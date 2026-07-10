@@ -10,6 +10,18 @@ export const VISIBILITY_VALUES: NoteVisibility[] = [
   "workspace",
 ];
 
+// FIR-2810: attribution of one body line — who created it and who last edited
+// it. Empty strings mean "unknown" (the line predates tracking, or was written
+// by an agent through the artifact API).
+export const NoteLineAttrSchema = z.object({
+  created_by: z.string().default(""),
+  created_at: z.string().default(""),
+  updated_by: z.string().default(""),
+  updated_at: z.string().default(""),
+});
+
+export type NoteLineAttr = z.infer<typeof NoteLineAttrSchema>;
+
 // NoteSchema parses the /api/notes wire shape defensively (API Response
 // Compatibility rule): every field defaulted, unknown visibility downgraded to
 // "private" so a server enum drift never crashes the list.
@@ -25,6 +37,13 @@ export const NoteSchema = z.object({
     .catch("private")
     .default("private"),
   pinned: z.boolean().default(false),
+  // FIR-2595: whether THIS caller may edit and save the note, driven by folder
+  // access (owner, or an 'editor'/'full_access' grant on the note's folder). The
+  // editor renders read-only when false instead of letting a viewer type into a
+  // field that silently fails to save. Defaults to true so older server builds
+  // (and lightweight list rows that omit it) keep today's editable behavior; the
+  // single-note read the editor uses always sends the real value.
+  can_edit: z.boolean().default(true),
   // FIR-1852: a note now shares the same issue/project scope a document carries,
   // so the editor renders "on FIR-XXX" and the note lands in the issue's
   // document list. Defaulted to null for older server builds that omit them.
@@ -32,6 +51,12 @@ export const NoteSchema = z.object({
   project_id: z.string().nullable().default(null),
   // FIR-2145: populated on list reads; 0 on single-note detail reads.
   comment_count: z.number().default(0),
+  // FIR-2810: per-note toggle — stamp the writer's member code on every line.
+  // Populated on single-note reads; defaults false on list rows / old servers.
+  author_codes: z.boolean().default(false),
+  // FIR-2810: per-line attribution, aligned index-for-index with the body's
+  // lines. Populated on single-note reads; empty on list rows / old servers.
+  line_attrs: z.array(NoteLineAttrSchema).catch([]).default([]),
   created_at: z.string().default(""),
   updated_at: z.string().default(""),
 });

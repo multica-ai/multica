@@ -7,9 +7,6 @@ import {
   Search,
   Pin,
   Trash2,
-  Lock,
-  Users,
-  Globe,
   NotebookPen,
   ChevronLeft,
   ChevronDown,
@@ -23,9 +20,11 @@ import {
   User,
   Pencil,
   Replace,
-  Share2,
   Check,
+  Copy,
   GitMerge,
+  Users,
+  PenLine,
 } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
 import { Input } from "@multica/ui/components/ui/input";
@@ -44,6 +43,7 @@ import {
   EditorActionsMenu,
   EntityMetaHeader,
   FindReplaceBar,
+  FolderSuggestionBanner,
 } from "@multica/cerebro-artifacts/views/components";
 import { FolderAccessColumn } from "@multica/cerebro-collections/views";
 import {
@@ -62,30 +62,36 @@ import { cn } from "@multica/ui/lib/utils";
 import { useIsMobile } from "@multica/ui/hooks/use-mobile";
 import { MobileSidebarTrigger } from "@multica/views/layout/page-header";
 import {
-  ContentEditor,
   type ContentEditorRef,
   ReadonlyContent,
 } from "@multica/views/editor";
+import { EditorImageTray } from "@multica/cerebro-composer";
+import { api } from "@multica/core/api";
+import { useFileUpload } from "@multica/core/hooks/use-file-upload";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { useWorkspacePaths } from "@multica/core/paths";
+import { useNavigation } from "@multica/views/navigation";
 import { useAuthStore } from "@multica/core/auth";
 import { memberListOptions } from "@multica/core/workspace/queries";
 import { useFeatureFlag } from "@multica/cerebro-feature-flags";
+import { useEnsureNoteMentionScope } from "./note-mention-scope";
 import type { Editor } from "@tiptap/react";
 import {
   notesListOptions,
+  noteDetailOptions,
   useCreateNote,
   useUpdateNote,
   useDeleteNote,
   useSetNotePin,
-  useSetNoteVisibility,
   useNoteEditLock,
   useNoteComments,
   useSetNoteFolder,
+  useSetNoteAuthorCodes,
   firstLineTitle,
-  VISIBILITY_LABELS,
+  memberCode,
   NoteConflictError,
 } from "../core";
-import type { Note, NoteVisibility } from "../core";
+import type { Note } from "../core";
 import {
   artifactFoldersOptions,
   useCreateArtifactFolder,
@@ -102,6 +108,9 @@ import { NoteConflictDialog } from "./note-conflict-dialog";
 import type { NoteConflict } from "./note-conflict-dialog";
 import { useCommentAnchors } from "./use-comment-anchors";
 import { useFindHighlight } from "./use-find-highlight";
+import { useAuthorCodeStamper } from "./use-author-codes";
+import { LineAuthorsGutter } from "./line-authors-gutter";
+import { useLineAuthorsPull } from "./use-line-authors-pull";
 import {
   DRAFT_ANCHOR_ID,
   type CommentAnchor,
@@ -109,12 +118,6 @@ import {
 
 // drag-and-drop payload type for moving a note row onto a folder.
 const NOTE_DND_TYPE = "application/x-note-id";
-
-const VIS_ICON: Record<NoteVisibility, React.ReactNode> = {
-  private: <Lock className="size-3" />,
-  shared: <Users className="size-3" />,
-  workspace: <Globe className="size-3" />,
-};
 
 // A note carries an owner_id but no owner name (the wire shape is lightweight),
 // so resolve the display name from the workspace member list (FIR-1460). Used by
@@ -135,7 +138,16 @@ function ownerName(
 // list on the left, and the selected note's editor on the right. Private by
 // default; visibility is changed per note. Built on top of Documents — a note
 // is an artifact(kind=note) plus owner/visibility/pin state.
-export function NotesPage({ initialNoteId }: { initialNoteId?: string | null }) {
+export function NotesPage({
+  initialNoteId,
+  initialCommentId,
+}: {
+  initialNoteId?: string | null;
+  // FIR-2589: when the Notes surface is opened from a note-comment mention in the
+  // inbox, this is the comment id to open — the editor opens the comments panel
+  // and scrolls to that comment.
+  initialCommentId?: string | null;
+}) {
   const wsId = useWorkspaceId();
   const [search, setSearch] = React.useState("");
   const [selectedId, setSelectedId] = React.useState<string | null>(
@@ -153,7 +165,14 @@ export function NotesPage({ initialNoteId }: { initialNoteId?: string | null }) 
   // null = the root, where loose (unfiled) notes and top-level folders live.
   // Drilling into a folder scopes the list to that folder + shows its
   // subfolders, with a breadcrumb back to the root.
-  const [folderId, setFolderId] = React.useState<string | null>(null);
+  const navigation = useNavigation();
+  const wsPaths = useWorkspacePaths();
+  // FIR-2688: seed the open folder from `?folder=<id>` so a folder URL copied
+  // from the address bar reopens that folder. A stale id resolves to an empty
+  // list until refetch, which is harmless.
+  const [folderId, setFolderId] = React.useState<string | null>(
+    () => navigation.searchParams.get("folder"),
+  );
   const { data: folders = [] } = useQuery(
     artifactFoldersOptions(wsId, { kind: "note" }),
   );
@@ -174,6 +193,57 @@ export function NotesPage({ initialNoteId }: { initialNoteId?: string | null }) 
     () => notes.find((n) => n.id === selectedId) ?? null,
     [notes, selectedId],
   );
+  const urlNoteId = navigation.searchParams.get("note");
+  const urlCommentId = navigation.searchParams.get("comment");
+  const initialCommentForSelected =
+    selectedId && (selectedId === initialNoteId || selectedId === urlNoteId)
+      ? initialCommentId ?? urlCommentId
+      : null;
+
+  React.useEffect(() => {
+    const noteFromUrl = initialNoteId ?? urlNoteId;
+    if (!selectedId && noteFromUrl) setSelectedId(noteFromUrl);
+  }, [initialNoteId, selectedId, urlNoteId]);
+
+  // FIR-2595 + FIR-2688: keep the browser address bar in sync with the open
+  // note OR the open folder, so both URLs are shareable ("kopier den fra
+  // browseren"). `replaceSilent` updates the URL via the History API with no
+  // route reload — the same trick the inbox uses (FIR-2684). Deliberately NOT
+  // falling back to `replace`: web-only, it is gated on `replaceSilent` being
+  // present. On desktop there is no URL bar and a real `replace` would swap the
+  // route element and remount the page, so desktop shares via the Copy link
+  // button. An open note wins the URL (`/notes/:id`); with no note open the URL
+  // reflects the folder (`/notes?folder=<id>`), else the bare list. Comparing
+  // the full pathname+search keeps it loop-free.
+  React.useEffect(() => {
+    if (!navigation.replaceSilent) return;
+    if (!navigation.pathname.includes("/notes")) return;
+    if (selectedId) {
+      // Note open: `/notes/:id`. Guard on pathname so a deep link like
+      // /notes/:id?comment=x keeps its ?comment param untouched on load.
+      // FIR-2826 — when the legacy `/notes?note=<id>&comment=<comment-id>`
+      // entry route is normalized to `/notes/<id>`, keep the comment param so
+      // the route remount still passes initialCommentId to NoteEditor.
+      const commentParam = initialCommentForSelected
+        ? `?comment=${encodeURIComponent(initialCommentForSelected)}`
+        : "";
+      const desired = `${wsPaths.noteDetail(selectedId)}${commentParam}`;
+      const searchString = navigation.searchParams.toString();
+      const current = searchString
+        ? `${navigation.pathname}?${searchString}`
+        : navigation.pathname;
+      if (current === desired) return;
+      navigation.replaceSilent(desired);
+      return;
+    }
+    if (urlNoteId) return;
+    // No note open: the folder owns the URL. Write unconditionally so leaving a
+    // folder clears a stale `?folder`; History-API writes don't re-render, so
+    // the effect only fires on a real selection change (loop-free).
+    navigation.replaceSilent(
+      folderId ? wsPaths.notesFolder(folderId) : wsPaths.notes(),
+    );
+  }, [selectedId, folderId, wsPaths, navigation, urlNoteId, initialCommentForSelected]);
 
   const noteFolderIds = React.useMemo(
     () => new Set(folders.map((f) => f.id)),
@@ -369,6 +439,7 @@ export function NotesPage({ initialNoteId }: { initialNoteId?: string | null }) 
               note={selected}
               wsId={wsId}
               onBack={() => setSelectedId(null)}
+              initialCommentId={initialCommentForSelected}
             />
           ) : (
             <div className="flex h-full w-full items-center justify-center text-sm text-muted-foreground">
@@ -714,13 +785,11 @@ function NoteListSection({
             {previewBody(n)}
           </div>
           <div className="mt-1.5 flex items-center gap-1 text-[11px] text-muted-foreground">
-            {VIS_ICON[n.visibility]}
-            <span>{VISIBILITY_LABELS[n.visibility]}</span>
-            {/* Show the owner when it isn't you, so a shared/team note's author
-                is always visible (FIR-1460, request 1). */}
+            {/* FIR-2595: per-note visibility ("Only you" / share) is removed —
+                folders drive who can open and edit a note. Show the owner when
+                it isn't you (FIR-1460, request 1). */}
             {n.owner_id && n.owner_id !== myId && (
               <>
-                <span className="opacity-50">·</span>
                 <User className="size-3" />
                 <span className="truncate">
                   {ownerName(n.owner_id, myId, members)}
@@ -730,7 +799,9 @@ function NoteListSection({
             {/* FIR-2145: comment count indicator — only shown when > 0. */}
             {n.comment_count > 0 && (
               <>
-                <span className="opacity-50">·</span>
+                {n.owner_id && n.owner_id !== myId && (
+                  <span className="opacity-50">·</span>
+                )}
                 <MessageSquare className="size-3" />
                 <span>{n.comment_count}</span>
               </>
@@ -742,29 +813,42 @@ function NoteListSection({
   );
 }
 
+// FIR-2826 — the desktop comments rail is wider by default and drag-resizable.
+// Width is clamped and remembered per browser so it survives reloads.
+const COMMENTS_WIDTH_KEY = "note:comments-width";
+const COMMENTS_MIN_WIDTH = 300;
+const COMMENTS_MAX_WIDTH = 760;
+const COMMENTS_DEFAULT_WIDTH = 420;
+
 export function NoteEditor({
   note,
   wsId,
   onBack,
   onOpenFull,
+  initialCommentId,
 }: {
   note: Note;
   wsId: string;
   onBack: () => void;
-  // TECH-3690: when set, renders an "Åbn fuldt" button in the action bar that
+  // TECH-3690: when set, renders an "Open full" button in the action bar that
   // jumps to the full Notes surface. Used when the editor is embedded in the
   // inbox detail pane; undefined on the full Notes page (already full).
   onOpenFull?: () => void;
+  // FIR-2589: a comment id to open on mount (from a note-comment mention in the
+  // inbox). Opens the comments panel and scrolls to that comment.
+  initialCommentId?: string | null;
 }) {
   const updateNote = useUpdateNote();
   const deleteNote = useDeleteNote();
   const setPin = useSetNotePin();
-  const setVisibility = useSetNoteVisibility();
 
   // Wave 3 (TECH-3556): each surface is independently feature-flagged.
   const lockEnabled = useFeatureFlag("cerebro_note_lock");
   const commentsEnabled = useFeatureFlag("cerebro_note_comments");
   const versionsEnabled = useFeatureFlag("cerebro_note_versions");
+  // FIR-2595 point 3: scope the note's @mention picker to people with access.
+  const scopedMentions = useFeatureFlag("cerebro_note_scoped_mentions");
+  useEnsureNoteMentionScope(wsId, note.id, scopedMentions);
   // FIR-1317 Plan A: per-note toggle for conflict merge (moved out of the
   // workspace feature flag so each user can turn it on/off from the note ⋯ menu).
   // Defaults to ON; stored in localStorage so the preference survives a reload.
@@ -776,6 +860,19 @@ export function NoteEditor({
     setConflictMergeEnabled(next);
     localStorage.setItem(`note:conflict-merge:${note.id}`, next ? "1" : "0");
   }
+  // FIR-2810: per-note (and per-user) toggle showing the line-authors gutter —
+  // who wrote / last edited every line, Apple Notes-style. Defaults to OFF;
+  // stored in localStorage like the conflict-merge toggle above.
+  const lineAuthorsEnabled = useFeatureFlag("cerebro_note_line_authors");
+  const [showLineAuthors, setShowLineAuthors] = React.useState(
+    () => localStorage.getItem(`note:line-authors:${note.id}`) === "1",
+  );
+  function toggleLineAuthors() {
+    const next = !showLineAuthors;
+    setShowLineAuthors(next);
+    localStorage.setItem(`note:line-authors:${note.id}`, next ? "1" : "0");
+  }
+  const setAuthorCodesMutation = useSetNoteAuthorCodes();
   const isMobile = useIsMobile();
 
   // FIR-1317 Plan A: track the server's updated_at when we last fetched/saved
@@ -786,12 +883,48 @@ export function NoteEditor({
   // FIR-1317 Plan A: active conflict waiting for user resolution.
   const [conflict, setConflict] = React.useState<NoteConflict | null>(null);
 
-  const [sharedIds, setSharedIds] = React.useState<string[]>([]);
   const [showComments, setShowComments] = React.useState(false);
   const [showHistory, setShowHistory] = React.useState(false);
-  // FIR-1873: sharing is managed from the "⋯" menu via this sheet, not a
-  // top-bar button (Jesper: "begge dele ind i 3 priks menuen").
-  const [showShare, setShowShare] = React.useState(false);
+  // FIR-2826 — remembered width of the desktop comments rail (drag-resizable via
+  // the handle on its left edge). Seeded from localStorage, clamped to sane
+  // bounds so a stale/garbage value can't collapse or overflow the rail.
+  const [commentsWidth, setCommentsWidth] = React.useState<number>(() => {
+    const saved = Number(localStorage.getItem(COMMENTS_WIDTH_KEY));
+    return Number.isFinite(saved) &&
+      saved >= COMMENTS_MIN_WIDTH &&
+      saved <= COMMENTS_MAX_WIDTH
+      ? saved
+      : COMMENTS_DEFAULT_WIDTH;
+  });
+  const startCommentsResize = React.useCallback(
+    (e: React.PointerEvent) => {
+      e.preventDefault();
+      const startX = e.clientX;
+      const startW = commentsWidth;
+      let latest = startW;
+      const onMove = (ev: PointerEvent) => {
+        // The rail sits on the right edge, so dragging its left handle to the
+        // left (smaller clientX) widens it.
+        const next = Math.min(
+          COMMENTS_MAX_WIDTH,
+          Math.max(COMMENTS_MIN_WIDTH, startW + (startX - ev.clientX)),
+        );
+        latest = next;
+        setCommentsWidth(next);
+      };
+      const onUp = () => {
+        window.removeEventListener("pointermove", onMove);
+        window.removeEventListener("pointerup", onUp);
+        document.body.style.userSelect = "";
+        localStorage.setItem(COMMENTS_WIDTH_KEY, String(Math.round(latest)));
+      };
+      // Suppress text selection while dragging across the editor.
+      document.body.style.userSelect = "none";
+      window.addEventListener("pointermove", onMove);
+      window.addEventListener("pointerup", onUp);
+    },
+    [commentsWidth],
+  );
   // Add-reference + create-issue are launched from the "⋯" menu (TECH-3690).
   const [addRefOpen, setAddRefOpen] = React.useState(false);
   const [creatingIssue, setCreatingIssue] = React.useState(false);
@@ -799,6 +932,8 @@ export function NoteEditor({
   const [activeAnchorId, setActiveAnchorId] = React.useState<string | null>(null);
   const [draftQuote, setDraftQuote] = React.useState<string | null>(null);
   const editorRef = React.useRef<ContentEditorRef>(null);
+  // Uploader for images dropped/pasted into the note (image tray, FIR-2693).
+  const { uploadWithToast } = useFileUpload(api);
   // Live body driving the outline + word/character count. Seeded from the note
   // and kept current by the editor's debounced onUpdate so the "Oversigt" and
   // counts react while typing, without waiting for the save round-trip.
@@ -822,12 +957,82 @@ export function NoteEditor({
   const myId = useAuthStore((s: { user: { id: string } | null }) => s.user?.id);
   const isOwner = note.owner_id === myId;
 
+  // FIR-2595: "Copy link" — puts a shareable URL to this note on the clipboard.
+  // getShareableUrl returns the web origin + path (desktop: the connected
+  // environment's public web URL), so the link opens the note for anyone with
+  // access. Available to everyone, not just the owner.
+  const navigation = useNavigation();
+  const wsPaths = useWorkspacePaths();
+  const [linkCopied, setLinkCopied] = React.useState(false);
+  const copyNoteLink = React.useCallback(() => {
+    const url = navigation.getShareableUrl(wsPaths.noteDetail(note.id));
+    void navigator.clipboard.writeText(url);
+    setLinkCopied(true);
+    window.setTimeout(() => setLinkCopied(false), 1500);
+  }, [navigation, wsPaths, note.id]);
+
   // Edit lock: while this note is open and the flag is on, hold the lock and
   // heartbeat. If someone else holds it live, drop to read-only + offer takeover.
   const editLock = useNoteEditLock(note.id, lockEnabled);
-  const readOnly = lockEnabled && editLock.blockedByOther;
+  // FIR-2595: authoritative edit permission comes from the SINGLE-note read.
+  // The editor is opened from a list row, and list rows omit can_edit (the
+  // schema defaults it to true), so trusting note.can_edit here made the editor
+  // writable for everyone — a non-owner could type into a save that then 403s
+  // silently. Fetch the note detail and gate on ITS can_edit. The owner is
+  // always allowed; a non-owner stays read-only until the fetch confirms edit
+  // access. It is also read-only while another user holds the live edit lock.
+  const { data: noteDetail } = useQuery(noteDetailOptions(wsId, note.id));
+  const canEdit = isOwner || noteDetail?.can_edit === true;
+  const readOnly = !canEdit || (lockEnabled && editLock.blockedByOther);
 
-  const { data: members = [] } = useQuery(memberListOptions(wsId));
+  // FIR-2810: line attribution + author codes. The single-note read carries
+  // the per-line attribution and the note's author-codes toggle; member names
+  // resolve the stored user ids into member codes ("JEH") for the gutter and
+  // the stamper.
+  const authorCodesOn = noteDetail?.author_codes === true;
+  const lineAttrs = React.useMemo(
+    () => noteDetail?.line_attrs ?? [],
+    [noteDetail],
+  );
+  const { data: gutterMembers = [] } = useQuery(memberListOptions(wsId));
+  const membersById = React.useMemo(
+    () =>
+      new Map(
+        (gutterMembers as OwnerInfo[]).map((m) => [
+          m.user_id,
+          { name: m.name },
+        ]),
+      ),
+    [gutterMembers],
+  );
+  const myCode = memberCode(
+    (myId && membersById.get(myId)?.name) || "",
+  );
+  useAuthorCodeStamper(
+    editor,
+    lineAuthorsEnabled && authorCodesOn && !readOnly,
+    myCode,
+  );
+  const showGutter = lineAuthorsEnabled && showLineAuthors;
+  const editorWrapRef = React.useRef<HTMLDivElement>(null);
+  // FIR-2810: temporary reveal — drag the left-edge handle (desktop) or touch
+  // and pull right on the body (mobile) to peek at the gutter; it springs back
+  // on release. Disabled while the permanent toggle already shows it.
+  const contentSlideRef = React.useRef<HTMLDivElement>(null);
+  const gutterBoxRef = React.useRef<HTMLDivElement>(null);
+  const pull = useLineAuthorsPull({
+    enabled: lineAuthorsEnabled && !showGutter,
+    slideRef: contentSlideRef,
+    gutterRef: gutterBoxRef,
+  });
+  const gutterMounted = showGutter || pull.visible;
+  // Bump after every (debounced) editor change so the gutter re-measures the
+  // rendered blocks; also when the comments rail opens/closes (layout reflow).
+  const [gutterVersion, setGutterVersion] = React.useState(0);
+  React.useEffect(() => {
+    if (gutterMounted) setGutterVersion((v) => v + 1);
+  }, [gutterMounted, liveBody, showComments, readOnly]);
+
   const { data: comments = [] } = useNoteComments(note.id);
   const { data: folders = [] } = useQuery(
     artifactFoldersOptions(wsId, { kind: "note" }),
@@ -851,6 +1056,21 @@ export function NoteEditor({
 
   const activeAnchor = draftQuote ? DRAFT_ANCHOR_ID : activeAnchorId;
   useCommentAnchors(editor, commentAnchors, activeAnchor);
+
+  // FIR-2589: opened from a note-comment mention in the inbox — open the
+  // comments panel and highlight the mentioned comment's thread root (a reply
+  // resolves to its root, which is what the panel highlights). Runs once, after
+  // the comments load, so we can resolve a reply to its root.
+  const openedCommentRef = React.useRef(false);
+  React.useEffect(() => {
+    if (openedCommentRef.current) return;
+    if (!commentsEnabled || !initialCommentId || comments.length === 0) return;
+    const target = comments.find((c) => c.id === initialCommentId);
+    if (!target) return;
+    openedCommentRef.current = true;
+    setActiveAnchorId(target.thread_root_id ?? target.id);
+    setShowComments(true);
+  }, [commentsEnabled, initialCommentId, comments]);
   // FIR-2145: paint find matches in the editor as the user types.
   useFindHighlight(editor, findOpen ? findQuery : "", findOpen ? findActiveIndex : -1);
 
@@ -928,26 +1148,6 @@ export function NoteEditor({
     return () => window.removeEventListener("keydown", onKey);
   }, [readOnly]);
 
-  function applyVisibility(v: NoteVisibility) {
-    setVisibility.mutate({
-      id: note.id,
-      visibility: v,
-      sharedUserIds: v === "shared" ? sharedIds : undefined,
-    });
-  }
-
-  function toggleShare(userId: string) {
-    const next = sharedIds.includes(userId)
-      ? sharedIds.filter((id) => id !== userId)
-      : [...sharedIds, userId];
-    setSharedIds(next);
-    setVisibility.mutate({
-      id: note.id,
-      visibility: "shared",
-      sharedUserIds: next,
-    });
-  }
-
   return (
     <div className="flex h-full min-h-0 w-full flex-col">
       {readOnly && editLock.lock && (
@@ -961,8 +1161,8 @@ export function NoteEditor({
           rest (pin, comments, history, add reference, create issue, delete)
           collapse into a single "⋯" menu so the bar no longer feels cluttered.
           FIR-1676: on mobile the row wraps to a second line instead of clipping
-          the "⋯" menu off the right edge (Jesper: "ellers skal der være 2
-          rækker"). On desktop it stays a single row with "⋯" pushed right. */}
+          the "⋯" menu off the right edge (Jesper: otherwise there must be two
+          rows). On desktop it stays a single row with "⋯" pushed right. */}
       <div className="flex flex-wrap items-center gap-2 border-b px-4 py-2.5 sm:px-5">
         <Button
           size="sm"
@@ -982,11 +1182,11 @@ export function NoteEditor({
             className="shrink-0 gap-1.5"
             onClick={onOpenFull}
           >
-            <ExternalLink className="size-4" /> Åbn fuldt
+            <ExternalLink className="size-4" /> Open full
           </Button>
         )}
 
-        {/* Folder first (request 4 — "folders skal ligge i række 1"). Only the
+        {/* Folder first (request 4 — "folders must be on row 1"). Only the
             owner may move a note; everyone else sees a read-only folder badge
             (FIR-1460, request 2). */}
         {isOwner ? (
@@ -1024,17 +1224,6 @@ export function NoteEditor({
           </Badge>
         )}
 
-        {/* FIR-1873: the owner now manages sharing from the "⋯" menu (it opens
-            the Share sheet), and the owner badge is gone from this bar — the
-            owner is already shown under the title (EntityMetaHeader). A
-            non-owner can't change sharing, so they keep a read-only badge here
-            showing who can currently see the note. */}
-        {!isOwner && (
-          <Badge variant="outline" className="gap-1.5">
-            {VIS_ICON[note.visibility]}
-            <span>{VISIBILITY_LABELS[note.visibility]}</span>
-          </Badge>
-        )}
 
         {/* Comments button: surfaces directly in the action bar so the count
             badge is always visible when comments exist and the panel is closed.
@@ -1062,14 +1251,16 @@ export function NoteEditor({
           triggerLabel="Note actions"
           className="ml-auto"
           items={[
-            // Share lives in the menu now (FIR-1873). Owner-only — only the
-            // owner may change who can see the note; it opens the Share sheet.
-            isOwner && {
-              key: "share",
-              label: "Share",
-              icon: Share2,
-              onSelect: () => setShowShare(true),
+            // FIR-2595: Copy link — a shareable URL to this note. Available to
+            // everyone, so anyone viewing a note can hand the link on.
+            {
+              key: "copy-link",
+              label: linkCopied ? "Link copied" : "Copy link",
+              icon: linkCopied ? Check : Copy,
+              onSelect: copyNoteLink,
             },
+            // FIR-2595: per-note "Share" (visibility + share-with) is removed —
+            // access is managed on the folder via Collections, not per note.
             // Pin is an owner-only action on the backend (FIR-1460, request 2).
             isOwner && {
               key: "pin",
@@ -1112,6 +1303,32 @@ export function NoteEditor({
               icon: GitMerge,
               onSelect: toggleConflictMerge,
             },
+            // FIR-2810: show/hide the line-authors gutter (who wrote / last
+            // edited every line). Per-user view preference, like conflict merge.
+            lineAuthorsEnabled && {
+              key: "line-authors",
+              label: showLineAuthors
+                ? "Line authors: On"
+                : "Line authors: Off",
+              icon: Users,
+              onSelect: toggleLineAuthors,
+            },
+            // FIR-2810: per-note author-codes toggle — stamp the writer's
+            // member code (e.g. JEH) on every line they write. Saved on the
+            // note itself, so it is on for everyone who writes in it.
+            lineAuthorsEnabled &&
+              !readOnly && {
+                key: "author-codes",
+                label: authorCodesOn
+                  ? "Author codes: On"
+                  : "Author codes: Off",
+                icon: PenLine,
+                onSelect: () =>
+                  setAuthorCodesMutation.mutate({
+                    id: note.id,
+                    authorCodes: !authorCodesOn,
+                  }),
+              },
             // Delete is owner-only (the backend rejects others with 403). Show
             // it solely to the owner so the action never silently fails
             // (FIR-1460, request 2). The onSuccess navigates back to the
@@ -1159,11 +1376,59 @@ export function NoteEditor({
 
           <NoteReferences noteId={note.id} />
 
+          {/* FIR-2697 part 2 — a pending agent folder suggestion for this note.
+              A note is an artifact, so it reuses the Documents banner. */}
+          <FolderSuggestionBanner artifactId={note.id} canResolve={canEdit} />
+
           {/* Body uses the SAME rich editor as issue comments + descriptions, so
               "@" behaves identically (people, agents, issues, …) inline. When
               the note is locked by someone else we render it read-only instead.
               The bubble menu's "Comment" icon (commentsEnabled) opens the
               comments panel anchored to the selected text. */}
+          {/* FIR-2810: the relative wrapper hosts the line-authors gutter,
+              which measures the rendered blocks inside it. With the gutter on,
+              the body shifts right to make room for the attribution column.
+              With it off, a click-and-drag on the left-edge handle (desktop)
+              or a touch-and-pull right on the body (mobile) slides the body
+              aside for a temporary peek that springs back on release. */}
+          <div
+            ref={editorWrapRef}
+            {...pull.wrapperProps}
+            className={cn(
+              "relative flex min-h-0 flex-1 flex-col overflow-x-clip",
+              showGutter && "pl-24",
+            )}
+          >
+          {gutterMounted && (
+            <div
+              ref={gutterBoxRef}
+              className="absolute inset-y-0 left-0 w-24"
+              style={showGutter ? undefined : { opacity: 0 }}
+            >
+              <LineAuthorsGutter
+                contentRef={editorWrapRef}
+                body={noteDetail?.body ?? note.body}
+                attrs={lineAttrs}
+                membersById={membersById}
+                version={gutterVersion}
+              />
+            </div>
+          )}
+          {lineAuthorsEnabled && !showGutter && !isMobile && (
+            // Desktop grab handle for the temporary peek; the faint bar shows
+            // on hover so the affordance is discoverable without being loud.
+            <div
+              {...pull.stripProps}
+              aria-hidden
+              className="group absolute inset-y-0 left-0 z-10 w-3 cursor-ew-resize touch-none"
+            >
+              <div className="absolute left-[3px] top-1/2 h-10 w-1 -translate-y-1/2 rounded-full bg-border opacity-0 transition-opacity group-hover:opacity-100" />
+            </div>
+          )}
+          <div
+            ref={contentSlideRef}
+            className="flex min-h-0 flex-1 flex-col bg-background"
+          >
           {readOnly ? (
             <ReadonlyContent content={note.body} className="min-h-[50vh] flex-1" />
           ) : (
@@ -1184,21 +1449,26 @@ export function NoteEditor({
                   }}
                 />
               )}
-              <ContentEditor
+              <EditorImageTray
                 key={`${note.id}:${replaceToken}`}
                 ref={editorRef}
                 defaultValue={liveBody}
                 onUpdate={saveBody}
+                onUploadFile={uploadWithToast}
                 onBlur={() => saveBody(editorRef.current?.getMarkdown() ?? "")}
                 onEditorReady={setEditor}
                 onCommentOnSelection={
                   commentsEnabled ? startCommentOnSelection : undefined
                 }
+                // FIR-2595 point 3: scope @mentions to people with note access.
+                currentNoteId={scopedMentions ? note.id : undefined}
                 placeholder="Just start writing… (type “@” to mention a person, agent or issue)"
                 className="min-h-[50vh] flex-1"
               />
             </div>
           )}
+          </div>
+          </div>
         </div>
 
         {/* Heading navigation ("Oversigt") + word/character count, shared with
@@ -1208,9 +1478,24 @@ export function NoteEditor({
           <DocumentToolsSidebar body={liveBody} contentRef={contentScrollRef} />
         </div>
 
-        {/* Desktop: comments as an inline side rail. */}
+        {/* Desktop: comments as an inline side rail. FIR-2826 — wider default
+            and drag-resizable via the handle on its left edge. */}
         {commentsEnabled && showComments && !isMobile && (
-          <div className="w-80 shrink-0 border-l">
+          <div
+            className="relative shrink-0 border-l"
+            style={{ width: commentsWidth }}
+          >
+            {/* Drag handle: a hit strip straddling the left border with a
+                thin bar that brightens on hover/drag. */}
+            <div
+              role="separator"
+              aria-orientation="vertical"
+              aria-label="Resize comments panel"
+              onPointerDown={startCommentsResize}
+              className="group absolute -left-1 top-0 bottom-0 z-10 w-2 cursor-col-resize"
+            >
+              <div className="mx-auto h-full w-px bg-transparent transition-colors group-hover:bg-primary/40 group-active:bg-primary/60" />
+            </div>
             <NoteCommentsPanel
               noteId={note.id}
               noteBody={note.body}
@@ -1259,68 +1544,6 @@ export function NoteEditor({
               }}
               onClose={closeComments}
             />
-          </SheetContent>
-        </Sheet>
-      )}
-
-      {/* FIR-1873: Share moved out of the top bar into this sheet, opened from
-          the "⋯" menu. Same controls as before — visibility + share-with — so
-          behavior is unchanged, only the entry point moved. Owner-only. */}
-      {isOwner && (
-        <Sheet open={showShare} onOpenChange={setShowShare}>
-          <SheetContent
-            side="right"
-            className="flex flex-col gap-0 p-0 data-[side=right]:w-[94vw] data-[side=right]:sm:max-w-md"
-          >
-            <SheetHeader className="border-b px-5 py-3">
-              <SheetTitle className="flex items-center gap-2 text-base">
-                <Share2 className="size-4" /> Share
-              </SheetTitle>
-              <SheetDescription className="sr-only">
-                Choose who can see this note.
-              </SheetDescription>
-            </SheetHeader>
-            <div className="flex flex-col gap-1 overflow-y-auto p-3">
-              <div className="px-1 pb-1 text-xs font-medium text-muted-foreground">
-                Who can see it
-              </div>
-              {(
-                [
-                  ["private", "Only you"],
-                  ["shared", "Selected colleagues"],
-                  ["workspace", "Whole team"],
-                ] as [NoteVisibility, string][]
-              ).map(([v, label]) => (
-                <button
-                  key={v}
-                  onClick={() => applyVisibility(v)}
-                  className="flex items-center gap-2 rounded-md px-2 py-2 text-left text-sm hover:bg-muted/50"
-                >
-                  {VIS_ICON[v]}
-                  <span className="flex-1">{label}</span>
-                  {note.visibility === v && <Check className="size-4" />}
-                </button>
-              ))}
-              {note.visibility === "shared" && members.length > 0 && (
-                <>
-                  <div className="mt-2 px-1 pb-1 text-xs font-medium text-muted-foreground">
-                    Share with
-                  </div>
-                  {members.map((m) => (
-                    <button
-                      key={m.user_id}
-                      onClick={() => toggleShare(m.user_id)}
-                      className="flex items-center gap-2 rounded-md px-2 py-2 text-left text-sm hover:bg-muted/50"
-                    >
-                      <span className="flex-1 truncate">{m.name}</span>
-                      {sharedIds.includes(m.user_id) && (
-                        <Check className="size-4" />
-                      )}
-                    </button>
-                  ))}
-                </>
-              )}
-            </div>
           </SheetContent>
         </Sheet>
       )}

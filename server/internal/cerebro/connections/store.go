@@ -118,13 +118,66 @@ type AuthConfig struct {
 	APIKeyHeader   string `json:"api_key_header,omitempty"`
 	CFAccessID     string `json:"cf_access_id,omitempty"`
 	CFAccessSecret string `json:"cf_access_secret,omitempty"`
+	// SessionExchange, when enabled, makes server-side API-connection dispatch
+	// exchange the connection's shared key for the triggering person's own
+	// short-lived session key before calling the remote API (FIR-2564 fase 2,
+	// Firtal Data Registry POST /sessions/exchange contract). Non-secret config;
+	// exchanged keys are cached encrypted in cerebro_connection_person_key,
+	// never here.
+	SessionExchange *SessionExchangeConfig `json:"session_exchange,omitempty"`
+	// OnBehalfOf, when enabled, makes server-side API-connection dispatch stamp
+	// the calling agent onto every outgoing request as the X-On-Behalf-Of header
+	// ("agent:<uuid>" — the Firtal Data Registry delegation contract, FIR-2564
+	// fase 1). The remote API then authorizes the call as THAT agent's own
+	// grants (its key's delegation_allowlist must cover the agent, fail closed
+	// on its side) instead of the shared connection key's grants. Non-secret
+	// config. (FIR-2668)
+	OnBehalfOf *OnBehalfOfConfig `json:"on_behalf_of,omitempty"`
+}
+
+// TrimCredentials strips leading/trailing whitespace from every credential
+// field. A key pasted from a password manager or terminal often carries an
+// invisible trailing newline; the raw value then validates when tested from
+// the form but the stored copy is rejected by the remote API — an admin-facing
+// dead end that reads as "my key is valid but the connection says 401"
+// (FIR-2640). Applied on create, update, and at dispatch (for values stored
+// before this existed).
+func TrimCredentials(a AuthConfig) AuthConfig {
+	a.BearerToken = strings.TrimSpace(a.BearerToken)
+	a.APIKey = strings.TrimSpace(a.APIKey)
+	a.APIKeyHeader = strings.TrimSpace(a.APIKeyHeader)
+	a.CFAccessID = strings.TrimSpace(a.CFAccessID)
+	a.CFAccessSecret = strings.TrimSpace(a.CFAccessSecret)
+	return a
+}
+
+// SessionExchangeConfig configures per-person session-key exchange for an
+// API-type connection.
+type SessionExchangeConfig struct {
+	Enabled bool `json:"enabled"`
+	// Path of the exchange endpoint relative to the connection URL.
+	// Default "/sessions/exchange".
+	Path string `json:"path,omitempty"`
+	// TTLSeconds is the lifetime requested for each exchanged key.
+	// Default 3600 (1 hour); the remote API caps it server-side.
+	TTLSeconds int `json:"ttl_seconds,omitempty"`
+}
+
+// OnBehalfOfConfig configures per-agent identity delegation for an API-type
+// connection (FIR-2668).
+type OnBehalfOfConfig struct {
+	Enabled bool `json:"enabled"`
 }
 
 // EndpointPermission describes one REST path and the HTTP methods allowed on it.
-// Used to build per-endpoint CRUD controls in the permissions UI.
+// Used to build per-endpoint CRUD controls in the permissions UI. Summary is the
+// optional human-readable label captured from the API's OpenAPI spec at
+// discovery time (e.g. "Execute data source: Orders"); the permissions UI and
+// the agent-facing tool description prefer it over the raw path.
 type EndpointPermission struct {
 	Path    string   `json:"path"`
 	Methods []string `json:"methods"`
+	Summary string   `json:"summary,omitempty"`
 }
 
 // CreateParams are the fields required to create a connection.
@@ -391,6 +444,16 @@ func mcpServerEntry(c Connection, rewriter MCPURLRewriter) map[string]any {
 		entry["headers"] = headers
 	}
 	return entry
+}
+
+// MCPServerEntry returns the Claude Code --mcp-config entry for a single
+// mcp_http connection, applying the relay rewriter when one is supplied. It is
+// the exported form of the internal mcpServerEntry: the connection tool resolver
+// (FIR-2441) admits connections one at a time by verdict, so it builds the
+// relay entry per connection instead of BuildMCPConfig's all-enabled sweep. A
+// nil rewriter yields the direct-URL entry cloud runtimes use.
+func MCPServerEntry(c Connection, rewriter MCPURLRewriter) map[string]any {
+	return mcpServerEntry(c, rewriter)
 }
 
 // GetEnabledByName returns one enabled connection by its (workspace-unique)

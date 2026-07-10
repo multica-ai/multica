@@ -12,8 +12,14 @@ import {
 } from "@multica/views/editor";
 import { Badge } from "@multica/ui/components/ui/badge";
 import { ScrollArea } from "@multica/ui/components/ui/scroll-area";
+import {
+  Avatar,
+  AvatarFallback,
+  AvatarImage,
+} from "@multica/ui/components/ui/avatar";
 import { cn } from "@multica/ui/lib/utils";
 import { useFeatureFlag } from "@multica/cerebro-feature-flags";
+import { useEnsureNoteMentionScope } from "./note-mention-scope";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useAuthStore } from "@multica/core/auth";
 import { ApiError } from "@multica/core/api";
@@ -31,11 +37,23 @@ import {
   parseIssueMentions,
   buildThreads,
   noteKeys,
+  extractMemberMentions,
+  checkMentionAccess,
+  grantMentionAccess,
+  type CreateNoteCommentInput,
   type IssueMention,
   type NoteComment,
   type NoteReference,
   type NoteThread,
 } from "../core";
+import {
+  AlertDialog,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@multica/ui/components/ui/alert-dialog";
 import type { Editor } from "@tiptap/react";
 import { useCommentAnchors } from "./use-comment-anchors";
 import { DRAFT_ANCHOR_ID, type CommentAnchor } from "./comment-anchor-plugin";
@@ -125,6 +143,9 @@ export function NoteCommentsPanel({
   // selected (or all) to the note's coupled issue/chat. Behind a flag; nothing
   // shows unless the flag is on.
   const collabEnabled = useFeatureFlag("cerebro_note_agent_collab");
+  // FIR-2595 point 3: scope the comment @mention picker to people with note access.
+  const scopedMentions = useFeatureFlag("cerebro_note_scoped_mentions");
+  useEnsureNoteMentionScope(wsId, noteId, scopedMentions);
   const send = useSendNoteComments(noteId);
   const { data: references = [] } = useNoteReferences(
     collabEnabled ? noteId : undefined,
@@ -213,9 +234,31 @@ export function NoteCommentsPanel({
   // input side of that whole feature.
   const composerRef = React.useRef<ContentEditorRef>(null);
 
+  // FIR-2595: when a comment tags members who can't open this note, hold the
+  // pending comment here and ask the author whether to give them access.
+  const [accessPrompt, setAccessPrompt] = React.useState<{
+    noAccess: string[];
+    payload: CreateNoteCommentInput;
+  } | null>(null);
+
   const threads = React.useMemo(() => buildThreads(comments), [comments]);
   const open = threads.filter((t) => !t.root.resolved);
   const resolved = threads.filter((t) => t.root.resolved);
+
+  // FIR-2589: when a thread becomes active (e.g. opened from a note-comment
+  // mention in the inbox), scroll it into view. Resolved threads live inside a
+  // <details>, so open that first before scrolling.
+  const threadListRef = React.useRef<HTMLDivElement>(null);
+  React.useEffect(() => {
+    if (!activeAnchorId) return;
+    const el = threadListRef.current?.querySelector<HTMLElement>(
+      `[data-thread-id="${activeAnchorId}"]`,
+    );
+    if (!el) return;
+    const details = el.closest("details");
+    if (details && !details.open) details.open = true;
+    el.scrollIntoView({ block: "center" });
+  }, [activeAnchorId, threads]);
 
   const unsent = React.useMemo(
     () => comments.filter(isUnsentToAgent),
@@ -288,35 +331,110 @@ export function NoteCommentsPanel({
     return members.find((m) => m.user_id === id)?.name ?? "Unknown";
   }
 
+  // FIR-2826 — avatar image for a comment author, so each row leads with a face
+  // and comments are easier to tell apart. Null → the initials fallback.
+  function avatarFor(id: string) {
+    return members.find((m) => m.user_id === id)?.avatar_url ?? null;
+  }
+
+  function doCreate(payload: CreateNoteCommentInput) {
+    create.mutate(payload, {
+      onSuccess: () => {
+        setDraft("");
+        composerRef.current?.clearContent();
+        onClearDraft();
+      },
+    });
+  }
+
   function submit() {
     // Read straight from the editor so a click right after typing isn't lost to
     // the onUpdate debounce.
     const text = (composerRef.current?.getMarkdown() ?? draft).trim();
     if (!text) return;
     const ctx = draftQuote ? anchorContext(noteBody, draftQuote) : null;
-    create.mutate(
-      {
-        kind: mode,
-        body: mode === "suggestion" ? "Suggested edit" : text,
-        suggestion_text: mode === "suggestion" ? text : undefined,
-        anchor_quote: draftQuote || undefined,
-        anchor_prefix: ctx?.prefix || undefined,
-        anchor_suffix: ctx?.suffix || undefined,
-        anchor_start: ctx?.start ?? undefined,
-        anchor_end: ctx?.end ?? undefined,
-      },
-      {
-        onSuccess: () => {
-          setDraft("");
-          composerRef.current?.clearContent();
-          onClearDraft();
-        },
-      },
-    );
+    const payload: CreateNoteCommentInput = {
+      kind: mode,
+      body: mode === "suggestion" ? "Suggested edit" : text,
+      suggestion_text: mode === "suggestion" ? text : undefined,
+      anchor_quote: draftQuote || undefined,
+      anchor_prefix: ctx?.prefix || undefined,
+      anchor_suffix: ctx?.suffix || undefined,
+      anchor_start: ctx?.start ?? undefined,
+      anchor_end: ctx?.end ?? undefined,
+    };
+    // FIR-2595: a suggestion's stored body carries no @mentions; only a real
+    // comment tags people. Before posting a comment that tags someone, ask the
+    // server whether any tagged member can't open this note — if so, prompt the
+    // author to give them access (so the notification is openable) instead of
+    // silently posting a mention they'll never receive.
+    const mentioned = mode === "suggestion" ? [] : extractMemberMentions(text);
+    if (mentioned.length === 0) {
+      doCreate(payload);
+      return;
+    }
+    void checkMentionAccess(noteId, mentioned)
+      .then((noAccess) => {
+        if (noAccess.length === 0) doCreate(payload);
+        else setAccessPrompt({ noAccess, payload });
+      })
+      // Never block posting on a failed check — fall back to posting as-is.
+      .catch(() => doCreate(payload));
   }
 
   return (
     <div className="flex h-full w-full min-w-0 flex-col">
+      {/* FIR-2595: "give access?" prompt when a comment tags people who can't
+          open this note. Give access grants them so they get the comment; Post
+          without still posts (they simply aren't notified); Cancel keeps the
+          draft. */}
+      <AlertDialog
+        open={accessPrompt !== null}
+        onOpenChange={(o) => {
+          if (!o) setAccessPrompt(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Give access to this note?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {accessPrompt?.noAccess.map(nameFor).join(", ")} can&apos;t open
+              this note yet, so they won&apos;t receive your comment. Give them
+              access, or post without notifying them.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <Button variant="ghost" onClick={() => setAccessPrompt(null)}>
+              Cancel
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => {
+                const p = accessPrompt;
+                setAccessPrompt(null);
+                if (p) doCreate(p.payload);
+              }}
+            >
+              Post without
+            </Button>
+            <Button
+              onClick={async () => {
+                const p = accessPrompt;
+                setAccessPrompt(null);
+                if (!p) return;
+                try {
+                  await grantMentionAccess(noteId, p.noAccess);
+                } catch {
+                  toast.error("Couldn't give access — posting anyway.");
+                }
+                doCreate(p.payload);
+              }}
+            >
+              Give access &amp; post
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
       <div className="flex items-center gap-2 border-b px-3 py-2">
         <MessageSquarePlus className="size-4 text-muted-foreground" />
         <span className="text-sm font-semibold">Comments</span>
@@ -404,8 +522,68 @@ export function NoteCommentsPanel({
         </div>
       )}
 
-      {/* Composer */}
-      <div className="border-b p-3">
+      <ScrollArea className="min-h-0 flex-1">
+        <div ref={threadListRef} className="divide-y">
+          {open.length === 0 && resolved.length === 0 && (
+            <p className="p-4 text-sm text-muted-foreground">
+              No comments yet. Select text and add one.
+            </p>
+          )}
+          {open.map((t) => (
+            <ThreadView
+              key={t.root.id}
+              thread={t}
+              noteId={noteId}
+              myId={myId}
+              isOwner={isOwner}
+              nameFor={nameFor}
+              avatarFor={avatarFor}
+              active={activeAnchorId === t.root.id}
+              selectable={collabEnabled && Boolean(coupling)}
+              selected={selected}
+              onToggleSelect={toggleSelect}
+              onSelect={() =>
+                onSelectThread(t.root.anchor_quote ? t.root.id : null)
+              }
+              onAfterDecide={() =>
+                qc.invalidateQueries({ queryKey: noteKeys.all(wsId) })
+              }
+            />
+          ))}
+          {resolved.length > 0 && (
+            <details className="bg-muted/20">
+              <summary className="cursor-pointer px-3 py-2 text-xs text-muted-foreground">
+                {resolved.length} resolved
+              </summary>
+              {resolved.map((t) => (
+                <ThreadView
+                  key={t.root.id}
+                  thread={t}
+                  noteId={noteId}
+                  myId={myId}
+                  isOwner={isOwner}
+                  nameFor={nameFor}
+                  avatarFor={avatarFor}
+                  active={activeAnchorId === t.root.id}
+                  selectable={collabEnabled && Boolean(coupling)}
+                  selected={selected}
+                  onToggleSelect={toggleSelect}
+                  onSelect={() =>
+                    onSelectThread(t.root.anchor_quote ? t.root.id : null)
+                  }
+                  onAfterDecide={() =>
+                    qc.invalidateQueries({ queryKey: noteKeys.all(wsId) })
+                  }
+                />
+              ))}
+            </details>
+          )}
+        </div>
+      </ScrollArea>
+
+      {/* FIR-2826 — keep the composer at the bottom like a chat box, while the
+          existing comments scroll above it. */}
+      <div className="shrink-0 border-t bg-background p-3">
         <div className="mb-2 flex gap-1">
           <Button
             size="sm"
@@ -449,6 +627,8 @@ export function NoteCommentsPanel({
             onSubmit={submit}
             showBubbleMenu={false}
             debounceMs={150}
+            // FIR-2595 point 3: scope @mentions to people with note access.
+            currentNoteId={scopedMentions ? noteId : undefined}
             placeholder={
               mode === "suggestion"
                 ? "Replace the selected text with…"
@@ -476,63 +656,6 @@ export function NoteCommentsPanel({
           </p>
         )}
       </div>
-
-      <ScrollArea className="min-h-0 flex-1">
-        <div className="divide-y">
-          {open.length === 0 && resolved.length === 0 && (
-            <p className="p-4 text-sm text-muted-foreground">
-              No comments yet. Select text and add one.
-            </p>
-          )}
-          {open.map((t) => (
-            <ThreadView
-              key={t.root.id}
-              thread={t}
-              noteId={noteId}
-              myId={myId}
-              isOwner={isOwner}
-              nameFor={nameFor}
-              active={activeAnchorId === t.root.id}
-              selectable={collabEnabled && Boolean(coupling)}
-              selected={selected}
-              onToggleSelect={toggleSelect}
-              onSelect={() =>
-                onSelectThread(t.root.anchor_quote ? t.root.id : null)
-              }
-              onAfterDecide={() =>
-                qc.invalidateQueries({ queryKey: noteKeys.all(wsId) })
-              }
-            />
-          ))}
-          {resolved.length > 0 && (
-            <details className="bg-muted/20">
-              <summary className="cursor-pointer px-3 py-2 text-xs text-muted-foreground">
-                {resolved.length} resolved
-              </summary>
-              {resolved.map((t) => (
-                <ThreadView
-                  key={t.root.id}
-                  thread={t}
-                  noteId={noteId}
-                  myId={myId}
-                  isOwner={isOwner}
-                  nameFor={nameFor}
-                  active={activeAnchorId === t.root.id}
-                  selectable={collabEnabled && Boolean(coupling)}
-                  selected={selected}
-                  onToggleSelect={toggleSelect}
-                  onSelect={() =>
-                    onSelectThread(t.root.anchor_quote ? t.root.id : null)
-                  }
-                  onAfterDecide={() =>
-                    qc.invalidateQueries({ queryKey: noteKeys.all(wsId) })
-                  }
-                />
-              ))}
-            </details>
-          )}
-        </div>
-      </ScrollArea>
     </div>
   );
 }
@@ -543,6 +666,7 @@ function ThreadView({
   myId,
   isOwner,
   nameFor,
+  avatarFor,
   active,
   selectable,
   selected,
@@ -555,6 +679,7 @@ function ThreadView({
   myId: string | undefined;
   isOwner: boolean;
   nameFor: (id: string) => string;
+  avatarFor: (id: string) => string | null;
   active: boolean;
   selectable: boolean;
   selected: Set<string>;
@@ -563,6 +688,9 @@ function ThreadView({
   onAfterDecide: () => void;
 }) {
   const { root, replies } = thread;
+  // FIR-2595 point 3: scope the reply @mention picker (cache is warmed by the
+  // parent panel's useEnsureNoteMentionScope for this note).
+  const scopedMentions = useFeatureFlag("cerebro_note_scoped_mentions");
   const resolve = useResolveNoteComment(noteId);
   const del = useDeleteNoteComment(noteId);
   const decide = useDecideNoteSuggestion(noteId);
@@ -594,26 +722,29 @@ function ThreadView({
   return (
     <div
       onClick={onSelect}
+      data-thread-id={root.id}
       className={cn(
-        "p-3",
+        "px-3 py-3.5 transition-colors",
         root.resolved && "opacity-70",
         root.anchor_quote && "cursor-pointer",
-        active && "bg-orange-400/10",
+        active
+          ? "bg-orange-400/10 ring-1 ring-inset ring-orange-400/40"
+          : root.anchor_quote && "hover:bg-muted/40",
       )}
     >
       {root.anchor_quote && (
         <div
           className={cn(
-            "mb-1.5 border-l-2 pl-2 text-xs italic line-clamp-2",
+            "mb-2 rounded-r border-l-2 py-0.5 pl-2 text-xs italic line-clamp-2",
             active
-              ? "border-orange-500 text-orange-700"
+              ? "border-orange-500 bg-orange-400/5 text-orange-700"
               : "border-amber-500/60 text-muted-foreground",
           )}
         >
           “{root.anchor_quote}”
         </div>
       )}
-      <CommentRow c={root} nameFor={nameFor} myId={myId} noteId={noteId} canDelete={root.author_id === myId || isOwner} onDelete={() => del.mutate(root.id)} selectable={selectable} selected={selected.has(root.id)} onToggleSelect={onToggleSelect} />
+      <CommentRow c={root} nameFor={nameFor} avatarFor={avatarFor} myId={myId} noteId={noteId} canDelete={root.author_id === myId || isOwner} onDelete={() => del.mutate(root.id)} selectable={selectable} selected={selected.has(root.id)} onToggleSelect={onToggleSelect} />
 
       {isSuggestion && (
         <div className="mt-1.5 rounded bg-emerald-500/10 p-2 text-sm">
@@ -637,11 +768,13 @@ function ThreadView({
         </div>
       )}
 
-      {replies.map((r) => (
-        <div key={r.id} className="mt-2 pl-4">
-          <CommentRow c={r} nameFor={nameFor} myId={myId} noteId={noteId} canDelete={r.author_id === myId || isOwner} onDelete={() => del.mutate(r.id)} selectable={selectable} selected={selected.has(r.id)} onToggleSelect={onToggleSelect} />
+      {replies.length > 0 && (
+        <div className="mt-3 ml-3 flex flex-col gap-3 border-l border-border/70 pl-3">
+          {replies.map((r) => (
+            <CommentRow key={r.id} c={r} nameFor={nameFor} avatarFor={avatarFor} myId={myId} noteId={noteId} canDelete={r.author_id === myId || isOwner} onDelete={() => del.mutate(r.id)} selectable={selectable} selected={selected.has(r.id)} onToggleSelect={onToggleSelect} />
+          ))}
         </div>
-      ))}
+      )}
 
       <div className="mt-2 flex flex-wrap items-center gap-2">
         {pending && isOwner && (
@@ -700,6 +833,8 @@ function ThreadView({
               onSubmit={sendReply}
               showBubbleMenu={false}
               debounceMs={150}
+              // FIR-2595 point 3: scope @mentions to people with note access.
+              currentNoteId={scopedMentions ? noteId : undefined}
               placeholder="Reply… (type @ to mention)"
               className="min-h-[40px] text-sm"
             />
@@ -720,6 +855,7 @@ function ThreadView({
 function CommentRow({
   c,
   nameFor,
+  avatarFor,
   myId,
   canDelete,
   onDelete,
@@ -729,6 +865,7 @@ function CommentRow({
 }: {
   c: NoteComment;
   nameFor: (id: string) => string;
+  avatarFor: (id: string) => string | null;
   myId: string | undefined;
   noteId: string;
   canDelete: boolean;
@@ -738,48 +875,73 @@ function CommentRow({
   onToggleSelect?: (id: string) => void;
 }) {
   const unsent = isUnsentToAgent(c);
+  // FIR-2826 — lead each comment with the author's avatar so rows read as
+  // distinct messages instead of one continuous block of text.
+  const authorName = c.author_id === myId ? "You" : nameFor(c.author_id);
+  const avatarUrl = avatarFor(c.author_id);
   return (
-    <div>
-      <div className="flex items-center gap-1.5 text-xs">
-        {selectable && unsent && (
-          <input
-            type="checkbox"
-            checked={selected}
-            onClick={(e) => e.stopPropagation()}
-            onChange={() => onToggleSelect?.(c.id)}
-            className="size-3 shrink-0 cursor-pointer accent-amber-600"
-            aria-label="Select comment to send"
+    <div className="group/comment flex gap-2.5">
+      {selectable && unsent && (
+        <input
+          type="checkbox"
+          checked={selected}
+          onClick={(e) => e.stopPropagation()}
+          onChange={() => onToggleSelect?.(c.id)}
+          className="mt-1 size-3 shrink-0 cursor-pointer accent-amber-600"
+          aria-label="Select comment to send"
+        />
+      )}
+      <Avatar size="sm" className="mt-0.5">
+        {avatarUrl && <AvatarImage src={avatarUrl} alt={nameFor(c.author_id)} />}
+        <AvatarFallback className="text-[10px] font-medium">
+          {initialsOf(nameFor(c.author_id))}
+        </AvatarFallback>
+      </Avatar>
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-1.5 text-xs">
+          <span className="font-semibold text-foreground">{authorName}</span>
+          <span className="text-muted-foreground">
+            {formatWhen(c.created_at)}
+          </span>
+          {unsent && (
+            <Badge
+              variant="outline"
+              className="border-amber-400/60 text-[10px] text-amber-700"
+            >
+              Unsent
+            </Badge>
+          )}
+          {canDelete && (
+            <button
+              onClick={onDelete}
+              className="ml-auto text-muted-foreground opacity-0 transition-opacity hover:text-destructive group-hover/comment:opacity-100"
+              aria-label="Delete comment"
+            >
+              <Trash2 className="size-3" />
+            </button>
+          )}
+        </div>
+        {c.body && c.body !== "Suggested edit" && (
+          // FIR-1647 — render markdown so an @-mention shows as a chip, not raw
+          // `[@Name](mention://…)` text.
+          <ReadonlyContent
+            content={c.body}
+            className="mt-1 break-words text-sm leading-relaxed"
           />
         )}
-        <span className="font-medium">
-          {c.author_id === myId ? "You" : nameFor(c.author_id)}
-        </span>
-        <span className="text-muted-foreground">{formatWhen(c.created_at)}</span>
-        {unsent && (
-          <Badge
-            variant="outline"
-            className="border-amber-400/60 text-[10px] text-amber-700"
-          >
-            Unsent
-          </Badge>
-        )}
-        {canDelete && (
-          <button
-            onClick={onDelete}
-            className="ml-auto text-muted-foreground hover:text-destructive"
-            aria-label="Delete comment"
-          >
-            <Trash2 className="size-3" />
-          </button>
-        )}
       </div>
-      {c.body && c.body !== "Suggested edit" && (
-        // FIR-1647 — render markdown so an @-mention shows as a chip, not raw
-        // `[@Name](mention://…)` text.
-        <ReadonlyContent content={c.body} className="mt-0.5 break-words" />
-      )}
     </div>
   );
+}
+
+// FIR-2826 — up to two initials for the avatar fallback (first + last word).
+function initialsOf(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  const first = parts[0];
+  if (!first) return "?";
+  const last = parts[parts.length - 1];
+  if (parts.length === 1) return first.slice(0, 2).toUpperCase();
+  return ((first[0] ?? "") + (last?.[0] ?? "")).toUpperCase();
 }
 
 function formatWhen(iso: string): string {

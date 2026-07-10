@@ -4,7 +4,8 @@ This file provides guidance to AI agents when working with code in this reposito
 
 > **Single source of truth:** This file is a concise pointer document.
 > All authoritative architecture, coding rules, commands, and conventions
-> live in **CLAUDE.md** at the project root. Read that file first.
+> live in **CLAUDE.md** at the project root. Read that file first —
+> including "Investigate before you code" (the committed code-map).
 
 ## Quick Reference
 

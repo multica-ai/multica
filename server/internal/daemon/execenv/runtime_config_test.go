@@ -1659,7 +1659,7 @@ func TestNoBusyWaitRulePresentForIssueRunsOnly(t *testing.T) {
 // contradicting the wakeup-mandatory section.
 func TestWakeupRuleEmittedOnceAndReconciledWithNoBusyWait(t *testing.T) {
 	t.Parallel()
-	const wakeupHeading = "## Wakeup ved ventetid — obligatorisk (gælder ALLE agenter)"
+	const wakeupHeading = "## Wakeup before waiting — mandatory (ALL agents)"
 
 	for _, tc := range []struct {
 		name string
@@ -1687,6 +1687,21 @@ func TestWakeupRuleEmittedOnceAndReconciledWithNoBusyWait(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// CEREBRO-PATCH(runtime-config-wakeup-mandatory): FIR-2679 — the wakeup brief must route agents to the cerebro-agent-triggers skill (the single home for interval choice, no-working-hours, event-triggers, cheaper-model) instead of restating the rules inline.
+func TestWakeupBriefRoutesToTriggersSkill(t *testing.T) {
+	t.Parallel()
+	out := buildMetaSkillContent("claude", TaskContextForEnv{IssueID: "44444444-5555-6666-7777-888888888888"})
+	for _, want := range []string{
+		"read the `cerebro-agent-triggers` skill",
+		"NO working hours",
+		"never fires Opus",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("wakeup brief missing skill-routing text %q", want)
+		}
 	}
 }
 

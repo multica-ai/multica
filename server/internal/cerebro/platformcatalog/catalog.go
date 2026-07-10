@@ -327,6 +327,11 @@ var catalog = []Capability{
 			"PUT /api/artifact-folders/{id}",
 			"PUT /api/artifact-folders/{id}/visibility",
 			"DELETE /api/artifact-folders/{id}",
+			// FIR-2697: folder suggestions — request one for an artifact, then
+			// accept (moves the artifact into the suggested folder) or reject it.
+			"POST /api/artifacts/{id}/folder-suggestion",
+			"POST /api/artifact-folder-suggestions/{id}/accept",
+			"POST /api/artifact-folder-suggestions/{id}/reject",
 			"POST /api/artifact-uploads",
 			"POST /api/upload-file",
 			"DELETE /api/attachments/{id}",
@@ -344,6 +349,8 @@ var catalog = []Capability{
 			"DELETE /api/notes/{id}",
 			"PUT /api/notes/{id}/pin",
 			"PUT /api/notes/{id}/visibility",
+			// FIR-2810: per-note toggle for per-line author-code stamping.
+			"PUT /api/notes/{id}/author-codes",
 			"POST /api/notes/{id}/references",
 			"DELETE /api/notes/{id}/references/{refId}",
 			// Wave 3 (TECH-3556): comments + suggestions, versions, edit lock.
@@ -359,6 +366,9 @@ var catalog = []Capability{
 			"DELETE /api/notes/{id}/lock",
 			// FIR-1317: conflict detection + AI merge dialog.
 			"POST /api/notes/{id}/merge",
+			// FIR-2595: grant a tagged member viewer access to a note
+			// (the "Give access & send" choice in the mention flow).
+			"POST /api/notes/{id}/mention-access",
 		},
 	},
 	{
@@ -426,6 +436,20 @@ var catalog = []Capability{
 			"POST /api/agents/context/change-requests/{crId}/review",
 			"POST /api/agents/{id}/context/rollback",
 			"PUT /api/agents/{id}/context/ownership",
+		},
+	},
+	{
+		Key:           "create_memory",
+		Title:         "Use agent memory",
+		Category:      CategoryAgents,
+		Description:   "Whether a group may use Cognee-backed memory: turn a per-(user,agent) memory read/write toggle on or off. FIR-1794 Gate 3 — default deny, so a group must be explicitly granted this before any member can enable memory for an agent, even when the workspace-wide memory flag is on.",
+		DescriptionZh: "群组是否可使用 Cognee 支持的记忆功能：开启或关闭按（用户，agent）设置的记忆读写开关。FIR-1794 Gate 3——默认拒绝，即使工作区级记忆开关已打开，群组也必须被明确授予此能力后，成员才能为某个 agent 启用记忆。",
+		Ops: []string{
+			"PUT /api/agents/{id}/memory-settings",
+		},
+		Evidence: []string{
+			"server/internal/cerebro/grouppermissions/permissions.go:45",   // CapabilityCreateMemory
+			"server/internal/handler/agent_memory_settings_cerebro.go:118", // cerebroRequireCapability("create_memory") on the PUT route
 		},
 	},
 	{
@@ -667,6 +691,28 @@ var catalog = []Capability{
 		},
 	},
 	{
+		Key:           "manage_group_overrides",
+		Title:         "Manage group permissions",
+		Category:      CategoryPermissions,
+		Description:   "Author another member's own (User-layer) tool-policy or Connections access row — including an Allow that overrides a workspace-level Deny — for members who share a group with you. A WHEN condition on this permission (argument group_id) limits it to specific group(s). Can never be used on your own access. Workspace owners and admins are not limited by this: they can always change any member's access, including their own (FIR-2351).",
+		DescriptionZh: "为与你共享群组的其他成员，编写其个人（User 层）工具策略或 Connections 访问规则——包括覆盖工作区级 Deny 的 Allow。此权限上的 WHEN 条件（参数 group_id）可将其限定到特定群组。永远不能用于你自己的访问权限。工作区所有者和管理员不受此限制：他们始终可以更改任何成员的访问权限，包括自己的（FIR-2351）。",
+		Evidence: []string{
+			"server/internal/handler/group_permissions_cerebro.go:433", // cerebroRequireDelegatedOverridePolicy
+			"server/internal/cerebro/toolpolicy/override_grant.go:40",  // CanAuthorDelegatedOverride
+		},
+	},
+	{
+		Key:           "manage_workspace_overrides",
+		Title:         "Manage permissions",
+		Category:      CategoryPermissions,
+		Description:   "Author tool-policy or Connections access rows at the User, Group, and Agent layers, for anyone and any agent in the workspace — including an Allow that overrides a workspace-level Deny. Workspace/runtime defaults themselves stay owner/admin-only. Can never be used on your own access. Workspace owners and admins are not limited by this: they can always change any member's access, including their own (FIR-2351).",
+		DescriptionZh: "为工作区内任何成员和任何代理，编写 User、Group 和 Agent 层的工具策略或 Connections 访问规则——包括覆盖工作区级 Deny 的 Allow。工作区/运行时默认值本身仍仅限所有者/管理员修改，且永远不能用于你自己的访问权限。工作区所有者和管理员不受此限制：他们始终可以更改任何成员的访问权限，包括自己的（FIR-2351）。",
+		Evidence: []string{
+			"server/internal/handler/group_permissions_cerebro.go:433", // cerebroRequireDelegatedOverridePolicy
+			"server/internal/cerebro/toolpolicy/override_grant.go:40",  // CanAuthorDelegatedOverride
+		},
+	},
+	{
 		Key:           "manage_agent_vault_access",
 		Title:         "Manage Agent Vault access",
 		Category:      CategoryPermissions,
@@ -747,8 +793,8 @@ var catalog = []Capability{
 		Key:           "manage_project_sprints",
 		Title:         "Manage project sprints",
 		Category:      CategoryProjects,
-		Description:   "Create, edit, delete, and assign project sprints and recurring sprint tasks.",
-		DescriptionZh: "创建、编辑、删除并分配项目冲刺与周期性冲刺任务。",
+		Description:   "Create, edit, complete, delete, and assign project sprints and recurring sprint tasks.",
+		DescriptionZh: "创建、编辑、完成、删除并分配项目冲刺与周期性冲刺任务。",
 		Ops: []string{
 			"PUT /api/cerebro/projects/{projectID}/sprint-settings/",
 			"DELETE /api/cerebro/projects/{projectID}/sprint-settings/",
@@ -757,6 +803,7 @@ var catalog = []Capability{
 			"POST /api/cerebro/projects/{projectID}/sprint-recurring-tasks/",
 			"PUT /api/cerebro/sprint-recurring-tasks/{id}/",
 			"DELETE /api/cerebro/sprint-recurring-tasks/{id}/",
+			"POST /api/cerebro/sprints/{sprintID}/complete",
 			"PUT /api/cerebro/sprints/{sprintID}/",
 			"DELETE /api/cerebro/sprints/{sprintID}/",
 			"PUT /api/cerebro/issues/{issueID}/sprint/",
@@ -824,6 +871,19 @@ var catalog = []Capability{
 			"DELETE /api/workspaces/{id}/github/installations/{installationId}",
 			"DELETE /api/workspaces/{id}/lark/installations/{installationId}",
 			"POST /api/workspaces/{id}/lark/install/begin",
+		},
+	},
+	{
+		Key:           "manage_model_registry",
+		Title:         "Manage model registry",
+		Category:      CategoryWorkspace,
+		Description:   "Propose, review, approve, and roll back changes to the single-source model registry (prices, context windows, display labels) under Settings → Model registry (FIR-2698). The direct analog of manage_skills: reviewing/approving is additionally gated in-handler to the registry owner, a named approver, or a workspace admin (modelregistry/handler.go canManage).",
+		DescriptionZh: "在 Settings → Model registry 下提交、审阅、批准和回滚对单一来源模型注册表（价格、上下文窗口、显示名称）的更改（FIR-2698）。与 manage_skills 直接类似：审阅/批准操作在处理程序内额外限定为注册表所有者、指定审批人或工作区管理员（modelregistry/handler.go canManage）。",
+		Ops: []string{
+			"POST /api/model-registry/change-requests",
+			"POST /api/model-registry/change-requests/{crId}/review",
+			"POST /api/model-registry/rollback",
+			"PUT /api/model-registry/ownership",
 		},
 	},
 
@@ -923,6 +983,8 @@ var catalog = []Capability{
 			"PUT /api/cerebro/workflows/{id}",
 			"DELETE /api/cerebro/workflows/{id}",
 			"POST /api/cerebro/workflows/{id}/toggle",
+			"POST /api/cerebro/workflows/{id}/activate",
+			"POST /api/cerebro/workflows/{id}/human-checks/{checkId}/approve",
 			"POST /api/cerebro/workflows/{id}/regenerate-outbound-secret",
 			"POST /api/cerebro/workflows/{id}/regenerate-signing-secret",
 			"POST /api/cerebro/workflows/{id}/regenerate-token",
@@ -1155,6 +1217,7 @@ var excluded = map[string]string{
 	"POST /api/agents/backfill-avatars":              "cosmetic — avatar backfill maintenance",
 	"POST /api/capabilities/report":                  "runtime-self-report — a runtime reporting its own tools, not a user action",
 	"POST /api/workspaces/{id}/cerebro/test-as-user": "read-only — resolves another user+agent's tool verdict (Test as user); reads policy, changes no state; gated in-handler by tools:test-as-user",
+	"POST /api/agents/context/lint/repo-file":        "read-only — drift lint of a repo CLAUDE.md/AGENTS.md's content posted in the body (FIR-1775 Phase 3); pure analysis, changes no state",
 	"POST /api/issues/{id}/squad-evaluated":          "system-callback — squad-evaluation marker set by the platform, not a user action",
 }
 

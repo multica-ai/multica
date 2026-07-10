@@ -53,6 +53,25 @@ func TestDaemonUsageCerebroWiringPresent(t *testing.T) {
 			fragment: `"subtree_cost_cents": subtreeCostCents`,
 			why:      "GetIssueUsage must return the subtree cost roll-up the frontend reads.",
 		},
+		// Claim-time cost-saving call sites in ClaimTaskByRuntime. Upstream sync
+		// #4454 deleted all four; the implementations survived in their
+		// daemon_cost_*_cerebro.go siblings but had zero callers for ~2 weeks.
+		{
+			fragment: "h.applySnapshotSaving(r.Context(), &resp, issue, task.TriggerCommentID, task.ID)",
+			why:      "ClaimTaskByRuntime must apply the snapshot_prompt saving, or issue+thread inlining and its measurement go dark (FIR-2384).",
+		},
+		{
+			fragment: "h.applyBundledReadSaving(r.Context(), &resp, issue, task.ID)",
+			why:      "ClaimTaskByRuntime must apply the bundled_read saving, or the `issue context` prompt rewrite and shadow measurement go dark (FIR-2384).",
+		},
+		{
+			fragment: "h.applyContextDuplicationSaving(r.Context(), &resp, issue, task.ID)",
+			why:      "ClaimTaskByRuntime must score meta-skill context duplication, or FIR-2765 measurement goes dark.",
+		},
+		{
+			fragment: "h.applyGraphifyNudge(r.Context(), &resp, issue)",
+			why:      "ClaimTaskByRuntime must apply the graphify nudge, or agents stop being pointed at the code map (FIR-1311).",
+		},
 	}
 
 	for _, r := range required {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   AlertCircle,
   ArrowLeft,
@@ -112,6 +112,14 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
   // One-shot channel: the inspector's compact Lark status row asks the
   // overview pane to focus a tab. The pane clears it after consuming.
   const [tabNavIntent, setTabNavIntent] = useState<DetailTab | null>(null);
+
+  // CEREBRO-PATCH(agent-office-deeplink): FIR-1775 — inbox agent-context
+  // change-request rows deep-link with ?tab=instructions; focus that tab on
+  // arrival. The overview pane self-protects against unknown tab ids.
+  const tabParam = navigation.searchParams.get("tab");
+  useEffect(() => {
+    if (tabParam) setTabNavIntent(tabParam as DetailTab);
+  }, [tabParam]);
 
   const handleUpdate = async (id: string, data: Record<string, unknown>) => {
     // Optimistic update: patch the matching agent in the cached list

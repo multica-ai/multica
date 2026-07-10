@@ -88,6 +88,41 @@ func TestResolve_CeilingCannotBeLoosened(t *testing.T) {
 	}
 }
 
+// TestResolve_OnBehalfOfTightensOnly asserts the on_behalf_of (delegated member)
+// layer behaves like every other chain layer under the tighten-only Resolve
+// (FIR-2441 — member as a full actor level): its Deny/Ask can restrict, but its
+// Allow can never loosen what a tighter layer already decided. This is the
+// invariant that lets a member be denied a tool across every agent they drive
+// without ever being able to widen access.
+func TestResolve_OnBehalfOfTightensOnly(t *testing.T) {
+	// A member Deny tightens an otherwise-allowed tool.
+	e := Resolve(Input{Settings: set(
+		LayerRuntime, SettingAllow,
+		LayerOnBehalfOf, SettingDeny,
+	)})
+	if e.Setting != SettingDeny {
+		t.Fatalf("on_behalf_of Deny must tighten, got %s", e.Setting)
+	}
+	if e.DecidedBy != LayerOnBehalfOf {
+		t.Fatalf("expected DecidedBy=on_behalf_of, got %q", e.DecidedBy)
+	}
+
+	// A member Allow can NOT loosen a tighter agent Deny.
+	e = Resolve(Input{Settings: set(
+		LayerAgent, SettingDeny,
+		LayerOnBehalfOf, SettingAllow, // tries to loosen — must be ignored
+	)})
+	if e.Setting != SettingDeny {
+		t.Fatalf("on_behalf_of Allow must not loosen an agent Deny, got %s", e.Setting)
+	}
+
+	// Absent on_behalf_of leaves resolution exactly as before (non-delegated path).
+	e = Resolve(Input{Settings: set(LayerRuntime, SettingAllow)})
+	if e.Setting != SettingAllow {
+		t.Fatalf("absent on_behalf_of must not change resolution, got %s", e.Setting)
+	}
+}
+
 // TestResolve_MockupRows walks every row from the FIR-2230 mockup and asserts
 // the effective verdict and attribution match what the design promises.
 func TestResolve_MockupRows(t *testing.T) {

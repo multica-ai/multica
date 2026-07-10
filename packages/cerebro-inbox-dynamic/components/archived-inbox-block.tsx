@@ -26,6 +26,7 @@ import {
   useMarkInboxUnread,
   useUnarchiveInbox,
 } from "@multica/cerebro-inbox";
+import { useUnarchiveChannel } from "@multica/cerebro-channels";
 import { sectionLabel, type InboxSectionConfig, type SectionSort } from "../layout";
 import {
   entryMatchesQuery,
@@ -97,6 +98,7 @@ export function ArchivedInboxBlock({
     useArchivedInboxEntries(wsId);
   const unarchive = useUnarchiveInbox();
   const markUnread = useMarkInboxUnread();
+  const unarchiveChannel = useUnarchiveChannel();
 
   // Search (top-bar query AND in-block search) → sort. Grouping happens after.
   const shown = useMemo(() => {
@@ -113,8 +115,9 @@ export function ArchivedInboxBlock({
 
   const onUnarchive = (entry: DynInboxEntry) => {
     // Chats unarchive through their own row menu (CerebroChatSessionRowActions);
-    // here we only restore inbox notifications.
+    // here we restore inbox notifications and channels/DMs (FIR-2791).
     if (entry.kind === "notif") unarchive.mutate(entry.item.id);
+    else if (entry.kind === "channel") unarchiveChannel.mutate(entry.channel.id);
   };
   const onUnarchiveUnread = (entry: DynInboxEntry) => {
     if (entry.kind !== "notif") return;

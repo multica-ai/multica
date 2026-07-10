@@ -50,6 +50,9 @@ import { getMentionAccessContext } from "@multica/cerebro-access/views";
 import { canTriggerPrivateAgentMention } from "@multica/cerebro-access/views";
 // CEREBRO-PATCH(agent-surface-visibility): TECH-3670 — hide agents from @-mention autocomplete.
 import { isAgentHiddenOnSurface } from "@multica/cerebro-access/views";
+// CEREBRO-PATCH(note-mention-scope-import): FIR-2595 point 3 — restrict the note
+// picker to members with note access + their agents (folder grants + shares).
+import { getNoteMentionScope } from "@multica/cerebro-notes/views/note-mention-scope";
 import { Lock } from "lucide-react";
 import { createSuggestionPopupRender } from "./suggestion-popup";
 
@@ -570,6 +573,9 @@ interface MentionSuggestionOptions {
   // CEREBRO-PATCH(mention-access-currentIssueId): JEH-1250 — accept the editor's
   // current issue id so the picker can mark members lacking project access.
   currentIssueId?: string | null;
+  // CEREBRO-PATCH(note-mention-scope-opt): FIR-2595 point 3 — when set, restrict
+  // the picker to members/agents with access to this note.
+  currentNoteId?: string | null;
 }
 
 export function createMentionSuggestion(
@@ -608,12 +614,20 @@ export function createMentionSuggestion(
 
     const q = query.toLowerCase();
 
+    // CEREBRO-PATCH(note-mention-scope-resolve): FIR-2595 point 3 — inside a
+    // note, restrict suggestions to members with note access + their agents.
+    const noteScope = getNoteMentionScope(qc, wsId, options.currentNoteId);
+
     const allItem: MentionItem[] =
-      "all members".includes(q) || "all".includes(q)
+      // CEREBRO-PATCH(note-mention-scope-all): FIR-2595 point 3 — "all members"
+      // is meaningless on a scoped note, so drop it when scoping is active.
+      !noteScope.active && ("all members".includes(q) || "all".includes(q))
         ? [{ id: "all", label: "All members", type: "all" as const }]
         : [];
 
     const memberItems: MentionItem[] = members
+      // CEREBRO-PATCH(note-mention-scope-member): FIR-2595 point 3.
+      .filter((m) => noteScope.allows(m.user_id))
       .filter((m) => m.name.toLowerCase().includes(q) || matchesPinyin(m.name, q))
       .map((m) => ({
         id: m.user_id,
@@ -626,6 +640,9 @@ export function createMentionSuggestion(
         (a) =>
           !a.archived_at &&
           (a.name.toLowerCase().includes(q) || matchesPinyin(a.name, q)) &&
+          // CEREBRO-PATCH(note-mention-scope-agent): FIR-2595 point 3 — inside a
+          // note, only agents owned by someone with note access (ownerless kept).
+          noteScope.allows(a.owner_id) &&
           // CEREBRO-PATCH(agent-surface-visibility): TECH-3670 — drop agents the
           // owner hid from @-mention (owner/admin still see their own).
           !isAgentHiddenOnSurface(a, "mention", { userId, role: myRole }) &&
@@ -661,9 +678,13 @@ export function createMentionSuggestion(
         };
       });
 
-    const squadItems: MentionItem[] = squads
-      .filter((s) => !s.archived_at && (s.name.toLowerCase().includes(q) || matchesPinyin(s.name, q)))
-      .map((s) => ({ id: s.id, label: s.name, type: "squad" as const }));
+    // CEREBRO-PATCH(note-mention-scope-squad): FIR-2595 point 3 — a squad fans
+    // out to a whole team, which would bypass note scoping, so hide squads then.
+    const squadItems: MentionItem[] = noteScope.active
+      ? []
+      : squads
+          .filter((s) => !s.archived_at && (s.name.toLowerCase().includes(q) || matchesPinyin(s.name, q)))
+          .map((s) => ({ id: s.id, label: s.name, type: "squad" as const }));
 
     // Members and agents share a single ranked list — recently mentioned
     // targets come first regardless of type, with an alphabetical fallback

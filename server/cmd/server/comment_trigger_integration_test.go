@@ -304,16 +304,19 @@ func TestCommentTriggerOnComment(t *testing.T) {
 		}
 	})
 
-	t.Run("reply to member thread without mentions suppresses trigger", func(t *testing.T) {
+	t.Run("reply to member thread without mentions wakes the assignee", func(t *testing.T) {
+		// CEREBRO-PATCH(reply-triggers-assignee): FIR-2553 — a plain reply routes
+		// to the issue assignee. Upstream suppressed the assignee on member-thread
+		// replies; our fork wakes it (tag someone to route elsewhere).
 		clearTasks(t, issueID)
 		// Member starts a thread.
 		threadID := postComment(t, issueID, "Hey team, what do you think?", nil)
 		// Clear the task that was created by the top-level comment.
 		clearTasks(t, issueID)
-		// Another member reply (same user in this test, but the key is parent is by member).
+		// Plain member reply, no mention → wakes the assignee agent.
 		postComment(t, issueID, "I agree with you", strPtr(threadID))
-		if n := countPendingTasks(t, issueID); n != 0 {
-			t.Errorf("expected 0 pending tasks (member-to-member reply), got %d", n)
+		if n := countPendingTasks(t, issueID); n != 1 {
+			t.Errorf("expected 1 pending task (plain reply wakes assignee), got %d", n)
 		}
 	})
 
@@ -473,7 +476,11 @@ func TestCommentTriggerThreadInheritedMention(t *testing.T) {
 		resp.Body.Close()
 	})
 
-	t.Run("reply in thread inherits parent mention", func(t *testing.T) {
+	t.Run("reply in thread does not inherit parent mention", func(t *testing.T) {
+		// CEREBRO-PATCH(reply-triggers-assignee): FIR-2553 — thread-root mention
+		// inheritance is disabled. A plain reply routes to the issue assignee; this
+		// issue has no assignee, so nobody is woken (the root-tagged agent is not
+		// re-triggered).
 		clearTasks(t, issueID)
 		// Top-level comment @mentions the agent.
 		content := fmt.Sprintf("[@Agent](mention://agent/%s) can you review this?", agentID)
@@ -483,10 +490,10 @@ func TestCommentTriggerThreadInheritedMention(t *testing.T) {
 		}
 		// Clear the task so we can test the reply independently.
 		clearTasks(t, issueID)
-		// Reply in the thread WITHOUT mentioning the agent.
+		// Reply in the thread WITHOUT mentioning the agent → no inheritance, no assignee.
 		postComment(t, issueID, "Here is more context for you", strPtr(threadID))
-		if n := countPendingTasks(t, issueID); n != 1 {
-			t.Errorf("expected 1 pending task from thread-inherited mention, got %d", n)
+		if n := countPendingTasks(t, issueID); n != 0 {
+			t.Errorf("expected 0 pending tasks (inheritance disabled, no assignee), got %d", n)
 		}
 	})
 

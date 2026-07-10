@@ -14,6 +14,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/multica-ai/multica/server/internal/cerebro/daemonmcp"
 )
 
 // claudeBackend implements Backend by spawning the Claude Code CLI
@@ -35,6 +37,16 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	runCtx, cancel := runContext(ctx, timeout)
 
 	args := buildClaudeArgs(opts, b.cfg.Logger)
+
+	// CEREBRO-PATCH(daemon-claude-mcp-self-entry): FIR-2341 `--strict-mcp-config`
+	// (below) makes any globally-registered server (`multica mcp install`)
+	// unreachable, so api-type workspace connections need `multica mcp serve`
+	// injected here, into the same document, every run.
+	if selfEntry, err := selfMCPServerEntry(); err == nil {
+		opts.McpConfig = daemonmcp.Merge(selfEntry, opts.McpConfig)
+	} else if b.cfg.Logger != nil {
+		b.cfg.Logger.Warn("mcp: could not resolve multica binary path; api-type connection tools unavailable", "error", err)
+	}
 
 	// If the caller provided an MCP config, write it to a temp file and pass
 	// --mcp-config <path> so the agent uses a controlled set of MCP servers
@@ -842,6 +854,28 @@ func stripSurroundingQuotes(s string) (string, bool) {
 		}
 	}
 	return s, false
+}
+
+// selfMCPServerEntry returns a {"mcpServers": {"multica": ...}} document that
+// registers the currently-running multica binary as a stdio MCP server (the
+// same registration `multica mcp install` performs manually via `claude mcp
+// add`). Claude Code inherits this process's env when it spawns the child, so
+// `multica mcp serve` resolves MULTICA_TOKEN / MULTICA_SERVER_URL /
+// MULTICA_WORKSPACE_ID the same way this daemon did (see cmd_mcp.go
+// resolveToken/resolveServerURL/resolveWorkspaceID).
+func selfMCPServerEntry() (json.RawMessage, error) {
+	selfBin, err := os.Executable()
+	if err != nil {
+		return nil, fmt.Errorf("resolve multica binary path: %w", err)
+	}
+	return json.Marshal(map[string]any{
+		"mcpServers": map[string]any{
+			"multica": map[string]any{
+				"command": selfBin,
+				"args":    []string{"mcp", "serve"},
+			},
+		},
+	})
 }
 
 // writeMcpConfigToTemp writes raw MCP config JSON to a temporary file and returns

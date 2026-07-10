@@ -157,14 +157,18 @@ func requirePreviewAgents(t *testing.T, preview CommentTriggerPreviewResponse, w
 	}
 }
 
-func TestPreviewCommentTriggers_MatchesCreateForInheritedParentMention(t *testing.T) {
+// CEREBRO-PATCH(reply-triggers-assignee): FIR-2553 — thread-root mention
+// inheritance is disabled. A plain reply routes to the issue ASSIGNEE (Walt),
+// not to the agent tagged at the root (Kim). The preview must match the create
+// path on that behavior.
+func TestPreviewCommentTriggers_MatchesCreateForPlainReplyRoutesToAssignee(t *testing.T) {
 	if testHandler == nil || testPool == nil {
 		t.Skip("database not available")
 	}
 
 	waltID := createHandlerTestAgent(t, "Preview Inherit Walt", nil)
 	kimID := createHandlerTestAgent(t, "Preview Inherit Kim", nil)
-	issueID := createCommentTriggerPreviewIssue(t, "comment trigger preview inherits parent mention", "agent", waltID)
+	issueID := createCommentTriggerPreviewIssue(t, "comment trigger preview plain reply routes to assignee", "agent", waltID)
 
 	topLevelPreview := previewCommentTriggersForTest(t, issueID, CommentTriggerPreviewRequest{
 		Content: "hello from the root composer",
@@ -190,32 +194,32 @@ func TestPreviewCommentTriggers_MatchesCreateForInheritedParentMention(t *testin
 		Content:  replyContent,
 		ParentID: &replyParentID,
 	})
-	requirePreviewAgents(t, replyPreview, kimID)
-	if replyPreview.Agents[0].Source != string(commentTriggerSourceMentionAgent) {
-		t.Fatalf("reply preview source = %q, want %q", replyPreview.Agents[0].Source, commentTriggerSourceMentionAgent)
+	// Plain reply routes to the assignee (Walt), not the root-tagged Kim.
+	requirePreviewAgents(t, replyPreview, waltID)
+	if replyPreview.Agents[0].Source != string(commentTriggerSourceIssueAssignee) {
+		t.Fatalf("reply preview source = %q, want %q", replyPreview.Agents[0].Source, commentTriggerSourceIssueAssignee)
 	}
 
 	postCommentForTriggerPreviewTest(t, issueID, replyBody)
-	if got := countQueuedCommentTriggerTasks(t, issueID, kimID); got != 1 {
-		t.Fatalf("plain reply queued Kim tasks = %d, want 1", got)
+	if got := countQueuedCommentTriggerTasks(t, issueID, kimID); got != 0 {
+		t.Fatalf("plain reply queued Kim tasks = %d, want 0 (inheritance disabled, FIR-2553)", got)
 	}
-	if got := countQueuedCommentTriggerTasks(t, issueID, waltID); got != 0 {
-		t.Fatalf("plain reply queued Walt tasks = %d, want 0", got)
+	if got := countQueuedCommentTriggerTasks(t, issueID, waltID); got != 1 {
+		t.Fatalf("plain reply queued Walt tasks = %d, want 1 (assignee wakes)", got)
 	}
 }
 
-// TestPreviewCommentTriggers_SquadAssigneeReplyDoesNotDoubleTrigger is the
-// regression test for MUL-3744. Scenario:
+// TestPreviewCommentTriggers_SquadAssigneeReplyDoesNotDoubleTrigger.
+// CEREBRO-PATCH(reply-triggers-assignee): FIR-2553. Scenario:
 //
 //   - Issue is assigned to a SQUAD (leader L).
 //   - Member root comment @mentions another agent (Kim).
 //   - Member posts a plain reply with no mention of its own ("hello").
 //
-// Before the fix the trigger-preview returned BOTH L (squad leader, via the
-// assignee path because the reply itself had no routing mention) and Kim
-// (via parent-mention inheritance on the @mention path). After the fix the
-// leader stays out of the way — the @mention path is already routing the
-// reply to Kim, so only one agent fires.
+// Thread-root mention inheritance is disabled in our fork, so the plain reply
+// does NOT re-fire Kim. With no routing mention of its own, the reply routes to
+// the issue assignee — the squad — so only the squad LEADER (L) fires. Still no
+// double-trigger; the single agent is now the assignee, not the root mention.
 func TestPreviewCommentTriggers_SquadAssigneeReplyDoesNotDoubleTrigger(t *testing.T) {
 	if testHandler == nil || testPool == nil {
 		t.Skip("database not available")
@@ -245,8 +249,9 @@ func TestPreviewCommentTriggers_SquadAssigneeReplyDoesNotDoubleTrigger(t *testin
 	}
 
 	// Composer preview of a plain reply ("hello") to that root.
-	// Expected: only Kim fires — via parent-mention inheritance on the
-	// @mention path. The squad leader must NOT also be queued.
+	// Expected (FIR-2553): only the squad leader L fires — the plain reply has
+	// no routing mention of its own and inheritance is disabled, so it routes to
+	// the assignee squad. Kim must NOT be queued.
 	replyContent := "hello"
 	replyParentID := rootID
 	replyBody := map[string]any{
@@ -257,19 +262,19 @@ func TestPreviewCommentTriggers_SquadAssigneeReplyDoesNotDoubleTrigger(t *testin
 		Content:  replyContent,
 		ParentID: &replyParentID,
 	})
-	requirePreviewAgents(t, replyPreview, kimID)
-	if replyPreview.Agents[0].Source != string(commentTriggerSourceMentionAgent) {
-		t.Fatalf("reply preview source = %q, want %q (mention path), got %+v",
-			replyPreview.Agents[0].Source, commentTriggerSourceMentionAgent, replyPreview.Agents)
+	requirePreviewAgents(t, replyPreview, leaderID)
+	if replyPreview.Agents[0].Source != string(commentTriggerSourceIssueAssignee) {
+		t.Fatalf("reply preview source = %q, want %q (assignee path), got %+v",
+			replyPreview.Agents[0].Source, commentTriggerSourceIssueAssignee, replyPreview.Agents)
 	}
 
-	// Verify the create path matches the preview — leader stays at 0.
+	// Verify the create path matches the preview — leader fires, Kim stays at 0.
 	postCommentForTriggerPreviewTest(t, issueID, replyBody)
-	if got := countQueuedCommentTriggerTasks(t, issueID, leaderID); got != 0 {
-		t.Fatalf("after plain reply on squad issue: expected 0 leader tasks, got %d (MUL-3744)", got)
+	if got := countQueuedCommentTriggerTasks(t, issueID, leaderID); got != 1 {
+		t.Fatalf("after plain reply on squad issue: expected 1 leader task (assignee wakes, FIR-2553), got %d", got)
 	}
-	if got := countQueuedCommentTriggerTasks(t, issueID, kimID); got != 1 {
-		t.Fatalf("after plain reply on squad issue: expected 1 Kim task (inherited mention), got %d", got)
+	if got := countQueuedCommentTriggerTasks(t, issueID, kimID); got != 0 {
+		t.Fatalf("after plain reply on squad issue: expected 0 Kim tasks (inheritance disabled, FIR-2553), got %d", got)
 	}
 }
 

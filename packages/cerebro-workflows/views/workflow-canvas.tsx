@@ -172,7 +172,7 @@ function WorkflowCanvasInner({ workflowId, headerSlot, embedded }: WorkflowCanva
       if (workspace) navigation.push(`/${workspace.slug}/workflows`);
     },
     onError: (err: unknown) => {
-      setError(err instanceof Error ? err.message : "Kunne ikke gemme workflow");
+      setError(err instanceof Error ? err.message : "Could not save workflow");
     },
   });
 
@@ -192,7 +192,7 @@ function WorkflowCanvasInner({ workflowId, headerSlot, embedded }: WorkflowCanva
   if (!workspace) {
     return (
       <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-        Workspace context indlæses…
+        Loading workspace context…
       </div>
     );
   }
@@ -249,7 +249,7 @@ function WorkflowCanvasInner({ workflowId, headerSlot, embedded }: WorkflowCanva
             variant="outline"
             onClick={() => navigation.push(`/${workspace.slug}/workflows`)}
           >
-            Annullér
+            Cancel
           </Button>
           <Button
             type="button"
@@ -260,7 +260,7 @@ function WorkflowCanvasInner({ workflowId, headerSlot, embedded }: WorkflowCanva
             }}
             data-testid="canvas-save"
           >
-            {save.isPending ? "Gemmer…" : "Gem"}
+            {save.isPending ? "Saving…" : "Save"}
           </Button>
         </div>
       </aside>
@@ -269,14 +269,14 @@ function WorkflowCanvasInner({ workflowId, headerSlot, embedded }: WorkflowCanva
 
   if (embedded) return body;
 
-  const heading = workflowId ? "Rediger workflow" : "Nyt workflow";
+  const heading = workflowId ? "Edit workflow" : "New workflow";
   return (
     <div className="flex h-full flex-col">
       <PageHeader className="justify-between gap-3">
         <div className="flex min-w-0 flex-col">
           <h1 className="text-sm font-semibold">{heading}</h1>
           <p className="truncate text-[11px] text-muted-foreground">
-            Trigger → action på canvas. Klik en node for at redigere felter til højre.
+            Trigger → action on canvas. Click a node to edit its fields on the right.
           </p>
         </div>
         {headerSlot}
@@ -308,21 +308,21 @@ function Inspector({
   if (selected === "trigger") {
     return (
       <div className="flex flex-col gap-4">
-        <Field label="Workflow-navn">
+        <Field label="Workflow name">
           <Input
             value={form.name}
             onChange={(e) => setForm({ ...form, name: e.target.value })}
             required
-            placeholder='F.eks. "Når in_review → opret QA sub-issue"'
+            placeholder='E.g. "When in_review → create QA sub-issue"'
           />
         </Field>
-        <Field label="Aktiv">
+        <Field label="Enabled">
           <Switch
             checked={form.enabled}
             onCheckedChange={(v) => setForm({ ...form, enabled: v === true })}
           />
         </Field>
-        <Field label="Trigger-type">
+        <Field label="Trigger type">
           <NativeSelect
             value={form.triggerType}
             onChange={(e) =>
@@ -339,12 +339,12 @@ function Inspector({
         </Field>
         {form.triggerType === "status_changed" && (
           <>
-            <Field label="Fra status (tom = alle)">
+            <Field label="From status (empty = all)">
               <NativeSelect
                 value={form.fromStatus}
                 onChange={(e) => setForm({ ...form, fromStatus: e.target.value })}
               >
-                <option value="">(alle)</option>
+                <option value="">(all)</option>
                 {statuses.map((s) => (
                   <option key={s} value={s}>
                     {s}
@@ -352,7 +352,7 @@ function Inspector({
                 ))}
               </NativeSelect>
             </Field>
-            <Field label="Til status">
+            <Field label="To status">
               <NativeSelect
                 value={form.toStatus}
                 onChange={(e) => setForm({ ...form, toStatus: e.target.value })}
@@ -405,7 +405,7 @@ function Inspector({
 
   return (
     <div className="flex flex-col gap-4">
-      <Field label="Action-type">
+      <Field label="Action type">
         <NativeSelect
           value={form.actionType}
           onChange={(e) =>
@@ -422,7 +422,7 @@ function Inspector({
       </Field>
 
       {form.actionType === "set_status" && (
-        <Field label="Sæt status til">
+        <Field label="Set status to">
           <NativeSelect
             value={form.setStatus}
             onChange={(e) => setForm({ ...form, setStatus: e.target.value })}
@@ -438,22 +438,22 @@ function Inspector({
 
       {form.actionType === "create_sub_issue" && (
         <>
-          <Field label="Sub-issue titel">
+          <Field label="Sub-issue title">
             <Input
               value={form.subIssueTitle}
               onChange={(e) => setForm({ ...form, subIssueTitle: e.target.value })}
               required
-              placeholder="F.eks. QA: {{title}}"
+              placeholder="E.g. QA: {{title}}"
             />
           </Field>
-          <Field label="Beskrivelse (valgfri)">
+          <Field label="Description (optional)">
             <Textarea
               value={form.subIssueDescription}
               onChange={(e) => setForm({ ...form, subIssueDescription: e.target.value })}
               rows={3}
             />
           </Field>
-          <Field label="Assignee-type">
+          <Field label="Assignee type">
             <NativeSelect
               value={form.subIssueAssigneeType}
               onChange={(e) =>
@@ -467,14 +467,14 @@ function Inspector({
               <option value="member">Member</option>
             </NativeSelect>
           </Field>
-          <Field label="Assignee-ID (valgfri)">
+          <Field label="Assignee ID (optional)">
             <Input
               value={form.subIssueAssigneeId}
               onChange={(e) => setForm({ ...form, subIssueAssigneeId: e.target.value })}
               placeholder="<uuid>"
             />
           </Field>
-          <Field label="Label-IDs (komma-separeret, valgfri)">
+          <Field label="Label IDs (comma-separated, optional)">
             <Input
               value={form.subIssueLabelIDs}
               onChange={(e) => setForm({ ...form, subIssueLabelIDs: e.target.value })}
@@ -486,7 +486,7 @@ function Inspector({
 
       {form.actionType === "send_reminder" && (
         <>
-          <Field label="Modtagertype">
+          <Field label="Recipient type">
             <NativeSelect
               value={form.reminderRecipientType}
               onChange={(e) =>
@@ -500,7 +500,7 @@ function Inspector({
               <option value="agent">Agent</option>
             </NativeSelect>
           </Field>
-          <Field label="Modtager-ID">
+          <Field label="Recipient ID">
             <Input
               value={form.reminderRecipientId}
               onChange={(e) => setForm({ ...form, reminderRecipientId: e.target.value })}
@@ -508,7 +508,7 @@ function Inspector({
               placeholder="<uuid>"
             />
           </Field>
-          <Field label="Besked">
+          <Field label="Message">
             <Textarea
               value={form.reminderMessage}
               onChange={(e) => setForm({ ...form, reminderMessage: e.target.value })}
@@ -521,7 +521,7 @@ function Inspector({
 
       {form.actionType === "run_skill" && (
         <>
-          <Field label="Skill (navn)">
+          <Field label="Skill (name)">
             <Input
               value={form.skillName}
               onChange={(e) => setForm({ ...form, skillName: e.target.value })}
@@ -530,7 +530,7 @@ function Inspector({
               data-testid="canvas-skill-name"
             />
           </Field>
-          <Field label="Agent-ID">
+          <Field label="Agent ID">
             <Input
               value={form.skillAgentId}
               onChange={(e) => setForm({ ...form, skillAgentId: e.target.value })}
@@ -539,7 +539,7 @@ function Inspector({
               data-testid="canvas-skill-agent"
             />
           </Field>
-          <Field label="Skill-input (JSON)">
+          <Field label="Skill input (JSON)">
             <Textarea
               value={form.skillInputJSON}
               onChange={(e) => setForm({ ...form, skillInputJSON: e.target.value })}
@@ -560,17 +560,17 @@ function Inspector({
                 setForm({ ...form, commentTarget: e.target.value as "self" | "parent" })
               }
             >
-              <option value="self">Triggerede issue</option>
-              <option value="parent">Parent-issue</option>
+              <option value="self">Triggered issue</option>
+              <option value="parent">Parent issue</option>
             </NativeSelect>
           </Field>
-          <Field label="Indhold">
+          <Field label="Content">
             <Textarea
               value={form.commentContent}
               onChange={(e) => setForm({ ...form, commentContent: e.target.value })}
               rows={5}
               required
-              placeholder="Opdatering på {{title}}: ..."
+              placeholder="Update on {{title}}: ..."
             />
           </Field>
         </>
@@ -578,7 +578,7 @@ function Inspector({
 
       {form.actionType === "route_by_domain" && (
         <>
-          <Field label="Label-præfiks">
+          <Field label="Label prefix">
             <Input
               value={form.routeLabelPrefix}
               onChange={(e) =>
@@ -588,7 +588,7 @@ function Inspector({
               data-testid="canvas-route-prefix"
             />
           </Field>
-          <Field label="Default-domæne">
+          <Field label="Default domain">
             <NativeSelect
               value={form.routeDefaultDomain}
               onChange={(e) =>
@@ -607,16 +607,16 @@ function Inspector({
             </NativeSelect>
           </Field>
           <p className="text-[11px] text-muted-foreground">
-            Krav: workspacet har et label pr. domæne (fx{" "}
-            <code>domain:code</code>). Heuristikken klassificerer ud fra
-            titel + beskrivelse.
+            Requires: the workspace has a label per domain (e.g.{" "}
+            <code>domain:code</code>). The heuristic classifies based on the
+            title + description.
           </p>
         </>
       )}
 
       {form.actionType === "escalate_to_owner" && (
         <>
-          <Field label="Max alder (timer)">
+          <Field label="Max age (hours)">
             <Input
               type="number"
               min={1}
@@ -627,7 +627,7 @@ function Inspector({
               data-testid="canvas-escalate-max-age"
             />
           </Field>
-          <Field label="Custom template (valgfri)">
+          <Field label="Custom template (optional)">
             <Textarea
               value={form.escalateContentTemplate}
               onChange={(e) =>
@@ -639,9 +639,9 @@ function Inspector({
             />
           </Field>
           <p className="text-[11px] text-muted-foreground">
-            Walker parent-kæden op fra det stallede issue og poster på
-            første ancestor med assignee. Tomt template → standard
-            backlinket besked.
+            Walks the parent chain up from the stalled issue and posts on the
+            first ancestor with an assignee. An empty template → default
+            backlinked message.
           </p>
         </>
       )}

@@ -198,6 +198,27 @@ func TestService_PolicyEnforces_AuthorizeRead(t *testing.T) {
 	}
 }
 
+// TestService_PolicyEnforces_AuthorizeRead_AgentAllowIsLogged verifies the
+// FIR-2243 (B3) change: a successful read BY AN AGENT now leaves a 'read'/'allow'
+// audit row (member reads stay unlogged, asserted above), so "which key did this
+// agent use" is answerable.
+func TestService_PolicyEnforces_AuthorizeRead_AgentAllowIsLogged(t *testing.T) {
+	allow := &recordingChecker{allow: true}
+	svc := newPolicyServiceTest(t, allow)
+	row := seedCredential(t, svc)
+
+	if err := svc.AuthorizeRead(context.Background(), row.WorkspaceID, row.ID, Type(row.Type), "agent", credentialsTestUserID); err != nil {
+		t.Fatalf("AuthorizeRead (agent) under allow: %v", err)
+	}
+	got := fetchLatestAudit(t, row.ID)
+	if got.Action != string(ActionRead) || got.Result != AuditResultAllow {
+		t.Fatalf("expected agent read-allow audit row, got action=%q result=%q", got.Action, got.Result)
+	}
+	if got.ActorType != "agent" {
+		t.Fatalf("expected actor_type=agent, got %q", got.ActorType)
+	}
+}
+
 // TestService_PolicyDefault_IsDeny verifies that a freshly-constructed
 // Service without WithPolicy denies-by-default — the safe wiring posture
 // required by JEH-1197's acceptance criteria.

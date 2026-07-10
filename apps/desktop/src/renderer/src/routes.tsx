@@ -50,6 +50,7 @@ import { ApprovalsPage } from "@multica/cerebro-approvals";
 import { NotesPage } from "@multica/cerebro-notes/views";
 import { NoteCommentsPanel } from "@multica/cerebro-notes/views/note-comments-panel";
 import { NoteReferencesSection } from "@multica/cerebro-notes/views/note-references";
+import { NoteVersionsDialog } from "@multica/cerebro-notes/views/note-versions-dialog";
 import { ReminderOverview } from "@multica/cerebro-reminders/views";
 import { SearchPage } from "@multica/views/search";
 import { useT } from "@multica/views/i18n";
@@ -333,6 +334,14 @@ export const appRoutes: RouteObject[] = [
             handle: { title: "Noter" },
           },
           {
+            // FIR-2595: shareable per-note path so a copied note link opens the
+            // right note on desktop too. No URL bar here, but the Copy link
+            // button produces the web URL that lands on this route's web twin.
+            path: "notes/:noteId",
+            element: <NoteViewRoute />,
+            handle: { title: "Note" },
+          },
+          {
             path: "reminders",
             element: <ReminderOverview />,
             handle: { title: "Reminders" },
@@ -374,7 +383,25 @@ function DocumentsRoute() {
 
 function NotesRoute() {
   const [search] = useSearchParams();
-  return <NotesPage initialNoteId={search.get("note")} />;
+  return (
+    <NotesPage
+      initialNoteId={search.get("note")}
+      initialCommentId={search.get("comment")}
+    />
+  );
+}
+
+// FIR-2595: opens the Notes surface with a specific note selected from the path
+// param, so a shared `/{workspace}/notes/{noteId}` link resolves on desktop.
+function NoteViewRoute() {
+  const params = useParams<{ noteId: string }>();
+  const [search] = useSearchParams();
+  return (
+    <NotesPage
+      initialNoteId={params.noteId ?? null}
+      initialCommentId={search.get("comment")}
+    />
+  );
 }
 
 function DocumentNewRoute() {
@@ -415,6 +442,15 @@ function DocumentViewRoute() {
       )}
       renderReferences={({ artifactId }) => (
         <NoteReferencesSection noteId={artifactId} />
+      )}
+      // FIR-2697 — version history for a document reuses the note version dialog.
+      renderVersions={({ artifactId, open, onOpenChange, onRestored }) => (
+        <NoteVersionsDialog
+          noteId={artifactId}
+          open={open}
+          onOpenChange={onOpenChange}
+          onRestored={onRestored}
+        />
       )}
     />
   );

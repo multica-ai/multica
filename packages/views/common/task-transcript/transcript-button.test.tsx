@@ -26,7 +26,8 @@ vi.mock("../actor-avatar", () => ({
 // upstream test only exercises the dialog's message/error flow, so it stubs the
 // cerebro child the same way it stubs ActorAvatar — keeping the test isolated
 // from cerebro's workspace-scoped runtime. See docs/cerebro-patches.md.
-vi.mock("@multica/cerebro-sessions", () => ({
+vi.mock("@multica/cerebro-sessions", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@multica/cerebro-sessions")>()),
   RunPromptDisclosure: () => null,
 }));
 

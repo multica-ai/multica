@@ -1200,6 +1200,12 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	// CEREBRO-PATCH(comment-cost-link): FIR-39 pin agent comment to its task.
 	h.linkCommentToTaskIfAgent(r, comment.ID, issue.ID, issue.WorkspaceID, authorType)
 
+	// CEREBRO-PATCH(attachment-folder): FIR-2697 part 4 — an agent-authored
+	// document attached via a `mention://artifact/<id>` token in this comment
+	// must always have a folder. Best-effort, non-fatal; logic lives in
+	// artifact_attachment_folder_cerebro.go.
+	h.ensureAttachedArtifactsFiled(r, uuidToString(issue.WorkspaceID), req.Content)
+
 	// Link uploaded attachments to this comment.
 	if len(attachmentIDs) > 0 {
 		h.linkAttachmentsByIDs(r.Context(), comment.ID, issue.ID, attachmentIDs)
@@ -1288,7 +1294,8 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Trigger @mentioned agents: parse agent mentions and enqueue tasks for each.
-	// Pass parentComment so that replies inherit mentions from the thread root.
+	// Only the reply's OWN mentions route here — thread-root inheritance is
+	// disabled in our fork (CEREBRO-PATCH(reply-triggers-assignee), FIR-2553).
 	// CEREBRO-PATCH(mention-trigger-gate-hook): JEH-1917 — pass r to the relocated gate.
 	h.enqueueMentionedAgentTasks(r.Context(), r, issue, comment, parentComment, authorType, authorID, mentionDelegation, mentionDelegationErr, privateAutopilotOwnerID, suppressedAgentIDs)
 
@@ -1715,55 +1722,17 @@ func (h *Handler) commentMentionsOthersButNotAssignee(content string, issue db.I
 	return true // Others mentioned but not assignee — suppress trigger
 }
 
-// isReplyToMemberThread returns true if the comment is a reply in a thread
-// started by a member and does NOT @mention the issue's assignee agent.
-// When a member replies in a member-started thread, they are most likely
-// continuing a human conversation — not requesting work from the assigned agent.
-// Replying to an agent-started thread, or explicitly @mentioning the assignee
-// in the reply, still triggers on_comment as expected.
-// If the parent (thread root) itself @mentions the assignee, the thread is
-// considered a conversation with the agent, so replies are allowed to trigger.
-// If the assigned agent has already replied in the thread, the member is
-// conversing with the agent, so replies are allowed to trigger.
+// isReplyToMemberThread — CEREBRO-PATCH(reply-triggers-assignee): FIR-2553.
+// Upstream suppressed the issue assignee's on_comment trigger whenever a member
+// replied in a member-started thread that didn't @mention the assignee, and a
+// sibling path (shouldInheritParentMentions) instead re-woke whichever agent was
+// tagged at the thread ROOT. On an issue assigned to agent A but whose thread
+// root tagged agent B, a plain reply woke B and skipped A — the reported bug.
+// Our fork routes every plain reply to the issue assignee; to involve someone
+// else you @mention them. We therefore never suppress on this path (return
+// false always). See docs/cerebro-patches.md.
 func (h *Handler) isReplyToMemberThread(ctx context.Context, parent *db.Comment, content string, issue db.Issue) bool {
-	if parent == nil {
-		return false // Not a reply — normal top-level comment
-	}
-	if parent.AuthorType != "member" {
-		return false // Thread started by an agent — allow trigger
-	}
-	// Thread was started by a member. Suppress on_comment unless the reply
-	// or the parent explicitly @mentions the assignee agent, or the agent
-	// has already participated in this thread.
-	if !issue.AssigneeID.Valid {
-		return true // No assignee to mention
-	}
-	assigneeID := uuidToString(issue.AssigneeID)
-	// Check current comment mentions.
-	for _, m := range util.ParseMentions(content) {
-		if m.ID == assigneeID {
-			return false // Assignee explicitly mentioned in reply — allow trigger
-		}
-	}
-	// Check parent (thread root) mentions — if the thread was started by
-	// mentioning the assignee, replies continue that conversation.
-	for _, m := range util.ParseMentions(parent.Content) {
-		if m.ID == assigneeID {
-			return false // Assignee mentioned in thread root — allow trigger
-		}
-	}
-	// Check if the assigned agent has already replied in this thread —
-	// if so, the member is continuing a conversation with the agent.
-	if h.Queries != nil {
-		hasReplied, err := h.Queries.HasAgentRepliedInThread(ctx, db.HasAgentRepliedInThreadParams{
-			ParentID: parent.ID,
-			AgentID:  issue.AssigneeID,
-		})
-		if err == nil && hasReplied {
-			return false // Agent participated in thread — allow trigger
-		}
-	}
-	return true // Reply to member thread without agent participation — suppress
+	return false
 }
 
 // requestPrivateAssigneeRunOnComment handles the on_comment path where a member
@@ -1819,17 +1788,15 @@ func (h *Handler) requestPrivateAssigneeRunOnComment(ctx context.Context, issue 
 //     reviewer agent). Subsequent member follow-ups in the same thread are
 //     directed at the assignee, not at the delegated agent — inheriting
 //     would re-trigger the delegated agent on every plain reply.
+//
+// shouldInheritParentMentions — CEREBRO-PATCH(reply-triggers-assignee): FIR-2553.
+// Upstream let a plain reply inherit the thread-root's @mentions, which re-woke
+// whichever agent was tagged at the root even when the issue was assigned to a
+// different agent. Our fork disables inheritance: a plain reply routes to the
+// issue assignee (see isReplyToMemberThread), and to involve anyone else you
+// @mention them explicitly. Returns false always. See docs/cerebro-patches.md.
 func shouldInheritParentMentions(parentComment *db.Comment, replyMentions []util.Mention, replyAuthorType string) bool {
-	if parentComment == nil {
-		return false
-	}
-	if len(replyMentions) > 0 {
-		return false
-	}
-	if replyAuthorType == "agent" {
-		return false
-	}
-	return parentComment.AuthorType == "member"
+	return false
 }
 
 func (h *Handler) computeMentionedAgentCommentTriggers(ctx context.Context, issue db.Issue, content string, parentComment *db.Comment, authorType, authorID string, opts commentTriggerComputeOptions) []commentAgentTrigger {

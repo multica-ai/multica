@@ -5,6 +5,8 @@ import (
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgtype"
+
+	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
 )
 
 // TestDeniedConnectionTools_AgentDenyProducesToken seeds an MCP connection with
@@ -65,7 +67,7 @@ func TestDeniedConnectionTools_AgentDenyProducesToken(t *testing.T) {
 
 // TestDeniedConnectionTools_ConnectionWideDenyScopedPerRuntimeAndAgent is the
 // TECH-3180 regression. Before the fix, denying the WHOLE connection (the
-// connection-wide row, resource_pattern '') at the runtime or agent layer was
+// connection-wide row, resource_pattern ”) at the runtime or agent layer was
 // display-only: it produced no --disallowedTools tokens, so the tools stayed
 // callable. The connection-wide chain must now cascade to every tool on the
 // connection, and the deny must be scoped to exactly the runtime/agent it was set
@@ -512,6 +514,69 @@ func TestConnectionToolEffective(t *testing.T) {
 // per-connection default_access (allow/ask/deny); per-actor tool-policy rows
 // override it with precedence Deny > Allow > Ask. This is NOT the tighten-only
 // chain (which could never lift a Deny default with an Allow grant — FIR-1771).
+// TestConnectionToolVerdicts_OnBehalfOfTightens proves the on_behalf_of layer
+// (FIR-2441 — member as a full actor level) is honoured, tighten-only, on the mcp
+// connection-tool verdict path: a delegated member denied a tool has it withheld
+// across the agents they drive, and with no delegation the row does not apply.
+func TestConnectionToolVerdicts_OnBehalfOfTightens(t *testing.T) {
+	s := newTPStore(t)
+	clearAll(t, s)
+	clearCaps(t, s)
+	ctx := context.Background()
+
+	agent := uuidByte(41)
+	member := uuidByte(42)
+	const conn = "cs-mcp-obo"
+	const toolKey = "connection:" + conn
+
+	if _, err := s.pool.Exec(ctx, `
+		INSERT INTO workspace_connection
+		  (workspace_id, name, display_name, type, url, tools, enabled)
+		VALUES ($1, $2, $3, 'mcp_http', 'http://internal:3000',
+		        '[{"name":"send_refund"}]'::jsonb, true)
+	`, tpTestWorkspaceID, conn, "OBO MCP"); err != nil {
+		if isUndefinedTable(err) {
+			t.Skip("workspace_connection table not present; skipping on_behalf_of test")
+		}
+		t.Fatalf("seed connection: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = s.pool.Exec(context.Background(),
+			`DELETE FROM workspace_connection WHERE workspace_id = $1`, tpTestWorkspaceID)
+	})
+
+	// The delegated member is denied the tool at the on_behalf_of layer.
+	if _, err := s.Set(ctx, SetParams{
+		WorkspaceID: tpTestWorkspaceID, ToolKey: toolKey, Layer: LayerOnBehalfOf,
+		SubjectID: member, Setting: SettingDeny, ResourcePattern: "send_refund",
+	}); err != nil {
+		t.Fatalf("set on_behalf_of deny: %v", err)
+	}
+
+	verdict := func(in TableQuery) Setting {
+		vs, err := s.ConnectionToolVerdicts(ctx, in)
+		if err != nil {
+			t.Fatalf("verdicts: %v", err)
+		}
+		for _, v := range vs {
+			if v.Connection == conn && v.Tool == "send_refund" {
+				return v.Setting
+			}
+		}
+		return SettingAllow // absent == allow base
+	}
+
+	var zero pgtype.UUID
+	// With the member driving the run (on_behalf_of), the tool is denied.
+	if got := verdict(TableQuery{WorkspaceID: tpTestWorkspaceID, AgentID: agent, OnBehalfOfID: member}); got != SettingDeny {
+		t.Fatalf("on_behalf_of Deny must tighten the tool to Deny, got %s", got)
+	}
+	// Without the delegated member, the on_behalf_of row does not apply.
+	if got := verdict(TableQuery{WorkspaceID: tpTestWorkspaceID, AgentID: agent, OnBehalfOfID: zero}); got != SettingAllow {
+		t.Fatalf("no delegation must leave the tool on the allow base, got %s", got)
+	}
+}
+
 func TestConnectionEndpointEffective(t *testing.T) {
 	s := newTPStore(t)
 	clearAll(t, s)
@@ -558,9 +623,9 @@ func TestConnectionEndpointEffective(t *testing.T) {
 	}
 	// Per-actor rows for "agent" (like Sara/Mia). Authored at the endpoint level so
 	// the test does not depend on a cerebro_capability wide row. "other" has none.
-	mustSet(LayerAgent, agent, "GET /secrets", SettingAllow)  // explicit grant
-	mustSet(LayerAgent, agent, "POST /secrets", SettingDeny)  // explicit deny wins
-	mustSet(LayerAgent, agent, "GET /status", SettingAsk)     // explicit ask gates
+	mustSet(LayerAgent, agent, "GET /secrets", SettingAllow) // explicit grant
+	mustSet(LayerAgent, agent, "POST /secrets", SettingDeny) // explicit deny wins
+	mustSet(LayerAgent, agent, "GET /status", SettingAsk)    // explicit ask gates
 
 	var zero pgtype.UUID
 	type tc struct {
@@ -572,7 +637,7 @@ func TestConnectionEndpointEffective(t *testing.T) {
 	}
 	run := func(label string, cs []tc) {
 		for _, c := range cs {
-			got, gotConn, err := s.ConnectionEndpointEffective(ctx, tpTestWorkspaceID, zero, c.ag, c.user, conn, c.method, c.path)
+			got, gotConn, err := s.ConnectionEndpointEffective(ctx, tpTestWorkspaceID, zero, c.ag, c.user, zero, conn, c.method, c.path)
 			if err != nil {
 				t.Fatalf("%s/%s: %v", label, c.name, err)
 			}
@@ -619,15 +684,218 @@ func TestConnectionEndpointEffective(t *testing.T) {
 		tpTestWorkspaceID, `[{"path":"/secrets","methods":["GET","POST"]},{"path":"/status","methods":["GET","POST"]}]`, conn); err != nil {
 		t.Fatalf("widen endpoints: %v", err)
 	}
-	if got, _, err := s.ConnectionEndpointEffective(ctx, tpTestWorkspaceID, zero, other, owner, conn, "POST", "/status"); err != nil {
+	if got, _, err := s.ConnectionEndpointEffective(ctx, tpTestWorkspaceID, zero, other, owner, zero, conn, "POST", "/status"); err != nil {
 		t.Fatalf("user-grant: %v", err)
 	} else if got != SettingAllow {
 		t.Fatalf("user-grant: got %s want allow", got)
 	}
 	mustSet(LayerWorkspace, tpTestWorkspaceID, "POST /status", SettingDeny)
-	if got, _, err := s.ConnectionEndpointEffective(ctx, tpTestWorkspaceID, zero, other, owner, conn, "POST", "/status"); err != nil {
+	if got, _, err := s.ConnectionEndpointEffective(ctx, tpTestWorkspaceID, zero, other, owner, zero, conn, "POST", "/status"); err != nil {
 		t.Fatalf("workspace-deny: %v", err)
 	} else if got != SettingDeny {
 		t.Fatalf("workspace-deny: got %s want deny (deny must win over a grant)", got)
+	}
+
+	// Lone #2 (FIR-2441): the conflict rule is Deny > Allow > Ask > default_access
+	// evaluated across the WHOLE scope stack, NOT "most-specific scope wins". On a
+	// secrets connection (default deny) the agent has an explicit agent-layer Allow
+	// on GET /secrets (seeded above) — so it is admitted today. A workspace-layer
+	// Deny on that same endpoint must CAP the agent-Allow: a builder who mistakes
+	// the rule for "agent is the most specific scope, so agent-Allow wins" would
+	// re-open the secrets box. This asserts the workspace-Deny wins.
+	if got, _, err := s.ConnectionEndpointEffective(ctx, tpTestWorkspaceID, zero, agent, zero, zero, conn, "GET", "/secrets"); err != nil {
+		t.Fatalf("agent-allow baseline: %v", err)
+	} else if got != SettingAllow {
+		t.Fatalf("agent-allow baseline: got %s want allow (agent-layer grant should admit before the cap)", got)
+	}
+	mustSet(LayerWorkspace, tpTestWorkspaceID, "GET /secrets", SettingDeny)
+	if got, _, err := s.ConnectionEndpointEffective(ctx, tpTestWorkspaceID, zero, agent, zero, zero, conn, "GET", "/secrets"); err != nil {
+		t.Fatalf("workspace-deny beats agent-allow: %v", err)
+	} else if got != SettingDeny {
+		t.Fatalf("workspace-deny beats agent-allow: got %s want deny (workspace-Deny must cap an agent-Allow on a secrets connection)", got)
+	}
+}
+
+// TestConnectionEndpointEffective_DisableCannotBeOverridden pins the FIR-2351
+// follow-up product decision (2026-07-06) on the connection grant path: with
+// cerebro_member_override ON, an ordinary workspace Deny on a connection
+// endpoint is openable by a per-actor Allow (see the "Lone #2" case above run
+// with the flag off, and resolveOpenable's agent-opening exception when it is
+// on) — but a workspace Disable must NOT be openable the same way, on OR off.
+func TestConnectionEndpointEffective_DisableCannotBeOverridden(t *testing.T) {
+	s := newTPStore(t)
+	clearAll(t, s)
+	clearCaps(t, s)
+	ctx := context.Background()
+
+	agent := uuidByte(34)
+	const conn = "infisical-admin"
+	const toolKey = "connection:" + conn
+
+	if _, err := s.pool.Exec(ctx, `
+		INSERT INTO workspace_connection
+		  (workspace_id, name, display_name, type, url, endpoint_permissions, enabled)
+		VALUES ($1, $2, $3, 'api', 'http://internal:8080',
+		        '[{"path":"/secrets","methods":["GET"]}]'::jsonb, true)
+	`, tpTestWorkspaceID, conn, "Infisical (admin)"); err != nil {
+		if isUndefinedTable(err) {
+			t.Skip("workspace_connection table not present; skipping endpoint resolver test")
+		}
+		t.Fatalf("seed connection: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = s.pool.Exec(context.Background(),
+			`DELETE FROM workspace_connection WHERE workspace_id = $1`, tpTestWorkspaceID)
+		_ = s.q.DeleteCerebroWorkspaceFeatureFlag(context.Background(), cerebrodb.DeleteCerebroWorkspaceFeatureFlagParams{
+			WorkspaceID: tpTestWorkspaceID, FlagKey: FlagMemberOverride,
+		})
+	})
+
+	// Agent holds an explicit per-endpoint Allow — this is the row that opens an
+	// ordinary workspace Deny under member-override.
+	if _, err := s.Set(ctx, SetParams{
+		WorkspaceID: tpTestWorkspaceID, ToolKey: toolKey, Layer: LayerAgent,
+		SubjectID: agent, Setting: SettingAllow, ResourcePattern: "GET /secrets",
+	}); err != nil {
+		t.Fatalf("set agent allow: %v", err)
+	}
+	if _, err := s.Set(ctx, SetParams{
+		WorkspaceID: tpTestWorkspaceID, ToolKey: toolKey, Layer: LayerWorkspace,
+		SubjectID: tpTestWorkspaceID, Setting: SettingDisable, ResourcePattern: "GET /secrets",
+	}); err != nil {
+		t.Fatalf("set workspace disable: %v", err)
+	}
+
+	var zero pgtype.UUID
+
+	// Flag OFF: Disable must still deny (a plain Deny already would too, so this
+	// alone isn't the interesting case, but it must not regress).
+	if got, _, err := s.ConnectionEndpointEffective(ctx, tpTestWorkspaceID, zero, agent, zero, zero, conn, "GET", "/secrets"); err != nil {
+		t.Fatalf("flag off: %v", err)
+	} else if got != SettingDeny {
+		t.Fatalf("flag off: got %s want deny", got)
+	}
+
+	// Flag ON: an ordinary workspace Deny here WOULD be opened by the agent's
+	// Allow (that is the whole point of FIR-2351). Disable must refuse to open.
+	if err := s.q.UpsertCerebroWorkspaceFeatureFlag(ctx, cerebrodb.UpsertCerebroWorkspaceFeatureFlagParams{
+		WorkspaceID: tpTestWorkspaceID, FlagKey: FlagMemberOverride, Enabled: true,
+	}); err != nil {
+		t.Fatalf("enable member-override flag: %v", err)
+	}
+	if got, _, err := s.ConnectionEndpointEffective(ctx, tpTestWorkspaceID, zero, agent, zero, zero, conn, "GET", "/secrets"); err != nil {
+		t.Fatalf("flag on: %v", err)
+	} else if got != SettingDeny {
+		t.Fatalf("flag on: agent Allow must NOT open a workspace Disable, got %s want deny", got)
+	}
+}
+
+// TestConnectionEndpointEffective_OnBehalfOfDenyOnly proves the on_behalf_of layer
+// (FIR-2441 — member as a full actor level) on the API-endpoint gate is DENY-ONLY:
+// on this default-deny GRANT path a member Deny revokes an otherwise-granted call,
+// but a member Allow can never grant one — so delegation can only narrow access to
+// the secrets box, never open it to whoever drives the agent.
+func TestConnectionEndpointEffective_OnBehalfOfDenyOnly(t *testing.T) {
+	s := newTPStore(t)
+	clearAll(t, s)
+	clearCaps(t, s)
+	ctx := context.Background()
+
+	agent := uuidByte(51)
+	member := uuidByte(52)
+	const conn = "infisical-admin-obo"
+	const toolKey = "connection:" + conn
+
+	// Default 'deny' secrets connection with two GET endpoints.
+	if _, err := s.pool.Exec(ctx, `
+		INSERT INTO workspace_connection
+		  (workspace_id, name, display_name, type, url, endpoint_permissions, default_access, enabled)
+		VALUES ($1, $2, $3, 'api', 'http://internal:8080',
+		        '[{"path":"/secrets","methods":["GET"]},{"path":"/status","methods":["GET"]}]'::jsonb, 'deny', true)
+	`, tpTestWorkspaceID, conn, "Infisical (admin) OBO"); err != nil {
+		if isUndefinedTable(err) {
+			t.Skip("workspace_connection table not present; skipping on_behalf_of endpoint test")
+		}
+		t.Fatalf("seed connection: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = s.pool.Exec(context.Background(),
+			`DELETE FROM workspace_connection WHERE workspace_id = $1`, tpTestWorkspaceID)
+	})
+
+	mustSet := func(layer Layer, subj pgtype.UUID, pattern string, setting Setting) {
+		if _, err := s.Set(ctx, SetParams{
+			WorkspaceID: tpTestWorkspaceID, ToolKey: toolKey, Layer: layer,
+			SubjectID: subj, Setting: setting, ResourcePattern: pattern,
+		}); err != nil {
+			t.Fatalf("set %s %q=%s: %v", layer, pattern, setting, err)
+		}
+	}
+	// The agent is granted GET /secrets at its own layer (like Sara/Mia).
+	mustSet(LayerAgent, agent, "GET /secrets", SettingAllow)
+
+	var zero pgtype.UUID
+	eff := func(onBehalfOf pgtype.UUID, method, path string) Setting {
+		got, _, err := s.ConnectionEndpointEffective(ctx, tpTestWorkspaceID, zero, agent, zero, onBehalfOf, conn, method, path)
+		if err != nil {
+			t.Fatalf("resolve %s %s: %v", method, path, err)
+		}
+		return got
+	}
+
+	// Baseline: no delegation → the agent grant admits GET /secrets.
+	if got := eff(zero, "GET", "/secrets"); got != SettingAllow {
+		t.Fatalf("no delegation: got %s want allow (agent grant should admit)", got)
+	}
+
+	// A member Deny at the on_behalf_of layer revokes the granted call.
+	mustSet(LayerOnBehalfOf, member, "GET /secrets", SettingDeny)
+	if got := eff(member, "GET", "/secrets"); got != SettingDeny {
+		t.Fatalf("on_behalf_of Deny must revoke the agent grant, got %s want deny", got)
+	}
+	// The same member driving a different agent-granted call is unaffected where no
+	// on_behalf_of Deny exists — the Deny is scoped to the endpoint it was set on.
+	if got := eff(member, "GET", "/status"); got != SettingDeny {
+		// /status was never granted (default deny), so it stays deny regardless — this
+		// asserts the on_behalf_of layer did not accidentally GRANT it.
+		t.Fatalf("ungranted endpoint must stay deny under delegation, got %s want deny", got)
+	}
+
+	// A member ALLOW at the on_behalf_of layer must NOT grant a call on the
+	// default-deny connection: Deny-only means Allow/Ask are ignored on this gate.
+	mustSet(LayerOnBehalfOf, member, "GET /status", SettingAllow)
+	if got := eff(member, "GET", "/status"); got != SettingDeny {
+		t.Fatalf("on_behalf_of Allow must NOT grant on a default-deny connection, got %s want deny", got)
+	}
+}
+
+// TestEndpointMethodTools_CarriesSummary asserts the OpenAPI summary captured on
+// an endpoint permission flows onto the synthetic per-method tool as its
+// Description, and that connectionToolTitle prefers it for api rows only.
+func TestEndpointMethodTools_CarriesSummary(t *testing.T) {
+	raw := []byte(`[
+		{"path": "/data-sources/9be2/execute", "methods": ["POST"], "summary": "Execute data source: Orders"},
+		{"path": "/manifest", "methods": ["GET"]}
+	]`)
+	tools := endpointMethodTools(raw)
+	if len(tools) != 2 {
+		t.Fatalf("expected 2 tools, got %d: %+v", len(tools), tools)
+	}
+	if tools[0].Description != "Execute data source: Orders" {
+		t.Errorf("expected summary on first tool, got %q", tools[0].Description)
+	}
+	if tools[1].Description != "" {
+		t.Errorf("expected empty description on unlabeled tool, got %q", tools[1].Description)
+	}
+	if got := connectionToolTitle("api", tools[0]); got != "Execute data source: Orders" {
+		t.Errorf("api title should be the summary, got %q", got)
+	}
+	if got := connectionToolTitle("api", tools[1]); got != "GET /manifest" {
+		t.Errorf("api title without summary should be the name, got %q", got)
+	}
+	// MCP tools keep their name even when a description exists.
+	mcpTool := connectionTool{Name: "get_secrets", Description: "Long prose description."}
+	if got := connectionToolTitle("mcp_http", mcpTool); got != "get_secrets" {
+		t.Errorf("mcp title should stay the tool name, got %q", got)
 	}
 }

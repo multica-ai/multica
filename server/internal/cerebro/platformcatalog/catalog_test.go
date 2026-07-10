@@ -179,3 +179,43 @@ func TestEveryMutatingRouteIsClassified(t *testing.T) {
 			len(missing), strings.Join(missing, "\n  "))
 	}
 }
+
+// TestDelegatedOverrideCopyStatesOwnerAdminExemption pins the copy clarified in
+// FIR-2351 (PR 2077), which shipped under the no-test-needed escape hatch — this
+// is the test that should have accompanied it. Both delegated-override
+// capabilities must state BOTH halves of the rule, in both app languages: a
+// capability holder can never target their own access row, and workspace
+// owners/admins are exempt (they can always change anyone's access, including
+// their own). Dropping either half re-creates the ambiguity that made an owner
+// believe they could not change their own permissions.
+func TestDelegatedOverrideCopyStatesOwnerAdminExemption(t *testing.T) {
+	byKey := map[string]Capability{}
+	for _, c := range All() {
+		byKey[c.Key] = c
+	}
+	for _, key := range []string{"manage_group_overrides", "manage_workspace_overrides"} {
+		c, ok := byKey[key]
+		if !ok {
+			t.Fatalf("capability %q missing from catalog", key)
+		}
+		requireCopyPhrases(t, key, "Description", c.Description,
+			"Can never be used on your own access",
+			"owners and admins are not limited by this",
+			"including their own",
+		)
+		requireCopyPhrases(t, key, "DescriptionZh", c.DescriptionZh,
+			"永远不能用于你自己的访问权限",
+			"工作区所有者和管理员不受此限制",
+			"包括自己的",
+		)
+	}
+}
+
+func requireCopyPhrases(t *testing.T, key, field, text string, phrases ...string) {
+	t.Helper()
+	for _, p := range phrases {
+		if !strings.Contains(text, p) {
+			t.Errorf("capability %q: %s no longer states %q — the copy must keep both the self-target ban and the owner/admin exemption (FIR-2351)", key, field, p)
+		}
+	}
+}

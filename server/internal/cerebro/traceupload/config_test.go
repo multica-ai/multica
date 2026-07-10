@@ -19,8 +19,26 @@ func TestConfigFromEnvDefaultsOff(t *testing.T) {
 	if c.MaxConcurrentPerWorkspace != DefaultMaxConcurrentPerWorkspace {
 		t.Errorf("concurrency=%d", c.MaxConcurrentPerWorkspace)
 	}
+	if c.MaxAttempts != DefaultMaxAttempts {
+		t.Errorf("MaxAttempts=%d want default %d", c.MaxAttempts, DefaultMaxAttempts)
+	}
+	if len(c.Backoff) != len(DefaultBackoff) || c.Backoff[len(c.Backoff)-1] != time.Hour {
+		t.Errorf("Backoff not the progressive default: %v", c.Backoff)
+	}
 	if c.StateDir != filepath.Join("/ws/root", ".trace-upload") {
 		t.Errorf("StateDir=%q", c.StateDir)
+	}
+}
+
+func TestConfigFromEnvMaxAttemptsOverride(t *testing.T) {
+	t.Setenv(EnvMaxAttempts, "3")
+	if c := ConfigFromEnv("/ws"); c.MaxAttempts != 3 {
+		t.Errorf("MaxAttempts override not applied: %d", c.MaxAttempts)
+	}
+	// Explicit 0 disables the cap (MaxAge still applies).
+	t.Setenv(EnvMaxAttempts, "0")
+	if c := ConfigFromEnv("/ws"); c.MaxAttempts != 0 {
+		t.Errorf("MaxAttempts=0 (disabled) not honored: %d", c.MaxAttempts)
 	}
 }
 

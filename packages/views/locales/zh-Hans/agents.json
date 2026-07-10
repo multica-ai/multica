@@ -90,6 +90,9 @@
     "runs": "运行次数",
     "last_active": "最近活跃",
     "model": "模型",
+    "_comment_fir2669": "CEREBRO-PATCH(agent-columns-account-thinking-i18n): FIR-2669 Account + Thinking columns",
+    "account": "账户",
+    "thinking": "思考级别",
     "created": "创建时间",
     "owner": "Owner"
   },
@@ -243,6 +246,8 @@
     "_comment_tools": "CEREBRO-PATCH(agent-tools-tab): JEH-1290 W8 — tools tab label",
     "capabilities": "能力",
     "_comment_capabilities": "CEREBRO-PATCH(agent-capabilities-tab): TECH-3642 — capabilities tab label",
+    "memory": "记忆",
+    "_comment_memory": "CEREBRO-PATCH(agent-memory-tab): FIR-1794 — per-agent memory read/write toggle tab label",
     "context": "上下文",
     "_comment_context": "CEREBRO-PATCH(agent-office-tab): FIR-1775 — Agent Office (context versioning + governance) tab label",
     "mcp_config": "MCP",
@@ -308,7 +313,9 @@
     "common": {
       "save": "保存",
       "add": "添加",
-      "unsaved_changes": "未保存的修改"
+      "unsaved_changes": "未保存的修改",
+      "propose_change": "提议更改",
+      "discard": "放弃"
     },
     "instructions": {
       "intro": "定义这个智能体的身份和工作风格。会注入到每个 task 的上下文。支持 Markdown。",
@@ -399,7 +406,9 @@
       "saved_toast": "已保存 MCP 配置",
       "save_failed_toast": "保存 MCP 配置失败",
       "redacted_title": "已配置 —— 当前账号无权查看",
-      "redacted_hint": "只有智能体所有者或工作区管理员可以读取该配置。"
+      "redacted_hint": "只有智能体所有者或工作区管理员可以读取该配置。",
+      "_comment_agent_office_versioned": "CEREBRO-PATCH(agent-office-skills-mcp-versioned): FIR-1775 2b — propose-flow strings for Skills/MCP tabs",
+      "versioned_note": "更改会被版本化。请在下方编辑，然后提议更改以供所有者审核。"
     },
     "skills": {
       "intro": "分配给该智能体的工作区 skill。本地运行时 skill 会自动可用。",
@@ -418,7 +427,10 @@
       "add_dialog_confirm_other": "添加 {{count}} 个 skill",
       "add_dialog_cancel": "取消",
       "add_failed_toast": "添加 skill 失败",
-      "add_dialog_confirm_one": "Add {{count}} skill"
+      "add_dialog_confirm_one": "Add {{count}} skill",
+      "versioned_note": "更改会被版本化。请在下方添加或移除，然后提议更改以供所有者审核。",
+      "added_draft_badge": "已添加（草稿）",
+      "draft_hint": "未保存的草稿 — 提议更改以提交审核。"
     },
     "integrations": {
       "intro": "把这个智能体连接到外部聊天平台，让大家在自己熟悉的工具里直接与它协作。",
@@ -537,6 +549,7 @@
     "none": "30 天内无活动"
   },
   "toolbar": {
+    "search_placeholder": "搜索智能体…",
     "result_count_title": "当前结果 / 范围内全部",
     "filter_label": "筛选",
     "filter_active_count_one": "{{count}} 项筛选",

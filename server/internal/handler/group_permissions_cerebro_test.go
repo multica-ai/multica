@@ -21,12 +21,15 @@ import (
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgtype"
+
+	"github.com/multica-ai/multica/server/internal/util"
 )
 
 type stubGroupPermissions struct {
 	resolve     func(ctx context.Context, ws, user pgtype.UUID) ([]pgtype.UUID, error)
 	canRT       func(ctx context.Context, viewer GroupPermissionsViewer, ws pgtype.UUID) (bool, error)
 	canAG       func(ctx context.Context, viewer GroupPermissionsViewer, ws pgtype.UUID) (bool, error)
+	canMem      func(ctx context.Context, viewer GroupPermissionsViewer, ws pgtype.UUID) (bool, error)
 	canUseR     func(ctx context.Context, viewer GroupPermissionsViewer, rt pgtype.UUID) (bool, error)
 	canUseA     func(ctx context.Context, viewer GroupPermissionsViewer, ag pgtype.UUID) (bool, error)
 	canSeeProj  func(ctx context.Context, viewer GroupPermissionsViewer, pr pgtype.UUID) (bool, error)
@@ -55,6 +58,13 @@ func (s *stubGroupPermissions) CanCreateAgent(ctx context.Context, viewer GroupP
 		return false, nil
 	}
 	return s.canAG(ctx, viewer, ws)
+}
+
+func (s *stubGroupPermissions) CanCreateMemory(ctx context.Context, viewer GroupPermissionsViewer, ws pgtype.UUID) (bool, error) {
+	if s.canMem == nil {
+		return false, nil
+	}
+	return s.canMem(ctx, viewer, ws)
 }
 
 func (s *stubGroupPermissions) CanUseRuntime(ctx context.Context, viewer GroupPermissionsViewer, rt pgtype.UUID) (bool, error) {
@@ -260,6 +270,96 @@ func TestRequireToolPolicyWritePolicy_RoutesPerKey(t *testing.T) {
 			t.Fatalf("non-credential key: expected a block status, got %d", w.Code)
 		}
 	})
+
+	// CEREBRO-PATCH(delegated-override-grant): FIR-2351 — a LayerUser write with a
+	// valid subject_id takes the new delegated-override branch, which fails open
+	// with nil CerebroQueries (same fail-open contract as every other gate here).
+	t.Run("LayerUser key with valid subject fails open to next", func(t *testing.T) {
+		called := false
+		next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { called = true })
+		body := `{"tool_key":"firtal_registry","layer":"user","subject_id":"11111111-1111-1111-1111-111111111111"}`
+		r := httptest.NewRequest(http.MethodPut, "/api/workspaces/x/tool-policy", strings.NewReader(body))
+		w := httptest.NewRecorder()
+		h.RequireToolPolicyWritePolicy("id")(next).ServeHTTP(w, r)
+		if !called {
+			t.Fatalf("LayerUser + valid subject: expected next to run (nil-queries fail open), status=%d body=%q", w.Code, w.Body.String())
+		}
+	})
+
+	// Group- and Agent-layer writes route to the Manage-permissions branch
+	// (FIR-2351 follow-up, product decision 2026-07-06), which fails open with
+	// nil CerebroQueries — the same fail-open contract as every other
+	// capability gate in this file.
+	t.Run("LayerGroup key fails open to next via Manage permissions branch", func(t *testing.T) {
+		called := false
+		next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { called = true })
+		body := `{"tool_key":"firtal_registry","layer":"group","subject_id":"11111111-1111-1111-1111-111111111111"}`
+		r := httptest.NewRequest(http.MethodPut, "/api/workspaces/x/tool-policy", strings.NewReader(body))
+		w := httptest.NewRecorder()
+		h.RequireToolPolicyWritePolicy("id")(next).ServeHTTP(w, r)
+		if !called {
+			t.Fatalf("LayerGroup: expected next to run (nil-queries fail open), status=%d body=%q", w.Code, w.Body.String())
+		}
+	})
+
+	t.Run("LayerAgent key fails open to next via Manage permissions branch", func(t *testing.T) {
+		called := false
+		next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { called = true })
+		body := `{"tool_key":"firtal_registry","layer":"agent","subject_id":"11111111-1111-1111-1111-111111111111"}`
+		r := httptest.NewRequest(http.MethodPut, "/api/workspaces/x/tool-policy", strings.NewReader(body))
+		w := httptest.NewRecorder()
+		h.RequireToolPolicyWritePolicy("id")(next).ServeHTTP(w, r)
+		if !called {
+			t.Fatalf("LayerAgent: expected next to run (nil-queries fail open), status=%d body=%q", w.Code, w.Body.String())
+		}
+	})
+
+	// The WORKSPACE default itself is never delegated: a workspace-layer write
+	// still falls through to the owner/admin-only branch, which has no
+	// fail-open path.
+	t.Run("LayerWorkspace key still requires owner/admin", func(t *testing.T) {
+		called := false
+		next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { called = true })
+		body := `{"tool_key":"firtal_registry","layer":"workspace","subject_id":"11111111-1111-1111-1111-111111111111"}`
+		r := httptest.NewRequest(http.MethodPut, "/api/workspaces/x/tool-policy", strings.NewReader(body))
+		w := httptest.NewRecorder()
+		h.RequireToolPolicyWritePolicy("id")(next).ServeHTTP(w, r)
+		if called {
+			t.Fatalf("LayerWorkspace: owner/admin branch must block an unauthenticated request, but next ran")
+		}
+	})
+
+	// A LayerUser write with an unparseable subject_id must not silently reach
+	// the delegated-override branch (which would then have no target to check
+	// self-override against) — it falls back to owner/admin, same as before.
+	t.Run("LayerUser key with invalid subject falls back to owner/admin", func(t *testing.T) {
+		called := false
+		next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { called = true })
+		body := `{"tool_key":"firtal_registry","layer":"user","subject_id":"not-a-uuid"}`
+		r := httptest.NewRequest(http.MethodPut, "/api/workspaces/x/tool-policy", strings.NewReader(body))
+		w := httptest.NewRecorder()
+		h.RequireToolPolicyWritePolicy("id")(next).ServeHTTP(w, r)
+		if called {
+			t.Fatalf("LayerUser + invalid subject: expected owner/admin fallback to block, but next ran")
+		}
+	})
+}
+
+// CEREBRO-PATCH(delegated-override-grant): FIR-2351 tests for the new
+// delegated-override write gate — mirrors the credential-grant gate's
+// nil-fail-open contract test above.
+
+func TestCerebroRequireDelegatedOverridePolicy_NilQueriesPasses(t *testing.T) {
+	h := &Handler{}
+	r := httptest.NewRequest(http.MethodPut, "/api/workspaces/x/tool-policy", nil)
+	w := httptest.NewRecorder()
+	target := pgtype.UUID{}
+	if err := target.Scan("11111111-1111-1111-1111-111111111111"); err != nil {
+		t.Fatalf("scan target uuid: %v", err)
+	}
+	if !h.cerebroRequireDelegatedOverridePolicy(w, r, "00000000-0000-0000-0000-000000000000", target) {
+		t.Fatalf("nil CerebroQueries: delegated-override gate must pass, got body=%q", w.Body.String())
+	}
 }
 
 func TestToolPolicyWriteIsCredential_RoutesByToolKey(t *testing.T) {
@@ -523,5 +623,319 @@ func TestCerebroViewerOwnsAgentWithCapability_OwnerWithoutCapability(t *testing.
 	exempt, err := h.cerebroViewerOwnsAgentWithCapability(context.Background(), viewer, "00000000-0000-0000-0000-000000000000", ownerID)
 	if err != nil || exempt {
 		t.Fatalf("owner without create_agent: expected (false, nil), got (%v, %v)", exempt, err)
+	}
+}
+
+// CEREBRO-PATCH(delegated-override-grant): FIR-2351 DB-backed integration
+// coverage for the two adversarial-review fixes (Tine, 2026-07-03):
+//   - finding 1: the two capabilities are opt-in (ResolveOptIn) — a plain
+//     member with NO authored Allow row must be denied, not allowed by a
+//     Base=Allow default.
+//   - finding 2: workspace-scope must resolve to a real member of THIS
+//     workspace — a syntactically valid UUID belonging only to a different
+//     workspace must be denied.
+//
+// Also pins the deliberate admin-bypass-before-self-check exception (see the
+// function doc on cerebroRequireDelegatedOverridePolicy): an owner/admin may
+// still target their own row, unaffected by the new capabilities.
+func TestCerebroRequireDelegatedOverridePolicy_Integration(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+
+	var actorID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO "user" (name, email) VALUES ('FIR-2351 Override Actor', 'fir2351-override-actor@multica.test')
+		RETURNING id
+	`).Scan(&actorID); err != nil {
+		t.Fatalf("create actor user: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM "user" WHERE id = $1`, actorID) })
+	if _, err := testPool.Exec(ctx, `INSERT INTO member (workspace_id, user_id, role) VALUES ($1, $2, 'member')`, testWorkspaceID, actorID); err != nil {
+		t.Fatalf("add actor as member: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM member WHERE workspace_id = $1 AND user_id = $2`, testWorkspaceID, actorID)
+	})
+
+	var targetID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO "user" (name, email) VALUES ('FIR-2351 Override Target', 'fir2351-override-target@multica.test')
+		RETURNING id
+	`).Scan(&targetID); err != nil {
+		t.Fatalf("create target user: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM "user" WHERE id = $1`, targetID) })
+	if _, err := testPool.Exec(ctx, `INSERT INTO member (workspace_id, user_id, role) VALUES ($1, $2, 'member')`, testWorkspaceID, targetID); err != nil {
+		t.Fatalf("add target as member: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM member WHERE workspace_id = $1 AND user_id = $2`, testWorkspaceID, targetID)
+	})
+
+	var foreignWorkspaceID, foreignTargetID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO workspace (name, slug, description, issue_prefix)
+		VALUES ('FIR-2351 Foreign Override Workspace', 'fir2351-foreign-override', 'workspace-scope membership test', 'FOV')
+		RETURNING id
+	`).Scan(&foreignWorkspaceID); err != nil {
+		t.Fatalf("create foreign workspace: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM workspace WHERE id = $1`, foreignWorkspaceID) })
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO "user" (name, email) VALUES ('FIR-2351 Foreign Target', 'fir2351-foreign-target@multica.test')
+		RETURNING id
+	`).Scan(&foreignTargetID); err != nil {
+		t.Fatalf("create foreign target user: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM "user" WHERE id = $1`, foreignTargetID) })
+	if _, err := testPool.Exec(ctx, `INSERT INTO member (workspace_id, user_id, role) VALUES ($1, $2, 'member')`, foreignWorkspaceID, foreignTargetID); err != nil {
+		t.Fatalf("add foreign target as member of the foreign workspace: %v", err)
+	}
+
+	clearPolicy := func() {
+		testPool.Exec(context.Background(), `
+			DELETE FROM cerebro_tool_policy
+			WHERE workspace_id = $1 AND tool_key = 'manage_workspace_overrides' AND subject_id = $2
+		`, testWorkspaceID, actorID)
+	}
+	clearPolicy()
+	t.Cleanup(clearPolicy)
+
+	targetUUID := mustTestUUID(t, targetID)
+	foreignTargetUUID := mustTestUUID(t, foreignTargetID)
+	actorUUID := mustTestUUID(t, actorID)
+	newActorReq := func() *http.Request {
+		return newRequestAsUser(actorID, http.MethodPut, "/api/workspaces/x/tool-policy", nil)
+	}
+
+	// Finding 1: no Allow row anywhere — the gate must default CLOSED.
+	w := httptest.NewRecorder()
+	if testHandler.cerebroRequireDelegatedOverridePolicy(w, newActorReq(), testWorkspaceID, targetUUID) {
+		t.Fatalf("no Allow row: gate must be opt-in (default closed), got allowed, status=%d body=%q", w.Code, w.Body.String())
+	}
+
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO cerebro_tool_policy (workspace_id, tool_key, layer, subject_id, resource_pattern, setting)
+		VALUES ($1, 'manage_workspace_overrides', 'user', $2, '', 'allow')
+	`, testWorkspaceID, actorID); err != nil {
+		t.Fatalf("seed workspace-scope allow for actor: %v", err)
+	}
+
+	// With the Allow row in place, workspace-scope reaches a real in-workspace target.
+	w = httptest.NewRecorder()
+	if !testHandler.cerebroRequireDelegatedOverridePolicy(w, newActorReq(), testWorkspaceID, targetUUID) {
+		t.Fatalf("workspace-scope: expected allow for a real in-workspace target, status=%d body=%q", w.Code, w.Body.String())
+	}
+
+	// Finding 2: workspace-scope must NOT reach a user who is not a member of THIS workspace.
+	w = httptest.NewRecorder()
+	if testHandler.cerebroRequireDelegatedOverridePolicy(w, newActorReq(), testWorkspaceID, foreignTargetUUID) {
+		t.Fatalf("workspace-scope: must deny a target outside this workspace, status=%d body=%q", w.Code, w.Body.String())
+	}
+
+	// Self-target stays banned even for a workspace-scope holder.
+	w = httptest.NewRecorder()
+	if testHandler.cerebroRequireDelegatedOverridePolicy(w, newActorReq(), testWorkspaceID, actorUUID) {
+		t.Fatalf("workspace-scope holder must never target their own row, status=%d body=%q", w.Code, w.Body.String())
+	}
+
+	// Deliberate exception: workspace owner/admin (testUserID) may still act on
+	// their OWN row via this same gate — the admin bypass runs before the
+	// self-target check by design (see the function doc).
+	w = httptest.NewRecorder()
+	adminSelfReq := newRequestAsUser(testUserID, http.MethodPut, "/api/workspaces/x/tool-policy", nil)
+	if !testHandler.cerebroRequireDelegatedOverridePolicy(w, adminSelfReq, testWorkspaceID, mustTestUUID(t, testUserID)) {
+		t.Fatalf("admin must still be able to target their own row (deliberate exception), status=%d body=%q", w.Code, w.Body.String())
+	}
+}
+
+// TestCerebroRequireManagePermissionsPolicy_Integration pins the FIR-2351
+// follow-up gate (product decision 2026-07-06): a Group- or Agent-layer
+// /tool-policy write is granted by the manage_workspace_overrides capability
+// ("Manage permissions"), opt-in exactly like the delegated-override gate —
+// default closed with no Allow row, open for a holder, and owner/admin always
+// bypasses.
+func TestCerebroRequireManagePermissionsPolicy_Integration(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+
+	var actorID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO "user" (name, email) VALUES ('FIR-2351 ManagePerms Actor', 'fir2351-manageperms-actor@multica.test')
+		RETURNING id
+	`).Scan(&actorID); err != nil {
+		t.Fatalf("create actor user: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM "user" WHERE id = $1`, actorID) })
+	if _, err := testPool.Exec(ctx, `INSERT INTO member (workspace_id, user_id, role) VALUES ($1, $2, 'member')`, testWorkspaceID, actorID); err != nil {
+		t.Fatalf("add actor as member: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM member WHERE workspace_id = $1 AND user_id = $2`, testWorkspaceID, actorID)
+	})
+	clearPolicy := func() {
+		testPool.Exec(context.Background(), `
+			DELETE FROM cerebro_tool_policy
+			WHERE workspace_id = $1 AND tool_key = 'manage_workspace_overrides' AND subject_id = $2
+		`, testWorkspaceID, actorID)
+	}
+	clearPolicy()
+	t.Cleanup(clearPolicy)
+
+	newActorReq := func() *http.Request {
+		return newRequestAsUser(actorID, http.MethodPut, "/api/workspaces/x/tool-policy", nil)
+	}
+
+	// Opt-in: no Allow row anywhere — the gate must default CLOSED.
+	w := httptest.NewRecorder()
+	if testHandler.cerebroRequireManagePermissionsPolicy(w, newActorReq(), testWorkspaceID) {
+		t.Fatalf("no Allow row: Manage permissions gate must default closed, status=%d body=%q", w.Code, w.Body.String())
+	}
+
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO cerebro_tool_policy (workspace_id, tool_key, layer, subject_id, resource_pattern, setting)
+		VALUES ($1, 'manage_workspace_overrides', 'user', $2, '', 'allow')
+	`, testWorkspaceID, actorID); err != nil {
+		t.Fatalf("seed Manage permissions allow for actor: %v", err)
+	}
+
+	// A holder passes.
+	w = httptest.NewRecorder()
+	if !testHandler.cerebroRequireManagePermissionsPolicy(w, newActorReq(), testWorkspaceID) {
+		t.Fatalf("holder: expected the Manage permissions gate to pass, status=%d body=%q", w.Code, w.Body.String())
+	}
+
+	// Owner/admin bypasses without any row.
+	w = httptest.NewRecorder()
+	adminReq := newRequestAsUser(testUserID, http.MethodPut, "/api/workspaces/x/tool-policy", nil)
+	if !testHandler.cerebroRequireManagePermissionsPolicy(w, adminReq, testWorkspaceID) {
+		t.Fatalf("admin must bypass the Manage permissions gate, status=%d body=%q", w.Code, w.Body.String())
+	}
+}
+
+// TestCerebroRequireDelegatedOverridePolicy_GroupScopedCondition pins the WHEN
+// group-scoping of manage_group_overrides ("Manage group permissions",
+// FIR-2351 product decision 2026-07-06): an arg_allowlist condition on
+// `group_id` limits the capability to the listed group(s). The write gate
+// resolves the capability once per group the actor and target SHARE, so a row
+// conditioned on a group the pair does not share never grants — and an
+// unconditioned row keeps today's any-shared-group behavior.
+func TestCerebroRequireDelegatedOverridePolicy_GroupScopedCondition(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+
+	var actorID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO "user" (name, email) VALUES ('FIR-2351 GroupScope Actor', 'fir2351-groupscope-actor@multica.test')
+		RETURNING id
+	`).Scan(&actorID); err != nil {
+		t.Fatalf("create actor user: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM "user" WHERE id = $1`, actorID) })
+	if _, err := testPool.Exec(ctx, `INSERT INTO member (workspace_id, user_id, role) VALUES ($1, $2, 'member')`, testWorkspaceID, actorID); err != nil {
+		t.Fatalf("add actor as member: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM member WHERE workspace_id = $1 AND user_id = $2`, testWorkspaceID, actorID)
+	})
+
+	var targetID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO "user" (name, email) VALUES ('FIR-2351 GroupScope Target', 'fir2351-groupscope-target@multica.test')
+		RETURNING id
+	`).Scan(&targetID); err != nil {
+		t.Fatalf("create target user: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM "user" WHERE id = $1`, targetID) })
+	if _, err := testPool.Exec(ctx, `INSERT INTO member (workspace_id, user_id, role) VALUES ($1, $2, 'member')`, testWorkspaceID, targetID); err != nil {
+		t.Fatalf("add target as member: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM member WHERE workspace_id = $1 AND user_id = $2`, testWorkspaceID, targetID)
+	})
+
+	actorUUID := mustTestUUID(t, actorID)
+	targetUUID := mustTestUUID(t, targetID)
+
+	// The pair shares sharedGroup; the actor alone is also in otherGroup.
+	sharedGroup := mustTestUUID(t, "33333333-3333-4333-8333-333333333331")
+	otherGroup := mustTestUUID(t, "33333333-3333-4333-8333-333333333332")
+	prevGP := testHandler.GroupPermissions
+	testHandler.GroupPermissions = &stubGroupPermissions{
+		resolve: func(ctx context.Context, ws, user pgtype.UUID) ([]pgtype.UUID, error) {
+			if user == actorUUID {
+				return []pgtype.UUID{sharedGroup, otherGroup}, nil
+			}
+			if user == targetUUID {
+				return []pgtype.UUID{sharedGroup}, nil
+			}
+			return nil, nil
+		},
+	}
+	t.Cleanup(func() { testHandler.GroupPermissions = prevGP })
+
+	clearPolicy := func() {
+		testPool.Exec(context.Background(), `
+			DELETE FROM cerebro_tool_policy
+			WHERE workspace_id = $1 AND tool_key = 'manage_group_overrides' AND subject_id = $2
+		`, testWorkspaceID, actorID)
+	}
+	clearPolicy()
+	t.Cleanup(clearPolicy)
+
+	newActorReq := func() *http.Request {
+		return newRequestAsUser(actorID, http.MethodPut, "/api/workspaces/x/tool-policy", nil)
+	}
+
+	// Conditioned on a group the pair does NOT share → never grants.
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO cerebro_tool_policy (workspace_id, tool_key, layer, subject_id, resource_pattern, setting, conditions)
+		VALUES ($1, 'manage_group_overrides', 'user', $2, '', 'allow',
+		        jsonb_build_object('arg_allowlist', jsonb_build_array(jsonb_build_object('arg', 'group_id', 'values', jsonb_build_array($3::text)))))
+	`, testWorkspaceID, actorID, util.UUIDToString(otherGroup)); err != nil {
+		t.Fatalf("seed group-conditioned allow (unshared group): %v", err)
+	}
+	w := httptest.NewRecorder()
+	if testHandler.cerebroRequireDelegatedOverridePolicy(w, newActorReq(), testWorkspaceID, targetUUID) {
+		t.Fatalf("condition names a group the pair does not share: gate must deny, status=%d body=%q", w.Code, w.Body.String())
+	}
+
+	// Re-conditioned on the SHARED group → grants.
+	clearPolicy()
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO cerebro_tool_policy (workspace_id, tool_key, layer, subject_id, resource_pattern, setting, conditions)
+		VALUES ($1, 'manage_group_overrides', 'user', $2, '', 'allow',
+		        jsonb_build_object('arg_allowlist', jsonb_build_array(jsonb_build_object('arg', 'group_id', 'values', jsonb_build_array($3::text)))))
+	`, testWorkspaceID, actorID, util.UUIDToString(sharedGroup)); err != nil {
+		t.Fatalf("seed group-conditioned allow (shared group): %v", err)
+	}
+	w = httptest.NewRecorder()
+	if !testHandler.cerebroRequireDelegatedOverridePolicy(w, newActorReq(), testWorkspaceID, targetUUID) {
+		t.Fatalf("condition names the shared group: gate must allow, status=%d body=%q", w.Code, w.Body.String())
+	}
+
+	// Unconditioned row keeps today's any-shared-group behavior.
+	clearPolicy()
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO cerebro_tool_policy (workspace_id, tool_key, layer, subject_id, resource_pattern, setting)
+		VALUES ($1, 'manage_group_overrides', 'user', $2, '', 'allow')
+	`, testWorkspaceID, actorID); err != nil {
+		t.Fatalf("seed unconditioned allow: %v", err)
+	}
+	w = httptest.NewRecorder()
+	if !testHandler.cerebroRequireDelegatedOverridePolicy(w, newActorReq(), testWorkspaceID, targetUUID) {
+		t.Fatalf("unconditioned row: gate must keep any-shared-group behavior, status=%d body=%q", w.Code, w.Body.String())
+	}
+
+	// Self-target stays banned for group-scope holders too.
+	w = httptest.NewRecorder()
+	if testHandler.cerebroRequireDelegatedOverridePolicy(w, newActorReq(), testWorkspaceID, actorUUID) {
+		t.Fatalf("group-scope holder must never target their own row, status=%d body=%q", w.Code, w.Body.String())
 	}
 }

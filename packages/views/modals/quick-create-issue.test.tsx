@@ -41,6 +41,10 @@ const mockSquadsData = vi.hoisted(
 );
 
 vi.mock("@tanstack/react-query", () => ({
+  // queryOptions is an identity helper for type inference — mirror it so
+  // components that build options objects (e.g. WorkflowSelectField via
+  // cerebroWorkflowsListOptions) can render under this mock.
+  queryOptions: <T,>(options: T) => options,
   useQuery: ({ queryKey }: { queryKey: string[] }) => {
     // Workspace-scoped query keys carry the wsId as `queryKey[1]`; the
     // discriminator is at `queryKey[2]` (e.g. ["workspaces", wsId, "squads"]).
@@ -192,6 +196,45 @@ vi.mock("../editor", () => {
     useFileDropZone: () => ({ isDragOver: false, dropZoneProps: {} }),
     FileDropOverlay: () => null,
   };
+});
+
+// FIR-2714: the prompt field renders EditorImageTray from
+// @multica/cerebro-composer. Stub it to the same ref-forwarding textarea so the
+// quick-create tests exercise create logic, not the tray internals.
+vi.mock("@multica/cerebro-composer", () => {
+  const EditorImageTray = forwardRef(
+    ({ defaultValue, onUpdate, onSubmit, placeholder }: any, ref: any) => {
+      const valueRef = useRef(defaultValue || "");
+      const [value, setValue] = useState(defaultValue || "");
+      useImperativeHandle(ref, () => ({
+        getMarkdown: () => valueRef.current,
+        clearContent: () => {
+          valueRef.current = "";
+          setValue("");
+        },
+        uploadFile: vi.fn(),
+        focus: vi.fn(),
+      }));
+      return (
+        <textarea
+          value={value}
+          placeholder={placeholder}
+          onChange={(e) => {
+            valueRef.current = e.target.value;
+            setValue(e.target.value);
+            onUpdate?.(e.target.value);
+          }}
+          onKeyDown={(e) => {
+            if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+              onSubmit?.();
+            }
+          }}
+        />
+      );
+    },
+  );
+  EditorImageTray.displayName = "EditorImageTray";
+  return { EditorImageTray };
 });
 
 vi.mock("@multica/ui/components/ui/dialog", () => ({

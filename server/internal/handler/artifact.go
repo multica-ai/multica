@@ -218,6 +218,9 @@ func (h *Handler) CreateArtifact(w http.ResponseWriter, r *http.Request) {
 		originIssueID = issue.ID
 	}
 	authorType, authorID := h.resolveActor(r, userID, workspaceID)
+	// CEREBRO-PATCH(agent-runs-folder): FIR-2697 part 3 — silently file an agent's
+	// unfiled save under Agent Runs > member > agent > run (see sibling file).
+	folderID = h.autoFileAgentArtifact(r, workspaceID, authorType, authorID, req.Kind, folderID)
 
 	// Requester defaults to the authenticated user when an agent acts on
 	// their behalf and omits the field. Members get nil (their own author

@@ -23,6 +23,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -31,6 +32,7 @@ import (
 	"time"
 
 	"github.com/multica-ai/multica/server/internal/cerebro/connections"
+	"github.com/multica-ai/multica/server/internal/cerebro/connmeta"
 )
 
 // apiConnectionResolver builds the shared APIConnectionResolver from the
@@ -61,6 +63,49 @@ const apiConnectionResponseLimit = 1 << 20 // 1 MiB
 // pathParamRe matches a `{name}` path parameter placeholder in an endpoint path.
 var pathParamRe = regexp.MustCompile(`\{([^/{}]+)\}`)
 
+// APIConnectionArgHint re-exports the single-source hint from connmeta so callers
+// in this package keep the short name. The canonical text lives in connmeta so the
+// cloud gateway (here) and the local claim brief (daemon/execenv) render byte-for-
+// byte the same argument-shape guidance in the first prompt (FIR-2441).
+const APIConnectionArgHint = connmeta.APIConnectionArgHint
+
+// ConnectionGuidance re-exports the full descriptive connection guidance from
+// connmeta so the cloud gateway renders byte-for-byte the same first-prompt text
+// the local claim brief already ships. It embeds APIConnectionArgHint (FIR-2441
+// fix-list #5).
+const ConnectionGuidance = connmeta.ConnectionGuidance
+
+// toolsHaveAPIConnectionTool reports whether any tool in the slice is an
+// *APIConnectionTool. The compat tool loop only has the resolved []Tool (no
+// Registry handle), so it keys on the concrete type to decide whether to append
+// ConnectionGuidance to the system prompt (FIR-2441).
+func toolsHaveAPIConnectionTool(tools []Tool) bool {
+	for _, t := range tools {
+		if _, isAPI := t.(*APIConnectionTool); isAPI {
+			return true
+		}
+	}
+	return false
+}
+
+// registryHasAPIConnectionTool reports whether any of the named tools resolves,
+// in the registry, to an *APIConnectionTool. The cloud gateway uses it to decide
+// whether to append APIConnectionArgHint to the system prompt, so the check keys
+// on the concrete tool type rather than a fragile tool-name pattern (FIR-2441).
+func registryHasAPIConnectionTool(registry *Registry, toolNames []string) bool {
+	if registry == nil {
+		return false
+	}
+	for _, name := range toolNames {
+		if t, ok := registry.Get(name); ok {
+			if _, isAPI := t.(*APIConnectionTool); isAPI {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // APIConnectionTool exposes one allowed endpoint (`<METHOD> <path>`) of an
 // enabled API-type connection as a Tool. Dispatch is server-side: Call issues the
 // HTTP request to baseURL+path with auth applied and returns the response body.
@@ -75,7 +120,52 @@ type APIConnectionTool struct {
 	path     string // endpoint path, may contain {param} placeholders
 	auth     connections.AuthConfig
 
+	// connID / workspaceID identify the connection row for the per-person
+	// session-key cache (FIR-2564 fase 2). exchanger is nil on surfaces that
+	// don't wire it; with session_exchange enabled that fails the call closed.
+	connID      string
+	workspaceID string
+	exchanger   *ConnectionSessionExchanger
+
 	client *http.Client
+
+	// trace + logger are attached per task (attachTrace) so a dispatched call can
+	// emit a structured gateway-trace line tying the outgoing request to the run
+	// that made it. Both are optional: a tool built without them (e.g. in unit
+	// tests) simply logs nothing — Call's behaviour is unchanged. (FIR-2243 B2.)
+	logger *slog.Logger
+	trace  apiToolTrace
+}
+
+// apiToolTrace is the per-run identity stamped onto an API-connection tool so the
+// gateway-trace line can answer "which agent, on which task/issue, with which
+// permission decision, made this outgoing call". It never holds a credential
+// VALUE — only the connection's id/name identify the credential. (FIR-2243 B2.)
+type apiToolTrace struct {
+	agentID   string
+	agentName string
+	taskID    string
+	issueID   string
+	surface   string
+	decision  string // resolved permission verdict (allow/ask) this call ran under
+}
+
+// attachTrace stamps the run identity + resolved permission decision + logger onto
+// the tool so a later Call can emit the gateway-trace line. Called once per task
+// after the call-time policy verdict is known; safe on a nil tool. (FIR-2243 B2.)
+func (t *APIConnectionTool) attachTrace(logger *slog.Logger, meta GatewayRequestMeta, decision string) {
+	if t == nil {
+		return
+	}
+	t.logger = logger
+	t.trace = apiToolTrace{
+		agentID:   meta.AgentID,
+		agentName: meta.AgentName,
+		taskID:    meta.TaskID,
+		issueID:   meta.IssueID,
+		surface:   meta.Surface,
+		decision:  decision,
+	}
 }
 
 func (t *APIConnectionTool) Name() string                { return t.toolName }
@@ -97,7 +187,7 @@ func (t *APIConnectionTool) Path() string           { return t.path }
 // the per-agent endpoint gate are the caller's responsibility; this only turns a
 // connection list into tools.
 func BuildAPIConnectionTools(conns []connections.Connection, client *http.Client) []Tool {
-	return buildAPIConnectionTools(conns, client)
+	return buildAPIConnectionTools(conns, client, nil)
 }
 
 // buildAPIConnectionTools turns a set of (already enabled) connections into one
@@ -105,7 +195,7 @@ func BuildAPIConnectionTools(conns []connections.Connection, client *http.Client
 // and connections without a usable URL are skipped. It is pure (no DB / network)
 // so it is unit-testable; the caller supplies the connection list and the
 // dispatch http.Client.
-func buildAPIConnectionTools(conns []connections.Connection, client *http.Client) []Tool {
+func buildAPIConnectionTools(conns []connections.Connection, client *http.Client, exchanger *ConnectionSessionExchanger) []Tool {
 	var tools []Tool
 	seen := map[string]struct{}{}
 	for _, c := range conns {
@@ -139,13 +229,16 @@ func buildAPIConnectionTools(conns []connections.Connection, client *http.Client
 				seen[name] = struct{}{}
 				tools = append(tools, &APIConnectionTool{
 					toolName:    name,
-					description: apiToolDescription(c, method, path),
+					description: apiToolDescription(c, method, path, ep.Summary),
 					schema:      apiToolSchema(method, path),
 					connName:    c.Name,
 					baseURL:     baseURL,
 					method:      method,
 					path:        path,
 					auth:        c.AuthConfig,
+					connID:      c.ID,
+					workspaceID: c.WorkspaceID,
+					exchanger:   exchanger,
 					client:      client,
 				})
 			}
@@ -191,12 +284,21 @@ func sanitizeToolSegment(s string) string {
 }
 
 // apiToolDescription is the human/model-facing one-liner for an endpoint tool.
-func apiToolDescription(c connections.Connection, method, path string) string {
+// apiToolDescription is what the model reads to decide when to use the tool.
+// When discovery captured the endpoint's one-line OpenAPI summary (e.g.
+// "Execute data source: Orders"), it leads the description — for per-resource
+// registry paths the raw path is an opaque UUID, so the summary is the only
+// human-meaningful part.
+func apiToolDescription(c connections.Connection, method, path, summary string) string {
 	label := c.DisplayName
 	if label == "" {
 		label = c.Name
 	}
-	return fmt.Sprintf("Call the %s API: %s %s. Dispatched server-side with the connection's credentials.", label, method, path)
+	base := fmt.Sprintf("Call the %s API: %s %s. Dispatched server-side with the connection's credentials.", label, method, path)
+	if s := strings.TrimSpace(summary); s != "" {
+		return s + ". " + base
+	}
+	return base
 }
 
 // apiToolSchema derives a JSON-Schema input shape for an endpoint from its method
@@ -301,17 +403,55 @@ func (t *APIConnectionTool) Call(ctx context.Context, args map[string]any) (stri
 		req.Header.Set("Content-Type", "application/json")
 	}
 	req.Header.Set("Accept", "application/json")
-	applyConnectionAuth(req, t.auth)
 
 	client := t.client
 	if client == nil {
 		client = &http.Client{Timeout: apiConnectionToolTimeout}
 	}
+	// Per-agent delegation (FIR-2668): when enabled and the call has an
+	// authenticated agent caller, stamp the agent onto the request so the
+	// remote API authorizes it as that agent's own grants (Firtal Data
+	// Registry x-on-behalf-of contract). Takes precedence over
+	// session_exchange — a delegated agent call must not ride the triggering
+	// human's (broader) session key.
+	delegatedAgent := ""
+	if ob := t.auth.OnBehalfOf; ob != nil && ob.Enabled {
+		delegatedAgent = ConnectionAgent(ctx)
+		if delegatedAgent != "" {
+			req.Header.Set(onBehalfOfHeader, "agent:"+delegatedAgent)
+		}
+	}
+
+	// Per-person session exchange (FIR-2564 fase 2): when enabled and the run
+	// has a triggering human, the call runs on that person's own short-lived
+	// key instead of the shared connection key — fail closed on any exchange
+	// error, never fall back to the (broader) shared key. System runs with no
+	// triggering human keep the shared key.
+	effectiveAuth := t.auth
+	if se := t.auth.SessionExchange; se != nil && se.Enabled && delegatedAgent == "" {
+		if member := ConnectionTriggerMember(ctx); member != "" {
+			if t.exchanger == nil {
+				return "", fmt.Errorf("api connection %q: session exchange is enabled but not available on this surface", t.connName)
+			}
+			key, xerr := t.exchanger.PersonalKey(ctx, client, t.workspaceID, t.connID, t.baseURL, t.auth, member)
+			if xerr != nil {
+				return "", fmt.Errorf("api connection %q: %w", t.connName, xerr)
+			}
+			effectiveAuth = personalKeyAuth(t.auth, key)
+		}
+	}
+	applyConnectionAuth(req, effectiveAuth)
+	start := time.Now()
 	resp, err := client.Do(req)
+	dur := time.Since(start)
 	if err != nil {
+		// Transport-level failure: no HTTP status. Trace it as a failed call so the
+		// gateway log records that the agent reached out and got nothing back.
+		t.logGatewayCall(req.URL.Host, filledPath, 0, false, dur, err)
 		return "", fmt.Errorf("api connection %q: call %s %s: %w", t.connName, t.method, filledPath, err)
 	}
 	defer resp.Body.Close()
+	t.logGatewayCall(req.URL.Host, filledPath, resp.StatusCode, resp.StatusCode >= 200 && resp.StatusCode < 300, dur, nil)
 
 	body, err := io.ReadAll(io.LimitReader(resp.Body, apiConnectionResponseLimit))
 	if err != nil {
@@ -322,7 +462,9 @@ func (t *APIConnectionTool) Call(ctx context.Context, args map[string]any) (stri
 	// agent constructs, but a misbehaving endpoint can echo its auth back in the
 	// response; without this an echoed token would leak straight to the model.
 	// Applied before BOTH the error and success returns below. (FIR-2166 C review.)
-	text := redactCredentials(strings.TrimSpace(string(body)), t.auth)
+	// effectiveAuth covers the exchanged personal key too, and the shared-key
+	// halves are redacted as well since they still live in t.auth.
+	text := redactCredentials(redactCredentials(strings.TrimSpace(string(body)), effectiveAuth), t.auth)
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return "", fmt.Errorf("api connection %q: %s %s returned HTTP %d: %s", t.connName, t.method, filledPath, resp.StatusCode, text)
 	}
@@ -330,6 +472,73 @@ func (t *APIConnectionTool) Call(ctx context.Context, args map[string]any) (stri
 		return fmt.Sprintf("HTTP %d (empty body)", resp.StatusCode), nil
 	}
 	return text, nil
+}
+
+// logGatewayCall emits one structured gateway-trace line per outgoing API-
+// connection call: which connection+tool, the target host/method/path, the
+// credential identity (id+name+scheme — never the value), the permission verdict
+// the call ran under, the HTTP outcome (status + ok/fail + duration), and the run
+// identity (agent/task/issue). This is the "outgoing call" half of the FIR-2243
+// audit trail; B1 covers the runtime tool+permission decision and B3 the
+// credential read. A non-2xx or transport error logs at Warn, a 2xx at Info.
+//
+// The credential VALUE never appears here — only the connection's id/name and the
+// auth scheme (bearer/api_key/cf_access). A tool without a logger attached (unit
+// tests, a tool that bypassed attachTrace) is a no-op, so Call's behaviour is
+// unchanged when tracing is not wired.
+func (t *APIConnectionTool) logGatewayCall(host, path string, status int, ok bool, dur time.Duration, callErr error) {
+	if t == nil || t.logger == nil {
+		return
+	}
+	attrs := []any{
+		"event", "api_connection_call",
+		"connection", t.connName,
+		"tool", t.toolName,
+		"target_host", host,
+		"method", t.method,
+		"path", path,
+		"credential_id", t.connID,
+		"credential_name", t.connName,
+		"credential_scheme", authScheme(t.auth),
+		"permission_decision", t.trace.decision,
+		"http_status", status,
+		"ok", ok,
+		"duration_ms", dur.Milliseconds(),
+		"agent_id", t.trace.agentID,
+		"agent_name", t.trace.agentName,
+		"task_id", t.trace.taskID,
+		"issue_id", t.trace.issueID,
+		"surface", t.trace.surface,
+	}
+	switch {
+	case callErr != nil:
+		t.logger.Warn("api connection gateway call failed (FIR-2243 B2)", append(attrs, "error", callErr.Error())...)
+	case !ok:
+		t.logger.Warn("api connection gateway call non-2xx (FIR-2243 B2)", attrs...)
+	default:
+		t.logger.Info("api connection gateway call (FIR-2243 B2)", attrs...)
+	}
+}
+
+// authScheme names which credential scheme(s) the connection's auth_config carries,
+// for the gateway-trace line. It NEVER returns a secret value — only the scheme
+// label(s): "bearer", "api_key", "cf_access", joined with "+" when several are set,
+// or "none" when the connection is unauthenticated.
+func authScheme(auth connections.AuthConfig) string {
+	var schemes []string
+	if auth.BearerToken != "" {
+		schemes = append(schemes, "bearer")
+	}
+	if auth.APIKey != "" {
+		schemes = append(schemes, "api_key")
+	}
+	if auth.CFAccessID != "" || auth.CFAccessSecret != "" {
+		schemes = append(schemes, "cf_access")
+	}
+	if len(schemes) == 0 {
+		return "none"
+	}
+	return strings.Join(schemes, "+")
 }
 
 // fillPathParams substitutes every `{param}` in path from args; a missing or
@@ -390,6 +599,7 @@ func buildQueryValues(args map[string]any) url.Values {
 // bearer token, a custom API-key header (default X-API-Key), and a Cloudflare
 // Access service-token pair. All are optional.
 func applyConnectionAuth(req *http.Request, auth connections.AuthConfig) {
+	auth = connections.TrimCredentials(auth)
 	if auth.BearerToken != "" {
 		req.Header.Set("Authorization", "Bearer "+auth.BearerToken)
 	}

@@ -57,7 +57,13 @@ toolaccess.ListEffectiveTools  →  AgentTaskResponse.effective_tools  →  cere
    `cerebroToolsBrief`
    ([server/internal/daemon/execenv/cerebro_tools_brief.go](../../server/internal/daemon/execenv/cerebro_tools_brief.go))
    renders them into `## Available Commands` as a grouped, deterministic section
-   with a short primer on what a connection is. Empty input → no section.
+   with a short primer on what a connection is. Empty input → no section. The
+   primer also states the **api-connection argument shape** up front — path
+   parameters at the top level, query parameters inside a `query` object, request
+   body inside `body` (FIR-2441) — so an agent never has to call-and-read-the-error
+   to discover the `query` object. That wording is the shared
+   `runtime.APIConnectionArgHint` constant (see the cloud note below), so the
+   local brief and the cloud system prompt teach the identical rule.
 
 Because the **same** tool-policy resolution drives both this list and live call
 enforcement, the two can never disagree: remove a permission and the tool drops
@@ -70,11 +76,32 @@ brief builder for every local provider (Claude → `CLAUDE.md`, Codex/Cursor/Kir
 → `AGENTS.md`, Gemini → `GEMINI.md`). One render path covers them all; see
 [runtime-prompt-architecture.md](./runtime-prompt-architecture.md).
 
-**Cloud (Firtal Gateway) runtimes assemble their prompt in a separate, upstream
-code path that is not in this repo.** The shipped `effective_tools` field is the
-runtime-agnostic seam: the gateway prompt builder must read the same field and
-render it the same way to reach parity. Until it does, the dynamic tools section
-is a local-runtime feature. Track this as the cross-runtime verification step.
+**Cloud (Firtal Gateway) runtimes assemble their system prompt in the
+`runtime.FirtalGatewayExecutor` tool loops
+([firtal_gateway_executor.go](../../server/internal/cerebro/runtime/firtal_gateway_executor.go)),
+a separate path from the local brief builder.** Note there are **two** cloud tool
+loops and the compat one is the live default: `runGatewayCompatRegistryToolLoop`
+(builds its prompt in `withRegistryToolUsageHint`) is the primary path per the
+`firtal-gateway-tool-loop-fallback` patch; `runAnthropicToolLoop` is the
+Anthropic-native fallback. Any prompt-parity change must land in **both**. Two
+levels of parity apply:
+
+- **Connection-guidance parity (done, FIR-2441 fix-list #5).** When an
+  api-connection tool is actually offered (detected via
+  `registryHasAPIConnectionTool` in the native loop / `toolsHaveAPIConnectionTool`
+  in the compat loop, not a name pattern), both cloud loops append the full
+  `runtime.ConnectionGuidance` constant — the same text the local brief renders,
+  which embeds `runtime.APIConnectionArgHint`. So a cloud agent and a local agent
+  learn the identical "what a connection is" + `query`-object rule; the two first
+  prompts cannot drift on it. Before this the live compat loop shipped only a bare
+  tool-name list, so a cloud agent discovered the `query` shape by calling and
+  failing.
+- **Full tool-list parity (still tracked).** The flat cloud "You have the
+  following tools available: …" line is built from the offered tool names, not yet
+  from the shipped `effective_tools` entries with their families/verdicts. Making
+  the cloud prompt render `effective_tools` the same way the local brief does is
+  the remaining cross-runtime verification step (a same-agent/same-permissions
+  diff test of the two first prompts).
 
 ## Adding a new tool / connection / permission
 

@@ -143,7 +143,7 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	_, ownerUUID, ok := h.scope(w, r, userID)
+	wsUUID, ownerUUID, ok := h.scope(w, r, userID)
 	if !ok {
 		return
 	}
@@ -206,7 +206,57 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to create comment")
 		return
 	}
+	// Notify members @mentioned in the comment body (bug FIR-2589). Reuses the
+	// exact share + EventNoteMentioned path a note-body mention uses, but carries
+	// the comment so the "mentioned" inbox item deep-links to that comment and
+	// shows its text as context. Best-effort: a failed lookup never fails create.
+	h.notifyCommentMentions(r.Context(), wsUUID, noteID, ownerUUID, created)
 	writeJSON(w, http.StatusCreated, commentToResponse(created))
+}
+
+// commentExcerptLimit caps the comment preview carried into the inbox message
+// so a long comment doesn't bloat the notification body.
+const commentExcerptLimit = 280
+
+// notifyCommentMentions fans out "mentioned" notifications for the member
+// (@member) mentions in a newly created note comment. A comment is created
+// once, so every member mention in its body is new — oldBody is "". Delegates
+// to notifyNoteMentions (share the note + publish EventNoteMentioned) so the
+// comment path behaves identically to the note-body path, passing the comment's
+// thread-root id (the inbox deep-link target) and a trimmed excerpt.
+func (h *Handler) notifyCommentMentions(ctx context.Context, wsUUID, noteID, authorID pgtype.UUID, comment cerebrodb.CerebroNoteComment) {
+	if h.Bus == nil {
+		return
+	}
+	if len(newMemberMentions("", comment.Body, uuidStr(authorID))) == 0 {
+		return
+	}
+	noteRow, err := h.Cerebro.GetNote(ctx, noteID)
+	if err != nil {
+		return
+	}
+	artifact, err := h.Upstream.GetArtifact(ctx, db.GetArtifactParams{ID: noteID, WorkspaceID: wsUUID})
+	if err != nil {
+		return
+	}
+	// A reply deep-links to its thread root (the panel highlights the root); a
+	// root comment is its own target.
+	target := uuidStr(comment.ID)
+	if comment.ThreadRootID.Valid {
+		target = uuidStr(comment.ThreadRootID)
+	}
+	h.notifyNoteMentions(ctx, wsUUID, noteID, authorID, artifact.Title, "", comment.Body, noteRow.Visibility, target, commentExcerpt(comment.Body))
+}
+
+// commentExcerpt trims a comment body to a short single-string preview for the
+// inbox message. Mentions stay as raw markdown — the inbox renderer resolves
+// them — and whitespace is collapsed so the preview reads on one line.
+func commentExcerpt(body string) string {
+	trimmed := strings.TrimSpace(body)
+	if len(trimmed) <= commentExcerptLimit {
+		return trimmed
+	}
+	return strings.TrimSpace(trimmed[:commentExcerptLimit]) + "…"
 }
 
 // UpdateComment edits a comment's own text. Author-only (or note owner).
@@ -382,7 +432,7 @@ func (h *Handler) applySuggestion(ctx context.Context, wsUUID, noteID, ownerUUID
 
 	// Snapshot the pre-accept state, then write the spliced body, then snapshot
 	// the result — so the change shows up in version history and is undoable.
-	h.snapshotVersion(ctx, noteID, ownerUUID, artifact.Title, artifact.Body, "edit", "", false)
+	h.snapshotVersion(ctx, noteID, ownerUUID, "member", artifact.Title, artifact.Body, "edit", "", false)
 	updated, err := h.Upstream.UpdateArtifact(ctx, db.UpdateArtifactParams{
 		ID:            noteID,
 		WorkspaceID:   wsUUID,
@@ -395,7 +445,13 @@ func (h *Handler) applySuggestion(ctx context.Context, wsUUID, noteID, ownerUUID
 	if err != nil {
 		return errCannotApply("failed to apply suggestion")
 	}
-	h.snapshotVersion(ctx, noteID, ownerUUID, updated.Title, updated.Body, "edit", "", false)
+	h.snapshotVersion(ctx, noteID, ownerUUID, "member", updated.Title, updated.Body, "edit", "", false)
+
+	// FIR-2810: credit the changed lines to the suggestion's author — accepting
+	// publishes THEIR words, so the line attribution should carry their name.
+	if updated.Body != artifact.Body {
+		h.advanceAndSaveLineAttrs(ctx, noteID, artifact.Body, updated.Body, uuidStr(c.AuthorID))
+	}
 	return nil
 }
 

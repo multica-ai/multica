@@ -14,13 +14,15 @@
     "@multica/cerebro-access": "workspace:*",
     "@multica/cerebro-comment-drafts": "workspace:*",
     "@multica/cerebro-dictation": "workspace:*",
+    "@multica/cerebro-feature-flags": "workspace:*",
     "@multica/cerebro-pin-input": "workspace:*",
     "@multica/cerebro-preferences": "workspace:*",
     "@multica/cerebro-ui": "workspace:*",
     "@multica/core": "workspace:*",
     "@multica/ui": "workspace:*",
     "@multica/views": "workspace:*",
-    "lucide-react": "catalog:"
+    "lucide-react": "catalog:",
+    "sonner": "^2.0.7"
   },
   "peerDependencies": {
     "react": "catalog:"

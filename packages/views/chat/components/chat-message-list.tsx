@@ -30,6 +30,8 @@ import type { ChatMessage, ChatPendingTask, TaskFailureReason } from "@multica/c
 import type { ChatTimelineItem } from "@multica/core/chat";
 // CEREBRO-PATCH(chat-message-list-cerebro): import from cerebro-chat after Phase 6 relocation
 import { getToolSummary, MessageCostBadge, ChatAttachmentList, CerebroChatMessageReminderAction } from "@multica/cerebro-chat/views";
+// CEREBRO-PATCH(chat-image-gallery): FIR-2710 — one image gallery per chat message.
+import { ImageGalleryProvider } from "@multica/cerebro-attachments/views";
 import { failureReasonLabel } from "../../agents/components/tabs/task-failure";
 import { buildTimeline } from "../../common/task-transcript";
 import { TaskStatusPill } from "./task-status-pill";
@@ -176,6 +178,8 @@ function MessageBubble({ message, isPending }: { message: ChatMessage; isPending
     return (
       // CEREBRO-PATCH(chat-attachment-list): TECH-3183 — flex-col so attachment cards stack under the bubble, right-aligned.
       <div className="flex flex-col items-end gap-1">
+        {/* CEREBRO-PATCH(chat-image-gallery): FIR-2710 — this message's inline + attachment images page as one gallery. */}
+        <ImageGalleryProvider>
         {/* CEREBRO-PATCH(chat-bubble-wrap-long-words): FIR-2560 — min-w-0 lets the flex item shrink below intrinsic content width so the bubble respects max-w-[80%] when a single unbreakable token (long URL) lives inside. */}
         <div
           className={cn(
@@ -204,6 +208,7 @@ function MessageBubble({ message, isPending }: { message: ChatMessage; isPending
         </div>
         {/* CEREBRO-PATCH(chat-attachment-list): TECH-3183 — files attached to a user message. */}
         <ChatAttachmentList attachments={message.attachments} className="max-w-[80%]" />
+        </ImageGalleryProvider>
       </div>
     );
   }
@@ -247,6 +252,8 @@ function AssistantMessage({
 
   return (
     <div className="w-full space-y-1.5">
+      {/* CEREBRO-PATCH(chat-image-gallery): FIR-2710 — this reply's inline + attachment images page as one gallery. */}
+      <ImageGalleryProvider>
       {timeline.length > 0 ? (
         <TimelineView items={timeline} />
       ) : (
@@ -263,6 +270,7 @@ function AssistantMessage({
       />
       {/* CEREBRO-PATCH(chat-attachment-list): TECH-3183 — files the agent attached to its reply. */}
       <ChatAttachmentList attachments={message.attachments} className="max-w-[70ch]" />
+      </ImageGalleryProvider>
     </div>
   );
 }

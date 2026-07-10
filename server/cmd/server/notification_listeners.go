@@ -31,6 +31,9 @@ type mobilePushNotifier interface {
 // per device, and not every deployment has VAPID keys configured.
 var pushNotifier mobilePushNotifier
 
+// CEREBRO-PATCH(channel-mention-members-only): FIR-2680 — hook to drop @mentioned non-participants in channels/groups. Identity by default; the cerebro wiring binds it to the real guard (see cerebro_channel_mention_guard.go).
+var filterChannelMentionRecipients = func(_ context.Context, _ events.Event, _ string, ids map[string]bool) map[string]bool { return ids }
+
 // Apple Web Push enforces a hard ~4 KB ceiling on the encrypted payload.
 // After AES-128-GCM padding the plaintext budget shrinks to roughly 3 KB —
 // and full comment bodies routinely exceeded that, which made Apple reject
@@ -337,6 +340,48 @@ func notifyCreatorIssueStarted(
 		WorkspaceID:   issue.WorkspaceID,
 		RecipientType: "member",
 		RecipientID:   issue.CreatorID,
+		IssueID:       issue.ID,
+		IssueStatus:   issue.Status,
+		NotifType:     "issue_started",
+		Severity:      "info",
+		Title:         issue.Title,
+		Body:          "",
+		Details:       emptyDetails,
+		Actor:         e,
+	}, routeInbox)
+}
+
+// CEREBRO-PATCH(triggered-agent-started-inbox): agent-created issues notify the member they were created for.
+func notifyTriggeredMemberIssueStarted(
+	ctx context.Context,
+	queries *db.Queries,
+	bus *events.Bus,
+	e events.Event,
+	issue handler.IssueResponse,
+	triggeringTaskID string,
+) {
+	if issue.CreatorType != "agent" || triggeringTaskID == "" {
+		return
+	}
+	if !issueStartsImmediately(issue.Status) || !startedIssuesInInboxEnabled(ctx, queries, issue.WorkspaceID) {
+		return
+	}
+	memberID := lookupTriggeringMember(queries, triggeringTaskID)
+	if memberID == "" || memberID == issue.CreatorID {
+		return
+	}
+	subscribed, err := queries.IsIssueSubscriber(ctx, db.IsIssueSubscriberParams{
+		IssueID:  parseUUID(issue.ID),
+		UserType: "member",
+		UserID:   parseUUID(memberID),
+	})
+	if err != nil || !subscribed {
+		return
+	}
+	createInboxItemForChannel(ctx, queries, bus, inboxItemDraft{
+		WorkspaceID:   issue.WorkspaceID,
+		RecipientType: "member",
+		RecipientID:   memberID,
 		IssueID:       issue.ID,
 		IssueStatus:   issue.Status,
 		NotifType:     "issue_started",
@@ -747,6 +792,8 @@ func notifyMentionedMembers(
 	recipientIDs := collectMentionedMemberIDs(context.Background(), queries, e.WorkspaceID, mentions)
 
 	ctx := context.Background()
+	// CEREBRO-PATCH(channel-mention-members-only): FIR-2680 — drop @mentioned non-participants in channels/groups.
+	recipientIDs = filterChannelMentionRecipients(ctx, e, issueID, recipientIDs)
 	for id := range recipientIDs {
 		if id == e.ActorID || skip[id] {
 			continue
@@ -798,6 +845,9 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries, pushSvc
 		skip := map[string]bool{e.ActorID: true}
 
 		notifyCreatorIssueStarted(ctx, queries, bus, e, issue)
+		if triggeringTaskID, _ := payload["triggering_task_id"].(string); triggeringTaskID != "" {
+			notifyTriggeredMemberIssueStarted(ctx, queries, bus, e, issue, triggeringTaskID)
+		}
 
 		// Direct notification to assignee
 		if issue.AssigneeType != nil && issue.AssigneeID != nil {
@@ -1073,7 +1123,10 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries, pushSvc
 		// CEREBRO-PATCH(agent-comment-tag-split): TECH-2961 — agent-authored comments fan out to three routing keys based on who they tag, so users can mute monologues without losing hand-offs.
 		newCommentKey := pickAgentCommentRoutingKey(authorType, mentions)
 		// CEREBRO-PATCH(dm-push): FIR-308 — direct messages route under their own key.
-		if issueKind == "dm" {
+		// CEREBRO-PATCH(channel-dm-unify): FIR-2610 — channels/groups are the
+		// same conversational surface as a DM, just with more than 2 people, so
+		// they route under the same "Direct message" key (per Jesper).
+		if issueKind == "dm" || issueKind == "channel" || issueKind == "group" {
 			newCommentKey = "dm_message"
 		}
 		notifySubscribers(ctx, queries, bus, issueID, issueStatus, e.WorkspaceID, e,

@@ -400,6 +400,18 @@ export function ProjectIssuesSurface({
     () => (selectedSprintId ? { ...filter, sprint_id: selectedSprintId } : filter),
     [filter, selectedSprintId],
   );
+  // CEREBRO-PATCH(sprint-board-onbehalf-count-fix): FIR-2817 the on-behalf-of
+  // id must be folded into the SAME filter object used for both the
+  // statusIssuesQuery cache key and the filter threaded down to BoardView.
+  // Building the query with `{ ...effectiveFilter, on_behalf_of_ids }` inline
+  // (as before) while passing plain `effectiveFilter` to ProjectIssuesContent
+  // gave useLoadMoreByStatus a different queryKey than the one the fetch
+  // actually populated, so `qc.getQueryData` always missed and the column
+  // count badge showed 0 even though the cards themselves rendered fine.
+  const statusIssuesFilter = useMemo(
+    () => ({ ...effectiveFilter, on_behalf_of_ids: onBehalfOfFilters }),
+    [effectiveFilter, onBehalfOfFilters],
+  );
 
   const sort = useMemo(
     () => ({
@@ -432,7 +444,7 @@ export function ProjectIssuesSurface({
   );
   const statusIssuesQuery = useQuery({
     // CEREBRO-PATCH(issue-on-behalf-of-filter): MUL-2553 project list on-behalf-of filter.
-    ...myIssueListOptions(wsId, scope, { ...effectiveFilter, on_behalf_of_ids: onBehalfOfFilters }, undefined, sort),
+    ...myIssueListOptions(wsId, scope, statusIssuesFilter, undefined, sort),
     enabled: !usesAssigneeBoard && !usesGantt,
   });
   const assigneeGroupsQuery = useQuery({
@@ -481,7 +493,7 @@ export function ProjectIssuesSurface({
         assigneeGroupQueryKey={usesAssigneeBoard ? assigneeGroupsOptions.queryKey : undefined}
         assigneeGroupFilter={usesAssigneeBoard ? assigneeGroupFilter : undefined}
         scope={scope}
-        filter={effectiveFilter}
+        filter={statusIssuesFilter}
         sort={sort}
         ganttIssues={ganttIssues}
         // CEREBRO-PATCH(project-detail-sprint-create): TECH-3620 new issues created here join the selected sprint.

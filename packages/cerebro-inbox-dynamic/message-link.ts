@@ -11,10 +11,47 @@
 // workspace-global / shareable), while every other entry is keyed by its own
 // id. The `kind:` prefix keeps the three id spaces (notif/channel/chat) from
 // ever colliding.
+import type { InboxItem } from "@multica/core/types";
 import type { DynInboxEntry } from "./section-filter";
 
 /** URL search-param name that holds the open message's key. */
 export const INBOX_MESSAGE_PARAM = "message";
+
+/** FIR-2826 — the note (and optional comment) a note-mention inbox item points at. */
+export interface NoteMentionTarget {
+  noteId: string;
+  /** Set when the mention was in a comment on the note; opens that exact comment. */
+  commentId: string | null;
+}
+
+/**
+ * FIR-2826 — resolve the note a `mentioned` inbox item deep-links to. A note
+ * @-mention rides in `details.note_id`; a note-COMMENT mention additionally
+ * carries `details.comment_id` so the note can open straight at that comment
+ * (parity with the classic inbox). Returns `null` when the item is not a note
+ * mention.
+ */
+export function noteMentionTarget(item: InboxItem): NoteMentionTarget | null {
+  const noteId = item.details?.note_id;
+  if (!noteId) return null;
+  const commentId = item.details?.comment_id;
+  return { noteId, commentId: commentId ? commentId : null };
+}
+
+/**
+ * FIR-2826 — full Notes-page URL for a note mention, appending `&comment=` when
+ * the mention targets a specific comment. Used as the fallback when the note
+ * inbox pane is off.
+ */
+export function noteMentionUrl(
+  notesPath: string,
+  target: NoteMentionTarget,
+): string {
+  const commentQ = target.commentId
+    ? `?comment=${encodeURIComponent(target.commentId)}`
+    : "";
+  return `${notesPath}/${encodeURIComponent(target.noteId)}${commentQ}`;
+}
 
 /**
  * Stable, copyable key for an inbox entry. Mirrors the selection identity used
@@ -59,6 +96,39 @@ export function findEntryByMessageKey(
     if (kind === "thread" && entry.kind === "thread" && entry.threadRootId === id) return entry;
   }
   return null;
+}
+
+/**
+ * Decide the URL the "keep the address bar in sync with the open message"
+ * effect should navigate to, or `null` to leave the URL untouched.
+ *
+ * FIR-2677 — the guard is load-bearing. That effect re-runs whenever the
+ * navigation adapter hands the inbox a fresh `replace`/`replaceSilent`
+ * reference (it does on every navigation), which means it can fire with a
+ * STALE `selected` while a sidebar "New message" intent (`?chat`/`?agent`) or a
+ * created-conversation intent (`?issue`) is still in the URL. Writing the stale
+ * selection's `?message=<key>` there overwrites the incoming intent; the intent
+ * reader then re-selects the previously open message and discards the new chat,
+ * so the pane never moves. While an intent is present the consume effect owns
+ * the URL, so this returns `null` and leaves it alone.
+ */
+export function nextInboxMessageUrl(params: {
+  urlChat: string;
+  urlIssue: string;
+  /** `messageKeyForEntry(selected)` for the open row, or `null` when nothing is open. */
+  selectedKey: string | null;
+  /** Current value of the `?message=` param, or `null` when absent. */
+  currentMessageParam: string | null;
+  /** Workspace inbox path, e.g. `/acme/inbox`. */
+  inboxPath: string;
+}): string | null {
+  const { urlChat, urlIssue, selectedKey, currentMessageParam, inboxPath } = params;
+  // An unconsumed intent owns the URL — don't clobber it with a stale selection.
+  if (urlChat || urlIssue) return null;
+  if (selectedKey === currentMessageParam) return null;
+  return selectedKey
+    ? `${inboxPath}?${INBOX_MESSAGE_PARAM}=${encodeURIComponent(selectedKey)}`
+    : inboxPath;
 }
 
 /**

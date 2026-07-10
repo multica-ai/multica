@@ -37,5 +37,16 @@ export function useAttachmentActions() {
     [wsId],
   );
 
-  return { openViewer, downloadFile };
+  // A plain href (absolute when the adapter can build a shareable URL, else the
+  // in-app path) to the attachment's own full-page viewer. Used as the
+  // gallery's "open on its own page" link (FIR-2710 point 2).
+  const viewerHref = useCallback(
+    (id: string) => {
+      const path = wsPaths.attachmentView(id);
+      return router.getShareableUrl ? router.getShareableUrl(path) : path;
+    },
+    [wsPaths, router],
+  );
+
+  return { openViewer, downloadFile, viewerHref };
 }

@@ -1,10 +1,11 @@
 "use client";
 
 import { useState } from "react";
-import { Loader2, Send } from "lucide-react";
+import { Check, Loader2, Send } from "lucide-react";
 import { toast } from "sonner";
 import { useQuery } from "@tanstack/react-query";
 import type { Agent } from "@multica/core/types";
+import { useWorkspaceId } from "@multica/core/hooks";
 import { Button } from "@multica/ui/components/ui/button";
 import {
   Dialog,
@@ -18,11 +19,19 @@ import { Input } from "@multica/ui/components/ui/input";
 import { Textarea } from "@multica/ui/components/ui/textarea";
 import { Label } from "@multica/ui/components/ui/label";
 import { agentContextVersionsOptions } from "../../core/queries";
-import { useCreateAgentContextChangeRequest } from "../../core/mutations";
+import {
+  useCreateAgentContextChangeRequest,
+  useReviewAgentContextChangeRequest,
+} from "../../core/mutations";
 import { AgentContextSnapshotView } from "./agent-context-snapshot-view";
+import { AgentContextConfigFields } from "./agent-context-config-fields";
 
 interface Props {
   agent: Agent;
+  /** True when the current user can approve (owner/approver/admin). Unlocks
+   *  the one-step "Save & approve" action so an approver doesn't have to
+   *  propose to themselves and then approve their own request. */
+  canReview?: boolean;
 }
 
 // bumpPatch returns the next strict-semver patch of a valid X.Y.Z, else 1.0.1.
@@ -32,7 +41,8 @@ function bumpPatch(v: string): string {
   return `${m[1]}.${m[2]}.${Number(m[3]) + 1}`;
 }
 
-export function AgentContextProposeDialog({ agent }: Props) {
+export function AgentContextProposeDialog({ agent, canReview = false }: Props) {
+  const wsId = useWorkspaceId();
   const [open, setOpen] = useState(false);
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
@@ -49,6 +59,8 @@ export function AgentContextProposeDialog({ agent }: Props) {
   const currentSnapshot = versions[0]?.snapshot;
 
   const mutation = useCreateAgentContextChangeRequest(agent.id);
+  const reviewMutation = useReviewAgentContextChangeRequest(agent.id, wsId);
+  const busy = mutation.isPending || reviewMutation.isPending;
 
   const reset = () => {
     setTitle("");
@@ -59,10 +71,13 @@ export function AgentContextProposeDialog({ agent }: Props) {
     setPersonaSandbox(agent.persona_sandbox ?? "");
   };
 
-  const handleSubmit = async () => {
+  // approve=true creates the change request and immediately merges it, so an
+  // approver commits their edit in one step instead of proposing to themselves
+  // and then approving their own pending request.
+  const submit = async (approve: boolean) => {
     if (!title.trim()) return;
     try {
-      await mutation.mutateAsync({
+      const cr = await mutation.mutateAsync({
         title: title.trim(),
         description: description.trim() || undefined,
         proposed_version: proposedVersion,
@@ -71,11 +86,21 @@ export function AgentContextProposeDialog({ agent }: Props) {
         thinking_level: thinkingLevel.trim(),
         persona_sandbox: personaSandbox.trim(),
       });
-      toast.success("Change proposed — the owner will be notified.");
+      if (approve) {
+        await reviewMutation.mutateAsync({
+          crId: cr.id,
+          data: { action: "approve" },
+        });
+        toast.success(`Change approved — now live as ${proposedVersion}.`);
+      } else {
+        toast.success("Change proposed — the owner will be notified.");
+      }
       setOpen(false);
       reset();
     } catch {
-      toast.error("Failed to submit proposal");
+      toast.error(
+        approve ? "Failed to save & approve" : "Failed to submit proposal",
+      );
     }
   };
 
@@ -94,7 +119,7 @@ export function AgentContextProposeDialog({ agent }: Props) {
         Propose change
       </Button>
 
-      <Dialog open={open} onOpenChange={(v) => !mutation.isPending && setOpen(v)}>
+      <Dialog open={open} onOpenChange={(v) => !busy && setOpen(v)}>
         <DialogContent className="sm:max-w-2xl">
           <DialogHeader>
             <DialogTitle>Propose an agent context change</DialogTitle>
@@ -152,44 +177,15 @@ export function AgentContextProposeDialog({ agent }: Props) {
               />
             </div>
 
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-              <div className="space-y-1.5">
-                <Label htmlFor="ac-model" className="text-xs">
-                  Model
-                </Label>
-                <Input
-                  id="ac-model"
-                  value={model}
-                  onChange={(e) => setModel(e.target.value)}
-                  placeholder="default"
-                  className="h-8 font-mono text-xs"
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="ac-thinking" className="text-xs">
-                  Thinking level
-                </Label>
-                <Input
-                  id="ac-thinking"
-                  value={thinkingLevel}
-                  onChange={(e) => setThinkingLevel(e.target.value)}
-                  placeholder="default"
-                  className="h-8 font-mono text-xs"
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="ac-sandbox" className="text-xs">
-                  Sandbox
-                </Label>
-                <Input
-                  id="ac-sandbox"
-                  value={personaSandbox}
-                  onChange={(e) => setPersonaSandbox(e.target.value)}
-                  placeholder="none"
-                  className="h-8 font-mono text-xs"
-                />
-              </div>
-            </div>
+            <AgentContextConfigFields
+              agent={agent}
+              model={model}
+              thinkingLevel={thinkingLevel}
+              personaSandbox={personaSandbox}
+              onModel={setModel}
+              onThinkingLevel={setThinkingLevel}
+              onPersonaSandbox={setPersonaSandbox}
+            />
 
             {currentSnapshot && (
               <>
@@ -223,17 +219,21 @@ export function AgentContextProposeDialog({ agent }: Props) {
               variant="ghost"
               size="sm"
               onClick={() => setOpen(false)}
-              disabled={mutation.isPending}
+              disabled={busy}
             >
               Cancel
             </Button>
+            {/* An approver gets both paths: propose (leave it pending for a
+                second reviewer) or save & approve (commit it live now). A
+                non-approver only sees the propose action. */}
             <Button
               type="button"
               size="sm"
-              onClick={handleSubmit}
-              disabled={mutation.isPending || !title.trim()}
+              variant={canReview ? "outline" : "default"}
+              onClick={() => submit(false)}
+              disabled={busy || !title.trim()}
             >
-              {mutation.isPending ? (
+              {mutation.isPending && !reviewMutation.isPending ? (
                 <>
                   <Loader2 className="h-3 w-3 animate-spin" />
                   Submitting…
@@ -241,10 +241,30 @@ export function AgentContextProposeDialog({ agent }: Props) {
               ) : (
                 <>
                   <Send className="h-3 w-3" />
-                  Submit proposal
+                  {canReview ? "Propose only" : "Submit proposal"}
                 </>
               )}
             </Button>
+            {canReview && (
+              <Button
+                type="button"
+                size="sm"
+                onClick={() => submit(true)}
+                disabled={busy || !title.trim()}
+              >
+                {reviewMutation.isPending ? (
+                  <>
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                    Saving…
+                  </>
+                ) : (
+                  <>
+                    <Check className="h-3 w-3" />
+                    Save &amp; approve
+                  </>
+                )}
+              </Button>
+            )}
           </DialogFooter>
         </DialogContent>
       </Dialog>

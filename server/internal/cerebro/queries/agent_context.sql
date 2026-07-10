@@ -80,6 +80,26 @@ INSERT INTO agent_context_version (
 VALUES ($1, $2, $3, $4, $5)
 RETURNING *;
 
+-- GetLatestAgentContextVersion returns the most recent snapshot row for the
+-- agent. The direct-edit recorder compares against it to skip edits that did
+-- not change any versioned field, and to keep the version pointer monotonic
+-- if it ever drifted behind the history.
+-- name: GetLatestAgentContextVersion :one
+SELECT * FROM agent_context_version
+WHERE agent_id = $1
+ORDER BY created_at DESC, version DESC
+LIMIT 1;
+
+-- BumpAgentContextVersion advances only the version pointer. The direct-edit
+-- path has already written the new field values through the generic agent
+-- update; unlike ApplyAgentContextSnapshot nothing else may be rewritten here.
+-- name: BumpAgentContextVersion :one
+UPDATE agent SET
+    context_version = $2,
+    updated_at      = now()
+WHERE id = $1
+RETURNING *;
+
 -- --- Change requests ---
 
 -- name: ListAgentChangeRequestsByAgent :many
@@ -122,3 +142,42 @@ UPDATE agent_change_request SET
     updated_at     = now()
 WHERE id = $1
 RETURNING *;
+
+-- --- Context lint (FIR-1775 Phase 3) ---
+
+-- ListAgentSkillsForContextLint returns the skills currently bound to the
+-- agent with their content, so the lint can detect rules duplicated between
+-- the instructions and a bound skill (or between two bound skills).
+-- name: ListAgentSkillsForContextLint :many
+SELECT s.id, s.name, s.content
+FROM agent_skill ask
+JOIN skill s ON s.id = ask.skill_id
+WHERE ask.agent_id = $1
+ORDER BY s.name;
+
+-- ListWorkspaceSkillsForContextLint returns every skill in the workspace so
+-- skill-name references in instructions can be resolved (dead vs unbound).
+-- name: ListWorkspaceSkillsForContextLint :many
+SELECT id, name, content FROM skill
+WHERE workspace_id = $1
+ORDER BY name;
+
+-- ListAgentsForContextLint returns the non-archived agents of a workspace for
+-- the workspace-wide lint sweep and for the repo-file drift lint's harness set.
+-- name: ListAgentsForContextLint :many
+SELECT * FROM agent
+WHERE workspace_id = $1 AND archived_at IS NULL
+ORDER BY name;
+
+-- GetWorkspaceReposForContextLint returns the workspace-level repos JSONB
+-- (array of {url, description}) used to resolve repo links in instructions.
+-- name: GetWorkspaceReposForContextLint :one
+SELECT repos FROM workspace
+WHERE id = $1;
+
+-- ListWorkspaceGithubRepoRefsForContextLint returns the project-bound
+-- github_repo resource refs ({url: ...}) of a workspace; together with the
+-- workspace repos these form the known-repo set for the stale-link check.
+-- name: ListWorkspaceGithubRepoRefsForContextLint :many
+SELECT resource_ref FROM project_resource
+WHERE workspace_id = $1 AND resource_type = 'github_repo';

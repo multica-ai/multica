@@ -8,7 +8,8 @@
     "test": "vitest run"
   },
   "exports": {
-    ".": "./index.ts"
+    ".": "./index.ts",
+    "./task-transcript-safety": "./task-transcript-safety.ts"
   },
   "dependencies": {
     "@multica/cerebro-feature-flags": "workspace:*",

@@ -7,6 +7,8 @@
     ".": "./index.ts",
     "./views": "./views/index.ts",
     "./views/note-comments-panel": "./views/note-comments-panel.tsx",
+    "./views/note-versions-dialog": "./views/note-versions-dialog.tsx",
+    "./views/note-mention-scope": "./views/note-mention-scope.ts",
     "./views/note-references": "./views/note-references.tsx",
     "./views/notes-nav-item": "./views/notes-nav-item.tsx",
     "./settings-tabs": "./views/notes-settings-tabs.tsx",
@@ -19,6 +21,7 @@
   "dependencies": {
     "@multica/cerebro-artifacts": "workspace:*",
     "@multica/cerebro-collections": "workspace:*",
+    "@multica/cerebro-composer": "workspace:*",
     "@multica/cerebro-dictation": "workspace:*",
     "@multica/cerebro-feature-flags": "workspace:*",
     "@multica/core": "workspace:*",

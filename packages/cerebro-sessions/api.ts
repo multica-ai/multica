@@ -31,6 +31,9 @@ const ContextUsageSchema = z.object({
   // shows no compaction marker rather than NaN.
   compactions: z.number().default(0),
   last_run_compaction: z.boolean().default(false),
+  // FIR-2279: prompt-cache countdown anchor. Absent on older servers → null, so
+  // the bar renders no timer rather than NaN.
+  last_activity_at: z.string().nullish().default(null),
 }).loose();
 
 export const CONTEXT_USAGE_FALLBACK: ContextUsage = {
@@ -48,6 +51,7 @@ export const CONTEXT_USAGE_FALLBACK: ContextUsage = {
   approximate: false,
   compactions: 0,
   last_run_compaction: false,
+  last_activity_at: null,
 };
 
 export async function getContextUsage(issueId: string, sessionId?: string): Promise<ContextUsage> {

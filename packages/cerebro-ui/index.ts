@@ -12,6 +12,11 @@ export {
   type DocTypeStyle,
 } from "./components/attachment-chip";
 export { ZoomableImage, type ZoomableImageProps } from "./components/zoomable-image";
+export {
+  ImageGallery,
+  type ImageGalleryProps,
+  type GalleryImage,
+} from "./components/image-gallery";
 export { useZoomPan, type ZoomPanOptions, type ZoomPanState } from "./hooks/use-zoom-pan";
 export { useStickyBottom } from "./hooks/use-sticky-bottom";
 export { useHighlightCommentScroll } from "./hooks/use-highlight-comment-scroll";

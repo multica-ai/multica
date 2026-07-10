@@ -12,6 +12,7 @@ import (
 
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
 	"github.com/multica-ai/multica/server/internal/events"
+	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/util"
 )
 
@@ -82,7 +83,15 @@ func (s *Service) WithPolicy(p PolicyChecker) *Service {
 // credID may be zero (List). credType may be empty (List/audit
 // summaries that don't carry a single type).
 func (s *Service) AuthorizeRead(ctx context.Context, workspaceID, credentialID pgtype.UUID, credentialType Type, actorType string, actorID pgtype.UUID) error {
-	return s.enforce(ctx, workspaceID, credentialID, credentialType, PermReadRedacted, actorType, actorID, "")
+	// FIR-2243 (B3): record successful reads BY AGENTS so "which key did this
+	// agent use, on which issue" is answerable. Member (UI) reads stay
+	// unlogged — one row per page render would balloon the table for no
+	// security value, the original JEH-1197 rationale (migration 9025).
+	allowAuditAction := Action("")
+	if actorType == "agent" {
+		allowAuditAction = ActionRead
+	}
+	return s.enforce(ctx, workspaceID, credentialID, credentialType, PermReadRedacted, actorType, actorID, allowAuditAction)
 }
 
 // enforce runs the policy check for a governance action, writes the
@@ -341,7 +350,7 @@ func (s *Service) Reveal(ctx context.Context, workspaceID, credentialID pgtype.U
 		Action:       string(ActionReveal),
 		ActorType:    actorType,
 		ActorID:      actorID,
-		Metadata:     []byte("{}"),
+		Metadata:     auditMetadata(ctx, nil),
 		Result:       AuditResultAllow,
 		Reason:       "",
 	}); err != nil {
@@ -458,19 +467,51 @@ func (s *Service) DeleteBinding(ctx context.Context, workspaceID, credentialID, 
 // Reveal uses RecordCerebroCredentialAudit directly so the error is
 // surfaced and the plaintext is not returned without a trail.
 func (s *Service) auditAllow(ctx context.Context, workspaceID, credentialID pgtype.UUID, action Action, actorType string, actorID pgtype.UUID, reason string, metadata []byte) {
-	if len(metadata) == 0 {
-		metadata = []byte("{}")
-	}
 	_, _ = s.Cerebro.RecordCerebroCredentialAudit(ctx, cerebrodb.RecordCerebroCredentialAuditParams{
 		WorkspaceID:  workspaceID,
 		CredentialID: credentialID,
 		Action:       string(action),
 		ActorType:    actorType,
 		ActorID:      actorID,
-		Metadata:     metadata,
+		Metadata:     auditMetadata(ctx, metadata),
 		Result:       AuditResultAllow,
 		Reason:       reason,
 	})
+}
+
+// auditMetadata enriches a credential-audit metadata blob with the issue/task
+// the action happened on (FIR-2243 B3). When the call runs on a task-scoped
+// token the request context carries TaskScopeContext{IssueID, TaskID}; merging
+// it in lets cerebro evaluate / firtal-data-registry attribute each credential
+// use to its originating issue. Member/non-task calls add nothing.
+func auditMetadata(ctx context.Context, base []byte) []byte {
+	ts := middleware.TaskScopeFromContext(ctx)
+	return mergeAuditContext(base, ts.IssueID, ts.TaskID)
+}
+
+// mergeAuditContext folds issue/task ids into an audit metadata JSON object.
+// base may be nil/empty; issueID/taskID may be empty (then nothing is added).
+// Pure function so the merge is unit-testable without a request context.
+func mergeAuditContext(base []byte, issueID, taskID string) []byte {
+	m := map[string]any{}
+	if len(base) > 0 {
+		// base is always our own JSON ({} or binding details); ignore parse errors.
+		_ = json.Unmarshal(base, &m)
+	}
+	if issueID != "" {
+		m["issue_id"] = issueID
+	}
+	if taskID != "" {
+		m["task_id"] = taskID
+	}
+	if len(m) == 0 {
+		return []byte("{}")
+	}
+	out, err := json.Marshal(m)
+	if err != nil {
+		return []byte("{}")
+	}
+	return out
 }
 
 // auditDeny records a policy-denied attempt. action is the credential
@@ -485,7 +526,7 @@ func (s *Service) auditDeny(ctx context.Context, workspaceID, credentialID pgtyp
 		Action:       string(permissionToAuditAction(perm)),
 		ActorType:    actorType,
 		ActorID:      actorID,
-		Metadata:     []byte("{}"),
+		Metadata:     auditMetadata(ctx, nil),
 		Result:       AuditResultDeny,
 		Reason:       reason,
 	})

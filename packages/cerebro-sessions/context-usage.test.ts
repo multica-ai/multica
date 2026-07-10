@@ -75,4 +75,20 @@ describe("context-usage api compatibility", () => {
     const res2 = await getContextUsage("issue-1");
     expect(res2.approximate).toBe(false); // missing → defaulted, not undefined
   });
+
+  // FIR-2279: the bar reads last_activity_at to drive the prompt-cache countdown.
+  it("passes last_activity_at through and defaults it to null", async () => {
+    mockCerebroRequest.mockResolvedValueOnce({
+      has_data: true,
+      used_percent: 40,
+      last_activity_at: "2026-07-05T18:30:00Z",
+    });
+    const res = await getContextUsage("issue-1");
+    expect(res.last_activity_at).toBe("2026-07-05T18:30:00Z");
+
+    // Older server omits it → null, so the bar renders no timer rather than NaN.
+    mockCerebroRequest.mockResolvedValueOnce({ has_data: true, used_percent: 40 });
+    const res2 = await getContextUsage("issue-1");
+    expect(res2.last_activity_at).toBe(null);
+  });
 });

@@ -7,7 +7,8 @@ func TestContextWindowForModel_ExactPerModel(t *testing.T) {
 		model string
 		want  int64
 	}{
-		{"claude-opus-4-8", 1_000_000},   // current Opus ships the 1M window as standard (FIR-1931)
+		{"claude-fable-5", 1_000_000},  // Fable 5 ships the 1M window as standard (FIR-2580)
+		{"claude-opus-4-8", 1_000_000}, // current Opus ships the 1M window as standard (FIR-1931)
 		{"claude-opus-4-7", 1_000_000},
 		{"claude-opus-4-6", 1_000_000},
 		{"claude-opus-4-5", 200_000},     // older Opus stays conservative until a 1M window is confirmed
@@ -125,14 +126,14 @@ func TestClampPercent(t *testing.T) {
 // even though real footprint data exists.
 func TestIdentifierNumber(t *testing.T) {
 	cases := []struct {
-		in      string
-		want    int32
-		wantOK  bool
+		in     string
+		want   int32
+		wantOK bool
 	}{
 		{"FIR-1931", 1931, true},
 		{"MUL-3375", 3375, true},
 		{"A-1", 1, true},
-		{"MULTI-WORD-42", 42, true}, // only the trailing -NUMBER matters
+		{"MULTI-WORD-42", 42, true},                        // only the trailing -NUMBER matters
 		{"b669a722-2e15-445a-b6a5-a5cdb576a989", 0, false}, // a UUID is not an identifier
 		{"FIR-", 0, false},
 		{"-1931", 0, false},

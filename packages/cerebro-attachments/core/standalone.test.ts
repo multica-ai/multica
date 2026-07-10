@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Attachment } from "@multica/core/types";
-import { standaloneAttachments } from "./standalone";
+import { standaloneAttachments, allIssueAttachments } from "./standalone";
 
 function att(over: Partial<Attachment>): Attachment {
   return {
@@ -53,5 +53,26 @@ describe("standaloneAttachments", () => {
     const bigger = att({ id: "a2", url: "https://cdn.test/dup-2.png", size_bytes: 999 });
     const result = standaloneAttachments([inline, bigger], `![x](${inline.url})`);
     expect(result.map((a) => a.id)).toEqual(["a2"]);
+  });
+});
+
+describe("allIssueAttachments (FIR-2710)", () => {
+  it("returns [] for empty/undefined input", () => {
+    expect(allIssueAttachments(undefined, undefined)).toEqual([]);
+    expect(allIssueAttachments([], [])).toEqual([]);
+  });
+
+  it("unions issue + comment attachments, deduped by id", () => {
+    const issue = att({ id: "a1" });
+    const shared = att({ id: "a2" });
+    const commentOnly = att({ id: "a3" });
+    const result = allIssueAttachments([issue, shared], [shared, commentOnly]);
+    expect(result.map((a) => a.id).sort()).toEqual(["a1", "a2", "a3"]);
+  });
+
+  it("keeps inline-referenced attachments (unlike standaloneAttachments)", () => {
+    // No content filtering here at all — the tab is the complete file index.
+    const inline = att({ id: "a1" });
+    expect(allIssueAttachments([inline], []).map((a) => a.id)).toEqual(["a1"]);
   });
 });

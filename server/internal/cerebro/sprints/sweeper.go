@@ -301,18 +301,18 @@ func (s *Sweeper) maybeCreateNext(ctx context.Context, settings cerebrodb.Cerebr
 		return pgtype.UUID{}, 0, 0, nil
 	}
 
-	latest, err := s.Cerebro.GetLatestCerebroSprintByProject(ctx, settings.ProjectID)
+	laterSprints, maxSequence, err := s.laterSprintsSummary(ctx, settings.ProjectID, active)
 	if err != nil {
 		return pgtype.UUID{}, 0, 0, err
 	}
-	if !uuidEqual(latest.ID, active.ID) {
-		// A later (planned) sprint already exists; nothing to create.
+	if laterSprints > 0 {
+		// A later planned/active sprint already exists; nothing to create.
 		return pgtype.UUID{}, 0, 0, nil
 	}
 
 	nextStart := ComputeNextStart(active.EndDate.Time, settings.DurationUnit, int(settings.StartWeekday))
 	nextEnd := ComputeEnd(nextStart, settings.DurationUnit, int(settings.DurationCount))
-	nextSeq := active.SequenceNo + 1
+	nextSeq := maxSequence + 1
 	nextName := ApplyNameTemplateWithDates(settings.NameTemplate, nextSeq, nextStart, nextEnd)
 
 	var (
@@ -376,6 +376,27 @@ func (s *Sweeper) maybeCreateNext(ctx context.Context, settings cerebrodb.Cerebr
 		return pgtype.UUID{}, 0, 0, err
 	}
 	return newSprintID, moved, cloned, nil
+}
+
+func (s *Sweeper) laterSprintsSummary(ctx context.Context, projectID pgtype.UUID, active cerebrodb.CerebroSprint) (int, int32, error) {
+	sprints, err := s.Cerebro.ListCerebroSprintsByProject(ctx, projectID)
+	if err != nil {
+		return 0, 0, err
+	}
+	maxSequence := active.SequenceNo
+	var blocking int
+	for _, sprint := range sprints {
+		if sprint.SequenceNo > maxSequence {
+			maxSequence = sprint.SequenceNo
+		}
+		if sprint.SequenceNo <= active.SequenceNo {
+			continue
+		}
+		if sprint.Status == StatusPlanned || sprint.Status == StatusActive {
+			blocking++
+		}
+	}
+	return blocking, maxSequence, nil
 }
 
 func (s *Sweeper) cloneRecurringTasks(ctx context.Context, tx pgx.Tx, cqtx *cerebrodb.Queries, dqtx *db.Queries, settings cerebrodb.CerebroSprintSetting, sprint cerebrodb.CerebroSprint) (int, error) {

@@ -29,7 +29,20 @@ func registerAsNote(ctx context.Context, q *cerebrodb.Queries, nt cerebrodb.Cere
 		Visibility: noteVisibilityWorkspace,
 		Pinned:     false,
 	})
-	return err
+	if err != nil {
+		return err
+	}
+	// FIR-2810: a recurring note (e.g. a business review) can switch author
+	// codes on for every note it materialises.
+	if nt.AuthorCodes {
+		if err := q.SetNoteAuthorCodes(ctx, cerebrodb.SetNoteAuthorCodesParams{
+			ArtifactID:  artifactID,
+			AuthorCodes: true,
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // assignNumber returns the running number to stamp on this materialisation and

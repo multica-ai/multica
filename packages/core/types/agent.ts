@@ -705,6 +705,11 @@ export interface CreateAgentContextChangeRequestRequest {
   thinking_level?: string;
   persona_sandbox?: string;
   skill_ids?: string[];
+  // CEREBRO-PATCH(agent-office-skills-mcp-versioned): FIR-1775 2b — config overrides on a change request.
+  /** Full replacement MCP config; null clears it. Omit to leave unchanged. */
+  mcp_config?: unknown;
+  custom_args?: unknown;
+  runtime_config?: unknown;
 }
 
 export interface ReviewAgentContextChangeRequestRequest {

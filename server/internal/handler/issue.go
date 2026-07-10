@@ -81,6 +81,13 @@ type IssueResponse struct {
 	OriginType *string        `json:"origin_type,omitempty"`
 	OriginID   *string        `json:"origin_id,omitempty"`
 	OnBehalfOf *OnBehalfOfRef `json:"on_behalf_of,omitempty"`
+	// CEREBRO-PATCH(issue-response-workflow-activation): FIR-2283 followup —
+	// present only on a create response when the request carried workflow_id.
+	// Lets a CLI/API caller confirm the issue actually started on the workflow
+	// (or read why it didn't) in the same call. omitempty keeps every other
+	// issue payload byte-identical.
+	WorkflowActivated       bool   `json:"workflow_activated,omitempty"`
+	WorkflowActivationError string `json:"workflow_activation_error,omitempty"`
 }
 
 // OnBehalfOfRef identifies the human a system/agent acted for, resolved from an
@@ -1912,6 +1919,11 @@ type QuickCreateIssueRequest struct {
 	Prompt        string `json:"prompt"`
 	ProjectID     string `json:"project_id,omitempty"`
 	ParentIssueID string `json:"parent_issue_id,omitempty"`
+	// CEREBRO-PATCH(quick-create-workflow-id): FIR-2283 followup — optional
+	// Issue workflow recipe to start the created issue on (the Create-with-
+	// agent modal's workflow picker). The agent creates the issue async, so
+	// the workflow is attached by the completion handler, not here.
+	WorkflowID string `json:"workflow_id,omitempty"`
 }
 
 // QuickCreateIssueResponse echoes the queued task id so the frontend can
@@ -2079,7 +2091,21 @@ func (h *Handler) QuickCreateIssue(w http.ResponseWriter, r *http.Request) {
 		parentIssueUUID = pid
 	}
 
-	task, err := h.TaskService.EnqueueQuickCreateTask(r.Context(), wsUUID, requesterUUID, agentUUID, squadUUID, prompt, projectUUID, parentIssueUUID)
+	// CEREBRO-PATCH(quick-create-workflow-id): FIR-2283 followup — optional
+	// Issue workflow to start the created issue on. Validate only that it is a
+	// UUID here (the trust boundary re-checks type/ownership at activation
+	// time, once the async-created issue exists). An empty value means "no
+	// workflow", same as the manual create path.
+	var workflowUUID pgtype.UUID
+	if strings.TrimSpace(req.WorkflowID) != "" {
+		wid, ok := parseUUIDOrBadRequest(w, req.WorkflowID, "workflow_id")
+		if !ok {
+			return
+		}
+		workflowUUID = wid
+	}
+
+	task, err := h.TaskService.EnqueueQuickCreateTask(r.Context(), wsUUID, requesterUUID, agentUUID, squadUUID, prompt, projectUUID, parentIssueUUID, workflowUUID)
 	if err != nil {
 		slog.Warn("quick-create enqueue failed", append(logger.RequestAttrs(r), "error", err)...)
 		writeError(w, http.StatusInternalServerError, "failed to enqueue quick-create task")
@@ -2199,6 +2225,13 @@ type CreateIssueRequest struct {
 	OriginID   *string `json:"origin_id,omitempty"`
 
 	AllowDuplicate bool `json:"allow_duplicate,omitempty"`
+
+	// CEREBRO-PATCH(create-issue-workflow-id): FIR-2283 followup — when set,
+	// the freshly created issue is immediately started on this Issue workflow
+	// recipe (same effect as the manual create modal's workflow picker, and
+	// as `multica issue create --workflow <id>`). Activation is best-effort:
+	// a failure is reported in the response but does not roll back the issue.
+	WorkflowID *string `json:"workflow_id,omitempty"`
 }
 
 func duplicateIssueMessage(issue IssueResponse) string {
@@ -2488,6 +2521,30 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 
 	resp := issueToResponse(issue, prefix)
 	resp.Attachments = buildAttachmentResponses(res.Attachments)
+
+	// CEREBRO-PATCH(create-issue-workflow-activate): FIR-2283 followup — start
+	// the new issue on the requested Issue workflow. Best-effort: the issue is
+	// already committed, so a failure is reported in the response, never rolled
+	// back. This is what gives the CLI (`--workflow`) and the REST API the same
+	// one-call "create + start on a workflow" the manual create modal has.
+	if req.WorkflowID != nil && *req.WorkflowID != "" {
+		switch {
+		case h.IssueWorkflowActivator == nil:
+			resp.WorkflowActivationError = "issue workflows are not enabled on this server"
+		default:
+			wfID, perr := util.ParseUUID(*req.WorkflowID)
+			if perr != nil {
+				resp.WorkflowActivationError = "workflow_id must be a valid id"
+			} else if aerr := h.IssueWorkflowActivator.ActivateForIssue(r.Context(), wsUUID, wfID, issue.ID, parseUUID(actualCreatorID), creatorType); aerr != nil {
+				resp.WorkflowActivationError = aerr.Error()
+				slog.Warn("create issue: workflow activation failed",
+					append(logger.RequestAttrs(r), "error", aerr, "issue_id", uuidToString(issue.ID), "workflow_id", *req.WorkflowID)...)
+			} else {
+				resp.WorkflowActivated = true
+			}
+		}
+	}
+
 	writeJSON(w, http.StatusCreated, resp)
 }
 

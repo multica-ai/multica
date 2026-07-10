@@ -51,6 +51,20 @@ const (
 	SettingAsk Setting = "ask"
 	// SettingDeny forbids the tool entirely. Most restrictive.
 	SettingDeny Setting = "deny"
+	// SettingDisable is a workspace-authoring-only state (product decision
+	// 2026-07-06, FIR-2351 follow-up): it makes a workspace Deny a hard,
+	// unopenable floor for this one permission — no Group/User/Agent Allow can
+	// loosen it, exactly like the existing credential/sandbox/repo floors, but
+	// choosable per permission instead of hardcoded. It is only ever authored at
+	// LayerWorkspace (validSetting in store.go rejects it elsewhere, and the
+	// write path already restricts workspace rows to owner/admin — see
+	// requireWorkspaceOwnerAdmin). SettingDisable never appears in an Effective
+	// verdict: resolveOpenable and resolveHardFloor both normalize it to
+	// SettingDeny via normalizeDisable before it can flow into rank()'s fold, so
+	// the "Effective.Setting is always Allow/Ask/Deny" contract holds. See
+	// resolveOpenable's workspaceDisabled handling for where the "cannot be
+	// loosened" behavior is actually enforced.
+	SettingDisable Setting = "disable"
 )
 
 // Layer identifies one rung of the policy chain.
@@ -68,6 +82,17 @@ const (
 	LayerGroup Layer = "group"
 	// LayerUser is the ceiling — the requesting user's own access.
 	LayerUser Layer = "user"
+	// LayerOnBehalfOf is the human the work is performed FOR — the task initiator
+	// in a delegated run (on_behalf_of), distinct from the agent owner at LayerUser
+	// (FIR-2441 — member as a full actor level). It is a TIGHTEN-ONLY layer: in the
+	// tighten-only Resolve it can only restrict, so a delegated member can be denied
+	// or ask-gated a tool across every agent they drive, but it can NEVER raise
+	// access. On the default-deny api-endpoint path (ConnectionEndpointEffective,
+	// which grants on an explicit Allow at any layer) its Allow is deliberately
+	// ignored — otherwise an on_behalf_of grant could open a default-deny secrets
+	// connection (infisical-admin) to whoever drives the agent. Modelling a member
+	// grant that WIDENS access is a separate, reviewed slice.
+	LayerOnBehalfOf Layer = "on_behalf_of"
 	// LayerSystem is the ceiling for runs with no human behind them (autopilot /
 	// system-triggered). It is a PEER of LayerUser at the mandate level: exactly
 	// one of User or System fills the ceiling slot per run, never both. A System
@@ -83,21 +108,42 @@ const (
 // LayerUser and LayerSystem are mutually exclusive per run (one mandate actor),
 // so listing both at the ceiling is safe: the absent one is Inherit and does not
 // constrain. Either can cap below the base, like a ceiling should.
-var chainOrder = []Layer{LayerWorkspace, LayerRuntime, LayerAgent, LayerGroup, LayerUser, LayerSystem}
+var chainOrder = []Layer{LayerWorkspace, LayerRuntime, LayerAgent, LayerGroup, LayerUser, LayerOnBehalfOf, LayerSystem}
 
 // rank maps a concrete setting to its restrictiveness. Higher is tighter.
 // Inherit (and any unknown value) returns -1 — "no opinion, pass through".
+//
+// SettingDisable ranks alongside SettingDeny (fail-safe: if a caller ever reads
+// a Disable value without routing it through normalizeDisable first, it still
+// behaves at least as restrictively as Deny rather than falling through to "no
+// opinion"). The two functions that fold a chain (resolveHardFloor,
+// resolveOpenable) always normalize Disable to Deny before it reaches rank(),
+// so this branch is a safety net, not the primary mechanism.
 func rank(s Setting) int {
 	switch s {
 	case SettingAllow:
 		return 0
 	case SettingAsk:
 		return 1
-	case SettingDeny:
+	case SettingDeny, SettingDisable:
 		return 2
 	default:
 		return -1
 	}
+}
+
+// normalizeDisable folds the authoring-only SettingDisable to SettingDeny.
+// Every read of a Settings map entry inside resolveHardFloor and
+// resolveOpenable goes through this first, so SettingDisable never flows into
+// rank()'s fold and Effective.Setting never leaks anything but Allow/Ask/Deny.
+// Disable's actual distinguishing behavior — that nothing below the workspace
+// layer may loosen it — is enforced separately in resolveOpenable, since a
+// plain rank/fold cannot express "loosening is forbidden here specifically."
+func normalizeDisable(s Setting) Setting {
+	if s == SettingDisable {
+		return SettingDeny
+	}
+	return s
 }
 
 // MoreRestrictive returns the tighter of two concrete settings. Inherit is
@@ -152,7 +198,46 @@ type Effective struct {
 // Allowed reports whether the tool may run without an approval pause.
 func (e Effective) Allowed() bool { return e.Setting == SettingAllow }
 
-// Resolve folds the chain into a single Effective verdict.
+// Mode selects which resolution semantics a call site needs (FIR-2351). It is
+// the single switch that keeps chain resolution to ONE function body per
+// semantics instead of two hand-synced top-level algorithms: the on_behalf_of
+// parity gap between Resolve and ResolveMemberOverride (fixed just before this
+// change) drifted in precisely because the two were separate functions that
+// had to be updated in lockstep by hand. ResolveWithMode is now the single
+// place either algorithm is read or changed; Resolve and ResolveMemberOverride
+// below are thin, behavior-preserving wrappers kept for every existing caller.
+type Mode string
+
+const (
+	// ModeOpenable is the general tool-policy gate's semantics (FIR-2175): the
+	// member layers — Workspace (as the root default), Group, User — may OPEN a
+	// closed floor, the most specific explicit member setting winning. Runtime,
+	// Agent, on_behalf_of, and System sit above the member ceiling and may only
+	// TIGHTEN it, never loosen it. See ResolveMemberOverride for the full model.
+	ModeOpenable Mode = "openable"
+	// ModeHardFloor is the deny-by-default floors' semantics — credentials, the
+	// OS sandbox, repo checkout, the repo-approval cap. Every layer may only
+	// tighten below Base; a Base=Deny floor can never be loosened from below by
+	// any layer, member or not. See Resolve for the full model.
+	ModeHardFloor Mode = "hard_floor"
+)
+
+// ResolveWithMode folds the chain into one Effective verdict, in the semantics
+// mode selects. It is the only resolution algorithm in this package —
+// ModeHardFloor and ModeOpenable are two branches of one function, not two
+// independently maintained ones. New call sites should call this directly
+// with an explicit mode; Resolve and ResolveMemberOverride remain for the
+// existing call sites and are equivalent to ResolveWithMode(ModeHardFloor, in)
+// and ResolveWithMode(ModeOpenable, in) respectively.
+func ResolveWithMode(mode Mode, in Input) Effective {
+	if mode == ModeOpenable {
+		return resolveOpenable(in)
+	}
+	return resolveHardFloor(in)
+}
+
+// Resolve folds the chain into a single Effective verdict using the
+// tighten-only, deny-by-default-floor semantics (ModeHardFloor).
 //
 // Algorithm (walk base → ceiling):
 //
@@ -165,7 +250,16 @@ func (e Effective) Allowed() bool { return e.Setting == SettingAllow }
 //
 // Because step 3 is a monotonic max over restrictiveness, the effective setting
 // is independent of layer order; only DecidedBy / CappedBy depend on the walk.
+//
+// This is the load-bearing resolver for every deny-by-default floor —
+// credentials, the OS sandbox, repo checkout, the approval cap. It MUST NEVER
+// loosen a Base=Deny floor from below. See ResolveMemberOverride for the
+// openable, member-layer counterpart used by the general tool-policy gate.
 func Resolve(in Input) Effective {
+	return resolveHardFloor(in)
+}
+
+func resolveHardFloor(in Input) Effective {
 	base := in.Base
 	if rank(base) < 0 {
 		base = SettingAllow
@@ -177,7 +271,7 @@ func Resolve(in Input) Effective {
 	var cappedBy Layer
 
 	for _, layer := range chainOrder {
-		v := in.Settings[layer]
+		v := normalizeDisable(in.Settings[layer])
 		if rank(v) < 0 {
 			continue // Inherit / absent — follow the layer below.
 		}
@@ -233,8 +327,25 @@ func Resolve(in Input) Effective {
 //	  own setting is authoritative for the member; group/workspace are the
 //	  inherited defaults it can override.
 //	Stage B — the AGENT inherits the member verdict as a CEILING, then Runtime,
-//	  Agent (and System) may only TIGHTEN it. An agent can never do more than its
-//	  member; a Deny on runtime/agent wins even when member/workspace say Allow.
+//	  Agent, on_behalf_of (and System) may only TIGHTEN it — with ONE exception
+//	  (FIR-2351, product decision 2026-07-06): when the member verdict came from
+//	  the WORKSPACE default (no explicit Group/User row), an explicit Agent-layer
+//	  setting may OPEN it, so an operator can grant one agent a tool the
+//	  workspace default denies. An explicit Group or User row is still an
+//	  absolute ceiling for the agent. A Deny on runtime/agent wins even when
+//	  member/workspace say Allow. on_behalf_of (the delegated task initiator,
+//	  FIR-2441) is a peer of runtime here — tighten-only, same as under Resolve —
+//	  so a member driving someone else's agent can be restricted but can never
+//	  widen what that agent's own owner allows.
+//
+// EXCEPTION TO THE EXCEPTION (product decision 2026-07-06): when the workspace
+// row is SettingDisable rather than an ordinary Deny, none of the above
+// loosening applies — Stage A never lets Group/User override it and the
+// Stage B agent-opening exception never fires. It behaves exactly like a
+// hard floor for that one permission, settable and clearable only by a
+// workspace owner/admin (an explicit per-permission alternative to the
+// hardcoded credential/sandbox/repo floors). See workspaceDisabled in
+// resolveOpenable.
 //
 // CONTRAST WITH Resolve: Resolve is pure most-restrictive-wins (tighten-only at
 // every layer) and is the load-bearing invariant for the deny-by-default gates —
@@ -243,10 +354,23 @@ func Resolve(in Input) Effective {
 // deny-by-default floor. It is for the general tool-policy chain only, behind the
 // member-override feature flag. Keep credentials/sandbox/etc. on Resolve.
 func ResolveMemberOverride(in Input) Effective {
+	return resolveOpenable(in)
+}
+
+func resolveOpenable(in Input) Effective {
 	base := in.Base
 	if rank(base) < 0 {
 		base = SettingAllow
 	}
+
+	// FIR-2351 follow-up (product decision 2026-07-06): an explicit Disable at
+	// the workspace layer is the opposite of "openable" — a hard floor for this
+	// one permission that nothing below the workspace layer may loosen, unlike
+	// an ordinary workspace Deny. workspaceDisabled short-circuits every
+	// loosening path below (Stage A's Group/User specificity and the Agent-
+	// opening exception); Runtime/Agent/OnBehalfOf/System can still TIGHTEN it
+	// further in Stage B, same as any other Deny.
+	workspaceDisabled := in.Settings[LayerWorkspace] == SettingDisable
 
 	// Stage A — member effective by specificity: the most specific explicit
 	// layer wins (User > Group > Workspace). Iterating broad→specific and
@@ -254,20 +378,45 @@ func ResolveMemberOverride(in Input) Effective {
 	memberEff := base
 	var memberDecidedBy Layer
 	for _, layer := range []Layer{LayerWorkspace, LayerGroup, LayerUser} {
-		if v := in.Settings[layer]; rank(v) >= 0 {
+		if workspaceDisabled && layer != LayerWorkspace {
+			continue // a Disabled workspace floor cannot be loosened by Group/User.
+		}
+		v := in.Settings[layer]
+		if layer == LayerWorkspace {
+			v = normalizeDisable(v)
+		}
+		if rank(v) >= 0 {
 			memberEff = v
 			memberDecidedBy = layer
 		}
 	}
 
-	// Stage B — the agent inherits the member ceiling; runtime/agent/system may
-	// only tighten it. A layer trying to loosen is ignored.
+	// Stage B — the agent inherits the member ceiling; runtime/agent/on_behalf_of/
+	// system may only tighten it. A layer trying to loosen is ignored.
 	resolved := memberEff
 	decidedBy := memberDecidedBy
 	var cappedBy Layer
-	memberRank := rank(memberEff)
-	for _, layer := range []Layer{LayerRuntime, LayerAgent, LayerSystem} {
-		v := in.Settings[layer]
+
+	// Agent opening (FIR-2351, product decision 2026-07-06): a workspace-authored
+	// setting is a DEFAULT, not a cap — an operator with permission-write rights
+	// must be able to open it for one specific agent ("give this agent access even
+	// though the workspace default says deny"). So an explicit Agent-layer setting
+	// may LOOSEN the running value, but only when the member verdict came from the
+	// workspace default (or the base) — an explicit Group or User row is the
+	// member's own ceiling and an agent can never exceed its member, exactly as
+	// before. Who may AUTHOR an agent row is the write path's job
+	// (RequireToolPolicyWritePolicy); resolution trusts authored rows. A Disabled
+	// workspace floor is never openable this way, regardless of member verdict.
+	if v := in.Settings[LayerAgent]; !workspaceDisabled && rank(v) >= 0 &&
+		(memberDecidedBy == "" || memberDecidedBy == LayerWorkspace) &&
+		rank(v) < rank(resolved) {
+		resolved = v
+		decidedBy = LayerAgent
+	}
+
+	memberRank := rank(resolved)
+	for _, layer := range []Layer{LayerRuntime, LayerAgent, LayerOnBehalfOf, LayerSystem} {
+		v := normalizeDisable(in.Settings[layer])
 		if rank(v) < 0 {
 			continue // Inherit / absent — no opinion.
 		}
@@ -297,11 +446,15 @@ func ResolveMemberOverride(in Input) Effective {
 		}
 	}
 
+	reason := reasonFor(resolved, decidedBy, cappedBy)
+	if workspaceDisabled && decidedBy == LayerWorkspace {
+		reason = "Disabled by workspace"
+	}
 	return Effective{
 		Setting:   resolved,
 		DecidedBy: decidedBy,
 		CappedBy:  cappedBy,
-		Reason:    reasonFor(resolved, decidedBy, cappedBy),
+		Reason:    reason,
 	}
 }
 

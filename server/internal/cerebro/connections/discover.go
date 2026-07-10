@@ -28,9 +28,16 @@ import (
 )
 
 // discoveredEndpoint is one path and the HTTP methods declared on it in the spec.
+// Summary is the human-readable label the spec declares for the path — the path
+// item's own summary, or the first operation summary in verb order. A
+// personalized registry spec labels its per-resource paths with the resource's
+// name (e.g. "Execute data source: Orders"), so carrying it through lets the
+// permissions UI and the agent-facing tool description show that name instead
+// of a bare "<METHOD> /data-sources/<uuid>/execute".
 type discoveredEndpoint struct {
 	Path    string   `json:"path"`
 	Methods []string `json:"methods"`
+	Summary string   `json:"summary,omitempty"`
 }
 
 // httpVerbs is the set of OpenAPI path-item keys that are real HTTP operations.
@@ -60,23 +67,105 @@ var specCandidatePaths = []string{
 	"/swagger/v1/swagger.json",
 }
 
+// specAuthRejection records a spec candidate that answered 401/403 — the
+// strongest signal the admin's credential (not the URL) is the problem. Without
+// surfacing this, a rejected key reads as "no spec found" and admins chase the
+// URL instead of the key (FIR-2640).
+type specAuthRejection struct {
+	URL        string
+	StatusCode int
+}
+
 // discoverAPIEndpoints attempts to find and parse an OpenAPI/Swagger spec for the
 // given API base URL, returning the declared endpoints sorted by path. It tries,
 // in order: the URL itself (it may already point at a spec), then the well-known
 // spec paths appended to the URL, then the same paths on the URL's origin. The
-// first candidate that parses into at least one endpoint wins. Returns nil (no
-// error) when nothing parses — discovery is best-effort and never fails a test.
-func discoverAPIEndpoints(ctx context.Context, client *http.Client, baseURL string, auth AuthConfig) []discoveredEndpoint {
+// first candidate that parses into at least one endpoint wins. Returns nil
+// endpoints when nothing parses — discovery is best-effort and never fails a
+// test — plus the first auth rejection (401/403) seen, so the caller can tell
+// the admin their credential was refused rather than pretend no spec exists.
+func discoverAPIEndpoints(ctx context.Context, client *http.Client, baseURL string, auth AuthConfig) ([]discoveredEndpoint, *specAuthRejection) {
+	var rejection *specAuthRejection
 	for _, candidate := range specCandidates(baseURL) {
-		body, ok := fetchSpec(ctx, client, candidate, auth)
+		body, status, ok := fetchSpec(ctx, client, candidate, auth)
 		if !ok {
+			if rejection == nil && (status == http.StatusUnauthorized || status == http.StatusForbidden) {
+				rejection = &specAuthRejection{URL: candidate, StatusCode: status}
+			}
 			continue
 		}
 		if eps := parseSpec(body); len(eps) > 0 {
-			return eps
+			return eps, nil
 		}
 	}
-	return nil
+	return nil, rejection
+}
+
+// resolveExplicitSpec resolves the endpoint catalogue from an explicitly
+// provided spec — an uploaded document (specContent) or a direct spec URL.
+// Unlike the best-effort probing above, explicit input gets an explicit error
+// message back when it cannot be used, so the admin knows what to fix.
+func resolveExplicitSpec(ctx context.Context, client *http.Client, specURL, specContent string, auth AuthConfig) ([]discoveredEndpoint, string) {
+	if strings.TrimSpace(specContent) != "" {
+		if eps := parseSpec([]byte(specContent)); len(eps) > 0 {
+			return eps, ""
+		}
+		return nil, "the uploaded document is not a parsable OpenAPI/Swagger spec (no endpoints found)"
+	}
+	specURL = strings.TrimSpace(specURL)
+	body, status, ok := fetchSpec(ctx, client, specURL, auth)
+	if !ok {
+		switch status {
+		case 0:
+			return nil, "could not fetch the spec URL (unreachable)"
+		case http.StatusUnauthorized, http.StatusForbidden:
+			// A rejected credential should not leave the admin empty-handed:
+			// fall back to the document the API serves anonymously (mirrors the
+			// registry docs page), with a warning that names the real problem.
+			if hasCredential(auth) {
+				if anonBody, _, anonOK := fetchSpec(ctx, client, specURL, stripCredentials(auth)); anonOK {
+					if eps := parseSpec(anonBody); len(eps) > 0 {
+						return eps, fmt.Sprintf("the spec URL rejected the connection's credential (HTTP %d) — showing the API's public document instead; fix the Bearer token / API key to see key-specific endpoints", status)
+					}
+				}
+			}
+			return nil, fmt.Sprintf("the spec URL rejected the connection's credential (HTTP %d) — check the Bearer token / API key", status)
+		default:
+			return nil, fmt.Sprintf("could not fetch the spec URL (HTTP %d)", status)
+		}
+	}
+	if eps := parseSpec(body); len(eps) > 0 {
+		return eps, ""
+	}
+	if looksLikeHTML(body) {
+		return nil, "the spec URL returned an HTML page instead of an OpenAPI/Swagger document — likely a login wall (e.g. Cloudflare Access) in front of the API"
+	}
+	return nil, "the spec URL did not return a parsable OpenAPI/Swagger document"
+}
+
+// hasCredential reports whether the config carries an API credential (Bearer
+// token or API key). Cloudflare Access service tokens are transport-level and
+// do not count — they open the network path, they are not the API identity.
+func hasCredential(auth AuthConfig) bool {
+	return auth.BearerToken != "" || auth.APIKey != ""
+}
+
+// stripCredentials returns the auth config without the API credential, keeping
+// Cloudflare Access headers so an anonymous retry can still traverse a login
+// wall in front of the API.
+func stripCredentials(auth AuthConfig) AuthConfig {
+	return AuthConfig{
+		CFAccessID:     auth.CFAccessID,
+		CFAccessSecret: auth.CFAccessSecret,
+	}
+}
+
+// looksLikeHTML reports whether a fetched body is an HTML page rather than a
+// JSON/YAML document — the signature of an auth portal or error page served
+// with a 200 status.
+func looksLikeHTML(body []byte) bool {
+	head := strings.ToLower(strings.TrimSpace(string(body[:min(len(body), 512)])))
+	return strings.HasPrefix(head, "<!doctype html") || strings.HasPrefix(head, "<html")
 }
 
 // specCandidates builds the ordered, de-duplicated list of URLs to probe for a
@@ -116,31 +205,32 @@ func specCandidates(baseURL string) []string {
 }
 
 // fetchSpec GETs a candidate URL and returns its body when the response looks
-// like a usable document (2xx, non-empty). Auth + Cloudflare Access headers are
+// like a usable document (2xx, non-empty), plus the HTTP status code (0 when
+// the request never got a response). Auth + Cloudflare Access headers are
 // attached so specs behind auth are reachable.
-func fetchSpec(ctx context.Context, client *http.Client, specURL string, auth AuthConfig) ([]byte, bool) {
+func fetchSpec(ctx context.Context, client *http.Client, specURL string, auth AuthConfig) ([]byte, int, bool) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, specURL, nil)
 	if err != nil {
-		return nil, false
+		return nil, 0, false
 	}
 	req.Header.Set("Accept", "application/json, application/yaml, text/yaml, */*")
 	addAuthHeaders(req, auth)
 
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, false
+		return nil, 0, false
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, false
+		return nil, resp.StatusCode, false
 	}
 	// Cap the read so a stray non-spec endpoint streaming a large body can't
 	// blow up memory. 8 MiB comfortably fits even large specs.
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
 	if err != nil || len(body) == 0 {
-		return nil, false
+		return nil, resp.StatusCode, false
 	}
-	return body, true
+	return body, resp.StatusCode, true
 }
 
 // parseSpec parses an OpenAPI v3 or Swagger v2 document (JSON or YAML) and
@@ -184,10 +274,37 @@ func parseSpec(body []byte) []discoveredEndpoint {
 			continue
 		}
 		sort.Strings(methods)
-		out = append(out, discoveredEndpoint{Path: path, Methods: methods})
+		out = append(out, discoveredEndpoint{Path: path, Methods: methods, Summary: pathSummary(item)})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Path < out[j].Path })
 	return out
+}
+
+// pathSummary picks the human-readable label for a path item: the path item's
+// own `summary`, or the first non-empty operation `summary` in deterministic
+// verb order. Descriptions are deliberately not used — they are long-form prose,
+// while summaries are the one-line labels specs put on operations.
+func pathSummary(item map[string]any) string {
+	if s, ok := item["summary"].(string); ok && strings.TrimSpace(s) != "" {
+		return strings.TrimSpace(s)
+	}
+	verbs := make([]string, 0, len(item))
+	for key := range item {
+		if _, isVerb := httpVerbs[strings.ToLower(key)]; isVerb {
+			verbs = append(verbs, key)
+		}
+	}
+	sort.Strings(verbs)
+	for _, verb := range verbs {
+		op, ok := item[verb].(map[string]any)
+		if !ok {
+			continue
+		}
+		if s, ok := op["summary"].(string); ok && strings.TrimSpace(s) != "" {
+			return strings.TrimSpace(s)
+		}
+	}
+	return ""
 }
 
 // decodeSpecDoc decodes a spec body to a generic map, trying JSON first then

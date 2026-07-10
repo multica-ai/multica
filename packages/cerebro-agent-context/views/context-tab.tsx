@@ -66,7 +66,7 @@ export function CerebroAgentContextTab({
             instead of drifting.
           </p>
         </div>
-        <AgentContextProposeDialog agent={agent} />
+        <AgentContextProposeDialog agent={agent} canReview={canManage} />
       </div>
 
       <div className="my-1 h-px bg-border" />

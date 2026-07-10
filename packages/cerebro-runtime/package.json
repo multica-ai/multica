@@ -22,7 +22,8 @@
     "@multica/views": "workspace:*",
     "@tanstack/react-query": "catalog:",
     "lucide-react": "catalog:",
-    "sonner": "^2.0.7"
+    "sonner": "^2.0.7",
+    "zustand": "catalog:"
   },
   "peerDependencies": {
     "react": "catalog:"

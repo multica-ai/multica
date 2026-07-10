@@ -3,22 +3,24 @@
 -- default (USD + the wakeup-limit defaults), so callers treat pgx.ErrNoRows as
 -- "use default", not an error.
 SELECT workspace_id, display_currency, wakeup_max_self_per_issue,
-       wakeup_min_interval_minutes, default_agent_start_kind, updated_at, updated_by
+       wakeup_min_interval_minutes, wakeup_max_consecutive_loops,
+       default_agent_start_kind, updated_at, updated_by
 FROM cerebro_workspace_settings
 WHERE workspace_id = $1;
 
 -- name: UpsertCerebroWorkspaceWakeupLimits :exec
--- TECH-3298: set (or change) the per-workspace self-wakeup limits. Only the two
--- wakeup columns are touched on conflict so an existing display_currency choice
--- is preserved.
+-- TECH-3298 / FIR-2679: set (or change) the per-workspace self-wakeup limits.
+-- Only the wakeup columns are touched on conflict so an existing display_currency
+-- choice is preserved.
 INSERT INTO cerebro_workspace_settings (
     workspace_id, wakeup_max_self_per_issue, wakeup_min_interval_minutes,
-    updated_at, updated_by
+    wakeup_max_consecutive_loops, updated_at, updated_by
 )
-VALUES ($1, $2, $3, now(), $4)
+VALUES ($1, $2, $3, $4, now(), $5)
 ON CONFLICT (workspace_id) DO UPDATE
 SET wakeup_max_self_per_issue = EXCLUDED.wakeup_max_self_per_issue,
     wakeup_min_interval_minutes = EXCLUDED.wakeup_min_interval_minutes,
+    wakeup_max_consecutive_loops = EXCLUDED.wakeup_max_consecutive_loops,
     updated_at = now(),
     updated_by = EXCLUDED.updated_by;
 

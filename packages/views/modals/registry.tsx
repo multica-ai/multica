@@ -12,6 +12,9 @@ import { DeleteIssueConfirmModal } from "./delete-issue-confirm";
 import { BacklogAgentHintModal } from "./backlog-agent-hint";
 // CEREBRO-PATCH(sidebar-new-message-modal): JEH-1296 global new-message modal
 import { CerebroNewMessageModal } from "./cerebro-new-message";
+// CEREBRO-PATCH(run-confirm-mount): FIR-2553 — restore the run-confirm modal
+// mount our diverged registry dropped when the upstream feature was cherry-picked.
+import { RunConfirmModal } from "./run-confirm";
 
 export function ModalRegistry() {
   const modal = useModalStore((s) => s.modal);
@@ -44,6 +47,10 @@ export function ModalRegistry() {
     // CEREBRO-PATCH(sidebar-new-message-modal): JEH-1296 global new-message modal
     case "new-message":
       return <CerebroNewMessageModal />;
+    // CEREBRO-PATCH(run-confirm-mount): FIR-2553 — assigning an agent opens this
+    // confirm dialog; without the mount the change was set but never rendered.
+    case "issue-run-confirm":
+      return <RunConfirmModal onClose={close} data={data} />;
     default:
       return null;
   }

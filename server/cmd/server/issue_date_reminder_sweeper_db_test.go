@@ -15,7 +15,17 @@ import (
 )
 
 // createDueTodayIssue inserts an open issue assigned to assigneeID with
-// due_date = now(), so it falls on "today" in any timezone. Returns the UUID.
+// due_date set to "today" in the assignee's resolved timezone. Returns the UUID.
+//
+// CEREBRO-PATCH(issue-date-reminders): due_date is a DATE column (migration
+// 112), so a naive now() stores the CI session's UTC calendar day. The
+// eligibility check in ClaimArrivingDateReminders compares against
+// date(now() AT TIME ZONE cerebro_safe_timezone(u.timezone)) — the Copenhagen
+// day. Between ~22:00 and 24:00 UTC (summer) those two days differ, so the UTC
+// due_date no longer equals the Copenhagen "today" and both issues silently
+// drop from the sweep (flaky evening CI red, no error). Storing due_date in the
+// same resolved timezone the query uses makes the fixture deterministic at any
+// wall-clock hour, without touching production sweep behavior.
 func createDueTodayIssue(t *testing.T, workspaceID, assigneeID string) string {
 	t.Helper()
 	ctx := context.Background()
@@ -29,7 +39,10 @@ func createDueTodayIssue(t *testing.T, workspaceID, assigneeID string) string {
 		                   creator_type, creator_id, assignee_type, assignee_id,
 		                   due_date, position, number)
 		SELECT $1, 'date reminder tz test', 'todo', 'medium', 'issue',
-		       'member', $2, 'member', $2, now(), 0, issue_counter FROM bump
+		       'member', $2, 'member', $2,
+		       date(now() AT TIME ZONE cerebro_safe_timezone(
+		           (SELECT timezone FROM "user" WHERE id = $2))),
+		       0, issue_counter FROM bump
 		RETURNING id
 	`, workspaceID, assigneeID).Scan(&issueID)
 	if err != nil {

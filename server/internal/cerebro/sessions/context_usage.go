@@ -27,6 +27,7 @@ package sessions
 import (
 	"context"
 	"net/http"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -63,6 +64,13 @@ type contextUsageResponse struct {
 	// predate footprint history.
 	Compactions       int  `json:"compactions"`
 	LastRunCompaction bool `json:"last_run_compaction"`
+	// FIR-2279: when the most recent run in this session finished. The prompt
+	// cache Anthropic keeps warm lives ~5 minutes past the last call, so the
+	// context bar counts down from this toward a "cache cold" state — resuming
+	// after it means the next run re-pays the full cache-write instead of a cheap
+	// read. Nil (omitted) when there is no run with usage yet; an older client
+	// simply shows no timer. RFC3339 UTC.
+	LastActivityAt *string `json:"last_activity_at,omitempty"`
 }
 
 // ContextUsage serves GET /api/cerebro/issues/{issueId}/sessions/context-usage.
@@ -120,6 +128,14 @@ func (h *Handler) ContextUsage(w http.ResponseWriter, r *http.Request) {
 	resp.OutputTokens = u.output
 	resp.ContextTokens, resp.MaxContextTokens, resp.UsedPercent, resp.CacheSharePercent, resp.Approximate = u.derive()
 
+	// FIR-2279: expose when the latest run finished so the bar can show the
+	// prompt-cache warm/cold countdown. Only set when we actually have a
+	// timestamp — otherwise the field is omitted and no timer renders.
+	if u.lastActivityAt.Valid {
+		s := u.lastActivityAt.Time.UTC().Format(time.RFC3339)
+		resp.LastActivityAt = &s
+	}
+
 	// FIR-1960: track compactions inside the measurement itself. Best-effort — a
 	// failure here must never blank the bar, so a query error just leaves the
 	// counts at zero rather than failing the whole response.
@@ -136,6 +152,9 @@ type runUsage struct {
 	input, cacheRead, cacheWrite, output int64
 	footprintInput, footprintCacheRead   int64
 	model                                string
+	// FIR-2279: when the latest run in the session finished (completed_at, else
+	// started_at, else created_at) — the anchor for the prompt-cache countdown.
+	lastActivityAt pgtype.Timestamptz
 }
 
 // derive turns a run's components into the displayed context figures: prefer the
@@ -180,7 +199,8 @@ func (h *Handler) latestRunUsage(ctx context.Context, issueID, rootID pgtype.UUI
 		       COALESCE(SUM(tu.output_tokens), 0),
 		       MAX(tu.model),
 		       COALESCE(MAX(cf.input_tokens), 0),
-		       COALESCE(MAX(cf.cache_read_tokens), 0)
+		       COALESCE(MAX(cf.cache_read_tokens), 0),
+		       COALESCE(t.completed_at, t.started_at, t.created_at)
 		FROM agent_task_queue t
 		JOIN task_usage tu ON tu.task_id = t.id
 		LEFT JOIN cerebro_task_context_footprint cf ON cf.task_id = t.id
@@ -194,7 +214,7 @@ func (h *Handler) latestRunUsage(ctx context.Context, issueID, rootID pgtype.UUI
 	var u runUsage
 	var model pgtype.Text
 	err := h.pool.QueryRow(ctx, q, issueID, rootID, isFirst).
-		Scan(&u.input, &u.cacheRead, &u.cacheWrite, &u.output, &model, &u.footprintInput, &u.footprintCacheRead)
+		Scan(&u.input, &u.cacheRead, &u.cacheWrite, &u.output, &model, &u.footprintInput, &u.footprintCacheRead, &u.lastActivityAt)
 	if err != nil {
 		if err == pgx.ErrNoRows {
 			return runUsage{}, false, nil

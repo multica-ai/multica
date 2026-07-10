@@ -88,10 +88,11 @@ func TestGeminiStaticModelsExposesAliasesAndGemini3(t *testing.T) {
 	}
 }
 
-func TestCodexStaticModelsExposesGPT55(t *testing.T) {
+// CEREBRO-PATCH(codex-gpt-5-6-models): guard the Codex models exposed in the agent model picker.
+func TestCodexStaticModelsExposesGPT56(t *testing.T) {
 	// Codex CLI has no `models list` subcommand so the catalog is
 	// hand-maintained. Regression guard for multica-ai/multica#2009 —
-	// GPT-5.5 must be selectable, and the badge default must point at
+	// the latest GPT-5.6 models must be selectable, and the badge default must point at
 	// the latest release rather than lagging a version behind.
 	models := codexStaticModels()
 	ids := map[string]Model{}
@@ -99,6 +100,7 @@ func TestCodexStaticModelsExposesGPT55(t *testing.T) {
 		ids[m.ID] = m
 	}
 	for _, want := range []string{
+		"gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna",
 		"gpt-5.5", "gpt-5.5-mini",
 		"gpt-5.4", "gpt-5.4-mini",
 		"gpt-5.3-codex", "gpt-5",
@@ -108,9 +110,9 @@ func TestCodexStaticModelsExposesGPT55(t *testing.T) {
 			t.Errorf("missing expected Codex model %q in: %+v", want, models)
 		}
 	}
-	latest, ok := ids["gpt-5.5"]
+	latest, ok := ids["gpt-5.6-sol"]
 	if !ok || !latest.Default {
-		t.Errorf("expected `gpt-5.5` to be the default Codex entry, got %+v", latest)
+		t.Errorf("expected `gpt-5.6-sol` to be the default Codex entry, got %+v", latest)
 	}
 	defaults := 0
 	for _, m := range models {
@@ -499,6 +501,33 @@ bareword-only-line
 	// the legacy `provider:model` form gets colon→slash normalization.
 	if models[3].ID != "opencode/claude-sonnet-4-6:exp" || models[3].Provider != "opencode" {
 		t.Errorf("expected ':' inside table-format model name to be preserved: %+v", models[3])
+	}
+}
+
+// CEREBRO-PATCH(pi-model-discovery-stable-dir): FIR-2992
+func TestDiscoverPiModelsRunsFromUserHome(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fake pi binary is a /bin/sh script")
+	}
+
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	fakePath := filepath.Join(t.TempDir(), "pi")
+	writeTestExecutable(t, fakePath, []byte(`#!/bin/sh
+if [ "$PWD" != "$HOME" ]; then
+  echo "Error: invalid working directory"
+  exit 1
+fi
+echo "provider model context max-out thinking images"
+echo "xai-auth grok-4.5 500K 131.1K yes yes"
+`))
+
+	models, err := discoverPiModels(context.Background(), fakePath)
+	if err != nil {
+		t.Fatalf("discoverPiModels: %v", err)
+	}
+	if len(models) != 1 || models[0].ID != "xai-auth/grok-4.5" {
+		t.Fatalf("expected Pi catalog discovered from user home, got %+v", models)
 	}
 }
 

@@ -29,6 +29,7 @@ type createWakeupRequest struct {
 	WatchIssueID  *string `json:"watch_issue_id,omitempty"`
 	WatchStatus   *string `json:"watch_status,omitempty"`
 	OnIssueStatus *string `json:"on_issue_status,omitempty"`
+	Model         *string `json:"model,omitempty"`
 }
 
 type wakeupResponse struct {
@@ -49,6 +50,7 @@ type wakeupResponse struct {
 	ClaimedAt    *string `json:"claimed_at,omitempty"`
 	DispatchedAt *string `json:"dispatched_at,omitempty"`
 	CancelledAt  *string `json:"cancelled_at,omitempty"`
+	Model        *string `json:"model,omitempty"`
 }
 
 func NewHandler(svc *Service) *Handler {
@@ -150,6 +152,10 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	if req.WatchStatus != nil && strings.TrimSpace(*req.WatchStatus) != "" {
 		watchStatus = pgtype.Text{String: strings.TrimSpace(*req.WatchStatus), Valid: true}
 	}
+	modelOverride := ""
+	if req.Model != nil {
+		modelOverride = strings.TrimSpace(*req.Model)
+	}
 	var createdBy pgtype.UUID
 	if raw := strings.TrimSpace(r.Header.Get("X-User-ID")); raw != "" {
 		createdBy, _ = util.ParseUUID(raw)
@@ -169,6 +175,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		WatchStatus:     watchStatus,
 		CreatedByID:     createdBy,
 		OriginCommentID: originCommentID,
+		ModelOverride:   modelOverride,
 	})
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
@@ -296,7 +303,17 @@ func toResponse(row cerebrodb.CerebroAgentWakeup) wakeupResponse {
 		ClaimedAt:    timePtr(row.ClaimedAt),
 		DispatchedAt: timePtr(row.DispatchedAt),
 		CancelledAt:  timePtr(row.CancelledAt),
+		Model:        strPtr(row.ModelOverride),
 	}
+}
+
+// strPtr returns nil for an empty string so an unset model_override is omitted
+// from the JSON response rather than serialized as "".
+func strPtr(s string) *string {
+	if s == "" {
+		return nil
+	}
+	return &s
 }
 
 func uuidPtr(v pgtype.UUID) *string {

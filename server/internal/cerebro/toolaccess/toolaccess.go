@@ -51,6 +51,10 @@ type Query struct {
 	RuntimeCapabilities []byte
 	AgentID             pgtype.UUID
 	UserID              pgtype.UUID
+	// OnBehalfOfID is the delegated member (task initiator) the work is performed
+	// for, resolved as the tighten-only on_behalf_of policy layer distinct from
+	// UserID (the agent owner) (FIR-2441). Zero when there is no delegation.
+	OnBehalfOfID pgtype.UUID
 }
 
 type EffectiveTool struct {
@@ -140,12 +144,13 @@ func (s *Service) ListEffectiveTools(ctx context.Context, q Query) ([]EffectiveT
 	for _, t := range tools {
 		desc := DescriptorForTool(t)
 		policy, err := s.policy.Resolve(ctx, toolpolicy.Query{
-			WorkspaceID: q.WorkspaceID,
-			ToolKey:     desc.ToolKey,
-			RuntimeID:   q.RuntimeID,
-			AgentID:     q.AgentID,
-			UserID:      q.UserID,
-			Base:        toolpolicy.SettingAllow,
+			WorkspaceID:  q.WorkspaceID,
+			ToolKey:      desc.ToolKey,
+			RuntimeID:    q.RuntimeID,
+			AgentID:      q.AgentID,
+			UserID:       q.UserID,
+			OnBehalfOfID: q.OnBehalfOfID,
+			Base:         toolpolicy.SettingAllow,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("resolve policy for %s: %w", desc.ToolKey, err)

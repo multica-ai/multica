@@ -1,9 +1,9 @@
 // Package pricing converts model token usage into a cents-denominated cost.
 //
-// The price table lives in code rather than the database because it is
-// provider pricing — it changes when we deploy, not when a workspace owner
-// edits a setting. Unknown models fall back to the most expensive entry so
-// budget caps over-estimate rather than under-estimate spend (fail-safe).
+// The price table is injected from the database-backed model registry
+// (server/internal/cerebro/modelregistry) via SetTable — see table_cerebro.go.
+// Unknown models fall back to the registry's fallback entry so budget caps
+// over-estimate rather than under-estimate spend (fail-safe).
 package pricing
 
 // CEREBRO-PATCH(pricing-pricing): cerebro modification of upstream file
@@ -28,65 +28,9 @@ type Pricing struct {
 	CacheWriteCentsPerMtok float64
 }
 
-// modelPricing is the lookup table. Keys are normalized (lowercase, version
-// suffixes intact). Add new entries here when we onboard a new model.
-//
-// Numbers below reflect public list pricing as of the deploy that ships this
-// table. They will drift; treat updates as a regular code change. Anthropic
-// figures verified against https://platform.claude.com/docs/en/about-claude/pricing
-// on 2026-05-11 — cache-write values are the 5-minute TTL (1.25× base input)
-// because the daemon reports `cache_creation_input_tokens` without TTL
-// metadata and 5m is the API default. Mirror updates here with the
-// frontend's `packages/views/runtimes/utils.ts:MODEL_PRICING` table — the
-// frontend prices runtime-dashboard rows that the server doesn't ship a
-// `cost_cents` field for (Cost by agent / Cost by hour).
-//
-// CEREBRO-PATCH(pricing-anthropic-rates-2026-05): Opus 4.5+ and Haiku 4.5
-// rates corrected to actual Anthropic list pricing. Previously these rows
-// carried Opus 4 / Haiku 3.5 rates, which over-charged Opus 4.5+ tasks by
-// 3× (issue sidebar, chat session cost, budget rollup) and under-charged
-// Haiku 4.5 by ~20%. Frontend `MODEL_PRICING` (utils.ts) is the cross-check
-// for any future update — it was set correctly in PR #2334 (JEH-440) and
-// the two tables must agree.
-var modelPricing = map[string]Pricing{
-	// Anthropic — Opus 4.5+ generation (lower-tier pricing).
-	// CEREBRO-PATCH(pricing-opus-4-8): FIR-2471 add Opus 4.8 list price — without it Opus 4.8 fell back to Opus 4.1 ($15/$75), a 3× over-charge.
-	"claude-opus-4-8": {InputCentsPerMtok: 500, OutputCentsPerMtok: 2500, CacheReadCentsPerMtok: 50, CacheWriteCentsPerMtok: 625},
-	"claude-opus-4-7": {InputCentsPerMtok: 500, OutputCentsPerMtok: 2500, CacheReadCentsPerMtok: 50, CacheWriteCentsPerMtok: 625},
-	"claude-opus-4-6": {InputCentsPerMtok: 500, OutputCentsPerMtok: 2500, CacheReadCentsPerMtok: 50, CacheWriteCentsPerMtok: 625},
-	"claude-opus-4-5": {InputCentsPerMtok: 500, OutputCentsPerMtok: 2500, CacheReadCentsPerMtok: 50, CacheWriteCentsPerMtok: 625},
-
-	// Anthropic — Opus 4 / 4.1 (older, higher-tier pricing — kept for runtimes
-	// still pinned to them and as the fail-safe fallback for unknown models).
-	"claude-opus-4-1": {InputCentsPerMtok: 1500, OutputCentsPerMtok: 7500, CacheReadCentsPerMtok: 150, CacheWriteCentsPerMtok: 1875},
-	"claude-opus-4":   {InputCentsPerMtok: 1500, OutputCentsPerMtok: 7500, CacheReadCentsPerMtok: 150, CacheWriteCentsPerMtok: 1875},
-
-	// Anthropic — Sonnet 4 family (uniform across 4 / 4.5 / 4.6).
-	"claude-sonnet-4-6": {InputCentsPerMtok: 300, OutputCentsPerMtok: 1500, CacheReadCentsPerMtok: 30, CacheWriteCentsPerMtok: 375},
-	"claude-sonnet-4-5": {InputCentsPerMtok: 300, OutputCentsPerMtok: 1500, CacheReadCentsPerMtok: 30, CacheWriteCentsPerMtok: 375},
-	"claude-sonnet-4":   {InputCentsPerMtok: 300, OutputCentsPerMtok: 1500, CacheReadCentsPerMtok: 30, CacheWriteCentsPerMtok: 375},
-
-	// Anthropic — Haiku.
-	"claude-haiku-4-5": {InputCentsPerMtok: 100, OutputCentsPerMtok: 500, CacheReadCentsPerMtok: 10, CacheWriteCentsPerMtok: 125},
-	"claude-haiku-3-5": {InputCentsPerMtok: 80, OutputCentsPerMtok: 400, CacheReadCentsPerMtok: 8, CacheWriteCentsPerMtok: 100},
-
-	// OpenAI — gpt-5 family. Cache read priced at 10% of input per OpenAI's
-	// public schedule; no separate cache-write line (writes are free).
-	// CEREBRO-PATCH(pricing-gpt55): FIR-2776 add gpt-5.5 — without it Codex agents fell back to Opus 4.1 ($15/$75), a 12× over-charge vs actual $5/$30.
-	"gpt-5.5":    {InputCentsPerMtok: 500, OutputCentsPerMtok: 3000, CacheReadCentsPerMtok: 50, CacheWriteCentsPerMtok: 500},
-	"gpt-5":      {InputCentsPerMtok: 125, OutputCentsPerMtok: 1000, CacheReadCentsPerMtok: 12.5, CacheWriteCentsPerMtok: 0},
-	"gpt-5-mini": {InputCentsPerMtok: 25, OutputCentsPerMtok: 200, CacheReadCentsPerMtok: 2.5, CacheWriteCentsPerMtok: 0},
-
-	// Google — Gemini 2.5. Cache pricing per Vertex AI's published rates.
-	"gemini-2.5-pro":   {InputCentsPerMtok: 125, OutputCentsPerMtok: 1000, CacheReadCentsPerMtok: 31.25, CacheWriteCentsPerMtok: 0},
-	"gemini-2.5-flash": {InputCentsPerMtok: 7.5, OutputCentsPerMtok: 30, CacheReadCentsPerMtok: 1.875, CacheWriteCentsPerMtok: 0},
-}
-
-// fallbackModel is used when ComputeCents is asked for a model not in the
-// table. We pick the priciest entry so unknown models don't accidentally
-// undercount and slip past a cap. Opus 4 / 4.1 are now the priciest
-// Anthropic tier ($15/$75) after the 4.5+ generation dropped to $5/$25.
-const fallbackModel = "claude-opus-4-1"
+// CEREBRO-PATCH(pricing-registry-table): FIR-2698 — the price table is no
+// longer hardcoded here. It is injected via SetTable (table_cerebro.go) from
+// the database-backed model registry, the single source for model prices.
 
 // unknownModelLogged tracks which unknown model names we've already warned
 // about to keep the logs from drowning during a long-running rollout where
@@ -112,9 +56,9 @@ func ComputeCents(model string, u Usage) int64 {
 		// Log once per distinct unknown model.
 		if _, seen := unknownModelLogged.LoadOrStore(model, struct{}{}); !seen {
 			slog.Warn("pricing: unknown model, using worst-case fallback",
-				"model", model, "fallback", fallbackModel)
+				"model", model, "fallback", fallbackModelName()) // CEREBRO-PATCH(pricing-registry-table): fallback comes from the injected registry table.
 		}
-		p = modelPricing[fallbackModel]
+		p = fallbackPricing() // CEREBRO-PATCH(pricing-registry-table): fail-safe rate from the injected registry table.
 	}
 
 	const mtok = 1_000_000.0
@@ -148,11 +92,11 @@ func lookup(model string) (Pricing, bool) {
 	if strings.HasPrefix(key, "gemma") {
 		return Pricing{}, true
 	}
-	if p, ok := modelPricing[key]; ok {
+	if p, ok := tableGet(key); ok { // CEREBRO-PATCH(pricing-registry-table): lookup against the injected registry table.
 		return p, true
 	}
 	if stripped := stripDateSuffix(key); stripped != key {
-		if p, ok := modelPricing[stripped]; ok {
+		if p, ok := tableGet(stripped); ok { // CEREBRO-PATCH(pricing-registry-table): lookup against the injected registry table.
 			return p, true
 		}
 	}

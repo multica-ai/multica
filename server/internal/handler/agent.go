@@ -244,6 +244,7 @@ type AgentTaskResponse struct {
 	IssueSnapshot     string `json:"issue_snapshot,omitempty"`      // CEREBRO-PATCH(agent-task-issue-snapshot): FIR-2384 — pre-rendered issue+thread inlined into the start prompt when the snapshot_prompt cost saving is on
 	BundleContextHint bool   `json:"bundle_context_hint,omitempty"` // CEREBRO-PATCH(agent-task-bundle-context-hint): FIR-2384 — point the start prompt at a single `multica issue context` call when the bundled_read cost saving is on
 	GraphifyNudge     string `json:"graphify_nudge,omitempty"`      // CEREBRO-PATCH(agent-task-graphify-nudge): FIR-1311 — standing "use the graphify code graph" instruction inlined into the start prompt when the graphify saving is on
+	MemoryContext     string `json:"memory_context,omitempty"`      // CEREBRO-PATCH(agent-task-memory-context): FIR-1794 layer 3 — automatically recalled memories inlined into the start prompt when cerebro_memory is on
 
 	NewCommentCount          int                  `json:"new_comment_count,omitempty"`         // trigger-thread comments since last run; excludes injected trigger + own comments; omitempty so old daemons ignore it
 	NewCommentsSince         string               `json:"new_comments_since,omitempty"`        // RFC3339 anchor (last run's started_at) the count is measured from; omitempty so old daemons ignore it
@@ -275,7 +276,8 @@ type AgentTaskResponse struct {
 	Title                            *string `json:"title,omitempty"` // CEREBRO-PATCH(task-title-builder): short generated headline.
 	// CEREBRO-PATCH(runtime-pause-wait-reason): FIR-2717 — queued-task hint while runtime is paused (runtime_paused|reason|unpause_at).
 	WaitReason            *string              `json:"wait_reason,omitempty"`
-	ModelOverride         string               `json:"model_override,omitempty"` // CEREBRO-PATCH(agent-task-model-override): per-task model override that wins over agent.model (JEH-1310).
+	ModelOverride         string               `json:"model_override,omitempty"`    // CEREBRO-PATCH(agent-task-model-override): per-task model override that wins over agent.model (JEH-1310).
+	ThinkingOverride      string               `json:"thinking_override,omitempty"` // CEREBRO-PATCH(agent-task-thinking-override): per-task thinking override for issue workflow steps.
 	SandboxEnabled        *bool                `json:"sandbox_enabled,omitempty"`
 	RuntimeSandboxPolicy  json.RawMessage      `json:"runtime_sandbox_policy,omitempty"`
 	RuntimePersonaSandbox string               `json:"runtime_persona_sandbox,omitempty"`
@@ -422,7 +424,8 @@ func taskToResponse(t db.AgentTaskQueue, workspaceID string) AgentTaskResponse {
 		AutopilotRunID: uuidToString(t.AutopilotRunID),
 		Kind:           computeTaskKind(t),
 		// CEREBRO-PATCH(agent-task-model-override-field): surface per-task model override (JEH-1310).
-		ModelOverride: t.ModelOverride.String,
+		ModelOverride:    t.ModelOverride.String,
+		ThinkingOverride: t.ThinkingOverride.String,
 	}
 }
 
@@ -1355,6 +1358,9 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 			})
 		}
 	}
+
+	// CEREBRO-PATCH(agent-office-direct-edit-version): FIR-1775 Phase 2 — a direct edit (outside the change-request flow) records an agent_context_version so version history stays complete. Best-effort; logic in agent_context_direct_edit_cerebro.go.
+	h.recordAgentContextDirectEdit(r, updated)
 
 	resp := agentToResponse(updated)
 	// agentToResponse always initialises Skills as []; junction-table rows

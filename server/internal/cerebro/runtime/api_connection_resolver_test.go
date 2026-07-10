@@ -30,7 +30,7 @@ type fakeEndpointPolicy struct {
 	err      error
 }
 
-func (f fakeEndpointPolicy) ConnectionEndpointEffective(ctx context.Context, workspaceID, runtimeID, agentID, userID pgtype.UUID, connName, method, path string) (toolpolicy.Setting, string, error) {
+func (f fakeEndpointPolicy) ConnectionEndpointEffective(ctx context.Context, workspaceID, runtimeID, agentID, userID, onBehalfOfID pgtype.UUID, connName, method, path string) (toolpolicy.Setting, string, error) {
 	if f.err != nil {
 		return toolpolicy.SettingDeny, connName, f.err
 	}

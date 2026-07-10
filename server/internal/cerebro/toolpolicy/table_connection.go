@@ -67,11 +67,13 @@ type connectionTool struct {
 }
 
 // endpointPermission mirrors connections.EndpointPermission: one REST path and
-// the HTTP methods configured on it. Used to synthesize per-endpoint+method rows
-// for API connections.
+// the HTTP methods configured on it, plus the optional human-readable summary
+// captured from the API's OpenAPI spec at discovery time. Used to synthesize
+// per-endpoint+method rows for API connections.
 type endpointPermission struct {
 	Path    string   `json:"path"`
 	Methods []string `json:"methods"`
+	Summary string   `json:"summary,omitempty"`
 }
 
 // connectionRow pairs a connection's policy key with the human label its tools
@@ -155,7 +157,7 @@ func (s *Store) appendConnectionToolRows(ctx context.Context, in TableQuery, gro
 			row := TableRow{
 				ToolKey:         toolKey,
 				ResourcePattern: t.Name,
-				Title:           t.Name,
+				Title:           connectionToolTitle(conn.kind, t),
 				Category:        conn.displayName,
 				Source:          source,
 				Layers:          map[Layer]Setting{},
@@ -172,7 +174,7 @@ func (s *Store) appendConnectionToolRows(ctx context.Context, in TableQuery, gro
 					row.Layers[LayerGroup] = CombineGroups(cell.groups...)
 				}
 			}
-			row.Effective = Resolve(Input{Settings: row.Layers, Base: base})
+			row.Effective = ResolveWithMode(tableRowMode(in.mode, row.ToolKey), Input{Settings: row.Layers, Base: base})
 			out = append(out, row)
 		}
 	}
@@ -198,7 +200,7 @@ func connectionWideBases(out []TableRow) map[string]Setting {
 
 // connectionWideAuthoredBases resolves, per connection policy key, the effective
 // connection-wide setting from the authored rows in cerebro_tool_policy
-// (tool_key 'connection:%', resource_pattern '') folded through the same
+// (tool_key 'connection:%', resource_pattern ”) folded through the same
 // Workspace › Runtime › Agent › Group › User chain as every other layer. It is
 // the fallback for connectionWideBases: it does NOT depend on a cerebro_capability
 // row existing, so a connection authored only in workspace_connection (no
@@ -219,9 +221,10 @@ func (s *Store) connectionWideAuthoredBases(ctx context.Context, in TableQuery, 
 		    (p.layer = 'runtime'   AND p.subject_id = $2) OR
 		    (p.layer = 'agent'     AND p.subject_id = $3) OR
 		    (p.layer = 'user'      AND p.subject_id = $4) OR
-		    (p.layer = 'group'     AND p.subject_id = ANY($5::uuid[]))
+		    (p.layer = 'group'     AND p.subject_id = ANY($5::uuid[])) OR
+		    (p.layer = 'on_behalf_of' AND p.subject_id = $6)
 		  )
-	`, in.WorkspaceID, in.RuntimeID, in.AgentID, in.UserID, groupIDs)
+	`, in.WorkspaceID, in.RuntimeID, in.AgentID, in.UserID, groupIDs, in.OnBehalfOfID)
 	if err != nil {
 		if isUndefinedTable(err) {
 			return nil, nil
@@ -262,7 +265,7 @@ func (s *Store) connectionWideAuthoredBases(ctx context.Context, in TableQuery, 
 		if len(a.groups) > 0 {
 			a.layers[LayerGroup] = CombineGroups(a.groups...)
 		}
-		out[key] = Resolve(Input{Settings: a.layers, Base: in.Base}).Setting
+		out[key] = ResolveWithMode(tableRowMode(in.mode, key), Input{Settings: a.layers, Base: in.Base}).Setting
 	}
 	return out, nil
 }
@@ -328,10 +331,25 @@ func endpointMethodTools(raw []byte) []connectionTool {
 			if m == "" {
 				continue
 			}
-			tools = append(tools, connectionTool{Name: m + " " + ep.Path})
+			tools = append(tools, connectionTool{Name: m + " " + ep.Path, Description: ep.Summary})
 		}
 	}
 	return tools
+}
+
+// connectionToolTitle is the human-facing label for a per-tool row. For API
+// endpoint rows the discovered one-line OpenAPI summary (e.g. "Execute data
+// source: Orders") beats the raw "<METHOD> <path>" — which for per-resource
+// registry paths is an unreadable UUID. MCP tools keep their name: their
+// descriptions are long-form prose, not labels. The resource_pattern keeps the
+// technical name either way, so the UI can show both.
+func connectionToolTitle(kind string, t connectionTool) string {
+	if kind == "api" {
+		if s := strings.TrimSpace(t.Description); s != "" {
+			return s
+		}
+	}
+	return t.Name
 }
 
 // ConnectionToolDenied reports whether a tool named toolName is denied as a
@@ -433,8 +451,10 @@ func (s *Store) ConnectionToolEffective(ctx context.Context, workspaceID, runtim
 // actor, over the connection-wide row (`connection:<name>`, empty
 // resource_pattern) AND the matching per-endpoint row (source
 // connection-endpoint, resource_pattern "<METHOD> <path>"), at EVERY actor layer
-// (Workspace › Runtime › Agent › Group › User). It is the engine half the
-// API-call gate uses, so the gateway gate and the admin screen can never drift.
+// (Workspace › Runtime › Agent › Group › User), plus the tighten-only on_behalf_of
+// layer (the delegated task initiator, keyed by onBehalfOfID — Deny-only, see the
+// SECURITY note in the loop below). It is the engine half the API-call gate uses,
+// so the gateway gate and the admin screen can never drift.
 //
 // API-connection endpoints resolve against a PER-CONNECTION default — FIR-2166
 // "C" v2. Each connection carries a default_access mode (allow/ask/deny) chosen
@@ -444,6 +464,8 @@ func (s *Store) ConnectionToolEffective(ctx context.Context, workspaceID, runtim
 // ever tightens below its Base and refuses to loosen, so a Deny base could never
 // be lifted by an Allow grant. The rule, over all of the above rows/layers:
 //
+//   - an explicit workspace Disable wins immediately (FIR-2351 follow-up,
+//     2026-07-06) — a hard, unopenable floor, unlike an ordinary workspace Deny;
 //   - an explicit Deny at any layer wins (revokes) — fail-safe;
 //   - else an explicit Allow at any layer grants the call;
 //   - else an explicit Ask at any layer gates the call (human approval);
@@ -458,16 +480,17 @@ func (s *Store) ConnectionToolEffective(ctx context.Context, workspaceID, runtim
 // connections (ConnectionToolEffective / ConnectionToolDenied), which keep their
 // Allow-baseline shape and are unaffected. Returns the resolved setting and, on a
 // non-Allow, the connection name so callers can surface "which integration".
-func (s *Store) ConnectionEndpointEffective(ctx context.Context, workspaceID, runtimeID, agentID, userID pgtype.UUID, connName, method, path string) (Setting, string, error) {
+func (s *Store) ConnectionEndpointEffective(ctx context.Context, workspaceID, runtimeID, agentID, userID, onBehalfOfID pgtype.UUID, connName, method, path string) (Setting, string, error) {
 	if connName == "" || method == "" || path == "" {
 		// An unidentifiable endpoint cannot be matched to a grant; fail closed.
 		return SettingDeny, connName, nil
 	}
 	rows, err := s.Table(ctx, TableQuery{
-		WorkspaceID: workspaceID,
-		RuntimeID:   runtimeID,
-		AgentID:     agentID,
-		UserID:      userID,
+		WorkspaceID:  workspaceID,
+		RuntimeID:    runtimeID,
+		AgentID:      agentID,
+		UserID:       userID,
+		OnBehalfOfID: onBehalfOfID,
 	})
 	if err != nil {
 		// Return the error so the caller's fail-open(list)/fail-closed(call) policy
@@ -477,7 +500,17 @@ func (s *Store) ConnectionEndpointEffective(ctx context.Context, workspaceID, ru
 	}
 	wantKey := connectionToolKeyPrefix + connName
 	wantPattern := method + " " + path
+	// Workspace-Deny-as-default (FIR-2351, product decision 2026-07-06): with the
+	// workspace member-override flag on, an explicit WORKSPACE-layer setting on a
+	// connection is a workspace-authored DEFAULT, not an instant global verdict —
+	// so "deny this connection for the workspace" can still be opened for one
+	// specific agent/member/group by an explicit Allow at those layers, exactly
+	// like the connection's own default_access=deny. Who may author those rows is
+	// the write path's job. With the flag off, behavior is unchanged: an explicit
+	// Deny at ANY layer (workspace included) wins immediately.
+	openableWS := s.MemberOverrideEnabled(ctx, workspaceID)
 	var hasAllow, hasAsk bool
+	var wsWide, wsEndpoint Setting
 	for _, r := range rows {
 		if r.ToolKey != wantKey {
 			continue
@@ -492,7 +525,45 @@ func (s *Store) ConnectionEndpointEffective(ctx context.Context, workspaceID, ru
 		// Inspect the raw per-layer settings (NOT r.Effective, whose tighten-only
 		// verdict carries an Allow base). Deny wins immediately; otherwise an
 		// explicit Allow grants and an explicit Ask gates, overriding the default.
-		for _, set := range r.Layers {
+		//
+		// SECURITY (FIR-2441): the on_behalf_of layer (the delegated task initiator,
+		// keyed by OnBehalfOfID above) is TIGHTEN-ONLY on this grant path. This path
+		// GRANTS on any layer's explicit Allow, and it is the gate for the default-deny
+		// secrets connections (infisical-admin). So a member (on_behalf_of) rule may only
+		// ever REVOKE — an on_behalf_of Deny blocks the call, but an on_behalf_of
+		// Allow/Ask is ignored (never grants, never gates). That keeps a member from
+		// opening the secrets box to whoever drives the agent, while still letting a
+		// member-level Deny hold across every agent that member delegates work to.
+		for layer, set := range r.Layers {
+			if layer == LayerWorkspace && set == SettingDisable {
+				// FIR-2351 follow-up (product decision 2026-07-06): a workspace row
+				// explicitly Disabled is a hard, unopenable floor for this connection —
+				// unlike an ordinary workspace Deny (which openableWS defers below so a
+				// per-actor Allow can open it), nothing overrides Disable. Return
+				// immediately regardless of any per-actor Allow already collected from
+				// an earlier row in this loop, and regardless of openableWS/flag state,
+				// so Disable works the same whether or not cerebro_member_override is on.
+				return SettingDeny, connName, nil
+			}
+			if layer == LayerOnBehalfOf {
+				// Deny-only: honour a revoke, ignore any Allow/Ask so the initiator can
+				// never grant or gate a call the owner's own layers did not.
+				if set == SettingDeny {
+					return SettingDeny, connName, nil
+				}
+				continue
+			}
+			if openableWS && layer == LayerWorkspace {
+				// Collect the workspace-authored default instead of treating it as a
+				// per-actor verdict; it applies below (endpoint row wins over the
+				// connection-wide row by specificity) only when no per-actor row spoke.
+				if isEndpoint {
+					wsEndpoint = set
+				} else {
+					wsWide = set
+				}
+				continue
+			}
 			switch set {
 			case SettingDeny:
 				return SettingDeny, connName, nil
@@ -510,6 +581,23 @@ func (s *Store) ConnectionEndpointEffective(ctx context.Context, workspaceID, ru
 	}
 	if hasAsk {
 		return SettingAsk, connName, nil
+	}
+	// No per-actor row spoke — the workspace-authored default (flag on) decides
+	// before the connection's configured default_access, endpoint-specific over
+	// connection-wide.
+	if openableWS {
+		wsDefault := wsWide
+		if rank(wsEndpoint) >= 0 {
+			wsDefault = wsEndpoint
+		}
+		switch wsDefault {
+		case SettingAllow:
+			return SettingAllow, "", nil
+		case SettingAsk:
+			return SettingAsk, connName, nil
+		case SettingDeny:
+			return SettingDeny, connName, nil
+		}
 	}
 	// No explicit per-actor row — fall back to the connection's configured default
 	// access (allow/ask/deny), chosen when the connection was created/edited. A
@@ -613,6 +701,57 @@ func mcpToolToken(connectionName, tool string) string {
 	return "mcp__" + connectionName + "__" + tool
 }
 
+// MCPToolToken is the exported form of mcpToolToken. The connection tool
+// resolver (FIR-2441) derives its --disallowedTools tokens from this single
+// source, so it never re-implements the "mcp__<server>__<tool>" format that
+// DeniedConnectionTools already emits.
+func MCPToolToken(connectionName, tool string) string {
+	return mcpToolToken(connectionName, tool)
+}
+
+// ConnectionToolVerdict is one mcp_http connection tool paired with its resolved
+// effective verdict for a chain context.
+type ConnectionToolVerdict struct {
+	// Connection is the connection name (the "connection:<name>" key stripped).
+	Connection string
+	// Tool is the discovered tool name (the row's resource_pattern).
+	Tool string
+	// Setting is the effective verdict across the whole chain (Allow/Ask/Deny).
+	Setting Setting
+}
+
+// ConnectionToolVerdicts resolves the effective verdict for EVERY discovered
+// mcp_http connection tool in the query context. Where DeniedConnectionTools
+// returns only the Deny tokens for --disallowedTools, this returns each MCP tool
+// with its Allow/Ask/Deny verdict, so the connection tool resolver (FIR-2441)
+// can decide per tool which become raw relay entries and which need a
+// policy-aware path. It reads the same Table() rows the admin screen renders and
+// DeniedConnectionTools filters, so the resolver, the runtime enforcement, and
+// the screen can never drift. API-endpoint rows (connectionEndpointSource) are
+// intentionally excluded — those resolve through ConnectionEndpointEffective.
+func (s *Store) ConnectionToolVerdicts(ctx context.Context, in TableQuery) ([]ConnectionToolVerdict, error) {
+	rows, err := s.Table(ctx, in)
+	if err != nil {
+		return nil, err
+	}
+	var out []ConnectionToolVerdict
+	for _, r := range rows {
+		if r.Source != connectionToolSource {
+			continue
+		}
+		connName := strings.TrimPrefix(r.ToolKey, connectionToolKeyPrefix)
+		if connName == "" || r.ResourcePattern == "" {
+			continue
+		}
+		out = append(out, ConnectionToolVerdict{
+			Connection: connName,
+			Tool:       r.ResourcePattern,
+			Setting:    r.Effective.Setting,
+		})
+	}
+	return out, nil
+}
+
 // loadConnectionPolicySettings fetches every explicit per-layer setting authored
 // for a connection tool (tool_key 'connection:%', resource_pattern non-empty) in
 // the query's context, bucketed by (tool_key, tool). It mirrors the subject
@@ -630,9 +769,10 @@ func (s *Store) loadConnectionPolicySettings(ctx context.Context, in TableQuery,
 		    (p.layer = 'runtime'   AND p.subject_id = $2) OR
 		    (p.layer = 'agent'     AND p.subject_id = $3) OR
 		    (p.layer = 'user'      AND p.subject_id = $4) OR
-		    (p.layer = 'group'     AND p.subject_id = ANY($5::uuid[]))
+		    (p.layer = 'group'     AND p.subject_id = ANY($5::uuid[])) OR
+		    (p.layer = 'on_behalf_of' AND p.subject_id = $6)
 		  )
-	`, in.WorkspaceID, in.RuntimeID, in.AgentID, in.UserID, groupIDs)
+	`, in.WorkspaceID, in.RuntimeID, in.AgentID, in.UserID, groupIDs, in.OnBehalfOfID)
 	if err != nil {
 		return nil, fmt.Errorf("toolpolicy: load connection policy settings: %w", err)
 	}

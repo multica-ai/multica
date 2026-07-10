@@ -247,7 +247,7 @@ VALUES (
     $1, $2, NULL, 'queued', $3, $4,
     $5, $6, $7
 )
-RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, original_user_id, delegating_agent_id, source_task_id, delegation_source, wait_reason, initiator_user_id, squad_id, handoff_note, prepare_lease_expires_at, title, model_override
+RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, original_user_id, delegating_agent_id, source_task_id, delegation_source, wait_reason, initiator_user_id, squad_id, handoff_note, prepare_lease_expires_at, title, model_override, thinking_override
 `
 
 type CreateAutopilotTaskParams struct {
@@ -312,6 +312,7 @@ func (q *Queries) CreateAutopilotTask(ctx context.Context, arg CreateAutopilotTa
 		&i.PrepareLeaseExpiresAt,
 		&i.Title,
 		&i.ModelOverride,
+		&i.ThinkingOverride,
 	)
 	return i, err
 }
@@ -1249,6 +1250,22 @@ type SetAgentTaskModelOverrideParams struct {
 // daemon falls back to agent.model (then env, then CLI default) at run time.
 func (q *Queries) SetAgentTaskModelOverride(ctx context.Context, arg SetAgentTaskModelOverrideParams) error {
 	_, err := q.db.Exec(ctx, setAgentTaskModelOverride, arg.ModelOverride, arg.ID)
+	return err
+}
+
+const setAgentTaskThinkingOverride = `-- name: SetAgentTaskThinkingOverride :exec
+UPDATE agent_task_queue
+SET thinking_override = NULLIF($1::text, '')
+WHERE id = $2::uuid
+`
+
+type SetAgentTaskThinkingOverrideParams struct {
+	ThinkingOverride string      `json:"thinking_override"`
+	ID               pgtype.UUID `json:"id"`
+}
+
+func (q *Queries) SetAgentTaskThinkingOverride(ctx context.Context, arg SetAgentTaskThinkingOverrideParams) error {
+	_, err := q.db.Exec(ctx, setAgentTaskThinkingOverride, arg.ThinkingOverride, arg.ID)
 	return err
 }
 

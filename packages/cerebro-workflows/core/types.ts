@@ -30,6 +30,12 @@ export type CerebroWorkflowRunStatus =
 
 export type CerebroWorkflowEditorMode = "form" | "canvas";
 
+// FIR-2283 — Issue workflow. "standard" is the existing trigger -> conditions
+// -> action rule (unchanged). "issue_loop" is a Plan/Build/Delivery-gate/Done
+// recipe: it carries a LoopSpec instead of a trigger/action, and the server
+// compiles it onto the loop engine (see loop_spec below).
+export type CerebroWorkflowType = "standard" | "issue_loop";
+
 // Phase-3 trigger config shapes (mirrors server/internal/cerebro/workflows/types.go).
 export interface TriggerConfigCron {
   schedule_expr: string;
@@ -89,6 +95,164 @@ export interface CerebroWorkflow {
   inbound_webhook_token?: string;
   inbound_signing_secret_set?: boolean;
   outbound_webhook_secret_set?: boolean;
+  // FIR-2283. Absent on older cached responses -> treat as "standard".
+  workflow_type?: CerebroWorkflowType;
+  loop_spec?: LoopSpec;
+}
+
+// --- FIR-2283 Issue workflow: loop_spec wire shape ---
+// Mirrors server/internal/cerebro/loops.Spec + the issue-specific bindings
+// loops.CompileParams needs (see materialize_issue_loop.go's
+// issueLoopSpecWire) — the recipe designed on the Issue workflow surface.
+
+export type LoopCheckType = "programmatic" | "judge" | "human";
+export type LoopAssigneeType = "agent" | "member";
+
+// "Confirmed by" in the UI. Maps 1:1 to LoopCheckType; kept as a distinct
+// display-facing alias so the editor's copy can read "A command" / "An AI
+// review" / "A person" without every callsite re-deriving the label.
+export const CONFIRMED_BY_OPTIONS: ReadonlyArray<{
+  value: LoopCheckType;
+  label: string;
+}> = [
+  { value: "programmatic", label: "A command" },
+  { value: "judge", label: "An AI review" },
+  { value: "human", label: "A person" },
+];
+
+export interface LoopVerification {
+  id: string;
+  type: LoopCheckType;
+  /** Short human-readable name, e.g. "Test suite". Display-only. */
+  label?: string;
+
+  // Programmatic ("A command").
+  check?: string[]; // argv array, never a shell string
+  expect?: "exit_zero";
+
+  // Judge ("An AI review"). Runs a skill (preferred) or a free-text prompt
+  // ("rubric") — "Runs: A skill / A prompt" in the editor.
+  rubric?: string;
+  skill?: string;
+
+  // Human ("A person").
+  prompt?: string;
+
+  // Assignee for judge/human checks — "Assign to" in the editor, showing
+  // both agents and people in one list.
+  assignee_type?: LoopAssigneeType;
+  assignee_id?: string;
+  model?: string;
+  thinking_level?: string;
+}
+
+export interface LoopCaps {
+  max_iterations: number;
+  max_revisions: number;
+  no_progress_stalls: number;
+}
+
+// One ordered build phase in a multi-phase loop (FIR-2283 followup point 6).
+// Each phase runs its own build skill and is gated by its own delivery review
+// (verification) that must pass before the next phase's build starts.
+export interface LoopBuildPhase {
+  /** Display name, e.g. "Backend". Names the phase's build/review sessions. */
+  name?: string;
+  build_skill: string;
+  build_agent_id?: string;
+  model?: string;
+  thinking_level?: string;
+  goal?: string;
+  verification: LoopVerification[];
+}
+
+export interface LoopSpec {
+  version: 1;
+  // FIR-2283 v2 point 4 — one free-text prompt (skill-taggable) replaces the
+  // old fixed Goal / Definition-of-done pair. Both stay optional on the wire
+  // (the backend spec already treats them as human-notes, not required); the
+  // editor now writes only `goal` and leaves `definition_of_done` unset.
+  goal?: string;
+  definition_of_done?: string;
+  verification: LoopVerification[];
+  caps: LoopCaps;
+  planning?: boolean;
+  // Gates on the Plan step (FIR-2283 v2 point 6) — only meaningful when
+  // planning is true. Unlike verification, a plan gate does NOT require a
+  // programmatic entry: there is no code yet to run a command against
+  // during planning, so a judge-only criterion (e.g. an adversarial AI
+  // review of the plan) is valid on its own.
+  plan_gate?: LoopVerification[];
+
+  // Build bindings. Used for a single-phase loop. When `phases` is set (a
+  // multi-phase loop), these are ignored — each phase carries its own build
+  // skill/agent and its own delivery gate.
+  build_agent_id: string;
+  build_skill: string;
+  build_model?: string;
+  build_thinking?: string;
+
+  // Multi-phase build chain (FIR-2283 followup point 6). When non-empty, the
+  // build is split into ordered phases, each gated by its own review that must
+  // pass before the next phase's build begins. Empty/omitted = single-phase.
+  phases?: LoopBuildPhase[];
+
+  // Planning bindings — only meaningful when planning is true.
+  plan_agent_id?: string;
+  plan_skill?: string;
+  plan_model?: string;
+  plan_thinking?: string;
+
+  // Status names — optional, server defaults apply (todo / in_progress /
+  // in_review / done) when omitted.
+  planning_status?: string;
+  build_status?: string;
+  review_status?: string;
+  done_status?: string;
+
+  // Spec-wide judge fallback, used only by a judge check without its own
+  // assignee_id.
+  judge_agent_id?: string;
+  judge_skill?: string;
+  judge_model?: string;
+  judge_thinking?: string;
+}
+
+export const DEFAULT_LOOP_CAPS: LoopCaps = {
+  max_iterations: 6,
+  max_revisions: 6,
+  no_progress_stalls: 2,
+};
+
+// GET /{id}/loop-state response — the control strip's live read.
+export interface LoopStateResponse {
+  round: number;
+  max_iterations?: number;
+  stopped: boolean;
+  stop_reason?: string;
+  pending_human_checks: PendingHumanCheck[];
+}
+
+export interface PendingHumanCheck {
+  check_id: string;
+  prompt: string;
+  assignee_type: LoopAssigneeType;
+  assignee_id: string;
+}
+
+// FIR-2283 v2 point 8 — "per-issue workflow activation".
+// POST /{id}/activate response.
+export interface ActivateWorkflowResponse {
+  activated: boolean;
+  workflow_id: string;
+  issue_id: string;
+}
+
+// GET /for-issue/{issueId} response — which recipe (if any) an issue is
+// currently running. workflow_id is only present when active is true.
+export interface ActiveWorkflowForIssueResponse {
+  active: boolean;
+  workflow_id?: string;
 }
 
 export interface CerebroWorkflowRun {
@@ -116,6 +280,22 @@ export interface WorkflowRunsListResponse {
   offset: number;
 }
 
+// FIR-2283 v2 point 7 — one issue that has run through a recipe's loop, for
+// the run-history page's issue log. Derived server-side from the generated
+// child rows; no separate run table.
+export interface IssueLoopRun {
+  issue_id: string;
+  issue_number: number;
+  issue_title: string;
+  issue_status: string;
+  first_activated_at: string;
+  last_activated_at: string;
+}
+
+export interface IssueLoopRunsResponse {
+  issue_runs: IssueLoopRun[];
+}
+
 // Phase-3 regenerate-endpoint responses (JEH-1108). The plaintext secret /
 // token leaves the server exactly once, on the regenerate response; the
 // UI is responsible for showing it to the user before navigating away.
@@ -138,15 +318,22 @@ export interface WorkflowWriteInput {
   name: string;
   enabled?: boolean;
   project_id?: string;
-  trigger_type: CerebroWorkflowTriggerType;
+  // trigger_type/action_type are required for a "standard" workflow. For an
+  // issue_loop write, omit them entirely — the server pins an inert
+  // placeholder and compiles the real rules from loop_spec instead (see
+  // issueLoopPlaceholderRule on the server).
+  trigger_type?: CerebroWorkflowTriggerType;
   trigger_config?: unknown;
   conditions?: unknown;
-  action_type: CerebroWorkflowActionType;
+  action_type?: CerebroWorkflowActionType;
   action_config?: unknown;
   // Phase 2: optional. Omitting editor_mode keeps the server-side default of
   // "form" — form-mode workflows therefore don't need to send these fields.
   editor_mode?: CerebroWorkflowEditorMode;
   editor_layout?: unknown;
+  // FIR-2283. Omit for a standard workflow.
+  workflow_type?: CerebroWorkflowType;
+  loop_spec?: LoopSpec;
 }
 
 // Display metadata for the form builder. Order here is the order shown in

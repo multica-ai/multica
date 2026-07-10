@@ -163,6 +163,7 @@ type AgentTaskQueue struct {
 	PrepareLeaseExpiresAt pgtype.Timestamptz `json:"prepare_lease_expires_at"`
 	Title                 pgtype.Text        `json:"title"`
 	ModelOverride         pgtype.Text        `json:"model_override"`
+	ThinkingOverride      pgtype.Text        `json:"thinking_override"`
 }
 
 type AgentToolGrant struct {
@@ -417,6 +418,7 @@ type CerebroAgentWakeup struct {
 	UpdatedAt            pgtype.Timestamptz `json:"updated_at"`
 	ConsecutivePostpones int32              `json:"consecutive_postpones"`
 	OriginCommentID      pgtype.UUID        `json:"origin_comment_id"`
+	ModelOverride        string             `json:"model_override"`
 }
 
 type CerebroAgentvaultAgentAccess struct {
@@ -501,6 +503,14 @@ type CerebroChannelAgentSetting struct {
 	UpdatedAt  pgtype.Timestamptz `json:"updated_at"`
 }
 
+type CerebroUserAgentMemorySetting struct {
+	UserID         pgtype.UUID        `json:"user_id"`
+	AgentID        pgtype.UUID        `json:"agent_id"`
+	CanReadMemory  bool               `json:"can_read_memory"`
+	CanWriteMemory bool               `json:"can_write_memory"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+}
+
 type CerebroChannelArchived struct {
 	ChannelID  pgtype.UUID        `json:"channel_id"`
 	UserID     pgtype.UUID        `json:"user_id"`
@@ -529,6 +539,17 @@ type CerebroCommentTask struct {
 	IssueID     pgtype.UUID        `json:"issue_id"`
 	WorkspaceID pgtype.UUID        `json:"workspace_id"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+}
+
+type CerebroConnectionPersonKey struct {
+	ID            pgtype.UUID        `json:"id"`
+	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
+	ConnectionID  pgtype.UUID        `json:"connection_id"`
+	MemberID      pgtype.UUID        `json:"member_id"`
+	KeyCiphertext []byte             `json:"key_ciphertext"`
+	ExpiresAt     pgtype.Timestamptz `json:"expires_at"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
 }
 
 type CerebroCostOptimization struct {
@@ -816,6 +837,7 @@ type CerebroNote struct {
 	LockedBy        pgtype.UUID        `json:"locked_by"`
 	LockedAt        pgtype.Timestamptz `json:"locked_at"`
 	LockHeartbeatAt pgtype.Timestamptz `json:"lock_heartbeat_at"`
+	AuthorCodes     bool               `json:"author_codes"`
 }
 
 type CerebroNoteComment struct {
@@ -881,6 +903,14 @@ type CerebroNoteType struct {
 	NumberingEnabled     bool               `json:"numbering_enabled"`
 	NextNumber           int32              `json:"next_number"`
 	AnchorWeekday        pgtype.Int2        `json:"anchor_weekday"`
+	AuthorCodes          bool               `json:"author_codes"`
+}
+
+type CerebroNoteLineAttr struct {
+	ArtifactID pgtype.UUID        `json:"artifact_id"`
+	BaseBody   string             `json:"base_body"`
+	Attrs      []byte             `json:"attrs"`
+	UpdatedAt  pgtype.Timestamptz `json:"updated_at"`
 }
 
 type CerebroNoteVersion struct {
@@ -1237,13 +1267,14 @@ type CerebroWorkspaceDefaultGroup struct {
 }
 
 type CerebroWorkspaceSetting struct {
-	WorkspaceID              pgtype.UUID        `json:"workspace_id"`
-	DisplayCurrency          string             `json:"display_currency"`
-	UpdatedAt                pgtype.Timestamptz `json:"updated_at"`
-	UpdatedBy                pgtype.UUID        `json:"updated_by"`
-	WakeupMaxSelfPerIssue    int32              `json:"wakeup_max_self_per_issue"`
-	WakeupMinIntervalMinutes int32              `json:"wakeup_min_interval_minutes"`
-	DefaultAgentStartKind    string             `json:"default_agent_start_kind"`
+	WorkspaceID               pgtype.UUID        `json:"workspace_id"`
+	DisplayCurrency           string             `json:"display_currency"`
+	UpdatedAt                 pgtype.Timestamptz `json:"updated_at"`
+	UpdatedBy                 pgtype.UUID        `json:"updated_by"`
+	WakeupMaxSelfPerIssue     int32              `json:"wakeup_max_self_per_issue"`
+	WakeupMinIntervalMinutes  int32              `json:"wakeup_min_interval_minutes"`
+	WakeupMaxConsecutiveLoops int32              `json:"wakeup_max_consecutive_loops"`
+	DefaultAgentStartKind     string             `json:"default_agent_start_kind"`
 }
 
 type ChatMessage struct {
@@ -1580,6 +1611,45 @@ type Member struct {
 	Role                     string             `json:"role"`
 	CreatedAt                pgtype.Timestamptz `json:"created_at"`
 	BudgetEnforcementEnabled bool               `json:"budget_enforcement_enabled"`
+}
+
+type ModelRegistry struct {
+	ID             pgtype.UUID        `json:"id"`
+	RegistryKey    string             `json:"registry_key"`
+	OwnerID        pgtype.UUID        `json:"owner_id"`
+	ApproverIds    []pgtype.UUID      `json:"approver_ids"`
+	CurrentVersion string             `json:"current_version"`
+	Snapshot       []byte             `json:"snapshot"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+}
+
+type ModelRegistryChangeRequest struct {
+	ID               pgtype.UUID        `json:"id"`
+	RegistryID       pgtype.UUID        `json:"registry_id"`
+	Title            string             `json:"title"`
+	Description      string             `json:"description"`
+	BaseVersion      string             `json:"base_version"`
+	ProposedVersion  string             `json:"proposed_version"`
+	ProposedSnapshot []byte             `json:"proposed_snapshot"`
+	Status           string             `json:"status"`
+	ProposedBy       pgtype.UUID        `json:"proposed_by"`
+	ReviewedBy       pgtype.UUID        `json:"reviewed_by"`
+	ReviewedAt       pgtype.Timestamptz `json:"reviewed_at"`
+	ReviewComment    string             `json:"review_comment"`
+	WorkSessionID    pgtype.UUID        `json:"work_session_id"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
+}
+
+type ModelRegistryVersion struct {
+	ID          pgtype.UUID        `json:"id"`
+	RegistryID  pgtype.UUID        `json:"registry_id"`
+	Version     string             `json:"version"`
+	Snapshot    []byte             `json:"snapshot"`
+	Description string             `json:"description"`
+	CreatedBy   pgtype.UUID        `json:"created_by"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
 type NotificationPreference struct {

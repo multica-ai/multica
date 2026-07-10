@@ -222,6 +222,8 @@ func discoveryCacheKey(providerType, executablePath string) string {
 func claudeStaticModels() []Model {
 	return []Model{
 		{ID: "claude-sonnet-4-6", Label: "Claude Sonnet 4.6", Provider: "anthropic", Default: true},
+		{ID: "claude-sonnet-5", Label: "Claude Sonnet 5", Provider: "anthropic"}, // CEREBRO-PATCH(agent-models-sonnet-5): FIR-2661 expose Claude Sonnet 5 in the daemon model picker.
+		{ID: "claude-fable-5", Label: "Claude Fable 5", Provider: "anthropic"},   // CEREBRO-PATCH(agent-models-fable): expose Claude Fable 5 in the daemon model picker.
 		{ID: "claude-opus-4-8", Label: "Claude Opus 4.8", Provider: "anthropic"},
 		{ID: "claude-opus-4-7", Label: "Claude Opus 4.7", Provider: "anthropic"},
 		{ID: "claude-haiku-4-5-20251001", Label: "Claude Haiku 4.5", Provider: "anthropic"},
@@ -232,7 +234,11 @@ func claudeStaticModels() []Model {
 
 func codexStaticModels() []Model {
 	return []Model{
-		{ID: "gpt-5.5", Label: "GPT-5.5", Provider: "openai", Default: true},
+		// CEREBRO-PATCH(codex-gpt-5-6-models): expose OpenAI's GPT-5.6 Codex family in the agent model picker.
+		{ID: "gpt-5.6-sol", Label: "GPT-5.6 Sol", Provider: "openai", Default: true},
+		{ID: "gpt-5.6-terra", Label: "GPT-5.6 Terra", Provider: "openai"},
+		{ID: "gpt-5.6-luna", Label: "GPT-5.6 Luna", Provider: "openai"},
+		{ID: "gpt-5.5", Label: "GPT-5.5", Provider: "openai"},
 		{ID: "gpt-5.5-mini", Label: "GPT-5.5 mini", Provider: "openai"},
 		{ID: "gpt-5.4", Label: "GPT-5.4", Provider: "openai"},
 		{ID: "gpt-5.4-mini", Label: "GPT-5.4 mini", Provider: "openai"},
@@ -590,6 +596,16 @@ func discoverPiModels(ctx context.Context, executablePath string) ([]Model, erro
 	runCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(runCtx, executablePath, "--list-models")
+	// CEREBRO-PATCH(pi-model-discovery-stable-dir): FIR-2992
+	// Desktop daemons can outlive the temporary directory they were launched
+	// from. Pi's Node.js bootstrap calls process.cwd(), which crashes when that
+	// inherited directory has been removed. Model discovery is user-scoped, so
+	// run it from the user's stable home directory instead.
+	if homeDir, err := os.UserHomeDir(); err == nil {
+		if info, statErr := os.Stat(homeDir); statErr == nil && info.IsDir() {
+			cmd.Dir = homeDir
+		}
+	}
 	hideAgentWindow(cmd)
 	var stderr strings.Builder
 	cmd.Stderr = &stderr

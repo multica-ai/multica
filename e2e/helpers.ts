@@ -49,3 +49,18 @@ export async function openWorkspaceMenu(page: Page) {
   // Wait for dropdown to appear
   await page.getByRole("menuitem", { name: "Log out" }).waitFor({ state: "visible" });
 }
+
+export async function reloadAppPage(page: Page) {
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await expect(page.getByRole("link", { name: "Inbox" })).toBeVisible({ timeout: 15000 });
+}
+
+export async function waitForPageText(page: Page, text: string | RegExp) {
+  await expect(page.getByText(text).first()).toBeVisible({ timeout: 15000 });
+}
+
+export async function preferManualCreateMode(page: Page) {
+  await page.evaluate(() => {
+    localStorage.setItem("multica-create-issue-mode", "manual");
+  });
+}

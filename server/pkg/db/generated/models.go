@@ -163,6 +163,7 @@ type AgentTaskQueue struct {
 	PrepareLeaseExpiresAt pgtype.Timestamptz `json:"prepare_lease_expires_at"`
 	Title                 pgtype.Text        `json:"title"`
 	ModelOverride         pgtype.Text        `json:"model_override"`
+	ThinkingOverride      pgtype.Text        `json:"thinking_override"`
 }
 
 type AgentToolGrant struct {

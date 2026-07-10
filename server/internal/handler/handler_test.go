@@ -3970,8 +3970,9 @@ func TestDaemonRegisterMissingWorkspaceReturns404(t *testing.T) {
 
 // TestAgentReplyDoesNotInheritParentMentions verifies that agent-authored
 // replies do NOT inherit parent-comment mentions, preventing agent-to-agent
-// re-trigger loops (e.g. "No reply needed" chains). Member-authored replies
-// still inherit parent mentions as expected.
+// re-trigger loops (e.g. "No reply needed" chains). CEREBRO-PATCH(reply-triggers-assignee):
+// FIR-2553 — in our fork member-authored replies do NOT inherit either; a plain
+// reply routes to the issue assignee, so on this unassigned issue nobody fires.
 func TestAgentReplyDoesNotInheritParentMentions(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
@@ -4087,7 +4088,9 @@ func TestAgentReplyDoesNotInheritParentMentions(t *testing.T) {
 	cancelTasks(agentB)
 
 	// 5. Member posts a reply in the same thread with NO mentions.
-	// This SHOULD inherit the parent mention and re-trigger Agent B.
+	// CEREBRO-PATCH(reply-triggers-assignee): FIR-2553 — inheritance is disabled,
+	// so a plain reply does NOT re-trigger the root-mentioned Agent B. The issue
+	// is unassigned, so no assignee fires either → Agent B stays at 0.
 	w = postComment(issueID, map[string]any{
 		"content":   "Thanks for the review.",
 		"parent_id": parentComment.ID,
@@ -4095,8 +4098,8 @@ func TestAgentReplyDoesNotInheritParentMentions(t *testing.T) {
 	if w.Code != http.StatusCreated {
 		t.Fatalf("member reply: expected 201, got %d: %s", w.Code, w.Body.String())
 	}
-	if countTasks(agentB) != 1 {
-		t.Fatalf("expected 1 task for Agent B after member reply (parent inheritance allowed), got %d", countTasks(agentB))
+	if countTasks(agentB) != 0 {
+		t.Fatalf("expected 0 tasks for Agent B after member reply (inheritance disabled, FIR-2553), got %d", countTasks(agentB))
 	}
 }
 
@@ -4290,9 +4293,11 @@ func TestNestedMemberReplyUsesDirectParentForMentionInheritance(t *testing.T) {
 	}
 }
 
-// TestNestedMemberReplyUsesDirectParentForAssigneeParticipation is the
-// regression for treating any prior agent reply in the root thread as direct
-// participation in a nested human sub-thread.
+// TestNestedMemberReplyWakesAssignee.
+// CEREBRO-PATCH(reply-triggers-assignee): FIR-2553 — a member's plain reply
+// (no @mention) routes to the issue assignee, regardless of thread shape or
+// where the assignee last participated. Upstream suppressed the assignee here;
+// our fork wakes it, which is the reported expectation.
 func TestNestedMemberReplyUsesDirectParentForAssigneeParticipation(t *testing.T) {
 	if testHandler == nil || testPool == nil {
 		t.Skip("database not available")
@@ -4381,8 +4386,8 @@ func TestNestedMemberReplyUsesDirectParentForAssigneeParticipation(t *testing.T)
 	if nested.ParentID == nil || *nested.ParentID != humanParentID {
 		t.Fatalf("stored nested reply parent_id should keep direct parent %s, got %v", humanParentID, nested.ParentID)
 	}
-	if got := countAssigneeQueued(); got != 0 {
-		t.Fatalf("plain nested human reply must not wake assignee just because assignee replied elsewhere under root; got %d queued tasks", got)
+	if got := countAssigneeQueued(); got != 1 {
+		t.Fatalf("plain nested human reply must wake the issue assignee (FIR-2553); got %d queued tasks", got)
 	}
 }
 

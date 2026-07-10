@@ -17,7 +17,10 @@ import { useAuthStore } from "@multica/core/auth";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useNavigation } from "@multica/views/navigation";
 import { MobileSidebarTrigger } from "@multica/views/layout/page-header";
-import { ContentEditor, type ContentEditorRef } from "@multica/views/editor";
+import { type ContentEditorRef } from "@multica/views/editor";
+import { EditorImageTray } from "@multica/cerebro-composer";
+import { api } from "@multica/core/api";
+import { useFileUpload } from "@multica/core/hooks/use-file-upload";
 import { TextareaDictationMic } from "@multica/cerebro-dictation";
 
 export function DocumentEditPage({ artifactId }: { artifactId: string }) {
@@ -30,6 +33,8 @@ export function DocumentEditPage({ artifactId }: { artifactId: string }) {
   const userId = useAuthStore((s) => s.user?.id);
   const update = useUpdateArtifact();
   const upload = useUploadArtifactFile();
+  // Uploader for images dropped/pasted into the document body (image tray, FIR-2693).
+  const { uploadWithToast } = useFileUpload(api);
 
   const [title, setTitle] = React.useState("");
   const [body, setBody] = React.useState("");
@@ -165,9 +170,10 @@ export function DocumentEditPage({ artifactId }: { artifactId: string }) {
               <Label>Body</Label>
               <div className="rounded-md border border-input bg-background px-3 py-2 min-h-[60vh]">
                 {hydrated && (
-                  <ContentEditor
+                  <EditorImageTray
                     ref={editorRef}
                     defaultValue={artifact.body}
+                    onUploadFile={uploadWithToast}
                     placeholder="Write something…"
                   />
                 )}

@@ -419,6 +419,7 @@ var multicaMCPToolMatrix = []ToolMeta{
 	{Name: "add_project_group", Description: "Grant a group access to a project.", Status: ToolStatusExcluded},
 	{Name: "agent_context_change_requests", Description: "List agent-context change requests (proposals). CLI-runtime MCP tool over GET /api/agents/{id}/context/change-requests.", Status: ToolStatusExcluded},
 	{Name: "agent_context_diff", Description: "Show a unified diff between two versions of an agent's context. CLI-runtime MCP tool over GET /api/agents/{id}/context/diff.", Status: ToolStatusExcluded},
+	{Name: "agent_context_lint", Description: "Drift-lint agent context (dead skill refs, duplicated rules, governance gaps, stale repo links) or a repo CLAUDE.md/AGENTS.md. CLI-runtime MCP tool over GET /api/agents/{id}/context/lint, GET /api/agents/context/lint, and POST /api/agents/context/lint/repo-file.", Status: ToolStatusExcluded},
 	{Name: "agent_context_propose", Description: "Propose a versioned change to an agent's context as a change request. CLI-runtime MCP tool over POST /api/agents/{id}/context/change-requests.", Status: ToolStatusExcluded},
 	{Name: "agent_context_review", Description: "Approve or reject a pending agent-context change request. CLI-runtime MCP tool over POST /api/agents/context/change-requests/{crId}/review.", Status: ToolStatusExcluded},
 	{Name: "agent_context_rollback", Description: "Roll an agent's context back to a historical version. CLI-runtime MCP tool over POST /api/agents/{id}/context/rollback.", Status: ToolStatusExcluded},
@@ -429,6 +430,7 @@ var multicaMCPToolMatrix = []ToolMeta{
 	{Name: "complete_work", Description: "Mark attached session work complete with a summary.", Status: ToolStatusExcluded},
 	{Name: "create_artifact", Description: "Create a workspace artifact.", Status: ToolStatusExcluded},
 	{Name: "create_artifact_folder", Description: "Create an artifact folder.", Status: ToolStatusExcluded},
+	{Name: "create_connection", Description: "Create a workspace connection. Requires the manage_connections capability.", Status: ToolStatusNewlyImplemented},
 	{Name: "create_group", Description: "Create a workspace group.", Status: ToolStatusExcluded},
 	{Name: "create_issue", Description: "Create a new issue in the current workspace.", Status: ToolStatusImplemented},
 	{Name: "create_project", Description: "Create a project in the current workspace.", Status: ToolStatusNewlyImplemented},
@@ -438,10 +440,12 @@ var multicaMCPToolMatrix = []ToolMeta{
 	{Name: "credential_policy_set", Description: "Update the credential governance policy.", Status: ToolStatusExcluded},
 	{Name: "delete_artifact", Description: "Delete an artifact.", Status: ToolStatusExcluded},
 	{Name: "delete_artifact_folder", Description: "Delete an artifact folder.", Status: ToolStatusExcluded},
+	{Name: "delete_connection", Description: "Delete a workspace connection by UUID. Requires the manage_connections capability.", Status: ToolStatusNewlyImplemented},
 	{Name: "delete_group", Description: "Delete a workspace group.", Status: ToolStatusExcluded},
 	{Name: "fork_session", Description: "Fork an attached work session for a subtask.", Status: ToolStatusExcluded},
-	{Name: "get_agent_capabilities", Description: "Get an agent's capabilities card: skills, tools, credentials (names only), and limits. CLI-runtime MCP tool over GET /api/agents/{id}/capabilities.", Status: ToolStatusExcluded},
+	{Name: "get_agent_capabilities", Description: "Get YOUR OWN capabilities card — what you can do (skills), may use (tools, with allow/ask/deny), have access to (credentials/data by name only, never secret values), and are limited by (sandbox + MCP). Omit agent_id to inspect yourself. Call this whenever you are unsure what you are allowed to do. CLI-runtime MCP tool over GET /api/agents/{id}/capabilities.", Status: ToolStatusNewlyImplemented},
 	{Name: "get_artifact", Description: "Fetch one artifact with metadata and content.", Status: ToolStatusExcluded},
+	{Name: "get_connection", Description: "Get one workspace connection by UUID. Auth secrets are returned masked.", Status: ToolStatusNewlyImplemented},
 	{Name: "get_group", Description: "Fetch one workspace group.", Status: ToolStatusExcluded},
 	{Name: "get_issue", Description: "Get full details of a Multica issue: title, description, status, priority, and comments.", Status: ToolStatusImplemented},
 	{Name: "get_me", Description: "Return the calling agent's ID, name, and workspace context.", Status: ToolStatusImplemented},
@@ -450,6 +454,7 @@ var multicaMCPToolMatrix = []ToolMeta{
 	{Name: "list_artifacts", Description: "List workspace artifacts.", Status: ToolStatusNewlyImplemented},
 	{Name: "list_attachments", Description: "List file attachments on a Multica issue or chat message.", Status: ToolStatusNewlyImplemented},
 	{Name: "list_comments", Description: "List all comments on a Multica issue in chronological order.", Status: ToolStatusImplemented},
+	{Name: "list_connections", Description: "List the workspace's connections.", Status: ToolStatusNewlyImplemented},
 	{Name: "list_group_agents", Description: "List agents allowed for a group.", Status: ToolStatusExcluded},
 	{Name: "list_group_capabilities", Description: "List capabilities granted to a group.", Status: ToolStatusExcluded},
 	{Name: "list_group_members", Description: "List members of a group.", Status: ToolStatusExcluded},
@@ -481,8 +486,10 @@ var multicaMCPToolMatrix = []ToolMeta{
 	{Name: "search_notes", Description: "Full-text search across notes/documents — matches title, body, and comments.", Status: ToolStatusExcluded},
 	{Name: "schedule_wakeup", Description: "Schedule an agent to wake up on an issue at a time or when a watched event happens.", Status: ToolStatusImplemented},
 	{Name: "set_artifact_folder", Description: "Set an artifact's folder.", Status: ToolStatusExcluded},
+	{Name: "suggest_artifact_folder", Description: "Propose an existing folder for an artifact; a person accepts before it moves.", Status: ToolStatusExcluded},
 	{Name: "set_group_capability", Description: "Grant a capability to a group.", Status: ToolStatusExcluded},
 	{Name: "skill_audit", Description: "Audit skill metadata and governance state.", Status: ToolStatusExcluded},
+	{Name: "skill_diff", Description: "Show a unified diff between two versions of a skill. CLI-runtime MCP tool over GET /api/skills/{id}/versions.", Status: ToolStatusExcluded},
 	{Name: "skill_fork", Description: "Fork a skill into a new owned copy.", Status: ToolStatusExcluded},
 	{Name: "skill_get", Description: "Fetch a skill's content, files, version, owner, and approvers.", Status: ToolStatusExcluded},
 	{Name: "skill_get_observations", Description: "List recorded observations for a skill.", Status: ToolStatusImplemented},
@@ -495,6 +502,10 @@ var multicaMCPToolMatrix = []ToolMeta{
 	{Name: "skill_propose_change", Description: "Propose a versioned change request to a skill.", Status: ToolStatusExcluded},
 	{Name: "skill_record_observation", Description: "Record an observation about a skill.", Status: ToolStatusImplemented},
 	{Name: "skill_review_change_request", Description: "Approve or reject a skill change request.", Status: ToolStatusExcluded},
+	{Name: "skill_set_ownership", Description: "Set a skill's owner and/or approvers. CLI-runtime MCP tool over PUT /api/skills/{id}/ownership.", Status: ToolStatusExcluded},
+	{Name: "skill_update", Description: "Directly update a skill's name/description/content/config, bypassing review. CLI-runtime MCP tool over PUT /api/skills/{id}.", Status: ToolStatusExcluded},
+	{Name: "test_connection", Description: "Probe a URL for reachability and tool discovery without saving a connection. Requires the manage_connections capability.", Status: ToolStatusNewlyImplemented},
+	{Name: "update_connection", Description: "Update a workspace connection. Requires the manage_connections capability.", Status: ToolStatusNewlyImplemented},
 	{Name: "update_artifact", Description: "Update artifact metadata or content.", Status: ToolStatusExcluded},
 	{Name: "update_artifact_folder", Description: "Update an artifact folder.", Status: ToolStatusExcluded},
 	{Name: "update_group", Description: "Rename or update a group's description.", Status: ToolStatusExcluded},
@@ -517,6 +528,7 @@ func AllBuiltinToolMeta() []ToolMeta {
 	out = append(out, legacyGatewayToolMeta...)
 	out = append(out, multicaMCPToolMatrix...)
 	out = append(out, customerServiceMCPToolMeta()...)
+	out = append(out, cerebroMemoryToolMeta()...) // CEREBRO-PATCH(memory-tools-offer): FIR-1794 — excluded status, gate-driven only.
 	return out
 }
 

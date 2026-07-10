@@ -4,9 +4,17 @@ import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { useCurrentWorkspace } from "@multica/core/paths";
 import { useFeatureFlag } from "@multica/cerebro-feature-flags";
+import { MoreHorizontal } from "lucide-react";
 import { PageHeader } from "@multica/views/layout/page-header";
 import { Button } from "@multica/ui/components/ui/button";
 import { NativeSelect } from "@multica/ui/components/ui/native-select";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@multica/ui/components/ui/dropdown-menu";
+import { WorkflowLoopControls } from "./workflow-loop-controls";
 import {
   Table,
   TableBody,
@@ -17,6 +25,7 @@ import {
 } from "@multica/ui/components/ui/table";
 import {
   RUN_STATUS_BADGE,
+  cerebroWorkflowLoopRunsOptions,
   cerebroWorkflowRunsOptions,
   cerebroWorkflowsListOptions,
 } from "../core";
@@ -38,9 +47,18 @@ export function WorkflowRunsPage({ workflowId }: WorkflowRunsPageProps) {
   const [selectedWorkflowId, setSelectedWorkflowId] = useState<string | null>(workflowId ?? null);
   const [statusFilter, setStatusFilter] = useState<CerebroWorkflowRunStatus | "">("");
   const [offset, setOffset] = useState(0);
+  // FIR-2283 followup point 4 — the loop controls moved here from the editor
+  // form. They open from the three-dot menu (below) rather than sitting inline,
+  // and only apply to one workflow, so the menu item is disabled until a
+  // workflow is selected.
+  const [showLoopControls, setShowLoopControls] = useState(false);
 
   const workflows = useQuery(cerebroWorkflowsListOptions(wsId));
   const runs = useQuery(cerebroWorkflowRunsOptions(wsId, selectedWorkflowId, PAGE_SIZE, offset));
+  // FIR-2283 v2 point 7 — the issues that ran through the selected recipe.
+  // Only meaningful for one workflow at a time, so it loads when a workflow is
+  // picked (or the page is the per-workflow route).
+  const loopRuns = useQuery(cerebroWorkflowLoopRunsOptions(wsId, selectedWorkflowId ?? ""));
 
   if (!enabled) return null;
   if (!workspace) {
@@ -68,10 +86,32 @@ export function WorkflowRunsPage({ workflowId }: WorkflowRunsPageProps) {
             Executions across workflows
           </p>
         </div>
+        {/* FIR-2283 followup point 4 — the loop controls (Loop on/off, Watch an
+            issue, Activate on this issue, live loop state) live here now,
+            reached from this three-dot menu instead of cluttering the editor
+            form. They apply to one workflow, so pick a workflow first. */}
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            render={<Button variant="ghost" size="icon-sm" aria-label="Workflow actions" />}
+          >
+            <MoreHorizontal className="h-4 w-4 text-muted-foreground" />
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem
+              disabled={!selectedWorkflowId}
+              onClick={() => setShowLoopControls((v) => !v)}
+            >
+              {showLoopControls ? "Hide loop controls" : "Loop controls…"}
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </PageHeader>
 
       <div className="flex-1 min-h-0 overflow-y-auto">
         <div className="flex flex-col gap-4 p-6">
+          {showLoopControls && selectedWorkflowId && (
+            <WorkflowLoopControls workflowId={selectedWorkflowId} wsId={wsId} />
+          )}
           <div className="flex flex-wrap items-end gap-3">
             {!workflowId && (
               <FilterField label="Workflow">
@@ -105,6 +145,46 @@ export function WorkflowRunsPage({ workflowId }: WorkflowRunsPageProps) {
               </NativeSelect>
             </FilterField>
           </div>
+
+          {/* FIR-2283 v2 point 7 — issues that ran through the selected recipe. */}
+          {selectedWorkflowId && (
+            <div className="flex flex-col gap-2">
+              <h2 className="text-xs font-semibold text-muted-foreground">
+                Issues in this workflow
+              </h2>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="w-[12%]">Issue</TableHead>
+                    <TableHead>Title</TableHead>
+                    <TableHead className="w-[16%]">Status</TableHead>
+                    <TableHead className="w-[22%]">Last activated</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {(loopRuns.data?.issue_runs.length ?? 0) === 0 && !loopRuns.isLoading && (
+                    <TableRow>
+                      <TableCell colSpan={4} className="text-center text-sm text-muted-foreground">
+                        No issues have run through this workflow yet.
+                      </TableCell>
+                    </TableRow>
+                  )}
+                  {(loopRuns.data?.issue_runs ?? []).map((run) => (
+                    <TableRow key={run.issue_id}>
+                      <TableCell className="text-xs">#{run.issue_number}</TableCell>
+                      <TableCell className="text-xs">{run.issue_title}</TableCell>
+                      <TableCell className="text-xs">{run.issue_status}</TableCell>
+                      <TableCell className="text-xs text-muted-foreground">
+                        {run.last_activated_at
+                          ? new Date(run.last_activated_at).toLocaleString()
+                          : ""}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          )}
 
           {runs.isError && (
             <div className="rounded-md border border-destructive/40 bg-destructive/5 p-3 text-sm text-destructive">

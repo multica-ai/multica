@@ -1,6 +1,10 @@
 import { z } from "zod";
 import type {
+  ActivateWorkflowResponse,
+  ActiveWorkflowForIssueResponse,
   CerebroWorkflow,
+  IssueLoopRunsResponse,
+  LoopStateResponse,
   RegenerateInboundSigningSecretResponse,
   RegenerateInboundTokenResponse,
   RegenerateOutboundSecretResponse,
@@ -57,6 +61,10 @@ export const workflowSchema = z
     inbound_webhook_token: z.string().nullable().optional(),
     inbound_signing_secret_set: z.boolean().optional().default(false),
     outbound_webhook_secret_set: z.boolean().optional().default(false),
+    // FIR-2283. Default "standard" so an older backend that omits the field
+    // entirely renders as the pre-existing workflow type, never crashes.
+    workflow_type: z.string().optional().default("standard"),
+    loop_spec: z.unknown().optional(),
   })
   .passthrough();
 
@@ -114,6 +122,60 @@ export const regenerateOutboundSecretSchema = z
   })
   .passthrough();
 
+// FIR-2283 — control strip live state.
+export const pendingHumanCheckSchema = z
+  .object({
+    check_id: z.string(),
+    prompt: z.string().default(""),
+    assignee_type: z.string(),
+    assignee_id: z.string(),
+  })
+  .passthrough();
+
+export const loopStateSchema = z
+  .object({
+    round: z.number().default(0),
+    max_iterations: z.number().optional(),
+    stopped: z.boolean().default(false),
+    stop_reason: z.string().optional(),
+    pending_human_checks: z.array(pendingHumanCheckSchema).default([]),
+  })
+  .passthrough();
+
+// FIR-2283 v2 point 8 — "per-issue workflow activation".
+export const activateWorkflowSchema = z
+  .object({
+    activated: z.boolean().default(false),
+    workflow_id: z.string().default(""),
+    issue_id: z.string().default(""),
+  })
+  .passthrough();
+
+export const activeWorkflowForIssueSchema = z
+  .object({
+    active: z.boolean().default(false),
+    workflow_id: z.string().optional(),
+  })
+  .passthrough();
+
+// FIR-2283 v2 point 7 — the list of issues that have run through a recipe.
+export const issueLoopRunSchema = z
+  .object({
+    issue_id: z.string(),
+    issue_number: z.number().default(0),
+    issue_title: z.string().default(""),
+    issue_status: z.string().default(""),
+    first_activated_at: z.string().default(""),
+    last_activated_at: z.string().default(""),
+  })
+  .passthrough();
+
+export const issueLoopRunsSchema = z
+  .object({
+    issue_runs: z.array(issueLoopRunSchema).default([]),
+  })
+  .passthrough();
+
 // Empty / fallback values used by parseWithFallback at call sites. Defined
 // once here so the values stay consistent across api.ts and queries.ts.
 export const EMPTY_WORKFLOWS_LIST: WorkflowsListResponse = { workflows: [] };
@@ -122,6 +184,7 @@ export const EMPTY_WORKFLOW_RUNS_LIST: WorkflowRunsListResponse = {
   limit: 0,
   offset: 0,
 };
+export const EMPTY_ISSUE_LOOP_RUNS: IssueLoopRunsResponse = { issue_runs: [] };
 export const EMPTY_REGENERATE_INBOUND_TOKEN: RegenerateInboundTokenResponse = {
   inbound_webhook_token: "",
   inbound_webhook_url: "",
@@ -158,4 +221,21 @@ export const EMPTY_WORKFLOW: CerebroWorkflow = {
   inbound_webhook_token: undefined,
   inbound_signing_secret_set: false,
   outbound_webhook_secret_set: false,
+  workflow_type: "standard",
+};
+
+export const EMPTY_LOOP_STATE: LoopStateResponse = {
+  round: 0,
+  stopped: false,
+  pending_human_checks: [],
+};
+
+export const EMPTY_ACTIVATE_WORKFLOW: ActivateWorkflowResponse = {
+  activated: false,
+  workflow_id: "",
+  issue_id: "",
+};
+
+export const EMPTY_ACTIVE_WORKFLOW_FOR_ISSUE: ActiveWorkflowForIssueResponse = {
+  active: false,
 };

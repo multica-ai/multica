@@ -1,0 +1,26 @@
+# Scope of the committed graphify code-map (see AGENTS.md).
+# We map the cerebro fork surface — the code agents actually get confused by —
+# not the whole 50 MB monorepo, to keep the committed graph.json small enough
+# to version and rebuild on every merge to main.
+#
+# Ignore everything, then re-include the cerebro zone.
+/*
+
+# Cerebro server code
+!/server/
+/server/*
+!/server/internal/
+/server/internal/*
+!/server/internal/cerebro/
+
+# All cerebro frontend/runtime packages
+!/packages/
+/packages/*
+!/packages/cerebro-*/
+
+# The graphify skill itself (so "how does the map work" is answerable)
+!/.agents/
+/.agents/*
+!/.agents/skills/
+/.agents/skills/*
+!/.agents/skills/graphify/

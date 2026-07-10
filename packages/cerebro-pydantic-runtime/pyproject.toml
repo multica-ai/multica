@@ -1,0 +1,17 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "cerebro-pydantic-runtime"
+version = "0.1.0"
+description = "ACP wrapper for running Pydantic AI CodeMode as a Multica custom runtime profile."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "pydantic-ai",
+  "pydantic-ai-harness[code-mode]",
+]
+
+[project.scripts]
+pydantic-acp-agent = "cerebro_pydantic_runtime.cli:main"

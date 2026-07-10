@@ -11,7 +11,7 @@
 // labelled content-size estimate so the bar is never blank or misleadingly
 // exact.
 
-import { useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { ArrowRightLeft } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
 import { estimateSessionContextFraction } from "./context-estimate";
@@ -22,6 +22,23 @@ import type { TimelineGroup } from "./grouping";
 // Jesper's thresholds (FIR-1787): orange from 50%, recommend handoff from 60%.
 const WARM_THRESHOLD = 0.5;
 const HANDOFF_THRESHOLD = 0.6;
+
+// FIR-2279: Anthropic keeps the prompt cache warm for ~5 minutes after the last
+// call (the API default TTL; our pricing table assumes the same). Past that the
+// cache goes cold and the next run re-pays the full cache-write on the whole
+// context instead of a cheap read — so the bar counts down from the last run to
+// this line and then flips to a "cold" state.
+const CACHE_TTL_MS = 5 * 60 * 1000;
+// Amber the timer in its final minute — the last moment resuming the session is
+// still cheap.
+const CACHE_URGENT_MS = 60 * 1000;
+
+function formatCountdown(ms: number): string {
+  const total = Math.max(0, Math.floor(ms / 1000));
+  const m = Math.floor(total / 60);
+  const s = total % 60;
+  return `${m}:${s.toString().padStart(2, "0")}`;
+}
 
 function formatTokens(n: number): string {
   if (n >= 1000) return `${Math.round(n / 1000)}k`;
@@ -47,6 +64,53 @@ export function SessionContextBar({
   const startFresh = useStartFresh(issueId);
   // FIR-1931: clicking the bar opens the per-session cost/token/cache sheet.
   const [sheetOpen, setSheetOpen] = useState(false);
+
+  // FIR-2279: prompt-cache warm/cold countdown. Only the active session can be
+  // resumed cheaply, so only it shows the timer; a historical session's cache is
+  // always long cold. lastActivity anchors the 5-minute window.
+  const lastActivity = active && data?.has_data ? data.last_activity_at ?? null : null;
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  useEffect(() => {
+    if (!lastActivity) return;
+    const expiresAt = new Date(lastActivity).getTime() + CACHE_TTL_MS;
+    setNowMs(Date.now());
+    // Nothing left to count down once the cache is cold — stop ticking and stay
+    // on the cold state rather than spinning a 1s interval forever.
+    if (Date.now() >= expiresAt) return;
+    const id = setInterval(() => {
+      const t = Date.now();
+      setNowMs(t);
+      if (t >= expiresAt) clearInterval(id);
+    }, 1000);
+    return () => clearInterval(id);
+  }, [lastActivity]);
+
+  let cacheTimer: ReactNode = null;
+  if (lastActivity) {
+    const remainingMs = new Date(lastActivity).getTime() + CACHE_TTL_MS - nowMs;
+    if (remainingMs > 0) {
+      const urgent = remainingMs <= CACHE_URGENT_MS;
+      cacheTimer = (
+        <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+          <span
+            className={`inline-block h-1.5 w-1.5 shrink-0 rounded-full ${
+              urgent ? "bg-amber-500" : "bg-muted-foreground/40"
+            }`}
+          />
+          <span className={urgent ? "text-amber-600 dark:text-amber-400" : undefined}>
+            Cache warm · {formatCountdown(remainingMs)} left
+          </span>
+        </div>
+      );
+    } else {
+      cacheTimer = (
+        <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+          <span className="inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-muted-foreground/40" />
+          <span>Cache cold · next run re-pays the full context</span>
+        </div>
+      );
+    }
+  }
 
   let fraction: number;
   let approximate: boolean;
@@ -138,6 +202,7 @@ export function SessionContextBar({
           <div className={`h-full ${fill} transition-all`} style={{ width: `${pct * 100}%` }} />
         </div>
       </button>
+      {cacheTimer}
       <SessionUsageSheet issueId={issueId} open={sheetOpen} onOpenChange={setSheetOpen} />
       {recommendHandoff ? (
         <div className="flex items-center justify-between gap-2 pt-0.5">

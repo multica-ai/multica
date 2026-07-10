@@ -157,6 +157,38 @@ describe("ReadonlyContent line breaks", () => {
   });
 });
 
+// CEREBRO-PATCH(readonly-image-strip): FIR-2714 — posted images render as a
+// left-aligned scrollable strip instead of centered stacked blocks.
+describe("ReadonlyContent image strip", () => {
+  it("wraps an image-only paragraph (composer tray block) in .rte-image-strip", () => {
+    const { container } = render(
+      <ReadonlyContent
+        content={"![image 1](https://cdn/a.png)\n![image 2](https://cdn/b.png)"}
+      />,
+    );
+    const strip = container.querySelector(".rte-image-strip");
+    expect(strip).not.toBeNull();
+    // Both images live inside the one strip, and it is NOT a <p>.
+    expect(strip?.querySelectorAll(".image-node").length).toBe(2);
+    expect(strip?.tagName.toLowerCase()).toBe("div");
+  });
+
+  it("wraps a single image on its own line in the strip", () => {
+    const { container } = render(
+      <ReadonlyContent content={"![image 1](https://cdn/a.png)"} />,
+    );
+    expect(container.querySelector(".rte-image-strip")).not.toBeNull();
+  });
+
+  it("leaves a paragraph that mixes text and an image as a normal <p>", () => {
+    const { container } = render(
+      <ReadonlyContent content={"look here ![image 1](https://cdn/a.png) thanks"} />,
+    );
+    expect(container.querySelector(".rte-image-strip")).toBeNull();
+    expect(container.querySelector("p")).not.toBeNull();
+  });
+});
+
 describe("ReadonlyContent issue mention chip", () => {
   // Default desktop behavior follows regular browser links: plain click
   // navigates in the current view, modifier-click opens a new tab. JEH-1112:

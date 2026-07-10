@@ -20,6 +20,7 @@ package toolpolicy
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/jackc/pgx/v5/pgtype"
 
@@ -106,6 +107,13 @@ type TableQuery struct {
 	AgentID     pgtype.UUID
 	UserID      pgtype.UUID
 	GroupIDs    []pgtype.UUID
+	// OnBehalfOfID scopes the on_behalf_of layer to the human the work is performed
+	// for (the task initiator in a delegated run), distinct from UserID (the agent
+	// owner). Zero (Valid=false) leaves the layer empty — the non-delegated path is
+	// unchanged. The layer is tighten-only (see LayerOnBehalfOf): it can restrict a
+	// delegated member's access but never widen it, and its Allow is ignored on the
+	// default-deny api-endpoint grant path (FIR-2441).
+	OnBehalfOfID pgtype.UUID
 	// SystemID scopes the System (mandate-actor) layer to one autopilot, so the
 	// admin can view/author the System rules for that human-less actor (FIR-1609).
 	// Zero (Valid=false) leaves the System column empty — the existing agent /
@@ -126,6 +134,37 @@ type TableQuery struct {
 	// caller (the handler checks cerebro_credentials_per_actor) so prod sees
 	// nothing new until an admin turns the flag on (FIR-1479 redesign).
 	IncludeCredentials bool
+	// mode is the chain-resolution mode the Effective column is computed with,
+	// decided ONCE at the top of Table() from the workspace's
+	// cerebro_member_override flag (FIR-2351: the table must show the same
+	// verdict the gates enforce — before this it always displayed the
+	// tighten-only fold, so a member/group/agent override that genuinely opened
+	// a workspace default at the gate still rendered as Deny). Unexported:
+	// callers never set it; hard-floor rows ignore it via tableRowMode.
+	mode Mode
+}
+
+// agentBrowserCapabilityKey is the tool_key of the agent-browser unix-socket
+// gate — a deny-by-default floor whose daemon gate resolves through the
+// tighten-only Resolve regardless of the member-override flag, so its table
+// row must too (mirrors handler.agentBrowserToolKey).
+const agentBrowserCapabilityKey = "tools:agent-browser"
+
+// tableRowMode picks the resolution mode one table row's Effective is computed
+// with. The openable mode reaches exactly the rows whose ENFORCEMENT honours
+// the member-override flag (the general gate and the connection paths); the
+// deny-by-default floors — credential.* keys, the verbed repo./credential.
+// capability keys (ActionOf), and the agent-browser socket — always display the
+// tighten-only fold their gates enforce, so the table can never show an
+// opening a floor would refuse.
+func tableRowMode(mode Mode, toolKey string) Mode {
+	if mode != ModeOpenable {
+		return ModeHardFloor
+	}
+	if strings.HasPrefix(toolKey, "credential.") || toolKey == agentBrowserCapabilityKey || ActionOf(toolKey) != "" {
+		return ModeHardFloor
+	}
+	return ModeOpenable
 }
 
 // Table returns one row per capability (tool) in the workspace, each with the
@@ -133,6 +172,16 @@ type TableQuery struct {
 // Effective verdict. Tools with no stored settings resolve to Base (Allow by
 // default), so an unconfigured workspace still lists every tool as allowed.
 func (s *Store) Table(ctx context.Context, in TableQuery) ([]TableRow, error) {
+	// Decide the resolution mode for the whole listing once: the Effective
+	// column must agree with what the gates enforce, so it follows the same
+	// workspace-level cerebro_member_override flag the gateway and local-runtime
+	// gates read (FIR-2351). tableRowMode() keeps the hard floors on the
+	// tighten-only fold row by row.
+	in.mode = ModeHardFloor
+	if s.MemberOverrideEnabled(ctx, in.WorkspaceID) {
+		in.mode = ModeOpenable
+	}
+
 	// Expand to the user's real groups when a user is in scope but no explicit
 	// groups were passed, so the Effective column reflects the full chain
 	// including the user's group layer (see resolveGroupIDs).
@@ -217,11 +266,12 @@ func (s *Store) Table(ctx context.Context, in TableQuery) ([]TableRow, error) {
 		   (p.layer = 'agent'     AND p.subject_id = $3) OR
 		   (p.layer = 'user'      AND p.subject_id = $4) OR
 		   (p.layer = 'group'     AND p.subject_id = ANY($5::uuid[])) OR
-		   (p.layer = 'system'    AND p.subject_id = $6)
+		   (p.layer = 'system'    AND p.subject_id = $6) OR
+		   (p.layer = 'on_behalf_of' AND p.subject_id = $7)
 		 )
 		WHERE c.workspace_id = $1`+runtimeFilter+`
 		ORDER BY c.category, lower(c.title), c.capability_key
-	`, in.WorkspaceID, in.RuntimeID, in.AgentID, in.UserID, groupIDs, in.SystemID)
+	`, in.WorkspaceID, in.RuntimeID, in.AgentID, in.UserID, groupIDs, in.SystemID, in.OnBehalfOfID)
 	if err != nil {
 		return nil, fmt.Errorf("toolpolicy: load table: %w", err)
 	}
@@ -322,7 +372,7 @@ func (s *Store) Table(ctx context.Context, in TableQuery) ([]TableRow, error) {
 		if len(a.groups) > 0 {
 			a.row.Layers[LayerGroup] = CombineGroups(a.groups...)
 		}
-		a.row.Effective = Resolve(Input{Settings: a.row.Layers, Base: in.Base})
+		a.row.Effective = ResolveWithMode(tableRowMode(in.mode, a.row.ToolKey), Input{Settings: a.row.Layers, Base: in.Base})
 		drivingByIndex = append(drivingByIndex, drivingGroupIDs(a.row.Effective, a.row.Layers[LayerGroup], a.groupSubjects, allGroupIDs))
 		out = append(out, a.row)
 	}

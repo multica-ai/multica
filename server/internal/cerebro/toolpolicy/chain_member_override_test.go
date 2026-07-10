@@ -138,3 +138,141 @@ func TestResolveMemberOverride_SystemAskBecomesDeny(t *testing.T) {
 		t.Fatalf("expected DecidedBy=system, got %q", e.DecidedBy)
 	}
 }
+
+// TestResolveMemberOverride_OnBehalfOfTightensOnly closes a parity gap with
+// Resolve (see TestResolve_OnBehalfOfTightensOnly): under the tighten-only
+// Resolve, on_behalf_of (the delegated task initiator, FIR-2441) can restrict a
+// tool across every agent that member drives but never widen it. Before this
+// test, ResolveMemberOverride's Stage B ceiling walked only
+// [Runtime, Agent, System] — on_behalf_of settings were silently dropped, so a
+// workspace that turns on cerebro_member_override (FIR-2175) would lose
+// on_behalf_of enforcement on the general gate even though the connection-grant
+// path (ConnectionEndpointEffective) already treats it as tighten-only. Both
+// resolvers must agree: on_behalf_of always tightens, never loosens.
+func TestResolveMemberOverride_OnBehalfOfTightensOnly(t *testing.T) {
+	// A delegated member Deny tightens an otherwise-allowed tool.
+	e := ResolveMemberOverride(Input{Settings: set(
+		LayerUser, SettingAllow,
+		LayerOnBehalfOf, SettingDeny,
+	)})
+	if e.Setting != SettingDeny {
+		t.Fatalf("on_behalf_of Deny must tighten, got %s", e.Setting)
+	}
+	if e.CappedBy != LayerOnBehalfOf {
+		t.Fatalf("expected CappedBy=on_behalf_of, got %q", e.CappedBy)
+	}
+	if e.DecidedBy != LayerOnBehalfOf {
+		t.Fatalf("expected DecidedBy=on_behalf_of, got %q", e.DecidedBy)
+	}
+
+	// A delegated member Allow can NOT loosen a tighter agent Deny.
+	e = ResolveMemberOverride(Input{Settings: set(
+		LayerAgent, SettingDeny,
+		LayerOnBehalfOf, SettingAllow, // tries to loosen — must be ignored
+	)})
+	if e.Setting != SettingDeny {
+		t.Fatalf("on_behalf_of Allow must not loosen an agent Deny, got %s", e.Setting)
+	}
+
+	// Absent on_behalf_of leaves resolution exactly as before (non-delegated path).
+	e = ResolveMemberOverride(Input{Settings: set(LayerUser, SettingAllow)})
+	if e.Setting != SettingAllow {
+		t.Fatalf("absent on_behalf_of must not change resolution, got %s", e.Setting)
+	}
+}
+
+// TestResolveMemberOverride_AgentOpensWorkspaceDefault pins the FIR-2351
+// product decision (2026-07-06): a workspace-authored setting is a DEFAULT,
+// not a cap — an explicit Agent-layer Allow may open a workspace Deny so an
+// operator can grant one agent a tool the workspace default denies. An
+// explicit Group or User row remains the agent's absolute ceiling, and every
+// other above-member layer (runtime, on_behalf_of, system) stays tighten-only.
+func TestResolveMemberOverride_AgentOpensWorkspaceDefault(t *testing.T) {
+	// Agent Allow opens a workspace Deny when no member row caps it.
+	e := ResolveMemberOverride(Input{Settings: set(
+		LayerWorkspace, SettingDeny,
+		LayerAgent, SettingAllow,
+	)})
+	if e.Setting != SettingAllow {
+		t.Fatalf("agent Allow must open a workspace-default Deny, got %s", e.Setting)
+	}
+	if e.DecidedBy != LayerAgent {
+		t.Fatalf("expected DecidedBy=agent, got %q", e.DecidedBy)
+	}
+
+	// Agent Ask softens a workspace Deny to an approval gate.
+	e = ResolveMemberOverride(Input{Settings: set(
+		LayerWorkspace, SettingDeny,
+		LayerAgent, SettingAsk,
+	)})
+	if e.Setting != SettingAsk {
+		t.Fatalf("agent Ask must open a workspace-default Deny to Ask, got %s", e.Setting)
+	}
+
+	// An explicit User Deny is the member ceiling — the agent can NOT exceed it.
+	e = ResolveMemberOverride(Input{Settings: set(
+		LayerUser, SettingDeny,
+		LayerAgent, SettingAllow,
+	)})
+	if e.Setting != SettingDeny {
+		t.Fatalf("agent Allow must not exceed an explicit user Deny, got %s", e.Setting)
+	}
+
+	// An explicit Group Deny is also a member ceiling.
+	e = ResolveMemberOverride(Input{Settings: set(
+		LayerGroup, SettingDeny,
+		LayerAgent, SettingAllow,
+	)})
+	if e.Setting != SettingDeny {
+		t.Fatalf("agent Allow must not exceed an explicit group Deny, got %s", e.Setting)
+	}
+
+	// A member layer may still open the workspace default for itself, and the
+	// agent opening never LOWERS the member verdict: user Allow + agent Deny
+	// keeps the agent tightened to Deny (tighten still works).
+	e = ResolveMemberOverride(Input{Settings: set(
+		LayerWorkspace, SettingDeny,
+		LayerUser, SettingAllow,
+		LayerAgent, SettingDeny,
+	)})
+	if e.Setting != SettingDeny {
+		t.Fatalf("agent Deny must still tighten below a user Allow, got %s", e.Setting)
+	}
+
+	// Runtime stays tighten-only: a runtime Allow can NOT open a workspace Deny.
+	e = ResolveMemberOverride(Input{Settings: set(
+		LayerWorkspace, SettingDeny,
+		LayerRuntime, SettingAllow,
+	)})
+	if e.Setting != SettingDeny {
+		t.Fatalf("runtime Allow must not open a workspace Deny, got %s", e.Setting)
+	}
+
+	// on_behalf_of stays tighten-only: it can NOT open a workspace Deny.
+	e = ResolveMemberOverride(Input{Settings: set(
+		LayerWorkspace, SettingDeny,
+		LayerOnBehalfOf, SettingAllow,
+	)})
+	if e.Setting != SettingDeny {
+		t.Fatalf("on_behalf_of Allow must not open a workspace Deny, got %s", e.Setting)
+	}
+
+	// A runtime layer above still tightens an agent-opened value.
+	e = ResolveMemberOverride(Input{Settings: set(
+		LayerWorkspace, SettingDeny,
+		LayerAgent, SettingAllow,
+		LayerRuntime, SettingAsk,
+	)})
+	if e.Setting != SettingAsk {
+		t.Fatalf("runtime Ask must tighten an agent-opened Allow, got %s", e.Setting)
+	}
+
+	// The hard floor is untouched: under Resolve the same input stays Deny.
+	e = Resolve(Input{Settings: set(
+		LayerWorkspace, SettingDeny,
+		LayerAgent, SettingAllow,
+	)})
+	if e.Setting != SettingDeny {
+		t.Fatalf("hard floor must ignore agent opening, got %s", e.Setting)
+	}
+}

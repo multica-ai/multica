@@ -1,0 +1,35 @@
+name: cerebro-require-tests
+
+# Machine-enforced half of the "proof = an automated test, not a screenshot"
+# policy (FIR-2610, verification-before-completion skill): a PR that changes
+# production source (logic) without adding/changing a test is blocked. Docs,
+# config, generated files, migrations, styling and tooling are exempt — this
+# is NOT "every PR needs a test". Opt out for a genuinely test-free logic
+# change by adding the `no-test-needed` label to the PR (or a
+# "CEREBRO-ALLOW-NO-TEST: <why>" line in a commit message).
+#
+# Net-new cerebro-only workflow (cerebro- filename prefix) so an upstream sync
+# never conflicts with it. To actually block merges, mark the `require-tests`
+# check as required in the branch-protection settings for `main`.
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  require-tests:
+    runs-on: ubuntu-latest
+    env:
+      BASE_REF: origin/main
+      CEREBRO_ALLOW_NO_TEST: ${{ contains(github.event.pull_request.labels.*.name, 'no-test-needed') && '1' || '' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          fetch-depth: 0
+
+      - name: Self-test the gate script
+        run: bash scripts/cerebro-require-tests.sh --test
+
+      - name: Require a test for logic changes
+        run: bash scripts/cerebro-require-tests.sh

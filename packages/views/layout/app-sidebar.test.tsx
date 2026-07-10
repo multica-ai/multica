@@ -193,11 +193,8 @@ vi.mock("@multica/core/api", async (importOriginal) => {
     },
   };
 });
-vi.mock("@multica/core/inbox/queries", () => ({
-  deduplicateInboxItems: (items: unknown[]) => items,
-  inboxKeys: { list: () => ["inbox"] },
-  inboxListOptions: () => ({ queryKey: ["inbox"] }),
-}));
+// CEREBRO-PATCH(inbox-badge-thread-aware): FIR-2382 sidebar badge (useCerebroInboxUnreadCount) calls inboxListOptions; mock it so the sidebar renders.
+vi.mock("@multica/core/inbox/queries", () => ({ deduplicateInboxItems: (items: unknown[]) => items, inboxKeys: { list: () => ["inbox"] }, inboxListOptions: (wsId: string) => ({ queryKey: ["inbox", "list", wsId] }) }));
 vi.mock("@multica/core/issues/queries", () => ({ issueDetailOptions: () => ({ queryKey: ["issue"] }) }));
 vi.mock("@multica/core/issues/stores/create-mode-store", () => ({
   useCreateModeStore: { getState: () => ({ lastMode: "agent" }) },

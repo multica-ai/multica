@@ -33,6 +33,8 @@ import (
 	cerebroruntimetools "github.com/multica-ai/multica/server/internal/cerebro/runtimetools"
 	// CEREBRO-PATCH(main-workflows-engine): JEH-1047 cerebro workflow engine import
 	cerebroworkflows "github.com/multica-ai/multica/server/internal/cerebro/workflows"
+	// CEREBRO-PATCH(main-loop-gate-evaluator): FIR-2283 loop delivery-gate evaluator import
+	cerebroloops "github.com/multica-ai/multica/server/internal/cerebro/loops"
 	// CEREBRO-PATCH(main-sprints-sweeper): FIR-2666 project sprint sweeper import
 	cerebrosprints "github.com/multica-ai/multica/server/internal/cerebro/sprints"
 	// CEREBRO-PATCH(main-recurring-issue-sweeper): TECH-3064 recurring-issue sweeper import
@@ -41,6 +43,8 @@ import (
 	cerebrodriftwatch "github.com/multica-ai/multica/server/internal/cerebro/driftwatch"
 	// CEREBRO-PATCH(main-note-types-sweeper): TECH-3511 note types sweeper import
 	cerebronotetypes "github.com/multica-ai/multica/server/internal/cerebro/note_types"
+	// CEREBRO-PATCH(main-artifact-versions): FIR-2697 artifact version listener import
+	cerebronote "github.com/multica-ai/multica/server/internal/cerebro/note"
 	// CEREBRO-PATCH(main-skill-learning-sweeper): TECH-3077 skill self-learning sweeper import
 	cerebrolearn "github.com/multica-ai/multica/server/internal/cerebro"
 	"github.com/multica-ai/multica/server/internal/daemonws"
@@ -344,6 +348,12 @@ func main() {
 
 	// CEREBRO-PATCH(main-workflows-engine): JEH-1047 / JEH-1108 — engine is constructed here (before the router) so the public webhook ingress route can be wired into the router with the same Service instance the bus listener and sweepers use.
 	workflowSvc := cerebroworkflows.New(cerebrodb.New(pool), queries, bus)
+	// CEREBRO-PATCH(main-workflow-session-stamper): FIR-2283 — dispatch-time session badge writer shared by the engine's phase dispatch and the loop revision dispatcher.
+	workflowSessionStamper := cerebroworkflows.NewSessionPhaseStamper(pool)
+	workflowSvc.WithSessionStamper(workflowSessionStamper)
+	// CEREBRO-PATCH(main-loop-gate-evaluator): FIR-2283 plug the loop delivery-gate evaluator (check_passes) into the engine, with the egress that dispatches enqueued checks to the worker agent's runtime.
+	// CEREBRO-PATCH(main-loop-status-reverter): FIR-2283 v2 — also plug in the status-revert egress, so a gate revising visibly moves the board back to Build/Plan.
+	workflowSvc.WithGateEvaluator(cerebroloops.NewGateEvaluator(pool).WithDispatcher(cerebroloops.NewTaskDispatcher(queries).WithSessionStamper(workflowSessionStamper)).WithStatusSetter(cerebroloops.NewIssueStatusSetter(queries)))
 	// CEREBRO-PATCH(router-push-service): pushSvc threaded through to handlers.
 	r, h := NewRouterWithOptions(pool, hub, bus, analyticsClient, storeRedis, pushSvc, RouterOptions{
 		HTTPMetrics:        httpMetrics,
@@ -379,6 +389,8 @@ func main() {
 	// CEREBRO-PATCH(main-wakeup): FIR-3013 issue/time/GitHub-CI wakeup listeners.
 	wakeupSvc := cerebrowakeup.New(cerebrodb.New(pool), queries, taskSvc, bus)
 	cerebrowakeup.RegisterListeners(bus, wakeupSvc)
+	// CEREBRO-PATCH(main-artifact-versions): FIR-2697 snapshot a version whenever an agent-created document (artifact) is created/updated, reusing the note version engine.
+	cerebronote.RegisterArtifactVersionListener(bus, cerebrodb.New(pool))
 
 	// Construct a LivenessStore that mirrors the one wired into the HTTP
 	// handler. Both the heartbeat write path (handler) and the sweeper read
@@ -439,6 +451,8 @@ func main() {
 		gatewayExecutor.SetConnectionDenyStore(cerebrotoolpolicy.NewStore(pool))
 		// CEREBRO-PATCH(main-firtal-gateway-api-connection-tools): FIR-2166 C PR2 — expose enabled API-type connections as server-side-dispatched agent tools, behind the default-off cerebro_api_connection_tools workspace flag.
 		gatewayExecutor.SetAPIConnectionStore(cerebroconnections.New(pool))
+		// CEREBRO-PATCH(main-loop-report-store): FIR-2283 — wire the loop check store so worker agents can call report_loop_check to report check exit codes back to the delivery gate.
+		gatewayExecutor.SetLoopStore(cerebroloops.NewStore(pool))
 		// CEREBRO-PATCH(main-firtal-gateway-inproc-bridge): FIR-1449 default-off in-process bridge to the full CLI tool surface, controlled rollout via env.
 		cerebroruntime.MaybeEnableInProcessBridge(gatewayExecutor, r)
 		go gatewayExecutor.Run(gatewayRuntimeCtx)

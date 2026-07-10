@@ -633,11 +633,11 @@ func TestCodexRawItemAgentMessageFinalAnswer(t *testing.T) {
 	c.notificationProtocol = "raw"
 	c.turnStarted = true
 
-	var gotText string
+	var got Message
 	var turnDone bool
 	c.onMessage = func(msg Message) {
 		if msg.Type == MessageText {
-			gotText = msg.Content
+			got = msg
 		}
 	}
 	c.onTurnDone = func(aborted bool) {
@@ -646,11 +646,38 @@ func TestCodexRawItemAgentMessageFinalAnswer(t *testing.T) {
 
 	c.handleLine(`{"jsonrpc":"2.0","method":"item/completed","params":{"item":{"type":"agentMessage","id":"msg-1","text":"Done!","phase":"final_answer"}}}`)
 
-	if gotText != "Done!" {
-		t.Fatalf("expected text 'Done!', got %q", gotText)
+	if got.Content != "Done!" {
+		t.Fatalf("expected text 'Done!', got %q", got.Content)
+	}
+	if !got.Final {
+		t.Fatal("expected final_answer text to be marked final")
 	}
 	if !turnDone {
 		t.Fatal("expected onTurnDone for final_answer")
+	}
+}
+
+// CEREBRO-PATCH(codex-final-output-only): raw progress agent messages still stream but must not become final output.
+func TestCodexRawItemAgentMessageProgressIsNotFinal(t *testing.T) {
+	t.Parallel()
+
+	c, _, _ := newTestCodexClient(t)
+	c.notificationProtocol = "raw"
+
+	var got Message
+	c.onMessage = func(msg Message) {
+		if msg.Type == MessageText {
+			got = msg
+		}
+	}
+
+	c.handleLine(`{"jsonrpc":"2.0","method":"item/completed","params":{"item":{"type":"agentMessage","id":"msg-1","text":"still working"}}}`)
+
+	if got.Content != "still working" {
+		t.Fatalf("expected progress text to stream, got %q", got.Content)
+	}
+	if got.Final {
+		t.Fatal("progress text must not be marked final")
 	}
 }
 
@@ -1354,8 +1381,8 @@ func TestCodexExecuteSemanticInactivityAllowsContinuousMessages(t *testing.T) {
 	if result.Status != "completed" {
 		t.Fatalf("expected completed, got status=%q error=%q", result.Status, result.Error)
 	}
-	if !strings.Contains(result.Output, "still working") {
-		t.Fatalf("expected streamed text in output, got %q", result.Output)
+	if strings.Contains(result.Output, "still working") {
+		t.Fatalf("progress text must not become final output, got %q", result.Output)
 	}
 }
 
@@ -1409,7 +1436,7 @@ func TestCodexExecuteSemanticInactivityDoesNotAffectNormalTurnCompletion(t *test
 		`read line`+"\n"+
 		`echo '{"jsonrpc":"2.0","id":3,"result":{}}'`+"\n"+
 		`echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"thr-normal","turn":{"id":"turn-normal"}}}'`+"\n"+
-		`echo '{"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"thr-normal","item":{"type":"agentMessage","id":"msg-1","text":"Done"}}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"thr-normal","item":{"type":"agentMessage","id":"msg-1","text":"Done","phase":"final_answer"}}}'`+"\n"+
 		`echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thr-normal","turn":{"id":"turn-normal","status":"completed"}}}'`+"\n")
 
 	result := executeFakeCodex(t, fakePath, ExecOptions{

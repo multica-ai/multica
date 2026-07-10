@@ -1,0 +1,33 @@
+---
+title: "Multica v1.12.0"
+description: "15 release bullets: 6 new, 7 fixed, 2 improved."
+date: 2026-07-03
+---
+
+**Release summary:** 15 release bullets: 6 new, 7 fixed, 2 improved.
+
+Changes since [v1.11.4](https://github.com/firtal-group/firtal-cerebro/compare/v1.11.4...v1.12.0) — bump: **minor**
+
+## New
+
+- Discover all MCP transports + explicit OpenAPI spec URL/upload (FIR-2656) [#2070](https://github.com/firtal-group/firtal-cerebro/pull/2070)
+- Issue workflow v2 — consolidated + de-staled (FIR-2283) [#2061](https://github.com/firtal-group/firtal-cerebro/pull/2061)
+- Endpoint labels from OpenAPI summaries end-to-end (FIR-2640)
+- Delegated override capabilities with mandatory self-target ban (FIR-2351)
+- Folders are the only note permission control (FIR-2595) [#2059](https://github.com/firtal-group/firtal-cerebro/pull/2059)
+- Folder editors can edit and save notes (FIR-2595) [#2052](https://github.com/firtal-group/firtal-cerebro/pull/2052)
+
+## Fixed
+
+- Surface upstream errors as 424, not 502 (FIR-2441) [#2071](https://github.com/firtal-group/firtal-cerebro/pull/2071)
+- Stay on connection page after save + fix misleading internal-URL placeholders (FIR-2640) [#2062](https://github.com/firtal-group/firtal-cerebro/pull/2062)
+- Close two access holes in the delegated override gate (FIR-2351)
+- Route channel/group messages under dm_message key [#2058](https://github.com/firtal-group/firtal-cerebro/pull/2058)
+- Read can_edit from the single-note fetch, not the list row (FIR-2595) [#2057](https://github.com/firtal-group/firtal-cerebro/pull/2057)
+- Close on_behalf_of parity gap in ResolveMemberOverride (FIR-2351) [#2055](https://github.com/firtal-group/firtal-cerebro/pull/2055)
+- Add can_edit to note test fixture (FIR-2595) [#2053](https://github.com/firtal-group/firtal-cerebro/pull/2053)
+
+## Improved
+
+- Unify Resolve/ResolveMemberOverride into one mode-selected function (FIR-2351) [#2056](https://github.com/firtal-group/firtal-cerebro/pull/2056)
+- Fix stale Resolve/Base=Allow comment in override_grant.go (FIR-2351)

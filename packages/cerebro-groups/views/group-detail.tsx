@@ -1129,6 +1129,14 @@ function CapabilitiesSection({
           onChange={(next) => onToggle("create_shared_filters", next)}
           testId="capability-create-shared-filters"
         />
+        <CapabilityRow
+          label="Create memory"
+          tooltip="Members of this group can use agent & member memory: enable it on an agent for themselves and write memories. Default deny — without this, memory stays read-only company context at most. Requires the workspace memory switch to be on."
+          checked={has("create_memory")}
+          disabled={!isAdmin || grant.isPending || revoke.isPending}
+          onChange={(next) => onToggle("create_memory", next)}
+          testId="capability-create-memory"
+        />
       </div>
     </section>
   );

@@ -296,3 +296,107 @@
   overflow-wrap: break-word;
   vertical-align: top;
 }
+
+/* CEREBRO-PATCH(stacked-tables-editor): FIR-2482 — the editable Tiptap editor now
+   tags data tables `.data-table` too (via cerebro-stacked-tables-extension), so the
+   mobile card layout above (each row → one labelled card) reaches notes, issue
+   descriptions and editable documents. One gap remains vs. the readonly markdown
+   path: ProseMirror renders the header row as <th> cells inside <tbody> (there is no
+   <thead>), so the thead-hiding card rule above never matches it — the header row
+   would otherwise render as a stray unlabelled card. Hide the first row explicitly
+   for editable data tables on mobile; its text is already surfaced on every body cell
+   via the data-label attribute the extension injects. */
+@media (max-width: 640px) {
+  .rich-text-editor:not(.readonly) table.data-table tr:first-child {
+    display: none;
+  }
+}
+
+/* CEREBRO-PATCH(stacked-tables-editor-wrapper): FIR-2482 follow-up — the fix above
+   never actually reached the editable editor. cerebro-stacked-tables-extension tags
+   the table with a ProseMirror node decoration (`Decoration.node(..., {class:
+   "data-table"})`), and ProseMirror applies a node decoration's class to the node's
+   OUTER dom element. Tiptap wraps every editable table in a `.tableWrapper` div
+   (from the columnResizing/tableView plugin), so the `.data-table` class lands on
+   that WRAPPER, not on the inner `<table>`. Every mobile card rule above keys off
+   `table.data-table`, so it matched nothing and notes/descriptions still rendered a
+   cramped multi-column grid (Jesper's original screenshot). Re-apply the identical
+   card layout for the editable editor, keyed off the wrapper where the class really
+   lands. The per-cell `data-label` decoration DOES land on each `<td>` correctly, so
+   the labels are already present. */
+@media (max-width: 640px) {
+  .rich-text-editor:not(.readonly) .tableWrapper.data-table {
+    overflow-x: visible;
+    border: none;
+    background: none;
+    margin: 0.75rem 0;
+  }
+  .rich-text-editor:not(.readonly) .tableWrapper.data-table > table,
+  .rich-text-editor:not(.readonly) .tableWrapper.data-table tbody,
+  .rich-text-editor:not(.readonly) .tableWrapper.data-table tr,
+  .rich-text-editor:not(.readonly) .tableWrapper.data-table td {
+    display: block;
+    width: 100%;
+  }
+  .rich-text-editor:not(.readonly) .tableWrapper.data-table tr:first-child {
+    /* ProseMirror renders the header row as <th> in <tbody> (no <thead>); its text
+       is surfaced per body cell via data-label, so hide the raw header row. */
+    display: none;
+  }
+  .rich-text-editor:not(.readonly) .tableWrapper.data-table tr {
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 0.5rem 0.9rem;
+    margin-bottom: 0.85rem;
+    background: var(--background);
+  }
+  .rich-text-editor:not(.readonly) .tableWrapper.data-table td {
+    border: none;
+    border-top: 1px solid var(--border);
+    padding: 0.55rem 0;
+  }
+  .rich-text-editor:not(.readonly) .tableWrapper.data-table tr td:first-child {
+    border-top: none;
+  }
+  .rich-text-editor:not(.readonly) .tableWrapper.data-table td[data-label]::before {
+    content: attr(data-label);
+    display: block;
+    margin-bottom: 3px;
+    font-size: 0.72rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
+    color: var(--muted-foreground);
+  }
+  .rich-text-editor:not(.readonly) .tableWrapper.data-table td:empty {
+    display: none;
+  }
+}
+
+/* CEREBRO-PATCH(readonly-image-strip): FIR-2714 — posted images (issue comments,
+   descriptions, chat, channel/DM messages) used to render each markdown image as a
+   centered block (media.css `.image-node { display:block; text-align:center }`), so a
+   single attachment sat in the middle of the message and several attachments stacked
+   down the thread. Jesper wants them laid out like the composer image tray:
+   left-aligned, on one row, and horizontally scrollable when they exceed the width.
+   readonly-content.tsx wraps an image-only paragraph in `.rte-image-strip`; this styles
+   that wrapper as the scroll row and pins each thumbnail so it keeps its size. Scoped to
+   `.readonly` so the editable editor is untouched. */
+.rich-text-editor.readonly .rte-image-strip {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: flex-start;
+  gap: 0.5rem;
+  margin: 0.5rem 0;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+}
+.rich-text-editor.readonly .rte-image-strip br {
+  display: none;
+}
+.rich-text-editor.readonly .rte-image-strip .image-node {
+  display: block !important;
+  flex: 0 0 auto;
+  margin: 0;
+  text-align: left;
+}

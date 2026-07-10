@@ -21,6 +21,7 @@
 package mcprelay
 
 import (
+	"bytes"
 	"context"
 	"crypto/hmac"
 	"crypto/sha256"
@@ -28,6 +29,8 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
@@ -52,6 +55,48 @@ type connLoader interface {
 	GetEnabledByName(ctx context.Context, workspaceID pgtype.UUID, name string) (connections.Connection, error)
 }
 
+// ConnActor is the actor a relay token was minted for, parsed back out of the
+// token at call time so the relay can resolve the FULL policy chain — not just
+// the workspace scope. Every field is optional: a workspace-scoped token (the
+// legacy direct mint, or the agent-less runtime tool-scan) carries none, so all
+// fields are the zero UUID and the resolve collapses to workspace scope exactly
+// as the first slice did. A claim mints the fields it knows (agent + owner +
+// on_behalf_of initiator), so the relay honors an agent-level or member-level
+// Deny too (FIR-2441 fix-list #2 follow-up).
+type ConnActor struct {
+	RuntimeID    pgtype.UUID
+	AgentID      pgtype.UUID
+	OwnerID      pgtype.UUID // agent owner → tool-policy User layer
+	OnBehalfOfID pgtype.UUID // task initiator → tighten-only on_behalf_of layer
+}
+
+// toolPolicy decides whether a single mcp_http tool call is forbidden by policy
+// for the actor a relay token carries (FIR-2441 fix-list #2). It exists because
+// the relay previously proxied EVERY tools/call for a valid connection token
+// untouched — so a `Deny` on one tool was only honored by CLIs that respect
+// --disallowedTools (Claude/Cursor/Gemini). Codex/Hermes/Kimi/Kiro/OpenCode
+// ignore that list, so the Deny leaked. Enforcing it here — server-side, on the
+// path EVERY local runtime's mcp_http call already flows through — closes the
+// hole independently of which agent program is running and independently of the
+// cerebro_api_connection_tools flag. The first slice enforced only a
+// workspace-scope Deny; the resolver now folds the whole actor chain (Workspace ›
+// Runtime › Agent › Group › User › OnBehalfOf) from the token's actor, so an
+// agent- or member-level Deny is honored too — an actor with no fields set (a
+// workspace-scoped token) resolves exactly the workspace scope as before. A nil
+// resolver means "no server-side policy" (the pre-FIR-2441 pass-through
+// behavior), and the resolver only ever returns deny=true for an EXPLICIT Deny
+// verdict — any error or unknown verdict is fail-open, so a tool that works today
+// can never be broken by this gate.
+type toolPolicy interface {
+	ToolDenied(ctx context.Context, workspaceID pgtype.UUID, actor ConnActor, connName, toolName string) (denied bool, err error)
+}
+
+// maxRelayPolicyPeek bounds how large a request body the relay will buffer to
+// inspect for a tools/call. MCP JSON-RPC requests are tiny; anything larger (or
+// with an unknown length, e.g. chunked/SSE) is proxied untouched rather than
+// buffered, so the policy peek can never truncate or OOM a legitimate request.
+const maxRelayPolicyPeek = 1 << 20 // 1 MiB
+
 // Signer mints and verifies relay tokens. A token binds a single connection in
 // a single workspace to an expiry, authenticated by an HMAC over the server
 // secret. The secret never leaves the server; the local runtime only carries
@@ -70,20 +115,80 @@ type tokenPayload struct {
 	WS   string `json:"ws"`
 	Conn string `json:"conn"`
 	Exp  int64  `json:"exp"`
+	// Actor fields (FIR-2441 fix-list #2 follow-up). All omitempty so a
+	// workspace-scoped token stays byte-for-byte the old shape and a token minted
+	// off the direct Mint carries no actor at all. Stored as strings (UUID text)
+	// so the token is self-describing and the relay can rebuild a ConnActor.
+	RT  string `json:"rt,omitempty"`  // runtime id
+	Agt string `json:"agt,omitempty"` // agent id
+	Own string `json:"own,omitempty"` // agent owner (tool-policy User layer)
+	OBO string `json:"obo,omitempty"` // on_behalf_of initiator (tighten-only layer)
 }
 
 // Mint returns a signed token authorizing relay access to connection `conn` in
-// workspace `ws` until tokenTTL from now.
+// workspace `ws` until tokenTTL from now. It carries no actor, so the relay
+// enforces tool policy at the workspace scope only — the pre-follow-up behavior,
+// kept for the agent-less runtime tool-scan and any caller with no actor.
 func (s *Signer) Mint(ws, conn string) (string, error) {
+	return s.MintFor(ws, conn, ConnActor{})
+}
+
+// MintFor is Mint with an actor bound into the token, so the relay resolves the
+// full Workspace › Runtime › Agent › Group › User › OnBehalfOf policy chain for
+// that actor and honors an agent- or member-level Deny server-side — even for a
+// CLI that ignores --disallowedTools (FIR-2441 fix-list #2 follow-up). A zero
+// ConnActor is identical to Mint.
+func (s *Signer) MintFor(ws, conn string, actor ConnActor) (string, error) {
 	if len(s.secret) == 0 {
 		return "", fmt.Errorf("mcprelay: signer not configured")
 	}
-	body, err := json.Marshal(tokenPayload{WS: ws, Conn: conn, Exp: s.now().Add(tokenTTL).Unix()})
+	body, err := json.Marshal(tokenPayload{
+		WS:   ws,
+		Conn: conn,
+		Exp:  s.now().Add(tokenTTL).Unix(),
+		RT:   uuidText(actor.RuntimeID),
+		Agt:  uuidText(actor.AgentID),
+		Own:  uuidText(actor.OwnerID),
+		OBO:  uuidText(actor.OnBehalfOfID),
+	})
 	if err != nil {
 		return "", err
 	}
 	p := base64.RawURLEncoding.EncodeToString(body)
 	return p + "." + s.sign(p), nil
+}
+
+// uuidText renders a UUID as its text form, or "" when unset, so an absent actor
+// field is simply omitted from the token (omitempty).
+func uuidText(id pgtype.UUID) string {
+	if !id.Valid {
+		return ""
+	}
+	return util.UUIDToString(id)
+}
+
+// actor rebuilds the ConnActor from a token payload. A field that does not parse
+// as a UUID is left zero (Valid=false), which the tool-policy chain treats as
+// "layer empty" — so a malformed actor field degrades to a narrower scope, never
+// a wider one.
+func (p tokenPayload) actor() ConnActor {
+	return ConnActor{
+		RuntimeID:    parseUUIDOrZero(p.RT),
+		AgentID:      parseUUIDOrZero(p.Agt),
+		OwnerID:      parseUUIDOrZero(p.Own),
+		OnBehalfOfID: parseUUIDOrZero(p.OBO),
+	}
+}
+
+func parseUUIDOrZero(s string) pgtype.UUID {
+	if s == "" {
+		return pgtype.UUID{}
+	}
+	id, err := util.ParseUUID(s)
+	if err != nil {
+		return pgtype.UUID{}
+	}
+	return id
 }
 
 // Verify checks a token's signature and expiry and returns its payload.
@@ -125,11 +230,14 @@ func (s *Signer) sign(p string) string {
 type Relay struct {
 	signer *Signer
 	store  connLoader
+	policy toolPolicy // nil ⇒ no server-side tool-policy enforcement
 }
 
-// NewRelay wires the handler.
-func NewRelay(signer *Signer, store connLoader) *Relay {
-	return &Relay{signer: signer, store: store}
+// NewRelay wires the handler. policy may be nil, in which case the relay proxies
+// every call for a valid token exactly as before (pre-FIR-2441). When non-nil it
+// gates each tools/call against the workspace tool policy (fix-list #2).
+func NewRelay(signer *Signer, store connLoader, policy toolPolicy) *Relay {
+	return &Relay{signer: signer, store: store, policy: policy}
 }
 
 // ServeHTTP handles every MCP method (POST for requests, GET for the SSE
@@ -166,6 +274,37 @@ func (rl *Relay) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if conn.Type != connections.TypeMCPHTTP {
 		http.Error(w, "mcp relay: not an mcp connection", http.StatusBadRequest)
 		return
+	}
+	// FIR-2441 fix-list #2: gate a tools/call against the tool policy for the
+	// token's actor server-side, so a Deny is honored regardless of which agent
+	// CLI is running. The actor (agent + owner + on_behalf_of) rides in the token,
+	// so an agent- or member-level Deny is enforced here too; a workspace-scoped
+	// token carries no actor and resolves the workspace scope exactly as before.
+	// Only an explicit Deny blocks; everything else (including a body we cannot
+	// safely buffer, an unparseable body, or a resolver error) is proxied
+	// untouched, so this never breaks a call that works today.
+	if rl.policy != nil && r.Method == http.MethodPost && r.ContentLength > 0 && r.ContentLength <= maxRelayPolicyPeek {
+		buf, readErr := io.ReadAll(r.Body)
+		_ = r.Body.Close()
+		// Restore the body for the proxy no matter what we found.
+		r.Body = io.NopCloser(bytes.NewReader(buf))
+		r.ContentLength = int64(len(buf))
+		r.GetBody = func() (io.ReadCloser, error) { return io.NopCloser(bytes.NewReader(buf)), nil }
+		if readErr == nil {
+			if tool, ok := toolCallName(buf); ok {
+				denied, derr := rl.policy.ToolDenied(r.Context(), wsID, payload.actor(), payload.Conn, tool)
+				switch {
+				case derr != nil:
+					// Fail open (don't break a working tool) but record it — a
+					// silently-skipped policy check is a security regression.
+					slog.Warn("mcp relay: tool policy resolve failed; proxying without enforcement",
+						"workspace_id", payload.WS, "connection", payload.Conn, "tool", tool, "error", derr)
+				case denied:
+					http.Error(w, "mcp relay: tool denied by policy", http.StatusForbidden)
+					return
+				}
+			}
+		}
 	}
 	target, err := url.Parse(conn.URL)
 	if err != nil || target.Host == "" {
@@ -218,6 +357,31 @@ func realHeaders(a connections.AuthConfig) map[string]string {
 		h["CF-Access-Client-Secret"] = a.CFAccessSecret
 	}
 	return h
+}
+
+// toolCallName extracts the tool name from an MCP JSON-RPC request body when it
+// is a tools/call. It returns ok=false for any other method, a batch (array)
+// body, or a malformed body — the caller then proxies without enforcement, so a
+// shape the relay does not understand never blocks a call. It intentionally only
+// reads the two fields it needs and ignores everything else.
+func toolCallName(body []byte) (string, bool) {
+	var req struct {
+		Method string `json:"method"`
+		Params struct {
+			Name string `json:"name"`
+		} `json:"params"`
+	}
+	if err := json.Unmarshal(body, &req); err != nil {
+		return "", false
+	}
+	if req.Method != "tools/call" {
+		return "", false
+	}
+	name := strings.TrimSpace(req.Params.Name)
+	if name == "" {
+		return "", false
+	}
+	return name, true
 }
 
 func bearer(header string) (string, bool) {

@@ -25,12 +25,17 @@ type fakeIssueActions struct {
 	Agent       db.Agent
 	GetAgentErr error
 
-	TaskQueued       db.CreateQuickCreateTaskParams
-	TaskQueueErr     error
-	CreatedComment   db.CreateCommentParams
-	CreateCommentErr error
-	ParentIssue      db.Issue
-	GetIssueErr      error
+	TaskQueued           db.CreateQuickCreateTaskParams
+	IssueTaskQueued      db.CreateAgentTaskParams
+	IssueTaskQueuedCount int
+	IssueTaskQueueErr    error
+	ModelOverride        db.SetAgentTaskModelOverrideParams
+	ThinkingOverride     db.SetAgentTaskThinkingOverrideParams
+	TaskQueueErr         error
+	CreatedComment       db.CreateCommentParams
+	CreateCommentErr     error
+	ParentIssue          db.Issue
+	GetIssueErr          error
 
 	// Phase-2 ext (JEH-1114, route_by_domain).
 	Labels        []db.IssueLabel
@@ -111,6 +116,14 @@ func (f *fakeIssueActions) CreateQuickCreateTask(_ context.Context, p db.CreateQ
 	}
 	return db.AgentTaskQueue{ID: mustUUID("33333333-3333-3333-3333-333333333333")}, nil
 }
+func (f *fakeIssueActions) SetAgentTaskModelOverride(_ context.Context, p db.SetAgentTaskModelOverrideParams) error {
+	f.ModelOverride = p
+	return nil
+}
+func (f *fakeIssueActions) SetAgentTaskThinkingOverride(_ context.Context, p db.SetAgentTaskThinkingOverrideParams) error {
+	f.ThinkingOverride = p
+	return nil
+}
 func (f *fakeIssueActions) ListLabels(_ context.Context, _ pgtype.UUID) ([]db.IssueLabel, error) {
 	if f.ListLabelsErr != nil {
 		return nil, f.ListLabelsErr
@@ -142,6 +155,15 @@ func (f *fakeIssueActions) UpdateIssueAssignee(_ context.Context, p db.UpdateIss
 		return db.Issue{}, f.UpdateAssigneeErr
 	}
 	return db.Issue{ID: p.ID, AssigneeType: p.AssigneeType, AssigneeID: p.AssigneeID}, nil
+}
+
+func (f *fakeIssueActions) CreateAgentTask(_ context.Context, p db.CreateAgentTaskParams) (db.AgentTaskQueue, error) {
+	f.IssueTaskQueued = p
+	f.IssueTaskQueuedCount++
+	if f.IssueTaskQueueErr != nil {
+		return db.AgentTaskQueue{}, f.IssueTaskQueueErr
+	}
+	return db.AgentTaskQueue{ID: mustUUID("44444444-4444-4444-4444-444444444444")}, nil
 }
 
 func mustUUID(s string) pgtype.UUID {
@@ -240,9 +262,11 @@ func TestActionRunSkill_HappyPath(t *testing.T) {
 	}
 	svc := newServiceWithFake(fake)
 	wf := testWorkflow(ActionRunSkill, ActionConfigRunSkill{
-		SkillName:  skillName,
-		AgentID:    "ffffffff-ffff-ffff-ffff-ffffffffffff",
-		SkillInput: map[string]any{"query": "active campaigns"},
+		SkillName:     skillName,
+		AgentID:       "ffffffff-ffff-ffff-ffff-ffffffffffff",
+		Model:         "build-model",
+		ThinkingLevel: "low",
+		SkillInput:    map[string]any{"query": "active campaigns"},
 	})
 
 	if err := svc.actionRunSkill(context.Background(), wf, testTriggerEvent()); err != nil {
@@ -267,6 +291,12 @@ func TestActionRunSkill_HappyPath(t *testing.T) {
 	if ctx["workflow_skill_name"] != skillName {
 		t.Errorf("context.workflow_skill_name = %v, want %q", ctx["workflow_skill_name"], skillName)
 	}
+	if fake.ModelOverride.ModelOverride != "build-model" {
+		t.Fatalf("model override = %q, want build-model", fake.ModelOverride.ModelOverride)
+	}
+	if fake.ThinkingOverride.ThinkingOverride != "low" {
+		t.Fatalf("thinking override = %q, want low", fake.ThinkingOverride.ThinkingOverride)
+	}
 }
 
 func TestActionRunSkill_RejectsMissingSkill(t *testing.T) {
@@ -286,6 +316,51 @@ func TestActionRunSkill_RejectsMissingSkill(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "not found") {
 		t.Errorf("expected 'not found' error, got %v", err)
+	}
+}
+
+// TestActionRunSkill_FallsBackToIssueAssignee locks in FIR-2283 v2's optional
+// build agent: when the step's action config carries no agent_id, the
+// dispatch resolves to whoever the triggering issue is currently assigned to.
+func TestActionRunSkill_FallsBackToIssueAssignee(t *testing.T) {
+	skillName := "firtal-data-evaluate"
+	assigneeID := mustUUID("ffffffff-ffff-ffff-ffff-ffffffffffff")
+	fake := &fakeIssueActions{
+		Skills:      []db.ListSkillSummariesByWorkspaceRow{{Name: skillName}},
+		AgentSkills: []db.Skill{{Name: skillName}},
+		Agent: db.Agent{
+			RuntimeID: mustUUID("eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee"),
+		},
+		ParentIssue: db.Issue{
+			ID:           mustUUID("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"),
+			AssigneeType: pgtype.Text{String: AssigneeTypeAgent, Valid: true},
+			AssigneeID:   assigneeID,
+		},
+	}
+	svc := newServiceWithFake(fake)
+	wf := testWorkflow(ActionRunSkill, ActionConfigRunSkill{SkillName: skillName})
+
+	if err := svc.actionRunSkill(context.Background(), wf, testTriggerEvent()); err != nil {
+		t.Fatalf("actionRunSkill returned %v", err)
+	}
+	if fake.TaskQueued.AgentID != assigneeID {
+		t.Fatalf("expected task queued for the issue's assignee %v, got %v", assigneeID, fake.TaskQueued.AgentID)
+	}
+}
+
+// TestActionRunSkill_RejectsEmptyAgentWithNoIssueAssignee proves the fallback
+// fails loudly instead of silently picking an arbitrary agent when the issue
+// has no agent assignee either.
+func TestActionRunSkill_RejectsEmptyAgentWithNoIssueAssignee(t *testing.T) {
+	fake := &fakeIssueActions{
+		ParentIssue: db.Issue{ID: mustUUID("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")},
+	}
+	svc := newServiceWithFake(fake)
+	wf := testWorkflow(ActionRunSkill, ActionConfigRunSkill{SkillName: "any-skill"})
+
+	err := svc.actionRunSkill(context.Background(), wf, testTriggerEvent())
+	if err == nil || !strings.Contains(err.Error(), "no agent assignee") {
+		t.Fatalf("expected 'no agent assignee' error, got %v", err)
 	}
 }
 
@@ -443,12 +518,29 @@ func TestBuildRunSkillPrompt_DeterministicJSON(t *testing.T) {
 	}
 }
 
+func TestBuildPlanModePrompt(t *testing.T) {
+	inner := buildRunSkillPrompt("plan-skill", nil)
+	got := buildPlanModePrompt(inner)
+	// The plan skill instruction must survive (the plan skill still runs).
+	if !strings.Contains(got, inner) {
+		t.Fatalf("plan-mode prompt dropped the inner skill instruction: %q", got)
+	}
+	// And the run must be told it is planning and must not write code.
+	// rename_session is deliberately absent: the session badge is stamped
+	// server-side at dispatch time now, not requested from the agent.
+	for _, want := range []string{"PLAN MODE", "must NOT write or edit", "build status"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("plan-mode prompt missing %q, got:\n%s", want, got)
+		}
+	}
+}
+
 func TestClassifyDomain(t *testing.T) {
 	cases := []struct {
-		name    string
-		title   string
-		desc    string
-		want    string
+		name  string
+		title string
+		desc  string
+		want  string
 	}{
 		{"empty falls back to default", "", "", DomainBusiness},
 		{"file extension wins", "Tweak handler", "fix in actions.go and types.ts", DomainCode},

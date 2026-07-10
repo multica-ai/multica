@@ -3,14 +3,55 @@ package execenv
 import (
 	"strings"
 	"testing"
+
+	"github.com/multica-ai/multica/server/internal/cerebro/connmeta"
 )
 
-func TestCerebroToolsBriefEmptyRendersNothing(t *testing.T) {
-	if got := cerebroToolsBrief(nil); got != "" {
-		t.Fatalf("expected empty string for no entries, got %q", got)
+// FIR-2441 (DoD 4): with no resolved tools the brief no longer renders nothing
+// — it renders the compact "0 connection tools" explanation so silence can never
+// be mistaken for a docs/tools load failure. It stays compact: header + the one
+// note, no tool list and no argument-shape guidance (there is nothing to call).
+func TestCerebroToolsBriefEmptyRendersZeroConnectionsNote(t *testing.T) {
+	for _, entries := range [][]ToolBriefEntry{nil, {}} {
+		got := cerebroToolsBrief(entries)
+		if !strings.Contains(got, "### Connections & MCP tools (resolved live from your permissions)") {
+			t.Fatalf("expected section header for empty entries, got %q", got)
+		}
+		if !strings.Contains(got, "You currently have 0 connection tools") {
+			t.Fatalf("expected zero-connection-tools note for empty entries, got %q", got)
+		}
+		if !strings.Contains(got, "multica_connection_tools_status") {
+			t.Fatalf("expected diagnostic pointer for empty entries, got %q", got)
+		}
+		// Compact: no tool-list scaffolding or arg-shape guidance when empty.
+		if strings.Contains(got, connmeta.APIConnectionArgHint) {
+			t.Fatalf("did not expect arg-shape guidance when there are no tools:\n%s", got)
+		}
 	}
-	if got := cerebroToolsBrief([]ToolBriefEntry{}); got != "" {
-		t.Fatalf("expected empty string for zero entries, got %q", got)
+}
+
+// When the agent HAS tools but none of them are connection tools, the note still
+// appears (alongside the normal section) so the empty Connections family is never
+// ambiguous.
+func TestCerebroToolsBriefMCPOnlyStillNotesZeroConnections(t *testing.T) {
+	out := cerebroToolsBrief([]ToolBriefEntry{
+		{Family: "MCP tools", Name: "schedule_wakeup", Description: "Schedule a wakeup", Verdict: "allow"},
+	})
+	if !strings.Contains(out, "You currently have 0 connection tools") {
+		t.Fatalf("expected zero-connection-tools note when only MCP tools are present:\n%s", out)
+	}
+	if !strings.Contains(out, "`schedule_wakeup`") {
+		t.Fatalf("expected the MCP tool to still be listed:\n%s", out)
+	}
+}
+
+// With at least one connection tool present, the zero note must NOT appear.
+func TestCerebroToolsBriefWithConnectionOmitsZeroNote(t *testing.T) {
+	out := cerebroToolsBrief([]ToolBriefEntry{
+		{Family: "Connections", Name: "data-registry / query_run", Description: "Run a query", Verdict: "allow"},
+	})
+	if strings.Contains(out, "You currently have 0 connection tools") {
+		t.Fatalf("did not expect zero-connection-tools note when a connection tool is present:\n%s", out)
 	}
 }
 
@@ -30,6 +71,12 @@ func TestCerebroToolsBriefGroupsAndOrders(t *testing.T) {
 		"`customer-service / lookup_order`",
 		"`customer-service / draft_reply`",
 		"Look up an order",
+		// FIR-2441: the first prompt must state the api-connection argument shape
+		// (path top-level, query params inside `query`, body inside `body`) so an
+		// agent never has to call-and-read-the-error to discover the `query` object.
+		// Assert the exact shared connmeta constant so the local brief and the cloud
+		// gateway system prompt render byte-for-byte the same rule (single source).
+		connmeta.APIConnectionArgHint,
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("expected rendered brief to contain %q\n---\n%s", want, out)
@@ -79,10 +126,15 @@ func TestBriefIncludesToolsSectionWhenEntriesPresent(t *testing.T) {
 	}
 }
 
-func TestBriefOmitsToolsSectionWhenNoEntries(t *testing.T) {
+// FIR-2441 (DoD 4): with no resolved tools the brief now carries the compact
+// "0 connection tools" explanation instead of omitting the section entirely.
+func TestBriefNotesZeroConnectionsWhenNoEntries(t *testing.T) {
 	ctx := TaskContextForEnv{IssueID: "00000000-0000-0000-0000-000000000001"}
 	out := buildMetaSkillContent("claude", ctx)
-	if strings.Contains(out, "### Connections & MCP tools (resolved live from your permissions)") {
-		t.Fatalf("did not expect tools section when EffectiveTools is empty")
+	if !strings.Contains(out, "### Connections & MCP tools (resolved live from your permissions)") {
+		t.Fatalf("expected tools section header when EffectiveTools is empty")
+	}
+	if !strings.Contains(out, "You currently have 0 connection tools") {
+		t.Fatalf("expected zero-connection-tools note when EffectiveTools is empty")
 	}
 }

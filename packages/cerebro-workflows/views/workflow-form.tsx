@@ -85,6 +85,10 @@ export interface FormState extends WorkflowPhase3FormFields {
   // Phase 2 ext (JEH-1114, escalate_to_owner).
   escalateMaxAgeHours: string; // textbox value; parsed as int at save-time
   escalateContentTemplate: string;
+  // Loop settings (FIR-2283). Only relevant when actionType === "run_skill".
+  // Stored as loop_planning in the action_config JSON; consumed by the loop
+  // compiler to prepend a planning-dispatch rule before the build phase.
+  loopPlanningMode: boolean;
 }
 
 export const EMPTY_FORM: FormState = {
@@ -114,6 +118,7 @@ export const EMPTY_FORM: FormState = {
   conditionsJSON: "[]",
   escalateMaxAgeHours: "12",
   escalateContentTemplate: "",
+  loopPlanningMode: false,
 };
 
 interface WorkflowFormProps {
@@ -167,7 +172,7 @@ export function WorkflowForm({ workflowId, headerSlot, embedded }: WorkflowFormP
       if (workspace) navigation.push(`/${workspace.slug}/workflows`);
     },
     onError: (err: unknown) => {
-      setError(err instanceof Error ? err.message : "Kunne ikke gemme workflow");
+      setError(err instanceof Error ? err.message : "Could not save workflow");
     },
   });
 
@@ -175,7 +180,7 @@ export function WorkflowForm({ workflowId, headerSlot, embedded }: WorkflowFormP
   if (!workspace) {
     return (
       <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-        Workspace context indlæses…
+        Loading workspace context…
       </div>
     );
   }
@@ -191,7 +196,7 @@ export function WorkflowForm({ workflowId, headerSlot, embedded }: WorkflowFormP
         }}
       >
         {!workflowId && (
-          <Section title="Start fra en skabelon (valgfri)">
+          <Section title="Start from a template (optional)">
             <ul className="flex flex-col divide-y">
               {WORKFLOW_TEMPLATES.map((tpl) => (
                 <li
@@ -214,7 +219,7 @@ export function WorkflowForm({ workflowId, headerSlot, embedded }: WorkflowFormP
                       }
                     }}
                   >
-                    {tpl.status === "active" ? "Brug" : "Kommer i fase 4"}
+                    {tpl.status === "active" ? "Use" : "Coming in phase 4"}
                   </Button>
                 </li>
               ))}
@@ -222,16 +227,16 @@ export function WorkflowForm({ workflowId, headerSlot, embedded }: WorkflowFormP
           </Section>
         )}
 
-        <Section title="Grundlæggende">
-          <Field label="Navn">
+        <Section title="Basics">
+          <Field label="Name">
             <Input
               value={form.name}
               onChange={(e) => setForm({ ...form, name: e.target.value })}
               required
-              placeholder='F.eks. "Når in_review → opret QA sub-issue"'
+              placeholder='E.g. "When in_review → create QA sub-issue"'
             />
           </Field>
-          <Field label="Aktiv">
+          <Field label="Enabled">
             <Switch
               checked={form.enabled}
               onCheckedChange={(v) => setForm({ ...form, enabled: v === true })}
@@ -256,12 +261,12 @@ export function WorkflowForm({ workflowId, headerSlot, embedded }: WorkflowFormP
           </Field>
           {form.triggerType === "status_changed" && (
             <>
-              <Field label="Fra status (tom = alle)">
+              <Field label="From status (empty = all)">
                 <NativeSelect
                   value={form.fromStatus}
                   onChange={(e) => setForm({ ...form, fromStatus: e.target.value })}
                 >
-                  <option value="">(alle)</option>
+                  <option value="">(all)</option>
                   {ISSUE_STATUSES.map((s) => (
                     <option key={s} value={s}>
                       {s}
@@ -269,7 +274,7 @@ export function WorkflowForm({ workflowId, headerSlot, embedded }: WorkflowFormP
                   ))}
                 </NativeSelect>
               </Field>
-              <Field label="Til status">
+              <Field label="To status">
                 <NativeSelect
                   value={form.toStatus}
                   onChange={(e) => setForm({ ...form, toStatus: e.target.value })}
@@ -318,7 +323,7 @@ export function WorkflowForm({ workflowId, headerSlot, embedded }: WorkflowFormP
           )}
         </Section>
 
-        <Section title="Conditions (avanceret, valgfri)">
+        <Section title="Conditions (advanced, optional)">
           <Field label="Conditions JSON">
             <Textarea
               value={form.conditionsJSON}
@@ -330,11 +335,11 @@ export function WorkflowForm({ workflowId, headerSlot, embedded }: WorkflowFormP
             />
           </Field>
           <p className="text-[11px] text-muted-foreground">
-            Conditions filtrerer efter trigger og før action. Skabeloner kan
-            pre-udfylde dette felt (fx <code>evidence_present</code> til at
-            gate <code>set_status: done</code>). En dedikeret editor lander
-            i en senere PR; rediger JSON direkte indtil da. Tom array
-            betyder "kør altid".
+            Conditions filter after the trigger and before the action. Templates can
+            pre-fill this field (e.g. <code>evidence_present</code> to
+            gate <code>set_status: done</code>). A dedicated editor lands
+            in a later PR; edit the JSON directly until then. An empty array
+            means "always run".
           </p>
         </Section>
 
@@ -355,7 +360,7 @@ export function WorkflowForm({ workflowId, headerSlot, embedded }: WorkflowFormP
           </Field>
 
           {form.actionType === "set_status" && (
-            <Field label="Sæt status til">
+            <Field label="Set status to">
               <NativeSelect
                 value={form.setStatus}
                 onChange={(e) => setForm({ ...form, setStatus: e.target.value })}
@@ -371,22 +376,22 @@ export function WorkflowForm({ workflowId, headerSlot, embedded }: WorkflowFormP
 
           {form.actionType === "create_sub_issue" && (
             <>
-              <Field label="Sub-issue titel">
+              <Field label="Sub-issue title">
                 <Input
                   value={form.subIssueTitle}
                   onChange={(e) => setForm({ ...form, subIssueTitle: e.target.value })}
                   required
-                  placeholder="F.eks. QA: {{title}}"
+                  placeholder="E.g. QA: {{title}}"
                 />
               </Field>
-              <Field label="Sub-issue beskrivelse (valgfri)">
+              <Field label="Sub-issue description (optional)">
                 <Textarea
                   value={form.subIssueDescription}
                   onChange={(e) => setForm({ ...form, subIssueDescription: e.target.value })}
                   rows={3}
                 />
               </Field>
-              <Field label="Assignee-type (valgfri)">
+              <Field label="Assignee type (optional)">
                 <NativeSelect
                   value={form.subIssueAssigneeType}
                   onChange={(e) =>
@@ -400,14 +405,14 @@ export function WorkflowForm({ workflowId, headerSlot, embedded }: WorkflowFormP
                   <option value="member">Member</option>
                 </NativeSelect>
               </Field>
-              <Field label="Assignee-ID (UUID, valgfri)">
+              <Field label="Assignee ID (UUID, optional)">
                 <Input
                   value={form.subIssueAssigneeId}
                   onChange={(e) => setForm({ ...form, subIssueAssigneeId: e.target.value })}
                   placeholder="<uuid>"
                 />
               </Field>
-              <Field label="Label-IDs (komma-separeret UUIDs, valgfri)">
+              <Field label="Label IDs (comma-separated UUIDs, optional)">
                 <Input
                   value={form.subIssueLabelIDs}
                   onChange={(e) => setForm({ ...form, subIssueLabelIDs: e.target.value })}
@@ -419,7 +424,7 @@ export function WorkflowForm({ workflowId, headerSlot, embedded }: WorkflowFormP
 
           {form.actionType === "send_reminder" && (
             <>
-              <Field label="Modtagertype">
+              <Field label="Recipient type">
                 <NativeSelect
                   value={form.reminderRecipientType}
                   onChange={(e) =>
@@ -433,7 +438,7 @@ export function WorkflowForm({ workflowId, headerSlot, embedded }: WorkflowFormP
                   <option value="agent">Agent</option>
                 </NativeSelect>
               </Field>
-              <Field label="Modtager-ID (UUID)">
+              <Field label="Recipient ID (UUID)">
                 <Input
                   value={form.reminderRecipientId}
                   onChange={(e) => setForm({ ...form, reminderRecipientId: e.target.value })}
@@ -441,7 +446,7 @@ export function WorkflowForm({ workflowId, headerSlot, embedded }: WorkflowFormP
                   placeholder="<uuid>"
                 />
               </Field>
-              <Field label="Besked">
+              <Field label="Message">
                 <Textarea
                   value={form.reminderMessage}
                   onChange={(e) => setForm({ ...form, reminderMessage: e.target.value })}
@@ -454,7 +459,7 @@ export function WorkflowForm({ workflowId, headerSlot, embedded }: WorkflowFormP
 
           {form.actionType === "run_skill" && (
             <>
-              <Field label="Skill (navn fra workspace)">
+              <Field label="Skill (name from workspace)">
                 <Input
                   value={form.skillName}
                   onChange={(e) => setForm({ ...form, skillName: e.target.value })}
@@ -462,7 +467,7 @@ export function WorkflowForm({ workflowId, headerSlot, embedded }: WorkflowFormP
                   placeholder="firtal-data-evaluate"
                 />
               </Field>
-              <Field label="Agent-ID (skal have skillen attached)">
+              <Field label="Agent ID (must have the skill attached)">
                 <Input
                   value={form.skillAgentId}
                   onChange={(e) => setForm({ ...form, skillAgentId: e.target.value })}
@@ -470,7 +475,7 @@ export function WorkflowForm({ workflowId, headerSlot, embedded }: WorkflowFormP
                   placeholder="<uuid>"
                 />
               </Field>
-              <Field label="Skill-input (JSON)">
+              <Field label="Skill input (JSON)">
                 <Textarea
                   value={form.skillInputJSON}
                   onChange={(e) => setForm({ ...form, skillInputJSON: e.target.value })}
@@ -491,17 +496,17 @@ export function WorkflowForm({ workflowId, headerSlot, embedded }: WorkflowFormP
                     setForm({ ...form, commentTarget: e.target.value as "self" | "parent" })
                   }
                 >
-                  <option value="self">Triggerede issue</option>
-                  <option value="parent">Parent-issue</option>
+                  <option value="self">Triggered issue</option>
+                  <option value="parent">Parent issue</option>
                 </NativeSelect>
               </Field>
-              <Field label="Indhold (template-felter understøttes)">
+              <Field label="Content (template fields supported)">
                 <Textarea
                   value={form.commentContent}
                   onChange={(e) => setForm({ ...form, commentContent: e.target.value })}
                   rows={4}
                   required
-                  placeholder="Opdatering på {{title}}: ..."
+                  placeholder="Update on {{title}}: ..."
                 />
               </Field>
             </>
@@ -509,7 +514,7 @@ export function WorkflowForm({ workflowId, headerSlot, embedded }: WorkflowFormP
 
           {form.actionType === "route_by_domain" && (
             <>
-              <Field label="Label-præfiks">
+              <Field label="Label prefix">
                 <Input
                   value={form.routeLabelPrefix}
                   onChange={(e) =>
@@ -519,7 +524,7 @@ export function WorkflowForm({ workflowId, headerSlot, embedded }: WorkflowFormP
                   data-testid="route-label-prefix"
                 />
               </Field>
-              <Field label="Default-domæne (når heuristikken ikke matcher)">
+              <Field label="Default domain (when the heuristic doesn't match)">
                 <NativeSelect
                   value={form.routeDefaultDomain}
                   onChange={(e) =>
@@ -538,16 +543,16 @@ export function WorkflowForm({ workflowId, headerSlot, embedded }: WorkflowFormP
                 </NativeSelect>
               </Field>
               <p className="text-[11px] text-muted-foreground">
-                Workspacet skal have et label per domæne (f.eks.{" "}
-                <code>domain:code</code>). Mangler labelet, fejler kørslen
-                med en klar besked — opret det under Settings → Labels.
+                The workspace needs a label per domain (e.g.{" "}
+                <code>domain:code</code>). If the label is missing, the run fails
+                with a clear message — create it under Settings → Labels.
               </p>
             </>
           )}
 
           {form.actionType === "escalate_to_owner" && (
             <>
-              <Field label="Max alder uden status-skift (timer)">
+              <Field label="Max age without a status change (hours)">
                 <Input
                   type="number"
                   min={1}
@@ -558,7 +563,7 @@ export function WorkflowForm({ workflowId, headerSlot, embedded }: WorkflowFormP
                   data-testid="escalate-max-age"
                 />
               </Field>
-              <Field label="Custom kommentar-template (valgfri)">
+              <Field label="Custom comment template (optional)">
                 <Textarea
                   value={form.escalateContentTemplate}
                   onChange={(e) =>
@@ -570,10 +575,10 @@ export function WorkflowForm({ workflowId, headerSlot, embedded }: WorkflowFormP
                 />
               </Field>
               <p className="text-[11px] text-muted-foreground">
-                Engine walker <code>parent_issue_id</code>-kæden op fra det
-                stallede issue og poster en kommentar på første ancestor
-                med assignee. Tomt template → standard backlinket besked
-                med #-nummer + alder + tærskel.
+                The engine walks the <code>parent_issue_id</code> chain up from the
+                stalled issue and posts a comment on the first ancestor
+                with an assignee. An empty template → default backlinked message
+                with #-number + age + threshold.
               </p>
             </>
           )}
@@ -603,6 +608,24 @@ export function WorkflowForm({ workflowId, headerSlot, embedded }: WorkflowFormP
           )}
         </Section>
 
+        {form.actionType === "run_skill" && (
+          <Section title="Loop settings">
+            <Field label="Planning mode">
+              <Switch
+                checked={form.loopPlanningMode}
+                onCheckedChange={(v) => setForm({ ...form, loopPlanningMode: v === true })}
+                data-testid="loop-planning-mode"
+              />
+            </Field>
+            <p className="text-[11px] text-muted-foreground">
+              When enabled, the agent must produce and post a plan before the
+              build phase begins. The agent advances to{" "}
+              <code>in_progress</code> manually when it is satisfied with the
+              plan. Disable to start building immediately.
+            </p>
+          </Section>
+        )}
+
         {error && (
           <div className="rounded-md border border-destructive/40 bg-destructive/5 p-3 text-sm text-destructive">
             {error}
@@ -615,10 +638,10 @@ export function WorkflowForm({ workflowId, headerSlot, embedded }: WorkflowFormP
             variant="outline"
             onClick={() => navigation.push(`/${workspace.slug}/workflows`)}
           >
-            Annullér
+            Cancel
           </Button>
           <Button type="submit" disabled={save.isPending}>
-            {save.isPending ? "Gemmer…" : "Gem"}
+            {save.isPending ? "Saving…" : "Save"}
           </Button>
         </div>
       </form>
@@ -627,14 +650,14 @@ export function WorkflowForm({ workflowId, headerSlot, embedded }: WorkflowFormP
 
   if (embedded) return body;
 
-  const heading = workflowId ? "Rediger workflow" : "Nyt workflow";
+  const heading = workflowId ? "Edit workflow" : "New workflow";
   return (
     <div className="flex h-full flex-col">
       <PageHeader className="justify-between gap-3">
         <div className="flex min-w-0 flex-col">
           <h1 className="text-sm font-semibold">{heading}</h1>
           <p className="truncate text-[11px] text-muted-foreground">
-            Trigger → conditions → action. Form-mode (skift til canvas øverst for node-graf).
+            Trigger → conditions → action. Form mode (switch to canvas above for the node graph).
           </p>
         </div>
         {headerSlot}
@@ -676,10 +699,10 @@ export function formStateFromInput(input: WorkflowWriteInput): FormState {
     ...EMPTY_FORM,
     name: input.name ?? "",
     enabled: input.enabled ?? true,
-    triggerType: input.trigger_type,
+    triggerType: input.trigger_type ?? EMPTY_FORM.triggerType,
     fromStatus: (tc.from_status as string) ?? "",
     toStatus: (tc.to_status as string) ?? EMPTY_FORM.toStatus,
-    actionType: input.action_type,
+    actionType: input.action_type ?? EMPTY_FORM.actionType,
     setStatus: (ac.status as string) ?? EMPTY_FORM.setStatus,
     subIssueTitle: (ac.title as string) ?? "",
     subIssueDescription: (ac.description as string) ?? "",
@@ -728,6 +751,7 @@ export function formStateFromInput(input: WorkflowWriteInput): FormState {
       typeof ac.assignee_id === "string" && input.action_type === "reassign_issue"
         ? (ac.assignee_id as string)
         : EMPTY_FORM.reassignAssigneeId,
+    loopPlanningMode: ac.loop_planning === true,
   };
 }
 
@@ -829,6 +853,7 @@ export function buildPayload(f: FormState): WorkflowWriteInput {
       skill_name: f.skillName,
       agent_id: f.skillAgentId,
       skill_input: safeParseJSON(f.skillInputJSON),
+      ...(f.loopPlanningMode ? { loop_planning: true } : {}),
     };
   } else if (f.actionType === "comment_on_issue") {
     actionConfig = {

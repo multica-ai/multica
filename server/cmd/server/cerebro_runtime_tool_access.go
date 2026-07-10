@@ -27,6 +27,7 @@ func (a *runtimeToolAccessAdapter) ListEffectiveTools(ctx context.Context, q han
 		RuntimeCapabilities: q.RuntimeCapabilities,
 		AgentID:             q.AgentID,
 		UserID:              q.UserID,
+		OnBehalfOfID:        q.OnBehalfOfID,
 	})
 	if err != nil {
 		return nil, err

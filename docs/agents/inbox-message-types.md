@@ -130,7 +130,11 @@ Archived messages have two surfaces in the dynamic inbox:
   (`ArchivedInboxBlock`, `packages/cerebro-inbox-dynamic/components/archived-inbox-block.tsx`).
   It is **not** part of the merged inbox feed — like the Chat block it renders
   over its own archived queries via the shared `useArchivedInboxEntries` hook
-  (archived inbox notifications + archived chats). It **starts folded** by
+  (archived inbox notifications + archived chats + archived channels/DMs,
+  FIR-2791 via `GET /api/channels?archived_only=true`). An archived channel/DM
+  shows as **one** row: its message notifications are folded into the channel
+  row (`buildArchivedEntries` drops notifs whose `issue_id` is an archived
+  channel). It **starts folded** by
   default and offers an in-block search, sort (newest/oldest), and
   group-by-type (Issues / Channels / Chat). It needs no extra flag — it lives
   inside the existing `cerebro_inbox_dynamic` inbox.
@@ -143,7 +147,8 @@ upstream `InboxListItem`, the block wraps each message row in
 and `CerebroUnarchiveAction` reads that context to upgrade its single restore
 button into a two-action menu. Absent the provider (the classic archived view),
 the button stays a plain single "unarchive". Chat rows keep their own restore
-flow and get no "mark unread" affordance.
+flow and get no "mark unread" affordance. Channel/DM rows (FIR-2791) restore
+via `useUnarchiveChannel` (single "unarchive" only, both surfaces).
 
 ---
 
@@ -171,6 +176,17 @@ losing hand-offs).
 
 **Platform / governance:** `private_agent_run_request`,
 `skill_change_request_created`, `skill_change_request_reviewed`,
+`agent_context_change_request` (FIR-1775 Agent Office — fires when someone
+proposes a versioned edit to an agent's context; recipients are the context
+owner + named approvers minus the proposer, `severity` `action_required`,
+`route` `inbox` by default with push opt-in; `details` carries `agent_id`,
+`agent_name`, `change_request_id`, `base_version`, `proposed_version`; carries no
+`issue_id` — the inbox UI deep-links from `details.agent_id` to the agent's
+Instructions tab. (Skill change-request rows, by contrast, no longer navigate
+away: FIR-2742 opens them **in the inbox pane** via `SkillChangeInboxDetail`,
+which lists the diff from `details` and offers an explicit "Open in new window".)
+Emitted by the
+agent-office handler and routed by `registerCerebroAgentOfficeNotificationListener`),
 `runtime_auto_paused`, `manually_added`, `agent_capability_drift` (TECH-3738
 Bid C — the capability drift watcher alerts workspace owners/admins, `severity`
 `attention`, when an agent uses a tool its declared policy denies; `details`
@@ -234,10 +250,10 @@ into its issue's group:
 
 ---
 
-## Mentions come from two sources (comment and note)
+## Mentions come from three sources (issue comment, note, note comment)
 
-`mentioned` is a single `InboxItemType`, but it is produced from **two** places —
-both reuse the same comment-mention engine and the per-user
+`mentioned` is a single `InboxItemType`, but it is produced from **three** places —
+all reuse the same comment-mention engine and the per-user
 `"mentioned"` → `"comments"` notification setting:
 
 - **Comment mention** — `@`-tagging a member in an issue comment. The inbox item
@@ -252,6 +268,18 @@ both reuse the same comment-mention engine and the per-user
   (`details.note_id`, `details.note_title`) and the inbox UI deep-links from
   `details.note_id`. The listener also shares the note with the mentioned member
   so the notification is openable.
+- **Note comment mention** (FIR-2589) — `@`-tagging a member in a **comment on a
+  note**. `CreateComment` (`server/internal/cerebro/note/comments.go`) calls
+  `notifyCommentMentions`, which reuses the exact note-body path above: it
+  shares the note with the tagged member and publishes the same
+  `EventNoteMentioned`. Unlike a body mention it also carries the comment, so
+  the event payload adds `comment_id` (the thread-root id) and `comment_excerpt`.
+  The listener puts `comment_id` in `details` and the excerpt in the item **body**,
+  so the inbox message reads with context and the deep-link opens the exact
+  comment: the inbox appends `&comment=<id>` to `?note=<id>` and the Notes surface
+  (`NotesPage`/`NoteEditor` `initialCommentId`) opens the comments panel and
+  scrolls to that comment. Still no new event or notification type — a comment
+  mention is a `mentioned` item with `details.comment_id` also set.
 
 > Takeaway for agents: a note mention is **not** a separate type — it is a
 > `mentioned` notification whose `details.note_id` is set (issue-less). If you

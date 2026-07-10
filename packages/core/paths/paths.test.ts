@@ -26,10 +26,22 @@ describe("paths.workspace(slug)", () => {
     expect(ws.squads()).toBe("/acme/squads");
     expect(ws.squadDetail("sq_1")).toBe("/acme/squads/sq_1");
     expect(ws.settings()).toBe("/acme/settings");
+    // FIR-2595: shareable per-note URL.
+    expect(ws.notes()).toBe("/acme/notes");
+    expect(ws.noteDetail("n1")).toBe("/acme/notes/n1");
+    // FIR-2688: shareable per-folder URLs across the four folder surfaces.
+    expect(ws.documentsFolder("f1")).toBe("/acme/documents?folder=f1");
+    expect(ws.notesFolder("f1")).toBe("/acme/notes?folder=f1");
+    expect(ws.skillsFolder("f1")).toBe("/acme/skills?folder=f1");
+    expect(ws.autopilotsFolder("f1")).toBe("/acme/autopilots?folder=f1");
   });
 
   it("URL-encodes special characters in ids", () => {
     expect(ws.issueDetail("id with space")).toBe("/acme/issues/id%20with%20space");
+    expect(ws.noteDetail("id with space")).toBe("/acme/notes/id%20with%20space");
+    // FIR-2688: ids are opaque; encode so a weird id can't break the query.
+    expect(ws.notesFolder("a/b?c")).toBe("/acme/notes?folder=a%2Fb%3Fc");
+    expect(ws.skillsFolder("a b")).toBe("/acme/skills?folder=a%20b");
   });
 });
 

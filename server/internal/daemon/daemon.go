@@ -1175,13 +1175,26 @@ func newWorkspaceState(workspaceID string, runtimeIDs []string, reposVersion str
 	}
 }
 
+// normalizeRepoURL trims incidental whitespace and a trailing slash so that
+// "https://github.com/org/repo" and "https://github.com/org/repo/" are
+// treated as the same repo when checking allowlists. Without this, a repo
+// whose configured URL happens to carry a trailing slash falls outside the
+// allowlist and every checkout of it fails with ErrRepoNotConfigured even
+// though the repo is legitimately configured (FIR-2786).
+// CEREBRO-PATCH(repo-url-trailing-slash): upstream allowlist keys/lookups
+// were exact-string matches with no URL normalization.
+func normalizeRepoURL(rawURL string) string {
+	return strings.TrimRight(strings.TrimSpace(rawURL), "/")
+}
+
 func repoAllowlist(repos []RepoData) map[string]struct{} {
 	allowed := make(map[string]struct{}, len(repos))
 	for _, repo := range repos {
-		if repo.URL == "" {
+		url := normalizeRepoURL(repo.URL) // CEREBRO-PATCH(repo-url-trailing-slash)
+		if url == "" {
 			continue
 		}
-		allowed[repo.URL] = struct{}{}
+		allowed[url] = struct{}{}
 	}
 	return allowed
 }
@@ -1195,6 +1208,7 @@ func (d *Daemon) setWorkspaceRepoSyncError(workspaceID, syncErr string) {
 }
 
 func (d *Daemon) workspaceRepoAllowed(workspaceID, repoURL string) bool {
+	repoURL = normalizeRepoURL(repoURL) // CEREBRO-PATCH(repo-url-trailing-slash)
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	ws, ok := d.workspaces[workspaceID]
@@ -1298,7 +1312,7 @@ func (d *Daemon) registerTaskRepos(workspaceID string, args ...any) {
 	}
 	candidates := make([]repoCandidate, 0, len(repos))
 	for _, repo := range repos {
-		url := strings.TrimSpace(repo.URL)
+		url := normalizeRepoURL(repo.URL) // CEREBRO-PATCH(repo-url-trailing-slash)
 		if url == "" {
 			continue
 		}
@@ -1602,7 +1616,7 @@ func (d *Daemon) ensureRepoReady(ctx context.Context, workspaceID, repoURL strin
 		return fmt.Errorf("repo cache not initialized")
 	}
 
-	repoURL = strings.TrimSpace(repoURL)
+	repoURL = normalizeRepoURL(repoURL) // CEREBRO-PATCH(repo-url-trailing-slash)
 
 	d.mu.Lock()
 	ws, ok := d.workspaces[workspaceID]
@@ -3519,6 +3533,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		IsSquadLeader:                    strings.Contains(instructions, "## Squad Operating Protocol"),
 		RequestingUserName:               task.RequestingUserName,
 		RequestingUserProfileDescription: task.RequestingUserProfileDescription,
+		UserProfilePrompt:                task.UserProfilePrompt, // CEREBRO-PATCH(user-profile-prompt): JEH-304 carry the compiled profile into the brief.
 		InitiatorType:                    task.InitiatorType,
 		InitiatorID:                      task.InitiatorID,
 		InitiatorName:                    task.InitiatorName,
@@ -3761,10 +3776,25 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			agentEnv[k] = v
 		}
 	}
+	// CEREBRO-PATCH(daemon-tool-policy-ipc): TECH-2563 — wire Claude Code's
+	// PreToolUse hook to the local tool-policy resolve IPC when the workspace
+	// has opted in (claim carries the resolved stage). No-op for the default
+	// "off" stage and for non-Claude providers.
+	toolPolicySpawn, tperr := d.prepareToolPolicySpawn(provider, task.LocalToolPolicyStage, env.WorkDir)
+	if tperr != nil {
+		return TaskResult{}, fmt.Errorf("tool-policy prep: %w", tperr)
+	}
+	if toolPolicySpawn != nil {
+		for k, v := range toolPolicySpawn.Env {
+			agentEnv[k] = v
+		}
+	}
 	backend, err := agent.New(provider, agent.Config{
 		ExecutablePath: entry.Path,
 		Env:            agentEnv,
 		Logger:         d.logger,
+		// CEREBRO-PATCH(runtime-sandbox-override-claim): JEH-418 — honour the claim's per-runtime sandbox override + policy at spawn (restored after upstream sync #4530, FIR-2743).
+		Sandbox: d.buildSandboxConfig(provider, task.SandboxEnabled, parseRuntimeSandboxPolicy(task.RuntimeSandboxPolicy), task.Agent),
 	})
 	if err != nil {
 		return TaskResult{}, fmt.Errorf("create agent backend: %w", err)
@@ -3792,25 +3822,23 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		customArgs = task.Agent.CustomArgs
 		mcpConfig = task.Agent.McpConfig
 	}
-	// Two-tier model resolution: an explicit agent.model wins,
-	// then the daemon-wide MULTICA_<PROVIDER>_MODEL env var. If
-	// both are empty we deliberately pass "" through — each
-	// backend omits `--model` from the CLI invocation, so the
-	// provider picks its own default (Claude Code's shipped
-	// default, codex app-server's account-scoped default, etc.).
-	// Baking a Go-side "recommended default" here is how the
-	// cursor regression happened — static guesses drift from
-	// whatever the upstream CLI actually accepts.
-	model := ""
-	if task.Agent != nil && task.Agent.Model != "" {
-		model = task.Agent.Model
+	// CEREBRO-PATCH(daemon-tool-policy-ipc): TECH-2563 — pass the tool-policy
+	// PreToolUse hook to Claude Code via --settings on customArgs (the args the
+	// CLI actually consumes). No-op unless prepareToolPolicySpawn wired a settings file.
+	if toolPolicySpawn != nil && provider == "claude" && toolPolicySpawn.SettingsPath != "" {
+		customArgs = append(customArgs, "--settings", toolPolicySpawn.SettingsPath)
 	}
-	if model == "" {
-		model = entry.Model
-	}
+	// CEREBRO-PATCH(daemon-run-task-model-override): task model_override wins over agent.model for workflow/wakeup runs.
+	model := resolveTaskModel(task, entry)
 	thinkingLevel := ""
+	// CEREBRO-PATCH(daemon-run-task-thinking-override): task thinking_override wins over agent.thinking_level for workflow steps.
+	if task.ThinkingOverride != "" {
+		thinkingLevel = task.ThinkingOverride
+	}
 	if task.Agent != nil {
-		thinkingLevel = task.Agent.ThinkingLevel
+		if thinkingLevel == "" {
+			thinkingLevel = task.Agent.ThinkingLevel
+		}
 	}
 	// Per-model guard: the server validates the literal token against the
 	// provider's enum, but per-model gaps (Claude's `xhigh` on a non-Opus

@@ -34,9 +34,11 @@ package runtime
 
 import (
 	"context"
+	"strings"
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/cerebro/toolpolicy"
+	"github.com/multica-ai/multica/server/internal/util"
 )
 
 // apiEndpointSetting resolves the per-actor Allow/Ask/Deny verdict for an
@@ -90,8 +92,18 @@ func (e *FirtalGatewayExecutor) apiEndpointSetting(
 			"agent_id", meta.AgentID, "tool", toolName, "fail_closed", failClosed, "error", err)
 		return onErr, ""
 	}
+	// on_behalf_of (FIR-2441): the human who triggered the run is the delegated
+	// task initiator. Pass them as the tighten-only on_behalf_of layer so a
+	// member-level Deny holds at call time exactly as it does in the list/brief.
+	// Empty (system run) or unparseable → zero UUID, i.e. no on_behalf_of layer.
+	var onBehalfOfID pgtype.UUID
+	if s := strings.TrimSpace(meta.TriggerUserID); s != "" {
+		if u, perr := util.ParseUUID(s); perr == nil {
+			onBehalfOfID = u
+		}
+	}
 	eff, connName, err := e.connDeny.ConnectionEndpointEffective(
-		ctx, workspaceID, agent.RuntimeID, agentID, agent.OwnerID,
+		ctx, workspaceID, agent.RuntimeID, agentID, agent.OwnerID, onBehalfOfID,
 		api.ConnectionName(), api.Method(), api.Path())
 	if err != nil {
 		e.logger.Warn("api endpoint policy: resolve failed",

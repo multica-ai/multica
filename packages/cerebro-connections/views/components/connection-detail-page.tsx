@@ -1,9 +1,10 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import {
   CheckCircle2,
   ChevronRight,
+  FileUp,
   Loader2,
   Plus,
   Settings,
@@ -62,6 +63,9 @@ const EMPTY_FORM = {
   api_key_header: "",
   cf_access_id: "",
   cf_access_secret: "",
+  session_exchange_enabled: false,
+  session_exchange_path: "/sessions/exchange",
+  session_exchange_ttl_seconds: "3600",
   enabled: true,
   default_access: "deny" as DefaultAccess,
 };
@@ -75,17 +79,27 @@ const HTTP_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE"] as const;
 // by path so the list stays stable across discoveries.
 function mergeEndpoints(
   current: EndpointPermission[],
-  discovered: { path: string; methods: string[] }[],
+  discovered: { path: string; methods: string[]; summary?: string }[],
 ): EndpointPermission[] {
   const byPath = new Map<string, Set<string>>();
-  for (const ep of current) byPath.set(ep.path, new Set(ep.methods));
+  const summaries = new Map<string, string>();
+  for (const ep of current) {
+    byPath.set(ep.path, new Set(ep.methods));
+    if (ep.summary) summaries.set(ep.path, ep.summary);
+  }
   for (const ep of discovered) {
     const set = byPath.get(ep.path) ?? new Set<string>();
     for (const m of ep.methods) set.add(m.toUpperCase());
     byPath.set(ep.path, set);
+    // A freshly discovered summary wins: the spec is the source of truth for labels.
+    if (ep.summary) summaries.set(ep.path, ep.summary);
   }
   return Array.from(byPath.entries())
-    .map(([path, methods]) => ({ path, methods: Array.from(methods).sort() }))
+    .map(([path, methods]) => ({
+      path,
+      methods: Array.from(methods).sort(),
+      ...(summaries.has(path) ? { summary: summaries.get(path) } : {}),
+    }))
     .sort((a, b) => a.path.localeCompare(b.path));
 }
 
@@ -131,6 +145,9 @@ function ConnectionFormBody({
   const [endpoints, setEndpoints] = useState<EndpointPermission[]>(initialEndpoints ?? []);
   const [scopableArgs, setScopableArgs] = useState<ScopableArg[]>(initialScopableArgs ?? []);
   const [testResult, setTestResult] = useState<TestResult | null>(null);
+  // Explicit OpenAPI spec URL (api type) — used by "Discover from URL".
+  const [specUrl, setSpecUrl] = useState("");
+  const specFileRef = useRef<HTMLInputElement | null>(null);
 
   // Tool names known for this connection — the discovered list (persisted or from
   // a fresh test) — used to populate the tool / options-source dropdowns so an
@@ -158,27 +175,57 @@ function ConnectionFormBody({
     if (v !== "apikey") setForm((f) => ({ ...f, api_key: "", api_key_header: "" }));
   }
 
-  async function handleTest() {
+  // runTest probes the connection. With a spec source (an explicit document
+  // URL or uploaded document text), the backend reads the endpoint catalogue
+  // from that spec instead of probing well-known spec locations.
+  async function runTest(spec?: { spec_url?: string; spec_content?: string }) {
     if (!form.url) {
       toast.error("Enter a URL first.");
       return;
     }
     setTestResult(null);
     const auth_config = buildAuthConfig(form, authType);
-    const result = await testConn.mutateAsync({
-      url: form.url,
-      type: form.type,
-      auth_config,
-      // Pass the connection ID when editing so the backend can fill in masked credentials.
-      ...(existingConn?.id ? { connection_id: existingConn.id } : {}),
-    });
+    let result: TestResult;
+    try {
+      result = await testConn.mutateAsync({
+        url: form.url,
+        type: form.type,
+        auth_config,
+        // Pass the connection ID when editing so the backend can fill in masked credentials.
+        ...(existingConn?.id ? { connection_id: existingConn.id } : {}),
+        ...(spec ?? {}),
+      });
+    } catch {
+      toast.error("Test failed. Please try again.");
+      return;
+    }
     setTestResult(result);
     // For API connections, discovery returns the endpoint catalogue from the
     // API's OpenAPI/Swagger spec — fold it into the editable list.
     if (form.type === "api" && result.endpoints && result.endpoints.length > 0) {
       setEndpoints((prev) => mergeEndpoints(prev, result.endpoints ?? []));
       toast.success(`Discovered ${result.endpoints.length} endpoint${result.endpoints.length !== 1 ? "s" : ""}.`);
+    } else if (spec && result.error) {
+      // Explicit spec input deserves an explicit failure signal.
+      toast.error(result.error);
     }
+  }
+
+  function handleTest() {
+    return runTest();
+  }
+
+  async function handleSpecFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    // Reset so picking the same file again re-triggers onChange.
+    e.target.value = "";
+    if (!file) return;
+    if (file.size > 8 * 1024 * 1024) {
+      toast.error("Spec file is too large (max 8 MB).");
+      return;
+    }
+    const content = await file.text();
+    await runTest({ spec_content: content });
   }
 
   function addEndpoint() {
@@ -296,7 +343,7 @@ function ConnectionFormBody({
         <form
           id="conn-form"
           onSubmit={(e) => void handleSubmit(e)}
-          className="mx-auto max-w-2xl px-6 py-8 space-y-6"
+          className="w-full px-6 py-8 space-y-6"
         >
           {/* Name (new only) */}
           {isCreate && (
@@ -375,10 +422,8 @@ function ConnectionFormBody({
               >
                 {testConn.isPending ? (
                   <Loader2 className="size-3.5 animate-spin" />
-                ) : form.type === "api" ? (
-                  "Test & discover"
                 ) : (
-                  "Test"
+                  "Test & discover"
                 )}
               </Button>
             </div>
@@ -433,12 +478,13 @@ function ConnectionFormBody({
               )}
 
               {testResult.reachable &&
+                !testResult.error &&
                 (!testResult.tools || testResult.tools.length === 0) &&
                 (!testResult.endpoints || testResult.endpoints.length === 0) && (
                   <p className="text-xs text-muted-foreground">
                     {form.type === "mcp_http"
-                      ? "Server reachable — no tools returned (server may require initialize handshake)."
-                      : "Server reachable — no OpenAPI/Swagger spec found. Add endpoints manually below."}
+                      ? "Server reachable — no tools returned. The server may require authentication, or it may expose no tools yet."
+                      : "Server reachable — no OpenAPI/Swagger spec found next to this URL. Paste the spec's URL or upload the document in the OpenAPI spec section below, or add endpoints manually."}
                   </p>
                 )}
             </div>
@@ -587,6 +633,105 @@ function ConnectionFormBody({
             </div>
           </div>
 
+          {form.type === "api" && (
+            <div className="space-y-3 rounded-md border p-4">
+              <div className="flex items-start gap-3">
+                <Switch
+                  id="conn-session-exchange"
+                  checked={form.session_exchange_enabled}
+                  onCheckedChange={(v) =>
+                    setForm((f) => ({ ...f, session_exchange_enabled: v === true }))
+                  }
+                />
+                <div>
+                  <Label htmlFor="conn-session-exchange">Use personal session keys</Label>
+                  <p className="text-xs text-muted-foreground">
+                    Exchange the shared connection key for the triggering person's own short-lived key before each API call. If exchange fails, the call stops instead of falling back to the shared key.
+                  </p>
+                </div>
+              </div>
+              {form.session_exchange_enabled && (
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1.5">
+                    <Label htmlFor="conn-session-exchange-path">Exchange path</Label>
+                    <Input
+                      id="conn-session-exchange-path"
+                      value={form.session_exchange_path}
+                      onChange={field("session_exchange_path")}
+                      placeholder="/sessions/exchange"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="conn-session-exchange-ttl">Key lifetime in seconds</Label>
+                    <Input
+                      id="conn-session-exchange-ttl"
+                      type="number"
+                      min={60}
+                      value={form.session_exchange_ttl_seconds}
+                      onChange={field("session_exchange_ttl_seconds")}
+                      placeholder="3600"
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* OpenAPI spec (REST API only) — explicit spec input for APIs whose
+              document doesn't live at a well-known location: a direct URL to
+              the document, or an uploaded JSON/YAML file. Both fill the
+              Endpoints list below from the spec. */}
+          {form.type === "api" && (
+            <div className="space-y-3 rounded-md border p-4">
+              <div>
+                <p className="text-sm font-medium">OpenAPI spec</p>
+                <p className="text-xs text-muted-foreground">
+                  “Test &amp; discover” already checks well-known spec locations automatically. If the
+                  API’s OpenAPI/Swagger document lives somewhere else, paste its URL or upload the
+                  file — the endpoints below are then set up from it.
+                </p>
+              </div>
+              <div className="flex gap-2">
+                <Input
+                  value={specUrl}
+                  onChange={(e) => setSpecUrl(e.target.value)}
+                  placeholder="https://api.example.com/internal/docs/openapi.json"
+                  className="flex-1 text-xs"
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => void runTest({ spec_url: specUrl.trim() })}
+                  disabled={testConn.isPending || !specUrl.trim()}
+                  className="shrink-0"
+                >
+                  Discover from URL
+                </Button>
+              </div>
+              <div className="flex items-center gap-2">
+                <input
+                  ref={specFileRef}
+                  type="file"
+                  accept=".json,.yaml,.yml,application/json"
+                  className="hidden"
+                  onChange={(e) => void handleSpecFile(e)}
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => specFileRef.current?.click()}
+                  disabled={testConn.isPending}
+                >
+                  <FileUp className="size-3.5 mr-1" />
+                  Upload spec file
+                </Button>
+                <span className="text-xs text-muted-foreground">JSON or YAML, max 8 MB</span>
+              </div>
+            </div>
+          )}
+
           {/* Endpoints (REST API only) — the catalogue of paths agents may call,
               each gated per HTTP method. Populated by "Test & discover" from the
               API's OpenAPI/Swagger spec, or added by hand. */}
@@ -614,7 +759,13 @@ function ConnectionFormBody({
               ) : (
                 <div className="space-y-2">
                   {endpoints.map((ep, i) => (
-                    <div key={i} className="flex items-center gap-2">
+                    <div key={i} className="space-y-0.5">
+                      {ep.summary && (
+                        <p className="text-xs text-muted-foreground truncate" title={ep.summary}>
+                          {ep.summary}
+                        </p>
+                      )}
+                      <div className="flex items-center gap-2">
                       <Input
                         value={ep.path}
                         onChange={(e) => setEndpointPath(i, e.target.value)}
@@ -648,6 +799,7 @@ function ConnectionFormBody({
                       >
                         <Trash2 className="size-3.5" />
                       </Button>
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -767,8 +919,12 @@ function ConnectionFormBody({
 // Auth config builder
 // ---------------------------------------------------------------------------
 
-function buildAuthConfig(form: typeof EMPTY_FORM, authType: AuthType): Connection["auth_config"] {
-  return {
+function buildAuthConfig(
+  form: typeof EMPTY_FORM,
+  authType: AuthType,
+  existingAuth?: Connection["auth_config"],
+): Connection["auth_config"] {
+  const auth: Connection["auth_config"] = {
     ...(authType === "bearer" && form.bearer_token ? { bearer_token: form.bearer_token } : {}),
     ...(authType === "apikey" && form.api_key
       ? { api_key: form.api_key, ...(form.api_key_header ? { api_key_header: form.api_key_header } : {}) }
@@ -776,6 +932,27 @@ function buildAuthConfig(form: typeof EMPTY_FORM, authType: AuthType): Connectio
     ...(form.cf_access_id ? { cf_access_id: form.cf_access_id } : {}),
     ...(form.cf_access_secret ? { cf_access_secret: form.cf_access_secret } : {}),
   };
+  if (authType === "bearer" && !auth.bearer_token && existingAuth?.bearer_token === "***") {
+    auth.bearer_token = "***";
+  }
+  if (authType === "apikey" && !auth.api_key && existingAuth?.api_key === "***") {
+    auth.api_key = "***";
+    if (form.api_key_header) auth.api_key_header = form.api_key_header;
+  }
+  if (!auth.cf_access_secret && existingAuth?.cf_access_secret === "***") {
+    auth.cf_access_secret = "***";
+  }
+  if (form.session_exchange_enabled) {
+    const ttl = Number.parseInt(form.session_exchange_ttl_seconds, 10);
+    auth.session_exchange = {
+      enabled: true,
+      ...(form.session_exchange_path.trim()
+        ? { path: form.session_exchange_path.trim() }
+        : {}),
+      ...(Number.isFinite(ttl) && ttl > 0 ? { ttl_seconds: ttl } : {}),
+    };
+  }
+  return auth;
 }
 
 // ---------------------------------------------------------------------------
@@ -805,9 +982,15 @@ export function ConnectionCreatePage() {
       scopable_args: scopableArgs,
       default_access: form.default_access,
     };
-    await create.mutateAsync(input);
+    const created = await create.mutateAsync(input);
     toast.success("Connection created.");
-    router.push(wsPaths.settings());
+    // Stay on the connection after creating: land on its edit page so the admin
+    // can keep configuring (test, permissions) without re-finding it in the list.
+    if (created.id) {
+      router.push(wsPaths.connectionEdit(created.id));
+    } else {
+      router.push(wsPaths.settings());
+    }
   }
 
   return (
@@ -829,8 +1012,6 @@ export function ConnectionCreatePage() {
 
 export function ConnectionEditPage({ connId }: { connId: string }) {
   const wsId = useWorkspaceId();
-  const router = useNavigation();
-  const wsPaths = useWorkspacePaths();
   const { data: conn, isLoading } = useConnection(wsId ?? "", connId);
   const update = useUpdateConnection(wsId ?? "", connId);
 
@@ -842,7 +1023,7 @@ export function ConnectionEditPage({ connId }: { connId: string }) {
           <span className="text-muted-foreground">/</span>
           <Skeleton className="h-4 w-32" />
         </div>
-        <div className="mx-auto max-w-2xl px-6 py-8 space-y-4 w-full">
+        <div className="w-full px-6 py-8 space-y-4">
           <Skeleton className="h-6 w-48" />
           <Skeleton className="h-10 w-full" />
           <Skeleton className="h-10 w-full" />
@@ -877,9 +1058,13 @@ export function ConnectionEditPage({ connId }: { connId: string }) {
     api_key_header: conn.auth_config.api_key_header ?? "",
     cf_access_id: conn.auth_config.cf_access_id ?? "",
     cf_access_secret: conn.auth_config.cf_access_secret === "***" ? "" : (conn.auth_config.cf_access_secret ?? ""),
+    session_exchange_enabled: conn.auth_config.session_exchange?.enabled === true,
+    session_exchange_path: conn.auth_config.session_exchange?.path ?? "/sessions/exchange",
+    session_exchange_ttl_seconds: String(conn.auth_config.session_exchange?.ttl_seconds ?? 3600),
     enabled: conn.enabled,
     default_access: conn.default_access,
   };
+  const existingAuth = conn.auth_config;
 
   async function handleSave(
     form: typeof EMPTY_FORM,
@@ -891,15 +1076,16 @@ export function ConnectionEditPage({ connId }: { connId: string }) {
       display_name: form.display_name,
       url: form.url,
       internal: form.internal,
-      auth_config: buildAuthConfig(form, authType),
+      auth_config: buildAuthConfig(form, authType, existingAuth),
       endpoint_permissions: endpoints,
       scopable_args: scopableArgs,
       enabled: form.enabled,
       default_access: form.default_access,
     };
     await update.mutateAsync(input);
+    // Stay on the page after saving — jumping back to the settings list loses
+    // the admin's place mid-configuration (FIR-2640).
     toast.success("Connection updated.");
-    router.push(wsPaths.settings());
   }
 
   return (

@@ -323,6 +323,8 @@ func init() {
 	issueCreateCmd.Flags().String("start-date", "", "Start date (calendar day, YYYY-MM-DD)")
 	issueCreateCmd.Flags().String("due-date", "", "Due date (calendar day, YYYY-MM-DD)")
 	issueCreateCmd.Flags().Bool("allow-duplicate", false, "Allow creating an issue even when an active duplicate exists")
+	// CEREBRO-PATCH(cli-issue-create-workflow): FIR-2283 followup — start a new issue on an Issue workflow recipe in the same create call (parity with the create modal's picker + POST /api/issues workflow_id).
+	issueCreateCmd.Flags().String("workflow", "", "Issue workflow recipe ID to start the new issue on (runs the plan→build→gate loop; find IDs with `multica workflow list`)")
 	issueCreateCmd.Flags().String("output", "json", "Output format: table or json")
 	issueCreateCmd.Flags().StringSlice("attachment", nil, "File path(s) to attach (can be specified multiple times)")
 
@@ -723,6 +725,13 @@ func runIssueCreate(cmd *cobra.Command, _ []string) error {
 	if v, _ := cmd.Flags().GetBool("allow-duplicate"); v {
 		body["allow_duplicate"] = true
 	}
+	if v, _ := cmd.Flags().GetString("workflow"); v != "" {
+		// Start the new issue on this Issue workflow recipe. The server
+		// attaches it after the issue is committed and reports the result
+		// back in workflow_activated / workflow_activation_error (surfaced
+		// on stderr below).
+		body["workflow_id"] = v
+	}
 	aType, aID, hasAssignee, resolveErr := pickAssigneeFromFlags(ctx, client, cmd, "assignee", "assignee-id", issueAssigneeKinds)
 	if resolveErr != nil {
 		return fmt.Errorf("resolve assignee: %w", resolveErr)
@@ -794,6 +803,16 @@ func runIssueCreate(cmd *cobra.Command, _ []string) error {
 			continue
 		}
 		fmt.Fprintf(os.Stderr, "Uploaded %s\n", att.path)
+	}
+
+	// Surface the workflow-activation outcome — the issue is created either
+	// way, so a failed activation is a stderr warning, not a non-zero exit.
+	if wf, _ := cmd.Flags().GetString("workflow"); wf != "" {
+		if wfErr := strVal(result, "workflow_activation_error"); wfErr != "" {
+			fmt.Fprintf(os.Stderr, "warning: issue created but workflow did not start: %s\n", wfErr)
+		} else if activated, ok := result["workflow_activated"].(bool); ok && activated {
+			fmt.Fprintf(os.Stderr, "Issue started on workflow %s\n", wf)
+		}
 	}
 
 	output, _ := cmd.Flags().GetString("output")

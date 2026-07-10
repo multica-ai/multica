@@ -280,6 +280,8 @@ export function MermaidDiagram({ chart }: { chart: string }) {
         mermaid.initialize({
           startOnLoad: false,
           securityLevel: "strict",
+          // CEREBRO-PATCH(mermaid-suppress-error-orphan): FIR-2448 — on a parse error Mermaid appends its "Syntax error in text" SVG to document.body then throws before its temp-cleanup runs, leaving an orphan glued to the page across every surface. This flag makes render() remove the temp element before throwing; our own error box below still renders.
+          suppressErrorRendering: true,
           theme: "base",
           themeVariables: getMermaidThemeVariables(containerRef.current),
         });

@@ -7,6 +7,7 @@
 
 import type { AgentContextSnapshot } from "@multica/core/types";
 import { snapshotToFields } from "../../core/snapshot-fields";
+import { useSkillNameResolver } from "../use-skill-name-resolver";
 
 interface Props {
   snapshot: AgentContextSnapshot;
@@ -15,7 +16,8 @@ interface Props {
 }
 
 export function AgentContextSnapshotView({ snapshot, exclude = [] }: Props) {
-  const fields = snapshotToFields(snapshot).filter(
+  const resolveSkill = useSkillNameResolver();
+  const fields = snapshotToFields(snapshot, { resolveSkill }).filter(
     (f) => !exclude.includes(f.key),
   );
 

@@ -12,6 +12,7 @@
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
+    "@multica/cerebro-duplicate-check": "workspace:*",
     "@multica/cerebro-feature-flags": "workspace:*",
     "@multica/core": "workspace:*",
     "@multica/ui": "workspace:*",

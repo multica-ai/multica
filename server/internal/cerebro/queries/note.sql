@@ -16,9 +16,31 @@ SET visibility = EXCLUDED.visibility,
 RETURNING artifact_id, owner_id, visibility, pinned, pinned_at, created_at, updated_at;
 
 -- name: GetNote :one
-SELECT artifact_id, owner_id, visibility, pinned, pinned_at, created_at, updated_at
+SELECT artifact_id, owner_id, visibility, pinned, pinned_at, author_codes, created_at, updated_at
 FROM cerebro_note
 WHERE artifact_id = $1;
+
+-- name: SetNoteAuthorCodes :exec
+-- FIR-2810: per-note toggle — stamp the writer's member code on every line.
+UPDATE cerebro_note
+SET author_codes = $2, updated_at = now()
+WHERE artifact_id = $1;
+
+-- name: GetNoteLineAttr :one
+-- FIR-2810: per-line attribution state for a note. base_body is the body the
+-- attrs array was computed for; a mismatch with the current artifact body
+-- means an out-of-band edit happened and the caller must self-heal.
+SELECT artifact_id, base_body, attrs, updated_at
+FROM cerebro_note_line_attr
+WHERE artifact_id = $1;
+
+-- name: UpsertNoteLineAttr :exec
+INSERT INTO cerebro_note_line_attr (artifact_id, base_body, attrs, updated_at)
+VALUES ($1, $2, $3, now())
+ON CONFLICT (artifact_id) DO UPDATE
+SET base_body  = EXCLUDED.base_body,
+    attrs      = EXCLUDED.attrs,
+    updated_at = now();
 
 -- name: SetNoteVisibility :exec
 UPDATE cerebro_note
@@ -56,18 +78,70 @@ ORDER BY created_at;
 -- name: CanUserSeeNote :one
 -- Returns true when the user is allowed to see the note under the access rule.
 -- FIR-1590: the note's own rule AND its folder chain must both allow the user.
+-- FIR-2595: additively, a Collections folder grant (cerebro_folder_grant, the
+-- "Access" dialog) on the folder or any ancestor ALSO grants access on its own —
+-- so folders can drive permissions. The legacy path stays fully in effect; the
+-- grant path only ever ADDS access (mirrors the project-grant cutover).
+SELECT EXISTS (
+    SELECT 1 FROM cerebro_note n
+    JOIN artifact a ON a.id = n.artifact_id
+    WHERE n.artifact_id = $1
+      AND (
+        (
+          (
+            n.owner_id = $2
+            OR n.visibility = 'workspace'
+            OR (n.visibility = 'shared' AND EXISTS (
+                SELECT 1 FROM cerebro_note_share s
+                WHERE s.artifact_id = n.artifact_id AND s.user_id = $2))
+          )
+          AND cerebro_artifact_folder_visible(a.folder_id, $2)
+        )
+        OR cerebro_artifact_folder_grant_visible(a.folder_id, $2)
+      )
+) AS allowed;
+
+-- name: CanUserEditNote :one
+-- Returns true when the user may EDIT and SAVE the note (not just read it).
+-- FIR-2595: edit/save is driven by folder access — folders are now the ONLY
+-- permission control for notes (Jesper: "a user must be able to edit and save
+-- all notes in folders they have access to"). A user may write when
+--   * they own the note (baseline — nobody is ever locked out of their own note,
+--     including personal notes at the workspace root that carry no folder), OR
+--   * they reach the note's folder (or any ancestor) via ANY Collections grant.
+-- Access to the folder IS edit access; there is no read-only tier for notes.
+-- Additive to the legacy owner-only gate: it only ever GRANTS write; it never
+-- removes anyone's existing access.
 SELECT EXISTS (
     SELECT 1 FROM cerebro_note n
     JOIN artifact a ON a.id = n.artifact_id
     WHERE n.artifact_id = $1
       AND (
         n.owner_id = $2
-        OR n.visibility = 'workspace'
-        OR (n.visibility = 'shared' AND EXISTS (
-            SELECT 1 FROM cerebro_note_share s
-            WHERE s.artifact_id = n.artifact_id AND s.user_id = $2))
+        OR cerebro_artifact_folder_grant_visible(a.folder_id, $2)
       )
-      AND cerebro_artifact_folder_visible(a.folder_id, $2)
+) AS allowed;
+
+-- name: CanUserEditArtifact :one
+-- FIR-2697: WRITE access for ANY artifact, used to gate document version
+-- save/restore. The personal-Notes save/restore path keeps its own stricter
+-- owner-only rule (requireOwner in the handler) — this query is only consulted
+-- for plain DOCUMENTS (no cerebro_note row), so it never loosens note behavior.
+-- A document is writable when the caller reaches its folder (or an ancestor) via
+-- a Collections grant, OR authored the document themselves (covers a root
+-- document with no folder — e.g. a member restoring a version of a doc they
+-- created). Deny-by-default otherwise.
+SELECT EXISTS (
+    SELECT 1 FROM artifact a
+    LEFT JOIN cerebro_note n ON n.artifact_id = a.id
+    WHERE a.id = sqlc.arg(id)
+      AND (
+        (n.artifact_id IS NOT NULL AND (n.owner_id = sqlc.arg(p_user) OR cerebro_artifact_folder_grant_visible(a.folder_id, sqlc.arg(p_user))))
+        OR (n.artifact_id IS NULL AND (
+              cerebro_artifact_folder_grant_visible(a.folder_id, sqlc.arg(p_user))
+              OR (a.author_type = 'member' AND a.author_id = sqlc.arg(p_user))
+        ))
+      )
 ) AS allowed;
 
 -- name: CanUserCommentOnArtifact :one
@@ -79,18 +153,25 @@ SELECT EXISTS (
 --   * a document (no cerebro_note row) is governed purely by folder access
 --     control — workspace membership is already enforced by the request's
 --     workspace middleware, so the folder rule is the only per-artifact gate.
+-- FIR-2595: a Collections folder grant on the folder/ancestor additively grants
+-- comment access on its own, same as CanUserSeeNote.
 SELECT EXISTS (
     SELECT 1 FROM artifact a
     LEFT JOIN cerebro_note n ON n.artifact_id = a.id
     WHERE a.id = $1
-      AND cerebro_artifact_folder_visible(a.folder_id, $2)
       AND (
-        n.artifact_id IS NULL
-        OR n.owner_id = $2
-        OR n.visibility = 'workspace'
-        OR (n.visibility = 'shared' AND EXISTS (
-            SELECT 1 FROM cerebro_note_share s
-            WHERE s.artifact_id = n.artifact_id AND s.user_id = $2))
+        (
+          cerebro_artifact_folder_visible(a.folder_id, $2)
+          AND (
+            n.artifact_id IS NULL
+            OR n.owner_id = $2
+            OR n.visibility = 'workspace'
+            OR (n.visibility = 'shared' AND EXISTS (
+                SELECT 1 FROM cerebro_note_share s
+                WHERE s.artifact_id = n.artifact_id AND s.user_id = $2))
+          )
+        )
+        OR cerebro_artifact_folder_grant_visible(a.folder_id, $2)
       )
 ) AS allowed;
 
@@ -106,15 +187,22 @@ FROM cerebro_note n
 JOIN artifact a ON a.id = n.artifact_id
 WHERE a.workspace_id = $1
   AND (
-    n.owner_id = $2
-    OR n.visibility = 'workspace'
-    OR (n.visibility = 'shared' AND EXISTS (
-        SELECT 1 FROM cerebro_note_share s
-        WHERE s.artifact_id = n.artifact_id AND s.user_id = $2))
+    (
+      (
+        n.owner_id = $2
+        OR n.visibility = 'workspace'
+        OR (n.visibility = 'shared' AND EXISTS (
+            SELECT 1 FROM cerebro_note_share s
+            WHERE s.artifact_id = n.artifact_id AND s.user_id = $2))
+      )
+      -- FIR-1590: hide a note inside a folder the user may not see (gated up the
+      -- whole folder chain). NULL folder_id (root) is always visible.
+      AND cerebro_artifact_folder_visible(a.folder_id, $2)
+    )
+    -- FIR-2595: a Collections folder grant on the folder/ancestor grants access
+    -- additively on its own — folders drive permissions.
+    OR cerebro_artifact_folder_grant_visible(a.folder_id, $2)
   )
-  -- FIR-1590: hide a note inside a folder the user may not see (gated up the
-  -- whole folder chain). NULL folder_id (root) is always visible.
-  AND cerebro_artifact_folder_visible(a.folder_id, $2)
 ORDER BY n.pinned DESC, n.pinned_at DESC NULLS LAST, a.updated_at DESC
 LIMIT $3 OFFSET $4;
 
@@ -130,15 +218,22 @@ FROM cerebro_note n
 JOIN artifact a ON a.id = n.artifact_id
 WHERE a.workspace_id = $1
   AND (
-    n.owner_id = $2
-    OR n.visibility = 'workspace'
-    OR (n.visibility = 'shared' AND EXISTS (
-        SELECT 1 FROM cerebro_note_share s
-        WHERE s.artifact_id = n.artifact_id AND s.user_id = $2))
+    (
+      (
+        n.owner_id = $2
+        OR n.visibility = 'workspace'
+        OR (n.visibility = 'shared' AND EXISTS (
+            SELECT 1 FROM cerebro_note_share s
+            WHERE s.artifact_id = n.artifact_id AND s.user_id = $2))
+      )
+      -- FIR-1590: hide a note inside a folder the user may not see (gated up the
+      -- whole folder chain). NULL folder_id (root) is always visible.
+      AND cerebro_artifact_folder_visible(a.folder_id, $2)
+    )
+    -- FIR-2595: a Collections folder grant on the folder/ancestor grants access
+    -- additively on its own — folders drive permissions.
+    OR cerebro_artifact_folder_grant_visible(a.folder_id, $2)
   )
-  -- FIR-1590: hide a note inside a folder the user may not see (gated up the
-  -- whole folder chain). NULL folder_id (root) is always visible.
-  AND cerebro_artifact_folder_visible(a.folder_id, $2)
   AND (
     a.title ILIKE '%' || sqlc.arg('q')::text || '%'
     OR a.body ILIKE '%' || sqlc.arg('q')::text || '%'
@@ -158,15 +253,22 @@ FROM cerebro_note n
 JOIN artifact a ON a.id = n.artifact_id
 WHERE a.workspace_id = $1
   AND (
-    n.owner_id = $2
-    OR n.visibility = 'workspace'
-    OR (n.visibility = 'shared' AND EXISTS (
-        SELECT 1 FROM cerebro_note_share s
-        WHERE s.artifact_id = n.artifact_id AND s.user_id = $2))
+    (
+      (
+        n.owner_id = $2
+        OR n.visibility = 'workspace'
+        OR (n.visibility = 'shared' AND EXISTS (
+            SELECT 1 FROM cerebro_note_share s
+            WHERE s.artifact_id = n.artifact_id AND s.user_id = $2))
+      )
+      -- FIR-1590: hide a note inside a folder the user may not see (gated up the
+      -- whole folder chain). NULL folder_id (root) is always visible.
+      AND cerebro_artifact_folder_visible(a.folder_id, $2)
+    )
+    -- FIR-2595: a Collections folder grant on the folder/ancestor grants access
+    -- additively on its own — folders drive permissions.
+    OR cerebro_artifact_folder_grant_visible(a.folder_id, $2)
   )
-  -- FIR-1590: hide a note inside a folder the user may not see (gated up the
-  -- whole folder chain). NULL folder_id (root) is always visible.
-  AND cerebro_artifact_folder_visible(a.folder_id, $2)
 ORDER BY n.pinned DESC, n.pinned_at DESC NULLS LAST, a.updated_at DESC
 LIMIT $3;
 
@@ -187,11 +289,17 @@ WHERE a.workspace_id = sqlc.arg(workspace_id)
   AND ref.object = sqlc.arg(object)
   AND ref.ref_id = sqlc.arg(ref_id)
   AND (
-    n.owner_id = sqlc.arg(viewer_id)
-    OR n.visibility = 'workspace'
-    OR (n.visibility = 'shared' AND EXISTS (
-        SELECT 1 FROM cerebro_note_share s
-        WHERE s.artifact_id = n.artifact_id AND s.user_id = sqlc.arg(viewer_id)))
+    (
+      (
+        n.owner_id = sqlc.arg(viewer_id)
+        OR n.visibility = 'workspace'
+        OR (n.visibility = 'shared' AND EXISTS (
+            SELECT 1 FROM cerebro_note_share s
+            WHERE s.artifact_id = n.artifact_id AND s.user_id = sqlc.arg(viewer_id)))
+      )
+      AND cerebro_artifact_folder_visible(a.folder_id, sqlc.arg(viewer_id))
+    )
+    -- FIR-2595: a Collections folder grant additively grants access on its own.
+    OR cerebro_artifact_folder_grant_visible(a.folder_id, sqlc.arg(viewer_id))
   )
-  AND cerebro_artifact_folder_visible(a.folder_id, sqlc.arg(viewer_id))
 ORDER BY a.updated_at DESC;

@@ -43,8 +43,10 @@ func TestGet_TokenMode(t *testing.T) {
 		t.Fatalf("want 200, got %d", w.Code)
 	}
 	snap := decodeBody(t, w.Body.Bytes())
-	if snap.Version != corepricing.Version {
-		t.Fatalf("version: want %q, got %q", corepricing.Version, snap.Version)
+	// FIR-2698: the table is injected from the model registry; the version is
+	// stamped "registry-<semver>" by the store (fixture set in TestMain).
+	if snap.Version != testTableVersion {
+		t.Fatalf("version: want %q, got %q", testTableVersion, snap.Version)
 	}
 	if snap.FallbackModel == "" {
 		t.Fatal("fallback_model empty")

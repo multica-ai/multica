@@ -53,6 +53,7 @@ func init() {
 	wakeupCreateCmd.Flags().String("on-issue-status", "", "Wake when this issue reaches --watch-status")
 	wakeupCreateCmd.Flags().String("watch-status", "", "Status for --on-issue-status")
 	wakeupCreateCmd.Flags().String("on-github-ci", "", "Wake when linked GitHub CI updates for this issue")
+	wakeupCreateCmd.Flags().String("model", "", "Optional cheaper model for the woken run (e.g. claude-haiku-4-5-20251001) so a pure check never fires Opus")
 	wakeupCreateCmd.Flags().String("output", "json", "Output format: table or json")
 
 	wakeupListCmd.Flags().String("agent", "", "Filter by agent ID")
@@ -79,12 +80,16 @@ func runWakeupCreate(cmd *cobra.Command, args []string) error {
 	onIssueStatus, _ := cmd.Flags().GetString("on-issue-status")
 	watchStatus, _ := cmd.Flags().GetString("watch-status")
 	onGithubCI, _ := cmd.Flags().GetString("on-github-ci")
+	model, _ := cmd.Flags().GetString("model")
 	output, _ := cmd.Flags().GetString("output")
 
 	body := map[string]any{
 		"agent_id": strings.TrimSpace(agentID),
 		"issue_id": strings.TrimSpace(issueID),
 		"prompt":   prompt,
+	}
+	if strings.TrimSpace(model) != "" {
+		body["model"] = strings.TrimSpace(model)
 	}
 	switch {
 	case strings.TrimSpace(at) != "":

@@ -13,6 +13,8 @@ import (
 	"context"
 	"testing"
 
+	"github.com/jackc/pgx/v5/pgtype"
+
 	"github.com/multica-ai/multica/server/internal/cerebro/agentvault"
 )
 
@@ -23,7 +25,7 @@ type fakeVaultLister struct {
 	err   error
 }
 
-func (f fakeVaultLister) ListVaults(_ context.Context) ([]agentvault.Vault, error) {
+func (f fakeVaultLister) ListVaults(context.Context, pgtype.UUID) ([]agentvault.Vault, error) {
 	if f.err != nil {
 		return nil, f.err
 	}

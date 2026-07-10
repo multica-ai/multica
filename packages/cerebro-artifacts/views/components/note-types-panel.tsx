@@ -123,6 +123,7 @@ interface DraftState {
   numbering_enabled: boolean;
   next_number: number;
   anchor_weekday: number | null;
+  author_codes: boolean;
 }
 
 function emptyDraft(): DraftState {
@@ -139,6 +140,7 @@ function emptyDraft(): DraftState {
     numbering_enabled: false,
     next_number: 1,
     anchor_weekday: null,
+    author_codes: false,
   };
 }
 
@@ -156,6 +158,7 @@ function draftFrom(nt: NoteType): DraftState {
     numbering_enabled: nt.numbering_enabled,
     next_number: nt.next_number,
     anchor_weekday: nt.anchor_weekday,
+    author_codes: nt.author_codes,
   };
 }
 
@@ -245,6 +248,7 @@ export function NoteTypesPanel({
       numbering_enabled: draft.numbering_enabled,
       next_number: Math.max(1, draft.next_number),
       anchor_weekday: draft.cadence_unit === "week" ? draft.anchor_weekday : null,
+      author_codes: draft.author_codes,
     };
     if (draft.id) {
       await update.mutateAsync({ id: draft.id, data: payload });
@@ -477,6 +481,22 @@ export function NoteTypesPanel({
               </span>
             </div>
           )}
+        </div>
+
+        {/* FIR-2810: notes materialised from this type start with author codes
+            on — every line a person writes is stamped with their member code. */}
+        <div className="flex items-center justify-between rounded-md border px-3 py-2">
+          <div>
+            <div className="text-sm font-medium">Author codes</div>
+            <div className="text-xs text-muted-foreground">
+              New notes stamp each writer's member code (e.g. JEH) on every
+              line they write.
+            </div>
+          </div>
+          <Switch
+            checked={draft.author_codes}
+            onCheckedChange={(c) => setDraft({ ...draft, author_codes: c })}
+          />
         </div>
 
         <div className="flex items-center justify-end gap-2 pt-2">

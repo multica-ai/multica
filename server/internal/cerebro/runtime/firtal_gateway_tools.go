@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	cerebroloops "github.com/multica-ai/multica/server/internal/cerebro/loops"
 	"github.com/multica-ai/multica/server/internal/mcp"
 	"github.com/multica-ai/multica/server/internal/storage"
 	"github.com/multica-ai/multica/server/internal/util"
@@ -42,6 +43,10 @@ type ToolContext struct {
 	// override them.
 	IssueID       pgtype.UUID
 	ChatMessageID pgtype.UUID
+	// CEREBRO-PATCH(toolctx-loopstore): FIR-2283 — loop check outcome store, used
+	// by FirtalReportLoopCheckTool so worker agents can report check exit codes
+	// back to the delivery gate. Nil disables the tool (no loop check reporting).
+	LoopStore *cerebroloops.Store
 }
 
 // NewFirtalGatewayToolServer builds the in-process MCP server with the POC

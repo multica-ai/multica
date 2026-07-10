@@ -93,7 +93,10 @@ vi.mock("@multica/ui/components/ui/popover", async () => {
   };
 });
 
-import { FirtalRegistryDataSourceSheet } from "./firtal-registry-data-source-sheet";
+import {
+  DataSourceList,
+  FirtalRegistryDataSourceSheet,
+} from "./firtal-registry-data-source-sheet";
 import type { ToolPolicyRow } from "../core";
 
 // A projected per-data-source row: tool_key=firtal_registry, resource_pattern=ds
@@ -193,5 +196,50 @@ describe("FirtalRegistryDataSourceSheet (FIR-1609 Phase 5)", () => {
     expect(editor.getByLabelText("Action execute")).toBeInTheDocument();
     // A registry data source is not host-bound → no host allow-list section.
     expect(editor.queryByLabelText("Add host")).not.toBeInTheDocument();
+  });
+});
+
+// DataSourceList — the inline "Data sources" list under an expanded row in the
+// capability catalog. FIR-2706 follow-up: each source row renders the SAME
+// single decision-with-When pill as repo, credential, and connection sub-rows
+// (CatalogDecisionControl); the standalone When button is gone.
+function renderInlineList(rows: ToolPolicyRow[]) {
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return render(
+    <QueryClientProvider client={qc}>
+      <DataSourceList
+        toolKey="firtal_registry"
+        sourceRows={rows}
+        editLayer="agent"
+        subjectId="agent-1"
+      />
+    </QueryClientProvider>,
+  );
+}
+
+describe("DataSourceList (FIR-2706 same-design)", () => {
+  it("renders each data source with ONE Decision pill and no separate When button", () => {
+    renderInlineList([dsRow("ds-1", "Orders", "allow")]);
+    const orders = screen.getByTestId("registry-data-source-ds-1");
+    expect(within(orders).getByRole("button", { name: /^Decision:/ })).toBeInTheDocument();
+    expect(
+      within(orders).queryByTestId("condition-control-firtal_registry"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("writes the chosen decision scoped to the data source id from inside the pill", async () => {
+    const user = userEvent.setup();
+    renderInlineList([dsRow("ds-1", "Orders", "allow")]);
+    const orders = screen.getByTestId("registry-data-source-ds-1");
+    await user.click(within(orders).getByRole("button", { name: /^Decision:/ }));
+    await user.click(within(orders).getByTestId("catalog-decision-firtal_registry-deny"));
+    const body = lastPut();
+    expect(body).toMatchObject({
+      tool_key: "firtal_registry",
+      resource_pattern: "ds-1",
+      layer: "agent",
+      subject_id: "agent-1",
+      setting: "deny",
+    });
   });
 });

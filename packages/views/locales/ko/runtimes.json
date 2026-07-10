@@ -281,6 +281,10 @@
     "delete_permission_hint": "런타임 소유자와 워크스페이스 관리자만 이 런타임을 삭제할 수 있습니다",
     "delete_admin_hint": "런타임 소유자와 워크스페이스 관리자만 런타임을 삭제할 수 있습니다.",
     "col_cli": "CLI",
+    "_comment_daemon_col": "CEREBRO-PATCH(runtime-list-daemon-col): FIR-2669 daemon CLI version column",
+    "col_daemon": "데몬",
+    "_comment_fir2669": "CEREBRO-PATCH(runtime-list-columns-i18n): FIR-2669 column picker label",
+    "columns_label": "열",
     "cli_managed_badge": "Desktop",
     "cli_update_available_aria": "Update available",
     "cli_update_available_tooltip": "Update available: {{version}}"

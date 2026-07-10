@@ -39,6 +39,9 @@ func BuildPrompt(task Task, provider string) string {
 	if nudge, ok := graphifyNudgeBlock(task); ok { // CEREBRO-PATCH(daemon-graphify-nudge): inline graphify usage when the saving is on (FIR-1311)
 		b.WriteString(nudge)
 	}
+	if mem, ok := memoryContextBlock(task); ok { // CEREBRO-PATCH(daemon-memory-autorecall): inline auto-recalled memories when cerebro_memory is on (FIR-1794)
+		b.WriteString(mem)
+	}
 	if snap, ok := snapshotIssueContext(task); ok { // CEREBRO-PATCH(daemon-snapshot-prompt): inline issue+thread when snapshot saving on (FIR-2384)
 		b.WriteString(snap)
 		return b.String()
@@ -76,6 +79,9 @@ func buildWakeupPrompt(task Task, provider string) string {
 	}
 	if nudge, ok := graphifyNudgeBlock(task); ok { // CEREBRO-PATCH(daemon-graphify-nudge): inline graphify usage when the saving is on (FIR-1311)
 		b.WriteString(nudge)
+	}
+	if mem, ok := memoryContextBlock(task); ok { // CEREBRO-PATCH(daemon-memory-autorecall): inline auto-recalled memories when cerebro_memory is on (FIR-1794)
+		b.WriteString(mem)
 	}
 	if snap, ok := snapshotIssueContext(task); ok {
 		b.WriteString(snap)
@@ -228,6 +234,9 @@ func buildCommentPrompt(task Task, provider string) string {
 	}
 	if nudge, ok := graphifyNudgeBlock(task); ok { // CEREBRO-PATCH(daemon-graphify-nudge): inline graphify usage when the saving is on (FIR-1311)
 		b.WriteString(nudge)
+	}
+	if mem, ok := memoryContextBlock(task); ok { // CEREBRO-PATCH(daemon-memory-autorecall): inline auto-recalled memories when cerebro_memory is on (FIR-1794)
+		b.WriteString(mem)
 	}
 	if snap, ok := snapshotIssueContext(task); ok { // CEREBRO-PATCH(daemon-snapshot-prompt): inline issue+thread when snapshot saving on (FIR-2384)
 		b.WriteString(snap)

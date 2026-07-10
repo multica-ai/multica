@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, beforeEach, afterEach } from "vitest";
+import { useModelRegistryPricingStore } from "@multica/core/runtimes/model-registry-pricing-store";
 import {
   aggregateAgentTokens,
   aggregateDailyCost,
@@ -6,6 +7,20 @@ import {
   formatDuration,
   mergeAgentDashboardRows,
 } from "./utils";
+
+// Cost estimation reads through the registry-backed pricing cache (FIR-2698)
+// rather than a hardcoded table — seed the one model this suite prices.
+beforeEach(() => {
+  useModelRegistryPricingStore.setState({
+    pricings: {
+      "claude-sonnet-4-6": { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3.75 },
+    },
+  });
+});
+
+afterEach(() => {
+  useModelRegistryPricingStore.setState({ pricings: {} });
+});
 
 describe("aggregateDailyCost", () => {
   it("collapses multiple rows per day into one stack and sorts by date asc", () => {

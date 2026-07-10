@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { z } from "zod";
-import { api } from "@multica/core/api";
+import { api, parseWithFallback } from "@multica/core/api";
 import { useWorkspaceId } from "@multica/core/hooks";
 
 // Wave 3 / G1 (TECH-3556) — comments + suggestions on a note. Mirrors the
@@ -258,5 +258,57 @@ export function useDecideNoteSuggestion(noteId: string) {
       state: "accepted" | "rejected";
     }) => api.decideNoteSuggestion(noteId, commentId, state),
     onSettled: invalidate,
+  });
+}
+
+// ---------------------------------------------------------------------------
+// FIR-2595 Stage 2 — mention access. Before a note/comment mention is saved,
+// the composer asks the server which tagged members can't open the note, and —
+// if the author confirms — grants them access so the notification is openable.
+// Replaces the old silent auto-share (which never opened a folder-gated note).
+// Backend: server/internal/cerebro/note/mention_access.go
+// ---------------------------------------------------------------------------
+
+// extractMemberMentions pulls the unique member UUIDs out of a note/comment body
+// written in the standard mention markdown [@label](mention://member/<uuid>).
+// Pure + exported so the composer and its test share one source of truth.
+export function extractMemberMentions(body: string): string[] {
+  const re = /mention:\/\/member\/([0-9a-fA-F-]{36})/g;
+  const seen = new Set<string>();
+  for (const m of body.matchAll(re)) {
+    if (m[1]) seen.add(m[1]);
+  }
+  return [...seen];
+}
+
+const mentionAccessCheckSchema = z.object({
+  no_access: z.array(z.string()).default([]),
+});
+
+// checkMentionAccess returns the subset of memberIds who cannot currently open
+// the note. Empty in → empty out (no round-trip).
+export async function checkMentionAccess(
+  noteId: string,
+  memberIds: string[],
+): Promise<string[]> {
+  if (memberIds.length === 0) return [];
+  const raw = await api.cerebroRequest<unknown>(
+    `/api/notes/${noteId}/mention-access?members=${encodeURIComponent(memberIds.join(","))}`,
+  );
+  return parseWithFallback(raw, mentionAccessCheckSchema, { no_access: [] }, {
+    endpoint: "checkMentionAccess",
+  }).no_access;
+}
+
+// grantMentionAccess grants each member access so they can open the note (a
+// foldered note grants viewer on its folder; a root note gets a note-share).
+export async function grantMentionAccess(
+  noteId: string,
+  memberIds: string[],
+): Promise<void> {
+  if (memberIds.length === 0) return;
+  await api.cerebroRequest(`/api/notes/${noteId}/mention-access`, {
+    method: "POST",
+    body: JSON.stringify({ member_ids: memberIds }),
   });
 }

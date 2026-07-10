@@ -132,7 +132,8 @@ func TestBootSweepResendsPending(t *testing.T) {
 // CP4: an upload failure does not fail the task — Enqueue returns nil and the
 // transcript stays unmarked (pending) for a later sweep.
 func TestUploadFailureLeavesEntryPending(t *testing.T) {
-	up := &mockUploader{err: errors.New("endpoint down")}
+	// A transient failure (network error / 5xx) is retryable → stays pending.
+	up := &mockUploader{err: retryableError{errors.New("endpoint down")}}
 	m, led := testManager(t, up)
 	path := writeTranscript(t, `{"x":1}`)
 	s := Sidecar{Runtime: "claude", TaskID: "t", SessionID: "s", WorkspaceID: "ws"}
@@ -158,7 +159,7 @@ func TestUploadFailureLeavesEntryPending(t *testing.T) {
 // CP5: repeated failures retry with backoff; after MaxAge the entry becomes a
 // dead letter and the metric increments.
 func TestRetryBackoffAndDeadLetter(t *testing.T) {
-	up := &mockUploader{err: errors.New("still down")}
+	up := &mockUploader{err: retryableError{errors.New("still down")}}
 	m, led := testManager(t, up)
 	path := writeTranscript(t, `{"x":1}`)
 	s := Sidecar{Runtime: "claude", TaskID: "t", SessionID: "s", WorkspaceID: "ws"}
@@ -177,8 +178,13 @@ func TestRetryBackoffAndDeadLetter(t *testing.T) {
 		}
 	}
 
-	// Backoff schedule: 1s, 5s, 30s, then capped at 30s.
-	for attempts, want := range map[int]time.Duration{1: time.Second, 2: 5 * time.Second, 3: 30 * time.Second, 9: 30 * time.Second} {
+	// Progressive backoff schedule (FIR-2549): 1s, 5s, 30s, 2m, 10m, 30m, then
+	// capped at the 1h ceiling — each failure waits longer than the last.
+	for attempts, want := range map[int]time.Duration{
+		1: time.Second, 2: 5 * time.Second, 3: 30 * time.Second,
+		4: 2 * time.Minute, 5: 10 * time.Minute, 6: 30 * time.Minute,
+		7: time.Hour, 20: time.Hour,
+	} {
 		if got := m.backoffFor(attempts); got != want {
 			t.Errorf("backoffFor(%d)=%v want %v", attempts, got, want)
 		}
@@ -198,6 +204,87 @@ func TestRetryBackoffAndDeadLetter(t *testing.T) {
 	// Dead letters are terminal — not re-sent.
 	if out := m.processOnce(context.Background(), "t|s"); out != outcomeSkip {
 		t.Fatalf("dead letter re-processed: %v", out)
+	}
+}
+
+// FIR-2549: a non-retryable failure (the registry rejected the batch as
+// malformed/oversized, or returned a "do not retry" 4xx) is parked on the
+// FIRST attempt instead of looping — this is what stops a deterministic failure
+// from re-POSTing the same transcript over and over.
+func TestNonRetryableErrorDeadLettersImmediately(t *testing.T) {
+	up := &mockUploader{err: errors.New("registry 413: payload too large")} // plain error = non-retryable
+	m, led := testManager(t, up)
+	path := writeTranscript(t, `{"x":1}`)
+	s := Sidecar{Runtime: "claude", TaskID: "t", SessionID: "s", WorkspaceID: "ws"}
+	_ = m.Enqueue(s, path)
+
+	if out := m.processOnce(context.Background(), "t|s"); out != outcomeDeadLetter {
+		t.Fatalf("outcome=%v want dead_letter on first non-retryable failure", out)
+	}
+	if led.Get("t|s").Status != StatusDeadLetter {
+		t.Fatalf("entry not parked as dead_letter: %s", led.Get("t|s").Status)
+	}
+	if up.callCount() != 1 {
+		t.Fatalf("uploader called %d times, want exactly 1 (no retry loop)", up.callCount())
+	}
+	if m.Metrics().DeadLetter != 1 {
+		t.Fatalf("dead_letter metric=%d want 1", m.Metrics().DeadLetter)
+	}
+}
+
+// FIR-2549: with MaxAttempts set, a batch that keeps failing transiently is
+// parked once the attempt budget is spent — long before MaxAge (7 days) would
+// have caught it, so a bad batch stops in a bounded number of tries.
+func TestMaxAttemptsDeadLetter(t *testing.T) {
+	up := &mockUploader{err: retryableError{errors.New("still down")}}
+	led, _ := LoadLedger(filepath.Join(t.TempDir(), "ledger.json"))
+	cfg := Config{
+		Enabled:                   true,
+		MaxConcurrentPerWorkspace: 2,
+		MaxAge:                    DefaultMaxAge,
+		Backoff:                   DefaultBackoff,
+		MaxAttempts:               3,
+	}
+	m := newManagerWith(cfg, led, up, nil)
+	path := writeTranscript(t, `{"x":1}`)
+	s := Sidecar{Runtime: "claude", TaskID: "t", SessionID: "s", WorkspaceID: "ws"}
+	_ = m.Enqueue(s, path)
+
+	// 3 retryable failures (attempts 1→3), each staying pending.
+	for i := 1; i <= 3; i++ {
+		if out := m.processOnce(context.Background(), "t|s"); out != outcomeRetry {
+			t.Fatalf("attempt %d outcome=%v want retry", i, out)
+		}
+	}
+	// 4th pass: Attempts (3) >= MaxAttempts (3) → parked before any upload.
+	callsBefore := up.callCount()
+	if out := m.processOnce(context.Background(), "t|s"); out != outcomeDeadLetter {
+		t.Fatalf("outcome=%v want dead_letter after max attempts", out)
+	}
+	if led.Get("t|s").Status != StatusDeadLetter {
+		t.Fatal("entry not parked as dead_letter")
+	}
+	if up.callCount() != callsBefore {
+		t.Fatalf("uploader called again after budget spent: %d→%d", callsBefore, up.callCount())
+	}
+}
+
+// The attempt cap is opt-in: MaxAttempts <= 0 disables it, preserving the
+// MaxAge-only behavior for callers that never set it.
+func TestMaxAttemptsDisabledByDefault(t *testing.T) {
+	up := &mockUploader{err: retryableError{errors.New("still down")}}
+	m, led := testManager(t, up) // testManager leaves MaxAttempts at 0 (disabled)
+	path := writeTranscript(t, `{"x":1}`)
+	s := Sidecar{Runtime: "claude", TaskID: "t", SessionID: "s", WorkspaceID: "ws"}
+	_ = m.Enqueue(s, path)
+
+	for i := 1; i <= 20; i++ {
+		if out := m.processOnce(context.Background(), "t|s"); out != outcomeRetry {
+			t.Fatalf("attempt %d outcome=%v want retry (cap disabled)", i, out)
+		}
+	}
+	if led.Get("t|s").Status != StatusPending {
+		t.Fatalf("entry should still be pending with cap disabled, got %s", led.Get("t|s").Status)
 	}
 }
 

@@ -8,12 +8,19 @@
 import type { AgentContextSnapshot } from "@multica/core/types";
 import { snapshotToFields } from "../../core/snapshot-fields";
 import { AgentContextDiffView } from "./agent-context-diff-view";
+import { useSkillNameResolver } from "../use-skill-name-resolver";
 
 interface Props {
   base: AgentContextSnapshot;
   proposed: AgentContextSnapshot;
   baseLabel?: string;
   proposedLabel?: string;
+  /**
+   * When set, only these snapshot keys are considered — used by the Skills and
+   * MCP tabs to scope the diff to the one field that tab edits, so a reviewer
+   * sees just that change instead of the whole bundle.
+   */
+  onlyKeys?: string[];
 }
 
 export function AgentContextFieldDiff({
@@ -21,16 +28,20 @@ export function AgentContextFieldDiff({
   proposed,
   baseLabel = "base",
   proposedLabel = "proposed",
+  onlyKeys,
 }: Props) {
-  const baseFields = snapshotToFields(base);
-  const proposedFields = snapshotToFields(proposed);
+  const resolveSkill = useSkillNameResolver();
+  const baseFields = snapshotToFields(base, { resolveSkill });
+  const proposedFields = snapshotToFields(proposed, { resolveSkill });
 
-  const rows = baseFields.map((bf, i) => ({
-    key: bf.key,
-    label: bf.label,
-    prev: bf.value,
-    next: proposedFields[i]?.value ?? "",
-  }));
+  const rows = baseFields
+    .map((bf, i) => ({
+      key: bf.key,
+      label: bf.label,
+      prev: bf.value,
+      next: proposedFields[i]?.value ?? "",
+    }))
+    .filter((r) => !onlyKeys || onlyKeys.includes(r.key));
 
   const changed = rows.filter((r) => r.prev !== r.next);
   const unchanged = rows.filter((r) => r.prev === r.next);

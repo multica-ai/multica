@@ -260,6 +260,18 @@ func (m *Manager) processOnce(ctx context.Context, key string) attemptOutcome {
 		return outcomeDeadLetter
 	}
 
+	// Dead-letter check: exhausted the attempt budget (FIR-2549). MaxAge alone
+	// let a deterministically-failing upload retry for up to 7 days; a bounded
+	// attempt count stops a bad batch in minutes. <= 0 disables the cap.
+	if m.cfg.MaxAttempts > 0 && entry.Attempts >= m.cfg.MaxAttempts {
+		_ = m.ledger.MarkDeadLetter(key, now, fmt.Sprintf("exceeded max attempts (%d)", m.cfg.MaxAttempts))
+		m.metrics.incDeadLetter()
+		m.logger.Error("trace upload: DEAD LETTER — giving up after max attempts",
+			"key", key, "attempts", entry.Attempts, "max_attempts", m.cfg.MaxAttempts,
+			"last_error", entry.LastError)
+		return outcomeDeadLetter
+	}
+
 	jsonl, err := os.ReadFile(entry.FilePath)
 	if err != nil {
 		m.metrics.incFailed()
@@ -312,10 +324,20 @@ func (m *Manager) processOnce(ctx context.Context, key string) attemptOutcome {
 	release()
 
 	if err != nil {
+		// A non-retryable failure (4xx other than 429: the registry rejected the
+		// batch as malformed/oversized, or told us "do not retry") will fail the
+		// same way forever — park it immediately instead of looping (FIR-2549).
+		if !IsRetryable(err) {
+			_ = m.ledger.MarkDeadLetter(key, m.now(), fmt.Sprintf("non-retryable: %v", err))
+			m.metrics.incDeadLetter()
+			m.logger.Error("trace upload: DEAD LETTER — registry rejected batch (non-retryable)",
+				"key", key, "attempts", entry.Attempts+1, "error", err)
+			return outcomeDeadLetter
+		}
 		m.metrics.incFailed()
 		_ = m.ledger.MarkFailed(key, m.now(), err.Error())
 		m.logger.Warn("trace upload: attempt failed", "key", key, "attempts", entry.Attempts+1,
-			"retryable", IsRetryable(err), "error", err)
+			"retryable", true, "error", err)
 		return outcomeRetry
 	}
 

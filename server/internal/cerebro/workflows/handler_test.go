@@ -1,6 +1,7 @@
 package workflows
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -348,5 +349,18 @@ func TestPublicWebhookURL_DerivesFromRequest(t *testing.T) {
 	want := "https://api.example.com/api/cerebro/workflows/webhook/TOK"
 	if got != want {
 		t.Errorf("publicWebhookURL = %q, want %q", got, want)
+	}
+}
+
+// TestActivateForIssue_NotWired covers the FIR-2283 followup guard: a Handler
+// without the issue-loop store/compiler wired must reject activation with a
+// clear "not wired" error rather than panic. This is the seam CreateIssue and
+// the quick-create completion path call, so the nil-safe guard matters.
+func TestActivateForIssue_NotWired(t *testing.T) {
+	h := &Handler{}
+	var zero pgtype.UUID
+	err := h.ActivateForIssue(context.Background(), zero, zero, zero, zero, "member")
+	if err == nil || !strings.Contains(err.Error(), "not wired") {
+		t.Fatalf("expected a 'not wired' error, got %v", err)
 	}
 }

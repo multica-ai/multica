@@ -1,5 +1,6 @@
-import { describe, it, expect, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { useCustomPricingStore } from "@multica/core/runtimes/custom-pricing-store";
+import { useModelRegistryPricingStore } from "@multica/core/runtimes/model-registry-pricing-store";
 import type { AgentRuntime } from "@multica/core/types";
 
 import {
@@ -11,9 +12,73 @@ import {
   isSelfHealingRuntime,
 } from "./utils";
 
+// Test fixture mirroring the model registry's seed prices
+// (server/migrations/9120_cerebro_model_registry.up.sql) — production code no
+// longer holds its own copy (FIR-2698); resolvePricing reads through
+// getRegistryPricing, backed by this store. Values below are USD per million
+// tokens, straight from the same sources the migration cites:
+//   Anthropic: https://platform.claude.com/docs/en/about-claude/pricing
+//   OpenAI:    https://openai.com/api/pricing
+//   DeepSeek:  https://api-docs.deepseek.com/quick_start/pricing
+//   Moonshot:  https://www.kimi.com/resources/kimi-k2-6-pricing
+//   Zhipu:     https://docs.z.ai/guides/overview/pricing
+const REGISTRY_PRICING_FIXTURE: Record<
+  string,
+  { input: number; output: number; cacheRead: number; cacheWrite: number }
+> = {
+  "claude-fable-5":     { input: 10,   output: 50,   cacheRead: 1.00, cacheWrite: 12.50 },
+  "claude-haiku-4-5":   { input: 1,    output: 5,    cacheRead: 0.10, cacheWrite: 1.25 },
+  "claude-sonnet-5":    { input: 3,    output: 15,   cacheRead: 0.30, cacheWrite: 3.75 },
+  "claude-sonnet-4-5":  { input: 3,    output: 15,   cacheRead: 0.30, cacheWrite: 3.75 },
+  "claude-sonnet-4-6":  { input: 3,    output: 15,   cacheRead: 0.30, cacheWrite: 3.75 },
+  "claude-opus-4-5":    { input: 5,    output: 25,   cacheRead: 0.50, cacheWrite: 6.25 },
+  "claude-opus-4-6":    { input: 5,    output: 25,   cacheRead: 0.50, cacheWrite: 6.25 },
+  "claude-opus-4-7":    { input: 5,    output: 25,   cacheRead: 0.50, cacheWrite: 6.25 },
+  "claude-opus-4-8":    { input: 5,    output: 25,   cacheRead: 0.50, cacheWrite: 6.25 },
+  "claude-opus-4-1":    { input: 15,   output: 75,   cacheRead: 1.50, cacheWrite: 18.75 },
+  "claude-opus-4":      { input: 15,   output: 75,   cacheRead: 1.50, cacheWrite: 18.75 },
+  "claude-sonnet-4":    { input: 3,    output: 15,   cacheRead: 0.30, cacheWrite: 3.75 },
+  "claude-haiku-3-5":   { input: 0.80, output: 4,    cacheRead: 0.08, cacheWrite: 1.00 },
+  "gpt-5.5":            { input: 5,    output: 30,   cacheRead: 0.50,  cacheWrite: 5 },
+  "gpt-5.4-mini":       { input: 0.75, output: 4.50, cacheRead: 0.075, cacheWrite: 0.75 },
+  "gpt-5.4":            { input: 2.50, output: 15,   cacheRead: 0.25,  cacheWrite: 2.50 },
+  "gpt-5.3-codex":      { input: 1.75, output: 14,   cacheRead: 0.175, cacheWrite: 1.75 },
+  "gpt-5-codex":        { input: 1.25, output: 10,   cacheRead: 0.125, cacheWrite: 1.25 },
+  "gpt-5-mini":         { input: 0.25, output: 2,    cacheRead: 0.025, cacheWrite: 0.25 },
+  "gpt-5-nano":         { input: 0.05, output: 0.40, cacheRead: 0.005, cacheWrite: 0.05 },
+  "gpt-5":              { input: 1.25, output: 10,   cacheRead: 0.125, cacheWrite: 1.25 },
+  "o3-mini":            { input: 1.10, output: 4.40, cacheRead: 0.55,  cacheWrite: 1.10 },
+  "o3":                 { input: 2,    output: 8,    cacheRead: 0.50,  cacheWrite: 2 },
+  "o4-mini":            { input: 1.10, output: 4.40, cacheRead: 0.275, cacheWrite: 1.10 },
+  "gpt-4o-mini":        { input: 0.15, output: 0.60, cacheRead: 0.075, cacheWrite: 0.15 },
+  "gpt-4o":             { input: 2.50, output: 10,   cacheRead: 1.25,  cacheWrite: 2.50 },
+  "deepseek-v4-flash":  { input: 0.14, output: 0.28, cacheRead: 0.0028, cacheWrite: 0.14 },
+  "deepseek-v4-pro":    { input: 1.74, output: 3.48, cacheRead: 0.0145, cacheWrite: 1.74 },
+  "deepseek-chat":      { input: 0.14, output: 0.28, cacheRead: 0.0028, cacheWrite: 0.14 },
+  "deepseek-reasoner":  { input: 0.14, output: 0.28, cacheRead: 0.0028, cacheWrite: 0.14 },
+  "kimi-k2.6":          { input: 0.95, output: 4.00, cacheRead: 0.16,   cacheWrite: 0.95 },
+  "glm-5.1":            { input: 1.4,  output: 4.4,  cacheRead: 0.26,   cacheWrite: 1.4 },
+  "glm-5":              { input: 1.0,  output: 3.2,  cacheRead: 0.2,    cacheWrite: 1.0 },
+  "glm-5-turbo":        { input: 1.2,  output: 4.0,  cacheRead: 0.24,   cacheWrite: 1.2 },
+  "glm-4.7":            { input: 0.6,  output: 2.2,  cacheRead: 0.11,   cacheWrite: 0.6 },
+  "glm-4.7-flashx":     { input: 0.07, output: 0.4,  cacheRead: 0.01,   cacheWrite: 0.07 },
+  "glm-4.7-flash":      { input: 0,    output: 0,    cacheRead: 0,      cacheWrite: 0 },
+  "glm-4.6":            { input: 0.6,  output: 2.2,  cacheRead: 0.11,   cacheWrite: 0.6 },
+  "glm-4.5":            { input: 0.6,  output: 2.2,  cacheRead: 0.11,   cacheWrite: 0.6 },
+  "glm-4.5-x":          { input: 2.2,  output: 8.9,  cacheRead: 0.45,   cacheWrite: 2.2 },
+  "glm-4.5-air":        { input: 0.2,  output: 1.1,  cacheRead: 0.03,   cacheWrite: 0.2 },
+  "glm-4.5-airx":       { input: 1.1,  output: 4.5,  cacheRead: 0.22,   cacheWrite: 1.1 },
+  "glm-4.5-flash":      { input: 0,    output: 0,    cacheRead: 0,      cacheWrite: 0 },
+};
+
+beforeEach(() => {
+  useModelRegistryPricingStore.setState({ pricings: REGISTRY_PRICING_FIXTURE });
+});
+
 afterEach(() => {
   // Reset overrides so tests don't bleed pricing state into one another.
   useCustomPricingStore.setState({ pricings: {} });
+  useModelRegistryPricingStore.setState({ pricings: {} });
 });
 
 const zeroUsage = {
@@ -251,10 +316,11 @@ describe("estimateCost", () => {
   });
 
   // The Chinese-model rates below are spot-checked against the literal
-  // numbers on the three official price sheets cited in MODEL_PRICING's
-  // header comment. Pinning them in tests is what catches a future edit
-  // that copies a price from a near-named neighbour by accident — the
-  // mistake the previous attempt (PR #3170, closed) made.
+  // numbers on the three official price sheets cited in
+  // REGISTRY_PRICING_FIXTURE's header comment above. Pinning them in tests
+  // is what catches a future edit that copies a price from a near-named
+  // neighbour by accident — the mistake the previous attempt (PR #3170,
+  // closed) made.
   it("prices deepseek-v4-flash at the official $0.14/$0.28 with ~50× cache-hit discount", () => {
     // 1M input × $0.14 + 1M output × $0.28 + 1M cache read × $0.0028 = $0.4228.
     const cost = estimateCost({

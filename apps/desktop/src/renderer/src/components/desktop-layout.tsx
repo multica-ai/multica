@@ -139,11 +139,6 @@ function useInternalLinkHandler() {
 function DesktopInboxBridge() {
   const workspace = useCurrentWorkspace();
   useDesktopUnreadBadge(workspace?.id ?? null);
-  // Cerebro personal-browser bridge (FIR-2037): ensure the agent-control server
-  // is up at startup (flag-on) and open the Browser tab when an agent asks.
-  // Mounted here because this component already sits inside both the navigation
-  // and workspace-slug providers the bridge needs.
-  useCerebroBrowserBridge();
   const { push } = useNavigation();
   // The adapter identity changes with the active tab's location; the ref
   // keeps the main-process subscription stable across navigations.
@@ -160,6 +155,15 @@ function DesktopInboxBridge() {
     });
   }, []);
 
+  return workspace ? <DesktopCerebroBrowserBridge /> : null;
+}
+
+function DesktopCerebroBrowserBridge() {
+  // Cerebro personal-browser bridge (FIR-2037): ensure the agent-control server
+  // is up at startup (flag-on) and open the Browser tab when an agent asks.
+  // Mounted only after a workspace resolves because the feature flag hook is
+  // workspace-scoped.
+  useCerebroBrowserBridge();
   return null;
 }
 

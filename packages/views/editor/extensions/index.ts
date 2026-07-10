@@ -56,6 +56,8 @@ import { FileCardExtension } from "./file-card";
 import { ImageView } from "./image-view";
 import { BlockMathExtension, InlineMathExtension } from "./math";
 import { HighlightExtension } from "./highlight";
+// CEREBRO-PATCH(stacked-tables-editor): FIR-2482 — tag editable data tables `.data-table` so the mobile card CSS reaches notes/descriptions/editable docs.
+import { StackedTablesExtension } from "../cerebro-stacked-tables-extension";
 
 const lowlight = createLowlight(common);
 
@@ -141,6 +143,9 @@ export interface EditorExtensionsOptions {
   // editor's currentIssueId into the @mention factory so cerebro-access can
   // mark users lacking project access. Optional; unused upstream.
   currentIssueId?: string | null;
+  // CEREBRO-PATCH(note-mention-scope-opt): FIR-2595 point 3 — thread the note id
+  // so the @mention factory can scope suggestions to note-access. Optional.
+  currentNoteId?: string | null;
   /** Override @ behavior for chat context suggestions. */
   mentionMode?: "default" | "context";
   getMentionContextItems?: () => MentionItem[];
@@ -193,6 +198,7 @@ export function createEditorExtensions(
     TableRow,
     TableHeader,
     TableCell,
+    StackedTablesExtension,
     BlockMathExtension,
     InlineMathExtension,
     HighlightExtension,
@@ -213,6 +219,8 @@ export function createEditorExtensions(
                 mode: options.mentionMode,
                 getContextItems: options.getMentionContextItems,
                 currentIssueId: options.currentIssueId,
+                // CEREBRO-PATCH(note-mention-scope-pass): FIR-2595 point 3.
+                currentNoteId: options.currentNoteId,
               }),
             }
           : {}),

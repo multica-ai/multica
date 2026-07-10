@@ -26,10 +26,11 @@ var _ handler.CerebroAPIConnectionBriefResolver = (*APIConnectionResolver)(nil)
 // rendered brief lists the callable identity, not a decorated label.
 func (r *APIConnectionResolver) APIConnectionToolsForBrief(ctx context.Context, ident handler.CerebroAPIConnectionBriefIdentity) []handler.CerebroAPIConnectionBriefTool {
 	verds := r.ListForAgent(ctx, APIConnectionIdentity{
-		WorkspaceID: ident.WorkspaceID,
-		RuntimeID:   ident.RuntimeID,
-		AgentID:     ident.AgentID,
-		OwnerID:     ident.OwnerID,
+		WorkspaceID:  ident.WorkspaceID,
+		RuntimeID:    ident.RuntimeID,
+		AgentID:      ident.AgentID,
+		OwnerID:      ident.OwnerID,
+		OnBehalfOfID: ident.InitiatorID,
 	})
 	if len(verds) == 0 {
 		return nil

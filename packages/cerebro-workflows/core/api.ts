@@ -1,11 +1,19 @@
 import { api, parseWithFallback } from "@multica/core/api";
 import {
+  EMPTY_ACTIVATE_WORKFLOW,
+  EMPTY_ACTIVE_WORKFLOW_FOR_ISSUE,
+  EMPTY_LOOP_STATE,
   EMPTY_REGENERATE_INBOUND_SECRET,
   EMPTY_REGENERATE_INBOUND_TOKEN,
   EMPTY_REGENERATE_OUTBOUND_SECRET,
+  EMPTY_ISSUE_LOOP_RUNS,
   EMPTY_WORKFLOW,
   EMPTY_WORKFLOWS_LIST,
   EMPTY_WORKFLOW_RUNS_LIST,
+  activateWorkflowSchema,
+  activeWorkflowForIssueSchema,
+  issueLoopRunsSchema,
+  loopStateSchema,
   regenerateInboundSigningSecretSchema,
   regenerateInboundTokenSchema,
   regenerateOutboundSecretSchema,
@@ -14,7 +22,11 @@ import {
   workflowsListSchema,
 } from "./api-schemas";
 import type {
+  ActivateWorkflowResponse,
+  ActiveWorkflowForIssueResponse,
   CerebroWorkflow,
+  IssueLoopRunsResponse,
+  LoopStateResponse,
   RegenerateInboundSigningSecretResponse,
   RegenerateInboundTokenResponse,
   RegenerateOutboundSecretResponse,
@@ -116,4 +128,72 @@ export async function regenerateOutboundSecret(
     EMPTY_REGENERATE_OUTBOUND_SECRET,
     { endpoint: "regenerateCerebroOutboundSecret" },
   );
+}
+
+// FIR-2283 — Issue workflow control strip + approval. Routed through the
+// generic cerebroRequest primitive (no dedicated client.ts method needed —
+// see CEREBRO-PATCH(cerebro-api-request)).
+export async function fetchLoopState(
+  workflowId: string,
+  issueId: string,
+): Promise<LoopStateResponse> {
+  const raw = await api.cerebroRequest<unknown>(
+    `/api/cerebro/workflows/${workflowId}/loop-state?issue_id=${encodeURIComponent(issueId)}`,
+  );
+  return parseWithFallback(raw, loopStateSchema, EMPTY_LOOP_STATE, {
+    endpoint: "loopState",
+  });
+}
+
+export async function approveHumanCheck(
+  workflowId: string,
+  checkId: string,
+  input: { issue_id: string; approved: boolean; note?: string },
+): Promise<void> {
+  await api.cerebroRequest<unknown>(
+    `/api/cerebro/workflows/${workflowId}/human-checks/${checkId}/approve`,
+    { method: "POST", body: JSON.stringify(input) },
+  );
+}
+
+// FIR-2283 v2 point 8 — "per-issue workflow activation". Activates a saved
+// Issue workflow recipe (workflowId) on one specific issue: the recipe stays
+// a reusable template, this compiles an independent set of rules for that
+// issue alone.
+export async function activateWorkflow(
+  workflowId: string,
+  issueId: string,
+): Promise<ActivateWorkflowResponse> {
+  const raw = await api.cerebroRequest<unknown>(
+    `/api/cerebro/workflows/${workflowId}/activate`,
+    { method: "POST", body: JSON.stringify({ issue_id: issueId }) },
+  );
+  return parseWithFallback(raw, activateWorkflowSchema, EMPTY_ACTIVATE_WORKFLOW, {
+    endpoint: "activateWorkflow",
+  });
+}
+
+// fetchActiveWorkflowForIssue reads back which recipe (if any) issueId is
+// currently running.
+export async function fetchActiveWorkflowForIssue(
+  issueId: string,
+): Promise<ActiveWorkflowForIssueResponse> {
+  const raw = await api.cerebroRequest<unknown>(
+    `/api/cerebro/workflows/for-issue/${encodeURIComponent(issueId)}`,
+  );
+  return parseWithFallback(raw, activeWorkflowForIssueSchema, EMPTY_ACTIVE_WORKFLOW_FOR_ISSUE, {
+    endpoint: "activeWorkflowForIssue",
+  });
+}
+
+// FIR-2283 v2 point 7 — the issues that have run through workflowId's loop.
+export async function fetchWorkflowLoopRuns(
+  workflowId: string,
+): Promise<IssueLoopRunsResponse> {
+  const raw = await api.cerebroRequest<unknown>(
+    `/api/cerebro/workflows/${encodeURIComponent(workflowId)}/loop-runs`,
+  );
+  return parseWithFallback(raw, issueLoopRunsSchema, EMPTY_ISSUE_LOOP_RUNS, {
+    endpoint: "workflowLoopRuns",
+  });
 }

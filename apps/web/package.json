@@ -23,6 +23,7 @@
     "@multica/cerebro-access": "workspace:*",
     "@multica/cerebro-agent-capabilities": "workspace:*",
     "@multica/cerebro-agent-avatar": "workspace:*",
+    "@multica/cerebro-agent-page-redesign": "workspace:*",
     "@multica/cerebro-approvals": "workspace:*",
     "@multica/cerebro-autopilot-pages": "workspace:*",
     "@multica/cerebro-artifacts": "workspace:*",

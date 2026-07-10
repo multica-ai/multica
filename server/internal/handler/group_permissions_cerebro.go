@@ -32,6 +32,7 @@ import (
 	// CEREBRO-PATCH(create-local-runtime-policy-gate): FIR-2672 tool-policy resolve for local runtime creation.
 	"github.com/multica-ai/multica/server/internal/cerebro/toolpolicy"
 	"github.com/multica-ai/multica/server/internal/util"
+	db "github.com/multica-ai/multica/server/pkg/db/generated" // CEREBRO-PATCH(delegated-override-grant): FIR-2351 workspace-membership check for workspace-scope overrides.
 )
 
 // GroupPermissionsInvoker is the upstream-side seam that the cerebro group-
@@ -47,6 +48,9 @@ type GroupPermissionsInvoker interface {
 	ResolveGroupIDs(ctx context.Context, workspaceID, userID pgtype.UUID) ([]pgtype.UUID, error)
 	CanCreateRuntime(ctx context.Context, viewer GroupPermissionsViewer, workspaceID pgtype.UUID) (bool, error)
 	CanCreateAgent(ctx context.Context, viewer GroupPermissionsViewer, workspaceID pgtype.UUID) (bool, error)
+	// CanCreateMemory gates the Cognee memory feature (FIR-1794 Gate 2) — same
+	// shape as CanCreateAgent, default deny.
+	CanCreateMemory(ctx context.Context, viewer GroupPermissionsViewer, workspaceID pgtype.UUID) (bool, error)
 	CanUseRuntime(ctx context.Context, viewer GroupPermissionsViewer, runtimeID pgtype.UUID) (bool, error)
 	// JEH-1009 PR 4 — allowlist enforcement on `TriggerAgent` / `ListAgents` /
 	// `ListRuntimes` / `ListProjects` / `ListIssues`. `VisibleXxxIDs` return
@@ -134,7 +138,7 @@ func (h *Handler) cerebroRequireCapability(w http.ResponseWriter, r *http.Reques
 	// the handler fails fast with 500 — we'd rather see this in a test than
 	// ship a backdoor that silently grants an unknown right.
 	switch capability {
-	case "create_runtime", "create_agent":
+	case "create_runtime", "create_agent", "create_memory":
 		// known
 	default:
 		writeError(w, http.StatusInternalServerError, "unknown capability")
@@ -158,6 +162,8 @@ func (h *Handler) cerebroRequireCapability(w http.ResponseWriter, r *http.Reques
 		allowed, err = h.GroupPermissions.CanCreateRuntime(r.Context(), viewer, wsUUID)
 	case "create_agent":
 		allowed, err = h.GroupPermissions.CanCreateAgent(r.Context(), viewer, wsUUID)
+	case "create_memory":
+		allowed, err = h.GroupPermissions.CanCreateMemory(r.Context(), viewer, wsUUID)
 	}
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "permission check failed")
@@ -356,49 +362,286 @@ func (h *Handler) requireWorkspaceOwnerAdmin(w http.ResponseWriter, r *http.Requ
 	return true
 }
 
+// toolPolicyWriteProbe reads tool_key, layer, and subject_id off an in-flight
+// /tool-policy write without consuming the body for the downstream handler.
+// For DELETE these are query params; for PUT they live in the JSON body,
+// which is read once and restored (io.NopCloser) so Handler.Set can decode it
+// again. Any read/parse failure, or an empty tool_key, returns ok=false —
+// every caller MUST fail closed to the owner/admin gate on that, so a probe
+// error can never open a looser path by accident.
+//
+// CEREBRO-PATCH(delegated-override-grant): FIR-2351 generalized the FIR-1479
+// credential-only probe to also surface layer + subject_id, so the write gate
+// can route LayerUser rows through the delegated-override capability check.
+func (h *Handler) toolPolicyWriteProbe(r *http.Request) (toolKey, layer, subjectID string, ok bool) {
+	if r.Method == http.MethodDelete {
+		q := r.URL.Query()
+		key := q.Get("tool_key")
+		if key == "" {
+			return "", "", "", false
+		}
+		return key, q.Get("layer"), q.Get("subject_id"), true
+	}
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		return "", "", "", false
+	}
+	r.Body = io.NopCloser(bytes.NewReader(body))
+	var probe struct {
+		ToolKey   string `json:"tool_key"`
+		Layer     string `json:"layer"`
+		SubjectID string `json:"subject_id"`
+	}
+	if err := json.Unmarshal(body, &probe); err != nil {
+		return "", "", "", false
+	}
+	if probe.ToolKey == "" {
+		return "", "", "", false
+	}
+	return probe.ToolKey, probe.Layer, probe.SubjectID, true
+}
+
 // toolPolicyWriteIsCredential reports whether the in-flight /tool-policy write targets
-// a credential.* tool_key. For DELETE the key is a query param; for PUT it lives in the
-// JSON body, which is read once and restored (io.NopCloser) so the downstream handler
-// can decode it again. Any read/parse failure returns false — fail-closed to the
+// a credential.* tool_key. Any read/parse failure returns false — fail-closed to the
 // owner/admin gate, so the looser credential path is never reached by accident.
 //
 // CEREBRO-PATCH(credentials-manage-policy-gate): FIR-1479 read tool_key to route the write gate.
 func (h *Handler) toolPolicyWriteIsCredential(r *http.Request) bool {
-	if r.Method == http.MethodDelete {
-		return strings.HasPrefix(r.URL.Query().Get("tool_key"), "credential.")
-	}
-	body, err := io.ReadAll(r.Body)
-	if err != nil {
+	key, _, _, ok := h.toolPolicyWriteProbe(r)
+	if !ok {
 		return false
 	}
-	r.Body = io.NopCloser(bytes.NewReader(body))
-	var probe struct {
-		ToolKey string `json:"tool_key"`
-	}
-	if err := json.Unmarshal(body, &probe); err != nil {
-		return false
-	}
-	return strings.HasPrefix(probe.ToolKey, "credential.")
+	return strings.HasPrefix(key, "credential.")
 }
 
-// RequireToolPolicyWritePolicy gates a /tool-policy write per tool_key. FIR-1479 folds
-// credential authoring onto the shared tool-policy endpoint, but credential rows must be
-// settable by anyone holding manage_credential_access — not only owners/admins, who
-// alone author the platform/repo/tool rows. So this middleware routes:
+// cerebroRequireDelegatedOverridePolicy gates a LayerUser /tool-policy write
+// on the two delegated override capabilities (FIR-2351): manage_group_overrides
+// and manage_workspace_overrides, resolved through the unified tool-policy
+// chain exactly like manage_credential_access.
 //
-//   - credential.* keys → cerebroRequireCredentialGrantPolicy (manage_credential_access)
-//   - every other key   → requireWorkspaceOwnerAdmin (today's behavior, unchanged)
+// DELIBERATE, DOCUMENTED EXCEPTION: workspace owner/admin bypasses this gate
+// entirely, INCLUDING when subjectID == the admin's own user id — same as
+// every other capability gate in this file (cerebroRequireCredentialGrantPolicy,
+// cerebroRequireConnectionsPolicy, cerebroRequireLocalRuntimePolicy all check
+// IsAdmin first). The self-target ban below is a property of the two NEW
+// delegated capabilities, not a blanket rule over every actor in the system —
+// Jesper's rule was scoped to "andre brugere MED DEN PERMISSION" (other users
+// WITH THAT PERMISSION), i.e. capability holders, not admins who already hold
+// unrestricted authority here. See TestCerebroRequireDelegatedOverridePolicy_AdminCanTargetSelf.
+//
+// For everyone else: this is the ONLY place the self-target rule from the
+// product decision is enforced ("en bruger skal ikke kunne override sin egen
+// adgang, men andre brugere med den permission skal kunne det") — see
+// toolpolicy.CanAuthorDelegatedOverride for the pure rule. targetUserID is the
+// write's subject_id; callers MUST have already confirmed the write is
+// LayerUser before calling this (Group/Workspace/Runtime/Agent/System rows
+// stay owner/admin-only, unaffected by this capability).
+//
+// nil-queries fails open for the same reason as cerebroRequireCredentialGrantPolicy:
+// upstream-only test fixtures must keep working.
+//
+// CEREBRO-PATCH(delegated-override-grant): FIR-2351 write gate for the two delegated override capabilities.
+func (h *Handler) cerebroRequireDelegatedOverridePolicy(w http.ResponseWriter, r *http.Request, workspaceID string, targetUserID pgtype.UUID) bool {
+	if h.CerebroQueries == nil {
+		return true
+	}
+	viewer, ok := h.cerebroGroupViewer(w, r, workspaceID)
+	if !ok {
+		return false
+	}
+	if viewer.IsAdmin {
+		return true
+	}
+	wsUUID, perr := util.ParseUUID(workspaceID)
+	if perr != nil {
+		writeError(w, http.StatusBadRequest, "invalid workspace id")
+		return false
+	}
+
+	// FIR-2351 fix (Tine, adversarial review, finding 1): these are OPT-IN
+	// capabilities — nobody holds either until an explicit Allow is authored
+	// at the User or Group layer. ResolveOptIn (not Resolve/Base=Allow) is the
+	// correct primitive: Resolve's Base=Allow default would make every
+	// workspace member hold override power by default with no row at all,
+	// which is exactly backwards for "a permission you GIVE to users."
+	store := toolpolicy.NewStoreFromQueries(h.CerebroQueries)
+	hasWorkspaceScope, err := store.ResolveOptIn(r.Context(), toolpolicy.Query{
+		WorkspaceID: wsUUID,
+		ToolKey:     toolpolicy.CapabilityManageWorkspaceOverrides,
+		UserID:      viewer.UserID,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "permission check failed")
+		return false
+	}
+
+	// FIR-2351 fix (Tine, adversarial review, finding 2): workspace-scope must
+	// resolve to a REAL member of THIS workspace, not any syntactically valid
+	// UUID — otherwise it could author a row keyed to a non-member or a user
+	// from a different workspace. Demote (not reject outright) so a holder of
+	// BOTH capabilities still falls through to group-scope correctly.
+	if hasWorkspaceScope {
+		if _, merr := h.Queries.GetMemberByUserAndWorkspace(r.Context(), db.GetMemberByUserAndWorkspaceParams{
+			UserID:      targetUserID,
+			WorkspaceID: wsUUID,
+		}); merr != nil {
+			hasWorkspaceScope = false
+		}
+	}
+
+	// Group scope ("Manage group permissions") resolves PER SHARED GROUP so a
+	// WHEN condition on the capability row can pin the grant to specific
+	// group(s) (FIR-2351, product decision 2026-07-06): the capability's Allow
+	// row may carry an arg_allowlist condition on `group_id`, and the row then
+	// only applies when one of the groups the actor and target SHARE is listed.
+	// An unconditioned Allow row matches every context, so existing grants keep
+	// today's any-shared-group reach unchanged.
+	var actorGroups, targetGroups []pgtype.UUID
+	hasGroupScope := false
+	if h.GroupPermissions != nil {
+		if actorGroups, err = h.GroupPermissions.ResolveGroupIDs(r.Context(), wsUUID, viewer.UserID); err != nil {
+			writeError(w, http.StatusInternalServerError, "permission check failed")
+			return false
+		}
+		if targetGroups, err = h.GroupPermissions.ResolveGroupIDs(r.Context(), wsUUID, targetUserID); err != nil {
+			writeError(w, http.StatusInternalServerError, "permission check failed")
+			return false
+		}
+		shared := map[pgtype.UUID]bool{}
+		for _, a := range actorGroups {
+			if a.Valid {
+				shared[a] = true
+			}
+		}
+		for _, t := range targetGroups {
+			if !t.Valid || !shared[t] {
+				continue
+			}
+			granted, gerr := store.ResolveOptIn(r.Context(), toolpolicy.Query{
+				WorkspaceID: wsUUID,
+				ToolKey:     toolpolicy.CapabilityManageGroupOverrides,
+				UserID:      viewer.UserID,
+				RequestContext: toolpolicy.RequestContext{
+					ArgValues: map[string]string{"group_id": util.UUIDToString(t)},
+				},
+			})
+			if gerr != nil {
+				writeError(w, http.StatusInternalServerError, "permission check failed")
+				return false
+			}
+			if granted {
+				hasGroupScope = true
+				break
+			}
+		}
+	}
+
+	if !hasWorkspaceScope && !hasGroupScope {
+		writeError(w, http.StatusForbidden, "overriding another user's access is not allowed for you — ask a workspace admin")
+		return false
+	}
+
+	if !toolpolicy.CanAuthorDelegatedOverride(viewer.UserID, targetUserID, hasWorkspaceScope, hasGroupScope, actorGroups, targetGroups) {
+		writeError(w, http.StatusForbidden, "overriding another user's access is not allowed for you — ask a workspace admin (and note: this permission can never be used on your own access)")
+		return false
+	}
+	return true
+}
+
+// cerebroRequireManagePermissionsPolicy gates a Group- or Agent-layer
+// /tool-policy write on the manage_workspace_overrides capability ("Manage
+// permissions" in the app) — the FIR-2351 follow-up (product decision
+// 2026-07-06) that lets its holder grant a group or a single agent access,
+// including an Allow that opens a workspace-level default Deny. The
+// group-scoped capability (manage_group_overrides, "Manage group permissions")
+// deliberately does NOT reach these layers: it delegates authoring one
+// person's own row, not team- or agent-wide rules. Owner/admin bypasses like
+// every other capability gate in this file, and nil-queries fails open for
+// upstream-only test fixtures, both exactly as
+// cerebroRequireDelegatedOverridePolicy.
+//
+// CEREBRO-PATCH(delegated-override-grant): FIR-2351 Group/Agent-layer write gate for Manage permissions.
+func (h *Handler) cerebroRequireManagePermissionsPolicy(w http.ResponseWriter, r *http.Request, workspaceID string) bool {
+	if h.CerebroQueries == nil {
+		return true
+	}
+	viewer, ok := h.cerebroGroupViewer(w, r, workspaceID)
+	if !ok {
+		return false
+	}
+	if viewer.IsAdmin {
+		return true
+	}
+	wsUUID, perr := util.ParseUUID(workspaceID)
+	if perr != nil {
+		writeError(w, http.StatusBadRequest, "invalid workspace id")
+		return false
+	}
+	store := toolpolicy.NewStoreFromQueries(h.CerebroQueries)
+	granted, err := store.ResolveOptIn(r.Context(), toolpolicy.Query{
+		WorkspaceID: wsUUID,
+		ToolKey:     toolpolicy.CapabilityManageWorkspaceOverrides,
+		UserID:      viewer.UserID,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "permission check failed")
+		return false
+	}
+	if !granted {
+		writeError(w, http.StatusForbidden, "changing group or agent permission rows requires the Manage permissions capability — ask a workspace admin")
+		return false
+	}
+	return true
+}
+
+// RequireToolPolicyWritePolicy gates a /tool-policy write per tool_key and layer.
+// FIR-1479 folded credential authoring onto the shared tool-policy endpoint;
+// FIR-2351 adds a second delegable path for per-user rows. So this middleware routes:
+//
+//   - credential.* keys      → cerebroRequireCredentialGrantPolicy (manage_credential_access)
+//   - LayerUser, valid subject → cerebroRequireDelegatedOverridePolicy (manage_group/workspace_overrides)
+//   - everything else        → requireWorkspaceOwnerAdmin (today's behavior, unchanged)
 //
 // CEREBRO-PATCH(credentials-manage-policy-gate): FIR-1479 per-key tool-policy write gate.
+// CEREBRO-PATCH(delegated-override-grant): FIR-2351 added the LayerUser delegated-override branch.
 func (h *Handler) RequireToolPolicyWritePolicy(param string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			workspaceID := chi.URLParam(r, param)
-			if h.toolPolicyWriteIsCredential(r) {
+			key, layer, subjectID, probeOK := h.toolPolicyWriteProbe(r)
+
+			if probeOK && strings.HasPrefix(key, "credential.") {
 				if !h.cerebroRequireCredentialGrantPolicy(w, r, workspaceID) {
 					return
 				}
-			} else if !h.requireWorkspaceOwnerAdmin(w, r, workspaceID) {
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			if probeOK && toolpolicy.Layer(layer) == toolpolicy.LayerUser {
+				if targetID, perr := util.ParseUUID(subjectID); perr == nil {
+					if !h.cerebroRequireDelegatedOverridePolicy(w, r, workspaceID, targetID) {
+						return
+					}
+					next.ServeHTTP(w, r)
+					return
+				}
+			}
+
+			// Group- and Agent-layer rows are how a "Manage permissions" holder
+			// grants a group or a single agent access — including opening a
+			// workspace-level default Deny (FIR-2351, product decision
+			// 2026-07-06). Workspace/runtime/system rows stay owner/admin-only
+			// below: the workspace DEFAULT itself is not delegated.
+			if probeOK && (toolpolicy.Layer(layer) == toolpolicy.LayerGroup || toolpolicy.Layer(layer) == toolpolicy.LayerAgent) {
+				if !h.cerebroRequireManagePermissionsPolicy(w, r, workspaceID) {
+					return
+				}
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			if !h.requireWorkspaceOwnerAdmin(w, r, workspaceID) {
 				return
 			}
 			next.ServeHTTP(w, r)

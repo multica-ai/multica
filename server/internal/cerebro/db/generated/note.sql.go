@@ -32,14 +32,19 @@ SELECT EXISTS (
     SELECT 1 FROM artifact a
     LEFT JOIN cerebro_note n ON n.artifact_id = a.id
     WHERE a.id = $1
-      AND cerebro_artifact_folder_visible(a.folder_id, $2)
       AND (
-        n.artifact_id IS NULL
-        OR n.owner_id = $2
-        OR n.visibility = 'workspace'
-        OR (n.visibility = 'shared' AND EXISTS (
-            SELECT 1 FROM cerebro_note_share s
-            WHERE s.artifact_id = n.artifact_id AND s.user_id = $2))
+        (
+          cerebro_artifact_folder_visible(a.folder_id, $2)
+          AND (
+            n.artifact_id IS NULL
+            OR n.owner_id = $2
+            OR n.visibility = 'workspace'
+            OR (n.visibility = 'shared' AND EXISTS (
+                SELECT 1 FROM cerebro_note_share s
+                WHERE s.artifact_id = n.artifact_id AND s.user_id = $2))
+          )
+        )
+        OR cerebro_artifact_folder_grant_visible(a.folder_id, $2)
       )
 ) AS allowed
 `
@@ -57,8 +62,81 @@ type CanUserCommentOnArtifactParams struct {
 //   - a document (no cerebro_note row) is governed purely by folder access
 //     control — workspace membership is already enforced by the request's
 //     workspace middleware, so the folder rule is the only per-artifact gate.
+//
+// FIR-2595: a Collections folder grant on the folder/ancestor additively grants
+// comment access on its own, same as CanUserSeeNote.
 func (q *Queries) CanUserCommentOnArtifact(ctx context.Context, arg CanUserCommentOnArtifactParams) (bool, error) {
 	row := q.db.QueryRow(ctx, canUserCommentOnArtifact, arg.ID, arg.PUser)
+	var allowed bool
+	err := row.Scan(&allowed)
+	return allowed, err
+}
+
+const canUserEditArtifact = `-- name: CanUserEditArtifact :one
+SELECT EXISTS (
+    SELECT 1 FROM artifact a
+    LEFT JOIN cerebro_note n ON n.artifact_id = a.id
+    WHERE a.id = $1
+      AND (
+        (n.artifact_id IS NOT NULL AND (n.owner_id = $2 OR cerebro_artifact_folder_grant_visible(a.folder_id, $2)))
+        OR (n.artifact_id IS NULL AND (
+              cerebro_artifact_folder_grant_visible(a.folder_id, $2)
+              OR (a.author_type = 'member' AND a.author_id = $2)
+        ))
+      )
+) AS allowed
+`
+
+type CanUserEditArtifactParams struct {
+	ID    pgtype.UUID `json:"id"`
+	PUser pgtype.UUID `json:"p_user"`
+}
+
+// FIR-2697: WRITE access for ANY artifact, used to gate document version
+// save/restore. The personal-Notes save/restore path keeps its own stricter
+// owner-only rule (requireOwner in the handler) — this query is only consulted
+// for plain DOCUMENTS (no cerebro_note row), so it never loosens note behavior.
+// A document is writable when the caller reaches its folder (or an ancestor) via
+// a Collections grant, OR authored the document themselves (covers a root
+// document with no folder — e.g. a member restoring a version of a doc they
+// created). Deny-by-default otherwise.
+func (q *Queries) CanUserEditArtifact(ctx context.Context, arg CanUserEditArtifactParams) (bool, error) {
+	row := q.db.QueryRow(ctx, canUserEditArtifact, arg.ID, arg.PUser)
+	var allowed bool
+	err := row.Scan(&allowed)
+	return allowed, err
+}
+
+const canUserEditNote = `-- name: CanUserEditNote :one
+SELECT EXISTS (
+    SELECT 1 FROM cerebro_note n
+    JOIN artifact a ON a.id = n.artifact_id
+    WHERE n.artifact_id = $1
+      AND (
+        n.owner_id = $2
+        OR cerebro_artifact_folder_grant_visible(a.folder_id, $2)
+      )
+) AS allowed
+`
+
+type CanUserEditNoteParams struct {
+	ArtifactID pgtype.UUID `json:"artifact_id"`
+	OwnerID    pgtype.UUID `json:"owner_id"`
+}
+
+// Returns true when the user may EDIT and SAVE the note (not just read it).
+// FIR-2595: edit/save is driven by folder access — folders are now the ONLY
+// permission control for notes (Jesper: "a user must be able to edit and save
+// all notes in folders they have access to"). A user may write when
+//   - they own the note (baseline — nobody is ever locked out of their own note,
+//     including personal notes at the workspace root that carry no folder), OR
+//   - they reach the note's folder (or any ancestor) via ANY Collections grant.
+//
+// Access to the folder IS edit access; there is no read-only tier for notes.
+// Additive to the legacy owner-only gate: it only ever GRANTS write; it never
+// removes anyone's existing access.
+func (q *Queries) CanUserEditNote(ctx context.Context, arg CanUserEditNoteParams) (bool, error) {
+	row := q.db.QueryRow(ctx, canUserEditNote, arg.ArtifactID, arg.OwnerID)
 	var allowed bool
 	err := row.Scan(&allowed)
 	return allowed, err
@@ -70,13 +148,18 @@ SELECT EXISTS (
     JOIN artifact a ON a.id = n.artifact_id
     WHERE n.artifact_id = $1
       AND (
-        n.owner_id = $2
-        OR n.visibility = 'workspace'
-        OR (n.visibility = 'shared' AND EXISTS (
-            SELECT 1 FROM cerebro_note_share s
-            WHERE s.artifact_id = n.artifact_id AND s.user_id = $2))
+        (
+          (
+            n.owner_id = $2
+            OR n.visibility = 'workspace'
+            OR (n.visibility = 'shared' AND EXISTS (
+                SELECT 1 FROM cerebro_note_share s
+                WHERE s.artifact_id = n.artifact_id AND s.user_id = $2))
+          )
+          AND cerebro_artifact_folder_visible(a.folder_id, $2)
+        )
+        OR cerebro_artifact_folder_grant_visible(a.folder_id, $2)
       )
-      AND cerebro_artifact_folder_visible(a.folder_id, $2)
 ) AS allowed
 `
 
@@ -87,6 +170,10 @@ type CanUserSeeNoteParams struct {
 
 // Returns true when the user is allowed to see the note under the access rule.
 // FIR-1590: the note's own rule AND its folder chain must both allow the user.
+// FIR-2595: additively, a Collections folder grant (cerebro_folder_grant, the
+// "Access" dialog) on the folder or any ancestor ALSO grants access on its own —
+// so folders can drive permissions. The legacy path stays fully in effect; the
+// grant path only ever ADDS access (mirrors the project-grant cutover).
 func (q *Queries) CanUserSeeNote(ctx context.Context, arg CanUserSeeNoteParams) (bool, error) {
 	row := q.db.QueryRow(ctx, canUserSeeNote, arg.ArtifactID, arg.OwnerID)
 	var allowed bool
@@ -104,19 +191,20 @@ func (q *Queries) DeleteNote(ctx context.Context, artifactID pgtype.UUID) error 
 }
 
 const getNote = `-- name: GetNote :one
-SELECT artifact_id, owner_id, visibility, pinned, pinned_at, created_at, updated_at
+SELECT artifact_id, owner_id, visibility, pinned, pinned_at, author_codes, created_at, updated_at
 FROM cerebro_note
 WHERE artifact_id = $1
 `
 
 type GetNoteRow struct {
-	ArtifactID pgtype.UUID        `json:"artifact_id"`
-	OwnerID    pgtype.UUID        `json:"owner_id"`
-	Visibility string             `json:"visibility"`
-	Pinned     bool               `json:"pinned"`
-	PinnedAt   pgtype.Timestamptz `json:"pinned_at"`
-	CreatedAt  pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt  pgtype.Timestamptz `json:"updated_at"`
+	ArtifactID  pgtype.UUID        `json:"artifact_id"`
+	OwnerID     pgtype.UUID        `json:"owner_id"`
+	Visibility  string             `json:"visibility"`
+	Pinned      bool               `json:"pinned"`
+	PinnedAt    pgtype.Timestamptz `json:"pinned_at"`
+	AuthorCodes bool               `json:"author_codes"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
 }
 
 func (q *Queries) GetNote(ctx context.Context, artifactID pgtype.UUID) (GetNoteRow, error) {
@@ -128,7 +216,29 @@ func (q *Queries) GetNote(ctx context.Context, artifactID pgtype.UUID) (GetNoteR
 		&i.Visibility,
 		&i.Pinned,
 		&i.PinnedAt,
+		&i.AuthorCodes,
 		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getNoteLineAttr = `-- name: GetNoteLineAttr :one
+SELECT artifact_id, base_body, attrs, updated_at
+FROM cerebro_note_line_attr
+WHERE artifact_id = $1
+`
+
+// FIR-2810: per-line attribution state for a note. base_body is the body the
+// attrs array was computed for; a mismatch with the current artifact body
+// means an out-of-band edit happened and the caller must self-heal.
+func (q *Queries) GetNoteLineAttr(ctx context.Context, artifactID pgtype.UUID) (CerebroNoteLineAttr, error) {
+	row := q.db.QueryRow(ctx, getNoteLineAttr, artifactID)
+	var i CerebroNoteLineAttr
+	err := row.Scan(
+		&i.ArtifactID,
+		&i.BaseBody,
+		&i.Attrs,
 		&i.UpdatedAt,
 	)
 	return i, err
@@ -175,15 +285,22 @@ FROM cerebro_note n
 JOIN artifact a ON a.id = n.artifact_id
 WHERE a.workspace_id = $1
   AND (
-    n.owner_id = $2
-    OR n.visibility = 'workspace'
-    OR (n.visibility = 'shared' AND EXISTS (
-        SELECT 1 FROM cerebro_note_share s
-        WHERE s.artifact_id = n.artifact_id AND s.user_id = $2))
+    (
+      (
+        n.owner_id = $2
+        OR n.visibility = 'workspace'
+        OR (n.visibility = 'shared' AND EXISTS (
+            SELECT 1 FROM cerebro_note_share s
+            WHERE s.artifact_id = n.artifact_id AND s.user_id = $2))
+      )
+      -- FIR-1590: hide a note inside a folder the user may not see (gated up the
+      -- whole folder chain). NULL folder_id (root) is always visible.
+      AND cerebro_artifact_folder_visible(a.folder_id, $2)
+    )
+    -- FIR-2595: a Collections folder grant on the folder/ancestor grants access
+    -- additively on its own — folders drive permissions.
+    OR cerebro_artifact_folder_grant_visible(a.folder_id, $2)
   )
-  -- FIR-1590: hide a note inside a folder the user may not see (gated up the
-  -- whole folder chain). NULL folder_id (root) is always visible.
-  AND cerebro_artifact_folder_visible(a.folder_id, $2)
 ORDER BY n.pinned DESC, n.pinned_at DESC NULLS LAST, a.updated_at DESC
 LIMIT $3 OFFSET $4
 `
@@ -212,6 +329,7 @@ type ListNotesForUserRow struct {
 
 // The fast Notes list: every note the user may see in a workspace, pinned
 // first (most-recently pinned first), then most-recently-updated.
+// FIR-2145: comment_count lets the list UI show a comment-indicator badge.
 func (q *Queries) ListNotesForUser(ctx context.Context, arg ListNotesForUserParams) ([]ListNotesForUserRow, error) {
 	rows, err := q.db.Query(ctx, listNotesForUser,
 		arg.WorkspaceID,
@@ -261,13 +379,19 @@ WHERE a.workspace_id = $1
   AND ref.object = $2
   AND ref.ref_id = $3
   AND (
-    n.owner_id = $4
-    OR n.visibility = 'workspace'
-    OR (n.visibility = 'shared' AND EXISTS (
-        SELECT 1 FROM cerebro_note_share s
-        WHERE s.artifact_id = n.artifact_id AND s.user_id = $4))
+    (
+      (
+        n.owner_id = $4
+        OR n.visibility = 'workspace'
+        OR (n.visibility = 'shared' AND EXISTS (
+            SELECT 1 FROM cerebro_note_share s
+            WHERE s.artifact_id = n.artifact_id AND s.user_id = $4))
+      )
+      AND cerebro_artifact_folder_visible(a.folder_id, $4)
+    )
+    -- FIR-2595: a Collections folder grant additively grants access on its own.
+    OR cerebro_artifact_folder_grant_visible(a.folder_id, $4)
   )
-  AND cerebro_artifact_folder_visible(a.folder_id, $4)
 ORDER BY a.updated_at DESC
 `
 
@@ -344,15 +468,22 @@ FROM cerebro_note n
 JOIN artifact a ON a.id = n.artifact_id
 WHERE a.workspace_id = $1
   AND (
-    n.owner_id = $2
-    OR n.visibility = 'workspace'
-    OR (n.visibility = 'shared' AND EXISTS (
-        SELECT 1 FROM cerebro_note_share s
-        WHERE s.artifact_id = n.artifact_id AND s.user_id = $2))
+    (
+      (
+        n.owner_id = $2
+        OR n.visibility = 'workspace'
+        OR (n.visibility = 'shared' AND EXISTS (
+            SELECT 1 FROM cerebro_note_share s
+            WHERE s.artifact_id = n.artifact_id AND s.user_id = $2))
+      )
+      -- FIR-1590: hide a note inside a folder the user may not see (gated up the
+      -- whole folder chain). NULL folder_id (root) is always visible.
+      AND cerebro_artifact_folder_visible(a.folder_id, $2)
+    )
+    -- FIR-2595: a Collections folder grant on the folder/ancestor grants access
+    -- additively on its own — folders drive permissions.
+    OR cerebro_artifact_folder_grant_visible(a.folder_id, $2)
   )
-  -- FIR-1590: hide a note inside a folder the user may not see (gated up the
-  -- whole folder chain). NULL folder_id (root) is always visible.
-  AND cerebro_artifact_folder_visible(a.folder_id, $2)
 ORDER BY n.pinned DESC, n.pinned_at DESC NULLS LAST, a.updated_at DESC
 LIMIT $3
 `
@@ -380,6 +511,7 @@ type ListRecentNotesForUserRow struct {
 
 // Compact feed for the Notes box in the dynamic inbox: pinned first, then
 // newest, capped small by the caller via LIMIT.
+// FIR-2145: comment_count included for consistency with ListNotesForUser.
 func (q *Queries) ListRecentNotesForUser(ctx context.Context, arg ListRecentNotesForUserParams) ([]ListRecentNotesForUserRow, error) {
 	rows, err := q.db.Query(ctx, listRecentNotesForUser, arg.WorkspaceID, arg.OwnerID, arg.Limit)
 	if err != nil {
@@ -446,15 +578,22 @@ FROM cerebro_note n
 JOIN artifact a ON a.id = n.artifact_id
 WHERE a.workspace_id = $1
   AND (
-    n.owner_id = $2
-    OR n.visibility = 'workspace'
-    OR (n.visibility = 'shared' AND EXISTS (
-        SELECT 1 FROM cerebro_note_share s
-        WHERE s.artifact_id = n.artifact_id AND s.user_id = $2))
+    (
+      (
+        n.owner_id = $2
+        OR n.visibility = 'workspace'
+        OR (n.visibility = 'shared' AND EXISTS (
+            SELECT 1 FROM cerebro_note_share s
+            WHERE s.artifact_id = n.artifact_id AND s.user_id = $2))
+      )
+      -- FIR-1590: hide a note inside a folder the user may not see (gated up the
+      -- whole folder chain). NULL folder_id (root) is always visible.
+      AND cerebro_artifact_folder_visible(a.folder_id, $2)
+    )
+    -- FIR-2595: a Collections folder grant on the folder/ancestor grants access
+    -- additively on its own — folders drive permissions.
+    OR cerebro_artifact_folder_grant_visible(a.folder_id, $2)
   )
-  -- FIR-1590: hide a note inside a folder the user may not see (gated up the
-  -- whole folder chain). NULL folder_id (root) is always visible.
-  AND cerebro_artifact_folder_visible(a.folder_id, $2)
   AND (
     a.title ILIKE '%' || $5::text || '%'
     OR a.body ILIKE '%' || $5::text || '%'
@@ -488,6 +627,7 @@ type SearchNotesForUserRow struct {
 
 // Same access rule as ListNotesForUser, filtered by a free-text query over
 // title + body. Private notes only ever match for their owner.
+// FIR-2145: comment_count included for consistency with ListNotesForUser.
 func (q *Queries) SearchNotesForUser(ctx context.Context, arg SearchNotesForUserParams) ([]SearchNotesForUserRow, error) {
 	rows, err := q.db.Query(ctx, searchNotesForUser,
 		arg.WorkspaceID,
@@ -525,6 +665,23 @@ func (q *Queries) SearchNotesForUser(ctx context.Context, arg SearchNotesForUser
 		return nil, err
 	}
 	return items, nil
+}
+
+const setNoteAuthorCodes = `-- name: SetNoteAuthorCodes :exec
+UPDATE cerebro_note
+SET author_codes = $2, updated_at = now()
+WHERE artifact_id = $1
+`
+
+type SetNoteAuthorCodesParams struct {
+	ArtifactID  pgtype.UUID `json:"artifact_id"`
+	AuthorCodes bool        `json:"author_codes"`
+}
+
+// FIR-2810: per-note toggle — stamp the writer's member code on every line.
+func (q *Queries) SetNoteAuthorCodes(ctx context.Context, arg SetNoteAuthorCodesParams) error {
+	_, err := q.db.Exec(ctx, setNoteAuthorCodes, arg.ArtifactID, arg.AuthorCodes)
+	return err
 }
 
 const setNotePinned = `-- name: SetNotePinned :exec
@@ -616,4 +773,24 @@ func (q *Queries) UpsertNote(ctx context.Context, arg UpsertNoteParams) (UpsertN
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const upsertNoteLineAttr = `-- name: UpsertNoteLineAttr :exec
+INSERT INTO cerebro_note_line_attr (artifact_id, base_body, attrs, updated_at)
+VALUES ($1, $2, $3, now())
+ON CONFLICT (artifact_id) DO UPDATE
+SET base_body  = EXCLUDED.base_body,
+    attrs      = EXCLUDED.attrs,
+    updated_at = now()
+`
+
+type UpsertNoteLineAttrParams struct {
+	ArtifactID pgtype.UUID `json:"artifact_id"`
+	BaseBody   string      `json:"base_body"`
+	Attrs      []byte      `json:"attrs"`
+}
+
+func (q *Queries) UpsertNoteLineAttr(ctx context.Context, arg UpsertNoteLineAttrParams) error {
+	_, err := q.db.Exec(ctx, upsertNoteLineAttr, arg.ArtifactID, arg.BaseBody, arg.Attrs)
+	return err
 }

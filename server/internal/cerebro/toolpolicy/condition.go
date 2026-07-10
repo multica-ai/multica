@@ -329,6 +329,15 @@ func EnforcedConditionKinds(toolKey, source string, managedExternally bool) []Co
 	if toolKey == RegistryToolKey || source == registryDataSourceSource {
 		kinds = append(kinds, ConditionKindArg)
 	}
+	// The delegated-override write gate threads group_id into
+	// RequestContext.ArgValues when it resolves manage_group_overrides ("Manage
+	// group permissions"), one call per group the actor and target share
+	// (FIR-2351, product decision 2026-07-06). An arg_allowlist on group_id
+	// therefore pins the capability to specific group(s) — "you may manage
+	// permissions, but only for group X".
+	if toolKey == CapabilityManageGroupOverrides {
+		kinds = append(kinds, ConditionKindArg)
+	}
 	kinds = append(kinds, ConditionKindCEL)
 	return kinds
 }

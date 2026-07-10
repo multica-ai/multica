@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { z } from "zod";
 import { api } from "@multica/core/api";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { artifactKeys } from "@multica/cerebro-artifacts/core";
 import { noteKeys } from "./queries";
 import { safeParseNote } from "./types";
 
@@ -38,6 +39,23 @@ export const noteVersionKeys = {
     ["note-versions", wsId, noteId] as const,
 };
 
+// FIR-2697: the query keys a restore must invalidate. A restore changes the
+// record's body AND the version list, and the same record is read through two
+// caches: the Notes editor reads it via noteKeys, the Documents editor reads it
+// via artifactKeys.detail. Invalidating only the note keys left a restored
+// document showing stale body text until a manual reload. Keeping the list here
+// (and asserting it in a test) stops that alignment gap from regressing. noteId
+// is the artifact id for a document; the artifact keys are a harmless no-op for
+// a pure personal note.
+export function restoreVersionInvalidationKeys(wsId: string, noteId: string) {
+  return [
+    noteKeys.all(wsId),
+    noteVersionKeys.byNote(wsId, noteId),
+    artifactKeys.detail(wsId, noteId),
+    artifactKeys.all(wsId),
+  ];
+}
+
 export function useNoteVersions(
   noteId: string | null | undefined,
   enabled = true,
@@ -69,9 +87,9 @@ export function useRestoreNoteVersion(noteId: string) {
     mutationFn: async (versionId: string) =>
       safeParseNote(await api.restoreNoteVersion(noteId, versionId)),
     onSettled: () => {
-      // Restore changes both the note body and the version list.
-      qc.invalidateQueries({ queryKey: noteKeys.all(wsId) });
-      qc.invalidateQueries({ queryKey: noteVersionKeys.byNote(wsId, noteId) });
+      for (const queryKey of restoreVersionInvalidationKeys(wsId, noteId)) {
+        qc.invalidateQueries({ queryKey });
+      }
     },
   });
 }

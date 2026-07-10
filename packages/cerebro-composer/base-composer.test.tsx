@@ -1,6 +1,14 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, cleanup } from "@testing-library/react";
+import { render, screen, fireEvent, cleanup, waitFor, act } from "@testing-library/react";
 import { BaseComposer, type ComposerDraftHandle } from "./base-composer";
+
+const apiMock = vi.hoisted(() => ({
+  getMe: vi.fn(),
+}));
+
+const toastMock = vi.hoisted(() => ({
+  error: vi.fn(),
+}));
 
 // The real ContentEditor is a heavy Tiptap mount; the composer's submit-enable
 // logic does not depend on it, so we stub it with a textarea that holds the
@@ -41,10 +49,16 @@ vi.mock("@multica/views/editor", async () => {
     ContentEditor,
     useFileDropZone: () => ({ isDragOver: false, dropZoneProps: {} }),
     FileDropOverlay: () => null,
+    useAttachmentPreview: () => ({ open: vi.fn(), tryOpen: vi.fn(), modal: null }),
   };
 });
 
-vi.mock("@multica/core/api", () => ({ api: {} }));
+vi.mock("@multica/cerebro-feature-flags", () => ({
+  useFeatureFlag: () => false,
+}));
+
+vi.mock("@multica/core/api", () => ({ api: apiMock }));
+vi.mock("sonner", () => ({ toast: toastMock }));
 vi.mock("@multica/core/hooks/use-file-upload", () => ({
   useFileUpload: () => ({ uploadWithToast: vi.fn() }),
 }));
@@ -98,6 +112,12 @@ function makeDraft(defaultValue: string): ComposerDraftHandle {
 const submit = () => screen.getByRole("button", { name: "Submit" });
 
 beforeEach(() => cleanup());
+beforeEach(() => {
+  vi.useRealTimers();
+  apiMock.getMe.mockReset();
+  apiMock.getMe.mockResolvedValue({});
+  toastMock.error.mockClear();
+});
 
 describe("BaseComposer draft parity", () => {
   it("enables Submit on first render when a draft is restored, and sends it", async () => {
@@ -126,6 +146,63 @@ describe("BaseComposer draft parity", () => {
     expect(submit()).toBeEnabled();
     fireEvent.click(submit());
     expect(onSubmit).toHaveBeenCalledWith("hi", undefined);
+  });
+
+  it("keeps the draft when submit rejects", async () => {
+    const draft = makeDraft("unsent comment");
+    const onSubmit = vi.fn().mockRejectedValue(new Error("Session expired"));
+    render(
+      <BaseComposer draft={draft} onSubmit={onSubmit} editorKey="s1" />,
+    );
+
+    fireEvent.click(submit());
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith("unsent comment", undefined));
+    expect(draft.clear).not.toHaveBeenCalled();
+    expect(submit()).toBeEnabled();
+  });
+
+  it("warns early when a saved draft exists but the connection check fails", async () => {
+    vi.useFakeTimers();
+    apiMock.getMe.mockRejectedValue(new Error("Cloudflare session expired"));
+    const draft = makeDraft("");
+    render(
+      <BaseComposer draft={draft} onSubmit={vi.fn()} editorKey="s1" />,
+    );
+
+    fireEvent.change(screen.getByTestId("editor"), { target: { value: "half-written" } });
+    await act(async () => {
+      vi.advanceTimersByTime(1200);
+      await Promise.resolve();
+    });
+
+    expect(toastMock.error).toHaveBeenCalledWith(
+      "Connection lost. Your draft is saved locally. Sign in again before submitting.",
+    );
+    expect(draft.save).toHaveBeenCalledWith("half-written");
+    expect(submit()).toBeEnabled();
+  });
+
+  it("does not repeat the connection warning on every keystroke while still disconnected", async () => {
+    vi.useFakeTimers();
+    apiMock.getMe.mockRejectedValue(new Error("Cloudflare session expired"));
+    render(
+      <BaseComposer draft={makeDraft("")} onSubmit={vi.fn()} editorKey="s1" />,
+    );
+
+    fireEvent.change(screen.getByTestId("editor"), { target: { value: "one" } });
+    await act(async () => {
+      vi.advanceTimersByTime(1200);
+      await Promise.resolve();
+    });
+    fireEvent.change(screen.getByTestId("editor"), { target: { value: "one two" } });
+    await act(async () => {
+      vi.advanceTimersByTime(1200);
+      await Promise.resolve();
+    });
+
+    expect(toastMock.error).toHaveBeenCalledTimes(1);
+    expect(apiMock.getMe).toHaveBeenCalledTimes(1);
   });
 
   it("re-seeds Submit-enable when editorKey switches to a key with a draft", () => {

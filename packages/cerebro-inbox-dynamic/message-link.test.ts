@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import type { InboxItem, Channel } from "@multica/core/types";
-import { messageKeyForEntry, findEntryByMessageKey, findEntryByInboxIssueParam } from "./message-link";
+import { messageKeyForEntry, findEntryByMessageKey, findEntryByInboxIssueParam, nextInboxMessageUrl, noteMentionTarget, noteMentionUrl } from "./message-link";
 import type { DynInboxEntry } from "./section-filter";
 
 function notifEntry(id: string, over: Partial<InboxItem> = {}): DynInboxEntry {
@@ -66,6 +66,113 @@ describe("findEntryByMessageKey", () => {
     expect(findEntryByMessageKey(entries, "chat:")).toBeNull();
     expect(findEntryByMessageKey(entries, "garbage")).toBeNull();
     expect(findEntryByMessageKey(entries, "")).toBeNull();
+  });
+});
+
+describe("nextInboxMessageUrl", () => {
+  const base = {
+    urlChat: "",
+    urlIssue: "",
+    selectedKey: null as string | null,
+    currentMessageParam: null as string | null,
+    inboxPath: "/acme/inbox",
+  };
+
+  it("writes ?message= for the open row when no message param is set yet", () => {
+    expect(
+      nextInboxMessageUrl({ ...base, selectedKey: "notif:iss-9" }),
+    ).toBe("/acme/inbox?message=notif%3Aiss-9");
+  });
+
+  it("clears the URL to the bare inbox path when nothing is selected", () => {
+    expect(
+      nextInboxMessageUrl({ ...base, selectedKey: null, currentMessageParam: "notif:iss-9" }),
+    ).toBe("/acme/inbox");
+  });
+
+  it("skips when the URL already reflects the open row", () => {
+    expect(
+      nextInboxMessageUrl({
+        ...base,
+        selectedKey: "notif:iss-9",
+        currentMessageParam: "notif:iss-9",
+      }),
+    ).toBeNull();
+  });
+
+  // FIR-2677 — the regression: a message is open (selectedKey set) while a
+  // sidebar "New message" intent has just landed in the URL. Rewriting
+  // ?message= here would clobber that intent and re-open the old message,
+  // discarding the new agent chat. The write must be skipped.
+  it("does NOT write ?message= while a ?chat/?agent intent is unconsumed", () => {
+    expect(
+      nextInboxMessageUrl({
+        ...base,
+        urlChat: "new-chat",
+        selectedKey: "notif:iss-9",
+        currentMessageParam: null,
+      }),
+    ).toBeNull();
+  });
+
+  it("does NOT write ?message= while a ?issue intent is unconsumed", () => {
+    expect(
+      nextInboxMessageUrl({
+        ...base,
+        urlIssue: "chan-1",
+        selectedKey: "notif:iss-9",
+        currentMessageParam: null,
+      }),
+    ).toBeNull();
+  });
+
+  it("resumes normal syncing once the intent has been consumed and selection cleared", () => {
+    // After consume: selection is cleared and the intent params are gone, so the
+    // stale ?message= (if any) is cleared back to the bare inbox path.
+    expect(
+      nextInboxMessageUrl({ ...base, selectedKey: null, currentMessageParam: "notif:iss-9" }),
+    ).toBe("/acme/inbox");
+  });
+});
+
+// FIR-2826 — a note-comment mention must carry the comment id so clicking the
+// notification opens the note AND its comments panel at the exact comment.
+describe("noteMentionTarget", () => {
+  function item(details: Record<string, string> | null): InboxItem {
+    return { id: "n1", type: "mentioned", details } as InboxItem;
+  }
+
+  it("returns null when the item is not a note mention", () => {
+    expect(noteMentionTarget(item(null))).toBeNull();
+    expect(noteMentionTarget(item({}))).toBeNull();
+    expect(noteMentionTarget(item({ comment_id: "c1" }))).toBeNull();
+  });
+
+  it("resolves a note-body mention with no comment", () => {
+    expect(noteMentionTarget(item({ note_id: "note-9" }))).toEqual({
+      noteId: "note-9",
+      commentId: null,
+    });
+  });
+
+  it("carries the comment id for a note-comment mention", () => {
+    expect(
+      noteMentionTarget(item({ note_id: "note-9", comment_id: "cmt-3" })),
+    ).toEqual({ noteId: "note-9", commentId: "cmt-3" });
+  });
+});
+
+describe("noteMentionUrl", () => {
+  it("links to the note when there is no comment", () => {
+    expect(noteMentionUrl("/acme/notes", { noteId: "n 9", commentId: null })).toBe(
+      "/acme/notes/n%209",
+    );
+  });
+
+  it("appends the comment param for a note-comment mention", () => {
+    expect(
+      noteMentionUrl("/acme/notes", { noteId: "n9", commentId: "c3" }),
+    ).toBe("/acme/notes/n9?comment=c3");
   });
 });
 

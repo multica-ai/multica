@@ -57,6 +57,13 @@ import type {
   CreateAgentContextChangeRequestRequest,
   ReviewAgentContextChangeRequestRequest,
   RollbackAgentContextRequest,
+  // CEREBRO-PATCH(model-registry-api-types): FIR-2698 model registry governance types.
+  ModelRegistry,
+  ModelRegistryVersion,
+  ModelRegistryChangeRequest,
+  CreateModelRegistryChangeRequestRequest,
+  ReviewModelRegistryChangeRequestRequest,
+  RollbackModelRegistryRequest,
   UpdateSkillOwnershipRequest,
   CreateSkillChangeRequestRequest,
   ReviewSkillChangeRequestRequest,
@@ -87,6 +94,7 @@ import type {
   Attachment,
   Artifact,
   ArtifactFolder,
+  ArtifactFolderSuggestion,
   ArtifactUploadResponse,
   CreateArtifactRequest,
   UpdateArtifactRequest,
@@ -1564,6 +1572,10 @@ export class ApiClient {
     prompt: string;
     project_id?: string | null;
     parent_issue_id?: string | null;
+    // CEREBRO-PATCH(quick-create-workflow-id-client): FIR-2283 followup —
+    // optional Issue workflow the created issue is started on (server attaches
+    // it once the agent's async-created issue is resolved).
+    workflow_id?: string | null;
   }): Promise<{ task_id: string }> {
     return this.fetch("/api/issues/quick-create", {
       method: "POST",
@@ -2621,8 +2633,15 @@ export class ApiClient {
   // CEREBRO-PATCH(channel-list-include-archived): TECH-3758 — the Chat roster
   // passes include_archived so inbox-archived channels still show in the chat
   // interface (archive only hides them from the inbox feed, not the roster).
-  async listChannels(params?: { include_archived?: boolean }): Promise<Channel[]> {
-    const qs = params?.include_archived ? "?include_archived=true" : "";
+  // CEREBRO-PATCH(channel-list-include-archived): FIR-2791 — archived_only
+  // returns ONLY the caller's archived channels/DMs (backs the Archived
+  // block + archived view in the inbox).
+  async listChannels(params?: { include_archived?: boolean; archived_only?: boolean }): Promise<Channel[]> {
+    const qs = params?.archived_only
+      ? "?archived_only=true"
+      : params?.include_archived
+        ? "?include_archived=true"
+        : "";
     return this.fetch(`/api/channels${qs}`);
   }
 
@@ -3282,6 +3301,53 @@ export class ApiClient {
     data: RollbackAgentContextRequest,
   ): Promise<AgentContextVersion> {
     return this.fetch(`/api/agents/${id}/context/rollback`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  // CEREBRO-PATCH(model-registry-api-methods): FIR-2698 model registry — the single source for model prices,
+  // context windows, and display metadata. A deployment-wide singleton (no
+  // id in the routes). Backs onto
+  // server/internal/cerebro/modelregistry/handler.go.
+  async getModelRegistry(): Promise<ModelRegistry> {
+    return this.fetch(`/api/model-registry`);
+  }
+
+  async listModelRegistryVersions(): Promise<ModelRegistryVersion[]> {
+    return this.fetch(`/api/model-registry/versions`);
+  }
+
+  async listModelRegistryChangeRequests(
+    status?: "pending",
+  ): Promise<ModelRegistryChangeRequest[]> {
+    const qs = status ? `?status=${status}` : "";
+    return this.fetch(`/api/model-registry/change-requests${qs}`);
+  }
+
+  async createModelRegistryChangeRequest(
+    data: CreateModelRegistryChangeRequestRequest,
+  ): Promise<ModelRegistryChangeRequest> {
+    return this.fetch(`/api/model-registry/change-requests`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async reviewModelRegistryChangeRequest(
+    crId: string,
+    data: ReviewModelRegistryChangeRequestRequest,
+  ): Promise<ModelRegistryChangeRequest> {
+    return this.fetch(`/api/model-registry/change-requests/${crId}/review`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async rollbackModelRegistry(
+    data: RollbackModelRegistryRequest,
+  ): Promise<ModelRegistryVersion> {
+    return this.fetch(`/api/model-registry/rollback`, {
       method: "POST",
       body: JSON.stringify(data),
     });
@@ -4091,6 +4157,47 @@ export class ApiClient {
     });
   }
 
+  // CEREBRO-PATCH(folder-suggestion): FIR-2697 part 2 — an agent proposes an
+  // existing folder for a document/note; a person accepts before it moves.
+  async getArtifactFolderSuggestion(
+    artifactId: string,
+  ): Promise<{ suggestion: ArtifactFolderSuggestion | null }> {
+    return this.fetch(`/api/artifacts/${artifactId}/folder-suggestion`);
+  }
+
+  async createArtifactFolderSuggestion(
+    artifactId: string,
+    data: { folder_id: string; reason?: string },
+  ): Promise<ArtifactFolderSuggestion> {
+    return this.fetch(`/api/artifacts/${artifactId}/folder-suggestion`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async listArtifactFolderSuggestions(
+    surface?: string,
+  ): Promise<ArtifactFolderSuggestion[]> {
+    const qs = surface ? `?surface=${encodeURIComponent(surface)}` : "";
+    return this.fetch(`/api/artifact-folder-suggestions${qs}`);
+  }
+
+  async acceptArtifactFolderSuggestion(
+    id: string,
+  ): Promise<ArtifactFolderSuggestion> {
+    return this.fetch(`/api/artifact-folder-suggestions/${id}/accept`, {
+      method: "POST",
+    });
+  }
+
+  async rejectArtifactFolderSuggestion(
+    id: string,
+  ): Promise<ArtifactFolderSuggestion> {
+    return this.fetch(`/api/artifact-folder-suggestions/${id}/reject`, {
+      method: "POST",
+    });
+  }
+
   // Artifact folders
   // CEREBRO-PATCH(artifact-folder-kind): TECH-3637 — optional kind filter so
   // notes and documents list separate folder trees.
@@ -4306,11 +4413,13 @@ export class ApiClient {
     });
   }
 
-  // CEREBRO-PATCH(cerebro-wakeup-settings): TECH-3298 per-workspace self-wakeup
-  // limits (max wakeups per issue + minimum gap between two time wakeups).
+  // CEREBRO-PATCH(cerebro-wakeup-settings): TECH-3298 + FIR-2679 per-workspace
+  // self-wakeup limits (max wakeups per issue, min gap between time wakeups, and
+  // the consecutive-loop cap for the loop guard).
   async getWakeupSettings(wsId: string): Promise<{
     max_self_per_issue: number;
     min_interval_minutes: number;
+    max_consecutive_loops: number;
   }> {
     return this.fetch(`/api/workspaces/${wsId}/wakeup-settings`);
   }
@@ -4319,12 +4428,18 @@ export class ApiClient {
     wsId: string,
     maxSelfPerIssue: number,
     minIntervalMinutes: number,
-  ): Promise<{ max_self_per_issue: number; min_interval_minutes: number }> {
+    maxConsecutiveLoops: number,
+  ): Promise<{
+    max_self_per_issue: number;
+    min_interval_minutes: number;
+    max_consecutive_loops: number;
+  }> {
     return this.fetch(`/api/workspaces/${wsId}/wakeup-settings`, {
       method: "PUT",
       body: JSON.stringify({
         max_self_per_issue: maxSelfPerIssue,
         min_interval_minutes: minIntervalMinutes,
+        max_consecutive_loops: maxConsecutiveLoops,
       }),
     });
   }
@@ -4472,6 +4587,15 @@ export class ApiClient {
     return this.fetch<T>(`/api/notes/${id}/pin`, {
       method: "PUT",
       body: JSON.stringify({ pinned }),
+    });
+  }
+
+  // CEREBRO-PATCH(cerebro-note-author-codes): FIR-2810 — per-note toggle that
+  // stamps the writer's member code (e.g. "JEH") on every line they write.
+  async setNoteAuthorCodes<T = unknown>(id: string, authorCodes: boolean): Promise<T> {
+    return this.fetch<T>(`/api/notes/${id}/author-codes`, {
+      method: "PUT",
+      body: JSON.stringify({ author_codes: authorCodes }),
     });
   }
 
