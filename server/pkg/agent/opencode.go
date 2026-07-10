@@ -144,18 +144,29 @@ func (b *opencodeBackend) Execute(ctx context.Context, prompt string, opts ExecO
 	// workdir is reused across turns for the same (agent, issue), and any
 	// agent- or user-written model / tools / permission settings in it must
 	// survive across runs.
-	hardenedMcpConfig, mcpTempCleanup, err := hardenBrowserMcpConfigTemp(opts.McpConfig)
-	if err != nil {
-		cancel()
-		return nil, fmt.Errorf("opencode: harden mcp_config: %w", err)
-	}
-	context.AfterFunc(runCtx, mcpTempCleanup)
-
-	mcpContent, err := buildOpenCodeMCPConfigContent(hardenedMcpConfig)
+	//
+	// buildOpenCodeMCPConfigContent hardens internally (after translating
+	// mcp_config into OpenCode's native shape, so it covers both accepted
+	// input shapes — see its doc comment). The returned cleanup must not
+	// run until the process has actually exited, not merely been
+	// cancelled: a bare context.AfterFunc(runCtx, cleanup) fires the
+	// instant runCtx.Done() closes, which on a timeout/cancellation is
+	// *before* the SIGTERM→SIGKILL grace sequence below has finished, and
+	// could delete the sidecar out from under an MCP subprocess that's
+	// still mid-launch. Instead: clean up directly on every pre-Start()
+	// failure path, and hand ownership to the completion goroutine once
+	// cmd.Start() succeeds, which calls it only after cmd.Wait() returns.
+	mcpContent, mcpCleanup, err := buildOpenCodeMCPConfigContent(opts.McpConfig)
 	if err != nil {
 		cancel()
 		return nil, err
 	}
+	ownedMcpCleanup := mcpCleanup
+	defer func() {
+		if ownedMcpCleanup != nil {
+			ownedMcpCleanup()
+		}
+	}()
 	if mcpContent != "" {
 		if _, dup := b.cfg.Env["OPENCODE_CONFIG_CONTENT"]; dup {
 			b.cfg.Logger.Warn("agent.custom_env sets OPENCODE_CONFIG_CONTENT but agent.mcp_config takes precedence and overrides it")
@@ -175,6 +186,10 @@ func (b *opencodeBackend) Execute(ctx context.Context, prompt string, opts ExecO
 		cancel()
 		return nil, fmt.Errorf("start opencode: %w", err)
 	}
+
+	// cmd.Start() succeeded — transfer mcp cleanup ownership to the
+	// completion goroutine below, which runs it after cmd.Wait() returns.
+	ownedMcpCleanup = nil
 
 	b.cfg.Logger.Info("opencode started", "pid", cmd.Process.Pid, "cwd", opts.Cwd, "model", opts.Model)
 
@@ -222,6 +237,7 @@ func (b *opencodeBackend) Execute(ctx context.Context, prompt string, opts ExecO
 
 		// Wait for process exit, then release the cancellation handler.
 		exitErr := cmd.Wait()
+		mcpCleanup()
 		close(procDone)
 		duration := time.Since(startTime)
 

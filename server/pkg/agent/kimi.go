@@ -42,12 +42,21 @@ func (b *kimiBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 	timeout := opts.Timeout
 	runCtx, cancel := runContext(ctx, timeout)
 
-	hardenedMcpConfig, mcpTempCleanup, err := hardenBrowserMcpConfigTemp(opts.McpConfig)
+	// hardenBrowserMcpConfigTemp's cleanup must not run until the child
+	// process has actually exited, not merely been cancelled — see the
+	// matching comment in hermes.go for why a bare
+	// context.AfterFunc(runCtx, cleanup) is unsafe here.
+	hardenedMcpConfig, mcpCleanup, err := hardenBrowserMcpConfigTemp(opts.McpConfig)
 	if err != nil {
 		cancel()
 		return nil, fmt.Errorf("kimi: harden mcp_config: %w", err)
 	}
-	context.AfterFunc(runCtx, mcpTempCleanup)
+	ownedMcpCleanup := mcpCleanup
+	defer func() {
+		if ownedMcpCleanup != nil {
+			ownedMcpCleanup()
+		}
+	}()
 
 	// Translate the agent's mcp_config (Claude-style object of objects)
 	// into the array shape ACP `session/new` expects. Fail closed on
@@ -105,6 +114,9 @@ func (b *kimiBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 		cancel()
 		return nil, fmt.Errorf("start kimi: %w", err)
 	}
+	// cmd.Start() succeeded — transfer mcp cleanup ownership to the
+	// completion goroutine below, which runs it after cmd.Wait() returns.
+	ownedMcpCleanup = nil
 
 	stderrSink := io.MultiWriter(newLogWriter(b.cfg.Logger, "[kimi:stderr] "), providerErr)
 	stderrDone := make(chan struct{})
@@ -180,6 +192,7 @@ func (b *kimiBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 		defer func() {
 			stdin.Close()
 			_ = cmd.Wait()
+			mcpCleanup()
 		}()
 
 		startTime := time.Now()
