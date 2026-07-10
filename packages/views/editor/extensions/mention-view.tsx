@@ -27,7 +27,7 @@ import {
   ActorMentionChip,
   isActorMentionType,
 } from "@multica/ui/components/common/actor-mention-chip";
-import { MentionHoverCard } from "@multica/ui/components/common/mention-hover-card";
+import { MentionHoverCard } from "../mention-hover-card";
 
 export function MentionView({ node }: NodeViewProps) {
   const { type, id, label } = node.attrs;
@@ -64,7 +64,7 @@ export function MentionView({ node }: NodeViewProps) {
 
   return (
     <NodeViewWrapper as="span" className="inline">
-      <MentionHoverCard type={type} id={id} name={name} initials={initials}>
+      <MentionHoverCard type={type} id={id}>
         <ActorMentionChip type={type} label={name} initials={initials} focusable />
       </MentionHoverCard>
     </NodeViewWrapper>
