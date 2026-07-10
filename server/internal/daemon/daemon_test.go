@@ -1068,7 +1068,8 @@ func TestExecuteAndDrain_ResumeFailureFallback(t *testing.T) {
 
 	// First attempt: resume fails (no SessionID in result).
 	opts := agent.ExecOptions{ResumeSessionID: "stale-id"}
-	result, _, err := d.executeAndDrain(ctx, fb, "prompt", opts, taskLog, "task-1")
+	var msgSeq atomic.Int32
+	result, _, err := d.executeAndDrain(ctx, fb, "prompt", opts, taskLog, "task-1", &msgSeq)
 	if err != nil {
 		t.Fatalf("first call error: %v", err)
 	}
@@ -1080,7 +1081,7 @@ func TestExecuteAndDrain_ResumeFailureFallback(t *testing.T) {
 	if result.Status == "failed" && result.SessionID == "" {
 		firstUsage := result.Usage
 		opts.ResumeSessionID = ""
-		retryResult, _, retryErr := d.executeAndDrain(ctx, fb, "prompt", opts, taskLog, "task-1")
+		retryResult, _, retryErr := d.executeAndDrain(ctx, fb, "prompt", opts, taskLog, "task-1", &msgSeq)
 		if retryErr != nil {
 			t.Fatalf("retry error: %v", retryErr)
 		}
@@ -1169,7 +1170,7 @@ func TestExecuteAndDrain_FlushesTranscriptBeforeReturningResult(t *testing.T) {
 
 	d, rec := newTranscriptRecorder(t)
 
-	result, _, err := d.executeAndDrain(context.Background(), &transcriptBackend{}, "p", agent.ExecOptions{}, slog.Default(), "task-flush")
+	result, _, err := d.executeAndDrain(context.Background(), &transcriptBackend{}, "p", agent.ExecOptions{}, slog.Default(), "task-flush", new(atomic.Int32))
 	if err != nil {
 		t.Fatalf("executeAndDrain: %v", err)
 	}
@@ -1179,6 +1180,44 @@ func TestExecuteAndDrain_FlushesTranscriptBeforeReturningResult(t *testing.T) {
 
 	if got := rec.snapshot(); len(got) != 2 {
 		t.Fatalf("expected the transcript flushed before the result hand-off, got %d messages: %+v", len(got), got)
+	}
+}
+
+// TestExecuteAndDrain_SeqContinuesAcrossRetry pins the transcript's ordering
+// key: the server sorts a task's messages by seq alone, so a same-task resume
+// retry must keep numbering upwards instead of restarting at 1 and
+// interleaving its rows with the failed attempt's.
+func TestExecuteAndDrain_SeqContinuesAcrossRetry(t *testing.T) {
+	t.Parallel()
+
+	d, rec := newTranscriptRecorder(t)
+	fb := &transcriptBackend{}
+	var msgSeq atomic.Int32
+
+	result, _, err := d.executeAndDrain(context.Background(), fb, "p", agent.ExecOptions{ResumeSessionID: "stale"}, slog.Default(), "task-seq", &msgSeq)
+	if err != nil {
+		t.Fatalf("first call: %v", err)
+	}
+	if result.Status != "failed" {
+		t.Fatalf("expected failed first result, got %+v", result)
+	}
+
+	result, _, err = d.executeAndDrain(context.Background(), fb, "p", agent.ExecOptions{}, slog.Default(), "task-seq", &msgSeq)
+	if err != nil {
+		t.Fatalf("retry: %v", err)
+	}
+	if result.Status != "completed" {
+		t.Fatalf("expected completed retry result, got %+v", result)
+	}
+
+	got := rec.snapshot()
+	if len(got) != 4 {
+		t.Fatalf("expected 4 messages total, got %d: %+v", len(got), got)
+	}
+	for i, m := range got {
+		if m.Seq != i+1 {
+			t.Fatalf("expected strictly ascending seq across the retry, got %+v", got)
+		}
 	}
 }
 
@@ -1194,7 +1233,7 @@ func TestExecuteAndDrain_NoRetryWhenSessionEstablished(t *testing.T) {
 	}
 
 	opts := agent.ExecOptions{ResumeSessionID: "some-id"}
-	result, _, err := d.executeAndDrain(context.Background(), fb, "p", opts, slog.Default(), "t")
+	result, _, err := d.executeAndDrain(context.Background(), fb, "p", opts, slog.Default(), "t", new(atomic.Int32))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1264,7 +1303,7 @@ func TestExecuteAndDrain_CodexInactivityReportsToolResultTranscript(t *testing.T
 	result, tools, err := d.executeAndDrain(context.Background(), backend, "prompt", agent.ExecOptions{
 		Timeout:                   5 * time.Second,
 		SemanticInactivityTimeout: 100 * time.Millisecond,
-	}, slog.Default(), "task-stale")
+	}, slog.Default(), "task-stale", new(atomic.Int32))
 	if err != nil {
 		t.Fatalf("executeAndDrain: %v", err)
 	}
@@ -1319,7 +1358,7 @@ func TestExecuteAndDrain_ContextCancelled_ReportsCancelled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	result, _, err := d.executeAndDrain(ctx, blockingBackend{}, "p", agent.ExecOptions{}, slog.Default(), "t")
+	result, _, err := d.executeAndDrain(ctx, blockingBackend{}, "p", agent.ExecOptions{}, slog.Default(), "t", new(atomic.Int32))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1358,7 +1397,7 @@ func TestExecuteAndDrain_IdleWatchdog_FiresOnInactivity(t *testing.T) {
 	t.Cleanup(cancel)
 
 	start := time.Now()
-	result, _, err := d.executeAndDrain(ctx, idleWatchdogBackend{emitOne: true}, "p", agent.ExecOptions{}, slog.Default(), "t-idle")
+	result, _, err := d.executeAndDrain(ctx, idleWatchdogBackend{emitOne: true}, "p", agent.ExecOptions{}, slog.Default(), "t-idle", new(atomic.Int32))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1388,7 +1427,7 @@ func TestExecuteAndDrain_IdleWatchdog_FiresWhenNoMessageEverArrives(t *testing.T
 	// emitOne=false models a backend that hangs before sending any message.
 	// lastActivityAt is initialised at executeAndDrain entry, so the same
 	// window applies even with zero traffic.
-	result, _, err := d.executeAndDrain(ctx, idleWatchdogBackend{emitOne: false}, "p", agent.ExecOptions{}, slog.Default(), "t-idle-zero")
+	result, _, err := d.executeAndDrain(ctx, idleWatchdogBackend{emitOne: false}, "p", agent.ExecOptions{}, slog.Default(), "t-idle-zero", new(atomic.Int32))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1409,7 +1448,7 @@ func TestExecuteAndDrain_IdleWatchdog_DisabledWhenZero(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	time.AfterFunc(80*time.Millisecond, cancel)
 
-	result, _, err := d.executeAndDrain(ctx, idleWatchdogBackend{emitOne: true}, "p", agent.ExecOptions{}, slog.Default(), "t-idle-off")
+	result, _, err := d.executeAndDrain(ctx, idleWatchdogBackend{emitOne: true}, "p", agent.ExecOptions{}, slog.Default(), "t-idle-off", new(atomic.Int32))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1435,7 +1474,7 @@ func TestExecuteAndDrain_IdleWatchdog_HappyPathDoesNotFire(t *testing.T) {
 		},
 	}
 
-	result, _, err := d.executeAndDrain(context.Background(), fb, "p", agent.ExecOptions{}, slog.Default(), "t-idle-happy")
+	result, _, err := d.executeAndDrain(context.Background(), fb, "p", agent.ExecOptions{}, slog.Default(), "t-idle-happy", new(atomic.Int32))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1508,6 +1547,7 @@ func TestExecuteAndDrain_IdleWatchdog_DoesNotFireDuringInFlightToolCall(t *testi
 		agent.ExecOptions{},
 		slog.Default(),
 		"t-long-tool",
+		new(atomic.Int32),
 	)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -1547,7 +1587,7 @@ func TestExecuteAndDrain_IdleWatchdog_FiresOnStuckInFlightTool(t *testing.T) {
 	t.Cleanup(cancel)
 
 	start := time.Now()
-	result, _, err := d.executeAndDrain(ctx, stuckInFlightToolBackend{}, "p", agent.ExecOptions{}, slog.Default(), "t-stuck-tool")
+	result, _, err := d.executeAndDrain(ctx, stuckInFlightToolBackend{}, "p", agent.ExecOptions{}, slog.Default(), "t-stuck-tool", new(atomic.Int32))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1583,7 +1623,7 @@ func TestExecuteAndDrain_IdleWatchdog_FiresAfterToolResultIfBackendStaysSilent(t
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 
-	result, _, err := d.executeAndDrain(ctx, tailIdleAfterToolBackend{}, "p", agent.ExecOptions{}, slog.Default(), "t-tail-idle")
+	result, _, err := d.executeAndDrain(ctx, tailIdleAfterToolBackend{}, "p", agent.ExecOptions{}, slog.Default(), "t-tail-idle", new(atomic.Int32))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

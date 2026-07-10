@@ -3941,7 +3941,10 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		"timeout", execOpts.Timeout,
 	)
 
-	result, tools, err := d.executeAndDrain(ctx, backend, prompt, execOpts, taskLog, task.ID)
+	// Shared across the resume-retry below so the retry's transcript rows
+	// keep ascending seq values for the same task.
+	var msgSeq atomic.Int32
+	result, tools, err := d.executeAndDrain(ctx, backend, prompt, execOpts, taskLog, task.ID, &msgSeq)
 	if err != nil {
 		return TaskResult{}, err
 	}
@@ -3953,7 +3956,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		firstUsage := result.Usage
 		taskLog.Warn("session resume failed, retrying with fresh session", "error", result.Error)
 		execOpts.ResumeSessionID = ""
-		retryResult, retryTools, retryErr := d.executeAndDrain(ctx, backend, prompt, execOpts, taskLog, task.ID)
+		retryResult, retryTools, retryErr := d.executeAndDrain(ctx, backend, prompt, execOpts, taskLog, task.ID, &msgSeq)
 		if retryErr != nil {
 			taskLog.Error("fresh session also failed to start", "error", retryErr)
 		} else {
@@ -4145,8 +4148,11 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 }
 
 // executeAndDrain runs a backend, drains its message stream (forwarding to the
-// server), and waits for the final result.
-func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, prompt string, opts agent.ExecOptions, taskLog *slog.Logger, taskID string) (agent.Result, int32, error) {
+// server), and waits for the final result. msgSeq numbers the reported task
+// messages and is owned by the caller so a same-task retry continues the
+// sequence instead of restarting at 1 — the server orders the transcript by
+// seq alone, and duplicate seqs would interleave the two attempts' rows.
+func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, prompt string, opts agent.ExecOptions, taskLog *slog.Logger, taskID string, msgSeq *atomic.Int32) (agent.Result, int32, error) {
 	// Wrap the caller's ctx so the idle watchdog (below) can interrupt both
 	// the agent subprocess (via the ctx passed to backend.Execute) AND the
 	// drain loop with a single cancel. Without this layer the backend would
@@ -4211,7 +4217,6 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 	drainFinished := make(chan struct{})
 	go func() {
 		defer close(drainFinished)
-		var seq atomic.Int32
 		var mu sync.Mutex
 		var pendingText strings.Builder
 		var pendingThinking strings.Builder
@@ -4221,7 +4226,7 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 		flush := func() {
 			mu.Lock()
 			if pendingThinking.Len() > 0 {
-				s := seq.Add(1)
+				s := msgSeq.Add(1)
 				batch = append(batch, TaskMessageData{
 					Seq:     int(s),
 					Type:    "thinking",
@@ -4230,7 +4235,7 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 				pendingThinking.Reset()
 			}
 			if pendingText.Len() > 0 {
-				s := seq.Add(1)
+				s := msgSeq.Add(1)
 				batch = append(batch, TaskMessageData{
 					Seq:     int(s),
 					Type:    "text",
@@ -4309,7 +4314,7 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 						callIDToTool[msg.CallID] = msg.Tool
 						mu.Unlock()
 					}
-					s := seq.Add(1)
+					s := msgSeq.Add(1)
 					mu.Lock()
 					batch = append(batch, TaskMessageData{
 						Seq:   int(s),
@@ -4333,7 +4338,7 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 							break
 						}
 					}
-					s := seq.Add(1)
+					s := msgSeq.Add(1)
 					output := msg.Output
 					if len(output) > 8192 {
 						output = output[:8192]
@@ -4368,7 +4373,7 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 					}
 				case agent.MessageError:
 					taskLog.Error("agent error", "content", msg.Content)
-					s := seq.Add(1)
+					s := msgSeq.Add(1)
 					mu.Lock()
 					batch = append(batch, TaskMessageData{
 						Seq:     int(s),
