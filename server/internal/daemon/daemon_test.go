@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -1100,6 +1101,84 @@ func TestExecuteAndDrain_ResumeFailureFallback(t *testing.T) {
 	// Second call should NOT have ResumeSessionID.
 	if fb.calls[1].ResumeSessionID != "" {
 		t.Fatal("retry should not have ResumeSessionID")
+	}
+}
+
+// transcriptBackend emits a tool_use and a text message before returning its
+// result — the first call fails like a broken resume, the second completes.
+type transcriptBackend struct {
+	calls atomic.Int32
+}
+
+func (b *transcriptBackend) Execute(_ context.Context, _ string, _ agent.ExecOptions) (*agent.Session, error) {
+	n := b.calls.Add(1)
+	msgCh := make(chan agent.Message, 2)
+	msgCh <- agent.Message{Type: agent.MessageToolUse, Tool: "bash"}
+	msgCh <- agent.Message{Type: agent.MessageText, Content: fmt.Sprintf("attempt %d", n)}
+	close(msgCh)
+	resCh := make(chan agent.Result, 1)
+	if n == 1 {
+		resCh <- agent.Result{Status: "failed", Error: "session not found"}
+	} else {
+		resCh <- agent.Result{Status: "completed", Output: "done", SessionID: "sess-2"}
+	}
+	return &agent.Session{Messages: msgCh, Result: resCh}, nil
+}
+
+// transcriptRecorder collects the task messages a daemon reports to its
+// message endpoint.
+type transcriptRecorder struct {
+	mu       sync.Mutex
+	messages []TaskMessageData
+}
+
+func (r *transcriptRecorder) snapshot() []TaskMessageData {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return slices.Clone(r.messages)
+}
+
+// newTranscriptRecorder returns a daemon whose message endpoint appends every
+// reported batch to the returned recorder.
+func newTranscriptRecorder(t *testing.T) (*Daemon, *transcriptRecorder) {
+	t.Helper()
+	rec := &transcriptRecorder{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/messages") {
+			var body struct {
+				Messages []TaskMessageData `json:"messages"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err == nil {
+				rec.mu.Lock()
+				rec.messages = append(rec.messages, body.Messages...)
+				rec.mu.Unlock()
+			}
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(srv.Close)
+	return &Daemon{client: NewClient(srv.URL), logger: slog.Default()}, rec
+}
+
+// TestExecuteAndDrain_FlushesTranscriptBeforeReturningResult pins the
+// completion contract: once the agent result is handed back, the task's
+// messages have been reported. Without the wait the drain goroutine is still
+// in flight, so a consumer reading the transcript sees it truncated.
+func TestExecuteAndDrain_FlushesTranscriptBeforeReturningResult(t *testing.T) {
+	t.Parallel()
+
+	d, rec := newTranscriptRecorder(t)
+
+	result, _, err := d.executeAndDrain(context.Background(), &transcriptBackend{}, "p", agent.ExecOptions{}, slog.Default(), "task-flush")
+	if err != nil {
+		t.Fatalf("executeAndDrain: %v", err)
+	}
+	if result.Status != "failed" {
+		t.Fatalf("expected the backend's result, got %+v", result)
+	}
+
+	if got := rec.snapshot(); len(got) != 2 {
+		t.Fatalf("expected the transcript flushed before the result hand-off, got %d messages: %+v", len(got), got)
 	}
 }
 

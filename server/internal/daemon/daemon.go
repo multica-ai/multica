@@ -4205,7 +4205,12 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 		go d.runIdleWatchdog(agentCtx, idleWindow, d.cfg.AgentToolWatchdog, &lastActivityAt, &inFlightTools, &idleWatchdogFired, &idleWatchdogThreshold, agentCancel, session.Messages, taskLog, taskID)
 	}
 
+	// drainFinished closes after the drain goroutine has flushed the last
+	// message batch, so the result hand-off below can wait for the transcript
+	// tail to be persisted.
+	drainFinished := make(chan struct{})
 	go func() {
+		defer close(drainFinished)
 		var seq atomic.Int32
 		var mu sync.Mutex
 		var pendingText strings.Builder
@@ -4252,7 +4257,9 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 		defer ticker.Stop()
 
 		done := make(chan struct{})
+		tickerDone := make(chan struct{})
 		go func() {
+			defer close(tickerDone)
 			for {
 				select {
 				case <-ticker.C:
@@ -4376,11 +4383,36 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 		}
 	drainDone:
 		close(done)
+		// Let any tick-driven flush finish before the final one: a flush still
+		// in flight would otherwise keep posting batches after this goroutine
+		// signalled that the transcript tail was persisted.
+		<-tickerDone
 		flush()
 	}()
 
 	select {
 	case result := <-session.Result:
+		// Wait for the drain goroutine to flush the transcript tail before
+		// handing the result back: a consumer that reads the task's messages
+		// on completion would otherwise see a transcript that is non-empty but
+		// truncated, indistinguishable from a complete one. Bounded so a
+		// backend that never closes its message channel cannot stall
+		// completion.
+		select {
+		case <-drainFinished:
+		case <-time.After(10 * time.Second):
+			// Stop the drain loop and give it a bounded window to land its
+			// last batch, wide enough for its worst-case exit: an in-flight
+			// tick flush plus the final one, each capped by the 5s
+			// ReportTaskMessages timeout and neither interruptible by the
+			// cancel below (they post on context.Background()).
+			drainCancel()
+			select {
+			case <-drainFinished:
+			case <-time.After(12 * time.Second):
+				taskLog.Warn("transcript drain did not stop after cancel; completing anyway")
+			}
+		}
 		if idleWatchdogFired.Load() {
 			// The backend's wait goroutine (e.g. claude.go) translates the
 			// SIGKILL we delivered via agentCancel into Status="aborted".
