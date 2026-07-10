@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { fireEvent, screen } from "@testing-library/react";
+import { act, fireEvent, screen } from "@testing-library/react";
 import type { TimelineEntry } from "@multica/core/types";
 import { renderWithI18n } from "../../test/i18n";
 import { ThreadMinimap, commentPreview, waveScale } from "./thread-minimap";
@@ -98,6 +98,34 @@ describe("ThreadMinimap", () => {
     expect(screen.getByRole("button", { name: "Second thread opener" })).toBeInTheDocument();
     // Attachment-only comment: accessible name falls back to the actor.
     expect(screen.getByRole("button", { name: "member:author-c3" })).toBeInTheDocument();
+  });
+
+  it("opens the shared preview card after the intent delay and closes after the leave grace", () => {
+    vi.useFakeTimers({
+      toFake: ["setTimeout", "clearTimeout", "requestAnimationFrame", "cancelAnimationFrame"],
+    });
+    try {
+      renderWithI18n(
+        <ThreadMinimap threads={threads} scrollContainerEl={null} onJump={vi.fn()} />,
+      );
+      const nav = screen.getByRole("navigation", { name: "Jump to comment thread" });
+
+      // jsdom rects are all zero → the nearest tick resolves to index 0.
+      fireEvent.pointerMove(nav, { clientY: 0 });
+      act(() => vi.advanceTimersByTime(30)); // rAF flush — arms the intent timer
+      expect(screen.queryByText("with details")).not.toBeInTheDocument();
+
+      act(() => vi.advanceTimersByTime(150)); // intent delay elapses → card opens
+      expect(screen.getByText("with details")).toBeInTheDocument();
+
+      fireEvent.pointerLeave(nav);
+      act(() => vi.advanceTimersByTime(30)); // wave-clear frame
+      expect(screen.getByText("with details")).toBeInTheDocument(); // grace keeps it up
+      act(() => vi.advanceTimersByTime(150)); // grace elapses → card closes
+      expect(screen.queryByText("with details")).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("jumps to the clicked thread", () => {
