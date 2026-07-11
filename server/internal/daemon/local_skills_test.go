@@ -200,6 +200,12 @@ func TestLocalSkills_DiscoversACPProviderRoots(t *testing.T) {
 			wantPath: "~/.qoder/skills/review-helper",
 			wantName: "Qoder Review",
 		},
+		{
+			provider: "grok",
+			root:     filepath.Join(".grok", "skills"),
+			wantPath: "~/.grok/skills/review-helper",
+			wantName: "Grok Review",
+		},
 	}
 
 	for _, tc := range tests {
