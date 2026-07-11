@@ -7,6 +7,7 @@ interface UseAutoSaveOptions<T> {
   value: T;
   savedValue: T;
   onSave: (value: T) => Promise<void>;
+  onSuccess?: (value: T) => void;
   onError?: (error: unknown) => void;
   enabled?: boolean;
   delay?: number;
@@ -28,6 +29,7 @@ export function useAutoSave<T>({
   value,
   savedValue,
   onSave,
+  onSuccess,
   onError,
   enabled = true,
   delay = 650,
@@ -43,12 +45,14 @@ export function useAutoSave<T>({
   const observedSavedRef = useRef(savedValue);
   const enabledRef = useRef(enabled);
   const onSaveRef = useRef(onSave);
+  const onSuccessRef = useRef(onSuccess);
   const onErrorRef = useRef(onError);
   const isEqualRef = useRef(isEqual);
 
   latestValueRef.current = value;
   enabledRef.current = enabled;
   onSaveRef.current = onSave;
+  onSuccessRef.current = onSuccess;
   onErrorRef.current = onError;
   isEqualRef.current = isEqual;
 
@@ -67,11 +71,12 @@ export function useAutoSave<T>({
     }
 
     savingRef.current = true;
+    let succeeded = false;
     if (mountedRef.current) setStatus("saving");
     try {
       await onSaveRef.current(next);
       persistedRef.current = next;
-      if (mountedRef.current) setStatus("saved");
+      succeeded = true;
     } catch (error) {
       if (mountedRef.current) setStatus("error");
       onErrorRef.current?.(error);
@@ -81,6 +86,9 @@ export function useAutoSave<T>({
       queuedRef.current = null;
       if (queued && !isEqualRef.current(queued, persistedRef.current)) {
         void runSave(queued);
+      } else if (succeeded && mountedRef.current) {
+        setStatus("saved");
+        onSuccessRef.current?.(next);
       }
     }
   }, []);

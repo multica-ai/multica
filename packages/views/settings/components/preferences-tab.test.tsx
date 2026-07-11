@@ -12,13 +12,15 @@ const mockUpdateMe = vi.hoisted(() => vi.fn());
 const mockReload = vi.hoisted(() => vi.fn());
 const mockToastWarning = vi.hoisted(() => vi.fn());
 const mockToastError = vi.hoisted(() => vi.fn());
+const mockToastSuccess = vi.hoisted(() => vi.fn());
+const mockSetTheme = vi.hoisted(() => vi.fn());
 const mockSetUser = vi.hoisted(() => vi.fn());
 const userRef = vi.hoisted(() => ({
   current: null as { id: string; timezone?: string | null } | null,
 }));
 
 vi.mock("@multica/ui/components/common/theme-provider", () => ({
-  useTheme: () => ({ theme: "light", setTheme: vi.fn() }),
+  useTheme: () => ({ theme: "light", setTheme: mockSetTheme }),
 }));
 
 vi.mock("@multica/core/i18n/react", async () => {
@@ -41,7 +43,11 @@ vi.mock("@multica/core/api", () => ({
 }));
 
 vi.mock("sonner", () => ({
-  toast: { warning: mockToastWarning, error: mockToastError },
+  toast: {
+    warning: mockToastWarning,
+    error: mockToastError,
+    success: mockToastSuccess,
+  },
 }));
 
 vi.mock("@multica/core/auth", async () => {
@@ -114,6 +120,17 @@ describe("PreferencesTab — Language switcher", () => {
     expect(mockReload).not.toHaveBeenCalled();
   });
 
+  it("shows a confirmation toast when the theme is saved locally", async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    render(<PreferencesTab />, { wrapper: I18nWrapper });
+
+    await user.click(screen.getByRole("combobox", { name: "Theme" }));
+    await user.click(await screen.findByRole("option", { name: "Dark" }));
+
+    expect(mockSetTheme).toHaveBeenCalledWith("dark");
+    expect(mockToastSuccess).toHaveBeenCalledTimes(1);
+  });
+
   it("when not logged in: persists + reloads, no PATCH", async () => {
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     render(<PreferencesTab />, { wrapper: I18nWrapper });
@@ -122,6 +139,9 @@ describe("PreferencesTab — Language switcher", () => {
 
     expect(mockPersist).toHaveBeenCalledWith("ko");
     expect(mockUpdateMe).not.toHaveBeenCalled();
+    expect(mockToastSuccess).toHaveBeenCalledTimes(1);
+    expect(mockReload).not.toHaveBeenCalled();
+    act(() => vi.advanceTimersByTime(900));
     expect(mockReload).toHaveBeenCalledTimes(1);
     expect(mockToastWarning).not.toHaveBeenCalled();
   });
@@ -134,11 +154,14 @@ describe("PreferencesTab — Language switcher", () => {
 
     expect(mockPersist).toHaveBeenCalledWith("ja");
     expect(mockUpdateMe).not.toHaveBeenCalled();
+    expect(mockToastSuccess).toHaveBeenCalledTimes(1);
+    expect(mockReload).not.toHaveBeenCalled();
+    act(() => vi.advanceTimersByTime(900));
     expect(mockReload).toHaveBeenCalledTimes(1);
     expect(mockToastWarning).not.toHaveBeenCalled();
   });
 
-  it("when logged in + PATCH success: persists + PATCH + reload immediately", async () => {
+  it("when logged in + PATCH success: confirms the save before reloading", async () => {
     userRef.current = { id: "user-1" };
     mockUpdateMe.mockResolvedValueOnce({});
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
@@ -149,6 +172,9 @@ describe("PreferencesTab — Language switcher", () => {
     expect(mockPersist).toHaveBeenCalledWith("zh-Hans");
     expect(mockUpdateMe).toHaveBeenCalledWith({ language: "zh-Hans" });
     expect(mockToastWarning).not.toHaveBeenCalled();
+    expect(mockToastSuccess).toHaveBeenCalledTimes(1);
+    expect(mockReload).not.toHaveBeenCalled();
+    act(() => vi.advanceTimersByTime(900));
     expect(mockReload).toHaveBeenCalledTimes(1);
   });
 
@@ -223,6 +249,7 @@ describe("PreferencesTab — Timezone section", () => {
     await waitFor(() => {
       expect(mockUpdateMe).toHaveBeenCalledWith({ timezone: "Asia/Tokyo" });
       expect(mockSetUser).toHaveBeenCalledWith(updatedUser);
+      expect(mockToastSuccess).toHaveBeenCalledTimes(1);
     });
   }, 20000);
 

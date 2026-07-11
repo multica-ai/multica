@@ -3,6 +3,7 @@ import { AlertCircle, Info, LogIn } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
 import { Switch } from "@multica/ui/components/ui/switch";
 import { cn } from "@multica/ui/lib/utils";
+import { toast } from "sonner";
 import {
   SettingsCard,
   SettingsRow,
@@ -67,9 +68,17 @@ export function DaemonSettingsTab() {
   const updatePref = useCallback(
     async (key: keyof DaemonPrefs, value: boolean) => {
       setSaving(true);
-      const updated = await window.daemonAPI.setPrefs({ [key]: value });
-      setPrefs(updated);
-      setSaving(false);
+      try {
+        const updated = await window.daemonAPI.setPrefs({ [key]: value });
+        setPrefs(updated);
+        toast.success("Daemon settings saved", { id: "settings-auto-save" });
+      } catch (error) {
+        toast.error(
+          error instanceof Error ? error.message : "Failed to save daemon settings",
+        );
+      } finally {
+        setSaving(false);
+      }
     },
     [],
   );

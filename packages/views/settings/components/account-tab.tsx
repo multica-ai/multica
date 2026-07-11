@@ -77,6 +77,10 @@ export function AccountTab() {
     value: draft,
     savedValue: savedDraft,
     onSave: saveProfile,
+    onSuccess: () =>
+      toast.success(t(($) => $.account.toast_profile_updated), {
+        id: "settings-auto-save",
+      }),
     onError: (error) =>
       toast.error(
         error instanceof Error
@@ -113,8 +117,19 @@ export function AccountTab() {
                 name={user?.name ?? ""}
                 size={64}
                 onUploaded={async (url) => {
-                  const updated = await api.updateMe({ avatar_url: url });
-                  setUser(updated);
+                  try {
+                    const updated = await api.updateMe({ avatar_url: url });
+                    setUser(updated);
+                    toast.success(t(($) => $.account.toast_avatar_updated), {
+                      id: "settings-auto-save",
+                    });
+                  } catch (error) {
+                    toast.error(
+                      error instanceof Error
+                        ? error.message
+                        : t(($) => $.account.toast_avatar_failed),
+                    );
+                  }
                 }}
               />
             </div>

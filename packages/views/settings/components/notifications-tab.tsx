@@ -45,6 +45,10 @@ export function NotificationsTab() {
       delete updated[key];
     }
     mutation.mutate(updated, {
+      onSuccess: () =>
+        toast.success(t(($) => $.auto_save.toast_saved), {
+          id: "settings-auto-save",
+        }),
       onError: (err) =>
         toast.error(
           err instanceof Error && err.message

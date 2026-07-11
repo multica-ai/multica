@@ -202,6 +202,10 @@ export function WorkspaceTab() {
     value: detailsDraft,
     savedValue: savedDetails,
     onSave: saveDetails,
+    onSuccess: () =>
+      toast.success(t(($) => $.workspace.toast_saved), {
+        id: "settings-auto-save",
+      }),
     onError: (error) =>
       toast.error(
         error instanceof Error
@@ -226,6 +230,9 @@ export function WorkspaceTab() {
       // so every cached issue key is stale after this confirmed change.
       await qc.invalidateQueries({ queryKey: issueKeys.all(updated.id) });
       setPrefixSaveStatus("saved");
+      toast.success(t(($) => $.workspace.toast_saved), {
+        id: "settings-auto-save",
+      });
     } catch (error) {
       setPrefixSaveStatus("error");
       toast.error(
@@ -327,14 +334,25 @@ export function WorkspaceTab() {
                 disabled={!canManageWorkspace}
                 ariaLabel={t(($) => $.workspace.change_logo_aria)}
                 onUploaded={async (url) => {
-                  const updated = await api.updateWorkspace(workspace.id, {
-                    avatar_url: url,
-                  });
-                  qc.setQueryData(
-                    workspaceKeys.list(),
-                    (old: Workspace[] | undefined) =>
-                      old?.map((ws) => (ws.id === updated.id ? updated : ws)),
-                  );
+                  try {
+                    const updated = await api.updateWorkspace(workspace.id, {
+                      avatar_url: url,
+                    });
+                    qc.setQueryData(
+                      workspaceKeys.list(),
+                      (old: Workspace[] | undefined) =>
+                        old?.map((ws) => (ws.id === updated.id ? updated : ws)),
+                    );
+                    toast.success(t(($) => $.workspace.toast_logo_updated), {
+                      id: "settings-auto-save",
+                    });
+                  } catch (error) {
+                    toast.error(
+                      error instanceof Error
+                        ? error.message
+                        : t(($) => $.workspace.toast_logo_failed),
+                    );
+                  }
                 }}
               />
             </div>

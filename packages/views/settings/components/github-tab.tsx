@@ -83,6 +83,9 @@ export function GitHubTab() {
       qc.setQueryData(workspaceKeys.list(), (old: Workspace[] | undefined) =>
         old?.map((ws) => (ws.id === updated.id ? updated : ws)),
       );
+      toast.success(t(($) => $.auto_save.toast_saved), {
+        id: "settings-auto-save",
+      });
     } catch (e) {
       toast.error(e instanceof Error ? e.message : t(($) => $.github.toast_failed));
     } finally {

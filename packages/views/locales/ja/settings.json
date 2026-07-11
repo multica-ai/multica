@@ -2,7 +2,8 @@
   "auto_save": {
     "saving": "保存中…",
     "saved": "保存済み",
-    "failed": "保存できませんでした"
+    "failed": "保存できませんでした",
+    "toast_saved": "変更を保存しました"
   },
   "preferences": {
     "general_title": "一般",
