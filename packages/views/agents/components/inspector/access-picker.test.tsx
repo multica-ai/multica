@@ -76,19 +76,32 @@ describe("AccessPicker owner-only editing (MUL-3963)", () => {
     ).toBeInTheDocument();
   });
 
-  it("renders an interactive trigger for the owner", () => {
+  it("renders explicit access choices for the owner", () => {
     renderPicker({ canEdit: true });
-    expect(screen.getByRole("button")).toBeInTheDocument();
-    // Private is the default summary.
-    expect(screen.getAllByText("Only me").length).toBeGreaterThan(0);
+    expect(
+      screen.getByRole("radio", { name: /^Private/i }),
+    ).toHaveAttribute("aria-checked", "true");
+    expect(
+      screen.getByRole("radio", { name: /^Shared/i }),
+    ).toHaveAttribute("aria-checked", "false");
+  });
+
+  it("defaults a newly shared agent to workspace access", () => {
+    const { onChange } = renderPicker({ canEdit: true });
+    fireEvent.click(screen.getByRole("radio", { name: /^Shared/i }));
+    expect(onChange).toHaveBeenCalledWith({
+      permission_mode: "public_to",
+      invocation_targets: [{ target_type: "workspace" }],
+    });
   });
 
   it("owner can pick a specific member, emitting a public_to member target", () => {
-    const { onChange } = renderPicker({ canEdit: true });
-    fireEvent.click(screen.getByRole("button"));
-    // Checkbox order in the open popover: [0] workspace, [1] Alice, [2] Bob.
-    const boxes = screen.getAllByRole("checkbox");
-    fireEvent.click(boxes[1]!);
+    const { onChange } = renderPicker({
+      canEdit: true,
+      permissionMode: "public_to",
+      invocationTargets: [],
+    });
+    fireEvent.click(screen.getByRole("checkbox", { name: /Alice/i }));
     expect(onChange).toHaveBeenCalledWith({
       permission_mode: "public_to",
       invocation_targets: [{ target_type: "member", target_id: "u1" }],
@@ -104,10 +117,9 @@ describe("AccessPicker owner-only editing (MUL-3963)", () => {
       invocationTargets: [{ target_type: "member", target_id: "u1" }],
       visibility: "private",
     });
-    fireEvent.click(screen.getByRole("button"));
-    const boxes = screen.getAllByRole("checkbox");
-    // [0] is the "Everyone in workspace" toggle.
-    fireEvent.click(boxes[0]!);
+    fireEvent.click(
+      screen.getByRole("checkbox", { name: /Public to workspace/i }),
+    );
     expect(onChange).toHaveBeenCalledWith({
       permission_mode: "public_to",
       invocation_targets: [
@@ -129,8 +141,9 @@ describe("AccessPicker owner-only editing (MUL-3963)", () => {
         invocationTargets: undefined as unknown as AgentInvocationTarget[],
       }),
     ).not.toThrow();
-    // Private is the fallback summary when there are no grants.
-    expect(screen.getAllByText("Only me").length).toBeGreaterThan(0);
+    expect(
+      screen.getByRole("radio", { name: /^Private/i }),
+    ).toHaveAttribute("aria-checked", "true");
   });
 
   it("read-only mode: undefined invocationTargets does not crash for non-owners", () => {

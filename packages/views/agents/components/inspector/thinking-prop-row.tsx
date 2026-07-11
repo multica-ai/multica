@@ -66,6 +66,44 @@ export function ThinkingPropRow({
   );
 }
 
+/** Full-width counterpart used by the General settings form. */
+export function ThinkingSettingField({
+  runtimeId,
+  runtimeOnline,
+  provider,
+  model,
+  value,
+  canEdit,
+  onChange,
+}: {
+  runtimeId: string | null;
+  runtimeOnline: boolean;
+  provider: string;
+  model: string;
+  value: string;
+  canEdit: boolean;
+  onChange: (next: string) => Promise<void> | void;
+}) {
+  const modelsQuery = useQuery(
+    runtimeModelsOptions(runtimeOnline ? runtimeId : null),
+  );
+  const models = modelsQuery.data?.models ?? [];
+  const entry = pickModelEntry(models, model, provider);
+  const levels = entry?.thinking?.supported_levels ?? [];
+
+  if (levels.length === 0 && !value) return null;
+
+  return (
+    <ThinkingPicker
+      variant="field"
+      value={value}
+      levels={levels}
+      canEdit={canEdit}
+      onChange={onChange}
+    />
+  );
+}
+
 function pickModelEntry(
   models: RuntimeModel[],
   model: string,
