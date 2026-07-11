@@ -805,6 +805,12 @@ func runIssueCreate(cmd *cobra.Command, _ []string) error {
 		fmt.Fprintf(os.Stderr, "Uploaded %s\n", att.path)
 	}
 
+	// CEREBRO-PATCH(cerebro-sprints-cli): FIR-2500 optional --sprint placement after create.
+	// Warning-only like attachments above: the issue exists, so failing here would invite duplicate-creating retries.
+	if sprintErr := assignCreatedIssueToUISprint(ctx, cmd, client, issueID); sprintErr != nil {
+		fmt.Fprintf(os.Stderr, "warning: issue created (%s) but sprint placement failed: %v\n", strVal(result, "identifier"), sprintErr)
+	}
+
 	// Surface the workflow-activation outcome — the issue is created either
 	// way, so a failed activation is a stderr warning, not a non-zero exit.
 	if wf, _ := cmd.Flags().GetString("workflow"); wf != "" {

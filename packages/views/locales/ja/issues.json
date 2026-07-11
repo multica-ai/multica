@@ -274,6 +274,8 @@
     "cmdf_toast_title": "ページ内検索は表示中の内容のみが対象です",
     "cmdf_toast_description": "タイムラインは仮想化されているため、画面外のコメントは ⌘F で見つかりません。アプリ全体の検索は近日提供予定です。",
     "update_failed": "イシューを更新できませんでした",
+    "_comment_session_expired": "CEREBRO-PATCH(description-drafts): FIR-2648",
+    "session_expired_toast": "編集中にセッションの有効期限が切れました。入力内容はこの端末に保存されています。ページを再読み込みして再度サインインすると復元できます。",
     "link_copied": "リンクをコピーしました",
     "link_copy_failed": "リンクをコピーできませんでした",
     "workdir_path_copied": "作業ディレクトリのパスをコピーしました",

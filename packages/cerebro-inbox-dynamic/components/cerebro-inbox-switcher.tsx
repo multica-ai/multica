@@ -10,11 +10,12 @@ import { DynamicInbox } from "./dynamic-inbox";
 
 export function CerebroInboxSwitcher() {
   const dynamicAvailable = useFeatureFlag("cerebro_inbox_dynamic");
+  const roundsEnabled = useFeatureFlag("cerebro_inbox_rounds");
   const mode = useInboxMode();
   // The user's Classic/Dynamic choice is honoured on every surface. The dynamic
   // inbox now has a single-column mobile layout (DynamicInbox switches on
   // useIsMobile), so the Dynamic toggle works on mobile/PWA too instead of
   // silently falling back to classic.
-  if (dynamicAvailable && mode === "dynamic") return <DynamicInbox />;
+  if (roundsEnabled || (dynamicAvailable && mode === "dynamic")) return <DynamicInbox />;
   return <InboxPage />;
 }
