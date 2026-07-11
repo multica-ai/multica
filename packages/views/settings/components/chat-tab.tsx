@@ -2,6 +2,7 @@
 
 import { Switch } from "@multica/ui/components/ui/switch";
 import { useChatStore } from "@multica/core/chat";
+import { toast } from "sonner";
 import { useT } from "../../i18n";
 import {
   SettingsCard,
@@ -32,7 +33,12 @@ export function ChatTab() {
           >
           <Switch
             checked={enabled}
-            onCheckedChange={setEnabled}
+            onCheckedChange={(checked) => {
+              setEnabled(checked);
+              toast.success(t(($) => $.auto_save.toast_saved), {
+                id: "settings-auto-save",
+              });
+            }}
             aria-label={t(($) => $.chat.floating_label)}
           />
           </SettingsRow>

@@ -2,7 +2,8 @@
   "auto_save": {
     "saving": "저장 중…",
     "saved": "저장됨",
-    "failed": "저장하지 못했습니다"
+    "failed": "저장하지 못했습니다",
+    "toast_saved": "변경사항을 저장했습니다"
   },
   "preferences": {
     "general_title": "일반",

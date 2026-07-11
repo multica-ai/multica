@@ -8,6 +8,7 @@ import enSettings from "../../locales/en/settings.json";
 
 const mockUpdateWorkspace = vi.hoisted(() => vi.fn());
 const mockInvalidateQueries = vi.hoisted(() => vi.fn());
+const mockToastSuccess = vi.hoisted(() => vi.fn());
 const workspaceRef = vi.hoisted(() => ({
   current: {
     id: "workspace-1",
@@ -82,7 +83,7 @@ vi.mock("./delete-workspace-dialog", () => ({
 }));
 
 vi.mock("sonner", () => ({
-  toast: { success: vi.fn(), error: vi.fn() },
+  toast: { success: mockToastSuccess, error: vi.fn() },
 }));
 
 import { WorkspaceTab } from "./workspace-tab";
@@ -164,6 +165,10 @@ describe("WorkspaceTab — automatic updates", () => {
         description: "",
         context: "",
       });
+      expect(mockToastSuccess).toHaveBeenCalledWith(
+        "Workspace settings saved",
+        { id: "settings-auto-save" },
+      );
     });
     expect(mockInvalidateQueries).not.toHaveBeenCalled();
   });
@@ -192,6 +197,10 @@ describe("WorkspaceTab — automatic updates", () => {
     expect(mockInvalidateQueries).toHaveBeenCalledWith({
       queryKey: ["issues", "workspace-1"],
     });
+    expect(mockToastSuccess).toHaveBeenCalledWith(
+      "Workspace settings saved",
+      { id: "settings-auto-save" },
+    );
   });
 
   it("does not persist a prefix when the confirmation is cancelled", async () => {

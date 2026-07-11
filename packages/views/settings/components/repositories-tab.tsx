@@ -84,6 +84,10 @@ export function RepositoriesTab() {
     value: draft,
     savedValue: savedRepositories,
     onSave: saveRepositories,
+    onSuccess: () =>
+      toast.success(t(($) => $.repositories.toast_saved), {
+        id: "settings-auto-save",
+      }),
     onError: (error) =>
       toast.error(
         error instanceof Error

@@ -7,6 +7,7 @@ import enCommon from "../../locales/en/common.json";
 import enSettings from "../../locales/en/settings.json";
 
 const mockUpdateWorkspace = vi.hoisted(() => vi.fn());
+const mockToastSuccess = vi.hoisted(() => vi.fn());
 const workspaceRef = vi.hoisted(() => ({
   current: {
     id: "workspace-1",
@@ -54,7 +55,7 @@ vi.mock("@multica/core/auth", () => {
 });
 
 vi.mock("sonner", () => ({
-  toast: { success: vi.fn(), error: vi.fn() },
+  toast: { success: mockToastSuccess, error: vi.fn() },
 }));
 
 import { RepositoriesTab } from "./repositories-tab";
@@ -119,6 +120,9 @@ describe("RepositoriesTab — automatic updates", () => {
     await waitFor(() => {
       expect(mockUpdateWorkspace).toHaveBeenCalledWith("workspace-1", {
         repos: [{ url: "https://github.com/multica-ai/edited" }],
+      });
+      expect(mockToastSuccess).toHaveBeenCalledWith("Repositories saved", {
+        id: "settings-auto-save",
       });
     });
   });

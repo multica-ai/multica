@@ -83,7 +83,11 @@ export function PreferencesTab() {
       setTimeout(() => window.location.reload(), 2500);
       return;
     }
-    window.location.reload();
+    toast.success(t(($) => $.auto_save.toast_saved), {
+      id: "settings-auto-save",
+    });
+    // Keep the confirmation visible before the locale reload replaces the UI.
+    setTimeout(() => window.location.reload(), 900);
   };
 
   return (
@@ -97,7 +101,11 @@ export function PreferencesTab() {
             <Select
               value={theme}
               onValueChange={(next) => {
-                if (next) setTheme(next as (typeof themeOptions)[number]["value"]);
+                if (!next || next === theme) return;
+                setTheme(next as (typeof themeOptions)[number]["value"]);
+                toast.success(t(($) => $.auto_save.toast_saved), {
+                  id: "settings-auto-save",
+                });
               }}
             >
               <SelectTrigger
@@ -181,6 +189,9 @@ function TimezoneRow() {
     try {
       const updated = await api.updateMe({ timezone: payload });
       setUser(updated);
+      toast.success(t(($) => $.auto_save.toast_saved), {
+        id: "settings-auto-save",
+      });
     } catch (err) {
       toast.error(
         err instanceof Error && err.message
