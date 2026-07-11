@@ -79,6 +79,15 @@ describe("AppLink", () => {
     expect(() => fireEvent.focus(screen.getByText("go"))).not.toThrow();
   });
 
+  it("uses adapter href resolution for browser-native link behavior", () => {
+    const adapter = makeAdapter({
+      getHref: (path: string) => `/multica${path}`,
+    } as Partial<NavigationAdapter>);
+
+    renderLink(adapter);
+    expect(screen.getByText("go")).toHaveAttribute("href", "/multica/issues");
+  });
+
   it("modifier-click (cmd / ctrl) delegates to openInNewTab and does NOT push", () => {
     const push = vi.fn();
     const openInNewTab = vi.fn();

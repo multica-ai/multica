@@ -29,6 +29,7 @@ import { setLoggedInCookie } from "@/features/auth/auth-cookie";
 import Link from "next/link";
 import { LoginPage, validateCliCallback } from "@multica/views/auth";
 import { useT } from "@multica/views/i18n";
+import { withBasePath } from "@/config/base-path";
 
 /**
  * Pick where a logged-in user with no explicit `?next=` should land.
@@ -61,6 +62,7 @@ function LoginPageContent() {
   const qc = useQueryClient();
   const { t } = useT("auth");
   const googleClientId = useConfigStore((state) => state.googleClientId);
+  const publicBasePath = useConfigStore((state) => state.publicBasePath);
   const user = useAuthStore((s) => s.user);
   const isLoading = useAuthStore((s) => s.isLoading);
   const searchParams = useSearchParams();
@@ -222,7 +224,10 @@ function LoginPageContent() {
         googleClientId
           ? {
               clientId: googleClientId,
-              redirectUri: `${window.location.origin}/auth/callback`,
+              redirectUri: `${window.location.origin}${withBasePath(
+                publicBasePath,
+                "/auth/callback",
+              )}`,
               state: googleState,
             }
           : undefined

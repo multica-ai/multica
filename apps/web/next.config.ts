@@ -2,6 +2,7 @@ import type { NextConfig } from "next";
 import { config } from "dotenv";
 import { resolve } from "path";
 import { resolveRemoteApiUrl } from "./config/runtime-urls";
+import { resolveBasePath } from "./config/base-path";
 import { createMDX } from "fumadocs-mdx/next";
 
 // Load root .env so REMOTE_API_URL is available to next.config.ts
@@ -9,6 +10,7 @@ config({ path: resolve(__dirname, "../../.env") });
 
 const remoteApiUrl = resolveRemoteApiUrl(process.env);
 const docsUrl = process.env.DOCS_URL || "http://localhost:4000";
+const basePath = resolveBasePath(process.env);
 
 // Parse hostnames from CORS_ALLOWED_ORIGINS so that Next.js dev server
 // allows cross-origin HMR / webpack requests (e.g. from Tailscale IPs).
@@ -26,6 +28,10 @@ const allowedDevOrigins = process.env.CORS_ALLOWED_ORIGINS
 
 const nextConfig: NextConfig = {
   ...(process.env.STANDALONE === "true" ? { output: "standalone" as const } : {}),
+  ...(basePath ? { basePath } : {}),
+  env: {
+    NEXT_PUBLIC_BASE_PATH: basePath,
+  },
   transpilePackages: ["@multica/core", "@multica/ui", "@multica/views"],
   ...(allowedDevOrigins && allowedDevOrigins.length > 0
     ? { allowedDevOrigins }

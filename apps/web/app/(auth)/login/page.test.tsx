@@ -3,6 +3,7 @@ import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { I18nProvider } from "@multica/core/i18n/react";
+import { configStore } from "@multica/core/config";
 import enCommon from "@multica/views/locales/en/common.json";
 import enAuth from "@multica/views/locales/en/auth.json";
 import enSettings from "@multica/views/locales/en/settings.json";
@@ -104,6 +105,7 @@ describe("LoginPage", () => {
     authStateRef.state.isLoading = false;
     mockListWorkspaces.mockResolvedValue([]);
     mockListMyInvitations.mockResolvedValue([]);
+    configStore.setState({ googleClientId: "", publicBasePath: "" });
   });
 
   it("renders login form with email input and continue button", () => {
@@ -162,6 +164,41 @@ describe("LoginPage", () => {
     await waitFor(() => {
       expect(screen.getByText("Check your email")).toBeInTheDocument();
     });
+  });
+
+  it("includes the public base path in the Google redirect URI", async () => {
+    configStore.setState({
+      googleClientId: "goog-client",
+      publicBasePath: "/multica",
+    });
+    const user = userEvent.setup();
+    const hrefSetter = vi.fn();
+    const originalLocation = window.location;
+    Object.defineProperty(window, "location", {
+      configurable: true,
+      value: {
+        ...originalLocation,
+        origin: "https://app.example.test",
+        set href(value: string) {
+          hrefSetter(value);
+        },
+      },
+    });
+
+    try {
+      render(<LoginPage />, { wrapper: createWrapper() });
+      await user.click(screen.getByRole("button", { name: /continue with google/i }));
+
+      const redirect = new URL(hrefSetter.mock.calls[0]?.[0]);
+      expect(redirect.searchParams.get("redirect_uri")).toBe(
+        "https://app.example.test/multica/auth/callback",
+      );
+    } finally {
+      Object.defineProperty(window, "location", {
+        configurable: true,
+        value: originalLocation,
+      });
+    }
   });
 
   it("shows error when sendCode fails", async () => {

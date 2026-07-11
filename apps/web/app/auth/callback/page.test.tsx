@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, waitFor } from "@testing-library/react";
 import { paths } from "@multica/core/paths";
+import { configStore } from "@multica/core/config";
 
 const {
   mockPush,
@@ -96,6 +97,7 @@ describe("CallbackPage", () => {
     mockLoginWithGoogle.mockResolvedValue(makeUser());
     mockListWorkspaces.mockResolvedValue([]);
     mockListMyInvitations.mockResolvedValue([]);
+    configStore.setState({ publicBasePath: "" });
   });
 
   it("unonboarded user honors a safe next= (e.g. /invite/{id}) so invitees aren't trapped", async () => {
@@ -236,6 +238,27 @@ describe("CallbackPage", () => {
         value: originalLocation,
       });
     }
+  });
+
+  it("uses the public base path when exchanging a CLI Google callback", async () => {
+    const { api: mockedApi } = await import("@multica/core/api");
+    const mockGoogleLogin = mockedApi.googleLogin as ReturnType<typeof vi.fn>;
+
+    configStore.setState({ publicBasePath: "/multica" });
+    mockSearchParams.set(
+      "state",
+      "cli_callback:http://127.0.0.1:46233/callback",
+    );
+    mockGoogleLogin.mockResolvedValue({ token: "cli-jwt-token" });
+
+    render(<CallbackPage />);
+
+    await waitFor(() => {
+      expect(mockGoogleLogin).toHaveBeenCalledWith(
+        "test-code",
+        "http://localhost:3000/multica/auth/callback",
+      );
+    });
   });
 
   it("falls through to normal web flow when state contains invalid cli_callback", async () => {

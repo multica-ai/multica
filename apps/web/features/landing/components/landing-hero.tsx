@@ -4,6 +4,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { ArrowRight, Download } from "lucide-react";
 import { useAuthStore } from "@multica/core/auth";
+import { resolveBasePath, withBasePath } from "@/config/base-path";
 import { useLocale } from "../i18n";
 import {
   ClaudeCodeLogo,
@@ -13,6 +14,14 @@ import {
   OpenCodeLogo,
   heroButtonClassName,
 } from "./shared";
+
+const PUBLIC_BASE_PATH = resolveBasePath({
+  NEXT_PUBLIC_BASE_PATH: process.env.NEXT_PUBLIC_BASE_PATH,
+});
+
+function publicAsset(path: string): string {
+  return withBasePath(PUBLIC_BASE_PATH, path);
+}
 
 export function LandingHero() {
   const { t } = useLocale();
@@ -103,7 +112,7 @@ function LandingBackdrop() {
   return (
     <div className="pointer-events-none absolute inset-0">
       <Image
-        src="/images/landing-bg.jpg"
+        src={publicAsset("/images/landing-bg.jpg")}
         alt=""
         fill
         className="object-cover object-center"
@@ -117,7 +126,7 @@ function ProductImage({ alt }: { alt: string }) {
     <div>
       <div className="relative overflow-hidden border border-white/14">
         <Image
-          src="/images/landing-hero.png"
+          src={publicAsset("/images/landing-hero.png")}
           alt={alt}
           width={3532}
           height={2382}

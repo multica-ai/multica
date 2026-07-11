@@ -17,7 +17,7 @@ import {
 import { useT } from "../i18n";
 import { isReservedSlug } from "@multica/core/paths";
 import { useConfigStore } from "@multica/core/config";
-import { workspaceUrlHost } from "@multica/core/workspace/workspace-url";
+import { workspaceUrlPrefix } from "@multica/core/workspace/workspace-url";
 
 export interface CreateWorkspaceFormProps {
   onSuccess: (workspace: Workspace) => void | Promise<void>;
@@ -26,7 +26,10 @@ export interface CreateWorkspaceFormProps {
 export function CreateWorkspaceForm({ onSuccess }: CreateWorkspaceFormProps) {
   const { t } = useT("workspace");
   const createWorkspace = useCreateWorkspace();
-  const urlHost = workspaceUrlHost(useConfigStore((s) => s.daemonAppUrl));
+  const urlPrefix = workspaceUrlPrefix(
+    useConfigStore((s) => s.daemonAppUrl),
+    useConfigStore((s) => s.publicBasePath),
+  );
   const [name, setName] = useState("");
   const [slug, setSlug] = useState("");
   const [slugServerError, setSlugServerError] = useState<string | null>(null);
@@ -102,7 +105,7 @@ export function CreateWorkspaceForm({ onSuccess }: CreateWorkspaceFormProps) {
           <Label htmlFor="ws-slug">{t(($) => $.create_form.url_label)}</Label>
           <div className="flex items-center gap-0 rounded-md border bg-background focus-within:ring-2 focus-within:ring-ring">
             <span className="pl-3 text-sm text-muted-foreground select-none">
-              {`${urlHost}/`}
+              {urlPrefix}
             </span>
             <Input
               id="ws-slug"

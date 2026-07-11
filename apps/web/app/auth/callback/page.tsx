@@ -4,6 +4,7 @@ import { Suspense, useEffect, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
 import { sanitizeNextUrl, useAuthStore } from "@multica/core/auth";
+import { useConfigStore } from "@multica/core/config";
 import { workspaceKeys } from "@multica/core/workspace/queries";
 import { paths, resolvePostAuthDestination } from "@multica/core/paths";
 import { api } from "@multica/core/api";
@@ -17,12 +18,14 @@ import {
 } from "@multica/ui/components/ui/card";
 import { Button } from "@multica/ui/components/ui/button";
 import { Loader2 } from "lucide-react";
+import { withBasePath } from "@/config/base-path";
 
 function CallbackContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const qc = useQueryClient();
   const loginWithGoogle = useAuthStore((s) => s.loginWithGoogle);
+  const publicBasePath = useConfigStore((s) => s.publicBasePath);
   const [error, setError] = useState("");
   const [desktopToken, setDesktopToken] = useState<string | null>(null);
 
@@ -59,7 +62,10 @@ function CallbackContent() {
       ? decodeURIComponent(cliStatePart.slice("cli_state:".length))
       : "";
 
-    const redirectUri = `${window.location.origin}/auth/callback`;
+    const redirectUri = `${window.location.origin}${withBasePath(
+      publicBasePath,
+      "/auth/callback",
+    )}`;
 
     // Validate the CLI callback URL before redirecting — the state parameter
     // passes through Google OAuth and must be treated as attacker-controlled.
@@ -141,7 +147,7 @@ function CallbackContent() {
           setError(err instanceof Error ? err.message : "Login failed");
         });
     }
-  }, [searchParams, loginWithGoogle, router, qc]);
+  }, [searchParams, loginWithGoogle, router, qc, publicBasePath]);
 
   if (desktopToken) {
     return (

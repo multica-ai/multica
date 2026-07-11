@@ -21,3 +21,5 @@ services:
         REMOTE_API_URL: http://backend:8080
         NEXT_PUBLIC_WS_URL: ${NEXT_PUBLIC_WS_URL:-}
         NEXT_PUBLIC_APP_VERSION: dev
+        NEXT_PUBLIC_BASE_PATH: ${NEXT_PUBLIC_BASE_PATH:-${BASE_PATH:-}}
+        BASE_PATH: ${BASE_PATH:-}

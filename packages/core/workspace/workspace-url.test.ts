@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { workspaceUrlHost } from "./workspace-url";
+import { workspaceUrlHost, workspaceUrlPrefix } from "./workspace-url";
 
 describe("workspaceUrlHost", () => {
   it("returns the host of a full app URL", () => {
@@ -33,5 +33,16 @@ describe("workspaceUrlHost", () => {
     expect(workspaceUrlHost("   ")).toBe("multica.ai");
     expect(workspaceUrlHost(null)).toBe("multica.ai");
     expect(workspaceUrlHost(undefined)).toBe("multica.ai");
+  });
+});
+
+describe("workspaceUrlPrefix", () => {
+  it("includes the normalized public base path", () => {
+    expect(
+      workspaceUrlPrefix("https://multica.example.com", "/ops/multica/"),
+    ).toBe("multica.example.com/ops/multica/");
+    expect(workspaceUrlPrefix("https://multica.example.com", "")).toBe(
+      "multica.example.com/",
+    );
   });
 });
