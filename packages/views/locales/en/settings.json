@@ -110,7 +110,9 @@
   },
   "tokens": {
     "title": "API Tokens",
-    "description": "Personal access tokens allow the CLI and external integrations to authenticate with your account.",
+    "description": "Personal access tokens allow the CLI and external integrations to authenticate with your account. Use one via multica login --token, or as a Bearer token when calling the API.",
+    "security_note": "A token grants full access to your account — treat it like a password.",
+    "empty": "No API tokens yet. Create one above to get started.",
     "name_placeholder": "Token name (e.g. My CLI)",
     "expiry": {
       "30": "30 days",
@@ -137,9 +139,14 @@
       "confirm": "Revoke"
     },
     "created_dialog": {
-      "title": "Token created",
-      "description": "Copy your personal access token now. You won't be able to see it again.",
+      "title": "Personal access token created",
+      "warning_prefix": "Your new personal access token has been created. For security reasons, it is ",
+      "warning_emphasis": "displayed only once",
+      "warning_suffix": " — store it securely and never share it. A lost token cannot be recovered; revoke it and create a new one instead.",
+      "confirm_stored": "I have securely stored this token.",
       "copy_tooltip": "Copy token",
+      "cli_hint": "Sign in to the CLI with:",
+      "copy_command_tooltip": "Copy command",
       "done": "Done"
     }
   },

@@ -1,9 +1,11 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import { Trash2, Copy, Check } from "lucide-react";
+import { Trash2, Copy, Check, Info } from "lucide-react";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
 import type { PersonalAccessToken } from "@multica/core/types";
+import { Alert, AlertDescription } from "@multica/ui/components/ui/alert";
+import { Checkbox } from "@multica/ui/components/ui/checkbox";
 import { Input } from "@multica/ui/components/ui/input";
 import { Button } from "@multica/ui/components/ui/button";
 import { Card, CardContent } from "@multica/ui/components/ui/card";
@@ -19,7 +21,6 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
-  DialogDescription,
   DialogFooter,
 } from "@multica/ui/components/ui/dialog";
 import {
@@ -49,6 +50,8 @@ export function TokensTab() {
   const [tokenCreating, setTokenCreating] = useState(false);
   const [newToken, setNewToken] = useState<string | null>(null);
   const [tokenCopied, setTokenCopied] = useState(false);
+  const [commandCopied, setCommandCopied] = useState(false);
+  const [storedConfirmed, setStoredConfirmed] = useState(false);
   const [tokenRevoking, setTokenRevoking] = useState<string | null>(null);
   const [revokeConfirmId, setRevokeConfirmId] = useState<string | null>(null);
   const [tokensLoading, setTokensLoading] = useState(true);
@@ -103,9 +106,32 @@ export function TokensTab() {
     }
   };
 
+  const handleCopyCommand = async () => {
+    if (!newToken) return;
+    if (await copyText(`multica login --token ${newToken}`)) {
+      setCommandCopied(true);
+      setTimeout(() => setCommandCopied(false), 2000);
+    }
+  };
+
+  const closeCreatedDialog = () => {
+    setNewToken(null);
+    setTokenCopied(false);
+    setCommandCopied(false);
+    setStoredConfirmed(false);
+  };
+
   return (
     <SettingsTab title={t(($) => $.tokens.title)}>
-      <SettingsSection description={t(($) => $.tokens.description)}>
+      <SettingsSection
+        description={
+          <>
+            {t(($) => $.tokens.description)}
+            <br />
+            {t(($) => $.tokens.security_note)}
+          </>
+        }
+      >
         <Card>
           <CardContent className="space-y-3">
             <div className="grid gap-3 sm:grid-cols-[1fr_120px_auto]">
@@ -150,7 +176,13 @@ export function TokensTab() {
               </Card>
             ))}
           </div>
-        ) : tokens.length > 0 && (
+        ) : tokens.length === 0 ? (
+          <Card>
+            <CardContent>
+              <p className="text-xs text-muted-foreground">{t(($) => $.tokens.empty)}</p>
+            </CardContent>
+          </Card>
+        ) : (
           <div className="space-y-2">
             {tokens.map((token) => (
               <Card key={token.id}>
@@ -218,16 +250,21 @@ export function TokensTab() {
         </AlertDialogContent>
       </AlertDialog>
 
-      <Dialog open={!!newToken} onOpenChange={(v) => { if (!v) { setNewToken(null); setTokenCopied(false); } }}>
-        <DialogContent>
+      <Dialog open={!!newToken} onOpenChange={(v) => { if (!v) closeCreatedDialog(); }}>
+        <DialogContent className="sm:max-w-xl">
           <DialogHeader>
             <DialogTitle>{t(($) => $.tokens.created_dialog.title)}</DialogTitle>
-            <DialogDescription>
-              {t(($) => $.tokens.created_dialog.description)}
-            </DialogDescription>
           </DialogHeader>
-          <div className="flex items-center gap-2">
-            <code className="flex-1 rounded-md border bg-muted/50 px-3 py-2 text-sm break-all select-all">
+          <Alert>
+            <Info />
+            <AlertDescription>
+              {t(($) => $.tokens.created_dialog.warning_prefix)}
+              <span className="font-medium text-foreground">{t(($) => $.tokens.created_dialog.warning_emphasis)}</span>
+              {t(($) => $.tokens.created_dialog.warning_suffix)}
+            </AlertDescription>
+          </Alert>
+          <div className="flex min-w-0 items-center gap-2">
+            <code className="min-w-0 flex-1 truncate rounded-md border bg-muted/50 px-3 py-2 text-sm select-all">
               {newToken}
             </code>
             <Tooltip>
@@ -241,8 +278,35 @@ export function TokensTab() {
               <TooltipContent>{t(($) => $.tokens.created_dialog.copy_tooltip)}</TooltipContent>
             </Tooltip>
           </div>
-          <DialogFooter>
-            <Button onClick={() => { setNewToken(null); setTokenCopied(false); }}>{t(($) => $.tokens.created_dialog.done)}</Button>
+          <div className="min-w-0 space-y-1.5">
+            <p className="text-xs text-muted-foreground">{t(($) => $.tokens.created_dialog.cli_hint)}</p>
+            <div className="flex min-w-0 items-center gap-2">
+              <code className="min-w-0 flex-1 truncate rounded-md border bg-muted/50 px-3 py-2 text-sm select-all">
+                {`multica login --token ${newToken}`}
+              </code>
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <Button variant="outline" size="icon" onClick={handleCopyCommand}>
+                      {commandCopied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+                    </Button>
+                  }
+                />
+                <TooltipContent>{t(($) => $.tokens.created_dialog.copy_command_tooltip)}</TooltipContent>
+              </Tooltip>
+            </div>
+          </div>
+          <DialogFooter className="items-center sm:justify-between">
+            <label className="flex items-center gap-2 text-sm">
+              <Checkbox
+                checked={storedConfirmed}
+                onCheckedChange={(v) => setStoredConfirmed(v === true)}
+              />
+              {t(($) => $.tokens.created_dialog.confirm_stored)}
+            </label>
+            <Button disabled={!storedConfirmed} onClick={closeCreatedDialog}>
+              {t(($) => $.tokens.created_dialog.done)}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
