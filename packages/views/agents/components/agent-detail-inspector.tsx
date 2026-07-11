@@ -11,10 +11,7 @@ import type {
   AgentRuntime,
   MemberWithUser,
 } from "@multica/core/types";
-import {
-  AGENT_DESCRIPTION_MAX_LENGTH,
-  type AgentPresenceDetail,
-} from "@multica/core/agents";
+import { AGENT_DESCRIPTION_MAX_LENGTH } from "@multica/core/agents";
 import { isImeComposing } from "@multica/core/utils";
 import { useTimeAgo } from "../../i18n";
 import { Button } from "@multica/ui/components/ui/button";
@@ -34,26 +31,18 @@ import {
   PopoverTrigger,
 } from "@multica/ui/components/ui/popover";
 import { PropRow } from "../../common/prop-row";
-import { availabilityConfig } from "../presence";
 import { CharCounter } from "./char-counter";
 import { useT } from "../../i18n";
 import { ConcurrencyPicker } from "./inspector/concurrency-picker";
 import { ModelPicker } from "./inspector/model-picker";
 import { RuntimePicker } from "./inspector/runtime-picker";
-import { SkillAttach } from "./inspector/skill-attach";
 import { ThinkingPropRow } from "./inspector/thinking-prop-row";
 import { AccessPicker } from "./inspector/access-picker";
-import { LarkAgentBindButton } from "../../settings/components/lark-tab";
-import { SlackAgentBindButton } from "../../settings/components/slack-tab";
 
 interface InspectorProps {
   agent: Agent;
   runtime: AgentRuntime | null;
   owner: MemberWithUser | null;
-  presence: AgentPresenceDetail | null | undefined;
-  // Below: needed for inline edit. The inspector now owns the editing surface
-  // (no Settings tab anymore), so the parent has to pass through everything
-  // a write needs.
   runtimes: AgentRuntime[];
   members: MemberWithUser[];
   currentUserId: string | null;
@@ -67,36 +56,23 @@ interface InspectorProps {
    */
   canEdit: boolean;
   onUpdate: (id: string, data: Record<string, unknown>) => Promise<void>;
-  /**
-   * Focus the overview pane's Integrations tab. The inspector's Lark status
-   * row is read-only and deep-links here; Manage / Disconnect live in the
-   * tab so the destructive action exists in exactly one place.
-   */
-  onShowIntegrations: () => void;
 }
 
 /**
- * Left 320px column of the agent detail page. Holds the agent's identity card
- * (avatar / name / description / status), inline-editable properties, and
- * skills.
- *
- * **All editing happens here** — there is no separate Settings tab. The
- * trade-off is that the inspector carries some weight (4 inline pickers plus
- * 3 popovers for name/description/avatar), but it eliminates the "see vs
- * edit" mode split that the previous Settings tab created. Users no longer
- * have to switch tabs and hunt for the field they were already looking at.
+ * General settings surface. Identity and execution controls are grouped by
+ * product meaning instead of being squeezed into a persistent inspector next
+ * to every task view. This keeps the workbench read-oriented while preserving
+ * the existing permission-aware picker and optimistic-update behaviour.
  */
 export function AgentDetailInspector({
   agent,
   runtime,
   owner,
-  presence,
   runtimes,
   members,
   currentUserId,
   canEdit,
   onUpdate,
-  onShowIntegrations,
 }: InspectorProps) {
   const { t } = useT("agents");
   const timeAgo = useTimeAgo();
@@ -104,157 +80,111 @@ export function AgentDetailInspector({
   const isOnline = runtime?.status === "online";
 
   return (
-    <aside className="flex w-full flex-col rounded-lg border bg-background md:h-full md:min-h-0 md:overflow-y-auto">
-      {/* Identity */}
-      <div className="flex flex-col gap-3 border-b px-5 pb-5 pt-5">
-        <AvatarEditor agent={agent} canEdit={canEdit} onUpdate={update} />
-        <NameAndDescription
-          agent={agent}
-          canEdit={canEdit}
-          onUpdate={update}
-        />
-        <PresenceBadge presence={presence} />
-      </div>
-
-      {/* Properties — editable when canEdit. When the current user lacks
-          permission, each picker self-renders a static read-only display so
-          the value is visible but not interactive. */}
-      <Section label={t(($) => $.inspector.section_properties)}>
-        <PropRow label={t(($) => $.inspector.prop_runtime)} interactive={false}>
-          <RuntimePicker
-            value={agent.runtime_id}
-            runtimes={runtimes}
-            members={members}
-            currentUserId={currentUserId}
-            canEdit={canEdit}
-            onChange={(id) => update({ runtime_id: id })}
-          />
-        </PropRow>
-        <PropRow label={t(($) => $.inspector.prop_model)} interactive={false}>
-          <ModelPicker
-            runtimeId={agent.runtime_id}
-            runtimeOnline={!!isOnline}
-            value={agent.model ?? ""}
-            canEdit={canEdit}
-            onChange={(m) => update({ model: m })}
-          />
-        </PropRow>
-        <ThinkingPropRow
-          runtimeId={agent.runtime_id}
-          runtimeOnline={!!isOnline}
-          provider={runtime?.provider ?? ""}
-          model={agent.model ?? ""}
-          value={agent.thinking_level ?? ""}
-          canEdit={canEdit}
-          onChange={(v) => update({ thinking_level: v })}
-        />
-        <PropRow label={t(($) => $.inspector.prop_visibility)} interactive={false}>
-          <AccessPicker
-            permissionMode={agent.permission_mode}
-            invocationTargets={agent.invocation_targets}
-            visibility={agent.visibility}
-            members={members}
-            // Access is OWNER-ONLY (MUL-3963): a workspace admin can edit other
-            // agent properties (canEdit) but NOT who may run the agent. Gate the
-            // picker on ownership specifically so non-owners get the read-only
-            // state instead of a control the backend would reject with 403.
-            canEdit={
-              currentUserId !== null && agent.owner_id === currentUserId
-            }
-            hasComposioAllowlist={
-              (agent.composio_toolkit_allowlist ?? []).length > 0
-            }
-            onChange={(next) => update(next)}
-          />
-        </PropRow>
-        <PropRow label={t(($) => $.inspector.prop_concurrency)} interactive={false}>
-          <ConcurrencyPicker
-            value={agent.max_concurrent_tasks}
-            canEdit={canEdit}
-            onChange={(n) => update({ max_concurrent_tasks: n })}
-          />
-        </PropRow>
-      </Section>
-
-      {/* Details — read-only (no hover, no chip styling — these aren't clickable) */}
-      <Section label={t(($) => $.inspector.section_details)}>
-        {owner && (
-          <PropRow label={t(($) => $.inspector.prop_owner)} interactive={false}>
-            <span className="flex min-w-0 items-center gap-1.5">
-              <ActorAvatar
-                actorType="member"
-                actorId={owner.user_id}
-                size="xs"
+    <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(300px,380px)]">
+      <div className="space-y-4">
+        <SettingsCard title={t(($) => $.inspector.section_profile)}>
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-start">
+            <AvatarEditor agent={agent} canEdit={canEdit} onUpdate={update} />
+            <div className="min-w-0 flex-1">
+              <NameAndDescription
+                agent={agent}
+                canEdit={canEdit}
+                onUpdate={update}
               />
-              <span className="truncate">{owner.name}</span>
-            </span>
-          </PropRow>
-        )}
-        <PropRow label={t(($) => $.inspector.prop_created)} interactive={false}>
-          <span className="text-muted-foreground">
-            {timeAgo(agent.created_at)}
-          </span>
-        </PropRow>
-        <PropRow label={t(($) => $.inspector.prop_updated)} interactive={false}>
-          <span className="text-muted-foreground">
-            {timeAgo(agent.updated_at)}
-          </span>
-        </PropRow>
-      </Section>
+            </div>
+          </div>
+        </SettingsCard>
 
-      {/* Skills */}
-      <div className="flex flex-col border-b px-5 py-4">
-        <div className="mb-2 flex items-center gap-2">
-          <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
-            {t(($) => $.inspector.section_skills)}
-          </span>
-          <span className="font-mono text-[10px] tabular-nums text-muted-foreground/70">
-            {agent.skills.length}
-          </span>
-        </div>
-        <div className="flex flex-wrap gap-1">
-          {agent.skills.map((s) => (
-            <span
-              key={s.id}
-              className="rounded-md bg-muted px-1.5 py-0.5 font-mono text-[10px] font-medium text-muted-foreground"
-            >
-              {s.name}
-            </span>
-          ))}
-          <SkillAttach agent={agent} canEdit={canEdit} />
-        </div>
+        <SettingsCard title={t(($) => $.inspector.section_execution)}>
+          <PropertyGrid>
+            <PropRow label={t(($) => $.inspector.prop_runtime)} interactive={false}>
+              <RuntimePicker
+                value={agent.runtime_id}
+                runtimes={runtimes}
+                members={members}
+                currentUserId={currentUserId}
+                canEdit={canEdit}
+                onChange={(id) => update({ runtime_id: id })}
+              />
+            </PropRow>
+            <PropRow label={t(($) => $.inspector.prop_model)} interactive={false}>
+              <ModelPicker
+                runtimeId={agent.runtime_id}
+                runtimeOnline={!!isOnline}
+                value={agent.model ?? ""}
+                canEdit={canEdit}
+                onChange={(m) => update({ model: m })}
+              />
+            </PropRow>
+            <ThinkingPropRow
+              runtimeId={agent.runtime_id}
+              runtimeOnline={!!isOnline}
+              provider={runtime?.provider ?? ""}
+              model={agent.model ?? ""}
+              value={agent.thinking_level ?? ""}
+              canEdit={canEdit}
+              onChange={(v) => update({ thinking_level: v })}
+            />
+            <PropRow label={t(($) => $.inspector.prop_concurrency)} interactive={false}>
+              <ConcurrencyPicker
+                value={agent.max_concurrent_tasks}
+                canEdit={canEdit}
+                onChange={(n) => update({ max_concurrent_tasks: n })}
+              />
+            </PropRow>
+          </PropertyGrid>
+        </SettingsCard>
       </div>
 
-      {/* Integrations — surfaces external-channel bind entry points
-          (Lark + Slack today; Discord in the future). Each bind button
-          self-hides when its server-side install capability gate is
-          closed, so this section may render empty on deployments without
-          a configured channel — that's intentional and matches the
-          "don't surface a flow that will fail" guarantee. We only mount
-          it for editors: viewers shouldn't see a CTA they can't action. */}
-      {canEdit && (
-        <div className="flex flex-col px-5 py-4">
-          <div className="mb-2 flex items-center gap-2">
-            <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
-              {t(($) => $.inspector.section_integrations)}
-            </span>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <LarkAgentBindButton
-              agentId={agent.id}
-              agentName={agent.name}
-              agentOwnerId={agent.owner_id}
-              onShowConnectedDetails={onShowIntegrations}
-            />
-            <SlackAgentBindButton
-              agentId={agent.id}
-              agentName={agent.name}
-              onShowConnectedDetails={onShowIntegrations}
-            />
-          </div>
-        </div>
-      )}
-    </aside>
+      <div className="space-y-4">
+        <SettingsCard title={t(($) => $.inspector.section_access)}>
+          <PropertyGrid>
+            <PropRow label={t(($) => $.inspector.prop_visibility)} interactive={false}>
+              <AccessPicker
+                permissionMode={agent.permission_mode}
+                invocationTargets={agent.invocation_targets}
+                visibility={agent.visibility}
+                members={members}
+                canEdit={
+                  currentUserId !== null && agent.owner_id === currentUserId
+                }
+                hasComposioAllowlist={
+                  (agent.composio_toolkit_allowlist ?? []).length > 0
+                }
+                onChange={(next) => update(next)}
+              />
+            </PropRow>
+          </PropertyGrid>
+        </SettingsCard>
+
+        <SettingsCard title={t(($) => $.inspector.section_details)}>
+          <PropertyGrid>
+            {owner && (
+              <PropRow label={t(($) => $.inspector.prop_owner)} interactive={false}>
+                <span className="flex min-w-0 items-center gap-1.5">
+                  <ActorAvatar
+                    actorType="member"
+                    actorId={owner.user_id}
+                    size="xs"
+                  />
+                  <span className="truncate">{owner.name}</span>
+                </span>
+              </PropRow>
+            )}
+            <PropRow label={t(($) => $.inspector.prop_created)} interactive={false}>
+              <span className="text-muted-foreground">
+                {timeAgo(agent.created_at)}
+              </span>
+            </PropRow>
+            <PropRow label={t(($) => $.inspector.prop_updated)} interactive={false}>
+              <span className="text-muted-foreground">
+                {timeAgo(agent.updated_at)}
+              </span>
+            </PropRow>
+          </PropertyGrid>
+        </SettingsCard>
+      </div>
+    </div>
   );
 }
 
@@ -262,21 +192,27 @@ export function AgentDetailInspector({
 // Layout helpers
 // ---------------------------------------------------------------------------
 
-function Section({
-  label,
+function SettingsCard({
+  title,
   children,
 }: {
-  label: string;
+  title: string;
   children: ReactNode;
 }) {
   return (
-    <div className="border-b px-5 py-4">
-      <div className="mb-1 -mx-2 px-2 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
-        {label}
+    <section className="rounded-lg border bg-background">
+      <div className="border-b px-5 py-3.5">
+        <h2 className="text-sm font-semibold">{title}</h2>
       </div>
-      <div className="grid grid-cols-[auto_1fr] gap-x-2 gap-y-0.5">
-        {children}
-      </div>
+      <div className="p-5">{children}</div>
+    </section>
+  );
+}
+
+function PropertyGrid({ children }: { children: ReactNode }) {
+  return (
+    <div className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1">
+      {children}
     </div>
   );
 }
@@ -495,7 +431,11 @@ function DescriptionEditorBody({
           onClick={() => void commit()}
           disabled={saving || overLimit || !dirty}
         >
-          {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : t(($) => $.inspector.save)}
+          {saving ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin motion-reduce:animate-none" />
+          ) : (
+            t(($) => $.inspector.save)
+          )}
         </Button>
       </DialogFooter>
     </>
@@ -629,7 +569,7 @@ function InlineEditPopover({
               disabled={saving || draft === value}
             >
               {saving ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                <Loader2 className="h-3.5 w-3.5 animate-spin motion-reduce:animate-none" />
               ) : (
                 t(($) => $.inspector.save)
               )}
@@ -638,37 +578,5 @@ function InlineEditPopover({
         </div>
       </PopoverContent>
     </Popover>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Presence badge — unchanged from the previous version
-// ---------------------------------------------------------------------------
-
-function PresenceBadge({
-  presence,
-}: {
-  presence: AgentPresenceDetail | null | undefined;
-}) {
-  const { t } = useT("agents");
-  // Archived is carried by the unified presence (deriveAgentPresenceDetail
-  // sets availability="archived" before any runtime/task scan), so the
-  // normal path below renders the gray "Archived" badge with no special
-  // case here — same single source of truth as every other status surface.
-  if (!presence) {
-    return (
-      <span className="inline-flex h-5 w-20 animate-pulse rounded-md bg-muted" />
-    );
-  }
-  const av = availabilityConfig[presence.availability];
-  return (
-    <div className="flex flex-wrap items-center gap-1.5">
-      <span
-        className={`inline-flex items-center gap-1.5 rounded-md border px-1.5 py-0.5 text-xs ${av.textClass}`}
-      >
-        <span className={`h-1.5 w-1.5 rounded-full ${av.dotClass}`} />
-        {t(($) => $.availability[presence.availability])}
-      </span>
-    </div>
   );
 }

@@ -135,9 +135,15 @@
     "agent_archived_toast": "에이전트를 보관했습니다",
     "archive_failed_toast": "에이전트를 보관하지 못했습니다",
     "agent_restored_toast": "에이전트를 복원했습니다",
-    "restore_failed_toast": "에이전트를 복원하지 못했습니다"
+    "restore_failed_toast": "에이전트를 복원하지 못했습니다",
+    "assign_work": "작업 할당",
+    "more_actions_aria": "에이전트 작업",
+    "updated": "{{when}} 업데이트됨"
   },
   "inspector": {
+    "section_profile": "프로필",
+    "section_execution": "실행 설정",
+    "section_access": "접근 권한",
     "section_properties": "속성",
     "section_details": "세부 정보",
     "section_skills": "스킬",
@@ -161,6 +167,12 @@
     "description_placeholder": "이 에이전트는 무엇을 하나요?",
     "save": "저장",
     "cancel": "취소"
+  },
+  "overview": {
+    "agent_context": "에이전트",
+    "access": "접근 권한",
+    "attention_title": "확인이 필요한 task",
+    "attention_queued_other": "런타임을 사용할 수 없어 {{count}}개의 task가 대기 중입니다."
   },
   "skill_attach": {
     "trigger_aria": "워크스페이스 스킬 연결",
@@ -203,6 +215,13 @@
     "clear_full": "선택 지우기(제공자 기본값 사용)"
   },
   "tabs": {
+    "overview": "개요",
+    "work": "작업",
+    "capabilities": "기능",
+    "settings": "설정",
+    "general": "일반",
+    "page_navigation_aria": "에이전트 페이지",
+    "section_navigation_aria": "에이전트 섹션",
     "activity": "활동",
     "tasks": "작업",
     "instructions": "지침",
@@ -395,6 +414,15 @@
       "members_note": "에이전트를 외부 채팅 플랫폼에 연결할 수 있는 사람은 워크스페이스 소유자와 관리자뿐입니다. 연결된 봇은 설정 → 연동에서 확인할 수 있습니다."
     },
     "activity": {
+      "status": {
+        "queued": "대기 중",
+        "dispatched": "전달됨",
+        "waiting_local_directory": "디렉터리 대기 중",
+        "running": "실행 중",
+        "completed": "성공",
+        "failed": "실패",
+        "cancelled": "취소됨"
+      },
       "section_now": "현재",
       "section_last_30d": "최근 30일",
       "section_recent": "최근 작업",
@@ -410,8 +438,11 @@
       "show_more": "더 보기 →",
       "runs_other": "회 실행",
       "success_pct": "성공률 {{percent}}%",
+      "success_label": "성공",
       "avg_duration": "평균 {{value}}",
+      "avg_duration_label": "평균 소요 시간",
       "failed_count": "{{count}}회 실패",
+      "failed_label": "실패",
       "source_issue": "이슈",
       "source_chat": "채팅",
       "source_autopilot": "오토파일럿",

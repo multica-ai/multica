@@ -135,9 +135,15 @@
     "agent_archived_toast": "已归档智能体",
     "archive_failed_toast": "归档智能体失败",
     "agent_restored_toast": "已恢复智能体",
-    "restore_failed_toast": "恢复智能体失败"
+    "restore_failed_toast": "恢复智能体失败",
+    "assign_work": "分配工作",
+    "more_actions_aria": "智能体操作",
+    "updated": "{{when}}更新"
   },
   "inspector": {
+    "section_profile": "资料",
+    "section_execution": "执行配置",
+    "section_access": "访问权限",
     "section_properties": "属性",
     "section_details": "详情",
     "section_skills": "Skills",
@@ -161,6 +167,12 @@
     "description_placeholder": "这个智能体做什么？",
     "save": "保存",
     "cancel": "取消"
+  },
+  "overview": {
+    "agent_context": "智能体",
+    "access": "访问权限",
+    "attention_title": "Task 需要处理",
+    "attention_queued_other": "运行时不可用，当前有 {{count}} 个 task 正在排队。"
   },
   "skill_attach": {
     "trigger_aria": "附加工作区 skill",
@@ -203,6 +215,13 @@
     "clear_full": "清除选择（使用提供方默认）"
   },
   "tabs": {
+    "overview": "概览",
+    "work": "工作",
+    "capabilities": "能力",
+    "settings": "设置",
+    "general": "通用",
+    "page_navigation_aria": "智能体页面",
+    "section_navigation_aria": "智能体分区",
     "activity": "动态",
     "tasks": "Tasks",
     "instructions": "指令",
@@ -395,6 +414,15 @@
       "members_note": "只有工作区的所有者和管理员才能把智能体连接到外部聊天平台。你可以在「设置 → 集成」中查看已连接的 Bot。"
     },
     "activity": {
+      "status": {
+        "queued": "排队中",
+        "dispatched": "已分发",
+        "waiting_local_directory": "等待目录",
+        "running": "进行中",
+        "completed": "成功",
+        "failed": "失败",
+        "cancelled": "已取消"
+      },
       "section_now": "当前",
       "section_last_30d": "近 30 天",
       "section_recent": "最近工作",
@@ -410,8 +438,11 @@
       "show_more": "查看更多 →",
       "runs_other": "次运行",
       "success_pct": "{{percent}}% 成功",
+      "success_label": "成功",
       "avg_duration": "平均 {{value}}",
+      "avg_duration_label": "平均耗时",
       "failed_count": "{{count}} 次失败",
+      "failed_label": "失败",
       "source_issue": "Issue",
       "source_chat": "聊天",
       "source_autopilot": "自动化",

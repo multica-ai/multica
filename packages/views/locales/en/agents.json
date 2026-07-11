@@ -143,9 +143,15 @@
     "agent_archived_toast": "Agent archived",
     "archive_failed_toast": "Failed to archive agent",
     "agent_restored_toast": "Agent restored",
-    "restore_failed_toast": "Failed to restore agent"
+    "restore_failed_toast": "Failed to restore agent",
+    "assign_work": "Assign work",
+    "more_actions_aria": "Agent actions",
+    "updated": "Updated {{when}}"
   },
   "inspector": {
+    "section_profile": "Profile",
+    "section_execution": "Execution",
+    "section_access": "Access",
     "section_properties": "Properties",
     "section_details": "Details",
     "section_skills": "Skills",
@@ -169,6 +175,13 @@
     "description_placeholder": "What does this agent do?",
     "save": "Save",
     "cancel": "Cancel"
+  },
+  "overview": {
+    "agent_context": "Agent",
+    "access": "Access",
+    "attention_title": "Tasks need attention",
+    "attention_queued_one": "{{count}} task is queued while the runtime is unavailable.",
+    "attention_queued_other": "{{count}} tasks are queued while the runtime is unavailable."
   },
   "skill_attach": {
     "trigger_aria": "Attach a workspace skill",
@@ -211,6 +224,13 @@
     "clear_full": "Clear selection (use provider default)"
   },
   "tabs": {
+    "overview": "Overview",
+    "work": "Work",
+    "capabilities": "Capabilities",
+    "settings": "Settings",
+    "general": "General",
+    "page_navigation_aria": "Agent page",
+    "section_navigation_aria": "Agent section",
     "activity": "Activity",
     "tasks": "Tasks",
     "instructions": "Instructions",
@@ -406,6 +426,15 @@
       "members_note": "Only workspace owners and admins can connect an agent to an external chat platform. You can view connected bots in Settings → Integrations."
     },
     "activity": {
+      "status": {
+        "queued": "Queued",
+        "dispatched": "Dispatched",
+        "waiting_local_directory": "Waiting for directory",
+        "running": "Running",
+        "completed": "Succeeded",
+        "failed": "Failed",
+        "cancelled": "Cancelled"
+      },
       "section_now": "Now",
       "section_last_30d": "Last 30 days",
       "section_recent": "Recent work",
@@ -423,8 +452,11 @@
       "runs_one": "run",
       "runs_other": "runs",
       "success_pct": "{{percent}}% success",
+      "success_label": "succeeded",
       "avg_duration": "avg {{value}}",
+      "avg_duration_label": "average duration",
       "failed_count": "{{count}} failed",
+      "failed_label": "failed",
       "source_issue": "Issue",
       "source_chat": "Chat",
       "source_autopilot": "Autopilot",
