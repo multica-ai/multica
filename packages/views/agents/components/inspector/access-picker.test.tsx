@@ -76,23 +76,25 @@ describe("AccessPicker owner-only editing (MUL-3963)", () => {
     ).toBeInTheDocument();
   });
 
-  it("renders explicit access choices for the owner", () => {
+  it("renders mutually exclusive access scopes for the owner", () => {
     renderPicker({ canEdit: true });
     expect(
-      screen.getByRole("radio", { name: /^Private/i }),
+      screen.getByRole("radio", { name: /^Only me/i }),
     ).toBeChecked();
     expect(
-      screen.getByRole("radio", { name: /^Shared/i }),
+      screen.getByRole("radio", { name: /^Entire workspace/i }),
+    ).not.toBeChecked();
+    expect(
+      screen.getByRole("radio", { name: /^Specific people/i }),
     ).not.toBeChecked();
   });
 
-  it("defaults a newly shared agent to workspace access", () => {
+  it("lets the owner grant the entire workspace access", () => {
     const { onChange } = renderPicker({ canEdit: true });
-    fireEvent.click(screen.getByRole("radio", { name: /^Shared/i }));
+    fireEvent.click(
+      screen.getByRole("radio", { name: /^Entire workspace/i }),
+    );
     expect(onChange).not.toHaveBeenCalled();
-    expect(
-      screen.getByRole("checkbox", { name: /Public to workspace/i }),
-    ).toBeChecked();
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
     expect(onChange).toHaveBeenCalledWith({
       permission_mode: "public_to",
@@ -104,19 +106,22 @@ describe("AccessPicker owner-only editing (MUL-3963)", () => {
     const onDirtyChange = vi.fn();
     renderPicker({ canEdit: true, onDirtyChange });
 
-    fireEvent.click(screen.getByRole("radio", { name: /^Shared/i }));
+    fireEvent.click(
+      screen.getByRole("radio", { name: /^Entire workspace/i }),
+    );
     expect(onDirtyChange).toHaveBeenLastCalledWith(true);
 
-    fireEvent.click(screen.getByRole("radio", { name: /^Private/i }));
+    fireEvent.click(screen.getByRole("radio", { name: /^Only me/i }));
     expect(onDirtyChange).toHaveBeenLastCalledWith(false);
   });
 
   it("owner can pick a specific member, emitting a public_to member target", () => {
     const { onChange } = renderPicker({
       canEdit: true,
-      permissionMode: "public_to",
-      invocationTargets: [],
     });
+    fireEvent.click(
+      screen.getByRole("radio", { name: /^Specific people/i }),
+    );
     fireEvent.click(screen.getByRole("checkbox", { name: /Alice/i }));
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
     expect(onChange).toHaveBeenCalledWith({
@@ -125,25 +130,18 @@ describe("AccessPicker owner-only editing (MUL-3963)", () => {
     });
   });
 
-  it("owner can stack workspace + a member (mixed, multi-select)", () => {
-    // Start from a member target; toggling the workspace checkbox must ADD a
-    // workspace target rather than replacing the member one.
+  it("workspace scope removes redundant member grants", () => {
     const { onChange } = renderPicker({
       canEdit: true,
       permissionMode: "public_to",
       invocationTargets: [{ target_type: "member", target_id: "u1" }],
       visibility: "private",
     });
-    fireEvent.click(
-      screen.getByRole("checkbox", { name: /Public to workspace/i }),
-    );
+    fireEvent.click(screen.getByRole("radio", { name: /^Entire workspace/i }));
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
     expect(onChange).toHaveBeenCalledWith({
       permission_mode: "public_to",
-      invocation_targets: [
-        { target_type: "workspace" },
-        { target_type: "member", target_id: "u1" },
-      ],
+      invocation_targets: [{ target_type: "workspace" }],
     });
   });
 
@@ -160,7 +158,7 @@ describe("AccessPicker owner-only editing (MUL-3963)", () => {
       }),
     ).not.toThrow();
     expect(
-      screen.getByRole("radio", { name: /^Private/i }),
+      screen.getByRole("radio", { name: /^Only me/i }),
     ).toBeChecked();
   });
 
