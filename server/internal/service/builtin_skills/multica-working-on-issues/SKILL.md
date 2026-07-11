@@ -177,6 +177,24 @@ multica workflow list                       # find the recipe ID (only Issue wor
 multica issue create --title "..." --workflow <workflow-id>
 ```
 
+<!-- CEREBRO-PATCH(cerebro-workflow-agent-guidance): FIR-2937 workflow CLI/MCP management surface. -->
+Agents can also manage and activate recipes without the web editor:
+
+```bash
+multica workflow get <workflow-id>
+multica workflow create --file workflow.json
+multica workflow update <workflow-id> --file workflow.json
+multica workflow toggle <workflow-id> --enabled=false
+multica workflow activate <workflow-id> <issue-id>
+multica workflow for-issue <issue-id>
+multica workflow delete <workflow-id>
+```
+
+Use `--stdin` instead of `--file` when piping the complete JSON document. MCP
+exposes the same surface as `list_workflows`, `get_workflow`,
+`create_workflow`, `update_workflow`, `toggle_workflow`, `activate_workflow`,
+`get_active_workflow`, and `delete_workflow`.
+
 - `--workflow` takes an Issue workflow recipe ID (from `multica workflow list`).
   Plain (standard) workflows are rejected.
 - Activation is best-effort: the issue is always created. If the workflow could

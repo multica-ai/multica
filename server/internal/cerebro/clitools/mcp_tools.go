@@ -127,6 +127,8 @@ func RegisterTools(srv *mcp.Server, client *cli.APIClient, session *SessionState
 	// CEREBRO-PATCH(cerebro-connections-admin-mcp): FIR-2835 connection registry CRUD tools
 	// (create/list/get/update/delete/test connections), gated on manage_connections.
 	registerCerebroConnectionAdminTools(srv, client)
+	// CEREBRO-PATCH(cerebro-workflow-mcp): FIR-2937 workflow management tools.
+	registerWorkflowTools(srv, client)
 
 	// -----------------------------------------------------------------------
 	// list_issues

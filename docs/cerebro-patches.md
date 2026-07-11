@@ -1468,3 +1468,15 @@ comment for SQL/CSS/SBPL/JSON-with-_comment-field).
 | `description-drafts` | packages/cerebro-description-draft and issue-detail.tsx | local draft mirror + recovery banner | FIR-2648 — preserve issue-description edits locally when a session expires before the debounced save succeeds. |
 | `sprint-cli-real-model` | server/cmd/multica/cerebro_sprint.go and server/internal/cerebro/sprints | CLI and API wiring | FIR-2500 — the sprint CLI uses the real workspace sprint model instead of treating sprints as sub-projects. |
 | `ci-parallel-turbo` | .github/workflows/ci.yml | 1 marked command + timing artifact | FIR-3072 — run the frontend Turbo graph with four concurrent tasks instead of one while preserving every build, typecheck, and test; retain Turbo's per-task summary for 14 days so the speed change can be measured over subsequent green runs. |
+
+# cerebro-workflow-cli-management
+
+- Location: `server/cmd/multica/cmd_workflow.go`
+- Reason: Expose the existing Cerebro workflow API through agent-safe CLI management commands.
+- Approver: Jesper Hvejsel, FIR-2937 comment “byg det”, 2026-07-11.
+
+# cerebro-workflow-agent-guidance
+
+- Location: `server/internal/service/builtin_skills/multica-working-on-issues/`
+- Reason: Keep the source-traced built-in agent workflow contract aligned with the new CLI and MCP surface.
+- Approver: Jesper Hvejsel, FIR-2937 comment “byg det”, 2026-07-11.
