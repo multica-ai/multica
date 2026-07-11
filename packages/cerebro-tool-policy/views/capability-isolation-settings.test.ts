@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { csvToList, mergeCapabilitiesSettings, readCapabilitiesConfig } from "./settings";
+import { csvToList, mergeCapabilitiesSettings, readCapabilitiesConfig } from "./capability-isolation-settings";
 
 describe("agent capability settings", () => {
   it("defaults to standard local fallback", () => {

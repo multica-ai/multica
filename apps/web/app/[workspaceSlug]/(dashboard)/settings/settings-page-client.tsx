@@ -1,7 +1,6 @@
 "use client";
 
 import { useMemo, type ReactNode } from "react";
-import { agentCapabilitiesSettingsTab } from "@multica/cerebro-agent-capabilities";
 import { cerebroCostOptimizationTabs } from "@multica/cerebro-cost-optimization/views";
 import { cerebroFeatureFlagTabs } from "@multica/cerebro-feature-flags/settings-tabs";
 import { cerebroNotesSettingsTabs } from "@multica/cerebro-notes/settings-tabs";
@@ -28,7 +27,6 @@ import { useCerebroCollectionsSettingsTabs } from "@multica/cerebro-collections/
 // Components"). Module-level constant keeps the array reference stable so it
 // doesn't bust SettingsPage's useMemo on every render.
 const extraAccountTabs: ExtraSettingsTab[] = [
-  agentCapabilitiesSettingsTab,
   ...cerebroCostOptimizationTabs,
   ...cerebroNotesSettingsTabs,
   ...cerebroFeatureFlagTabs,

@@ -15,7 +15,6 @@ import { CerebroBrowserPage } from "./pages/cerebro-browser-page";
 import { SprintDetailPage } from "./pages/sprint-detail-page";
 import { AutopilotDetailPage } from "./pages/autopilot-detail-page";
 import { AutopilotCreatePage, AutopilotEditPage } from "@multica/cerebro-autopilot-pages";
-import { agentCapabilitiesSettingsTab } from "@multica/cerebro-agent-capabilities";
 import { SkillDetailPage } from "./pages/skill-detail-page";
 import { AgentDetailPage } from "./pages/agent-detail-page";
 import { RuntimeDetailPage } from "./pages/runtime-detail-page";
@@ -130,7 +129,6 @@ function SettingsRoute() {
           icon: Download,
           content: <UpdatesSettingsTab />,
         },
-        agentCapabilitiesSettingsTab,
         ...cerebroCostOptimizationTabs,
         ...cerebroNotesSettingsTabs,
         ...cerebroFeatureFlagTabs,

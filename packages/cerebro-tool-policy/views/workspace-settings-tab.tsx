@@ -11,6 +11,7 @@ import { Wrench } from "lucide-react";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useFeatureFlag } from "@multica/cerebro-feature-flags";
 import { ToolPolicyTabs } from "./tool-policy-table";
+import { CapabilityIsolationSections } from "./capability-isolation-sections";
 
 // Mirrors @multica/views ExtraSettingsTab structurally. Defined locally so this
 // entrypoint stays free of a views dependency (and the topo-sort coupling it
@@ -46,6 +47,11 @@ export function WorkspacePermissionsTab() {
         </p>
       </div>
       <ToolPolicyTabs wsId={wsId} view="workspace" subjectId={wsId} />
+      {/* FIR-3091 slice 3: the OS-sandbox network profiles, per-runtime
+          overrides, and per-agent blocked MCP servers — a parallel isolation
+          layer shown alongside the tool-policy catalog, rehomed from the retired
+          "Agent capabilities" settings tab. */}
+      <CapabilityIsolationSections />
     </div>
   );
 }
