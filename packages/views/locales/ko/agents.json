@@ -135,11 +135,21 @@
     "agent_archived_toast": "에이전트를 보관했습니다",
     "archive_failed_toast": "에이전트를 보관하지 못했습니다",
     "agent_restored_toast": "에이전트를 복원했습니다",
-    "restore_failed_toast": "에이전트를 복원하지 못했습니다"
+    "restore_failed_toast": "에이전트를 복원하지 못했습니다",
+    "assign_work": "작업 할당",
+    "more_actions_aria": "에이전트 작업",
+    "updated": "{{when}} 업데이트됨"
   },
   "inspector": {
+    "section_profile": "프로필",
+    "section_profile_hint": "워크스페이스에서 이 에이전트가 표시되는 방식을 관리합니다.",
+    "section_execution": "실행 설정",
+    "section_execution_hint": "런타임, 모델, 추론 수준과 병렬 작업 한도를 설정합니다.",
+    "section_access": "접근 권한",
+    "section_access_hint": "이 에이전트와 연결된 기능을 사용할 수 있는 대상을 관리합니다.",
     "section_properties": "속성",
     "section_details": "세부 정보",
+    "section_details_hint": "소유권과 수명 주기에 대한 읽기 전용 정보입니다.",
     "section_skills": "스킬",
     "section_integrations": "연동",
     "prop_runtime": "런타임",
@@ -151,6 +161,10 @@
     "prop_created": "생성일",
     "prop_updated": "수정일",
     "no_description_placeholder": "설명 없음",
+    "avatar_label": "아바타",
+    "avatar_hint": "할당, 활동 및 채팅에 표시됩니다.",
+    "name_label": "이름",
+    "description_label": "설명",
     "change_avatar_aria": "아바타 변경",
     "avatar_updated_toast": "아바타를 업데이트했습니다",
     "avatar_upload_failed_toast": "아바타를 업로드하지 못했습니다",
@@ -161,6 +175,12 @@
     "description_placeholder": "이 에이전트는 무엇을 하나요?",
     "save": "저장",
     "cancel": "취소"
+  },
+  "overview": {
+    "agent_context": "에이전트",
+    "access": "접근 권한",
+    "attention_title": "확인이 필요한 task",
+    "attention_queued_other": "런타임을 사용할 수 없어 {{count}}개의 task가 대기 중입니다."
   },
   "skill_attach": {
     "trigger_aria": "워크스페이스 스킬 연결",
@@ -203,6 +223,14 @@
     "clear_full": "선택 지우기(제공자 기본값 사용)"
   },
   "tabs": {
+    "overview": "개요",
+    "work": "작업",
+    "capabilities": "기능",
+    "settings": "설정",
+    "general": "일반",
+    "access": "접근 권한",
+    "page_navigation_aria": "에이전트 페이지",
+    "section_navigation_aria": "에이전트 섹션",
     "activity": "활동",
     "tasks": "작업",
     "instructions": "지침",
@@ -290,7 +318,8 @@
       "unsaved_changes": "저장하지 않은 변경사항"
     },
     "instructions": {
-      "intro": "이 에이전트의 정체성과 작업 방식을 정의하세요. 모든 작업에서 에이전트 컨텍스트에 포함됩니다. Markdown을 지원합니다.",
+      "intro": "모든 작업에 사용할 System Prompt를 설정하세요. Markdown을 지원합니다.",
+      "system_prompt_label": "System Prompt",
       "placeholder": "이 에이전트의 역할, 전문성, 작업 방식을 정의하세요.\n\n# 예시\n당신은 React와 TypeScript에 특화된 프런트엔드 엔지니어입니다.\n\n## 작업 방식\n- 작고 집중된 PR을 작성합니다. 논리적 변경 단위마다 커밋 하나를 사용합니다\n- 상속보다 조합을 선호합니다\n- 새 컴포넌트에는 항상 단위 테스트를 추가합니다\n\n## 제약\n- 명시적인 승인 없이 shared/ 타입을 수정하지 않습니다\n- features/의 기존 컴포넌트 패턴을 따릅니다"
     },
     "env": {
@@ -316,16 +345,27 @@
       "empty_editable": "설정된 환경 변수가 없습니다. 시작 시 에이전트에 주입할 변수를 추가하세요."
     },
     "custom_args": {
-      "intro": "에이전트 명령을 시작할 때 뒤에 붙는 추가 CLI 인자입니다. 여러 토큰으로 된 플래그는 한 행에 둘 수 있으며, CLI에 전달되기 전에 공백 기준으로 나뉩니다.",
-      "launch_mode_prefix": "시작 모드: ",
-      "launch_mode_args_placeholder": "<인자>",
-      "input_placeholder": "--flag value",
-      "remove_aria": "인자 제거",
+      "intro": "에이전트를 시작할 때 전달할 CLI 인자를 추가하세요.",
+      "arguments_label": "인자",
+      "arguments_description": "각 항목은 하나의 토큰으로 전달되며 목록 순서가 유지됩니다.",
+      "add_argument_action": "인자 추가",
+      "add_action": "추가",
+      "update_action": "업데이트",
+      "cancel_action": "취소",
+      "command_preview_label": "명령어 미리보기",
+      "input_placeholder": "--profile",
+      "input_aria": "인자 {{index}}",
+      "new_argument_aria": "새 인자",
+      "empty_title": "아직 인자가 없습니다",
+      "empty_hint": "첫 번째 토큰을 추가하여 시작 명령어를 만드세요.",
+      "edit_aria": "인자 {{index}} 편집",
+      "remove_aria": "인자 {{index}} 제거",
       "saved_toast": "사용자 지정 인자를 저장했습니다",
       "save_failed_toast": "사용자 지정 인자를 저장하지 못했습니다"
     },
     "mcp_config": {
-      "intro": "런타임 CLI로 전달되는 MCP server configuration입니다(Claude는 --mcp-config, Codex는 $CODEX_HOME/config.toml, Hermes/Kimi/Kiro는 ACP mcpServers, OpenCode는 OPENCODE_CONFIG_CONTENT, OpenClaw는 task별 config wrapper). 그대로 저장되며 secret이 포함될 수 있으므로 에이전트 소유자와 워크스페이스 관리자만 읽을 수 있습니다. 비워두면 CLI 자체 기본값을 사용합니다. OpenClaw HTTP/SSE 항목은 Claude의 \"type\" 대신 OpenClaw의 필드명(예: \"transport\": \"streamable-http\")을 사용하세요.",
+      "intro": "이 에이전트가 사용할 MCP Server를 설정하세요. 비워 두면 런타임 기본값을 사용합니다.",
+      "config_label": "Server 설정(JSON)",
       "placeholder": "{\n  \"mcpServers\": {\n    \"fetch\": {\n      \"command\": \"uvx\",\n      \"args\": [\"mcp-server-fetch\"]\n    }\n  }\n}",
       "editor_aria": "MCP config JSON editor",
       "clear_action": "지우기",
@@ -395,6 +435,15 @@
       "members_note": "에이전트를 외부 채팅 플랫폼에 연결할 수 있는 사람은 워크스페이스 소유자와 관리자뿐입니다. 연결된 봇은 설정 → 연동에서 확인할 수 있습니다."
     },
     "activity": {
+      "status": {
+        "queued": "대기 중",
+        "dispatched": "전달됨",
+        "waiting_local_directory": "디렉터리 대기 중",
+        "running": "실행 중",
+        "completed": "성공",
+        "failed": "실패",
+        "cancelled": "취소됨"
+      },
       "section_now": "현재",
       "section_last_30d": "최근 30일",
       "section_recent": "최근 작업",
@@ -402,16 +451,19 @@
       "subtitle_active_other": "활성 작업 {{count}}개",
       "subtitle_performance": "성과",
       "subtitle_no_recent": "아직 완료된 작업 없음",
-      "subtitle_recent_progress": "{{total}}개 중 {{shown}}개",
-      "subtitle_recent_latest": "최근 {{count}}개",
+      "subtitle_recent_progress": "{{total}}회 실행 중 {{shown}}회",
+      "subtitle_recent_latest": "최근 {{count}}회 실행",
       "empty_now": "이 에이전트는 지금 실행 중인 작업이 없습니다.",
       "empty_30d": "최근 30일 동안 완료된 작업이 없습니다.",
       "empty_recent": "이 에이전트는 아직 완료한 작업이 없습니다.",
       "show_more": "더 보기 →",
       "runs_other": "회 실행",
       "success_pct": "성공률 {{percent}}%",
+      "success_label": "성공",
       "avg_duration": "평균 {{value}}",
+      "avg_duration_label": "평균 소요 시간",
       "failed_count": "{{count}}회 실패",
+      "failed_label": "실패",
       "source_issue": "이슈",
       "source_chat": "채팅",
       "source_autopilot": "오토파일럿",
@@ -451,6 +503,7 @@
     }
   },
   "access": {
+    "section_title": "이 에이전트를 실행할 수 있는 사용자",
     "tooltip": "접근 권한 · 누가 이 에이전트를 실행할 수 있는지",
     "trigger_private": "나만",
     "trigger_workspace": "워크스페이스",
@@ -459,6 +512,9 @@
     "trigger_team": "팀",
     "private_title": "비공개",
     "private_desc": "나만 이 에이전트를 실행할 수 있습니다",
+    "shared_title": "공유",
+    "shared_desc": "이 에이전트를 실행할 워크스페이스 또는 특정 사용자를 선택합니다",
+    "shared_target_required": "저장하기 전에 워크스페이스 또는 한 명 이상의 사용자를 선택하세요.",
     "workspace_title": "워크스페이스에 공개",
     "workspace_desc": "이 워크스페이스의 모든 사람이 이 에이전트를 실행할 수 있습니다",
     "members_title": "특정 사용자에게 공개",

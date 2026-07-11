@@ -1,674 +1,309 @@
 "use client";
 
-import {
-  useEffect,
-  useState,
-  type ReactNode,
-} from "react";
-import { Loader2, Pencil } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type {
   Agent,
   AgentRuntime,
   MemberWithUser,
 } from "@multica/core/types";
-import {
-  AGENT_DESCRIPTION_MAX_LENGTH,
-  type AgentPresenceDetail,
-} from "@multica/core/agents";
+import { AGENT_DESCRIPTION_MAX_LENGTH } from "@multica/core/agents";
 import { isImeComposing } from "@multica/core/utils";
-import { useTimeAgo } from "../../i18n";
-import { Button } from "@multica/ui/components/ui/button";
-import { ActorAvatar } from "../../common/actor-avatar";
-import { AvatarUploadControl } from "../../common/avatar-upload-control";
 import { Input } from "@multica/ui/components/ui/input";
+import { Textarea } from "@multica/ui/components/ui/textarea";
+import { AvatarUploadControl } from "../../common/avatar-upload-control";
 import {
-  Dialog,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@multica/ui/components/ui/dialog";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@multica/ui/components/ui/popover";
-import { PropRow } from "../../common/prop-row";
-import { availabilityConfig } from "../presence";
-import { CharCounter } from "./char-counter";
+  SettingsCard,
+  SettingsRow,
+  SettingsSaveState,
+  SettingsSection,
+} from "../../settings/components/settings-layout";
+import { useAutoSave } from "../../settings/components/use-auto-save";
 import { useT } from "../../i18n";
-import { ConcurrencyPicker } from "./inspector/concurrency-picker";
+import { CharCounter } from "./char-counter";
 import { ModelPicker } from "./inspector/model-picker";
 import { RuntimePicker } from "./inspector/runtime-picker";
-import { SkillAttach } from "./inspector/skill-attach";
-import { ThinkingPropRow } from "./inspector/thinking-prop-row";
-import { AccessPicker } from "./inspector/access-picker";
-import { LarkAgentBindButton } from "../../settings/components/lark-tab";
-import { SlackAgentBindButton } from "../../settings/components/slack-tab";
+import { ThinkingSettingField } from "./inspector/thinking-prop-row";
 
 interface InspectorProps {
   agent: Agent;
   runtime: AgentRuntime | null;
-  owner: MemberWithUser | null;
-  presence: AgentPresenceDetail | null | undefined;
-  // Below: needed for inline edit. The inspector now owns the editing surface
-  // (no Settings tab anymore), so the parent has to pass through everything
-  // a write needs.
   runtimes: AgentRuntime[];
   members: MemberWithUser[];
   currentUserId: string | null;
-  /**
-   * Computed by the parent via `useAgentPermissions(agent).canEdit.allowed`.
-   * When false the inspector renders all editable surfaces as static
-   * read-only displays — pickers become text/badges, name/description lose
-   * their pencil affordance, the avatar is no longer clickable, and the
-   * "Attach skill" trigger is hidden. Mirrors the backend gate at
-   * `server/internal/handler/agent.go:519-535`.
-   */
   canEdit: boolean;
   onUpdate: (id: string, data: Record<string, unknown>) => Promise<void>;
-  /**
-   * Focus the overview pane's Integrations tab. The inspector's Lark status
-   * row is read-only and deep-links here; Manage / Disconnect live in the
-   * tab so the destructive action exists in exactly one place.
-   */
-  onShowIntegrations: () => void;
+}
+
+interface ProfileDraft {
+  name: string;
+  description: string;
+}
+
+function profileDraftsEqual(left: ProfileDraft, right: ProfileDraft) {
+  return left.name === right.name && left.description === right.description;
 }
 
 /**
- * Left 320px column of the agent detail page. Holds the agent's identity card
- * (avatar / name / description / status), inline-editable properties, and
- * skills.
- *
- * **All editing happens here** — there is no separate Settings tab. The
- * trade-off is that the inspector carries some weight (4 inline pickers plus
- * 3 popovers for name/description/avatar), but it eliminates the "see vs
- * edit" mode split that the previous Settings tab created. Users no longer
- * have to switch tabs and hunt for the field they were already looking at.
+ * Full-width General settings form. Every editable value is presented as an
+ * explicit field; compact inspector chips are used only through their
+ * settings-field variants, where the whole control is a visible click target.
  */
 export function AgentDetailInspector({
   agent,
   runtime,
-  owner,
-  presence,
   runtimes,
   members,
   currentUserId,
   canEdit,
   onUpdate,
-  onShowIntegrations,
 }: InspectorProps) {
   const { t } = useT("agents");
-  const timeAgo = useTimeAgo();
-  const update = (data: Record<string, unknown>) => onUpdate(agent.id, data);
+  const { t: ts } = useT("settings");
+  const update = useCallback(
+    (data: Record<string, unknown>) => onUpdate(agent.id, data),
+    [agent.id, onUpdate],
+  );
+
+  const [name, setName] = useState(agent.name);
+  const [description, setDescription] = useState(agent.description ?? "");
+
+  useEffect(() => {
+    setName(agent.name);
+    setDescription(agent.description ?? "");
+    // Reset only when moving to another agent. Cache updates from this form
+    // must not erase a newer local draft while an autosave is in flight.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [agent.id]);
+
+  const profileDraft = useMemo(
+    () => ({ name: name.trim(), description }),
+    [description, name],
+  );
+  const savedProfile = useMemo(
+    () => ({
+      name: agent.name,
+      description: agent.description ?? "",
+    }),
+    [agent.description, agent.name],
+  );
+  const saveProfile = useCallback(
+    async (next: ProfileDraft) => {
+      await update({ name: next.name, description: next.description });
+    },
+    [update],
+  );
+  const profileAutoSave = useAutoSave({
+    value: profileDraft,
+    savedValue: savedProfile,
+    onSave: saveProfile,
+    enabled:
+      canEdit &&
+      profileDraft.name.length > 0 &&
+      profileDraft.description.length <= AGENT_DESCRIPTION_MAX_LENGTH,
+    isEqual: profileDraftsEqual,
+  });
+
   const isOnline = runtime?.status === "online";
+  const nameInvalid = name.trim().length === 0;
 
   return (
-    <aside className="flex w-full flex-col rounded-lg border bg-background md:h-full md:min-h-0 md:overflow-y-auto">
-      {/* Identity */}
-      <div className="flex flex-col gap-3 border-b px-5 pb-5 pt-5">
-        <AvatarEditor agent={agent} canEdit={canEdit} onUpdate={update} />
-        <NameAndDescription
-          agent={agent}
-          canEdit={canEdit}
-          onUpdate={update}
-        />
-        <PresenceBadge presence={presence} />
-      </div>
-
-      {/* Properties — editable when canEdit. When the current user lacks
-          permission, each picker self-renders a static read-only display so
-          the value is visible but not interactive. */}
-      <Section label={t(($) => $.inspector.section_properties)}>
-        <PropRow label={t(($) => $.inspector.prop_runtime)} interactive={false}>
-          <RuntimePicker
-            value={agent.runtime_id}
-            runtimes={runtimes}
-            members={members}
-            currentUserId={currentUserId}
-            canEdit={canEdit}
-            onChange={(id) => update({ runtime_id: id })}
+    <div className="space-y-8">
+      <SettingsSection
+        title={t(($) => $.inspector.section_profile)}
+        description={t(($) => $.inspector.section_profile_hint)}
+        action={
+          <SettingsSaveState
+            status={profileAutoSave.status}
+            savingLabel={ts(($) => $.auto_save.saving)}
+            savedLabel={ts(($) => $.auto_save.saved)}
+            errorLabel={ts(($) => $.auto_save.failed)}
           />
-        </PropRow>
-        <PropRow label={t(($) => $.inspector.prop_model)} interactive={false}>
-          <ModelPicker
+        }
+      >
+        <SettingsCard>
+          <SettingsRow
+            label={t(($) => $.inspector.avatar_label)}
+            description={t(($) => $.inspector.avatar_hint)}
+            controlClassName="sm:max-w-none"
+          >
+            <div className="flex justify-start sm:justify-end">
+              <AvatarUploadControl
+                variant="agent"
+                value={agent.avatar_url ?? null}
+                name={agent.name}
+                size={56}
+                disabled={!canEdit}
+                onUploaded={(url) => update({ avatar_url: url })}
+              />
+            </div>
+          </SettingsRow>
+
+          <SettingsRow
+            label={t(($) => $.inspector.name_label)}
+            controlClassName="sm:w-80"
+          >
+            <div>
+              <Input
+                type="text"
+                name="agent-name"
+                autoComplete="off"
+                aria-label={t(($) => $.inspector.name_label)}
+                value={name}
+                onChange={(event) => setName(event.target.value)}
+                onBlur={profileAutoSave.flush}
+                disabled={!canEdit}
+                aria-invalid={nameInvalid || undefined}
+              />
+              {nameInvalid ? (
+                <p className="mt-1 text-xs text-destructive">
+                  {t(($) => $.inspector.rename_required)}
+                </p>
+              ) : null}
+            </div>
+          </SettingsRow>
+
+          <SettingsRow
+            label={t(($) => $.inspector.description_label)}
+            controlClassName="sm:w-96"
+            align="start"
+          >
+            <div>
+              <Textarea
+                name="agent-description"
+                autoComplete="off"
+                aria-label={t(($) => $.inspector.description_label)}
+                value={description}
+                onChange={(event) => setDescription(event.target.value)}
+                onBlur={profileAutoSave.flush}
+                disabled={!canEdit}
+                rows={5}
+                maxLength={AGENT_DESCRIPTION_MAX_LENGTH}
+                className="resize-y"
+                placeholder={t(($) => $.inspector.description_placeholder)}
+              />
+              <CharCounter
+                length={[...description].length}
+                max={AGENT_DESCRIPTION_MAX_LENGTH}
+              />
+            </div>
+          </SettingsRow>
+        </SettingsCard>
+      </SettingsSection>
+
+      <SettingsSection
+        title={t(($) => $.inspector.section_execution)}
+        description={t(($) => $.inspector.section_execution_hint)}
+      >
+        <SettingsCard>
+          <SettingsRow
+            label={t(($) => $.inspector.prop_runtime)}
+            controlClassName="sm:w-80"
+          >
+            <RuntimePicker
+              variant="field"
+              showLabel={false}
+              value={agent.runtime_id}
+              runtimes={runtimes}
+              members={members}
+              currentUserId={currentUserId}
+              canEdit={canEdit}
+              onChange={(id) => update({ runtime_id: id })}
+            />
+          </SettingsRow>
+          <SettingsRow
+            label={t(($) => $.inspector.prop_model)}
+            controlClassName="sm:w-80"
+          >
+            <ModelPicker
+              variant="field"
+              showLabel={false}
+              runtimeId={agent.runtime_id}
+              runtimeOnline={!!isOnline}
+              value={agent.model ?? ""}
+              canEdit={canEdit}
+              onChange={(model) => update({ model })}
+            />
+          </SettingsRow>
+          <ThinkingSettingField
+            label={t(($) => $.inspector.prop_thinking)}
             runtimeId={agent.runtime_id}
             runtimeOnline={!!isOnline}
-            value={agent.model ?? ""}
+            provider={runtime?.provider ?? ""}
+            model={agent.model ?? ""}
+            value={agent.thinking_level ?? ""}
             canEdit={canEdit}
-            onChange={(m) => update({ model: m })}
-          />
-        </PropRow>
-        <ThinkingPropRow
-          runtimeId={agent.runtime_id}
-          runtimeOnline={!!isOnline}
-          provider={runtime?.provider ?? ""}
-          model={agent.model ?? ""}
-          value={agent.thinking_level ?? ""}
-          canEdit={canEdit}
-          onChange={(v) => update({ thinking_level: v })}
-        />
-        <PropRow label={t(($) => $.inspector.prop_visibility)} interactive={false}>
-          <AccessPicker
-            permissionMode={agent.permission_mode}
-            invocationTargets={agent.invocation_targets}
-            visibility={agent.visibility}
-            members={members}
-            // Access is OWNER-ONLY (MUL-3963): a workspace admin can edit other
-            // agent properties (canEdit) but NOT who may run the agent. Gate the
-            // picker on ownership specifically so non-owners get the read-only
-            // state instead of a control the backend would reject with 403.
-            canEdit={
-              currentUserId !== null && agent.owner_id === currentUserId
+            onChange={(thinkingLevel) =>
+              update({ thinking_level: thinkingLevel })
             }
-            hasComposioAllowlist={
-              (agent.composio_toolkit_allowlist ?? []).length > 0
-            }
-            onChange={(next) => update(next)}
           />
-        </PropRow>
-        <PropRow label={t(($) => $.inspector.prop_concurrency)} interactive={false}>
-          <ConcurrencyPicker
-            value={agent.max_concurrent_tasks}
-            canEdit={canEdit}
-            onChange={(n) => update({ max_concurrent_tasks: n })}
-          />
-        </PropRow>
-      </Section>
-
-      {/* Details — read-only (no hover, no chip styling — these aren't clickable) */}
-      <Section label={t(($) => $.inspector.section_details)}>
-        {owner && (
-          <PropRow label={t(($) => $.inspector.prop_owner)} interactive={false}>
-            <span className="flex min-w-0 items-center gap-1.5">
-              <ActorAvatar
-                actorType="member"
-                actorId={owner.user_id}
-                size="xs"
-              />
-              <span className="truncate">{owner.name}</span>
-            </span>
-          </PropRow>
-        )}
-        <PropRow label={t(($) => $.inspector.prop_created)} interactive={false}>
-          <span className="text-muted-foreground">
-            {timeAgo(agent.created_at)}
-          </span>
-        </PropRow>
-        <PropRow label={t(($) => $.inspector.prop_updated)} interactive={false}>
-          <span className="text-muted-foreground">
-            {timeAgo(agent.updated_at)}
-          </span>
-        </PropRow>
-      </Section>
-
-      {/* Skills */}
-      <div className="flex flex-col border-b px-5 py-4">
-        <div className="mb-2 flex items-center gap-2">
-          <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
-            {t(($) => $.inspector.section_skills)}
-          </span>
-          <span className="font-mono text-[10px] tabular-nums text-muted-foreground/70">
-            {agent.skills.length}
-          </span>
-        </div>
-        <div className="flex flex-wrap gap-1">
-          {agent.skills.map((s) => (
-            <span
-              key={s.id}
-              className="rounded-md bg-muted px-1.5 py-0.5 font-mono text-[10px] font-medium text-muted-foreground"
-            >
-              {s.name}
-            </span>
-          ))}
-          <SkillAttach agent={agent} canEdit={canEdit} />
-        </div>
-      </div>
-
-      {/* Integrations — surfaces external-channel bind entry points
-          (Lark + Slack today; Discord in the future). Each bind button
-          self-hides when its server-side install capability gate is
-          closed, so this section may render empty on deployments without
-          a configured channel — that's intentional and matches the
-          "don't surface a flow that will fail" guarantee. We only mount
-          it for editors: viewers shouldn't see a CTA they can't action. */}
-      {canEdit && (
-        <div className="flex flex-col px-5 py-4">
-          <div className="mb-2 flex items-center gap-2">
-            <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
-              {t(($) => $.inspector.section_integrations)}
-            </span>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <LarkAgentBindButton
-              agentId={agent.id}
-              agentName={agent.name}
-              agentOwnerId={agent.owner_id}
-              onShowConnectedDetails={onShowIntegrations}
-            />
-            <SlackAgentBindButton
-              agentId={agent.id}
-              agentName={agent.name}
-              onShowConnectedDetails={onShowIntegrations}
-            />
-          </div>
-        </div>
-      )}
-    </aside>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Layout helpers
-// ---------------------------------------------------------------------------
-
-function Section({
-  label,
-  children,
-}: {
-  label: string;
-  children: ReactNode;
-}) {
-  return (
-    <div className="border-b px-5 py-4">
-      <div className="mb-1 -mx-2 px-2 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
-        {label}
-      </div>
-      <div className="grid grid-cols-[auto_1fr] gap-x-2 gap-y-0.5">
-        {children}
-      </div>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Identity — avatar / name / description editors
-// ---------------------------------------------------------------------------
-
-function AvatarEditor({
-  agent,
-  canEdit,
-  onUpdate,
-}: {
-  agent: Agent;
-  canEdit: boolean;
-  onUpdate: (data: Record<string, unknown>) => Promise<void>;
-}) {
-  if (!canEdit) {
-    return (
-      <div className="h-14 w-14 shrink-0 overflow-hidden rounded-full">
-        <ActorAvatar actorType="agent" actorId={agent.id} size="2xl" />
-      </div>
-    );
-  }
-
-  return (
-    <AvatarUploadControl
-      variant="agent"
-      value={agent.avatar_url ?? null}
-      name={agent.name}
-      size={56}
-      onUploaded={(url) => onUpdate({ avatar_url: url })}
-    />
-  );
-}
-
-function NameAndDescription({
-  agent,
-  canEdit,
-  onUpdate,
-}: {
-  agent: Agent;
-  canEdit: boolean;
-  onUpdate: (data: Record<string, unknown>) => Promise<void>;
-}) {
-  const { t } = useT("agents");
-  if (!canEdit) {
-    return (
-      <div className="flex flex-col gap-1">
-        <span className="text-base font-semibold leading-tight">
-          {agent.name}
-        </span>
-        {agent.description ? (
-          <span className="text-xs leading-relaxed text-muted-foreground">
-            {agent.description}
-          </span>
-        ) : (
-          <span className="text-xs italic leading-relaxed text-muted-foreground/50">
-            {t(($) => $.inspector.no_description_placeholder)}
-          </span>
-        )}
-      </div>
-    );
-  }
-
-  return (
-    <div className="flex flex-col gap-1">
-      <InlineEditPopover
-        value={agent.name}
-        onSave={(v) => onUpdate({ name: v.trim() })}
-        kind="input"
-        title={t(($) => $.inspector.rename_title)}
-        placeholder={t(($) => $.inspector.rename_placeholder)}
-        validate={(v) => (v.trim().length > 0 ? null : t(($) => $.inspector.rename_required))}
-      >
-        {(triggerProps) => (
-          <button
-            type="button"
-            {...triggerProps}
-            className="group -mx-1 inline-flex items-center gap-1.5 self-start rounded px-1 text-left text-base font-semibold leading-tight transition-colors hover:bg-accent/50"
+          <SettingsRow
+            label={t(($) => $.inspector.prop_concurrency)}
+            controlClassName="sm:w-80"
           >
-            <span>{agent.name}</span>
-            <Pencil className="h-3 w-3 shrink-0 text-muted-foreground/0 transition-colors group-hover:text-muted-foreground" />
-          </button>
-        )}
-      </InlineEditPopover>
-
-      <DescriptionEditor
-        value={agent.description ?? ""}
-        onSave={(v) => onUpdate({ description: v })}
-      />
+            <ConcurrencyField
+              value={agent.max_concurrent_tasks}
+              canEdit={canEdit}
+              onSave={(next) => update({ max_concurrent_tasks: next })}
+            />
+          </SettingsRow>
+        </SettingsCard>
+      </SettingsSection>
     </div>
   );
 }
 
-// Description editor — modal because the description benefits from a roomy
-// composition surface (the inline popover was 288 px wide × 3 rows, too
-// cramped to read or edit anything substantial). Name stays in the inline
-// popover above: a single line is the right shape for it.
-//
-// The editor body is split into a child component that mounts only while
-// the dialog is open. That way the draft state is initialised from `value`
-// at mount time and never reset by an external update mid-edit — closing
-// the dialog unmounts the body, reopening starts fresh with the latest
-// value. This is the React-recommended replacement for the
-// `useEffect(reset, [value])` anti-pattern (see "You Might Not Need an
-// Effect" — Resetting state with a key / mount).
-function DescriptionEditor({
+function ConcurrencyField({
   value,
+  canEdit,
   onSave,
 }: {
-  value: string;
-  onSave: (next: string) => Promise<void>;
+  value: number;
+  canEdit: boolean;
+  onSave: (next: number) => Promise<void>;
 }) {
   const { t } = useT("agents");
-  const [open, setOpen] = useState(false);
+  const [draft, setDraft] = useState(String(value));
+  const min = 1;
+  const max = 50;
 
-  return (
-    <>
-      <button
-        type="button"
-        onClick={() => setOpen(true)}
-        className="group -mx-1 inline-flex items-start gap-1.5 self-start rounded px-1 text-left text-xs leading-relaxed transition-colors hover:bg-accent/50"
-      >
-        {value ? (
-          <span className="text-muted-foreground">{value}</span>
-        ) : (
-          <span className="italic text-muted-foreground/50">{t(($) => $.inspector.no_description_placeholder)}</span>
-        )}
-        <Pencil className="mt-0.5 h-3 w-3 shrink-0 text-muted-foreground/0 transition-colors group-hover:text-muted-foreground" />
-      </button>
+  useEffect(() => setDraft(String(value)), [value]);
 
-      <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="sm:max-w-lg">
-          {open && (
-            <DescriptionEditorBody
-              initialValue={value}
-              onSave={onSave}
-              onClose={() => setOpen(false)}
-            />
-          )}
-        </DialogContent>
-      </Dialog>
-    </>
-  );
-}
-
-function DescriptionEditorBody({
-  initialValue,
-  onSave,
-  onClose,
-}: {
-  initialValue: string;
-  onSave: (next: string) => Promise<void>;
-  onClose: () => void;
-}) {
-  const { t } = useT("agents");
-  const [draft, setDraft] = useState(initialValue);
-  const [saving, setSaving] = useState(false);
-
-  const length = [...draft].length;
-  const overLimit = length > AGENT_DESCRIPTION_MAX_LENGTH;
-  const dirty = draft !== initialValue;
-
-  const commit = async () => {
-    if (overLimit || !dirty) return;
-    setSaving(true);
-    try {
-      await onSave(draft);
-      onClose();
-    } catch {
-      // toast handled by parent's onUpdate
-    } finally {
-      setSaving(false);
+  const commit = () => {
+    const next = Number(draft);
+    if (!Number.isInteger(next) || next < min || next > max) {
+      setDraft(String(value));
+      return;
     }
+    if (next !== value) void onSave(next);
   };
 
   return (
-    <>
-      <DialogHeader>
-        <DialogTitle>{t(($) => $.inspector.edit_description_title)}</DialogTitle>
-      </DialogHeader>
-      <div className="flex flex-col gap-2">
-        <textarea
-          autoFocus
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          placeholder={t(($) => $.inspector.description_placeholder)}
-          rows={6}
-          onKeyDown={(e) => {
-            if (e.key === "Escape") {
-              onClose();
-              return;
-            }
-            if (isImeComposing(e)) return;
-            if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-              e.preventDefault();
-              void commit();
-            }
-          }}
-          className="w-full resize-none rounded-md border bg-transparent px-3 py-2 text-sm outline-none focus-visible:border-input"
-        />
-        <CharCounter length={length} max={AGENT_DESCRIPTION_MAX_LENGTH} />
-      </div>
-      <DialogFooter>
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={onClose}
-          disabled={saving}
-        >
-          {t(($) => $.inspector.cancel)}
-        </Button>
-        <Button
-          size="sm"
-          onClick={() => void commit()}
-          disabled={saving || overLimit || !dirty}
-        >
-          {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : t(($) => $.inspector.save)}
-        </Button>
-      </DialogFooter>
-    </>
-  );
-}
-
-
-// Generic single-field popover editor used for name / description. Keeps the
-// trigger styling fully in the caller's hands by using a render prop.
-function InlineEditPopover({
-  value,
-  onSave,
-  kind,
-  title,
-  placeholder,
-  validate,
-  children,
-}: {
-  value: string;
-  onSave: (next: string) => Promise<void>;
-  kind: "input" | "textarea";
-  title: string;
-  placeholder?: string;
-  validate?: (v: string) => string | null;
-  children: (triggerProps: {
-    onClick: (e: React.MouseEvent) => void;
-  }) => ReactNode;
-}) {
-  const { t } = useT("agents");
-  const [open, setOpen] = useState(false);
-  const [draft, setDraft] = useState(value);
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  // Reset draft when popover opens or upstream value changes between sessions.
-  useEffect(() => {
-    if (open) {
-      setDraft(value);
-      setError(null);
-    }
-  }, [open, value]);
-
-  const commit = async () => {
-    const err = validate?.(draft) ?? null;
-    if (err) {
-      setError(err);
-      return;
-    }
-    if (draft === value) {
-      setOpen(false);
-      return;
-    }
-    setSaving(true);
-    try {
-      await onSave(draft);
-      setOpen(false);
-    } catch {
-      // toast handled by parent's onUpdate
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger
-        render={children({ onClick: () => setOpen(true) }) as React.ReactElement}
+    <div>
+      <Input
+        id="agent-concurrency"
+        type="number"
+        name="agent-concurrency"
+        autoComplete="off"
+        inputMode="numeric"
+        min={min}
+        max={max}
+        value={draft}
+        onChange={(event) => setDraft(event.target.value)}
+        onBlur={commit}
+        onKeyDown={(event) => {
+          if (isImeComposing(event)) return;
+          if (event.key === "Enter") {
+            event.preventDefault();
+            commit();
+          }
+        }}
+        disabled={!canEdit}
+        aria-label={t(($) => $.inspector.prop_concurrency)}
+        className="font-mono tabular-nums"
       />
-      <PopoverContent align="start" className="w-72 p-3">
-        <div className="space-y-2">
-          <p className="text-xs font-medium">{title}</p>
-          {kind === "input" ? (
-            <Input
-              autoFocus
-              value={draft}
-              onChange={(e) => {
-                setDraft(e.target.value);
-                if (error) setError(null);
-              }}
-              placeholder={placeholder}
-              onKeyDown={(e) => {
-                if (e.key === "Escape") {
-                  setOpen(false);
-                  return;
-                }
-                if (isImeComposing(e)) return;
-                if (e.key === "Enter") {
-                  e.preventDefault();
-                  void commit();
-                }
-              }}
-              className="h-8"
-            />
-          ) : (
-            <textarea
-              autoFocus
-              value={draft}
-              onChange={(e) => {
-                setDraft(e.target.value);
-                if (error) setError(null);
-              }}
-              placeholder={placeholder}
-              onKeyDown={(e) => {
-                if (e.key === "Escape") {
-                  setOpen(false);
-                  return;
-                }
-                if (isImeComposing(e)) return;
-                if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-                  e.preventDefault();
-                  void commit();
-                }
-              }}
-              rows={3}
-              className="w-full resize-none rounded-md border bg-transparent px-2 py-1.5 text-xs outline-none focus-visible:border-input"
-            />
-          )}
-          {error && <p className="text-xs text-destructive">{error}</p>}
-          <div className="flex items-center justify-end gap-2">
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setOpen(false)}
-              disabled={saving}
-            >
-              {t(($) => $.inspector.cancel)}
-            </Button>
-            <Button
-              size="sm"
-              onClick={() => void commit()}
-              disabled={saving || draft === value}
-            >
-              {saving ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              ) : (
-                t(($) => $.inspector.save)
-              )}
-            </Button>
-          </div>
-        </div>
-      </PopoverContent>
-    </Popover>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Presence badge — unchanged from the previous version
-// ---------------------------------------------------------------------------
-
-function PresenceBadge({
-  presence,
-}: {
-  presence: AgentPresenceDetail | null | undefined;
-}) {
-  const { t } = useT("agents");
-  // Archived is carried by the unified presence (deriveAgentPresenceDetail
-  // sets availability="archived" before any runtime/task scan), so the
-  // normal path below renders the gray "Archived" badge with no special
-  // case here — same single source of truth as every other status surface.
-  if (!presence) {
-    return (
-      <span className="inline-flex h-5 w-20 animate-pulse rounded-md bg-muted" />
-    );
-  }
-  const av = availabilityConfig[presence.availability];
-  return (
-    <div className="flex flex-wrap items-center gap-1.5">
-      <span
-        className={`inline-flex items-center gap-1.5 rounded-md border px-1.5 py-0.5 text-xs ${av.textClass}`}
-      >
-        <span className={`h-1.5 w-1.5 rounded-full ${av.dotClass}`} />
-        {t(($) => $.availability[presence.availability])}
-      </span>
+      <p className="mt-1 text-xs text-muted-foreground">
+        {t(($) => $.pickers.concurrency_range, { min, max })}
+      </p>
     </div>
   );
 }

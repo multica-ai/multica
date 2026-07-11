@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { Globe, Lock, Users, UsersRound } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { Globe, Loader2, Lock, Users } from "lucide-react";
 import type {
   AgentInvocationTarget,
   AgentInvocationTargetInput,
@@ -9,332 +9,347 @@ import type {
   AgentVisibility,
   MemberWithUser,
 } from "@multica/core/types";
+import { Button } from "@multica/ui/components/ui/button";
 import { Checkbox } from "@multica/ui/components/ui/checkbox";
-import {
-  Tooltip,
-  TooltipTrigger,
-  TooltipContent,
-} from "@multica/ui/components/ui/tooltip";
-import {
-  PickerItem,
-  PropertyPicker,
-} from "../../../issues/components/pickers";
 import { ActorAvatar } from "../../../common/actor-avatar";
 import { useT } from "../../../i18n";
-import { CHIP_CLASS } from "./chip";
-
-/**
- * AccessPicker — the owner-facing control for MUL-3963 agent invocation
- * permissions. It reads/writes `permission_mode` + `invocation_targets`
- * (the authoritative gate) rather than the legacy derived `visibility` field.
- *
- * Access is EITHER Private (only me) OR Public with a STACKABLE, MIXED
- * allow-list: the owner can combine "Everyone in workspace" + any number of
- * specific members + (future) teams on the same agent. `canInvokeAgent` on
- * the backend admits an actor matching ANY target (OR), so the picker emits
- * the full union of every selected target and the whole set is replaced on
- * save.
- *
- * OWNER-ONLY (MUL-3963): access is the one agent property a workspace admin
- * may NOT change — only the agent owner decides who can run their agent, and
- * the backend rejects a non-owner permission change with 403. So `canEdit`
- * here must be passed as "is the viewer the agent owner", NOT the general
- * manage permission. When `canEdit` is false the control is a static,
- * non-interactive read-only display (current value + a lock affordance +
- * a tooltip explaining only the owner can change it), the same way GitHub /
- * Notion present a permission setting a viewer can see but not edit. There is
- * deliberately no clickable trigger in that state, so a non-owner can never
- * open a picker that the backend would only bounce back.
- */
 
 export type AccessChange = {
   permission_mode: AgentPermissionMode;
   invocation_targets: AgentInvocationTargetInput[];
 };
 
-// The helpers below defensively coerce a missing (`undefined` / `null`) list
-// to an empty array. `Agent.invocation_targets` is TYPED as a required array,
-// and the modern backend always serialises `[]` when there are no grants,
-// but older self-host servers / stale query caches / template create
-// responses (see `MinimalAgentSchema` in api/schemas.ts) can still surface an
-// undefined value at runtime. Without the fallback, opening an agent detail
-// page against a legacy backend crashes the whole route with
-// "Cannot read properties of undefined (reading 'some')" (GH #4915).
 function hasWorkspaceTarget(
   targets: AgentInvocationTarget[] | undefined | null,
 ): boolean {
-  return (targets ?? []).some((t) => t.target_type === "workspace");
+  return (targets ?? []).some((target) => target.target_type === "workspace");
 }
 
-function selectedMemberIds(
+function selectedTargetIds(
   targets: AgentInvocationTarget[] | undefined | null,
+  type: "member" | "team",
 ): string[] {
   return (targets ?? [])
-    .filter((t) => t.target_type === "member" && t.target_id !== null)
-    .map((t) => t.target_id as string);
+    .filter(
+      (target) => target.target_type === type && target.target_id !== null,
+    )
+    .map((target) => target.target_id as string);
 }
 
-function selectedTeamIds(
-  targets: AgentInvocationTarget[] | undefined | null,
-): string[] {
-  return (targets ?? [])
-    .filter((t) => t.target_type === "team" && t.target_id !== null)
-    .map((t) => t.target_id as string);
-}
-
+/**
+ * Draft-first access editor. Visibility changes are security-sensitive, so
+ * choosing Shared only reveals the scope controls; nothing is persisted until
+ * the owner explicitly saves the complete selection.
+ */
 export function AccessPicker({
   permissionMode,
   invocationTargets,
   visibility: _visibility,
   members,
+  ownerId,
   canEdit = true,
   hasComposioAllowlist = false,
+  onDirtyChange,
   onChange,
 }: {
   permissionMode: AgentPermissionMode;
-  /**
-   * The agent's invocation grants. Typed loose (may be `undefined`) because
-   * the schema is `optional()` and older self-host backends / template create
-   * responses can omit the field even though the modern shape is a
-   * required-array. The internal helpers `?? []` this before reading.
-   */
   invocationTargets: AgentInvocationTarget[] | undefined;
-  /**
-   * Legacy derived visibility. No longer rendered directly (the read-only and
-   * editable states both summarise permission_mode + targets), but kept in the
-   * props so existing call sites compile unchanged.
-   */
   visibility: AgentVisibility;
   members: MemberWithUser[];
-  /**
-   * True ONLY when the viewer is the agent owner (MUL-3963 access is
-   * owner-only). When false, render the static read-only state.
-   */
+  ownerId?: string | null;
   canEdit?: boolean;
-  /**
-   * True when the agent already has a non-empty Composio toolkit allowlist.
-   * Surfaces a one-time hint when the owner shares a previously-private agent,
-   * since sharing widens who can drive those apps through the agent.
-   */
   hasComposioAllowlist?: boolean;
+  onDirtyChange?: (dirty: boolean) => void;
   onChange: (next: AccessChange) => Promise<void> | void;
 }) {
   const { t } = useT("agents");
-  const [open, setOpen] = useState(false);
-  const [showComposioHint, setShowComposioHint] = useState(false);
+  const { t: tc } = useT("common");
+  const persistedPrivate = permissionMode === "private";
+  const persistedWorkspace =
+    !persistedPrivate && hasWorkspaceTarget(invocationTargets);
+  const persistedMembers = useMemo(
+    () => selectedTargetIds(invocationTargets, "member"),
+    [invocationTargets],
+  );
+  const teamIds = useMemo(
+    () => selectedTargetIds(invocationTargets, "team"),
+    [invocationTargets],
+  );
 
-  // Display summary of the current access, shared by the read-only and
-  // editable states so they never drift.
-  const isPrivate = permissionMode === "private";
-  const workspaceOn = !isPrivate && hasWorkspaceTarget(invocationTargets);
-  const memberIds = selectedMemberIds(invocationTargets);
-  // Team targets aren't editable in v1, but must be preserved across saves so
-  // a batch-replace never silently drops them.
-  const teamIds = selectedTeamIds(invocationTargets);
-  const memberCount = memberIds.length;
+  const [draftPrivate, setDraftPrivate] = useState(persistedPrivate);
+  const [draftWorkspace, setDraftWorkspace] = useState(persistedWorkspace);
+  const [draftMembers, setDraftMembers] = useState(persistedMembers);
+  const [saving, setSaving] = useState(false);
 
-  const SummaryIcon = isPrivate
-    ? Lock
-    : workspaceOn
-      ? Globe
-      : memberCount > 0
-        ? Users
-        : Globe;
+  useEffect(() => {
+    setDraftPrivate(persistedPrivate);
+    setDraftWorkspace(persistedWorkspace);
+    setDraftMembers(persistedMembers);
+  }, [persistedMembers, persistedPrivate, persistedWorkspace]);
 
-  const summaryLabel = isPrivate
-    ? t(($) => $.access.trigger_private)
-    : workspaceOn
-      ? t(($) => $.access.trigger_workspace)
-      : memberCount > 0
-        ? t(($) => $.access.trigger_members_count, { count: memberCount })
-        : t(($) => $.access.trigger_members_empty);
+  const editableMembers = ownerId
+    ? members.filter((member) => member.user_id !== ownerId)
+    : members;
 
-  // Read-only state for non-owners: current value + lock + owner-only tooltip.
-  // No interactive trigger is rendered, so the control can never be clicked
-  // into a change the backend would reject.
-  if (!canEdit) {
-    const readOnlyMsg = t(($) => $.access.owner_only_readonly);
-    return (
-      <Tooltip>
-        <TooltipTrigger
-          render={
-            <span
-              className="inline-flex items-center gap-1 text-xs text-muted-foreground"
-              aria-label={readOnlyMsg}
-              data-testid="access-readonly"
-            >
-              <SummaryIcon className="h-3 w-3 shrink-0" />
-              <span className="truncate">{summaryLabel}</span>
-              <Lock className="h-3 w-3 shrink-0 opacity-60" />
-            </span>
-          }
-        />
-        <TooltipContent>{readOnlyMsg}</TooltipContent>
-      </Tooltip>
-    );
-  }
+  const sameMembers =
+    draftMembers.length === persistedMembers.length &&
+    draftMembers.every((id) => persistedMembers.includes(id));
+  const dirty =
+    draftPrivate !== persistedPrivate ||
+    (!draftPrivate &&
+      (draftWorkspace !== persistedWorkspace || !sameMembers));
+  const hasSharedTarget =
+    draftWorkspace || draftMembers.length > 0 || teamIds.length > 0;
 
-  // Build the union of every selected target and emit it. An empty union
-  // collapses to Private (owner-only), which is the intuitive "nothing shared"
-  // state rather than a public_to with no grants.
-  const emit = (next: {
-    workspace: boolean;
-    members: string[];
-    teams: string[];
-  }) => {
-    const targets: AgentInvocationTargetInput[] = [];
-    if (next.workspace) targets.push({ target_type: "workspace" });
-    for (const id of next.members)
-      targets.push({ target_type: "member", target_id: id });
-    for (const id of next.teams)
-      targets.push({ target_type: "team", target_id: id });
-    if (targets.length === 0) {
-      void onChange({ permission_mode: "private", invocation_targets: [] });
-      return;
-    }
-    void onChange({
-      permission_mode: "public_to",
-      invocation_targets: targets,
-    });
-  };
+  useEffect(() => {
+    onDirtyChange?.(dirty);
+    return () => onDirtyChange?.(false);
+  }, [dirty, onDirtyChange]);
 
-  const maybeFlagComposio = (goingPublic: boolean) => {
-    if (hasComposioAllowlist && isPrivate && goingPublic) {
-      setShowComposioHint(true);
-    }
-  };
-
-  const choosePrivate = () => {
-    setShowComposioHint(false);
-    void onChange({ permission_mode: "private", invocation_targets: [] });
-  };
-
-  const toggleWorkspace = (checked: boolean) => {
-    maybeFlagComposio(checked);
-    emit({ workspace: checked, members: memberIds, teams: teamIds });
+  const chooseMode = (mode: "private" | "shared") => {
+    const nextPrivate = mode === "private";
+    setDraftPrivate(nextPrivate);
+    if (!nextPrivate && !hasSharedTarget) setDraftWorkspace(true);
   };
 
   const toggleMember = (userId: string, checked: boolean) => {
-    maybeFlagComposio(checked);
-    const next = new Set(memberIds);
-    if (checked) next.add(userId);
-    else next.delete(userId);
-    emit({ workspace: workspaceOn, members: Array.from(next), teams: teamIds });
+    setDraftMembers((current) => {
+      const next = new Set(current);
+      if (checked) next.add(userId);
+      else next.delete(userId);
+      return Array.from(next);
+    });
   };
 
-  const tooltip = t(($) => $.access.tooltip);
+  const save = async () => {
+    if (!dirty || saving || (!draftPrivate && !hasSharedTarget)) return;
+    const targets: AgentInvocationTargetInput[] = [];
+    if (!draftPrivate && draftWorkspace) {
+      targets.push({ target_type: "workspace" });
+    }
+    if (!draftPrivate) {
+      for (const id of draftMembers) {
+        targets.push({ target_type: "member", target_id: id });
+      }
+      for (const id of teamIds) {
+        targets.push({ target_type: "team", target_id: id });
+      }
+    }
+
+    setSaving(true);
+    try {
+      await onChange({
+        permission_mode: draftPrivate ? "private" : "public_to",
+        invocation_targets: draftPrivate ? [] : targets,
+      });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (!canEdit) {
+    const summaryLabel = persistedPrivate
+      ? t(($) => $.access.trigger_private)
+      : persistedWorkspace
+        ? t(($) => $.access.trigger_workspace)
+        : persistedMembers.length > 0
+          ? t(($) => $.access.trigger_members_count, {
+              count: persistedMembers.length,
+            })
+          : t(($) => $.access.trigger_members_empty);
+
+    return (
+      <div
+        className="flex items-start gap-3 px-4 py-4"
+        aria-label={t(($) => $.access.owner_only_readonly)}
+        data-testid="access-readonly"
+      >
+        <span className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground">
+          <Lock className="size-4" aria-hidden="true" />
+        </span>
+        <div className="min-w-0">
+          <p className="text-sm font-medium">{summaryLabel}</p>
+          <p className="mt-0.5 text-xs leading-5 text-muted-foreground">
+            {t(($) => $.access.owner_only_readonly)}
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <PropertyPicker
-      open={open}
-      onOpenChange={(v) => {
-        setOpen(v);
-        if (v) setShowComposioHint(false);
-      }}
-      width="w-auto min-w-[15rem]"
-      align="start"
-      tooltip={tooltip}
-      triggerRender={
-        <button type="button" className={CHIP_CLASS} aria-label={tooltip} />
-      }
-      trigger={
-        <>
-          <SummaryIcon className="h-3 w-3 shrink-0 text-muted-foreground" />
-          <span className="truncate">{summaryLabel}</span>
-        </>
-      }
-    >
-      {/* Private is the exclusive "not shared" choice: selecting it clears the
-          whole allow-list. */}
-      <PickerItem selected={isPrivate} onClick={choosePrivate}>
-        <Lock className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-        <div className="text-left">
-          <div className="font-medium">{t(($) => $.access.private_title)}</div>
-          <div className="text-xs text-muted-foreground">
-            {t(($) => $.access.private_desc)}
-          </div>
-        </div>
-      </PickerItem>
+    <fieldset>
+      <legend className="sr-only">{t(($) => $.access.tooltip)}</legend>
 
-      <div className="mt-1 border-t pt-1">
-        <div className="px-2 pb-1 pt-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
-          {t(($) => $.access.public_group)}
-        </div>
+      <div className="divide-y divide-surface-border">
+        <AccessChoice
+          name="agent-access-mode"
+          value="private"
+          icon={Lock}
+          title={t(($) => $.access.private_title)}
+          description={t(($) => $.access.private_desc)}
+          selected={draftPrivate}
+          onSelect={() => chooseMode("private")}
+        />
+        <AccessChoice
+          name="agent-access-mode"
+          value="shared"
+          icon={Users}
+          title={t(($) => $.access.shared_title)}
+          description={t(($) => $.access.shared_desc)}
+          selected={!draftPrivate}
+          onSelect={() => chooseMode("shared")}
+        />
+      </div>
 
-        {/* Everyone in workspace — stackable with member/team targets. */}
-        <label className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-accent">
-          <Checkbox
-            checked={workspaceOn}
-            onCheckedChange={(v) => toggleWorkspace(v === true)}
-            aria-label={t(($) => $.access.workspace_title)}
-          />
-          <Globe className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-          <div className="min-w-0 flex-1 text-left">
-            <div className="font-medium">
-              {t(($) => $.access.workspace_title)}
+      {!draftPrivate ? (
+        <div className="space-y-6 border-t border-surface-border bg-muted/20 px-4 py-5 sm:px-6">
+          <div>
+            <h4 className="text-sm font-medium">
+              {t(($) => $.access.public_group)}
+            </h4>
+            <div className="mt-3 flex items-start gap-3 rounded-lg border bg-background p-3">
+              <Checkbox
+                id="agent-access-workspace"
+                checked={draftWorkspace}
+                onCheckedChange={(value) =>
+                  setDraftWorkspace(value === true)
+                }
+                className="mt-0.5"
+              />
+              <label
+                htmlFor="agent-access-workspace"
+                className="flex min-w-0 flex-1 cursor-pointer items-start gap-3"
+              >
+                <Globe
+                  className="mt-0.5 size-4 shrink-0 text-muted-foreground"
+                  aria-hidden="true"
+                />
+                <span className="min-w-0">
+                  <span className="block text-sm font-medium">
+                    {t(($) => $.access.workspace_title)}
+                  </span>
+                  <span className="mt-0.5 block text-xs leading-5 text-muted-foreground">
+                    {t(($) => $.access.workspace_desc)}
+                  </span>
+                </span>
+              </label>
             </div>
-            <div className="truncate text-xs text-muted-foreground">
-              {t(($) => $.access.workspace_desc)}
-            </div>
           </div>
-        </label>
-      </div>
 
-      {/* Specific people — multi-select, stacks with the workspace toggle. */}
-      <div className="mt-1 border-t pt-1">
-        <div className="flex items-center gap-1.5 px-2 pb-1 pt-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
-          <Users className="h-3 w-3 shrink-0" />
-          {t(($) => $.access.members_group)}
-        </div>
-        {members.length === 0 ? (
-          <div className="px-2 py-2 text-xs text-muted-foreground">
-            {t(($) => $.access.members_empty)}
+          <div>
+            <h4 className="text-sm font-medium">
+              {t(($) => $.access.members_group)}
+            </h4>
+            {editableMembers.length === 0 ? (
+              <p className="mt-3 text-xs text-muted-foreground">
+                {t(($) => $.access.members_empty)}
+              </p>
+            ) : (
+              <div className="mt-3 max-h-64 divide-y divide-surface-border overflow-y-auto rounded-lg border bg-background overscroll-contain">
+                {editableMembers.map((member) => {
+                  const id = `agent-access-member-${member.user_id}`;
+                  return (
+                    <div
+                      key={member.user_id}
+                      className="flex items-center gap-3 px-3 py-3 hover:bg-surface-hover"
+                    >
+                      <Checkbox
+                        id={id}
+                        checked={draftMembers.includes(member.user_id)}
+                        onCheckedChange={(value) =>
+                          toggleMember(member.user_id, value === true)
+                        }
+                      />
+                      <label
+                        htmlFor={id}
+                        className="flex min-w-0 flex-1 cursor-pointer items-center gap-3"
+                      >
+                        <ActorAvatar
+                          actorType="member"
+                          actorId={member.user_id}
+                          size="sm"
+                        />
+                        <span className="min-w-0 flex-1 truncate text-sm">
+                          {member.name}
+                        </span>
+                      </label>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
-        ) : (
-          <div className="max-h-48 overflow-y-auto">
-            {members.map((m) => {
-              const checked = memberIds.includes(m.user_id);
-              return (
-                <label
-                  key={m.user_id}
-                  className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-accent"
-                >
-                  <Checkbox
-                    checked={checked}
-                    onCheckedChange={(v) => toggleMember(m.user_id, v === true)}
-                    aria-label={m.name}
-                  />
-                  <ActorAvatar
-                    actorType="member"
-                    actorId={m.user_id}
-                    size="sm"
-                  />
-                  <span className="min-w-0 flex-1 truncate">{m.name}</span>
-                </label>
-              );
-            })}
-          </div>
-        )}
-      </div>
 
-      {/* Team — reserved for a future release; shown disabled so the roadmap
-          is visible without being actionable. The emit logic already carries
-          team targets through so nothing is lost once teams ship. */}
-      <div className="mt-1 border-t pt-1">
-        <div className="flex items-center gap-1.5 px-2 py-1.5 text-sm text-muted-foreground opacity-60">
-          <UsersRound className="h-3.5 w-3.5 shrink-0" />
-          <span className="font-medium">{t(($) => $.access.team_title)}</span>
-          <span className="rounded bg-muted px-1 py-0.5 text-[10px] font-medium">
-            {t(($) => $.access.team_coming_soon)}
-          </span>
-        </div>
-      </div>
+          {!hasSharedTarget ? (
+            <p className="text-xs text-destructive" role="alert">
+              {t(($) => $.access.shared_target_required)}
+            </p>
+          ) : null}
 
-      {showComposioHint && (
-        <div className="mx-1 mt-1 rounded-md bg-amber-500/10 px-2 py-1.5 text-xs text-amber-700 dark:text-amber-400">
-          {t(($) => $.access.composio_switch_hint)}
+          {hasComposioAllowlist && persistedPrivate ? (
+            <p className="border-l-2 border-warning pl-3 text-xs leading-5 text-muted-foreground">
+              {t(($) => $.access.composio_switch_hint)}
+            </p>
+          ) : null}
         </div>
-      )}
-    </PropertyPicker>
+      ) : null}
+
+      <div className="flex justify-end border-t border-surface-border px-4 py-3.5">
+        <Button
+          type="button"
+          onClick={() => void save()}
+          disabled={!dirty || saving || (!draftPrivate && !hasSharedTarget)}
+        >
+          {saving ? (
+            <Loader2
+              className="size-4 animate-spin motion-reduce:animate-none"
+              aria-hidden="true"
+            />
+          ) : null}
+          {tc(($) => $.save)}
+        </Button>
+      </div>
+    </fieldset>
+  );
+}
+
+function AccessChoice({
+  name,
+  value,
+  icon: Icon,
+  title,
+  description,
+  selected,
+  onSelect,
+}: {
+  name: string;
+  value: string;
+  icon: typeof Lock;
+  title: string;
+  description: string;
+  selected: boolean;
+  onSelect: () => void;
+}) {
+  return (
+    <label className="flex min-h-16 cursor-pointer items-start gap-3 px-4 py-3.5 transition-colors hover:bg-surface-hover">
+      <input
+        type="radio"
+        name={name}
+        value={value}
+        checked={selected}
+        onChange={onSelect}
+        className="mt-2 size-4 shrink-0 accent-foreground"
+      />
+      <span className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground">
+        <Icon className="size-4" aria-hidden="true" />
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block text-sm font-medium">{title}</span>
+        <span className="mt-0.5 block text-xs leading-5 text-muted-foreground">
+          {description}
+        </span>
+      </span>
+    </label>
   );
 }

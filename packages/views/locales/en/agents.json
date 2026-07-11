@@ -143,11 +143,21 @@
     "agent_archived_toast": "Agent archived",
     "archive_failed_toast": "Failed to archive agent",
     "agent_restored_toast": "Agent restored",
-    "restore_failed_toast": "Failed to restore agent"
+    "restore_failed_toast": "Failed to restore agent",
+    "assign_work": "Assign work",
+    "more_actions_aria": "Agent actions",
+    "updated": "Updated {{when}}"
   },
   "inspector": {
+    "section_profile": "Profile",
+    "section_profile_hint": "Manage how this agent appears across the workspace.",
+    "section_execution": "Execution",
+    "section_execution_hint": "Choose the runtime, model, reasoning level, and parallel task limit.",
+    "section_access": "Access",
+    "section_access_hint": "Control who can run this agent and use its connected capabilities.",
     "section_properties": "Properties",
     "section_details": "Details",
+    "section_details_hint": "Read-only ownership and lifecycle information.",
     "section_skills": "Skills",
     "section_integrations": "Integrations",
     "prop_runtime": "Runtime",
@@ -159,6 +169,10 @@
     "prop_created": "Created",
     "prop_updated": "Updated",
     "no_description_placeholder": "No description",
+    "avatar_label": "Avatar",
+    "avatar_hint": "Shown in assignments, activity, and chat.",
+    "name_label": "Name",
+    "description_label": "Description",
     "change_avatar_aria": "Change avatar",
     "avatar_updated_toast": "Avatar updated",
     "avatar_upload_failed_toast": "Failed to upload avatar",
@@ -169,6 +183,13 @@
     "description_placeholder": "What does this agent do?",
     "save": "Save",
     "cancel": "Cancel"
+  },
+  "overview": {
+    "agent_context": "Agent",
+    "access": "Access",
+    "attention_title": "Tasks need attention",
+    "attention_queued_one": "{{count}} task is queued while the runtime is unavailable.",
+    "attention_queued_other": "{{count}} tasks are queued while the runtime is unavailable."
   },
   "skill_attach": {
     "trigger_aria": "Attach a workspace skill",
@@ -211,6 +232,14 @@
     "clear_full": "Clear selection (use provider default)"
   },
   "tabs": {
+    "overview": "Overview",
+    "work": "Work",
+    "capabilities": "Capabilities",
+    "settings": "Settings",
+    "general": "General",
+    "access": "Access",
+    "page_navigation_aria": "Agent page",
+    "section_navigation_aria": "Agent section",
     "activity": "Activity",
     "tasks": "Tasks",
     "instructions": "Instructions",
@@ -299,7 +328,8 @@
       "unsaved_changes": "Unsaved changes"
     },
     "instructions": {
-      "intro": "Define this agent's identity and working style. Injected into the agent's context for every task. Markdown is supported.",
+      "intro": "Set the system prompt used for every task. Markdown is supported.",
+      "system_prompt_label": "System prompt",
       "placeholder": "Define this agent's role, expertise, and working style.\n\n# Example\nYou are a frontend engineer specializing in React and TypeScript.\n\n## Working Style\n- Write small, focused PRs — one commit per logical change\n- Prefer composition over inheritance\n- Always add unit tests for new components\n\n## Constraints\n- Do not modify shared/ types without explicit approval\n- Follow the existing component patterns in features/"
     },
     "env": {
@@ -326,16 +356,27 @@
       "empty_editable": "No environment variables configured. Add one to inject it into the agent at launch."
     },
     "custom_args": {
-      "intro": "Additional CLI arguments appended to the agent command at launch. Multi-token flags can share one row — they'll be split on whitespace before being passed to the CLI.",
-      "launch_mode_prefix": "Launch mode: ",
-      "launch_mode_args_placeholder": "<your args>",
-      "input_placeholder": "--flag value",
-      "remove_aria": "Remove argument",
+      "intro": "Add CLI arguments passed when this agent starts.",
+      "arguments_label": "Arguments",
+      "arguments_description": "Each item is passed as one token. The list order is preserved.",
+      "add_argument_action": "Add argument",
+      "add_action": "Add",
+      "update_action": "Update",
+      "cancel_action": "Cancel",
+      "command_preview_label": "Command preview",
+      "input_placeholder": "--profile",
+      "input_aria": "Argument {{index}}",
+      "new_argument_aria": "New argument",
+      "empty_title": "No arguments yet",
+      "empty_hint": "Add the first token to build the launch command.",
+      "edit_aria": "Edit argument {{index}}",
+      "remove_aria": "Remove argument {{index}}",
       "saved_toast": "Custom arguments saved",
       "save_failed_toast": "Failed to save custom arguments"
     },
     "mcp_config": {
-      "intro": "MCP server configuration forwarded to the runtime CLI (Claude via --mcp-config, Codex via $CODEX_HOME/config.toml, Hermes/Kimi/Kiro via ACP mcpServers, OpenCode via OPENCODE_CONFIG_CONTENT, OpenClaw via the per-task config wrapper). Stored verbatim and may contain secrets — only the agent owner and workspace admins can read it. Leave empty to fall back to the CLI's own default. For OpenClaw HTTP/SSE entries use OpenClaw's own field name (e.g. \"transport\": \"streamable-http\") instead of Claude's \"type\".",
+      "intro": "Configure the MCP servers available to this agent. Leave this empty to use the runtime defaults.",
+      "config_label": "Server configuration (JSON)",
       "placeholder": "{\n  \"mcpServers\": {\n    \"fetch\": {\n      \"command\": \"uvx\",\n      \"args\": [\"mcp-server-fetch\"]\n    }\n  }\n}",
       "editor_aria": "MCP config JSON editor",
       "clear_action": "Clear",
@@ -406,6 +447,15 @@
       "members_note": "Only workspace owners and admins can connect an agent to an external chat platform. You can view connected bots in Settings → Integrations."
     },
     "activity": {
+      "status": {
+        "queued": "Queued",
+        "dispatched": "Dispatched",
+        "waiting_local_directory": "Waiting for directory",
+        "running": "Running",
+        "completed": "Succeeded",
+        "failed": "Failed",
+        "cancelled": "Cancelled"
+      },
       "section_now": "Now",
       "section_last_30d": "Last 30 days",
       "section_recent": "Recent work",
@@ -414,8 +464,8 @@
       "subtitle_active_other": "{{count}} active tasks",
       "subtitle_performance": "Performance",
       "subtitle_no_recent": "Nothing finished yet",
-      "subtitle_recent_progress": "{{shown}} of {{total}}",
-      "subtitle_recent_latest": "{{count}} latest",
+      "subtitle_recent_progress": "{{shown}} of {{total}} runs",
+      "subtitle_recent_latest": "{{count}} latest runs",
       "empty_now": "This agent isn't running anything right now.",
       "empty_30d": "No completions in the last 30 days.",
       "empty_recent": "This agent hasn't completed anything yet.",
@@ -423,8 +473,11 @@
       "runs_one": "run",
       "runs_other": "runs",
       "success_pct": "{{percent}}% success",
+      "success_label": "succeeded",
       "avg_duration": "avg {{value}}",
+      "avg_duration_label": "average duration",
       "failed_count": "{{count}} failed",
+      "failed_label": "failed",
       "source_issue": "Issue",
       "source_chat": "Chat",
       "source_autopilot": "Autopilot",
@@ -464,6 +517,7 @@
     }
   },
   "access": {
+    "section_title": "Who can run this agent",
     "tooltip": "Access · who may run this agent",
     "trigger_private": "Only me",
     "trigger_workspace": "Workspace",
@@ -472,6 +526,9 @@
     "trigger_team": "Team",
     "private_title": "Private",
     "private_desc": "Only you can run this agent",
+    "shared_title": "Shared",
+    "shared_desc": "Choose the workspace or specific people who can run this agent",
+    "shared_target_required": "Select the workspace or at least one person before saving.",
     "workspace_title": "Public to workspace",
     "workspace_desc": "Anyone in this workspace can run this agent",
     "members_title": "Public to specific people",

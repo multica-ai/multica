@@ -135,11 +135,21 @@
     "agent_archived_toast": "已归档智能体",
     "archive_failed_toast": "归档智能体失败",
     "agent_restored_toast": "已恢复智能体",
-    "restore_failed_toast": "恢复智能体失败"
+    "restore_failed_toast": "恢复智能体失败",
+    "assign_work": "分配工作",
+    "more_actions_aria": "智能体操作",
+    "updated": "{{when}}更新"
   },
   "inspector": {
+    "section_profile": "资料",
+    "section_profile_hint": "管理该智能体在工作区内的展示方式。",
+    "section_execution": "执行配置",
+    "section_execution_hint": "选择运行时、模型、思考强度和并行任务上限。",
+    "section_access": "访问权限",
+    "section_access_hint": "控制谁可以运行该智能体并使用它已连接的能力。",
     "section_properties": "属性",
     "section_details": "详情",
+    "section_details_hint": "只读的所有权和生命周期信息。",
     "section_skills": "Skills",
     "section_integrations": "外部集成",
     "prop_runtime": "运行时",
@@ -151,6 +161,10 @@
     "prop_created": "创建时间",
     "prop_updated": "更新时间",
     "no_description_placeholder": "暂无描述",
+    "avatar_label": "头像",
+    "avatar_hint": "显示在任务分配、动态和聊天中。",
+    "name_label": "名称",
+    "description_label": "描述",
     "change_avatar_aria": "更换头像",
     "avatar_updated_toast": "已更新头像",
     "avatar_upload_failed_toast": "头像上传失败",
@@ -161,6 +175,12 @@
     "description_placeholder": "这个智能体做什么？",
     "save": "保存",
     "cancel": "取消"
+  },
+  "overview": {
+    "agent_context": "智能体",
+    "access": "访问权限",
+    "attention_title": "Task 需要处理",
+    "attention_queued_other": "运行时不可用，当前有 {{count}} 个 task 正在排队。"
   },
   "skill_attach": {
     "trigger_aria": "附加工作区 skill",
@@ -203,6 +223,14 @@
     "clear_full": "清除选择（使用提供方默认）"
   },
   "tabs": {
+    "overview": "概览",
+    "work": "工作",
+    "capabilities": "能力",
+    "settings": "设置",
+    "general": "通用",
+    "access": "访问权限",
+    "page_navigation_aria": "智能体页面",
+    "section_navigation_aria": "智能体分区",
     "activity": "动态",
     "tasks": "Tasks",
     "instructions": "指令",
@@ -290,7 +318,8 @@
       "unsaved_changes": "未保存的修改"
     },
     "instructions": {
-      "intro": "定义这个智能体的身份和工作风格。会注入到每个 task 的上下文。支持 Markdown。",
+      "intro": "设置每个任务都会使用的 System Prompt，支持 Markdown。",
+      "system_prompt_label": "System Prompt",
       "placeholder": "定义这个智能体的角色、专长和工作风格。\n\n# 示例\n你是一名专注 React 和 TypeScript 的前端工程师。\n\n## 工作风格\n- 写小而聚焦的 PR —— 每个逻辑变更一个 commit\n- 优先组合而不是继承\n- 新组件总是配单元测试\n\n## 约束\n- 未经明确批准不要修改 shared/ 下的 type\n- 遵循 features/ 中现有的组件模式"
     },
     "env": {
@@ -316,16 +345,27 @@
       "empty_editable": "尚未配置环境变量。新增一条即可在智能体启动时注入。"
     },
     "custom_args": {
-      "intro": "在智能体命令启动时追加的额外 CLI 参数。多 token 的参数可以共用一行 —— 在传给 CLI 前会按空白拆分。",
-      "launch_mode_prefix": "启动方式： ",
-      "launch_mode_args_placeholder": "<你的参数>",
-      "input_placeholder": "--flag 值",
-      "remove_aria": "移除参数",
+      "intro": "添加智能体启动时传入的 CLI 参数。",
+      "arguments_label": "参数",
+      "arguments_description": "每一项会作为一个完整 token 传入，并保留列表顺序。",
+      "add_argument_action": "添加参数",
+      "add_action": "添加",
+      "update_action": "更新",
+      "cancel_action": "取消",
+      "command_preview_label": "命令预览",
+      "input_placeholder": "--profile",
+      "input_aria": "参数 {{index}}",
+      "new_argument_aria": "新参数",
+      "empty_title": "还没有参数",
+      "empty_hint": "添加第一个 token，开始构建启动命令。",
+      "edit_aria": "编辑参数 {{index}}",
+      "remove_aria": "移除参数 {{index}}",
       "saved_toast": "已保存自定义参数",
       "save_failed_toast": "保存自定义参数失败"
     },
     "mcp_config": {
-      "intro": "转发给运行时 CLI 的 MCP 服务器配置（Claude 通过 --mcp-config，Codex 通过 $CODEX_HOME/config.toml，Hermes/Kimi/Kiro 通过 ACP mcpServers，OpenCode 通过 OPENCODE_CONFIG_CONTENT，OpenClaw 通过每个任务的配置 wrapper）。原样保存，可能包含密钥 —— 只有智能体所有者和工作区管理员可以读取。留空则回退到 CLI 自身的默认设置。OpenClaw 的 HTTP/SSE 条目需要使用 OpenClaw 自己的字段名（例如 \"transport\": \"streamable-http\"），而不是 Claude 的 \"type\"。",
+      "intro": "配置这个智能体可以使用的 MCP Server。留空时使用运行时的默认配置。",
+      "config_label": "Server 配置（JSON）",
       "placeholder": "{\n  \"mcpServers\": {\n    \"fetch\": {\n      \"command\": \"uvx\",\n      \"args\": [\"mcp-server-fetch\"]\n    }\n  }\n}",
       "editor_aria": "MCP 配置 JSON 编辑器",
       "clear_action": "清空",
@@ -395,6 +435,15 @@
       "members_note": "只有工作区的所有者和管理员才能把智能体连接到外部聊天平台。你可以在「设置 → 集成」中查看已连接的 Bot。"
     },
     "activity": {
+      "status": {
+        "queued": "排队中",
+        "dispatched": "已分发",
+        "waiting_local_directory": "等待目录",
+        "running": "进行中",
+        "completed": "成功",
+        "failed": "失败",
+        "cancelled": "已取消"
+      },
       "section_now": "当前",
       "section_last_30d": "近 30 天",
       "section_recent": "最近工作",
@@ -402,16 +451,19 @@
       "subtitle_active_other": "{{count}} 个进行中的 task",
       "subtitle_performance": "表现",
       "subtitle_no_recent": "还没有完成的 task",
-      "subtitle_recent_progress": "{{shown}} / {{total}}",
-      "subtitle_recent_latest": "最近 {{count}} 条",
+      "subtitle_recent_progress": "显示 {{shown}} / {{total}} 次运行",
+      "subtitle_recent_latest": "最近 {{count}} 次运行",
       "empty_now": "这个智能体当前没有在跑任何 task。",
       "empty_30d": "近 30 天没有任何完成记录。",
       "empty_recent": "这个智能体还没有完成过任何 task。",
       "show_more": "查看更多 →",
       "runs_other": "次运行",
       "success_pct": "{{percent}}% 成功",
+      "success_label": "成功",
       "avg_duration": "平均 {{value}}",
+      "avg_duration_label": "平均耗时",
       "failed_count": "{{count}} 次失败",
+      "failed_label": "失败",
       "source_issue": "Issue",
       "source_chat": "聊天",
       "source_autopilot": "自动化",
@@ -451,6 +503,7 @@
     }
   },
   "access": {
+    "section_title": "谁可以运行该智能体",
     "tooltip": "访问权限 · 谁可以运行该智能体",
     "trigger_private": "仅自己",
     "trigger_workspace": "工作区",
@@ -459,6 +512,9 @@
     "trigger_team": "团队",
     "private_title": "私有",
     "private_desc": "只有你可以运行该智能体",
+    "shared_title": "共享",
+    "shared_desc": "向整个工作区或指定成员开放该智能体",
+    "shared_target_required": "保存前，请选择整个工作区或至少一名成员。",
     "workspace_title": "公开给工作区",
     "workspace_desc": "工作区内任何人都可以运行该智能体",
     "members_title": "公开给指定成员",
@@ -468,7 +524,7 @@
     "team_coming_soon": "即将推出",
     "members_group": "成员",
     "public_group": "公开访问",
-    "owner_only_readonly": "只有该 Agent 的所有者可以更改谁能调用它。",
+    "owner_only_readonly": "只有该智能体的所有者可以更改谁能调用它。",
     "members_empty": "没有可选择的工作区成员",
     "composio_switch_hint": "提示 —— 该智能体已启用 Composio 应用。共享后，所有获得访问权限的人都可以通过该智能体使用这些应用。"
   },

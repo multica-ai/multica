@@ -4,13 +4,21 @@ import { useState } from "react";
 import {
   AlertCircle,
   ArrowLeft,
+  Bot,
+  Clock3,
   Lock,
   MoreHorizontal,
+  Plus,
+  Server,
   Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import type { Agent, UpdateAgentRequest } from "@multica/core/types";
+import type {
+  Agent,
+  AgentRuntime,
+  UpdateAgentRequest,
+} from "@multica/core/types";
 import {
   type AgentPresenceDetail,
   useWorkspacePresenceMap,
@@ -18,6 +26,7 @@ import {
 import { api, ApiError } from "@multica/core/api";
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { useModalStore } from "@multica/core/modals";
 import { useWorkspacePaths } from "@multica/core/paths";
 import {
   agentListOptions,
@@ -44,12 +53,12 @@ import {
 } from "@multica/ui/components/ui/dropdown-menu";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { AppLink, useNavigation } from "../../navigation";
-import { BreadcrumbHeader } from "../../layout/breadcrumb-header";
 import { PageHeader } from "../../layout/page-header";
-import { availabilityConfig } from "../presence";
-import { AgentDetailInspector } from "./agent-detail-inspector";
+import { ActorAvatar } from "../../common/actor-avatar";
+import { AgentPresenceIndicator } from "./agent-presence-indicator";
+import { VisibilityBadge } from "./visibility-badge";
 import { AgentOverviewPane, type DetailTab } from "./agent-overview-pane";
-import { useT } from "../../i18n";
+import { useT, useTimeAgo } from "../../i18n";
 
 interface AgentDetailPageProps {
   agentId: string;
@@ -97,7 +106,7 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
   // signature handles the not-found / loading case internally so the early
   // returns below don't violate the rules of hooks. Backend gates archive
   // and restore identically to edit, so a single `canEdit` covers them all.
-  const { canEdit } = useAgentPermissions(agent, wsId);
+  const { canAssign, canEdit } = useAgentPermissions(agent, wsId);
 
   const [confirmArchive, setConfirmArchive] = useState(false);
 
@@ -248,9 +257,16 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
     <div className="flex flex-1 min-h-0 flex-col">
       <DetailHeader
         agent={agent}
+        runtime={runtime}
         presence={presence}
         backHref={paths.agents()}
+        canAssign={canAssign.allowed}
         canArchive={canEdit.allowed}
+        onAssign={() =>
+          useModalStore
+            .getState()
+            .open("quick-create-issue", { agent_id: agent.id })
+        }
         onArchive={() => setConfirmArchive(true)}
       />
 
@@ -283,25 +299,16 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
         </div>
       )}
 
-      <div className="flex flex-1 min-h-0 flex-col gap-3 overflow-y-auto p-3 md:grid md:grid-cols-[320px_minmax(0,1fr)] md:gap-4 md:overflow-hidden md:p-6">
-        <AgentDetailInspector
+      <div className="flex flex-1 min-h-0 flex-col overflow-hidden">
+        <AgentOverviewPane
           agent={agent}
           runtime={runtime}
           owner={owner}
-          presence={presence}
           runtimes={runtimes}
           members={members}
+          onUpdate={handleUpdate}
           currentUserId={currentUser?.id ?? null}
           canEdit={canEdit.allowed}
-          onUpdate={handleUpdate}
-          onShowIntegrations={() => setTabNavIntent("integrations")}
-        />
-
-        <AgentOverviewPane
-          agent={agent}
-          runtimes={runtimes}
-          onUpdate={handleUpdate}
-          currentUserId={currentUser?.id ?? null}
           navIntent={tabNavIntent}
           onNavIntentHandled={() => setTabNavIntent(null)}
         />
@@ -355,64 +362,113 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
 
 function DetailHeader({
   agent,
+  runtime,
   presence,
   backHref,
+  canAssign,
   canArchive,
+  onAssign,
   onArchive,
 }: {
   agent: Agent;
+  runtime: AgentRuntime | null;
   presence: AgentPresenceDetail | null;
   backHref: string;
+  canAssign: boolean;
   canArchive: boolean;
+  onAssign: () => void;
   onArchive: () => void;
 }) {
   const { t } = useT("agents");
+  const timeAgo = useTimeAgo();
   const isArchived = !!agent.archived_at;
-  const av = presence
-    ? { ...availabilityConfig[presence.availability], label: t(($) => $.availability[presence.availability]) }
-    : null;
-  // Last-task state is intentionally not surfaced in the header — the
-  // Recent work section on this page already shows the same information
-  // (and richer: titles, timestamps, error messages). Showing "Completed"
-  // up here was redundant chrome.
 
   return (
-    <BreadcrumbHeader
-      segments={[{ href: backHref, label: t(($) => $.page.title) }]}
-      leaf={
-        <>
-          <h1 className="min-w-0 truncate text-sm font-medium text-foreground">{agent.name}</h1>
-          {av && presence && (
-            <span
-              className={`inline-flex shrink-0 items-center gap-1.5 rounded-md border px-1.5 py-0.5 text-xs ${av.textClass}`}
-            >
-              <span className={`h-1.5 w-1.5 rounded-full ${av.dotClass}`} />
-              {av.label}
-            </span>
-          )}
-        </>
-      }
-      actions={
-        !isArchived && canArchive ? (
+    <header className="shrink-0 border-b bg-background px-4 pb-5 pt-3 sm:px-6">
+      <div className="mx-auto max-w-[1440px]">
+        <div className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
+          <AppLink
+            href={backHref}
+            className="rounded-sm transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            {t(($) => $.page.title)}
+          </AppLink>
+          <span aria-hidden="true">/</span>
+          <span className="truncate text-foreground">{agent.name}</span>
+        </div>
+
+        <div className="mt-4 flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+          <div className="flex min-w-0 items-start gap-4">
+            <ActorAvatar
+              actorType="agent"
+              actorId={agent.id}
+              size="2xl"
+              profileLink={false}
+              className="ring-1 ring-border"
+            />
+            <div className="min-w-0 pt-0.5">
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+                <h1 className="min-w-0 text-balance text-xl font-semibold tracking-tight sm:text-2xl">
+                  {agent.name}
+                </h1>
+                <AgentPresenceIndicator detail={presence} />
+              </div>
+              <p className="mt-1 max-w-2xl text-pretty text-sm leading-6 text-muted-foreground">
+                {agent.description || t(($) => $.inspector.no_description_placeholder)}
+              </p>
+              <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-muted-foreground">
+                <span className="inline-flex min-w-0 items-center gap-1.5">
+                  <Bot className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                  <span className="truncate">{agent.model || t(($) => $.pickers.model_default)}</span>
+                </span>
+                <span className="inline-flex min-w-0 items-center gap-1.5">
+                  <Server className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                  <span className="truncate">
+                    {runtime?.name ?? t(($) => $.pickers.runtime_none)}
+                  </span>
+                </span>
+                <VisibilityBadge value={agent.visibility} />
+                <span className="inline-flex items-center gap-1.5">
+                  <Clock3 className="h-3.5 w-3.5" aria-hidden="true" />
+                  {t(($) => $.detail.updated, { when: timeAgo(agent.updated_at) })}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <div className="flex shrink-0 items-center gap-2 self-end lg:self-start">
+            {!isArchived && canAssign && (
+              <Button type="button" size="sm" onClick={onAssign}>
+                <Plus className="h-4 w-4" aria-hidden="true" />
+                {t(($) => $.detail.assign_work)}
+              </Button>
+            )}
+            {!isArchived && canArchive ? (
           <DropdownMenu>
             <DropdownMenuTrigger
               render={<Button variant="ghost" size="icon-sm" />}
+              aria-label={t(($) => $.detail.more_actions_aria)}
             >
-              <MoreHorizontal className="h-4 w-4 text-muted-foreground" />
+              <MoreHorizontal
+                className="h-4 w-4 text-muted-foreground"
+                aria-hidden="true"
+              />
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-auto">
               <DropdownMenuItem
                 variant="destructive"
                 onClick={onArchive}
               >
-                <Trash2 className="h-3.5 w-3.5" />
+                <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
                 {t(($) => $.detail.more_archive)}
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
-        ) : null
-      }
-    />
+            ) : null}
+          </div>
+        </div>
+      </div>
+    </header>
   );
 }
 
@@ -435,25 +491,25 @@ function BackHeader({ paths, title }: { paths: string; title: string }) {
 function DetailLoadingSkeleton() {
   return (
     <div className="flex flex-1 min-h-0 flex-col">
-      <PageHeader className="px-5">
-        <Skeleton className="h-5 w-48" />
-      </PageHeader>
-      <div className="flex flex-1 min-h-0 flex-col gap-3 overflow-y-auto p-3 md:grid md:grid-cols-[320px_minmax(0,1fr)] md:gap-4 md:overflow-hidden md:p-6">
-        <div className="flex flex-col gap-4 rounded-lg border p-5">
+      <div className="shrink-0 border-b px-6 pb-5 pt-3">
+        <Skeleton className="h-4 w-48" />
+        <div className="mt-4 flex items-start gap-4">
           <Skeleton className="h-14 w-14 rounded-full" />
-          <Skeleton className="h-5 w-40" />
-          <Skeleton className="h-3 w-full" />
-          <div className="space-y-2">
-            <Skeleton className="h-3 w-3/4" />
-            <Skeleton className="h-3 w-2/3" />
-            <Skeleton className="h-3 w-1/2" />
+          <div className="flex-1 space-y-3">
+            <Skeleton className="h-7 w-64" />
+            <Skeleton className="h-4 w-full max-w-xl" />
+            <Skeleton className="h-4 w-full max-w-lg" />
           </div>
         </div>
-        <div className="flex flex-col gap-4 rounded-lg border p-6">
-          <Skeleton className="h-6 w-64" />
-          <Skeleton className="h-4 w-full" />
-          <Skeleton className="h-4 w-5/6" />
-          <Skeleton className="h-4 w-4/6" />
+      </div>
+      <div className="flex flex-1 flex-col p-6">
+        <Skeleton className="h-9 w-96" />
+        <div className="mt-6 grid flex-1 gap-6 xl:grid-cols-[minmax(0,1fr)_320px]">
+          <div className="space-y-5">
+            <Skeleton className="h-48 w-full" />
+            <Skeleton className="h-64 w-full" />
+          </div>
+          <Skeleton className="h-96 w-full" />
         </div>
       </div>
     </div>

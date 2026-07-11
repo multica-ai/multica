@@ -127,11 +127,21 @@
     "agent_archived_toast": "エージェントをアーカイブしました",
     "archive_failed_toast": "エージェントをアーカイブできませんでした",
     "agent_restored_toast": "エージェントを復元しました",
-    "restore_failed_toast": "エージェントを復元できませんでした"
+    "restore_failed_toast": "エージェントを復元できませんでした",
+    "assign_work": "作業を割り当てる",
+    "more_actions_aria": "エージェントの操作",
+    "updated": "{{when}}に更新"
   },
   "inspector": {
+    "section_profile": "プロフィール",
+    "section_profile_hint": "ワークスペース内でのエージェントの表示を管理します。",
+    "section_execution": "実行設定",
+    "section_execution_hint": "ランタイム、モデル、思考レベル、同時タスク数を設定します。",
+    "section_access": "アクセス",
+    "section_access_hint": "このエージェントと接続済み機能を利用できる相手を管理します。",
     "section_properties": "プロパティ",
     "section_details": "詳細",
+    "section_details_hint": "所有者とライフサイクルに関する読み取り専用情報です。",
     "section_skills": "スキル",
     "section_integrations": "連携",
     "prop_runtime": "ランタイム",
@@ -143,6 +153,10 @@
     "prop_created": "作成日",
     "prop_updated": "更新日",
     "no_description_placeholder": "説明なし",
+    "avatar_label": "アバター",
+    "avatar_hint": "割り当て、アクティビティ、チャットに表示されます。",
+    "name_label": "名前",
+    "description_label": "説明",
     "change_avatar_aria": "アバターを変更",
     "avatar_updated_toast": "アバターを更新しました",
     "avatar_upload_failed_toast": "アバターをアップロードできませんでした",
@@ -153,6 +167,12 @@
     "description_placeholder": "このエージェントは何をしますか？",
     "save": "保存",
     "cancel": "キャンセル"
+  },
+  "overview": {
+    "agent_context": "エージェント",
+    "access": "アクセス",
+    "attention_title": "対応が必要な task",
+    "attention_queued_other": "ランタイムが利用できないため、{{count}}件の task が待機中です。"
   },
   "skill_attach": {
     "trigger_aria": "ワークスペースのスキルを追加",
@@ -195,6 +215,14 @@
     "clear_full": "選択をクリア（プロバイダーのデフォルトを使用）"
   },
   "tabs": {
+    "overview": "概要",
+    "work": "作業",
+    "capabilities": "機能",
+    "settings": "設定",
+    "general": "一般",
+    "access": "アクセス",
+    "page_navigation_aria": "エージェントページ",
+    "section_navigation_aria": "エージェントセクション",
     "activity": "アクティビティ",
     "tasks": "タスク",
     "instructions": "指示",
@@ -282,7 +310,8 @@
       "unsaved_changes": "保存していない変更"
     },
     "instructions": {
-      "intro": "このエージェントのアイデンティティと作業スタイルを定義します。すべてのタスクでエージェントのコンテキストに注入されます。Markdown に対応しています。",
+      "intro": "すべてのタスクで使用する System Prompt を設定します。Markdown に対応しています。",
+      "system_prompt_label": "System Prompt",
       "placeholder": "このエージェントの役割、専門分野、作業スタイルを定義してください。\n\n# 例\nあなたは React と TypeScript を専門とするフロントエンドエンジニアです。\n\n## 作業スタイル\n- 小さく焦点を絞った PR を作成する — 論理的な変更ごとに1コミット\n- 継承よりコンポジションを優先する\n- 新しいコンポーネントには必ずユニットテストを追加する\n\n## 制約\n- 明示的な承認なしに shared/ の型を変更しない\n- features/ の既存のコンポーネントパターンに従う"
     },
     "env": {
@@ -308,16 +337,27 @@
       "empty_editable": "設定された環境変数はありません。起動時にエージェントへ注入する変数を追加してください。"
     },
     "custom_args": {
-      "intro": "起動時にエージェントコマンドの末尾に追加される CLI 引数です。複数トークンのフラグは1行にまとめられ、CLI に渡される前に空白で分割されます。",
-      "launch_mode_prefix": "起動モード: ",
-      "launch_mode_args_placeholder": "<引数>",
-      "input_placeholder": "--flag value",
-      "remove_aria": "引数を削除",
+      "intro": "エージェントの起動時に渡す CLI 引数を追加します。",
+      "arguments_label": "引数",
+      "arguments_description": "各項目は 1 つのトークンとして渡され、リストの順序が保持されます。",
+      "add_argument_action": "引数を追加",
+      "add_action": "追加",
+      "update_action": "更新",
+      "cancel_action": "キャンセル",
+      "command_preview_label": "コマンドプレビュー",
+      "input_placeholder": "--profile",
+      "input_aria": "引数 {{index}}",
+      "new_argument_aria": "新しい引数",
+      "empty_title": "引数はまだありません",
+      "empty_hint": "最初のトークンを追加して、起動コマンドを作成します。",
+      "edit_aria": "引数 {{index}} を編集",
+      "remove_aria": "引数 {{index}} を削除",
       "saved_toast": "カスタム引数を保存しました",
       "save_failed_toast": "カスタム引数を保存できませんでした"
     },
     "mcp_config": {
-      "intro": "ランタイム CLI に転送される MCP server configuration です（Claude は --mcp-config、Codex は $CODEX_HOME/config.toml、Hermes/Kimi/Kiro は ACP mcpServers、OpenClaw はタスクごとの config wrapper 経由）。そのまま保存され、secret が含まれる場合があるため、エージェントのオーナーとワークスペースの admin のみが読み取れます。空のままにすると CLI 自身のデフォルトが使用されます。OpenClaw の HTTP/SSE エントリには、Claude の \"type\" の代わりに OpenClaw 独自のフィールド名（例: \"transport\": \"streamable-http\"）を使用してください。",
+      "intro": "このエージェントが使用できる MCP Server を設定します。空欄の場合はランタイムのデフォルトを使用します。",
+      "config_label": "Server 設定（JSON）",
       "placeholder": "{\n  \"mcpServers\": {\n    \"fetch\": {\n      \"command\": \"uvx\",\n      \"args\": [\"mcp-server-fetch\"]\n    }\n  }\n}",
       "editor_aria": "MCP config JSON editor",
       "clear_action": "クリア",
@@ -387,6 +427,15 @@
       "members_note": "エージェントを外部チャットプラットフォームに接続できるのはワークスペースのオーナーと管理者のみです。接続済みの Bot は「設定 → 連携」で確認できます。"
     },
     "activity": {
+      "status": {
+        "queued": "待機中",
+        "dispatched": "送信済み",
+        "waiting_local_directory": "ディレクトリ待機中",
+        "running": "実行中",
+        "completed": "成功",
+        "failed": "失敗",
+        "cancelled": "キャンセル済み"
+      },
       "section_now": "現在",
       "section_last_30d": "過去30日",
       "section_recent": "最近の作業",
@@ -394,16 +443,19 @@
       "subtitle_active_other": "アクティブなタスク {{count}} 件",
       "subtitle_performance": "パフォーマンス",
       "subtitle_no_recent": "まだ完了した作業はありません",
-      "subtitle_recent_progress": "{{total}} 件中 {{shown}} 件",
-      "subtitle_recent_latest": "最新 {{count}} 件",
+      "subtitle_recent_progress": "{{total}} 回の実行中 {{shown}} 回",
+      "subtitle_recent_latest": "最新 {{count}} 回の実行",
       "empty_now": "このエージェントは現在何も実行していません。",
       "empty_30d": "過去30日間に完了した作業はありません。",
       "empty_recent": "このエージェントはまだ何も完了していません。",
       "show_more": "もっと見る →",
       "runs_other": "回実行",
       "success_pct": "成功率 {{percent}}%",
+      "success_label": "成功",
       "avg_duration": "平均 {{value}}",
+      "avg_duration_label": "平均時間",
       "failed_count": "{{count}} 回失敗",
+      "failed_label": "失敗",
       "source_issue": "イシュー",
       "source_chat": "チャット",
       "source_autopilot": "オートパイロット",
@@ -443,6 +495,7 @@
     }
   },
   "access": {
+    "section_title": "このエージェントを実行できるユーザー",
     "tooltip": "アクセス · 誰がこのエージェントを実行できるか",
     "trigger_private": "自分のみ",
     "trigger_workspace": "ワークスペース",
@@ -451,6 +504,9 @@
     "trigger_team": "チーム",
     "private_title": "プライベート",
     "private_desc": "あなただけがこのエージェントを実行できます",
+    "shared_title": "共有",
+    "shared_desc": "このエージェントを実行できるワークスペースまたはメンバーを選択します",
+    "shared_target_required": "保存する前に、ワークスペースまたは1人以上のメンバーを選択してください。",
     "workspace_title": "ワークスペースに公開",
     "workspace_desc": "このワークスペースの全員がこのエージェントを実行できます",
     "members_title": "特定のメンバーに公開",

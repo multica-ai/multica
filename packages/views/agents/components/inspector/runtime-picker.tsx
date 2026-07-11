@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Cloud, Lock, Monitor } from "lucide-react";
+import { ChevronDown, Cloud, Lock, Monitor } from "lucide-react";
 import type { AgentRuntime, MemberWithUser } from "@multica/core/types";
 import { runtimeDisplayName } from "@multica/core/runtimes";
 import { ActorAvatar } from "../../../common/actor-avatar";
@@ -10,6 +10,7 @@ import {
   PropertyPicker,
 } from "../../../issues/components/pickers";
 import { ProviderLogo } from "../../../runtimes/components/provider-logo";
+import { Label } from "@multica/ui/components/ui/label";
 import { CHIP_CLASS } from "./chip";
 import { useT } from "../../../i18n";
 
@@ -27,6 +28,8 @@ export function RuntimePicker({
   members,
   currentUserId,
   canEdit = true,
+  variant = "chip",
+  showLabel = true,
   onChange,
 }: {
   value: string;
@@ -35,6 +38,8 @@ export function RuntimePicker({
   currentUserId: string | null;
   /** When false, render a static read-only display and skip the popover. */
   canEdit?: boolean;
+  variant?: "chip" | "field";
+  showLabel?: boolean;
   onChange: (runtimeId: string) => Promise<void> | void;
 }) {
   const { t } = useT("agents");
@@ -72,6 +77,32 @@ export function RuntimePicker({
 
   if (!canEdit) {
     const isOnline = selected?.status === "online";
+    const valueLabel = selected
+      ? runtimeDisplayName(selected)
+      : t(($) => $.pickers.runtime_none);
+    if (variant === "field") {
+      const control = (
+        <div className="flex min-h-10 items-center gap-2 rounded-lg border border-input bg-input/50 px-3 text-sm text-muted-foreground">
+          <Icon className="h-4 w-4 shrink-0" aria-hidden="true" />
+          <span className="min-w-0 flex-1 truncate">{valueLabel}</span>
+          {selected ? (
+            <span
+              className={`h-2 w-2 shrink-0 rounded-full ${
+                isOnline ? "bg-success" : "bg-muted-foreground/40"
+              }`}
+              aria-hidden="true"
+            />
+          ) : null}
+        </div>
+      );
+      if (!showLabel) return control;
+      return (
+        <div className="flex min-w-0 flex-col">
+          <Label>{t(($) => $.inspector.prop_runtime)}</Label>
+          <div className="mt-1.5">{control}</div>
+        </div>
+      );
+    }
     return (
       <span className="inline-flex min-w-0 items-center gap-1.5 px-1.5 py-0.5 text-xs text-muted-foreground">
         <Icon className="h-3 w-3 shrink-0" />
@@ -114,24 +145,47 @@ export function RuntimePicker({
     if (id !== value) await onChange(id);
   };
 
-  return (
+  const picker = (
     <PropertyPicker
       open={open}
       onOpenChange={setOpen}
-      width="w-auto min-w-[18rem] max-w-md"
+      width={
+        variant === "field"
+          ? "w-[var(--anchor-width)] min-w-[18rem] max-w-md"
+          : "w-auto min-w-[18rem] max-w-md"
+      }
       align="start"
       tooltip={triggerTitle}
       triggerRender={
         <button
           type="button"
-          className={CHIP_CLASS}
+          className={
+            variant === "field"
+              ? `${showLabel ? "mt-1.5 " : ""}flex min-h-10 w-full min-w-0 items-center gap-2 rounded-lg border border-input bg-transparent px-3 text-left text-sm transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/50`
+              : CHIP_CLASS
+          }
           aria-label={triggerTitle}
         />
       }
       trigger={
         <>
-          <Icon className="h-3 w-3 shrink-0 text-muted-foreground" />
-          <span className="min-w-0 truncate font-mono">{triggerLabel}</span>
+          <Icon
+            className={
+              variant === "field"
+                ? "h-4 w-4 shrink-0 text-muted-foreground"
+                : "h-3 w-3 shrink-0 text-muted-foreground"
+            }
+            aria-hidden="true"
+          />
+          <span
+            className={
+              variant === "field"
+                ? "min-w-0 flex-1 truncate"
+                : "min-w-0 truncate font-mono"
+            }
+          >
+            {triggerLabel}
+          </span>
           {selected && (
             <span
               className={`ml-auto h-1.5 w-1.5 shrink-0 rounded-full ${
@@ -139,6 +193,14 @@ export function RuntimePicker({
               }`}
             />
           )}
+          {variant === "field" ? (
+            <ChevronDown
+              className={`h-4 w-4 shrink-0 text-muted-foreground transition-transform ${
+                open ? "rotate-180" : ""
+              }`}
+              aria-hidden="true"
+            />
+          ) : null}
         </>
       }
       header={
@@ -244,6 +306,18 @@ export function RuntimePicker({
       )}
     </PropertyPicker>
   );
+
+  if (variant === "field") {
+    if (!showLabel) return picker;
+    return (
+      <div className="flex min-w-0 flex-col">
+        <Label>{t(($) => $.inspector.prop_runtime)}</Label>
+        {picker}
+      </div>
+    );
+  }
+
+  return picker;
 }
 
 function FilterButton({
