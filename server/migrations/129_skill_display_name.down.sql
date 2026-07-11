@@ -1,0 +1,1 @@
+ALTER TABLE skill DROP COLUMN IF EXISTS display_name;

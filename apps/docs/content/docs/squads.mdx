@@ -23,6 +23,33 @@ A squad is a **named group of [agents](/agents) and human [members](/members-rol
 
 The squad doesn't add capability — it adds **routing**. The members are still ordinary agents; the leader's only job is to pick the right one.
 
+## Design an agent team with squads
+
+Start from the current routing model: a squad is not an execution pool. Assigning an issue to a squad, mentioning a squad, or assigning an autopilot to a squad all route first to the **leader agent**. The leader then chooses a member and delegates with either an `@`-mention or a child issue.
+
+A practical setup:
+
+| Squad | Leader should be good at… | Members to add |
+|---|---|---|
+| `Triage Squad` | Reading vague reports, asking for missing context, picking the right lane | Bug fixer, frontend builder, backend fixer, docs writer |
+| `Frontend Squad` | Splitting UI / interaction / test work | Frontend designer, frontend builder, webapp tester, copywriter |
+| `Engineering Review Squad` | Deciding whether a thread needs review, tests, docs, or release notes | Code reviewer, webapp tester, ADR writer, PR description writer |
+
+Use these rules when designing the roster:
+
+- **Name squads by problem domain, not org chart.** `Bug Triage`, `Frontend`, `Release`, and `Docs` are better routing targets than "Team A".
+- **Pick one strong coordinator as leader.** The leader does not need to be the best implementer; it needs to read the issue, choose the right member, record the evaluation, and stop.
+- **Write member roles as capabilities.** Prefer "owns sqlc migrations and Go handlers" over "backend dev", or "runs Playwright and visual QA" over "tester". The leader sees these roles in its roster.
+- **Use squad instructions as routing policy.** Put rules like "database/schema work goes to Alice", "visual regressions go to the tester first", and "ask a human before touching billing flows" in the squad instructions.
+- **Choose one delegation path per piece of work.** Use `@`-mentions for small hand-offs on the same issue. Use child issues for work that needs independent status, acceptance criteria, or follow-up. Do not both create a child issue and `@`-mention the same agent for the same work.
+- **Let the task queue handle execution.** Multica claims queued tasks per agent/runtime and allows different agents to work on the same issue in parallel, while preventing the same agent from running duplicate work for the same issue.
+
+Autopilots can use this model too: assign the autopilot to a squad when the trigger should always start with a leader decision. The autopilot will run through the squad leader, not through every member automatically.
+
+<Callout type="info">
+Squads do not currently do skill-based fan-out, load balancing, or automatic member selection in the backend. That policy lives in the leader's instructions and the squad roster. If you need automatic member selection, make the leader's routing policy explicit and keep member roles / skills up to date.
+</Callout>
+
 ## Permissions
 
 | Action | Who can do it |

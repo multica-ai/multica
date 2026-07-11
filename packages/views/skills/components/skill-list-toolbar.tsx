@@ -6,6 +6,7 @@ import {
   ChevronDown,
   Download,
   Filter,
+  FolderOpen,
   HardDrive,
   Pencil,
   Search,
@@ -75,6 +76,7 @@ export function countActiveFilterDimensions(
 const ORIGIN_TYPES: OriginType[] = [
   "manual",
   "runtime_local",
+  "local_directory",
   "clawhub",
   "skills_sh",
   "github",
@@ -83,6 +85,7 @@ const ORIGIN_TYPES: OriginType[] = [
 function originIcon(type: OriginType) {
   if (type === "manual") return <Pencil className="size-3.5" />;
   if (type === "runtime_local") return <HardDrive className="size-3.5" />;
+  if (type === "local_directory") return <FolderOpen className="size-3.5" />;
   return <Download className="size-3.5" />;
 }
 
@@ -150,6 +153,7 @@ export function SkillListToolbar({
   const ORIGIN_LABELS: Record<OriginType, string> = {
     manual: t(($) => $.table.source_manual),
     runtime_local: t(($) => $.table.source_runtime_unknown),
+    local_directory: t(($) => $.table.source_local_directory),
     clawhub: t(($) => $.table.source_clawhub),
     skills_sh: t(($) => $.table.source_skills_sh),
     github: t(($) => $.table.source_github),

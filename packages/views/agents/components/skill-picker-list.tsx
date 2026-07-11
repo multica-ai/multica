@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { FileText, Search } from "lucide-react";
 import type { SkillSummary } from "@multica/core/types";
+import { skillDisplayName } from "@multica/core/skills";
 import { Checkbox } from "@multica/ui/components/ui/checkbox";
 import { Input } from "@multica/ui/components/ui/input";
 import { cn } from "@multica/ui/lib/utils";
@@ -124,7 +125,7 @@ export function SkillPickerList({
                 />
                 <FileText className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                 <div className="min-w-0 flex-1">
-                  <div className="truncate text-sm font-medium">{skill.name}</div>
+                  <div className="truncate text-sm font-medium">{skillDisplayName(skill)}</div>
                   {skill.description ? (
                     <div className="truncate text-xs text-muted-foreground">
                       {skill.description}

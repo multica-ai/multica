@@ -25,6 +25,7 @@ import { useActorName } from "@multica/core/workspace/hooks";
 import { useNavigation, AppLink } from "../../navigation";
 import { BreadcrumbHeader } from "../../layout/breadcrumb-header";
 import { ActorAvatar } from "../../common/actor-avatar";
+import { useViewingTimezone } from "../../common/use-viewing-timezone";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { Button } from "@multica/ui/components/ui/button";
 import { Switch } from "@multica/ui/components/ui/switch";
@@ -620,6 +621,7 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
   const wsPaths = useWorkspacePaths();
   const router = useNavigation();
   const { getActorName } = useActorName();
+  const viewingTimezone = useViewingTimezone();
 
   const { data, isLoading } = useQuery(autopilotDetailOptions(wsId, autopilotId));
   const { data: runs = [], isLoading: runsLoading } = useQuery(autopilotRunsOptions(wsId, autopilotId));
@@ -697,7 +699,7 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
 
   const handleRunNow = async () => {
     try {
-      await triggerAutopilot.mutateAsync(autopilotId);
+      await triggerAutopilot.mutateAsync({ id: autopilotId, timezone: viewingTimezone });
       toast.success(t(($) => $.detail.toast_triggered));
     } catch (e: any) {
       toast.error(e?.message || t(($) => $.detail.toast_trigger_failed));

@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import type { Agent } from "@multica/core/types";
 import { api } from "@multica/core/api";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { skillDisplayName } from "@multica/core/skills";
 import {
   skillListOptions,
   workspaceKeys,
@@ -96,7 +97,7 @@ export function SkillsTab({
             >
               <FileText className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
               <div className="min-w-0 flex-1">
-                <div className="text-sm font-medium">{skill.name}</div>
+                <div className="text-sm font-medium">{skillDisplayName(skill)}</div>
                 {skill.description && (
                   <div className="truncate text-xs text-muted-foreground">
                     {skill.description}

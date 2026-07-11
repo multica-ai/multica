@@ -201,7 +201,13 @@ func loadSquadMemberSkillNames(ctx context.Context, q *db.Queries, members []db.
 	byAgentID := make(map[string][]string, len(agentIDs))
 	for _, row := range rows {
 		id := util.UUIDToString(row.AgentID)
-		byAgentID[id] = append(byAgentID[id], row.Name)
+		// Prefer the human-readable display_name (e.g. Chinese) so the leader
+		// sees the label the user chose, falling back to the slug.
+		label := row.DisplayName
+		if strings.TrimSpace(label) == "" {
+			label = row.Name
+		}
+		byAgentID[id] = append(byAgentID[id], label)
 	}
 	return byAgentID, true
 }

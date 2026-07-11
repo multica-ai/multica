@@ -5,6 +5,7 @@ import {
   AlertCircle,
   AlertTriangle,
   ArrowLeft,
+  FolderOpen,
   HardDrive,
   Loader2,
   Lock,
@@ -62,6 +63,7 @@ import { AppLink, useNavigation } from "../../navigation";
 import { BreadcrumbHeader } from "../../layout/breadcrumb-header";
 import { useCanEditSkill } from "../hooks/use-can-edit-skill";
 import { useSkillPermissions } from "@multica/core/permissions";
+import { skillDisplayName } from "@multica/core/skills";
 import { CapabilityBanner } from "@multica/ui/components/common/capability-banner";
 import { readOrigin, totalFileCount, type OriginInfo } from "../lib/origin";
 import { FileTree } from "./file-tree";
@@ -201,20 +203,25 @@ function OriginSidebarCard({
   if (origin.type === "manual") return null;
 
   const isRuntime = origin.type === "runtime_local";
+  const isLocalDirectory = origin.type === "local_directory";
   const label =
     origin.type === "runtime_local"
       ? t(($) => $.detail.origin_card.imported_runtime)
-      : origin.type === "clawhub"
-        ? t(($) => $.detail.origin_card.imported_clawhub)
-        : origin.type === "github"
-          ? t(($) => $.detail.origin_card.imported_github)
-          : t(($) => $.detail.origin_card.imported_skills_sh);
+      : origin.type === "local_directory"
+        ? t(($) => $.detail.origin_card.imported_local_directory)
+        : origin.type === "clawhub"
+          ? t(($) => $.detail.origin_card.imported_clawhub)
+          : origin.type === "github"
+            ? t(($) => $.detail.origin_card.imported_github)
+            : t(($) => $.detail.origin_card.imported_skills_sh);
 
   return (
     <div className="rounded-md border bg-muted/30 p-3">
       <div className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
         {isRuntime ? (
           <HardDrive className="h-3 w-3" />
+        ) : isLocalDirectory ? (
+          <FolderOpen className="h-3 w-3" />
         ) : (
           <Sparkles className="h-3 w-3" />
         )}
@@ -294,6 +301,7 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
   };
 
   const [name, setName] = useState("");
+  const [displayName, setDisplayName] = useState("");
   const [description, setDescription] = useState("");
   const [content, setContent] = useState("");
   const [files, setFiles] = useState<DraftFile[]>([]);
@@ -305,8 +313,8 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
   const [addingFile, setAddingFile] = useState(false);
   const [conflictPending, setConflictPending] = useState(false);
 
-  const draftRef = useRef({ name, description, content, files });
-  draftRef.current = { name, description, content, files };
+  const draftRef = useRef({ name, displayName, description, content, files });
+  draftRef.current = { name, displayName, description, content, files };
 
   const seededKeyRef = useRef<string | null>(null);
 
@@ -329,6 +337,7 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
       );
       const hasEdits =
         d.name.trim() !== skill.name ||
+        d.displayName !== (skill.display_name ?? "") ||
         d.description.trim() !== skill.description ||
         d.content !== skill.content ||
         draftFilesJson !== serverFilesJson;
@@ -341,6 +350,7 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
     seededKeyRef.current = key;
     setConflictPending(false);
     setName(skill.name);
+    setDisplayName(skill.display_name ?? "");
     setDescription(skill.description);
     setContent(skill.content);
     setFiles(
@@ -400,14 +410,16 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
     const draftFiles = files.map((f) => ({ path: f.path, content: f.content }));
     return (
       name.trim() !== skill.name ||
+      displayName !== (skill.display_name ?? "") ||
       description.trim() !== skill.description ||
       content !== skill.content ||
       JSON.stringify(draftFiles) !== JSON.stringify(serverFiles)
     );
-  }, [skill, name, description, content, files]);
+  }, [skill, name, displayName, description, content, files]);
 
   const seedFromSkill = (s: Skill) => {
     setName(s.name);
+    setDisplayName(s.display_name ?? "");
     setDescription(s.description);
     setContent(s.content);
     setFiles(
@@ -427,6 +439,7 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
     try {
       const payload: UpdateSkillRequest = {
         name: trimmedName,
+        display_name: displayName,
         description: trimmedDesc,
         content,
         files: files.filter((f) => f.path.trim()),
@@ -566,6 +579,7 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
           ? t(($) => $.detail.subline.origin_runtime_provider, { provider: origin.provider })
           : t(($) => $.detail.subline.origin_runtime_unknown);
     }
+    if (origin.type === "local_directory") return t(($) => $.detail.subline.origin_local_directory);
     if (origin.type === "clawhub") return t(($) => $.detail.subline.origin_clawhub);
     if (origin.type === "skills_sh") return t(($) => $.detail.subline.origin_skills_sh);
     if (origin.type === "github") return t(($) => $.detail.subline.origin_github);
@@ -578,7 +592,7 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
         segments={[{ href: paths.skills(), label: t(($) => $.page.title) }]}
         leaf={
           <span className="truncate font-mono text-xs text-foreground">
-            {skill.name}
+            {skillDisplayName(skill)}
           </span>
         }
         actions={
@@ -700,6 +714,14 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
               placeholder={t(($) => $.detail.name_placeholder)}
               className="h-9 border-0 bg-transparent px-0 text-lg font-semibold shadow-none focus-visible:ring-0 read-only:cursor-default dark:bg-transparent"
               aria-label={t(($) => $.detail.name_aria)}
+            />
+            <Input
+              value={displayName}
+              readOnly={!canEdit}
+              onChange={(e) => setDisplayName(e.target.value)}
+              placeholder={t(($) => $.detail.display_name_placeholder)}
+              className="h-8 border-0 bg-transparent px-0 text-sm text-muted-foreground shadow-none focus-visible:ring-0 read-only:cursor-default dark:bg-transparent"
+              aria-label={t(($) => $.detail.display_name_aria)}
             />
             <div className="space-y-1">
               <Label
@@ -933,11 +955,11 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
             <DialogDescription>
               {skillAgents.length > 0
                 ? t(($) => $.detail.delete_dialog.description_with_agents, {
-                    name: skill.name,
+                    name: skillDisplayName(skill),
                     count: skillAgents.length,
                   })
                 : t(($) => $.detail.delete_dialog.description_no_agents, {
-                    name: skill.name,
+                    name: skillDisplayName(skill),
                   })}
             </DialogDescription>
           </DialogHeader>

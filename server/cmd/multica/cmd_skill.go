@@ -120,6 +120,7 @@ func init() {
 
 	// skill create
 	skillCreateCmd.Flags().String("name", "", "Skill name (required)")
+	skillCreateCmd.Flags().String("display-name", "", "Human-readable display name (UTF-8, e.g. Chinese); shown in the UI, defaults to the slug when empty")
 	skillCreateCmd.Flags().String("description", "", "Skill description")
 	skillCreateCmd.Flags().String("content", "", "Skill content (SKILL.md body)")
 	skillCreateCmd.Flags().Bool("content-stdin", false, "Read skill content from stdin. Mutually exclusive with --content and --content-file.")
@@ -129,6 +130,7 @@ func init() {
 
 	// skill update
 	skillUpdateCmd.Flags().String("name", "", "New name")
+	skillUpdateCmd.Flags().String("display-name", "", "New display name (pass an empty string to clear)")
 	skillUpdateCmd.Flags().String("description", "", "New description")
 	skillUpdateCmd.Flags().String("content", "", "New content")
 	skillUpdateCmd.Flags().Bool("content-stdin", false, "Read new content from stdin. Mutually exclusive with --content and --content-file.")
@@ -297,6 +299,9 @@ func runSkillCreate(cmd *cobra.Command, _ []string) error {
 	if v, _ := cmd.Flags().GetString("description"); v != "" {
 		body["description"] = v
 	}
+	if v, _ := cmd.Flags().GetString("display-name"); v != "" {
+		body["display_name"] = v
+	}
 	content, hasContent, err := resolveSkillContentFlag(cmd)
 	if err != nil {
 		return err
@@ -345,6 +350,10 @@ func runSkillUpdate(cmd *cobra.Command, args []string) error {
 		v, _ := cmd.Flags().GetString("description")
 		body["description"] = v
 	}
+	if cmd.Flags().Changed("display-name") {
+		v, _ := cmd.Flags().GetString("display-name")
+		body["display_name"] = v
+	}
 	content, hasContent, err := resolveSkillContentFlag(cmd)
 	if err != nil {
 		return err
@@ -362,7 +371,7 @@ func runSkillUpdate(cmd *cobra.Command, args []string) error {
 	}
 
 	if len(body) == 0 {
-		return fmt.Errorf("no fields to update; use --name, --description, --content, or --config")
+		return fmt.Errorf("no fields to update; use --name, --display-name, --description, --content, or --config")
 	}
 
 	ctx, cancel := cli.APIContext(context.Background())

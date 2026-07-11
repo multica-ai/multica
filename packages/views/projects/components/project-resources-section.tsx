@@ -18,9 +18,11 @@ import {
   useDeleteProjectResource,
   useUpdateProjectResource,
 } from "@multica/core/projects";
+import { runtimeListOptions } from "@multica/core/runtimes";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useCurrentWorkspace } from "@multica/core/paths";
 import type {
+  AgentRuntime,
   GithubRepoResourceRef,
   LocalDirectoryResourceRef,
   ProjectResource,
@@ -63,6 +65,68 @@ function isLocalDirectoryRef(r: ProjectResource): r is ProjectResource & {
   return r.resource_type === "local_directory";
 }
 
+function looksLikeLocalDirectoryPath(value: string): boolean {
+  const trimmed = value.trim();
+  return (
+    trimmed.startsWith("/") ||
+    trimmed.startsWith("~/") ||
+    trimmed.startsWith("file://") ||
+    trimmed.startsWith("\\\\") ||
+    /^[A-Za-z]:[\\/]/.test(trimmed)
+  );
+}
+
+function isAbsoluteLocalDirectoryPath(value: string): boolean {
+  const trimmed = value.trim();
+  return (
+    trimmed.startsWith("/") ||
+    trimmed.startsWith("\\\\") ||
+    /^[A-Za-z]:[\\/]/.test(trimmed)
+  );
+}
+
+interface LocalRuntimeOption {
+  daemonId: string;
+  label: string;
+  running: boolean;
+}
+
+function localRuntimeOptions(runtimes: AgentRuntime[]): LocalRuntimeOption[] {
+  const byDaemon = new Map<string, AgentRuntime[]>();
+  for (const runtime of runtimes) {
+    if (runtime.runtime_mode !== "local" || !runtime.daemon_id) continue;
+    const list = byDaemon.get(runtime.daemon_id) ?? [];
+    list.push(runtime);
+    byDaemon.set(runtime.daemon_id, list);
+  }
+
+  return Array.from(byDaemon.entries())
+    .map(([daemonId, rows]) => {
+      const first = rows[0];
+      const running = rows.some((runtime) => runtime.status === "online");
+      return {
+        daemonId,
+        label: first ? localRuntimeLabel(first, daemonId) : daemonId,
+        running,
+      };
+    })
+    .sort((a, b) => {
+      if (a.running !== b.running) return a.running ? -1 : 1;
+      return a.label.localeCompare(b.label);
+    });
+}
+
+function localRuntimeLabel(runtime: AgentRuntime, daemonId: string): string {
+  const nameMatch = runtime.name.match(/^.+?\s+\(([^)]+)\)$/);
+  const device = nameMatch?.[1] || runtime.device_info?.split(" · ")[0]?.trim();
+  return device || daemonId;
+}
+
+function basenameFromPath(path: string): string {
+  const parts = path.split(/[\\/]/).filter(Boolean);
+  return parts.at(-1) ?? path;
+}
+
 export function ProjectResourcesSection({ projectId }: { projectId: string }) {
   const { t } = useT("projects");
   const wsId = useWorkspaceId();
@@ -70,8 +134,10 @@ export function ProjectResourcesSection({ projectId }: { projectId: string }) {
   const daemonStatus = useLocalDaemonStatus();
   const [open, setOpen] = useState(true);
   const [addOpen, setAddOpen] = useState(false);
+  const [localAddOpen, setLocalAddOpen] = useState(false);
   const [repoSearch, setRepoSearch] = useState("");
   const [picking, setPicking] = useState(false);
+  const [manualLocalDaemonId, setManualLocalDaemonId] = useState("");
 
   const { data: resources = [] } = useQuery(
     projectResourcesOptions(wsId, projectId),
@@ -80,15 +146,24 @@ export function ProjectResourcesSection({ projectId }: { projectId: string }) {
   const updateResource = useUpdateProjectResource(wsId, projectId);
   const deleteResource = useDeleteProjectResource(wsId, projectId);
 
-  // Desktop-only entry points. We hide (not just disable) on web so users
-  // there don't see an action they can never complete — the spec calls for
-  // read-only on web because the daemon-id check can't be performed in the
-  // browser.
+  // Only the desktop shell can return an absolute local path from the OS
+  // folder picker. Browser folder APIs expose file handles, not the path that
+  // local_directory needs to bind a daemon-owned working directory.
   const desktopMode = isDesktopShell();
   const localDaemonId = daemonStatus.daemonId;
+  const { data: runtimes = [] } = useQuery({
+    ...runtimeListOptions(wsId),
+    enabled: !desktopMode,
+  });
+  const webLocalRuntimes = localRuntimeOptions(runtimes);
+  const selectedWebLocalDaemonId =
+    manualLocalDaemonId || webLocalRuntimes[0]?.daemonId || "";
 
   const attachedUrls = new Set(
     resources.filter(isGithubRef).map((r) => r.resource_ref.url),
+  );
+  const attachedLocalDaemonIds = new Set(
+    resources.filter(isLocalDirectoryRef).map((r) => r.resource_ref.daemon_id),
   );
   const attachedLocalPaths = new Set(
     resources
@@ -100,7 +175,7 @@ export function ProjectResourcesSection({ projectId }: { projectId: string }) {
   // daemon-side resolver picks the first match by daemon_id, so two rows
   // on the same daemon would silently route the agent into one of them.
   // The server enforces this at the API boundary; the UI mirrors the
-  // restriction by hiding the "Add" affordance once a row exists for the
+  // restriction by disabling the "Add" affordance once a row exists for the
   // current daemon, otherwise users would only discover the limit on a
   // 409 toast.
   const hasLocalDirectoryForCurrentDaemon =
@@ -110,16 +185,59 @@ export function ProjectResourcesSection({ projectId }: { projectId: string }) {
   const filteredRepos =
     workspace?.repos?.filter((repo) => repo.url.toLowerCase().includes(repoQuery)) ?? [];
 
-  const handleAttach = async (url: string) => {
+  const attachManualLocalDirectory = async (pathInput: string) => {
+    const path = pathInput.trim();
+    if (!path || !isAbsoluteLocalDirectoryPath(path)) {
+      toast.error(t(($) => $.resources.local_validate_not_absolute));
+      return false;
+    }
+    if (!selectedWebLocalDaemonId) {
+      toast.error(t(($) => $.resources.toast_local_runtime_required));
+      return false;
+    }
+    if (attachedLocalDaemonIds.has(selectedWebLocalDaemonId)) {
+      toast.error(t(($) => $.resources.toast_local_daemon_already_attached));
+      return false;
+    }
+    try {
+      await createResource.mutateAsync({
+        resource_type: "local_directory",
+        resource_ref: {
+          local_path: path,
+          daemon_id: selectedWebLocalDaemonId,
+          label: basenameFromPath(path),
+        },
+      });
+      toast.success(t(($) => $.resources.toast_local_attached));
+      return true;
+    } catch (err) {
+      const msg =
+        err instanceof Error
+          ? err.message
+          : t(($) => $.resources.toast_local_pick_failed);
+      toast.error(msg);
+      return false;
+    }
+  };
+
+  const handleAttach = async (url: string): Promise<boolean> => {
+    const trimmedUrl = url.trim();
+    if (looksLikeLocalDirectoryPath(trimmedUrl)) {
+      toast.error(t(($) => $.resources.local_path_use_local_entry));
+      return false;
+    }
+
     try {
       await createResource.mutateAsync({
         resource_type: "github_repo",
-        resource_ref: { url },
+        resource_ref: { url: trimmedUrl },
       });
       toast.success(t(($) => $.resources.toast_attached));
+      return true;
     } catch (err) {
       const msg = err instanceof Error ? err.message : t(($) => $.resources.toast_attach_failed);
       toast.error(msg);
+      return false;
     }
   };
 
@@ -317,8 +435,9 @@ export function ProjectResourcesSection({ projectId }: { projectId: string }) {
                           aria-disabled={isDisabled}
                           onClick={async () => {
                             if (isDisabled) return;
-                            await handleAttach(repo.url);
-                            setAddOpen(false);
+                            if (await handleAttach(repo.url)) {
+                              setAddOpen(false);
+                            }
                           }}
                           className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-xs text-left hover:bg-accent transition-colors aria-disabled:opacity-50 aria-disabled:cursor-not-allowed aria-disabled:hover:bg-transparent"
                         >
@@ -344,8 +463,9 @@ export function ProjectResourcesSection({ projectId }: { projectId: string }) {
               )}
               <CustomRepoForm
                 onSubmit={async (url) => {
-                  await handleAttach(url);
-                  setAddOpen(false);
+                  const attached = await handleAttach(url);
+                  if (attached) setAddOpen(false);
+                  return attached;
                 }}
               />
             </PopoverContent>
@@ -380,6 +500,42 @@ export function ProjectResourcesSection({ projectId }: { projectId: string }) {
                 </p>
               )}
             </div>
+          )}
+          {!desktopMode && (
+            <Popover
+              open={localAddOpen}
+              onOpenChange={(v) => {
+                setLocalAddOpen(v);
+              }}
+            >
+              <PopoverTrigger
+                render={
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 justify-start px-2 text-xs text-muted-foreground hover:text-foreground"
+                  >
+                    <FolderOpen className="size-3" />
+                    {t(($) => $.resources.add_local_directory_button)}
+                  </Button>
+                }
+              />
+              <PopoverContent align="start" className="w-72 p-2 space-y-2">
+                <div className="text-xs font-medium text-muted-foreground">
+                  {t(($) => $.resources.add_local_directory_button)}
+                </div>
+                <LocalDirectoryForm
+                  localRuntimes={webLocalRuntimes}
+                  selectedLocalDaemonId={selectedWebLocalDaemonId}
+                  onLocalDaemonChange={setManualLocalDaemonId}
+                  onSubmit={async (path) => {
+                    const attached = await attachManualLocalDirectory(path);
+                    if (attached) setLocalAddOpen(false);
+                    return attached;
+                  }}
+                />
+              </PopoverContent>
+            </Popover>
           )}
         </div>
       )}
@@ -587,7 +743,7 @@ function LocalDirectoryRow({
 function CustomRepoForm({
   onSubmit,
 }: {
-  onSubmit: (url: string) => Promise<void> | void;
+  onSubmit: (url: string) => Promise<boolean | void> | boolean | void;
 }) {
   const { t } = useT("projects");
   const [url, setUrl] = useState("");
@@ -598,30 +754,108 @@ function CustomRepoForm({
     if (!trimmed) return;
     setSubmitting(true);
     try {
-      await onSubmit(trimmed);
-      setUrl("");
+      const submitted = await onSubmit(trimmed);
+      if (submitted !== false) setUrl("");
     } finally {
       setSubmitting(false);
     }
   };
   return (
-    <form onSubmit={handle} className="flex items-center gap-1.5 pt-1 border-t">
-      <input
-        type="text"
-        value={url}
-        onChange={(e) => setUrl(e.target.value)}
-        placeholder={t(($) => $.resources.url_placeholder)}
-        className="flex-1 bg-transparent text-xs px-2 py-1 outline-none placeholder:text-muted-foreground"
-      />
-      <Button
-        type="submit"
-        size="sm"
-        variant="ghost"
-        className="h-6 px-2 text-xs"
-        disabled={!url.trim() || submitting}
-      >
-        {t(($) => $.resources.url_submit)}
-      </Button>
+    <form onSubmit={handle} className="space-y-1.5 pt-1 border-t">
+      <div className="flex items-center gap-1.5">
+        <input
+          type="text"
+          value={url}
+          onChange={(e) => setUrl(e.target.value)}
+          placeholder={t(($) => $.resources.url_placeholder)}
+          className="flex-1 bg-transparent text-xs px-2 py-1 outline-none placeholder:text-muted-foreground"
+        />
+        <Button
+          type="submit"
+          size="sm"
+          variant="ghost"
+          className="h-6 px-2 text-xs"
+          disabled={!url.trim() || submitting}
+        >
+          {t(($) => $.resources.url_submit)}
+        </Button>
+      </div>
+    </form>
+  );
+}
+
+function LocalDirectoryForm({
+  localRuntimes,
+  selectedLocalDaemonId,
+  onLocalDaemonChange,
+  onSubmit,
+}: {
+  localRuntimes: LocalRuntimeOption[];
+  selectedLocalDaemonId: string;
+  onLocalDaemonChange: (daemonId: string) => void;
+  onSubmit: (path: string) => Promise<boolean | void> | boolean | void;
+}) {
+  const { t } = useT("projects");
+  const [path, setPath] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const showLocalRuntimeSelect = localRuntimes.length > 1;
+
+  const handle = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const trimmed = path.trim();
+    if (!trimmed) return;
+    setSubmitting(true);
+    try {
+      const submitted = await onSubmit(trimmed);
+      if (submitted !== false) setPath("");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <form onSubmit={handle} className="space-y-1.5">
+      {showLocalRuntimeSelect && (
+        <>
+          <label className="sr-only" htmlFor="project-local-runtime">
+            {t(($) => $.resources.local_runtime_label)}
+          </label>
+          <select
+            id="project-local-runtime"
+            value={selectedLocalDaemonId}
+            disabled={submitting}
+            onChange={(e) => onLocalDaemonChange(e.target.value)}
+            className="h-7 w-full rounded-md border bg-transparent px-2 text-xs outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:opacity-50"
+          >
+            {localRuntimes.map((runtime) => (
+              <option key={runtime.daemonId} value={runtime.daemonId}>
+                {runtime.label}
+                {runtime.running
+                  ? ""
+                  : ` ${t(($) => $.resources.local_runtime_offline_suffix)}`}
+              </option>
+            ))}
+          </select>
+        </>
+      )}
+      <div className="flex items-center gap-1.5">
+        <input
+          type="text"
+          value={path}
+          onChange={(e) => setPath(e.target.value)}
+          placeholder={t(($) => $.resources.local_path_placeholder)}
+          className="flex-1 bg-transparent text-xs px-2 py-1 outline-none placeholder:text-muted-foreground"
+        />
+        <Button
+          type="submit"
+          size="sm"
+          variant="ghost"
+          className="h-6 px-2 text-xs"
+          disabled={!path.trim() || submitting}
+        >
+          {t(($) => $.resources.url_submit)}
+        </Button>
+      </div>
     </form>
   );
 }

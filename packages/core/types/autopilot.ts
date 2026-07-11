@@ -161,6 +161,10 @@ export interface UpdateAutopilotRequest {
   subscribers?: AutopilotSubscriberInput[];
 }
 
+export interface TriggerAutopilotRequest {
+  timezone?: string;
+}
+
 export interface CreateAutopilotTriggerRequest {
   kind: AutopilotTriggerKind;
   cron_expression?: string;

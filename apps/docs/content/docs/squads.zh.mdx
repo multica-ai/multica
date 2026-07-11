@@ -23,6 +23,33 @@ import { Callout } from "fumadocs-ui/components/callout";
 
 小队不增加能力——它增加**路由**。成员还是那些智能体，队长唯一的工作是**挑对人**。
 
+## 用小队设计智能体团队
+
+先抓住当前模型：小队不是执行池。把 issue 分给小队、在评论里 `@` 小队、或把自动化分给小队，都会先触发**队长智能体**。队长再判断该派给谁，用 `@` 提及或子 issue 做二级分派。
+
+一个实用的起步配置：
+
+| 小队 | 队长擅长什么 | 适合加入的成员 |
+|---|---|---|
+| `Triage Squad` | 读模糊反馈、补信息、判断该走哪条线 | bug fixer、frontend builder、backend fixer、docs writer |
+| `Frontend Squad` | 拆 UI / 交互 / 测试工作 | frontend designer、frontend builder、webapp tester、copywriter |
+| `Engineering Review Squad` | 判断一条线程需要 review、测试、文档还是 release notes | code reviewer、webapp tester、ADR writer、PR description writer |
+
+设计 roster 时按这几条来：
+
+- **按问题域建小队，不按组织架构建。** `Bug Triage`、`Frontend`、`Release`、`Docs` 这类名字比 "Team A" 更适合作为路由入口。
+- **只放一个强协调型队长。** 队长不一定是最强实现者；它要会读 issue、选成员、记录 evaluation，然后停下。
+- **成员 role 写能力，不写职位。** "owns sqlc migrations and Go handlers" 比 "backend dev" 有用；"runs Playwright and visual QA" 比 "tester" 有用。队长会在 roster 里看到这些 role。
+- **把 instructions 写成路由策略。** 例如 "数据库 / schema 工作派给 Alice"、"视觉回归先给 tester"、"碰 billing flow 前先问人类"。
+- **同一份工作只选一种分派路径。** 小交接用 `@` 提及；需要独立状态、验收标准或后续追踪的工作，用子 issue。不要同时创建子 issue 又 `@` 同一个智能体做同一件事。
+- **执行并发交给 task 队列。** Multica 会按 agent / runtime 领取排队 task；不同智能体可以并行处理同一个 issue，同一个智能体不会在同一个 issue 上重复跑同一批活。
+
+自动化也能套这个模型：如果某个定时 / 触发任务每次都应该先由队长判断路线，就把自动化分给小队。自动化会解析到小队队长执行，而不是自动触发所有成员。
+
+<Callout type="info">
+当前小队还不会在后端做基于 skill 的 fan-out、负载均衡、或自动选成员。这些策略现在写在队长 instructions 和 roster 里。想要更稳定的自动调度，就把队长的路由规则写具体，并维护好成员的 role / skill。
+</Callout>
+
 ## 权限
 
 | 操作 | 谁能做 |

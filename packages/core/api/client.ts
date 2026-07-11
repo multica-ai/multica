@@ -98,6 +98,7 @@ import type {
   AutopilotRun,
   CreateAutopilotRequest,
   UpdateAutopilotRequest,
+  TriggerAutopilotRequest,
   CreateAutopilotTriggerRequest,
   UpdateAutopilotTriggerRequest,
   ListAutopilotsResponse,
@@ -218,6 +219,10 @@ import {
   EMPTY_BILLING_CHECKOUT_SESSION_STATUS,
   EMPTY_CREATE_BILLING_PORTAL_SESSION_RESPONSE,
   EMPTY_CANCEL_TASK_RESPONSE,
+  SkillSchema,
+  SkillSummaryListSchema,
+  EMPTY_SKILL,
+  EMPTY_SKILL_SUMMARY_LIST,
   CreateFeedbackResponseSchema,
   EMPTY_CREATE_FEEDBACK_RESPONSE,
   InboxUnreadSummarySchema,
@@ -1658,24 +1663,36 @@ export class ApiClient {
 
   // Skills
   async listSkills(): Promise<SkillSummary[]> {
-    return this.fetch("/api/skills");
+    const raw = await this.fetch<unknown>("/api/skills");
+    return parseWithFallback(raw, SkillSummaryListSchema, EMPTY_SKILL_SUMMARY_LIST, {
+      endpoint: "GET /api/skills",
+    });
   }
 
   async getSkill(id: string): Promise<Skill> {
-    return this.fetch(`/api/skills/${id}`);
+    const raw = await this.fetch<unknown>(`/api/skills/${id}`);
+    return parseWithFallback(raw, SkillSchema, EMPTY_SKILL, {
+      endpoint: "GET /api/skills/:id",
+    });
   }
 
   async createSkill(data: CreateSkillRequest): Promise<Skill> {
-    return this.fetch("/api/skills", {
+    const raw = await this.fetch<unknown>("/api/skills", {
       method: "POST",
       body: JSON.stringify(data),
+    });
+    return parseWithFallback(raw, SkillSchema, EMPTY_SKILL, {
+      endpoint: "POST /api/skills",
     });
   }
 
   async updateSkill(id: string, data: UpdateSkillRequest): Promise<Skill> {
-    return this.fetch(`/api/skills/${id}`, {
+    const raw = await this.fetch<unknown>(`/api/skills/${id}`, {
       method: "PUT",
       body: JSON.stringify(data),
+    });
+    return parseWithFallback(raw, SkillSchema, EMPTY_SKILL, {
+      endpoint: "PUT /api/skills/:id",
     });
   }
 
@@ -2189,8 +2206,11 @@ export class ApiClient {
     });
   }
 
-  async triggerAutopilot(id: string): Promise<AutopilotRun> {
-    return this.fetch(`/api/autopilots/${id}/trigger`, { method: "POST" });
+  async triggerAutopilot(id: string, data?: TriggerAutopilotRequest): Promise<AutopilotRun> {
+    return this.fetch(`/api/autopilots/${id}/trigger`, {
+      method: "POST",
+      ...(data ? { body: JSON.stringify(data) } : {}),
+    });
   }
 
   async listAutopilotRuns(id: string, params?: { limit?: number; offset?: number }): Promise<ListAutopilotRunsResponse> {

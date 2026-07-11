@@ -60,6 +60,7 @@
     "source_runtime_named": "来自 {{name}}",
     "source_runtime_provider": "来自 {{provider}} 运行时",
     "source_runtime_unknown": "来自某个运行时",
+    "source_local_directory": "来自本地目录",
     "source_clawhub": "来自 ClawHub",
     "source_skills_sh": "来自 Skills.sh",
     "source_github": "来自 GitHub"
@@ -113,12 +114,15 @@
     "delete_file": "删除文件",
     "name_aria": "skill 名称",
     "name_placeholder": "skill-name",
+    "display_name_aria": "skill 显示名称",
+    "display_name_placeholder": "显示名称（可选）",
     "description_label": "描述",
     "description_placeholder": "用一句话描述智能体什么时候应该使用这个 skill...",
     "subline": {
       "origin_runtime_named": "本地运行时 · {{name}}",
       "origin_runtime_provider": "本地运行时 · {{provider}}",
       "origin_runtime_unknown": "本地运行时",
+      "origin_local_directory": "本地目录",
       "origin_clawhub": "导入自 · ClawHub",
       "origin_skills_sh": "导入自 · Skills.sh",
       "origin_github": "导入自 · GitHub",
@@ -153,6 +157,7 @@
     },
     "origin_card": {
       "imported_runtime": "从本地运行时导入",
+      "imported_local_directory": "从本地目录导入",
       "imported_clawhub": "从 ClawHub 导入",
       "imported_skills_sh": "从 Skills.sh 导入",
       "imported_github": "从 GitHub 导入",
@@ -207,6 +212,10 @@
         "title": "从 URL 导入",
         "desc": "通过 URL 拉取已发布的 skill，文件由服务端拉取。"
       },
+      "local_directory": {
+        "title": "从本地目录导入",
+        "desc": "选择一个 skills 目录，导入一个或多个 SKILL.md 包。"
+      },
       "runtime": {
         "title": "从运行时复制",
         "desc": "扫描本地运行时，把它磁盘上的 skill 提升到工作区。"
@@ -217,6 +226,8 @@
       "manual_desc": "从空白 SKILL.md 开始，自己写指令。",
       "url_title": "从 URL 导入",
       "url_desc": "从 ClawHub 或 Skills.sh 拉取已发布的 skill。",
+      "local_directory_title": "从本地目录导入",
+      "local_directory_desc": "选择本地磁盘上的 skills 文件夹，再导入选中的包。",
       "runtime_title": "从运行时复制",
       "runtime_desc": "把本地运行时里已经装好的 skill 提升过来。"
     },
@@ -224,6 +235,9 @@
       "name_label": "名称",
       "name_placeholder": "例如：review-helper",
       "name_hint": "工作区内必须唯一。",
+      "display_name_label": "显示名称",
+      "display_name_placeholder": "例如：代码审查助手",
+      "display_name_hint": "可选。仅在界面显示，不会修改 skill 的目录名。",
       "description_label": "描述",
       "description_placeholder": "用一句话说什么时候应该把这个 skill 分配给智能体。",
       "name_conflict_hint": "请换一个名字再提交。",
@@ -246,6 +260,17 @@
       "cancel": "取消",
       "toast_imported": "已导入 skill"
     }
+  },
+  "local_directory_import": {
+    "choose_button": "选择目录",
+    "choose_again": "选择其他目录",
+    "loading": "正在读取目录...",
+    "load_failed": "读取本地目录失败",
+    "empty_title": "选择一个 skills 目录",
+    "empty_hint": "选择包含一个或多个 SKILL.md 文件的 skill 目录。",
+    "no_skills_hint": "这个目录里没有找到 SKILL.md 文件。",
+    "toast_imported_other": "已导入 {{count}} 个 skill",
+    "toast_import_failed": "导入 skill 失败"
   },
   "runtime_import": {
     "runtime_label": "运行时",

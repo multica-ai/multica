@@ -408,6 +408,7 @@ export interface Agent {
 export interface AgentSkillSummary {
   id: string;
   name: string;
+  display_name?: string;
   description: string;
 }
 
@@ -619,6 +620,7 @@ export interface SkillSummary {
   id: string;
   workspace_id: string;
   name: string;
+  display_name?: string;
   description: string;
   config: Record<string, unknown>;
   created_by: string | null;
@@ -642,6 +644,7 @@ export interface SkillFile {
 
 export interface CreateSkillRequest {
   name: string;
+  display_name?: string;
   description?: string;
   content?: string;
   config?: Record<string, unknown>;
@@ -650,6 +653,7 @@ export interface CreateSkillRequest {
 
 export interface UpdateSkillRequest {
   name?: string;
+  display_name?: string;
   description?: string;
   content?: string;
   config?: Record<string, unknown>;

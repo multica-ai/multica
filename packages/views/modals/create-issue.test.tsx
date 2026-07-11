@@ -332,8 +332,18 @@ vi.mock("@multica/ui/components/ui/switch", () => ({
 }));
 
 vi.mock("@multica/ui/components/common/file-upload-button", () => ({
-  FileUploadButton: ({ onSelect }: { onSelect: (file: File) => void }) => (
-    <button type="button" onClick={() => onSelect(new File(["test"], "test.txt"))}>
+  FileUploadButton: ({
+    onSelect,
+    multiple,
+  }: {
+    onSelect: (file: File) => void;
+    multiple?: boolean;
+  }) => (
+    <button
+      type="button"
+      data-multiple={multiple ? "true" : "false"}
+      onClick={() => onSelect(new File(["test"], "test.txt"))}
+    >
       Upload file
     </button>
   ),
@@ -541,6 +551,15 @@ describe("CreateIssueModal", () => {
     )?.[0] as { attachments?: Array<{ download_url: string }> } | undefined;
     expect(draftAttachmentsCall?.attachments?.[0]?.download_url).not.toContain(
       "Signature=",
+    );
+  });
+
+  it("allows selecting multiple attachments from the manual create footer", () => {
+    renderModal(<CreateIssueModal onClose={vi.fn()} />);
+
+    expect(screen.getByRole("button", { name: "Upload file" })).toHaveAttribute(
+      "data-multiple",
+      "true",
     );
   });
 

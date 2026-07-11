@@ -45,7 +45,8 @@ const OPEN_KEY = "multica:chat:isOpen";
  */
 const FLOATING_KEY = "multica:chat:floatingChatEnabled";
 
-function readDrafts(storage: StorageAdapter, key: string): Record<string, string> {
+function readDrafts(storage: StorageAdapter, key: string | null): Record<string, string> {
+  if (!key) return {};
   const raw = storage.getItem(key);
   if (!raw) return {};
   try {
@@ -56,7 +57,8 @@ function readDrafts(storage: StorageAdapter, key: string): Record<string, string
   }
 }
 
-function writeDrafts(storage: StorageAdapter, key: string, drafts: Record<string, string>) {
+function writeDrafts(storage: StorageAdapter, key: string | null, drafts: Record<string, string>) {
+  if (!key) return;
   // Prune empty entries so the blob doesn't grow unbounded.
   const pruned: Record<string, string> = {};
   for (const [k, v] of Object.entries(drafts)) {
@@ -78,7 +80,8 @@ function isAttachmentDraft(value: unknown): value is Attachment {
   );
 }
 
-function readDraftAttachments(storage: StorageAdapter, key: string): Record<string, Attachment[]> {
+function readDraftAttachments(storage: StorageAdapter, key: string | null): Record<string, Attachment[]> {
+  if (!key) return {};
   const raw = storage.getItem(key);
   if (!raw) return {};
   try {
@@ -98,9 +101,10 @@ function readDraftAttachments(storage: StorageAdapter, key: string): Record<stri
 
 function writeDraftAttachments(
   storage: StorageAdapter,
-  key: string,
+  key: string | null,
   drafts: Record<string, Attachment[]>,
 ) {
+  if (!key) return;
   const pruned: Record<string, Attachment[]> = {};
   for (const [k, v] of Object.entries(drafts)) {
     if (v.length > 0) pruned[k] = v;
@@ -168,12 +172,31 @@ export interface ChatStoreOptions {
 export function createChatStore(options: ChatStoreOptions) {
   const { storage } = options;
 
-  const wsKey = (base: string) => {
+  // Workspace-scoped key for per-workspace state (session, agent, drafts,
+  // size). Returns null when no workspace slug is set so reads/writes are
+  // skipped instead of bleeding into a shared global slot — this is the
+  // cross-workspace session-mixup guard.
+  const wsKey = (base: string): string | null => {
     const slug = getCurrentSlug();
-    return slug ? `${base}:${slug}` : base;
+    return slug ? `${base}:${slug}` : null;
   };
 
-  // Resolve initial isOpen from storage. The three-state read (null /
+  const readString = (base: string) => {
+    const key = wsKey(base);
+    return key ? storage.getItem(key) : null;
+  };
+
+  const writeString = (base: string, value: string) => {
+    const key = wsKey(base);
+    if (key) storage.setItem(key, value);
+  };
+
+  const removeString = (base: string) => {
+    const key = wsKey(base);
+    if (key) storage.removeItem(key);
+  };
+
+  // Resolve initial isOpen from storage (global). The three-state read (null /
   // "true" / "false") keeps the "new user → closed" default while still
   // honouring an explicit "I opened it" choice on every reload.
   const storedOpen = storage.getItem(OPEN_KEY);
@@ -187,13 +210,13 @@ export function createChatStore(options: ChatStoreOptions) {
   const store = create<ChatState>((set, get) => ({
     isOpen: initialIsOpen,
     floatingChatEnabled: initialFloatingEnabled,
-    activeSessionId: storage.getItem(wsKey(SESSION_STORAGE_KEY)),
-    selectedAgentId: storage.getItem(wsKey(AGENT_STORAGE_KEY)),
+    activeSessionId: readString(SESSION_STORAGE_KEY),
+    selectedAgentId: readString(AGENT_STORAGE_KEY),
     inputDrafts: readDrafts(storage, wsKey(DRAFTS_KEY)),
     inputDraftAttachments: readDraftAttachments(storage, wsKey(DRAFT_ATTACHMENTS_KEY)),
-    chatWidth: Number(storage.getItem(CHAT_WIDTH_KEY)) || CHAT_DEFAULT_W,
-    chatHeight: Number(storage.getItem(CHAT_HEIGHT_KEY)) || CHAT_DEFAULT_H,
-    isExpanded: storage.getItem(wsKey(CHAT_EXPANDED_KEY)) === "true",
+    chatWidth: Number(readString(CHAT_WIDTH_KEY)) || CHAT_DEFAULT_W,
+    chatHeight: Number(readString(CHAT_HEIGHT_KEY)) || CHAT_DEFAULT_H,
+    isExpanded: readString(CHAT_EXPANDED_KEY) === "true",
     setOpen: (open) => {
       logger.debug("setOpen", { from: get().isOpen, to: open });
       storage.setItem(OPEN_KEY, String(open));
@@ -216,15 +239,15 @@ export function createChatStore(options: ChatStoreOptions) {
     setActiveSession: (id) => {
       logger.info("setActiveSession", { from: get().activeSessionId, to: id });
       if (id) {
-        storage.setItem(wsKey(SESSION_STORAGE_KEY), id);
+        writeString(SESSION_STORAGE_KEY, id);
       } else {
-        storage.removeItem(wsKey(SESSION_STORAGE_KEY));
+        removeString(SESSION_STORAGE_KEY);
       }
       set({ activeSessionId: id });
     },
     setSelectedAgentId: (id) => {
       logger.info("setSelectedAgentId", { from: get().selectedAgentId, to: id });
-      storage.setItem(wsKey(AGENT_STORAGE_KEY), id);
+      writeString(AGENT_STORAGE_KEY, id);
       set({ selectedAgentId: id });
     },
     setInputDraft: (sessionId, draft) => {
@@ -271,28 +294,31 @@ export function createChatStore(options: ChatStoreOptions) {
     },
     setChatSize: (w, h) => {
       logger.debug("setChatSize", { w, h });
-      storage.setItem(CHAT_WIDTH_KEY, String(w));
-      storage.setItem(CHAT_HEIGHT_KEY, String(h));
+      writeString(CHAT_WIDTH_KEY, String(w));
+      writeString(CHAT_HEIGHT_KEY, String(h));
       // Dragging = user chose a manual size → exit expanded mode
-      storage.removeItem(wsKey(CHAT_EXPANDED_KEY));
+      removeString(CHAT_EXPANDED_KEY);
       set({ chatWidth: w, chatHeight: h, isExpanded: false });
     },
     setExpanded: (expanded) => {
       logger.info("setExpanded", { to: expanded });
       if (expanded) {
-        storage.setItem(wsKey(CHAT_EXPANDED_KEY), "true");
+        writeString(CHAT_EXPANDED_KEY, "true");
       } else {
-        storage.removeItem(wsKey(CHAT_EXPANDED_KEY));
+        removeString(CHAT_EXPANDED_KEY);
       }
       set({ isExpanded: expanded });
     },
   }));
 
   registerForWorkspaceRehydration(() => {
-    const nextSession = storage.getItem(wsKey(SESSION_STORAGE_KEY));
-    const nextAgent = storage.getItem(wsKey(AGENT_STORAGE_KEY));
+    const nextSession = readString(SESSION_STORAGE_KEY);
+    const nextAgent = readString(AGENT_STORAGE_KEY);
     const nextDrafts = readDrafts(storage, wsKey(DRAFTS_KEY));
     const nextDraftAttachments = readDraftAttachments(storage, wsKey(DRAFT_ATTACHMENTS_KEY));
+    const nextWidth = Number(readString(CHAT_WIDTH_KEY)) || CHAT_DEFAULT_W;
+    const nextHeight = Number(readString(CHAT_HEIGHT_KEY)) || CHAT_DEFAULT_H;
+    const nextExpanded = readString(CHAT_EXPANDED_KEY) === "true";
     logger.info("workspace rehydration", {
       prevSession: store.getState().activeSessionId,
       nextSession,
@@ -300,12 +326,19 @@ export function createChatStore(options: ChatStoreOptions) {
       nextAgent,
       draftCount: Object.keys(nextDrafts).length,
       draftAttachmentCount: Object.keys(nextDraftAttachments).length,
+      nextWidth,
+      nextHeight,
+      nextExpanded,
     });
+    // isOpen / floatingChatEnabled are global and do not vary by workspace.
     store.setState({
       activeSessionId: nextSession,
       selectedAgentId: nextAgent,
       inputDrafts: nextDrafts,
       inputDraftAttachments: nextDraftAttachments,
+      chatWidth: nextWidth,
+      chatHeight: nextHeight,
+      isExpanded: nextExpanded,
     });
   });
 
