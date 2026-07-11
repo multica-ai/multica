@@ -7,8 +7,10 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/multica-ai/multica/server/internal/cerebro/connections"
 	"github.com/multica-ai/multica/server/internal/cerebro/toolpolicy"
 	"github.com/multica-ai/multica/server/internal/handler"
+	"github.com/multica-ai/multica/server/internal/util"
 )
 
 // capturingVerdicts records the TableQuery the resolver builds, so a test can
@@ -80,6 +82,33 @@ func TestClaimConnectionMCPFlagOnAuthoritative(t *testing.T) {
 
 	if len(deny) != 1 || deny[0] != toolpolicy.MCPToolToken("gamma", "g2") {
 		t.Errorf("claim deny = %v, want exactly [%s]", deny, toolpolicy.MCPToolToken("gamma", "g2"))
+	}
+}
+
+// The claim-specific entry builder must receive the same actor identity used
+// for policy resolution. Relay tokens minted from the generic entry builder are
+// workspace-scoped and lose the agent Allow that admitted the connection.
+func TestClaimConnectionMCPBuildsRelayEntryForClaimActor(t *testing.T) {
+	want := claimIdent()
+	r := newMixedResolver()
+	r.SetClaimMCPEntryBuilder(func(c connections.Connection, got ConnectionIdentity) map[string]any {
+		if got.WorkspaceID != want.WorkspaceID || got.RuntimeID != want.RuntimeID || got.AgentID != want.AgentID || got.OwnerID != want.OwnerID {
+			t.Fatalf("claim entry identity = %+v, want %+v", got, want)
+		}
+		return map[string]any{"url": "https://relay.example/" + c.Name, "actor": util.UUIDToString(got.AgentID)}
+	})
+
+	mcp, _, handled := r.ClaimConnectionMCP(context.Background(), want)
+	if !handled {
+		t.Fatal("flag on must be authoritative")
+	}
+	servers := parseMCPServers(t, mcp)
+	alpha, ok := servers["alpha"].(map[string]any)
+	if !ok {
+		t.Fatalf("alpha entry = %#v, want object", servers["alpha"])
+	}
+	if alpha["actor"] != util.UUIDToString(want.AgentID) {
+		t.Fatalf("alpha actor = %v, want %s", alpha["actor"], util.UUIDToString(want.AgentID))
 	}
 }
 

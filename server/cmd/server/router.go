@@ -616,7 +616,13 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			return cerebroconnections.MCPServerEntry(c, cerebroMCPRelay)
 		}
 	}
-	h.ConnectionClaimResolver = cerebroruntime.NewConnectionToolResolver(cerebroAPIConnResolver, cerebroConnectionsHandler.Store, cerebrotoolpolicy.NewStore(pool), cerebroQueries, cerebroClaimMCPEntry, nil)
+	claimConnectionResolver := cerebroruntime.NewConnectionToolResolver(cerebroAPIConnResolver, cerebroConnectionsHandler.Store, cerebrotoolpolicy.NewStore(pool), cerebroQueries, cerebroClaimMCPEntry, nil) // CEREBRO-PATCH(claim-relay-actor-token): FIR-2835 actor-scoped relay token for unified claim resolver.
+	if cerebroMCPRelay != nil {
+		claimConnectionResolver.SetClaimMCPEntryBuilder(func(c cerebroconnections.Connection, ident cerebroruntime.ConnectionIdentity) map[string]any {
+			return cerebroMCPRelay.MCPServerEntryForActor(c, ident.RuntimeID, ident.AgentID, ident.OwnerID, ident.InitiatorID)
+		})
+	}
+	h.ConnectionClaimResolver = claimConnectionResolver
 	// CEREBRO-PATCH(cerebro-web-fetch-policy-routes): TECH-3522 per-workspace web_fetch policy handler.
 	cerebroWebFetchPolicyHandler := cerebrowebfetchpolicy.NewHandler(cerebroQueries)
 	h.ConnectionToolDeny = cerebrotoolpolicy.NewStore(pool)   // CEREBRO-PATCH(cerebro-connection-tool-deny-wire): TECH-3156 resolve per-tool connection denies at claim.
