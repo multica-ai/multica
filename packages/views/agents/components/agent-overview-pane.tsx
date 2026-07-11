@@ -297,6 +297,7 @@ export function AgentOverviewPane({
   const activeSecondaryTab = secondaryTabs.find(
     (tab) => tab.id === effectiveView,
   );
+  const isSecondaryLayout = secondaryTabs.length > 0 && activeSecondaryTab != null;
 
   return (
     <div className="flex min-h-0 flex-1 flex-col bg-background">
@@ -326,7 +327,15 @@ export function AgentOverviewPane({
         </div>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto">
+      {/* Overview/Work scroll as one page. Sidebar views split scrolling on
+          md+ (nav rail pinned, content pane scrolls) like settings-page.tsx;
+          below md the rail is a horizontal strip and the page scrolls whole. */}
+      <div
+        className={cn(
+          "min-h-0 flex-1 overflow-y-auto",
+          isSecondaryLayout && "md:overflow-hidden",
+        )}
+      >
         {effectiveView === "overview" && (
           <div className="mx-auto max-w-[1440px] p-4 sm:p-6">
             <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_320px]">
@@ -347,8 +356,8 @@ export function AgentOverviewPane({
         )}
 
         {secondaryTabs.length > 0 && activeSecondaryTab && (
-          <div className="flex min-h-full flex-col md:flex-row">
-            <aside className="shrink-0 overflow-x-auto border-b border-surface-border bg-app-shell/70 p-2 md:w-52 md:overflow-x-visible md:border-b-0 md:border-r md:p-4">
+          <div className="flex min-h-full flex-col md:h-full md:flex-row">
+            <aside className="shrink-0 overflow-x-auto border-b border-surface-border bg-app-shell/70 p-2 md:w-52 md:overflow-y-auto md:border-b-0 md:border-r md:p-4">
               <div
                 className="flex w-max min-w-full items-center gap-1 md:w-full md:flex-col md:items-stretch"
                 role="tablist"
@@ -378,7 +387,7 @@ export function AgentOverviewPane({
               </div>
             </aside>
 
-            <section className="min-w-0 flex-1">
+            <section className="min-w-0 flex-1 md:overflow-y-auto">
               <div className="mx-auto w-full max-w-3xl p-4 sm:p-6 md:p-8">
                 <header>
                   <h2 className="text-base font-medium text-balance">
