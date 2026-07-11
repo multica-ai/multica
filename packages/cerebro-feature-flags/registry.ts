@@ -268,6 +268,9 @@ export type CerebroFlagKey =
   | "cerebro_comment_target_guard_wakeup_exempt"
   // FIR-2409: friendly "Agent-start" permission tab — who may trigger an agent they don't own.
   | "cerebro_agent_trigger_permissions"
+  // FIR-3091 slice 5: surface the web_fetch host allow/deny list inside the unified
+  // Permissions screen instead of its own separate "Web fetch" settings tab.
+  | "cerebro_web_fetch_permissions"
   // TECH-2880: collapsible Projects entry in the sidebar (with nested project tree).
   | "cerebro_projects"
   // FIR-2660: restrict channel creation to workspace owners/admins. Default off
@@ -677,6 +680,11 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   cerebro_comment_target_guard_wakeup_exempt: false,
   // FIR-2409: opt-in until the Agent-start tab + per-agent rows are reviewed.
   cerebro_agent_trigger_permissions: false,
+  // FIR-3091 slice 5: OFF by default. When on, the web_fetch host list moves
+  // into the Permissions screen and the standalone "Web fetch" tab is hidden.
+  // Pure UI relocation — the standalone tab (cerebro_web_fetch_policy) is the
+  // fallback whenever this is off, so the change is reversible.
+  cerebro_web_fetch_permissions: false,
   // TECH-2880: OFF by default — workspace opts in to surface the Projects
   // collapsible (header + sub-items) in the sidebar.
   cerebro_projects: false,
@@ -1354,6 +1362,13 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
       "Add a friendly 'Agent-start' tab under Settings → Permissions to control who may start (trigger) an agent they don't own — a workspace-wide default plus a per-agent override (Allow / run-request / owner-only). Reuses the tool-policy engine; server enforcement is unchanged when off. FIR-2409.",
   },
   {
+    key: "cerebro_web_fetch_permissions",
+    label: "Web fetch in Permissions",
+    group: "permissions",
+    description:
+      "Show the web_fetch host list (which URLs agents may fetch) inside the unified Permissions screen instead of its own separate 'Web fetch' settings tab. Pure UI relocation — the mode and host rules, and how they are enforced, are unchanged. When off, the standalone 'Web fetch' tab (cerebro_web_fetch_policy) is used instead, so the move is reversible. FIR-3091.",
+  },
+  {
     key: "cerebro_image_reload",
     label: "Reload stalled images",
     group: "workspace",
@@ -1885,6 +1900,7 @@ export const CEREBRO_FLAG_SUBGROUP_OF: Partial<Record<CerebroFlagKey, string>> =
   cerebro_simple_tool_policy: "tool_permissions",
   cerebro_runtime_tool_grant_ui: "tool_permissions",
   cerebro_web_fetch_policy: "tool_permissions",
+  cerebro_web_fetch_permissions: "tool_permissions",
   cerebro_platform_capabilities: "tool_permissions",
   cerebro_approval_gate: "tool_permissions",
   cerebro_local_tool_policy: "tool_permissions",

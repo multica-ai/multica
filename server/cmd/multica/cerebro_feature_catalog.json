@@ -512,6 +512,13 @@
       "default": false
     },
     {
+      "key": "cerebro_web_fetch_permissions",
+      "label": "Web fetch in Permissions",
+      "description": "Show the web_fetch host list (which URLs agents may fetch) inside the unified Permissions screen instead of its own separate 'Web fetch' settings tab. Pure UI relocation — the mode and host rules, and how they are enforced, are unchanged. When off, the standalone 'Web fetch' tab (cerebro_web_fetch_policy) is used instead, so the move is reversible. FIR-3091.",
+      "group": "permissions",
+      "default": false
+    },
+    {
       "key": "cerebro_image_reload",
       "label": "Reload stalled images",
       "description": "On a document page showing an image, recover when the image stops mid-load: a loading indicator while it fetches, up to two automatic retries on failure, and a manual \"Reload image\" button so you can try again without reloading the whole page. Off restores the plain image with no retry. FIR-1673.",

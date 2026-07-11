@@ -15,11 +15,15 @@ interface ExtraSettingsTab {
   content: React.ReactNode;
 }
 
-// useCerebroWebFetchPolicySettingsTabs returns the Web fetch settings tab when
-// the cerebro_web_fetch_policy flag is on, and nothing when it is off.
+// useCerebroWebFetchPolicySettingsTabs returns the standalone Web fetch settings
+// tab when the cerebro_web_fetch_policy flag is on, and nothing when it is off.
+// FIR-3091 slice 5: when cerebro_web_fetch_permissions is on, the host list is
+// rendered inside the unified Permissions screen instead, so the standalone tab
+// is suppressed here to avoid showing the same editor in two places.
 export function useCerebroWebFetchPolicySettingsTabs(): ExtraSettingsTab[] {
   const enabled = useFeatureFlag("cerebro_web_fetch_policy");
-  if (!enabled) return [];
+  const movedToPermissions = useFeatureFlag("cerebro_web_fetch_permissions");
+  if (!enabled || movedToPermissions) return [];
   return [
     {
       value: "web-fetch",
