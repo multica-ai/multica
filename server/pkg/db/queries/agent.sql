@@ -662,15 +662,16 @@ RETURNING *;
 -- proving liveness, so the wall clock is allowed to fire — same shape as
 -- the legacy pure-wall-clock behavior for that (rare / historical) case.
 --
--- waiting_local_directory rows are intentionally excluded: the daemon owns
--- the wait (with its own ctx-driven timeout) and a legitimate queue ahead
--- of this task can exceed the dispatch / running timeouts without being
--- "stuck". If the daemon dies, RecoverOrphanedTasksForRuntime reclaims
--- those rows at restart.
+-- waiting_local_directory rows require a separate branch with an independent
+-- wall-clock timeout (waiting_local_directory_timeout_secs) so that tasks
+-- stuck behind a hung lock-holder are eventually recovered even when the
+-- runtime stays online. The daemon-dead case is already covered by
+-- FailTasksForOfflineRuntimes in the same tick.
 UPDATE agent_task_queue
 SET status = 'failed', completed_at = now(), error = 'task timed out',
     failure_reason = 'timeout',
-    prepare_lease_expires_at = NULL
+    prepare_lease_expires_at = NULL,
+    wait_reason = NULL
 WHERE (
     status = 'dispatched'
     AND dispatched_at < now() - make_interval(secs => @dispatch_timeout_secs::double precision)
@@ -685,6 +686,17 @@ WHERE (
         AND r.status = 'online'
         AND r.last_seen_at >= now() - make_interval(secs => @runtime_stale_secs::double precision)
     )
+  )
+   OR (
+    -- waiting_local_directory: defense-in-depth timeout for tasks whose
+    -- daemon-level path lock is stuck. The daemon owns the wait (with its
+    -- own ctx-driven timeout), but if the lock holder's agent hangs, the
+    -- waiting task can block indefinitely. This wall clock fires after a
+    -- generous timeout to unstick such tasks even when the runtime is still
+    -- online. Use dispatched_at as the clock since waiting_local_directory
+    -- tasks have no started_at.
+    status = 'waiting_local_directory'
+    AND dispatched_at < now() - make_interval(secs => @waiting_local_directory_timeout_secs::double precision)
   )
 RETURNING *;
 

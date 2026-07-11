@@ -51,6 +51,18 @@ const (
 	// liveness + DB stale + FailTasksForOfflineRuntimes), which typically
 	// reclaims orphaned tasks within ~180s.
 	runningTimeoutSeconds = 9000.0
+	// waitingLocalDirectoryTimeoutSeconds is the wall-clock timeout for tasks
+	// stuck in 'waiting_local_directory'. This is a defense-in-depth backstop:
+	// the daemon owns the wait with its own ctx-driven timeout (bounded by the
+	// agent timeout), but if the path-lock holder's agent hangs (e.g. a child
+	// process becomes unkillable on Windows), the waiting task could block
+	// indefinitely. This timeout unconditionally fails such tasks. Unlike the
+	// running-task branch, we do NOT gate on daemon liveness here — a
+	// heartbeating daemon with a stuck waiting task is exactly the failure
+	// mode we want to recover from. The timeout is set to the same value as
+	// runningTimeoutSeconds since a legitimate wait should never approach this
+	// duration; if it does, something is genuinely wrong.
+	waitingLocalDirectoryTimeoutSeconds = 9000.0
 	// queuedTTLSeconds expires tasks that have been sitting in 'queued'
 	// for longer than this without ever being claimed. This is the cleanup
 	// arm of the MUL-1899 backlog fix: even with the dispatch-time
@@ -246,14 +258,16 @@ func gcRuntimes(ctx context.Context, queries *db.Queries, bus *events.Bus) {
 	}
 }
 
-// sweepStaleTasks fails tasks stuck in dispatched/running for too long,
-// even when the runtime is still online at the row level. Each branch pairs
-// the wall clock with a task-appropriate liveness signal so healthy long
-// runs are preserved:
+// sweepStaleTasks fails tasks stuck in dispatched/running/waiting_local_directory
+// for too long, even when the runtime is still online at the row level. Each
+// branch pairs the wall clock with a task-appropriate liveness signal so healthy
+// long runs are preserved:
 //   - dispatched: excludes rows with an active prepare_lease (renewed by
 //     the daemon between claim and StartTask).
 //   - running: excludes rows whose runtime is 'online' with a fresh
 //     last_seen_at (renewed by the daemon heartbeat ~every 15s).
+//   - waiting_local_directory: unconditionally fails after the wall-clock
+//     timeout — a stuck path lock is unrecoverable without server intervention.
 //
 // The daemon-dead case is primarily handled upstream by sweepStaleRuntimes
 // in the same tick; this function is a defensive backstop for the residual
@@ -261,11 +275,12 @@ func gcRuntimes(ctx context.Context, queries *db.Queries, bus *events.Bus) {
 // wall clock (MUL-4107).
 func sweepStaleTasks(ctx context.Context, queries *db.Queries, taskSvc *service.TaskService, bus *events.Bus) {
 	failedTasks, err := queries.FailStaleTasks(ctx, db.FailStaleTasksParams{
-		DispatchTimeoutSecs: dispatchTimeoutSeconds,
-		RunningTimeoutSecs:  runningTimeoutSeconds,
+		DispatchTimeoutSecs:              dispatchTimeoutSeconds,
+		RunningTimeoutSecs:               runningTimeoutSeconds,
 		// Reuse the runtime stale window so the running-task backstop
 		// exactly matches what sweepStaleRuntimes considers "not alive".
-		RuntimeStaleSecs: staleThresholdSeconds,
+		RuntimeStaleSecs:                 staleThresholdSeconds,
+		WaitingLocalDirectoryTimeoutSecs: waitingLocalDirectoryTimeoutSeconds,
 	})
 	if err != nil {
 		slog.Warn("task sweeper: failed to clean up stale tasks", "error", err)
