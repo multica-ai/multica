@@ -722,6 +722,16 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	r.Route("/api/daemon", func(r chi.Router) {
 		r.Use(middleware.DaemonAuth(queries, patCache, daemonTokenCache, cloudPATVerifier))
 
+		// Compress large daemon API responses — most importantly the task-claim
+		// payload, which inlines every bound skill's full content and can reach
+		// many MB. Without compression a slow link blows past the daemon client's
+		// 30s read timeout while streaming the body ("context deadline exceeded
+		// ... while reading body"), see #4072. The daemon client uses the default
+		// Go transport (http.DefaultTransport.Clone), which transparently
+		// advertises Accept-Encoding: gzip and decompresses the response, so no
+		// client change is needed. chi's Compress skips WebSocket upgrades.
+		r.Use(chimw.Compress(5))
+
 		r.Post("/register", h.DaemonRegister)
 		r.Post("/deregister", h.DaemonDeregister)
 		r.Post("/heartbeat", h.DaemonHeartbeat)
