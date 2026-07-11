@@ -32,6 +32,7 @@ import { cn } from "@multica/ui/lib/utils";
 import { copyText } from "@multica/ui/lib/clipboard";
 import { toast } from "sonner";
 import { useT } from "../../i18n";
+import { COMPACT_INSTANT_FORMAT, useDateFormatter } from "../../common/date-format";
 import type {
   WebhookDelivery,
   WebhookDeliveryStatus,
@@ -68,18 +69,6 @@ const UNKNOWN_VISUAL: StatusVisual = {
 
 function visualForStatus(status: string): StatusVisual {
   return (STATUS_VISUAL as Record<string, StatusVisual>)[status] ?? UNKNOWN_VISUAL;
-}
-
-// --- Helpers --------------------------------------------------------------
-
-function formatDate(value: string): string {
-  if (!value) return "—";
-  return new Date(value).toLocaleString(undefined, {
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
 }
 
 // A delivery is replayable when (a) the server allows it (signature is not
@@ -158,6 +147,9 @@ function DeliveryRow({
   autopilotId: string;
 }) {
   const { t } = useT("autopilots");
+  const formatDate = useDateFormatter();
+  const formatDeliveryDate = (value?: string | null) =>
+    value ? formatDate(value, COMPACT_INSTANT_FORMAT) : "—";
   const [open, setOpen] = useState(false);
 
   const visual = visualForStatus(delivery.status);
@@ -204,7 +196,7 @@ function DeliveryRow({
           </Badge>
         )}
         <span className="w-32 shrink-0 text-right text-xs text-muted-foreground tabular-nums">
-          {formatDate(delivery.received_at || delivery.created_at)}
+          {formatDeliveryDate(delivery.received_at || delivery.created_at)}
         </span>
       </button>
       {open && (
@@ -233,6 +225,9 @@ function DeliveryDetailDialog({
   delivery: WebhookDelivery;
 }) {
   const { t } = useT("autopilots");
+  const formatDate = useDateFormatter();
+  const formatDeliveryDate = (value?: string | null) =>
+    value ? formatDate(value, COMPACT_INSTANT_FORMAT) : "—";
   const wsId = useWorkspaceId();
   const { data: detail, isLoading } = useQuery(
     autopilotDeliveryOptions(wsId, autopilotId, delivery.id, { enabled: open }),
@@ -283,11 +278,11 @@ function DeliveryDetailDialog({
           <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
             <MetaRow
               label={t(($) => $.deliveries.detail.received_at)}
-              value={formatDate(full.received_at)}
+              value={formatDeliveryDate(full.received_at)}
             />
             <MetaRow
               label={t(($) => $.deliveries.detail.last_attempt_at)}
-              value={formatDate(full.last_attempt_at)}
+              value={formatDeliveryDate(full.last_attempt_at)}
             />
             <MetaRow
               label={t(($) => $.deliveries.detail.attempt_count)}

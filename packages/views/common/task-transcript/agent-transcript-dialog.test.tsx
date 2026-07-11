@@ -16,6 +16,10 @@ vi.mock("@multica/core/api", () => ({
   },
 }));
 
+vi.mock("../use-viewing-timezone", () => ({
+  useViewingTimezone: () => "UTC",
+}));
+
 vi.mock("../actor-avatar", () => ({
   ActorAvatar: () => <span data-testid="actor-avatar" />,
 }));

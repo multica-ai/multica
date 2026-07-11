@@ -41,6 +41,7 @@ import type { TimelineEntry, Attachment } from "@multica/core/types";
 import { contentReferencesAttachment } from "@multica/core/types";
 import { useCommentCollapseStore, useCommentDraftStore } from "@multica/core/issues/stores";
 import { useT } from "../../i18n";
+import { FULL_INSTANT_FORMAT, useDateFormatter } from "../../common/date-format";
 import { CommentsFoldBar } from "./resolved-thread-bar";
 import { deriveThreadResolution } from "./thread-utils";
 
@@ -500,6 +501,7 @@ function CommentRow({
 }) {
   const { t } = useT("issues");
   const timeAgo = useTimeAgo();
+  const formatDate = useDateFormatter();
   const { getActorName } = useActorName();
 
   const edit = useEditAttachmentState(issueId, entry, onEdit);
@@ -535,7 +537,7 @@ function CommentRow({
             }
           />
           <TooltipContent side="top">
-            {new Date(entry.created_at).toLocaleString()}
+            {formatDate(entry.created_at, FULL_INSTANT_FORMAT)}
           </TooltipContent>
         </Tooltip>
 
@@ -714,6 +716,7 @@ function CommentCardImpl({
 }: CommentCardProps) {
   const { t } = useT("issues");
   const timeAgo = useTimeAgo();
+  const formatDate = useDateFormatter();
   const { getActorName } = useActorName();
   const isCollapsed = useCommentCollapseStore((s) => s.isCollapsed(issueId, entry.id));
   const toggleCollapse = useCommentCollapseStore((s) => s.toggle);
@@ -810,7 +813,7 @@ function CommentCardImpl({
                   }
                 />
                 <TooltipContent side="top">
-                  {new Date(entry.created_at).toLocaleString()}
+                  {formatDate(entry.created_at, FULL_INSTANT_FORMAT)}
                 </TooltipContent>
               </Tooltip>
 

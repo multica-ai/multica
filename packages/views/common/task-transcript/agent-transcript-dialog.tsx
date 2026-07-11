@@ -44,6 +44,12 @@ import type { AgentTask, Agent, AgentRuntime } from "@multica/core/types/agent";
 import { redactSecrets } from "./redact";
 import type { TimelineItem } from "./build-timeline";
 import { useT } from "../../i18n";
+import {
+  COMPACT_INSTANT_FORMAT,
+  FULL_INSTANT_FORMAT,
+  TIME_WITH_SECONDS_FORMAT,
+  useDateFormatter,
+} from "../date-format";
 
 interface AgentTranscriptDialogProps {
   open: boolean;
@@ -197,6 +203,7 @@ export function AgentTranscriptDialog({
   headerSlot,
 }: AgentTranscriptDialogProps) {
   const { t } = useT("agents");
+  const formatDate = useDateFormatter();
   const [selectedSeq, setSelectedSeq] = useState<number | null>(null);
   const [elapsed, setElapsed] = useState("");
   const [copied, setCopied] = useState(false);
@@ -679,12 +686,7 @@ export function AgentTranscriptDialog({
             {/* Created time */}
             {task.created_at && (
               <MetadataChip>
-                {new Date(task.created_at).toLocaleString(undefined, {
-                  month: "short",
-                  day: "numeric",
-                  hour: "2-digit",
-                  minute: "2-digit",
-                })}
+                {formatDate(task.created_at, COMPACT_INSTANT_FORMAT)}
               </MetadataChip>
             )}
           </div>
@@ -896,6 +898,7 @@ const TranscriptEventRow = ({
   expanded,
   onExpandedChange,
 }: TranscriptEventRowProps & { ref?: React.Ref<HTMLDivElement> }) => {
+  const formatDate = useDateFormatter();
   const color = getEventColor(item);
   const label = getEventLabel(item);
   const summary = getEventSummary(item);
@@ -957,12 +960,11 @@ const TranscriptEventRow = ({
 
           {/* Timestamp */}
           {date && (
-            <span className="shrink-0 text-[10px] text-muted-foreground/50 tabular-nums mt-1" title={date.toLocaleString()}>
-              {date.toLocaleTimeString(undefined, {
-                hour: "2-digit",
-                minute: "2-digit",
-                second: "2-digit",
-              })}
+            <span
+              className="shrink-0 text-[10px] text-muted-foreground/50 tabular-nums mt-1"
+              title={formatDate(date, FULL_INSTANT_FORMAT)}
+            >
+              {formatDate(date, TIME_WITH_SECONDS_FORMAT)}
             </span>
           )}
         </div>

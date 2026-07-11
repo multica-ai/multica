@@ -55,6 +55,11 @@ import {
 } from "./autopilot-list-actions";
 import type { TriggerFrequency } from "./trigger-config";
 import { useT, useTimeAgo } from "../../i18n";
+import {
+  COMPACT_INSTANT_FORMAT,
+  DATE_ONLY_FORMAT,
+  useDateFormatter,
+} from "../../common/date-format";
 
 // Column template — single source of truth for header, rows, and skeletons.
 // Same conventions as the skills list (see list-grid.tsx and the comment
@@ -368,17 +373,13 @@ function LastRunCell({ autopilot }: { autopilot: Autopilot }) {
 }
 
 function NextRunCell({ autopilot }: { autopilot: Autopilot }) {
+  const formatDate = useDateFormatter();
   const next = autopilot.next_run_at;
   return (
     <ListGridCell className="hidden @2xl:flex">
       {next ? (
         <span className="whitespace-nowrap text-xs tabular-nums text-muted-foreground">
-          {new Date(next).toLocaleString(undefined, {
-            month: "short",
-            day: "numeric",
-            hour: "2-digit",
-            minute: "2-digit",
-          })}
+          {formatDate(next, COMPACT_INSTANT_FORMAT)}
         </span>
       ) : (
         <span className="text-xs text-muted-foreground/40">—</span>
@@ -599,6 +600,7 @@ function LoadingSkeleton() {
 
 export function AutopilotsPage() {
   const { t } = useT("autopilots");
+  const formatDate = useDateFormatter();
   const wsId = useWorkspaceId();
   const wsPaths = useWorkspacePaths();
   const rowLink = useRowLink();
@@ -945,7 +947,7 @@ export function AutopilotsPage() {
                       )}
                       {isColVisible("created") ? (
                         <ListGridCell className="hidden whitespace-nowrap text-xs tabular-nums text-muted-foreground @2xl:flex">
-                          {new Date(autopilot.created_at).toLocaleDateString()}
+                          {formatDate(autopilot.created_at, DATE_ONLY_FORMAT)}
                         </ListGridCell>
                       ) : (
                         <ListGridCell className="hidden px-0 @2xl:flex" />
