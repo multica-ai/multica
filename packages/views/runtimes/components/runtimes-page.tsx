@@ -29,6 +29,11 @@ import {
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { useIsMobile } from "@multica/ui/hooks/use-mobile";
 import { cn } from "@multica/ui/lib/utils";
+import {
+  CollectionPageHeader,
+  CollectionPageHeaderAction,
+  CollectionPageState,
+} from "../../layout/collection-page";
 import { PageHeader } from "../../layout/page-header";
 import { ConnectRemoteDialog } from "./connect-remote-dialog";
 import { CloudRuntimeDialog } from "./cloud-runtime-dialog";
@@ -408,66 +413,34 @@ function PageHeaderBar({
 }) {
   const { t } = useT("runtimes");
   return (
-    <PageHeader className="justify-between px-5">
-      <div className="flex items-center gap-2">
-        <Server className="h-4 w-4 text-muted-foreground" />
-        <h1 className="text-sm font-medium">{t(($) => $.page.title)}</h1>
-        {totalCount > 0 && (
-          <span className="font-mono text-xs tabular-nums text-muted-foreground/70">
-            {totalCount}
-          </span>
-        )}
-      </div>
-      {/* Quiet chrome buttons (outline, icon-only below md) — primary is
-          reserved for the empty state's CTA. All three share the same
-          dimensions, padding, and responsive icon-only behavior so the
-          header reads as a single, consistent action group. */}
-      <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
-        {canManageProfiles && (
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            className="h-8 w-8 gap-1 px-0 md:w-auto md:px-2.5"
-            aria-label={t(($) => $.profiles.cta)}
-            onClick={onAddRuntime}
-          >
-            <Plus className="h-3.5 w-3.5" />
-            <span className="hidden md:inline">
-              {t(($) => $.profiles.cta)}
-            </span>
-          </Button>
-        )}
-        {cloudRuntimeEnabled && (
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            className="h-8 w-8 gap-1 px-0 md:w-auto md:px-2.5"
-            aria-label={t(($) => $.cloud_runtime.action)}
-            onClick={onOpenCloudRuntime}
-          >
-            <Cloud className="h-3.5 w-3.5" />
-            <span className="hidden md:inline">
-              {t(($) => $.cloud_runtime.action)}
-            </span>
-          </Button>
-        )}
-        <Button
-          type="button"
-          size="sm"
-          variant="outline"
-          className="h-8 w-8 gap-1 px-0 md:w-auto md:px-2.5"
-          aria-label={t(($) => $.page.connect_remote)}
-          onClick={onConnectRemote}
-        >
-          <Plus className="h-3.5 w-3.5" />
-          <span className="hidden md:inline">
-            {t(($) => $.page.connect_remote)}
-          </span>
-        </Button>
-      </div>
-    </PageHeader>
+    <CollectionPageHeader
+      icon={Server}
+      title={t(($) => $.page.title)}
+      count={totalCount}
+      actions={
+        <>
+          {canManageProfiles && (
+            <CollectionPageHeaderAction
+              icon={Plus}
+              label={t(($) => $.profiles.cta)}
+              onClick={onAddRuntime}
+            />
+          )}
+          {cloudRuntimeEnabled && (
+            <CollectionPageHeaderAction
+              icon={Cloud}
+              label={t(($) => $.cloud_runtime.action)}
+              onClick={onOpenCloudRuntime}
+            />
+          )}
+          <CollectionPageHeaderAction
+            icon={Plus}
+            label={t(($) => $.page.connect_remote)}
+            onClick={onConnectRemote}
+          />
+        </>
+      }
+    />
   );
 }
 
@@ -526,6 +499,7 @@ function MachineSidebar({
           <Input
             value={search}
             onChange={(event) => setSearch(event.target.value)}
+            aria-label={t(($) => $.machine.search_placeholder)}
             placeholder={t(($) => $.machine.search_placeholder)}
             className="h-9 pl-8 text-sm"
           />
@@ -858,24 +832,17 @@ function MachineDetail({
 function EmptyState({ onConnectRemote }: { onConnectRemote: () => void }) {
   const { t } = useT("runtimes");
   return (
-    <div className="flex flex-1 flex-col items-center justify-center px-6 py-16 text-center">
-      <div className="flex h-12 w-12 items-center justify-center rounded-full bg-muted">
-        <Server className="h-6 w-6 text-muted-foreground" />
-      </div>
-      <h2 className="mt-4 text-base font-semibold">{t(($) => $.page.empty.title)}</h2>
-      <p className="mt-1 max-w-md text-sm text-muted-foreground">
-        {t(($) => $.page.empty.hint)}
-      </p>
-      <Button
-        type="button"
-        size="sm"
-        onClick={onConnectRemote}
-        className="mt-5"
-      >
-        <Plus className="h-3 w-3" />
-        {t(($) => $.page.connect_remote)}
-      </Button>
-    </div>
+    <CollectionPageState
+      icon={Server}
+      title={t(($) => $.page.empty.title)}
+      description={t(($) => $.page.empty.hint)}
+      actions={
+        <Button type="button" size="sm" onClick={onConnectRemote}>
+          <Plus aria-hidden="true" className="size-3" />
+          {t(($) => $.page.connect_remote)}
+        </Button>
+      }
+    />
   );
 }
 
