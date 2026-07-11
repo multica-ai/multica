@@ -119,6 +119,7 @@ var (
 		"copilot":       "copilot",
 		"cursor":        "cursor",
 		"gemini":        "gemini",
+		"grok":          "grok",
 		"hermes":        "hermes",
 		"kiro":          "kiro",
 		"kimi":          "kimi",
@@ -126,6 +127,8 @@ var (
 		"openclaw":      "openclaw",
 		"opencode":      "opencode",
 		"pi":            "pi",
+		"qoder":         "qoder",
+		"traecli":       "traecli",
 		"other":         "other",
 	}
 	knownTerminalStatuses = map[string]string{

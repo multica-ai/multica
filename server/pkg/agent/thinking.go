@@ -666,6 +666,17 @@ var providerThinkingEnums = map[string]map[string]bool{
 		"high":   true,
 		"xhigh":  true,
 	},
+	// Grok Build CLI --reasoning-effort / --effort canonical levels
+	// (see Grok headless docs). `max` is accepted as an alias of xhigh.
+	"grok": {
+		"none":    true,
+		"minimal": true,
+		"low":     true,
+		"medium":  true,
+		"high":    true,
+		"xhigh":   true,
+		"max":     true,
+	},
 }
 
 // IsKnownThinkingValue reports whether `value` is a recognised effort

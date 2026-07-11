@@ -450,6 +450,12 @@ func TestIsKnownThinkingValue(t *testing.T) {
 		{"opencode", "bad value", false}, // spaces are not valid variant names
 		{"hermes", "", true},
 		{"hermes", "low", false}, // hermes has no thinking concept
+		{"grok", "", true},
+		{"grok", "none", true},
+		{"grok", "low", true},
+		{"grok", "xhigh", true},
+		{"grok", "max", true},
+		{"grok", "bogus", false},
 	}
 	for _, tc := range tests {
 		if got := IsKnownThinkingValue(tc.provider, tc.value); got != tc.want {

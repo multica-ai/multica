@@ -78,6 +78,7 @@ func TestNewReturnsAntigravityBackend(t *testing.T) {
 	}
 }
 
+
 func TestNewRejectsUnknownType(t *testing.T) {
 	t.Parallel()
 	_, err := New("gpt", Config{})
@@ -175,7 +176,7 @@ func TestLaunchHeaderCoversAllSupportedBackends(t *testing.T) {
 	// entry to launchHeaders in agent.go and extend this list.
 	supported := []string{
 		"antigravity", "claude", "codebuddy", "codex", "copilot", "cursor",
-		"hermes", "kimi", "kiro", "openclaw", "opencode", "pi", "qoder", "traecli",
+		"grok", "hermes", "kimi", "kiro", "openclaw", "opencode", "pi", "qoder", "traecli",
 	}
 	for _, t_ := range supported {
 		if header := LaunchHeader(t_); header == "" {

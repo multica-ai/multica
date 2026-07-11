@@ -160,6 +160,13 @@ func ListModels(ctx context.Context, providerType, executablePath string) ([]Mod
 			annotateCodebuddyThinking(ctx, models, executablePath)
 			return models, nil
 		})
+	case "grok":
+		// xAI Grok Build is ACP-native (`grok agent stdio`); model catalog
+		// comes from session/new. Falls back to a small static list so the
+		// UI picker stays usable offline / unauthenticated.
+		return cachedDiscovery(providerType, func() ([]Model, error) {
+			return discoverGrokModels(ctx, executablePath)
+		})
 	default:
 		return nil, fmt.Errorf("unknown agent type: %q", providerType)
 	}
@@ -1151,6 +1158,64 @@ func parseAntigravityModels(output string) []Model {
 		})
 	}
 	return models
+}
+
+// discoverGrokModels spins up `grok agent --always-approve stdio` and parses
+// the model catalog from session/new (same shape as Kiro/Qoder/Trae). Requires
+// an authenticated Grok CLI; on any failure falls back to grokStaticModels.
+func discoverGrokModels(ctx context.Context, executablePath string) ([]Model, error) {
+	models, err := discoverACPModels(ctx, executablePath, acpDiscoveryProvider{
+		defaultBin:   "grok",
+		clientName:   "multica-model-discovery",
+		tmpdirPrefix: "multica-grok-discovery-",
+		acpArgs:      []string{"agent", "--always-approve", "stdio"},
+	})
+	if err != nil || len(models) == 0 {
+		return grokStaticModels(), nil
+	}
+	for i := range models {
+		if models[i].Provider == "" {
+			models[i].Provider = "xai"
+		}
+	}
+	annotateGrokThinking(models)
+	return models, nil
+}
+
+// grokStaticModels is the offline fallback catalog for the Grok Build CLI.
+// IDs match a typical signed-in `session/new` / `grok models` listing.
+func grokStaticModels() []Model {
+	models := []Model{
+		{ID: "grok-4.5", Label: "Grok 4.5", Provider: "xai", Default: true},
+		{ID: "grok-composer-2.5-fast", Label: "Grok Composer 2.5 Fast", Provider: "xai"},
+	}
+	annotateGrokThinking(models)
+	return models
+}
+
+// annotateGrokThinking attaches the fixed --reasoning-effort vocabulary to
+// every discovered Grok model. Per-model capability is not exposed by
+// session/new, so the full canonical set is offered and the CLI rejects
+// unsupported levels at runtime if a model cannot reason.
+//
+// `max` is a CLI alias of `xhigh` (accepted by IsKnownThinkingValue for
+// backward compat) but is intentionally omitted from SupportedLevels so the
+// picker does not show two identical options.
+func annotateGrokThinking(models []Model) {
+	levels := []ThinkingLevel{
+		{Value: "none", Label: "None"},
+		{Value: "minimal", Label: "Minimal"},
+		{Value: "low", Label: "Low"},
+		{Value: "medium", Label: "Medium"},
+		{Value: "high", Label: "High"},
+		{Value: "xhigh", Label: "Extra high"},
+	}
+	for i := range models {
+		models[i].Thinking = &ModelThinking{
+			DefaultLevel:    "",
+			SupportedLevels: levels,
+		}
+	}
 }
 
 // discoverCursorModels runs `cursor-agent --list-models` and parses
