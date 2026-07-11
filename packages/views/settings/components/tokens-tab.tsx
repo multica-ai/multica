@@ -1,10 +1,11 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import { Key, Trash2, Copy, Check } from "lucide-react";
+import { Key, Trash2, Copy, Check, Plus } from "lucide-react";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
 import type { PersonalAccessToken } from "@multica/core/types";
 import { Input } from "@multica/ui/components/ui/input";
+import { Label } from "@multica/ui/components/ui/label";
 import { Button } from "@multica/ui/components/ui/button";
 import { Card, CardContent } from "@multica/ui/components/ui/card";
 import {
@@ -46,6 +47,7 @@ export function TokensTab() {
   const [tokenName, setTokenName] = useState("");
   const [tokenExpiry, setTokenExpiry] = useState("90");
   const [tokenCreating, setTokenCreating] = useState(false);
+  const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [newToken, setNewToken] = useState<string | null>(null);
   const [tokenCopied, setTokenCopied] = useState(false);
   const [tokenRevoking, setTokenRevoking] = useState<string | null>(null);
@@ -66,11 +68,14 @@ export function TokensTab() {
   useEffect(() => { loadTokens(); }, [loadTokens]);
 
   const handleCreateToken = async () => {
+    const name = tokenName.trim();
+    if (!name) return;
     setTokenCreating(true);
     try {
       const expiresInDays = tokenExpiry === "never" ? undefined : Number(tokenExpiry);
-      const result = await api.createPersonalAccessToken({ name: tokenName, expires_in_days: expiresInDays });
+      const result = await api.createPersonalAccessToken({ name, expires_in_days: expiresInDays });
       setNewToken(result.token);
+      setCreateDialogOpen(false);
       setTokenName("");
       setTokenExpiry("90");
       await loadTokens();
@@ -112,26 +117,13 @@ export function TokensTab() {
 
         <Card>
           <CardContent className="space-y-3">
-            <p className="text-xs text-muted-foreground">
-              {t(($) => $.tokens.description)}
-            </p>
-            <div className="grid gap-3 sm:grid-cols-[1fr_120px_auto]">
-              <Input
-                type="text"
-                value={tokenName}
-                onChange={(e) => setTokenName(e.target.value)}
-                placeholder={t(($) => $.tokens.name_placeholder)}
-              />
-              <Select value={tokenExpiry} onValueChange={(v) => { if (v) setTokenExpiry(v); }}>
-                <SelectTrigger size="sm"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  {EXPIRY_KEYS.map((key) => (
-                    <SelectItem key={key} value={key}>{t(($) => $.tokens.expiry[key])}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <Button onClick={handleCreateToken} disabled={tokenCreating || !tokenName.trim()}>
-                {tokenCreating ? t(($) => $.tokens.creating) : t(($) => $.tokens.create)}
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <p className="text-xs text-muted-foreground">
+                {t(($) => $.tokens.description)}
+              </p>
+              <Button type="button" onClick={() => setCreateDialogOpen(true)}>
+                <Plus className="h-4 w-4" />
+                {t(($) => $.tokens.create)}
               </Button>
             </div>
           </CardContent>
@@ -195,6 +187,79 @@ export function TokensTab() {
           </div>
         )}
       </section>
+
+      <Dialog
+        open={createDialogOpen}
+        onOpenChange={(v) => {
+          if (!tokenCreating) setCreateDialogOpen(v);
+        }}
+      >
+        <DialogContent>
+          <form
+            className="contents"
+            onSubmit={(e) => {
+              e.preventDefault();
+              void handleCreateToken();
+            }}
+          >
+            <DialogHeader>
+              <DialogTitle>{t(($) => $.tokens.create_dialog.title)}</DialogTitle>
+              <DialogDescription>
+                {t(($) => $.tokens.create_dialog.description)}
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="token-name" className="text-xs">
+                  {t(($) => $.tokens.create_dialog.name_label)}
+                </Label>
+                <Input
+                  id="token-name"
+                  type="text"
+                  value={tokenName}
+                  onChange={(e) => setTokenName(e.target.value)}
+                  placeholder={t(($) => $.tokens.name_placeholder)}
+                  autoFocus
+                  autoComplete="off"
+                  disabled={tokenCreating}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="token-expiry" className="text-xs">
+                  {t(($) => $.tokens.create_dialog.expiry_label)}
+                </Label>
+                <Select
+                  value={tokenExpiry}
+                  onValueChange={(v) => { if (v) setTokenExpiry(v); }}
+                  disabled={tokenCreating}
+                >
+                  <SelectTrigger id="token-expiry" size="sm"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {EXPIRY_KEYS.map((key) => (
+                      <SelectItem key={key} value={key}>{t(($) => $.tokens.expiry[key])}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setCreateDialogOpen(false)}
+                disabled={tokenCreating}
+              >
+                {t(($) => $.tokens.create_dialog.cancel)}
+              </Button>
+              <Button type="submit" disabled={tokenCreating || !tokenName.trim()}>
+                {tokenCreating ? t(($) => $.tokens.creating) : t(($) => $.tokens.create)}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
 
       <AlertDialog open={!!revokeConfirmId} onOpenChange={(v) => { if (!v) setRevokeConfirmId(null); }}>
         <AlertDialogContent>
