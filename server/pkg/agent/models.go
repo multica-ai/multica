@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -163,6 +164,13 @@ func ListModels(ctx context.Context, providerType, executablePath string) ([]Mod
 			}
 			annotateCodebuddyThinking(ctx, models, executablePath)
 			return models, nil
+		})
+	case "grok":
+		// xAI Grok Build is ACP-native (`grok agent stdio`); model catalog
+		// comes from session/new. Falls back to a small static list so the
+		// UI picker stays usable offline / unauthenticated.
+		return cachedDiscovery(providerType, func() ([]Model, error) {
+			return discoverGrokModels(ctx, executablePath)
 		})
 	default:
 		return nil, fmt.Errorf("unknown agent type: %q", providerType)
@@ -895,6 +903,12 @@ type acpDiscoveryProvider struct {
 	// acpArgs is the argv passed to the binary to start it in ACP
 	// server mode. Defaults to []string{"acp"} when nil/empty.
 	acpArgs []string
+	// authMethodID, when non-empty, inserts an ACP `authenticate` request
+	// (with the given methodId) between `initialize` and `session/new`.
+	// Agents that need no auth (kiro/qoder/trae) leave this empty and the
+	// handshake is unchanged. Grok Build requires it or session/new is
+	// rejected, degrading discovery to the static fallback catalog.
+	authMethodID string
 }
 
 // discoverACPModels runs the ACP handshake for any agent CLI that
@@ -977,14 +991,29 @@ func discoverACPModels(ctx context.Context, executablePath string, p acpDiscover
 	}
 	defer os.RemoveAll(tmp)
 
-	if err := writeACP(2, "session/new", map[string]any{
+	// Agents that gate session ops behind an auth handshake (Grok Build)
+	// need `authenticate` before session/new; others leave authMethodID
+	// empty and this step is skipped, keeping their id sequence unchanged.
+	sessionNewID := 2
+	if p.authMethodID != "" {
+		if err := writeACP(2, "authenticate", map[string]any{
+			"methodId": p.authMethodID,
+			"_meta":    map[string]any{"headless": true},
+		}); err != nil {
+			return []Model{}, nil
+		}
+		sessionNewID = 3
+	}
+
+	if err := writeACP(sessionNewID, "session/new", map[string]any{
 		"cwd":        tmp,
 		"mcpServers": []any{},
 	}); err != nil {
 		return []Model{}, nil
 	}
+	wantID := strconv.Itoa(sessionNewID)
 
-	// Read responses until we see the one for id=2 (session/new).
+	// Read responses until we see the one for session/new.
 	scanner := bufio.NewScanner(stdout)
 	scanner.Buffer(make([]byte, 0, 1024*1024), 4*1024*1024)
 	deadline := time.After(12 * time.Second)
@@ -1003,7 +1032,7 @@ func discoverACPModels(ctx context.Context, executablePath string, p acpDiscover
 			if err := json.Unmarshal([]byte(line), &env); err != nil {
 				continue
 			}
-			if env.ID.String() != "2" || len(env.Result) == 0 {
+			if env.ID.String() != wantID || len(env.Result) == 0 {
 				continue
 			}
 			done <- parseACPSessionNewModels(env.Result)
@@ -1155,6 +1184,73 @@ func parseAntigravityModels(output string) []Model {
 		})
 	}
 	return models
+}
+
+// discoverGrokModels spins up `grok agent --always-approve stdio` and parses
+// the model catalog from session/new (same shape as Kiro/Qoder/Trae). Requires
+// an authenticated Grok CLI; on any failure falls back to grokStaticModels.
+func discoverGrokModels(ctx context.Context, executablePath string) ([]Model, error) {
+	// Match the daemon's runtime launch: `--no-auto-update` (global) so a
+	// background update check can't stall discovery, and the same auth
+	// handshake — prefer the API key when XAI_API_KEY is set, else the cached
+	// login token — so session/new returns the real catalog instead of being
+	// rejected (which silently falls back to grokStaticModels).
+	authMethod := grokAuthMethodCachedToken
+	if strings.TrimSpace(os.Getenv("XAI_API_KEY")) != "" {
+		authMethod = grokAuthMethodAPIKey
+	}
+	models, err := discoverACPModels(ctx, executablePath, acpDiscoveryProvider{
+		defaultBin:   "grok",
+		clientName:   "multica-model-discovery",
+		tmpdirPrefix: "multica-grok-discovery-",
+		acpArgs:      []string{"--no-auto-update", "agent", "--always-approve", "stdio"},
+		authMethodID: authMethod,
+	})
+	if err != nil || len(models) == 0 {
+		return grokStaticModels(), nil
+	}
+	for i := range models {
+		if models[i].Provider == "" {
+			models[i].Provider = "xai"
+		}
+	}
+	annotateGrokThinking(models)
+	return models, nil
+}
+
+// grokStaticModels is the offline fallback catalog for the Grok Build CLI.
+// IDs match a typical signed-in `session/new` / `grok models` listing.
+func grokStaticModels() []Model {
+	models := []Model{
+		{ID: "grok-4.5", Label: "Grok 4.5", Provider: "xai", Default: true},
+		{ID: "grok-composer-2.5-fast", Label: "Grok Composer 2.5 Fast", Provider: "xai"},
+	}
+	annotateGrokThinking(models)
+	return models
+}
+
+// annotateGrokThinking attaches the fixed --effort vocabulary to
+// every discovered Grok model. Per-model capability is not exposed by
+// session/new, so the full canonical set is offered and the CLI rejects
+// unsupported levels at runtime if a model cannot reason. grok tops out at
+// `xhigh`; this list must stay in lockstep with the grok entry in
+// providerThinkingEnums (thinking.go) so a persisted level is never silently
+// dropped at execution by ValidateThinkingLevel.
+func annotateGrokThinking(models []Model) {
+	levels := []ThinkingLevel{
+		{Value: "none", Label: "None"},
+		{Value: "minimal", Label: "Minimal"},
+		{Value: "low", Label: "Low"},
+		{Value: "medium", Label: "Medium"},
+		{Value: "high", Label: "High"},
+		{Value: "xhigh", Label: "Extra high"},
+	}
+	for i := range models {
+		models[i].Thinking = &ModelThinking{
+			DefaultLevel:    "",
+			SupportedLevels: levels,
+		}
+	}
 }
 
 // discoverCursorModels runs `cursor-agent --list-models` and parses
