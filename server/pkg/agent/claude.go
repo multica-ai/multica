@@ -2,6 +2,7 @@ package agent
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -10,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -41,6 +43,11 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	var mcpConfigPath string
 	var mcpFileCleanup func() // non-nil while this function owns the temp file
 	if len(opts.McpConfig) > 0 {
+		allowedTools, err := claudeMcpAllowedTools(opts.McpConfig)
+		if err != nil {
+			cancel()
+			return nil, fmt.Errorf("claude: invalid mcp_config: %w", err)
+		}
 		path, err := writeMcpConfigToTemp(opts.McpConfig)
 		if err != nil {
 			cancel()
@@ -49,6 +56,9 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		mcpConfigPath = path
 		mcpFileCleanup = func() { cleanupMcpConfigTemp(mcpConfigPath) }
 		args = append(args, "--mcp-config", mcpConfigPath)
+		if len(allowedTools) > 0 {
+			args = append(args, "--allowedTools", strings.Join(allowedTools, ","))
+		}
 	}
 	// Clean up the temp file if we return before the goroutine takes ownership.
 	defer func() {
@@ -838,6 +848,77 @@ func stripSurroundingQuotes(s string) (string, bool) {
 		}
 	}
 	return s, false
+}
+
+// claudeMcpAllowedTools converts managed MCP server names to Claude Code's
+// permission tokens. Claude exposes server tools as mcp__<server>__<tool>;
+// adding mcp__<server>__* keeps fresh non-interactive sessions from starting
+// with a valid --mcp-config but no usable MCP tools. Only server names are
+// surfaced in argv/logs; URLs, headers, env, and bearer tokens stay inside the
+// temp config file.
+func claudeMcpAllowedTools(raw json.RawMessage) ([]string, error) {
+	serverNames, err := claudeMcpServerNames(raw)
+	if err != nil || len(serverNames) == 0 {
+		return nil, err
+	}
+	tools := make([]string, 0, len(serverNames))
+	for _, name := range serverNames {
+		if !isClaudeMcpServerNameSafeForAllowedTools(name) {
+			return nil, fmt.Errorf("mcpServers.%q cannot be mapped to --allowedTools", name)
+		}
+		tools = append(tools, "mcp__"+name+"__*")
+	}
+	return tools, nil
+}
+
+func claudeMcpServerNames(raw json.RawMessage) ([]string, error) {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
+		return nil, nil
+	}
+
+	var cfg map[string]json.RawMessage
+	if err := json.Unmarshal(trimmed, &cfg); err != nil {
+		return nil, fmt.Errorf("parse mcp_config json: %w", err)
+	}
+
+	serversRaw := bytes.TrimSpace(cfg["mcpServers"])
+	if len(serversRaw) == 0 || bytes.Equal(serversRaw, []byte("null")) {
+		return nil, nil
+	}
+	if serversRaw[0] != '{' {
+		return nil, fmt.Errorf("mcpServers must be a JSON object")
+	}
+
+	var servers map[string]json.RawMessage
+	if err := json.Unmarshal(serversRaw, &servers); err != nil {
+		return nil, fmt.Errorf("parse mcpServers: %w", err)
+	}
+	names := make([]string, 0, len(servers))
+	for name, server := range servers {
+		if name == "" {
+			return nil, fmt.Errorf("mcp server name must not be empty")
+		}
+		server = bytes.TrimSpace(server)
+		if len(server) == 0 || server[0] != '{' {
+			return nil, fmt.Errorf("mcpServers.%s must be a JSON object", name)
+		}
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names, nil
+}
+
+func isClaudeMcpServerNameSafeForAllowedTools(name string) bool {
+	if strings.TrimSpace(name) != name || name == "" {
+		return false
+	}
+	for _, r := range name {
+		if r <= 0x20 || r == 0x7f || r == ',' {
+			return false
+		}
+	}
+	return true
 }
 
 // writeMcpConfigToTemp writes MCP config JSON to a temporary file and returns

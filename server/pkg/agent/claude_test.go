@@ -776,6 +776,124 @@ func TestWriteMcpConfigToTemp(t *testing.T) {
 	}
 }
 
+func TestClaudeMcpAllowedTools(t *testing.T) {
+	t.Parallel()
+
+	raw := json.RawMessage(`{
+		"mcpServers": {
+			"github": {"type": "http", "url": "https://mcp.example.test/github", "headers": {"Authorization": "Bearer secret"}},
+			"context7": {"command": "uvx", "args": ["context7"]}
+		}
+	}`)
+	got, err := claudeMcpAllowedTools(raw)
+	if err != nil {
+		t.Fatalf("claudeMcpAllowedTools: %v", err)
+	}
+	want := []string{"mcp__context7__*", "mcp__github__*"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("allowed tools = %v, want %v", got, want)
+	}
+}
+
+func TestClaudeMcpAllowedToolsRejectsMalformedConfig(t *testing.T) {
+	t.Parallel()
+
+	for _, raw := range []json.RawMessage{
+		json.RawMessage(`not json`),
+		json.RawMessage(`{"mcpServers":{"bad":42}}`),
+		json.RawMessage(`{"mcpServers":{"bad name":{"command":"uvx"}}}`),
+	} {
+		if _, err := claudeMcpAllowedTools(raw); err == nil {
+			t.Fatalf("expected error for %s", string(raw))
+		}
+	}
+}
+
+func TestClaudeExecuteAddsMcpAllowedTools(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+
+	argsPath := filepath.Join(t.TempDir(), "args.txt")
+	fakePath := filepath.Join(t.TempDir(), "claude")
+	script := "#!/bin/sh\n" +
+		"printf '%s\\n' \"$@\" > \"$CLAUDE_ARGS_CAPTURE\"\n" +
+		"IFS= read -r _\n" +
+		"printf '%s\\n' '{\"type\":\"system\",\"session_id\":\"sess-mcp\"}'\n" +
+		"printf '%s\\n' '{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"session_id\":\"sess-mcp\",\"result\":\"done\"}'\n"
+	writeTestExecutable(t, fakePath, []byte(script))
+
+	backend, err := New("claude", Config{
+		ExecutablePath: fakePath,
+		Env:            map[string]string{"CLAUDE_ARGS_CAPTURE": argsPath},
+		Logger:         slog.Default(),
+	})
+	if err != nil {
+		t.Fatalf("new claude backend: %v", err)
+	}
+
+	mcpConfig := json.RawMessage(`{"mcpServers":{"github":{"type":"http","url":"https://mcp.example.test/github","headers":{"Authorization":"Bearer should-not-hit-argv"}}}}`)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{Timeout: 5 * time.Second, McpConfig: mcpConfig})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+	select {
+	case result := <-session.Result:
+		if result.Status != "completed" {
+			t.Fatalf("expected completed result, got %+v", result)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("timeout waiting for result")
+	}
+
+	data, err := os.ReadFile(argsPath)
+	if err != nil {
+		t.Fatalf("read captured args: %v", err)
+	}
+	args := strings.Split(strings.TrimSpace(string(data)), "\n")
+	joined := strings.Join(args, "\n")
+	if !strings.Contains(joined, "--mcp-config") {
+		t.Fatalf("expected --mcp-config in args, got %v", args)
+	}
+	if !strings.Contains(joined, "--allowedTools\nmcp__github__*") {
+		t.Fatalf("expected generated MCP allowedTools in args, got %v", args)
+	}
+	if strings.Contains(joined, "should-not-hit-argv") || strings.Contains(joined, "Authorization") {
+		t.Fatalf("secret-bearing mcp_config leaked into argv: %v", args)
+	}
+}
+
+func TestClaudeExecuteFailsClosedOnMalformedMcpConfig(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+
+	fakePath := filepath.Join(t.TempDir(), "claude")
+	writeTestExecutable(t, fakePath, []byte("#!/bin/sh\nexit 0\n"))
+	backend, err := New("claude", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	if err != nil {
+		t.Fatalf("new claude backend: %v", err)
+	}
+
+	_, err = backend.Execute(context.Background(), "prompt-ignored", ExecOptions{
+		McpConfig: json.RawMessage(`{"mcpServers":{"bad":42}}`),
+	})
+	if err == nil {
+		t.Fatal("expected Execute to reject malformed mcp_config")
+	}
+	if !strings.Contains(err.Error(), "invalid mcp_config") {
+		t.Fatalf("expected mcp_config error, got %q", err)
+	}
+}
+
 func TestResolveSessionID(t *testing.T) {
 	t.Parallel()
 
