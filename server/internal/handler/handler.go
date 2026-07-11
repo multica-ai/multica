@@ -174,6 +174,10 @@ type Handler struct {
 	// UI consults IsConfigured() to decide whether to surface install
 	// entry points.
 	LarkAPIClient lark.APIClient
+	// GitLabBox encrypts/decrypts OAuth access tokens stored in gitlab_connection.
+	// Nil when GITLAB_SECRET_KEY is not configured; the GitLab OAuth handlers
+	// return an error in that case.
+	GitLabBox *secretbox.Box
 	// Composio integration (MUL-3720). Nil when COMPOSIO_API_KEY is unset;
 	// the composio HTTP handlers return 503 in that case. Wired in
 	// cmd/server/router.go after handler.New.

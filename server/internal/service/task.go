@@ -45,6 +45,10 @@ type TaskService struct {
 	// goes through the DB. Wired in router.go from the shared Redis
 	// client.
 	EmptyClaim *EmptyClaimCache
+	// PostCommentToGitLab relays a newly-created comment to the linked GitLab
+	// issue when the issue is synced. Injected by handler.New; nil when GitLab
+	// is not configured or the issue is not synced.
+	PostCommentToGitLab func(ctx context.Context, comment db.Comment, issue db.Issue)
 	// Composio computes the per-task MCP overlay (Stage 3 of the Composio
 	// epic, MUL-3721) — the integration's "current user's connected apps
 	// → MCP session URL" hook called from each Enqueue* path. Optional: a

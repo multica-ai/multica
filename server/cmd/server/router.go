@@ -510,6 +510,19 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		slog.Info("slack integration disabled (MULTICA_SLACK_SECRET_KEY not set)")
 	}
 
+	// GitLab integration token encryption. Nil when GITLAB_SECRET_KEY is unset;
+	// the GitLab OAuth handlers return a clear error in that case.
+	if gitlabKey, err := secretbox.LoadKey("GITLAB_SECRET_KEY"); err == nil {
+		box, err := secretbox.New(gitlabKey)
+		if err != nil {
+			slog.Error("gitlab: secretbox.New failed; GitLab OAuth disabled", "error", err)
+		} else {
+			h.GitLabBox = box
+			slog.Info("gitlab integration enabled")
+		}
+  } else {
+		slog.Info("gitlab integration disabled (GITLAB_SECRET_KEY not set)")
+	}
 	// Composio integration (MUL-3720). Gated by COMPOSIO_API_KEY plus the
 	// composio_mcp_apps feature flag. The env var is the project-scoped key the
 	// standalone SDK authenticates Composio with (sent as x-api-key; the project
@@ -707,6 +720,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// HMAC-SHA256 signature in the handler) and post-install setup callback.
 	r.Post("/api/webhooks/github", h.HandleGitHubWebhook)
 	r.Get("/api/github/setup", h.GitHubSetupCallback)
+	// GitLab webhook (no Multica auth — authenticated via X-Gitlab-Token
+	// shared secret) and OAuth callback.
+	r.Post("/api/webhooks/gitlab", h.HandleGitLabWebhook)
+	r.Get("/api/gitlab/setup", h.GitLabSetupCallback)
 	// Slack OAuth callback (no Multica auth in the path — it is hit by Slack's
 	// browser redirect; the workspace/agent/initiator are recovered from the
 	// sealed state). It exchanges the code, upserts the install, then bounces
