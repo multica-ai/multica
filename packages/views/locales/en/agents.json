@@ -205,6 +205,7 @@
     "runtime_offline": "offline",
     "runtime_owned_by": "owned by {{name}}",
     "runtime_empty": "No runtimes",
+    "runtime_back_to_machines": "Back to machines",
     "model_default": "Default",
     "model_tooltip": "Model · {{value}}",
     "model_managed_by_runtime": "Managed by runtime",

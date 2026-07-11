@@ -188,6 +188,7 @@
     "runtime_offline": "オフライン",
     "runtime_owned_by": "{{name}} が所有",
     "runtime_empty": "ランタイムなし",
+    "runtime_back_to_machines": "マシン一覧に戻る",
     "model_default": "デフォルト",
     "model_tooltip": "モデル · {{value}}",
     "model_managed_by_runtime": "ランタイムで管理",

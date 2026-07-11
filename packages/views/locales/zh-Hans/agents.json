@@ -196,6 +196,7 @@
     "runtime_offline": "离线",
     "runtime_owned_by": "{{name}} 的",
     "runtime_empty": "暂无运行时",
+    "runtime_back_to_machines": "返回机器列表",
     "model_default": "默认",
     "model_tooltip": "模型 · {{value}}",
     "model_managed_by_runtime": "由运行时管理",

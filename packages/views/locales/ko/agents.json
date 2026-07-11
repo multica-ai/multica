@@ -196,6 +196,7 @@
     "runtime_offline": "오프라인",
     "runtime_owned_by": "{{name}} 소유",
     "runtime_empty": "런타임 없음",
+    "runtime_back_to_machines": "기기 목록으로 돌아가기",
     "model_default": "기본값",
     "model_tooltip": "모델 · {{value}}",
     "model_managed_by_runtime": "런타임에서 관리",
