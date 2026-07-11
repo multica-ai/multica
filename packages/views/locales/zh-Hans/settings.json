@@ -72,7 +72,6 @@
     "loading": "正在加载标签...",
     "empty": "暂无 {{scope}} 标签",
     "no_results": "没有匹配的标签",
-    "read_only": "只有工作区 owner 和 admin 可以管理标签。",
     "save_failed": "无法保存标签",
     "actions": {
       "open": "{{name}} 的操作",

@@ -412,15 +412,20 @@ func (h *Handler) AttachLabel(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if _, err := h.Queries.GetLabel(r.Context(), db.GetLabelParams{
+	label, err := h.Queries.GetLabel(r.Context(), db.GetLabelParams{
 		ID: labelID, WorkspaceID: issue.WorkspaceID,
-	}); err != nil {
+	})
+	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			writeError(w, http.StatusNotFound, "label not found")
 			return
 		}
 		slog.Warn("GetLabel in AttachLabel failed", append(logger.RequestAttrs(r), "error", err)...)
 		writeError(w, http.StatusInternalServerError, "failed to attach label")
+		return
+	}
+	if label.ResourceType != "issue" {
+		writeError(w, http.StatusNotFound, "issue label not found")
 		return
 	}
 
@@ -472,15 +477,20 @@ func (h *Handler) DetachLabel(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if _, err := h.Queries.GetLabel(r.Context(), db.GetLabelParams{
+	label, err := h.Queries.GetLabel(r.Context(), db.GetLabelParams{
 		ID: labelUUID, WorkspaceID: issue.WorkspaceID,
-	}); err != nil {
+	})
+	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			writeError(w, http.StatusNotFound, "label not found")
 			return
 		}
 		slog.Warn("GetLabel in DetachLabel failed", append(logger.RequestAttrs(r), "error", err)...)
 		writeError(w, http.StatusInternalServerError, "failed to detach label")
+		return
+	}
+	if label.ResourceType != "issue" {
+		writeError(w, http.StatusNotFound, "issue label not found")
 		return
 	}
 

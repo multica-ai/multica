@@ -198,6 +198,62 @@ func TestIssueLabelAttachDetach(t *testing.T) {
 	}
 }
 
+func TestIssueLabelRejectsNonIssueScope(t *testing.T) {
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title":    "Issue rejects agent label",
+		"status":   "todo",
+		"priority": "medium",
+	})
+	testHandler.CreateIssue(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateIssue: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var issue IssueResponse
+	if err := json.NewDecoder(w.Body).Decode(&issue); err != nil {
+		t.Fatalf("decode issue: %v", err)
+	}
+
+	w = httptest.NewRecorder()
+	req = newRequest("POST", "/api/labels", map[string]any{
+		"resource_type": "agent",
+		"name":          "agent-only-" + uuid.NewString()[:8],
+		"color":         "#3b82f6",
+	})
+	testHandler.CreateLabel(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateLabel: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var label LabelResponse
+	if err := json.NewDecoder(w.Body).Decode(&label); err != nil {
+		t.Fatalf("decode label: %v", err)
+	}
+	t.Cleanup(func() {
+		w := httptest.NewRecorder()
+		req := newRequest("DELETE", "/api/labels/"+label.ID, nil)
+		req = withURLParam(req, "id", label.ID)
+		testHandler.DeleteLabel(w, req)
+	})
+
+	w = httptest.NewRecorder()
+	req = newRequest("POST", "/api/issues/"+issue.ID+"/labels", map[string]any{
+		"label_id": label.ID,
+	})
+	req = withURLParam(req, "id", issue.ID)
+	testHandler.AttachLabel(w, req)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("AttachLabel with agent label: expected 404, got %d: %s", w.Code, w.Body.String())
+	}
+
+	w = httptest.NewRecorder()
+	req = newRequest("DELETE", "/api/issues/"+issue.ID+"/labels/"+label.ID, nil)
+	req = withURLParams(req, "id", issue.ID, "labelId", label.ID)
+	testHandler.DetachLabel(w, req)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("DetachLabel with agent label: expected 404, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
 // TestLabelNotFoundAcrossWorkspaces ensures GET with a foreign workspace
 // header returns 404 — the query's `WHERE workspace_id = $2` does the work.
 func TestLabelNotFoundAcrossWorkspaces(t *testing.T) {

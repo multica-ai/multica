@@ -72,7 +72,6 @@
     "loading": "레이블 불러오는 중...",
     "empty": "{{scope}} 레이블이 없습니다",
     "no_results": "일치하는 레이블이 없습니다",
-    "read_only": "워크스페이스 소유자와 관리자만 레이블을 관리할 수 있습니다.",
     "save_failed": "레이블을 저장하지 못했습니다",
     "actions": { "open": "{{name}} 작업", "edit": "편집", "delete": "삭제" },
     "editor": {

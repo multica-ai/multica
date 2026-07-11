@@ -4,7 +4,6 @@ import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { MoreHorizontal, Pencil, Plus, Search, Tag, Trash2 } from "lucide-react";
 import { toast } from "sonner";
-import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
 import {
   labelListOptions,
@@ -12,7 +11,6 @@ import {
   useDeleteLabel,
   useUpdateLabel,
 } from "@multica/core/labels";
-import { memberListOptions } from "@multica/core/workspace/queries";
 import type { Label, LabelResourceType } from "@multica/core/types";
 import { Button } from "@multica/ui/components/ui/button";
 import { Input } from "@multica/ui/components/ui/input";
@@ -75,10 +73,6 @@ const EMPTY_DRAFT: LabelDraft = {
 export function LabelsTab() {
   const { t } = useT("settings");
   const wsId = useWorkspaceId();
-  const user = useAuthStore((state) => state.user);
-  const { data: members = [] } = useQuery(memberListOptions(wsId));
-  const currentMember = members.find((member) => member.user_id === user?.id) ?? null;
-  const canManage = currentMember?.role === "owner" || currentMember?.role === "admin";
 
   const [resourceType, setResourceType] = useState<LabelResourceType>("issue");
   const [query, setQuery] = useState("");
@@ -142,12 +136,10 @@ export function LabelsTab() {
               className="pl-9"
             />
           </div>
-          {canManage ? (
-            <Button className="gap-2" onClick={() => setCreateOpen(true)}>
-              <Plus className="size-4" />
-              {t(($) => $.labels.new_label)}
-            </Button>
-          ) : null}
+          <Button className="gap-2" onClick={() => setCreateOpen(true)}>
+            <Plus className="size-4" />
+            {t(($) => $.labels.new_label)}
+          </Button>
         </div>
 
         <div className="overflow-hidden rounded-lg border border-surface-border bg-card">
@@ -195,45 +187,37 @@ export function LabelsTab() {
                   <span className="text-xs text-muted-foreground">
                     {new Date(label.updated_at).toLocaleDateString()}
                   </span>
-                  {canManage ? (
-                    <DropdownMenu>
-                      <DropdownMenuTrigger
-                        render={
-                          <Button
-                            variant="ghost"
-                            size="icon-sm"
-                            aria-label={t(($) => $.labels.actions.open, { name: label.name })}
-                          >
-                            <MoreHorizontal className="size-4" />
-                          </Button>
-                        }
-                      />
-                      <DropdownMenuContent align="end">
-                        <DropdownMenuItem onClick={() => setEditing(label)}>
-                          <Pencil className="size-4" />
-                          {t(($) => $.labels.actions.edit)}
-                        </DropdownMenuItem>
-                        <DropdownMenuItem
-                          variant="destructive"
-                          onClick={() => setPendingDelete(label)}
+                  <DropdownMenu>
+                    <DropdownMenuTrigger
+                      render={
+                        <Button
+                          variant="ghost"
+                          size="icon-sm"
+                          aria-label={t(($) => $.labels.actions.open, { name: label.name })}
                         >
-                          <Trash2 className="size-4" />
-                          {t(($) => $.labels.actions.delete)}
-                        </DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  ) : null}
+                          <MoreHorizontal className="size-4" />
+                        </Button>
+                      }
+                    />
+                    <DropdownMenuContent align="end">
+                      <DropdownMenuItem onClick={() => setEditing(label)}>
+                        <Pencil className="size-4" />
+                        {t(($) => $.labels.actions.edit)}
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        variant="destructive"
+                        onClick={() => setPendingDelete(label)}
+                      >
+                        <Trash2 className="size-4" />
+                        {t(($) => $.labels.actions.delete)}
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
                 </div>
               ))}
             </div>
           )}
         </div>
-
-        {!canManage ? (
-          <p className="text-xs text-muted-foreground">
-            {t(($) => $.labels.read_only)}
-          </p>
-        ) : null}
       </div>
 
       <LabelEditorDialog

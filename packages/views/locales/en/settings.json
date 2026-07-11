@@ -72,7 +72,6 @@
     "loading": "Loading labels...",
     "empty": "No {{scope}} labels yet",
     "no_results": "No matching labels",
-    "read_only": "Only workspace owners and admins can manage labels.",
     "save_failed": "Couldn't save label",
     "actions": {
       "open": "Actions for {{name}}",

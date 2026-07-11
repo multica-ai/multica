@@ -16,8 +16,11 @@ import type {
   CreateBillingPortalSessionResponse,
   GroupedIssuesResponse,
   InboxWorkspaceUnread,
+  Label,
   ListIssuesResponse,
+  ListLabelsResponse,
   ListWebhookDeliveriesResponse,
+  ResourceLabelsResponse,
   SearchIssuesResponse,
   SearchProjectsResponse,
   Squad,
@@ -27,6 +30,51 @@ import type {
 } from "../types";
 import type { CloudRuntimeNode } from "../runtimes/cloud-runtime";
 import type { CreateFeedbackResponse } from "../feedback/types";
+
+// Label responses are consumed by settings tables and resource pickers. Keep
+// the resource type lenient so newer server scopes do not break older clients,
+// while defaulting fields that predate scoped label catalogs.
+export const LabelSchema = z.object({
+  id: z.string(),
+  workspace_id: z.string(),
+  resource_type: z.string().optional().default("issue"),
+  name: z.string(),
+  description: z.string().optional().default(""),
+  color: z.string(),
+  usage_count: z.number().optional().default(0),
+  created_at: z.string(),
+  updated_at: z.string(),
+}).loose();
+
+export const EMPTY_LABEL: Label = {
+  id: "",
+  workspace_id: "",
+  resource_type: "issue",
+  name: "",
+  description: "",
+  color: "#6b7280",
+  usage_count: 0,
+  created_at: "",
+  updated_at: "",
+};
+
+export const ListLabelsResponseSchema = z.object({
+  labels: z.array(LabelSchema).default([]),
+  total: z.number().default(0),
+}).loose();
+
+export const EMPTY_LIST_LABELS_RESPONSE: ListLabelsResponse = {
+  labels: [],
+  total: 0,
+};
+
+export const ResourceLabelsResponseSchema = z.object({
+  labels: z.array(LabelSchema).default([]),
+}).loose();
+
+export const EMPTY_RESOURCE_LABELS_RESPONSE: ResourceLabelsResponse = {
+  labels: [],
+};
 
 export interface AppConfigResponse {
   cdn_domain: string;
