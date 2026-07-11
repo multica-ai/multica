@@ -52,6 +52,13 @@
     "search_runtime_filtered": "\"{{machine}}\" 上に \"{{query}}\" に一致するエージェントがありません。",
     "runtime_filtered": "\"{{machine}}\" 上にエージェントがありません。"
   },
+  "fallback_runtime_picker": {
+    "label": "フォールバックランタイム",
+    "mine": "自分のランタイム",
+    "all": "すべてのランタイム",
+    "add": "フォールバックランタイムを追加",
+    "empty": "利用可能なランタイムがありません。"
+  },
   "columns": {
     "agent": "エージェント",
     "status": "ステータス",

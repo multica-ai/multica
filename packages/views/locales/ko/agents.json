@@ -60,6 +60,13 @@
     "agent_count_other": "에이전트 {{count}}개",
     "empty": "아직 기기가 없습니다"
   },
+  "fallback_runtime_picker": {
+    "label": "대체 런타임",
+    "mine": "내 런타임",
+    "all": "모든 런타임",
+    "add": "대체 런타임 추가",
+    "empty": "사용 가능한 런타임이 없습니다."
+  },
   "columns": {
     "agent": "에이전트",
     "status": "상태",

@@ -11,6 +11,7 @@ import {
   PopoverTrigger,
 } from "@multica/ui/components/ui/popover";
 import { ActorAvatar } from "../../common/actor-avatar";
+import { useT } from "../../i18n";
 import { ProviderLogo } from "../../runtimes/components/provider-logo";
 
 type RuntimeFilter = "mine" | "all";
@@ -34,6 +35,7 @@ export function FallbackRuntimesInput({
   onChange,
   disabled = false,
 }: FallbackRuntimesInputProps) {
+  const { t } = useT("agents");
   const [open, setOpen] = useState(false);
   const [filter, setFilter] = useState<RuntimeFilter>("mine");
 
@@ -84,7 +86,9 @@ export function FallbackRuntimesInput({
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between gap-3">
-        <Label className="text-xs text-muted-foreground">Fallback runtimes</Label>
+        <Label className="text-xs text-muted-foreground">
+          {t(($) => $.fallback_runtime_picker.label)}
+        </Label>
         {hasSharedRuntimes && (
           <div className="flex rounded-md bg-muted p-0.5 text-xs">
             <button
@@ -92,14 +96,14 @@ export function FallbackRuntimesInput({
               onClick={() => setFilter("mine")}
               className={`rounded px-2 py-0.5 ${filter === "mine" ? "bg-background shadow-sm" : "text-muted-foreground"}`}
             >
-              My runtimes
+              {t(($) => $.fallback_runtime_picker.mine)}
             </button>
             <button
               type="button"
               onClick={() => setFilter("all")}
               className={`rounded px-2 py-0.5 ${filter === "all" ? "bg-background shadow-sm" : "text-muted-foreground"}`}
             >
-              All runtimes
+              {t(($) => $.fallback_runtime_picker.all)}
             </button>
           </div>
         )}
@@ -167,11 +171,13 @@ export function FallbackRuntimesInput({
           disabled={disabled || selectable.length === 0}
         >
           <Plus className="h-4 w-4" />
-          Add fallback runtime
+          {t(($) => $.fallback_runtime_picker.add)}
         </PopoverTrigger>
         <PopoverContent align="start" className="max-h-64 w-[var(--anchor-width)] overflow-y-auto p-1">
           {selectable.length === 0 ? (
-            <div className="px-2 py-2 text-sm text-muted-foreground">No runtimes available.</div>
+            <div className="px-2 py-2 text-sm text-muted-foreground">
+              {t(($) => $.fallback_runtime_picker.empty)}
+            </div>
           ) : (
             selectable.map((runtime) => {
               const owner = memberForRuntime(runtime);
