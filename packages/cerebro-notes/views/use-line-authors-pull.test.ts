@@ -1,11 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
   CLOSE_THRESHOLD,
+  HOLD_MS,
+  HOLD_SLOP,
   OPEN_THRESHOLD,
   PULL_WIDTH,
   TOUCH_GAIN,
   appliedOffset,
-  isHorizontalPull,
+  holdBroken,
   shouldClose,
   shouldLatchOpen,
 } from "./use-line-authors-pull";
@@ -16,18 +18,20 @@ describe("appliedOffset", () => {
     expect(appliedOffset(0, 0, 1)).toBe(0);
   });
 
-  it("follows the pointer up to the gutter width", () => {
+  it("follows the pointer up to the reveal width", () => {
     expect(appliedOffset(0, 40, 1)).toBe(40);
     expect(appliedOffset(0, PULL_WIDTH, 1)).toBe(PULL_WIDTH);
   });
 
-  it("rubber-bands past the gutter width", () => {
+  it("rubber-bands past the reveal width", () => {
     expect(appliedOffset(0, PULL_WIDTH + 100, 1)).toBe(PULL_WIDTH + 20);
   });
 
-  it("amplifies touch travel so the gutter opens on a short pull", () => {
-    // ~60px of finger travel fully opens the 96px gutter.
-    expect(appliedOffset(0, 60, TOUCH_GAIN)).toBe(PULL_WIDTH);
+  it("amplifies touch travel so the reveal opens on a short pull", () => {
+    // ~40px of finger travel fully opens the 64px reveal.
+    expect(appliedOffset(0, PULL_WIDTH / TOUCH_GAIN, TOUCH_GAIN)).toBe(
+      PULL_WIDTH,
+    );
     expect(appliedOffset(0, 30, TOUCH_GAIN)).toBe(48);
   });
 
@@ -37,27 +41,21 @@ describe("appliedOffset", () => {
   });
 });
 
-describe("isHorizontalPull", () => {
-  it("accepts a clear rightward pull", () => {
-    expect(isHorizontalPull(30, 5, false)).toBe(true);
+describe("hold requirement", () => {
+  it("tolerates finger jitter within the slop", () => {
+    expect(holdBroken(0, 0)).toBe(false);
+    expect(holdBroken(HOLD_SLOP, -HOLD_SLOP)).toBe(false);
   });
 
-  it("rejects leftward movement while closed", () => {
-    expect(isHorizontalPull(-30, 0, false)).toBe(false);
+  it("cancels on movement past the slop in any direction", () => {
+    expect(holdBroken(HOLD_SLOP + 1, 0)).toBe(true);
+    expect(holdBroken(-(HOLD_SLOP + 1), 0)).toBe(true);
+    expect(holdBroken(0, HOLD_SLOP + 1)).toBe(true);
+    expect(holdBroken(0, -(HOLD_SLOP + 1))).toBe(true);
   });
 
-  it("accepts leftward movement while latched open (closing pull)", () => {
-    expect(isHorizontalPull(-30, 0, true)).toBe(true);
-  });
-
-  it("rejects mostly-vertical movement (scrolling)", () => {
-    expect(isHorizontalPull(12, 40, false)).toBe(false);
-    expect(isHorizontalPull(-12, 40, true)).toBe(false);
-  });
-
-  it("rejects tiny movements", () => {
-    expect(isHorizontalPull(5, 1, false)).toBe(false);
-    expect(isHorizontalPull(-5, 1, true)).toBe(false);
+  it("requires a real hold before the pull arms", () => {
+    expect(HOLD_MS).toBeGreaterThanOrEqual(400);
   });
 });
 

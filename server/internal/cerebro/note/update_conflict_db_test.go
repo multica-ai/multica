@@ -90,3 +90,41 @@ func TestUpdateNoteNoopSaveNeverConflicts(t *testing.T) {
 		t.Fatalf("changed body with current base: got %d, want 200 (body: %s)", w.Code, w.Body.String())
 	}
 }
+
+// FIR-2810 review (Jesper, 2026-07-11) — a stale-base save whose only change
+// is a system-inserted author-code stamp must be accepted, not answered 409.
+// Any other stale-base change (including the user's own) still conflicts.
+func TestUpdateNoteStampOnlySaveNeverConflicts(t *testing.T) {
+	if w3Pool == nil {
+		t.Skip("no test DB")
+	}
+	ctx := context.Background()
+	noteID := makeNote(t, ctx, "StampOnly", "line one\n- line two")
+
+	// The current body plus stamps, on a stale base: accepted and persisted.
+	payload, _ := json.Marshal(map[string]string{
+		"body":            "**JEH** line one\n- **JEH** line two",
+		"base_updated_at": "2000-01-01T00:00:00Z",
+	})
+	w := updateRequest(t, noteID, string(payload))
+	if w.Code != http.StatusOK {
+		t.Fatalf("stamp-only save with stale base: got %d, want 200 (body: %s)", w.Code, w.Body.String())
+	}
+	var resp NoteResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.Body != "**JEH** line one\n- **JEH** line two" {
+		t.Fatalf("stamp-only save persisted wrong body: %q", resp.Body)
+	}
+
+	// A stamp PLUS a real edit on a stale base still conflicts.
+	payload, _ = json.Marshal(map[string]string{
+		"body":            "**JEH** line one CHANGED\n- **JEH** line two",
+		"base_updated_at": "2000-01-01T00:00:00Z",
+	})
+	w = updateRequest(t, noteID, string(payload))
+	if w.Code != http.StatusConflict {
+		t.Fatalf("stamp + real edit with stale base: got %d, want 409 (body: %s)", w.Code, w.Body.String())
+	}
+}
