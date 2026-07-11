@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 // FIR-2710 — the image gallery lightbox pages through a message's images with
 // prev/next + keyboard + a thumbnail strip, shows a counter, and zooms each.
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { ImageGallery, type GalleryImage } from "./image-gallery";
 
 const IMAGES: GalleryImage[] = [
@@ -21,6 +21,14 @@ function currentAlt(): string | null {
   const imgs = screen.getAllByRole("img") as HTMLImageElement[];
   const main = imgs.find((i) => i.alt !== "");
   return main?.alt ?? null;
+}
+
+function currentImage(): HTMLImageElement {
+  const image = screen
+    .getAllByRole("img")
+    .find((candidate) => (candidate as HTMLImageElement).alt !== "");
+  if (!image) throw new Error("Current gallery image was not rendered");
+  return image as HTMLImageElement;
 }
 
 afterEach(cleanup);
@@ -119,5 +127,26 @@ describe("ImageGallery", () => {
     render(<ImageGallery images={[{ src: "/a.png", alt: "img-1" }]} open onClose={() => {}} />);
     expect(screen.queryByRole("link", { name: "Open on its own page" })).toBeNull();
     expect(screen.queryByRole("link", { name: "Download" })).toBeNull();
+  });
+
+  it("retries with a cache-busted URL when the current image stalls", () => {
+    vi.useFakeTimers();
+    render(<ImageGallery images={IMAGES.slice(0, 1)} open onClose={() => {}} />);
+    expect(currentImage().getAttribute("src")).toBe("/a.png");
+
+    act(() => {
+      vi.advanceTimersByTime(10_600);
+    });
+
+    expect(currentImage().getAttribute("src")).toContain("_reload=1");
+    vi.useRealTimers();
+  });
+
+  it("lets the user reload the current image at any time", () => {
+    render(<ImageGallery images={IMAGES.slice(0, 1)} open onClose={() => {}} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Reload image" }));
+
+    expect(currentImage().getAttribute("src")).toContain("_reload=1");
   });
 });
