@@ -1,11 +1,20 @@
 package handler
 
 import (
+	"context"
 	"net/http/httptest"
 	"reflect"
 	"strings"
 	"testing"
 )
+
+func TestUsageExplorerRunsQueryMatchesCurrentSchemaAndAcceptsGoIntDays(t *testing.T) {
+	rows, err := testPool.Query(context.Background(), usageExplorerRunsQuery, parseUUID(testWorkspaceID), 7)
+	if err != nil {
+		t.Fatalf("query usage explorer with Go int days: %v", err)
+	}
+	rows.Close()
+}
 
 func TestUsageExplorerMatchesORWithinDimensionANDAcrossDimensions(t *testing.T) {
 	filter := usageExplorerFilter{Include: map[string][]string{"model": {"gpt-5", "claude"}, "status": {"completed"}}, Exclude: map[string][]string{"provider": {"legacy"}}}
