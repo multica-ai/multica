@@ -1852,9 +1852,13 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     <div className="relative flex h-full min-w-0 flex-1 flex-col">
         {/* In-page find bar — floats over the top-right of the content column
             (below the breadcrumb header), outside the scroll container so it
-            stays put while the timeline scrolls and its own text isn't walked. */}
+            stays put while the timeline scrolls and its own text isn't walked.
+            z-30: must beat every sticky affordance pinned at the timeline's
+            top-0 (comment headers z-10, resolve collapse bars z-20) — at equal
+            z the later-in-DOM sticky bar paints over the find bar and orphans
+            its close button (MUL-4414). */}
         {find.open && (
-          <FindBar find={find} className="absolute right-4 top-14 z-20" />
+          <FindBar find={find} className="absolute right-4 top-14 z-30" />
         )}
         <BreadcrumbHeader
           segments={breadcrumbSegments}
