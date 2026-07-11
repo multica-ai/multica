@@ -56,6 +56,7 @@ export function LineAuthorsGutter({
   attrs,
   membersById,
   version,
+  align = "right",
   className,
 }: {
   // The positioned wrapper that contains the rendered note body. Rows are
@@ -67,6 +68,11 @@ export function LineAuthorsGutter({
   membersById: Map<string, GutterMember>;
   // Bump to force a re-measure (the editor re-rendered its content).
   version: number;
+  // "right" (default): the permanent w-24 gutter, codes right-aligned against
+  // the body text. "left": the temporary pull reveal — the gutter fills its
+  // container and the codes hug the left edge, so the narrow reveal shows
+  // them immediately (Jesper, 2026-07-11 round 4).
+  align?: "left" | "right";
   className?: string;
 }) {
   const [rows, setRows] = React.useState<GutterRow[]>([]);
@@ -133,7 +139,8 @@ export function LineAuthorsGutter({
     <div
       aria-hidden
       className={cn(
-        "pointer-events-none absolute inset-y-0 left-0 w-24 select-none",
+        "pointer-events-none absolute inset-y-0 left-0 select-none",
+        align === "right" ? "w-24" : "w-full",
         className,
       )}
     >
@@ -141,7 +148,12 @@ export function LineAuthorsGutter({
         <div
           key={i}
           title={row.title}
-          className="pointer-events-auto absolute left-0 flex w-full flex-col items-end pr-3 text-right leading-tight"
+          className={cn(
+            "pointer-events-auto absolute left-0 flex w-full flex-col leading-tight",
+            align === "right"
+              ? "items-end pr-3 text-right"
+              : "items-start pl-1 text-left",
+          )}
           style={{ top: row.top }}
         >
           <span className="text-[11px] font-semibold text-muted-foreground">
