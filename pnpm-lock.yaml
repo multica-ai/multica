@@ -2119,6 +2119,9 @@ importers:
       '@multica/cerebro-feature-flags':
         specifier: workspace:*
         version: link:../cerebro-feature-flags
+      '@multica/cerebro-usage':
+        specifier: workspace:*
+        version: link:../cerebro-usage
       '@multica/core':
         specifier: workspace:*
         version: link:../core
@@ -2713,12 +2716,12 @@ importers:
       '@multica/cerebro-notes':
         specifier: workspace:*
         version: link:../cerebro-notes
-      '@multica/cerebro-skill-ownership':
-        specifier: workspace:*
-        version: link:../cerebro-skill-ownership
       '@multica/cerebro-rounds':
         specifier: workspace:*
         version: link:../cerebro-rounds
+      '@multica/cerebro-skill-ownership':
+        specifier: workspace:*
+        version: link:../cerebro-skill-ownership
       '@multica/core':
         specifier: workspace:*
         version: link:../core

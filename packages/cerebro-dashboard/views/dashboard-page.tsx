@@ -1,8 +1,15 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
+import { useEffect, useMemo, useState } from "react";
 import { useCurrentWorkspace } from "@multica/core/paths";
 import { useFeatureFlag } from "@multica/cerebro-feature-flags";
+import {
+  SkillUsagePanel,
+  skillUsageOptions,
+  UsageExplorerPanel,
+  usageExplorerOptions,
+} from "@multica/cerebro-usage";
 import { PageHeader } from "@multica/views/layout/page-header";
 import { ActorTabs } from "./components/actor-tabs";
 import { TimeRangePicker } from "./components/time-range-picker";
@@ -38,9 +45,52 @@ export function DashboardPage() {
   const actorName = useDashboardStore((s) => s.actorName);
   const tab = useDashboardStore((s) => s.tab);
   const setActor = useDashboardStore((s) => s.setActor);
+  const [usageParams, setUsageParams] = useState(() => new URLSearchParams());
 
   const wsId = workspace?.id ?? "";
   const overview = useQuery(dashboardOverviewOptions(wsId, range, scope, actorId));
+  const usageDays = range === "24h" ? 1 : range === "30d" ? 30 : 7;
+
+  useEffect(() => {
+    setUsageParams(new URLSearchParams(window.location.search));
+  }, []);
+
+  const explorerQueryString = useMemo(() => {
+    const params = new URLSearchParams(usageParams);
+    params.set("days", String(usageDays));
+    params.set("grain", "day");
+    params.set("limit", "50");
+    return params.toString();
+  }, [usageDays, usageParams]);
+  const explorer = useQuery(usageExplorerOptions(wsId, explorerQueryString));
+  const skillUsage = useQuery(
+    skillUsageOptions(
+      wsId,
+      usageDays,
+      null,
+      usageParams.getAll("skill"),
+      usageParams.getAll("exclude.skill"),
+    ),
+  );
+
+  const selectUsageValue = (
+    dimension: string,
+    value: string,
+    mode: "include" | "exclude",
+  ) => {
+    const params = new URLSearchParams(usageParams);
+    const key = mode === "include" ? dimension : `exclude.${dimension}`;
+    const otherKey = mode === "include" ? `exclude.${dimension}` : dimension;
+    const selected = new Set(params.getAll(key));
+    selected.has(value) ? selected.delete(value) : selected.add(value);
+    params.delete(key);
+    [...selected].sort().forEach((item) => params.append(key, item));
+    const opposite = params.getAll(otherKey).filter((item) => item !== value);
+    params.delete(otherKey);
+    opposite.forEach((item) => params.append(otherKey, item));
+    window.history.replaceState(null, "", `${window.location.pathname}?${params}`);
+    setUsageParams(params);
+  };
 
   if (!enabled) return null;
 
@@ -96,6 +146,17 @@ export function DashboardPage() {
 
           {tab === "issues" && (
             <>
+              <UsageExplorerPanel
+                data={explorer.data ?? { summary: { runs: 0, tokens: 0, actual_cost_cents: 0, calculated_cost_runs: 0, missing_cost_runs: 0 }, facets: {}, runs: [], total: 0, savings: [] }}
+                onSelect={selectUsageValue}
+              />
+
+              <SkillUsagePanel
+                rows={skillUsage.data ?? []}
+                isLoading={skillUsage.isLoading}
+                onSelect={(skill, mode) => selectUsageValue("skill", skill, mode)}
+              />
+
               <section aria-label="KPIs">
                 <KpiCards
                   data={data}
