@@ -76,6 +76,8 @@ interface TabStore {
    * "every live workspace has at least one tab" holds.
    */
   closeTab: (tabId: string) => void;
+  /** Close every other unpinned tab in the target tab's workspace. */
+  closeOtherTabs: (tabId: string) => void;
   /**
    * Activate a tab. Finds it across all workspaces. Sets both the owning
    * workspace as active and that group's activeTabId; needed for any code
@@ -257,6 +259,44 @@ function findTabLocation(
   return null;
 }
 
+function buildCloseOtherTabsResult(
+  byWorkspace: Record<string, WorkspaceTabGroup>,
+  tabId: string,
+): {
+  nextByWorkspace: Record<string, WorkspaceTabGroup>;
+  closingTabs: Tab[];
+} | null {
+  const hit = findTabLocation(byWorkspace, tabId);
+  if (!hit) return null;
+  const { slug, group } = hit;
+  const closingTabs = group.tabs.filter(
+    (tab) => !tab.pinned && tab.id !== tabId,
+  );
+  if (closingTabs.length === 0) return null;
+
+  const closingIds = new Set(closingTabs.map((tab) => tab.id));
+  const nextTabs = group.tabs.filter((tab) => !closingIds.has(tab.id));
+  const nextActiveTabId = closingIds.has(group.activeTabId)
+    ? tabId
+    : group.activeTabId;
+
+  return {
+    nextByWorkspace: {
+      ...byWorkspace,
+      [slug]: { tabs: nextTabs, activeTabId: nextActiveTabId },
+    },
+    closingTabs,
+  };
+}
+
+function disposeTabRoutersAfterUnmount(tabs: readonly Tab[]) {
+  if (tabs.length === 0) return;
+  // Let React unmount every closed tab's RouterProvider before disposal.
+  window.setTimeout(() => {
+    for (const tab of tabs) tab.router.dispose();
+  }, 0);
+}
+
 // ---------------------------------------------------------------------------
 // Store
 // ---------------------------------------------------------------------------
@@ -388,10 +428,6 @@ export const useTabStore = create<TabStore>()(
         const { slug, group, index } = hit;
 
         const closing = group.tabs[index];
-        const disposeClosingRouter = () => {
-          // Let React unmount the tab's RouterProvider before disposing it.
-          window.setTimeout(() => closing.router.dispose(), 0);
-        };
 
         if (group.tabs.length === 1) {
           // Last tab in this workspace — reseed a default so the workspace
@@ -404,7 +440,7 @@ export const useTabStore = create<TabStore>()(
               [slug]: { tabs: [fresh], activeTabId: fresh.id },
             },
           });
-          disposeClosingRouter();
+          disposeTabRoutersAfterUnmount([closing]);
           return;
         }
 
@@ -420,7 +456,15 @@ export const useTabStore = create<TabStore>()(
             [slug]: { tabs: nextTabs, activeTabId: nextActiveTabId },
           },
         });
-        disposeClosingRouter();
+        disposeTabRoutersAfterUnmount([closing]);
+      },
+
+      closeOtherTabs(tabId) {
+        const { byWorkspace } = get();
+        const result = buildCloseOtherTabsResult(byWorkspace, tabId);
+        if (!result) return;
+        set({ byWorkspace: result.nextByWorkspace });
+        disposeTabRoutersAfterUnmount(result.closingTabs);
       },
 
       setActiveTab(tabId) {

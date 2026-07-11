@@ -66,8 +66,10 @@ function ListRowContent({
         ref={containerRef}
         style={containerStyle}
         {...containerProps}
-        className={`group/row flex h-9 items-center gap-2 px-4 text-sm transition-colors hover:not-data-[popup-open]:bg-accent/60 data-[popup-open]:bg-accent ${
-          selected ? "bg-accent/30" : ""
+        className={`group/row flex h-9 items-center gap-2 px-4 text-sm transition-colors ${
+          selected
+            ? "bg-surface-selected hover:not-data-[popup-open]:bg-surface-selected data-[popup-open]:bg-surface-selected"
+            : "hover:not-data-[popup-open]:bg-surface-hover data-[popup-open]:bg-surface-hover"
         } ${isDragging ? "opacity-30" : ""}`}
       >
         <div
@@ -139,7 +141,7 @@ function ListRowContent({
             <ActorAvatar
               actorType={issue.assignee_type!}
               actorId={issue.assignee_id!}
-              size={20}
+              size="sm"
               enableHoverCard
             />
           )}

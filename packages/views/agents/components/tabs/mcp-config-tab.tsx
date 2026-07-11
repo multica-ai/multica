@@ -87,7 +87,10 @@ export function McpConfigTab({
     return (
       <div className="space-y-3">
         <p className="flex items-center gap-2 text-sm font-medium">
-          <Lock className="h-3.5 w-3.5 text-muted-foreground" />
+          <Lock
+            className="h-3.5 w-3.5 text-muted-foreground"
+            aria-hidden="true"
+          />
           {t(($) => $.tab_body.mcp_config.redacted_title)}
         </p>
         <p className="text-xs text-muted-foreground">
@@ -130,9 +133,9 @@ export function McpConfigTab({
       : "";
 
   return (
-    <div className="flex h-full flex-col space-y-3">
+    <div className="space-y-5">
       <div className="flex items-start justify-between gap-3">
-        <p className="text-xs text-muted-foreground">
+        <p className="max-w-2xl break-words text-pretty text-sm leading-6 text-muted-foreground">
           {t(($) => $.tab_body.mcp_config.intro)}
         </p>
         {trimmed !== "" && (
@@ -143,21 +146,33 @@ export function McpConfigTab({
             onClick={handleClear}
             className="shrink-0"
           >
-            <Eraser className="h-3 w-3" />
+            <Eraser className="h-3 w-3" aria-hidden="true" />
             {t(($) => $.tab_body.mcp_config.clear_action)}
           </Button>
         )}
       </div>
 
-      <Textarea
-        value={text}
-        onChange={(e) => setText(e.target.value)}
-        placeholder={t(($) => $.tab_body.mcp_config.placeholder)}
-        aria-invalid={showInvalid || undefined}
-        aria-label={t(($) => $.tab_body.mcp_config.editor_aria)}
-        spellCheck={false}
-        className="min-h-[240px] flex-1 font-mono text-xs"
-      />
+      <div className="space-y-2">
+        <label
+          htmlFor={`agent-mcp-config-${agent.id}`}
+          className="text-sm font-medium"
+        >
+          {t(($) => $.tab_body.mcp_config.config_label)}
+        </label>
+        <Textarea
+          id={`agent-mcp-config-${agent.id}`}
+          name="agent-mcp-config"
+          autoComplete="off"
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          placeholder={t(($) => $.tab_body.mcp_config.placeholder)}
+          aria-invalid={showInvalid || undefined}
+          aria-label={t(($) => $.tab_body.mcp_config.editor_aria)}
+          spellCheck={false}
+          rows={14}
+          className="min-h-80 resize-y font-mono text-xs"
+        />
+      </div>
 
       {showInvalid && (
         <p className="text-xs text-destructive">{invalidMessage}</p>
@@ -175,9 +190,12 @@ export function McpConfigTab({
           size="sm"
         >
           {saving ? (
-            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            <Loader2
+              className="h-3.5 w-3.5 animate-spin motion-reduce:animate-none"
+              aria-hidden="true"
+            />
           ) : (
-            <Save className="h-3.5 w-3.5" />
+            <Save className="h-3.5 w-3.5" aria-hidden="true" />
           )}
           {t(($) => $.tab_body.common.save)}
         </Button>

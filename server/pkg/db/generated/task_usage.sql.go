@@ -393,6 +393,74 @@ func (q *Queries) ListDashboardUsageDaily(ctx context.Context, arg ListDashboard
 	return items, nil
 }
 
+const listIssueTaskUsage = `-- name: ListIssueTaskUsage :many
+SELECT
+    tu.task_id,
+    atq.created_at,
+    (atq.trigger_comment_id IS NOT NULL)::bool AS comment_triggered,
+    atq.trigger_comment_id,
+    tu.provider,
+    tu.model,
+    tu.input_tokens,
+    tu.output_tokens,
+    tu.cache_read_tokens,
+    tu.cache_write_tokens
+FROM task_usage tu
+JOIN agent_task_queue atq ON atq.id = tu.task_id
+WHERE atq.issue_id = $1
+ORDER BY atq.created_at DESC, tu.model
+`
+
+type ListIssueTaskUsageRow struct {
+	TaskID           pgtype.UUID        `json:"task_id"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	CommentTriggered bool               `json:"comment_triggered"`
+	TriggerCommentID pgtype.UUID        `json:"trigger_comment_id"`
+	Provider         string             `json:"provider"`
+	Model            string             `json:"model"`
+	InputTokens      int64              `json:"input_tokens"`
+	OutputTokens     int64              `json:"output_tokens"`
+	CacheReadTokens  int64              `json:"cache_read_tokens"`
+	CacheWriteTokens int64              `json:"cache_write_tokens"`
+}
+
+// Per-task per-model usage rows for one issue, newest task first. Powers the
+// per-run breakdown in the issue sidebar's Token usage section.
+// comment_triggered distinguishes comment-cycle runs from assignment runs;
+// trigger_comment_id lets the client label the run with the comment's
+// position in the timeline (numbering is computed client-side from the
+// loaded comment list so it always matches what the timeline renders).
+func (q *Queries) ListIssueTaskUsage(ctx context.Context, issueID pgtype.UUID) ([]ListIssueTaskUsageRow, error) {
+	rows, err := q.db.Query(ctx, listIssueTaskUsage, issueID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListIssueTaskUsageRow{}
+	for rows.Next() {
+		var i ListIssueTaskUsageRow
+		if err := rows.Scan(
+			&i.TaskID,
+			&i.CreatedAt,
+			&i.CommentTriggered,
+			&i.TriggerCommentID,
+			&i.Provider,
+			&i.Model,
+			&i.InputTokens,
+			&i.OutputTokens,
+			&i.CacheReadTokens,
+			&i.CacheWriteTokens,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const upsertTaskUsage = `-- name: UpsertTaskUsage :exec
 INSERT INTO task_usage (task_id, provider, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, updated_at)
 VALUES ($1, $2, $3, $4, $5, $6, $7, now())

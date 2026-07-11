@@ -5,6 +5,7 @@ import { useDefaultLayout } from "react-resizable-panels";
 import {
   Cloud,
   Monitor,
+  Pencil,
   Plus,
   Search,
   Server,
@@ -28,10 +29,16 @@ import {
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { useIsMobile } from "@multica/ui/hooks/use-mobile";
 import { cn } from "@multica/ui/lib/utils";
+import {
+  CollectionPageHeader,
+  CollectionPageHeaderAction,
+  CollectionPageState,
+} from "../../layout/collection-page";
 import { PageHeader } from "../../layout/page-header";
 import { ConnectRemoteDialog } from "./connect-remote-dialog";
 import { CloudRuntimeDialog } from "./cloud-runtime-dialog";
 import { RuntimeProfilesDialog } from "./runtime-profiles-dialog";
+import { RenameMachineDialog } from "./rename-machine-dialog";
 import { ProviderLogo } from "./provider-logo";
 import { RuntimeList, buildWorkloadIndex } from "./runtime-list";
 import {
@@ -42,6 +49,7 @@ import {
   buildRuntimeMachines,
   filterRuntimeMachines,
   runtimeMachineCounts,
+  sharedCustomName,
   type RuntimeMachine,
   type RuntimeMachineFilter,
 } from "./runtime-machines";
@@ -140,6 +148,7 @@ export function RuntimesPage({
   const canManageProfiles =
     currentMember?.role === "owner" || currentMember?.role === "admin";
   const [showProfilesDialog, setShowProfilesDialog] = useState(false);
+  const [renameOpen, setRenameOpen] = useState(false);
 
   const handleDaemonEvent = useCallback(() => {
     qc.invalidateQueries({ queryKey: runtimeKeys.all(wsId) });
@@ -240,6 +249,24 @@ export function RuntimesPage({
     filteredMachines[0] ??
     null;
 
+  // Rename is a machine-level action: it names the whole machine (all runtimes
+  // on the daemon). Pick a runtime on the selected machine the current user is
+  // allowed to edit — admins can use any; others must own it — and derive the
+  // machine's current custom name (shared across its runtimes when named).
+  const renameTarget = useMemo(() => {
+    const m = selectedMachine;
+    if (!m || m.runtimes.length === 0) return null;
+    const editable = canManageProfiles
+      ? m.runtimes[0]
+      : m.runtimes.find((r) => r.owner_id === currentUserId);
+    if (!editable) return null;
+    // Pre-fill only a real machine name — the same rule the machine title uses
+    // (every runtime shares one non-empty custom_name). A lone per-runtime
+    // custom name must NOT masquerade as the machine's current name.
+    const currentName = sharedCustomName(m.runtimes) ?? "";
+    return { runtimeId: editable.id, currentName };
+  }, [selectedMachine, canManageProfiles, currentUserId]);
+
   if (isLoading || fetching) return <RuntimesPageSkeleton />;
 
   const totalCount = visibleRuntimes.length;
@@ -280,6 +307,8 @@ export function RuntimesPage({
             updatableIds={updatableIds}
             now={now}
             bootstrapping={bootstrapping}
+            canRename={!!renameTarget}
+            onRename={() => setRenameOpen(true)}
             actions={
               selectedMachine?.isCurrent ? localMachineActions : undefined
             }
@@ -320,6 +349,8 @@ export function RuntimesPage({
                 updatableIds={updatableIds}
                 now={now}
                 bootstrapping={bootstrapping}
+                canRename={!!renameTarget}
+                onRename={() => setRenameOpen(true)}
                 actions={
                   selectedMachine?.isCurrent ? localMachineActions : undefined
                 }
@@ -345,6 +376,15 @@ export function RuntimesPage({
             ])
           }
           onClose={() => setShowProfilesDialog(false)}
+        />
+      )}
+      {renameTarget && (
+        <RenameMachineDialog
+          open={renameOpen}
+          onOpenChange={setRenameOpen}
+          wsId={wsId}
+          runtimeId={renameTarget.runtimeId}
+          currentName={renameTarget.currentName}
         />
       )}
     </div>
@@ -373,66 +413,34 @@ function PageHeaderBar({
 }) {
   const { t } = useT("runtimes");
   return (
-    <PageHeader className="justify-between px-5">
-      <div className="flex items-center gap-2">
-        <Server className="h-4 w-4 text-muted-foreground" />
-        <h1 className="text-sm font-medium">{t(($) => $.page.title)}</h1>
-        {totalCount > 0 && (
-          <span className="font-mono text-xs tabular-nums text-muted-foreground/70">
-            {totalCount}
-          </span>
-        )}
-      </div>
-      {/* Quiet chrome buttons (outline, icon-only below md) — primary is
-          reserved for the empty state's CTA. All three share the same
-          dimensions, padding, and responsive icon-only behavior so the
-          header reads as a single, consistent action group. */}
-      <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
-        {canManageProfiles && (
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            className="h-8 w-8 gap-1 px-0 md:w-auto md:px-2.5"
-            aria-label={t(($) => $.profiles.cta)}
-            onClick={onAddRuntime}
-          >
-            <Plus className="h-3.5 w-3.5" />
-            <span className="hidden md:inline">
-              {t(($) => $.profiles.cta)}
-            </span>
-          </Button>
-        )}
-        {cloudRuntimeEnabled && (
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            className="h-8 w-8 gap-1 px-0 md:w-auto md:px-2.5"
-            aria-label={t(($) => $.cloud_runtime.action)}
-            onClick={onOpenCloudRuntime}
-          >
-            <Cloud className="h-3.5 w-3.5" />
-            <span className="hidden md:inline">
-              {t(($) => $.cloud_runtime.action)}
-            </span>
-          </Button>
-        )}
-        <Button
-          type="button"
-          size="sm"
-          variant="outline"
-          className="h-8 w-8 gap-1 px-0 md:w-auto md:px-2.5"
-          aria-label={t(($) => $.page.connect_remote)}
-          onClick={onConnectRemote}
-        >
-          <Plus className="h-3.5 w-3.5" />
-          <span className="hidden md:inline">
-            {t(($) => $.page.connect_remote)}
-          </span>
-        </Button>
-      </div>
-    </PageHeader>
+    <CollectionPageHeader
+      icon={Server}
+      title={t(($) => $.page.title)}
+      count={totalCount}
+      actions={
+        <>
+          {canManageProfiles && (
+            <CollectionPageHeaderAction
+              icon={Plus}
+              label={t(($) => $.profiles.cta)}
+              onClick={onAddRuntime}
+            />
+          )}
+          {cloudRuntimeEnabled && (
+            <CollectionPageHeaderAction
+              icon={Cloud}
+              label={t(($) => $.cloud_runtime.action)}
+              onClick={onOpenCloudRuntime}
+            />
+          )}
+          <CollectionPageHeaderAction
+            icon={Plus}
+            label={t(($) => $.page.connect_remote)}
+            onClick={onConnectRemote}
+          />
+        </>
+      }
+    />
   );
 }
 
@@ -491,6 +499,7 @@ function MachineSidebar({
           <Input
             value={search}
             onChange={(event) => setSearch(event.target.value)}
+            aria-label={t(($) => $.machine.search_placeholder)}
             placeholder={t(($) => $.machine.search_placeholder)}
             className="h-9 pl-8 text-sm"
           />
@@ -680,12 +689,16 @@ function MachineDetail({
   updatableIds,
   now,
   bootstrapping,
+  canRename,
+  onRename,
   actions,
 }: {
   machine: RuntimeMachine | null;
   updatableIds: Set<string>;
   now: number;
   bootstrapping?: boolean;
+  canRename?: boolean;
+  onRename?: () => void;
   actions?: React.ReactNode;
 }) {
   const { t } = useT("runtimes");
@@ -766,6 +779,17 @@ function MachineDetail({
               <h2 className="truncate text-xl font-semibold tracking-tight">
                 {machine.title}
               </h2>
+              {canRename && onRename && (
+                <button
+                  type="button"
+                  onClick={onRename}
+                  aria-label={t(($) => $.machine.rename)}
+                  title={t(($) => $.machine.rename)}
+                  className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                >
+                  <Pencil className="h-3.5 w-3.5" />
+                </button>
+              )}
               <span className="inline-flex items-center gap-1 rounded-md border bg-background px-2 py-0.5 text-xs text-muted-foreground">
                 <HealthIcon health={machine.health} />
                 {healthLabel(machine.health)}
@@ -808,24 +832,17 @@ function MachineDetail({
 function EmptyState({ onConnectRemote }: { onConnectRemote: () => void }) {
   const { t } = useT("runtimes");
   return (
-    <div className="flex flex-1 flex-col items-center justify-center px-6 py-16 text-center">
-      <div className="flex h-12 w-12 items-center justify-center rounded-full bg-muted">
-        <Server className="h-6 w-6 text-muted-foreground" />
-      </div>
-      <h2 className="mt-4 text-base font-semibold">{t(($) => $.page.empty.title)}</h2>
-      <p className="mt-1 max-w-md text-sm text-muted-foreground">
-        {t(($) => $.page.empty.hint)}
-      </p>
-      <Button
-        type="button"
-        size="sm"
-        onClick={onConnectRemote}
-        className="mt-5"
-      >
-        <Plus className="h-3 w-3" />
-        {t(($) => $.page.connect_remote)}
-      </Button>
-    </div>
+    <CollectionPageState
+      icon={Server}
+      title={t(($) => $.page.empty.title)}
+      description={t(($) => $.page.empty.hint)}
+      actions={
+        <Button type="button" size="sm" onClick={onConnectRemote}>
+          <Plus aria-hidden="true" className="size-3" />
+          {t(($) => $.page.connect_remote)}
+        </Button>
+      }
+    />
   );
 }
 

@@ -29,6 +29,29 @@ FROM task_usage tu
 JOIN agent_task_queue atq ON atq.id = tu.task_id
 WHERE atq.issue_id = $1;
 
+-- name: ListIssueTaskUsage :many
+-- Per-task per-model usage rows for one issue, newest task first. Powers the
+-- per-run breakdown in the issue sidebar's Token usage section.
+-- comment_triggered distinguishes comment-cycle runs from assignment runs;
+-- trigger_comment_id lets the client label the run with the comment's
+-- position in the timeline (numbering is computed client-side from the
+-- loaded comment list so it always matches what the timeline renders).
+SELECT
+    tu.task_id,
+    atq.created_at,
+    (atq.trigger_comment_id IS NOT NULL)::bool AS comment_triggered,
+    atq.trigger_comment_id,
+    tu.provider,
+    tu.model,
+    tu.input_tokens,
+    tu.output_tokens,
+    tu.cache_read_tokens,
+    tu.cache_write_tokens
+FROM task_usage tu
+JOIN agent_task_queue atq ON atq.id = tu.task_id
+WHERE atq.issue_id = $1
+ORDER BY atq.created_at DESC, tu.model;
+
 -- name: ListDashboardUsageDaily :many
 -- Daily per-(date, provider, model) token aggregates for the workspace, served
 -- from the UTC-bucketed `task_usage_hourly` table and

@@ -16,6 +16,7 @@ import type {
   CreateBillingPortalSessionResponse,
   GroupedIssuesResponse,
   InboxWorkspaceUnread,
+  IssueUsageSummary,
   ListIssuesResponse,
   ListWebhookDeliveriesResponse,
   SearchIssuesResponse,
@@ -44,6 +45,9 @@ export interface AppConfigResponse {
   daemon_app_url?: string;
   workspace_creation_disabled?: boolean;
   feature_flags?: Record<string, boolean>;
+  // True when the server has GitLab OAuth configured. Older servers omit the
+  // field; treat that as false so the login button stays hidden by default.
+  gitlab_enabled?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -452,6 +456,37 @@ const DashboardUsageByAgentSchema = z.object({
 
 export const DashboardUsageByAgentListSchema = z.array(DashboardUsageByAgentSchema);
 
+export const IssueTaskUsageSchema = z.object({
+  task_id: z.string().default(""),
+  created_at: z.string().default(""),
+  comment_triggered: z.boolean().default(false),
+  trigger_comment_id: z.string().default(""),
+  provider: z.string().default(""),
+  model: z.string().default(""),
+  input_tokens: z.number().default(0),
+  output_tokens: z.number().default(0),
+  cache_read_tokens: z.number().default(0),
+  cache_write_tokens: z.number().default(0),
+});
+
+export const IssueUsageSummarySchema = z.object({
+  total_input_tokens: z.number().default(0),
+  total_output_tokens: z.number().default(0),
+  total_cache_read_tokens: z.number().default(0),
+  total_cache_write_tokens: z.number().default(0),
+  task_count: z.number().default(0),
+  tasks: z.array(IssueTaskUsageSchema).default([]),
+});
+
+export const EMPTY_ISSUE_USAGE: IssueUsageSummary = {
+  total_input_tokens: 0,
+  total_output_tokens: 0,
+  total_cache_read_tokens: 0,
+  total_cache_write_tokens: 0,
+  task_count: 0,
+  tasks: [],
+};
+
 const DashboardAgentRunTimeSchema = z.object({
   agent_id: z.string().default(""),
   total_seconds: z.number().default(0),
@@ -523,15 +558,19 @@ const RuntimeUsageByHourSchema = z.object({
 export const RuntimeUsageByHourListSchema = z.array(RuntimeUsageByHourSchema);
 
 // ---------------------------------------------------------------------------
-// Task cancellation (`POST /api/tasks/:id/cancel`)
-//
-// This response is consumed directly by chat recovery. The embedded task
-// object stays loose so daemon/runtime fields can drift, but the optional
-// `cancelled_chat_message` payload must be well-formed before the UI deletes
-// a message from cache or restores text into the input.
+// Agent task responses. The base object stays loose so daemon/runtime fields
+// can drift while task-list consumers still validate the fields they render.
 // ---------------------------------------------------------------------------
 
-const AgentTaskResponseSchema = z.object({
+const OptionalStringArraySchema = z.preprocess(
+  (value) =>
+    Array.isArray(value) && value.every((item) => typeof item === "string")
+      ? value
+      : undefined,
+  z.array(z.string()).optional(),
+);
+
+export const AgentTaskSchema = z.object({
   id: z.string(),
   agent_id: z.string().default(""),
   runtime_id: z.string().default(""),
@@ -550,6 +589,11 @@ const AgentTaskResponseSchema = z.object({
   parent_task_id: z.string().optional(),
   attempt: z.number().optional(),
   trigger_comment_id: z.string().optional(),
+  // Coverage is additive display metadata. A mixed-version or partially
+  // upgraded server must not make one malformed optional field erase the
+  // entire execution log, so degrade that field to "absent" independently.
+  coalesced_comment_ids: OptionalStringArraySchema,
+  delivered_comment_ids: OptionalStringArraySchema,
   trigger_summary: z.string().optional(),
   handoff_note: z.string().optional(),
   kind: z.string().optional(),
@@ -557,6 +601,11 @@ const AgentTaskResponseSchema = z.object({
   relative_work_dir: z.string().optional(),
 }).loose();
 
+export const AgentTaskListSchema = z.array(AgentTaskSchema);
+
+// Task cancellation (`POST /api/tasks/:id/cancel`) is consumed directly by
+// chat recovery. Its optional message payload must be well-formed before the
+// UI deletes a message from cache or restores text into the input.
 const CancelledChatMessageSchema = z.object({
   chat_session_id: z.string(),
   message_id: z.string(),
@@ -567,7 +616,7 @@ const CancelledChatMessageSchema = z.object({
   attachments: z.array(AttachmentSchema).optional(),
 }).loose();
 
-export const CancelTaskResponseSchema = AgentTaskResponseSchema.extend({
+export const CancelTaskResponseSchema = AgentTaskSchema.extend({
   cancelled_chat_message: CancelledChatMessageSchema.nullish()
     .transform((value) => value ?? undefined),
 }).loose();

@@ -227,6 +227,114 @@ func claimTaskByRuntimeForTest(t *testing.T, runtimeID string) (*struct {
 	return resp.Task, w.Body.String()
 }
 
+// claimChatIntroForTest claims the next task for a runtime and returns the
+// claimed task id plus its chat_intro flag (false when the field is absent, as
+// it is omitempty).
+func claimChatIntroForTest(t *testing.T, runtimeID string) (string, bool, string) {
+	t.Helper()
+
+	w := httptest.NewRecorder()
+	req := newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/tasks/claim", nil,
+		testWorkspaceID, "chat-intro-review")
+	req = withURLParam(req, "runtimeId", runtimeID)
+
+	testHandler.ClaimTaskByRuntime(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("ClaimTaskByRuntime: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp struct {
+		Task *struct {
+			ID        string `json:"id"`
+			ChatIntro bool   `json:"chat_intro"`
+		} `json:"task"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode claim response: %v", err)
+	}
+	if resp.Task == nil {
+		t.Fatalf("expected a claimable task, got none: %s", w.Body.String())
+	}
+	return resp.Task.ID, resp.Task.ChatIntro, w.Body.String()
+}
+
+// TestClaimTaskByRuntime_ChatIntroGateClearsAfterUserReplies pins the MUL-4259
+// fix: an is_agent_intro session drives the self-introduction prompt only on
+// its first, message-less turn. Once the creator has replied, later turns on
+// the same (still is_agent_intro) session must claim with chat_intro=false so
+// the agent answers instead of repeating its introduction.
+func TestClaimTaskByRuntime_ChatIntroGateClearsAfterUserReplies(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+	runtimeID := createClaimReclaimRuntime(t, ctx, "Chat intro gate runtime")
+	agentID, _ := createClaimReclaimAgentAndIssue(t, ctx, runtimeID, "Chat intro gate agent")
+	// Allow more than one in-flight task so the second claim isn't blocked by
+	// the first (which stays 'dispatched') on the concurrency limit.
+	if _, err := testPool.Exec(ctx, `UPDATE agent SET max_concurrent_tasks = 5 WHERE id = $1`, agentID); err != nil {
+		t.Fatalf("raise max_concurrent_tasks: %v", err)
+	}
+
+	var sessionID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO chat_session (workspace_id, agent_id, creator_id, title, status, runtime_id, is_agent_intro)
+		VALUES ($1, $2, $3, '👋 intro', 'active', $4, true)
+		RETURNING id
+	`, testWorkspaceID, agentID, testUserID, runtimeID).Scan(&sessionID); err != nil {
+		t.Fatalf("insert intro chat session: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM chat_session WHERE id = $1`, sessionID) })
+
+	seedQueuedChatTask := func() string {
+		var taskID string
+		if err := testPool.QueryRow(ctx, `
+			INSERT INTO agent_task_queue (agent_id, runtime_id, status, priority, chat_session_id)
+			VALUES ($1, $2, 'queued', 0, $3)
+			RETURNING id
+		`, agentID, runtimeID, sessionID).Scan(&taskID); err != nil {
+			t.Fatalf("seed queued chat task: %v", err)
+		}
+		t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE id = $1`, taskID) })
+		return taskID
+	}
+
+	// First turn: no user message yet → the server-driven intro run.
+	introTaskID := seedQueuedChatTask()
+	claimedID, chatIntro, body := claimChatIntroForTest(t, runtimeID)
+	if claimedID != introTaskID {
+		t.Fatalf("claimed task id = %s, want intro task %s: %s", claimedID, introTaskID, body)
+	}
+	if !chatIntro {
+		t.Fatalf("expected chat_intro=true for the message-less intro turn: %s", body)
+	}
+
+	// The intro run finishes. Chat tasks serialize on chat_session_id, so the
+	// next turn only becomes claimable once this one leaves an in-flight state.
+	if _, err := testPool.Exec(ctx, `UPDATE agent_task_queue SET status = 'completed' WHERE id = $1`, introTaskID); err != nil {
+		t.Fatalf("complete intro task: %v", err)
+	}
+
+	// The creator replies: persist a user message on the same session.
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO chat_message (chat_session_id, role, content)
+		VALUES ($1, 'user', 'thanks! can you help me with X?')
+	`, sessionID); err != nil {
+		t.Fatalf("insert user reply: %v", err)
+	}
+
+	// Second turn on the same is_agent_intro session must NOT re-introduce.
+	followupTaskID := seedQueuedChatTask()
+	claimedID, chatIntro, body = claimChatIntroForTest(t, runtimeID)
+	if claimedID != followupTaskID {
+		t.Fatalf("claimed task id = %s, want follow-up task %s: %s", claimedID, followupTaskID, body)
+	}
+	if chatIntro {
+		t.Fatalf("expected chat_intro=false once the creator has replied: %s", body)
+	}
+}
+
 func TestClaimTaskByRuntime_ReclaimsStaleDispatchedTask(t *testing.T) {
 	if testHandler == nil || testPool == nil {
 		t.Skip("database not available")
@@ -1519,6 +1627,129 @@ func TestGetIssueUsage_CrossWorkspace_Returns404(t *testing.T) {
 	testHandler.GetIssueUsage(w, req)
 	if w.Code != http.StatusNotFound {
 		t.Fatalf("GetIssueUsage with cross-workspace issueId: expected 404, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+// TestGetIssueUsage_PerTaskBreakdown verifies the usage endpoint returns
+// per-task rows alongside the aggregate totals, with comment_triggered
+// distinguishing comment-cycle runs from assignment runs.
+func TestGetIssueUsage_PerTaskBreakdown(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+
+	var runtimeID, agentID string
+	if err := testPool.QueryRow(ctx, `
+		SELECT id FROM agent_runtime WHERE workspace_id = $1 LIMIT 1
+	`, testWorkspaceID).Scan(&runtimeID); err != nil {
+		t.Fatalf("fetch runtime: %v", err)
+	}
+	if err := testPool.QueryRow(ctx, `
+		SELECT id FROM agent WHERE workspace_id = $1 LIMIT 1
+	`, testWorkspaceID).Scan(&agentID); err != nil {
+		t.Fatalf("fetch agent: %v", err)
+	}
+
+	var issueID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (workspace_id, title, creator_id, creator_type, number)
+		VALUES ($1, 'usage breakdown test', $2, 'member',
+			(SELECT COALESCE(MAX(number), 0) + 1 FROM issue WHERE workspace_id = $1))
+		RETURNING id
+	`, testWorkspaceID, testUserID).Scan(&issueID); err != nil {
+		t.Fatalf("insert issue: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID) })
+
+	var commentID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO comment (issue_id, author_id, author_type, content, workspace_id)
+		VALUES ($1, $2, 'member', 'trigger', $3)
+		RETURNING id
+	`, issueID, testUserID, testWorkspaceID).Scan(&commentID); err != nil {
+		t.Fatalf("insert comment: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM comment WHERE id = $1`, commentID) })
+
+	mkTask := func(triggerCommentID any, createdOffset time.Duration, inputTokens int64) string {
+		var taskID string
+		if err := testPool.QueryRow(ctx, `
+			INSERT INTO agent_task_queue (agent_id, issue_id, runtime_id, status, trigger_comment_id, created_at)
+			VALUES ($1, $2, $3, 'completed', $4, now() + $5::interval)
+			RETURNING id
+		`, agentID, issueID, runtimeID, triggerCommentID,
+			fmt.Sprintf("%d seconds", int(createdOffset.Seconds()))).Scan(&taskID); err != nil {
+			t.Fatalf("insert task: %v", err)
+		}
+		t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE id = $1`, taskID) })
+		if _, err := testPool.Exec(ctx, `
+			INSERT INTO task_usage (task_id, provider, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, updated_at)
+			VALUES ($1, 'anthropic', 'claude-sonnet-4.6', $2, 100, 50, 25, now())
+		`, taskID, inputTokens); err != nil {
+			t.Fatalf("insert task_usage: %v", err)
+		}
+		return taskID
+	}
+
+	assignmentTaskID := mkTask(nil, 0, 1000)
+	commentTaskID := mkTask(commentID, time.Minute, 2000) // newer → first in response
+
+	w := httptest.NewRecorder()
+	req := newRequest("GET", "/api/issues/"+issueID+"/usage", nil)
+	req = withURLParam(req, "id", issueID)
+	testHandler.GetIssueUsage(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("GetIssueUsage: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp struct {
+		TotalInputTokens int64 `json:"total_input_tokens"`
+		TaskCount        int   `json:"task_count"`
+		Tasks            []struct {
+			TaskID           string `json:"task_id"`
+			CreatedAt        string `json:"created_at"`
+			CommentTriggered bool   `json:"comment_triggered"`
+			TriggerCommentID string `json:"trigger_comment_id"`
+			Provider         string `json:"provider"`
+			Model            string `json:"model"`
+			InputTokens      int64  `json:"input_tokens"`
+			OutputTokens     int64  `json:"output_tokens"`
+			CacheReadTokens  int64  `json:"cache_read_tokens"`
+			CacheWriteTokens int64  `json:"cache_write_tokens"`
+		} `json:"tasks"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	if resp.TotalInputTokens != 3000 {
+		t.Fatalf("expected total_input_tokens 3000, got %d", resp.TotalInputTokens)
+	}
+	if resp.TaskCount != 2 {
+		t.Fatalf("expected task_count 2, got %d", resp.TaskCount)
+	}
+	if len(resp.Tasks) != 2 {
+		t.Fatalf("expected 2 task rows, got %d", len(resp.Tasks))
+	}
+	// Newest first.
+	if resp.Tasks[0].TaskID != commentTaskID || !resp.Tasks[0].CommentTriggered {
+		t.Fatalf("expected first row = comment task %s with comment_triggered=true, got %+v", commentTaskID, resp.Tasks[0])
+	}
+	if resp.Tasks[0].TriggerCommentID != commentID {
+		t.Fatalf("expected first row trigger_comment_id %s, got %q", commentID, resp.Tasks[0].TriggerCommentID)
+	}
+	if resp.Tasks[1].TaskID != assignmentTaskID || resp.Tasks[1].CommentTriggered {
+		t.Fatalf("expected second row = assignment task %s with comment_triggered=false, got %+v", assignmentTaskID, resp.Tasks[1])
+	}
+	if resp.Tasks[1].TriggerCommentID != "" {
+		t.Fatalf("expected second row empty trigger_comment_id, got %q", resp.Tasks[1].TriggerCommentID)
+	}
+	if resp.Tasks[0].InputTokens != 2000 || resp.Tasks[0].Model != "claude-sonnet-4.6" {
+		t.Fatalf("unexpected first row fields: %+v", resp.Tasks[0])
+	}
+	if resp.Tasks[0].CreatedAt == "" {
+		t.Fatal("expected created_at to be set")
 	}
 }
 

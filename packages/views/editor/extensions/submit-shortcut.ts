@@ -16,7 +16,15 @@ export function createSubmitExtension(
     name: "submitShortcut",
     addKeyboardShortcuts() {
       const shortcuts: Record<string, () => boolean> = {
-        "Mod-Enter": () => onSubmit(),
+        "Mod-Enter": () => {
+          // IME guard — same as Enter below. While a composition is open the
+          // composed text is not in the document yet, so submitting here
+          // would send the doc WITHOUT what the user just typed (e.g. paste
+          // a screenshot, type a pinyin sentence, hit ⌘↵ before the buffer
+          // commits — the submission carries only the screenshot).
+          if (this.editor.view.composing) return false;
+          return onSubmit();
+        },
       };
       if (submitOnEnter) {
         shortcuts.Enter = () => {

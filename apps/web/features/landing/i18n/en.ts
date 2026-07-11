@@ -294,6 +294,76 @@ export function createEnDict(allowSignup: boolean): LandingDict {
     },
     entries: [
       {
+        version: "0.3.43",
+        date: "2026-07-10",
+        title: "New Codex models, issue-key autolinks, and avatar cropping",
+        changes: [],
+        features: [
+          "You can now run your agents on the new Codex gpt-5.6 models — Sol, Terra, and Luna.",
+          "Type or paste an issue key like MUL-123 and it turns into a clickable issue link on its own.",
+          "When you upload an avatar, you can now crop, zoom, and rotate it before saving.",
+          "When an agent ends without a text reply, chat now shows a clear no-reply note instead of a blank message.",
+          "Mention a busy agent across several separate comment threads and each thread now gets its own answer.",
+        ],
+        improvements: [
+          "Agent, squad, and workspace avatars are now round everywhere, matching your member avatar.",
+          "Changing the status of several sub-issues at once now applies right away, without a needless confirm step.",
+          "A chat message you send while an agent is still replying is now picked up by its next reply, never missed.",
+          "The background service on your machine keeps its own log small, so it can no longer fill up your disk.",
+        ],
+        fixes: [
+          "Linking a Lark bot now works even when your computer's clock is slightly off from the server.",
+          "Cursor agents now pick up their connected tools correctly again.",
+          "A Claude agent session that stalled while resuming now recovers and keeps going.",
+        ],
+      },
+      {
+        version: "0.3.42",
+        date: "2026-07-09",
+        title: "A dedicated Chat tab, plus reliability fixes",
+        changes: [],
+        features: [
+          "Chat now lives in its own tab, with your conversations on one side and the open chat on the other.",
+          "New chats get a short, fitting title after your first message, in the language you wrote in.",
+          "Starting a new chat drops your cursor right in the message box, so you can type immediately.",
+          "Cancelled issues now appear as their own column on the board and list, like every other status.",
+          "Hover an agent to see which model it is running and its thinking level, without opening its page.",
+        ],
+        improvements: [
+          "The app recovers its connection more reliably after a brief network interruption.",
+          "Assigning an issue from the command line no longer fails on a momentary network hiccup.",
+        ],
+        fixes: [
+          "Your follow-up comment on an issue is never dropped — even sent while the agent is still working, it always gets picked up.",
+          "When one agent mentions another, the mentioned agent now reliably starts working.",
+          "A chat bot that got stuck can be reconnected again, and the \u201calready in use\u201d message now says exactly who holds it.",
+          "Links wrapped in bold in comments and descriptions now display correctly.",
+          "The Windows desktop app now always shows the correct version number.",
+        ],
+      },
+      {
+        version: "0.3.41",
+        date: "2026-07-08",
+        title: "Machine names, member-owned squads, and CLI issue ordering",
+        changes: [],
+        features: [
+          "You can now give your machines their own names, and the runtime picker for creating an agent is searchable and grouped by machine.",
+          "Any member can now create and manage their own squads, not just workspace admins.",
+          "An agent's owner can now connect and manage its Lark bot directly, without needing to be an admin.",
+          "You can now reorder issues from the command line and set an exact position.",
+        ],
+        improvements: [
+          "When an agent task fails in chat, you now get a friendly, plain-language message with a nudge to try again.",
+        ],
+        fixes: [
+          "In Feishu topic groups, each topic now keeps its own separate conversation instead of everyone sharing one.",
+          "The desktop app now always shows a correct version number.",
+          "After a task moves between statuses, the board's count and the rows it shows stay in sync.",
+          "Files brought in through a skill import are now kept instead of being lost.",
+          "Deleting an autopilot now archives it cleanly, with nothing left behind.",
+        ],
+      },
+      {
         version: "0.3.40",
         date: "2026-07-07",
         title: "In-page find, resumable downloads, and fixes",
@@ -431,7 +501,7 @@ export function createEnDict(allowSignup: boolean): LandingDict {
       {
         version: "0.3.33",
         date: "2026-06-30",
-        title: "Autopilot access controls, Slack history backfill, and skill-archive imports",
+        title: "Autopilot access controls, Slack history backfill, skill-archive imports, and GitLab Integration",
         changes: [],
         features: [
           "Autopilots now have a clear write-permission layer, plus a Manage Access dialog that lets the creator grant write access to specific workspace members.",
@@ -440,6 +510,9 @@ export function createEnDict(allowSignup: boolean): LandingDict {
           "Skill bundles can be installed from a local .skill or .zip archive.",
           "multica issue commands no longer accept short UUID prefixes — use the issue key (MUL-123) or the full UUID.",
           "The Agents page is now usable on mobile.",
+          "Connect a GitLab group once in Settings → GitLab. Merge requests that reference a Multica issue identifier appear automatically in the issue sidebar.",
+          "GitLab issues labeled 'agent' are created in Multica and kept in sync — description, assignee, status, and comments flow both ways.",
+          "Merging an MR that closes an issue moves it to Done automatically. Closing or reopening a synced GitLab issue reflects in Multica immediately.",
         ],
         improvements: [
           "Comment routing was rewritten end-to-end so parent-chain mentions, agent-authored replies, and squad-leader fallback all flow through one well-tested cascade.",

@@ -86,19 +86,19 @@ vi.mock("../common/actor-avatar", () => ({
   ),
 }));
 
-vi.mock("../agents/components/avatar-picker", () => ({
-  AvatarPicker: ({
+vi.mock("../common/avatar-upload-control", () => ({
+  AvatarUploadControl: ({
     value,
-    onChange,
+    onUploaded,
   }: {
     value: string | null;
-    onChange: (v: string | null) => void;
+    onUploaded: (v: string) => void;
   }) => (
     <button
       type="button"
       data-testid="avatar-picker"
       data-value={value ?? ""}
-      onClick={() => onChange("https://example.com/avatar.png")}
+      onClick={() => onUploaded("https://example.com/avatar.png")}
     >
       avatar
     </button>

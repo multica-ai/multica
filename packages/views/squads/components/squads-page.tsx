@@ -82,7 +82,11 @@ import { ActorAvatar as ActorAvatarBase } from "@multica/ui/components/common/ac
 import { ActorAvatar } from "../../common/actor-avatar";
 import { FILTER_ITEM_CLASS, HoverCheck } from "../../common/hover-check";
 import { useRowLink } from "../../navigation";
-import { PageHeader } from "../../layout/page-header";
+import {
+  CollectionPageHeader,
+  CollectionPageHeaderAction,
+  CollectionPageState,
+} from "../../layout/collection-page";
 import { useT } from "../../i18n";
 
 // Column template — the simplest member of the ListGrid family (squads are
@@ -148,18 +152,19 @@ function SquadAvatar({ squad }: { squad: Squad }) {
         name={squad.name}
         initials={initials}
         avatarUrl={resolvePublicFileUrl(squad.avatar_url)}
-        size={32}
-        className="shrink-0 rounded-md"
+        size="lg"
+        className="shrink-0"
       />
     );
   }
   return (
-    <div
-      className="flex size-8 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground"
-      title={squad.name}
-    >
-      <Users className="h-4 w-4" />
-    </div>
+    <ActorAvatarBase
+      name={squad.name}
+      initials={initials}
+      isSquad
+      size="lg"
+      className="shrink-0"
+    />
   );
 }
 
@@ -191,7 +196,7 @@ function LeaderCell({
 }) {
   return (
     <ListGridCell className="gap-1.5">
-      <ActorAvatar actorType="agent" actorId={leaderId} size={18} />
+      <ActorAvatar actorType="agent" actorId={leaderId} size="sm" />
       <span className="min-w-0 truncate text-xs text-muted-foreground">
         {leader?.name ?? leaderId.slice(0, 8)}
       </span>
@@ -225,7 +230,7 @@ function MembersCell({ squad }: { squad: Squad }) {
             <ActorAvatar
               actorType={m.member_type}
               actorId={m.member_id}
-              size={22}
+              size="md"
               enableHoverCard={m.member_type === "agent"}
             />
           </span>
@@ -599,7 +604,7 @@ function SquadListToolbar({
                   className={FILTER_ITEM_CLASS}
                 >
                   <HoverCheck checked={filters.leaders.includes(o.id)} />
-                  <ActorAvatar actorType="agent" actorId={o.id} size={16} />
+                  <ActorAvatar actorType="agent" actorId={o.id} size="sm" />
                   <span className="min-w-0 truncate">{o.name}</span>
                   {countBadge(o.count)}
                 </DropdownMenuCheckboxItem>
@@ -622,7 +627,7 @@ function SquadListToolbar({
                   className={FILTER_ITEM_CLASS}
                 >
                   <HoverCheck checked={filters.creators.includes(o.id)} />
-                  <ActorAvatar actorType="member" actorId={o.id} size={16} />
+                  <ActorAvatar actorType="member" actorId={o.id} size="sm" />
                   <span className="min-w-0 truncate">{o.name}</span>
                   {countBadge(o.count)}
                 </DropdownMenuCheckboxItem>
@@ -874,48 +879,47 @@ export function SquadsPage() {
     return sorted;
   }, [scopeRows, filters, sortField, sortDirection]);
 
+  // Reserve the row-actions (kebab) track when the current user can manage at
+  // least one visible squad. Workspace admins manage all squads; a regular
+  // member manages the squads they created (MUL-4223).
+  const canManageAnyRow = useMemo(
+    () =>
+      isWorkspaceAdmin ||
+      (!!currentUser && rows.some((s) => s.creator_id === currentUser.id)),
+    [isWorkspaceAdmin, rows, currentUser],
+  );
+
   return (
     <div className="flex flex-1 min-h-0 flex-col">
-      <PageHeader className="justify-between px-5">
-        <div className="flex items-center gap-2">
-          <Users className="h-4 w-4 text-muted-foreground" />
-          <h1 className="text-sm font-medium">{t(($) => $.page.title)}</h1>
-          {squads.length > 0 && (
-            <span className="font-mono text-xs tabular-nums text-muted-foreground/70">
-              {squads.length}
-            </span>
-          )}
-        </div>
-        {/* Quiet chrome button (outline, icon-only below md) — primary is
-            reserved for the empty state. */}
-        <Button
-          size="sm"
-          variant="outline"
-          className="h-8 w-8 gap-1 px-0 md:w-auto md:px-2.5"
-          aria-label={t(($) => $.page.new_button)}
-          onClick={() => useModalStore.getState().open("create-squad")}
-        >
-          <Plus className="h-3.5 w-3.5" />
-          <span className="hidden md:inline">{t(($) => $.page.new_button)}</span>
-        </Button>
-      </PageHeader>
+      <CollectionPageHeader
+        icon={Users}
+        title={t(($) => $.page.title)}
+        count={squads.length}
+        actions={
+          <CollectionPageHeaderAction
+            icon={Plus}
+            label={t(($) => $.page.new_button)}
+            onClick={() => useModalStore.getState().open("create-squad")}
+          />
+        }
+      />
 
       {isLoading ? (
         <LoadingSkeleton />
       ) : squads.length === 0 ? (
-        <div className="flex flex-1 flex-col items-center justify-center gap-3 py-16 text-center">
-          <Users className="size-10 text-muted-foreground/50" />
-          <p className="text-sm text-muted-foreground">
-            {t(($) => $.page.empty_no_squads)}
-          </p>
-          <Button
-            size="sm"
-            onClick={() => useModalStore.getState().open("create-squad")}
-          >
-            <Plus className="size-3.5" />
-            {t(($) => $.page.new_button)}
-          </Button>
-        </div>
+        <CollectionPageState
+          icon={Users}
+          title={t(($) => $.page.empty_no_squads)}
+          actions={
+            <Button
+              size="sm"
+              onClick={() => useModalStore.getState().open("create-squad")}
+            >
+              <Plus aria-hidden="true" className="size-3.5" />
+              {t(($) => $.page.new_button)}
+            </Button>
+          }
+        />
       ) : (
         <>
           <SquadListToolbar
@@ -940,7 +944,7 @@ export function SquadsPage() {
             <ListGrid
               className={`${GRID_COLS} @2xl:min-w-[var(--sqc-minw)]`}
               style={{
-                ...columnTrackVars(isColVisible, isWorkspaceAdmin),
+                ...columnTrackVars(isColVisible, canManageAnyRow),
                 paddingBottom: LIST_GRID_BOTTOM_CLEARANCE,
               }}
             >
@@ -976,7 +980,7 @@ export function SquadsPage() {
                         <ActorAvatar
                           actorType="member"
                           actorId={squad.creator_id}
-                          size={18}
+                          size="sm"
                         />
                         <span className="min-w-0 truncate text-xs text-muted-foreground">
                           {membersById.get(squad.creator_id)?.name ??
@@ -994,7 +998,8 @@ export function SquadsPage() {
                       <ListGridCell className="hidden px-0 @2xl:flex" />
                     )}
                     <ListGridCell className="justify-end px-0">
-                      {isWorkspaceAdmin ? (
+                      {isWorkspaceAdmin ||
+                      (!!currentUser && squad.creator_id === currentUser.id) ? (
                         <SquadRowActions squad={squad} />
                       ) : null}
                     </ListGridCell>
@@ -1036,7 +1041,7 @@ function LoadingSkeleton() {
         {Array.from({ length: 4 }).map((_, i) => (
           <ListGridRow key={i} className="h-16 hover:bg-transparent">
             <ListGridCell className="gap-3">
-              <Skeleton className="size-8 rounded-md" />
+              <Skeleton className="size-8 rounded-full" />
               <div className="min-w-0 flex-1 space-y-1.5">
                 <Skeleton className="h-3.5 w-32 max-w-full" />
                 <Skeleton className="h-3 w-48 max-w-full" />

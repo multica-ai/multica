@@ -49,6 +49,8 @@ type AppConfig struct {
 	// FeatureFlags exposes only frontend-safe boolean decisions. Do not dump
 	// raw rules here: /api/config is public and may be called anonymously.
 	FeatureFlags map[string]bool `json:"feature_flags,omitempty"`
+	// GitLabEnabled signals that GitLab OAuth is configured on this instance.
+	GitLabEnabled bool `json:"gitlab_enabled,omitempty"`
 }
 
 // GetConfig is mounted on the public (unauthenticated) route group because
@@ -67,6 +69,7 @@ func (h *Handler) GetConfig(w http.ResponseWriter, r *http.Request) {
 	config.CdnSigned = h.CFSigner != nil
 	config.DaemonServerURL, config.DaemonAppURL = daemonSetupURLsFromEnv()
 	config.FeatureFlags = featureflags.EvaluateFrontendPublicFlags(r.Context(), h.FeatureFlags)
+	config.GitLabEnabled = isGitLabConfigured()
 
 	// Re-read from env on every request so operators can rotate keys via
 	// secret refresh without a server restart.

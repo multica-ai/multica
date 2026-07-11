@@ -146,7 +146,7 @@ export function WorkspaceAgentWorkingChip({
           >
             <AgentAvatarStack
               agentIds={agentIds}
-              size={16}
+              size="sm"
               max={3}
               opacity="full"
             />

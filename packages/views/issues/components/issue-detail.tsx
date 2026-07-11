@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useMemo, useRef, Fragment } from "react";
-import { Virtuoso } from "react-virtuoso";
+import { Virtuoso, type VirtuosoHandle } from "react-virtuoso";
 import { useDefaultLayout, usePanelRef } from "react-resizable-panels";
 import { AppLink } from "../../navigation";
 import { useNavigation } from "../../navigation";
@@ -58,9 +58,11 @@ import { LocalDirectoryHint } from "../../projects/components/local-directory-hi
 import { CommentCard } from "./comment-card";
 import { CommentInput } from "./comment-input";
 import { ResolvedThreadBar } from "./resolved-thread-bar";
+import { ThreadMinimap, type ThreadMinimapThread } from "./thread-minimap";
 import { collectThreadReplies, deriveThreadResolution } from "./thread-utils";
 import { IssueAgentHeaderChip } from "./issue-agent-header-chip";
 import { ExecutionLogSection } from "./execution-log-section";
+import { IssueTokenUsageSection, foldRuns } from "./issue-token-usage-section";
 import { PullRequestList } from "./pull-request-list";
 import { MergeRequestList } from "./merge-request-list";
 import { GitLabIssueBadge } from "./gitlab-issue-badge";
@@ -152,7 +154,7 @@ function SubscriberPopoverContent({
                     className="flex items-center gap-2.5"
                   >
                     <Checkbox checked={isSubbed} className="pointer-events-none" />
-                    <ActorAvatar actorType="member" actorId={m.user_id} size={22} />
+                    <ActorAvatar actorType="member" actorId={m.user_id} size="md" />
                     <span className="truncate flex-1">{m.name}</span>
                   </CommandItem>
                 );
@@ -171,7 +173,7 @@ function SubscriberPopoverContent({
                     className="flex items-center gap-2.5"
                   >
                     <Checkbox checked={isSubbed} className="pointer-events-none" />
-                    <ActorAvatar actorType="agent" actorId={a.id} size={22} showStatusDot />
+                    <ActorAvatar actorType="agent" actorId={a.id} size="md" showStatusDot />
                     <span className="truncate flex-1">{a.name}</span>
                   </CommandItem>
                 );
@@ -283,12 +285,6 @@ function formatActivity(
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-function formatTokenCount(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
-  return String(n);
-}
 
 // Stable reference for threads with no replies. Inline `[]` would create a
 // new array on every render and bust React.memo on CommentCard / ResolvedThreadBar.
@@ -534,7 +530,7 @@ function ActivityBlock({
         } else if (isDueDateChange) {
           leadIcon = <Calendar className="h-4 w-4 shrink-0 text-muted-foreground" />;
         } else {
-          leadIcon = <ActorAvatar actorType={entry.actor_type} actorId={entry.actor_id} size={16} />;
+          leadIcon = <ActorAvatar actorType={entry.actor_type} actorId={entry.actor_id} size="sm" />;
         }
 
         return (
@@ -666,7 +662,7 @@ function SubIssueRow({ child }: { child: Issue }) {
             <ActorAvatar
               actorType={child.assignee_type}
               actorId={child.assignee_id}
-              size={20}
+              size="sm"
               className="shrink-0"
             />
           ) : (
@@ -751,7 +747,6 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   const [parentIssueOpen, setParentIssueOpen] = useState(true);
   const [pullRequestsOpen, setPullRequestsOpen] = useState(true);
   const [metadataOpen, setMetadataOpen] = useState(false);
-  const [tokenUsageOpen, setTokenUsageOpen] = useState(true);
   const githubSettings = useGitHubSettings();
   const gitlabSettings = useGitLabSettings();
 
@@ -1021,8 +1016,31 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
       }
     }
 
-    return { threadReplies, groups };
+    // Number comment threads old -> new in render order ("#2" chips and the
+    // sidebar's "Comment 2" run labels both derive from this).
+    const threadNumbers = new Map<string, number>();
+    let threadCounter = 0;
+    for (const group of groups) {
+      if (group.type === "comment" && group.entries[0]) {
+        threadNumbers.set(group.entries[0].id, ++threadCounter);
+      }
+    }
+
+    return { threadReplies, groups, threadNumbers };
   }, [timeline]);
+
+  // commentId -> timeline position ("2" for thread roots, "2.1" for replies).
+  // Single source of truth for run labels in the Token-usage sidebar; must
+  // stay in sync with the #chips rendered by CommentCard (same inputs).
+  const commentLabels = useMemo(() => {
+    const labels = new Map<string, string>();
+    for (const [rootId, n] of timelineView.threadNumbers) {
+      labels.set(rootId, `${n}`);
+      const replies = timelineView.threadReplies.get(rootId) ?? [];
+      replies.forEach((reply, i) => labels.set(reply.id, `${n}.${i + 1}`));
+    }
+    return labels;
+  }, [timelineView]);
 
   // Flat array consumed by <Virtuoso>. Recomputed when timelineView.groups
   // changes (timeline events) or expandedResolved flips (user toggles a
@@ -1083,6 +1101,59 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     return items.findIndex((it) => it.id === rootId);
   }, [items, highlightCommentId, replyToRoot]);
 
+  // Quick-jump minimap rail: one tick per comment thread (folded resolved
+  // bars included), activity groups skipped. Derived from the same flat
+  // `items` array Virtuoso renders so tick order always matches the page.
+  const minimapThreads = useMemo<ThreadMinimapThread[]>(
+    () =>
+      items.flatMap((it) =>
+        it.kind === "comment" || it.kind === "resolved-bar"
+          ? [{ id: it.id, entry: it.entry }]
+          : [],
+      ),
+    [items],
+  );
+
+  // When the timeline renders flat (deep-link or in-page find), there is no
+  // Virtuoso instance — minimap jumps drive the scroll container directly.
+  const isFlatTimeline = !!highlightCommentId || find.open;
+  const virtuosoRef = useRef<VirtuosoHandle>(null);
+  const jumpFlashTimerRef = useRef<number | null>(null);
+  useEffect(
+    () => () => {
+      if (jumpFlashTimerRef.current !== null) window.clearTimeout(jumpFlashTimerRef.current);
+    },
+    [],
+  );
+  const jumpToThread = useCallback(
+    (threadId: string) => {
+      if (isFlatTimeline) {
+        // Flat mode mounts every row, so the anchor is always in the DOM.
+        // Drive the container's scrollTop directly — never native
+        // scrollIntoView, which also scrolls the desktop shell (#3929).
+        const el = document.getElementById(`comment-${threadId}`);
+        const container = scrollContainerEl;
+        if (!el || !container) return;
+        const c = container.getBoundingClientRect();
+        const e = el.getBoundingClientRect();
+        container.scrollTop = Math.max(0, container.scrollTop + (e.top - c.top) - 16);
+      } else {
+        // Virtualized mode: the target row may not be mounted, so scroll by
+        // index and let Virtuoso mount it. Offset leaves a small top gap.
+        const index = items.findIndex((it) => it.id === threadId);
+        if (index < 0) return;
+        virtuosoRef.current?.scrollToIndex({ index, align: "start", offset: -16 });
+      }
+      // Flash the landed thread the same way inbox deep-links do, so the eye
+      // has an anchor after the instant jump. (Folded resolved bars don't
+      // take the highlight prop — the scroll itself is the feedback there.)
+      setHighlightedId(threadId);
+      if (jumpFlashTimerRef.current !== null) window.clearTimeout(jumpFlashTimerRef.current);
+      jumpFlashTimerRef.current = window.setTimeout(() => setHighlightedId(null), 2000);
+    },
+    [isFlatTimeline, items, scrollContainerEl],
+  );
+
   const {
     reactions: issueReactions,
     toggleReaction: handleToggleIssueReaction,
@@ -1094,6 +1165,14 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
 
   // Token usage
   const { data: usage } = useQuery(issueUsageOptions(id));
+
+  // taskId -> folded run usage, for the inline summary under agent response
+  // comments (matched via comment.source_task_id). Stable per usage refetch
+  // so CommentCard memo only busts when usage actually changes.
+  const taskUsage = useMemo(() => {
+    if (!usage) return undefined;
+    return new Map(foldRuns(usage.tasks).map((run) => [run.taskId, run]));
+  }, [usage]);
 
   // Attachments uploaded against this issue. Drives the description
   // editor's click-time fresh-sign download: NodeViews match
@@ -1370,7 +1449,9 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
           <Skeleton className="h-4 w-24" />
         </div>
         <div className="flex flex-1 min-h-0">
-          <div className="flex-1 overflow-y-auto">
+          {/* Same scrollbar-gutter as the loaded scroller below, so the skeleton
+              column doesn't shift sideways when real content mounts. */}
+          <div className="flex-1 overflow-y-auto [scrollbar-gutter:stable_both-edges]">
             <div className="mx-auto w-full max-w-4xl px-8 py-8 space-y-6">
               <Skeleton className="h-8 w-3/4" />
               <div className="space-y-2">
@@ -1629,7 +1710,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
         </button>
         {detailsOpen && <div className="grid grid-cols-[auto_1fr] gap-x-2 gap-y-0.5 pl-2">
           <PropRow label={t(($) => $.detail.prop_created_by)}>
-            <ActorAvatar actorType={issue.creator_type} actorId={issue.creator_id} size={18} enableHoverCard />
+            <ActorAvatar actorType={issue.creator_type} actorId={issue.creator_id} size="sm" enableHoverCard />
             <span className="cursor-pointer truncate">{getActorName(issue.creator_type, issue.creator_id)}</span>
           </PropRow>
           <PropRow label={t(($) => $.detail.prop_created)}>
@@ -1647,39 +1728,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
       <ExecutionLogSection issueId={id} />
 
       {/* Token usage */}
-      {usage && usage.task_count > 0 && (
-        <div>
-          <button
-            type="button"
-            className={`flex w-full items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-colors mb-2 hover:bg-accent/70 ${tokenUsageOpen ? "" : "text-muted-foreground hover:text-foreground"}`}
-            onClick={() => setTokenUsageOpen(!tokenUsageOpen)}
-          >
-            {t(($) => $.detail.section_token_usage)}
-            <ChevronRight className={`!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform ${tokenUsageOpen ? "rotate-90" : ""}`} />
-          </button>
-          {tokenUsageOpen && <div className="grid grid-cols-[auto_1fr] gap-x-2 gap-y-0.5 pl-2">
-            <PropRow label={t(($) => $.detail.prop_input)}>
-              <span className="text-muted-foreground">{formatTokenCount(usage.total_input_tokens)}</span>
-            </PropRow>
-            <PropRow label={t(($) => $.detail.prop_output)}>
-              <span className="text-muted-foreground">{formatTokenCount(usage.total_output_tokens)}</span>
-            </PropRow>
-            {(usage.total_cache_read_tokens > 0 || usage.total_cache_write_tokens > 0) && (
-              <PropRow label={t(($) => $.detail.prop_cache)}>
-                <span className="text-muted-foreground">
-                  {t(($) => $.detail.prop_cache_value, {
-                    read: formatTokenCount(usage.total_cache_read_tokens),
-                    write: formatTokenCount(usage.total_cache_write_tokens),
-                  })}
-                </span>
-              </PropRow>
-            )}
-            <PropRow label={t(($) => $.detail.prop_runs)}>
-              <span className="text-muted-foreground">{usage.task_count}</span>
-            </PropRow>
-          </div>}
-        </div>
-      )}
+      {usage && <IssueTokenUsageSection usage={usage} commentLabels={commentLabels} />}
 
       {/* Metadata — agent-facing free-form KV bag. The values almost
           never mean anything to humans, so the trigger row matches the
@@ -1748,6 +1797,8 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
             expandedResolvedIds={expandedResolved}
             onResolvedExpandChange={toggleResolvedExpand}
             highlightedCommentId={highlightedId}
+            threadNumber={timelineView.threadNumbers.get(item.id)}
+            taskUsage={taskUsage}
           />
         </div>
       );
@@ -1802,9 +1853,13 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     <div className="relative flex h-full min-w-0 flex-1 flex-col">
         {/* In-page find bar — floats over the top-right of the content column
             (below the breadcrumb header), outside the scroll container so it
-            stays put while the timeline scrolls and its own text isn't walked. */}
+            stays put while the timeline scrolls and its own text isn't walked.
+            z-30: must beat every sticky affordance pinned at the timeline's
+            top-0 (comment headers z-10, resolve collapse bars z-20) — at equal
+            z the later-in-DOM sticky bar paints over the find bar and orphans
+            its close button (MUL-4414). */}
         {find.open && (
-          <FindBar find={find} className="absolute right-4 top-14 z-20" />
+          <FindBar find={find} className="absolute right-4 top-14 z-30" />
         )}
         <BreadcrumbHeader
           segments={breadcrumbSegments}
@@ -1904,10 +1959,16 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
           }
         />
 
+        {/* scrollbar-gutter both-edges: with classic (space-taking) scrollbars —
+            macOS with a mouse or "always show", Windows, Linux — the global
+            `scrollbar-width: thin` carves ~11px off the right side only, so the
+            centered column reads 32px left vs 43px right (MUL-4404). Mirroring
+            the gutter restores symmetry; overlay-scrollbar platforms reserve
+            nothing and render unchanged. */}
         <div
           ref={setScrollContainerEl}
           data-tab-scroll-root
-          className="relative flex-1 overflow-y-auto"
+          className="relative flex-1 overflow-y-auto [scrollbar-gutter:stable_both-edges]"
         >
         <div className="mx-auto w-full max-w-4xl px-8 py-8">
           <TitleEditor
@@ -2127,7 +2188,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                             key={`${sub.user_type}-${sub.user_id}`}
                             actorType={sub.user_type}
                             actorId={sub.user_id}
-                            size={24}
+                            size="md"
                             enableHoverCard
                           />
                         ))}
@@ -2202,6 +2263,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                   <div className="mt-4">
                     <Virtuoso
                       key={`${wsId}:${id}`}
+                      ref={virtuosoRef}
                       customScrollParent={scrollContainerEl}
                       data={items}
                       increaseViewportBy={{ top: 800, bottom: 800 }}
@@ -2238,6 +2300,19 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
           </div>
         </div>
         </div>
+
+        {/* Thread quick-jump rail — overlays the scroll container's left
+            gutter (inside the px-8 content padding, so it never covers
+            text). Hover previews a thread, click jumps to it. Hidden on
+            mobile: no hover, and the gutter is too tight. */}
+        {!isMobile && (
+          <ThreadMinimap
+            threads={minimapThreads}
+            scrollContainerEl={scrollContainerEl}
+            onJump={jumpToThread}
+            className="absolute bottom-0 left-2 top-12"
+          />
+        )}
       </div>
   );
 

@@ -125,6 +125,11 @@ services:
       # in the database, so this single deployment-wide key is all the operator
       # needs to set here.
       MULTICA_SLACK_SECRET_KEY: ${MULTICA_SLACK_SECRET_KEY:-}
+      GITLAB_URL: ${GITLAB_URL:-}
+      GITLAB_APP_ID: ${GITLAB_APP_ID:-}
+      GITLAB_APP_SECRET: ${GITLAB_APP_SECRET:-}
+      GITLAB_WEBHOOK_SECRET: ${GITLAB_WEBHOOK_SECRET:-}
+      GITLAB_SECRET_KEY: ${GITLAB_SECRET_KEY:-}
     restart: unless-stopped
     networks:
       - default

@@ -1,10 +1,19 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { Save, Plus, Trash2, Pencil, X } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { Plus, Trash2 } from "lucide-react";
 import { Input } from "@multica/ui/components/ui/input";
 import { Button } from "@multica/ui/components/ui/button";
-import { Card, CardContent } from "@multica/ui/components/ui/card";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@multica/ui/components/ui/alert-dialog";
 import { toast } from "sonner";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuthStore } from "@multica/core/auth";
@@ -14,229 +23,226 @@ import { memberListOptions, workspaceKeys } from "@multica/core/workspace/querie
 import { api } from "@multica/core/api";
 import type { Workspace, WorkspaceRepo } from "@multica/core/types";
 import { useT } from "../../i18n";
+import {
+  SettingsCard,
+  SettingsSaveState,
+  SettingsSection,
+  SettingsTab,
+} from "./settings-layout";
+import { useAutoSave } from "./use-auto-save";
 
-function dropAndShiftIndex(set: Set<number>, removed: number): Set<number> {
-  const next = new Set<number>();
-  set.forEach((i) => {
-    if (i === removed) return;
-    next.add(i > removed ? i - 1 : i);
-  });
-  return next;
-}
+const EMPTY_REPOSITORIES: WorkspaceRepo[] = [];
 
-function isDirty(local: WorkspaceRepo[], saved: WorkspaceRepo[]): boolean {
-  if (local.length !== saved.length) return true;
-  return local.some((r, i) => r.url !== saved[i]?.url || (r.description ?? "") !== (saved[i]?.description ?? ""));
+function repositoriesEqual(left: WorkspaceRepo[], right: WorkspaceRepo[]) {
+  if (left.length !== right.length) return false;
+  return left.every(
+    (repo, index) =>
+      repo.url === right[index]?.url &&
+      (repo.description ?? "") === (right[index]?.description ?? ""),
+  );
 }
 
 export function RepositoriesTab() {
   const { t } = useT("settings");
-  const user = useAuthStore((s) => s.user);
+  const user = useAuthStore((state) => state.user);
   const workspace = useCurrentWorkspace();
   const wsId = useWorkspaceId();
-  const qc = useQueryClient();
+  const queryClient = useQueryClient();
   const { data: members = [] } = useQuery(memberListOptions(wsId));
+  const [repositories, setRepositories] = useState<WorkspaceRepo[]>(
+    workspace?.repos ?? EMPTY_REPOSITORIES,
+  );
+  const [pendingRemovalIndex, setPendingRemovalIndex] = useState<number | null>(null);
 
-  const [repos, setRepos] = useState<WorkspaceRepo[]>(workspace?.repos ?? []);
-  const [editingIndices, setEditingIndices] = useState<Set<number>>(new Set());
-  const [saving, setSaving] = useState(false);
-
-  const currentMember = members.find((m) => m.user_id === user?.id) ?? null;
-  const canManageWorkspace = currentMember?.role === "owner" || currentMember?.role === "admin";
+  const currentMember = members.find((member) => member.user_id === user?.id) ?? null;
+  const canManageWorkspace =
+    currentMember?.role === "owner" || currentMember?.role === "admin";
 
   useEffect(() => {
-    setRepos(workspace?.repos ?? []);
-  }, [workspace]);
+    setRepositories(workspace?.repos ?? EMPTY_REPOSITORIES);
+    // A cache update after auto-save replaces the Workspace object. Keying on
+    // identity prevents that response from wiping a newer local keystroke.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally keyed on workspace identity
+  }, [workspace?.id]);
 
-  const savedRepos = workspace?.repos ?? [];
-  const dirty = isDirty(repos, savedRepos);
-
-  const handleSave = async () => {
-    if (!workspace) return;
-    setSaving(true);
-    try {
-      const updated = await api.updateWorkspace(workspace.id, { repos });
-      qc.setQueryData(workspaceKeys.list(), (old: Workspace[] | undefined) =>
-        old?.map((ws) => (ws.id === updated.id ? updated : ws)),
+  const savedRepositories = workspace?.repos ?? EMPTY_REPOSITORIES;
+  const draft = useMemo(() => repositories, [repositories]);
+  const saveRepositories = useCallback(
+    async (next: WorkspaceRepo[]) => {
+      if (!workspace) return;
+      const updated = await api.updateWorkspace(workspace.id, { repos: next });
+      queryClient.setQueryData(
+        workspaceKeys.list(),
+        (old: Workspace[] | undefined) =>
+          old?.map((item) => (item.id === updated.id ? updated : item)),
       );
-      setEditingIndices(new Set());
-      toast.success(t(($) => $.repositories.toast_saved));
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : t(($) => $.repositories.toast_save_failed));
-    } finally {
-      setSaving(false);
-    }
+    },
+    [queryClient, workspace],
+  );
+  const allUrlsValid = repositories.every((repo) => repo.url.trim().length > 0);
+  const autoSave = useAutoSave({
+    value: draft,
+    savedValue: savedRepositories,
+    onSave: saveRepositories,
+    onSuccess: () =>
+      toast.success(t(($) => $.repositories.toast_saved), {
+        id: "settings-auto-save",
+      }),
+    onError: (error) =>
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : t(($) => $.repositories.toast_save_failed),
+      ),
+    enabled: !!workspace && canManageWorkspace && allUrlsValid,
+    isEqual: repositoriesEqual,
+  });
+
+  const updateRepository = (
+    index: number,
+    field: keyof WorkspaceRepo,
+    value: string,
+  ) => {
+    setRepositories((current) =>
+      current.map((repo, repoIndex) =>
+        repoIndex === index ? { ...repo, [field]: value } : repo,
+      ),
+    );
   };
 
-  const handleAddRepo = () => {
-    const nextIndex = repos.length;
-    setRepos([...repos, { url: "" }]);
-    setEditingIndices(new Set(editingIndices).add(nextIndex));
+  const addRepository = () => {
+    setRepositories((current) => [...current, { url: "" }]);
   };
 
-  const handleRemoveRepo = (index: number) => {
-    setRepos(repos.filter((_, i) => i !== index));
-    setEditingIndices(dropAndShiftIndex(editingIndices, index));
-  };
-
-  const handleRepoChange = (index: number, field: keyof WorkspaceRepo, value: string) => {
-    setRepos(repos.map((r, i) => (i === index ? { ...r, [field]: value } : r)));
-  };
-
-  const handleEditRepo = (index: number) => {
-    setEditingIndices(new Set(editingIndices).add(index));
-  };
-
-  const handleCancelEdit = (index: number) => {
-    const saved = savedRepos[index];
-    if (saved === undefined) {
-      // Newly added row that was never persisted — drop it entirely.
-      handleRemoveRepo(index);
-      return;
-    }
-    setRepos(repos.map((r, i) => (i === index ? { ...r, url: saved.url, description: saved.description } : r)));
-    const next = new Set(editingIndices);
-    next.delete(index);
-    setEditingIndices(next);
+  const removeRepository = (index: number) => {
+    const next = repositories.filter((_, repoIndex) => repoIndex !== index);
+    setRepositories(next);
+    autoSave.saveNow(next);
   };
 
   if (!workspace) return null;
 
   return (
-    <div className="space-y-8">
-      <section className="space-y-4">
-        <h2 className="text-sm font-semibold">{t(($) => $.repositories.section_title)}</h2>
+    <SettingsTab title={t(($) => $.page.tabs.repositories)}>
+      <SettingsSection
+        description={t(($) => $.repositories.description)}
+        action={
+          <SettingsSaveState
+            status={autoSave.status}
+            savingLabel={t(($) => $.auto_save.saving)}
+            savedLabel={t(($) => $.auto_save.saved)}
+            errorLabel={t(($) => $.auto_save.failed)}
+          />
+        }
+      >
+        <SettingsCard>
+          {repositories.length === 0 ? (
+            <div className="px-4 py-8 text-center text-xs text-muted-foreground">
+              {t(($) => $.repositories.empty)}
+            </div>
+          ) : null}
 
-        <Card>
-          <CardContent className="space-y-3">
-            <p className="text-xs text-muted-foreground">
-              {t(($) => $.repositories.description)}
-            </p>
-
-            {repos.length === 0 && (
-              <p className="text-xs text-muted-foreground italic">
-                {t(($) => $.repositories.empty)}
-              </p>
-            )}
-
-            {repos.map((repo, index) => {
-              const isEditing = editingIndices.has(index);
-              return (
-                <div
-                  key={index}
-                  className="group flex items-start gap-2"
+          {repositories.map((repository, index) => (
+            <div
+              key={index}
+              className="grid gap-2 px-4 py-3.5 sm:grid-cols-[minmax(0,1fr)_minmax(0,0.8fr)_auto] sm:items-center"
+            >
+              <Input
+                type="text"
+                name={`repository-${index}-url`}
+                autoComplete="off"
+                spellCheck={false}
+                aria-label={t(($) => $.repositories.url_placeholder)}
+                value={repository.url}
+                onChange={(event) =>
+                  updateRepository(index, "url", event.target.value)
+                }
+                onBlur={autoSave.flush}
+                disabled={!canManageWorkspace}
+                aria-invalid={!repository.url.trim()}
+                placeholder={t(($) => $.repositories.url_placeholder)}
+                className="font-mono text-xs"
+              />
+              <Input
+                type="text"
+                name={`repository-${index}-description`}
+                autoComplete="off"
+                aria-label={t(($) => $.repositories.description_placeholder)}
+                value={repository.description ?? ""}
+                onChange={(event) =>
+                  updateRepository(index, "description", event.target.value)
+                }
+                onBlur={autoSave.flush}
+                disabled={!canManageWorkspace}
+                placeholder={t(($) => $.repositories.description_placeholder)}
+              />
+              {canManageWorkspace ? (
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label={t(($) => $.repositories.delete_aria)}
+                  className="justify-self-end text-muted-foreground hover:text-destructive"
+                  onClick={() => setPendingRemovalIndex(index)}
                 >
-                  {isEditing ? (
-                    <div className="flex-1 min-w-0 space-y-1.5">
-                      <Input
-                        type="text"
-                        value={repo.url}
-                        onChange={(e) => handleRepoChange(index, "url", e.target.value)}
-                        disabled={!canManageWorkspace}
-                        placeholder={t(($) => $.repositories.url_placeholder)}
-                        className="text-sm"
-                      />
-                      <Input
-                        type="text"
-                        value={repo.description ?? ""}
-                        onChange={(e) => handleRepoChange(index, "description", e.target.value)}
-                        disabled={!canManageWorkspace}
-                        placeholder={t(($) => $.repositories.description_placeholder)}
-                        className="text-sm"
-                      />
-                    </div>
-                  ) : (
-                    <div className="flex-1 min-w-0 rounded-md border bg-muted/50 px-3 py-2">
-                      <div
-                        className="truncate font-mono text-xs text-muted-foreground"
-                        title={repo.url}
-                      >
-                        {repo.url || t(($) => $.repositories.url_empty)}
-                      </div>
-                      {repo.description && (
-                        <div className="mt-0.5 truncate text-xs text-muted-foreground/70" title={repo.description}>
-                          {repo.description}
-                        </div>
-                      )}
-                    </div>
-                  )}
-                  {canManageWorkspace && (
-                    <div
-                      className={
-                        isEditing
-                          ? "flex shrink-0 items-center gap-0.5 pt-1.5"
-                          : "flex shrink-0 items-center gap-0.5 pt-1.5 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 [@media(hover:none)]:opacity-100"
-                      }
-                    >
-                      {!isEditing && (
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          aria-label={t(($) => $.repositories.edit_aria)}
-                          className="text-muted-foreground hover:text-foreground"
-                          onClick={() => handleEditRepo(index)}
-                        >
-                          <Pencil className="h-3.5 w-3.5" />
-                        </Button>
-                      )}
-                      {isEditing && (
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          aria-label={t(($) => $.repositories.cancel_aria)}
-                          className="text-muted-foreground hover:text-foreground"
-                          onClick={() => handleCancelEdit(index)}
-                        >
-                          <X className="h-3.5 w-3.5" />
-                        </Button>
-                      )}
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        aria-label={t(($) => $.repositories.delete_aria)}
-                        className="text-muted-foreground hover:text-destructive"
-                        onClick={() => handleRemoveRepo(index)}
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </Button>
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-
-            {canManageWorkspace && (
-              <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
-                <Button variant="outline" size="sm" onClick={handleAddRepo}>
-                  <Plus className="h-3 w-3" />
-                  {t(($) => $.repositories.add)}
+                  <Trash2 className="size-3.5" />
                 </Button>
-                <div className="flex items-center gap-3">
-                  {!dirty && repos.length > 0 && (
-                    <span className="text-xs text-muted-foreground">
-                      {t(($) => $.repositories.saved_hint)}
-                    </span>
-                  )}
-                  <Button
-                    size="sm"
-                    onClick={handleSave}
-                    disabled={saving || !dirty}
-                  >
-                    <Save className="h-3 w-3" />
-                    {saving ? t(($) => $.repositories.saving) : t(($) => $.repositories.save)}
-                  </Button>
-                </div>
-              </div>
-            )}
+              ) : null}
+            </div>
+          ))}
 
-            {!canManageWorkspace && (
-              <p className="text-xs text-muted-foreground">
-                {t(($) => $.repositories.manage_hint)}
-              </p>
-            )}
-          </CardContent>
-        </Card>
-      </section>
-    </div>
+          {canManageWorkspace ? (
+            <div className="flex items-center justify-between gap-3 px-4 py-3.5">
+              <Button variant="outline" size="sm" onClick={addRepository}>
+                <Plus className="size-3.5" />
+                {t(($) => $.repositories.add)}
+              </Button>
+              {!allUrlsValid ? (
+                <span className="text-xs text-muted-foreground">
+                  {t(($) => $.repositories.url_empty)}
+                </span>
+              ) : null}
+            </div>
+          ) : (
+            <div className="px-4 py-3 text-xs text-muted-foreground">
+              {t(($) => $.repositories.manage_hint)}
+            </div>
+          )}
+        </SettingsCard>
+      </SettingsSection>
+
+      <AlertDialog
+        open={pendingRemovalIndex !== null}
+        onOpenChange={(open) => {
+          if (!open) setPendingRemovalIndex(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {t(($) => $.repositories.delete_confirm_title)}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {t(($) => $.repositories.delete_confirm_description)}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>
+              {t(($) => $.repositories.delete_confirm_cancel)}
+            </AlertDialogCancel>
+            <AlertDialogAction
+              variant="destructive"
+              onClick={() => {
+                if (pendingRemovalIndex !== null) {
+                  removeRepository(pendingRemovalIndex);
+                }
+                setPendingRemovalIndex(null);
+              }}
+            >
+              {t(($) => $.repositories.delete_confirm_action)}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </SettingsTab>
   );
 }

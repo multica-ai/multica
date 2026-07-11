@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   AppConfigSchema,
+  AgentTaskListSchema,
   DashboardAgentRunTimeListSchema,
   DashboardUsageByAgentListSchema,
   DashboardUsageDailyListSchema,
@@ -11,6 +12,7 @@ import {
   EMPTY_USER,
   InboxUnreadSummarySchema,
   IssueTriggerPreviewSchema,
+  IssueUsageSummarySchema,
   ListIssuesResponseSchema,
   RuntimeHourlyActivityListSchema,
   RuntimeUsageByAgentListSchema,
@@ -185,6 +187,74 @@ describe("TimelineEntriesSchema", () => {
     ]);
 
     expect(parsed[0]?.source_task_id).toBe("task-1");
+  });
+});
+
+describe("AgentTaskListSchema", () => {
+  const task = {
+    id: "task-1",
+    agent_id: "agent-1",
+    runtime_id: "runtime-1",
+    issue_id: "issue-1",
+    status: "queued",
+    priority: 0,
+    dispatched_at: null,
+    started_at: null,
+    completed_at: null,
+    result: null,
+    error: null,
+    created_at: "2026-07-10T00:00:00Z",
+    trigger_comment_id: "comment-3",
+  };
+
+  it("preserves planned and delivered comment IDs for a task run", () => {
+    const parsed = AgentTaskListSchema.parse([
+      {
+        ...task,
+        coalesced_comment_ids: ["comment-1", "comment-2"],
+        delivered_comment_ids: ["comment-1", "comment-2", "comment-3"],
+      },
+    ]);
+
+    expect(parsed[0]?.trigger_comment_id).toBe("comment-3");
+    expect(parsed[0]?.coalesced_comment_ids).toEqual([
+      "comment-1",
+      "comment-2",
+    ]);
+    expect(parsed[0]?.delivered_comment_ids).toEqual([
+      "comment-1",
+      "comment-2",
+      "comment-3",
+    ]);
+  });
+
+  it("accepts task payloads from older backends without comment coverage", () => {
+    const parsed = AgentTaskListSchema.parse([task]);
+    expect(parsed[0]?.coalesced_comment_ids).toBeUndefined();
+    expect(parsed[0]?.delivered_comment_ids).toBeUndefined();
+  });
+
+  it("degrades malformed optional coverage without dropping task rows", () => {
+    const parsed = AgentTaskListSchema.parse([
+      {
+        ...task,
+        coalesced_comment_ids: ["comment-1", 2],
+        delivered_comment_ids: "not-an-array",
+      },
+      {
+        ...task,
+        id: "task-2",
+        delivered_comment_ids: ["comment-2", "comment-3"],
+      },
+    ]);
+
+    expect(parsed).toHaveLength(2);
+    expect(parsed[0]?.coalesced_comment_ids).toBeUndefined();
+    expect(parsed[0]?.delivered_comment_ids).toBeUndefined();
+    expect(parsed[1]?.delivered_comment_ids).toEqual([
+      "comment-2",
+      "comment-3",
+    ]);
   });
 });
 
@@ -507,5 +577,31 @@ describe("InboxUnreadSummarySchema", () => {
         ENDPOINT,
       ),
     ).toBe(EMPTY_INBOX_UNREAD_SUMMARY);
+  });
+});
+
+describe("IssueUsageSummarySchema", () => {
+  it("fills defaults for a malformed response", () => {
+    const parsed = IssueUsageSummarySchema.parse({});
+    expect(parsed.total_input_tokens).toBe(0);
+    expect(parsed.task_count).toBe(0);
+    expect(parsed.tasks).toEqual([]);
+  });
+
+  it("defaults missing fields inside task rows", () => {
+    const parsed = IssueUsageSummarySchema.parse({
+      total_input_tokens: 10,
+      tasks: [{ model: "claude-sonnet-4.6" }],
+    });
+    const task = parsed.tasks[0]!;
+    expect(task.model).toBe("claude-sonnet-4.6");
+    expect(task.input_tokens).toBe(0);
+    expect(task.comment_triggered).toBe(false);
+    expect(task.trigger_comment_id).toBe("");
+  });
+
+  it("rejects a non-array tasks field", () => {
+    const parsed = IssueUsageSummarySchema.safeParse({ tasks: "nope" });
+    expect(parsed.success).toBe(false);
   });
 });

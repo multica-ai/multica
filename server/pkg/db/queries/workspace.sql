@@ -7,6 +7,11 @@ JOIN workspace w ON w.id = m.workspace_id
 WHERE m.user_id = $1
 ORDER BY w.created_at ASC;
 
+-- name: ListWorkspacesWithRepos :many
+SELECT id, name, slug, description, settings, created_at, updated_at, context, repos, issue_prefix, issue_counter, avatar_url
+FROM workspace
+WHERE repos IS NOT NULL AND jsonb_array_length(repos) > 0;
+
 -- name: GetWorkspace :one
 SELECT * FROM workspace
 WHERE id = $1;
@@ -33,20 +38,52 @@ UPDATE workspace SET
 WHERE id = $1
 RETURNING *;
 
--- name: ListWorkspacesWithRepos :many
--- Workspaces with a non-empty repo registry, to route a webhook to the repo's
--- owning workspace. ORDER BY id keeps the resolver's tie-break stable on replay.
-SELECT id, repos FROM workspace
-WHERE repos IS NOT NULL AND repos <> '[]'::jsonb
-ORDER BY id;
-
 -- name: IncrementIssueCounter :one
 UPDATE workspace SET issue_counter = issue_counter + 1
 WHERE id = $1
 RETURNING issue_counter;
 
 -- name: DeleteWorkspace :exec
-WITH deleted_pending_check_suites AS (
+-- The channel_* tables carry NO FK to workspace (MUL-3515 §4), so — unlike the
+-- CASCADE-backed tables the DELETE below sweeps — they are not cleaned up
+-- implicitly. Remove this workspace's channel installations, and every dependent
+-- row of each, here so a deleted workspace never leaves an orphaned installation
+-- occupying its bot's (channel_type, config->>'app_id') routing slot, which would
+-- make that bot un-rebindable anywhere until an operator hand-deletes the row
+-- (#4810). All in one statement so it commits atomically with the workspace row.
+WITH ws_installations AS (
+    SELECT id FROM channel_installation WHERE workspace_id = $1
+),
+cleared_chat_sessions AS (
+    DELETE FROM channel_chat_session_binding WHERE installation_id IN (SELECT id FROM ws_installations)
+    RETURNING chat_session_id
+),
+cleared_outbound_cards AS (
+    -- channel_outbound_card_message is keyed by chat_session_id (no FK); its own
+    -- chat_session rows cascade away with the workspace, so reach the cards through
+    -- the just-removed chat-session bindings, which still carry the id.
+    DELETE FROM channel_outbound_card_message
+    WHERE chat_session_id IN (SELECT chat_session_id FROM cleared_chat_sessions)
+),
+cleared_inbound_dedup AS (
+    DELETE FROM channel_inbound_message_dedup WHERE installation_id IN (SELECT id FROM ws_installations)
+),
+cleared_audit AS (
+    -- Purge, don't detach: the workspace is gone and channel_inbound_audit has no
+    -- workspace_id and no reaper, so a detached (NULL) row would be permanently
+    -- unattributable. (Reclaim, where the workspace survives, still detaches.)
+    DELETE FROM channel_inbound_audit WHERE installation_id IN (SELECT id FROM ws_installations)
+),
+cleared_user_bindings AS (
+    DELETE FROM channel_user_binding WHERE workspace_id = $1
+),
+cleared_binding_tokens AS (
+    DELETE FROM channel_binding_token WHERE workspace_id = $1
+),
+cleared_installations AS (
+    DELETE FROM channel_installation WHERE workspace_id = $1
+),
+deleted_pending_check_suites AS (
     DELETE FROM github_pending_check_suite WHERE workspace_id = $1
 )
-DELETE FROM workspace WHERE id = $1;
+DELETE FROM workspace WHERE workspace.id = $1;

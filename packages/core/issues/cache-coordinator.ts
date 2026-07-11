@@ -39,8 +39,10 @@ import type { InboxItem, Issue, ListIssuesCache } from "../types";
  *     patch + mark the key stale
  *   card absent, change can't affect this list → skip
  *   card absent, stayed a member + status changed → move one unit of the
- *     server total between the two buckets (count-only arithmetic, arrays
- *     untouched, zero requests)
+ *     server total between the two buckets immediately, then mark the key
+ *     stale: the row's slot in the destination bucket's loaded window is
+ *     server knowledge, and under staleTime: Infinity an explicit
+ *     invalidation is the only channel that ever fills it in
  *   card absent, left the list (reassigned / re-projected) → old status
  *     bucket total -1
  *   card absent, may have ENTERED, or anything undecidable (no base entity,
@@ -181,6 +183,11 @@ export function applyIssueChange(
         if (next !== data) {
           prevLists.push([key, data]);
           qc.setQueryData<ListIssuesCache>(key, next);
+          // The count moved but the row can't be inserted client-side (its
+          // page/slot under the list's sort is server knowledge). Leave the
+          // reconcile trigger: with staleTime: Infinity nothing else ever
+          // brings the destination bucket's window in line with its total.
+          staleKeys.push(key);
         }
         continue;
       }

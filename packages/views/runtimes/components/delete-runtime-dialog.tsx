@@ -484,7 +484,7 @@ function AgentPlanTable({
                 <ActorAvatar
                   actorType="agent"
                   actorId={agent.id}
-                  size={20}
+                  size="sm"
                   enableHoverCard
                 />
                 <span className="truncate font-medium text-foreground">
@@ -496,7 +496,7 @@ function AgentPlanTable({
                   <ActorAvatar
                     actorType="member"
                     actorId={ownerMember.user_id}
-                    size={16}
+                    size="sm"
                   />
                 ) : null}
                 <span className="truncate text-muted-foreground">

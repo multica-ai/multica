@@ -1,6 +1,7 @@
 {
   "nav": {
     "inbox": "收件箱",
+    "chat": "聊天",
     "my_issues": "我的 issue",
     "issues": "Issues",
     "projects": "项目",
