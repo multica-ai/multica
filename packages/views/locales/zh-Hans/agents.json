@@ -165,6 +165,8 @@
     "avatar_hint": "显示在任务分配、动态和聊天中。",
     "name_label": "名称",
     "description_label": "描述",
+    "labels_label": "标签",
+    "labels_hint": "用于分类这个智能体的工作区标签。",
     "change_avatar_aria": "更换头像",
     "avatar_updated_toast": "已更新头像",
     "avatar_upload_failed_toast": "头像上传失败",

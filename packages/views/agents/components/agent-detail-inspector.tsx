@@ -20,6 +20,7 @@ import {
 import { useAutoSave } from "../../settings/components/use-auto-save";
 import { useT } from "../../i18n";
 import { CharCounter } from "./char-counter";
+import { ResourceLabelPicker } from "../../labels/resource-label-picker";
 import { ModelPicker } from "./inspector/model-picker";
 import { RuntimePicker } from "./inspector/runtime-picker";
 import { ThinkingSettingField } from "./inspector/thinking-prop-row";
@@ -186,6 +187,18 @@ export function AgentDetailInspector({
                 max={AGENT_DESCRIPTION_MAX_LENGTH}
               />
             </div>
+          </SettingsRow>
+          <SettingsRow
+            label={t(($) => $.inspector.labels_label)}
+            description={t(($) => $.inspector.labels_hint)}
+            controlClassName="sm:w-96"
+            align="start"
+          >
+            <ResourceLabelPicker
+              resourceType="agent"
+              resourceId={agent.id}
+              canEdit={canEdit}
+            />
           </SettingsRow>
         </SettingsCard>
       </SettingsSection>

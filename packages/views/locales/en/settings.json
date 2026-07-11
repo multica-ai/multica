@@ -48,7 +48,57 @@
       "github": "GitHub",
       "integrations": "Integrations",
       "labs": "Labs",
-      "members": "Members"
+      "members": "Members",
+      "labels": "Labels"
+    }
+  },
+  "labels": {
+    "title": "Labels",
+    "description": "Manage the separate label catalogs used to organize issues, agents, and skills in this workspace.",
+    "scopes": {
+      "issue": "Issues",
+      "agent": "Agents",
+      "skill": "Skills"
+    },
+    "search_placeholder": "Filter by name or description...",
+    "new_label": "New label",
+    "columns": {
+      "name": "Name",
+      "description": "Description",
+      "usage": "Used by",
+      "updated": "Updated"
+    },
+    "usage_count": "{{count}} used",
+    "loading": "Loading labels...",
+    "empty": "No {{scope}} labels yet",
+    "no_results": "No matching labels",
+    "read_only": "Only workspace owners and admins can manage labels.",
+    "save_failed": "Couldn't save label",
+    "actions": {
+      "open": "Actions for {{name}}",
+      "edit": "Edit",
+      "delete": "Delete"
+    },
+    "editor": {
+      "create_title": "New label",
+      "edit_title": "Edit label",
+      "scope_hint": "This label belongs only to the {{scope}} catalog.",
+      "name": "Name",
+      "name_placeholder": "e.g. Bug",
+      "description": "Description",
+      "description_placeholder": "Describe when this label should be used",
+      "color": "Color",
+      "custom_color": "Choose a custom color",
+      "cancel": "Cancel",
+      "save": "Save label",
+      "saving": "Saving..."
+    },
+    "delete_dialog": {
+      "title": "Delete label?",
+      "description": "Delete \"{{name}}\"? It will be removed from {{count}} resources. This can't be undone.",
+      "cancel": "Cancel",
+      "confirm": "Delete label",
+      "failed": "Couldn't delete label"
     }
   },
   "account": {

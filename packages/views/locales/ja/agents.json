@@ -157,6 +157,8 @@
     "avatar_hint": "割り当て、アクティビティ、チャットに表示されます。",
     "name_label": "名前",
     "description_label": "説明",
+    "labels_label": "ラベル",
+    "labels_hint": "このエージェントを分類するワークスペースラベルです。",
     "change_avatar_aria": "アバターを変更",
     "avatar_updated_toast": "アバターを更新しました",
     "avatar_upload_failed_toast": "アバターをアップロードできませんでした",

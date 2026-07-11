@@ -7,6 +7,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/google/uuid"
 )
 
 // TestLabelCRUD exercises label create/list/get/update/delete.
@@ -437,6 +439,49 @@ func TestLabelNameAllowsEmoji(t *testing.T) {
 		req = withURLParam(req, "id", created.ID)
 		testHandler.DeleteLabel(w, req)
 	})
+}
+
+func TestLabelResourceTypesHaveIndependentNamespaces(t *testing.T) {
+	name := "shared-scope-label-" + uuid.NewString()[:8]
+	for _, resourceType := range []string{"issue", "agent", "skill"} {
+		w := httptest.NewRecorder()
+		req := newRequest("POST", "/api/labels", map[string]any{
+			"resource_type": resourceType,
+			"name":          name,
+			"description":   resourceType + " description",
+			"color":         "#3b82f6",
+		})
+		testHandler.CreateLabel(w, req)
+		if w.Code != http.StatusCreated {
+			t.Fatalf("CreateLabel resource_type=%s: expected 201, got %d: %s", resourceType, w.Code, w.Body.String())
+		}
+		var created LabelResponse
+		if err := json.NewDecoder(w.Body).Decode(&created); err != nil {
+			t.Fatalf("decode created label: %v", err)
+		}
+		if created.ResourceType != resourceType || created.Description != resourceType+" description" {
+			t.Fatalf("unexpected scoped label: %+v", created)
+		}
+		t.Cleanup(func() {
+			w := httptest.NewRecorder()
+			req := newRequest("DELETE", "/api/labels/"+created.ID, nil)
+			req = withURLParam(req, "id", created.ID)
+			testHandler.DeleteLabel(w, req)
+		})
+	}
+}
+
+func TestLabelRejectsUnknownResourceType(t *testing.T) {
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/labels", map[string]any{
+		"resource_type": "project",
+		"name":          "invalid-scope",
+		"color":         "#3b82f6",
+	})
+	testHandler.CreateLabel(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", w.Code, w.Body.String())
+	}
 }
 
 // TestColorCaseNormalization — input `#ABCDEF` must be stored as `#abcdef`

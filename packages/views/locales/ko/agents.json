@@ -165,6 +165,8 @@
     "avatar_hint": "할당, 활동 및 채팅에 표시됩니다.",
     "name_label": "이름",
     "description_label": "설명",
+    "labels_label": "레이블",
+    "labels_hint": "이 에이전트를 분류하는 워크스페이스 레이블입니다.",
     "change_avatar_aria": "아바타 변경",
     "avatar_updated_toast": "아바타를 업데이트했습니다",
     "avatar_upload_failed_toast": "아바타를 업로드하지 못했습니다",

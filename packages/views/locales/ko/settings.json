@@ -48,7 +48,53 @@
       "github": "GitHub",
       "integrations": "연동",
       "labs": "실험실",
-      "members": "멤버"
+      "members": "멤버",
+      "labels": "레이블"
+    }
+  },
+  "labels": {
+    "title": "레이블",
+    "description": "이 워크스페이스의 이슈, 에이전트, 스킬 레이블을 각각 관리합니다.",
+    "scopes": {
+      "issue": "이슈",
+      "agent": "에이전트",
+      "skill": "스킬"
+    },
+    "search_placeholder": "이름 또는 설명으로 필터링...",
+    "new_label": "새 레이블",
+    "columns": {
+      "name": "이름",
+      "description": "설명",
+      "usage": "사용 수",
+      "updated": "업데이트"
+    },
+    "usage_count": "{{count}}개에서 사용",
+    "loading": "레이블 불러오는 중...",
+    "empty": "{{scope}} 레이블이 없습니다",
+    "no_results": "일치하는 레이블이 없습니다",
+    "read_only": "워크스페이스 소유자와 관리자만 레이블을 관리할 수 있습니다.",
+    "save_failed": "레이블을 저장하지 못했습니다",
+    "actions": { "open": "{{name}} 작업", "edit": "편집", "delete": "삭제" },
+    "editor": {
+      "create_title": "새 레이블",
+      "edit_title": "레이블 편집",
+      "scope_hint": "이 레이블은 {{scope}} 카탈로그에만 속합니다.",
+      "name": "이름",
+      "name_placeholder": "예: Bug",
+      "description": "설명",
+      "description_placeholder": "이 레이블을 사용할 때를 설명하세요",
+      "color": "색상",
+      "custom_color": "사용자 지정 색상 선택",
+      "cancel": "취소",
+      "save": "레이블 저장",
+      "saving": "저장 중..."
+    },
+    "delete_dialog": {
+      "title": "레이블을 삭제할까요?",
+      "description": "\"{{name}}\" 레이블을 삭제할까요? {{count}}개 리소스에서 제거되며 되돌릴 수 없습니다.",
+      "cancel": "취소",
+      "confirm": "레이블 삭제",
+      "failed": "레이블을 삭제하지 못했습니다"
     }
   },
   "account": {

@@ -48,7 +48,57 @@
       "github": "GitHub",
       "integrations": "集成",
       "labs": "实验室",
-      "members": "成员"
+      "members": "成员",
+      "labels": "标签"
+    }
+  },
+  "labels": {
+    "title": "标签",
+    "description": "分别管理工作区中用于整理 issue、智能体和 skill 的标签。三类标签相互独立。",
+    "scopes": {
+      "issue": "Issue",
+      "agent": "智能体",
+      "skill": "Skill"
+    },
+    "search_placeholder": "按名称或描述筛选...",
+    "new_label": "新建标签",
+    "columns": {
+      "name": "名称",
+      "description": "描述",
+      "usage": "使用数量",
+      "updated": "更新时间"
+    },
+    "usage_count": "已使用 {{count}} 次",
+    "loading": "正在加载标签...",
+    "empty": "暂无 {{scope}} 标签",
+    "no_results": "没有匹配的标签",
+    "read_only": "只有工作区 owner 和 admin 可以管理标签。",
+    "save_failed": "无法保存标签",
+    "actions": {
+      "open": "{{name}} 的操作",
+      "edit": "编辑",
+      "delete": "删除"
+    },
+    "editor": {
+      "create_title": "新建标签",
+      "edit_title": "编辑标签",
+      "scope_hint": "这个标签只属于 {{scope}} 分类。",
+      "name": "名称",
+      "name_placeholder": "例如：Bug",
+      "description": "描述",
+      "description_placeholder": "说明什么时候应使用这个标签",
+      "color": "颜色",
+      "custom_color": "选择自定义颜色",
+      "cancel": "取消",
+      "save": "保存标签",
+      "saving": "保存中..."
+    },
+    "delete_dialog": {
+      "title": "删除标签？",
+      "description": "确认删除 \"{{name}}\"？它将从 {{count}} 个资源中移除。此操作无法撤销。",
+      "cancel": "取消",
+      "confirm": "删除标签",
+      "failed": "无法删除标签"
     }
   },
   "account": {

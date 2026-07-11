@@ -88,6 +88,8 @@ import type {
   UpdateLabelRequest,
   ListLabelsResponse,
   IssueLabelsResponse,
+  LabelResourceType,
+  ResourceLabelsResponse,
   PinnedItem,
   CreatePinRequest,
   PinnedItemType,
@@ -2012,8 +2014,8 @@ export class ApiClient {
   }
 
   // Labels
-  async listLabels(): Promise<ListLabelsResponse> {
-    return this.fetch(`/api/labels`);
+  async listLabels(resourceType: LabelResourceType = "issue"): Promise<ListLabelsResponse> {
+    return this.fetch(`/api/labels?resource_type=${resourceType}`);
   }
 
   async getLabel(id: string): Promise<Label> {
@@ -2051,6 +2053,34 @@ export class ApiClient {
 
   async detachLabel(issueId: string, labelId: string): Promise<IssueLabelsResponse> {
     return this.fetch(`/api/issues/${issueId}/labels/${labelId}`, {
+      method: "DELETE",
+    });
+  }
+
+  async listLabelsForResource(
+    resourceType: "agent" | "skill",
+    resourceId: string,
+  ): Promise<ResourceLabelsResponse> {
+    return this.fetch(`/api/${resourceType === "agent" ? "agents" : "skills"}/${resourceId}/labels`);
+  }
+
+  async attachLabelToResource(
+    resourceType: "agent" | "skill",
+    resourceId: string,
+    labelId: string,
+  ): Promise<ResourceLabelsResponse> {
+    return this.fetch(`/api/${resourceType === "agent" ? "agents" : "skills"}/${resourceId}/labels`, {
+      method: "POST",
+      body: JSON.stringify({ label_id: labelId }),
+    });
+  }
+
+  async detachLabelFromResource(
+    resourceType: "agent" | "skill",
+    resourceId: string,
+    labelId: string,
+  ): Promise<ResourceLabelsResponse> {
+    return this.fetch(`/api/${resourceType === "agent" ? "agents" : "skills"}/${resourceId}/labels/${labelId}`, {
       method: "DELETE",
     });
   }

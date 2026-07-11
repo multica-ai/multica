@@ -160,12 +160,14 @@ func (h *Handler) labelsByIssue(ctx context.Context, wsUUID pgtype.UUID, issueID
 	for _, r := range rows {
 		issueID := uuidToString(r.IssueID)
 		out[issueID] = append(out[issueID], LabelResponse{
-			ID:          uuidToString(r.ID),
-			WorkspaceID: uuidToString(r.WorkspaceID),
-			Name:        r.Name,
-			Color:       r.Color,
-			CreatedAt:   timestampToString(r.CreatedAt),
-			UpdatedAt:   timestampToString(r.UpdatedAt),
+			ID:           uuidToString(r.ID),
+			WorkspaceID:  uuidToString(r.WorkspaceID),
+			ResourceType: r.ResourceType,
+			Name:         r.Name,
+			Description:  r.Description,
+			Color:        r.Color,
+			CreatedAt:    timestampToString(r.CreatedAt),
+			UpdatedAt:    timestampToString(r.UpdatedAt),
 		})
 	}
 	return out

@@ -48,7 +48,53 @@
       "github": "GitHub",
       "integrations": "連携",
       "labs": "ラボ",
-      "members": "メンバー"
+      "members": "メンバー",
+      "labels": "ラベル"
+    }
+  },
+  "labels": {
+    "title": "ラベル",
+    "description": "このワークスペースの Issue、エージェント、Skill 用ラベルを個別に管理します。",
+    "scopes": {
+      "issue": "Issue",
+      "agent": "エージェント",
+      "skill": "Skill"
+    },
+    "search_placeholder": "名前または説明で絞り込み...",
+    "new_label": "新しいラベル",
+    "columns": {
+      "name": "名前",
+      "description": "説明",
+      "usage": "使用数",
+      "updated": "更新日"
+    },
+    "usage_count": "{{count}} 件で使用",
+    "loading": "ラベルを読み込み中...",
+    "empty": "{{scope}} ラベルはまだありません",
+    "no_results": "一致するラベルがありません",
+    "read_only": "ラベルを管理できるのはワークスペースのオーナーと管理者のみです。",
+    "save_failed": "ラベルを保存できませんでした",
+    "actions": { "open": "{{name}} の操作", "edit": "編集", "delete": "削除" },
+    "editor": {
+      "create_title": "新しいラベル",
+      "edit_title": "ラベルを編集",
+      "scope_hint": "このラベルは {{scope}} カタログ専用です。",
+      "name": "名前",
+      "name_placeholder": "例: Bug",
+      "description": "説明",
+      "description_placeholder": "このラベルを使用する条件を説明",
+      "color": "色",
+      "custom_color": "カスタム色を選択",
+      "cancel": "キャンセル",
+      "save": "ラベルを保存",
+      "saving": "保存中..."
+    },
+    "delete_dialog": {
+      "title": "ラベルを削除しますか？",
+      "description": "「{{name}}」を削除しますか？{{count}} 件のリソースから削除されます。この操作は元に戻せません。",
+      "cancel": "キャンセル",
+      "confirm": "ラベルを削除",
+      "failed": "ラベルを削除できませんでした"
     }
   },
   "account": {

@@ -173,6 +173,8 @@
     "avatar_hint": "Shown in assignments, activity, and chat.",
     "name_label": "Name",
     "description_label": "Description",
+    "labels_label": "Labels",
+    "labels_hint": "Workspace labels used to classify this agent.",
     "change_avatar_aria": "Change avatar",
     "avatar_updated_toast": "Avatar updated",
     "avatar_upload_failed_toast": "Failed to upload avatar",
