@@ -302,6 +302,8 @@ type AgentTaskResponse struct {
 	SpaceKey            string                   `json:"space_key,omitempty"`            // Space issue namespace key, e.g. MUL
 	SpaceName           string                   `json:"space_name,omitempty"`           // human-readable Space name
 	SpaceContext        string                   `json:"space_context,omitempty"`        // Space operating context; only present for runs bound to this Space
+	SpaceScope          string                   `json:"space_scope,omitempty"`          // "space" for one bound Space, "all" for an All-spaces Chat
+	Spaces              []TaskSpaceData          `json:"spaces,omitempty"`               // concrete contexts available to an All-spaces Chat
 	ProjectID           string                   `json:"project_id,omitempty"`           // issue's project, when present
 	ProjectTitle        string                   `json:"project_title,omitempty"`        // for surfacing in agent context
 	ProjectDescription  string                   `json:"project_description,omitempty"`  // durable project-level context injected into the brief
@@ -535,6 +537,13 @@ type IntegrationBindingData struct {
 	Provider     string `json:"provider"`
 	ConnectionID string `json:"connection_id"`
 	DisplayName  string `json:"display_name"`
+}
+
+type TaskSpaceData struct {
+	ID      string `json:"id"`
+	Key     string `json:"key"`
+	Name    string `json:"name"`
+	Context string `json:"context,omitempty"`
 }
 
 // ChatAttachmentMeta is the structured attachment metadata embedded in
@@ -777,7 +786,7 @@ func (h *Handler) ListAgents(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	boundSpaceID, isTaskToken, ok := h.taskTokenSpaceScope(w, r, wsUUID)
+	allowedSpaceIDs, isTaskToken, ok := h.taskTokenAllowedSpaces(w, r, wsUUID)
 	if !ok {
 		return
 	}
@@ -801,8 +810,11 @@ func (h *Handler) ListAgents(w http.ResponseWriter, r *http.Request) {
 	if isTaskToken {
 		scoped := make([]db.Agent, 0, len(agents))
 		for _, candidate := range agents {
-			if service.AgentAvailableInSpace(r.Context(), h.Queries, candidate, wsUUID, boundSpaceID) {
-				scoped = append(scoped, candidate)
+			for _, spaceID := range allowedSpaceIDs {
+				if service.AgentAvailableInSpace(r.Context(), h.Queries, candidate, wsUUID, spaceID) {
+					scoped = append(scoped, candidate)
+					break
+				}
 			}
 		}
 		agents = scoped
@@ -952,13 +964,22 @@ func (h *Handler) GetAgent(w http.ResponseWriter, r *http.Request) {
 	// render an explicit "no access" placeholder instead of a 404 — see
 	// agent-detail-page.tsx.
 	workspaceID := uuidToString(agent.WorkspaceID)
-	boundSpaceID, isTaskToken, scopeOK := h.taskTokenSpaceScope(w, r, agent.WorkspaceID)
+	allowedSpaceIDs, isTaskToken, scopeOK := h.taskTokenAllowedSpaces(w, r, agent.WorkspaceID)
 	if !scopeOK {
 		return
 	}
-	if isTaskToken && !service.AgentAvailableInSpace(r.Context(), h.Queries, agent, agent.WorkspaceID, boundSpaceID) {
-		writeError(w, http.StatusForbidden, "this Agent is not available in the task Space")
-		return
+	if isTaskToken {
+		available := false
+		for _, spaceID := range allowedSpaceIDs {
+			if service.AgentAvailableInSpace(r.Context(), h.Queries, agent, agent.WorkspaceID, spaceID) {
+				available = true
+				break
+			}
+		}
+		if !available {
+			writeError(w, http.StatusForbidden, "this Agent is not available in the task's Chat context")
+			return
+		}
 	}
 	actorType, actorID := h.resolveActor(r, requestUserID(r), workspaceID)
 	if !h.canAccessPrivateAgent(r.Context(), agent, actorType, actorID, workspaceID) {
@@ -1383,9 +1404,8 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 // effort: any failure is logged and never blocks the (already-committed) agent
 // creation.
 func (h *Handler) sendAgentWelcomeChat(ctx context.Context, agent db.Agent, creatorID, workspaceID string) {
-	if !agent.RuntimeID.Valid || agent.AvailabilityMode == agentAvailabilitySelectedSpaces {
-		// No runtime means the agent cannot run. Selected Spaces has no valid
-		// context-free Chat location, so it must not enqueue an intro run.
+	if !agent.RuntimeID.Valid {
+		// No runtime means the agent cannot run.
 		return
 	}
 	// Create inside a tx that first takes FOR KEY SHARE on the workspace row — the

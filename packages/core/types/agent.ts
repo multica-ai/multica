@@ -27,8 +27,9 @@ export type AgentPermissionMode = "private" | "public_to";
 
 /**
  * Product-facing Agent Space assignment. This controls where an Agent may be
- * discovered and invoked and which Space can be bound to a run. Every run is
- * still isolated to exactly one Space.
+ * discovered and invoked and which Spaces can be bound to a run. Most work
+ * runs are isolated to one Space; Chat may explicitly use the intersection of
+ * all Spaces available to both the member and the Agent.
  */
 export type AgentAvailabilityMode =
   | "private"

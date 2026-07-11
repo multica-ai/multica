@@ -3810,6 +3810,8 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		SpaceKey:                         task.SpaceKey,
 		SpaceName:                        task.SpaceName,
 		SpaceContext:                     task.SpaceContext,
+		SpaceScope:                       task.SpaceScope,
+		Spaces:                           convertSpacesForEnv(task.Spaces),
 		ProjectID:                        task.ProjectID,
 		ProjectTitle:                     task.ProjectTitle,
 		ProjectDescription:               task.ProjectDescription,
@@ -4956,6 +4958,22 @@ func convertReposForEnv(repos []RepoData) []execenv.RepoContextForEnv {
 		result[i] = execenv.RepoContextForEnv{URL: r.URL, Description: r.Description, Ref: r.Ref}
 	}
 	return result
+}
+
+func convertSpacesForEnv(spaces []TaskSpaceData) []execenv.SpaceContextForEnv {
+	if len(spaces) == 0 {
+		return nil
+	}
+	out := make([]execenv.SpaceContextForEnv, len(spaces))
+	for i, space := range spaces {
+		out[i] = execenv.SpaceContextForEnv{
+			ID:      space.ID,
+			Key:     space.Key,
+			Name:    space.Name,
+			Context: space.Context,
+		}
+	}
+	return out
 }
 
 func convertProjectResourcesForEnv(resources []ProjectResourceData) []execenv.ProjectResourceForEnv {

@@ -4,6 +4,14 @@
     "select_prompt": "대화를 선택하거나 +로 새로 시작하세요",
     "agent_link_no_access": "이 에이전트와 채팅할 권한이 없습니다."
   },
+  "context": {
+    "scope_label": "컨텍스트",
+    "spaces_label": "스페이스",
+    "all_spaces": "모든 스페이스",
+    "all_spaces_description": "{{count}}개 스페이스의 데이터를 사용할 수 있습니다",
+    "search_spaces": "스페이스 검색…",
+    "picker_aria": "채팅 컨텍스트: {{selection}}"
+  },
   "fab": {
     "running": "Multica가 작업 중입니다...",
     "unread_other": "읽지 않은 채팅 {{count}}개",

@@ -9,6 +9,24 @@ WHERE workspace_id = $1
   AND archived_at IS NULL
 ORDER BY name ASC, created_at ASC;
 
+-- name: ListCollaborativeWorkspaceSpacesForUser :many
+-- Concrete work contexts a member may use for Chat. Open-but-unjoined Spaces
+-- remain discoverable elsewhere, but do not enter an Agent's All-spaces write
+-- scope until the member joins (workspace owners/admins retain governance
+-- collaboration across the workspace).
+SELECT ws.*
+FROM workspace_space ws
+JOIN member wm
+  ON wm.workspace_id = ws.workspace_id
+ AND wm.user_id = $2
+LEFT JOIN workspace_space_member sm
+  ON sm.space_id = ws.id
+ AND sm.user_id = $2
+WHERE ws.workspace_id = $1
+  AND ws.archived_at IS NULL
+  AND (wm.role IN ('owner', 'admin') OR sm.role IN ('lead', 'admin', 'member'))
+ORDER BY ws.name ASC, ws.created_at ASC;
+
 -- name: ListActiveWorkspaceSpacesForUpdate :many
 -- Locks every active Space row for this workspace so a concurrent archive on
 -- another Space in the same workspace serializes behind this one. Used by

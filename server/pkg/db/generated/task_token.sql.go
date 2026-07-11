@@ -12,9 +12,18 @@ import (
 )
 
 const createTaskToken = `-- name: CreateTaskToken :one
-INSERT INTO task_token (token_hash, task_id, agent_id, workspace_id, space_id, user_id, expires_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7)
-RETURNING id, token_hash, task_id, agent_id, workspace_id, user_id, expires_at, created_at, space_id
+INSERT INTO task_token (token_hash, task_id, agent_id, workspace_id, space_id, space_ids, user_id, expires_at)
+VALUES (
+    $1,
+    $2,
+    $3,
+    $4,
+    $5,
+    COALESCE($6::uuid[], ARRAY[]::uuid[]),
+    $7,
+    $8
+)
+RETURNING id, token_hash, task_id, agent_id, workspace_id, user_id, expires_at, created_at, space_id, space_ids
 `
 
 type CreateTaskTokenParams struct {
@@ -23,6 +32,7 @@ type CreateTaskTokenParams struct {
 	AgentID     pgtype.UUID        `json:"agent_id"`
 	WorkspaceID pgtype.UUID        `json:"workspace_id"`
 	SpaceID     pgtype.UUID        `json:"space_id"`
+	SpaceIds    []pgtype.UUID      `json:"space_ids"`
 	UserID      pgtype.UUID        `json:"user_id"`
 	ExpiresAt   pgtype.Timestamptz `json:"expires_at"`
 }
@@ -34,6 +44,7 @@ func (q *Queries) CreateTaskToken(ctx context.Context, arg CreateTaskTokenParams
 		arg.AgentID,
 		arg.WorkspaceID,
 		arg.SpaceID,
+		arg.SpaceIds,
 		arg.UserID,
 		arg.ExpiresAt,
 	)
@@ -48,6 +59,7 @@ func (q *Queries) CreateTaskToken(ctx context.Context, arg CreateTaskTokenParams
 		&i.ExpiresAt,
 		&i.CreatedAt,
 		&i.SpaceID,
+		&i.SpaceIds,
 	)
 	return i, err
 }
@@ -71,7 +83,7 @@ func (q *Queries) DeleteTaskTokensByTask(ctx context.Context, taskID pgtype.UUID
 }
 
 const getTaskTokenByHash = `-- name: GetTaskTokenByHash :one
-SELECT id, token_hash, task_id, agent_id, workspace_id, user_id, expires_at, created_at, space_id FROM task_token
+SELECT id, token_hash, task_id, agent_id, workspace_id, user_id, expires_at, created_at, space_id, space_ids FROM task_token
 WHERE token_hash = $1 AND expires_at > now()
 `
 
@@ -88,6 +100,7 @@ func (q *Queries) GetTaskTokenByHash(ctx context.Context, tokenHash string) (Tas
 		&i.ExpiresAt,
 		&i.CreatedAt,
 		&i.SpaceID,
+		&i.SpaceIds,
 	)
 	return i, err
 }

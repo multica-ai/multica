@@ -4,6 +4,14 @@
     "select_prompt": "选择一个对话，或点 + 新建",
     "agent_link_no_access": "你没有权限与该智能体聊天。"
   },
+  "context": {
+    "scope_label": "上下文",
+    "spaces_label": "空间",
+    "all_spaces": "所有空间",
+    "all_spaces_description": "可使用 {{count}} 个空间的数据",
+    "search_spaces": "搜索空间…",
+    "picker_aria": "对话上下文：{{selection}}"
+  },
   "fab": {
     "running": "Multica 正在工作...",
     "unread_other": "{{count}} 条未读对话",

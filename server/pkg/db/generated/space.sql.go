@@ -503,6 +503,65 @@ func (q *Queries) ListActiveWorkspaceSpacesForUpdate(ctx context.Context, worksp
 	return items, nil
 }
 
+const listCollaborativeWorkspaceSpacesForUser = `-- name: ListCollaborativeWorkspaceSpacesForUser :many
+SELECT ws.id, ws.workspace_id, ws.name, ws.key, ws.icon, ws.issue_counter, ws.archived_at, ws.archived_by, ws.created_by, ws.created_at, ws.updated_at, ws.is_default, ws.visibility, ws.context
+FROM workspace_space ws
+JOIN member wm
+  ON wm.workspace_id = ws.workspace_id
+ AND wm.user_id = $2
+LEFT JOIN workspace_space_member sm
+  ON sm.space_id = ws.id
+ AND sm.user_id = $2
+WHERE ws.workspace_id = $1
+  AND ws.archived_at IS NULL
+  AND (wm.role IN ('owner', 'admin') OR sm.role IN ('lead', 'admin', 'member'))
+ORDER BY ws.name ASC, ws.created_at ASC
+`
+
+type ListCollaborativeWorkspaceSpacesForUserParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	UserID      pgtype.UUID `json:"user_id"`
+}
+
+// Concrete work contexts a member may use for Chat. Open-but-unjoined Spaces
+// remain discoverable elsewhere, but do not enter an Agent's All-spaces write
+// scope until the member joins (workspace owners/admins retain governance
+// collaboration across the workspace).
+func (q *Queries) ListCollaborativeWorkspaceSpacesForUser(ctx context.Context, arg ListCollaborativeWorkspaceSpacesForUserParams) ([]WorkspaceSpace, error) {
+	rows, err := q.db.Query(ctx, listCollaborativeWorkspaceSpacesForUser, arg.WorkspaceID, arg.UserID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []WorkspaceSpace{}
+	for rows.Next() {
+		var i WorkspaceSpace
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.Name,
+			&i.Key,
+			&i.Icon,
+			&i.IssueCounter,
+			&i.ArchivedAt,
+			&i.ArchivedBy,
+			&i.CreatedBy,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.IsDefault,
+			&i.Visibility,
+			&i.Context,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listPrivateWorkspaceSpaceAudienceUserIDs = `-- name: ListPrivateWorkspaceSpaceAudienceUserIDs :many
 SELECT DISTINCT wm.user_id
 FROM member wm

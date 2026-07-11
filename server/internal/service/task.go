@@ -1437,10 +1437,62 @@ var ErrChatTaskAgentArchived = errors.New("chat task: agent archived")
 // path returns a task row, not this error.
 var ErrChatTaskAgentNoRuntime = errors.New("chat task: agent has no runtime")
 
-// ErrChatTaskAgentUnavailable signals that a context-free chat attempted to
-// invoke an agent whose Availability requires a concrete Space, or a private
-// agent on behalf of someone other than its owner.
-var ErrChatTaskAgentUnavailable = errors.New("chat task: agent is unavailable without a target Space")
+// ErrChatTaskAgentUnavailable signals that the member, Agent Availability,
+// and requested Chat context have no valid invocation/data-access overlap.
+var ErrChatTaskAgentUnavailable = errors.New("chat task: agent is unavailable in the selected Space context")
+
+// TaskSpaceScope is the effective Space authorization for one run. All is
+// true only for an All-spaces Chat; every other Space-backed task remains
+// bound to exactly one ID. IDs is always the concrete, current allow-list.
+type TaskSpaceScope struct {
+	All bool
+	IDs []pgtype.UUID
+}
+
+// ChatSessionSpaceScope resolves a Chat's user-visible context into concrete
+// Spaces. A NULL chat_session.space_id means All spaces, never context-free:
+// take the intersection of the initiating member's collaborative Spaces and
+// the Agent's current Availability. Recomputing this at send/claim time makes
+// member removal, Space archive, and Agent removal revoke future runs.
+func (s *TaskService) ChatSessionSpaceScope(
+	ctx context.Context,
+	session db.ChatSession,
+	agent db.Agent,
+	initiatorUserID pgtype.UUID,
+) (TaskSpaceScope, error) {
+	if session.WorkspaceID != agent.WorkspaceID || !initiatorUserID.Valid {
+		return TaskSpaceScope{}, ErrChatTaskAgentUnavailable
+	}
+	if session.SpaceID.Valid {
+		allowed, err := s.Queries.CanCollaborateInWorkspaceSpace(ctx, db.CanCollaborateInWorkspaceSpaceParams{
+			WorkspaceID: session.WorkspaceID,
+			ID:          session.SpaceID,
+			UserID:      initiatorUserID,
+		})
+		if err != nil || !allowed || !AgentAvailableInSpace(ctx, s.Queries, agent, session.WorkspaceID, session.SpaceID) {
+			return TaskSpaceScope{}, ErrChatTaskAgentUnavailable
+		}
+		return TaskSpaceScope{IDs: []pgtype.UUID{session.SpaceID}}, nil
+	}
+
+	spaces, err := s.Queries.ListCollaborativeWorkspaceSpacesForUser(ctx, db.ListCollaborativeWorkspaceSpacesForUserParams{
+		WorkspaceID: session.WorkspaceID,
+		UserID:      initiatorUserID,
+	})
+	if err != nil {
+		return TaskSpaceScope{}, fmt.Errorf("list collaborative chat Spaces: %w", err)
+	}
+	ids := make([]pgtype.UUID, 0, len(spaces))
+	for _, space := range spaces {
+		if AgentAvailableInSpace(ctx, s.Queries, agent, session.WorkspaceID, space.ID) {
+			ids = append(ids, space.ID)
+		}
+	}
+	if len(ids) == 0 {
+		return TaskSpaceScope{}, ErrChatTaskAgentUnavailable
+	}
+	return TaskSpaceScope{All: true, IDs: ids}, nil
+}
 
 // EnqueueChatTask creates a queued task for a chat session.
 // Unlike issue tasks, chat tasks have no issue_id.
@@ -1484,13 +1536,7 @@ func (s *TaskService) EnqueueChatTask(ctx context.Context, chatSession db.ChatSe
 	if !MemberCanInvokeAgent(ctx, s.Queries, agent, chatSession.WorkspaceID, initiatorUserID) {
 		return db.AgentTaskQueue{}, ErrChatTaskAgentUnavailable
 	}
-	switch agent.AvailabilityMode {
-	case "private":
-	case "workspace":
-		// Context-free chat is defined only for Workspace availability.
-	case "selected_spaces":
-		return db.AgentTaskQueue{}, ErrChatTaskAgentUnavailable
-	default:
+	if _, err := s.ChatSessionSpaceScope(ctx, chatSession, agent, initiatorUserID); err != nil {
 		return db.AgentTaskQueue{}, ErrChatTaskAgentUnavailable
 	}
 
@@ -3709,7 +3755,7 @@ func (s *TaskService) publishAgentStatus(agent db.Agent) {
 
 // LoadAgentSkills loads an agent's skills with their files for task execution.
 func (s *TaskService) LoadAgentSkills(ctx context.Context, agentID pgtype.UUID) []AgentSkillData {
-	return s.loadAgentSkillsForContext(ctx, agentID, pgtype.UUID{}, false)
+	return s.loadAgentSkillsForContext(ctx, agentID, nil, false)
 }
 
 // LoadAgentSkillsForTask applies Skill Availability to the concrete run.
@@ -3718,13 +3764,14 @@ func (s *TaskService) LoadAgentSkills(ctx context.Context, agentID pgtype.UUID) 
 // task's Issue/Autopilot Space to match. Sharing a Skill grants no Space data
 // access — it only decides whether the Skill bundle is mounted for this run.
 func (s *TaskService) LoadAgentSkillsForTask(ctx context.Context, task db.AgentTaskQueue) []AgentSkillData {
-	spaceID := s.TaskSpaceID(ctx, task)
-	return s.loadAgentSkillsForContext(ctx, task.AgentID, spaceID, true)
+	scope := s.ResolveTaskSpaceScope(ctx, task)
+	return s.loadAgentSkillsForContext(ctx, task.AgentID, scope.IDs, true)
 }
 
 func (s *TaskService) loadAgentSkillsForContext(
 	ctx context.Context,
-	agentID, spaceID pgtype.UUID,
+	agentID pgtype.UUID,
+	spaceIDs []pgtype.UUID,
 	enforceAvailability bool,
 ) []AgentSkillData {
 	agent, err := s.Queries.GetAgent(ctx, agentID)
@@ -3738,7 +3785,7 @@ func (s *TaskService) loadAgentSkillsForContext(
 
 	result := make([]AgentSkillData, 0, len(skills))
 	for _, sk := range skills {
-		if enforceAvailability && !s.skillAvailableForTask(ctx, sk, agent, spaceID) {
+		if enforceAvailability && !s.skillAvailableForTask(ctx, sk, agent, spaceIDs) {
 			continue
 		}
 		data := AgentSkillData{
@@ -3760,7 +3807,7 @@ func (s *TaskService) skillAvailableForTask(
 	ctx context.Context,
 	skill db.Skill,
 	agent db.Agent,
-	spaceID pgtype.UUID,
+	spaceIDs []pgtype.UUID,
 ) bool {
 	if skill.WorkspaceID != agent.WorkspaceID {
 		return false
@@ -3771,28 +3818,33 @@ func (s *TaskService) skillAvailableForTask(
 	case "private":
 		return skill.CreatedBy.Valid && skill.CreatedBy == agent.OwnerID
 	case "selected_spaces":
-		if !spaceID.Valid {
+		if len(spaceIDs) == 0 {
 			return false
 		}
-		allowed, err := s.Queries.IsSkillAvailableInActiveSpace(ctx, db.IsSkillAvailableInActiveSpaceParams{
-			SkillID:     skill.ID,
-			WorkspaceID: skill.WorkspaceID,
-			SpaceID:     spaceID,
-		})
-		return err == nil && allowed
+		for _, spaceID := range spaceIDs {
+			allowed, err := s.Queries.IsSkillAvailableInActiveSpace(ctx, db.IsSkillAvailableInActiveSpaceParams{
+				SkillID:     skill.ID,
+				WorkspaceID: skill.WorkspaceID,
+				SpaceID:     spaceID,
+			})
+			if err == nil && allowed {
+				return true
+			}
+		}
+		return false
 	default:
 		return false
 	}
 }
 
-// TaskSpaceID resolves the single Space authorization boundary for a task.
-// Direct Chat deliberately resolves to NULL: without a concrete Space context,
-// its task token may use chat/task endpoints but cannot browse Space work.
-func (s *TaskService) TaskSpaceID(ctx context.Context, task db.AgentTaskQueue) pgtype.UUID {
+// ResolveTaskSpaceScope resolves the effective Space boundary for a task.
+// Issue, Autopilot, quick-create, and single-Space Chat return one ID. An
+// All-spaces Chat returns every currently valid intersection Space.
+func (s *TaskService) ResolveTaskSpaceScope(ctx context.Context, task db.AgentTaskQueue) TaskSpaceScope {
 	if task.IssueID.Valid {
 		issue, err := s.Queries.GetIssue(ctx, task.IssueID)
 		if err == nil {
-			return issue.SpaceID
+			return TaskSpaceScope{IDs: []pgtype.UUID{issue.SpaceID}}
 		}
 	}
 	if task.AutopilotRunID.Valid {
@@ -3800,16 +3852,42 @@ func (s *TaskService) TaskSpaceID(ctx context.Context, task db.AgentTaskQueue) p
 		if err == nil {
 			autopilot, err := s.Queries.GetAutopilot(ctx, run.AutopilotID)
 			if err == nil {
-				return autopilot.SpaceID
+				return TaskSpaceScope{IDs: []pgtype.UUID{autopilot.SpaceID}}
 			}
 		}
 	}
 	if qc, ok := s.parseQuickCreateContext(task); ok && qc.SpaceID != "" {
 		if spaceID, err := util.ParseUUID(qc.SpaceID); err == nil {
-			return spaceID
+			return TaskSpaceScope{IDs: []pgtype.UUID{spaceID}}
 		}
 	}
-	return pgtype.UUID{}
+	if task.ChatSessionID.Valid {
+		session, err := s.Queries.GetChatSession(ctx, task.ChatSessionID)
+		if err == nil {
+			agent, agentErr := s.Queries.GetAgent(ctx, task.AgentID)
+			initiator := task.InitiatorUserID
+			if !initiator.Valid {
+				initiator = session.CreatorID
+			}
+			if agentErr == nil {
+				if scope, scopeErr := s.ChatSessionSpaceScope(ctx, session, agent, initiator); scopeErr == nil {
+					return scope
+				}
+			}
+		}
+	}
+	return TaskSpaceScope{}
+}
+
+// TaskSpaceID is retained for single-Space call sites. It deliberately returns
+// NULL for All-spaces Chat even when the current intersection happens to
+// contain one Space, preserving the user's explicit All selection.
+func (s *TaskService) TaskSpaceID(ctx context.Context, task db.AgentTaskQueue) pgtype.UUID {
+	scope := s.ResolveTaskSpaceScope(ctx, task)
+	if scope.All || len(scope.IDs) != 1 {
+		return pgtype.UUID{}
+	}
+	return scope.IDs[0]
 }
 
 // LoadAgentSkillBundles returns every skill visible to an agent, including

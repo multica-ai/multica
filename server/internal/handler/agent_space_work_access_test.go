@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -21,6 +22,13 @@ func taskTokenRequest(method, path string, body any, agentID, spaceID string) *h
 	if spaceID != "" {
 		r.Header.Set("X-Space-ID", spaceID)
 	}
+	return r
+}
+
+func allSpacesTaskTokenRequest(method, path string, body any, agentID string, spaceIDs ...string) *http.Request {
+	r := taskTokenRequest(method, path, body, agentID, "")
+	r.Header.Set("X-Space-IDs", strings.Join(spaceIDs, ","))
+	r.Header.Set("X-User-ID", testUserID)
 	return r
 }
 
@@ -233,6 +241,52 @@ func TestAgentTaskTokenIsBoundToOneAssignedSpace(t *testing.T) {
 		t.Fatalf("task-token Spaces = %+v, want only Space A", spaces.Spaces)
 	}
 
+	// All-spaces Chat tokens expose the complete authoritative allow-list, but
+	// workspace-wide list/search calls must still choose one concrete Space.
+	if _, err := testPool.Exec(context.Background(), `
+		INSERT INTO agent_available_space (agent_id, workspace_id, space_id, created_by)
+		VALUES ($1, $2, $3, $4)
+	`, agentID, testWorkspaceID, spaceB.ID, testUserID); err != nil {
+		t.Fatalf("assign agent to Space B: %v", err)
+	}
+	w = httptest.NewRecorder()
+	testHandler.ListSpaces(w, allSpacesTaskTokenRequest(http.MethodGet, "/api/spaces", nil, agentID, spaceA.ID, spaceB.ID))
+	if w.Code != http.StatusOK {
+		t.Fatalf("list All-spaces Chat Spaces: %d %s", w.Code, w.Body.String())
+	}
+	spaces.Spaces = nil
+	if err := json.Unmarshal(w.Body.Bytes(), &spaces); err != nil {
+		t.Fatalf("decode All-spaces Chat Spaces: %v", err)
+	}
+	if len(spaces.Spaces) != 2 {
+		t.Fatalf("All-spaces Chat list returned %d Spaces, want 2", len(spaces.Spaces))
+	}
+
+	w = httptest.NewRecorder()
+	testHandler.ListIssues(w, allSpacesTaskTokenRequest(http.MethodGet, "/api/issues", nil, agentID, spaceA.ID, spaceB.ID))
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("unfiltered All-spaces issue list: got %d, want 400: %s", w.Code, w.Body.String())
+	}
+	w = httptest.NewRecorder()
+	testHandler.ListIssues(w, allSpacesTaskTokenRequest(http.MethodGet, "/api/issues?space_id="+spaceB.ID, nil, agentID, spaceA.ID, spaceB.ID))
+	if w.Code != http.StatusOK {
+		t.Fatalf("Space-filtered All-spaces issue list: %d %s", w.Code, w.Body.String())
+	}
+	listed.Issues = nil
+	if err := json.Unmarshal(w.Body.Bytes(), &listed); err != nil {
+		t.Fatalf("decode filtered All-spaces issues: %v", err)
+	}
+	foundB = false
+	for _, issue := range listed.Issues {
+		foundB = foundB || issue.ID == issueB.ID
+		if issue.SpaceID == nil || *issue.SpaceID != spaceB.ID {
+			t.Fatalf("filtered All-spaces list leaked Space %v", issue.SpaceID)
+		}
+	}
+	if !foundB {
+		t.Fatal("filtered All-spaces list did not return Space B issue")
+	}
+
 	// Auth, not the Agent process, is authoritative for X-Space-ID. A forged
 	// client header is discarded and replaced with the token row's bound Space.
 	var taskID string
@@ -268,11 +322,34 @@ func TestAgentTaskTokenIsBoundToOneAssignedSpace(t *testing.T) {
 		t.Fatalf("auth stamped Space = %q status=%d, want %q/204", stampedSpace, authW.Code, spaceA.ID)
 	}
 
-	// A context-free Chat token has no Space data access.
+	if _, err := testPool.Exec(context.Background(), `
+		UPDATE task_token
+		SET space_id = NULL, space_ids = ARRAY[$2::uuid, $3::uuid]
+		WHERE token_hash = $1
+	`, auth.HashToken(rawToken), spaceA.ID, spaceB.ID); err != nil {
+		t.Fatalf("promote auth probe token to All spaces: %v", err)
+	}
+	var stampedSpaceIDs string
+	authHandler = authmiddleware.Auth(testHandler.Queries, nil, nil)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		stampedSpace = r.Header.Get("X-Space-ID")
+		stampedSpaceIDs = r.Header.Get("X-Space-IDs")
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	authReq = httptest.NewRequest(http.MethodGet, "/api/issues", nil)
+	authReq.Header.Set("Authorization", "Bearer "+rawToken)
+	authReq.Header.Set("X-Space-ID", "99999999-9999-9999-9999-999999999999")
+	authReq.Header.Set("X-Space-IDs", "99999999-9999-9999-9999-999999999999")
+	authW = httptest.NewRecorder()
+	authHandler.ServeHTTP(authW, authReq)
+	if authW.Code != http.StatusNoContent || stampedSpace != "" || stampedSpaceIDs != spaceA.ID+","+spaceB.ID {
+		t.Fatalf("auth stamped All spaces = scalar:%q ids:%q status=%d", stampedSpace, stampedSpaceIDs, authW.Code)
+	}
+
+	// A legacy token without any resolved Space scope has no Space data access.
 	w = httptest.NewRecorder()
 	testHandler.GetIssue(w, withURLParam(taskTokenRequest(http.MethodGet, "/api/issues/"+issueA.ID, nil, agentID, ""), "id", issueA.ID))
 	if w.Code != http.StatusForbidden {
-		t.Fatalf("context-free token get: got %d, want 403: %s", w.Code, w.Body.String())
+		t.Fatalf("scope-less token get: got %d, want 403: %s", w.Code, w.Body.String())
 	}
 
 	// Removing the assignment revokes an already-running token immediately.

@@ -97,19 +97,21 @@ happens in the CLI, not the create handler.
 Space access answers **where** an Agent may work and is independent from the
 legacy invocation audience (`permission_mode` + `invocation_targets`), which
 answers **who** may invoke it. Both gates must pass. Adding an Agent to a Space
-authorizes its runs to work with that Space's Multica data, but every concrete
-run is still bound to exactly one Space. A run in Space A cannot read or mutate
-Space B even when the same Agent is assigned to both. Space access does not
-grant credentials or bypass a separate Integration or Resource binding.
+authorizes its runs to work with that Space's Multica data. Issue, Autopilot,
+Quick Create, and similar work runs are bound to exactly one Space. Chat may
+instead be created with one Space or `All spaces`; the latter is always the
+current intersection of the initiating member's collaboration access and the
+Agent's Availability. Space access does not grant credentials or bypass a
+separate Integration or Resource binding.
 
-- `private`: only the Agent owner may invoke it. For an Issue/Autopilot, the
-  owner must still be able to view the active target Space. Context-free direct
-  Chat is allowed for the owner.
+- `private`: only the Agent owner may invoke it. For any run, the owner must
+  still have collaboration access to every selected target Space.
 - `selected_spaces`: the Agent is explicitly added to the Spaces in
   `availability_space_ids`. The target Issue/Autopilot/Squad Space must exactly
-  match one of them, including when the caller is the owner. A concrete Space
-  is mandatory, so direct/context-free Chat is unavailable.
-- `workspace`: valid in every active Space in the workspace and in direct Chat.
+  match one of them, including when the caller is the owner. Chat can use one
+  selected Space or All spaces within this allow-list.
+- `workspace`: valid in every active Space in the workspace; Chat still
+  intersects that set with the initiating member's collaboration access.
 
 When `availability_mode` is sent explicitly, it is authoritative: `private`
 sets an owner-only audience; the two shared modes set the workspace audience;
@@ -249,10 +251,10 @@ State-changing (require an explicit instruction — do not run speculatively):
   clear; only `custom_env` is gated behind the dedicated env endpoint.
 - "`agent get` shows env values." It shows only `has_custom_env` and
   `custom_env_key_count`.
-- "Availability grants access to a Space's data." It does not; it only decides
-  whether a run may target that location.
+- "Availability alone grants access to a Space's data." It does not; the
+  member and selected task/Chat scope gates must also pass.
 - "The Agent owner can use Selected Spaces anywhere." The owner cannot bypass
-  the selected Space allow-list, and context-free Chat has no selected Space.
+  either the selected Space allow-list or their own collaboration access.
 - "An invalid `thinking_level`/`model` combo is caught at create." Only an
   unknown provider-level literal is — model-specific gaps fail at run time.
 - "`set` and `add` are interchangeable for skills." `set` replaces all

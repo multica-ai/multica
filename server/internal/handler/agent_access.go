@@ -56,7 +56,7 @@ func (h *Handler) canInvokeAgent(ctx context.Context, agent db.Agent, actorType,
 	// Availability is an independent location gate. It runs before the
 	// invocation-audience rules below, so even the agent owner cannot use a
 	// Selected Spaces agent outside the selected set. Private remains the one
-	// owner-only mode and can be used without a Space (direct Chat).
+	// owner-only mode; Chat resolves its one/All context before this gate.
 	if !h.agentLocationAllowsInvocation(ctx, agent, effectiveUser, targetSpaceID) {
 		return false
 	}

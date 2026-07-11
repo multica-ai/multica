@@ -33,6 +33,8 @@ export interface ChatSession {
   creator_id: string;
   title: string;
   status: "active" | "archived";
+  /** null means All spaces; a concrete id is the session's single Space. */
+  space_id?: string | null;
   /** True when the session has any unread assistant replies. List-only.
    *  Convenience for `unread_count > 0`. */
   has_unread: boolean;

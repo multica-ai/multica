@@ -1,6 +1,15 @@
 -- name: CreateTaskToken :one
-INSERT INTO task_token (token_hash, task_id, agent_id, workspace_id, space_id, user_id, expires_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7)
+INSERT INTO task_token (token_hash, task_id, agent_id, workspace_id, space_id, space_ids, user_id, expires_at)
+VALUES (
+    sqlc.arg('token_hash'),
+    sqlc.arg('task_id'),
+    sqlc.arg('agent_id'),
+    sqlc.arg('workspace_id'),
+    sqlc.narg('space_id'),
+    COALESCE(sqlc.arg('space_ids')::uuid[], ARRAY[]::uuid[]),
+    sqlc.arg('user_id'),
+    sqlc.arg('expires_at')
+)
 RETURNING *;
 
 -- name: GetTaskTokenByHash :one

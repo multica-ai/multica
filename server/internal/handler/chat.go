@@ -33,6 +33,10 @@ const chatSessionTitleMaxLen = 200
 type CreateChatSessionRequest struct {
 	AgentID string `json:"agent_id"`
 	Title   string `json:"title"`
+	// SpaceID narrows the Chat to one Space. nil/empty means All spaces
+	// currently available to both the member and Agent; there is no General
+	// (context-free) Chat mode.
+	SpaceID *string `json:"space_id"`
 }
 
 func (h *Handler) CreateChatSession(w http.ResponseWriter, r *http.Request) {
@@ -73,11 +77,31 @@ func (h *Handler) CreateChatSession(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "agent is archived")
 		return
 	}
+	var selectedSpaceID pgtype.UUID
+	if req.SpaceID != nil && strings.TrimSpace(*req.SpaceID) != "" {
+		selectedSpaceID, ok = parseUUIDOrBadRequest(w, strings.TrimSpace(*req.SpaceID), "space_id")
+		if !ok {
+			return
+		}
+	}
+	prospective := db.ChatSession{
+		WorkspaceID: workspaceUUID,
+		AgentID:     agent.ID,
+		CreatorID:   parseUUID(userID),
+		SpaceID:     selectedSpaceID,
+	}
+	spaceScope, err := h.TaskService.ChatSessionSpaceScope(
+		r.Context(), prospective, agent, prospective.CreatorID,
+	)
+	if err != nil || len(spaceScope.IDs) == 0 {
+		writeError(w, http.StatusForbidden, "this agent is not available in any Chat Space")
+		return
+	}
 	// Invocation gate: starting a chat produces agent runs, so it uses the
 	// invoke permission (MUL-3963), not the softer view gate. Agent-to-agent
 	// chat sessions are judged by the top-of-chain originator.
 	actorType, actorID := h.resolveActor(r, userID, workspaceID)
-	if !h.canInvokeAgent(r.Context(), agent, actorType, actorID, h.invokeOriginatorFromRequest(r, actorType, actorID), workspaceID, pgtype.UUID{}) {
+	if !h.canInvokeAgent(r.Context(), agent, actorType, actorID, h.invokeOriginatorFromRequest(r, actorType, actorID), workspaceID, spaceScope.IDs[0]) {
 		writeError(w, http.StatusForbidden, "you do not have access to this agent")
 		return
 	}
@@ -109,6 +133,7 @@ func (h *Handler) CreateChatSession(w http.ResponseWriter, r *http.Request) {
 		AgentID:     agentID,
 		CreatorID:   parseUUID(userID),
 		Title:       req.Title,
+		SpaceID:     selectedSpaceID,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create chat session")
@@ -177,6 +202,7 @@ func (h *Handler) ListChatSessions(w http.ResponseWriter, r *http.Request) {
 				UnreadCount: int(s.UnreadCount),
 				LastMessage: buildChatLastMessage(s.LastMessageAt, s.LastMessageContent, s.LastMessageRole, s.LastMessageFailureReason, s.LastMessageKind),
 				Pinned:      s.PinnedAt.Valid,
+				SpaceID:     uuidToPtr(s.SpaceID),
 				CreatedAt:   timestampToString(s.CreatedAt),
 				UpdatedAt:   timestampToString(s.UpdatedAt),
 			})
@@ -206,6 +232,7 @@ func (h *Handler) ListChatSessions(w http.ResponseWriter, r *http.Request) {
 				UnreadCount: int(s.UnreadCount),
 				LastMessage: buildChatLastMessage(s.LastMessageAt, s.LastMessageContent, s.LastMessageRole, s.LastMessageFailureReason, s.LastMessageKind),
 				Pinned:      s.PinnedAt.Valid,
+				SpaceID:     uuidToPtr(s.SpaceID),
 				CreatedAt:   timestampToString(s.CreatedAt),
 				UpdatedAt:   timestampToString(s.UpdatedAt),
 			})
@@ -658,10 +685,17 @@ func (h *Handler) SendChatMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	actorType, actorID := h.resolveActor(r, userID, workspaceID)
+	spaceScope, scopeErr := h.TaskService.ChatSessionSpaceScope(
+		r.Context(), session, agent, parseUUID(userID),
+	)
+	if scopeErr != nil || len(spaceScope.IDs) == 0 {
+		writeError(w, http.StatusForbidden, "agent is not available in this Chat context")
+		return
+	}
 	if !h.canInvokeAgent(
 		r.Context(), agent, actorType, actorID,
 		h.invokeOriginatorFromRequest(r, actorType, actorID),
-		workspaceID, pgtype.UUID{},
+		workspaceID, spaceScope.IDs[0],
 	) {
 		h.writeDispatchBlocked(w, http.StatusForbidden, ReasonInvocationNotAllowed)
 		return
@@ -1378,6 +1412,9 @@ type ChatSessionResponse struct {
 	CreatorID   string `json:"creator_id"`
 	Title       string `json:"title"`
 	Status      string `json:"status"`
+	// nil means All spaces; a concrete value is the immutable single-Space
+	// context selected before the first message.
+	SpaceID *string `json:"space_id"`
 	// Only populated by list endpoints — single-session fetches return 0/false/nil.
 	// HasUnread is kept as a convenience (== UnreadCount > 0) for existing consumers.
 	HasUnread   bool             `json:"has_unread"`
@@ -1452,6 +1489,7 @@ func chatSessionToResponse(s db.ChatSession) ChatSessionResponse {
 		CreatorID:   uuidToString(s.CreatorID),
 		Title:       s.Title,
 		Status:      s.Status,
+		SpaceID:     uuidToPtr(s.SpaceID),
 		Pinned:      s.PinnedAt.Valid,
 		CreatedAt:   timestampToString(s.CreatedAt),
 		UpdatedAt:   timestampToString(s.UpdatedAt),

@@ -2483,15 +2483,32 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "runtime owner required to mint task token")
 		return
 	}
-	taskSpaceID := h.TaskService.TaskSpaceID(r.Context(), *task)
-	if taskSpaceID.Valid {
+	taskSpaceScope := h.TaskService.ResolveTaskSpaceScope(r.Context(), *task)
+	if task.ChatSessionID.Valid && len(taskSpaceScope.IDs) == 0 {
+		outcome = "revoked_space_access"
+		if _, cancelErr := h.TaskService.CancelTask(r.Context(), task.ID); cancelErr != nil {
+			slog.Error("task claim: cancel Chat with no available Spaces failed",
+				"task_id", uuidToString(task.ID), "error", cancelErr)
+		}
+		payloadBytes, _ = writeMeasuredJSON(w, http.StatusOK, map[string]any{"task": nil})
+		return
+	}
+	if len(taskSpaceScope.IDs) > 0 {
 		agent, agentErr := h.Queries.GetAgent(r.Context(), task.AgentID)
-		if agentErr != nil || !service.AgentAvailableInSpace(r.Context(), h.Queries, agent, parseUUID(resp.WorkspaceID), taskSpaceID) {
+		spaceAccessValid := agentErr == nil
+		if spaceAccessValid {
+			for _, spaceID := range taskSpaceScope.IDs {
+				if !service.AgentAvailableInSpace(r.Context(), h.Queries, agent, parseUUID(resp.WorkspaceID), spaceID) {
+					spaceAccessValid = false
+					break
+				}
+			}
+		}
+		if !spaceAccessValid {
 			outcome = "revoked_space_access"
-			slog.Info("task claim cancelled: agent no longer has access to task Space",
+			slog.Info("task claim cancelled: agent no longer has access to Chat context",
 				"task_id", uuidToString(task.ID),
 				"agent_id", uuidToString(task.AgentID),
-				"space_id", uuidToString(taskSpaceID),
 			)
 			if _, cancelErr := h.TaskService.CancelTask(r.Context(), task.ID); cancelErr != nil {
 				slog.Error("task claim: cancel after Space access revocation failed",
@@ -2500,6 +2517,17 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 			payloadBytes, _ = writeMeasuredJSON(w, http.StatusOK, map[string]any{"task": nil})
 			return
 		}
+	}
+	var taskSpaceID pgtype.UUID
+	if !taskSpaceScope.All && len(taskSpaceScope.IDs) == 1 {
+		taskSpaceID = taskSpaceScope.IDs[0]
+		resp.SpaceScope = "space"
+		if resp.SpaceID == "" {
+			h.attachSpaceToTaskResponse(r.Context(), &resp, parseUUID(resp.WorkspaceID), taskSpaceID)
+		}
+	} else if taskSpaceScope.All {
+		resp.SpaceScope = "all"
+		h.attachSpacesToTaskResponse(r.Context(), &resp, parseUUID(resp.WorkspaceID), taskSpaceScope.IDs)
 	}
 	tokenStr, terr := auth.GenerateAgentTaskToken()
 	if terr != nil {
@@ -2510,13 +2538,21 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to mint task token")
 		return
 	}
+	taskTokenUserID := runtime.OwnerID
+	if task.ChatSessionID.Valid && task.InitiatorUserID.Valid {
+		// Chat runs act on behalf of the member who sent this turn. Binding the
+		// task token to that initiator lets All-spaces access shrink immediately
+		// when their Space membership changes, without exposing runtime-owner reach.
+		taskTokenUserID = task.InitiatorUserID
+	}
 	receipt, ferr := h.TaskService.FinalizeTaskClaim(r.Context(), *task, db.CreateTaskTokenParams{
 		TokenHash:   auth.HashToken(tokenStr),
 		TaskID:      task.ID,
 		AgentID:     task.AgentID,
 		WorkspaceID: parseUUID(resp.WorkspaceID),
 		SpaceID:     taskSpaceID,
-		UserID:      runtime.OwnerID,
+		SpaceIds:    taskSpaceScope.IDs,
+		UserID:      taskTokenUserID,
 		ExpiresAt:   pgtype.Timestamptz{Time: time.Now().Add(24 * time.Hour), Valid: true},
 	}, deliveredCommentIDs, commentBackedTask)
 	if ferr != nil {
@@ -2575,6 +2611,28 @@ func (h *Handler) attachSpaceToTaskResponse(ctx context.Context, resp *AgentTask
 				DisplayName:  row.DisplayName,
 			}
 		}
+	}
+}
+
+func (h *Handler) attachSpacesToTaskResponse(ctx context.Context, resp *AgentTaskResponse, workspaceID pgtype.UUID, spaceIDs []pgtype.UUID) {
+	if len(spaceIDs) == 0 {
+		return
+	}
+	spaces, err := h.Queries.ListWorkspaceSpacesByIDs(ctx, db.ListWorkspaceSpacesByIDsParams{
+		WorkspaceID: workspaceID,
+		SpaceIds:    spaceIDs,
+	})
+	if err != nil {
+		return
+	}
+	resp.Spaces = make([]TaskSpaceData, 0, len(spaces))
+	for _, space := range spaces {
+		resp.Spaces = append(resp.Spaces, TaskSpaceData{
+			ID:      uuidToString(space.ID),
+			Key:     space.Key,
+			Name:    space.Name,
+			Context: space.Context,
+		})
 	}
 }
 

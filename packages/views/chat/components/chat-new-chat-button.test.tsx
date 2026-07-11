@@ -126,7 +126,7 @@ describe("NewChatButton", () => {
     });
   });
 
-  it("starts immediately without a picker when only one agent exists", () => {
+  it("keeps agent selection explicit when only one agent exists", async () => {
     const onStart = vi.fn();
     render(
       <I18nProvider locale="en" resources={TEST_RESOURCES}>
@@ -136,7 +136,10 @@ describe("NewChatButton", () => {
 
     fireEvent.click(screen.getByRole("button", { name: NEW_CHAT_LABEL }));
 
+    const dialog = await screen.findByRole("dialog");
+    expect(onStart).not.toHaveBeenCalled();
+
+    fireEvent.click(within(dialog).getByText("Alpha"));
     expect(onStart).toHaveBeenCalledWith(agents[0]);
-    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 });

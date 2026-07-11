@@ -26,7 +26,7 @@ A project groups work and carries durable resources. A resource is not just disp
 
 A project's `description` is also durable context: when an issue (or a quick-create task) is bound to a project, the project description is injected into the agent's brief under `## Project Context` and written to `.multica/project/resources.json` as `project_description`. Use it for project-wide rules/context that should apply to every task in the project.
 
-Project Context is layered below Workspace Context and the task's one bound Space Context. Space Context applies to every run bound to that Space; Project Context applies only when the task is also bound to that Project. Neither context layer grants data or Integration access, and context-free direct Chat receives no Space Context.
+Project Context is layered below Workspace Context and the task's Space Context. Work runs normally bind one Space; Chat may bind one Space or All spaces. Project Context applies only when the task is also bound to that Project. Neither context layer grants additional data or Integration access.
 
 Common resource types:
 

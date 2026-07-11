@@ -60,6 +60,13 @@ type IntegrationBindingData struct {
 	DisplayName  string `json:"display_name"`
 }
 
+type TaskSpaceData struct {
+	ID      string `json:"id"`
+	Key     string `json:"key"`
+	Name    string `json:"name"`
+	Context string `json:"context,omitempty"`
+}
+
 // Task represents a claimed task from the server.
 // Agent data (name, skills) is populated by the claim endpoint.
 type Task struct {
@@ -81,6 +88,8 @@ type Task struct {
 	SpaceKey                 string                   `json:"space_key,omitempty"`                   // Space issue namespace key, e.g. MUL
 	SpaceName                string                   `json:"space_name,omitempty"`                  // human-readable Space name
 	SpaceContext             string                   `json:"space_context,omitempty"`               // operating context for the one bound Space
+	SpaceScope               string                   `json:"space_scope,omitempty"`                 // "space" or "all"
+	Spaces                   []TaskSpaceData          `json:"spaces,omitempty"`                      // concrete contexts for an All-spaces Chat
 	ProjectID                string                   `json:"project_id,omitempty"`                  // issue's project, when present
 	ProjectTitle             string                   `json:"project_title,omitempty"`               // human-readable project title for context injection
 	ProjectDescription       string                   `json:"project_description,omitempty"`         // durable project-level context injected into the brief

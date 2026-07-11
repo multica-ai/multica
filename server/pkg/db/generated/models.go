@@ -416,6 +416,8 @@ type ChatSession struct {
 	LastReadAt   pgtype.Timestamptz `json:"last_read_at"`
 	IsAgentIntro bool               `json:"is_agent_intro"`
 	PinnedAt     pgtype.Timestamptz `json:"pinned_at"`
+	// Chat context. NULL = all Spaces available to the Agent and current initiating member; non-NULL = one immutable Space.
+	SpaceID pgtype.UUID `json:"space_id"`
 }
 
 type Comment struct {
@@ -968,6 +970,8 @@ type TaskToken struct {
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 	// The single Space data boundary for this run. NULL means the task has no Space data access.
 	SpaceID pgtype.UUID `json:"space_id"`
+	// Authoritative active Space allow-list for this run. Empty means no Space data access.
+	SpaceIds []pgtype.UUID `json:"space_ids"`
 }
 
 type TaskUsage struct {

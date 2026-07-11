@@ -124,6 +124,8 @@ type TaskContextForEnv struct {
 	SpaceKey                      string                     // Space issue namespace key, e.g. MUL
 	SpaceName                     string                     // human-readable Space name
 	SpaceContext                  string                     // operating context for the one bound Space
+	SpaceScope                    string                     // "space" or "all"
+	Spaces                        []SpaceContextForEnv       // concrete contexts for an All-spaces Chat
 	ProjectID                     string                     // issue's project, when present
 	ProjectTitle                  string                     // human-readable project title
 	ProjectDescription            string                     // durable project-level context, rendered into the brief's Project Context section
@@ -166,6 +168,13 @@ type TaskContextForEnv struct {
 	InitiatorID    string
 	InitiatorName  string
 	InitiatorEmail string
+}
+
+type SpaceContextForEnv struct {
+	ID      string
+	Key     string
+	Name    string
+	Context string
 }
 
 // SkillContextForEnv represents a skill to be written into the execution environment.

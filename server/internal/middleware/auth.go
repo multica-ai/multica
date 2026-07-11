@@ -46,6 +46,7 @@ func Auth(queries *db.Queries, patCache *auth.PATCache, cloudPAT *auth.CloudPATV
 			// from a non-task-token path.
 			r.Header.Del("X-Actor-Source")
 			r.Header.Del("X-Space-ID")
+			r.Header.Del("X-Space-IDs")
 
 			tokenString, fromCookie := extractToken(r)
 			if tokenString == "" {
@@ -89,6 +90,15 @@ func Auth(queries *db.Queries, patCache *auth.PATCache, cloudPAT *auth.CloudPATV
 				r.Header.Set("X-Workspace-ID", uuidToString(tt.WorkspaceID))
 				if tt.SpaceID.Valid {
 					r.Header.Set("X-Space-ID", uuidToString(tt.SpaceID))
+				}
+				if len(tt.SpaceIds) > 0 {
+					ids := make([]string, 0, len(tt.SpaceIds))
+					for _, id := range tt.SpaceIds {
+						if id.Valid {
+							ids = append(ids, uuidToString(id))
+						}
+					}
+					r.Header.Set("X-Space-IDs", strings.Join(ids, ","))
 				}
 				// X-Actor-Source flags the auth path so resolveActor and
 				// any owner-only handler can deny without re-querying the

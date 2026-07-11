@@ -255,10 +255,32 @@ func writeRepositories(b *strings.Builder, ctx TaskContextForEnv) {
 	b.WriteString("\n")
 }
 
-// writeSpaceContext emits identity, operating context, and issue-creation
-// guidance only for the task's one bound Space. Context-free direct chat has no
-// Space and therefore never receives this section.
+// writeSpaceContext emits either one bound Space or the concrete contexts in
+// an All-spaces Chat. All-spaces access is not workspace-global: the listed
+// Spaces are the current intersection of member collaboration and Agent
+// Availability, and commands must still name the Space they act on.
 func writeSpaceContext(b *strings.Builder, ctx TaskContextForEnv) {
+	if ctx.SpaceScope == "all" && len(ctx.Spaces) > 0 {
+		b.WriteString("## Space Contexts\n\n")
+		b.WriteString("This Chat can work across the following Spaces. Treat this list as the complete data boundary for the run; do not infer access to any other Space. For list, search, create, or update operations, name the target with `--space <space-id-or-key>`.\n\n")
+		for _, space := range ctx.Spaces {
+			label := space.Name
+			if label == "" {
+				label = space.Key
+			}
+			fmt.Fprintf(b, "### %s", label)
+			if space.Key != "" {
+				fmt.Fprintf(b, " (`%s`)", space.Key)
+			}
+			b.WriteString("\n\n")
+			if ctxText := strings.TrimRight(space.Context, " \t\r\n"); ctxText != "" {
+				b.WriteString(ctxText)
+				b.WriteString("\n\n")
+			}
+		}
+		b.WriteString("Issue and Project Space is immutable in this release. If the user's request could create work in more than one listed Space and no target is clear, ask which Space to use.\n\n")
+		return
+	}
 	if ctx.SpaceID == "" {
 		return
 	}

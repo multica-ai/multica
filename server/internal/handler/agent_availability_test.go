@@ -350,7 +350,7 @@ func TestLegacyAccessUpdateMapsLocationWithoutClobberingNoOpSelectedMode(t *test
 	}
 }
 
-func TestExistingChatSessionCannotBypassSelectedSpaceAvailability(t *testing.T) {
+func TestExistingAllSpacesChatNarrowsWithSelectedSpaceAvailability(t *testing.T) {
 	if testHandler == nil || testPool == nil {
 		t.Skip("database not available")
 	}
@@ -382,9 +382,104 @@ func TestExistingChatSessionCannotBypassSelectedSpaceAvailability(t *testing.T) 
 		"content": "try the stale session",
 	}), "sessionId", sessionID)
 	testHandler.SendChatMessage(sent, withChatTestWorkspaceCtx(t, req))
-	if sent.Code != http.StatusForbidden {
-		t.Fatalf("send through stale context-free Chat: expected 403, got %d: %s", sent.Code, sent.Body.String())
+	if sent.Code != http.StatusCreated {
+		t.Fatalf("send through All-spaces Chat: expected 201, got %d: %s", sent.Code, sent.Body.String())
 	}
+
+	session, err := testHandler.Queries.GetChatSession(context.Background(), parseUUID(sessionID))
+	if err != nil {
+		t.Fatalf("load chat session: %v", err)
+	}
+	loadedAgent, err := testHandler.Queries.GetAgent(context.Background(), parseUUID(agent.ID))
+	if err != nil {
+		t.Fatalf("load agent: %v", err)
+	}
+	scope, err := testHandler.TaskService.ChatSessionSpaceScope(context.Background(), session, loadedAgent, parseUUID(testUserID))
+	if err != nil {
+		t.Fatalf("resolve All-spaces scope: %v", err)
+	}
+	if !scope.All || len(scope.IDs) != 1 || uuidToString(scope.IDs[0]) != selected.ID {
+		t.Fatalf("All-spaces scope = all:%v ids:%v, want selected Space %s", scope.All, scope.IDs, selected.ID)
+	}
+}
+
+func TestExistingSingleSpaceChatCannotBypassSelectedSpaceAvailability(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	selected := createSpaceForAccessTest(t, "Chat Allowed Space", "AGCHATA", "open")
+	other := createSpaceForAccessTest(t, "Chat Revoked Space", "AGCHATR", "open")
+	agent := createAvailabilityTestAgent(t, "availability-single-chat-agent", agentAvailabilityWorkspace, nil)
+	var sessionID string
+	if err := testPool.QueryRow(context.Background(), `
+		INSERT INTO chat_session (workspace_id, agent_id, creator_id, title, space_id)
+		VALUES ($1, $2, $3, 'Existing single-Space chat', $4)
+		RETURNING id
+	`, testWorkspaceID, agent.ID, testUserID, other.ID).Scan(&sessionID); err != nil {
+		t.Fatalf("seed chat session: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM chat_session WHERE id = $1`, sessionID)
+	})
+
+	updated := httptest.NewRecorder()
+	testHandler.UpdateAgent(updated, withURLParam(newRequest(http.MethodPut, "/api/agents/"+agent.ID, map[string]any{
+		"availability_mode":      agentAvailabilitySelectedSpaces,
+		"availability_space_ids": []string{selected.ID},
+	}), "id", agent.ID))
+	if updated.Code != http.StatusOK {
+		t.Fatalf("change Availability: expected 200, got %d: %s", updated.Code, updated.Body.String())
+	}
+
+	sent := httptest.NewRecorder()
+	req := withURLParam(newRequest(http.MethodPost, "/api/chat/sessions/"+sessionID+"/messages", map[string]any{
+		"content": "try the revoked Space",
+	}), "sessionId", sessionID)
+	testHandler.SendChatMessage(sent, withChatTestWorkspaceCtx(t, req))
+	if sent.Code != http.StatusForbidden {
+		t.Fatalf("send through revoked single-Space Chat: expected 403, got %d: %s", sent.Code, sent.Body.String())
+	}
+}
+
+func TestCreateChatSessionSupportsAllAndSingleSpaceContext(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	selected := createSpaceForAccessTest(t, "Chat Context Selected", "AGCTXS", "open")
+	other := createSpaceForAccessTest(t, "Chat Context Other", "AGCTXO", "open")
+	agent := createAvailabilityTestAgent(t, "chat-context-create-agent", agentAvailabilitySelectedSpaces, []string{selected.ID})
+
+	create := func(t *testing.T, spaceID *string, wantStatus int) *ChatSessionResponse {
+		t.Helper()
+		body := map[string]any{"agent_id": agent.ID, "title": "Context picker Chat"}
+		if spaceID != nil {
+			body["space_id"] = *spaceID
+		}
+		w := httptest.NewRecorder()
+		req := withChatTestWorkspaceCtx(t, newRequest(http.MethodPost, "/api/chat/sessions", body))
+		testHandler.CreateChatSession(w, req)
+		if w.Code != wantStatus {
+			t.Fatalf("create Chat with space %v: got %d, want %d: %s", spaceID, w.Code, wantStatus, w.Body.String())
+		}
+		if wantStatus != http.StatusCreated {
+			return nil
+		}
+		var session ChatSessionResponse
+		if err := json.Unmarshal(w.Body.Bytes(), &session); err != nil {
+			t.Fatalf("decode Chat session: %v", err)
+		}
+		return &session
+	}
+
+	all := create(t, nil, http.StatusCreated)
+	if all.SpaceID != nil {
+		t.Fatalf("All-spaces Chat returned space_id %v, want null", all.SpaceID)
+	}
+	single := create(t, &selected.ID, http.StatusCreated)
+	if single.SpaceID == nil || *single.SpaceID != selected.ID {
+		t.Fatalf("single-Space Chat returned space_id %v, want %s", single.SpaceID, selected.ID)
+	}
+	create(t, &other.ID, http.StatusForbidden)
 }
 
 func TestAgentAvailabilityRejectsForeignOrArchivedSpace(t *testing.T) {

@@ -138,9 +138,10 @@ function AgentPickerItem({
  * "New chat" ⊕ button. Per the Chat V2 design, starting a new chat is where the
  * agent is chosen — so this opens an AgentPicker and reports the pick via
  * `onStart`. No agent is pre-checked: a new chat has no "current" agent yet.
- * Shortcuts: with a single available agent it starts immediately (no point
- * showing a one-item menu); with none it still fires `onStart(null)` so the
- * surface shows its no-agent empty state.
+ * Even one available Agent opens the picker: Agent choice is the primary New
+ * Chat decision, and keeping it explicit avoids a silent selection that makes
+ * the attached Space context bar feel disconnected. With none it still fires
+ * `onStart(null)` so the surface shows its no-agent empty state.
  */
 export function NewChatButton({
   agents,
@@ -156,8 +157,7 @@ export function NewChatButton({
   const { t } = useT("chat");
   const label = t(($) => $.window.new_chat_tooltip);
 
-  if (agents.length <= 1) {
-    const only = agents[0] ?? null;
+  if (agents.length === 0) {
     return (
       <Tooltip>
         <TooltipTrigger
@@ -167,7 +167,7 @@ export function NewChatButton({
               size="icon-sm"
               className="rounded-full text-muted-foreground"
               aria-label={label}
-              onClick={() => onStart(only)}
+              onClick={() => onStart(null)}
             />
           }
         >

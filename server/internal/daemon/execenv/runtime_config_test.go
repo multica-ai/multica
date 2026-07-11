@@ -615,7 +615,7 @@ func TestSpaceContextRenderedOnlyForBoundSpace(t *testing.T) {
 			wantContext: true,
 		},
 		{
-			name: "context-free direct chat",
+			name: "legacy chat without resolved scope",
 			ctx: TaskContextForEnv{
 				ChatSessionID: "chat-1",
 				SpaceContext:  spaceContext,
@@ -659,6 +659,33 @@ func TestSpaceContextRenderedOnlyForBoundSpace(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestAllSpacesChatRendersCompleteContextBoundary(t *testing.T) {
+	t.Parallel()
+	ctx := TaskContextForEnv{
+		ChatSessionID: "chat-1",
+		SpaceScope:    "all",
+		Spaces: []SpaceContextForEnv{
+			{ID: "space-eng", Key: "ENG", Name: "Engineering", Context: "Use the engineering runbook."},
+			{ID: "space-prod", Key: "PROD", Name: "Product", Context: "Use the product brief."},
+		},
+	}
+
+	out := buildMetaSkillContent("claude", ctx)
+	for _, want := range []string{
+		"## Space Contexts",
+		"complete data boundary",
+		"### Engineering (`ENG`)",
+		"Use the engineering runbook.",
+		"### Product (`PROD`)",
+		"Use the product brief.",
+		"--space <space-id-or-key>",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("All-spaces brief missing %q\n%s", want, out)
+		}
 	}
 }
 

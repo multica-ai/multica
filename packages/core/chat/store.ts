@@ -8,6 +8,7 @@ const logger = createLogger("chat.store");
 
 const AGENT_STORAGE_KEY = "multica:chat:selectedAgentId";
 const SESSION_STORAGE_KEY = "multica:chat:activeSessionId";
+const SPACE_STORAGE_KEY = "multica:chat:newSessionSpaceId";
 /** Drafts are stored as one JSON blob per workspace: { [sessionId]: text }. */
 const DRAFTS_KEY = "multica:chat:drafts";
 /** Draft attachment records per workspace: { [sessionId]: Attachment[] }. */
@@ -236,6 +237,8 @@ export interface ChatState {
   floatingChatEnabled: boolean;
   activeSessionId: string | null;
   selectedAgentId: string | null;
+  /** New-chat context. null means All spaces; existing sessions use session.space_id. */
+  newSessionSpaceId: string | null;
   /** Drafts per session: sessionId (or DRAFT_NEW_SESSION) → markdown text. */
   inputDrafts: Record<string, string>;
   /** Attachment rows referenced by each input draft. */
@@ -253,6 +256,7 @@ export interface ChatState {
   setFloatingChatEnabled: (enabled: boolean) => void;
   setActiveSession: (id: string | null) => void;
   setSelectedAgentId: (id: string) => void;
+  setNewSessionSpaceId: (id: string | null) => void;
   /** sessionId accepts a real session UUID or DRAFT_NEW_SESSION. */
   setInputDraft: (sessionId: string, draft: string) => void;
   setInputDraftAttachments: (sessionId: string, attachments: Attachment[]) => void;
@@ -299,6 +303,7 @@ export function createChatStore(options: ChatStoreOptions) {
     floatingChatEnabled: initialFloatingEnabled,
     activeSessionId: storage.getItem(wsKey(SESSION_STORAGE_KEY)),
     selectedAgentId: storage.getItem(wsKey(AGENT_STORAGE_KEY)),
+    newSessionSpaceId: storage.getItem(wsKey(SPACE_STORAGE_KEY)),
     inputDrafts: readDrafts(storage, wsKey(DRAFTS_KEY)),
     inputDraftAttachments: readDraftAttachments(storage, wsKey(DRAFT_ATTACHMENTS_KEY)),
     appliedDraftRestoreIds: readAppliedRestores(storage, wsKey(APPLIED_RESTORES_KEY)),
@@ -392,6 +397,12 @@ export function createChatStore(options: ChatStoreOptions) {
       writePendingSendRestores(storage, wsKey(PENDING_SEND_RESTORES_KEY), next);
       set({ pendingSendRestores: next });
     },
+    setNewSessionSpaceId: (id) => {
+      logger.info("setNewSessionSpaceId", { from: get().newSessionSpaceId, to: id });
+      if (id) storage.setItem(wsKey(SPACE_STORAGE_KEY), id);
+      else storage.removeItem(wsKey(SPACE_STORAGE_KEY));
+      set({ newSessionSpaceId: id });
+    },
     setInputDraft: (sessionId, draft) => {
       // Debug level — onUpdate fires on every keystroke.
       logger.debug("setInputDraft", { sessionId, length: draft.length });
@@ -456,6 +467,7 @@ export function createChatStore(options: ChatStoreOptions) {
   registerForWorkspaceRehydration(() => {
     const nextSession = storage.getItem(wsKey(SESSION_STORAGE_KEY));
     const nextAgent = storage.getItem(wsKey(AGENT_STORAGE_KEY));
+    const nextSpace = storage.getItem(wsKey(SPACE_STORAGE_KEY));
     const nextDrafts = readDrafts(storage, wsKey(DRAFTS_KEY));
     const nextDraftAttachments = readDraftAttachments(storage, wsKey(DRAFT_ATTACHMENTS_KEY));
     logger.info("workspace rehydration", {
@@ -463,12 +475,14 @@ export function createChatStore(options: ChatStoreOptions) {
       nextSession,
       prevAgent: store.getState().selectedAgentId,
       nextAgent,
+      nextSpace,
       draftCount: Object.keys(nextDrafts).length,
       draftAttachmentCount: Object.keys(nextDraftAttachments).length,
     });
     store.setState({
       activeSessionId: nextSession,
       selectedAgentId: nextAgent,
+      newSessionSpaceId: nextSpace,
       inputDrafts: nextDrafts,
       inputDraftAttachments: nextDraftAttachments,
       appliedDraftRestoreIds: readAppliedRestores(storage, wsKey(APPLIED_RESTORES_KEY)),
