@@ -635,6 +635,9 @@ export interface CreateSkillChangeRequestRequest {
 export interface ReviewSkillChangeRequestRequest {
   action: "approve" | "reject";
   comment?: string;
+  // CEREBRO-PATCH(skill-review-edit-content): FIR-2924 — reviewer's edited
+  // proposal (approve only). Omit/empty to merge as originally proposed.
+  edited_content?: string;
 }
 
 export interface ForkSkillRequest {

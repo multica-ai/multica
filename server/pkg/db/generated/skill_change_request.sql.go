@@ -251,22 +251,27 @@ func (q *Queries) MarkSkillChangeRequestMerged(ctx context.Context, id pgtype.UU
 	return i, err
 }
 
+// CEREBRO-PATCH(skill-review-edit-content): FIR-2924 — proposed_content is
+// rewritten on review so a reviewer's edits (approve) or the unchanged
+// proposal (reject) stay the source of truth for this CR's own history.
 const reviewSkillChangeRequest = `-- name: ReviewSkillChangeRequest :one
 UPDATE skill_change_request SET
     status = $2,
     reviewed_by = $3,
     reviewed_at = now(),
     review_comment = $4,
+    proposed_content = $5,
     updated_at = now()
 WHERE id = $1
 RETURNING id, skill_id, title, description, base_version, proposed_version, proposed_content, proposed_files, status, proposed_by, reviewed_by, reviewed_at, review_comment, created_at, updated_at, work_session_id
 `
 
 type ReviewSkillChangeRequestParams struct {
-	ID            pgtype.UUID `json:"id"`
-	Status        string      `json:"status"`
-	ReviewedBy    pgtype.UUID `json:"reviewed_by"`
-	ReviewComment string      `json:"review_comment"`
+	ID              pgtype.UUID `json:"id"`
+	Status          string      `json:"status"`
+	ReviewedBy      pgtype.UUID `json:"reviewed_by"`
+	ReviewComment   string      `json:"review_comment"`
+	ProposedContent string      `json:"proposed_content"`
 }
 
 func (q *Queries) ReviewSkillChangeRequest(ctx context.Context, arg ReviewSkillChangeRequestParams) (SkillChangeRequest, error) {
@@ -275,6 +280,7 @@ func (q *Queries) ReviewSkillChangeRequest(ctx context.Context, arg ReviewSkillC
 		arg.Status,
 		arg.ReviewedBy,
 		arg.ReviewComment,
+		arg.ProposedContent,
 	)
 	var i SkillChangeRequest
 	err := row.Scan(

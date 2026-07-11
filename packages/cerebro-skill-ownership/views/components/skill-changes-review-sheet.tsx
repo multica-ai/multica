@@ -42,7 +42,7 @@ import {
   type SkillChangeSort,
 } from "../../core/select-changes";
 import { useReviewAnyChangeRequest } from "../../core/mutations";
-import { SkillDiffView } from "./skill-diff-view";
+import { SkillDiffEditor } from "./skill-diff-editor";
 
 interface Props {
   open: boolean;
@@ -106,6 +106,7 @@ export function SkillChangesReviewSheet({
   const [sort, setSort] = useState<SkillChangeSort>("newest");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [reviewComment, setReviewComment] = useState("");
+  const [editedContent, setEditedContent] = useState<string | undefined>(undefined);
 
   const mutation = useReviewAnyChangeRequest(wsId);
 
@@ -130,6 +131,7 @@ export function SkillChangesReviewSheet({
     if (mutation.isPending) return;
     setSelectedId(null);
     setReviewComment("");
+    setEditedContent(undefined);
   };
 
   const handleReview = async (action: "approve" | "reject") => {
@@ -138,11 +140,21 @@ export function SkillChangesReviewSheet({
       await mutation.mutateAsync({
         crId: selected.id,
         skillId: selected.skill_id,
-        data: { action, comment: reviewComment || undefined },
+        data: {
+          action,
+          comment: reviewComment || undefined,
+          // Edits only apply on approve — a reject always refers to the
+          // proposal as originally submitted.
+          edited_content:
+            action === "approve" && editedContent !== undefined && editedContent !== selected.proposed_content
+              ? editedContent
+              : undefined,
+        },
       });
       toast.success(action === "approve" ? "Change approved" : "Change rejected");
       setSelectedId(null);
       setReviewComment("");
+      setEditedContent(undefined);
     } catch {
       toast.error("Failed to review change request");
     }
@@ -210,11 +222,13 @@ export function SkillChangesReviewSheet({
             {detailLoading || !skillDetail ? (
               <Skeleton className="h-40 w-full rounded-md" />
             ) : (
-              <SkillDiffView
+              <SkillDiffEditor
                 base={skillDetail.content}
                 proposed={selected.proposed_content}
                 baseLabel={`current (${selected.current_version})`}
                 proposedLabel={selected.proposed_version}
+                editedContent={editedContent}
+                onEditedContentChange={setEditedContent}
               />
             )}
 
@@ -299,6 +313,7 @@ export function SkillChangesReviewSheet({
                     onClick={() => {
                       setSelectedId(cr.id);
                       setReviewComment("");
+                      setEditedContent(undefined);
                     }}
                     className="flex w-full items-center gap-2 rounded-md border bg-card px-2.5 py-2 text-left hover:bg-accent"
                   >
