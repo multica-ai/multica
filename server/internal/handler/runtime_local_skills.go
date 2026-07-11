@@ -88,7 +88,7 @@ type LocalSkillListStore interface {
 	// never start a claim they might have to abort.
 	HasPending(ctx context.Context, runtimeID string) (bool, error)
 	PopPending(ctx context.Context, runtimeID string) (*RuntimeLocalSkillListRequest, error)
-	Complete(ctx context.Context, id string, skills []RuntimeLocalSkillSummary, supported bool) error
+	Complete(ctx context.Context, id string, skills []RuntimeLocalSkillSummary, supported bool, mcpServers []RuntimeLocalMcpServerSummary, mcpSupported bool) error
 	Fail(ctx context.Context, id string, errMsg string) error
 }
 
@@ -178,12 +178,24 @@ type RuntimeLocalSkillSummary struct {
 	SourcePath  string `json:"source_path"`
 	Provider    string `json:"provider"`
 	// Root classifies the discovery root the daemon found this skill under:
-	// "provider" (the runtime's own skill directory, e.g. ~/.claude/skills)
-	// or "universal" (the cross-tool ~/.agents/skills fallback). Daemons
+	// "provider" (the runtime's own skill directory, e.g. ~/.claude/skills),
+	// "universal" (the cross-tool ~/.agents/skills fallback), or "plugin"
+	// for a skill contributed by an enabled runtime plugin. Daemons
 	// that predate multi-root discovery omit it; an empty value means
 	// "unknown" and the UI should not assert either origin.
 	Root      string `json:"root,omitempty"`
+	Plugin    string `json:"plugin,omitempty"`
 	FileCount int    `json:"file_count"`
+}
+
+// RuntimeLocalMcpServerSummary is deliberately non-secret. The daemon only
+// reports the configured server name, transport, and config scope; command
+// arguments, URLs, headers, and environment values never leave the machine.
+type RuntimeLocalMcpServerSummary struct {
+	Name      string `json:"name"`
+	Transport string `json:"transport,omitempty"`
+	Source    string `json:"source,omitempty"`
+	Enabled   bool   `json:"enabled"`
 }
 
 type RuntimeLocalSkillListRequest struct {
@@ -192,6 +204,8 @@ type RuntimeLocalSkillListRequest struct {
 	Status       RuntimeLocalSkillRequestStatus `json:"status"`
 	Skills       []RuntimeLocalSkillSummary     `json:"skills,omitempty"`
 	Supported    bool                           `json:"supported"`
+	McpServers   []RuntimeLocalMcpServerSummary `json:"mcp_servers,omitempty"`
+	McpSupported bool                           `json:"mcp_supported"`
 	Error        string                         `json:"error,omitempty"`
 	CreatedAt    time.Time                      `json:"created_at"`
 	UpdatedAt    time.Time                      `json:"updated_at"`
@@ -304,7 +318,7 @@ func (s *InMemoryLocalSkillListStore) PopPending(_ context.Context, runtimeID st
 	return oldest, nil
 }
 
-func (s *InMemoryLocalSkillListStore) Complete(_ context.Context, id string, skills []RuntimeLocalSkillSummary, supported bool) error {
+func (s *InMemoryLocalSkillListStore) Complete(_ context.Context, id string, skills []RuntimeLocalSkillSummary, supported bool, mcpServers []RuntimeLocalMcpServerSummary, mcpSupported bool) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -312,6 +326,8 @@ func (s *InMemoryLocalSkillListStore) Complete(_ context.Context, id string, ski
 		req.Status = RuntimeLocalSkillCompleted
 		req.Skills = skills
 		req.Supported = supported
+		req.McpServers = mcpServers
+		req.McpSupported = mcpSupported
 		req.UpdatedAt = time.Now()
 	}
 	return nil
@@ -711,10 +727,12 @@ func (h *Handler) ReportLocalSkillListResult(w http.ResponseWriter, r *http.Requ
 	}
 
 	var body struct {
-		Status    string                     `json:"status"`
-		Skills    []RuntimeLocalSkillSummary `json:"skills"`
-		Supported *bool                      `json:"supported"`
-		Error     string                     `json:"error"`
+		Status       string                         `json:"status"`
+		Skills       []RuntimeLocalSkillSummary     `json:"skills"`
+		Supported    *bool                          `json:"supported"`
+		McpServers   []RuntimeLocalMcpServerSummary `json:"mcp_servers"`
+		McpSupported *bool                          `json:"mcp_supported"`
+		Error        string                         `json:"error"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -726,7 +744,11 @@ func (h *Handler) ReportLocalSkillListResult(w http.ResponseWriter, r *http.Requ
 		if body.Supported != nil {
 			supported = *body.Supported
 		}
-		if err := h.LocalSkillListStore.Complete(r.Context(), requestID, body.Skills, supported); err != nil {
+		mcpSupported := false
+		if body.McpSupported != nil {
+			mcpSupported = *body.McpSupported
+		}
+		if err := h.LocalSkillListStore.Complete(r.Context(), requestID, body.Skills, supported, body.McpServers, mcpSupported); err != nil {
 			// Surface the store failure as 5xx so the daemon can retry instead
 			// of swallowing the report (leaves the request stuck in running
 			// until the server-side timeout, which is exactly the "looks OK but

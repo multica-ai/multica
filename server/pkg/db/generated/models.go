@@ -84,6 +84,7 @@ type AgentSkill struct {
 	AgentID   pgtype.UUID        `json:"agent_id"`
 	SkillID   pgtype.UUID        `json:"skill_id"`
 	CreatedAt pgtype.Timestamptz `json:"created_at"`
+	Enabled   bool               `json:"enabled"`
 }
 
 type AgentTaskQueue struct {

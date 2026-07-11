@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Globe, Lock } from "lucide-react";
+import { Globe, Lock, Users } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { ModelDropdown } from "./model-dropdown";
 import { RuntimePicker, isRuntimeUsableForUser } from "./runtime-picker";
@@ -170,6 +170,12 @@ export function CreateAgentDialog({
   const selectedRuntimeLocked =
     selectedRuntime != null &&
     !isRuntimeUsableForUser(selectedRuntime, currentUserId);
+  const accessSelectionInvalid =
+    accessPickerEnabled &&
+    permissionMode === "public_to" &&
+    !workspaceTargetOn &&
+    selectedMemberIds.size === 0 &&
+    templateTeamTargets.length === 0;
 
   // Shared squad-join follow-up. Returns nothing — the caller has
   // already shown its create-success toast; we only need to surface a
@@ -202,7 +208,14 @@ export function CreateAgentDialog({
   };
 
   const handleSubmit = async () => {
-    if (!name.trim() || !selectedRuntime || selectedRuntimeLocked) return;
+    if (
+      !name.trim() ||
+      !selectedRuntime ||
+      selectedRuntimeLocked ||
+      accessSelectionInvalid
+    ) {
+      return;
+    }
     setCreating(true);
 
     try {
@@ -219,18 +232,19 @@ export function CreateAgentDialog({
         // New MUL-3963 shape: send the authoritative permission fields and
         // let the backend derive the legacy `visibility` field. Mirror the
         // AccessPicker `emit` normalisation — a public_to with zero targets
-        // collapses to private so the backend never sees an "empty public"
-        // request. Team targets pulled from the template are preserved.
+        // collapses to private as defense in depth so the backend never sees
+        // an "empty public" request. Team targets from the template survive.
         const invocationTargets: AgentInvocationTargetInput[] = [];
         if (permissionMode === "public_to") {
           if (workspaceTargetOn) {
             invocationTargets.push({ target_type: "workspace" });
-          }
-          for (const id of selectedMemberIds) {
-            invocationTargets.push({ target_type: "member", target_id: id });
-          }
-          for (const tgt of templateTeamTargets) {
-            invocationTargets.push(tgt);
+          } else {
+            for (const id of selectedMemberIds) {
+              invocationTargets.push({ target_type: "member", target_id: id });
+            }
+            for (const tgt of templateTeamTargets) {
+              invocationTargets.push(tgt);
+            }
           }
         }
         const collapseToPrivate =
@@ -498,11 +512,9 @@ export function CreateAgentDialog({
  * `permission_mode` + `invocation_targets` (MUL-3963), not the legacy
  * `visibility`.
  *
- * Layout keeps the create-flow's compact 2-button toggle so the visibility
- * section stays visually stable in the modal. Under "Public" a compact
- * sub-panel exposes the same choices AccessPicker offers — workspace
- * toggle + member allow-list — so a caller can share the agent with the
- * right audience without a second trip to the inspector after create.
+ * The three mutually exclusive scopes mirror AccessPicker on the detail page.
+ * Specific people reveals a member allow-list; an entire-workspace grant never
+ * stacks redundant member targets underneath it.
  *
  * The current viewer is intentionally excluded from the member list: an
  * owner is always allowed to invoke their own agent, so listing them again
@@ -529,9 +541,10 @@ function AccessSection({
 }) {
   const { t } = useT("agents");
   const isPrivate = permissionMode === "private";
+  const isWorkspace = !isPrivate && workspaceTargetOn;
+  const isMembers = !isPrivate && !workspaceTargetOn;
 
   const otherMembers = members.filter((m) => m.user_id !== currentUserId);
-  const hasAnyGrant = workspaceTargetOn || selectedMemberIds.size > 0;
 
   const toggleMember = (userId: string, checked: boolean) => {
     const next = new Set(selectedMemberIds);
@@ -545,67 +558,43 @@ function AccessSection({
       <Label className="text-xs text-muted-foreground">
         {t(($) => $.create_dialog.access.label)}
       </Label>
-      <div className="mt-1.5 flex gap-2">
-        <button
-          type="button"
-          onClick={() => onPermissionModeChange("private")}
-          className={`flex flex-1 items-center gap-2 rounded-lg border px-3 py-2.5 text-sm transition-colors ${
-            isPrivate
-              ? "border-primary bg-primary/5"
-              : "border-border hover:bg-muted"
-          }`}
-        >
-          <Lock className="h-4 w-4 shrink-0 text-muted-foreground" />
-          <div className="text-left">
-            <div className="font-medium">
-              {t(($) => $.create_dialog.access.private_title)}
-            </div>
-            <div className="text-xs text-muted-foreground">
-              {t(($) => $.create_dialog.access.private_desc)}
-            </div>
-          </div>
-        </button>
-        <button
-          type="button"
-          onClick={() => onPermissionModeChange("public_to")}
-          className={`flex flex-1 items-center gap-2 rounded-lg border px-3 py-2.5 text-sm transition-colors ${
-            !isPrivate
-              ? "border-primary bg-primary/5"
-              : "border-border hover:bg-muted"
-          }`}
-        >
-          <Globe className="h-4 w-4 shrink-0 text-muted-foreground" />
-          <div className="text-left">
-            <div className="font-medium">
-              {t(($) => $.create_dialog.access.public_title)}
-            </div>
-            <div className="text-xs text-muted-foreground">
-              {t(($) => $.create_dialog.access.public_desc)}
-            </div>
-          </div>
-        </button>
-      </div>
+      <fieldset className="mt-1.5 grid gap-2 sm:grid-cols-3">
+        <legend className="sr-only">{t(($) => $.access.tooltip)}</legend>
+        <CompactAccessChoice
+          value="private"
+          icon={Lock}
+          title={t(($) => $.access.private_title)}
+          description={t(($) => $.access.private_desc)}
+          selected={isPrivate}
+          onSelect={() => onPermissionModeChange("private")}
+        />
+        <CompactAccessChoice
+          value="workspace"
+          icon={Globe}
+          title={t(($) => $.access.workspace_title)}
+          description={t(($) => $.access.workspace_desc)}
+          selected={isWorkspace}
+          onSelect={() => {
+            onPermissionModeChange("public_to");
+            onWorkspaceTargetChange(true);
+          }}
+        />
+        <CompactAccessChoice
+          value="members"
+          icon={Users}
+          title={t(($) => $.access.members_title)}
+          description={t(($) => $.access.members_desc)}
+          selected={isMembers}
+          onSelect={() => {
+            onPermissionModeChange("public_to");
+            onWorkspaceTargetChange(false);
+          }}
+        />
+      </fieldset>
 
-      {!isPrivate && (
+      {isMembers && (
         <div className="mt-2 rounded-lg border bg-muted/30 px-3 py-2">
-          {/* Everyone in workspace — stackable with any member grants below,
-              exactly like AccessPicker on the detail page. */}
-          <label className="flex cursor-pointer items-center gap-2 rounded-md py-1 text-sm">
-            <Checkbox
-              checked={workspaceTargetOn}
-              onCheckedChange={(v) => onWorkspaceTargetChange(v === true)}
-              aria-label={t(($) => $.create_dialog.access.public_workspace_option)}
-            />
-            <Globe className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-            <span className="min-w-0 flex-1">
-              {t(($) => $.create_dialog.access.public_workspace_option)}
-            </span>
-          </label>
-
-          <div className="mt-2 border-t pt-2">
-            <div className="pb-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
-              {t(($) => $.create_dialog.access.public_members_group)}
-            </div>
+          <div>
             {otherMembers.length === 0 ? (
               <div className="py-1 text-xs text-muted-foreground">
                 {t(($) => $.create_dialog.access.public_members_empty)}
@@ -639,13 +628,56 @@ function AccessSection({
             )}
           </div>
 
-          {!hasAnyGrant && (
-            <div className="mt-2 text-xs text-amber-700 dark:text-amber-400">
-              {t(($) => $.create_dialog.access.public_targets_empty_hint)}
+          {selectedMemberIds.size === 0 && (
+            <div className="mt-2 text-xs text-destructive" role="alert">
+              {t(($) => $.access.shared_target_required)}
             </div>
           )}
         </div>
       )}
     </div>
+  );
+}
+
+function CompactAccessChoice({
+  value,
+  icon: Icon,
+  title,
+  description,
+  selected,
+  onSelect,
+}: {
+  value: string;
+  icon: typeof Lock;
+  title: string;
+  description: string;
+  selected: boolean;
+  onSelect: () => void;
+}) {
+  return (
+    <label
+      className={`flex min-w-0 cursor-pointer items-start gap-2 rounded-lg border px-3 py-2.5 text-sm transition-colors hover:bg-muted ${
+        selected ? "border-primary bg-primary/5" : "border-border"
+      }`}
+    >
+      <input
+        type="radio"
+        name="create-agent-access-scope"
+        value={value}
+        checked={selected}
+        onChange={onSelect}
+        className="mt-0.5 size-4 shrink-0 accent-foreground"
+      />
+      <Icon
+        className="mt-0.5 size-4 shrink-0 text-muted-foreground"
+        aria-hidden="true"
+      />
+      <span className="min-w-0">
+        <span className="block font-medium">{title}</span>
+        <span className="mt-0.5 block text-xs leading-4 text-muted-foreground">
+          {description}
+        </span>
+      </span>
+    </label>
   );
 }

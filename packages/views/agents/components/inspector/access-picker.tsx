@@ -19,6 +19,8 @@ export type AccessChange = {
   invocation_targets: AgentInvocationTargetInput[];
 };
 
+type AccessScope = "private" | "workspace" | "members";
+
 function hasWorkspaceTarget(
   targets: AgentInvocationTarget[] | undefined | null,
 ): boolean {
@@ -38,8 +40,8 @@ function selectedTargetIds(
 
 /**
  * Draft-first access editor. Visibility changes are security-sensitive, so
- * choosing Shared only reveals the scope controls; nothing is persisted until
- * the owner explicitly saves the complete selection.
+ * choosing a scope only updates the draft; nothing is persisted until the
+ * owner explicitly saves the complete selection.
  */
 export function AccessPicker({
   permissionMode,
@@ -65,8 +67,12 @@ export function AccessPicker({
   const { t } = useT("agents");
   const { t: tc } = useT("common");
   const persistedPrivate = permissionMode === "private";
-  const persistedWorkspace =
-    !persistedPrivate && hasWorkspaceTarget(invocationTargets);
+  const persistedWorkspace = !persistedPrivate && hasWorkspaceTarget(invocationTargets);
+  const persistedScope: AccessScope = persistedPrivate
+    ? "private"
+    : persistedWorkspace
+      ? "workspace"
+      : "members";
   const persistedMembers = useMemo(
     () => selectedTargetIds(invocationTargets, "member"),
     [invocationTargets],
@@ -76,16 +82,14 @@ export function AccessPicker({
     [invocationTargets],
   );
 
-  const [draftPrivate, setDraftPrivate] = useState(persistedPrivate);
-  const [draftWorkspace, setDraftWorkspace] = useState(persistedWorkspace);
+  const [draftScope, setDraftScope] = useState<AccessScope>(persistedScope);
   const [draftMembers, setDraftMembers] = useState(persistedMembers);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    setDraftPrivate(persistedPrivate);
-    setDraftWorkspace(persistedWorkspace);
+    setDraftScope(persistedScope);
     setDraftMembers(persistedMembers);
-  }, [persistedMembers, persistedPrivate, persistedWorkspace]);
+  }, [persistedMembers, persistedScope]);
 
   const editableMembers = ownerId
     ? members.filter((member) => member.user_id !== ownerId)
@@ -95,22 +99,14 @@ export function AccessPicker({
     draftMembers.length === persistedMembers.length &&
     draftMembers.every((id) => persistedMembers.includes(id));
   const dirty =
-    draftPrivate !== persistedPrivate ||
-    (!draftPrivate &&
-      (draftWorkspace !== persistedWorkspace || !sameMembers));
-  const hasSharedTarget =
-    draftWorkspace || draftMembers.length > 0 || teamIds.length > 0;
+    draftScope !== persistedScope ||
+    (draftScope === "members" && !sameMembers);
+  const hasMemberTarget = draftMembers.length > 0;
 
   useEffect(() => {
     onDirtyChange?.(dirty);
     return () => onDirtyChange?.(false);
   }, [dirty, onDirtyChange]);
-
-  const chooseMode = (mode: "private" | "shared") => {
-    const nextPrivate = mode === "private";
-    setDraftPrivate(nextPrivate);
-    if (!nextPrivate && !hasSharedTarget) setDraftWorkspace(true);
-  };
 
   const toggleMember = (userId: string, checked: boolean) => {
     setDraftMembers((current) => {
@@ -122,12 +118,14 @@ export function AccessPicker({
   };
 
   const save = async () => {
-    if (!dirty || saving || (!draftPrivate && !hasSharedTarget)) return;
+    if (!dirty || saving || (draftScope === "members" && !hasMemberTarget)) {
+      return;
+    }
     const targets: AgentInvocationTargetInput[] = [];
-    if (!draftPrivate && draftWorkspace) {
+    if (draftScope === "workspace") {
       targets.push({ target_type: "workspace" });
     }
-    if (!draftPrivate) {
+    if (draftScope === "members") {
       for (const id of draftMembers) {
         targets.push({ target_type: "member", target_id: id });
       }
@@ -139,8 +137,8 @@ export function AccessPicker({
     setSaving(true);
     try {
       await onChange({
-        permission_mode: draftPrivate ? "private" : "public_to",
-        invocation_targets: draftPrivate ? [] : targets,
+        permission_mode: draftScope === "private" ? "private" : "public_to",
+        invocation_targets: draftScope === "private" ? [] : targets,
       });
     } finally {
       setSaving(false);
@@ -188,65 +186,38 @@ export function AccessPicker({
           icon={Lock}
           title={t(($) => $.access.private_title)}
           description={t(($) => $.access.private_desc)}
-          selected={draftPrivate}
-          onSelect={() => chooseMode("private")}
+          selected={draftScope === "private"}
+          onSelect={() => setDraftScope("private")}
         />
         <AccessChoice
           name="agent-access-mode"
-          value="shared"
+          value="workspace"
+          icon={Globe}
+          title={t(($) => $.access.workspace_title)}
+          description={t(($) => $.access.workspace_desc)}
+          selected={draftScope === "workspace"}
+          onSelect={() => setDraftScope("workspace")}
+        />
+        <AccessChoice
+          name="agent-access-mode"
+          value="members"
           icon={Users}
-          title={t(($) => $.access.shared_title)}
-          description={t(($) => $.access.shared_desc)}
-          selected={!draftPrivate}
-          onSelect={() => chooseMode("shared")}
+          title={t(($) => $.access.members_title)}
+          description={t(($) => $.access.members_desc)}
+          selected={draftScope === "members"}
+          onSelect={() => setDraftScope("members")}
         />
       </div>
 
-      {!draftPrivate ? (
-        <div className="space-y-6 border-t border-surface-border bg-muted/20 px-4 py-5 sm:px-6">
+      {draftScope === "members" ? (
+        <div className="border-t border-surface-border bg-muted/20 px-4 py-5 sm:px-6">
           <div>
-            <h4 className="text-sm font-medium">
-              {t(($) => $.access.public_group)}
-            </h4>
-            <div className="mt-3 flex items-start gap-3 rounded-lg border bg-background p-3">
-              <Checkbox
-                id="agent-access-workspace"
-                checked={draftWorkspace}
-                onCheckedChange={(value) =>
-                  setDraftWorkspace(value === true)
-                }
-                className="mt-0.5"
-              />
-              <label
-                htmlFor="agent-access-workspace"
-                className="flex min-w-0 flex-1 cursor-pointer items-start gap-3"
-              >
-                <Globe
-                  className="mt-0.5 size-4 shrink-0 text-muted-foreground"
-                  aria-hidden="true"
-                />
-                <span className="min-w-0">
-                  <span className="block text-sm font-medium">
-                    {t(($) => $.access.workspace_title)}
-                  </span>
-                  <span className="mt-0.5 block text-xs leading-5 text-muted-foreground">
-                    {t(($) => $.access.workspace_desc)}
-                  </span>
-                </span>
-              </label>
-            </div>
-          </div>
-
-          <div>
-            <h4 className="text-sm font-medium">
-              {t(($) => $.access.members_group)}
-            </h4>
             {editableMembers.length === 0 ? (
-              <p className="mt-3 text-xs text-muted-foreground">
+              <p className="text-xs text-muted-foreground">
                 {t(($) => $.access.members_empty)}
               </p>
             ) : (
-              <div className="mt-3 max-h-64 divide-y divide-surface-border overflow-y-auto rounded-lg border bg-background overscroll-contain">
+              <div className="max-h-64 divide-y divide-surface-border overflow-y-auto rounded-lg border bg-background overscroll-contain">
                 {editableMembers.map((member) => {
                   const id = `agent-access-member-${member.user_id}`;
                   return (
@@ -281,17 +252,19 @@ export function AccessPicker({
             )}
           </div>
 
-          {!hasSharedTarget ? (
-            <p className="text-xs text-destructive" role="alert">
+          {!hasMemberTarget ? (
+            <p className="mt-3 text-xs text-destructive" role="alert">
               {t(($) => $.access.shared_target_required)}
             </p>
           ) : null}
+        </div>
+      ) : null}
 
-          {hasComposioAllowlist && persistedPrivate ? (
-            <p className="border-l-2 border-warning pl-3 text-xs leading-5 text-muted-foreground">
-              {t(($) => $.access.composio_switch_hint)}
-            </p>
-          ) : null}
+      {hasComposioAllowlist && persistedPrivate && draftScope !== "private" ? (
+        <div className="border-t border-surface-border bg-muted/20 px-4 py-4 sm:px-6">
+          <p className="border-l-2 border-warning pl-3 text-xs leading-5 text-muted-foreground">
+            {t(($) => $.access.composio_switch_hint)}
+          </p>
         </div>
       ) : null}
 
@@ -299,7 +272,9 @@ export function AccessPicker({
         <Button
           type="button"
           onClick={() => void save()}
-          disabled={!dirty || saving || (!draftPrivate && !hasSharedTarget)}
+          disabled={
+            !dirty || saving || (draftScope === "members" && !hasMemberTarget)
+          }
         >
           {saving ? (
             <Loader2

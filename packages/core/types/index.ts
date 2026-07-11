@@ -55,6 +55,7 @@ export type {
   RuntimeLocalSkillImportAction,
   RuntimeLocalSkillImportConflict,
   RuntimeLocalSkillSummary,
+	RuntimeLocalMcpServerSummary,
   RuntimeLocalSkillListRequest,
   CreateRuntimeLocalSkillImportRequest,
   RuntimeLocalSkillImportRequest,

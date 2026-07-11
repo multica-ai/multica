@@ -159,7 +159,10 @@
   },
   "tokens": {
     "title": "API Token",
-    "description": "个人访问 token 让 CLI 和外部集成可以代表你的账号进行身份验证。",
+    "description": "个人访问 token 让 CLI 和外部集成可以代表你的账号进行身份验证。可通过 multica login --token 使用，或在调用 API 时作为 Bearer token 发送。",
+    "security_note": "Token 拥有你账号的完整访问权限，请像密码一样妥善保管。",
+    "empty": "还没有 API token。在上方创建一个即可开始使用。",
+    "load_failed": "无法加载 API token，请刷新页面重试。",
     "name_placeholder": "Token 名称（例如：我的 CLI）",
     "expiry": {
       "30": "30 天",
@@ -186,9 +189,14 @@
       "confirm": "吊销"
     },
     "created_dialog": {
-      "title": "Token 已创建",
-      "description": "立即复制你的个人访问 token——它不会再次显示。",
+      "title": "个人访问 token 已创建",
+      "warning_prefix": "新的个人访问 token 已创建。出于安全考虑，它",
+      "warning_emphasis": "仅显示一次",
+      "warning_suffix": "，请妥善保存且不要泄露。Token 丢失后无法找回，只能吊销后重新创建。",
+      "confirm_stored": "我已妥善保存该 token。",
       "copy_tooltip": "复制 token",
+      "cli_hint": "使用以下命令登录 CLI：",
+      "copy_command_tooltip": "复制命令",
       "done": "完成"
     }
   },
