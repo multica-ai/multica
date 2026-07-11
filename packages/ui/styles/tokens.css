@@ -64,13 +64,13 @@
     /* Surface system: the app shell is the quiet outer frame; the page canvas
        is where lists, boards, and conversations live; surfaces are reserved
        for bounded content groups; raised surfaces are ephemeral overlays. */
-    --app-shell: oklch(0.955 0.002 286.32);
-    --page-canvas: oklch(0.98 0.001 286.32);
+    --app-shell: oklch(0.964435 0.001327 286.375);
+    --page-canvas: oklch(0.988087 0 0);
     --surface: oklch(1 0 0);
     --surface-foreground: oklch(0.141 0.005 285.823);
     --surface-raised: oklch(1 0 0);
     --surface-hover: oklch(0.967 0.001 286.375);
-    --surface-selected: oklch(0.95 0.014 255);
+    --surface-selected: oklch(0.95 0.002 286.375);
     --surface-selected-foreground: oklch(0.141 0.005 285.823);
     --surface-border: oklch(0.92 0.004 286.32);
     --surface-shadow: 0 1px 2px rgb(15 23 42 / 0.04), 0 1px 1px rgb(15 23 42 / 0.03);
@@ -104,7 +104,7 @@
     --chart-4: oklch(0.85 0.06 255);
     --chart-5: oklch(0.92 0.03 255);
     --radius: 0.625rem;
-    --sidebar: oklch(0.97 0.002 286.32);
+    --sidebar: oklch(0.964435 0.001327 286.375);
     --sidebar-foreground: oklch(0.141 0.005 285.823);
     --sidebar-primary: oklch(0.21 0.006 285.885);
     --sidebar-primary-foreground: oklch(0.985 0 0);
@@ -136,7 +136,7 @@
     --surface-foreground: oklch(0.985 0 0);
     --surface-raised: oklch(0.235 0.007 285.885);
     --surface-hover: oklch(0.274 0.006 286.033);
-    --surface-selected: oklch(0.3 0.038 255);
+    --surface-selected: oklch(0.3 0.006 286.033);
     --surface-selected-foreground: oklch(0.985 0 0);
     --surface-border: oklch(1 0 0 / 10%);
     --surface-shadow: 0 1px 2px rgb(0 0 0 / 0.2), 0 1px 1px rgb(0 0 0 / 0.16);

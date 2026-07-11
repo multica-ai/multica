@@ -76,6 +76,9 @@ const LEGACY_WORKSPACE_TAB_REDIRECTS: Record<string, string> = {
   lark: "integrations",
 };
 
+const SETTINGS_TAB_TRIGGER_CLASS =
+  "h-8 shrink-0 px-2.5 hover:bg-surface-hover data-active:!bg-surface-selected data-active:!text-surface-selected-foreground data-active:hover:!bg-surface-selected md:!w-full md:px-2 md:after:hidden";
+
 export interface ExtraSettingsTab {
   value: string;
   label: string;
@@ -146,7 +149,7 @@ export function SettingsPage({ extraAccountTabs }: SettingsPageProps = {}) {
               <TabsTrigger
                 key={key}
                 value={key}
-                className="h-8 shrink-0 px-2.5 hover:bg-surface-hover data-active:!bg-surface-selected data-active:!text-surface-selected-foreground data-active:hover:!bg-surface-selected data-active:after:bg-brand md:!w-full md:px-2"
+                className={SETTINGS_TAB_TRIGGER_CLASS}
               >
                 <Icon className="h-4 w-4" />
                 {t(($) => $.page.tabs[key])}
@@ -157,7 +160,7 @@ export function SettingsPage({ extraAccountTabs }: SettingsPageProps = {}) {
             <TabsTrigger
               key={tab.value}
               value={tab.value}
-              className="h-8 shrink-0 px-2.5 hover:bg-surface-hover data-active:!bg-surface-selected data-active:!text-surface-selected-foreground data-active:hover:!bg-surface-selected data-active:after:bg-brand md:!w-full md:px-2"
+              className={SETTINGS_TAB_TRIGGER_CLASS}
             >
               <tab.icon className="h-4 w-4" />
               {tab.label}
@@ -174,7 +177,7 @@ export function SettingsPage({ extraAccountTabs }: SettingsPageProps = {}) {
               <TabsTrigger
                 key={key}
                 value={WORKSPACE_TAB_VALUES[key]}
-                className="h-8 shrink-0 px-2.5 hover:bg-surface-hover data-active:!bg-surface-selected data-active:!text-surface-selected-foreground data-active:hover:!bg-surface-selected data-active:after:bg-brand md:!w-full md:px-2"
+                className={SETTINGS_TAB_TRIGGER_CLASS}
               >
                 <Icon className="h-4 w-4" />
                 {t(($) => $.page.tabs[key])}
