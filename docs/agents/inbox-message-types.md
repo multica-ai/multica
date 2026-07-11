@@ -51,6 +51,13 @@ Every row kind exposes the same action affordance so the inbox feels uniform:
 - **Mobile:** a swipe surface — swipe-right to archive, swipe-left to reveal
   read/snooze, long-press for the full action drawer.
 
+When `cerebro_inbox_rounds` is enabled, issue-notification rows add **Add to
+Round** to the desktop `...` menu and **Round** to the mobile swipe-left panel
+and long-press drawer. Channel, DM, chat, and thread rows do not show the action
+because Round membership is issue-scoped. The picker and mutation are owned by
+`@multica/cerebro-rounds`; `CerebroInboxRowActions` only opens that shared
+picker so desktop, mobile, and issue detail use the same membership behavior.
+
 The mobile surface is **one shared component**, `MobileRowActions`, exported
 from `@multica/cerebro-inbox`, reused by every row kind so mobile behaviour is
 identical. The row-action component per kind:

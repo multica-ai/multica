@@ -3,7 +3,7 @@ import { parseWithFallback } from "@multica/core/api";
 
 const roundSchema = z.object({
   id: z.string(), workspace_id: z.string().default(""), owner_id: z.string().default(""),
-  name: z.string().default("Round"), schedule_cron: z.string().nullish().default(null),
+  name: z.string().default("Round"), mode: z.enum(["live", "batch"]).catch("batch").default("batch"), schedule_cron: z.string().nullish().default(null),
   timezone: z.string().nullish().default(null), next_run_at: z.string().nullish().default(null),
   created_at: z.string().default(""), updated_at: z.string().default(""),
 }).loose();
@@ -24,7 +24,8 @@ export const roundStatusSchema = z.object({ round: roundSchema, active_run: runS
 export type RoundStatus = z.infer<typeof roundStatusSchema>;
 const statusesSchema = z.object({ rounds: z.array(roundStatusSchema).default([]) }).loose();
 export function parseRoundStatuses(raw: unknown): RoundStatus[] { return parseWithFallback(raw, statusesSchema, { rounds: [] }, { endpoint: "round-statuses" }).rounds; }
-export function roundIssueIdsToExclude(statuses: RoundStatus[]): Set<string> {
+export function roundIssueIdsToExclude(statuses: RoundStatus[], blockActive = true): Set<string> {
+  if (!blockActive) return new Set();
   return new Set(statuses.flatMap((s) => s.members.map((m) => m.issue_id)));
 }
 export function roundRunState(statuses: RoundStatus[], issueId: string): "round_running" | "round_queued" | null {

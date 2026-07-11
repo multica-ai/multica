@@ -95,7 +95,8 @@ import {
 } from "../layout";
 import type { DynInboxEntry } from "../section-filter";
 import { DynamicInboxCreateMenu } from "./dynamic-inbox-create-menu";
-import { DynamicInboxSection } from "./dynamic-inbox-section";
+import { DynamicInboxSection, runStateFor } from "./dynamic-inbox-section";
+import { DynamicInboxRow } from "./dynamic-inbox-row";
 import { ArchivedInboxView } from "./archived-inbox-view";
 // FIR-1645 — Archived box: archived messages as a foldable block (its own
 // archived queries), dispatched here like the Chat block.
@@ -462,8 +463,11 @@ export function DynamicInbox() {
   // section filter/sort sees the entry's selection-time state, not the
   // just-marked-read state. Matched on stable identity; falls through cleanly
   // if the row was archived/removed.
+  const roundBlockActive = roundsEnabled && roundStatuses.some(
+    (status) => status.members.length > 0 || status.round.next_run_at || status.active_run,
+  );
   const displayEntries = useMemo(() => {
-    const excluded = roundsEnabled ? roundIssueIdsToExclude(roundStatuses) : new Set<string>();
+    const excluded = roundIssueIdsToExclude(roundStatuses, roundBlockActive);
     const availableEntries = entries.filter((e) => e.kind !== "notif" || !e.item.issue_id || !excluded.has(e.item.issue_id));
     if (!selectedSnapshot) return availableEntries;
     const target = entryIdentity(selectedSnapshot);
@@ -476,7 +480,7 @@ export function DynamicInbox() {
       return e;
     });
     return swapped ? next : availableEntries;
-  }, [entries, selectedSnapshot, roundsEnabled, roundStatuses]);
+  }, [entries, selectedSnapshot, roundBlockActive, roundStatuses]);
 
   // TECH-3413 #1 — drag-to-reorder sections (5px threshold so clicks inside a
   // section still register).
@@ -1161,13 +1165,31 @@ export function DynamicInbox() {
         <div ref={sectionsScrollRef} className="flex-1 space-y-3 overflow-y-auto p-3">
           {loading && <p className="px-1 text-sm text-muted-foreground">Loading…</p>}
           {roundsEnabled && (
-            <div className="space-y-2">
-              <div className="flex justify-end"><ConnectedRoundManager statuses={roundStatuses} issueTitles={roundIssueTitles} /></div>
-              <RoundsBlock statuses={roundStatuses} issueTitles={roundIssueTitles} onStart={(roundId) => startRound.mutate(roundId)} onSelectIssue={(issueId) => {
+            <RoundsBlock
+              statuses={roundStatuses}
+              issueTitles={roundIssueTitles}
+              settings={<ConnectedRoundManager statuses={roundStatuses} issueTitles={roundIssueTitles} />}
+              onStart={(roundId) => startRound.mutate(roundId)}
+              onSelectIssue={(issueId) => {
                 const entry = entries.find((e) => e.kind === "notif" && e.item.issue_id === issueId);
                 if (entry) onSelect(entry);
-              }} />
-            </div>
+              }}
+              renderIssue={(issueId) => {
+                const entry = entries.find((candidate) => candidate.kind === "notif" && candidate.item.issue_id === issueId);
+                if (!entry) return null;
+                return <DynamicInboxRow
+                  key={entry.id}
+                  entry={entry}
+                  isSelected={entry.id === selected?.id}
+                  agentRunState={runStateFor(entry, filterContext)}
+                  favoritesEnabled={favoritesEnabled}
+                  isFavorite={filterContext.isFavorite?.(entry) ?? false}
+                  onToggleFavorite={toggleFavorite}
+                  onSelect={onSelect}
+                  onArchive={onArchive}
+                />;
+              }}
+            />
           )}
           {activeSections.length === 0 && !loading && (
             <p className="px-1 text-sm text-muted-foreground">

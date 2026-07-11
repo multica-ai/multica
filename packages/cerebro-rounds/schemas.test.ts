@@ -14,6 +14,7 @@ describe("round API compatibility", () => {
     expect(rounds).toHaveLength(2);
     expect(rounds[0]?.active_run).toBeNull();
     expect(rounds[1]?.active_run?.status).toBe("unknown");
+    expect(rounds[0]?.round.mode).toBe("batch");
   });
 
   it("excludes only queued or running round issues from All messages", () => {
@@ -23,6 +24,7 @@ describe("round API compatibility", () => {
       id: "run", round_id: "r", status: "running", total_count: 2,
     }, members: [{ round_id: "r", issue_id: "queued", held_trigger_count: 0 }, { round_id: "r", issue_id: "running", held_trigger_count: 1 }] }] });
     expect(roundIssueIdsToExclude(rounds)).toEqual(new Set(["waiting", "queued", "running"]));
+    expect(roundIssueIdsToExclude(rounds, false)).toEqual(new Set());
     expect(roundRunState(rounds, "queued")).toBe("round_running");
   });
 

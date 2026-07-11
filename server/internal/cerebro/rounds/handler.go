@@ -18,6 +18,7 @@ func NewHandler(s *Service) *Handler { return &Handler{Service: s} }
 
 type roundRequest struct {
 	Name         string  `json:"name"`
+	Mode         *string `json:"mode"`
 	ScheduleCron *string `json:"schedule_cron"`
 	Timezone     *string `json:"timezone"`
 }
@@ -85,13 +86,17 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	schedule, timezone := "", "UTC"
+	mode := "batch"
+	if q.Mode != nil {
+		mode = *q.Mode
+	}
 	if q.ScheduleCron != nil {
 		schedule = *q.ScheduleCron
 	}
 	if q.Timezone != nil {
 		timezone = *q.Timezone
 	}
-	row, err := h.Service.Create(r.Context(), ws, u, q.Name, schedule, timezone)
+	row, err := h.Service.Create(r.Context(), ws, u, q.Name, mode, schedule, timezone)
 	if err != nil {
 		handleErr(w, err)
 		return
@@ -128,7 +133,7 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, "invalid JSON")
 		return
 	}
-	row, err := h.Service.Update(r.Context(), ws, u, id, optional(q.Name), q.ScheduleCron, q.Timezone)
+	row, err := h.Service.Update(r.Context(), ws, u, id, optional(q.Name), q.Mode, q.ScheduleCron, q.Timezone)
 	if err != nil {
 		handleErr(w, err)
 		return
