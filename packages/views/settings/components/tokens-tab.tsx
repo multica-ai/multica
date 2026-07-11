@@ -55,12 +55,15 @@ export function TokensTab() {
   const [tokenRevoking, setTokenRevoking] = useState<string | null>(null);
   const [revokeConfirmId, setRevokeConfirmId] = useState<string | null>(null);
   const [tokensLoading, setTokensLoading] = useState(true);
+  const [tokensLoadFailed, setTokensLoadFailed] = useState(false);
 
   const loadTokens = useCallback(async () => {
     try {
       const list = await api.listPersonalAccessTokens();
       setTokens(list);
+      setTokensLoadFailed(false);
     } catch (e) {
+      setTokensLoadFailed(true);
       toast.error(e instanceof Error ? e.message : t(($) => $.tokens.toast_load_failed));
     } finally {
       setTokensLoading(false);
@@ -179,7 +182,9 @@ export function TokensTab() {
         ) : tokens.length === 0 ? (
           <Card>
             <CardContent>
-              <p className="text-xs text-muted-foreground">{t(($) => $.tokens.empty)}</p>
+              <p className="text-xs text-muted-foreground">
+                {tokensLoadFailed ? t(($) => $.tokens.load_failed) : t(($) => $.tokens.empty)}
+              </p>
             </CardContent>
           </Card>
         ) : (

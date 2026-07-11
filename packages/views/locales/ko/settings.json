@@ -113,6 +113,7 @@
     "description": "개인 액세스 토큰을 사용하면 CLI와 외부 연동이 내 계정으로 인증할 수 있습니다. multica login --token 으로 사용하거나 API 호출 시 Bearer 토큰으로 보낼 수 있습니다.",
     "security_note": "토큰은 계정에 대한 전체 접근 권한을 부여하므로 비밀번호처럼 안전하게 보관하세요.",
     "empty": "아직 API 토큰이 없습니다. 위에서 만들어 시작하세요.",
+    "load_failed": "API 토큰을 불러오지 못했습니다. 페이지를 새로고침한 뒤 다시 시도하세요.",
     "name_placeholder": "토큰 이름(예: 내 CLI)",
     "expiry": {
       "30": "30일",

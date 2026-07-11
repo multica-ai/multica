@@ -113,6 +113,7 @@
     "description": "个人访问 token 让 CLI 和外部集成可以代表你的账号进行身份验证。可通过 multica login --token 使用，或在调用 API 时作为 Bearer token 发送。",
     "security_note": "Token 拥有你账号的完整访问权限，请像密码一样妥善保管。",
     "empty": "还没有 API token。在上方创建一个即可开始使用。",
+    "load_failed": "无法加载 API token，请刷新页面重试。",
     "name_placeholder": "Token 名称（例如：我的 CLI）",
     "expiry": {
       "30": "30 天",
