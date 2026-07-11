@@ -66,6 +66,18 @@ func TestTryAutoUpdate_SkipsWhenTasksRunning(t *testing.T) {
 	}
 }
 
+// CEREBRO-PATCH(runtime-online-auto-update): FIR-3064 server-triggered updates share the idle barrier.
+func TestTryBeginServerUpdateDefersWhileTaskIsRunning(t *testing.T) {
+	d, _ := newAutoUpdateTestDaemon(t, "v0.1.13")
+	d.activeTasks.Store(1)
+	if d.tryBeginServerUpdate() {
+		t.Fatal("server-triggered update acquired barrier while a task was running")
+	}
+	if d.updating.Load() || d.pauseClaims {
+		t.Fatal("failed barrier must release update state")
+	}
+}
+
 // TestTryAutoUpdate_DefersWhenClaimInFlightAtBarrier covers the race the
 // review flagged: cheap pre-fetch idle check passes (activeTasks == 0), then
 // during the release fetch a poller decides to claim and bumps

@@ -272,6 +272,8 @@ import {
 // CEREBRO-PATCH(api-client-active-terminal-session): inline zod schema for active terminal session lookup.
 import { z } from "zod";
 const ActiveTerminalSessionSchema = z.object({ session_id: z.string(), attach_path: z.string(), created_at: z.string() }).loose();
+// CEREBRO-PATCH(runtime-distribution-version): FIR-3064 parse the fork-owned latest runtime version response.
+const LatestRuntimeVersionSchema = z.object({ version: z.string() }).loose();
 
 // CEREBRO-PATCH(channel-message-search-client): FIR-407 — per-channel/DM message search response schema + type.
 const ChannelMessageSearchResponseSchema = z.object({ messages: z.array(z.object({ id: z.string(), parent_id: z.string().nullable().optional(), author_type: z.string(), author_id: z.string(), content: z.string(), snippet: z.string(), created_at: z.string() }).loose()).default([]), total: z.number().default(0) }).loose();
@@ -2501,6 +2503,17 @@ export class ApiClient {
       method: "POST",
       body: JSON.stringify({ target_version: targetVersion }),
     });
+  }
+
+  // CEREBRO-PATCH(runtime-distribution-version): FIR-3064 keep GitHub release coordinates behind the server boundary.
+  async getLatestRuntimeVersion(): Promise<string | null> {
+    const raw = await this.fetch<unknown>("/api/runtimes/latest-version");
+    return parseWithFallback(
+      raw,
+      LatestRuntimeVersionSchema,
+      { version: null as string | null },
+      { endpoint: "GET /api/runtimes/latest-version" },
+    ).version;
   }
 
   async getUpdateResult(

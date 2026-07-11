@@ -507,6 +507,8 @@ Logs land in `.deploy/logs/deploy-latest.log` on the runner.
 
 A CLI release publishes the `multica` binary to GitHub Releases + Homebrew tap. It is independent of the prod deploy above. Cut one whenever the distributed CLI should be brought in sync with what prod is running.
 
+For the Cerebro fork, every desktop and CLI update coordinate must resolve through the Firtal-owned public distribution channel. `server/internal/cerebro/forkdist` is the canonical server/CLI configuration; `apps/desktop/src/main/cerebro-distribution.ts` is its Electron boundary counterpart. Never introduce `multica-ai/multica` into an update or publish path; `scripts/cerebro/check-distribution-boundary.sh` enforces this in CI.
+
 1. Create a tag on `main`: `git tag v0.x.x`
 2. Push the tag: `git push origin v0.x.x`
 3. GitHub Actions runs `release.yml`: Go tests → GoReleaser builds multi-platform binaries → publishes to GitHub Releases + Homebrew tap.

@@ -9,13 +9,13 @@ import { tmpdir } from "os";
 import { Readable } from "stream";
 
 import { selectPlatformReleaseAssetName } from "./cli-release-asset";
+import { CEREBRO_CLI_RELEASE_DOWNLOAD_URL } from "./cerebro-distribution";
 
 // Desktop prefers the bundled `multica` CLI shipped inside the app for
 // same-repo builds, but it can also repair or bootstrap a managed copy in
 // userData on first launch when the bundled binary is missing or unusable.
 
-const GITHUB_LATEST_BASE =
-  "https://github.com/multica-ai/multica/releases/latest/download";
+const GITHUB_LATEST_BASE = CEREBRO_CLI_RELEASE_DOWNLOAD_URL;
 
 function binaryName(): string {
   return process.platform === "win32" ? "multica.exe" : "multica";

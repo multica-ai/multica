@@ -112,6 +112,26 @@ export function normalizeGitVersion(raw) {
   return stripped;
 }
 
+export function resolveReleaseSigning(env, platform) {
+  if (env.CI !== "true") {
+    return { environment: env, missing: [], signed: true };
+  }
+  const required = platform === "darwin"
+    ? ["CSC_LINK", "CSC_KEY_PASSWORD", "APPLE_ID", "APPLE_APP_SPECIFIC_PASSWORD", "APPLE_TEAM_ID"]
+    : platform === "win32"
+      ? ["CSC_LINK", "CSC_KEY_PASSWORD"]
+      : [];
+  const missing = required.filter((key) => !env[key]);
+  if (missing.length === 0) {
+    return { environment: env, missing, signed: true };
+  }
+  return {
+    environment: { ...env, CSC_IDENTITY_AUTO_DISCOVERY: "false" },
+    missing,
+    signed: false,
+  };
+}
+
 function deriveVersion() {
   return normalizeGitVersion(sh("git describe --tags --always --dirty"));
 }
@@ -318,6 +338,17 @@ function main() {
   const passthrough = stripLeadingSeparator(process.argv.slice(2));
   const parsed = parsePackageArgs(passthrough);
   const buildMatrix = resolveBuildMatrix(parsed);
+  let buildEnvironment = process.env;
+  if (passthrough.includes("--publish") && passthrough.includes("always")) {
+    const signing = resolveReleaseSigning(process.env, process.platform);
+    buildEnvironment = signing.environment;
+    if (!signing.signed) {
+      console.warn(
+        `[package] release signing credentials missing: ${signing.missing.join(", ")} — ` +
+          "building unsigned installers with CSC identity auto-discovery disabled.",
+      );
+    }
+  }
   console.log(
     `[package] build matrix → ${buildMatrix.map(formatTarget).join(", ")}`,
   );
@@ -339,7 +370,7 @@ function main() {
   const viteResult = spawnSync("electron-vite", ["build"], {
     stdio: "inherit",
     cwd: desktopRoot,
-    env: envWithLocalBins(),
+    env: envWithLocalBins(buildEnvironment),
     shell: true,
   });
   if (viteResult.error) {
@@ -363,10 +394,10 @@ function main() {
     );
   }
 
-  const disableMacNotarize = !process.env.APPLE_TEAM_ID;
+  const disableMacNotarize = !buildEnvironment.APPLE_TEAM_ID;
   if (disableMacNotarize) {
     console.warn(
-      "[package] APPLE_TEAM_ID not set — skipping notarization (local dev build). " +
+      "[package] APPLE_TEAM_ID not set — skipping notarization. " +
         "Set APPLE_ID + APPLE_APP_SPECIFIC_PASSWORD + APPLE_TEAM_ID for a release build.",
     );
   }
@@ -404,7 +435,7 @@ function main() {
     const result = spawnSync("electron-builder", builderArgs, {
       stdio: "inherit",
       cwd: desktopRoot,
-      env: envWithLocalBins(),
+      env: envWithLocalBins(buildEnvironment),
       shell: true,
     });
 

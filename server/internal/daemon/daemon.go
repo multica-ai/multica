@@ -2302,12 +2302,24 @@ func (d *Daemon) handleUpdate(ctx context.Context, runtimeID string, update *Pen
 		return
 	}
 
-	// Prevent concurrent update attempts.
-	if !d.updating.CompareAndSwap(false, true) {
-		d.logger.Warn("update already in progress, ignoring", "runtime_id", runtimeID, "update_id", update.ID)
+	// Use the same strict idle barrier as the periodic updater. This prevents
+	// a server-triggered restart from cancelling an active task or a claim that
+	// is already in flight.
+	if !d.tryBeginServerUpdate() {
+		d.logger.Info("CLI update deferred: task, claim, or update in progress", "runtime_id", runtimeID, "update_id", update.ID)
+		d.reportUpdateResult(ctx, runtimeID, update.ID, map[string]any{
+			"status": "failed",
+			"error":  "update deferred until the runtime is idle",
+		})
 		return
 	}
-	defer d.updating.Store(false)
+	restarting := false
+	defer func() {
+		if !restarting {
+			d.releaseClaimBarrier()
+			d.updating.Store(false)
+		}
+	}()
 
 	d.logger.Info("CLI update requested", "runtime_id", runtimeID, "update_id", update.ID, "target_version", update.TargetVersion)
 
@@ -2333,7 +2345,20 @@ func (d *Daemon) handleUpdate(ctx context.Context, runtimeID string, update *Pen
 	})
 
 	// Trigger daemon restart with the new binary.
+	restarting = true
 	d.triggerRestart()
+}
+
+// CEREBRO-PATCH(runtime-online-auto-update): FIR-3064 acquire the strict idle barrier for heartbeat-triggered updates.
+func (d *Daemon) tryBeginServerUpdate() bool {
+	if !d.updating.CompareAndSwap(false, true) {
+		return false
+	}
+	if !d.trySetClaimBarrier() {
+		d.updating.Store(false)
+		return false
+	}
+	return true
 }
 
 // runUpdate executes the brew-or-download upgrade against targetVersion and

@@ -1094,6 +1094,7 @@ func (h *Handler) processHeartbeat(ctx context.Context, rt db.AgentRuntime, supp
 		Status:    "ok",
 	}
 	ack.CerebroAccountID = h.recordHeartbeatAccount(ctx, rt, account)
+	h.maybeScheduleRuntimeUpdate(ctx, rt) // CEREBRO-PATCH(runtime-online-auto-update): FIR-3064 queue fork CLI updates on heartbeat.
 
 	probeUpdateCtx, cancelProbeUpdate := context.WithTimeout(ctx, heartbeatHasPendingTimeout)
 	hasUpdate, probeUpdateErr := h.UpdateStore.HasPending(probeUpdateCtx, runtimeID)
