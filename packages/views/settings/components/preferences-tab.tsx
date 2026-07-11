@@ -125,18 +125,17 @@ export function PreferencesTab() {
     { value: "ja", label: t(($) => $.preferences.language.japanese) },
   ];
 
-  // Persist locally → sync to user.language → reload. Reload (vs in-place
-  // changeLanguage) avoids hydration mismatch and is the i18next-recommended
-  // pattern for App Router.
+  // Persist locally, apply the already-loaded i18n bundle in-place, then sync
+  // to user.language for other devices. Avoiding a full reload keeps the
+  // settings page stable and prevents losing unsaved UI state elsewhere.
   //
-  // If the cross-device sync (PATCH /api/me) fails, the local cookie is
-  // already written so the new locale will take effect after reload — but
-  // the user's other devices won't see the change. Surface that explicitly
-  // via a toast and delay the reload long enough for the toast to be read,
-  // otherwise the failure would be invisible.
+  // If the cross-device sync (PATCH /api/me) fails, the local preference has
+  // still changed for this device. Surface that explicitly via a toast so the
+  // user knows other devices may not pick it up yet.
   const handleLanguageChange = async (next: SupportedLocale) => {
     if (next === currentLocale) return;
     localeAdapter.persist(next);
+    await i18n.changeLanguage(next);
 
     let syncFailed = false;
     if (user) {
@@ -149,11 +148,7 @@ export function PreferencesTab() {
 
     if (syncFailed) {
       toast.warning(t(($) => $.preferences.language.sync_failed));
-      // Give the toast 2.5s of visible time before navigating away.
-      setTimeout(() => window.location.reload(), 2500);
-      return;
     }
-    window.location.reload();
   };
 
   return (

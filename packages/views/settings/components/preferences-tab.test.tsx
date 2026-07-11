@@ -106,7 +106,7 @@ describe("PreferencesTab — Language switcher", () => {
     expect(mockReload).not.toHaveBeenCalled();
   });
 
-  it("when not logged in: persists + reloads, no PATCH", async () => {
+  it("when not logged in: persists and switches language in-place, no PATCH", async () => {
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     render(<PreferencesTab />, { wrapper: I18nWrapper });
 
@@ -126,11 +126,11 @@ describe("PreferencesTab — Language switcher", () => {
 
     expect(mockPersist).toHaveBeenCalledWith("ja");
     expect(mockUpdateMe).not.toHaveBeenCalled();
-    expect(mockReload).toHaveBeenCalledTimes(1);
+    expect(mockReload).not.toHaveBeenCalled();
     expect(mockToastWarning).not.toHaveBeenCalled();
   });
 
-  it("when logged in + PATCH success: persists + PATCH + reload immediately", async () => {
+  it("when logged in + PATCH success: persists, patches, and avoids reload", async () => {
     userRef.current = { id: "user-1" };
     mockUpdateMe.mockResolvedValueOnce({});
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
@@ -141,10 +141,10 @@ describe("PreferencesTab — Language switcher", () => {
     expect(mockPersist).toHaveBeenCalledWith("zh-Hans");
     expect(mockUpdateMe).toHaveBeenCalledWith({ language: "zh-Hans" });
     expect(mockToastWarning).not.toHaveBeenCalled();
-    expect(mockReload).toHaveBeenCalledTimes(1);
+    expect(mockReload).not.toHaveBeenCalled();
   });
 
-  it("when logged in + PATCH fails: shows toast and delays reload by 2.5s", async () => {
+  it("when logged in + PATCH fails: shows toast without reloading", async () => {
     userRef.current = { id: "user-1" };
     mockUpdateMe.mockRejectedValueOnce(new Error("network"));
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
@@ -152,18 +152,12 @@ describe("PreferencesTab — Language switcher", () => {
 
     await user.click(screen.getByRole("radio", { name: "中文" }));
 
-    // Local persist still happened so the reload below sees the new locale.
+    // Local persist still happened so this device keeps the new locale.
     expect(mockPersist).toHaveBeenCalledWith("zh-Hans");
     expect(mockUpdateMe).toHaveBeenCalledWith({ language: "zh-Hans" });
     // Toast surfaced the sync failure.
     expect(mockToastWarning).toHaveBeenCalledTimes(1);
-    // Reload deferred so the toast is visible.
     expect(mockReload).not.toHaveBeenCalled();
-
-    act(() => {
-      vi.advanceTimersByTime(2500);
-    });
-    expect(mockReload).toHaveBeenCalledTimes(1);
   });
 });
 
