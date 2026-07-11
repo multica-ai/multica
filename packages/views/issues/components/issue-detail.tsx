@@ -1420,7 +1420,9 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
           <Skeleton className="h-4 w-24" />
         </div>
         <div className="flex flex-1 min-h-0">
-          <div className="flex-1 overflow-y-auto">
+          {/* Same scrollbar-gutter as the loaded scroller below, so the skeleton
+              column doesn't shift sideways when real content mounts. */}
+          <div className="flex-1 overflow-y-auto [scrollbar-gutter:stable_both-edges]">
             <div className="mx-auto w-full max-w-4xl px-8 py-8 space-y-6">
               <Skeleton className="h-8 w-3/4" />
               <div className="space-y-2">
@@ -1952,10 +1954,16 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
           }
         />
 
+        {/* scrollbar-gutter both-edges: with classic (space-taking) scrollbars —
+            macOS with a mouse or "always show", Windows, Linux — the global
+            `scrollbar-width: thin` carves ~11px off the right side only, so the
+            centered column reads 32px left vs 43px right (MUL-4404). Mirroring
+            the gutter restores symmetry; overlay-scrollbar platforms reserve
+            nothing and render unchanged. */}
         <div
           ref={setScrollContainerEl}
           data-tab-scroll-root
-          className="relative flex-1 overflow-y-auto"
+          className="relative flex-1 overflow-y-auto [scrollbar-gutter:stable_both-edges]"
         >
         <div className="mx-auto w-full max-w-4xl px-8 py-8">
           <TitleEditor
