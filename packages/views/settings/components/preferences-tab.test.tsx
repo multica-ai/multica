@@ -95,11 +95,19 @@ describe("PreferencesTab — Language switcher", () => {
     vi.useRealTimers();
   });
 
+  async function pickLanguage(
+    user: ReturnType<typeof userEvent.setup>,
+    name: string,
+  ) {
+    await user.click(screen.getByRole("combobox", { name: "Language" }));
+    await user.click(await screen.findByRole("option", { name }));
+  }
+
   it("does nothing when clicking the current locale", async () => {
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     render(<PreferencesTab />, { wrapper: I18nWrapper });
 
-    await user.click(screen.getByRole("radio", { name: "English" }));
+    await pickLanguage(user, "English");
 
     expect(mockPersist).not.toHaveBeenCalled();
     expect(mockUpdateMe).not.toHaveBeenCalled();
@@ -110,7 +118,7 @@ describe("PreferencesTab — Language switcher", () => {
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     render(<PreferencesTab />, { wrapper: I18nWrapper });
 
-    await user.click(screen.getByRole("radio", { name: "한국어" }));
+    await pickLanguage(user, "한국어");
 
     expect(mockPersist).toHaveBeenCalledWith("ko");
     expect(mockUpdateMe).not.toHaveBeenCalled();
@@ -122,7 +130,7 @@ describe("PreferencesTab — Language switcher", () => {
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     render(<PreferencesTab />, { wrapper: I18nWrapper });
 
-    await user.click(screen.getByRole("radio", { name: "日本語" }));
+    await pickLanguage(user, "日本語");
 
     expect(mockPersist).toHaveBeenCalledWith("ja");
     expect(mockUpdateMe).not.toHaveBeenCalled();
@@ -136,7 +144,7 @@ describe("PreferencesTab — Language switcher", () => {
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     render(<PreferencesTab />, { wrapper: I18nWrapper });
 
-    await user.click(screen.getByRole("radio", { name: "中文" }));
+    await pickLanguage(user, "中文");
 
     expect(mockPersist).toHaveBeenCalledWith("zh-Hans");
     expect(mockUpdateMe).toHaveBeenCalledWith({ language: "zh-Hans" });
@@ -150,7 +158,7 @@ describe("PreferencesTab — Language switcher", () => {
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     render(<PreferencesTab />, { wrapper: I18nWrapper });
 
-    await user.click(screen.getByRole("radio", { name: "中文" }));
+    await pickLanguage(user, "中文");
 
     // Local persist still happened so the reload below sees the new locale.
     expect(mockPersist).toHaveBeenCalledWith("zh-Hans");
@@ -187,7 +195,7 @@ describe("PreferencesTab — Timezone section", () => {
     user: ReturnType<typeof userEvent.setup>,
     name: RegExp | string,
   ) {
-    await user.click(screen.getByRole("combobox"));
+    await user.click(screen.getByRole("combobox", { name: "Viewing Timezone" }));
     await user.click(await screen.findByRole("option", { name }));
   }
 
@@ -195,7 +203,9 @@ describe("PreferencesTab — Timezone section", () => {
     userRef.current = { id: "user-1", timezone: "Asia/Shanghai" };
     render(<PreferencesTab />, { wrapper: I18nWrapper });
 
-    expect(screen.getByRole("combobox").textContent).toContain("Asia/Shanghai");
+    expect(
+      screen.getByRole("combobox", { name: "Viewing Timezone" }).textContent,
+    ).toContain("Asia/Shanghai");
   });
 
   // handleChange PATCHes then updates the store asynchronously, so the

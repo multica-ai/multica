@@ -1,5 +1,11 @@
 {
+  "auto_save": {
+    "saving": "Saving…",
+    "saved": "Saved",
+    "failed": "Couldn't save"
+  },
   "preferences": {
+    "general_title": "General",
     "theme": {
       "title": "Theme",
       "light": "Light",
@@ -45,7 +51,8 @@
     }
   },
   "account": {
-    "section_profile": "Profile",
+    "section_profile": "Personal information",
+    "avatar_label": "Avatar",
     "click_avatar_hint": "Click to upload avatar",
     "name_label": "Name",
     "profile_description_label": "About you",
@@ -136,7 +143,8 @@
     }
   },
   "workspace": {
-    "section_general": "General",
+    "section_general": "Workspace details",
+    "logo_label": "Workspace logo",
     "change_logo_aria": "Change workspace logo",
     "click_logo_hint": "Click the logo to upload a new image",
     "toast_logo_updated": "Workspace logo updated",
@@ -393,6 +401,10 @@
     "edit_aria": "Edit repository",
     "cancel_aria": "Cancel edit",
     "delete_aria": "Delete repository",
+    "delete_confirm_title": "Delete repository?",
+    "delete_confirm_description": "This repository will be removed from the workspace immediately.",
+    "delete_confirm_cancel": "Cancel",
+    "delete_confirm_action": "Delete repository",
     "manage_hint": "Only admins and owners can manage repositories.",
     "toast_saved": "Repositories saved",
     "toast_save_failed": "Failed to save repositories"

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import { Key, Trash2, Copy, Check } from "lucide-react";
+import { Trash2, Copy, Check } from "lucide-react";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
 import type { PersonalAccessToken } from "@multica/core/types";
 import { Input } from "@multica/ui/components/ui/input";
@@ -37,6 +37,7 @@ import { copyText } from "@multica/ui/lib/clipboard";
 import { toast } from "sonner";
 import { api } from "@multica/core/api";
 import { useT } from "../../i18n";
+import { SettingsSection, SettingsTab } from "./settings-layout";
 
 const EXPIRY_KEYS = ["30", "90", "365", "never"] as const;
 
@@ -103,27 +104,25 @@ export function TokensTab() {
   };
 
   return (
-    <div className="space-y-8">
-      <section className="space-y-4">
-        <div className="flex items-center gap-2">
-          <Key className="h-4 w-4 text-muted-foreground" />
-          <h2 className="text-sm font-semibold">{t(($) => $.tokens.title)}</h2>
-        </div>
-
+    <SettingsTab title={t(($) => $.tokens.title)}>
+      <SettingsSection description={t(($) => $.tokens.description)}>
         <Card>
           <CardContent className="space-y-3">
-            <p className="text-xs text-muted-foreground">
-              {t(($) => $.tokens.description)}
-            </p>
             <div className="grid gap-3 sm:grid-cols-[1fr_120px_auto]">
               <Input
                 type="text"
+                name="token-name"
+                autoComplete="off"
+                aria-label={t(($) => $.tokens.name_placeholder)}
                 value={tokenName}
                 onChange={(e) => setTokenName(e.target.value)}
                 placeholder={t(($) => $.tokens.name_placeholder)}
               />
               <Select value={tokenExpiry} onValueChange={(v) => { if (v) setTokenExpiry(v); }}>
-                <SelectTrigger size="sm"><SelectValue /></SelectTrigger>
+                <SelectTrigger
+                  size="sm"
+                  aria-label={t(($) => $.tokens.title)}
+                ><SelectValue /></SelectTrigger>
                 <SelectContent>
                   {EXPIRY_KEYS.map((key) => (
                     <SelectItem key={key} value={key}>{t(($) => $.tokens.expiry[key])}</SelectItem>
@@ -194,7 +193,7 @@ export function TokensTab() {
             ))}
           </div>
         )}
-      </section>
+      </SettingsSection>
 
       <AlertDialog open={!!revokeConfirmId} onOpenChange={(v) => { if (!v) setRevokeConfirmId(null); }}>
         <AlertDialogContent>
@@ -247,6 +246,6 @@ export function TokensTab() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
+    </SettingsTab>
   );
 }
