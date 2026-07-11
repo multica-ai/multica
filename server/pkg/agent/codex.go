@@ -341,7 +341,12 @@ func renderCodexMcpServersBlock(raw json.RawMessage) (string, bool, error) {
 			if err != nil {
 				return "", false, fmt.Errorf("mcp_servers.%s.%s: %w", name, k, err)
 			}
-			sb.WriteString(codexTOMLKey(k))
+			// CEREBRO-PATCH(codex-mcp-http-headers): Codex names static remote MCP headers `http_headers`, unlike the shared Claude-shaped input.
+			outputKey := map[string]string{"headers": "http_headers"}[k]
+			if outputKey == "" {
+				outputKey = k
+			}
+			sb.WriteString(codexTOMLKey(outputKey))
 			sb.WriteString(" = ")
 			sb.WriteString(tomlValue)
 			sb.WriteString("\n")
