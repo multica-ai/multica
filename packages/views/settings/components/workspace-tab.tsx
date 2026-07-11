@@ -24,6 +24,7 @@ import {
   workspaceKeys,
   workspaceListOptions,
 } from "@multica/core/workspace/queries";
+import { activeSpaceListOptions, spaceKeys } from "@multica/core/spaces/queries";
 import { api } from "@multica/core/api";
 import { issueKeys } from "@multica/core/issues/queries";
 import { activeSpaceListOptions, spaceKeys } from "@multica/core/spaces/queries";
@@ -36,6 +37,7 @@ import {
 import { setCurrentWorkspace } from "@multica/core/platform";
 import type { Workspace } from "@multica/core/types";
 import { AvatarUploadControl } from "../../common/avatar-upload-control";
+import { SpacePicker } from "../../spaces/components/space-picker";
 import { useNavigation } from "../../navigation";
 import { DeleteWorkspaceDialog } from "./delete-workspace-dialog";
 import { useT } from "../../i18n";
@@ -79,6 +81,10 @@ export function WorkspaceTab() {
   const wsId = workspace?.id;
   const { data: members = [], isFetched: membersFetched } = useQuery({
     ...memberListOptions(wsId ?? ""),
+    enabled: !!wsId,
+  });
+  const { data: spaces = [] } = useQuery({
+    ...activeSpaceListOptions(wsId ?? ""),
     enabled: !!wsId,
   });
   const qc = useQueryClient();
