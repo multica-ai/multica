@@ -449,7 +449,7 @@ func (e *FirtalGatewayExecutor) guardToolCallViaPolicy(
 	}
 
 	// This is the GENERAL tool-policy gate, so it resolves through ResolveGeneral:
-	// when the default-OFF cerebro_member_override flag is on for the workspace it
+	// when cerebro_member_override is on for the workspace it
 	// uses the member-override model (a member may loosen an inherited group/
 	// workspace default), otherwise it is identical to the tighten-only Resolve.
 	// The deny-by-default floors (credentials, sandbox, repo checkout, repo-
@@ -580,7 +580,7 @@ func (e *FirtalGatewayExecutor) approvalInboxActive(ctx context.Context, agentID
 	return e.workspaceApprovalGateEnabled(ctx, workspaceID)
 }
 
-// memberOverrideEnabled reports whether the default-OFF cerebro_member_override
+// memberOverrideEnabled reports whether the default-on cerebro_member_override
 // flag is on for the workspace — the switch that makes the GENERAL tool-policy
 // gate resolve through the member-override model (a member may loosen a group
 // default) instead of the pure tighten-only chain. A DB lookup miss or error

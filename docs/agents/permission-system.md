@@ -37,8 +37,8 @@ name if a line moved.
 
 Keep these apart. This doc answers question 2 honestly.
 
-> **FIR-2175 (flag `cerebro_member_override`, default OFF):** when this general
-> gate IS deciding a call (question 1), a workspace can opt into the
+> **FIR-2175 / FIR-3062 (flag `cerebro_member_override`, default ON):** when this general
+> gate IS deciding a call (question 1), a workspace uses the
 > *member-override* model — a member's own Allow/Ask/Deny overrides an inherited
 > group/workspace default by specificity, so a member Allow can OPEN what their
 > group denied (it can loosen, not only tighten). It is wired ONLY into the two

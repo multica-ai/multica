@@ -193,7 +193,7 @@ func (s *Store) ResolveGeneral(ctx context.Context, in Query, memberOverride boo
 	return ResolveWithMode(mode, input), nil
 }
 
-// MemberOverrideEnabled reports whether the default-OFF cerebro_member_override
+// MemberOverrideEnabled reports whether the default-on cerebro_member_override
 // flag is on for the workspace — read from the workspace-level row (the all-zero
 // sentinel user_id), exactly like the gateway (runtime.memberOverrideEnabled) and
 // local-runtime (daemonMemberOverrideEnabled) gates, so a display surface that

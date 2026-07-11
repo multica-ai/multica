@@ -32,6 +32,10 @@ describe("cerebro feature flag grouping", () => {
     }
   });
 
+  it("uses member override semantics by default", () => {
+    expect(CEREBRO_FLAG_DEFAULTS.cerebro_member_override).toBe(true);
+  });
+
   it("has unique group keys", () => {
     expect(groupKeys.size).toBe(CEREBRO_FLAG_GROUPS.length);
   });

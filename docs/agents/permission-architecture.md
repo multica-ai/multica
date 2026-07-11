@@ -70,7 +70,7 @@ The unified tool-policy chain is the model we want **everything** to converge on
   (`validSetting` + DB CHECK `cerebro_tool_policy_disable_workspace_only`, migration
   `9122`); workspace-layer writes already require owner/admin, so Disable needs no new
   write gate. UI: only the workspace-layer decision control offers it.
-- **Member-override resolver (FIR-2175, flag `cerebro_member_override`, default OFF):**
+- **Member-override resolver (FIR-2175/FIR-3062, flag `cerebro_member_override`, default ON):**
   `toolpolicy.ResolveMemberOverride` (pure, `chain.go:245`) is a two-stage variant — Stage A
   resolves the human layers `Workspace › Group › User` by **specificity** (most specific wins,
   so a member's own Allow can OPEN what their group denied — it can LOOSEN, not only tighten),

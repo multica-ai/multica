@@ -172,7 +172,7 @@ func (h *Handler) ResolveDaemonToolPolicy(w http.ResponseWriter, r *http.Request
 	// Resolved once and reused across the capability-wide and per-resource calls.
 	celEval := h.daemonPolicyCELEvaluator(r.Context(), wsUUID)
 	// This is the local-runtime twin of the gateway's GENERAL tool-policy gate, so
-	// it resolves through ResolveGeneral behind the default-OFF cerebro_member_override
+	// it resolves through ResolveGeneral behind the default-on cerebro_member_override
 	// flag: on → the member-override model (a member may loosen an inherited group/
 	// workspace default), off → identical to the tighten-only Resolve. Resolved once
 	// and reused across the capability-wide and per-resource calls so both see the
@@ -391,7 +391,7 @@ func (h *Handler) localToolPolicyMode(ctx context.Context, wsID pgtype.UUID) loc
 	return localtoolpolicy.ModeFromFlags(enabled, enforce)
 }
 
-// daemonMemberOverrideEnabled reports whether the default-OFF cerebro_member_override
+// daemonMemberOverrideEnabled reports whether the default-on cerebro_member_override
 // flag is on for the workspace — the switch that makes the local-runtime GENERAL
 // tool-policy gate resolve through the member-override model (a member may loosen
 // an inherited group default) instead of the pure tighten-only chain. It mirrors

@@ -762,12 +762,12 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   // admin flips this on, after the grant→tool-policy migration is verified 1:1.
   // No deploy-time behaviour change; can never open a default-allow hole on reveal.
   cerebro_credential_chain_grant: false,
-  // FIR-2175: OFF by default — the general tool-policy gate stays pure
-  // tighten-only (Resolve) until an admin opts a workspace into member-override.
+  // FIR-3062: ON by default — workspace permissions are defaults, group
+  // permissions combine by maximum access, and a direct member rule wins.
   // Flipping it on can only affect the visible tool-policy permissions; the
   // deny-by-default floors are never wired to it, so it can never widen
   // credential, sandbox, repo-checkout, or approval-cap access.
-  cerebro_member_override: false,
+  cerebro_member_override: true,
   // TECH-3196: OFF by default — Agent Vault per-agent secret brokering ships
   // dormant until an admin opts in and the access table is configured.
   cerebro_agent_vault: false,
@@ -1796,7 +1796,7 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     label: "Member overrides group on the tool-policy gate",
     group: "permissions",
     description:
-      "Resolve the visible per-tool Allow / Ask / Block policy with the member-override model: a member's own setting wins over an inherited group or workspace default by specificity (most specific wins, so a member Allow can OPEN what their group denied), and the runtime + agent layers may then only tighten that member verdict. Off by default — the gate stays pure most-restrictive-wins. This only affects the general tool-policy permissions an operator sees in the table; the deny-by-default floors (credentials, OS sandbox, repo checkout, the repo-approval cap) are never resolved through it and stay strictly tighten-only, so turning it on can never widen access to a secret, the sandbox, or a repo. FIR-2175.",
+      "Resolve the visible per-tool Allow / Ask / Block policy with the member-override model: workspace is the default, the highest permission across groups wins, and a member's own setting wins over both. On by default. This only affects the general tool-policy permissions an operator sees in the table; the deny-by-default floors (credentials, OS sandbox, repo checkout, the repo-approval cap) are never resolved through it and stay strictly tighten-only, so it can never widen access to a secret, the sandbox, or a repo. FIR-2175, FIR-3062.",
   },
 ];
 
