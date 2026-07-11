@@ -57,6 +57,8 @@ export interface User {
    * NOT NULL DEFAULT '' at the column level, empty when unset.
    */
   profile_description: string;
+  /** Free-form personal motto. Newer servers return a string, empty when unset. */
+  motto?: string;
   /** Pinned IANA tz; null means "use browser-detected tz at render time". */
   timezone: string | null;
   created_at: string;
