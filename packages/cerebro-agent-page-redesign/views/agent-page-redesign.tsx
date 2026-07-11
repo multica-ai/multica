@@ -43,6 +43,7 @@ import {
   workspaceKeys,
 } from "@multica/core/workspace/queries";
 import { CerebroCapabilitiesTab } from "@multica/cerebro-agent-capabilities/views";
+import { agentContextKeys } from "@multica/cerebro-agent-context";
 import { CerebroAgentContextTab } from "@multica/cerebro-agent-context/views";
 import { CerebroAgentMemoryTab } from "@multica/cerebro-agent-memory/views";
 import { CerebroToolsTab } from "@multica/cerebro-agent-tools/views";
@@ -88,6 +89,7 @@ import { PageHeader } from "@multica/views/layout/page-header";
 import { AppLink, useNavigation } from "@multica/views/navigation";
 import { agentPageTabs, type RedesignTab } from "./agent-page-tabs";
 import { IdentityRail } from "./identity-rail";
+import { agentChatUrl } from "./message-agent";
 
 export function CerebroAgentDetailPage({ agentId }: { agentId: string }) {
   const wsId = useWorkspaceId();
@@ -146,6 +148,7 @@ export function CerebroAgentDetailPage({ agentId }: { agentId: string }) {
     try {
       await api.updateAgent(id, data as UpdateAgentRequest);
       qc.invalidateQueries({ queryKey });
+      qc.invalidateQueries({ queryKey: agentContextKeys.versions(id) });
       toast.success("Agent updated");
     } catch (e) {
       if (prevAgent) {
@@ -202,7 +205,8 @@ export function CerebroAgentDetailPage({ agentId }: { agentId: string }) {
     if (!agent) return;
     setActiveSession(null);
     setSelectedAgentId(agent.id);
-    setChatOpen(true);
+    setChatOpen(false);
+    navigation.push(agentChatUrl(paths.inbox(), agent.id));
   };
 
   const newIssueForAgent = () => {
