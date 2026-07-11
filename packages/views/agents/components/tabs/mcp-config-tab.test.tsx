@@ -4,13 +4,27 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import type { Agent } from "@multica/core/types";
+import type { Agent, AgentRuntime } from "@multica/core/types";
+import { ApiError } from "@multica/core/api";
 import { I18nProvider } from "@multica/core/i18n/react";
 import enCommon from "../../../locales/en/common.json";
 import enAgents from "../../../locales/en/agents.json";
 import { McpConfigTab } from "./mcp-config-tab";
 
 const TEST_RESOURCES = { en: { common: enCommon, agents: enAgents } };
+
+const mockRuntimeCapabilities = vi.hoisted(() => vi.fn());
+
+// The tab reads discovery through runtimeCapabilitiesOptions; existing tests
+// render with runtime={null} so the query stays disabled and never fires.
+vi.mock("@multica/core/runtimes", () => ({
+  runtimeCapabilitiesOptions: (runtimeId: string | null) => ({
+    queryKey: ["runtime-capabilities", runtimeId],
+    queryFn: () => mockRuntimeCapabilities(runtimeId),
+    enabled: Boolean(runtimeId),
+    retry: false,
+  }),
+}));
 
 vi.mock("sonner", () => ({
   toast: {
@@ -58,18 +72,37 @@ function TestShell({ children }: { children: React.ReactNode }) {
 function renderTab(
   overrides: Partial<Agent> = {},
   onSave = vi.fn().mockResolvedValue(undefined),
+  runtime: AgentRuntime | null = null,
 ) {
   const result = render(
     <TestShell>
       <McpConfigTab
         agent={{ ...baseAgent, ...overrides }}
-        runtime={null}
+        runtime={runtime}
         onSave={onSave}
       />
     </TestShell>,
   );
   return { ...result, onSave };
 }
+
+const onlineRuntime: AgentRuntime = {
+  id: "runtime-1",
+  workspace_id: "ws-1",
+  daemon_id: "daemon-1",
+  name: "Claude (Mac)",
+  runtime_mode: "local",
+  provider: "claude",
+  launch_header: "",
+  status: "online",
+  device_info: "Mac",
+  metadata: {},
+  owner_id: "user-1",
+  visibility: "private",
+  last_seen_at: null,
+  created_at: "2026-07-11T00:00:00Z",
+  updated_at: "2026-07-11T00:00:00Z",
+};
 
 describe("McpConfigTab", () => {
   beforeEach(() => vi.clearAllMocks());
@@ -213,5 +246,48 @@ describe("McpConfigTab", () => {
     expect(screen.getByText(/invalid json/i)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /add server/i })).toBeDisabled();
     expect(onSave).not.toHaveBeenCalled();
+  });
+
+  it("lists inherited MCP servers discovered from the assigned runtime", async () => {
+    mockRuntimeCapabilities.mockResolvedValue({
+      skills: [],
+      supported: true,
+      mcpServers: [
+        { name: "linear", transport: "http", source: "User config", enabled: true },
+      ],
+      mcpSupported: true,
+    });
+
+    renderTab({}, undefined, onlineRuntime);
+
+    expect(await screen.findByText("linear")).toBeInTheDocument();
+  });
+
+  it("shows a permission notice when capability discovery is forbidden", async () => {
+    mockRuntimeCapabilities.mockRejectedValue(
+      new ApiError("insufficient permissions", 403, "Forbidden"),
+    );
+
+    renderTab({}, undefined, onlineRuntime);
+
+    expect(
+      await screen.findByText(
+        "You don't have permission to view this runtime's MCP servers.",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("shows a retry notice when capability discovery fails", async () => {
+    mockRuntimeCapabilities.mockRejectedValue(
+      new Error("daemon did not respond within 3 minutes"),
+    );
+
+    renderTab({}, undefined, onlineRuntime);
+
+    expect(
+      await screen.findByText(
+        "Couldn't discover runtime MCP servers. Try again.",
+      ),
+    ).toBeInTheDocument();
   });
 });

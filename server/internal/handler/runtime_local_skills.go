@@ -542,31 +542,51 @@ func runtimeLocalSkillRequestTerminal(status RuntimeLocalSkillRequestStatus) boo
 		status == RuntimeLocalSkillTimeout || status == RuntimeLocalSkillConflict
 }
 
-func (h *Handler) requireRuntimeLocalSkillAccess(w http.ResponseWriter, r *http.Request, runtimeID string) (runtimeIDAndWorkspace, bool) {
+// requireRuntimeCapabilityReadAccess resolves the runtime and asserts the
+// caller is a member of its workspace. This is the read-level gate for
+// capability discovery (local skills + the redacted MCP inventory): the
+// payload is deliberately non-secret so any member viewing an agent can see
+// what it inherits from its runtime, regardless of who owns that runtime.
+// Flows that copy skill files off the owner's machine must use the stricter
+// requireRuntimeLocalSkillAccess instead.
+func (h *Handler) requireRuntimeCapabilityReadAccess(w http.ResponseWriter, r *http.Request, runtimeID string) (runtimeIDAndWorkspace, db.Member, bool) {
 	runtimeUUID, ok := parseUUIDOrBadRequest(w, runtimeID, "runtime_id")
 	if !ok {
-		return runtimeIDAndWorkspace{}, false
+		return runtimeIDAndWorkspace{}, db.Member{}, false
 	}
 
 	rt, err := h.Queries.GetAgentRuntime(r.Context(), runtimeUUID)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "runtime not found")
-		return runtimeIDAndWorkspace{}, false
+		return runtimeIDAndWorkspace{}, db.Member{}, false
 	}
 
 	wsID := uuidToString(rt.WorkspaceID)
 	member, ok := h.requireWorkspaceMember(w, r, wsID, "runtime not found")
 	if !ok {
+		return runtimeIDAndWorkspace{}, db.Member{}, false
+	}
+
+	return runtimeIDAndWorkspace{
+		runtimeID:   uuidToString(rt.ID),
+		workspaceID: wsID,
+		provider:    rt.Provider,
+		status:      rt.Status,
+		ownerID:     uuidToString(rt.OwnerID),
+	}, member, true
+}
+
+// requireRuntimeLocalSkillAccess additionally requires the caller to own the
+// runtime. Import reads full skill file contents from the owner's machine, so
+// it stays owner-only even for workspace owners/admins.
+func (h *Handler) requireRuntimeLocalSkillAccess(w http.ResponseWriter, r *http.Request, runtimeID string) (runtimeIDAndWorkspace, bool) {
+	rt, member, ok := h.requireRuntimeCapabilityReadAccess(w, r, runtimeID)
+	if !ok {
 		return runtimeIDAndWorkspace{}, false
 	}
 
-	if rt.OwnerID.Valid && uuidToString(rt.OwnerID) == uuidToString(member.UserID) {
-		return runtimeIDAndWorkspace{
-			runtimeID:   uuidToString(rt.ID),
-			workspaceID: wsID,
-			provider:    rt.Provider,
-			status:      rt.Status,
-		}, true
+	if rt.ownerID != "" && rt.ownerID == uuidToString(member.UserID) {
+		return rt, true
 	}
 
 	writeError(w, http.StatusForbidden, "insufficient permissions")
@@ -578,11 +598,12 @@ type runtimeIDAndWorkspace struct {
 	workspaceID string
 	provider    string
 	status      string
+	ownerID     string
 }
 
 func (h *Handler) InitiateListLocalSkills(w http.ResponseWriter, r *http.Request) {
 	runtimeID := chi.URLParam(r, "runtimeId")
-	rt, ok := h.requireRuntimeLocalSkillAccess(w, r, runtimeID)
+	rt, _, ok := h.requireRuntimeCapabilityReadAccess(w, r, runtimeID)
 	if !ok {
 		return
 	}
@@ -601,7 +622,7 @@ func (h *Handler) InitiateListLocalSkills(w http.ResponseWriter, r *http.Request
 
 func (h *Handler) GetLocalSkillListRequest(w http.ResponseWriter, r *http.Request) {
 	runtimeID := chi.URLParam(r, "runtimeId")
-	rt, ok := h.requireRuntimeLocalSkillAccess(w, r, runtimeID)
+	rt, _, ok := h.requireRuntimeCapabilityReadAccess(w, r, runtimeID)
 	if !ok {
 		return
 	}

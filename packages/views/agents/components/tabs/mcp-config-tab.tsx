@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import type { Agent, AgentRuntime } from "@multica/core/types";
+import { ApiError } from "@multica/core/api";
 import { runtimeCapabilitiesOptions } from "@multica/core/runtimes";
 import {
   AlertDialog,
@@ -222,7 +223,14 @@ export function McpConfigTab({
             text={t(($) => $.tab_body.mcp_config.runtime_discovering)}
           />
         ) : runtimeQuery.isError ? (
-          <McpNotice text={t(($) => $.tab_body.mcp_config.runtime_failed)} />
+          <McpNotice
+            text={
+              runtimeQuery.error instanceof ApiError &&
+              runtimeQuery.error.status === 403
+                ? t(($) => $.tab_body.mcp_config.runtime_forbidden)
+                : t(($) => $.tab_body.mcp_config.runtime_failed)
+            }
+          />
         ) : runtimeQuery.data?.mcpSupported !== true ? (
           <McpNotice
             text={t(($) => $.tab_body.mcp_config.runtime_unsupported)}

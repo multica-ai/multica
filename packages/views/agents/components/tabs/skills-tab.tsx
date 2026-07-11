@@ -16,7 +16,7 @@ import type {
   AgentRuntime,
   RuntimeLocalSkillSummary,
 } from "@multica/core/types";
-import { api } from "@multica/core/api";
+import { api, ApiError } from "@multica/core/api";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { runtimeCapabilitiesOptions } from "@multica/core/runtimes";
 import {
@@ -231,7 +231,14 @@ export function SkillsTab({
             text={t(($) => $.tab_body.skills.runtime_discovering)}
           />
         ) : runtimeQuery.isError ? (
-          <RuntimeNotice text={t(($) => $.tab_body.skills.runtime_failed)} />
+          <RuntimeNotice
+            text={
+              runtimeQuery.error instanceof ApiError &&
+              runtimeQuery.error.status === 403
+                ? t(($) => $.tab_body.skills.runtime_forbidden)
+                : t(($) => $.tab_body.skills.runtime_failed)
+            }
+          />
         ) : runtimeQuery.data?.supported !== true ? (
           <RuntimeNotice text={t(($) => $.tab_body.skills.runtime_unsupported)} />
         ) : runtimeSkills.length === 0 ? (

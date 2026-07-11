@@ -17,6 +17,22 @@ const mockSetAgentSkillEnabled = vi.hoisted(() => vi.fn());
 const mockRemoveAgentSkill = vi.hoisted(() => vi.fn());
 const mockRuntimeCapabilities = vi.hoisted(() => vi.fn());
 
+// ApiError mirrors the production export. The tab branches on
+// `instanceof ApiError` for the 403 permission notice, so the class identity
+// must match the one the mocked query rejects with.
+const { ApiError } = vi.hoisted(() => {
+  class ApiError extends Error {
+    status: number;
+    statusText: string;
+    constructor(message: string, status: number, statusText: string) {
+      super(message);
+      this.status = status;
+      this.statusText = statusText;
+    }
+  }
+  return { ApiError };
+});
+
 vi.mock("@multica/core/hooks", () => ({
   useWorkspaceId: () => "ws-1",
 }));
@@ -29,6 +45,7 @@ vi.mock("@multica/core/api", () => ({
     setAgentSkillEnabled: (...args: unknown[]) => mockSetAgentSkillEnabled(...args),
     removeAgentSkill: (...args: unknown[]) => mockRemoveAgentSkill(...args),
   },
+  ApiError,
 }));
 
 vi.mock("@multica/core/runtimes", () => ({
@@ -72,6 +89,24 @@ const agent: Agent = {
   updated_at: "2026-04-16T00:00:00Z",
   archived_at: null,
   archived_by: null,
+};
+
+const onlineRuntime: AgentRuntime = {
+  id: "runtime-1",
+  workspace_id: "ws-1",
+  daemon_id: "daemon-1",
+  name: "Codex (Mac)",
+  runtime_mode: "local",
+  provider: "codex",
+  launch_header: "",
+  status: "online",
+  device_info: "Mac",
+  metadata: {},
+  owner_id: "user-1",
+  visibility: "private",
+  last_seen_at: null,
+  created_at: "2026-07-11T00:00:00Z",
+  updated_at: "2026-07-11T00:00:00Z",
 };
 
 function renderSkillsTab(
@@ -159,27 +194,36 @@ describe("SkillsTab", () => {
       mcpServers: [],
       mcpSupported: true,
     });
-    const runtime: AgentRuntime = {
-      id: "runtime-1",
-      workspace_id: "ws-1",
-      daemon_id: "daemon-1",
-      name: "Codex (Mac)",
-      runtime_mode: "local",
-      provider: "codex",
-      launch_header: "",
-      status: "online",
-      device_info: "Mac",
-      metadata: {},
-      owner_id: "user-1",
-      visibility: "private",
-      last_seen_at: null,
-      created_at: "2026-07-11T00:00:00Z",
-      updated_at: "2026-07-11T00:00:00Z",
-    };
 
-    renderSkillsTab({}, runtime);
+    renderSkillsTab({}, onlineRuntime);
 
     expect(await screen.findByText("Local review")).toBeInTheDocument();
     expect(screen.getByText("Host-level review workflow")).toBeInTheDocument();
+  });
+
+  it("shows a permission notice when capability discovery is forbidden", async () => {
+    mockRuntimeCapabilities.mockRejectedValue(
+      new ApiError("insufficient permissions", 403, "Forbidden"),
+    );
+
+    renderSkillsTab({}, onlineRuntime);
+
+    expect(
+      await screen.findByText(
+        "You don't have permission to view this runtime's skills.",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("shows a retry notice when capability discovery fails", async () => {
+    mockRuntimeCapabilities.mockRejectedValue(
+      new Error("daemon did not respond within 3 minutes"),
+    );
+
+    renderSkillsTab({}, onlineRuntime);
+
+    expect(
+      await screen.findByText("Couldn't discover runtime skills. Try again."),
+    ).toBeInTheDocument();
   });
 });
