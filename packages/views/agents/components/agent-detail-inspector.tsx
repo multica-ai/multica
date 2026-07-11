@@ -18,6 +18,7 @@ import { Button } from "@multica/ui/components/ui/button";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { AvatarUploadControl } from "../../common/avatar-upload-control";
 import { Input } from "@multica/ui/components/ui/input";
+import { Textarea } from "@multica/ui/components/ui/textarea";
 import {
   Dialog,
   DialogContent,
@@ -80,9 +81,9 @@ export function AgentDetailInspector({
   const isOnline = runtime?.status === "online";
 
   return (
-    <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(300px,380px)]">
-      <div className="space-y-4">
-        <SettingsCard title={t(($) => $.inspector.section_profile)}>
+    <div className="space-y-8">
+      <SettingsSection title={t(($) => $.inspector.section_profile)}>
+        <div className="border-y border-surface-border py-4">
           <div className="flex flex-col gap-4 sm:flex-row sm:items-start">
             <AvatarEditor agent={agent} canEdit={canEdit} onUpdate={update} />
             <div className="min-w-0 flex-1">
@@ -93,97 +94,95 @@ export function AgentDetailInspector({
               />
             </div>
           </div>
-        </SettingsCard>
+        </div>
+      </SettingsSection>
 
-        <SettingsCard title={t(($) => $.inspector.section_execution)}>
-          <PropertyGrid>
-            <PropRow label={t(($) => $.inspector.prop_runtime)} interactive={false}>
-              <RuntimePicker
-                value={agent.runtime_id}
-                runtimes={runtimes}
-                members={members}
-                currentUserId={currentUserId}
-                canEdit={canEdit}
-                onChange={(id) => update({ runtime_id: id })}
-              />
-            </PropRow>
-            <PropRow label={t(($) => $.inspector.prop_model)} interactive={false}>
-              <ModelPicker
-                runtimeId={agent.runtime_id}
-                runtimeOnline={!!isOnline}
-                value={agent.model ?? ""}
-                canEdit={canEdit}
-                onChange={(m) => update({ model: m })}
-              />
-            </PropRow>
-            <ThinkingPropRow
+      <SettingsSection title={t(($) => $.inspector.section_execution)}>
+        <PropertyGrid>
+          <PropRow label={t(($) => $.inspector.prop_runtime)} interactive={false}>
+            <RuntimePicker
+              value={agent.runtime_id}
+              runtimes={runtimes}
+              members={members}
+              currentUserId={currentUserId}
+              canEdit={canEdit}
+              onChange={(id) => update({ runtime_id: id })}
+            />
+          </PropRow>
+          <PropRow label={t(($) => $.inspector.prop_model)} interactive={false}>
+            <ModelPicker
               runtimeId={agent.runtime_id}
               runtimeOnline={!!isOnline}
-              provider={runtime?.provider ?? ""}
-              model={agent.model ?? ""}
-              value={agent.thinking_level ?? ""}
+              value={agent.model ?? ""}
               canEdit={canEdit}
-              onChange={(v) => update({ thinking_level: v })}
+              onChange={(m) => update({ model: m })}
             />
-            <PropRow label={t(($) => $.inspector.prop_concurrency)} interactive={false}>
-              <ConcurrencyPicker
-                value={agent.max_concurrent_tasks}
-                canEdit={canEdit}
-                onChange={(n) => update({ max_concurrent_tasks: n })}
-              />
-            </PropRow>
-          </PropertyGrid>
-        </SettingsCard>
-      </div>
+          </PropRow>
+          <ThinkingPropRow
+            runtimeId={agent.runtime_id}
+            runtimeOnline={!!isOnline}
+            provider={runtime?.provider ?? ""}
+            model={agent.model ?? ""}
+            value={agent.thinking_level ?? ""}
+            canEdit={canEdit}
+            onChange={(v) => update({ thinking_level: v })}
+          />
+          <PropRow label={t(($) => $.inspector.prop_concurrency)} interactive={false}>
+            <ConcurrencyPicker
+              value={agent.max_concurrent_tasks}
+              canEdit={canEdit}
+              onChange={(n) => update({ max_concurrent_tasks: n })}
+            />
+          </PropRow>
+        </PropertyGrid>
+      </SettingsSection>
 
-      <div className="space-y-4">
-        <SettingsCard title={t(($) => $.inspector.section_access)}>
-          <PropertyGrid>
-            <PropRow label={t(($) => $.inspector.prop_visibility)} interactive={false}>
-              <AccessPicker
-                permissionMode={agent.permission_mode}
-                invocationTargets={agent.invocation_targets}
-                visibility={agent.visibility}
-                members={members}
-                canEdit={
-                  currentUserId !== null && agent.owner_id === currentUserId
-                }
-                hasComposioAllowlist={
-                  (agent.composio_toolkit_allowlist ?? []).length > 0
-                }
-                onChange={(next) => update(next)}
-              />
-            </PropRow>
-          </PropertyGrid>
-        </SettingsCard>
+      <SettingsSection title={t(($) => $.inspector.section_access)}>
+        <PropertyGrid>
+          <PropRow label={t(($) => $.inspector.prop_visibility)} interactive={false}>
+            <AccessPicker
+              permissionMode={agent.permission_mode}
+              invocationTargets={agent.invocation_targets}
+              visibility={agent.visibility}
+              members={members}
+              canEdit={
+                currentUserId !== null && agent.owner_id === currentUserId
+              }
+              hasComposioAllowlist={
+                (agent.composio_toolkit_allowlist ?? []).length > 0
+              }
+              onChange={(next) => update(next)}
+            />
+          </PropRow>
+        </PropertyGrid>
+      </SettingsSection>
 
-        <SettingsCard title={t(($) => $.inspector.section_details)}>
-          <PropertyGrid>
-            {owner && (
-              <PropRow label={t(($) => $.inspector.prop_owner)} interactive={false}>
-                <span className="flex min-w-0 items-center gap-1.5">
-                  <ActorAvatar
-                    actorType="member"
-                    actorId={owner.user_id}
-                    size="xs"
-                  />
-                  <span className="truncate">{owner.name}</span>
-                </span>
-              </PropRow>
-            )}
-            <PropRow label={t(($) => $.inspector.prop_created)} interactive={false}>
-              <span className="text-muted-foreground">
-                {timeAgo(agent.created_at)}
+      <SettingsSection title={t(($) => $.inspector.section_details)}>
+        <PropertyGrid>
+          {owner && (
+            <PropRow label={t(($) => $.inspector.prop_owner)} interactive={false}>
+              <span className="flex min-w-0 items-center gap-1.5">
+                <ActorAvatar
+                  actorType="member"
+                  actorId={owner.user_id}
+                  size="xs"
+                />
+                <span className="truncate">{owner.name}</span>
               </span>
             </PropRow>
-            <PropRow label={t(($) => $.inspector.prop_updated)} interactive={false}>
-              <span className="text-muted-foreground">
-                {timeAgo(agent.updated_at)}
-              </span>
-            </PropRow>
-          </PropertyGrid>
-        </SettingsCard>
-      </div>
+          )}
+          <PropRow label={t(($) => $.inspector.prop_created)} interactive={false}>
+            <span className="text-muted-foreground">
+              {timeAgo(agent.created_at)}
+            </span>
+          </PropRow>
+          <PropRow label={t(($) => $.inspector.prop_updated)} interactive={false}>
+            <span className="text-muted-foreground">
+              {timeAgo(agent.updated_at)}
+            </span>
+          </PropRow>
+        </PropertyGrid>
+      </SettingsSection>
     </div>
   );
 }
@@ -192,7 +191,7 @@ export function AgentDetailInspector({
 // Layout helpers
 // ---------------------------------------------------------------------------
 
-function SettingsCard({
+function SettingsSection({
   title,
   children,
 }: {
@@ -200,18 +199,16 @@ function SettingsCard({
   children: ReactNode;
 }) {
   return (
-    <section className="rounded-lg border bg-background">
-      <div className="border-b px-5 py-3.5">
-        <h2 className="text-sm font-semibold">{title}</h2>
-      </div>
-      <div className="p-5">{children}</div>
+    <section className="space-y-3">
+      <h3 className="px-0.5 text-sm font-medium">{title}</h3>
+      {children}
     </section>
   );
 }
 
 function PropertyGrid({ children }: { children: ReactNode }) {
   return (
-    <div className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1">
+    <div className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 border-y border-surface-border py-2">
       {children}
     </div>
   );
@@ -262,7 +259,7 @@ function NameAndDescription({
   if (!canEdit) {
     return (
       <div className="flex flex-col gap-1">
-        <span className="text-base font-semibold leading-tight">
+        <span className="text-base font-medium leading-tight">
           {agent.name}
         </span>
         {agent.description ? (
@@ -292,10 +289,13 @@ function NameAndDescription({
           <button
             type="button"
             {...triggerProps}
-            className="group -mx-1 inline-flex items-center gap-1.5 self-start rounded px-1 text-left text-base font-semibold leading-tight transition-colors hover:bg-accent/50"
+            className="group -mx-1 inline-flex items-center gap-1.5 self-start rounded px-1 text-left text-base font-medium leading-tight transition-colors hover:bg-accent/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
             <span>{agent.name}</span>
-            <Pencil className="h-3 w-3 shrink-0 text-muted-foreground/0 transition-colors group-hover:text-muted-foreground" />
+            <Pencil
+              className="h-3 w-3 shrink-0 text-muted-foreground/0 transition-colors group-hover:text-muted-foreground"
+              aria-hidden="true"
+            />
           </button>
         )}
       </InlineEditPopover>
@@ -335,14 +335,17 @@ function DescriptionEditor({
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="group -mx-1 inline-flex items-start gap-1.5 self-start rounded px-1 text-left text-xs leading-relaxed transition-colors hover:bg-accent/50"
+        className="group -mx-1 inline-flex items-start gap-1.5 self-start rounded px-1 text-left text-xs leading-relaxed transition-colors hover:bg-accent/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       >
         {value ? (
           <span className="text-muted-foreground">{value}</span>
         ) : (
           <span className="italic text-muted-foreground/50">{t(($) => $.inspector.no_description_placeholder)}</span>
         )}
-        <Pencil className="mt-0.5 h-3 w-3 shrink-0 text-muted-foreground/0 transition-colors group-hover:text-muted-foreground" />
+        <Pencil
+          className="mt-0.5 h-3 w-3 shrink-0 text-muted-foreground/0 transition-colors group-hover:text-muted-foreground"
+          aria-hidden="true"
+        />
       </button>
 
       <Dialog open={open} onOpenChange={setOpen}>
@@ -396,8 +399,11 @@ function DescriptionEditorBody({
         <DialogTitle>{t(($) => $.inspector.edit_description_title)}</DialogTitle>
       </DialogHeader>
       <div className="flex flex-col gap-2">
-        <textarea
+        <Textarea
           autoFocus
+          name="agent-description"
+          autoComplete="off"
+          aria-label={t(($) => $.inspector.edit_description_title)}
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           placeholder={t(($) => $.inspector.description_placeholder)}
@@ -413,7 +419,7 @@ function DescriptionEditorBody({
               void commit();
             }
           }}
-          className="w-full resize-none rounded-md border bg-transparent px-3 py-2 text-sm outline-none focus-visible:border-input"
+          className="resize-none"
         />
         <CharCounter length={length} max={AGENT_DESCRIPTION_MAX_LENGTH} />
       </div>
@@ -510,6 +516,9 @@ function InlineEditPopover({
           {kind === "input" ? (
             <Input
               autoFocus
+              name="agent-name"
+              autoComplete="off"
+              aria-label={title}
               value={draft}
               onChange={(e) => {
                 setDraft(e.target.value);
@@ -530,8 +539,11 @@ function InlineEditPopover({
               className="h-8"
             />
           ) : (
-            <textarea
+            <Textarea
               autoFocus
+              name="agent-inline-description"
+              autoComplete="off"
+              aria-label={title}
               value={draft}
               onChange={(e) => {
                 setDraft(e.target.value);
@@ -550,7 +562,7 @@ function InlineEditPopover({
                 }
               }}
               rows={3}
-              className="w-full resize-none rounded-md border bg-transparent px-2 py-1.5 text-xs outline-none focus-visible:border-input"
+              className="resize-none text-xs"
             />
           )}
           {error && <p className="text-xs text-destructive">{error}</p>}

@@ -309,7 +309,8 @@
       "unsaved_changes": "저장하지 않은 변경사항"
     },
     "instructions": {
-      "intro": "이 에이전트의 정체성과 작업 방식을 정의하세요. 모든 작업에서 에이전트 컨텍스트에 포함됩니다. Markdown을 지원합니다.",
+      "intro": "모든 작업에 사용할 System Prompt를 설정하세요. Markdown을 지원합니다.",
+      "system_prompt_label": "System Prompt",
       "placeholder": "이 에이전트의 역할, 전문성, 작업 방식을 정의하세요.\n\n# 예시\n당신은 React와 TypeScript에 특화된 프런트엔드 엔지니어입니다.\n\n## 작업 방식\n- 작고 집중된 PR을 작성합니다. 논리적 변경 단위마다 커밋 하나를 사용합니다\n- 상속보다 조합을 선호합니다\n- 새 컴포넌트에는 항상 단위 테스트를 추가합니다\n\n## 제약\n- 명시적인 승인 없이 shared/ 타입을 수정하지 않습니다\n- features/의 기존 컴포넌트 패턴을 따릅니다"
     },
     "env": {
@@ -335,16 +336,20 @@
       "empty_editable": "설정된 환경 변수가 없습니다. 시작 시 에이전트에 주입할 변수를 추가하세요."
     },
     "custom_args": {
-      "intro": "에이전트 명령을 시작할 때 뒤에 붙는 추가 CLI 인자입니다. 여러 토큰으로 된 플래그는 한 행에 둘 수 있으며, CLI에 전달되기 전에 공백 기준으로 나뉩니다.",
+      "intro": "에이전트를 시작할 때 전달할 CLI 인자를 추가하세요. 한 행에 공백으로 구분된 여러 토큰을 입력할 수 있습니다.",
+      "arguments_label": "인자",
       "launch_mode_prefix": "시작 모드: ",
       "launch_mode_args_placeholder": "<인자>",
       "input_placeholder": "--flag value",
+      "input_aria": "인자 {{index}}",
+      "empty_title": "설정된 사용자 지정 인자가 없습니다.",
       "remove_aria": "인자 제거",
       "saved_toast": "사용자 지정 인자를 저장했습니다",
       "save_failed_toast": "사용자 지정 인자를 저장하지 못했습니다"
     },
     "mcp_config": {
-      "intro": "런타임 CLI로 전달되는 MCP server configuration입니다(Claude는 --mcp-config, Codex는 $CODEX_HOME/config.toml, Hermes/Kimi/Kiro는 ACP mcpServers, OpenCode는 OPENCODE_CONFIG_CONTENT, OpenClaw는 task별 config wrapper). 그대로 저장되며 secret이 포함될 수 있으므로 에이전트 소유자와 워크스페이스 관리자만 읽을 수 있습니다. 비워두면 CLI 자체 기본값을 사용합니다. OpenClaw HTTP/SSE 항목은 Claude의 \"type\" 대신 OpenClaw의 필드명(예: \"transport\": \"streamable-http\")을 사용하세요.",
+      "intro": "이 에이전트가 사용할 MCP Server를 설정하세요. 비워 두면 런타임 기본값을 사용합니다.",
+      "config_label": "Server 설정(JSON)",
       "placeholder": "{\n  \"mcpServers\": {\n    \"fetch\": {\n      \"command\": \"uvx\",\n      \"args\": [\"mcp-server-fetch\"]\n    }\n  }\n}",
       "editor_aria": "MCP config JSON editor",
       "clear_action": "지우기",

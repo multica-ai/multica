@@ -309,7 +309,8 @@
       "unsaved_changes": "未保存的修改"
     },
     "instructions": {
-      "intro": "定义这个智能体的身份和工作风格。会注入到每个 task 的上下文。支持 Markdown。",
+      "intro": "设置每个任务都会使用的 System Prompt，支持 Markdown。",
+      "system_prompt_label": "System Prompt",
       "placeholder": "定义这个智能体的角色、专长和工作风格。\n\n# 示例\n你是一名专注 React 和 TypeScript 的前端工程师。\n\n## 工作风格\n- 写小而聚焦的 PR —— 每个逻辑变更一个 commit\n- 优先组合而不是继承\n- 新组件总是配单元测试\n\n## 约束\n- 未经明确批准不要修改 shared/ 下的 type\n- 遵循 features/ 中现有的组件模式"
     },
     "env": {
@@ -335,16 +336,20 @@
       "empty_editable": "尚未配置环境变量。新增一条即可在智能体启动时注入。"
     },
     "custom_args": {
-      "intro": "在智能体命令启动时追加的额外 CLI 参数。多 token 的参数可以共用一行 —— 在传给 CLI 前会按空白拆分。",
+      "intro": "添加智能体启动时传入的 CLI 参数。一行可以包含多个以空格分隔的 token。",
+      "arguments_label": "参数",
       "launch_mode_prefix": "启动方式： ",
       "launch_mode_args_placeholder": "<你的参数>",
       "input_placeholder": "--flag 值",
+      "input_aria": "参数 {{index}}",
+      "empty_title": "尚未配置自定义参数。",
       "remove_aria": "移除参数",
       "saved_toast": "已保存自定义参数",
       "save_failed_toast": "保存自定义参数失败"
     },
     "mcp_config": {
-      "intro": "转发给运行时 CLI 的 MCP 服务器配置（Claude 通过 --mcp-config，Codex 通过 $CODEX_HOME/config.toml，Hermes/Kimi/Kiro 通过 ACP mcpServers，OpenCode 通过 OPENCODE_CONFIG_CONTENT，OpenClaw 通过每个任务的配置 wrapper）。原样保存，可能包含密钥 —— 只有智能体所有者和工作区管理员可以读取。留空则回退到 CLI 自身的默认设置。OpenClaw 的 HTTP/SSE 条目需要使用 OpenClaw 自己的字段名（例如 \"transport\": \"streamable-http\"），而不是 Claude 的 \"type\"。",
+      "intro": "配置这个智能体可以使用的 MCP Server。留空时使用运行时的默认配置。",
+      "config_label": "Server 配置（JSON）",
       "placeholder": "{\n  \"mcpServers\": {\n    \"fetch\": {\n      \"command\": \"uvx\",\n      \"args\": [\"mcp-server-fetch\"]\n    }\n  }\n}",
       "editor_aria": "MCP 配置 JSON 编辑器",
       "clear_action": "清空",

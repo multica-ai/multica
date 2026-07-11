@@ -296,6 +296,9 @@ export function AgentOverviewPane({
       : activeSection === "settings"
         ? visibleSettingsTabs
         : [];
+  const activeSecondaryTab = secondaryTabs.find(
+    (tab) => tab.id === effectiveView,
+  );
 
   const needsAttention =
     presence !== null &&
@@ -329,34 +332,6 @@ export function AgentOverviewPane({
           ))}
         </div>
       </div>
-
-      {secondaryTabs.length > 0 && (
-        <div className="shrink-0 border-b bg-muted/20 px-4 py-2 sm:px-6">
-          <div
-            className="mx-auto flex max-w-[1440px] items-center gap-1 overflow-x-auto"
-            role="tablist"
-            aria-label={t(($) => $.tabs.section_navigation_aria)}
-          >
-            {secondaryTabs.map((tab) => (
-              <button
-                key={tab.id}
-                type="button"
-                role="tab"
-                aria-selected={effectiveView === tab.id}
-                onClick={() => requestView(tab.id)}
-                className={cn(
-                  "shrink-0 rounded-md px-3 py-1.5 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                  effectiveView === tab.id
-                    ? "bg-background text-foreground shadow-xs ring-1 ring-border"
-                    : "text-muted-foreground hover:bg-background/70 hover:text-foreground",
-                )}
-              >
-                {t(($) => $.tabs[tab.labelKey])}
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
 
       <div className="min-h-0 flex-1 overflow-y-auto">
         {effectiveView === "overview" && (
@@ -400,77 +375,104 @@ export function AgentOverviewPane({
           </div>
         )}
 
-        {effectiveView === "instructions" && (
-          <TabContent>
-            <InstructionsTab
-              agent={agent}
-              onSave={(instructions) => onUpdate(agent.id, { instructions })}
-              onDirtyChange={setActiveDirty}
-            />
-          </TabContent>
-        )}
-        {effectiveView === "skills" && (
-          <TabContent>
-            <SkillsTab agent={agent} />
-          </TabContent>
-        )}
-        {effectiveView === "mcp_config" && (
-          <TabContent>
-            <McpConfigTab
-              agent={agent}
-              onSave={(updates) => onUpdate(agent.id, updates)}
-              onDirtyChange={setActiveDirty}
-            />
-          </TabContent>
-        )}
-        {effectiveView === "composio_mcp" && (
-          <TabContent>
-            <AgentMcpTab agent={agent} />
-          </TabContent>
-        )}
-        {effectiveView === "integrations" && (
-          <TabContent>
-            <IntegrationsTab agent={agent} />
-          </TabContent>
-        )}
+        {secondaryTabs.length > 0 && activeSecondaryTab && (
+          <div className="flex min-h-full flex-col md:flex-row">
+            <aside className="shrink-0 overflow-x-auto border-b border-surface-border bg-app-shell/70 p-2 md:w-52 md:overflow-x-visible md:border-b-0 md:border-r md:p-4">
+              <div
+                className="flex w-max min-w-full items-center gap-1 md:w-full md:flex-col md:items-stretch"
+                role="tablist"
+                aria-orientation="vertical"
+                aria-label={t(($) => $.tabs.section_navigation_aria)}
+              >
+                {secondaryTabs.map((tab) => {
+                  const active = effectiveView === tab.id;
+                  return (
+                    <button
+                      key={tab.id}
+                      type="button"
+                      role="tab"
+                      aria-selected={active}
+                      onClick={() => requestView(tab.id)}
+                      className={cn(
+                        "flex h-8 shrink-0 items-center rounded-md px-2.5 text-left text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring md:w-full",
+                        active
+                          ? "bg-surface-selected font-medium text-surface-selected-foreground hover:bg-surface-selected"
+                          : "text-muted-foreground hover:bg-surface-hover hover:text-foreground",
+                      )}
+                    >
+                      {t(($) => $.tabs[tab.labelKey])}
+                    </button>
+                  );
+                })}
+              </div>
+            </aside>
 
-        {effectiveView === "general" && (
-          <TabContent wide>
-            <AgentDetailInspector
-              agent={agent}
-              runtime={runtime}
-              owner={owner}
-              runtimes={runtimes}
-              members={members}
-              currentUserId={currentUserId ?? null}
-              canEdit={canEdit}
-              onUpdate={onUpdate}
-            />
-          </TabContent>
-        )}
-        {effectiveView === "env" && (
-          <TabContent>
-            <EnvTab agent={agent} onDirtyChange={setActiveDirty} />
-          </TabContent>
-        )}
-        {effectiveView === "custom_args" && (
-          <TabContent>
-            <CustomArgsTab
-              agent={agent}
-              runtimeDevice={runtime ?? undefined}
-              onSave={(updates) => onUpdate(agent.id, updates)}
-              onDirtyChange={setActiveDirty}
-            />
-          </TabContent>
-        )}
-        {effectiveView === "runtime_config" && (
-          <TabContent>
-            <RuntimeConfigTab
-              agent={agent}
-              onSave={(updates) => onUpdate(agent.id, updates)}
-              onDirtyChange={setActiveDirty}
-            />
-          </TabContent>
+            <section className="min-w-0 flex-1">
+              <div className="mx-auto w-full max-w-3xl p-4 sm:p-6 md:p-8">
+                <header>
+                  <h2 className="text-base font-medium text-balance">
+                    {t(($) => $.tabs[activeSecondaryTab.labelKey])}
+                  </h2>
+                </header>
+
+                <div className="mt-6">
+                  {effectiveView === "instructions" && (
+                    <InstructionsTab
+                      agent={agent}
+                      onSave={(instructions) =>
+                        onUpdate(agent.id, { instructions })
+                      }
+                      onDirtyChange={setActiveDirty}
+                    />
+                  )}
+                  {effectiveView === "skills" && <SkillsTab agent={agent} />}
+                  {effectiveView === "mcp_config" && (
+                    <McpConfigTab
+                      agent={agent}
+                      onSave={(updates) => onUpdate(agent.id, updates)}
+                      onDirtyChange={setActiveDirty}
+                    />
+                  )}
+                  {effectiveView === "composio_mcp" && (
+                    <AgentMcpTab agent={agent} />
+                  )}
+                  {effectiveView === "integrations" && (
+                    <IntegrationsTab agent={agent} />
+                  )}
+                  {effectiveView === "general" && (
+                    <AgentDetailInspector
+                      agent={agent}
+                      runtime={runtime}
+                      owner={owner}
+                      runtimes={runtimes}
+                      members={members}
+                      currentUserId={currentUserId ?? null}
+                      canEdit={canEdit}
+                      onUpdate={onUpdate}
+                    />
+                  )}
+                  {effectiveView === "env" && (
+                    <EnvTab agent={agent} onDirtyChange={setActiveDirty} />
+                  )}
+                  {effectiveView === "custom_args" && (
+                    <CustomArgsTab
+                      agent={agent}
+                      runtimeDevice={runtime ?? undefined}
+                      onSave={(updates) => onUpdate(agent.id, updates)}
+                      onDirtyChange={setActiveDirty}
+                    />
+                  )}
+                  {effectiveView === "runtime_config" && (
+                    <RuntimeConfigTab
+                      agent={agent}
+                      onSave={(updates) => onUpdate(agent.id, updates)}
+                      onDirtyChange={setActiveDirty}
+                    />
+                  )}
+                </div>
+              </div>
+            </section>
+          </div>
         )}
       </div>
 
@@ -504,25 +506,6 @@ export function AgentOverviewPane({
           </AlertDialogContent>
         </AlertDialog>
       )}
-    </div>
-  );
-}
-
-function TabContent({
-  children,
-  wide = false,
-}: {
-  children: React.ReactNode;
-  wide?: boolean;
-}) {
-  return (
-    <div
-      className={cn(
-        "mx-auto flex min-h-full flex-col p-4 sm:p-6",
-        wide ? "max-w-[1200px]" : "max-w-5xl",
-      )}
-    >
-      {children}
     </div>
   );
 }

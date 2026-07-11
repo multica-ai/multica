@@ -301,7 +301,8 @@
       "unsaved_changes": "保存していない変更"
     },
     "instructions": {
-      "intro": "このエージェントのアイデンティティと作業スタイルを定義します。すべてのタスクでエージェントのコンテキストに注入されます。Markdown に対応しています。",
+      "intro": "すべてのタスクで使用する System Prompt を設定します。Markdown に対応しています。",
+      "system_prompt_label": "System Prompt",
       "placeholder": "このエージェントの役割、専門分野、作業スタイルを定義してください。\n\n# 例\nあなたは React と TypeScript を専門とするフロントエンドエンジニアです。\n\n## 作業スタイル\n- 小さく焦点を絞った PR を作成する — 論理的な変更ごとに1コミット\n- 継承よりコンポジションを優先する\n- 新しいコンポーネントには必ずユニットテストを追加する\n\n## 制約\n- 明示的な承認なしに shared/ の型を変更しない\n- features/ の既存のコンポーネントパターンに従う"
     },
     "env": {
@@ -327,16 +328,20 @@
       "empty_editable": "設定された環境変数はありません。起動時にエージェントへ注入する変数を追加してください。"
     },
     "custom_args": {
-      "intro": "起動時にエージェントコマンドの末尾に追加される CLI 引数です。複数トークンのフラグは1行にまとめられ、CLI に渡される前に空白で分割されます。",
+      "intro": "エージェントの起動時に渡す CLI 引数を追加します。1 行に空白区切りの複数トークンを入力できます。",
+      "arguments_label": "引数",
       "launch_mode_prefix": "起動モード: ",
       "launch_mode_args_placeholder": "<引数>",
       "input_placeholder": "--flag value",
+      "input_aria": "引数 {{index}}",
+      "empty_title": "カスタム引数は設定されていません。",
       "remove_aria": "引数を削除",
       "saved_toast": "カスタム引数を保存しました",
       "save_failed_toast": "カスタム引数を保存できませんでした"
     },
     "mcp_config": {
-      "intro": "ランタイム CLI に転送される MCP server configuration です（Claude は --mcp-config、Codex は $CODEX_HOME/config.toml、Hermes/Kimi/Kiro は ACP mcpServers、OpenClaw はタスクごとの config wrapper 経由）。そのまま保存され、secret が含まれる場合があるため、エージェントのオーナーとワークスペースの admin のみが読み取れます。空のままにすると CLI 自身のデフォルトが使用されます。OpenClaw の HTTP/SSE エントリには、Claude の \"type\" の代わりに OpenClaw 独自のフィールド名（例: \"transport\": \"streamable-http\"）を使用してください。",
+      "intro": "このエージェントが使用できる MCP Server を設定します。空欄の場合はランタイムのデフォルトを使用します。",
+      "config_label": "Server 設定（JSON）",
       "placeholder": "{\n  \"mcpServers\": {\n    \"fetch\": {\n      \"command\": \"uvx\",\n      \"args\": [\"mcp-server-fetch\"]\n    }\n  }\n}",
       "editor_aria": "MCP config JSON editor",
       "clear_action": "クリア",

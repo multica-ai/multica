@@ -85,66 +85,87 @@ export function CustomArgsTab({
   const launchHeader = runtimeDevice?.launch_header;
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-start justify-between gap-3">
-        <div className="space-y-1">
-          <p className="text-xs text-muted-foreground">
-            {t(($) => $.tab_body.custom_args.intro)}
-          </p>
-          {launchHeader && (
-            <p className="text-xs text-muted-foreground">
-              {t(($) => $.tab_body.custom_args.launch_mode_prefix)}
-              <code className="rounded bg-muted px-1 py-0.5 font-mono text-[11px]">
-                {launchHeader} {t(($) => $.tab_body.custom_args.launch_mode_args_placeholder)}
-              </code>
-            </p>
-          )}
-        </div>
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          onClick={addEntry}
-          className="shrink-0"
-        >
-          <Plus className="h-3 w-3" />
-          {t(($) => $.tab_body.common.add)}
-        </Button>
-      </div>
+    <div className="space-y-6">
+      <p className="max-w-2xl text-pretty text-sm leading-6 text-muted-foreground">
+        {t(($) => $.tab_body.custom_args.intro)}
+      </p>
 
-      {entries.length > 0 && (
-        <div className="space-y-2">
-          {entries.map((entry, index) => (
-            <div key={entry.id} className="flex items-center gap-2">
-              <Input
-                value={entry.value}
-                onChange={(e) => updateEntry(index, e.target.value)}
-                placeholder={t(($) => $.tab_body.custom_args.input_placeholder)}
-                className="flex-1 font-mono text-xs"
-              />
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                onClick={() => removeEntry(index)}
-                className="text-muted-foreground hover:text-destructive"
-                aria-label={t(($) => $.tab_body.custom_args.remove_aria)}
-              >
-                <Trash2 className="h-3.5 w-3.5" />
-              </Button>
-            </div>
-          ))}
+      {launchHeader && (
+        <div className="border-y border-surface-border py-3 text-xs text-muted-foreground">
+          <span>{t(($) => $.tab_body.custom_args.launch_mode_prefix)}</span>
+          <code className="ml-1 rounded bg-muted px-1.5 py-0.5 font-mono text-xs">
+            {launchHeader}{" "}
+            {t(($) => $.tab_body.custom_args.launch_mode_args_placeholder)}
+          </code>
         </div>
       )}
 
-      <div className="flex items-center justify-end gap-3">
+      <section className="space-y-3">
+        <div className="flex items-center justify-between gap-3">
+          <h3 className="text-sm font-medium">
+            {t(($) => $.tab_body.custom_args.arguments_label)}
+          </h3>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={addEntry}
+          >
+            <Plus className="h-3 w-3" aria-hidden="true" />
+            {t(($) => $.tab_body.common.add)}
+          </Button>
+        </div>
+
+        {entries.length > 0 ? (
+          <div className="divide-y divide-surface-border border-y border-surface-border">
+            {entries.map((entry, index) => (
+              <div key={entry.id} className="flex items-center gap-2 py-3">
+                <Input
+                  name={`agent-custom-arg-${index + 1}`}
+                  autoComplete="off"
+                  spellCheck={false}
+                  value={entry.value}
+                  onChange={(e) => updateEntry(index, e.target.value)}
+                  placeholder={t(($) => $.tab_body.custom_args.input_placeholder)}
+                  aria-label={t(($) => $.tab_body.custom_args.input_aria, {
+                    index: index + 1,
+                  })}
+                  className="flex-1 font-mono text-xs"
+                />
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-sm"
+                  onClick={() => removeEntry(index)}
+                  className="text-muted-foreground hover:text-destructive"
+                  aria-label={t(($) => $.tab_body.custom_args.remove_aria)}
+                >
+                  <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
+                </Button>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="border-y border-surface-border py-8 text-center text-xs text-muted-foreground">
+            {t(($) => $.tab_body.custom_args.empty_title)}
+          </p>
+        )}
+      </section>
+
+      <div className="flex items-center justify-end gap-3 border-t border-surface-border pt-4">
         {dirty && (
-          <span className="text-xs text-muted-foreground">{t(($) => $.tab_body.common.unsaved_changes)}</span>
+          <span className="text-xs text-muted-foreground">
+            {t(($) => $.tab_body.common.unsaved_changes)}
+          </span>
         )}
         <Button onClick={handleSave} disabled={!dirty || saving} size="sm">
           {saving ? (
-            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            <Loader2
+              className="h-3.5 w-3.5 animate-spin motion-reduce:animate-none"
+              aria-hidden="true"
+            />
           ) : (
-            <Save className="h-3.5 w-3.5" />
+            <Save className="h-3.5 w-3.5" aria-hidden="true" />
           )}
           {t(($) => $.tab_body.common.save)}
         </Button>

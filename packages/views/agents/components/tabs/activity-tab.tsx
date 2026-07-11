@@ -208,8 +208,8 @@ export function AgentPerformanceSummary({ agent }: { agent: Agent }) {
       : 100;
 
   return (
-    <section className="border-t pt-5">
-      <h2 className="text-sm font-semibold">
+    <section className="mt-5 border-t pt-5">
+      <h2 className="text-sm font-medium">
         {t(($) => $.tab_body.activity.section_last_30d)}
       </h2>
       {summary.totalRuns === 0 ? (

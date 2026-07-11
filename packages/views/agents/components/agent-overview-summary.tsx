@@ -31,9 +31,9 @@ export function AgentOverviewSummary({
   const runtimeOnline = runtime?.status === "online";
 
   return (
-    <aside className="self-start rounded-lg border bg-muted/10 p-5 xl:sticky xl:top-6">
+    <aside className="self-start rounded-xl border border-surface-border bg-surface p-5 shadow-[var(--surface-shadow)] xl:sticky xl:top-6">
       <section>
-        <h2 className="text-sm font-semibold">
+        <h2 className="text-sm font-medium">
           {t(($) => $.overview.agent_context)}
         </h2>
         <dl className="mt-4 space-y-3 text-xs">
@@ -84,10 +84,10 @@ export function AgentOverviewSummary({
 
       <section className="mt-5 border-t pt-5">
         <div className="flex items-center justify-between gap-3">
-          <h2 className="text-sm font-semibold">
+          <h2 className="text-sm font-medium">
             {t(($) => $.inspector.section_skills)}
           </h2>
-          <span className="font-mono text-[11px] tabular-nums text-muted-foreground">
+          <span className="font-mono text-xs tabular-nums text-muted-foreground">
             {agent.skills.length}
           </span>
         </div>
@@ -96,7 +96,7 @@ export function AgentOverviewSummary({
             {agent.skills.map((skill) => (
               <span
                 key={skill.id}
-                className="max-w-full truncate rounded-md border bg-background px-2 py-1 text-[11px] text-muted-foreground"
+                className="max-w-full truncate rounded-md border border-surface-border bg-surface-hover px-2 py-1 text-xs text-muted-foreground"
               >
                 {skill.name}
               </span>
