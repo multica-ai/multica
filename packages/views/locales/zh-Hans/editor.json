@@ -45,6 +45,12 @@
     "preview_unsupported": "该文件类型暂不支持预览。",
     "close": "关闭",
     "open_in_new_tab": "在新标签页打开",
+    "find_placeholder": "在页面中查找",
+    "find_count": "{{current}}/{{total}}",
+    "find_no_results": "无结果",
+    "find_prev": "上一个匹配",
+    "find_next": "下一个匹配",
+    "find_close": "关闭查找",
     "remove": "移除附件"
   },
   "link_hover": {
