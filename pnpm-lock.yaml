@@ -2713,6 +2713,9 @@ importers:
       '@multica/cerebro-notes':
         specifier: workspace:*
         version: link:../cerebro-notes
+      '@multica/cerebro-skill-ownership':
+        specifier: workspace:*
+        version: link:../cerebro-skill-ownership
       '@multica/cerebro-rounds':
         specifier: workspace:*
         version: link:../cerebro-rounds

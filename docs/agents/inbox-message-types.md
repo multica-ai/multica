@@ -184,7 +184,8 @@ owner + named approvers minus the proposer, `severity` `action_required`,
 `issue_id` — the inbox UI deep-links from `details.agent_id` to the agent's
 Instructions tab. (Skill change-request rows, by contrast, no longer navigate
 away: FIR-2742 opens them **in the inbox pane** via `SkillChangeInboxDetail`,
-which lists the diff from `details` and offers an explicit "Open in new window".)
+which lists the diff from `details` and offers an explicit "Open in new window".
+Both classic and Dynamic Inbox use this message-pane behavior.)
 Emitted by the
 agent-office handler and routed by `registerCerebroAgentOfficeNotificationListener`),
 `runtime_auto_paused`, `manually_added`, `agent_capability_drift` (TECH-3738
