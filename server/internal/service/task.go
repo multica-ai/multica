@@ -902,6 +902,31 @@ func taskErrorType(reason string) string {
 	}
 }
 
+func (s *TaskService) runtimeForNewTask(ctx context.Context, agent db.Agent) (pgtype.UUID, error) {
+	runtime, err := s.Queries.GetAgentRuntime(ctx, agent.RuntimeID)
+	if err != nil {
+		return agent.RuntimeID, fmt.Errorf("load primary runtime: %w", err)
+	}
+	if runtime.Status == "online" {
+		return agent.RuntimeID, nil
+	}
+	fallbackID, err := s.Queries.GetNextFallbackRuntime(ctx, db.GetNextFallbackRuntimeParams{
+		AgentID: agent.ID, CurrentRuntimeID: agent.RuntimeID,
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return agent.RuntimeID, nil
+	}
+	if err != nil {
+		return agent.RuntimeID, fmt.Errorf("select fallback runtime: %w", err)
+	}
+	slog.Info("using fallback runtime for new task",
+		"agent_id", util.UUIDToString(agent.ID),
+		"primary_runtime_id", util.UUIDToString(agent.RuntimeID),
+		"fallback_runtime_id", util.UUIDToString(fallbackID),
+	)
+	return fallbackID, nil
+}
+
 // EnqueueTaskForIssue creates a queued task for an agent-assigned issue.
 // No context snapshot is stored — the agent fetches all data it needs at
 // runtime via the multica CLI.
@@ -991,6 +1016,10 @@ func (s *TaskService) enqueueIssueTaskWithCommentPlan(ctx context.Context, issue
 		slog.Error("task enqueue failed", "issue_id", util.UUIDToString(issue.ID), "error", "agent has no runtime")
 		return db.AgentTaskQueue{}, fmt.Errorf("agent has no runtime")
 	}
+	runtimeID, err := s.runtimeForNewTask(ctx, agent)
+	if err != nil {
+		return db.AgentTaskQueue{}, err
+	}
 
 	// The issue assignee reacting to an agent-authored comment is a
 	// comment_source attribution (a special case of delegation); a member
@@ -1010,7 +1039,7 @@ func (s *TaskService) enqueueIssueTaskWithCommentPlan(ctx context.Context, issue
 	attrSource, attrDelegatedFrom, attrEvidenceKind, attrEvidenceRef := attributionCreateParams(attr)
 	task, err := s.Queries.CreateAgentTask(ctx, db.CreateAgentTaskParams{
 		AgentID:              issue.AssigneeID,
-		RuntimeID:            agent.RuntimeID,
+		RuntimeID:            runtimeID,
 		IssueID:              issue.ID,
 		Priority:             priorityToInt(issue.Priority),
 		TriggerCommentID:     triggerCommentID,
@@ -1109,6 +1138,10 @@ func (s *TaskService) enqueueMentionTaskWithCommentPlan(ctx context.Context, iss
 		slog.Error("mention task enqueue failed: agent has no runtime", "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agentID))
 		return db.AgentTaskQueue{}, fmt.Errorf("agent has no runtime")
 	}
+	runtimeID, err := s.runtimeForNewTask(ctx, agent)
+	if err != nil {
+		return db.AgentTaskQueue{}, err
+	}
 
 	// An explicit mention / thread-parent / squad-leader hop from an
 	// agent-authored comment is a delegation (the parent task's human is
@@ -1127,7 +1160,7 @@ func (s *TaskService) enqueueMentionTaskWithCommentPlan(ctx context.Context, iss
 	attrSource, attrDelegatedFrom, attrEvidenceKind, attrEvidenceRef := attributionCreateParams(attr)
 	task, err := s.Queries.CreateAgentTask(ctx, db.CreateAgentTaskParams{
 		AgentID:              agentID,
-		RuntimeID:            agent.RuntimeID,
+		RuntimeID:            runtimeID,
 		IssueID:              issue.ID,
 		Priority:             priorityToInt(issue.Priority),
 		TriggerCommentID:     triggerCommentID,
@@ -1179,6 +1212,10 @@ func (s *TaskService) EnqueueDeferredAssigneeFallback(ctx context.Context, issue
 		slog.Error("deferred fallback enqueue failed: agent has no runtime", "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agentID))
 		return db.AgentTaskQueue{}, fmt.Errorf("agent has no runtime")
 	}
+	runtimeID, err := s.runtimeForNewTask(ctx, agent)
+	if err != nil {
+		return db.AgentTaskQueue{}, err
+	}
 
 	// The fallback assignee is reacting to the same trigger comment as the primary
 	// routed task, so resolve attribution from that comment (member author →
@@ -1199,7 +1236,7 @@ func (s *TaskService) EnqueueDeferredAssigneeFallback(ctx context.Context, issue
 	isLeader := squadID.Valid
 	task, err := s.Queries.CreateDeferredAgentTask(ctx, db.CreateDeferredAgentTaskParams{
 		AgentID:              agentID,
-		RuntimeID:            agent.RuntimeID,
+		RuntimeID:            runtimeID,
 		IssueID:              issue.ID,
 		Priority:             priorityToInt(issue.Priority),
 		TriggerCommentID:     triggerCommentID,
@@ -1297,6 +1334,10 @@ func (s *TaskService) EnqueueQuickCreateTask(ctx context.Context, workspaceID, r
 	if !agent.RuntimeID.Valid {
 		return db.AgentTaskQueue{}, fmt.Errorf("agent has no runtime")
 	}
+	runtimeID, err := s.runtimeForNewTask(ctx, agent)
+	if err != nil {
+		return db.AgentTaskQueue{}, err
+	}
 
 	payload := QuickCreateContext{
 		Type:        QuickCreateContextType,
@@ -1347,7 +1388,7 @@ func (s *TaskService) EnqueueQuickCreateTask(ctx context.Context, workspaceID, r
 	runtimeMCPOverlay := s.buildRuntimeMCPOverlay(ctx, requesterID, agent)
 	task, err := s.Queries.CreateQuickCreateTask(ctx, db.CreateQuickCreateTaskParams{
 		AgentID:              agentID,
-		RuntimeID:            agent.RuntimeID,
+		RuntimeID:            runtimeID,
 		Priority:             priorityToInt("high"),
 		Context:              contextJSON,
 		OriginatorUserID:     requesterID,
@@ -1433,6 +1474,10 @@ func (s *TaskService) EnqueueChatTask(ctx context.Context, chatSession db.ChatSe
 	if !agent.RuntimeID.Valid {
 		return db.AgentTaskQueue{}, ErrChatTaskAgentNoRuntime
 	}
+	runtimeID, err := s.runtimeForNewTask(ctx, agent)
+	if err != nil {
+		return db.AgentTaskQueue{}, err
+	}
 
 	// The chat sender (initiator) is the direct_human originator and accountable.
 	// Evidence uses the uniform pair (kind=chat, ref=chat_session_id) so the
@@ -1452,7 +1497,7 @@ func (s *TaskService) EnqueueChatTask(ctx context.Context, chatSession db.ChatSe
 	runtimeMCPOverlay := s.buildRuntimeMCPOverlay(ctx, initiatorUserID, agent)
 	task, err := s.Queries.CreateChatTask(ctx, db.CreateChatTaskParams{
 		AgentID:           chatSession.AgentID,
-		RuntimeID:         agent.RuntimeID,
+		RuntimeID:         runtimeID,
 		Priority:          2, // medium priority for chat
 		ChatSessionID:     chatSession.ID,
 		InitiatorUserID:   initiatorUserID,
@@ -1504,6 +1549,10 @@ func (s *TaskService) SendDirectChatMessage(ctx context.Context, session db.Chat
 	// Build the per-task Composio overlay before the transaction — it can do
 	// network I/O and must not run with a DB transaction open.
 	overlay := s.buildRuntimeMCPOverlay(ctx, initiatorUserID, agent)
+	runtimeID, err := s.runtimeForNewTask(ctx, agent)
+	if err != nil {
+		return nil, err
+	}
 
 	// Full attribution for the chat sender, resolved before the tx (the policy read
 	// + fallback must not run with a transaction open) — the same direct_human stamp
@@ -1521,7 +1570,7 @@ func (s *TaskService) SendDirectChatMessage(ctx context.Context, session db.Chat
 	if err := s.runInTx(ctx, func(qtx *db.Queries) error {
 		task, err := qtx.CreateChatTask(ctx, db.CreateChatTaskParams{
 			AgentID:              session.AgentID,
-			RuntimeID:            agent.RuntimeID,
+			RuntimeID:            runtimeID,
 			Priority:             2, // medium priority for chat; matches EnqueueChatTask
 			ChatSessionID:        session.ID,
 			InitiatorUserID:      initiatorUserID,

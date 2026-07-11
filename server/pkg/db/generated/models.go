@@ -62,6 +62,13 @@ type AgentInvocationTarget struct {
 	CreatedAt  pgtype.Timestamptz `json:"created_at"`
 }
 
+type AgentFallbackRuntime struct {
+	AgentID   pgtype.UUID        `json:"agent_id"`
+	RuntimeID pgtype.UUID        `json:"runtime_id"`
+	Priority  int32              `json:"priority"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+}
+
 type AgentRuntime struct {
 	ID             pgtype.UUID        `json:"id"`
 	WorkspaceID    pgtype.UUID        `json:"workspace_id"`

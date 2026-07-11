@@ -16,6 +16,36 @@ WHERE id = $1;
 SELECT * FROM agent
 WHERE id = $1 AND workspace_id = $2 AND kind = 'user';
 
+-- name: ListAgentFallbackRuntimeIDs :many
+SELECT runtime_id FROM agent_fallback_runtime
+WHERE agent_id = $1
+ORDER BY priority ASC;
+
+-- name: DeleteAgentFallbackRuntimes :exec
+DELETE FROM agent_fallback_runtime WHERE agent_id = $1;
+
+-- name: AddAgentFallbackRuntime :exec
+INSERT INTO agent_fallback_runtime (agent_id, runtime_id, priority)
+SELECT sqlc.arg(agent_id), sqlc.arg(runtime_id), sqlc.arg(priority)
+FROM agent a
+JOIN agent_runtime ar ON ar.id = sqlc.arg(runtime_id) AND ar.workspace_id = a.workspace_id
+WHERE a.id = sqlc.arg(agent_id);
+
+-- name: GetNextFallbackRuntime :one
+SELECT afr.runtime_id
+FROM agent_fallback_runtime afr
+JOIN agent_runtime ar ON ar.id = afr.runtime_id
+WHERE afr.agent_id = sqlc.arg(agent_id)
+  AND afr.runtime_id <> sqlc.arg(current_runtime_id)
+  AND ar.status = 'online'
+  AND afr.priority > COALESCE((
+    SELECT current.priority FROM agent_fallback_runtime current
+    WHERE current.agent_id = sqlc.arg(agent_id)
+      AND current.runtime_id = sqlc.arg(current_runtime_id)
+  ), -1)
+ORDER BY afr.priority ASC
+LIMIT 1;
+
 -- name: CreateAgent :one
 INSERT INTO agent (
     workspace_id, name, description, avatar_url, runtime_mode,
@@ -351,7 +381,20 @@ INSERT INTO agent_task_queue (
     chat_input_task_id, fire_at
 )
 SELECT
-    p.agent_id, p.runtime_id, p.issue_id, p.chat_session_id, p.autopilot_run_id,
+    p.agent_id,
+    COALESCE((
+      SELECT afr.runtime_id
+      FROM agent_fallback_runtime afr
+      JOIN agent_runtime ar ON ar.id = afr.runtime_id AND ar.status = 'online'
+      WHERE afr.agent_id = p.agent_id
+        AND afr.priority > COALESCE((
+          SELECT current.priority FROM agent_fallback_runtime current
+          WHERE current.agent_id = p.agent_id AND current.runtime_id = p.runtime_id
+        ), -1)
+      ORDER BY afr.priority ASC
+      LIMIT 1
+    ), p.runtime_id),
+    p.issue_id, p.chat_session_id, p.autopilot_run_id,
     CASE WHEN sqlc.narg(fire_at)::timestamptz IS NOT NULL THEN 'deferred' ELSE 'queued' END,
     CASE WHEN p.chat_session_id IS NOT NULL THEN GREATEST(p.priority, 3) ELSE p.priority END,
     p.trigger_comment_id, p.coalesced_comment_ids, p.trigger_summary, p.context,

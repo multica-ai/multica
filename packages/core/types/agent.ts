@@ -351,6 +351,7 @@ export interface Agent {
   id: string;
   workspace_id: string;
   runtime_id: string;
+  fallback_runtime_ids?: string[];
   name: string;
   description: string;
   instructions: string;
@@ -471,6 +472,7 @@ export interface CreateAgentRequest {
   instructions?: string;
   avatar_url?: string;
   runtime_id: string;
+  fallback_runtime_ids?: string[];
   runtime_config?: Record<string, unknown>;
   custom_env?: Record<string, string>;
   custom_args?: string[];
@@ -588,6 +590,7 @@ export interface UpdateAgentRequest {
   instructions?: string;
   avatar_url?: string;
   runtime_id?: string;
+  fallback_runtime_ids?: string[];
   runtime_config?: Record<string, unknown>;
   /**
    * NOTE: `custom_env` is intentionally NOT updatable through this

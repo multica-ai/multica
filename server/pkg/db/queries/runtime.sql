@@ -234,7 +234,7 @@ UPDATE agent_task_queue
 SET status = 'failed', completed_at = now(), error = 'runtime went offline',
     failure_reason = 'runtime_offline',
     wait_reason = NULL
-WHERE status IN ('dispatched', 'running', 'waiting_local_directory')
+WHERE status IN ('queued', 'dispatched', 'running', 'waiting_local_directory')
   AND runtime_id IN (
     SELECT id FROM agent_runtime WHERE status = 'offline'
   )
