@@ -1,17 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AlertTriangle } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import type {
   Agent,
   AgentRuntime,
   MemberWithUser,
 } from "@multica/core/types";
-import {
-  providerSupportsMcpConfig,
-  type AgentPresenceDetail,
-} from "@multica/core/agents";
+import { providerSupportsMcpConfig } from "@multica/core/agents";
 import { useFeatureEnabled } from "@multica/core/config";
 import { COMPOSIO_MCP_APPS_FLAG } from "@multica/core/feature-flags";
 import { useWorkspaceId } from "@multica/core/hooks";
@@ -38,6 +34,7 @@ import { AgentMcpTab } from "./tabs/agent-mcp-tab";
 import { IntegrationsTab } from "./tabs/integrations-tab";
 import { RuntimeConfigTab } from "./tabs/runtime-config-tab";
 import { AgentDetailInspector } from "./agent-detail-inspector";
+import { AgentAccessSettings } from "./agent-access-settings";
 import { AgentOverviewSummary } from "./agent-overview-summary";
 import { ActorIssuesPanel } from "../../common/actor-issues-panel";
 import { useT } from "../../i18n";
@@ -54,6 +51,7 @@ export type DetailTab =
   | "composio_mcp"
   | "integrations"
   | "general"
+  | "access"
   | "env"
   | "custom_args"
   | "runtime_config";
@@ -67,6 +65,7 @@ type SecondaryTab = {
     | "composio_mcp"
     | "integrations"
     | "general"
+    | "access"
     | "environment"
     | "custom_args"
     | "runtime_config";
@@ -82,6 +81,7 @@ const CAPABILITY_TABS: SecondaryTab[] = [
 
 const SETTINGS_TABS: SecondaryTab[] = [
   { id: "general", labelKey: "general" },
+  { id: "access", labelKey: "access" },
   { id: "env", labelKey: "environment" },
   { id: "custom_args", labelKey: "custom_args" },
   { id: "runtime_config", labelKey: "runtime_config" },
@@ -120,7 +120,6 @@ interface AgentOverviewPaneProps {
   agent: Agent;
   runtime: AgentRuntime | null;
   owner: MemberWithUser | null;
-  presence: AgentPresenceDetail | null;
   runtimes: AgentRuntime[];
   members: MemberWithUser[];
   onUpdate: (id: string, data: Record<string, unknown>) => Promise<void>;
@@ -141,7 +140,6 @@ export function AgentOverviewPane({
   agent,
   runtime,
   owner,
-  presence,
   runtimes,
   members,
   onUpdate,
@@ -300,11 +298,6 @@ export function AgentOverviewPane({
     (tab) => tab.id === effectiveView,
   );
 
-  const needsAttention =
-    presence !== null &&
-    presence.availability !== "online" &&
-    presence.queuedCount > 0;
-
   return (
     <div className="flex min-h-0 flex-1 flex-col bg-background">
       <div
@@ -336,28 +329,6 @@ export function AgentOverviewPane({
       <div className="min-h-0 flex-1 overflow-y-auto">
         {effectiveView === "overview" && (
           <div className="mx-auto max-w-[1440px] p-4 sm:p-6">
-            {needsAttention && (
-              <div
-                role="status"
-                className="mb-5 flex items-start gap-3 rounded-lg border border-warning/40 bg-warning/5 px-4 py-3"
-              >
-                <AlertTriangle
-                  className="mt-0.5 h-4 w-4 shrink-0 text-warning"
-                  aria-hidden="true"
-                />
-                <div className="min-w-0">
-                  <p className="text-sm font-medium">
-                    {t(($) => $.overview.attention_title)}
-                  </p>
-                  <p className="mt-0.5 text-xs text-muted-foreground">
-                    {t(($) => $.overview.attention_queued, {
-                      count: presence.queuedCount,
-                    })}
-                  </p>
-                </div>
-              </div>
-            )}
-
             <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_320px]">
               <ActivityTab agent={agent} showPerformance={false} />
               <AgentOverviewSummary
@@ -443,11 +414,19 @@ export function AgentOverviewPane({
                     <AgentDetailInspector
                       agent={agent}
                       runtime={runtime}
-                      owner={owner}
                       runtimes={runtimes}
                       members={members}
                       currentUserId={currentUserId ?? null}
                       canEdit={canEdit}
+                      onUpdate={onUpdate}
+                    />
+                  )}
+                  {effectiveView === "access" && (
+                    <AgentAccessSettings
+                      agent={agent}
+                      members={members}
+                      currentUserId={currentUserId ?? null}
+                      onDirtyChange={setActiveDirty}
                       onUpdate={onUpdate}
                     />
                   )}

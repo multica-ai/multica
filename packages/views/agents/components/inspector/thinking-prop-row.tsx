@@ -1,9 +1,11 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
+import type { ReactNode } from "react";
 import type { RuntimeModel } from "@multica/core/types";
 import { runtimeModelsOptions } from "@multica/core/runtimes";
 import { PropRow } from "../../../common/prop-row";
+import { SettingsRow } from "../../../settings/components/settings-layout";
 import { useT } from "../../../i18n";
 import { ThinkingPicker } from "./thinking-picker";
 
@@ -68,6 +70,7 @@ export function ThinkingPropRow({
 
 /** Full-width counterpart used by the General settings form. */
 export function ThinkingSettingField({
+  label,
   runtimeId,
   runtimeOnline,
   provider,
@@ -76,6 +79,7 @@ export function ThinkingSettingField({
   canEdit,
   onChange,
 }: {
+  label: ReactNode;
   runtimeId: string | null;
   runtimeOnline: boolean;
   provider: string;
@@ -94,13 +98,16 @@ export function ThinkingSettingField({
   if (levels.length === 0 && !value) return null;
 
   return (
-    <ThinkingPicker
-      variant="field"
-      value={value}
-      levels={levels}
-      canEdit={canEdit}
-      onChange={onChange}
-    />
+    <SettingsRow label={label} controlClassName="sm:w-80">
+      <ThinkingPicker
+        variant="field"
+        showLabel={false}
+        value={value}
+        levels={levels}
+        canEdit={canEdit}
+        onChange={onChange}
+      />
+    </SettingsRow>
   );
 }
 

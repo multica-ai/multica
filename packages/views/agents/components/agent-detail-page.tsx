@@ -304,7 +304,6 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
           agent={agent}
           runtime={runtime}
           owner={owner}
-          presence={presence}
           runtimes={runtimes}
           members={members}
           onUpdate={handleUpdate}

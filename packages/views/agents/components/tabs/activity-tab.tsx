@@ -46,7 +46,7 @@ const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
 // scannable, then "Show more" reveals 20 at a time. Tasks are already
 // fully cached client-side (one listAgentTasks for the whole agent), so
 // "more" is a pure state flip — zero extra fetches.
-const RECENT_INITIAL = 5;
+const RECENT_INITIAL = 10;
 const RECENT_PAGE = 20;
 
 interface ActivityTabProps {

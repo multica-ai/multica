@@ -80,19 +80,35 @@ describe("AccessPicker owner-only editing (MUL-3963)", () => {
     renderPicker({ canEdit: true });
     expect(
       screen.getByRole("radio", { name: /^Private/i }),
-    ).toHaveAttribute("aria-checked", "true");
+    ).toBeChecked();
     expect(
       screen.getByRole("radio", { name: /^Shared/i }),
-    ).toHaveAttribute("aria-checked", "false");
+    ).not.toBeChecked();
   });
 
   it("defaults a newly shared agent to workspace access", () => {
     const { onChange } = renderPicker({ canEdit: true });
     fireEvent.click(screen.getByRole("radio", { name: /^Shared/i }));
+    expect(onChange).not.toHaveBeenCalled();
+    expect(
+      screen.getByRole("checkbox", { name: /Public to workspace/i }),
+    ).toBeChecked();
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
     expect(onChange).toHaveBeenCalledWith({
       permission_mode: "public_to",
       invocation_targets: [{ target_type: "workspace" }],
     });
+  });
+
+  it("reports an unsaved draft until the owner returns to the persisted mode", () => {
+    const onDirtyChange = vi.fn();
+    renderPicker({ canEdit: true, onDirtyChange });
+
+    fireEvent.click(screen.getByRole("radio", { name: /^Shared/i }));
+    expect(onDirtyChange).toHaveBeenLastCalledWith(true);
+
+    fireEvent.click(screen.getByRole("radio", { name: /^Private/i }));
+    expect(onDirtyChange).toHaveBeenLastCalledWith(false);
   });
 
   it("owner can pick a specific member, emitting a public_to member target", () => {
@@ -102,6 +118,7 @@ describe("AccessPicker owner-only editing (MUL-3963)", () => {
       invocationTargets: [],
     });
     fireEvent.click(screen.getByRole("checkbox", { name: /Alice/i }));
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
     expect(onChange).toHaveBeenCalledWith({
       permission_mode: "public_to",
       invocation_targets: [{ target_type: "member", target_id: "u1" }],
@@ -120,6 +137,7 @@ describe("AccessPicker owner-only editing (MUL-3963)", () => {
     fireEvent.click(
       screen.getByRole("checkbox", { name: /Public to workspace/i }),
     );
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
     expect(onChange).toHaveBeenCalledWith({
       permission_mode: "public_to",
       invocation_targets: [
@@ -143,7 +161,7 @@ describe("AccessPicker owner-only editing (MUL-3963)", () => {
     ).not.toThrow();
     expect(
       screen.getByRole("radio", { name: /^Private/i }),
-    ).toHaveAttribute("aria-checked", "true");
+    ).toBeChecked();
   });
 
   it("read-only mode: undefined invocationTargets does not crash for non-owners", () => {

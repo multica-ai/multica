@@ -30,6 +30,7 @@ export function ThinkingPicker({
   levels,
   canEdit = true,
   variant = "chip",
+  showLabel = true,
   onChange,
 }: {
   /** Persisted thinking_level — "" means "follow local CLI config". */
@@ -42,6 +43,7 @@ export function ThinkingPicker({
   /** When false, render a static read-only display and skip the popover. */
   canEdit?: boolean;
   variant?: "chip" | "field";
+  showLabel?: boolean;
   onChange: (next: string) => Promise<void> | void;
 }) {
   const { t } = useT("agents");
@@ -66,13 +68,17 @@ export function ThinkingPicker({
 
   if (!canEdit) {
     if (variant === "field") {
+      const control = (
+        <div className="flex min-h-10 items-center gap-2 rounded-lg border border-input bg-input/50 px-3 text-sm text-muted-foreground">
+          <Brain className="h-4 w-4 shrink-0" aria-hidden="true" />
+          <span className="min-w-0 truncate">{triggerLabel}</span>
+        </div>
+      );
+      if (!showLabel) return control;
       return (
         <div className="flex min-w-0 flex-col">
           <Label>{t(($) => $.inspector.prop_thinking)}</Label>
-          <div className="mt-1.5 flex min-h-10 items-center gap-2 rounded-lg border border-input bg-input/50 px-3 text-sm text-muted-foreground">
-            <Brain className="h-4 w-4 shrink-0" aria-hidden="true" />
-            <span className="min-w-0 truncate">{triggerLabel}</span>
-          </div>
+          <div className="mt-1.5">{control}</div>
         </div>
       );
     }
@@ -102,7 +108,7 @@ export function ThinkingPicker({
           type="button"
           className={
             variant === "field"
-              ? "mt-1.5 flex min-h-10 w-full min-w-0 items-center gap-2 rounded-lg border border-input bg-transparent px-3 text-left text-sm transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+              ? `${showLabel ? "mt-1.5 " : ""}flex min-h-10 w-full min-w-0 items-center gap-2 rounded-lg border border-input bg-transparent px-3 text-left text-sm transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/50`
               : CHIP_CLASS
           }
           aria-label={triggerTitle}
@@ -178,6 +184,7 @@ export function ThinkingPicker({
   );
 
   if (variant === "field") {
+    if (!showLabel) return picker;
     return (
       <div className="flex min-w-0 flex-col">
         <Label>{t(($) => $.inspector.prop_thinking)}</Label>

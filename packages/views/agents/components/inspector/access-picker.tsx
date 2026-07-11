@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { Check, Globe, Lock, Users } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { Globe, Loader2, Lock, Users } from "lucide-react";
 import type {
   AgentInvocationTarget,
   AgentInvocationTargetInput,
@@ -9,6 +9,7 @@ import type {
   AgentVisibility,
   MemberWithUser,
 } from "@multica/core/types";
+import { Button } from "@multica/ui/components/ui/button";
 import { Checkbox } from "@multica/ui/components/ui/checkbox";
 import { ActorAvatar } from "../../../common/actor-avatar";
 import { useT } from "../../../i18n";
@@ -24,31 +25,21 @@ function hasWorkspaceTarget(
   return (targets ?? []).some((target) => target.target_type === "workspace");
 }
 
-function selectedMemberIds(
+function selectedTargetIds(
   targets: AgentInvocationTarget[] | undefined | null,
+  type: "member" | "team",
 ): string[] {
   return (targets ?? [])
     .filter(
-      (target) =>
-        target.target_type === "member" && target.target_id !== null,
-    )
-    .map((target) => target.target_id as string);
-}
-
-function selectedTeamIds(
-  targets: AgentInvocationTarget[] | undefined | null,
-): string[] {
-  return (targets ?? [])
-    .filter(
-      (target) => target.target_type === "team" && target.target_id !== null,
+      (target) => target.target_type === type && target.target_id !== null,
     )
     .map((target) => target.target_id as string);
 }
 
 /**
- * Expanded access editor for General settings. Permission choices stay visible
- * instead of hiding inside an inspector popover, while writes keep the same
- * owner-only and mixed-target semantics as the backend.
+ * Draft-first access editor. Visibility changes are security-sensitive, so
+ * choosing Shared only reveals the scope controls; nothing is persisted until
+ * the owner explicitly saves the complete selection.
  */
 export function AccessPicker({
   permissionMode,
@@ -58,6 +49,7 @@ export function AccessPicker({
   ownerId,
   canEdit = true,
   hasComposioAllowlist = false,
+  onDirtyChange,
   onChange,
 }: {
   permissionMode: AgentPermissionMode;
@@ -67,97 +59,113 @@ export function AccessPicker({
   ownerId?: string | null;
   canEdit?: boolean;
   hasComposioAllowlist?: boolean;
+  onDirtyChange?: (dirty: boolean) => void;
   onChange: (next: AccessChange) => Promise<void> | void;
 }) {
   const { t } = useT("agents");
-  const [showComposioHint, setShowComposioHint] = useState(false);
+  const { t: tc } = useT("common");
+  const persistedPrivate = permissionMode === "private";
+  const persistedWorkspace =
+    !persistedPrivate && hasWorkspaceTarget(invocationTargets);
+  const persistedMembers = useMemo(
+    () => selectedTargetIds(invocationTargets, "member"),
+    [invocationTargets],
+  );
+  const teamIds = useMemo(
+    () => selectedTargetIds(invocationTargets, "team"),
+    [invocationTargets],
+  );
 
-  const isPrivate = permissionMode === "private";
-  const workspaceOn = !isPrivate && hasWorkspaceTarget(invocationTargets);
-  const memberIds = selectedMemberIds(invocationTargets);
-  const teamIds = selectedTeamIds(invocationTargets);
+  const [draftPrivate, setDraftPrivate] = useState(persistedPrivate);
+  const [draftWorkspace, setDraftWorkspace] = useState(persistedWorkspace);
+  const [draftMembers, setDraftMembers] = useState(persistedMembers);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    setDraftPrivate(persistedPrivate);
+    setDraftWorkspace(persistedWorkspace);
+    setDraftMembers(persistedMembers);
+  }, [persistedMembers, persistedPrivate, persistedWorkspace]);
+
   const editableMembers = ownerId
     ? members.filter((member) => member.user_id !== ownerId)
     : members;
 
-  const summaryLabel = isPrivate
-    ? t(($) => $.access.trigger_private)
-    : workspaceOn
-      ? t(($) => $.access.trigger_workspace)
-      : memberIds.length > 0
-        ? t(($) => $.access.trigger_members_count, {
-            count: memberIds.length,
-          })
-        : t(($) => $.access.trigger_members_empty);
+  const sameMembers =
+    draftMembers.length === persistedMembers.length &&
+    draftMembers.every((id) => persistedMembers.includes(id));
+  const dirty =
+    draftPrivate !== persistedPrivate ||
+    (!draftPrivate &&
+      (draftWorkspace !== persistedWorkspace || !sameMembers));
+  const hasSharedTarget =
+    draftWorkspace || draftMembers.length > 0 || teamIds.length > 0;
 
-  const emit = (next: {
-    workspace: boolean;
-    members: string[];
-    teams: string[];
-  }) => {
-    const targets: AgentInvocationTargetInput[] = [];
-    if (next.workspace) targets.push({ target_type: "workspace" });
-    for (const id of next.members) {
-      targets.push({ target_type: "member", target_id: id });
-    }
-    for (const id of next.teams) {
-      targets.push({ target_type: "team", target_id: id });
-    }
+  useEffect(() => {
+    onDirtyChange?.(dirty);
+    return () => onDirtyChange?.(false);
+  }, [dirty, onDirtyChange]);
 
-    if (targets.length === 0) {
-      void onChange({ permission_mode: "private", invocation_targets: [] });
-      return;
-    }
-    void onChange({
-      permission_mode: "public_to",
-      invocation_targets: targets,
-    });
-  };
-
-  const maybeFlagComposio = (goingPublic: boolean) => {
-    if (hasComposioAllowlist && isPrivate && goingPublic) {
-      setShowComposioHint(true);
-    }
-  };
-
-  const choosePrivate = () => {
-    if (isPrivate) return;
-    setShowComposioHint(false);
-    void onChange({ permission_mode: "private", invocation_targets: [] });
-  };
-
-  const chooseShared = () => {
-    if (!isPrivate) return;
-    maybeFlagComposio(true);
-    const hasExistingGrant =
-      workspaceOn || memberIds.length > 0 || teamIds.length > 0;
-    emit({
-      workspace: hasExistingGrant ? workspaceOn : true,
-      members: memberIds,
-      teams: teamIds,
-    });
-  };
-
-  const toggleWorkspace = (checked: boolean) => {
-    emit({ workspace: checked, members: memberIds, teams: teamIds });
+  const chooseMode = (mode: "private" | "shared") => {
+    const nextPrivate = mode === "private";
+    setDraftPrivate(nextPrivate);
+    if (!nextPrivate && !hasSharedTarget) setDraftWorkspace(true);
   };
 
   const toggleMember = (userId: string, checked: boolean) => {
-    const next = new Set(memberIds);
-    if (checked) next.add(userId);
-    else next.delete(userId);
-    emit({ workspace: workspaceOn, members: Array.from(next), teams: teamIds });
+    setDraftMembers((current) => {
+      const next = new Set(current);
+      if (checked) next.add(userId);
+      else next.delete(userId);
+      return Array.from(next);
+    });
+  };
+
+  const save = async () => {
+    if (!dirty || saving || (!draftPrivate && !hasSharedTarget)) return;
+    const targets: AgentInvocationTargetInput[] = [];
+    if (!draftPrivate && draftWorkspace) {
+      targets.push({ target_type: "workspace" });
+    }
+    if (!draftPrivate) {
+      for (const id of draftMembers) {
+        targets.push({ target_type: "member", target_id: id });
+      }
+      for (const id of teamIds) {
+        targets.push({ target_type: "team", target_id: id });
+      }
+    }
+
+    setSaving(true);
+    try {
+      await onChange({
+        permission_mode: draftPrivate ? "private" : "public_to",
+        invocation_targets: draftPrivate ? [] : targets,
+      });
+    } finally {
+      setSaving(false);
+    }
   };
 
   if (!canEdit) {
+    const summaryLabel = persistedPrivate
+      ? t(($) => $.access.trigger_private)
+      : persistedWorkspace
+        ? t(($) => $.access.trigger_workspace)
+        : persistedMembers.length > 0
+          ? t(($) => $.access.trigger_members_count, {
+              count: persistedMembers.length,
+            })
+          : t(($) => $.access.trigger_members_empty);
+
     return (
       <div
-        className="flex items-start gap-3 border-y border-surface-border py-4"
+        className="flex items-start gap-3 px-4 py-4"
         aria-label={t(($) => $.access.owner_only_readonly)}
         data-testid="access-readonly"
       >
-        <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground">
-          <Lock className="h-4 w-4" aria-hidden="true" />
+        <span className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground">
+          <Lock className="size-4" aria-hidden="true" />
         </span>
         <div className="min-w-0">
           <p className="text-sm font-medium">{summaryLabel}</p>
@@ -170,58 +178,63 @@ export function AccessPicker({
   }
 
   return (
-    <fieldset className="space-y-5">
+    <fieldset>
       <legend className="sr-only">{t(($) => $.access.tooltip)}</legend>
 
-      <div
-        className="divide-y divide-surface-border border-y border-surface-border"
-        role="radiogroup"
-        aria-label={t(($) => $.access.tooltip)}
-      >
+      <div className="divide-y divide-surface-border">
         <AccessChoice
+          name="agent-access-mode"
+          value="private"
           icon={Lock}
           title={t(($) => $.access.private_title)}
           description={t(($) => $.access.private_desc)}
-          selected={isPrivate}
-          onSelect={choosePrivate}
+          selected={draftPrivate}
+          onSelect={() => chooseMode("private")}
         />
         <AccessChoice
+          name="agent-access-mode"
+          value="shared"
           icon={Users}
           title={t(($) => $.access.shared_title)}
           description={t(($) => $.access.shared_desc)}
-          selected={!isPrivate}
-          onSelect={chooseShared}
+          selected={!draftPrivate}
+          onSelect={() => chooseMode("shared")}
         />
       </div>
 
-      {!isPrivate ? (
-        <div className="space-y-5 pl-4 sm:pl-6">
+      {!draftPrivate ? (
+        <div className="space-y-6 border-t border-surface-border bg-muted/20 px-4 py-5 sm:px-6">
           <div>
             <h4 className="text-sm font-medium">
               {t(($) => $.access.public_group)}
             </h4>
-            <label className="mt-3 flex cursor-pointer items-start gap-3 border-y border-surface-border py-3">
+            <div className="mt-3 flex items-start gap-3 rounded-lg border bg-background p-3">
               <Checkbox
-                checked={workspaceOn}
+                id="agent-access-workspace"
+                checked={draftWorkspace}
                 onCheckedChange={(value) =>
-                  toggleWorkspace(value === true)
+                  setDraftWorkspace(value === true)
                 }
-                aria-label={t(($) => $.access.workspace_title)}
                 className="mt-0.5"
               />
-              <Globe
-                className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground"
-                aria-hidden="true"
-              />
-              <span className="min-w-0">
-                <span className="block text-sm font-medium">
-                  {t(($) => $.access.workspace_title)}
+              <label
+                htmlFor="agent-access-workspace"
+                className="flex min-w-0 flex-1 cursor-pointer items-start gap-3"
+              >
+                <Globe
+                  className="mt-0.5 size-4 shrink-0 text-muted-foreground"
+                  aria-hidden="true"
+                />
+                <span className="min-w-0">
+                  <span className="block text-sm font-medium">
+                    {t(($) => $.access.workspace_title)}
+                  </span>
+                  <span className="mt-0.5 block text-xs leading-5 text-muted-foreground">
+                    {t(($) => $.access.workspace_desc)}
+                  </span>
                 </span>
-                <span className="mt-0.5 block text-xs leading-5 text-muted-foreground">
-                  {t(($) => $.access.workspace_desc)}
-                </span>
-              </span>
-            </label>
+              </label>
+            </div>
           </div>
 
           <div>
@@ -229,61 +242,89 @@ export function AccessPicker({
               {t(($) => $.access.members_group)}
             </h4>
             {editableMembers.length === 0 ? (
-              <p className="mt-3 border-y border-surface-border py-4 text-xs text-muted-foreground">
+              <p className="mt-3 text-xs text-muted-foreground">
                 {t(($) => $.access.members_empty)}
               </p>
             ) : (
-              <div className="mt-3 max-h-64 divide-y divide-surface-border overflow-y-auto border-y border-surface-border">
+              <div className="mt-3 max-h-64 divide-y divide-surface-border overflow-y-auto rounded-lg border bg-background overscroll-contain">
                 {editableMembers.map((member) => {
-                  const checked = memberIds.includes(member.user_id);
+                  const id = `agent-access-member-${member.user_id}`;
                   return (
-                    <label
+                    <div
                       key={member.user_id}
-                      className="flex cursor-pointer items-center gap-3 py-3 hover:bg-surface-hover"
+                      className="flex items-center gap-3 px-3 py-3 hover:bg-surface-hover"
                     >
                       <Checkbox
-                        checked={checked}
+                        id={id}
+                        checked={draftMembers.includes(member.user_id)}
                         onCheckedChange={(value) =>
                           toggleMember(member.user_id, value === true)
                         }
-                        aria-label={member.name}
                       />
-                      <ActorAvatar
-                        actorType="member"
-                        actorId={member.user_id}
-                        size="sm"
-                      />
-                      <span className="min-w-0 flex-1 truncate text-sm">
-                        {member.name}
-                      </span>
-                    </label>
+                      <label
+                        htmlFor={id}
+                        className="flex min-w-0 flex-1 cursor-pointer items-center gap-3"
+                      >
+                        <ActorAvatar
+                          actorType="member"
+                          actorId={member.user_id}
+                          size="sm"
+                        />
+                        <span className="min-w-0 flex-1 truncate text-sm">
+                          {member.name}
+                        </span>
+                      </label>
+                    </div>
                   );
                 })}
               </div>
             )}
           </div>
+
+          {!hasSharedTarget ? (
+            <p className="text-xs text-destructive" role="alert">
+              {t(($) => $.access.shared_target_required)}
+            </p>
+          ) : null}
+
+          {hasComposioAllowlist && persistedPrivate ? (
+            <p className="border-l-2 border-warning pl-3 text-xs leading-5 text-muted-foreground">
+              {t(($) => $.access.composio_switch_hint)}
+            </p>
+          ) : null}
         </div>
       ) : null}
 
-      {showComposioHint ? (
-        <p
-          role="status"
-          className="border-l-2 border-warning pl-3 text-xs leading-5 text-muted-foreground"
+      <div className="flex justify-end border-t border-surface-border px-4 py-3.5">
+        <Button
+          type="button"
+          onClick={() => void save()}
+          disabled={!dirty || saving || (!draftPrivate && !hasSharedTarget)}
         >
-          {t(($) => $.access.composio_switch_hint)}
-        </p>
-      ) : null}
+          {saving ? (
+            <Loader2
+              className="size-4 animate-spin motion-reduce:animate-none"
+              aria-hidden="true"
+            />
+          ) : null}
+          {tc(($) => $.save)}
+        </Button>
+      </div>
     </fieldset>
   );
 }
 
 function AccessChoice({
+  name,
+  value,
   icon: Icon,
   title,
   description,
   selected,
   onSelect,
 }: {
+  name: string;
+  value: string;
   icon: typeof Lock;
   title: string;
   description: string;
@@ -291,15 +332,17 @@ function AccessChoice({
   onSelect: () => void;
 }) {
   return (
-    <button
-      type="button"
-      role="radio"
-      aria-checked={selected}
-      onClick={onSelect}
-      className="flex w-full items-start gap-3 px-0 py-3 text-left transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
-    >
-      <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground">
-        <Icon className="h-4 w-4" aria-hidden="true" />
+    <label className="flex min-h-16 cursor-pointer items-start gap-3 px-4 py-3.5 transition-colors hover:bg-surface-hover">
+      <input
+        type="radio"
+        name={name}
+        value={value}
+        checked={selected}
+        onChange={onSelect}
+        className="mt-2 size-4 shrink-0 accent-foreground"
+      />
+      <span className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground">
+        <Icon className="size-4" aria-hidden="true" />
       </span>
       <span className="min-w-0 flex-1">
         <span className="block text-sm font-medium">{title}</span>
@@ -307,16 +350,6 @@ function AccessChoice({
           {description}
         </span>
       </span>
-      <span
-        className={`mt-1 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border ${
-          selected
-            ? "border-foreground bg-foreground text-background"
-            : "border-input"
-        }`}
-        aria-hidden="true"
-      >
-        {selected ? <Check className="h-3 w-3" /> : null}
-      </span>
-    </button>
+    </label>
   );
 }

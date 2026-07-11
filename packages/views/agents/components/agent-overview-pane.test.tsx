@@ -24,6 +24,9 @@ vi.mock("./tabs/activity-tab", () => ({
 vi.mock("./agent-overview-summary", () => ({
   AgentOverviewSummary: () => <div>agent-overview-summary</div>,
 }));
+vi.mock("./agent-access-settings", () => ({
+  AgentAccessSettings: () => <div>agent-access-settings</div>,
+}));
 vi.mock("./tabs/instructions-tab", () => ({
   InstructionsTab: () => <div>instructions-tab</div>,
 }));
@@ -139,13 +142,6 @@ function renderPane(runtimes: AgentRuntime[]) {
             agent={baseAgent}
             runtime={runtimes[0] ?? null}
             owner={null}
-            presence={{
-              availability: "online",
-              workload: "idle",
-              runningCount: 0,
-              queuedCount: 0,
-              capacity: 1,
-            }}
             runtimes={runtimes}
             members={[]}
             onUpdate={vi.fn().mockResolvedValue(undefined)}
@@ -159,6 +155,10 @@ function renderPane(runtimes: AgentRuntime[]) {
 
 function openCapabilities() {
   fireEvent.click(screen.getByRole("tab", { name: /^Capabilities$/i }));
+}
+
+function openSettings() {
+  fireEvent.click(screen.getByRole("tab", { name: /^Settings$/i }));
 }
 
 beforeEach(() => {
@@ -231,5 +231,13 @@ describe("AgentOverviewPane Integrations tab visibility", () => {
     expect(
       screen.queryByRole("tab", { name: /^Integrations$/i }),
     ).not.toBeInTheDocument();
+  });
+});
+
+describe("AgentOverviewPane Settings navigation", () => {
+  it("gives Access its own settings tab", () => {
+    renderPane([makeRuntime("claude")]);
+    openSettings();
+    expect(screen.getByRole("tab", { name: /^Access$/i })).toBeInTheDocument();
   });
 });
