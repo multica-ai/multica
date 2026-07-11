@@ -103,6 +103,8 @@
     "title": "Settings",
     "my_account": "My Account",
     "workspace_fallback": "Workspace",
+    "space": "Space",
+    "loading": "Loading settings…",
     "this_device": "This Device",
     "tabs": {
       "profile": "Profile",

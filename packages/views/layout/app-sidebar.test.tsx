@@ -149,7 +149,7 @@ vi.mock("@multica/core/paths", () => ({
     spaceProjects: (key: string) => `/acme/space/${key}/projects`,
     spaceAutopilots: (key: string) => `/acme/space/${key}/autopilots`,
     spaceSquads: (key: string) => `/acme/space/${key}/squads`,
-    spaceSettings: (key: string) => `/acme/space/${key}/settings`,
+    spaceSettings: (key: string) => `/acme/settings/space/${key}`,
     issueDetail: (id: string) => `/acme/issues/${id}`,
     projectDetail: (id: string) => `/acme/projects/${id}`,
   }),
@@ -296,7 +296,7 @@ describe("project navigation", () => {
     ).not.toBeNull();
     expect(
       container.querySelector('button[data-href="/acme/space/ENG/settings"]'),
-    ).not.toBeNull();
+    ).toBeNull();
   });
 });
 

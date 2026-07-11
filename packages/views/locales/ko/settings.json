@@ -100,6 +100,8 @@
     "title": "설정",
     "my_account": "내 계정",
     "workspace_fallback": "워크스페이스",
+    "space": "스페이스",
+    "loading": "설정을 불러오는 중…",
     "this_device": "이 기기",
     "tabs": {
       "profile": "프로필",

@@ -12,6 +12,7 @@ import type { Space } from "@multica/core/types";
 export function SpaceIcon({ space, className }: { space: Pick<Space, "icon">; className?: string }) {
   return (
     <span
+      aria-hidden="true"
       className={cn(
         "flex size-4 shrink-0 items-center justify-center rounded-sm",
         space.icon

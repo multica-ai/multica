@@ -49,6 +49,8 @@
     },
     "new_space": "새 Space",
     "spaces_empty": "첫 Space 만들기",
-    "browse_spaces": "Space 찾아보기"
+    "browse_spaces": "Space 찾아보기",
+    "expand_space": "{{name}} 펼치기",
+    "collapse_space": "{{name}} 접기"
   }
 }

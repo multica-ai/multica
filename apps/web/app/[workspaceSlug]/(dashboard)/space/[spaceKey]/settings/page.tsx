@@ -1,13 +1,11 @@
-"use client";
+import { redirect } from "next/navigation";
+import { paths } from "@multica/core/paths";
 
-import { use } from "react";
-import { SpaceSettingsPage } from "@multica/views/spaces";
-
-export default function Page({
+export default async function Page({
   params,
 }: {
-  params: Promise<{ spaceKey: string }>;
+  params: Promise<{ workspaceSlug: string; spaceKey: string }>;
 }) {
-  const { spaceKey } = use(params);
-  return <SpaceSettingsPage spaceKey={spaceKey} />;
+  const { workspaceSlug, spaceKey } = await params;
+  redirect(paths.workspace(workspaceSlug).spaceSettings(spaceKey));
 }

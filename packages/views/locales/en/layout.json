@@ -49,6 +49,8 @@
     },
     "new_space": "New space",
     "spaces_empty": "Create your first space",
-    "browse_spaces": "Browse spaces"
+    "browse_spaces": "Browse spaces",
+    "expand_space": "Expand {{name}}",
+    "collapse_space": "Collapse {{name}}"
   }
 }

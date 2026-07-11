@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useEffect, useMemo, useRef } from "react";
+import { useQuery } from "@tanstack/react-query";
 import {
   Bell,
   FolderGit2,
@@ -26,7 +27,14 @@ import {
   SelectValue,
 } from "@multica/ui/components/ui/select";
 import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
+import {
+  sortSpacesForDisplay,
+  spaceListOptions,
+} from "@multica/core/spaces/queries";
+import type { Space } from "@multica/core/types";
 import { AppLink, useNavigation } from "../../navigation";
+import { SpaceIcon } from "../../spaces/components/space-icon";
+import { SpaceSettingsPage } from "../../spaces/components/space-detail-page";
 import { AccountTab } from "./account-tab";
 import { PreferencesTab } from "./preferences-tab";
 import { ChatTab } from "./chat-tab";
@@ -43,7 +51,7 @@ import { WorkspaceSpacesTab } from "./workspace-spaces-tab";
 import { AutopilotTemplatesTab } from "./autopilot-templates-tab";
 import { useT } from "../../i18n";
 
-type SettingsScope = "account" | "workspace" | "device";
+type SettingsScope = "account" | "workspace" | "space";
 
 interface SettingsDestination {
   scope: SettingsScope;
@@ -51,6 +59,7 @@ interface SettingsDestination {
   label: string;
   icon: React.ComponentType<{ className?: string; "aria-hidden"?: boolean }>;
   content: React.ReactNode;
+  space?: Space;
 }
 
 const LEGACY_TAB_PATHS: Record<string, string> = {
@@ -80,7 +89,7 @@ export interface ExtraSettingsTab {
 }
 
 interface SettingsPageProps {
-  /** Device-scoped pages injected by a platform, such as desktop updates. */
+  /** Device-scoped pages injected by a platform and shown under My Account. */
   extraDeviceTabs?: ExtraSettingsTab[];
 }
 
@@ -93,9 +102,19 @@ function settingsSuffix(pathname: string): string | null {
 
 export function SettingsPage({ extraDeviceTabs }: SettingsPageProps = {}) {
   const { t } = useT("settings");
-  const workspaceName = useCurrentWorkspace()?.name;
+  const workspace = useCurrentWorkspace();
   const navigation = useNavigation();
   const paths = useWorkspacePaths();
+  const spacesQuery = useQuery({
+    ...spaceListOptions(workspace?.id ?? ""),
+    enabled: !!workspace?.id,
+  });
+  const settingsSpaces = useMemo(() => {
+    const ordered = sortSpacesForDisplay(spacesQuery.data ?? []);
+    return [...ordered].sort(
+      (a, b) => Number(!!a.archived_at) - Number(!!b.archived_at),
+    );
+  }, [spacesQuery.data]);
 
   const groups = useMemo(() => {
     const account: SettingsDestination[] = [
@@ -139,6 +158,13 @@ export function SettingsPage({ extraDeviceTabs }: SettingsPageProps = {}) {
         icon: Key,
         content: <TokensTab />,
       },
+      ...(extraDeviceTabs ?? []).map((tab) => ({
+        scope: "account" as const,
+        key: tab.value,
+        label: tab.label,
+        icon: tab.icon,
+        content: tab.content,
+      })),
     ];
     const workspace: SettingsDestination[] = [
       {
@@ -198,18 +224,19 @@ export function SettingsPage({ extraDeviceTabs }: SettingsPageProps = {}) {
         content: <RepositoriesTab />,
       },
     ];
-    const device: SettingsDestination[] = (extraDeviceTabs ?? []).map((tab) => ({
-      scope: "device",
-      key: tab.value,
-      label: tab.label,
-      icon: tab.icon,
-      content: tab.content,
+    const space: SettingsDestination[] = settingsSpaces.map((item) => ({
+      scope: "space",
+      key: item.key,
+      label: item.name,
+      icon: Layers3,
+      content: <SpaceSettingsPage spaceKey={item.key} embedded />,
+      space: item,
     }));
-    return { account, workspace, device };
-  }, [extraDeviceTabs, t]);
+    return { account, workspace, space };
+  }, [extraDeviceTabs, settingsSpaces, t]);
 
   const destinations = useMemo(
-    () => [...groups.account, ...groups.workspace, ...groups.device],
+    () => [...groups.account, ...groups.workspace, ...groups.space],
     [groups],
   );
   const destinationByPath = useMemo(
@@ -225,12 +252,27 @@ export function SettingsPage({ extraDeviceTabs }: SettingsPageProps = {}) {
 
   const suffix = settingsSuffix(navigation.pathname);
   const legacyTab = navigation.searchParams.get("tab");
-  const requestedPath = suffix ?? (legacyTab ? LEGACY_TAB_PATHS[legacyTab] : null);
-  const active =
-    (requestedPath ? destinationByPath.get(requestedPath) : null) ?? groups.account[0]!;
-  const activePath = `${active.scope}/${active.key}`;
+  const rawRequestedPath =
+    suffix ?? (legacyTab ? LEGACY_TAB_PATHS[legacyTab] : null);
+  // Desktop builds previously placed machine-specific pages under a fourth
+  // "device" group. They now live under My Account so Settings has exactly
+  // the three product scopes, while persisted old URLs still canonicalize.
+  const requestedPath = rawRequestedPath?.startsWith("device/")
+    ? `account/${rawRequestedPath.slice("device/".length)}`
+    : rawRequestedPath;
+  const waitingForSpace =
+    !!requestedPath?.startsWith("space/") && !spacesQuery.isSuccess;
+  const active = waitingForSpace
+    ? null
+    : (requestedPath ? destinationByPath.get(requestedPath) : null) ??
+      groups.account[0]!;
+  const activePath = active
+    ? `${active.scope}/${active.key}`
+    : (requestedPath ?? "account/profile");
   const canonicalPath =
-    suffix === activePath && legacyTab === null
+    waitingForSpace || !active
+      ? null
+      : suffix === activePath && legacyTab === null
       ? null
       : paths.settingsSection(active.scope, active.key);
   const lastRequestedCanonicalPath = useRef<string | null>(null);
@@ -269,18 +311,14 @@ export function SettingsPage({ extraDeviceTabs }: SettingsPageProps = {}) {
     },
     {
       scope: "workspace",
-      label: workspaceName ?? t(($) => $.page.workspace_fallback),
+      label: t(($) => $.page.workspace_fallback),
       entries: groups.workspace,
     },
-    ...(groups.device.length > 0
-      ? [
-          {
-            scope: "device" as const,
-            label: t(($) => $.page.this_device),
-            entries: groups.device,
-          },
-        ]
-      : []),
+    {
+      scope: "space",
+      label: t(($) => $.page.space),
+      entries: groups.space,
+    },
   ];
 
   return (
@@ -288,7 +326,9 @@ export function SettingsPage({ extraDeviceTabs }: SettingsPageProps = {}) {
       <div className="border-b border-surface-border bg-app-shell/70 p-3 md:hidden">
         <Select value={activePath} onValueChange={selectDestination}>
           <SelectTrigger className="w-full" aria-label={t(($) => $.page.title)}>
-            <SelectValue>{active.label}</SelectValue>
+            <SelectValue>
+              {active?.label ?? t(($) => $.page.loading)}
+            </SelectValue>
           </SelectTrigger>
           <SelectContent align="start">
             {groupEntries.map((group) => (
@@ -301,7 +341,11 @@ export function SettingsPage({ extraDeviceTabs }: SettingsPageProps = {}) {
                       key={`${entry.scope}/${entry.key}`}
                       value={`${entry.scope}/${entry.key}`}
                     >
-                      <Icon className="size-4" aria-hidden />
+                      {entry.space ? (
+                        <SpaceIcon space={entry.space} className="size-4" />
+                      ) : (
+                        <Icon className="size-4" aria-hidden />
+                      )}
                       {entry.label}
                     </SelectItem>
                   );
@@ -343,7 +387,11 @@ export function SettingsPage({ extraDeviceTabs }: SettingsPageProps = {}) {
                           "bg-surface-selected font-medium text-surface-selected-foreground hover:bg-surface-selected",
                       )}
                     >
-                      <Icon className="size-4" aria-hidden />
+                      {entry.space ? (
+                        <SpaceIcon space={entry.space} className="size-4" />
+                      ) : (
+                        <Icon className="size-4" aria-hidden />
+                      )}
                       <span className="truncate">{entry.label}</span>
                     </AppLink>
                   );
@@ -358,12 +406,16 @@ export function SettingsPage({ extraDeviceTabs }: SettingsPageProps = {}) {
         <div
           className={cn(
             "mx-auto w-full p-4 md:p-6",
-            active.key === "labels" || active.key === "properties"
+            active?.key === "labels" || active?.key === "properties"
               ? "max-w-5xl"
               : "max-w-3xl",
           )}
         >
-          {active.content}
+          {active?.content ?? (
+            <p className="text-sm text-muted-foreground" aria-live="polite">
+              {t(($) => $.page.loading)}
+            </p>
+          )}
         </div>
       </main>
     </div>

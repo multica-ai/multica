@@ -103,6 +103,8 @@
     "title": "设置",
     "my_account": "我的账号",
     "workspace_fallback": "工作区",
+    "space": "空间",
+    "loading": "正在加载设置…",
     "this_device": "此设备",
     "tabs": {
       "profile": "个人资料",

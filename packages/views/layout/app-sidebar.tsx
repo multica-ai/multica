@@ -165,7 +165,7 @@ const personalNav: { key: NavKey; labelKey: NavLabelKey; icon: typeof Inbox }[] 
 // The workspace-wide issue and project lists left the nav with the space
 // rollout: both live under their space (Spaces section below), while a user's
 // cross-space work remains available under My Issues. Space management lives
-// on each space's detail page (the /spaces overview was cut from v1).
+// in the unified Settings → Space group (the /spaces overview is discovery).
 // Autopilots are also space-scoped (space_id NOT NULL, their output lands in
 // their space), so they live under each space below.
 const workspaceNav: { key: NavKey; labelKey: NavLabelKey; icon: typeof Inbox }[] = [
@@ -186,7 +186,6 @@ const spaceChildNav = [
   { pathKey: "spaceProjects", labelKey: "projects", icon: FolderKanban },
   { pathKey: "spaceAutopilots", labelKey: "autopilots", icon: Zap },
   { pathKey: "spaceSquads", labelKey: "squads", icon: Users },
-  { pathKey: "spaceSettings", labelKey: "settings", icon: Settings },
 ] as const;
 
 function DraftDot() {
@@ -276,13 +275,18 @@ function SortableSpaceGroup({
             <span className="truncate">{space.name}</span>
             <button
               type="button"
+              aria-label={
+                collapse.open
+                  ? t(($) => $.sidebar.collapse_space, { name: space.name })
+                  : t(($) => $.sidebar.expand_space, { name: space.name })
+              }
               onClick={(e) => {
                 // Toggle only — never follow the surrounding link.
                 e.preventDefault();
                 e.stopPropagation();
                 collapse.onOpenChange(!collapse.open);
               }}
-              className="-ml-1 flex size-4 shrink-0 cursor-pointer items-center justify-center rounded-sm text-muted-foreground hover:bg-sidebar-accent hover:text-foreground"
+              className="-ml-1 flex size-4 shrink-0 cursor-pointer items-center justify-center rounded-sm text-muted-foreground hover:bg-sidebar-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring"
             >
               <ChevronRight
                 className={cn(

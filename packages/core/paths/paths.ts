@@ -35,7 +35,10 @@ function workspaceScoped(slug: string) {
     spaceSquadDetail: (key: string, id: string) =>
       `${ws}/space/${encode(key)}/squads/${encode(id)}`,
     spaceDetail: (key: string) => `${ws}/space/${encode(key)}`,
-    spaceSettings: (key: string) => `${ws}/space/${encode(key)}/settings`,
+    // Space configuration lives in the unified Settings information
+    // architecture. Space work stays under /space/:key/*; organization and
+    // governance live under /settings/space/:key.
+    spaceSettings: (key: string) => `${ws}/settings/space/${encode(key)}`,
     spacesDirectory: () => `${ws}/spaces`,
     // Static sibling of spaceDetail — "new" is a reserved space key
     // (RESERVED_SPACE_KEYS) precisely so it can never collide with this route.

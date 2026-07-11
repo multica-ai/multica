@@ -358,10 +358,9 @@ Initiative 只聚合和呈现，不接管 Project 或 Issue 的归属。看到 I
 - Projects；
 - Autopilots；
 - Squads；
-- Members；
-- Space Settings。
+- Members。
 
-Sidebar 中只显示用户已加入或主动 Pin 的 Space。项目只在所属 Space 下作为工作入口，不在 Workspace Sidebar 中重复出现。跨 Space 的项目索引可以通过搜索、报表或未来的聚合视图提供，但它只是展示层，不改变项目归属，也不成为 Workspace 根目录下的第二套项目入口。
+Sidebar 中只显示用户已加入或主动 Pin 的 Space，以及每个 Space 的日常工作入口；Space Settings 不在 Sidebar 重复出现。统一 Settings 页面固定分为 My Account、Workspace 和 Space 三部分，Space 部分列出当前用户可访问的各个 Space 设置。项目只在所属 Space 下作为工作入口，不在 Workspace Sidebar 中重复出现。跨 Space 的项目索引可以通过搜索、报表或未来的聚合视图提供，但它只是展示层，不改变项目归属，也不成为 Workspace 根目录下的第二套项目入口。
 
 ## 生命周期规则
 

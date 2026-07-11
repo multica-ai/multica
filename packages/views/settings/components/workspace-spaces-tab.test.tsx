@@ -73,7 +73,7 @@ vi.mock("@multica/core/paths", () => ({
   useWorkspacePaths: () => ({
     spaceNew: () => "/acme/space/new",
     spaceDetail: (key: string) => `/acme/space/${key}`,
-    spaceSettings: (key: string) => `/acme/space/${key}/settings`,
+    spaceSettings: (key: string) => `/acme/settings/space/${key}`,
   }),
 }));
 

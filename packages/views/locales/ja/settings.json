@@ -100,6 +100,8 @@
     "title": "設定",
     "my_account": "マイアカウント",
     "workspace_fallback": "ワークスペース",
+    "space": "スペース",
+    "loading": "設定を読み込んでいます…",
     "this_device": "このデバイス",
     "tabs": {
       "profile": "プロフィール",

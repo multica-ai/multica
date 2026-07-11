@@ -49,6 +49,8 @@
     },
     "new_space": "新しい Space",
     "spaces_empty": "最初の Space を作成",
-    "browse_spaces": "Space を探す"
+    "browse_spaces": "Space を探す",
+    "expand_space": "{{name}}を展開",
+    "collapse_space": "{{name}}を折りたたむ"
   }
 }

@@ -58,10 +58,17 @@ import { SpaceIcon } from "./space-icon";
 import { useT, useTimeAgo } from "../../i18n";
 
 /**
- * Space settings — /space/:key/settings. Identity fields apply inline, then
- * membership and lifecycle controls follow in the same narrow column.
+ * Space settings. The canonical surface is embedded in
+ * /settings/space/:key; the standalone wrapper remains available while old
+ * platform routes redirect into the unified Settings information architecture.
  */
-export function SpaceSettingsPage({ spaceKey }: { spaceKey: string }) {
+export function SpaceSettingsPage({
+  spaceKey,
+  embedded = false,
+}: {
+  spaceKey: string;
+  embedded?: boolean;
+}) {
   const { t } = useT("spaces");
   const wsId = useWorkspaceId();
   // Full list (not active-only): an archived space's settings stay viewable.
@@ -80,6 +87,19 @@ export function SpaceSettingsPage({ spaceKey }: { spaceKey: string }) {
     ) : null;
   }
 
+  const content = (
+    <div className="flex w-full flex-col gap-8">
+      <Identity space={space} />
+      <ContextSection space={space} />
+      <MembersSection space={space} isLastActiveSpace={isLastActiveSpace} />
+      <ArchiveSection space={space} isLastActiveSpace={isLastActiveSpace} />
+      <RestoreSection space={space} />
+      <ActivitySection space={space} />
+    </div>
+  );
+
+  if (embedded) return content;
+
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <PageHeader className="gap-2">
@@ -94,14 +114,7 @@ export function SpaceSettingsPage({ spaceKey }: { spaceKey: string }) {
       </PageHeader>
 
       <div className="min-h-0 flex-1 overflow-y-auto">
-        <div className="mx-auto flex w-full max-w-4xl flex-col gap-8 px-6 py-8">
-          <Identity space={space} />
-          <ContextSection space={space} />
-          <MembersSection space={space} isLastActiveSpace={isLastActiveSpace} />
-          <ArchiveSection space={space} isLastActiveSpace={isLastActiveSpace} />
-          <RestoreSection space={space} />
-          <ActivitySection space={space} />
-        </div>
+        <div className="mx-auto w-full max-w-4xl px-6 py-8">{content}</div>
       </div>
     </div>
   );
@@ -347,9 +360,9 @@ function Identity({ space }: { space: Space }) {
     try {
       await updateSpace.mutateAsync({ id: space.id, key: nextKey });
       toast.success(t(($) => $.toast_updated));
-      // The Identifier is the space's URL segment — move to the new URL so
-      // the current /space/:key route keeps resolving.
-      navigation.replace(p.spaceDetail(nextKey));
+      // The Identifier is the settings URL segment — keep the selected Space
+      // destination canonical after a rename.
+      navigation.replace(p.spaceSettings(nextKey));
     } catch (err) {
       setKeyDraft(space.key);
       toast.error(

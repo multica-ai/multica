@@ -1,11 +1,11 @@
-import { useParams } from "react-router-dom";
+import { Navigate, useParams } from "react-router-dom";
+import { paths } from "@multica/core/paths";
 import {
   SpaceIssuesPage,
   SpaceProjectsPage,
   SpaceAutopilotsPage,
   SpaceSquadsPage,
   SpaceOverviewPage,
-  SpaceSettingsPage,
 } from "@multica/views/spaces";
 
 // Router wrappers: resolve the :spaceKey param and hand it to the shared
@@ -42,7 +42,15 @@ export function SpaceDetailRoute() {
 }
 
 export function SpaceSettingsRoute() {
-  const { spaceKey } = useParams<{ spaceKey: string }>();
-  if (!spaceKey) return null;
-  return <SpaceSettingsPage spaceKey={spaceKey} />;
+  const { workspaceSlug, spaceKey } = useParams<{
+    workspaceSlug: string;
+    spaceKey: string;
+  }>();
+  if (!workspaceSlug || !spaceKey) return null;
+  return (
+    <Navigate
+      to={paths.workspace(workspaceSlug).spaceSettings(spaceKey)}
+      replace
+    />
+  );
 }

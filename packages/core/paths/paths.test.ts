@@ -29,7 +29,7 @@ describe("paths.workspace(slug)", () => {
     expect(ws.settingsSection("workspace", "members")).toBe(
       "/acme/settings/workspace/members",
     );
-    expect(ws.spaceSettings("ENG")).toBe("/acme/space/ENG/settings");
+    expect(ws.spaceSettings("ENG")).toBe("/acme/settings/space/ENG");
     expect(ws.spacesDirectory()).toBe("/acme/spaces");
     expect(ws.attachmentPreview("att_42")).toBe("/acme/attachments/att_42/preview");
   });

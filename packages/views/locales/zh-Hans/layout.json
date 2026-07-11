@@ -49,6 +49,8 @@
     },
     "new_space": "新建空间",
     "spaces_empty": "新建第一个空间",
-    "browse_spaces": "浏览空间"
+    "browse_spaces": "浏览空间",
+    "expand_space": "展开 {{name}}",
+    "collapse_space": "收起 {{name}}"
   }
 }
