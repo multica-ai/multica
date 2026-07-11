@@ -172,14 +172,14 @@ export function PreferencesTab() {
                 role="radio"
                 aria-checked={active}
                 onClick={() => setTheme(opt.value)}
-                className="group flex flex-col items-center gap-2"
+                className="group flex flex-col items-center gap-2 rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/70 focus-visible:ring-offset-2 focus-visible:ring-offset-page-canvas"
               >
                 <div
                   className={cn(
-                    "aspect-[4/3] w-36 overflow-hidden rounded-lg ring-1 transition-all",
+                    "aspect-[4/3] w-36 overflow-hidden rounded-lg ring-1 transition-shadow",
                     active
                       ? "ring-2 ring-brand"
-                      : "ring-border hover:ring-2 hover:ring-border"
+                      : "ring-surface-border group-hover:ring-2 group-hover:ring-surface-border"
                   )}
                 >
                   {opt.value === "system" ? (
@@ -228,10 +228,10 @@ export function PreferencesTab() {
                 aria-checked={active}
                 onClick={() => handleLanguageChange(opt.value)}
                 className={cn(
-                  "rounded-md border px-4 py-2 text-sm transition-colors",
+                  "rounded-md border px-4 py-2 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/70 focus-visible:ring-offset-2 focus-visible:ring-offset-page-canvas",
                   active
-                    ? "border-brand bg-brand/10 font-medium text-foreground"
-                    : "border-border text-muted-foreground hover:border-foreground/30"
+                    ? "border-brand/50 bg-surface-selected font-medium text-foreground"
+                    : "border-surface-border text-muted-foreground hover:border-foreground/30 hover:bg-surface-hover"
                 )}
               >
                 {opt.label}

@@ -233,6 +233,12 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .animate-chat-impulse,
+  .animate-chat-text-shimmer,
+  .animate-nav-progress-sweep {
+    animation: none;
+  }
+
   [data-right-sidebar-panel] {
     transition: none;
   }
