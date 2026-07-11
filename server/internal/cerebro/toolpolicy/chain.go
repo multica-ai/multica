@@ -193,6 +193,15 @@ type Effective struct {
 	// Reason is a short human-readable explanation suitable for audit rows and
 	// tooltips, e.g. "Capped by user" or "Allowed by runtime default".
 	Reason string
+	// Openable is true when this verdict was resolved under the member-override
+	// (ModeOpenable) model — i.e. a member layer (Group/User) MAY still open a
+	// broader default, unlike a tighten-only hard floor (credentials, OS sandbox,
+	// repo, agent-browser) or a member-override-off workspace. It is a DISPLAY
+	// hint only — enforcement never reads it — so the admin table's lock/warning
+	// affordance can tell an openable workspace Deny (not a floor) apart from an
+	// unopenable one without re-deriving the mode client-side (FIR-3091). False
+	// for every tighten-only resolution, which fails the display safe (locked).
+	Openable bool
 }
 
 // Allowed reports whether the tool may run without an approval pause.
@@ -443,6 +452,7 @@ func resolveOpenable(in Input) Effective {
 			DecidedBy: LayerSystem,
 			CappedBy:  LayerSystem,
 			Reason:    "Denied — system actor has no human to answer an Ask",
+			Openable:  true,
 		}
 	}
 
@@ -455,6 +465,8 @@ func resolveOpenable(in Input) Effective {
 		DecidedBy: decidedBy,
 		CappedBy:  cappedBy,
 		Reason:    reason,
+		// Resolved under the openable (member-override) model — see Effective.Openable.
+		Openable: true,
 	}
 }
 

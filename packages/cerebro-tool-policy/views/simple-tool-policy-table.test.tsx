@@ -46,7 +46,7 @@ const row = (over: Partial<ToolPolicyRow> = {}): ToolPolicyRow => ({
   managed_externally: false,
   layers: { workspace: null, runtime: null, agent: null, group: null, user: null, system: null },
   conditions: { workspace: null, runtime: null, agent: null, user: null, system: null },
-  effective: { setting: "allow", decided_by: "", capped_by: "", reason: "" },
+  effective: { setting: "allow", decided_by: "", capped_by: "", reason: "", openable: false },
   capped_by_groups: [],
   ...over,
 });
@@ -65,14 +65,14 @@ const TABLE = {
       title: "Hent fra nettet",
       category: "Web",
       layers: { workspace: null, runtime: null, agent: "ask", group: null, user: null, system: null },
-      effective: { setting: "ask", decided_by: "agent", capped_by: "", reason: "" },
+      effective: { setting: "ask", decided_by: "agent", capped_by: "", reason: "", openable: false },
     }),
     row({
       tool_key: "delete_shared",
       title: "Slet delte ressourcer",
       category: "tools",
       layers: { workspace: null, runtime: null, agent: "deny", group: null, user: null, system: null },
-      effective: { setting: "deny", decided_by: "agent", capped_by: "", reason: "" },
+      effective: { setting: "deny", decided_by: "agent", capped_by: "", reason: "", openable: false },
     }),
   ],
 };

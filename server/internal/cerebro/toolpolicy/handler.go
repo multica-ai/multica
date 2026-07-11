@@ -122,6 +122,12 @@ type effectiveResponse struct {
 	DecidedBy string `json:"decided_by"`
 	CappedBy  string `json:"capped_by"`
 	Reason    string `json:"reason"`
+	// Openable is a display hint (FIR-3091): true when the verdict resolved under
+	// the member-override model, so a member layer may still open a broader
+	// default. The admin table uses it to reserve the lock/"no effect" affordance
+	// for genuine floors instead of every workspace Deny. Omitted-by-older-backend
+	// drifts to false client-side, which fails safe (treated as an unopenable floor).
+	Openable bool `json:"openable"`
 }
 
 // groupAttributionResponse names a group that drives a group-layer cap on a row
@@ -539,6 +545,7 @@ func toRowResponse(row TableRow) toolPolicyRow {
 			DecidedBy: string(row.Effective.DecidedBy),
 			CappedBy:  string(row.Effective.CappedBy),
 			Reason:    row.Effective.Reason,
+			Openable:  row.Effective.Openable,
 		},
 		CappedByGroups: groups,
 	}

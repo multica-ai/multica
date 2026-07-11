@@ -12,7 +12,7 @@ const row = (over: Partial<ToolPolicyRow> = {}): ToolPolicyRow => ({
   managed_externally: false,
   layers: { workspace: null, runtime: null, agent: null, group: null, user: null, system: null },
   conditions: { workspace: null, runtime: null, agent: null, user: null, system: null },
-  effective: { setting: "allow", decided_by: "", capped_by: "", reason: "" },
+  effective: { setting: "allow", decided_by: "", capped_by: "", reason: "", openable: false },
   capped_by_groups: [],
   ...over,
 });
@@ -51,10 +51,10 @@ describe("groupByCapability", () => {
 
   it("counts rows per Effective verdict for the header dot summary", () => {
     const rows = [
-      row({ tool_key: "a", category: "Slack", effective: { setting: "allow", decided_by: "", capped_by: "", reason: "" } }),
-      row({ tool_key: "b", category: "Slack", effective: { setting: "ask", decided_by: "", capped_by: "", reason: "" } }),
-      row({ tool_key: "c", category: "Slack", effective: { setting: "deny", decided_by: "", capped_by: "", reason: "" } }),
-      row({ tool_key: "d", category: "Slack", effective: { setting: "allow", decided_by: "", capped_by: "", reason: "" } }),
+      row({ tool_key: "a", category: "Slack", effective: { setting: "allow", decided_by: "", capped_by: "", reason: "", openable: false } }),
+      row({ tool_key: "b", category: "Slack", effective: { setting: "ask", decided_by: "", capped_by: "", reason: "", openable: false } }),
+      row({ tool_key: "c", category: "Slack", effective: { setting: "deny", decided_by: "", capped_by: "", reason: "", openable: false } }),
+      row({ tool_key: "d", category: "Slack", effective: { setting: "allow", decided_by: "", capped_by: "", reason: "", openable: false } }),
     ];
     const [group] = groupByCapability(rows);
     expect(group!.counts).toEqual({ allow: 2, ask: 1, deny: 1 });

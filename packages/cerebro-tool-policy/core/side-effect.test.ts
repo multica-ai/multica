@@ -20,6 +20,7 @@ function row(
       decided_by: "",
       capped_by: "",
       reason: "",
+      openable: false,
     },
     capped_by_groups: [],
   };
