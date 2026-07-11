@@ -168,6 +168,17 @@ func writeConnectedApps(b *strings.Builder, ctx TaskContextForEnv) {
 	b.WriteString("\nUse the listed MCP server when the task asks to read or act in one of these apps.\n\n")
 }
 
+func writeFallbackTranscriptPointer(b *strings.Builder, ctx TaskContextForEnv) {
+	if ctx.FallbackTranscript == nil || len(ctx.FallbackTranscript.Messages) == 0 {
+		return
+	}
+	b.WriteString("## Previous Runtime Transcript\n\n")
+	fmt.Fprintf(b, "A failed run on another runtime left a provider-neutral transcript at `%s` (source task `%s`). Read that file only when prior execution details would help; its contents are deliberately not injected into this prompt.\n\n", fallbackTranscriptRelPath(ctx.FallbackTranscript), ctx.FallbackTranscript.SourceTaskID)
+	if ctx.FallbackTranscript.Truncated {
+		b.WriteString("The handover file is size-bounded and contains the most recent available entries from the retry chain; older entries were omitted.\n\n")
+	}
+}
+
 func sanitizeBriefCodeToken(s string) string {
 	s = strings.TrimSpace(s)
 	if s == "" {
@@ -588,6 +599,7 @@ func buildMetaSkillContentSlim(provider string, ctx TaskContextForEnv) string {
 	writeTaskInitiator(&b, ctx)
 	writeWorkspaceContext(&b, ctx)
 	writeConnectedApps(&b, ctx)
+	writeFallbackTranscriptPointer(&b, ctx)
 
 	switch kind {
 	case kindQuickCreate:

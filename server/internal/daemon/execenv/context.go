@@ -1,6 +1,7 @@
 package execenv
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -21,6 +22,18 @@ const TaskContextMarkerRelPath = ".multica/daemon_task_context.json"
 // TaskContextMarkerManagedBy is the marker discriminator the CLI checks before
 // treating TaskContextMarkerRelPath as daemon-owned.
 const TaskContextMarkerManagedBy = "multica-daemon-task"
+
+const FallbackTranscriptBaseRelDir = ".multica/fallback-context"
+
+var fallbackTranscriptSourcePattern = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
+
+func fallbackTranscriptRelPath(transcript *FallbackTranscriptForEnv) string {
+	source := strings.TrimSpace(transcript.SourceTaskID)
+	if source == "" || !fallbackTranscriptSourcePattern.MatchString(source) {
+		source = "previous-runtime"
+	}
+	return filepath.Join(FallbackTranscriptBaseRelDir, source, "transcript.jsonl")
+}
 
 type taskContextMarkerFile struct {
 	ManagedBy string `json:"managed_by"`
@@ -144,6 +157,9 @@ func writeContextFiles(workDir, provider string, ctx TaskContextForEnv, manifest
 	if err := writeTaskContextMarker(workDir, ctx, manifest); err != nil {
 		return err
 	}
+	if err := writeFallbackTranscript(workDir, ctx.FallbackTranscript, manifest); err != nil {
+		return fmt.Errorf("write fallback transcript: %w", err)
+	}
 
 	contextDir := filepath.Join(workDir, ".agent_context")
 	if err := recordMkdirAll(contextDir, 0o755, manifest); err != nil {
@@ -195,6 +211,39 @@ func writeContextFiles(workDir, provider string, ctx TaskContextForEnv, manifest
 	}
 
 	return nil
+}
+
+func writeFallbackTranscript(workDir string, transcript *FallbackTranscriptForEnv, manifest *sidecarManifest) error {
+	if transcript == nil || len(transcript.Messages) == 0 {
+		return nil
+	}
+	path := filepath.Join(workDir, fallbackTranscriptRelPath(transcript))
+	if err := recordMkdirAll(filepath.Dir(path), 0o755, manifest); err != nil {
+		return err
+	}
+	var content strings.Builder
+	for _, message := range transcript.Messages {
+		if !json.Valid(message) {
+			return errors.New("invalid fallback transcript message")
+		}
+		content.Write(message)
+		content.WriteByte('\n')
+	}
+	data := []byte(content.String())
+	if err := recordWriteFile(path, data, 0o444, manifest); err != nil {
+		if !errors.Is(err, errPathPreExists) {
+			return err
+		}
+		existing, readErr := os.ReadFile(path)
+		if readErr != nil {
+			return readErr
+		}
+		if !bytes.Equal(existing, data) {
+			return err
+		}
+		return nil
+	}
+	return os.Chmod(path, 0o444)
 }
 
 func writeTaskContextMarker(workDir string, ctx TaskContextForEnv, manifest *sidecarManifest) error {
@@ -688,6 +737,13 @@ func renderIssueContext(provider string, ctx TaskContextForEnv) string {
 		b.WriteString("## Handoff Note\n\n")
 		b.WriteString("The person who assigned this issue left this instruction for the run. Treat it as scope guidance and follow it before doing anything broader:\n\n")
 		fmt.Fprintf(&b, "> %s\n\n", ctx.HandoffNote)
+	}
+	if ctx.FallbackTranscript != nil && len(ctx.FallbackTranscript.Messages) > 0 {
+		b.WriteString("## Previous Runtime Transcript\n\n")
+		fmt.Fprintf(&b, "The previous runtime's provider-neutral transcript is available at `%s` (source task `%s`). Read it only if prior execution details are needed; it is not injected into your prompt.\n\n", fallbackTranscriptRelPath(ctx.FallbackTranscript), ctx.FallbackTranscript.SourceTaskID)
+		if ctx.FallbackTranscript.Truncated {
+			b.WriteString("The file is size-bounded and contains the most recent available entries from the retry chain; older entries were omitted.\n\n")
+		}
 	}
 
 	b.WriteString("## Quick Start\n\n")

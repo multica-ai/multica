@@ -2493,6 +2493,23 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 			)
 		}
 	}
+
+	// A provider-native session cannot be resumed after an automatic retry
+	// moves to another runtime, which may be on another host. Relay Multica's
+	// persisted provider-neutral transcript so the claiming daemon can expose
+	// it as a read-only file. Manual reruns remain truly fresh, and transcript
+	// data never crosses runtime-owner boundaries.
+	if !task.ForceFreshSession && task.ParentTaskID.Valid {
+		transcript, err := h.loadFallbackTranscript(r.Context(), *task, runtime)
+		if err != nil {
+			outcome = "error_fallback_transcript"
+			slog.Error("task claim: failed to load fallback transcript", "task_id", uuidToString(task.ID), "error", err)
+			requeueFailedClaim("fallback_transcript")
+			writeError(w, http.StatusInternalServerError, "failed to prepare fallback transcript")
+			return
+		}
+		resp.FallbackTranscript = transcript
+	}
 	// Mint a task-scoped `mat_` token bound to (agent, task, workspace,
 	// owner). The daemon will inject this as MULTICA_TOKEN into the agent
 	// process instead of its own credential, so any API call the agent
@@ -3575,6 +3592,139 @@ func taskMessageToPayload(m db.TaskMessage, taskID, issueID string) protocol.Tas
 		Output:    m.Output.String,
 		CreatedAt: createdAt,
 	}
+}
+
+const (
+	fallbackTranscriptMaxTasks        = 8
+	fallbackTranscriptMaxRowsPerTask  = 2000
+	fallbackTranscriptMaxBytes        = 2 << 20
+	fallbackTranscriptMaxMessageBytes = 128 << 10
+)
+
+// loadFallbackTranscript walks the automatic retry ancestry newest-first,
+// retaining the most recent messages within a bounded payload. The rows are
+// reversed before return so the JSONL file reads chronologically. Direct SQL
+// is used here because the UI transcript query is intentionally unbounded,
+// while the claim control plane must have a hard row limit.
+func (h *Handler) loadFallbackTranscript(ctx context.Context, task db.AgentTaskQueue, claimingRuntime db.AgentRuntime) (*FallbackTranscriptData, error) {
+	parent, err := h.Queries.GetAgentTask(ctx, task.ParentTaskID)
+	if err != nil {
+		return nil, fmt.Errorf("load parent task: %w", err)
+	}
+	if parent.RuntimeID == task.RuntimeID {
+		return nil, nil
+	}
+
+	var selected []protocol.TaskMessagePayload
+	totalBytes := 0
+	truncated := false
+	capacityReached := false
+	current := parent
+	for depth := 0; depth < fallbackTranscriptMaxTasks; depth++ {
+		if current.AgentID != task.AgentID {
+			return nil, errors.New("fallback transcript parent agent mismatch")
+		}
+		sourceRuntime, err := h.Queries.GetAgentRuntime(ctx, current.RuntimeID)
+		if err != nil {
+			return nil, fmt.Errorf("load source runtime: %w", err)
+		}
+		if !sourceRuntime.OwnerID.Valid || !claimingRuntime.OwnerID.Valid || sourceRuntime.OwnerID != claimingRuntime.OwnerID {
+			return nil, nil
+		}
+
+		messages, moreRows, err := h.listFallbackTaskMessages(ctx, current.ID)
+		if err != nil {
+			return nil, err
+		}
+		truncated = truncated || moreRows
+		for _, message := range messages { // newest first
+			payload := compactFallbackMessage(taskMessageToPayload(message, uuidToString(current.ID), uuidToString(current.IssueID)))
+			encoded, err := json.Marshal(payload)
+			if err != nil {
+				return nil, fmt.Errorf("marshal fallback transcript message: %w", err)
+			}
+			if totalBytes+len(encoded)+1 > fallbackTranscriptMaxBytes {
+				truncated = true
+				capacityReached = true
+				break
+			}
+			selected = append(selected, payload)
+			totalBytes += len(encoded) + 1
+		}
+		if capacityReached || !current.ParentTaskID.Valid {
+			break
+		}
+		if depth == fallbackTranscriptMaxTasks-1 {
+			truncated = true
+			break
+		}
+		next, err := h.Queries.GetAgentTask(ctx, current.ParentTaskID)
+		if err != nil {
+			return nil, fmt.Errorf("load fallback ancestor: %w", err)
+		}
+		current = next
+	}
+
+	if len(selected) == 0 {
+		return nil, nil
+	}
+	for i, j := 0, len(selected)-1; i < j; i, j = i+1, j-1 {
+		selected[i], selected[j] = selected[j], selected[i]
+	}
+	return &FallbackTranscriptData{
+		SourceTaskID: uuidToString(parent.ID),
+		Messages:     selected,
+		Truncated:    truncated,
+	}, nil
+}
+
+func (h *Handler) listFallbackTaskMessages(ctx context.Context, taskID pgtype.UUID) ([]db.TaskMessage, bool, error) {
+	rows, err := h.DB.Query(ctx, `
+		SELECT id, task_id, seq, type, tool, content, input, output, created_at
+		FROM task_message
+		WHERE task_id = $1
+		ORDER BY seq DESC
+		LIMIT $2
+	`, taskID, fallbackTranscriptMaxRowsPerTask+1)
+	if err != nil {
+		return nil, false, fmt.Errorf("query fallback transcript: %w", err)
+	}
+	defer rows.Close()
+
+	messages := make([]db.TaskMessage, 0, fallbackTranscriptMaxRowsPerTask)
+	rowCount := 0
+	for rows.Next() {
+		rowCount++
+		var message db.TaskMessage
+		if err := rows.Scan(&message.ID, &message.TaskID, &message.Seq, &message.Type, &message.Tool, &message.Content, &message.Input, &message.Output, &message.CreatedAt); err != nil {
+			return nil, false, fmt.Errorf("scan fallback transcript: %w", err)
+		}
+		if len(messages) < fallbackTranscriptMaxRowsPerTask {
+			messages = append(messages, message)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, false, fmt.Errorf("read fallback transcript: %w", err)
+	}
+	return messages, rowCount > fallbackTranscriptMaxRowsPerTask, nil
+}
+
+func compactFallbackMessage(message protocol.TaskMessagePayload) protocol.TaskMessagePayload {
+	encoded, _ := json.Marshal(message)
+	if len(encoded) <= fallbackTranscriptMaxMessageBytes {
+		return message
+	}
+	message.Input = nil
+	message.Content = truncateFallbackField(message.Content, 48<<10)
+	message.Output = truncateFallbackField(message.Output, 48<<10)
+	return message
+}
+
+func truncateFallbackField(value string, limit int) string {
+	if len(value) <= limit {
+		return value
+	}
+	return value[:limit] + "\n[truncated for cross-runtime handover]"
 }
 
 // ListTaskMessages returns the persisted messages for a task (for catch-up after reconnect).

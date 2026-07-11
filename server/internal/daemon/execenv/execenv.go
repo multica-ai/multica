@@ -127,7 +127,8 @@ type TaskContextForEnv struct {
 	// history-command policy is Slack-only and lives in the per-turn chat prompt
 	// (daemon/prompt.go) — the server has no Feishu history reader.
 	ChatChannelType         string
-	AutopilotRunID          string // non-empty for autopilot run_only tasks
+	FallbackTranscript      *FallbackTranscriptForEnv // cross-runtime parent transcript, written to disk rather than injected
+	AutopilotRunID          string                    // non-empty for autopilot run_only tasks
 	AutopilotID             string
 	AutopilotTitle          string
 	AutopilotDescription    string
@@ -163,6 +164,12 @@ type TaskContextForEnv struct {
 	InitiatorID    string
 	InitiatorName  string
 	InitiatorEmail string
+}
+
+type FallbackTranscriptForEnv struct {
+	SourceTaskID string
+	Messages     []json.RawMessage
+	Truncated    bool
 }
 
 // SkillContextForEnv represents a skill to be written into the execution environment.

@@ -3893,6 +3893,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		NewCommentCount:                  task.NewCommentCount,
 		NewCommentsSince:                 task.NewCommentsSince,
 		PriorSessionResumed:              task.PriorSessionID != "",
+		FallbackTranscript:               fallbackTranscriptForEnv(task.FallbackTranscript),
 		AgentID:                          agentID,
 		AgentName:                        agentName,
 		AgentInstructions:                instructions,
@@ -5081,6 +5082,28 @@ func convertReposForEnv(repos []RepoData) []execenv.RepoContextForEnv {
 		result[i] = execenv.RepoContextForEnv{URL: r.URL, Description: r.Description, Ref: r.Ref}
 	}
 	return result
+}
+
+func fallbackTranscriptForEnv(transcript *FallbackTranscriptData) *execenv.FallbackTranscriptForEnv {
+	if transcript == nil || len(transcript.Messages) == 0 {
+		return nil
+	}
+	messages := make([]json.RawMessage, 0, len(transcript.Messages))
+	for _, message := range transcript.Messages {
+		encoded, err := json.Marshal(message)
+		if err != nil {
+			continue
+		}
+		messages = append(messages, encoded)
+	}
+	if len(messages) == 0 {
+		return nil
+	}
+	return &execenv.FallbackTranscriptForEnv{
+		SourceTaskID: transcript.SourceTaskID,
+		Messages:     messages,
+		Truncated:    transcript.Truncated,
+	}
 }
 
 func convertProjectResourcesForEnv(resources []ProjectResourceData) []execenv.ProjectResourceForEnv {

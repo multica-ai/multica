@@ -3146,15 +3146,113 @@ func TestCompleteTask_AssignmentTriggered_DoesNotSuppressTrivialDoneOutput(t *te
 }
 
 type claimRuntimeGuardTask struct {
-	PriorSessionID           string   `json:"prior_session_id"`
-	PriorWorkDir             string   `json:"prior_work_dir"`
-	ChatMessage              string   `json:"chat_message"`
-	ThreadName               string   `json:"thread_name"`
-	QuickCreateAttachmentIDs []string `json:"quick_create_attachment_ids"`
-	QuickCreatePriority      string   `json:"quick_create_priority"`
-	QuickCreateDueDate       string   `json:"quick_create_due_date"`
-	ProjectID                string   `json:"project_id"`
-	ProjectDescription       string   `json:"project_description"`
+	PriorSessionID           string                  `json:"prior_session_id"`
+	PriorWorkDir             string                  `json:"prior_work_dir"`
+	ChatMessage              string                  `json:"chat_message"`
+	ThreadName               string                  `json:"thread_name"`
+	QuickCreateAttachmentIDs []string                `json:"quick_create_attachment_ids"`
+	QuickCreatePriority      string                  `json:"quick_create_priority"`
+	QuickCreateDueDate       string                  `json:"quick_create_due_date"`
+	ProjectID                string                  `json:"project_id"`
+	ProjectDescription       string                  `json:"project_description"`
+	FallbackTranscript       *FallbackTranscriptData `json:"fallback_transcript"`
+}
+
+func TestClaimTask_CrossRuntimeRetryIncludesParentTranscript(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	agentID, runtimeID, daemonID := createRuntimeGuardAgent(t, ctx)
+	oldRuntimeID := createRuntimeGuardRuntime(t, ctx, "claude")
+
+	var issueID, grandparentTaskID, parentTaskID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type, number, position)
+		VALUES ($1, 'cross runtime transcript fixture', 'in_progress', 'none', $2, 'member', 81219, 0)
+		RETURNING id
+	`, testWorkspaceID, testUserID).Scan(&issueID); err != nil {
+		t.Fatalf("create issue: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID) })
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, started_at, completed_at, session_id)
+		VALUES ($1, $2, $3, 'failed', 0, now() - interval '2 minutes', now() - interval '2 minutes', 'claude-session-1')
+		RETURNING id
+	`, agentID, oldRuntimeID, issueID).Scan(&grandparentTaskID); err != nil {
+		t.Fatalf("create grandparent task: %v", err)
+	}
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO task_message (task_id, seq, type, content)
+		VALUES ($1, 1, 'text', 'initial investigation')
+	`, grandparentTaskID); err != nil {
+		t.Fatalf("create grandparent transcript: %v", err)
+	}
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO task_message (task_id, seq, type, content)
+		SELECT $1, n, 'text', 'grandparent entry ' || n::text
+		FROM generate_series(2, 2002) AS n
+	`, grandparentTaskID); err != nil {
+		t.Fatalf("create bounded grandparent transcript: %v", err)
+	}
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, started_at, completed_at, session_id, parent_task_id, attempt)
+		VALUES ($1, $2, $3, 'failed', 0, now(), now(), 'claude-session-2', $4, 2)
+		RETURNING id
+	`, agentID, oldRuntimeID, issueID, grandparentTaskID).Scan(&parentTaskID); err != nil {
+		t.Fatalf("create parent task: %v", err)
+	}
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO task_message (task_id, seq, type, content)
+		VALUES ($1, 1, 'text', 'prior investigation'), ($1, 2, 'error', 'quota exceeded')
+	`, parentTaskID); err != nil {
+		t.Fatalf("create parent transcript: %v", err)
+	}
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, parent_task_id, attempt)
+		VALUES ($1, $2, $3, 'queued', 0, $4, 2)
+	`, agentID, runtimeID, issueID, parentTaskID); err != nil {
+		t.Fatalf("create fallback task: %v", err)
+	}
+
+	task := claimTaskForRuntimeGuard(t, runtimeID, daemonID)
+	if task.PriorSessionID != "" {
+		t.Fatalf("cross-runtime retry unexpectedly resumed provider session %q", task.PriorSessionID)
+	}
+	if task.FallbackTranscript == nil {
+		t.Fatal("cross-runtime retry missing fallback transcript")
+	}
+	if task.FallbackTranscript.SourceTaskID != parentTaskID {
+		t.Fatalf("source task = %q, want %q", task.FallbackTranscript.SourceTaskID, parentTaskID)
+	}
+	if !task.FallbackTranscript.Truncated {
+		t.Fatal("fallback transcript should report truncation after row cap")
+	}
+	if len(task.FallbackTranscript.Messages) != 2002 ||
+		task.FallbackTranscript.Messages[0].Content != "grandparent entry 3" ||
+		task.FallbackTranscript.Messages[2000].Content != "prior investigation" {
+		t.Fatalf("fallback transcript = %#v", task.FallbackTranscript.Messages)
+	}
+}
+
+func TestCompactFallbackMessageBoundsOversizedFields(t *testing.T) {
+	message := protocol.TaskMessagePayload{
+		Type:    "tool_result",
+		Content: strings.Repeat("c", fallbackTranscriptMaxMessageBytes),
+		Output:  strings.Repeat("o", fallbackTranscriptMaxMessageBytes),
+		Input:   map[string]any{"payload": strings.Repeat("i", fallbackTranscriptMaxMessageBytes)},
+	}
+	compact := compactFallbackMessage(message)
+	encoded, err := json.Marshal(compact)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(encoded) > fallbackTranscriptMaxMessageBytes {
+		t.Fatalf("compacted message bytes = %d, max %d", len(encoded), fallbackTranscriptMaxMessageBytes)
+	}
+	if compact.Input != nil {
+		t.Fatal("oversized tool input should be omitted from fallback transcript")
+	}
 }
 
 func claimTaskForRuntimeGuard(t *testing.T, runtimeID, daemonID string) *claimRuntimeGuardTask {
