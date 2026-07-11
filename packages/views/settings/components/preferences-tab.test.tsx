@@ -1,5 +1,14 @@
 import type { ReactNode } from "react";
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import {
+  describe,
+  it,
+  expect,
+  beforeAll,
+  beforeEach,
+  afterAll,
+  afterEach,
+  vi,
+} from "vitest";
 import { render, screen, act, cleanup, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { I18nProvider } from "@multica/core/i18n/react";
@@ -202,6 +211,22 @@ describe("PreferencesTab — Language switcher", () => {
 });
 
 describe("PreferencesTab — Timezone section", () => {
+  // Shrink the picker to the curated COMMON_TIMEZONES fallback. With the
+  // real Intl.supportedValuesOf the popup renders ~600 options, and
+  // userEvent traversal of that list blew past the per-test timeout on
+  // slow CI runners (MUL-4427). Everything these tests pick — Asia/Tokyo
+  // and the "(browser)" sentinel — exists in the fallback list too.
+  const intlWithValues = Intl as typeof Intl & {
+    supportedValuesOf?: (key: "timeZone") => string[];
+  };
+  const realSupportedValuesOf = intlWithValues.supportedValuesOf;
+  beforeAll(() => {
+    intlWithValues.supportedValuesOf = () => [];
+  });
+  afterAll(() => {
+    intlWithValues.supportedValuesOf = realSupportedValuesOf;
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
     userRef.current = null;
@@ -235,8 +260,7 @@ describe("PreferencesTab — Timezone section", () => {
   });
 
   // handleChange PATCHes then updates the store asynchronously, so the
-  // post-pick assertions must waitFor it to settle. The extended timeout
-  // covers querying the Select's full ~600-option IANA list on slow CI.
+  // post-pick assertions must waitFor it to settle.
   it("saving a new timezone PATCHes /api/me and updates the auth store", async () => {
     userRef.current = { id: "user-1", timezone: "Asia/Shanghai" };
     const updatedUser = { id: "user-1", timezone: "Asia/Tokyo" };
@@ -251,7 +275,7 @@ describe("PreferencesTab — Timezone section", () => {
       expect(mockSetUser).toHaveBeenCalledWith(updatedUser);
       expect(mockToastSuccess).toHaveBeenCalledTimes(1);
     });
-  }, 20000);
+  });
 
   it("surfaces a toast when the PATCH fails", async () => {
     userRef.current = { id: "user-1", timezone: "Asia/Shanghai" };
@@ -266,7 +290,7 @@ describe("PreferencesTab — Timezone section", () => {
       expect(mockToastError).toHaveBeenCalledTimes(1);
     });
     expect(mockSetUser).not.toHaveBeenCalled();
-  }, 20000);
+  });
 
   it("clearing the preference sends an empty-string timezone", async () => {
     userRef.current = { id: "user-1", timezone: "Asia/Shanghai" };
@@ -285,5 +309,5 @@ describe("PreferencesTab — Timezone section", () => {
       // so the picker switches back to "(browser)" without a refetch.
       expect(mockSetUser).toHaveBeenCalledWith(clearedUser);
     });
-  }, 20000);
+  });
 });
