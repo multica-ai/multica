@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, nativeImage, Notification } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, nativeImage, Notification, screen } from "electron";
 import { homedir } from "os";
 import { join } from "path";
 import { electronApp, optimizer, is } from "@electron-toolkit/utils";
@@ -28,6 +28,14 @@ import {
   readAndClearFreezeBreadcrumb,
   clearFreezeBreadcrumb,
 } from "./freeze-breadcrumb";
+import {
+  isVisibleOnSomeDisplay,
+  loadWindowState,
+  resolveWindowOptions,
+  saveWindowStateToFile,
+  snapshotWindowState,
+  windowStateFilePath,
+} from "./window-state";
 
 // Guards against registering the will-download handler more than once on the
 // same session. window.webContents.session is shared, and createWindow() can
@@ -154,9 +162,21 @@ function createWindow(): void {
   const systemLocale = getSystemLocale();
   lastKnownSystemLocale = systemLocale;
 
+  // Restore prior size/position/maximized/fullscreen (#5244). Position is
+  // only applied when the saved bounds still intersect a connected display
+  // so an unplugged external monitor does not open the window off-screen.
+  const stateFile = windowStateFilePath(app.getPath("userData"));
+  const savedWindowState = loadWindowState(stateFile);
+  const displays = screen.getAllDisplays().map((d) => d.workArea);
+  const useSavedPosition = isVisibleOnSomeDisplay(savedWindowState, displays);
+  const windowOpts = resolveWindowOptions(savedWindowState, useSavedPosition);
+
   mainWindow = new BrowserWindow({
-    width: 1280,
-    height: 800,
+    width: windowOpts.width,
+    height: windowOpts.height,
+    ...(windowOpts.x != null && windowOpts.y != null
+      ? { x: windowOpts.x, y: windowOpts.y }
+      : {}),
     minWidth: 900,
     minHeight: 600,
     titleBarStyle: "hiddenInset",
@@ -202,6 +222,25 @@ function createWindow(): void {
   const window = mainWindow;
   latestRendererRouteContext = null;
 
+  // Persist bounds on resize/move (debounced) and on close so the next
+  // launch restores size/position and max/fullscreen flags. getNormalBounds
+  // is used so maximized/fullscreen still saves the restore size.
+  let persistTimer: ReturnType<typeof setTimeout> | null = null;
+  const persistWindowState = () => {
+    const snap = snapshotWindowState(window);
+    if (snap) saveWindowStateToFile(stateFile, snap);
+  };
+  const schedulePersistWindowState = () => {
+    if (persistTimer) clearTimeout(persistTimer);
+    persistTimer = setTimeout(persistWindowState, 400);
+  };
+  window.on("resize", schedulePersistWindowState);
+  window.on("move", schedulePersistWindowState);
+  window.on("close", () => {
+    if (persistTimer) clearTimeout(persistTimer);
+    persistWindowState();
+  });
+
   window.on("closed", () => {
     if (mainWindow === window) {
       mainWindow = null;
@@ -220,6 +259,12 @@ function createWindow(): void {
   );
 
   window.on("ready-to-show", () => {
+    // Restore max/fullscreen after normal bounds are applied.
+    if (windowOpts.isFullScreen) {
+      window.setFullScreen(true);
+    } else if (windowOpts.isMaximized) {
+      window.maximize();
+    }
     window.show();
   });
 
