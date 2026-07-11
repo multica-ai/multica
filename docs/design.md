@@ -32,6 +32,7 @@ Surface 系统描述的是容器之间的关系，不是把每一段内容都包
 规则：
 
 - Page Canvas 是默认内容面。需要分组时先用间距和分割线，只有独立操作或独立信息块才使用 Surface。
+- 浅色模式中，`page-canvas` 必须与纯白 `surface` 保持可见但克制的明度差（当前为 `0.98` 与 `1.00`）；不能只靠 border 区分设置组和页面背景。`app-shell` 与 sidebar 再各退后一级，形成由外向内逐步变亮的层级。
 - Card 使用 `bg-surface border-surface-border shadow-[var(--surface-shadow)]`；浮层使用 `bg-surface-raised ring-surface-border shadow-[var(--floating-shadow)]`。
 - `surface-hover` 只表示指针经过；`surface-selected` 表示持续选中。选中项 hover 时必须保留 `surface-selected`，不能退回 hover 状态。
 - focus 一律使用 `focus-visible` ring。不要用阴影、尺寸变化或品牌大面积填充代替键盘焦点。

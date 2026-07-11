@@ -16,8 +16,8 @@
     color-scheme: light;
 }
 .landing-light {
-    --app-shell: oklch(0.976 0.002 286.32);
-    --page-canvas: oklch(0.995 0.001 286.32);
+    --app-shell: oklch(0.955 0.002 286.32);
+    --page-canvas: oklch(0.98 0.001 286.32);
     --surface: oklch(1 0 0);
     --surface-foreground: oklch(0.141 0.005 285.823);
     --surface-raised: oklch(1 0 0);
