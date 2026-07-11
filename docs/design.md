@@ -2,6 +2,8 @@
 
 本文档定义 Multica 的视觉语言和交互规范。所有 UI 开发以此为准。
 
+页面级信息架构、布局组合与一致性治理见 [`ui-consistency-audit.md`](./ui-consistency-audit.md)。
+
 ---
 
 ## 1. 设计哲学
