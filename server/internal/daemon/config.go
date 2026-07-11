@@ -756,12 +756,20 @@ var defaultAgentCommandNames = []string{
 	"pi", "cursor-agent", "copilot", "kimi", "kiro-cli", "codebuddy", "agy", "traecli",
 }
 
+// codexDesktopAppBundlePaths returns candidate macOS app-bundle locations for
+// the bundled Codex CLI. OpenAI relocated the Desktop app from Codex.app to
+// ChatGPT.app (#5205); prefer the new path first, keep the legacy Codex.app
+// path so older installs still resolve.
 var codexDesktopAppBundlePaths = func() []string {
 	paths := []string{
+		"/Applications/ChatGPT.app/Contents/Resources/codex",
 		"/Applications/Codex.app/Contents/Resources/codex",
 	}
 	if home, err := os.UserHomeDir(); err == nil {
-		paths = append(paths, filepath.Join(home, "Applications", "Codex.app", "Contents", "Resources", "codex"))
+		paths = append(paths,
+			filepath.Join(home, "Applications", "ChatGPT.app", "Contents", "Resources", "codex"),
+			filepath.Join(home, "Applications", "Codex.app", "Contents", "Resources", "codex"),
+		)
 	}
 	return paths
 }
