@@ -223,7 +223,7 @@ func (s *RedisLocalSkillListStore) PopPending(ctx context.Context, runtimeID str
 	return nil, nil
 }
 
-func (s *RedisLocalSkillListStore) Complete(ctx context.Context, id string, skills []RuntimeLocalSkillSummary, supported bool) error {
+func (s *RedisLocalSkillListStore) Complete(ctx context.Context, id string, skills []RuntimeLocalSkillSummary, supported bool, mcpServers []RuntimeLocalMcpServerSummary, mcpSupported bool) error {
 	req, err := s.loadListRequest(ctx, id)
 	if err != nil {
 		return err
@@ -234,6 +234,8 @@ func (s *RedisLocalSkillListStore) Complete(ctx context.Context, id string, skil
 	req.Status = RuntimeLocalSkillCompleted
 	req.Skills = skills
 	req.Supported = supported
+	req.McpServers = mcpServers
+	req.McpSupported = mcpSupported
 	req.UpdatedAt = time.Now()
 	return s.persistListRequest(ctx, req)
 }

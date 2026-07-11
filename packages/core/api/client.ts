@@ -1711,6 +1711,19 @@ export class ApiClient {
     });
   }
 
+	async setAgentSkillEnabled(agentId: string, skillId: string, enabled: boolean): Promise<void> {
+		await this.fetch(`/api/agents/${agentId}/skills/${skillId}/enabled`, {
+			method: "PUT",
+			body: JSON.stringify({ enabled }),
+		});
+	}
+
+	async removeAgentSkill(agentId: string, skillId: string): Promise<void> {
+		await this.fetch(`/api/agents/${agentId}/skills/${skillId}`, {
+			method: "DELETE",
+		});
+	}
+
   // Personal Access Tokens
   async listPersonalAccessTokens(): Promise<PersonalAccessToken[]> {
     return this.fetch("/api/tokens");

@@ -119,11 +119,13 @@ func TestInMemoryLocalSkillListStore_PreservesSummaries(t *testing.T) {
 		"supported": true,
 		"skills": []map[string]any{
 			{
-				"key":         "review-helper",
-				"name":        "Review Helper",
+				"key":         "paper-desktop:review-helper",
+				"name":        "paper-desktop:review-helper",
 				"description": "Review PRs",
-				"source_path": "~/.claude/skills/review-helper",
+				"source_path": "~/.claude/plugins/cache/paper/skills/review-helper",
 				"provider":    "claude",
+				"root":        "plugin",
+				"plugin":      "paper-desktop@paper",
 				"file_count":  2,
 			},
 		},
@@ -137,7 +139,7 @@ func TestInMemoryLocalSkillListStore_PreservesSummaries(t *testing.T) {
 		t.Fatalf("unmarshal report body: %v", err)
 	}
 
-	if err := store.Complete(ctx, req.ID, parsed.Skills, true); err != nil {
+	if err := store.Complete(ctx, req.ID, parsed.Skills, true, nil, false); err != nil {
 		t.Fatalf("complete: %v", err)
 	}
 	got, err := store.Get(ctx, req.ID)
@@ -150,8 +152,11 @@ func TestInMemoryLocalSkillListStore_PreservesSummaries(t *testing.T) {
 	if len(got.Skills) != 1 {
 		t.Fatalf("expected 1 skill, got %d", len(got.Skills))
 	}
-	if got.Skills[0].SourcePath != "~/.claude/skills/review-helper" {
+	if got.Skills[0].SourcePath != "~/.claude/plugins/cache/paper/skills/review-helper" {
 		t.Fatalf("source_path = %q", got.Skills[0].SourcePath)
+	}
+	if got.Skills[0].Root != "plugin" || got.Skills[0].Plugin != "paper-desktop@paper" {
+		t.Fatalf("plugin origin = %#v", got.Skills[0])
 	}
 	if got.Skills[0].FileCount != 2 {
 		t.Fatalf("file_count = %d", got.Skills[0].FileCount)

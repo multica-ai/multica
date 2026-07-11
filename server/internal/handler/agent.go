@@ -640,6 +640,7 @@ func (h *Handler) ListAgents(w http.ResponseWriter, r *http.Request) {
 			ID:          uuidToString(row.ID),
 			Name:        row.Name,
 			Description: row.Description,
+			Enabled:     row.Enabled,
 		})
 	}
 
@@ -1631,6 +1632,7 @@ func (h *Handler) attachAgentSkills(ctx context.Context, resp *AgentResponse, ag
 			ID:          uuidToString(s.ID),
 			Name:        s.Name,
 			Description: s.Description,
+			Enabled:     s.Enabled,
 		}
 	}
 	resp.Skills = out

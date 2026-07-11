@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -307,7 +308,7 @@ func TestTrySendDropsWhenFull(t *testing.T) {
 	}
 }
 
-func TestBuildClaudeArgsIncludesStrictMCPConfig(t *testing.T) {
+func TestBuildClaudeArgsInheritsMCPByDefault(t *testing.T) {
 	t.Parallel()
 
 	args := buildClaudeArgs(ExecOptions{}, slog.Default())
@@ -316,7 +317,6 @@ func TestBuildClaudeArgsIncludesStrictMCPConfig(t *testing.T) {
 		"--output-format", "stream-json",
 		"--input-format", "stream-json",
 		"--verbose",
-		"--strict-mcp-config",
 		"--permission-mode", "bypassPermissions",
 		"--disallowedTools", "AskUserQuestion",
 	}
@@ -328,6 +328,15 @@ func TestBuildClaudeArgsIncludesStrictMCPConfig(t *testing.T) {
 		if args[i] != want {
 			t.Fatalf("expected args[%d] = %q, got %q", i, want, args[i])
 		}
+	}
+}
+
+func TestBuildClaudeArgsUsesStrictMCPForManagedConfig(t *testing.T) {
+	t.Parallel()
+
+	args := buildClaudeArgs(ExecOptions{McpConfig: json.RawMessage(`{}`)}, slog.Default())
+	if !slices.Contains(args, "--strict-mcp-config") {
+		t.Fatalf("managed MCP config must enable strict mode, got %v", args)
 	}
 }
 

@@ -396,10 +396,17 @@ export function AgentOverviewPane({
                       onDirtyChange={setActiveDirty}
                     />
                   )}
-                  {effectiveView === "skills" && <SkillsTab agent={agent} />}
+                  {effectiveView === "skills" && (
+                    <SkillsTab
+                      agent={agent}
+                      runtime={runtime}
+                      canEdit={canEdit}
+                    />
+                  )}
                   {effectiveView === "mcp_config" && (
                     <McpConfigTab
                       agent={agent}
+                      runtime={runtime}
                       onSave={(updates) => onUpdate(agent.id, updates)}
                       onDirtyChange={setActiveDirty}
                     />
