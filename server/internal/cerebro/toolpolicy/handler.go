@@ -252,6 +252,7 @@ func (h *Handler) Table(w http.ResponseWriter, r *http.Request) {
 		SystemID:           systemID,
 		Base:               base,
 		IncludePlatform:    h.Store.PlatformCapabilitiesEnabled(r.Context(), workspaceID, member.UserID),
+		IncludeAgentStart:  h.Store.AgentStartCapabilitiesEnabled(r.Context(), workspaceID, member.UserID),
 		IncludeCredentials: h.Store.CredentialAuthoringEnabled(r.Context(), workspaceID, member.UserID),
 	})
 	if err != nil {

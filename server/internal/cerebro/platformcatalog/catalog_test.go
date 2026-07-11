@@ -219,3 +219,51 @@ func requireCopyPhrases(t *testing.T, key, field, text string, phrases ...string
 		}
 	}
 }
+
+// TestSurfacedKeys guards the agent-start surface allowlist (FIR-3091 slice 4):
+// exactly the four "start someone else's agent" capabilities are marked Surfaced
+// so they can appear in the Permissions table behind the light agent-start gate
+// WITHOUT opening the whole platform catalog. Every surfaced key must be a real
+// catalog entry, and SurfacedKeys() must agree with the Surfaced field.
+func TestSurfacedKeys(t *testing.T) {
+	want := map[string]bool{
+		"trigger_other_agent":   true,
+		"rerun_issue":           true,
+		"schedule_agent_wakeup": true,
+		"trigger_autopilot":     true,
+	}
+
+	// SurfacedKeys() returns exactly the wanted set (no more, no less).
+	got := map[string]bool{}
+	for _, k := range SurfacedKeys() {
+		if got[k] {
+			t.Errorf("SurfacedKeys() returned duplicate %q", k)
+		}
+		got[k] = true
+	}
+	for k := range want {
+		if !got[k] {
+			t.Errorf("SurfacedKeys() missing %q", k)
+		}
+	}
+	for k := range got {
+		if !want[k] {
+			t.Errorf("SurfacedKeys() has unexpected %q — surface only the agent-start family", k)
+		}
+	}
+
+	// The Surfaced field on the catalog must agree with SurfacedKeys(), and every
+	// surfaced key must be a real, enforced/known catalog entry.
+	inCatalog := map[string]bool{}
+	for _, c := range All() {
+		inCatalog[c.Key] = true
+		if c.Surfaced != want[c.Key] {
+			t.Errorf("capability %q Surfaced = %v, want %v", c.Key, c.Surfaced, want[c.Key])
+		}
+	}
+	for k := range want {
+		if !inCatalog[k] {
+			t.Errorf("surfaced key %q is not a catalog entry", k)
+		}
+	}
+}

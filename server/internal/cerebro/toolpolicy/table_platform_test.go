@@ -201,3 +201,113 @@ func setPersonalFlag(t *testing.T, s *Store, userID pgtype.UUID, key string, ena
 		t.Fatalf("set personal flag: %v", err)
 	}
 }
+
+// TestTable_AgentStartSurfaceGate proves the FIR-3091 slice 4 surface: with the
+// agent-start gate on (and the full-catalog flag off) the table shows EXACTLY the
+// surfaced "start someone else's agent" family and none of the rest of the
+// platform catalog; with neither gate set the table is unchanged (no platform
+// rows). This is what lets an admin see/set those rules without opening the whole
+// catalog.
+func TestTable_AgentStartSurfaceGate(t *testing.T) {
+	s := newTPStore(t)
+	clearAll(t, s)
+	clearCaps(t, s)
+	ctx := context.Background()
+
+	// Neither gate: no platform rows at all (backwards-compatible default).
+	none, err := s.Table(ctx, TableQuery{WorkspaceID: tpTestWorkspaceID})
+	if err != nil {
+		t.Fatalf("Table (none): %v", err)
+	}
+	for _, k := range platformcatalog.SurfacedKeys() {
+		if _, ok := findRow(none, k); ok {
+			t.Errorf("surfaced row %q present with no gate", k)
+		}
+	}
+	if _, ok := findRow(none, "create_issue"); ok {
+		t.Error("non-surfaced platform row create_issue present with no gate")
+	}
+
+	// Agent-start gate only: exactly the surfaced family, nothing else.
+	on, err := s.Table(ctx, TableQuery{WorkspaceID: tpTestWorkspaceID, IncludeAgentStart: true})
+	if err != nil {
+		t.Fatalf("Table (agent-start): %v", err)
+	}
+	for _, k := range platformcatalog.SurfacedKeys() {
+		row, ok := findRow(on, k)
+		if !ok {
+			t.Errorf("surfaced key %q missing under agent-start gate", k)
+			continue
+		}
+		if row.Source != platformcatalog.Source {
+			t.Errorf("%q source = %q, want %q", k, row.Source, platformcatalog.Source)
+		}
+	}
+	// A non-surfaced platform action must NOT leak through the light surface.
+	if _, ok := findRow(on, "create_issue"); ok {
+		t.Error("non-surfaced platform row create_issue leaked through agent-start gate")
+	}
+	if _, ok := findRow(on, "add_comment"); ok {
+		t.Error("non-surfaced platform row add_comment leaked through agent-start gate")
+	}
+}
+
+// TestTable_AgentStartRowSettable proves a surfaced row carries its stored
+// per-layer settings and resolves the chain like any tool, so the surface is
+// genuinely settable — not read-only.
+func TestTable_AgentStartRowSettable(t *testing.T) {
+	s := newTPStore(t)
+	clearAll(t, s)
+	clearCaps(t, s)
+	ctx := context.Background()
+
+	if _, err := s.Set(ctx, SetParams{
+		WorkspaceID: tpTestWorkspaceID, ToolKey: "trigger_other_agent",
+		Layer: LayerWorkspace, SubjectID: tpTestWorkspaceID, Setting: SettingDeny, UpdatedBy: tpTestUserID,
+	}); err != nil {
+		t.Fatalf("set workspace Deny: %v", err)
+	}
+
+	rows, err := s.Table(ctx, TableQuery{WorkspaceID: tpTestWorkspaceID, IncludeAgentStart: true})
+	if err != nil {
+		t.Fatalf("Table: %v", err)
+	}
+	row, ok := findRow(rows, "trigger_other_agent")
+	if !ok {
+		t.Fatal("trigger_other_agent row missing under agent-start gate")
+	}
+	if got := row.Layers[LayerWorkspace]; got != SettingDeny {
+		t.Errorf("workspace layer = %q, want deny", got)
+	}
+	if row.Effective.Setting != SettingDeny {
+		t.Errorf("effective = %q, want deny", row.Effective.Setting)
+	}
+}
+
+// TestAgentStartCapabilitiesEnabled_HonorsWorkspaceOverride mirrors the
+// platform-flag precedence test for the agent-start gate: locked workspace wins,
+// else personal, else unlocked workspace, else registry default OFF.
+func TestAgentStartCapabilitiesEnabled_HonorsWorkspaceOverride(t *testing.T) {
+	s := newTPStore(t)
+	clearFlags(t, s)
+	ctx := context.Background()
+	requester := uuidByte(0x9)
+
+	if s.AgentStartCapabilitiesEnabled(ctx, tpTestWorkspaceID, requester) {
+		t.Fatal("no override: want disabled (registry default OFF)")
+	}
+	setWorkspaceFlag(t, s, FlagAgentStartCapabilities, true, true)
+	if !s.AgentStartCapabilitiesEnabled(ctx, tpTestWorkspaceID, requester) {
+		t.Fatal("locked workspace ON: want enabled for a user with no personal row")
+	}
+	setWorkspaceFlag(t, s, FlagAgentStartCapabilities, false, true)
+	setPersonalFlag(t, s, requester, FlagAgentStartCapabilities, true)
+	if s.AgentStartCapabilitiesEnabled(ctx, tpTestWorkspaceID, requester) {
+		t.Fatal("locked workspace OFF: must win over personal ON")
+	}
+	setWorkspaceFlag(t, s, FlagAgentStartCapabilities, false, false)
+	if !s.AgentStartCapabilitiesEnabled(ctx, tpTestWorkspaceID, requester) {
+		t.Fatal("unlocked workspace OFF + personal ON: personal must win")
+	}
+	clearFlags(t, s)
+}

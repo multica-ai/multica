@@ -34,6 +34,14 @@ import (
 // until an admin deliberately turns the flag on (FIR-2594).
 const FlagPlatformCapabilities = "cerebro_platform_capabilities"
 
+// FlagAgentStartCapabilities is the cerebro feature flag that gates the light
+// "agent-start" surface: the Permissions table shows the surfaced platform
+// capabilities (platformcatalog.SurfacedKeys — the "start someone else's agent"
+// family) when it is on, WITHOUT opening the whole platform catalog. It is the
+// same flag that gates the friendly Agent-start tab (agent-trigger-tab.tsx), so
+// turning it on gives an admin both surfaces. Default OFF (FIR-3091 slice 4).
+const FlagAgentStartCapabilities = "cerebro_agent_trigger_permissions"
+
 // PlatformCapabilitiesEnabled reports whether the platform-capability catalog
 // should be appended to the table for this (workspace, user). The flag defaults
 // OFF, so with no override anywhere it stays hidden; a DB error fails closed
@@ -53,6 +61,32 @@ const FlagPlatformCapabilities = "cerebro_platform_capabilities"
 // the admin screen offers for this flag had no effect on the server gate, so
 // platform actions never surfaced. Honoring the sentinel row fixes that.
 func (s *Store) PlatformCapabilitiesEnabled(ctx context.Context, workspaceID, userID pgtype.UUID) bool {
+	return s.cerebroFlagEnabled(ctx, workspaceID, userID, FlagPlatformCapabilities)
+}
+
+// AgentStartCapabilitiesEnabled reports whether the light agent-start surface
+// (platformcatalog.SurfacedKeys) should be appended to the table for this
+// (workspace, user). Gated by FlagAgentStartCapabilities with the same
+// precedence as the full-catalog flag, so the two surfaces resolve identically;
+// default OFF (FIR-3091 slice 4).
+func (s *Store) AgentStartCapabilitiesEnabled(ctx context.Context, workspaceID, userID pgtype.UUID) bool {
+	return s.cerebroFlagEnabled(ctx, workspaceID, userID, FlagAgentStartCapabilities)
+}
+
+// cerebroFlagEnabled resolves one cerebro feature flag for a (workspace, user)
+// with the canonical client precedence in packages/cerebro-feature-flags
+// (resolveFlag), so a server-side gate agrees with the admin toggle:
+//
+//  1. a LOCKED workspace override wins outright;
+//  2. otherwise a personal override wins;
+//  3. otherwise an unlocked workspace override (a soft workspace default);
+//  4. otherwise the registry default (false for the gate flags here).
+//
+// The workspace-level override lives under the all-zero sentinel user_id, NOT
+// the requester's id, so it must be read from the workspace list — reading only
+// the per-user row silently ignores a "Force on for the whole workspace" toggle.
+// A DB error fails closed (return false) and is logged.
+func (s *Store) cerebroFlagEnabled(ctx context.Context, workspaceID, userID pgtype.UUID, flagKey string) bool {
 	if s.q == nil {
 		return false
 	}
@@ -60,10 +94,10 @@ func (s *Store) PlatformCapabilitiesEnabled(ctx context.Context, workspaceID, us
 	var wsEnabled, wsLocked, wsFound bool
 	wsRows, err := s.q.ListCerebroWorkspaceFeatureFlags(ctx, workspaceID)
 	if err != nil {
-		slog.Error("toolpolicy: workspace platform-capabilities flag lookup failed", "error", err)
+		slog.Error("toolpolicy: workspace feature flag lookup failed", "flag", flagKey, "error", err)
 	} else {
 		for _, r := range wsRows {
-			if r.FlagKey == FlagPlatformCapabilities {
+			if r.FlagKey == flagKey {
 				wsEnabled, wsLocked, wsFound = r.Enabled, r.Locked, true
 				break
 			}
@@ -78,13 +112,13 @@ func (s *Store) PlatformCapabilitiesEnabled(ctx context.Context, workspaceID, us
 		on, perr := s.q.GetCerebroFeatureFlag(ctx, cerebrodb.GetCerebroFeatureFlagParams{
 			WorkspaceID: workspaceID,
 			UserID:      userID,
-			FlagKey:     FlagPlatformCapabilities,
+			FlagKey:     flagKey,
 		})
 		if perr == nil {
 			return on
 		}
 		if !errors.Is(perr, pgx.ErrNoRows) {
-			slog.Error("toolpolicy: platform-capabilities flag lookup failed", "error", perr)
+			slog.Error("toolpolicy: feature flag lookup failed", "flag", flagKey, "error", perr)
 			return false
 		}
 	}
@@ -92,7 +126,7 @@ func (s *Store) PlatformCapabilitiesEnabled(ctx context.Context, workspaceID, us
 	if wsFound {
 		return wsEnabled
 	}
-	// 4. Otherwise the registry default — OFF for this flag.
+	// 4. Otherwise the registry default — OFF for these gate flags.
 	return false
 }
 
@@ -102,12 +136,28 @@ func (s *Store) PlatformCapabilitiesEnabled(ctx context.Context, workspaceID, us
 // for the context (see Table), reused so the Group layer resolves against the
 // same groups as the capability-wide rows.
 func (s *Store) appendPlatformRows(ctx context.Context, in TableQuery, groupIDs []pgtype.UUID, out []TableRow) ([]TableRow, error) {
+	// IncludePlatform emits the whole catalog; otherwise (agent-start gate only)
+	// emit just the surfaced family, so the light surface never leaks the rest of
+	// the platform actions (FIR-3091 slice 4).
 	caps := platformcatalog.All()
+	if !in.IncludePlatform {
+		surfaced := caps[:0]
+		for _, c := range caps {
+			if c.Surfaced {
+				surfaced = append(surfaced, c)
+			}
+		}
+		caps = surfaced
+	}
 	if len(caps) == 0 {
 		return out, nil
 	}
 
-	settings, err := s.loadPlatformPolicySettings(ctx, in, groupIDs, platformcatalog.Keys())
+	keys := make([]string, len(caps))
+	for i, c := range caps {
+		keys[i] = c.Key
+	}
+	settings, err := s.loadPlatformPolicySettings(ctx, in, groupIDs, keys)
 	if err != nil {
 		return nil, err
 	}

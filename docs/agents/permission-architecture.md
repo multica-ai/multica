@@ -155,6 +155,15 @@ categories. It is surfaced in the tool-policy table **only when the `cerebro_pla
 feature flag is on (default OFF)** and the server gate `toolpolicy.PlatformCapabilitiesEnabled`
 passes — so today it is an **inventory, not an enforcement point**. Wiring it on is part of FIR-1496.
 
+**Light agent-start surface (FIR-3091 slice 4).** The four "start someone else's agent"
+capabilities — `trigger_other_agent`, `rerun_issue`, `schedule_agent_wakeup`, `trigger_autopilot`
+(marked `Surfaced` in the catalog, see `platformcatalog.SurfacedKeys`) — also surface on their own,
+behind the lighter `cerebro_agent_trigger_permissions` flag (gate `toolpolicy.AgentStartCapabilitiesEnabled`,
+`TableQuery.IncludeAgentStart`), **without** opening the rest of the catalog. This makes that family
+visible/settable in Permissions next to the friendly Agent-start tab. Enforcement is unchanged: only
+`trigger_other_agent` is enforced through the tool-policy chain (`mentiongate`, FIR-2409); the other
+three surface for visibility and are not yet an enforcement point.
+
 | Category | Capabilities (`tool_key`) |
 |---|---|
 | Issues | `create_issue`, `update_issue`, `delete_issue`, `rerun_issue`, `subscribe_issue`, `manage_labels`, `manage_share_tokens`, `manage_issue_recurrence` |
