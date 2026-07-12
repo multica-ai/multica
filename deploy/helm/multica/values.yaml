@@ -167,7 +167,9 @@ frontend:
 # Ingress
 # -----------------------------------------------------------------------------
 ingress:
-  enabled: true
+  # Disabled by default. Enable this when the cluster exposes applications with
+  # a Kubernetes Ingress controller. For Gateway API, use gatewayAPI below.
+  enabled: false
   className: traefik
   annotations: {}
   frontend:
@@ -177,6 +179,27 @@ ingress:
   # tls:
   #   - hosts: [multica.dev.lan, api.multica.dev.lan]
   #     secretName: multica-tls
+
+# -----------------------------------------------------------------------------
+# Gateway API
+# -----------------------------------------------------------------------------
+gatewayAPI:
+  # Requires the Gateway API CRDs and a controller-managed Gateway. The chart
+  # creates HTTPRoutes only; it does not create or manage the parent Gateway.
+  enabled: false
+  annotations: {}
+  # Parent Gateway(s) to attach both HTTPRoutes to. Namespace and sectionName
+  # are optional; omit namespace when the Gateway is in the release namespace.
+  parentRefs:
+    - name: gateway
+      # namespace: gateway-system
+      # sectionName: http
+  frontend:
+    hostnames:
+      - multica.dev.lan
+  backend:
+    hostnames:
+      - api.multica.dev.lan
 
 # -----------------------------------------------------------------------------
 # Monitoring

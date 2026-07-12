@@ -140,21 +140,21 @@ multica daemon status
 
 ## Kubernetes Deployment (Alternative)
 
-If you already run a Kubernetes cluster, you can deploy Multica there instead of Docker Compose using the released OCI Helm chart at `oci://ghcr.io/multica-ai/charts/multica` or the source chart at [`deploy/helm/multica/`](deploy/helm/multica/). It targets a typical k3s / k8s setup with an Ingress controller and a default `ReadWriteOnce` StorageClass — authored against k3s + Traefik + `local-path`, and should work on any cluster with minor tweaks.
+If you already run a Kubernetes cluster, you can deploy Multica there instead of Docker Compose using the released OCI Helm chart at `oci://ghcr.io/multica-ai/charts/multica` or the source chart at [`deploy/helm/multica/`](deploy/helm/multica/). It supports either Kubernetes Ingress or Gateway API for external traffic and expects a default `ReadWriteOnce` StorageClass. Both exposure modes are disabled by default, so choose one when installing the chart.
 
 The chart creates the following resources in the target namespace:
 
 - `multica-postgres` — `pgvector/pgvector:pg17` backed by a 10Gi PVC
 - `multica-backend` — Go API/WS server. Backed by a 5Gi `ReadWriteOnce` uploads PVC by default; set `backend.uploads.persistence.enabled=false` when you have configured S3 (`backend.config.s3Bucket`) and don't want the chart to declare the PVC at all.
 - `multica-frontend` — Next.js standalone server
-- Two `Ingress` resources: one for the web host, one for the backend host
+- When enabled, two `Ingress` or two `HTTPRoute` resources: one for the web host and one for the backend host
 - `multica-config` ConfigMap (rendered from `values.yaml`)
 
 The `multica-secrets` Secret is **not** managed by the chart — you create it once with `kubectl` so real values never need to land in git.
 
 > **One release per namespace:** the prebuilt `multica-web` image bakes `REMOTE_API_URL=http://backend:8080` at build time, so the chart ships an ExternalName Service literally named `backend`. Because that name is unprefixed, you can run only one Multica release per namespace, and `helm install` will fail if a `Service/backend` already exists there (pass `--take-ownership`, or use a dedicated namespace). If you build a web image with a patched `REMOTE_API_URL`, set `frontend.compatibility.backendAlias: false` to drop the alias.
 
-> **Prerequisites:** `kubectl` and `helm` (v3.13+ for `--take-ownership`, or v4+) configured for the target cluster, an Ingress controller (Traefik / NGINX), and a default StorageClass.
+> **Prerequisites:** `kubectl` and `helm` (v3.13+ for `--take-ownership`, or v4+) configured for the target cluster, a default StorageClass, and either an Ingress controller (Traefik / NGINX) or Gateway API CRDs plus a controller-managed `Gateway`. The chart creates `HTTPRoute` resources but does not manage the parent `Gateway`.
 
 ### Step 1 — Point hostnames at the cluster
 
@@ -166,11 +166,11 @@ The chart defaults to `multica.dev.lan` (web) and `api.multica.dev.lan` (backend
   192.168.1.206  multica.dev.lan api.multica.dev.lan
   ```
 
-  Replace `192.168.1.206` with any node IP where your Ingress controller's Service is reachable.
+  Replace `192.168.1.206` with an address where your Ingress controller or Gateway is reachable.
 
-- **Local DNS** (Pi-hole, Unbound, etc.): add A records for both hostnames pointing at the cluster Ingress IP.
+- **Local DNS** (Pi-hole, Unbound, etc.): add A records for both hostnames pointing at the Ingress or Gateway address.
 
-To use different hostnames, override the matching values at install time (see [Step 4](#step-4--install-the-chart)) — `ingress.frontend.host`, `ingress.backend.host`, plus `backend.config.appUrl`, `backend.config.frontendOrigin`, `backend.config.localUploadBaseUrl`, and `backend.config.googleRedirectUri`.
+To use different hostnames, override the matching exposure values at install time (see [Step 4](#step-4--install-the-chart)) — either `ingress.frontend.host` and `ingress.backend.host`, or `gatewayAPI.frontend.hostnames` and `gatewayAPI.backend.hostnames`. Also update `backend.config.appUrl`, `backend.config.frontendOrigin`, `backend.config.localUploadBaseUrl`, and `backend.config.googleRedirectUri`.
 
 ### Step 2 — Create the namespace
 
@@ -196,10 +196,28 @@ Leave optional values empty for now — you can fill them in later (see [Step 5 
 
 ### Step 4 — Install the chart
 
+Choose one external exposure mode. For an Ingress controller:
+
 ```bash
 helm install multica oci://ghcr.io/multica-ai/charts/multica \
   --version <chart-version> \
-  -n multica
+  -n multica \
+  --set ingress.enabled=true
+```
+
+For Gateway API, point the routes at an existing Gateway. Add
+`gatewayAPI.parentRefs[0].namespace` when it is outside the `multica` namespace,
+and optionally set `gatewayAPI.parentRefs[0].sectionName` to select a listener.
+The selected Gateway listener must allow `HTTPRoute` attachments from the
+Multica namespace:
+
+```bash
+helm install multica oci://ghcr.io/multica-ai/charts/multica \
+  --version <chart-version> \
+  -n multica \
+  --set gatewayAPI.enabled=true \
+  --set 'gatewayAPI.parentRefs[0].name=my-gateway' \
+  --set 'gatewayAPI.parentRefs[0].namespace=gateway-system'
 ```
 
 Released chart versions strip the leading `v` from the Git tag. For example, release tag `v0.3.5` publishes chart version `0.3.5`; the chart defaults the backend and frontend image tags to `v0.3.5`.
@@ -209,7 +227,7 @@ To override defaults, export the chart values, edit them, and pass them with `-f
 ```bash
 helm show values oci://ghcr.io/multica-ai/charts/multica \
   --version <chart-version> > my-values.yaml
-# edit my-values.yaml — e.g. change ingress hosts, image tags, resource limits
+# edit my-values.yaml — enable Ingress or Gateway API and configure hosts, images, and resources
 helm install multica oci://ghcr.io/multica-ai/charts/multica \
   --version <chart-version> \
   -n multica \
@@ -219,7 +237,7 @@ helm install multica oci://ghcr.io/multica-ai/charts/multica \
 When developing from a checkout, use the local chart path instead:
 
 ```bash
-helm install multica deploy/helm/multica -n multica
+helm install multica deploy/helm/multica -n multica --set ingress.enabled=true
 ```
 
 Watch the pods come up:
@@ -231,7 +249,7 @@ kubectl -n multica get pods -w
 On a cold cluster the backend can sit `Running` but not `Ready` for a few minutes while it waits on PostgreSQL and runs migrations — a startupProbe absorbs this, so the pod should not restart. Once the backend reports `Ready`, migrations have completed and `/healthz` returns OK:
 
 ```bash
-curl -H "Host: api.multica.dev.lan" http://<ingress-ip>/healthz
+curl -H "Host: api.multica.dev.lan" http://<ingress-or-gateway-address>/healthz
 # {"status":"ok","checks":{"db":"ok","migrations":"ok"}}
 ```
 
