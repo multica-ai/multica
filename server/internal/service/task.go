@@ -94,7 +94,8 @@ type TaskService struct {
 type IssueWorkflowActivator interface {
 	ActivateForIssue(
 		ctx context.Context,
-		workspaceID, workflowID, issueID, creatorID pgtype.UUID,
+		// CEREBRO-PATCH(cerebro-workflow-agent-requester): preserve the human requester across quick-create activation.
+		workspaceID, workflowID, issueID, creatorID, requesterID pgtype.UUID,
 		createdByType string,
 	) error
 }
@@ -2966,7 +2967,7 @@ func (s *TaskService) notifyQuickCreateCompleted(ctx context.Context, task db.Ag
 		if workflowID, perr := util.ParseUUID(qc.WorkflowID); perr != nil {
 			slog.Warn("quick-create completion: invalid workflow id",
 				"task_id", util.UUIDToString(task.ID), "workflow_id", qc.WorkflowID, "error", perr)
-		} else if aerr := s.IssueWorkflowActivator.ActivateForIssue(ctx, workspaceID, workflowID, issue.ID, requesterID, "member"); aerr != nil {
+		} else if aerr := s.IssueWorkflowActivator.ActivateForIssue(ctx, workspaceID, workflowID, issue.ID, requesterID, requesterID, "member"); aerr != nil {
 			slog.Warn("quick-create completion: workflow activation failed",
 				"task_id", util.UUIDToString(task.ID),
 				"issue_id", util.UUIDToString(issue.ID),

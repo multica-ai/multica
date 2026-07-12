@@ -289,7 +289,8 @@ type Handler struct {
 type IssueWorkflowActivator interface {
 	ActivateForIssue(
 		ctx context.Context,
-		workspaceID, workflowID, issueID, creatorID pgtype.UUID,
+		// CEREBRO-PATCH(cerebro-workflow-agent-requester): preserve the human requester when an agent activates a workflow.
+		workspaceID, workflowID, issueID, creatorID, requesterID pgtype.UUID,
 		createdByType string,
 	) error
 }
