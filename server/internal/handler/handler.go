@@ -144,6 +144,9 @@ type Handler struct {
 	// CEREBRO-PATCH(handler-chat-mute): TECH-3352 — cerebro chat-session snooze
 	// seam (read muted_until onto the chat list, clear it on read).
 	ChatMute ChatMuteInvoker
+	// CEREBRO-PATCH(handler-chat-stream): FIR-2835 Phase 1 — chat run SSE
+	// stream broker seam (interface lives in chat_stream_cerebro.go).
+	ChatStream ChatRunStreamBroker
 	// CEREBRO-PATCH(handler-runtime-pause): cerebro runtime pause/unpause service.
 	RuntimePause RuntimePauseInvoker
 	// CEREBRO-PATCH(handler-group-permissions): cerebro group-permission gate.

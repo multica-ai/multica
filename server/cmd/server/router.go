@@ -28,6 +28,8 @@ import (
 	cerebroagentmemory "github.com/multica-ai/multica/server/internal/cerebro/agentmemory"
 	"github.com/multica-ai/multica/server/internal/cerebro/cfaccess" // CEREBRO-PATCH(cf-access-auth): Cloudflare Access verifier
 	cerebrochannels "github.com/multica-ai/multica/server/internal/cerebro/channels"
+	// CEREBRO-PATCH(chat-run-stream-route): FIR-2835 Phase 1 chat run SSE stream broker import.
+	cerebrochatstream "github.com/multica-ai/multica/server/internal/cerebro/chatstream"
 	// CEREBRO-PATCH(comments-move-to-subissue): JEH-1309 move-comment-to-sub-issue handler import.
 	cerebrocomments "github.com/multica-ai/multica/server/internal/cerebro/comments"
 	// CEREBRO-PATCH(cerebro-webhook-gateway-delivery): FIR-1766 gateway on-behalf-of channel delivery import.
@@ -562,6 +564,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	cerebroNoteHandler := cerebronote.New(queries, cerebroQueries, bus, h.TaskService) // CEREBRO-PATCH(cerebro-notes-handler): TECH-3421 Notes + FIR-1621 send-to-agent dispatch.
 	// CEREBRO-PATCH(handler-chat-mute-wire): TECH-3352 — chat-snooze seam.
 	h.ChatMute = cerebroInboxHandler
+	// CEREBRO-PATCH(chat-run-stream-wire): FIR-2835 Phase 1 — chat run SSE stream broker.
+	h.ChatStream = cerebrochatstream.NewBroker(bus)
 	// CEREBRO-PATCH(cerebro-dashboard-route): JEH-684 dashboard handler instance
 	cerebroDashboardHandler := cerebrodashboard.New(cerebroQueries, queries)
 	// CEREBRO-PATCH(cerebro-pricing-route): FIR-2471 pricing endpoint handler instance (service key from CEREBRO_PRICING_KEY).
@@ -1950,6 +1954,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/usage", h.GetChatSessionUsage)
 					// CEREBRO-PATCH(chat-message-cost-route): FIR-31 per-reply cost badge.
 					r.Get("/message-costs", h.GetChatSessionMessageCosts)
+					// CEREBRO-PATCH(chat-run-stream-route): FIR-2835 Phase 1 — SSE run stream (AI SDK UI-message-stream v1).
+					r.Get("/stream", h.StreamChatSessionRun)
 				})
 			})
 			r.Get("/api/chat/messages/{messageId}/attachments", h.ListChatMessageAttachments)
