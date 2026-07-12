@@ -12,7 +12,10 @@ import { AutopilotDetailPage } from "./pages/autopilot-detail-page";
 import { SkillDetailPage } from "./pages/skill-detail-page";
 import { AgentDetailPage } from "./pages/agent-detail-page";
 import { MemberDetailPage } from "./pages/member-detail-page";
-import { RuntimeDetailPage } from "./pages/runtime-detail-page";
+import {
+  RuntimeDetailPage,
+  RuntimeSettingsPage,
+} from "./pages/runtime-detail-page";
 import { AttachmentPreviewRoute } from "./pages/attachment-preview-page";
 import { IssuesPage } from "@multica/views/issues/components";
 import { ProjectsPage } from "@multica/views/projects/components";
@@ -161,6 +164,11 @@ export const appRoutes: RouteObject[] = [
           {
             path: "runtimes/:id",
             element: <RuntimeDetailPage />,
+            handle: { title: "Machine" },
+          },
+          {
+            path: "runtimes/:id/runtime/:runtimeId",
+            element: <RuntimeSettingsPage />,
             handle: { title: "Runtime" },
           },
           { path: "skills", element: <SkillsPage />, handle: { title: "Skills" } },

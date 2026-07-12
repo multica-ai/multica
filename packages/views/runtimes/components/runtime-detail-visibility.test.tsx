@@ -262,9 +262,18 @@ describe("RuntimeDetail visibility section", () => {
     );
 
     fireEvent.click(screen.getByRole("button", { name: /Delete runtime/i }));
-    expect(screen.getByText("Delete custom runtime?")).toBeInTheDocument();
+    expect(
+      screen.getByText("Delete custom runtime from workspace?"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("alertdialog", {
+        name: "Delete custom runtime from workspace?",
+      }),
+    ).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "Delete from workspace" }),
+    );
     await waitFor(() =>
       expect(mockDeleteRuntimeProfile).toHaveBeenCalledWith(profile.id),
     );
