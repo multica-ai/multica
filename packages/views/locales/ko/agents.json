@@ -679,6 +679,98 @@
     "section_owner": "소유자",
     "section_model": "모델"
   },
+  "creation_studio": {
+    "title": "에이전트 만들기",
+    "squad_title": "이 스쿼드용 에이전트 만들기",
+    "duplicate_title": "{{name}} 복제",
+    "back": "뒤로",
+    "eyebrow": "에이전트 만들기",
+    "choose_title": "어떻게 시작하시겠어요?",
+    "choose_description": "모든 항목을 직접 설정하거나, 검증된 템플릿을 수정하거나, 필요한 내용을 설명하고 대화로 만들 수 있습니다.",
+    "recommended": "추천",
+    "continue": "계속",
+    "step_choose": "시작 방법 선택",
+    "step_template": "템플릿 선택",
+    "step_configure": "검토 및 설정",
+    "step_ai": "대화로 만들기",
+    "modes": {
+      "blank": {
+        "title": "빈 상태로 시작",
+        "description": "모든 항목을 직접 설정합니다. 에이전트의 동작 방식을 정확히 알고 있을 때 적합합니다."
+      },
+      "template": {
+        "title": "템플릿 사용",
+        "description": "정리된 지침과 스킬을 바탕으로 워크스페이스에 맞게 세부 항목을 조정합니다."
+      },
+      "ai": {
+        "title": "AI로 만들기",
+        "description": "원하는 결과를 설명하면 Agent Builder가 핵심 질문을 하고 실시간 초안을 준비합니다."
+      }
+    },
+    "templates": {
+      "search": "템플릿 검색…",
+      "search_label": "에이전트 템플릿 검색",
+      "empty": "검색과 일치하는 템플릿이 없습니다.",
+      "select_hint": "템플릿을 선택하여 지침과 스킬을 미리 확인하세요.",
+      "skills": "포함된 스킬",
+      "instructions": "지침",
+      "use": "이 템플릿 사용"
+    },
+    "sections": {
+      "identity": "기본 정보",
+      "identity_hint": "알아보기 쉬운 이름과 간결한 목적을 지정하세요.",
+      "behavior": "동작 및 기능",
+      "behavior_hint": "작업 방식을 정의하고 사용할 워크스페이스 스킬을 추가하세요.",
+      "execution": "실행",
+      "execution_hint": "에이전트를 실행할 위치를 선택하고 필요하면 런타임 기본 모델을 변경하세요.",
+      "access": "접근 권한",
+      "access_hint": "이 에이전트를 실행할 수 있는 사용자를 설정합니다. 나중에 변경할 수 있습니다."
+    },
+    "access": {
+      "private": {
+        "title": "나만",
+        "description": "나만 이 에이전트를 실행할 수 있습니다."
+      },
+      "workspace": {
+        "title": "전체 워크스페이스",
+        "description": "모든 워크스페이스 멤버가 실행할 수 있습니다."
+      },
+      "members": {
+        "title": "특정 멤버",
+        "description": "선택한 멤버만 실행할 수 있습니다.",
+        "required": "멤버를 한 명 이상 선택하세요."
+      }
+    },
+    "builder": {
+      "setup_title": "Agent Builder 런타임 선택",
+      "setup_description": "선택한 온라인 런타임이 설정 대화를 실행하고 새 에이전트의 기본 런타임이 됩니다.",
+      "start": "대화 시작",
+      "connect_runtime": "런타임 연결",
+      "start_failed": "Agent Builder를 시작하지 못했습니다.",
+      "send_failed": "메시지를 보내지 못했습니다.",
+      "stop_failed": "현재 생성을 중지하지 못했습니다.",
+      "chat_title": "Agent Builder",
+      "chat_hint": "대화로 요구 사항을 정리하고 옆의 설정을 다듬으세요.",
+      "runtime_online": "런타임 온라인",
+      "runtime_offline": "런타임 오프라인",
+      "empty_title": "이 에이전트는 무엇을 해야 하나요?",
+      "empty_description": "역할, 작업 흐름, 출력 또는 제약 사항을 설명하세요. 오른쪽에 첫 초안이 표시됩니다.",
+      "prompt_review": "프런트엔드 Pull Request 검토",
+      "prompt_research": "경쟁사를 조사하고 결과 요약",
+      "prompt_assistant": "팀의 프로젝트 계획과 작성 지원",
+      "thinking": "초안 업데이트 중…",
+      "placeholder": "필요한 에이전트를 설명하세요…",
+      "send": "메시지 보내기"
+    },
+    "live_draft": "에이전트 설정",
+    "live_draft_hint": "대화 내용이 여기에 반영되며 각 항목을 직접 조정할 수 있습니다.",
+    "duplicate_env_notice": "지침, 스킬, 모델 및 명령 인수는 복사됩니다. 보안을 위해 환경 변수는 복사되지 않습니다.",
+    "create_and_open": "만들고 열기",
+    "create_and_add": "만들고 스쿼드에 추가",
+    "creating": "에이전트 만드는 중…",
+    "create_failed": "에이전트를 만들지 못했습니다.",
+    "created": "{{name}}을(를) 만들었습니다"
+  },
   "actions": {
     "selected_other": "{{count}}개 선택됨",
     "clear_selection": "선택 해제"

@@ -308,37 +308,37 @@ type AgentTaskResponse struct {
 	// when WorkDir is empty, or when stripping leaves nothing. See
 	// relativeWorkDir() for the full rules. Older clients can still read
 	// WorkDir directly; newer UIs should prefer RelativeWorkDir.
-	RelativeWorkDir          string               `json:"relative_work_dir,omitempty"`
-	TriggerCommentID         *string              `json:"trigger_comment_id,omitempty"`          // comment that triggered this task
-	CoalescedCommentIDs      []string             `json:"coalesced_comment_ids,omitempty"`       // MUL-4195: earlier comments folded into this run when it had not yet started, so a single run still covers every deliberate comment; trigger_comment_id is the newest. Surfaced so the UI can show which comments a run covered. omitempty so old clients ignore it
-	CoalescedComments        []CoalescedCommentData `json:"coalesced_comments,omitempty"`        // MUL-4195: full detail (thread_id/author/created_at/content) of the folded comments, so the daemon prompt can address each without assuming they share the triggering thread. omitempty so old clients ignore it
-	DeliveredCommentIDs      []string             `json:"delivered_comment_ids"`                 // always present: [] is an authoritative empty receipt, while field absence identifies responses from legacy servers
-	TriggerThreadID          string               `json:"trigger_thread_id,omitempty"`           // root comment ID for the triggering thread
-	TriggerCommentContent    string               `json:"trigger_comment_content,omitempty"`     // content of the triggering comment
-	TriggerSummary           *string              `json:"trigger_summary,omitempty"`             // canonical short description snapshot — comment text / autopilot title — taken at task creation; survives source edits/deletes
-	TriggerAuthorType        string               `json:"trigger_author_type,omitempty"`         // "agent" or "member" — author kind of the triggering comment
-	TriggerAuthorName        string               `json:"trigger_author_name,omitempty"`         // display name of the triggering comment author
-	NewCommentCount          int                  `json:"new_comment_count,omitempty"`           // trigger-thread comments since last run; excludes injected trigger + own comments; omitempty so old daemons ignore it
-	NewCommentsSince         string               `json:"new_comments_since,omitempty"`          // RFC3339 anchor (last run's started_at) the count is measured from; omitempty so old daemons ignore it
-	ChatSessionID            string               `json:"chat_session_id,omitempty"`             // non-empty for chat tasks
-	ChatChannelType          string               `json:"chat_channel_type,omitempty"`           // "slack" when the chat session is backed by an IM channel; empty for a web-only chat. Makes the agent channel-aware (read history from the channel, not Multica)
-	ChatInThread             bool                 `json:"chat_in_thread,omitempty"`              // true when the latest @mention was a thread reply; tells the agent to start with `multica chat thread` vs `multica chat history`
-	ChatMessage              string               `json:"chat_message,omitempty"`                // user message for chat tasks
-	ChatMessageAttachments   []ChatAttachmentMeta `json:"chat_message_attachments,omitempty"`    // attachments on the user message — agent calls `multica attachment download <id>` per entry
-	ChatIntro                bool                 `json:"chat_intro,omitempty"`                  // true for the agent's proactive self-introduction chat (is_agent_intro session, no user message); the daemon builds an intro prompt instead of a reply prompt
-	AutopilotRunID           string               `json:"autopilot_run_id,omitempty"`            // non-empty for autopilot-spawned tasks
-	AutopilotID              string               `json:"autopilot_id,omitempty"`                // autopilot that spawned this task
-	AutopilotTitle           string               `json:"autopilot_title,omitempty"`             // autopilot title used as task context
-	AutopilotDescription     string               `json:"autopilot_description,omitempty"`       // autopilot description used as task prompt
-	AutopilotSource          string               `json:"autopilot_source,omitempty"`            // manual, schedule, webhook, or api
-	AutopilotTriggerPayload  json.RawMessage      `json:"autopilot_trigger_payload,omitempty"`   // optional trigger payload for webhook/api runs
-	QuickCreatePrompt        string               `json:"quick_create_prompt,omitempty"`         // user's natural-language input for quick-create tasks
-	QuickCreateAttachmentIDs []string             `json:"quick_create_attachment_ids,omitempty"` // attachment ids uploaded in the quick-create prompt and bound on issue create
-	HandoffNote              string               `json:"handoff_note,omitempty"`                // assignment handoff instruction; rendered into the run's opening prompt + issue_context.md (omitempty so old daemons ignore it)
-	SquadID                  string               `json:"squad_id,omitempty"`                    // for quick-create tasks where the picker was a squad; Agent is still the resolved leader
-	SquadName                string               `json:"squad_name,omitempty"`                  // display name for the picker squad
-	ParentIssueID            string               `json:"parent_issue_id,omitempty"`             // for quick-create tasks opened from "Add sub issue" — UUID of the parent issue the new issue should be filed under
-	ParentIssueIdentifier    string               `json:"parent_issue_identifier,omitempty"`     // human-readable identifier (e.g. MUL-123) of the quick-create parent issue, resolved on claim for prompt context
+	RelativeWorkDir          string                 `json:"relative_work_dir,omitempty"`
+	TriggerCommentID         *string                `json:"trigger_comment_id,omitempty"`          // comment that triggered this task
+	CoalescedCommentIDs      []string               `json:"coalesced_comment_ids,omitempty"`       // MUL-4195: earlier comments folded into this run when it had not yet started, so a single run still covers every deliberate comment; trigger_comment_id is the newest. Surfaced so the UI can show which comments a run covered. omitempty so old clients ignore it
+	CoalescedComments        []CoalescedCommentData `json:"coalesced_comments,omitempty"`          // MUL-4195: full detail (thread_id/author/created_at/content) of the folded comments, so the daemon prompt can address each without assuming they share the triggering thread. omitempty so old clients ignore it
+	DeliveredCommentIDs      []string               `json:"delivered_comment_ids"`                 // always present: [] is an authoritative empty receipt, while field absence identifies responses from legacy servers
+	TriggerThreadID          string                 `json:"trigger_thread_id,omitempty"`           // root comment ID for the triggering thread
+	TriggerCommentContent    string                 `json:"trigger_comment_content,omitempty"`     // content of the triggering comment
+	TriggerSummary           *string                `json:"trigger_summary,omitempty"`             // canonical short description snapshot — comment text / autopilot title — taken at task creation; survives source edits/deletes
+	TriggerAuthorType        string                 `json:"trigger_author_type,omitempty"`         // "agent" or "member" — author kind of the triggering comment
+	TriggerAuthorName        string                 `json:"trigger_author_name,omitempty"`         // display name of the triggering comment author
+	NewCommentCount          int                    `json:"new_comment_count,omitempty"`           // trigger-thread comments since last run; excludes injected trigger + own comments; omitempty so old daemons ignore it
+	NewCommentsSince         string                 `json:"new_comments_since,omitempty"`          // RFC3339 anchor (last run's started_at) the count is measured from; omitempty so old daemons ignore it
+	ChatSessionID            string                 `json:"chat_session_id,omitempty"`             // non-empty for chat tasks
+	ChatChannelType          string                 `json:"chat_channel_type,omitempty"`           // "slack" when the chat session is backed by an IM channel; empty for a web-only chat. Makes the agent channel-aware (read history from the channel, not Multica)
+	ChatInThread             bool                   `json:"chat_in_thread,omitempty"`              // true when the latest @mention was a thread reply; tells the agent to start with `multica chat thread` vs `multica chat history`
+	ChatMessage              string                 `json:"chat_message,omitempty"`                // user message for chat tasks
+	ChatMessageAttachments   []ChatAttachmentMeta   `json:"chat_message_attachments,omitempty"`    // attachments on the user message — agent calls `multica attachment download <id>` per entry
+	ChatIntro                bool                   `json:"chat_intro,omitempty"`                  // true for the agent's proactive self-introduction chat (is_agent_intro session, no user message); the daemon builds an intro prompt instead of a reply prompt
+	AutopilotRunID           string                 `json:"autopilot_run_id,omitempty"`            // non-empty for autopilot-spawned tasks
+	AutopilotID              string                 `json:"autopilot_id,omitempty"`                // autopilot that spawned this task
+	AutopilotTitle           string                 `json:"autopilot_title,omitempty"`             // autopilot title used as task context
+	AutopilotDescription     string                 `json:"autopilot_description,omitempty"`       // autopilot description used as task prompt
+	AutopilotSource          string                 `json:"autopilot_source,omitempty"`            // manual, schedule, webhook, or api
+	AutopilotTriggerPayload  json.RawMessage        `json:"autopilot_trigger_payload,omitempty"`   // optional trigger payload for webhook/api runs
+	QuickCreatePrompt        string                 `json:"quick_create_prompt,omitempty"`         // user's natural-language input for quick-create tasks
+	QuickCreateAttachmentIDs []string               `json:"quick_create_attachment_ids,omitempty"` // attachment ids uploaded in the quick-create prompt and bound on issue create
+	HandoffNote              string                 `json:"handoff_note,omitempty"`                // assignment handoff instruction; rendered into the run's opening prompt + issue_context.md (omitempty so old daemons ignore it)
+	SquadID                  string                 `json:"squad_id,omitempty"`                    // for quick-create tasks where the picker was a squad; Agent is still the resolved leader
+	SquadName                string                 `json:"squad_name,omitempty"`                  // display name for the picker squad
+	ParentIssueID            string                 `json:"parent_issue_id,omitempty"`             // for quick-create tasks opened from "Add sub issue" — UUID of the parent issue the new issue should be filed under
+	ParentIssueIdentifier    string                 `json:"parent_issue_identifier,omitempty"`     // human-readable identifier (e.g. MUL-123) of the quick-create parent issue, resolved on claim for prompt context
 	// RequestingUserName + RequestingUserProfileDescription mirror the user
 	// the agent is acting on behalf of (see daemon/types.go). v1 sources them
 	// from the runtime owner so they're populated for daemon runtimes and
@@ -801,6 +801,9 @@ type CreateAgentRequest struct {
 	// event still fires with `template=""`, which is the correct signal
 	// for "manually authored agent".
 	Template string `json:"template"`
+	// SkillIDs are attached inside the same transaction as the agent row so a
+	// create never becomes visible in a partially configured state.
+	SkillIDs []string `json:"skill_ids"`
 }
 
 func decodeJSONBodyWithRawFields(body io.Reader, dst any) (map[string]json.RawMessage, error) {
@@ -950,7 +953,29 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		allowlist = nil
 	}
 
-	created, err := h.Queries.CreateAgent(r.Context(), db.CreateAgentParams{
+	skillUUIDs, ok := parseUUIDSliceOrBadRequest(w, req.SkillIDs, "skill_ids")
+	if !ok {
+		return
+	}
+	for _, skillID := range skillUUIDs {
+		if _, err := h.Queries.GetSkillInWorkspace(r.Context(), db.GetSkillInWorkspaceParams{
+			ID:          skillID,
+			WorkspaceID: wsUUID,
+		}); err != nil {
+			writeError(w, http.StatusBadRequest, "skill does not belong to this workspace")
+			return
+		}
+	}
+
+	tx, err := h.TxStarter.Begin(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to start agent create transaction")
+		return
+	}
+	defer tx.Rollback(r.Context())
+	qtx := h.Queries.WithTx(tx)
+
+	created, err := qtx.CreateAgent(r.Context(), db.CreateAgentParams{
 		WorkspaceID:              wsUUID,
 		Name:                     req.Name,
 		Description:              req.Description,
@@ -982,14 +1007,24 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to create agent: "+err.Error())
 		return
 	}
-	slog.Info("agent created", append(logger.RequestAttrs(r), "agent_id", uuidToString(created.ID), "name", created.Name, "workspace_id", workspaceID)...)
-
-	// Persist the invocation allow-list (MUL-3963). Best-effort log on failure
-	// but do not fail the create — the agent row already exists and defaults
-	// to no targets (deny-by-default private).
-	if err := h.replaceInvocationTargets(r.Context(), created.ID, parseUUID(ownerID), perm.targets); err != nil {
-		slog.Warn("create agent: persist invocation targets failed", append(logger.RequestAttrs(r), "error", err, "agent_id", uuidToString(created.ID))...)
+	if err := replaceInvocationTargetsWithQueries(r.Context(), qtx, created.ID, parseUUID(ownerID), perm.targets); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to save agent access")
+		return
 	}
+	for _, skillID := range skillUUIDs {
+		if err := qtx.AddAgentSkill(r.Context(), db.AddAgentSkillParams{
+			AgentID: created.ID,
+			SkillID: skillID,
+		}); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to attach agent skill")
+			return
+		}
+	}
+	if err := tx.Commit(r.Context()); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to commit agent create")
+		return
+	}
+	slog.Info("agent created", append(logger.RequestAttrs(r), "agent_id", uuidToString(created.ID), "name", created.Name, "workspace_id", workspaceID)...)
 
 	if runtime.Status == "online" {
 		h.TaskService.ReconcileAgentStatus(r.Context(), created.ID)
@@ -997,14 +1032,17 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resp := agentToResponse(created)
+	if err := h.attachAgentSkills(r.Context(), &resp, created.ID); err != nil {
+		slog.Warn("create agent: load skills for response failed", append(logger.RequestAttrs(r), "error", err, "agent_id", uuidToString(created.ID))...)
+	}
 	if err := h.enrichAgentResponseWithTargets(r.Context(), &resp, created.ID); err != nil {
 		slog.Warn("create agent: load invocation targets for response failed", append(logger.RequestAttrs(r), "error", err, "agent_id", uuidToString(created.ID))...)
 	}
 	actorType, actorID := h.resolveActor(r, ownerID, workspaceID)
 	h.publish(protocol.EventAgentCreated, workspaceID, actorType, actorID, map[string]any{"agent": broadcastAgentResponse(resp)})
 
-	// Kick off a "meet your new agent" chat so the agent introduces itself
-	// (LLM-generated via a real run, not a canned template). Best effort.
+	// Start the existing proactive introduction only after the complete Agent
+	// configuration has committed, so the first run sees its skills and access.
 	h.sendAgentWelcomeChat(r.Context(), created, ownerID, workspaceID)
 
 	obsmetrics.RecordEvent(h.Analytics, h.Metrics, analytics.AgentCreated(

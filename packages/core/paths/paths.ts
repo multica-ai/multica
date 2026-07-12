@@ -26,6 +26,7 @@ function workspaceScoped(slug: string) {
     autopilots: () => `${ws}/autopilots`,
     autopilotDetail: (id: string) => `${ws}/autopilots/${encode(id)}`,
     agents: () => `${ws}/agents`,
+    newAgent: () => `${ws}/agents/new`,
     agentDetail: (id: string) => `${ws}/agents/${encode(id)}`,
     memberDetail: (id: string) => `${ws}/members/${encode(id)}`,
     squads: () => `${ws}/squads`,

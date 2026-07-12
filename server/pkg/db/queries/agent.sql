@@ -1,11 +1,11 @@
 -- name: ListAgents :many
 SELECT * FROM agent
-WHERE workspace_id = $1 AND archived_at IS NULL
+WHERE workspace_id = $1 AND archived_at IS NULL AND kind = 'user'
 ORDER BY created_at ASC;
 
 -- name: ListAllAgents :many
 SELECT * FROM agent
-WHERE workspace_id = $1
+WHERE workspace_id = $1 AND kind = 'user'
 ORDER BY created_at ASC;
 
 -- name: GetAgent :one
@@ -14,7 +14,7 @@ WHERE id = $1;
 
 -- name: GetAgentInWorkspace :one
 SELECT * FROM agent
-WHERE id = $1 AND workspace_id = $2;
+WHERE id = $1 AND workspace_id = $2 AND kind = 'user';
 
 -- name: CreateAgent :one
 INSERT INTO agent (
@@ -30,6 +30,29 @@ INSERT INTO agent (
     COALESCE(sqlc.narg('permission_mode'), 'private')
 )
 RETURNING *;
+
+-- name: CreateAgentBuilder :one
+-- One hidden builder agent per creation session. Keeping the execution carrier
+-- session-scoped freezes its model/runtime configuration when multiple builder
+-- flows are open concurrently, while `kind = 'system'` keeps it out of normal
+-- agent lists and assignment surfaces.
+INSERT INTO agent (
+    workspace_id, name, description, runtime_mode, runtime_config, runtime_id,
+    visibility, permission_mode, max_concurrent_tasks, owner_id, instructions,
+    custom_env, custom_args, model, kind, system_key
+) VALUES (
+    @workspace_id, @name, '', @runtime_mode, '{}'::jsonb, @runtime_id,
+    'private', 'private', 1, @owner_id, @instructions,
+    '{}'::jsonb, '[]'::jsonb, sqlc.narg('model'), 'system', @system_key
+)
+RETURNING *;
+
+-- name: DeleteSystemAgentByID :exec
+-- Builder sessions own their hidden execution agent. Deleting the session
+-- removes that carrier and its task rows; the kind guard prevents this cleanup
+-- path from ever deleting a user-authored agent.
+DELETE FROM agent
+WHERE id = $1 AND kind = 'system' AND system_key LIKE 'agent_builder:%';
 
 -- name: UpdateAgent :one
 -- composio_toolkit_allowlist is set wholesale: the API layer is responsible
@@ -132,7 +155,7 @@ RETURNING *;
 -- and so the cascade endpoint's expected_active_agent_ids check has a stable
 -- snapshot to compare against. Ordered by name for a deterministic display.
 SELECT * FROM agent
-WHERE runtime_id = $1 AND archived_at IS NULL
+WHERE runtime_id = $1 AND archived_at IS NULL AND kind = 'user'
 ORDER BY name ASC;
 
 -- name: ListActiveAgentsByRuntimeForUpdate :many
@@ -145,7 +168,7 @@ ORDER BY name ASC;
 -- that the set we compared against expected_active_agent_ids is exactly
 -- the set ArchiveAgentsByIDs will operate on — no race window.
 SELECT * FROM agent
-WHERE runtime_id = $1 AND archived_at IS NULL
+WHERE runtime_id = $1 AND archived_at IS NULL AND kind = 'user'
 ORDER BY name ASC
 FOR UPDATE;
 

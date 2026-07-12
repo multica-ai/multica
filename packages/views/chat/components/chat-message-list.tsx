@@ -52,6 +52,8 @@ interface ChatMessageListProps {
   hasOlderMessages?: boolean;
   isFetchingOlderMessages?: boolean;
   onLoadOlderMessages?: () => void;
+  /** Transform assistant task text for embedded chat protocols before render/copy. */
+  transformContent?: (content: string) => string;
 }
 
 // ─── Virtuoso chrome ─────────────────────────────────────────────────────
@@ -122,6 +124,7 @@ export function ChatMessageList({
   hasOlderMessages = false,
   isFetchingOlderMessages = false,
   onLoadOlderMessages,
+  transformContent,
 }: ChatMessageListProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [scrollContainerEl, setScrollContainerEl] = useState<HTMLDivElement | null>(null);
@@ -154,8 +157,8 @@ export function ChatMessageList({
   // the array reference when a duplicate event arrives, so this recomputes
   // only when a genuinely new message lands — not on unrelated re-renders.
   const liveTimeline: ChatTimelineItem[] = useMemo(
-    () => buildTimeline(liveTaskMessages ?? []),
-    [liveTaskMessages],
+    () => transformTimeline(buildTimeline(liveTaskMessages ?? []), transformContent),
+    [liveTaskMessages, transformContent],
   );
   const hasLive = showLiveTimeline && liveTimeline.length > 0;
   const showStatusPill = !!pendingTaskId && !pendingAlreadyPersisted && !!pendingTask;
@@ -206,6 +209,7 @@ export function ChatMessageList({
             <MessageBubble
               message={msg}
               isPending={!!pendingTaskId && msg.task_id === pendingTaskId}
+              transformContent={transformContent}
             />
           </div>
         )}
@@ -252,9 +256,11 @@ export function ChatMessageSkeleton() {
 const MessageBubble = memo(function MessageBubble({
   message,
   isPending,
+  transformContent,
 }: {
   message: ChatMessage;
   isPending: boolean;
+  transformContent?: (content: string) => string;
 }) {
   if (message.role === "user") {
     return (
@@ -277,15 +283,23 @@ const MessageBubble = memo(function MessageBubble({
     );
   }
 
-  return <AssistantMessage message={message} isPending={isPending} />;
+  return (
+    <AssistantMessage
+      message={message}
+      isPending={isPending}
+      transformContent={transformContent}
+    />
+  );
 });
 
 function AssistantMessage({
   message,
   isPending,
+  transformContent,
 }: {
   message: ChatMessage;
   isPending: boolean;
+  transformContent?: (content: string) => string;
 }) {
   const taskId = message.task_id;
   const canFetchTaskMessages = isTaskMessageTaskId(taskId);
@@ -300,8 +314,8 @@ function AssistantMessage({
 
   // Same memoization rationale as the live timeline in ChatMessageList.
   const timeline: ChatTimelineItem[] = useMemo(
-    () => buildTimeline(taskMessages ?? []),
-    [taskMessages],
+    () => transformTimeline(buildTimeline(taskMessages ?? []), transformContent),
+    [taskMessages, transformContent],
   );
 
   // Failure bubble path: when the server's FailTask wrote a failure
@@ -346,6 +360,18 @@ function AssistantMessage({
         isPending={isPending}
       />
     </div>
+  );
+}
+
+function transformTimeline(
+  timeline: ChatTimelineItem[],
+  transformContent?: (content: string) => string,
+): ChatTimelineItem[] {
+  if (!transformContent) return timeline;
+  return timeline.map((item) =>
+    item.type === "text" && item.content
+      ? { ...item, content: transformContent(item.content) }
+      : item,
   );
 }
 

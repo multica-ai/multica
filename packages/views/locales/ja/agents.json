@@ -679,6 +679,98 @@
     "section_owner": "オーナー",
     "section_model": "モデル"
   },
+  "creation_studio": {
+    "title": "エージェントを作成",
+    "squad_title": "このスクワッド用のエージェントを作成",
+    "duplicate_title": "{{name}} を複製",
+    "back": "戻る",
+    "eyebrow": "エージェント作成",
+    "choose_title": "どの方法で始めますか？",
+    "choose_description": "すべて自分で設定するか、実績のあるテンプレートを調整するか、必要なものを説明して会話から作成できます。",
+    "recommended": "おすすめ",
+    "continue": "続ける",
+    "step_choose": "開始方法を選択",
+    "step_template": "テンプレートを選択",
+    "step_configure": "確認して設定",
+    "step_ai": "会話で作成",
+    "modes": {
+      "blank": {
+        "title": "空白から始める",
+        "description": "すべての項目を自分で設定します。エージェントの動作が明確に決まっている場合に最適です。"
+      },
+      "template": {
+        "title": "テンプレートを使用",
+        "description": "整理された指示とスキルを基に、ワークスペースに合わせて詳細を調整します。"
+      },
+      "ai": {
+        "title": "AI で作成",
+        "description": "期待する成果を説明すると、Agent Builder が重要な質問を行い、下書きをリアルタイムで作成します。"
+      }
+    },
+    "templates": {
+      "search": "テンプレートを検索…",
+      "search_label": "エージェントテンプレートを検索",
+      "empty": "検索に一致するテンプレートはありません。",
+      "select_hint": "テンプレートを選択して、指示とスキルをプレビューします。",
+      "skills": "含まれるスキル",
+      "instructions": "指示",
+      "use": "このテンプレートを使用"
+    },
+    "sections": {
+      "identity": "基本情報",
+      "identity_hint": "識別しやすい名前と簡潔な目的を設定します。",
+      "behavior": "動作と機能",
+      "behavior_hint": "動作方法を定義し、利用できるワークスペースのスキルを追加します。",
+      "execution": "実行環境",
+      "execution_hint": "エージェントを実行する場所を選び、必要に応じてランタイムの既定モデルを変更します。",
+      "access": "アクセス",
+      "access_hint": "このエージェントを実行できるユーザーを設定します。後から変更できます。"
+    },
+    "access": {
+      "private": {
+        "title": "自分のみ",
+        "description": "このエージェントを実行できるのは自分だけです。"
+      },
+      "workspace": {
+        "title": "ワークスペース全体",
+        "description": "すべてのワークスペースメンバーが実行できます。"
+      },
+      "members": {
+        "title": "特定のメンバー",
+        "description": "選択したメンバーだけが実行できます。",
+        "required": "メンバーを1人以上選択してください。"
+      }
+    },
+    "builder": {
+      "setup_title": "Agent Builder のランタイムを選択",
+      "setup_description": "選択したオンラインのランタイムが設定会話を実行し、新しいエージェントの既定ランタイムになります。",
+      "start": "会話を開始",
+      "connect_runtime": "ランタイムを接続",
+      "start_failed": "Agent Builder を開始できませんでした。",
+      "send_failed": "メッセージを送信できませんでした。",
+      "stop_failed": "現在の生成を停止できませんでした。",
+      "chat_title": "Agent Builder",
+      "chat_hint": "会話で要件を整理し、隣の設定を調整します。",
+      "runtime_online": "ランタイムはオンライン",
+      "runtime_offline": "ランタイムはオフライン",
+      "empty_title": "このエージェントに何をさせますか？",
+      "empty_description": "役割、ワークフロー、出力、制約を説明してください。右側に最初の下書きが表示されます。",
+      "prompt_review": "フロントエンドの Pull Request をレビュー",
+      "prompt_research": "競合を調査して結果を要約",
+      "prompt_assistant": "チームのプロジェクト計画と文章作成を支援",
+      "thinking": "下書きを更新中…",
+      "placeholder": "必要なエージェントを説明…",
+      "send": "メッセージを送信"
+    },
+    "live_draft": "エージェント設定",
+    "live_draft_hint": "会話内容がここに反映され、各項目を直接調整できます。",
+    "duplicate_env_notice": "指示、スキル、モデル、コマンド引数がコピーされます。セキュリティ上、環境変数はコピーされません。",
+    "create_and_open": "作成して開く",
+    "create_and_add": "作成してスクワッドに追加",
+    "creating": "エージェントを作成中…",
+    "create_failed": "エージェントを作成できませんでした。",
+    "created": "{{name}} を作成しました"
+  },
   "actions": {
     "selected_other": "{{count}} 件選択中",
     "clear_selection": "選択を解除"

@@ -3,6 +3,7 @@ import type {
   Agent,
   AgentTemplate,
   AgentTemplateSummary,
+  AgentBuilderSession,
   Attachment,
   BillingBalance,
   BillingBatchesPage,
@@ -765,6 +766,18 @@ export const EMPTY_CREATE_AGENT_FROM_TEMPLATE_RESPONSE: CreateAgentFromTemplateR
   agent: { id: "" } as Agent,
   imported_skill_ids: [],
   reused_skill_ids: [],
+};
+
+export const AgentBuilderSessionSchema = z.object({
+  session_id: z.string(),
+  builder_agent_id: z.string(),
+  runtime_id: z.string(),
+}).loose();
+
+export const EMPTY_AGENT_BUILDER_SESSION: AgentBuilderSession = {
+  session_id: "",
+  builder_agent_id: "",
+  runtime_id: "",
 };
 
 // Squad list responses carry lightweight membership previews used by hover

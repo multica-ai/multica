@@ -440,6 +440,14 @@ export interface CreateAgentRequest {
   /** Optional template slug used by the onboarding agent picker. Surfaced
    *  as the `template` property on the `agent_created` PostHog event. */
   template?: string;
+  /** Workspace skill IDs attached atomically with the agent row. */
+  skill_ids?: string[];
+}
+
+export interface AgentBuilderSession {
+  session_id: string;
+  builder_agent_id: string;
+  runtime_id: string;
 }
 
 /** Agent template summary — fields needed by the picker grid. Does NOT

@@ -22,6 +22,7 @@ import { MyIssuesPage } from "@multica/views/my-issues";
 import { SkillsPage } from "@multica/views/skills";
 import { DesktopRuntimesPage } from "./components/desktop-runtimes-page";
 import { DesktopAgentsPage } from "./components/desktop-agents-page";
+import { AgentCreationStudio } from "@multica/views/agents";
 import { SquadsPage, SquadDetailPage as SquadDetailPageView } from "@multica/views/squads/components";
 import { InboxPage } from "@multica/views/inbox";
 import { ChatPage } from "@multica/views/chat";
@@ -170,6 +171,7 @@ export const appRoutes: RouteObject[] = [
             handle: { title: "Skill" },
           },
           { path: "agents", element: <DesktopAgentsPage />, handle: { title: "Agents" } },
+          { path: "agents/new", element: <AgentCreationStudio />, handle: { title: "Create Agent" } },
           {
             path: "agents/:id",
             element: <AgentDetailPage />,

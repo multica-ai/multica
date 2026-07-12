@@ -474,6 +474,10 @@ func (h *Handler) DeleteChatSession(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to delete chat session")
 		return
 	}
+	if err := qtx.DeleteSystemAgentByID(r.Context(), session.AgentID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to clean up chat session agent")
+		return
+	}
 
 	if err := tx.Commit(r.Context()); err != nil {
 		slog.Warn("commit chat session delete failed", "session_id", sessionID, "error", err)

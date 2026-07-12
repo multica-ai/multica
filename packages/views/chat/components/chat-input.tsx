@@ -90,6 +90,13 @@ interface ChatInputProps {
    *  0 (the initial value) is inert, so a plain deep-link open never steals
    *  focus; only an explicit bump does. */
   focusRequest?: number;
+  /**
+   * Optional storage/identity isolation for embedded chat surfaces that use
+   * the shared composer without participating in the global chat selection
+   * store (for example Agent Builder).
+   */
+  draftKeyOverride?: string;
+  editorKeyOverride?: string;
 }
 
 export function ChatInput({
@@ -106,6 +113,8 @@ export function ChatInput({
   leftAdornment,
   contextItems,
   focusRequest,
+  draftKeyOverride,
+  editorKeyOverride,
 }: ChatInputProps) {
   const { t } = useT("chat");
   const sendShortcut = useShortcut("send");
@@ -139,7 +148,8 @@ export function ChatInput({
   // user would see the image flash on then disappear. Keeping editor
   // identity stable across the lazy-create event is what makes
   // first-upload-creates-session work the same as second-upload.
-  const draftKey = activeSessionId ?? newSessionDraftKey(selectedAgentId);
+  const draftKey =
+    draftKeyOverride ?? activeSessionId ?? newSessionDraftKey(selectedAgentId);
   // Select a primitive — empty-string fallback keeps referential stability.
   const inputDraft = useChatStore((s) => s.inputDrafts[draftKey] ?? "");
   const draftAttachments = useChatStore(
@@ -152,7 +162,7 @@ export function ChatInput({
   const [isEmpty, setIsEmpty] = useState(!inputDraft.trim());
   const [isSubmitting, setIsSubmitting] = useState(false);
   const consumedRestoreIdRef = useRef<string | null>(null);
-  const editorKey = selectedAgentId ?? "no-agent";
+  const editorKey = editorKeyOverride ?? selectedAgentId ?? "no-agent";
   // Number of in-flight uploads. We track this explicitly (rather than
   // peeking at the editor on every render) so the SubmitButton visibly
   // disables the instant an upload starts and re-enables the instant it
@@ -429,7 +439,9 @@ export function ChatInput({
             tooltip={sendShortcut
               ? `${t(($) => $.input.send_tooltip)} · ${formatShortcut(sendShortcut)}`
               : t(($) => $.input.send_tooltip)}
+            ariaLabel={t(($) => $.input.send_tooltip)}
             stopTooltip={t(($) => $.input.stop_tooltip)}
+            stopAriaLabel={t(($) => $.input.stop_tooltip)}
           />
         </div>
         {uploadEnabled && isDragOver && <FileDropOverlay />}

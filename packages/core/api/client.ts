@@ -17,6 +17,7 @@ import type {
   AgentTemplateSummary,
   CreateAgentFromTemplateRequest,
   CreateAgentFromTemplateResponse,
+  AgentBuilderSession,
   UpdateAgentRequest,
   AgentEnvResponse,
   UpdateAgentEnvRequest,
@@ -161,6 +162,7 @@ import {
   CloudRuntimeNodeListSchema,
   CloudRuntimeNodeSchema,
   CreateAgentFromTemplateResponseSchema,
+  AgentBuilderSessionSchema,
   DashboardAgentRunTimeListSchema,
   DashboardRunTimeDailyListSchema,
   DashboardUsageByAgentListSchema,
@@ -172,6 +174,7 @@ import {
   EMPTY_CLOUD_RUNTIME_NODE,
   EMPTY_CLOUD_RUNTIME_NODE_LIST,
   EMPTY_CREATE_AGENT_FROM_TEMPLATE_RESPONSE,
+  EMPTY_AGENT_BUILDER_SESSION,
   EMPTY_GROUPED_ISSUES_RESPONSE,
   EMPTY_LIST_ISSUES_RESPONSE,
   EMPTY_SEARCH_ISSUES_RESPONSE,
@@ -864,6 +867,22 @@ export class ApiClient {
       method: "POST",
       body: JSON.stringify(data),
     });
+  }
+
+  async createAgentBuilderSession(data: {
+    runtime_id: string;
+    model?: string;
+  }): Promise<AgentBuilderSession> {
+    const raw = await this.fetch<unknown>("/api/agent-builder/sessions", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+    return parseWithFallback(
+      raw,
+      AgentBuilderSessionSchema,
+      EMPTY_AGENT_BUILDER_SESSION,
+      { endpoint: "POST /api/agent-builder/sessions" },
+    );
   }
 
   async listAgentTemplates(): Promise<AgentTemplateSummary[]> {
