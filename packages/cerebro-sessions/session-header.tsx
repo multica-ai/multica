@@ -3,6 +3,13 @@
 import { useState } from "react";
 import { ChevronRight, ScrollText } from "lucide-react";
 import { Input } from "@multica/ui/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@multica/ui/components/ui/select";
 import { cn } from "@multica/ui/lib/utils";
 import type { Session } from "./types";
 import { useUpdateSession } from "./use-sessions";
@@ -131,23 +138,36 @@ export function SessionHeader({
       )}
       {!editing && (
         <div className="flex shrink-0 items-center gap-2">
-          <button
-            type="button"
-            aria-label="Plan mode"
-            aria-pressed={(session.mode ?? "default") === "plan"}
-            onClick={() => update.mutateAsync({
-              sessionId: session.id,
-              input: { mode: (session.mode ?? "default") === "plan" ? "default" : "plan" },
-            })}
-            className={cn(
-              "rounded-full border px-2 py-0.5 text-xs transition-colors",
-              (session.mode ?? "default") === "plan"
-                ? "border-amber-500/30 bg-amber-500/10 text-amber-600 dark:text-amber-400"
-                : "text-muted-foreground hover:bg-muted/60 hover:text-foreground",
-            )}
+          {/* FIR-3087 (Jesper): the mode is a select between Plan and Build, not a
+              toggle. "Build" is the ordinary run mode and maps to the stored
+              "default" so the server/daemon contract is unchanged. */}
+          <Select
+            value={session.mode ?? "default"}
+            items={{ plan: "Plan", default: "Build" }}
+            onValueChange={(v) =>
+              update.mutateAsync({
+                sessionId: session.id,
+                input: { mode: v === "plan" ? "plan" : "default" },
+              })
+            }
           >
-            Plan
-          </button>
+            <SelectTrigger
+              size="sm"
+              aria-label="Session mode"
+              className={cn(
+                "h-auto rounded-full border px-2 py-0.5 text-xs transition-colors",
+                (session.mode ?? "default") === "plan"
+                  ? "border-amber-500/30 bg-amber-500/10 text-amber-600 dark:text-amber-400"
+                  : "text-muted-foreground hover:bg-muted/60 hover:text-foreground",
+              )}
+            >
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="plan">Plan</SelectItem>
+              <SelectItem value="default">Build</SelectItem>
+            </SelectContent>
+          </Select>
           {hasHandoff && onToggleHandoff ? (
             <button
               type="button"

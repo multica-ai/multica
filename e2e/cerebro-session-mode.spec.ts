@@ -33,17 +33,15 @@ test.describe("Cerebro session mode", () => {
     await page.reload({ waitUntil: "domcontentloaded" });
     await expect(page.getByText(commentText)).toBeVisible({ timeout: 10000 });
 
-    const planMode = page.getByRole("button", { name: "Plan mode" }).last();
-    await expect(planMode).toBeVisible();
-    await expect(planMode).toHaveAttribute("aria-pressed", "false");
-    await planMode.click();
-    await expect(planMode).toHaveAttribute("aria-pressed", "true");
+    const modeSelect = page.getByRole("combobox", { name: "Session mode" }).last();
+    await expect(modeSelect).toBeVisible();
+    await expect(modeSelect).toHaveText(/Build/);
+    await modeSelect.click();
+    await page.getByRole("option", { name: "Plan" }).click();
+    await expect(modeSelect).toHaveText(/Plan/);
 
     await page.reload({ waitUntil: "domcontentloaded" });
     await expect(page.getByText(commentText)).toBeVisible({ timeout: 10000 });
-    await expect(page.getByRole("button", { name: "Plan mode" }).last()).toHaveAttribute(
-      "aria-pressed",
-      "true",
-    );
+    await expect(page.getByRole("combobox", { name: "Session mode" }).last()).toHaveText(/Plan/);
   });
 });

@@ -27,11 +27,30 @@ const session = (phase: string | null): Session => ({
   updated_at: "2026-06-21T00:00:00Z",
 });
 
-describe("SessionHeader mode toggle", () => {
-  it("switches an ordinary session into Plan mode", async () => {
+describe("SessionHeader mode select", () => {
+  it("switches an ordinary session into Plan mode via the mode select", async () => {
     render(<SessionHeader issueId="issue-1" session={session(null)} open onToggle={() => {}} />);
-    await userEvent.click(screen.getByRole("button", { name: "Plan mode" }));
+    const trigger = screen.getByRole("combobox", { name: "Session mode" });
+    expect(trigger).toHaveTextContent("Build");
+    await userEvent.click(trigger);
+    await userEvent.click(await screen.findByRole("option", { name: "Plan" }));
     expect(mutateAsync).toHaveBeenCalledWith({ sessionId: "root-1", input: { mode: "plan" } });
+  });
+
+  it("switches a Plan session back to Build", async () => {
+    render(
+      <SessionHeader
+        issueId="issue-1"
+        session={{ ...session(null), mode: "plan" }}
+        open
+        onToggle={() => {}}
+      />,
+    );
+    const trigger = screen.getByRole("combobox", { name: "Session mode" });
+    expect(trigger).toHaveTextContent("Plan");
+    await userEvent.click(trigger);
+    await userEvent.click(await screen.findByRole("option", { name: "Build" }));
+    expect(mutateAsync).toHaveBeenCalledWith({ sessionId: "root-1", input: { mode: "default" } });
   });
 });
 
