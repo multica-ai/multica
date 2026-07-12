@@ -1265,8 +1265,13 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 				if err == nil && task.IssueID.Valid && uuidToString(task.IssueID) == uuidToString(issue.ID) {
 					if task.TriggerCommentID.Valid {
 						if !taskCoversReplyParent(task, parentID) {
+							// Spell out that a parentless top-level comment is the
+							// rejected case and give the exact fix, so an agent does
+							// not misread this 409 as the issue being locked and
+							// delete a good reply trying to "reset" it
+							// (MUL-4417 / GH #5266).
 							writeError(w, http.StatusConflict,
-								"parent_id must be this task's trigger comment id ("+uuidToString(task.TriggerCommentID)+") or one of the earlier comments it coalesced")
+								"this comment-triggered task must reply under its trigger comment; top-level comments are not allowed while it is active — set parent_id (--parent) to the trigger comment id "+uuidToString(task.TriggerCommentID)+", or to an earlier comment it coalesced")
 							return
 						}
 					}
