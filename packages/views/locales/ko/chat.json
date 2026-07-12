@@ -1,7 +1,8 @@
 {
   "page": {
     "title": "채팅",
-    "select_prompt": "대화를 선택하거나 +로 새로 시작하세요"
+    "select_prompt": "대화를 선택하거나 +로 새로 시작하세요",
+    "agent_link_no_access": "이 에이전트와 채팅할 권한이 없습니다."
   },
   "fab": {
     "running": "Multica가 작업 중입니다...",

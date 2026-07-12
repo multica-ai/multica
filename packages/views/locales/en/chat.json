@@ -1,7 +1,8 @@
 {
   "page": {
     "title": "Chat",
-    "select_prompt": "Pick a conversation, or start a new one with +"
+    "select_prompt": "Pick a conversation, or start a new one with +",
+    "agent_link_no_access": "You don't have access to chat with this agent."
   },
   "fab": {
     "running": "Multica is working...",

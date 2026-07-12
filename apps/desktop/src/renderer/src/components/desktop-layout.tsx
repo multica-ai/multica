@@ -211,14 +211,14 @@ export function DesktopShell() {
           triggered by IndexRedirect, not a route. */}
       <WorkspaceSlugProvider slug={slug}>
         <DesktopInboxBridge />
-        <div className="flex h-screen">
-          <SidebarProvider className="flex-1">
+        <div className="flex h-screen bg-app-shell">
+          <SidebarProvider className="flex-1 bg-app-shell">
             {slug && <WindowToolbar />}
             {slug && <AppSidebar topSlot={<SidebarTopSpacer />} searchSlot={<SearchTrigger />} />}
             {/* Right side: header + content container */}
             <motion.div layout transition={toolbarMotion} className="flex flex-1 min-w-0 flex-col">
               <MainTopBar />
-              <div className="relative flex flex-1 min-h-0 flex-col overflow-hidden mr-2 mb-2 ml-0.5 rounded-xl shadow-sm bg-background">
+              <div className="relative flex flex-1 min-h-0 flex-col overflow-hidden mr-2 mb-2 ml-0.5 rounded-xl bg-page-canvas ring-1 ring-surface-border shadow-[var(--surface-shadow)]">
                 <TabContent />
                 {slug && <FloatingChat />}
               </div>

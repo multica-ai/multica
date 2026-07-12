@@ -1,15 +1,15 @@
 "use client";
 
 import { useRef, useState, useCallback, useEffect } from "react";
-import { ArrowUp, Loader2 } from "lucide-react";
 import { ContentEditor, type ContentEditorRef, useFileDropZone, FileDropOverlay } from "../../editor";
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
-import { Button } from "@multica/ui/components/ui/button";
+import { SubmitButton } from "@multica/ui/components/common/submit-button";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
 import { api } from "@multica/core/api";
 import type { Attachment } from "@multica/core/types";
 import { contentReferencesAttachment } from "@multica/core/types";
+import { enterKey, formatShortcut, modKey } from "@multica/core/platform";
 import { useCommentDraftStore, type CommentDraftKey } from "@multica/core/issues/stores";
 import { cn } from "@multica/ui/lib/utils";
 import type { AvatarSize } from "@multica/ui/lib/avatar-size";
@@ -212,19 +212,12 @@ function ReplyInput({
             multiple
             onSelect={(file) => editorRef.current?.uploadFile(file)}
           />
-          <Button
-            type="button"
-            variant={isEmpty ? "ghost" : "default"}
-            size="icon-xs"
-            disabled={isEmpty || submitting}
+          <SubmitButton
             onClick={handleSubmit}
-          >
-            {submitting ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-            ) : (
-              <ArrowUp className="h-3.5 w-3.5" />
-            )}
-          </Button>
+            disabled={isEmpty}
+            loading={submitting}
+            tooltip={`${t(($) => $.comment.send_tooltip)} · ${formatShortcut(modKey, enterKey)}`}
+          />
         </div>
         {isDragOver && <FileDropOverlay />}
       </div>

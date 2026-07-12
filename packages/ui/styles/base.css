@@ -233,6 +233,17 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .animate-entrance-spin,
+  .animate-onboarding-enter,
+  .animate-welcome-emoji-pop,
+  .animate-completion-badge,
+  .animate-completion-check,
+  .animate-chat-impulse,
+  .animate-chat-text-shimmer,
+  .animate-nav-progress-sweep {
+    animation: none;
+  }
+
   [data-right-sidebar-panel] {
     transition: none;
   }

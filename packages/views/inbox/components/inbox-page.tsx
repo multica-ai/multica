@@ -375,7 +375,7 @@ export function InboxPage() {
           </div>
           <div className="flex-1 min-h-0 overflow-y-auto space-y-1 p-2">
             {Array.from({ length: 5 }).map((_, i) => (
-              <div key={i} className="flex items-center gap-3 px-4 py-2.5">
+              <div key={i} className="flex items-center gap-3 px-2 py-2.5">
                 <Skeleton className="h-7 w-7 shrink-0 rounded-full" />
                 <div className="flex-1 space-y-2">
                   <Skeleton className="h-4 w-3/4" />
@@ -433,7 +433,7 @@ export function InboxPage() {
             </div>
             <div className="flex-1 min-h-0 overflow-y-auto space-y-1 p-2">
               {Array.from({ length: 5 }).map((_, i) => (
-                <div key={i} className="flex items-center gap-3 px-4 py-2.5">
+                <div key={i} className="flex items-center gap-3 px-2 py-2.5">
                   <Skeleton className="h-7 w-7 shrink-0 rounded-full" />
                   <div className="flex-1 space-y-2">
                     <Skeleton className="h-4 w-3/4" />

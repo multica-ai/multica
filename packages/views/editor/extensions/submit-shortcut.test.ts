@@ -25,7 +25,7 @@ describe("createSubmitExtension", () => {
     isActive: () => false,
   } as Partial<Editor>;
 
-  it("Mod-Enter always submits", () => {
+  it("Mod-Enter submits when no composition is open", () => {
     const onSubmit = vi.fn(() => true);
     const shortcuts = getShortcuts(
       createSubmitExtension(onSubmit, { submitOnEnter: false }),
@@ -33,8 +33,22 @@ describe("createSubmitExtension", () => {
     );
 
     expect(shortcuts["Mod-Enter"]).toBeDefined();
-    shortcuts["Mod-Enter"]!();
+    expect(shortcuts["Mod-Enter"]!()).toBe(true);
     expect(onSubmit).toHaveBeenCalledTimes(1);
+  });
+
+  it("Mod-Enter is suppressed during IME composition", () => {
+    const onSubmit = vi.fn(() => true);
+    const shortcuts = getShortcuts(
+      createSubmitExtension(onSubmit, { submitOnEnter: false }),
+      {
+        view: { composing: true } as unknown as Editor["view"],
+        isActive: () => false,
+      },
+    );
+
+    expect(shortcuts["Mod-Enter"]!()).toBe(false);
+    expect(onSubmit).not.toHaveBeenCalled();
   });
 
   it("bare Enter is not bound when submitOnEnter is false", () => {

@@ -38,6 +38,7 @@ type runtimeLocalSkillSummary struct {
 	// server treats an empty value as "unknown" rather than a provider/
 	// universal assertion.
 	Root      string `json:"root,omitempty"`
+	Plugin    string `json:"plugin,omitempty"`
 	FileCount int    `json:"file_count"`
 }
 
@@ -55,8 +56,10 @@ type runtimeLocalSkillBundle struct {
 // localSkillRootsForProvider; the kind is surfaced to the UI on each
 // discovered skill (see runtimeLocalSkillSummary.Root).
 type localSkillRoot struct {
-	path string
-	kind string
+	path      string
+	kind      string
+	keyPrefix string
+	plugin    string
 }
 
 const (
@@ -68,6 +71,11 @@ const (
 	// universal home-level skill store. It is always searched last so a
 	// same-key skill in the provider directory keeps winning.
 	localSkillRootUniversal = "universal"
+	// localSkillRootPlugin marks skills contributed by an enabled runtime
+	// plugin. Plugin roots use a namespace prefix so their invocation keys
+	// match Claude Code (for example paper-desktop:design-to-code) and never
+	// collide with standalone user skills.
+	localSkillRootPlugin = "plugin"
 )
 
 // localSkillRootsForProvider returns the ordered user-level skill roots
@@ -150,10 +158,28 @@ func localSkillRootsForProvider(provider string) ([]localSkillRoot, bool, error)
 		return nil, false, nil
 	}
 
-	return []localSkillRoot{
+	roots := []localSkillRoot{
 		{path: providerRoot, kind: localSkillRootProvider},
 		{path: filepath.Join(home, ".agents", "skills"), kind: localSkillRootUniversal},
-	}, true, nil
+	}
+	if provider == "claude" || provider == "codebuddy" {
+		for _, plugin := range listEnabledClaudePlugins(home) {
+			manifest, _ := readClaudePluginManifest(plugin.InstallPath)
+			for _, path := range claudePluginComponentPaths(
+				plugin.InstallPath,
+				manifest.Skills,
+				filepath.Join(plugin.InstallPath, "skills"),
+			) {
+				roots = append(roots, localSkillRoot{
+					path:      path,
+					kind:      localSkillRootPlugin,
+					keyPrefix: plugin.Name + ":",
+					plugin:    plugin.ID,
+				})
+			}
+		}
+	}
+	return roots, true, nil
 }
 
 func isIgnoredLocalSkillEntry(name string) bool {
@@ -332,7 +358,7 @@ func listRuntimeLocalSkills(provider string) ([]runtimeLocalSkillSummary, bool, 
 		// drop the legitimate second entry.
 		rootSkills := make([]runtimeLocalSkillSummary, 0)
 		visited := make(map[string]bool)
-		enumerateLocalSkills(provider, root.kind, root.path, root.path, 0, visited, &rootSkills)
+		enumerateLocalSkills(provider, root, root.path, root.path, 0, visited, &rootSkills)
 
 		for _, s := range rootSkills {
 			if seenKeys[s.Key] {
@@ -362,7 +388,9 @@ func listRuntimeLocalSkills(provider string) ([]runtimeLocalSkillSummary, bool, 
 // EvalSymlinks up front. Errors from EvalSymlinks just stop the descent on
 // that branch — most often it's a dangling link, which we want to ignore.
 func enumerateLocalSkills(
-	provider, rootKind, walkRoot, currentDir string,
+	provider string,
+	root localSkillRoot,
+	walkRoot, currentDir string,
 	depth int,
 	visited map[string]bool,
 	skills *[]runtimeLocalSkillSummary,
@@ -405,13 +433,16 @@ func enumerateLocalSkills(
 			if err != nil {
 				continue
 			}
+			key = root.keyPrefix + key
 
 			content, err := readLocalSkillMainFile(path)
 			if err != nil {
 				continue
 			}
 			skillName, description := skill.ParseSkillFrontmatter(content)
-			if skillName == "" {
+			if root.plugin != "" {
+				skillName = key
+			} else if skillName == "" {
 				skillName = filepath.Base(path)
 			}
 
@@ -426,7 +457,8 @@ func enumerateLocalSkills(
 				Description: description,
 				SourcePath:  relativizeHomePath(path),
 				Provider:    provider,
-				Root:        rootKind,
+				Root:        root.kind,
+				Plugin:      root.plugin,
 				// `files` is the supporting bundle (collectLocalSkillFiles
 				// intentionally excludes SKILL.md so the bundle's `Content`
 				// field can carry it without duplication on import). For the
@@ -438,7 +470,7 @@ func enumerateLocalSkills(
 		}
 
 		// No SKILL.md here — descend looking for nested skills.
-		enumerateLocalSkills(provider, rootKind, walkRoot, path, depth+1, visited, skills)
+		enumerateLocalSkills(provider, root, walkRoot, path, depth+1, visited, skills)
 	}
 }
 
@@ -464,7 +496,14 @@ func loadRuntimeLocalSkillBundle(provider, skillKey string) (*runtimeLocalSkillB
 	// returned, so we never silently substitute a different-content same-key
 	// skill from a lower-priority root.
 	for _, root := range roots {
-		skillDir := filepath.Join(root.path, filepath.FromSlash(key))
+		rootKey := key
+		if root.keyPrefix != "" {
+			if !strings.HasPrefix(key, root.keyPrefix) {
+				continue
+			}
+			rootKey = strings.TrimPrefix(key, root.keyPrefix)
+		}
+		skillDir := filepath.Join(root.path, filepath.FromSlash(rootKey))
 		info, err := os.Stat(skillDir)
 		if err != nil {
 			// IsNotExist => this root simply lacks the skill, try the next.
@@ -504,7 +543,9 @@ func loadRuntimeLocalSkillBundle(provider, skillKey string) (*runtimeLocalSkillB
 			return nil, true, err
 		}
 		name, description := skill.ParseSkillFrontmatter(content)
-		if name == "" {
+		if root.plugin != "" {
+			name = key
+		} else if name == "" {
 			name = filepath.Base(skillDir)
 		}
 
