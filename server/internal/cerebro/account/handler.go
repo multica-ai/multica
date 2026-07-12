@@ -295,12 +295,16 @@ func parseNullableTime(raw json.RawMessage, field string) (*NullableTime, error)
 	return out, nil
 }
 
+// accountIDs resolves the workspace + account UUIDs for the workspace-scoped
+// per-account routes. The route param is {accountID}, not {id} — a nested {id}
+// would shadow the workspace {id} for the group's membership middleware
+// (FIR-3118).
 func (h *Handler) accountIDs(w http.ResponseWriter, r *http.Request) (workspaceID, accountID pgtype.UUID, ok bool) {
 	workspaceID, ok = workspaceIDFromRequest(w, r)
 	if !ok {
 		return pgtype.UUID{}, pgtype.UUID{}, false
 	}
-	accountID, err := util.ParseUUID(chi.URLParam(r, "id"))
+	accountID, err := util.ParseUUID(chi.URLParam(r, "accountID"))
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid account id")
 		return pgtype.UUID{}, pgtype.UUID{}, false

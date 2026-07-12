@@ -1208,10 +1208,13 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					// CEREBRO-PATCH(cerebro-account-routes): workspace accounts CRUD + JEH-998 controls patch.
 					r.Get("/accounts", cerebroAccountHandler.List)
 					r.Post("/accounts", cerebroAccountHandler.Create)
-					r.Get("/accounts/{id}", cerebroAccountHandler.Get)
-					r.Delete("/accounts/{id}", cerebroAccountHandler.Delete)
-					r.Patch("/accounts/{id}/controls", cerebroAccountHandler.UpdateControls)
-					r.Get("/accounts/{id}/usage-history", cerebroAccountHandler.UsageHistory) // CEREBRO-PATCH(cerebro-account-routes): FIR-3118 hourly usage buckets.
+					// CEREBRO-PATCH(cerebro-account-routes): FIR-3118 — the account param must not be {id}:
+					// the group's RequireWorkspaceMemberFromURL("id") reads the innermost duplicate (the
+					// account id) and 404s every per-account route with "workspace not found".
+					r.Get("/accounts/{accountID}", cerebroAccountHandler.Get)
+					r.Delete("/accounts/{accountID}", cerebroAccountHandler.Delete)
+					r.Patch("/accounts/{accountID}/controls", cerebroAccountHandler.UpdateControls)
+					r.Get("/accounts/{accountID}/usage-history", cerebroAccountHandler.UsageHistory) // CEREBRO-PATCH(cerebro-account-routes): FIR-3118 hourly usage buckets.
 					// CEREBRO-PATCH(cerebro-credentials-routes): JEH-1196 credential registry routes (CRUD + reveal + rotate + bindings + audit).
 					cerebroCredentialsHandler.Mount(r)
 					// CEREBRO-PATCH(cerebro-connections-routes): TECH-3108 workspace connection reads (any member).
