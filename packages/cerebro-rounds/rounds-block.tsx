@@ -30,17 +30,24 @@ export function RoundsBlock({ statuses, issueTitles, onStart, onSelectIssue, set
   onRemove?: () => void;
 }) {
   const visible = statuses.filter((s) => s.members.length > 0 || s.round.next_run_at || s.active_run);
-  const [expanded, setExpanded] = useState<string | null>(null);
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
   const [collapsed, setCollapsed] = useState(defaultCollapsed === true);
   const [query, setQuery] = useState("");
   const readyRoundId = visible.find((status) => status.active_run?.status === "ready")?.round.id ?? null;
   useEffect(() => {
-    if (readyRoundId) setExpanded(readyRoundId);
+    if (readyRoundId) setExpandedIds((prev) => (prev.has(readyRoundId) ? prev : new Set(prev).add(readyRoundId)));
   }, [readyRoundId]);
-  const filtered = visible.filter((status) => {
-    const needle = query.trim().toLocaleLowerCase();
-    return !needle || status.round.name.toLocaleLowerCase().includes(needle) || status.members.some((member) => (issueTitles[member.issue_id] ?? "").toLocaleLowerCase().includes(needle));
-  });
+  const needle = query.trim().toLocaleLowerCase();
+  const matchesByMember = (status: RoundStatus) => status.members.some((member) => (issueTitles[member.issue_id] ?? "").toLocaleLowerCase().includes(needle));
+  useEffect(() => {
+    if (!needle) return;
+    const matches = visible.filter(matchesByMember).map((status) => status.round.id);
+    if (matches.length === 0) return;
+    setExpandedIds((prev) => new Set([...prev, ...matches]));
+    // Only re-run when the search term changes; expanding on every render (e.g. new statuses) would fight manual collapses.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [needle]);
+  const filtered = visible.filter((status) => !needle || status.round.name.toLocaleLowerCase().includes(needle) || matchesByMember(status));
   return <section className="overflow-hidden rounded-xl border border-border bg-card" aria-label="Rounds">
     <header className="flex items-center gap-2 border-b border-border px-3 py-2">
       {dragHandle}
@@ -57,11 +64,15 @@ export function RoundsBlock({ statuses, issueTitles, onStart, onSelectIssue, set
       const running = s.active_run?.status === "running";
       const ready = s.active_run?.status === "ready";
       const complete = s.members.length === 0 || (ready && (s.active_run?.responded_count ?? 0) >= (s.active_run?.total_count ?? s.members.length));
-      const open = expanded === s.round.id;
+      const open = expandedIds.has(s.round.id);
       const schedule = nextRunLabel(s.round.next_run_at);
       return <div key={s.round.id}>
         <div className="flex items-center gap-2 px-3 py-2">
-          <button type="button" aria-label={`${open ? "Collapse" : "Expand"} ${s.round.name}`} className="flex min-w-0 flex-1 items-center gap-2 text-left" onClick={() => setExpanded(open ? null : s.round.id)}>
+          <button type="button" aria-label={`${open ? "Collapse" : "Expand"} ${s.round.name}`} className="flex min-w-0 flex-1 items-center gap-2 text-left" onClick={() => setExpandedIds((prev) => {
+            const next = new Set(prev);
+            if (open) next.delete(s.round.id); else next.add(s.round.id);
+            return next;
+          })}>
             {open ? <ChevronDown className="size-3.5" /> : <ChevronRight className="size-3.5" />}
             <span className="truncate text-sm font-medium">{s.round.name}</span>
             <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">{s.round.mode === "live" ? "Live" : "Batch"}</span>

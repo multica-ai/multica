@@ -49,6 +49,25 @@ describe("RoundsBlock", () => {
     expect(screen.getByText("Weekly")).toBeInTheDocument();
   });
 
+  it("expands a round automatically when the search matches one of its issues (FIR-3108)", () => {
+    const second = status({ round: { ...status().round, id: "round-2", name: "Weekly" }, members: [{ ...status().members[0]!, round_id: "round-2", issue_id: "issue-2" }] });
+    render(<RoundsBlock statuses={[status(), second]} issueTitles={{ "issue-1": "Alpha returns", "issue-2": "Beta pricing" }} onStart={vi.fn()} onSelectIssue={vi.fn()} />);
+    expect(screen.queryByText("Beta pricing")).not.toBeInTheDocument();
+    fireEvent.change(screen.getByRole("searchbox", { name: "Search Rounds" }), { target: { value: "beta" } });
+    expect(screen.getByRole("button", { name: "Collapse Weekly" })).toBeInTheDocument();
+    expect(screen.getByText("Beta pricing")).toBeInTheDocument();
+  });
+
+  it("expands every matching round when a search term matches issues in more than one round", () => {
+    const second = status({ round: { ...status().round, id: "round-2", name: "Weekly" }, members: [{ ...status().members[0]!, round_id: "round-2", issue_id: "issue-2" }] });
+    render(<RoundsBlock statuses={[status(), second]} issueTitles={{ "issue-1": "Returns queue", "issue-2": "Returns follow-up" }} onStart={vi.fn()} onSelectIssue={vi.fn()} />);
+    fireEvent.change(screen.getByRole("searchbox", { name: "Search Rounds" }), { target: { value: "returns" } });
+    expect(screen.getByRole("button", { name: "Collapse Daily ideas" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Collapse Weekly" })).toBeInTheDocument();
+    expect(screen.getByText("Returns queue")).toBeInTheDocument();
+    expect(screen.getByText("Returns follow-up")).toBeInTheDocument();
+  });
+
   it("shows a green disabled play button when every conversation is done", () => {
     const completed = status({ active_run: { id: "run-1", round_id: "round-1", status: "ready", total_count: 1, responded_count: 1, stalled_count: 0, nudged_count: 0, started_at: "", ready_at: "", completed_at: null, created_at: "" } });
     render(<RoundsBlock statuses={[completed]} issueTitles={{}} onStart={vi.fn()} onSelectIssue={vi.fn()} />);
