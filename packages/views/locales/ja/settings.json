@@ -28,6 +28,55 @@
       "sync_failed": "タイムゾーン設定を保存できませんでした。"
     }
   },
+  "shortcuts": {
+    "title": "キーボードショートカット",
+    "description": "このデバイスで製品操作のショートカットをカスタマイズします。ショートカットをクリックして、新しいキーの組み合わせを押してください。",
+    "search_placeholder": "操作を検索...",
+    "reset_all": "デフォルトに戻す",
+    "reset": "リセット",
+    "disable": "無効にする",
+    "reset_action": "{{action}}をリセット",
+    "disable_action": "{{action}}のショートカットを無効にする",
+    "record_aria": "{{action}}のショートカットを変更",
+    "recording": "キーを入力",
+    "record_hint": "Esc でキャンセル · Delete でクリア",
+    "unassigned": "未設定",
+    "no_results": "一致するショートカット操作はありません。",
+    "conflict_error": "すでに{{action}}で使用されています。",
+    "reserved_error": "ブラウザまたはデスクトップウィンドウで予約されています。",
+    "send_error": "送信には Enter または Mod+Enter のみ使用できます。",
+    "unsafe_error": "このキーは文字入力や基本的なキーボード操作と競合します。",
+    "send_enter_hint": "Shift+Enterで段落の挿入、リストの継続、コードブロック内の改行ができます。",
+    "categories": { "general": "一般", "navigation": "ナビゲーション" },
+    "actions": {
+      "openSearch": { "label": "検索を開く", "description": "どこからでも検索やコマンドを実行します。" },
+      "createIssue": { "label": "Issueを作成", "description": "優先するissue作成フローを開きます。" },
+      "toggleSidebar": { "label": "サイドバーを切り替え", "description": "メインサイドバーの表示を切り替えます。" },
+      "findInIssue": { "label": "Issue内を検索", "description": "開いているissueの詳細を検索します。" },
+      "send": { "label": "送信", "description": "チャット、コメント、返信、フィードバック、プロンプトを送信します。" },
+      "goInbox": { "label": "受信トレイへ移動", "description": "ワークスペースの受信トレイを開きます。" },
+      "goChat": { "label": "チャットへ移動", "description": "ワークスペースのチャットを開きます。" },
+      "goMyIssues": { "label": "自分のIssuesへ移動", "description": "自分に割り当てられたissueを開きます。" },
+      "goIssues": { "label": "Issuesへ移動", "description": "Issue一覧を開きます。" },
+      "goProjects": { "label": "プロジェクトへ移動", "description": "プロジェクト一覧を開きます。" },
+      "goAutopilots": { "label": "自動化へ移動", "description": "ワークスペースの自動化を開きます。" },
+      "goAgents": { "label": "エージェントへ移動", "description": "エージェント一覧を開きます。" },
+      "goSquads": { "label": "Squadsへ移動", "description": "Squad一覧を開きます。" },
+      "goUsage": { "label": "使用量へ移動", "description": "使用量分析を開きます。" },
+      "goRuntimes": { "label": "ランタイムへ移動", "description": "ランタイム設定を開きます。" },
+      "goSkills": { "label": "Skillsへ移動", "description": "Skillライブラリを開きます。" },
+      "goSettings": { "label": "設定へ移動", "description": "ワークスペース設定を開きます。" }
+    },
+    "fixed": {
+      "title": "固定のシステムショートカット",
+      "description": "ウィンドウとアクセシビリティのショートカットは信頼性のため固定されています。ズームとタブ操作はデスクトップアプリに適用されます。",
+      "close_tab": "アクティブなタブを閉じる",
+      "zoom_in": "拡大",
+      "zoom_out": "縮小",
+      "reset_zoom": "ズームをリセット",
+      "close_dialog": "ダイアログまたはメニューを閉じる"
+    }
+  },
   "chat": {
     "floating_title": "フローティングウィンドウ",
     "floating_label": "フローティングチャット",
@@ -40,6 +89,7 @@
     "tabs": {
       "profile": "プロフィール",
       "preferences": "環境設定",
+      "shortcuts": "ショートカット",
       "chat": "チャット",
       "notifications": "通知",
       "tokens": "API トークン",

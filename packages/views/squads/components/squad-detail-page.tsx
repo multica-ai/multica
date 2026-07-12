@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@multica/core/api";
 import { useAuthStore } from "@multica/core/auth";
@@ -8,6 +8,7 @@ import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
 import { isImeComposing } from "@multica/core/utils";
+import { getShortcut, shortcutMatchesEvent } from "@multica/core/shortcuts";
 import { useTimeAgo } from "../../i18n";
 import { agentListOptions, memberListOptions, squadMemberStatusOptions, workspaceKeys } from "@multica/core/workspace/queries";
 import { runtimeListOptions } from "@multica/core/runtimes";
@@ -925,10 +926,13 @@ function SquadDescriptionEditorBody({
   const { t } = useT("squads");
   const [draft, setDraft] = useState(initialValue);
   const [saving, setSaving] = useState(false);
+  const savingRef = useRef(false);
   const dirty = draft !== initialValue;
 
   const commit = async () => {
+    if (savingRef.current) return;
     if (!dirty) { onClose(); return; }
+    savingRef.current = true;
     setSaving(true);
     try {
       await onSave(draft);
@@ -936,6 +940,7 @@ function SquadDescriptionEditorBody({
     } catch {
       // toast handled by parent's mutation
     } finally {
+      savingRef.current = false;
       setSaving(false);
     }
   };
@@ -953,8 +958,8 @@ function SquadDescriptionEditorBody({
         rows={6}
         onKeyDown={(e) => {
           if (e.key === "Escape") { onClose(); return; }
-          if (isImeComposing(e)) return;
-          if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+          if (e.defaultPrevented || e.repeat || isImeComposing(e)) return;
+          if (shortcutMatchesEvent(getShortcut("send"), e.nativeEvent)) {
             e.preventDefault();
             void commit();
           }

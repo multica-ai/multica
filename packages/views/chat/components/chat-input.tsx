@@ -13,7 +13,7 @@ import { SubmitButton } from "@multica/ui/components/common/submit-button";
 import { ChatAddMenu } from "./chat-add-menu";
 import { useChatStore, newSessionDraftKey } from "@multica/core/chat";
 import { createLogger } from "@multica/core/logger";
-import { enterKey, formatShortcut, modKey } from "@multica/core/platform";
+import { formatShortcut, useShortcut } from "@multica/core/shortcuts";
 import type { UploadResult } from "@multica/core/hooks/use-file-upload";
 import type { MentionItem } from "../../editor/extensions/mention-suggestion";
 import type { Attachment } from "@multica/core/types";
@@ -108,6 +108,7 @@ export function ChatInput({
   focusRequest,
 }: ChatInputProps) {
   const { t } = useT("chat");
+  const sendShortcut = useShortcut("send");
   const editorRef = useRef<ContentEditorRef>(null);
   const activeSessionId = useChatStore((s) => s.activeSessionId);
   const selectedAgentId = useChatStore((s) => s.selectedAgentId);
@@ -406,11 +407,6 @@ export function ChatInput({
             // Chat is short-form — the floating formatting toolbar is
             // more distraction than feature here.
             showBubbleMenu={false}
-            // Chat intentionally leaves submitOnEnter at its default false:
-            // Mod+Enter submits, while bare Enter falls through to Tiptap's
-            // default behavior for lists, quotes, and paragraph breaks.
-            // Without this, Enter-as-send would steal the only key that
-            // continues a bullet list, leaving users stuck after one item.
           />
         </div>
         {(uploadEnabled || leftAdornment) && (
@@ -430,7 +426,9 @@ export function ChatInput({
             loading={isSubmitting}
             running={isRunning}
             onStop={onStop}
-            tooltip={`${t(($) => $.input.send_tooltip)} · ${formatShortcut(modKey, enterKey)}`}
+            tooltip={sendShortcut
+              ? `${t(($) => $.input.send_tooltip)} · ${formatShortcut(sendShortcut)}`
+              : t(($) => $.input.send_tooltip)}
             stopTooltip={t(($) => $.input.stop_tooltip)}
           />
         </div>

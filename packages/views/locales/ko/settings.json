@@ -28,6 +28,55 @@
       "sync_failed": "시간대 설정을 저장하지 못했습니다."
     }
   },
+  "shortcuts": {
+    "title": "키보드 단축키",
+    "description": "이 기기에서 제품 동작의 단축키를 설정합니다. 단축키를 클릭한 다음 새 키 조합을 누르세요.",
+    "search_placeholder": "동작 검색...",
+    "reset_all": "기본값 복원",
+    "reset": "재설정",
+    "disable": "사용 안 함",
+    "reset_action": "{{action}} 재설정",
+    "disable_action": "{{action}} 단축키 사용 안 함",
+    "record_aria": "{{action}} 단축키 변경",
+    "recording": "키를 누르세요",
+    "record_hint": "Esc 취소 · Delete 지우기",
+    "unassigned": "지정되지 않음",
+    "no_results": "일치하는 단축키 동작이 없습니다.",
+    "conflict_error": "이미 {{action}}에서 사용 중입니다.",
+    "reserved_error": "브라우저 또는 데스크톱 창에서 예약된 단축키입니다.",
+    "send_error": "보내기는 Enter 또는 Mod+Enter만 사용할 수 있습니다.",
+    "unsafe_error": "이 키는 텍스트 입력이나 기본 키보드 탐색을 방해합니다.",
+    "send_enter_hint": "Shift+Enter로 단락을 삽입하거나 목록을 이어가고 코드 블록에서 줄을 바꿀 수 있습니다.",
+    "categories": { "general": "일반", "navigation": "탐색" },
+    "actions": {
+      "openSearch": { "label": "검색 열기", "description": "어디서나 검색하고 명령을 실행합니다." },
+      "createIssue": { "label": "Issue 만들기", "description": "선호하는 issue 만들기 흐름을 엽니다." },
+      "toggleSidebar": { "label": "사이드바 전환", "description": "기본 사이드바를 표시하거나 숨깁니다." },
+      "findInIssue": { "label": "Issue에서 찾기", "description": "열린 issue 상세 내용에서 검색합니다." },
+      "send": { "label": "보내기", "description": "채팅, 댓글, 답글, 피드백 및 프롬프트를 보냅니다." },
+      "goInbox": { "label": "받은 편지함으로 이동", "description": "워크스페이스 받은 편지함을 엽니다." },
+      "goChat": { "label": "채팅으로 이동", "description": "워크스페이스 채팅을 엽니다." },
+      "goMyIssues": { "label": "내 Issues로 이동", "description": "나에게 할당된 issue를 엽니다." },
+      "goIssues": { "label": "Issues로 이동", "description": "Issue 목록을 엽니다." },
+      "goProjects": { "label": "프로젝트로 이동", "description": "프로젝트 목록을 엽니다." },
+      "goAutopilots": { "label": "자동화로 이동", "description": "워크스페이스 자동화를 엽니다." },
+      "goAgents": { "label": "에이전트로 이동", "description": "에이전트 목록을 엽니다." },
+      "goSquads": { "label": "스쿼드로 이동", "description": "스쿼드 목록을 엽니다." },
+      "goUsage": { "label": "사용량으로 이동", "description": "사용량 분석을 엽니다." },
+      "goRuntimes": { "label": "런타임으로 이동", "description": "런타임 설정을 엽니다." },
+      "goSkills": { "label": "Skills로 이동", "description": "Skill 라이브러리를 엽니다." },
+      "goSettings": { "label": "설정으로 이동", "description": "워크스페이스 설정을 엽니다." }
+    },
+    "fixed": {
+      "title": "고정 시스템 단축키",
+      "description": "창 및 접근성 단축키는 안정성을 위해 고정됩니다. 확대/축소 및 탭 제어는 데스크톱 앱에 적용됩니다.",
+      "close_tab": "활성 탭 닫기",
+      "zoom_in": "확대",
+      "zoom_out": "축소",
+      "reset_zoom": "확대/축소 재설정",
+      "close_dialog": "대화상자 또는 메뉴 닫기"
+    }
+  },
   "chat": {
     "floating_title": "플로팅 창",
     "floating_label": "플로팅 채팅 창",
@@ -40,6 +89,7 @@
     "tabs": {
       "profile": "프로필",
       "preferences": "환경설정",
+      "shortcuts": "단축키",
       "chat": "채팅",
       "notifications": "알림",
       "tokens": "API 토큰",

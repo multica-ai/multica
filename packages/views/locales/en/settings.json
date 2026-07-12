@@ -28,6 +28,58 @@
       "sync_failed": "Failed to save your timezone preference."
     }
   },
+  "shortcuts": {
+    "title": "Keyboard Shortcuts",
+    "description": "Customize product actions on this device. Click a shortcut, then press the new key combination.",
+    "search_placeholder": "Search actions...",
+    "reset_all": "Restore defaults",
+    "reset": "Reset",
+    "disable": "Disable",
+    "reset_action": "Reset {{action}}",
+    "disable_action": "Disable {{action}} shortcut",
+    "record_aria": "Change shortcut for {{action}}",
+    "recording": "Press keys",
+    "record_hint": "Esc cancels · Delete clears",
+    "unassigned": "Unassigned",
+    "no_results": "No matching shortcut actions.",
+    "conflict_error": "Already used by {{action}}.",
+    "reserved_error": "Reserved by the browser or desktop window.",
+    "send_error": "Send can only use Enter or Mod+Enter.",
+    "unsafe_error": "This key would interfere with typing or basic keyboard navigation.",
+    "send_enter_hint": "Shift+Enter inserts a paragraph, continues a list, or adds a code-block newline.",
+    "categories": {
+      "general": "General",
+      "navigation": "Navigation"
+    },
+    "actions": {
+      "openSearch": { "label": "Open search", "description": "Search and run commands from anywhere." },
+      "createIssue": { "label": "Create issue", "description": "Open your preferred issue creation flow." },
+      "toggleSidebar": { "label": "Toggle sidebar", "description": "Show or hide the main sidebar." },
+      "findInIssue": { "label": "Find in issue", "description": "Search within the open issue detail." },
+      "send": { "label": "Send", "description": "Send chat messages, comments, replies, feedback, and prompts." },
+      "goInbox": { "label": "Go to Inbox", "description": "Open the workspace inbox." },
+      "goChat": { "label": "Go to Chat", "description": "Open workspace chat." },
+      "goMyIssues": { "label": "Go to My Issues", "description": "Open issues assigned to you." },
+      "goIssues": { "label": "Go to Issues", "description": "Open the issue list." },
+      "goProjects": { "label": "Go to Projects", "description": "Open the project list." },
+      "goAutopilots": { "label": "Go to Autopilot", "description": "Open workspace automations." },
+      "goAgents": { "label": "Go to Agents", "description": "Open the agent list." },
+      "goSquads": { "label": "Go to Squads", "description": "Open the squad list." },
+      "goUsage": { "label": "Go to Usage", "description": "Open usage analytics." },
+      "goRuntimes": { "label": "Go to Runtimes", "description": "Open runtime configuration." },
+      "goSkills": { "label": "Go to Skills", "description": "Open the skill library." },
+      "goSettings": { "label": "Go to Settings", "description": "Open workspace settings." }
+    },
+    "fixed": {
+      "title": "Fixed system shortcuts",
+      "description": "Window and accessibility shortcuts stay fixed so they remain reliable. Zoom and tab controls apply to the desktop app.",
+      "close_tab": "Close active tab",
+      "zoom_in": "Zoom in",
+      "zoom_out": "Zoom out",
+      "reset_zoom": "Reset zoom",
+      "close_dialog": "Close dialog or menu"
+    }
+  },
   "chat": {
     "floating_title": "Floating window",
     "floating_label": "Floating chat window",
@@ -40,6 +92,7 @@
     "tabs": {
       "profile": "Profile",
       "preferences": "Preferences",
+      "shortcuts": "Shortcuts",
       "chat": "Chat",
       "notifications": "Notifications",
       "tokens": "API Tokens",
