@@ -16,6 +16,7 @@ INSERT INTO cerebro_account (workspace_id, provider, login_identity)
 VALUES ($1, $2, $3)
 RETURNING id, workspace_id, provider, login_identity,
           usage_window_pct, throttled_until, extra_spend_on, paused_manual,
+          usage_5h_pct, usage_5h_resets_at, usage_7d_pct, usage_7d_resets_at,
           created_at, updated_at,
           0::bigint AS tokens_5h,
           0::bigint AS tokens_7d
@@ -28,18 +29,22 @@ type CreateCerebroAccountParams struct {
 }
 
 type CreateCerebroAccountRow struct {
-	ID             pgtype.UUID        `json:"id"`
-	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
-	Provider       string             `json:"provider"`
-	LoginIdentity  string             `json:"login_identity"`
-	UsageWindowPct pgtype.Float4      `json:"usage_window_pct"`
-	ThrottledUntil pgtype.Timestamptz `json:"throttled_until"`
-	ExtraSpendOn   bool               `json:"extra_spend_on"`
-	PausedManual   bool               `json:"paused_manual"`
-	CreatedAt      pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
-	Tokens5h       int64              `json:"tokens_5h"`
-	Tokens7d       int64              `json:"tokens_7d"`
+	ID              pgtype.UUID        `json:"id"`
+	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
+	Provider        string             `json:"provider"`
+	LoginIdentity   string             `json:"login_identity"`
+	UsageWindowPct  pgtype.Float4      `json:"usage_window_pct"`
+	ThrottledUntil  pgtype.Timestamptz `json:"throttled_until"`
+	ExtraSpendOn    bool               `json:"extra_spend_on"`
+	PausedManual    bool               `json:"paused_manual"`
+	Usage5hPct      pgtype.Float4      `json:"usage_5h_pct"`
+	Usage5hResetsAt pgtype.Timestamptz `json:"usage_5h_resets_at"`
+	Usage7dPct      pgtype.Float4      `json:"usage_7d_pct"`
+	Usage7dResetsAt pgtype.Timestamptz `json:"usage_7d_resets_at"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+	Tokens5h        int64              `json:"tokens_5h"`
+	Tokens7d        int64              `json:"tokens_7d"`
 }
 
 func (q *Queries) CreateCerebroAccount(ctx context.Context, arg CreateCerebroAccountParams) (CreateCerebroAccountRow, error) {
@@ -54,6 +59,10 @@ func (q *Queries) CreateCerebroAccount(ctx context.Context, arg CreateCerebroAcc
 		&i.ThrottledUntil,
 		&i.ExtraSpendOn,
 		&i.PausedManual,
+		&i.Usage5hPct,
+		&i.Usage5hResetsAt,
+		&i.Usage7dPct,
+		&i.Usage7dResetsAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.Tokens5h,
@@ -88,6 +97,7 @@ func (q *Queries) DeleteOldCerebroAccountTokenUsage(ctx context.Context) (int64,
 const getCerebroAccount = `-- name: GetCerebroAccount :one
 SELECT ca.id, ca.workspace_id, ca.provider, ca.login_identity,
        ca.usage_window_pct, ca.throttled_until, ca.extra_spend_on, ca.paused_manual,
+       ca.usage_5h_pct, ca.usage_5h_resets_at, ca.usage_7d_pct, ca.usage_7d_resets_at,
        ca.created_at, ca.updated_at,
        (
            SELECT COALESCE(SUM(catu.tokens), 0)::bigint
@@ -106,18 +116,22 @@ WHERE ca.id = $1
 `
 
 type GetCerebroAccountRow struct {
-	ID             pgtype.UUID        `json:"id"`
-	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
-	Provider       string             `json:"provider"`
-	LoginIdentity  string             `json:"login_identity"`
-	UsageWindowPct pgtype.Float4      `json:"usage_window_pct"`
-	ThrottledUntil pgtype.Timestamptz `json:"throttled_until"`
-	ExtraSpendOn   bool               `json:"extra_spend_on"`
-	PausedManual   bool               `json:"paused_manual"`
-	CreatedAt      pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
-	Tokens5h       int64              `json:"tokens_5h"`
-	Tokens7d       int64              `json:"tokens_7d"`
+	ID              pgtype.UUID        `json:"id"`
+	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
+	Provider        string             `json:"provider"`
+	LoginIdentity   string             `json:"login_identity"`
+	UsageWindowPct  pgtype.Float4      `json:"usage_window_pct"`
+	ThrottledUntil  pgtype.Timestamptz `json:"throttled_until"`
+	ExtraSpendOn    bool               `json:"extra_spend_on"`
+	PausedManual    bool               `json:"paused_manual"`
+	Usage5hPct      pgtype.Float4      `json:"usage_5h_pct"`
+	Usage5hResetsAt pgtype.Timestamptz `json:"usage_5h_resets_at"`
+	Usage7dPct      pgtype.Float4      `json:"usage_7d_pct"`
+	Usage7dResetsAt pgtype.Timestamptz `json:"usage_7d_resets_at"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+	Tokens5h        int64              `json:"tokens_5h"`
+	Tokens7d        int64              `json:"tokens_7d"`
 }
 
 func (q *Queries) GetCerebroAccount(ctx context.Context, id pgtype.UUID) (GetCerebroAccountRow, error) {
@@ -132,6 +146,10 @@ func (q *Queries) GetCerebroAccount(ctx context.Context, id pgtype.UUID) (GetCer
 		&i.ThrottledUntil,
 		&i.ExtraSpendOn,
 		&i.PausedManual,
+		&i.Usage5hPct,
+		&i.Usage5hResetsAt,
+		&i.Usage7dPct,
+		&i.Usage7dResetsAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.Tokens5h,
@@ -156,9 +174,48 @@ func (q *Queries) InsertCerebroAccountTokenUsage(ctx context.Context, arg Insert
 	return err
 }
 
+const listCerebroAccountTokenUsageHistory = `-- name: ListCerebroAccountTokenUsageHistory :many
+SELECT date_trunc('hour', catu.created_at)::timestamptz AS bucket,
+       SUM(catu.tokens)::bigint                         AS tokens
+FROM cerebro_account_token_usage catu
+WHERE catu.account_id = $1
+  AND catu.created_at >= now() - interval '7 days'
+GROUP BY 1
+ORDER BY 1 ASC
+`
+
+type ListCerebroAccountTokenUsageHistoryRow struct {
+	Bucket pgtype.Timestamptz `json:"bucket"`
+	Tokens int64              `json:"tokens"`
+}
+
+// FIR-3118: hourly token-usage buckets for the account detail page chart.
+// Retention on cerebro_account_token_usage is 8 days, so 7 days of history
+// is always fully backed by raw samples.
+func (q *Queries) ListCerebroAccountTokenUsageHistory(ctx context.Context, accountID pgtype.UUID) ([]ListCerebroAccountTokenUsageHistoryRow, error) {
+	rows, err := q.db.Query(ctx, listCerebroAccountTokenUsageHistory, accountID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListCerebroAccountTokenUsageHistoryRow{}
+	for rows.Next() {
+		var i ListCerebroAccountTokenUsageHistoryRow
+		if err := rows.Scan(&i.Bucket, &i.Tokens); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listCerebroAccounts = `-- name: ListCerebroAccounts :many
 SELECT ca.id, ca.workspace_id, ca.provider, ca.login_identity,
        ca.usage_window_pct, ca.throttled_until, ca.extra_spend_on, ca.paused_manual,
+       ca.usage_5h_pct, ca.usage_5h_resets_at, ca.usage_7d_pct, ca.usage_7d_resets_at,
        ca.created_at, ca.updated_at,
        (
            SELECT COALESCE(SUM(catu.tokens), 0)::bigint
@@ -178,18 +235,22 @@ ORDER BY ca.provider ASC, lower(ca.login_identity) ASC, ca.created_at ASC
 `
 
 type ListCerebroAccountsRow struct {
-	ID             pgtype.UUID        `json:"id"`
-	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
-	Provider       string             `json:"provider"`
-	LoginIdentity  string             `json:"login_identity"`
-	UsageWindowPct pgtype.Float4      `json:"usage_window_pct"`
-	ThrottledUntil pgtype.Timestamptz `json:"throttled_until"`
-	ExtraSpendOn   bool               `json:"extra_spend_on"`
-	PausedManual   bool               `json:"paused_manual"`
-	CreatedAt      pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
-	Tokens5h       int64              `json:"tokens_5h"`
-	Tokens7d       int64              `json:"tokens_7d"`
+	ID              pgtype.UUID        `json:"id"`
+	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
+	Provider        string             `json:"provider"`
+	LoginIdentity   string             `json:"login_identity"`
+	UsageWindowPct  pgtype.Float4      `json:"usage_window_pct"`
+	ThrottledUntil  pgtype.Timestamptz `json:"throttled_until"`
+	ExtraSpendOn    bool               `json:"extra_spend_on"`
+	PausedManual    bool               `json:"paused_manual"`
+	Usage5hPct      pgtype.Float4      `json:"usage_5h_pct"`
+	Usage5hResetsAt pgtype.Timestamptz `json:"usage_5h_resets_at"`
+	Usage7dPct      pgtype.Float4      `json:"usage_7d_pct"`
+	Usage7dResetsAt pgtype.Timestamptz `json:"usage_7d_resets_at"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+	Tokens5h        int64              `json:"tokens_5h"`
+	Tokens7d        int64              `json:"tokens_7d"`
 }
 
 func (q *Queries) ListCerebroAccounts(ctx context.Context, workspaceID pgtype.UUID) ([]ListCerebroAccountsRow, error) {
@@ -210,6 +271,10 @@ func (q *Queries) ListCerebroAccounts(ctx context.Context, workspaceID pgtype.UU
 			&i.ThrottledUntil,
 			&i.ExtraSpendOn,
 			&i.PausedManual,
+			&i.Usage5hPct,
+			&i.Usage5hResetsAt,
+			&i.Usage7dPct,
+			&i.Usage7dResetsAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.Tokens5h,
@@ -235,6 +300,10 @@ SELECT
     ca.throttled_until,
     ca.extra_spend_on,
     ca.paused_manual,
+    ca.usage_5h_pct,
+    ca.usage_5h_resets_at,
+    ca.usage_7d_pct,
+    ca.usage_7d_resets_at,
     ca.created_at,
     ca.updated_at,
     COALESCE(t5.tokens, 0)::bigint                                                              AS tokens_5h,
@@ -275,6 +344,10 @@ type ListCerebroAccountsWithAvailabilityRow struct {
 	ThrottledUntil        pgtype.Timestamptz `json:"throttled_until"`
 	ExtraSpendOn          bool               `json:"extra_spend_on"`
 	PausedManual          bool               `json:"paused_manual"`
+	Usage5hPct            pgtype.Float4      `json:"usage_5h_pct"`
+	Usage5hResetsAt       pgtype.Timestamptz `json:"usage_5h_resets_at"`
+	Usage7dPct            pgtype.Float4      `json:"usage_7d_pct"`
+	Usage7dResetsAt       pgtype.Timestamptz `json:"usage_7d_resets_at"`
 	CreatedAt             pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt             pgtype.Timestamptz `json:"updated_at"`
 	Tokens5h              int64              `json:"tokens_5h"`
@@ -302,6 +375,10 @@ func (q *Queries) ListCerebroAccountsWithAvailability(ctx context.Context, works
 			&i.ThrottledUntil,
 			&i.ExtraSpendOn,
 			&i.PausedManual,
+			&i.Usage5hPct,
+			&i.Usage5hResetsAt,
+			&i.Usage7dPct,
+			&i.Usage7dResetsAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.Tokens5h,
@@ -333,9 +410,10 @@ SET extra_spend_on = CASE WHEN $2::boolean
 WHERE cerebro_account.id = $1
 RETURNING id, workspace_id, provider, login_identity,
           usage_window_pct, throttled_until, extra_spend_on, paused_manual,
+          usage_5h_pct, usage_5h_resets_at, usage_7d_pct, usage_7d_resets_at,
           created_at, updated_at
 )
-SELECT updated.id, updated.workspace_id, updated.provider, updated.login_identity, updated.usage_window_pct, updated.throttled_until, updated.extra_spend_on, updated.paused_manual, updated.created_at, updated.updated_at,
+SELECT updated.id, updated.workspace_id, updated.provider, updated.login_identity, updated.usage_window_pct, updated.throttled_until, updated.extra_spend_on, updated.paused_manual, updated.usage_5h_pct, updated.usage_5h_resets_at, updated.usage_7d_pct, updated.usage_7d_resets_at, updated.created_at, updated.updated_at,
        (
            SELECT COALESCE(SUM(catu.tokens), 0)::bigint
            FROM cerebro_account_token_usage catu
@@ -360,18 +438,22 @@ type UpdateCerebroAccountControlsParams struct {
 }
 
 type UpdateCerebroAccountControlsRow struct {
-	ID             pgtype.UUID        `json:"id"`
-	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
-	Provider       string             `json:"provider"`
-	LoginIdentity  string             `json:"login_identity"`
-	UsageWindowPct pgtype.Float4      `json:"usage_window_pct"`
-	ThrottledUntil pgtype.Timestamptz `json:"throttled_until"`
-	ExtraSpendOn   bool               `json:"extra_spend_on"`
-	PausedManual   bool               `json:"paused_manual"`
-	CreatedAt      pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
-	Tokens5h       int64              `json:"tokens_5h"`
-	Tokens7d       int64              `json:"tokens_7d"`
+	ID              pgtype.UUID        `json:"id"`
+	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
+	Provider        string             `json:"provider"`
+	LoginIdentity   string             `json:"login_identity"`
+	UsageWindowPct  pgtype.Float4      `json:"usage_window_pct"`
+	ThrottledUntil  pgtype.Timestamptz `json:"throttled_until"`
+	ExtraSpendOn    bool               `json:"extra_spend_on"`
+	PausedManual    bool               `json:"paused_manual"`
+	Usage5hPct      pgtype.Float4      `json:"usage_5h_pct"`
+	Usage5hResetsAt pgtype.Timestamptz `json:"usage_5h_resets_at"`
+	Usage7dPct      pgtype.Float4      `json:"usage_7d_pct"`
+	Usage7dResetsAt pgtype.Timestamptz `json:"usage_7d_resets_at"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+	Tokens5h        int64              `json:"tokens_5h"`
+	Tokens7d        int64              `json:"tokens_7d"`
 }
 
 // UI-driven control toggles. Same partial-update pattern as usage above.
@@ -393,6 +475,10 @@ func (q *Queries) UpdateCerebroAccountControls(ctx context.Context, arg UpdateCe
 		&i.ThrottledUntil,
 		&i.ExtraSpendOn,
 		&i.PausedManual,
+		&i.Usage5hPct,
+		&i.Usage5hResetsAt,
+		&i.Usage7dPct,
+		&i.Usage7dResetsAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.Tokens5h,
@@ -410,13 +496,26 @@ SET usage_window_pct = CASE WHEN $2::boolean
     throttled_until  = CASE WHEN $4::boolean
                             THEN $5::timestamptz
                             ELSE throttled_until END,
+    usage_5h_pct     = CASE WHEN $6::boolean
+                            THEN $7::real
+                            ELSE usage_5h_pct END,
+    usage_5h_resets_at = CASE WHEN $8::boolean
+                            THEN $9::timestamptz
+                            ELSE usage_5h_resets_at END,
+    usage_7d_pct     = CASE WHEN $10::boolean
+                            THEN $11::real
+                            ELSE usage_7d_pct END,
+    usage_7d_resets_at = CASE WHEN $12::boolean
+                            THEN $13::timestamptz
+                            ELSE usage_7d_resets_at END,
     updated_at       = now()
 WHERE cerebro_account.id = $1
 RETURNING id, workspace_id, provider, login_identity,
           usage_window_pct, throttled_until, extra_spend_on, paused_manual,
+          usage_5h_pct, usage_5h_resets_at, usage_7d_pct, usage_7d_resets_at,
           created_at, updated_at
 )
-SELECT updated.id, updated.workspace_id, updated.provider, updated.login_identity, updated.usage_window_pct, updated.throttled_until, updated.extra_spend_on, updated.paused_manual, updated.created_at, updated.updated_at,
+SELECT updated.id, updated.workspace_id, updated.provider, updated.login_identity, updated.usage_window_pct, updated.throttled_until, updated.extra_spend_on, updated.paused_manual, updated.usage_5h_pct, updated.usage_5h_resets_at, updated.usage_7d_pct, updated.usage_7d_resets_at, updated.created_at, updated.updated_at,
        (
            SELECT COALESCE(SUM(catu.tokens), 0)::bigint
            FROM cerebro_account_token_usage catu
@@ -433,26 +532,38 @@ FROM updated
 `
 
 type UpdateCerebroAccountUsageParams struct {
-	ID                pgtype.UUID        `json:"id"`
-	UsageWindowPctSet bool               `json:"usage_window_pct_set"`
-	UsageWindowPct    pgtype.Float4      `json:"usage_window_pct"`
-	ThrottledUntilSet bool               `json:"throttled_until_set"`
-	ThrottledUntil    pgtype.Timestamptz `json:"throttled_until"`
+	ID                 pgtype.UUID        `json:"id"`
+	UsageWindowPctSet  bool               `json:"usage_window_pct_set"`
+	UsageWindowPct     pgtype.Float4      `json:"usage_window_pct"`
+	ThrottledUntilSet  bool               `json:"throttled_until_set"`
+	ThrottledUntil     pgtype.Timestamptz `json:"throttled_until"`
+	Usage5hPctSet      bool               `json:"usage_5h_pct_set"`
+	Usage5hPct         pgtype.Float4      `json:"usage_5h_pct"`
+	Usage5hResetsAtSet bool               `json:"usage_5h_resets_at_set"`
+	Usage5hResetsAt    pgtype.Timestamptz `json:"usage_5h_resets_at"`
+	Usage7dPctSet      bool               `json:"usage_7d_pct_set"`
+	Usage7dPct         pgtype.Float4      `json:"usage_7d_pct"`
+	Usage7dResetsAtSet bool               `json:"usage_7d_resets_at_set"`
+	Usage7dResetsAt    pgtype.Timestamptz `json:"usage_7d_resets_at"`
 }
 
 type UpdateCerebroAccountUsageRow struct {
-	ID             pgtype.UUID        `json:"id"`
-	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
-	Provider       string             `json:"provider"`
-	LoginIdentity  string             `json:"login_identity"`
-	UsageWindowPct pgtype.Float4      `json:"usage_window_pct"`
-	ThrottledUntil pgtype.Timestamptz `json:"throttled_until"`
-	ExtraSpendOn   bool               `json:"extra_spend_on"`
-	PausedManual   bool               `json:"paused_manual"`
-	CreatedAt      pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
-	Tokens5h       int64              `json:"tokens_5h"`
-	Tokens7d       int64              `json:"tokens_7d"`
+	ID              pgtype.UUID        `json:"id"`
+	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
+	Provider        string             `json:"provider"`
+	LoginIdentity   string             `json:"login_identity"`
+	UsageWindowPct  pgtype.Float4      `json:"usage_window_pct"`
+	ThrottledUntil  pgtype.Timestamptz `json:"throttled_until"`
+	ExtraSpendOn    bool               `json:"extra_spend_on"`
+	PausedManual    bool               `json:"paused_manual"`
+	Usage5hPct      pgtype.Float4      `json:"usage_5h_pct"`
+	Usage5hResetsAt pgtype.Timestamptz `json:"usage_5h_resets_at"`
+	Usage7dPct      pgtype.Float4      `json:"usage_7d_pct"`
+	Usage7dResetsAt pgtype.Timestamptz `json:"usage_7d_resets_at"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+	Tokens5h        int64              `json:"tokens_5h"`
+	Tokens7d        int64              `json:"tokens_7d"`
 }
 
 // Daemon-driven usage telemetry. Each field is updated only when the
@@ -465,6 +576,14 @@ func (q *Queries) UpdateCerebroAccountUsage(ctx context.Context, arg UpdateCereb
 		arg.UsageWindowPct,
 		arg.ThrottledUntilSet,
 		arg.ThrottledUntil,
+		arg.Usage5hPctSet,
+		arg.Usage5hPct,
+		arg.Usage5hResetsAtSet,
+		arg.Usage5hResetsAt,
+		arg.Usage7dPctSet,
+		arg.Usage7dPct,
+		arg.Usage7dResetsAtSet,
+		arg.Usage7dResetsAt,
 	)
 	var i UpdateCerebroAccountUsageRow
 	err := row.Scan(
@@ -476,6 +595,10 @@ func (q *Queries) UpdateCerebroAccountUsage(ctx context.Context, arg UpdateCereb
 		&i.ThrottledUntil,
 		&i.ExtraSpendOn,
 		&i.PausedManual,
+		&i.Usage5hPct,
+		&i.Usage5hResetsAt,
+		&i.Usage7dPct,
+		&i.Usage7dResetsAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.Tokens5h,

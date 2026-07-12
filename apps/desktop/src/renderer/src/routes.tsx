@@ -18,6 +18,7 @@ import { AutopilotCreatePage, AutopilotEditPage } from "@multica/cerebro-autopil
 import { SkillDetailPage } from "./pages/skill-detail-page";
 import { AgentDetailPage } from "./pages/agent-detail-page";
 import { RuntimeDetailPage } from "./pages/runtime-detail-page";
+import { AccountDetailPage } from "./pages/account-detail-page";
 import { IssuesPage } from "@multica/views/issues/components";
 import { ProjectsPage } from "@multica/views/projects/components";
 import { FileManagerPage } from "@multica/cerebro-artifacts/views/components";
@@ -364,6 +365,11 @@ export const appRoutes: RouteObject[] = [
             path: "settings",
             element: <SettingsRoute />,
             handle: { title: "Settings" },
+          },
+          {
+            path: "settings/accounts/:id",
+            element: <AccountDetailPage />,
+            handle: { title: "Account" },
           },
         ],
       },

@@ -3599,6 +3599,9 @@ importers:
       react:
         specifier: 'catalog:'
         version: 19.2.3
+      recharts:
+        specifier: '*'
+        version: 3.8.0(@types/react@19.2.15)(react-dom@19.2.3(react@19.2.3))(react-is@19.2.6)(react@19.2.3)(redux@5.0.1)
       sonner:
         specifier: ^2.0.7
         version: 2.0.7(react-dom@19.2.3(react@19.2.3))(react@19.2.3)

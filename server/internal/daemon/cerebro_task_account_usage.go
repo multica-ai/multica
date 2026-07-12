@@ -42,6 +42,10 @@ func (d *Daemon) maybeReportAccountUsage(ctx context.Context, runtimeID, comment
 	if accountID == "" {
 		return
 	}
+	// CEREBRO-PATCH(daemon-claude-oauth-usage): FIR-3118 — fetch exact 5h/7d
+	// window utilization from Claude's OAuth usage endpoint after every task
+	// run, independent of whether the logs carried a quota signal.
+	d.maybeReportClaudeOAuthUsage(ctx, runtimeID, accountID, log)
 	// Merge comment + verbose logs so the parser can pick up signals that
 	// appear in Claude Code's debug log stream (e.g. x-ratelimit headers)
 	// rather than only in the agent's final text output.

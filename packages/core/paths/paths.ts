@@ -68,6 +68,8 @@ function workspaceScoped(slug: string) {
     // CEREBRO-PATCH(cerebro-connections-routes): TECH-3108 full-page connection create/edit routes.
     connectionNew: () => `${ws}/settings/connections/new`,
     connectionEdit: (id: string) => `${ws}/settings/connections/${encode(id)}`,
+    // CEREBRO-PATCH(cerebro-account-detail-path): FIR-3118 account usage detail page.
+    accountDetail: (id: string) => `${ws}/settings/accounts/${encode(id)}`,
     // CEREBRO-PATCH(firtal-welcome-path): FIR-2490 Firtal-branded welcome page
     welcome: () => `${ws}/welcome`,
   };

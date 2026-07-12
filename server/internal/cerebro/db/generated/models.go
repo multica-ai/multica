@@ -310,16 +310,20 @@ type BudgetState struct {
 }
 
 type CerebroAccount struct {
-	ID             pgtype.UUID        `json:"id"`
-	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
-	Provider       string             `json:"provider"`
-	LoginIdentity  string             `json:"login_identity"`
-	CreatedAt      pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
-	UsageWindowPct pgtype.Float4      `json:"usage_window_pct"`
-	ThrottledUntil pgtype.Timestamptz `json:"throttled_until"`
-	ExtraSpendOn   bool               `json:"extra_spend_on"`
-	PausedManual   bool               `json:"paused_manual"`
+	ID              pgtype.UUID        `json:"id"`
+	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
+	Provider        string             `json:"provider"`
+	LoginIdentity   string             `json:"login_identity"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+	UsageWindowPct  pgtype.Float4      `json:"usage_window_pct"`
+	ThrottledUntil  pgtype.Timestamptz `json:"throttled_until"`
+	ExtraSpendOn    bool               `json:"extra_spend_on"`
+	PausedManual    bool               `json:"paused_manual"`
+	Usage5hPct      pgtype.Float4      `json:"usage_5h_pct"`
+	Usage5hResetsAt pgtype.Timestamptz `json:"usage_5h_resets_at"`
+	Usage7dPct      pgtype.Float4      `json:"usage_7d_pct"`
+	Usage7dResetsAt pgtype.Timestamptz `json:"usage_7d_resets_at"`
 }
 
 type CerebroAccountTokenUsage struct {

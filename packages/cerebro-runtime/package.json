@@ -22,6 +22,7 @@
     "@multica/views": "workspace:*",
     "@tanstack/react-query": "catalog:",
     "lucide-react": "catalog:",
+    "recharts": "*",
     "sonner": "^2.0.7",
     "zustand": "catalog:"
   },

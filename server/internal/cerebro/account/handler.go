@@ -61,6 +61,28 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, accountResponseFromModel(a))
 }
 
+// UsageHistory handles GET /accounts/{id}/usage-history (FIR-3118).
+// Returns hourly token-usage buckets for the last 7 days, oldest first.
+func (h *Handler) UsageHistory(w http.ResponseWriter, r *http.Request) {
+	workspaceID, accountID, ok := h.accountIDs(w, r)
+	if !ok {
+		return
+	}
+	rows, err := h.Service.UsageHistory(r.Context(), workspaceID, accountID)
+	if err != nil {
+		h.writeServiceError(w, r, err)
+		return
+	}
+	resp := make([]usageHistoryBucket, len(rows))
+	for i, row := range rows {
+		resp[i] = usageHistoryBucket{
+			Bucket: util.TimestampToString(row.Bucket),
+			Tokens: row.Tokens,
+		}
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
 func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	workspaceID, ok := workspaceIDFromRequest(w, r)
 	if !ok {
@@ -143,6 +165,12 @@ type daemonUsageRequest struct {
 	UsageWindowPct json.RawMessage `json:"usage_window_pct,omitempty"`
 	ThrottledUntil json.RawMessage `json:"throttled_until,omitempty"`
 	Tokens         *int64          `json:"tokens,omitempty"`
+	// FIR-3118: provider-reported rolling windows (Claude OAuth usage
+	// endpoint). Same RawMessage null-clears semantics as the fields above.
+	Usage5hPct      json.RawMessage `json:"usage_5h_pct,omitempty"`
+	Usage5hResetsAt json.RawMessage `json:"usage_5h_resets_at,omitempty"`
+	Usage7dPct      json.RawMessage `json:"usage_7d_pct,omitempty"`
+	Usage7dResetsAt json.RawMessage `json:"usage_7d_resets_at,omitempty"`
 }
 
 // UpdateUsage handles the daemon-callable usage-telemetry endpoint.
@@ -198,31 +226,24 @@ func (h *Handler) UpdateUsage(w http.ResponseWriter, r *http.Request) {
 
 func parseDaemonUsageUpdate(raw daemonUsageRequest) (UsageUpdate, error) {
 	var update UsageUpdate
-	if raw.UsageWindowPct != nil {
-		update.UsageWindowPct = &NullableFloat32{}
-		// json.RawMessage of literal "null" means "clear".
-		if string(raw.UsageWindowPct) != "null" {
-			var v float32
-			if err := json.Unmarshal(raw.UsageWindowPct, &v); err != nil {
-				return UsageUpdate{}, errors.New("usage_window_pct must be a number")
-			}
-			update.UsageWindowPct.Value = &v
-		}
+	var err error
+	if update.UsageWindowPct, err = parseNullableFloat(raw.UsageWindowPct, "usage_window_pct"); err != nil {
+		return UsageUpdate{}, err
 	}
-	if raw.ThrottledUntil != nil {
-		update.ThrottledUntil = &NullableTime{}
-		if string(raw.ThrottledUntil) != "null" {
-			var s string
-			if err := json.Unmarshal(raw.ThrottledUntil, &s); err != nil {
-				return UsageUpdate{}, errors.New("throttled_until must be an RFC3339 timestamp or null")
-			}
-			t, err := time.Parse(time.RFC3339, s)
-			if err != nil {
-				return UsageUpdate{}, errors.New("throttled_until must be an RFC3339 timestamp or null")
-			}
-			ts := pgtype.Timestamptz{Time: t.UTC(), Valid: true}
-			update.ThrottledUntil.Value = &ts
-		}
+	if update.ThrottledUntil, err = parseNullableTime(raw.ThrottledUntil, "throttled_until"); err != nil {
+		return UsageUpdate{}, err
+	}
+	if update.Usage5hPct, err = parseNullableFloat(raw.Usage5hPct, "usage_5h_pct"); err != nil {
+		return UsageUpdate{}, err
+	}
+	if update.Usage5hResetsAt, err = parseNullableTime(raw.Usage5hResetsAt, "usage_5h_resets_at"); err != nil {
+		return UsageUpdate{}, err
+	}
+	if update.Usage7dPct, err = parseNullableFloat(raw.Usage7dPct, "usage_7d_pct"); err != nil {
+		return UsageUpdate{}, err
+	}
+	if update.Usage7dResetsAt, err = parseNullableTime(raw.Usage7dResetsAt, "usage_7d_resets_at"); err != nil {
+		return UsageUpdate{}, err
 	}
 	if raw.Tokens != nil {
 		if *raw.Tokens < 0 {
@@ -231,6 +252,47 @@ func parseDaemonUsageUpdate(raw daemonUsageRequest) (UsageUpdate, error) {
 		update.Tokens = raw.Tokens
 	}
 	return update, nil
+}
+
+// parseNullableFloat maps a RawMessage field to the NullableFloat32
+// patch semantics: absent (nil) → nil, literal "null" → clear, number →
+// write. json.RawMessage of literal "null" means "clear".
+func parseNullableFloat(raw json.RawMessage, field string) (*NullableFloat32, error) {
+	if raw == nil {
+		return nil, nil
+	}
+	out := &NullableFloat32{}
+	if string(raw) != "null" {
+		var v float32
+		if err := json.Unmarshal(raw, &v); err != nil {
+			return nil, errors.New(field + " must be a number")
+		}
+		out.Value = &v
+	}
+	return out, nil
+}
+
+// parseNullableTime maps a RawMessage field to the NullableTime patch
+// semantics: absent (nil) → nil, literal "null" → clear, RFC3339 string →
+// write.
+func parseNullableTime(raw json.RawMessage, field string) (*NullableTime, error) {
+	if raw == nil {
+		return nil, nil
+	}
+	out := &NullableTime{}
+	if string(raw) != "null" {
+		var s string
+		if err := json.Unmarshal(raw, &s); err != nil {
+			return nil, errors.New(field + " must be an RFC3339 timestamp or null")
+		}
+		t, err := time.Parse(time.RFC3339, s)
+		if err != nil {
+			return nil, errors.New(field + " must be an RFC3339 timestamp or null")
+		}
+		ts := pgtype.Timestamptz{Time: t.UTC(), Valid: true}
+		out.Value = &ts
+	}
+	return out, nil
 }
 
 func (h *Handler) accountIDs(w http.ResponseWriter, r *http.Request) (workspaceID, accountID pgtype.UUID, ok bool) {

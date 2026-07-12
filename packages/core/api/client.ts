@@ -391,6 +391,11 @@ export interface CerebroAccount {
   login_identity: string;
   usage_window_pct: number | null;
   throttled_until: string | null;
+  // CEREBRO-PATCH(cerebro-account-client): FIR-3118 provider-reported rolling usage windows.
+  usage_5h_pct: number | null;
+  usage_5h_resets_at: string | null;
+  usage_7d_pct: number | null;
+  usage_7d_resets_at: string | null;
   tokens_5h: number; // CEREBRO-PATCH(cerebro-account-client): JEH-1365 rolling account token load.
   tokens_7d: number;
   extra_spend_on: boolean;
@@ -410,6 +415,11 @@ export interface CreateCerebroAccountRequest {
 export interface UpdateCerebroAccountControlsRequest {
   extra_spend_on?: boolean;
   paused_manual?: boolean;
+}
+// CEREBRO-PATCH(cerebro-account-client): FIR-3118 hourly token-usage history bucket.
+export interface CerebroAccountUsageBucket {
+  bucket: string;
+  tokens: number;
 }
 
 const EMPTY_ONBOARDING_NO_RUNTIME_BOOTSTRAP_RESPONSE:
@@ -922,6 +932,14 @@ export class ApiClient {
     await this.fetch(`/api/workspaces/${wsId}/accounts/${id}`, {
       method: "DELETE",
     });
+  }
+
+  // CEREBRO-PATCH(cerebro-account-client): FIR-3118 hourly usage history for the account detail page.
+  async getCerebroAccountUsageHistory(
+    wsId: string,
+    id: string,
+  ): Promise<CerebroAccountUsageBucket[]> {
+    return this.fetch(`/api/workspaces/${wsId}/accounts/${id}/usage-history`);
   }
 
   // CEREBRO-PATCH(cerebro-account-client): JEH-998 UI-driven control toggles.

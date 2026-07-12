@@ -21,6 +21,32 @@ vi.mock("sonner", () => ({
   toast: { success: mockToastSuccess, error: mockToastError },
 }));
 
+// The tab renders outside a workspace route in tests — pin the path builder
+// to a fixed slug and flatten AppLink to a plain anchor (FIR-3118).
+vi.mock("@multica/core/paths", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@multica/core/paths")>();
+  return {
+    ...actual,
+    useWorkspacePaths: () => actual.paths.workspace("acme"),
+  };
+});
+
+vi.mock("@multica/views/navigation", () => ({
+  AppLink: ({
+    href,
+    children,
+    className,
+  }: {
+    href: string;
+    children: ReactNode;
+    className?: string;
+  }) => (
+    <a href={href} className={className}>
+      {children}
+    </a>
+  ),
+}));
+
 // Base UI's AlertDialog uses a portal that is awkward in jsdom — replace it
 // with pass-through wrappers so the confirmation flow is observable. Mirrors
 // the kill-switch-section test setup.
@@ -83,6 +109,10 @@ const acc1: CerebroAccount = {
   login_identity: "user-a@example.com",
   usage_window_pct: null,
   throttled_until: null,
+  usage_5h_pct: null,
+  usage_5h_resets_at: null,
+  usage_7d_pct: null,
+  usage_7d_resets_at: null,
   tokens_5h: 0,
   tokens_7d: 0,
   extra_spend_on: false,
@@ -112,6 +142,41 @@ describe("AccountsSettingsTab", () => {
     expect(screen.getByText("user-a@example.com")).toBeInTheDocument();
     expect(screen.getByText("user-b@example.com")).toBeInTheDocument();
     expect(screen.getAllByText("claude")).toHaveLength(2);
+  });
+
+  it("links each row to the account detail page (FIR-3118)", () => {
+    mockListAccounts.mockReturnValue({ data: [acc1], isLoading: false });
+
+    render(<AccountsSettingsTab />);
+
+    const link = screen.getByRole("link", { name: /user-a@example\.com/ });
+    expect(link).toHaveAttribute("href", "/acme/settings/accounts/acc-1");
+  });
+
+  it("shows remaining usage for the 5h and weekly windows when reported (FIR-3118)", () => {
+    mockListAccounts.mockReturnValue({
+      data: [{ ...acc1, usage_5h_pct: 40, usage_7d_pct: 15 }],
+      isLoading: false,
+    });
+
+    render(<AccountsSettingsTab />);
+
+    expect(screen.getByText("Next 5h")).toBeInTheDocument();
+    expect(screen.getByText("60% left")).toBeInTheDocument();
+    expect(screen.getByText("This week")).toBeInTheDocument();
+    expect(screen.getByText("85% left")).toBeInTheDocument();
+  });
+
+  it("falls back to measured token totals when no window pct is reported (FIR-3118)", () => {
+    mockListAccounts.mockReturnValue({
+      data: [{ ...acc1, tokens_5h: 1_500, tokens_7d: 2_400_000 }],
+      isLoading: false,
+    });
+
+    render(<AccountsSettingsTab />);
+
+    expect(screen.getByText("1.5k tok")).toBeInTheDocument();
+    expect(screen.getByText("2.4M tok")).toBeInTheDocument();
   });
 
   it("shows the empty state when no accounts are registered", () => {

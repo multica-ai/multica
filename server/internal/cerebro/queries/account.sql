@@ -1,6 +1,7 @@
 -- name: ListCerebroAccounts :many
 SELECT ca.id, ca.workspace_id, ca.provider, ca.login_identity,
        ca.usage_window_pct, ca.throttled_until, ca.extra_spend_on, ca.paused_manual,
+       ca.usage_5h_pct, ca.usage_5h_resets_at, ca.usage_7d_pct, ca.usage_7d_resets_at,
        ca.created_at, ca.updated_at,
        (
            SELECT COALESCE(SUM(catu.tokens), 0)::bigint
@@ -21,6 +22,7 @@ ORDER BY ca.provider ASC, lower(ca.login_identity) ASC, ca.created_at ASC;
 -- name: GetCerebroAccount :one
 SELECT ca.id, ca.workspace_id, ca.provider, ca.login_identity,
        ca.usage_window_pct, ca.throttled_until, ca.extra_spend_on, ca.paused_manual,
+       ca.usage_5h_pct, ca.usage_5h_resets_at, ca.usage_7d_pct, ca.usage_7d_resets_at,
        ca.created_at, ca.updated_at,
        (
            SELECT COALESCE(SUM(catu.tokens), 0)::bigint
@@ -42,6 +44,7 @@ INSERT INTO cerebro_account (workspace_id, provider, login_identity)
 VALUES ($1, $2, $3)
 RETURNING id, workspace_id, provider, login_identity,
           usage_window_pct, throttled_until, extra_spend_on, paused_manual,
+          usage_5h_pct, usage_5h_resets_at, usage_7d_pct, usage_7d_resets_at,
           created_at, updated_at,
           0::bigint AS tokens_5h,
           0::bigint AS tokens_7d;
@@ -67,6 +70,10 @@ SELECT
     ca.throttled_until,
     ca.extra_spend_on,
     ca.paused_manual,
+    ca.usage_5h_pct,
+    ca.usage_5h_resets_at,
+    ca.usage_7d_pct,
+    ca.usage_7d_resets_at,
     ca.created_at,
     ca.updated_at,
     COALESCE(t5.tokens, 0)::bigint                                                              AS tokens_5h,
@@ -109,10 +116,23 @@ SET usage_window_pct = CASE WHEN sqlc.arg('usage_window_pct_set')::boolean
     throttled_until  = CASE WHEN sqlc.arg('throttled_until_set')::boolean
                             THEN sqlc.narg('throttled_until')::timestamptz
                             ELSE throttled_until END,
+    usage_5h_pct     = CASE WHEN sqlc.arg('usage_5h_pct_set')::boolean
+                            THEN sqlc.narg('usage_5h_pct')::real
+                            ELSE usage_5h_pct END,
+    usage_5h_resets_at = CASE WHEN sqlc.arg('usage_5h_resets_at_set')::boolean
+                            THEN sqlc.narg('usage_5h_resets_at')::timestamptz
+                            ELSE usage_5h_resets_at END,
+    usage_7d_pct     = CASE WHEN sqlc.arg('usage_7d_pct_set')::boolean
+                            THEN sqlc.narg('usage_7d_pct')::real
+                            ELSE usage_7d_pct END,
+    usage_7d_resets_at = CASE WHEN sqlc.arg('usage_7d_resets_at_set')::boolean
+                            THEN sqlc.narg('usage_7d_resets_at')::timestamptz
+                            ELSE usage_7d_resets_at END,
     updated_at       = now()
 WHERE cerebro_account.id = $1
 RETURNING id, workspace_id, provider, login_identity,
           usage_window_pct, throttled_until, extra_spend_on, paused_manual,
+          usage_5h_pct, usage_5h_resets_at, usage_7d_pct, usage_7d_resets_at,
           created_at, updated_at
 )
 SELECT updated.*,
@@ -138,6 +158,18 @@ VALUES ($1, $2, $3);
 DELETE FROM cerebro_account_token_usage
 WHERE created_at < now() - interval '8 days';
 
+-- name: ListCerebroAccountTokenUsageHistory :many
+-- FIR-3118: hourly token-usage buckets for the account detail page chart.
+-- Retention on cerebro_account_token_usage is 8 days, so 7 days of history
+-- is always fully backed by raw samples.
+SELECT date_trunc('hour', catu.created_at)::timestamptz AS bucket,
+       SUM(catu.tokens)::bigint                         AS tokens
+FROM cerebro_account_token_usage catu
+WHERE catu.account_id = $1
+  AND catu.created_at >= now() - interval '7 days'
+GROUP BY 1
+ORDER BY 1 ASC;
+
 -- name: UpdateCerebroAccountControls :one
 -- UI-driven control toggles. Same partial-update pattern as usage above.
 WITH updated AS (
@@ -152,6 +184,7 @@ SET extra_spend_on = CASE WHEN sqlc.arg('extra_spend_on_set')::boolean
 WHERE cerebro_account.id = $1
 RETURNING id, workspace_id, provider, login_identity,
           usage_window_pct, throttled_until, extra_spend_on, paused_manual,
+          usage_5h_pct, usage_5h_resets_at, usage_7d_pct, usage_7d_resets_at,
           created_at, updated_at
 )
 SELECT updated.*,
