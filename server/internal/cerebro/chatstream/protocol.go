@@ -33,12 +33,20 @@ const (
 
 // Chunk type discriminators for the UI message stream parts we emit.
 const (
-	ChunkTypeStart     = "start"
-	ChunkTypeTextStart = "text-start"
-	ChunkTypeTextDelta = "text-delta"
-	ChunkTypeTextEnd   = "text-end"
-	ChunkTypeFinish    = "finish"
-	ChunkTypeError     = "error"
+	ChunkTypeStart               = "start"
+	ChunkTypeTextStart           = "text-start"
+	ChunkTypeTextDelta           = "text-delta"
+	ChunkTypeTextEnd             = "text-end"
+	ChunkTypeFinish              = "finish"
+	ChunkTypeError               = "error"
+	ChunkTypeStartStep           = "start-step"
+	ChunkTypeFinishStep          = "finish-step"
+	ChunkTypeToolInputStart      = "tool-input-start"
+	ChunkTypeToolInputDelta      = "tool-input-delta"
+	ChunkTypeToolInputAvailable  = "tool-input-available"
+	ChunkTypeToolOutputAvailable = "tool-output-available"
+	ChunkTypeToolOutputDenied    = "tool-output-denied"
+	ChunkTypeToolApprovalRequest = "tool-approval-request"
 )
 
 type StartChunk struct {
@@ -70,6 +78,57 @@ type FinishChunk struct {
 type ErrorChunk struct {
 	Type      string `json:"type"`
 	ErrorText string `json:"errorText"`
+}
+
+type StepStartChunk struct {
+	Type string `json:"type"`
+}
+type StepFinishChunk struct {
+	Type string `json:"type"`
+}
+
+type ToolInputStartChunk struct {
+	Type       string `json:"type"`
+	ToolCallID string `json:"toolCallId"`
+	ToolName   string `json:"toolName"`
+}
+
+type ToolInputDeltaChunk struct {
+	Type           string `json:"type"`
+	ToolCallID     string `json:"toolCallId"`
+	InputTextDelta string `json:"inputTextDelta"`
+}
+
+type ToolInputAvailableChunk struct {
+	Type       string `json:"type"`
+	ToolCallID string `json:"toolCallId"`
+	ToolName   string `json:"toolName"`
+	Input      any    `json:"input"`
+}
+
+type ToolOutputAvailableChunk struct {
+	Type       string `json:"type"`
+	ToolCallID string `json:"toolCallId"`
+	Output     any    `json:"output"`
+}
+
+type ToolOutputDeniedChunk struct {
+	Type       string `json:"type"`
+	ToolCallID string `json:"toolCallId"`
+}
+
+type ToolApprovalRequestChunk struct {
+	Type       string `json:"type"`
+	ApprovalID string `json:"approvalId"`
+	ToolCallID string `json:"toolCallId"`
+}
+
+// DataChunk is the protocol escape hatch for typed application data. Type
+// must use the AI SDK data-* namespace (for example data-finance).
+type DataChunk struct {
+	Type string `json:"type"`
+	ID   string `json:"id,omitempty"`
+	Data any    `json:"data"`
 }
 
 // FinishUsage carries the run's token + cost spend inside the finish chunk's
@@ -135,6 +194,18 @@ func (s *Writer) WriteDone() error {
 		return err
 	}
 	s.f.Flush()
+	return nil
+}
+
+// WriteParts emits already-typed UI message parts without terminating the
+// stream. This lets runtime adapters relay tools, approvals, steps and custom
+// data while the transport remains independent of the runtime/provider.
+func (s *Writer) WriteParts(parts []any) error {
+	for _, part := range parts {
+		if err := s.WriteChunk(part); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 

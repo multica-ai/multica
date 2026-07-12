@@ -147,6 +147,38 @@ func TestWriteError(t *testing.T) {
 	}
 }
 
+func TestWritePartsEmitsToolApprovalStepAndDataChunks(t *testing.T) {
+	rec := httptest.NewRecorder()
+	sw, _ := NewWriter(rec)
+	parts := []any{
+		StepStartChunk{Type: ChunkTypeStartStep},
+		ToolInputStartChunk{Type: ChunkTypeToolInputStart, ToolCallID: "call-1", ToolName: "get_pl_analysis"},
+		ToolInputDeltaChunk{Type: ChunkTypeToolInputDelta, ToolCallID: "call-1", InputTextDelta: `{"month":"2026-06"}`},
+		ToolInputAvailableChunk{Type: ChunkTypeToolInputAvailable, ToolCallID: "call-1", ToolName: "get_pl_analysis", Input: map[string]any{"month": "2026-06"}},
+		ToolApprovalRequestChunk{Type: ChunkTypeToolApprovalRequest, ApprovalID: "approval-1", ToolCallID: "call-1"},
+		ToolOutputAvailableChunk{Type: ChunkTypeToolOutputAvailable, ToolCallID: "call-1", Output: map[string]any{"rows": 176}},
+		DataChunk{Type: "data-finance", ID: "data-1", Data: map[string]any{"period": "2026-06"}},
+		StepFinishChunk{Type: ChunkTypeFinishStep},
+	}
+	if err := sw.WriteParts(parts); err != nil {
+		t.Fatalf("WriteParts: %v", err)
+	}
+	frames := parseFrames(t, rec.Body.String())
+	want := []string{"start-step", "tool-input-start", "tool-input-delta", "tool-input-available", "tool-approval-request", "tool-output-available", "data-finance", "finish-step"}
+	if len(frames) != len(want) {
+		t.Fatalf("got %d frames, want %d: %v", len(frames), len(want), frames)
+	}
+	for i, frame := range frames {
+		var chunk map[string]any
+		if err := json.Unmarshal([]byte(frame), &chunk); err != nil {
+			t.Fatalf("frame %d: %v", i, err)
+		}
+		if chunk["type"] != want[i] {
+			t.Errorf("frame %d type = %v, want %s", i, chunk["type"], want[i])
+		}
+	}
+}
+
 // parseFrames splits an SSE body into its data payloads, ignoring comments.
 func parseFrames(t *testing.T, body string) []string {
 	t.Helper()
