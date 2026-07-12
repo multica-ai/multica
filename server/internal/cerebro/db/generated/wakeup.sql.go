@@ -305,10 +305,18 @@ WHERE w.workspace_id = $1
   AND w.issue_id = $3
   AND w.state <> 'cancelled'
   AND w.created_at > COALESCE(
-        (SELECT max(c.created_at)
-         FROM comment c
-         WHERE c.issue_id = $3
-           AND c.author_type = 'member'),
+        (SELECT max(progress_at)
+         FROM (
+           SELECT c.created_at AS progress_at
+           FROM comment c
+           WHERE c.issue_id = $3
+             AND (c.author_type = 'member' OR c.type IN ('status_change', 'progress_update'))
+           UNION ALL
+           SELECT pr.updated_at AS progress_at
+           FROM issue_pull_request ipr
+           JOIN github_pull_request pr ON pr.id = ipr.pull_request_id
+           WHERE ipr.issue_id = $3
+         ) progress),
         '-infinity'::timestamptz
       )
 `
@@ -319,11 +327,10 @@ type CountConsecutiveSelfWakeupsForAgentIssueParams struct {
 	IssueID     pgtype.UUID `json:"issue_id"`
 }
 
-// FIR-2679 Spor 1a: how many self-wakeups this agent has stacked on this issue
-// since the last time a human (member) commented on it. A member comment is what
-// breaks a self-wakeup loop, so only wakeups created after the latest member
-// comment count toward the consecutive-loop cap. Cancelled wakeups don't count.
-// When the issue has no member comment, every non-cancelled wakeup counts.
+// FIR-3098: how many self-wakeups this agent has stacked on this issue since
+// the latest objective progress signal. Ordinary agent comments deliberately
+// do not reset the streak: status/progress events, member replies, and linked
+// pull-request updates do. Cancelled wakeups don't count.
 func (q *Queries) CountConsecutiveSelfWakeupsForAgentIssue(ctx context.Context, arg CountConsecutiveSelfWakeupsForAgentIssueParams) (int64, error) {
 	row := q.db.QueryRow(ctx, countConsecutiveSelfWakeupsForAgentIssue, arg.WorkspaceID, arg.AgentID, arg.IssueID)
 	var count int64

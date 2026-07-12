@@ -39,9 +39,9 @@ const (
 	defaultMinWakeupIntervalMin   = 5
 
 	// defaultMaxConsecutiveWakeupLoops caps how many self-wakeups an agent may
-	// chain on one issue since the last human (member) comment (FIR-2679 Spor
-	// 1a). Applied when the workspace has no settings row. 0 = guard disabled.
-	defaultMaxConsecutiveWakeupLoops = 5
+	// chain without objective progress on one issue. Applied when the workspace
+	// has no settings row. 0 = guard disabled.
+	defaultMaxConsecutiveWakeupLoops = 2
 
 	// postponeDelay is how long to wait before retrying a wakeup that couldn't
 	// fire because the issue had an active task or the agent runtime was offline.
@@ -188,8 +188,9 @@ func (s *Service) Create(ctx context.Context, workspaceID pgtype.UUID, req Creat
 	}
 
 	// FIR-2679 Spor 1a: loop-guard. Stop an agent from chaining self-wakeups on
-	// the same issue without a human replying in between (worst observed: 18
-	// re-arms in 22h). The streak resets on the next member comment. Gated by the
+	// the same issue without objective progress (worst observed: 18 re-arms in
+	// 22h). The streak resets on a member reply, issue status/progress event, or
+	// linked pull-request update. Gated by the
 	// cerebro_wakeup_loop_guard flag (default ON); a cap of 0 disables it.
 	if err := s.enforceLoopGuard(ctx, workspaceID, req); err != nil {
 		return cerebrodb.CerebroAgentWakeup{}, err
@@ -526,9 +527,8 @@ func (s *Service) maxConsecutiveWakeupLoops(ctx context.Context, workspaceID pgt
 }
 
 // enforceLoopGuard blocks a new wakeup once an agent has already chained the
-// configured number of self-wakeups on this issue since the last human (member)
-// comment. The error is actionable — it tells the agent to escalate to the human
-// instead of looping — and surfaces to the create handler as a 400. Off when the
+// configured number of self-wakeups on this issue without objective progress.
+// The error is actionable and surfaces to the create handler as a 400. Off when the
 // cerebro_wakeup_loop_guard flag is disabled or the cap is 0.
 func (s *Service) enforceLoopGuard(ctx context.Context, workspaceID pgtype.UUID, req CreateRequest) error {
 	if !s.loopGuardEnabled(ctx, workspaceID) {
@@ -549,7 +549,7 @@ func (s *Service) enforceLoopGuard(ctx context.Context, workspaceID pgtype.UUID,
 	}
 	if int(count) >= loopCap {
 		return fmt.Errorf(
-			"wakeup loop guard: this agent has already scheduled %d wakeups on this issue since the last human reply (max %d in a row). Post a status or question to the human instead of scheduling another wakeup — a human comment resets the limit.",
+			"wakeup loop guard: this agent has already scheduled %d wakeups on this issue without objective progress (max %d in a row). Post a result or question to the human instead of scheduling another wakeup; a member reply, issue status/progress event, or linked pull-request update resets the limit.",
 			count, loopCap,
 		)
 	}
