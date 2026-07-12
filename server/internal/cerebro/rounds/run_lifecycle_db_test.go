@@ -11,10 +11,12 @@ import (
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
-// FIR-3114 — run lifecycle: a new Start supersedes the previous 'ready' run,
-// and DismissRun (the UI's Pause) completes it so the round collapses back to
-// its planned state. Uses a nil TaskService: with no held triggers Start never
-// enqueues, and publishProgress no-ops without a bus.
+// FIR-3114 — run lifecycle (review round 3): a Start with nothing waiting
+// never leaves the round pinned open (the cycle closes again immediately and
+// the empty run completes), a new Start supersedes any lingering active run,
+// and DismissRun (the UI's Pause) stays idempotent. Uses a nil TaskService:
+// with no held triggers Start never enqueues, and publishProgress no-ops
+// without a bus.
 func TestStartSupersedesReadyRunAndDismissCompletesIt(t *testing.T) {
 	dbURL := os.Getenv("DATABASE_URL")
 	if dbURL == "" {
@@ -48,38 +50,43 @@ func TestStartSupersedesReadyRunAndDismissCompletesIt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if first.Status != RunReady {
-		t.Fatalf("first run status = %q, want ready (0 held triggers complete instantly)", first.Status)
+	if first.Status != RunCompleted {
+		t.Fatalf("first run status = %q, want completed (0 held triggers complete instantly)", first.Status)
+	}
+	var cycleOpen bool
+	if err := pool.QueryRow(ctx, `SELECT cycle_opened_at IS NOT NULL FROM cerebro_round WHERE id=$1`, roundID).Scan(&cycleOpen); err != nil {
+		t.Fatal(err)
+	}
+	if cycleOpen {
+		t.Fatal("cycle open after an empty start, want closed again immediately")
 	}
 
-	second, err := svc.Start(ctx, wsID, ownerID, roundID)
+	// A lingering active run (e.g. agents still working) is superseded by the
+	// next Start instead of violating the one-active-run index.
+	var lingering pgtype.UUID
+	if err := pool.QueryRow(ctx, `INSERT INTO cerebro_round_run (round_id, total_count) VALUES ($1, 2) RETURNING id`, roundID).Scan(&lingering); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Start(ctx, wsID, ownerID, roundID); err != nil {
+		t.Fatal(err)
+	}
+	superseded, err := svc.GetRun(ctx, lingering)
 	if err != nil {
 		t.Fatal(err)
 	}
-	firstAfter, err := svc.GetRun(ctx, mustUUID(t, first.ID))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if firstAfter.Status != RunCompleted || firstAfter.CompletedAt == nil {
-		t.Fatalf("superseded run = %q (completed_at %v), want completed with timestamp", firstAfter.Status, firstAfter.CompletedAt)
+	if superseded.Status != RunCompleted || superseded.CompletedAt == nil {
+		t.Fatalf("superseded run = %q (completed_at %v), want completed with timestamp", superseded.Status, superseded.CompletedAt)
 	}
 	active, err := svc.ActiveRun(ctx, roundID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if active == nil || active.ID != second.ID {
-		t.Fatalf("active run = %+v, want the second run %s", active, second.ID)
+	if active != nil {
+		t.Fatalf("active run after empty starts = %+v, want none", active)
 	}
 
 	if err := svc.DismissRun(ctx, wsID, ownerID, roundID); err != nil {
 		t.Fatal(err)
-	}
-	active, err = svc.ActiveRun(ctx, roundID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if active != nil {
-		t.Fatalf("active run after dismiss = %+v, want none", active)
 	}
 	// Idempotent: dismissing again is a no-op, not an error.
 	if err := svc.DismissRun(ctx, wsID, ownerID, roundID); err != nil {

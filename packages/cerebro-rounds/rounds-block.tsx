@@ -11,7 +11,7 @@ import { Drawer, DrawerContent, DrawerHeader, DrawerTitle } from "@multica/ui/co
 import { useIsMobile } from "@multica/ui/hooks/use-mobile";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useAddIssueToRound, useCreateRound, useDeleteRound, useRemoveIssueFromRound, useRoundStatuses, useUpdateRound } from "./queries";
-import { roundMembershipLabel, type RoundStatus } from "./schemas";
+import { roundActivity, roundMembershipLabel, type RoundStatus } from "./schemas";
 import type { RoundInput } from "./api";
 
 function nextRunLabel(value: string | null | undefined): string | null {
@@ -29,15 +29,21 @@ export function RoundsBlock({ statuses, issueTitles, onStart, onDismiss, onSelec
   defaultCollapsed?: boolean;
   onRemove?: () => void;
 }) {
-  const visible = statuses.filter((s) => s.members.length > 0 || s.round.next_run_at || s.active_run);
+  // A round with 0 messages is inactive and disappears from the block
+  // entirely (FIR-3114 review round 3, point 4) — it stays reachable through
+  // Manage rounds and reappears the moment content arrives.
+  const visible = statuses.filter((s) => roundActivity(s).hasContent);
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
   const [answeredOpenIds, setAnsweredOpenIds] = useState<Set<string>>(new Set());
   const [collapsed, setCollapsed] = useState(defaultCollapsed === true);
   const [query, setQuery] = useState("");
-  const readyRoundId = visible.find((status) => status.active_run?.status === "ready")?.round.id ?? null;
+  // A round whose answer cycle just opened expands on its own — that is the
+  // moment its waiting messages surface for the owner.
+  const openCycleIds = visible.filter((status) => roundActivity(status).cycleOpen).map((status) => status.round.id).join(",");
   useEffect(() => {
-    if (readyRoundId) setExpandedIds((prev) => (prev.has(readyRoundId) ? prev : new Set(prev).add(readyRoundId)));
-  }, [readyRoundId]);
+    if (!openCycleIds) return;
+    setExpandedIds((prev) => new Set([...prev, ...openCycleIds.split(",")]));
+  }, [openCycleIds]);
   const needle = query.trim().toLocaleLowerCase();
   const matchesByMember = (status: RoundStatus) => status.members.some((member) => (issueTitles[member.issue_id] ?? "").toLocaleLowerCase().includes(needle));
   useEffect(() => {
@@ -49,6 +55,97 @@ export function RoundsBlock({ statuses, issueTitles, onStart, onDismiss, onSelec
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [needle]);
   const filtered = visible.filter((status) => !needle || status.round.name.toLocaleLowerCase().includes(needle) || matchesByMember(status));
+  // A round with an open answer cycle needs the owner now; everything else —
+  // done, dispatching, or accumulating responses — drops into the "Ready to
+  // start" group at the bottom (FIR-3114 review round 3, point 2).
+  const activeRounds = filtered.filter((status) => roundActivity(status).cycleOpen);
+  const restingRounds = filtered.filter((status) => !roundActivity(status).cycleOpen);
+  const renderRound = (s: RoundStatus) => {
+    const { waiting, queued, held, working, running, cycleOpen } = roundActivity(s);
+    // Nothing to surface or release: Run stays off until a response queues
+    // for the next round or a paused cycle left replies held.
+    const runnable = queued > 0 || held > 0;
+    const open = expandedIds.has(s.round.id);
+    const schedule = nextRunLabel(s.round.next_run_at);
+    const displayedMembers = needle
+      ? s.members.filter((member) => (issueTitles[member.issue_id] ?? "").toLocaleLowerCase().includes(needle))
+      : s.members;
+    // The header number is what waits for the owner while the cycle is open;
+    // a resting round summarizes what the next start will bring.
+    const countLabel = cycleOpen
+      ? `${waiting} waiting`
+      : running
+        ? `${s.active_run?.responded_count ?? 0}/${s.active_run?.total_count ?? 0} running`
+        : queued > 0
+          ? `${queued} queued`
+          : held > 0
+            ? `${held} held`
+            : working
+              ? "working"
+              : "ready";
+    return <div key={s.round.id}>
+      <div className="flex items-center gap-2 px-3 py-2">
+        <button type="button" aria-label={`${open ? "Collapse" : "Expand"} ${s.round.name}`} className="flex min-w-0 flex-1 items-center gap-2 text-left" onClick={() => setExpandedIds((prev) => {
+          const next = new Set(prev);
+          if (open) next.delete(s.round.id); else next.add(s.round.id);
+          return next;
+        })}>
+          {open ? <ChevronDown className="size-3.5" /> : <ChevronRight className="size-3.5" />}
+          <span className="truncate text-sm font-medium">{s.round.name}</span>
+          <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">{s.round.mode === "live" ? "Live" : "Batch"}</span>
+          {schedule && !running && !cycleOpen && <span className="hidden text-xs text-muted-foreground sm:inline">{schedule}</span>}
+          <span className="ml-auto text-xs text-muted-foreground">{countLabel}</span>
+        </button>
+        {cycleOpen && onDismiss && <Button size="sm" variant="ghost" onClick={() => {
+          setExpandedIds((prev) => { const next = new Set(prev); next.delete(s.round.id); return next; });
+          onDismiss(s.round.id);
+        }} aria-label={`Pause ${s.round.name}`}><Pause className="size-3.5" /><span className="sr-only">Pause</span></Button>}
+        {(!cycleOpen || (s.round.mode === "batch" && held > 0)) && <Button size="sm" variant={!cycleOpen && runnable ? "default" : "ghost"} disabled={!runnable} onClick={() => onStart(s.round.id)} aria-label={`Run ${s.round.name}`}><Play className="size-3.5" /><span className="sr-only">Run</span></Button>}
+      </div>
+      {running && <div className="px-3 pb-2">
+        <div role="progressbar" aria-label={`${s.round.name} progress`} aria-valuemin={0} aria-valuemax={s.active_run?.total_count ?? 0} aria-valuenow={s.active_run?.responded_count ?? 0} className="h-1.5 overflow-hidden rounded-full bg-muted">
+          <div className="h-full rounded-full bg-primary transition-[width]" style={{ width: `${Math.min(100, ((s.active_run?.responded_count ?? 0) / Math.max(1, s.active_run?.total_count ?? 0)) * 100)}%` }} />
+        </div>
+        {(s.active_run?.nudged_count ?? 0) > 0 && <p className="mt-1 text-right text-[11px] text-muted-foreground">{s.active_run?.nudged_count} nudged</p>}
+      </div>}
+      {open && (() => {
+        // A counted member must never be invisible: fall back to the plain
+        // title row when the host has no inbox row to render for it
+        // (FIR-3114 review round 3, point 1 — "2 waiting" with nothing shown).
+        const renderMember = (m: RoundStatus["members"][number]) =>
+          renderIssue?.(m.issue_id) ?? <button key={m.issue_id} type="button" aria-label={issueTitles[m.issue_id] ?? m.issue_id} onClick={() => onSelectIssue(m.issue_id)} className="flex w-full items-center gap-2 px-4 py-2.5 text-left text-xs hover:bg-muted">
+            <span className={`size-1.5 rounded-full ${running ? "bg-blue-500" : cycleOpen ? "bg-emerald-500" : "bg-muted-foreground"}`} />
+            <span className="min-w-0 flex-1 truncate">{issueTitles[m.issue_id] ?? m.issue_id}</span>
+            {m.held_trigger_count > 0 && <span className="text-muted-foreground">{m.held_trigger_count} held {m.held_trigger_count === 1 ? "response" : "responses"}</span>}
+          </button>;
+        // The list reads as "what still needs me" at all times (FIR-3114
+        // review, points 1+3): answered members fold away behind their own
+        // collapse in batch AND live, and members whose agent is working or
+        // whose response queued after the cycle opened hide entirely until
+        // the next round surfaces them. Search narrows both lists via
+        // displayedMembers.
+        const answeredDisplayed = displayedMembers.filter((m) => m.state === "answered");
+        const foldAnswered = answeredDisplayed.length > 0;
+        const pending = displayedMembers.filter((m) => m.state === "waiting" || m.state === "planned");
+        const answeredOpen = answeredOpenIds.has(s.round.id);
+        return <div className="border-t border-border/50 divide-y divide-border/60">
+          {pending.map(renderMember)}
+          {foldAnswered && <div>
+            <button type="button" aria-expanded={answeredOpen} aria-label={`${answeredOpen ? "Collapse" : "Expand"} answered in ${s.round.name}`} className="flex w-full items-center gap-1.5 px-4 py-2 text-left text-xs text-muted-foreground hover:bg-muted" onClick={() => setAnsweredOpenIds((prev) => {
+              const next = new Set(prev);
+              if (answeredOpen) next.delete(s.round.id); else next.add(s.round.id);
+              return next;
+            })}>
+              {answeredOpen ? <ChevronDown className="size-3" /> : <ChevronRight className="size-3" />}
+              <Check className="size-3 text-success" />
+              <span>Answered ({answeredDisplayed.length})</span>
+            </button>
+            {answeredOpen && <div className="divide-y divide-border/60 border-t border-border/50">{answeredDisplayed.map(renderMember)}</div>}
+          </div>}
+        </div>;
+      })()}
+    </div>;
+  };
   return <section className="overflow-hidden rounded-xl border border-border bg-card" aria-label="Rounds">
     <header className="flex items-center gap-2 border-b border-border px-3 py-2">
       {dragHandle}
@@ -61,87 +158,14 @@ export function RoundsBlock({ statuses, issueTitles, onStart, onDismiss, onSelec
     </header>
     {!collapsed && <>
       <div className="border-b border-border px-3 py-2"><div className="relative"><Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" /><Input type="search" aria-label="Search Rounds" placeholder="Search Rounds…" className="pl-8" value={query} onChange={(event) => setQuery(event.target.value)} /></div></div>
-      <div className="divide-y divide-border/60">{filtered.map((s) => {
-      const running = s.active_run?.status === "running";
-      const ready = s.active_run?.status === "ready";
-      const heldTotal = s.members.reduce((total, m) => total + m.held_trigger_count, 0);
-      // Nothing to release: batch rounds run held replies, so Run stays off
-      // until at least one reply is held. Live rounds run agents immediately —
-      // Run only surfaces a review pass, which needs members.
-      const runnable = s.round.mode === "batch" ? heldTotal > 0 : s.members.length > 0 && !ready;
-      const open = expandedIds.has(s.round.id);
-      const schedule = nextRunLabel(s.round.next_run_at);
-      const displayedMembers = needle
-        ? s.members.filter((member) => (issueTitles[member.issue_id] ?? "").toLocaleLowerCase().includes(needle))
-        : s.members;
-      // The header number is what waits for the owner (FIR-3114 review,
-      // point 3): the total of agent messages needing a reply, across the
-      // whole round — not run bookkeeping.
-      const waitingTotal = s.members.reduce((total, m) => total + m.waiting_count, 0);
-      const countLabel = waitingTotal > 0
-        ? `${waitingTotal} waiting`
-        : running
-          ? `${s.active_run?.responded_count ?? 0}/${s.active_run?.total_count ?? s.members.length} ready`
-          : `${s.members.length} planned`;
-      return <div key={s.round.id}>
-        <div className="flex items-center gap-2 px-3 py-2">
-          <button type="button" aria-label={`${open ? "Collapse" : "Expand"} ${s.round.name}`} className="flex min-w-0 flex-1 items-center gap-2 text-left" onClick={() => setExpandedIds((prev) => {
-            const next = new Set(prev);
-            if (open) next.delete(s.round.id); else next.add(s.round.id);
-            return next;
-          })}>
-            {open ? <ChevronDown className="size-3.5" /> : <ChevronRight className="size-3.5" />}
-            <span className="truncate text-sm font-medium">{s.round.name}</span>
-            <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">{s.round.mode === "live" ? "Live" : "Batch"}</span>
-            {schedule && !running && !ready && <span className="hidden text-xs text-muted-foreground sm:inline">{schedule}</span>}
-            <span className="ml-auto text-xs text-muted-foreground">{countLabel}</span>
-          </button>
-          {(running || ready) && onDismiss && <Button size="sm" variant="ghost" onClick={() => {
-            setExpandedIds((prev) => { const next = new Set(prev); next.delete(s.round.id); return next; });
-            onDismiss(s.round.id);
-          }} aria-label={`Pause ${s.round.name}`}><Pause className="size-3.5" /><span className="sr-only">Pause</span></Button>}
-          {!running && <Button size="sm" variant={ready && runnable ? "default" : "ghost"} disabled={!runnable} onClick={() => onStart(s.round.id)} aria-label={`Run ${s.round.name}`}><Play className="size-3.5" /><span className="sr-only">Run</span></Button>}
-        </div>
-        {running && <div className="px-3 pb-2">
-          <div role="progressbar" aria-label={`${s.round.name} progress`} aria-valuemin={0} aria-valuemax={s.active_run?.total_count ?? 0} aria-valuenow={s.active_run?.responded_count ?? 0} className="h-1.5 overflow-hidden rounded-full bg-muted">
-            <div className="h-full rounded-full bg-primary transition-[width]" style={{ width: `${Math.min(100, ((s.active_run?.responded_count ?? 0) / Math.max(1, s.active_run?.total_count ?? 0)) * 100)}%` }} />
-          </div>
-          {(s.active_run?.nudged_count ?? 0) > 0 && <p className="mt-1 text-right text-[11px] text-muted-foreground">{s.active_run?.nudged_count} nudged</p>}
+      <div className="divide-y divide-border/60">
+        {activeRounds.map(renderRound)}
+        {restingRounds.length > 0 && <div>
+          <p className="px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground" aria-label="Ready to start">Ready to start</p>
+          <div className="divide-y divide-border/60 border-t border-border/40">{restingRounds.map(renderRound)}</div>
         </div>}
-        {open && (() => {
-          const renderMember = (m: RoundStatus["members"][number]) =>
-            renderIssue ? renderIssue(m.issue_id) : <button key={m.issue_id} type="button" aria-label={issueTitles[m.issue_id] ?? m.issue_id} onClick={() => onSelectIssue(m.issue_id)} className="flex w-full items-center gap-2 px-4 py-2.5 text-left text-xs hover:bg-muted">
-              <span className={`size-1.5 rounded-full ${running ? "bg-blue-500" : ready ? "bg-emerald-500" : "bg-muted-foreground"}`} />
-              <span className="min-w-0 flex-1 truncate">{issueTitles[m.issue_id] ?? m.issue_id}</span>
-              {m.held_trigger_count > 0 && <span className="text-muted-foreground">{m.held_trigger_count} held {m.held_trigger_count === 1 ? "response" : "responses"}</span>}
-            </button>;
-          // The list reads as "what still needs me" at all times (FIR-3114
-          // review, points 1+3): answered members fold away behind their own
-          // collapse in batch AND live, and members whose agent is working
-          // hide entirely until the next round surfaces their response.
-          // Search narrows both lists via displayedMembers.
-          const answeredDisplayed = displayedMembers.filter((m) => m.state === "answered");
-          const foldAnswered = answeredDisplayed.length > 0;
-          const pending = displayedMembers.filter((m) => m.state === "waiting" || m.state === "planned");
-          const answeredOpen = answeredOpenIds.has(s.round.id);
-          return <div className="border-t border-border/50 divide-y divide-border/60">
-            {pending.map(renderMember)}
-            {foldAnswered && <div>
-              <button type="button" aria-expanded={answeredOpen} aria-label={`${answeredOpen ? "Collapse" : "Expand"} answered in ${s.round.name}`} className="flex w-full items-center gap-1.5 px-4 py-2 text-left text-xs text-muted-foreground hover:bg-muted" onClick={() => setAnsweredOpenIds((prev) => {
-                const next = new Set(prev);
-                if (answeredOpen) next.delete(s.round.id); else next.add(s.round.id);
-                return next;
-              })}>
-                {answeredOpen ? <ChevronDown className="size-3" /> : <ChevronRight className="size-3" />}
-                <Check className="size-3 text-success" />
-                <span>Answered ({answeredDisplayed.length})</span>
-              </button>
-              {answeredOpen && <div className="divide-y divide-border/60 border-t border-border/50">{answeredDisplayed.map(renderMember)}</div>}
-            </div>}
-          </div>;
-        })()}
-      </div>;
-    })}{filtered.length === 0 && <p className="px-3 py-3 text-xs text-muted-foreground">Nothing here right now.</p>}</div>
+        {filtered.length === 0 && <p className="px-3 py-3 text-xs text-muted-foreground">Nothing here right now.</p>}
+      </div>
     </>}
   </section>;
 }

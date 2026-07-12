@@ -85,6 +85,25 @@ func (f *reviewFixture) newComment(t *testing.T, issueID pgtype.UUID, authorType
 	return id
 }
 
+// openCycle marks the round's answer cycle as open, as Start would, without
+// dispatching anything — so tests can stage responses "surfaced by the cycle"
+// (created before) versus "queued for the next start" (created after).
+func (f *reviewFixture) openCycle(t *testing.T) {
+	t.Helper()
+	if _, err := f.pool.Exec(context.Background(), `UPDATE cerebro_round SET cycle_opened_at=now() WHERE id=$1`, f.roundID); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func (f *reviewFixture) cycleOpen(t *testing.T) bool {
+	t.Helper()
+	var open bool
+	if err := f.pool.QueryRow(context.Background(), `SELECT cycle_opened_at IS NOT NULL FROM cerebro_round WHERE id=$1`, f.roundID).Scan(&open); err != nil {
+		t.Fatal(err)
+	}
+	return open
+}
+
 func (f *reviewFixture) memberByIssue(t *testing.T, members []Member, issueID pgtype.UUID) Member {
 	t.Helper()
 	want := util.UUIDToString(issueID)
@@ -97,11 +116,12 @@ func (f *reviewFixture) memberByIssue(t *testing.T, members []Member, issueID pg
 	return Member{}
 }
 
-// FIR-3114 review, points 1+3 — a member's state follows the owner's
-// perspective: agent responses newer than the owner's last reply make it
-// 'waiting' (and waiting_count counts those messages), the owner's reply
-// makes it 'answered', an in-flight agent task makes it 'working', and an
-// untouched issue stays 'planned'.
+// FIR-3114 review, points 1+3 (round 3) — a member's state follows the
+// owner's perspective, gated by the answer cycle: agent responses created
+// before the cycle opened make it 'waiting'; responses arriving after the
+// cycle opened are 'queued' for the next start and never surface on their
+// own; the owner's reply makes it 'answered'; an in-flight agent task makes
+// it 'working'; an untouched issue stays 'planned'.
 func TestMemberStatesFollowOwnerPerspective(t *testing.T) {
 	f := newReviewFixture(t)
 	ctx := context.Background()
@@ -123,6 +143,11 @@ func TestMemberStatesFollowOwnerPerspective(t *testing.T) {
 
 	planned := f.newIssue(t, "planned: nothing happened yet")
 
+	f.openCycle(t)
+
+	queued := f.newIssue(t, "queued: response arrived after the cycle opened")
+	f.newComment(t, queued, "agent", f.agentID, "late response")
+
 	members, err := f.svc.Members(ctx, f.roundID)
 	if err != nil {
 		t.Fatal(err)
@@ -139,6 +164,31 @@ func TestMemberStatesFollowOwnerPerspective(t *testing.T) {
 	if m := f.memberByIssue(t, members, planned); m.State != MemberPlanned {
 		t.Fatalf("planned member = state %q, want planned", m.State)
 	}
+	if m := f.memberByIssue(t, members, queued); m.State != MemberQueued || m.WaitingCount != 0 || m.QueuedCount != 1 {
+		t.Fatalf("queued member = state %q waiting %d queued %d, want queued/0/1", m.State, m.WaitingCount, m.QueuedCount)
+	}
+}
+
+// FIR-3114 review round 3, points 1+3 — with no open cycle NOTHING waits:
+// every unanswered agent response is queued until the owner starts the round.
+// This is the exact screenshot bug: the owner had answered everything, agents
+// replied again within minutes, and the header showed "2 waiting".
+func TestNothingWaitsWithoutAnOpenCycle(t *testing.T) {
+	f := newReviewFixture(t)
+	ctx := context.Background()
+
+	issue := f.newIssue(t, "answered, then the agent replied again")
+	f.newComment(t, issue, "agent", f.agentID, "response")
+	f.newComment(t, issue, "member", f.ownerID, "owner answer")
+	f.newComment(t, issue, "agent", f.agentID, "follow-up after the answer")
+
+	members, err := f.svc.Members(ctx, f.roundID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m := f.memberByIssue(t, members, issue); m.State != MemberQueued || m.WaitingCount != 0 || m.QueuedCount != 1 {
+		t.Fatalf("member = state %q waiting %d queued %d, want queued/0/1 (nothing waits before the next start)", m.State, m.WaitingCount, m.QueuedCount)
+	}
 }
 
 // FIR-3114 review, point 2 — a held reply must NOT start agents while other
@@ -153,13 +203,8 @@ func TestHoldCommentQueuesWhileOtherMessagesWait(t *testing.T) {
 	issueB := f.newIssue(t, "issue B")
 	f.newComment(t, issueB, "agent", f.agentID, "response B")
 
-	// The surfaced 'ready' run whose responses the owner is answering.
-	// total_count 0 keeps RefreshRun from flipping it back to 'running'
-	// (the responses above arrived without run items in this fixture).
-	var readyRunID pgtype.UUID
-	if err := f.pool.QueryRow(ctx, `INSERT INTO cerebro_round_run (round_id, total_count, status, ready_at) VALUES ($1, 0, 'ready', now()) RETURNING id`, f.roundID).Scan(&readyRunID); err != nil {
-		t.Fatal(err)
-	}
+	// The open answer cycle whose surfaced responses the owner is answering.
+	f.openCycle(t)
 
 	replyA := f.newComment(t, issueA, "member", f.ownerID, "answer A")
 	held, err := f.svc.HoldComment(ctx, f.wsID, issueA, replyA, "member", util.UUIDToString(f.ownerID), "answer A")
@@ -170,8 +215,11 @@ func TestHoldCommentQueuesWhileOtherMessagesWait(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if run == nil || run.ID != util.UUIDToString(readyRunID) {
-		t.Fatalf("active run after first answer = %+v, want the untouched ready run — issue B still waits", run)
+	if run != nil {
+		t.Fatalf("active run after first answer = %+v, want none — issue B still waits", run)
+	}
+	if !f.cycleOpen(t) {
+		t.Fatal("cycle closed after first answer, want still open — issue B still waits")
 	}
 	var heldCount int
 	if err := f.pool.QueryRow(ctx, `SELECT count(*) FROM cerebro_round_held_trigger WHERE round_id=$1 AND state='held'`, f.roundID).Scan(&heldCount); err != nil {
@@ -190,8 +238,11 @@ func TestHoldCommentQueuesWhileOtherMessagesWait(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if run == nil || run.ID == util.UUIDToString(readyRunID) || run.TotalCount != 2 {
-		t.Fatalf("active run after everything answered = %+v, want a new run releasing both held replies", run)
+	if run == nil || run.TotalCount != 2 {
+		t.Fatalf("active run after everything answered = %+v, want a run releasing both held replies", run)
+	}
+	if f.cycleOpen(t) {
+		t.Fatal("cycle still open after everything answered, want closed (round done)")
 	}
 }
 
@@ -235,6 +286,7 @@ func TestDismissPausesRunningRun(t *testing.T) {
 	f := newReviewFixture(t)
 	ctx := context.Background()
 
+	f.openCycle(t)
 	var runID pgtype.UUID
 	if err := f.pool.QueryRow(ctx, `INSERT INTO cerebro_round_run (round_id, total_count) VALUES ($1, 3) RETURNING id`, f.roundID).Scan(&runID); err != nil {
 		t.Fatal(err)
@@ -251,5 +303,8 @@ func TestDismissPausesRunningRun(t *testing.T) {
 	}
 	if active, err := f.svc.ActiveRun(ctx, f.roundID); err != nil || active != nil {
 		t.Fatalf("active run after pause = %+v (%v), want none", active, err)
+	}
+	if f.cycleOpen(t) {
+		t.Fatal("cycle still open after pause, want closed — unanswered messages wait for the next round")
 	}
 }

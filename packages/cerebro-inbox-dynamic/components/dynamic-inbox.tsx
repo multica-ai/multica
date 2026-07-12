@@ -1200,10 +1200,10 @@ export function DynamicInbox() {
                           renderIssue={(issueId) => {
                             const entry = entries.find((candidate) => candidate.kind === "notif" && candidate.item.issue_id === issueId);
                             if (!entry || entry.kind !== "notif") return null;
-                            // FIR-3114 — outside an active run a round member never reads as
-                            // unread: live-mode responses accumulate quietly until the next
+                            // FIR-3114 — outside an open answer cycle a round member never
+                            // reads as unread: responses accumulate quietly until the next
                             // round surfaces them (the row itself stays visible in the round).
-                            const surfaced = roundStatuses.some((status) => status.active_run && status.members.some((member) => member.issue_id === issueId));
+                            const surfaced = roundStatuses.some((status) => status.round.cycle_opened_at != null && status.members.some((member) => member.issue_id === issueId));
                             const displayEntry = surfaced || entry.item.read ? entry : { ...entry, item: { ...entry.item, read: true } };
                             return <DynamicInboxRow key={entry.id} entry={displayEntry} isSelected={entry.id === selected?.id} agentRunState={runStateFor(entry, filterContext)} favoritesEnabled={favoritesEnabled} isFavorite={filterContext.isFavorite?.(entry) ?? false} onToggleFavorite={toggleFavorite} onSelect={onSelect} onArchive={onArchive} />;
                           }}

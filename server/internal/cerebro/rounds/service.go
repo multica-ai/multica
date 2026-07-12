@@ -44,8 +44,13 @@ type Round struct {
 	ScheduleCron string     `json:"schedule_cron"`
 	Timezone     string     `json:"timezone"`
 	NextRunAt    *time.Time `json:"next_run_at"`
-	CreatedAt    time.Time  `json:"created_at"`
-	UpdatedAt    time.Time  `json:"updated_at"`
+	// CycleOpenedAt is non-nil while an answer cycle is open: Start (manual or
+	// scheduled) sets it, answering everything surfaced or pausing clears it.
+	// Agent responses created after this instant stay hidden (queued) until
+	// the next cycle opens (FIR-3114 review round 3, points 1-3).
+	CycleOpenedAt *time.Time `json:"cycle_opened_at"`
+	CreatedAt     time.Time  `json:"created_at"`
+	UpdatedAt     time.Time  `json:"updated_at"`
 }
 
 func normalizeMode(mode string) (string, error) {
@@ -62,17 +67,21 @@ func normalizeMode(mode string) (string, error) {
 func shouldHoldComment(mode string) bool { return mode == "batch" }
 
 // Member state, from the round owner's point of view (FIR-3114 review):
-//   - waiting:  agent responses newer than the owner's last reply — the issue
+//   - waiting:  agent responses surfaced by the open answer cycle (created
+//     before the cycle opened, newer than the owner's last reply) — the issue
 //     needs the owner and is the only state that surfaces in the round list.
 //   - answered: the owner replied last (held for batch, or sent in live) —
 //     folded away behind "Answered".
 //   - working:  an agent task is queued/dispatched/running — hidden until the
-//     agent's response makes it waiting again in a later round.
+//     next cycle surfaces the agent's response.
+//   - queued:   agent responses accumulated outside the open cycle — hidden
+//     until the next Start surfaces them (FIR-3114 review round 3, point 3).
 //   - planned:  no agent response yet and nothing in flight.
 const (
 	MemberWaiting  = "waiting"
 	MemberAnswered = "answered"
 	MemberWorking  = "working"
+	MemberQueued   = "queued"
 	MemberPlanned  = "planned"
 )
 
@@ -83,11 +92,12 @@ type Member struct {
 	AddedByID        string    `json:"added_by_id"`
 	HeldTriggerCount int       `json:"held_trigger_count"`
 	WaitingCount     int       `json:"waiting_count"`
+	QueuedCount      int       `json:"queued_count"`
 	State            string    `json:"state"`
 	CreatedAt        time.Time `json:"created_at"`
 }
 
-func memberState(waitingCount, heldCount int, working, hasResponses bool) string {
+func memberState(waitingCount, heldCount, queuedCount int, working, hasResponses bool) string {
 	switch {
 	case waitingCount > 0:
 		return MemberWaiting
@@ -95,6 +105,8 @@ func memberState(waitingCount, heldCount int, working, hasResponses bool) string
 		return MemberAnswered
 	case working:
 		return MemberWorking
+	case queuedCount > 0:
+		return MemberQueued
 	case hasResponses:
 		return MemberAnswered
 	default:
@@ -138,13 +150,6 @@ func nextRunAt(spec, timezone string, now time.Time) (time.Time, error) {
 	return schedule.Next(now.In(loc)).UTC(), nil
 }
 
-func runStatus(total, responded, failed int) string {
-	if responded+failed >= total {
-		return RunReady
-	}
-	return RunRunning
-}
-
 func (s *Service) Create(ctx context.Context, workspaceID, ownerID pgtype.UUID, name, mode, schedule, timezone string) (Round, error) {
 	name, schedule, timezone = strings.TrimSpace(name), strings.TrimSpace(schedule), strings.TrimSpace(timezone)
 	if name == "" {
@@ -165,12 +170,12 @@ func (s *Service) Create(ctx context.Context, workspaceID, ownerID pgtype.UUID, 
 		}
 		next = &n
 	}
-	row := s.Pool.QueryRow(ctx, `INSERT INTO cerebro_round(workspace_id,owner_id,name,mode,schedule_cron,timezone,next_run_at) VALUES($1,$2,$3,$4,NULLIF($5,''),$6,$7) RETURNING id::text,workspace_id::text,owner_id::text,name,mode,COALESCE(schedule_cron,''),timezone,next_run_at,created_at,updated_at`, workspaceID, ownerID, name, mode, schedule, timezone, next)
+	row := s.Pool.QueryRow(ctx, `INSERT INTO cerebro_round(workspace_id,owner_id,name,mode,schedule_cron,timezone,next_run_at) VALUES($1,$2,$3,$4,NULLIF($5,''),$6,$7) RETURNING id::text,workspace_id::text,owner_id::text,name,mode,COALESCE(schedule_cron,''),timezone,next_run_at,cycle_opened_at,created_at,updated_at`, workspaceID, ownerID, name, mode, schedule, timezone, next)
 	return scanRound(row)
 }
 
 func (s *Service) List(ctx context.Context, workspaceID, ownerID pgtype.UUID) ([]Round, error) {
-	rows, err := s.Pool.Query(ctx, `SELECT id::text,workspace_id::text,owner_id::text,name,mode,COALESCE(schedule_cron,''),timezone,next_run_at,created_at,updated_at FROM cerebro_round WHERE workspace_id=$1 AND owner_id=$2 ORDER BY created_at`, workspaceID, ownerID)
+	rows, err := s.Pool.Query(ctx, `SELECT id::text,workspace_id::text,owner_id::text,name,mode,COALESCE(schedule_cron,''),timezone,next_run_at,cycle_opened_at,created_at,updated_at FROM cerebro_round WHERE workspace_id=$1 AND owner_id=$2 ORDER BY created_at`, workspaceID, ownerID)
 	if err != nil {
 		return nil, err
 	}
@@ -187,7 +192,7 @@ func (s *Service) List(ctx context.Context, workspaceID, ownerID pgtype.UUID) ([
 }
 
 func (s *Service) Get(ctx context.Context, workspaceID, ownerID, id pgtype.UUID) (Round, error) {
-	r, err := scanRound(s.Pool.QueryRow(ctx, `SELECT id::text,workspace_id::text,owner_id::text,name,mode,COALESCE(schedule_cron,''),timezone,next_run_at,created_at,updated_at FROM cerebro_round WHERE id=$1 AND workspace_id=$2 AND owner_id=$3`, id, workspaceID, ownerID))
+	r, err := scanRound(s.Pool.QueryRow(ctx, `SELECT id::text,workspace_id::text,owner_id::text,name,mode,COALESCE(schedule_cron,''),timezone,next_run_at,cycle_opened_at,created_at,updated_at FROM cerebro_round WHERE id=$1 AND workspace_id=$2 AND owner_id=$3`, id, workspaceID, ownerID))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Round{}, ErrNotFound
 	}
@@ -228,7 +233,7 @@ func (s *Service) Update(ctx context.Context, workspaceID, ownerID, id pgtype.UU
 		}
 		next = &n
 	}
-	return scanRound(s.Pool.QueryRow(ctx, `UPDATE cerebro_round SET name=$4,mode=$5,schedule_cron=NULLIF($6,''),timezone=$7,next_run_at=$8,updated_at=now() WHERE id=$1 AND workspace_id=$2 AND owner_id=$3 RETURNING id::text,workspace_id::text,owner_id::text,name,mode,COALESCE(schedule_cron,''),timezone,next_run_at,created_at,updated_at`, id, workspaceID, ownerID, current.Name, current.Mode, current.ScheduleCron, current.Timezone, next))
+	return scanRound(s.Pool.QueryRow(ctx, `UPDATE cerebro_round SET name=$4,mode=$5,schedule_cron=NULLIF($6,''),timezone=$7,next_run_at=$8,updated_at=now() WHERE id=$1 AND workspace_id=$2 AND owner_id=$3 RETURNING id::text,workspace_id::text,owner_id::text,name,mode,COALESCE(schedule_cron,''),timezone,next_run_at,cycle_opened_at,created_at,updated_at`, id, workspaceID, ownerID, current.Name, current.Mode, current.ScheduleCron, current.Timezone, next))
 }
 func (s *Service) Delete(ctx context.Context, workspaceID, ownerID, id pgtype.UUID) error {
 	ct, err := s.Pool.Exec(ctx, `DELETE FROM cerebro_round WHERE id=$1 AND workspace_id=$2 AND owner_id=$3`, id, workspaceID, ownerID)
@@ -240,7 +245,7 @@ func (s *Service) Delete(ctx context.Context, workspaceID, ownerID, id pgtype.UU
 
 func scanRound(row pgx.Row) (Round, error) {
 	var r Round
-	err := row.Scan(&r.ID, &r.WorkspaceID, &r.OwnerID, &r.Name, &r.Mode, &r.ScheduleCron, &r.Timezone, &r.NextRunAt, &r.CreatedAt, &r.UpdatedAt)
+	err := row.Scan(&r.ID, &r.WorkspaceID, &r.OwnerID, &r.Name, &r.Mode, &r.ScheduleCron, &r.Timezone, &r.NextRunAt, &r.CycleOpenedAt, &r.CreatedAt, &r.UpdatedAt)
 	return r, err
 }
 
@@ -263,12 +268,19 @@ func (s *Service) AddMember(ctx context.Context, workspaceID, ownerID, roundID, 
 }
 
 // memberSelect computes each member's owner-perspective signals in one pass:
-// held replies, agent responses newer than the owner's last reply (waiting),
-// whether an agent task is in flight (working) and whether any agent response
-// exists at all (distinguishes answered from planned).
+// held replies, unanswered agent responses split by the round's answer cycle —
+// surfaced by the open cycle (waiting) vs accumulated for the next start
+// (queued) — whether an agent task is in flight (working) and whether any
+// agent response exists at all (distinguishes answered from planned). With no
+// open cycle every unanswered response is queued, so nothing surfaces until
+// the owner starts the round (FIR-3114 review round 3, points 1+3).
 const memberSelect = `SELECT m.round_id::text,m.issue_id::text,m.added_by_type,m.added_by_id::text,
 	(SELECT count(*)::int FROM cerebro_round_held_trigger h WHERE h.round_id=m.round_id AND h.issue_id=m.issue_id AND h.state='held'),
 	(SELECT count(*)::int FROM comment c WHERE c.issue_id=m.issue_id AND c.author_type='agent' AND c.type='comment'
+		AND r.cycle_opened_at IS NOT NULL AND c.created_at <= r.cycle_opened_at
+		AND c.created_at > COALESCE((SELECT max(c2.created_at) FROM comment c2 WHERE c2.issue_id=m.issue_id AND c2.author_type='member' AND c2.author_id=r.owner_id AND c2.type='comment'), '-infinity'::timestamptz)),
+	(SELECT count(*)::int FROM comment c WHERE c.issue_id=m.issue_id AND c.author_type='agent' AND c.type='comment'
+		AND (r.cycle_opened_at IS NULL OR c.created_at > r.cycle_opened_at)
 		AND c.created_at > COALESCE((SELECT max(c2.created_at) FROM comment c2 WHERE c2.issue_id=m.issue_id AND c2.author_type='member' AND c2.author_id=r.owner_id AND c2.type='comment'), '-infinity'::timestamptz)),
 	EXISTS(SELECT 1 FROM agent_task_queue q WHERE q.issue_id=m.issue_id AND q.status IN ('queued','dispatched','running')),
 	EXISTS(SELECT 1 FROM comment c WHERE c.issue_id=m.issue_id AND c.author_type='agent' AND c.type='comment'),
@@ -278,8 +290,8 @@ const memberSelect = `SELECT m.round_id::text,m.issue_id::text,m.added_by_type,m
 func scanMember(row pgx.Row) (Member, error) {
 	var m Member
 	var working, hasResponses bool
-	err := row.Scan(&m.RoundID, &m.IssueID, &m.AddedByType, &m.AddedByID, &m.HeldTriggerCount, &m.WaitingCount, &working, &hasResponses, &m.CreatedAt)
-	m.State = memberState(m.WaitingCount, m.HeldTriggerCount, working, hasResponses)
+	err := row.Scan(&m.RoundID, &m.IssueID, &m.AddedByType, &m.AddedByID, &m.HeldTriggerCount, &m.WaitingCount, &m.QueuedCount, &working, &hasResponses, &m.CreatedAt)
+	m.State = memberState(m.WaitingCount, m.HeldTriggerCount, m.QueuedCount, working, hasResponses)
 	return m, err
 }
 
@@ -325,16 +337,28 @@ func (s *Service) ActiveRun(ctx context.Context, roundID pgtype.UUID) (*Run, err
 	}
 	s.RefreshRun(ctx, id)
 	r, err := s.GetRun(ctx, id)
-	return &r, err
+	if err != nil {
+		return nil, err
+	}
+	// The refresh may have just completed the run (all agents responded) —
+	// a completed run is no longer active and must not surface the round.
+	if r.Status != RunRunning && r.Status != RunReady {
+		return nil, nil
+	}
+	return &r, nil
 }
 
-// DismissRun (UI: Pause) closes the round's active run — 'ready' or 'running' —
-// so the round collapses back to its planned state in the inbox. Held replies
-// stay held for the next start. Pausing a 'running' run does not cancel the
-// agent tasks already dispatched: they finish on their own, and their responses
-// surface as waiting messages in the next round (FIR-3114 review, point 4).
+// DismissRun (UI: Pause) closes the round's open answer cycle and completes
+// any active run so the round collapses back to its resting state in the
+// inbox. Held replies stay held for the next start. Pausing does not cancel
+// agent tasks already dispatched: they finish on their own, and their
+// responses queue silently until the next cycle surfaces them (FIR-3114
+// review, point 4; round 3, point 3).
 func (s *Service) DismissRun(ctx context.Context, workspaceID, ownerID, roundID pgtype.UUID) error {
 	if _, err := s.Get(ctx, workspaceID, ownerID, roundID); err != nil {
+		return err
+	}
+	if _, err := s.Pool.Exec(ctx, `UPDATE cerebro_round SET cycle_opened_at=NULL,updated_at=now() WHERE id=$1`, roundID); err != nil {
 		return err
 	}
 	var runID pgtype.UUID
@@ -383,11 +407,18 @@ func (s *Service) HoldComment(ctx context.Context, workspaceID, issueID, comment
 	var mode string
 	var roundID, roundOwnerID pgtype.UUID
 	err := s.Pool.QueryRow(ctx, `SELECT r.mode,r.id,r.owner_id FROM cerebro_round_member m JOIN cerebro_round r ON r.id=m.round_id WHERE m.issue_id=$1 AND r.workspace_id=$2`, issueID, workspaceID).Scan(&mode, &roundID, &roundOwnerID)
-	if errors.Is(err, pgx.ErrNoRows) || (err == nil && !shouldHoldComment(mode)) {
+	if errors.Is(err, pgx.ErrNoRows) {
 		return false, nil
 	}
 	if err != nil {
 		return false, err
+	}
+	if !shouldHoldComment(mode) {
+		// Live rounds dispatch the reply immediately, but the answer still
+		// counts toward finishing the cycle: when nothing surfaced is left
+		// waiting, the round is done (FIR-3114 review round 3, point 2).
+		s.maybeCloseCycle(ctx, roundID)
+		return false, nil
 	}
 	targets := heldTargets(content)
 	if len(targets) == 0 {
@@ -402,47 +433,73 @@ func (s *Service) HoldComment(ctx context.Context, workspaceID, issueID, comment
 		held = held || ct.RowsAffected() > 0
 	}
 	if held {
-		s.autoStartWhenAnswered(ctx, workspaceID, roundOwnerID, roundID)
+		s.maybeCloseCycle(ctx, roundID)
 	}
 	return held, nil
 }
 
-// autoStartWhenAnswered releases the round as soon as the owner has replied to
-// every message waiting anywhere in the round — "batch" means: answer
-// everything, then all replies run at once without pressing Run. It only fires
-// while a 'ready' run is surfaced (an answer cycle in progress): fresh replies
-// seeded into an idle or paused round queue until Run or the schedule, and a
-// reply during a 'running' run queues for the next start. Counting only the
-// surfaced run's items was wrong (FIR-3114 review, point 2): a reply could
-// auto-start agents while other member issues still had unanswered responses.
-func (s *Service) autoStartWhenAnswered(ctx context.Context, workspaceID, ownerID, roundID pgtype.UUID) {
-	var runID pgtype.UUID
-	if err := s.Pool.QueryRow(ctx, `SELECT id FROM cerebro_round_run WHERE round_id=$1 AND status='ready' ORDER BY created_at DESC LIMIT 1`, roundID).Scan(&runID); err != nil {
+// maybeCloseCycle finishes the round's answer cycle once the owner has replied
+// to every message the cycle surfaced — "batch" means: answer everything, then
+// all held replies run at once without pressing Run (FIR-3114 point 5). It
+// only fires while a cycle is open: fresh replies into an idle or paused round
+// queue until Run or the schedule. Closing the cycle sets the round to done —
+// it drops into the inbox's "ready to start" group and responses arriving
+// afterwards stay hidden until the next Start (review round 3, points 2+3).
+func (s *Service) maybeCloseCycle(ctx context.Context, roundID pgtype.UUID) {
+	var mode string
+	if err := s.Pool.QueryRow(ctx, `SELECT mode FROM cerebro_round WHERE id=$1 AND cycle_opened_at IS NOT NULL`, roundID).Scan(&mode); err != nil {
 		return
 	}
 	var waiting int
 	err := s.Pool.QueryRow(ctx, `SELECT count(*)::int FROM cerebro_round_member m JOIN cerebro_round r ON r.id=m.round_id WHERE m.round_id=$1 AND EXISTS (
 		SELECT 1 FROM comment c WHERE c.issue_id=m.issue_id AND c.author_type='agent' AND c.type='comment'
+		AND c.created_at <= r.cycle_opened_at
 		AND c.created_at > COALESCE((SELECT max(c2.created_at) FROM comment c2 WHERE c2.issue_id=m.issue_id AND c2.author_type='member' AND c2.author_id=r.owner_id AND c2.type='comment'), '-infinity'::timestamptz))`, roundID).Scan(&waiting)
 	if err != nil || waiting > 0 {
 		return
 	}
-	_, _ = s.Start(ctx, workspaceID, ownerID, roundID)
+	if shouldHoldComment(mode) {
+		var heldCount int
+		if err := s.Pool.QueryRow(ctx, `SELECT count(*)::int FROM cerebro_round_held_trigger WHERE round_id=$1 AND state='held'`, roundID).Scan(&heldCount); err == nil && heldCount > 0 {
+			_, _ = s.dispatchHeld(ctx, roundID)
+		}
+	}
+	_, _ = s.Pool.Exec(ctx, `UPDATE cerebro_round SET cycle_opened_at=NULL,updated_at=now() WHERE id=$1`, roundID)
 }
 
+// Start opens a new answer cycle: replies still held from the previous cycle
+// are dispatched, and every response accumulated up to this instant surfaces
+// as waiting. If nothing surfaced needs the owner, the cycle closes again
+// right away so an empty Start never leaves the round pinned open.
 func (s *Service) Start(ctx context.Context, workspaceID, ownerID, roundID pgtype.UUID) (Run, error) {
 	if _, err := s.Get(ctx, workspaceID, ownerID, roundID); err != nil {
 		return Run{}, err
 	}
+	run, err := s.dispatchHeld(ctx, roundID)
+	if err != nil {
+		return Run{}, err
+	}
+	if _, err := s.Pool.Exec(ctx, `UPDATE cerebro_round SET cycle_opened_at=now(),updated_at=now() WHERE id=$1`, roundID); err != nil {
+		return Run{}, err
+	}
+	s.maybeCloseCycle(ctx, roundID)
+	return run, nil
+}
+
+// dispatchHeld releases every held reply in the round as one run and enqueues
+// the agent tasks. The run tracks dispatch progress only — when the agents
+// finish it completes silently instead of re-surfacing the round (FIR-3114
+// review round 3, point 3).
+func (s *Service) dispatchHeld(ctx context.Context, roundID pgtype.UUID) (Run, error) {
 	tx, err := s.Pool.Begin(ctx)
 	if err != nil {
 		return Run{}, err
 	}
 	defer tx.Rollback(ctx)
-	// A new run supersedes the previous surfaced one: without this, a 'ready'
-	// run lingers forever (nothing else completes runs) and keeps the round
-	// pinned open in the inbox.
-	if _, err = tx.Exec(ctx, `UPDATE cerebro_round_run SET status='completed',completed_at=now() WHERE round_id=$1 AND status='ready'`, roundID); err != nil {
+	// A new run supersedes the previous one: the partial unique index allows a
+	// single 'running' run per round, and legacy 'ready' runs would otherwise
+	// linger forever (nothing else completes runs).
+	if _, err = tx.Exec(ctx, `UPDATE cerebro_round_run SET status='completed',completed_at=now() WHERE round_id=$1 AND status IN ('ready','running')`, roundID); err != nil {
 		return Run{}, err
 	}
 	var run Run
@@ -529,7 +586,10 @@ func (s *Service) RefreshRun(ctx context.Context, id pgtype.UUID) {
 		}
 	}
 	_, _ = s.Pool.Exec(ctx, `UPDATE cerebro_round_run_item i SET status='stalled',updated_at=now() FROM agent_task_queue q WHERE i.run_id=$1 AND q.id=i.task_id AND q.status='running' AND q.started_at < now()-$2::interval`, id, stalledTaskTimeout.String())
-	_, _ = s.Pool.Exec(ctx, `WITH c AS (SELECT count(*) FILTER(WHERE q.status='completed')::int responded,count(*) FILTER(WHERE i.status IN ('failed','stalled') OR q.status='failed')::int failed FROM cerebro_round_run_item i LEFT JOIN agent_task_queue q ON q.id=i.task_id WHERE i.run_id=$1) UPDATE cerebro_round_run r SET responded_count=c.responded,stalled_count=c.failed,status=CASE WHEN c.responded+c.failed>=r.total_count THEN 'ready' ELSE 'running' END,ready_at=CASE WHEN c.responded+c.failed>=r.total_count THEN COALESCE(r.ready_at,now()) ELSE NULL END FROM c WHERE r.id=$1`, id)
+	// A finished run completes silently: the responses stay queued behind the
+	// round until the owner starts the next answer cycle — they must not
+	// re-surface on their own (FIR-3114 review round 3, point 3).
+	_, _ = s.Pool.Exec(ctx, `WITH c AS (SELECT count(*) FILTER(WHERE q.status='completed')::int responded,count(*) FILTER(WHERE i.status IN ('failed','stalled') OR q.status='failed')::int failed FROM cerebro_round_run_item i LEFT JOIN agent_task_queue q ON q.id=i.task_id WHERE i.run_id=$1) UPDATE cerebro_round_run r SET responded_count=c.responded,stalled_count=c.failed,status=CASE WHEN c.responded+c.failed>=r.total_count THEN 'completed' ELSE 'running' END,completed_at=CASE WHEN c.responded+c.failed>=r.total_count THEN COALESCE(r.completed_at,now()) ELSE r.completed_at END FROM c WHERE r.id=$1 AND r.status IN ('running','ready')`, id)
 	s.publishProgress(ctx, id)
 }
 

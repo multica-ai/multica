@@ -42,19 +42,23 @@ func TestNextRunAtRejectsInvalidTimezone(t *testing.T) {
 	}
 }
 
-func TestRunStatus(t *testing.T) {
+func TestMemberStatePrecedence(t *testing.T) {
 	tests := []struct {
-		total, responded, failed int
-		want                     string
+		name                  string
+		waiting, held, queued int
+		working, hasResponses bool
+		want                  string
 	}{
-		{3, 1, 0, RunRunning},
-		{3, 3, 0, RunReady},
-		{3, 2, 1, RunReady},
-		{0, 0, 0, RunReady},
+		{"waiting wins", 2, 1, 1, true, true, MemberWaiting},
+		{"held reads answered", 0, 1, 0, false, true, MemberAnswered},
+		{"working hides until next cycle", 0, 0, 0, true, true, MemberWorking},
+		{"queued hides until next start", 0, 0, 3, false, true, MemberQueued},
+		{"owner replied last", 0, 0, 0, false, true, MemberAnswered},
+		{"untouched", 0, 0, 0, false, false, MemberPlanned},
 	}
 	for _, tt := range tests {
-		if got := runStatus(tt.total, tt.responded, tt.failed); got != tt.want {
-			t.Fatalf("runStatus(%d,%d,%d)=%q, want %q", tt.total, tt.responded, tt.failed, got, tt.want)
+		if got := memberState(tt.waiting, tt.held, tt.queued, tt.working, tt.hasResponses); got != tt.want {
+			t.Fatalf("%s: memberState = %q, want %q", tt.name, got, tt.want)
 		}
 	}
 }
