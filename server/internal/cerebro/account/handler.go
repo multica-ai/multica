@@ -61,7 +61,7 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, accountResponseFromModel(a))
 }
 
-// UsageHistory handles GET /accounts/{id}/usage-history (FIR-3118).
+// UsageHistory handles GET /accounts/{accountID}/usage-history (FIR-3118).
 // Returns hourly token-usage buckets for the last 7 days, oldest first.
 func (h *Handler) UsageHistory(w http.ResponseWriter, r *http.Request) {
 	workspaceID, accountID, ok := h.accountIDs(w, r)
@@ -129,7 +129,7 @@ type updateControlsRequest struct {
 	PausedManual *bool `json:"paused_manual"`
 }
 
-// UpdateControls handles PATCH /accounts/{id}/controls (UI-driven).
+// UpdateControls handles PATCH /accounts/{accountID}/controls (UI-driven).
 func (h *Handler) UpdateControls(w http.ResponseWriter, r *http.Request) {
 	workspaceID, accountID, ok := h.accountIDs(w, r)
 	if !ok {

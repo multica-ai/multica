@@ -560,8 +560,8 @@ var catalog = []Capability{
 		DescriptionZh: "添加、移除或更改 runtime 所用的模型/供应商账户的管控。",
 		Ops: []string{
 			"POST /api/workspaces/{id}/accounts",
-			"DELETE /api/workspaces/{id}/accounts/{id}",
-			"PATCH /api/workspaces/{id}/accounts/{id}/controls",
+			"DELETE /api/workspaces/{id}/accounts/{accountID}",
+			"PATCH /api/workspaces/{id}/accounts/{accountID}/controls",
 		},
 	},
 	{
