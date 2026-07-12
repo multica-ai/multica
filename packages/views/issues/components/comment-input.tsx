@@ -1,8 +1,11 @@
 "use client";
 
 import { useRef, useState, useCallback, useEffect } from "react";
+import { Pin, PinOff } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
 import { ContentEditor, type ContentEditorRef, useFileDropZone, FileDropOverlay } from "../../editor";
+import { Button } from "@multica/ui/components/ui/button";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@multica/ui/components/ui/tooltip";
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
 import { SubmitButton } from "@multica/ui/components/common/submit-button";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
@@ -10,7 +13,7 @@ import { api } from "@multica/core/api";
 import type { Attachment } from "@multica/core/types";
 import { contentReferencesAttachment } from "@multica/core/types";
 import { enterKey, formatShortcut, modKey } from "@multica/core/platform";
-import { useCommentDraftStore } from "@multica/core/issues/stores";
+import { useCommentComposerStore, useCommentDraftStore } from "@multica/core/issues/stores";
 import { useT } from "../../i18n";
 import { CommentTriggerChips } from "./comment-trigger-chips";
 import { useCommentTriggerPreview } from "../hooks/use-comment-trigger-preview";
@@ -46,6 +49,10 @@ function CommentInput({ issueId, onSubmit }: CommentInputProps) {
   const { isDragOver, dropZoneProps } = useFileDropZone({
     onDrop: (files) => files.forEach((f) => editorRef.current?.uploadFile(f)),
   });
+  // Sticky preference: issue-detail pins this composer to the bottom of the
+  // scroll viewport when enabled; the toggle lives here, on the bar itself.
+  const sticky = useCommentComposerStore((s) => s.sticky);
+  const toggleSticky = useCommentComposerStore((s) => s.toggleSticky);
 
   // Draft persistence. Hydrate from store on mount via `defaultValue` above
   // (ContentEditorRef has no setContent, so this is the only injection point).
@@ -146,6 +153,10 @@ function CommentInput({ issueId, onSubmit }: CommentInputProps) {
       <div
         className={cn(
           "flex-1 min-h-0 overflow-y-auto px-3 py-2",
+          // Pinned to the viewport bottom the composer grows upward; cap it
+          // so a long draft can't swallow the whole timeline (the editor
+          // area scrolls internally instead).
+          sticky && "max-h-[40vh]",
           submitting && "pointer-events-none opacity-60",
         )}
         aria-busy={submitting || undefined}
@@ -179,6 +190,32 @@ function CommentInput({ issueId, onSubmit }: CommentInputProps) {
         />
       </div>
       <div className="absolute bottom-1 right-1.5 flex items-center gap-1">
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-xs"
+                onClick={toggleSticky}
+                aria-pressed={sticky}
+                aria-label={
+                  sticky
+                    ? t(($) => $.comment.unpin_composer_tooltip)
+                    : t(($) => $.comment.pin_composer_tooltip)
+                }
+                className="text-muted-foreground"
+              >
+                {sticky ? <PinOff className="h-3.5 w-3.5" /> : <Pin className="h-3.5 w-3.5" />}
+              </Button>
+            }
+          />
+          <TooltipContent side="top">
+            {sticky
+              ? t(($) => $.comment.unpin_composer_tooltip)
+              : t(($) => $.comment.pin_composer_tooltip)}
+          </TooltipContent>
+        </Tooltip>
         <FileUploadButton
           size="sm"
           multiple

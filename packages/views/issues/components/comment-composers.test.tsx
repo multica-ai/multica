@@ -3,6 +3,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { fireEvent, screen, waitFor } from "@testing-library/react";
 import type { UploadResult } from "@multica/core/hooks/use-file-upload";
+import { useCommentComposerStore } from "@multica/core/issues/stores";
 import { renderWithI18n } from "../../test/i18n";
 import { CommentInput } from "./comment-input";
 import { ReplyInput } from "./reply-input";
@@ -114,7 +115,9 @@ function renderReplyInput({
 }
 
 function getSubmitButton(container: HTMLElement): HTMLButtonElement {
-  const button = container.querySelectorAll("button")[1];
+  // Submit is always the last button in a composer's action cluster.
+  const buttons = container.querySelectorAll("button");
+  const button = buttons[buttons.length - 1];
   if (!button) throw new Error("Expected submit button to render");
   return button;
 }
@@ -122,6 +125,7 @@ function getSubmitButton(container: HTMLElement): HTMLButtonElement {
 beforeEach(() => {
   uploadWithToast.mockReset();
   localStorage.clear();
+  useCommentComposerStore.setState({ sticky: true });
 });
 
 describe("comment composers", () => {
@@ -130,7 +134,8 @@ describe("comment composers", () => {
 
     expect(screen.getByPlaceholderText("Leave a comment...")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Attach file" })).toBeInTheDocument();
-    expect(container.querySelectorAll("button")).toHaveLength(2);
+    // pin toggle + attach + submit
+    expect(container.querySelectorAll("button")).toHaveLength(3);
 
     const shell = screen.getByTestId("drop-zone");
     expect(shell.className).not.toMatch(/max-h-/);
@@ -221,5 +226,33 @@ describe("comment composers", () => {
     await waitFor(() => expect(onSubmit).toHaveBeenCalled());
     // Failed send must NOT clear — the box still has content, submit stays live.
     await waitFor(() => expect(getSubmitButton(container)).not.toBeDisabled());
+  });
+});
+
+describe("sticky composer toggle", () => {
+  it("shows the unpin control and caps editor height while sticky is on (default)", () => {
+    renderCommentInput();
+
+    const toggle = screen.getByRole("button", { name: "Unpin comment bar" });
+    expect(toggle).toHaveAttribute("aria-pressed", "true");
+    // The height cap lives on the editor wrapper, not the card shell.
+    expect(screen.getByTestId("editor").parentElement?.className).toContain("max-h-[40vh]");
+  });
+
+  it("toggles the store off and back on from the bar", () => {
+    renderCommentInput();
+
+    fireEvent.click(screen.getByRole("button", { name: "Unpin comment bar" }));
+    expect(useCommentComposerStore.getState().sticky).toBe(false);
+    expect(screen.getByTestId("editor").parentElement?.className).not.toContain("max-h-[40vh]");
+
+    fireEvent.click(screen.getByRole("button", { name: "Pin comment bar to bottom" }));
+    expect(useCommentComposerStore.getState().sticky).toBe(true);
+  });
+
+  it("does not render a pin toggle on thread replies", () => {
+    renderReplyInput();
+
+    expect(screen.queryByRole("button", { name: /pin comment bar/i })).toBeNull();
   });
 });
