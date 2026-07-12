@@ -37,6 +37,12 @@
     "description": "Customize product actions on this device. Click a shortcut, then press the new key combination.",
     "search_placeholder": "Search actions...",
     "reset_all": "Restore defaults",
+    "reset_confirm": {
+      "title": "Restore all shortcut defaults?",
+      "description": "This will remove every custom shortcut and restore the defaults on this device.",
+      "cancel": "Cancel",
+      "confirm": "Restore all defaults"
+    },
     "reset": "Reset",
     "disable": "Disable",
     "reset_action": "Reset {{action}}",

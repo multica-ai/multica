@@ -37,6 +37,12 @@
     "description": "이 기기에서 제품 동작의 단축키를 설정합니다. 단축키를 클릭한 다음 새 키 조합을 누르세요.",
     "search_placeholder": "동작 검색...",
     "reset_all": "기본값 복원",
+    "reset_confirm": {
+      "title": "모든 단축키를 기본값으로 복원할까요?",
+      "description": "이 기기의 모든 사용자 지정 단축키를 삭제하고 기본 설정으로 복원합니다.",
+      "cancel": "취소",
+      "confirm": "모두 기본값으로 복원"
+    },
     "reset": "재설정",
     "disable": "사용 안 함",
     "reset_action": "{{action}} 재설정",
