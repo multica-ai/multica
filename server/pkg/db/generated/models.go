@@ -79,9 +79,9 @@ type AgentRuntime struct {
 	LegacyDaemonID pgtype.Text        `json:"legacy_daemon_id"`
 	Visibility     string             `json:"visibility"`
 	ProfileID      pgtype.UUID        `json:"profile_id"`
+	CustomName     pgtype.Text        `json:"custom_name"`
 	HoldUntil      pgtype.Timestamptz `json:"hold_until"`
 	HoldReason     pgtype.Text        `json:"hold_reason"`
-	CustomName     pgtype.Text        `json:"custom_name"`
 }
 
 type AgentSkill struct {
