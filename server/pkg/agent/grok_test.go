@@ -98,6 +98,47 @@ printf '%s\n' \
 `
 }
 
+func TestGrokBackendExecuteCompletesAfterEndEvenIfProcessKilled(t *testing.T) {
+	t.Parallel()
+	// Real Grok Build emits end, then keeps running until the parent cancels.
+	// Context cancel surfaces as signal: killed — that must not fail the task.
+	script := `#!/bin/sh
+trap 'exit 143' TERM INT
+printf '%s\n' \
+  '{"type":"text","data":"pong"}' \
+  '{"type":"end","stopReason":"EndTurn","sessionId":"fake-session"}'
+while true; do sleep 1; done
+`
+	fakePath := filepath.Join(t.TempDir(), "grok")
+	if err := os.WriteFile(fakePath, []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake grok: %v", err)
+	}
+
+	backend, err := New("grok", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	if err != nil {
+		t.Fatalf("new grok backend: %v", err)
+	}
+
+	session, err := backend.Execute(context.Background(), "ping", ExecOptions{Cwd: t.TempDir()})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+
+	var result Result
+	select {
+	case result = <-session.Result:
+	case <-time.After(12 * time.Second):
+		t.Fatal("timeout waiting for grok result")
+	}
+
+	if result.Status != "completed" {
+		t.Fatalf("status = %q, want completed (err=%q)", result.Status, result.Error)
+	}
+	if result.Error != "" {
+		t.Fatalf("error = %q, want empty after graceful end", result.Error)
+	}
+}
+
 func TestGrokBackendExecute(t *testing.T) {
 	t.Parallel()
 	fakePath := filepath.Join(t.TempDir(), "grok")

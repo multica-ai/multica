@@ -188,6 +188,9 @@ func (b *grokBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 				trySend(msgCh, m)
 			}
 			if st.endSeen {
+				// Grok Build can emit the terminal end event while the worker
+				// process keeps running. Treat end as the protocol boundary so
+				// the daemon can report completion (same pattern as cursor.go).
 				cancel()
 				break
 			}
@@ -205,7 +208,7 @@ func (b *grokBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 		} else if runCtx.Err() == context.Canceled && st.finalStatus == "completed" && !st.endSeen {
 			st.finalStatus = "aborted"
 			st.finalError = "execution cancelled"
-		} else if exitErr != nil && st.finalStatus == "completed" {
+		} else if exitErr != nil && st.finalStatus == "completed" && !st.endSeen {
 			st.finalStatus = "failed"
 			st.finalError = fmt.Sprintf("grok exited with error: %v", exitErr)
 		}
