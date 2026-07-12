@@ -758,8 +758,10 @@ var defaultAgentCommandNames = []string{
 
 // codexDesktopAppBundlePaths returns candidate macOS app-bundle locations for
 // the bundled Codex CLI. OpenAI relocated the Desktop app from Codex.app to
-// ChatGPT.app (#5205); prefer the new path first, keep the legacy Codex.app
-// path so older installs still resolve.
+// ChatGPT.app (#5205). Candidates are ordered by install location first
+// (system /Applications before user ~/Applications); within each location the
+// new ChatGPT.app path is tried before the legacy Codex.app path, so updated
+// installs win while older installs still resolve.
 var codexDesktopAppBundlePaths = func() []string {
 	paths := []string{
 		"/Applications/ChatGPT.app/Contents/Resources/codex",
