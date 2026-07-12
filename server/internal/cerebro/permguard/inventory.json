@@ -377,7 +377,7 @@
       "gate": "workspace_owner"
     },
     {
-      "id": "DELETE /api/workspaces/{id}/accounts/{id}",
+      "id": "DELETE /api/workspaces/{id}/accounts/{accountID}",
       "gate": "workspace_admin"
     },
     {
@@ -505,7 +505,7 @@
       "gate": "workspace_admin"
     },
     {
-      "id": "PATCH /api/workspaces/{id}/accounts/{id}/controls",
+      "id": "PATCH /api/workspaces/{id}/accounts/{accountID}/controls",
       "gate": "workspace_member"
     },
     {
