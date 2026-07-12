@@ -30,7 +30,7 @@ const (
 3. En sikkerhedsbund i koden (`minWakeupIntervalFloor`) forhindrer interval under 1 minut, også hvis workspace setting sættes lavere.
 4. Der må ikke allerede eksistere en pending wakeup for samme `agent_id + issue_id` oprettet inden for det aktuelle minimumsinterval.
 5. Én agent kan højst oprette `defaultMaxSelfWakeupsPerIssue = 8` wakeups på samme issue, medmindre workspace settings sætter en anden grænse.
-6. By default, the loop guard rejects the next wakeup after two rounds without objective progress. A member reply, a `status_change`/`progress_update` event, or an update to a linked pull request resets the count. An ordinary agent comment does not.
+6. By default, the loop guard rejects the next wakeup after two rounds without objective progress. A member reply or a `status_change`/`progress_update` event resets the count. Ordinary agent comments and pull-request updates do not.
 
 ## Dispatch-flow (Phase 1)
 

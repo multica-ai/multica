@@ -133,8 +133,8 @@ export function WakeupLimitsSettings() {
           <Label className="text-xs font-medium">Max consecutive wakeup loops per issue</Label>
           <p className="text-xs text-muted-foreground">
             How many times an agent may wake itself on the same issue without objective
-            progress. A member reply, issue status/progress event, or linked pull-request
-            update resets the count. Ordinary agent comments do not. 0 disables the guard.
+            progress. A member reply or issue status/progress event resets the count.
+            Ordinary agent comments and pull-request updates do not. 0 disables the guard.
           </p>
         </div>
         <Input

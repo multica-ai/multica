@@ -156,7 +156,7 @@ func TestLoopGuardResetsAfterIssueStatusProgress(t *testing.T) {
 	}
 }
 
-func TestLoopGuardResetsAfterLinkedPullRequestProgress(t *testing.T) {
+func TestLoopGuardDoesNotResetAfterLinkedPullRequestUpdate(t *testing.T) {
 	if wkPool == nil {
 		t.Skip("no test DB")
 	}
@@ -187,14 +187,18 @@ func TestLoopGuardResetsAfterLinkedPullRequestProgress(t *testing.T) {
 		_, _ = wkPool.Exec(context.Background(), `DELETE FROM github_pull_request WHERE id = $1`, pullRequestID)
 	})
 
-	if _, err := svc.Create(ctx, wkWorkspaceID, CreateRequest{
+	_, err := svc.Create(ctx, wkWorkspaceID, CreateRequest{
 		AgentID:     wkAgentID,
 		IssueID:     wkOtherIssue,
-		Prompt:      "allowed after pull request progress",
+		Prompt:      "blocked despite pull request churn",
 		TriggerType: TriggerTime,
 		FireAt:      pgtype.Timestamptz{Time: time.Now().Add(time.Hour), Valid: true},
-	}); err != nil {
-		t.Fatalf("expected wakeup allowed after linked pull request progress, got: %v", err)
+	})
+	if err == nil {
+		t.Fatal("expected pull-request churn not to reset the empty-loop guard")
+	}
+	if !strings.Contains(err.Error(), "loop guard") {
+		t.Fatalf("expected a loop-guard error, got: %v", err)
 	}
 }
 

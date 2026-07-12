@@ -311,11 +311,6 @@ WHERE w.workspace_id = $1
            FROM comment c
            WHERE c.issue_id = $3
              AND (c.author_type = 'member' OR c.type IN ('status_change', 'progress_update'))
-           UNION ALL
-           SELECT pr.updated_at AS progress_at
-           FROM issue_pull_request ipr
-           JOIN github_pull_request pr ON pr.id = ipr.pull_request_id
-           WHERE ipr.issue_id = $3
          ) progress),
         '-infinity'::timestamptz
       )
@@ -329,8 +324,10 @@ type CountConsecutiveSelfWakeupsForAgentIssueParams struct {
 
 // FIR-3098: how many self-wakeups this agent has stacked on this issue since
 // the latest objective progress signal. Ordinary agent comments deliberately
-// do not reset the streak: status/progress events, member replies, and linked
-// pull-request updates do. Cancelled wakeups don't count.
+// do not reset the streak: only status/progress events and member replies do.
+// Pull-request churn is deliberately excluded because repeated CI/deploy checks
+// can change a PR while the agent still makes no useful progress. Cancelled
+// wakeups don't count.
 func (q *Queries) CountConsecutiveSelfWakeupsForAgentIssue(ctx context.Context, arg CountConsecutiveSelfWakeupsForAgentIssueParams) (int64, error) {
 	row := q.db.QueryRow(ctx, countConsecutiveSelfWakeupsForAgentIssue, arg.WorkspaceID, arg.AgentID, arg.IssueID)
 	var count int64

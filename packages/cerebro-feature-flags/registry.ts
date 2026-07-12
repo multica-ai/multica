@@ -1761,7 +1761,7 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     label: "Wakeup: loop guard",
     group: "agents",
     description:
-      "Stop an agent from waking itself in an endless loop: once it has scheduled the configured number of wakeups on the same issue without objective progress, the next wakeup is rejected. A member reply, issue status/progress event, or linked pull-request update resets the count; ordinary agent comments do not. Set the number under 'Max consecutive wakeup loops per issue' in the wakeup settings. Off lets agents chain self-wakeups without the cap. FIR-3098.",
+      "Stop an agent from waking itself in an endless loop: once it has scheduled the configured number of wakeups on the same issue without objective progress, the next wakeup is rejected. A member reply or issue status/progress event resets the count; ordinary agent comments and pull-request updates do not. Set the number under 'Max consecutive wakeup loops per issue' in the wakeup settings. Off lets agents chain self-wakeups without the cap. FIR-3098.",
   },
   {
     key: "cerebro_wakeup_bar",

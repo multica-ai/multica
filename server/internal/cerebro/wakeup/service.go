@@ -189,8 +189,8 @@ func (s *Service) Create(ctx context.Context, workspaceID pgtype.UUID, req Creat
 
 	// FIR-2679 Spor 1a: loop-guard. Stop an agent from chaining self-wakeups on
 	// the same issue without objective progress (worst observed: 18 re-arms in
-	// 22h). The streak resets on a member reply, issue status/progress event, or
-	// linked pull-request update. Gated by the
+	// 22h). The streak resets on a member reply or issue status/progress event.
+	// Pull-request churn does not count as progress. Gated by the
 	// cerebro_wakeup_loop_guard flag (default ON); a cap of 0 disables it.
 	if err := s.enforceLoopGuard(ctx, workspaceID, req); err != nil {
 		return cerebrodb.CerebroAgentWakeup{}, err
@@ -549,7 +549,7 @@ func (s *Service) enforceLoopGuard(ctx context.Context, workspaceID pgtype.UUID,
 	}
 	if int(count) >= loopCap {
 		return fmt.Errorf(
-			"wakeup loop guard: this agent has already scheduled %d wakeups on this issue without objective progress (max %d in a row). Post a result or question to the human instead of scheduling another wakeup; a member reply, issue status/progress event, or linked pull-request update resets the limit.",
+			"wakeup loop guard: this agent has already scheduled %d wakeups on this issue without objective progress (max %d in a row). Post a result or question to the human instead of scheduling another wakeup; a member reply or issue status/progress event resets the limit. Pull-request updates alone do not count.",
 			count, loopCap,
 		)
 	}
