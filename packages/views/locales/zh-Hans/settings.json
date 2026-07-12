@@ -37,6 +37,12 @@
     "description": "自定义当前设备上的产品操作。点击一个快捷键，然后按下新的组合键。",
     "search_placeholder": "搜索操作...",
     "reset_all": "恢复默认设置",
+    "reset_confirm": {
+      "title": "恢复所有快捷键的默认设置？",
+      "description": "这会清除当前设备上的所有自定义快捷键，并恢复默认设置。",
+      "cancel": "取消",
+      "confirm": "恢复全部默认设置"
+    },
     "reset": "重置",
     "disable": "停用",
     "reset_action": "重置「{{action}}」",
