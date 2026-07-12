@@ -26,21 +26,28 @@ spec:
               value: https://g2crowd.atlassian.net
             - name: DEFAULT_GIT_REPO
               value: "https://github.com/g2crowd/ai-enhancement-hub,https://github.com/g2crowd/ue,https://github.com/g2crowd/companies_service"
-            # Platform Bot GitHub App — non-secret identifiers used by
-            # git-credential-platform-bot to mint installation tokens. The
-            # private key (GITHUB_APP_PRIVATE_KEY) arrives via the
+            # Enterprise Platform Bot GitHub App — installed in both g2crowd and
+            # gartner-digital-markets, enabling cross-org repo access.
+            # The credential helper resolves the correct installation ID
+            # dynamically at mint time, so no per-org installation ID is needed.
+            # The private key (GITHUB_APP_PRIVATE_KEY) arrives via the
             # agentrunner-secrets envFrom below.
+            # TODO: replace with G2 Enterprise Platform Bot app ID once confirmed.
             - name: GITHUB_APP_ID
-              value: "859473"
-            - name: GITHUB_APP_INSTALLATION_ID
-              value: "48670491"
+              value: "4153447"
+            # Fallback org for gh CLI invocations that run outside a git checkout.
+            # Dynamic installation discovery covers the git credential path without
+            # this; it is only needed when the gh wrapper cannot detect a remote.
+            - name: GITHUB_DEFAULT_ORG
+              value: "g2crowd"
             # Bot git identity. Declared here (not via the secret) so it takes
             # precedence over any GIT_USER_* swept in through envFrom — commits
             # from runner agents are attributed to the bot, not the requester.
+            # TODO: update to Enterprise Bot identity once confirmed.
             - name: GIT_USER_NAME
-              value: "g2-platform-bot[bot]"
+              value: "g2-enterprise-platform-bot[bot]"
             - name: GIT_USER_EMAIL
-              value: "g2-platform-bot[bot]@users.noreply.github.com"
+              value: "g2-enterprise-platform-bot[bot]@users.noreply.github.com"
           envFrom:
             - secretRef:
                 name: agentrunner-secrets

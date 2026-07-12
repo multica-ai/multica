@@ -8,13 +8,16 @@ set -euo pipefail
 : "${OPENAI_API_KEY:?OPENAI_API_KEY required}"
 : "${WORKSPACE_SLUG:?WORKSPACE_SLUG required}"
 
-# ── GitHub credential helper (Platform Bot GitHub App) ───────────────────────
-# The runner mints short-lived installation tokens from the Platform Bot app at
-# git-time via git-credential-platform-bot, so no static PAT is stored. App
-# creds (GITHUB_APP_ID, GITHUB_APP_INSTALLATION_ID, GITHUB_APP_PRIVATE_KEY)
-# arrive via the deployment env + agentrunner-secrets.
-if [ -n "${GITHUB_APP_ID:-}" ] && [ -n "${GITHUB_APP_INSTALLATION_ID:-}" ] && [ -n "${GITHUB_APP_PRIVATE_KEY:-}" ]; then
+# ── GitHub credential helper (Enterprise Platform Bot GitHub App) ─────────────
+# The runner mints short-lived installation tokens via git-credential-platform-bot.
+# Installation IDs are resolved dynamically per org/repo at mint time, so no
+# GITHUB_APP_INSTALLATION_ID is needed. App creds (GITHUB_APP_ID,
+# GITHUB_APP_PRIVATE_KEY) arrive via the deployment env + agentrunner-secrets.
+if [ -n "${GITHUB_APP_ID:-}" ] && [ -n "${GITHUB_APP_PRIVATE_KEY:-}" ]; then
   git config --global --replace-all credential."https://github.com".helper "/usr/local/bin/git-credential-platform-bot"
+  # Send the full repo path to the credential helper so it can resolve the
+  # correct installation per org without a hardcoded installation ID.
+  git config --global credential."https://github.com".useHttpPath true
   # Rewrite ssh-style remotes to https so the credential helper applies.
   git config --global --unset-all url."https://github.com/".insteadOf 2>/dev/null || true
   git config --global --add url."https://github.com/".insteadOf "git@github.com:"
