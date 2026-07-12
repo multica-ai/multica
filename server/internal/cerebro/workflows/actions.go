@@ -487,6 +487,15 @@ func (s *Service) dispatchPhaseRunOnIssue(ctx context.Context, wf workflow, te T
 	if err != nil {
 		return fmt.Errorf("run_skill: load target issue: %w", err)
 	}
+	if s.planDocuments != nil {
+		status := "Plan phase started. The agent is writing the plan."
+		if phase != "plan" {
+			status = "Build phase started. The agent is building from the plan."
+		}
+		if _, _, err := s.planDocuments.AppendIssueStatus(ctx, issue.WorkspaceID, issue.ID, status); err != nil {
+			return fmt.Errorf("run_skill: update plan document: %w", err)
+		}
+	}
 
 	comment, err := s.issues.CreateComment(ctx, db.CreateCommentParams{
 		IssueID:     issue.ID,

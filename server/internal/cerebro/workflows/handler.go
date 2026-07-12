@@ -47,6 +47,9 @@ type Handler struct {
 	issueLoopColumns *IssueLoopColumnStore
 	// loopCheckStore is optional and nil-safe: see issue_loop_state.go.
 	loopCheckStore LoopCheckStore
+	// planDocuments is optional and nil-safe: when wired, issue workflow
+	// activation maintains the shared plan artifact under Agents > Workflow.
+	planDocuments *PlanDocumentService
 	// issueLookup is optional and nil-safe: without it, the per-issue
 	// activation endpoints (FIR-2283 v2 point 8) are unavailable. Wired via
 	// WithIssueLookup from router.go — reuses the IssueLookup interface
@@ -70,6 +73,11 @@ func (h *Handler) WithIssueLookup(l IssueLookup) *Handler {
 // Returns the receiver for chainable init.
 func (h *Handler) WithIssueLoopColumns(s *IssueLoopColumnStore) *Handler {
 	h.issueLoopColumns = s
+	return h
+}
+
+func (h *Handler) WithPlanDocuments(s *PlanDocumentService) *Handler {
+	h.planDocuments = s
 	return h
 }
 
@@ -1174,6 +1182,20 @@ func (h *Handler) ActivateForIssue(ctx context.Context, workspaceID, workflowID,
 	}
 	if len(fields.LoopSpec) == 0 {
 		return fmt.Errorf("this recipe has no loop_spec to compile")
+	}
+	if h.planDocuments != nil {
+		if _, err := h.planDocuments.Ensure(ctx, PlanDocumentEnsureParams{
+			WorkspaceID:   workspaceID,
+			IssueID:       issueID,
+			WorkflowID:    row.ID,
+			WorkflowName:  row.Name,
+			AuthorID:      creatorID,
+			AuthorType:    createdByType,
+			RequesterID:   creatorID,
+			InitialStatus: "Workflow activated. Plan phase is starting.",
+		}); err != nil {
+			return fmt.Errorf("create workflow plan document: %w", err)
+		}
 	}
 	if err := h.issueLoopCompiler.ActivateOnIssue(ctx, workspaceID, row.ID, row.ProjectID, creatorID, issueID, createdByType, fields.LoopSpec); err != nil {
 		return err
