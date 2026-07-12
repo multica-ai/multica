@@ -125,7 +125,7 @@ function AgentPickerRow({
         initials={agent.name.slice(0, 2).toUpperCase()}
         avatarUrl={resolvePublicFileUrl(agent.avatar_url)}
         isAgent
-        size={22}
+        size="md"
       />
       <span className="min-w-0 flex-1 truncate text-sm">{agent.name}</span>
       {hasAll ? (

@@ -753,7 +753,7 @@ function Leaderboard({
                         <ActorAvatar
                           actorType="agent"
                           actorId={row.agentId}
-                          size={22}
+                          size="md"
                           enableHoverCard
                         />
                         <span className="cursor-pointer truncate text-sm font-medium">

@@ -35,13 +35,10 @@ func (h *Handler) issueTriggerWriteProbe(r *http.Request, actorType string, issu
 // readiness to a member who cannot see it — matching validateAssigneePair /
 // canEnqueueSquadLeader) and the same self-loop guard.
 func (h *Handler) issueTriggerPreviewProbe(r *http.Request, actorType, actorID, workspaceID string, issue db.Issue) service.IssueTriggerProbe {
+	originatorUserID := h.invokeOriginatorFromRequest(r, actorType, actorID)
 	return service.IssueTriggerProbe{
 		CanAccessAgent: func(agent db.Agent) bool {
-			at := actorType
-			if at == "system" {
-				at = "agent"
-			}
-			return h.canAccessPrivateAgent(r.Context(), agent, at, actorID, workspaceID)
+			return h.canInvokeAgent(r.Context(), agent, actorType, actorID, originatorUserID, workspaceID)
 		},
 		IsSelfLoop: func() bool {
 			return h.isAgentRunningOnIssue(r, actorType, issue)

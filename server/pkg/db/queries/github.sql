@@ -7,9 +7,13 @@ SELECT * FROM github_installation
 WHERE workspace_id = $1
 ORDER BY created_at ASC;
 
--- name: GetGitHubInstallationByInstallationID :one
+-- name: ListGitHubInstallationsByInstallationID :many
+-- One installation_id can be bound to several workspaces; webhook routing lists
+-- every binding and picks the target workspace via the repos registry. Ordered
+-- so the oldest binding is the deterministic routing fallback (insts[0]).
 SELECT * FROM github_installation
-WHERE installation_id = $1;
+WHERE installation_id = $1
+ORDER BY created_at ASC, id ASC;
 
 -- name: GetGitHubInstallationByID :one
 SELECT * FROM github_installation
@@ -21,8 +25,7 @@ INSERT INTO github_installation (
 ) VALUES (
     $1, $2, $3, $4, sqlc.narg('account_avatar_url'), sqlc.narg('connected_by_id')
 )
-ON CONFLICT (installation_id) DO UPDATE SET
-    workspace_id = EXCLUDED.workspace_id,
+ON CONFLICT (workspace_id, installation_id) DO UPDATE SET
     account_login = EXCLUDED.account_login,
     account_type = EXCLUDED.account_type,
     account_avatar_url = EXCLUDED.account_avatar_url,
@@ -33,9 +36,24 @@ RETURNING *;
 -- name: DeleteGitHubInstallation :exec
 DELETE FROM github_installation WHERE id = $1 AND workspace_id = $2;
 
--- name: DeleteGitHubInstallationByInstallationID :one
+-- name: DeleteGitHubInstallationByInstallationID :many
+-- GitHub-side uninstall/suspend removes trust in the installation entirely, so
+-- drop every workspace binding. Returns one row per deleted binding so the
+-- handler can broadcast to each affected workspace.
 DELETE FROM github_installation WHERE installation_id = $1
 RETURNING id, workspace_id;
+
+-- name: UpdateGitHubInstallationAccountByInstallationID :many
+-- Refresh the GitHub account display metadata across every workspace binding of
+-- an installation (fired by installation.created/new_permissions_accepted/
+-- unsuspend). Leaves workspace_id and connected_by_id untouched.
+UPDATE github_installation
+SET account_login = $2,
+    account_type = $3,
+    account_avatar_url = sqlc.narg('account_avatar_url'),
+    updated_at = now()
+WHERE installation_id = $1
+RETURNING *;
 
 -- name: UpsertPendingGitHubInstallation :one
 INSERT INTO github_pending_installation (
@@ -120,12 +138,14 @@ WHERE workspace_id = $1 AND repo_owner = $2 AND repo_name = $3 AND pr_number = $
 -- selected so a single app firing multiple suites on the same head doesn't
 -- get counted N times. Late-arriving suites for an OLD head are stored but
 -- excluded by the head_sha filter, so they can't override the new head's
--- pending view.
+-- pending view. reference_only links (a PR that merely mentions the issue
+-- identifier in its body, with no closing keyword and no title/branch
+-- reference) are filtered out — they are not working PRs for this issue.
 WITH issue_prs AS (
     SELECT pr.id, pr.head_sha
     FROM github_pull_request pr
     JOIN issue_pull_request ipr ON ipr.pull_request_id = pr.id
-    WHERE ipr.issue_id = sqlc.arg('issue_id')
+    WHERE ipr.issue_id = sqlc.arg('issue_id') AND NOT ipr.reference_only
 ),
 per_app_latest AS (
     SELECT DISTINCT ON (cs.pr_id, cs.app_id)
@@ -164,8 +184,25 @@ SELECT
 FROM github_pull_request pr
 JOIN issue_pull_request ipr ON ipr.pull_request_id = pr.id
 LEFT JOIN checks c ON c.pr_id = pr.id
-WHERE ipr.issue_id = sqlc.arg('issue_id')
+WHERE ipr.issue_id = sqlc.arg('issue_id') AND NOT ipr.reference_only
 ORDER BY pr.pr_created_at DESC;
+
+-- name: GetIssueReviewHeadSha :one
+-- Returns the head SHA of the commit currently "under review" for an issue:
+-- the most-recently-updated linked PR that still has an open/draft state and a
+-- non-empty head_sha. Used by the reviewer-loop dedup (TEN-356) so a pending
+-- review task pinned to an old head does not satisfy a request after HEAD
+-- advanced. Prefers in-flight PRs (open/draft) over merged/closed ones so a
+-- stale merged sibling can't shadow the live review target; falls back to the
+-- newest linked PR with a head_sha when none are open. Returns no rows (empty
+-- string) when the issue has no linked PR — callers treat that as "no SHA key"
+-- and dedup on (issue_id, agent_id) alone, preserving pre-TEN-356 behavior.
+SELECT pr.head_sha
+FROM github_pull_request pr
+JOIN issue_pull_request ipr ON ipr.pull_request_id = pr.id
+WHERE ipr.issue_id = $1 AND pr.head_sha <> ''
+ORDER BY (pr.state IN ('open', 'draft')) DESC, pr.pr_updated_at DESC
+LIMIT 1;
 
 -- name: ListIssueIDsForPullRequest :many
 SELECT issue_id FROM issue_pull_request
@@ -180,12 +217,19 @@ WHERE pull_request_id = $1;
 -- (with close_intent) are persisted before this query runs, so the result
 -- is event-agnostic — a link-only sibling closing after a closing-keyword
 -- PR has already merged still resolves the issue.
+--
+-- reference_only links (a PR that merely mentions the issue identifier in its
+-- body) are excluded: they are hidden from the issue PR list, so they must not
+-- silently gate auto-advance either. An open body-only mention would otherwise
+-- keep open_count > 0 and block the issue from advancing while being invisible
+-- in the UI. (reference_only rows never carry close_intent, so excluding them
+-- does not change merged_with_close_intent_count.)
 SELECT
     COALESCE(SUM(CASE WHEN pr.state IN ('open', 'draft') THEN 1 ELSE 0 END), 0)::bigint AS open_count,
     COALESCE(SUM(CASE WHEN pr.state = 'merged' AND ipr.close_intent THEN 1 ELSE 0 END), 0)::bigint AS merged_with_close_intent_count
 FROM github_pull_request pr
 JOIN issue_pull_request ipr ON ipr.pull_request_id = pr.id
-WHERE ipr.issue_id = $1;
+WHERE ipr.issue_id = $1 AND NOT ipr.reference_only;
 
 -- =====================
 -- GitHub PR check suite
@@ -262,15 +306,24 @@ RETURNING suite_id, head_sha, app_id, conclusion, status, suite_updated_at;
 -- the current title/body parse result so authors can remove a closing keyword
 -- before merge. Post-terminal edits can opt into preserving the stored value,
 -- keeping the merge-time decision stable.
+--
+-- reference_only marks a link justified ONLY by a bare body mention (no closing
+-- keyword, no title/branch reference). It follows the same preserve gate as
+-- close_intent so a post-terminal edit can't retroactively hide a PR that did
+-- the work. The issue's PR list filters these out (see ListPullRequestsByIssue).
 INSERT INTO issue_pull_request (
-    issue_id, pull_request_id, linked_by_type, linked_by_id, close_intent
+    issue_id, pull_request_id, linked_by_type, linked_by_id, close_intent, reference_only
 ) VALUES (
-    $1, $2, sqlc.narg('linked_by_type'), sqlc.narg('linked_by_id'), $3
+    $1, $2, sqlc.narg('linked_by_type'), sqlc.narg('linked_by_id'), $3, sqlc.arg('reference_only')
 )
 ON CONFLICT (issue_id, pull_request_id) DO UPDATE SET
     close_intent = CASE
         WHEN sqlc.arg('preserve_close_intent') THEN issue_pull_request.close_intent
         ELSE EXCLUDED.close_intent
+    END,
+    reference_only = CASE
+        WHEN sqlc.arg('preserve_close_intent') THEN issue_pull_request.reference_only
+        ELSE EXCLUDED.reference_only
     END;
 
 -- name: UnlinkIssueFromPullRequest :exec

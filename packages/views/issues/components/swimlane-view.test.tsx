@@ -47,18 +47,12 @@ vi.mock("@multica/core/paths", async () => {
   };
 });
 
-// Stub backend-bound queries that the swimlane invokes for project /
-// assignee groupings. The hook MUST return a stable reference each call
+// Stub backend-bound hooks that the swimlane invokes for assignee groupings.
+// The hook MUST return a stable reference each call
 // — production `useActorName` wraps its returns in `useMemo`, and the
 // swimlane feeds the result into a `useMemo(..., [getActorName, ...])`
 // that then drives a `useEffect(setLocalCells, [cells])` chain. A fresh
 // object per render therefore loops the effect indefinitely.
-vi.mock("@multica/core/projects/queries", () => ({
-  projectListOptions: (_wsId: string) => ({
-    queryKey: ["projects", _wsId, "list"],
-    queryFn: () => Promise.resolve([]),
-  }),
-}));
 const { mockActorNameResult } = vi.hoisted(() => ({
   mockActorNameResult: {
     getActorName: (_type: string, _id: string) => "Mock Actor",
@@ -101,7 +95,6 @@ vi.mock("../../navigation", () => ({
 // Mock issue config
 vi.mock("@multica/core/issues/config", () => ({
   ALL_STATUSES: ["backlog", "todo", "in_progress", "in_review", "done", "blocked", "cancelled"],
-  BOARD_STATUSES: ["backlog", "todo", "in_progress", "in_review", "done", "blocked"],
   STATUS_ORDER: ["backlog", "todo", "in_progress", "in_review", "done", "blocked", "cancelled"],
   STATUS_CONFIG: {
     backlog: { label: "Backlog", iconColor: "text-muted-foreground", hoverBg: "hover:bg-accent" },
@@ -378,6 +371,67 @@ describe("SwimLaneView", () => {
     expect(screen.getByText("In Progress")).toBeInTheDocument();
   });
 
+  // MUL-4290: `cancelled` is a first-class default status. Status columns come
+  // from `visibleStatuses` in ALL_STATUSES order, so the Cancelled column
+  // renders by default (ordered last) and is only dropped when the status
+  // filter narrows to a subset that excludes it.
+  const cancelledOrphan: Issue = {
+    id: "cancelled-orphan",
+    workspace_id: "ws-1",
+    number: 9,
+    identifier: "PROJ-9",
+    title: "Cancelled Orphan",
+    description: "A cancelled orphan",
+    status: "cancelled",
+    priority: "none",
+    assignee_type: null,
+    assignee_id: null,
+    creator_type: "member",
+    creator_id: "user-1",
+    parent_issue_id: null,
+    project_id: null,
+    position: 400,
+    stage: null,
+    start_date: null,
+    due_date: null,
+    metadata: {},
+    created_at: "2026-01-01T00:00:00Z",
+    updated_at: "2026-01-01T00:00:00Z",
+  };
+
+  it("renders a Cancelled column and its cards by default", () => {
+    renderWithI18n(
+      // No visibleStatuses prop → default (ALL_STATUSES) includes cancelled.
+      <SwimLaneView
+        issues={[...mockIssues, cancelledOrphan]}
+        onMoveIssue={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText("Cancelled")).toBeInTheDocument();
+    expect(screen.getByText("Cancelled Orphan")).toBeInTheDocument();
+  });
+
+  it("omits the Cancelled column when the status filter narrows to a subset without cancelled", () => {
+    renderWithI18n(
+      <SwimLaneView
+        issues={[...mockIssues, cancelledOrphan]}
+        visibleStatuses={[
+          "backlog",
+          "todo",
+          "in_progress",
+          "in_review",
+          "done",
+          "blocked",
+        ]}
+        onMoveIssue={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByText("Cancelled")).not.toBeInTheDocument();
+    expect(screen.queryByText("Cancelled Orphan")).not.toBeInTheDocument();
+  });
+
   it("renders parent swimlanes and orphans section", () => {
     renderWithI18n(
       <SwimLaneView
@@ -409,11 +463,13 @@ describe("SwimLaneView", () => {
     expect(screen.getByText("Child Issue 1")).toBeInTheDocument();
   });
 
-  it("triggers modal open when add button is clicked", () => {
+  it("calls the create callback when add button is clicked", () => {
+    const onCreateIssue = vi.fn();
     renderWithI18n(
       <SwimLaneView
         issues={mockIssues}
         onMoveIssue={vi.fn()}
+        onCreateIssue={onCreateIssue}
       />,
     );
 
@@ -421,25 +477,48 @@ describe("SwimLaneView", () => {
     expect(addButtons.length).toBeGreaterThan(0);
 
     fireEvent.click(addButtons[0]!);
-    expect(mockOpenModal).toHaveBeenCalledWith("create-issue", expect.any(Object));
+    expect(onCreateIssue).toHaveBeenCalledWith(expect.any(Object));
+    expect(mockOpenModal).not.toHaveBeenCalled();
   });
 
   it("includes project_id in the create payload when projectId prop is set", () => {
+    const onCreateIssue = vi.fn();
     renderWithI18n(
       <SwimLaneView
         issues={mockIssues}
         onMoveIssue={vi.fn()}
         projectId="proj-42"
+        onCreateIssue={onCreateIssue}
       />,
     );
 
     const addButtons = screen.getAllByRole("button", { name: /add issue/i });
     fireEvent.click(addButtons[0]!);
 
-    expect(mockOpenModal).toHaveBeenCalledWith(
-      "create-issue",
+    expect(onCreateIssue).toHaveBeenCalledWith(
       expect.objectContaining({ project_id: "proj-42" }),
     );
+    expect(mockOpenModal).not.toHaveBeenCalled();
+  });
+
+  it("routes add button through the surface create callback when provided", () => {
+    const onCreateIssue = vi.fn();
+    renderWithI18n(
+      <SwimLaneView
+        issues={mockIssues}
+        onMoveIssue={vi.fn()}
+        projectId="proj-42"
+        onCreateIssue={onCreateIssue}
+      />,
+    );
+
+    const addButtons = screen.getAllByRole("button", { name: /add issue/i });
+    fireEvent.click(addButtons[0]!);
+
+    expect(onCreateIssue).toHaveBeenCalledWith(
+      expect.objectContaining({ project_id: "proj-42" }),
+    );
+    expect(mockOpenModal).not.toHaveBeenCalled();
   });
 
   // A child whose parent isn't in the loaded set — lands in "Other parents".
@@ -481,13 +560,14 @@ describe("SwimLaneView", () => {
       <SwimLaneView
         issues={[...mockIssues, orphanChild]}
         onMoveIssue={vi.fn()}
+        onCreateIssue={vi.fn()}
       />,
     );
 
     // No parent + Parent Issue 1 each have one + per visible status column.
     // The Other parents lane must add zero.
     const realLaneCount = 2;
-    const visibleStatusCount = 6; // BOARD_STATUSES default
+    const visibleStatusCount = 7; // ALL_STATUSES default (cancelled included)
     expect(
       screen.getAllByRole("button", { name: /add issue/i }).length,
     ).toBe(realLaneCount * visibleStatusCount);
@@ -1063,10 +1143,9 @@ describe("SwimLaneView", () => {
 
     // No-project pinned lane is always present.
     expect(screen.getAllByText("No project").length).toBeGreaterThanOrEqual(1);
-    // Both issue cards from real projects render — production fetches
-    // project titles from the API; in tests the mocked listProjects
-    // returns [] so the lane headers fall back to an empty title and
-    // we assert on card visibility, not lane title text.
+    // Both issue cards from real projects render. The component receives
+    // project metadata from its parent, so this standalone test asserts on
+    // card visibility rather than lane title text.
     expect(screen.getByText("Issue A")).toBeInTheDocument();
     expect(screen.getByText("Issue B")).toBeInTheDocument();
     expect(screen.getByText("Issue C")).toBeInTheDocument();

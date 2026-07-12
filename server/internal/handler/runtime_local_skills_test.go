@@ -372,6 +372,12 @@ func TestRuntimeLocalSkillImportFlow_EndToEnd(t *testing.T) {
 	if completed.Skill.Description != "Imported description" {
 		t.Fatalf("imported description = %q", completed.Skill.Description)
 	}
+	if len(completed.Skill.Files) != 1 {
+		t.Fatalf("expected poll response to include 1 imported file, got %d", len(completed.Skill.Files))
+	}
+	if completed.Skill.Files[0].Path != "templates/check.md" || completed.Skill.Files[0].Content != "body" {
+		t.Fatalf("unexpected imported file in poll response: %+v", completed.Skill.Files[0])
+	}
 	if got := countSkillFiles(t, completed.Skill.ID); got != 1 {
 		t.Fatalf("expected 1 imported file, got %d", got)
 	}

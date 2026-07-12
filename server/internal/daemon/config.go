@@ -222,9 +222,9 @@ func LoadConfig(overrides Overrides) (Config, error) {
 	}
 	probe := func(envVar, defaultCmd, modelEnv string) (AgentEntry, bool) {
 		cmd := envOrDefault(envVar, defaultCmd)
-		if _, err := exec.LookPath(cmd); err == nil {
+		if path, err := resolveAgentExecutablePath(cmd); err == nil {
 			return AgentEntry{
-				Path:  cmd,
+				Path:  path,
 				Model: strings.TrimSpace(os.Getenv(modelEnv)),
 			}, true
 		}
@@ -298,9 +298,9 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		agents["antigravity"] = e
 	}
 	qoderPath := envOrDefault("MULTICA_QODER_PATH", "qodercli")
-	if _, err := exec.LookPath(qoderPath); err == nil {
+	if path, err := resolveAgentExecutablePath(qoderPath); err == nil {
 		agents["qoder"] = AgentEntry{
-			Path:  qoderPath,
+			Path:  path,
 			Model: strings.TrimSpace(os.Getenv("MULTICA_QODER_MODEL")),
 		}
 	}
@@ -654,6 +654,98 @@ func shellArgsFromEnv(name string) ([]string, error) {
 	return args, nil
 }
 
+// resolveAgentExecutablePath returns the concrete executable path the daemon
+// should keep for an agent command. Bare command names are pinned to the path
+// resolved during startup so later PATH changes cannot redirect task launches.
+// When ~/.multica/hooks shadows a real agent binary, skip that hooks directory:
+// previously generated hook wrappers can execute the same command name and
+// recurse forever if the daemon records or launches the wrapper.
+func resolveAgentExecutablePath(cmd string) (string, error) {
+	resolved, err := exec.LookPath(cmd)
+	if err != nil {
+		return "", err
+	}
+	if strings.ContainsAny(cmd, "/\\") {
+		return resolved, nil
+	}
+	if isInMulticaHooksDir(resolved) {
+		if unshadowed, err := lookPathExcludingMulticaHooks(cmd); err == nil {
+			return unshadowed, nil
+		}
+	}
+	return canonicalExecutablePath(resolved), nil
+}
+
+func lookPathExcludingMulticaHooks(cmd string) (string, error) {
+	for _, dir := range filepath.SplitList(os.Getenv("PATH")) {
+		if dir == "" {
+			dir = "."
+		}
+		if isMulticaHooksDir(dir) {
+			continue
+		}
+		candidate := filepath.Join(dir, cmd)
+		if isExecutableFile(candidate) {
+			return canonicalExecutablePath(candidate), nil
+		}
+	}
+	return "", exec.ErrNotFound
+}
+
+func isInMulticaHooksDir(path string) bool {
+	if path == "" {
+		return false
+	}
+	return isMulticaHooksDir(filepath.Dir(path))
+}
+
+func isMulticaHooksDir(dir string) bool {
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return false
+	}
+	return samePathDir(dir, filepath.Join(home, ".multica", "hooks"))
+}
+
+func samePathDir(a, b string) bool {
+	absA, err := filepath.Abs(a)
+	if err != nil {
+		return false
+	}
+	absB, err := filepath.Abs(b)
+	if err != nil {
+		return false
+	}
+	absA = filepath.Clean(absA)
+	absB = filepath.Clean(absB)
+	if realA, err := filepath.EvalSymlinks(absA); err == nil {
+		absA = realA
+	}
+	if realB, err := filepath.EvalSymlinks(absB); err == nil {
+		absB = realB
+	}
+	return absA == absB
+}
+
+func canonicalExecutablePath(path string) string {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return path
+	}
+	if real, err := filepath.EvalSymlinks(abs); err == nil {
+		return real
+	}
+	return abs
+}
+
+func isExecutableFile(path string) bool {
+	info, err := os.Stat(path)
+	if err != nil || info.IsDir() {
+		return false
+	}
+	return info.Mode()&0o111 != 0
+}
+
 // defaultAgentCommandNames lists the command names the agent probe loop tries
 // before any MULTICA_*_PATH override is applied. Kept in sync with the
 // `probe(...)` calls in LoadConfig — the shell-fallback resolver uses this
@@ -806,7 +898,9 @@ func resolveAgentsViaLoginShell(names []string) map[string]string {
 //     than hand back garbage),
 //  5. canonicalises the directory via `cd ... && pwd -P` so symlinked prefix
 //     dirs (fnm/nvm/volta) collapse to stable paths,
-//  6. prints `<name>\t<canonical_path>` one entry per line for the caller.
+//  6. if the resolved path lives in ~/.multica/hooks, searches the same
+//     shell-expanded PATH for the first executable outside that hooks dir,
+//  7. prints `<name>\t<canonical_path>` one entry per line for the caller.
 //
 // Why steps 2 is important — and why this PR's first revision missed #2512:
 // the motivating case has `alias claude=...` in ~/.zshrc *and* fnm's real
@@ -835,6 +929,18 @@ func buildLoginShellResolveScript(names []string) string {
 	b.WriteString("  [ -n \"$p\" ] || continue\n")
 	b.WriteString("  case \"$p\" in /*) ;; *) continue ;; esac\n")
 	b.WriteString("  d=$(dirname \"$p\") && f=$(basename \"$p\") && c=$(cd \"$d\" 2>/dev/null && pwd -P) || continue\n")
+	b.WriteString("  hc=\"\"\n")
+	b.WriteString("  if [ -n \"${HOME:-}\" ]; then hd=\"$HOME/.multica/hooks\"; hc=$(cd \"$hd\" 2>/dev/null && pwd -P) || hc=\"\"; fi\n")
+	b.WriteString("  if [ -n \"$hc\" ] && [ \"$c\" = \"$hc\" ]; then\n")
+	b.WriteString("    oldIFS=$IFS; IFS=:\n")
+	b.WriteString("    for d2 in $PATH; do\n")
+	b.WriteString("      [ -n \"$d2\" ] || d2=.\n")
+	b.WriteString("      c2=$(cd \"$d2\" 2>/dev/null && pwd -P) || continue\n")
+	b.WriteString("      [ \"$c2\" = \"$hc\" ] && continue\n")
+	b.WriteString("      if [ -f \"$c2/$n\" ] && [ -x \"$c2/$n\" ]; then c=\"$c2\"; f=\"$n\"; break; fi\n")
+	b.WriteString("    done\n")
+	b.WriteString("    IFS=$oldIFS\n")
+	b.WriteString("  fi\n")
 	b.WriteString("  printf '%s\\t%s\\n' \"$n\" \"$c/$f\"\n")
 	b.WriteString("done\n")
 	return b.String()

@@ -203,6 +203,34 @@ func TestDeleteAgentRuntime_CustomProfileInstanceRefusesDirectDelete(t *testing.
 	}
 }
 
+func TestDeleteAgentRuntime_OrphanedProfileAllowsDirectDelete(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+
+	runtimeID, profileID := createProfileBackedRuntime(t, ctx, "Orphaned Custom Instance Delete")
+	if _, err := testPool.Exec(ctx, `DELETE FROM runtime_profile WHERE id = $1`, profileID); err != nil {
+		t.Fatalf("delete profile row: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	req := newRequest("DELETE", "/api/runtimes/"+runtimeID, nil)
+	req = withURLParam(req, "runtimeId", runtimeID)
+	testHandler.DeleteAgentRuntime(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var rtRows int
+	if err := testPool.QueryRow(ctx, `SELECT count(*) FROM agent_runtime WHERE id = $1`, runtimeID).Scan(&rtRows); err != nil {
+		t.Fatalf("count runtime rows: %v", err)
+	}
+	if rtRows != 0 {
+		t.Fatalf("expected orphaned custom runtime instance to be deleted, count=%d", rtRows)
+	}
+}
+
 // TestArchiveAgentsAndDeleteRuntime_HappyPath exercises the cascade endpoint
 // end-to-end: with the correct expected_active_agent_ids snapshot, it must
 // archive the active agent, delete the runtime row, and respond 200 with the
@@ -277,6 +305,35 @@ func TestArchiveAgentsAndDeleteRuntime_CustomProfileInstanceRefusesDirectDelete(
 	}
 	if rtRows != 1 {
 		t.Fatalf("expected custom runtime instance to survive refusal, count=%d", rtRows)
+	}
+}
+
+func TestArchiveAgentsAndDeleteRuntime_OrphanedProfileAllowsCascade(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+
+	runtimeID, profileID := createProfileBackedRuntime(t, ctx, "Orphaned Custom Instance Cascade")
+	if _, err := testPool.Exec(ctx, `DELETE FROM runtime_profile WHERE id = $1`, profileID); err != nil {
+		t.Fatalf("delete profile row: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/runtimes/"+runtimeID+"/archive-agents-and-delete",
+		map[string]any{"expected_active_agent_ids": []string{}})
+	req = withURLParam(req, "runtimeId", runtimeID)
+	testHandler.ArchiveAgentsAndDeleteRuntime(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var rtRows int
+	if err := testPool.QueryRow(ctx, `SELECT count(*) FROM agent_runtime WHERE id = $1`, runtimeID).Scan(&rtRows); err != nil {
+		t.Fatalf("count runtime rows: %v", err)
+	}
+	if rtRows != 0 {
+		t.Fatalf("expected orphaned custom runtime instance to be deleted, count=%d", rtRows)
 	}
 }
 

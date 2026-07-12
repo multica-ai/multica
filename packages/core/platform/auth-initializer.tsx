@@ -67,6 +67,7 @@ export function AuthInitializer({
           daemonServerUrl: cfg.daemon_server_url,
           daemonAppUrl: cfg.daemon_app_url,
         });
+        configStore.getState().setFeatureFlags(cfg.feature_flags);
         if (cfg.posthog_key) {
           initAnalytics({
             key: cfg.posthog_key,

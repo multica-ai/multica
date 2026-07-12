@@ -142,6 +142,41 @@ func (s *ChannelStore) UpsertLarkInstallation(ctx context.Context, arg UpsertIns
 	return installationFromRow(row)
 }
 
+// ReclaimDeadInstallationByAppID frees the (feishu, config->>'app_id') routing
+// slot before a rebind by removing a DEAD prior owner of the same Lark/Feishu
+// app — a revoked placeholder left by a DIFFERENT agent in this workspace, or an
+// ORPHAN whose owning workspace/agent has been deleted (#4810) — together with
+// every dependent row of that installation, in a single statement. A live owner
+// is deliberately left in place: the SAME agent's own revoked row (reactivated by
+// the follow-up upsert), and any ACTIVE owner whose agent still exists — including
+// an ARCHIVED agent, since archiving is reversible — so the upsert surfaces a
+// conflict instead of silently stealing the bot. See the full contract, and the
+// TOCTOU / EvalPlanQual reasoning, on ReclaimDeadChannelInstallationByAppID.
+func (s *ChannelStore) ReclaimDeadInstallationByAppID(ctx context.Context, workspaceID, agentID pgtype.UUID, appID string) error {
+	_, err := s.Queries.ReclaimDeadChannelInstallationByAppID(ctx, db.ReclaimDeadChannelInstallationByAppIDParams{
+		ChannelType: channelTypeFeishu,
+		AppID:       appID,
+		WorkspaceID: workspaceID,
+		AgentID:     agentID,
+	})
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		// pgx.ErrNoRows just means nothing was dead — a no-op, not a failure.
+		return err
+	}
+	return nil
+}
+
+// InstallationOwnerByAppID returns the current owner of the (feishu, app_id)
+// routing slot so the caller can build an accurate rebind-conflict message.
+// Called after ReclaimDeadInstallationByAppID, so a row here is a live owner;
+// pgx.ErrNoRows means the slot is free.
+func (s *ChannelStore) InstallationOwnerByAppID(ctx context.Context, appID string) (db.GetChannelInstallationOwnerByAppIDRow, error) {
+	return s.Queries.GetChannelInstallationOwnerByAppID(ctx, db.GetChannelInstallationOwnerByAppIDParams{
+		ChannelType: channelTypeFeishu,
+		AppID:       appID,
+	})
+}
+
 func (s *ChannelStore) SetLarkInstallationStatus(ctx context.Context, arg SetInstallationStatusParams) error {
 	return s.Queries.SetChannelInstallationStatus(ctx, db.SetChannelInstallationStatusParams{
 		ID:     arg.ID,
@@ -251,23 +286,6 @@ func (s *ChannelStore) GetLarkChatSessionBindingBySession(ctx context.Context, c
 	row, err := s.Queries.GetChannelChatSessionBindingBySession(ctx, db.GetChannelChatSessionBindingBySessionParams{
 		ChatSessionID: chatSessionID,
 		ChannelType:   channelTypeFeishu,
-	})
-	if err != nil {
-		return ChatSessionBinding{}, err
-	}
-	return chatSessionBindingFromRow(row), nil
-}
-
-func (s *ChannelStore) CreateLarkChatSessionBinding(ctx context.Context, arg CreateChatSessionBindingParams) (ChatSessionBinding, error) {
-	row, err := s.Queries.CreateChannelChatSessionBinding(ctx, db.CreateChannelChatSessionBindingParams{
-		ChatSessionID:  arg.ChatSessionID,
-		InstallationID: arg.InstallationID,
-		ChannelType:    channelTypeFeishu,
-		ChannelChatID:  arg.ChannelChatID,
-		ChatType:       arg.ChatType,
-		// Feishu's channel_chat_id is the real chat id, so the key alone routes
-		// outbound; config stays the empty object (the column is NOT NULL).
-		Config: []byte("{}"),
 	})
 	if err != nil {
 		return ChatSessionBinding{}, err

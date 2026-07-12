@@ -161,16 +161,40 @@ type chatSession interface {
 
 type feishuSessionBinder struct{ session chatSession }
 
+// larkBindingConfig is the opaque outbound routing persisted on the chat
+// binding's config when the binding key is a composite (Lark topic): the real
+// chat id lives here so the outbound path can post back.
+type larkBindingConfig struct {
+	ChatID string `json:"chat_id"`
+}
+
+// larkSessionRouting derives the session-isolation key (stored as
+// channel_chat_id) and the outbound config from one inbound Feishu message.
+// A p2p or plain group chat is one continuous session per chat, so the key is
+// the chat id and the key alone routes outbound (no config). A message inside
+// a Lark topic (话题, thread_id present) is isolated by topic — key =
+// "chat:thread" — so two @bot topics in one group are two sessions (the same
+// model as Slack's channel:threadRoot; see engine.EnsureSessionInput). Pure
+// function so the isolation contract is unit-tested without a DB.
+func larkSessionRouting(msg channel.InboundMessage) (bindingKey string, config []byte) {
+	chatID := msg.Source.ChatID
+	if msg.Source.ChatType != channel.ChatTypeGroup || msg.Source.ThreadID == "" {
+		return chatID, nil
+	}
+	cfg, _ := json.Marshal(larkBindingConfig{ChatID: chatID})
+	return chatID + ":" + msg.Source.ThreadID, cfg
+}
+
 func (r *feishuSessionBinder) EnsureSession(ctx context.Context, p engine.EnsureSessionParams) (pgtype.UUID, error) {
+	bindingKey, config := larkSessionRouting(p.Message)
 	return r.session.EnsureSession(ctx, engine.EnsureSessionInput{
 		WorkspaceID:    p.Installation.WorkspaceID,
 		AgentID:        p.Installation.AgentID,
 		InstallationID: p.Installation.ID,
 		Sender:         p.Sender,
-		// Feishu's chat id is the session-isolation key (one session per chat),
-		// and channel_chat_id IS the real outbound chat, so no BindingConfig.
-		BindingKey: p.Message.Source.ChatID,
-		ChatType:   p.Message.Source.ChatType,
+		BindingKey:     bindingKey,
+		BindingConfig:  config,
+		ChatType:       p.Message.Source.ChatType,
 	})
 }
 

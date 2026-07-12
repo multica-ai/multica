@@ -31,19 +31,45 @@ const (
 
 const EventSchemaVersion = 2
 
-// metricsOnlyEvents are operational / execution-lifecycle events that are
-// recorded to Prometheus (via metrics.IncForEvent, for Grafana) but are
-// deliberately NOT shipped to PostHog. They are high-volume runtime/autopilot
-// telemetry whose per-event PostHog ingestion cost is not justified — Grafana
-// already carries the equivalent counters. metrics.RecordEvent consults this
-// set and skips the PostHog Capture for these names while still incrementing
-// the counter. PostHog is reserved for user/product-behaviour events.
+// metricsOnlyEvents lists every server-side event that is recorded to
+// Prometheus (via metrics.IncForEvent, for Grafana) but deliberately NOT
+// shipped to PostHog. metrics.RecordEvent consults this set and skips the
+// PostHog Capture for these names while still incrementing the counter.
+//
+// As of MUL-4127, PostHog is no longer used for server-side product analytics:
+// the acquisition / activation / expansion funnel is now read straight from the
+// operational database and from these Grafana counters, so the redundant
+// PostHog copy of every product event was retired. That makes ALL server-side
+// events metrics-only — both the product-behaviour group and the original
+// high-volume runtime/autopilot telemetry are Prometheus-only. PostHog now only
+// receives frontend error/crash telemetry ($exception, client_crash,
+// client_unresponsive); see packages/core/analytics and docs/analytics.md.
 //
 // Note: agent_task_* lifecycle events are also Prometheus-only, but their
 // Prometheus side is handled by typed BusinessMetrics.RecordTask* methods, so
 // they never build an analytics.Event in the first place and don't need an
 // entry here.
 var metricsOnlyEvents = map[string]struct{}{
+	// Product-behaviour events — DB + Grafana are the source of truth
+	// (MUL-4127); the PostHog copy was redundant.
+	EventSignup:                        {},
+	EventWorkspaceCreated:              {},
+	EventIssueCreated:                  {},
+	EventIssueExecuted:                 {},
+	EventChatMessageSent:               {},
+	EventTeamInviteSent:                {},
+	EventTeamInviteAccepted:            {},
+	EventOnboardingStarted:             {},
+	EventOnboardingQuestionnaireSubmit: {},
+	EventAgentCreated:                  {},
+	EventOnboardingCompleted:           {},
+	EventCloudWaitlistJoined:           {},
+	EventFeedbackSubmitted:             {},
+	EventContactSalesSubmitted:         {},
+	EventSquadCreated:                  {},
+	EventAutopilotCreated:              {},
+	// High-volume runtime / autopilot execution-lifecycle telemetry — always
+	// Prometheus-only (Grafana already carries the equivalent counters).
 	EventRuntimeRegistered:     {},
 	EventRuntimeReady:          {},
 	EventRuntimeFailed:         {},
@@ -53,8 +79,9 @@ var metricsOnlyEvents = map[string]struct{}{
 	EventAutopilotRunFailed:    {},
 }
 
-// IsMetricsOnly reports whether an event name is operational telemetry that
-// must be counted in Prometheus but not sent to PostHog. See metricsOnlyEvents.
+// IsMetricsOnly reports whether an event name is recorded to Prometheus but must
+// not be sent to PostHog. As of MUL-4127 this is true for every server-side
+// event. See metricsOnlyEvents.
 func IsMetricsOnly(name string) bool {
 	_, ok := metricsOnlyEvents[name]
 	return ok

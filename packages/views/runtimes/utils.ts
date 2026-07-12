@@ -135,10 +135,13 @@ export function formatTokens(n: number): string {
 //
 // Anthropic's cacheWrite reflects the 5-minute cache TTL (1.25× input); the
 // daemon reports cache_creation_input_tokens without TTL metadata, so 5m is
-// the safest / cheapest assumption (matches the API default). OpenAI,
-// DeepSeek, Moonshot and Zhipu do not bill cache writes separately (cached
-// input is just discounted on subsequent reads), so cacheWrite mirrors
-// input there.
+// the safest / cheapest assumption (matches the API default). DeepSeek,
+// Moonshot and Zhipu do not bill cache writes separately (cached input is
+// just discounted on subsequent reads), so cacheWrite mirrors input there.
+// OpenAI historically did the same, but its GPT-5.6+ generation bills cache
+// writes at 1.25× input (cache reads still get the 90% cached-input
+// discount), so those rows carry a distinct cacheWrite. Codex usage doesn't
+// yet stream cache-write tokens, so that rate isn't exercised today.
 //
 // The resolver matches exact keys after stripping a trailing date snapshot
 // (see `resolvePricing` below). It deliberately does NOT do startsWith
@@ -187,6 +190,15 @@ const MODEL_PRICING: Record<
   // -- OpenAI: dotted-minor Codex catalog SKUs. Each generation is priced
   //    independently — no fallback to `gpt-5`. Entries track
   //    `server/pkg/agent/models.go` (Codex provider list).
+  //    gpt-5.6 (sol/terra/luna) uses OpenAI's official announcement rates.
+  //    5.6+ is the first OpenAI generation to bill cache writes separately:
+  //    cacheRead = 0.1x input (90% cached-input discount), cacheWrite = 1.25x
+  //    input (see the header note above). Codex usage doesn't yet report
+  //    cache-write tokens, so cacheWrite isn't exercised today, but the rate
+  //    is kept correct for when it is.
+  "gpt-5.6-sol":        { input: 5,    output: 30,   cacheRead: 0.50,  cacheWrite: 6.25 },
+  "gpt-5.6-terra":      { input: 2.50, output: 15,   cacheRead: 0.25,  cacheWrite: 3.125 },
+  "gpt-5.6-luna":       { input: 1,    output: 6,    cacheRead: 0.10,  cacheWrite: 1.25 },
   "gpt-5.5":            { input: 5,    output: 30,   cacheRead: 0.50,  cacheWrite: 5 },
   "gpt-5.4-mini":       { input: 0.75, output: 4.50, cacheRead: 0.075, cacheWrite: 0.75 },
   "gpt-5.4":            { input: 2.50, output: 15,   cacheRead: 0.25,  cacheWrite: 2.50 },

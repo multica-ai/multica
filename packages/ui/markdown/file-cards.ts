@@ -47,9 +47,14 @@ export function isAllowedFileCardHref(href: string): boolean {
   )
 }
 
-/** New syntax: !file[name](url) — unambiguous, no hostname matching needed. */
+/**
+ * New syntax: !file[name](url) — unambiguous, no hostname matching needed.
+ * Backslash is excluded from the label char class so "\x" runs can only be
+ * consumed by \\. — overlapping alternatives backtrack in 2^n ways (ReDoS,
+ * GitHub #4881). This runs on every comment/description render.
+ */
 const NEW_FILE_CARD_RE = new RegExp(
-  `^!file\\[((?:\\\\.|[^\\]])*)\\]\\((${FILE_CARD_URL_PATTERN.source})\\)$`,
+  `^!file\\[((?:\\\\.|[^\\]\\\\])*)\\]\\((${FILE_CARD_URL_PATTERN.source})\\)$`,
 )
 
 /** Legacy syntax: [name](cdnUrl) on its own line — matched by CDN hostname. */

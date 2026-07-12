@@ -101,7 +101,7 @@ export function createEnDict(allowSignup: boolean): LandingDict {
       label: "RUNTIMES",
       title: "One dashboard for all your compute",
       description:
-        "Local daemons and cloud runtimes, managed from a single panel. Real-time monitoring of online/offline status, usage charts, and activity heatmaps. Auto-detects 12 supported coding tools on your machine.",
+        "Local daemons and cloud runtimes, managed from a single panel. Real-time monitoring of online/offline status, usage charts, and activity heatmaps. Auto-detects 14 supported coding tools on your machine.",
       cards: [
         {
           title: "Unified runtime panel",
@@ -116,7 +116,7 @@ export function createEnDict(allowSignup: boolean): LandingDict {
         {
           title: "Auto-detection on first run",
           description:
-            "Multica scans for 12 supported coding tools \u2014 Antigravity, Claude Code, Codex, Cursor, Copilot, Gemini, Hermes, Kimi, Kiro CLI, OpenCode, OpenClaw, and Pi \u2014 and registers a runtime for each one it finds.",
+            "Multica scans for 14 supported coding tools \u2014 Antigravity, Claude Code, CodeBuddy, Codex, Cursor, Copilot, Hermes, Kimi, Kiro CLI, OpenCode, OpenClaw, Pi, Qoder, and Trae CLI \u2014 and registers a runtime for each one it finds.",
         },
       ],
     },
@@ -136,7 +136,7 @@ export function createEnDict(allowSignup: boolean): LandingDict {
       {
         title: "Install the CLI & connect your machine",
         description:
-          "Run multica setup \u2014 it walks you through OAuth, starts the daemon, and scans for the 12 supported coding tools (Antigravity, Claude Code, Codex, Cursor, Copilot, Gemini, Hermes, Kimi, Kiro CLI, OpenCode, OpenClaw, Pi). Whichever ones you already have installed get registered as runtimes automatically.",
+          "Run multica setup \u2014 it walks you through OAuth, starts the daemon, and scans for the 14 supported coding tools (Antigravity, Claude Code, CodeBuddy, Codex, Cursor, Copilot, Hermes, Kimi, Kiro CLI, OpenCode, OpenClaw, Pi, Qoder, Trae CLI). Whichever ones you already have installed get registered as runtimes automatically.",
       },
       {
         title: "Create your first agent",
@@ -192,7 +192,7 @@ export function createEnDict(allowSignup: boolean): LandingDict {
       {
         question: "What coding agents does Multica support?",
         answer:
-          "Multica supports 12 coding tools out of the box: Antigravity, Claude Code, Codex, Cursor, Copilot, Gemini, Hermes, Kimi, Kiro CLI, OpenCode, OpenClaw, and Pi. The daemon auto-detects whichever CLIs you already have installed and registers a runtime for each one. Since it's open source, you can also add your own backends.",
+          "Multica supports 14 coding tools out of the box: Antigravity, Claude Code, CodeBuddy, Codex, Cursor, Copilot, Hermes, Kimi, Kiro CLI, OpenCode, OpenClaw, Pi, Qoder, and Trae CLI. The daemon auto-detects whichever CLIs you already have installed and registers a runtime for each one. Since it's open source, you can also add your own backends.",
       },
       {
         question: "Do I need to self-host, or is there a cloud version?",
@@ -293,6 +293,160 @@ export function createEnDict(allowSignup: boolean): LandingDict {
       fixes: "Bug Fixes",
     },
     entries: [
+      {
+        version: "0.3.42",
+        date: "2026-07-09",
+        title: "A dedicated Chat tab, plus reliability fixes",
+        changes: [],
+        features: [
+          "Chat now lives in its own tab, with your conversations on one side and the open chat on the other.",
+          "New chats get a short, fitting title after your first message, in the language you wrote in.",
+          "Starting a new chat drops your cursor right in the message box, so you can type immediately.",
+          "Cancelled issues now appear as their own column on the board and list, like every other status.",
+          "Hover an agent to see which model it is running and its thinking level, without opening its page.",
+        ],
+        improvements: [
+          "The app recovers its connection more reliably after a brief network interruption.",
+          "Assigning an issue from the command line no longer fails on a momentary network hiccup.",
+        ],
+        fixes: [
+          "Your follow-up comment on an issue is never dropped — even sent while the agent is still working, it always gets picked up.",
+          "When one agent mentions another, the mentioned agent now reliably starts working.",
+          "A chat bot that got stuck can be reconnected again, and the \u201calready in use\u201d message now says exactly who holds it.",
+          "Links wrapped in bold in comments and descriptions now display correctly.",
+          "The Windows desktop app now always shows the correct version number.",
+        ],
+      },
+      {
+        version: "0.3.41",
+        date: "2026-07-08",
+        title: "Machine names, member-owned squads, and CLI issue ordering",
+        changes: [],
+        features: [
+          "You can now give your machines their own names, and the runtime picker for creating an agent is searchable and grouped by machine.",
+          "Any member can now create and manage their own squads, not just workspace admins.",
+          "An agent's owner can now connect and manage its Lark bot directly, without needing to be an admin.",
+          "You can now reorder issues from the command line and set an exact position.",
+        ],
+        improvements: [
+          "When an agent task fails in chat, you now get a friendly, plain-language message with a nudge to try again.",
+        ],
+        fixes: [
+          "In Feishu topic groups, each topic now keeps its own separate conversation instead of everyone sharing one.",
+          "The desktop app now always shows a correct version number.",
+          "After a task moves between statuses, the board's count and the rows it shows stay in sync.",
+          "Files brought in through a skill import are now kept instead of being lost.",
+          "Deleting an autopilot now archives it cleanly, with nothing left behind.",
+        ],
+      },
+      {
+        version: "0.3.40",
+        date: "2026-07-07",
+        title: "In-page find, resumable downloads, and fixes",
+        changes: [],
+        features: [
+          "You can now invite workspace members straight from the command line.",
+          "Issue detail now supports in-page find (Ctrl+F) to jump to and highlight matches.",
+          "Attachment downloads can resume after an interruption instead of restarting from the beginning.",
+        ],
+        improvements: [
+          "The in-progress task indicator in chat refreshes faster and makes fewer background requests.",
+          "More agent providers can now be configured with MCP.",
+          "Opening a workspace no longer auto-opens the chat window — open it yourself from the button.",
+        ],
+        fixes: [
+          "Multiple agent tasks running in parallel on the same machine no longer interfere with each other.",
+          "Reconnecting a Feishu bot to the same agent no longer loses members' account links or chat continuity.",
+          "After login, if you already have a workspace you're no longer sent to the create-workspace page by mistake.",
+          "Deleting a workspace now waits for the server before navigating, and a failed delete leaves you in place.",
+          "Launching Claude as root or with sudo now shows a clear, actionable error instead of just failing.",
+          "You can now delete orphaned custom runtimes.",
+        ],
+      },
+      {
+        version: "0.3.39",
+        date: "2026-07-06",
+        title: "Qoder and Trae CLI as custom runtime bases, plus squad and stability fixes",
+        changes: [],
+        features: [
+          "You can now build custom runtime profiles on top of Qoder, including for Qoder CN users.",
+          "ByteDance Trae CLI is also available as a base for custom runtime profiles.",
+        ],
+        improvements: [
+          "The runtime provider page and public docs now show the full lineup of built-in runtimes, including Qoder and Trae CLI, across every localized site.",
+        ],
+        fixes: [
+          "Multi-stage squad flows no longer stall at the first stage when the squad leader is private and a sub-Issue is closed by an agent.",
+          "A parent Issue's staged sub-task-done note no longer wrongly claims an intermediate stage is the final one — the leader is offered both options and picks.",
+          "Several agents can now share a local repo checkout while a squad leader wraps up — the leader no longer holds the checkout lock.",
+          "Multi-hour agent tasks — long research, training, or codegen runs — are no longer killed by the server while your daemon is still alive.",
+          "Search no longer hangs on self-hosted setups — even large workspaces return results quickly on the first try.",
+          "The Issue and comment editor no longer freezes when you paste a long stacktrace or an unusual long string.",
+          "The Antigravity agent no longer fails to start on machines where Claude is also installed.",
+          "Browser MCP now starts correctly on Windows agents.",
+          "The Codex agent's MCP settings are applied correctly again.",
+          "The Pi agent's task result now shows only the final answer — intermediate thinking is hidden.",
+          "Autopilots no longer accidentally run the same Issue twice in a row when a run takes longer than expected.",
+          "An Issue's PR list only shows PRs that really target that Issue — PRs that just mention the key in passing (\"Related to MUL-…\") no longer appear.",
+          "The Issue action menu's nested \"More\" item is now called \"Relations\", so you can tell what's inside without opening it.",
+          "Every attachment upload button — chat, Issue creation, Issue description, feedback — now lets you pick multiple files at once from the system file dialog.",
+        ],
+      },
+      {
+        version: "0.3.36",
+        date: "2026-07-03",
+        title: "Transcript view memory, external PostgreSQL for Helm, and reliability fixes",
+        changes: [],
+        features: [
+          "The task transcript remembers your filter and expansion choices, and restores them the next time you open the run.",
+          "Self-hosted (Helm): a new `postgres.external.enabled` toggle points Multica at an externally managed PostgreSQL (RDS, CNPG, Cloud SQL, Neon…) and skips the built-in database.",
+        ],
+        fixes: [
+          "Ordered-list caret no longer strands on the block below when a comment draft with an empty `1. ` line reloads.",
+          "The daemon now finds the correct agent CLI (Claude, Codex, …) even when a login-shell hook wrapper sits in front of it on PATH.",
+          "PR review agents re-run when a new commit is pushed instead of silently reusing the previous verdict on the older commit.",
+          "Realtime clients no longer miss events published while a server pod restarts — a bounded 5-minute replay window covers the gap.",
+          "Kiro ACP runtime task usage is accounted correctly in the usage log again.",
+          "Autopilot 'create issue' runs stay visible on the runs list even when the runtime is offline.",
+          "Slack alert cards (Grafana, incoming webhooks) whose real message body lives in the attachment are now read from the attachment instead of the short fallback line.",
+          "Codex agent tasks see the daemon's Codex model catalog inside the task home again. (Community-reported.)",
+          "Legacy `/squads/…` and `/usage` web routes redirect to their current equivalents instead of 404-ing.",
+          "The desktop app's Save dialog uses the real attachment filename instead of defaulting to `download.txt`. (Community contribution.)",
+          "Squad coordination: a private squad leader now wakes correctly when the worker agent it dispatched posts its completion comment via the HTTP API — the leader → worker → leader loop no longer stalls after the first hop.",
+          "Tasks no longer hard-fail on hosts whose Claude CLI predates `--effort` — the daemon drops the effort flag with a warning and runs the task plainly.",
+        ],
+      },
+      {
+        version: "0.3.35",
+        date: "2026-07-02",
+        title: "Show sub-issues toggle, snappier issue views, and safer agent CLI writes",
+        changes: [],
+        features: [
+          "Issue views gain a 'Show sub-issues' display toggle to focus on parent Issues across board, list, swimlane, and Gantt.",
+          "The manual create-issue dialog now has an inline Labels picker; Due date moves to the ⋯ overflow menu.",
+          "A skill's detail page can attach the skill to several agents at once, with agent search in the picker.",
+          "Self-hosted: S3-compatible object storage now supports path-style addressing.",
+        ],
+        improvements: [
+          "Board, list, swimlane, and Gantt share one query and cache path — Members/Agents tab counts are exact, cross-project moves reconcile per-list, and slow networks get a shared refresh indicator on sort/filter changes.",
+          "The chat live timeline no longer remounts on every streamed task message, so long agent runs stay smooth.",
+        ],
+        fixes: [
+          "A child Issue closing inside the same squad now wakes the parent's squad leader, so the parent no longer stalls in in_progress.",
+          "Daemon-managed agent CLI calls fail closed when they lose their task token, so agent writes stop landing as the workspace owner. (Community-reported.)",
+          "Slack alert cards (Grafana, webhooks) whose body lives only in attachments, blocks, or rich_text are recovered on chat history reads.",
+          "Inline base64 images (QR codes, screenshots, charts) render in Markdown and read-only Issue comments.",
+          "Comment attachment links keep resolving when the comment moves between Issues.",
+          "Antigravity runs completing with empty stdout now surface the recovered transcript in the run timeline.",
+          "Attachment preview accepts the same text file types the frontend advertises.",
+          "The Mermaid renderer no longer leaks its built-in error graphic on invalid syntax.",
+          "Local skills are exposed to ACP-based runtimes again.",
+          "In-app feedback submissions validate the server response and forward the error kind.",
+          "The daemon times out stuck repo-cache git commands. (Community-reported.)",
+          "Runtime pending keys stay in a single Redis slot on cluster deployments. (Community-reported.)",
+          "The web Docker image derives its pnpm version from packageManager. (Community-reported.)",
+        ],
+      },
       {
         version: "0.3.34",
         date: "2026-07-01",

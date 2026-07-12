@@ -1,8 +1,6 @@
 # --- Dependencies ---
 FROM node:22-alpine AS deps
 
-RUN corepack enable && corepack prepare pnpm@10.28.2 --activate
-
 WORKDIR /app
 
 # Copy workspace config and all package.json files for dependency resolution
@@ -16,14 +14,22 @@ COPY packages/views/package.json packages/views/
 COPY packages/tsconfig/package.json packages/tsconfig/
 COPY packages/eslint-config/package.json packages/eslint-config/
 
+RUN corepack enable && \
+    PNPM_VERSION="$(node -p 'require("./package.json").packageManager')" && \
+    corepack prepare "$PNPM_VERSION" --activate
 RUN pnpm install --frozen-lockfile
 
 # --- Build ---
 FROM node:22-alpine AS builder
 
-RUN corepack enable && corepack prepare pnpm@10.28.2 --activate
-
 WORKDIR /app
+
+# Activate the same pnpm version declared by the repository before the
+# offline frozen install validates package-manager metadata in pnpm-lock.yaml.
+COPY package.json ./
+RUN corepack enable && \
+    PNPM_VERSION="$(node -p 'require("./package.json").packageManager')" && \
+    corepack prepare "$PNPM_VERSION" --activate
 
 # Copy installed dependencies (preserves pnpm symlink structure)
 COPY --from=deps /app ./

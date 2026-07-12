@@ -19,7 +19,6 @@ import (
 
 	"github.com/multica-ai/multica/server/internal/cli"
 	"github.com/multica-ai/multica/server/internal/daemon"
-	"github.com/multica-ai/multica/server/internal/daemon/execenv"
 	logger_pkg "github.com/multica-ai/multica/server/internal/logger"
 	"github.com/multica-ai/multica/server/internal/util"
 )
@@ -390,14 +389,6 @@ func runDaemonForeground(cmd *cobra.Command) error {
 	defer stop()
 
 	logger := logger_pkg.NewLogger("daemon")
-	serverSnapshotProvider, flags, err := execenv.NewDaemonFeatureFlagServiceFromEnv(logger)
-	if err != nil {
-		return err
-	}
-	execenv.SetServerSnapshotProvider(serverSnapshotProvider)
-	execenv.SetFeatureFlags(flags)
-	defer execenv.SetServerSnapshotProvider(nil)
-	defer execenv.SetFeatureFlags(nil)
 
 	d := daemon.New(cfg, logger)
 

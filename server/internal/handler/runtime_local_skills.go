@@ -121,7 +121,7 @@ type LocalSkillImportStore interface {
 	// transitions them to running. Used by the heartbeat handler to deliver
 	// multiple imports per heartbeat cycle.
 	PopPendingBatch(ctx context.Context, runtimeID string, limit int) ([]*RuntimeLocalSkillImportRequest, error)
-	Complete(ctx context.Context, id string, skill SkillResponse) error
+	Complete(ctx context.Context, id string, skill SkillWithFilesResponse) error
 	// Conflict transitions a request to the terminal RuntimeLocalSkillConflict
 	// state, attaching structured conflict metadata for the caller to act on.
 	Conflict(ctx context.Context, id string, info LocalSkillImportConflict) error
@@ -211,7 +211,7 @@ type RuntimeLocalSkillImportRequest struct {
 	// the new `conflict` status and the legacy `failed` behavior.
 	SupportsConflict bool                           `json:"supports_conflict,omitempty"`
 	Status           RuntimeLocalSkillRequestStatus `json:"status"`
-	Skill            *SkillResponse                 `json:"skill,omitempty"`
+	Skill            *SkillWithFilesResponse        `json:"skill,omitempty"`
 	Conflict         *LocalSkillImportConflict      `json:"conflict,omitempty"`
 	Error            string                         `json:"error,omitempty"`
 	CreatedAt        time.Time                      `json:"created_at"`
@@ -450,7 +450,7 @@ func (s *InMemoryLocalSkillImportStore) PopPendingBatch(_ context.Context, runti
 	return result, nil
 }
 
-func (s *InMemoryLocalSkillImportStore) Complete(_ context.Context, id string, skill SkillResponse) error {
+func (s *InMemoryLocalSkillImportStore) Complete(_ context.Context, id string, skill SkillWithFilesResponse) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -861,7 +861,7 @@ func (h *Handler) ReportLocalSkillImportResult(w http.ResponseWriter, r *http.Re
 			h.failLocalSkillImport(w, r, requestID, failMsg)
 			return
 		}
-		if err := h.LocalSkillImportStore.Complete(r.Context(), requestID, resp.SkillResponse); err != nil {
+		if err := h.LocalSkillImportStore.Complete(r.Context(), requestID, resp); err != nil {
 			// The overwrite already committed; unlike the create path we must
 			// NOT delete the skill to "roll back" (that would destroy a
 			// pre-existing skill and its agent bindings). Surface 5xx so the
@@ -915,7 +915,7 @@ func (h *Handler) ReportLocalSkillImportResult(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	if err := h.LocalSkillImportStore.Complete(r.Context(), requestID, resp.SkillResponse); err != nil {
+	if err := h.LocalSkillImportStore.Complete(r.Context(), requestID, resp); err != nil {
 		// We already wrote the Skill to Postgres. If the store-side Complete
 		// fails we can't leave that Skill orphaned: the daemon will retry on
 		// 5xx and re-create it, which blows up on the unique-name constraint

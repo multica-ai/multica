@@ -74,14 +74,6 @@ type GetChatSessionBindingParams struct {
 	ChannelChatID  string
 }
 
-// CreateChatSessionBindingParams binds a chat_session to a channel chat.
-type CreateChatSessionBindingParams struct {
-	ChatSessionID  pgtype.UUID
-	InstallationID pgtype.UUID
-	ChannelChatID  string
-	ChatType       string
-}
-
 // UpdateChatSessionBindingReplyTargetParams records the latest inbound trigger
 // message + thread so the outbound patcher can thread its reply.
 type UpdateChatSessionBindingReplyTargetParams struct {

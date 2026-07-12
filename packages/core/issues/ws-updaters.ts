@@ -1,7 +1,12 @@
-import type { QueryClient, QueryKey } from "@tanstack/react-query";
+import type { QueryClient } from "@tanstack/react-query";
 import { issueKeys } from "./queries";
 import { labelKeys } from "../labels/queries";
 import { projectKeys } from "../projects/queries";
+import {
+  applyIssueChange,
+  invalidateIssueDerivatives,
+  invalidateStaleListKeys,
+} from "./cache-coordinator";
 import {
   addIssueToBuckets,
   findIssueLocation,
@@ -41,106 +46,73 @@ export function onIssueUpdated(
   wsId: string,
   issue: Partial<Issue> & { id: string },
   // assigneeChanged / statusChanged / projectChanged come from the server's
-  // issue:updated flags. assigneeChanged + projectChanged gate the filtered-list
-  // (myAll) invalidate so a non-membership change keeps those lists in place
-  // instead of refetching. statusChanged gates the off-screen count reconcile
-  // below.
+  // issue:updated flags — authoritative "did this write move a membership
+  // dimension" signals. They feed the coordinator's changed-dims input so a
+  // non-membership change (title / position / priority / label) keeps every
+  // loaded list in place instead of refetching.
   meta: {
     assigneeChanged?: boolean;
     statusChanged?: boolean;
     projectChanged?: boolean;
   } = {},
 ) {
-  // Look up the OLD parent before mutating list state, so we can keep
-  // the parent's children cache in sync (powers the sub-issues list
-  // shown on the parent issue page).
+  // Look up the OLD parent + cached entity before mutating cache state, so we
+  // can keep the parent's children cache in sync (powers the sub-issues list
+  // shown on the parent issue page) and diff-fallback the change flags.
   const listQueries = qc.getQueriesData<ListIssuesCache>({ queryKey: issueKeys.list(wsId) });
   const firstListData = listQueries[0]?.[1];
   const detailData = qc.getQueryData<Issue>(issueKeys.detail(wsId, issue.id));
+  const cachedIssue =
+    detailData ??
+    (firstListData ? findIssueLocation(firstListData, issue.id)?.issue : undefined);
   const oldParentId =
-    detailData?.parent_issue_id ??
-    (firstListData ? findIssueLocation(firstListData, issue.id)?.issue.parent_issue_id : null) ??
-    null;
+    detailData?.parent_issue_id ?? cachedIssue?.parent_issue_id ?? null;
   // The NEW parent comes from the WS payload when parent_issue_id changed
   const newParentId = issue.parent_issue_id ?? null;
   const parentChanged =
     issue.parent_issue_id !== undefined && newParentId !== oldParentId;
 
-  // Project board membership keys on project_id. Prefer the server's
-  // project_changed flag (authoritative, set on the wire). Fall back to diffing
-  // the incoming project_id against the cached one only when the flag is absent
+  // Prefer the server's flags (authoritative, set on the wire). Fall back to
+  // diffing the payload against the cached copy only when a flag is absent
   // (older backend): the diff is unreliable once a local optimistic move has
-  // overwritten the cached project_id, but it still covers remote/agent moves
+  // overwritten the cached value, but it still covers remote/agent changes
   // and keeps a new frontend on an old backend from regressing (MUL-3669 /
-  // #4548). The local move itself is also covered by the onSettled safety net in
-  // useUpdateIssue, which never depends on this flag.
-  const oldProjectId =
-    detailData?.project_id ??
-    (firstListData ? findIssueLocation(firstListData, issue.id)?.issue.project_id : null) ??
-    null;
-  const projectChanged =
-    meta.projectChanged ??
-    (issue.project_id !== undefined && (issue.project_id ?? null) !== oldProjectId);
-
-  // A status change shifts two bucket totals (the column header counts).
-  // patchIssueInBuckets does that surgically, but only when it can find the card
-  // in a loaded page; a paginated column holds just its first page, so an issue
-  // outside that window — common when an agent flips the status of something the
-  // viewer never scrolled to — makes the patch a no-op (it returns the same
-  // reference) and the totals silently drift. A status change otherwise never
-  // refetches the list (that refetch was the drag flicker removed by the
-  // optimistic-update work), so recover the one case the patch cannot: on a
-  // status-changed no-op, refetch just that single list to reconcile its counts.
-  const patchOrRefetchCounts = (key: QueryKey, data: ListIssuesCache) => {
-    const next = patchIssueInBuckets(data, issue.id, issue);
-    qc.setQueryData<ListIssuesCache>(key, next);
-    if (next === data && meta.statusChanged) {
-      qc.invalidateQueries({ queryKey: key });
-    }
+  // #4548). The local move itself is covered by useUpdateIssue's own
+  // coordinator pass, which never depends on these flags.
+  const oldProjectId = detailData?.project_id ?? cachedIssue?.project_id ?? null;
+  const changed = {
+    assignee:
+      meta.assigneeChanged ??
+      (cachedIssue !== undefined &&
+        ((issue.assignee_id !== undefined &&
+          issue.assignee_id !== cachedIssue.assignee_id) ||
+          (issue.assignee_type !== undefined &&
+            issue.assignee_type !== cachedIssue.assignee_type))),
+    project:
+      meta.projectChanged ??
+      (issue.project_id !== undefined && (issue.project_id ?? null) !== oldProjectId),
+    status:
+      meta.statusChanged ??
+      (cachedIssue !== undefined &&
+        issue.status !== undefined &&
+        issue.status !== cachedIssue.status),
   };
 
-  for (const [key, data] of listQueries) {
-    if (data) patchOrRefetchCounts(key, data);
-  }
-  // The workspace board (issueKeys.list) is NOT filtered: an issue is always a
-  // member, so patchIssueInBuckets above is a complete surgical reconcile —
-  // cross-status move, same-column reorder, and field updates all land in the
-  // right bucket/slot. The old `if (position) invalidateQueries(list)` re-pulled
-  // the entire board on top of that, which is the full-list refetch that made a
-  // drag (local or echoed back over WS) flicker. It is pure redundancy here.
-  //
-  // myAll (My Issues / Project / actor lists) IS filtered. Surgically patch the
-  // cards that already live in those caches too, so a non-membership change
-  // (pure status / position / priority / label) reconciles in place — no
-  // refetch, no flicker — exactly like the workspace board above.
-  const myListQueries = qc.getQueriesData<ListIssuesCache>({ queryKey: issueKeys.myAll(wsId) });
-  for (const [key, data] of myListQueries) {
-    if (data?.byStatus) patchOrRefetchCounts(key, data);
-  }
-  // Only refetch the filtered lists when the change can actually move an issue
-  // in/out of one. My-Issues / actor-panel membership keys on the assignee (the
-  // "involves" leg — my agents / my squads — is assignee-based too), so the
-  // server's assignee_changed flag covers it; the Project board keys on
-  // project_id. A pure status / position / priority / label change cannot change
-  // membership, so the surgical patch above is the complete reconcile and we
-  // skip the invalidate that used to make a My-Issues drag refetch + flicker.
-  if (meta.assigneeChanged || projectChanged) {
-    qc.invalidateQueries({ queryKey: issueKeys.myAll(wsId) });
-  }
-  qc.invalidateQueries({ queryKey: issueKeys.assigneeGroupsAll(wsId) });
-  qc.invalidateQueries({ queryKey: issueKeys.myAssigneeGroupsAll(wsId) });
-  if (issue.status !== undefined || issue.project_id !== undefined) {
-    qc.invalidateQueries({ queryKey: projectKeys.all(wsId) });
-  }
-  // Any field change can shift Gantt membership — start_date / due_date may
-  // have moved in or out of the `scheduled` set, project_id may have
-  // changed, or the row that is in the cache may need to mirror updated
-  // metadata (title, status, assignee). Cheaper to invalidate the prefix
-  // than to mirror the server filter here.
-  qc.invalidateQueries({ queryKey: issueKeys.projectGanttAll(wsId) });
-  qc.setQueryData<Issue>(issueKeys.detail(wsId, issue.id), (old) =>
-    old ? { ...old, ...issue } : old,
-  );
+  // The coordinator applies the same rules table the local mutations use:
+  // surgical patch/rebucket where the card is loaded and still belongs,
+  // surgical remove where the change moved it off a filtered surface, and
+  // stale keys for the drift a patch cannot fix (enter/leave beyond the
+  // loaded window, undecidable membership, off-screen bucket counts). The
+  // server has already committed, so stale keys are flushed immediately.
+  const change = applyIssueChange(qc, wsId, issue.id, issue, {
+    changed,
+    baseIssue: cachedIssue,
+  });
+  invalidateStaleListKeys(qc, change.staleKeys);
+  invalidateIssueDerivatives(qc, wsId, {
+    statusOrProjectChanged:
+      issue.status !== undefined || issue.project_id !== undefined,
+  });
 
   // Invalidate old parent's children (issue was removed from it)
   if (oldParentId) {

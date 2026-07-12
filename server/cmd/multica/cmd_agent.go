@@ -15,6 +15,7 @@ import (
 
 	"github.com/multica-ai/multica/server/internal/cli"
 	"github.com/multica-ai/multica/server/internal/daemon"
+	"github.com/multica-ai/multica/server/internal/daemon/execenv"
 )
 
 var agentCmd = &cobra.Command{
@@ -170,7 +171,10 @@ func init() {
 	agentCreateCmd.Flags().String("mcp-config", "", "MCP server configuration as a JSON object, e.g. '{\"mcpServers\":{\"shortcut\":{...}}}'. Treated as secret material (MCP entries often carry API tokens) — never logged by the CLI, but values passed on the command line are visible to shell history and 'ps'; prefer --mcp-config-stdin or --mcp-config-file for real secrets.")
 	agentCreateCmd.Flags().Bool("mcp-config-stdin", false, "Read the --mcp-config JSON object from stdin. Keeps secrets out of shell history and 'ps'. Mutually exclusive with --mcp-config and --mcp-config-file.")
 	agentCreateCmd.Flags().String("mcp-config-file", "", "Read the --mcp-config JSON object from a file path (suggested mode: 0600). Mutually exclusive with --mcp-config and --mcp-config-stdin.")
-	agentCreateCmd.Flags().String("visibility", "private", "Visibility: private or workspace")
+	agentCreateCmd.Flags().String("visibility", "private", "Visibility: private or workspace (legacy; mapped to --permission-mode. private->private, workspace->public_to+workspace target)")
+	agentCreateCmd.Flags().String("permission-mode", "", "Invocation permission mode: private (owner only) or public_to (allow-list via --public-to-*). Authoritative over --visibility when set.")
+	agentCreateCmd.Flags().Bool("public-to-workspace", false, "public_to: allow every workspace member to invoke this agent.")
+	agentCreateCmd.Flags().StringSlice("public-to-member", nil, "public_to: allow the given member user id(s) to invoke this agent. Repeatable.")
 	agentCreateCmd.Flags().Int32("max-concurrent-tasks", 6, "Maximum concurrent tasks")
 	agentCreateCmd.Flags().String("output", "json", "Output format: table or json")
 
@@ -194,7 +198,10 @@ func init() {
 	agentUpdateCmd.Flags().String("mcp-config", "", "New MCP server configuration as a JSON object, e.g. '{\"mcpServers\":{...}}'. Pass 'null' to clear. Treated as secret material — never logged by the CLI, but values passed on the command line are visible to shell history and 'ps'; prefer --mcp-config-stdin or --mcp-config-file for real secrets.")
 	agentUpdateCmd.Flags().Bool("mcp-config-stdin", false, "Read the --mcp-config JSON from stdin. Keeps secrets out of shell history and 'ps'. Mutually exclusive with --mcp-config and --mcp-config-file.")
 	agentUpdateCmd.Flags().String("mcp-config-file", "", "Read the --mcp-config JSON from a file path (suggested mode: 0600). Mutually exclusive with --mcp-config and --mcp-config-stdin.")
-	agentUpdateCmd.Flags().String("visibility", "", "New visibility: private or workspace")
+	agentUpdateCmd.Flags().String("visibility", "", "New visibility: private or workspace (legacy; mapped to --permission-mode)")
+	agentUpdateCmd.Flags().String("permission-mode", "", "New invocation permission mode: private or public_to. Authoritative over --visibility. Owner-only.")
+	agentUpdateCmd.Flags().Bool("public-to-workspace", false, "public_to: allow every workspace member to invoke this agent.")
+	agentUpdateCmd.Flags().StringSlice("public-to-member", nil, "public_to: allow the given member user id(s) to invoke this agent. Repeatable.")
 	agentUpdateCmd.Flags().String("status", "", "New status")
 	agentUpdateCmd.Flags().Int32("max-concurrent-tasks", 0, "New max concurrent tasks")
 	agentUpdateCmd.Flags().String("output", "json", "Output format: table or json")
@@ -249,7 +256,17 @@ func newAPIClient(cmd *cobra.Command) (*cli.APIClient, error) {
 	if serverURL == "" {
 		return nil, fmt.Errorf("server URL not set: use --server-url flag, MULTICA_SERVER_URL env, or 'multica config set server_url <url>'")
 	}
-	if inAgentExecutionContext() && !strings.HasPrefix(token, "mat_") {
+	if inDaemonManagedExecutionContext() && !strings.HasPrefix(token, "mat_") {
+		// When the ONLY daemon signal is a workdir marker (no MULTICA_AGENT_ID /
+		// MULTICA_TASK_ID / MULTICA_DAEMON_PORT), the likeliest cause outside a
+		// real task is a leftover marker from a crashed daemon task in a
+		// local_directory. Name the exact file so a normal user can recover
+		// instead of hitting an opaque "requires mat_ token" error.
+		if !inAgentExecutionContext() && os.Getenv("MULTICA_DAEMON_PORT") == "" {
+			if markerPath := daemonTaskContextMarkerPath(); markerPath != "" {
+				return nil, fmt.Errorf("agent execution context requires MULTICA_TOKEN to be a task-scoped mat_ token; detected a daemon task marker at %s — if you are not running inside an agent task this is likely a leftover, remove it and retry", markerPath)
+			}
+		}
 		return nil, fmt.Errorf("agent execution context requires MULTICA_TOKEN to be a task-scoped mat_ token")
 	}
 
@@ -287,15 +304,59 @@ func normalizeAPIBaseURL(raw string) string {
 	return raw
 }
 
-// inAgentExecutionContext reports whether the CLI is being invoked from
-// inside a daemon-managed agent task (daemon sets MULTICA_AGENT_ID and
-// MULTICA_TASK_ID in the agent env). In that context the workspace must be
-// provided explicitly by the daemon — falling back to user-global
-// ~/.multica/config.json would let the agent act on whatever workspace the
-// user last configured, which is how cross-workspace contamination happens
-// when multiple workspaces share a host.
+// inAgentExecutionContext reports whether the CLI has explicit task identity
+// markers from a daemon-managed agent task.
 func inAgentExecutionContext() bool {
 	return os.Getenv("MULTICA_AGENT_ID") != "" || os.Getenv("MULTICA_TASK_ID") != ""
+}
+
+// inDaemonManagedExecutionContext reports whether the CLI is being invoked
+// from inside a daemon-managed agent task. MULTICA_DAEMON_PORT is included as
+// a defense-in-depth marker for subprocesses that lose MULTICA_AGENT_ID or
+// MULTICA_TASK_ID but still run under the daemon environment. In this context
+// workspace and token must come from daemon-provided env; falling back to
+// user-global ~/.multica/config.json can make agent writes land as a member.
+func inDaemonManagedExecutionContext() bool {
+	return inAgentExecutionContext() || os.Getenv("MULTICA_DAEMON_PORT") != "" || hasDaemonTaskContextMarker()
+}
+
+func hasDaemonTaskContextMarker() bool {
+	return daemonTaskContextMarkerPath() != ""
+}
+
+// daemonTaskContextMarkerPath walks up from the current working directory and
+// returns the path of the first readable daemon-task marker whose managed_by
+// matches, or "" when none is found.
+func daemonTaskContextMarkerPath() string {
+	dir, err := os.Getwd()
+	if err != nil {
+		return ""
+	}
+	for {
+		markerPath := filepath.Join(dir, execenv.TaskContextMarkerRelPath)
+		// Only a marker we can read AND whose managed_by matches counts as a
+		// daemon-task signal. Any other outcome — missing file, unreadable
+		// path, or a foreign file at this name — is treated as "no signal
+		// here", so we keep walking up. We must not fail closed on an
+		// unrelated read error (e.g. an unsearchable ancestor directory on a
+		// normal user's machine), which would refuse their PAT for no reason;
+		// the daemon writes this marker world-readable in the agent's own
+		// workdir, so a legitimate agent can always read it.
+		if data, err := os.ReadFile(markerPath); err == nil {
+			var marker struct {
+				ManagedBy string `json:"managed_by"`
+			}
+			if json.Unmarshal(data, &marker) == nil && marker.ManagedBy == execenv.TaskContextMarkerManagedBy {
+				return markerPath
+			}
+		}
+
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return ""
+		}
+		dir = parent
+	}
 }
 
 func resolveWorkspaceID(cmd *cobra.Command) string {
@@ -305,7 +366,7 @@ func resolveWorkspaceID(cmd *cobra.Command) string {
 	}
 	// Inside an agent task the daemon is the only authority on workspace
 	// identity. Never read the user-global CLI config here.
-	if inAgentExecutionContext() {
+	if inDaemonManagedExecutionContext() {
 		return ""
 	}
 	profile := resolveProfile(cmd)
@@ -319,7 +380,7 @@ func resolveWorkspaceID(cmd *cobra.Command) string {
 func requireWorkspaceID(cmd *cobra.Command) (string, error) {
 	id := resolveWorkspaceID(cmd)
 	if id == "" {
-		if inAgentExecutionContext() {
+		if inDaemonManagedExecutionContext() {
 			return "", fmt.Errorf("workspace_id is required: MULTICA_WORKSPACE_ID must be set by the daemon in agent execution context (no fallback to user config)")
 		}
 		return "", fmt.Errorf("workspace_id is required: use --workspace-id flag, set MULTICA_WORKSPACE_ID env, or run 'multica config set workspace_id <id>'")
@@ -416,6 +477,38 @@ func runAgentGet(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
+// applyAgentPermissionFlags translates the invocation-permission flags
+// (--permission-mode / --public-to-workspace / --public-to-member) into the
+// permission_mode + invocation_targets request fields (MUL-3963). When none of
+// the flags are set it is a no-op, so the legacy --visibility handling still
+// drives the request. When any public-to-* flag is present without an explicit
+// --permission-mode, the mode defaults to public_to.
+func applyAgentPermissionFlags(cmd *cobra.Command, body map[string]any) {
+	hasMode := cmd.Flags().Changed("permission-mode")
+	hasWorkspace := cmd.Flags().Changed("public-to-workspace")
+	hasMembers := cmd.Flags().Changed("public-to-member")
+	if !hasMode && !hasWorkspace && !hasMembers {
+		return
+	}
+
+	mode := "public_to"
+	if hasMode {
+		mode, _ = cmd.Flags().GetString("permission-mode")
+	}
+	body["permission_mode"] = mode
+
+	targets := []map[string]any{}
+	if on, _ := cmd.Flags().GetBool("public-to-workspace"); on {
+		targets = append(targets, map[string]any{"target_type": "workspace"})
+	}
+	if members, _ := cmd.Flags().GetStringSlice("public-to-member"); len(members) > 0 {
+		for _, m := range members {
+			targets = append(targets, map[string]any{"target_type": "member", "target_id": m})
+		}
+	}
+	body["invocation_targets"] = targets
+}
+
 func runAgentCreate(cmd *cobra.Command, _ []string) error {
 	client, err := newAPIClient(cmd)
 	if err != nil {
@@ -483,6 +576,7 @@ func runAgentCreate(cmd *cobra.Command, _ []string) error {
 		v, _ := cmd.Flags().GetString("visibility")
 		body["visibility"] = v
 	}
+	applyAgentPermissionFlags(cmd, body)
 	if cmd.Flags().Changed("max-concurrent-tasks") {
 		v, _ := cmd.Flags().GetInt32("max-concurrent-tasks")
 		body["max_concurrent_tasks"] = v
@@ -559,6 +653,7 @@ func runAgentUpdate(cmd *cobra.Command, args []string) error {
 		v, _ := cmd.Flags().GetString("visibility")
 		body["visibility"] = v
 	}
+	applyAgentPermissionFlags(cmd, body)
 	if cmd.Flags().Changed("status") {
 		v, _ := cmd.Flags().GetString("status")
 		body["status"] = v

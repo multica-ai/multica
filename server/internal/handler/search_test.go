@@ -255,3 +255,42 @@ func TestBuildSearchQuery_SingleTermNoAllTermTiers(t *testing.T) {
 		t.Error("single-term query should not have tier 8 (comment all-terms)")
 	}
 }
+
+// TestBuildSearchQuery_CommentSubqueryWorkspaceScope regressions the
+// MUL-4059 fix: every EXISTS / correlated subquery over `comment` MUST
+// filter by c.workspace_id = $wsParam. Without this, Postgres rewrites
+// the correlated subquery into a hashed subplan that materializes every
+// comment in the entire table matching the LIKE — on prd this was
+// 536k rows / 32.3 s for '%search%'. With the filter the hashed set
+// collapses to this workspace's comments and the plan uses the
+// idx_comment_workspace supporting btree.
+//
+// $4 is buildSearchQuery's canonical workspace_id placeholder (the
+// caller writes wsUUID into args[3] before executing).
+func TestBuildSearchQuery_CommentSubqueryWorkspaceScope(t *testing.T) {
+	singleQuery, _ := buildSearchQuery("html", []string{"html"}, 0, false, false)
+
+	// Every occurrence of `FROM comment c` must be followed by the
+	// c.workspace_id = $4 constraint. Counting is safer than a single
+	// substring check because the WHERE, rank CASE, matched_comment_content
+	// subqueries all touch `comment` and must each carry the filter.
+	fromCount := strings.Count(singleQuery, "FROM comment c")
+	scopedCount := strings.Count(singleQuery, "c.workspace_id = $4")
+	if fromCount == 0 {
+		t.Fatalf("single-term query has no comment subquery — did buildSearchQuery drop it?")
+	}
+	if scopedCount < fromCount {
+		t.Errorf("single-term query has %d comment subqueries but only %d workspace_id filters — %d unscoped subquery(ies) will trigger the MUL-4059 global-hash plan",
+			fromCount, scopedCount, fromCount-scopedCount)
+	}
+
+	// Multi-term uses one extra comment subquery in the WHERE and one in
+	// the rank CASE for the all-terms match — same invariant applies.
+	multiQuery, _ := buildSearchQuery("foo bar", []string{"foo", "bar"}, 0, false, false)
+	fromCountMulti := strings.Count(multiQuery, "FROM comment c")
+	scopedCountMulti := strings.Count(multiQuery, "c.workspace_id = $4")
+	if scopedCountMulti < fromCountMulti {
+		t.Errorf("multi-term query has %d comment subqueries but only %d workspace_id filters",
+			fromCountMulti, scopedCountMulti)
+	}
+}

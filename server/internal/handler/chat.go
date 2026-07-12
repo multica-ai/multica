@@ -71,11 +71,11 @@ func (h *Handler) CreateChatSession(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "agent is archived")
 		return
 	}
-	// Private-agent gate: members must be in allowed_principals to start
-	// a chat with a private agent. Agent-to-agent chat sessions bypass
-	// the gate so A2A collaboration still works.
+	// Invocation gate: starting a chat produces agent runs, so it uses the
+	// invoke permission (MUL-3963), not the softer view gate. Agent-to-agent
+	// chat sessions are judged by the top-of-chain originator.
 	actorType, actorID := h.resolveActor(r, userID, workspaceID)
-	if !h.canAccessPrivateAgent(r.Context(), agent, actorType, actorID, workspaceID) {
+	if !h.canInvokeAgent(r.Context(), agent, actorType, actorID, h.invokeOriginatorFromRequest(r, actorType, actorID), workspaceID) {
 		writeError(w, http.StatusForbidden, "you do not have access to this agent")
 		return
 	}
@@ -144,7 +144,10 @@ func (h *Handler) ListChatSessions(w http.ResponseWriter, r *http.Request) {
 				CreatorID:   uuidToString(s.CreatorID),
 				Title:       s.Title,
 				Status:      s.Status,
-				HasUnread:   s.HasUnread,
+				HasUnread:   s.UnreadCount > 0,
+				UnreadCount: int(s.UnreadCount),
+				LastMessage: buildChatLastMessage(s.LastMessageAt, s.LastMessageContent, s.LastMessageRole, s.LastMessageFailureReason),
+				Pinned:      s.PinnedAt.Valid,
 				CreatedAt:   timestampToString(s.CreatedAt),
 				UpdatedAt:   timestampToString(s.UpdatedAt),
 			})
@@ -170,7 +173,10 @@ func (h *Handler) ListChatSessions(w http.ResponseWriter, r *http.Request) {
 				CreatorID:   uuidToString(s.CreatorID),
 				Title:       s.Title,
 				Status:      s.Status,
-				HasUnread:   s.HasUnread,
+				HasUnread:   s.UnreadCount > 0,
+				UnreadCount: int(s.UnreadCount),
+				LastMessage: buildChatLastMessage(s.LastMessageAt, s.LastMessageContent, s.LastMessageRole, s.LastMessageFailureReason),
+				Pinned:      s.PinnedAt.Valid,
 				CreatedAt:   timestampToString(s.CreatedAt),
 				UpdatedAt:   timestampToString(s.UpdatedAt),
 			})
@@ -248,8 +254,9 @@ type UpdateChatSessionRequest struct {
 
 // UpdateChatSession updates user-editable fields on a chat session — today
 // just `title`, surfaced by the inline rename affordance in the session
-// dropdown. Title is the only field accepted: `status` is legacy + read-only,
-// agent/creator/workspace are immutable, the resume pointers
+// dropdown. Title is the only field accepted here: `status` has its own
+// archive/unarchive endpoint (SetChatSessionArchived), `pinned` its own pin
+// endpoint, agent/creator/workspace are immutable, the resume pointers
 // (session_id / work_dir / runtime_id) are daemon-owned.
 func (h *Handler) UpdateChatSession(w http.ResponseWriter, r *http.Request) {
 	userID, ok := requireUserID(w, r)
@@ -296,6 +303,103 @@ func (h *Handler) UpdateChatSession(w http.ResponseWriter, r *http.Request) {
 	h.publishChat(protocol.EventChatSessionUpdated, workspaceID, "member", userID, resolvedSessionID, protocol.ChatSessionUpdatedPayload{
 		ChatSessionID: resolvedSessionID,
 		Title:         updated.Title,
+		UpdatedAt:     timestampToString(updated.UpdatedAt),
+	})
+
+	writeJSON(w, http.StatusOK, chatSessionToResponse(updated))
+}
+
+type SetChatSessionPinnedRequest struct {
+	Pinned bool `json:"pinned"`
+}
+
+// SetChatSessionPinned pins or unpins a chat so it sticks to the top of the
+// caller's conversation list. Pin state is per-session and, since sessions are
+// per-creator, inherently per-user. It never bumps updated_at (see the SQL) so
+// an unpinned chat does not jump the activity-sorted list.
+func (h *Handler) SetChatSessionPinned(w http.ResponseWriter, r *http.Request) {
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+	workspaceID := ctxWorkspaceID(r.Context())
+	sessionID := chi.URLParam(r, "sessionId")
+
+	var req SetChatSessionPinnedRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	session, ok := h.gateChatSessionForUser(w, r, userID, workspaceID, sessionID)
+	if !ok {
+		return
+	}
+
+	updated, err := h.Queries.SetChatSessionPinned(r.Context(), db.SetChatSessionPinnedParams{
+		ID:     session.ID,
+		Pinned: req.Pinned,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to update chat session")
+		return
+	}
+
+	resolvedSessionID := uuidToString(updated.ID)
+	pinned := updated.PinnedAt.Valid
+	h.publishChat(protocol.EventChatSessionUpdated, workspaceID, "member", userID, resolvedSessionID, protocol.ChatSessionUpdatedPayload{
+		ChatSessionID: resolvedSessionID,
+		Title:         updated.Title,
+		Pinned:        &pinned,
+		UpdatedAt:     timestampToString(updated.UpdatedAt),
+	})
+
+	writeJSON(w, http.StatusOK, chatSessionToResponse(updated))
+}
+
+type SetChatSessionArchivedRequest struct {
+	Archived bool `json:"archived"`
+}
+
+// SetChatSessionArchived archives or unarchives a chat session owned by the
+// caller. Archiving is the reversible sibling of delete: the row stays in the
+// user's history (behind the "Archived" entry) and the conversation becomes
+// read-only — SendChatMessage refuses status='archived'. Hard delete is only
+// offered from the archived list, so nothing is destroyed in one hover click.
+func (h *Handler) SetChatSessionArchived(w http.ResponseWriter, r *http.Request) {
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+	workspaceID := ctxWorkspaceID(r.Context())
+	sessionID := chi.URLParam(r, "sessionId")
+
+	var req SetChatSessionArchivedRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	session, ok := h.gateChatSessionForUser(w, r, userID, workspaceID, sessionID)
+	if !ok {
+		return
+	}
+
+	updated, err := h.Queries.SetChatSessionArchived(r.Context(), db.SetChatSessionArchivedParams{
+		ID:       session.ID,
+		Archived: req.Archived,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to update chat session")
+		return
+	}
+
+	resolvedSessionID := uuidToString(updated.ID)
+	status := updated.Status
+	h.publishChat(protocol.EventChatSessionUpdated, workspaceID, "member", userID, resolvedSessionID, protocol.ChatSessionUpdatedPayload{
+		ChatSessionID: resolvedSessionID,
+		Title:         updated.Title,
+		Status:        &status,
 		UpdatedAt:     timestampToString(updated.UpdatedAt),
 	})
 
@@ -353,6 +457,13 @@ func (h *Handler) DeleteChatSession(w http.ResponseWriter, r *http.Request) {
 	// prune the binding here in the same tx that deletes its chat_session.
 	if err := qtx.DeleteChannelChatSessionBindingBySession(r.Context(), session.ID); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to delete chat session binding")
+		return
+	}
+	// channel_outbound_card_message is also keyed by chat_session_id with no FK
+	// and no reaper, so prune it in the same tx or a deleted chat session leaves
+	// permanent orphan card rows (#4810 follow-up).
+	if err := qtx.DeleteChannelOutboundCardMessagesBySession(r.Context(), session.ID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to delete chat session outbound cards")
 		return
 	}
 
@@ -447,13 +558,44 @@ func (h *Handler) SendChatMessage(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	// New archive flow doesn't exist anymore, but legacy rows with
-	// status='archived' may still be in the DB from before the feature
-	// was removed. Refuse to enqueue new agent work for them — frontend
-	// surfaces these as read-only.
+	// Archived sessions are read-only: refuse to enqueue new agent work for
+	// them (see SetChatSessionArchived). The frontend disables the composer
+	// for status='archived' and only offers unarchive/delete there. Legacy
+	// soft-archived rows from before the feature are covered by the same check.
 	if session.Status != "active" {
 		writeError(w, http.StatusBadRequest, "chat session is archived")
 		return
+	}
+
+	// Preflight the agent's enqueue preconditions BEFORE persisting the user
+	// message. EnqueueChatTask (below) rejects an archived or runtime-less agent
+	// with an error; without this check a stale client (agent archived in
+	// another tab) would land the user message, then get a 500, leaving an
+	// orphan message with no task or reply. Fail fast with a 4xx and mutate
+	// nothing. See EnqueueChatTask's ErrChatTaskAgentArchived / NoRuntime.
+	agent, err := h.Queries.GetAgent(r.Context(), session.AgentID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load chat agent")
+		return
+	}
+	if agent.ArchivedAt.Valid {
+		writeError(w, http.StatusConflict, "chat agent is archived")
+		return
+	}
+	if !agent.RuntimeID.Valid {
+		writeError(w, http.StatusConflict, "chat agent has no runtime")
+		return
+	}
+
+	// Detect whether this is the very first human message in the session,
+	// BEFORE we insert the new row. This scopes LLM auto-titling (MUL-4295) to
+	// the opening turn: we upgrade the default/original title exactly once, off
+	// the first user message, and never re-run it on every subsequent send. A
+	// query error here is treated as "not first" so we simply skip generation
+	// (best-effort — never block the send).
+	hadUserMessage := true
+	if existed, err := h.Queries.ChatSessionHasUserMessage(r.Context(), session.ID); err == nil {
+		hadUserMessage = existed
 	}
 
 	// Create the user message first so the daemon can always find it.
@@ -543,6 +685,16 @@ func (h *Handler) SendChatMessage(w http.ResponseWriter, r *http.Request) {
 		TaskID:        uuidToString(task.ID),
 		CreatedAt:     timestampToString(msg.CreatedAt),
 	})
+
+	// First user message → kick off best-effort LLM auto-titling (MUL-4295).
+	// Fire-and-forget and non-blocking: the response below is written whether
+	// or not a title is ever generated, and a disabled/failing LLM layer
+	// silently keeps the original first-message-derived title. session.Title
+	// is the default/original title observed here and drives the CAS so a
+	// manual rename mid-generation is never clobbered.
+	if !hadUserMessage {
+		h.maybeGenerateChatTitleAsync(workspaceID, userID, session.ID, session.Title, req.Content)
+	}
 
 	writeJSON(w, http.StatusCreated, SendChatMessageResponse{
 		MessageID:     uuidToString(msg.ID),
@@ -778,6 +930,13 @@ func (h *Handler) ListPendingChatTasks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// No accessible agents → every row would be filtered out anyway. Skip the
+	// DB round-trip and return an empty list (mirrors HasPendingChatTasks).
+	if len(allowed) == 0 {
+		writeJSON(w, http.StatusOK, PendingChatTasksResponse{Tasks: []PendingChatTaskItem{}})
+		return
+	}
+
 	rows, err := h.Queries.ListPendingChatTasksByCreator(r.Context(), db.ListPendingChatTasksByCreatorParams{
 		WorkspaceID: parseUUID(workspaceID),
 		CreatorID:   parseUUID(userID),
@@ -787,39 +946,83 @@ func (h *Handler) ListPendingChatTasks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Map session → agent so we can filter without an N+1. The user's own
-	// session list is small, so one extra query is cheaper than per-row
-	// lookups.
-	sessions, err := h.Queries.ListAllChatSessionsByCreator(r.Context(), db.ListAllChatSessionsByCreatorParams{
-		WorkspaceID: parseUUID(workspaceID),
-		CreatorID:   parseUUID(userID),
-	})
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to resolve chat session agents")
-		return
-	}
-	sessionAgent := make(map[string]string, len(sessions))
-	for _, s := range sessions {
-		sessionAgent[uuidToString(s.ID)] = uuidToString(s.AgentID)
-	}
-
+	// The pending query now returns cs.agent_id per row, so we can filter
+	// out private agents the caller has lost access to directly against the
+	// already-loaded `allowed` set — no second ListAllChatSessionsByCreator
+	// scan on this hot path (MUL-4159).
 	items := make([]PendingChatTaskItem, 0, len(rows))
 	for _, row := range rows {
-		sessionID := uuidToString(row.ChatSessionID)
-		agentID, hasAgent := sessionAgent[sessionID]
-		if !hasAgent {
-			continue
-		}
+		agentID := uuidToString(row.AgentID)
 		if _, ok := allowed[agentID]; !ok {
 			continue
 		}
 		items = append(items, PendingChatTaskItem{
 			TaskID:        uuidToString(row.TaskID),
 			Status:        row.Status,
-			ChatSessionID: sessionID,
+			ChatSessionID: uuidToString(row.ChatSessionID),
 		})
 	}
 	writeJSON(w, http.StatusOK, PendingChatTasksResponse{Tasks: items})
+}
+
+// HasPendingChatTasksResponse is the boolean fast-path payload consumed by the
+// FAB, which only needs to know whether any in-flight chat task exists — not
+// the full list.
+type HasPendingChatTasksResponse struct {
+	HasPending bool `json:"has_pending"`
+}
+
+// HasPendingChatTasks answers "does the current user have any in-flight chat
+// task in this workspace?" with a single EXISTS query, for the FAB's running
+// indicator. It is the boolean sibling of ListPendingChatTasks: the detailed
+// list is reserved for the ChatWindow history / stop-task flows.
+//
+// Permission filtering is preserved end-to-end: the set of agents the caller
+// may currently see is resolved the same way as ListPendingChatTasks and
+// pushed into the query as agent_ids, so a member who lost access to a private
+// agent never sees a true from a task on that agent (MUL-4159). An empty
+// accessible-agent set short-circuits to false without hitting the DB.
+func (h *Handler) HasPendingChatTasks(w http.ResponseWriter, r *http.Request) {
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+	workspaceID := ctxWorkspaceID(r.Context())
+
+	member, ok := h.workspaceMember(w, r, workspaceID)
+	if !ok {
+		return
+	}
+	actorType, actorID := h.resolveActor(r, userID, workspaceID)
+	allowed, ok := h.accessibleAgentIDs(r.Context(), workspaceID, actorType, actorID, member.Role)
+	if !ok {
+		writeError(w, http.StatusInternalServerError, "failed to resolve agent access")
+		return
+	}
+
+	// No accessible agents → nothing the caller may see can be pending.
+	// Skip the round-trip and return false.
+	if len(allowed) == 0 {
+		writeJSON(w, http.StatusOK, HasPendingChatTasksResponse{HasPending: false})
+		return
+	}
+
+	agentIDs := make([]pgtype.UUID, 0, len(allowed))
+	for id := range allowed {
+		agentIDs = append(agentIDs, parseUUID(id))
+	}
+
+	hasPending, err := h.Queries.HasPendingChatTasksByCreator(r.Context(), db.HasPendingChatTasksByCreatorParams{
+		WorkspaceID: parseUUID(workspaceID),
+		CreatorID:   parseUUID(userID),
+		AgentIds:    agentIDs,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to check pending chat tasks")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, HasPendingChatTasksResponse{HasPending: hasPending})
 }
 
 // GetPendingChatTask returns the most recent in-flight task (queued / dispatched
@@ -972,10 +1175,40 @@ type ChatSessionResponse struct {
 	CreatorID   string `json:"creator_id"`
 	Title       string `json:"title"`
 	Status      string `json:"status"`
-	// Only populated by list endpoints — single-session fetches return false.
-	HasUnread bool   `json:"has_unread"`
+	// Only populated by list endpoints — single-session fetches return 0/false/nil.
+	// HasUnread is kept as a convenience (== UnreadCount > 0) for existing consumers.
+	HasUnread   bool             `json:"has_unread"`
+	UnreadCount int              `json:"unread_count"`
+	LastMessage *ChatLastMessage `json:"last_message"`
+	// Pinned marks a chat the user has stuck to the top of the list. Populated
+	// by list endpoints and by the pin/unpin + single-session responses.
+	Pinned    bool   `json:"pinned"`
 	CreatedAt string `json:"created_at"`
 	UpdatedAt string `json:"updated_at"`
+}
+
+// ChatLastMessage is a preview of a session's most recent message, used to
+// render the IM-style conversation list (name + snippet + time). nil when the
+// session has no messages yet.
+type ChatLastMessage struct {
+	Content       string  `json:"content"`
+	Role          string  `json:"role"`
+	CreatedAt     string  `json:"created_at"`
+	FailureReason *string `json:"failure_reason"`
+}
+
+// buildChatLastMessage assembles the preview from list-row columns; returns nil
+// when there is no last message (the LEFT JOIN produced a NULL timestamp).
+func buildChatLastMessage(at pgtype.Timestamptz, content, role string, failure pgtype.Text) *ChatLastMessage {
+	if !at.Valid {
+		return nil
+	}
+	return &ChatLastMessage{
+		Content:       content,
+		Role:          role,
+		CreatedAt:     timestampToString(at),
+		FailureReason: textToPtr(failure),
+	}
 }
 
 type ChatMessageResponse struct {
@@ -1007,6 +1240,7 @@ func chatSessionToResponse(s db.ChatSession) ChatSessionResponse {
 		CreatorID:   uuidToString(s.CreatorID),
 		Title:       s.Title,
 		Status:      s.Status,
+		Pinned:      s.PinnedAt.Valid,
 		CreatedAt:   timestampToString(s.CreatedAt),
 		UpdatedAt:   timestampToString(s.UpdatedAt),
 	}

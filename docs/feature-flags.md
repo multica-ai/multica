@@ -59,58 +59,6 @@ if err != nil {
 
 The provider chain is `EnvProvider → YAML StaticProvider`. The server can boot with zero flag config — every `IsEnabled` call falls back to the caller's default until someone authors a rule.
 
-### Daemon-bound flags
-
-Daemon-bound flags are evaluated by the server and delivered to local daemons
-over the daemon heartbeat ack. This is for process-level daemon behavior where
-operators need one rollout and kill-switch path across cloud runtimes, Desktop
-embedded daemons, and user-run CLI daemons.
-
-Only flags listed in `server/internal/featureflagdispatch/registry.go` are sent
-to daemons. The registry is intentionally short:
-
-```go
-var DaemonBoundFlags = []string{
-    "runtime_brief_slim",
-}
-```
-
-On each HTTP or WebSocket heartbeat, the server evaluates every registered key
-as a daemon/process-level decision. The snapshot EvalContext exposes
-`daemon_id` only; workspace/runtime/task/user scoped rollout is intentionally
-not part of this channel because the daemon stores one process-global snapshot.
-The heartbeat ack carries a full snapshot:
-
-```json
-{
-  "feature_flags": {
-    "version": 1,
-    "flags": {
-      "runtime_brief_slim": "on"
-    }
-  }
-}
-```
-
-The daemon installs that snapshot into its process-level feature flag service.
-The daemon provider order is:
-
-1. `EnvProvider` (`FF_*`) for local emergency overrides.
-2. `ServerSnapshotProvider` from the latest heartbeat ack.
-3. local YAML `StaticProvider` as a fallback for old servers or self-hosted rescue.
-4. the toggle point's caller-supplied default.
-
-That means `FF_RUNTIME_BRIEF_SLIM=false` always suppresses a server snapshot
-that enables `runtime_brief_slim`. New daemons talking to old servers receive no
-`feature_flags` field and automatically fall back to local env/YAML behavior.
-Old daemons talking to new servers ignore the unknown JSON field.
-
-To add another daemon-bound process-level flag, add its key to the registry and
-use the existing daemon feature flag service at the toggle point. Do not add
-workspace percent rollout, task payload fields, or task-scoped readers for
-daemon-bound flags unless a separate design explicitly introduces scoped daemon
-flag evaluation.
-
 ### YAML schema
 
 ```yaml

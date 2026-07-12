@@ -289,7 +289,7 @@ function UsedByCell({ agents }: { agents: Agent[] }) {
           initials={agent.name.slice(0, 2).toUpperCase()}
           avatarUrl={resolvePublicFileUrl(agent.avatar_url)}
           isAgent
-          size={22}
+          size="md"
         />
         <span className="min-w-0 truncate text-xs text-muted-foreground">
           {agent.name}
@@ -312,7 +312,7 @@ function UsedByCell({ agents }: { agents: Agent[] }) {
                     initials={a.name.slice(0, 2).toUpperCase()}
                     avatarUrl={resolvePublicFileUrl(a.avatar_url)}
                     isAgent
-                    size={22}
+                    size="md"
                   />
                 </span>
               }
@@ -379,7 +379,7 @@ function CreatorCell({ creator }: { creator: MemberWithUser | null }) {
             name={creator.name}
             initials={creator.name.slice(0, 2).toUpperCase()}
             avatarUrl={resolvePublicFileUrl(creator.avatar_url)}
-            size={22}
+            size="md"
           />
           <span className="min-w-0 truncate text-xs text-muted-foreground">
             {creator.name}

@@ -58,6 +58,19 @@
       "cli": "CLI",
       "cloud_worker": "云端 worker",
       "local_daemon": "本地守护进程"
+    },
+    "rename": "重命名机器",
+    "rename_dialog": {
+      "title": "重命名机器",
+      "description": "给这台机器起一个你能认出来的名字。会应用到这台机器上的所有运行时，并在给 agent 选择运行时时显示。",
+      "placeholder": "例如：我的 MacBook",
+      "hint": "留空则使用设备的默认名称。",
+      "cancel": "取消",
+      "save": "保存",
+      "saving": "保存中...",
+      "toast_saved": "已重命名机器",
+      "toast_cleared": "已清除机器名称",
+      "toast_failed": "重命名机器失败"
     }
   },
   "health": {

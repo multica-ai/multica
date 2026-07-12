@@ -11,16 +11,17 @@ import { useWorkspaceId } from "@multica/core/hooks";
 import { agentTaskSnapshotOptions } from "@multica/core/agents";
 import type { AgentTask } from "@multica/core/types";
 import { cn } from "@multica/ui/lib/utils";
+import type { AvatarSize } from "@multica/ui/lib/avatar-size";
 import { AgentAvatarStack } from "../../agents/components/agent-avatar-stack";
 import { AgentActivityHoverContent } from "../../agents/components/agent-activity-hover-content";
 import { useT } from "../../i18n";
 
 interface IssueAgentActivityIndicatorProps {
   issueId: string;
-  // Avatar size in px. Kept very small — this is a corner-of-card cue,
-  // not a primary control. Default 12 reads as a dot at typical board
+  // Avatar tier. Kept very small — this is a corner-of-card cue, not a
+  // primary control. Default xs (16 px) reads as a dot at typical board
   // densities while still showing the agent's face on hover-zoom.
-  size?: number;
+  size?: AvatarSize;
 }
 
 /**
@@ -48,7 +49,7 @@ interface IssueAgentActivityIndicatorProps {
  */
 export const IssueAgentActivityIndicator = memo(function IssueAgentActivityIndicator({
   issueId,
-  size = 12,
+  size = "xs",
 }: IssueAgentActivityIndicatorProps) {
   const { t } = useT("issues");
   const wsId = useWorkspaceId();

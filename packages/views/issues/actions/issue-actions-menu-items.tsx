@@ -10,7 +10,7 @@ import {
   CalendarClock,
   FolderOpen,
   Link2,
-  MoreHorizontal,
+  Network,
   Pin,
   PinOff,
   Plus,
@@ -270,12 +270,14 @@ export function IssueActionsMenuItems({
 
       <P.Separator />
 
-      {/* Relationship actions live under "More" — they're lower-frequency and
-          will grow (blocks, duplicates, related) as we add more relation types. */}
+      {/* Relationship actions live under "Relations" — a semantically explicit
+          label (unlike the old "More") so the first level tells you what the
+          submenu does. Holds parent/sub-issue links today, and will grow
+          (blocks, duplicates, related) as we add more relation types. */}
       <P.Sub>
         <P.SubTrigger>
-          <MoreHorizontal className="h-3.5 w-3.5" />
-          {t(($) => $.actions.more)}
+          <Network className="h-3.5 w-3.5" />
+          {t(($) => $.actions.relations)}
         </P.SubTrigger>
         <P.SubContent>
           <P.Item onClick={openCreateSubIssue}>

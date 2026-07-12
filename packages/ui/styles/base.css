@@ -278,3 +278,17 @@
     }
   }
 }
+
+/* In-page find (Cmd/Ctrl+F on the issue detail page). Matches are painted with
+ * the CSS Custom Highlight API — ranges only, no DOM mutation — so the tint
+ * layers cleanly over React-rendered markdown and the contenteditable
+ * title/description editors. `multica-find-active` is registered with a higher
+ * priority so the current match paints on top of the dimmer all-matches tint. */
+::highlight(multica-find) {
+  background-color: var(--find-match);
+  color: var(--find-match-foreground);
+}
+::highlight(multica-find-active) {
+  background-color: var(--find-match-active);
+  color: var(--find-match-foreground);
+}

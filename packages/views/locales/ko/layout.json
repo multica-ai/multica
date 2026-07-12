@@ -1,6 +1,7 @@
 {
   "nav": {
     "inbox": "인박스",
+    "chat": "채팅",
     "my_issues": "내 이슈",
     "issues": "이슈",
     "projects": "프로젝트",

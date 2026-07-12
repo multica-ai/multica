@@ -134,6 +134,25 @@ WHERE workspace_id = $1
 ORDER BY created_at ASC
 LIMIT 1;
 
+-- name: FindRecentAutopilotDuplicateIssue :one
+SELECT i.* FROM issue i
+WHERE i.workspace_id = $1
+  AND i.status NOT IN ('done', 'cancelled')
+  AND i.origin_type = 'autopilot'
+  AND i.origin_id = $2
+  AND i.project_id IS NOT DISTINCT FROM sqlc.arg('project_id')::uuid
+  AND lower(btrim(regexp_replace(i.title, '[[:space:]]+', ' ', 'g'))) = sqlc.arg('normalized_title')
+  AND i.created_at >= sqlc.arg('created_after')::timestamptz
+  AND EXISTS (
+    SELECT 1
+    FROM autopilot_run r
+    WHERE r.issue_id = i.id
+      AND r.autopilot_id = i.origin_id
+      AND r.status IN ('issue_created', 'running', 'completed')
+  )
+ORDER BY i.created_at ASC
+LIMIT 1;
+
 -- name: DeleteIssue :exec
 -- Defense-in-depth: the workspace_id predicate makes the tenant invariant a
 -- SQL-layer guarantee rather than a handler-layer one. Handler loaders

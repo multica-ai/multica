@@ -40,6 +40,17 @@ type localDirectoryAssignment struct {
 	RealPath string // canonical key for the path mutex
 }
 
+// localDirectoryAssignmentForTask returns the local_directory assignment a task
+// should execute inside. Squad-leader tasks are coordinators: they may create
+// child issues or comments, but should not bind to the user's repo worktree or
+// hold the path mutex while downstream workers are ready to write.
+func localDirectoryAssignmentForTask(task Task, daemonID string) (*localDirectoryAssignment, error) {
+	if task.IsLeaderTask {
+		return nil, nil
+	}
+	return findLocalDirectoryAssignment(task.ProjectResources, daemonID)
+}
+
 // findLocalDirectoryAssignment scans the task's project resources for one of
 // type local_directory whose daemon_id matches this daemon. Returns nil
 // (without error) when no such resource exists — the task takes the regular

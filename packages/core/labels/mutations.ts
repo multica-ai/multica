@@ -141,6 +141,30 @@ export function useAttachLabel(issueId: string) {
   });
 }
 
+/**
+ * Attach a label to an issue identified by mutation variables rather than a
+ * closed-over `issueId`. `useAttachLabel` binds one issueId at hook-call time
+ * for the optimistic issue-detail flow; this variant defers the id to call
+ * time so a caller can attach labels to an issue that doesn't exist yet at
+ * render — e.g. labels chosen in the create-issue dialog, attached right after
+ * the issue is created. No optimistic patch: the create flow closes the dialog
+ * and relies on the settle-time invalidation to surface the new labels.
+ */
+export function useAttachLabelToIssue() {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: ({ issueId, labelId }: { issueId: string; labelId: string }) =>
+      api.attachLabel(issueId, labelId),
+    onSettled: (_data, _err, { issueId }) => {
+      qc.invalidateQueries({ queryKey: labelKeys.byIssue(wsId, issueId) });
+      // Issues embed a denormalized labels snapshot, so refresh the issues
+      // caches that hold it (list / board / detail) once the attach settles.
+      qc.invalidateQueries({ queryKey: issueKeys.all(wsId) });
+    },
+  });
+}
+
 export function useDetachLabel(issueId: string) {
   const qc = useQueryClient();
   const wsId = useWorkspaceId();

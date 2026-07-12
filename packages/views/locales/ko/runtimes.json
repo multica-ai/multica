@@ -58,6 +58,19 @@
       "cli": "CLI",
       "cloud_worker": "클라우드 워커",
       "local_daemon": "로컬 데몬"
+    },
+    "rename": "기기 이름 변경",
+    "rename_dialog": {
+      "title": "기기 이름 변경",
+      "description": "이 기기에 알아보기 쉬운 이름을 지정합니다. 이 기기의 모든 런타임에 적용되며 에이전트의 런타임을 선택할 때 표시됩니다.",
+      "placeholder": "예: 내 MacBook",
+      "hint": "비워 두면 기기의 기본 이름을 사용합니다.",
+      "cancel": "취소",
+      "save": "저장",
+      "saving": "저장 중...",
+      "toast_saved": "기기 이름을 변경했습니다",
+      "toast_cleared": "기기 이름을 지웠습니다",
+      "toast_failed": "기기 이름 변경에 실패했습니다"
     }
   },
   "health": {

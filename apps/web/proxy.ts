@@ -13,12 +13,14 @@ const LEGACY_ROUTE_SEGMENTS = new Set([
   "issues",
   "projects",
   "agents",
+  "squads",
   "inbox",
   "my-issues",
   "autopilots",
   "runtimes",
   "skills",
   "settings",
+  "usage",
 ]);
 
 function resolveLocale(req: NextRequest): string {

@@ -31,11 +31,13 @@ import (
 // finding about the "request disappears under Redis hiccups" path.
 
 const (
+	runtimePendingRedisHashTag = "{runtime_pending}"
+
 	// Namespaced so we don't collide with the realtime relay's ws:* keys.
-	localSkillListKeyPrefix       = "mul:local_skill:list:"
-	localSkillListPendingPrefix   = "mul:local_skill:list:pending:"
-	localSkillImportKeyPrefix     = "mul:local_skill:import:"
-	localSkillImportPendingPrefix = "mul:local_skill:import:pending:"
+	localSkillListKeyPrefix       = "mul:" + runtimePendingRedisHashTag + ":local_skill:list:"
+	localSkillListPendingPrefix   = "mul:" + runtimePendingRedisHashTag + ":local_skill:list:pending:"
+	localSkillImportKeyPrefix     = "mul:" + runtimePendingRedisHashTag + ":local_skill:import:"
+	localSkillImportPendingPrefix = "mul:" + runtimePendingRedisHashTag + ":local_skill:import:pending:"
 	localSkillRedisPopMaxRetries  = 5
 )
 
@@ -483,7 +485,7 @@ func (s *RedisLocalSkillImportStore) PopPendingBatch(ctx context.Context, runtim
 	return result, nil
 }
 
-func (s *RedisLocalSkillImportStore) Complete(ctx context.Context, id string, skill SkillResponse) error {
+func (s *RedisLocalSkillImportStore) Complete(ctx context.Context, id string, skill SkillWithFilesResponse) error {
 	req, err := s.loadImportRequest(ctx, id)
 	if err != nil {
 		return err

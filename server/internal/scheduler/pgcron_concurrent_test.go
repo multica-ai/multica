@@ -39,6 +39,13 @@ func TestPgCronConcurrentNoDoubleWrite(t *testing.T) {
 	pool := integrationPool(t)
 	ctx := context.Background()
 
+	// This test forces the shared rollup watermark backwards and asserts
+	// exactly one of N concurrent callers advances it. Serialise against any
+	// other package's rollup test running concurrently against the same DB,
+	// otherwise a stray rollup tick advances the watermark past our window
+	// and we see winners=0 (MUL-3980).
+	lockRollupSingleton(t, pool)
+
 	// Seed an isolated workspace/runtime/agent/task and a handful of
 	// task_usage rows landing in the same UTC hour bucket. The bucket
 	// math is the SQL helper task_usage_hour_bucket(...).

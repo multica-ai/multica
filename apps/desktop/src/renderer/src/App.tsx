@@ -13,7 +13,6 @@ import { MulticaIcon } from "@multica/ui/components/common/multica-icon";
 import { Toaster } from "@multica/ui/components/ui/sonner";
 import { DesktopLoginPage } from "./pages/login";
 import { DesktopShell } from "./components/desktop-layout";
-import { PageviewTracker } from "./components/pageview-tracker";
 import { UpdateNotification } from "./components/update-notification";
 import { useTabStore } from "./stores/tab-store";
 import { useWindowOverlayStore } from "./stores/window-overlay-store";
@@ -277,15 +276,7 @@ function AppContent() {
     );
   }
 
-  // Pageview tracker sits at the app root so it covers every visible
-  // surface (login, overlays, tab paths) — mounting it inside DesktopShell
-  // would miss the logged-out and overlay states.
-  return (
-    <>
-      <PageviewTracker />
-      {user ? <DesktopShell /> : <DesktopLoginPage />}
-    </>
-  );
+  return user ? <DesktopShell /> : <DesktopLoginPage />;
 }
 
 function BlockingRuntimeConfigError({ message }: { message: string }) {

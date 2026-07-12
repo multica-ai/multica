@@ -149,6 +149,74 @@ func TestDispatchAutopilotForPlanIsIdempotent(t *testing.T) {
 	}
 }
 
+func TestDispatchAutopilotSuppressesRecentDuplicateIssue(t *testing.T) {
+	ctx := context.Background()
+	queries := db.New(testPool)
+	bus := events.New()
+	taskSvc := service.NewTaskService(queries, testPool, nil, bus)
+	autopilotSvc := service.NewAutopilotService(queries, testPool, bus, taskSvc)
+
+	var agentID string
+	if err := testPool.QueryRow(ctx,
+		`SELECT id::text FROM agent WHERE workspace_id = $1 ORDER BY created_at ASC LIMIT 1`,
+		testWorkspaceID,
+	).Scan(&agentID); err != nil {
+		t.Fatalf("load fixture agent: %v", err)
+	}
+
+	title := "Autopilot recent duplicate issue " + time.Now().UTC().Format("20060102150405.000000000")
+	ap, err := queries.CreateAutopilot(ctx, db.CreateAutopilotParams{
+		WorkspaceID:        parseUUID(testWorkspaceID),
+		Title:              "Recent duplicate issue guard",
+		Description:        pgtype.Text{String: "Recent duplicate issue guard test", Valid: true},
+		AssigneeType:       "agent",
+		AssigneeID:         parseUUID(agentID),
+		Status:             "active",
+		ExecutionMode:      "create_issue",
+		IssueTitleTemplate: pgtype.Text{String: title, Valid: true},
+		CreatedByType:      "member",
+		CreatedByID:        parseUUID(testUserID),
+	})
+	if err != nil {
+		t.Fatalf("CreateAutopilot: %v", err)
+	}
+	t.Cleanup(func() {
+		bg := context.Background()
+		_, _ = testPool.Exec(bg, `DELETE FROM autopilot WHERE id = $1`, ap.ID)
+		_, _ = testPool.Exec(bg, `DELETE FROM issue WHERE workspace_id = $1 AND title = $2`, testWorkspaceID, title)
+	})
+
+	first, err := autopilotSvc.DispatchAutopilot(ctx, ap, pgtype.UUID{}, "manual", nil)
+	if err != nil {
+		t.Fatalf("first DispatchAutopilot: %v", err)
+	}
+	if first == nil || first.Status != "issue_created" || !first.IssueID.Valid {
+		t.Fatalf("first dispatch = %+v, want issue_created with issue_id", first)
+	}
+
+	second, err := autopilotSvc.DispatchAutopilot(ctx, ap, pgtype.UUID{}, "manual", nil)
+	if err != nil {
+		t.Fatalf("second DispatchAutopilot: %v", err)
+	}
+	if second == nil || second.Status != "skipped" {
+		t.Fatalf("second dispatch = %+v, want skipped duplicate run", second)
+	}
+	if second.IssueID.Valid {
+		t.Fatalf("duplicate run linked issue_id=%s, want no new issue", util.UUIDToString(second.IssueID))
+	}
+
+	var count int
+	if err := testPool.QueryRow(ctx,
+		`SELECT count(*) FROM issue WHERE workspace_id = $1 AND title = $2`,
+		testWorkspaceID, title,
+	).Scan(&count); err != nil {
+		t.Fatalf("count issues: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("recent duplicate autopilot dispatch should leave 1 matching issue, got %d", count)
+	}
+}
+
 // TestDispatchAutopilotForPlanRejectsZeroArgs locks in the
 // fail-loud contract: a caller that forgets to set trigger_id or
 // planned_at would silently disable the idempotency guard, and the

@@ -40,6 +40,7 @@ const mockDraftStore = {
     assigneeId: undefined as string | undefined,
     startDate: null,
     dueDate: null,
+    labelIds: [] as string[],
     attachments: [] as Array<{
       id: string;
       workspace_id: string;
@@ -248,7 +249,16 @@ vi.mock("../issues/components", () => ({
       onClick={() => onOpenChange?.(false)}
     />
   ),
-  DueDatePicker: () => <div data-testid="due-date-picker" />,
+  // Due date now shares the start-date overflow pattern, so surface
+  // open/onOpenChange to assert it too.
+  DueDatePicker: ({ open, onOpenChange }: { open?: boolean; onOpenChange?: (v: boolean) => void }) => (
+    <div
+      data-testid="due-date-picker"
+      data-open={open ? "true" : "false"}
+      onClick={() => onOpenChange?.(false)}
+    />
+  ),
+  LabelPicker: () => <div data-testid="label-picker" />,
 }));
 
 vi.mock("../projects/components/project-picker", () => ({
@@ -371,6 +381,7 @@ describe("CreateIssueModal", () => {
     mockDraftStore.draft.assigneeId = undefined;
     mockDraftStore.draft.startDate = null;
     mockDraftStore.draft.dueDate = null;
+    mockDraftStore.draft.labelIds = [];
     mockDraftStore.draft.attachments = [];
     mockSetDraft.mockImplementation((patch: Partial<typeof mockDraftStore.draft>) => {
       mockDraftStore.draft = { ...mockDraftStore.draft, ...patch };
@@ -385,6 +396,7 @@ describe("CreateIssueModal", () => {
         assigneeId: mockDraftStore.lastAssigneeId,
         startDate: null,
         dueDate: null,
+        labelIds: [],
         attachments: [],
       };
     });
@@ -501,6 +513,7 @@ describe("CreateIssueModal", () => {
       assigneeId: undefined,
       startDate: null,
       dueDate: null,
+      labelIds: [],
       attachments: [],
     });
   });
@@ -817,6 +830,35 @@ describe("CreateIssueModal", () => {
     await user.click(picker);
 
     expect(screen.queryByTestId("start-date-picker")).not.toBeInTheDocument();
+  });
+
+  it("exposes the label picker on the toolbar and keeps due date in the overflow menu", async () => {
+    renderModal(<CreateIssueModal onClose={vi.fn()} />);
+
+    // Label entry is now surfaced directly on the dialog...
+    expect(screen.getByTestId("label-picker")).toBeInTheDocument();
+    // ...while due date is collapsed into the ⋯ menu (no inline pill yet).
+    expect(screen.queryByTestId("due-date-picker")).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /Set due date/i }),
+    ).toBeInTheDocument();
+  });
+
+  it("hides due date behind the overflow menu and reveals it on demand", async () => {
+    const user = userEvent.setup();
+
+    renderModal(<CreateIssueModal onClose={vi.fn()} />);
+
+    expect(screen.queryByTestId("due-date-picker")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /Set due date/i }));
+
+    const picker = await screen.findByTestId("due-date-picker");
+    expect(picker).toHaveAttribute("data-open", "true");
+
+    await user.click(picker);
+
+    expect(screen.queryByTestId("due-date-picker")).not.toBeInTheDocument();
   });
 
   // Title + description are packed into the agent prompt on switch; if we

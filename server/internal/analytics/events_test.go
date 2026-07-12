@@ -25,23 +25,25 @@ func TestFailedEventsUseWillRetry(t *testing.T) {
 }
 
 func TestIsMetricsOnly(t *testing.T) {
-	// Operational / execution-lifecycle events are Prometheus-only and must
-	// not be shipped to PostHog.
+	// As of MUL-4127, PostHog is retired for server-side product analytics:
+	// every server-side event is Prometheus-only and must not ship to PostHog.
 	for _, name := range []string{
+		// runtime / autopilot execution-lifecycle telemetry
 		EventRuntimeRegistered, EventRuntimeReady, EventRuntimeFailed, EventRuntimeOffline,
 		EventAutopilotRunStarted, EventAutopilotRunCompleted, EventAutopilotRunFailed,
+		// product-behaviour events (now DB + Grafana only)
+		EventSignup, EventWorkspaceCreated, EventIssueCreated, EventIssueExecuted,
+		EventChatMessageSent, EventTeamInviteSent, EventTeamInviteAccepted,
+		EventOnboardingStarted, EventOnboardingQuestionnaireSubmit, EventAgentCreated,
+		EventOnboardingCompleted, EventCloudWaitlistJoined, EventFeedbackSubmitted,
+		EventContactSalesSubmitted, EventSquadCreated, EventAutopilotCreated,
 	} {
 		if !IsMetricsOnly(name) {
-			t.Errorf("IsMetricsOnly(%q) = false, want true (operational event must stay out of PostHog)", name)
+			t.Errorf("IsMetricsOnly(%q) = false, want true (server events stay out of PostHog since MUL-4127)", name)
 		}
 	}
-	// Product-behaviour events must still reach PostHog.
-	for _, name := range []string{
-		EventSignup, EventWorkspaceCreated, EventIssueCreated, EventIssueExecuted,
-		EventChatMessageSent, EventAgentCreated, EventAutopilotCreated,
-	} {
-		if IsMetricsOnly(name) {
-			t.Errorf("IsMetricsOnly(%q) = true, want false (product event must reach PostHog)", name)
-		}
+	// A name that isn't a declared server event is not metrics-only.
+	if IsMetricsOnly("$exception") {
+		t.Errorf("IsMetricsOnly(%q) = true, want false (frontend-only event)", "$exception")
 	}
 }

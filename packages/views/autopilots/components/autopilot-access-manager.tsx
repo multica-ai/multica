@@ -115,7 +115,7 @@ export function AutopilotAccessManager({
                   setPickerOpen(false);
                 }}
               >
-                <ActorAvatar actorType="member" actorId={m.user_id} size={18} />
+                <ActorAvatar actorType="member" actorId={m.user_id} size="sm" />
                 <span className="truncate">{m.name}</span>
               </PickerItem>
             ))
@@ -135,7 +135,7 @@ export function AutopilotAccessManager({
               className="flex items-center justify-between rounded-md px-2 py-1.5 hover:bg-muted/50"
             >
               <span className="flex min-w-0 items-center gap-2">
-                <ActorAvatar actorType="member" actorId={c.user_id} size={20} />
+                <ActorAvatar actorType="member" actorId={c.user_id} size="sm" />
                 <span className="truncate text-sm">
                   {getActorName("member", c.user_id)}
                 </span>

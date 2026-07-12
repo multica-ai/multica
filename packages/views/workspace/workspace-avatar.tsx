@@ -2,9 +2,9 @@ import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
 import { cn } from "@multica/ui/lib/utils";
 
 const sizeMap = {
-  sm: "h-5 w-5 text-xs rounded",
-  md: "h-7 w-7 text-xs rounded-md",
-  lg: "h-9 w-9 text-sm rounded-md",
+  sm: "h-5 w-5 text-xs rounded-full",
+  md: "h-7 w-7 text-xs rounded-full",
+  lg: "h-9 w-9 text-sm rounded-full",
 } as const;
 
 interface WorkspaceAvatarProps {

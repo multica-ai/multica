@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"testing"
+	"time"
 
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/util"
@@ -123,6 +124,50 @@ func TestSendChatMessage_LinksAttachments(t *testing.T) {
 	}
 }
 
+// TestSendChatMessage_ArchivedAgent verifies that sending to a session whose
+// agent was archived is rejected with 409 BEFORE any message is persisted.
+// EnqueueChatTask rejects an archived agent, but only after CreateChatMessage;
+// without the handler's preflight a stale client would leave an orphan user
+// message with no task or reply.
+func TestSendChatMessage_ArchivedAgent(t *testing.T) {
+	agentID := createHandlerTestAgent(t, "ChatArchivedAgent", []byte("[]"))
+	sessionID := createHandlerTestChatSession(t, agentID)
+
+	// Archive the agent out from under the (stale) client.
+	if _, err := testPool.Exec(
+		context.Background(),
+		`UPDATE agent SET archived_at = now() WHERE id = $1`,
+		agentID,
+	); err != nil {
+		t.Fatalf("archive agent: %v", err)
+	}
+
+	sendReq := newRequest("POST", "/api/chat-sessions/"+sessionID+"/messages", map[string]any{
+		"content": "still there?",
+	})
+	sendReq = withURLParam(sendReq, "sessionId", sessionID)
+	sendReq = withChatTestWorkspaceCtx(t, sendReq)
+	sendW := httptest.NewRecorder()
+	testHandler.SendChatMessage(sendW, sendReq)
+
+	if sendW.Code != http.StatusConflict {
+		t.Fatalf("SendChatMessage to archived agent: expected 409, got %d: %s", sendW.Code, sendW.Body.String())
+	}
+
+	// The rejected send must not have persisted an orphan user message.
+	var count int
+	if err := testPool.QueryRow(
+		context.Background(),
+		`SELECT count(*) FROM chat_message WHERE chat_session_id = $1`,
+		sessionID,
+	).Scan(&count); err != nil {
+		t.Fatalf("count chat messages: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("expected no chat_message rows after rejected send, got %d", count)
+	}
+}
+
 // TestSendChatMessage_LinksUnattachedAttachments verifies the new compose
 // path: upload creates a workspace-scoped unattached attachment, and chat send
 // binds it to both the session and the user message.
@@ -233,6 +278,130 @@ func TestUpdateChatSession_RenamesTitle(t *testing.T) {
 	}
 	if dbTitle != "Renamed Session" {
 		t.Fatalf("db title: want %q, got %q", "Renamed Session", dbTitle)
+	}
+}
+
+// TestSetChatSessionPinned_TogglesPin confirms PATCH /pin stamps pinned_at on
+// pin and clears it on unpin, returns the new state, and does not bump
+// updated_at (pinning is a list-ordering preference, not activity).
+func TestSetChatSessionPinned_TogglesPin(t *testing.T) {
+	agentID := createHandlerTestAgent(t, "ChatPinAgent", []byte("[]"))
+	sessionID := createHandlerTestChatSession(t, agentID)
+
+	var updatedBefore time.Time
+	if err := testPool.QueryRow(
+		context.Background(),
+		`SELECT updated_at FROM chat_session WHERE id = $1`,
+		sessionID,
+	).Scan(&updatedBefore); err != nil {
+		t.Fatalf("query updated_at: %v", err)
+	}
+
+	pin := func(pinned bool) ChatSessionResponse {
+		req := newRequest("PATCH", "/api/chat/sessions/"+sessionID+"/pin", map[string]any{
+			"pinned": pinned,
+		})
+		req = withURLParam(req, "sessionId", sessionID)
+		req = withChatTestWorkspaceCtx(t, req)
+		w := httptest.NewRecorder()
+		testHandler.SetChatSessionPinned(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("SetChatSessionPinned(%v): expected 200, got %d: %s", pinned, w.Code, w.Body.String())
+		}
+		var resp ChatSessionResponse
+		if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("decode pin: %v", err)
+		}
+		return resp
+	}
+
+	// Pin.
+	if resp := pin(true); !resp.Pinned {
+		t.Fatalf("pin=true response Pinned: want true, got false")
+	}
+	var pinnedAt *time.Time
+	var updatedAfter time.Time
+	if err := testPool.QueryRow(
+		context.Background(),
+		`SELECT pinned_at, updated_at FROM chat_session WHERE id = $1`,
+		sessionID,
+	).Scan(&pinnedAt, &updatedAfter); err != nil {
+		t.Fatalf("query pinned_at: %v", err)
+	}
+	if pinnedAt == nil {
+		t.Fatalf("pinned_at: want non-null after pin, got null")
+	}
+	if !updatedAfter.Equal(updatedBefore) {
+		t.Fatalf("updated_at must not change on pin: before %v, after %v", updatedBefore, updatedAfter)
+	}
+
+	// Unpin.
+	if resp := pin(false); resp.Pinned {
+		t.Fatalf("pin=false response Pinned: want false, got true")
+	}
+	if err := testPool.QueryRow(
+		context.Background(),
+		`SELECT pinned_at FROM chat_session WHERE id = $1`,
+		sessionID,
+	).Scan(&pinnedAt); err != nil {
+		t.Fatalf("query pinned_at after unpin: %v", err)
+	}
+	if pinnedAt != nil {
+		t.Fatalf("pinned_at: want null after unpin, got %v", *pinnedAt)
+	}
+}
+
+// TestSetChatSessionArchived_TogglesStatus archives then unarchives a session,
+// asserting the response + DB status column flip and that updated_at is bumped
+// (so the row re-sorts in whichever list it lands).
+func TestSetChatSessionArchived_TogglesStatus(t *testing.T) {
+	agentID := createHandlerTestAgent(t, "ChatArchiveAgent", []byte("[]"))
+	sessionID := createHandlerTestChatSession(t, agentID)
+
+	archive := func(archived bool) ChatSessionResponse {
+		req := newRequest("PATCH", "/api/chat/sessions/"+sessionID+"/archive", map[string]any{
+			"archived": archived,
+		})
+		req = withURLParam(req, "sessionId", sessionID)
+		req = withChatTestWorkspaceCtx(t, req)
+		w := httptest.NewRecorder()
+		testHandler.SetChatSessionArchived(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("SetChatSessionArchived(%v): expected 200, got %d: %s", archived, w.Code, w.Body.String())
+		}
+		var resp ChatSessionResponse
+		if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("decode archive: %v", err)
+		}
+		return resp
+	}
+
+	dbStatus := func() string {
+		var status string
+		if err := testPool.QueryRow(
+			context.Background(),
+			`SELECT status FROM chat_session WHERE id = $1`,
+			sessionID,
+		).Scan(&status); err != nil {
+			t.Fatalf("query status: %v", err)
+		}
+		return status
+	}
+
+	// Archive.
+	if resp := archive(true); resp.Status != "archived" {
+		t.Fatalf("archive=true response Status: want archived, got %q", resp.Status)
+	}
+	if got := dbStatus(); got != "archived" {
+		t.Fatalf("db status after archive: want archived, got %q", got)
+	}
+
+	// Unarchive restores it to active.
+	if resp := archive(false); resp.Status != "active" {
+		t.Fatalf("archive=false response Status: want active, got %q", resp.Status)
+	}
+	if got := dbStatus(); got != "active" {
+		t.Fatalf("db status after unarchive: want active, got %q", got)
 	}
 }
 
@@ -445,17 +614,20 @@ func TestListChatMessagesPage_RejectsInvalidLimit(t *testing.T) {
 	}
 }
 
-// TestDeleteChatSession_PrunesChannelChatSessionBinding verifies the
-// application-layer replacement for the channel_chat_session_binding
-// chat_session-FK cascade (MUL-3515 §4): deleting a chat session prunes its
-// channel binding in the same tx that deletes the session row.
-func TestDeleteChatSession_PrunesChannelChatSessionBinding(t *testing.T) {
+// TestDeleteChatSession_PrunesChannelRows verifies the application-layer
+// replacement for the channel_* chat_session-FK cascade (MUL-3515 §4): deleting a
+// chat session prunes BOTH its channel_chat_session_binding and its
+// channel_outbound_card_message rows in the same tx that deletes the session row.
+// Both are keyed by chat_session_id with no FK and no reaper, so a miss leaves a
+// permanent orphan (Elon's follow-up on #4810).
+func TestDeleteChatSession_PrunesChannelRows(t *testing.T) {
 	agentID := createHandlerTestAgent(t, "ChatDeleteBindingAgent", []byte("[]"))
 	sessionID := createHandlerTestChatSession(t, agentID)
 	ctx := context.Background()
 
 	const appID = "cli_chat_delete_binding"
 	const channelChatID = "oc_chat_delete_binding"
+	const cardMsgID = "om_chat_delete_card"
 
 	// channel_* rows have no FK to chat_session/workspace (MUL-3515 §4), so
 	// they outlive the helper's chat_session cleanup; clear by deterministic
@@ -463,6 +635,8 @@ func TestDeleteChatSession_PrunesChannelChatSessionBinding(t *testing.T) {
 	cleanChannel := func() {
 		_, _ = testPool.Exec(context.Background(),
 			`DELETE FROM channel_chat_session_binding WHERE channel_chat_id = $1`, channelChatID)
+		_, _ = testPool.Exec(context.Background(),
+			`DELETE FROM channel_outbound_card_message WHERE channel_card_message_id = $1`, cardMsgID)
 		_, _ = testPool.Exec(context.Background(),
 			`DELETE FROM channel_installation WHERE channel_type = 'feishu' AND config->>'app_id' = $1`, appID)
 	}
@@ -485,6 +659,13 @@ VALUES ($1, $2, 'feishu', $3, 'p2p')
 		t.Fatalf("insert channel_chat_session_binding: %v", err)
 	}
 
+	if _, err := testPool.Exec(ctx, `
+INSERT INTO channel_outbound_card_message (chat_session_id, channel_type, channel_chat_id, channel_card_message_id, status)
+VALUES ($1, 'feishu', $2, $3, 'final')
+`, sessionID, channelChatID, cardMsgID); err != nil {
+		t.Fatalf("insert channel_outbound_card_message: %v", err)
+	}
+
 	req := httptest.NewRequest(http.MethodDelete, "/api/chat/sessions/"+sessionID, nil)
 	req.Header.Set("X-User-ID", testUserID)
 	req = withURLParam(req, "sessionId", sessionID)
@@ -503,5 +684,14 @@ VALUES ($1, $2, 'feishu', $3, 'p2p')
 	}
 	if bindingExists {
 		t.Fatal("deleted chat session's channel_chat_session_binding was not pruned")
+	}
+
+	var cardExists bool
+	if err := testPool.QueryRow(ctx,
+		`SELECT EXISTS (SELECT 1 FROM channel_outbound_card_message WHERE channel_card_message_id = $1)`, cardMsgID).Scan(&cardExists); err != nil {
+		t.Fatalf("query outbound card message: %v", err)
+	}
+	if cardExists {
+		t.Fatal("deleted chat session's channel_outbound_card_message was not pruned (no reaper would ever collect it)")
 	}
 }

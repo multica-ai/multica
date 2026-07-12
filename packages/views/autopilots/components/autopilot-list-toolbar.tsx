@@ -339,7 +339,7 @@ export function AutopilotListToolbar({
                       <HoverCheck
                         checked={filters.assignees.includes(value)}
                       />
-                      <ActorAvatar actorType={type} actorId={id} size={16} />
+                      <ActorAvatar actorType={type} actorId={id} size="sm" />
                       <span className="min-w-0 truncate">
                         {getActorName(type, id)}
                       </span>
@@ -434,7 +434,7 @@ export function AutopilotListToolbar({
                       className={FILTER_ITEM_CLASS}
                     >
                       <HoverCheck checked={filters.creators.includes(value)} />
-                      <ActorAvatar actorType={type} actorId={id} size={16} />
+                      <ActorAvatar actorType={type} actorId={id} size="sm" />
                       <span className="min-w-0 truncate">
                         {getActorName(type, id)}
                       </span>

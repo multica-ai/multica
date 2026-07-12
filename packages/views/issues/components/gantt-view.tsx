@@ -381,7 +381,7 @@ function ScheduledRow({
             <ActorAvatar
               actorType={issue.assignee_type}
               actorId={issue.assignee_id}
-              size={18}
+              size="sm"
               enableHoverCard
             />
           )}

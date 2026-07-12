@@ -1,4 +1,8 @@
 {
+  "page": {
+    "title": "チャット",
+    "select_prompt": "会話を選ぶか、＋ で新規作成してください"
+  },
   "fab": {
     "running": "Multica が作業中です...",
     "unread_other": "未読のチャット {{count}}件",
@@ -7,18 +11,29 @@
   "input": {
     "placeholder_no_agent": "チャットを始めるにはエージェントを作成してください",
     "placeholder_archived": "このセッションはアーカイブされています",
+    "placeholder_archived_agent": "このエージェントはアーカイブされています",
     "placeholder_named": "{{name}} にメッセージ…",
     "placeholder_default": "メッセージを入力…",
     "send_tooltip": "送信",
     "stop_tooltip": "停止",
     "send_failed_toast": "メッセージを送信できませんでした",
-    "attachment_bind_failed_toast": "メッセージは送信されましたが、ファイルを添付できませんでした。しばらくしてからもう一度お試しください。"
+    "attachment_bind_failed_toast": "メッセージは送信されましたが、ファイルを添付できませんでした。しばらくしてからもう一度お試しください。",
+    "add_tooltip": "追加",
+    "upload_file": "画像・ファイル"
   },
   "message_list": {
     "show_details": "詳細を表示",
     "replied_in": "{{elapsed}}で返信",
     "failed_after": "{{elapsed}}後に失敗",
-    "task_failed_fallback": "タスクが失敗しました",
+    "failure": {
+      "agent_error": "エージェントでエラーが発生し、返信を完了できませんでした。もう一度お試しください。",
+      "timeout": "処理に時間がかかりすぎたため、完了前に停止しました。もう一度お試しいただくか、リクエストを分けてみてください。",
+      "codex_semantic_inactivity": "エージェントが応答しなくなり、完了前に停止しました。もう一度お試しください。",
+      "runtime_offline": "エージェントは現在オフラインのため、返信できませんでした。オンラインに戻ってから再度お試しください。",
+      "runtime_recovery": "完了する前にエージェントが再起動しました。もう一度お試しください。",
+      "manual": "この返信はキャンセルされました。",
+      "fallback": "問題が発生し、エージェントは返信を完了できませんでした。もう一度お試しください。"
+    },
     "tools_other": "ツール {{count}}個",
     "tool_result_named": "{{tool}} の結果: ",
     "tool_result_unnamed": "結果: ",
@@ -87,7 +102,8 @@
     "first_time_actions": "要約を頼んだり、今日の予定を立てたり、簡単なタスクを任せたりしてみましょう。",
     "returning_title_named": "こんにちは、{{name}} です",
     "returning_title_default": "Multica へようこそ",
-    "returning_subtitle": "こう聞いてみましょう"
+    "returning_subtitle": "こう聞いてみましょう",
+    "chat_with_named": "{{name}} とチャット"
   },
   "starter_prompts": {
     "list_open": "オープンなタスクを優先度順にまとめて",
@@ -95,6 +111,7 @@
     "plan_next": "次に取り組むことを計画して"
   },
   "no_agent_banner": "チャットを始めるにはエージェントが必要です。",
+  "archived_agent_banner": "{{name}} はアーカイブされました。この会話は読み取り専用です。",
   "offline_banner": {
     "fallback_name": "エージェント",
     "unstable": "{{name}} の接続が不安定です。返信が遅れる場合があります。",
@@ -118,5 +135,29 @@
       "searching_web": "ウェブを検索中",
       "fallback": "作業中"
     }
+  },
+  "list": {
+    "typing": "入力中…",
+    "failed": "送信失敗",
+    "you_prefix": "あなた：",
+    "no_messages": "メッセージはまだありません",
+    "quick_agents": "よく使う Agent",
+    "add": "追加",
+    "add_agent": "よく使う Agent を追加",
+    "unpin_agent": "よく使うから外す",
+    "waiting": "返信待ち",
+    "pin": "ピン留め",
+    "unpin": "ピン留めを解除",
+    "pinned": "ピン留め済み",
+    "archive": "アーカイブ",
+    "unarchive": "アーカイブ解除",
+    "archived_title": "アーカイブ済み"
+  },
+  "header": {
+    "view_profile": "Agent のプロフィール",
+    "rename": "名前を変更",
+    "delete": "チャットを削除",
+    "archive": "チャットをアーカイブ",
+    "unarchive": "アーカイブを解除"
   }
 }

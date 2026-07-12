@@ -283,8 +283,9 @@ const maxDerivedTextLen = 4000
 // Block Kit blocks and leave the top-level Text empty; without this fallback
 // such a message is indistinguishable from a join/system marker and gets
 // dropped (MUL-3931 / #4803). Order: top-level text, then each attachment's
-// built-in Fallback / title+text/fields, then a best-effort blocks flatten.
-// Returns "" only when nothing renderable exists — a real system marker.
+// rendered text/fields, then last-resort fallback text, then a best-effort
+// blocks flatten. Returns "" only when nothing renderable exists — a real
+// system marker.
 func flattenSlackText(m slack.Message) string {
 	if t := strings.TrimSpace(m.Text); t != "" {
 		return t
@@ -303,13 +304,11 @@ func flattenSlackText(m slack.Message) string {
 	return truncateRunes(strings.TrimSpace(strings.Join(parts, "\n")), maxDerivedTextLen)
 }
 
-// attachmentText summarizes one attachment, preferring Slack's built-in
-// Fallback (the plain-text rendering Slack ships for exactly this purpose),
-// then a pretext/title/text/fields composite, then the attachment's own blocks.
+// attachmentText summarizes one attachment. Attachment fallback is only a
+// last-resort summary for clients that cannot render attachments; Grafana-style
+// alerts often put the useful alert body in Text/Fields while Fallback repeats
+// the short title.
 func attachmentText(a slack.Attachment) string {
-	if t := strings.TrimSpace(a.Fallback); t != "" {
-		return t
-	}
 	parts := make([]string, 0, 3+len(a.Fields))
 	for _, s := range []string{a.Pretext, a.Title, a.Text} {
 		if s = strings.TrimSpace(s); s != "" {
@@ -323,6 +322,9 @@ func attachmentText(a slack.Attachment) string {
 	}
 	if len(parts) > 0 {
 		return strings.Join(parts, "\n")
+	}
+	if t := strings.TrimSpace(a.Fallback); t != "" {
+		return t
 	}
 	return flattenBlocks(a.Blocks)
 }

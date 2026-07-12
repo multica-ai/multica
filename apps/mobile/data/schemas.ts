@@ -12,6 +12,7 @@
 import { z } from "zod";
 import type {
   Agent,
+  AgentInvocationTarget,
   AgentTask,
   Attachment,
   ChatMessage,
@@ -546,6 +547,18 @@ export const MemberWithUserSchema: z.ZodType<MemberWithUser> = z.object({
 export const MemberListSchema = z.array(MemberWithUserSchema).default([]);
 export const EMPTY_MEMBER_LIST: MemberWithUser[] = [];
 
+const AgentInvocationTargetSchema: z.ZodType<AgentInvocationTarget> = z
+  .object({
+    target_type: z.enum(["workspace", "member", "team"]).catch("team"),
+    target_id: z
+      .string()
+      .nullable()
+      .optional()
+      .catch(null)
+      .transform((v) => v ?? null),
+  })
+  .loose();
+
 // Agent schema is loose on every enum / structural field — the agent table is
 // where new modes/visibilities/statuses get added most often. We need only id,
 // name, avatar_url, and a couple of flags for the assignee picker + chat
@@ -572,6 +585,8 @@ export const AgentSchema: z.ZodType<Agent> = z.object({
   visibility: z.string().catch("workspace") as unknown as z.ZodType<
     Agent["visibility"]
   >,
+  permission_mode: z.enum(["private", "public_to"]).catch("private"),
+  invocation_targets: z.array(AgentInvocationTargetSchema).default([]),
   status: z.string().catch("active") as unknown as z.ZodType<Agent["status"]>,
   max_concurrent_tasks: z.number().default(1),
   model: z.string().default(""),

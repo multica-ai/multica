@@ -25,9 +25,9 @@ Go backend + monorepo frontend (pnpm workspaces + Turborepo) with shared package
 ### State Management (critical)
 
 - **React Query** owns all server state (issues, members, agents, inbox, workspace list)
-- **Zustand** owns all client state (current workspace selection, view filters, drafts, modals)
+- **Zustand** owns client/view state (view filters, drafts, modals, desktop tab state); current workspace identity is route-driven and only mirrored for platform plumbing
 - All Zustand stores live in `packages/core/` - never in `packages/views/` or app directories
-- WS events invalidate React Query - never write directly to stores
+- WS events update React Query for server data; store writes are only for clearing client-owned pointers with a single responder/self-event guard
 
 ### Package Boundaries (hard rules)
 

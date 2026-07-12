@@ -64,6 +64,43 @@ export function removeIssueFromBuckets(
 }
 
 /**
+ * Count-only reconcile for an issue BEYOND the loaded window: its status
+ * changed server-side, so one unit of `total` moves between buckets while
+ * the loaded arrays stay untouched. `hasMore` (loaded < total) stays
+ * consistent for free.
+ */
+export function moveBucketTotal(
+  resp: ListIssuesCache,
+  from: IssueStatus,
+  to: IssueStatus,
+): ListIssuesCache {
+  if (from === to) return resp;
+  const fromBucket = getBucket(resp, from);
+  const toBucket = getBucket(resp, to);
+  let next = setBucket(resp, from, {
+    ...fromBucket,
+    total: Math.max(0, fromBucket.total - 1),
+  });
+  next = setBucket(next, to, { ...toBucket, total: toBucket.total + 1 });
+  return next;
+}
+
+/**
+ * Count-only reconcile for an issue BEYOND the loaded window that LEFT the
+ * list (reassigned / moved project): the bucket it was counted in loses one.
+ */
+export function decrementBucketTotal(
+  resp: ListIssuesCache,
+  status: IssueStatus,
+): ListIssuesCache {
+  const bucket = getBucket(resp, status);
+  return setBucket(resp, status, {
+    ...bucket,
+    total: Math.max(0, bucket.total - 1),
+  });
+}
+
+/**
  * Insert `issue` into `issues` at the slot implied by `position ASC` — the same
  * ordering the board renders (server `ORDER BY position ASC`). Returns a new
  * array; the input is not mutated.

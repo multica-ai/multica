@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -69,6 +70,9 @@ func resolveTextFlag(cmd *cobra.Command, flagName string) (string, bool, error) 
 		return body, true, nil
 	}
 	if filePath != "" {
+		if err := ensureFileFlagWithinWorkdir(cmd, fileFlag, flagName, filePath); err != nil {
+			return "", false, err
+		}
 		data, err := os.ReadFile(filePath)
 		if err != nil {
 			return "", false, fmt.Errorf("read file for --%s: %w", fileFlag, err)
@@ -83,6 +87,79 @@ func resolveTextFlag(cmd *cobra.Command, flagName string) (string, bool, error) 
 		return "", false, nil
 	}
 	return util.UnescapeBackslashEscapes(inline), true, nil
+}
+
+// ensureFileFlagWithinWorkdir fails closed when a --<name>-file path resolves
+// outside the current working directory, unless --allow-external-file is set.
+//
+// Agent task workdirs are isolated per profile and per task; machine-shared
+// scratch paths like /tmp are not. MUL-4252 traced a cross-environment context
+// leak to exactly this gap: a quick-create run wrote its description to a fixed
+// /tmp/desc.md, the write silently failed because a *different* environment's
+// run had left a stale file there minutes earlier, and --description-file then
+// fed that stale content into the new issue. Requiring the file to live under
+// the workdir turns "silently read another run's file" into a loud command
+// failure — an "incorrect content" bug becomes a "command errored" bug.
+func ensureFileFlagWithinWorkdir(cmd *cobra.Command, fileFlag, flagName, filePath string) error {
+	if allow, _ := cmd.Flags().GetBool("allow-external-file"); allow {
+		return nil
+	}
+	within, err := fileWithinWorkingDir(filePath)
+	if err != nil {
+		return fmt.Errorf("resolve --%s path %q: %w", fileFlag, filePath, err)
+	}
+	if !within {
+		return fmt.Errorf(
+			"--%s path %q resolves outside the current working directory; "+
+				"write agent temp files inside the task workdir (e.g. ./%s.md) rather than machine-shared "+
+				"paths like /tmp, where another run's stale file can be read by mistake. "+
+				"Pass --allow-external-file to override.",
+			fileFlag, filePath, flagName)
+	}
+	return nil
+}
+
+// fileWithinWorkingDir reports whether filePath resolves to a location inside
+// the process working directory. Both sides are symlink-resolved so aliased
+// roots (e.g. macOS /tmp -> /private/tmp) and symlinks planted inside the
+// workdir fail closed. A path that does not exist yet is judged on its cleaned
+// absolute form so the caller's os.ReadFile still surfaces the real not-found
+// error afterwards.
+func fileWithinWorkingDir(filePath string) (bool, error) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return false, err
+	}
+	base := cwd
+	if resolved, err := filepath.EvalSymlinks(cwd); err == nil {
+		base = resolved
+	}
+	abs := filePath
+	if !filepath.IsAbs(abs) {
+		abs = filepath.Join(cwd, abs)
+	}
+	if resolved, err := filepath.EvalSymlinks(abs); err == nil {
+		abs = resolved
+	} else {
+		// The file may not exist yet (the caller's os.ReadFile surfaces that).
+		// Resolve symlinks on the parent directory instead so the comparison
+		// base and the candidate share the same canonical prefix — otherwise a
+		// workdir under a symlinked root (e.g. macOS temp dirs) would falsely
+		// read as "outside". A missing parent falls back to a plain clean.
+		if resolvedParent, perr := filepath.EvalSymlinks(filepath.Dir(abs)); perr == nil {
+			abs = filepath.Join(resolvedParent, filepath.Base(abs))
+		} else {
+			abs = filepath.Clean(abs)
+		}
+	}
+	rel, err := filepath.Rel(base, abs)
+	if err != nil {
+		return false, err
+	}
+	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return false, nil
+	}
+	return true, nil
 }
 
 var issueCmd = &cobra.Command{
@@ -146,6 +223,22 @@ var issueStatusCmd = &cobra.Command{
 		"backlog, todo, in_progress, in_review, done, blocked, cancelled.",
 	Args: exactArgs(2),
 	RunE: runIssueStatus,
+}
+
+var issueReorderCmd = &cobra.Command{
+	Use:   "reorder <id>",
+	Short: "Move an issue within its status column",
+	Long: "Reposition an issue inside its current status column by computing a new\n" +
+		"ordering position, the same value the board's drag-and-drop sets.\n\n" +
+		"Pick exactly one target:\n" +
+		"  --before <id>  place it directly above another issue in the same column\n" +
+		"  --after  <id>  place it directly below another issue in the same column\n" +
+		"  --top          move it to the top of its column\n" +
+		"  --bottom       move it to the bottom of its column\n\n" +
+		"Reorder stays inside the issue's current column. To move an issue to a\n" +
+		"different column, change its status first with `multica issue status`.",
+	Args: exactArgs(1),
+	RunE: runIssueReorder,
 }
 
 // Comment subcommands.
@@ -273,6 +366,27 @@ var validIssuePriorities = []string{
 	"urgent", "high", "medium", "low", "none",
 }
 
+// validIssueSortColumns are the sort keys `issue list --sort` accepts. They
+// mirror the server's ListIssues handler. "position" is the default and is
+// always sorted ascending (the board's manual drag order), so --direction is
+// only meaningful for the other columns.
+var validIssueSortColumns = []string{
+	"position", "title", "created_at", "start_date", "due_date", "priority",
+}
+
+// directionalIssueSortColumns are the sort keys for which --direction is
+// meaningful: every valid column except "position". Derived from
+// validIssueSortColumns so the two stay in sync.
+var directionalIssueSortColumns = func() []string {
+	cols := make([]string, 0, len(validIssueSortColumns)-1)
+	for _, c := range validIssueSortColumns {
+		if c != "position" {
+			cols = append(cols, c)
+		}
+	}
+	return cols
+}()
+
 func validateIssueStatus(status string) error {
 	return validateIssueEnum("status", status, validIssueStatuses)
 }
@@ -299,6 +413,7 @@ func init() {
 	issueCmd.AddCommand(issueUpdateCmd)
 	issueCmd.AddCommand(issueAssignCmd)
 	issueCmd.AddCommand(issueStatusCmd)
+	issueCmd.AddCommand(issueReorderCmd)
 	issueCmd.AddCommand(issueCommentCmd)
 	issueCmd.AddCommand(issueSubscriberCmd)
 	issueCmd.AddCommand(issueRunsCmd)
@@ -329,6 +444,8 @@ func init() {
 	issueListCmd.Flags().StringSlice("metadata", nil, "Filter by metadata key=value (repeatable; combined with AND). Value is JSON-parsed: 'true'/'false' → bool, numbers → number, otherwise string. Wrap as '\"42\"' to force a string when the value would otherwise sniff as a number.")
 	issueListCmd.Flags().Int("limit", 50, "Maximum number of issues to return")
 	issueListCmd.Flags().Int("offset", 0, "Number of issues to skip (for pagination)")
+	issueListCmd.Flags().String("sort", "", "Sort column: position (default, manual board order), title, created_at, start_date, due_date, priority")
+	issueListCmd.Flags().String("direction", "", "Sort direction (asc or desc); requires --sort to be a non-position column (position is always ascending)")
 
 	// issue get
 	issueGetCmd.Flags().String("output", "json", "Output format: table or json")
@@ -343,7 +460,8 @@ func init() {
 	issueCreateCmd.Flags().String("title", "", "Issue title (required)")
 	issueCreateCmd.Flags().String("description", "", "Issue description (decodes \\n, \\r, \\t, \\\\; pipe via --description-stdin to preserve literal backslashes)")
 	issueCreateCmd.Flags().Bool("description-stdin", false, "Read issue description from stdin (preserves multi-line content verbatim)")
-	issueCreateCmd.Flags().String("description-file", "", "Read issue description from a UTF-8 file (preserves multi-line content verbatim; use this on Windows when stdin piping mangles non-ASCII bytes)")
+	issueCreateCmd.Flags().String("description-file", "", "Read issue description from a UTF-8 file (preserves multi-line content verbatim; use this on Windows when stdin piping mangles non-ASCII bytes). The path must be inside the current working directory unless --allow-external-file is set.")
+	issueCreateCmd.Flags().Bool("allow-external-file", false, "Allow --description-file / --attachment to read a path outside the current working directory. Off by default so a stale file from another run/environment can't be picked up (MUL-4252).")
 	issueCreateCmd.Flags().String("status", "", "Issue status")
 	issueCreateCmd.Flags().String("priority", "", "Issue priority")
 	issueCreateCmd.Flags().String("assignee", "", "Assignee name (member, agent, or squad; fuzzy match)")
@@ -362,7 +480,8 @@ func init() {
 	issueUpdateCmd.Flags().String("title", "", "New title")
 	issueUpdateCmd.Flags().String("description", "", "New description (decodes \\n, \\r, \\t, \\\\; pipe via --description-stdin to preserve literal backslashes)")
 	issueUpdateCmd.Flags().Bool("description-stdin", false, "Read new description from stdin (preserves multi-line content verbatim)")
-	issueUpdateCmd.Flags().String("description-file", "", "Read new description from a UTF-8 file (preserves multi-line content verbatim; use this on Windows when stdin piping mangles non-ASCII bytes)")
+	issueUpdateCmd.Flags().String("description-file", "", "Read new description from a UTF-8 file (preserves multi-line content verbatim; use this on Windows when stdin piping mangles non-ASCII bytes). The path must be inside the current working directory unless --allow-external-file is set.")
+	issueUpdateCmd.Flags().Bool("allow-external-file", false, "Allow --description-file to read a path outside the current working directory. Off by default so a stale temp file from another run/environment can't be picked up (MUL-4252).")
 	issueUpdateCmd.Flags().String("status", "", "New status")
 	issueUpdateCmd.Flags().String("priority", "", "New priority")
 	issueUpdateCmd.Flags().String("assignee", "", "New assignee name (member, agent, or squad; fuzzy match)")
@@ -372,10 +491,14 @@ func init() {
 	issueUpdateCmd.Flags().String("due-date", "", "New due date (calendar day, YYYY-MM-DD)")
 	issueUpdateCmd.Flags().String("parent", "", "Parent issue ID (use --parent \"\" to clear)")
 	issueUpdateCmd.Flags().Int("stage", 0, "Stage ordinal (>=1) for this sub-issue; see `issue create --stage`")
+	issueUpdateCmd.Flags().Float64("position", 0, "Ordering position within the board column (lower sorts first); prefer `issue reorder` for relative moves")
 	issueUpdateCmd.Flags().String("output", "json", "Output format: table or json")
 
 	// issue status
 	issueStatusCmd.Flags().String("output", "table", "Output format: table or json")
+
+	// issue reorder
+	registerIssueReorderFlags(issueReorderCmd)
 
 	// issue assign
 	issueAssignCmd.Flags().String("to", "", "Assignee name (member, agent, or squad; fuzzy match)")
@@ -415,7 +538,8 @@ func init() {
 	// issue comment add
 	issueCommentAddCmd.Flags().String("content", "", "Comment content (decodes \\n, \\r, \\t, \\\\; pipe via --content-stdin for multi-line bodies or to preserve literal backslashes)")
 	issueCommentAddCmd.Flags().Bool("content-stdin", false, "Read comment content from stdin (preserves multi-line content verbatim)")
-	issueCommentAddCmd.Flags().String("content-file", "", "Read comment content from a UTF-8 file (preserves multi-line content verbatim; use this on Windows when stdin piping mangles non-ASCII bytes)")
+	issueCommentAddCmd.Flags().String("content-file", "", "Read comment content from a UTF-8 file (preserves multi-line content verbatim; use this on Windows when stdin piping mangles non-ASCII bytes). The path must be inside the current working directory unless --allow-external-file is set.")
+	issueCommentAddCmd.Flags().Bool("allow-external-file", false, "Allow --content-file / --attachment to read a path outside the current working directory. Off by default so a stale file from another run/environment can't be picked up (MUL-4252).")
 	issueCommentAddCmd.Flags().String("parent", "", "Parent comment ID (reply to a specific comment)")
 	issueCommentAddCmd.Flags().StringSlice("attachment", nil, "File path(s) to attach (can be specified multiple times)")
 	issueCommentAddCmd.Flags().String("output", "json", "Output format: table or json")
@@ -496,6 +620,34 @@ func runIssueList(cmd *cobra.Command, _ []string) error {
 			return err
 		}
 		params.Set("metadata", filter)
+	}
+	sortVal, _ := cmd.Flags().GetString("sort")
+	if sortVal != "" {
+		valid := false
+		for _, c := range validIssueSortColumns {
+			if c == sortVal {
+				valid = true
+				break
+			}
+		}
+		if !valid {
+			return fmt.Errorf("invalid --sort %q; valid values: %s", sortVal, strings.Join(validIssueSortColumns, ", "))
+		}
+		params.Set("sort", sortVal)
+	}
+	if v, _ := cmd.Flags().GetString("direction"); v != "" {
+		d := strings.ToLower(v)
+		if d != "asc" && d != "desc" {
+			return fmt.Errorf("invalid --direction %q; valid values: asc, desc", v)
+		}
+		// position (the manual board order) is always ascending, so the server
+		// ignores --direction for it. Reject the combination up front rather
+		// than silently dropping the flag — a passed-but-ignored flag is a
+		// footgun, especially in scripts.
+		if sortVal == "" || sortVal == "position" {
+			return fmt.Errorf("--direction requires --sort to be one of %s; position (the default manual board order) is always ascending", strings.Join(directionalIssueSortColumns, ", "))
+		}
+		params.Set("direction", d)
 	}
 
 	path := "/api/issues"
@@ -808,6 +960,66 @@ func isHTTPURL(path string) bool {
 	return strings.HasPrefix(p, "http://") || strings.HasPrefix(p, "https://")
 }
 
+// ensureAttachmentWithinWorkdir applies the same workdir containment guard as
+// --description-file / --content-file (MUL-4252) to a local --attachment path.
+// An agent that writes a chart/report to a machine-shared path like /tmp and
+// then attaches it could otherwise pick up another run's — possibly another
+// workspace's — stale file (the image version of the /tmp/desc.md leak). URL
+// values are filtered by the caller and never reach here. --allow-external-file
+// overrides, mirroring the text-flag escape hatch.
+func ensureAttachmentWithinWorkdir(cmd *cobra.Command, filePath string) error {
+	if allow, _ := cmd.Flags().GetBool("allow-external-file"); allow {
+		return nil
+	}
+	within, err := fileWithinWorkingDir(filePath)
+	if err != nil {
+		return fmt.Errorf("resolve --attachment path %q: %w", filePath, err)
+	}
+	if !within {
+		return fmt.Errorf(
+			"--attachment path %q resolves outside the current working directory; "+
+				"attach files generated inside the task workdir rather than machine-shared "+
+				"paths like /tmp, where another run's stale file can be attached by mistake. "+
+				"Pass --allow-external-file to override.",
+			filePath)
+	}
+	return nil
+}
+
+// pendingAttachment is a local --attachment file that passed URL filtering and
+// the workdir guard and has been read into memory, ready to upload.
+type pendingAttachment struct {
+	path string
+	data []byte
+}
+
+// collectLocalAttachments validates and reads ALL local --attachment paths up
+// front, before any upload. URL-shaped values are warned and skipped (the API
+// only accepts local paths). Each remaining path is run through the MUL-4252
+// workdir guard and read into memory; the first invalid or unreadable path
+// returns an error with nothing uploaded. Both `issue create` and
+// `comment add` share this so an invalid attachment can never leave an earlier
+// one uploaded as an orphaned issue attachment while the issue/comment is never
+// created (which would duplicate on retry).
+func collectLocalAttachments(cmd *cobra.Command, attachments []string) ([]pendingAttachment, error) {
+	pending := make([]pendingAttachment, 0, len(attachments))
+	for _, filePath := range attachments {
+		if isHTTPURL(filePath) {
+			fmt.Fprintf(os.Stderr, "Skipping --attachment %q: URLs are not supported here, only local file paths.\n", filePath)
+			continue
+		}
+		if err := ensureAttachmentWithinWorkdir(cmd, filePath); err != nil {
+			return nil, err
+		}
+		data, readErr := os.ReadFile(filePath)
+		if readErr != nil {
+			return nil, fmt.Errorf("read attachment %s: %w", filePath, readErr)
+		}
+		pending = append(pending, pendingAttachment{path: filePath, data: data})
+	}
+	return pending, nil
+}
+
 func appendUniqueStrings(dst []string, values ...string) []string {
 	seen := make(map[string]struct{}, len(dst)+len(values))
 	out := make([]string, 0, len(dst)+len(values))
@@ -943,34 +1155,15 @@ func runIssueCreate(cmd *cobra.Command, _ []string) error {
 		body["attachment_ids"] = attachmentIDs
 	}
 
-	// Pre-validate attachments BEFORE creating the issue so a bad path
-	// can never produce a half-created issue (which would otherwise
-	// trigger callers — especially the agent doing quick-create — to
-	// retry the whole `issue create` and end up with duplicates).
-	//
-	//   - http(s) URLs are not local files; the API only accepts local
-	//     paths here. Warn and skip rather than fail — a markdown image
-	//     URL embedded in the prompt should never be re-attached, and
-	//     skipping is the safest outcome for that case.
-	//   - Anything else is treated as a local path and read upfront.
-	//     A read failure here is a real user/agent mistake (typo,
-	//     missing file) and we surface it pre-create so the issue
-	//     never lands.
-	type pendingAttachment struct {
-		path string
-		data []byte
-	}
-	pending := make([]pendingAttachment, 0, len(attachments))
-	for _, filePath := range attachments {
-		if isHTTPURL(filePath) {
-			fmt.Fprintf(os.Stderr, "Skipping --attachment %q: URLs are not supported here, only local file paths.\n", filePath)
-			continue
-		}
-		data, readErr := os.ReadFile(filePath)
-		if readErr != nil {
-			return fmt.Errorf("read attachment %s: %w", filePath, readErr)
-		}
-		pending = append(pending, pendingAttachment{path: filePath, data: data})
+	// Pre-validate attachments BEFORE creating the issue so a bad path can
+	// never produce a half-created issue (which would otherwise trigger
+	// callers — especially the agent doing quick-create — to retry the whole
+	// `issue create` and end up with duplicates). URLs are warned+skipped, the
+	// workdir guard is applied, and every local path is read upfront; a failure
+	// here surfaces pre-create so the issue never lands.
+	pending, err := collectLocalAttachments(cmd, attachments)
+	if err != nil {
+		return err
 	}
 
 	var result map[string]any
@@ -1125,6 +1318,10 @@ func runIssueUpdate(cmd *cobra.Command, args []string) error {
 		}
 		body["stage"] = stage
 	}
+	if cmd.Flags().Changed("position") {
+		v, _ := cmd.Flags().GetFloat64("position")
+		body["position"] = v
+	}
 
 	if len(body) == 0 {
 		return fmt.Errorf("no fields to update; use flags like --title, --status, --priority, --assignee, etc.")
@@ -1246,6 +1443,299 @@ func runIssueStatus(cmd *cobra.Command, args []string) error {
 		return cli.PrintJSON(os.Stdout, result)
 	}
 	return nil
+}
+
+// ---------------------------------------------------------------------------
+// Reorder command
+// ---------------------------------------------------------------------------
+
+// registerIssueReorderFlags wires the reorder command's flags and declares its
+// target selector as a cobra flag group: mutually exclusive so at most one of
+// --before/--after/--top/--bottom is accepted, and one-required so at least one
+// must be given. Declaring the rule (instead of counting the flags by hand in
+// runIssueReorder) lets cobra reject zero-target and multi-target invocations
+// before RunE with a canonical message, and makes shell completion group-aware
+// — it hides the sibling target flags once one of them is set. It is shared with
+// the command's tests so they exercise the exact flag-group wiring that ships.
+func registerIssueReorderFlags(cmd *cobra.Command) {
+	cmd.Flags().String("before", "", "Place the issue directly above this issue (same column)")
+	cmd.Flags().String("after", "", "Place the issue directly below this issue (same column)")
+	cmd.Flags().Bool("top", false, "Move the issue to the top of its status column")
+	cmd.Flags().Bool("bottom", false, "Move the issue to the bottom of its status column")
+	cmd.Flags().String("output", "json", "Output format: table or json")
+	cmd.MarkFlagsMutuallyExclusive("before", "after", "top", "bottom")
+	cmd.MarkFlagsOneRequired("before", "after", "top", "bottom")
+}
+
+// runIssueReorder repositions an issue inside its current status column. The
+// new position is computed client-side by computeReorderPosition, which mirrors
+// the board/list drag-and-drop math (computePosition in
+// packages/views/issues/utils/drag-utils.ts) so the CLI and UI agree on where
+// an issue lands. Only the issue's own position changes; its column membership
+// (status) is left untouched, so cross-column moves still go through
+// `issue status`.
+func runIssueReorder(cmd *cobra.Command, args []string) error {
+	before, _ := cmd.Flags().GetString("before")
+	after, _ := cmd.Flags().GetString("after")
+	top, _ := cmd.Flags().GetBool("top")
+	bottom, _ := cmd.Flags().GetBool("bottom")
+
+	// "Exactly one of --before/--after/--top/--bottom" is enforced declaratively
+	// by the command's mutually-exclusive, one-required flag group (see
+	// registerIssueReorderFlags), so cobra rejects zero-target and multi-target
+	// invocations before RunE runs. Cobra keys off flag *presence* (Changed),
+	// not value, so guard the cases it cannot see: a --before/--after passed
+	// empty (e.g. an unset shell variable), or a --top/--bottom explicitly set
+	// to false (e.g. `--top=false` from a generated command). Each counts as
+	// "set" for the group yet selects no real target, and would otherwise fall
+	// through to a confusing "not found in column" error.
+	if cmd.Flags().Changed("before") && before == "" {
+		return fmt.Errorf("--before requires an issue ID or key")
+	}
+	if cmd.Flags().Changed("after") && after == "" {
+		return fmt.Errorf("--after requires an issue ID or key")
+	}
+	if cmd.Flags().Changed("top") && !top {
+		return fmt.Errorf("--top cannot be set to false; pass it on its own to move the issue to the top of its column")
+	}
+	if cmd.Flags().Changed("bottom") && !bottom {
+		return fmt.Errorf("--bottom cannot be set to false; pass it on its own to move the issue to the bottom of its column")
+	}
+
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+
+	ctx, cancel := cli.APIContext(context.Background())
+	defer cancel()
+
+	wsID := client.WorkspaceID
+	if wsID == "" {
+		wsID, err = requireWorkspaceID(cmd)
+		if err != nil {
+			return err
+		}
+	}
+
+	issueRef, err := resolveIssueRef(ctx, client, args[0])
+	if err != nil {
+		return fmt.Errorf("resolve issue: %w", err)
+	}
+	target, err := fetchIssue(ctx, client, issueRef.ID)
+	if err != nil {
+		return fmt.Errorf("get issue: %w", err)
+	}
+	status := strVal(target, "status")
+	if status == "" {
+		return fmt.Errorf("issue %s has no status, cannot determine its column", issueRef.Display)
+	}
+
+	// Resolve the relative target up front, before any no-op shortcut, so a bad
+	// --before/--after value (typo, self-reference) always errors instead of
+	// being swallowed by the single-issue-column fast path below.
+	relative := before != "" || after != ""
+	var otherRef resolvedID
+	if relative {
+		otherInput := before
+		if after != "" {
+			otherInput = after
+		}
+		otherRef, err = resolveIssueRef(ctx, client, otherInput)
+		if err != nil {
+			return fmt.Errorf("resolve target issue: %w", err)
+		}
+		if otherRef.ID == issueRef.ID {
+			return fmt.Errorf("cannot reorder issue %s relative to itself", issueRef.Display)
+		}
+	}
+
+	// Scope the column to the issue's own project (when it has one) so the
+	// computed position lands relative to the project board the issue lives on,
+	// not a blend of every project's issues in this status.
+	projectID := strVal(target, "project_id")
+	column, err := fetchIssueColumn(ctx, client, wsID, projectID, status)
+	if err != nil {
+		return fmt.Errorf("list %s column: %w", status, err)
+	}
+
+	// Build the column order with the target removed, plus a lookup of every
+	// position in the column (the target's own included, for the no-op check).
+	positions := make(map[string]float64, len(column))
+	ordered := make([]string, 0, len(column))
+	for _, raw := range column {
+		id := strVal(raw, "id")
+		if id == "" {
+			continue
+		}
+		positions[id] = floatVal(raw, "position")
+		if id != issueRef.ID {
+			ordered = append(ordered, id)
+		}
+	}
+	if len(ordered) == 0 {
+		// The active issue is alone in its column. A relative move cannot
+		// succeed here (its target is necessarily in another column), so report
+		// that rather than a misleading "nothing to reorder".
+		if relative {
+			return reorderTargetNotInColumnError(ctx, client, otherRef, issueRef, status)
+		}
+		fmt.Fprintf(os.Stderr, "Issue %s is the only issue in the %s column; nothing to reorder.\n", issueRef.Display, status)
+		return issueReorderOutput(cmd, target)
+	}
+
+	insertIdx := 0
+	switch {
+	case top:
+		insertIdx = 0
+	case bottom:
+		insertIdx = len(ordered)
+	default:
+		idx := indexOfString(ordered, otherRef.ID)
+		if idx == -1 {
+			return reorderTargetNotInColumnError(ctx, client, otherRef, issueRef, status)
+		}
+		if before != "" {
+			insertIdx = idx
+		} else {
+			insertIdx = idx + 1
+		}
+	}
+
+	reordered := make([]string, 0, len(ordered)+1)
+	reordered = append(reordered, ordered[:insertIdx]...)
+	reordered = append(reordered, issueRef.ID)
+	reordered = append(reordered, ordered[insertIdx:]...)
+
+	currentPos := positions[issueRef.ID]
+	newPos := computeReorderPosition(reordered, issueRef.ID, positions, currentPos)
+	if newPos == currentPos {
+		fmt.Fprintf(os.Stderr, "Issue %s is already in that position.\n", issueRef.Display)
+		return issueReorderOutput(cmd, target)
+	}
+
+	var result map[string]any
+	if err := client.PutJSON(ctx, "/api/issues/"+url.PathEscape(issueRef.ID), map[string]any{"position": newPos}, &result); err != nil {
+		return fmt.Errorf("reorder issue: %w", err)
+	}
+	fmt.Fprintf(os.Stderr, "Issue %s reordered.\n", issueDisplayKey(result))
+	return issueReorderOutput(cmd, result)
+}
+
+// issueReorderOutput prints an issue map as a table or JSON, matching the
+// update command's output contract.
+func issueReorderOutput(cmd *cobra.Command, issue map[string]any) error {
+	output, _ := cmd.Flags().GetString("output")
+	if output == "table" {
+		headers := []string{"KEY", "TITLE", "STATUS", "PRIORITY"}
+		rows := [][]string{{
+			issueDisplayKey(issue),
+			strVal(issue, "title"),
+			strVal(issue, "status"),
+			strVal(issue, "priority"),
+		}}
+		cli.PrintTable(os.Stdout, headers, rows)
+		return nil
+	}
+	return cli.PrintJSON(os.Stdout, issue)
+}
+
+// reorderTargetNotInColumnError explains why a --before/--after target could
+// not be used. It fetches the target only to report its actual column in the
+// message, so the common mistake (target lives in a different column) gets a
+// precise, actionable error instead of a bare "not found".
+func reorderTargetNotInColumnError(ctx context.Context, client *cli.APIClient, otherRef, issueRef resolvedID, status string) error {
+	if other, err := fetchIssue(ctx, client, otherRef.ID); err == nil {
+		if otherStatus := strVal(other, "status"); otherStatus != "" && otherStatus != status {
+			return fmt.Errorf("issue %s is in the %q column but %s is in %q; move one with `multica issue status` first, or pick a target in the same column", otherRef.Display, otherStatus, issueRef.Display, status)
+		}
+	}
+	return fmt.Errorf("issue %s was not found in the %q column", otherRef.Display, status)
+}
+
+// fetchIssue retrieves a single issue by canonical ID.
+func fetchIssue(ctx context.Context, client *cli.APIClient, id string) (map[string]any, error) {
+	var issue map[string]any
+	if err := client.GetJSON(ctx, "/api/issues/"+url.PathEscape(id), &issue); err != nil {
+		return nil, err
+	}
+	return issue, nil
+}
+
+// fetchIssueColumn returns every issue in a status column ordered by position
+// ascending, paginating through the list endpoint so columns larger than one
+// page (the server caps a page at 100) still produce a complete, correctly
+// ordered set. A non-empty projectID scopes the column to that project,
+// matching a project board; an empty projectID lists the whole workspace
+// column.
+func fetchIssueColumn(ctx context.Context, client *cli.APIClient, workspaceID, projectID, status string) ([]map[string]any, error) {
+	var all []map[string]any
+	offset := 0
+	for {
+		params := url.Values{}
+		params.Set("workspace_id", workspaceID)
+		params.Set("status", status)
+		if projectID != "" {
+			params.Set("project_id", projectID)
+		}
+		params.Set("sort", "position")
+		params.Set("limit", "100")
+		params.Set("offset", fmt.Sprintf("%d", offset))
+
+		var result map[string]any
+		if err := client.GetJSON(ctx, "/api/issues?"+params.Encode(), &result); err != nil {
+			return nil, err
+		}
+		page, _ := result["issues"].([]any)
+		for _, raw := range page {
+			if m, ok := raw.(map[string]any); ok {
+				all = append(all, m)
+			}
+		}
+		total, _ := result["total"].(float64)
+		offset += len(page)
+		if len(page) == 0 || offset >= int(total) {
+			break
+		}
+	}
+	return all, nil
+}
+
+// computeReorderPosition computes the position that places activeID at its
+// index in ids. It mirrors computePosition in
+// packages/views/issues/utils/drag-utils.ts: the top of a column is one less
+// than the next item, the bottom is one more than the previous, and any
+// interior slot is the midpoint of its neighbours. fallback is returned when
+// activeID is alone in (or absent from) the column, leaving its position
+// unchanged.
+func computeReorderPosition(ids []string, activeID string, positions map[string]float64, fallback float64) float64 {
+	idx := indexOfString(ids, activeID)
+	if idx == -1 || len(ids) == 1 {
+		return fallback
+	}
+	if idx == 0 {
+		return positions[ids[1]] - 1
+	}
+	if idx == len(ids)-1 {
+		return positions[ids[idx-1]] + 1
+	}
+	return (positions[ids[idx-1]] + positions[ids[idx+1]]) / 2
+}
+
+func indexOfString(s []string, target string) int {
+	for i, v := range s {
+		if v == target {
+			return i
+		}
+	}
+	return -1
+}
+
+func floatVal(m map[string]any, key string) float64 {
+	if v, ok := m[key].(float64); ok {
+		return v
+	}
+	return 0
 }
 
 // ---------------------------------------------------------------------------
@@ -1445,28 +1935,24 @@ func runIssueCommentAdd(cmd *cobra.Command, args []string) error {
 	}
 	issueID := issueRef.ID
 
-	// Upload attachments and collect their IDs. URLs are skipped with a
-	// warning — `--attachment` only accepts local file paths, and a
-	// markdown image URL embedded in agent-supplied content should never
-	// be re-uploaded as if it were a file. Unlike `issue create`, this
-	// path uploads BEFORE posting the comment, so a hard failure on a
-	// real (local) attachment correctly aborts the whole call.
+	// Validate and read ALL attachments before uploading any. URLs are skipped
+	// with a warning — `--attachment` only accepts local file paths. Reading
+	// everything up front means a later invalid path (external / symlink escape
+	// caught by the workdir guard) aborts the call with ZERO uploads, instead
+	// of leaving an earlier file uploaded as an orphaned issue attachment while
+	// the comment is never posted (which would duplicate on retry — MUL-4252).
+	pending, err := collectLocalAttachments(cmd, attachments)
+	if err != nil {
+		return err
+	}
 	var attachmentIDs []string
-	for _, filePath := range attachments {
-		if isHTTPURL(filePath) {
-			fmt.Fprintf(os.Stderr, "Skipping --attachment %q: URLs are not supported here, only local file paths.\n", filePath)
-			continue
-		}
-		data, readErr := os.ReadFile(filePath)
-		if readErr != nil {
-			return fmt.Errorf("read attachment %s: %w", filePath, readErr)
-		}
-		id, uploadErr := client.UploadFile(ctx, data, filePath, issueID)
+	for _, att := range pending {
+		id, uploadErr := client.UploadFile(ctx, att.data, att.path, issueID)
 		if uploadErr != nil {
-			return fmt.Errorf("upload attachment %s: %w", filePath, uploadErr)
+			return fmt.Errorf("upload attachment %s: %w", att.path, uploadErr)
 		}
 		attachmentIDs = append(attachmentIDs, id)
-		fmt.Fprintf(os.Stderr, "Uploaded %s\n", filePath)
+		fmt.Fprintf(os.Stderr, "Uploaded %s\n", att.path)
 	}
 
 	body := map[string]any{"content": content}
@@ -1972,6 +2458,37 @@ var (
 	memberOrAgentKinds = assigneeKinds{member: true, agent: true}
 )
 
+var assigneeResolveRetrySleep = func(ctx context.Context, d time.Duration) bool {
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return true
+	case <-timer.C:
+		return false
+	}
+}
+
+func getAssigneeJSON(ctx context.Context, client *cli.APIClient, path string, out any) error {
+	delays := []time.Duration{100 * time.Millisecond, 250 * time.Millisecond}
+	var err error
+	for attempt := 0; attempt <= len(delays); attempt++ {
+		err = client.GetJSON(ctx, path, out)
+		if err == nil || !isRetryableAssigneeResolveError(err) || attempt == len(delays) {
+			return err
+		}
+		if assigneeResolveRetrySleep(ctx, delays[attempt]) {
+			return ctx.Err()
+		}
+	}
+	return err
+}
+
+func isRetryableAssigneeResolveError(err error) bool {
+	var netErr *cli.NetworkError
+	return errors.As(err, &netErr)
+}
+
 func (k assigneeKinds) describe() string {
 	parts := make([]string, 0, 3)
 	if k.member {
@@ -2035,7 +2552,7 @@ func resolveAssignee(ctx context.Context, client *cli.APIClient, name string, ki
 	if kinds.member {
 		fetchAttempts++
 		var members []map[string]any
-		if err := client.GetJSON(ctx, "/api/workspaces/"+client.WorkspaceID+"/members", &members); err != nil {
+		if err := getAssigneeJSON(ctx, client, "/api/workspaces/"+client.WorkspaceID+"/members", &members); err != nil {
 			errs = append(errs, fmt.Errorf("fetch members: %w", err))
 		} else {
 			for _, m := range members {
@@ -2049,7 +2566,7 @@ func resolveAssignee(ctx context.Context, client *cli.APIClient, name string, ki
 		fetchAttempts++
 		var agents []map[string]any
 		agentPath := "/api/agents?" + url.Values{"workspace_id": {client.WorkspaceID}}.Encode()
-		if err := client.GetJSON(ctx, agentPath, &agents); err != nil {
+		if err := getAssigneeJSON(ctx, client, agentPath, &agents); err != nil {
 			errs = append(errs, fmt.Errorf("fetch agents: %w", err))
 		} else {
 			for _, a := range agents {
@@ -2068,7 +2585,7 @@ func resolveAssignee(ctx context.Context, client *cli.APIClient, name string, ki
 	if kinds.squad {
 		fetchAttempts++
 		var squads []map[string]any
-		if err := client.GetJSON(ctx, "/api/squads", &squads); err != nil {
+		if err := getAssigneeJSON(ctx, client, "/api/squads", &squads); err != nil {
 			errs = append(errs, fmt.Errorf("fetch squads: %w", err))
 		} else {
 			for _, s := range squads {
@@ -2143,20 +2660,20 @@ func resolveAssigneeByID(ctx context.Context, client *cli.APIClient, id string, 
 	var members []map[string]any
 	var memberErr error
 	if kinds.member {
-		memberErr = client.GetJSON(ctx, "/api/workspaces/"+client.WorkspaceID+"/members", &members)
+		memberErr = getAssigneeJSON(ctx, client, "/api/workspaces/"+client.WorkspaceID+"/members", &members)
 	}
 
 	var agents []map[string]any
 	var agentErr error
 	if kinds.agent {
 		agentPath := "/api/agents?" + url.Values{"workspace_id": {client.WorkspaceID}}.Encode()
-		agentErr = client.GetJSON(ctx, agentPath, &agents)
+		agentErr = getAssigneeJSON(ctx, client, agentPath, &agents)
 	}
 
 	var squads []map[string]any
 	var squadErr error
 	if kinds.squad {
-		squadErr = client.GetJSON(ctx, "/api/squads", &squads)
+		squadErr = getAssigneeJSON(ctx, client, "/api/squads", &squads)
 	}
 
 	allFailed := true

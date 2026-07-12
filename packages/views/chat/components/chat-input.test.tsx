@@ -41,7 +41,7 @@ const editorProps = vi.hoisted(() => ({
 }));
 // Records imperative editor calls so tests can assert whether a commit
 // scrubbed the editor (clearEditor) or left it intact (fire-and-forget).
-const editorState = vi.hoisted(() => ({ cleared: 0, blurred: 0 }));
+const editorState = vi.hoisted(() => ({ cleared: 0, blurred: 0, focused: 0 }));
 
 vi.mock("../../editor", () => ({
   useFileDropZone: ({ onDrop }: { onDrop: (files: File[]) => void }) => {
@@ -78,7 +78,9 @@ vi.mock("../../editor", () => ({
       blur: () => {
         editorState.blurred += 1;
       },
-      focus: () => {},
+      focus: () => {
+        editorState.focused += 1;
+      },
       uploadFile: async (file: File) => {
         uploadingRef.current += 1;
         try {
@@ -150,6 +152,7 @@ beforeEach(() => {
   editorProps.last = null;
   editorState.cleared = 0;
   editorState.blurred = 0;
+  editorState.focused = 0;
   const state = useChatStore.getState() as unknown as {
     activeSessionId: string | null;
     selectedAgentId: string;
@@ -202,6 +205,39 @@ function renderInput(props: Partial<React.ComponentProps<typeof ChatInput>> = {}
   return { onSend, onUploadFile };
 }
 
+describe("ChatInput focusRequest", () => {
+  it("focuses the editor when focusRequest becomes a non-zero value (new chat)", () => {
+    const { rerender } = render(
+      <I18nProvider locale="en" resources={TEST_RESOURCES}>
+        <ChatInput onSend={vi.fn()} agentName="Multica" focusRequest={0} />
+      </I18nProvider>,
+    );
+    // The inert initial value must not steal focus (e.g. a plain deep-link open).
+    expect(editorState.focused).toBe(0);
+
+    // Starting a new chat bumps the nonce — the compose box grabs focus.
+    rerender(
+      <I18nProvider locale="en" resources={TEST_RESOURCES}>
+        <ChatInput onSend={vi.fn()} agentName="Multica" focusRequest={1} />
+      </I18nProvider>,
+    );
+    expect(editorState.focused).toBe(1);
+
+    // Each subsequent new chat re-focuses.
+    rerender(
+      <I18nProvider locale="en" resources={TEST_RESOURCES}>
+        <ChatInput onSend={vi.fn()} agentName="Multica" focusRequest={2} />
+      </I18nProvider>,
+    );
+    expect(editorState.focused).toBe(2);
+  });
+
+  it("does not focus on mount when focusRequest is undefined or 0", () => {
+    renderInput();
+    expect(editorState.focused).toBe(0);
+  });
+});
+
 describe("ChatInput @ context wiring", () => {
   it("configures chat @ with current/recent issue/project context", () => {
     const contextItems = [
@@ -248,7 +284,8 @@ describe("ChatInput attachment wiring", () => {
 
     // Wait for the submit button to become enabled (onUpdate has fired and
     // React has re-rendered). SubmitButton has no aria-label, so we pick
-    // the last action button on the bar (FileUploadButton, SubmitButton).
+    // the last action button on the bar (ChatAddMenu "+" is on the left,
+    // SubmitButton is last).
     let sendButton: HTMLElement;
     await waitFor(() => {
       const buttons = screen.getAllByRole("button");
@@ -363,10 +400,10 @@ describe("ChatInput attachment wiring", () => {
 
   it("does not render the file upload button when onUploadFile is omitted", () => {
     renderInput({ onUploadFile: undefined });
-    // FileUploadButton renders an icon button labelled by its tooltip — when
-    // upload wiring is absent the chat input falls back to "submit + extras"
-    // only. Probe by counting buttons: with no upload, only the submit
-    // button is in the action row.
+    // The ChatAddMenu "+" (which hosts file upload) only mounts when upload
+    // wiring is present — without it the chat input falls back to "submit +
+    // extras" only. Probe by counting buttons: with no upload, only the
+    // submit button is in the action row.
     const buttons = screen.getAllByRole("button");
     // The agent picker may render zero buttons
     // in this test (no leftAdornment passed). So a single button = submit.

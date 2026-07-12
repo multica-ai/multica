@@ -101,7 +101,7 @@ export function createZhDict(allowSignup: boolean): LandingDict {
       label: "\u8fd0\u884c\u65f6",
       title: "\u4e00\u4e2a\u63a7\u5236\u53f0\u7ba1\u7406\u6240\u6709\u7b97\u529b",
       description:
-        "\u672c\u5730\u5b88\u62a4\u8fdb\u7a0b\u548c\u4e91\u7aef\u8fd0\u884c\u65f6\uff0c\u5728\u540c\u4e00\u4e2a\u9762\u677f\u4e2d\u7ba1\u7406\u3002\u5b9e\u65f6\u76d1\u63a7\u5728\u7ebf/\u79bb\u7ebf\u72b6\u6001\u3001\u4f7f\u7528\u91cf\u56fe\u8868\u548c\u6d3b\u52a8\u70ed\u529b\u56fe\u3002\u81ea\u52a8\u68c0\u6d4b\u672c\u673a\u5df2\u5b89\u88c5\u7684 12 \u6b3e\u652f\u6301\u7684 AI \u7f16\u7a0b\u5de5\u5177\u3002",
+        "\u672c\u5730\u5b88\u62a4\u8fdb\u7a0b\u548c\u4e91\u7aef\u8fd0\u884c\u65f6\uff0c\u5728\u540c\u4e00\u4e2a\u9762\u677f\u4e2d\u7ba1\u7406\u3002\u5b9e\u65f6\u76d1\u63a7\u5728\u7ebf/\u79bb\u7ebf\u72b6\u6001\u3001\u4f7f\u7528\u91cf\u56fe\u8868\u548c\u6d3b\u52a8\u70ed\u529b\u56fe\u3002\u81ea\u52a8\u68c0\u6d4b\u672c\u673a\u5df2\u5b89\u88c5\u7684 14 \u6b3e\u652f\u6301\u7684 AI \u7f16\u7a0b\u5de5\u5177\u3002",
       cards: [
         {
           title: "\u7edf\u4e00\u8fd0\u884c\u65f6\u9762\u677f",
@@ -116,7 +116,7 @@ export function createZhDict(allowSignup: boolean): LandingDict {
         {
           title: "\u9996\u6b21\u542f\u52a8\u81ea\u52a8\u6ce8\u518c",
           description:
-            "Multica \u626b\u63cf\u672c\u673a\u7684 12 \u6b3e\u652f\u6301\u7684 AI \u7f16\u7a0b\u5de5\u5177\u2014\u2014Antigravity\u3001Claude Code\u3001Codex\u3001Cursor\u3001Copilot\u3001Gemini\u3001Hermes\u3001Kimi\u3001Kiro CLI\u3001OpenCode\u3001OpenClaw\u3001Pi\u2014\u2014\u5e76\u4e3a\u6bcf\u6b3e\u5df2\u5b89\u88c5\u7684\u5de5\u5177\u6ce8\u518c\u4e00\u4e2a\u8fd0\u884c\u65f6\u3002",
+            "Multica \u626b\u63cf\u672c\u673a\u7684 14 \u6b3e\u652f\u6301\u7684 AI \u7f16\u7a0b\u5de5\u5177\u2014\u2014Antigravity\u3001Claude Code\u3001CodeBuddy\u3001Codex\u3001Cursor\u3001Copilot\u3001Hermes\u3001Kimi\u3001Kiro CLI\u3001OpenCode\u3001OpenClaw\u3001Pi\u3001Qoder\u3001Trae CLI\u2014\u2014\u5e76\u4e3a\u6bcf\u6b3e\u5df2\u5b89\u88c5\u7684\u5de5\u5177\u6ce8\u518c\u4e00\u4e2a\u8fd0\u884c\u65f6\u3002",
         },
       ],
     },
@@ -136,7 +136,7 @@ export function createZhDict(allowSignup: boolean): LandingDict {
       {
         title: "\u5b89\u88c5 CLI \u5e76\u8fde\u63a5\u4f60\u7684\u673a\u5668",
         description:
-          "运行 multica setup——它会引导你完成 OAuth 登录、启动守护进程、并扫描 12 款支持的 AI 编程工具（Antigravity、Claude Code、Codex、Cursor、Copilot、Gemini、Hermes、Kimi、Kiro CLI、OpenCode、OpenClaw、Pi）。本机已安装的工具会被自动注册成运行时。",
+          "运行 multica setup——它会引导你完成 OAuth 登录、启动守护进程、并扫描 14 款支持的 AI 编程工具（Antigravity、Claude Code、CodeBuddy、Codex、Cursor、Copilot、Hermes、Kimi、Kiro CLI、OpenCode、OpenClaw、Pi、Qoder、Trae CLI）。本机已安装的工具会被自动注册成运行时。",
       },
       {
         title: "\u521b\u5efa\u4f60\u7684\u7b2c\u4e00\u4e2a 智能体",
@@ -192,7 +192,7 @@ export function createZhDict(allowSignup: boolean): LandingDict {
       {
         question: "Multica \u652f\u6301\u54ea\u4e9b\u7f16\u7801 智能体\uff1f",
         answer:
-          "Multica \u5f00\u7bb1\u5373\u7528\u652f\u6301 12 \u6b3e AI \u7f16\u7a0b\u5de5\u5177\uff1aAntigravity\u3001Claude Code\u3001Codex\u3001Cursor\u3001Copilot\u3001Gemini\u3001Hermes\u3001Kimi\u3001Kiro CLI\u3001OpenCode\u3001OpenClaw\u3001Pi\u3002\u5b88\u62a4\u8fdb\u7a0b\u4f1a\u81ea\u52a8\u68c0\u6d4b\u672c\u673a\u5df2\u5b89\u88c5\u7684 CLI \u5e76\u4e3a\u6bcf\u6b3e\u6ce8\u518c\u4e00\u4e2a\u8fd0\u884c\u65f6\u3002\u56e0\u4e3a\u5f00\u6e90\uff0c\u4f60\u4e5f\u53ef\u4ee5\u81ea\u5df1\u6dfb\u52a0\u540e\u7aef\u3002",
+          "Multica \u5f00\u7bb1\u5373\u7528\u652f\u6301 14 \u6b3e AI \u7f16\u7a0b\u5de5\u5177\uff1aAntigravity\u3001Claude Code\u3001CodeBuddy\u3001Codex\u3001Cursor\u3001Copilot\u3001Hermes\u3001Kimi\u3001Kiro CLI\u3001OpenCode\u3001OpenClaw\u3001Pi\u3001Qoder\u3001Trae CLI\u3002\u5b88\u62a4\u8fdb\u7a0b\u4f1a\u81ea\u52a8\u68c0\u6d4b\u672c\u673a\u5df2\u5b89\u88c5\u7684 CLI \u5e76\u4e3a\u6bcf\u6b3e\u6ce8\u518c\u4e00\u4e2a\u8fd0\u884c\u65f6\u3002\u56e0\u4e3a\u5f00\u6e90\uff0c\u4f60\u4e5f\u53ef\u4ee5\u81ea\u5df1\u6dfb\u52a0\u540e\u7aef\u3002",
       },
       {
         question: "\u9700\u8981\u81ea\u6258\u7ba1\u5417\uff0c\u8fd8\u662f\u6709\u4e91\u7248\u672c\uff1f",
@@ -293,6 +293,160 @@ export function createZhDict(allowSignup: boolean): LandingDict {
       fixes: "问题修复",
     },
     entries: [
+      {
+        version: "0.3.42",
+        date: "2026-07-09",
+        title: "全新独立聊天页，以及多项可靠性修复",
+        changes: [],
+        features: [
+          "聊天现在有了独立的页面，一侧是会话列表，一侧是当前对话。",
+          "新会话会在你发出第一条消息后自动生成贴切的标题，语言与你输入的一致。",
+          "新建聊天时光标会自动落在输入框里，你可以马上开始打字。",
+          "已取消的 Issue 现在会像其他状态一样，单独作为看板和列表里的一列显示。",
+          "把鼠标悬停在智能体上，就能看到它正在使用哪个模型以及思考强度，无需打开详情页。",
+        ],
+        improvements: [
+          "网络短暂中断后，应用能更稳定地自动恢复连接。",
+          "在命令行里指派 Issue 时，不会再因为网络瞬时波动而失败。",
+        ],
+        fixes: [
+          "你在 Issue 上的追加评论不会再丢失，即使在智能体处理时发出也一定会被接收。",
+          "当一个智能体提到另一个智能体时，被提到的那个现在会可靠地开始工作。",
+          "之前卡住无法重连的聊天机器人现在能重新连上了，占用提示也会准确说明是谁在用。",
+          "评论和描述里被加粗包裹的链接现在能正确显示了。",
+          "Windows 桌面应用现在总是显示正确的版本号。",
+        ],
+      },
+      {
+        version: "0.3.41",
+        date: "2026-07-08",
+        title: "机器命名、成员自建小队与命令行排序 Issue",
+        changes: [],
+        features: [
+          "你现在可以给机器起名字，创建智能体时的运行时选择器支持搜索并按机器分组。",
+          "任何成员现在都能自己创建和管理小队，不再只有管理员可以。",
+          "智能体的拥有者现在可以直接连接和管理它的飞书机器人，不需要管理员权限。",
+          "你现在可以在命令行里给 Issue 排序，并指定精确位置。",
+        ],
+        improvements: [
+          "对话里智能体任务失败时，现在会给出友好、易懂的提示，并提醒你重试。",
+        ],
+        fixes: [
+          "飞书话题群里，每个话题现在都有各自独立的会话，不再所有人共用一个。",
+          "桌面应用现在总能显示正确的版本号。",
+          "任务在不同状态之间移动后，看板的计数和显示的条目会保持一致。",
+          "通过技能导入进来的文件现在会被保留，不再丢失。",
+          "删除自动驾驶后会被正确归档，不再残留。",
+        ],
+      },
+      {
+        version: "0.3.40",
+        date: "2026-07-07",
+        title: "页内查找、断点续传与多项修复",
+        changes: [],
+        features: [
+          "你现在可以直接用命令行邀请成员加入工作区。",
+          "Issue 详情页支持页内查找（Ctrl+F），可以直接跳转并高亮关键词。",
+          "附件下载中断后可以断点续传，不用再从头下载。",
+        ],
+        improvements: [
+          "对话里进行中任务的状态刷新更快，后台请求也更少了。",
+          "更多智能体供应商现在都能配置 MCP 了。",
+          "打开工作区时不再自动弹出对话窗口，你可以自己用悬浮按钮打开。",
+        ],
+        fixes: [
+          "同一台机器上并行运行的多个智能体任务不再互相干扰。",
+          "断开后把飞书机器人重新连回同一个智能体时，成员的账号绑定和会话不再丢失。",
+          "登录后如果你已经有工作区，不会再被错误地带到新建工作区页面。",
+          "删除工作区时会等服务端确认后再跳转，删除失败会停留在原地。",
+          "以 root 或 sudo 启动 Claude 时会给出明确、可操作的报错，而不是直接失败。",
+          "你现在可以删除已失效的孤立运行时了。",
+        ],
+      },
+      {
+        version: "0.3.39",
+        date: "2026-07-06",
+        title: "Qoder 与 TRAE CLI 加入自定义运行时基座，小队与稳定性修复",
+        changes: [],
+        features: [
+          "你现在可以基于 Qoder 搭建自定义运行时了，Qoder CN 用户也能直接用。",
+          "字节 TRAE CLI 也可以作为自定义运行时的基座。",
+        ],
+        improvements: [
+          "运行时供应商页和公开文档更新到当前所有内置运行时的完整名单，包括 Qoder 与 TRAE CLI，四种语言同步。",
+        ],
+        fixes: [
+          "多阶段小队流程在私有 Leader + 子 Issue 由智能体关闭的情况下，不再卡在第一阶段。",
+          "父 Issue 的「子任务完成」提示不再把中间阶段错说成最终阶段，小队 Leader 可以自己选择继续下一阶段还是收尾。",
+          "小队 Leader 在收尾阶段不再占用本地仓库的锁，同一个仓库里的多个智能体可以继续并行工作。",
+          "多小时的智能体任务（研究、训练、代码生成）不再被服务端误杀，只要本机后台还活着就会跑完。",
+          "自托管环境下的搜索不再卡死，大工作区里首次搜索也能秒回。",
+          "在 Issue 或评论编辑器里粘贴长报错堆栈或异常长的字符串时不再卡页面。",
+          "同时装了 Claude 的机器上，Antigravity 智能体不再启动失败。",
+          "Windows 上的 Browser MCP 现在能正常启动。",
+          "Codex 智能体的 MCP 设置能被正确读取了。",
+          "Pi 智能体的任务结果只显示最终答案，不再夹带中间步骤。",
+          "自动驾驶不再在单次运行超时的时候重复派发同一个 Issue。",
+          "Issue 的 PR 列表只显示真正关联到本 Issue 的 PR，仅在描述里顺带提到「Related to MUL-…」的 PR 不再露出。",
+          "Issue 操作菜单里嵌套的「More」项改名为「Relations」，你不用点开也知道里面装的是关系类操作。",
+          "所有附件上传按钮——对话输入、Issue 创建、Issue 描述、反馈——都支持在系统对话框里一次选多个文件。",
+        ],
+      },
+      {
+        version: "0.3.36",
+        date: "2026-07-03",
+        title: "任务日志偏好记忆、Helm 外部 PostgreSQL 支持，与稳定性修复",
+        changes: [],
+        features: [
+          "任务日志（Transcript）会记住你的过滤条件与展开状态，下次打开同一次运行时自动恢复。",
+          "自托管（Helm）：新增 `postgres.external.enabled` 开关，可将 Multica 指向外部托管的 PostgreSQL（RDS、CNPG、Cloud SQL、Neon 等），跳过内置数据库。",
+        ],
+        fixes: [
+          "评论草稿里有空的 `1. ` 列表项时，重新加载后光标不再卡在下方块。",
+          "登录 Shell 里挂了 hook 包装时，守护进程也能正确发现智能体 CLI（Claude、Codex 等）。",
+          "新提交推送后，PR 审查智能体会重新触发审查，不再复用旧提交的结论。",
+          "实时事件在服务端 Pod 重启期间不再被静默丢失，新增有界 5 分钟回放窗口覆盖这段时间。",
+          "Kiro ACP 运行时任务的用量再次被正确记入使用日志。",
+          "运行时离线时，自动驾驶（Autopilot）的「创建 Issue」运行仍然会出现在运行列表里。",
+          "正文只在 Slack 附件里的告警卡片（Grafana、Webhook 等）现在会从附件读取正文，而不是回落文本。",
+          "Codex 智能体任务能在任务主目录里看到守护进程的 Codex 模型目录。（社区反馈）",
+          "`/squads/…` 与 `/usage` 老路径不再 404，会重定向到当前对应页面。",
+          "桌面端「保存」对话框展示真实的附件文件名，不再默认成 `download.txt`。（社区贡献）",
+          "小队协作：Leader 通过 mention 派发的工作者智能体，在通过 HTTP API 发布完成评论时，能正确唤醒私有小队 Leader；Leader → Worker → Leader 协作链不再在第一跳后卡住。",
+          "如果宿主机 Claude CLI 版本早于 `--effort` 参数，任务不再硬失败——守护进程会丢弃 effort 标志并打印告警，回落到普通模式运行。",
+        ],
+      },
+      {
+        version: "0.3.35",
+        date: "2026-07-02",
+        title: "「显示子 Issue」开关、Issue 视图更快、智能体 CLI 更安全",
+        changes: [],
+        features: [
+          "Issue 视图新增「显示子 Issue」开关，看板、列表、泳道、甘特图一键聚焦父 Issue。",
+          "手动新建 Issue 弹窗新增标签选择器，截止日期收进 ⋯ 折叠菜单。",
+          "技能详情页支持一次把技能挂给多个智能体，选择器带智能体搜索。",
+          "自托管：S3 兼容对象存储支持 path-style 寻址。",
+        ],
+        improvements: [
+          "看板、列表、泳道、甘特图共用一套查询与缓存：成员／智能体 Tab 计数精确，跨项目移动按列表对账，慢网下新增共用刷新指示器。",
+          "对话实时时间线不再在每条流式任务消息到来时重新挂载，长时间智能体运行不再卡渲染。",
+        ],
+        fixes: [
+          "同一小队里子 Issue 完成时，父 Issue 所属小队的 Leader 会被叫醒，父 Issue 不再滞留处理中。",
+          "受守护进程托管的智能体 CLI 丢失任务 token 时立刻失败，写操作不再冒充成工作区拥有者。（社区反馈）",
+          "Slack 告警卡片（Grafana、Webhook 等）正文只在 Attachments / Blocks / rich_text 里时，也能被聊天智能体在历史阅读里读回。",
+          "内联 base64 图片（二维码、截图、图表）在 Markdown 与只读 Issue 评论中正常渲染。",
+          "评论跨 Issue 移动后附件链接仍能正确定位。",
+          "Antigravity 空输出完成时，找回的最终回复会补进运行时间线。",
+          "附件预览接受的文本文件类型与前端展示对齐。",
+          "Mermaid 语法出错时不再把内置错误图注入页面。",
+          "本地技能重新对 ACP 类运行时可见。",
+          "应用内反馈提交前会校验响应并透传错误类型。",
+          "守护进程调用仓库缓存的 git 命令带超时。（社区反馈）",
+          "集群部署下，运行时的 pending 键保留在同一个 Redis slot 里。（社区反馈）",
+          "Web Docker 镜像从 packageManager 字段推导 pnpm 版本。（社区反馈）",
+        ],
+      },
       {
         version: "0.3.34",
         date: "2026-07-01",

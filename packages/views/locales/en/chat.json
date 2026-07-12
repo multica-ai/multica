@@ -1,4 +1,8 @@
 {
+  "page": {
+    "title": "Chat",
+    "select_prompt": "Pick a conversation, or start a new one with +"
+  },
   "fab": {
     "running": "Multica is working...",
     "unread_one": "{{count}} unread chat",
@@ -8,18 +12,29 @@
   "input": {
     "placeholder_no_agent": "Create an agent to start chatting",
     "placeholder_archived": "This session is archived",
+    "placeholder_archived_agent": "This agent has been archived",
     "placeholder_named": "Message {{name}}…",
     "placeholder_default": "Start a message…",
     "send_tooltip": "Send",
     "stop_tooltip": "Stop",
     "send_failed_toast": "Failed to send message",
-    "attachment_bind_failed_toast": "Message sent, but files were not attached. Please try again in a moment."
+    "attachment_bind_failed_toast": "Message sent, but files were not attached. Please try again in a moment.",
+    "add_tooltip": "Add",
+    "upload_file": "Image or files"
   },
   "message_list": {
     "show_details": "Show details",
     "replied_in": "Replied in {{elapsed}}",
     "failed_after": "Failed after {{elapsed}}",
-    "task_failed_fallback": "Task failed",
+    "failure": {
+      "agent_error": "The agent ran into an error and couldn't finish replying. Please try again.",
+      "timeout": "The agent took too long and stopped before finishing. Try again, or break your request into smaller steps.",
+      "codex_semantic_inactivity": "The agent went idle and stopped before finishing. Please try again.",
+      "runtime_offline": "The agent is offline right now, so it couldn't reply. Please try again once it's back online.",
+      "runtime_recovery": "The agent restarted before it could finish. Please try again.",
+      "manual": "This reply was cancelled.",
+      "fallback": "Something went wrong and the agent couldn't finish replying. Please try again."
+    },
     "tools_one": "{{count}} tool",
     "tools_other": "{{count}} tools",
     "tool_result_named": "{{tool}} result: ",
@@ -90,7 +105,8 @@
     "first_time_actions": "Ask for a summary, plan your day, or hand off a quick task.",
     "returning_title_named": "Hi, I'm {{name}}",
     "returning_title_default": "Welcome to Multica",
-    "returning_subtitle": "Try asking"
+    "returning_subtitle": "Try asking",
+    "chat_with_named": "Chat with {{name}}"
   },
   "starter_prompts": {
     "list_open": "List my open tasks by priority",
@@ -98,6 +114,7 @@
     "plan_next": "Plan what to work on next"
   },
   "no_agent_banner": "You need an agent to start chatting.",
+  "archived_agent_banner": "{{name}} has been archived — this conversation is read-only.",
   "offline_banner": {
     "fallback_name": "the agent",
     "unstable": "{{name}}'s connection is unstable — replies may be delayed.",
@@ -121,5 +138,29 @@
       "searching_web": "Searching the web",
       "fallback": "Working"
     }
+  },
+  "list": {
+    "typing": "Typing…",
+    "failed": "Failed to send",
+    "you_prefix": "You: ",
+    "no_messages": "No messages yet",
+    "quick_agents": "Frequent agents",
+    "add": "Add",
+    "add_agent": "Add a frequent agent",
+    "unpin_agent": "Remove from frequent",
+    "waiting": "Waiting for reply",
+    "pin": "Pin",
+    "unpin": "Unpin",
+    "pinned": "Pinned",
+    "archive": "Archive",
+    "unarchive": "Unarchive",
+    "archived_title": "Archived"
+  },
+  "header": {
+    "view_profile": "View agent profile",
+    "rename": "Rename chat",
+    "archive": "Archive chat",
+    "unarchive": "Unarchive chat",
+    "delete": "Delete chat"
   }
 }

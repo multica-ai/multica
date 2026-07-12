@@ -501,11 +501,11 @@ func TestAutopilotScheduleJobPausedAutopilotSkipsAtHandler(t *testing.T) {
 	// and returns a SUCCESS no-op WITHOUT calling DispatchAutopilotForPlan.
 	planTime := time.Now().UTC().Truncate(time.Minute)
 	result, err := job.Handler(ctx, scheduler.HandlerInput{
-		Job:      &job,
-		Scope:    scheduler.Scope{Kind: scheduler.ScopeKindAutopilotTrigger, ID: util.UUIDToString(trigger.ID)},
-		PlanTime: planTime,
-		Attempt:  1,
-		RunnerID: "handler-guard-test",
+		Job:       &job,
+		Scope:     scheduler.Scope{Kind: scheduler.ScopeKindAutopilotTrigger, ID: util.UUIDToString(trigger.ID)},
+		PlanTime:  planTime,
+		Attempt:   1,
+		RunnerID:  "handler-guard-test",
 		Heartbeat: func(ctx context.Context) error { return nil },
 	})
 	if err != nil {
@@ -736,8 +736,8 @@ func TestAutopilotScheduleJobColdStartBrandNewTriggerStillFires(t *testing.T) {
 	ctx := context.Background()
 	trigger, queries, autopilotSvc := seedColdStartTrigger(t, "0 12 * * *")
 
-	createdAt := time.Date(2026, 6, 23, 11, 50, 0, 0, time.UTC)  // 10 min before the fire
-	pinnedNow := time.Date(2026, 6, 23, 12, 5, 0, 0, time.UTC)   // 5 min after the fire
+	createdAt := time.Date(2026, 6, 23, 11, 50, 0, 0, time.UTC)   // 10 min before the fire
+	pinnedNow := time.Date(2026, 6, 23, 12, 5, 0, 0, time.UTC)    // 5 min after the fire
 	expectedFire := time.Date(2026, 6, 23, 12, 0, 0, 0, time.UTC) // the daily noon UTC fire
 
 	if _, err := testPool.Exec(ctx, `
@@ -769,5 +769,44 @@ func TestAutopilotScheduleJobColdStartBrandNewTriggerStillFires(t *testing.T) {
 	if !plans[0].Equal(expectedFire) {
 		t.Fatalf("plan_time mismatch: got %s want %s",
 			plans[0].Format(time.RFC3339), expectedFire.Format(time.RFC3339))
+	}
+}
+
+// TestAutopilotScheduleJobColdStartSkipsStaleMissedOccurrence covers the
+// activation-after-window case from WS-1465: a trigger with no scheduler
+// history must not immediately fire an hours-old occurrence just because it
+// became schedulable after the configured time had already passed.
+func TestAutopilotScheduleJobColdStartSkipsStaleMissedOccurrence(t *testing.T) {
+	ctx := context.Background()
+	trigger, queries, autopilotSvc := seedColdStartTrigger(t, "7 9 * * *")
+
+	createdAt := time.Date(2026, 7, 2, 15, 54, 0, 0, time.UTC)
+	pinnedNow := time.Date(2026, 7, 4, 13, 4, 27, 0, time.UTC)
+
+	if _, err := testPool.Exec(ctx, `
+		UPDATE autopilot_trigger
+		   SET created_at    = $2,
+		       last_fired_at = NULL
+		 WHERE id = $1
+	`, trigger.ID, createdAt); err != nil {
+		t.Fatalf("seed deterministic timestamps: %v", err)
+	}
+
+	job := scheduler.AutopilotScheduleDispatchJob(testPool, queries, autopilotSvc)
+	if _, err := job.Scopes(ctx, pinnedNow); err != nil {
+		t.Fatalf("populate scope cache: %v", err)
+	}
+
+	scope := scheduler.Scope{
+		Kind: scheduler.ScopeKindAutopilotTrigger,
+		ID:   util.UUIDToString(trigger.ID),
+	}
+
+	plans, err := job.PlansForScope(ctx, scope, pinnedNow, scheduler.LatestPlanInfo{Found: false})
+	if err != nil {
+		t.Fatalf("planner hook: %v", err)
+	}
+	if len(plans) != 0 {
+		t.Fatalf("stale cold-start occurrence must be skipped; got plans %v", plans)
 	}
 }

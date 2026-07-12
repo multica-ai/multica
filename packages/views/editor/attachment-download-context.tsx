@@ -28,6 +28,18 @@ interface ProviderProps {
   children: ReactNode;
 }
 
+function stripQueryAndFragment(url: string): string {
+  return url.split(/[?#]/, 1)[0] ?? "";
+}
+
+function matchesAttachmentURL(embeddedURL: string, attachmentURL?: string): boolean {
+  if (!embeddedURL || !attachmentURL) return false;
+  if (embeddedURL === attachmentURL) return true;
+  const embeddedStable = stripQueryAndFragment(embeddedURL);
+  const attachmentStable = stripQueryAndFragment(attachmentURL);
+  return embeddedStable !== "" && embeddedStable === attachmentStable;
+}
+
 /**
  * Provides a click-time download handler to Tiptap NodeViews mounted inside
  * `ContentEditor`. Without a provider the consumer falls back to opening the
@@ -60,7 +72,12 @@ export function AttachmentDownloadProvider({ attachments, children }: ProviderPr
         // straight at the CDN, and anything else where
         // `attachments[i].url` was the literal value embedded in
         // markdown.
-        return attachments.find((a) => a.url === url);
+        return attachments.find(
+          (a) =>
+            matchesAttachmentURL(url, a.url) ||
+            matchesAttachmentURL(url, a.download_url) ||
+            matchesAttachmentURL(url, a.markdown_url),
+        );
       };
       return {
         resolveAttachmentId: (url) => lookup(url)?.id,

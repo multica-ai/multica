@@ -167,7 +167,7 @@ func TestClaudeExecuteDoesNotDeadlockOnStartupStdoutBurst(t *testing.T) {
 
 	backend, err := New("claude", Config{
 		ExecutablePath: self,
-		Env:            map[string]string{"CLAUDE_FAKE_MODE": "startup_stdout_burst"},
+		Env:            map[string]string{"CLAUDE_FAKE_MODE": "startup_stdout_burst", "IS_SANDBOX": "1"},
 		Logger:         slog.Default(),
 	})
 	if err != nil {
@@ -214,7 +214,7 @@ func TestClaudeExecuteRespondsToControlRequest(t *testing.T) {
 
 	backend, err := New("claude", Config{
 		ExecutablePath: self,
-		Env:            map[string]string{"CLAUDE_FAKE_MODE": "control_request"},
+		Env:            map[string]string{"CLAUDE_FAKE_MODE": "control_request", "IS_SANDBOX": "1"},
 		Logger:         slog.Default(),
 	})
 	if err != nil {
@@ -262,7 +262,7 @@ func TestClaudeExecuteForcesBackgroundControlRequestForeground(t *testing.T) {
 
 	backend, err := New("claude", Config{
 		ExecutablePath: self,
-		Env:            map[string]string{"CLAUDE_FAKE_MODE": "background_control_request"},
+		Env:            map[string]string{"CLAUDE_FAKE_MODE": "background_control_request", "IS_SANDBOX": "1"},
 		Logger:         slog.Default(),
 	})
 	if err != nil {
@@ -310,7 +310,7 @@ func TestClaudeExecuteFailsLoudlyOnAsyncLaunchedToolResult(t *testing.T) {
 
 	backend, err := New("claude", Config{
 		ExecutablePath: self,
-		Env:            map[string]string{"CLAUDE_FAKE_MODE": "async_launched_tool_result"},
+		Env:            map[string]string{"CLAUDE_FAKE_MODE": "async_launched_tool_result", "IS_SANDBOX": "1"},
 		Logger:         slog.Default(),
 	})
 	if err != nil {

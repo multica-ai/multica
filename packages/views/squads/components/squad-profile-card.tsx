@@ -34,7 +34,7 @@ export function SquadProfileCard({ squadId }: SquadProfileCardProps) {
   if (squadsLoading && !squad) {
     return (
       <div className="flex items-center gap-3">
-        <Skeleton className="h-10 w-10 rounded-md" />
+        <Skeleton className="h-10 w-10 rounded-full" />
         <div className="flex-1 space-y-1.5">
           <Skeleton className="h-4 w-28" />
           <Skeleton className="h-3 w-20" />
@@ -70,8 +70,7 @@ export function SquadProfileCard({ squadId }: SquadProfileCardProps) {
           initials={initials}
           avatarUrl={squad.avatar_url}
           isSquad
-          size={40}
-          className="rounded-md"
+          size="xl"
         />
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-1.5">
@@ -164,7 +163,7 @@ function MembersList({
               <ActorAvatar
                 actorType={m.member_type}
                 actorId={m.member_id}
-                size={20}
+                size="sm"
                 showStatusDot={m.member_type === "agent"}
                 className="shrink-0"
               />

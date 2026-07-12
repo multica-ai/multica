@@ -70,13 +70,11 @@ vi.mock("../i18n", () => ({
     const labels = {
       run_confirm: {
         title_assign: "Assign and start?",
-        title_status: "Start working now?",
         will_start_named: "start Walt",
         will_start_named_squad: "start squad Walt",
         will_start: "start many",
         will_start_squad: "start squad many",
         nothing_assign: "no run (backlog)",
-        nothing_status: "no runs",
         checking: "Checking…",
         note_label: "Handoff note",
         note_placeholder: "scope...",
@@ -209,21 +207,24 @@ describe("RunConfirmModal", () => {
     expect(screen.getByText("runtime too old")).toBeInTheDocument();
   });
 
-  it("batch (N ids) applies via batchUpdate", async () => {
+  it("batch assign (N ids) applies via batchUpdate with the assignee change", async () => {
     previewState.triggers = [
-      { issue_id: "i1", agent_id: "a1", source: "status", handoff_supported: true },
-      { issue_id: "i2", agent_id: "a2", source: "status", handoff_supported: true },
+      { issue_id: "i1", agent_id: "a1", source: "assign", handoff_supported: true },
+      { issue_id: "i2", agent_id: "a2", source: "assign", handoff_supported: true },
     ];
     previewState.totalCount = 2;
     render(
       <RunConfirmModal
         onClose={vi.fn()}
-        data={{ issueIds: ["i1", "i2"], mode: "status", status: "todo" }}
+        data={{ issueIds: ["i1", "i2"], mode: "assign", assigneeType: "agent", assigneeId: "agent-1" }}
       />,
     );
     fireEvent.click(screen.getByText("Start"));
     await waitFor(() => expect(mockBatch).toHaveBeenCalledTimes(1));
-    expect(mockBatch).toHaveBeenCalledWith({ ids: ["i1", "i2"], updates: { status: "todo" } });
+    expect(mockBatch).toHaveBeenCalledWith({
+      ids: ["i1", "i2"],
+      updates: { assignee_type: "agent", assignee_id: "agent-1" },
+    });
     expect(mockUpdate).not.toHaveBeenCalled();
   });
 });

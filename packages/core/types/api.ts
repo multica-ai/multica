@@ -81,6 +81,12 @@ export interface ListIssuesParams {
   priority?: IssuePriority;
   assignee_id?: string;
   assignee_ids?: string[];
+  /**
+   * Narrow to issues assigned to the given actor kinds (member / agent /
+   * squad). Same semantics as `ListGroupedIssuesParams.assignee_types` —
+   * powers the workspace Members/Agents tabs server-side.
+   */
+  assignee_types?: IssueAssigneeType[];
   creator_id?: string;
   project_id?: string;
   /**

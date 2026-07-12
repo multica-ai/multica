@@ -35,7 +35,6 @@ vi.mock("@multica/core/hooks/use-file-upload", () => ({
   useFileUpload: () => ({ uploadWithToast: vi.fn() }),
 }));
 vi.mock("@multica/core/api", () => ({ api: {} }));
-vi.mock("@multica/core/analytics", () => ({ captureFeedbackOpened: vi.fn() }));
 vi.mock("sonner", () => ({ toast: { info: vi.fn(), error: vi.fn(), success: vi.fn() } }));
 vi.mock("@multica/core/platform", () => ({
   formatShortcut: () => "⌘↵",
@@ -43,6 +42,7 @@ vi.mock("@multica/core/platform", () => ({
   enterKey: "enter",
 }));
 vi.mock("@multica/core/feedback", () => ({
+  FEEDBACK_KINDS: ["bug", "feature", "general", "praise"] as const,
   useCreateFeedback: () => ({ isPending: false, mutateAsync: vi.fn() }),
   useFeedbackDraftStore: (selector: any) =>
     selector({ draft: { message: storedDraftMessage }, setDraft: vi.fn(), clearDraft: vi.fn() }),

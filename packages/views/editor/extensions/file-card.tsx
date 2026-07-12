@@ -21,8 +21,11 @@ import { FILE_CARD_URL_PATTERN } from "@multica/ui/markdown";
 import { escapeMarkdownLabel } from "../utils/escape-markdown-label";
 import { Attachment } from "../attachment";
 
+// Backslash is excluded from the label char class so "\x" runs can only be
+// consumed by \\. — overlapping alternatives backtrack in 2^n ways (ReDoS,
+// GitHub #4881).
 const FILE_CARD_MARKDOWN_RE = new RegExp(
-  `^!file\\[((?:\\\\.|[^\\]])*)\\]\\((${FILE_CARD_URL_PATTERN.source})\\)`,
+  `^!file\\[((?:\\\\.|[^\\]\\\\])*)\\]\\((${FILE_CARD_URL_PATTERN.source})\\)`,
 );
 
 

@@ -66,6 +66,8 @@ The CLI counterpart to the Cursor editor. **Session resumption works** with curr
 | Install | Install the [Cursor editor](https://cursor.com/) and then the CLI per their docs at [docs.cursor.com](https://docs.cursor.com/). The binary name is `cursor-agent`, not `cursor`. |
 | Authentication | Sign in through the Cursor editor; the CLI reuses that session. |
 
+For authenticated MCP servers, Cursor stores OAuth state in the project data directory where the auth flow first ran. Multica isolates managed Cursor MCP runs with a per-task `CURSOR_DATA_DIR`, so it does not scan or copy every file under `~/.cursor/projects`. To opt in for one agent, set the agent custom env key `CURSOR_MCP_AUTH_SOURCE` to the absolute path of the trusted `mcp-auth.json` file, or to the Cursor project data directory containing that file. Multica links or seeds only that `mcp-auth.json` into the isolated task project data directory. When symlinks are supported, Cursor token refreshes may write back to the trusted source; environments that cannot create symlinks fall back to copying the file.
+
 ### GitHub Copilot
 
 Model routing goes through your GitHub account entitlement — the tool doesn't pick a model itself; GitHub decides which model you get.

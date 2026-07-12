@@ -424,7 +424,7 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		c.usageMu.Unlock()
 
 		var usageMap map[string]TokenUsage
-		if u.InputTokens > 0 || u.OutputTokens > 0 || u.CacheReadTokens > 0 {
+		if u.InputTokens > 0 || u.OutputTokens > 0 || u.CacheReadTokens > 0 || u.CacheWriteTokens > 0 {
 			model := effectiveModel
 			if model == "" {
 				model = "unknown"
@@ -732,14 +732,8 @@ func (c *hermesClient) handleResponse(raw map[string]json.RawMessage) {
 
 func (c *hermesClient) extractPromptResult(data json.RawMessage) {
 	var resp struct {
-		StopReason string `json:"stopReason"`
-		Usage      *struct {
-			InputTokens      int64 `json:"inputTokens"`
-			OutputTokens     int64 `json:"outputTokens"`
-			TotalTokens      int64 `json:"totalTokens"`
-			ThoughtTokens    int64 `json:"thoughtTokens"`
-			CachedReadTokens int64 `json:"cachedReadTokens"`
-		} `json:"usage"`
+		StopReason string          `json:"stopReason"`
+		Usage      json.RawMessage `json:"usage"`
 	}
 	if err := json.Unmarshal(data, &resp); err != nil {
 		return
@@ -748,12 +742,8 @@ func (c *hermesClient) extractPromptResult(data json.RawMessage) {
 	pr := hermesPromptResult{
 		stopReason: resp.StopReason,
 	}
-	if resp.Usage != nil {
-		pr.usage = TokenUsage{
-			InputTokens:     resp.Usage.InputTokens,
-			OutputTokens:    resp.Usage.OutputTokens,
-			CacheReadTokens: resp.Usage.CachedReadTokens,
-		}
+	if len(resp.Usage) > 0 && string(resp.Usage) != "null" {
+		pr.usage = parseACPTokenUsage(resp.Usage)
 	}
 
 	if c.onPromptDone != nil {
@@ -1190,29 +1180,82 @@ func extractACPToolCallText(blocks []json.RawMessage) string {
 
 func (c *hermesClient) handleUsageUpdate(data json.RawMessage) {
 	var msg struct {
-		Usage struct {
-			InputTokens      int64 `json:"inputTokens"`
-			OutputTokens     int64 `json:"outputTokens"`
-			TotalTokens      int64 `json:"totalTokens"`
-			CachedReadTokens int64 `json:"cachedReadTokens"`
-		} `json:"usage"`
+		Usage json.RawMessage `json:"usage"`
 	}
 	if err := json.Unmarshal(data, &msg); err != nil {
 		return
 	}
+	usage := parseACPTokenUsage(msg.Usage)
 
 	c.usageMu.Lock()
 	// Usage updates from ACP are cumulative snapshots, so take the latest.
-	if msg.Usage.InputTokens > c.usage.InputTokens {
-		c.usage.InputTokens = msg.Usage.InputTokens
+	if usage.InputTokens > c.usage.InputTokens {
+		c.usage.InputTokens = usage.InputTokens
 	}
-	if msg.Usage.OutputTokens > c.usage.OutputTokens {
-		c.usage.OutputTokens = msg.Usage.OutputTokens
+	if usage.OutputTokens > c.usage.OutputTokens {
+		c.usage.OutputTokens = usage.OutputTokens
 	}
-	if msg.Usage.CachedReadTokens > c.usage.CacheReadTokens {
-		c.usage.CacheReadTokens = msg.Usage.CachedReadTokens
+	if usage.CacheReadTokens > c.usage.CacheReadTokens {
+		c.usage.CacheReadTokens = usage.CacheReadTokens
+	}
+	if usage.CacheWriteTokens > c.usage.CacheWriteTokens {
+		c.usage.CacheWriteTokens = usage.CacheWriteTokens
 	}
 	c.usageMu.Unlock()
+}
+
+func parseACPTokenUsage(data json.RawMessage) TokenUsage {
+	if len(data) == 0 || string(data) == "null" {
+		return TokenUsage{}
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return TokenUsage{}
+	}
+	return TokenUsage{
+		InputTokens:  acpUsageInt64(fields, "inputTokens", "input_tokens"),
+		OutputTokens: acpUsageInt64(fields, "outputTokens", "output_tokens"),
+		CacheReadTokens: acpUsageInt64(fields,
+			"cachedReadTokens",
+			"cacheReadTokens",
+			"cached_input_tokens",
+			"cache_read_tokens",
+			"cache_read_input_tokens",
+		),
+		CacheWriteTokens: acpUsageInt64(fields,
+			"cachedWriteTokens",
+			"cacheWriteTokens",
+			"cache_write_tokens",
+			"cache_creation_input_tokens",
+		),
+	}
+}
+
+func acpUsageInt64(fields map[string]json.RawMessage, names ...string) int64 {
+	for _, name := range names {
+		raw, ok := fields[name]
+		if !ok {
+			continue
+		}
+		var n json.Number
+		dec := json.NewDecoder(bytes.NewReader(raw))
+		dec.UseNumber()
+		if err := dec.Decode(&n); err == nil {
+			if v, err := n.Int64(); err == nil {
+				return v
+			}
+			if f, err := n.Float64(); err == nil {
+				return int64(f)
+			}
+		}
+		var s string
+		if err := json.Unmarshal(raw, &s); err == nil {
+			if v, err := strconv.ParseInt(strings.TrimSpace(s), 10, 64); err == nil {
+				return v
+			}
+		}
+	}
+	return 0
 }
 
 // ── Helpers ──

@@ -3,11 +3,15 @@ package execenv
 import (
 	"fmt"
 	"strings"
+
+	"github.com/multica-ai/multica/server/internal/runtimeapps"
 )
 
-// This file holds the slim runtime brief — the post-MUL-3560 path that
-// `buildMetaSkillContent` routes to when the `runtime_brief_slim` feature
-// flag is enabled. The legacy path lives untouched in runtime_config.go.
+// This file holds the runtime brief assembler — the post-MUL-3560 path
+// that `buildMetaSkillContent` delegates to. It used to be one of two
+// paths gated by the `runtime_brief_slim` feature flag against a legacy
+// verbose brief; the flag was retired in MUL-4297 and this is now the
+// only brief.
 //
 // Layout:
 //
@@ -18,7 +22,7 @@ import (
 //   - Each section is its own writer so the matrix of "which kind gets
 //     which section" lives at a single dispatch site.
 //
-// The slim path applies two orthogonal optimisations:
+// The brief applies two orthogonal optimisations:
 //
 //  1. Section gating per task kind — quick-create / chat / autopilot
 //     skip sections they have no use for (Mentions, Comment Formatting,
@@ -29,10 +33,8 @@ import (
 //     Repositories, Output are all tightened. Every test-asserted phrase
 //     stays.
 //
-// Background Task Safety still lives in runtime_config.go because the
-// helper there (`writeBackgroundTaskSafetyInstructions`) is the legacy
-// implementation. The slim path emits its own compressed version via
-// `writeBackgroundTaskSafetySlim` below.
+// Background Task Safety is emitted by `writeBackgroundTaskSafetySlim`
+// below.
 
 // writeHeader emits the brief's leading title and one-line elevator pitch.
 func writeHeader(b *strings.Builder) {
@@ -40,18 +42,20 @@ func writeHeader(b *strings.Builder) {
 	b.WriteString("You are a coding agent in the Multica platform. Use the `multica` CLI to interact with the platform.\n\n")
 }
 
-// writeBackgroundTaskSafetySlim is the slim analogue of
-// writeBackgroundTaskSafetyInstructions (legacy). Drops the verbose
-// preamble and keeps the three behaviour pins (the same ones tests
-// assert): "Do NOT end your turn while background tasks",
-// "wait for a future notification/reminder", "run the work synchronously
-// instead".
+// writeBackgroundTaskSafetySlim emits the Background Task Safety section.
+// Drops the verbose preamble but keeps the same hard behaviour pins the
+// tests assert:
+// "Do NOT end your turn while background tasks", "wait for a future
+// notification/reminder", "run the work synchronously instead", the
+// no-background-and-yield rule, and the no-"standing by" sign-off rule.
 func writeBackgroundTaskSafetySlim(b *strings.Builder) {
 	b.WriteString("## Background Task Safety\n\n")
-	b.WriteString("Multica marks the task terminal when your top-level turn exits — any background work still running may be orphaned and its result lost.\n\n")
-	b.WriteString("- Do NOT end your turn while background tasks, async subagents, background shell commands, or detached tool calls are still running.\n")
-	b.WriteString("- If a tool response says to wait for a future notification/reminder, do not rely on that in Multica-managed runs — block on the appropriate wait / output / collect operation before exiting.\n")
-	b.WriteString("- If you can't observe a background task's result, run the work synchronously instead.\n\n")
+	b.WriteString("Multica marks the task terminal the moment your top-level turn exits — any background work still running is orphaned, its result lost, and the final comment you meant to post after it never sends. There is no background-completion wakeup here.\n\n")
+	b.WriteString("- Do NOT end your turn while background tasks, async subagents, background shell commands, or detached tool calls are still running. Never background-and-yield: never end a turn expecting a future notification or wakeup to resume — it will not arrive.\n")
+	b.WriteString("- Do every wait synchronously inside one foreground tool call that blocks to completion (e.g. `gh run watch`, a blocking test command); never split \"start the wait\" and \"collect the result\" across turns.\n")
+	b.WriteString("- If a tool response says to wait for a future notification/reminder, or that it is running in the background so you can keep working, do not rely on that in Multica-managed runs — block on the appropriate wait / output / collect operation before exiting.\n")
+	b.WriteString("- If you can't observe a background task's result, run the work synchronously instead.\n")
+	b.WriteString("- Never end a turn with a \"standing by\" / \"I'll report back when X finishes\" message — that becomes your final output and the task ends.\n\n")
 }
 
 // writeAgentIdentity emits the Agent Identity heading and (optionally) the
@@ -136,6 +140,48 @@ func writeWorkspaceContext(b *strings.Builder, ctx TaskContextForEnv) {
 	b.WriteString("\n\n")
 }
 
+func writeConnectedApps(b *strings.Builder, ctx TaskContextForEnv) {
+	if len(ctx.ConnectedApps) == 0 {
+		return
+	}
+	var lines strings.Builder
+	for _, app := range ctx.ConnectedApps {
+		serverName := sanitizeBriefCodeToken(app.ServerName)
+		toolkitSlug := sanitizeBriefCodeToken(app.ToolkitSlug)
+		if serverName == "" || toolkitSlug == "" {
+			continue
+		}
+		name := sanitizeNameForBriefMarkdown(app.ToolkitName)
+		if name == "" {
+			name = sanitizeNameForBriefMarkdown(runtimeapps.DisplayNameForToolkitSlug(toolkitSlug))
+		}
+		if name == "" {
+			name = toolkitSlug
+		}
+		fmt.Fprintf(&lines, "- %s (`%s`) via MCP server `%s`\n", name, toolkitSlug, serverName)
+	}
+	if lines.Len() == 0 {
+		return
+	}
+	b.WriteString("## Connected Apps\n\n")
+	b.WriteString(lines.String())
+	b.WriteString("\nUse the listed MCP server when the task asks to read or act in one of these apps.\n\n")
+}
+
+func sanitizeBriefCodeToken(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return ""
+	}
+	for _, r := range s {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_' || r == '-' || r == '.' {
+			continue
+		}
+		return ""
+	}
+	return s
+}
+
 // writeAvailableCommands emits the slim Available Commands section
 // (~2.4k chars vs legacy ~4.4k). Every test-asserted substring is
 // preserved: each `multica issue …` command name, all three `comment add`
@@ -154,7 +200,7 @@ func writeAvailableCommands(b *strings.Builder) {
 	b.WriteString("### Core\n")
 	b.WriteString("- `multica issue get <id> --output json` — full issue.\n")
 	b.WriteString("- `multica issue comment list <issue-id> [--thread <comment-id> [--tail N] | --recent N] [--before <ts> --before-id <uuid>] [--since <RFC3339>] [--full] --output json` — thread-aware comment reads. Resolved threads come back folded by default on complete-thread reads (default list, `--recent`, `--thread` without `--tail`); pass `--full` to expand. Page older replies / threads with `--before`/`--before-id` (stderr labels: `Next reply cursor`, `Next thread cursor`); `--help` for full semantics.\n")
-	b.WriteString("- `multica issue create --title \"...\" [--description-file <path>] [--priority X] [--status X] [--assignee X | --assignee-id <uuid>] [--parent <issue-id>] [--stage N] [--project <project-id>] [--due-date <RFC3339>] [--attachment <path>]` — create an issue. For agent-authored long descriptions prefer `--description-file <path>` (heredoc stdin can swallow trailing flags, #4182).\n")
+	b.WriteString("- `multica issue create --title \"...\" [--description-file <path>] [--priority X] [--status X] [--assignee X | --assignee-id <uuid>] [--parent <issue-id>] [--stage N] [--project <project-id>] [--due-date <RFC3339>] [--attachment <path>]` — create an issue. For agent-authored long descriptions prefer `--description-file <path>` (heredoc stdin can swallow trailing flags, #4182). Write that file inside your working directory (e.g. `./description.md`), never `/tmp` or shared paths, and treat a failed write as fatal — the CLI rejects a path outside the workdir so a stale file from another run can't leak in (MUL-4252).\n")
 	b.WriteString("- `multica issue update <id> [--title X] [--description-file <path>] [--priority X] [--status X] [--assignee X] [--parent <issue-id>] [--stage N] [--project <project-id>] [--due-date <RFC3339>]` — update fields; pass `--parent \"\"` to clear parent.\n")
 	b.WriteString("- `multica issue status <id> <status>` — flip status (todo / in_progress / in_review / done / blocked / backlog / cancelled).\n")
 	b.WriteString("- `multica issue children <id> [--output json]` — list a parent's sub-issues grouped by stage.\n")
@@ -175,7 +221,7 @@ func writeAvailableCommandsQuickCreate(b *strings.Builder) {
 	b.WriteString("## Available Commands\n\n")
 	b.WriteString("**Use `--output json` for structured data.** For anything beyond `issue create`, run `multica --help` or `multica <command> --help`.\n\n")
 	b.WriteString("### Core\n")
-	b.WriteString("- `multica issue create --title \"...\" [--description \"...\" | --description-file <path> | --description-stdin] [--priority X] [--status X] [--assignee X | --assignee-id <uuid>] [--parent <issue-id>] [--stage N] [--project <project-id>] [--due-date <RFC3339>] [--attachment <path>]` — Create a new issue; `--attachment` may be repeated. For agent-authored long descriptions, prefer `--description-file <path>` over `--description-stdin` (flags after a HEREDOC terminator can be silently swallowed, #4182).\n\n")
+	b.WriteString("- `multica issue create --title \"...\" [--description \"...\" | --description-file <path> | --description-stdin] [--priority X] [--status X] [--assignee X | --assignee-id <uuid>] [--parent <issue-id>] [--stage N] [--project <project-id>] [--due-date <RFC3339>] [--attachment <path>]` — Create a new issue; `--attachment` may be repeated. For agent-authored long descriptions, prefer `--description-file <path>` over `--description-stdin` (flags after a HEREDOC terminator can be silently swallowed, #4182). Write that file inside your working directory (e.g. `./description.md`), never `/tmp` or shared paths, and treat a failed write as fatal — the CLI rejects a path outside the workdir so a stale file from another run can't leak in (MUL-4252).\n\n")
 }
 
 // writeCommentFormatting emits the cross-platform file-first guardrail.
@@ -184,10 +230,10 @@ func writeAvailableCommandsQuickCreate(b *strings.Builder) {
 func writeCommentFormatting(b *strings.Builder) {
 	b.WriteString("## Comment Formatting\n\n")
 	if runtimeGOOS == "windows" {
-		b.WriteString("On Windows, **always write the comment body to a UTF-8 file with your file-write tool first, then post it with `--content-file <path>`** — do NOT pipe via `--content-stdin` (PowerShell 5.1's `$OutputEncoding` defaults to ASCIIEncoding when piping to a native command, silently dropping non-ASCII characters as `?` before they reach `multica.exe`). Never use inline `--content` for agent-authored comments. Keep the same `--parent` value from the trigger comment when replying. Delete the temp file (`Remove-Item ./reply.md`) after posting; do not rely on `\\n` escapes.\n\n")
+		b.WriteString("On Windows, **always write the comment body to a UTF-8 file with your file-write tool first, then post it with `--content-file <path>`** — do NOT pipe via `--content-stdin` (PowerShell 5.1's `$OutputEncoding` defaults to ASCIIEncoding when piping to a native command, silently dropping non-ASCII characters as `?` before they reach `multica.exe`). Never use inline `--content` for agent-authored comments. Write that file inside your working directory (`./reply.md`), never `/tmp` or shared paths — the CLI rejects a `--content-file` path outside the workdir so another run's stale file can't leak in (MUL-4252). Keep the same `--parent` value from the trigger comment when replying. Delete the temp file (`Remove-Item ./reply.md`) after posting; do not rely on `\\n` escapes.\n\n")
 		return
 	}
-	b.WriteString("For issue comments, **always write the comment body to a UTF-8 file with your file-write tool first, then post it with `--content-file <path>`**. Never use inline `--content` for agent-authored comments — the shell rewrites backticks / `$()` / quotes in the body (MUL-2904). Never use `--content-stdin` with a HEREDOC alongside other flags either — the heredoc/flag boundary is fragile and flags get silently swallowed (#4182). Keep the same `--parent` value from the trigger comment when replying. Delete the temp file (`rm ./reply.md`) after posting; do not rely on `\\n` escapes.\n\n")
+	b.WriteString("For issue comments, **always write the comment body to a UTF-8 file with your file-write tool first, then post it with `--content-file <path>`**. Never use inline `--content` for agent-authored comments — the shell rewrites backticks / `$()` / quotes in the body (MUL-2904). Never use `--content-stdin` with a HEREDOC alongside other flags either — the heredoc/flag boundary is fragile and flags get silently swallowed (#4182). Write that file inside your working directory (`./reply.md`), never `/tmp` or shared paths — the CLI rejects a `--content-file` path outside the workdir so another run's stale file can't leak in (MUL-4252). Keep the same `--parent` value from the trigger comment when replying. Delete the temp file (`rm ./reply.md`) after posting; do not rely on `\\n` escapes.\n\n")
 }
 
 // writeRepositories emits the Repositories section when at least one repo
@@ -444,9 +490,9 @@ func writeOutput(b *strings.Builder, kind taskKind, ctx TaskContextForEnv) {
 	}
 }
 
-// buildMetaSkillContentSlim is the post-MUL-3560 slim brief assembler.
-// Gated by the `runtime_brief_slim` feature flag; only called from
-// buildMetaSkillContent (runtime_config.go) when the flag is on.
+// buildMetaSkillContentSlim is the post-MUL-3560 brief assembler.
+// Called from buildMetaSkillContent (runtime_config.go). The
+// `runtime_brief_slim` flag that once gated it was retired in MUL-4297.
 //
 // The Section × Kind matrix encoded below (skip = elide section, keep
 // = always emit, △ = data-driven inside the helper):
@@ -465,9 +511,9 @@ func writeOutput(b *strings.Builder, kind taskKind, ctx TaskContextForEnv) {
 //	Attachments           |    ✓    |   ✓    |     —     |      —       |  —
 //
 // Always-on rows — Header, Background Task Safety, Agent Identity,
-// Requesting User, Task Initiator, Workspace Context, Workflow, Always
-// Use CLI, Output — are shared by every kind and emitted unconditionally
-// (or gated by their own data preconditions).
+// Requesting User, Task Initiator, Workspace Context, Connected Apps,
+// Workflow, Always Use CLI, Output — are shared by every kind and emitted
+// unconditionally (or gated by their own data preconditions).
 func buildMetaSkillContentSlim(provider string, ctx TaskContextForEnv) string {
 	var b strings.Builder
 	kind := classifyTask(ctx)
@@ -478,6 +524,7 @@ func buildMetaSkillContentSlim(provider string, ctx TaskContextForEnv) string {
 	writeRequestingUser(&b, ctx)
 	writeTaskInitiator(&b, ctx)
 	writeWorkspaceContext(&b, ctx)
+	writeConnectedApps(&b, ctx)
 
 	switch kind {
 	case kindQuickCreate:

@@ -114,3 +114,53 @@ func TestListAutopilots_DerivedFields(t *testing.T) {
 		}
 	}
 }
+
+func TestListAutopilots_DefaultExcludesArchived(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+
+	agentID := createHandlerTestAgent(t, "autopilot-list-archived-agent", []byte(`[]`))
+	archived := insertListTestAutopilot(t, agentID, "list-archived-hidden")
+	if _, err := testPool.Exec(ctx, `UPDATE autopilot SET status = 'archived' WHERE id = $1`, archived); err != nil {
+		t.Fatalf("archive autopilot fixture: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	testHandler.ListAutopilots(w, newRequest("GET", "/api/autopilots", nil))
+	if w.Code != 200 {
+		t.Fatalf("ListAutopilots default: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var body struct {
+		Autopilots []map[string]any `json:"autopilots"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode default list: %v", err)
+	}
+	for _, row := range body.Autopilots {
+		if row["id"] == archived {
+			t.Fatalf("archived autopilot %s appeared in default list", archived)
+		}
+	}
+
+	w = httptest.NewRecorder()
+	testHandler.ListAutopilots(w, newRequest("GET", "/api/autopilots?status=archived", nil))
+	if w.Code != 200 {
+		t.Fatalf("ListAutopilots archived: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	body.Autopilots = nil
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode archived list: %v", err)
+	}
+	found := false
+	for _, row := range body.Autopilots {
+		if row["id"] == archived {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("archived autopilot %s missing from status=archived list", archived)
+	}
+}

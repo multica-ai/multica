@@ -460,6 +460,73 @@ func (q *Queries) FindActiveDuplicateIssue(ctx context.Context, arg FindActiveDu
 	return i, err
 }
 
+const findRecentAutopilotDuplicateIssue = `-- name: FindRecentAutopilotDuplicateIssue :one
+SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority, i.assignee_type, i.assignee_id, i.creator_type, i.creator_id, i.parent_issue_id, i.acceptance_criteria, i.context_refs, i.position, i.due_date, i.created_at, i.updated_at, i.number, i.project_id, i.origin_type, i.origin_id, i.first_executed_at, i.start_date, i.metadata, i.stage FROM issue i
+WHERE i.workspace_id = $1
+  AND i.status NOT IN ('done', 'cancelled')
+  AND i.origin_type = 'autopilot'
+  AND i.origin_id = $2
+  AND i.project_id IS NOT DISTINCT FROM $3::uuid
+  AND lower(btrim(regexp_replace(i.title, '[[:space:]]+', ' ', 'g'))) = $4
+  AND i.created_at >= $5::timestamptz
+  AND EXISTS (
+    SELECT 1
+    FROM autopilot_run r
+    WHERE r.issue_id = i.id
+      AND r.autopilot_id = i.origin_id
+      AND r.status IN ('issue_created', 'running', 'completed')
+  )
+ORDER BY i.created_at ASC
+LIMIT 1
+`
+
+type FindRecentAutopilotDuplicateIssueParams struct {
+	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
+	OriginID        pgtype.UUID        `json:"origin_id"`
+	ProjectID       pgtype.UUID        `json:"project_id"`
+	NormalizedTitle string             `json:"normalized_title"`
+	CreatedAfter    pgtype.Timestamptz `json:"created_after"`
+}
+
+func (q *Queries) FindRecentAutopilotDuplicateIssue(ctx context.Context, arg FindRecentAutopilotDuplicateIssueParams) (Issue, error) {
+	row := q.db.QueryRow(ctx, findRecentAutopilotDuplicateIssue,
+		arg.WorkspaceID,
+		arg.OriginID,
+		arg.ProjectID,
+		arg.NormalizedTitle,
+		arg.CreatedAfter,
+	)
+	var i Issue
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.Title,
+		&i.Description,
+		&i.Status,
+		&i.Priority,
+		&i.AssigneeType,
+		&i.AssigneeID,
+		&i.CreatorType,
+		&i.CreatorID,
+		&i.ParentIssueID,
+		&i.AcceptanceCriteria,
+		&i.ContextRefs,
+		&i.Position,
+		&i.DueDate,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Number,
+		&i.ProjectID,
+		&i.OriginType,
+		&i.OriginID,
+		&i.FirstExecutedAt,
+		&i.StartDate,
+		&i.Metadata,
+		&i.Stage,
+	)
+	return i, err
+}
+
 const getIssue = `-- name: GetIssue :one
 SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage FROM issue
 WHERE id = $1
