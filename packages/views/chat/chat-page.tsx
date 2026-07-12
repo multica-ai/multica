@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useDefaultLayout } from "react-resizable-panels";
 import { ArrowLeft, MessageSquare } from "lucide-react";
+import { toast } from "sonner";
 import { Button } from "@multica/ui/components/ui/button";
 import {
   ResizablePanelGroup,
@@ -62,7 +63,12 @@ export function ChatPage() {
   // real session takes over.
   const [composingNew, setComposingNew] = useState(false);
   useEffect(() => {
-    if (c.activeSessionId) setComposingNew(false);
+    // Read the LIVE store value for the same reason as the session sync
+    // effects below: under StrictMode's double-invoke this effect replays
+    // with the render-captured snapshot, and a stale non-null session (a
+    // persisted chat the URL→store effect already cleared) would revert the
+    // composingNew=true that the later `?agent=` intent effect just set.
+    if (useChatStore.getState().activeSessionId) setComposingNew(false);
   }, [c.activeSessionId]);
 
   // Two-way sync between the URL (`?session=`) and the chat store's
@@ -98,7 +104,20 @@ export function ChatPage() {
     id: "multica_chat_layout",
   });
 
+  // `?agent=` intent bookkeeping. The ref holds the param value already
+  // consumed (or superseded) so the effect below fires at most once per deep
+  // link — it also bridges the async window between replace() and the
+  // searchParams actually dropping the param. Any explicit user action must
+  // supersede a still-pending intent: agent/member queries can resolve late,
+  // and a deferred intent firing after the user picked a thread (or started
+  // another chat) would clobber that choice.
+  const consumedAgentIntent = useRef<string | null>(null);
+  const supersedeAgentIntent = () => {
+    if (urlAgent) consumedAgentIntent.current = urlAgent;
+  };
+
   const handleSelect = (session: ChatSession) => {
+    supersedeAgentIntent();
     c.handleSelectSession(session);
     setComposingNew(false);
   };
@@ -109,6 +128,7 @@ export function ChatPage() {
   // the list, which reads more naturally than being thrown into an unrelated
   // conversation full-screen. Archiving any other chat leaves the view put.
   const handleArchive = (session: ChatSession) => {
+    supersedeAgentIntent();
     if (session.id === c.activeSessionId) {
       if (isMobile) {
         c.setActiveSession(null);
@@ -121,6 +141,9 @@ export function ChatPage() {
   };
 
   const startNewChat = (agent: Agent | null) => {
+    // A manual ⊕ pick outranks a pending deep link; when called FROM the
+    // intent effect the ref is already set to this param, so this is a no-op.
+    supersedeAgentIntent();
     if (agent) c.handleStartNewChat(agent);
     else c.handleNewChat();
     setComposingNew(true);
@@ -131,11 +154,11 @@ export function ChatPage() {
   // agent. The permission-filtered agent list loads async, so the intent is
   // consumed on the render where the agent resolves, then the param is
   // stripped so refresh / the session sync above don't replay it. The ref
-  // guards the window between replace() and the searchParams actually
-  // updating; it resets once the param is gone so a later identical deep link
-  // fires again. An id that never resolves (access revoked or agent archived
-  // in the meantime) is ignored and the page stays on its default view.
-  const consumedAgentIntent = useRef<string | null>(null);
+  // resets once the param is gone so a later identical deep link fires again.
+  // A settled miss (access revoked, agent archived, bad id) is a denial: it
+  // explains itself with a toast and consumes the intent so a later refetch
+  // that surfaces the agent cannot start a chat without a fresh click. While
+  // the queries are still loading the intent simply stays pending.
   useEffect(() => {
     if (!urlAgent) {
       consumedAgentIntent.current = null;
@@ -143,12 +166,19 @@ export function ChatPage() {
     }
     if (consumedAgentIntent.current === urlAgent) return;
     const agent = c.availableAgents.find((a) => a.id === urlAgent);
-    if (!agent) return;
-    consumedAgentIntent.current = urlAgent;
-    startNewChat(agent);
-    replace(wsPaths.chat());
+    if (agent) {
+      consumedAgentIntent.current = urlAgent;
+      startNewChat(agent);
+      replace(wsPaths.chat());
+      return;
+    }
+    if (c.agentsSettled) {
+      consumedAgentIntent.current = urlAgent;
+      toast.error(t(($) => $.page.agent_link_no_access));
+      replace(wsPaths.chat());
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- consume when the URL param or the resolving agent list changes
-  }, [urlAgent, c.availableAgents]);
+  }, [urlAgent, c.availableAgents, c.agentsSettled]);
 
   const newChatButton = (
     <NewChatButton

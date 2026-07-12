@@ -29,6 +29,9 @@ vi.mock("./agent-presence-indicator", () => ({
 
 const agentsRef = vi.hoisted(() => ({ current: [] as unknown[] }));
 const membersRef = vi.hoisted(() => ({ current: [] as unknown[] }));
+// When set, the member query never resolves — the "membership still loading"
+// window in which the DM decision is undetermined.
+const membersPendingRef = vi.hoisted(() => ({ current: false }));
 const currentUserRef = vi.hoisted(() => ({
   current: { id: "user-1" } as { id: string } | null,
 }));
@@ -48,7 +51,10 @@ vi.mock("@multica/core/workspace/queries", () => ({
   }),
   memberListOptions: (wsId: string) => ({
     queryKey: ["members", wsId],
-    queryFn: () => Promise.resolve(membersRef.current),
+    queryFn: () =>
+      membersPendingRef.current
+        ? new Promise(() => {})
+        : Promise.resolve(membersRef.current),
   }),
   workspaceKeys: { agents: (wsId: string) => ["agents", wsId] },
 }));
@@ -152,6 +158,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   currentUserRef.current = { id: "user-1" };
   membersRef.current = [{ user_id: "user-1", role: "member" }];
+  membersPendingRef.current = false;
   agentsRef.current = [baseAgent];
 });
 
@@ -176,6 +183,19 @@ describe("AgentDetailPage DM button", () => {
     expect(mockToastError).toHaveBeenCalledWith(
       "You don't have access to chat with this agent.",
     );
+    expect(push).not.toHaveBeenCalled();
+  });
+
+  it("disables DM while membership is resolving instead of toasting a false deny", async () => {
+    // Review P2: a pending member query collapses role to null, which the
+    // rules read as not_member — a legitimate public_to+workspace member
+    // would get a wrong "no access" toast. Undetermined must disable, not deny.
+    membersPendingRef.current = true;
+    const { push } = renderPage();
+    const dm = await screen.findByRole("button", { name: "DM" });
+    expect(dm).toBeDisabled();
+    fireEvent.click(dm);
+    expect(mockToastError).not.toHaveBeenCalled();
     expect(push).not.toHaveBeenCalled();
   });
 

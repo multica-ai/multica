@@ -203,8 +203,12 @@ export function useChatController(opts?: { isActive?: boolean }) {
   const setActiveSession = useChatStore((s) => s.setActiveSession);
   const setSelectedAgentId = useChatStore((s) => s.setSelectedAgentId);
   const user = useAuthStore((s) => s.user);
-  const { data: agents = [] } = useQuery(agentListOptions(wsId));
-  const { data: members = [] } = useQuery(memberListOptions(wsId));
+  const { data: agents = [], isSuccess: agentsLoaded } = useQuery(
+    agentListOptions(wsId),
+  );
+  const { data: members = [], isSuccess: membersLoaded } = useQuery(
+    memberListOptions(wsId),
+  );
   const { data: sessions = [], isSuccess: sessionsLoaded } = useQuery(
     chatSessionsOptions(wsId),
   );
@@ -265,6 +269,13 @@ export function useChatController(opts?: { isActive?: boolean }) {
   const availableAgents = agents.filter(
     (a) => !a.archived_at && canAssignAgent(a, user?.id, memberRole),
   );
+  // `availableAgents` is only trustworthy once BOTH queries above succeeded:
+  // the permission filter reads the member role, so agents-without-members
+  // misreports a public_to agent as unavailable. Consumers that must tell
+  // "still loading" apart from "settled and not available" (the `?agent=`
+  // deep link) gate on this instead of sniffing list emptiness. Query errors
+  // deliberately keep this false — a failed fetch is not a permission verdict.
+  const agentsSettled = agentsLoaded && membersLoaded;
 
   // The agent bound to the OPEN session, resolved from the full agent list
   // (archived included, since agentListOptions passes include_archived). An
@@ -655,6 +666,7 @@ export function useChatController(opts?: { isActive?: boolean }) {
     user,
     agents,
     availableAgents,
+    agentsSettled,
     sessions,
     activeSessionId,
     selectedAgentId,
