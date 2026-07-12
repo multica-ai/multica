@@ -41,8 +41,6 @@ export interface RuntimesPageProps {
   localDaemonId?: string | null;
   /** Desktop-only friendly device name for the local daemon. */
   localMachineName?: string | null;
-  /** Desktop-only daemon controls attached to the local machine row. */
-  localMachineActions?: React.ReactNode;
   /** Keep the local device visible even before its first runtime registers. */
   hasLocalMachine?: boolean;
   /** The bundled daemon is starting but has not registered yet. */
@@ -63,7 +61,6 @@ function useNowTick(intervalMs = 30_000): number {
 export function RuntimesPage({
   localDaemonId,
   localMachineName,
-  localMachineActions,
   hasLocalMachine,
   bootstrapping,
   cloudRuntimeEnabled = false,
@@ -156,7 +153,6 @@ export function RuntimesPage({
               <MachineList
                 machines={machines}
                 bootstrapping={bootstrapping}
-                localMachineActions={localMachineActions}
               />
             )}
             {orphanProfileRuntimes.length > 0 && (
@@ -252,11 +248,9 @@ function PageHeaderBar({
 function MachineList({
   machines,
   bootstrapping,
-  localMachineActions,
 }: {
   machines: RuntimeMachine[];
   bootstrapping?: boolean;
-  localMachineActions?: React.ReactNode;
 }) {
   const { t } = useT("runtimes");
   if (machines.length === 0) {
@@ -281,24 +275,14 @@ function MachineList({
     <div className="overflow-hidden rounded-lg border bg-card">
       <div className="divide-y">
         {machines.map((machine) => (
-          <MachineRow
-            key={machine.id}
-            machine={machine}
-            actions={machine.isCurrent ? localMachineActions : undefined}
-          />
+          <MachineRow key={machine.id} machine={machine} />
         ))}
       </div>
     </div>
   );
 }
 
-function MachineRow({
-  machine,
-  actions,
-}: {
-  machine: RuntimeMachine;
-  actions?: React.ReactNode;
-}) {
+function MachineRow({ machine }: { machine: RuntimeMachine }) {
   const { t } = useT("runtimes");
   const healthLabel = useHealthLabel();
   const timeAgo = useTimeAgo();
@@ -316,19 +300,21 @@ function MachineRow({
         />
       </span>
       <span className="min-w-0 flex-1">
-        <span className="flex min-w-0 flex-wrap items-center gap-2">
-          <span className="truncate text-sm font-medium">{machine.title}</span>
+        <span className="block truncate text-sm font-medium">
+          {machine.title}
+        </span>
+        <span className="mt-1 flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
+          <span className="truncate">
+            {machine.subtitle ??
+              (machine.section === "cloud"
+                ? t(($) => $.machine.metrics.cloud_worker)
+                : t(($) => $.machine.metrics.local_daemon))}
+          </span>
           {machine.isCurrent && (
-            <span className="shrink-0 rounded bg-foreground px-1.5 py-0.5 text-[10px] font-medium text-background">
+            <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
               {t(($) => $.machine.this_machine)}
             </span>
           )}
-        </span>
-        <span className="mt-1 block truncate text-xs text-muted-foreground">
-          {machine.subtitle ??
-            (machine.section === "cloud"
-              ? t(($) => $.machine.metrics.cloud_worker)
-              : t(($) => $.machine.metrics.local_daemon))}
         </span>
       </span>
 
@@ -365,15 +351,12 @@ function MachineRow({
   );
 
   return (
-    <div className="flex min-w-0 items-center">
-      <AppLink
-        href={paths.runtimeDetail(locator)}
-        className="group flex min-w-0 flex-1 items-center gap-3 px-4 py-3.5 transition-colors hover:bg-accent/40 focus-visible:bg-accent/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
-      >
-        {body}
-      </AppLink>
-      {actions && <div className="shrink-0 pr-4">{actions}</div>}
-    </div>
+    <AppLink
+      href={paths.runtimeDetail(locator)}
+      className="group flex min-w-0 items-center gap-3 px-4 py-3.5 transition-colors hover:bg-accent/40 focus-visible:bg-accent/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+    >
+      {body}
+    </AppLink>
   );
 }
 

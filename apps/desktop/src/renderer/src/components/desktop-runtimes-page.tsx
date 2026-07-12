@@ -1,5 +1,4 @@
 import { RuntimesPage } from "@multica/views/runtimes";
-import { DaemonRuntimeActions } from "./daemon-runtime-card";
 import { useDesktopRuntimeContext } from "./use-desktop-runtime-context";
 
 /**
@@ -23,11 +22,10 @@ export function DesktopRuntimesPage() {
     <RuntimesPage
       localDaemonId={context.localDaemonId}
       localMachineName={context.localMachineName}
-      localMachineActions={<DaemonRuntimeActions />}
       // Desktop owns a local machine for the lifetime of the app, even
-      // while the daemon is stopped or hasn't registered yet. The shared
-      // page synthesizes a placeholder local row when no real runtime
-      // matches, so the Start button is always reachable.
+      // while the daemon is stopped or hasn't registered yet. Lifecycle
+      // controls live on the machine detail page so this collection stays
+      // consistent with every other machine row.
       hasLocalMachine
       bootstrapping={context.bootstrapping}
     />
