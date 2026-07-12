@@ -64,6 +64,11 @@ func hardenWindowsBrowserMcpConfig(raw json.RawMessage, tempDir string) ([]byte,
 				entry["args"] = append(args, "--executablePath="+path)
 				servers[name], changed = mustMarshalRaw(entry), true
 			}
+		case lowerName == "agent-browser" || argsContain(args, "agent-browser"):
+			if shouldPinAgentBrowserArgs(args, entry["env"]) {
+				entry["env"] = withEnvVar(entry["env"], "AGENT_BROWSER_ARGS", "--disable-gpu")
+				servers[name], changed = mustMarshalRaw(entry), true
+			}
 		}
 	}
 	if !changed {
@@ -176,6 +181,36 @@ func shouldPinChromeDevToolsExecutable(args []string) bool {
 		}
 	}
 	return true
+}
+
+// shouldPinAgentBrowserArgs reports whether it's safe to inject
+// AGENT_BROWSER_ARGS=--disable-gpu — false if the caller already set an
+// explicit --args CLI flag or an AGENT_BROWSER_ARGS env var, matching the
+// "never override an explicit choice" contract used by the other browser
+// tools above.
+func shouldPinAgentBrowserArgs(args []string, env any) bool {
+	if hasFlag(args, "--args") {
+		return false
+	}
+	return !envHasKey(env, "AGENT_BROWSER_ARGS")
+}
+
+func envHasKey(env any, key string) bool {
+	envMap, ok := env.(map[string]any)
+	if !ok {
+		return false
+	}
+	_, ok = envMap[key]
+	return ok
+}
+
+func withEnvVar(env any, key, value string) map[string]any {
+	envMap, ok := env.(map[string]any)
+	if !ok {
+		envMap = map[string]any{}
+	}
+	envMap[key] = value
+	return envMap
 }
 
 func stringSlice(v any) ([]string, bool) {

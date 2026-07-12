@@ -156,6 +156,62 @@ func TestHardenWindowsBrowserMcpConfigRespectsExplicitPlaywrightBrowser(t *testi
 	}
 }
 
+// TestHardenWindowsBrowserMcpConfigPinsAgentBrowserDisableGpu pins the fix
+// for a live-repro'd phantom window: agent-browser was never covered by
+// hardenWindowsBrowserMcpConfig at all (only playwright/chrome-devtools
+// were), so Multica-orchestrated agents using agent-browser on Windows got
+// a raw --headless=new Chromium launch with no --disable-gpu, hitting the
+// same swap-chain phantom-window bug the other two tools were hardened
+// against. agent-browser takes extra Chrome flags via the AGENT_BROWSER_ARGS
+// env var (see its README), not a CLI arg, so this injects env rather than
+// args like the playwright/chrome-devtools cases above.
+func TestHardenWindowsBrowserMcpConfigPinsAgentBrowserDisableGpu(t *testing.T) {
+	withBrowserMcpTestHost(t, "windows", nil, nil)
+
+	tempDir := t.TempDir()
+	raw := json.RawMessage(`{"mcpServers":{
+		"agent-browser":{"command":"cmd","args":["/c","agent-browser","mcp","--tools","all"],"env":{"AGENT_BROWSER_EXECUTABLE_PATH":"C:\\Edge\\msedge.exe"}}
+	}}`)
+
+	got, err := hardenBrowserMcpConfig(raw, tempDir)
+	if err != nil {
+		t.Fatalf("hardenBrowserMcpConfig: %v", err)
+	}
+
+	servers := decodeMcpServers(t, got)
+	env := decodeEnv(t, servers["agent-browser"])
+	if env["AGENT_BROWSER_ARGS"] != "--disable-gpu" {
+		t.Fatalf("expected AGENT_BROWSER_ARGS=--disable-gpu, got env: %v", env)
+	}
+	if env["AGENT_BROWSER_EXECUTABLE_PATH"] != `C:\Edge\msedge.exe` {
+		t.Fatalf("existing env var was clobbered: %v", env)
+	}
+}
+
+// TestHardenWindowsBrowserMcpConfigRespectsExplicitAgentBrowserArgs mirrors
+// the playwright/chrome-devtools "never override an explicit choice"
+// contract: an operator who already set AGENT_BROWSER_ARGS (or --args) must
+// not have it silently replaced.
+func TestHardenWindowsBrowserMcpConfigRespectsExplicitAgentBrowserArgs(t *testing.T) {
+	withBrowserMcpTestHost(t, "windows", nil, nil)
+
+	tempDir := t.TempDir()
+	raw := json.RawMessage(`{"mcpServers":{
+		"agent-browser":{"command":"cmd","args":["/c","agent-browser","mcp","--tools","all"],"env":{"AGENT_BROWSER_ARGS":"--proxy-server=localhost:8080"}}
+	}}`)
+
+	got, err := hardenBrowserMcpConfig(raw, tempDir)
+	if err != nil {
+		t.Fatalf("hardenBrowserMcpConfig: %v", err)
+	}
+
+	servers := decodeMcpServers(t, got)
+	env := decodeEnv(t, servers["agent-browser"])
+	if env["AGENT_BROWSER_ARGS"] != "--proxy-server=localhost:8080" {
+		t.Fatalf("expected operator's explicit AGENT_BROWSER_ARGS to survive unchanged, got: %v", env)
+	}
+}
+
 func TestHardenWindowsBrowserMcpConfigRespectsExplicitBrowserArgs(t *testing.T) {
 	withBrowserMcpTestHost(t, "windows", map[string]string{
 		"MULTICA_CHROME_DEVTOOLS_EXECUTABLE_PATH": `D:\Browsers\Chrome\chrome.exe`,
@@ -214,6 +270,17 @@ func decodeArgs(t *testing.T, raw json.RawMessage) []string {
 		t.Fatalf("unmarshal mcp server: %v\n%s", err, raw)
 	}
 	return entry.Args
+}
+
+func decodeEnv(t *testing.T, raw json.RawMessage) map[string]string {
+	t.Helper()
+	var entry struct {
+		Env map[string]string `json:"env"`
+	}
+	if err := json.Unmarshal(raw, &entry); err != nil {
+		t.Fatalf("unmarshal mcp server: %v\n%s", err, raw)
+	}
+	return entry.Env
 }
 
 func indexOfString(items []string, item string) int {
