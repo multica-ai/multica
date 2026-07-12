@@ -97,7 +97,35 @@ func hardenWindowsPlaywrightMcpArgs(args []string, tempDir string) ([]string, er
 	if err := os.WriteFile(configPath, data, 0o600); err != nil {
 		return nil, fmt.Errorf("write playwright mcp browser config: %w", err)
 	}
-	return append(args, "--config", configPath), nil
+	nextArgs := append(args, "--config", configPath)
+	// Without an explicit --browser/--executable-path/--channel, playwright
+	// falls back to its own downloaded/managed Chromium build (surfaces as
+	// "Chrome for Testing") instead of a system browser. Pin it to system
+	// Edge when present, mirroring the --executablePath pin already applied
+	// to chrome-devtools-mcp below, so Windows users get one consistent
+	// browser identity across both tools rather than an unmanaged download.
+	if _, ok := windowsChromiumFallbackExecutable(); ok && shouldPinPlaywrightBrowser(args) {
+		nextArgs = append(nextArgs, "--browser", "msedge")
+	}
+	return nextArgs, nil
+}
+
+// shouldPinPlaywrightBrowser reports whether it's safe to force playwright
+// onto system Edge — false if the caller already made an explicit browser
+// choice, matching shouldPinChromeDevToolsExecutable's "never override an
+// explicit choice" contract.
+func shouldPinPlaywrightBrowser(args []string) bool {
+	for _, flag := range []string{
+		"--browser",
+		"--executable-path",
+		"--executablePath",
+		"--channel",
+	} {
+		if hasFlag(args, flag) {
+			return false
+		}
+	}
+	return true
 }
 
 func windowsChromiumFallbackExecutable() (string, bool) {

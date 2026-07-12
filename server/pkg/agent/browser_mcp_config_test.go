@@ -95,6 +95,67 @@ func TestHardenWindowsBrowserMcpConfigAddsPlaywrightLaunchConfigAndEdgeFallback(
 	}
 }
 
+// TestHardenWindowsBrowserMcpConfigPinsPlaywrightToEdge pins the fix for
+// the "Chrome for Testing crept back" report: hardenWindowsPlaywrightMcpArgs
+// previously only added --disable-gpu, never a browser channel, so a
+// playwright entry with no explicit --browser/--executable-path fell back
+// to playwright's own downloaded/managed Chromium (surfacing as "Chrome for
+// Testing") instead of the system-installed Edge every other part of this
+// hardening pass already prefers.
+func TestHardenWindowsBrowserMcpConfigPinsPlaywrightToEdge(t *testing.T) {
+	edgePath := `C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe`
+	withBrowserMcpTestHost(t, "windows", map[string]string{
+		"ProgramFiles(x86)": `C:\Program Files (x86)`,
+	}, map[string]bool{edgePath: true})
+
+	tempDir := t.TempDir()
+	raw := json.RawMessage(`{"mcpServers":{
+		"playwright":{"command":"npx","args":["@playwright/mcp@latest","--headless","--isolated"]}
+	}}`)
+
+	got, err := hardenBrowserMcpConfig(raw, tempDir)
+	if err != nil {
+		t.Fatalf("hardenBrowserMcpConfig: %v", err)
+	}
+
+	servers := decodeMcpServers(t, got)
+	args := decodeArgs(t, servers["playwright"])
+	browserIndex := indexOfString(args, "--browser")
+	if browserIndex < 0 || browserIndex+1 >= len(args) || args[browserIndex+1] != "msedge" {
+		t.Fatalf("expected --browser msedge in hardened playwright args, got: %v", args)
+	}
+}
+
+// TestHardenWindowsBrowserMcpConfigRespectsExplicitPlaywrightBrowser pins
+// the other half: an operator who already chose a browser/channel/path
+// explicitly must not be overridden.
+func TestHardenWindowsBrowserMcpConfigRespectsExplicitPlaywrightBrowser(t *testing.T) {
+	edgePath := `C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe`
+	withBrowserMcpTestHost(t, "windows", map[string]string{
+		"ProgramFiles(x86)": `C:\Program Files (x86)`,
+	}, map[string]bool{edgePath: true})
+
+	tempDir := t.TempDir()
+	raw := json.RawMessage(`{"mcpServers":{
+		"playwright":{"command":"npx","args":["@playwright/mcp@latest","--browser","chrome","--headless","--isolated"]}
+	}}`)
+
+	got, err := hardenBrowserMcpConfig(raw, tempDir)
+	if err != nil {
+		t.Fatalf("hardenBrowserMcpConfig: %v", err)
+	}
+
+	servers := decodeMcpServers(t, got)
+	args := decodeArgs(t, servers["playwright"])
+	if strings.Count(strings.Join(args, " "), "--browser") != 1 {
+		t.Fatalf("expected exactly one --browser flag (the operator's own), got: %v", args)
+	}
+	browserIndex := indexOfString(args, "--browser")
+	if args[browserIndex+1] != "chrome" {
+		t.Fatalf("expected the operator's explicit --browser chrome to survive unchanged, got: %v", args)
+	}
+}
+
 func TestHardenWindowsBrowserMcpConfigRespectsExplicitBrowserArgs(t *testing.T) {
 	withBrowserMcpTestHost(t, "windows", map[string]string{
 		"MULTICA_CHROME_DEVTOOLS_EXECUTABLE_PATH": `D:\Browsers\Chrome\chrome.exe`,
