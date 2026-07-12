@@ -139,7 +139,7 @@ func TestDeniedConnectionTools_ConnectionWideDenyScopedPerRuntimeAndAgent(t *tes
 
 	// Clear the runtime deny; assert nothing is denied anymore (proves the cascade
 	// is driven by the layer, not a sticky side effect).
-	if err := s.Clear(ctx, tpTestWorkspaceID, connKey, LayerRuntime, deniedRuntime, ""); err != nil {
+	if err := s.Clear(ctx, tpTestWorkspaceID, connKey, LayerRuntime, deniedRuntime, "", pgtype.UUID{}); err != nil {
 		t.Fatalf("clear runtime deny: %v", err)
 	}
 

@@ -445,7 +445,7 @@ func TestStore_ClearReverts(t *testing.T) {
 		t.Fatalf("before clear: setting = %q, want deny", eff.Setting)
 	}
 
-	if err := s.Clear(ctx, tpTestWorkspaceID, tool, LayerUser, user, ""); err != nil {
+	if err := s.Clear(ctx, tpTestWorkspaceID, tool, LayerUser, user, "", pgtype.UUID{}); err != nil {
 		t.Fatalf("clear user: %v", err)
 	}
 	eff, err := s.Resolve(ctx, Query{WorkspaceID: tpTestWorkspaceID, ToolKey: tool, AgentID: agent, UserID: user})
@@ -499,7 +499,7 @@ func TestStore_RejectsBadInput(t *testing.T) {
 	if _, err := s.Set(ctx, SetParams{Layer: LayerAgent, Setting: "nonsense"}); err == nil {
 		t.Fatal("Set with unknown setting should error before hitting the DB")
 	}
-	if err := s.Clear(ctx, pgtype.UUID{}, "x", "nonsense", pgtype.UUID{}, ""); err == nil {
+	if err := s.Clear(ctx, pgtype.UUID{}, "x", "nonsense", pgtype.UUID{}, "", pgtype.UUID{}); err == nil {
 		t.Fatal("Clear with unknown layer should error before hitting the DB")
 	}
 }
@@ -589,7 +589,7 @@ func TestStore_ResourcePatternIsolatesRowsByResource(t *testing.T) {
 	}
 
 	// Clear the repoA override; capability-wide row stays intact.
-	if err := s.Clear(ctx, tpTestWorkspaceID, tool, LayerAgent, agent, repoA); err != nil {
+	if err := s.Clear(ctx, tpTestWorkspaceID, tool, LayerAgent, agent, repoA, pgtype.UUID{}); err != nil {
 		t.Fatalf("clear repoA: %v", err)
 	}
 	eff, err = s.Resolve(ctx, Query{

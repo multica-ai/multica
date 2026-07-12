@@ -1,10 +1,11 @@
 "use client";
 
-// FIR-3091 punkt 8 (fase 1b) — per-permission detail page. For one tool it
-// lists every subject that has the permission set and which layer grants it
-// (the "Who & why" tab), the reverse of the per-subject tool-policy table. The
-// tab shell mirrors the credential detail page; later phases add a change log
-// (fase 2) and a usage log (fase 3) as the two disabled tabs.
+// FIR-3091 punkt 8 — per-permission detail page. For one tool it lists every
+// subject that has the permission set and which layer grants it (the "Who &
+// why" tab, fase 1b), and every Set/Clear on its policy rows (the "Changes"
+// tab, fase 2), the reverse of the per-subject tool-policy table. The tab
+// shell mirrors the credential detail page; fase 3 adds a usage log as the
+// remaining disabled tab.
 //
 // Gated by cerebro_permission_detail (default OFF). Nothing links here while the
 // flag is off, so the page is dormant and the change is reversible.
@@ -23,7 +24,8 @@ import { Button } from "@multica/ui/components/ui/button";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useFeatureFlag } from "@multica/cerebro-feature-flags";
 
-import { getPermissionHolders } from "../api";
+import { getPermissionChanges, getPermissionHolders } from "../api";
+import type { PermissionChange } from "../api";
 import { useHolderDirectory } from "./use-holder-directory";
 
 const LAYER_LABEL: Record<string, string> = {
@@ -56,6 +58,27 @@ function settingLabel(setting: string): string {
   }
 }
 
+// transitionLabel renders one change-log row's old -> new movement. "" on the
+// old side means the layer held no explicit row before the write (Inherit); a
+// clear always ends at "Cleared" (back to Inherit).
+function transitionLabel(change: PermissionChange): string {
+  const from = change.old_setting ? settingLabel(change.old_setting) : "Not set";
+  if (change.action === "clear") {
+    return `${from} → Cleared`;
+  }
+  return `${from} → ${settingLabel(change.new_setting)}`;
+}
+
+// changeTimeLabel formats a change's RFC3339 timestamp for the row. An
+// unparseable or missing value downgrades to the raw string (or a dash)
+// instead of rendering "Invalid Date".
+function changeTimeLabel(createdAt: string): string {
+  if (!createdAt) return "—";
+  const d = new Date(createdAt);
+  if (Number.isNaN(d.getTime())) return createdAt;
+  return d.toLocaleString();
+}
+
 export function PermissionDetailPage({
   toolKey,
   onBack,
@@ -69,6 +92,12 @@ export function PermissionDetailPage({
   const holdersQuery = useQuery({
     queryKey: ["cerebro", "tool-policy", "holders", wsId, toolKey],
     queryFn: () => getPermissionHolders(wsId, toolKey),
+    enabled: enabled && !!wsId && !!toolKey,
+  });
+
+  const changesQuery = useQuery({
+    queryKey: ["cerebro", "tool-policy", "changes", wsId, toolKey],
+    queryFn: () => getPermissionChanges(wsId, toolKey),
     enabled: enabled && !!wsId && !!toolKey,
   });
 
@@ -109,9 +138,7 @@ export function PermissionDetailPage({
       <Tabs defaultValue="holders">
         <TabsList>
           <TabsTrigger value="holders">Who &amp; why</TabsTrigger>
-          <TabsTrigger value="changes" disabled>
-            Changes
-          </TabsTrigger>
+          <TabsTrigger value="changes">Changes</TabsTrigger>
           <TabsTrigger value="usage" disabled>
             Usage
           </TabsTrigger>
@@ -149,6 +176,44 @@ export function PermissionDetailPage({
                   </div>
                   <span className="shrink-0 text-xs text-muted-foreground">
                     {settingLabel(h.setting)}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </TabsContent>
+
+        <TabsContent value="changes" className="pt-4">
+          {changesQuery.isLoading || directory.isLoading ? (
+            <p className="text-sm text-muted-foreground">Loading…</p>
+          ) : (changesQuery.data?.changes ?? []).length === 0 ? (
+            <p className="text-sm text-muted-foreground">
+              No changes recorded. Recording started when this log shipped, so
+              earlier changes are not shown.
+            </p>
+          ) : (
+            <ul className="space-y-2 text-sm">
+              {(changesQuery.data?.changes ?? []).map((c, i) => (
+                <li
+                  key={`${c.created_at}:${c.layer}:${c.subject_id}:${i}`}
+                  className="flex items-center justify-between gap-3 rounded border p-2"
+                >
+                  <div className="min-w-0">
+                    <span className="font-medium">
+                      {directory.labelFor(c.layer, c.subject_id)}
+                    </span>
+                    <span className="ml-2 text-xs text-muted-foreground">
+                      {layerLabel(c.layer)} layer · {transitionLabel(c)}
+                    </span>
+                    <div className="text-xs text-muted-foreground">
+                      by{" "}
+                      {c.actor_type === "member"
+                        ? directory.labelFor("user", c.actor_id)
+                        : "System"}
+                    </div>
+                  </div>
+                  <span className="shrink-0 text-xs text-muted-foreground">
+                    {changeTimeLabel(c.created_at)}
                   </span>
                 </li>
               ))}

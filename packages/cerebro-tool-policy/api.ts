@@ -123,3 +123,52 @@ export async function getPermissionHolders(
     { endpoint: path },
   );
 }
+
+// --- FIR-3091 punkt 8 fase 2: per-permission change log ----------------------
+// One tool's Set/Clear history, newest first. old_setting "" means the layer
+// held no explicit row before the write (Inherit); new_setting "" means the row
+// was cleared back to Inherit. Recording started when fase 2 shipped, so an
+// empty list means "no changes since then", not "never changed".
+
+const PermissionChangeSchema = z
+  .object({
+    layer: z.string().default(""),
+    subject_id: z.string().default(""),
+    resource_pattern: z.string().default(""),
+    action: z.string().default(""),
+    old_setting: z.string().default(""),
+    new_setting: z.string().default(""),
+    actor_type: z.string().default(""),
+    actor_id: z.string().default(""),
+    created_at: z.string().default(""),
+  })
+  .loose();
+
+const PermissionChangesSchema = z
+  .object({
+    tool_key: z.string().default(""),
+    changes: z.array(PermissionChangeSchema).default([]),
+  })
+  .loose();
+
+export type PermissionChange = z.infer<typeof PermissionChangeSchema>;
+export type PermissionChanges = z.infer<typeof PermissionChangesSchema>;
+
+// getPermissionChanges lists one tool's change log. Admin/owner only
+// server-side. Returns an empty result on parse/transport failure so the page
+// renders "no changes" rather than crashing.
+export async function getPermissionChanges(
+  workspaceId: string,
+  toolKey: string,
+): Promise<PermissionChanges> {
+  const path = `/api/workspaces/${workspaceId}/tool-policy/changes?tool_key=${encodeURIComponent(
+    toolKey,
+  )}`;
+  const raw = await api.cerebroRequest<unknown>(path);
+  return parseWithFallback(
+    raw,
+    PermissionChangesSchema,
+    { tool_key: toolKey, changes: [] },
+    { endpoint: path },
+  );
+}

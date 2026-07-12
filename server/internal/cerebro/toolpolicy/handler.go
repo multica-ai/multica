@@ -25,6 +25,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -177,6 +178,33 @@ type holdersResponse struct {
 	ToolKey  string           `json:"tool_key"`
 	Enforced bool             `json:"enforced"`
 	Holders  []holderResponse `json:"holders"`
+}
+
+// changeResponse is one change-log row for a tool: which layer/subject/pattern
+// was written, whether it was a set or a clear, the old -> new setting
+// transition, who did it, and when (FIR-3091 punkt 8 fase 2). old_setting ""
+// means the layer held no explicit row before the write (Inherit); new_setting
+// "" means the row was cleared back to Inherit. Ids are raw UUID strings the
+// frontend resolves to names from data it already holds.
+type changeResponse struct {
+	Layer           string `json:"layer"`
+	SubjectID       string `json:"subject_id"`
+	ResourcePattern string `json:"resource_pattern"`
+	Action          string `json:"action"`
+	OldSetting      string `json:"old_setting"`
+	NewSetting      string `json:"new_setting"`
+	ActorType       string `json:"actor_type"`
+	ActorID         string `json:"actor_id"`
+	CreatedAt       string `json:"created_at"`
+}
+
+// changesResponse is the body of GET .../tool-policy/changes: one tool's change
+// history, newest first. Recording started when FIR-3091 fase 2 shipped, so an
+// empty list on a long-lived tool means "no changes since then", not "never
+// changed".
+type changesResponse struct {
+	ToolKey string           `json:"tool_key"`
+	Changes []changeResponse `json:"changes"`
 }
 
 // --- request types ----------------------------------------------------------
@@ -472,7 +500,7 @@ func looserThanOwner(proposed, ownerEffective Setting) bool {
 // Clear — DELETE /api/workspaces/{id}/tool-policy
 // Query params: tool_key, layer, subject_id.
 func (h *Handler) Clear(w http.ResponseWriter, r *http.Request) {
-	_, workspaceID, ok := h.loadWorkspace(w, r)
+	member, workspaceID, ok := h.loadWorkspace(w, r)
 	if !ok {
 		return
 	}
@@ -495,7 +523,7 @@ func (h *Handler) Clear(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resourcePattern := q.Get("resource_pattern")
-	if err := h.Store.Clear(r.Context(), workspaceID, toolKey, layer, subjectID, resourcePattern); err != nil {
+	if err := h.Store.Clear(r.Context(), workspaceID, toolKey, layer, subjectID, resourcePattern, member.UserID); err != nil {
 		if errors.Is(err, ErrUnknownLayer) {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
@@ -554,6 +582,59 @@ func (h *Handler) Holders(w http.ResponseWriter, r *http.Request) {
 		Enforced: platformcatalog.Enforced(toolKey),
 		Holders:  holders,
 	})
+}
+
+// changesLimit caps one Changes read. The page shows recent history, not a full
+// export; 200 rows is far more than the UI renders while keeping the response
+// bounded no matter how busy the log gets.
+const changesLimit = 200
+
+// Changes — GET /api/workspaces/{id}/tool-policy/changes?tool_key=...
+//
+// One tool's change log, newest first (FIR-3091 punkt 8 fase 2): every Set and
+// Clear on the tool's policy rows since the log shipped. Same admin/owner gate
+// as Holders — the history names every subject's settings for a permission.
+func (h *Handler) Changes(w http.ResponseWriter, r *http.Request) {
+	member, workspaceID, ok := h.loadWorkspace(w, r)
+	if !ok {
+		return
+	}
+	if member.Role != "owner" && member.Role != "admin" {
+		writeError(w, http.StatusForbidden, "insufficient permissions")
+		return
+	}
+
+	toolKey := r.URL.Query().Get("tool_key")
+	if toolKey == "" {
+		writeError(w, http.StatusBadRequest, "tool_key required")
+		return
+	}
+
+	rows, err := h.Store.Changes(r.Context(), workspaceID, toolKey, changesLimit)
+	if err != nil {
+		h.serverError(w, r, "list tool policy changes", err)
+		return
+	}
+
+	changes := make([]changeResponse, 0, len(rows))
+	for _, row := range rows {
+		actorID := ""
+		if row.ActorID.Valid {
+			actorID = util.UUIDToString(row.ActorID)
+		}
+		changes = append(changes, changeResponse{
+			Layer:           row.Layer,
+			SubjectID:       util.UUIDToString(row.SubjectID),
+			ResourcePattern: row.ResourcePattern,
+			Action:          row.Action,
+			OldSetting:      row.OldSetting,
+			NewSetting:      row.NewSetting,
+			ActorType:       row.ActorType,
+			ActorID:         actorID,
+			CreatedAt:       row.CreatedAt.UTC().Format(time.RFC3339),
+		})
+	}
+	writeJSON(w, http.StatusOK, changesResponse{ToolKey: toolKey, Changes: changes})
 }
 
 // --- helpers ----------------------------------------------------------------
