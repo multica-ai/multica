@@ -25,8 +25,52 @@ import (
 // overridden by user-configured custom_args. `acp` is the protocol
 // subcommand that drives the ACP JSON-RPC transport; overriding it
 // would break the daemon↔Hermes communication contract.
+//
+// `-p`/`--profile` are NOT stripped unconditionally: a skill-less Hermes task
+// has no overlay, so its profile selection must pass through to Hermes
+// unchanged. The daemon strips the profile flags via FilterHermesProfileArgs
+// only when it actually built the per-task overlay (see the daemon's launch-arg
+// handling), so the flag can't re-point HERMES_HOME past the overlay while
+// leaving no-overlay tasks' behavior untouched.
 var hermesBlockedArgs = map[string]blockedArgMode{
 	"acp": blockedStandalone,
+}
+
+// hermesProfileArgs are the profile-selection flags, value-taking. Shared by
+// HermesProfileFromArgs (read the selection) and FilterHermesProfileArgs (strip
+// it) so both agree on spelling and value consumption.
+var hermesProfileArgs = map[string]blockedArgMode{
+	"-p":        blockedWithValue,
+	"--profile": blockedWithValue,
+}
+
+// HermesProfileFromArgs returns the Hermes profile name selected in custom_args
+// (`-p <name>`, `--profile <name>`, or `--profile=<name>`), or "" if none. It
+// unquotes args with the same helper as filterCustomArgs so the two agree on
+// shell quoting, and ignores a trailing flag with no value, matching Hermes'
+// own parser.
+func HermesProfileFromArgs(args []string) string {
+	for i := 0; i < len(args); i++ {
+		arg := unshellQuoteArg(args[i])
+		if v, ok := strings.CutPrefix(arg, "--profile="); ok {
+			return v
+		}
+		if arg == "-p" || arg == "--profile" {
+			if i+1 < len(args) {
+				return unshellQuoteArg(args[i+1])
+			}
+			return ""
+		}
+	}
+	return ""
+}
+
+// FilterHermesProfileArgs removes the profile-selection flags (`-p`,
+// `--profile`, `--profile=<v>`) from args. The daemon calls this only when it
+// built the per-task overlay, so Hermes uses the overlay's HERMES_HOME instead
+// of re-resolving the profile — while a skill-less task keeps its flags.
+func FilterHermesProfileArgs(args []string, logger *slog.Logger) []string {
+	return filterCustomArgs(args, hermesProfileArgs, logger)
 }
 
 // hermesBackend implements Backend by spawning `hermes acp` and communicating

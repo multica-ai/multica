@@ -3623,33 +3623,57 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	if task.Agent != nil && provider == "openclaw" {
 		openclawMode, openclawGateway = decodeOpenclawRuntimeConfig(task.Agent.RuntimeConfig, d.logger)
 	}
+	var agentEnvOverrides map[string]string
+	var agentCustomArgs []string
+	if task.Agent != nil {
+		agentEnvOverrides = task.Agent.CustomEnv
+		agentCustomArgs = task.Agent.CustomArgs
+	}
+	// Hermes: resolve the overlay source home (honoring the agent's custom_env
+	// HERMES_HOME and any -p/--profile in custom_args — the profile flag is
+	// stripped from the acp argv so it can't re-point HERMES_HOME past the
+	// overlay) and the sanitized effective env for external_dirs expansion.
+	var hermesSourceHome string
+	var hermesSourceMustExist bool
+	var hermesEnv map[string]string
+	if provider == "hermes" {
+		profile := agent.HermesProfileFromArgs(agentCustomArgs)
+		hermesSourceHome, hermesSourceMustExist = execenv.ResolveHermesSourceHome(agentEnvOverrides["HERMES_HOME"], profile)
+		hermesEnv = sanitizeAgentEnv(agentEnvOverrides)
+	}
 	if task.PriorWorkDir != "" && localAssignment == nil && !task.IsLeaderTask {
 		env = execenv.Reuse(execenv.ReuseParams{
-			WorkspacesRoot:      d.cfg.WorkspacesRoot,
-			WorkDir:             task.PriorWorkDir,
-			Provider:            provider,
-			CodexVersion:        codexVersion,
-			OpenclawBin:         openclawBin,
-			McpConfig:           effectiveMcpConfig,
-			CursorMcpAuthSource: cursorMcpAuthSource,
-			OpenclawGateway:     openclawGateway,
-			Task:                taskCtx,
+			WorkspacesRoot:        d.cfg.WorkspacesRoot,
+			WorkDir:               task.PriorWorkDir,
+			Provider:              provider,
+			CodexVersion:          codexVersion,
+			OpenclawBin:           openclawBin,
+			McpConfig:             effectiveMcpConfig,
+			CursorMcpAuthSource:   cursorMcpAuthSource,
+			OpenclawGateway:       openclawGateway,
+			HermesSourceHome:      hermesSourceHome,
+			HermesSourceMustExist: hermesSourceMustExist,
+			HermesEnv:             hermesEnv,
+			Task:                  taskCtx,
 		}, d.logger)
 	}
 	if env == nil {
 		var err error
 		prepParams := execenv.PrepareParams{
-			WorkspacesRoot:      d.cfg.WorkspacesRoot,
-			WorkspaceID:         task.WorkspaceID,
-			TaskID:              task.ID,
-			AgentName:           agentName,
-			Provider:            provider,
-			CodexVersion:        codexVersion,
-			OpenclawBin:         openclawBin,
-			McpConfig:           effectiveMcpConfig,
-			CursorMcpAuthSource: cursorMcpAuthSource,
-			OpenclawGateway:     openclawGateway,
-			Task:                taskCtx,
+			WorkspacesRoot:        d.cfg.WorkspacesRoot,
+			WorkspaceID:           task.WorkspaceID,
+			TaskID:                task.ID,
+			AgentName:             agentName,
+			Provider:              provider,
+			CodexVersion:          codexVersion,
+			OpenclawBin:           openclawBin,
+			McpConfig:             effectiveMcpConfig,
+			CursorMcpAuthSource:   cursorMcpAuthSource,
+			OpenclawGateway:       openclawGateway,
+			HermesSourceHome:      hermesSourceHome,
+			HermesSourceMustExist: hermesSourceMustExist,
+			HermesEnv:             hermesEnv,
+			Task:                  taskCtx,
 		}
 		if localAssignment != nil {
 			prepParams.LocalWorkDir = localAssignment.AbsPath
@@ -3792,6 +3816,9 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	if env.CodexHome != "" {
 		agentEnv["CODEX_HOME"] = env.CodexHome
 	}
+	// (Hermes HERMES_HOME is applied after custom_env below so the per-task
+	// overlay can win over a user-set HERMES_HOME; see
+	// layerCustomEnvAndHermesHome.)
 	// Point Cursor at per-task project state when managed MCP is present.
 	// The workdir .cursor/mcp.json carries the managed server list, while
 	// CURSOR_DATA_DIR isolates the matching project approvals from the user's
@@ -3820,15 +3847,11 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// Bedrock). These are set per-agent via the agent settings UI.
 	// Critical internal variables are blocklisted to prevent accidental or
 	// malicious override of daemon-set values.
+	var agentCustomEnv map[string]string
 	if task.Agent != nil {
-		for k, v := range task.Agent.CustomEnv {
-			if isBlockedEnvKey(k) {
-				d.logger.Warn("custom_env: blocked key skipped", "key", k)
-				continue
-			}
-			agentEnv[k] = v
-		}
+		agentCustomEnv = task.Agent.CustomEnv
 	}
+	layerCustomEnvAndHermesHome(agentEnv, agentCustomEnv, env.HermesHome, d.logger)
 	backend, err := agent.New(provider, agent.Config{
 		ExecutablePath: entry.Path,
 		Env:            agentEnv,
@@ -3859,6 +3882,9 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	if task.Agent != nil {
 		customArgs = task.Agent.CustomArgs
 		mcpConfig = effectiveMcpConfig
+	}
+	if provider == "hermes" {
+		customArgs = hermesLaunchArgs(customArgs, env != nil && env.HermesHome != "", d.logger)
 	}
 	// Two-tier model resolution: an explicit agent.model wins,
 	// then the daemon-wide MULTICA_<PROVIDER>_MODEL env var. If
@@ -4775,6 +4801,59 @@ func isBlockedEnvKey(key string) bool {
 		return true
 	}
 	return false
+}
+
+// layerCustomEnvAndHermesHome applies the agent's custom_env onto the child env
+// (skipping daemon-internal blocklisted keys), then overrides HERMES_HOME with
+// the per-task overlay when one was built. HERMES_HOME is intentionally NOT
+// blocklisted: with skills bound the overlay is built FROM the user's
+// HERMES_HOME and must win here; with no skills bound (overlayHome empty) the
+// user's own HERMES_HOME passes through unchanged, so a skill-less Hermes task
+// keeps its original behavior.
+// sanitizeAgentEnv returns the agent custom_env with daemon-blocklisted keys
+// removed — the effective env the Hermes child actually sees, used to expand
+// ${VAR} in external_dirs consistently (blocked keys like HOME resolve to the
+// daemon process value, not the dropped custom one). Uses the same
+// isBlockedEnvKey rule as layerCustomEnvAndHermesHome so the two agree.
+func sanitizeAgentEnv(customEnv map[string]string) map[string]string {
+	if len(customEnv) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(customEnv))
+	for k, v := range customEnv {
+		if isBlockedEnvKey(k) {
+			continue
+		}
+		out[k] = v
+	}
+	return out
+}
+
+// hermesLaunchArgs decides the final Hermes custom_args: with the per-task
+// overlay active, the -p/--profile flags are stripped (the overlay was seeded
+// from that profile's home and exports its own HERMES_HOME, so the flag must not
+// re-resolve the profile past it); with no overlay, the flags pass through so a
+// skill-less task's profile behavior is unchanged.
+func hermesLaunchArgs(customArgs []string, overlayActive bool, logger *slog.Logger) []string {
+	if !overlayActive {
+		return customArgs
+	}
+	return agent.FilterHermesProfileArgs(customArgs, logger)
+}
+
+func layerCustomEnvAndHermesHome(agentEnv, customEnv map[string]string, overlayHome string, logger *slog.Logger) {
+	for k, v := range customEnv {
+		if isBlockedEnvKey(k) {
+			if logger != nil {
+				logger.Warn("custom_env: blocked key skipped", "key", k)
+			}
+			continue
+		}
+		agentEnv[k] = v
+	}
+	if overlayHome != "" {
+		agentEnv["HERMES_HOME"] = overlayHome
+	}
 }
 
 func defaultArgsForProvider(cfg Config, provider string) []string {

@@ -1,0 +1,485 @@
+package execenv
+
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"gopkg.in/yaml.v3"
+)
+
+// hermesExternalDirs parses skills.external_dirs out of a derived config.yaml.
+func hermesExternalDirs(t *testing.T, configPath string) []string {
+	t.Helper()
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("read derived config: %v", err)
+	}
+	var parsed struct {
+		Skills struct {
+			ExternalDirs []string `yaml:"external_dirs"`
+		} `yaml:"skills"`
+	}
+	if err := yaml.Unmarshal(data, &parsed); err != nil {
+		t.Fatalf("parse derived config: %v\n%s", err, data)
+	}
+	return parsed.Skills.ExternalDirs
+}
+
+// hermesMemoryProvider returns the memory.provider value in a derived config,
+// and whether the key is present.
+func hermesMemoryProvider(t *testing.T, configPath string) (string, bool) {
+	t.Helper()
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("read derived config: %v", err)
+	}
+	var parsed struct {
+		Memory struct {
+			Provider *string `yaml:"provider"`
+		} `yaml:"memory"`
+	}
+	if err := yaml.Unmarshal(data, &parsed); err != nil {
+		t.Fatalf("parse derived config: %v", err)
+	}
+	if parsed.Memory.Provider == nil {
+		return "", false
+	}
+	return *parsed.Memory.Provider, true
+}
+
+// TestPrepareHermesHomeOverlay verifies the compatibility overlay: shared state
+// is mirrored via symlink, the derived config references the user's real skills
+// as an external root, and only the bound skill lands in the task-local skills/
+// dir (the user's global skills are referenced, not copied).
+func TestPrepareHermesHomeOverlay(t *testing.T) {
+	t.Parallel()
+	sharedHome := t.TempDir()
+	mustWrite(t, filepath.Join(sharedHome, "auth.json"), `{"token":"secret"}`)
+	mustWrite(t, filepath.Join(sharedHome, ".env"), "API_KEY=abc")
+	mustWrite(t, filepath.Join(sharedHome, "config.yaml"), "model: hermes-4\n")
+	mustWrite(t, filepath.Join(sharedHome, "plugins", "custom-provider", "plugin.py"), "# provider plugin")
+	mustWrite(t, filepath.Join(sharedHome, "oauth_state.json"), `{"nous":"tok"}`)
+	mustWrite(t, filepath.Join(sharedHome, "skills", "personal-notes", "SKILL.md"), "My personal notes skill.")
+
+	hermesHome := filepath.Join(t.TempDir(), "hermes-home")
+	skills := []SkillContextForEnv{{Name: "Review Helper", Content: "Help review code."}}
+	if err := prepareHermesHome(hermesHome, sharedHome, false, skills, nil, testLogger()); err != nil {
+		t.Fatalf("prepareHermesHome failed: %v", err)
+	}
+
+	for _, name := range []string{"auth.json", ".env", "plugins", "oauth_state.json"} {
+		fi, err := os.Lstat(filepath.Join(hermesHome, name))
+		if err != nil {
+			t.Fatalf("%s not mirrored into overlay: %v", name, err)
+		}
+		if fi.Mode()&os.ModeSymlink == 0 {
+			t.Errorf("%s should be a symlink into the shared home", name)
+		}
+	}
+
+	cfgPath := filepath.Join(hermesHome, "config.yaml")
+	if fi, err := os.Lstat(cfgPath); err != nil {
+		t.Fatalf("config.yaml missing: %v", err)
+	} else if fi.Mode()&os.ModeSymlink != 0 {
+		t.Error("config.yaml should be a derived copy, not a symlink")
+	}
+	if data, _ := os.ReadFile(cfgPath); !strings.Contains(string(data), "hermes-4") {
+		t.Error("derived config dropped the user's model setting")
+	}
+	wantExternal := filepath.Join(sharedHome, "skills")
+	if got := hermesExternalDirs(t, cfgPath); len(got) != 1 || got[0] != wantExternal {
+		t.Errorf("external_dirs = %v, want [%s]", got, wantExternal)
+	}
+
+	if body, err := os.ReadFile(filepath.Join(hermesHome, "skills", "review-helper", "SKILL.md")); err != nil {
+		t.Fatalf("bound skill not written: %v", err)
+	} else if !strings.Contains(string(body), "Help review code.") {
+		t.Error("bound SKILL.md missing content")
+	}
+	if _, err := os.Stat(filepath.Join(hermesHome, "skills", "personal-notes")); !os.IsNotExist(err) {
+		t.Error("user global skill should be referenced via external_dirs, not copied into the task-local skills/")
+	}
+}
+
+// TestHermesDisablesExternalMemoryProvider is the regression for the shared
+// memory-backend blocker: a host-configured memory.provider must be neutralized
+// in the derived config so managed tasks don't share an external memory bank.
+func TestHermesDisablesExternalMemoryProvider(t *testing.T) {
+	t.Parallel()
+	sharedHome := t.TempDir()
+	mustWrite(t, filepath.Join(sharedHome, "config.yaml"),
+		"memory:\n  provider: supermemory\n  memory_enabled: true\n")
+
+	hermesHome := filepath.Join(t.TempDir(), "hermes-home")
+	skills := []SkillContextForEnv{{Name: "Review Helper", Content: "x"}}
+	if err := prepareHermesHome(hermesHome, sharedHome, false, skills, nil, testLogger()); err != nil {
+		t.Fatalf("prepareHermesHome failed: %v", err)
+	}
+
+	got, ok := hermesMemoryProvider(t, filepath.Join(hermesHome, "config.yaml"))
+	if !ok {
+		t.Fatal("memory.provider should be present and explicitly disabled")
+	}
+	if got != "" {
+		t.Errorf("memory.provider = %q, want \"\" (external backend disabled)", got)
+	}
+	if data, _ := os.ReadFile(filepath.Join(hermesHome, "config.yaml")); !strings.Contains(string(data), "memory_enabled: true") {
+		t.Error("built-in memory settings should be preserved")
+	}
+}
+
+// TestHermesDerivedConfigRebasesRelativeExternalDirs is the regression for the
+// silent-repoint bug: relative external_dirs must be rewritten to absolute paths
+// anchored at the shared home, absolute entries left intact, and the real skills
+// dir appended.
+func TestHermesDerivedConfigRebasesRelativeExternalDirs(t *testing.T) {
+	t.Parallel()
+	sharedHome := t.TempDir()
+	mustWrite(t, filepath.Join(sharedHome, "config.yaml"),
+		"model: hermes-4\nskills:\n  external_dirs:\n    - team-skills\n    - /opt/shared/skills\n")
+
+	hermesHome := filepath.Join(t.TempDir(), "hermes-home")
+	skills := []SkillContextForEnv{{Name: "Review Helper", Content: "x"}}
+	if err := prepareHermesHome(hermesHome, sharedHome, false, skills, nil, testLogger()); err != nil {
+		t.Fatalf("prepareHermesHome failed: %v", err)
+	}
+
+	got := hermesExternalDirs(t, filepath.Join(hermesHome, "config.yaml"))
+	want := []string{
+		filepath.Join(sharedHome, "team-skills"),
+		"/opt/shared/skills",
+		filepath.Join(sharedHome, "skills"),
+	}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Errorf("external_dirs =\n%v\nwant\n%v", got, want)
+	}
+}
+
+// TestHermesExternalDirsExpandsSanitizedEnv verifies a ${VAR} present in the
+// sanitized effective env expands, while an UNKNOWN var is preserved verbatim
+// (Hermes/Python expandvars semantics) instead of collapsing to empty and being
+// silently rewritten to an absolute path.
+func TestHermesExternalDirsExpandsSanitizedEnv(t *testing.T) {
+	t.Parallel()
+	sharedHome := t.TempDir()
+	mustWrite(t, filepath.Join(sharedHome, "config.yaml"),
+		"skills:\n  external_dirs:\n    - ${TEAM_SKILLS}/reviews\n    - ${MYSTERY_VAR}/x\n")
+
+	hermesHome := filepath.Join(t.TempDir(), "hermes-home")
+	env := map[string]string{"TEAM_SKILLS": "/srv/team"} // MYSTERY_VAR set nowhere
+	skills := []SkillContextForEnv{{Name: "Review Helper", Content: "x"}}
+	if err := prepareHermesHome(hermesHome, sharedHome, false, skills, env, testLogger()); err != nil {
+		t.Fatalf("prepareHermesHome failed: %v", err)
+	}
+
+	got := hermesExternalDirs(t, filepath.Join(hermesHome, "config.yaml"))
+	want := []string{
+		"/srv/team/reviews", // known var expanded
+		"${MYSTERY_VAR}/x",  // unknown var preserved verbatim, NOT absolutized
+		filepath.Join(sharedHome, "skills"),
+	}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Errorf("external_dirs =\n%v\nwant\n%v", got, want)
+	}
+}
+
+// TestHermesBoundSkillKeepsNaturalSlug asserts a bound skill sharing a name with
+// a user global skill keeps its natural slug (so Hermes resolves the bound
+// version, home skills first) and leaves the user's shared copy untouched.
+func TestHermesBoundSkillKeepsNaturalSlug(t *testing.T) {
+	t.Parallel()
+	sharedHome := t.TempDir()
+	userSkill := filepath.Join(sharedHome, "skills", "review-helper", "SKILL.md")
+	mustWrite(t, userSkill, "USER VERSION")
+
+	hermesHome := filepath.Join(t.TempDir(), "hermes-home")
+	skills := []SkillContextForEnv{{Name: "Review Helper", Content: "WORKSPACE VERSION"}}
+	if err := prepareHermesHome(hermesHome, sharedHome, false, skills, nil, testLogger()); err != nil {
+		t.Fatalf("prepareHermesHome failed: %v", err)
+	}
+
+	body, err := os.ReadFile(filepath.Join(hermesHome, "skills", "review-helper", "SKILL.md"))
+	if err != nil {
+		t.Fatalf("read bound skill: %v", err)
+	}
+	if strings.Contains(string(body), "USER VERSION") || !strings.Contains(string(body), "WORKSPACE VERSION") {
+		t.Errorf("bound skill should keep natural slug with its own content, got: %q", body)
+	}
+	if data, _ := os.ReadFile(userSkill); string(data) != "USER VERSION" {
+		t.Errorf("user's shared skill was modified: %q", data)
+	}
+}
+
+// TestHermesOverlayIsolatesMemories asserts the host memory dir isn't reachable
+// from the task, task writes don't touch the host, and the task-local dir
+// survives reuse.
+func TestHermesOverlayIsolatesMemories(t *testing.T) {
+	t.Parallel()
+	sharedHome := t.TempDir()
+	mustWrite(t, filepath.Join(sharedHome, "config.yaml"), "model: hermes-4\n")
+	mustWrite(t, filepath.Join(sharedHome, "memories", "MEMORY.md"), "HOST MEMORY — must not leak")
+
+	hermesHome := filepath.Join(t.TempDir(), "hermes-home")
+	skills := []SkillContextForEnv{{Name: "Review Helper", Content: "x"}}
+	if err := prepareHermesHome(hermesHome, sharedHome, false, skills, nil, testLogger()); err != nil {
+		t.Fatalf("prepareHermesHome failed: %v", err)
+	}
+
+	memDir := filepath.Join(hermesHome, "memories")
+	if fi, err := os.Lstat(memDir); err != nil {
+		t.Fatalf("task memories dir missing: %v", err)
+	} else if fi.Mode()&os.ModeSymlink != 0 {
+		t.Fatal("task memories/ must be a real dir, not a symlink into the host home")
+	}
+	if _, err := os.Stat(filepath.Join(memDir, "MEMORY.md")); !os.IsNotExist(err) {
+		t.Error("host MEMORY.md must not be visible in the task")
+	}
+
+	mustWrite(t, filepath.Join(memDir, "MEMORY.md"), "TASK MEMORY")
+	if data, _ := os.ReadFile(filepath.Join(sharedHome, "memories", "MEMORY.md")); string(data) != "HOST MEMORY — must not leak" {
+		t.Errorf("host memory was modified through the overlay: %q", data)
+	}
+	if err := prepareHermesHome(hermesHome, sharedHome, false, skills, nil, testLogger()); err != nil {
+		t.Fatalf("prepareHermesHome (reuse) failed: %v", err)
+	}
+	if data, _ := os.ReadFile(filepath.Join(memDir, "MEMORY.md")); string(data) != "TASK MEMORY" {
+		t.Errorf("reuse should preserve task-local memory, got: %q", data)
+	}
+}
+
+// TestHermesOverlayPermissions asserts the task home is 0700 and the derived
+// config (which can hold inline api_key secrets) is 0600.
+func TestHermesOverlayPermissions(t *testing.T) {
+	t.Parallel()
+	sharedHome := t.TempDir()
+	mustWrite(t, filepath.Join(sharedHome, "config.yaml"), "model: hermes-4\napi_key: sk-secret\n")
+
+	hermesHome := filepath.Join(t.TempDir(), "hermes-home")
+	skills := []SkillContextForEnv{{Name: "Review Helper", Content: "x"}}
+	if err := prepareHermesHome(hermesHome, sharedHome, false, skills, nil, testLogger()); err != nil {
+		t.Fatalf("prepareHermesHome failed: %v", err)
+	}
+
+	if fi, err := os.Stat(hermesHome); err != nil {
+		t.Fatalf("stat home: %v", err)
+	} else if fi.Mode().Perm() != 0o700 {
+		t.Errorf("task home perms = %o, want 0700", fi.Mode().Perm())
+	}
+	if fi, err := os.Stat(filepath.Join(hermesHome, "config.yaml")); err != nil {
+		t.Fatalf("stat config: %v", err)
+	} else if fi.Mode().Perm() != 0o600 {
+		t.Errorf("derived config perms = %o, want 0600", fi.Mode().Perm())
+	}
+}
+
+// TestHermesOverlayReconcilesDeletedSharedEntry asserts a top-level entry
+// removed from the shared home is dropped from the overlay on rebuild.
+func TestHermesOverlayReconcilesDeletedSharedEntry(t *testing.T) {
+	t.Parallel()
+	sharedHome := t.TempDir()
+	mustWrite(t, filepath.Join(sharedHome, "config.yaml"), "model: hermes-4\n")
+	mustWrite(t, filepath.Join(sharedHome, "plugins", "p", "plugin.py"), "# plugin")
+
+	hermesHome := filepath.Join(t.TempDir(), "hermes-home")
+	skills := []SkillContextForEnv{{Name: "Review Helper", Content: "x"}}
+	if err := prepareHermesHome(hermesHome, sharedHome, false, skills, nil, testLogger()); err != nil {
+		t.Fatalf("prepareHermesHome failed: %v", err)
+	}
+	if _, err := os.Lstat(filepath.Join(hermesHome, "plugins")); err != nil {
+		t.Fatalf("plugins not mirrored: %v", err)
+	}
+	if err := os.RemoveAll(filepath.Join(sharedHome, "plugins")); err != nil {
+		t.Fatalf("remove shared plugins: %v", err)
+	}
+	if err := prepareHermesHome(hermesHome, sharedHome, false, skills, nil, testLogger()); err != nil {
+		t.Fatalf("prepareHermesHome (rebuild) failed: %v", err)
+	}
+	if _, err := os.Lstat(filepath.Join(hermesHome, "plugins")); !os.IsNotExist(err) {
+		t.Error("stale mirrored plugins should be reconciled away after deletion in the shared home")
+	}
+}
+
+// TestPrepareHermesHomeFailsClosed asserts prepareHermesHome returns an error
+// when required overlay state can't be built (here an unreadable shared config).
+func TestPrepareHermesHomeFailsClosed(t *testing.T) {
+	t.Parallel()
+	sharedHome := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(sharedHome, "config.yaml"), 0o755); err != nil {
+		t.Fatalf("mkdir config.yaml dir: %v", err)
+	}
+	hermesHome := filepath.Join(t.TempDir(), "hermes-home")
+	skills := []SkillContextForEnv{{Name: "Review Helper", Content: "x"}}
+	if err := prepareHermesHome(hermesHome, sharedHome, false, skills, nil, testLogger()); err == nil {
+		t.Fatal("expected prepareHermesHome to fail closed on an unreadable shared config")
+	}
+}
+
+// TestResolveHermesSourceHome covers the profile-aware source-home resolution
+// the daemon uses before building the overlay, matching Hermes' profile rules:
+// default/invalid → base (named=false), valid named → <base>/profiles/<name>
+// (named=true).
+func TestResolveHermesSourceHome(t *testing.T) {
+	t.Parallel()
+	base := filepath.Join(string(filepath.Separator)+"home", "u", ".hermes")
+
+	if got, named := ResolveHermesSourceHome(base, ""); got != base || named {
+		t.Errorf("no profile: got (%q,%v), want (%q,false)", got, named, base)
+	}
+	// "default" is ~/.hermes itself, not profiles/default.
+	if got, named := ResolveHermesSourceHome(base, "default"); got != base || named {
+		t.Errorf("default profile: got (%q,%v), want (%q,false)", got, named, base)
+	}
+	// An invalid name (Hermes regex) is ignored → base, not failed.
+	if got, named := ResolveHermesSourceHome(base, "Bad Name!"); got != base || named {
+		t.Errorf("invalid profile: got (%q,%v), want (%q,false)", got, named, base)
+	}
+	if got, named := ResolveHermesSourceHome(base, "research"); got != filepath.Join(base, "profiles", "research") || !named {
+		t.Errorf("named profile: got (%q,%v), want (%q,true)", got, named, filepath.Join(base, "profiles", "research"))
+	}
+	if got, _ := ResolveHermesSourceHome("", ""); got == "" {
+		t.Error("empty inputs should resolve to a platform default, not empty")
+	}
+}
+
+// TestPlatformDefaultHermesHome covers the Windows branch off a Windows host,
+// including the LOCALAPPDATA-missing fallback to %USERPROFILE%\AppData\Local.
+func TestPlatformDefaultHermesHome(t *testing.T) {
+	t.Parallel()
+	la := filepath.Join(string(filepath.Separator)+"Users", "me", "AppData", "Local")
+	home := filepath.Join(string(filepath.Separator)+"home", "me")
+
+	if got, want := platformDefaultHermesHomeFor("windows", la, home), filepath.Join(la, "hermes"); got != want {
+		t.Errorf("windows: got %q, want %q", got, want)
+	}
+	// No LOCALAPPDATA → %USERPROFILE%\AppData\Local\hermes, matching Hermes.
+	if got, want := platformDefaultHermesHomeFor("windows", "", home), filepath.Join(home, "AppData", "Local", "hermes"); got != want {
+		t.Errorf("windows no LOCALAPPDATA: got %q, want %q", got, want)
+	}
+	if got, want := platformDefaultHermesHomeFor("linux", la, home), filepath.Join(home, ".hermes"); got != want {
+		t.Errorf("linux: got %q, want %q", got, want)
+	}
+}
+
+// TestHermesOverlayDoesNotMirrorStickyProfile is the regression for the sticky
+// active_profile bypass: active_profile and profiles/ from the shared home must
+// NOT be mirrored into the overlay, or Hermes would follow the sticky profile at
+// startup and redirect HERMES_HOME past the overlay.
+func TestHermesOverlayDoesNotMirrorStickyProfile(t *testing.T) {
+	t.Parallel()
+	sharedHome := t.TempDir()
+	mustWrite(t, filepath.Join(sharedHome, "config.yaml"), "model: hermes-4\n")
+	mustWrite(t, filepath.Join(sharedHome, "active_profile"), "coder")
+	mustWrite(t, filepath.Join(sharedHome, "profiles", "coder", "config.yaml"), "model: coder\n")
+
+	hermesHome := filepath.Join(t.TempDir(), "hermes-home")
+	skills := []SkillContextForEnv{{Name: "Review Helper", Content: "x"}}
+	if err := prepareHermesHome(hermesHome, sharedHome, false, skills, nil, testLogger()); err != nil {
+		t.Fatalf("prepareHermesHome failed: %v", err)
+	}
+	for _, name := range []string{"active_profile", "profiles"} {
+		if _, err := os.Lstat(filepath.Join(hermesHome, name)); !os.IsNotExist(err) {
+			t.Errorf("%s must not be mirrored into the overlay (sticky-profile bypass)", name)
+		}
+	}
+}
+
+// TestPrepareHermesHomeFailsOnMissingNamedProfile asserts an explicitly named
+// profile whose home doesn't exist fails closed rather than silently seeding
+// from an empty dir (which would drop the user's auth/config), matching Hermes'
+// own sys.exit(1).
+func TestPrepareHermesHomeFailsOnMissingNamedProfile(t *testing.T) {
+	t.Parallel()
+	base := t.TempDir()
+	missingProfileHome := filepath.Join(base, "profiles", "does-not-exist")
+	hermesHome := filepath.Join(t.TempDir(), "hermes-home")
+	skills := []SkillContextForEnv{{Name: "Review Helper", Content: "x"}}
+	if err := prepareHermesHome(hermesHome, missingProfileHome, true, skills, nil, testLogger()); err == nil {
+		t.Fatal("expected a missing named profile home to fail closed")
+	}
+}
+
+// TestPrepareHermesNoSkillsLeavesHomeUnset is the regression for the review's
+// top blocker: a Hermes task with no bound skills must NOT get a redirected
+// HERMES_HOME.
+func TestPrepareHermesNoSkillsLeavesHomeUnset(t *testing.T) {
+	t.Parallel()
+	env, err := Prepare(PrepareParams{
+		WorkspacesRoot: t.TempDir(),
+		WorkspaceID:    "ws-hermes-noskill",
+		TaskID:         "aaaa1111-2222-3333-4444-555566667777",
+		Provider:       "hermes",
+		Task:           TaskContextForEnv{IssueID: "no-skill"},
+	}, testLogger())
+	if err != nil {
+		t.Fatalf("Prepare failed: %v", err)
+	}
+	defer env.Cleanup(true)
+
+	if env.HermesHome != "" {
+		t.Errorf("skill-less Hermes task must not redirect HERMES_HOME, got %q", env.HermesHome)
+	}
+	if _, err := os.Stat(filepath.Join(env.RootDir, "hermes-home")); !os.IsNotExist(err) {
+		t.Error("no hermes-home overlay should be created for a skill-less task")
+	}
+}
+
+// TestReuseHermesTearsDownWhenSkillsRemoved covers the resume path: a task that
+// had a skill and lost its last one must drop the redirect and remove the
+// overlay.
+func TestReuseHermesTearsDownWhenSkillsRemoved(t *testing.T) {
+	t.Parallel()
+	sharedHome := t.TempDir()
+	mustWrite(t, filepath.Join(sharedHome, "config.yaml"), "model: hermes-4\n")
+
+	withSkill := TaskContextForEnv{
+		IssueID:     "hermes-resume",
+		AgentSkills: []SkillContextForEnv{{Name: "Review Helper", Content: "Help review."}},
+	}
+	env, err := Prepare(PrepareParams{
+		WorkspacesRoot:   t.TempDir(),
+		WorkspaceID:      "ws-hermes-resume",
+		TaskID:           "bbbb1111-2222-3333-4444-555566667777",
+		Provider:         "hermes",
+		HermesSourceHome: sharedHome,
+		Task:             withSkill,
+	}, testLogger())
+	if err != nil {
+		t.Fatalf("Prepare failed: %v", err)
+	}
+	defer env.Cleanup(true)
+
+	if env.HermesHome == "" {
+		t.Fatal("expected HERMES_HOME redirect for a task with a bound skill")
+	}
+	overlayDir := filepath.Join(env.RootDir, "hermes-home")
+
+	if reused := Reuse(ReuseParams{WorkDir: env.WorkDir, Provider: "hermes", HermesSourceHome: sharedHome, Task: withSkill}, testLogger()); reused == nil {
+		t.Fatal("Reuse with skill returned nil")
+	} else if reused.HermesHome == "" {
+		t.Error("resume with a bound skill should keep the redirect")
+	}
+
+	noSkill := TaskContextForEnv{IssueID: "hermes-resume"}
+	reused := Reuse(ReuseParams{WorkDir: env.WorkDir, Provider: "hermes", HermesSourceHome: sharedHome, Task: noSkill}, testLogger())
+	if reused == nil {
+		t.Fatal("Reuse without skill returned nil")
+	}
+	if reused.HermesHome != "" {
+		t.Errorf("removing the last skill should clear HERMES_HOME, got %q", reused.HermesHome)
+	}
+	if _, err := os.Stat(overlayDir); !os.IsNotExist(err) {
+		t.Error("stale hermes-home overlay should be removed on teardown")
+	}
+}
+
+func mustWrite(t *testing.T, path, content string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("mkdir for %s: %v", path, err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("write %s: %v", path, err)
+	}
+}

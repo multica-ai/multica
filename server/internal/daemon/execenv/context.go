@@ -121,6 +121,7 @@ func writeWorkspacesRootMarkerAtomic(path string, data []byte) error {
 //
 // Claude:      skills → {workDir}/.claude/skills/{name}/SKILL.md  (native discovery)
 // Codex:       skills → handled separately in Prepare via codex-home
+// Hermes:      skills → handled separately in Prepare via hermes-home (HERMES_HOME/skills; Hermes has no workspace-relative discovery, see hermes_home.go)
 // Copilot:     skills → {workDir}/.github/skills/{name}/SKILL.md  (native project-level discovery)
 // OpenCode:    skills → {workDir}/.opencode/skills/{name}/SKILL.md  (native discovery)
 // OpenClaw:    skills → {workDir}/skills/{name}/SKILL.md  (native discovery — paired with a per-task synthesized openclaw-config.json that pins agents.defaults.workspace to workDir; see openclaw_config.go)
@@ -165,14 +166,20 @@ func writeContextFiles(workDir, provider string, ctx TaskContextForEnv, manifest
 	}
 
 	if len(ctx.AgentSkills) > 0 {
-		skillsDir, err := resolveSkillsDir(workDir, provider, manifest)
-		if err != nil {
-			return fmt.Errorf("resolve skills dir: %w", err)
-		}
-		// Codex skills are written to codex-home in Prepare; skip here.
-		if provider != "codex" {
-			if err := writeSkillFiles(skillsDir, ctx.AgentSkills, manifest); err != nil {
-				return fmt.Errorf("write skill files: %w", err)
+		// Hermes materializes skills into its per-task HERMES_HOME/skills during
+		// Prepare (Hermes has no workspace-relative discovery), so it needs no
+		// workdir-local skills dir at all — skip the resolve too, to avoid
+		// leaving an empty .agent_context/skills/ behind.
+		if provider != "hermes" {
+			skillsDir, err := resolveSkillsDir(workDir, provider, manifest)
+			if err != nil {
+				return fmt.Errorf("resolve skills dir: %w", err)
+			}
+			// Codex skills are written to codex-home in Prepare; skip here.
+			if provider != "codex" {
+				if err := writeSkillFiles(skillsDir, ctx.AgentSkills, manifest); err != nil {
+					return fmt.Errorf("write skill files: %w", err)
+				}
 			}
 		}
 	}

@@ -2263,3 +2263,48 @@ func TestHermesKeepsRemoteMcpWhenCapabilityAdvertised(t *testing.T) {
 		t.Fatalf("session/new.mcpServers: got %d entries, want 3", len(servers))
 	}
 }
+
+func TestHermesProfileFromArgs(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{"none", []string{"--yolo"}, ""},
+		{"short flag", []string{"-p", "research"}, "research"},
+		{"long flag", []string{"--profile", "research"}, "research"},
+		{"inline", []string{"--profile=research"}, "research"},
+		{"trailing short flag with no value", []string{"--yolo", "-p"}, ""},
+		{"amid other args", []string{"--yolo", "--profile", "coder", "-x"}, "coder"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := HermesProfileFromArgs(tc.args); got != tc.want {
+				t.Errorf("HermesProfileFromArgs(%v) = %q, want %q", tc.args, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestFilterHermesProfileArgs asserts the profile flags are stripped (all three
+// spellings) when the daemon builds the overlay, while other args survive — and
+// that the base blocked set does NOT strip them, so a skill-less task's profile
+// passes through unchanged.
+func TestFilterHermesProfileArgs(t *testing.T) {
+	t.Parallel()
+	got := FilterHermesProfileArgs(
+		[]string{"-p", "research", "--yolo", "--profile=coder", "--profile", "x"},
+		slog.Default(),
+	)
+	if len(got) != 1 || got[0] != "--yolo" {
+		t.Fatalf("profile flags should be stripped, leaving [--yolo], got %v", got)
+	}
+	if _, ok := hermesBlockedArgs["-p"]; ok {
+		t.Error("hermesBlockedArgs must not unconditionally strip -p")
+	}
+	if _, ok := hermesBlockedArgs["--profile"]; ok {
+		t.Error("hermesBlockedArgs must not unconditionally strip --profile")
+	}
+}

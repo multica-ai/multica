@@ -19,7 +19,7 @@ For guidance on picking a tool when creating an agent, see [Creating and configu
 | **Codex** | OpenAI | ✅ | ✅ | `$CODEX_HOME/skills/` | Static |
 | **Copilot** | GitHub | ✅ | ❌ | `.github/skills/` | Static (determined by account entitlement) |
 | **Cursor** | Anysphere | ✅ | ✅ | `.cursor/skills/` | Dynamic discovery |
-| **Hermes** | Nous Research | ✅ | ✅ | `.agent_context/skills/` (fallback) | Dynamic discovery |
+| **Hermes** | Nous Research | ✅ | ✅ | `HERMES_HOME/skills/` (per-task home) | Dynamic discovery |
 | **Kimi** | Moonshot | ✅ | ✅ | `.kimi/skills/` | Dynamic discovery |
 | **Kiro CLI** | Amazon | ✅ | ✅ | `.kiro/skills/` | Dynamic discovery |
 | **OpenCode** | SST | ✅ | ✅ | `.opencode/skills/` | Dynamic discovery + variants |
@@ -56,7 +56,7 @@ From Anysphere, the CLI counterpart to the Cursor editor. **Session resumption w
 
 ### Hermes
 
-From Nous Research. Uses the ACP protocol (shares a transport with Kimi). Session resumption works, and MCP config is passed through ACP `mcpServers`. But the **skill injection path is the generic fallback** (`.agent_context/skills/`), not a dedicated one — if the Hermes CLI itself doesn't read this path, skills may not take effect. Verify by testing.
+From Nous Research. Uses the ACP protocol (shares a transport with Kimi). Session resumption works, and MCP config is passed through ACP `mcpServers`. Hermes discovers skills only from its home directory (`~/.hermes/skills/`, or `%LOCALAPPDATA%\hermes\skills\` on native Windows) and configured `skills.external_dirs` — it has no workspace-relative discovery. So **when an agent has skills assigned**, Multica points `HERMES_HOME` at a per-task overlay of your Hermes home: your real home is mirrored by symlink (auth/secrets included, so token refreshes propagate), a derived `config.yaml` references your existing skills as read-only external roots, and only the assigned skills are written into its `skills/` directory — where they take precedence, so your global skills keep working. A `-p`/`--profile` selection in `custom_args` is honored: the overlay is seeded from that profile's home, and the flag is consumed from the launch command so it can't slip past the overlay. Multica never writes to your shared home directly (it only reads it and links into it), though writes Hermes itself makes through a mirrored symlink — a token refresh, say — do propagate. Task memory is isolated per task: a fresh `memories/` directory, plus the external `memory.provider` backend is disabled in the derived config, so neither on-disk notes nor a shared Supermemory/Hindsight-style bank crosses between tasks (a managed, agent-scoped memory backend is a separate future decision). A Hermes task with no assigned skills runs against your real home unchanged.
 
 **Selecting a Hermes profile.** To launch Hermes under a specific profile, set the agent's `custom_args` to the profile flag and the profile name as two separate entries — for example, for a profile named `research`:
 
@@ -134,10 +134,10 @@ Each tool uses **its own** skill discovery path. Before a task runs, the Multica
 | Pi | `.pi/skills/` | ✅ Native |
 | Qoder | `.qoder/skills/` | ✅ Native |
 | Antigravity | `.agents/skills/` | ✅ Native (inherits Gemini CLI's workspace layout — see [Antigravity docs](https://antigravity.google/docs/gcli-migration)) |
-| Hermes | `.agent_context/skills/` | ⚠️ Generic fallback |
+| Hermes | `HERMES_HOME/skills/` (per-task home) | ✅ Native (seeded per task from `~/.hermes/`) |
 | OpenClaw | `.agent_context/skills/` | ⚠️ Generic fallback |
 
-Whether a fallback-path tool actually reads this directory depends on the tool's own documentation — no guarantees. If your skills aren't taking effect for Hermes / OpenClaw, check this first.
+Whether a fallback-path tool actually reads this directory depends on the tool's own documentation — no guarantees. If your skills aren't taking effect for OpenClaw, check this first.
 
 For native project-level paths, repo-scoped discovery is expected: if the checked-out repository already contains a matching directory, the underlying tool can discover those committed skills on its own. You do not need to import those repo skills into Multica just to use them in that repo. Multica keeps the repo files intact. If a workspace skill has the same natural directory name, the daemon writes the workspace copy to a collision-free sibling such as `review-helper-multica`.
 

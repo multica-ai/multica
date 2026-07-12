@@ -19,7 +19,7 @@ Multica 内置支持 **14 款 AI 编程工具**。它们都实现了同一套接
 | **Codex** | OpenAI | ✅ | ✅ | `$CODEX_HOME/skills/` | 静态 |
 | **Copilot** | GitHub | ✅ | ❌ | `.github/skills/` | 静态（账号权益决定）|
 | **Cursor** | Anysphere | ✅ | ✅ | `.cursor/skills/` | 动态发现 |
-| **Hermes** | Nous Research | ✅ | ✅ | `.agent_context/skills/` （fallback）| 动态发现 |
+| **Hermes** | Nous Research | ✅ | ✅ | `HERMES_HOME/skills/` （单次任务 home）| 动态发现 |
 | **Kimi** | Moonshot | ✅ | ✅ | `.kimi/skills/` | 动态发现 |
 | **Kiro CLI** | Amazon | ✅ | ✅ | `.kiro/skills/` | 动态发现 |
 | **OpenCode** | SST | ✅ | ✅ | `.opencode/skills/` | 动态发现 + variant |
@@ -56,7 +56,7 @@ Anysphere 出品，Cursor 编辑器的 CLI 对应物。**会话恢复可用**—
 
 ### Hermes
 
-Nous Research 出品。使用 ACP 协议（和 Kimi 共享传输层）。会话恢复真用，MCP 配置通过 ACP `mcpServers` 传入。但 **skill 注入路径是通用 fallback**（`.agent_context/skills/`），不是专用路径——如果 Hermes CLI 本身不读这路径，skill 对它可能不起作用。需要结合实测再确认。
+Nous Research 出品。使用 ACP 协议（和 Kimi 共享传输层）。会话恢复真用，MCP 配置通过 ACP `mcpServers` 传入。Hermes 只从自己的 home 目录（`~/.hermes/skills/`）和配置的 `skills.external_dirs` 发现 skill，没有工作区相对发现。因此，**只有当智能体分配了 skill 时**，Multica 才会把 `HERMES_HOME` 指向你 `~/.hermes/` 的单次任务 overlay：真实 home 用软链镜像（含 auth／密钥，令牌刷新可传播），派生的 `config.yaml` 把你已有的 skill 作为只读 external root 引用，只有被分配的 skill 写入它的 `skills/` 目录并具更高优先级。你的全局 skill 照常可用。Multica 不会直接写你的共享 `~/.hermes/`（只读取并链接进去），但 Hermes 自己通过被镜像的软链写入时（如刷新令牌）会传播。`custom_args` 里的 `-p`/`--profile` 选择会被尊重：overlay 从该 profile 的 home 播种，且该标志会从启动命令里消费掉，无法绕过 overlay。任务记忆按任务隔离：一个全新的 `memories/` 目录，外加在派生配置里禁用外部 `memory.provider` 后端，所以磁盘上的笔记和共享的 Supermemory/Hindsight 之类记忆库都不会在任务间串用（受管、按 agent 隔离的记忆后端是后续单独决策）。没有分配 skill 的 Hermes 任务按真实 home 原样运行。另外,home 的平台默认值在原生 Windows 上是 `%LOCALAPPDATA%\hermes`。
 
 **指定 Hermes profile。** 要让 Hermes 使用某个 profile 启动，把智能体的 `custom_args` 设成 profile flag 和 profile 名两个独立条目。例如使用名为 `research` 的 profile：
 
@@ -126,10 +126,10 @@ ByteDance 官方 TRAE CLI（`traecli`，搭配 Trae IDE，**不是**开源的 `b
 | Qoder | `.qoder/skills/` | ✅ 原生 |
 | Trae CLI | `.traecli/skills/` | ✅ 原生 |
 | Antigravity | `.agents/skills/` | ✅ 原生（沿用 Gemini CLI 的 workspace 布局——见 [Antigravity 文档](https://antigravity.google/docs/gcli-migration)）|
-| Hermes | `.agent_context/skills/` | ⚠️ 通用 fallback |
+| Hermes | `HERMES_HOME/skills/` （单次任务 home）| ✅ 原生（每个任务从 `~/.hermes/` 播种）|
 | OpenClaw | `.agent_context/skills/` | ⚠️ 通用 fallback |
 
-fallback 路径对应的工具是否真的读取这个目录，取决于工具本身的文档——没保证。如果你的 skill 对 Hermes / OpenClaw 没起效，先查这个问题。
+fallback 路径对应的工具是否真的读取这个目录，取决于工具本身的文档——没保证。如果你的 skill 对 OpenClaw 没起效，先查这个问题。
 
 对原生项目级路径来说，repo-scoped discovery 是预期行为：如果检出的仓库已经包含对应目录，底层工具可以自己发现这些提交在仓库里的 Skill。你不需要为了在这个仓库里使用这些 repo skills 而先把它们导入 Multica。Multica 会保持这些仓库文件不变。如果某个工作区 Skill 的自然目录名相同，守护进程会把工作区副本写到类似 `review-helper-multica` 的无冲突 sibling 目录。
 

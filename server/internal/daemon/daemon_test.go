@@ -105,6 +105,11 @@ func TestIsBlockedEnvKey(t *testing.T) {
 		{key: "OPENCLAW_INCLUDE_ROOTS", want: true},
 		{key: "ANTHROPIC_API_KEY", want: false},
 		{key: "CURSOR_AGENT", want: false},
+		// HERMES_HOME is intentionally NOT blocked: a skill-less Hermes task
+		// must be able to honor a user-set profile/home, and when skills are
+		// bound the per-task overlay overrides it after custom_env is layered.
+		{key: "HERMES_HOME", want: false},
+		{key: "hermes_home", want: false},
 	}
 
 	for _, tt := range tests {
@@ -112,6 +117,68 @@ func TestIsBlockedEnvKey(t *testing.T) {
 			t.Parallel()
 			if got := isBlockedEnvKey(tt.key); got != tt.want {
 				t.Fatalf("isBlockedEnvKey(%q) = %v, want %v", tt.key, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestLayerCustomEnvAndHermesHome exercises the daemon-assembled child env for
+// HERMES_HOME: no overlay passes the user's value through, an overlay overrides
+// it, and blocklisted keys are still dropped.
+func TestLayerCustomEnvAndHermesHome(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name        string
+		customEnv   map[string]string
+		overlayHome string
+		wantHermes  string // "" means the key must be absent
+		wantAbsent  []string
+	}{
+		{
+			name:        "no skills: user HERMES_HOME passes through",
+			customEnv:   map[string]string{"HERMES_HOME": "/home/u/.hermes-research"},
+			overlayHome: "",
+			wantHermes:  "/home/u/.hermes-research",
+		},
+		{
+			name:        "skills bound: overlay overrides user HERMES_HOME",
+			customEnv:   map[string]string{"HERMES_HOME": "/home/u/.hermes-research"},
+			overlayHome: "/tmp/task/hermes-home",
+			wantHermes:  "/tmp/task/hermes-home",
+		},
+		{
+			name:        "no custom home, no overlay: key absent",
+			customEnv:   map[string]string{"ANTHROPIC_API_KEY": "sk"},
+			overlayHome: "",
+			wantHermes:  "",
+		},
+		{
+			name:        "blocklisted key dropped, overlay still applied",
+			customEnv:   map[string]string{"CODEX_HOME": "/evil", "MULTICA_TOKEN": "x"},
+			overlayHome: "/tmp/task/hermes-home",
+			wantHermes:  "/tmp/task/hermes-home",
+			wantAbsent:  []string{"CODEX_HOME", "MULTICA_TOKEN"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			agentEnv := map[string]string{}
+			layerCustomEnvAndHermesHome(agentEnv, tt.customEnv, tt.overlayHome, nil)
+
+			if got, ok := agentEnv["HERMES_HOME"]; tt.wantHermes == "" {
+				if ok {
+					t.Errorf("HERMES_HOME should be absent, got %q", got)
+				}
+			} else if got != tt.wantHermes {
+				t.Errorf("HERMES_HOME = %q, want %q", got, tt.wantHermes)
+			}
+			for _, k := range tt.wantAbsent {
+				if _, ok := agentEnv[k]; ok {
+					t.Errorf("blocklisted key %q should not be applied", k)
+				}
 			}
 		})
 	}
@@ -2889,5 +2956,70 @@ func TestWatchTaskCancellation_ReconcileRunningKeepsTickerAlive(t *testing.T) {
 	case <-cancelled:
 	case <-time.After(2 * time.Second):
 		t.Fatalf("ticker did not detect cancellation after broadcast-running path (calls=%d)", calls.Load())
+	}
+}
+
+// TestSanitizeAgentEnv asserts the effective env handed to the Hermes overlay
+// for ${VAR} expansion drops daemon-blocklisted keys (so a blocked HOME in
+// custom_env can't repoint external_dirs away from what the child sees) while
+// keeping ordinary vars.
+func TestSanitizeAgentEnv(t *testing.T) {
+	t.Parallel()
+	in := map[string]string{
+		"HOME":        "/evil",
+		"PATH":        "/evil/bin",
+		"MULTICA_X":   "1",
+		"TEAM_SKILLS": "/srv/team",
+		"HERMES_HOME": "/some/home",
+	}
+	got := sanitizeAgentEnv(in)
+	for _, blocked := range []string{"HOME", "PATH", "MULTICA_X"} {
+		if _, ok := got[blocked]; ok {
+			t.Errorf("blocklisted key %q must be dropped from the effective env", blocked)
+		}
+	}
+	if got["TEAM_SKILLS"] != "/srv/team" {
+		t.Errorf("ordinary var dropped: %v", got)
+	}
+	// HERMES_HOME is not blocklisted (it drives source-home resolution), so it
+	// survives here even though the child's value is the overlay.
+	if got["HERMES_HOME"] != "/some/home" {
+		t.Errorf("HERMES_HOME should survive sanitization, got %v", got)
+	}
+	if sanitizeAgentEnv(nil) != nil {
+		t.Error("nil in should yield nil out")
+	}
+}
+
+// TestHermesLaunchArgsAndEnvByScenario covers the profile chain end to end at
+// the decision level: the final launch args + the final HERMES_HOME the child
+// sees, for a skill-less vs. an overlay-active task that both set a profile.
+func TestHermesLaunchArgsAndEnvByScenario(t *testing.T) {
+	t.Parallel()
+	customArgs := []string{"-p", "research", "--yolo"}
+	customEnv := map[string]string{"HERMES_HOME": "/home/u/.hermes"}
+	logger := slog.Default()
+
+	// No overlay (skill-less): profile flag passes through, and the user's
+	// HERMES_HOME passes through — behavior unchanged.
+	noOverlayArgs := hermesLaunchArgs(customArgs, false, logger)
+	if len(noOverlayArgs) != 3 || noOverlayArgs[0] != "-p" || noOverlayArgs[1] != "research" {
+		t.Errorf("skill-less task must keep its profile flags, got %v", noOverlayArgs)
+	}
+	noOverlayEnv := map[string]string{}
+	layerCustomEnvAndHermesHome(noOverlayEnv, customEnv, "", nil)
+	if noOverlayEnv["HERMES_HOME"] != "/home/u/.hermes" {
+		t.Errorf("skill-less task must keep the user HERMES_HOME, got %q", noOverlayEnv["HERMES_HOME"])
+	}
+
+	// Overlay active: profile flag is stripped, and HERMES_HOME is the overlay.
+	overlayArgs := hermesLaunchArgs(customArgs, true, logger)
+	if len(overlayArgs) != 1 || overlayArgs[0] != "--yolo" {
+		t.Errorf("overlay task must strip profile flags, got %v", overlayArgs)
+	}
+	overlayEnv := map[string]string{}
+	layerCustomEnvAndHermesHome(overlayEnv, customEnv, "/task/hermes-home", nil)
+	if overlayEnv["HERMES_HOME"] != "/task/hermes-home" {
+		t.Errorf("overlay task must redirect HERMES_HOME to the overlay, got %q", overlayEnv["HERMES_HOME"])
 	}
 }
