@@ -13,7 +13,6 @@ import { useTimeAgo } from "../../i18n";
 import { agentListOptions, memberListOptions, squadMemberStatusOptions, workspaceKeys } from "@multica/core/workspace/queries";
 import { spaceListOptions, spaceMembersOptions } from "@multica/core/spaces/queries";
 import { canAssignAgentToIssue } from "@multica/core/permissions";
-import { runtimeListOptions } from "@multica/core/runtimes";
 import { useNavigation } from "../../navigation";
 import { AppLink } from "../../navigation";
 import { BreadcrumbHeader } from "../../layout/breadcrumb-header";

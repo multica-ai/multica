@@ -27,7 +27,6 @@ import {
 import { activeSpaceListOptions, spaceKeys } from "@multica/core/spaces/queries";
 import { api } from "@multica/core/api";
 import { issueKeys } from "@multica/core/issues/queries";
-import { activeSpaceListOptions, spaceKeys } from "@multica/core/spaces/queries";
 import {
   paths,
   resolvePostAuthDestination,

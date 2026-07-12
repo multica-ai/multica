@@ -255,7 +255,7 @@ export function AgentDetailInspector({
           />
           <SettingsRow
             label={t(($) => $.inspector.prop_availability)}
-            controlClassName="sm:w-80"
+            size="select-wide"
           >
             <AvailabilityPicker
               availabilityMode={agent.availability_mode}

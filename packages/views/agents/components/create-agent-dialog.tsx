@@ -541,7 +541,7 @@ export function CreateAgentDialog({
   );
 }
 
-function AvailabilitySection({
+export function AvailabilitySection({
   mode,
   onModeChange,
   selectedSpaceIds,
