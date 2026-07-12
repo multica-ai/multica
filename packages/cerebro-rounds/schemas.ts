@@ -10,6 +10,12 @@ const roundSchema = z.object({
 const memberSchema = z.object({
   round_id: z.string(), issue_id: z.string(), added_by_type: z.string().default(""),
   added_by_id: z.string().default(""), held_trigger_count: z.number().int().nonnegative().default(0),
+  // Owner-perspective state (FIR-3114 review): only 'waiting' members surface
+  // in the round list; 'answered' folds away; 'working' hides until the next
+  // round. Older servers omit these fields — default to 'planned'/0, which
+  // degrades to showing every member (the pre-review behavior).
+  waiting_count: z.number().int().nonnegative().default(0),
+  state: z.enum(["waiting", "answered", "working", "planned"]).catch("planned").default("planned"),
   created_at: z.string().default(""),
 }).loose();
 const runSchema = z.object({

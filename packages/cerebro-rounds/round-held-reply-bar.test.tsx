@@ -24,7 +24,7 @@ const status = (overrides: Partial<RoundStatus> = {}): RoundStatus => ({
     created_at: "", updated_at: "",
   },
   active_run: null,
-  members: [{ round_id: "round-1", issue_id: "issue-1", added_by_type: "member", added_by_id: "owner", held_trigger_count: 1, created_at: "" }],
+  members: [{ round_id: "round-1", issue_id: "issue-1", added_by_type: "member", added_by_id: "owner", held_trigger_count: 1, waiting_count: 0, state: "answered", created_at: "" }],
   ...overrides,
 });
 

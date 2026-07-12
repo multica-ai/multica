@@ -64,9 +64,6 @@ export function RoundsBlock({ statuses, issueTitles, onStart, onDismiss, onSelec
       <div className="divide-y divide-border/60">{filtered.map((s) => {
       const running = s.active_run?.status === "running";
       const ready = s.active_run?.status === "ready";
-      // A member counts as answered once the owner's reply is held for the
-      // next run — that is the "done with this one" signal in a batch round.
-      const answered = s.members.filter((m) => m.held_trigger_count > 0);
       const heldTotal = s.members.reduce((total, m) => total + m.held_trigger_count, 0);
       // Nothing to release: batch rounds run held replies, so Run stays off
       // until at least one reply is held. Live rounds run agents immediately —
@@ -77,10 +74,14 @@ export function RoundsBlock({ statuses, issueTitles, onStart, onDismiss, onSelec
       const displayedMembers = needle
         ? s.members.filter((member) => (issueTitles[member.issue_id] ?? "").toLocaleLowerCase().includes(needle))
         : s.members;
-      const countLabel = running
-        ? `${s.active_run?.responded_count ?? 0}/${s.active_run?.total_count ?? s.members.length} ready`
-        : ready
-          ? `${answered.length}/${s.members.length} answered`
+      // The header number is what waits for the owner (FIR-3114 review,
+      // point 3): the total of agent messages needing a reply, across the
+      // whole round — not run bookkeeping.
+      const waitingTotal = s.members.reduce((total, m) => total + m.waiting_count, 0);
+      const countLabel = waitingTotal > 0
+        ? `${waitingTotal} waiting`
+        : running
+          ? `${s.active_run?.responded_count ?? 0}/${s.active_run?.total_count ?? s.members.length} ready`
           : `${s.members.length} planned`;
       return <div key={s.round.id}>
         <div className="flex items-center gap-2 px-3 py-2">
@@ -95,7 +96,7 @@ export function RoundsBlock({ statuses, issueTitles, onStart, onDismiss, onSelec
             {schedule && !running && !ready && <span className="hidden text-xs text-muted-foreground sm:inline">{schedule}</span>}
             <span className="ml-auto text-xs text-muted-foreground">{countLabel}</span>
           </button>
-          {ready && onDismiss && <Button size="sm" variant="ghost" onClick={() => {
+          {(running || ready) && onDismiss && <Button size="sm" variant="ghost" onClick={() => {
             setExpandedIds((prev) => { const next = new Set(prev); next.delete(s.round.id); return next; });
             onDismiss(s.round.id);
           }} aria-label={`Pause ${s.round.name}`}><Pause className="size-3.5" /><span className="sr-only">Pause</span></Button>}
@@ -114,13 +115,14 @@ export function RoundsBlock({ statuses, issueTitles, onStart, onDismiss, onSelec
               <span className="min-w-0 flex-1 truncate">{issueTitles[m.issue_id] ?? m.issue_id}</span>
               {m.held_trigger_count > 0 && <span className="text-muted-foreground">{m.held_trigger_count} held {m.held_trigger_count === 1 ? "response" : "responses"}</span>}
             </button>;
-          // While a run is active, answered members fold away behind their own
-          // collapse so the list reads as "what still needs me". Outside a run
-          // the full planned list shows as before (held counts stay inline).
+          // The list reads as "what still needs me" at all times (FIR-3114
+          // review, points 1+3): answered members fold away behind their own
+          // collapse in batch AND live, and members whose agent is working
+          // hide entirely until the next round surfaces their response.
           // Search narrows both lists via displayedMembers.
-          const answeredDisplayed = displayedMembers.filter((m) => m.held_trigger_count > 0);
-          const foldAnswered = (running || ready) && answeredDisplayed.length > 0;
-          const pending = foldAnswered ? displayedMembers.filter((m) => m.held_trigger_count === 0) : displayedMembers;
+          const answeredDisplayed = displayedMembers.filter((m) => m.state === "answered");
+          const foldAnswered = answeredDisplayed.length > 0;
+          const pending = displayedMembers.filter((m) => m.state === "waiting" || m.state === "planned");
           const answeredOpen = answeredOpenIds.has(s.round.id);
           return <div className="border-t border-border/50 divide-y divide-border/60">
             {pending.map(renderMember)}
@@ -233,24 +235,49 @@ export function AddToRoundAction({ issueId }: { issueId: string }) {
   const wsId = useWorkspaceId();
   const { data: statuses = [] } = useRoundStatuses(wsId);
   const add = useAddIssueToRound(wsId);
-  const available = statuses.filter((s) => !s.members.some((m) => m.issue_id === issueId));
+  const remove = useRemoveIssueFromRound(wsId);
+  const current = statuses.find((s) => s.members.some((m) => m.issue_id === issueId));
+  const available = statuses.filter((s) => s.round.id !== current?.round.id);
   const membership = roundMembershipLabel(statuses, issueId);
-  if (available.length === 0 && !membership) return null;
-  return <div className="flex flex-wrap items-center gap-2">{membership && <span className="rounded-full bg-muted px-2 py-1 text-xs text-muted-foreground" aria-label="Round status">{membership}</span>}{available.length > 0 && <DropdownMenu><DropdownMenuTrigger render={<Button variant="outline" size="sm" />}>Add to round</DropdownMenuTrigger><DropdownMenuContent align="start">{available.map((s) => <DropdownMenuItem key={s.round.id} onClick={() => add.mutate({ roundId: s.round.id, issueId })}>{s.round.name}</DropdownMenuItem>)}</DropdownMenuContent></DropdownMenu>}</div>;
+  if (available.length === 0 && !current) return null;
+  // A member issue can move to another round or leave rounds entirely
+  // (FIR-3114 review, point 5). Membership is unique per issue, so a move
+  // must remove before it adds.
+  const moveTo = async (roundId: string) => {
+    if (current) await remove.mutateAsync({ roundId: current.round.id, issueId });
+    add.mutate({ roundId, issueId });
+  };
+  return <div className="flex flex-wrap items-center gap-2">{membership && <span className="rounded-full bg-muted px-2 py-1 text-xs text-muted-foreground" aria-label="Round status">{membership}</span>}<DropdownMenu><DropdownMenuTrigger render={<Button variant="outline" size="sm" />}>{current ? "Move to round" : "Add to round"}</DropdownMenuTrigger><DropdownMenuContent align="start">
+    {available.map((s) => <DropdownMenuItem key={s.round.id} onClick={() => void moveTo(s.round.id)}>{s.round.name}</DropdownMenuItem>)}
+    {current && <DropdownMenuItem onClick={() => remove.mutate({ roundId: current.round.id, issueId })}>Remove from {current.round.name}</DropdownMenuItem>}
+  </DropdownMenuContent></DropdownMenu></div>;
 }
 
 export function RoundPickerDialog({ issueId, open, onOpenChange }: { issueId: string; open: boolean; onOpenChange: (open: boolean) => void }) {
   const wsId = useWorkspaceId();
   const { data: statuses = [] } = useRoundStatuses(wsId);
   const add = useAddIssueToRound(wsId);
-  const available = statuses.filter((status) => !status.members.some((member) => member.issue_id === issueId));
-  return <ResponsiveRoundPanel open={open} onOpenChange={onOpenChange} title="Add to Round">
+  const remove = useRemoveIssueFromRound(wsId);
+  const current = statuses.find((status) => status.members.some((member) => member.issue_id === issueId));
+  const available = statuses.filter((status) => status.round.id !== current?.round.id);
+  // A member issue can move to another round or leave rounds entirely
+  // (FIR-3114 review, point 5). Membership is unique per issue, so a move
+  // must remove before it adds.
+  const moveTo = async (roundId: string) => {
+    if (current) await remove.mutateAsync({ roundId: current.round.id, issueId });
+    add.mutate({ roundId, issueId });
+  };
+  return <ResponsiveRoundPanel open={open} onOpenChange={onOpenChange} title={current ? "Move to Round" : "Add to Round"}>
       <div className="grid gap-2">
         {available.map((status) => <Button key={status.round.id} variant="outline" className="h-auto justify-start px-3 py-2 text-left" onClick={() => {
-          add.mutate({ roundId: status.round.id, issueId });
+          void moveTo(status.round.id);
           onOpenChange(false);
         }}><span className="min-w-0 flex-1"><span className="block truncate font-medium">{status.round.name}</span><span className="block text-xs text-muted-foreground">{status.round.mode === "live" ? "Live" : "Batch"}</span></span></Button>)}
-        {available.length === 0 && <p className="py-4 text-center text-sm text-muted-foreground">Create a Round from Inbox first.</p>}
+        {current && <Button variant="outline" className="h-auto justify-start px-3 py-2 text-left" onClick={() => {
+          remove.mutate({ roundId: current.round.id, issueId });
+          onOpenChange(false);
+        }} aria-label={`Remove from ${current.round.name}`}><span className="min-w-0 flex-1"><span className="block truncate font-medium">Remove from {current.round.name}</span><span className="block text-xs text-muted-foreground">Back to the normal inbox</span></span></Button>}
+        {available.length === 0 && !current && <p className="py-4 text-center text-sm text-muted-foreground">Create a Round from Inbox first.</p>}
       </div>
   </ResponsiveRoundPanel>;
 }

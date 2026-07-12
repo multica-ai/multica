@@ -61,13 +61,45 @@ func normalizeMode(mode string) (string, error) {
 
 func shouldHoldComment(mode string) bool { return mode == "batch" }
 
+// Member state, from the round owner's point of view (FIR-3114 review):
+//   - waiting:  agent responses newer than the owner's last reply — the issue
+//     needs the owner and is the only state that surfaces in the round list.
+//   - answered: the owner replied last (held for batch, or sent in live) —
+//     folded away behind "Answered".
+//   - working:  an agent task is queued/dispatched/running — hidden until the
+//     agent's response makes it waiting again in a later round.
+//   - planned:  no agent response yet and nothing in flight.
+const (
+	MemberWaiting  = "waiting"
+	MemberAnswered = "answered"
+	MemberWorking  = "working"
+	MemberPlanned  = "planned"
+)
+
 type Member struct {
 	RoundID          string    `json:"round_id"`
 	IssueID          string    `json:"issue_id"`
 	AddedByType      string    `json:"added_by_type"`
 	AddedByID        string    `json:"added_by_id"`
 	HeldTriggerCount int       `json:"held_trigger_count"`
+	WaitingCount     int       `json:"waiting_count"`
+	State            string    `json:"state"`
 	CreatedAt        time.Time `json:"created_at"`
+}
+
+func memberState(waitingCount, heldCount int, working, hasResponses bool) string {
+	switch {
+	case waitingCount > 0:
+		return MemberWaiting
+	case heldCount > 0:
+		return MemberAnswered
+	case working:
+		return MemberWorking
+	case hasResponses:
+		return MemberAnswered
+	default:
+		return MemberPlanned
+	}
 }
 
 type Run struct {
@@ -230,21 +262,40 @@ func (s *Service) AddMember(ctx context.Context, workspaceID, ownerID, roundID, 
 	return s.member(ctx, roundID, issueID)
 }
 
-func (s *Service) member(ctx context.Context, roundID, issueID pgtype.UUID) (Member, error) {
+// memberSelect computes each member's owner-perspective signals in one pass:
+// held replies, agent responses newer than the owner's last reply (waiting),
+// whether an agent task is in flight (working) and whether any agent response
+// exists at all (distinguishes answered from planned).
+const memberSelect = `SELECT m.round_id::text,m.issue_id::text,m.added_by_type,m.added_by_id::text,
+	(SELECT count(*)::int FROM cerebro_round_held_trigger h WHERE h.round_id=m.round_id AND h.issue_id=m.issue_id AND h.state='held'),
+	(SELECT count(*)::int FROM comment c WHERE c.issue_id=m.issue_id AND c.author_type='agent' AND c.type='comment'
+		AND c.created_at > COALESCE((SELECT max(c2.created_at) FROM comment c2 WHERE c2.issue_id=m.issue_id AND c2.author_type='member' AND c2.author_id=r.owner_id AND c2.type='comment'), '-infinity'::timestamptz)),
+	EXISTS(SELECT 1 FROM agent_task_queue q WHERE q.issue_id=m.issue_id AND q.status IN ('queued','dispatched','running')),
+	EXISTS(SELECT 1 FROM comment c WHERE c.issue_id=m.issue_id AND c.author_type='agent' AND c.type='comment'),
+	m.created_at
+	FROM cerebro_round_member m JOIN cerebro_round r ON r.id=m.round_id`
+
+func scanMember(row pgx.Row) (Member, error) {
 	var m Member
-	err := s.Pool.QueryRow(ctx, `SELECT m.round_id::text,m.issue_id::text,m.added_by_type,m.added_by_id::text,count(h.id)::int,m.created_at FROM cerebro_round_member m LEFT JOIN cerebro_round_held_trigger h ON h.round_id=m.round_id AND h.issue_id=m.issue_id AND h.state='held' WHERE m.round_id=$1 AND m.issue_id=$2 GROUP BY m.round_id,m.issue_id,m.added_by_type,m.added_by_id,m.created_at`, roundID, issueID).Scan(&m.RoundID, &m.IssueID, &m.AddedByType, &m.AddedByID, &m.HeldTriggerCount, &m.CreatedAt)
+	var working, hasResponses bool
+	err := row.Scan(&m.RoundID, &m.IssueID, &m.AddedByType, &m.AddedByID, &m.HeldTriggerCount, &m.WaitingCount, &working, &hasResponses, &m.CreatedAt)
+	m.State = memberState(m.WaitingCount, m.HeldTriggerCount, working, hasResponses)
 	return m, err
 }
+
+func (s *Service) member(ctx context.Context, roundID, issueID pgtype.UUID) (Member, error) {
+	return scanMember(s.Pool.QueryRow(ctx, memberSelect+` WHERE m.round_id=$1 AND m.issue_id=$2`, roundID, issueID))
+}
 func (s *Service) Members(ctx context.Context, roundID pgtype.UUID) ([]Member, error) {
-	rows, err := s.Pool.Query(ctx, `SELECT m.round_id::text,m.issue_id::text,m.added_by_type,m.added_by_id::text,count(h.id)::int,m.created_at FROM cerebro_round_member m LEFT JOIN cerebro_round_held_trigger h ON h.round_id=m.round_id AND h.issue_id=m.issue_id AND h.state='held' WHERE m.round_id=$1 GROUP BY m.round_id,m.issue_id,m.added_by_type,m.added_by_id,m.created_at ORDER BY m.created_at`, roundID)
+	rows, err := s.Pool.Query(ctx, memberSelect+` WHERE m.round_id=$1 ORDER BY m.created_at`, roundID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	out := []Member{}
 	for rows.Next() {
-		var m Member
-		if err := rows.Scan(&m.RoundID, &m.IssueID, &m.AddedByType, &m.AddedByID, &m.HeldTriggerCount, &m.CreatedAt); err != nil {
+		m, err := scanMember(rows)
+		if err != nil {
 			return nil, err
 		}
 		out = append(out, m)
@@ -277,15 +328,17 @@ func (s *Service) ActiveRun(ctx context.Context, roundID pgtype.UUID) (*Run, err
 	return &r, err
 }
 
-// DismissRun closes the round's surfaced 'ready' run so the round collapses
-// back to its planned state in the inbox. Held replies stay held for the next
-// start; a 'running' run is untouched (agents are still working).
+// DismissRun (UI: Pause) closes the round's active run — 'ready' or 'running' —
+// so the round collapses back to its planned state in the inbox. Held replies
+// stay held for the next start. Pausing a 'running' run does not cancel the
+// agent tasks already dispatched: they finish on their own, and their responses
+// surface as waiting messages in the next round (FIR-3114 review, point 4).
 func (s *Service) DismissRun(ctx context.Context, workspaceID, ownerID, roundID pgtype.UUID) error {
 	if _, err := s.Get(ctx, workspaceID, ownerID, roundID); err != nil {
 		return err
 	}
 	var runID pgtype.UUID
-	err := s.Pool.QueryRow(ctx, `UPDATE cerebro_round_run SET status='completed',completed_at=now() WHERE round_id=$1 AND status='ready' RETURNING id`, roundID).Scan(&runID)
+	err := s.Pool.QueryRow(ctx, `UPDATE cerebro_round_run SET status='completed',completed_at=now() WHERE round_id=$1 AND status IN ('ready','running') RETURNING id`, roundID).Scan(&runID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil
 	}
@@ -355,16 +408,23 @@ func (s *Service) HoldComment(ctx context.Context, workspaceID, issueID, comment
 }
 
 // autoStartWhenAnswered releases the round as soon as the owner has replied to
-// every agent response in the surfaced 'ready' run — "batch" means: answer
-// everything, then all replies run at once without pressing Run.
+// every message waiting anywhere in the round — "batch" means: answer
+// everything, then all replies run at once without pressing Run. It only fires
+// while a 'ready' run is surfaced (an answer cycle in progress): fresh replies
+// seeded into an idle or paused round queue until Run or the schedule, and a
+// reply during a 'running' run queues for the next start. Counting only the
+// surfaced run's items was wrong (FIR-3114 review, point 2): a reply could
+// auto-start agents while other member issues still had unanswered responses.
 func (s *Service) autoStartWhenAnswered(ctx context.Context, workspaceID, ownerID, roundID pgtype.UUID) {
 	var runID pgtype.UUID
 	if err := s.Pool.QueryRow(ctx, `SELECT id FROM cerebro_round_run WHERE round_id=$1 AND status='ready' ORDER BY created_at DESC LIMIT 1`, roundID).Scan(&runID); err != nil {
 		return
 	}
-	var unanswered int
-	err := s.Pool.QueryRow(ctx, `SELECT count(*)::int FROM cerebro_round_run_item i JOIN agent_task_queue q ON q.id=i.task_id WHERE i.run_id=$1 AND q.status='completed' AND NOT EXISTS (SELECT 1 FROM cerebro_round_held_trigger h WHERE h.round_id=$2 AND h.issue_id=i.issue_id AND h.state='held')`, runID, roundID).Scan(&unanswered)
-	if err != nil || unanswered > 0 {
+	var waiting int
+	err := s.Pool.QueryRow(ctx, `SELECT count(*)::int FROM cerebro_round_member m JOIN cerebro_round r ON r.id=m.round_id WHERE m.round_id=$1 AND EXISTS (
+		SELECT 1 FROM comment c WHERE c.issue_id=m.issue_id AND c.author_type='agent' AND c.type='comment'
+		AND c.created_at > COALESCE((SELECT max(c2.created_at) FROM comment c2 WHERE c2.issue_id=m.issue_id AND c2.author_type='member' AND c2.author_id=r.owner_id AND c2.type='comment'), '-infinity'::timestamptz))`, roundID).Scan(&waiting)
+	if err != nil || waiting > 0 {
 		return
 	}
 	_, _ = s.Start(ctx, workspaceID, ownerID, roundID)
