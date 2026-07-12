@@ -78,19 +78,42 @@ export function SettingsCard({
   );
 }
 
+/**
+ * Width tiers for the control column. Within a card, every text-entry
+ * control shares the `text` tier so their edges align; a row may only
+ * drop to a smaller tier when the field is deliberately short (a code,
+ * an enum select) — the difference must read as intentional. Pick a
+ * tier instead of adding per-row ad-hoc widths.
+ */
+const SETTINGS_CONTROL_WIDTHS = {
+  /** Text inputs and textareas — the standard control column. */
+  text: "sm:w-96",
+  /** Selects/pickers with long option labels (timezone, model). */
+  "select-wide": "sm:w-72",
+  /** Compact enum selects (theme, language). */
+  select: "sm:w-48",
+  /** Short fixed-format codes (issue prefix). */
+  code: "sm:w-40",
+  /** Unconstrained — non-input content like avatar uploads. */
+  none: "sm:max-w-none",
+} as const;
+
+export type SettingsControlSize = keyof typeof SETTINGS_CONTROL_WIDTHS;
+
 export function SettingsRow({
   label,
   description,
   children,
   className,
-  controlClassName,
+  size,
   align = "center",
 }: {
   label: ReactNode;
   description?: ReactNode;
   children: ReactNode;
   className?: string;
-  controlClassName?: string;
+  /** Control column width tier; omit for content-hugging controls (buttons, switches). */
+  size?: SettingsControlSize;
   align?: "center" | "start";
 }) {
   return (
@@ -112,7 +135,7 @@ export function SettingsRow({
       <div
         className={cn(
           "w-full shrink-0 sm:w-auto sm:max-w-[56%]",
-          controlClassName,
+          size ? SETTINGS_CONTROL_WIDTHS[size] : undefined,
         )}
       >
         {children}

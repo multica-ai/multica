@@ -98,7 +98,7 @@ export function ThinkingSettingField({
   if (levels.length === 0 && !value) return null;
 
   return (
-    <SettingsRow label={label} controlClassName="sm:w-80">
+    <SettingsRow label={label} size="select-wide">
       <ThinkingPicker
         variant="field"
         showLabel={false}
