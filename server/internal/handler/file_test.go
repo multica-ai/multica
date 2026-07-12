@@ -861,37 +861,38 @@ func TestGetAttachmentContent_PDFWithoutTextAndNoOCRBinary(t *testing.T) {
 	}
 }
 
-func TestGetAttachmentContent_PortableRuntimeExtraction(t *testing.T) {
+func TestGetAttachmentContent_PortableRuntimePDFExtraction(t *testing.T) { // CEREBRO-PATCH(attachment-text-runtime-tool): the UI content proxy extracts PDFs only; Office extraction belongs to read_attachment.
 	originalRunner := attachmenttext.DefaultRunner
 	attachmenttext.DefaultRunner = handlerAttachmentRunner{}
 	defer func() { attachmenttext.DefaultRunner = originalRunner }()
 
-	cases := []struct {
-		filename    string
-		contentType string
-		body        []byte
-		want        string
-	}{
-		{filename: "scanned-ocr-test.pdf", contentType: "application/pdf", body: tinyBlankPDF(), want: "ORANGE-7319"},
-		{filename: "legacy-source.doc", contentType: "application/octet-stream", body: []byte("legacy-doc"), want: "COBALT-4826"},
-	}
-	for _, tc := range cases {
-		t.Run(tc.filename, func(t *testing.T) {
-			store := &mockStorage{}
-			originalStorage := testHandler.Storage
-			testHandler.Storage = store
-			defer func() { testHandler.Storage = originalStorage }()
+	store := &mockStorage{}
+	originalStorage := testHandler.Storage
+	testHandler.Storage = store
+	defer func() { testHandler.Storage = originalStorage }()
 
-			id := seedPreviewAttachment(t, store, tc.filename, tc.filename, tc.contentType, tc.body)
-			req, w := newPreviewRequest(t, id, testWorkspaceID)
-			testHandler.GetAttachmentContent(w, req)
-			if w.Code != http.StatusOK {
-				t.Fatalf("status = %d, want 200; body=%s", w.Code, w.Body.String())
-			}
-			if !strings.Contains(w.Body.String(), tc.want) {
-				t.Fatalf("body = %q, want %s", w.Body.String(), tc.want)
-			}
-		})
+	id := seedPreviewAttachment(t, store, "scanned-ocr-test.pdf", "scanned-ocr-test.pdf", "application/pdf", tinyBlankPDF())
+	req, w := newPreviewRequest(t, id, testWorkspaceID)
+	testHandler.GetAttachmentContent(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", w.Code, w.Body.String())
+	}
+	if got := w.Body.String(); !strings.Contains(got, "ORANGE-7319") {
+		t.Fatalf("body = %q, want ORANGE-7319", got)
+	}
+}
+
+func TestGetAttachmentContent_LegacyOfficeRejected(t *testing.T) {
+	store := &mockStorage{}
+	originalStorage := testHandler.Storage
+	testHandler.Storage = store
+	defer func() { testHandler.Storage = originalStorage }()
+
+	id := seedPreviewAttachment(t, store, "legacy-source.doc", "legacy-source.doc", "application/octet-stream", []byte("legacy-doc"))
+	req, w := newPreviewRequest(t, id, testWorkspaceID)
+	testHandler.GetAttachmentContent(w, req)
+	if w.Code != http.StatusUnsupportedMediaType {
+		t.Fatalf("status = %d, want 415; body=%s", w.Code, w.Body.String())
 	}
 }
 
