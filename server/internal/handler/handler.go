@@ -19,6 +19,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/auth"
+	cerebroanalytics "github.com/multica-ai/multica/server/internal/cerebro/analytics" // CEREBRO-PATCH(analytics-projection): wire Cerebro-owned analytics projection into upstream handler.
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
 	"github.com/multica-ai/multica/server/internal/cerebro/duplicatecheck"
 	cerebroinfisical "github.com/multica-ai/multica/server/internal/cerebro/infisical"
@@ -103,6 +104,11 @@ type cloudRuntimeProxy interface {
 }
 
 type Handler struct {
+	// CEREBRO-PATCH(analytics-projection-seam): FIR-2996 keeps canonical analytics behind cerebro-owned interfaces.
+	AnalyticsProjector  cerebroanalytics.RunProjector
+	AnalyticsBackfiller interface {
+		BackfillWorkspace(ctx context.Context, workspaceID, afterCursor string, limit int) (string, int, error)
+	}
 	Queries *db.Queries
 	// CEREBRO-PATCH(agent-infisical-secrets): cerebro queries for per-agent secret refs.
 	CerebroQueries        *cerebrodb.Queries
@@ -277,6 +283,15 @@ type Handler struct {
 	// "start an issue on a workflow" reach the manual create modal already has.
 	// Nil on a server without cerebro workflows wired.
 	IssueWorkflowActivator IssueWorkflowActivator
+}
+
+func (h *Handler) projectAnalyticsRun(ctx context.Context, taskID string) {
+	if h.AnalyticsProjector == nil {
+		return
+	}
+	if err := h.AnalyticsProjector.ProjectRun(ctx, taskID); err != nil {
+		slog.Warn("project analytics run failed", "task_id", taskID, "error", err)
+	}
 }
 
 // IssueWorkflowActivator is the upstream-side seam for attaching a cerebro

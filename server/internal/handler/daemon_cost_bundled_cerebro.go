@@ -67,6 +67,8 @@ func (h *Handler) applyBundledReadSaving(ctx context.Context, resp *AgentTaskRes
 		// Behaviour unchanged; record the hypothetical would-save for this run.
 		if err := h.CerebroQueries.RecordCerebroCostOptimizationMeasurement(ctx, bundledReadMeasurementParams(issue.WorkspaceID, taskID, costSavingModeShadow, estimateBundledPayloadChars(issue))); err != nil {
 			slog.Warn("bundled-read cost-saving: record would-save failed", "error", err)
+		} else {
+			h.projectAnalyticsRun(ctx, uuidToString(taskID))
 		}
 	}
 }

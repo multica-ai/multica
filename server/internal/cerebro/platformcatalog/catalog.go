@@ -863,6 +863,20 @@ var catalog = []Capability{
 		},
 	},
 	{
+		Key:           "manage_analytics",
+		Title:         "Use and manage analytics",
+		Category:      CategoryWorkspace,
+		Description:   "Query workspace analytics, rebuild the analytics projection, and create, update, or delete saved visuals.",
+		DescriptionZh: "查询工作区分析、重建分析投影，以及创建、更新或删除已保存的可视化。",
+		Ops: []string{
+			"POST /api/analytics/query",
+			"POST /api/analytics/backfill",
+			"POST /api/analytics/visuals",
+			"PUT /api/analytics/visuals/{visualId}",
+			"DELETE /api/analytics/visuals/{visualId}",
+		},
+	},
+	{
 		Key:           "delete_workspace",
 		Title:         "Delete workspace",
 		Category:      CategoryWorkspace,

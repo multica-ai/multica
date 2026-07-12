@@ -7,7 +7,7 @@ import { DEFAULT_FILTER, type ActorScope, type TimeRange } from "./types";
 // state (current tab, selected actor, time-range) lives in Zustand, not in
 // the URL or query cache. Server data is fetched via TanStack Query keyed
 // on these values.
-export type DashboardTab = "issues" | "messages";
+export type DashboardTab = "overview" | "runs" | "messages";
 
 interface DashboardState {
   scope: ActorScope;
@@ -29,7 +29,7 @@ interface DashboardState {
 
 export const useDashboardStore = create<DashboardState>((set) => ({
   ...DEFAULT_FILTER,
-  tab: "issues",
+  tab: "overview",
   messagePanelActorId: null,
   messagePanelActorName: null,
   setScope: (scope) =>
@@ -40,5 +40,5 @@ export const useDashboardStore = create<DashboardState>((set) => ({
   openMessagePanel: (messagePanelActorId, messagePanelActorName) =>
     set({ messagePanelActorId, messagePanelActorName }),
   closeMessagePanel: () => set({ messagePanelActorId: null, messagePanelActorName: null }),
-  reset: () => set({ ...DEFAULT_FILTER, tab: "issues", messagePanelActorId: null, messagePanelActorName: null }),
+  reset: () => set({ ...DEFAULT_FILTER, tab: "overview", messagePanelActorId: null, messagePanelActorName: null }),
 }));

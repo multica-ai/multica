@@ -1,6 +1,26 @@
 {
   "http": [
     {
+      "id": "DELETE /api/analytics/visuals/{visualId}",
+      "gate": "workspace_member"
+    },
+    {
+      "id": "POST /api/analytics/backfill",
+      "gate": "workspace_admin"
+    },
+    {
+      "id": "POST /api/analytics/query",
+      "exempt": "read-only analytics query — resolves workspace-scoped aggregates without mutating data"
+    },
+    {
+      "id": "POST /api/analytics/visuals",
+      "gate": "workspace_member"
+    },
+    {
+      "id": "PUT /api/analytics/visuals/{visualId}",
+      "gate": "workspace_member"
+    },
+    {
       "id": "DELETE /api/agents/{id}/tool-grants",
       "gate": "workspace_admin"
     },
@@ -1719,6 +1739,14 @@
   ],
   "mcp": [
     {
+      "id": "analytics_catalog",
+      "exempt": "read-only — wraps GET /api/analytics/catalog"
+    },
+    {
+      "id": "analytics_query",
+      "exempt": "read-only — wraps POST /api/analytics/query, which only resolves workspace-scoped aggregates"
+    },
+    {
       "id": "add_attachment",
       "gate": "via:POST /api/upload-file"
     },
@@ -2160,6 +2188,18 @@
     }
   ],
   "cli": [
+    {
+      "id": "analytics backfill",
+      "gate": "via:POST /api/analytics/backfill"
+    },
+    {
+      "id": "analytics catalog",
+      "exempt": "read-only — wraps GET /api/analytics/catalog"
+    },
+    {
+      "id": "analytics query",
+      "exempt": "read-only — wraps POST /api/analytics/query, which only resolves workspace-scoped aggregates"
+    },
     {
       "id": "agent archive",
       "gate": "via:POST /api/agents/{id}/archive"

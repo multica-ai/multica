@@ -85,6 +85,8 @@ func (h *Handler) applyContextDuplicationSaving(
 		DetailJson:      detail,
 	}); err != nil {
 		slog.Warn("context_duplication cost-saving: record measurement failed", "error", err)
+	} else {
+		h.projectAnalyticsRun(ctx, uuidToString(taskID))
 	}
 }
 

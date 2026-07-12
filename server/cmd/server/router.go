@@ -26,6 +26,7 @@ import (
 	cerebroagentpass "github.com/multica-ai/multica/server/internal/cerebro/agentpass"
 	// CEREBRO-PATCH(cerebro-agent-memory-routes): FIR-1794 Gate 3 per-(user,agent) memory toggle service import.
 	cerebroagentmemory "github.com/multica-ai/multica/server/internal/cerebro/agentmemory"
+	cerebroanalytics "github.com/multica-ai/multica/server/internal/cerebro/analytics"
 	"github.com/multica-ai/multica/server/internal/cerebro/cfaccess" // CEREBRO-PATCH(cf-access-auth): Cloudflare Access verifier
 	cerebrochannels "github.com/multica-ai/multica/server/internal/cerebro/channels"
 	// CEREBRO-PATCH(chat-run-stream-route): FIR-2835 Phase 1 chat run SSE stream broker import.
@@ -536,6 +537,13 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// don't conflict on router wiring.
 	cerebroQueries := cerebrodb.New(pool)
 	h.CerebroQueries = cerebroQueries
+	analyticsProjector := cerebroanalytics.NewProjector(
+		cerebroanalytics.NewPostgresProjectionSource(pool),
+		cerebroanalytics.NewPostgresProjectionStore(pool),
+	)
+	h.AnalyticsProjector = analyticsProjector
+	h.AnalyticsBackfiller = analyticsProjector
+	h.TaskService.AnalyticsProjector = analyticsProjector
 	h.PullRequestLinkHealer = cerebrogithubprheal.New(cerebroQueries, queries) // CEREBRO-PATCH(cerebro-github-pr-heal): JEH-1919
 	featureFlagsHandler := feature_flags.New(cerebroQueries, bus)
 	// CEREBRO-PATCH(cerebro-cost-optimization-routes): FIR-2325 per-workspace saving-mode handler.
@@ -1795,6 +1803,17 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			r.Route("/api/usage", func(r chi.Router) {
 				r.Get("/daily", h.GetWorkspaceUsageByDay)
 				r.Get("/summary", h.GetWorkspaceUsageSummary)
+			})
+
+			// CEREBRO-PATCH(analytics-query-api): FIR-2996 canonical analytics contract.
+			r.Route("/api/analytics", func(r chi.Router) {
+				r.Get("/catalog", h.GetAnalyticsCatalog)
+				r.Post("/query", h.QueryAnalytics)
+				r.Get("/visuals", h.ListAnalyticsVisuals)
+				r.Post("/visuals", h.CreateAnalyticsVisual)
+				r.Put("/visuals/{visualId}", h.UpdateAnalyticsVisual)
+				r.Delete("/visuals/{visualId}", h.DeleteAnalyticsVisual)
+				r.Post("/backfill", h.BackfillAnalytics)
 			})
 
 			// Dashboard — workspace-wide token + run-time rollups for the

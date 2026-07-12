@@ -1,11 +1,12 @@
 "use client";
 
 import { cn } from "@multica/ui/lib/utils";
-import { BarChart3, MessageSquare } from "lucide-react";
+import { BarChart3, ListChecks, MessageSquare } from "lucide-react";
 import { useDashboardStore, type DashboardTab } from "../../core/store";
 
 const TABS: { id: DashboardTab; label: string; icon: React.ReactNode }[] = [
-  { id: "issues", label: "Issues", icon: <BarChart3 className="size-3.5" /> },
+  { id: "overview", label: "Overview", icon: <BarChart3 className="size-3.5" /> },
+  { id: "runs", label: "Runs", icon: <ListChecks className="size-3.5" /> },
   { id: "messages", label: "Messages", icon: <MessageSquare className="size-3.5" /> },
 ];
 

@@ -18,6 +18,7 @@ import (
 	// CEREBRO-PATCH(task-title-builder): cerebro-owned LLM title generator.
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/cerebro/agent_title"
+	cerebroanalytics "github.com/multica-ai/multica/server/internal/cerebro/analytics" // CEREBRO-PATCH(analytics-projection): project completed/failed tasks into canonical analytics.
 	"github.com/multica-ai/multica/server/internal/cerebro/delegationorigin"
 	"github.com/multica-ai/multica/server/internal/cerebro/failrouter" // CEREBRO-PATCH(failure-router): FIR-2751 central failure routing policy.
 	"github.com/multica-ai/multica/server/internal/events"
@@ -38,13 +39,14 @@ import (
 const cancelledByUserMarker = "_(stoppet af bruger)_"
 
 type TaskService struct {
-	Queries   *db.Queries
-	TxStarter TxStarter
-	Hub       *realtime.Hub
-	Bus       *events.Bus
-	Analytics analytics.Client
-	Metrics   *obsmetrics.BusinessMetrics
-	Wakeup    TaskWakeupNotifier
+	Queries            *db.Queries
+	TxStarter          TxStarter
+	Hub                *realtime.Hub
+	Bus                *events.Bus
+	Analytics          analytics.Client
+	Metrics            *obsmetrics.BusinessMetrics
+	AnalyticsProjector cerebroanalytics.RunProjector // CEREBRO-PATCH(analytics-projection-seam): FIR-2996 refresh on terminal task writes.
+	Wakeup             TaskWakeupNotifier
 	// EmptyClaim caches "this runtime has no queued task" so the daemon
 	// poll path can skip a Postgres scan on the steady-state empty case.
 	// Optional — a nil cache disables the fast path and every claim
@@ -376,6 +378,15 @@ func (s *TaskService) captureTaskCompleted(ctx context.Context, task db.AgentTas
 	if s.Metrics != nil {
 		source, runtimeMode, _ := s.taskMetricsContext(ctx, task)
 		s.Metrics.RecordTaskTerminal(util.UUIDToString(task.ID), source, runtimeMode, task.Status, taskRunSeconds(task), taskTotalSeconds(task), task.Attempt)
+	}
+}
+
+func (s *TaskService) projectAnalyticsRun(ctx context.Context, taskID pgtype.UUID) {
+	if s.AnalyticsProjector == nil {
+		return
+	}
+	if err := s.AnalyticsProjector.ProjectRun(ctx, util.UUIDToString(taskID)); err != nil {
+		slog.Warn("project analytics run failed", "task_id", util.UUIDToString(taskID), "error", err)
 	}
 }
 
@@ -1708,6 +1719,7 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 
 	slog.Info("task completed", "task_id", util.UUIDToString(task.ID), "issue_id", util.UUIDToString(task.IssueID))
 	s.captureTaskCompleted(ctx, task)
+	s.projectAnalyticsRun(ctx, task.ID)
 	// CEREBRO-PATCH(auto-pause-reset): FIR-2476 — a success clears the runtime's auto-pause circuit breaker.
 	if s.AutoPause != nil && task.RuntimeID.Valid {
 		s.AutoPause.ResetAutoPauseCount(ctx, task.RuntimeID)
@@ -1903,6 +1915,7 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 
 	slog.Warn("task failed", "task_id", util.UUIDToString(task.ID), "issue_id", util.UUIDToString(task.IssueID), "error", errMsg, "failure_reason", failureReason)
 	s.captureTaskFailed(ctx, task)
+	s.projectAnalyticsRun(ctx, task.ID)
 
 	// CEREBRO-PATCH(auto-pause-on-failure): check rate-limit / monthly-cap /
 	// expired auth BEFORE auto-retry. When paused, skip retry creation so the

@@ -68,3 +68,22 @@ func TestRuntimeSetupRoutesAreMounted(t *testing.T) {
 		}
 	}
 }
+
+// CEREBRO-PATCH(analytics-query-api): FIR-2996 canonical analytics routes.
+func TestAnalyticsQueryRoutesAreMounted(t *testing.T) {
+	router := NewRouter(nil, realtime.NewHub(), events.New(), analytics.NoopClient{}, nil, nil)
+	for _, route := range []struct{ method, path string }{
+		{"GET", "/api/analytics/catalog"},
+		{"POST", "/api/analytics/query"},
+		{"GET", "/api/analytics/visuals"},
+		{"POST", "/api/analytics/visuals"},
+		{"PUT", "/api/analytics/visuals/11111111-1111-1111-1111-111111111111"},
+		{"DELETE", "/api/analytics/visuals/11111111-1111-1111-1111-111111111111"},
+		{"POST", "/api/analytics/backfill"},
+	} {
+		rctx := chi.NewRouteContext()
+		if !router.Match(rctx, route.method, route.path) {
+			t.Fatalf("expected %s %s to match a mounted route", route.method, route.path)
+		}
+	}
+}
