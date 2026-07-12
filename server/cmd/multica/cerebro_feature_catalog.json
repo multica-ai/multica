@@ -519,6 +519,13 @@
       "default": false
     },
     {
+      "key": "cerebro_permission_detail",
+      "label": "Permission detail page",
+      "description": "Open a detail page for a single tool permission that shows who holds it (which agents, people, groups and runtimes have it set) and which layer grants it. Permissions that are shown but not enforced at runtime yet are greyed out. Off by default while it is built; nothing links to the page until it is turned on, so the change is reversible. Later phases add a change log and a usage log. FIR-3091.",
+      "group": "permissions",
+      "default": false
+    },
+    {
       "key": "cerebro_image_reload",
       "label": "Reload stalled images",
       "description": "On a document page showing an image, recover when the image stops mid-load: a loading indicator while it fetches, up to two automatic retries on failure, and a manual \"Reload image\" button so you can try again without reloading the whole page. Off restores the plain image with no retry. FIR-1673.",
