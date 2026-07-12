@@ -3508,6 +3508,9 @@ importers:
 
   packages/cerebro-rounds:
     dependencies:
+      '@multica/cerebro-feature-flags':
+        specifier: workspace:*
+        version: link:../cerebro-feature-flags
       '@multica/core':
         specifier: workspace:*
         version: link:../core
@@ -4905,6 +4908,9 @@ importers:
       '@multica/cerebro-recurring-issues':
         specifier: workspace:*
         version: link:../cerebro-recurring-issues
+      '@multica/cerebro-rounds':
+        specifier: workspace:*
+        version: link:../cerebro-rounds
       '@multica/cerebro-saved-filters':
         specifier: workspace:*
         version: link:../cerebro-saved-filters

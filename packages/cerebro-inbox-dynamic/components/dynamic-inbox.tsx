@@ -107,7 +107,7 @@ import { SecretarySection, secretaryEntryKey } from "./secretary-section";
 import { NotesInboxBox, NoteInboxBox, NoteInboxDetail } from "@multica/cerebro-notes/views";
 import { SkillChangeInboxDetail } from "@multica/cerebro-skill-ownership/views";
 import { opensInDynamicInboxPane } from "../notification-routing";
-import { AddToRoundAction, ConnectedRoundManager, RoundsBlock, roundIssueIdsToExclude, useRoundStatuses, useStartRound } from "@multica/cerebro-rounds";
+import { AddToRoundAction, ConnectedRoundManager, RoundsBlock, roundIssueIdsToExclude, useDismissRound, useRoundStatuses, useStartRound } from "@multica/cerebro-rounds";
 
 function replaceTab(layout: InboxLayout, tabId: string, fn: (t: InboxTabConfig) => InboxTabConfig): InboxLayout {
   return { ...layout, tabs: layout.tabs.map((t) => (t.id === tabId ? fn(t) : t)) };
@@ -189,6 +189,7 @@ export function DynamicInbox() {
   const roundsEnabled = useFeatureFlag("cerebro_inbox_rounds");
   const { data: roundStatuses = [] } = useRoundStatuses(wsId);
   const startRound = useStartRound(wsId);
+  const dismissRound = useDismissRound(wsId);
   const roundIssueIds = useMemo(() => [...new Set(roundStatuses.flatMap((status) => status.members.map((member) => member.issue_id)))], [roundStatuses]);
   const roundIssueQueries = useQueries({ queries: roundIssueIds.map((issueId) => issueDetailOptions(wsId, issueId)) });
   const roundIssueTitles = useMemo(() => Object.fromEntries(roundIssueQueries.flatMap((query, index) => {
@@ -1191,14 +1192,20 @@ export function DynamicInbox() {
                           defaultCollapsed={section.defaultCollapsed}
                           onRemove={() => removeSection(section.id)}
                           onStart={(roundId) => startRound.mutate(roundId)}
+                          onDismiss={(roundId) => dismissRound.mutate(roundId)}
                           onSelectIssue={(issueId) => {
                             const entry = entries.find((candidate) => candidate.kind === "notif" && candidate.item.issue_id === issueId);
                             if (entry) onSelect(entry);
                           }}
                           renderIssue={(issueId) => {
                             const entry = entries.find((candidate) => candidate.kind === "notif" && candidate.item.issue_id === issueId);
-                            if (!entry) return null;
-                            return <DynamicInboxRow key={entry.id} entry={entry} isSelected={entry.id === selected?.id} agentRunState={runStateFor(entry, filterContext)} favoritesEnabled={favoritesEnabled} isFavorite={filterContext.isFavorite?.(entry) ?? false} onToggleFavorite={toggleFavorite} onSelect={onSelect} onArchive={onArchive} />;
+                            if (!entry || entry.kind !== "notif") return null;
+                            // FIR-3114 — outside an active run a round member never reads as
+                            // unread: live-mode responses accumulate quietly until the next
+                            // round surfaces them (the row itself stays visible in the round).
+                            const surfaced = roundStatuses.some((status) => status.active_run && status.members.some((member) => member.issue_id === issueId));
+                            const displayEntry = surfaced || entry.item.read ? entry : { ...entry, item: { ...entry.item, read: true } };
+                            return <DynamicInboxRow key={entry.id} entry={displayEntry} isSelected={entry.id === selected?.id} agentRunState={runStateFor(entry, filterContext)} favoritesEnabled={favoritesEnabled} isFavorite={filterContext.isFavorite?.(entry) ?? false} onToggleFavorite={toggleFavorite} onSelect={onSelect} onArchive={onArchive} />;
                           }}
                         />
                       ) : section.kind === "notes" ? (

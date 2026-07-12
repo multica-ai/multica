@@ -832,6 +832,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	cerebroRoundsService := cerebrorounds.New(pool, queries, h.TaskService)
 	cerebroRoundsHandler := cerebrorounds.NewHandler(cerebroRoundsService)
 	h.RoundCommentGate = cerebroRoundsService
+	setRoundsPushGuard(pool) // CEREBRO-PATCH(rounds-push-suppression): FIR-3114 — round issues never push/banner outside the round.
 
 	r := chi.NewRouter()
 
@@ -1477,6 +1478,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Delete("/", cerebroRoundsHandler.Delete)
 					r.Get("/status", cerebroRoundsHandler.Status)
 					r.Post("/start", cerebroRoundsHandler.Start)
+					r.Post("/dismiss", cerebroRoundsHandler.Dismiss) // CEREBRO-PATCH(cerebro-rounds-routes): FIR-3114 pause/collapse a surfaced run.
 					r.Post("/members", cerebroRoundsHandler.AddMember)
 					r.Delete("/members/{issueId}", cerebroRoundsHandler.RemoveMember)
 				})

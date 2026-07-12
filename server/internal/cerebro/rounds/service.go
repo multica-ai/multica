@@ -277,6 +277,25 @@ func (s *Service) ActiveRun(ctx context.Context, roundID pgtype.UUID) (*Run, err
 	return &r, err
 }
 
+// DismissRun closes the round's surfaced 'ready' run so the round collapses
+// back to its planned state in the inbox. Held replies stay held for the next
+// start; a 'running' run is untouched (agents are still working).
+func (s *Service) DismissRun(ctx context.Context, workspaceID, ownerID, roundID pgtype.UUID) error {
+	if _, err := s.Get(ctx, workspaceID, ownerID, roundID); err != nil {
+		return err
+	}
+	var runID pgtype.UUID
+	err := s.Pool.QueryRow(ctx, `UPDATE cerebro_round_run SET status='completed',completed_at=now() WHERE round_id=$1 AND status='ready' RETURNING id`, roundID).Scan(&runID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	s.publishProgress(ctx, runID)
+	return nil
+}
+
 func (s *Service) RemoveMember(ctx context.Context, workspaceID, ownerID, roundID, issueID pgtype.UUID) error {
 	if _, err := s.Get(ctx, workspaceID, ownerID, roundID); err != nil {
 		return err
@@ -309,7 +328,8 @@ func (s *Service) HoldComment(ctx context.Context, workspaceID, issueID, comment
 		return false, nil
 	}
 	var mode string
-	err := s.Pool.QueryRow(ctx, `SELECT r.mode FROM cerebro_round_member m JOIN cerebro_round r ON r.id=m.round_id WHERE m.issue_id=$1 AND r.workspace_id=$2`, issueID, workspaceID).Scan(&mode)
+	var roundID, roundOwnerID pgtype.UUID
+	err := s.Pool.QueryRow(ctx, `SELECT r.mode,r.id,r.owner_id FROM cerebro_round_member m JOIN cerebro_round r ON r.id=m.round_id WHERE m.issue_id=$1 AND r.workspace_id=$2`, issueID, workspaceID).Scan(&mode, &roundID, &roundOwnerID)
 	if errors.Is(err, pgx.ErrNoRows) || (err == nil && !shouldHoldComment(mode)) {
 		return false, nil
 	}
@@ -328,7 +348,26 @@ func (s *Service) HoldComment(ctx context.Context, workspaceID, issueID, comment
 		}
 		held = held || ct.RowsAffected() > 0
 	}
+	if held {
+		s.autoStartWhenAnswered(ctx, workspaceID, roundOwnerID, roundID)
+	}
 	return held, nil
+}
+
+// autoStartWhenAnswered releases the round as soon as the owner has replied to
+// every agent response in the surfaced 'ready' run — "batch" means: answer
+// everything, then all replies run at once without pressing Run.
+func (s *Service) autoStartWhenAnswered(ctx context.Context, workspaceID, ownerID, roundID pgtype.UUID) {
+	var runID pgtype.UUID
+	if err := s.Pool.QueryRow(ctx, `SELECT id FROM cerebro_round_run WHERE round_id=$1 AND status='ready' ORDER BY created_at DESC LIMIT 1`, roundID).Scan(&runID); err != nil {
+		return
+	}
+	var unanswered int
+	err := s.Pool.QueryRow(ctx, `SELECT count(*)::int FROM cerebro_round_run_item i JOIN agent_task_queue q ON q.id=i.task_id WHERE i.run_id=$1 AND q.status='completed' AND NOT EXISTS (SELECT 1 FROM cerebro_round_held_trigger h WHERE h.round_id=$2 AND h.issue_id=i.issue_id AND h.state='held')`, runID, roundID).Scan(&unanswered)
+	if err != nil || unanswered > 0 {
+		return
+	}
+	_, _ = s.Start(ctx, workspaceID, ownerID, roundID)
 }
 
 func (s *Service) Start(ctx context.Context, workspaceID, ownerID, roundID pgtype.UUID) (Run, error) {
@@ -340,6 +379,12 @@ func (s *Service) Start(ctx context.Context, workspaceID, ownerID, roundID pgtyp
 		return Run{}, err
 	}
 	defer tx.Rollback(ctx)
+	// A new run supersedes the previous surfaced one: without this, a 'ready'
+	// run lingers forever (nothing else completes runs) and keeps the round
+	// pinned open in the inbox.
+	if _, err = tx.Exec(ctx, `UPDATE cerebro_round_run SET status='completed',completed_at=now() WHERE round_id=$1 AND status='ready'`, roundID); err != nil {
+		return Run{}, err
+	}
 	var run Run
 	err = tx.QueryRow(ctx, `INSERT INTO cerebro_round_run(round_id,total_count) SELECT $1,count(*) FROM cerebro_round_held_trigger WHERE round_id=$1 AND state='held' RETURNING id::text,round_id::text,status,total_count,responded_count,stalled_count,nudged_count,started_at,ready_at,completed_at,created_at`, roundID).Scan(&run.ID, &run.RoundID, &run.Status, &run.TotalCount, &run.RespondedCount, &run.StalledCount, &run.NudgedCount, &run.StartedAt, &run.ReadyAt, &run.CompletedAt, &run.CreatedAt)
 	if err != nil {

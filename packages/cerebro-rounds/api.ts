@@ -22,6 +22,9 @@ export async function startRound(roundId: string) {
   const path = `/api/cerebro/rounds/${roundId}/start`;
   return parseWithFallback(await api.cerebroRequest<unknown>(path, { method: "POST" }), runSchema, null, { endpoint: path });
 }
+export async function dismissRound(roundId: string): Promise<void> {
+  await api.cerebroRequest(`/api/cerebro/rounds/${roundId}/dismiss`, { method: "POST" });
+}
 export type RoundInput = { name: string; mode: "live" | "batch"; schedule_cron: string | null; timezone: string | null };
 export async function createRound(input: RoundInput): Promise<Round | null> {
   const path = "/api/cerebro/rounds";

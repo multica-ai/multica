@@ -1,6 +1,6 @@
 "use client";
 
-import { ChevronDown, ChevronRight, Pencil, Play, Plus, Search, Settings, Trash2, X } from "lucide-react";
+import { Check, ChevronDown, ChevronRight, Pause, Pencil, Play, Plus, Search, Settings, Trash2, X } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import { Button } from "@multica/ui/components/ui/button";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@multica/ui/components/ui/dialog";
@@ -21,8 +21,8 @@ function nextRunLabel(value: string | null | undefined): string | null {
   return `Next ${new Intl.DateTimeFormat(undefined, { weekday: "short", hour: "2-digit", minute: "2-digit" }).format(date)}`;
 }
 
-export function RoundsBlock({ statuses, issueTitles, onStart, onSelectIssue, settings, renderIssue, dragHandle, defaultCollapsed, onRemove }: {
-  statuses: RoundStatus[]; issueTitles: Record<string, string>; onStart: (id: string) => void; onSelectIssue: (id: string) => void;
+export function RoundsBlock({ statuses, issueTitles, onStart, onDismiss, onSelectIssue, settings, renderIssue, dragHandle, defaultCollapsed, onRemove }: {
+  statuses: RoundStatus[]; issueTitles: Record<string, string>; onStart: (id: string) => void; onDismiss?: (id: string) => void; onSelectIssue: (id: string) => void;
   settings?: ReactNode;
   renderIssue?: (issueId: string) => ReactNode;
   dragHandle?: ReactNode;
@@ -31,6 +31,7 @@ export function RoundsBlock({ statuses, issueTitles, onStart, onSelectIssue, set
 }) {
   const visible = statuses.filter((s) => s.members.length > 0 || s.round.next_run_at || s.active_run);
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
+  const [answeredOpenIds, setAnsweredOpenIds] = useState<Set<string>>(new Set());
   const [collapsed, setCollapsed] = useState(defaultCollapsed === true);
   const [query, setQuery] = useState("");
   const readyRoundId = visible.find((status) => status.active_run?.status === "ready")?.round.id ?? null;
@@ -63,12 +64,24 @@ export function RoundsBlock({ statuses, issueTitles, onStart, onSelectIssue, set
       <div className="divide-y divide-border/60">{filtered.map((s) => {
       const running = s.active_run?.status === "running";
       const ready = s.active_run?.status === "ready";
-      const complete = s.members.length === 0 || (ready && (s.active_run?.responded_count ?? 0) >= (s.active_run?.total_count ?? s.members.length));
+      // A member counts as answered once the owner's reply is held for the
+      // next run — that is the "done with this one" signal in a batch round.
+      const answered = s.members.filter((m) => m.held_trigger_count > 0);
+      const heldTotal = s.members.reduce((total, m) => total + m.held_trigger_count, 0);
+      // Nothing to release: batch rounds run held replies, so Run stays off
+      // until at least one reply is held. Live rounds run agents immediately —
+      // Run only surfaces a review pass, which needs members.
+      const runnable = s.round.mode === "batch" ? heldTotal > 0 : s.members.length > 0 && !ready;
       const open = expandedIds.has(s.round.id);
       const schedule = nextRunLabel(s.round.next_run_at);
       const displayedMembers = needle
         ? s.members.filter((member) => (issueTitles[member.issue_id] ?? "").toLocaleLowerCase().includes(needle))
         : s.members;
+      const countLabel = running
+        ? `${s.active_run?.responded_count ?? 0}/${s.active_run?.total_count ?? s.members.length} ready`
+        : ready
+          ? `${answered.length}/${s.members.length} answered`
+          : `${s.members.length} planned`;
       return <div key={s.round.id}>
         <div className="flex items-center gap-2 px-3 py-2">
           <button type="button" aria-label={`${open ? "Collapse" : "Expand"} ${s.round.name}`} className="flex min-w-0 flex-1 items-center gap-2 text-left" onClick={() => setExpandedIds((prev) => {
@@ -80,9 +93,13 @@ export function RoundsBlock({ statuses, issueTitles, onStart, onSelectIssue, set
             <span className="truncate text-sm font-medium">{s.round.name}</span>
             <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">{s.round.mode === "live" ? "Live" : "Batch"}</span>
             {schedule && !running && !ready && <span className="hidden text-xs text-muted-foreground sm:inline">{schedule}</span>}
-            <span className="ml-auto text-xs text-muted-foreground">{running || ready ? `${s.active_run?.responded_count ?? 0}/${s.active_run?.total_count ?? s.members.length} ready` : `${s.members.length} planned`}</span>
+            <span className="ml-auto text-xs text-muted-foreground">{countLabel}</span>
           </button>
-          {!running && <Button size="sm" variant={ready ? "default" : "ghost"} disabled={complete} className={complete ? "bg-success text-success-foreground opacity-100" : undefined} onClick={() => onStart(s.round.id)} aria-label={`Run ${s.round.name}`}><Play className="size-3.5" /><span className="sr-only">Run</span></Button>}
+          {ready && onDismiss && <Button size="sm" variant="ghost" onClick={() => {
+            setExpandedIds((prev) => { const next = new Set(prev); next.delete(s.round.id); return next; });
+            onDismiss(s.round.id);
+          }} aria-label={`Pause ${s.round.name}`}><Pause className="size-3.5" /><span className="sr-only">Pause</span></Button>}
+          {!running && <Button size="sm" variant={ready && runnable ? "default" : "ghost"} disabled={!runnable} onClick={() => onStart(s.round.id)} aria-label={`Run ${s.round.name}`}><Play className="size-3.5" /><span className="sr-only">Run</span></Button>}
         </div>
         {running && <div className="px-3 pb-2">
           <div role="progressbar" aria-label={`${s.round.name} progress`} aria-valuemin={0} aria-valuemax={s.active_run?.total_count ?? 0} aria-valuenow={s.active_run?.responded_count ?? 0} className="h-1.5 overflow-hidden rounded-full bg-muted">
@@ -90,12 +107,37 @@ export function RoundsBlock({ statuses, issueTitles, onStart, onSelectIssue, set
           </div>
           {(s.active_run?.nudged_count ?? 0) > 0 && <p className="mt-1 text-right text-[11px] text-muted-foreground">{s.active_run?.nudged_count} nudged</p>}
         </div>}
-        {open && <div className="border-t border-border/50 divide-y divide-border/60">{displayedMembers.map((m) =>
-          renderIssue ? renderIssue(m.issue_id) : <button key={m.issue_id} type="button" aria-label={issueTitles[m.issue_id] ?? m.issue_id} onClick={() => onSelectIssue(m.issue_id)} className="flex w-full items-center gap-2 px-4 py-2.5 text-left text-xs hover:bg-muted">
-            <span className={`size-1.5 rounded-full ${running ? "bg-blue-500" : ready ? "bg-emerald-500" : "bg-muted-foreground"}`} />
-            <span className="min-w-0 flex-1 truncate">{issueTitles[m.issue_id] ?? m.issue_id}</span>
-            {m.held_trigger_count > 0 && <span className="text-muted-foreground">{m.held_trigger_count} held {m.held_trigger_count === 1 ? "response" : "responses"}</span>}
-          </button>)}</div>}
+        {open && (() => {
+          const renderMember = (m: RoundStatus["members"][number]) =>
+            renderIssue ? renderIssue(m.issue_id) : <button key={m.issue_id} type="button" aria-label={issueTitles[m.issue_id] ?? m.issue_id} onClick={() => onSelectIssue(m.issue_id)} className="flex w-full items-center gap-2 px-4 py-2.5 text-left text-xs hover:bg-muted">
+              <span className={`size-1.5 rounded-full ${running ? "bg-blue-500" : ready ? "bg-emerald-500" : "bg-muted-foreground"}`} />
+              <span className="min-w-0 flex-1 truncate">{issueTitles[m.issue_id] ?? m.issue_id}</span>
+              {m.held_trigger_count > 0 && <span className="text-muted-foreground">{m.held_trigger_count} held {m.held_trigger_count === 1 ? "response" : "responses"}</span>}
+            </button>;
+          // While a run is active, answered members fold away behind their own
+          // collapse so the list reads as "what still needs me". Outside a run
+          // the full planned list shows as before (held counts stay inline).
+          // Search narrows both lists via displayedMembers.
+          const answeredDisplayed = displayedMembers.filter((m) => m.held_trigger_count > 0);
+          const foldAnswered = (running || ready) && answeredDisplayed.length > 0;
+          const pending = foldAnswered ? displayedMembers.filter((m) => m.held_trigger_count === 0) : displayedMembers;
+          const answeredOpen = answeredOpenIds.has(s.round.id);
+          return <div className="border-t border-border/50 divide-y divide-border/60">
+            {pending.map(renderMember)}
+            {foldAnswered && <div>
+              <button type="button" aria-expanded={answeredOpen} aria-label={`${answeredOpen ? "Collapse" : "Expand"} answered in ${s.round.name}`} className="flex w-full items-center gap-1.5 px-4 py-2 text-left text-xs text-muted-foreground hover:bg-muted" onClick={() => setAnsweredOpenIds((prev) => {
+                const next = new Set(prev);
+                if (answeredOpen) next.delete(s.round.id); else next.add(s.round.id);
+                return next;
+              })}>
+                {answeredOpen ? <ChevronDown className="size-3" /> : <ChevronRight className="size-3" />}
+                <Check className="size-3 text-success" />
+                <span>Answered ({answeredDisplayed.length})</span>
+              </button>
+              {answeredOpen && <div className="divide-y divide-border/60 border-t border-border/50">{answeredDisplayed.map(renderMember)}</div>}
+            </div>}
+          </div>;
+        })()}
       </div>;
     })}{filtered.length === 0 && <p className="px-3 py-3 text-xs text-muted-foreground">Nothing here right now.</p>}</div>
     </>}

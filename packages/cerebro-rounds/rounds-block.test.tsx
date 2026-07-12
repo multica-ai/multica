@@ -81,11 +81,38 @@ describe("RoundsBlock", () => {
     expect(screen.getByText("Returns follow-up")).toBeInTheDocument();
   });
 
-  it("shows a green disabled play button when every conversation is done", () => {
-    const completed = status({ active_run: { id: "run-1", round_id: "round-1", status: "ready", total_count: 1, responded_count: 1, stalled_count: 0, nudged_count: 0, started_at: "", ready_at: "", completed_at: null, created_at: "" } });
-    render(<RoundsBlock statuses={[completed]} issueTitles={{}} onStart={vi.fn()} onSelectIssue={vi.fn()} />);
+  it("keeps Run enabled on a ready run while replies are held (FIR-3114)", () => {
+    const onStart = vi.fn();
+    const readyRun = status({ active_run: { id: "run-1", round_id: "round-1", status: "ready", total_count: 1, responded_count: 1, stalled_count: 0, nudged_count: 0, started_at: "", ready_at: "", completed_at: null, created_at: "" } });
+    render(<RoundsBlock statuses={[readyRun]} issueTitles={{}} onStart={onStart} onSelectIssue={vi.fn()} />);
+    const run = screen.getByRole("button", { name: "Run Daily ideas" });
+    expect(run).toBeEnabled();
+    fireEvent.click(run);
+    expect(onStart).toHaveBeenCalledWith("round-1");
+  });
+
+  it("disables Run when nothing is held, and Pause collapses the surfaced run (FIR-3114)", () => {
+    const onDismiss = vi.fn();
+    const readyRun = status({
+      active_run: { id: "run-1", round_id: "round-1", status: "ready", total_count: 1, responded_count: 1, stalled_count: 0, nudged_count: 0, started_at: "", ready_at: "", completed_at: null, created_at: "" },
+      members: [{ ...status().members[0]!, held_trigger_count: 0 }],
+    });
+    render(<RoundsBlock statuses={[readyRun]} issueTitles={{}} onStart={vi.fn()} onDismiss={onDismiss} onSelectIssue={vi.fn()} />);
     expect(screen.getByRole("button", { name: "Run Daily ideas" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Run Daily ideas" })).toHaveClass("bg-success");
+    expect(screen.getByRole("button", { name: "Collapse Daily ideas" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Pause Daily ideas" }));
+    expect(onDismiss).toHaveBeenCalledWith("round-1");
+    expect(screen.getByRole("button", { name: "Expand Daily ideas" })).toBeInTheDocument();
+  });
+
+  it("folds answered members behind a collapse during a ready run (FIR-3114)", () => {
+    const readyRun = status({ active_run: { id: "run-1", round_id: "round-1", status: "ready", total_count: 1, responded_count: 1, stalled_count: 0, nudged_count: 0, started_at: "", ready_at: "", completed_at: null, created_at: "" } });
+    render(<RoundsBlock statuses={[readyRun]} issueTitles={{ "issue-1": "FIR-42 · Investigate returns" }} onStart={vi.fn()} onSelectIssue={vi.fn()} />);
+    expect(screen.getByText("1/1 answered")).toBeInTheDocument();
+    expect(screen.queryByText("FIR-42 · Investigate returns")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Expand answered in Daily ideas" }));
+    expect(screen.getByText("Answered (1)")).toBeInTheDocument();
+    expect(screen.getByText("FIR-42 · Investigate returns")).toBeInTheDocument();
   });
 
   it("omits stale members when the shared inbox row no longer exists", () => {
@@ -127,10 +154,10 @@ describe("RoundsBlock", () => {
     expect(renderIssue).toHaveBeenCalledWith("issue-1");
   });
 
-  it("shows live run progress and the next-round action", () => {
+  it("shows how many are answered on a ready run and starts the next round", () => {
     const onStart = vi.fn();
     const { container } = render(<RoundsBlock statuses={[status({ active_run: { id: "run-1", round_id: "round-1", status: "ready", total_count: 4, responded_count: 3, stalled_count: 1, nudged_count: 0, started_at: "", ready_at: "", completed_at: null, created_at: "" } })]} issueTitles={{}} onStart={onStart} onSelectIssue={vi.fn()} />);
-    expect(within(container).getByText("3/4 ready")).toBeInTheDocument();
+    expect(within(container).getByText("1/1 answered")).toBeInTheDocument();
     fireEvent.click(within(container).getByRole("button", { name: "Run Daily ideas" }));
     expect(onStart).toHaveBeenCalledWith("round-1");
   });
@@ -149,7 +176,7 @@ describe("RoundsBlock", () => {
       id: "run-1", round_id: "round-1", status: "ready", total_count: 4,
       responded_count: 4, stalled_count: 0, nudged_count: 1, started_at: "",
       ready_at: "", completed_at: null, created_at: "",
-    } })]} issueTitles={{ "issue-1": "FIR-42 · Investigate returns" }} onStart={vi.fn()} onSelectIssue={vi.fn()} />);
+    }, members: [{ ...status().members[0]!, held_trigger_count: 0 }] })]} issueTitles={{ "issue-1": "FIR-42 · Investigate returns" }} onStart={vi.fn()} onSelectIssue={vi.fn()} />);
 
     expect(within(container).getByRole("button", { name: "FIR-42 · Investigate returns" })).toBeVisible();
   });

@@ -232,6 +232,26 @@ func (h *Handler) Start(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, 201, row)
 }
+
+// Dismiss closes the round's surfaced 'ready' run (the UI calls this Pause) so
+// the round collapses back to its planned state. Idempotent — 204 whether or
+// not a ready run existed.
+func (h *Handler) Dismiss(w http.ResponseWriter, r *http.Request) {
+	ws, u, ok := parseContext(w, r)
+	if !ok {
+		return
+	}
+	id, ok := parseParam(w, r, "roundId")
+	if !ok {
+		return
+	}
+	if err := h.Service.DismissRun(r.Context(), ws, u, id); err != nil {
+		handleErr(w, err)
+		return
+	}
+	w.WriteHeader(204)
+}
+
 func (h *Handler) Status(w http.ResponseWriter, r *http.Request) {
 	ws, u, ok := parseContext(w, r)
 	if !ok {

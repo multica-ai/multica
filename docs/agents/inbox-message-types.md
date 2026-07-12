@@ -66,6 +66,21 @@ Collapsed Rounds shows no count. Expanded Rounds provides in-block search and
 renders live members through the shared Inbox row renderer; missing/stale Inbox
 rows are omitted instead of falling back to a second row design.
 
+Round-member issues notify **only inside the Rounds box** (FIR-3114): their
+inbox rows are excluded from the other dynamic-inbox sections, from every
+unread count badge (sidebar/dock hook `useCerebroInboxUnreadCount`, the three
+server count queries in `server/pkg/db/queries/inbox.sql`), and from
+mobile/desktop push + in-app banner (`suppressPushForRoundIssue` in
+`server/cmd/server/notification_listeners.go`). The inbox_item rows are still
+created and keep their read state — inside the Rounds box a member row renders
+unread only while its round has an active run; outside a run new responses
+accumulate quietly until the next round surfaces them. During a run the member
+list folds answered issues (held reply exists) behind an "Answered (n)"
+collapse, the header counts `answered/total`, and a ready run can be paused
+(`POST /api/cerebro/rounds/{roundId}/dismiss`) to collapse the round back to
+its planned state. A batch round auto-starts when every agent response in the
+ready run has received a reply.
+
 The mobile surface is **one shared component**, `MobileRowActions`, exported
 from `@multica/cerebro-inbox`, reused by every row kind so mobile behaviour is
 identical. The row-action component per kind:
