@@ -21,9 +21,11 @@ var providerHTTP5xxRe = regexp.MustCompile(`(^|[^0-9])5[0-9][0-9]([^0-9]|$)`)
 // the same digit-boundary guard as providerHTTP5xxRe. Without this guard the
 // bare substrings "401"/"402"/"403"/"429"/"529" fire on unrelated numbers —
 // e.g. "402913 tokens", "15290ms", "exit status 4030" — misclassifying process
-// or unknown failures as provider billing / rate-limit errors. That skews both
-// observability and the retry path (a transient provider error is retried; a
-// hard process failure should not be masqueraded as one). The 5xx bucket was
+// or unknown failures as provider billing / rate-limit errors. That pollutes
+// failure observability: a genuine process crash gets filed under a provider
+// bucket, masking the real cause on failure dashboards. (It does not change
+// auto-retry — Classify only ever returns agent_error.* reasons, none of which
+// are in internal/service/task.go's retryableReasons set.) The 5xx bucket was
 // already anchored for exactly this reason (MUL-1949); these codes were not.
 var (
 	httpAuthCodeRe     = regexp.MustCompile(`(^|[^0-9])(401|403)([^0-9]|$)`)

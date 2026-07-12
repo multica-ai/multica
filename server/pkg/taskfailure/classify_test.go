@@ -139,8 +139,9 @@ func TestClassifyRules(t *testing.T) {
 
 		// 15. Digit-boundary regression: 3-digit HTTP status codes must NOT
 		//     match when embedded in a longer number. Before the fix these
-		//     landed in provider auth/quota/capacity buckets and, worse,
-		//     masked hard process failures as retryable provider errors.
+		//     landed in provider auth/quota/capacity buckets, masking hard
+		//     process failures under a provider reason and polluting failure
+		//     observability.
 		{"402 embedded not quota", "agent consumed 402913 tokens before crashing", ReasonAgentUnknown},
 		{"529 embedded not capacity", "request latency was 15290ms; then it panicked: signal killed", ReasonAgentProcessFailure},
 		{"403 embedded not auth", "processed 4030 items, then exit status 1", ReasonAgentProcessFailure},
