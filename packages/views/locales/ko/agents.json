@@ -136,6 +136,8 @@
     "archive_failed_toast": "에이전트를 보관하지 못했습니다",
     "agent_restored_toast": "에이전트를 복원했습니다",
     "restore_failed_toast": "에이전트를 복원하지 못했습니다",
+    "dm": "DM",
+    "dm_no_permission_toast": "이 에이전트와 채팅할 권한이 없습니다.",
     "assign_work": "작업 할당",
     "more_actions_aria": "에이전트 작업",
     "updated": "{{when}} 업데이트됨"

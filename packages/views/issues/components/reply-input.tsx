@@ -9,7 +9,7 @@ import { useFileUpload } from "@multica/core/hooks/use-file-upload";
 import { api } from "@multica/core/api";
 import type { Attachment } from "@multica/core/types";
 import { contentReferencesAttachment } from "@multica/core/types";
-import { enterKey, formatShortcut, modKey } from "@multica/core/platform";
+import { formatShortcut, useShortcut } from "@multica/core/shortcuts";
 import { useCommentDraftStore, type CommentDraftKey } from "@multica/core/issues/stores";
 import { cn } from "@multica/ui/lib/utils";
 import type { AvatarSize } from "@multica/ui/lib/avatar-size";
@@ -52,6 +52,7 @@ function ReplyInput({
   draftKey,
 }: ReplyInputProps) {
   const { t } = useT("issues");
+  const sendShortcut = useShortcut("send");
   const placeholderText = placeholder ?? t(($) => $.reply.placeholder);
   const editorRef = useRef<ContentEditorRef>(null);
   // If a draft key is provided, hydrate from store on mount (defaultValue is
@@ -216,7 +217,9 @@ function ReplyInput({
             onClick={handleSubmit}
             disabled={isEmpty}
             loading={submitting}
-            tooltip={`${t(($) => $.comment.send_tooltip)} · ${formatShortcut(modKey, enterKey)}`}
+            tooltip={sendShortcut
+              ? `${t(($) => $.comment.send_tooltip)} · ${formatShortcut(sendShortcut)}`
+              : t(($) => $.comment.send_tooltip)}
           />
         </div>
         {isDragOver && <FileDropOverlay />}

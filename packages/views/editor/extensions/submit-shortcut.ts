@@ -1,44 +1,98 @@
 import { Extension } from "@tiptap/core";
+import { Plugin } from "@tiptap/pm/state";
+import {
+  getShortcut,
+  isPlainShortcut,
+  shortcutMatchesEvent,
+  type ShortcutChord,
+} from "@multica/core/shortcuts";
+import { isImeComposing } from "@multica/core/utils";
+
+export function shouldHandleSubmitShortcut(
+  event: KeyboardEvent,
+  options: {
+    configuredShortcut: ShortcutChord | null;
+    composing: boolean;
+  },
+): boolean {
+  return (
+    !event.repeat &&
+    !options.composing &&
+    !isImeComposing(event) &&
+    shortcutMatchesEvent(options.configuredShortcut, event)
+  );
+}
 
 /**
- * `onSubmit` must return true when it actually handled the event and false
- * when there's no submit handler wired up. That lets us fall through to the
- * default Enter behaviour — inserting a newline — when appropriate.
- *
- * `submitOnEnter` — when true, bare Enter also submits (chat-style). When
- * false, only Mod-Enter submits and bare Enter keeps its default (newline).
+ * When plain Enter becomes Send, Shift+Enter must inherit the old Enter
+ * behavior instead of Tiptap's normal hard-break behavior. Replaying the
+ * editor's Enter keymap preserves paragraphs, patched list exit/continuation,
+ * code-block newlines, and open suggestion pickers.
  */
-export function createSubmitExtension(
+export function shouldReplayNativeEnter(
+  event: KeyboardEvent,
+  configuredShortcut: ShortcutChord | null,
+  composing: boolean,
+): boolean {
+  return (
+    !composing &&
+    !isImeComposing(event) &&
+    isPlainShortcut(configuredShortcut, "Enter") &&
+    event.key === "Enter" &&
+    event.shiftKey &&
+    !event.metaKey &&
+    !event.ctrlKey &&
+    !event.altKey
+  );
+}
+
+/**
+ * Tiered-priority dynamic key handler. Suggestion and slash-command plugins
+ * get first refusal, while submit still runs before the base editor keymap.
+ */
+export function createSubmitShortcutExtension(
   onSubmit: () => boolean,
-  { submitOnEnter }: { submitOnEnter: boolean },
 ) {
   return Extension.create({
     name: "submitShortcut",
-    addKeyboardShortcuts() {
-      const shortcuts: Record<string, () => boolean> = {
-        "Mod-Enter": () => {
-          // IME guard — same as Enter below. While a composition is open the
-          // composed text is not in the document yet, so submitting here
-          // would send the doc WITHOUT what the user just typed (e.g. paste
-          // a screenshot, type a pinyin sentence, hit ⌘↵ before the buffer
-          // commits — the submission carries only the screenshot).
-          if (this.editor.view.composing) return false;
-          return onSubmit();
-        },
-      };
-      if (submitOnEnter) {
-        shortcuts.Enter = () => {
-          const editor = this.editor;
-          // IME guard — never submit while composing a multi-key input
-          // (Chinese pinyin, Japanese kana, etc). `view.composing` is set
-          // by ProseMirror between compositionstart and compositionend.
-          if (editor.view.composing) return false;
-          // Let Enter insert a newline inside a code block.
-          if (editor.isActive("codeBlock")) return false;
-          return onSubmit();
-        };
-      }
-      return shortcuts;
+    // Mention/slash extensions use 101, so open pickers get first refusal.
+    // Default editor keymaps use 100; reverse extension order places this
+    // late-added handler ahead of them while keeping picker priority intact.
+    priority: 100,
+    addProseMirrorPlugins() {
+      const editor = this.editor;
+      let replayingEnter = false;
+      return [
+        new Plugin({
+          props: {
+            handleKeyDown(view, event) {
+              if (replayingEnter) return false;
+              const shortcut = getShortcut("send");
+
+              if (
+                shouldReplayNativeEnter(event, shortcut, view.composing)
+              ) {
+                replayingEnter = true;
+                try {
+                  return editor.commands.keyboardShortcut("Enter");
+                } finally {
+                  replayingEnter = false;
+                }
+              }
+
+              if (
+                !shouldHandleSubmitShortcut(event, {
+                  configuredShortcut: shortcut,
+                  composing: view.composing,
+                })
+              ) {
+                return false;
+              }
+              return onSubmit();
+            },
+          },
+        }),
+      ];
     },
   });
 }

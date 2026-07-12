@@ -7,6 +7,7 @@ import {
   Bot,
   Clock3,
   Lock,
+  MessageSquare,
   MoreHorizontal,
   Plus,
   Server,
@@ -106,7 +107,11 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
   // signature handles the not-found / loading case internally so the early
   // returns below don't violate the rules of hooks. Backend gates archive
   // and restore identically to edit, so a single `canEdit` covers them all.
-  const { canAssign, canEdit } = useAgentPermissions(agent, wsId);
+  const {
+    canAssign,
+    canEdit,
+    isLoading: permissionsLoading,
+  } = useAgentPermissions(agent, wsId);
 
   const [confirmArchive, setConfirmArchive] = useState(false);
 
@@ -253,6 +258,20 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
     ? members.find((m) => m.user_id === agent.owner_id) ?? null
     : null;
 
+  // Chat shares the invocation gate with assignment (MUL-3963): starting a
+  // chat triggers agent runs. The button stays visible either way — a denied
+  // click explains itself instead of the affordance silently missing. While
+  // membership is still resolving the decision is undetermined, so the button
+  // is disabled rather than toasting a false "no access" at a real member.
+  const handleDm = () => {
+    if (permissionsLoading) return;
+    if (!canAssign.allowed) {
+      toast.error(t(($) => $.detail.dm_no_permission_toast));
+      return;
+    }
+    navigation.push(`${paths.chat()}?agent=${agent.id}`);
+  };
+
   return (
     <div className="flex flex-1 min-h-0 flex-col">
       <DetailHeader
@@ -262,6 +281,8 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
         backHref={paths.agents()}
         canAssign={canAssign.allowed}
         canArchive={canEdit.allowed}
+        dmPending={permissionsLoading}
+        onDm={handleDm}
         onAssign={() =>
           useModalStore
             .getState()
@@ -367,6 +388,8 @@ function DetailHeader({
   backHref,
   canAssign,
   canArchive,
+  dmPending,
+  onDm,
   onAssign,
   onArchive,
 }: {
@@ -376,6 +399,8 @@ function DetailHeader({
   backHref: string;
   canAssign: boolean;
   canArchive: boolean;
+  dmPending: boolean;
+  onDm: () => void;
   onAssign: () => void;
   onArchive: () => void;
 }) {
@@ -437,6 +462,18 @@ function DetailHeader({
           </div>
 
           <div className="flex shrink-0 items-center gap-2 self-end lg:self-start">
+            {!isArchived && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={dmPending}
+                onClick={onDm}
+              >
+                <MessageSquare className="h-4 w-4" aria-hidden="true" />
+                {t(($) => $.detail.dm)}
+              </Button>
+            )}
             {!isArchived && canAssign && (
               <Button type="button" size="sm" onClick={onAssign}>
                 <Plus className="h-4 w-4" aria-hidden="true" />

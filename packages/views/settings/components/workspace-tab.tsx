@@ -323,7 +323,7 @@ export function WorkspaceTab() {
           <SettingsRow
             label={t(($) => $.workspace.logo_label)}
             description={t(($) => $.workspace.click_logo_hint)}
-            controlClassName="sm:max-w-none"
+            size="none"
           >
             <div className="flex justify-start sm:justify-end">
               <AvatarUploadControl
@@ -360,7 +360,7 @@ export function WorkspaceTab() {
 
           <SettingsRow
             label={t(($) => $.workspace.name_label)}
-            controlClassName="sm:w-80"
+            size="text"
           >
             <Input
               type="text"
@@ -376,7 +376,7 @@ export function WorkspaceTab() {
 
           <SettingsRow
             label={t(($) => $.workspace.description_label)}
-            controlClassName="sm:w-96"
+            size="text"
             align="start"
           >
             <Textarea
@@ -395,7 +395,7 @@ export function WorkspaceTab() {
 
           <SettingsRow
             label={t(($) => $.workspace.context_label)}
-            controlClassName="sm:w-96"
+            size="text"
             align="start"
           >
             <Textarea
@@ -414,7 +414,7 @@ export function WorkspaceTab() {
 
           <SettingsRow
             label={t(($) => $.workspace.slug_label)}
-            controlClassName="sm:w-80"
+            size="text"
           >
               <div className="rounded-lg border border-input bg-muted/50 px-2.5 py-1.5 font-mono text-xs text-muted-foreground">
                 {workspace.slug}
@@ -426,7 +426,7 @@ export function WorkspaceTab() {
             description={t(($) => $.workspace.issue_prefix_hint, {
               example: `${normalizedPrefix || workspace.issue_prefix}-123`,
             })}
-            controlClassName="sm:w-40"
+            size="code"
           >
               <Input
                 type="text"

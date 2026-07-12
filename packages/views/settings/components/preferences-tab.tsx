@@ -98,7 +98,7 @@ export function PreferencesTab() {
         <SettingsCard>
           <SettingsRow
             label={t(($) => $.preferences.theme.title)}
-            controlClassName="sm:w-48"
+            size="select"
           >
             <Select
               value={theme}
@@ -131,7 +131,7 @@ export function PreferencesTab() {
 
           <SettingsRow
             label={t(($) => $.preferences.language.title)}
-            controlClassName="sm:w-48"
+            size="select"
           >
             <Select
               value={currentLocale}
@@ -240,7 +240,7 @@ function TimezoneRow() {
     <SettingsRow
       label={t(($) => $.preferences.timezone.title)}
       description={t(($) => $.preferences.timezone.hint)}
-      controlClassName="sm:w-72"
+      size="select-wide"
     >
       <Select
         value={value}

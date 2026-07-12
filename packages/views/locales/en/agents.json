@@ -144,6 +144,8 @@
     "archive_failed_toast": "Failed to archive agent",
     "agent_restored_toast": "Agent restored",
     "restore_failed_toast": "Failed to restore agent",
+    "dm": "DM",
+    "dm_no_permission_toast": "You don't have access to chat with this agent.",
     "assign_work": "Assign work",
     "more_actions_aria": "Agent actions",
     "updated": "Updated {{when}}"

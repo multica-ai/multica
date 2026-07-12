@@ -108,7 +108,7 @@ export function AccountTab() {
           <SettingsRow
             label={t(($) => $.account.avatar_label)}
             description={t(($) => $.account.click_avatar_hint)}
-            controlClassName="sm:max-w-none"
+            size="none"
           >
             <div className="flex justify-start sm:justify-end">
               <AvatarUploadControl
@@ -137,7 +137,7 @@ export function AccountTab() {
 
           <SettingsRow
             label={t(($) => $.account.name_label)}
-            controlClassName="sm:w-80"
+            size="text"
           >
             <Input
               type="text"
@@ -153,7 +153,7 @@ export function AccountTab() {
           <SettingsRow
             label={t(($) => $.account.profile_description_label)}
             description={t(($) => $.account.profile_description_hint)}
-            controlClassName="sm:w-96"
+            size="text"
             align="start"
           >
             <div>

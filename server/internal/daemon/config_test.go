@@ -660,6 +660,80 @@ func TestLoadConfig_UsesCodexDesktopAppBundleFallback(t *testing.T) {
 	}
 }
 
+// Regression for #5205: after OpenAI moved the Desktop app to ChatGPT.app,
+// Multica must resolve the bundled CLI under ChatGPT.app (and prefer it over
+// the legacy Codex.app path when both exist).
+func TestLoadConfig_UsesChatGPTAppBundleCodexPath(t *testing.T) {
+	pathDir := t.TempDir()
+	fakeChatGPT := filepath.Join(pathDir, "ChatGPT.app", "Contents", "Resources", "codex")
+	fakeLegacy := filepath.Join(pathDir, "Codex.app", "Contents", "Resources", "codex")
+	for _, p := range []string{fakeChatGPT, fakeLegacy} {
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatalf("mkdir: %v", err)
+		}
+		if err := os.WriteFile(p, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+			t.Fatalf("write fake CLI: %v", err)
+		}
+	}
+
+	oldBundlePaths := codexDesktopAppBundlePaths
+	// Prefer ChatGPT first, matching production ordering.
+	codexDesktopAppBundlePaths = func() []string { return []string{fakeChatGPT, fakeLegacy} }
+	t.Cleanup(func() { codexDesktopAppBundlePaths = oldBundlePaths })
+
+	t.Setenv("PATH", t.TempDir())
+	t.Setenv("SHELL", filepath.Join(t.TempDir(), "fish"))
+	t.Setenv("MULTICA_DAEMON_ID", "11111111-1111-1111-1111-111111111111")
+	pinNonCodexAgentsToMissingPaths(t)
+
+	cfg, err := LoadConfig(Overrides{
+		ServerURL:      "http://localhost:0",
+		WorkspacesRoot: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	got, ok := cfg.Agents["codex"]
+	if !ok {
+		t.Fatalf("expected codex agent from ChatGPT.app bundle, got %#v", cfg.Agents)
+	}
+	if got.Path != fakeChatGPT {
+		t.Fatalf("codex path = %q, want ChatGPT.app path %q", got.Path, fakeChatGPT)
+	}
+}
+
+func TestCodexDesktopAppBundlePaths_IncludesChatGPTAndLegacy(t *testing.T) {
+	paths := codexDesktopAppBundlePaths()
+	var hasChatGPT, hasLegacy bool
+	for _, p := range paths {
+		if strings.Contains(p, "ChatGPT.app") && strings.HasSuffix(filepath.ToSlash(p), "Contents/Resources/codex") {
+			hasChatGPT = true
+		}
+		if strings.Contains(p, "Codex.app") && strings.HasSuffix(filepath.ToSlash(p), "Contents/Resources/codex") {
+			hasLegacy = true
+		}
+	}
+	if !hasChatGPT {
+		t.Fatalf("codexDesktopAppBundlePaths missing ChatGPT.app entry: %#v", paths)
+	}
+	if !hasLegacy {
+		t.Fatalf("codexDesktopAppBundlePaths missing legacy Codex.app entry: %#v", paths)
+	}
+	// New path must be preferred (listed before legacy).
+	chatgptIdx, legacyIdx := -1, -1
+	for i, p := range paths {
+		if chatgptIdx < 0 && strings.Contains(p, "ChatGPT.app") {
+			chatgptIdx = i
+		}
+		if legacyIdx < 0 && strings.Contains(p, "Codex.app") {
+			legacyIdx = i
+		}
+	}
+	if chatgptIdx < 0 || legacyIdx < 0 || chatgptIdx > legacyIdx {
+		t.Fatalf("expected ChatGPT.app before Codex.app, got indices chat=%d legacy=%d paths=%#v", chatgptIdx, legacyIdx, paths)
+	}
+}
+
 func TestLoadConfig_CodexDesktopFallbackDoesNotOverrideExplicitPath(t *testing.T) {
 	pathDir := t.TempDir()
 	fakeCodex := filepath.Join(pathDir, "Codex.app", "Contents", "Resources", "codex")

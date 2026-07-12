@@ -136,6 +136,8 @@
     "archive_failed_toast": "归档智能体失败",
     "agent_restored_toast": "已恢复智能体",
     "restore_failed_toast": "恢复智能体失败",
+    "dm": "私信",
+    "dm_no_permission_toast": "你没有权限与该智能体聊天。",
     "assign_work": "分配工作",
     "more_actions_aria": "智能体操作",
     "updated": "{{when}}更新"
