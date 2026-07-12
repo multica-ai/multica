@@ -74,6 +74,10 @@ type TaskService struct {
 	// completion (not dependent on the agent calling rename_session). Set from
 	// router.go; nil-safe.
 	WorkflowSessionStamper WorkflowSessionStamper
+	// CEREBRO-PATCH(workflow-loop-advancer): FIR-3052 — advance Plan -> Build on
+	// plan-task completion so the loop moves without a manual status flip. Set
+	// from router.go; nil-safe.
+	WorkflowLoopAdvancer WorkflowLoopAdvancer
 
 	analyticsContextMu    sync.Mutex
 	analyticsContextCache map[string]analytics.TaskContext
@@ -104,6 +108,13 @@ type TaskWakeupNotifier interface {
 // upstream service package free of a cerebro import.
 type WorkflowSessionStamper interface {
 	StampOnComplete(ctx context.Context, task db.AgentTaskQueue)
+}
+
+// CEREBRO-PATCH(workflow-loop-advancer-iface): FIR-3052 step-hook seam.
+// Implemented by cerebro/workflows.LoopPhaseAdvancer; the interface keeps the
+// upstream service package free of a cerebro import.
+type WorkflowLoopAdvancer interface {
+	AdvanceOnComplete(ctx context.Context, task db.AgentTaskQueue)
 }
 
 // CEREBRO-PATCH(auto-pause-invoker): cerebro auto-pause invoker seam.
@@ -1762,6 +1773,10 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 	// carried loop_phase; runs post-commit so it never blocks completion.
 	if s.WorkflowSessionStamper != nil {
 		s.WorkflowSessionStamper.StampOnComplete(ctx, task)
+	}
+	// CEREBRO-PATCH(workflow-loop-advancer-call): FIR-3052 — advance Plan -> Build.
+	if s.WorkflowLoopAdvancer != nil {
+		s.WorkflowLoopAdvancer.AdvanceOnComplete(ctx, task)
 	}
 
 	// For chat tasks, broadcast chat:done. The assistant reply, the

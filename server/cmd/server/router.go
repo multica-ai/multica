@@ -769,6 +769,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	workflowPlanDocuments := cerebroworkflows.NewPlanDocumentService(queries)
 	if opts.WorkflowService != nil {
 		opts.WorkflowService.WithPlanDocuments(workflowPlanDocuments)
+		// CEREBRO-PATCH(workflow-loop-advancer-wire): FIR-3052 — advance Plan -> Build on plan-task completion via the engine's own Dispatch; nil-safe seam.
+		h.TaskService.WorkflowLoopAdvancer = cerebroworkflows.NewLoopPhaseAdvancer(opts.WorkflowService)
 	}
 	// CEREBRO-PATCH(cerebro-workflows-routes): JEH-1047 workflow handler instance; JEH-1108 PR3 wires the engine Service so the test-only /_test/cron-sweep endpoint can fire the sweeper synchronously.
 	cerebroWorkflowsHandler := cerebroworkflows.NewHandler(cerebroQueries).
