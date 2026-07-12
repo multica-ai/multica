@@ -30,8 +30,8 @@ import (
 const (
 	claudeOAuthUsageURL = "https://api.anthropic.com/api/oauth/usage"
 	// claudeOAuthUsageMinInterval throttles endpoint calls per account so a
-	// burst of task completions doesn't hammer Anthropic — usage barely
-	// moves in under a minute anyway.
+	// burst of task completions doesn't hammer the provider — usage barely
+	// moves in under a minute anyway. Shared by all provider fetchers.
 	claudeOAuthUsageMinInterval = time.Minute
 )
 
@@ -41,14 +41,26 @@ var claudeOAuthUsageHTTP = &http.Client{Timeout: 10 * time.Second}
 // account ID for the throttle above.
 var claudeOAuthUsageLastFetch sync.Map // accountID string -> time.Time
 
-// maybeReportClaudeOAuthUsage fetches the exact usage windows for the
+// maybeReportProviderUsageWindows fetches the exact usage windows for the
 // account behind the given runtime and reports them to the server.
 // Best-effort on every path: missing credentials, keychain denial, network
 // errors and non-200s are logged at debug/warn and never block the
-// task-completion path. No-op for non-claude providers.
-func (d *Daemon) maybeReportClaudeOAuthUsage(ctx context.Context, runtimeID, accountID string, log *slog.Logger) {
+// task-completion path. No-op for providers without a usage source
+// (claude → OAuth usage endpoint; codex → ChatGPT wham/usage endpoint,
+// see cerebro_account_codex_usage.go).
+func (d *Daemon) maybeReportProviderUsageWindows(ctx context.Context, runtimeID, accountID string, log *slog.Logger) {
 	rt := d.findRuntime(runtimeID)
-	if rt == nil || strings.ToLower(strings.TrimSpace(rt.Provider)) != "claude" {
+	if rt == nil {
+		return
+	}
+	provider := strings.ToLower(strings.TrimSpace(rt.Provider))
+	var fetch func(context.Context) (cerebroaccount.OAuthUsageSnapshot, error)
+	switch provider {
+	case "claude":
+		fetch = fetchClaudeUsageSnapshot
+	case "codex":
+		fetch = fetchCodexUsageSnapshot
+	default:
 		return
 	}
 	if last, ok := claudeOAuthUsageLastFetch.Load(accountID); ok {
@@ -58,25 +70,36 @@ func (d *Daemon) maybeReportClaudeOAuthUsage(ctx context.Context, runtimeID, acc
 	}
 	claudeOAuthUsageLastFetch.Store(accountID, time.Now())
 
-	token, err := readClaudeOAuthToken(time.Now())
+	snap, err := fetch(ctx)
 	if err != nil {
-		// Expected on machines where Claude Code uses an API key or is not
-		// logged in — debug, not warn.
-		log.Debug("claude oauth token unavailable", "runtime_id", runtimeID, "error", err)
-		return
-	}
-	snap, err := fetchClaudeOAuthUsage(ctx, token)
-	if err != nil {
-		log.Warn("fetch claude oauth usage failed", "runtime_id", runtimeID, "error", err)
+		// Missing/stale credentials are expected on machines that use an
+		// API key or are not logged in — debug. Real fetch failures warn.
+		if errors.Is(err, cerebroaccount.ErrOAuthTokenUnavailable) {
+			log.Debug("provider usage token unavailable",
+				"provider", provider, "runtime_id", runtimeID, "error", err)
+		} else {
+			log.Warn("fetch provider usage failed",
+				"provider", provider, "runtime_id", runtimeID, "error", err)
+		}
 		return
 	}
 	if !snap.HasSignal() {
 		return
 	}
 	if err := d.client.ReportAccountUsageWindows(ctx, accountID, snap); err != nil {
-		log.Warn("report claude oauth usage failed",
-			"account_id", accountID, "runtime_id", runtimeID, "error", err)
+		log.Warn("report provider usage failed",
+			"provider", provider, "account_id", accountID, "runtime_id", runtimeID, "error", err)
 	}
+}
+
+// fetchClaudeUsageSnapshot resolves the Claude Code OAuth token and calls
+// the OAuth usage endpoint.
+func fetchClaudeUsageSnapshot(ctx context.Context) (cerebroaccount.OAuthUsageSnapshot, error) {
+	token, err := readClaudeOAuthToken(time.Now())
+	if err != nil {
+		return cerebroaccount.OAuthUsageSnapshot{}, err
+	}
+	return fetchClaudeOAuthUsage(ctx, token)
 }
 
 // fetchClaudeOAuthUsage calls the OAuth usage endpoint with the given
