@@ -134,8 +134,7 @@ describe("comment composers", () => {
 
     expect(screen.getByPlaceholderText("Leave a comment...")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Attach file" })).toBeInTheDocument();
-    // pin toggle + attach + submit
-    expect(container.querySelectorAll("button")).toHaveLength(3);
+    expect(container.querySelectorAll("button")).toHaveLength(2);
 
     const shell = screen.getByTestId("drop-zone");
     expect(shell.className).not.toMatch(/max-h-/);
@@ -229,30 +228,18 @@ describe("comment composers", () => {
   });
 });
 
-describe("sticky composer toggle", () => {
-  it("shows the unpin control and caps editor height while sticky is on (default)", () => {
+describe("sticky composer preference", () => {
+  it("caps the editor height while the sticky preference is on (default)", () => {
     renderCommentInput();
 
-    const toggle = screen.getByRole("button", { name: "Unpin comment bar" });
-    expect(toggle).toHaveAttribute("aria-pressed", "true");
     // The height cap lives on the editor wrapper, not the card shell.
     expect(screen.getByTestId("editor").parentElement?.className).toContain("max-h-[40vh]");
   });
 
-  it("toggles the store off and back on from the bar", () => {
+  it("lets the editor grow when the preference is off", () => {
+    useCommentComposerStore.setState({ sticky: false });
     renderCommentInput();
 
-    fireEvent.click(screen.getByRole("button", { name: "Unpin comment bar" }));
-    expect(useCommentComposerStore.getState().sticky).toBe(false);
     expect(screen.getByTestId("editor").parentElement?.className).not.toContain("max-h-[40vh]");
-
-    fireEvent.click(screen.getByRole("button", { name: "Pin comment bar to bottom" }));
-    expect(useCommentComposerStore.getState().sticky).toBe(true);
-  });
-
-  it("does not render a pin toggle on thread replies", () => {
-    renderReplyInput();
-
-    expect(screen.queryByRole("button", { name: /pin comment bar/i })).toBeNull();
   });
 });

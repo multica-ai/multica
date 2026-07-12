@@ -26,6 +26,10 @@
       "browser_suffix": " (browser)",
       "hint": "Used for dashboards, charts, and any 'today' label shown to you. It's a personal preference that applies across all your workspaces.",
       "sync_failed": "Failed to save your timezone preference."
+    },
+    "sticky_comment_bar": {
+      "title": "Sticky comment bar",
+      "hint": "Keep the comment bar pinned to the bottom while scrolling an issue page."
     }
   },
   "chat": {

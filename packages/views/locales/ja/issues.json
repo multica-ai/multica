@@ -290,8 +290,6 @@
     "reply_count_other": "返信 {{count}} 件",
     "leave_comment_placeholder": "コメントを残す...",
     "send_tooltip": "送信",
-    "pin_composer_tooltip": "コメントバーを下部に固定",
-    "unpin_composer_tooltip": "コメントバーの固定を解除",
     "trigger_source_issue_assignee": "担当",
     "trigger_source_mention_agent": "@メンション",
     "trigger_source_mention_squad_leader": "Squad",

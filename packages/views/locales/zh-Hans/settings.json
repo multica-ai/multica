@@ -26,6 +26,10 @@
       "browser_suffix": "（浏览器）",
       "hint": "用于仪表盘、图表和「今天」标签。这是个人偏好，在你的所有工作区中通用。",
       "sync_failed": "保存时区偏好失败。"
+    },
+    "sticky_comment_bar": {
+      "title": "固定评论栏",
+      "hint": "滚动 issue 页面时，评论栏始终固定在底部。"
     }
   },
   "chat": {

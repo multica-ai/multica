@@ -290,8 +290,6 @@
     "reply_count_other": "{{count}} 条回复",
     "leave_comment_placeholder": "留下评论...",
     "send_tooltip": "发送",
-    "pin_composer_tooltip": "将评论栏固定在底部",
-    "unpin_composer_tooltip": "取消固定评论栏",
     "trigger_source_issue_assignee": "assignee",
     "trigger_source_mention_agent": "@mention",
     "trigger_source_mention_squad_leader": "squad",

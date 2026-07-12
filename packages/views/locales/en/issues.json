@@ -298,8 +298,6 @@
     "reply_count_other": "{{count}} replies",
     "leave_comment_placeholder": "Leave a comment...",
     "send_tooltip": "Send",
-    "pin_composer_tooltip": "Pin comment bar to bottom",
-    "unpin_composer_tooltip": "Unpin comment bar",
     "trigger_source_issue_assignee": "assignee",
     "trigger_source_mention_agent": "@mention",
     "trigger_source_mention_squad_leader": "squad",

@@ -81,6 +81,7 @@ vi.mock("@multica/core/auth", async () => {
 });
 
 import { PreferencesTab } from "./preferences-tab";
+import { useCommentComposerStore } from "@multica/core/issues/stores";
 
 const TEST_RESOURCES = {
   en: { common: enCommon, auth: enAuth, settings: enSettings },
@@ -309,5 +310,31 @@ describe("PreferencesTab — Timezone section", () => {
       // so the picker switches back to "(browser)" without a refetch.
       expect(mockSetUser).toHaveBeenCalledWith(clearedUser);
     });
+  });
+});
+
+describe("PreferencesTab — Sticky comment bar", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    userRef.current = null;
+    useCommentComposerStore.setState({ sticky: true });
+  });
+
+  afterEach(() => {
+    cleanup();
+  });
+
+  it("renders on by default and toggles the preference off with a saved toast", async () => {
+    const user = userEvent.setup();
+    render(<PreferencesTab />, { wrapper: I18nWrapper });
+
+    const toggle = screen.getByRole("switch", { name: "Sticky comment bar" });
+    expect(toggle).toHaveAttribute("aria-checked", "true");
+
+    await user.click(toggle);
+
+    expect(useCommentComposerStore.getState().sticky).toBe(false);
+    expect(toggle).toHaveAttribute("aria-checked", "false");
+    expect(mockToastSuccess).toHaveBeenCalledTimes(1);
   });
 });
