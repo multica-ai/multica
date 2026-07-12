@@ -258,6 +258,28 @@ function TraeLogo({ className }: { className: string }) {
   return <img src={TRAE_ICON} alt="Trae" className={className} />;
 }
 
+// xAI Grok Build — stylized diagonal slash mark on a dark tile.
+function GrokLogo({ className }: { className: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" className={className}>
+      <rect width="24" height="24" rx="5" fill="#0A0A0A" />
+      <path
+        d="M6.5 17.5L17.5 6.5"
+        stroke="white"
+        strokeWidth="2.4"
+        strokeLinecap="round"
+      />
+      <path
+        d="M9.5 17.5L17.5 9.5"
+        stroke="white"
+        strokeWidth="2.4"
+        strokeLinecap="round"
+        opacity="0.55"
+      />
+    </svg>
+  );
+}
+
 export function ProviderLogo({
   provider,
   className = "h-4 w-4",
@@ -294,6 +316,8 @@ export function ProviderLogo({
       return <AntigravityLogo className={className} />;
     case "traecli":
       return <TraeLogo className={className} />;
+    case "grok":
+      return <GrokLogo className={className} />;
     default:
       return <Monitor className={className} />;
   }

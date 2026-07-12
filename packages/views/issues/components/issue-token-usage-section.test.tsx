@@ -88,6 +88,13 @@ describe("IssueTokenUsageSection", () => {
     expect(screen.getByText("$0.02 · in 2.0k · out 100 · cache 30.0k")).toBeInTheDocument();
   });
 
+  it("expands a per-run breakdown labelled by trigger type", () => {
+    render(wrap(<IssueTokenUsageSection usage={USAGE} />));
+    fireEvent.click(screen.getByText("2 runs"));
+    expect(screen.getByText("Comment")).toBeInTheDocument();
+    expect(screen.getByText("Assignment")).toBeInTheDocument();
+  });
+
   it("explains cache read/write in a tooltip", () => {
     render(wrap(<IssueTokenUsageSection usage={USAGE} />));
     expect(screen.getByText("Cache").closest("[title]")).toHaveAttribute(

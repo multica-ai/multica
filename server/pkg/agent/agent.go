@@ -1,6 +1,6 @@
 // Package agent provides a unified interface for executing prompts via
 // coding agents (Claude Code, CodeBuddy, Codex, Copilot, OpenCode, OpenClaw,
-// Hermes, Pi, Cursor, Kimi, Kiro, Antigravity, Qoder). It mirrors the
+// Hermes, Pi, Cursor, Kimi, Kiro, Antigravity, Qoder, Grok). It mirrors the
 // happy-cli AgentBackend pattern, translated to idiomatic Go.
 package agent
 
@@ -127,13 +127,13 @@ type Result struct {
 
 // Config configures a Backend instance.
 type Config struct {
-	ExecutablePath string            // path to CLI binary (claude, codebuddy, codex, copilot, opencode, openclaw, hermes, pi, cursor, kimi, kiro-cli, agy, qodercli)
+	ExecutablePath string            // path to CLI binary (claude, codebuddy, codex, copilot, opencode, openclaw, hermes, pi, cursor, kimi, kiro-cli, agy, qodercli, grok)
 	Env            map[string]string // extra environment variables
 	Logger         *slog.Logger
 }
 
 // New creates a Backend for the given agent type.
-// Supported types: "claude", "codebuddy", "codex", "copilot", "opencode", "openclaw", "hermes", "pi", "cursor", "kimi", "kiro", "antigravity", "qoder", "traecli".
+// Supported types: "claude", "codebuddy", "codex", "copilot", "opencode", "openclaw", "hermes", "pi", "cursor", "kimi", "kiro", "antigravity", "qoder", "traecli", "grok".
 //
 // SupportedTypes is the canonical whitelist of agent types eligible to back a
 // custom runtime profile. It MUST stay in lockstep with the
@@ -160,6 +160,7 @@ var SupportedTypes = []string{
 	"antigravity",
 	"qoder",
 	"traecli",
+	"grok",
 }
 
 // IsSupportedType reports whether agentType is in the SupportedTypes whitelist.
@@ -208,8 +209,10 @@ func New(agentType string, cfg Config) (Backend, error) {
 		return &qoderBackend{cfg: cfg}, nil
 	case "traecli":
 		return &traecliBackend{cfg: cfg}, nil
+	case "grok":
+		return &grokBackend{cfg: cfg}, nil
 	default:
-		return nil, fmt.Errorf("unknown agent type: %q (supported: claude, codebuddy, codex, copilot, opencode, openclaw, hermes, pi, cursor, kimi, kiro, antigravity, qoder, traecli)", agentType)
+		return nil, fmt.Errorf("unknown agent type: %q (supported: claude, codebuddy, codex, copilot, opencode, openclaw, hermes, pi, cursor, kimi, kiro, antigravity, qoder, traecli, grok)", agentType)
 	}
 }
 
@@ -239,6 +242,7 @@ var launchHeaders = map[string]string{
 	"pi":          "pi (json mode)",
 	"qoder":       "qodercli --acp",
 	"traecli":     "traecli acp serve",
+	"grok":        "grok -p (streaming-json)",
 }
 
 // LaunchHeader returns the user-visible launch skeleton for agentType, or an

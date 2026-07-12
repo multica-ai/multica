@@ -115,6 +115,12 @@ func ListModels(ctx context.Context, providerType, executablePath string) ([]Mod
 		return cachedDiscovery(providerType, func() ([]Model, error) {
 			return discoverTraecliModels(ctx, executablePath)
 		})
+	case "grok":
+		// xAI Grok Build exposes its catalog via `grok models`. Falls back to a
+		// short static list when the CLI is missing or not logged in.
+		return cachedDiscovery(discoveryCacheKey(providerType, executablePath), func() ([]Model, error) {
+			return discoverGrokModels(ctx, executablePath)
+		})
 	case "cursor":
 		return cachedDiscovery(providerType, func() ([]Model, error) {
 			return discoverCursorModels(ctx, executablePath)
@@ -234,6 +240,7 @@ func isRuntimeSpecificModelID(model string) bool {
 func modelHasKnownPrefix(model string) bool {
 	return strings.HasPrefix(model, "claude-") ||
 		strings.HasPrefix(model, "gpt-") ||
+		strings.HasPrefix(model, "grok-") ||
 		strings.HasPrefix(model, "gemini-") ||
 		strings.HasPrefix(model, "auto-gemini-") ||
 		isOpenAIReasoningSeriesID(model)
