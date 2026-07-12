@@ -2,7 +2,7 @@
 //
 // Source: https://models.dev/api.json (MIT, community-maintained,
 // the same dataset OpenCode uses internally).
-// Snapshot: 2026-07-10
+// Snapshot: 2026-07-12
 //
 // Regenerate with: node scripts/generate-pricing.mjs
 
@@ -63,6 +63,9 @@ export const MODEL_PRICING: Readonly<Record<string, {
   "gemini-flash-latest": { input: 0.3, output: 2.5, cacheRead: 0.075, cacheWrite: 0.3 },
   "gemini-flash-lite-latest": { input: 0.1, output: 0.4, cacheRead: 0.025, cacheWrite: 0.1 },
   "gemini-omni-flash-preview": { input: 1.5, output: 17.5, cacheRead: 1.5, cacheWrite: 1.5 },
+  "github-copilot/gpt-5.6-luna": { input: 1, output: 6, cacheRead: 0.1, cacheWrite: 1 },
+  "github-copilot/gpt-5.6-sol": { input: 5, output: 30, cacheRead: 0.5, cacheWrite: 5 },
+  "github-copilot/gpt-5.6-terra": { input: 2.5, output: 15, cacheRead: 0.25, cacheWrite: 2.5 },
   "glm-4.5": { input: 0.6, output: 2.2, cacheRead: 0.11, cacheWrite: 0 },
   "glm-4.5-air": { input: 0.2, output: 1.1, cacheRead: 0.03, cacheWrite: 0 },
   "glm-4.5v": { input: 0.6, output: 1.8, cacheRead: 0.6, cacheWrite: 0.6 },
@@ -115,6 +118,7 @@ export const MODEL_PRICING: Readonly<Record<string, {
   "gpt-5.6-sol": { input: 5, output: 30, cacheRead: 0.5, cacheWrite: 6.25 },
   "gpt-5.6-terra": { input: 2.5, output: 15, cacheRead: 0.25, cacheWrite: 3.125 },
   "gpt-image-2": { input: 5, output: 30, cacheRead: 1.25, cacheWrite: 5 },
+  "gpt-realtime-2.1": { input: 4, output: 24, cacheRead: 0.4, cacheWrite: 4 },
   "grok-4.20-0309-non-reasoning": { input: 1.25, output: 2.5, cacheRead: 0.2, cacheWrite: 1.25 },
   "grok-4.20-0309-reasoning": { input: 1.25, output: 2.5, cacheRead: 0.2, cacheWrite: 1.25 },
   "grok-4.20-multi-agent-0309": { input: 1.25, output: 2.5, cacheRead: 0.2, cacheWrite: 1.25 },
