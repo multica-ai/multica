@@ -7,6 +7,7 @@ import {
   Bot,
   Clock3,
   Lock,
+  MessageSquare,
   MoreHorizontal,
   Plus,
   Server,
@@ -253,6 +254,17 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
     ? members.find((m) => m.user_id === agent.owner_id) ?? null
     : null;
 
+  // Chat shares the invocation gate with assignment (MUL-3963): starting a
+  // chat triggers agent runs. The button stays visible either way — a denied
+  // click explains itself instead of the affordance silently missing.
+  const handleDm = () => {
+    if (!canAssign.allowed) {
+      toast.error(t(($) => $.detail.dm_no_permission_toast));
+      return;
+    }
+    navigation.push(`${paths.chat()}?agent=${agent.id}`);
+  };
+
   return (
     <div className="flex flex-1 min-h-0 flex-col">
       <DetailHeader
@@ -262,6 +274,7 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
         backHref={paths.agents()}
         canAssign={canAssign.allowed}
         canArchive={canEdit.allowed}
+        onDm={handleDm}
         onAssign={() =>
           useModalStore
             .getState()
@@ -367,6 +380,7 @@ function DetailHeader({
   backHref,
   canAssign,
   canArchive,
+  onDm,
   onAssign,
   onArchive,
 }: {
@@ -376,6 +390,7 @@ function DetailHeader({
   backHref: string;
   canAssign: boolean;
   canArchive: boolean;
+  onDm: () => void;
   onAssign: () => void;
   onArchive: () => void;
 }) {
@@ -437,6 +452,17 @@ function DetailHeader({
           </div>
 
           <div className="flex shrink-0 items-center gap-2 self-end lg:self-start">
+            {!isArchived && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={onDm}
+              >
+                <MessageSquare className="h-4 w-4" aria-hidden="true" />
+                {t(($) => $.detail.dm)}
+              </Button>
+            )}
             {!isArchived && canAssign && (
               <Button type="button" size="sm" onClick={onAssign}>
                 <Plus className="h-4 w-4" aria-hidden="true" />

@@ -128,6 +128,8 @@
     "archive_failed_toast": "エージェントをアーカイブできませんでした",
     "agent_restored_toast": "エージェントを復元しました",
     "restore_failed_toast": "エージェントを復元できませんでした",
+    "dm": "DM",
+    "dm_no_permission_toast": "このエージェントとチャットする権限がありません。",
     "assign_work": "作業を割り当てる",
     "more_actions_aria": "エージェントの操作",
     "updated": "{{when}}に更新"

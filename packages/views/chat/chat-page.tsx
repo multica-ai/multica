@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useDefaultLayout } from "react-resizable-panels";
 import { ArrowLeft, MessageSquare } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
@@ -36,7 +36,9 @@ import { ArchivedAgentBanner } from "./components/archived-agent-banner";
  * Selection is URL-addressable via `?session=<id>` so a thread can be
  * deep-linked, opened from a notification, and survive refresh. The chat
  * store's `activeSessionId` stays the source of truth (both surfaces read
- * it); the URL is kept in sync in both directions.
+ * it); the URL is kept in sync in both directions. `?agent=<id>` is the
+ * complementary one-shot deep link for a NEW chat: it starts a fresh compose
+ * bound to that agent and is then stripped from the URL.
  *
  * Starting a chat is where the agent is chosen: the header ⊕ opens an agent
  * picker (see NewChatButton), so the compose box no longer needs its own
@@ -52,6 +54,7 @@ export function ChatPage() {
 
   const c = useChatController({ isActive: true });
   const urlSession = searchParams.get("session") || null;
+  const urlAgent = searchParams.get("agent") || null;
 
   // "Composing a brand-new chat" — the user hit ⊕ but hasn't sent yet, so no
   // session exists. On mobile this decides list-vs-conversation; on desktop the
@@ -122,6 +125,30 @@ export function ChatPage() {
     else c.handleNewChat();
     setComposingNew(true);
   };
+
+  // URL → new chat: `?agent=<id>` is the deep link used by "DM" entry points
+  // (e.g. the agent detail page) to land on a fresh compose bound to that
+  // agent. The permission-filtered agent list loads async, so the intent is
+  // consumed on the render where the agent resolves, then the param is
+  // stripped so refresh / the session sync above don't replay it. The ref
+  // guards the window between replace() and the searchParams actually
+  // updating; it resets once the param is gone so a later identical deep link
+  // fires again. An id that never resolves (access revoked or agent archived
+  // in the meantime) is ignored and the page stays on its default view.
+  const consumedAgentIntent = useRef<string | null>(null);
+  useEffect(() => {
+    if (!urlAgent) {
+      consumedAgentIntent.current = null;
+      return;
+    }
+    if (consumedAgentIntent.current === urlAgent) return;
+    const agent = c.availableAgents.find((a) => a.id === urlAgent);
+    if (!agent) return;
+    consumedAgentIntent.current = urlAgent;
+    startNewChat(agent);
+    replace(wsPaths.chat());
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- consume when the URL param or the resolving agent list changes
+  }, [urlAgent, c.availableAgents]);
 
   const newChatButton = (
     <NewChatButton
