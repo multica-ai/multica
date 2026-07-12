@@ -25,6 +25,7 @@ const EMPTY_ENTRY: ModelRegistryEntry = {
   label: "",
   provider: "",
   context_window: 0,
+  cache_ttl_seconds: 0,
   input_usd_per_mtok: 0,
   output_usd_per_mtok: 0,
   cache_read_usd_per_mtok: 0,
@@ -228,6 +229,20 @@ export function ModelRegistryProposeDialog({
                   min={0}
                   value={fields.context_window}
                   onChange={(e) => setField("context_window", e.target.value)}
+                  className="h-8 text-sm"
+                />
+              </div>
+              <div className="col-span-2 space-y-1.5">
+                <Label htmlFor="mr-cache-ttl" className="text-xs">
+                  Cache lifetime (seconds, 0 = not specified)
+                </Label>
+                <Input
+                  id="mr-cache-ttl"
+                  type="number"
+                  min={0}
+                  step={1}
+                  value={fields.cache_ttl_seconds ?? 0}
+                  onChange={(e) => setField("cache_ttl_seconds", e.target.value)}
                   className="h-8 text-sm"
                 />
               </div>
