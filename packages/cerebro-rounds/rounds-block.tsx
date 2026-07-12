@@ -115,9 +115,12 @@ function ResponsiveRoundPanel({ open, onOpenChange, title, showTrigger = false, 
   return <span className="contents" onClick={(event) => event.stopPropagation()}>
     {showTrigger && <Button type="button" variant="ghost" size="icon-sm" aria-label="Manage rounds" onClick={() => onOpenChange(true)}><Settings className="size-4" /></Button>}
     {isMobile ? <Drawer open={open} onOpenChange={onOpenChange}>
-      <DrawerContent>
+      {/* 85dvh, not 80vh: on phones vh is the large viewport (browser chrome
+          collapsed), so an 80vh drawer overflows the visible area while the
+          URL bar is showing (FIR-3107). dvh tracks what is actually visible. */}
+      <DrawerContent className="data-[vaul-drawer-direction=bottom]:max-h-[85dvh]">
         <DrawerHeader><DrawerTitle>{title}</DrawerTitle></DrawerHeader>
-        <div className="overflow-y-auto px-4 pb-6">{children}</div>
+        <div className="min-h-0 overflow-y-auto px-4 pb-6">{children}</div>
       </DrawerContent>
     </Drawer> : <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-lg">
@@ -133,6 +136,7 @@ export function RoundManager({ statuses, issueTitles, onCreate, onUpdate, onDele
   onCreate: (input: RoundInput) => void; onUpdate: (id: string, input: RoundInput) => void;
   onDelete: (id: string) => void; onRemoveMember: (roundId: string, issueId: string) => void;
 }) {
+  const isMobile = useIsMobile();
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<RoundStatus | null>(null);
   const [creating, setCreating] = useState(false);
@@ -156,12 +160,17 @@ export function RoundManager({ statuses, issueTitles, onCreate, onUpdate, onDele
   };
   return <ResponsiveRoundPanel open={open} onOpenChange={setOpen} title="Manage rounds" showTrigger>
       {creating ? <div className="grid gap-4">
-        <div className="grid gap-1.5"><Label htmlFor="round-name">Round name</Label><Input id="round-name" value={name} onChange={(e) => setName(e.target.value)} autoFocus /></div>
+        {/* No autoFocus on mobile: it opens the keyboard over the lower half
+            of the form before the user has seen it (FIR-3107). */}
+        <div className="grid gap-1.5"><Label htmlFor="round-name">Round name</Label><Input id="round-name" value={name} onChange={(e) => setName(e.target.value)} autoFocus={!isMobile} /></div>
         <fieldset className="grid gap-2"><legend className="text-sm font-medium">Type</legend><div className="grid grid-cols-2 gap-2">{(["live", "batch"] as const).map((value) => <Button key={value} type="button" variant={mode === value ? "default" : "outline"} role="radio" aria-checked={mode === value} aria-label={value === "live" ? "Live" : "Batch"} onClick={() => setMode(value)}>{value === "live" ? "Live" : "Batch"}</Button>)}</div><p className="text-xs text-muted-foreground">{mode === "live" ? "Agents work immediately; replies wait in this Round." : "Work waits until you press Run."}</p></fieldset>
         <fieldset className="grid gap-2"><legend className="text-sm font-medium">Schedule</legend><div className="grid grid-cols-2 gap-2">{(["manual", "daily", "weekdays", "weekly"] as const).map((value) => <Button key={value} type="button" variant={schedulePreset === value ? "default" : "outline"} onClick={() => setSchedulePreset(value)}>{value[0]!.toUpperCase() + value.slice(1)}</Button>)}</div></fieldset>
         {schedulePreset !== "manual" && <div className="grid gap-1.5"><Label htmlFor="round-time">Time</Label><Input id="round-time" type="time" value={scheduleTime} onChange={(event) => setScheduleTime(event.target.value)} /></div>}
         <div className="grid gap-1.5"><Label htmlFor="round-timezone">Timezone</Label><Input id="round-timezone" value={timezone} onChange={(e) => setTimezone(e.target.value)} /></div>
-        <DialogFooter><Button variant="ghost" onClick={() => setCreating(false)}>Cancel</Button><Button onClick={save} disabled={!name.trim()} aria-label="Save round">Save</Button></DialogFooter>
+        {/* Sticky: Save/Cancel stay on screen while the form above scrolls or
+            the mobile keyboard pushes content out of view (FIR-3107). The
+            opaque background keeps scrolled-under fields from showing through. */}
+        <DialogFooter className="sticky bottom-0 bg-popover"><Button variant="ghost" onClick={() => setCreating(false)}>Cancel</Button><Button onClick={save} disabled={!name.trim()} aria-label="Save round">Save</Button></DialogFooter>
       </div> : <div className="grid gap-3">
         <Button variant="outline" onClick={beginCreate} aria-label="Create round"><Plus className="size-4" />Create round</Button>
         {statuses.map((s) => <div key={s.round.id} className="rounded-lg border p-3">
