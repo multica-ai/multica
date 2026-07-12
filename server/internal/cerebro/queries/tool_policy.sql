@@ -70,3 +70,13 @@ SELECT tool_key, resource_pattern, setting, conditions, updated_by, updated_at
 FROM cerebro_tool_policy
 WHERE workspace_id = $1 AND layer = $2 AND subject_id = $3
 ORDER BY tool_key ASC, resource_pattern ASC;
+
+-- name: ListCerebroToolPolicyHolders :many
+-- Every explicit setting for one tool across all layers and subjects in the
+-- workspace — the reverse of ListCerebroToolPolicyForSubject. Backs the
+-- per-permission detail page (FIR-3091 punkt 8): "who has this permission and
+-- which layer grants it."
+SELECT layer, subject_id, resource_pattern, setting, updated_by, updated_at
+FROM cerebro_tool_policy
+WHERE workspace_id = sqlc.arg(workspace_id) AND tool_key = sqlc.arg(tool_key)
+ORDER BY layer ASC, subject_id ASC, resource_pattern ASC;

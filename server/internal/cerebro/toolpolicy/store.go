@@ -14,6 +14,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -424,6 +425,45 @@ func (s *Store) ListForSubject(ctx context.Context, workspaceID pgtype.UUID, lay
 			Conditions:      cond,
 			UpdatedBy:       r.UpdatedBy,
 			UpdatedAt:       r.UpdatedAt,
+		})
+	}
+	return out, nil
+}
+
+// Holder is one explicit policy row for a single tool: which layer set it, on
+// which subject, for which resource pattern, and to what setting. It is the
+// reverse of SubjectSetting (one subject, all tools) — one tool, all subjects
+// and layers — and backs the per-permission detail page's "who has this
+// permission and which layer grants it" tab (FIR-3091 punkt 8).
+type Holder struct {
+	Layer           string
+	SubjectID       pgtype.UUID
+	ResourcePattern string
+	Setting         Setting
+	UpdatedBy       pgtype.UUID
+	UpdatedAt       time.Time
+}
+
+// Holders returns every explicit setting authored for one tool across all
+// layers and subjects in the workspace, ordered by layer, subject, then
+// resource pattern. An unconfigured tool returns an empty slice, never an error.
+func (s *Store) Holders(ctx context.Context, workspaceID pgtype.UUID, toolKey string) ([]Holder, error) {
+	rows, err := s.q.ListCerebroToolPolicyHolders(ctx, cerebrodb.ListCerebroToolPolicyHoldersParams{
+		WorkspaceID: workspaceID,
+		ToolKey:     toolKey,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("toolpolicy: list holders: %w", err)
+	}
+	out := make([]Holder, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, Holder{
+			Layer:           r.Layer,
+			SubjectID:       r.SubjectID,
+			ResourcePattern: r.ResourcePattern,
+			Setting:         Setting(r.Setting),
+			UpdatedBy:       r.UpdatedBy,
+			UpdatedAt:       r.UpdatedAt.Time,
 		})
 	}
 	return out, nil

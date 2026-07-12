@@ -1271,6 +1271,34 @@ func SurfacedKeys() []string {
 	return out
 }
 
+// notEnforcedKeys is the closed set of capability keys that are Surfaced in the
+// Permissions table but whose stored setting does NOT yet gate anything at
+// runtime — "surfaced but not yet wired". Today these are the three agent-start
+// family keys added as Surfaced=true (FIR-3091 slice 4 / FIR-2409): the table
+// shows and lets an admin author them, but only trigger_other_agent is actually
+// read by the gate, so the other three are cosmetic until their gate lands. See
+// the Surfaced doc + SurfacedKeys() above for the surfacing side.
+//
+// Kept as an explicit exception list, not a per-entry flag, so the DEFAULT is
+// "enforced" (Jesper's rule, FIR-3091 punkt 8): every permission is enforced
+// unless it is one of these known-unwired keys, and a new capability is enforced
+// the moment it is added without touching every catalog entry.
+var notEnforcedKeys = map[string]bool{
+	"rerun_issue":           true,
+	"schedule_agent_wakeup": true,
+	"trigger_autopilot":     true,
+}
+
+// Enforced reports whether a policy setting authored on this tool_key is actually
+// read by the runtime gate today (FIR-3091 punkt 8). It backs the per-permission
+// detail page's "is this live or cosmetic" signal: true for every key except the
+// known "surfaced but not yet wired" exceptions in notEnforcedKeys. An unknown
+// key returns true (enforced by default), matching Jesper's rule that a
+// capability is enforced unless explicitly listed otherwise.
+func Enforced(key string) bool {
+	return !notEnforcedKeys[key]
+}
+
 // ByKey looks a capability up by its stable key.
 func ByKey(key string) (Capability, bool) {
 	for _, c := range catalog {

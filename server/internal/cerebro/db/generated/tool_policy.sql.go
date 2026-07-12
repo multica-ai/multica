@@ -189,6 +189,58 @@ func (q *Queries) ListCerebroToolPolicyForSubject(ctx context.Context, arg ListC
 	return items, nil
 }
 
+const listCerebroToolPolicyHolders = `-- name: ListCerebroToolPolicyHolders :many
+SELECT layer, subject_id, resource_pattern, setting, updated_by, updated_at
+FROM cerebro_tool_policy
+WHERE workspace_id = $1 AND tool_key = $2
+ORDER BY layer ASC, subject_id ASC, resource_pattern ASC
+`
+
+type ListCerebroToolPolicyHoldersParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	ToolKey     string      `json:"tool_key"`
+}
+
+type ListCerebroToolPolicyHoldersRow struct {
+	Layer           string             `json:"layer"`
+	SubjectID       pgtype.UUID        `json:"subject_id"`
+	ResourcePattern string             `json:"resource_pattern"`
+	Setting         string             `json:"setting"`
+	UpdatedBy       pgtype.UUID        `json:"updated_by"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+}
+
+// Every explicit setting for one tool across all layers and subjects in the
+// workspace — the reverse of ListCerebroToolPolicyForSubject. Backs the
+// per-permission detail page (FIR-3091 punkt 8): "who has this permission and
+// which layer grants it."
+func (q *Queries) ListCerebroToolPolicyHolders(ctx context.Context, arg ListCerebroToolPolicyHoldersParams) ([]ListCerebroToolPolicyHoldersRow, error) {
+	rows, err := q.db.Query(ctx, listCerebroToolPolicyHolders, arg.WorkspaceID, arg.ToolKey)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListCerebroToolPolicyHoldersRow{}
+	for rows.Next() {
+		var i ListCerebroToolPolicyHoldersRow
+		if err := rows.Scan(
+			&i.Layer,
+			&i.SubjectID,
+			&i.ResourcePattern,
+			&i.Setting,
+			&i.UpdatedBy,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const upsertCerebroToolPolicy = `-- name: UpsertCerebroToolPolicy :one
 INSERT INTO cerebro_tool_policy (workspace_id, tool_key, layer, subject_id, resource_pattern, setting, conditions, updated_by)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)

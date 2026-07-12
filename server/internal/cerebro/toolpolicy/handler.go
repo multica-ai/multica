@@ -29,6 +29,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/multica-ai/multica/server/internal/cerebro/platformcatalog"
 	"github.com/multica-ai/multica/server/internal/logger"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/util"
@@ -156,6 +157,26 @@ type toolPolicyRow struct {
 	EnforcedConditions []string                   `json:"enforced_conditions"`
 	Effective          effectiveResponse          `json:"effective"`
 	CappedByGroups     []groupAttributionResponse `json:"capped_by_groups"`
+}
+
+// holderResponse is one explicit policy row for a tool: which layer set it, on
+// which subject, for which resource pattern, and to what setting. subject_id is
+// the raw UUID string — the frontend resolves it to an agent/member/group/runtime
+// name from data it already holds (FIR-3091 punkt 8, per-permission holders tab).
+type holderResponse struct {
+	Layer           string `json:"layer"`
+	SubjectID       string `json:"subject_id"`
+	ResourcePattern string `json:"resource_pattern"`
+	Setting         string `json:"setting"`
+}
+
+// holdersResponse is the body of GET .../tool-policy/holders: every explicit
+// setting for one tool across all layers/subjects, plus whether the tool's
+// policy is actually enforced at runtime today (platformcatalog.Enforced).
+type holdersResponse struct {
+	ToolKey  string           `json:"tool_key"`
+	Enforced bool             `json:"enforced"`
+	Holders  []holderResponse `json:"holders"`
 }
 
 // --- request types ----------------------------------------------------------
@@ -483,6 +504,56 @@ func (h *Handler) Clear(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// Holders — GET /api/workspaces/{id}/tool-policy/holders?tool_key=...
+//
+// Lists every explicit policy row for one tool across all layers and subjects in
+// the workspace — the reverse of the per-subject Table read — so the
+// per-permission detail page can show "who has this permission and which layer
+// grants it" (FIR-3091 punkt 8). It also reports whether the tool's policy is
+// actually enforced at runtime today (platformcatalog.Enforced).
+//
+// This is a sensitive audit-style read (it exposes every subject's setting for a
+// permission), so it is gated to workspace admin/owner in the handler — it mounts
+// in the member-level route group, unlike Set/Clear which are gated by their own
+// router middleware.
+func (h *Handler) Holders(w http.ResponseWriter, r *http.Request) {
+	member, workspaceID, ok := h.loadWorkspace(w, r)
+	if !ok {
+		return
+	}
+	if member.Role != "owner" && member.Role != "admin" {
+		writeError(w, http.StatusForbidden, "insufficient permissions")
+		return
+	}
+
+	toolKey := r.URL.Query().Get("tool_key")
+	if toolKey == "" {
+		writeError(w, http.StatusBadRequest, "tool_key required")
+		return
+	}
+
+	rows, err := h.Store.Holders(r.Context(), workspaceID, toolKey)
+	if err != nil {
+		h.serverError(w, r, "list tool policy holders", err)
+		return
+	}
+
+	holders := make([]holderResponse, 0, len(rows))
+	for _, row := range rows {
+		holders = append(holders, holderResponse{
+			Layer:           row.Layer,
+			SubjectID:       util.UUIDToString(row.SubjectID),
+			ResourcePattern: row.ResourcePattern,
+			Setting:         string(row.Setting),
+		})
+	}
+	writeJSON(w, http.StatusOK, holdersResponse{
+		ToolKey:  toolKey,
+		Enforced: platformcatalog.Enforced(toolKey),
+		Holders:  holders,
+	})
 }
 
 // --- helpers ----------------------------------------------------------------
