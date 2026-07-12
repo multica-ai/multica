@@ -27,6 +27,7 @@ import { RuntimeAccountCell } from "@multica/cerebro-runtime/views";
 import { Button } from "@multica/ui/components/ui/button";
 import { daemonVersion, runtimeVersion } from "./runtime-meta";
 import { timeAgo } from "./time-ago";
+import { ResponsiveRailSection } from "./responsive-rail-section";
 import { descriptionUpdate, nameUpdate } from "./identity-draft";
 
 function IdentityTextEditor({
@@ -153,7 +154,7 @@ function availabilityTone(availability: AgentAvailability | undefined): {
 
 function SectionLabel({ children }: { children: React.ReactNode }) {
   return (
-    <div className="mb-2 text-[10.5px] font-semibold uppercase tracking-wider text-muted-foreground">
+    <div className="mb-2 hidden text-[10.5px] font-semibold uppercase tracking-wider text-muted-foreground md:block">
       {children}
     </div>
   );
@@ -258,7 +259,7 @@ export function IdentityRail({
       </div>
 
       {/* properties — editable via the shipped inspector pickers */}
-      <div className="border-b px-5 py-4">
+      <ResponsiveRailSection title="Properties">
         <SectionLabel>Properties</SectionLabel>
         <div className="grid grid-cols-[auto_1fr] gap-x-2 gap-y-0.5">
           <PropRow label="Runtime" interactive={false}>
@@ -312,10 +313,10 @@ export function IdentityRail({
             />
           </PropRow>
         </div>
-      </div>
+      </ResponsiveRailSection>
 
       {/* details — read-only */}
-      <div className="border-b px-5 py-4">
+      <ResponsiveRailSection title="Details">
         <SectionLabel>Details</SectionLabel>
         <div className="grid grid-cols-[auto_1fr] gap-x-2 gap-y-0.5">
           <PropRow label="Account" interactive={false}>
@@ -351,11 +352,11 @@ export function IdentityRail({
             </span>
           </PropRow>
         </div>
-      </div>
+      </ResponsiveRailSection>
 
       {/* skills — chips + the shipped Attach control */}
-      <div className="px-5 py-4">
-        <div className="mb-3 flex items-center gap-2">
+      <ResponsiveRailSection title="Skills" count={skills.length} className="">
+        <div className="mb-3 hidden items-center gap-2 md:flex">
           <span className="text-[10.5px] font-semibold uppercase tracking-wider text-muted-foreground">
             Skills
           </span>
@@ -375,7 +376,7 @@ export function IdentityRail({
           ))}
           <SkillAttach agent={agent} canEdit={canEdit} />
         </div>
-      </div>
+      </ResponsiveRailSection>
     </div>
   );
 }
