@@ -283,6 +283,40 @@ func stripLegacySandboxDirectives(content string) string {
 	return strings.Join(out, "\n")
 }
 
+// stripWindowsSandboxHelperTable removes the top-level `[windows]` table
+// Codex CLI writes into the user's global ~/.codex/config.toml on its own —
+// this is not something Multica writes or manages. A `sandbox = "unelevated"` key
+// inside it makes Codex spawn its native codex-windows-sandbox-setup.exe
+// helper on every launch to set up an OS-level sandbox, which needs to
+// elevate via UAC, regardless of what sandbox_mode says.
+//
+// syncCopiedFile (codex_home.go, MUL-2646) unconditionally re-copies the
+// shared ~/.codex/config.toml into every per-task config.toml on every
+// run, so a one-time edit to the shared file doesn't stick if Codex
+// re-writes the table there on its own next startup — this must be
+// stripped fresh on every per-task write instead.
+func stripWindowsSandboxHelperTable(content string) string {
+	lines := strings.Split(content, "\n")
+	out := make([]string, 0, len(lines))
+	inWindowsTable := false
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "[") {
+			inWindowsTable = trimmed == "[windows]"
+			if inWindowsTable {
+				continue
+			}
+			out = append(out, line)
+			continue
+		}
+		if inWindowsTable {
+			continue
+		}
+		out = append(out, line)
+	}
+	return strings.Join(out, "\n")
+}
+
 // ensureCodexSandboxConfig writes the multica-managed sandbox block into the
 // given config.toml according to the policy. It is idempotent: running it
 // twice produces the same file contents. The file is created if it doesn't
@@ -310,6 +344,18 @@ func ensureCodexSandboxConfig(configPath string, policy codexSandboxPolicy, dete
 	// versions so they don't collide with the managed block.
 	if existing != "" && !managedBlockRe.MatchString(existing) {
 		existing = stripLegacySandboxDirectives(existing)
+	}
+
+	// Under danger-full-access, Codex's own OS-level Windows sandbox is
+	// redundant (the process already runs with full access) — strip the
+	// table so codex-windows-sandbox-setup.exe never launches and never
+	// prompts for UAC. Leave it alone under workspace-write, where Codex's
+	// own sandboxing may depend on it. Run on every write (not gated behind
+	// the managed-block-marker check above) because the shared source file
+	// can reintroduce the table on its own between runs — see
+	// stripWindowsSandboxHelperTable.
+	if policy.Mode == "danger-full-access" && strings.Contains(existing, "[windows]") {
+		existing = stripWindowsSandboxHelperTable(existing)
 	}
 
 	updated := upsertMulticaManagedBlock(existing, policy)

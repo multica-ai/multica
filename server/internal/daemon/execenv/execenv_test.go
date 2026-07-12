@@ -2541,6 +2541,91 @@ network_access = true
 	}
 }
 
+// TestEnsureCodexSandboxConfigStripsWindowsHelperUnderDangerFullAccess pins
+// a real-world root cause: Codex CLI writes its own `[windows]` table
+// (independent of anything Multica manages) into the shared
+// ~/.codex/config.toml, and syncCopiedFile (codex_home.go, MUL-2646)
+// unconditionally re-copies that shared file into every per-task
+// config.toml on every run. A `sandbox = "unelevated"` key inside that
+// table makes Codex spawn its native codex-windows-sandbox-setup.exe
+// helper on every launch, which needs to elevate via UAC — regardless of
+// what sandbox_mode says. When policy.Mode is danger-full-access, that
+// OS-level sandbox is redundant (the process already runs with full
+// access), so the daemon must strip the table on every write — a one-time
+// edit to the shared file doesn't stick, since Codex re-adds it there on
+// its own next startup.
+func TestEnsureCodexSandboxConfigStripsWindowsHelperUnderDangerFullAccess(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.toml")
+
+	existing := `model = "gpt-5.6-luna"
+sandbox_mode = "danger-full-access"
+
+[sandbox_workspace_write]
+network_access = true
+
+[windows]
+sandbox = "unelevated"
+`
+	os.WriteFile(configPath, []byte(existing), 0o644)
+
+	policy := codexSandboxPolicy{
+		Mode:          "danger-full-access",
+		NetworkAccess: false,
+		Reason:        "MULTICA_CODEX_WINDOWS_SANDBOX_MODE override",
+		Platform:      "windows",
+	}
+	if err := ensureCodexSandboxConfig(configPath, policy, "0.144.1", testLogger()); err != nil {
+		t.Fatalf("ensureCodexSandboxConfig failed: %v", err)
+	}
+
+	data, _ := os.ReadFile(configPath)
+	s := string(data)
+	if !strings.Contains(s, `model = "gpt-5.6-luna"`) {
+		t.Error("should have preserved unrelated user config")
+	}
+	if strings.Contains(s, "[windows]") {
+		t.Errorf("expected [windows] sandbox-helper table to be stripped under danger-full-access, got:\n%s", s)
+	}
+	if strings.Contains(s, `sandbox = "unelevated"`) {
+		t.Errorf("expected the unelevated sandbox directive to be gone, got:\n%s", s)
+	}
+}
+
+// TestEnsureCodexSandboxConfigKeepsWindowsHelperUnderWorkspaceWrite pins the
+// other half of the contract: under workspace-write (the normal path when
+// the native sandbox helper is present and expected to run), the [windows]
+// table is left alone — Codex's own Windows sandboxing may depend on it.
+func TestEnsureCodexSandboxConfigKeepsWindowsHelperUnderWorkspaceWrite(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.toml")
+
+	existing := `model = "gpt-5.6-luna"
+
+[windows]
+sandbox = "unelevated"
+`
+	os.WriteFile(configPath, []byte(existing), 0o644)
+
+	policy := codexSandboxPolicy{
+		Mode:          "workspace-write",
+		NetworkAccess: true,
+		Reason:        "windows default",
+		Platform:      "windows",
+	}
+	if err := ensureCodexSandboxConfig(configPath, policy, "0.144.1", testLogger()); err != nil {
+		t.Fatalf("ensureCodexSandboxConfig failed: %v", err)
+	}
+
+	data, _ := os.ReadFile(configPath)
+	s := string(data)
+	if !strings.Contains(s, "[windows]") || !strings.Contains(s, `sandbox = "unelevated"`) {
+		t.Errorf("expected [windows] sandbox-helper table to survive under workspace-write, got:\n%s", s)
+	}
+}
+
 func TestEnsureCodexSandboxConfigHoistsAboveUserTables(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
