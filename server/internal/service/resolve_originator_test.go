@@ -197,9 +197,9 @@ func seedOriginatorFanout(t *testing.T, pool *pgxpool.Pool) (memberCommentID, ag
 	// row the resolver must follow back through comment.source_task_id.
 	if err := pool.QueryRow(ctx, `
 		INSERT INTO agent_task_queue (
-			agent_id, runtime_id, issue_id, status, priority, originator_user_id
+			agent_id, runtime_id, issue_id, status, priority, originator_user_id, accountable_user_id
 		)
-		VALUES ($1, $2, $3, 'completed', 0, $4)
+		VALUES ($1, $2, $3, 'completed', 0, $4, $4)
 		RETURNING id
 	`, agentAID, runtimeID, issueID, userIDStr).Scan(&taskAIDStr); err != nil {
 		t.Fatalf("seed task A: %v", err)

@@ -187,6 +187,14 @@ type CommentFacts struct {
 	// invalid when the source task is missing or itself unattributed.
 	SourceTaskID     pgtype.UUID
 	ParentOriginator pgtype.UUID
+
+	// ParentAccountable is the source task's accountable_user_id (MUL-4302 §3.2).
+	// It lets an autopilot-rooted chain — where the parent has NO authorizing human
+	// (ParentOriginator NULL) but IS accountable to someone (trigger creator / rule
+	// publisher) — copy that responsible human down the delegation, instead of
+	// dropping the chain root to unattributed. Loaded by the caller alongside
+	// ParentOriginator; invalid when the parent has no accountable human either.
+	ParentAccountable pgtype.UUID
 }
 
 // ClassifyComment resolves attribution for a comment-triggered run from
@@ -214,6 +222,15 @@ func ClassifyComment(f CommentFacts, agentAuthoredSource Source) Result {
 		r.DelegatedFromTaskID = f.SourceTaskID
 		if f.ParentOriginator.Valid {
 			r.UserID = f.ParentOriginator
+			r.Source = agentAuthoredSource
+		} else if f.ParentAccountable.Valid {
+			// The parent had no authorizing human (autopilot-rooted chain:
+			// originator NULL, accountable = trigger creator / rule publisher) but
+			// IS accountable to someone. Copy that accountable down so the
+			// responsibility chain root stays stable at any depth (MUL-4302 §3.2);
+			// originator stays NULL so authorization is unchanged and a fail-closed
+			// workspace does not reject a fan-out that has a precise responsible human.
+			r.AccountableUserID = f.ParentAccountable
 			r.Source = agentAuthoredSource
 		} else {
 			// Source task exists but has no human at its own top of chain.
@@ -249,6 +266,13 @@ type DirectFacts struct {
 	OriginType       string
 	OriginTaskID     pgtype.UUID
 	OriginOriginator pgtype.UUID
+
+	// OriginAccountable is the origin task's accountable_user_id — the DirectFacts
+	// analogue of CommentFacts.ParentAccountable (MUL-4302 §3.2). An agent-created
+	// sub-issue whose origin task is autopilot-rooted (OriginOriginator NULL,
+	// accountable set) inherits that accountable via delegation instead of dropping
+	// to unattributed.
+	OriginAccountable pgtype.UUID
 }
 
 // ClassifyDirect resolves attribution for a run with no trigger comment.
@@ -281,6 +305,12 @@ func ClassifyDirect(f DirectFacts) Result {
 		}
 		if f.OriginOriginator.Valid {
 			r.UserID = f.OriginOriginator
+			r.Source = SourceDelegation
+		} else if f.OriginAccountable.Valid {
+			// Autopilot-rooted origin task: no authorizing human, but accountable
+			// to the trigger creator / rule publisher. Copy accountable down so the
+			// chain root stays stable; originator stays NULL (MUL-4302 §3.2).
+			r.AccountableUserID = f.OriginAccountable
 			r.Source = SourceDelegation
 		} else {
 			r.Source = SourceUnattributed

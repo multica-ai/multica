@@ -162,6 +162,25 @@ func (s *TaskService) ResolveOriginatorFromTriggerComment(ctx context.Context, w
 	return s.resolveOriginatorFromTriggerComment(ctx, workspaceID, commentID)
 }
 
+// AttributionForMergedComment resolves the FULL attribution snapshot for a comment
+// being coalesced into an already-queued task (MUL-4302). A merge re-attributes the
+// run to the newly-arrived comment's human, so the whole snapshot — source, evidence,
+// delegation lineage, and both person columns — must move together as one
+// attribution.Result; re-stamping only the person columns would leave a run showing
+// B accountable while still pointing at A's stale source / evidence / level. isMention
+// picks the agent-authored label (delegation for a mention / thread-parent, otherwise
+// comment_source), matching the fresh-enqueue routing. The task is already admitted,
+// so an unresolved comment degrades to owner_fallback (accountable = agent owner)
+// rather than refusing — the fail-closed gate already ran at the original enqueue.
+func (s *TaskService) AttributionForMergedComment(ctx context.Context, workspaceID, commentID pgtype.UUID, isMention bool, agent db.Agent) attribution.Result {
+	agentAuthoredSource := attribution.SourceCommentSource
+	if isMention {
+		agentAuthoredSource = attribution.SourceDelegation
+	}
+	attr := s.attributionFromTriggerComment(ctx, workspaceID, commentID, agentAuthoredSource)
+	return attribution.OwnerFallback(attr, agent.OwnerID)
+}
+
 // BuildCommentTriggerSummary is the exported wrapper used by the comment-merge
 // path (MUL-4195) to refresh a coalesced task's trigger_summary to the newest
 // trigger comment's snapshot. workspaceID scopes the lookup (MUL-4252).
@@ -334,6 +353,7 @@ func (s *TaskService) attributionFromComment(ctx context.Context, comment db.Com
 		facts.SourceTaskID = comment.SourceTaskID
 		if parent, err := s.Queries.GetAgentTask(ctx, comment.SourceTaskID); err == nil {
 			facts.ParentOriginator = parent.OriginatorUserID
+			facts.ParentAccountable = parent.AccountableUserID
 		}
 	}
 	return attribution.ClassifyComment(facts, agentAuthoredSource)
@@ -432,6 +452,7 @@ func (s *TaskService) attributionForIssueTask(ctx context.Context, issue db.Issu
 		facts.OriginTaskID = issue.OriginID
 		if task, err := s.Queries.GetAgentTask(ctx, issue.OriginID); err == nil {
 			facts.OriginOriginator = task.OriginatorUserID
+			facts.OriginAccountable = task.AccountableUserID
 		}
 	}
 	return attribution.ClassifyDirect(facts)
@@ -1438,6 +1459,18 @@ func (s *TaskService) SendDirectChatMessage(ctx context.Context, session db.Chat
 	// network I/O and must not run with a DB transaction open.
 	overlay := s.buildRuntimeMCPOverlay(ctx, initiatorUserID, agent)
 
+	// Full attribution for the chat sender, resolved before the tx (the policy read
+	// + fallback must not run with a transaction open) — the same direct_human stamp
+	// EnqueueChatTask writes. Without this the direct-chat path was a bypass: it set
+	// originator_user_id but left accountable_user_id / source / evidence NULL,
+	// violating the one-way invariant and dropping the audit source (MUL-4302 §2).
+	attr := attribution.DirectHumanRun(initiatorUserID, attribution.EvidenceChat, session.ID)
+	attr, err := s.applyAttributionFallback(ctx, attr, agent)
+	if err != nil {
+		return nil, err
+	}
+	attrSource, _, attrEvidenceKind, attrEvidenceRef := attributionCreateParams(attr)
+
 	var out DirectChatSendResult
 	if err := s.runInTx(ctx, func(qtx *db.Queries) error {
 		task, err := qtx.CreateChatTask(ctx, db.CreateChatTaskParams{
@@ -1446,10 +1479,14 @@ func (s *TaskService) SendDirectChatMessage(ctx context.Context, session db.Chat
 			Priority:             2, // medium priority for chat; matches EnqueueChatTask
 			ChatSessionID:        session.ID,
 			InitiatorUserID:      initiatorUserID,
-			OriginatorUserID:     initiatorUserID,
+			OriginatorUserID:     attr.UserID,
+			AccountableUserID:    attr.AccountableUserID,
 			ForceFreshSession:    pgtype.Bool{Bool: false, Valid: true},
 			RuntimeMcpOverlay:    overlay.Overlay,
 			RuntimeConnectedApps: overlay.ConnectedApps,
+			OriginatorSource:     attrSource,
+			TriggerEvidenceKind:  attrEvidenceKind,
+			TriggerEvidenceRefID: attrEvidenceRef,
 		})
 		if err != nil {
 			return fmt.Errorf("create direct chat task: %w", err)

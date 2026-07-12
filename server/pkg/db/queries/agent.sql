@@ -884,12 +884,20 @@ SET coalesced_comment_ids = (
     ),
     trigger_comment_id = @new_trigger_comment_id::uuid,
     trigger_summary = COALESCE(sqlc.narg('new_trigger_summary'), trigger_summary),
+    -- Re-attribution is ATOMIC (MUL-4302): folding a newly-arrived comment moves the
+    -- WHOLE attribution snapshot to that comment's human — person columns, source
+    -- label, delegation lineage, rule version, and evidence — computed by the caller
+    -- as one attribution.Result. Re-stamping only the person columns would leave a
+    -- run showing B accountable while still pointing at A's stale source / evidence /
+    -- level. accountable comes from the resolved Result (finalizeAttribution already
+    -- guaranteed originator ⟹ accountable == originator; the cross-column CHECK backs it).
     originator_user_id = sqlc.narg('new_originator_user_id')::uuid,
-    -- Keep the MUL-4302 one-way invariant on re-attribution: when a coalescing run
-    -- takes over the new comment's originator, accountable must mirror it — the same
-    -- thing finalizeAttribution does for enqueues. Without this, folding member B's
-    -- comment into member A's queued task would leave originator=B / accountable=A.
-    accountable_user_id = sqlc.narg('new_originator_user_id')::uuid,
+    accountable_user_id = sqlc.narg('new_accountable_user_id')::uuid,
+    originator_source = sqlc.narg('new_originator_source'),
+    delegated_from_task_id = sqlc.narg('new_delegated_from_task_id')::uuid,
+    rule_version_id = sqlc.narg('new_rule_version_id')::uuid,
+    trigger_evidence_kind = sqlc.narg('new_trigger_evidence_kind'),
+    trigger_evidence_ref_id = sqlc.narg('new_trigger_evidence_ref_id')::uuid,
     runtime_mcp_overlay = sqlc.narg('new_runtime_mcp_overlay'),
     runtime_connected_apps = sqlc.narg('new_runtime_connected_apps')
 WHERE id = (

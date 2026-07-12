@@ -70,6 +70,59 @@ func TestClassifyComment_AgentAuthoredInheritsParentAsDelegation(t *testing.T) {
 	}
 }
 
+func TestClassifyComment_AutopilotRootedParentInheritsAccountableOnly(t *testing.T) {
+	// The parent task is autopilot-rooted: it has NO authorizing human
+	// (ParentOriginator NULL) but IS accountable to the trigger creator
+	// (ParentAccountable = human). Delegating from it must copy accountable down —
+	// keeping the chain root stable and precise — while leaving originator NULL so
+	// authorization is unchanged and a fail-closed workspace does not reject the
+	// fan-out (MUL-4302 §3.2).
+	got := ClassifyComment(CommentFacts{
+		CommentID:         comment,
+		AuthorType:        "agent",
+		SourceTaskID:      srcTask,
+		ParentAccountable: human,
+	}, SourceDelegation)
+
+	if got.Source != SourceDelegation {
+		t.Fatalf("source = %q, want delegation (not unattributed)", got.Source)
+	}
+	if got.UserID.Valid {
+		t.Errorf("originator must stay NULL (autopilot-rooted, no human authorized), got %v", got.UserID)
+	}
+	if got.AccountableUserID != human {
+		t.Errorf("accountable must inherit the parent's trigger creator, got %v", got.AccountableUserID)
+	}
+	if !got.Source.Precise() {
+		t.Errorf("delegation is a precise source; fail-closed must not reject it")
+	}
+	if got.DelegatedFromTaskID != srcTask {
+		t.Errorf("delegated_from = %v, want %v", got.DelegatedFromTaskID, srcTask)
+	}
+}
+
+func TestClassifyDirect_AutopilotRootedOriginInheritsAccountableOnly(t *testing.T) {
+	// agent_create sub-issue whose origin task is autopilot-rooted: inherit the
+	// origin's accountable via delegation, originator stays NULL.
+	got := ClassifyDirect(DirectFacts{
+		IssueID:           issue,
+		CreatorType:       "agent",
+		OriginType:        "agent_create",
+		OriginTaskID:      srcTask,
+		OriginAccountable: human,
+	})
+
+	if got.Source != SourceDelegation {
+		t.Fatalf("source = %q, want delegation (not unattributed)", got.Source)
+	}
+	if got.UserID.Valid {
+		t.Errorf("originator must stay NULL, got %v", got.UserID)
+	}
+	if got.AccountableUserID != human {
+		t.Errorf("accountable must inherit the origin's accountable, got %v", got.AccountableUserID)
+	}
+}
+
 func TestClassifyComment_AgentAuthoredUsesCommentSourceLabelForAssigneePath(t *testing.T) {
 	// Same facts, but the issue-assignee-reacting path passes comment_source.
 	got := ClassifyComment(CommentFacts{
@@ -288,8 +341,9 @@ func TestAccountableMirrorsOriginatorInvariant(t *testing.T) {
 		// accountable with a NULL originator is allowed (divergence), but the
 		// reverse — originator set from accountable — must never happen implicitly.
 		if r.AccountableUserID.Valid && !r.UserID.Valid &&
-			r.Source != SourceRuleOwner && r.Source != SourceTriggerOwner && r.Source != SourceOwnerFallback {
-			t.Errorf("result[%d]: accountable set with NULL originator only allowed for trigger_owner/rule_owner/owner_fallback, got source=%q", i, r.Source)
+			r.Source != SourceRuleOwner && r.Source != SourceTriggerOwner && r.Source != SourceOwnerFallback &&
+			r.Source != SourceDelegation && r.Source != SourceCommentSource {
+			t.Errorf("result[%d]: accountable set with NULL originator only allowed for delegation/comment_source/trigger_owner/rule_owner/owner_fallback, got source=%q", i, r.Source)
 		}
 	}
 }

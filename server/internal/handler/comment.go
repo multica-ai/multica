@@ -1502,13 +1502,24 @@ func (h *Handler) hasActiveTaskForIssueAndAgent(ctx context.Context, issueID, ag
 // one-pending-per-(issue,agent) unique index) and so silently dropped the
 // mismatched-originator comment.
 func (h *Handler) mergeCommentIntoPendingTask(ctx context.Context, issue db.Issue, trigger commentAgentTrigger, newTriggerCommentID pgtype.UUID) bool {
-	originator := h.TaskService.ResolveOriginatorFromTriggerComment(ctx, issue.WorkspaceID, newTriggerCommentID)
-	overlay, connectedApps := h.TaskService.BuildRuntimeMCPOverlayForMerge(ctx, originator, trigger.Agent)
+	// Re-attribute the coalescing run to the new comment's human atomically: the
+	// whole attribution snapshot moves, not just the person columns (MUL-4302). An
+	// issue-assignee reaction is comment_source; a mention / thread-parent /
+	// conversation hop is delegation.
+	isMention := trigger.Source != commentTriggerSourceIssueAssignee
+	attr := h.TaskService.AttributionForMergedComment(ctx, issue.WorkspaceID, newTriggerCommentID, isMention, trigger.Agent)
+	overlay, connectedApps := h.TaskService.BuildRuntimeMCPOverlayForMerge(ctx, attr.UserID, trigger.Agent)
 	row, err := h.Queries.MergeCommentIntoPendingTask(ctx, db.MergeCommentIntoPendingTaskParams{
 		IssueID:                 issue.ID,
 		AgentID:                 trigger.Agent.ID,
 		NewTriggerCommentID:     newTriggerCommentID,
-		NewOriginatorUserID:     originator,
+		NewOriginatorUserID:     attr.UserID,
+		NewAccountableUserID:    attr.AccountableUserID,
+		NewOriginatorSource:     pgtype.Text{String: attr.Source.String(), Valid: true},
+		NewDelegatedFromTaskID:  attr.DelegatedFromTaskID,
+		NewRuleVersionID:        attr.RuleVersionID,
+		NewTriggerEvidenceKind:  pgtype.Text{String: string(attr.EvidenceKind), Valid: attr.EvidenceKind != ""},
+		NewTriggerEvidenceRefID: attr.EvidenceRefID,
 		NewTriggerSummary:       h.TaskService.BuildCommentTriggerSummary(ctx, issue.WorkspaceID, newTriggerCommentID),
 		NewRuntimeMcpOverlay:    overlay,
 		NewRuntimeConnectedApps: connectedApps,

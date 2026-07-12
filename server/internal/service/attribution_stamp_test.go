@@ -198,11 +198,12 @@ func TestMergeCommentIntoPendingTask_KeepsAccountableEqualsOriginator(t *testing
 		t.Fatalf("add member B: %v", err)
 	}
 
-	// A queued task attributed to A (originator == accountable == A).
+	// A queued task attributed to A with a STALE source label + no evidence, so the
+	// merge has something to prove it re-stamped the whole snapshot, not just people.
 	var taskID string
 	if err := pool.QueryRow(ctx, `
 		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, originator_user_id, accountable_user_id, originator_source)
-		VALUES ($1, (SELECT runtime_id FROM agent WHERE id = $1), $2, 'queued', 0, $3, $3, 'direct_human')
+		VALUES ($1, (SELECT runtime_id FROM agent WHERE id = $1), $2, 'queued', 0, $3, $3, 'delegation')
 		RETURNING id`, agentID, issueID, userA).Scan(&taskID); err != nil {
 		t.Fatalf("seed queued task: %v", err)
 	}
@@ -216,19 +217,26 @@ func TestMergeCommentIntoPendingTask_KeepsAccountableEqualsOriginator(t *testing
 		t.Fatalf("seed comment: %v", err)
 	}
 
+	// Re-stamp the FULL snapshot for B's member comment (direct_human + comment
+	// evidence), as the caller does.
 	if _, err := q.MergeCommentIntoPendingTask(ctx, db.MergeCommentIntoPendingTaskParams{
-		IssueID:             util.MustParseUUID(issueID),
-		AgentID:             util.MustParseUUID(agentID),
-		NewTriggerCommentID: util.MustParseUUID(commentID),
-		NewOriginatorUserID: util.MustParseUUID(userB),
+		IssueID:                 util.MustParseUUID(issueID),
+		AgentID:                 util.MustParseUUID(agentID),
+		NewTriggerCommentID:     util.MustParseUUID(commentID),
+		NewOriginatorUserID:     util.MustParseUUID(userB),
+		NewAccountableUserID:    util.MustParseUUID(userB),
+		NewOriginatorSource:     pgtype.Text{String: "direct_human", Valid: true},
+		NewTriggerEvidenceKind:  pgtype.Text{String: "comment", Valid: true},
+		NewTriggerEvidenceRefID: util.MustParseUUID(commentID),
 	}); err != nil {
 		t.Fatalf("MergeCommentIntoPendingTask: %v", err)
 	}
 
 	var originator, accountable pgtype.UUID
+	var source, evidenceKind pgtype.Text
 	if err := pool.QueryRow(ctx,
-		`SELECT originator_user_id, accountable_user_id FROM agent_task_queue WHERE id = $1`, taskID,
-	).Scan(&originator, &accountable); err != nil {
+		`SELECT originator_user_id, accountable_user_id, originator_source, trigger_evidence_kind FROM agent_task_queue WHERE id = $1`, taskID,
+	).Scan(&originator, &accountable, &source, &evidenceKind); err != nil {
 		t.Fatalf("read task: %v", err)
 	}
 	if !originator.Valid || originator.Bytes != util.MustParseUUID(userB).Bytes {
@@ -237,6 +245,57 @@ func TestMergeCommentIntoPendingTask_KeepsAccountableEqualsOriginator(t *testing
 	if !accountable.Valid || accountable.Bytes != originator.Bytes {
 		t.Errorf("accountable = %s, want == originator (B); one-way invariant violated on merge", util.UUIDToString(accountable))
 	}
+	// Full-snapshot re-stamp: the stale 'delegation' source + NULL evidence must move
+	// to the new comment's 'direct_human' + comment evidence, not linger.
+	if source.String != "direct_human" {
+		t.Errorf("originator_source = %q, want re-stamped to direct_human (stale snapshot left behind)", source.String)
+	}
+	if evidenceKind.String != "comment" {
+		t.Errorf("trigger_evidence_kind = %q, want re-stamped to comment", evidenceKind.String)
+	}
+}
+
+// TestAttributionInvariantCheck_RejectsBypass verifies the DB-level cross-column
+// CHECK (MUL-4302): any write that sets originator_user_id but leaves
+// accountable_user_id NULL — or different — is rejected at the database, so a future
+// code path that bypasses finalizeAttribution fails loudly instead of silently
+// mis-attributing an audited run (the #5192 comment-merge bug class).
+func TestAttributionInvariantCheck_RejectsBypass(t *testing.T) {
+	pool := newResolveOriginatorPool(t)
+	ctx := context.Background()
+	_, userA, agentID, issueID := seedAttributionFixture(t, pool)
+
+	// originator set, accountable NULL → must violate the check.
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, originator_user_id)
+		VALUES ($1, (SELECT runtime_id FROM agent WHERE id = $1), $2, 'queued', 0, $3)`,
+		agentID, issueID, userA); err == nil {
+		t.Fatal("expected the CHECK to reject originator set with NULL accountable, but insert succeeded")
+	}
+
+	// originator != accountable → also rejected.
+	var userB string
+	if err := pool.QueryRow(ctx, `INSERT INTO "user" (name, email) VALUES ('Check B', $1) RETURNING id`,
+		fmt.Sprintf("check-b-%d@multica.test", time.Now().UnixNano())).Scan(&userB); err != nil {
+		t.Fatalf("seed user B: %v", err)
+	}
+	t.Cleanup(func() { pool.Exec(context.Background(), `DELETE FROM "user" WHERE id = $1`, userB) })
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, originator_user_id, accountable_user_id)
+		VALUES ($1, (SELECT runtime_id FROM agent WHERE id = $1), $2, 'queued', 0, $3, $4)`,
+		agentID, issueID, userA, userB); err == nil {
+		t.Fatal("expected the CHECK to reject originator != accountable, but insert succeeded")
+	}
+
+	// The legitimate shape (equal) is accepted.
+	var okTaskID string
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, originator_user_id, accountable_user_id)
+		VALUES ($1, (SELECT runtime_id FROM agent WHERE id = $1), $2, 'queued', 0, $3, $3) RETURNING id`,
+		agentID, issueID, userA).Scan(&okTaskID); err != nil {
+		t.Fatalf("equal originator/accountable must be accepted, got %v", err)
+	}
+	t.Cleanup(func() { pool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE id = $1`, okTaskID) })
 }
 
 // TestTriggerOwnerAttribution_ScheduleTriggerCreator is the acceptance test for
