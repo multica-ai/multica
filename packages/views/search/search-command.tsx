@@ -97,11 +97,13 @@ function memberInitials(name: string) {
 }
 
 function matchesMember(member: MemberWithUser, query: string) {
+  const name = member.name ?? "";
+  const email = member.email ?? "";
   return (
-    member.name.toLowerCase().includes(query) ||
-    member.email.toLowerCase().includes(query) ||
+    name.toLowerCase().includes(query) ||
+    email.toLowerCase().includes(query) ||
     (query.length >= 3 && member.role.startsWith(query)) ||
-    matchesPinyin(member.name, query)
+    matchesPinyin(name, query)
   );
 }
 

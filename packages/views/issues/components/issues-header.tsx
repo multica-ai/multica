@@ -207,15 +207,18 @@ function ActorSubContent({
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
   const { data: squads = [] } = useQuery(squadListOptions(wsId));
   const query = search.trim().toLowerCase();
-  const filteredMembers = members.filter((m) =>
-    m.name.toLowerCase().includes(query) || matchesPinyin(m.name, query),
-  );
-  const filteredAgents = agents.filter((a) =>
-    !a.archived_at && (a.name.toLowerCase().includes(query) || matchesPinyin(a.name, query)),
-  );
-  const filteredSquads = squads.filter((s) =>
-    !s.archived_at && (s.name.toLowerCase().includes(query) || matchesPinyin(s.name, query)),
-  );
+  const filteredMembers = members.filter((m) => {
+    const name = m.name ?? "";
+    return name.toLowerCase().includes(query) || matchesPinyin(name, query);
+  });
+  const filteredAgents = agents.filter((a) => {
+    const name = a.name ?? "";
+    return !a.archived_at && (name.toLowerCase().includes(query) || matchesPinyin(name, query));
+  });
+  const filteredSquads = squads.filter((s) => {
+    const name = s.name ?? "";
+    return !s.archived_at && (name.toLowerCase().includes(query) || matchesPinyin(name, query));
+  });
 
   const isSelected = (type: "member" | "agent" | "squad", id: string) =>
     selected.some((f) => f.type === type && f.id === id);
@@ -374,7 +377,7 @@ function ProjectSubContent({
   const { data: projects = [] } = useQuery(projectListOptions(wsId));
   const query = search.trim().toLowerCase();
   const filtered = projects.filter((p) =>
-    p.title.toLowerCase().includes(query),
+    (p.title ?? "").toLowerCase().includes(query),
   );
 
   return (
@@ -458,7 +461,7 @@ function LabelSubContent({
   const wsId = useWorkspaceId();
   const { data: labels = [] } = useQuery(labelListOptions(wsId));
   const query = search.trim().toLowerCase();
-  const filtered = labels.filter((l) => l.name.toLowerCase().includes(query));
+  const filtered = labels.filter((l) => (l.name ?? "").toLowerCase().includes(query));
 
   return (
     <>
