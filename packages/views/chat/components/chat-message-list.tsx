@@ -52,6 +52,8 @@ interface ChatMessageListProps {
   hasOlderMessages?: boolean;
   isFetchingOlderMessages?: boolean;
   onLoadOlderMessages?: () => void;
+  /** Transform assistant task text for embedded chat protocols before render/copy. */
+  transformContent?: (content: string) => string;
 }
 
 // ─── Virtuoso chrome ─────────────────────────────────────────────────────
@@ -122,6 +124,7 @@ export function ChatMessageList({
   hasOlderMessages = false,
   isFetchingOlderMessages = false,
   onLoadOlderMessages,
+  transformContent,
 }: ChatMessageListProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [scrollContainerEl, setScrollContainerEl] = useState<HTMLDivElement | null>(null);
@@ -154,8 +157,8 @@ export function ChatMessageList({
   // the array reference when a duplicate event arrives, so this recomputes
   // only when a genuinely new message lands — not on unrelated re-renders.
   const liveTimeline: ChatTimelineItem[] = useMemo(
-    () => buildTimeline(liveTaskMessages ?? []),
-    [liveTaskMessages],
+    () => transformTimeline(buildTimeline(liveTaskMessages ?? []), transformContent),
+    [liveTaskMessages, transformContent],
   );
   const hasLive = showLiveTimeline && liveTimeline.length > 0;
   const showStatusPill = !!pendingTaskId && !pendingAlreadyPersisted && !!pendingTask;
@@ -206,6 +209,7 @@ export function ChatMessageList({
             <MessageBubble
               message={msg}
               isPending={!!pendingTaskId && msg.task_id === pendingTaskId}
+              transformContent={transformContent}
             />
           </div>
         )}
@@ -252,9 +256,11 @@ export function ChatMessageSkeleton() {
 const MessageBubble = memo(function MessageBubble({
   message,
   isPending,
+  transformContent,
 }: {
   message: ChatMessage;
   isPending: boolean;
+  transformContent?: (content: string) => string;
 }) {
   if (message.role === "user") {
     return (
@@ -277,15 +283,23 @@ const MessageBubble = memo(function MessageBubble({
     );
   }
 
-  return <AssistantMessage message={message} isPending={isPending} />;
+  return (
+    <AssistantMessage
+      message={message}
+      isPending={isPending}
+      transformContent={transformContent}
+    />
+  );
 });
 
 function AssistantMessage({
   message,
   isPending,
+  transformContent,
 }: {
   message: ChatMessage;
   isPending: boolean;
+  transformContent?: (content: string) => string;
 }) {
   const taskId = message.task_id;
   const canFetchTaskMessages = isTaskMessageTaskId(taskId);
@@ -300,8 +314,8 @@ function AssistantMessage({
 
   // Same memoization rationale as the live timeline in ChatMessageList.
   const timeline: ChatTimelineItem[] = useMemo(
-    () => buildTimeline(taskMessages ?? []),
-    [taskMessages],
+    () => transformTimeline(buildTimeline(taskMessages ?? []), transformContent),
+    [taskMessages, transformContent],
   );
 
   // Failure bubble path: when the server's FailTask wrote a failure
@@ -319,15 +333,23 @@ function AssistantMessage({
     );
   }
 
+  // no_response path (MUL-4351): the agent completed this direct-chat turn
+  // without any text. Keep whatever tool/thinking timeline the run produced and
+  // show a localized "no text reply" notice instead of an empty markdown block.
+  const isNoResponse = message.message_kind === "no_response";
+
   return (
     <div className="w-full space-y-1.5">
-      {timeline.length > 0 ? (
+      {timeline.length > 0 && (
         <TimelineView items={timeline} attachments={message.attachments} />
-      ) : (
+      )}
+      {isNoResponse ? (
+        <NoResponseNotice />
+      ) : timeline.length === 0 ? (
         <div className="text-sm leading-relaxed prose prose-sm dark:prose-invert max-w-none">
           <MemoizedMarkdown attachments={message.attachments}>{message.content}</MemoizedMarkdown>
         </div>
-      )}
+      ) : null}
       <AttachmentList
         attachments={message.attachments}
         content={message.content}
@@ -337,6 +359,30 @@ function AssistantMessage({
         timeline={timeline}
         isPending={isPending}
       />
+    </div>
+  );
+}
+
+function transformTimeline(
+  timeline: ChatTimelineItem[],
+  transformContent?: (content: string) => string,
+): ChatTimelineItem[] {
+  if (!transformContent) return timeline;
+  return timeline.map((item) =>
+    item.type === "text" && item.content
+      ? { ...item, content: transformContent(item.content) }
+      : item,
+  );
+}
+
+// Muted, localized notice shown in place of assistant text when a turn
+// completed with no reply (message_kind === "no_response"). Explains the empty
+// turn instead of rendering a blank bubble (MUL-4351).
+function NoResponseNotice() {
+  const { t } = useT("chat");
+  return (
+    <div className="text-sm italic text-muted-foreground">
+      {t(($) => $.message_list.no_response)}
     </div>
   );
 }
@@ -355,12 +401,18 @@ function MessageFooter({
   timeline: ChatTimelineItem[];
   isPending: boolean;
 }) {
-  const showCopy = !isPending;
+  // A no_response turn has nothing to copy, and its caption uses a neutral
+  // "Finished in Xs" instead of "Replied in Xs" (MUL-4351).
+  const isNoResponse = message.message_kind === "no_response";
+  const showCopy = !isPending && !isNoResponse;
   if (message.elapsed_ms == null && !showCopy) return null;
   return (
     <div className="flex items-center gap-1.5">
       {message.elapsed_ms != null && (
-        <ElapsedCaption variant="replied" elapsedMs={message.elapsed_ms} />
+        <ElapsedCaption
+          variant={isNoResponse ? "finished" : "replied"}
+          elapsedMs={message.elapsed_ms}
+        />
       )}
       {showCopy && <MessageCopyButton message={message} timeline={timeline} />}
     </div>
@@ -414,15 +466,18 @@ function ElapsedCaption({
   elapsedMs,
   className,
 }: {
-  variant: "replied" | "failed";
+  variant: "replied" | "failed" | "finished";
   elapsedMs: number;
   className?: string;
 }) {
   const { t } = useT("chat");
+  const elapsed = formatElapsedMs(elapsedMs);
   const text =
     variant === "replied"
-      ? t(($) => $.message_list.replied_in, { elapsed: formatElapsedMs(elapsedMs) })
-      : t(($) => $.message_list.failed_after, { elapsed: formatElapsedMs(elapsedMs) });
+      ? t(($) => $.message_list.replied_in, { elapsed })
+      : variant === "finished"
+        ? t(($) => $.message_list.finished_in, { elapsed })
+        : t(($) => $.message_list.failed_after, { elapsed });
   return (
     <div className={cn("text-xs text-muted-foreground/80", className)}>
       {text}

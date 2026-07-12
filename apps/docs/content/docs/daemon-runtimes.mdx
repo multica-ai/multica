@@ -62,8 +62,46 @@ Key points:
 
 Built-in provider detection covers the common tools, but teams can also define
 **custom runtime profiles** for AI CLIs that speak one of Multica's supported
-protocol families and need a workspace-specific launch command. Profiles are
-managed from the Runtimes UI or the CLI:
+protocol families and need a different launch command. Typical examples include
+an internal wrapper around Codex, a version-pinned executable, or a team CLI
+that adds fixed model arguments.
+
+Do not create a custom profile just to use Claude Code, Codex, Kimi, or another
+built-in provider with its normal command. The daemon detects those tools
+automatically.
+
+### Before you create one
+
+- Install the custom command on at least one machine running a Multica daemon,
+  and confirm the same command works in that machine's terminal.
+- Confirm the tool speaks one of the base protocol families shown in the UI.
+  Choosing a family tells Multica how to communicate with the process; it does
+  not make an incompatible CLI compatible.
+- You must be a workspace owner or admin to create, edit, or delete a profile.
+
+### Create one from the Runtimes UI
+
+1. Open **Runtimes**, then select the machine where you installed the command.
+2. Select **Add custom runtime**.
+3. Choose the base protocol family implemented by the command.
+4. Enter a display name and the command you would run in a terminal, including
+   any fixed arguments. Add an optional description so teammates know what it
+   is for.
+5. Select **Create runtime**.
+
+The profile definition belongs to the whole workspace and syncs to every
+connected daemon. Each machine registers its own runtime only when it can
+resolve that command. The machine where you started the flow shows a temporary
+**Registering** row while it waits. If the row does not become online, check
+that the command is installed and available to the daemon on that machine.
+
+Creating a profile does not install the CLI, authenticate it, or copy it to
+other machines. Install and sign in to the underlying tool separately on every
+machine that should provide this runtime.
+
+### Manage profiles from the CLI
+
+The same workspace profiles can be managed from the CLI:
 
 ```bash
 multica runtime profile list
@@ -71,6 +109,11 @@ multica runtime profile create --display-name "Composer" --protocol-family codex
 multica runtime profile update <profile-id> --command-name agent
 multica runtime profile delete <profile-id>
 ```
+
+Custom and built-in runtimes share the same machine list. Use a custom runtime
+row's actions menu to edit or delete its profile. Deleting a profile removes its
+registered runtime instances after the daemons synchronize; it can be blocked
+while agents still depend on it.
 
 The command is argv-oriented, not a shell string. Multica stores an executable
 name plus fixed arguments, then the daemon launches it directly with

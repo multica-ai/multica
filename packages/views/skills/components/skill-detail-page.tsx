@@ -71,6 +71,7 @@ import {
   type SkillActionsContext,
 } from "./skill-list-actions";
 import { useT } from "../../i18n";
+import { ResourceLabelPicker } from "../../labels/resource-label-picker";
 
 const SKILL_MD = "SKILL.md";
 
@@ -719,6 +720,11 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
                 className="resize-none text-sm read-only:cursor-default"
               />
             </div>
+            <ResourceLabelPicker
+              resourceType="skill"
+              resourceId={skill.id}
+              canEdit={canEdit}
+            />
             <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
               {originLabel && (
                 <span className="inline-flex items-center gap-1">

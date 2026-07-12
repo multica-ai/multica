@@ -47,7 +47,9 @@ type Agent struct {
 	// Composio toolkit slugs this agent is allowed to mount as MCP. NULL or empty array = no MCP overlay. Mounted for any run that passes the agent invocation-permission gate (MUL-3963); the overlay uses the agent OWNER's active Composio connection, so sharing the agent (public_to) shares these apps with whoever may invoke it. No longer gated on originator == owner. Stored as TEXT[] so the dispatch path can intersect against the owner's active connections with a single SQL ANY() filter.
 	ComposioToolkitAllowlist []string `json:"composio_toolkit_allowlist"`
 	// Agent invocation permission mode (MUL-3963). private = owner only; public_to = allow-list in agent_invocation_target. Replaces visibility as the authorization source for triggering runs; visibility is now a derived legacy field. Default private = deny-by-default.
-	PermissionMode string `json:"permission_mode"`
+	PermissionMode string      `json:"permission_mode"`
+	Kind           string      `json:"kind"`
+	SystemKey      pgtype.Text `json:"system_key"`
 }
 
 // Allow-list of who may invoke a public_to agent (MUL-3963). One row per (agent, target_type, target); targets stack and canInvokeAgent OR-matches. workspace rows store the agent workspace_id in target_id; member rows store the user id; team rows are reserved and inert in V1. Rows only matter when agent.permission_mode = public_to. No DB foreign keys: agent_id / created_by / member target_id relationships are maintained in the application layer (see migration comment).
@@ -84,6 +86,7 @@ type AgentSkill struct {
 	AgentID   pgtype.UUID        `json:"agent_id"`
 	SkillID   pgtype.UUID        `json:"skill_id"`
 	CreatedAt pgtype.Timestamptz `json:"created_at"`
+	Enabled   bool               `json:"enabled"`
 }
 
 type AgentTaskQueue struct {
@@ -127,6 +130,13 @@ type AgentTaskQueue struct {
 	RuntimeConnectedApps []byte        `json:"runtime_connected_apps"`
 	CoalescedCommentIds  []pgtype.UUID `json:"coalesced_comment_ids"`
 	DeliveredCommentIds  []pgtype.UUID `json:"delivered_comment_ids"`
+	ChatInputTaskID      pgtype.UUID   `json:"chat_input_task_id"`
+}
+
+type AgentToLabel struct {
+	AgentID   pgtype.UUID        `json:"agent_id"`
+	LabelID   pgtype.UUID        `json:"label_id"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
 }
 
 type Attachment struct {
@@ -305,6 +315,7 @@ type ChatMessage struct {
 	CreatedAt     pgtype.Timestamptz `json:"created_at"`
 	FailureReason pgtype.Text        `json:"failure_reason"`
 	ElapsedMs     pgtype.Int8        `json:"elapsed_ms"`
+	MessageKind   string             `json:"message_kind"`
 }
 
 type ChatPinnedAgent struct {
@@ -533,12 +544,14 @@ type IssueDependency struct {
 }
 
 type IssueLabel struct {
-	ID          pgtype.UUID        `json:"id"`
-	WorkspaceID pgtype.UUID        `json:"workspace_id"`
-	Name        string             `json:"name"`
-	Color       string             `json:"color"`
-	CreatedAt   pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+	ID           pgtype.UUID        `json:"id"`
+	WorkspaceID  pgtype.UUID        `json:"workspace_id"`
+	Name         string             `json:"name"`
+	Color        string             `json:"color"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
+	ResourceType string             `json:"resource_type"`
+	Description  string             `json:"description"`
 }
 
 type IssuePullRequest struct {
@@ -752,6 +765,12 @@ type SkillFile struct {
 	Content   string             `json:"content"`
 	CreatedAt pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
+}
+
+type SkillToLabel struct {
+	SkillID   pgtype.UUID        `json:"skill_id"`
+	LabelID   pgtype.UUID        `json:"label_id"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
 }
 
 type Squad struct {

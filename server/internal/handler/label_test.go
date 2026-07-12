@@ -7,6 +7,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/google/uuid"
 )
 
 // TestLabelCRUD exercises label create/list/get/update/delete.
@@ -193,6 +195,62 @@ func TestIssueLabelAttachDetach(t *testing.T) {
 	json.NewDecoder(w.Body).Decode(&issueLabels)
 	if len(issueLabels.Labels) != 0 {
 		t.Fatalf("after Detach: expected 0 labels, got %d", len(issueLabels.Labels))
+	}
+}
+
+func TestIssueLabelRejectsNonIssueScope(t *testing.T) {
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title":    "Issue rejects agent label",
+		"status":   "todo",
+		"priority": "medium",
+	})
+	testHandler.CreateIssue(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateIssue: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var issue IssueResponse
+	if err := json.NewDecoder(w.Body).Decode(&issue); err != nil {
+		t.Fatalf("decode issue: %v", err)
+	}
+
+	w = httptest.NewRecorder()
+	req = newRequest("POST", "/api/labels", map[string]any{
+		"resource_type": "agent",
+		"name":          "agent-only-" + uuid.NewString()[:8],
+		"color":         "#3b82f6",
+	})
+	testHandler.CreateLabel(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateLabel: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var label LabelResponse
+	if err := json.NewDecoder(w.Body).Decode(&label); err != nil {
+		t.Fatalf("decode label: %v", err)
+	}
+	t.Cleanup(func() {
+		w := httptest.NewRecorder()
+		req := newRequest("DELETE", "/api/labels/"+label.ID, nil)
+		req = withURLParam(req, "id", label.ID)
+		testHandler.DeleteLabel(w, req)
+	})
+
+	w = httptest.NewRecorder()
+	req = newRequest("POST", "/api/issues/"+issue.ID+"/labels", map[string]any{
+		"label_id": label.ID,
+	})
+	req = withURLParam(req, "id", issue.ID)
+	testHandler.AttachLabel(w, req)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("AttachLabel with agent label: expected 404, got %d: %s", w.Code, w.Body.String())
+	}
+
+	w = httptest.NewRecorder()
+	req = newRequest("DELETE", "/api/issues/"+issue.ID+"/labels/"+label.ID, nil)
+	req = withURLParams(req, "id", issue.ID, "labelId", label.ID)
+	testHandler.DetachLabel(w, req)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("DetachLabel with agent label: expected 404, got %d: %s", w.Code, w.Body.String())
 	}
 }
 
@@ -437,6 +495,49 @@ func TestLabelNameAllowsEmoji(t *testing.T) {
 		req = withURLParam(req, "id", created.ID)
 		testHandler.DeleteLabel(w, req)
 	})
+}
+
+func TestLabelResourceTypesHaveIndependentNamespaces(t *testing.T) {
+	name := "shared-scope-label-" + uuid.NewString()[:8]
+	for _, resourceType := range []string{"issue", "agent", "skill"} {
+		w := httptest.NewRecorder()
+		req := newRequest("POST", "/api/labels", map[string]any{
+			"resource_type": resourceType,
+			"name":          name,
+			"description":   resourceType + " description",
+			"color":         "#3b82f6",
+		})
+		testHandler.CreateLabel(w, req)
+		if w.Code != http.StatusCreated {
+			t.Fatalf("CreateLabel resource_type=%s: expected 201, got %d: %s", resourceType, w.Code, w.Body.String())
+		}
+		var created LabelResponse
+		if err := json.NewDecoder(w.Body).Decode(&created); err != nil {
+			t.Fatalf("decode created label: %v", err)
+		}
+		if created.ResourceType != resourceType || created.Description != resourceType+" description" {
+			t.Fatalf("unexpected scoped label: %+v", created)
+		}
+		t.Cleanup(func() {
+			w := httptest.NewRecorder()
+			req := newRequest("DELETE", "/api/labels/"+created.ID, nil)
+			req = withURLParam(req, "id", created.ID)
+			testHandler.DeleteLabel(w, req)
+		})
+	}
+}
+
+func TestLabelRejectsUnknownResourceType(t *testing.T) {
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/labels", map[string]any{
+		"resource_type": "project",
+		"name":          "invalid-scope",
+		"color":         "#3b82f6",
+	})
+	testHandler.CreateLabel(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", w.Code, w.Body.String())
+	}
 }
 
 // TestColorCaseNormalization — input `#ABCDEF` must be stored as `#abcdef`

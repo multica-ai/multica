@@ -1,11 +1,11 @@
 -- name: ListAgents :many
 SELECT * FROM agent
-WHERE workspace_id = $1 AND archived_at IS NULL
+WHERE workspace_id = $1 AND archived_at IS NULL AND kind = 'user'
 ORDER BY created_at ASC;
 
 -- name: ListAllAgents :many
 SELECT * FROM agent
-WHERE workspace_id = $1
+WHERE workspace_id = $1 AND kind = 'user'
 ORDER BY created_at ASC;
 
 -- name: GetAgent :one
@@ -14,7 +14,7 @@ WHERE id = $1;
 
 -- name: GetAgentInWorkspace :one
 SELECT * FROM agent
-WHERE id = $1 AND workspace_id = $2;
+WHERE id = $1 AND workspace_id = $2 AND kind = 'user';
 
 -- name: CreateAgent :one
 INSERT INTO agent (
@@ -30,6 +30,29 @@ INSERT INTO agent (
     COALESCE(sqlc.narg('permission_mode'), 'private')
 )
 RETURNING *;
+
+-- name: CreateAgentBuilder :one
+-- One hidden builder agent per creation session. Keeping the execution carrier
+-- session-scoped freezes its model/runtime configuration when multiple builder
+-- flows are open concurrently, while `kind = 'system'` keeps it out of normal
+-- agent lists and assignment surfaces.
+INSERT INTO agent (
+    workspace_id, name, description, runtime_mode, runtime_config, runtime_id,
+    visibility, permission_mode, max_concurrent_tasks, owner_id, instructions,
+    custom_env, custom_args, model, kind, system_key
+) VALUES (
+    @workspace_id, @name, '', @runtime_mode, '{}'::jsonb, @runtime_id,
+    'private', 'private', 1, @owner_id, @instructions,
+    '{}'::jsonb, '[]'::jsonb, sqlc.narg('model'), 'system', @system_key
+)
+RETURNING *;
+
+-- name: DeleteSystemAgentByID :exec
+-- Builder sessions own their hidden execution agent. Deleting the session
+-- removes that carrier and its task rows; the kind guard prevents this cleanup
+-- path from ever deleting a user-authored agent.
+DELETE FROM agent
+WHERE id = $1 AND kind = 'system' AND system_key LIKE 'agent_builder:%';
 
 -- name: UpdateAgent :one
 -- composio_toolkit_allowlist is set wholesale: the API layer is responsible
@@ -132,7 +155,7 @@ RETURNING *;
 -- and so the cascade endpoint's expected_active_agent_ids check has a stable
 -- snapshot to compare against. Ordered by name for a deterministic display.
 SELECT * FROM agent
-WHERE runtime_id = $1 AND archived_at IS NULL
+WHERE runtime_id = $1 AND archived_at IS NULL AND kind = 'user'
 ORDER BY name ASC;
 
 -- name: ListActiveAgentsByRuntimeForUpdate :many
@@ -145,7 +168,7 @@ ORDER BY name ASC;
 -- that the set we compared against expected_active_agent_ids is exactly
 -- the set ArchiveAgentsByIDs will operate on — no race window.
 SELECT * FROM agent
-WHERE runtime_id = $1 AND archived_at IS NULL
+WHERE runtime_id = $1 AND archived_at IS NULL AND kind = 'user'
 ORDER BY name ASC
 FOR UPDATE;
 
@@ -254,16 +277,34 @@ WHERE id = $1 AND issue_id IS NULL;
 -- run has not changed. The Composio overlay follows the agent's invocation
 -- permission and uses the agent owner's connection (MUL-3963); originator is
 -- carried for A2A/audit, not as an originator == agent.owner_id gate.
+--
+-- chat_input_task_id is inherited straight from the parent so the whole retry
+-- chain keeps consuming the ORIGINAL root input batch (MUL-4351): the root
+-- direct task set it to its own id, every descendant copies that value, and a
+-- claim always reads the same user messages. A plain copy (not
+-- COALESCE(parent.chat_input_task_id, parent.id)) is deliberate: legacy/channel
+-- parents carry NULL and must stay NULL so their retries keep the trailing
+-- selector — promoting a pre-migration NULL row to the task-owned path on retry
+-- would risk replaying untagged history during a rolling deploy.
+--
+-- Chat retries are queued at GREATEST(priority, 3) so a transiently-failed
+-- earlier turn is re-claimed ahead of any fresh chat task (priority 2) the user
+-- queued while the failing turn was still running — the retry continues the
+-- older turn first. Combined with creating the retry inside FailTask's
+-- transaction, this leaves no window for a newer input task to jump ahead.
 INSERT INTO agent_task_queue (
     agent_id, runtime_id, issue_id, chat_session_id, autopilot_run_id,
     status, priority, trigger_comment_id, coalesced_comment_ids, trigger_summary, context,
     session_id, work_dir,
     attempt, max_attempts, parent_task_id, force_fresh_session, is_leader_task,
-    squad_id, originator_user_id, runtime_mcp_overlay, runtime_connected_apps
+    squad_id, originator_user_id, runtime_mcp_overlay, runtime_connected_apps,
+    chat_input_task_id
 )
 SELECT
     p.agent_id, p.runtime_id, p.issue_id, p.chat_session_id, p.autopilot_run_id,
-    'queued', p.priority, p.trigger_comment_id, p.coalesced_comment_ids, p.trigger_summary, p.context,
+    'queued',
+    CASE WHEN p.chat_session_id IS NOT NULL THEN GREATEST(p.priority, 3) ELSE p.priority END,
+    p.trigger_comment_id, p.coalesced_comment_ids, p.trigger_summary, p.context,
     CASE WHEN p.failure_reason IS NOT DISTINCT FROM 'codex_semantic_inactivity' THEN NULL ELSE p.session_id END,
     CASE WHEN p.failure_reason IS NOT DISTINCT FROM 'codex_semantic_inactivity' THEN NULL ELSE p.work_dir END,
     p.attempt + 1, p.max_attempts, p.id,
@@ -272,7 +313,8 @@ SELECT
     p.squad_id,
     p.originator_user_id,
     sqlc.narg(runtime_mcp_overlay),
-    sqlc.narg(runtime_connected_apps)
+    sqlc.narg(runtime_connected_apps),
+    p.chat_input_task_id
 FROM agent_task_queue p
 WHERE p.id = $1
 RETURNING *;

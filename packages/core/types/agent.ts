@@ -410,6 +410,8 @@ export interface AgentSkillSummary {
   id: string;
   name: string;
   description: string;
+	/** Older servers omit this field; consumers must treat that as enabled. */
+	enabled?: boolean;
 }
 
 export interface CreateAgentRequest {
@@ -439,6 +441,14 @@ export interface CreateAgentRequest {
   /** Optional template slug used by the onboarding agent picker. Surfaced
    *  as the `template` property on the `agent_created` PostHog event. */
   template?: string;
+  /** Workspace skill IDs attached atomically with the agent row. */
+  skill_ids?: string[];
+}
+
+export interface AgentBuilderSession {
+  session_id: string;
+  builder_agent_id: string;
+  runtime_id: string;
 }
 
 /** Agent template summary — fields needed by the picker grid. Does NOT
@@ -625,6 +635,8 @@ export interface SkillSummary {
   created_by: string | null;
   created_at: string;
   updated_at: string;
+	/** Present only when returned from an agent-scoped assignment endpoint. */
+	enabled?: boolean;
 }
 
 export interface Skill extends SkillSummary {
@@ -875,8 +887,17 @@ export interface RuntimeLocalSkillSummary {
    * discovery omit the field; treat `undefined` as unknown rather than
    * asserting either origin.
    */
-  root?: "provider" | "universal";
+  root?: "provider" | "universal" | "plugin";
+  /** Enabled runtime plugin that contributed this skill, when applicable. */
+  plugin?: string;
   file_count: number;
+}
+
+export interface RuntimeLocalMcpServerSummary {
+	name: string;
+	transport?: "stdio" | "http" | "sse" | "unknown";
+	source?: string;
+	enabled: boolean;
 }
 
 export interface RuntimeLocalSkillListRequest {
@@ -885,6 +906,8 @@ export interface RuntimeLocalSkillListRequest {
   status: RuntimeLocalSkillStatus;
   skills?: RuntimeLocalSkillSummary[];
   supported: boolean;
+	mcp_servers?: RuntimeLocalMcpServerSummary[];
+	mcp_supported?: boolean;
   error?: string;
   created_at: string;
   updated_at: string;
@@ -919,6 +942,8 @@ export interface RuntimeLocalSkillImportRequest {
 export interface RuntimeLocalSkillsResult {
   skills: RuntimeLocalSkillSummary[];
   supported: boolean;
+	mcpServers: RuntimeLocalMcpServerSummary[];
+	mcpSupported: boolean;
 }
 
 export interface RuntimeLocalSkillImportResult {

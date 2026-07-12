@@ -3,7 +3,6 @@
 import type { ReactNode } from "react";
 import { ArrowUp, Loader2, Square } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
-import { cn } from "@multica/ui/lib/utils";
 import {
   Tooltip,
   TooltipContent,
@@ -17,20 +16,18 @@ interface SubmitButtonProps {
   running?: boolean;
   onStop?: () => void;
   /**
-   * Button silhouette. `"rounded"` (default) keeps the rounded-square used by
-   * issue comment composers; `"circle"` makes it a fully-round pill — the
-   * Chat V2 look. Opt-in so shared callers keep their existing shape.
-   */
-  shape?: "rounded" | "circle";
-  /**
    * Tooltip shown over the send button when idle. Pass a string or a node
    * (e.g. `Send · ⌘↵`). Omit to render no tooltip.
    * Callers compose the shortcut hint themselves to keep this component
    * free of `@multica/core` (platform-detection) and i18n imports.
    */
   tooltip?: ReactNode;
+  /** Accessible name for the icon-only submit button. */
+  ariaLabel?: string;
   /** Tooltip shown over the stop button while a run is in progress. */
   stopTooltip?: ReactNode;
+  /** Accessible name for the icon-only stop button. */
+  stopAriaLabel?: string;
 }
 
 function SubmitButton({
@@ -40,14 +37,19 @@ function SubmitButton({
   running,
   onStop,
   tooltip,
+  ariaLabel,
   stopTooltip,
-  shape = "rounded",
+  stopAriaLabel,
 }: SubmitButtonProps) {
-  const shapeClass = shape === "circle" ? "rounded-full" : undefined;
   if (running) {
     const stopButton = (
-      <Button size="icon-sm" className={cn(shapeClass)} onClick={onStop}>
-        <Square className="fill-current" />
+      <Button
+        size="icon-sm"
+        className="rounded-full"
+        onClick={onStop}
+        aria-label={stopAriaLabel}
+      >
+        <Square className="fill-current" aria-hidden="true" />
       </Button>
     );
     if (!stopTooltip) return stopButton;
@@ -62,11 +64,16 @@ function SubmitButton({
   const submitButton = (
     <Button
       size="icon-sm"
-      className={cn(shapeClass)}
+      className="rounded-full"
       disabled={disabled || loading}
       onClick={onClick}
+      aria-label={ariaLabel}
     >
-      {loading ? <Loader2 className="animate-spin" /> : <ArrowUp />}
+      {loading ? (
+        <Loader2 className="animate-spin" aria-hidden="true" />
+      ) : (
+        <ArrowUp aria-hidden="true" />
+      )}
     </Button>
   );
   if (!tooltip) return submitButton;

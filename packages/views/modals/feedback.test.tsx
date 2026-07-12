@@ -1,8 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { forwardRef, useImperativeHandle } from "react";
 
 let storedDraftMessage = "saved draft";
+let liveEditorMarkdown = "";
+const feedbackMocks = vi.hoisted(() => ({ mutateAsync: vi.fn() }));
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({ t: (key: string) => key, i18n: { changeLanguage: vi.fn() } }),
@@ -36,25 +38,30 @@ vi.mock("@multica/core/hooks/use-file-upload", () => ({
 }));
 vi.mock("@multica/core/api", () => ({ api: {} }));
 vi.mock("sonner", () => ({ toast: { info: vi.fn(), error: vi.fn(), success: vi.fn() } }));
-vi.mock("@multica/core/platform", () => ({
-  formatShortcut: () => "⌘↵",
-  modKey: "mod",
-  enterKey: "enter",
-}));
 vi.mock("@multica/core/feedback", () => ({
   FEEDBACK_KINDS: ["bug", "feature", "general", "praise"] as const,
-  useCreateFeedback: () => ({ isPending: false, mutateAsync: vi.fn() }),
+  useCreateFeedback: () => ({ isPending: false, mutateAsync: feedbackMocks.mutateAsync }),
   useFeedbackDraftStore: (selector: any) =>
     selector({ draft: { message: storedDraftMessage }, setDraft: vi.fn(), clearDraft: vi.fn() }),
 }));
 vi.mock("../editor", () => {
-  const ContentEditor = forwardRef(({ defaultValue }: any, ref) => {
+  const ContentEditor = forwardRef(({ defaultValue, onSubmit }: any, ref) => {
+    liveEditorMarkdown = defaultValue;
     useImperativeHandle(ref, () => ({
       hasActiveUploads: () => false,
-      getMarkdown: () => defaultValue,
+      getMarkdown: () => liveEditorMarkdown,
       uploadFile: vi.fn(),
     }));
-    return <textarea aria-label="feedback editor" defaultValue={defaultValue} />;
+    return (
+      <textarea
+        aria-label="feedback editor"
+        defaultValue={defaultValue}
+        onChange={(event) => { liveEditorMarkdown = event.currentTarget.value; }}
+        onKeyDown={(event) => {
+          if (event.key === "Enter" && event.metaKey) void onSubmit?.();
+        }}
+      />
+    );
   });
   ContentEditor.displayName = "MockContentEditor";
   return {
@@ -70,6 +77,7 @@ import { FeedbackModal } from "./feedback";
 describe("FeedbackModal", () => {
   beforeEach(() => {
     vi.spyOn(console, "error").mockImplementation(() => {});
+    feedbackMocks.mutateAsync.mockReset().mockResolvedValue(undefined);
   });
 
   afterEach(() => {
@@ -92,5 +100,20 @@ describe("FeedbackModal", () => {
     expect(screen.getByLabelText("feedback editor")).toHaveValue(
       "saved draft\n\n---\n\nkind: desktop_route_error",
     );
+  });
+
+  it("submits the editor's latest markdown before debounced state catches up", async () => {
+    storedDraftMessage = "";
+    render(<FeedbackModal onClose={vi.fn()} />);
+
+    const editor = screen.getByLabelText("feedback editor");
+    fireEvent.change(editor, { target: { value: "fresh feedback" } });
+    fireEvent.keyDown(editor, { key: "Enter", metaKey: true });
+
+    await waitFor(() => {
+      expect(feedbackMocks.mutateAsync).toHaveBeenCalledWith(
+        expect.objectContaining({ message: "fresh feedback" }),
+      );
+    });
   });
 });

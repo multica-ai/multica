@@ -41,7 +41,8 @@ export function ChatFab() {
     toggle();
   };
 
-  // Tooltip text communicates the state that isn't carried by the icon/badge.
+  // Tooltip text carries the running/unread state on hover; the FAB itself no
+  // longer shows an unread-count badge (it duplicated the chat tab's, MUL-4374).
   const tooltip = isRunning
     ? t(($) => $.fab.running)
     : unreadSessionCount > 0
@@ -52,19 +53,15 @@ export function ChatFab() {
     <Tooltip>
       <TooltipTrigger
         onClick={handleClick}
+        aria-label={tooltip}
         className={cn(
-          "absolute bottom-2 right-2 z-50 flex size-10 cursor-pointer items-center justify-center rounded-full ring-1 ring-foreground/10 bg-card text-muted-foreground shadow-sm transition-transform hover:scale-110 hover:text-accent-foreground active:scale-95",
+          "absolute bottom-2 right-2 z-50 flex size-10 touch-manipulation items-center justify-center rounded-full bg-surface-raised text-muted-foreground shadow-[var(--floating-shadow)] ring-1 ring-surface-border transition-[background-color,color,box-shadow] hover:bg-surface-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/70 focus-visible:ring-offset-2 focus-visible:ring-offset-page-canvas active:bg-surface-hover",
           // Impulse the button itself while a chat task is running — no
           // outer ring to keep things calm.
           isRunning && "animate-chat-impulse",
         )}
       >
         <MessageCircle className="size-5" />
-        {unreadSessionCount > 0 && (
-          <span className="pointer-events-none absolute -top-0.5 -right-0.5 flex min-w-4 h-4 items-center justify-center rounded-full bg-brand px-1 text-xs font-semibold leading-none text-background">
-            {unreadSessionCount > 9 ? "9+" : unreadSessionCount}
-          </span>
-        )}
       </TooltipTrigger>
       <TooltipContent side="top" sideOffset={10}>{tooltip}</TooltipContent>
     </Tooltip>
