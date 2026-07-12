@@ -89,7 +89,8 @@ func (s *Service) canTriggerAgent(ctx context.Context, workspaceID, userID, agen
 	// for an owner/admin); an explicit Allow grants a member who would
 	// otherwise be blocked. Base = Allow so an unconfigured workspace is fully
 	// governed by the baseline above.
-	eff, err := toolpolicy.NewStoreFromQueries(s.Permissions.Cerebro).Resolve(ctx, toolpolicy.Query{
+	store := toolpolicy.NewStoreFromQueries(s.Permissions.Cerebro)
+	eff, err := store.Resolve(ctx, toolpolicy.Query{
 		WorkspaceID: workspaceID,
 		ToolKey:     triggerOtherAgentKey,
 		UserID:      userID,
@@ -99,10 +100,28 @@ func (s *Service) canTriggerAgent(ctx context.Context, workspaceID, userID, agen
 	if err != nil {
 		return false, err
 	}
-	if eff.DecidedBy == "" {
-		return baseline, nil
+	allowed := baseline
+	if eff.DecidedBy != "" {
+		allowed = eff.Setting == toolpolicy.SettingAllow
 	}
-	return eff.Setting == toolpolicy.SettingAllow, nil
+	// FIR-3091 punkt 8 fase 3: usage log — one row per applied trigger decision,
+	// so the permission detail page can show every time trigger_other_agent was
+	// enforced. Best-effort; DecidedBy "" records that the baseline answered.
+	decision := toolpolicy.SettingDeny
+	if allowed {
+		decision = toolpolicy.SettingAllow
+	}
+	store.RecordUsage(ctx, toolpolicy.UsageParams{
+		WorkspaceID:      workspaceID,
+		ToolKey:          triggerOtherAgentKey,
+		EnforcementPoint: "mention_gate",
+		SubjectType:      "member",
+		SubjectID:        userID,
+		Resource:         util.UUIDToString(agentID),
+		Decision:         decision,
+		DecidedBy:        string(eff.DecidedBy),
+	})
+	return allowed, nil
 }
 
 // baselineCanTrigger is the original hardcoded trigger rule: owners/admins hold

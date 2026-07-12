@@ -332,6 +332,62 @@ func (q *Queries) ListCerebroToolPolicyHolders(ctx context.Context, arg ListCere
 	return items, nil
 }
 
+const listCerebroToolPolicyUsageForTool = `-- name: ListCerebroToolPolicyUsageForTool :many
+SELECT id, enforcement_point, subject_type, subject_id, resource, decision, decided_by, created_at
+FROM cerebro_tool_policy_usage
+WHERE workspace_id = $1 AND tool_key = $2
+ORDER BY created_at DESC, id DESC
+LIMIT $3
+`
+
+type ListCerebroToolPolicyUsageForToolParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	ToolKey     string      `json:"tool_key"`
+	RowLimit    int32       `json:"row_limit"`
+}
+
+type ListCerebroToolPolicyUsageForToolRow struct {
+	ID               pgtype.UUID        `json:"id"`
+	EnforcementPoint string             `json:"enforcement_point"`
+	SubjectType      string             `json:"subject_type"`
+	SubjectID        pgtype.UUID        `json:"subject_id"`
+	Resource         string             `json:"resource"`
+	Decision         string             `json:"decision"`
+	DecidedBy        string             `json:"decided_by"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+}
+
+// One tool's usage history, newest first. Backs the "Usage" tab of the
+// per-permission detail page (FIR-3091 punkt 8 fase 3).
+func (q *Queries) ListCerebroToolPolicyUsageForTool(ctx context.Context, arg ListCerebroToolPolicyUsageForToolParams) ([]ListCerebroToolPolicyUsageForToolRow, error) {
+	rows, err := q.db.Query(ctx, listCerebroToolPolicyUsageForTool, arg.WorkspaceID, arg.ToolKey, arg.RowLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListCerebroToolPolicyUsageForToolRow{}
+	for rows.Next() {
+		var i ListCerebroToolPolicyUsageForToolRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.EnforcementPoint,
+			&i.SubjectType,
+			&i.SubjectID,
+			&i.Resource,
+			&i.Decision,
+			&i.DecidedBy,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const recordCerebroToolPolicyAudit = `-- name: RecordCerebroToolPolicyAudit :exec
 INSERT INTO cerebro_tool_policy_audit (
     workspace_id, tool_key, layer, subject_id, resource_pattern,
@@ -366,6 +422,41 @@ func (q *Queries) RecordCerebroToolPolicyAudit(ctx context.Context, arg RecordCe
 		arg.NewSetting,
 		arg.ActorType,
 		arg.ActorID,
+	)
+	return err
+}
+
+const recordCerebroToolPolicyUsage = `-- name: RecordCerebroToolPolicyUsage :exec
+INSERT INTO cerebro_tool_policy_usage (
+    workspace_id, tool_key, enforcement_point, subject_type, subject_id,
+    resource, decision, decided_by
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+`
+
+type RecordCerebroToolPolicyUsageParams struct {
+	WorkspaceID      pgtype.UUID `json:"workspace_id"`
+	ToolKey          string      `json:"tool_key"`
+	EnforcementPoint string      `json:"enforcement_point"`
+	SubjectType      string      `json:"subject_type"`
+	SubjectID        pgtype.UUID `json:"subject_id"`
+	Resource         string      `json:"resource"`
+	Decision         string      `json:"decision"`
+	DecidedBy        string      `json:"decided_by"`
+}
+
+// Append one usage-log row after a permission decision was applied at an
+// enforcement point (FIR-3091 punkt 8 fase 3). The log is append-only; rows
+// are never updated.
+func (q *Queries) RecordCerebroToolPolicyUsage(ctx context.Context, arg RecordCerebroToolPolicyUsageParams) error {
+	_, err := q.db.Exec(ctx, recordCerebroToolPolicyUsage,
+		arg.WorkspaceID,
+		arg.ToolKey,
+		arg.EnforcementPoint,
+		arg.SubjectType,
+		arg.SubjectID,
+		arg.Resource,
+		arg.Decision,
+		arg.DecidedBy,
 	)
 	return err
 }

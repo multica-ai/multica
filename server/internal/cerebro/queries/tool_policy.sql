@@ -106,3 +106,21 @@ FROM cerebro_tool_policy_audit
 WHERE workspace_id = sqlc.arg(workspace_id) AND tool_key = sqlc.arg(tool_key)
 ORDER BY created_at DESC, id DESC
 LIMIT sqlc.arg(row_limit);
+
+-- name: RecordCerebroToolPolicyUsage :exec
+-- Append one usage-log row after a permission decision was applied at an
+-- enforcement point (FIR-3091 punkt 8 fase 3). The log is append-only; rows
+-- are never updated.
+INSERT INTO cerebro_tool_policy_usage (
+    workspace_id, tool_key, enforcement_point, subject_type, subject_id,
+    resource, decision, decided_by
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8);
+
+-- name: ListCerebroToolPolicyUsageForTool :many
+-- One tool's usage history, newest first. Backs the "Usage" tab of the
+-- per-permission detail page (FIR-3091 punkt 8 fase 3).
+SELECT id, enforcement_point, subject_type, subject_id, resource, decision, decided_by, created_at
+FROM cerebro_tool_policy_usage
+WHERE workspace_id = sqlc.arg(workspace_id) AND tool_key = sqlc.arg(tool_key)
+ORDER BY created_at DESC, id DESC
+LIMIT sqlc.arg(row_limit);

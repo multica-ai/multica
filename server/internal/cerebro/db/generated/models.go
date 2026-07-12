@@ -1171,6 +1171,19 @@ type CerebroToolPolicyAudit struct {
 	CreatedAt       pgtype.Timestamptz `json:"created_at"`
 }
 
+type CerebroToolPolicyUsage struct {
+	ID               pgtype.UUID        `json:"id"`
+	WorkspaceID      pgtype.UUID        `json:"workspace_id"`
+	ToolKey          string             `json:"tool_key"`
+	EnforcementPoint string             `json:"enforcement_point"`
+	SubjectType      string             `json:"subject_type"`
+	SubjectID        pgtype.UUID        `json:"subject_id"`
+	Resource         string             `json:"resource"`
+	Decision         string             `json:"decision"`
+	DecidedBy        string             `json:"decided_by"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+}
+
 type CerebroUserInfisicalFolder struct {
 	ID          pgtype.UUID        `json:"id"`
 	WorkspaceID pgtype.UUID        `json:"workspace_id"`

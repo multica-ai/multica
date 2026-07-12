@@ -207,6 +207,31 @@ type changesResponse struct {
 	Changes []changeResponse `json:"changes"`
 }
 
+// usageRowResponse is one usage-log row for a tool: which gate applied a
+// decision, to whom, on which concrete resource, and what was decided
+// (FIR-3091 punkt 8 fase 3). subject_id "" records a system subject (a
+// human-less run). decided_by "" means no explicit rule matched and the
+// gate's base/baseline answered. Ids are raw UUID strings the frontend
+// resolves to names from data it already holds.
+type usageRowResponse struct {
+	EnforcementPoint string `json:"enforcement_point"`
+	SubjectType      string `json:"subject_type"`
+	SubjectID        string `json:"subject_id"`
+	Resource         string `json:"resource"`
+	Decision         string `json:"decision"`
+	DecidedBy        string `json:"decided_by"`
+	CreatedAt        string `json:"created_at"`
+}
+
+// usageResponse is the body of GET .../tool-policy/usage: one tool's usage
+// log, newest first. Recording started when FIR-3091 fase 3 shipped, so an
+// empty list on a long-lived tool means "no usage since then", not "never
+// used".
+type usageResponse struct {
+	ToolKey string             `json:"tool_key"`
+	Usage   []usageRowResponse `json:"usage"`
+}
+
 // --- request types ----------------------------------------------------------
 
 type setRequest struct {
@@ -635,6 +660,57 @@ func (h *Handler) Changes(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	writeJSON(w, http.StatusOK, changesResponse{ToolKey: toolKey, Changes: changes})
+}
+
+// usageLimit caps one Usage read. The page shows recent history, not a full
+// export; 200 rows keeps the response bounded no matter how busy the gates get.
+const usageLimit = 200
+
+// Usage — GET /api/workspaces/{id}/tool-policy/usage?tool_key=...
+//
+// One tool's usage log, newest first (FIR-3091 punkt 8 fase 3): every time a
+// permission decision for the tool was applied at an enforcement point since
+// the log shipped. Same admin/owner gate as Holders and Changes — the history
+// names who acted and what they were allowed or denied.
+func (h *Handler) Usage(w http.ResponseWriter, r *http.Request) {
+	member, workspaceID, ok := h.loadWorkspace(w, r)
+	if !ok {
+		return
+	}
+	if member.Role != "owner" && member.Role != "admin" {
+		writeError(w, http.StatusForbidden, "insufficient permissions")
+		return
+	}
+
+	toolKey := r.URL.Query().Get("tool_key")
+	if toolKey == "" {
+		writeError(w, http.StatusBadRequest, "tool_key required")
+		return
+	}
+
+	rows, err := h.Store.Usage(r.Context(), workspaceID, toolKey, usageLimit)
+	if err != nil {
+		h.serverError(w, r, "list tool policy usage", err)
+		return
+	}
+
+	usage := make([]usageRowResponse, 0, len(rows))
+	for _, row := range rows {
+		subjectID := ""
+		if row.SubjectID.Valid {
+			subjectID = util.UUIDToString(row.SubjectID)
+		}
+		usage = append(usage, usageRowResponse{
+			EnforcementPoint: row.EnforcementPoint,
+			SubjectType:      row.SubjectType,
+			SubjectID:        subjectID,
+			Resource:         row.Resource,
+			Decision:         row.Decision,
+			DecidedBy:        row.DecidedBy,
+			CreatedAt:        row.CreatedAt.UTC().Format(time.RFC3339),
+		})
+	}
+	writeJSON(w, http.StatusOK, usageResponse{ToolKey: toolKey, Usage: usage})
 }
 
 // --- helpers ----------------------------------------------------------------

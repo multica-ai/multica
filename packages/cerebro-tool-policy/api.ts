@@ -172,3 +172,51 @@ export async function getPermissionChanges(
     { endpoint: path },
   );
 }
+
+// --- FIR-3091 punkt 8 fase 3: per-permission usage log -----------------------
+// One tool's usage history, newest first: every time a permission decision for
+// the tool was applied at an enforcement point. subject_id "" records a system
+// subject (a human-less run); decided_by "" means no explicit rule matched and
+// the gate's base/baseline answered. Recording started when fase 3 shipped, so
+// an empty list means "no usage since then", not "never used".
+
+const PermissionUsageRowSchema = z
+  .object({
+    enforcement_point: z.string().default(""),
+    subject_type: z.string().default(""),
+    subject_id: z.string().default(""),
+    resource: z.string().default(""),
+    decision: z.string().default(""),
+    decided_by: z.string().default(""),
+    created_at: z.string().default(""),
+  })
+  .loose();
+
+const PermissionUsageSchema = z
+  .object({
+    tool_key: z.string().default(""),
+    usage: z.array(PermissionUsageRowSchema).default([]),
+  })
+  .loose();
+
+export type PermissionUsageRow = z.infer<typeof PermissionUsageRowSchema>;
+export type PermissionUsage = z.infer<typeof PermissionUsageSchema>;
+
+// getPermissionUsage lists one tool's usage log. Admin/owner only server-side.
+// Returns an empty result on parse/transport failure so the page renders "no
+// usage" rather than crashing.
+export async function getPermissionUsage(
+  workspaceId: string,
+  toolKey: string,
+): Promise<PermissionUsage> {
+  const path = `/api/workspaces/${workspaceId}/tool-policy/usage?tool_key=${encodeURIComponent(
+    toolKey,
+  )}`;
+  const raw = await api.cerebroRequest<unknown>(path);
+  return parseWithFallback(
+    raw,
+    PermissionUsageSchema,
+    { tool_key: toolKey, usage: [] },
+    { endpoint: path },
+  );
+}

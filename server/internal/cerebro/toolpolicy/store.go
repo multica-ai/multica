@@ -568,6 +568,90 @@ func (s *Store) Changes(ctx context.Context, workspaceID pgtype.UUID, toolKey st
 	return out, nil
 }
 
+// UsageParams describes one applied permission decision for the usage log
+// (FIR-3091 punkt 8 fase 3): which tool was enforced, at which gate, for whom,
+// on which concrete resource, and what the decision was. DecidedBy is the layer
+// whose rule decided; "" means no explicit rule matched and the gate's
+// base/baseline answered.
+type UsageParams struct {
+	WorkspaceID      pgtype.UUID
+	ToolKey          string
+	EnforcementPoint string
+	SubjectType      string // "member" | "agent" | "system"
+	SubjectID        pgtype.UUID
+	Resource         string
+	Decision         Setting
+	DecidedBy        string
+}
+
+// RecordUsage appends one usage-log row after a permission decision was
+// applied at an enforcement point (FIR-3091 punkt 8 fase 3). Best-effort by
+// design: the decision has already been applied, and failing the guarded
+// action over a missing history row would be worse than a gap in the log (the
+// same trade-off recordAudit makes). A subject without a valid id is recorded
+// as a system subject; a Disable verdict is recorded as the deny it acts as.
+func (s *Store) RecordUsage(ctx context.Context, p UsageParams) {
+	if s == nil || s.q == nil {
+		return
+	}
+	subjectType := p.SubjectType
+	if !p.SubjectID.Valid {
+		subjectType = "system"
+	}
+	decision := p.Decision
+	if decision == SettingDisable {
+		decision = SettingDeny
+	}
+	_ = s.q.RecordCerebroToolPolicyUsage(ctx, cerebrodb.RecordCerebroToolPolicyUsageParams{
+		WorkspaceID:      p.WorkspaceID,
+		ToolKey:          p.ToolKey,
+		EnforcementPoint: p.EnforcementPoint,
+		SubjectType:      subjectType,
+		SubjectID:        p.SubjectID,
+		Resource:         p.Resource,
+		Decision:         string(decision),
+		DecidedBy:        p.DecidedBy,
+	})
+}
+
+// UsageRow is one usage-log row for a tool: which gate applied a decision, to
+// whom, on which resource, and what was decided (FIR-3091 punkt 8 fase 3).
+type UsageRow struct {
+	EnforcementPoint string
+	SubjectType      string
+	SubjectID        pgtype.UUID
+	Resource         string
+	Decision         string
+	DecidedBy        string
+	CreatedAt        time.Time
+}
+
+// Usage returns one tool's usage history, newest first, capped at limit rows.
+// A tool with no recorded usage returns an empty slice, never an error.
+func (s *Store) Usage(ctx context.Context, workspaceID pgtype.UUID, toolKey string, limit int32) ([]UsageRow, error) {
+	rows, err := s.q.ListCerebroToolPolicyUsageForTool(ctx, cerebrodb.ListCerebroToolPolicyUsageForToolParams{
+		WorkspaceID: workspaceID,
+		ToolKey:     toolKey,
+		RowLimit:    limit,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("toolpolicy: list usage: %w", err)
+	}
+	out := make([]UsageRow, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, UsageRow{
+			EnforcementPoint: r.EnforcementPoint,
+			SubjectType:      r.SubjectType,
+			SubjectID:        r.SubjectID,
+			Resource:         r.Resource,
+			Decision:         r.Decision,
+			DecidedBy:        r.DecidedBy,
+			CreatedAt:        r.CreatedAt.Time,
+		})
+	}
+	return out, nil
+}
+
 // encodeCondition marshals an optional Condition for the conditions JSONB
 // column. A nil or zero-value Condition encodes to NULL (no constraint).
 func encodeCondition(c *Condition) ([]byte, error) {

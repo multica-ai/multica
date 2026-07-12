@@ -1187,6 +1187,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/tool-policy/holders", cerebroToolPolicyHandler.Holders)
 					// CEREBRO-PATCH(cerebro-tool-policy-changes): FIR-3091 punkt 8 fase 2 per-permission change log (admin/owner-gated in handler).
 					r.Get("/tool-policy/changes", cerebroToolPolicyHandler.Changes)
+					// CEREBRO-PATCH(cerebro-tool-policy-usage): FIR-3091 punkt 8 fase 3 per-permission usage log (admin/owner-gated in handler).
+					r.Get("/tool-policy/usage", cerebroToolPolicyHandler.Usage)
 					// CEREBRO-PATCH(cerebro-sandbox-profile-routes): FIR-2230 sandbox isolation profile catalog (any member).
 					r.Get("/sandbox-profiles", cerebroSandboxProfileHandler.List)
 					// CEREBRO-PATCH(cerebro-approvals-routes): FIR-2131 approval inbox reads (any member). /audit before /{approvalId} so it is not shadowed.
