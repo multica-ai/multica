@@ -1,11 +1,13 @@
 import { queryOptions } from "@tanstack/react-query";
 import { api } from "../api";
-import type { Agent, Squad, Workspace } from "../types";
+import type { Agent, KnownUser, Squad, Workspace } from "../types";
 
 export const workspaceKeys = {
   all: (wsId: string) => ["workspaces", wsId] as const,
   list: () => ["workspaces", "list"] as const,
   members: (wsId: string) => ["workspaces", wsId, "members"] as const,
+  addableUsers: (wsId: string) => ["workspaces", wsId, "addable-users"] as const,
+  knownUsers: () => ["known-users"] as const,
   invitations: (wsId: string) => ["workspaces", wsId, "invitations"] as const,
   myInvitations: () => ["invitations", "mine"] as const,
   agents: (wsId: string) => ["workspaces", wsId, "agents"] as const,
@@ -38,6 +40,21 @@ export function memberListOptions(wsId: string) {
   return queryOptions({
     queryKey: workspaceKeys.members(wsId),
     queryFn: () => api.listMembers(wsId),
+  });
+}
+
+export function knownUserListOptions() {
+  return queryOptions<KnownUser[]>({
+    queryKey: workspaceKeys.knownUsers(),
+    queryFn: () => api.listKnownUsers(),
+  });
+}
+
+export function addableUserListOptions(wsId: string) {
+  return queryOptions<KnownUser[]>({
+    queryKey: workspaceKeys.addableUsers(wsId),
+    queryFn: () => api.listAddableUsers(wsId),
+    enabled: !!wsId,
   });
 }
 

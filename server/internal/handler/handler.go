@@ -182,10 +182,6 @@ type Handler struct {
 	// the composio HTTP handlers return 503 in that case. Wired in
 	// cmd/server/router.go after handler.New.
 	Composio *composio.Service
-	// GitLabBox encrypts/decrypts OAuth access tokens stored in gitlab_connection.
-	// Nil when GITLAB_SECRET_KEY is not configured; the GitLab OAuth handlers
-	// return an error in that case.
-	GitLabBox *secretbox.Box
 	// ChannelSupervisor owns the per-installation supervisor goroutines
 	// that hold the §4.4 WS lease and drive each channel.Channel
 	// (MUL-3620 generalized the Feishu-only Hub into this channel-agnostic

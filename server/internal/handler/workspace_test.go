@@ -124,6 +124,69 @@ func TestCreateWorkspace_DisabledByConfig(t *testing.T) {
 	}
 }
 
+func TestCreateWorkspace_AddsSelectedMembers(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+	const slug = "handler-tests-create-with-members"
+	const coworkerEmail = "create-ws-coworker@multica.ai"
+	_, _ = testPool.Exec(ctx, `DELETE FROM workspace WHERE slug = $1`, slug)
+
+	var coworkerID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO "user" (name, email)
+		VALUES ('Coworker', $1)
+		ON CONFLICT (email) DO UPDATE SET name = EXCLUDED.name
+		RETURNING id
+	`, coworkerEmail).Scan(&coworkerID); err != nil {
+		t.Fatalf("seed coworker: %v", err)
+	}
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO member (workspace_id, user_id, role)
+		VALUES ($1, $2, 'member')
+		ON CONFLICT DO NOTHING
+	`, parseUUID(testWorkspaceID), coworkerID); err != nil {
+		t.Fatalf("add coworker to shared workspace: %v", err)
+	}
+
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM workspace WHERE slug = $1`, slug)
+		_, _ = testPool.Exec(context.Background(),
+			`DELETE FROM member WHERE user_id = $1 AND workspace_id != $2`,
+			coworkerID, parseUUID(testWorkspaceID))
+		_, _ = testPool.Exec(context.Background(),
+			`DELETE FROM "user" WHERE email = $1`, coworkerEmail)
+	})
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/workspaces", map[string]any{
+		"name":             "Members Probe",
+		"slug":             slug,
+		"member_user_ids":  []string{coworkerID},
+	})
+	testHandler.CreateWorkspace(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateWorkspace: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var wsResp WorkspaceResponse
+	if err := json.NewDecoder(w.Body).Decode(&wsResp); err != nil {
+		t.Fatalf("decode workspace: %v", err)
+	}
+
+	var memberCount int
+	if err := testPool.QueryRow(ctx, `
+		SELECT count(*) FROM member WHERE workspace_id = $1
+	`, wsResp.ID).Scan(&memberCount); err != nil {
+		t.Fatalf("count members: %v", err)
+	}
+	if memberCount != 2 {
+		t.Fatalf("expected owner + coworker = 2 members, got %d", memberCount)
+	}
+}
+
 // TestDeleteWorkspace_RequiresOwner exercises the in-handler authorization
 // added to DeleteWorkspace by calling the handler directly (bypassing the
 // router-level RequireWorkspaceRoleFromURL middleware). Without the handler

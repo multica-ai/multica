@@ -73,8 +73,9 @@ export function DeployAgentModal({
         <DialogHeader>
           <DialogTitle>Deploy agent to workspace</DialogTitle>
           <DialogDescription>
-            Copies this agent&apos;s configuration and skills to another workspace.
-            Secrets are never copied. The target workspace&apos;s runner is used automatically.
+            Copies this agent&apos;s configuration and skills to another workspace as a
+            shared agent (public to anyone in that workspace). Secrets are never copied.
+            Uses the same runner as the original when it is registered there.
           </DialogDescription>
         </DialogHeader>
         <div className="flex flex-col gap-4 py-2">

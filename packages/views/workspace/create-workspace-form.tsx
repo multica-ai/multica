@@ -1,12 +1,15 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
+import { useQuery } from "@tanstack/react-query";
 import { Input } from "@multica/ui/components/ui/input";
 import { Label } from "@multica/ui/components/ui/label";
 import { Button } from "@multica/ui/components/ui/button";
 import { Card, CardContent } from "@multica/ui/components/ui/card";
+import { Checkbox } from "@multica/ui/components/ui/checkbox";
 import { useCreateWorkspace } from "@multica/core/workspace/mutations";
+import { knownUserListOptions } from "@multica/core/workspace/queries";
 import type { Workspace } from "@multica/core/types";
 import { isImeComposing } from "@multica/core/utils";
 import {
@@ -18,6 +21,8 @@ import { useT } from "../i18n";
 import { isReservedSlug } from "@multica/core/paths";
 import { useConfigStore } from "@multica/core/config";
 import { workspaceUrlHost } from "@multica/core/workspace/workspace-url";
+import { User } from "lucide-react";
+import { matchesPinyin } from "../editor/extensions/pinyin-match";
 
 export interface CreateWorkspaceFormProps {
   onSuccess: (workspace: Workspace) => void | Promise<void>;
@@ -27,9 +32,14 @@ export function CreateWorkspaceForm({ onSuccess }: CreateWorkspaceFormProps) {
   const { t } = useT("workspace");
   const createWorkspace = useCreateWorkspace();
   const urlHost = workspaceUrlHost(useConfigStore((s) => s.daemonAppUrl));
+  const { data: knownUsers = [] } = useQuery(knownUserListOptions());
   const [name, setName] = useState("");
   const [slug, setSlug] = useState("");
   const [slugServerError, setSlugServerError] = useState<string | null>(null);
+  const [memberFilter, setMemberFilter] = useState("");
+  const [selectedMemberIds, setSelectedMemberIds] = useState<Set<string>>(
+    () => new Set(),
+  );
   const slugTouched = useRef(false);
 
   const slugValidationError =
@@ -43,6 +53,26 @@ export function CreateWorkspaceForm({ onSuccess }: CreateWorkspaceFormProps) {
   const slugError = slugValidationError ?? slugReservedError ?? slugServerError;
   const canSubmit =
     name.trim().length > 0 && slug.trim().length > 0 && !slugError;
+
+  const filteredKnownUsers = useMemo(() => {
+    const q = memberFilter.trim().toLowerCase();
+    if (!q) return knownUsers;
+    return knownUsers.filter(
+      (u) =>
+        u.name.toLowerCase().includes(q) ||
+        u.email.toLowerCase().includes(q) ||
+        matchesPinyin(u.name, q),
+    );
+  }, [knownUsers, memberFilter]);
+
+  const toggleMember = (userId: string, checked: boolean) => {
+    setSelectedMemberIds((prev) => {
+      const next = new Set(prev);
+      if (checked) next.add(userId);
+      else next.delete(userId);
+      return next;
+    });
+  };
 
   const handleNameChange = (value: string) => {
     setName(value);
@@ -61,7 +91,14 @@ export function CreateWorkspaceForm({ onSuccess }: CreateWorkspaceFormProps) {
   const handleCreate = () => {
     if (!canSubmit) return;
     createWorkspace.mutate(
-      { name: name.trim(), slug: slug.trim() },
+      {
+        name: name.trim(),
+        slug: slug.trim(),
+        member_user_ids:
+          selectedMemberIds.size > 0
+            ? [...selectedMemberIds]
+            : undefined,
+      },
       {
         onSuccess,
         onError: (error) => {
@@ -121,6 +158,62 @@ export function CreateWorkspaceForm({ onSuccess }: CreateWorkspaceFormProps) {
             <p className="text-xs text-destructive">{slugError}</p>
           )}
         </div>
+
+        {knownUsers.length > 0 && (
+          <div className="space-y-2">
+            <div>
+              <Label htmlFor="ws-members">
+                {t(($) => $.create_form.members_label)}
+              </Label>
+              <p className="text-xs text-muted-foreground">
+                {t(($) => $.create_form.members_hint)}
+              </p>
+            </div>
+            <Input
+              id="ws-members"
+              type="search"
+              value={memberFilter}
+              onChange={(e) => setMemberFilter(e.target.value)}
+              placeholder={t(($) => $.create_form.members_search_placeholder)}
+            />
+            <div className="max-h-48 space-y-1 overflow-y-auto rounded-md border p-2">
+              {filteredKnownUsers.length === 0 ? (
+                <p className="px-2 py-3 text-sm text-muted-foreground">
+                  {t(($) => $.create_form.members_empty)}
+                </p>
+              ) : (
+                filteredKnownUsers.map((user) => {
+                  const checked = selectedMemberIds.has(user.id);
+                  return (
+                    <label
+                      key={user.id}
+                      className="flex cursor-pointer items-center gap-3 rounded-md px-2 py-2 hover:bg-muted/60"
+                    >
+                      <Checkbox
+                        checked={checked}
+                        onCheckedChange={(v) =>
+                          toggleMember(user.id, v === true)
+                        }
+                      />
+                      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-muted">
+                        <User className="h-4 w-4 text-muted-foreground" />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate text-sm font-medium">
+                          {user.name}
+                        </div>
+                        <div className="truncate text-xs text-muted-foreground">
+                          {user.email}
+                        </div>
+                      </div>
+                    </label>
+                  );
+                })
+              )}
+            </div>
+          </div>
+        )}
+
         <Button
           className="w-full"
           size="lg"

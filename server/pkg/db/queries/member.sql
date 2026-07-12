@@ -31,3 +31,37 @@ FROM member m
 JOIN "user" u ON u.id = m.user_id
 WHERE m.workspace_id = $1
 ORDER BY m.created_at ASC;
+
+-- name: ListKnownUsers :many
+-- Users who share at least one workspace with the requester (excluding self).
+SELECT DISTINCT u.id, u.name, u.email, u.avatar_url
+FROM "user" u
+JOIN member m ON m.user_id = u.id
+WHERE m.workspace_id IN (
+  SELECT om.workspace_id FROM member om WHERE om.user_id = $1
+)
+AND u.id != $1
+ORDER BY u.name ASC, u.email ASC;
+
+-- name: ListAddableUsersForWorkspace :many
+-- Known users who are not already members of the target workspace.
+SELECT DISTINCT u.id, u.name, u.email, u.avatar_url
+FROM "user" u
+JOIN member m ON m.user_id = u.id
+WHERE m.workspace_id IN (
+  SELECT om.workspace_id FROM member om WHERE om.user_id = $1
+)
+AND u.id != $1
+AND NOT EXISTS (
+  SELECT 1 FROM member tm
+  WHERE tm.workspace_id = $2 AND tm.user_id = u.id
+)
+ORDER BY u.name ASC, u.email ASC;
+
+-- name: IsKnownCoworker :one
+SELECT EXISTS (
+  SELECT 1
+  FROM member m1
+  JOIN member m2 ON m1.workspace_id = m2.workspace_id
+  WHERE m1.user_id = $1 AND m2.user_id = $2
+) AS is_coworker;

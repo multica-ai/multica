@@ -6,6 +6,10 @@
     "url_placeholder": "my-workspace",
     "submit": "ワークスペースを作成",
     "submitting": "作成中...",
+    "members_label": "メンバーを追加",
+    "members_hint": "他のワークスペースのメンバーは招待なしですぐにアクセスできます。",
+    "members_search_placeholder": "名前またはメールで検索",
+    "members_empty": "一致する人がいません",
     "errors": {
       "slug_format": "小文字、数字、ハイフンのみ使用できます",
       "slug_taken": "このワークスペースURLはすでに使用されています。",
@@ -19,7 +23,7 @@
     "log_out": "ログアウト",
     "title": "Multicaへようこそ",
     "description": "あなたとAIの仲間が同じコンテキストを共有しながら、イシューを引き受け、コメントを残し、隣り合って作業する1つのワークスペースです。",
-    "invite_hint": "ワークスペースの準備ができたら、仲間を招待できます。"
+    "invite_hint": "作成時に他のワークスペースのメンバーを追加できます。"
   },
   "creation_disabled": {
     "title": "ワークスペースの作成が無効になっています",

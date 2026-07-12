@@ -218,7 +218,8 @@ export interface UpdateMeRequest {
 }
 
 export interface CreateMemberRequest {
-  email: string;
+  email?: string;
+  user_id?: string;
   role?: MemberRole;
 }
 

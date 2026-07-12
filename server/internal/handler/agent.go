@@ -14,6 +14,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/analytics"
@@ -1951,9 +1952,12 @@ type CopyAgentRequest struct {
 }
 
 // CopyAgent handles POST /api/agents/:id/copy.
-// Duplicates an agent's configuration into another workspace.
-// Secrets (custom_env, mcp_config, runtime_config) are never copied.
-// Skills are find-or-created by name so target-workspace customisations survive.
+// Duplicates an agent's configuration into another workspace as a shared
+// agent (public_to + workspace invocation target). Secrets (custom_env,
+// mcp_config, runtime_config) are never copied. Skills are find-or-created
+// by name so target-workspace customisations survive. The copy prefers the
+// same physical runtime (daemon_id + provider/profile) when registered in
+// the target workspace.
 func (h *Handler) CopyAgent(w http.ResponseWriter, r *http.Request) {
 	agentID := chi.URLParam(r, "id")
 	src, ok := h.loadAgentForUser(w, r, agentID)
@@ -1987,7 +1991,10 @@ func (h *Handler) CopyAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Resolve target runtime.
+	// Resolve target runtime. Prefer the same physical machine as the source
+	// agent (daemon_id + provider/profile) when that daemon is registered in
+	// the target workspace; fall back to an explicit override or the first
+	// available runtime there.
 	var targetRuntime db.AgentRuntime
 	if req.TargetRuntimeID != "" {
 		rUUID, ok2 := parseUUIDOrBadRequest(w, req.TargetRuntimeID, "target_runtime_id")
@@ -2003,7 +2010,12 @@ func (h *Handler) CopyAgent(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		targetRuntime = rt
-	} else {
+	} else if rt, err2 := h.Queries.GetMatchingRuntimeInWorkspace(r.Context(), db.GetMatchingRuntimeInWorkspaceParams{
+		SourceRuntimeID:   src.RuntimeID,
+		TargetWorkspaceID: targetWs.ID,
+	}); err2 == nil {
+		targetRuntime = rt
+	} else if errors.Is(err2, pgx.ErrNoRows) {
 		rt, err2 := h.Queries.GetFirstRuntimeForWorkspace(r.Context(), targetWs.ID)
 		if err2 != nil {
 			writeError(w, http.StatusUnprocessableEntity,
@@ -2011,6 +2023,10 @@ func (h *Handler) CopyAgent(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		targetRuntime = rt
+	} else {
+		slog.Warn("copy agent: match source runtime in target workspace failed", "error", err2, "source", agentID, "target_workspace", targetWsID)
+		writeError(w, http.StatusInternalServerError, "failed to resolve target runtime")
+		return
 	}
 
 	targetName := src.Name
@@ -2027,7 +2043,8 @@ func (h *Handler) CopyAgent(w http.ResponseWriter, r *http.Request) {
 		RuntimeMode:        targetRuntime.RuntimeMode,
 		RuntimeConfig:      []byte("{}"),
 		RuntimeID:          targetRuntime.ID,
-		Visibility:         "private",
+		Visibility:         "workspace",
+		PermissionMode:     permissionModePublicTo,
 		MaxConcurrentTasks: src.MaxConcurrentTasks,
 		OwnerID:            parseUUID(userID),
 		CustomEnv:          []byte("{}"),
@@ -2082,12 +2099,22 @@ func (h *Handler) CopyAgent(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	if err := h.replaceInvocationTargets(r.Context(), created.ID, parseUUID(userID), []targetSpec{{
+		targetType: invocationTargetWorkspace,
+		targetID:   targetWs.ID,
+	}}); err != nil {
+		slog.Warn("copy agent: persist invocation targets failed", "error", err, "agent_id", uuidToString(created.ID))
+	}
+
 	if targetRuntime.Status == "online" {
 		h.TaskService.ReconcileAgentStatus(r.Context(), created.ID)
 		created, _ = h.Queries.GetAgent(r.Context(), created.ID)
 	}
 
 	resp := agentToResponse(created)
+	if err := h.enrichAgentResponseWithTargets(r.Context(), &resp, created.ID); err != nil {
+		slog.Warn("copy agent: load invocation targets for response failed", "error", err, "agent_id", uuidToString(created.ID))
+	}
 	if err := h.attachAgentSkills(r.Context(), &resp, created.ID); err != nil {
 		slog.Warn("copy agent: failed to attach skills to response", "error", err)
 	}

@@ -449,7 +449,7 @@ func (q *Queries) GetAgentRuntimeForWorkspace(ctx context.Context, arg GetAgentR
 }
 
 const getFirstRuntimeForWorkspace = `-- name: GetFirstRuntimeForWorkspace :one
-SELECT id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, visibility, profile_id FROM agent_runtime
+SELECT id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, visibility, profile_id, custom_name FROM agent_runtime
 WHERE workspace_id = $1
 ORDER BY (status = 'online') DESC, created_at ASC
 LIMIT 1
@@ -477,21 +477,39 @@ func (q *Queries) GetFirstRuntimeForWorkspace(ctx context.Context, workspaceID p
 		&i.LegacyDaemonID,
 		&i.Visibility,
 		&i.ProfileID,
+		&i.CustomName,
 	)
 	return i, err
 }
 
-const getFirstRuntimeForWorkspace = `-- name: GetFirstRuntimeForWorkspace :one
-SELECT id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, visibility, profile_id FROM agent_runtime
-WHERE workspace_id = $1
-ORDER BY (status = 'online') DESC, created_at ASC
+const getMatchingRuntimeInWorkspace = `-- name: GetMatchingRuntimeInWorkspace :one
+SELECT tgt.id, tgt.workspace_id, tgt.daemon_id, tgt.name, tgt.runtime_mode, tgt.provider, tgt.status, tgt.device_info, tgt.metadata, tgt.last_seen_at, tgt.created_at, tgt.updated_at, tgt.owner_id, tgt.legacy_daemon_id, tgt.visibility, tgt.profile_id, tgt.custom_name
+FROM agent_runtime src
+JOIN agent_runtime tgt
+  ON tgt.workspace_id = $1
+ AND src.daemon_id IS NOT NULL
+ AND tgt.daemon_id = src.daemon_id
+ AND (
+   (src.profile_id IS NOT NULL AND tgt.profile_id = src.profile_id)
+   OR (src.profile_id IS NULL AND tgt.profile_id IS NULL AND tgt.provider = src.provider)
+ )
+WHERE src.id = $2
+ORDER BY (tgt.status = 'online') DESC, tgt.created_at ASC
 LIMIT 1
 `
 
-// Returns the best available runtime in a workspace: online runtimes first,
-// then by oldest created_at. Used as the default when copying an agent.
-func (q *Queries) GetFirstRuntimeForWorkspace(ctx context.Context, workspaceID pgtype.UUID) (AgentRuntime, error) {
-	row := q.db.QueryRow(ctx, getFirstRuntimeForWorkspace, workspaceID)
+type GetMatchingRuntimeInWorkspaceParams struct {
+	TargetWorkspaceID pgtype.UUID `json:"target_workspace_id"`
+	SourceRuntimeID   pgtype.UUID `json:"source_runtime_id"`
+}
+
+// Finds the runtime in the target workspace that corresponds to a source
+// runtime: same daemon_id and either the same custom profile_id or, for
+// built-in runtimes, the same provider. Prefers online rows. Used when
+// deploying an agent to another workspace so the copy lands on the same
+// physical machine when that daemon is registered in both workspaces.
+func (q *Queries) GetMatchingRuntimeInWorkspace(ctx context.Context, arg GetMatchingRuntimeInWorkspaceParams) (AgentRuntime, error) {
+	row := q.db.QueryRow(ctx, getMatchingRuntimeInWorkspace, arg.TargetWorkspaceID, arg.SourceRuntimeID)
 	var i AgentRuntime
 	err := row.Scan(
 		&i.ID,
@@ -510,6 +528,7 @@ func (q *Queries) GetFirstRuntimeForWorkspace(ctx context.Context, workspaceID p
 		&i.LegacyDaemonID,
 		&i.Visibility,
 		&i.ProfileID,
+		&i.CustomName,
 	)
 	return i, err
 }

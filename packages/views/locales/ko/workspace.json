@@ -6,6 +6,10 @@
     "url_placeholder": "my-workspace",
     "submit": "워크스페이스 만들기",
     "submitting": "만드는 중...",
+    "members_label": "멤버 추가",
+    "members_hint": "다른 워크스페이스의 사람은 즉시 접근 권한을 받습니다. 초대 단계는 없습니다.",
+    "members_search_placeholder": "이름 또는 이메일로 검색",
+    "members_empty": "일치하는 사람이 없습니다",
     "errors": {
       "slug_format": "소문자, 숫자, 하이픈만 사용할 수 있습니다",
       "slug_taken": "이미 사용 중인 워크스페이스 URL입니다.",
@@ -19,7 +23,7 @@
     "log_out": "로그아웃",
     "title": "Multica에 오신 것을 환영합니다",
     "description": "하나의 워크스페이스에서 사람과 AI 팀원이 같은 맥락을 공유하며 이슈를 맡고, 댓글을 남기고, 함께 작업합니다.",
-    "invite_hint": "워크스페이스가 준비되면 팀원을 초대할 수 있습니다."
+    "invite_hint": "만들 때 다른 워크스페이스의 팀원을 추가할 수 있습니다."
   },
   "creation_disabled": {
     "title": "워크스페이스 생성이 비활성화되었습니다",
