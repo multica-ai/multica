@@ -140,7 +140,7 @@ multica daemon status
 
 ## Kubernetes Deployment (Alternative)
 
-If you already run a Kubernetes cluster, you can deploy Multica there instead of Docker Compose using the released OCI Helm chart at `oci://ghcr.io/multica-ai/charts/multica` or the source chart at [`deploy/helm/multica/`](deploy/helm/multica/). It supports either Kubernetes Ingress or Gateway API for external traffic and expects a default `ReadWriteOnce` StorageClass. Both exposure modes are disabled by default, so choose one when installing the chart.
+If you already run a Kubernetes cluster, you can deploy Multica there instead of Docker Compose using the released OCI Helm chart at `oci://ghcr.io/multica-ai/charts/multica` or the source chart at [`deploy/helm/multica/`](deploy/helm/multica/). It supports either Kubernetes Ingress or Gateway API for external traffic and expects a default `ReadWriteOnce` StorageClass. Ingress is enabled by default for compatibility; Gateway API is opt-in.
 
 The chart creates the following resources in the target namespace:
 
@@ -196,13 +196,12 @@ Leave optional values empty for now — you can fill them in later (see [Step 5 
 
 ### Step 4 — Install the chart
 
-Choose one external exposure mode. For an Ingress controller:
+The default installation uses an Ingress controller:
 
 ```bash
 helm install multica oci://ghcr.io/multica-ai/charts/multica \
   --version <chart-version> \
-  -n multica \
-  --set ingress.enabled=true
+  -n multica
 ```
 
 For Gateway API, point the routes at an existing Gateway. Add
@@ -215,6 +214,7 @@ Multica namespace:
 helm install multica oci://ghcr.io/multica-ai/charts/multica \
   --version <chart-version> \
   -n multica \
+  --set ingress.enabled=false \
   --set gatewayAPI.enabled=true \
   --set 'gatewayAPI.parentRefs[0].name=my-gateway' \
   --set 'gatewayAPI.parentRefs[0].namespace=gateway-system'
@@ -227,7 +227,7 @@ To override defaults, export the chart values, edit them, and pass them with `-f
 ```bash
 helm show values oci://ghcr.io/multica-ai/charts/multica \
   --version <chart-version> > my-values.yaml
-# edit my-values.yaml — enable Ingress or Gateway API and configure hosts, images, and resources
+# edit my-values.yaml — configure Ingress, or disable it and enable Gateway API
 helm install multica oci://ghcr.io/multica-ai/charts/multica \
   --version <chart-version> \
   -n multica \
@@ -237,7 +237,7 @@ helm install multica oci://ghcr.io/multica-ai/charts/multica \
 When developing from a checkout, use the local chart path instead:
 
 ```bash
-helm install multica deploy/helm/multica -n multica --set ingress.enabled=true
+helm install multica deploy/helm/multica -n multica
 ```
 
 Watch the pods come up:

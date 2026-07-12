@@ -167,9 +167,9 @@ frontend:
 # Ingress
 # -----------------------------------------------------------------------------
 ingress:
-  # Disabled by default. Enable this when the cluster exposes applications with
-  # a Kubernetes Ingress controller. For Gateway API, use gatewayAPI below.
-  enabled: false
+  # Enabled by default for compatibility with existing installations. Disable
+  # this when using Gateway API instead.
+  enabled: true
   className: traefik
   annotations: {}
   frontend:
