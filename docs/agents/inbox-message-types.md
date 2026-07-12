@@ -57,6 +57,14 @@ and long-press drawer. Channel, DM, chat, and thread rows do not show the action
 because Round membership is issue-scoped. The picker and mutation are owned by
 `@multica/cerebro-rounds`; `CerebroInboxRowActions` only opens that shared
 picker so desktop, mobile, and issue detail use the same membership behavior.
+The picker is a bottom drawer on mobile and a dialog on desktop.
+
+The Rounds inbox surface is an optional `rounds` section in the dynamic Inbox
+layout; it is never injected outside the user's saved section order. It uses the
+same sortable, removable, collapsible block contract as other Inbox sections.
+Collapsed Rounds shows no count. Expanded Rounds provides in-block search and
+renders live members through the shared Inbox row renderer; missing/stale Inbox
+rows are omitted instead of falling back to a second row design.
 
 The mobile surface is **one shared component**, `MobileRowActions`, exported
 from `@multica/cerebro-inbox`, reused by every row kind so mobile behaviour is

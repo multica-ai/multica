@@ -81,7 +81,8 @@ export type SectionKind =
   // sort, group-by-type) instead of the full-screen ⋯ → "Show archived" view.
   // Rendered by a dedicated component (ArchivedInboxBlock) over its own archived
   // queries, like the Chat block — not a slice of the live merged feed.
-  | "archived";
+  | "archived"
+  | "rounds";
 
 /** How rows inside a section are grouped under sub-headers. TECH-3541 #2 —
  *  widened to the full classic-inbox set (project / agent / type) so the "All
@@ -268,6 +269,7 @@ export const SECTION_CATALOG: SectionCatalogEntry[] = [
   { kind: "secretary", label: "Secretary" },
   // FIR-1645 — Archived: always available in the dynamic inbox (no extra flag).
   { kind: "archived", label: "Archived" },
+  { kind: "rounds", label: "Rounds" },
 ];
 
 export function sectionLabel(section: InboxSectionConfig): string {

@@ -1,12 +1,14 @@
 "use client";
 
-import { ChevronDown, ChevronRight, Pencil, Play, Plus, Settings, Trash2, X } from "lucide-react";
+import { ChevronDown, ChevronRight, Pencil, Play, Plus, Search, Settings, Trash2, X } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import { Button } from "@multica/ui/components/ui/button";
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@multica/ui/components/ui/dialog";
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@multica/ui/components/ui/dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@multica/ui/components/ui/dropdown-menu";
 import { Input } from "@multica/ui/components/ui/input";
 import { Label } from "@multica/ui/components/ui/label";
+import { Drawer, DrawerContent, DrawerHeader, DrawerTitle } from "@multica/ui/components/ui/drawer";
+import { useIsMobile } from "@multica/ui/hooks/use-mobile";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useAddIssueToRound, useCreateRound, useDeleteRound, useRemoveIssueFromRound, useRoundStatuses, useUpdateRound } from "./queries";
 import { roundMembershipLabel, type RoundStatus } from "./schemas";
@@ -19,27 +21,42 @@ function nextRunLabel(value: string | null | undefined): string | null {
   return `Next ${new Intl.DateTimeFormat(undefined, { weekday: "short", hour: "2-digit", minute: "2-digit" }).format(date)}`;
 }
 
-export function RoundsBlock({ statuses, issueTitles, onStart, onSelectIssue, settings, renderIssue }: {
+export function RoundsBlock({ statuses, issueTitles, onStart, onSelectIssue, settings, renderIssue, dragHandle, defaultCollapsed, onRemove }: {
   statuses: RoundStatus[]; issueTitles: Record<string, string>; onStart: (id: string) => void; onSelectIssue: (id: string) => void;
   settings?: ReactNode;
   renderIssue?: (issueId: string) => ReactNode;
+  dragHandle?: ReactNode;
+  defaultCollapsed?: boolean;
+  onRemove?: () => void;
 }) {
   const visible = statuses.filter((s) => s.members.length > 0 || s.round.next_run_at || s.active_run);
   const [expanded, setExpanded] = useState<string | null>(null);
+  const [collapsed, setCollapsed] = useState(defaultCollapsed === true);
+  const [query, setQuery] = useState("");
   const readyRoundId = visible.find((status) => status.active_run?.status === "ready")?.round.id ?? null;
   useEffect(() => {
     if (readyRoundId) setExpanded(readyRoundId);
   }, [readyRoundId]);
-  if (visible.length === 0) return null;
+  const filtered = visible.filter((status) => {
+    const needle = query.trim().toLocaleLowerCase();
+    return !needle || status.round.name.toLocaleLowerCase().includes(needle) || status.members.some((member) => (issueTitles[member.issue_id] ?? "").toLocaleLowerCase().includes(needle));
+  });
   return <section className="overflow-hidden rounded-xl border border-border bg-card" aria-label="Rounds">
     <header className="flex items-center gap-2 border-b border-border px-3 py-2">
+      {dragHandle}
+      <button type="button" className="-ml-1 rounded p-0.5 text-muted-foreground hover:bg-muted" onClick={() => setCollapsed((value) => !value)} aria-label={`${collapsed ? "Expand" : "Collapse"} Rounds`}>
+        {collapsed ? <ChevronRight className="size-3.5" /> : <ChevronDown className="size-3.5" />}
+      </button>
       <span className="text-xs font-bold uppercase tracking-wide text-muted-foreground">Rounds</span>
-      <span className="text-xs text-muted-foreground">{visible.length}</span>
       <div className="ml-auto">{settings}</div>
+      {onRemove && <button type="button" className="rounded p-1 text-muted-foreground hover:bg-muted" onClick={onRemove} aria-label="Remove Rounds"><X className="size-3.5" /></button>}
     </header>
-    <div className="divide-y divide-border/60">{visible.map((s) => {
+    {!collapsed && <>
+      <div className="border-b border-border px-3 py-2"><div className="relative"><Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" /><Input type="search" aria-label="Search Rounds" placeholder="Search Rounds…" className="pl-8" value={query} onChange={(event) => setQuery(event.target.value)} /></div></div>
+      <div className="divide-y divide-border/60">{filtered.map((s) => {
       const running = s.active_run?.status === "running";
       const ready = s.active_run?.status === "ready";
+      const complete = s.members.length === 0 || (ready && (s.active_run?.responded_count ?? 0) >= (s.active_run?.total_count ?? s.members.length));
       const open = expanded === s.round.id;
       const schedule = nextRunLabel(s.round.next_run_at);
       return <div key={s.round.id}>
@@ -51,7 +68,7 @@ export function RoundsBlock({ statuses, issueTitles, onStart, onSelectIssue, set
             {schedule && !running && !ready && <span className="hidden text-xs text-muted-foreground sm:inline">{schedule}</span>}
             <span className="ml-auto text-xs text-muted-foreground">{running || ready ? `${s.active_run?.responded_count ?? 0}/${s.active_run?.total_count ?? s.members.length} ready` : `${s.members.length} planned`}</span>
           </button>
-          {!running && <Button size="sm" variant={ready ? "default" : "ghost"} onClick={() => onStart(s.round.id)} aria-label={`Run ${s.round.name}`}><Play className="size-3.5" /><span className="sr-only">Run</span></Button>}
+          {!running && <Button size="sm" variant={ready ? "default" : "ghost"} disabled={complete} className={complete ? "bg-success text-success-foreground opacity-100" : undefined} onClick={() => onStart(s.round.id)} aria-label={`Run ${s.round.name}`}><Play className="size-3.5" /><span className="sr-only">Run</span></Button>}
         </div>
         {running && <div className="px-3 pb-2">
           <div role="progressbar" aria-label={`${s.round.name} progress`} aria-valuemin={0} aria-valuemax={s.active_run?.total_count ?? 0} aria-valuenow={s.active_run?.responded_count ?? 0} className="h-1.5 overflow-hidden rounded-full bg-muted">
@@ -60,14 +77,39 @@ export function RoundsBlock({ statuses, issueTitles, onStart, onSelectIssue, set
           {(s.active_run?.nudged_count ?? 0) > 0 && <p className="mt-1 text-right text-[11px] text-muted-foreground">{s.active_run?.nudged_count} nudged</p>}
         </div>}
         {open && <div className="border-t border-border/50 divide-y divide-border/60">{s.members.map((m) =>
-          renderIssue?.(m.issue_id) ?? <button key={m.issue_id} type="button" aria-label={issueTitles[m.issue_id] ?? m.issue_id} onClick={() => onSelectIssue(m.issue_id)} className="flex w-full items-center gap-2 px-4 py-2.5 text-left text-xs hover:bg-muted">
+          renderIssue ? renderIssue(m.issue_id) : <button key={m.issue_id} type="button" aria-label={issueTitles[m.issue_id] ?? m.issue_id} onClick={() => onSelectIssue(m.issue_id)} className="flex w-full items-center gap-2 px-4 py-2.5 text-left text-xs hover:bg-muted">
             <span className={`size-1.5 rounded-full ${running ? "bg-blue-500" : ready ? "bg-emerald-500" : "bg-muted-foreground"}`} />
             <span className="min-w-0 flex-1 truncate">{issueTitles[m.issue_id] ?? m.issue_id}</span>
             {m.held_trigger_count > 0 && <span className="text-muted-foreground">{m.held_trigger_count} held {m.held_trigger_count === 1 ? "response" : "responses"}</span>}
           </button>)}</div>}
       </div>;
-    })}</div>
+    })}{filtered.length === 0 && <p className="px-3 py-3 text-xs text-muted-foreground">Nothing here right now.</p>}</div>
+    </>}
   </section>;
+}
+
+function ResponsiveRoundPanel({ open, onOpenChange, title, showTrigger = false, children }: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  title: string;
+  showTrigger?: boolean;
+  children: ReactNode;
+}) {
+  const isMobile = useIsMobile();
+  return <>
+    {showTrigger && <Button type="button" variant="ghost" size="icon-sm" aria-label="Manage rounds" onClick={() => onOpenChange(true)}><Settings className="size-4" /></Button>}
+    {isMobile ? <Drawer open={open} onOpenChange={onOpenChange}>
+      <DrawerContent>
+        <DrawerHeader><DrawerTitle>{title}</DrawerTitle></DrawerHeader>
+        <div className="overflow-y-auto px-4 pb-6">{children}</div>
+      </DrawerContent>
+    </Drawer> : <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-lg">
+        <DialogHeader><DialogTitle>{title}</DialogTitle></DialogHeader>
+        {children}
+      </DialogContent>
+    </Dialog>}
+  </>;
 }
 
 export function RoundManager({ statuses, issueTitles, onCreate, onUpdate, onDelete, onRemoveMember }: {
@@ -96,10 +138,7 @@ export function RoundManager({ statuses, issueTitles, onCreate, onUpdate, onDele
     if (editing) onUpdate(editing.round.id, input); else onCreate(input);
     setCreating(false);
   };
-  return <Dialog open={open} onOpenChange={setOpen}>
-    <DialogTrigger render={<Button variant="ghost" size="icon-sm" aria-label="Manage rounds" />}><Settings className="size-4" /></DialogTrigger>
-    <DialogContent className="sm:max-w-lg">
-      <DialogHeader><DialogTitle>Manage rounds</DialogTitle></DialogHeader>
+  return <ResponsiveRoundPanel open={open} onOpenChange={setOpen} title="Manage rounds" showTrigger>
       {creating ? <div className="grid gap-4">
         <div className="grid gap-1.5"><Label htmlFor="round-name">Round name</Label><Input id="round-name" value={name} onChange={(e) => setName(e.target.value)} autoFocus /></div>
         <fieldset className="grid gap-2"><legend className="text-sm font-medium">Type</legend><div className="grid grid-cols-2 gap-2">{(["live", "batch"] as const).map((value) => <Button key={value} type="button" variant={mode === value ? "default" : "outline"} role="radio" aria-checked={mode === value} aria-label={value === "live" ? "Live" : "Batch"} onClick={() => setMode(value)}>{value === "live" ? "Live" : "Batch"}</Button>)}</div><p className="text-xs text-muted-foreground">{mode === "live" ? "Agents work immediately; replies wait in this Round." : "Work waits until you press Run."}</p></fieldset>
@@ -117,8 +156,7 @@ export function RoundManager({ statuses, issueTitles, onCreate, onUpdate, onDele
           {s.members.map((m) => <div key={m.issue_id} className="mt-2 flex items-center gap-2 text-xs"><span className="min-w-0 flex-1 truncate">{issueTitles[m.issue_id] ?? m.issue_id}</span><Button variant="ghost" size="icon-sm" aria-label={`Remove ${issueTitles[m.issue_id] ?? m.issue_id}`} onClick={() => onRemoveMember(s.round.id, m.issue_id)}><X className="size-3.5" /></Button></div>)}
         </div>)}
       </div>}
-    </DialogContent>
-  </Dialog>;
+  </ResponsiveRoundPanel>;
 }
 
 export function AddToRoundAction({ issueId }: { issueId: string }) {
@@ -136,9 +174,7 @@ export function RoundPickerDialog({ issueId, open, onOpenChange }: { issueId: st
   const { data: statuses = [] } = useRoundStatuses(wsId);
   const add = useAddIssueToRound(wsId);
   const available = statuses.filter((status) => !status.members.some((member) => member.issue_id === issueId));
-  return <Dialog open={open} onOpenChange={onOpenChange}>
-    <DialogContent className="sm:max-w-sm">
-      <DialogHeader><DialogTitle>Add to Round</DialogTitle></DialogHeader>
+  return <ResponsiveRoundPanel open={open} onOpenChange={onOpenChange} title="Add to Round">
       <div className="grid gap-2">
         {available.map((status) => <Button key={status.round.id} variant="outline" className="h-auto justify-start px-3 py-2 text-left" onClick={() => {
           add.mutate({ roundId: status.round.id, issueId });
@@ -146,8 +182,7 @@ export function RoundPickerDialog({ issueId, open, onOpenChange }: { issueId: st
         }}><span className="min-w-0 flex-1"><span className="block truncate font-medium">{status.round.name}</span><span className="block text-xs text-muted-foreground">{status.round.mode === "live" ? "Live" : "Batch"}</span></span></Button>)}
         {available.length === 0 && <p className="py-4 text-center text-sm text-muted-foreground">Create a Round from Inbox first.</p>}
       </div>
-    </DialogContent>
-  </Dialog>;
+  </ResponsiveRoundPanel>;
 }
 
 export function ConnectedRoundManager({ statuses, issueTitles }: { statuses: RoundStatus[]; issueTitles: Record<string, string> }) {

@@ -1,9 +1,24 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
-import { fireEvent, render, screen, within } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
-import { RoundManager, RoundsBlock } from "./rounds-block";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { RoundManager, RoundPickerDialog, RoundsBlock } from "./rounds-block";
 import type { RoundStatus } from "./schemas";
+
+const mocks = vi.hoisted(() => ({ mobile: false, add: vi.fn() }));
+vi.mock("@multica/ui/hooks/use-mobile", () => ({ useIsMobile: () => mocks.mobile }));
+vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => "ws" }));
+vi.mock("./queries", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./queries")>()),
+  useRoundStatuses: () => ({ data: [status()] }),
+  useAddIssueToRound: () => ({ mutate: mocks.add }),
+}));
+
+afterEach(() => {
+  cleanup();
+  mocks.mobile = false;
+  mocks.add.mockReset();
+});
 
 const status = (overrides: Partial<RoundStatus> = {}): RoundStatus => ({
   round: {
@@ -18,6 +33,35 @@ const status = (overrides: Partial<RoundStatus> = {}): RoundStatus => ({
 });
 
 describe("RoundsBlock", () => {
+  it("matches native inbox folding and hides every count while folded", () => {
+    const { container } = render(<RoundsBlock statuses={[status()]} issueTitles={{}} onStart={vi.fn()} onSelectIssue={vi.fn()} defaultCollapsed />);
+    const block = within(container).getByRole("region", { name: "Rounds" });
+    expect(within(block).getByRole("button", { name: "Expand Rounds" })).toBeInTheDocument();
+    expect(within(block).queryByText("1")).not.toBeInTheDocument();
+    expect(within(block).queryByText("Daily ideas")).not.toBeInTheDocument();
+  });
+
+  it("searches the inbox rows inside the expanded block", () => {
+    const second = status({ round: { ...status().round, id: "round-2", name: "Weekly" }, members: [{ ...status().members[0]!, round_id: "round-2", issue_id: "issue-2" }] });
+    render(<RoundsBlock statuses={[status(), second]} issueTitles={{ "issue-1": "Alpha returns", "issue-2": "Beta pricing" }} onStart={vi.fn()} onSelectIssue={vi.fn()} />);
+    fireEvent.change(screen.getByRole("searchbox", { name: "Search Rounds" }), { target: { value: "beta" } });
+    expect(screen.queryByText("Daily ideas")).not.toBeInTheDocument();
+    expect(screen.getByText("Weekly")).toBeInTheDocument();
+  });
+
+  it("shows a green disabled play button when every conversation is done", () => {
+    const completed = status({ active_run: { id: "run-1", round_id: "round-1", status: "ready", total_count: 1, responded_count: 1, stalled_count: 0, nudged_count: 0, started_at: "", ready_at: "", completed_at: null, created_at: "" } });
+    render(<RoundsBlock statuses={[completed]} issueTitles={{}} onStart={vi.fn()} onSelectIssue={vi.fn()} />);
+    expect(screen.getByRole("button", { name: "Run Daily ideas" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Run Daily ideas" })).toHaveClass("bg-success");
+  });
+
+  it("omits stale members when the shared inbox row no longer exists", () => {
+    render(<RoundsBlock statuses={[status()]} issueTitles={{ "issue-1": "Old fallback row" }} onStart={vi.fn()} onSelectIssue={vi.fn()} renderIssue={() => null} />);
+    fireEvent.click(screen.getByRole("button", { name: "Expand Daily ideas" }));
+    expect(screen.queryByText("Old fallback row")).not.toBeInTheDocument();
+  });
+
   it("shows issue titles, schedule and starts the next round", () => {
     const onStart = vi.fn();
     render(<RoundsBlock statuses={[status()]} issueTitles={{ "issue-1": "FIR-42 · Investigate returns" }} onStart={onStart} onSelectIssue={vi.fn()} />);
@@ -80,6 +124,14 @@ describe("RoundsBlock", () => {
 });
 
 describe("RoundManager", () => {
+  it("opens settings in a bottom drawer on mobile", () => {
+    mocks.mobile = true;
+    render(<RoundManager statuses={[status()]} issueTitles={{}} onCreate={vi.fn()} onUpdate={vi.fn()} onDelete={vi.fn()} onRemoveMember={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Manage rounds" }));
+    expect(document.querySelector('[data-slot="drawer-content"]')).toBeInTheDocument();
+    mocks.mobile = false;
+  });
+
   it("creates, edits, removes members and deletes rounds", () => {
     const actions = { onCreate: vi.fn(), onUpdate: vi.fn(), onDelete: vi.fn(), onRemoveMember: vi.fn() };
     render(<RoundManager statuses={[status()]} issueTitles={{ "issue-1": "FIR-42 · Investigate returns" }} {...actions} />);
@@ -94,5 +146,15 @@ describe("RoundManager", () => {
     expect(actions.onRemoveMember).toHaveBeenCalledWith("round-1", "issue-1");
     fireEvent.click(screen.getByRole("button", { name: "Delete Daily ideas" }));
     expect(actions.onDelete).toHaveBeenCalledWith("round-1");
+  });
+});
+
+describe("RoundPickerDialog", () => {
+  it("opens Add to Round in a bottom drawer on mobile", () => {
+    mocks.mobile = true;
+    render(<RoundPickerDialog issueId="new-issue" open onOpenChange={vi.fn()} />);
+    expect(screen.getByText("Add to Round")).toBeInTheDocument();
+    expect(document.querySelector('[data-slot="drawer-content"]')).toBeInTheDocument();
+    mocks.mobile = false;
   });
 });

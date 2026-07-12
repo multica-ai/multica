@@ -27,6 +27,7 @@ import {
   makeUserInboxPresetsBlob,
   operatorPreset,
   readUserInboxPresets,
+  SECTION_CATALOG,
   sectionLabel,
   upsertUserInboxPreset,
   type InboxLayout,
@@ -418,6 +419,11 @@ describe("section-filter", () => {
 });
 
 describe("layout", () => {
+  it("offers Rounds as an optional section without adding it to the default inbox", () => {
+    expect(SECTION_CATALOG).toContainEqual({ kind: "rounds", label: "Rounds" });
+    expect(operatorPreset().tabs.flatMap((tab) => tab.sections).some((section) => section.kind === "rounds")).toBe(false);
+  });
+
   it("operator preset is a valid layout", () => {
     expect(isValidLayout(operatorPreset())).toBe(true);
   });

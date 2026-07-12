@@ -463,7 +463,7 @@ export function DynamicInbox() {
   // section filter/sort sees the entry's selection-time state, not the
   // just-marked-read state. Matched on stable identity; falls through cleanly
   // if the row was archived/removed.
-  const roundBlockActive = roundsEnabled && roundStatuses.some(
+  const roundBlockActive = roundsEnabled && activeSections.some((section) => section.kind === "rounds") && roundStatuses.some(
     (status) => status.members.length > 0 || status.round.next_run_at || status.active_run,
   );
   const displayEntries = useMemo(() => {
@@ -1102,6 +1102,7 @@ export function DynamicInbox() {
                     .filter((c) => c.kind !== "secretary" || secretaryEnabled)
                     // TECH-3579 — only offer the Favorites box when its flag is on.
                     .filter((c) => c.kind !== "favorites" || favoritesEnabled)
+                    .filter((c) => c.kind !== "rounds" || roundsEnabled)
                     .map((c) => (
                     <DropdownMenuItem key={c.kind} onClick={() => addSection(c.kind)}>
                       {c.label}
@@ -1164,33 +1165,6 @@ export function DynamicInbox() {
         {/* sections */}
         <div ref={sectionsScrollRef} className="flex-1 space-y-3 overflow-y-auto p-3">
           {loading && <p className="px-1 text-sm text-muted-foreground">Loading…</p>}
-          {roundsEnabled && (
-            <RoundsBlock
-              statuses={roundStatuses}
-              issueTitles={roundIssueTitles}
-              settings={<ConnectedRoundManager statuses={roundStatuses} issueTitles={roundIssueTitles} />}
-              onStart={(roundId) => startRound.mutate(roundId)}
-              onSelectIssue={(issueId) => {
-                const entry = entries.find((e) => e.kind === "notif" && e.item.issue_id === issueId);
-                if (entry) onSelect(entry);
-              }}
-              renderIssue={(issueId) => {
-                const entry = entries.find((candidate) => candidate.kind === "notif" && candidate.item.issue_id === issueId);
-                if (!entry) return null;
-                return <DynamicInboxRow
-                  key={entry.id}
-                  entry={entry}
-                  isSelected={entry.id === selected?.id}
-                  agentRunState={runStateFor(entry, filterContext)}
-                  favoritesEnabled={favoritesEnabled}
-                  isFavorite={filterContext.isFavorite?.(entry) ?? false}
-                  onToggleFavorite={toggleFavorite}
-                  onSelect={onSelect}
-                  onArchive={onArchive}
-                />;
-              }}
-            />
-          )}
           {activeSections.length === 0 && !loading && (
             <p className="px-1 text-sm text-muted-foreground">
               Empty tab — add a section from the ⋯ menu.
@@ -1208,7 +1182,26 @@ export function DynamicInbox() {
                       // TECH-3421 — the Notes box renders its own data (recent
                       // notes); dispatched here like the Chat block, not via
                       // DynamicInboxSection.
-                      section.kind === "notes" ? (
+                      section.kind === "rounds" && roundsEnabled ? (
+                        <RoundsBlock
+                          statuses={roundStatuses}
+                          issueTitles={roundIssueTitles}
+                          settings={<ConnectedRoundManager statuses={roundStatuses} issueTitles={roundIssueTitles} />}
+                          dragHandle={handle}
+                          defaultCollapsed={section.defaultCollapsed}
+                          onRemove={() => removeSection(section.id)}
+                          onStart={(roundId) => startRound.mutate(roundId)}
+                          onSelectIssue={(issueId) => {
+                            const entry = entries.find((candidate) => candidate.kind === "notif" && candidate.item.issue_id === issueId);
+                            if (entry) onSelect(entry);
+                          }}
+                          renderIssue={(issueId) => {
+                            const entry = entries.find((candidate) => candidate.kind === "notif" && candidate.item.issue_id === issueId);
+                            if (!entry) return null;
+                            return <DynamicInboxRow key={entry.id} entry={entry} isSelected={entry.id === selected?.id} agentRunState={runStateFor(entry, filterContext)} favoritesEnabled={favoritesEnabled} isFavorite={filterContext.isFavorite?.(entry) ?? false} onToggleFavorite={toggleFavorite} onSelect={onSelect} onArchive={onArchive} />;
+                          }}
+                        />
+                      ) : section.kind === "notes" ? (
                         <NotesInboxBox
                           title={section.title}
                           dragHandle={handle}
