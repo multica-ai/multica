@@ -57,6 +57,7 @@ import type {
   CreateAgentContextChangeRequestRequest,
   ReviewAgentContextChangeRequestRequest,
   RollbackAgentContextRequest,
+  AgentContextObservability,
   // CEREBRO-PATCH(model-registry-api-types): FIR-2698 model registry governance types.
   ModelRegistry,
   ModelRegistryVersion,
@@ -3317,6 +3318,16 @@ export class ApiClient {
       method: "POST",
       body: JSON.stringify(data),
     });
+  }
+
+  // CEREBRO-PATCH(agent-office-observability-api): FIR-1775 Phase 4 — read-only
+  // observability overview for one agent (change frequency, approvers, drift).
+  // The panel normalizes the response defensively (normalizeAgentObservability)
+  // so a drifted server shape never white-screens the agent page.
+  async getAgentContextObservability(
+    id: string,
+  ): Promise<AgentContextObservability> {
+    return this.fetch(`/api/agents/${id}/context/observability`);
   }
 
   // CEREBRO-PATCH(model-registry-api-methods): FIR-2698 model registry — the single source for model prices,

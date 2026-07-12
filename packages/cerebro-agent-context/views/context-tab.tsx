@@ -15,6 +15,7 @@ import { memberListOptions } from "@multica/core/workspace/queries";
 import { AgentContextVersionsPanel } from "./components/agent-context-versions-panel";
 import { AgentContextChangeRequestQueue } from "./components/agent-context-change-request-queue";
 import { AgentContextProposeDialog } from "./components/agent-context-propose-dialog";
+import { AgentContextObservabilityPanel } from "./components/agent-context-observability-panel";
 
 export interface AgentDetailTabExtension {
   id: string;
@@ -61,6 +62,7 @@ export function CerebroAgentContextTab({
       <div className="my-1 h-px bg-border" />
 
       <div className="space-y-5">
+        <AgentContextObservabilityPanel agent={agent} />
         <AgentContextChangeRequestQueue
           agent={agent}
           wsId={wsId}
