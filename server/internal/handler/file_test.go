@@ -17,16 +17,33 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	attachmenttext "github.com/multica-ai/multica/packages/cerebro-attachment-text"
 	"github.com/multica-ai/multica/server/internal/auth"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
+
+type handlerAttachmentRunner struct{}
+
+func (handlerAttachmentRunner) Run(_ context.Context, dir, name string, args ...string) ([]byte, error) {
+	switch name {
+	case "pdftoppm":
+		return nil, os.WriteFile(filepath.Join(dir, "page-1.png"), []byte("png"), 0o600)
+	case "tesseract":
+		return []byte("Secret code: ORANGE-7319"), nil
+	case "antiword":
+		return []byte("Secret code: COBALT-4826"), nil
+	}
+	return nil, nil
+}
 
 // createHandlerTestChatSession seeds a chat_session row owned by testUserID
 // targeting the given agent and returns the session UUID. Cleanup runs after
@@ -826,7 +843,7 @@ func TestGetAttachmentContent_PDFText(t *testing.T) { // CEREBRO-PATCH(pdf-attac
 	}
 }
 
-func TestGetAttachmentContent_PDFWithoutText(t *testing.T) {
+func TestGetAttachmentContent_PDFWithoutTextAndNoOCRBinary(t *testing.T) {
 	store := &mockStorage{}
 	origStorage := testHandler.Storage
 	testHandler.Storage = store
@@ -839,8 +856,42 @@ func TestGetAttachmentContent_PDFWithoutText(t *testing.T) {
 	if w.Code != http.StatusUnsupportedMediaType {
 		t.Fatalf("status = %d, want 415; body=%s", w.Code, w.Body.String())
 	}
-	if !strings.Contains(w.Body.String(), "PDF contains no extractable text") {
-		t.Fatalf("body = %q, want no-text explanation", w.Body.String())
+	if !strings.Contains(w.Body.String(), "attachment could not be converted to text") {
+		t.Fatalf("body = %q, want conversion explanation", w.Body.String())
+	}
+}
+
+func TestGetAttachmentContent_PortableRuntimeExtraction(t *testing.T) {
+	originalRunner := attachmenttext.DefaultRunner
+	attachmenttext.DefaultRunner = handlerAttachmentRunner{}
+	defer func() { attachmenttext.DefaultRunner = originalRunner }()
+
+	cases := []struct {
+		filename    string
+		contentType string
+		body        []byte
+		want        string
+	}{
+		{filename: "scanned-ocr-test.pdf", contentType: "application/pdf", body: tinyBlankPDF(), want: "ORANGE-7319"},
+		{filename: "legacy-source.doc", contentType: "application/octet-stream", body: []byte("legacy-doc"), want: "COBALT-4826"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.filename, func(t *testing.T) {
+			store := &mockStorage{}
+			originalStorage := testHandler.Storage
+			testHandler.Storage = store
+			defer func() { testHandler.Storage = originalStorage }()
+
+			id := seedPreviewAttachment(t, store, tc.filename, tc.filename, tc.contentType, tc.body)
+			req, w := newPreviewRequest(t, id, testWorkspaceID)
+			testHandler.GetAttachmentContent(w, req)
+			if w.Code != http.StatusOK {
+				t.Fatalf("status = %d, want 200; body=%s", w.Code, w.Body.String())
+			}
+			if !strings.Contains(w.Body.String(), tc.want) {
+				t.Fatalf("body = %q, want %s", w.Body.String(), tc.want)
+			}
+		})
 	}
 }
 

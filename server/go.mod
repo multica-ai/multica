@@ -5,6 +5,9 @@ go 1.26.1
 // CEREBRO-PATCH(pdf-attachment-text): PDF extraction lives outside the upstream server zone.
 replace github.com/multica-ai/multica/packages/cerebro-pdf-text => ../packages/cerebro-pdf-text
 
+// CEREBRO-PATCH(attachment-text-runtime-tool): shared server-side extraction for every runtime.
+replace github.com/multica-ai/multica/packages/cerebro-attachment-text => ../packages/cerebro-attachment-text
+
 require (
 	github.com/SherClockHolmes/webpush-go v1.4.0
 	github.com/aws/aws-sdk-go-v2 v1.41.6
@@ -20,6 +23,7 @@ require (
 	github.com/jackc/pgx/v5 v5.9.2
 	github.com/lmittmann/tint v1.1.3
 	github.com/mattn/go-shellwords v1.0.13
+	github.com/multica-ai/multica/packages/cerebro-attachment-text v0.0.0 // CEREBRO-PATCH(attachment-text-runtime-tool): portable attachment extraction.
 	github.com/multica-ai/multica/packages/cerebro-pdf-text v0.0.0 // CEREBRO-PATCH(pdf-attachment-text): pure-Go PDF text extraction for attachment content.
 	github.com/oklog/ulid/v2 v2.1.1
 	github.com/pelletier/go-toml/v2 v2.3.0
@@ -41,6 +45,8 @@ require github.com/hatchet-dev/hatchet v0.88.6 // CEREBRO-PATCH(cerebro-hatchet-
 require (
 	github.com/google/cel-go v0.28.0
 	github.com/prometheus/client_model v0.6.2
+	github.com/spf13/pflag v1.0.10
+	golang.org/x/mod v0.35.0
 	google.golang.org/protobuf v1.36.11
 )
 
@@ -119,6 +125,7 @@ require (
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/mohae/deepcopy v0.0.0-20170929034955-c48cc78d4826 // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
+	github.com/nkiri/xls v0.0.2 // indirect
 	github.com/oapi-codegen/runtime v1.4.0 // indirect
 	github.com/oasdiff/yaml v0.0.9 // indirect
 	github.com/oasdiff/yaml3 v0.0.9 // indirect
@@ -133,7 +140,6 @@ require (
 	github.com/sourcegraph/conc v0.3.1-0.20240121214520-5f936abd7ae8 // indirect
 	github.com/spf13/afero v1.15.0 // indirect
 	github.com/spf13/cast v1.10.0 // indirect
-	github.com/spf13/pflag v1.0.10 // indirect
 	github.com/spf13/viper v1.21.0 // indirect
 	github.com/subosito/gotenv v1.6.0 // indirect
 	github.com/valyala/bytebufferpool v1.0.0 // indirect
@@ -155,7 +161,6 @@ require (
 	go.yaml.in/yaml/v3 v3.0.4 // indirect
 	golang.org/x/crypto v0.51.0 // indirect
 	golang.org/x/exp v0.0.0-20260218203240-3dfff04db8fa // indirect
-	golang.org/x/mod v0.35.0 // indirect
 	golang.org/x/net v0.55.0 // indirect
 	golang.org/x/oauth2 v0.36.0 // indirect
 	golang.org/x/sync v0.20.0 // indirect

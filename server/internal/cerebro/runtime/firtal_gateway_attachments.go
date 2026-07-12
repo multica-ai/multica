@@ -16,6 +16,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	attachmenttext "github.com/multica-ai/multica/packages/cerebro-attachment-text"
 	pdftext "github.com/multica-ai/multica/packages/cerebro-pdf-text"
 	"github.com/multica-ai/multica/server/internal/storage"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -199,6 +200,36 @@ func gatewayAttachmentBlocks(ctx context.Context, store storage.Storage, att db.
 		}
 		return nil, fmt.Errorf("unsupported attachment type %q", mediaType)
 	}
+}
+
+func gatewayAttachmentText(ctx context.Context, store storage.Storage, att db.Attachment) (string, error) {
+	if store == nil {
+		return "", fmt.Errorf("storage not configured")
+	}
+	if att.SizeBytes > firtalGatewayAttachmentMaxBytes {
+		return "", fmt.Errorf("attachment %q exceeds the gateway limit", att.Filename)
+	}
+	key := store.KeyFromURL(att.Url)
+	if key == "" {
+		return "", fmt.Errorf("attachment storage key is empty")
+	}
+	reader, err := store.GetReader(ctx, key)
+	if err != nil {
+		return "", err
+	}
+	defer reader.Close()
+	body, err := io.ReadAll(io.LimitReader(reader, firtalGatewayAttachmentMaxBytes+1))
+	if err != nil {
+		return "", err
+	}
+	if len(body) > firtalGatewayAttachmentMaxBytes {
+		return "", fmt.Errorf("attachment %q exceeds the gateway limit", att.Filename)
+	}
+	text, err := attachmenttext.Extract(ctx, body, att.ContentType, att.Filename, attachmenttext.Options{MaxBytes: firtalGatewayAttachmentMaxBytes})
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(text)), nil
 }
 
 // extractPDFBlockText pulls plain text out of a base64 PDF document block.
