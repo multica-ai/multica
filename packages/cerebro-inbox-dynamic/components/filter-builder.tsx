@@ -6,7 +6,7 @@
 "use client";
 
 import { Fragment, useState } from "react";
-import { Plus, X, FolderOpen, Check, ChevronDown, CircleDot } from "lucide-react";
+import { Plus, X, FolderOpen, Check, ChevronDown } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -29,7 +29,7 @@ import {
   CommandGroup,
   CommandItem,
 } from "@multica/ui/components/ui/command";
-import type { Project, IssueStatus } from "@multica/core/types";
+import type { Project } from "@multica/core/types";
 import type { FilterCondition, FilterField, EntryKindFilter, FilterMatchMode } from "../layout";
 
 export interface FilterBuilderProps {
@@ -64,17 +64,6 @@ const KIND_OPTIONS: Array<{ value: EntryKindFilter; label: string }> = [
   { value: "channel", label: "Channels & DMs" },
 ];
 
-// FIR-1917 — issue status options, matching IssueStatus in @multica/core/types.
-const STATUS_OPTIONS: Array<{ value: IssueStatus; label: string }> = [
-  { value: "backlog", label: "Backlog" },
-  { value: "todo", label: "Todo" },
-  { value: "in_progress", label: "In progress" },
-  { value: "in_review", label: "In review" },
-  { value: "blocked", label: "Blocked" },
-  { value: "done", label: "Done" },
-  { value: "cancelled", label: "Cancelled" },
-];
-
 function conditionLabel(cond: FilterCondition, projects: Project[]): string {
   switch (cond.field) {
     case "unread":
@@ -97,13 +86,6 @@ function conditionLabel(cond: FilterCondition, projects: Project[]): string {
       const title = projects.find((p) => p.id === cond.projectId)?.title ?? "unknown";
       return cond.includeSubprojects ? `Project: ${title} + sub-projects` : `Project: ${title}`;
     }
-    case "status": {
-      if (!cond.statusValues || cond.statusValues.length === 0) return "Status: any";
-      const labels = cond.statusValues.map(
-        (v) => STATUS_OPTIONS.find((o) => o.value === v)?.label ?? v,
-      );
-      return `Status: ${labels.join(", ")}`;
-    }
     default:
       return cond.field;
   }
@@ -117,7 +99,6 @@ export function FilterBuilder({
   onMatchChange,
 }: FilterBuilderProps) {
   const [projectOpen, setProjectOpen] = useState(false);
-  const [statusOpen, setStatusOpen] = useState(false);
   // FIR-1731 — the word shown between chips and in the mode toggle.
   const connector = match === "any" ? "or" : "and";
 
@@ -138,17 +119,6 @@ export function FilterBuilder({
   const setKind = (entryKind: EntryKindFilter) => {
     const without = filters.filter((c) => c.field !== "kind");
     onChange(activeKind === entryKind ? without : [...without, { field: "kind", entryKind }]);
-  };
-
-  // FIR-1917 — one status condition; toggleStatus adds/removes individual values.
-  const statusCond = filters.find((c) => c.field === "status");
-  const toggleStatus = (value: IssueStatus) => {
-    const current = statusCond?.statusValues ?? [];
-    const next = current.includes(value)
-      ? current.filter((v) => v !== value)
-      : [...current, value];
-    const without = filters.filter((c) => c.field !== "status");
-    onChange(next.length > 0 ? [...without, { field: "status", statusValues: next }] : without);
   };
 
   // Only one project narrow at a time (matches the old behaviour).
@@ -309,52 +279,6 @@ export function FilterBuilder({
           </DropdownMenuGroup>
         </DropdownMenuContent>
       </DropdownMenu>
-
-      {/* Status — FIR-1917: multi-select over issue_status values. */}
-      <Popover open={statusOpen} onOpenChange={setStatusOpen}>
-        <PopoverTrigger
-          render={
-            <button
-              type="button"
-              className="inline-flex items-center gap-1 rounded-full border border-dashed border-border px-2 py-0.5 text-[11px] text-muted-foreground hover:bg-accent hover:text-foreground"
-              title="Filter by issue status"
-            />
-          }
-        >
-          <CircleDot className="size-3" /> Status
-        </PopoverTrigger>
-        <PopoverContent align="start" className="w-52 p-0">
-          <Command>
-            <CommandList>
-              <CommandGroup>
-                <CommandItem
-                  value="__none__ clear status"
-                  onSelect={() => {
-                    const without = filters.filter((c) => c.field !== "status");
-                    onChange(without);
-                    setStatusOpen(false);
-                  }}
-                >
-                  <span className="text-muted-foreground">No status filter</span>
-                  {!statusCond?.statusValues?.length && <Check className="ml-auto size-3.5" />}
-                </CommandItem>
-                {STATUS_OPTIONS.map((opt) => (
-                  <CommandItem
-                    key={opt.value}
-                    value={opt.value}
-                    onSelect={() => toggleStatus(opt.value)}
-                  >
-                    <span className="truncate">{opt.label}</span>
-                    {statusCond?.statusValues?.includes(opt.value) && (
-                      <Check className="ml-auto size-3.5" />
-                    )}
-                  </CommandItem>
-                ))}
-              </CommandGroup>
-            </CommandList>
-          </Command>
-        </PopoverContent>
-      </Popover>
 
       {/* Project — searchable picker, not a flat list of every project. */}
       {projects.length > 0 && (
