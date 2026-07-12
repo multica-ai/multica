@@ -136,4 +136,35 @@ describe("KeyboardShortcutsTab", () => {
     );
     expect(getShortcut("createIssue")).toEqual(createShortcutChord("C"));
   });
+
+  it("confirms before restoring all shortcut defaults", () => {
+    useShortcutStore.getState().setShortcut(
+      "openSearch",
+      createShortcutChord("J", { primary: true }),
+    );
+    renderWithI18n(<KeyboardShortcutsTab />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Restore defaults" }));
+    expect(screen.getByRole("alertdialog")).toHaveTextContent(
+      "This will remove every custom shortcut and restore the defaults on this device.",
+    );
+    expect(getShortcut("openSearch")).toEqual(
+      createShortcutChord("J", { primary: true }),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+    expect(getShortcut("openSearch")).toEqual(
+      createShortcutChord("J", { primary: true }),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Restore defaults" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "Restore all defaults" }),
+    );
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+    expect(getShortcut("openSearch")).toEqual(
+      createShortcutChord("K", { primary: true }),
+    );
+  });
 });

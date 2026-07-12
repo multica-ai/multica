@@ -4,6 +4,16 @@ import { useMemo, useState } from "react";
 import { Keyboard, RotateCcw, Search, X } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
 import { Input } from "@multica/ui/components/ui/input";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@multica/ui/components/ui/alert-dialog";
 import { cn } from "@multica/ui/lib/utils";
 import {
   findShortcutConflict,
@@ -42,6 +52,7 @@ export function KeyboardShortcutsTab() {
   const [query, setQuery] = useState("");
   const [recording, setRecording] = useState<ShortcutActionId | null>(null);
   const [captureError, setCaptureError] = useState<CaptureError>(null);
+  const [resetConfirmOpen, setResetConfirmOpen] = useState(false);
   const overrides = useShortcutStore((state) => state.overrides);
   const setShortcut = useShortcutStore((state) => state.setShortcut);
   const resetShortcut = useShortcutStore((state) => state.resetShortcut);
@@ -119,11 +130,7 @@ export function KeyboardShortcutsTab() {
         <Button
           variant="outline"
           size="sm"
-          onClick={() => {
-            resetAll();
-            setCaptureError(null);
-            setRecording(null);
-          }}
+          onClick={() => setResetConfirmOpen(true)}
           disabled={Object.keys(overrides).length === 0}
         >
           <RotateCcw className="size-3.5" />
@@ -195,6 +202,35 @@ export function KeyboardShortcutsTab() {
           <FixedShortcutRow label={t(($) => $.shortcuts.fixed.close_dialog)} shortcut={createShortcutChord("Escape")} />
         </SettingsCard>
       </SettingsSection>
+
+      <AlertDialog open={resetConfirmOpen} onOpenChange={setResetConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {t(($) => $.shortcuts.reset_confirm.title)}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {t(($) => $.shortcuts.reset_confirm.description)}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>
+              {t(($) => $.shortcuts.reset_confirm.cancel)}
+            </AlertDialogCancel>
+            <AlertDialogAction
+              variant="destructive"
+              onClick={() => {
+                resetAll();
+                setCaptureError(null);
+                setRecording(null);
+                setResetConfirmOpen(false);
+              }}
+            >
+              {t(($) => $.shortcuts.reset_confirm.confirm)}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </SettingsTab>
   );
 }
