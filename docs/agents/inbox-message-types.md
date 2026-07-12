@@ -51,6 +51,36 @@ Every row kind exposes the same action affordance so the inbox feels uniform:
 - **Mobile:** a swipe surface — swipe-right to archive, swipe-left to reveal
   read/snooze, long-press for the full action drawer.
 
+When `cerebro_inbox_rounds` is enabled, issue-notification rows add **Add to
+Round** to the desktop `...` menu and **Round** to the mobile swipe-left panel
+and long-press drawer. Channel, DM, chat, and thread rows do not show the action
+because Round membership is issue-scoped. The picker and mutation are owned by
+`@multica/cerebro-rounds`; `CerebroInboxRowActions` only opens that shared
+picker so desktop, mobile, and issue detail use the same membership behavior.
+The picker is a bottom drawer on mobile and a dialog on desktop.
+
+The Rounds inbox surface is an optional `rounds` section in the dynamic Inbox
+layout; it is never injected outside the user's saved section order. It uses the
+same sortable, removable, collapsible block contract as other Inbox sections.
+Collapsed Rounds shows no count. Expanded Rounds provides in-block search and
+renders live members through the shared Inbox row renderer; missing/stale Inbox
+rows are omitted instead of falling back to a second row design.
+
+Round-member issues notify **only inside the Rounds box** (FIR-3114): their
+inbox rows are excluded from the other dynamic-inbox sections, from every
+unread count badge (sidebar/dock hook `useCerebroInboxUnreadCount`, the three
+server count queries in `server/pkg/db/queries/inbox.sql`), and from
+mobile/desktop push + in-app banner (`suppressPushForRoundIssue` in
+`server/cmd/server/notification_listeners.go`). The inbox_item rows are still
+created and keep their read state — inside the Rounds box a member row renders
+unread only while its round has an active run; outside a run new responses
+accumulate quietly until the next round surfaces them. During a run the member
+list folds answered issues (held reply exists) behind an "Answered (n)"
+collapse, the header counts `answered/total`, and a ready run can be paused
+(`POST /api/cerebro/rounds/{roundId}/dismiss`) to collapse the round back to
+its planned state. A batch round auto-starts when every agent response in the
+ready run has received a reply.
+
 The mobile surface is **one shared component**, `MobileRowActions`, exported
 from `@multica/cerebro-inbox`, reused by every row kind so mobile behaviour is
 identical. The row-action component per kind:
@@ -184,7 +214,8 @@ owner + named approvers minus the proposer, `severity` `action_required`,
 `issue_id` — the inbox UI deep-links from `details.agent_id` to the agent's
 Instructions tab. (Skill change-request rows, by contrast, no longer navigate
 away: FIR-2742 opens them **in the inbox pane** via `SkillChangeInboxDetail`,
-which lists the diff from `details` and offers an explicit "Open in new window".)
+which lists the diff from `details` and offers an explicit "Open in new window".
+Both classic and Dynamic Inbox use this message-pane behavior.)
 Emitted by the
 agent-office handler and routed by `registerCerebroAgentOfficeNotificationListener`),
 `runtime_auto_paused`, `manually_added`, `agent_capability_drift` (TECH-3738

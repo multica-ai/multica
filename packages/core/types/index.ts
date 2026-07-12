@@ -50,6 +50,11 @@ export type {
   CreateAgentContextChangeRequestRequest,
   ReviewAgentContextChangeRequestRequest,
   RollbackAgentContextRequest,
+  // CEREBRO-PATCH(agent-office-observability-types): FIR-1775 Phase 4 observability overview types.
+  AgentContextObservability,
+  AgentContextChangeRequestCounts,
+  AgentContextApproverStat,
+  AgentContextDriftSummary,
 } from "./agent";
 // CEREBRO-PATCH(model-registry-types-export): FIR-2698 single-source model registry governance types.
 export type {

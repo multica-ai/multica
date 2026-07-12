@@ -28,6 +28,7 @@ import { Textarea } from "@multica/ui/components/ui/textarea";
 import { skillChangeRequestsOptions } from "../../core/queries";
 import { useReviewSkillChangeRequest } from "../../core/mutations";
 import { SkillDiffView } from "./skill-diff-view";
+import { SkillDiffEditor } from "./skill-diff-editor";
 
 interface Props {
   skill: Skill;
@@ -70,6 +71,7 @@ export function SkillChangeRequestQueue({ skill, wsId, members }: Props) {
   const [open, setOpen] = useState(true);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [reviewComment, setReviewComment] = useState("");
+  const [editedContent, setEditedContent] = useState<string | undefined>(undefined);
   const isMobile = useIsMobile();
   const mobileVvh = useMobileViewportHeight();
 
@@ -88,12 +90,14 @@ export function SkillChangeRequestQueue({ skill, wsId, members }: Props) {
   const openReview = (req: SkillChangeRequest) => {
     setSelectedId(req.id);
     setReviewComment("");
+    setEditedContent(undefined);
   };
 
   const closeReview = () => {
     if (mutation.isPending) return;
     setSelectedId(null);
     setReviewComment("");
+    setEditedContent(undefined);
   };
 
   const handleReview = async (action: "approve" | "reject") => {
@@ -101,11 +105,21 @@ export function SkillChangeRequestQueue({ skill, wsId, members }: Props) {
     try {
       await mutation.mutateAsync({
         crId: selected.id,
-        data: { action, comment: reviewComment || undefined },
+        data: {
+          action,
+          comment: reviewComment || undefined,
+          // Edits only apply on approve — a reject always refers to the
+          // proposal as originally submitted.
+          edited_content:
+            action === "approve" && editedContent !== undefined && editedContent !== selected.proposed_content
+              ? editedContent
+              : undefined,
+        },
       });
       toast.success(action === "approve" ? "Change approved" : "Change rejected");
       setSelectedId(null);
       setReviewComment("");
+      setEditedContent(undefined);
     } catch {
       toast.error("Failed to review change request");
     }
@@ -225,12 +239,23 @@ export function SkillChangeRequestQueue({ skill, wsId, members }: Props) {
                 </div>
               )}
 
-              <SkillDiffView
-                base={skill.content}
-                proposed={selected.proposed_content}
-                baseLabel={`current (${skill.current_version})`}
-                proposedLabel={selected.proposed_version}
-              />
+              {selected.status === "pending" ? (
+                <SkillDiffEditor
+                  base={skill.content}
+                  proposed={selected.proposed_content}
+                  baseLabel={`current (${skill.current_version})`}
+                  proposedLabel={selected.proposed_version}
+                  editedContent={editedContent}
+                  onEditedContentChange={setEditedContent}
+                />
+              ) : (
+                <SkillDiffView
+                  base={skill.content}
+                  proposed={selected.proposed_content}
+                  baseLabel={`current (${skill.current_version})`}
+                  proposedLabel={selected.proposed_version}
+                />
+              )}
 
               {selected.status === "pending" ? (
                 <>

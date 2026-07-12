@@ -18,6 +18,7 @@ func NewHandler(s *Service) *Handler { return &Handler{Service: s} }
 
 type roundRequest struct {
 	Name         string  `json:"name"`
+	Mode         *string `json:"mode"`
 	ScheduleCron *string `json:"schedule_cron"`
 	Timezone     *string `json:"timezone"`
 }
@@ -85,13 +86,17 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	schedule, timezone := "", "UTC"
+	mode := "batch"
+	if q.Mode != nil {
+		mode = *q.Mode
+	}
 	if q.ScheduleCron != nil {
 		schedule = *q.ScheduleCron
 	}
 	if q.Timezone != nil {
 		timezone = *q.Timezone
 	}
-	row, err := h.Service.Create(r.Context(), ws, u, q.Name, schedule, timezone)
+	row, err := h.Service.Create(r.Context(), ws, u, q.Name, mode, schedule, timezone)
 	if err != nil {
 		handleErr(w, err)
 		return
@@ -128,7 +133,7 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, "invalid JSON")
 		return
 	}
-	row, err := h.Service.Update(r.Context(), ws, u, id, optional(q.Name), q.ScheduleCron, q.Timezone)
+	row, err := h.Service.Update(r.Context(), ws, u, id, optional(q.Name), q.Mode, q.ScheduleCron, q.Timezone)
 	if err != nil {
 		handleErr(w, err)
 		return
@@ -227,6 +232,26 @@ func (h *Handler) Start(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, 201, row)
 }
+
+// Dismiss closes the round's surfaced 'ready' run (the UI calls this Pause) so
+// the round collapses back to its planned state. Idempotent — 204 whether or
+// not a ready run existed.
+func (h *Handler) Dismiss(w http.ResponseWriter, r *http.Request) {
+	ws, u, ok := parseContext(w, r)
+	if !ok {
+		return
+	}
+	id, ok := parseParam(w, r, "roundId")
+	if !ok {
+		return
+	}
+	if err := h.Service.DismissRun(r.Context(), ws, u, id); err != nil {
+		handleErr(w, err)
+		return
+	}
+	w.WriteHeader(204)
+}
+
 func (h *Handler) Status(w http.ResponseWriter, r *http.Request) {
 	ws, u, ok := parseContext(w, r)
 	if !ok {

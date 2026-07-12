@@ -101,6 +101,13 @@ type Capability struct {
 	// ManagedExternally is true when the tool-policy gate is NOT this action's
 	// enforcement point (see package doc). Shown for visibility; phase 2 skips it.
 	ManagedExternally bool
+	// Surfaced marks a capability that appears in the Permissions table behind the
+	// light agent-start gate (cerebro_agent_trigger_permissions), NOT only behind
+	// the full-catalog flag (cerebro_platform_capabilities). It is set on the
+	// "start someone else's agent" family (FIR-3091 slice 4) so an admin can see
+	// and set those rules in the same screen as reported tools without opening the
+	// whole platform catalog. SurfacedKeys() is the canonical list.
+	Surfaced bool
 	// Ops are the permguard inventory ids (http surface) this capability covers.
 	// Traceability + coverage tripwire: every id must be a real, current route.
 	Ops []string
@@ -171,6 +178,7 @@ var catalog = []Capability{
 		Key:           "rerun_issue",
 		Title:         "Re-run / cancel issue agent",
 		Category:      CategoryIssues,
+		Surfaced:      true,
 		Description:   "Re-trigger the assigned agent on an issue, or cancel a running task.",
 		DescriptionZh: "重新触发工单上分配的 agent，或取消正在运行的任务。",
 		Ops: []string{
@@ -279,6 +287,7 @@ var catalog = []Capability{
 		Key:           "trigger_autopilot",
 		Title:         "Trigger autopilot",
 		Category:      CategoryAutopilots,
+		Surfaced:      true,
 		Description:   "Fire an autopilot manually, or replay a past delivery.",
 		DescriptionZh: "手动触发 autopilot，或重放一次过往投递。",
 		Ops: []string{
@@ -456,6 +465,7 @@ var catalog = []Capability{
 		Key:           "trigger_other_agent",
 		Title:         "Trigger someone else's agent",
 		Category:      CategoryAgents,
+		Surfaced:      true,
 		Description:   "Whether you may start an agent you do not own (via an @mention or run-request). FIR-2409: now settable on the controllable engine at workspace / group / member / agent level. With no rule set, the hardcoded default applies (owners/admins master key, members blocked); an explicit Deny removes the master key, an explicit Allow grants a blocked member.",
 		DescriptionZh: "是否可启动不属于你的 agent（通过 @提及 或运行请求）。FIR-2409：现可在工作区/群组/成员/agent 层级于可控引擎上设置。未设规则时套用硬编码默认（所有者/管理员持万能钥匙，成员被阻止）；显式 Deny 移除万能钥匙，显式 Allow 放行被阻止的成员。",
 		Evidence: []string{
@@ -467,6 +477,7 @@ var catalog = []Capability{
 		Key:           "schedule_agent_wakeup",
 		Title:         "Schedule agent wakeup",
 		Category:      CategoryAgents,
+		Surfaced:      true,
 		Description:   "Create or cancel a scheduled wakeup that starts an agent on an issue later or when a watched event happens.",
 		DescriptionZh: "创建或取消计划唤醒，在稍后或监视事件发生时于工单上启动 agent。",
 		Ops: []string{
@@ -1101,6 +1112,7 @@ var excluded = map[string]string{
 	"POST /api/cerebro/rounds/{roundId}/members":             "self_only — caller's own inbox rounds (FIR-2736)",
 	"DELETE /api/cerebro/rounds/{roundId}/members/{issueId}": "self_only — caller's own inbox rounds (FIR-2736)",
 	"POST /api/cerebro/rounds/{roundId}/start":               "self_only — caller's own inbox rounds (FIR-2736)",
+	"POST /api/cerebro/rounds/{roundId}/dismiss":             "self_only — caller's own inbox rounds (FIR-3114)",
 	"POST /api/inbox/{id}/archive":                           "self_only — caller's own inbox",
 	"POST /api/inbox/{id}/mute":                              "self_only — caller's own inbox",
 	"DELETE /api/inbox/{id}/mute":                            "self_only — caller's own inbox",
@@ -1244,6 +1256,48 @@ func Keys() []string {
 		out[i] = c.Key
 	}
 	return out
+}
+
+// SurfacedKeys returns the keys marked Surfaced (the agent-start family), in
+// catalog order. These are the capabilities the Permissions table shows behind
+// the light agent-start gate, without opening the whole platform catalog
+// (FIR-3091 slice 4).
+func SurfacedKeys() []string {
+	var out []string
+	for _, c := range catalog {
+		if c.Surfaced {
+			out = append(out, c.Key)
+		}
+	}
+	return out
+}
+
+// notEnforcedKeys is the closed set of capability keys that are Surfaced in the
+// Permissions table but whose stored setting does NOT yet gate anything at
+// runtime — "surfaced but not yet wired". Today these are the three agent-start
+// family keys added as Surfaced=true (FIR-3091 slice 4 / FIR-2409): the table
+// shows and lets an admin author them, but only trigger_other_agent is actually
+// read by the gate, so the other three are cosmetic until their gate lands. See
+// the Surfaced doc + SurfacedKeys() above for the surfacing side.
+//
+// Kept as an explicit exception list, not a per-entry flag, so the DEFAULT is
+// "enforced" (Jesper's rule, FIR-3091 punkt 8): every permission is enforced
+// unless it is one of these known-unwired keys, and a new capability is enforced
+// the moment it is added without touching every catalog entry.
+var notEnforcedKeys = map[string]bool{
+	"rerun_issue":           true,
+	"schedule_agent_wakeup": true,
+	"trigger_autopilot":     true,
+}
+
+// Enforced reports whether a policy setting authored on this tool_key is actually
+// read by the runtime gate today (FIR-3091 punkt 8). It backs the per-permission
+// detail page's "is this live or cosmetic" signal: true for every key except the
+// known "surfaced but not yet wired" exceptions in notEnforcedKeys. An unknown
+// key returns true (enforced by default), matching Jesper's rule that a
+// capability is enforced unless explicitly listed otherwise.
+func Enforced(key string) bool {
+	return !notEnforcedKeys[key]
 }
 
 // ByKey looks a capability up by its stable key.

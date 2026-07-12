@@ -176,6 +176,19 @@ type usageExplorerSaving struct {
 	AffectedRuns int    `json:"affected_runs"`
 }
 
+const usageExplorerRunsQuery = `
+		SELECT atq.id::text, COALESCE(tu.created_at, atq.created_at), atq.status,
+		       COALESCE(p.title, 'Unknown'), COALESCE(a.name, 'Deleted'),
+		       COALESCE(ar.name, ar.provider, 'Unknown'), COALESCE(tu.model, 'Unknown'), COALESCE(NULLIF(tu.provider,''), 'Unknown'),
+		       CASE WHEN atq.autopilot_run_id IS NOT NULL THEN 'autopilot' WHEN atq.chat_session_id IS NOT NULL THEN 'chat' WHEN atq.trigger_comment_id IS NOT NULL THEN 'issue' ELSE 'manual' END,
+		       COALESCE(tu.input_tokens,0), COALESCE(tu.output_tokens,0), COALESCE(tu.cost_cents,0),
+		       GREATEST(0, EXTRACT(EPOCH FROM (COALESCE(atq.completed_at, now()) - COALESCE(atq.started_at, atq.created_at)))::bigint)
+		FROM agent_task_queue atq JOIN agent a ON a.id=atq.agent_id
+		LEFT JOIN task_usage tu ON tu.task_id=atq.id LEFT JOIN issue i ON i.id=atq.issue_id
+		LEFT JOIN project p ON p.id=i.project_id LEFT JOIN agent_runtime ar ON ar.id=atq.runtime_id
+		WHERE a.workspace_id=$1 AND atq.created_at >= now()-make_interval(days=>$2)
+		ORDER BY atq.created_at DESC, atq.id`
+
 // GetDashboardUsageExplorer serves one canonical filtered result so totals,
 // facets, savings and run rows cannot drift apart.
 func (h *Handler) GetDashboardUsageExplorer(w http.ResponseWriter, r *http.Request) {
@@ -188,18 +201,7 @@ func (h *Handler) GetDashboardUsageExplorer(w http.ResponseWriter, r *http.Reque
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	rows, err := h.DB.Query(r.Context(), `
-		SELECT atq.id::text, COALESCE(tu.created_at, atq.created_at), atq.status,
-		       COALESCE(p.name, 'Unknown'), COALESCE(a.name, 'Deleted'),
-		       COALESCE(ar.name, ar.provider, 'Unknown'), COALESCE(tu.model, 'Unknown'), COALESCE(NULLIF(tu.provider,''), 'Unknown'),
-		       CASE WHEN atq.autopilot_run_id IS NOT NULL THEN 'autopilot' WHEN atq.chat_session_id IS NOT NULL THEN 'chat' WHEN atq.trigger_comment_id IS NOT NULL THEN 'issue' ELSE 'manual' END,
-		       COALESCE(tu.input_tokens,0), COALESCE(tu.output_tokens,0), COALESCE(tu.cost_cents,0),
-		       GREATEST(0, EXTRACT(EPOCH FROM (COALESCE(atq.completed_at, now()) - COALESCE(atq.started_at, atq.created_at)))::bigint)
-		FROM agent_task_queue atq JOIN agent a ON a.id=atq.agent_id
-		LEFT JOIN task_usage tu ON tu.task_id=atq.id LEFT JOIN issue i ON i.id=atq.issue_id
-		LEFT JOIN project p ON p.id=i.project_id LEFT JOIN agent_runtime ar ON ar.id=atq.runtime_id
-		WHERE a.workspace_id=$1 AND atq.created_at >= now()-make_interval(days=>$2)
-		ORDER BY atq.created_at DESC, atq.id`, parseUUID(workspaceID), filter.Days)
+	rows, err := h.DB.Query(r.Context(), usageExplorerRunsQuery, parseUUID(workspaceID), filter.Days)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to explore usage")
 		return

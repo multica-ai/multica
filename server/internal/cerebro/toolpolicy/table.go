@@ -128,6 +128,13 @@ type TableQuery struct {
 	// checks the cerebro_platform_capabilities flag) so prod sees nothing new
 	// until an admin turns the flag on (FIR-2594).
 	IncludePlatform bool
+	// IncludeAgentStart appends ONLY the surfaced platform capabilities
+	// (platformcatalog.SurfacedKeys — the "start someone else's agent" family) to
+	// the listing, without the rest of the catalog. Gated by the caller (the
+	// handler checks cerebro_agent_trigger_permissions) so the family becomes
+	// visible/settable in Permissions without opening the whole platform catalog
+	// (FIR-3091 slice 4). Ignored when IncludePlatform already emits everything.
+	IncludeAgentStart bool
 	// IncludeCredentials appends the per-credential authoring rows (one row per
 	// credential capability per Agent Vault box) to the listing, so an admin can
 	// author Allow/Ask/Deny on a credential at every actor layer. Gated by the
@@ -417,7 +424,7 @@ func (s *Store) Table(ctx context.Context, in TableQuery) ([]TableRow, error) {
 	// them; they are capability-wide (empty ResourcePattern) and carry the
 	// "platform" source. Gated by IncludePlatform so an unflagged workspace lists
 	// exactly what it listed before.
-	if in.IncludePlatform {
+	if in.IncludePlatform || in.IncludeAgentStart {
 		out, err = s.appendPlatformRows(ctx, in, groupIDs, out)
 		if err != nil {
 			return nil, err

@@ -1,16 +1,25 @@
 "use client";
 
+// FIR-3091 slice 3 — the "living" cards of the retired Settings → Agent
+// capabilities tab (sandbox network profiles, per-runtime profile overrides,
+// per-agent blocked MCP servers), rehomed under the unified Permissions screen.
+// This is a pure UI relocation: the config is still stored as
+// workspace.settings.agent_capabilities and still enforced at claim by
+// applyCapabilityPolicyToClaim → ApplyClaimPolicy (FIR-458). Storage shape is
+// unchanged, so agent-claim behaviour is 1:1 with the old tab. The old tab's
+// info-only "Capability register" card is dropped (duplicated by the catalog).
+
 import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Bot, Cpu, Database, Save, ShieldCheck } from "lucide-react";
+import { Bot, Cpu, Save, ShieldCheck } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@multica/core/api";
 import { useCurrentWorkspace } from "@multica/core/paths";
 import { useCurrentMember } from "@multica/core/permissions";
 import { agentListOptions, workspaceKeys } from "@multica/core/workspace/queries";
 import { runtimeListOptions } from "@multica/core/runtimes/queries";
-import type { Workspace, Capability, CapabilitySubject } from "@multica/core/types";
+import type { Workspace } from "@multica/core/types";
 import type { AgentRuntime } from "@multica/core/types/agent";
 import { Badge } from "@multica/ui/components/ui/badge";
 import { Button } from "@multica/ui/components/ui/button";
@@ -18,10 +27,20 @@ import { Card, CardContent, CardHeader, CardTitle } from "@multica/ui/components
 import { Input } from "@multica/ui/components/ui/input";
 import { Label } from "@multica/ui/components/ui/label";
 import { NativeSelect, NativeSelectOption } from "@multica/ui/components/ui/native-select";
-import { csvToList, mergeCapabilitiesSettings, permissionsForAgent, readCapabilitiesConfig } from "./settings";
-import type { AgentCapabilitiesConfig } from "./types";
+import {
+  csvToList,
+  mergeCapabilitiesSettings,
+  permissionsForAgent,
+  readCapabilitiesConfig,
+} from "./capability-isolation-settings";
+import type { AgentCapabilitiesConfig } from "./capability-isolation-types";
 
-export function AgentCapabilitiesSettingsTab() {
+// CapabilityIsolationSections renders the two isolation surfaces that used to
+// live on the Agent capabilities tab: the OS sandbox network profiles (a
+// parallel layer to the tool-policy chain, shown alongside it, not as a tool
+// row) and the per-agent blocked MCP servers. It owns a local draft and a
+// single Save that writes the whole agent_capabilities blob via updateWorkspace.
+export function CapabilityIsolationSections() {
   const workspace = useCurrentWorkspace();
   const { role, isLoading: memberLoading } = useCurrentMember(workspace?.id ?? "");
   const canManage = role === "owner" || role === "admin";
@@ -33,11 +52,6 @@ export function AgentCapabilitiesSettingsTab() {
   });
   const { data: runtimes = [] } = useQuery({
     ...runtimeListOptions(workspace?.id ?? ""),
-    enabled: !!workspace?.id,
-  });
-  const { data: capabilityResponse, isLoading: capabilitiesLoading } = useQuery({
-    queryKey: ["cerebro", "capabilities", workspace?.id ?? ""],
-    queryFn: () => api.listCapabilities({ workspace_id: workspace!.id }),
     enabled: !!workspace?.id,
   });
 
@@ -68,7 +82,6 @@ export function AgentCapabilitiesSettingsTab() {
   const selectedPermissions = selectedAgent
     ? permissionsForAgent(draft, selectedAgent.id)
     : permissionsForAgent(draft, "");
-  const groupedCapabilities = groupCapabilities(capabilityResponse?.capabilities ?? []);
 
   const updateDraft = (patch: Partial<AgentCapabilitiesConfig>) => {
     setDraft((current) => ({ ...current, ...patch }));
@@ -124,7 +137,7 @@ export function AgentCapabilitiesSettingsTab() {
         <div className="flex min-w-0 items-center gap-2">
           <ShieldCheck className="h-4 w-4 text-muted-foreground" />
           <div>
-            <h2 className="text-sm font-semibold">Agent capabilities</h2>
+            <h3 className="text-sm font-semibold">Sandbox &amp; isolation</h3>
             <p className="text-xs text-muted-foreground">
               Multica enforces sandbox profiles and blocked MCP servers when an agent starts.
             </p>
@@ -141,52 +154,6 @@ export function AgentCapabilitiesSettingsTab() {
           Only workspace owners and admins can change agent capabilities.
         </div>
       )}
-
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2 text-sm">
-            <Database className="h-4 w-4 text-muted-foreground" />
-            Capability register
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          {capabilitiesLoading ? (
-            <p className="text-xs text-muted-foreground">Loading capabilities…</p>
-          ) : groupedCapabilities.length === 0 ? (
-            <p className="text-xs text-muted-foreground">
-              No capabilities reported yet. Runtimes will report in at the next capability refresh.
-            </p>
-          ) : (
-            <div className="overflow-hidden rounded-md border">
-              <div className="grid grid-cols-[minmax(120px,0.8fr)_minmax(160px,1fr)_minmax(180px,1.2fr)] border-b bg-muted/40 px-3 py-2 text-xs font-medium text-muted-foreground">
-                <span>Type</span>
-                <span>Capability</span>
-                <span>Owners &amp; users</span>
-              </div>
-              <div className="divide-y">
-                {groupedCapabilities.map((capability) => (
-                  <div
-                    key={`${capability.category}:${capability.key}`}
-                    className="grid grid-cols-[minmax(120px,0.8fr)_minmax(160px,1fr)_minmax(180px,1.2fr)] items-center gap-3 px-3 py-2 text-sm"
-                  >
-                    <Badge variant="secondary" className="w-fit">
-                      {capability.category}
-                    </Badge>
-                    <span className="min-w-0 truncate font-medium">{capability.title}</span>
-                    <span className="min-w-0 truncate text-xs text-muted-foreground">
-                      {capabilitySubjects(capability).length > 0
-                        ? capabilitySubjects(capability)
-                            .map((subject) => `${subject.type}:${subject.id.slice(0, 8)}`)
-                            .join(", ")
-                        : "No subjects"}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-        </CardContent>
-      </Card>
 
       <Card>
         <CardHeader>
@@ -254,7 +221,7 @@ export function AgentCapabilitiesSettingsTab() {
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-sm">
             <Bot className="h-4 w-4 text-muted-foreground" />
-            Agent permissions
+            Blocked MCP servers
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -292,29 +259,6 @@ export function AgentCapabilitiesSettingsTab() {
       </Card>
     </div>
   );
-}
-
-// capabilitySubjects merges owners + users into a single deduped list so the
-// register card shows who owns/uses a capability. Runtime self-reports land as
-// owners (with no users yet), so showing only `users` would render empty.
-function capabilitySubjects(capability: Capability): CapabilitySubject[] {
-  const seen = new Set<string>();
-  const out: CapabilitySubject[] = [];
-  for (const subject of [...capability.owners, ...capability.users]) {
-    const dedupeKey = `${subject.type}:${subject.id}`;
-    if (seen.has(dedupeKey)) continue;
-    seen.add(dedupeKey);
-    out.push(subject);
-  }
-  return out;
-}
-
-function groupCapabilities<T extends { category: string; title: string }>(items: T[]): T[] {
-  return [...items].sort((a, b) => {
-    const categoryCompare = a.category.localeCompare(b.category);
-    if (categoryCompare !== 0) return categoryCompare;
-    return a.title.localeCompare(b.title);
-  });
 }
 
 function Field({ label, children }: { label: string; children: ReactNode }) {

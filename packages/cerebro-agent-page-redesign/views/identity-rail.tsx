@@ -1,7 +1,8 @@
 "use client";
 
 import "@multica/cerebro-types";
-import { GitBranch } from "lucide-react";
+import { useState } from "react";
+import { Check, GitBranch, Pencil, X } from "lucide-react";
 import type {
   AgentAvailability,
   AgentPresenceDetail,
@@ -23,8 +24,105 @@ import { SkillAttach } from "@multica/views/agents/components/inspector/skill-at
 import { AgentSurfaceVisibilityPicker } from "@multica/cerebro-access/views";
 import { useFeatureFlag } from "@multica/cerebro-feature-flags";
 import { RuntimeAccountCell } from "@multica/cerebro-runtime/views";
+import { Button } from "@multica/ui/components/ui/button";
 import { daemonVersion, runtimeVersion } from "./runtime-meta";
 import { timeAgo } from "./time-ago";
+import { ResponsiveRailSection } from "./responsive-rail-section";
+import { descriptionUpdate, nameUpdate } from "./identity-draft";
+
+function IdentityTextEditor({
+  label,
+  value,
+  multiline = false,
+  placeholder,
+  onSave,
+}: {
+  label: string;
+  value: string;
+  multiline?: boolean;
+  placeholder: string;
+  onSave: (value: string) => Promise<void> | void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(value);
+  const [saving, setSaving] = useState(false);
+  const valid = multiline || draft.trim().length > 0;
+
+  const cancel = () => {
+    setDraft(value);
+    setEditing(false);
+  };
+  const save = async () => {
+    if (!valid) return;
+    setSaving(true);
+    try {
+      await onSave(draft);
+      setEditing(false);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (!editing) {
+    return (
+      <button
+        type="button"
+        className={`group -mx-1 inline-flex max-w-full items-start gap-1.5 rounded px-1 text-left transition-colors hover:bg-accent/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+          multiline
+            ? "mt-2.5 text-[13.5px] leading-relaxed text-muted-foreground"
+            : "text-[22px] font-bold tracking-tight"
+        }`}
+        aria-label={`Edit ${label}`}
+        onClick={() => {
+          setDraft(value);
+          setEditing(true);
+        }}
+      >
+        <span className={multiline ? "whitespace-pre-wrap" : "truncate"}>
+          {value || placeholder}
+        </span>
+        <Pencil className="mt-1 h-3 w-3 shrink-0 text-muted-foreground/0 transition-colors group-hover:text-muted-foreground group-focus-visible:text-muted-foreground" />
+      </button>
+    );
+  }
+
+  return (
+    <div className={multiline ? "mt-2.5 w-full" : "w-full"}>
+      {multiline ? (
+        <textarea
+          autoFocus
+          aria-label={label}
+          value={draft}
+          onChange={(event) => setDraft(event.target.value)}
+          rows={4}
+          className="w-full resize-y rounded-md border bg-background px-2.5 py-2 text-[13.5px] leading-relaxed outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        />
+      ) : (
+        <input
+          autoFocus
+          aria-label={label}
+          value={draft}
+          onChange={(event) => setDraft(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") void save();
+            if (event.key === "Escape") cancel();
+          }}
+          className="h-9 w-full rounded-md border bg-background px-2.5 text-lg font-semibold outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        />
+      )}
+      <div className="mt-1.5 flex items-center gap-1">
+        <Button type="button" size="xs" onClick={() => void save()} disabled={!valid || saving}>
+          <Check className="h-3 w-3" />
+          Save
+        </Button>
+        <Button type="button" size="xs" variant="ghost" onClick={cancel} disabled={saving}>
+          <X className="h-3 w-3" />
+          Cancel
+        </Button>
+      </div>
+    </div>
+  );
+}
 
 /** Presence dot + label colour, mapped to the app's semantic tokens. */
 function availabilityTone(availability: AgentAvailability | undefined): {
@@ -56,7 +154,7 @@ function availabilityTone(availability: AgentAvailability | undefined): {
 
 function SectionLabel({ children }: { children: React.ReactNode }) {
   return (
-    <div className="mb-2 text-[10.5px] font-semibold uppercase tracking-wider text-muted-foreground">
+    <div className="mb-2 hidden text-[10.5px] font-semibold uppercase tracking-wider text-muted-foreground md:block">
       {children}
     </div>
   );
@@ -126,16 +224,34 @@ export function IdentityRail({
             />
           </div>
         </div>
-        <div className="mt-3.5 flex items-center gap-2.5">
-          <h1 className="m-0 text-[22px] font-bold tracking-tight">
-            {agent.name}
-          </h1>
+        <div className="mt-3.5 flex items-start gap-2.5">
+          {canEdit ? (
+            <IdentityTextEditor
+              label="agent name"
+              value={agent.name}
+              placeholder="Agent name"
+              onSave={(value) => {
+                const update = nameUpdate(value);
+                return update ? onUpdate(update) : undefined;
+              }}
+            />
+          ) : (
+            <h1 className="m-0 text-[22px] font-bold tracking-tight">{agent.name}</h1>
+          )}
           <span className={`inline-flex items-center gap-1.5 text-xs ${tone.text}`}>
             <span className={`h-[7px] w-[7px] rounded-full ${tone.dot}`} />
             {tone.label}
           </span>
         </div>
-        {agent.description ? (
+        {canEdit ? (
+          <IdentityTextEditor
+            label="agent description"
+            value={agent.description ?? ""}
+            multiline
+            placeholder="Add a description"
+            onSave={(value) => onUpdate(descriptionUpdate(value))}
+          />
+        ) : agent.description ? (
           <p className="mt-2.5 text-[13.5px] leading-relaxed text-muted-foreground">
             {agent.description}
           </p>
@@ -143,7 +259,7 @@ export function IdentityRail({
       </div>
 
       {/* properties — editable via the shipped inspector pickers */}
-      <div className="border-b px-5 py-4">
+      <ResponsiveRailSection title="Properties">
         <SectionLabel>Properties</SectionLabel>
         <div className="grid grid-cols-[auto_1fr] gap-x-2 gap-y-0.5">
           <PropRow label="Runtime" interactive={false}>
@@ -197,10 +313,10 @@ export function IdentityRail({
             />
           </PropRow>
         </div>
-      </div>
+      </ResponsiveRailSection>
 
       {/* details — read-only */}
-      <div className="border-b px-5 py-4">
+      <ResponsiveRailSection title="Details">
         <SectionLabel>Details</SectionLabel>
         <div className="grid grid-cols-[auto_1fr] gap-x-2 gap-y-0.5">
           <PropRow label="Account" interactive={false}>
@@ -236,11 +352,11 @@ export function IdentityRail({
             </span>
           </PropRow>
         </div>
-      </div>
+      </ResponsiveRailSection>
 
       {/* skills — chips + the shipped Attach control */}
-      <div className="px-5 py-4">
-        <div className="mb-3 flex items-center gap-2">
+      <ResponsiveRailSection title="Skills" count={skills.length} className="">
+        <div className="mb-3 hidden items-center gap-2 md:flex">
           <span className="text-[10.5px] font-semibold uppercase tracking-wider text-muted-foreground">
             Skills
           </span>
@@ -260,7 +376,7 @@ export function IdentityRail({
           ))}
           <SkillAttach agent={agent} canEdit={canEdit} />
         </div>
-      </div>
+      </ResponsiveRailSection>
     </div>
   );
 }

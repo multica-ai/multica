@@ -383,7 +383,7 @@ func TestCompile_NonPlanningSpec_NoPlanningDispatch(t *testing.T) {
 }
 
 func TestPlanningDispatchRule_Standalone(t *testing.T) {
-	rule := PlanningDispatchRule("agent-1", "build", "")
+	rule := PlanningDispatchRule("agent-1", "build", "", "")
 	if rule.Name != "loop:planning-dispatch" {
 		t.Fatalf("expected loop:planning-dispatch, got %q", rule.Name)
 	}
@@ -403,13 +403,23 @@ func TestPlanningDispatchRule_Standalone(t *testing.T) {
 	if !ac.PlanMode {
 		t.Fatal("planning-dispatch action config should have PlanMode=true")
 	}
+	// FIR-3052 step hook — a standalone plan dispatch carries the default
+	// advance statuses so completion moves the issue todo -> in_progress.
+	if ac.AdvanceFromStatus != "todo" || ac.AdvanceToStatus != "in_progress" {
+		t.Fatalf("expected advance todo->in_progress, got %q->%q", ac.AdvanceFromStatus, ac.AdvanceToStatus)
+	}
 }
 
 func TestPlanningDispatchRule_CustomStatus(t *testing.T) {
-	rule := PlanningDispatchRule("agent-1", "build", "backlog")
+	rule := PlanningDispatchRule("agent-1", "build", "backlog", "doing")
 	tc := rule.TriggerConfig.(workflows.TriggerConfigStatusChanged)
 	if tc.ToStatus != "backlog" {
 		t.Fatalf("expected custom planning status, got %q", tc.ToStatus)
+	}
+	// FIR-3052 — custom planning/build statuses flow into the advance hook.
+	ac := rule.ActionConfig.(workflows.ActionConfigRunSkill)
+	if ac.AdvanceFromStatus != "backlog" || ac.AdvanceToStatus != "doing" {
+		t.Fatalf("expected advance backlog->doing, got %q->%q", ac.AdvanceFromStatus, ac.AdvanceToStatus)
 	}
 }
 

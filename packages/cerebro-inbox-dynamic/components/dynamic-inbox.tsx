@@ -95,7 +95,8 @@ import {
 } from "../layout";
 import type { DynInboxEntry } from "../section-filter";
 import { DynamicInboxCreateMenu } from "./dynamic-inbox-create-menu";
-import { DynamicInboxSection } from "./dynamic-inbox-section";
+import { DynamicInboxSection, runStateFor } from "./dynamic-inbox-section";
+import { DynamicInboxRow } from "./dynamic-inbox-row";
 import { ArchivedInboxView } from "./archived-inbox-view";
 // FIR-1645 — Archived box: archived messages as a foldable block (its own
 // archived queries), dispatched here like the Chat block.
@@ -104,7 +105,9 @@ import { SecretarySection, secretaryEntryKey } from "./secretary-section";
 // TECH-3421 — the Notes box renders its own data (recent notes), so it is
 // dispatched here instead of going through DynamicInboxSection.
 import { NotesInboxBox, NoteInboxBox, NoteInboxDetail } from "@multica/cerebro-notes/views";
-import { AddToRoundAction, ConnectedRoundManager, RoundsBlock, roundIssueIdsToExclude, useRoundStatuses, useStartRound } from "@multica/cerebro-rounds";
+import { SkillChangeInboxDetail } from "@multica/cerebro-skill-ownership/views";
+import { opensInDynamicInboxPane } from "../notification-routing";
+import { AddToRoundAction, ConnectedRoundManager, RoundsBlock, roundIssueIdsToExclude, useDismissRound, useRoundStatuses, useStartRound } from "@multica/cerebro-rounds";
 
 function replaceTab(layout: InboxLayout, tabId: string, fn: (t: InboxTabConfig) => InboxTabConfig): InboxLayout {
   return { ...layout, tabs: layout.tabs.map((t) => (t.id === tabId ? fn(t) : t)) };
@@ -186,6 +189,7 @@ export function DynamicInbox() {
   const roundsEnabled = useFeatureFlag("cerebro_inbox_rounds");
   const { data: roundStatuses = [] } = useRoundStatuses(wsId);
   const startRound = useStartRound(wsId);
+  const dismissRound = useDismissRound(wsId);
   const roundIssueIds = useMemo(() => [...new Set(roundStatuses.flatMap((status) => status.members.map((member) => member.issue_id)))], [roundStatuses]);
   const roundIssueQueries = useQueries({ queries: roundIssueIds.map((issueId) => issueDetailOptions(wsId, issueId)) });
   const roundIssueTitles = useMemo(() => Object.fromEntries(roundIssueQueries.flatMap((query, index) => {
@@ -343,15 +347,9 @@ export function DynamicInbox() {
   // the empty "Select a message" pane. Returns true when it routed away.
   const routeNonIssueNotif = useCallback(
     (item: InboxItem): boolean => {
-      if (
-        (item.type === "skill_change_request_created" ||
-          item.type === "skill_change_request_reviewed") &&
-        item.details?.skill_id
-      ) {
-        const cr = item.details.change_request_id;
-        push(`${paths.skillDetail(item.details.skill_id)}${cr ? `?cr=${cr}` : ""}`);
-        return true;
-      }
+      // FIR-3051 — skill change requests are messages, not navigation. They
+      // stay selected and render SkillChangeInboxDetail in this pane.
+      if (opensInDynamicInboxPane(item)) return false;
       // FIR-1587 — fork / agent-assignment items deep-link to the relevant skill detail.
       if (item.type === "skill_forked" && item.details?.forked_skill_id) {
         push(paths.skillDetail(String(item.details.forked_skill_id)));
@@ -466,8 +464,11 @@ export function DynamicInbox() {
   // section filter/sort sees the entry's selection-time state, not the
   // just-marked-read state. Matched on stable identity; falls through cleanly
   // if the row was archived/removed.
+  const roundBlockActive = roundsEnabled && activeSections.some((section) => section.kind === "rounds") && roundStatuses.some(
+    (status) => status.members.length > 0 || status.round.next_run_at || status.active_run,
+  );
   const displayEntries = useMemo(() => {
-    const excluded = roundsEnabled ? roundIssueIdsToExclude(roundStatuses) : new Set<string>();
+    const excluded = roundIssueIdsToExclude(roundStatuses, roundBlockActive);
     const availableEntries = entries.filter((e) => e.kind !== "notif" || !e.item.issue_id || !excluded.has(e.item.issue_id));
     if (!selectedSnapshot) return availableEntries;
     const target = entryIdentity(selectedSnapshot);
@@ -480,7 +481,7 @@ export function DynamicInbox() {
       return e;
     });
     return swapped ? next : availableEntries;
-  }, [entries, selectedSnapshot, roundsEnabled, roundStatuses]);
+  }, [entries, selectedSnapshot, roundBlockActive, roundStatuses]);
 
   // TECH-3413 #1 — drag-to-reorder sections (5px threshold so clicks inside a
   // section still register).
@@ -871,10 +872,16 @@ export function DynamicInbox() {
     // TECH-3598 #2 — a notification with no issue_id that wasn't routed away
     // (reminder, quick-create-failed, runtime-auto-paused, private-agent run
     // request, …). Classic renders a real detail pane for these instead of the
-    // empty placeholder; mirror it so the row opens something. Skill change
-    // requests and note mentions never reach here — they deep-link in onSelect.
+    // empty placeholder; mirror it so the row opens something.
     if (selected.kind === "notif") {
       const item = selected.item;
+      if (opensInDynamicInboxPane(item)) {
+        return (
+          <ErrorBoundary resetKeys={[item.id]}>
+            <SkillChangeInboxDetail item={item} />
+          </ErrorBoundary>
+        );
+      }
       return (
         <div className="p-3 sm:p-6">
           <h2 className="text-lg font-semibold">{item.title}</h2>
@@ -1096,6 +1103,7 @@ export function DynamicInbox() {
                     .filter((c) => c.kind !== "secretary" || secretaryEnabled)
                     // TECH-3579 — only offer the Favorites box when its flag is on.
                     .filter((c) => c.kind !== "favorites" || favoritesEnabled)
+                    .filter((c) => c.kind !== "rounds" || roundsEnabled)
                     .map((c) => (
                     <DropdownMenuItem key={c.kind} onClick={() => addSection(c.kind)}>
                       {c.label}
@@ -1158,15 +1166,6 @@ export function DynamicInbox() {
         {/* sections */}
         <div ref={sectionsScrollRef} className="flex-1 space-y-3 overflow-y-auto p-3">
           {loading && <p className="px-1 text-sm text-muted-foreground">Loading…</p>}
-          {roundsEnabled && (
-            <div className="space-y-2">
-              <div className="flex justify-end"><ConnectedRoundManager statuses={roundStatuses} issueTitles={roundIssueTitles} /></div>
-              <RoundsBlock statuses={roundStatuses} issueTitles={roundIssueTitles} onStart={(roundId) => startRound.mutate(roundId)} onSelectIssue={(issueId) => {
-                const entry = entries.find((e) => e.kind === "notif" && e.item.issue_id === issueId);
-                if (entry) onSelect(entry);
-              }} />
-            </div>
-          )}
           {activeSections.length === 0 && !loading && (
             <p className="px-1 text-sm text-muted-foreground">
               Empty tab — add a section from the ⋯ menu.
@@ -1184,7 +1183,32 @@ export function DynamicInbox() {
                       // TECH-3421 — the Notes box renders its own data (recent
                       // notes); dispatched here like the Chat block, not via
                       // DynamicInboxSection.
-                      section.kind === "notes" ? (
+                      section.kind === "rounds" && roundsEnabled ? (
+                        <RoundsBlock
+                          statuses={roundStatuses}
+                          issueTitles={roundIssueTitles}
+                          settings={<ConnectedRoundManager statuses={roundStatuses} issueTitles={roundIssueTitles} />}
+                          dragHandle={handle}
+                          defaultCollapsed={section.defaultCollapsed}
+                          onRemove={() => removeSection(section.id)}
+                          onStart={(roundId) => startRound.mutate(roundId)}
+                          onDismiss={(roundId) => dismissRound.mutate(roundId)}
+                          onSelectIssue={(issueId) => {
+                            const entry = entries.find((candidate) => candidate.kind === "notif" && candidate.item.issue_id === issueId);
+                            if (entry) onSelect(entry);
+                          }}
+                          renderIssue={(issueId) => {
+                            const entry = entries.find((candidate) => candidate.kind === "notif" && candidate.item.issue_id === issueId);
+                            if (!entry || entry.kind !== "notif") return null;
+                            // FIR-3114 — outside an active run a round member never reads as
+                            // unread: live-mode responses accumulate quietly until the next
+                            // round surfaces them (the row itself stays visible in the round).
+                            const surfaced = roundStatuses.some((status) => status.active_run && status.members.some((member) => member.issue_id === issueId));
+                            const displayEntry = surfaced || entry.item.read ? entry : { ...entry, item: { ...entry.item, read: true } };
+                            return <DynamicInboxRow key={entry.id} entry={displayEntry} isSelected={entry.id === selected?.id} agentRunState={runStateFor(entry, filterContext)} favoritesEnabled={favoritesEnabled} isFavorite={filterContext.isFavorite?.(entry) ?? false} onToggleFavorite={toggleFavorite} onSelect={onSelect} onArchive={onArchive} />;
+                          }}
+                        />
+                      ) : section.kind === "notes" ? (
                         <NotesInboxBox
                           title={section.title}
                           dragHandle={handle}

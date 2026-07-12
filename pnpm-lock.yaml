@@ -1204,9 +1204,24 @@ importers:
       '@multica/tsconfig':
         specifier: workspace:*
         version: link:../tsconfig
+      '@testing-library/jest-dom':
+        specifier: 'catalog:'
+        version: 6.9.1
+      '@testing-library/react':
+        specifier: 'catalog:'
+        version: 16.3.2(@testing-library/dom@10.4.1)(@types/react-dom@19.2.3(@types/react@19.2.15))(@types/react@19.2.15)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
+      '@testing-library/user-event':
+        specifier: 'catalog:'
+        version: 14.6.1(@testing-library/dom@10.4.1)
       '@types/react':
         specifier: 19.2.15
         version: 19.2.15
+      '@vitejs/plugin-react':
+        specifier: 'catalog:'
+        version: 6.0.2(babel-plugin-react-compiler@1.0.0)(vite@8.0.14(@types/node@25.9.1)(esbuild@0.27.7)(jiti@2.7.0)(terser@5.48.0)(yaml@2.9.0))
+      jsdom:
+        specifier: 'catalog:'
+        version: 29.1.1(@noble/hashes@1.8.0)
       typescript:
         specifier: 'catalog:'
         version: 5.9.3
@@ -1244,6 +1259,18 @@ importers:
       '@types/react':
         specifier: 19.2.15
         version: 19.2.15
+      typescript:
+        specifier: 'catalog:'
+        version: 5.9.3
+      vitest:
+        specifier: 'catalog:'
+        version: 4.1.7(@opentelemetry/api@1.9.1)(@types/node@25.9.1)(jsdom@29.1.1(@noble/hashes@1.8.0))(msw@2.14.6(@types/node@25.9.1)(typescript@5.9.3))(vite@8.0.14(@types/node@25.9.1)(esbuild@0.27.7)(jiti@2.7.0)(terser@5.48.0)(yaml@2.9.0))
+
+  packages/cerebro-agent-sdk:
+    devDependencies:
+      '@multica/tsconfig':
+        specifier: workspace:*
+        version: link:../tsconfig
       typescript:
         specifier: 'catalog:'
         version: 5.9.3
@@ -2119,6 +2146,9 @@ importers:
       '@multica/cerebro-feature-flags':
         specifier: workspace:*
         version: link:../cerebro-feature-flags
+      '@multica/cerebro-usage':
+        specifier: workspace:*
+        version: link:../cerebro-usage
       '@multica/core':
         specifier: workspace:*
         version: link:../core
@@ -2150,6 +2180,49 @@ importers:
       '@types/react':
         specifier: 19.2.15
         version: 19.2.15
+      typescript:
+        specifier: 'catalog:'
+        version: 5.9.3
+      vitest:
+        specifier: 'catalog:'
+        version: 4.1.7(@opentelemetry/api@1.9.1)(@types/node@25.9.1)(jsdom@29.1.1(@noble/hashes@1.8.0))(msw@2.14.6(@types/node@25.9.1)(typescript@5.9.3))(vite@8.0.14(@types/node@25.9.1)(esbuild@0.27.7)(jiti@2.7.0)(terser@5.48.0)(yaml@2.9.0))
+
+  packages/cerebro-description-draft:
+    dependencies:
+      '@multica/cerebro-feature-flags':
+        specifier: workspace:*
+        version: link:../cerebro-feature-flags
+      '@multica/core':
+        specifier: workspace:*
+        version: link:../core
+      '@multica/ui':
+        specifier: workspace:*
+        version: link:../ui
+      lucide-react:
+        specifier: 'catalog:'
+        version: 1.16.0(react@19.2.3)
+      react:
+        specifier: 'catalog:'
+        version: 19.2.3
+    devDependencies:
+      '@multica/tsconfig':
+        specifier: workspace:*
+        version: link:../tsconfig
+      '@testing-library/jest-dom':
+        specifier: 'catalog:'
+        version: 6.9.1
+      '@testing-library/react':
+        specifier: 'catalog:'
+        version: 16.3.2(@testing-library/dom@10.4.1)(@types/react-dom@19.2.3(@types/react@19.2.15))(@types/react@19.2.15)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
+      '@types/react':
+        specifier: 19.2.15
+        version: 19.2.15
+      '@vitejs/plugin-react':
+        specifier: 'catalog:'
+        version: 6.0.2(babel-plugin-react-compiler@1.0.0)(vite@8.0.14(@types/node@25.9.1)(esbuild@0.27.7)(jiti@2.7.0)(terser@5.48.0)(yaml@2.9.0))
+      jsdom:
+        specifier: 'catalog:'
+        version: 29.1.1(@noble/hashes@1.8.0)
       typescript:
         specifier: 'catalog:'
         version: 5.9.3
@@ -2603,6 +2676,9 @@ importers:
       '@multica/cerebro-feature-flags':
         specifier: workspace:*
         version: link:../cerebro-feature-flags
+      '@multica/cerebro-rounds':
+        specifier: workspace:*
+        version: link:../cerebro-rounds
       '@multica/cerebro-types':
         specifier: workspace:*
         version: link:../cerebro-types
@@ -2631,9 +2707,18 @@ importers:
       '@multica/tsconfig':
         specifier: workspace:*
         version: link:../tsconfig
+      '@testing-library/jest-dom':
+        specifier: 'catalog:'
+        version: 6.9.1
+      '@testing-library/react':
+        specifier: 'catalog:'
+        version: 16.3.2(@testing-library/dom@10.4.1)(@types/react-dom@19.2.3(@types/react@19.2.15))(@types/react@19.2.15)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
       '@types/react':
         specifier: 19.2.15
         version: 19.2.15
+      jsdom:
+        specifier: 'catalog:'
+        version: 29.1.1(@noble/hashes@1.8.0)
       typescript:
         specifier: 'catalog:'
         version: 5.9.3
@@ -2673,6 +2758,9 @@ importers:
       '@multica/cerebro-rounds':
         specifier: workspace:*
         version: link:../cerebro-rounds
+      '@multica/cerebro-skill-ownership':
+        specifier: workspace:*
+        version: link:../cerebro-skill-ownership
       '@multica/core':
         specifier: workspace:*
         version: link:../core
@@ -3420,6 +3508,9 @@ importers:
 
   packages/cerebro-rounds:
     dependencies:
+      '@multica/cerebro-feature-flags':
+        specifier: workspace:*
+        version: link:../cerebro-feature-flags
       '@multica/core':
         specifier: workspace:*
         version: link:../core
@@ -4126,6 +4217,9 @@ importers:
       '@multica/cerebro-feature-flags':
         specifier: workspace:*
         version: link:../cerebro-feature-flags
+      '@multica/cerebro-web-fetch-policy':
+        specifier: workspace:*
+        version: link:../cerebro-web-fetch-policy
       '@multica/core':
         specifier: workspace:*
         version: link:../core
@@ -4390,9 +4484,21 @@ importers:
       '@multica/tsconfig':
         specifier: workspace:*
         version: link:../tsconfig
+      '@testing-library/jest-dom':
+        specifier: 'catalog:'
+        version: 6.9.1
+      '@testing-library/react':
+        specifier: 'catalog:'
+        version: 16.3.2(@testing-library/dom@10.4.1)(@types/react-dom@19.2.3(@types/react@19.2.15))(@types/react@19.2.15)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
       '@types/react':
         specifier: 19.2.15
         version: 19.2.15
+      '@vitejs/plugin-react':
+        specifier: 'catalog:'
+        version: 6.0.2(babel-plugin-react-compiler@1.0.0)(vite@8.0.14(@types/node@25.9.1)(esbuild@0.27.7)(jiti@2.7.0)(terser@5.48.0)(yaml@2.9.0))
+      jsdom:
+        specifier: 'catalog:'
+        version: 29.1.1(@noble/hashes@1.8.0)
       typescript:
         specifier: 'catalog:'
         version: 5.9.3
@@ -4760,6 +4866,9 @@ importers:
       '@multica/cerebro-comment-drafts':
         specifier: workspace:*
         version: link:../cerebro-comment-drafts
+      '@multica/cerebro-description-draft':
+        specifier: workspace:*
+        version: link:../cerebro-description-draft
       '@multica/cerebro-display-currency':
         specifier: workspace:*
         version: link:../cerebro-display-currency
@@ -4799,6 +4908,9 @@ importers:
       '@multica/cerebro-recurring-issues':
         specifier: workspace:*
         version: link:../cerebro-recurring-issues
+      '@multica/cerebro-rounds':
+        specifier: workspace:*
+        version: link:../cerebro-rounds
       '@multica/cerebro-saved-filters':
         specifier: workspace:*
         version: link:../cerebro-saved-filters

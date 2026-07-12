@@ -220,6 +220,16 @@ type ActionConfigRunSkill struct {
 	// detached quick_create task nobody can see on the issue (Tine's live-test
 	// finding: 0 comments / 0 sessions on the workflow's target issue).
 	LoopPhase string `json:"loop_phase,omitempty"`
+	// AdvanceFromStatus / AdvanceToStatus turn a plan-phase dispatch into a
+	// deterministic step hook (FIR-3052): when the plan run completes, the loop
+	// advances the issue From -> To so the loop:dispatch-build rule (which
+	// triggers on entry to BuildStatus) fires without the plan agent having to
+	// flip the status by hand. Set by the loop compiler on the
+	// loop:planning-dispatch rule (From = PlanningStatus, To = BuildStatus) and
+	// stamped onto the plan task context; consumed by LoopPhaseAdvancer on task
+	// completion. Empty on every non-planning dispatch — the advance is a no-op.
+	AdvanceFromStatus string `json:"advance_from_status,omitempty"`
+	AdvanceToStatus   string `json:"advance_to_status,omitempty"`
 }
 
 // ActionConfigCommentOnIssue — post a workflow-authored comment on either

@@ -813,6 +813,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 	// readiness wait blocks on, so success is reported only after startup
 	// actually completed, not merely because the health port came up.
 	d.ready.Store(true)
+	d.startTraceUpload(ctx) // CEREBRO-PATCH(daemon-trace-upload): start the Registry uploader after runtimes are registered (FIR-2757)
 	d.logger.Debug("background loops launched (workspace-sync, task-wakeup, heartbeat, gc, auto-update, token-renewal); health now reporting ready")
 	err = d.pollLoop(ctx, taskWakeups)
 	d.logger.Debug("daemon main loop returning", "error", err)
@@ -2302,12 +2303,24 @@ func (d *Daemon) handleUpdate(ctx context.Context, runtimeID string, update *Pen
 		return
 	}
 
-	// Prevent concurrent update attempts.
-	if !d.updating.CompareAndSwap(false, true) {
-		d.logger.Warn("update already in progress, ignoring", "runtime_id", runtimeID, "update_id", update.ID)
+	// Use the same strict idle barrier as the periodic updater. This prevents
+	// a server-triggered restart from cancelling an active task or a claim that
+	// is already in flight.
+	if !d.tryBeginServerUpdate() {
+		d.logger.Info("CLI update deferred: task, claim, or update in progress", "runtime_id", runtimeID, "update_id", update.ID)
+		d.reportUpdateResult(ctx, runtimeID, update.ID, map[string]any{
+			"status": "failed",
+			"error":  "update deferred until the runtime is idle",
+		})
 		return
 	}
-	defer d.updating.Store(false)
+	restarting := false
+	defer func() {
+		if !restarting {
+			d.releaseClaimBarrier()
+			d.updating.Store(false)
+		}
+	}()
 
 	d.logger.Info("CLI update requested", "runtime_id", runtimeID, "update_id", update.ID, "target_version", update.TargetVersion)
 
@@ -2333,7 +2346,20 @@ func (d *Daemon) handleUpdate(ctx context.Context, runtimeID string, update *Pen
 	})
 
 	// Trigger daemon restart with the new binary.
+	restarting = true
 	d.triggerRestart()
+}
+
+// CEREBRO-PATCH(runtime-online-auto-update): FIR-3064 acquire the strict idle barrier for heartbeat-triggered updates.
+func (d *Daemon) tryBeginServerUpdate() bool {
+	if !d.updating.CompareAndSwap(false, true) {
+		return false
+	}
+	if !d.trySetClaimBarrier() {
+		d.updating.Store(false)
+		return false
+	}
+	return true
 }
 
 // runUpdate executes the brew-or-download upgrade against targetVersion and
@@ -3510,6 +3536,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		IssueID:                          task.IssueID,
 		TriggerCommentID:                 task.TriggerCommentID,
 		TriggerThreadID:                  task.TriggerThreadID,
+		PlanMode:                         task.PlanMode, // CEREBRO-PATCH(session-plan-mode): carry the thread mode into runtime context.
 		NewCommentCount:                  task.NewCommentCount,
 		NewCommentsSince:                 task.NewCommentsSince,
 		PriorSessionResumed:              task.PriorSessionID != "",

@@ -1,0 +1,69 @@
+---
+title: "Multica v1.14.0"
+description: "48 release bullets: 15 new, 20 fixed, 3 improved, plus 10 more."
+date: 2026-07-12
+---
+
+**Release summary:** 48 release bullets: 15 new, 20 fixed, 3 improved, plus 10 more.
+
+Changes since [v1.13.0](https://github.com/firtal-group/firtal-cerebro/compare/v1.13.0...v1.14.0) — bump: **minor**
+
+## New
+
+- Per-permission change log — record Set/Clear, Changes tab (FIR-3091 punkt 8 fase 2)\n\nEvery write to cerebro_tool_policy (Set/Clear) now appends a row to the new\ncerebro_tool_policy_audit table (migration 9131): layer, subject, resource\npattern, old -> new setting, actor, timestamp. Recording is best-effort after\nthe write, mirroring cerebro_credential_audit's allow-side trade-off.\n\nNew admin/owner-gated read GET /tool-policy/changes?tool_key=... returns one\ntool's history newest-first (capped at 200). The permission detail page's\nChanges tab is now live: transition per row, actor name, local timestamp, and\nan honest empty state (history starts the day this ships).\n\nClear gains a clearedBy actor param; a no-op clear (absent row) logs nothing.\n\nCo-Authored-By: Claude Fable 5 \<noreply@anthropic.com> [#2277](https://github.com/firtal-group/firtal-cerebro/pull/2277)
+- SSE chat run stream endpoint (FIR-2835 Phase 1)\n\nGET /api/chat/sessions/\{sessionId}/stream streams a chat session's agent\nrun as Server-Sent Events in the Vercel AI SDK UI-message-stream (v1)\nprotocol, replacing the create->send->poll loop embedding apps\n(Finance AI CFO first) hand-roll today.\n\n- start -> text-start/delta/end -> finish (taskId/elapsedMs/model/usage\n  from task_usage) -> [DONE]; failures surface as in-stream error chunks\n  carrying the real failure text (the FIR-2835 Phase 0 contract).\n- ?task_id= follows a specific run; without it the pending task is used\n  and 204 = nothing active (AI SDK resume contract).\n- Runs that finished before connect replay from the persisted assistant\n  message, so the send->open-stream race is safe.\n- New cerebro package server/internal/cerebro/chatstream (protocol\n  writer + bus broker); thin handler in chat_stream_cerebro.go; marked\n  CEREBRO-PATCH lines for the Handler field, router import/wire/route.\n\nCo-Authored-By: Claude Fable 5 \<noreply@anthropic.com> [#2266](https://github.com/firtal-group/firtal-cerebro/pull/2266)
+- Session mode is a Plan/Build select, not a toggle (FIR-3087) [#2274](https://github.com/firtal-group/firtal-cerebro/pull/2274)
+- Agent Office context observability overview (FIR-1775 Phase 4) [#2263](https://github.com/firtal-group/firtal-cerebro/pull/2263)
+- Auto-advance Plan -> Build on plan completion (FIR-3052) [#2260](https://github.com/firtal-group/firtal-cerebro/pull/2260)
+- Portable read_attachment (OCR + legacy .doc/.xls) across all runtimes [#2261](https://github.com/firtal-group/firtal-cerebro/pull/2261)
+- Per-permission detail page (FIR-3091 punkt 8 fase 1b) [#2258](https://github.com/firtal-group/firtal-cerebro/pull/2258)
+- Per-permission holders endpoint + enforced signal (FIR-3091 punkt 8 fase 1a) [#2255](https://github.com/firtal-group/firtal-cerebro/pull/2255)
+- Fold web_fetch host list into Permissions (FIR-3091 slice 5) [#2247](https://github.com/firtal-group/firtal-cerebro/pull/2247)
+- Surface agent-start permissions in Permissions behind agent-trigger gate (FIR-3091 slice 4) [#2246](https://github.com/firtal-group/firtal-cerebro/pull/2246)
+- Unify group capabilities onto catalog card design (FIR-3091 slice 2) [#2244](https://github.com/firtal-group/firtal-cerebro/pull/2244)
+- Make rounds native inbox blocks (FIR-2736) [#2233](https://github.com/firtal-group/firtal-cerebro/pull/2233)
+- Add CLI and MCP management (FIR-2937)
+- Edit proposed content while reviewing a skill change (FIR-2924) [#2203](https://github.com/firtal-group/firtal-cerebro/pull/2203)
+- Wire the multica sprint CLI to the real sprint feature (FIR-2500)
+
+## Fixed
+
+- Filter messages inside searched rounds (FIR-3108) [#2275](https://github.com/firtal-group/firtal-cerebro/pull/2275)
+- Preserve member requester for agent activation (FIR-3072) [#2259](https://github.com/firtal-group/firtal-cerebro/pull/2259)
+- Keep the round settings panel on screen on mobile (FIR-3107) [#2267](https://github.com/firtal-group/firtal-cerebro/pull/2267)
+- Restrict UI preview proxy to PDF, not full Office family [#2265](https://github.com/firtal-group/firtal-cerebro/pull/2265)
+- Auto-expand rounds with a matching search result (FIR-3108) [#2264](https://github.com/firtal-group/firtal-cerebro/pull/2264)
+- Stop Add to Round clicks from opening the issue (FIR-3107)\n\nThe RoundPickerDialog is mounted inside the clickable inbox row. Its\ndialog/drawer renders in a portal, but React synthetic clicks bubble\nthrough the React tree to the row's onClick, which navigates to the\nissue. Guard the whole ResponsiveRoundPanel with a display:contents\nstopPropagation wrapper so picking a round (or dismissing the panel)\nno longer opens the issue.\n\nCo-Authored-By: Claude Fable 5 \<noreply@anthropic.com> [#2262](https://github.com/firtal-group/firtal-cerebro/pull/2262)
+- Restore daemon upload startup (FIR-2757) [#2257](https://github.com/firtal-group/firtal-cerebro/pull/2257)
+- Persist issue workflow plan document
+- Make inbox block native (FIR-2736) [#2248](https://github.com/firtal-group/firtal-cerebro/pull/2248)
+- Treat workspace Deny as openable, reserve lock for Disable+floors (FIR-3091) [#2243](https://github.com/firtal-group/firtal-cerebro/pull/2243)
+- Query dashboard project title (FIR-2996)
+- Restore editing and messaging (FIR-2670)
+- Use supported dashboard explorer grain (FIR-2996)
+- Line-authors pull opens on drag-then-hold, click closes (FIR-2810) [#2236](https://github.com/firtal-group/firtal-cerebro/pull/2236)
+- Recover stalled image previews (FIR-3068) [#2222](https://github.com/firtal-group/firtal-cerebro/pull/2222)
+- Enable member overrides by default (FIR-3062)
+- Mount usage explorer on visible route (FIR-2996) [#2231](https://github.com/firtal-group/firtal-cerebro/pull/2231)
+- Pass Connection auth to HTTP MCP servers (FIR-2835) [#2228](https://github.com/firtal-group/firtal-cerebro/pull/2228)
+- Note review round 3 — touch pull needs a hold, narrower reveal, stamp-only saves never conflict (FIR-2810) [#2224](https://github.com/firtal-group/firtal-cerebro/pull/2224)
+- Show rounds inbox surface when enabled (FIR-2736) [#2221](https://github.com/firtal-group/firtal-cerebro/pull/2221)
+
+## Improved
+
+- Release notes v1.15.0 [#2254](https://github.com/firtal-group/firtal-cerebro/pull/2254)
+- Add explicit rollback path (FIR-3064) [#2251](https://github.com/firtal-group/firtal-cerebro/pull/2251)
+- Move agent-capabilities cards into Permissions, retire old tab (FIR-3091 slice 3) [#2245](https://github.com/firtal-group/firtal-cerebro/pull/2245)
+
+## Other changes
+
+- FIR-2835: typed agent parts, resumability SDK and scoped identity [#2278](https://github.com/firtal-group/firtal-cerebro/pull/2278)
+- FIR-3105 split agent attachment extraction from preview [#2276](https://github.com/firtal-group/firtal-cerebro/pull/2276)
+- FIR-2670: Finish mobile agent page and Advanced settings [#2273](https://github.com/firtal-group/firtal-cerebro/pull/2273)
+- FIR-3087: add standalone session plan mode [#2242](https://github.com/firtal-group/firtal-cerebro/pull/2242)
+- FIR-3064: Own Cerebro desktop and runtime distribution [#2226](https://github.com/firtal-group/firtal-cerebro/pull/2226)
+- FIR-2835: mint actor-scoped MCP relay tokens at claim [#2238](https://github.com/firtal-group/firtal-cerebro/pull/2238)
+- FIR-2760: add permission-scoped connection instructions
+- FIR-3051: keep skill changes inside dynamic inbox
+- Issue sidebar restructure + merged Runs tab (FIR-2827)
+- Gem kladde af issue-beskrivelse lokalt så tekst ikke tabes ved session-udløb

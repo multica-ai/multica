@@ -1823,6 +1823,27 @@ func TestEnsureCodexMcpConfigWritesManagedBlock(t *testing.T) {
 	}
 }
 
+// CEREBRO-PATCH(codex-mcp-http-headers-test): Regression proof for the Codex-specific HTTP header key.
+func TestEnsureCodexMcpConfigTranslatesHTTPHeaders(t *testing.T) {
+	t.Parallel()
+	tmp := filepath.Join(t.TempDir(), "config.toml")
+	raw := json.RawMessage(`{"mcpServers":{"finance":{"type":"http","url":"https://example.com/mcp","headers":{"Authorization":"Bearer relay-token"}}}}`)
+	if err := ensureCodexMcpConfig(tmp, raw, slog.Default()); err != nil {
+		t.Fatalf("ensure: %v", err)
+	}
+	data, err := os.ReadFile(tmp)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	got := string(data)
+	if !strings.Contains(got, `http_headers = { Authorization = "Bearer relay-token" }`) {
+		t.Fatalf("Codex HTTP MCP auth must use http_headers, got:\n%s", got)
+	}
+	if strings.Contains(got, "\nheaders =") {
+		t.Fatalf("Claude-style headers key is ignored by Codex, got:\n%s", got)
+	}
+}
+
 func TestEnsureCodexMcpConfigForces0600OnPreexistingFile(t *testing.T) {
 	t.Parallel()
 	if runtime.GOOS == "windows" {

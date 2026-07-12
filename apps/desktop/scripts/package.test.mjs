@@ -5,9 +5,40 @@ import {
   envWithLocalBins,
   normalizeGitVersion,
   parsePackageArgs,
+  resolveReleaseSigning,
   resolveBuildMatrix,
   stripLeadingSeparator,
 } from "./package.mjs";
+
+it("falls back to unsigned CI release packaging when credentials are missing", () => {
+  expect(resolveReleaseSigning({ CI: "true" }, "darwin")).toEqual({
+    environment: {
+      CI: "true",
+      CSC_IDENTITY_AUTO_DISCOVERY: "false",
+    },
+    missing: [
+      "CSC_LINK",
+      "CSC_KEY_PASSWORD",
+      "APPLE_ID",
+      "APPLE_APP_SPECIFIC_PASSWORD",
+      "APPLE_TEAM_ID",
+    ],
+    signed: false,
+  });
+});
+
+it("keeps signing enabled when release credentials are present", () => {
+  const environment = {
+    CI: "true",
+    CSC_LINK: "certificate",
+    CSC_KEY_PASSWORD: "password",
+  };
+  expect(resolveReleaseSigning(environment, "win32")).toEqual({
+    environment,
+    missing: [],
+    signed: true,
+  });
+});
 
 describe("normalizeGitVersion", () => {
   it("returns null for empty / nullish input", () => {

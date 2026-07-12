@@ -233,6 +233,65 @@ func TestReviewSkillChangeRequest_NotifiesProposerOnApproveAndReject(t *testing.
 	}
 }
 
+// CEREBRO-PATCH(skill-review-edit-content): FIR-2924 — coverage for the
+// reviewer-edits-before-approving flow: the merged skill content, the new
+// skill_version snapshot, and the change request's own record all reflect
+// what the reviewer actually approved, not the original proposal.
+func TestReviewSkillChangeRequest_ApproveWithEditedContent(t *testing.T) {
+	ctx := context.Background()
+	f := setupOwnershipFixture(t)
+
+	body := map[string]any{
+		"title":            "editable proposal",
+		"proposed_version": "1.1.0",
+		"proposed_content": "line one (proposed)\nline two\nline three\n",
+	}
+	w := httptest.NewRecorder()
+	req := newRequestAs(f.proposerID, "POST", "/api/skills/"+f.skillID+"/change-requests", body)
+	req = withURLParam(req, "id", f.skillID)
+	testHandler.CreateSkillChangeRequest(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create CR: %d: %s", w.Code, w.Body.String())
+	}
+	var cr SkillChangeRequestResponse
+	json.NewDecoder(w.Body).Decode(&cr)
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM skill_change_request WHERE id = $1`, cr.ID) })
+
+	edited := "line one (owner edit)\nline two\nline three\n"
+	reviewBody := map[string]any{"action": "approve", "edited_content": edited}
+	w = httptest.NewRecorder()
+	req = newRequestAs(f.ownerID, "POST", "/api/skill-change-requests/"+cr.ID+"/review", reviewBody)
+	req = withURLParam(req, "crId", cr.ID)
+	testHandler.ReviewSkillChangeRequest(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("review approve: %d: %s", w.Code, w.Body.String())
+	}
+
+	var skillContent string
+	if err := testPool.QueryRow(ctx, `SELECT content FROM skill WHERE id = $1`, f.skillID).Scan(&skillContent); err != nil {
+		t.Fatalf("query skill content: %v", err)
+	}
+	if skillContent != edited {
+		t.Fatalf("skill content = %q, want edited content %q", skillContent, edited)
+	}
+
+	var crContent string
+	if err := testPool.QueryRow(ctx, `SELECT proposed_content FROM skill_change_request WHERE id = $1`, cr.ID).Scan(&crContent); err != nil {
+		t.Fatalf("query change request content: %v", err)
+	}
+	if crContent != edited {
+		t.Fatalf("change request proposed_content = %q, want %q (should reflect the merged edit)", crContent, edited)
+	}
+
+	var versionContent string
+	if err := testPool.QueryRow(ctx, `SELECT content FROM skill_version WHERE skill_id = $1 AND version = '1.1.0'`, f.skillID).Scan(&versionContent); err != nil {
+		t.Fatalf("query skill_version content: %v", err)
+	}
+	if versionContent != edited {
+		t.Fatalf("skill_version content = %q, want %q", versionContent, edited)
+	}
+}
+
 func mapKeys(m map[string][]byte) []string {
 	out := make([]string, 0, len(m))
 	for k := range m {

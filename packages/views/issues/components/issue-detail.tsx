@@ -4,6 +4,7 @@
 // CEREBRO-PATCH(channels-flag-gate): cerebro_channels feature flag controls channel/DM chrome
 
 import { useFeatureFlag } from "@multica/cerebro-feature-flags";
+import { useDescriptionDraft, DescriptionDraftBanner } from "@multica/cerebro-description-draft";
 // CEREBRO-PATCH(display-currency-issue-detail): FIR-40 cost in workspace currency.
 import { useCostFormatter } from "@multica/cerebro-display-currency/views";
 import { useState, useEffect, useCallback, useMemo, useRef, type ReactNode } from "react";
@@ -151,6 +152,8 @@ import { CommentCard, isWakeupComment } from "./comment-card"; // CEREBRO-PATCH(
 // CEREBRO-PATCH(issue-description-image-tray): FIR-2693 — numbered image tray on the description editor.
 import { CommentComposer, EditorImageTray } from "@multica/cerebro-composer";
 import { AgentLiveCard, TaskRunHistory, WorkSessionHistory } from "./agent-live-card";
+// CEREBRO-PATCH(rounds-held-reply-bar): FIR-3114 — held-reply banner for batch Rounds.
+import { RoundHeldReplyBar } from "@multica/cerebro-rounds";
 import { PullRequestList } from "./pull-request-list";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@multica/ui/components/ui/tabs";
 import { BacklogAgentHintDialog } from "./backlog-agent-hint-dialog";
@@ -1313,6 +1316,11 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
   // Called before the `if (!issue)` early return so hook order stays stable.
   const actions = useIssueActions(issue);
   const handleUpdateField = actions.updateField;
+
+  // CEREBRO-PATCH(description-drafts): FIR-2648 — mirror every edit locally so
+  // a session expiry cannot silently discard text before the save completes.
+  const descriptionDraft = useDescriptionDraft(id, issue?.description ?? "");
+  const [descRestoreEpoch, setDescRestoreEpoch] = useState(0);
 
   // Labels live in their own query (not on the issue body) — fetch the count
   // here so seeding can decide whether the "Labels" optional row should be
@@ -2604,12 +2612,25 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
             // CEREBRO-PATCH(description-image-gallery): FIR-2710 — description body + attachment images page as one gallery.
             <ImageGalleryProvider>
             <div {...descDropZoneProps} className="relative mt-5 rounded-lg">
+              {/* CEREBRO-PATCH(description-drafts): FIR-2648 — restore text that never reached the server. */}
+              {descriptionDraft.hasRecoverableDraft && (
+                <DescriptionDraftBanner
+                  onRestore={() => {
+                    setDescRestoreEpoch((n) => n + 1);
+                    descriptionDraft.dismissBanner();
+                  }}
+                  onDiscard={() => descriptionDraft.discard()}
+                />
+              )}
               <EditorImageTray
                 ref={descEditorRef}
-                key={id}
-                defaultValue={issue.description || ""}
+                key={`${id}-${descRestoreEpoch}`}
+                defaultValue={descRestoreEpoch > 0 ? descriptionDraft.draftValue : (issue.description || "")}
                 placeholder={t(($) => $.detail.desc_placeholder)}
-                onUpdate={(md) => handleUpdateField({ description: md })}
+                onUpdate={(md) => {
+                  descriptionDraft.save(md);
+                  handleUpdateField({ description: md });
+                }}
                 onUploadFile={handleDescriptionUpload}
                 debounceMs={1500}
                 currentIssueId={id}
@@ -2689,6 +2710,8 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
                 bar instead of a separate banner. wakeupIssueId is the issue UUID (issue.id),
                 not the route identifier (id): the wakeups list endpoint requires a UUID. */}
             {!isChat && <AgentLiveCard key={id} issueId={id} wakeupIssueId={issue?.id} />}
+            {/* CEREBRO-PATCH(rounds-held-reply-bar): FIR-3114 — a member reply held for a batch Round renders a wakeup-style banner here. */}
+            {!isChat && issue?.id && <RoundHeldReplyBar issueId={issue.id} />}
 
             {/* CEREBRO-PATCH(issue-detail-tabs-anchor): JEH-1518 — scroll anchor for NavOverlayButton tab-section scroll */}
             <div ref={tabsRef} />

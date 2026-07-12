@@ -74,6 +74,10 @@ type TaskService struct {
 	// completion (not dependent on the agent calling rename_session). Set from
 	// router.go; nil-safe.
 	WorkflowSessionStamper WorkflowSessionStamper
+	// CEREBRO-PATCH(workflow-loop-advancer): FIR-3052 — advance Plan -> Build on
+	// plan-task completion so the loop moves without a manual status flip. Set
+	// from router.go; nil-safe.
+	WorkflowLoopAdvancer WorkflowLoopAdvancer
 
 	analyticsContextMu    sync.Mutex
 	analyticsContextCache map[string]analytics.TaskContext
@@ -90,7 +94,8 @@ type TaskService struct {
 type IssueWorkflowActivator interface {
 	ActivateForIssue(
 		ctx context.Context,
-		workspaceID, workflowID, issueID, creatorID pgtype.UUID,
+		// CEREBRO-PATCH(cerebro-workflow-agent-requester): preserve the human requester across quick-create activation.
+		workspaceID, workflowID, issueID, creatorID, requesterID pgtype.UUID,
 		createdByType string,
 	) error
 }
@@ -104,6 +109,13 @@ type TaskWakeupNotifier interface {
 // upstream service package free of a cerebro import.
 type WorkflowSessionStamper interface {
 	StampOnComplete(ctx context.Context, task db.AgentTaskQueue)
+}
+
+// CEREBRO-PATCH(workflow-loop-advancer-iface): FIR-3052 step-hook seam.
+// Implemented by cerebro/workflows.LoopPhaseAdvancer; the interface keeps the
+// upstream service package free of a cerebro import.
+type WorkflowLoopAdvancer interface {
+	AdvanceOnComplete(ctx context.Context, task db.AgentTaskQueue)
 }
 
 // CEREBRO-PATCH(auto-pause-invoker): cerebro auto-pause invoker seam.
@@ -1763,6 +1775,10 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 	if s.WorkflowSessionStamper != nil {
 		s.WorkflowSessionStamper.StampOnComplete(ctx, task)
 	}
+	// CEREBRO-PATCH(workflow-loop-advancer-call): FIR-3052 — advance Plan -> Build.
+	if s.WorkflowLoopAdvancer != nil {
+		s.WorkflowLoopAdvancer.AdvanceOnComplete(ctx, task)
+	}
 
 	// For chat tasks, broadcast chat:done. The assistant reply, the
 	// responded_at marker, and the resume pointer were all persisted
@@ -2951,7 +2967,7 @@ func (s *TaskService) notifyQuickCreateCompleted(ctx context.Context, task db.Ag
 		if workflowID, perr := util.ParseUUID(qc.WorkflowID); perr != nil {
 			slog.Warn("quick-create completion: invalid workflow id",
 				"task_id", util.UUIDToString(task.ID), "workflow_id", qc.WorkflowID, "error", perr)
-		} else if aerr := s.IssueWorkflowActivator.ActivateForIssue(ctx, workspaceID, workflowID, issue.ID, requesterID, "member"); aerr != nil {
+		} else if aerr := s.IssueWorkflowActivator.ActivateForIssue(ctx, workspaceID, workflowID, issue.ID, requesterID, requesterID, "member"); aerr != nil {
 			slog.Warn("quick-create completion: workflow activation failed",
 				"task_id", util.UUIDToString(task.ID),
 				"issue_id", util.UUIDToString(issue.ID),

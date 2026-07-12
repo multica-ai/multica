@@ -202,8 +202,8 @@ func runAttachmentText(cmd *cobra.Command, args []string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
-	// CEREBRO-PATCH(attachment-cli-text): expose /content directly for agent workflows.
-	text, _, err := client.GetText(ctx, "/api/attachments/"+args[0]+"/content")
+	// CEREBRO-PATCH(attachment-agent-text): CLI extraction supports Office while browser preview stays PDF-only.
+	text, _, err := client.GetText(ctx, "/api/attachments/"+args[0]+"/content?agent_read=1")
 	if err != nil {
 		return fmt.Errorf("get attachment text: %w", err)
 	}

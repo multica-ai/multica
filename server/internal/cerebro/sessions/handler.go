@@ -58,11 +58,12 @@ type handoffBrief struct {
 // thread it is the metadata for; the frontend matches it to the thread and reads
 // open/closed from that thread root's resolved_at (there is no status field).
 type sessionResponse struct {
-	ID            string        `json:"id"`
-	IssueID       string        `json:"issue_id"`
-	RootCommentID *string       `json:"root_comment_id"`
-	Position      int32         `json:"position"`
-	Name          string        `json:"name"`
+	ID            string  `json:"id"`
+	IssueID       string  `json:"issue_id"`
+	RootCommentID *string `json:"root_comment_id"`
+	Position      int32   `json:"position"`
+	Name          string  `json:"name"`
+	Mode          string  `json:"mode"`
 	// Phase is the workflow phase this session belongs to when an Issue workflow
 	// started it — "plan" / "build" / "review" — so the UI badges it next to
 	// Open/Resolved. Null for an ordinary, non-workflow session (FIR-2283
@@ -113,6 +114,7 @@ type updateRequest struct {
 	// / "review"), so the workflow engine (via rename_session) can name AND badge
 	// a session in one call. Omitted (nil) leaves the existing phase untouched.
 	Phase *string `json:"phase"`
+	Mode  *string `json:"mode"`
 }
 
 func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
@@ -121,7 +123,7 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rows, err := h.pool.Query(r.Context(), `
-		SELECT id, issue_id, root_comment_id, position, name, phase, handoff, created_at, updated_at
+		SELECT id, issue_id, root_comment_id, position, name, mode, phase, handoff, created_at, updated_at
 		FROM cerebro_session
 		WHERE issue_id = $1
 		ORDER BY created_at ASC, id ASC`, issue.ID)
@@ -188,7 +190,12 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	session, err := upsertThreadSession(r.Context(), tx, issue.ID, rootID, name, normalizePhase(req.Phase), normalizeHandoff(req.Handoff))
+	mode, valid := normalizeMode(req.Mode)
+	if !valid {
+		writeError(w, http.StatusBadRequest, "mode must be default or plan")
+		return
+	}
+	session, err := upsertThreadSession(r.Context(), tx, issue.ID, rootID, name, mode, normalizePhase(req.Phase), normalizeHandoff(req.Handoff))
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to update session")
 		return
@@ -257,7 +264,7 @@ func (h *Handler) StartFresh(w http.ResponseWriter, r *http.Request) {
 	// Upsert the metadata row for this thread, preserving any name a human or an
 	// earlier agent set unless this brief carries a fresh one.
 	name := sessionNameFromHandoff(handoff, agentAuthored)
-	session, err := upsertThreadSession(r.Context(), tx, issue.ID, rootID, name, nil, handoff)
+	session, err := upsertThreadSession(r.Context(), tx, issue.ID, rootID, name, nil, nil, handoff)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to write handoff")
 		return
@@ -460,7 +467,7 @@ func (h *Handler) generateHandoff(ctx context.Context, tx pgx.Tx, issueID, rootI
 // optional workflow phase (nil = leave any existing phase untouched; a non-nil
 // value — including a pointer to "" to clear — replaces it), so naming a session
 // and badging its phase happen in the same upsert (FIR-2283 followup point 2).
-func upsertThreadSession(ctx context.Context, tx pgx.Tx, issueID, rootID pgtype.UUID, name string, phase *string, handoff *handoffBrief) (sessionResponse, error) {
+func upsertThreadSession(ctx context.Context, tx pgx.Tx, issueID, rootID pgtype.UUID, name string, mode, phase *string, handoff *handoffBrief) (sessionResponse, error) {
 	raw, err := marshalHandoff(handoff)
 	if err != nil {
 		return sessionResponse{}, err
@@ -481,18 +488,19 @@ func upsertThreadSession(ctx context.Context, tx pgx.Tx, issueID, rootID pgtype.
 			UPDATE cerebro_session
 			SET name = $1,
 			    handoff = COALESCE($2::jsonb, handoff),
-			    phase = CASE WHEN $5::bool THEN $6 ELSE phase END,
+			    mode = CASE WHEN $5::bool THEN $6 ELSE mode END,
+			    phase = CASE WHEN $7::bool THEN $8 ELSE phase END,
 			    updated_at = now()
 			WHERE id = $3 AND issue_id = $4
-			RETURNING id, issue_id, root_comment_id, position, name, phase, handoff, created_at, updated_at`,
-			finalName, raw, existingID, issueID, phase != nil, derefText(phase))
+			RETURNING id, issue_id, root_comment_id, position, name, mode, phase, handoff, created_at, updated_at`,
+			finalName, raw, existingID, issueID, mode != nil, derefText(mode), phase != nil, derefText(phase))
 		return scanSession(row)
 	case pgx.ErrNoRows:
 		row := tx.QueryRow(ctx, `
-			INSERT INTO cerebro_session (issue_id, root_comment_id, position, name, phase, handoff)
-			VALUES ($1, $2, 0, $3, $4, $5::jsonb)
-			RETURNING id, issue_id, root_comment_id, position, name, phase, handoff, created_at, updated_at`,
-			issueID, rootID, name, phase, raw)
+			INSERT INTO cerebro_session (issue_id, root_comment_id, position, name, mode, phase, handoff)
+			VALUES ($1, $2, 0, $3, COALESCE($4, 'default'), $5, $6::jsonb)
+			RETURNING id, issue_id, root_comment_id, position, name, mode, phase, handoff, created_at, updated_at`,
+			issueID, rootID, name, mode, phase, raw)
 		return scanSession(row)
 	default:
 		return sessionResponse{}, err
@@ -607,7 +615,7 @@ func scanSession(row scanner) (sessionResponse, error) {
 	var id, issueID, rootID pgtype.UUID
 	var raw []byte
 	out := sessionResponse{}
-	if err := row.Scan(&id, &issueID, &rootID, &out.Position, &out.Name, &out.Phase, &raw, &out.CreatedAt, &out.UpdatedAt); err != nil {
+	if err := row.Scan(&id, &issueID, &rootID, &out.Position, &out.Name, &out.Mode, &out.Phase, &raw, &out.CreatedAt, &out.UpdatedAt); err != nil {
 		return sessionResponse{}, err
 	}
 	out.ID = util.UUIDToString(id)
@@ -629,6 +637,17 @@ func scanSession(row scanner) (sessionResponse, error) {
 		}
 	}
 	return out, nil
+}
+
+func normalizeMode(in *string) (*string, bool) {
+	if in == nil {
+		return nil, true
+	}
+	v := strings.ToLower(strings.TrimSpace(*in))
+	if v != "default" && v != "plan" {
+		return nil, false
+	}
+	return &v, true
 }
 
 func marshalHandoff(handoff *handoffBrief) ([]byte, error) {

@@ -125,6 +125,10 @@
       "gate": "self_only"
     },
     {
+      "id": "POST /api/cerebro/rounds/{roundId}/dismiss",
+      "gate": "self_only"
+    },
+    {
       "id": "POST /api/cerebro/rounds/{roundId}/start",
       "gate": "self_only"
     },
@@ -1827,6 +1831,10 @@
       "gate": "via:POST /api/cerebro/wakeups/{id}/cancel"
     },
     {
+      "id": "activate_workflow",
+      "gate": "via:POST /api/cerebro/workflows/{id}/activate"
+    },
+    {
       "id": "complete_work",
       "gate": "via:PUT /api/work-sessions/{id}/complete"
     },
@@ -1843,6 +1851,10 @@
       "gate": "via:POST /api/workspaces/{id}/connections"
     },
     {
+      "id": "create_workflow",
+      "gate": "via:POST /api/cerebro/workflows"
+    },
+    {
       "id": "create_group",
       "gate": "via:POST /api/workspaces/{id}/groups"
     },
@@ -1851,20 +1863,44 @@
       "gate": "via:DELETE /api/workspaces/{id}/connections/{connId}"
     },
     {
+      "id": "delete_workflow",
+      "gate": "via:DELETE /api/cerebro/workflows/{id}"
+    },
+    {
       "id": "get_connection",
       "exempt": "read-only — wraps GET /api/workspaces/{id}/connections/{connId}"
+    },
+    {
+      "id": "get_active_workflow",
+      "exempt": "read-only — wraps GET /api/cerebro/workflows/for-issue/{issueId}"
+    },
+    {
+      "id": "get_workflow",
+      "exempt": "read-only — wraps GET /api/cerebro/workflows/{id}"
     },
     {
       "id": "list_connections",
       "exempt": "read-only — wraps GET /api/workspaces/{id}/connections"
     },
     {
+      "id": "list_workflows",
+      "exempt": "read-only — wraps GET /api/cerebro/workflows"
+    },
+    {
       "id": "test_connection",
       "gate": "via:POST /api/workspaces/{id}/connections/test"
     },
     {
+      "id": "toggle_workflow",
+      "gate": "via:POST /api/cerebro/workflows/{id}/toggle"
+    },
+    {
       "id": "update_connection",
       "gate": "via:PUT /api/workspaces/{id}/connections/{connId}"
+    },
+    {
+      "id": "update_workflow",
+      "gate": "via:PUT /api/cerebro/workflows/{id}"
     },
     {
       "id": "create_issue",
@@ -2954,27 +2990,31 @@
     },
     {
       "id": "sprint assign",
-      "gate": "via:PUT /api/issues/{id}"
+      "gate": "via:PUT /api/cerebro/issues/{id}/sprint + PUT /api/issues/{id} (legacy fallback)"
     },
     {
       "id": "sprint create",
-      "gate": "via:POST /api/projects/ + PUT /api/projects/{id}/parent"
+      "gate": "via:POST /api/cerebro/projects/{id}/sprints + POST /api/projects/ + PUT /api/projects/{id}/parent (legacy fallback)"
     },
     {
       "id": "sprint delete",
-      "gate": "via:DELETE /api/projects/{id}/"
+      "gate": "via:DELETE /api/cerebro/sprints/{id} + DELETE /api/projects/{id}/ (legacy fallback)"
     },
     {
       "id": "sprint get",
-      "exempt": "read-only - wraps GET /api/projects/{id}"
+      "exempt": "read-only - wraps GET /api/cerebro/sprints/{id} (legacy fallback: GET /api/projects/{id})"
+    },
+    {
+      "id": "sprint issues",
+      "exempt": "read-only - wraps GET /api/cerebro/sprints/{id}/issues"
     },
     {
       "id": "sprint list",
-      "exempt": "read-only - wraps GET /api/projects/tree"
+      "exempt": "read-only - wraps GET /api/cerebro/sprints (legacy fallback: GET /api/projects/tree)"
     },
     {
       "id": "sprint update",
-      "gate": "via:PUT /api/projects/{id}/"
+      "gate": "via:PUT /api/cerebro/sprints/{id} + PUT /api/projects/{id}/ (legacy fallback)"
     },
     {
       "id": "squad activity",
@@ -3091,6 +3131,34 @@
     {
       "id": "workflow list",
       "exempt": "read-only — wraps GET /api/cerebro/workflows"
+    },
+    {
+      "id": "workflow activate",
+      "gate": "via:POST /api/cerebro/workflows/{id}/activate"
+    },
+    {
+      "id": "workflow create",
+      "gate": "via:POST /api/cerebro/workflows"
+    },
+    {
+      "id": "workflow delete",
+      "gate": "via:DELETE /api/cerebro/workflows/{id}"
+    },
+    {
+      "id": "workflow for-issue",
+      "exempt": "read-only — wraps GET /api/cerebro/workflows/for-issue/{issueId}"
+    },
+    {
+      "id": "workflow get",
+      "exempt": "read-only — wraps GET /api/cerebro/workflows/{id}"
+    },
+    {
+      "id": "workflow toggle",
+      "gate": "via:POST /api/cerebro/workflows/{id}/toggle"
+    },
+    {
+      "id": "workflow update",
+      "gate": "via:PUT /api/cerebro/workflows/{id}"
     },
     {
       "id": "workspace get",

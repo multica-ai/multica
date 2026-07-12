@@ -64,6 +64,7 @@ type TaskContextForEnv struct {
 	IssueID          string
 	TriggerCommentID string // comment that triggered this task (empty for on_assign)
 	TriggerThreadID  string // root comment ID for the triggering thread; falls back to TriggerCommentID when empty
+	PlanMode         bool   // CEREBRO-PATCH(session-plan-mode): true when this issue thread is restricted to planning.
 	// CEREBRO-PATCH(wakeup-system-activity): wakeup tasks are platform activity, not synthetic comments.
 	WakeupPrompt            string // non-empty when the platform re-invoked the agent from a wakeup
 	WakeupTriggerType       string // time, issue_status, or github_ci for wakeup tasks

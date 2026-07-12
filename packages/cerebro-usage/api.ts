@@ -23,7 +23,13 @@ const ExplorerSchema = z.object({ summary:ExplorerSummarySchema, facets:z.record
 export type UsageExplorer = z.infer<typeof ExplorerSchema>;
 export const EMPTY_EXPLORER: UsageExplorer = { summary:{runs:0,tokens:0,actual_cost_cents:0,calculated_cost_runs:0,missing_cost_runs:0}, facets:{}, runs:[], total:0, savings:[] };
 export function parseUsageExplorer(raw: unknown): UsageExplorer { return parseWithFallback(raw, ExplorerSchema, EMPTY_EXPLORER, { endpoint:"/api/dashboard/usage/explorer" }); }
-export async function fetchUsageExplorer(query:string):Promise<UsageExplorer>{ const path=`/api/dashboard/usage/explorer?${query}`; return parseUsageExplorer(await api.cerebroRequest<unknown>(path)); }
+export async function fetchUsageExplorer(query:string):Promise<UsageExplorer>{
+  const params = new URLSearchParams(query);
+  if (params.get("grain") === "day") params.set("grain", "daily");
+  if (params.get("grain") === "week") params.set("grain", "weekly");
+  const path=`/api/dashboard/usage/explorer?${params}`;
+  return parseUsageExplorer(await api.cerebroRequest<unknown>(path));
+}
 
 export async function fetchSkillUsage(
   days: number,

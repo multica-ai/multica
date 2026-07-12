@@ -287,6 +287,8 @@
     "cmdf_toast_title": "页面内查找仅覆盖可见区",
     "cmdf_toast_description": "评论列表已虚拟滚动,⌘F 找不到视口外的评论。完整应用内搜索即将推出。",
     "update_failed": "更新 issue 失败",
+    "_comment_session_expired": "CEREBRO-PATCH(description-drafts): FIR-2648",
+    "session_expired_toast": "编辑过程中会话已过期。你输入的内容已保存在本设备上——刷新页面并重新登录即可恢复。",
     "link_copied": "已复制链接",
     "link_copy_failed": "复制链接失败",
     "workdir_path_copied": "已复制本地 workdir 路径",

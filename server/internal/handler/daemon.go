@@ -1094,6 +1094,7 @@ func (h *Handler) processHeartbeat(ctx context.Context, rt db.AgentRuntime, supp
 		Status:    "ok",
 	}
 	ack.CerebroAccountID = h.recordHeartbeatAccount(ctx, rt, account)
+	h.maybeScheduleRuntimeUpdate(ctx, rt) // CEREBRO-PATCH(runtime-online-auto-update): FIR-3064 queue fork CLI updates on heartbeat.
 
 	probeUpdateCtx, cancelProbeUpdate := context.WithTimeout(ctx, heartbeatHasPendingTimeout)
 	hasUpdate, probeUpdateErr := h.UpdateStore.HasPending(probeUpdateCtx, runtimeID)
@@ -1613,6 +1614,13 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 				resp.TriggerThreadID = uuidToString(comment.ID)
 				if comment.ParentID.Valid {
 					resp.TriggerThreadID = uuidToString(comment.ParentID)
+				}
+				var sessionMode string // CEREBRO-PATCH(session-plan-mode): resolve mode from the triggering thread.
+				if err := h.DB.QueryRow(r.Context(), `
+					SELECT mode FROM cerebro_session
+					WHERE issue_id = $1 AND root_comment_id = $2`,
+					comment.IssueID, parseUUID(resp.TriggerThreadID)).Scan(&sessionMode); err == nil {
+					resp.PlanMode = sessionMode == "plan"
 				}
 				resp.TriggerAuthorType = comment.AuthorType
 				// The triggering comment's author is the task initiator — the

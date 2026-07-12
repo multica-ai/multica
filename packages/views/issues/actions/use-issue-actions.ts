@@ -3,6 +3,8 @@
 import { useCallback } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
+// CEREBRO-PATCH(description-drafts): FIR-2648 — distinguish a session-expiry save failure.
+import { ApiError } from "@multica/core/api";
 import type { Issue, UpdateIssueRequest } from "@multica/core/types";
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
@@ -88,12 +90,23 @@ export function useIssueActions(issue: Issue | null): UseIssueActionsResult {
       updateIssue.mutate(
         { id: issueId, ...updates },
         {
-          onError: (err) =>
+          onError: (err) => {
+            // CEREBRO-PATCH(description-drafts): FIR-2648 — a 401 here usually
+            // means the Cloudflare Access session expired mid-edit; tell the
+            // user explicitly instead of the generic "failed to update" toast,
+            // since their unsaved description text is recoverable from the
+            // local draft (see useDescriptionDraft) but a comment/title edit
+            // is not.
+            if (err instanceof ApiError && err.status === 401) {
+              toast.error(t(($) => $.detail.session_expired_toast));
+              return;
+            }
             toast.error(
               err instanceof Error && err.message
                 ? err.message
                 : t(($) => $.detail.update_failed),
-            ),
+            );
+          },
         },
       );
     },

@@ -274,7 +274,7 @@ func (m *multicaMock) handle(w http.ResponseWriter, r *http.Request) {
 			"download_url": "/api/attachments/att-1/download",
 		}})
 
-	case r.Method == http.MethodGet && r.URL.Path == "/api/attachments/att-1/content":
+	case r.Method == http.MethodGet && r.URL.Path == "/api/attachments/att-1/content" && r.URL.Query().Get("agent_read") == "1": // CEREBRO-PATCH(attachment-agent-text): local MCP must opt into agent extraction.
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		_, _ = w.Write([]byte("sku,qty\nABC,2\n"))
 

@@ -197,6 +197,7 @@ make start-worktree     # Start using .env.worktree
 - New global (pre-workspace) routes MUST use a single word (`/login`, `/inbox`) or a `/{noun}/{verb}` pair (`/workspaces/new`). NEVER add hyphenated word-group root routes (`/new-workspace`, `/create-team`) — they collide with common user workspace names and force endless reserved-slug audits. Reserving the noun (`workspaces`) automatically protects the entire `/workspaces/*` subtree.
 - The reserved-slug list lives in **one** place: `server/internal/handler/reserved_slugs.json`. The Go side embeds the JSON; `packages/core/paths/reserved-slugs.ts` is generated from it by `pnpm generate:reserved-slugs`. Edit the JSON, run the generator, commit both. CI re-runs the generator and fails on any drift, so a stale TS file cannot land.
 - When you change a CLI command or flag, an API request/response field, or product behavior that a built-in skill documents (`server/internal/service/builtin_skills/*`), update that skill's `SKILL.md` **and** its `references/*-source-map.md` in the same PR. The built-in skills are source-traced contracts shipped to agents — if the code moves and the skill doesn't, it silently teaches stale behavior.
+- Every new agent-facing capability must be delivered as a Multica tool with one shared contract that is executable through both local runtimes (`multica mcp serve`) and the Firtal Gateway registry. Runtime-specific binaries may support the server implementation, but they must not be a runtime prerequisite; delivery requires automated coverage of both tool surfaces.
 
 ### API Response Compatibility
 
@@ -506,6 +507,8 @@ Logs land in `.deploy/logs/deploy-latest.log` on the runner.
 ## CLI Release (binary distribution)
 
 A CLI release publishes the `multica` binary to GitHub Releases + Homebrew tap. It is independent of the prod deploy above. Cut one whenever the distributed CLI should be brought in sync with what prod is running.
+
+For the Cerebro fork, every desktop and CLI update coordinate must resolve through the Firtal-owned public distribution channel. `server/internal/cerebro/forkdist` is the canonical server/CLI configuration; `apps/desktop/src/main/cerebro-distribution.ts` is its Electron boundary counterpart. Never introduce `multica-ai/multica` into an update or publish path; `scripts/cerebro/check-distribution-boundary.sh` enforces this in CI.
 
 1. Create a tag on `main`: `git tag v0.x.x`
 2. Push the tag: `git push origin v0.x.x`

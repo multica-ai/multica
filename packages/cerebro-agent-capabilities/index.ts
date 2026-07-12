@@ -1,4 +1,3 @@
-export { agentCapabilitiesSettingsTab } from "./views";
 // TECH-3642 — per-agent capabilities card: client + detail-tab factory.
 export {
   getAgentCapabilities,

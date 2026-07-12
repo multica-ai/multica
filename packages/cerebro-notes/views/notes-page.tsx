@@ -110,7 +110,7 @@ import { useCommentAnchors } from "./use-comment-anchors";
 import { useFindHighlight } from "./use-find-highlight";
 import { useAuthorCodeStamper } from "./use-author-codes";
 import { LineAuthorsGutter } from "./line-authors-gutter";
-import { useLineAuthorsPull } from "./use-line-authors-pull";
+import { PULL_WIDTH, useLineAuthorsPull } from "./use-line-authors-pull";
 import {
   DRAFT_ANCHOR_ID,
   type CommentAnchor,
@@ -1015,10 +1015,10 @@ export function NoteEditor({
   );
   const showGutter = lineAuthorsEnabled && showLineAuthors;
   const editorWrapRef = React.useRef<HTMLDivElement>(null);
-  // FIR-2810: temporary reveal — drag the left-edge handle (desktop) or touch
-  // and pull right on the body (mobile). Released past the threshold it stays
-  // open; a small pull back to the left closes it. Disabled while the
-  // permanent toggle already shows it.
+  // FIR-2810: temporary reveal — drag the left-edge handle (desktop) or
+  // pull the body right and HOLD (mobile) to latch the gutter open; a click
+  // on the revealed field closes it. Disabled while the permanent toggle
+  // already shows it.
   const contentSlideRef = React.useRef<HTMLDivElement>(null);
   const gutterBoxRef = React.useRef<HTMLDivElement>(null);
   const pull = useLineAuthorsPull({
@@ -1423,8 +1423,9 @@ export function NoteEditor({
               which measures the rendered blocks inside it. With the gutter on,
               the body shifts right to make room for the attribution column.
               With it off, a click-and-drag on the left-edge handle (desktop)
-              or a touch-and-pull right on the body (mobile) slides the body
-              aside; past the threshold it latches open until pulled back. */}
+              or a pull-right-and-hold on the body (mobile) slides the body
+              aside and latches the gutter open; a click on the revealed
+              field closes it. */}
           <div
             ref={editorWrapRef}
             {...pull.wrapperProps}
@@ -1434,10 +1435,20 @@ export function NoteEditor({
             )}
           >
           {gutterMounted && (
+            // The temporary pull reveals a narrower, left-aligned strip —
+            // just wide enough for the author codes (Jesper, 2026-07-11
+            // round 4: only far enough to see who edited, text left-
+            // aligned). A click on the revealed field closes it.
             <div
               ref={gutterBoxRef}
-              className="absolute inset-y-0 left-0 w-24"
-              style={showGutter ? undefined : { opacity: 0 }}
+              {...pull.gutterProps}
+              className={cn(
+                "absolute inset-y-0 left-0",
+                showGutter && "w-24",
+              )}
+              style={
+                showGutter ? undefined : { opacity: 0, width: PULL_WIDTH }
+              }
             >
               <LineAuthorsGutter
                 contentRef={editorWrapRef}
@@ -1445,6 +1456,7 @@ export function NoteEditor({
                 attrs={lineAttrs}
                 membersById={membersById}
                 version={gutterVersion}
+                align={showGutter ? "right" : "left"}
               />
             </div>
           )}

@@ -17,16 +17,33 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	attachmenttext "github.com/multica-ai/multica/packages/cerebro-attachment-text"
 	"github.com/multica-ai/multica/server/internal/auth"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
+
+type handlerAttachmentRunner struct{}
+
+func (handlerAttachmentRunner) Run(_ context.Context, dir, name string, args ...string) ([]byte, error) {
+	switch name {
+	case "pdftoppm":
+		return nil, os.WriteFile(filepath.Join(dir, "page-1.png"), []byte("png"), 0o600)
+	case "tesseract":
+		return []byte("Secret code: ORANGE-7319"), nil
+	case "antiword":
+		return []byte("Secret code: COBALT-4826"), nil
+	}
+	return nil, nil
+}
 
 // createHandlerTestChatSession seeds a chat_session row owned by testUserID
 // targeting the given agent and returns the session UUID. Cleanup runs after
@@ -826,7 +843,7 @@ func TestGetAttachmentContent_PDFText(t *testing.T) { // CEREBRO-PATCH(pdf-attac
 	}
 }
 
-func TestGetAttachmentContent_PDFWithoutText(t *testing.T) {
+func TestGetAttachmentContent_PDFWithoutTextAndNoOCRBinary(t *testing.T) {
 	store := &mockStorage{}
 	origStorage := testHandler.Storage
 	testHandler.Storage = store
@@ -839,8 +856,65 @@ func TestGetAttachmentContent_PDFWithoutText(t *testing.T) {
 	if w.Code != http.StatusUnsupportedMediaType {
 		t.Fatalf("status = %d, want 415; body=%s", w.Code, w.Body.String())
 	}
-	if !strings.Contains(w.Body.String(), "PDF contains no extractable text") {
-		t.Fatalf("body = %q, want no-text explanation", w.Body.String())
+	if !strings.Contains(w.Body.String(), "attachment could not be converted to text") {
+		t.Fatalf("body = %q, want conversion explanation", w.Body.String())
+	}
+}
+
+func TestGetAttachmentContent_PortableRuntimePDFExtraction(t *testing.T) { // CEREBRO-PATCH(attachment-text-runtime-tool): the UI content proxy extracts PDFs only; Office extraction belongs to read_attachment.
+	originalRunner := attachmenttext.DefaultRunner
+	attachmenttext.DefaultRunner = handlerAttachmentRunner{}
+	defer func() { attachmenttext.DefaultRunner = originalRunner }()
+
+	store := &mockStorage{}
+	originalStorage := testHandler.Storage
+	testHandler.Storage = store
+	defer func() { testHandler.Storage = originalStorage }()
+
+	id := seedPreviewAttachment(t, store, "scanned-ocr-test.pdf", "scanned-ocr-test.pdf", "application/pdf", tinyBlankPDF())
+	req, w := newPreviewRequest(t, id, testWorkspaceID)
+	testHandler.GetAttachmentContent(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", w.Code, w.Body.String())
+	}
+	if got := w.Body.String(); !strings.Contains(got, "ORANGE-7319") {
+		t.Fatalf("body = %q, want ORANGE-7319", got)
+	}
+}
+
+func TestGetAttachmentContent_LegacyOfficeRejected(t *testing.T) {
+	store := &mockStorage{}
+	originalStorage := testHandler.Storage
+	testHandler.Storage = store
+	defer func() { testHandler.Storage = originalStorage }()
+
+	id := seedPreviewAttachment(t, store, "legacy-source.doc", "legacy-source.doc", "application/octet-stream", []byte("legacy-doc"))
+	req, w := newPreviewRequest(t, id, testWorkspaceID)
+	testHandler.GetAttachmentContent(w, req)
+	if w.Code != http.StatusUnsupportedMediaType {
+		t.Fatalf("status = %d, want 415; body=%s", w.Code, w.Body.String())
+	}
+}
+
+func TestGetAttachmentContent_AgentReadExtractsLegacyOffice(t *testing.T) { // CEREBRO-PATCH(attachment-agent-text): agent reads support Office without broadening browser preview.
+	originalRunner := attachmenttext.DefaultRunner
+	attachmenttext.DefaultRunner = handlerAttachmentRunner{}
+	defer func() { attachmenttext.DefaultRunner = originalRunner }()
+
+	store := &mockStorage{}
+	originalStorage := testHandler.Storage
+	testHandler.Storage = store
+	defer func() { testHandler.Storage = originalStorage }()
+
+	id := seedPreviewAttachment(t, store, "legacy-source.doc", "legacy-source.doc", "application/octet-stream", []byte("legacy-doc"))
+	req, w := newPreviewRequest(t, id, testWorkspaceID)
+	req.URL.RawQuery = "agent_read=1"
+	testHandler.GetAttachmentContent(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", w.Code, w.Body.String())
+	}
+	if got := w.Body.String(); !strings.Contains(got, "COBALT-4826") {
+		t.Fatalf("body = %q, want COBALT-4826", got)
 	}
 }
 

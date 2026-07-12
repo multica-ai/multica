@@ -137,4 +137,35 @@ describe("SkillChangesReviewSheet", () => {
       expect(mockReview).toHaveBeenCalledWith("cr-a", { action: "approve" }),
     );
   });
+
+  it("lets the reviewer edit the proposed content and sends the edit on approve", async () => {
+    renderSheet([change({ id: "cr-a", skill_id: "s1", proposed_content: "new body" })]);
+    fireEvent.click(screen.getByText("Tighten alpha"));
+    await waitFor(() => expect(mockGetSkill).toHaveBeenCalledWith("s1"));
+
+    fireEvent.click(await screen.findByRole("button", { name: /^edit$/i }));
+    const textarea = await screen.findByPlaceholderText("Edit the proposed content…");
+    fireEvent.change(textarea, { target: { value: "new body, tightened further" } });
+
+    fireEvent.click(screen.getByText("Approve"));
+    await waitFor(() =>
+      expect(mockReview).toHaveBeenCalledWith("cr-a", {
+        action: "approve",
+        edited_content: "new body, tightened further",
+      }),
+    );
+  });
+
+  it("does not send an edit when the reviewer opens edit mode but leaves the text unchanged", async () => {
+    renderSheet([change({ id: "cr-a", skill_id: "s1", proposed_content: "new body" })]);
+    fireEvent.click(screen.getByText("Tighten alpha"));
+    await waitFor(() => expect(mockGetSkill).toHaveBeenCalledWith("s1"));
+
+    fireEvent.click(await screen.findByRole("button", { name: /^edit$/i }));
+
+    fireEvent.click(screen.getByText("Approve"));
+    await waitFor(() =>
+      expect(mockReview).toHaveBeenCalledWith("cr-a", { action: "approve" }),
+    );
+  });
 });

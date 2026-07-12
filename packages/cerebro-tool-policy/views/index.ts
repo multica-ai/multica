@@ -47,3 +47,9 @@ export {
   CerebroTestAsUserMenuItem,
   CerebroTestAsUserDialogHost,
 } from "./cerebro-test-as-user-menu";
+export { PermissionDetailPage } from "./permission-detail-page";
+export {
+  getPermissionHolders,
+  type PermissionHolder,
+  type PermissionHolders,
+} from "../api";

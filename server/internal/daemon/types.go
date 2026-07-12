@@ -66,6 +66,7 @@ type Task struct {
 	PriorWorkDir            string                `json:"prior_work_dir,omitempty"`             // work_dir from a previous task on this issue
 	TriggerCommentID        string                `json:"trigger_comment_id,omitempty"`         // comment that triggered this task
 	TriggerThreadID         string                `json:"trigger_thread_id,omitempty"`          // root comment ID for the triggering thread; falls back to trigger_comment_id on old servers
+	PlanMode                bool                  `json:"plan_mode,omitempty"`                  // CEREBRO-PATCH(session-plan-mode): fork-only session execution mode.
 	TriggerCommentContent   string                `json:"trigger_comment_content,omitempty"`    // content of the triggering comment
 	TriggerCommentCreatedAt string                `json:"trigger_comment_created_at,omitempty"` // RFC3339 timestamp for the triggering comment
 	HandoffNote             string                `json:"handoff_note,omitempty"`

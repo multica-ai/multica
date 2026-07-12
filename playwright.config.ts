@@ -22,7 +22,7 @@ export default defineConfig({
     // to keep the rest of the suite Chromium-only.
     {
       name: "webkit-mobile",
-      testMatch: /message-overflow-mobile\.spec\.ts$/,
+      testMatch: /(message-overflow-mobile|rounds-settings-mobile)\.spec\.ts$/,
       use: { browserName: "webkit" },
     },
   ],

@@ -15,6 +15,7 @@
   "dependencies": {
     "@multica/cerebro-agentvault": "workspace:*",
     "@multica/cerebro-feature-flags": "workspace:*",
+    "@multica/cerebro-web-fetch-policy": "workspace:*",
     "@multica/core": "workspace:*",
     "@multica/ui": "workspace:*",
     "@tanstack/react-query": "catalog:",

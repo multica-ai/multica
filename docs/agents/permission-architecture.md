@@ -70,7 +70,7 @@ The unified tool-policy chain is the model we want **everything** to converge on
   (`validSetting` + DB CHECK `cerebro_tool_policy_disable_workspace_only`, migration
   `9122`); workspace-layer writes already require owner/admin, so Disable needs no new
   write gate. UI: only the workspace-layer decision control offers it.
-- **Member-override resolver (FIR-2175, flag `cerebro_member_override`, default OFF):**
+- **Member-override resolver (FIR-2175/FIR-3062, flag `cerebro_member_override`, default ON):**
   `toolpolicy.ResolveMemberOverride` (pure, `chain.go:245`) is a two-stage variant — Stage A
   resolves the human layers `Workspace › Group › User` by **specificity** (most specific wins,
   so a member's own Allow can OPEN what their group denied — it can LOOSEN, not only tighten),
@@ -154,6 +154,15 @@ is the traceability tripwire.
 categories. It is surfaced in the tool-policy table **only when the `cerebro_platform_capabilities`
 feature flag is on (default OFF)** and the server gate `toolpolicy.PlatformCapabilitiesEnabled`
 passes — so today it is an **inventory, not an enforcement point**. Wiring it on is part of FIR-1496.
+
+**Light agent-start surface (FIR-3091 slice 4).** The four "start someone else's agent"
+capabilities — `trigger_other_agent`, `rerun_issue`, `schedule_agent_wakeup`, `trigger_autopilot`
+(marked `Surfaced` in the catalog, see `platformcatalog.SurfacedKeys`) — also surface on their own,
+behind the lighter `cerebro_agent_trigger_permissions` flag (gate `toolpolicy.AgentStartCapabilitiesEnabled`,
+`TableQuery.IncludeAgentStart`), **without** opening the rest of the catalog. This makes that family
+visible/settable in Permissions next to the friendly Agent-start tab. Enforcement is unchanged: only
+`trigger_other_agent` is enforced through the tool-policy chain (`mentiongate`, FIR-2409); the other
+three surface for visibility and are not yet an enforcement point.
 
 | Category | Capabilities (`tool_key`) |
 |---|---|

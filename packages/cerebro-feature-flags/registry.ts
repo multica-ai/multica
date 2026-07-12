@@ -268,6 +268,12 @@ export type CerebroFlagKey =
   | "cerebro_comment_target_guard_wakeup_exempt"
   // FIR-2409: friendly "Agent-start" permission tab — who may trigger an agent they don't own.
   | "cerebro_agent_trigger_permissions"
+  // FIR-3091 slice 5: surface the web_fetch host allow/deny list inside the unified
+  // Permissions screen instead of its own separate "Web fetch" settings tab.
+  | "cerebro_web_fetch_permissions"
+  // FIR-3091 punkt 8: per-permission detail page (who holds a tool permission,
+  // which layer grants it, and — later phases — its change log and usage log).
+  | "cerebro_permission_detail"
   // TECH-2880: collapsible Projects entry in the sidebar (with nested project tree).
   | "cerebro_projects"
   // FIR-2660: restrict channel creation to workspace owners/admins. Default off
@@ -368,6 +374,9 @@ export type CerebroFlagKey =
   // TECH-3491: per-device draft persistence for the comment / channel / DM
   // composers — a half-written message survives navigating away or a reload.
   | "cerebro_comment_drafts"
+  // FIR-2648: per-device draft persistence for the issue description editor —
+  // recovers text that never reached the server (e.g. session expired mid-edit).
+  | "cerebro_description_drafts"
   // TECH-3698: per-channel permission settings (who may rename / add-remove
   // participants / leave) surfaced in the channel settings sheet and the
   // create-channel dialog. Gates only the configuration UI.
@@ -674,6 +683,16 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   cerebro_comment_target_guard_wakeup_exempt: false,
   // FIR-2409: opt-in until the Agent-start tab + per-agent rows are reviewed.
   cerebro_agent_trigger_permissions: false,
+  // FIR-3091 slice 5: OFF by default. When on, the web_fetch host list moves
+  // into the Permissions screen and the standalone "Web fetch" tab is hidden.
+  // Pure UI relocation — the standalone tab (cerebro_web_fetch_policy) is the
+  // fallback whenever this is off, so the change is reversible.
+  cerebro_web_fetch_permissions: false,
+  // FIR-3091 punkt 8: OFF by default. When on, a per-permission detail page is
+  // reachable; it shows who holds a tool permission and which layer grants it
+  // (later phases add its change log and usage log). Nothing links to the page
+  // while off, so the change is reversible.
+  cerebro_permission_detail: false,
   // TECH-2880: OFF by default — workspace opts in to surface the Projects
   // collapsible (header + sub-items) in the sidebar.
   cerebro_projects: false,
@@ -759,12 +778,12 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   // admin flips this on, after the grant→tool-policy migration is verified 1:1.
   // No deploy-time behaviour change; can never open a default-allow hole on reveal.
   cerebro_credential_chain_grant: false,
-  // FIR-2175: OFF by default — the general tool-policy gate stays pure
-  // tighten-only (Resolve) until an admin opts a workspace into member-override.
+  // FIR-3062: ON by default — workspace permissions are defaults, group
+  // permissions combine by maximum access, and a direct member rule wins.
   // Flipping it on can only affect the visible tool-policy permissions; the
   // deny-by-default floors are never wired to it, so it can never widen
   // credential, sandbox, repo-checkout, or approval-cap access.
-  cerebro_member_override: false,
+  cerebro_member_override: true,
   // TECH-3196: OFF by default — Agent Vault per-agent secret brokering ships
   // dormant until an admin opts in and the access table is configured.
   cerebro_agent_vault: false,
@@ -773,6 +792,10 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   // is the intended behaviour change. Off restores the old "lose it on navigate"
   // behaviour and hides the "Kladde gemt" hint.
   cerebro_comment_drafts: true,
+  // FIR-2648: ON by default — recovering a description edit that never
+  // reached the server is the whole point of the feature. Off restores the
+  // old "lose it on session expiry" behaviour and hides the restore banner.
+  cerebro_description_drafts: true,
   // TECH-3582: OFF by default. Ships dormant — the Workspace copy console only
   // appears in Settings once an admin opts in to run a one-time workspace merge.
   cerebro_workspace_copy: false,
@@ -1347,6 +1370,20 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
       "Add a friendly 'Agent-start' tab under Settings → Permissions to control who may start (trigger) an agent they don't own — a workspace-wide default plus a per-agent override (Allow / run-request / owner-only). Reuses the tool-policy engine; server enforcement is unchanged when off. FIR-2409.",
   },
   {
+    key: "cerebro_web_fetch_permissions",
+    label: "Web fetch in Permissions",
+    group: "permissions",
+    description:
+      "Show the web_fetch host list (which URLs agents may fetch) inside the unified Permissions screen instead of its own separate 'Web fetch' settings tab. Pure UI relocation — the mode and host rules, and how they are enforced, are unchanged. When off, the standalone 'Web fetch' tab (cerebro_web_fetch_policy) is used instead, so the move is reversible. FIR-3091.",
+  },
+  {
+    key: "cerebro_permission_detail",
+    label: "Permission detail page",
+    group: "permissions",
+    description:
+      "Open a detail page for a single tool permission that shows who holds it (which agents, people, groups and runtimes have it set) and which layer grants it. Permissions that are shown but not enforced at runtime yet are greyed out. Off by default while it is built; nothing links to the page until it is turned on, so the change is reversible. Later phases add a change log and a usage log. FIR-3091.",
+  },
+  {
     key: "cerebro_image_reload",
     label: "Reload stalled images",
     group: "workspace",
@@ -1672,6 +1709,14 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     description:
       "Keep what you have typed in a comment, channel message, DM, or thread reply if you navigate away, reload, or the editor scrolls out of view — it reappears when you come back. Saved on this device only (not synced across devices). A small \"Kladde gemt\" hint shows when a draft is stored. Off restores the old behaviour where an unsent message is lost on navigate. TECH-3491.",
   },
+  // FIR-2648: per-device drafts for the issue description editor.
+  {
+    key: "cerebro_description_drafts",
+    label: "Recover unsaved description edits",
+    group: "issues",
+    description:
+      "Keep what you have typed into an issue description on this device, independent of whether the save actually reached the server. If the last save never reached the backend (e.g. the Cloudflare Access session expired mid-edit), a small banner offers to restore or discard it the next time the description editor is opened. Saved on this device only (not synced across devices). Off restores the old behaviour where an edit that never saved is silently lost. FIR-2648.",
+  },
   // TECH-3582: Workspace copy console — one-time workspace merge tool.
   {
     key: "cerebro_workspace_copy",
@@ -1781,7 +1826,7 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     label: "Member overrides group on the tool-policy gate",
     group: "permissions",
     description:
-      "Resolve the visible per-tool Allow / Ask / Block policy with the member-override model: a member's own setting wins over an inherited group or workspace default by specificity (most specific wins, so a member Allow can OPEN what their group denied), and the runtime + agent layers may then only tighten that member verdict. Off by default — the gate stays pure most-restrictive-wins. This only affects the general tool-policy permissions an operator sees in the table; the deny-by-default floors (credentials, OS sandbox, repo checkout, the repo-approval cap) are never resolved through it and stay strictly tighten-only, so turning it on can never widen access to a secret, the sandbox, or a repo. FIR-2175.",
+      "Resolve the visible per-tool Allow / Ask / Block policy with the member-override model: workspace is the default, the highest permission across groups wins, and a member's own setting wins over both. On by default. This only affects the general tool-policy permissions an operator sees in the table; the deny-by-default floors (credentials, OS sandbox, repo checkout, the repo-approval cap) are never resolved through it and stay strictly tighten-only, so it can never widen access to a secret, the sandbox, or a repo. FIR-2175, FIR-3062.",
   },
 ];
 
@@ -1870,6 +1915,8 @@ export const CEREBRO_FLAG_SUBGROUP_OF: Partial<Record<CerebroFlagKey, string>> =
   cerebro_simple_tool_policy: "tool_permissions",
   cerebro_runtime_tool_grant_ui: "tool_permissions",
   cerebro_web_fetch_policy: "tool_permissions",
+  cerebro_web_fetch_permissions: "tool_permissions",
+  cerebro_permission_detail: "tool_permissions",
   cerebro_platform_capabilities: "tool_permissions",
   cerebro_approval_gate: "tool_permissions",
   cerebro_local_tool_policy: "tool_permissions",

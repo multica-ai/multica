@@ -209,7 +209,8 @@ func (h *Handler) cerebroRequireLocalRuntimePolicy(w http.ResponseWriter, r *htt
 		writeError(w, http.StatusBadRequest, "invalid workspace id")
 		return false
 	}
-	eff, err := toolpolicy.NewStoreFromQueries(h.CerebroQueries).Resolve(r.Context(), toolpolicy.Query{
+	store := toolpolicy.NewStoreFromQueries(h.CerebroQueries)
+	eff, err := store.Resolve(r.Context(), toolpolicy.Query{
 		WorkspaceID: wsUUID,
 		ToolKey:     "create_local_runtime",
 		UserID:      viewer.UserID,
@@ -219,6 +220,17 @@ func (h *Handler) cerebroRequireLocalRuntimePolicy(w http.ResponseWriter, r *htt
 		writeError(w, http.StatusInternalServerError, "permission check failed")
 		return false
 	}
+	// FIR-3091 punkt 8 fase 3: usage log — one row per applied verdict, so the
+	// permission detail page can show every time this gate ran. Best-effort.
+	store.RecordUsage(r.Context(), toolpolicy.UsageParams{
+		WorkspaceID:      wsUUID,
+		ToolKey:          "create_local_runtime",
+		EnforcementPoint: "http_action",
+		SubjectType:      "member",
+		SubjectID:        viewer.UserID,
+		Decision:         eff.Setting,
+		DecidedBy:        string(eff.DecidedBy),
+	})
 	if eff.Setting != toolpolicy.SettingAllow {
 		writeError(w, http.StatusForbidden, "creating local runtimes is not allowed for you — ask a workspace admin")
 		return false
@@ -260,7 +272,8 @@ func (h *Handler) cerebroRequireConnectionsPolicy(w http.ResponseWriter, r *http
 		writeError(w, http.StatusBadRequest, "invalid workspace id")
 		return false
 	}
-	eff, err := toolpolicy.NewStoreFromQueries(h.CerebroQueries).Resolve(r.Context(), toolpolicy.Query{
+	store := toolpolicy.NewStoreFromQueries(h.CerebroQueries)
+	eff, err := store.Resolve(r.Context(), toolpolicy.Query{
 		WorkspaceID: wsUUID,
 		ToolKey:     "manage_connections",
 		UserID:      viewer.UserID,
@@ -270,6 +283,17 @@ func (h *Handler) cerebroRequireConnectionsPolicy(w http.ResponseWriter, r *http
 		writeError(w, http.StatusInternalServerError, "permission check failed")
 		return false
 	}
+	// FIR-3091 punkt 8 fase 3: usage log — one row per applied verdict, so the
+	// permission detail page can show every time this gate ran. Best-effort.
+	store.RecordUsage(r.Context(), toolpolicy.UsageParams{
+		WorkspaceID:      wsUUID,
+		ToolKey:          "manage_connections",
+		EnforcementPoint: "http_action",
+		SubjectType:      "member",
+		SubjectID:        viewer.UserID,
+		Decision:         eff.Setting,
+		DecidedBy:        string(eff.DecidedBy),
+	})
 	if eff.Setting != toolpolicy.SettingAllow {
 		writeError(w, http.StatusForbidden, "managing workspace connections is not allowed for you — ask a workspace admin")
 		return false
@@ -327,7 +351,8 @@ func (h *Handler) cerebroRequireCredentialGrantPolicy(w http.ResponseWriter, r *
 		writeError(w, http.StatusBadRequest, "invalid workspace id")
 		return false
 	}
-	eff, err := toolpolicy.NewStoreFromQueries(h.CerebroQueries).Resolve(r.Context(), toolpolicy.Query{
+	store := toolpolicy.NewStoreFromQueries(h.CerebroQueries)
+	eff, err := store.Resolve(r.Context(), toolpolicy.Query{
 		WorkspaceID: wsUUID,
 		ToolKey:     "manage_credential_access",
 		UserID:      viewer.UserID,
@@ -337,6 +362,17 @@ func (h *Handler) cerebroRequireCredentialGrantPolicy(w http.ResponseWriter, r *
 		writeError(w, http.StatusInternalServerError, "permission check failed")
 		return false
 	}
+	// FIR-3091 punkt 8 fase 3: usage log — one row per applied verdict, so the
+	// permission detail page can show every time this gate ran. Best-effort.
+	store.RecordUsage(r.Context(), toolpolicy.UsageParams{
+		WorkspaceID:      wsUUID,
+		ToolKey:          "manage_credential_access",
+		EnforcementPoint: "http_action",
+		SubjectType:      "member",
+		SubjectID:        viewer.UserID,
+		Decision:         eff.Setting,
+		DecidedBy:        string(eff.DecidedBy),
+	})
 	if eff.Setting != toolpolicy.SettingAllow {
 		writeError(w, http.StatusForbidden, "granting credential access is not allowed for you — ask a workspace admin")
 		return false

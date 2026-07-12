@@ -512,6 +512,20 @@
       "default": false
     },
     {
+      "key": "cerebro_web_fetch_permissions",
+      "label": "Web fetch in Permissions",
+      "description": "Show the web_fetch host list (which URLs agents may fetch) inside the unified Permissions screen instead of its own separate 'Web fetch' settings tab. Pure UI relocation — the mode and host rules, and how they are enforced, are unchanged. When off, the standalone 'Web fetch' tab (cerebro_web_fetch_policy) is used instead, so the move is reversible. FIR-3091.",
+      "group": "permissions",
+      "default": false
+    },
+    {
+      "key": "cerebro_permission_detail",
+      "label": "Permission detail page",
+      "description": "Open a detail page for a single tool permission that shows who holds it (which agents, people, groups and runtimes have it set) and which layer grants it. Permissions that are shown but not enforced at runtime yet are greyed out. Off by default while it is built; nothing links to the page until it is turned on, so the change is reversible. Later phases add a change log and a usage log. FIR-3091.",
+      "group": "permissions",
+      "default": false
+    },
+    {
       "key": "cerebro_image_reload",
       "label": "Reload stalled images",
       "description": "On a document page showing an image, recover when the image stops mid-load: a loading indicator while it fetches, up to two automatic retries on failure, and a manual \"Reload image\" button so you can try again without reloading the whole page. Off restores the plain image with no retry. FIR-1673.",
@@ -834,6 +848,13 @@
       "default": true
     },
     {
+      "key": "cerebro_description_drafts",
+      "label": "Recover unsaved description edits",
+      "description": "Keep what you have typed into an issue description on this device, independent of whether the save actually reached the server. If the last save never reached the backend (e.g. the Cloudflare Access session expired mid-edit), a small banner offers to restore or discard it the next time the description editor is opened. Saved on this device only (not synced across devices). Off restores the old behaviour where an edit that never saved is silently lost. FIR-2648.",
+      "group": "issues",
+      "default": true
+    },
+    {
       "key": "cerebro_workspace_copy",
       "label": "Workspace copy console",
       "description": "Add a \"Workspace copy\" tab to Settings (owners/admins only) for merging one workspace into another: pick a target workspace, then copy individual issues, channels, projects, agents, chats, or autopilots into it. Copies are non-destructive — the source workspace is never changed. Off hides the tab. TECH-3582.",
@@ -934,9 +955,9 @@
     {
       "key": "cerebro_member_override",
       "label": "Member overrides group on the tool-policy gate",
-      "description": "Resolve the visible per-tool Allow / Ask / Block policy with the member-override model: a member's own setting wins over an inherited group or workspace default by specificity (most specific wins, so a member Allow can OPEN what their group denied), and the runtime + agent layers may then only tighten that member verdict. Off by default — the gate stays pure most-restrictive-wins. This only affects the general tool-policy permissions an operator sees in the table; the deny-by-default floors (credentials, OS sandbox, repo checkout, the repo-approval cap) are never resolved through it and stay strictly tighten-only, so turning it on can never widen access to a secret, the sandbox, or a repo. FIR-2175.",
+      "description": "Resolve the visible per-tool Allow / Ask / Block policy with the member-override model: workspace is the default, the highest permission across groups wins, and a member's own setting wins over both. On by default. This only affects the general tool-policy permissions an operator sees in the table; the deny-by-default floors (credentials, OS sandbox, repo checkout, the repo-approval cap) are never resolved through it and stay strictly tighten-only, so it can never widen access to a secret, the sandbox, or a repo. FIR-2175, FIR-3062.",
       "group": "permissions",
-      "default": false
+      "default": true
     }
   ]
 }

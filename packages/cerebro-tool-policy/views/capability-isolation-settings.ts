@@ -4,7 +4,7 @@ import {
   type AgentCapabilitiesConfig,
   type AgentPermissions,
   type SandboxProfile,
-} from "./types";
+} from "./capability-isolation-types";
 
 const emptyPermissions: AgentPermissions = {
   mcp_denied_servers: [],

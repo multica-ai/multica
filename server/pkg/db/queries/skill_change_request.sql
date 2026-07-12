@@ -34,11 +34,15 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 RETURNING *;
 
 -- name: ReviewSkillChangeRequest :one
+-- CEREBRO-PATCH(skill-review-edit-content): FIR-2924 — proposed_content is
+-- rewritten on review so a reviewer's edits (approve) or the unchanged
+-- proposal (reject) stay the source of truth for this CR's own history.
 UPDATE skill_change_request SET
     status = $2,
     reviewed_by = $3,
     reviewed_at = now(),
     review_comment = $4,
+    proposed_content = $5,
     updated_at = now()
 WHERE id = $1
 RETURNING *;

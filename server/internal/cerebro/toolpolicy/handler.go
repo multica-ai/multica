@@ -25,10 +25,12 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/multica-ai/multica/server/internal/cerebro/platformcatalog"
 	"github.com/multica-ai/multica/server/internal/logger"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/util"
@@ -122,6 +124,12 @@ type effectiveResponse struct {
 	DecidedBy string `json:"decided_by"`
 	CappedBy  string `json:"capped_by"`
 	Reason    string `json:"reason"`
+	// Openable is a display hint (FIR-3091): true when the verdict resolved under
+	// the member-override model, so a member layer may still open a broader
+	// default. The admin table uses it to reserve the lock/"no effect" affordance
+	// for genuine floors instead of every workspace Deny. Omitted-by-older-backend
+	// drifts to false client-side, which fails safe (treated as an unopenable floor).
+	Openable bool `json:"openable"`
 }
 
 // groupAttributionResponse names a group that drives a group-layer cap on a row
@@ -150,6 +158,78 @@ type toolPolicyRow struct {
 	EnforcedConditions []string                   `json:"enforced_conditions"`
 	Effective          effectiveResponse          `json:"effective"`
 	CappedByGroups     []groupAttributionResponse `json:"capped_by_groups"`
+}
+
+// holderResponse is one explicit policy row for a tool: which layer set it, on
+// which subject, for which resource pattern, and to what setting. subject_id is
+// the raw UUID string — the frontend resolves it to an agent/member/group/runtime
+// name from data it already holds (FIR-3091 punkt 8, per-permission holders tab).
+type holderResponse struct {
+	Layer           string `json:"layer"`
+	SubjectID       string `json:"subject_id"`
+	ResourcePattern string `json:"resource_pattern"`
+	Setting         string `json:"setting"`
+}
+
+// holdersResponse is the body of GET .../tool-policy/holders: every explicit
+// setting for one tool across all layers/subjects, plus whether the tool's
+// policy is actually enforced at runtime today (platformcatalog.Enforced).
+type holdersResponse struct {
+	ToolKey  string           `json:"tool_key"`
+	Enforced bool             `json:"enforced"`
+	Holders  []holderResponse `json:"holders"`
+}
+
+// changeResponse is one change-log row for a tool: which layer/subject/pattern
+// was written, whether it was a set or a clear, the old -> new setting
+// transition, who did it, and when (FIR-3091 punkt 8 fase 2). old_setting ""
+// means the layer held no explicit row before the write (Inherit); new_setting
+// "" means the row was cleared back to Inherit. Ids are raw UUID strings the
+// frontend resolves to names from data it already holds.
+type changeResponse struct {
+	Layer           string `json:"layer"`
+	SubjectID       string `json:"subject_id"`
+	ResourcePattern string `json:"resource_pattern"`
+	Action          string `json:"action"`
+	OldSetting      string `json:"old_setting"`
+	NewSetting      string `json:"new_setting"`
+	ActorType       string `json:"actor_type"`
+	ActorID         string `json:"actor_id"`
+	CreatedAt       string `json:"created_at"`
+}
+
+// changesResponse is the body of GET .../tool-policy/changes: one tool's change
+// history, newest first. Recording started when FIR-3091 fase 2 shipped, so an
+// empty list on a long-lived tool means "no changes since then", not "never
+// changed".
+type changesResponse struct {
+	ToolKey string           `json:"tool_key"`
+	Changes []changeResponse `json:"changes"`
+}
+
+// usageRowResponse is one usage-log row for a tool: which gate applied a
+// decision, to whom, on which concrete resource, and what was decided
+// (FIR-3091 punkt 8 fase 3). subject_id "" records a system subject (a
+// human-less run). decided_by "" means no explicit rule matched and the
+// gate's base/baseline answered. Ids are raw UUID strings the frontend
+// resolves to names from data it already holds.
+type usageRowResponse struct {
+	EnforcementPoint string `json:"enforcement_point"`
+	SubjectType      string `json:"subject_type"`
+	SubjectID        string `json:"subject_id"`
+	Resource         string `json:"resource"`
+	Decision         string `json:"decision"`
+	DecidedBy        string `json:"decided_by"`
+	CreatedAt        string `json:"created_at"`
+}
+
+// usageResponse is the body of GET .../tool-policy/usage: one tool's usage
+// log, newest first. Recording started when FIR-3091 fase 3 shipped, so an
+// empty list on a long-lived tool means "no usage since then", not "never
+// used".
+type usageResponse struct {
+	ToolKey string             `json:"tool_key"`
+	Usage   []usageRowResponse `json:"usage"`
 }
 
 // --- request types ----------------------------------------------------------
@@ -246,6 +326,7 @@ func (h *Handler) Table(w http.ResponseWriter, r *http.Request) {
 		SystemID:           systemID,
 		Base:               base,
 		IncludePlatform:    h.Store.PlatformCapabilitiesEnabled(r.Context(), workspaceID, member.UserID),
+		IncludeAgentStart:  h.Store.AgentStartCapabilitiesEnabled(r.Context(), workspaceID, member.UserID),
 		IncludeCredentials: h.Store.CredentialAuthoringEnabled(r.Context(), workspaceID, member.UserID),
 	})
 	if err != nil {
@@ -444,7 +525,7 @@ func looserThanOwner(proposed, ownerEffective Setting) bool {
 // Clear — DELETE /api/workspaces/{id}/tool-policy
 // Query params: tool_key, layer, subject_id.
 func (h *Handler) Clear(w http.ResponseWriter, r *http.Request) {
-	_, workspaceID, ok := h.loadWorkspace(w, r)
+	member, workspaceID, ok := h.loadWorkspace(w, r)
 	if !ok {
 		return
 	}
@@ -467,7 +548,7 @@ func (h *Handler) Clear(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resourcePattern := q.Get("resource_pattern")
-	if err := h.Store.Clear(r.Context(), workspaceID, toolKey, layer, subjectID, resourcePattern); err != nil {
+	if err := h.Store.Clear(r.Context(), workspaceID, toolKey, layer, subjectID, resourcePattern, member.UserID); err != nil {
 		if errors.Is(err, ErrUnknownLayer) {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
@@ -476,6 +557,160 @@ func (h *Handler) Clear(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// Holders — GET /api/workspaces/{id}/tool-policy/holders?tool_key=...
+//
+// Lists every explicit policy row for one tool across all layers and subjects in
+// the workspace — the reverse of the per-subject Table read — so the
+// per-permission detail page can show "who has this permission and which layer
+// grants it" (FIR-3091 punkt 8). It also reports whether the tool's policy is
+// actually enforced at runtime today (platformcatalog.Enforced).
+//
+// This is a sensitive audit-style read (it exposes every subject's setting for a
+// permission), so it is gated to workspace admin/owner in the handler — it mounts
+// in the member-level route group, unlike Set/Clear which are gated by their own
+// router middleware.
+func (h *Handler) Holders(w http.ResponseWriter, r *http.Request) {
+	member, workspaceID, ok := h.loadWorkspace(w, r)
+	if !ok {
+		return
+	}
+	if member.Role != "owner" && member.Role != "admin" {
+		writeError(w, http.StatusForbidden, "insufficient permissions")
+		return
+	}
+
+	toolKey := r.URL.Query().Get("tool_key")
+	if toolKey == "" {
+		writeError(w, http.StatusBadRequest, "tool_key required")
+		return
+	}
+
+	rows, err := h.Store.Holders(r.Context(), workspaceID, toolKey)
+	if err != nil {
+		h.serverError(w, r, "list tool policy holders", err)
+		return
+	}
+
+	holders := make([]holderResponse, 0, len(rows))
+	for _, row := range rows {
+		holders = append(holders, holderResponse{
+			Layer:           row.Layer,
+			SubjectID:       util.UUIDToString(row.SubjectID),
+			ResourcePattern: row.ResourcePattern,
+			Setting:         string(row.Setting),
+		})
+	}
+	writeJSON(w, http.StatusOK, holdersResponse{
+		ToolKey:  toolKey,
+		Enforced: platformcatalog.Enforced(toolKey),
+		Holders:  holders,
+	})
+}
+
+// changesLimit caps one Changes read. The page shows recent history, not a full
+// export; 200 rows is far more than the UI renders while keeping the response
+// bounded no matter how busy the log gets.
+const changesLimit = 200
+
+// Changes — GET /api/workspaces/{id}/tool-policy/changes?tool_key=...
+//
+// One tool's change log, newest first (FIR-3091 punkt 8 fase 2): every Set and
+// Clear on the tool's policy rows since the log shipped. Same admin/owner gate
+// as Holders — the history names every subject's settings for a permission.
+func (h *Handler) Changes(w http.ResponseWriter, r *http.Request) {
+	member, workspaceID, ok := h.loadWorkspace(w, r)
+	if !ok {
+		return
+	}
+	if member.Role != "owner" && member.Role != "admin" {
+		writeError(w, http.StatusForbidden, "insufficient permissions")
+		return
+	}
+
+	toolKey := r.URL.Query().Get("tool_key")
+	if toolKey == "" {
+		writeError(w, http.StatusBadRequest, "tool_key required")
+		return
+	}
+
+	rows, err := h.Store.Changes(r.Context(), workspaceID, toolKey, changesLimit)
+	if err != nil {
+		h.serverError(w, r, "list tool policy changes", err)
+		return
+	}
+
+	changes := make([]changeResponse, 0, len(rows))
+	for _, row := range rows {
+		actorID := ""
+		if row.ActorID.Valid {
+			actorID = util.UUIDToString(row.ActorID)
+		}
+		changes = append(changes, changeResponse{
+			Layer:           row.Layer,
+			SubjectID:       util.UUIDToString(row.SubjectID),
+			ResourcePattern: row.ResourcePattern,
+			Action:          row.Action,
+			OldSetting:      row.OldSetting,
+			NewSetting:      row.NewSetting,
+			ActorType:       row.ActorType,
+			ActorID:         actorID,
+			CreatedAt:       row.CreatedAt.UTC().Format(time.RFC3339),
+		})
+	}
+	writeJSON(w, http.StatusOK, changesResponse{ToolKey: toolKey, Changes: changes})
+}
+
+// usageLimit caps one Usage read. The page shows recent history, not a full
+// export; 200 rows keeps the response bounded no matter how busy the gates get.
+const usageLimit = 200
+
+// Usage — GET /api/workspaces/{id}/tool-policy/usage?tool_key=...
+//
+// One tool's usage log, newest first (FIR-3091 punkt 8 fase 3): every time a
+// permission decision for the tool was applied at an enforcement point since
+// the log shipped. Same admin/owner gate as Holders and Changes — the history
+// names who acted and what they were allowed or denied.
+func (h *Handler) Usage(w http.ResponseWriter, r *http.Request) {
+	member, workspaceID, ok := h.loadWorkspace(w, r)
+	if !ok {
+		return
+	}
+	if member.Role != "owner" && member.Role != "admin" {
+		writeError(w, http.StatusForbidden, "insufficient permissions")
+		return
+	}
+
+	toolKey := r.URL.Query().Get("tool_key")
+	if toolKey == "" {
+		writeError(w, http.StatusBadRequest, "tool_key required")
+		return
+	}
+
+	rows, err := h.Store.Usage(r.Context(), workspaceID, toolKey, usageLimit)
+	if err != nil {
+		h.serverError(w, r, "list tool policy usage", err)
+		return
+	}
+
+	usage := make([]usageRowResponse, 0, len(rows))
+	for _, row := range rows {
+		subjectID := ""
+		if row.SubjectID.Valid {
+			subjectID = util.UUIDToString(row.SubjectID)
+		}
+		usage = append(usage, usageRowResponse{
+			EnforcementPoint: row.EnforcementPoint,
+			SubjectType:      row.SubjectType,
+			SubjectID:        subjectID,
+			Resource:         row.Resource,
+			Decision:         row.Decision,
+			DecidedBy:        row.DecidedBy,
+			CreatedAt:        row.CreatedAt.UTC().Format(time.RFC3339),
+		})
+	}
+	writeJSON(w, http.StatusOK, usageResponse{ToolKey: toolKey, Usage: usage})
 }
 
 // --- helpers ----------------------------------------------------------------
@@ -539,6 +774,7 @@ func toRowResponse(row TableRow) toolPolicyRow {
 			DecidedBy: string(row.Effective.DecidedBy),
 			CappedBy:  string(row.Effective.CappedBy),
 			Reason:    row.Effective.Reason,
+			Openable:  row.Effective.Openable,
 		},
 		CappedByGroups: groups,
 	}

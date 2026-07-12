@@ -76,4 +76,14 @@ describe("SkillChangeInboxDetail", () => {
     render(<SkillChangeInboxDetail item={item({ details: { title: "x" } })} />);
     expect(screen.queryByText("Open in new window")).toBeNull();
   });
+
+  it("renders reviewed notifications as an inbox message", () => {
+    render(
+      <SkillChangeInboxDetail
+        item={item({ type: "skill_change_request_reviewed" })}
+      />,
+    );
+    expect(screen.getByText(/reviewed/)).toBeTruthy();
+    expect(screen.getByText("Open in new window")).toBeTruthy();
+  });
 });

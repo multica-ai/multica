@@ -40,12 +40,26 @@ type Round struct {
 	WorkspaceID  string     `json:"workspace_id"`
 	OwnerID      string     `json:"owner_id"`
 	Name         string     `json:"name"`
+	Mode         string     `json:"mode"`
 	ScheduleCron string     `json:"schedule_cron"`
 	Timezone     string     `json:"timezone"`
 	NextRunAt    *time.Time `json:"next_run_at"`
 	CreatedAt    time.Time  `json:"created_at"`
 	UpdatedAt    time.Time  `json:"updated_at"`
 }
+
+func normalizeMode(mode string) (string, error) {
+	mode = strings.ToLower(strings.TrimSpace(mode))
+	if mode == "" {
+		return "batch", nil
+	}
+	if mode != "live" && mode != "batch" {
+		return "", fmt.Errorf("mode must be live or batch")
+	}
+	return mode, nil
+}
+
+func shouldHoldComment(mode string) bool { return mode == "batch" }
 
 type Member struct {
 	RoundID          string    `json:"round_id"`
@@ -99,13 +113,17 @@ func runStatus(total, responded, failed int) string {
 	return RunRunning
 }
 
-func (s *Service) Create(ctx context.Context, workspaceID, ownerID pgtype.UUID, name, schedule, timezone string) (Round, error) {
+func (s *Service) Create(ctx context.Context, workspaceID, ownerID pgtype.UUID, name, mode, schedule, timezone string) (Round, error) {
 	name, schedule, timezone = strings.TrimSpace(name), strings.TrimSpace(schedule), strings.TrimSpace(timezone)
 	if name == "" {
 		return Round{}, fmt.Errorf("name is required")
 	}
 	if timezone == "" {
 		timezone = "UTC"
+	}
+	mode, err := normalizeMode(mode)
+	if err != nil {
+		return Round{}, err
 	}
 	var next *time.Time
 	if schedule != "" {
@@ -115,12 +133,12 @@ func (s *Service) Create(ctx context.Context, workspaceID, ownerID pgtype.UUID, 
 		}
 		next = &n
 	}
-	row := s.Pool.QueryRow(ctx, `INSERT INTO cerebro_round(workspace_id,owner_id,name,schedule_cron,timezone,next_run_at) VALUES($1,$2,$3,NULLIF($4,''),$5,$6) RETURNING id::text,workspace_id::text,owner_id::text,name,COALESCE(schedule_cron,''),timezone,next_run_at,created_at,updated_at`, workspaceID, ownerID, name, schedule, timezone, next)
+	row := s.Pool.QueryRow(ctx, `INSERT INTO cerebro_round(workspace_id,owner_id,name,mode,schedule_cron,timezone,next_run_at) VALUES($1,$2,$3,$4,NULLIF($5,''),$6,$7) RETURNING id::text,workspace_id::text,owner_id::text,name,mode,COALESCE(schedule_cron,''),timezone,next_run_at,created_at,updated_at`, workspaceID, ownerID, name, mode, schedule, timezone, next)
 	return scanRound(row)
 }
 
 func (s *Service) List(ctx context.Context, workspaceID, ownerID pgtype.UUID) ([]Round, error) {
-	rows, err := s.Pool.Query(ctx, `SELECT id::text,workspace_id::text,owner_id::text,name,COALESCE(schedule_cron,''),timezone,next_run_at,created_at,updated_at FROM cerebro_round WHERE workspace_id=$1 AND owner_id=$2 ORDER BY created_at`, workspaceID, ownerID)
+	rows, err := s.Pool.Query(ctx, `SELECT id::text,workspace_id::text,owner_id::text,name,mode,COALESCE(schedule_cron,''),timezone,next_run_at,created_at,updated_at FROM cerebro_round WHERE workspace_id=$1 AND owner_id=$2 ORDER BY created_at`, workspaceID, ownerID)
 	if err != nil {
 		return nil, err
 	}
@@ -137,20 +155,26 @@ func (s *Service) List(ctx context.Context, workspaceID, ownerID pgtype.UUID) ([
 }
 
 func (s *Service) Get(ctx context.Context, workspaceID, ownerID, id pgtype.UUID) (Round, error) {
-	r, err := scanRound(s.Pool.QueryRow(ctx, `SELECT id::text,workspace_id::text,owner_id::text,name,COALESCE(schedule_cron,''),timezone,next_run_at,created_at,updated_at FROM cerebro_round WHERE id=$1 AND workspace_id=$2 AND owner_id=$3`, id, workspaceID, ownerID))
+	r, err := scanRound(s.Pool.QueryRow(ctx, `SELECT id::text,workspace_id::text,owner_id::text,name,mode,COALESCE(schedule_cron,''),timezone,next_run_at,created_at,updated_at FROM cerebro_round WHERE id=$1 AND workspace_id=$2 AND owner_id=$3`, id, workspaceID, ownerID))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Round{}, ErrNotFound
 	}
 	return r, err
 }
 
-func (s *Service) Update(ctx context.Context, workspaceID, ownerID, id pgtype.UUID, name, schedule, timezone *string) (Round, error) {
+func (s *Service) Update(ctx context.Context, workspaceID, ownerID, id pgtype.UUID, name, mode, schedule, timezone *string) (Round, error) {
 	current, err := s.Get(ctx, workspaceID, ownerID, id)
 	if err != nil {
 		return Round{}, err
 	}
 	if name != nil {
 		current.Name = strings.TrimSpace(*name)
+	}
+	if mode != nil {
+		current.Mode, err = normalizeMode(*mode)
+		if err != nil {
+			return Round{}, err
+		}
 	}
 	if schedule != nil {
 		current.ScheduleCron = strings.TrimSpace(*schedule)
@@ -172,7 +196,7 @@ func (s *Service) Update(ctx context.Context, workspaceID, ownerID, id pgtype.UU
 		}
 		next = &n
 	}
-	return scanRound(s.Pool.QueryRow(ctx, `UPDATE cerebro_round SET name=$4,schedule_cron=NULLIF($5,''),timezone=$6,next_run_at=$7,updated_at=now() WHERE id=$1 AND workspace_id=$2 AND owner_id=$3 RETURNING id::text,workspace_id::text,owner_id::text,name,COALESCE(schedule_cron,''),timezone,next_run_at,created_at,updated_at`, id, workspaceID, ownerID, current.Name, current.ScheduleCron, current.Timezone, next))
+	return scanRound(s.Pool.QueryRow(ctx, `UPDATE cerebro_round SET name=$4,mode=$5,schedule_cron=NULLIF($6,''),timezone=$7,next_run_at=$8,updated_at=now() WHERE id=$1 AND workspace_id=$2 AND owner_id=$3 RETURNING id::text,workspace_id::text,owner_id::text,name,mode,COALESCE(schedule_cron,''),timezone,next_run_at,created_at,updated_at`, id, workspaceID, ownerID, current.Name, current.Mode, current.ScheduleCron, current.Timezone, next))
 }
 func (s *Service) Delete(ctx context.Context, workspaceID, ownerID, id pgtype.UUID) error {
 	ct, err := s.Pool.Exec(ctx, `DELETE FROM cerebro_round WHERE id=$1 AND workspace_id=$2 AND owner_id=$3`, id, workspaceID, ownerID)
@@ -184,7 +208,7 @@ func (s *Service) Delete(ctx context.Context, workspaceID, ownerID, id pgtype.UU
 
 func scanRound(row pgx.Row) (Round, error) {
 	var r Round
-	err := row.Scan(&r.ID, &r.WorkspaceID, &r.OwnerID, &r.Name, &r.ScheduleCron, &r.Timezone, &r.NextRunAt, &r.CreatedAt, &r.UpdatedAt)
+	err := row.Scan(&r.ID, &r.WorkspaceID, &r.OwnerID, &r.Name, &r.Mode, &r.ScheduleCron, &r.Timezone, &r.NextRunAt, &r.CreatedAt, &r.UpdatedAt)
 	return r, err
 }
 
@@ -253,6 +277,25 @@ func (s *Service) ActiveRun(ctx context.Context, roundID pgtype.UUID) (*Run, err
 	return &r, err
 }
 
+// DismissRun closes the round's surfaced 'ready' run so the round collapses
+// back to its planned state in the inbox. Held replies stay held for the next
+// start; a 'running' run is untouched (agents are still working).
+func (s *Service) DismissRun(ctx context.Context, workspaceID, ownerID, roundID pgtype.UUID) error {
+	if _, err := s.Get(ctx, workspaceID, ownerID, roundID); err != nil {
+		return err
+	}
+	var runID pgtype.UUID
+	err := s.Pool.QueryRow(ctx, `UPDATE cerebro_round_run SET status='completed',completed_at=now() WHERE round_id=$1 AND status='ready' RETURNING id`, roundID).Scan(&runID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	s.publishProgress(ctx, runID)
+	return nil
+}
+
 func (s *Service) RemoveMember(ctx context.Context, workspaceID, ownerID, roundID, issueID pgtype.UUID) error {
 	if _, err := s.Get(ctx, workspaceID, ownerID, roundID); err != nil {
 		return err
@@ -284,6 +327,15 @@ func (s *Service) HoldComment(ctx context.Context, workspaceID, issueID, comment
 	if actorType != "member" {
 		return false, nil
 	}
+	var mode string
+	var roundID, roundOwnerID pgtype.UUID
+	err := s.Pool.QueryRow(ctx, `SELECT r.mode,r.id,r.owner_id FROM cerebro_round_member m JOIN cerebro_round r ON r.id=m.round_id WHERE m.issue_id=$1 AND r.workspace_id=$2`, issueID, workspaceID).Scan(&mode, &roundID, &roundOwnerID)
+	if errors.Is(err, pgx.ErrNoRows) || (err == nil && !shouldHoldComment(mode)) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
 	targets := heldTargets(content)
 	if len(targets) == 0 {
 		targets = []heldTarget{{kind: "assignee", id: pgtype.UUID{}}}
@@ -296,7 +348,26 @@ func (s *Service) HoldComment(ctx context.Context, workspaceID, issueID, comment
 		}
 		held = held || ct.RowsAffected() > 0
 	}
+	if held {
+		s.autoStartWhenAnswered(ctx, workspaceID, roundOwnerID, roundID)
+	}
 	return held, nil
+}
+
+// autoStartWhenAnswered releases the round as soon as the owner has replied to
+// every agent response in the surfaced 'ready' run — "batch" means: answer
+// everything, then all replies run at once without pressing Run.
+func (s *Service) autoStartWhenAnswered(ctx context.Context, workspaceID, ownerID, roundID pgtype.UUID) {
+	var runID pgtype.UUID
+	if err := s.Pool.QueryRow(ctx, `SELECT id FROM cerebro_round_run WHERE round_id=$1 AND status='ready' ORDER BY created_at DESC LIMIT 1`, roundID).Scan(&runID); err != nil {
+		return
+	}
+	var unanswered int
+	err := s.Pool.QueryRow(ctx, `SELECT count(*)::int FROM cerebro_round_run_item i JOIN agent_task_queue q ON q.id=i.task_id WHERE i.run_id=$1 AND q.status='completed' AND NOT EXISTS (SELECT 1 FROM cerebro_round_held_trigger h WHERE h.round_id=$2 AND h.issue_id=i.issue_id AND h.state='held')`, runID, roundID).Scan(&unanswered)
+	if err != nil || unanswered > 0 {
+		return
+	}
+	_, _ = s.Start(ctx, workspaceID, ownerID, roundID)
 }
 
 func (s *Service) Start(ctx context.Context, workspaceID, ownerID, roundID pgtype.UUID) (Run, error) {
@@ -308,6 +379,12 @@ func (s *Service) Start(ctx context.Context, workspaceID, ownerID, roundID pgtyp
 		return Run{}, err
 	}
 	defer tx.Rollback(ctx)
+	// A new run supersedes the previous surfaced one: without this, a 'ready'
+	// run lingers forever (nothing else completes runs) and keeps the round
+	// pinned open in the inbox.
+	if _, err = tx.Exec(ctx, `UPDATE cerebro_round_run SET status='completed',completed_at=now() WHERE round_id=$1 AND status='ready'`, roundID); err != nil {
+		return Run{}, err
+	}
 	var run Run
 	err = tx.QueryRow(ctx, `INSERT INTO cerebro_round_run(round_id,total_count) SELECT $1,count(*) FROM cerebro_round_held_trigger WHERE round_id=$1 AND state='held' RETURNING id::text,round_id::text,status,total_count,responded_count,stalled_count,nudged_count,started_at,ready_at,completed_at,created_at`, roundID).Scan(&run.ID, &run.RoundID, &run.Status, &run.TotalCount, &run.RespondedCount, &run.StalledCount, &run.NudgedCount, &run.StartedAt, &run.ReadyAt, &run.CompletedAt, &run.CreatedAt)
 	if err != nil {

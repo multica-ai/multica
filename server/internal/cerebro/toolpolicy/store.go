@@ -14,6 +14,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -193,7 +194,7 @@ func (s *Store) ResolveGeneral(ctx context.Context, in Query, memberOverride boo
 	return ResolveWithMode(mode, input), nil
 }
 
-// MemberOverrideEnabled reports whether the default-OFF cerebro_member_override
+// MemberOverrideEnabled reports whether the default-on cerebro_member_override
 // flag is on for the workspace — read from the workspace-level row (the all-zero
 // sentinel user_id), exactly like the gateway (runtime.memberOverrideEnabled) and
 // local-runtime (daemonMemberOverrideEnabled) gates, so a display surface that
@@ -350,6 +351,20 @@ func (s *Store) Set(ctx context.Context, p SetParams) (cerebrodb.UpsertCerebroTo
 	if err != nil {
 		return cerebrodb.UpsertCerebroToolPolicyRow{}, fmt.Errorf("toolpolicy: set: %w", err)
 	}
+	// Read the prior explicit setting first so the change-log row can record the
+	// old -> new transition (FIR-3091 punkt 8 fase 2). "" means the layer held no
+	// explicit row (Inherit). A read failure degrades to "" rather than blocking
+	// the write — the transition detail is lost, the change itself is still logged.
+	oldSetting, err := s.q.GetCerebroToolPolicySetting(ctx, cerebrodb.GetCerebroToolPolicySettingParams{
+		WorkspaceID:     p.WorkspaceID,
+		ToolKey:         p.ToolKey,
+		Layer:           string(p.Layer),
+		SubjectID:       p.SubjectID,
+		ResourcePattern: p.ResourcePattern,
+	})
+	if err != nil {
+		oldSetting = ""
+	}
 	row, err := s.q.UpsertCerebroToolPolicy(ctx, cerebrodb.UpsertCerebroToolPolicyParams{
 		WorkspaceID:     p.WorkspaceID,
 		ToolKey:         p.ToolKey,
@@ -363,16 +378,54 @@ func (s *Store) Set(ctx context.Context, p SetParams) (cerebrodb.UpsertCerebroTo
 	if err != nil {
 		return cerebrodb.UpsertCerebroToolPolicyRow{}, fmt.Errorf("toolpolicy: set: %w", err)
 	}
+	s.recordAudit(ctx, p.WorkspaceID, p.ToolKey, p.Layer, p.SubjectID, p.ResourcePattern, "set", oldSetting, string(p.Setting), p.UpdatedBy)
 	return row, nil
+}
+
+// recordAudit appends one change-log row after a completed Set/Clear (FIR-3091
+// punkt 8 fase 2). The error is swallowed deliberately — the policy write has
+// already happened, and failing the request over a missing history row would be
+// worse than a gap in the log (the same trade-off cerebro_credential_audit
+// makes for its allow-side rows). actorID identifies the member who authored
+// the change; the zero value records a system write (e.g. the enablement
+// migration pinning legacy grants).
+func (s *Store) recordAudit(ctx context.Context, workspaceID pgtype.UUID, toolKey string, layer Layer, subjectID pgtype.UUID, resourcePattern, action, oldSetting, newSetting string, actorID pgtype.UUID) {
+	actorType := "member"
+	if !actorID.Valid {
+		actorType = "system"
+	}
+	_ = s.q.RecordCerebroToolPolicyAudit(ctx, cerebrodb.RecordCerebroToolPolicyAuditParams{
+		WorkspaceID:     workspaceID,
+		ToolKey:         toolKey,
+		Layer:           string(layer),
+		SubjectID:       subjectID,
+		ResourcePattern: resourcePattern,
+		Action:          action,
+		OldSetting:      oldSetting,
+		NewSetting:      newSetting,
+		ActorType:       actorType,
+		ActorID:         actorID,
+	})
 }
 
 // Clear removes one layer's explicit choice for one (tool, resource_pattern)
 // so that layer reverts to Inherit for that pattern. Clearing an absent row is
-// a no-op.
-func (s *Store) Clear(ctx context.Context, workspaceID pgtype.UUID, toolKey string, layer Layer, subjectID pgtype.UUID, resourcePattern string) error {
+// a no-op and leaves no change-log row. clearedBy identifies the member who
+// authored the change for the change log (FIR-3091 punkt 8 fase 2); the zero
+// value records a system write.
+func (s *Store) Clear(ctx context.Context, workspaceID pgtype.UUID, toolKey string, layer Layer, subjectID pgtype.UUID, resourcePattern string, clearedBy pgtype.UUID) error {
 	if !validLayer(layer) {
 		return fmt.Errorf("%w: %q", ErrUnknownLayer, layer)
 	}
+	// Read the row being cleared first so the change-log entry records what was
+	// dropped — and so a no-op clear (no row) logs nothing.
+	oldSetting, getErr := s.q.GetCerebroToolPolicySetting(ctx, cerebrodb.GetCerebroToolPolicySettingParams{
+		WorkspaceID:     workspaceID,
+		ToolKey:         toolKey,
+		Layer:           string(layer),
+		SubjectID:       subjectID,
+		ResourcePattern: resourcePattern,
+	})
 	if err := s.q.DeleteCerebroToolPolicy(ctx, cerebrodb.DeleteCerebroToolPolicyParams{
 		WorkspaceID:     workspaceID,
 		ToolKey:         toolKey,
@@ -381,6 +434,9 @@ func (s *Store) Clear(ctx context.Context, workspaceID pgtype.UUID, toolKey stri
 		ResourcePattern: resourcePattern,
 	}); err != nil {
 		return fmt.Errorf("toolpolicy: clear: %w", err)
+	}
+	if getErr == nil {
+		s.recordAudit(ctx, workspaceID, toolKey, layer, subjectID, resourcePattern, "clear", oldSetting, "", clearedBy)
 	}
 	return nil
 }
@@ -424,6 +480,173 @@ func (s *Store) ListForSubject(ctx context.Context, workspaceID pgtype.UUID, lay
 			Conditions:      cond,
 			UpdatedBy:       r.UpdatedBy,
 			UpdatedAt:       r.UpdatedAt,
+		})
+	}
+	return out, nil
+}
+
+// Holder is one explicit policy row for a single tool: which layer set it, on
+// which subject, for which resource pattern, and to what setting. It is the
+// reverse of SubjectSetting (one subject, all tools) — one tool, all subjects
+// and layers — and backs the per-permission detail page's "who has this
+// permission and which layer grants it" tab (FIR-3091 punkt 8).
+type Holder struct {
+	Layer           string
+	SubjectID       pgtype.UUID
+	ResourcePattern string
+	Setting         Setting
+	UpdatedBy       pgtype.UUID
+	UpdatedAt       time.Time
+}
+
+// Holders returns every explicit setting authored for one tool across all
+// layers and subjects in the workspace, ordered by layer, subject, then
+// resource pattern. An unconfigured tool returns an empty slice, never an error.
+func (s *Store) Holders(ctx context.Context, workspaceID pgtype.UUID, toolKey string) ([]Holder, error) {
+	rows, err := s.q.ListCerebroToolPolicyHolders(ctx, cerebrodb.ListCerebroToolPolicyHoldersParams{
+		WorkspaceID: workspaceID,
+		ToolKey:     toolKey,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("toolpolicy: list holders: %w", err)
+	}
+	out := make([]Holder, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, Holder{
+			Layer:           r.Layer,
+			SubjectID:       r.SubjectID,
+			ResourcePattern: r.ResourcePattern,
+			Setting:         Setting(r.Setting),
+			UpdatedBy:       r.UpdatedBy,
+			UpdatedAt:       r.UpdatedAt.Time,
+		})
+	}
+	return out, nil
+}
+
+// Change is one change-log row for a tool: which layer/subject/pattern was
+// written, whether it was a set or a clear, the old -> new setting transition,
+// and who did it (FIR-3091 punkt 8 fase 2). OldSetting "" means the layer held
+// no explicit row before the write; NewSetting "" means the row was cleared.
+type Change struct {
+	Layer           string
+	SubjectID       pgtype.UUID
+	ResourcePattern string
+	Action          string
+	OldSetting      string
+	NewSetting      string
+	ActorType       string
+	ActorID         pgtype.UUID
+	CreatedAt       time.Time
+}
+
+// Changes returns one tool's change history, newest first, capped at limit
+// rows. A tool with no recorded changes returns an empty slice, never an error.
+func (s *Store) Changes(ctx context.Context, workspaceID pgtype.UUID, toolKey string, limit int32) ([]Change, error) {
+	rows, err := s.q.ListCerebroToolPolicyAuditForTool(ctx, cerebrodb.ListCerebroToolPolicyAuditForToolParams{
+		WorkspaceID: workspaceID,
+		ToolKey:     toolKey,
+		RowLimit:    limit,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("toolpolicy: list changes: %w", err)
+	}
+	out := make([]Change, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, Change{
+			Layer:           r.Layer,
+			SubjectID:       r.SubjectID,
+			ResourcePattern: r.ResourcePattern,
+			Action:          r.Action,
+			OldSetting:      r.OldSetting,
+			NewSetting:      r.NewSetting,
+			ActorType:       r.ActorType,
+			ActorID:         r.ActorID,
+			CreatedAt:       r.CreatedAt.Time,
+		})
+	}
+	return out, nil
+}
+
+// UsageParams describes one applied permission decision for the usage log
+// (FIR-3091 punkt 8 fase 3): which tool was enforced, at which gate, for whom,
+// on which concrete resource, and what the decision was. DecidedBy is the layer
+// whose rule decided; "" means no explicit rule matched and the gate's
+// base/baseline answered.
+type UsageParams struct {
+	WorkspaceID      pgtype.UUID
+	ToolKey          string
+	EnforcementPoint string
+	SubjectType      string // "member" | "agent" | "system"
+	SubjectID        pgtype.UUID
+	Resource         string
+	Decision         Setting
+	DecidedBy        string
+}
+
+// RecordUsage appends one usage-log row after a permission decision was
+// applied at an enforcement point (FIR-3091 punkt 8 fase 3). Best-effort by
+// design: the decision has already been applied, and failing the guarded
+// action over a missing history row would be worse than a gap in the log (the
+// same trade-off recordAudit makes). A subject without a valid id is recorded
+// as a system subject; a Disable verdict is recorded as the deny it acts as.
+func (s *Store) RecordUsage(ctx context.Context, p UsageParams) {
+	if s == nil || s.q == nil {
+		return
+	}
+	subjectType := p.SubjectType
+	if !p.SubjectID.Valid {
+		subjectType = "system"
+	}
+	decision := p.Decision
+	if decision == SettingDisable {
+		decision = SettingDeny
+	}
+	_ = s.q.RecordCerebroToolPolicyUsage(ctx, cerebrodb.RecordCerebroToolPolicyUsageParams{
+		WorkspaceID:      p.WorkspaceID,
+		ToolKey:          p.ToolKey,
+		EnforcementPoint: p.EnforcementPoint,
+		SubjectType:      subjectType,
+		SubjectID:        p.SubjectID,
+		Resource:         p.Resource,
+		Decision:         string(decision),
+		DecidedBy:        p.DecidedBy,
+	})
+}
+
+// UsageRow is one usage-log row for a tool: which gate applied a decision, to
+// whom, on which resource, and what was decided (FIR-3091 punkt 8 fase 3).
+type UsageRow struct {
+	EnforcementPoint string
+	SubjectType      string
+	SubjectID        pgtype.UUID
+	Resource         string
+	Decision         string
+	DecidedBy        string
+	CreatedAt        time.Time
+}
+
+// Usage returns one tool's usage history, newest first, capped at limit rows.
+// A tool with no recorded usage returns an empty slice, never an error.
+func (s *Store) Usage(ctx context.Context, workspaceID pgtype.UUID, toolKey string, limit int32) ([]UsageRow, error) {
+	rows, err := s.q.ListCerebroToolPolicyUsageForTool(ctx, cerebrodb.ListCerebroToolPolicyUsageForToolParams{
+		WorkspaceID: workspaceID,
+		ToolKey:     toolKey,
+		RowLimit:    limit,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("toolpolicy: list usage: %w", err)
+	}
+	out := make([]UsageRow, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, UsageRow{
+			EnforcementPoint: r.EnforcementPoint,
+			SubjectType:      r.SubjectType,
+			SubjectID:        r.SubjectID,
+			Resource:         r.Resource,
+			Decision:         r.Decision,
+			DecidedBy:        r.DecidedBy,
+			CreatedAt:        r.CreatedAt.Time,
 		})
 	}
 	return out, nil

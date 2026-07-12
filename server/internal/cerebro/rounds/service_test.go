@@ -58,3 +58,24 @@ func TestRunStatus(t *testing.T) {
 		}
 	}
 }
+
+func TestNormalizeModeAcceptsOnlyLiveOrBatch(t *testing.T) {
+	for _, tt := range []struct{ in, want string }{{"live", "live"}, {"batch", "batch"}, {"", "batch"}} {
+		got, err := normalizeMode(tt.in)
+		if err != nil || got != tt.want {
+			t.Fatalf("normalizeMode(%q) = %q, %v; want %q", tt.in, got, err, tt.want)
+		}
+	}
+	if _, err := normalizeMode("automatic"); err == nil {
+		t.Fatal("expected unsupported mode to fail")
+	}
+}
+
+func TestShouldHoldCommentOnlyForBatchRounds(t *testing.T) {
+	if shouldHoldComment("live") {
+		t.Fatal("live rounds must dispatch comments immediately")
+	}
+	if !shouldHoldComment("batch") {
+		t.Fatal("batch rounds must hold comments until Run")
+	}
+}

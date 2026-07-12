@@ -51,7 +51,7 @@ test("Usage explorer filters every result and opens a Multica run", async ({ pag
 
     const token = api.getToken()!;
     await page.addInitScript((value) => localStorage.setItem("multica_token", value), token);
-    await page.goto(`/${workspace.slug}/usage`);
+    await page.goto(`/${workspace.slug}/dashboard`);
 
     await expect(page.getByRole("heading", { name: "Filter every result" })).toBeVisible();
     await expect(page.getByText("$0.42")).toBeVisible();

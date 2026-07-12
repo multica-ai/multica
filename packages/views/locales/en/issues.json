@@ -287,6 +287,8 @@
     "cmdf_toast_title": "Find on page only covers what's visible",
     "cmdf_toast_description": "The timeline is virtualized — ⌘F can't see off-screen comments. Full in-app search is coming.",
     "update_failed": "Failed to update issue",
+    "_comment_session_expired": "CEREBRO-PATCH(description-drafts): FIR-2648",
+    "session_expired_toast": "Your session expired while editing. Your text was saved on this device — reload the page and sign in again to recover it.",
     "link_copied": "Link copied",
     "link_copy_failed": "Failed to copy link",
     "workdir_path_copied": "Workdir path copied",

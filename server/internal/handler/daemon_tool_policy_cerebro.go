@@ -172,7 +172,7 @@ func (h *Handler) ResolveDaemonToolPolicy(w http.ResponseWriter, r *http.Request
 	// Resolved once and reused across the capability-wide and per-resource calls.
 	celEval := h.daemonPolicyCELEvaluator(r.Context(), wsUUID)
 	// This is the local-runtime twin of the gateway's GENERAL tool-policy gate, so
-	// it resolves through ResolveGeneral behind the default-OFF cerebro_member_override
+	// it resolves through ResolveGeneral behind the default-on cerebro_member_override
 	// flag: on → the member-override model (a member may loosen an inherited group/
 	// workspace default), off → identical to the tighten-only Resolve. Resolved once
 	// and reused across the capability-wide and per-resource calls so both see the
@@ -240,6 +240,36 @@ func (h *Handler) ResolveDaemonToolPolicy(w http.ResponseWriter, r *http.Request
 	}
 
 	decision := localtoolpolicy.Decide(mode, eff)
+
+	// FIR-3091 punkt 8 fase 3: usage log — one row per ENFORCED local-CLI
+	// verdict, so the permission detail page can show every time the tool's
+	// policy was applied on a local runtime. Observe is a dry run (nothing is
+	// applied) and records nothing; the connection fold above is recorded under
+	// its own connection:<name> key when it decided. Best-effort.
+	if decision.Enforced {
+		store.RecordUsage(r.Context(), toolpolicy.UsageParams{
+			WorkspaceID:      wsUUID,
+			ToolKey:          toolKey,
+			EnforcementPoint: "local_cli",
+			SubjectType:      "agent",
+			SubjectID:        agentID,
+			Resource:         strings.TrimSpace(req.ResourcePattern),
+			Decision:         eff.Setting,
+			DecidedBy:        string(eff.DecidedBy),
+		})
+		if connName != "" {
+			store.RecordUsage(r.Context(), toolpolicy.UsageParams{
+				WorkspaceID:      wsUUID,
+				ToolKey:          toolpolicy.ConnectionToolKey(connName),
+				EnforcementPoint: "local_cli",
+				SubjectType:      "agent",
+				SubjectID:        agentID,
+				Resource:         req.ToolName,
+				Decision:         eff.Setting,
+				DecidedBy:        string(eff.DecidedBy),
+			})
+		}
+	}
 
 	// Enforce-stage Ask: raise (or rejoin) one shared-inbox approval and return
 	// its decision + id so the daemon can long-poll. Gate off while enforce is on
@@ -324,6 +354,18 @@ func (h *Handler) resolveAgentBrowserAllowed(ctx context.Context, wsID, runtimeI
 			"workspace_id", util.UUIDToString(wsID), "agent_id", util.UUIDToString(agentID), "error", err)
 		return false
 	}
+	// FIR-3091 punkt 8 fase 3: usage log — one row per applied sandbox verdict,
+	// so the permission detail page can show every time tools:agent-browser was
+	// enforced. Best-effort after the decision resolved.
+	store.RecordUsage(ctx, toolpolicy.UsageParams{
+		WorkspaceID:      wsID,
+		ToolKey:          agentBrowserToolKey,
+		EnforcementPoint: "agent_browser_sandbox",
+		SubjectType:      "agent",
+		SubjectID:        agentID,
+		Decision:         eff.Setting,
+		DecidedBy:        string(eff.DecidedBy),
+	})
 	return eff.Setting == toolpolicy.SettingAllow || eff.Setting == toolpolicy.SettingAsk
 }
 
@@ -391,7 +433,7 @@ func (h *Handler) localToolPolicyMode(ctx context.Context, wsID pgtype.UUID) loc
 	return localtoolpolicy.ModeFromFlags(enabled, enforce)
 }
 
-// daemonMemberOverrideEnabled reports whether the default-OFF cerebro_member_override
+// daemonMemberOverrideEnabled reports whether the default-on cerebro_member_override
 // flag is on for the workspace — the switch that makes the local-runtime GENERAL
 // tool-policy gate resolve through the member-override model (a member may loosen
 // an inherited group default) instead of the pure tighten-only chain. It mirrors

@@ -1156,6 +1156,34 @@ type CerebroToolPolicy struct {
 	Conditions      []byte             `json:"conditions"`
 }
 
+type CerebroToolPolicyAudit struct {
+	ID              pgtype.UUID        `json:"id"`
+	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
+	ToolKey         string             `json:"tool_key"`
+	Layer           string             `json:"layer"`
+	SubjectID       pgtype.UUID        `json:"subject_id"`
+	ResourcePattern string             `json:"resource_pattern"`
+	Action          string             `json:"action"`
+	OldSetting      string             `json:"old_setting"`
+	NewSetting      string             `json:"new_setting"`
+	ActorType       string             `json:"actor_type"`
+	ActorID         pgtype.UUID        `json:"actor_id"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+}
+
+type CerebroToolPolicyUsage struct {
+	ID               pgtype.UUID        `json:"id"`
+	WorkspaceID      pgtype.UUID        `json:"workspace_id"`
+	ToolKey          string             `json:"tool_key"`
+	EnforcementPoint string             `json:"enforcement_point"`
+	SubjectType      string             `json:"subject_type"`
+	SubjectID        pgtype.UUID        `json:"subject_id"`
+	Resource         string             `json:"resource"`
+	Decision         string             `json:"decision"`
+	DecidedBy        string             `json:"decided_by"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+}
+
 type CerebroUserInfisicalFolder struct {
 	ID          pgtype.UUID        `json:"id"`
 	WorkspaceID pgtype.UUID        `json:"workspace_id"`

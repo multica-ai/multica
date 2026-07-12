@@ -715,12 +715,23 @@ func (h *Handler) UpdateNote(w http.ResponseWriter, r *http.Request) {
 	if req.BaseUpdatedAt != nil && *req.BaseUpdatedAt != "" {
 		serverTS := tsStr(artifact.UpdatedAt)
 		if *req.BaseUpdatedAt != serverTS {
-			writeJSON(w, http.StatusConflict, noteConflictResponse{
-				Conflict:    true,
-				ServerBody:  artifact.Body,
-				ServerTitle: artifact.Title,
-			})
-			return
+			// FIR-2810 review (Jesper, 2026-07-11): the author-code stamper
+			// can fire on a stale base (blur in an old tab while a save is
+			// settling). When the incoming body is exactly the current body
+			// plus system-inserted stamps, nothing can be lost — accept it
+			// instead of opening the merge dialog. Anything else, including
+			// the user's own edits from elsewhere, still conflicts.
+			stampOnly := req.Body != nil &&
+				(req.Title == nil || *req.Title == artifact.Title) &&
+				bodyOnlyAddsAuthorStamps(artifact.Body, *req.Body)
+			if !stampOnly {
+				writeJSON(w, http.StatusConflict, noteConflictResponse{
+					Conflict:    true,
+					ServerBody:  artifact.Body,
+					ServerTitle: artifact.Title,
+				})
+				return
+			}
 		}
 	}
 

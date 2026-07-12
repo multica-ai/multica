@@ -6,7 +6,7 @@ vi.mock("@multica/core/api", async (importOriginal) => {
   return { ...actual, api: { ...actual.api, cerebroRequest } };
 });
 
-import { fetchSkillUsage } from "./api";
+import { fetchSkillUsage, fetchUsageExplorer } from "./api";
 import { parseUsageExplorer } from "./api";
 
 describe("fetchSkillUsage", () => {
@@ -31,6 +31,23 @@ describe("fetchSkillUsage", () => {
     await fetchSkillUsage(30, null, ["TDD"], ["Legacy"]);
     expect(cerebroRequest).toHaveBeenCalledWith(
       "/api/dashboard/usage/skills?days=30&skill=TDD&exclude.skill=Legacy",
+    );
+  });
+});
+
+describe("fetchUsageExplorer", () => {
+  beforeEach(() => cerebroRequest.mockReset());
+
+  it("normalizes the dashboard grain to the API vocabulary", async () => {
+    cerebroRequest.mockResolvedValue({
+      summary: { runs: 0, tokens: 0, actual_cost_cents: 0, calculated_cost_runs: 0, missing_cost_runs: 0 },
+      facets: {}, runs: [], total: 0, savings: [],
+    });
+
+    await fetchUsageExplorer("days=30&grain=day&limit=50");
+
+    expect(cerebroRequest).toHaveBeenCalledWith(
+      "/api/dashboard/usage/explorer?days=30&grain=daily&limit=50",
     );
   });
 });

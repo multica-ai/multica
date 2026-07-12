@@ -101,3 +101,34 @@ describe("countUnreadInboxConversations (FIR-2382)", () => {
     expect(countUnreadInboxConversations([], { excludeThreadReplies: false })).toBe(0);
   });
 });
+
+// FIR-3114 — round-member issues surface only inside the Rounds box: the badge
+// must not count them, mirroring the server-side count-query exclusion.
+describe("countUnreadInboxConversations round exclusion (FIR-3114)", () => {
+  it("drops unread items whose issue is in one of the user's rounds", () => {
+    const items = [
+      inboxItem({ id: "a", issue_id: "round-issue", read: false }),
+      inboxItem({ id: "b", issue_id: "plain-issue", read: false }),
+    ];
+    expect(
+      countUnreadInboxConversations(items, {
+        excludeThreadReplies: false,
+        excludeIssueIds: new Set(["round-issue"]),
+      }),
+    ).toBe(1);
+  });
+
+  it("keeps items without an issue id and counts normally when no exclusion set is given", () => {
+    const items = [
+      inboxItem({ id: "a", issue_id: null as unknown as string, read: false }),
+      inboxItem({ id: "b", issue_id: "round-issue", read: false }),
+    ];
+    expect(countUnreadInboxConversations(items, { excludeThreadReplies: false })).toBe(2);
+    expect(
+      countUnreadInboxConversations(items, {
+        excludeThreadReplies: false,
+        excludeIssueIds: new Set(["round-issue"]),
+      }),
+    ).toBe(1);
+  });
+});

@@ -59,7 +59,15 @@ Hver PR til `main` skal have ÉT af to labels: `staging-only` eller `prod-ready`
 **Produktion (`production` → `Multica.firtal.com`):**
 1. Åbn `https://Multica.firtal.com` og tjek at appen loader
 2. Tjek Sliplane's deploy-log for fejl
-3. Rollback via Sliplane hvis containeren fejler — eller revert commit på `production`-grenen
+
+## Rollback
+
+Brug denne rækkefølge, hvis en ændring fejler efter deploy:
+
+1. Slå det berørte feature-flag fra, hvis ændringen er beskyttet af et flag.
+2. Brug fix-forward til en lille, isoleret fejl, der kan rettes og verificeres med det samme.
+3. Revert ellers ændringen på `production`-grenen og lad Sliplane deploye den tidligere version igen.
+4. Hvis den nye container ikke starter, vælg den seneste fungerende deployment i Sliplane-dashboardet, og verificér derefter `https://Multica.firtal.com` samt Sliplane-loggen.
 
 ## Launchd-jobs (staging — på sara-serveren)
 
