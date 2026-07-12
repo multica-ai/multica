@@ -6,6 +6,10 @@
     "url_placeholder": "my-workspace",
     "submit": "创建工作区",
     "submitting": "创建中...",
+    "members_label": "添加成员",
+    "members_hint": "来自你其他工作区的人会立即获得访问权限，无需邀请步骤。",
+    "members_search_placeholder": "按姓名或邮箱搜索",
+    "members_empty": "没有匹配的人",
     "errors": {
       "slug_format": "只能包含小写字母、数字和连字符",
       "slug_taken": "该工作区 URL 已被占用。",
@@ -19,7 +23,7 @@
     "log_out": "退出登录",
     "title": "欢迎使用 Multica",
     "description": "一个工作区，让你和 AI 队友并肩协作——一起处理 issue、留下评论、共享同一份上下文。",
-    "invite_hint": "工作区创建后可邀请队友加入。"
+    "invite_hint": "创建时即可从其他工作区添加队友。"
   },
   "creation_disabled": {
     "title": "已禁用创建工作区",

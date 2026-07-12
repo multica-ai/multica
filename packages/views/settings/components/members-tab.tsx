@@ -1,9 +1,9 @@
 "use client";
 
-import { useState } from "react";
-import { Crown, Shield, User, Plus, MoreHorizontal, UserMinus, Clock, X, Mail } from "lucide-react";
+import { useMemo, useState } from "react";
+import { Crown, Shield, User, Plus, MoreHorizontal, UserMinus } from "lucide-react";
 import { ActorAvatar } from "../../common/actor-avatar";
-import type { MemberWithUser, MemberRole, Invitation } from "@multica/core/types";
+import type { MemberWithUser, MemberRole, KnownUser } from "@multica/core/types";
 import { Input } from "@multica/ui/components/ui/input";
 import { Button } from "@multica/ui/components/ui/button";
 import { Card, CardContent } from "@multica/ui/components/ui/card";
@@ -40,10 +40,15 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useCurrentWorkspace } from "@multica/core/paths";
-import { memberListOptions, invitationListOptions, workspaceKeys } from "@multica/core/workspace/queries";
+import {
+  addableUserListOptions,
+  memberListOptions,
+  workspaceKeys,
+} from "@multica/core/workspace/queries";
 import { api } from "@multica/core/api";
 import { useT } from "../../i18n";
 import { SettingsCard, SettingsSection, SettingsTab } from "./settings-layout";
+import { matchesPinyin } from "../../editor/extensions/pinyin-match";
 
 const ROLE_ICONS: Record<MemberRole, typeof Crown> = {
   owner: Crown,
@@ -85,8 +90,6 @@ function MemberRow({
   member: MemberWithUser;
   canManage: boolean;
   canManageOwners: boolean;
-  /** Total number of owners in this workspace — needed to gate demoting the
-   *  last owner per `workspace.go:497-507`. */
   ownerCount: number;
   isSelf: boolean;
   busy: boolean;
@@ -182,47 +185,25 @@ function MemberRow({
   );
 }
 
-function InvitationRow({
-  invitation,
-  canManage,
-  onRevoke,
+function AddableUserRow({
+  user,
   busy,
+  onAdd,
 }: {
-  invitation: Invitation;
-  canManage: boolean;
-  onRevoke: () => void;
+  user: KnownUser;
   busy: boolean;
+  onAdd: () => void;
 }) {
-  const { t } = useT("settings");
-  const roleConfig = useRoleLabels();
-  const rc = roleConfig[invitation.role];
-
   return (
-    <div className="flex items-center gap-3 px-4 py-3">
-      <div className="flex h-8 w-8 items-center justify-center rounded-full bg-muted">
-        <Mail className="h-4 w-4 text-muted-foreground" />
-      </div>
+    <div className="flex items-center gap-3 px-4 py-2.5">
+      <ActorAvatar actorType="member" actorId={user.id} size="sm" />
       <div className="min-w-0 flex-1">
-        <div className="text-sm font-medium truncate">{invitation.invitee_email}</div>
-        <div className="flex items-center gap-1 text-xs text-muted-foreground">
-          <Clock className="h-3 w-3" />
-          <span>{t(($) => $.members.pending_status)}</span>
-        </div>
+        <div className="text-sm font-medium truncate">{user.name}</div>
+        <div className="text-xs text-muted-foreground truncate">{user.email}</div>
       </div>
-      {canManage && (
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          disabled={busy}
-          onClick={onRevoke}
-          title={t(($) => $.members.revoke_invitation_tooltip)}
-        >
-          <X className="h-4 w-4 text-muted-foreground" />
-        </Button>
-      )}
-      <Badge variant="outline">
-        {rc.label}
-      </Badge>
+      <Button size="sm" variant="outline" disabled={busy} onClick={onAdd}>
+        Add
+      </Button>
     </div>
   );
 }
@@ -235,13 +216,14 @@ export function MembersTab() {
   const qc = useQueryClient();
   const wsId = useWorkspaceId();
   const { data: members = [] } = useQuery(memberListOptions(wsId));
-  const { data: invitations = [] } = useQuery(invitationListOptions(wsId));
+  const { data: addableUsers = [] } = useQuery(addableUserListOptions(wsId));
 
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteRole, setInviteRole] = useState<MemberRole>("member");
+  const [memberFilter, setMemberFilter] = useState("");
   const [inviteLoading, setInviteLoading] = useState(false);
+  const [addingUserId, setAddingUserId] = useState<string | null>(null);
   const [memberActionId, setMemberActionId] = useState<string | null>(null);
-  const [invitationActionId, setInvitationActionId] = useState<string | null>(null);
   const [confirmAction, setConfirmAction] = useState<{
     title: string;
     description: string;
@@ -254,44 +236,60 @@ export function MembersTab() {
   const isOwner = currentMember?.role === "owner";
   const ownerCount = members.filter((m) => m.role === "owner").length;
 
-  const handleInviteMember = async () => {
+  const filteredAddableUsers = useMemo(() => {
+    const q = memberFilter.trim().toLowerCase();
+    if (!q) return addableUsers;
+    return addableUsers.filter(
+      (u) =>
+        u.name.toLowerCase().includes(q) ||
+        u.email.toLowerCase().includes(q) ||
+        matchesPinyin(u.name, q),
+    );
+  }, [addableUsers, memberFilter]);
+
+  const invalidateMemberQueries = () => {
+    qc.invalidateQueries({ queryKey: workspaceKeys.members(wsId) });
+    qc.invalidateQueries({ queryKey: workspaceKeys.addableUsers(wsId) });
+    qc.invalidateQueries({ queryKey: workspaceKeys.list() });
+  };
+
+  const handleAddMember = async (data: { user_id?: string; email?: string }) => {
     if (!workspace) return;
     setInviteLoading(true);
     try {
       await api.createMember(workspace.id, {
-        email: inviteEmail,
+        ...data,
         role: inviteRole,
       });
       setInviteEmail("");
-      setInviteRole("member");
-      qc.invalidateQueries({ queryKey: workspaceKeys.invitations(wsId) });
-      toast.success(t(($) => $.members.toast_invitation_sent));
+      invalidateMemberQueries();
+      toast.success(t(($) => $.members.toast_member_added));
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : t(($) => $.members.toast_invitation_failed));
+      toast.error(e instanceof Error ? e.message : t(($) => $.members.toast_member_add_failed));
     } finally {
       setInviteLoading(false);
     }
   };
 
-  const handleRevokeInvitation = (invitation: Invitation) => {
-    if (!workspace) return;
-    setConfirmAction({
-      title: t(($) => $.members.revoke_invitation_title),
-      description: t(($) => $.members.revoke_invitation_description, { email: invitation.invitee_email }),
-      variant: "destructive",
-      onConfirm: async () => {
-        setInvitationActionId(invitation.id);
-        try {
-          await api.revokeInvitation(workspace.id, invitation.id);
-          qc.invalidateQueries({ queryKey: workspaceKeys.invitations(wsId) });
-          toast.success(t(($) => $.members.toast_invitation_revoked));
-        } catch (e) {
-          toast.error(e instanceof Error ? e.message : t(($) => $.members.toast_invitation_revoke_failed));
-        } finally {
-          setInvitationActionId(null);
-        }
-      },
-    });
+  const handleAddKnownUser = async (knownUser: KnownUser) => {
+    setAddingUserId(knownUser.id);
+    try {
+      await api.createMember(workspace!.id, {
+        user_id: knownUser.id,
+        role: inviteRole,
+      });
+      invalidateMemberQueries();
+      toast.success(t(($) => $.members.toast_member_added));
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : t(($) => $.members.toast_member_add_failed));
+    } finally {
+      setAddingUserId(null);
+    }
+  };
+
+  const handleInviteByEmail = async () => {
+    if (!inviteEmail.trim()) return;
+    await handleAddMember({ email: inviteEmail.trim() });
   };
 
   const handleRoleChange = async (memberId: string, role: MemberRole) => {
@@ -318,7 +316,7 @@ export function MembersTab() {
         setMemberActionId(member.id);
         try {
           await api.deleteMember(workspace.id, member.id);
-          qc.invalidateQueries({ queryKey: workspaceKeys.members(wsId) });
+          invalidateMemberQueries();
           toast.success(t(($) => $.members.toast_member_removed));
         } catch (e) {
           toast.error(e instanceof Error ? e.message : t(($) => $.members.toast_member_remove_failed));
@@ -337,40 +335,76 @@ export function MembersTab() {
 
         {canManageWorkspace && (
           <Card>
-            <CardContent className="space-y-3">
+            <CardContent className="space-y-4">
               <div className="flex items-center gap-2">
                 <Plus className="h-4 w-4 text-muted-foreground" />
-                <h3 className="text-sm font-medium">{t(($) => $.members.invite_title)}</h3>
+                <h3 className="text-sm font-medium">{t(($) => $.members.add_title)}</h3>
               </div>
-              <div className="grid gap-3 sm:grid-cols-[1fr_120px_auto]">
-                <Input
-                  type="email"
-                  name="invite-email"
-                  autoComplete="email"
-                  spellCheck={false}
-                  aria-label={t(($) => $.members.invite_email_placeholder)}
-                  value={inviteEmail}
-                  onChange={(e) => setInviteEmail(e.target.value)}
-                  placeholder={t(($) => $.members.invite_email_placeholder)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" && inviteEmail.trim()) handleInviteMember();
-                  }}
-                />
-                <Select value={inviteRole} onValueChange={(value) => setInviteRole(value as MemberRole)}>
-                  <SelectTrigger size="sm">
-                    <SelectValue>{() => roleConfig[inviteRole].label}</SelectValue>
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="member">{roleConfig.member.label}</SelectItem>
-                    <SelectItem value="admin">{roleConfig.admin.label}</SelectItem>
-                  </SelectContent>
-                </Select>
-                <Button
-                  onClick={handleInviteMember}
-                  disabled={inviteLoading || !inviteEmail.trim()}
-                >
-                  {inviteLoading ? t(($) => $.members.inviting) : t(($) => $.members.invite_button)}
-                </Button>
+
+              {addableUsers.length > 0 && (
+                <div className="space-y-2">
+                  <p className="text-xs text-muted-foreground">
+                    {t(($) => $.members.add_known_hint)}
+                  </p>
+                  <Input
+                    type="search"
+                    value={memberFilter}
+                    onChange={(e) => setMemberFilter(e.target.value)}
+                    placeholder={t(($) => $.members.add_search_placeholder)}
+                  />
+                  <SettingsCard>
+                    {filteredAddableUsers.length === 0 ? (
+                      <div className="px-4 py-3 text-sm text-muted-foreground">
+                        {t(($) => $.members.add_empty)}
+                      </div>
+                    ) : (
+                      filteredAddableUsers.map((u) => (
+                        <AddableUserRow
+                          key={u.id}
+                          user={u}
+                          busy={addingUserId === u.id || inviteLoading}
+                          onAdd={() => void handleAddKnownUser(u)}
+                        />
+                      ))
+                    )}
+                  </SettingsCard>
+                </div>
+              )}
+
+              <div className="space-y-2">
+                <p className="text-xs text-muted-foreground">
+                  {t(($) => $.members.add_email_hint)}
+                </p>
+                <div className="grid gap-3 sm:grid-cols-[1fr_120px_auto]">
+                  <Input
+                    type="email"
+                    name="invite-email"
+                    autoComplete="email"
+                    spellCheck={false}
+                    aria-label={t(($) => $.members.invite_email_placeholder)}
+                    value={inviteEmail}
+                    onChange={(e) => setInviteEmail(e.target.value)}
+                    placeholder={t(($) => $.members.invite_email_placeholder)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && inviteEmail.trim()) void handleInviteByEmail();
+                    }}
+                  />
+                  <Select value={inviteRole} onValueChange={(value) => setInviteRole(value as MemberRole)}>
+                    <SelectTrigger size="sm">
+                      <SelectValue>{() => roleConfig[inviteRole].label}</SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="member">{roleConfig.member.label}</SelectItem>
+                      <SelectItem value="admin">{roleConfig.admin.label}</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <Button
+                    onClick={() => void handleInviteByEmail()}
+                    disabled={inviteLoading || !inviteEmail.trim()}
+                  >
+                    {inviteLoading ? t(($) => $.members.adding) : t(($) => $.members.add_button)}
+                  </Button>
+                </div>
               </div>
             </CardContent>
           </Card>
@@ -397,23 +431,6 @@ export function MembersTab() {
           <p className="text-sm text-muted-foreground">{t(($) => $.members.no_members)}</p>
         )}
       </SettingsSection>
-
-      {invitations.length > 0 && (
-        <SettingsSection title={t(($) => $.members.pending_title, { count: invitations.length })}>
-          <SettingsCard>
-            {invitations.map((inv) => (
-              <div key={inv.id}>
-                <InvitationRow
-                  invitation={inv}
-                  canManage={canManageWorkspace}
-                  onRevoke={() => handleRevokeInvitation(inv)}
-                  busy={invitationActionId === inv.id}
-                />
-              </div>
-            ))}
-          </SettingsCard>
-        </SettingsSection>
-      )}
 
       <AlertDialog open={!!confirmAction} onOpenChange={(v) => { if (!v) setConfirmAction(null); }}>
         <AlertDialogContent>

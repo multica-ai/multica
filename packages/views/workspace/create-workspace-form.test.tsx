@@ -26,7 +26,12 @@ function I18nWrapper({ children }: { children: ReactNode }) {
 }
 
 function renderForm(onSuccess = vi.fn()) {
-  const qc = new QueryClient();
+  const qc = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+  qc.setQueryData(["known-users"], [
+    { id: "u-2", name: "Bob", email: "bob@example.com", avatar_url: null },
+  ]);
   return render(
     <QueryClientProvider client={qc}>
       <CreateWorkspaceForm onSuccess={onSuccess} />
@@ -114,6 +119,26 @@ describe("CreateWorkspaceForm", () => {
     expect(
       screen.getByRole("button", { name: /create workspace/i }),
     ).toBeDisabled();
+  });
+
+  it("shows known users and passes selected member_user_ids on create", async () => {
+    renderForm();
+    fireEvent.change(screen.getByLabelText(/workspace name/i), {
+      target: { value: "Team Hub" },
+    });
+    await waitFor(() => expect(screen.getByText("Bob")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("checkbox"));
+    fireEvent.click(screen.getByRole("button", { name: /create workspace/i }));
+    await waitFor(() =>
+      expect(mockMutate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          name: "Team Hub",
+          slug: "team-hub",
+          member_user_ids: ["u-2"],
+        }),
+        expect.any(Object),
+      ),
+    );
   });
 
   it("disables submit when slug is reserved", () => {

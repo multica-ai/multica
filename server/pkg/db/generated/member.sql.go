@@ -86,6 +86,124 @@ func (q *Queries) GetMemberByUserAndWorkspace(ctx context.Context, arg GetMember
 	return i, err
 }
 
+const isKnownCoworker = `-- name: IsKnownCoworker :one
+SELECT EXISTS (
+  SELECT 1
+  FROM member m1
+  JOIN member m2 ON m1.workspace_id = m2.workspace_id
+  WHERE m1.user_id = $1 AND m2.user_id = $2
+) AS is_coworker
+`
+
+type IsKnownCoworkerParams struct {
+	UserID   pgtype.UUID `json:"user_id"`
+	UserID_2 pgtype.UUID `json:"user_id_2"`
+}
+
+func (q *Queries) IsKnownCoworker(ctx context.Context, arg IsKnownCoworkerParams) (bool, error) {
+	row := q.db.QueryRow(ctx, isKnownCoworker, arg.UserID, arg.UserID_2)
+	var is_coworker bool
+	err := row.Scan(&is_coworker)
+	return is_coworker, err
+}
+
+const listAddableUsersForWorkspace = `-- name: ListAddableUsersForWorkspace :many
+SELECT DISTINCT u.id, u.name, u.email, u.avatar_url
+FROM "user" u
+JOIN member m ON m.user_id = u.id
+WHERE m.workspace_id IN (
+  SELECT om.workspace_id FROM member om WHERE om.user_id = $1
+)
+AND u.id != $1
+AND NOT EXISTS (
+  SELECT 1 FROM member tm
+  WHERE tm.workspace_id = $2 AND tm.user_id = u.id
+)
+ORDER BY u.name ASC, u.email ASC
+`
+
+type ListAddableUsersForWorkspaceParams struct {
+	UserID      pgtype.UUID `json:"user_id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+type ListAddableUsersForWorkspaceRow struct {
+	ID        pgtype.UUID `json:"id"`
+	Name      string      `json:"name"`
+	Email     string      `json:"email"`
+	AvatarUrl pgtype.Text `json:"avatar_url"`
+}
+
+// Known users who are not already members of the target workspace.
+func (q *Queries) ListAddableUsersForWorkspace(ctx context.Context, arg ListAddableUsersForWorkspaceParams) ([]ListAddableUsersForWorkspaceRow, error) {
+	rows, err := q.db.Query(ctx, listAddableUsersForWorkspace, arg.UserID, arg.WorkspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListAddableUsersForWorkspaceRow{}
+	for rows.Next() {
+		var i ListAddableUsersForWorkspaceRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.Email,
+			&i.AvatarUrl,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listKnownUsers = `-- name: ListKnownUsers :many
+SELECT DISTINCT u.id, u.name, u.email, u.avatar_url
+FROM "user" u
+JOIN member m ON m.user_id = u.id
+WHERE m.workspace_id IN (
+  SELECT om.workspace_id FROM member om WHERE om.user_id = $1
+)
+AND u.id != $1
+ORDER BY u.name ASC, u.email ASC
+`
+
+type ListKnownUsersRow struct {
+	ID        pgtype.UUID `json:"id"`
+	Name      string      `json:"name"`
+	Email     string      `json:"email"`
+	AvatarUrl pgtype.Text `json:"avatar_url"`
+}
+
+// Users who share at least one workspace with the requester (excluding self).
+func (q *Queries) ListKnownUsers(ctx context.Context, userID pgtype.UUID) ([]ListKnownUsersRow, error) {
+	rows, err := q.db.Query(ctx, listKnownUsers, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListKnownUsersRow{}
+	for rows.Next() {
+		var i ListKnownUsersRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.Email,
+			&i.AvatarUrl,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listMembers = `-- name: ListMembers :many
 SELECT id, workspace_id, user_id, role, created_at FROM member
 WHERE workspace_id = $1

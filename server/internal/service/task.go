@@ -57,10 +57,6 @@ type TaskService struct {
 	// exactly as before. Wired in router.go after composiointeg.NewService
 	// succeeds; the concrete type is *composio.Service.
 	Composio ComposioOverlayBuilder
-	// PostCommentToGitLab relays a newly-created comment to the linked GitLab
-	// issue when the issue is synced. Injected by handler.New; nil when GitLab
-	// is not configured or the issue is not synced.
-	PostCommentToGitLab func(ctx context.Context, comment db.Comment, issue db.Issue)
 
 	analyticsContextMu    sync.Mutex
 	analyticsContextCache map[string]analytics.TaskContext

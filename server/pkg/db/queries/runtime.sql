@@ -37,6 +37,26 @@ WHERE workspace_id = $1
 ORDER BY (status = 'online') DESC, created_at ASC
 LIMIT 1;
 
+-- name: GetMatchingRuntimeInWorkspace :one
+-- Finds the runtime in the target workspace that corresponds to a source
+-- runtime: same daemon_id and either the same custom profile_id or, for
+-- built-in runtimes, the same provider. Prefers online rows. Used when
+-- deploying an agent to another workspace so the copy lands on the same
+-- physical machine when that daemon is registered in both workspaces.
+SELECT tgt.*
+FROM agent_runtime src
+JOIN agent_runtime tgt
+  ON tgt.workspace_id = @target_workspace_id
+ AND src.daemon_id IS NOT NULL
+ AND tgt.daemon_id = src.daemon_id
+ AND (
+   (src.profile_id IS NOT NULL AND tgt.profile_id = src.profile_id)
+   OR (src.profile_id IS NULL AND tgt.profile_id IS NULL AND tgt.provider = src.provider)
+ )
+WHERE src.id = @source_runtime_id
+ORDER BY (tgt.status = 'online') DESC, tgt.created_at ASC
+LIMIT 1;
+
 -- name: UpsertAgentRuntime :one
 -- (xmax = 0) AS inserted distinguishes a fresh insert (true) from an upsert
 -- that updated an existing row (false). Analytics reads this to fire

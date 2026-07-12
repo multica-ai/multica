@@ -528,17 +528,17 @@ func runWorkspaceMemberInvite(cmd *cobra.Command, args []string) error {
 	defer cancel()
 
 	body := map[string]any{"email": email, "role": role}
-	var inv map[string]any
-	if err := client.PostJSON(ctx, "/api/workspaces/"+wsID+"/members", body, &inv); err != nil {
-		return fmt.Errorf("invite member: %w", err)
+	var member map[string]any
+	if err := client.PostJSON(ctx, "/api/workspaces/"+wsID+"/members", body, &member); err != nil {
+		return fmt.Errorf("add member: %w", err)
 	}
 
 	output, _ := cmd.Flags().GetString("output")
 	if output == "json" {
-		return cli.PrintJSON(os.Stdout, inv)
+		return cli.PrintJSON(os.Stdout, member)
 	}
 
-	fmt.Fprintf(os.Stdout, "Invitation sent to %s (role: %s, status: %s)\n",
-		strVal(inv, "invitee_email"), strVal(inv, "role"), strVal(inv, "status"))
+	fmt.Fprintf(os.Stdout, "Added %s to workspace (role: %s)\n",
+		strVal(member, "email"), strVal(member, "role"))
 	return nil
 }

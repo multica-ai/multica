@@ -308,7 +308,7 @@ func (q *Queries) GetCommentInWorkspace(ctx context.Context, arg GetCommentInWor
 }
 
 const getLatestMemberCommentForIssueSince = `-- name: GetLatestMemberCommentForIssueSince :one
-SELECT id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, source_task_id FROM comment
+SELECT id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, source_task_id, gitlab_note_id FROM comment
 WHERE issue_id = $1
   AND author_type = 'member'
   AND created_at > $2
@@ -348,6 +348,7 @@ func (q *Queries) GetLatestMemberCommentForIssueSince(ctx context.Context, arg G
 		&i.ResolvedByType,
 		&i.ResolvedByID,
 		&i.SourceTaskID,
+		&i.GitlabNoteID,
 	)
 	return i, err
 }
@@ -692,7 +693,7 @@ func (q *Queries) ListRecentThreadCommentsForIssue(ctx context.Context, arg List
 }
 
 const listReconcilableCommentsForIssueSince = `-- name: ListReconcilableCommentsForIssueSince :many
-SELECT id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, source_task_id FROM comment
+SELECT id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, source_task_id, gitlab_note_id FROM comment
 WHERE issue_id = $1
   AND author_type IN ('member', 'agent')
   AND (
@@ -759,6 +760,7 @@ func (q *Queries) ListReconcilableCommentsForIssueSince(ctx context.Context, arg
 			&i.ResolvedByType,
 			&i.ResolvedByID,
 			&i.SourceTaskID,
+			&i.GitlabNoteID,
 		); err != nil {
 			return nil, err
 		}

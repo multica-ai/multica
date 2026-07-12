@@ -165,14 +165,18 @@ func (q *Queries) IncrementIssueCounter(ctx context.Context, id pgtype.UUID) (in
 	return issue_counter, err
 }
 
-const listWorkspacesWithRepos = `-- name: ListWorkspacesWithRepos :many
-SELECT id, name, slug, description, settings, created_at, updated_at, context, repos, issue_prefix, issue_counter, avatar_url
-FROM workspace
-WHERE repos IS NOT NULL AND jsonb_array_length(repos) > 0
+const listWorkspaces = `-- name: ListWorkspaces :many
+SELECT w.id, w.name, w.slug, w.description, w.settings,
+       w.created_at, w.updated_at, w.context, w.repos,
+       w.issue_prefix, w.issue_counter, w.avatar_url
+FROM member m
+JOIN workspace w ON w.id = m.workspace_id
+WHERE m.user_id = $1
+ORDER BY w.created_at ASC
 `
 
-func (q *Queries) ListWorkspacesWithRepos(ctx context.Context) ([]Workspace, error) {
-	rows, err := q.db.Query(ctx, listWorkspacesWithRepos)
+func (q *Queries) ListWorkspaces(ctx context.Context, userID pgtype.UUID) ([]Workspace, error) {
+	rows, err := q.db.Query(ctx, listWorkspaces, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -204,18 +208,14 @@ func (q *Queries) ListWorkspacesWithRepos(ctx context.Context) ([]Workspace, err
 	return items, nil
 }
 
-const listWorkspaces = `-- name: ListWorkspaces :many
-SELECT w.id, w.name, w.slug, w.description, w.settings,
-       w.created_at, w.updated_at, w.context, w.repos,
-       w.issue_prefix, w.issue_counter, w.avatar_url
-FROM member m
-JOIN workspace w ON w.id = m.workspace_id
-WHERE m.user_id = $1
-ORDER BY w.created_at ASC
+const listWorkspacesWithRepos = `-- name: ListWorkspacesWithRepos :many
+SELECT id, name, slug, description, settings, created_at, updated_at, context, repos, issue_prefix, issue_counter, avatar_url
+FROM workspace
+WHERE repos IS NOT NULL AND jsonb_array_length(repos) > 0
 `
 
-func (q *Queries) ListWorkspaces(ctx context.Context, userID pgtype.UUID) ([]Workspace, error) {
-	rows, err := q.db.Query(ctx, listWorkspaces, userID)
+func (q *Queries) ListWorkspacesWithRepos(ctx context.Context) ([]Workspace, error) {
+	rows, err := q.db.Query(ctx, listWorkspacesWithRepos)
 	if err != nil {
 		return nil, err
 	}

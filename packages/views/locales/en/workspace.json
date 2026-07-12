@@ -6,6 +6,10 @@
     "url_placeholder": "my-workspace",
     "submit": "Create workspace",
     "submitting": "Creating...",
+    "members_label": "Add members",
+    "members_hint": "People from your other workspaces get access immediately — no invitation step.",
+    "members_search_placeholder": "Search by name or email",
+    "members_empty": "No matching people",
     "errors": {
       "slug_format": "Only lowercase letters, numbers, and hyphens",
       "slug_taken": "That workspace URL is already taken.",
@@ -19,7 +23,7 @@
     "log_out": "Log out",
     "title": "Welcome to Multica",
     "description": "One workspace where you and your AI teammates work side by side — taking issues, leaving comments, sharing the same context.",
-    "invite_hint": "You can invite teammates once your workspace is ready."
+    "invite_hint": "Add teammates from your other workspaces when you create it."
   },
   "creation_disabled": {
     "title": "Workspace creation is disabled",

@@ -27,6 +27,14 @@ export interface Member {
   created_at: string;
 }
 
+/** User visible to the caller via shared workspace membership. */
+export interface KnownUser {
+  id: string;
+  name: string;
+  email: string;
+  avatar_url: string | null;
+}
+
 export interface User {
   id: string;
   name: string;

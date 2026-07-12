@@ -12,8 +12,12 @@ import {
 export function useCreateWorkspace() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (data: { name: string; slug: string; description?: string }) =>
-      api.createWorkspace(data),
+    mutationFn: (data: {
+      name: string;
+      slug: string;
+      description?: string;
+      member_user_ids?: string[];
+    }) => api.createWorkspace(data),
     // Seed the workspace list cache BEFORE callers navigate to /{newWs.slug}/issues.
     // The destination [workspaceSlug]/layout queries by slug from this cache;
     // without seeding, it would briefly show "loading" before the background

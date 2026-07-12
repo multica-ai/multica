@@ -132,11 +132,12 @@ func (h *Handler) GetWorkspace(w http.ResponseWriter, r *http.Request) {
 }
 
 type CreateWorkspaceRequest struct {
-	Name        string  `json:"name"`
-	Slug        string  `json:"slug"`
-	Description *string `json:"description"`
-	Context     *string `json:"context"`
-	IssuePrefix *string `json:"issue_prefix"`
+	Name          string   `json:"name"`
+	Slug          string   `json:"slug"`
+	Description   *string  `json:"description"`
+	Context       *string  `json:"context"`
+	IssuePrefix   *string  `json:"issue_prefix"`
+	MemberUserIDs []string `json:"member_user_ids"`
 }
 
 func (h *Handler) CreateWorkspace(w http.ResponseWriter, r *http.Request) {
@@ -215,6 +216,46 @@ func (h *Handler) CreateWorkspace(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	creatorUUID := parseUUID(userID)
+	var addedMemberUserIDs []pgtype.UUID
+	for _, rawID := range req.MemberUserIDs {
+		memberUserUUID, ok := parseUUIDOrBadRequest(w, rawID, "member user id")
+		if !ok {
+			return
+		}
+		if uuidToString(memberUserUUID) == userID {
+			continue
+		}
+		isCoworker, coworkerErr := qtx.IsKnownCoworker(r.Context(), db.IsKnownCoworkerParams{
+			UserID:   creatorUUID,
+			UserID_2: memberUserUUID,
+		})
+		if coworkerErr != nil {
+			writeError(w, http.StatusInternalServerError, "failed to validate member")
+			return
+		}
+		if !isCoworker {
+			writeError(w, http.StatusBadRequest, "cannot add user who does not share a workspace with you")
+			return
+		}
+		if _, err := qtx.CreateMember(r.Context(), db.CreateMemberParams{
+			WorkspaceID: ws.ID,
+			UserID:      memberUserUUID,
+			Role:        "member",
+		}); err != nil {
+			if isUniqueViolation(err) {
+				continue
+			}
+			writeError(w, http.StatusInternalServerError, "failed to add member: "+err.Error())
+			return
+		}
+		if _, err := qtx.MarkUserOnboarded(r.Context(), memberUserUUID); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to mark member onboarded")
+			return
+		}
+		addedMemberUserIDs = append(addedMemberUserIDs, memberUserUUID)
+	}
+
 	// NOTE: CreateWorkspace deliberately does NOT mark the user as
 	// onboarded. The `onboarded_at` flag is owned by CompleteOnboarding
 	// (Step 3 of the flow) and by AcceptInvitation (invitee joining an
@@ -237,6 +278,25 @@ func (h *Handler) CreateWorkspace(w http.ResponseWriter, r *http.Request) {
 	obsmetrics.RecordEvent(h.Analytics, h.Metrics, analytics.WorkspaceCreated(userID, wsID))
 
 	slog.Info("workspace created", append(logger.RequestAttrs(r), "workspace_id", wsID, "name", ws.Name, "slug", ws.Slug)...)
+
+	for _, memberUserUUID := range addedMemberUserIDs {
+		member, memberErr := h.Queries.GetMemberByUserAndWorkspace(r.Context(), db.GetMemberByUserAndWorkspaceParams{
+			UserID:      memberUserUUID,
+			WorkspaceID: ws.ID,
+		})
+		if memberErr != nil {
+			continue
+		}
+		user, userErr := h.Queries.GetUser(r.Context(), memberUserUUID)
+		if userErr != nil {
+			continue
+		}
+		h.publish(protocol.EventMemberAdded, wsID, "member", userID, map[string]any{
+			"member":         memberWithUserResponse(member, user),
+			"workspace_name": ws.Name,
+		})
+	}
+
 	writeJSON(w, http.StatusCreated, workspaceToResponse(ws))
 }
 
@@ -420,8 +480,81 @@ func (h *Handler) ListMembersWithUser(w http.ResponseWriter, r *http.Request) {
 }
 
 type CreateMemberRequest struct {
-	Email string `json:"email"`
-	Role  string `json:"role"`
+	Email  string `json:"email"`
+	UserID string `json:"user_id"`
+	Role   string `json:"role"`
+}
+
+type KnownUserResponse struct {
+	ID        string  `json:"id"`
+	Name      string  `json:"name"`
+	Email     string  `json:"email"`
+	AvatarURL *string `json:"avatar_url"`
+}
+
+func knownUserToResponse(row db.ListKnownUsersRow) KnownUserResponse {
+	return KnownUserResponse{
+		ID:        uuidToString(row.ID),
+		Name:      row.Name,
+		Email:     row.Email,
+		AvatarURL: textToPtr(row.AvatarUrl),
+	}
+}
+
+func addableUserToResponse(row db.ListAddableUsersForWorkspaceRow) KnownUserResponse {
+	return KnownUserResponse{
+		ID:        uuidToString(row.ID),
+		Name:      row.Name,
+		Email:     row.Email,
+		AvatarURL: textToPtr(row.AvatarUrl),
+	}
+}
+
+// ListKnownUsers returns users who share at least one workspace with the
+// caller. Used to populate member pickers when creating a workspace or
+// adding members to an existing one.
+func (h *Handler) ListKnownUsers(w http.ResponseWriter, r *http.Request) {
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+
+	rows, err := h.Queries.ListKnownUsers(r.Context(), parseUUID(userID))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list known users")
+		return
+	}
+
+	resp := make([]KnownUserResponse, len(rows))
+	for i, row := range rows {
+		resp[i] = knownUserToResponse(row)
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// ListAddableUsers returns known users who are not already members of the
+// target workspace.
+func (h *Handler) ListAddableUsers(w http.ResponseWriter, r *http.Request) {
+	workspaceID := workspaceIDFromURL(r, "id")
+	requester, ok := h.workspaceMember(w, r, workspaceID)
+	if !ok {
+		return
+	}
+
+	rows, err := h.Queries.ListAddableUsersForWorkspace(r.Context(), db.ListAddableUsersForWorkspaceParams{
+		UserID:      requester.UserID,
+		WorkspaceID: requester.WorkspaceID,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list addable users")
+		return
+	}
+
+	resp := make([]KnownUserResponse, len(rows))
+	for i, row := range rows {
+		resp[i] = addableUserToResponse(row)
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 func memberWithUserResponse(member db.Member, user db.User) MemberWithUserResponse {
@@ -464,12 +597,6 @@ func (h *Handler) CreateMember(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	email := strings.ToLower(strings.TrimSpace(req.Email))
-	if email == "" {
-		writeError(w, http.StatusBadRequest, "email is required")
-		return
-	}
-
 	role, valid := normalizeMemberRole(req.Role)
 	if !valid {
 		writeError(w, http.StatusBadRequest, "invalid member role")
@@ -479,22 +606,61 @@ func (h *Handler) CreateMember(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusForbidden, "insufficient permissions")
 		return
 	}
+	if role == "owner" {
+		writeError(w, http.StatusBadRequest, "cannot add as owner")
+		return
+	}
 
-	user, err := h.Queries.GetUserByEmail(r.Context(), email)
-	if err != nil {
-		if isNotFound(err) {
-			// Auto-create user with email so they can be invited before signing up
-			user, err = h.Queries.CreateUser(r.Context(), db.CreateUserParams{
-				Name:  email,
-				Email: email,
-			})
-			if err != nil {
-				writeError(w, http.StatusInternalServerError, "failed to create user")
+	var user db.User
+	if req.UserID != "" {
+		memberUserUUID, ok := parseUUIDOrBadRequest(w, req.UserID, "user id")
+		if !ok {
+			return
+		}
+		isCoworker, coworkerErr := h.Queries.IsKnownCoworker(r.Context(), db.IsKnownCoworkerParams{
+			UserID:   requester.UserID,
+			UserID_2: memberUserUUID,
+		})
+		if coworkerErr != nil {
+			writeError(w, http.StatusInternalServerError, "failed to validate user")
+			return
+		}
+		if !isCoworker {
+			writeError(w, http.StatusBadRequest, "user is not in any of your workspaces")
+			return
+		}
+		var userErr error
+		user, userErr = h.Queries.GetUser(r.Context(), memberUserUUID)
+		if userErr != nil {
+			if isNotFound(userErr) {
+				writeError(w, http.StatusNotFound, "user not found")
 				return
 			}
-		} else {
 			writeError(w, http.StatusInternalServerError, "failed to load user")
 			return
+		}
+	} else {
+		email := strings.ToLower(strings.TrimSpace(req.Email))
+		if email == "" {
+			writeError(w, http.StatusBadRequest, "email or user_id is required")
+			return
+		}
+		var userErr error
+		user, userErr = h.Queries.GetUserByEmail(r.Context(), email)
+		if userErr != nil {
+			if isNotFound(userErr) {
+				user, userErr = h.Queries.CreateUser(r.Context(), db.CreateUserParams{
+					Name:  email,
+					Email: email,
+				})
+				if userErr != nil {
+					writeError(w, http.StatusInternalServerError, "failed to create user")
+					return
+				}
+			} else {
+				writeError(w, http.StatusInternalServerError, "failed to load user")
+				return
+			}
 		}
 	}
 
@@ -508,18 +674,29 @@ func (h *Handler) CreateMember(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusConflict, "user is already a member")
 			return
 		}
-		slog.Warn("create member failed", append(logger.RequestAttrs(r), "error", err, "workspace_id", workspaceID, "email", email)...)
+		slog.Warn("create member failed", append(logger.RequestAttrs(r), "error", err, "workspace_id", workspaceID, "email", user.Email)...)
 		writeError(w, http.StatusInternalServerError, "failed to create member")
 		return
 	}
 
-	slog.Info("member added", append(logger.RequestAttrs(r), "member_id", uuidToString(member.ID), "workspace_id", workspaceID, "email", email, "role", role)...)
+	if _, err := h.Queries.MarkUserOnboarded(r.Context(), user.ID); err != nil {
+		slog.Warn("mark user onboarded failed", append(logger.RequestAttrs(r), "error", err, "user_id", uuidToString(user.ID))...)
+	}
+
+	slog.Info("member added", append(logger.RequestAttrs(r), "member_id", uuidToString(member.ID), "workspace_id", workspaceID, "email", user.Email, "role", role)...)
 	userID := requestUserID(r)
 	eventPayload := map[string]any{"member": memberWithUserResponse(member, user)}
 	if ws, err := h.Queries.GetWorkspace(r.Context(), requester.WorkspaceID); err == nil {
 		eventPayload["workspace_name"] = ws.Name
 	}
 	h.publish(protocol.EventMemberAdded, uuidToString(requester.WorkspaceID), "member", userID, eventPayload)
+
+	obsmetrics.RecordEvent(h.Analytics, h.Metrics, analytics.TeamInviteSent(
+		uuidToString(requester.UserID),
+		uuidToString(requester.WorkspaceID),
+		user.Email,
+		"direct",
+	))
 
 	writeJSON(w, http.StatusCreated, memberWithUserResponse(member, user))
 }

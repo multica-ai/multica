@@ -39,6 +39,7 @@ import type {
   Workspace,
   WorkspaceRepo,
   MemberWithUser,
+  KnownUser,
   User,
   Skill,
   SkillSummary,
@@ -1592,11 +1593,25 @@ export class ApiClient {
     return this.fetch(`/api/workspaces/${id}`);
   }
 
-  async createWorkspace(data: { name: string; slug: string; description?: string; context?: string }): Promise<Workspace> {
+  async createWorkspace(data: {
+    name: string;
+    slug: string;
+    description?: string;
+    context?: string;
+    member_user_ids?: string[];
+  }): Promise<Workspace> {
     return this.fetch("/api/workspaces", {
       method: "POST",
       body: JSON.stringify(data),
     });
+  }
+
+  async listKnownUsers(): Promise<KnownUser[]> {
+    return this.fetch("/api/known-users");
+  }
+
+  async listAddableUsers(workspaceId: string): Promise<KnownUser[]> {
+    return this.fetch(`/api/workspaces/${workspaceId}/addable-users`);
   }
 
   async updateWorkspace(id: string, data: { name?: string; description?: string; context?: string; settings?: Record<string, unknown>; repos?: WorkspaceRepo[]; issue_prefix?: string; avatar_url?: string }): Promise<Workspace> {
@@ -1611,7 +1626,7 @@ export class ApiClient {
     return this.fetch(`/api/workspaces/${workspaceId}/members`);
   }
 
-  async createMember(workspaceId: string, data: CreateMemberRequest): Promise<Invitation> {
+  async createMember(workspaceId: string, data: CreateMemberRequest): Promise<MemberWithUser> {
     return this.fetch(`/api/workspaces/${workspaceId}/members`, {
       method: "POST",
       body: JSON.stringify(data),
