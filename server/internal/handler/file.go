@@ -676,7 +676,9 @@ func (h *Handler) GetAttachmentContent(w http.ResponseWriter, r *http.Request) {
 
 	attachmentID := uuidToString(att.ID)
 
-	if !isTextPreviewable(att.ContentType, att.Filename) {
+	agentRead := r.URL.Query().Get("agent_read") == "1" // CEREBRO-PATCH(attachment-agent-text): keep Office extraction exclusive to agent/CLI reads.
+	if (!agentRead && !isTextPreviewable(att.ContentType, att.Filename)) ||
+		(agentRead && !isTextPreviewable(att.ContentType, att.Filename) && !attachmenttext.IsPreviewable(att.ContentType, att.Filename)) {
 		writeError(w, http.StatusUnsupportedMediaType, "preview not supported for this file type")
 		return
 	}

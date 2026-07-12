@@ -896,6 +896,28 @@ func TestGetAttachmentContent_LegacyOfficeRejected(t *testing.T) {
 	}
 }
 
+func TestGetAttachmentContent_AgentReadExtractsLegacyOffice(t *testing.T) { // CEREBRO-PATCH(attachment-agent-text): agent reads support Office without broadening browser preview.
+	originalRunner := attachmenttext.DefaultRunner
+	attachmenttext.DefaultRunner = handlerAttachmentRunner{}
+	defer func() { attachmenttext.DefaultRunner = originalRunner }()
+
+	store := &mockStorage{}
+	originalStorage := testHandler.Storage
+	testHandler.Storage = store
+	defer func() { testHandler.Storage = originalStorage }()
+
+	id := seedPreviewAttachment(t, store, "legacy-source.doc", "legacy-source.doc", "application/octet-stream", []byte("legacy-doc"))
+	req, w := newPreviewRequest(t, id, testWorkspaceID)
+	req.URL.RawQuery = "agent_read=1"
+	testHandler.GetAttachmentContent(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", w.Code, w.Body.String())
+	}
+	if got := w.Body.String(); !strings.Contains(got, "COBALT-4826") {
+		t.Fatalf("body = %q, want COBALT-4826", got)
+	}
+}
+
 func TestGetAttachmentContent_TooLarge(t *testing.T) {
 	store := &mockStorage{}
 	origStorage := testHandler.Storage
