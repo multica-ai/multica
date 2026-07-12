@@ -419,6 +419,9 @@ func renderIssueContext(provider string, ctx TaskContextForEnv) string {
 
 	b.WriteString("# Task Assignment\n\n")
 	fmt.Fprintf(&b, "**Issue ID:** %s\n\n", ctx.IssueID)
+	if ctx.PlanMode { // CEREBRO-PATCH(session-plan-mode): enforce the selected mode in the agent brief.
+		b.WriteString("## PLAN MODE\n\nThis session is planning-only. You may produce and save a plan, but you must NOT write or edit code, run migrations or deploy, or open a pull request.\n\n")
+	}
 
 	if ctx.TriggerCommentID != "" {
 		b.WriteString("**Trigger:** Comment Reply\n")

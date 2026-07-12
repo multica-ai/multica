@@ -78,12 +78,13 @@ describe("groupTimelineByThread", () => {
     expect(groups[1]!.groups.map((g) => g.type)).toEqual(["comment"]);
   });
 
-  it("applies session-row metadata (name + handoff) by root_comment_id", () => {
+  it("applies session-row metadata (name + mode + handoff) by root_comment_id", () => {
     const handoff = { summary: "did work", done: [], remaining: [], plan_ref: null };
-    const groups = groupTimelineByThread("issue-1", [row("a", "Login fix", handoff)], [
+    const groups = groupTimelineByThread("issue-1", [{ ...row("a", "Login fix", handoff), mode: "plan" }], [
       commentGroup("a", "2026-06-21T00:00:00Z"),
     ]);
     expect(groups[0]!.session.name).toBe("Login fix");
+    expect(groups[0]!.session.mode).toBe("plan");
     expect(groups[0]!.session.handoff).toEqual(handoff);
   });
 

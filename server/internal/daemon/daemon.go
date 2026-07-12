@@ -3535,6 +3535,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		IssueID:                          task.IssueID,
 		TriggerCommentID:                 task.TriggerCommentID,
 		TriggerThreadID:                  task.TriggerThreadID,
+		PlanMode:                         task.PlanMode, // CEREBRO-PATCH(session-plan-mode): carry the thread mode into runtime context.
 		NewCommentCount:                  task.NewCommentCount,
 		NewCommentsSince:                 task.NewCommentsSince,
 		PriorSessionResumed:              task.PriorSessionID != "",

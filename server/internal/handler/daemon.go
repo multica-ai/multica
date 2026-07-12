@@ -1615,6 +1615,13 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 				if comment.ParentID.Valid {
 					resp.TriggerThreadID = uuidToString(comment.ParentID)
 				}
+				var sessionMode string // CEREBRO-PATCH(session-plan-mode): resolve mode from the triggering thread.
+				if err := h.DB.QueryRow(r.Context(), `
+					SELECT mode FROM cerebro_session
+					WHERE issue_id = $1 AND root_comment_id = $2`,
+					comment.IssueID, parseUUID(resp.TriggerThreadID)).Scan(&sessionMode); err == nil {
+					resp.PlanMode = sessionMode == "plan"
+				}
 				resp.TriggerAuthorType = comment.AuthorType
 				// The triggering comment's author is the task initiator — the
 				// real requester behind this run. Surface it (type + id + name,

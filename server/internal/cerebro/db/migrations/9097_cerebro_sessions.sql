@@ -13,6 +13,7 @@ CREATE TABLE IF NOT EXISTS cerebro_session (
     issue_id UUID NOT NULL REFERENCES issue(id) ON DELETE CASCADE,
     position INT NOT NULL DEFAULT 0,
     name TEXT NOT NULL,
+    mode TEXT NOT NULL DEFAULT 'default' CHECK (mode IN ('default', 'plan')),
     status TEXT NOT NULL DEFAULT 'in_progress' CHECK (status IN ('todo', 'in_progress', 'done')),
     handoff JSONB,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),

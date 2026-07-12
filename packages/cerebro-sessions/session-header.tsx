@@ -131,6 +131,23 @@ export function SessionHeader({
       )}
       {!editing && (
         <div className="flex shrink-0 items-center gap-2">
+          <button
+            type="button"
+            aria-label="Plan mode"
+            aria-pressed={(session.mode ?? "default") === "plan"}
+            onClick={() => update.mutateAsync({
+              sessionId: session.id,
+              input: { mode: (session.mode ?? "default") === "plan" ? "default" : "plan" },
+            })}
+            className={cn(
+              "rounded-full border px-2 py-0.5 text-xs transition-colors",
+              (session.mode ?? "default") === "plan"
+                ? "border-amber-500/30 bg-amber-500/10 text-amber-600 dark:text-amber-400"
+                : "text-muted-foreground hover:bg-muted/60 hover:text-foreground",
+            )}
+          >
+            Plan
+          </button>
           {hasHandoff && onToggleHandoff ? (
             <button
               type="button"

@@ -158,6 +158,7 @@ export function startFresh(issueId: string, input: HandoffActionInput): Promise<
 
 export function updateSession(issueId: string, sessionId: string, input: {
   name?: string;
+  mode?: "default" | "plan";
   handoff?: HandoffBrief;
 }): Promise<Session> {
   return api.cerebroRequest<Session>(`${base(issueId)}/${sessionId}`, {
