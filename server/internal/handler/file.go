@@ -727,7 +727,7 @@ func isTextPreviewable(contentType, filename string) bool {
 	if strings.HasPrefix(ct, "text/") {
 		return true
 	}
-	if attachmenttext.IsPreviewable(ct, filename) { // CEREBRO-PATCH(attachment-text-runtime-tool): keep preview routing aligned with the shared extractor.
+	if ct == "application/pdf" || strings.ToLower(path.Ext(filename)) == ".pdf" { // CEREBRO-PATCH(attachment-text-runtime-tool): UI proxy stays PDF-only; legacy Office formats extract via read_attachment, not this endpoint.
 		return true
 	}
 	switch ct {
