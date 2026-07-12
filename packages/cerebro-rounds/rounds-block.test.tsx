@@ -158,3 +158,19 @@ describe("RoundPickerDialog", () => {
     mocks.mobile = false;
   });
 });
+
+describe("RoundPickerDialog inside a clickable inbox row", () => {
+  it("does not bubble clicks to the surrounding row (FIR-3107)", () => {
+    const rowClick = vi.fn();
+    const onOpenChange = vi.fn();
+    render(
+      <div role="button" tabIndex={0} onClick={rowClick}>
+        <RoundPickerDialog issueId="new-issue" open onOpenChange={onOpenChange} />
+      </div>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /Daily ideas/ }));
+    expect(mocks.add).toHaveBeenCalledWith({ roundId: "round-1", issueId: "new-issue" });
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+    expect(rowClick).not.toHaveBeenCalled();
+  });
+});

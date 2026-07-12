@@ -96,7 +96,12 @@ function ResponsiveRoundPanel({ open, onOpenChange, title, showTrigger = false, 
   children: ReactNode;
 }) {
   const isMobile = useIsMobile();
-  return <>
+  // The panel is mounted inside the clickable inbox row (RoundPickerDialog in
+  // CerebroInboxRowActions). The dialog/drawer renders in a portal, but React
+  // synthetic clicks still bubble through the React tree to the row's onClick,
+  // which navigates to the issue (FIR-3107). display:contents keeps the guard
+  // out of the row's flex layout while its handler catches portal clicks.
+  return <span className="contents" onClick={(event) => event.stopPropagation()}>
     {showTrigger && <Button type="button" variant="ghost" size="icon-sm" aria-label="Manage rounds" onClick={() => onOpenChange(true)}><Settings className="size-4" /></Button>}
     {isMobile ? <Drawer open={open} onOpenChange={onOpenChange}>
       <DrawerContent>
@@ -109,7 +114,7 @@ function ResponsiveRoundPanel({ open, onOpenChange, title, showTrigger = false, 
         {children}
       </DialogContent>
     </Dialog>}
-  </>;
+  </span>;
 }
 
 export function RoundManager({ statuses, issueTitles, onCreate, onUpdate, onDelete, onRemoveMember }: {
