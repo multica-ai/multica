@@ -43,11 +43,17 @@ func TestCreateComment_TriggeredTaskRejectsTopLevelComment(t *testing.T) {
 		t.Fatalf("decode error response: %v", err)
 	}
 	msg, _ := body["error"].(string)
-	if !strings.Contains(msg, fx.TriggerCommentID) {
-		t.Fatalf("409 message should name the trigger comment %q, got %q", fx.TriggerCommentID, msg)
-	}
-	if !strings.Contains(msg, "top-level comments are not allowed") {
-		t.Fatalf("409 message should explain that top-level comments are not allowed, got %q", msg)
+	// Pin the three semantic pieces without locking the exact wording: why it
+	// was rejected, the comment to reply under, and the actionable fix. The last
+	// one guards against the guidance being dropped in a future edit.
+	for _, want := range []string{
+		"top-level comments",   // reason
+		fx.TriggerCommentID,    // the comment to reply under
+		"parent_id (--parent)", // actionable fix
+	} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("409 message should contain %q, got %q", want, msg)
+		}
 	}
 }
 
