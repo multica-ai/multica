@@ -66,6 +66,9 @@ export function RoundsBlock({ statuses, issueTitles, onStart, onSelectIssue, set
       const complete = s.members.length === 0 || (ready && (s.active_run?.responded_count ?? 0) >= (s.active_run?.total_count ?? s.members.length));
       const open = expandedIds.has(s.round.id);
       const schedule = nextRunLabel(s.round.next_run_at);
+      const displayedMembers = needle
+        ? s.members.filter((member) => (issueTitles[member.issue_id] ?? "").toLocaleLowerCase().includes(needle))
+        : s.members;
       return <div key={s.round.id}>
         <div className="flex items-center gap-2 px-3 py-2">
           <button type="button" aria-label={`${open ? "Collapse" : "Expand"} ${s.round.name}`} className="flex min-w-0 flex-1 items-center gap-2 text-left" onClick={() => setExpandedIds((prev) => {
@@ -87,7 +90,7 @@ export function RoundsBlock({ statuses, issueTitles, onStart, onSelectIssue, set
           </div>
           {(s.active_run?.nudged_count ?? 0) > 0 && <p className="mt-1 text-right text-[11px] text-muted-foreground">{s.active_run?.nudged_count} nudged</p>}
         </div>}
-        {open && <div className="border-t border-border/50 divide-y divide-border/60">{s.members.map((m) =>
+        {open && <div className="border-t border-border/50 divide-y divide-border/60">{displayedMembers.map((m) =>
           renderIssue ? renderIssue(m.issue_id) : <button key={m.issue_id} type="button" aria-label={issueTitles[m.issue_id] ?? m.issue_id} onClick={() => onSelectIssue(m.issue_id)} className="flex w-full items-center gap-2 px-4 py-2.5 text-left text-xs hover:bg-muted">
             <span className={`size-1.5 rounded-full ${running ? "bg-blue-500" : ready ? "bg-emerald-500" : "bg-muted-foreground"}`} />
             <span className="min-w-0 flex-1 truncate">{issueTitles[m.issue_id] ?? m.issue_id}</span>

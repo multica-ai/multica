@@ -58,6 +58,19 @@ describe("RoundsBlock", () => {
     expect(screen.getByText("Beta pricing")).toBeInTheDocument();
   });
 
+  it("shows only matching issues inside a round expanded by search", () => {
+    const multiMember = status({
+      members: [
+        status().members[0]!,
+        { ...status().members[0]!, issue_id: "issue-2" },
+      ],
+    });
+    render(<RoundsBlock statuses={[multiMember]} issueTitles={{ "issue-1": "Alpha returns", "issue-2": "Beta pricing" }} onStart={vi.fn()} onSelectIssue={vi.fn()} />);
+    fireEvent.change(screen.getByRole("searchbox", { name: "Search Rounds" }), { target: { value: "beta" } });
+    expect(screen.getByText("Beta pricing")).toBeInTheDocument();
+    expect(screen.queryByText("Alpha returns")).not.toBeInTheDocument();
+  });
+
   it("expands every matching round when a search term matches issues in more than one round", () => {
     const second = status({ round: { ...status().round, id: "round-2", name: "Weekly" }, members: [{ ...status().members[0]!, round_id: "round-2", issue_id: "issue-2" }] });
     render(<RoundsBlock statuses={[status(), second]} issueTitles={{ "issue-1": "Returns queue", "issue-2": "Returns follow-up" }} onStart={vi.fn()} onSelectIssue={vi.fn()} />);
