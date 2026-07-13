@@ -578,54 +578,85 @@ func (b *bufferWriter) String() string {
 	return b.buf.String()
 }
 
-// TestHermesClientAutoApprovesPermissionRequest asserts that when an
-// ACP agent sends us `session/request_permission`, the client replies by
-// selecting one of the optionIds the agent *actually offered* — an id the
-// agent never offered is treated as a denial and, on Hermes' edit path,
-// silently blocks every file write (GitHub multica#5300). The reply must
-// prefer session-scoped over single-use over a permanent grant, and echo
-// the agent's request id so its in-flight future resolves.
+// TestHermesClientAutoApprovesPermissionRequest asserts how the client
+// answers an ACP agent's `session/request_permission`. It must select an
+// optionId the agent *actually offered* — an id the agent never offered is
+// treated as a denial and, on Hermes' edit path, silently blocks every file
+// write (GitHub multica#5300). It prefers a session-scoped grant over a
+// single-use one, refuses to auto-select a permanent "allow_always" (which
+// persists to the runtime owner's on-disk allowlist), and fails closed with
+// a "cancelled" outcome when no safe grant is offered rather than fabricate
+// a selection. The reply always echoes the agent's request id.
 func TestHermesClientAutoApprovesPermissionRequest(t *testing.T) {
 	t.Parallel()
 
 	cases := []struct {
-		name    string
-		options string
-		wantID  string
+		name        string
+		options     string
+		wantOutcome string // "selected" or "cancelled"
+		wantID      string // expected optionId when wantOutcome == "selected"
 	}{
 		{
 			// Hermes edit-approval offers only these two and requires
 			// exactly "allow_once"; this is the multica#5300 regression
 			// the old hardcoded "approve_for_session" reply broke.
-			name:    "hermes edit approval",
-			options: `[{"optionId":"allow_once","name":"Allow edit","kind":"allow_once"},{"optionId":"deny","name":"Deny","kind":"reject_once"}]`,
-			wantID:  "allow_once",
+			name:        "hermes edit approval selects allow_once",
+			options:     `[{"optionId":"allow_once","name":"Allow edit","kind":"allow_once"},{"optionId":"deny","name":"Deny","kind":"reject_once"}]`,
+			wantOutcome: "selected",
+			wantID:      "allow_once",
 		},
 		{
-			// Hermes command approval offers a session option; prefer it
-			// over the permanent "allow_always" (which persists an on-disk
-			// allowlist) and over single-use "allow_once".
-			name:    "command approval prefers session over permanent",
-			options: `[{"optionId":"allow_once","kind":"allow_once"},{"optionId":"allow_session","kind":"allow_always"},{"optionId":"allow_always","kind":"allow_always"},{"optionId":"deny","kind":"reject_once"},{"optionId":"deny_always","kind":"reject_always"}]`,
-			wantID:  "allow_session",
-		},
-		{
-			// A permanent grant is selected only when it is the sole grant.
-			name:    "permanent grant only as last resort",
-			options: `[{"optionId":"allow_always","kind":"allow_always"},{"optionId":"deny","kind":"reject_once"}]`,
-			wantID:  "allow_always",
+			// Hermes command approval offers a session option; prefer it over
+			// both the permanent "allow_always" and single-use "allow_once".
+			name:        "command approval prefers session over permanent",
+			options:     `[{"optionId":"allow_once","kind":"allow_once"},{"optionId":"allow_session","kind":"allow_always"},{"optionId":"allow_always","kind":"allow_always"},{"optionId":"deny","kind":"reject_once"},{"optionId":"deny_always","kind":"reject_always"}]`,
+			wantOutcome: "selected",
+			wantID:      "allow_session",
 		},
 		{
 			// Other ACP agents' session-scoped id is honoured when offered.
-			name:    "session-scoped id honoured",
-			options: `[{"optionId":"approve","kind":"allow_once"},{"optionId":"approve_for_session","kind":"allow_always"},{"optionId":"reject","kind":"reject_once"}]`,
-			wantID:  "approve_for_session",
+			name:        "session-scoped id honoured",
+			options:     `[{"optionId":"approve","kind":"allow_once"},{"optionId":"approve_for_session","kind":"allow_always"},{"optionId":"reject","kind":"reject_once"}]`,
+			wantOutcome: "selected",
+			wantID:      "approve_for_session",
 		},
 		{
-			// No offered options: fall back to the legacy id rather than hang.
-			name:    "no options falls back to legacy id",
-			options: `[]`,
-			wantID:  "approve_for_session",
+			// Grant nature comes from the ACP kind, not the opaque optionId:
+			// a single-use option with a non-standard id is still selected.
+			name:        "non-standard single-use id selected by kind",
+			options:     `[{"optionId":"yolo-42","kind":"allow_once"},{"optionId":"nope","kind":"reject_once"}]`,
+			wantOutcome: "selected",
+			wantID:      "yolo-42",
+		},
+		{
+			// Only a permanent grant offered: fail closed, never auto-persist.
+			name:        "permanent-only grant fails closed",
+			options:     `[{"optionId":"allow_always","kind":"allow_always"},{"optionId":"deny","kind":"reject_once"}]`,
+			wantOutcome: "cancelled",
+		},
+		{
+			// Reject-only options: fail closed.
+			name:        "reject-only fails closed",
+			options:     `[{"optionId":"deny","kind":"reject_once"},{"optionId":"deny_always","kind":"reject_always"}]`,
+			wantOutcome: "cancelled",
+		},
+		{
+			// Unknown / future kind must not be auto-approved by name.
+			name:        "unknown kind fails closed",
+			options:     `[{"optionId":"allow_forever","kind":"allow_super"},{"optionId":"deny","kind":"reject_once"}]`,
+			wantOutcome: "cancelled",
+		},
+		{
+			// No options at all: fail closed rather than fabricate a selection.
+			name:        "empty options fails closed",
+			options:     `[]`,
+			wantOutcome: "cancelled",
+		},
+		{
+			// Malformed options payload (not an array): fail closed.
+			name:        "malformed options fails closed",
+			options:     `"not-an-array"`,
+			wantOutcome: "cancelled",
 		},
 	}
 
@@ -663,11 +694,18 @@ func TestHermesClientAutoApprovesPermissionRequest(t *testing.T) {
 			if resp.ID != 42 {
 				t.Errorf("id: got %d, want 42 (must echo agent's request id)", resp.ID)
 			}
-			if resp.Result.Outcome.Outcome != "selected" {
-				t.Errorf("outcome.outcome: got %q, want %q", resp.Result.Outcome.Outcome, "selected")
+			if resp.Result.Outcome.Outcome != tc.wantOutcome {
+				t.Errorf("outcome.outcome: got %q, want %q", resp.Result.Outcome.Outcome, tc.wantOutcome)
 			}
-			if resp.Result.Outcome.OptionID != tc.wantID {
-				t.Errorf("outcome.optionId: got %q, want %q", resp.Result.Outcome.OptionID, tc.wantID)
+			switch tc.wantOutcome {
+			case "selected":
+				if resp.Result.Outcome.OptionID != tc.wantID {
+					t.Errorf("outcome.optionId: got %q, want %q", resp.Result.Outcome.OptionID, tc.wantID)
+				}
+			case "cancelled":
+				if resp.Result.Outcome.OptionID != "" {
+					t.Errorf("cancelled outcome must not carry an optionId, got %q", resp.Result.Outcome.OptionID)
+				}
 			}
 		})
 	}
