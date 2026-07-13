@@ -3,6 +3,7 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 // The store no longer creates routers — the live router/mirror live in the tab
 // runtime registry (platform/tab-runtime), so these are pure store tests with
 // no router stubbing needed.
+import type { PersistedIssueViewState } from "@multica/core/issues/stores";
 import {
   sanitizeTabPath,
   migrateV1ToV2,
@@ -10,6 +11,9 @@ import {
   migrateV3ToV4,
   useTabStore,
 } from "./tab-store";
+
+const viewState = (viewMode: string) =>
+  ({ viewMode }) as unknown as PersistedIssueViewState;
 
 beforeEach(() => {
   useTabStore.getState().reset();
@@ -270,6 +274,46 @@ describe("useTabStore actions", () => {
       path: "/acme/issues",
       offsets: { main: 320, aside: 80 },
     });
+  });
+
+  it("updateTabViewState stores per-surface view state, keyed by surfaceKey", () => {
+    const store = useTabStore.getState();
+    store.switchWorkspace("acme");
+    const tabId = useTabStore.getState().byWorkspace.acme.tabs[0].id;
+
+    store.updateTabViewState(tabId, "workspace:all", viewState("list"));
+
+    expect(useTabStore.getState().byWorkspace.acme.tabs[0].viewState).toEqual({
+      "workspace:all": viewState("list"),
+    });
+  });
+
+  it("updateTabViewState merges surfaces without clobbering other keys", () => {
+    const store = useTabStore.getState();
+    store.switchWorkspace("acme");
+    const tabId = useTabStore.getState().byWorkspace.acme.tabs[0].id;
+
+    store.updateTabViewState(tabId, "s1", viewState("list"));
+    store.updateTabViewState(tabId, "s2", viewState("board"));
+    store.updateTabViewState(tabId, "s1", viewState("gantt")); // overwrite s1
+
+    expect(useTabStore.getState().byWorkspace.acme.tabs[0].viewState).toEqual({
+      s1: viewState("gantt"),
+      s2: viewState("board"),
+    });
+  });
+
+  it("closing a tab releases its per-tab view state (owned by the tab)", () => {
+    const store = useTabStore.getState();
+    store.switchWorkspace("acme");
+    const extraId = store.addTab("/acme/projects", "Projects", "FolderKanban");
+    store.updateTabViewState(extraId, "workspace:all", viewState("list"));
+
+    store.closeTab(extraId);
+
+    expect(
+      useTabStore.getState().byWorkspace.acme.tabs.some((t) => t.id === extraId),
+    ).toBe(false);
   });
 
   it("validateWorkspaceSlugs drops groups for slugs not in the valid set and repoints active", () => {

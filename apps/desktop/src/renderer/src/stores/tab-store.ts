@@ -4,6 +4,7 @@ import { arrayMove } from "@dnd-kit/sortable";
 import { createPersistStorage, defaultStorage } from "@multica/core/platform";
 import { createSafeId } from "@multica/core/utils";
 import { isReservedSlug } from "@multica/core/paths";
+import type { PersistedIssueViewState } from "@multica/core/issues/stores";
 import type { HistorySnapshot } from "@/platform/history-mirror";
 
 // ---------------------------------------------------------------------------
@@ -37,6 +38,13 @@ export interface Tab {
   icon: string;
   /** Serializable history session; the live router lives in the registry. */
   session: TabSession;
+  /**
+   * Per-surface persisted issue view state (filters/sort/viewMode), keyed by
+   * surfaceKey. Owned by the tab so two same-path tabs keep independent
+   * filters and it's released when the tab closes. A sibling of `session`:
+   * the router mirror / nav sync only ever write `session`, never this.
+   */
+  viewState?: Record<string, PersistedIssueViewState>;
   /** Ephemeral scroll offsets for the current page; restored on tab switch. */
   scroll?: TabScroll;
   /**
@@ -131,6 +139,17 @@ interface TabStore {
    * groups; no-ops for a tab that no longer exists.
    */
   updateTabScroll: (tabId: string, scroll: TabScroll) => void;
+  /**
+   * Persist a tab's per-surface issue view state (filters/sort/viewMode). The
+   * desktop session-backed view store writes back here on change; the tab owns
+   * it, so it's released when the tab closes. Finds across groups; no-ops for a
+   * tab that no longer exists.
+   */
+  updateTabViewState: (
+    tabId: string,
+    surfaceKey: string,
+    state: PersistedIssueViewState,
+  ) => void;
   /**
    * Close the active tab. The always-safe escape from a route-level crash:
    * unlike reloading the tab (recreates the same crashing path) or navigating
@@ -628,6 +647,26 @@ export const useTabStore = create<TabStore>()(
         });
       },
 
+      updateTabViewState(tabId, surfaceKey, state) {
+        const { byWorkspace } = get();
+        const hit = findTabLocation(byWorkspace, tabId);
+        if (!hit) return;
+        const { slug, group, index } = hit;
+        const current = group.tabs[index];
+        const next: Tab = {
+          ...current,
+          viewState: { ...(current.viewState ?? {}), [surfaceKey]: state },
+        };
+        const nextTabs = [...group.tabs];
+        nextTabs[index] = next;
+        set({
+          byWorkspace: {
+            ...byWorkspace,
+            [slug]: { ...group, tabs: nextTabs },
+          },
+        });
+      },
+
       closeActiveTab() {
         const { activeWorkspaceSlug, byWorkspace, closeTab } = get();
         if (!activeWorkspaceSlug) return;
@@ -812,6 +851,7 @@ export const useTabStore = create<TabStore>()(
               title: pTab.title,
               icon: pTab.icon,
               session: sanitizeSession(pTab.session, clean),
+              viewState: pTab.viewState,
               generation: 0,
               pinned: pTab.pinned === true,
             });
@@ -910,6 +950,9 @@ interface V4PersistedTab {
   icon: string;
   pinned: boolean;
   session: TabSession;
+  // Added additively after v4 shipped; optional so older persisted tabs (which
+  // lack it) rehydrate cleanly without a version bump.
+  viewState?: Record<string, PersistedIssueViewState>;
 }
 
 interface V4PersistedGroup {

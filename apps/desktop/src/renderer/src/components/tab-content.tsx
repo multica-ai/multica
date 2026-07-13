@@ -3,6 +3,7 @@ import { RouterProvider } from "react-router-dom";
 import { useActiveGroup, type Tab } from "@/stores/tab-store";
 import { TabNavigationProvider } from "@/platform/navigation";
 import { tabRuntimeRegistry } from "@/platform/tab-runtime";
+import { SurfaceViewStoreProvider } from "@/platform/surface-view-store-provider";
 import { useTabRuntimeSync } from "@/hooks/use-tab-runtime-sync";
 import { useTabScrollRestore } from "@/hooks/use-tab-scroll-restore";
 
@@ -22,9 +23,11 @@ function TabView({ tab }: { tab: Tab }) {
   const scrollRef = useTabScrollRestore(tab.id, tab.path);
   return (
     <div ref={scrollRef} style={{ display: "contents" }}>
-      <TabNavigationProvider router={runtime.router}>
-        <RouterProvider router={runtime.router} />
-      </TabNavigationProvider>
+      <SurfaceViewStoreProvider tabId={tab.id}>
+        <TabNavigationProvider router={runtime.router}>
+          <RouterProvider router={runtime.router} />
+        </TabNavigationProvider>
+      </SurfaceViewStoreProvider>
     </div>
   );
 }

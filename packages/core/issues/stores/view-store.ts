@@ -291,16 +291,19 @@ export const viewStoreSlice = (set: StoreApi<IssueViewState>["setState"]): Issue
     }),
 });
 
-export const viewStorePersistOptions = (name: string) => ({
-  name,
-  storage: createJSONStorage(() => createWorkspaceAwareStorage(defaultStorage)),
-  partialize: (state: IssueViewState) => ({
-    // NOTE: `agentRunningFilter` is intentionally NOT persisted — running
-    // state changes second-to-second, and a stored toggle would let users
-    // return to an unexplained empty list. Keep it ephemeral. See the
-    // field comment on IssueViewState.
-    // `dateFilter` is also intentionally not persisted: relative presets such
-    // as Today would otherwise become stale after a calendar-day rollover.
+/**
+ * The persisted subset of the issue view state (filters, sort, view mode, card
+ * properties, swimlane layout). Exported alongside `PersistedIssueViewState` so
+ * platform code — e.g. the desktop tab session — can store and rehydrate view
+ * state without re-deriving the shape.
+ *
+ * NOTE: `agentRunningFilter` is intentionally NOT persisted — running state
+ * changes second-to-second, and a stored toggle would let users return to an
+ * unexplained empty list. `dateFilter` is also not persisted: relative presets
+ * such as Today would otherwise become stale after a calendar-day rollover.
+ */
+export function partializeIssueViewState(state: IssueViewState) {
+  return {
     viewMode: state.viewMode,
     grouping: state.grouping,
     statusFilters: state.statusFilters,
@@ -321,7 +324,15 @@ export const viewStorePersistOptions = (name: string) => ({
     swimlaneGrouping: state.swimlaneGrouping,
     swimlaneOrders: state.swimlaneOrders,
     collapsedSwimlanes: state.collapsedSwimlanes,
-  }),
+  };
+}
+
+export type PersistedIssueViewState = ReturnType<typeof partializeIssueViewState>;
+
+export const viewStorePersistOptions = (name: string) => ({
+  name,
+  storage: createJSONStorage(() => createWorkspaceAwareStorage(defaultStorage)),
+  partialize: partializeIssueViewState,
   // Default Zustand merge is shallow, so a persisted `cardProperties` snapshot
   // saved before a new toggle was introduced wins entirely and the new key is
   // missing — the dropdown switch then reads `undefined` and renders unchecked

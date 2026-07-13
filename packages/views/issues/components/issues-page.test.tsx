@@ -232,6 +232,8 @@ vi.mock("@multica/core/issues/stores/view-store-context", () => ({
   ViewStoreProvider: ({ children }: { children: React.ReactNode }) => children,
   useViewStore: (selector?: any) => (selector ? selector(mockViewState) : mockViewState),
   useViewStoreApi: () => ({ getState: () => mockViewState, setState: vi.fn(), subscribe: vi.fn() }),
+  IssueViewStoreFactoryProvider: ({ children }: { children: React.ReactNode }) => children,
+  useIssueViewStoreFactory: () => null,
 }));
 
 let mockScope = "all";

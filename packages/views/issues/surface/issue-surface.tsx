@@ -7,6 +7,7 @@ import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { cn } from "@multica/ui/lib/utils";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { ViewStoreProvider } from "@multica/core/issues/stores/view-store-context";
+import { useIssueViewStoreFactory } from "@multica/core/issues/stores";
 import { getIssueSurfaceViewStore } from "@multica/core/issues/stores/surface-view-store";
 import { issueScopeKey } from "@multica/core/issues/surface/scope";
 import type { Issue } from "@multica/core/types";
@@ -55,9 +56,17 @@ export function IssueSurface({
 }: IssueSurfaceComponentProps) {
   const wsId = useWorkspaceId();
   const resolvedSurfaceKey = surfaceKey ?? issueScopeKey(scope);
+  // A platform (the desktop tab shell) may inject a per-tab, session-backed
+  // view store so two same-path tabs keep independent filters. When injected,
+  // the global surface registry is bypassed entirely; web has no injection and
+  // falls back to the shared registry.
+  const viewStoreFactory = useIssueViewStoreFactory();
   const store = useMemo(
-    () => getIssueSurfaceViewStore(resolvedSurfaceKey),
-    [resolvedSurfaceKey],
+    () =>
+      viewStoreFactory
+        ? viewStoreFactory(resolvedSurfaceKey)
+        : getIssueSurfaceViewStore(resolvedSurfaceKey),
+    [viewStoreFactory, resolvedSurfaceKey],
   );
 
   return (

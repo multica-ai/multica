@@ -14,6 +14,9 @@ export {
   ViewStoreProvider,
   useViewStore,
   useViewStoreApi,
+  IssueViewStoreFactoryProvider,
+  useIssueViewStoreFactory,
+  type IssueViewStoreFactory,
 } from "./view-store-context";
 export { useIssuesScopeStore, type IssuesScope } from "./issues-scope-store";
 export { useCommentCollapseStore } from "./comment-collapse-store";
@@ -34,6 +37,8 @@ export {
   createIssueViewStore,
   viewStoreSlice,
   viewStorePersistOptions,
+  mergeViewStatePersisted,
+  partializeIssueViewState,
   useClearFiltersOnWorkspaceChange,
   SORT_OPTIONS,
   CARD_PROPERTY_OPTIONS,
@@ -43,6 +48,7 @@ export {
   type CardProperties,
   type ActorFilterValue,
   type IssueViewState,
+  type PersistedIssueViewState,
 } from "./view-store";
 export {
   ISSUE_SURFACE_VIEW_STORAGE_KEY,

@@ -7,6 +7,10 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { setApiInstance } from "@multica/core/api";
 import type { ApiClient } from "@multica/core/api/client";
 import { pruneIssueSurfaceViewStates } from "@multica/core/issues/stores/surface-view-store";
+import {
+  IssueViewStoreFactoryProvider,
+  createIssueViewStore,
+} from "@multica/core/issues/stores";
 import type {
   AgentTask,
   Issue,
@@ -227,5 +231,30 @@ describe("IssueSurface — scope switch loading semantics", () => {
 
     expect(screen.getByTestId("surface-loading")).toBeInTheDocument();
     expect(screen.queryByText("WS1 issue")).not.toBeInTheDocument();
+  });
+
+  it("uses an injected view-store factory instead of the global registry", async () => {
+    // Desktop injects a per-tab, session-backed store. When present, IssueSurface
+    // must resolve its store through the factory (and never the global
+    // registry), so two same-path tabs keep independent filters.
+    const injected = createIssueViewStore("injected-test-surface");
+    const factory = vi.fn(() => injected);
+    render(
+      <QueryClientProvider client={qc}>
+        <IssueViewStoreFactoryProvider factory={factory}>
+          <IssueSurface
+            scope={{ type: "workspace" }}
+            modes={["list"]}
+            renderHeader={() => null}
+            renderLoading={() => <div data-testid="surface-loading" />}
+            batchToolbar="never"
+          />
+        </IssueViewStoreFactoryProvider>
+      </QueryClientProvider>,
+    );
+
+    await waitFor(() =>
+      expect(factory).toHaveBeenCalledWith("workspace:all"),
+    );
   });
 });
