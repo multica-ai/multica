@@ -26,6 +26,8 @@ Rules:
 - name is concise and suitable for a workspace list.
 - description is one sentence, at most 200 characters.
 - instructions are a complete Markdown system prompt describing role, workflow, output, and constraints.
+- model must be empty, preserve current_draft.model, or exactly match an id explicitly listed in AVAILABLE RUNTIME MODELS. Never use a model label as the id.
+- When AVAILABLE RUNTIME MODELS is null or empty, preserve current_draft.model and never invent a model id.
 - skill_ids may only contain IDs explicitly listed in AVAILABLE WORKSPACE SKILLS.
 - permission_scope must be private, workspace, or members. Default to private unless the user explicitly requests sharing.
 - member_ids may only contain IDs explicitly listed in AVAILABLE WORKSPACE MEMBERS, and only when permission_scope is members.

@@ -50,9 +50,26 @@ Return findings."}</agent_draft>`;
   });
 
   it("round-trips only the user's natural-language request for chat display", () => {
-    const content = encodeBuilderInput("Create a release manager", draft(), [], []);
+    const content = encodeBuilderInput(
+      "Create a release manager",
+      draft(),
+      [],
+      [],
+      { id: "runtime-1", name: "Codex", provider: "codex" },
+      [{ id: "gpt-5.5", label: "GPT-5.5", provider: "openai" }],
+    );
 
     expect(decodeBuilderInput(content)).toBe("Create a release manager");
+    expect(JSON.parse(content.slice(content.indexOf("\n") + 1))).toMatchObject({
+      selected_runtime: {
+        id: "runtime-1",
+        name: "Codex",
+        provider: "codex",
+      },
+      available_runtime_models: [
+        { id: "gpt-5.5", label: "GPT-5.5", provider: "openai" },
+      ],
+    });
     expect(decodeBuilderInput("ordinary chat message")).toBe(
       "ordinary chat message",
     );
@@ -70,6 +87,7 @@ Return findings."}</agent_draft>`;
       },
       new Set(["skill-1", "skill-2"]),
       new Set(["member-1"]),
+      new Set(["model-1"]),
     );
 
     expect(result.name).toBe("Release manager");
@@ -77,6 +95,86 @@ Return findings."}</agent_draft>`;
     expect([...result.skillIds]).toEqual(["skill-2"]);
     expect(result.permissionScope).toBe("members");
     expect([...result.memberIds]).toEqual(["member-1"]);
+  });
+
+  it("accepts catalog models and rejects invented or cross-runtime models", () => {
+    const validModelIds = new Set(["gpt-5.5", "gpt-5.3-codex"]);
+
+    expect(
+      mergeBuilderDraft(
+        draft(),
+        { model: "gpt-5.5" },
+        new Set(),
+        new Set(),
+        validModelIds,
+      ).model,
+    ).toBe("gpt-5.5");
+    expect(
+      mergeBuilderDraft(
+        draft(),
+        { model: "claude-3-5-sonnet" },
+        new Set(),
+        new Set(),
+        validModelIds,
+      ).model,
+    ).toBe("model-1");
+    expect(
+      mergeBuilderDraft(
+        draft(),
+        { model: "invented-model" },
+        new Set(),
+        new Set(),
+        validModelIds,
+      ).model,
+    ).toBe("model-1");
+    expect(
+      mergeBuilderDraft(
+        draft(),
+        { model: "" },
+        new Set(),
+        new Set(),
+        validModelIds,
+      ).model,
+    ).toBe("");
+  });
+
+  it("preserves a user-selected custom model when the catalog is unavailable", () => {
+    expect(
+      mergeBuilderDraft(
+        draft(),
+        { model: "invented-model" },
+        new Set(),
+        new Set(),
+        null,
+      ).model,
+    ).toBe("model-1");
+    expect(
+      mergeBuilderDraft(
+        draft(),
+        { model: "model-1" },
+        new Set(),
+        new Set(),
+        null,
+      ).model,
+    ).toBe("model-1");
+    expect(
+      mergeBuilderDraft(
+        draft(),
+        { model: "invented-model" },
+        new Set(),
+        new Set(),
+        new Set(),
+      ).model,
+    ).toBe("model-1");
+    expect(
+      mergeBuilderDraft(
+        draft(),
+        { model: "" },
+        new Set(),
+        new Set(),
+        new Set(),
+      ).model,
+    ).toBe("model-1");
   });
 
   it("preserves scoped member and team grants when duplicating an agent", () => {

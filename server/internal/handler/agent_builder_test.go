@@ -9,6 +9,18 @@ import (
 	"testing"
 )
 
+func TestAgentBuilderInstructionsConstrainModelsToRuntimeCatalog(t *testing.T) {
+	for _, requirement := range []string{
+		"AVAILABLE RUNTIME MODELS",
+		"Never use a model label as the id",
+		"never invent a model id",
+	} {
+		if !strings.Contains(agentBuilderInstructions, requirement) {
+			t.Fatalf("agent builder instructions missing model constraint %q", requirement)
+		}
+	}
+}
+
 func TestCreateAgentBuilderSessionCreatesIsolatedHiddenBuilder(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
