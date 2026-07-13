@@ -91,6 +91,13 @@ Cursor エディタに対応する CLI です。**セッション再開は動作
 
 **DevEco Code** は Huawei の HarmonyOS 開発向け独立コーディングエージェントで、OpenCode エンジンをベースに構築されています。独自のモデルカタログと Huawei アカウント認証を備えます。Multica は `deveco run --format json` で駆動し、モデルは `deveco models` から動的に探索されます（内蔵 `deveco/GLM-5.1`）。MCP サーバーは DevEco ネイティブ設定（`DEVECO_CONFIG_CONTENT`）で行います。Multica 側の `mcp_config` 連携は開発中です。
 
+| | |
+|---|---|
+| デーモンが探す名前 | `deveco` |
+| インストール | `npm install -g @deveco/deveco-code`。公式 README [gitcode.com/openharmony-sig/deveco-code](https://gitcode.com/openharmony-sig/deveco-code/blob/develop/README.en.md) または npm ページ [npmjs.com/package/@deveco/deveco-code](https://www.npmjs.com/package/@deveco/deveco-code) を参照してください。 |
+| 対応プラットフォーム | Windows x64 と macOS（arm64/x64）のみ。Linux ビルドは提供されていません。 |
+| 認証 | DevEco CLI 経由の Huawei アカウントログイン。 |
+
 ### Kiro CLI (Amazon)
 
 ACP-over-stdio のトランスポートです。セッション再開は ACP `session/load` を通じて動作し、スキルは `.kiro/skills/` にコピーされます。

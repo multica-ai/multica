@@ -91,6 +91,13 @@ Cursor 编辑器的 CLI 对应物。**会话续接可用**——当前 Cursor Ag
 
 **DevEco Code** 是华为面向鸿蒙开发的独立编程智能体，基于 OpenCode 引擎构建。自带模型目录与华为账号认证。Multica 通过 `deveco run --format json` 驱动；模型通过 `deveco models` 动态发现（内置 `deveco/GLM-5.1`）。MCP server 通过 DevEco 原生配置（`DEVECO_CONFIG_CONTENT`）接入；Multica 侧的 `mcp_config` 透传正在开发中。
 
+| | |
+|---|---|
+| 守护进程扫描 | `deveco` |
+| 安装 | `npm install -g @deveco/deveco-code`。参见官方 README [gitcode.com/openharmony-sig/deveco-code](https://gitcode.com/openharmony-sig/deveco-code/blob/develop/README.en.md) 或 npm 页面 [npmjs.com/package/@deveco/deveco-code](https://www.npmjs.com/package/@deveco/deveco-code)。 |
+| 支持平台 | 仅 Windows x64 与 macOS（arm64/x64），未发布 Linux 版本。 |
+| 认证 | 通过 DevEco CLI 使用华为账号登录。 |
+
 ### Kiro CLI（Amazon）
 
 ACP-over-stdio 传输。会话续接通过 ACP `session/load` 工作；MCP 配置通过 ACP `mcpServers` 传入；skills 拷到 `.kiro/skills/`。
