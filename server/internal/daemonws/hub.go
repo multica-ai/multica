@@ -30,6 +30,9 @@ type ClientIdentity struct {
 	WorkspaceIDs  []string
 	RuntimeIDs    []string
 	ClientVersion string
+	// Capabilities is the raw X-Client-Capabilities header captured at connect,
+	// so RPC handlers can honor the same capability gating as the HTTP path.
+	Capabilities string
 }
 
 // AuthorizedWorkspaceIDs returns the connection's workspace scope in stable

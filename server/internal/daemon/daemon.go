@@ -181,6 +181,12 @@ type Daemon struct {
 	// reconcile.go and runTaskWakeupConnection.
 	reconcile *reconcileBroadcaster
 
+	// wsRPC carries generic request/response RPCs (e.g. tasks.claim, MUL-4257)
+	// over the task-wakeup WS connection. It is attached to the live
+	// connection in runTaskWakeupConnection and detached on disconnect; when
+	// detached, callers fall back to HTTP.
+	wsRPC *wsRPCClient
+
 	// runtimeGoneMu guards runtimeGoneInflight, reregisterNextAttempt, and
 	// reregisterLastCompletedAt. The state lets heartbeat / poller / WS-ack
 	// handlers converge on a single recovery path when they each detect that a
@@ -271,6 +277,7 @@ func New(cfg Config, logger *slog.Logger) *Daemon {
 		reregisterLastCompletedAt: make(map[string]time.Time),
 		cancelPollInterval:        5 * time.Second,
 		reconcile:                 newReconcileBroadcaster(),
+		wsRPC:                     newWSRPCClient(batchClaimRequestTimeout),
 	}
 	d.runner = taskRunnerFunc(d.runTask)
 	d.runUpdateFn = d.runUpdate

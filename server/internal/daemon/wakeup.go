@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -150,6 +151,26 @@ func (d *Daemon) runTaskWakeupConnection(ctx context.Context, runtimeIDs []strin
 	writerDone := make(chan struct{})
 	go d.runWSWriter(conn, writes, writerDone)
 
+	// Attach the generic WS RPC sender (MUL-4257) to this connection's write
+	// channel. Guarded so a Call racing teardown never sends on the closed
+	// `writes` channel: teardown flips sendClosed under sendMu before
+	// close(writes), and the sender holds sendMu across its non-blocking send.
+	var sendMu sync.Mutex
+	sendClosed := false
+	d.wsRPC.attach(func(frame []byte) error {
+		sendMu.Lock()
+		defer sendMu.Unlock()
+		if sendClosed {
+			return errWSRPCUnavailable
+		}
+		select {
+		case writes <- frame:
+			return nil
+		default:
+			return errWSRPCWriteBufferFull
+		}
+	})
+
 	heartbeatCtx, cancelHeartbeat := context.WithCancel(ctx)
 	hbDone := make(chan struct{})
 	go func() {
@@ -173,6 +194,13 @@ func (d *Daemon) runTaskWakeupConnection(ctx context.Context, runtimeIDs []strin
 	// LIFO defer order would close writes before the sender stops, so the
 	// teardown is folded into a single deferred function instead.
 	defer func() {
+		// Detach RPC first so no new Call can send, and flip the closed flag
+		// under sendMu so any in-flight guarded send finishes before we close
+		// the writes channel below.
+		d.wsRPC.attach(nil)
+		sendMu.Lock()
+		sendClosed = true
+		sendMu.Unlock()
 		cancelHeartbeat()
 		<-hbDone
 		close(writes)
@@ -335,6 +363,13 @@ func (d *Daemon) readTaskWakeupMessages(conn *websocket.Conn, taskWakeups chan<-
 				continue
 			}
 			d.handleWSHeartbeatAck(context.Background(), &ack)
+		case protocol.EventDaemonRPCResponse:
+			var resp protocol.RPCResponsePayload
+			if err := json.Unmarshal(msg.Payload, &resp); err != nil {
+				d.logger.Debug("ws rpc response invalid payload", "error", err)
+				continue
+			}
+			d.wsRPC.deliver(resp)
 		}
 	}
 }

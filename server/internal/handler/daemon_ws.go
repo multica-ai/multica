@@ -52,6 +52,7 @@ func (h *Handler) DaemonWebSocket(w http.ResponseWriter, r *http.Request) {
 		WorkspaceIDs:  workspaceIDs,
 		RuntimeIDs:    runtimeIDs,
 		ClientVersion: r.Header.Get("X-Client-Version"),
+		Capabilities:  r.Header.Get("X-Client-Capabilities"),
 	})
 }
 
