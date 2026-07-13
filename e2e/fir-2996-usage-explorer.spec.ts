@@ -87,9 +87,12 @@ test("Dashboard shares filters, drills into runs, and persists a new visual", as
     await expect(page).toHaveURL(/provider=openai/);
 
     await page.getByRole("button", { name: "Runs", exact: true }).click();
-    await expect(page.getByRole("heading", { name: "Runs and debug links" })).toBeVisible();
-    await expect(page.locator(`a[href*="${issue.id}"]`, { hasText: "Open context" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Matching runs" })).toBeVisible();
+    // Click the run row (plain context cell) to open the debug/trace rail.
+    await page.getByRole("cell", { name: "Usage run", exact: true }).first().click();
+    await expect(page.getByRole("complementary", { name: "Run and debug context" })).toBeVisible();
     await expect(page.getByText(run.rows[0].id, { exact: true }).first()).toBeVisible();
+    await expect(page.locator(`aside a[href*="${issue.id}"]`)).toBeVisible();
 
     await page.getByRole("button", { name: "New visual" }).click();
     await page.getByLabel("Visual title").fill("Models by cost");
