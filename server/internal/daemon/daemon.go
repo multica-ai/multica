@@ -187,6 +187,13 @@ type Daemon struct {
 	// detached, callers fall back to HTTP.
 	wsRPC *wsRPCClient
 
+	// batchClaimUnsupported is set once a batch claim gets a 404 from the
+	// server (no /api/daemon/tasks/claim route — an un-upgraded server), so
+	// subsequent polls skip WS+batch and use the legacy per-runtime claim
+	// directly. Reset when the WS (re)connects, so a server upgrade that
+	// bounces the connection re-probes the batch route (MUL-4257).
+	batchClaimUnsupported atomic.Bool
+
 	// runtimeGoneMu guards runtimeGoneInflight, reregisterNextAttempt, and
 	// reregisterLastCompletedAt. The state lets heartbeat / poller / WS-ack
 	// handlers converge on a single recovery path when they each detect that a
@@ -277,7 +284,7 @@ func New(cfg Config, logger *slog.Logger) *Daemon {
 		reregisterLastCompletedAt: make(map[string]time.Time),
 		cancelPollInterval:        5 * time.Second,
 		reconcile:                 newReconcileBroadcaster(),
-		wsRPC:                     newWSRPCClient(batchClaimRequestTimeout),
+		wsRPC:                     newWSRPCClient(wsRPCResponseGrace),
 	}
 	d.runner = taskRunnerFunc(d.runTask)
 	d.runUpdateFn = d.runUpdate

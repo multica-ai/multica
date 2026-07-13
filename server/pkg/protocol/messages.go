@@ -20,6 +20,12 @@ type RPCRequestPayload struct {
 	RequestID string          `json:"request_id"`
 	Method    string          `json:"method"`
 	Body      json.RawMessage `json:"body,omitempty"`
+	// TimeoutMs is the server-side execution budget in milliseconds. The server
+	// bounds the handler's context by it so a slow RPC is cancelled (its work
+	// rolled back) rather than committing after the daemon has already timed
+	// out waiting and fallen back to HTTP (MUL-4257). 0 means no server-side
+	// bound (connection-lifetime only).
+	TimeoutMs int64 `json:"timeout_ms,omitempty"`
 }
 
 // RPCResponsePayload is the server→daemon reply, carried in a

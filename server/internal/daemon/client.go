@@ -240,6 +240,48 @@ func (c *Client) ClaimTasks(ctx context.Context, daemonID string, runtimeIDs []s
 	return resp.Tasks, nil
 }
 
+// isBatchClaimUnsupported reports whether err is a 404 from the batch claim
+// endpoint — i.e. the server predates the /api/daemon/tasks/claim route and the
+// daemon must fall back to the legacy per-runtime claim (MUL-4257). The batch
+// handler itself never returns 404, so a 404 here means the route is
+// unregistered on an un-upgraded server.
+func isBatchClaimUnsupported(err error) bool {
+	var reqErr *requestError
+	if !errors.As(err, &reqErr) {
+		return false
+	}
+	return reqErr.StatusCode == http.StatusNotFound
+}
+
+// claimTasksLegacy is the pre-batch compatibility fallback (MUL-4257): claim per
+// runtime via the legacy POST /api/daemon/runtimes/{id}/tasks/claim so a new
+// daemon still works against a server that has no batch route. Returns up to
+// maxTasks tasks. A per-runtime error is only propagated when nothing has been
+// claimed yet; otherwise the partial result is returned and the next poll
+// retries the rest.
+func (c *Client) claimTasksLegacy(ctx context.Context, runtimeIDs []string, maxTasks int) ([]*Task, error) {
+	if maxTasks <= 0 {
+		return nil, nil
+	}
+	out := make([]*Task, 0, maxTasks)
+	for _, rid := range runtimeIDs {
+		if len(out) >= maxTasks {
+			break
+		}
+		task, err := c.ClaimTask(ctx, rid)
+		if err != nil {
+			if len(out) == 0 {
+				return nil, err
+			}
+			return out, nil
+		}
+		if task != nil {
+			out = append(out, task)
+		}
+	}
+	return out, nil
+}
+
 // ResolveSkillBundle downloads a single skill bundle. It uses bundleClient (no
 // fixed timeout) so the deadline is governed entirely by ctx, which the daemon
 // scales to the bundle's size, and retries transient transport blips within

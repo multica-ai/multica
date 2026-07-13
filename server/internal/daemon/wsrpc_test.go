@@ -42,7 +42,7 @@ func TestWSRPCClient_CallRoundTrip(t *testing.T) {
 			ID string `json:"id"`
 		} `json:"tasks"`
 	}
-	status, err := c.Call(context.Background(), "tasks.claim", map[string]any{"max_tasks": 3}, &resp)
+	status, err := c.Call(context.Background(), "tasks.claim", 0, map[string]any{"max_tasks": 3}, &resp)
 	if err != nil || status != 200 {
 		t.Fatalf("Call: status=%d err=%v", status, err)
 	}
@@ -55,7 +55,7 @@ func TestWSRPCClient_CallRoundTrip(t *testing.T) {
 // the caller falls back to HTTP.
 func TestWSRPCClient_Unavailable(t *testing.T) {
 	c := newWSRPCClient(time.Second)
-	if _, err := c.Call(context.Background(), "tasks.claim", nil, nil); !errors.Is(err, errWSRPCUnavailable) {
+	if _, err := c.Call(context.Background(), "tasks.claim", 0, nil, nil); !errors.Is(err, errWSRPCUnavailable) {
 		t.Fatalf("err = %v, want errWSRPCUnavailable", err)
 	}
 }
@@ -64,7 +64,7 @@ func TestWSRPCClient_Unavailable(t *testing.T) {
 func TestWSRPCClient_Timeout(t *testing.T) {
 	c := newWSRPCClient(50 * time.Millisecond)
 	c.attach(func([]byte) error { return nil }) // send succeeds, never replies
-	status, err := c.Call(context.Background(), "tasks.claim", nil, nil)
+	status, err := c.Call(context.Background(), "tasks.claim", 0, nil, nil)
 	if err == nil || status != 0 {
 		t.Fatalf("status=%d err=%v, want timeout (status 0, err)", status, err)
 	}
@@ -82,7 +82,7 @@ func TestWSRPCClient_ServerError(t *testing.T) {
 		go c.deliver(protocol.RPCResponsePayload{RequestID: req.RequestID, Status: 400, Error: "bad daemon_id"})
 		return nil
 	})
-	status, err := c.Call(context.Background(), "tasks.claim", nil, nil)
+	status, err := c.Call(context.Background(), "tasks.claim", 0, nil, nil)
 	if status != 400 || err == nil {
 		t.Fatalf("status=%d err=%v, want 400 + error", status, err)
 	}
@@ -95,7 +95,7 @@ func TestWSRPCClient_DetachFailsPending(t *testing.T) {
 	c.attach(func([]byte) error { return nil })
 	done := make(chan error, 1)
 	go func() {
-		_, err := c.Call(context.Background(), "tasks.claim", nil, nil)
+		_, err := c.Call(context.Background(), "tasks.claim", 0, nil, nil)
 		done <- err
 	}()
 	time.Sleep(30 * time.Millisecond)

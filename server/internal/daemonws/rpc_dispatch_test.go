@@ -153,3 +153,39 @@ func TestRPCDispatch_DisconnectDuringHandlerNoPanic(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 	// No panic == pass.
 }
+
+// TestRPCDispatch_ServerTimeoutCancelsHandler pins the MUL-4257 review fix: the
+// RPC request's TimeoutMs bounds server-side execution, so a slow handler is
+// cancelled (its work rolled back) at the deadline rather than running to
+// completion after the daemon has already timed out and fallen back to HTTP.
+func TestRPCDispatch_ServerTimeoutCancelsHandler(t *testing.T) {
+	hub := NewHub()
+	cancelled := make(chan struct{}, 1)
+	hub.SetRPCHandler(func(ctx context.Context, identity ClientIdentity, method string, body json.RawMessage) (int, json.RawMessage, error) {
+		select {
+		case <-ctx.Done():
+			select {
+			case cancelled <- struct{}{}:
+			default:
+			}
+			return 0, nil, ctx.Err()
+		case <-time.After(5 * time.Second):
+			return http.StatusOK, json.RawMessage(`{}`), nil
+		}
+	})
+	conn := dialRPCTestConn(t, hub, ClientIdentity{DaemonID: "daemon-1", RuntimeIDs: []string{"rt-1"}})
+
+	resp := sendRPCRequest(t, conn, protocol.RPCRequestPayload{
+		RequestID: "req-timeout",
+		Method:    "tasks.claim",
+		TimeoutMs: 100,
+	})
+	if resp.RequestID != "req-timeout" || resp.Status < 400 || resp.Error == "" {
+		t.Fatalf("resp = %+v, want an error response from the cancelled handler", resp)
+	}
+	select {
+	case <-cancelled:
+	case <-time.After(2 * time.Second):
+		t.Fatal("handler context was not cancelled at the server-side TimeoutMs deadline")
+	}
+}

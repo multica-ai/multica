@@ -17,6 +17,12 @@ import (
 // to HTTP.
 var errWSRPCUnavailable = errors.New("ws rpc: no active connection")
 
+// wsRPCResponseGrace is how much longer the daemon waits for an RPC response
+// beyond the server-side execution budget it requested, so a claim that
+// committed just before the server deadline still reports back before the
+// daemon gives up (MUL-4257).
+const wsRPCResponseGrace = 2 * time.Second
+
 // errWSRPCWriteBufferFull is returned when the connection's write buffer is
 // saturated; the caller falls back to HTTP rather than blocking the socket.
 var errWSRPCWriteBufferFull = errors.New("ws rpc: write buffer full")
@@ -32,13 +38,16 @@ type wsRPCClient struct {
 	mu        sync.Mutex
 	pending   map[string]chan protocol.RPCResponsePayload
 	sendFrame func([]byte) error
-	timeout   time.Duration
+	// grace is added to a call's server-side timeout budget to get how long the
+	// daemon waits for the response, so a claim that committed just before the
+	// server deadline still reports back before the daemon gives up (MUL-4257).
+	grace time.Duration
 }
 
-func newWSRPCClient(timeout time.Duration) *wsRPCClient {
+func newWSRPCClient(grace time.Duration) *wsRPCClient {
 	return &wsRPCClient{
 		pending: make(map[string]chan protocol.RPCResponsePayload),
-		timeout: timeout,
+		grace:   grace,
 	}
 }
 
@@ -73,7 +82,7 @@ func (c *wsRPCClient) connected() bool {
 // returns the response status (0 when the call never reached the server) so the
 // caller can distinguish transport failure (→ HTTP fallback) from a server-side
 // error.
-func (c *wsRPCClient) Call(ctx context.Context, method string, reqBody, respBody any) (int, error) {
+func (c *wsRPCClient) Call(ctx context.Context, method string, serverTimeout time.Duration, reqBody, respBody any) (int, error) {
 	if c == nil {
 		return 0, errWSRPCUnavailable
 	}
@@ -92,6 +101,7 @@ func (c *wsRPCClient) Call(ctx context.Context, method string, reqBody, respBody
 			RequestID: id,
 			Method:    method,
 			Body:      rawReq,
+			TimeoutMs: serverTimeout.Milliseconds(),
 		}),
 	})
 	if err != nil {
@@ -118,7 +128,10 @@ func (c *wsRPCClient) Call(ctx context.Context, method string, reqBody, respBody
 		return 0, fmt.Errorf("ws rpc: send: %w", err)
 	}
 
-	timeout := c.timeout
+	// Wait the server-side budget PLUS a grace margin: a claim that committed
+	// just before the server deadline must still report back before the daemon
+	// gives up and falls back to HTTP, or we would double-claim (MUL-4257).
+	timeout := serverTimeout + c.grace
 	if timeout <= 0 {
 		timeout = 5 * time.Second
 	}
@@ -179,21 +192,39 @@ func (c *wsRPCClient) deliver(resp protocol.RPCResponsePayload) {
 // bodies are identical to the HTTP endpoint so both transports are
 // interchangeable. Wired into the claim poller as part of the poller cutover.
 func (d *Daemon) ClaimTasksWSFirst(ctx context.Context, daemonID string, runtimeIDs []string, maxTasks int) ([]*Task, error) {
+	// Un-upgraded server without the batch route: a prior poll already learned
+	// this (via a 404), so go straight to the legacy per-runtime claim and skip
+	// the WS + batch attempts each cycle.
+	if d.batchClaimUnsupported.Load() {
+		return d.client.claimTasksLegacy(ctx, runtimeIDs, maxTasks)
+	}
 	if d.wsRPC.connected() {
 		var resp struct {
 			Tasks []*Task `json:"tasks"`
 		}
-		reqCtx, cancel := context.WithTimeout(ctx, batchClaimRequestTimeout)
-		_, err := d.wsRPC.Call(reqCtx, "tasks.claim", map[string]any{
+		// batchClaimRequestTimeout is the server-side execution budget; the
+		// daemon waits that plus the client's grace margin for the response.
+		_, err := d.wsRPC.Call(ctx, "tasks.claim", batchClaimRequestTimeout, map[string]any{
 			"daemon_id":   daemonID,
 			"runtime_ids": runtimeIDs,
 			"max_tasks":   maxTasks,
 		}, &resp)
-		cancel()
 		if err == nil {
 			return resp.Tasks, nil
 		}
 		d.logger.Debug("ws claim failed; falling back to http", "error", err)
 	}
-	return d.client.ClaimTasks(ctx, daemonID, runtimeIDs, maxTasks)
+	tasks, err := d.client.ClaimTasks(ctx, daemonID, runtimeIDs, maxTasks)
+	if err == nil {
+		return tasks, nil
+	}
+	// Server has no batch route (404): freeze the old API contract by falling
+	// back to the legacy per-runtime claim loop, and remember it so we don't
+	// re-probe every cycle.
+	if isBatchClaimUnsupported(err) {
+		d.batchClaimUnsupported.Store(true)
+		d.logger.Info("batch claim route unsupported by server; using legacy per-runtime claim")
+		return d.client.claimTasksLegacy(ctx, runtimeIDs, maxTasks)
+	}
+	return nil, err
 }

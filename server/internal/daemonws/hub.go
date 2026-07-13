@@ -659,10 +659,19 @@ func (c *client) handleRPCFrame(raw json.RawMessage) {
 	}
 	go func() {
 		defer func() { <-c.rpcSem }()
-		// Use the connection ctx so a slow handler (e.g. a DB-bound claim) is
-		// cancelled when the socket tears down, rather than running on against
-		// a dead connection with context.Background().
-		status, body, err := handler(c.ctx, c.identity, req.Method, req.Body)
+		// Bound server-side execution by the caller's requested budget (in
+		// addition to the connection ctx), so a slow RPC is cancelled — and its
+		// work rolled back — rather than committing after the daemon has already
+		// timed out and fallen back to HTTP (MUL-4257). The daemon waits a grace
+		// period beyond this budget, so a claim that DID commit before the
+		// deadline still reports back in time.
+		hctx := c.ctx
+		if req.TimeoutMs > 0 {
+			var cancel context.CancelFunc
+			hctx, cancel = context.WithTimeout(c.ctx, time.Duration(req.TimeoutMs)*time.Millisecond)
+			defer cancel()
+		}
+		status, body, err := handler(hctx, c.identity, req.Method, req.Body)
 		if err != nil {
 			if status < 400 {
 				status = http.StatusInternalServerError
