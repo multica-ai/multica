@@ -47,8 +47,8 @@ var grokBlockedArgs = map[string]blockedArgMode{
 }
 
 // grokBackend implements Backend by spawning
-// `grok agent --always-approve [--reasoning-effort <level>] stdio` and
-// communicating via the standard ACP (Agent Client Protocol) JSON-RPC 2.0
+// `grok --no-auto-update agent --always-approve [--reasoning-effort <level>] stdio`
+// and communicating via the standard ACP (Agent Client Protocol) JSON-RPC 2.0
 // transport over stdin/stdout.
 //
 // This targets xAI's Grok Build CLI (the `grok` binary). Grok Build exposes
@@ -123,7 +123,12 @@ func (b *grokBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 	// Flags on `grok agent` come before the transport subcommand (`stdio`).
 	// Thinking is a process-level flag on the agent command; model is set
 	// after session create via session/set_model (ACP).
-	grokArgs := []string{"agent", "--always-approve"}
+	//
+	// `--no-auto-update` is a *global* flag (before the `agent` subcommand):
+	// xAI recommends it for headless/ACP/CI runs so a background update check
+	// never interferes with an unattended daemon task. It is daemon-owned
+	// (grokBlockedArgs) so user custom_args cannot double it or strip it.
+	grokArgs := []string{"--no-auto-update", "agent", "--always-approve"}
 	if opts.ThinkingLevel != "" {
 		grokArgs = append(grokArgs, "--reasoning-effort", opts.ThinkingLevel)
 	}
@@ -136,7 +141,8 @@ func (b *grokBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 	if opts.Cwd != "" {
 		cmd.Dir = opts.Cwd
 	}
-	cmd.Env = buildEnv(b.cfg.Env)
+	childEnv := buildEnv(b.cfg.Env)
+	cmd.Env = childEnv
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -259,6 +265,28 @@ func (b *grokBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 			finalError = fmt.Sprintf("grok initialize failed: %v", err)
 			resCh <- Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds()}
 			return
+		}
+
+		// Grok's ACP surface requires an explicit auth handshake between
+		// `initialize` and any session operation: read the advertised
+		// authMethods, pick one, and send `authenticate` before session/new
+		// or session/load. Skipping this makes a real, logged-in CLI reject
+		// every session op (the fake ACP in tests happens to accept them,
+		// which is exactly why this must be asserted in tests too). xAI's
+		// documented preference is the API key when XAI_API_KEY is set and
+		// offered, otherwise the cached login token.
+		// Ref: https://docs.x.ai/build/cli/headless-scripting
+		if methodID, ok := selectGrokAuthMethod(extractACPAuthMethods(initResult), envHasNonEmpty(childEnv, "XAI_API_KEY")); ok {
+			if _, err := c.request(runCtx, "authenticate", map[string]any{
+				"methodId": methodID,
+				"_meta":    map[string]any{"headless": true},
+			}); err != nil {
+				finalStatus = "failed"
+				finalError = fmt.Sprintf("grok authenticate (%s) failed: %v", methodID, err)
+				resCh <- Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds()}
+				return
+			}
+			b.cfg.Logger.Info("grok authenticated", "method", methodID)
 		}
 
 		// Drop MCP entries whose remote transport the runtime didn't advertise.
@@ -448,4 +476,50 @@ func (b *grokBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 	}()
 
 	return &Session{Messages: msgStream.ch, Result: resCh}, nil
+}
+
+// Grok's ACP `authenticate` method ids (from `initialize`.authMethods).
+// `xai.api_key` consumes XAI_API_KEY from the environment; `cached_token`
+// reuses the credentials written by `grok login`.
+const (
+	grokAuthMethodAPIKey      = "xai.api_key"
+	grokAuthMethodCachedToken = "cached_token"
+)
+
+// selectGrokAuthMethod chooses which advertised ACP auth method to use,
+// following xAI's documented headless flow: prefer the API key when
+// XAI_API_KEY is present in the child env and the CLI offers it, otherwise
+// fall back to the cached login token. If the CLI advertises methods but
+// offers neither known id, we still return the first advertised one so a
+// future rename doesn't hard-break the handshake (the real CLI then surfaces
+// a clear error). Returns ("", false) when no methods are advertised, which
+// means the CLI needs no explicit authenticate step.
+func selectGrokAuthMethod(methods []string, haveAPIKey bool) (string, bool) {
+	if len(methods) == 0 {
+		return "", false
+	}
+	offered := make(map[string]bool, len(methods))
+	for _, m := range methods {
+		offered[m] = true
+	}
+	if haveAPIKey && offered[grokAuthMethodAPIKey] {
+		return grokAuthMethodAPIKey, true
+	}
+	if offered[grokAuthMethodCachedToken] {
+		return grokAuthMethodCachedToken, true
+	}
+	return methods[0], true
+}
+
+// envHasNonEmpty reports whether an `os/exec`-style env slice
+// ("KEY=value" entries) contains key with a non-empty value. Later entries
+// win (matching how the OS resolves duplicate keys), so we scan from the end.
+func envHasNonEmpty(env []string, key string) bool {
+	prefix := key + "="
+	for i := len(env) - 1; i >= 0; i-- {
+		if strings.HasPrefix(env[i], prefix) {
+			return strings.TrimSpace(env[i][len(prefix):]) != ""
+		}
+	}
+	return false
 }

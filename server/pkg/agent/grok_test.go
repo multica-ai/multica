@@ -40,7 +40,14 @@ while IFS= read -r line; do
   id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
   case "$line" in
     *'"method":"initialize"'*)
-      printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true,"mcpCapabilities":{"http":true,"sse":true}}}}\n' "$id"
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":1,"authMethods":[{"id":"cached_token","name":"Cached login"},{"id":"xai.api_key","name":"API key"}],"agentCapabilities":{"loadSession":true,"mcpCapabilities":{"http":true,"sse":true}}}}\n' "$id"
+      ;;
+    *'"method":"authenticate"'*)
+      if [ -n "$GROK_AUTH_FAIL" ]; then
+        printf '{"jsonrpc":"2.0","id":%s,"error":{"code":-32000,"message":"authentication required: run grok login"}}\n' "$id"
+        exit 0
+      fi
+      printf '{"jsonrpc":"2.0","id":%s,"result":{}}\n' "$id"
       ;;
     *'"method":"session/new"'*)
       printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"ses_new","models":{"availableModels":[{"modelId":"grok-4.5","name":"Grok 4.5","description":""},{"modelId":"grok-composer-2.5-fast","name":"Grok Composer 2.5 Fast","description":""}]}}}\n' "$id"
@@ -165,7 +172,7 @@ func TestGrokBlockedArgsFiltering(t *testing.T) {
 		t.Fatalf("read args file: %v", err)
 	}
 	lines := strings.Split(strings.TrimSpace(string(raw)), "\n")
-	wantPrefix := []string{"agent", "--always-approve", "--reasoning-effort", "high", "stdio"}
+	wantPrefix := []string{"--no-auto-update", "agent", "--always-approve", "--reasoning-effort", "high", "stdio"}
 	if len(lines) < len(wantPrefix) {
 		t.Fatalf("expected at least %d args, got %d: %q", len(wantPrefix), len(lines), lines)
 	}
@@ -175,7 +182,7 @@ func TestGrokBlockedArgsFiltering(t *testing.T) {
 		}
 	}
 	joined := strings.Join(lines, " ")
-	for _, once := range []string{"agent", "--always-approve", "stdio"} {
+	for _, once := range []string{"--no-auto-update", "agent", "--always-approve", "stdio"} {
 		if c := countTokens(lines, once); c != 1 {
 			t.Errorf("expected exactly one %q, got %d (full: %q)", once, c, joined)
 		}
@@ -275,6 +282,153 @@ func TestGrokUsesSessionLoadForResume(t *testing.T) {
 	}
 	if strings.Contains(requests, `"method":"session/resume"`) {
 		t.Fatalf("grok must use session/load when resuming, not session/resume:\n%s", requests)
+	}
+}
+
+// TestGrokAuthenticatesBeforeSession asserts the ACP auth handshake happens in
+// the order the real Grok CLI requires: `authenticate` must be sent after
+// `initialize` and before any session operation (session/new or session/load).
+// A fake ACP that blindly accepts session/new (as ours does) would otherwise
+// hide a missing handshake — the exact gap this guards against.
+func TestGrokAuthenticatesBeforeSession(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name        string
+		resume      string
+		wantSession string
+	}{
+		{name: "new session", resume: "", wantSession: `"method":"session/new"`},
+		{name: "resume", resume: "ses_existing", wantSession: `"method":"session/load"`},
+	} {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			tempDir := t.TempDir()
+			requestsFile := filepath.Join(tempDir, "requests.jsonl")
+			fakePath := filepath.Join(tempDir, "grok")
+			writeTestExecutable(t, fakePath, []byte(fakeGrokACPScript()))
+
+			backend, err := New("grok", Config{
+				ExecutablePath: fakePath,
+				Logger:         slog.Default(),
+				Env:            map[string]string{"GROK_REQUESTS_FILE": requestsFile},
+			})
+			if err != nil {
+				t.Fatalf("new grok backend: %v", err)
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+
+			session, err := backend.Execute(ctx, "task", ExecOptions{
+				ResumeSessionID: tc.resume,
+				Timeout:         5 * time.Second,
+			})
+			if err != nil {
+				t.Fatalf("execute: %v", err)
+			}
+			go func() {
+				for range session.Messages {
+				}
+			}()
+			<-session.Result
+
+			raw, err := os.ReadFile(requestsFile)
+			if err != nil {
+				t.Fatalf("read requests: %v", err)
+			}
+			lines := strings.Split(strings.TrimSpace(string(raw)), "\n")
+			authIdx, sessionIdx, initIdx := -1, -1, -1
+			for i, l := range lines {
+				switch {
+				case strings.Contains(l, `"method":"initialize"`):
+					initIdx = i
+				case strings.Contains(l, `"method":"authenticate"`):
+					authIdx = i
+				case strings.Contains(l, tc.wantSession):
+					if sessionIdx == -1 {
+						sessionIdx = i
+					}
+				}
+			}
+			if authIdx == -1 {
+				t.Fatalf("expected an authenticate request, got:\n%s", raw)
+			}
+			if sessionIdx == -1 {
+				t.Fatalf("expected a %s request, got:\n%s", tc.wantSession, raw)
+			}
+			if !(initIdx < authIdx && authIdx < sessionIdx) {
+				t.Fatalf("expected order initialize(%d) < authenticate(%d) < session(%d):\n%s",
+					initIdx, authIdx, sessionIdx, raw)
+			}
+			// The daemon has no XAI_API_KEY here, so it must fall back to the
+			// cached-token method advertised by the fake.
+			if !strings.Contains(lines[authIdx], `"methodId":"cached_token"`) {
+				t.Errorf("expected cached_token auth method, got: %s", lines[authIdx])
+			}
+			if !strings.Contains(lines[authIdx], `"headless":true`) {
+				t.Errorf("expected headless meta on authenticate, got: %s", lines[authIdx])
+			}
+		})
+	}
+}
+
+// TestGrokAuthFailureFailsTask asserts a rejected authenticate handshake fails
+// the task with a clear error instead of falling through to session/new.
+func TestGrokAuthFailureFailsTask(t *testing.T) {
+	t.Parallel()
+	fakePath := filepath.Join(t.TempDir(), "grok")
+	writeTestExecutable(t, fakePath, []byte(fakeGrokACPScript()))
+
+	backend, err := New("grok", Config{
+		ExecutablePath: fakePath,
+		Logger:         slog.Default(),
+		Env:            map[string]string{"GROK_AUTH_FAIL": "1"},
+	})
+	if err != nil {
+		t.Fatalf("new grok backend: %v", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	session, err := backend.Execute(ctx, "task", ExecOptions{Timeout: 5 * time.Second})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+	result := <-session.Result
+	if result.Status != "failed" {
+		t.Fatalf("expected failed on authenticate error, got %q", result.Status)
+	}
+	if !strings.Contains(result.Error, "authenticate") {
+		t.Errorf("expected error to mention authenticate, got %q", result.Error)
+	}
+}
+
+// TestGrokSelectAuthMethod covers the auth-method selection preference.
+func TestGrokSelectAuthMethod(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name    string
+		methods []string
+		haveKey bool
+		wantID  string
+		wantOK  bool
+	}{
+		{"none advertised", nil, false, "", false},
+		{"cached only", []string{"cached_token"}, false, "cached_token", true},
+		{"api key preferred when present", []string{"cached_token", "xai.api_key"}, true, "xai.api_key", true},
+		{"api key ignored without env", []string{"cached_token", "xai.api_key"}, false, "cached_token", true},
+		{"unknown falls back to first", []string{"future_method"}, true, "future_method", true},
+	}
+	for _, tc := range cases {
+		got, ok := selectGrokAuthMethod(tc.methods, tc.haveKey)
+		if got != tc.wantID || ok != tc.wantOK {
+			t.Errorf("%s: selectGrokAuthMethod(%v, %v) = (%q, %v), want (%q, %v)",
+				tc.name, tc.methods, tc.haveKey, got, ok, tc.wantID, tc.wantOK)
+		}
 	}
 }
 

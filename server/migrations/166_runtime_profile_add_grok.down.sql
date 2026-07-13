@@ -1,6 +1,6 @@
 ALTER TABLE runtime_profile DROP CONSTRAINT IF EXISTS runtime_profile_protocol_family_check;
 
--- Restore the pre-163 whitelist (migration 136 shape, without grok). NOT VALID
+-- Restore the pre-166 whitelist (migration 136 shape, without grok). NOT VALID
 -- keeps the historical Gemini tolerance so the rollback cannot fail on old rows.
 ALTER TABLE runtime_profile ADD CONSTRAINT runtime_profile_protocol_family_check
     CHECK (protocol_family IN (
