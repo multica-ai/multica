@@ -62,6 +62,10 @@ export interface CommentTriggerPreviewAgent {
   avatar_url?: string;
   source: CommentTriggerSource | string;
   reason: string;
+  already_pending?: boolean;
+  pending_task_id?: string;
+  pending_task_status?: string;
+  pending_task_age_seconds?: number;
 }
 
 export interface CommentTriggerPreview {

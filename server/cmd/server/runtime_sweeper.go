@@ -36,21 +36,18 @@ const (
 	// The dispatched→running transition should be near-instant, so 5 minutes
 	// means something went wrong (e.g. StartTask API call failed silently).
 	dispatchTimeoutSeconds = 300.0
-	// runningTimeoutSeconds fails tasks stuck in 'running' beyond this. It is a
-	// coarse server-side backstop keyed on started_at, AND-gated by daemon
-	// liveness (agent_runtime.last_seen_at freshness within
-	// staleThresholdSeconds): a running task whose runtime is still
-	// heartbeating is NEVER killed by this wall clock, even after the timeout
-	// elapses. This is what lets healthy multi-hour research / training runs
-	// survive on self-hosted deployments (MUL-4107) — the daemon itself
-	// decides stuck-vs-long-running via its inactivity watchdogs (idle/tool),
-	// so the server-side wall clock is only a defensive backstop for the
-	// pathological case where a runtime row somehow retains status='online'
-	// with a stale DB heartbeat for longer than this timeout. The primary
-	// "daemon died" path is `sweepStaleRuntimes` in the same tick (Redis
-	// liveness + DB stale + FailTasksForOfflineRuntimes), which typically
-	// reclaims orphaned tasks within ~180s.
-	runningTimeoutSeconds = 9000.0
+	// runningTimeoutSeconds is the grace before task-level heartbeat recovery
+	// begins. A modern daemon renews a per-task heartbeat while its worker is
+	// active, so healthy multi-hour work survives; a wedged worker is recovered
+	// promptly even if other tasks keep the runtime heartbeat fresh. Legacy
+	// daemon tasks leave that field NULL and retain the runtime-heartbeat
+	// fallback until they finish or restart.
+	runningTimeoutSeconds = 300.0
+	// taskHeartbeatStaleSeconds permits three missed 30-second worker
+	// heartbeats before the sweeper marks a modern task failed. It must be
+	// comfortably above the daemon's request timeout to avoid false recovery on
+	// a slow server.
+	taskHeartbeatStaleSeconds = 90.0
 	// queuedTTLSeconds expires tasks that have been sitting in 'queued'
 	// for longer than this without ever being claimed. This is the cleanup
 	// arm of the MUL-1899 backlog fix: even with the dispatch-time
@@ -261,8 +258,10 @@ func gcRuntimes(ctx context.Context, queries *db.Queries, bus *events.Bus) {
 // runs are preserved:
 //   - dispatched: excludes rows with an active prepare_lease (renewed by
 //     the daemon between claim and StartTask).
-//   - running: excludes rows whose runtime is 'online' with a fresh
-//     last_seen_at (renewed by the daemon heartbeat ~every 15s).
+//   - running: modern daemons renew a per-task execution heartbeat, so a
+//     healthy multi-hour task survives while a single wedged worker is
+//     recovered. Legacy tasks retain the runtime-heartbeat fallback until
+//     their daemon upgrades.
 //
 // The daemon-dead case is primarily handled upstream by sweepStaleRuntimes
 // in the same tick; this function is a defensive backstop for the residual
@@ -270,8 +269,9 @@ func gcRuntimes(ctx context.Context, queries *db.Queries, bus *events.Bus) {
 // wall clock (MUL-4107).
 func sweepStaleTasks(ctx context.Context, queries *db.Queries, taskSvc *service.TaskService, bus *events.Bus) {
 	failedTasks, err := queries.FailStaleTasks(ctx, db.FailStaleTasksParams{
-		DispatchTimeoutSecs: dispatchTimeoutSeconds,
-		RunningTimeoutSecs:  runningTimeoutSeconds,
+		DispatchTimeoutSecs:    dispatchTimeoutSeconds,
+		RunningTimeoutSecs:     runningTimeoutSeconds,
+		TaskHeartbeatStaleSecs: taskHeartbeatStaleSeconds,
 		// Reuse the runtime stale window so the running-task backstop
 		// exactly matches what sweepStaleRuntimes considers "not alive".
 		RuntimeStaleSecs: staleThresholdSeconds,

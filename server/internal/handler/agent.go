@@ -281,6 +281,7 @@ type AgentTaskResponse struct {
 	Priority           int32                 `json:"priority"`
 	DispatchedAt       *string               `json:"dispatched_at"`
 	StartedAt          *string               `json:"started_at"`
+	LastHeartbeatAt    *string               `json:"last_heartbeat_at,omitempty"`
 	CompletedAt        *string               `json:"completed_at"`
 	Result             any                   `json:"result"`
 	Error              *string               `json:"error"`
@@ -605,6 +606,7 @@ func taskToResponse(t db.AgentTaskQueue, workspaceID string) AgentTaskResponse {
 		Priority:            t.Priority,
 		DispatchedAt:        timestampToPtr(t.DispatchedAt),
 		StartedAt:           timestampToPtr(t.StartedAt),
+		LastHeartbeatAt:     timestampToPtr(t.LastHeartbeatAt),
 		CompletedAt:         timestampToPtr(t.CompletedAt),
 		Result:              result,
 		Error:               textToPtr(t.Error),

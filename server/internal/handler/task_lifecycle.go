@@ -97,6 +97,23 @@ func (h *Handler) PinTaskSession(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// HeartbeatTaskExecution records liveness for the daemon worker running one
+// task. It is separate from the runtime heartbeat because a healthy daemon can
+// execute several tasks and lose only one worker.
+func (h *Handler) HeartbeatTaskExecution(w http.ResponseWriter, r *http.Request) {
+	taskID := chi.URLParam(r, "taskId")
+	if _, ok := h.requireDaemonTaskAccess(w, r, taskID); !ok {
+		return
+	}
+
+	if _, err := h.TaskService.HeartbeatTaskExecution(r.Context(), parseUUID(taskID)); err != nil {
+		slog.Debug("task execution heartbeat rejected", "task_id", taskID, "error", err)
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 // RerunIssueRequest is the optional body of POST /api/issues/{id}/rerun.
 // All fields are optional; an empty body keeps the legacy "rerun the issue's
 // current assignee" behaviour used by the CLI.

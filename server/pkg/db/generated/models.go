@@ -131,6 +131,7 @@ type AgentTaskQueue struct {
 	CoalescedCommentIds    []pgtype.UUID      `json:"coalesced_comment_ids"`
 	DeliveredCommentIds    []pgtype.UUID      `json:"delivered_comment_ids"`
 	ChatInputTaskID        pgtype.UUID        `json:"chat_input_task_id"`
+	LastHeartbeatAt        pgtype.Timestamptz `json:"last_heartbeat_at"`
 	ChatFinalizeDeferredAt pgtype.Timestamptz `json:"chat_finalize_deferred_at"`
 	// Waterfall level that resolved originator_user_id for this run: direct_human | delegation | comment_source | rule_owner | owner_fallback | backfill | unattributed. Audit/visibility metadata only — never consulted for authorization. TEXT with no CHECK so new trigger paths can add a source without a migration (MUL-4302 §7). NULL on pre-migration rows.
 	OriginatorSource pgtype.Text `json:"originator_source"`
