@@ -13,9 +13,13 @@ import { useSyncExternalStore } from "react";
  * consistent: while backgrounded the active session both counts toward the
  * badge and keeps its unread; on return the badge clears and mark-read fires.
  *
- * Conservative by design: any uncertainty (SSR, missing DOM) resolves to
- * `true`, and the moment focus/visibility is lost it flips to `false`, so we err
- * toward showing the badge — which clears itself as soon as the user returns.
+ * In the browser the value is always measured from the real DOM. The `true`
+ * fallbacks below only apply where there is no window to measure — SSR and
+ * other non-DOM contexts — which also have no live surface or WS traffic to act
+ * on. `true` (foreground) is chosen there only so the SSR snapshot matches the
+ * first client snapshot of a freshly opened, focused window and hydration
+ * doesn't flip the value; the real focus/visibility state takes over
+ * immediately on the client, flipping to `false` the moment either is lost.
  */
 function subscribe(onStoreChange: () => void): () => void {
   if (typeof document === "undefined") return () => {};
