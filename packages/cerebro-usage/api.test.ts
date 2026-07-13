@@ -6,8 +6,62 @@ vi.mock("@multica/core/api", async (importOriginal) => {
   return { ...actual, api: { ...actual.api, cerebroRequest } };
 });
 
-import { fetchSkillUsage, fetchUsageExplorer } from "./api";
-import { parseUsageExplorer } from "./api";
+import {
+  fetchAnalyticsCatalog,
+  fetchAnalyticsQuery,
+  createAnalyticsVisual,
+  fetchAnalyticsVisuals,
+  fetchSkillUsage,
+  fetchUsageExplorer,
+  parseAnalyticsQueryResult,
+  parseUsageExplorer,
+} from "./api";
+
+describe("canonical analytics API", () => {
+  beforeEach(() => cerebroRequest.mockReset());
+
+  it("queries the shared analytics endpoint without changing the contract", async () => {
+    cerebroRequest.mockResolvedValue({
+      columns: ["model", "runs", "cost_cents"],
+      rows: [{ model: "gpt-5", runs: 4, cost_cents: 125 }],
+      next_cursor: "2026-07-12T08:00:00Z",
+    });
+    const query = {
+      population: "all" as const,
+      metrics: ["runs" as const, "cost_cents" as const],
+      dimensions: ["model" as const],
+      page: { limit: 25 },
+    };
+
+    await expect(fetchAnalyticsQuery(query)).resolves.toMatchObject({
+      columns: ["model", "runs", "cost_cents"],
+      rows: [{ model: "gpt-5", runs: 4, cost_cents: 125 }],
+    });
+    expect(cerebroRequest).toHaveBeenCalledWith("/api/analytics/query", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(query),
+    });
+  });
+
+  it("loads the server catalog used by visual configuration", async () => {
+    cerebroRequest.mockResolvedValue({ populations: ["all"], metrics: ["runs"], dimensions: ["time"], grains: ["day"], operators: ["in"] });
+    await expect(fetchAnalyticsCatalog()).resolves.toMatchObject({ metrics: ["runs"], dimensions: ["time"] });
+    expect(cerebroRequest).toHaveBeenCalledWith("/api/analytics/catalog");
+  });
+
+  it("falls back safely when an older server returns malformed query data", () => {
+    expect(parseAnalyticsQueryResult({ columns: null, rows: "broken" })).toEqual({ columns: [], rows: [] });
+  });
+
+  it("lists and creates persisted visuals", async () => {
+    const visual = { id: "v1", name: "Cost by model", visual_type: "bars", query: { population: "all", metrics: ["cost_cents"], dimensions: ["model"] }, display: {}, position: 0, created_at: "2026-07-12T00:00:00Z", updated_at: "2026-07-12T00:00:00Z" };
+    cerebroRequest.mockResolvedValueOnce([visual]).mockResolvedValueOnce(visual);
+    await expect(fetchAnalyticsVisuals()).resolves.toHaveLength(1);
+    await expect(createAnalyticsVisual({ name: visual.name, visual_type: "bars", query: visual.query as never, display: {}, position: 0 })).resolves.toMatchObject({ id: "v1" });
+    expect(cerebroRequest).toHaveBeenLastCalledWith("/api/analytics/visuals", expect.objectContaining({ method: "POST" }));
+  });
+});
 
 describe("fetchSkillUsage", () => {
   beforeEach(() => cerebroRequest.mockReset());

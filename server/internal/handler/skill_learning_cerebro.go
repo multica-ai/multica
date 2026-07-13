@@ -80,6 +80,9 @@ func (h *Handler) RecordSkillObservation(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusInternalServerError, "failed to record observation")
 		return
 	}
+	if req.RunID != "" {
+		h.projectAnalyticsRun(r.Context(), req.RunID)
+	}
 	writeJSON(w, http.StatusCreated, map[string]string{"status": "recorded"})
 }
 

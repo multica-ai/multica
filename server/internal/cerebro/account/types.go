@@ -13,24 +13,30 @@ import (
 // same column set, so we normalize to a single type at the service
 // boundary instead of plumbing five row types through the handler.
 type Account struct {
-	ID             pgtype.UUID
-	WorkspaceID    pgtype.UUID
-	Provider       string
-	LoginIdentity  string
-	UsageWindowPct pgtype.Float4
-	ThrottledUntil pgtype.Timestamptz
-	Tokens5h       int64
-	Tokens7d       int64
-	ExtraSpendOn   bool
-	PausedManual   bool
-	CreatedAt      pgtype.Timestamptz
-	UpdatedAt      pgtype.Timestamptz
+	ID              pgtype.UUID
+	WorkspaceID     pgtype.UUID
+	Provider        string
+	LoginIdentity   string
+	UsageWindowPct  pgtype.Float4
+	ThrottledUntil  pgtype.Timestamptz
+	Usage5hPct      pgtype.Float4
+	Usage5hResetsAt pgtype.Timestamptz
+	Usage7dPct      pgtype.Float4
+	Usage7dResetsAt pgtype.Timestamptz
+	Tokens5h        int64
+	Tokens7d        int64
+	ExtraSpendOn    bool
+	PausedManual    bool
+	CreatedAt       pgtype.Timestamptz
+	UpdatedAt       pgtype.Timestamptz
 }
 
 func accountFromList(r cerebrodb.ListCerebroAccountsRow) Account {
 	return Account{
 		ID: r.ID, WorkspaceID: r.WorkspaceID, Provider: r.Provider, LoginIdentity: r.LoginIdentity,
 		UsageWindowPct: r.UsageWindowPct, ThrottledUntil: r.ThrottledUntil,
+		Usage5hPct: r.Usage5hPct, Usage5hResetsAt: r.Usage5hResetsAt,
+		Usage7dPct: r.Usage7dPct, Usage7dResetsAt: r.Usage7dResetsAt,
 		Tokens5h: r.Tokens5h, Tokens7d: r.Tokens7d,
 		ExtraSpendOn: r.ExtraSpendOn, PausedManual: r.PausedManual,
 		CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt,
@@ -41,6 +47,8 @@ func accountFromGet(r cerebrodb.GetCerebroAccountRow) Account {
 	return Account{
 		ID: r.ID, WorkspaceID: r.WorkspaceID, Provider: r.Provider, LoginIdentity: r.LoginIdentity,
 		UsageWindowPct: r.UsageWindowPct, ThrottledUntil: r.ThrottledUntil,
+		Usage5hPct: r.Usage5hPct, Usage5hResetsAt: r.Usage5hResetsAt,
+		Usage7dPct: r.Usage7dPct, Usage7dResetsAt: r.Usage7dResetsAt,
 		Tokens5h: r.Tokens5h, Tokens7d: r.Tokens7d,
 		ExtraSpendOn: r.ExtraSpendOn, PausedManual: r.PausedManual,
 		CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt,
@@ -51,6 +59,8 @@ func accountFromCreate(r cerebrodb.CreateCerebroAccountRow) Account {
 	return Account{
 		ID: r.ID, WorkspaceID: r.WorkspaceID, Provider: r.Provider, LoginIdentity: r.LoginIdentity,
 		UsageWindowPct: r.UsageWindowPct, ThrottledUntil: r.ThrottledUntil,
+		Usage5hPct: r.Usage5hPct, Usage5hResetsAt: r.Usage5hResetsAt,
+		Usage7dPct: r.Usage7dPct, Usage7dResetsAt: r.Usage7dResetsAt,
 		Tokens5h: r.Tokens5h, Tokens7d: r.Tokens7d,
 		ExtraSpendOn: r.ExtraSpendOn, PausedManual: r.PausedManual,
 		CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt,
@@ -61,6 +71,8 @@ func accountFromUpdateUsage(r cerebrodb.UpdateCerebroAccountUsageRow) Account {
 	return Account{
 		ID: r.ID, WorkspaceID: r.WorkspaceID, Provider: r.Provider, LoginIdentity: r.LoginIdentity,
 		UsageWindowPct: r.UsageWindowPct, ThrottledUntil: r.ThrottledUntil,
+		Usage5hPct: r.Usage5hPct, Usage5hResetsAt: r.Usage5hResetsAt,
+		Usage7dPct: r.Usage7dPct, Usage7dResetsAt: r.Usage7dResetsAt,
 		Tokens5h: r.Tokens5h, Tokens7d: r.Tokens7d,
 		ExtraSpendOn: r.ExtraSpendOn, PausedManual: r.PausedManual,
 		CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt,
@@ -71,6 +83,8 @@ func accountFromUpdateControls(r cerebrodb.UpdateCerebroAccountControlsRow) Acco
 	return Account{
 		ID: r.ID, WorkspaceID: r.WorkspaceID, Provider: r.Provider, LoginIdentity: r.LoginIdentity,
 		UsageWindowPct: r.UsageWindowPct, ThrottledUntil: r.ThrottledUntil,
+		Usage5hPct: r.Usage5hPct, Usage5hResetsAt: r.Usage5hResetsAt,
+		Usage7dPct: r.Usage7dPct, Usage7dResetsAt: r.Usage7dResetsAt,
 		Tokens5h: r.Tokens5h, Tokens7d: r.Tokens7d,
 		ExtraSpendOn: r.ExtraSpendOn, PausedManual: r.PausedManual,
 		CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt,
@@ -84,6 +98,10 @@ type accountResponse struct {
 	LoginIdentity         string   `json:"login_identity"`
 	UsageWindowPct        *float32 `json:"usage_window_pct"`
 	ThrottledUntil        *string  `json:"throttled_until"`
+	Usage5hPct            *float32 `json:"usage_5h_pct"`
+	Usage5hResetsAt       *string  `json:"usage_5h_resets_at"`
+	Usage7dPct            *float32 `json:"usage_7d_pct"`
+	Usage7dResetsAt       *string  `json:"usage_7d_resets_at"`
 	Tokens5h              int64    `json:"tokens_5h"`
 	Tokens7d              int64    `json:"tokens_7d"`
 	ExtraSpendOn          bool     `json:"extra_spend_on"`
@@ -114,7 +132,17 @@ func accountResponseFromModel(a Account) accountResponse {
 		v := a.UsageWindowPct.Float32
 		resp.UsageWindowPct = &v
 	}
+	if a.Usage5hPct.Valid {
+		v := a.Usage5hPct.Float32
+		resp.Usage5hPct = &v
+	}
+	if a.Usage7dPct.Valid {
+		v := a.Usage7dPct.Float32
+		resp.Usage7dPct = &v
+	}
 	resp.ThrottledUntil = util.TimestampToPtr(a.ThrottledUntil)
+	resp.Usage5hResetsAt = util.TimestampToPtr(a.Usage5hResetsAt)
+	resp.Usage7dResetsAt = util.TimestampToPtr(a.Usage7dResetsAt)
 	return resp
 }
 
@@ -145,8 +173,25 @@ func accountResponseFromAvailabilityRow(r cerebrodb.ListCerebroAccountsWithAvail
 		v := r.UsageWindowPct.Float32
 		resp.UsageWindowPct = &v
 	}
+	if r.Usage5hPct.Valid {
+		v := r.Usage5hPct.Float32
+		resp.Usage5hPct = &v
+	}
+	if r.Usage7dPct.Valid {
+		v := r.Usage7dPct.Float32
+		resp.Usage7dPct = &v
+	}
 	resp.ThrottledUntil = util.TimestampToPtr(r.ThrottledUntil)
+	resp.Usage5hResetsAt = util.TimestampToPtr(r.Usage5hResetsAt)
+	resp.Usage7dResetsAt = util.TimestampToPtr(r.Usage7dResetsAt)
 	return resp
+}
+
+// usageHistoryBucket is one hourly point of the account token-usage
+// time series returned by the usage-history endpoint (FIR-3118).
+type usageHistoryBucket struct {
+	Bucket string `json:"bucket"`
+	Tokens int64  `json:"tokens"`
 }
 
 // deriveAccountStatus maps runtime availability counters to a human-readable

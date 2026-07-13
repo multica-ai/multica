@@ -19,6 +19,9 @@ import { useQuery } from "@tanstack/react-query";
 import { deduplicateInboxItems, inboxListOptions } from "@multica/core/inbox/queries";
 import type { InboxItem } from "@multica/core/types";
 import { useFeatureFlag } from "@multica/cerebro-feature-flags";
+// FIR-3114 — issues in the user's rounds notify only inside the round, so the
+// badge must not count them (mirrors the server-side count exclusion).
+import { roundIssueIdsToExclude, useRoundStatuses } from "@multica/cerebro-rounds";
 
 /**
  * Count unread inbox conversations the way the inbox list surfaces them.
@@ -32,11 +35,17 @@ import { useFeatureFlag } from "@multica/cerebro-feature-flags";
  */
 export function countUnreadInboxConversations(
   items: InboxItem[],
-  opts: { excludeThreadReplies: boolean },
+  opts: { excludeThreadReplies: boolean; excludeIssueIds?: ReadonlySet<string> },
 ): number {
-  const base = opts.excludeThreadReplies
+  let base = opts.excludeThreadReplies
     ? items.filter((i) => !i.details?.thread_root_id)
     : items;
+  // FIR-3114 — round-member issues surface inside the Rounds box only; they
+  // never contribute to the badge (matches the server count queries).
+  const excluded = opts.excludeIssueIds;
+  if (excluded && excluded.size > 0) {
+    base = base.filter((i) => !i.issue_id || !excluded.has(i.issue_id));
+  }
   return deduplicateInboxItems(base).filter((i) => !i.read).length;
 }
 
@@ -49,11 +58,14 @@ export function useCerebroInboxUnreadCount(
   wsId: string | null | undefined,
 ): number {
   const threadSplit = useFeatureFlag("cerebro_inbox_thread_split");
+  const roundsEnabled = useFeatureFlag("cerebro_inbox_rounds");
+  const { data: roundStatuses = [] } = useRoundStatuses(wsId ?? "", roundsEnabled && !!wsId);
+  const excludeIssueIds = roundIssueIdsToExclude(roundStatuses, roundsEnabled);
   const { data } = useQuery({
     ...inboxListOptions(wsId ?? ""),
     enabled: !!wsId,
     select: (items: InboxItem[]) =>
-      countUnreadInboxConversations(items, { excludeThreadReplies: threadSplit }),
+      countUnreadInboxConversations(items, { excludeThreadReplies: threadSplit, excludeIssueIds }),
   });
   return data ?? 0;
 }

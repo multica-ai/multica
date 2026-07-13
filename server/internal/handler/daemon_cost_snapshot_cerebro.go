@@ -111,6 +111,8 @@ func (h *Handler) applySnapshotSaving(ctx context.Context, resp *AgentTaskRespon
 
 	if err := h.CerebroQueries.RecordCerebroCostOptimizationMeasurement(ctx, snapshotMeasurementParams(issue.WorkspaceID, taskID, mode, snapshotChars)); err != nil {
 		slog.Warn("snapshot cost-saving: record measurement failed", "error", err)
+	} else {
+		h.projectAnalyticsRun(ctx, uuidToString(taskID))
 	}
 }
 

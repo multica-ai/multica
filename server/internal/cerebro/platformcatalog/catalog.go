@@ -560,8 +560,8 @@ var catalog = []Capability{
 		DescriptionZh: "添加、移除或更改 runtime 所用的模型/供应商账户的管控。",
 		Ops: []string{
 			"POST /api/workspaces/{id}/accounts",
-			"DELETE /api/workspaces/{id}/accounts/{id}",
-			"PATCH /api/workspaces/{id}/accounts/{id}/controls",
+			"DELETE /api/workspaces/{id}/accounts/{accountID}",
+			"PATCH /api/workspaces/{id}/accounts/{accountID}/controls",
 		},
 	},
 	{
@@ -863,6 +863,20 @@ var catalog = []Capability{
 		},
 	},
 	{
+		Key:           "manage_analytics",
+		Title:         "Use and manage analytics",
+		Category:      CategoryWorkspace,
+		Description:   "Query workspace analytics, rebuild the analytics projection, and create, update, or delete saved visuals.",
+		DescriptionZh: "查询工作区分析、重建分析投影，以及创建、更新或删除已保存的可视化。",
+		Ops: []string{
+			"POST /api/analytics/query",
+			"POST /api/analytics/backfill",
+			"POST /api/analytics/visuals",
+			"PUT /api/analytics/visuals/{visualId}",
+			"DELETE /api/analytics/visuals/{visualId}",
+		},
+	},
+	{
 		Key:           "delete_workspace",
 		Title:         "Delete workspace",
 		Category:      CategoryWorkspace,
@@ -1112,6 +1126,7 @@ var excluded = map[string]string{
 	"POST /api/cerebro/rounds/{roundId}/members":             "self_only — caller's own inbox rounds (FIR-2736)",
 	"DELETE /api/cerebro/rounds/{roundId}/members/{issueId}": "self_only — caller's own inbox rounds (FIR-2736)",
 	"POST /api/cerebro/rounds/{roundId}/start":               "self_only — caller's own inbox rounds (FIR-2736)",
+	"POST /api/cerebro/rounds/{roundId}/dismiss":             "self_only — caller's own inbox rounds (FIR-3114)",
 	"POST /api/inbox/{id}/archive":                           "self_only — caller's own inbox",
 	"POST /api/inbox/{id}/mute":                              "self_only — caller's own inbox",
 	"DELETE /api/inbox/{id}/mute":                            "self_only — caller's own inbox",
@@ -1269,6 +1284,34 @@ func SurfacedKeys() []string {
 		}
 	}
 	return out
+}
+
+// notEnforcedKeys is the closed set of capability keys that are Surfaced in the
+// Permissions table but whose stored setting does NOT yet gate anything at
+// runtime — "surfaced but not yet wired". Today these are the three agent-start
+// family keys added as Surfaced=true (FIR-3091 slice 4 / FIR-2409): the table
+// shows and lets an admin author them, but only trigger_other_agent is actually
+// read by the gate, so the other three are cosmetic until their gate lands. See
+// the Surfaced doc + SurfacedKeys() above for the surfacing side.
+//
+// Kept as an explicit exception list, not a per-entry flag, so the DEFAULT is
+// "enforced" (Jesper's rule, FIR-3091 punkt 8): every permission is enforced
+// unless it is one of these known-unwired keys, and a new capability is enforced
+// the moment it is added without touching every catalog entry.
+var notEnforcedKeys = map[string]bool{
+	"rerun_issue":           true,
+	"schedule_agent_wakeup": true,
+	"trigger_autopilot":     true,
+}
+
+// Enforced reports whether a policy setting authored on this tool_key is actually
+// read by the runtime gate today (FIR-3091 punkt 8). It backs the per-permission
+// detail page's "is this live or cosmetic" signal: true for every key except the
+// known "surfaced but not yet wired" exceptions in notEnforcedKeys. An unknown
+// key returns true (enforced by default), matching Jesper's rule that a
+// capability is enforced unless explicitly listed otherwise.
+func Enforced(key string) bool {
+	return !notEnforcedKeys[key]
 }
 
 // ByKey looks a capability up by its stable key.

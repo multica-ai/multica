@@ -124,7 +124,8 @@ func TestActivateForIssue_StartsPlanPhaseWithPlanModePrompt(t *testing.T) {
 		WithIssueLoopColumns(cols).
 		WithIssueLoopCompiler(&planKickoffFakeCompiler{cq: cq, planSkill: "plan", planAgent: planAgent, planStatus: "todo"})
 
-	if err := h.ActivateForIssue(ctx, f.workspaceID, recipe.ID, issueID, f.userID, "member"); err != nil {
+	agentActorID := mustUUID("aaaaaaaa-1111-2222-3333-444444444444")
+	if err := h.ActivateForIssue(ctx, f.workspaceID, recipe.ID, issueID, agentActorID, f.userID, "agent"); err != nil {
 		t.Fatalf("activate for issue: %v", err)
 	}
 
@@ -190,6 +191,9 @@ func TestActivateForIssue_StartsPlanPhaseWithPlanModePrompt(t *testing.T) {
 	if artifacts[0].Kind != "plan" {
 		t.Fatalf("plan artifact kind = %q, want plan", artifacts[0].Kind)
 	}
+	if artifacts[0].RequesterUserID != f.userID {
+		t.Fatalf("plan artifact requester = %s, want member %s", uuidString(artifacts[0].RequesterUserID), uuidString(f.userID))
+	}
 }
 
 // TestActivateForIssue_NonPlanningStartsBuildPhase proves the kickoff also
@@ -246,7 +250,7 @@ func TestActivateForIssue_NonPlanningStartsBuildPhase(t *testing.T) {
 	compiler := &buildKickoffFakeCompiler{cq: cq, buildSkill: "build", buildAgent: buildAgent, buildStatus: "in_progress"}
 	h := NewHandler(cq).WithService(svc).WithIssueLoopColumns(cols).WithIssueLoopCompiler(compiler)
 
-	if err := h.ActivateForIssue(ctx, f.workspaceID, recipe.ID, issueID, f.userID, "member"); err != nil {
+	if err := h.ActivateForIssue(ctx, f.workspaceID, recipe.ID, issueID, f.userID, f.userID, "member"); err != nil {
 		t.Fatalf("activate for issue: %v", err)
 	}
 	if fake.TaskQueued.Context == nil {

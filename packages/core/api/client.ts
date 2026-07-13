@@ -57,6 +57,7 @@ import type {
   CreateAgentContextChangeRequestRequest,
   ReviewAgentContextChangeRequestRequest,
   RollbackAgentContextRequest,
+  AgentContextObservability,
   // CEREBRO-PATCH(model-registry-api-types): FIR-2698 model registry governance types.
   ModelRegistry,
   ModelRegistryVersion,
@@ -390,6 +391,11 @@ export interface CerebroAccount {
   login_identity: string;
   usage_window_pct: number | null;
   throttled_until: string | null;
+  // CEREBRO-PATCH(cerebro-account-client): FIR-3118 provider-reported rolling usage windows.
+  usage_5h_pct: number | null;
+  usage_5h_resets_at: string | null;
+  usage_7d_pct: number | null;
+  usage_7d_resets_at: string | null;
   tokens_5h: number; // CEREBRO-PATCH(cerebro-account-client): JEH-1365 rolling account token load.
   tokens_7d: number;
   extra_spend_on: boolean;
@@ -409,6 +415,11 @@ export interface CreateCerebroAccountRequest {
 export interface UpdateCerebroAccountControlsRequest {
   extra_spend_on?: boolean;
   paused_manual?: boolean;
+}
+// CEREBRO-PATCH(cerebro-account-client): FIR-3118 hourly token-usage history bucket.
+export interface CerebroAccountUsageBucket {
+  bucket: string;
+  tokens: number;
 }
 
 const EMPTY_ONBOARDING_NO_RUNTIME_BOOTSTRAP_RESPONSE:
@@ -921,6 +932,14 @@ export class ApiClient {
     await this.fetch(`/api/workspaces/${wsId}/accounts/${id}`, {
       method: "DELETE",
     });
+  }
+
+  // CEREBRO-PATCH(cerebro-account-client): FIR-3118 hourly usage history for the account detail page.
+  async getCerebroAccountUsageHistory(
+    wsId: string,
+    id: string,
+  ): Promise<CerebroAccountUsageBucket[]> {
+    return this.fetch(`/api/workspaces/${wsId}/accounts/${id}/usage-history`);
   }
 
   // CEREBRO-PATCH(cerebro-account-client): JEH-998 UI-driven control toggles.
@@ -3317,6 +3336,16 @@ export class ApiClient {
       method: "POST",
       body: JSON.stringify(data),
     });
+  }
+
+  // CEREBRO-PATCH(agent-office-observability-api): FIR-1775 Phase 4 — read-only
+  // observability overview for one agent (change frequency, approvers, drift).
+  // The panel normalizes the response defensively (normalizeAgentObservability)
+  // so a drifted server shape never white-screens the agent page.
+  async getAgentContextObservability(
+    id: string,
+  ): Promise<AgentContextObservability> {
+    return this.fetch(`/api/agents/${id}/context/observability`);
   }
 
   // CEREBRO-PATCH(model-registry-api-methods): FIR-2698 model registry — the single source for model prices,

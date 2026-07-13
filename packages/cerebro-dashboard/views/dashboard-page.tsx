@@ -1,15 +1,8 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { useEffect, useMemo, useState } from "react";
 import { useCurrentWorkspace } from "@multica/core/paths";
 import { useFeatureFlag } from "@multica/cerebro-feature-flags";
-import {
-  SkillUsagePanel,
-  skillUsageOptions,
-  UsageExplorerPanel,
-  usageExplorerOptions,
-} from "@multica/cerebro-usage";
 import { PageHeader } from "@multica/views/layout/page-header";
 import { ActorTabs } from "./components/actor-tabs";
 import { TimeRangePicker } from "./components/time-range-picker";
@@ -30,6 +23,8 @@ import { MessageSpendTable } from "./components/message-spend-table";
 import { DashboardTabBar } from "./components/dashboard-tab-bar";
 import { useDashboardStore } from "../core/store";
 import { dashboardOverviewOptions } from "../core/queries";
+import { AnalyticsDashboard } from "./components/analytics-dashboard";
+import { DEFAULT_ANALYTICS_VISUALS } from "../core/analytics";
 
 // Workspace operations dashboard. JEH-684. v2 — replaces the v1 placeholder
 // version with a single /api/cerebro/dashboard overview query that drives
@@ -45,52 +40,8 @@ export function DashboardPage() {
   const actorName = useDashboardStore((s) => s.actorName);
   const tab = useDashboardStore((s) => s.tab);
   const setActor = useDashboardStore((s) => s.setActor);
-  const [usageParams, setUsageParams] = useState(() => new URLSearchParams());
-
   const wsId = workspace?.id ?? "";
   const overview = useQuery(dashboardOverviewOptions(wsId, range, scope, actorId));
-  const usageDays = range === "24h" ? 1 : range === "30d" ? 30 : 7;
-
-  useEffect(() => {
-    setUsageParams(new URLSearchParams(window.location.search));
-  }, []);
-
-  const explorerQueryString = useMemo(() => {
-    const params = new URLSearchParams(usageParams);
-    params.set("days", String(usageDays));
-    params.set("grain", "day");
-    params.set("limit", "50");
-    return params.toString();
-  }, [usageDays, usageParams]);
-  const explorer = useQuery(usageExplorerOptions(wsId, explorerQueryString));
-  const skillUsage = useQuery(
-    skillUsageOptions(
-      wsId,
-      usageDays,
-      null,
-      usageParams.getAll("skill"),
-      usageParams.getAll("exclude.skill"),
-    ),
-  );
-
-  const selectUsageValue = (
-    dimension: string,
-    value: string,
-    mode: "include" | "exclude",
-  ) => {
-    const params = new URLSearchParams(usageParams);
-    const key = mode === "include" ? dimension : `exclude.${dimension}`;
-    const otherKey = mode === "include" ? `exclude.${dimension}` : dimension;
-    const selected = new Set(params.getAll(key));
-    selected.has(value) ? selected.delete(value) : selected.add(value);
-    params.delete(key);
-    [...selected].sort().forEach((item) => params.append(key, item));
-    const opposite = params.getAll(otherKey).filter((item) => item !== value);
-    params.delete(otherKey);
-    opposite.forEach((item) => params.append(otherKey, item));
-    window.history.replaceState(null, "", `${window.location.pathname}?${params}`);
-    setUsageParams(params);
-  };
 
   if (!enabled) return null;
 
@@ -106,8 +57,8 @@ export function DashboardPage() {
 
   return (
     <div className="flex h-full flex-col">
-      <PageHeader className="justify-between gap-3">
-        <div className="flex min-w-0 items-center gap-3">
+      <PageHeader className="justify-start gap-3">
+        <div className="flex shrink-0 items-center gap-3">
           <div className="flex min-w-0 flex-col">
             <h1 className="text-sm font-semibold">Dashboard</h1>
             <p className="truncate text-[11px] text-muted-foreground">
@@ -118,7 +69,7 @@ export function DashboardPage() {
           </div>
           <DashboardTabBar />
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex shrink-0 items-center gap-2">
           {actorId && (
             <button
               type="button"
@@ -144,18 +95,9 @@ export function DashboardPage() {
             </p>
           )}
 
-          {tab === "issues" && (
+          {tab === "overview" && (
             <>
-              <UsageExplorerPanel
-                data={explorer.data ?? { summary: { runs: 0, tokens: 0, actual_cost_cents: 0, calculated_cost_runs: 0, missing_cost_runs: 0 }, facets: {}, runs: [], total: 0, savings: [] }}
-                onSelect={selectUsageValue}
-              />
-
-              <SkillUsagePanel
-                rows={skillUsage.data ?? []}
-                isLoading={skillUsage.isLoading}
-                onSelect={(skill, mode) => selectUsageValue("skill", skill, mode)}
-              />
+              <AnalyticsDashboard workspaceId={workspace.id} initialVisuals={DEFAULT_ANALYTICS_VISUALS.filter((visual) => visual.id !== "runs")} />
 
               <section aria-label="KPIs">
                 <KpiCards
@@ -196,6 +138,10 @@ export function DashboardPage() {
                 />
               </section>
             </>
+          )}
+
+          {tab === "runs" && (
+            <AnalyticsDashboard workspaceId={workspace.id} initialVisuals={DEFAULT_ANALYTICS_VISUALS.filter((visual) => visual.id === "runs")} />
           )}
 
           {tab === "messages" && (

@@ -152,6 +152,8 @@ import { CommentCard, isWakeupComment } from "./comment-card"; // CEREBRO-PATCH(
 // CEREBRO-PATCH(issue-description-image-tray): FIR-2693 — numbered image tray on the description editor.
 import { CommentComposer, EditorImageTray } from "@multica/cerebro-composer";
 import { AgentLiveCard, TaskRunHistory, WorkSessionHistory } from "./agent-live-card";
+// CEREBRO-PATCH(rounds-held-reply-bar): FIR-3114 — held-reply banner for batch Rounds.
+import { RoundHeldReplyBar } from "@multica/cerebro-rounds";
 import { PullRequestList } from "./pull-request-list";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@multica/ui/components/ui/tabs";
 import { BacklogAgentHintDialog } from "./backlog-agent-hint-dialog";
@@ -2708,6 +2710,8 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
                 bar instead of a separate banner. wakeupIssueId is the issue UUID (issue.id),
                 not the route identifier (id): the wakeups list endpoint requires a UUID. */}
             {!isChat && <AgentLiveCard key={id} issueId={id} wakeupIssueId={issue?.id} />}
+            {/* CEREBRO-PATCH(rounds-held-reply-bar): FIR-3114 — a member reply held for a batch Round renders a wakeup-style banner here. */}
+            {!isChat && issue?.id && <RoundHeldReplyBar issueId={issue.id} />}
 
             {/* CEREBRO-PATCH(issue-detail-tabs-anchor): JEH-1518 — scroll anchor for NavOverlayButton tab-section scroll */}
             <div ref={tabsRef} />

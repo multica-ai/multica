@@ -813,6 +813,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 	// readiness wait blocks on, so success is reported only after startup
 	// actually completed, not merely because the health port came up.
 	d.ready.Store(true)
+	d.startTraceUpload(ctx) // CEREBRO-PATCH(daemon-trace-upload): start the Registry uploader after runtimes are registered (FIR-2757)
 	d.logger.Debug("background loops launched (workspace-sync, task-wakeup, heartbeat, gc, auto-update, token-renewal); health now reporting ready")
 	err = d.pollLoop(ctx, taskWakeups)
 	d.logger.Debug("daemon main loop returning", "error", err)
@@ -1881,6 +1882,14 @@ func (d *Daemon) syncWorkspacesFromAPI(ctx context.Context) error {
 			}
 		}
 
+		// CEREBRO-PATCH(daemon-account-prime-on-register): JEH-997 warm the
+		// identity-probe cache so the very first heartbeat (which fires
+		// almost immediately after register) already carries the runtime's
+		// detected login identity instead of a nil Account field.
+		for _, rt := range resp.Runtimes {
+			d.refreshHeartbeatAccount(rt.ID)
+		}
+
 		d.logger.Info("watching workspace", "workspace_id", id, "name", name, "runtimes", len(resp.Runtimes), "repos", len(resp.Repos))
 		registered++
 	}
@@ -2005,7 +2014,23 @@ func (d *Daemon) runHeartbeatTick(ctx context.Context, rid string) {
 		return
 	}
 	d.logger.Debug("heartbeat: HTTP tick", "runtime_id", rid)
-	resp, err := d.client.SendHeartbeat(ctx, rid)
+	// CEREBRO-PATCH(daemon-heartbeat-account-refresh): JEH-997 re-probe the
+	// runtime's login identity right before the beat so a fresh login
+	// propagates within one tick instead of one daemon restart. Probe is
+	// cheap (one fstat + one JSON parse) and the result is cached.
+	d.refreshHeartbeatAccount(rid)
+	opts := SendHeartbeatOpts{Account: d.heartbeatAccountFor(rid)}
+	// W4.2: advertise the runtime's current CLI version + tool capabilities
+	// so the server can update its capabilities snapshot on drift. Skipped
+	// when we couldn't resolve the runtime (e.g. just deregistered) or when
+	// the provider has no detected version yet.
+	if rt := d.findRuntime(rid); rt != nil {
+		if v := d.agentVersion(rt.Provider); v != "" {
+			opts.CLIVersion = v
+			opts.Capabilities = providerCapabilities(rt.Provider)
+		}
+	}
+	resp, err := d.client.SendHeartbeat(ctx, rid, opts)
 	if err != nil {
 		if ctx.Err() == nil {
 			if isRuntimeNotFoundError(err) {
@@ -2038,6 +2063,11 @@ func (d *Daemon) runHeartbeatTick(ctx context.Context, rid string) {
 func (d *Daemon) handleHeartbeatActions(ctx context.Context, runtimeID string, resp *HeartbeatResponse) {
 	if resp == nil {
 		return
+	}
+	// CEREBRO-PATCH(heartbeat-account-id-ack): cache server-registered account id for task usage reports.
+	if d.accountIdentities != nil && resp.CerebroAccountID != "" {
+		d.accountIdentities.setAccountID(runtimeID, resp.CerebroAccountID)
+		go d.maybeReportProviderUsageWindows(ctx, runtimeID, resp.CerebroAccountID, d.logger) // CEREBRO-PATCH(heartbeat-usage-poll): FIR-3118 usagepal-style periodic poll, throttled per account.
 	}
 	execenv.ApplyFeatureFlagSnapshot(resp.FeatureFlags)
 	if resp.PendingUpdate != nil || resp.PendingModelList != nil || resp.PendingLocalSkills != nil || resp.PendingLocalSkillImport != nil {
@@ -3002,6 +3032,8 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 		return
 	}
 
+	// CEREBRO-PATCH(daemon-task-account-usage): JEH-881/JEH-1365 parse the task
+	d.maybeReportAccountUsage(ctx, task.RuntimeID, result.Comment, result.Logs, result.Usage, taskLog) // CEREBRO-PATCH(daemon-task-account-token-usage): include exact task tokens in account usage telemetry.
 	d.reportTaskResult(ctx, task.ID, result, taskLog)
 
 	// Write GC metadata after the task finishes so the periodic GC loop

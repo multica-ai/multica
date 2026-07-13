@@ -271,6 +271,9 @@ export type CerebroFlagKey =
   // FIR-3091 slice 5: surface the web_fetch host allow/deny list inside the unified
   // Permissions screen instead of its own separate "Web fetch" settings tab.
   | "cerebro_web_fetch_permissions"
+  // FIR-3091 punkt 8: per-permission detail page (who holds a tool permission,
+  // which layer grants it, and — later phases — its change log and usage log).
+  | "cerebro_permission_detail"
   // TECH-2880: collapsible Projects entry in the sidebar (with nested project tree).
   | "cerebro_projects"
   // FIR-2660: restrict channel creation to workspace owners/admins. Default off
@@ -685,6 +688,11 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   // Pure UI relocation — the standalone tab (cerebro_web_fetch_policy) is the
   // fallback whenever this is off, so the change is reversible.
   cerebro_web_fetch_permissions: false,
+  // FIR-3091 punkt 8: OFF by default. When on, a per-permission detail page is
+  // reachable; it shows who holds a tool permission and which layer grants it
+  // (later phases add its change log and usage log). Nothing links to the page
+  // while off, so the change is reversible.
+  cerebro_permission_detail: false,
   // TECH-2880: OFF by default — workspace opts in to surface the Projects
   // collapsible (header + sub-items) in the sidebar.
   cerebro_projects: false,
@@ -1369,6 +1377,13 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
       "Show the web_fetch host list (which URLs agents may fetch) inside the unified Permissions screen instead of its own separate 'Web fetch' settings tab. Pure UI relocation — the mode and host rules, and how they are enforced, are unchanged. When off, the standalone 'Web fetch' tab (cerebro_web_fetch_policy) is used instead, so the move is reversible. FIR-3091.",
   },
   {
+    key: "cerebro_permission_detail",
+    label: "Permission detail page",
+    group: "permissions",
+    description:
+      "Open a detail page for a single tool permission that shows who holds it (which agents, people, groups and runtimes have it set) and which layer grants it. Permissions that are shown but not enforced at runtime yet are greyed out. Off by default while it is built; nothing links to the page until it is turned on, so the change is reversible. Later phases add a change log and a usage log. FIR-3091.",
+  },
+  {
     key: "cerebro_image_reload",
     label: "Reload stalled images",
     group: "workspace",
@@ -1901,6 +1916,7 @@ export const CEREBRO_FLAG_SUBGROUP_OF: Partial<Record<CerebroFlagKey, string>> =
   cerebro_runtime_tool_grant_ui: "tool_permissions",
   cerebro_web_fetch_policy: "tool_permissions",
   cerebro_web_fetch_permissions: "tool_permissions",
+  cerebro_permission_detail: "tool_permissions",
   cerebro_platform_capabilities: "tool_permissions",
   cerebro_approval_gate: "tool_permissions",
   cerebro_local_tool_policy: "tool_permissions",

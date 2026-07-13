@@ -2535,7 +2535,8 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 			wfID, perr := util.ParseUUID(*req.WorkflowID)
 			if perr != nil {
 				resp.WorkflowActivationError = "workflow_id must be a valid id"
-			} else if aerr := h.IssueWorkflowActivator.ActivateForIssue(r.Context(), wsUUID, wfID, issue.ID, parseUUID(actualCreatorID), creatorType); aerr != nil {
+				// CEREBRO-PATCH(cerebro-workflow-agent-requester): keep the authenticated member as the workflow requester.
+			} else if aerr := h.IssueWorkflowActivator.ActivateForIssue(r.Context(), wsUUID, wfID, issue.ID, parseUUID(actualCreatorID), parseUUID(creatorID), creatorType); aerr != nil {
 				resp.WorkflowActivationError = aerr.Error()
 				slog.Warn("create issue: workflow activation failed",
 					append(logger.RequestAttrs(r), "error", aerr, "issue_id", uuidToString(issue.ID), "workflow_id", *req.WorkflowID)...)

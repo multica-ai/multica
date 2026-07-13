@@ -32,6 +32,7 @@ export {
   cerebroAccountsListOptions,
 } from "./components/use-cerebro-accounts";
 export { AccountsSettingsTab } from "./components/accounts-settings-tab";
+export { AccountDetailPage } from "./components/account-detail-page";
 export { PauseRuntimeButton, PauseBanner, formatPauseReason } from "./components/pause-controls";
 export {
   parseRuntimePauseWaitReason,

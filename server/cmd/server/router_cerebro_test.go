@@ -68,3 +68,52 @@ func TestRuntimeSetupRoutesAreMounted(t *testing.T) {
 		}
 	}
 }
+
+// CEREBRO-PATCH(analytics-query-api): FIR-2996 canonical analytics routes.
+func TestAnalyticsQueryRoutesAreMounted(t *testing.T) {
+	router := NewRouter(nil, realtime.NewHub(), events.New(), analytics.NoopClient{}, nil, nil)
+	for _, route := range []struct{ method, path string }{
+		{"GET", "/api/analytics/catalog"},
+		{"POST", "/api/analytics/query"},
+		{"GET", "/api/analytics/visuals"},
+		{"POST", "/api/analytics/visuals"},
+		{"PUT", "/api/analytics/visuals/11111111-1111-1111-1111-111111111111"},
+		{"DELETE", "/api/analytics/visuals/11111111-1111-1111-1111-111111111111"},
+		{"POST", "/api/analytics/backfill"},
+	} {
+		rctx := chi.NewRouteContext()
+		if !router.Match(rctx, route.method, route.path) {
+			t.Fatalf("expected %s %s to match a mounted route", route.method, route.path)
+		}
+	}
+}
+
+// CEREBRO-PATCH(cerebro-account-routes): FIR-3118 — the per-account routes
+// sit inside the workspace group whose RequireWorkspaceMemberFromURL reads
+// URLParam("id"). chi returns the innermost value for duplicate param names,
+// so naming the account segment {id} handed the ACCOUNT id to the membership
+// check and every per-account route 404'd with "workspace not found". Guard
+// that the workspace {id} and account {accountID} params resolve separately.
+func TestAccountDetailRoutesResolveWorkspaceAndAccountParams(t *testing.T) {
+	router := NewRouter(nil, realtime.NewHub(), events.New(), analytics.NoopClient{}, nil, nil)
+
+	const ws = "11111111-1111-1111-1111-111111111111"
+	const acc = "22222222-2222-2222-2222-222222222222"
+	for _, route := range []struct{ method, path string }{
+		{"GET", "/api/workspaces/" + ws + "/accounts/" + acc},
+		{"DELETE", "/api/workspaces/" + ws + "/accounts/" + acc},
+		{"PATCH", "/api/workspaces/" + ws + "/accounts/" + acc + "/controls"},
+		{"GET", "/api/workspaces/" + ws + "/accounts/" + acc + "/usage-history"},
+	} {
+		rctx := chi.NewRouteContext()
+		if !router.Match(rctx, route.method, route.path) {
+			t.Fatalf("expected %s %s to match a mounted route", route.method, route.path)
+		}
+		if got := rctx.URLParam("id"); got != ws {
+			t.Errorf("%s %s: URLParam(\"id\") = %q, want workspace id %q — account param is shadowing the workspace param", route.method, route.path, got, ws)
+		}
+		if got := rctx.URLParam("accountID"); got != acc {
+			t.Errorf("%s %s: URLParam(\"accountID\") = %q, want account id %q", route.method, route.path, got, acc)
+		}
+	}
+}

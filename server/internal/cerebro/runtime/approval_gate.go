@@ -240,6 +240,20 @@ func (e *FirtalGatewayExecutor) guardToolCall(
 		connSetting = toolpolicy.MoreRestrictive(connSetting, epSetting)
 	}
 	connNameLog = connName
+	// FIR-3091 punkt 8 fase 3: usage log — a connection rule that decided this
+	// call (connName is only set when a rule tightened past the allow baseline)
+	// is recorded under its connection:<name> permission key. Best-effort.
+	if connName != "" {
+		e.connDeny.RecordUsage(ctx, toolpolicy.UsageParams{
+			WorkspaceID:      workspaceID,
+			ToolKey:          toolpolicy.ConnectionToolKey(connName),
+			EnforcementPoint: "gateway_connection_tool",
+			SubjectType:      "agent",
+			SubjectID:        agentID,
+			Resource:         toolName,
+			Decision:         connSetting,
+		})
+	}
 	if connSetting == toolpolicy.SettingDeny {
 		e.logger.Info("connection tool blocked by per-tool Deny (TECH-3174)",
 			"task_id", meta.TaskID, "agent_id", meta.AgentID, "tool", toolName)
@@ -475,6 +489,20 @@ func (e *FirtalGatewayExecutor) guardToolCallViaPolicy(
 			"task_id", meta.TaskID, "agent_id", meta.AgentID, "tool_name", toolName, "error", err)
 		return false, fmt.Sprintf("tool-policy gate error: %v", err)
 	}
+
+	// FIR-3091 punkt 8 fase 3: usage log — one row per applied gateway verdict,
+	// so the permission detail page can show every time this tool's policy was
+	// enforced on the gateway. Best-effort after the decision resolved.
+	e.toolPolicy.RecordUsage(ctx, toolpolicy.UsageParams{
+		WorkspaceID:      workspaceID,
+		ToolKey:          toolName,
+		EnforcementPoint: "gateway_tool",
+		SubjectType:      "agent",
+		SubjectID:        agentID,
+		Resource:         reqCtx.Host,
+		Decision:         eff.Setting,
+		DecidedBy:        string(eff.DecidedBy),
+	})
 
 	decision := toolPolicyDecision(eff)
 	if decision.Kind == permissions.DecisionAllow {

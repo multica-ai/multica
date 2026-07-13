@@ -341,6 +341,7 @@ func (h *Handler) ReportTaskSkillUsage(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	h.projectAnalyticsRun(r.Context(), uuidToString(taskID))
 	w.WriteHeader(http.StatusNoContent)
 }
 

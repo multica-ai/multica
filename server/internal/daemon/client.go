@@ -326,12 +326,35 @@ type (
 	PendingLocalSkillImport = protocol.DaemonHeartbeatPendingLocalSkillImport
 )
 
-func (c *Client) SendHeartbeat(ctx context.Context, runtimeID string) (*HeartbeatResponse, error) {
+// SendHeartbeatOpts bundles optional fields the daemon attaches to a
+// heartbeat. Each field is independently optional — the zero value of
+// SendHeartbeatOpts gives the original `(runtime_id only)` wire shape.
+type SendHeartbeatOpts struct {
+	// Account piggybacks the runtime's detected login identity (JEH-997).
+	// nil = daemon could not derive an identity yet; the server skips its
+	// account-registration hook entirely.
+	Account *protocol.DaemonHeartbeatAccount
+	// CLIVersion is the daemon-detected agent CLI version (W4.2).
+	// Empty = no advertised version; server keeps its stored value.
+	CLIVersion string
+	// Capabilities is an optional snapshot of the runtime's tool surface
+	// (W4.2). Server refreshes the runtime's capabilities row when set.
+	Capabilities map[string]any
+}
+
+// SendHeartbeat posts a runtime liveness ping. opts carries the optional
+// account piggyback (JEH-997) and CLI-version + capabilities snapshot
+// (W4.2). Zero-value opts keeps the wire shape minimal.
+func (c *Client) SendHeartbeat(ctx context.Context, runtimeID string, opts SendHeartbeatOpts) (*HeartbeatResponse, error) {
+	body := protocol.DaemonHeartbeatRequestPayload{
+		RuntimeID:           runtimeID,
+		SupportsBatchImport: true,
+		Account:             opts.Account,
+		CLIVersion:          opts.CLIVersion,
+		Capabilities:        opts.Capabilities,
+	}
 	var resp HeartbeatResponse
-	if err := c.postJSON(ctx, "/api/daemon/heartbeat", map[string]any{
-		"runtime_id":            runtimeID,
-		"supports_batch_import": true,
-	}, &resp); err != nil {
+	if err := c.postJSON(ctx, "/api/daemon/heartbeat", body, &resp); err != nil {
 		return nil, err
 	}
 	return &resp, nil

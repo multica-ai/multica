@@ -31,6 +31,29 @@ SET root_comment_id = (
 )
 WHERE s.root_comment_id IS NULL;
 
+-- 2b. The backfill in step 2 can map several legacy session rows to the SAME
+--     thread root (e.g. two old markers near one root, or rows that share a
+--     root after the interval match). The unique index in step 3 would then
+--     fail with a duplicate-key error (SQLSTATE 23505). Keep one session per
+--     root_comment_id (earliest created_at) and NULL out the rest — consistent
+--     with the "rows that cannot be mapped keep root_comment_id NULL and stop
+--     rendering" rule above. The feature is days old and flag-gated, so the
+--     data loss is negligible.
+WITH ranked AS (
+    SELECT id,
+           ROW_NUMBER() OVER (
+               PARTITION BY root_comment_id
+               ORDER BY created_at ASC, id ASC
+           ) AS rn
+    FROM cerebro_session
+    WHERE root_comment_id IS NOT NULL
+)
+UPDATE cerebro_session s
+SET root_comment_id = NULL
+FROM ranked
+WHERE s.id = ranked.id
+  AND ranked.rn > 1;
+
 -- 3. One session row per thread root. Replaces the (issue_id, position) unique
 --    index — position no longer drives membership or ordering (the thread root's
 --    created_at does).

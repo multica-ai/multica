@@ -241,6 +241,36 @@ func (h *Handler) ResolveDaemonToolPolicy(w http.ResponseWriter, r *http.Request
 
 	decision := localtoolpolicy.Decide(mode, eff)
 
+	// FIR-3091 punkt 8 fase 3: usage log — one row per ENFORCED local-CLI
+	// verdict, so the permission detail page can show every time the tool's
+	// policy was applied on a local runtime. Observe is a dry run (nothing is
+	// applied) and records nothing; the connection fold above is recorded under
+	// its own connection:<name> key when it decided. Best-effort.
+	if decision.Enforced {
+		store.RecordUsage(r.Context(), toolpolicy.UsageParams{
+			WorkspaceID:      wsUUID,
+			ToolKey:          toolKey,
+			EnforcementPoint: "local_cli",
+			SubjectType:      "agent",
+			SubjectID:        agentID,
+			Resource:         strings.TrimSpace(req.ResourcePattern),
+			Decision:         eff.Setting,
+			DecidedBy:        string(eff.DecidedBy),
+		})
+		if connName != "" {
+			store.RecordUsage(r.Context(), toolpolicy.UsageParams{
+				WorkspaceID:      wsUUID,
+				ToolKey:          toolpolicy.ConnectionToolKey(connName),
+				EnforcementPoint: "local_cli",
+				SubjectType:      "agent",
+				SubjectID:        agentID,
+				Resource:         req.ToolName,
+				Decision:         eff.Setting,
+				DecidedBy:        string(eff.DecidedBy),
+			})
+		}
+	}
+
 	// Enforce-stage Ask: raise (or rejoin) one shared-inbox approval and return
 	// its decision + id so the daemon can long-poll. Gate off while enforce is on
 	// is a misconfiguration — fail closed rather than silently allow.
@@ -324,6 +354,18 @@ func (h *Handler) resolveAgentBrowserAllowed(ctx context.Context, wsID, runtimeI
 			"workspace_id", util.UUIDToString(wsID), "agent_id", util.UUIDToString(agentID), "error", err)
 		return false
 	}
+	// FIR-3091 punkt 8 fase 3: usage log — one row per applied sandbox verdict,
+	// so the permission detail page can show every time tools:agent-browser was
+	// enforced. Best-effort after the decision resolved.
+	store.RecordUsage(ctx, toolpolicy.UsageParams{
+		WorkspaceID:      wsID,
+		ToolKey:          agentBrowserToolKey,
+		EnforcementPoint: "agent_browser_sandbox",
+		SubjectType:      "agent",
+		SubjectID:        agentID,
+		Decision:         eff.Setting,
+		DecidedBy:        string(eff.DecidedBy),
+	})
 	return eff.Setting == toolpolicy.SettingAllow || eff.Setting == toolpolicy.SettingAsk
 }
 

@@ -58,6 +58,13 @@ func TestValidateSnapshot(t *testing.T) {
 		t.Error("negative price must be rejected")
 	}
 	bad = testSnapshot()
+	e = bad.Models["gpt-5.5"]
+	e.CacheTTLSeconds = -1
+	bad.Models["gpt-5.5"] = e
+	if err := ValidateSnapshot(bad); err == nil {
+		t.Error("negative cache lifetime must be rejected")
+	}
+	bad = testSnapshot()
 	bad.Models["Claude-Upper"] = ModelEntry{}
 	if err := ValidateSnapshot(bad); err == nil {
 		t.Error("uppercase model id must be rejected")
@@ -82,11 +89,14 @@ func TestRenderAndDiffSnapshots(t *testing.T) {
 	}
 	changed := testSnapshot()
 	e := changed.Models["claude-sonnet-5"]
-	e.InputUSDPerMtok = 4
+	e.CacheTTLSeconds = 3600
 	changed.Models["claude-sonnet-5"] = e
 	d := DiffSnapshots(base, changed)
 	if !strings.Contains(d, "-claude-sonnet-5:") || !strings.Contains(d, "+claude-sonnet-5:") {
 		t.Errorf("diff must show the changed model line: %q", d)
+	}
+	if !strings.Contains(d, "cache_ttl_seconds=3600") {
+		t.Errorf("diff must show the cache lifetime: %q", d)
 	}
 }
 

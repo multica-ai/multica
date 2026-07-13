@@ -89,6 +89,19 @@ func (h *Handler) CheckDaemonRepoCapability(w http.ResponseWriter, r *http.Reque
 		writeError(w, http.StatusInternalServerError, "permission check failed")
 		return
 	}
+	// FIR-3091 punkt 8 fase 3: usage log — one row per applied checkout verdict,
+	// so the permission detail page can show every time repo.checkout (and its
+	// verbed siblings) was enforced. Best-effort after the decision resolved.
+	store.RecordUsage(r.Context(), toolpolicy.UsageParams{
+		WorkspaceID:      wsUUID,
+		ToolKey:          capability,
+		EnforcementPoint: "repo_checkout",
+		SubjectType:      "agent",
+		SubjectID:        agentID,
+		Resource:         repoURL,
+		Decision:         eff.Setting,
+		DecidedBy:        string(eff.DecidedBy),
+	})
 	switch eff.Setting {
 	case toolpolicy.SettingDeny:
 		writeJSON(w, http.StatusOK, map[string]any{"allowed": false, "decision": "deny", "reason": eff.Reason})

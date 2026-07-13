@@ -414,6 +414,8 @@ var multicaMCPToolMatrix = []ToolMeta{
 	{Name: "activate_workflow", Description: "Activate an Issue workflow recipe on an existing issue. CLI-runtime MCP tool over POST /api/cerebro/workflows/{id}/activate.", Status: ToolStatusExcluded},
 	{Name: "add_attachment", Description: "Upload and attach a file to a Multica issue or comment.", Status: ToolStatusExcluded},
 	{Name: "add_comment", Description: "Post a comment on a Multica issue as the calling agent.", Status: ToolStatusImplemented},
+	{Name: "analytics_catalog", Description: "List the canonical analytics populations, metrics, dimensions, filters, grains, and visual types.", Status: ToolStatusNewlyImplemented},
+	{Name: "analytics_query", Description: "Query canonical workspace analytics with shared filters, grouping, sorting, and pagination.", Status: ToolStatusNewlyImplemented},
 	{Name: "add_group_agent", Description: "Allow an agent for a workspace group.", Status: ToolStatusExcluded},
 	{Name: "add_group_member", Description: "Add a workspace member to a group.", Status: ToolStatusExcluded},
 	{Name: "add_group_runtime", Description: "Allow a runtime for a workspace group.", Status: ToolStatusExcluded},

@@ -11,6 +11,7 @@ WORKDIR /src
 # "replacement directory ... does not exist").
 COPY server/go.mod server/go.sum ./server/
 COPY packages/cerebro-pdf-text ./packages/cerebro-pdf-text
+COPY packages/cerebro-attachment-text ./packages/cerebro-attachment-text
 RUN cd server && go mod download
 
 # Copy server source
@@ -30,7 +31,17 @@ FROM alpine:3.21
 # git is required by the FIR-2656 skill archive sync worker (no-op unless
 # CEREBRO_SKILLS_SYNC_REPO/_TOKEN are set). su-exec lets the entrypoint
 # fix volume ownership as root, then drop to the unprivileged app user.
-RUN apk add --no-cache ca-certificates tzdata git su-exec
+RUN apk add --no-cache \
+    antiword \
+    ca-certificates \
+    git \
+    libreoffice-writer \
+    poppler-utils \
+    su-exec \
+    tesseract-ocr \
+    tesseract-ocr-data-dan \
+    tesseract-ocr-data-eng \
+    tzdata
 
 WORKDIR /app
 

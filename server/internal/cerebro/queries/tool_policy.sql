@@ -70,3 +70,57 @@ SELECT tool_key, resource_pattern, setting, conditions, updated_by, updated_at
 FROM cerebro_tool_policy
 WHERE workspace_id = $1 AND layer = $2 AND subject_id = $3
 ORDER BY tool_key ASC, resource_pattern ASC;
+
+-- name: ListCerebroToolPolicyHolders :many
+-- Every explicit setting for one tool across all layers and subjects in the
+-- workspace — the reverse of ListCerebroToolPolicyForSubject. Backs the
+-- per-permission detail page (FIR-3091 punkt 8): "who has this permission and
+-- which layer grants it."
+SELECT layer, subject_id, resource_pattern, setting, updated_by, updated_at
+FROM cerebro_tool_policy
+WHERE workspace_id = sqlc.arg(workspace_id) AND tool_key = sqlc.arg(tool_key)
+ORDER BY layer ASC, subject_id ASC, resource_pattern ASC;
+
+-- name: GetCerebroToolPolicySetting :one
+-- The current explicit setting for one exact (tool, layer, subject,
+-- resource_pattern) row, read just before a Set/Clear so the audit row can
+-- record the old -> new transition (FIR-3091 punkt 8 fase 2). sql.ErrNoRows
+-- means the layer held no explicit choice (Inherit).
+SELECT setting
+FROM cerebro_tool_policy
+WHERE workspace_id = $1 AND tool_key = $2 AND layer = $3 AND subject_id = $4 AND resource_pattern = $5;
+
+-- name: RecordCerebroToolPolicyAudit :exec
+-- Append one change-log row for a completed Set/Clear on cerebro_tool_policy
+-- (FIR-3091 punkt 8 fase 2). The log is append-only; rows are never updated.
+INSERT INTO cerebro_tool_policy_audit (
+    workspace_id, tool_key, layer, subject_id, resource_pattern,
+    action, old_setting, new_setting, actor_type, actor_id
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10);
+
+-- name: ListCerebroToolPolicyAuditForTool :many
+-- One tool's change history, newest first. Backs the "Changes" tab of the
+-- per-permission detail page (FIR-3091 punkt 8 fase 2).
+SELECT id, layer, subject_id, resource_pattern, action, old_setting, new_setting, actor_type, actor_id, created_at
+FROM cerebro_tool_policy_audit
+WHERE workspace_id = sqlc.arg(workspace_id) AND tool_key = sqlc.arg(tool_key)
+ORDER BY created_at DESC, id DESC
+LIMIT sqlc.arg(row_limit);
+
+-- name: RecordCerebroToolPolicyUsage :exec
+-- Append one usage-log row after a permission decision was applied at an
+-- enforcement point (FIR-3091 punkt 8 fase 3). The log is append-only; rows
+-- are never updated.
+INSERT INTO cerebro_tool_policy_usage (
+    workspace_id, tool_key, enforcement_point, subject_type, subject_id,
+    resource, decision, decided_by
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8);
+
+-- name: ListCerebroToolPolicyUsageForTool :many
+-- One tool's usage history, newest first. Backs the "Usage" tab of the
+-- per-permission detail page (FIR-3091 punkt 8 fase 3).
+SELECT id, enforcement_point, subject_type, subject_id, resource, decision, decided_by, created_at
+FROM cerebro_tool_policy_usage
+WHERE workspace_id = sqlc.arg(workspace_id) AND tool_key = sqlc.arg(tool_key)
+ORDER BY created_at DESC, id DESC
+LIMIT sqlc.arg(row_limit);

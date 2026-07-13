@@ -1,36 +1,54 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { RoundManager, RoundPickerDialog, RoundsBlock } from "./rounds-block";
 import type { RoundStatus } from "./schemas";
 
-const mocks = vi.hoisted(() => ({ mobile: false, add: vi.fn() }));
+const mocks = vi.hoisted(() => ({
+  mobile: false,
+  add: vi.fn(),
+  remove: vi.fn(),
+  removeAsync: vi.fn(async () => undefined),
+  statuses: null as unknown[] | null,
+}));
 vi.mock("@multica/ui/hooks/use-mobile", () => ({ useIsMobile: () => mocks.mobile }));
 vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => "ws" }));
 vi.mock("./queries", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./queries")>()),
-  useRoundStatuses: () => ({ data: [status()] }),
+  useRoundStatuses: () => ({ data: mocks.statuses ?? [status()] }),
   useAddIssueToRound: () => ({ mutate: mocks.add }),
+  useRemoveIssueFromRound: () => ({ mutate: mocks.remove, mutateAsync: mocks.removeAsync }),
 }));
 
 afterEach(() => {
   cleanup();
   mocks.mobile = false;
   mocks.add.mockReset();
+  mocks.remove.mockReset();
+  mocks.removeAsync.mockClear();
+  mocks.statuses = null;
 });
 
+// The default fixture is a resting round (no open answer cycle) holding two
+// replies for its next start. Tests about the open-cycle state override
+// round.cycle_opened_at.
 const status = (overrides: Partial<RoundStatus> = {}): RoundStatus => ({
   round: {
     id: "round-1", workspace_id: "ws", owner_id: "owner", name: "Daily ideas",
     mode: "batch",
     schedule_cron: "0 9 * * *", timezone: "Europe/Copenhagen", next_run_at: "2026-07-11T07:00:00Z",
+    cycle_opened_at: null,
     created_at: "", updated_at: "",
   },
   active_run: null,
-  members: [{ round_id: "round-1", issue_id: "issue-1", added_by_type: "member", added_by_id: "owner", held_trigger_count: 2, created_at: "" }],
+  members: [{ round_id: "round-1", issue_id: "issue-1", added_by_type: "member", added_by_id: "owner", held_trigger_count: 2, waiting_count: 1, queued_count: 0, state: "waiting", created_at: "" }],
   ...overrides,
 });
+const openCycle = (overrides: Partial<RoundStatus> = {}): RoundStatus => {
+  const base = status(overrides);
+  return { ...base, round: { ...base.round, cycle_opened_at: "2026-07-11T07:00:00Z" } };
+};
 
 describe("RoundsBlock", () => {
   it("matches native inbox folding and hides every count while folded", () => {
@@ -49,17 +67,96 @@ describe("RoundsBlock", () => {
     expect(screen.getByText("Weekly")).toBeInTheDocument();
   });
 
-  it("shows a green disabled play button when every conversation is done", () => {
-    const completed = status({ active_run: { id: "run-1", round_id: "round-1", status: "ready", total_count: 1, responded_count: 1, stalled_count: 0, nudged_count: 0, started_at: "", ready_at: "", completed_at: null, created_at: "" } });
-    render(<RoundsBlock statuses={[completed]} issueTitles={{}} onStart={vi.fn()} onSelectIssue={vi.fn()} />);
-    expect(screen.getByRole("button", { name: "Run Daily ideas" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Run Daily ideas" })).toHaveClass("bg-success");
+  it("expands a round automatically when the search matches one of its issues (FIR-3108)", () => {
+    const second = status({ round: { ...status().round, id: "round-2", name: "Weekly" }, members: [{ ...status().members[0]!, round_id: "round-2", issue_id: "issue-2" }] });
+    render(<RoundsBlock statuses={[status(), second]} issueTitles={{ "issue-1": "Alpha returns", "issue-2": "Beta pricing" }} onStart={vi.fn()} onSelectIssue={vi.fn()} />);
+    expect(screen.queryByText("Beta pricing")).not.toBeInTheDocument();
+    fireEvent.change(screen.getByRole("searchbox", { name: "Search Rounds" }), { target: { value: "beta" } });
+    expect(screen.getByRole("button", { name: "Collapse Weekly" })).toBeInTheDocument();
+    expect(screen.getByText("Beta pricing")).toBeInTheDocument();
   });
 
-  it("omits stale members when the shared inbox row no longer exists", () => {
-    render(<RoundsBlock statuses={[status()]} issueTitles={{ "issue-1": "Old fallback row" }} onStart={vi.fn()} onSelectIssue={vi.fn()} renderIssue={() => null} />);
+  it("shows only matching issues inside a round expanded by search", () => {
+    const multiMember = status({
+      members: [
+        status().members[0]!,
+        { ...status().members[0]!, issue_id: "issue-2" },
+      ],
+    });
+    render(<RoundsBlock statuses={[multiMember]} issueTitles={{ "issue-1": "Alpha returns", "issue-2": "Beta pricing" }} onStart={vi.fn()} onSelectIssue={vi.fn()} />);
+    fireEvent.change(screen.getByRole("searchbox", { name: "Search Rounds" }), { target: { value: "beta" } });
+    expect(screen.getByText("Beta pricing")).toBeInTheDocument();
+    expect(screen.queryByText("Alpha returns")).not.toBeInTheDocument();
+  });
+
+  it("expands every matching round when a search term matches issues in more than one round", () => {
+    const second = status({ round: { ...status().round, id: "round-2", name: "Weekly" }, members: [{ ...status().members[0]!, round_id: "round-2", issue_id: "issue-2" }] });
+    render(<RoundsBlock statuses={[status(), second]} issueTitles={{ "issue-1": "Returns queue", "issue-2": "Returns follow-up" }} onStart={vi.fn()} onSelectIssue={vi.fn()} />);
+    fireEvent.change(screen.getByRole("searchbox", { name: "Search Rounds" }), { target: { value: "returns" } });
+    expect(screen.getByRole("button", { name: "Collapse Daily ideas" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Collapse Weekly" })).toBeInTheDocument();
+    expect(screen.getByText("Returns queue")).toBeInTheDocument();
+    expect(screen.getByText("Returns follow-up")).toBeInTheDocument();
+  });
+
+  it("keeps Run enabled on a resting round while replies are held (FIR-3114)", () => {
+    const onStart = vi.fn();
+    render(<RoundsBlock statuses={[status()]} issueTitles={{}} onStart={onStart} onSelectIssue={vi.fn()} />);
+    const run = screen.getByRole("button", { name: "Run Daily ideas" });
+    expect(run).toBeEnabled();
+    fireEvent.click(run);
+    expect(onStart).toHaveBeenCalledWith("round-1");
+  });
+
+  it("hides Run during an open cycle with nothing held, and Pause collapses the round (FIR-3114)", () => {
+    const onDismiss = vi.fn();
+    const surfaced = openCycle({
+      members: [{ ...status().members[0]!, held_trigger_count: 0 }],
+    });
+    render(<RoundsBlock statuses={[surfaced]} issueTitles={{}} onStart={vi.fn()} onDismiss={onDismiss} onSelectIssue={vi.fn()} />);
+    expect(screen.queryByRole("button", { name: "Run Daily ideas" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Collapse Daily ideas" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Pause Daily ideas" }));
+    expect(onDismiss).toHaveBeenCalledWith("round-1");
+    expect(screen.getByRole("button", { name: "Expand Daily ideas" })).toBeInTheDocument();
+  });
+
+  it("folds answered members behind a collapse in batch and live alike (FIR-3114 review, point 1)", () => {
+    const answered = status({ members: [{ ...status().members[0]!, state: "answered", waiting_count: 0 }] });
+    render(<RoundsBlock statuses={[answered]} issueTitles={{ "issue-1": "FIR-42 · Investigate returns" }} onStart={vi.fn()} onSelectIssue={vi.fn()} />);
     fireEvent.click(screen.getByRole("button", { name: "Expand Daily ideas" }));
-    expect(screen.queryByText("Old fallback row")).not.toBeInTheDocument();
+    expect(screen.queryByText("FIR-42 · Investigate returns")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Expand answered in Daily ideas" }));
+    expect(screen.getByText("Answered (1)")).toBeInTheDocument();
+    expect(screen.getByText("FIR-42 · Investigate returns")).toBeInTheDocument();
+  });
+
+  it("hides working and queued members entirely until the next round (FIR-3114 review, point 3)", () => {
+    const mixed = openCycle({ members: [
+      { ...status().members[0]!, state: "working", waiting_count: 0, held_trigger_count: 0 },
+      { ...status().members[0]!, issue_id: "issue-2", state: "waiting", waiting_count: 4, held_trigger_count: 0 },
+      { ...status().members[0]!, issue_id: "issue-3", state: "queued", waiting_count: 0, queued_count: 2, held_trigger_count: 0 },
+    ] });
+    render(<RoundsBlock statuses={[mixed]} issueTitles={{ "issue-1": "Agent busy", "issue-2": "Needs me", "issue-3": "Replied after my answer" }} onStart={vi.fn()} onSelectIssue={vi.fn()} />);
+    expect(screen.getByText("4 waiting")).toBeInTheDocument();
+    expect(screen.getByText("Needs me")).toBeInTheDocument();
+    expect(screen.queryByText("Agent busy")).not.toBeInTheDocument();
+    expect(screen.queryByText("Replied after my answer")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Expand answered in Daily ideas" })).not.toBeInTheDocument();
+  });
+
+  it("pauses an open cycle while a run is dispatching (FIR-3114 review, point 4)", () => {
+    const onDismiss = vi.fn();
+    const runningRun = openCycle({ active_run: { id: "run-1", round_id: "round-1", status: "running", total_count: 3, responded_count: 1, stalled_count: 0, nudged_count: 0, started_at: "", ready_at: null, completed_at: null, created_at: "" } });
+    render(<RoundsBlock statuses={[runningRun]} issueTitles={{}} onStart={vi.fn()} onDismiss={onDismiss} onSelectIssue={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Pause Daily ideas" }));
+    expect(onDismiss).toHaveBeenCalledWith("round-1");
+  });
+
+  it("falls back to the plain title row when the shared inbox row no longer exists (FIR-3114 review round 3, point 1)", () => {
+    render(<RoundsBlock statuses={[status()]} issueTitles={{ "issue-1": "Counted fallback row" }} onStart={vi.fn()} onSelectIssue={vi.fn()} renderIssue={() => null} />);
+    fireEvent.click(screen.getByRole("button", { name: "Expand Daily ideas" }));
+    expect(screen.getByText("Counted fallback row")).toBeInTheDocument();
   });
 
   it("shows issue titles, schedule and starts the next round", () => {
@@ -95,15 +192,14 @@ describe("RoundsBlock", () => {
     expect(renderIssue).toHaveBeenCalledWith("issue-1");
   });
 
-  it("shows live run progress and the next-round action", () => {
-    const onStart = vi.fn();
-    const { container } = render(<RoundsBlock statuses={[status({ active_run: { id: "run-1", round_id: "round-1", status: "ready", total_count: 4, responded_count: 3, stalled_count: 1, nudged_count: 0, started_at: "", ready_at: "", completed_at: null, created_at: "" } })]} issueTitles={{}} onStart={onStart} onSelectIssue={vi.fn()} />);
-    expect(within(container).getByText("3/4 ready")).toBeInTheDocument();
-    fireEvent.click(within(container).getByRole("button", { name: "Run Daily ideas" }));
-    expect(onStart).toHaveBeenCalledWith("round-1");
+  it("counts the messages waiting for the owner, not run bookkeeping (FIR-3114 review, point 3)", () => {
+    const { container } = render(<RoundsBlock statuses={[openCycle({
+      members: [{ ...status().members[0]!, waiting_count: 9 }],
+    })]} issueTitles={{}} onStart={vi.fn()} onSelectIssue={vi.fn()} />);
+    expect(within(container).getByText("9 waiting")).toBeInTheDocument();
   });
 
-  it("shows progress and nudges, then opens a ready run for review", () => {
+  it("shows progress while dispatching, then surfaces the next cycle's messages", () => {
     const { container, rerender } = render(<RoundsBlock statuses={[status({ active_run: {
       id: "run-1", round_id: "round-1", status: "running", total_count: 4,
       responded_count: 2, stalled_count: 0, nudged_count: 1, started_at: "",
@@ -112,14 +208,33 @@ describe("RoundsBlock", () => {
 
     expect(within(container).getByRole("progressbar", { name: "Daily ideas progress" })).toHaveAttribute("aria-valuenow", "2");
     expect(within(container).getByText("1 nudged")).toBeInTheDocument();
+    expect(within(container).getByText("2/4 running")).toBeInTheDocument();
 
-    rerender(<RoundsBlock statuses={[status({ active_run: {
-      id: "run-1", round_id: "round-1", status: "ready", total_count: 4,
-      responded_count: 4, stalled_count: 0, nudged_count: 1, started_at: "",
-      ready_at: "", completed_at: null, created_at: "",
-    } })]} issueTitles={{ "issue-1": "FIR-42 · Investigate returns" }} onStart={vi.fn()} onSelectIssue={vi.fn()} />);
+    rerender(<RoundsBlock statuses={[openCycle({
+      members: [{ ...status().members[0]!, held_trigger_count: 0 }],
+    })]} issueTitles={{ "issue-1": "FIR-42 · Investigate returns" }} onStart={vi.fn()} onSelectIssue={vi.fn()} />);
 
     expect(within(container).getByRole("button", { name: "FIR-42 · Investigate returns" })).toBeVisible();
+  });
+
+  it("marks an answered round done and drops it into the Ready to start group (FIR-3114 review round 3, points 2+4)", () => {
+    const answering = openCycle({ members: [{ ...status().members[0]!, waiting_count: 1, held_trigger_count: 0 }] });
+    const done = status({
+      round: { ...status().round, id: "round-2", name: "Distractions" },
+      members: [{ ...status().members[0]!, round_id: "round-2", issue_id: "issue-2", state: "queued", waiting_count: 0, queued_count: 3, held_trigger_count: 0 }],
+    });
+    const empty = status({
+      round: { ...status().round, id: "round-3", name: "Hooks" },
+      members: [{ ...status().members[0]!, round_id: "round-3", issue_id: "issue-3", state: "planned", waiting_count: 0, queued_count: 0, held_trigger_count: 0 }],
+    });
+    render(<RoundsBlock statuses={[answering, done, empty]} issueTitles={{}} onStart={vi.fn()} onSelectIssue={vi.fn()} />);
+    const group = screen.getByLabelText("Ready to start");
+    expect(group).toBeInTheDocument();
+    expect(screen.getByText("1 waiting")).toBeInTheDocument();
+    expect(screen.getByText("Distractions")).toBeInTheDocument();
+    expect(screen.getByText("3 queued")).toBeInTheDocument();
+    // A round with 0 messages goes inactive and disappears from the block.
+    expect(screen.queryByText("Hooks")).not.toBeInTheDocument();
   });
 });
 
@@ -156,5 +271,39 @@ describe("RoundPickerDialog", () => {
     expect(screen.getByText("Add to Round")).toBeInTheDocument();
     expect(document.querySelector('[data-slot="drawer-content"]')).toBeInTheDocument();
     mocks.mobile = false;
+  });
+});
+
+describe("RoundPickerDialog for a round member (FIR-3114 review, point 5)", () => {
+  it("removes the issue from its round", () => {
+    const onOpenChange = vi.fn();
+    render(<RoundPickerDialog issueId="issue-1" open onOpenChange={onOpenChange} />);
+    fireEvent.click(screen.getByRole("button", { name: "Remove from Daily ideas" }));
+    expect(mocks.remove).toHaveBeenCalledWith({ roundId: "round-1", issueId: "issue-1" });
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+  });
+
+  it("moves the issue to another round (remove, then add)", async () => {
+    mocks.statuses = [status(), status({ round: { ...status().round, id: "round-2", name: "Weekly" }, members: [] })];
+    render(<RoundPickerDialog issueId="issue-1" open onOpenChange={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: /Weekly/ }));
+    await waitFor(() => expect(mocks.add).toHaveBeenCalledWith({ roundId: "round-2", issueId: "issue-1" }));
+    expect(mocks.removeAsync).toHaveBeenCalledWith({ roundId: "round-1", issueId: "issue-1" });
+  });
+});
+
+describe("RoundPickerDialog inside a clickable inbox row", () => {
+  it("does not bubble clicks to the surrounding row (FIR-3107)", () => {
+    const rowClick = vi.fn();
+    const onOpenChange = vi.fn();
+    render(
+      <div role="button" tabIndex={0} onClick={rowClick}>
+        <RoundPickerDialog issueId="new-issue" open onOpenChange={onOpenChange} />
+      </div>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /Daily ideas/ }));
+    expect(mocks.add).toHaveBeenCalledWith({ roundId: "round-1", issueId: "new-issue" });
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+    expect(rowClick).not.toHaveBeenCalled();
   });
 });

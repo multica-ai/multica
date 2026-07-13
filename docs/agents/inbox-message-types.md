@@ -57,7 +57,10 @@ and long-press drawer. Channel, DM, chat, and thread rows do not show the action
 because Round membership is issue-scoped. The picker and mutation are owned by
 `@multica/cerebro-rounds`; `CerebroInboxRowActions` only opens that shared
 picker so desktop, mobile, and issue detail use the same membership behavior.
-The picker is a bottom drawer on mobile and a dialog on desktop.
+The picker is a bottom drawer on mobile and a dialog on desktop. For an issue
+already in a round the same picker offers **Remove from `<round>`** and moving
+to another round (membership is unique per issue, so a move removes first,
+then adds).
 
 The Rounds inbox surface is an optional `rounds` section in the dynamic Inbox
 layout; it is never injected outside the user's saved section order. It uses the
@@ -65,6 +68,28 @@ same sortable, removable, collapsible block contract as other Inbox sections.
 Collapsed Rounds shows no count. Expanded Rounds provides in-block search and
 renders live members through the shared Inbox row renderer; missing/stale Inbox
 rows are omitted instead of falling back to a second row design.
+
+Round-member issues notify **only inside the Rounds box** (FIR-3114): their
+inbox rows are excluded from the other dynamic-inbox sections, from every
+unread count badge (sidebar/dock hook `useCerebroInboxUnreadCount`, the three
+server count queries in `server/pkg/db/queries/inbox.sql`), and from
+mobile/desktop push + in-app banner (`suppressPushForRoundIssue` in
+`server/cmd/server/notification_listeners.go`). The inbox_item rows are still
+created and keep their read state — inside the Rounds box a member row renders
+unread only while its round has an active run; outside a run new responses
+accumulate quietly until the next round surfaces them. Each member carries an
+owner-perspective `state` (FIR-3114 review): `waiting` (agent responses newer
+than the owner's last reply — the only state listed as pending), `answered`
+(owner replied last — folded behind an "Answered (n)" collapse in batch and
+live alike), `working` (an agent task is queued/dispatched/running — hidden
+until its response surfaces in a later round), and `planned` (nothing yet).
+The header counts the waiting messages (`waiting_count` sum), not run
+bookkeeping. Pause (`POST /api/cerebro/rounds/{roundId}/dismiss`) closes the
+active run whether `ready` or `running`; dispatched agents finish on their own
+and unanswered messages stay waiting for the next round. A batch round
+auto-starts only while a ready run is surfaced AND nothing anywhere in the
+round waits for the owner — replies seeded into an idle or paused round queue
+until Run or the schedule.
 
 The mobile surface is **one shared component**, `MobileRowActions`, exported
 from `@multica/cerebro-inbox`, reused by every row kind so mobile behaviour is

@@ -49,6 +49,7 @@ type ModelEntry struct {
 	Label                string  `json:"label"`
 	Provider             string  `json:"provider"`
 	ContextWindow        int64   `json:"context_window"`
+	CacheTTLSeconds      int64   `json:"cache_ttl_seconds"`
 	InputUSDPerMtok      float64 `json:"input_usd_per_mtok"`
 	OutputUSDPerMtok     float64 `json:"output_usd_per_mtok"`
 	CacheReadUSDPerMtok  float64 `json:"cache_read_usd_per_mtok"`
@@ -102,6 +103,9 @@ func ValidateSnapshot(s Snapshot) error {
 		if e.ContextWindow < 0 {
 			return fmt.Errorf("model %q: context_window must not be negative", id)
 		}
+		if e.CacheTTLSeconds < 0 {
+			return fmt.Errorf("model %q: cache_ttl_seconds must not be negative", id)
+		}
 		if e.InputUSDPerMtok < 0 || e.OutputUSDPerMtok < 0 ||
 			e.CacheReadUSDPerMtok < 0 || e.CacheWriteUSDPerMtok < 0 {
 			return fmt.Errorf("model %q: prices must not be negative", id)
@@ -128,8 +132,8 @@ func RenderSnapshot(s Snapshot) string {
 	sort.Strings(ids)
 	for _, id := range ids {
 		e := s.Models[id]
-		fmt.Fprintf(&b, "%s: label=%q provider=%s context_window=%d input=%s output=%s cache_read=%s cache_write=%s\n",
-			id, e.Label, e.Provider, e.ContextWindow,
+		fmt.Fprintf(&b, "%s: label=%q provider=%s context_window=%d cache_ttl_seconds=%d input=%s output=%s cache_read=%s cache_write=%s\n",
+			id, e.Label, e.Provider, e.ContextWindow, e.CacheTTLSeconds,
 			fmtUSD(e.InputUSDPerMtok), fmtUSD(e.OutputUSDPerMtok),
 			fmtUSD(e.CacheReadUSDPerMtok), fmtUSD(e.CacheWriteUSDPerMtok))
 	}

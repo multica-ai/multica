@@ -1162,7 +1162,7 @@ func (h *Handler) ApproveHumanCheck(w http.ResponseWriter, r *http.Request) {
 //
 // CEREBRO-PATCH(cerebro-workflows-activate-for-issue): FIR-2283 followup —
 // shared activation used by the CLI/API create-with-workflow path.
-func (h *Handler) ActivateForIssue(ctx context.Context, workspaceID, workflowID, issueID, creatorID pgtype.UUID, createdByType string) error {
+func (h *Handler) ActivateForIssue(ctx context.Context, workspaceID, workflowID, issueID, creatorID, requesterID pgtype.UUID, createdByType string) error {
 	if h.issueLoopColumns == nil || h.issueLoopCompiler == nil {
 		return fmt.Errorf("issue workflow activation is not wired on this server")
 	}
@@ -1191,7 +1191,7 @@ func (h *Handler) ActivateForIssue(ctx context.Context, workspaceID, workflowID,
 			WorkflowName:  row.Name,
 			AuthorID:      creatorID,
 			AuthorType:    createdByType,
-			RequesterID:   creatorID,
+			RequesterID:   requesterID,
 			InitialStatus: "Workflow activated. Plan phase is starting.",
 		}); err != nil {
 			return fmt.Errorf("create workflow plan document: %w", err)
@@ -1328,7 +1328,12 @@ func (h *Handler) ActivateWorkflow(w http.ResponseWriter, r *http.Request) {
 	}
 	// ActivateForIssue re-loads and validates the recipe (issue_loop + has a
 	// loop_spec); the earlier load here was redundant, so it is gone.
-	if err := h.ActivateForIssue(r.Context(), wsUUID, row.ID, issueID, creatorID, actorType(r)); err != nil {
+	requesterID, err := util.ParseUUID(userID)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid requester id")
+		return
+	}
+	if err := h.ActivateForIssue(r.Context(), wsUUID, row.ID, issueID, creatorID, requesterID, actorType(r)); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}

@@ -87,7 +87,8 @@ import { SandboxTab } from "@multica/views/agents/components/tabs/sandbox-tab";
 import { SkillsTab } from "@multica/views/agents/components/tabs/skills-tab";
 import { PageHeader } from "@multica/views/layout/page-header";
 import { AppLink, useNavigation } from "@multica/views/navigation";
-import { agentPageTabs, type RedesignTab } from "./agent-page-tabs";
+import { advancedTabs, agentPageTabs, type RedesignTab } from "./agent-page-tabs";
+import { AdvancedTabs } from "./advanced-tabs";
 import { IdentityRail } from "./identity-rail";
 import { agentChatUrl } from "./message-agent";
 
@@ -98,9 +99,11 @@ export function CerebroAgentDetailPage({ agentId }: { agentId: string }) {
   const qc = useQueryClient();
   const currentUser = useAuthStore((s) => s.user);
   const [tab, setTab] = useState<RedesignTab>("tasks");
+  const [advancedTab, setAdvancedTab] = useState<RedesignTab>("infisical");
   const [taskView, setTaskView] = useState<"activity" | "tasks">("tasks");
   const [activeDirty, setActiveDirty] = useState(false);
   const [pendingTab, setPendingTab] = useState<RedesignTab | null>(null);
+  const [pendingAdvancedTab, setPendingAdvancedTab] = useState<RedesignTab | null>(null);
   const [confirmArchive, setConfirmArchive] = useState(false);
   const [confirmCancelTasks, setConfirmCancelTasks] = useState(false);
 
@@ -280,6 +283,9 @@ export function CerebroAgentDetailPage({ agentId }: { agentId: string }) {
     mcpConfig: runtime ? providerSupportsMcpConfig(runtime.provider) : true,
     integrations: larkListing?.configured === true,
   });
+  const visibleAdvancedTabs = advancedTabs({
+    mcpConfig: runtime ? providerSupportsMcpConfig(runtime.provider) : true,
+  });
   const effectiveTab = visibleTabs.some((item) => item.id === tab)
     ? tab
     : "tasks";
@@ -294,10 +300,20 @@ export function CerebroAgentDetailPage({ agentId }: { agentId: string }) {
   };
 
   const commitTabChange = () => {
-    if (!pendingTab) return;
-    setTab(pendingTab);
+    if (pendingAdvancedTab) setAdvancedTab(pendingAdvancedTab);
+    if (pendingTab) setTab(pendingTab);
     setActiveDirty(false);
     setPendingTab(null);
+    setPendingAdvancedTab(null);
+  };
+
+  const requestAdvancedTabChange = (next: RedesignTab) => {
+    if (next === advancedTab) return;
+    if (activeDirty) {
+      setPendingAdvancedTab(next);
+      return;
+    }
+    setAdvancedTab(next);
   };
 
   return (
@@ -492,55 +508,58 @@ export function CerebroAgentDetailPage({ agentId }: { agentId: string }) {
                     <SkillsTab agent={agent} canEdit={canEdit} />
                   </div>
                 )}
-                {effectiveTab === "env" && (
-                  <TabContent>
-                    <EnvTab
-                      agent={agent}
-                      readOnly={!canEdit || agent.custom_env_redacted}
-                      onDirtyChange={setActiveDirty}
-                      onSaved={() =>
-                        qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) })
-                      }
-                    />
-                  </TabContent>
-                )}
-                {effectiveTab === "infisical" && (
-                  <TabContent>
-                    <InfisicalFoldersTab
-                      agent={agent}
-                      readOnly={!canEdit}
-                      onDirtyChange={setActiveDirty}
-                    />
-                  </TabContent>
-                )}
-                {effectiveTab === "custom_args" && (
-                  <TabContent>
-                    <CustomArgsTab
-                      agent={agent}
-                      runtimeDevice={runtime ?? undefined}
-                      readOnly={!canEdit}
-                      onSave={(updates) => handleUpdate(updates)}
-                      onDirtyChange={setActiveDirty}
-                    />
-                  </TabContent>
-                )}
-                {effectiveTab === "sandbox" && (
-                  <TabContent>
-                    <SandboxTab
-                      agent={agent}
-                      canEdit={canEdit}
-                      onSave={(updates) => handleUpdate(updates)}
-                    />
-                  </TabContent>
-                )}
-                {effectiveTab === "mcp_config" && (
-                  <TabContent>
-                    <McpConfigTab
-                      agent={agent}
-                      canEdit={canEdit}
-                      onDirtyChange={setActiveDirty}
-                    />
-                  </TabContent>
+                {effectiveTab === "advanced" && (
+                  <AdvancedTabs
+                    tabs={visibleAdvancedTabs}
+                    active={advancedTab}
+                    onSelect={requestAdvancedTabChange}
+                    renderContent={(advancedTab) => (
+                      <TabContent>
+                        {advancedTab === "env" && (
+                          <EnvTab
+                            agent={agent}
+                            readOnly={!canEdit || agent.custom_env_redacted}
+                            onDirtyChange={setActiveDirty}
+                            onSaved={() =>
+                              qc.invalidateQueries({
+                                queryKey: workspaceKeys.agents(wsId),
+                              })
+                            }
+                          />
+                        )}
+                        {advancedTab === "infisical" && (
+                          <InfisicalFoldersTab
+                            agent={agent}
+                            readOnly={!canEdit}
+                            onDirtyChange={setActiveDirty}
+                          />
+                        )}
+                        {advancedTab === "custom_args" && (
+                          <CustomArgsTab
+                            agent={agent}
+                            runtimeDevice={runtime ?? undefined}
+                            readOnly={!canEdit}
+                            onSave={(updates) => handleUpdate(updates)}
+                            onDirtyChange={setActiveDirty}
+                          />
+                        )}
+                        {advancedTab === "sandbox" && (
+                          <SandboxTab
+                            agent={agent}
+                            canEdit={canEdit}
+                            onSave={(updates) => handleUpdate(updates)}
+                          />
+                        )}
+                        {advancedTab === "mcp_config" && (
+                          <McpConfigTab
+                            agent={agent}
+                            canEdit={canEdit}
+                            onDirtyChange={setActiveDirty}
+                          />
+                        )}
+                      </TabContent>
+                    )}
+                  />
                 )}
                 {effectiveTab === "integrations" && (
                   <TabContent>
@@ -568,11 +587,14 @@ export function CerebroAgentDetailPage({ agentId }: { agentId: string }) {
         </div>
       </div>
 
-      {pendingTab !== null && (
+      {(pendingTab !== null || pendingAdvancedTab !== null) && (
         <AlertDialog
           open
           onOpenChange={(open) => {
-            if (!open) setPendingTab(null);
+            if (!open) {
+              setPendingTab(null);
+              setPendingAdvancedTab(null);
+            }
           }}
         >
           <AlertDialogContent>

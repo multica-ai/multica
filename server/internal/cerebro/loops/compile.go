@@ -452,7 +452,7 @@ func Compile(spec *Spec, params CompileParams) ([]Rule, error) {
 		if planAgentID == "" {
 			planAgentID = params.AgentID
 		}
-		planRule := PlanningDispatchRule(planAgentID, p.PlanSkill, p.PlanningStatus)
+		planRule := PlanningDispatchRule(planAgentID, p.PlanSkill, p.PlanningStatus, p.BuildStatus)
 		ac := planRule.ActionConfig.(workflows.ActionConfigRunSkill)
 		ac.Model = params.PlanModel
 		ac.ThinkingLevel = params.PlanThinking
@@ -474,9 +474,12 @@ func Compile(spec *Spec, params CompileParams) ([]Rule, error) {
 // the skill dispatched in the planning phase; callers that also have a
 // separate build-phase skill (Compile, via CompileParams.withDefaults) pass
 // the already-resolved PlanSkill.
-func PlanningDispatchRule(agentID, skillName, planningStatus string) Rule {
+func PlanningDispatchRule(agentID, skillName, planningStatus, buildStatus string) Rule {
 	if planningStatus == "" {
 		planningStatus = "todo"
+	}
+	if buildStatus == "" {
+		buildStatus = "in_progress"
 	}
 	return Rule{
 		Name:          "loop:planning-dispatch",
@@ -493,6 +496,11 @@ func PlanningDispatchRule(agentID, skillName, planningStatus string) Rule {
 			// Phase marker: the plan run happens ON the issue in a session
 			// badged "plan" (see ActionConfigRunSkill.LoopPhase).
 			LoopPhase: "plan",
+			// FIR-3052 step hook: when the plan run completes, advance the issue
+			// PlanningStatus -> BuildStatus so loop:dispatch-build fires without
+			// the plan agent flipping the status by hand.
+			AdvanceFromStatus: planningStatus,
+			AdvanceToStatus:   buildStatus,
 		},
 	}
 }
