@@ -155,6 +155,7 @@ func init() {
 	autopilotTriggerAddCmd.Flags().String("kind", "schedule", "Trigger kind: schedule or webhook")
 	autopilotTriggerAddCmd.Flags().String("cron", "", "Cron expression (required for --kind schedule)")
 	autopilotTriggerAddCmd.Flags().String("timezone", "", "IANA timezone (default UTC; schedule only)")
+	autopilotTriggerAddCmd.Flags().String("overlap-policy", "allow", "Schedule overlap policy: allow or coalesce")
 	autopilotTriggerAddCmd.Flags().String("label", "", "Optional human-readable label")
 	autopilotTriggerAddCmd.Flags().String("output", "json", "Output format: table or json")
 
@@ -166,6 +167,7 @@ func init() {
 	autopilotTriggerUpdateCmd.Flags().Bool("enabled", true, "Enable or disable the trigger")
 	autopilotTriggerUpdateCmd.Flags().String("cron", "", "New cron expression")
 	autopilotTriggerUpdateCmd.Flags().String("timezone", "", "New IANA timezone")
+	autopilotTriggerUpdateCmd.Flags().String("overlap-policy", "", "New schedule overlap policy: allow or coalesce")
 	autopilotTriggerUpdateCmd.Flags().String("label", "", "New label")
 	autopilotTriggerUpdateCmd.Flags().String("output", "json", "Output format: table or json")
 }
@@ -558,6 +560,9 @@ func runAutopilotTriggerAdd(cmd *cobra.Command, args []string) error {
 		if cron != "" {
 			return fmt.Errorf("--cron is only valid with --kind schedule")
 		}
+		if cmd.Flags().Changed("overlap-policy") {
+			return fmt.Errorf("--overlap-policy is only valid with --kind schedule")
+		}
 	}
 
 	body := map[string]any{"kind": kind}
@@ -566,6 +571,11 @@ func runAutopilotTriggerAdd(cmd *cobra.Command, args []string) error {
 		if v, _ := cmd.Flags().GetString("timezone"); v != "" {
 			body["timezone"] = v
 		}
+		overlapPolicy, _ := cmd.Flags().GetString("overlap-policy")
+		if overlapPolicy != "allow" && overlapPolicy != "coalesce" {
+			return fmt.Errorf("--overlap-policy must be allow or coalesce")
+		}
+		body["overlap_policy"] = overlapPolicy
 	}
 	if v, _ := cmd.Flags().GetString("label"); v != "" {
 		body["label"] = v
@@ -677,12 +687,19 @@ func runAutopilotTriggerUpdate(cmd *cobra.Command, args []string) error {
 		v, _ := cmd.Flags().GetString("timezone")
 		body["timezone"] = v
 	}
+	if cmd.Flags().Changed("overlap-policy") {
+		v, _ := cmd.Flags().GetString("overlap-policy")
+		if v != "allow" && v != "coalesce" {
+			return fmt.Errorf("--overlap-policy must be allow or coalesce")
+		}
+		body["overlap_policy"] = v
+	}
 	if cmd.Flags().Changed("label") {
 		v, _ := cmd.Flags().GetString("label")
 		body["label"] = v
 	}
 	if len(body) == 0 {
-		return fmt.Errorf("no fields to update; use --enabled, --cron, --timezone, or --label")
+		return fmt.Errorf("no fields to update; use --enabled, --cron, --timezone, --overlap-policy, or --label")
 	}
 
 	ctx, cancel := cli.APIContext(context.Background())

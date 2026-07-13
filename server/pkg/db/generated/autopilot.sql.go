@@ -291,13 +291,14 @@ func (q *Queries) CreateAutopilotTask(ctx context.Context, arg CreateAutopilotTa
 const createAutopilotTrigger = `-- name: CreateAutopilotTrigger :one
 INSERT INTO autopilot_trigger (
     autopilot_id, kind, enabled, cron_expression, timezone,
-    next_run_at, webhook_token, label, provider, event_filters
+    next_run_at, webhook_token, label, provider, event_filters, overlap_policy
 ) VALUES (
     $1, $2, $3, $4, $5,
     $6, $7, $8,
     COALESCE($9::text, 'generic'),
-    $10
-) RETURNING id, autopilot_id, kind, enabled, cron_expression, timezone, next_run_at, webhook_token, label, last_fired_at, created_at, updated_at, provider, signing_secret, event_filters
+    $10,
+    COALESCE($11::text, 'allow')
+) RETURNING id, autopilot_id, kind, enabled, cron_expression, timezone, next_run_at, webhook_token, label, last_fired_at, created_at, updated_at, provider, signing_secret, event_filters, overlap_policy
 `
 
 type CreateAutopilotTriggerParams struct {
@@ -311,6 +312,7 @@ type CreateAutopilotTriggerParams struct {
 	Label          pgtype.Text        `json:"label"`
 	Provider       pgtype.Text        `json:"provider"`
 	EventFilters   []byte             `json:"event_filters"`
+	OverlapPolicy  pgtype.Text        `json:"overlap_policy"`
 }
 
 func (q *Queries) CreateAutopilotTrigger(ctx context.Context, arg CreateAutopilotTriggerParams) (AutopilotTrigger, error) {
@@ -325,6 +327,7 @@ func (q *Queries) CreateAutopilotTrigger(ctx context.Context, arg CreateAutopilo
 		arg.Label,
 		arg.Provider,
 		arg.EventFilters,
+		arg.OverlapPolicy,
 	)
 	var i AutopilotTrigger
 	err := row.Scan(
@@ -343,6 +346,7 @@ func (q *Queries) CreateAutopilotTrigger(ctx context.Context, arg CreateAutopilo
 		&i.Provider,
 		&i.SigningSecret,
 		&i.EventFilters,
+		&i.OverlapPolicy,
 	)
 	return i, err
 }
@@ -406,6 +410,42 @@ WHERE issue_id = $1
 func (q *Queries) FailAutopilotRunsByIssue(ctx context.Context, issueID pgtype.UUID) error {
 	_, err := q.db.Exec(ctx, failAutopilotRunsByIssue, issueID)
 	return err
+}
+
+const getActiveAutopilotRunOnlyRun = `-- name: GetActiveAutopilotRunOnlyRun :one
+SELECT run.id, run.autopilot_id, run.trigger_id, run.source, run.status, run.issue_id, run.task_id, run.triggered_at, run.completed_at, run.failure_reason, run.trigger_payload, run.result, run.created_at, run.squad_id, run.planned_at
+FROM autopilot_run run
+JOIN agent_task_queue task ON task.autopilot_run_id = run.id
+WHERE run.autopilot_id = $1
+  AND task.status IN ('queued', 'dispatched', 'running', 'waiting_local_directory')
+ORDER BY task.created_at ASC
+LIMIT 1
+`
+
+// Returns the durable active run_only work that makes a coalescing schedule
+// occurrence a successful no-op. The task status is authoritative: a run may
+// briefly lag its terminal task until SyncRunFromTask updates it.
+func (q *Queries) GetActiveAutopilotRunOnlyRun(ctx context.Context, autopilotID pgtype.UUID) (AutopilotRun, error) {
+	row := q.db.QueryRow(ctx, getActiveAutopilotRunOnlyRun, autopilotID)
+	var i AutopilotRun
+	err := row.Scan(
+		&i.ID,
+		&i.AutopilotID,
+		&i.TriggerID,
+		&i.Source,
+		&i.Status,
+		&i.IssueID,
+		&i.TaskID,
+		&i.TriggeredAt,
+		&i.CompletedAt,
+		&i.FailureReason,
+		&i.TriggerPayload,
+		&i.Result,
+		&i.CreatedAt,
+		&i.SquadID,
+		&i.PlannedAt,
+	)
+	return i, err
 }
 
 const getAutopilot = `-- name: GetAutopilot :one
@@ -574,7 +614,7 @@ func (q *Queries) GetAutopilotRunByTriggerAndPlanned(ctx context.Context, arg Ge
 }
 
 const getAutopilotTrigger = `-- name: GetAutopilotTrigger :one
-SELECT id, autopilot_id, kind, enabled, cron_expression, timezone, next_run_at, webhook_token, label, last_fired_at, created_at, updated_at, provider, signing_secret, event_filters FROM autopilot_trigger
+SELECT id, autopilot_id, kind, enabled, cron_expression, timezone, next_run_at, webhook_token, label, last_fired_at, created_at, updated_at, provider, signing_secret, event_filters, overlap_policy FROM autopilot_trigger
 WHERE id = $1
 `
 
@@ -597,12 +637,13 @@ func (q *Queries) GetAutopilotTrigger(ctx context.Context, id pgtype.UUID) (Auto
 		&i.Provider,
 		&i.SigningSecret,
 		&i.EventFilters,
+		&i.OverlapPolicy,
 	)
 	return i, err
 }
 
 const getWebhookTriggerByToken = `-- name: GetWebhookTriggerByToken :one
-SELECT t.id, t.autopilot_id, t.kind, t.enabled, t.cron_expression, t.timezone, t.next_run_at, t.webhook_token, t.label, t.last_fired_at, t.created_at, t.updated_at, t.provider, t.signing_secret, t.event_filters, a.workspace_id AS autopilot_workspace_id
+SELECT t.id, t.autopilot_id, t.kind, t.enabled, t.cron_expression, t.timezone, t.next_run_at, t.webhook_token, t.label, t.last_fired_at, t.created_at, t.updated_at, t.provider, t.signing_secret, t.event_filters, t.overlap_policy, a.workspace_id AS autopilot_workspace_id
 FROM autopilot_trigger t
 JOIN autopilot a ON a.id = t.autopilot_id
 WHERE t.kind = 'webhook'
@@ -625,6 +666,7 @@ type GetWebhookTriggerByTokenRow struct {
 	Provider             string             `json:"provider"`
 	SigningSecret        pgtype.Text        `json:"signing_secret"`
 	EventFilters         []byte             `json:"event_filters"`
+	OverlapPolicy        string             `json:"overlap_policy"`
 	AutopilotWorkspaceID pgtype.UUID        `json:"autopilot_workspace_id"`
 }
 
@@ -652,6 +694,7 @@ func (q *Queries) GetWebhookTriggerByToken(ctx context.Context, webhookToken pgt
 		&i.Provider,
 		&i.SigningSecret,
 		&i.EventFilters,
+		&i.OverlapPolicy,
 		&i.AutopilotWorkspaceID,
 	)
 	return i, err
@@ -826,7 +869,7 @@ func (q *Queries) ListAutopilotSubscribers(ctx context.Context, autopilotID pgty
 
 const listAutopilotTriggers = `-- name: ListAutopilotTriggers :many
 
-SELECT id, autopilot_id, kind, enabled, cron_expression, timezone, next_run_at, webhook_token, label, last_fired_at, created_at, updated_at, provider, signing_secret, event_filters FROM autopilot_trigger
+SELECT id, autopilot_id, kind, enabled, cron_expression, timezone, next_run_at, webhook_token, label, last_fired_at, created_at, updated_at, provider, signing_secret, event_filters, overlap_policy FROM autopilot_trigger
 WHERE autopilot_id = $1
 ORDER BY created_at ASC
 `
@@ -859,6 +902,7 @@ func (q *Queries) ListAutopilotTriggers(ctx context.Context, autopilotID pgtype.
 			&i.Provider,
 			&i.SigningSecret,
 			&i.EventFilters,
+			&i.OverlapPolicy,
 		); err != nil {
 			return nil, err
 		}
@@ -1032,6 +1076,69 @@ func (q *Queries) ListSchedulableAutopilotTriggers(ctx context.Context) ([]ListS
 	return items, nil
 }
 
+const lockAutopilotForSchedulePolicy = `-- name: LockAutopilotForSchedulePolicy :one
+SELECT id, workspace_id, title, description, assignee_id, status, execution_mode, issue_title_template, created_by_type, created_by_id, last_run_at, created_at, updated_at, assignee_type, project_id FROM autopilot
+WHERE id = $1
+FOR UPDATE
+`
+
+// Serializes schedule admission and overlap-policy mutations for one
+// Autopilot. Callers always acquire this parent lock before a trigger lock.
+func (q *Queries) LockAutopilotForSchedulePolicy(ctx context.Context, id pgtype.UUID) (Autopilot, error) {
+	row := q.db.QueryRow(ctx, lockAutopilotForSchedulePolicy, id)
+	var i Autopilot
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.Title,
+		&i.Description,
+		&i.AssigneeID,
+		&i.Status,
+		&i.ExecutionMode,
+		&i.IssueTitleTemplate,
+		&i.CreatedByType,
+		&i.CreatedByID,
+		&i.LastRunAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.AssigneeType,
+		&i.ProjectID,
+	)
+	return i, err
+}
+
+const lockAutopilotTriggerForSchedulePolicy = `-- name: LockAutopilotTriggerForSchedulePolicy :one
+SELECT id, autopilot_id, kind, enabled, cron_expression, timezone, next_run_at, webhook_token, label, last_fired_at, created_at, updated_at, provider, signing_secret, event_filters, overlap_policy FROM autopilot_trigger
+WHERE id = $1
+FOR UPDATE
+`
+
+// Freezes one trigger while schedule admission or a policy mutation is
+// decided. The parent Autopilot lock must already be held.
+func (q *Queries) LockAutopilotTriggerForSchedulePolicy(ctx context.Context, id pgtype.UUID) (AutopilotTrigger, error) {
+	row := q.db.QueryRow(ctx, lockAutopilotTriggerForSchedulePolicy, id)
+	var i AutopilotTrigger
+	err := row.Scan(
+		&i.ID,
+		&i.AutopilotID,
+		&i.Kind,
+		&i.Enabled,
+		&i.CronExpression,
+		&i.Timezone,
+		&i.NextRunAt,
+		&i.WebhookToken,
+		&i.Label,
+		&i.LastFiredAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Provider,
+		&i.SigningSecret,
+		&i.EventFilters,
+		&i.OverlapPolicy,
+	)
+	return i, err
+}
+
 const recoverPartialAutopilotRun = `-- name: RecoverPartialAutopilotRun :exec
 UPDATE autopilot_run
 SET status = 'failed',
@@ -1062,7 +1169,7 @@ SET webhook_token = $2,
     updated_at = now()
 WHERE id = $1
   AND kind = 'webhook'
-RETURNING id, autopilot_id, kind, enabled, cron_expression, timezone, next_run_at, webhook_token, label, last_fired_at, created_at, updated_at, provider, signing_secret, event_filters
+RETURNING id, autopilot_id, kind, enabled, cron_expression, timezone, next_run_at, webhook_token, label, last_fired_at, created_at, updated_at, provider, signing_secret, event_filters, overlap_policy
 `
 
 type RotateAutopilotTriggerWebhookTokenParams struct {
@@ -1092,6 +1199,7 @@ func (q *Queries) RotateAutopilotTriggerWebhookToken(ctx context.Context, arg Ro
 		&i.Provider,
 		&i.SigningSecret,
 		&i.EventFilters,
+		&i.OverlapPolicy,
 	)
 	return i, err
 }
@@ -1184,7 +1292,7 @@ SET signing_secret = $2,
     updated_at = now()
 WHERE id = $1
   AND kind = 'webhook'
-RETURNING id, autopilot_id, kind, enabled, cron_expression, timezone, next_run_at, webhook_token, label, last_fired_at, created_at, updated_at, provider, signing_secret, event_filters
+RETURNING id, autopilot_id, kind, enabled, cron_expression, timezone, next_run_at, webhook_token, label, last_fired_at, created_at, updated_at, provider, signing_secret, event_filters, overlap_policy
 `
 
 type SetAutopilotTriggerSigningSecretParams struct {
@@ -1216,6 +1324,7 @@ func (q *Queries) SetAutopilotTriggerSigningSecret(ctx context.Context, arg SetA
 		&i.Provider,
 		&i.SigningSecret,
 		&i.EventFilters,
+		&i.OverlapPolicy,
 	)
 	return i, err
 }
@@ -1225,7 +1334,7 @@ UPDATE autopilot_trigger
 SET webhook_token = $2,
     updated_at = now()
 WHERE id = $1
-RETURNING id, autopilot_id, kind, enabled, cron_expression, timezone, next_run_at, webhook_token, label, last_fired_at, created_at, updated_at, provider, signing_secret, event_filters
+RETURNING id, autopilot_id, kind, enabled, cron_expression, timezone, next_run_at, webhook_token, label, last_fired_at, created_at, updated_at, provider, signing_secret, event_filters, overlap_policy
 `
 
 type SetAutopilotTriggerWebhookTokenParams struct {
@@ -1257,6 +1366,7 @@ func (q *Queries) SetAutopilotTriggerWebhookToken(ctx context.Context, arg SetAu
 		&i.Provider,
 		&i.SigningSecret,
 		&i.EventFilters,
+		&i.OverlapPolicy,
 	)
 	return i, err
 }
@@ -1609,9 +1719,10 @@ UPDATE autopilot_trigger SET
     next_run_at = $5,
     label = COALESCE($6, label),
     event_filters = COALESCE($7, event_filters),
+    overlap_policy = COALESCE($8::text, overlap_policy),
     updated_at = now()
 WHERE id = $1
-RETURNING id, autopilot_id, kind, enabled, cron_expression, timezone, next_run_at, webhook_token, label, last_fired_at, created_at, updated_at, provider, signing_secret, event_filters
+RETURNING id, autopilot_id, kind, enabled, cron_expression, timezone, next_run_at, webhook_token, label, last_fired_at, created_at, updated_at, provider, signing_secret, event_filters, overlap_policy
 `
 
 type UpdateAutopilotTriggerParams struct {
@@ -1622,6 +1733,7 @@ type UpdateAutopilotTriggerParams struct {
 	NextRunAt      pgtype.Timestamptz `json:"next_run_at"`
 	Label          pgtype.Text        `json:"label"`
 	EventFilters   []byte             `json:"event_filters"`
+	OverlapPolicy  pgtype.Text        `json:"overlap_policy"`
 }
 
 func (q *Queries) UpdateAutopilotTrigger(ctx context.Context, arg UpdateAutopilotTriggerParams) (AutopilotTrigger, error) {
@@ -1633,6 +1745,7 @@ func (q *Queries) UpdateAutopilotTrigger(ctx context.Context, arg UpdateAutopilo
 		arg.NextRunAt,
 		arg.Label,
 		arg.EventFilters,
+		arg.OverlapPolicy,
 	)
 	var i AutopilotTrigger
 	err := row.Scan(
@@ -1651,6 +1764,7 @@ func (q *Queries) UpdateAutopilotTrigger(ctx context.Context, arg UpdateAutopilo
 		&i.Provider,
 		&i.SigningSecret,
 		&i.EventFilters,
+		&i.OverlapPolicy,
 	)
 	return i, err
 }

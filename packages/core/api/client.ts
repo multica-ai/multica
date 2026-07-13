@@ -186,10 +186,14 @@ import {
   EMPTY_USER,
   EMPTY_LIST_WEBHOOK_DELIVERIES_RESPONSE,
   EMPTY_WEBHOOK_DELIVERY,
+  EMPTY_AUTOPILOT_TRIGGER,
+  EMPTY_GET_AUTOPILOT_RESPONSE,
   AppConfigSchema,
   type AppConfigResponse,
   GroupedIssuesResponseSchema,
   ListAutopilotsResponseSchema,
+  AutopilotTriggerResponseSchema,
+  GetAutopilotResponseSchema,
   EMPTY_LIST_AUTOPILOTS_RESPONSE,
   ListIssuesResponseSchema,
   ListWebhookDeliveriesResponseSchema,
@@ -296,6 +300,16 @@ export class PreviewUnsupportedError extends Error {
     super("attachment type not supported for inline preview");
     this.name = "PreviewUnsupportedError";
   }
+}
+
+function toAutopilotTriggerWireRequest(
+  data: CreateAutopilotTriggerRequest | UpdateAutopilotTriggerRequest,
+): Record<string, unknown> {
+  const { overlapPolicy, ...wire } = data;
+  if (overlapPolicy !== undefined) {
+    return { ...wire, overlap_policy: overlapPolicy };
+  }
+  return wire;
 }
 
 export class ApiClient {
@@ -2250,7 +2264,10 @@ export class ApiClient {
   }
 
   async getAutopilot(id: string): Promise<GetAutopilotResponse> {
-    return this.fetch(`/api/autopilots/${id}`);
+    const raw = await this.fetch<unknown>(`/api/autopilots/${id}`);
+    return parseWithFallback(raw, GetAutopilotResponseSchema, EMPTY_GET_AUTOPILOT_RESPONSE, {
+      endpoint: "GET /api/autopilots/:id",
+    }) as GetAutopilotResponse;
   }
 
   async createAutopilot(data: CreateAutopilotRequest): Promise<Autopilot> {
@@ -2306,16 +2323,22 @@ export class ApiClient {
   }
 
   async createAutopilotTrigger(autopilotId: string, data: CreateAutopilotTriggerRequest): Promise<AutopilotTrigger> {
-    return this.fetch(`/api/autopilots/${autopilotId}/triggers`, {
+    const raw = await this.fetch<unknown>(`/api/autopilots/${autopilotId}/triggers`, {
       method: "POST",
-      body: JSON.stringify(data),
+      body: JSON.stringify(toAutopilotTriggerWireRequest(data)),
+    });
+    return parseWithFallback(raw, AutopilotTriggerResponseSchema, EMPTY_AUTOPILOT_TRIGGER, {
+      endpoint: "POST /api/autopilots/:id/triggers",
     });
   }
 
   async updateAutopilotTrigger(autopilotId: string, triggerId: string, data: UpdateAutopilotTriggerRequest): Promise<AutopilotTrigger> {
-    return this.fetch(`/api/autopilots/${autopilotId}/triggers/${triggerId}`, {
+    const raw = await this.fetch<unknown>(`/api/autopilots/${autopilotId}/triggers/${triggerId}`, {
       method: "PATCH",
-      body: JSON.stringify(data),
+      body: JSON.stringify(toAutopilotTriggerWireRequest(data)),
+    });
+    return parseWithFallback(raw, AutopilotTriggerResponseSchema, EMPTY_AUTOPILOT_TRIGGER, {
+      endpoint: "PATCH /api/autopilots/:id/triggers/:triggerId",
     });
   }
 
@@ -2327,10 +2350,13 @@ export class ApiClient {
     autopilotId: string,
     triggerId: string,
   ): Promise<AutopilotTrigger> {
-    return this.fetch(
+    const raw = await this.fetch<unknown>(
       `/api/autopilots/${autopilotId}/triggers/${triggerId}/rotate-webhook-token`,
       { method: "POST" },
     );
+    return parseWithFallback(raw, AutopilotTriggerResponseSchema, EMPTY_AUTOPILOT_TRIGGER, {
+      endpoint: "POST /api/autopilots/:id/triggers/:triggerId/rotate-webhook-token",
+    });
   }
 
   // Webhook deliveries — list is slim (no raw_body / selected_headers /

@@ -94,12 +94,13 @@ WHERE id = $1;
 -- name: CreateAutopilotTrigger :one
 INSERT INTO autopilot_trigger (
     autopilot_id, kind, enabled, cron_expression, timezone,
-    next_run_at, webhook_token, label, provider, event_filters
+    next_run_at, webhook_token, label, provider, event_filters, overlap_policy
 ) VALUES (
     $1, $2, $3, sqlc.narg('cron_expression'), sqlc.narg('timezone'),
     sqlc.narg('next_run_at'), sqlc.narg('webhook_token'), sqlc.narg('label'),
     COALESCE(sqlc.narg('provider')::text, 'generic'),
-    sqlc.narg('event_filters')
+    sqlc.narg('event_filters'),
+    COALESCE(sqlc.narg('overlap_policy')::text, 'allow')
 ) RETURNING *;
 
 -- name: UpdateAutopilotTrigger :one
@@ -110,9 +111,36 @@ UPDATE autopilot_trigger SET
     next_run_at = sqlc.narg('next_run_at'),
     label = COALESCE(sqlc.narg('label'), label),
     event_filters = COALESCE(sqlc.narg('event_filters'), event_filters),
+    overlap_policy = COALESCE(sqlc.narg('overlap_policy')::text, overlap_policy),
     updated_at = now()
 WHERE id = $1
 RETURNING *;
+
+-- name: LockAutopilotForSchedulePolicy :one
+-- Serializes schedule admission and overlap-policy mutations for one
+-- Autopilot. Callers always acquire this parent lock before a trigger lock.
+SELECT * FROM autopilot
+WHERE id = $1
+FOR UPDATE;
+
+-- name: LockAutopilotTriggerForSchedulePolicy :one
+-- Freezes one trigger while schedule admission or a policy mutation is
+-- decided. The parent Autopilot lock must already be held.
+SELECT * FROM autopilot_trigger
+WHERE id = $1
+FOR UPDATE;
+
+-- name: GetActiveAutopilotRunOnlyRun :one
+-- Returns the durable active run_only work that makes a coalescing schedule
+-- occurrence a successful no-op. The task status is authoritative: a run may
+-- briefly lag its terminal task until SyncRunFromTask updates it.
+SELECT run.*
+FROM autopilot_run run
+JOIN agent_task_queue task ON task.autopilot_run_id = run.id
+WHERE run.autopilot_id = $1
+  AND task.status IN ('queued', 'dispatched', 'running', 'waiting_local_directory')
+ORDER BY task.created_at ASC
+LIMIT 1;
 
 -- name: DeleteAutopilotTrigger :exec
 DELETE FROM autopilot_trigger WHERE id = $1;

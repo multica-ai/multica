@@ -32,6 +32,12 @@ type AutopilotService struct {
 	TxStarter TxStarter
 	Bus       *events.Bus
 	TaskSvc   *TaskService
+
+	// deferExternalEffects is set only on the transaction-bound service copy
+	// used by coalescing schedule dispatch. Durable writes still use the
+	// existing dispatch path, while analytics, events, and daemon wakeups wait
+	// until the caller has committed the transaction.
+	deferExternalEffects bool
 }
 
 // DefaultAutopilotTriggerTimezone is the timezone used to render Autopilot
@@ -72,6 +78,156 @@ func (s *AutopilotService) DispatchAutopilot(
 	payload []byte,
 ) (*db.AutopilotRun, error) {
 	return s.dispatchAutopilot(ctx, autopilot, triggerID, source, payload, pgtype.Timestamptz{})
+}
+
+// ScheduledAutopilotDispatchResult describes the outcome of one canonical
+// schedule occurrence. A coalesced occurrence is a successful no-op: Run is
+// the earlier active run that owns the durable task and no new run or task was
+// created for the current plan time.
+type ScheduledAutopilotDispatchResult struct {
+	Run           *db.AutopilotRun
+	Coalesced     bool
+	SkippedReason string
+}
+
+// DispatchScheduledAutopilotForPlan applies a schedule trigger's overlap
+// policy before delegating to the occurrence-idempotent dispatch path.
+//
+// overlap_policy=allow preserves the historic behavior. For coalesce, an
+// exclusive lock on the parent Autopilot serializes admission across scheduler
+// replicas. While that lock is held, an active run_only task makes the new
+// occurrence a successful no-op. Otherwise the run and task are created in the
+// same transaction, so a crash cannot leave a committed run without its task.
+func (s *AutopilotService) DispatchScheduledAutopilotForPlan(
+	ctx context.Context,
+	autopilot db.Autopilot,
+	trigger db.AutopilotTrigger,
+	source string,
+	payload []byte,
+	plannedAt time.Time,
+) (*ScheduledAutopilotDispatchResult, error) {
+	if plannedAt.IsZero() {
+		return nil, fmt.Errorf("dispatch for plan: planned_at is required")
+	}
+	tx, err := s.TxStarter.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("begin coalescing schedule dispatch: %w", err)
+	}
+	defer tx.Rollback(ctx)
+	qtx := s.Queries.WithTx(tx)
+
+	lockedAutopilot, err := qtx.LockAutopilotForSchedulePolicy(ctx, autopilot.ID)
+	if err != nil {
+		return nil, fmt.Errorf("lock autopilot for schedule dispatch: %w", err)
+	}
+	if lockedAutopilot.Status != "active" {
+		if err := tx.Commit(ctx); err != nil {
+			return nil, fmt.Errorf("commit inactive-autopilot schedule no-op: %w", err)
+		}
+		return &ScheduledAutopilotDispatchResult{SkippedReason: "autopilot_inactive"}, nil
+	}
+	lockedTrigger, err := qtx.LockAutopilotTriggerForSchedulePolicy(ctx, trigger.ID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			if err := tx.Commit(ctx); err != nil {
+				return nil, fmt.Errorf("commit missing-trigger schedule no-op: %w", err)
+			}
+			return &ScheduledAutopilotDispatchResult{SkippedReason: "trigger_not_found"}, nil
+		}
+		return nil, fmt.Errorf("reload trigger for schedule dispatch: %w", err)
+	}
+	if !lockedTrigger.Enabled || lockedTrigger.Kind != "schedule" {
+		if err := tx.Commit(ctx); err != nil {
+			return nil, fmt.Errorf("commit disabled-trigger schedule no-op: %w", err)
+		}
+		return &ScheduledAutopilotDispatchResult{SkippedReason: "trigger_disabled"}, nil
+	}
+	if lockedTrigger.OverlapPolicy != "coalesce" {
+		if err := tx.Commit(ctx); err != nil {
+			return nil, fmt.Errorf("commit overlap-policy recheck: %w", err)
+		}
+		run, err := s.DispatchAutopilotForPlan(ctx, lockedAutopilot, lockedTrigger.ID, source, payload, plannedAt)
+		return &ScheduledAutopilotDispatchResult{Run: run}, err
+	}
+	if lockedAutopilot.ExecutionMode != "run_only" {
+		return nil, fmt.Errorf("coalescing schedule triggers require execution_mode=run_only")
+	}
+
+	// Exact-plan stale retries reuse the prior complete run without replaying
+	// analytics, events, or task wakeups. This check must precede the broader
+	// active-task coalescing query so same-occurrence idempotency remains
+	// distinguishable from a genuinely skipped later occurrence.
+	plannedTS := pgtype.Timestamptz{Time: plannedAt.UTC(), Valid: true}
+	existing, err := qtx.GetAutopilotRunByTriggerAndPlanned(ctx, db.GetAutopilotRunByTriggerAndPlannedParams{
+		TriggerID: lockedTrigger.ID,
+		PlannedAt: plannedTS,
+	})
+	switch {
+	case err == nil && isAutopilotRunComplete(existing):
+		if err := tx.Commit(ctx); err != nil {
+			return nil, fmt.Errorf("commit idempotent schedule dispatch: %w", err)
+		}
+		return &ScheduledAutopilotDispatchResult{Run: &existing}, nil
+	case err != nil && !errors.Is(err, pgx.ErrNoRows):
+		return nil, fmt.Errorf("check existing schedule run: %w", err)
+	}
+
+	active, err := qtx.GetActiveAutopilotRunOnlyRun(ctx, lockedAutopilot.ID)
+	switch {
+	case err == nil:
+		if err := tx.Commit(ctx); err != nil {
+			return nil, fmt.Errorf("commit coalesced schedule dispatch: %w", err)
+		}
+		return &ScheduledAutopilotDispatchResult{Run: &active, Coalesced: true}, nil
+	case !errors.Is(err, pgx.ErrNoRows):
+		return nil, fmt.Errorf("check active autopilot task: %w", err)
+	}
+
+	// Execute the existing dispatch logic against this transaction. Defer
+	// externally visible wakeups/events until the transaction commits; a
+	// daemon must never be woken for a row that could still roll back.
+	txService := *s
+	txService.Queries = qtx
+	txService.deferExternalEffects = true
+	run, err := txService.DispatchAutopilotForPlan(
+		ctx, lockedAutopilot, lockedTrigger.ID, source, payload, plannedAt,
+	)
+	if err != nil {
+		return nil, err
+	}
+	var enqueuedTask *db.AgentTaskQueue
+	if run.TaskID.Valid {
+		task, err := qtx.GetAgentTask(ctx, run.TaskID)
+		if err != nil {
+			return nil, fmt.Errorf("reload coalescing schedule task before commit: %w", err)
+		}
+		enqueuedTask = &task
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("commit coalescing schedule dispatch: %w", err)
+	}
+
+	if run.Status == "skipped" {
+		s.publishRunDone(util.UUIDToString(lockedAutopilot.WorkspaceID), *run, "skipped")
+	} else {
+		s.captureAutopilotRunStarted(lockedAutopilot, *run, source)
+		s.Bus.Publish(events.Event{
+			Type:        protocol.EventAutopilotRunStart,
+			WorkspaceID: util.UUIDToString(lockedAutopilot.WorkspaceID),
+			ActorType:   "system",
+			Payload: map[string]any{
+				"run_id":       util.UUIDToString(run.ID),
+				"autopilot_id": util.UUIDToString(lockedAutopilot.ID),
+				"source":       source,
+				"status":       run.Status,
+			},
+		})
+	}
+	if enqueuedTask != nil && s.TaskSvc != nil {
+		s.TaskSvc.NotifyTaskEnqueued(ctx, *enqueuedTask)
+	}
+
+	return &ScheduledAutopilotDispatchResult{Run: run}, nil
 }
 
 // DispatchAutopilotForPlan is the entry point for scheduled triggers that
@@ -227,7 +383,9 @@ func (s *AutopilotService) dispatchAutopilot(
 	if err != nil {
 		return nil, fmt.Errorf("create run: %w", err)
 	}
-	s.captureAutopilotRunStarted(autopilot, run, source)
+	if !s.deferExternalEffects {
+		s.captureAutopilotRunStarted(autopilot, run, source)
+	}
 
 	switch autopilot.ExecutionMode {
 	case "create_issue":
@@ -259,17 +417,19 @@ func (s *AutopilotService) dispatchAutopilot(
 	s.Queries.UpdateAutopilotLastRunAt(ctx, autopilot.ID)
 
 	// Publish run start event.
-	s.Bus.Publish(events.Event{
-		Type:        protocol.EventAutopilotRunStart,
-		WorkspaceID: util.UUIDToString(autopilot.WorkspaceID),
-		ActorType:   "system",
-		Payload: map[string]any{
-			"run_id":       util.UUIDToString(run.ID),
-			"autopilot_id": util.UUIDToString(autopilot.ID),
-			"source":       source,
-			"status":       run.Status,
-		},
-	})
+	if !s.deferExternalEffects {
+		s.Bus.Publish(events.Event{
+			Type:        protocol.EventAutopilotRunStart,
+			WorkspaceID: util.UUIDToString(autopilot.WorkspaceID),
+			ActorType:   "system",
+			Payload: map[string]any{
+				"run_id":       util.UUIDToString(run.ID),
+				"autopilot_id": util.UUIDToString(autopilot.ID),
+				"source":       source,
+				"status":       run.Status,
+			},
+		})
+	}
 
 	return &run, nil
 }
@@ -602,7 +762,9 @@ func (s *AutopilotService) dispatchRunOnly(ctx context.Context, ap db.Autopilot,
 	// (bypassing TaskService.Enqueue*), so without this the runtime
 	// would not get a wakeup and any cached "empty" verdict would
 	// stall the task until the TTL expired.
-	s.TaskSvc.NotifyTaskEnqueued(ctx, task)
+	if !s.deferExternalEffects {
+		s.TaskSvc.NotifyTaskEnqueued(ctx, task)
+	}
 
 	slog.Info("autopilot dispatched (run_only)",
 		"autopilot_id", util.UUIDToString(ap.ID),
@@ -1047,6 +1209,9 @@ func (s *AutopilotService) recordSkippedRun(
 }
 
 func (s *AutopilotService) publishRunDone(workspaceID string, run db.AutopilotRun, status string) {
+	if s.deferExternalEffects {
+		return
+	}
 	s.Bus.Publish(events.Event{
 		Type:        protocol.EventAutopilotRunDone,
 		WorkspaceID: workspaceID,
@@ -1060,7 +1225,7 @@ func (s *AutopilotService) publishRunDone(workspaceID string, run db.AutopilotRu
 }
 
 func (s *AutopilotService) captureIssueCreatedFromAutopilot(ap db.Autopilot, run *db.AutopilotRun, issue db.Issue, leaderID pgtype.UUID) {
-	if s.TaskSvc == nil || s.TaskSvc.Analytics == nil {
+	if s.deferExternalEffects || s.TaskSvc == nil || s.TaskSvc.Analytics == nil {
 		return
 	}
 	// For PostHog the agent_id should be the agent that will actually run
@@ -1079,7 +1244,7 @@ func (s *AutopilotService) captureIssueCreatedFromAutopilot(ap db.Autopilot, run
 }
 
 func (s *AutopilotService) captureAutopilotRunStarted(ap db.Autopilot, run db.AutopilotRun, triggerSource string) {
-	if s.TaskSvc == nil || s.TaskSvc.Analytics == nil {
+	if s.deferExternalEffects || s.TaskSvc == nil || s.TaskSvc.Analytics == nil {
 		return
 	}
 	obsmetrics.RecordEvent(s.TaskSvc.Analytics, s.TaskSvc.Metrics, analytics.AutopilotRunStarted(
@@ -1094,7 +1259,7 @@ func (s *AutopilotService) captureAutopilotRunStarted(ap db.Autopilot, run db.Au
 }
 
 func (s *AutopilotService) captureAutopilotRunCompleted(ap db.Autopilot, run db.AutopilotRun) {
-	if s.TaskSvc == nil || s.TaskSvc.Analytics == nil {
+	if s.deferExternalEffects || s.TaskSvc == nil || s.TaskSvc.Analytics == nil {
 		return
 	}
 	obsmetrics.RecordEvent(s.TaskSvc.Analytics, s.TaskSvc.Metrics, analytics.AutopilotRunCompleted(
@@ -1110,7 +1275,7 @@ func (s *AutopilotService) captureAutopilotRunCompleted(ap db.Autopilot, run db.
 }
 
 func (s *AutopilotService) captureAutopilotRunFailed(ap db.Autopilot, run db.AutopilotRun, triggerSource, reason string) {
-	if s.TaskSvc == nil || s.TaskSvc.Analytics == nil {
+	if s.deferExternalEffects || s.TaskSvc == nil || s.TaskSvc.Analytics == nil {
 		return
 	}
 	if reason == "" {

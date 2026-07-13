@@ -9,6 +9,7 @@ const baseTrigger: AutopilotTrigger = {
   enabled: true,
   cron_expression: null,
   timezone: null,
+  overlapPolicy: "allow",
   next_run_at: null,
   webhook_token: "awt_abc",
   webhook_path: "/api/webhooks/autopilots/awt_abc",
