@@ -13,25 +13,31 @@
 -- a new source label needs no migration); this locks a two-column equality, not an
 -- enumerable value, and carries no FK / cascade.
 --
--- UPGRADE SAFETY — the `originator_source IS NULL` clause exempts pre-migration rows
--- (Bohan chose the two-phase rollout on the MUL-4302 thread; raised by Elon). `NOT
--- VALID` skips the initial scan, but Postgres STILL checks a pre-existing row whenever
--- a later UPDATE touches it — even an UPDATE that leaves the attribution columns
--- alone. Cross-deployment stale queued/running tasks predate `167_agent_task_
--- accountable_user`, so they carry (originator_user_id set, accountable_user_id NULL);
--- their next claim / complete / cancel by the new backend would fail a bare invariant
--- CHECK. `originator_source` was added by `166` with no default/backfill, so it is
--- NULL on exactly those pre-migration rows and non-NULL on every row written by an
--- attribution-aware backend (finalizeAttribution always stamps it). Keying the
--- exemption on `originator_source IS NULL` therefore lets legacy rows keep flowing
--- while enforcing the FULL invariant on every new write. Phase 3 backfills the legacy
--- rows (real source + reconciled accountable), then drops this constraint and re-adds
--- the strict form (without the exemption) + VALIDATE.
+-- UPGRADE SAFETY — the `originator_source IS NULL` clause exempts legacy-writer /
+-- unbackfilled-lineage rows (Bohan chose the two-phase rollout on the MUL-4302 thread;
+-- raised by Elon). `NOT VALID` skips the initial scan, but Postgres STILL checks a
+-- pre-existing row whenever a later UPDATE touches it — even an UPDATE that leaves the
+-- attribution columns alone. Cross-deployment stale queued/running tasks predate
+-- `167_agent_task_accountable_user`, so they carry (originator_user_id set,
+-- accountable_user_id NULL); their next claim / complete / cancel by the new backend
+-- would fail a bare invariant CHECK.
+--
+-- `originator_source` was added by `166` with no default/backfill, so a NULL there does
+-- NOT strictly mean "row predates the migration" — it means the row was written by a
+-- writer that does not populate attribution: (a) rows created before this PR's
+-- migrations; (b) during a rolling deploy, NEW rows an older, not-yet-replaced backend
+-- INSERTs against the migrated schema; (c) a retry clone that inherits a legacy row's
+-- NULL lineage. All three are exactly the rows the transition must let keep flowing,
+-- and all resolve to "no attribution recorded", so exempting them is correct. Every
+-- attribution-aware write goes through finalizeAttribution, which always stamps a
+-- non-NULL source, so those rows stay under the FULL equality CHECK. Phase 3 backfills
+-- the exempt rows (real source + reconciled accountable), then drops this constraint
+-- and re-adds the strict form (without the exemption) + VALIDATE.
 --
 -- This does NOT reopen the #5192 bug class: that merge — and every real enqueue /
 -- coalesce path — stamps originator_source non-NULL, so an (originator=B,
--- accountable=A) bypass is still rejected. Only the originator_source-NULL shape
--- (legacy rows) is exempt.
+-- accountable=A) bypass is still rejected. Only the source-NULL (legacy-writer /
+-- unbackfilled) shape is exempt.
 --
 -- Added NOT VALID so the constraint is a fast metadata-only add on the hot queue table
 -- (no full-table ACCESS EXCLUSIVE scan); it enforces on every new INSERT/UPDATE

@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -950,16 +951,34 @@ func (h *Handler) UpdateAutopilot(w http.ResponseWriter, r *http.Request) {
 }
 
 // autopilotRuleSubstantiveChange reports whether a substantive (publish-worthy)
-// field of the autopilot ROW changed between prev and next: the execution target
-// (assignee), enabled-state (status: active/paused/archived), or execution mode
-// (MUL-4302 §3.4). Trigger-table edits (cron / webhook / event_filters) are also
-// substantive and republish the rule version in the trigger CRUD handlers
-// (Create/Update/Delete trigger); archive and system-pause do so in their own paths.
+// field of the autopilot ROW changed between prev and next — a change that alters
+// WHAT the automation instructs the agent to do, or WHO / WHETHER it runs, and so
+// transfers accountability to the editor (MUL-4302 §3.4; boundary pinned with Elon):
+//
+//   - assignee_type / assignee_id — who (agent / squad leader) executes;
+//   - status — enabled state (active / paused / archived);
+//   - execution_mode — run_only vs create_issue;
+//   - description — the product surfaces this as the run PROMPT, i.e. the task
+//     instruction itself, so editing it must transfer responsibility (the gap Elon
+//     flagged: a fresh publisher of the instructions is the accountable human);
+//   - issue_title_template — templates the created issue in create_issue mode; part
+//     of the instruction / output spec the run produces.
+//
+// Deliberately NOT substantive (cosmetic / routing — they change neither the
+// instruction nor the executor): title (display label) and project_id (which project
+// created issues are filed under). The comparison is faithful because UpdateAutopilot
+// seeds every param from prev, so an omitted field round-trips unchanged.
+//
+// Trigger-table edits (cron / timezone / enabled / event_filters) are substantive PER
+// TRIGGER and handled in UpdateAutopilotTrigger; archive and system-pause republish in
+// their own paths.
 func autopilotRuleSubstantiveChange(prev, next db.Autopilot) bool {
 	return prev.AssigneeType != next.AssigneeType ||
 		prev.AssigneeID != next.AssigneeID ||
 		prev.Status != next.Status ||
-		prev.ExecutionMode != next.ExecutionMode
+		prev.ExecutionMode != next.ExecutionMode ||
+		prev.Description != next.Description ||
+		prev.IssueTitleTemplate != next.IssueTitleTemplate
 }
 
 // recordAutopilotRuleVersion appends one rule-version snapshot for a substantive
@@ -1616,9 +1635,6 @@ func (h *Handler) UpdateAutopilotTrigger(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// Editing a trigger changes what / when the rule fires — a substantive publish
-	// (MUL-4302 §3.4) — so republish the rule version with this member as publisher,
-	// atomically with the trigger update (mirrors CreateAutopilot / UpdateAutopilot).
 	tx, err := h.TxStarter.Begin(r.Context())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to update trigger")
@@ -1632,20 +1648,34 @@ func (h *Handler) UpdateAutopilotTrigger(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusInternalServerError, "failed to update trigger")
 		return
 	}
-	if err := h.recordAutopilotRuleVersion(r.Context(), qtx, ap, "member", parseUUID(userID)); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to update trigger")
-		return
-	}
-	// Responsibility for THIS trigger's runs transfers to the editor. Scoped to the
-	// single row so editing one trigger never reassigns another's accountability —
-	// the per-firing-trigger granularity the autopilot-scoped rule_version can't give.
-	if err := qtx.SetAutopilotTriggerPublisher(r.Context(), db.SetAutopilotTriggerPublisherParams{
-		ID:              trigger.ID,
-		PublishedByType: pgtype.Text{String: "member", Valid: true},
-		PublishedByID:   parseUUID(userID),
-	}); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to update trigger")
-		return
+
+	// Only a substantive edit republishes the rule version and transfers this
+	// trigger's accountability to the editor. cron / timezone / enabled / event_filters
+	// change WHAT or WHEN the trigger fires; label is a cosmetic display field, and a
+	// no-op PATCH changes nothing — neither should move responsibility (MUL-4302; the
+	// over-transfer Elon flagged). Comparing the persisted before/after rows captures a
+	// real change and ignores label-only / no-op PATCHes (next_run_at is derived from
+	// cron/timezone, so it is not an independent signal).
+	triggerSubstantiveChange := prev.Enabled != trigger.Enabled ||
+		prev.CronExpression != trigger.CronExpression ||
+		prev.Timezone != trigger.Timezone ||
+		!bytes.Equal(prev.EventFilters, trigger.EventFilters)
+	if triggerSubstantiveChange {
+		if err := h.recordAutopilotRuleVersion(r.Context(), qtx, ap, "member", parseUUID(userID)); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to update trigger")
+			return
+		}
+		// Responsibility for THIS trigger's runs transfers to the editor. Scoped to the
+		// single row so editing one trigger never reassigns another's accountability —
+		// the per-firing-trigger granularity the autopilot-scoped rule_version can't give.
+		if err := qtx.SetAutopilotTriggerPublisher(r.Context(), db.SetAutopilotTriggerPublisherParams{
+			ID:              trigger.ID,
+			PublishedByType: pgtype.Text{String: "member", Valid: true},
+			PublishedByID:   parseUUID(userID),
+		}); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to update trigger")
+			return
+		}
 	}
 	if err := tx.Commit(r.Context()); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to update trigger")
