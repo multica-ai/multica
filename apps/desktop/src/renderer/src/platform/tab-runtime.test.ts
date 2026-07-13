@@ -8,7 +8,7 @@ vi.mock("../routes", () => ({
 }));
 
 import { tabRuntimeRegistry } from "./tab-runtime";
-import { useTabStore, getActiveTab } from "@/stores/tab-store";
+import { useTabStore, getActiveTab, getTabById } from "@/stores/tab-store";
 
 function activeTab() {
   const tab = getActiveTab(useTabStore.getState());
@@ -44,6 +44,10 @@ describe("TabRuntimeRegistry", () => {
       session: { entries: ["/acme/issues", "/acme/projects"], index: 1 },
     });
 
+    // Drop any runtime the reconcile eagerly created so the next acquire
+    // re-seeds from the now multi-entry session — the restore-from-persisted-
+    // session path.
+    tabRuntimeRegistry.disposeAll();
     const runtime = tabRuntimeRegistry.getOrCreate(activeTab());
     expect(runtime.router.state.location.pathname).toBe("/acme/projects");
   });
@@ -107,6 +111,40 @@ describe("TabRuntimeRegistry", () => {
       expect(afterRuntime.router.state.location.pathname).toBe("/acme/projects");
 
       vi.runAllTimers();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps current + most-recent-1 warm and evicts the LRU runtime", () => {
+    vi.useFakeTimers();
+    try {
+      const store = useTabStore.getState();
+      store.switchWorkspace("acme");
+      const tab1 = activeTab().id;
+      const tab2 = store.addTab("/acme/projects", "Projects", "FolderKanban");
+      const tab3 = store.addTab("/acme/agents", "Agents", "Bot");
+
+      // Anchor + spy on tab1's runtime (tab1 is active, so it exists).
+      const rt1 = tabRuntimeRegistry.getOrCreate(
+        getTabById(useTabStore.getState(), tab1)!,
+      );
+      const rt1Dispose = vi.spyOn(rt1.router, "dispose");
+
+      store.setActiveTab(tab2); // warm { tab1, tab2 }
+      const rt2Id = tabRuntimeRegistry.getOrCreate(
+        getTabById(useTabStore.getState(), tab2)!,
+      ).id;
+
+      store.setActiveTab(tab3); // { tab1, tab2, tab3 } -> evict LRU (tab1)
+      vi.runAllTimers();
+
+      // tab1 was the least-recently-used and is evicted.
+      expect(rt1Dispose).toHaveBeenCalled();
+      // tab2 stayed warm (same runtime instance, not re-created).
+      expect(
+        tabRuntimeRegistry.getOrCreate(getTabById(useTabStore.getState(), tab2)!).id,
+      ).toBe(rt2Id);
     } finally {
       vi.useRealTimers();
     }

@@ -245,6 +245,33 @@ describe("useTabStore actions", () => {
     expect(reset.generation).toBe(1);
   });
 
+  it("resetTabRuntime clears any stored scroll", () => {
+    const store = useTabStore.getState();
+    store.switchWorkspace("acme");
+    const tabId = useTabStore.getState().byWorkspace.acme.tabs[0].id;
+    store.updateTabScroll(tabId, { path: "/acme/issues", offsets: { main: 400 } });
+
+    store.resetTabRuntime(tabId);
+
+    expect(useTabStore.getState().byWorkspace.acme.tabs[0].scroll).toBeUndefined();
+  });
+
+  it("updateTabScroll stores per-tab scroll offsets tagged with the path", () => {
+    const store = useTabStore.getState();
+    store.switchWorkspace("acme");
+    const tabId = useTabStore.getState().byWorkspace.acme.tabs[0].id;
+
+    store.updateTabScroll(tabId, {
+      path: "/acme/issues",
+      offsets: { main: 320, aside: 80 },
+    });
+
+    expect(useTabStore.getState().byWorkspace.acme.tabs[0].scroll).toEqual({
+      path: "/acme/issues",
+      offsets: { main: 320, aside: 80 },
+    });
+  });
+
   it("validateWorkspaceSlugs drops groups for slugs not in the valid set and repoints active", () => {
     const store = useTabStore.getState();
     store.switchWorkspace("acme");

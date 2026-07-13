@@ -57,18 +57,25 @@ function seedRouter(session: TabSession, fallbackPath: string): DataRouter {
 let runtimeSeq = 0;
 
 class TabRuntimeRegistry {
+  // Map iteration order doubles as LRU recency: front = least recently used.
   private runtimes = new Map<string, TabRuntime>();
   private subscribed = false;
+  /**
+   * Keep the active tab plus one most-recently-used tab warm; older runtimes
+   * are disposed so N open tabs never hold N live routers. The acceptance
+   * explicitly allows "current + most recent 1".
+   */
+  private readonly maxLive = 2;
 
   /**
    * Subscribe to the store lazily, on first runtime creation — nothing needs
-   * disposing until a runtime exists, and a side-effect-free constructor keeps
-   * module import cheap and test-friendly.
+   * reconciling until a runtime exists, and a side-effect-free constructor
+   * keeps module import cheap and test-friendly.
    */
   private ensureSubscribed(): void {
     if (this.subscribed) return;
     this.subscribed = true;
-    useTabStore.subscribe(() => this.disposeRemovedTabs());
+    useTabStore.subscribe(() => this.reconcile());
   }
 
   getOrCreate(tab: Tab): TabRuntime {
@@ -115,7 +122,12 @@ class TabRuntimeRegistry {
     window.setTimeout(() => runtime.router.dispose(), 0);
   }
 
-  private disposeRemovedTabs(): void {
+  /**
+   * React to a store change: drop runtimes for tabs that no longer exist, keep
+   * the active runtime warm and most-recently-used, then evict older runtimes
+   * past the LRU cap.
+   */
+  private reconcile(): void {
     const state = useTabStore.getState();
     const live = new Set<string>();
     for (const slug of Object.keys(state.byWorkspace)) {
@@ -123,6 +135,36 @@ class TabRuntimeRegistry {
     }
     for (const tabId of [...this.runtimes.keys()]) {
       if (!live.has(tabId)) this.dispose(tabId);
+    }
+
+    const active = getActiveTab(state);
+    if (active) {
+      this.getOrCreate(active);
+      this.touch(active.id);
+    }
+    this.evictLRU(active?.id ?? null);
+  }
+
+  /** Move a runtime to most-recently-used (the end of iteration order). */
+  private touch(tabId: string): void {
+    const runtime = this.runtimes.get(tabId);
+    if (!runtime) return;
+    this.runtimes.delete(tabId);
+    this.runtimes.set(tabId, runtime);
+  }
+
+  /** Evict least-recently-used runtimes past the cap; never the active one. */
+  private evictLRU(activeId: string | null): void {
+    while (this.runtimes.size > this.maxLive) {
+      let evictId: string | null = null;
+      for (const tabId of this.runtimes.keys()) {
+        if (tabId !== activeId) {
+          evictId = tabId;
+          break;
+        }
+      }
+      if (evictId === null) break;
+      this.dispose(evictId);
     }
   }
 

@@ -1,4 +1,4 @@
-import { Activity, useEffect, useState, type ReactNode } from "react";
+import { useEffect, useState } from "react";
 import { RouterProvider } from "react-router-dom";
 import { useActiveGroup, type Tab } from "@/stores/tab-store";
 import { TabNavigationProvider } from "@/platform/navigation";
@@ -7,59 +7,36 @@ import { useTabRuntimeSync } from "@/hooks/use-tab-runtime-sync";
 import { useTabScrollRestore } from "@/hooks/use-tab-scroll-restore";
 
 /**
- * Wraps a tab's subtree so its scroll position survives the round trip
- * through `<Activity mode="hidden">`. Lives inside Activity so the hook's
- * effects cycle with the tab's visibility — see `useTabScrollRestore` for
- * the mechanism. `display: contents` keeps the wrapper transparent to
+ * The active tab's rendered subtree — the single live page tree. Inactive
+ * tabs are not rendered at all (no DOM, no query observers / effects), which
+ * is the whole point of the Session model: a tab is a resumable session, not a
+ * kept-alive page. The live router + history mirror come from the tab runtime
+ * registry (seeded from the tab's persisted session); the sync hook feeds the
+ * mirror back into the store, and the scroll hook persists / restores scroll
+ * across the mount cycle. `display: contents` keeps the wrapper transparent to
  * the surrounding flex layout.
  */
-function TabScrollRestoreWrapper({
-  tabPath,
-  children,
-}: {
-  tabPath: string;
-  children: ReactNode;
-}) {
-  const ref = useTabScrollRestore(tabPath);
+function TabView({ tab }: { tab: Tab }) {
+  const [runtime] = useState(() => tabRuntimeRegistry.getOrCreate(tab));
+  useTabRuntimeSync(tab.id, runtime);
+  const scrollRef = useTabScrollRestore(tab.id, tab.path);
   return (
-    <div ref={ref} style={{ display: "contents" }}>
-      {children}
+    <div ref={scrollRef} style={{ display: "contents" }}>
+      <TabNavigationProvider router={runtime.router}>
+        <RouterProvider router={runtime.router} />
+      </TabNavigationProvider>
     </div>
   );
 }
 
 /**
- * One tab's rendered subtree. The live router + history mirror come from the
- * tab runtime registry (seeded from the tab's persisted session); the sync
- * hook feeds the mirror back into the store as the tab session. Mounted once
- * per acquired runtime — TabContent keys this by `tab.id:generation`, so a
- * tab reload (generation bump) remounts on a fresh runtime instead of mutating
- * the RouterProvider's `router` prop (which React Router forbids).
- */
-function TabView({ tab, active }: { tab: Tab; active: boolean }) {
-  const [runtime] = useState(() => tabRuntimeRegistry.getOrCreate(tab));
-  useTabRuntimeSync(tab.id, runtime);
-  return (
-    <Activity mode={active ? "visible" : "hidden"}>
-      <TabScrollRestoreWrapper tabPath={tab.path}>
-        <TabNavigationProvider router={runtime.router}>
-          <RouterProvider router={runtime.router} />
-        </TabNavigationProvider>
-      </TabScrollRestoreWrapper>
-    </Activity>
-  );
-}
-
-/**
- * Renders the active workspace's tabs. Only the active tab is visible; hidden
- * tabs keep their DOM and React state via <Activity>. The routers themselves
- * live in the tab runtime registry, not the store.
- *
- * When switching workspaces, the previous workspace's tabs unmount entirely
- * and the new workspace's tabs mount fresh — cross-workspace state
- * preservation is an explicit non-goal (keeping all workspaces' tabs warm
- * simultaneously would bloat memory and make workspace switching feel
- * anything but "switching").
+ * Renders only the active workspace's active tab. Switching tabs swaps the
+ * whole subtree (keyed by `tab.id:generation`): the outgoing tab unmounts —
+ * releasing its DOM and observers — and the incoming tab mounts fresh from its
+ * session. The registry keeps the active tab plus one recent tab warm so quick
+ * back-and-forth reuses the router without re-seeding; a reload (generation
+ * bump) remounts on a fresh runtime rather than mutating the RouterProvider's
+ * `router` prop (which React Router forbids).
  */
 export function TabContent() {
   const group = useActiveGroup();
@@ -72,16 +49,10 @@ export function TabContent() {
   }, [group?.activeTabId, group?.tabs]);
 
   if (!group) return null;
+  const activeTab = group.tabs.find((t) => t.id === group.activeTabId);
+  if (!activeTab) return null;
 
   return (
-    <>
-      {group.tabs.map((tab) => (
-        <TabView
-          key={`${tab.id}:${tab.generation}`}
-          tab={tab}
-          active={tab.id === group.activeTabId}
-        />
-      ))}
-    </>
+    <TabView key={`${activeTab.id}:${activeTab.generation}`} tab={activeTab} />
   );
 }

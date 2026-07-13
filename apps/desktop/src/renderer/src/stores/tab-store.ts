@@ -18,6 +18,17 @@ import type { HistorySnapshot } from "@/platform/history-mirror";
  */
 export type TabSession = HistorySnapshot;
 
+/**
+ * Per-tab scroll offsets for the tab's current page, keyed by scroll-root name.
+ * Tagged with the `path` they were captured on so a stale page's offset isn't
+ * restored after intra-tab navigation. Ephemeral — survives tab switches (the
+ * store outlives the unmounted subtree) but is not persisted across restart.
+ */
+export interface TabScroll {
+  path: string;
+  offsets: Record<string, number>;
+}
+
 export interface Tab {
   id: string;
   /** Every tab path is workspace-scoped: `/{workspaceSlug}/{route}/...`. */
@@ -26,6 +37,8 @@ export interface Tab {
   icon: string;
   /** Serializable history session; the live router lives in the registry. */
   session: TabSession;
+  /** Ephemeral scroll offsets for the current page; restored on tab switch. */
+  scroll?: TabScroll;
   /**
    * Bumped by `resetTabRuntime` (tab reload) to force the tab subtree to
    * remount on a fresh runtime. Ephemeral — never persisted.
@@ -112,6 +125,12 @@ interface TabStore {
    * crash-recovery path (registry.reloadActive drives this).
    */
   resetTabRuntime: (tabId: string) => void;
+  /**
+   * Persist a tab's scroll offsets. Called when the tab subtree unmounts
+   * (switch away / close) so switching back can restore them. Finds across
+   * groups; no-ops for a tab that no longer exists.
+   */
+  updateTabScroll: (tabId: string, scroll: TabScroll) => void;
   /**
    * Close the active tab. The always-safe escape from a route-level crash:
    * unlike reloading the tab (recreates the same crashing path) or navigating
@@ -579,8 +598,26 @@ export const useTabStore = create<TabStore>()(
         const next: Tab = {
           ...current,
           session: { entries: [current.path], index: 0 },
+          scroll: undefined,
           generation: current.generation + 1,
         };
+        const nextTabs = [...group.tabs];
+        nextTabs[index] = next;
+        set({
+          byWorkspace: {
+            ...byWorkspace,
+            [slug]: { ...group, tabs: nextTabs },
+          },
+        });
+      },
+
+      updateTabScroll(tabId, scroll) {
+        const { byWorkspace } = get();
+        const hit = findTabLocation(byWorkspace, tabId);
+        if (!hit) return;
+        const { slug, group, index } = hit;
+        const current = group.tabs[index];
+        const next: Tab = { ...current, scroll };
         const nextTabs = [...group.tabs];
         nextTabs[index] = next;
         set({
@@ -741,9 +778,9 @@ export const useTabStore = create<TabStore>()(
             slug,
             {
               activeTabId: group.activeTabId,
-              // Persist the session; `generation` is ephemeral runtime state.
+              // Persist the session; `generation` and `scroll` are ephemeral.
               tabs: group.tabs.map(
-                ({ generation: _generation, ...rest }) => rest,
+                ({ generation: _generation, scroll: _scroll, ...rest }) => rest,
               ),
             },
           ]),
@@ -958,6 +995,15 @@ export function getActiveTab(s: TabStore): Tab | null {
   const group = s.byWorkspace[s.activeWorkspaceSlug];
   if (!group) return null;
   return group.tabs.find((t) => t.id === group.activeTabId) ?? null;
+}
+
+/** Find a tab by id across all workspace groups. Pure non-hook helper. */
+export function getTabById(s: TabStore, tabId: string): Tab | null {
+  for (const slug of Object.keys(s.byWorkspace)) {
+    const tab = s.byWorkspace[slug].tabs.find((t) => t.id === tabId);
+    if (tab) return tab;
+  }
+  return null;
 }
 
 /**

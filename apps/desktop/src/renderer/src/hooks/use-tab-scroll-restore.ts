@@ -1,78 +1,77 @@
 import { useEffect, useLayoutEffect, useRef } from "react";
+import { useTabStore, getTabById } from "@/stores/tab-store";
 
 /**
- * Persist a tab's scroll positions across <Activity> visibility transitions.
+ * Persist and restore a tab's scroll positions across its mount cycle.
  *
- * Tabs render under `<Activity mode="visible|hidden">`, which keeps React
- * state but loses DOM scrollTop — the subtree is taken out of layout while
- * hidden and rejoins with scrollTop=0. This hook records every marked
- * container's `scrollTop` while the tab is visible (continuously, via a
- * capture-phase scroll listener) and restores them in a `useLayoutEffect`
- * the next time the tab becomes visible, before the browser paints.
+ * In the Session model only the active tab is rendered; switching tabs unmounts
+ * the previous tab's subtree entirely (losing DOM scrollTop). This hook records
+ * every marked container's `scrollTop` while the tab is mounted, persists them
+ * into the tab session when the subtree unmounts (switch away / close), and
+ * restores them the next time the tab mounts — before the browser paints.
  *
- * Mark scroll containers in views with `data-tab-scroll-root`. The
- * attribute value is the cache key — defaults to `"main"` for unnamed
- * roots. Most pages have a single scroll container, so a bare attribute
- * is enough; named keys are only needed when a page has multiple
- * independently scrollable regions whose positions must all be restored.
+ * Mark scroll containers in views with `data-tab-scroll-root`. The attribute
+ * value is the cache key — defaults to `"main"` for unnamed roots. Named keys
+ * are only needed when a page has multiple independently scrollable regions.
  *
- * When the tab's path changes (intra-tab navigation), the saved offsets
- * are dropped — the new route's container shares the same marker key but
- * is a different page, and restoring the old offset would land the user
- * somewhere arbitrary on the new page.
+ * Offsets are tagged with the tab's path. On intra-tab navigation (path change)
+ * the saved offsets are dropped — the new route shares the marker key but is a
+ * different page, so restoring the old offset would land the user somewhere
+ * arbitrary. Restoration also ignores a stored offset captured on a different
+ * path.
  *
  * For virtualized children (Virtuoso, react-virtual, etc.) the single
- * synchronous `scrollTop = saved` inside useLayoutEffect isn't enough:
- * the child registers its observers in a passive useEffect that fires
- * later, so at restore time the container's scrollHeight has collapsed
- * to clientHeight and the browser clamps our assignment to 0. The
- * restore loops across rAF frames until the assignment sticks, which
- * lets virtualization rehydrate before we give up.
+ * synchronous `scrollTop = saved` inside useLayoutEffect isn't enough: the
+ * child registers its observers in a passive useEffect that fires later, so at
+ * restore time the container's scrollHeight has collapsed to clientHeight and
+ * the browser clamps our assignment to 0. The restore loops across rAF frames
+ * until the assignment sticks, which lets virtualization rehydrate first.
  */
-export function useTabScrollRestore(tabPath: string) {
+export function useTabScrollRestore(tabId: string, tabPath: string) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const savedRef = useRef<Map<string, number>>(new Map());
+  const savedRef = useRef<Map<string, number> | null>(null);
   const prevPathRef = useRef(tabPath);
+
+  // Hydrate once from the tab's persisted scroll — but only if it was captured
+  // on the current path. Reading the store imperatively (not subscribing) keeps
+  // this a one-time mount concern.
+  if (savedRef.current === null) {
+    const stored = getTabById(useTabStore.getState(), tabId)?.scroll;
+    savedRef.current =
+      stored && stored.path === tabPath
+        ? new Map(Object.entries(stored.offsets))
+        : new Map();
+  }
 
   if (prevPathRef.current !== tabPath) {
     savedRef.current.clear();
     prevPathRef.current = tabPath;
   }
 
-  // <Activity> cleans up effects on hidden and re-mounts them on visible,
-  // so an empty-deps useLayoutEffect runs exactly on every hidden → visible
-  // transition. Restoring here (before the browser paints) handles the
-  // common case without a flash.
-  //
-  // The synchronous set isn't enough for virtualized lists though
-  // (issue-detail uses Virtuoso with customScrollParent). Virtuoso wires
-  // its scroll/resize observers in a passive useEffect, which fires AFTER
-  // useLayoutEffect — so at the moment we try to restore, the spacer that
-  // gives the container its tall scrollHeight hasn't been re-established
-  // yet. The browser silently clamps `scrollTop = saved` down to 0 because
-  // `scrollHeight === clientHeight` in that window. Retry across rAF
-  // frames until the set sticks (or we time out around the time any sane
-  // child should have laid out, ~500ms).
+  // Restore before paint on mount. The synchronous set handles the common case;
+  // the rAF retry covers virtualized lists (see the docstring).
   useLayoutEffect(() => {
     const root = containerRef.current;
     if (!root) return;
+    const saved = savedRef.current;
+    if (!saved) return;
     const els = root.querySelectorAll<HTMLElement>("[data-tab-scroll-root]");
     const cancellers: Array<() => void> = [];
     els.forEach((el) => {
       const key = scrollKey(el);
-      const saved = savedRef.current.get(key);
-      if (saved === undefined) return;
-      el.scrollTop = saved;
-      if (el.scrollTop === saved) return;
+      const target = saved.get(key);
+      if (target === undefined) return;
+      el.scrollTop = target;
+      if (el.scrollTop === target) return;
 
       let cancelled = false;
       let attempts = 0;
       const maxAttempts = 30; // ~500ms at 60fps
       const tick = () => {
         if (cancelled) return;
-        el.scrollTop = saved;
+        el.scrollTop = target;
         attempts++;
-        if (el.scrollTop === saved) return;
+        if (el.scrollTop === target) return;
         if (attempts >= maxAttempts) return;
         requestAnimationFrame(tick);
       };
@@ -91,12 +90,25 @@ export function useTabScrollRestore(tabPath: string) {
       const target = e.target;
       if (!(target instanceof HTMLElement)) return;
       if (!target.hasAttribute("data-tab-scroll-root")) return;
-      savedRef.current.set(scrollKey(target), target.scrollTop);
+      savedRef.current?.set(scrollKey(target), target.scrollTop);
     };
     // Scroll events don't bubble, but capture catches them anyway.
     root.addEventListener("scroll", onScroll, { capture: true, passive: true });
     return () => root.removeEventListener("scroll", onScroll, true);
   }, []);
+
+  // Persist offsets into the tab session when the subtree unmounts, so
+  // switching back can restore them. No-ops if the tab was closed.
+  useEffect(() => {
+    return () => {
+      const saved = savedRef.current;
+      if (!saved) return;
+      useTabStore.getState().updateTabScroll(tabId, {
+        path: prevPathRef.current,
+        offsets: Object.fromEntries(saved),
+      });
+    };
+  }, [tabId]);
 
   return containerRef;
 }
