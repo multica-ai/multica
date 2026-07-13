@@ -37,20 +37,11 @@ WHERE cs.workspace_id = $1 AND cs.creator_id = $2 AND cs.status = 'active'
 ORDER BY (cs.pinned_at IS NOT NULL) DESC, cs.pinned_at DESC, COALESCE(lm.created_at, cs.updated_at) DESC;
 
 -- name: ListAllChatSessionsByCreator :many
--- Unlike ListChatSessionsByCreator this returns archived sessions too (for the
--- "Archived" view), so unread must be forced to 0 for archived rows: archiving
--- deliberately does NOT advance last_read_at (so unarchive can restore the true
--- unread state), but an archived session is read-only and hidden from history,
--- so any residual unread is uncleanable and must not light up any badge. Gating
--- on status here is the single source of truth for all unread surfaces (FAB,
--- sidebar Chat tab, chat-window header) — see MUL-4360.
 SELECT cs.*,
-       CASE WHEN cs.status = 'archived' THEN 0
-            ELSE (SELECT count(*) FROM chat_message m
-                    WHERE m.chat_session_id = cs.id
-                      AND m.role = 'assistant'
-                      AND m.created_at > cs.last_read_at)
-       END::int AS unread_count,
+       (SELECT count(*) FROM chat_message m
+          WHERE m.chat_session_id = cs.id
+            AND m.role = 'assistant'
+            AND m.created_at > cs.last_read_at)::int AS unread_count,
        COALESCE(lm.content, '') AS last_message_content,
        COALESCE(lm.role, '') AS last_message_role,
        lm.created_at AS last_message_at,

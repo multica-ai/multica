@@ -19,6 +19,27 @@ func newLoginTestCmd() *cobra.Command {
 	return cmd
 }
 
+func TestResolveLoginTokenServerURLDefaultsToCloud(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("MULTICA_SERVER_URL", "")
+
+	if got := resolveLoginTokenServerURL(newLoginTestCmd()); got != defaultCloudServerURL {
+		t.Fatalf("resolveLoginTokenServerURL() = %q, want %q", got, defaultCloudServerURL)
+	}
+}
+
+func TestResolveLoginTokenServerURLPrefersConfiguredServer(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("MULTICA_SERVER_URL", "")
+	if err := cli.SaveCLIConfig(cli.CLIConfig{ServerURL: "https://api.example.test/"}); err != nil {
+		t.Fatalf("SaveCLIConfig: %v", err)
+	}
+
+	if got := resolveLoginTokenServerURL(newLoginTestCmd()); got != "https://api.example.test" {
+		t.Fatalf("resolveLoginTokenServerURL() = %q, want configured server", got)
+	}
+}
+
 func TestRunLoginTokenAutoWatchesDiscoveredWorkspaces(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("MULTICA_TOKEN", "")

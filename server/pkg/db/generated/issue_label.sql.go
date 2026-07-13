@@ -134,6 +134,37 @@ func (q *Queries) CreateLabel(ctx context.Context, arg CreateLabelParams) (Issue
 	return i, err
 }
 
+const deleteAgentLabelAssignmentsByAgent = `-- name: DeleteAgentLabelAssignmentsByAgent :exec
+DELETE FROM agent_to_label WHERE agent_id = $1
+`
+
+func (q *Queries) DeleteAgentLabelAssignmentsByAgent(ctx context.Context, agentID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteAgentLabelAssignmentsByAgent, agentID)
+	return err
+}
+
+const deleteAgentLabelAssignmentsByLabel = `-- name: DeleteAgentLabelAssignmentsByLabel :exec
+DELETE FROM agent_to_label WHERE label_id = $1
+`
+
+func (q *Queries) DeleteAgentLabelAssignmentsByLabel(ctx context.Context, labelID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteAgentLabelAssignmentsByLabel, labelID)
+	return err
+}
+
+const deleteIssueLabelAssignmentsByLabel = `-- name: DeleteIssueLabelAssignmentsByLabel :exec
+
+DELETE FROM issue_to_label WHERE label_id = $1
+`
+
+// The resource-label junctions deliberately have no foreign keys. Keeping
+// their cleanup in the same application transaction as the owner deletion
+// avoids database-level cascades with unreviewed locking and audit behavior.
+func (q *Queries) DeleteIssueLabelAssignmentsByLabel(ctx context.Context, labelID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteIssueLabelAssignmentsByLabel, labelID)
+	return err
+}
+
 const deleteLabel = `-- name: DeleteLabel :one
 DELETE FROM issue_label
 WHERE id = $1 AND workspace_id = $2
@@ -152,6 +183,24 @@ func (q *Queries) DeleteLabel(ctx context.Context, arg DeleteLabelParams) (pgtyp
 	var id pgtype.UUID
 	err := row.Scan(&id)
 	return id, err
+}
+
+const deleteSkillLabelAssignmentsByLabel = `-- name: DeleteSkillLabelAssignmentsByLabel :exec
+DELETE FROM skill_to_label WHERE label_id = $1
+`
+
+func (q *Queries) DeleteSkillLabelAssignmentsByLabel(ctx context.Context, labelID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteSkillLabelAssignmentsByLabel, labelID)
+	return err
+}
+
+const deleteSkillLabelAssignmentsBySkill = `-- name: DeleteSkillLabelAssignmentsBySkill :exec
+DELETE FROM skill_to_label WHERE skill_id = $1
+`
+
+func (q *Queries) DeleteSkillLabelAssignmentsBySkill(ctx context.Context, skillID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteSkillLabelAssignmentsBySkill, skillID)
+	return err
 }
 
 const detachLabelFromAgent = `-- name: DetachLabelFromAgent :exec

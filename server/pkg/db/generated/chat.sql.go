@@ -473,12 +473,10 @@ func (q *Queries) LinkChatMessageToTask(ctx context.Context, arg LinkChatMessage
 
 const listAllChatSessionsByCreator = `-- name: ListAllChatSessionsByCreator :many
 SELECT cs.id, cs.workspace_id, cs.agent_id, cs.creator_id, cs.title, cs.session_id, cs.work_dir, cs.status, cs.created_at, cs.updated_at, cs.unread_since, cs.runtime_id, cs.last_read_at, cs.is_agent_intro, cs.pinned_at,
-       CASE WHEN cs.status = 'archived' THEN 0
-            ELSE (SELECT count(*) FROM chat_message m
-                    WHERE m.chat_session_id = cs.id
-                      AND m.role = 'assistant'
-                      AND m.created_at > cs.last_read_at)
-       END::int AS unread_count,
+       (SELECT count(*) FROM chat_message m
+          WHERE m.chat_session_id = cs.id
+            AND m.role = 'assistant'
+            AND m.created_at > cs.last_read_at)::int AS unread_count,
        COALESCE(lm.content, '') AS last_message_content,
        COALESCE(lm.role, '') AS last_message_role,
        lm.created_at AS last_message_at,
@@ -525,13 +523,6 @@ type ListAllChatSessionsByCreatorRow struct {
 	LastMessageKind          string             `json:"last_message_kind"`
 }
 
-// Unlike ListChatSessionsByCreator this returns archived sessions too (for the
-// "Archived" view), so unread must be forced to 0 for archived rows: archiving
-// deliberately does NOT advance last_read_at (so unarchive can restore the true
-// unread state), but an archived session is read-only and hidden from history,
-// so any residual unread is uncleanable and must not light up any badge. Gating
-// on status here is the single source of truth for all unread surfaces (FAB,
-// sidebar Chat tab, chat-window header) — see MUL-4360.
 func (q *Queries) ListAllChatSessionsByCreator(ctx context.Context, arg ListAllChatSessionsByCreatorParams) ([]ListAllChatSessionsByCreatorRow, error) {
 	rows, err := q.db.Query(ctx, listAllChatSessionsByCreator, arg.WorkspaceID, arg.CreatorID)
 	if err != nil {
