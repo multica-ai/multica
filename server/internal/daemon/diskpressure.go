@@ -12,16 +12,16 @@ var freeDiskBytesFunc = freeDiskBytes
 
 func (d *Daemon) diskPressureLoop(ctx context.Context) {
 	if d.cfg.DiskPressureCheckInterval <= 0 || d.cfg.DiskPressureMinFreeBytes <= 0 {
-		d.logger.Info("disk-pressure: disabled")
+		d.diskPressureInfo("disk-pressure: disabled")
 		return
 	}
-	d.logger.Info("disk-pressure: started",
+	d.diskPressureInfo("disk-pressure: started",
 		"interval", d.cfg.DiskPressureCheckInterval,
 		"min_free_bytes", d.cfg.DiskPressureMinFreeBytes,
 	)
 
 	if err := d.guardDiskPressure(ctx, false); err != nil {
-		d.logger.Warn("disk-pressure: initial check failed", "error", err)
+		d.diskPressureWarn("disk-pressure: initial check failed", "error", err)
 	}
 
 	ticker := time.NewTicker(d.cfg.DiskPressureCheckInterval)
@@ -33,7 +33,7 @@ func (d *Daemon) diskPressureLoop(ctx context.Context) {
 			return
 		case <-ticker.C:
 			if err := d.guardDiskPressure(ctx, false); err != nil {
-				d.logger.Warn("disk-pressure: check failed", "error", err)
+				d.diskPressureWarn("disk-pressure: check failed", "error", err)
 			}
 		}
 	}
@@ -45,14 +45,14 @@ func (d *Daemon) guardDiskPressure(ctx context.Context, failClosed bool) error {
 	}
 	freeBytes, totalBytes, err := freeDiskBytesFunc(d.cfg.WorkspacesRoot)
 	if err != nil {
-		d.logger.Warn("disk-pressure: measurement unavailable", "error", err)
+		d.diskPressureWarn("disk-pressure: measurement unavailable", "error", err)
 		return nil
 	}
 	if freeBytes >= d.cfg.DiskPressureMinFreeBytes {
 		return nil
 	}
 
-	d.logger.Warn("disk-pressure: free space below threshold; running GC",
+	d.diskPressureWarn("disk-pressure: free space below threshold; running GC",
 		"free_bytes", freeBytes,
 		"total_bytes", totalBytes,
 		"threshold_bytes", d.cfg.DiskPressureMinFreeBytes,
@@ -61,11 +61,11 @@ func (d *Daemon) guardDiskPressure(ctx context.Context, failClosed bool) error {
 
 	recheckFree, recheckTotal, err := freeDiskBytesFunc(d.cfg.WorkspacesRoot)
 	if err != nil {
-		d.logger.Warn("disk-pressure: remeasure unavailable", "error", err)
+		d.diskPressureWarn("disk-pressure: remeasure unavailable", "error", err)
 		return nil
 	}
 	if recheckFree >= d.cfg.DiskPressureMinFreeBytes {
-		d.logger.Info("disk-pressure: GC recovered enough space",
+		d.diskPressureInfo("disk-pressure: GC recovered enough space",
 			"free_bytes", recheckFree,
 			"total_bytes", recheckTotal,
 			"threshold_bytes", d.cfg.DiskPressureMinFreeBytes,
@@ -77,10 +77,28 @@ func (d *Daemon) guardDiskPressure(ctx context.Context, failClosed bool) error {
 	if failClosed {
 		return err
 	}
-	d.logger.Error("disk-pressure: unable to recover enough space",
+	d.diskPressureError("disk-pressure: unable to recover enough space",
 		"free_bytes", recheckFree,
 		"total_bytes", recheckTotal,
 		"threshold_bytes", d.cfg.DiskPressureMinFreeBytes,
 	)
 	return err
+}
+
+func (d *Daemon) diskPressureInfo(msg string, args ...any) {
+	if d != nil && d.logger != nil {
+		d.logger.Info(msg, args...)
+	}
+}
+
+func (d *Daemon) diskPressureWarn(msg string, args ...any) {
+	if d != nil && d.logger != nil {
+		d.logger.Warn(msg, args...)
+	}
+}
+
+func (d *Daemon) diskPressureError(msg string, args ...any) {
+	if d != nil && d.logger != nil {
+		d.logger.Error(msg, args...)
+	}
 }

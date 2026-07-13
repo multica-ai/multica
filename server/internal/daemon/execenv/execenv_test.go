@@ -3076,8 +3076,9 @@ func TestPrepareCodexCopiesWorkspaceSkillWhenCacheMissing(t *testing.T) {
 	if err != nil {
 		t.Fatalf("copied SKILL.md missing: %v", err)
 	}
-	if string(data) != "body" {
-		t.Fatalf("copied SKILL.md = %q, want %q", data, "body")
+	wantBody := ensureSkillFrontmatter("body", "writing", "Missing shared cache")
+	if string(data) != wantBody {
+		t.Fatalf("copied SKILL.md = %q, want normalized frontmatter %q", data, wantBody)
 	}
 	support, err := os.ReadFile(filepath.Join(dst, "docs", "guide.md"))
 	if err != nil {
