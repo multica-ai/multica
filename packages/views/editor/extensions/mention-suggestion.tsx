@@ -14,6 +14,12 @@ import type { QueryClient } from "@tanstack/react-query";
 import { getCurrentWsId } from "@multica/core/platform";
 import { flattenIssueBuckets, issueKeys } from "@multica/core/issues/queries";
 import { workspaceKeys } from "@multica/core/workspace/queries";
+import {
+  agentListOptions,
+  memberListOptions,
+  skillListOptions,
+  squadListOptions,
+} from "@multica/core/workspace/queries";
 import { useAuthStore } from "@multica/core/auth";
 import { canAssignAgentToIssue } from "@multica/core/permissions";
 import { api } from "@multica/core/api";
@@ -569,6 +575,24 @@ export function createMentionSuggestion(
   // The explicit key is passed into Tiptap Suggestion and reused by the
   // shared popup controller when it dispatches exitSuggestion(view, pluginKey).
   const pluginKey = new PluginKey("mentionSuggestion");
+
+  // Ensure the mentionable-entity caches are warm before the user types `@`.
+  // Without this, buildSyncItems reads from `getQueryData` and produces an
+  // empty result for skill/agent/member/squad/issue until the user has
+  // visited a page that fires those queries — the comment composer is the
+  // first place @support lands for many users, so the empty-cache case is
+  // the common one. ensureQueryData is idempotent and cheap when warm.
+  const ensureCaches = () => {
+    const wsId = getCurrentWsId();
+    if (!wsId) return;
+    void qc.ensureQueryData(skillListOptions(wsId));
+    void qc.ensureQueryData(agentListOptions(wsId));
+    void qc.ensureQueryData(squadListOptions(wsId));
+    void qc.ensureQueryData(memberListOptions(wsId));
+  };
+  // Fire once on factory construction; subsequent mount of the composer
+  // hits a warm cache.
+  ensureCaches();
 
   function buildSyncItems(query: string): MentionItem[] {
     // Read workspace id imperatively because this runs in TipTap factory scope

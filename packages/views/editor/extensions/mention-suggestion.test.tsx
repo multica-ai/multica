@@ -129,6 +129,11 @@ function fakeQc(data: {
       }
       return results;
     },
+    // ensureQueryData is called by createMentionSuggestion to warm the entity
+    // caches (skills/agents/squads/members) on factory construction. The
+    // fake stub treats it as a no-op since tests pre-populate the cache
+    // directly via getQueryData assertions.
+    ensureQueryData: () => Promise.resolve(),
   } as unknown as QueryClient;
 }
 
