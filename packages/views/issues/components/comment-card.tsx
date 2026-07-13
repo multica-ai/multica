@@ -26,7 +26,6 @@ import {
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@multica/ui/components/ui/collapsible";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { ReactionBar } from "@multica/ui/components/common/reaction-bar";
-import { ViewRunButton } from "./view-run-button";
 import { AgentTranscriptDialog } from "../../common/task-transcript/agent-transcript-dialog";
 import { buildTimeline, type TimelineItem } from "../../common/task-transcript/build-timeline";
 import { useAgentTaskForComment } from "../hooks/use-agent-task-for-comment";
@@ -264,43 +263,6 @@ function retryableAgentFailureComment(entry: TimelineEntry): entry is TimelineEn
   );
 }
 
-function ViewRunButtonSlot({
-  issueId,
-  sourceTaskId,
-  agentName,
-  className,
-  viewRunLabel,
-}: {
-  issueId: string;
-  sourceTaskId: string | null;
-  agentName: string | undefined;
-  className?: string;
-  viewRunLabel: string;
-}) {
-  // Sync cache read; no useQuery, no network — must not perturb memoization.
-  const agentTask = useAgentTaskForComment(issueId, sourceTaskId ?? null);
-  if (!agentTask) return null;
-  return (
-    <ViewRunButton
-      agentTask={agentTask}
-      agentName={agentName ?? ""}
-      title={viewRunLabel}
-      className={className}
-    />
-  );
-}
-
-/**
- * Hit-area that surfaces a hover card explaining *why* the View run chip is
- * absent on a comment that *should* have one. Renders only when:
- *   - source_task_id is set (the comment was produced by a run), AND
- *   - the AgentTask cannot be resolved from cache (task was GC'd, the
- *     backfill hasn't reached this row, or the row is in a workspace
- *     scoped out of the cache).
- * Picking a dedicated invisible hit-area (decision c) over card-wide hover
- * keeps the affordance predictable and avoids accidental triggers during
- * scrolling or text selection.
- */
 function TaskCommentRetryButton({
   issueId,
   taskId,
@@ -754,13 +716,6 @@ function CommentRow({
               className="mt-2 pl-12 pr-4"
             />
           )}
-          <ViewRunButtonSlot
-            issueId={issueId}
-            sourceTaskId={entry.source_task_id ?? null}
-            agentName={getActorName(entry.actor_type, entry.actor_id)}
-            className="mt-2 pl-12 pr-4"
-            viewRunLabel={t(($) => $.execution_log.view_run)}
-          />
           <ReactionBar
             reactions={reactions}
             currentUserId={currentUserId}
@@ -1085,13 +1040,6 @@ function CommentCardImpl({
                     className="mt-2 pl-10"
                   />
                 )}
-                <ViewRunButtonSlot
-                  issueId={issueId}
-                  sourceTaskId={entry.source_task_id ?? null}
-                  agentName={getActorName(entry.actor_type, entry.actor_id)}
-                  className="mt-2 pl-10"
-                  viewRunLabel={t(($) => $.execution_log.view_run)}
-                />
                 <ReactionBar
                   reactions={reactions}
                   currentUserId={currentUserId}
