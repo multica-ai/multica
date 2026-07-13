@@ -46,8 +46,8 @@ func TestHeartbeatAckPollsProviderUsage(t *testing.T) {
 		t.Fatalf("read daemon.go: %v", err)
 	}
 
-	if !strings.Contains(string(src), "d.maybeReportProviderUsageWindows(") {
-		t.Fatal("heartbeat ack must poll provider usage windows (FIR-3118); an upstream sync likely removed the Cerebro wiring")
+	if !strings.Contains(string(src), "d.maybeReportProviderUsageWindows(d.recoveryContext(),") {
+		t.Fatal("heartbeat ack must poll provider usage windows on the daemon root context (FIR-3118); a tick-scoped context cancels the provider request")
 	}
 }
 
