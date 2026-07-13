@@ -1,7 +1,7 @@
 "use client";
 
 import { memo, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
-import { CheckCircle2, ChevronRight, ListChevronsDownUp, Copy, Loader2, MoreHorizontal, Pencil, RotateCcw, Trash2 } from "lucide-react";
+import { CheckCircle2, ChevronRight, ListChevronsDownUp, Copy, Loader2, MoreHorizontal, Pencil, RotateCcw, ScrollText, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Card } from "@multica/ui/components/ui/card";
 import { Button } from "@multica/ui/components/ui/button";
@@ -27,8 +27,9 @@ import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@multica/ui
 import { ActorAvatar } from "../../common/actor-avatar";
 import { ReactionBar } from "@multica/ui/components/common/reaction-bar";
 import { ViewRunButton } from "./view-run-button";
+import { AgentTranscriptDialog } from "../../common/task-transcript/agent-transcript-dialog";
+import { buildTimeline, type TimelineItem } from "../../common/task-transcript/build-timeline";
 import { useAgentTaskForComment } from "../hooks/use-agent-task-for-comment";
-import { HoverCard, HoverCardTrigger, HoverCardContent } from "@multica/ui/components/ui/hover-card";
 import { cn } from "@multica/ui/lib/utils";
 import { copyText } from "@multica/ui/lib/clipboard";
 import { useActorName } from "@multica/core/workspace/hooks";
@@ -300,26 +301,6 @@ function ViewRunButtonSlot({
  * keeps the affordance predictable and avoids accidental triggers during
  * scrolling or text selection.
  */
-function GcTooltipSlot({
-  sourceTaskId,
-  className,
-  message,
-}: {
-  sourceTaskId: string | null;
-  className?: string;
-  message: string;
-}) {
-  if (!sourceTaskId) return null;
-  return (
-    <HoverCard>
-      <HoverCardTrigger render={<span className={cn("inline-flex h-4 w-4 cursor-help", className)} aria-label={message} />} />
-      <HoverCardContent side="bottom" sideOffset={6}>
-        {message}
-      </HoverCardContent>
-    </HoverCard>
-  );
-}
-
 function TaskCommentRetryButton({
   issueId,
   taskId,
@@ -568,11 +549,27 @@ function CommentRow({
   const canEditEntry = isOwn || (canModerate && entry.actor_type === "member");
   const canDeleteEntry = isOwn || canModerate;
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const viewRunAgentTask = useAgentTaskForComment(issueId, entry.source_task_id ?? null);
+  const [runTranscriptOpen, setRunTranscriptOpen] = useState(false);
+  const [runTranscriptItems, setRunTranscriptItems] = useState<TimelineItem[] | null>(null);
 
   const reactions = entry.reactions ?? [];
 
+  const handleViewRunClick = useCallback(() => {
+    if (!viewRunAgentTask) return;
+    api
+      .listTaskMessages(viewRunAgentTask.id)
+      .then((msgs) => {
+        setRunTranscriptItems(buildTimeline(msgs as any[]));
+        setRunTranscriptOpen(true);
+      })
+      .catch((err) => {
+        toast.error(err instanceof Error ? err.message : t(($) => $.execution_log.retry_failed));
+      });
+  }, [viewRunAgentTask, t]);
+
   return (
-    <div className="py-1.5 group">
+    <div className="py-1.5">
       {/* Header pins to the timeline's scroll parent within this reply's own
           row box, so a LONG reply keeps its
           author + actions visible while you scroll its body, then releases once
@@ -623,6 +620,15 @@ function CommentRow({
                 <Copy className="h-3.5 w-3.5" />
                 {t(($) => $.comment.copy_action)}
               </DropdownMenuItem>
+              {viewRunAgentTask && (
+                <DropdownMenuItem
+                  onClick={handleViewRunClick}
+                  data-testid="comment-view-run-menu-item"
+                >
+                  <ScrollText className="h-3.5 w-3.5" />
+                  {t(($) => $.execution_log.view_run)}
+                </DropdownMenuItem>
+              )}
               {onResolveToggle && (
                 <>
                   <DropdownMenuSeparator />
@@ -659,6 +665,15 @@ function CommentRow({
               )}
             </DropdownMenuContent>
           </DropdownMenu>
+          {viewRunAgentTask && (
+            <AgentTranscriptDialog
+              open={runTranscriptOpen}
+              onOpenChange={setRunTranscriptOpen}
+              task={viewRunAgentTask}
+              items={runTranscriptItems ?? []}
+              agentName={getActorName(entry.actor_type, entry.actor_id)}
+            />
+          )}
           <DeleteCommentDialog
             open={confirmDelete}
             onOpenChange={setConfirmDelete}
@@ -743,13 +758,8 @@ function CommentRow({
             issueId={issueId}
             sourceTaskId={entry.source_task_id ?? null}
             agentName={getActorName(entry.actor_type, entry.actor_id)}
-            className="mt-2 pl-12 pr-4 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity motion-reduce:transition-none"
+            className="mt-2 pl-12 pr-4"
             viewRunLabel={t(($) => $.execution_log.view_run)}
-          />
-          <GcTooltipSlot
-            sourceTaskId={entry.source_task_id ?? null}
-            className="ml-1"
-            message={t(($) => $.execution_log.view_run_cleaned_up)}
           />
           <ReactionBar
             reactions={reactions}
@@ -798,12 +808,28 @@ function CommentCardImpl({
   const canEditEntry = isOwn || (canModerate && entry.actor_type === "member");
   const canDeleteEntry = isOwn || canModerate;
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const viewRunAgentTask = useAgentTaskForComment(issueId, entry.source_task_id ?? null);
+  const [runTranscriptOpen, setRunTranscriptOpen] = useState(false);
+  const [runTranscriptItems, setRunTranscriptItems] = useState<TimelineItem[] | null>(null);
 
   const allNestedReplies = replies;
 
   const replyCount = allNestedReplies.length;
   const contentPreview = (entry.content ?? "").replace(/\n/g, " ").slice(0, 80);
   const reactions = entry.reactions ?? [];
+
+  const handleViewRunClick = useCallback(() => {
+    if (!viewRunAgentTask) return;
+    api
+      .listTaskMessages(viewRunAgentTask.id)
+      .then((msgs) => {
+        setRunTranscriptItems(buildTimeline(msgs as any[]));
+        setRunTranscriptOpen(true);
+      })
+      .catch((err) => {
+        toast.error(err instanceof Error ? err.message : t(($) => $.execution_log.retry_failed));
+      });
+  }, [viewRunAgentTask, t]);
 
   const isHighlighted = highlightedCommentId === entry.id;
 
@@ -916,6 +942,15 @@ function CommentCardImpl({
                         <Copy className="h-3.5 w-3.5" />
                         {t(($) => $.comment.copy_action)}
                       </DropdownMenuItem>
+                      {viewRunAgentTask && (
+                        <DropdownMenuItem
+                          onClick={handleViewRunClick}
+                          data-testid="comment-view-run-menu-item"
+                        >
+                          <ScrollText className="h-3.5 w-3.5" />
+                          {t(($) => $.execution_log.view_run)}
+                        </DropdownMenuItem>
+                      )}
                       {onResolveToggle && (
                         <>
                           <DropdownMenuSeparator />
@@ -954,6 +989,15 @@ function CommentCardImpl({
                       )}
                     </DropdownMenuContent>
                   </DropdownMenu>
+                  {viewRunAgentTask && (
+                    <AgentTranscriptDialog
+                      open={runTranscriptOpen}
+                      onOpenChange={setRunTranscriptOpen}
+                      task={viewRunAgentTask}
+                      items={runTranscriptItems ?? []}
+                      agentName={getActorName(entry.actor_type, entry.actor_id)}
+                    />
+                  )}
                   <DeleteCommentDialog
                     open={confirmDelete}
                     onOpenChange={setConfirmDelete}
@@ -1045,13 +1089,8 @@ function CommentCardImpl({
                   issueId={issueId}
                   sourceTaskId={entry.source_task_id ?? null}
                   agentName={getActorName(entry.actor_type, entry.actor_id)}
-                  className="mt-2 pl-10 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity motion-reduce:transition-none"
+                  className="mt-2 pl-10"
                   viewRunLabel={t(($) => $.execution_log.view_run)}
-                />
-                <GcTooltipSlot
-                  sourceTaskId={entry.source_task_id ?? null}
-                  className="ml-1"
-                  message={t(($) => $.execution_log.view_run_cleaned_up)}
                 />
                 <ReactionBar
                   reactions={reactions}
