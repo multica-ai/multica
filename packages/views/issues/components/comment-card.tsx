@@ -309,7 +309,7 @@ function TaskCommentRetryButton({
 // Shared edit-attachment state hook
 // ---------------------------------------------------------------------------
 
-function useEditAttachmentState(
+export function useEditAttachmentState(
   issueId: string,
   entry: TimelineEntry,
   onEdit: (commentId: string, content: string, attachmentIds: string[], suppressAgentIds?: string[]) => Promise<void>,
@@ -390,9 +390,28 @@ function useEditAttachmentState(
     clearDraft(draftKey);
   };
 
+  // Persist edit attachments + suppressed choices into the edit draft so a
+  // remount (desktop tab switch / virtualization) can restore them via
+  // startEdit — only into an existing content draft, always writing the
+  // current value (incl. `[]`). See CommentInput for the rationale.
+  useEffect(() => {
+    if (!editing) return;
+    if (useCommentDraftStore.getState().getDraft(draftKey) === undefined) return;
+    setDraft(draftKey, { attachments: pendingAttachments });
+  }, [editing, pendingAttachments, draftKey, setDraft]);
+
+  useEffect(() => {
+    if (!editing) return;
+    if (useCommentDraftStore.getState().getDraft(draftKey) === undefined) return;
+    setDraft(draftKey, { suppressedAgentIds: [...suppressedAgentIds] });
+  }, [editing, suppressedAgentIds, draftKey, setDraft]);
+
   const startEdit = () => {
     cancelledRef.current = false;
-    setContent(getDraft(draftKey)?.content ?? entry.content ?? "");
+    const draft = getDraft(draftKey);
+    setContent(draft?.content ?? entry.content ?? "");
+    setPendingAttachments(draft?.attachments ?? []);
+    setSuppressedAgentIds(new Set(draft?.suppressedAgentIds ?? []));
     setRetainedStandaloneIds(initialStandaloneAttachmentIds(entry));
     setEditing(true);
   };

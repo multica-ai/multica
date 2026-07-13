@@ -6,9 +6,11 @@ import { Button } from "@multica/ui/components/ui/button";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { cn } from "@multica/ui/lib/utils";
 import { useWorkspaceId } from "@multica/core/hooks";
-import { ViewStoreProvider } from "@multica/core/issues/stores/view-store-context";
-import { useIssueViewStoreFactory } from "@multica/core/issues/stores";
-import { getIssueSurfaceViewStore } from "@multica/core/issues/stores/surface-view-store";
+import {
+  ViewStoreProvider,
+  useIssueViewStoreFactory,
+  getIssueSurfaceViewStore,
+} from "@multica/core/issues/stores";
 import { issueScopeKey } from "@multica/core/issues/surface/scope";
 import type { Issue } from "@multica/core/types";
 import { BoardView } from "../components/board-view";

@@ -112,17 +112,20 @@ function ReplyInput({
     setSuppressedAgentIds(new Set(draft?.suppressedAgentIds ?? []));
   }, [draftKey, issueId, parentId]);
 
-  // Persist attachments + suppressed choices (only when a draftKey is present).
+  // Persist attachments + suppressed choices — only when a draftKey is present
+  // AND a content draft already exists (never create a content-less draft).
+  // Always write the current value (incl. `[]`) so clearing a suppression
+  // leaves no stale array to re-apply on remount.
   useEffect(() => {
-    if (draftKey && pendingAttachments.length > 0) {
-      setDraft(draftKey, { attachments: pendingAttachments });
-    }
+    if (!draftKey) return;
+    if (useCommentDraftStore.getState().getDraft(draftKey) === undefined) return;
+    setDraft(draftKey, { attachments: pendingAttachments });
   }, [draftKey, pendingAttachments, setDraft]);
 
   useEffect(() => {
-    if (draftKey && suppressedAgentIds.size > 0) {
-      setDraft(draftKey, { suppressedAgentIds: [...suppressedAgentIds] });
-    }
+    if (!draftKey) return;
+    if (useCommentDraftStore.getState().getDraft(draftKey) === undefined) return;
+    setDraft(draftKey, { suppressedAgentIds: [...suppressedAgentIds] });
   }, [draftKey, suppressedAgentIds, setDraft]);
 
   useEffect(() => {

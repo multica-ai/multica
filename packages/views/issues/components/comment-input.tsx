@@ -93,17 +93,18 @@ function CommentInput({ issueId, onSubmit }: CommentInputProps) {
   }, [draftKey]);
 
   // Persist attachments + suppressed choices so the composer's full state
-  // survives an unmount (desktop tab switch / virtualization scroll-out).
+  // survives an unmount (desktop tab switch / virtualization scroll-out). Only
+  // write INTO an existing content draft — never create a content-less draft
+  // just to record these — and always write the current value (incl. `[]`) so
+  // clearing a suppression leaves no stale array to re-apply on remount.
   useEffect(() => {
-    if (pendingAttachments.length > 0) {
-      setDraft(draftKey, { attachments: pendingAttachments });
-    }
+    if (useCommentDraftStore.getState().getDraft(draftKey) === undefined) return;
+    setDraft(draftKey, { attachments: pendingAttachments });
   }, [pendingAttachments, draftKey, setDraft]);
 
   useEffect(() => {
-    if (suppressedAgentIds.size > 0) {
-      setDraft(draftKey, { suppressedAgentIds: [...suppressedAgentIds] });
-    }
+    if (useCommentDraftStore.getState().getDraft(draftKey) === undefined) return;
+    setDraft(draftKey, { suppressedAgentIds: [...suppressedAgentIds] });
   }, [suppressedAgentIds, draftKey, setDraft]);
 
   useEffect(() => {
