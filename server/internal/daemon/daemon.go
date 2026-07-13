@@ -1573,10 +1573,10 @@ func (d *Daemon) ensureRepoReady(ctx context.Context, workspaceID, repoURL strin
 	//
 	//   - cacheHitOnEntry=true: the repo is already cloned; we still must
 	//     refresh `workspaceState.settings` because the /repo/checkout
-	//     handler reads workspaceCoAuthoredByEnabled right after this and
-	//     the 30s workspaceSyncLoop tick is too slow for a freshly-flipped
-	//     GitHub master switch / `co_authored_by_enabled` toggle to feel
-	//     live (RFC MUL-2414 §4.8; PR #2847 review by Emacs).
+	//     handler reads workspaceCoAuthoredByEnabled right after this. The
+	//     periodic workspace sync deliberately does not refresh repos or
+	//     settings, so this is the point at which a freshly-flipped GitHub
+	//     master switch / `co_authored_by_enabled` toggle becomes live.
 	//
 	//   - cacheHitOnEntry=false but cache hit *after* we acquire the mutex:
 	//     a sibling goroutine on a concurrent cold-miss already refreshed
@@ -1702,8 +1702,10 @@ func (d *Daemon) tryRenewToken(ctx context.Context) {
 
 // workspaceSyncLoop periodically fetches the user's workspaces from the API
 // and registers runtimes for any new ones. A WS connect/reconnect broadcast
-// triggers an immediate sync so runtime/repo changes the server applied during
-// the WS gap are picked up sub-second instead of after the next 30s tick.
+// triggers an immediate sync so workspace and runtime changes the server
+// applied during the WS gap are picked up sub-second instead of after the
+// next 30s tick. Repository bindings and workspace settings refresh on demand
+// when a checkout needs them.
 func (d *Daemon) workspaceSyncLoop(ctx context.Context) {
 	ticker := time.NewTicker(DefaultWorkspaceSyncInterval)
 	defer ticker.Stop()
@@ -1766,14 +1768,6 @@ func (d *Daemon) syncWorkspacesFromAPI(ctx context.Context) error {
 	var removed int
 	for id, name := range apiIDs {
 		if currentIDs[id] {
-			// Already tracked: refresh the cached workspace settings so
-			// feature toggles flipped in the web UI take effect on the next
-			// gated operation without a daemon restart (see RFC MUL-2414 §4.8;
-			// reviewed in PR #2847). refreshWorkspaceRepos covers settings +
-			// repos in a single round trip.
-			if _, err := d.refreshWorkspaceRepos(ctx, id); err != nil {
-				d.logger.Debug("workspace sync: refresh settings failed", "workspace_id", id, "error", err)
-			}
 			// Pick up custom runtime profiles created/edited/disabled via
 			// the web UI or CLI between sync ticks (MUL-3332). Without this,
 			// a profile added on the server would only become a runtime row

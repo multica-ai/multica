@@ -127,10 +127,11 @@ func (d *Daemon) runTaskWakeupConnection(ctx context.Context, runtimeIDs []strin
 	// signalTaskWakeup only wakes idle ClaimTask pollers. In-flight tasks and
 	// the workspace sync loop park on coarse tickers (5s and 30s) that do not
 	// observe the wakeup channel, so anything the server changed during the
-	// WS gap — task cancellation, runtime/repo updates — stays invisible to
-	// them until the next tick. The reconcile broadcaster nudges those loops
-	// to re-check immediately. broadcast() debounces back-to-back calls so a
-	// flapping connection cannot fan out into a request stampede.
+	// WS gap — task cancellation or runtime updates — stays invisible to
+	// them until the next tick. Repository bindings and workspace settings
+	// refresh when a checkout needs them. The reconcile broadcaster nudges
+	// those loops to re-check immediately. broadcast() debounces back-to-back
+	// calls so a flapping connection cannot fan out into a request stampede.
 	if d.reconcile != nil {
 		d.reconcile.broadcast()
 	}
