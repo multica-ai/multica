@@ -60,12 +60,14 @@ function ReplyInput({
   const initialDraft = draftKey
     ? useCommentDraftStore.getState().getDraft(draftKey)
     : undefined;
-  const [content, setContent] = useState(initialDraft ?? "");
+  const [content, setContent] = useState(initialDraft?.content ?? "");
   const setDraft = useCommentDraftStore((s) => s.setDraft);
   const clearDraft = useCommentDraftStore((s) => s.clearDraft);
-  const [isEmpty, setIsEmpty] = useState(!initialDraft?.trim());
+  const [isEmpty, setIsEmpty] = useState(!initialDraft?.content?.trim());
   const [submitting, setSubmitting] = useState(false);
-  const [suppressedAgentIds, setSuppressedAgentIds] = useState<Set<string>>(() => new Set());
+  const [suppressedAgentIds, setSuppressedAgentIds] = useState<Set<string>>(
+    () => new Set(initialDraft?.suppressedAgentIds ?? []),
+  );
   const triggerPreview = useCommentTriggerPreview({ issueId, parentId, content });
   // Attachments uploaded in this composer session — see CommentInput for the
   // rationale (drives both submit-time attachment_ids and editor previews).
@@ -80,7 +82,7 @@ function ReplyInput({
     if (!draftKey) return;
     const flush = () => {
       const md = editorRef.current?.getMarkdown();
-      if (md && md.trim().length > 0) setDraft(draftKey, md);
+      if (md && md.trim().length > 0) setDraft(draftKey, { content: md });
     };
     const onVis = () => { if (document.visibilityState === "hidden") flush(); };
     document.addEventListener("visibilitychange", onVis);
@@ -99,9 +101,29 @@ function ReplyInput({
     return result;
   }, [uploadWithToast, issueId]);
 
+  // Re-hydrate / reset attachments + suppressed choices when the draft target
+  // changes. With a draftKey the state is persisted (survives unmount); without
+  // one (ephemeral reply), it simply resets.
   useEffect(() => {
-    setSuppressedAgentIds(new Set());
-  }, [issueId, parentId]);
+    const draft = draftKey
+      ? useCommentDraftStore.getState().getDraft(draftKey)
+      : undefined;
+    setPendingAttachments(draft?.attachments ?? []);
+    setSuppressedAgentIds(new Set(draft?.suppressedAgentIds ?? []));
+  }, [draftKey, issueId, parentId]);
+
+  // Persist attachments + suppressed choices (only when a draftKey is present).
+  useEffect(() => {
+    if (draftKey && pendingAttachments.length > 0) {
+      setDraft(draftKey, { attachments: pendingAttachments });
+    }
+  }, [draftKey, pendingAttachments, setDraft]);
+
+  useEffect(() => {
+    if (draftKey && suppressedAgentIds.size > 0) {
+      setDraft(draftKey, { suppressedAgentIds: [...suppressedAgentIds] });
+    }
+  }, [draftKey, suppressedAgentIds, setDraft]);
 
   useEffect(() => {
     const visible = new Set(triggerPreview.agents.map((agent) => agent.id));
@@ -181,13 +203,13 @@ function ReplyInput({
         >
           <ContentEditor
             ref={editorRef}
-            defaultValue={initialDraft}
+            defaultValue={initialDraft?.content}
             placeholder={placeholderText}
             onUpdate={(md) => {
               setContent(md);
               setIsEmpty(!md.trim());
               if (draftKey) {
-                if (md.trim().length > 0) setDraft(draftKey, md);
+                if (md.trim().length > 0) setDraft(draftKey, { content: md });
                 else clearDraft(draftKey);
               }
             }}

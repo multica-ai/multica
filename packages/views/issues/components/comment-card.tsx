@@ -357,7 +357,7 @@ function useEditAttachmentState(
   const clearDraft = useCommentDraftStore((s) => s.clearDraft);
 
   const initialValue = editing
-    ? (getDraft(draftKey) ?? entry.content ?? "")
+    ? (getDraft(draftKey)?.content ?? entry.content ?? "")
     : (entry.content ?? "");
 
   useEffect(() => {
@@ -392,7 +392,7 @@ function useEditAttachmentState(
 
   const startEdit = () => {
     cancelledRef.current = false;
-    setContent(getDraft(draftKey) ?? entry.content ?? "");
+    setContent(getDraft(draftKey)?.content ?? entry.content ?? "");
     setRetainedStandaloneIds(initialStandaloneAttachmentIds(entry));
     setEditing(true);
   };
@@ -620,7 +620,7 @@ function CommentRow({
               placeholder={t(($) => $.comment.edit_placeholder)}
               onUpdate={(md) => {
                 edit.setContent(md);
-                if (md.trim().length > 0) edit.setDraft(edit.draftKey, md);
+                if (md.trim().length > 0) edit.setDraft(edit.draftKey, { content: md });
                 else edit.clearDraft(edit.draftKey);
               }}
               onSubmit={edit.saveEdit}
@@ -910,7 +910,7 @@ function CommentCardImpl({
                     placeholder={t(($) => $.comment.edit_placeholder)}
                     onUpdate={(md) => {
                       edit.setContent(md);
-                      if (md.trim().length > 0) edit.setDraft(edit.draftKey, md);
+                      if (md.trim().length > 0) edit.setDraft(edit.draftKey, { content: md });
                       else edit.clearDraft(edit.draftKey);
                     }}
                     onSubmit={edit.saveEdit}

@@ -33,16 +33,20 @@ function CommentInput({ issueId, onSubmit }: CommentInputProps) {
   // button would be disabled even though the editor visibly contains text.
   const draftKey = `new:${issueId}` as const;
   const initialDraft = useCommentDraftStore.getState().getDraft(draftKey);
-  const [content, setContent] = useState(initialDraft ?? "");
-  const [isEmpty, setIsEmpty] = useState(() => !initialDraft?.trim());
+  const [content, setContent] = useState(initialDraft?.content ?? "");
+  const [isEmpty, setIsEmpty] = useState(() => !initialDraft?.content?.trim());
   const [submitting, setSubmitting] = useState(false);
-  const [suppressedAgentIds, setSuppressedAgentIds] = useState<Set<string>>(() => new Set());
+  const [suppressedAgentIds, setSuppressedAgentIds] = useState<Set<string>>(
+    () => new Set(initialDraft?.suppressedAgentIds ?? []),
+  );
   const triggerPreview = useCommentTriggerPreview({ issueId, content });
   // Attachments uploaded in this composer session. Drives both:
   //  - submit-time `attachment_ids` payload (filtered to URLs still in markdown)
   //  - the editor's AttachmentDownloadProvider, so file-card Eye buttons can
   //    resolve text/code/markdown previews that require the attachment id.
-  const [pendingAttachments, setPendingAttachments] = useState<Attachment[]>([]);
+  const [pendingAttachments, setPendingAttachments] = useState<Attachment[]>(
+    () => initialDraft?.attachments ?? [],
+  );
   const { uploadWithToast } = useFileUpload(api);
   const { isDragOver, dropZoneProps } = useFileDropZone({
     onDrop: (files) => files.forEach((f) => editorRef.current?.uploadFile(f)),
@@ -60,7 +64,7 @@ function CommentInput({ issueId, onSubmit }: CommentInputProps) {
   useEffect(() => {
     const flush = () => {
       const md = editorRef.current?.getMarkdown();
-      if (md && md.trim().length > 0) setDraft(draftKey, md);
+      if (md && md.trim().length > 0) setDraft(draftKey, { content: md });
     };
     const onVis = () => { if (document.visibilityState === "hidden") flush(); };
     document.addEventListener("visibilitychange", onVis);
@@ -79,9 +83,28 @@ function CommentInput({ issueId, onSubmit }: CommentInputProps) {
     return result;
   }, [uploadWithToast, issueId]);
 
+  // Re-hydrate attachments + suppressed choices when the target draft changes
+  // (mount, or issue switch on a reused instance). Content hydrates via the
+  // editor's defaultValue.
   useEffect(() => {
-    setSuppressedAgentIds(new Set());
-  }, [issueId]);
+    const draft = useCommentDraftStore.getState().getDraft(draftKey);
+    setPendingAttachments(draft?.attachments ?? []);
+    setSuppressedAgentIds(new Set(draft?.suppressedAgentIds ?? []));
+  }, [draftKey]);
+
+  // Persist attachments + suppressed choices so the composer's full state
+  // survives an unmount (desktop tab switch / virtualization scroll-out).
+  useEffect(() => {
+    if (pendingAttachments.length > 0) {
+      setDraft(draftKey, { attachments: pendingAttachments });
+    }
+  }, [pendingAttachments, draftKey, setDraft]);
+
+  useEffect(() => {
+    if (suppressedAgentIds.size > 0) {
+      setDraft(draftKey, { suppressedAgentIds: [...suppressedAgentIds] });
+    }
+  }, [suppressedAgentIds, draftKey, setDraft]);
 
   useEffect(() => {
     const visible = new Set(triggerPreview.agents.map((agent) => agent.id));
@@ -160,14 +183,14 @@ function CommentInput({ issueId, onSubmit }: CommentInputProps) {
       >
         <ContentEditor
           ref={editorRef}
-          defaultValue={initialDraft}
+          defaultValue={initialDraft?.content}
           placeholder={t(($) => $.comment.leave_comment_placeholder)}
           onUpdate={(md) => {
             setContent(md);
             setIsEmpty(!md.trim());
             // Debounced upstream (debounceMs=100). Persist on every tick so a
             // reload or scroll-out-of-viewport restores work to the keystroke.
-            if (md.trim().length > 0) setDraft(draftKey, md);
+            if (md.trim().length > 0) setDraft(draftKey, { content: md });
             else clearDraft(draftKey);
           }}
           onSubmit={handleSubmit}

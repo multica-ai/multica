@@ -3,10 +3,31 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { fireEvent, screen, waitFor } from "@testing-library/react";
 import type { UploadResult } from "@multica/core/hooks/use-file-upload";
-import { useCommentComposerStore } from "@multica/core/issues/stores";
+import { useCommentComposerStore, useCommentDraftStore } from "@multica/core/issues/stores";
+import type { Attachment } from "@multica/core/types";
 import { renderWithI18n } from "../../test/i18n";
 import { CommentInput } from "./comment-input";
 import { ReplyInput } from "./reply-input";
+
+function makeAttachment(id: string, url: string): Attachment {
+  return {
+    id,
+    workspace_id: "ws-1",
+    issue_id: "issue-1",
+    comment_id: null,
+    chat_session_id: null,
+    chat_message_id: null,
+    uploader_type: "member",
+    uploader_id: "u1",
+    filename: `${id}.png`,
+    url,
+    download_url: url,
+    markdown_url: url,
+    content_type: "image/png",
+    size_bytes: 1,
+    created_at: "2026-01-01T00:00:00Z",
+  };
+}
 
 const uploadWithToast = vi.hoisted(() => vi.fn());
 
@@ -125,6 +146,7 @@ function getSubmitButton(container: HTMLElement): HTMLButtonElement {
 beforeEach(() => {
   uploadWithToast.mockReset();
   localStorage.clear();
+  useCommentDraftStore.setState({ drafts: {} });
   useCommentComposerStore.setState({ sticky: true });
 });
 
@@ -225,6 +247,28 @@ describe("comment composers", () => {
     await waitFor(() => expect(onSubmit).toHaveBeenCalled());
     // Failed send must NOT clear — the box still has content, submit stays live.
     await waitFor(() => expect(getSubmitButton(container)).not.toBeDisabled());
+  });
+
+  it("restores draft attachments on a fresh mount and re-sends attachment_ids", async () => {
+    // Simulate a prior composer session that uploaded an attachment (its URL is
+    // in the body) then unmounted — the desktop tab-switch regression this
+    // externalization fixes. A fresh mount must rebuild attachment_ids.
+    const att = makeAttachment("att-1", "http://x/att-1.png");
+    useCommentDraftStore.getState().setDraft("new:issue-1", {
+      content: "see http://x/att-1.png",
+      attachments: [att],
+    });
+
+    const { container, onSubmit } = renderCommentInput();
+    fireEvent.click(getSubmitButton(container));
+
+    await waitFor(() => {
+      expect(onSubmit).toHaveBeenCalledWith(
+        "see http://x/att-1.png",
+        ["att-1"],
+        undefined,
+      );
+    });
   });
 });
 
