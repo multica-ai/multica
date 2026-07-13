@@ -358,6 +358,7 @@
     "retry_failed": "タスクを再試行できませんでした",
     "transcript_tooltip": "トランスクリプトを表示",
     "view_run": "ランを表示",
+    "view_run_cleaned_up": "このコメントのソースランはクリーンアップされました。",
     "cancel_failed": "タスクをキャンセルできませんでした",
     "trigger_retry": "再試行",
     "trigger_retry_attempt": "再試行 #{{attempt}}",
