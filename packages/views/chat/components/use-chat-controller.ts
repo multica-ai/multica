@@ -308,31 +308,13 @@ export function useChatController(opts?: { isActive?: boolean }) {
   // Auto mark-as-read whenever the user is actively looking at a session with
   // unread state. `isActive` lets the caller say "my surface is on screen":
   // the floating overlay passes `isOpen`, the tab passes `true`.
-  //
-  // The read is deferred by a tick and cancelled on cleanup, so a session that
-  // is only *momentarily* active never gets marked read. This is the fix for
-  // MUL-4360's mount race: `activeSessionId` is persisted, so on a bare `/chat`
-  // navigation the page restores the last session for one frame before its
-  // URL→store effect (which runs AFTER this hook's effects, since the hook is
-  // called first) clears it back to null. Without the defer, that restored-but-
-  // never-opened session was marked read in that gap — its badge vanished
-  // though the user never opened it (right pane still shows "select a chat").
-  // Deferring lets the subsequent activeSessionId change cancel the pending
-  // read via cleanup; the store re-check is a belt-and-suspenders guard. Only a
-  // session that stays active past the tick — a real select, deep link, or
-  // refresh — is read.
   const currentHasUnread =
     sessions.find((s) => s.id === activeSessionId)?.has_unread ?? false;
   useEffect(() => {
     if (!isActive || !activeSessionId) return;
     if (!currentHasUnread) return;
-    const sessionId = activeSessionId;
-    const timer = setTimeout(() => {
-      if (useChatStore.getState().activeSessionId !== sessionId) return;
-      uiLogger.info("auto markRead", { sessionId });
-      markRead.mutate(sessionId);
-    }, 0);
-    return () => clearTimeout(timer);
+    uiLogger.info("auto markRead", { sessionId: activeSessionId });
+    markRead.mutate(activeSessionId);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- markRead ref stable
   }, [isActive, activeSessionId, currentHasUnread]);
 

@@ -199,14 +199,6 @@ export function useSetChatSessionPinned() {
  * `updated_at` so the row re-sorts by activity in whichever view it lands.
  * The matching `chat:session_updated` WS event carries the new status to other
  * tabs/devices — see use-realtime-sync.ts.
- *
- * Archiving also zeroes the row's unread locally so every badge (FAB, sidebar
- * Chat tab, chat-window header) drops it in the same frame the row moves to the
- * Archived view. The backend already forces unread to 0 for archived rows (see
- * ListAllChatSessionsByCreator / MUL-4360); this is the optimistic half so there
- * is no window where the header/sidebar still count a just-archived session
- * before the refetch lands. Unarchive does NOT restore a count here — the true
- * unread state comes back from the server refetch (last_read_at is untouched).
  */
 export function useSetChatSessionArchived() {
   const qc = useQueryClient();
@@ -228,12 +220,7 @@ export function useSetChatSessionArchived() {
         sortChatSessions(
           old.map((s) =>
             s.id === sessionId
-              ? {
-                  ...s,
-                  status: archived ? "archived" : "active",
-                  updated_at: nowIso,
-                  ...(archived ? { unread_count: 0, has_unread: false } : {}),
-                }
+              ? { ...s, status: archived ? "archived" : "active", updated_at: nowIso }
               : s,
           ),
         );
