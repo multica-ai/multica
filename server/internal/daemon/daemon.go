@@ -184,7 +184,7 @@ type Daemon struct {
 	// changes. It stays separate from reconcile because a membership hint only
 	// needs the minimal workspace list, while a WS reconnect also reconciles
 	// runtime profiles that may have changed during the gap.
-	workspaceChanges *reconcileBroadcaster
+	workspaceChanges *workspaceChangeSignal
 
 	// runtimeGoneMu guards runtimeGoneInflight, reregisterNextAttempt, and
 	// reregisterLastCompletedAt. The state lets heartbeat / poller / WS-ack
@@ -276,7 +276,7 @@ func New(cfg Config, logger *slog.Logger) *Daemon {
 		reregisterLastCompletedAt: make(map[string]time.Time),
 		cancelPollInterval:        5 * time.Second,
 		reconcile:                 newReconcileBroadcaster(),
-		workspaceChanges:          newReconcileBroadcaster(),
+		workspaceChanges:          newWorkspaceChangeSignal(),
 	}
 	d.runner = taskRunnerFunc(d.runTask)
 	d.runUpdateFn = d.runUpdate
@@ -1703,8 +1703,6 @@ func (d *Daemon) tryRenewToken(ctx context.Context) {
 	}
 }
 
-var workspaceSyncCoalesceWindow = time.Second
-
 // workspaceSyncLoop reconciles the user's workspace membership set. Daemons
 // with runtimes and account-scoped WS support use a thirty-minute jittered
 // consistency check; daemons talking to older servers retain a five-minute
@@ -1726,7 +1724,6 @@ func (d *Daemon) workspaceSyncLoop(ctx context.Context) {
 	}
 
 	var consecutiveFailures int
-	var lastSuccessfulSync time.Time
 	resetTimer := func() {
 		interval := workspaceSyncBackoff(d.workspaceSyncBaseInterval(), consecutiveFailures)
 		if !timer.Stop() {
@@ -1739,16 +1736,11 @@ func (d *Daemon) workspaceSyncLoop(ctx context.Context) {
 	}
 
 	syncNow := func(reconcileProfiles bool) {
-		if !reconcileProfiles && consecutiveFailures == 0 && !lastSuccessfulSync.IsZero() && time.Since(lastSuccessfulSync) < workspaceSyncCoalesceWindow {
-			resetTimer()
-			return
-		}
 		if err := d.syncWorkspacesFromAPI(ctx, reconcileProfiles); err != nil {
 			consecutiveFailures++
 			d.logger.Debug("workspace sync failed", "error", err)
 		} else {
 			consecutiveFailures = 0
-			lastSuccessfulSync = time.Now()
 		}
 		resetTimer()
 	}
@@ -1763,9 +1755,6 @@ func (d *Daemon) workspaceSyncLoop(ctx context.Context) {
 			}
 			syncNow(true)
 		case <-workspaceChangesCh:
-			if d.workspaceChanges != nil {
-				workspaceChangesCh = d.workspaceChanges.notify()
-			}
 			syncNow(false)
 		case <-timer.C:
 			syncNow(false)

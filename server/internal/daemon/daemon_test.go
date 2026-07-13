@@ -2706,9 +2706,8 @@ func TestWorkspaceSyncLoop_WorkspaceChangeTriggersImmediateSync(t *testing.T) {
 		client:           NewClient(srv.URL),
 		logger:           slog.Default(),
 		workspaces:       make(map[string]*workspaceState),
-		workspaceChanges: newReconcileBroadcaster(),
+		workspaceChanges: newWorkspaceChangeSignal(),
 	}
-	d.workspaceChanges.minBroadcastInterval = 0
 
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
@@ -2728,6 +2727,70 @@ func TestWorkspaceSyncLoop_WorkspaceChangeTriggersImmediateSync(t *testing.T) {
 		<-loopDone
 		t.Fatal("workspace change did not trigger an immediate sync")
 	}
+
+	cancel()
+	<-loopDone
+}
+
+// TestWorkspaceSyncLoop_DoesNotDropChangeAfterSuccessfulSync covers the
+// request-changes race from MUL-4480: a real membership hint arriving within
+// one second of a completed sync must trigger another sync, not be treated as
+// a duplicate of the earlier read and deferred to the 30-minute fallback.
+func TestWorkspaceSyncLoop_DoesNotDropChangeAfterSuccessfulSync(t *testing.T) {
+	t.Parallel()
+
+	var calls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/daemon/workspaces" {
+			http.NotFound(w, r)
+			return
+		}
+		calls.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`[]`))
+	}))
+	t.Cleanup(srv.Close)
+
+	d := &Daemon{
+		client:           NewClient(srv.URL),
+		logger:           slog.Default(),
+		workspaces:       make(map[string]*workspaceState),
+		workspaceChanges: newWorkspaceChangeSignal(),
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	loopDone := make(chan struct{})
+	go func() {
+		defer close(loopDone)
+		d.workspaceSyncLoop(ctx)
+	}()
+
+	waitForCalls := func(want int32) {
+		t.Helper()
+		deadline := time.Now().Add(2 * time.Second)
+		for time.Now().Before(deadline) && calls.Load() < want {
+			time.Sleep(10 * time.Millisecond)
+		}
+		if got := calls.Load(); got < want {
+			t.Fatalf("workspace sync calls = %d, want at least %d", got, want)
+		}
+	}
+
+	d.workspaceChanges.broadcast()
+	waitForCalls(1)
+	deadline := time.Now().Add(time.Second)
+	for !d.reloading.TryLock() {
+		if time.Now().After(deadline) {
+			t.Fatal("first workspace sync did not finish")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	d.reloading.Unlock()
+	// The second edge lands immediately after a successful API read. It
+	// represents a later commit and therefore cannot be coalesced backward.
+	d.workspaceChanges.broadcast()
+	waitForCalls(2)
 
 	cancel()
 	<-loopDone
