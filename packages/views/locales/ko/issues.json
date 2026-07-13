@@ -154,6 +154,7 @@
     "add_issue_tooltip": "이슈 추가",
     "empty_column": "이슈 없음",
     "empty_grouping": "일치하는 이슈가 없습니다",
+    "no_value": "값 없음",
     "ordered_by": "{{field}} 기준으로 정렬된 보드"
   },
   "detail": {

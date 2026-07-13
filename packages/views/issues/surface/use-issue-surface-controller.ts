@@ -20,7 +20,9 @@ import {
   type IssueSurfaceQueryPlan,
 } from "@multica/core/issues/surface/query-plan";
 import type { IssueScope } from "@multica/core/issues/surface/scope";
-import type { IssueDateFilter } from "@multica/core/issues/stores/view-store";
+import type { IssueDateFilter, SortField } from "@multica/core/issues/stores/view-store";
+import { sortIssues } from "../utils/sort";
+import { propertyIdFromViewKey } from "@multica/core/issues/stores/view-store";
 import { useViewStore } from "@multica/core/issues/stores/view-store-context";
 import type { IssueFilters } from "../utils/filter";
 import type { ChildProgress } from "../components/list-row";
@@ -129,6 +131,7 @@ export function useIssueSurfaceController({
   const projectFilters = useViewStore((s) => s.projectFilters);
   const includeNoProject = useViewStore((s) => s.includeNoProject);
   const labelFilters = useViewStore((s) => s.labelFilters);
+  const propertyFilters = useViewStore((s) => s.propertyFilters);
   const agentRunningFilter = useViewStore((s) => s.agentRunningFilter);
   const showSubIssues = useViewStore((s) => s.showSubIssues);
   const cardProperties = useViewStore((s) => s.cardProperties);
@@ -155,13 +158,20 @@ export function useIssueSurfaceController({
     () => issueDateFilterToApiParams(dateFilter),
     [dateFilter],
   );
+  // Custom-property sorts (`property:<id>`) are client-side only — the
+  // server sort enum is fixed, so the query falls back to position order and
+  // the surface lists re-sort below via sortIssues.
+  const propertySortId = propertyIdFromViewKey(sortBy);
   const sort = useMemo<IssueSortParam>(
     () => ({
-      sort_by: sortBy,
-      sort_direction: sortBy !== "position" ? sortDirection : undefined,
+      sort_by: propertySortId
+        ? "position"
+        : (sortBy as Exclude<SortField, `property:${string}`>),
+      sort_direction:
+        !propertySortId && sortBy !== "position" ? sortDirection : undefined,
       ...dateParams,
     }),
-    [dateParams, sortBy, sortDirection],
+    [dateParams, propertySortId, sortBy, sortDirection],
   );
 
   const selection = useCreateIssueSurfaceSelection(
@@ -198,6 +208,7 @@ export function useIssueSurfaceController({
     projectFilters: viewProjectFilters,
     includeNoProject: viewIncludeNoProject,
     labelFilters,
+    propertyFilters,
     agentRunningFilter,
     showSubIssues,
     loadProjects:
@@ -209,6 +220,26 @@ export function useIssueSurfaceController({
     createDefaults: resolvedCreateDefaults,
   });
 
+  // Client-side re-sort for property sorts (flat board/list + grouped board).
+  // Swimlane and gantt call sortIssues themselves.
+  const propertySortedIssues = useMemo(
+    () =>
+      propertySortId
+        ? sortIssues(data.issues, sortBy, sortDirection)
+        : data.issues,
+    [data.issues, propertySortId, sortBy, sortDirection],
+  );
+  const propertySortedAssigneeGroups = useMemo(
+    () =>
+      propertySortId && data.assigneeGroups
+        ? data.assigneeGroups.map((group) => ({
+            ...group,
+            issues: sortIssues(group.issues, sortBy, sortDirection),
+          }))
+        : data.assigneeGroups,
+    [data.assigneeGroups, propertySortId, sortBy, sortDirection],
+  );
+
   return {
     scopeKey,
     projectId,
@@ -216,6 +247,8 @@ export function useIssueSurfaceController({
     viewMode: effectiveViewMode,
     allowGantt: allowedModes.has("gantt") && !!projectId,
     ...data,
+    issues: propertySortedIssues,
+    assigneeGroups: propertySortedAssigneeGroups,
     sort,
     actions,
     selection,

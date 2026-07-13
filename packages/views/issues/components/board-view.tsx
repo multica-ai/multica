@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useCallback, useMemo, useEffect, useRef, memo } from "react";
+import { useQuery } from "@tanstack/react-query";
 import {
   DndContext,
   DragOverlay,
@@ -18,10 +19,14 @@ import type {
   IssueAssigneeGroup,
   IssueStatus,
   Project,
+  IssueProperty,
 } from "@multica/core/types";
 import { useLoadMoreByAssigneeGroup, useLoadMoreByStatus } from "@multica/core/issues/mutations";
 import type { AssigneeGroupedIssuesFilter, IssueSortParam, MyIssuesFilter } from "@multica/core/issues/queries";
 import { useViewStore } from "@multica/core/issues/stores/view-store-context";
+import { propertyIdFromViewKey } from "@multica/core/issues/stores/view-store";
+import { propertyListOptions, useSetIssueProperty, useUnsetIssueProperty } from "@multica/core/properties";
+import { useWorkspaceId } from "@multica/core/hooks";
 import type { IssueGrouping } from "@multica/core/issues/stores/view-store";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { BoardColumn, BOARD_CARD_WIDTH, type BoardColumnGroup } from "./board-column";
@@ -43,6 +48,7 @@ import {
   insertIdByPosition,
   issueMatchesGroup,
   getMoveUpdates,
+  propertyGroupId,
 } from "../utils/drag-utils";
 
 function isStatusGroup(
@@ -57,6 +63,8 @@ function buildGroups(
   grouping: IssueGrouping,
   getActorName: (type: string, id: string) => string,
   noAssigneeLabel: string,
+  groupingProperty: IssueProperty | null,
+  noValueLabel: string,
 ): BoardColumnGroup[] {
   if (grouping === "status") {
     return visibleStatuses.map((status) => ({
@@ -65,6 +73,28 @@ function buildGroups(
       status,
       createData: { status },
     }));
+  }
+
+  // Select-property board: one column per option (definition order) plus a
+  // trailing "No value" column. Empty columns stay visible — they are drop
+  // targets for assigning the value.
+  if (groupingProperty) {
+    const columns: BoardColumnGroup[] = (groupingProperty.config.options ?? []).map(
+      (option) => ({
+        id: propertyGroupId(groupingProperty.id, option.id),
+        title: option.name,
+        propertyId: groupingProperty.id,
+        propertyOptionId: option.id,
+        propertyOptionColor: option.color,
+      }),
+    );
+    columns.push({
+      id: propertyGroupId(groupingProperty.id, null),
+      title: noValueLabel,
+      propertyId: groupingProperty.id,
+      propertyOptionId: null,
+    });
+    return columns;
   }
 
   const groups = new Map<string, BoardColumnGroup>();
@@ -151,11 +181,43 @@ export function BoardView({
   onCreateIssue?: (defaults: IssueCreateDefaults) => void;
 }) {
   const { t } = useT("issues");
-  const grouping = useViewStore((s) => s.grouping);
+  const storeGrouping = useViewStore((s) => s.grouping);
   const sortBy = useViewStore((s) => s.sortBy);
+  const boardWsId = useWorkspaceId();
+  const { data: workspaceProperties = [] } = useQuery(propertyListOptions(boardWsId));
+  const groupingPropertyId = propertyIdFromViewKey(storeGrouping);
+  const groupingProperty = groupingPropertyId
+    ? workspaceProperties.find((p) => p.id === groupingPropertyId && p.type === "select") ?? null
+    : null;
+  // A persisted `property:<id>` grouping whose definition is gone (archived,
+  // deleted, other workspace) falls back to status columns.
+  const grouping: IssueGrouping =
+    groupingPropertyId && !groupingProperty ? "status" : storeGrouping;
+  const setIssuePropertyMutation = useSetIssueProperty();
+  const unsetIssuePropertyMutation = useUnsetIssueProperty();
+  const applyPropertyGroupValue = useCallback(
+    (group: BoardColumnGroup, issueId: string) => {
+      if (group.propertyId === undefined) return;
+      if (group.propertyOptionId === null) {
+        unsetIssuePropertyMutation.mutate({ issueId, propertyId: group.propertyId });
+      } else if (group.propertyOptionId !== undefined) {
+        setIssuePropertyMutation.mutate({
+          issueId,
+          propertyId: group.propertyId,
+          value: group.propertyOptionId,
+        });
+      }
+    },
+    [setIssuePropertyMutation, unsetIssuePropertyMutation],
+  );
   const sortFieldKey = sortBy === "created_at" ? "created" : sortBy;
+  const sortPropertyId = propertyIdFromViewKey(sortBy);
   const sortLabel = sortBy !== "position"
-    ? t(($) => $.board.ordered_by, { field: t(($) => $.display[`sort_${sortFieldKey}` as keyof typeof $.display]) })
+    ? t(($) => $.board.ordered_by, {
+        field: sortPropertyId
+          ? workspaceProperties.find((p) => p.id === sortPropertyId)?.name ?? ""
+          : t(($) => $.display[`sort_${sortFieldKey}` as keyof typeof $.display]),
+      })
     : null;
   const { getActorName } = useActorName();
   const myIssuesOpts = myIssuesScope
@@ -207,8 +269,10 @@ export function BoardView({
         grouping,
         getActorName,
         t(($) => $.filters.no_assignee),
+        groupingProperty,
+        t(($) => $.board.no_value),
       ),
-    [hydratedAssigneeGroups, issues, visibleStatuses, grouping, getActorName, t],
+    [hydratedAssigneeGroups, issues, visibleStatuses, grouping, getActorName, groupingProperty, t],
   );
   const groupIds = useMemo(
     () => new Set(groups.map((group) => group.id)),
@@ -381,6 +445,7 @@ export function BoardView({
           return { ...prev, [activeCol]: fromIds, [overCol]: toIds };
         });
         onMoveIssue(activeId, getMoveUpdates(finalGroup, currentIssue.position), beginSettle());
+        applyPropertyGroupValue(finalGroup, activeId);
         return;
       }
 
@@ -402,8 +467,9 @@ export function BoardView({
       // on error (onError restored the snapshot). Without it a failed move would
       // strand the card at the drop target, since onSettled no longer refetches.
       onMoveIssue(activeId, getMoveUpdates(finalGroup, newPosition), beginSettle());
+      applyPropertyGroupValue(finalGroup, activeId);
     },
-    [groupedIssues, groups, grouping, onMoveIssue, groupIds, groupMap, sortBy, beginSettle, columnsRef, isDraggingRef, setColumns],
+    [groupedIssues, groups, grouping, onMoveIssue, groupIds, groupMap, sortBy, beginSettle, columnsRef, isDraggingRef, setColumns, applyPropertyGroupValue],
   );
 
   return (

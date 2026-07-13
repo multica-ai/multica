@@ -169,6 +169,8 @@ const mockViewState = {
   projectFilters: [] as string[],
   includeNoProject: false,
   labelFilters: [] as string[],
+  propertyFilters: {} as Record<string, string[]>,
+  cardPropertyIds: [] as string[],
   sortBy: "position" as const,
   sortDirection: "asc" as const,
   cardProperties: { priority: true, description: true, assignee: true, dueDate: true, project: true, childProgress: true, labels: true },
@@ -183,6 +185,8 @@ const mockViewState = {
   toggleProjectFilter: vi.fn(),
   toggleNoProject: vi.fn(),
   toggleLabelFilter: vi.fn(),
+  togglePropertyFilter: vi.fn(),
+  toggleCardPropertyId: vi.fn(),
   hideStatus: vi.fn(),
   showStatus: vi.fn(),
   clearFilters: vi.fn(),
@@ -194,6 +198,9 @@ const mockViewState = {
 
 vi.mock("@multica/core/issues/stores/view-store", () => ({
   useClearFiltersOnWorkspaceChange: () => {},
+  PROPERTY_VIEW_PREFIX: "property:",
+  propertyIdFromViewKey: (key: string) =>
+    key.startsWith("property:") ? key.slice("property:".length) : null,
   viewStorePersistOptions: () => ({ name: "test", storage: undefined, partialize: (s: any) => s }),
   mergeViewStatePersisted: (_p: unknown, c: any) => c,
   viewStoreSlice: vi.fn(),

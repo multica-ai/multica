@@ -11,9 +11,21 @@ import { defaultStorage } from "../../platform/storage";
 
 export type ViewMode = "board" | "list" | "gantt" | "swimlane";
 export type GanttZoom = "day" | "week" | "month";
-export type IssueGrouping = "status" | "assignee";
+/**
+ * Board grouping. Besides the two built-ins, a select-type custom property
+ * groups columns by its options via the `property:<definitionId>` form.
+ * Persisted values may reference a since-archived definition — consumers must
+ * fall back to "status" when the definition can't be resolved.
+ */
+export type IssueGrouping = "status" | "assignee" | `property:${string}`;
 export type SwimlaneGrouping = "parent" | "project" | "assignee";
-export type SortField = "position" | "priority" | "start_date" | "due_date" | "created_at" | "title";
+/**
+ * Sort key. `property:<definitionId>` sorts client-side by a custom property
+ * value (number/date types); the server sort param only understands the
+ * static fields, so property sorts fall back to `position` server-side and
+ * re-sort in the surface data hook.
+ */
+export type SortField = "position" | "priority" | "start_date" | "due_date" | "created_at" | "title" | `property:${string}`;
 export type SortDirection = "asc" | "desc";
 export type IssueDateField = "created_at" | "updated_at";
 
@@ -41,7 +53,16 @@ export interface ActorFilterValue {
   id: string;
 }
 
-export const SORT_OPTIONS: { value: SortField; label: string }[] = [
+export const PROPERTY_VIEW_PREFIX = "property:";
+
+export function propertyIdFromViewKey(key: string): string | null {
+  return key.startsWith(PROPERTY_VIEW_PREFIX) ? key.slice(PROPERTY_VIEW_PREFIX.length) : null;
+}
+
+export type StaticSortField = Exclude<SortField, `property:${string}`>;
+export type StaticIssueGrouping = Exclude<IssueGrouping, `property:${string}`>;
+
+export const SORT_OPTIONS: { value: StaticSortField; label: string }[] = [
   { value: "position", label: "Manual" },
   { value: "priority", label: "Priority" },
   { value: "start_date", label: "Start date" },
@@ -50,7 +71,7 @@ export const SORT_OPTIONS: { value: SortField; label: string }[] = [
   { value: "title", label: "Title" },
 ];
 
-export const GROUPING_OPTIONS: { value: IssueGrouping; label: string }[] = [
+export const GROUPING_OPTIONS: { value: StaticIssueGrouping; label: string }[] = [
   { value: "status", label: "Status" },
   { value: "assignee", label: "Assignee" },
 ];
@@ -77,6 +98,13 @@ export interface IssueViewState {
   projectFilters: string[];
   includeNoProject: boolean;
   labelFilters: string[];
+  /**
+   * Custom-property filters: definition id → selected option ids (checkbox
+   * definitions use the pseudo-options "true"/"false"). Empty array = no
+   * filter for that definition; matching is OR within a definition and AND
+   * across definitions, mirroring the other filter groups.
+   */
+  propertyFilters: Record<string, string[]>;
   dateFilter: IssueDateFilter | null;
   // When true, the list only shows issues that currently have at least one
   // agent task in `running` status. Drives the workspace "agents working"
@@ -87,6 +115,8 @@ export interface IssueViewState {
   sortBy: SortField;
   sortDirection: SortDirection;
   cardProperties: CardProperties;
+  /** Custom property definition ids whose values render on board/list cards. */
+  cardPropertyIds: string[];
   // When false, issues that have a parent (sub-issues) are hidden from the
   // board / list / swimlane so users can focus on top-level parent issues.
   // Purely a display filter — it never touches the parent/child relationship.
@@ -115,6 +145,7 @@ export interface IssueViewState {
   toggleProjectFilter: (projectId: string) => void;
   toggleNoProject: () => void;
   toggleLabelFilter: (labelId: string) => void;
+  togglePropertyFilter: (propertyId: string, optionId: string) => void;
   setDateFilter: (filter: IssueDateFilter | null) => void;
   toggleAgentRunningFilter: () => void;
   hideStatus: (status: IssueStatus) => void;
@@ -123,6 +154,7 @@ export interface IssueViewState {
   setSortBy: (field: SortField) => void;
   setSortDirection: (dir: SortDirection) => void;
   toggleCardProperty: (key: keyof CardProperties) => void;
+  toggleCardPropertyId: (propertyId: string) => void;
   toggleShowSubIssues: () => void;
   toggleListCollapsed: (status: IssueStatus) => void;
   setSwimlaneGrouping: (grouping: SwimlaneGrouping) => void;
@@ -143,6 +175,7 @@ export const viewStoreSlice = (set: StoreApi<IssueViewState>["setState"]): Issue
   projectFilters: [],
   includeNoProject: false,
   labelFilters: [],
+  propertyFilters: {},
   dateFilter: null,
   agentRunningFilter: false,
   sortBy: "position",
@@ -157,6 +190,7 @@ export const viewStoreSlice = (set: StoreApi<IssueViewState>["setState"]): Issue
     childProgress: true,
     labels: true,
   },
+  cardPropertyIds: [],
   showSubIssues: true,
   listCollapsedStatuses: [],
   ganttZoom: "week",
@@ -224,6 +258,17 @@ export const viewStoreSlice = (set: StoreApi<IssueViewState>["setState"]): Issue
         ? state.labelFilters.filter((id) => id !== labelId)
         : [...state.labelFilters, labelId],
     })),
+  togglePropertyFilter: (propertyId, optionId) =>
+    set((state) => {
+      const current = state.propertyFilters[propertyId] ?? [];
+      const next = current.includes(optionId)
+        ? current.filter((id) => id !== optionId)
+        : [...current, optionId];
+      const propertyFilters = { ...state.propertyFilters };
+      if (next.length === 0) delete propertyFilters[propertyId];
+      else propertyFilters[propertyId] = next;
+      return { propertyFilters };
+    }),
   setDateFilter: (filter) => set({ dateFilter: filter }),
   toggleAgentRunningFilter: () =>
     set((state) => ({ agentRunningFilter: !state.agentRunningFilter })),
@@ -253,6 +298,7 @@ export const viewStoreSlice = (set: StoreApi<IssueViewState>["setState"]): Issue
       projectFilters: [],
       includeNoProject: false,
       labelFilters: [],
+      propertyFilters: {},
       dateFilter: null,
       agentRunningFilter: false,
     }),
@@ -264,6 +310,12 @@ export const viewStoreSlice = (set: StoreApi<IssueViewState>["setState"]): Issue
         ...state.cardProperties,
         [key]: !state.cardProperties[key],
       },
+    })),
+  toggleCardPropertyId: (propertyId) =>
+    set((state) => ({
+      cardPropertyIds: state.cardPropertyIds.includes(propertyId)
+        ? state.cardPropertyIds.filter((id) => id !== propertyId)
+        : [...state.cardPropertyIds, propertyId],
     })),
   toggleShowSubIssues: () =>
     set((state) => ({ showSubIssues: !state.showSubIssues })),
@@ -311,9 +363,11 @@ export const viewStorePersistOptions = (name: string) => ({
     projectFilters: state.projectFilters,
     includeNoProject: state.includeNoProject,
     labelFilters: state.labelFilters,
+    propertyFilters: state.propertyFilters,
     sortBy: state.sortBy,
     sortDirection: state.sortDirection,
     cardProperties: state.cardProperties,
+    cardPropertyIds: state.cardPropertyIds,
     showSubIssues: state.showSubIssues,
     listCollapsedStatuses: state.listCollapsedStatuses,
     ganttZoom: state.ganttZoom,

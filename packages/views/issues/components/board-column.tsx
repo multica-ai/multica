@@ -48,6 +48,11 @@ export interface BoardColumnGroup {
   status?: IssueStatus;
   assigneeType?: IssueAssigneeType | null;
   assigneeId?: string | null;
+  /** Set when the board is grouped by a select-type custom property. */
+  propertyId?: string;
+  /** Option id for this column; null = the "No value" column. */
+  propertyOptionId?: string | null;
+  propertyOptionColor?: string;
   totalCount?: number;
   createData?: IssueCreateDefaults;
 }
@@ -233,6 +238,23 @@ function BoardGroupHeading({
 }) {
   if (group.status) {
     return <StatusHeading status={group.status} count={count} />;
+  }
+
+  if (group.propertyId !== undefined) {
+    return (
+      <div className="flex min-w-0 items-center gap-2">
+        <span
+          className="size-2.5 shrink-0 rounded-full bg-muted-foreground/30"
+          style={group.propertyOptionColor ? { backgroundColor: group.propertyOptionColor } : undefined}
+        />
+        <span className="truncate text-sm font-medium" title={group.title}>
+          {group.title}
+        </span>
+        <span className="shrink-0 rounded-full bg-background px-1.5 py-0.5 text-[11px] font-medium tabular-nums text-muted-foreground">
+          {count}
+        </span>
+      </div>
+    );
   }
 
   const actorIcon =

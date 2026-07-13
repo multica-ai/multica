@@ -163,6 +163,8 @@ const mockViewState: {
   projectFilters?: string[];
   includeNoProject?: boolean;
   labelFilters?: string[];
+  propertyFilters?: Record<string, string[]>;
+  cardPropertyIds?: string[];
   agentRunningFilter?: boolean;
 } = {
   sortBy: "position",
@@ -183,6 +185,8 @@ const mockViewState: {
   projectFilters: [],
   includeNoProject: false,
   labelFilters: [],
+  propertyFilters: {},
+  cardPropertyIds: [],
   agentRunningFilter: false,
 };
 const mockSetSwimlaneOrder = mockViewState.setSwimlaneOrder as ReturnType<typeof vi.fn>;

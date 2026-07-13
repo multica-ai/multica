@@ -154,6 +154,7 @@
     "add_issue_tooltip": "新建 issue",
     "empty_column": "无 issue",
     "empty_grouping": "没有匹配的 issue",
+    "no_value": "未设置",
     "ordered_by": "按{{field}}排序"
   },
   "detail": {

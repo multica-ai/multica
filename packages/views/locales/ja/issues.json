@@ -154,6 +154,7 @@
     "add_issue_tooltip": "イシューを追加",
     "empty_column": "イシューなし",
     "empty_grouping": "一致するイシューがありません",
+    "no_value": "値なし",
     "ordered_by": "{{field}} 順に並べたボード"
   },
   "detail": {

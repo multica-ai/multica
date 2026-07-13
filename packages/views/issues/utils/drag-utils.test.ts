@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Issue } from "@multica/core/types";
-import { insertIdByPosition } from "./drag-utils";
+import { getIssueGroupId, getMoveUpdates, insertIdByPosition, issueMatchesGroup, propertyGroupId } from "./drag-utils";
 
 function mk(id: string, position: number): Issue {
   return {
@@ -69,5 +69,32 @@ describe("insertIdByPosition", () => {
       "moved",
       "y",
     ]);
+  });
+});
+
+describe("property grouping", () => {
+  const propertyId = "prop-env";
+  const withValue = { id: "A", properties: { [propertyId]: "opt-staging" } } as unknown as Issue;
+  const withoutValue = { id: "B", properties: {} } as unknown as Issue;
+
+  it("getIssueGroupId buckets by option id, no-value issues into the none column", () => {
+    expect(getIssueGroupId(withValue, `property:${propertyId}`)).toBe(
+      propertyGroupId(propertyId, "opt-staging"),
+    );
+    expect(getIssueGroupId(withoutValue, `property:${propertyId}`)).toBe(
+      propertyGroupId(propertyId, null),
+    );
+  });
+
+  it("issueMatchesGroup distinguishes option and no-value columns", () => {
+    const optionColumn = { id: "c1", title: "Staging", propertyId, propertyOptionId: "opt-staging" };
+    const noneColumn = { id: "c2", title: "No value", propertyId, propertyOptionId: null };
+    expect(issueMatchesGroup(withValue, optionColumn)).toBe(true);
+    expect(issueMatchesGroup(withValue, noneColumn)).toBe(false);
+    expect(issueMatchesGroup(withoutValue, noneColumn)).toBe(true);
+  });
+
+  it("getMoveUpdates for property columns only carries position", () => {
+    expect(getMoveUpdates({ id: "c1", title: "Staging", propertyId, propertyOptionId: "opt-staging" }, 5)).toEqual({ position: 5 });
   });
 });

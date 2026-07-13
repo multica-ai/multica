@@ -5,6 +5,7 @@ import {
 } from "@dnd-kit/core";
 import type { Issue, IssueAssigneeType, IssueStatus, UpdateIssueRequest } from "@multica/core/types";
 import type { IssueGrouping } from "@multica/core/issues/stores/view-store";
+import { propertyIdFromViewKey } from "@multica/core/issues/stores/view-store";
 import type { BoardColumnGroup } from "../components/board-column";
 
 export type DragMoveUpdates = Pick<
@@ -30,6 +31,10 @@ export function statusGroupId(status: IssueStatus): string {
   return `status:${status}`;
 }
 
+export function propertyGroupId(propertyId: string, optionId: string | null): string {
+  return `property:${propertyId}:${optionId ?? "none"}`;
+}
+
 export function assigneeGroupId(
   type: IssueAssigneeType | null,
   id: string | null,
@@ -39,6 +44,11 @@ export function assigneeGroupId(
 
 export function getIssueGroupId(issue: Issue, grouping: IssueGrouping): string {
   if (grouping === "status") return statusGroupId(issue.status);
+  const propertyId = propertyIdFromViewKey(grouping);
+  if (propertyId) {
+    const value = issue.properties?.[propertyId];
+    return propertyGroupId(propertyId, typeof value === "string" ? value : null);
+  }
   return assigneeGroupId(issue.assignee_type, issue.assignee_id);
 }
 
@@ -101,6 +111,11 @@ export function findColumn(
 
 export function issueMatchesGroup(issue: Issue, group: BoardColumnGroup): boolean {
   if (group.status) return issue.status === group.status;
+  if (group.propertyId !== undefined) {
+    const value = issue.properties?.[group.propertyId];
+    const optionId = typeof value === "string" ? value : null;
+    return optionId === (group.propertyOptionId ?? null);
+  }
   return (
     (issue.assignee_type ?? null) === (group.assigneeType ?? null) &&
     (issue.assignee_id ?? null) === (group.assigneeId ?? null)
@@ -112,6 +127,9 @@ export function getMoveUpdates(
   position: number,
 ): DragMoveUpdates {
   if (group.status) return { status: group.status, position };
+  // Property columns: the value change is not part of UpdateIssueRequest —
+  // the board applies it through useSetIssueProperty after the position move.
+  if (group.propertyId !== undefined) return { position };
   return {
     assignee_type: group.assigneeType ?? null,
     assignee_id: group.assigneeId ?? null,
