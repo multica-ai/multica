@@ -70,7 +70,7 @@ export function SettingsCard({
   className?: string;
 }) {
   return (
-    <Card className={cn("gap-0 py-0", className)}>
+    <Card className={cn("gap-0 py-0 shadow-none", className)}>
       <CardContent className="divide-y divide-surface-border px-0">
         {children}
       </CardContent>

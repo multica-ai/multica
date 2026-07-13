@@ -139,6 +139,14 @@ describe("WorkspaceTab — automatic updates", () => {
     expect(screen.queryByRole("button", { name: /^Save$/ })).toBeNull();
   });
 
+  it("renders the workspace slug in the shared read-only input control", () => {
+    render(<WorkspaceTab />, { wrapper: I18nWrapper });
+
+    const input = screen.getByRole("textbox", { name: "Slug" }) as HTMLInputElement;
+    expect(input.value).toBe("test-workspace");
+    expect(input.readOnly).toBe(true);
+  });
+
   it("uppercases and strips non-alphanumeric prefix input", async () => {
     const user = setupUser();
     render(<WorkspaceTab />, { wrapper: I18nWrapper });

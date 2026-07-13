@@ -416,9 +416,16 @@ export function WorkspaceTab() {
             label={t(($) => $.workspace.slug_label)}
             size="text"
           >
-              <div className="rounded-lg border border-input bg-muted/50 px-2.5 py-1.5 font-mono text-xs text-muted-foreground">
-                {workspace.slug}
-              </div>
+            <Input
+              type="text"
+              name="workspace-slug"
+              autoComplete="off"
+              spellCheck={false}
+              aria-label={t(($) => $.workspace.slug_label)}
+              value={workspace.slug}
+              readOnly
+              className="bg-muted/50 font-mono text-muted-foreground dark:bg-muted/50"
+            />
           </SettingsRow>
 
           <SettingsRow
