@@ -1,0 +1,908 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ideation: Task Run ↔ Issue Comment 关联与详情入口</title>
+<style>
+  :root {
+    --bg: #fafaf9;
+    --surface: #ffffff;
+    --surface-soft: #f5f5f4;
+    --border: #e7e5e4;
+    --border-strong: #d6d3d1;
+    --text: #1c1917;
+    --text-muted: #57534e;
+    --text-faint: #78716c;
+    --accent: #0f766e;
+    --accent-soft: #ccfbf1;
+    --warn-soft: #fef3c7;
+    --info-soft: #dbeafe;
+    --reject-soft: #fee2e2;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+    font-size: 15px;
+    line-height: 1.65;
+    -webkit-font-smoothing: antialiased;
+  }
+  .container {
+    max-width: 920px;
+    margin: 0 auto;
+    padding: 48px 24px 96px;
+  }
+  h1 { font-size: 28px; font-weight: 700; margin: 0 0 8px; letter-spacing: -0.01em; }
+  h2 { font-size: 20px; font-weight: 700; margin: 48px 0 16px; padding-bottom: 8px; border-bottom: 1px solid var(--border); letter-spacing: -0.005em; }
+  h3 { font-size: 16px; font-weight: 700; margin: 24px 0 8px; }
+  h4 { font-size: 14px; font-weight: 600; margin: 16px 0 6px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.04em; }
+  p { margin: 0 0 14px; }
+  ul, ol { margin: 0 0 16px; padding-left: 24px; }
+  li { margin: 4px 0; }
+  code { font-family: "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace; font-size: 13px; background: var(--surface-soft); padding: 1px 6px; border-radius: 4px; color: var(--text); }
+  pre { background: var(--surface-soft); padding: 14px; border-radius: 6px; overflow-x: auto; font-size: 13px; line-height: 1.5; border: 1px solid var(--border); }
+  strong { color: inherit; font-weight: 600; }
+  em { font-style: normal; color: var(--text-muted); font-size: 13px; }
+
+  /* Eyebrow labels */
+  .eyebrow { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: var(--accent); margin-bottom: 4px; }
+
+  /* Metadata header */
+  .metadata { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 18px 22px; margin-bottom: 32px; }
+  .metadata dl { display: grid; grid-template-columns: 100px 1fr; gap: 6px 12px; margin: 0; }
+  .metadata dt { font-weight: 600; font-size: 13px; color: var(--text-muted); }
+  .metadata dd { margin: 0; font-size: 13px; }
+
+  /* Jump-list */
+  .jump-list { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 14px 20px; margin-bottom: 24px; }
+  .jump-list h3 { margin: 0 0 8px; font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-muted); }
+  .jump-list ol { margin: 0; padding-left: 20px; columns: 1; }
+  .jump-list li { margin: 2px 0; font-size: 14px; }
+  .jump-list a { color: var(--accent); text-decoration: none; }
+  .jump-list a:hover { text-decoration: underline; }
+
+  /* Idea cards */
+  .idea { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 22px 26px; margin: 20px 0; }
+  .idea header { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; margin-bottom: 12px; flex-wrap: wrap; }
+  .idea-title { margin: 0; font-size: 18px; font-weight: 700; }
+  .idea-rank { font-size: 13px; color: var(--text-faint); font-weight: 500; }
+  .idea dl.meta { display: grid; grid-template-columns: 100px 1fr; gap: 4px 12px; margin: 12px 0; font-size: 13px; }
+  .idea dl.meta dt { font-weight: 600; color: var(--text-muted); }
+  .idea dl.meta dd { margin: 0; }
+  .idea section { margin-top: 14px; }
+  .idea .basis-tag { font-weight: 600; font-family: "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace; font-size: 12px; padding: 1px 6px; border-radius: 3px; }
+  .basis-tag.direct { background: var(--accent-soft); color: var(--accent); }
+  .basis-tag.external { background: var(--info-soft); color: #1e40af; }
+  .basis-tag.reasoned { background: var(--warn-soft); color: #92400e; }
+
+  /* Chips for confidence/complexity */
+  .chip { display: inline-block; font-size: 12px; padding: 2px 8px; border-radius: 999px; font-weight: 500; margin-left: 4px; }
+  .chip-conf { background: var(--accent-soft); color: var(--accent); }
+  .chip-cx { background: var(--surface-soft); color: var(--text-muted); border: 1px solid var(--border); }
+  .chip-axis { background: var(--surface-soft); color: var(--text-muted); border: 1px solid var(--border); }
+
+  /* SVG container */
+  .diagram { background: var(--surface-soft); border: 1px solid var(--border); border-radius: 6px; padding: 16px; margin: 16px 0; overflow-x: auto; }
+  .diagram-caption { font-size: 12px; color: var(--text-faint); margin-top: 8px; text-align: center; }
+
+  /* Rejection table */
+  table.reject { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 13px; }
+  table.reject th, table.reject td { text-align: left; padding: 8px 12px; border: 1px solid var(--border); vertical-align: top; }
+  table.reject th { background: var(--surface-soft); font-weight: 600; }
+  table.reject td:nth-child(1) { width: 60px; font-weight: 500; }
+  table.reject td:nth-child(3) { color: var(--text-muted); }
+
+  /* Footer */
+  footer.composition-signal { margin-top: 64px; padding-top: 16px; border-top: 1px solid var(--border); font-size: 12px; color: var(--text-faint); text-align: center; }
+  footer.composition-signal code { font-size: 11px; }
+
+  /* Sidebar reference box */
+  .ref-box { background: var(--surface); border-left: 3px solid var(--accent); padding: 14px 18px; margin: 14px 0; border-radius: 0 4px 4px 0; }
+  .ref-box p:last-child { margin-bottom: 0; }
+</style>
+</head>
+<body>
+<div class="container">
+
+<header>
+  <div class="eyebrow">Ideation Artifact</div>
+  <h1>Task Run ↔ Issue Comment：关联与详情入口</h1>
+  <p><em>在 Multica 的 issue 详情页面，task run 的历史记录位于右侧侧边栏。每次 task run 是否大概率关联到一条 issue comment？若是，是否可把"查看该次 task run 详情"的按钮添加到 comment 的合适位置？</em></p>
+</header>
+
+<div class="metadata">
+  <dl>
+    <dt>日期</dt><dd>2026-07-10</dd>
+    <dt>主题</dt><dd>task-run-comment-linkage</dd>
+    <dt>焦点</dt><dd>从 comment 入口打开 task run 详情</dd>
+    <dt>模式</dt><dd>repo-grounded</dd>
+    <dt>原始候选</dt><dd>47 条（5 个框架）</dd>
+    <dt>去重后</dt><dd>27 条 + 3 条交叉合成 = 30 条</dd>
+    <dt>幸存者</dt><dd>7 条</dd>
+  </dl>
+</div>
+
+<h2 id="grounding-context">Grounding Context</h2>
+
+<p>Multica 中"task run"是 <code>agent_task_queue</code> 的一行；它与 issue comment 之间存在两条方向相反的单向链接，但都不是"一条 comment 对应一个 run"的简单关系。本次接地调查（一次 codebase 扫描 + 5 个 evidence scout + 一次外部研究）揭示了几个关键事实，回答用户的前提：</p>
+
+<ul>
+  <li><strong>run 并不天然对应"一条"comment</strong>。存在两条链：<code>agent_task_queue.trigger_comment_id</code>（带 FK，<code>ON DELETE SET NULL</code>）指向"触发该 run 的 comment"；<code>comment.source_task_id</code>（无 FK，应用层解析）指向"产出该 comment 的 run"。</li>
+  <li><strong>最常见的产物恰好没盖戳</strong>。<code>task.go:1827</code> 的合成成功回退评论传的是空 UUID，而 <code>:1983</code> 的失败系统评论才传 <code>task.ID</code>。<code>issue_child_done.go:303</code> 同样未盖。→ 任何"从 comment 回到 run"的 UI 在最常见的成功评论上失明。</li>
+  <li><strong>三种 run 根本不产生 issue comment</strong>：<code>chat</code>（写 chat_message）、<code>quick_create</code>（仅 inbox）、squad-leader <code>no_action</code>（仅 activity_log）。→ 用户提问的"每次 run"对这些 kind 不成立。</li>
+  <li><strong>当前唯一的评论侧 run 入口是失败按钮</strong>。<code>TaskCommentRetryButton</code> 的守卫 <code>retryableAgentFailureComment</code> 要求 <code>actor_type==="agent"</code> AND <code>comment_type==="system"</code> AND <code>source_task_id</code> 非空——只有失败评论能进入。</li>
+  <li><strong><code>TranscriptButton</code> 与 <code>AgentTranscriptDialog</code> 已与侧边栏解耦</strong>。自门控、纯展示、自管 dialog 状态——可在评论内部直接复用，零后端改动。</li>
+  <li><strong>时间线本就异构</strong>。<code>useIssueTimeline</code> 把 activity 和 comment 交错到 <code>TimelineEntry[]</code>，<code>TimelineItem</code> 联合类型当前三种 kind；新增 kind 在结构上受支持。</li>
+  <li><strong>外部行业共识</strong>：人类/对话式 run 进线程（Copilot @mention、Devin Slack、Linear @Linear），计划/事件驱动自动化进独立流（Jira rules、Linear triage、GitHub Actions）。GitHub Checks 是最强先例——侧栏保全量历史 + 评论放 <code>details_url</code> 风格的 provenance 链接。</li>
+</ul>
+
+<h2 id="topic-axes">Topic Axes</h2>
+<ol>
+  <li><strong>linkage-data-model</strong> — run↔comment 的身份接缝（trigger_comment_id / source_task_id），覆盖缺口，<code>kind</code> 派生而非存储，哪些 run 真的产生 comment。</li>
+  <li><strong>comment-placement</strong> — 入口在评论 UI 哪个位置（正文页脚槽位、头部元数据区、作为新的 typed timeline 条目）。</li>
+  <li><strong>run-detail-reveal</strong> — 详情如何展示（复用 TranscriptButton/AgentTranscriptDialog、内联 Collapsible、hover card、Drawer、新建 run 路由）。</li>
+  <li><strong>run-scope-conditioning</strong> — 哪些 run 值得挂内联链接（issue run vs chat/quick_create/no_action；失败 vs 合成成功 vs CLI 执行评论）。</li>
+  <li><strong>sidebar-inline-bridge</strong> — 侧边栏与评论内联的关系（hybrid provenance、双向 coverage、镜像 TaskCommentCoverage、删除或降级侧边栏）。</li>
+</ol>
+
+<h2 id="ranked-ideas">Ranked Ideas</h2>
+
+<div class="jump-list">
+  <h3>Jump to idea</h3>
+  <ol>
+    <li><a href="#idea-1">为合成成功回退评论补盖 <code>source_task_id</code> — 数据层的 1 行修复</a></li>
+    <li><a href="#idea-2">分阶段 MVP：内联 run 链接 3 阶段路线图</a></li>
+    <li><a href="#idea-3">在 run 主动产出的评论上放一颗低调的 "View run" 按钮</a></li>
+    <li><a href="#idea-4">GitHub Checks 混合设计方向 — 行业验证的双轨架构</a></li>
+    <li><a href="#idea-5">评论内内联 Collapsible transcript — 揭示范式</a></li>
+    <li><a href="#idea-6">双向 TaskCommentCoverage — 桥的薄变厚</a></li>
+    <li><a href="#idea-7">运行丰富时间线 — 架构愿景</a></li>
+  </ol>
+</div>
+
+<article class="idea" id="idea-1">
+  <header>
+    <h3 class="idea-title">1. 为合成成功回退评论补盖 <code>source_task_id</code> — 数据层的 1 行修复</h3>
+    <div><span class="chip chip-axis">linkage-data-model</span><span class="chip chip-conf">95%</span><span class="chip chip-cx">Low</span></div>
+  </header>
+
+  <p><strong>Description：</strong>完成不变量在 <code>task.go:1827</code> 给合成成功回退评论传的是空 UUID（<code>pgtype.UUID{}</code>），而失败系统评论在 <code>:1983</code> 传的是 <code>task.ID</code>。把 <code>:1827</code> 改成 <code>task.ID</code>，并把 <code>issue_child_done.go:303</code> 也一并补盖——一行后端改动 + 前端守卫放宽，让"comment → run"查找覆盖失败 + 成功 + CLI 执行三类评论。这是用户提问前提的最大断层：最常见的"agent 完成了，输出如下"那条评论反而找不到它的 run。</p>
+
+  <div class="diagram">
+    <svg viewBox="0 0 720 220" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Before/after of source_task_id coverage on agent comments">
+      <defs>
+        <style>
+          .lbl { font: 12px -apple-system, "PingFang SC", sans-serif; fill: #1c1917; }
+          .mute { fill: #78716c; }
+          .hdr { font: 600 13px -apple-system, "PingFang SC", sans-serif; fill: #1c1917; }
+          .pill { fill: #ffffff; stroke: #d6d3d1; stroke-width: 1; }
+          .ok { fill: #ccfbf1; stroke: #0f766e; stroke-width: 1; }
+          .ng { fill: #fee2e2; stroke: #b91c1c; stroke-width: 1; }
+          .oktxt { fill: #0f766e; font-weight: 600; font-size: 12px; }
+          .ngtxt { fill: #b91c1c; font-weight: 600; font-size: 12px; }
+        </style>
+      </defs>
+
+      <!-- Headers -->
+      <text class="hdr" x="20" y="30">Before</text>
+      <text class="hdr" x="380" y="30">After</text>
+
+      <!-- BEFORE: three comment types -->
+      <g transform="translate(20,50)">
+        <rect class="ok" x="0" y="0" width="320" height="38" rx="4"/>
+        <text class="lbl" x="14" y="24">失败系统评论 — <tspan class="oktxt">source_task_id = task.ID ✓</tspan></text>
+
+        <rect class="ok" x="0" y="50" width="320" height="38" rx="4"/>
+        <text class="lbl" x="14" y="74">CLI 执行评论 — <tspan class="oktxt">source_task_id = task.ID ✓</tspan></text>
+
+        <rect class="ng" x="0" y="100" width="320" height="38" rx="4"/>
+        <text class="lbl" x="14" y="124">合成成功评论 — <tspan class="ngtxt">source_task_id = ∅ ✗</tspan></text>
+
+        <text class="mute" x="0" y="160">issue_child_done 系统评论 — <tspan class="ngtxt">∅ ✗</tspan></text>
+      </g>
+
+      <!-- Arrow between -->
+      <text x="350" y="110" text-anchor="middle" font-size="20" fill="#78716c">→</text>
+
+      <!-- AFTER: all stamped -->
+      <g transform="translate(380,50)">
+        <rect class="ok" x="0" y="0" width="320" height="38" rx="4"/>
+        <text class="lbl" x="14" y="24">失败系统评论 — <tspan class="oktxt">source_task_id = task.ID ✓</tspan></text>
+
+        <rect class="ok" x="0" y="50" width="320" height="38" rx="4"/>
+        <text class="lbl" x="14" y="74">CLI 执行评论 — <tspan class="oktxt">source_task_id = task.ID ✓</tspan></text>
+
+        <rect class="ok" x="0" y="100" width="320" height="38" rx="4"/>
+        <text class="lbl" x="14" y="124">合成成功评论 — <tspan class="oktxt">source_task_id = task.ID ✓</tspan></text>
+
+        <rect class="ok" x="0" y="150" width="320" height="38" rx="4"/>
+        <text class="lbl" x="14" y="174">issue_child_done — <tspan class="oktxt">source_task_id = task.ID ✓</tspan></text>
+      </g>
+    </svg>
+    <p class="diagram-caption">前后对比：补盖后所有 run 产出的评论都带 <code>source_task_id</code>，comment → run 查找对称完整。</p>
+  </div>
+
+  <dl class="meta">
+    <dt>轴</dt><dd>linkage-data-model</dd>
+    <dt>基础</dt><dd><span class="basis-tag direct">direct</span> 已读 <code>task.go:1827</code> 与 <code>:1983</code> 的对比；迁移 <code>120_comment_source_task_id.up.sql</code> 注释明言"在应用层解析"——但应用层此刻根本没盖。</dd>
+    <dt>信心</dt><dd>95%</dd>
+    <dt>复杂度</dt><dd>Low</dd>
+  </dl>
+
+  <section>
+    <h4>Basis</h4>
+    <p><span class="basis-tag direct">direct</span> <code>server/internal/service/task.go:1827</code> 的 <code>s.createAgentComment(ctx, task.IssueID, task.AgentID, redact.Text(body), "comment", task.TriggerCommentID, pgtype.UUID{})</code>——第 6 个参 <code>sourceTaskID</code> 为空。对比同函数失败路径 <code>:1983</code> 传 <code>task.ID</code>。迁移 <code>server/migrations/120_comment_source_task_id.up.sql:1-8</code> 注释明说"the referenced task can be GC'd independently ... resolved in the application layer"——意味着补盖不需 schema 改动。</p>
+  </section>
+
+  <section>
+    <h4>Rationale</h4>
+    <p>这是整个链路缺口的核心。一旦成功评论也带上 <code>source_task_id</code>，现有的 <code>retryableAgentFailureComment</code> 守卫（<code>comment-card.tsx:254-261</code>）只需放宽对 <code>comment_type</code> 的限制——成功评论会自动获得 run 入口资格。这是杠杆作用最大的一步棋：一条修复同时解锁评论 → run 的全链路识别，无需任何新查询或新组件。回填迁移可一并加上。<strong>同时是 Idea 3 的硬前置</strong>：Idea 3 的按钮承诺"覆盖所有 run 产出的评论"，但若不补盖，"成功评论查不到 run"会让按钮在最常见场景下失明——这是一个直接由 L1 修复决定能否上线的依赖关系。</p>
+  </section>
+
+  <section>
+    <h4>Downsides</h4>
+    <ul>
+      <li>改变完成不变量的写入语义，需团队对"合成评论也是 run 产物"达成共识。</li>
+      <li>回填历史评论需要写迁移脚本（针对已存在的成功评论反向回填 <code>source_task_id</code>）。</li>
+      <li>前端守卫放宽后，需重新审视视觉密度——比失败按钮更多的评论会显示 run 入口。</li>
+    </ul>
+  </section>
+</article>
+
+<article class="idea" id="idea-2">
+  <header>
+    <h3 class="idea-title">2. 分阶段 MVP：内联 run 链接 3 阶段路线图</h3>
+    <div><span class="chip chip-axis">linkage-data-model</span><span class="chip chip-conf">90%</span><span class="chip chip-cx">Low→Medium</span></div>
+  </header>
+
+  <p><strong>Description：</strong>把方案拆成 3 个可独立上线的阶段，每阶段都向前一阶段叠加而非替换。<strong>Phase 1（零后端改动）</strong>：用 <code>parent_id</code> 反查（success 评论的 <code>parent_id</code> = <code>trigger_comment_id</code>，已在 <code>task.go:1793-1794</code> 写明），从已存在的 <code>issueKeys.tasks(issueId)</code> 缓存查到 <code>AgentTask</code>，把 <code>TranscriptButton</code> 放进 retry 槽位。<strong>Phase 2</strong>：补盖 <code>source_task_id</code>（即 Idea 1），覆盖剩余场景，让 Idea 3 的按钮在所有 run 产出评论上落地。<strong>Phase 3</strong>：持久化 <code>kind</code>，加 <code>kind ∈ {comment, direct}</code> 的 gate；新增 <code>GET /api/tasks/:id</code> 让深链可寻址。</p>
+
+  <div class="diagram">
+    <svg viewBox="0 0 760 280" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Three-phase roadmap from MVP to full">
+      <defs>
+        <style>
+          .phase { fill: #ffffff; stroke: #d6d3d1; stroke-width: 1.5; }
+          .phase1 { fill: #ccfbf1; stroke: #0f766e; stroke-width: 1.5; }
+          .phase2 { fill: #dbeafe; stroke: #1e40af; stroke-width: 1.5; }
+          .phase3 { fill: #fef3c7; stroke: #92400e; stroke-width: 1.5; }
+          .ph { font: 700 13px -apple-system, sans-serif; fill: #1c1917; }
+          .ph1 { font: 700 13px -apple-system, sans-serif; fill: #0f766e; }
+          .ph2 { font: 700 13px -apple-system, sans-serif; fill: #1e40af; }
+          .ph3 { font: 700 13px -apple-system, sans-serif; fill: #92400e; }
+          .li { font: 12px -apple-system, "PingFang SC", sans-serif; fill: #1c1917; }
+          .mute { fill: #78716c; font: 11px -apple-system, sans-serif; }
+          .arr { stroke: #78716c; stroke-width: 1.5; fill: none; marker-end: url(#arrow); }
+        </style>
+        <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+          <path d="M 0 0 L 10 5 L 0 10 z" fill="#78716c"/>
+        </marker>
+      </defs>
+
+      <!-- Phase 1 -->
+      <g transform="translate(20,30)">
+        <rect class="phase1" x="0" y="0" width="220" height="220" rx="6"/>
+        <text class="ph1" x="14" y="24">Phase 1 · MVP</text>
+        <text class="mute" x="14" y="40">零后端改动 · 1 周内</text>
+        <text class="li" x="14" y="68">1. parent_id 反查 run</text>
+        <text class="li" x="14" y="90">2. 复用 issueKeys.tasks 缓存</text>
+        <text class="li" x="14" y="112">3. TranscriptButton 入 retry 槽位</text>
+        <text class="li" x="14" y="138" fill="#78716c">成果：失败评论</text>
+        <text class="li" x="14" y="156" fill="#78716c">已有入口；成功率</text>
+        <text class="li" x="14" y="174" fill="#78716c">约 80%（parent_id</text>
+        <text class="li" x="14" y="192" fill="#78716c">能查到的部分）</text>
+      </g>
+
+      <!-- Phase 2 -->
+      <g transform="translate(270,30)">
+        <rect class="phase2" x="0" y="0" width="220" height="220" rx="6"/>
+        <text class="ph2" x="14" y="24">Phase 2 · 数据修复</text>
+        <text class="mute" x="14" y="40">1 行后端 + 回填 · 2 周</text>
+        <text class="li" x="14" y="68">1. task.go:1827 补盖 task.ID</text>
+        <text class="li" x="14" y="90">2. issue_child_done.go 同步</text>
+        <text class="li" x="14" y="112">3. 守卫放宽：任何 source_task_id</text>
+        <text class="li" x="14" y="138" fill="#78716c">成果：所有 run 产出</text>
+        <text class="li" x="14" y="156" fill="#78716c">评论都获得入口；</text>
+        <text class="li" x="14" y="174" fill="#78716c">运行发现率 100%</text>
+      </g>
+
+      <!-- Phase 3 -->
+      <g transform="translate(520,30)">
+        <rect class="phase3" x="0" y="0" width="220" height="220" rx="6"/>
+        <text class="ph3" x="14" y="24">Phase 3 · 完整架构</text>
+        <text class="mute" x="14" y="40">数据 + API · 1-2 月</text>
+        <text class="li" x="14" y="68">1. 持久化 kind 列</text>
+        <text class="li" x="14" y="90">2. kind ∈ {comment,direct} gate</text>
+        <text class="li" x="14" y="112">3. GET /api/tasks/:id</text>
+        <text class="li" x="14" y="134">4. /issues/.../runs/:id 路由</text>
+        <text class="li" x="14" y="160" fill="#78716c">成果：run 一等</text>
+        <text class="li" x="14" y="178" fill="#78716c">可寻址；可深链；</text>
+        <text class="li" x="14" y="196" fill="#78716c">可被外部引用</text>
+      </g>
+
+      <!-- Arrows -->
+      <path class="arr" d="M 240 140 L 268 140"/>
+      <path class="arr" d="M 490 140 L 518 140"/>
+    </svg>
+    <p class="diagram-caption">三阶段路线：每阶段独立可上线、可衡量、可回滚。</p>
+  </div>
+
+  <dl class="meta">
+    <dt>轴</dt><dd>linkage-data-model</dd>
+    <dt>基础</dt><dd><span class="basis-tag direct">direct</span> <code>task.go:1793-1827</code>（parent_id 关系）+ <code>execution-log-section.tsx:70-75</code>（已热缓存）+ <code>transcript-button.tsx:24-44</code>（自门控）。</dd>
+    <dt>信心</dt><dd>90%</dd>
+    <dt>复杂度</dt><dd>Low → Medium</dd>
+  </dl>
+
+  <section>
+    <h4>Basis</h4>
+    <p><span class="basis-tag direct">direct</span> 三阶段均建立在已确认的代码事实上：Phase 1 依赖 <code>task.go:1793-1794</code> 注释（"For comment-triggered tasks, TriggerCommentID threads the fallback under the original comment"）+ <code>:1827</code> 中 <code>parentID = task.TriggerCommentID</code> 的实参 + <code>execution-log-section.tsx:70-75</code> 缓存 + <code>use-realtime-sync.ts:533-567</code> WS 失效。Phase 2 = Idea 1。Phase 3 = Idea 1 之外的 <code>kind</code> 持久化 + R3 路由。</p>
+  </section>
+
+  <section>
+    <h4>Rationale</h4>
+    <p>这是最 actionable 的 phasing 方案：每个阶段独立可上线、可衡量、可回滚。Phase 1 用零后端改动证明产品价值（让产品方在会议上看得见 demo），Phase 2 修数据让 Phase 1 覆盖率从 80% 提到 100%，Phase 3 加架构为后续所有 run 表面（侧边栏、导出、Slack 通知、审计）提供深链基础设施。避免一次性大重构的风险。</p>
+  </section>
+
+  <section>
+    <h4>Downsides</h4>
+    <ul>
+      <li>Phase 1 的 parent_id 反查在 "direct" 分配型 run 上无效（顶层 parent_id 为空），仅覆盖 ~80%。</li>
+      <li>三阶段累计实施周期可能比一次性重构长；需团队对阶段性交付有共识。</li>
+      <li>Phase 3 的 kind 持久化涉及 schema 变更与多 handler 路径。</li>
+    </ul>
+  </section>
+</article>
+
+<article class="idea" id="idea-3">
+  <header>
+    <h3 class="idea-title">3. 在 run 主动产出的评论上放一颗低调的 "View run" 按钮</h3>
+    <div><span class="chip chip-axis">comment-placement</span><span class="chip chip-conf">85%</span><span class="chip chip-cx">Low</span></div>
+  </header>
+
+  <p><strong>Description：</strong>在 run 主动创建的评论上放一颗不抢眼的"View run"按钮——点击复用侧边栏同款 <code>TranscriptButton</code>（自包含、只需 <code>AgentTask</code> + <code>agentName</code>、自管 dialog 状态、懒加载 <code>api.listTaskMessages</code>）打开 <code>AgentTranscriptDialog</code> 模态框。<strong>仅在 comment→run 关联数据能定位时显示</strong>——查不到 run（任务已被 GC 或源数据缺失）则不显示，避免迷茫。位置选择 <code>comment-card.tsx:965-971</code>（root）与 <code>:675-681</code>（reply）已有的 retry 槽位作为低调元数据 chip，与 ReactionBar 同级——这是用户提问的直接答案，零新布局、复用既有设计语言。</p>
+
+  <p><strong>前置依赖（必须先解决）：</strong>此 affordance 在最常见场景下会失明——合成成功评论 <code>task.go:1827</code> 当前传空 <code>sourceTaskID</code>，<code>issue_child_done.go:303</code> 也未盖。要让按钮覆盖率接近 100%，必须先做 Idea 1 的后端数据补盖。</p>
+
+  <div class="diagram">
+    <svg viewBox="0 0 600 320" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Comment card anatomy with view-run button placement">
+      <defs>
+        <style>
+          .card { fill: #ffffff; stroke: #d6d3d1; stroke-width: 1; }
+          .header { fill: #f5f5f4; stroke: #d6d3d1; stroke-width: 1; }
+          .slot { fill: #ccfbf1; stroke: #0f766e; stroke-width: 2; }
+          .body { fill: #fafaf9; }
+          .lbl { font: 12px -apple-system, "PingFang SC", sans-serif; fill: #1c1917; }
+          .mute { font: 11px -apple-system, sans-serif; fill: #78716c; }
+          .btn { fill: #0f766e; }
+          .btntxt { font: 600 11px -apple-system, sans-serif; fill: #ffffff; }
+          .note { font: 11px -apple-system, "PingFang SC", sans-serif; fill: #0f766e; }
+        </style>
+      </defs>
+
+      <!-- Comment card -->
+      <g transform="translate(40,20)">
+        <rect class="card" x="0" y="0" width="520" height="280" rx="8"/>
+
+        <!-- Header row -->
+        <rect class="header" x="0" y="0" width="520" height="40" rx="8"/>
+        <circle cx="22" cy="20" r="10" fill="#d6d3d1"/>
+        <text class="lbl" x="40" y="24">[Actor avatar] agent-name · 2h ago</text>
+
+        <!-- Body -->
+        <rect class="body" x="0" y="40" width="520" height="160"/>
+        <text class="lbl" x="20" y="68">[Comment body — agent's reply, tool output, etc.]</text>
+        <text class="lbl" x="20" y="92">[... continues ...]</text>
+
+        <!-- AttachmentList area -->
+        <text class="mute" x="20" y="158">[AttachmentList if any]</text>
+
+        <!-- THE SLOT — highlighted -->
+        <rect class="slot" x="0" y="170" width="520" height="40" rx="0"/>
+        <rect class="btn" x="20" y="178" width="100" height="24" rx="4"/>
+        <text class="btntxt" x="32" y="194">View run</text>
+        <text class="note" x="130" y="194">← View run / Retry slot (root:965, reply:675)</text>
+
+        <!-- ReactionBar area -->
+        <rect class="body" x="0" y="210" width="520" height="40"/>
+        <text class="mute" x="20" y="232">[ReactionBar — emoji reactions + resolve + collapse]</text>
+
+        <!-- Actions dropdown area -->
+        <text class="mute" x="20" y="266">[Actions dropdown — edit / delete / etc.]</text>
+      </g>
+    </svg>
+    <p class="diagram-caption">"View run" 按钮放进既有 <code>AttachmentList → View/Retry → ReactionBar</code> 顺序的中间槽位。</p>
+  </div>
+
+  <dl class="meta">
+    <dt>轴</dt><dd>comment-placement</dd>
+    <dt>基础</dt><dd><span class="basis-tag direct">direct</span> <code>transcript-button.tsx:24-44</code> 自门控 + <code>comment-card.tsx:965-971, :675-681</code> 既有槽位 + <code>comment-card.tsx:254-261</code> 守卫。</dd>
+    <dt>信心</dt><dd>85%</dd>
+    <dt>复杂度</dt><dd>Low</dd>
+  </dl>
+
+  <section>
+    <h4>Basis</h4>
+    <p><span class="basis-tag direct">direct</span> <code>TranscriptButton</code> props 是 <code>interface TranscriptButtonProps { task: AgentTask; agentName: string; ... }</code>（<code>transcript-button.tsx:24-44</code>），自管 dialog 状态、自行懒加载 <code>api.listTaskMessages</code>。<code>AgentTranscriptDialog</code> 是"pure presentational ... Reusable as-is from inside a comment"（证据 dossier §2）。<code>comment-card.tsx:965-971</code>（root）与 <code>:675-681</code>（reply）已验证可在 <code>AttachmentList</code> 与 <code>ReactionBar</code> 之间插入组件。retry 按钮已在此槽位存在。</p>
+  </section>
+
+  <section>
+    <h4>Rationale</h4>
+    <p>直接回答用户提问：把"查看 run 详情"入口放进 comment 的合适位置。失败的 run 有"重试"，成功的 run 却没有"看看发生了什么"——这是 affordance 的不对称缺失。最小改动：复用既有 <code>TranscriptButton</code>，复用既有槽位，零新布局、零新组件。仅是把守卫从"仅失败"放宽为"任何有 run 的评论"，并把组件换成 <code>TranscriptButton</code> 而非单独的 retry 按钮。</p>
+  </section>
+
+  <section>
+    <h4>Downsides</h4>
+    <ul>
+      <li>依赖 Idea 1 的 source_task_id 补盖才能让按钮覆盖率接近 100%；否则 Phase 1 阶段仍受限于反查（覆盖率 ~80%）。</li>
+      <li>正文字段 <code>comment-card.tsx:1090</code> 的 memo 稳定性策略需确认新 prop 不破坏。</li>
+      <li>"仅在能定位时显示"的策略对用户略反直觉：为何有些评论没有按钮？需配合 hover tooltip 简短解释（"该评论来源 run 已被清理"）以减少困惑。</li>
+    </ul>
+  </section>
+</article>
+
+<article class="idea" id="idea-4">
+  <header>
+    <h3 class="idea-title">4. GitHub Checks 混合设计方向 — 行业验证的双轨架构</h3>
+    <div><span class="chip chip-axis">sidebar-inline-bridge</span><span class="chip chip-conf">80%</span><span class="chip chip-cx">Low</span></div>
+  </header>
+
+  <p><strong>Description：</strong>采用 GitHub Checks 的双轨架构作为本主题的总体设计取向——<strong>不要</strong>把所有 run 强行塞进评论时间线（会污染对话叙事），<strong>也不要</strong>把 run 历史只锁在侧边栏（脱离上下文）。侧边栏保留权威的、可链接的、状态完整的 run 历史（类比 merge box 里的 checks 列表），每条相关评论得到一个 <code>details_url</code> 风格的"查看本次 run"provenance 链接（类比"View deployment"）。对话型 run（@mention）在线程内留痕；调度/自动化型 run（autopilot）留在审计流。</p>
+
+  <div class="diagram">
+    <svg viewBox="0 0 720 360" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="GitHub Checks hybrid model">
+      <defs>
+        <style>
+          .sidebar { fill: #f5f5f4; stroke: #d6d3d1; stroke-width: 1; }
+          .timeline { fill: #ffffff; stroke: #d6d3d1; stroke-width: 1; }
+          .runrow { fill: #ccfbf1; stroke: #0f766e; stroke-width: 1; }
+          .comment { fill: #ffffff; stroke: #d6d3d1; stroke-width: 1; }
+          .provenance { fill: #fef3c7; stroke: #92400e; stroke-width: 1.5; }
+          .lbl { font: 12px -apple-system, "PingFang SC", sans-serif; fill: #1c1917; }
+          .mute { font: 11px -apple-system, sans-serif; fill: #78716c; }
+          .em { font: 700 13px -apple-system, sans-serif; fill: #1c1917; }
+          .pl { font: 600 11px -apple-system, sans-serif; fill: #92400e; }
+        </style>
+      </defs>
+
+      <!-- Layout labels -->
+      <text class="em" x="200" y="22">评论时间线（对话）</text>
+      <text class="em" x="540" y="22">侧边栏（执行历史）</text>
+
+      <!-- Timeline column -->
+      <rect class="timeline" x="20" y="40" width="360" height="290" rx="6"/>
+      <text class="mute" x="32" y="62">[用户 @agent 在评论中]</text>
+
+      <!-- Comment 1 (trigger) -->
+      <g transform="translate(32,76)">
+        <rect class="comment" x="0" y="0" width="336" height="56" rx="4"/>
+        <text class="lbl" x="12" y="22">[User comment — @agent please fix this]</text>
+        <text class="mute" x="12" y="40">trigger_comment_id → run #1</text>
+      </g>
+
+      <!-- Comment 2 (agent reply with provenance) -->
+      <g transform="translate(32,144)">
+        <rect class="comment" x="0" y="0" width="336" height="68" rx="4"/>
+        <text class="lbl" x="12" y="22">[Agent reply — output of run]</text>
+        <rect class="provenance" x="12" y="36" width="160" height="22" rx="11"/>
+        <text class="pl" x="20" y="51">↗ View run → details_url</text>
+        <text class="mute" x="180" y="51">source_task_id</text>
+      </g>
+
+      <!-- Comment 3 -->
+      <g transform="translate(32,224)">
+        <rect class="comment" x="0" y="0" width="336" height="56" rx="4"/>
+        <text class="lbl" x="12" y="22">[User follow-up — thanks!]</text>
+        <text class="mute" x="12" y="40">[No run link — not agent output]</text>
+      </g>
+
+      <!-- Sidebar column -->
+      <rect class="sidebar" x="420" y="40" width="280" height="290" rx="6"/>
+      <text class="mute" x="432" y="62">ExecutionLogSection · 完整历史</text>
+
+      <!-- Run row 1 (authoritative) -->
+      <g transform="translate(432,80)">
+        <rect class="runrow" x="0" y="0" width="256" height="56" rx="4"/>
+        <text class="lbl" x="12" y="20">▶ run #1 — completed 2h</text>
+        <text class="mute" x="12" y="36">trigger_summary: "@agent please fix"</text>
+        <text class="mute" x="12" y="50">TaskCommentCoverage: 2 comments</text>
+      </g>
+
+      <!-- Run row 2 (authoritative) -->
+      <g transform="translate(432,148)">
+        <rect class="runrow" x="0" y="0" width="256" height="56" rx="4"/>
+        <text class="lbl" x="12" y="20">⏸ run #2 — running</text>
+        <text class="mute" x="12" y="36">trigger_summary: autopilot sweep</text>
+      </g>
+
+      <!-- Run row 3 (failed) -->
+      <g transform="translate(432,216)">
+        <rect class="runrow" x="0" y="0" width="256" height="56" rx="4"/>
+        <text class="lbl" x="12" y="20">✕ run #3 — failed 1d</text>
+        <text class="mute" x="12" y="36">"permission denied reading file"</text>
+      </g>
+
+      <text class="mute" x="432" y="312">[+ history …]</text>
+
+      <!-- Cross-link annotation -->
+      <text class="mute" x="180" y="350" text-anchor="middle">provenance 链接把两侧缝合：comment 知道哪个 run 产生了它，sidebar 知道哪些 comment 被它覆盖</text>
+    </svg>
+    <p class="diagram-caption">GitHub Checks 双轨：侧边栏是权威历史，评论带 provenance 链接。</p>
+  </div>
+
+  <dl class="meta">
+    <dt>轴</dt><dd>sidebar-inline-bridge</dd>
+    <dt>基础</dt><dd><span class="basis-tag external">external</span> GitHub Checks（<code>details_url</code> + 可选 annotation comment）+ 行业共识（Copilot 内联 vs Jira/Linear 审计流）。</dd>
+    <dt>信心</dt><dd>80%</dd>
+    <dt>复杂度</dt><dd>Low（方向而非功能）</dd>
+  </dl>
+
+  <section>
+    <h4>Basis</h4>
+    <p><span class="basis-tag external">external</span> GitHub Checks API（<code>details_url</code> + <code>checks run</code> 注释）的双轨设计已被数千 GitHub 应用验证。行业共识：人类/对话式 run（Copilot @mention、Devin Slack、Linear @Linear）进线程，调度/事件驱动自动化（Jira rules、Linear triage、GitHub Actions）进独立流。<span class="basis-tag reasoned">reasoned</span> 当前系统已经是侧栏 = 历史、评论 = 对话的事实双轨——只是缺 provenance 链接把两者缝起来。这不是重构，而是增量。</p>
+  </section>
+
+  <section>
+    <h4>Rationale</h4>
+    <p>这是本主题的总体设计取向。一旦团队接受这个方向：后续所有相关讨论（Idea 5/6/7）都有共同的参照系，避免在"加按钮 vs 搬数据"之间反复横跳。这是 lowest-risk、highest-conviction 的方向性决策——不动架构、不改 UX 范式，只补一条链接。同时也是保护评论叙事不被破坏的唯一现实路径。</p>
+  </section>
+
+  <section>
+    <h4>Downsides</h4>
+    <ul>
+      <li>这是方向性决策而非具体功能，需团队对"不要把 run 全搬进评论"达成共识。</li>
+      <li>要求所有具体实施都尊重双轨边界——未来若有人想"全进时间线"，会被方向性拒绝。</li>
+      <li>侧边栏的次要地位意味着其 UI 质量不能被忽视，否则仍会失修。</li>
+    </ul>
+  </section>
+</article>
+
+<article class="idea" id="idea-5">
+  <header>
+    <h3 class="idea-title">5. 评论内内联 Collapsible transcript — 揭示范式</h3>
+    <div><span class="chip chip-axis">run-detail-reveal</span><span class="chip chip-conf">85%</span><span class="chip chip-cx">Medium</span></div>
+  </header>
+
+  <p><strong>Description：</strong>当前 <code>AgentTranscriptDialog</code> 是近全屏模态（<code>!max-w-4xl !w-[calc(100vw-4rem)]</code>）。在评论正文下方挂一个低存在感的"显示执行细节"折叠块（chat 已有 <code>FailureBubble</code> 与 <code>OuterProcessFold</code> 同款 <code>Collapsible</code>），默认收起，展开后用 <code>buildTimeline</code> 渲染压缩过的 tool/thinking 流。模态留给深度复盘；inline 折叠给"快速确认"。把"reveal 强度"和"run 复杂度"对齐。</p>
+
+  <div class="diagram">
+    <svg viewBox="0 0 600 380" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Comment card with collapsible transcript inline">
+      <defs>
+        <style>
+          .card { fill: #ffffff; stroke: #d6d3d1; stroke-width: 1; }
+          .collapsible { fill: #f5f5f4; stroke: #d6d3d1; stroke-width: 1; }
+          .expanded { fill: #fafaf9; stroke: #d6d3d1; stroke-width: 1; stroke-dasharray: 3 2; }
+          .step { fill: #ffffff; stroke: #d6d3d1; stroke-width: 1; }
+          .lbl { font: 12px -apple-system, "PingFang SC", sans-serif; fill: #1c1917; }
+          .mute { font: 11px -apple-system, sans-serif; fill: #78716c; }
+          .chev { font: 14px -apple-system, sans-serif; fill: #78716c; }
+          .stepn { font: 600 10px -apple-system, sans-serif; fill: #57534e; }
+        </style>
+      </defs>
+
+      <!-- Card -->
+      <rect class="card" x="40" y="20" width="520" height="340" rx="8"/>
+      <text class="mute" x="56" y="42">[Avatar] agent-name · 2h ago</text>
+
+      <!-- Comment body -->
+      <text class="lbl" x="56" y="74">[Agent reply body — the synthesized output]</text>
+      <text class="lbl" x="56" y="92">[... continues ...]</text>
+
+      <!-- Collapsed state of inline transcript -->
+      <g transform="translate(56,116)">
+        <rect class="collapsible" x="0" y="0" width="488" height="36" rx="4"/>
+        <text class="chev" x="14" y="24">▶</text>
+        <text class="lbl" x="36" y="24">执行细节 — 12 个步骤，3 个工具调用，1 次重试</text>
+      </g>
+
+      <!-- Below: expanded preview to show the shape -->
+      <g transform="translate(56,170)">
+        <text class="mute" x="0" y="0">展开后（示意）：</text>
+        <rect class="expanded" x="0" y="12" width="488" height="160" rx="4"/>
+        <rect class="step" x="10" y="22" width="468" height="28" rx="3"/>
+        <text class="stepn" x="20" y="40">01</text>
+        <text class="lbl" x="50" y="40">read_file(path="/usr/foo.txt") → 1024 bytes</text>
+
+        <rect class="step" x="10" y="56" width="468" height="28" rx="3"/>
+        <text class="stepn" x="20" y="74">02</text>
+        <text class="lbl" x="50" y="74">think — analyzing diff for breaking changes</text>
+
+        <rect class="step" x="10" y="90" width="468" height="28" rx="3"/>
+        <text class="stepn" x="20" y="108">03</text>
+        <text class="lbl" x="50" y="108">edit_file(path=…, old=…, new=…) → ok</text>
+
+        <text class="mute" x="20" y="142">[… 9 more steps …]</text>
+      </g>
+    </svg>
+    <p class="diagram-caption">内联 Collapsible transcript：默认收起、点击展开；不离开评论上下文。</p>
+  </div>
+
+  <dl class="meta">
+    <dt>轴</dt><dd>run-detail-reveal</dd>
+    <dt>基础</dt><dd><span class="basis-tag direct">direct</span> <code>chat-message-list.tsx:476-490</code> FailureBubble + <code>:554-590</code> OuterProcessFold 均有 Collapsible precedent；<code>build-timeline.ts:5-13</code> buildTimeline 是纯函数。</dd>
+    <dt>信心</dt><dd>85%</dd>
+    <dt>复杂度</dt><dd>Medium</dd>
+  </dl>
+
+  <section>
+    <h4>Basis</h4>
+    <p><span class="basis-tag direct">direct</span> Chat 已经有 3 处 inline collapsible precedent：<code>chat-message-list.tsx:476-490</code> FailureBubble 的"Show details"（chevron + muted trigger → &lt;pre&gt; 原始错误）、<code>:554-590</code> OuterProcessFold（外层"N steps"折叠 + 内层逐行独立 toggle）。三处均复用 <code>@multica/ui/components/ui/collapsible</code>。<code>build-timeline.ts:5-13</code> 的 <code>buildTimeline</code> 是纯函数，可独立喂任意消息流。<code>agent-transcript-dialog.tsx:479-481</code> 是近全屏模态。</p>
+  </section>
+
+  <section>
+    <h4>Rationale</h4>
+    <p>模态 = 上下文切换。对短 run，用户要的是"它调了哪些工具/有没有报错"——一个 inline 折叠就够，不必把人从对话流里拽走。这正是 chat 已验证的模式（chat 不用 TranscriptButton，而是 <code>TimelineView</code> 内联）。把同一模式搬到 issue 评论，把 reveal 强度与 run 复杂度对齐：轻量 inline + 可选深度模态。同时让 chat 和 issue 共享同一揭示原语。</p>
+  </section>
+
+  <section>
+    <h4>Downsides</h4>
+    <ul>
+      <li>评论卡片高度可变（展开后撑高），需与 <code>comment-card.tsx:1090</code> memo 稳定性策略协调。</li>
+      <li>对长 run 的 transcript 折叠后仍是长列表——可能需内层逐行折叠（如 OuterProcessFold 那样）。</li>
+      <li>深度复盘场景仍需保留模态作为补充（不是取代）。</li>
+    </ul>
+  </section>
+</article>
+
+<article class="idea" id="idea-6">
+  <header>
+    <h3 class="idea-title">6. 双向 TaskCommentCoverage — 桥的薄变厚</h3>
+    <div><span class="chip chip-axis">sidebar-inline-bridge</span><span class="chip chip-conf">85%</span><span class="chip chip-cx">Medium</span></div>
+  </header>
+
+  <p><strong>Description：</strong>侧边栏的 <code>TaskCommentCoverage</code>（<code>execution-log-section.tsx:482-508</code>）计算 run 覆盖了多少评论（"Includes N comments"），但评论侧没有任何反向信号。添加一个镜像 chip："属于一次包含 N 条评论的 run"（当 run 涵盖 &gt;1 条评论时），点击滚到侧边栏中的该 run 并高亮。关闭循环：侧边栏和评论时间线成为同一个 run↔comment 图的两个视图，每个都可导航到另一个。</p>
+
+  <div class="diagram">
+    <svg viewBox="0 0 720 320" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Bidirectional coverage between sidebar runs and comments">
+      <defs>
+        <style>
+          .arrow { stroke: #0f766e; stroke-width: 2; fill: none; marker-end: url(#ah); }
+          .arrowrev { stroke: #92400e; stroke-width: 2; fill: none; marker-end: url(#ar); stroke-dasharray: 4 3; }
+          .comment { fill: #ffffff; stroke: #d6d3d1; stroke-width: 1; }
+          .runrow { fill: #ccfbf1; stroke: #0f766e; stroke-width: 1; }
+          .merged { fill: #fef3c7; stroke: #92400e; stroke-width: 1.5; }
+          .lbl { font: 12px -apple-system, "PingFang SC", sans-serif; fill: #1c1917; }
+          .mute { font: 11px -apple-system, sans-serif; fill: #78716c; }
+          .chip { font: 600 10px -apple-system, sans-serif; fill: #92400e; }
+        </style>
+        <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+          <path d="M 0 0 L 10 5 L 0 10 z" fill="#0f766e"/>
+        </marker>
+        <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+          <path d="M 0 0 L 10 5 L 0 10 z" fill="#92400e"/>
+        </marker>
+      </defs>
+
+      <!-- Comments column -->
+      <text class="lbl" x="20" y="22" font-weight="700">评论时间线</text>
+      <g transform="translate(20,40)">
+        <rect class="comment" x="0" y="0" width="240" height="48" rx="4"/>
+        <text class="lbl" x="12" y="20">[User @agent #1 — first trigger]</text>
+        <text class="mute" x="12" y="36">parent_id = root</text>
+      </g>
+      <g transform="translate(20,100)">
+        <rect class="comment merged" x="0" y="0" width="240" height="48" rx="4"/>
+        <text class="lbl" x="12" y="20">[User @agent #2 — merged into same run]</text>
+        <text class="chip" x="12" y="40">↗ 属于 run #5（3 条评论）</text>
+      </g>
+      <g transform="translate(20,160)">
+        <rect class="comment" x="0" y="0" width="240" height="48" rx="4"/>
+        <text class="lbl" x="12" y="20">[User @agent #3 — merged]</text>
+        <text class="chip" x="12" y="40">↗ 属于 run #5</text>
+      </g>
+      <g transform="translate(20,220)">
+        <rect class="comment" x="0" y="0" width="240" height="48" rx="4"/>
+        <text class="lbl" x="12" y="20">[Agent reply — output of run #5]</text>
+        <text class="chip" x="12" y="40">↗ run #5 · 查看详情</text>
+      </g>
+
+      <!-- Sidebar -->
+      <text class="lbl" x="500" y="22" font-weight="700">侧边栏 run 行</text>
+      <g transform="translate(440,120)">
+        <rect class="runrow" x="0" y="0" width="260" height="80" rx="4"/>
+        <text class="lbl" x="12" y="22">▶ run #5 · completed</text>
+        <text class="mute" x="12" y="40">3 个触发器合并：</text>
+        <text class="mute" x="12" y="58">· [comment #1] @agent #1</text>
+        <text class="mute" x="12" y="74">· [comment #2, #3] 合并触发器</text>
+      </g>
+
+      <!-- Forward arrows (sidebar → comment) -->
+      <path class="arrow" d="M 440 144 C 380 144, 360 124, 270 124"/>
+      <path class="arrow" d="M 440 156 C 380 156, 360 184, 270 184"/>
+      <path class="arrow" d="M 440 168 C 380 168, 360 244, 270 244"/>
+
+      <!-- Reverse arrow (comment → sidebar, on hover) -->
+      <path class="arrowrev" d="M 270 124 C 340 100, 380 140, 440 156"/>
+      <text class="chip" x="330" y="84">hover 反向高亮</text>
+    </svg>
+    <p class="diagram-caption">双向桥：实线 = TaskCommentCoverage（sidebar 已存在）；虚线 = 镜像 chip + 跨导航（新增）。</p>
+  </div>
+
+  <dl class="meta">
+    <dt>轴</dt><dd>sidebar-inline-bridge</dd>
+    <dt>基础</dt><dd><span class="basis-tag direct">direct</span> <code>execution-log-section.tsx:482-508</code> 已用 <code>trigger_comment_id + coalesced_comment_ids + delivered_comment_ids</code> 计算覆盖；<code>MergeCommentIntoPendingTask</code>（<code>agent.sql:821-828</code>）已把旧 trigger 折进 <code>coalesced_comment_ids</code>。</dd>
+    <dt>信心</dt><dd>85%</dd>
+    <dt>复杂度</dt><dd>Medium</dd>
+  </dl>
+
+  <section>
+    <h4>Basis</h4>
+    <p><span class="basis-tag direct">direct</span> <code>TaskCommentCoverage</code> 实现：<code>plannedCommentIds = [task.trigger_comment_id, ...(task.coalesced_comment_ids ?? [])]</code>，claim 后用 <code>delivered_comment_ids</code>，<code>commentIds.size &lt;= 1</code> 时返回 null（<code>execution-log-section.tsx:489-501</code>）。sidebar dossier §10 明言"Coverage chip unidirectional: run→comment-IDs on the run row; no reverse 'covered by run X' on comments"。反向查找可通过同一 <code>listTasksByIssue</code> 缓存计算——数据已存在于评论卡片可访问的缓存中。</p>
+  </section>
+
+  <section>
+    <h4>Rationale</h4>
+    <p>合并/折叠是用户最容易困惑的场景之一："我连发了三条 @agent，怎么只有一个 agent 在动？"答案（被合并成一次 run）只显示在侧栏那行的小 chip 里，而用户此刻正盯着的评论上毫无提示。双向镜像把"批量 run"这个事实推到用户视线所在的位置，而不是要求用户去侧栏反向推理。跨表面导航（评论 → 侧栏滚动/高亮）关闭了一个完整的循环。一旦实现双向，"悬停评论时高亮运行"或"点击侧栏 → 滚动到触发评论"都是廉价的扩展。</p>
+  </section>
+
+  <section>
+    <h4>Downsides</h4>
+    <ul>
+      <li>跨表面导航（评论 → 侧栏滚动/高亮）是新的交互模式，需用户体验测试。</li>
+      <li>评论侧 chip 的视觉密度需控制，避免在长线程评论中视觉噪音。</li>
+      <li>反向 chip 仅在 run 涵盖 &gt;1 条评论时显示（与现有 chip 隐藏条件对称）—— 信息密度反而低于 sidebar。</li>
+    </ul>
+  </section>
+</article>
+
+<article class="idea" id="idea-7">
+  <header>
+    <h3 class="idea-title">7. 运行丰富时间线 — 架构愿景</h3>
+    <div><span class="chip chip-axis">run-scope-conditioning</span><span class="chip chip-conf">75%</span><span class="chip chip-cx">High</span></div>
+  </header>
+
+  <p><strong>Description：</strong><code>TimelineItem</code> 当前 3 种 kind（<code>comment</code>、<code>resolved-bar</code>、<code>activity-group</code>，<code>issue-detail.tsx:379-382</code>）。加第 4 种 <code>"run"</code>——把 run 作为一等公民交错在时间线里，旁置其产出的 agent 评论（类比 <code>resolved-bar</code> 嵌套回复）。条件包含：仅 issue-scoped 对话型 run（<code>kind ∈ {comment, direct}</code>）；chat / quick_create / no_action 这三类无评论 run 也作为独立时间线条目注入（标记其完成时刻的位置）。这样 run 是时间线的真子集，侧边栏变可选摘要；时间线是唯一事实源。</p>
+
+  <div class="diagram">
+    <svg viewBox="0 0 600 420" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Run-enriched timeline with both comment-attached and standalone run entries">
+      <defs>
+        <style>
+          .user { fill: #f5f5f4; stroke: #d6d3d1; stroke-width: 1; }
+          .agent { fill: #ffffff; stroke: #d6d3d1; stroke-width: 1; }
+          .runinline { fill: #ccfbf1; stroke: #0f766e; stroke-width: 1; stroke-dasharray: 3 2; }
+          .runstandalone { fill: #dbeafe; stroke: #1e40af; stroke-width: 1; }
+          .resolved { fill: #fef3c7; stroke: #92400e; stroke-width: 1; }
+          .lbl { font: 12px -apple-system, "PingFang SC", sans-serif; fill: #1c1917; }
+          .mute { font: 11px -apple-system, sans-serif; fill: #78716c; }
+          .tag { font: 600 10px -apple-system, sans-serif; }
+        </style>
+      </defs>
+
+      <!-- Timeline header -->
+      <text class="lbl" x="60" y="22" font-weight="700">问题时间线（含 run 条目）</text>
+      <text class="mute" x="60" y="38">按时间顺序 · 单事实源</text>
+
+      <!-- Time markers -->
+      <line x1="40" y1="60" x2="40" y2="400" stroke="#d6d3d1" stroke-width="1"/>
+
+      <!-- Item 1: user comment + run inline -->
+      <g transform="translate(60,60)">
+        <rect class="user" x="0" y="0" width="520" height="42" rx="4"/>
+        <text class="lbl" x="14" y="18">[User] @agent please fix the bug</text>
+        <text class="mute" x="14" y="34">trigger_comment_id → run</text>
+      </g>
+      <g transform="translate(80,108)">
+        <rect class="runinline" x="0" y="0" width="500" height="46" rx="4"/>
+        <text class="lbl" x="14" y="18">▶ run #1 · running · 12s</text>
+        <text class="mute" x="14" y="36">[可展开 tool/thinking · inline Collapsible]</text>
+      </g>
+      <g transform="translate(80,160)">
+        <rect class="agent" x="0" y="0" width="500" height="42" rx="4"/>
+        <text class="lbl" x="14" y="18">[Agent reply — output of run #1]</text>
+        <text class="mute" x="14" y="34">source_task_id = run #1 · ↗ 查看详情</text>
+      </g>
+
+      <!-- Item 2: resolved bar -->
+      <g transform="translate(60,212)">
+        <rect class="resolved" x="0" y="0" width="520" height="22" rx="4"/>
+        <text class="tag" x="14" y="16" fill="#92400e">▣ [Thread resolved]</text>
+      </g>
+
+      <!-- Item 3: standalone no-comment run (autopilot) -->
+      <g transform="translate(60,246)">
+        <rect class="runstandalone" x="0" y="0" width="520" height="46" rx="4"/>
+        <text class="lbl" x="14" y="18">▶ run #2 · completed · autopilot</text>
+        <text class="mute" x="14" y="36">无评论触发器 · 静默执行 · 已发出 4 条通知</text>
+      </g>
+
+      <!-- Item 4: standalone no_comment run (squad no_action) -->
+      <g transform="translate(60,302)">
+        <rect class="runstandalone" x="0" y="0" width="520" height="46" rx="4"/>
+        <text class="lbl" x="14" y="18">✓ run #3 · no_action · squad leader</text>
+        <text class="mute" x="14" y="36">已评估，无需动作</text>
+      </g>
+
+      <!-- Item 5: user follow-up -->
+      <g transform="translate(60,358)">
+        <rect class="user" x="0" y="0" width="520" height="42" rx="4"/>
+        <text class="lbl" x="14" y="18">[User] Thanks, looks good.</text>
+        <text class="mute" x="14" y="34">[No run — not agent output]</text>
+      </g>
+
+      <!-- Sidebar annotation -->
+      <text class="mute" x="60" y="414">侧边栏变可选摘要（活跃 run 计数 + jump links） · 单 run issue 可隐藏</text>
+    </svg>
+    <p class="diagram-caption">运行丰富时间线：comment-attached run 嵌套、standalone run 自成条目；侧栏降级。</p>
+  </div>
+
+  <dl class="meta">
+    <dt>轴</dt><dd>run-scope-conditioning</dd>
+    <dt>基础</dt><dd><span class="basis-tag direct">direct</span> <code>issue-detail.tsx:379-382</code> TimelineItem 联合类型支持扩展；<code>computeTaskKind</code> 提供 kind 条件化；<span class="basis-tag external">external</span> 行业 split（Copilot 内联 vs Jira 审计流）。</dd>
+    <dt>信心</dt><dd>75%</dd>
+    <dt>复杂度</dt><dd>High</dd>
+  </dl>
+
+  <section>
+    <h4>Basis</h4>
+    <p><span class="basis-tag direct">direct</span> <code>TimelineItem</code> 联合类型在 <code>issue-detail.tsx:379-382</code> 有 3 种 kind；<code>renderItem</code> 在 <code>:1714-1770</code> 派发——结构上支持新 kind。<code>computeTaskKind</code>（<code>agent.go:588-608</code>）是 <code>(chat_session_id, autopilot_run_id, issue_id, trigger_comment_id)</code> 的纯函数，已可识别三种无评论 run。<span class="basis-tag external">external</span> 行业 split：Copilot @mention run 显示在线程中；Devin Slack 回复是线程一部分；Linear 的 @Linear chat 也在对话中——对话型 run 内联，自动化在审计流（外部研究）。</p>
+  </section>
+
+  <section>
+    <h4>Rationale</h4>
+    <p>这是 run ↔ comment 关系的根本反转：不再是"给评论加 run 入口"，而是"run 本就在时间线里"。一旦 run 在时间线中内联，侧边栏的作用减弱，覆盖率 chip 变成连接相邻时间线条目的桥梁，"查看详情"的受众范围也扩大了——同时为三种无评论 run 提供叙事位置（之前在时间线完全隐形）。侧栏不必删除——降级为摘要即契合 GitHub Checks 混合模式（Idea 4）。这是一个杠杆性的结构改动：一种新 TimelineItem kind 同时解决 comment-attached run 嵌套、no-comment run 显形、kind 条件化三个问题。</p>
+  </section>
+
+  <section>
+    <h4>Downsides</h4>
+    <ul>
+      <li>这是最大的结构改动之一——信息架构层级反转。需团队对"时间线是单一事实源"达成共识。</li>
+      <li>三类 run（chat/quick_create/no_action）的时间线条目会让部分 issue 的时间线显得密集——需视觉密度控制。</li>
+      <li>depends on Phase 3 of C1（kind 持久化）才能稳定 gate；未持久化前 kind 仍需派生计算。</li>
+      <li>需重新审视 <code>flattenGroups</code> 与 <code>renderItem</code> 派发逻辑——可能影响性能与现有测试。</li>
+    </ul>
+  </section>
+</article>
+
+<h2 id="rejection-summary">Rejection Summary</h2>
+<p>23 条被拒绝的想法分类汇总，按拒绝原因分组：</p>
+
+<table class="reject">
+<thead>
+<tr><th>ID</th><th>Idea</th><th>Reason Rejected</th></tr>
+</thead>
+<tbody>
+<tr><td>L2</td><td>持久化 kind</td><td>被 C1 Phase 3 吸收</td></tr>
+<tr><td>L3</td><td>parent_id 反查历史评论</td><td>工程路径不完整——无现有查询支持</td></tr>
+<tr><td>L4</td><td>produced_comment_ids 对称账本</td><td>过度设计——source_task_id 已覆盖 comment → run</td></tr>
+<tr><td>L5</td><td>retry/rerun 链身份传递</td><td>被 C1 后续阶段吸收</td></tr>
+<tr><td>L6</td><td>翻转 source_task_id 为 UI 主链接</td><td>意见层面，无足够数据支撑优先级翻转</td></tr>
+<tr><td>L7</td><td>每个 run 都留时间线痕迹</td><td>被 C3 愿景吸收</td></tr>
+<tr><td>P2</td><td>统一 run 卡片取代 retry 按钮</td><td>复杂度更高；P1 是更简的第一步</td></tr>
+<tr><td>P3</td><td>头部元数据区作 attestation 位</td><td>头部已拥挤；retry 槽位更自然</td></tr>
+<tr><td>P4</td><td>agent 评论 run-link 作主动作</td><td>降级 React 缺用户数据支撑</td></tr>
+<tr><td>R2</td><td>hover-card peek of run summary</td><td>被 C1 阶段式吸收；R1 是主要 reveal</td></tr>
+<tr><td>R3</td><td>GET /api/tasks/:id + run 路由</td><td>被 C1 Phase 3 吸收</td></tr>
+<tr><td>R4</td><td>Peek Definition via Drawer</td><td>未启用的 UI primitive，风险高</td></tr>
+<tr><td>R5</td><td>RunProvenanceChip 独立组件</td><td>被 C1 Phase 1 组件吸收</td></tr>
+<tr><td>R6</td><td>始终内联、永不弹窗（极端）</td><td>R1 双层方案更平衡</td></tr>
+<tr><td>R7</td><td>iMessage 投递回执样式</td><td>delivered_comment_ids 语义不匹配"已送达"</td></tr>
+<tr><td>S1</td><td>kind 作为内联 gate</td><td>被 C1 Phase 3 吸收</td></tr>
+<tr><td>S2</td><td>OTel span-link 三元模型</td><td>外部类比不直接适用</td></tr>
+<tr><td>S3</td><td>按状态变化条件化</td><td>当前无 autopilot 生成 status_change 评论的路径</td></tr>
+<tr><td>S4</td><td>仅给非对话式 run 内联链接</td><td>反行业默认，缺用户数据</td></tr>
+<tr><td>S5</td><td>无评论 run 作为 TimelineItem</td><td>被 C3 愿景吸收</td></tr>
+<tr><td>B2</td><td>评论卡 run-status 感知</td><td>被 B1 双向桥吸收</td></tr>
+<tr><td>B4</td><td>TimelineItem "run" 独立项</td><td>被 C3 愿景吸收</td></tr>
+<tr><td>B5/B6</td><td>翻转主表面 / 删侧边栏</td><td>B3 混合模式是更稳健的折中</td></tr>
+<tr><td>C2</td><td>统一 attestation chip</td><td>单一 chip 装太多关注点，有信息损失风险</td></tr>
+</tbody>
+</table>
+
+<h3 id="coverage-gaps">轴覆盖说明</h3>
+<ul>
+  <li><strong>linkage-data-model</strong>: 2 survivors (L1, C1) — 覆盖 ✓</li>
+  <li><strong>comment-placement</strong>: 1 survivor (P1) — 覆盖 ✓</li>
+  <li><strong>run-detail-reveal</strong>: 1 survivor (R1) — 覆盖 ✓</li>
+  <li><strong>run-scope-conditioning</strong>: 1 survivor (C3) — 覆盖 ✓</li>
+  <li><strong>sidebar-inline-bridge</strong>: 2 survivors (B3, B1) — 覆盖 ✓</li>
+</ul>
+
+<footer class="composition-signal">
+  Composed 2026-07-10 by <code>ce-ideate</code> for <code>/Users/fengzhao/multica</code> · Run ID <code>ce6acd14</code> · Grounded in 4 Phase 1 dispatches + 5 evidence dossiers · Generated from 47 raw ideas → 7 survivors
+</footer>
+
+</div>
+</body>
+</html>
