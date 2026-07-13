@@ -1507,7 +1507,14 @@ func TestCodexExecuteStartupRPCsHaveBoundedHandshakeTimeout(t *testing.T) {
 		t.Skip("shell-script fixture is POSIX-only")
 	}
 
-	const handshakeTimeout = 500 * time.Millisecond
+	// Every startup RPC shares one handshake bound, so the *successful*
+	// preamble RPCs (e.g. initialize) must also round-trip within it. The fake
+	// app-server is a forked /bin/sh script; under parallel test load its
+	// startup + first read/echo can spike well past a few hundred ms, which
+	// used to make initialize spuriously time out before the subtest reached
+	// the RPC it targets. Keep this comfortably above sh startup jitter yet
+	// below the 5s semantic timeout and the 10s executeFakeCodex ceiling.
+	const handshakeTimeout = 3 * time.Second
 	tests := []struct {
 		name   string
 		method string
@@ -1575,8 +1582,11 @@ func TestCodexExecuteStartupRPCsHaveBoundedHandshakeTimeout(t *testing.T) {
 					t.Fatalf("expected error to contain %q, got %q", want, result.Error)
 				}
 			}
-			if elapsed > 2*time.Second {
-				t.Fatalf("handshake timeout took %s, expected < 2s", elapsed)
+			// Proves the RPC was bounded rather than hanging to the 10s
+			// executeFakeCodex ceiling; the handshake fires at ~3s and
+			// shutdown is fast (closing stdin EOFs the fake).
+			if elapsed > 8*time.Second {
+				t.Fatalf("handshake timeout took %s, expected < 8s", elapsed)
 			}
 		})
 	}
