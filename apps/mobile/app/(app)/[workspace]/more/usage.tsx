@@ -10,9 +10,11 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useQuery } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { useActionSheet } from "@expo/react-native-action-sheet";
+import { Ionicons } from "@expo/vector-icons";
 import SegmentedControl from "@react-native-segmented-control/segmented-control";
 import { BarChart } from "react-native-gifted-charts";
 import type {
+  Agent,
   DashboardAgentRunTime,
   DashboardRunTimeDaily,
   DashboardUsageByAgent,
@@ -20,6 +22,7 @@ import type {
 } from "@multica/core/types";
 import { Text } from "@/components/ui/text";
 import { Button } from "@/components/ui/button";
+import { ActorAvatar } from "@/components/ui/actor-avatar";
 import { UsageStatCard } from "@/components/usage/usage-stat-card";
 import { useWorkspaceStore } from "@/data/workspace-store";
 import { useViewingTimezone } from "@/lib/use-viewing-timezone";
@@ -33,6 +36,8 @@ import {
 } from "@/data/queries/usage";
 import {
   addDaysIso,
+  type AgentDashboardRow,
+  aggregateAgentTokens,
   aggregateByWeek,
   aggregateDailyCost,
   aggregateDailyTasks,
@@ -40,8 +45,11 @@ import {
   aggregateDailyTokens,
   aggregateWeeklyTasks,
   aggregateWeeklyTime,
+  bucketUnknownAgentRows,
   computeDailyTotals,
+  DELETED_AGENTS_ROW_ID,
   formatDuration,
+  mergeAgentDashboardRows,
   todayIso,
 } from "@/lib/usage-display";
 import { fmtMoney, formatTokens } from "@/lib/usage-pricing";
@@ -49,6 +57,19 @@ import { useColorScheme } from "@/lib/use-color-scheme";
 import { THEME } from "@/lib/theme";
 
 type Dim = "daily" | "weekly";
+
+type LeaderboardSort = "tokens" | "cost" | "time" | "tasks";
+
+// Which metric ranks the leaderboard — drives row order and progress-bar
+// width. Hoisted to module scope (not re-created every render) since each
+// accessor only reads its own row argument, mirroring
+// packages/views/dashboard/components/dashboard-page.tsx's SORT_METRIC.
+const SORT_METRIC: Record<LeaderboardSort, (r: AgentDashboardRow) => number> = {
+  tokens: (r) => r.tokens,
+  cost: (r) => r.cost,
+  time: (r) => r.seconds,
+  tasks: (r) => r.taskCount,
+};
 
 // Stable references — `data ?? []` would create a new empty array on every
 // render while a query is loading, which breaks useMemo's reference-equality
@@ -58,6 +79,7 @@ const EMPTY_DAILY: DashboardUsageDaily[] = [];
 const EMPTY_BY_AGENT: DashboardUsageByAgent[] = [];
 const EMPTY_RUNTIME: DashboardAgentRunTime[] = [];
 const EMPTY_RUNTIME_DAILY: DashboardRunTimeDaily[] = [];
+const EMPTY_AGENTS: Agent[] = [];
 
 // Legal periods per dimension + default-on-switch, confirmed against
 // packages/views/dashboard/components/dashboard-page.tsx's
@@ -95,7 +117,8 @@ export default function UsagePage() {
   };
 
   const { data: projects = [] } = useQuery(projectListOptions(wsId));
-  const { data: agents = [] } = useQuery(agentListOptions(wsId));
+  const agentsQuery = useQuery(agentListOptions(wsId));
+  const agents = agentsQuery.data ?? EMPTY_AGENTS;
 
   const projectId = useMemo(() => {
     if (projectValue === ALL_PROJECTS) return null;
@@ -285,6 +308,38 @@ export default function UsagePage() {
     [chartBarData],
   );
 
+  const [sortBy, setSortBy] = useState<LeaderboardSort>("tokens");
+
+  const agentTokenRows = useMemo(() => aggregateAgentTokens(byAgentUsage), [byAgentUsage]);
+  const agentRows = useMemo(
+    () => mergeAgentDashboardRows(agentTokenRows, runTimeRows),
+    [agentTokenRows, runTimeRows],
+  );
+  // Skip bucketing until the agent list has loaded so a slow agents fetch
+  // doesn't transiently merge every row into "Deleted agents" — mirrors
+  // packages/views/dashboard/components/dashboard-page.tsx's knownAgentIds.
+  const knownAgentIds = useMemo(
+    () => (agentsQuery.isSuccess ? new Set(agents.map((a) => a.id)) : null),
+    [agentsQuery.isSuccess, agents],
+  );
+  const visibleAgentRows = useMemo(
+    () => bucketUnknownAgentRows(agentRows, knownAgentIds),
+    [agentRows, knownAgentIds],
+  );
+  const deletedAgentCount = useMemo(
+    () => (knownAgentIds ? agentRows.filter((r) => !knownAgentIds.has(r.agentId)).length : 0),
+    [agentRows, knownAgentIds],
+  );
+
+  const sortedRows = useMemo(() => {
+    const metricFn = SORT_METRIC[sortBy];
+    return [...visibleAgentRows].sort((a, b) => metricFn(b) - metricFn(a));
+  }, [visibleAgentRows, sortBy]);
+  const maxValue = useMemo(() => {
+    const metricFn = SORT_METRIC[sortBy];
+    return sortedRows.reduce((m, r) => Math.max(m, metricFn(r)), 0);
+  }, [sortedRows, sortBy]);
+
   return (
     <SafeAreaView className="flex-1 bg-background" edges={[]}>
       {isLoading ? (
@@ -378,6 +433,65 @@ export default function UsagePage() {
                 />
               )}
             </View>
+          </View>
+
+          <View className="mt-4 border-t border-border">
+            <View className="flex-row items-center justify-between px-4 pt-4 pb-2">
+              <Text className="text-sm font-semibold text-foreground">{t("leaderboard.title")}</Text>
+              <Text className="text-xs text-muted-foreground">
+                {deletedAgentCount > 0
+                  ? t("leaderboard.caption_with_deleted", {
+                      count: visibleAgentRows.length - 1,
+                      deleted: deletedAgentCount,
+                    })
+                  : t("leaderboard.caption", { count: visibleAgentRows.length })}
+              </Text>
+            </View>
+            <SegmentedControl
+              values={[t("leaderboard.sort_tokens"), t("leaderboard.sort_cost"), t("leaderboard.sort_time"), t("leaderboard.sort_tasks")]}
+              selectedIndex={(["tokens", "cost", "time", "tasks"] as const).indexOf(sortBy)}
+              onChange={(e) =>
+                setSortBy((["tokens", "cost", "time", "tasks"] as const)[e.nativeEvent.selectedSegmentIndex])
+              }
+              style={{ marginHorizontal: 16, marginBottom: 8 }}
+            />
+            {sortedRows.length === 0 ? (
+              <Text className="text-sm text-muted-foreground text-center py-6">{t("empty.title")}</Text>
+            ) : (
+              sortedRows.map((row) => {
+                const isDeletedBucket = row.agentId === DELETED_AGENTS_ROW_ID;
+                const value = SORT_METRIC[sortBy](row);
+                const pct = maxValue > 0 ? (value / maxValue) * 100 : 0;
+                return (
+                  <View key={row.agentId} className="flex-row items-center gap-3 px-4 py-2.5">
+                    {isDeletedBucket ? (
+                      <View className="h-6 w-6 items-center justify-center rounded-full bg-muted">
+                        <Ionicons name="trash-outline" size={14} color={theme.mutedForeground} />
+                      </View>
+                    ) : (
+                      <ActorAvatar type="agent" id={row.agentId} size={24} />
+                    )}
+                    <View className="flex-1 gap-1">
+                      <Text
+                        numberOfLines={1}
+                        className={isDeletedBucket ? "text-sm italic text-muted-foreground" : "text-sm font-medium text-foreground"}
+                      >
+                        {isDeletedBucket ? t("leaderboard.deleted_agents") : (agents.find((a) => a.id === row.agentId)?.name ?? row.agentId)}
+                      </Text>
+                      <View className="h-1.5 rounded-full bg-muted overflow-hidden">
+                        <View style={{ width: `${pct}%` }} className="h-full rounded-full bg-primary" />
+                      </View>
+                    </View>
+                    <Text className="text-xs tabular-nums text-muted-foreground w-16 text-right">
+                      {formatTokens(row.tokens)}
+                    </Text>
+                    <Text className="text-xs tabular-nums text-muted-foreground w-14 text-right">
+                      {fmtMoney(row.cost)}
+                    </Text>
+                  </View>
+                );
+              })
+            )}
           </View>
         </ScrollView>
       )}
