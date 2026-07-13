@@ -17,7 +17,6 @@ import { toast } from "sonner";
 import type {
   Agent,
   AgentRuntime,
-  CreateAgentRequest,
   MemberWithUser,
 } from "@multica/core/types";
 import {
@@ -74,9 +73,12 @@ import {
 } from "@multica/ui/components/ui/tooltip";
 import { useNavigation, useRowLink } from "../../navigation";
 import { ActorAvatar } from "../../common/actor-avatar";
-import { PageHeader } from "../../layout/page-header";
+import {
+  CollectionPageHeader,
+  CollectionPageHeaderAction,
+  CollectionPageState,
+} from "../../layout/collection-page";
 import { availabilityConfig } from "../presence";
-import { CreateAgentDialog } from "./create-agent-dialog";
 import { AgentRowActions } from "./agent-row-actions";
 import {
   AgentListToolbar,
@@ -202,41 +204,23 @@ function PageHeaderBar({
 }) {
   const { t } = useT("agents");
   return (
-    <PageHeader className="justify-between px-5">
-      <div className="flex items-center gap-2">
-        <Bot className="h-4 w-4 text-muted-foreground" />
-        <h1 className="text-sm font-medium">{t(($) => $.page.title)}</h1>
-        {totalCount > 0 && (
-          <span className="font-mono text-xs tabular-nums text-muted-foreground/70">
-            {totalCount}
-          </span>
-        )}
-        <p className="ml-2 hidden text-xs text-muted-foreground md:block">
-          {t(($) => $.page.tagline)}{" "}
-          <a
-            href="https://multica.ai/docs/agents"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="underline decoration-muted-foreground/30 underline-offset-4 transition-colors hover:text-foreground"
-          >
-            {t(($) => $.page.learn_more)}
-          </a>
-        </p>
-      </div>
-      {/* Quiet chrome button (outline, icon-only below md) — primary is
-          reserved for the empty state's CTA. */}
-      <Button
-        type="button"
-        size="sm"
-        variant="outline"
-        className="h-8 w-8 gap-1 px-0 md:w-auto md:px-2.5"
-        aria-label={t(($) => $.page.new_agent)}
-        onClick={onCreate}
-      >
-        <Plus className="h-3.5 w-3.5" />
-        <span className="hidden md:inline">{t(($) => $.page.new_agent)}</span>
-      </Button>
-    </PageHeader>
+    <CollectionPageHeader
+      icon={Bot}
+      title={t(($) => $.page.title)}
+      count={totalCount}
+      description={t(($) => $.page.tagline)}
+      learnMore={{
+        href: "https://multica.ai/docs/agents",
+        label: t(($) => $.page.learn_more),
+      }}
+      actions={
+        <CollectionPageHeaderAction
+          icon={Plus}
+          label={t(($) => $.page.new_agent)}
+          onClick={onCreate}
+        />
+      }
+    />
   );
 }
 
@@ -253,22 +237,22 @@ function ListError({
   return (
     <div className="flex flex-1 min-h-0 flex-col">
       <PageHeaderBar totalCount={0} onCreate={onCreate} />
-      <div className="flex flex-1 flex-col items-center justify-center gap-3 px-6 py-16 text-center">
-        <AlertCircle className="h-8 w-8 text-destructive" />
-        <div>
-          <p className="text-sm font-medium">
-            {t(($) => $.page.list_load_failed)}
-          </p>
-          <p className="mt-1 text-xs text-muted-foreground">
-            {listError instanceof Error
-              ? listError.message
-              : t(($) => $.page.list_load_failed_default)}
-          </p>
-        </div>
-        <Button type="button" variant="outline" size="sm" onClick={onRetry}>
-          {t(($) => $.page.try_again)}
-        </Button>
-      </div>
+      <CollectionPageState
+        role="alert"
+        tone="destructive"
+        icon={AlertCircle}
+        title={t(($) => $.page.list_load_failed)}
+        description={
+          listError instanceof Error
+            ? listError.message
+            : t(($) => $.page.list_load_failed_default)
+        }
+        actions={
+          <Button type="button" variant="outline" size="sm" onClick={onRetry}>
+            {t(($) => $.page.try_again)}
+          </Button>
+        }
+      />
     </div>
   );
 }
@@ -276,21 +260,17 @@ function ListError({
 function EmptyState({ onCreate }: { onCreate: () => void }) {
   const { t } = useT("agents");
   return (
-    <div className="flex flex-1 flex-col items-center justify-center px-6 py-16 text-center">
-      <div className="flex h-12 w-12 items-center justify-center rounded-full bg-muted">
-        <Bot className="h-6 w-6 text-muted-foreground" />
-      </div>
-      <h2 className="mt-4 text-base font-semibold">
-        {t(($) => $.empty.title)}
-      </h2>
-      <p className="mt-1 max-w-md text-sm text-muted-foreground">
-        {t(($) => $.empty.description)}
-      </p>
-      <Button type="button" onClick={onCreate} size="sm" className="mt-5">
-        <Plus className="h-3 w-3" />
-        {t(($) => $.page.new_agent)}
-      </Button>
-    </div>
+    <CollectionPageState
+      icon={Bot}
+      title={t(($) => $.empty.title)}
+      description={t(($) => $.empty.description)}
+      actions={
+        <Button type="button" onClick={onCreate} size="sm">
+          <Plus aria-hidden="true" className="size-3" />
+          {t(($) => $.page.new_agent)}
+        </Button>
+      }
+    />
   );
 }
 
@@ -811,7 +791,6 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
   const paths = useWorkspacePaths();
   const navigation = useNavigation();
   const rowLink = useRowLink();
-  const qc = useQueryClient();
   const currentUser = useAuthStore((s) => s.user);
 
   const {
@@ -820,7 +799,7 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
     error: listError,
     refetch: refetchList,
   } = useQuery(agentListOptions(wsId));
-  const { data: runtimes = [], isLoading: runtimesLoading } = useQuery(
+  const { data: runtimes = [] } = useQuery(
     runtimeListOptions(wsId),
   );
   const { data: members = [] } = useQuery(memberListOptions(wsId));
@@ -828,10 +807,6 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
   const { byAgent: presenceMap } = useWorkspacePresenceMap(wsId);
   const { byAgent: activityMap } = useWorkspaceActivityMap(wsId);
 
-  const [showCreate, setShowCreate] = useState(false);
-  const [duplicateTemplate, setDuplicateTemplate] = useState<Agent | null>(
-    null,
-  );
   const [selectedIds, setSelectedIds] = useState<ReadonlySet<string>>(
     new Set(),
   );
@@ -1038,25 +1013,9 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
     overscan: 10,
   });
 
-  const handleCreate = async (data: CreateAgentRequest): Promise<Agent> => {
-    const agent = await api.createAgent(data);
-    qc.setQueryData<Agent[]>(workspaceKeys.agents(wsId), (current = []) => {
-      const exists = current.some((a) => a.id === agent.id);
-      return exists
-        ? current.map((a) => (a.id === agent.id ? agent : a))
-        : [...current, agent];
-    });
-    setShowCreate(false);
-    setDuplicateTemplate(null);
-    navigation.push(paths.agentDetail(agent.id));
-    qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
-    return agent;
-  };
-
   const handleDuplicate = useCallback((agent: Agent) => {
-    setDuplicateTemplate(agent);
-    setShowCreate(true);
-  }, []);
+    navigation.push(`${paths.newAgent()}?duplicate=${encodeURIComponent(agent.id)}`);
+  }, [navigation, paths]);
 
   const selectedRows = rows.filter((row) => selectedIds.has(row.agent.id));
   const allSelected = rows.length > 0 && selectedRows.length === rows.length;
@@ -1080,7 +1039,7 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
   if (listError) {
     return (
       <ListError
-        onCreate={() => setShowCreate(true)}
+        onCreate={() => navigation.push(paths.newAgent())}
         listError={listError}
         onRetry={() => refetchList()}
       />
@@ -1096,7 +1055,7 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
     <div className="relative flex flex-1 min-h-0 flex-col">
       <PageHeaderBar
         totalCount={totalCount}
-        onCreate={() => setShowCreate(true)}
+        onCreate={() => navigation.push(paths.newAgent())}
       />
 
       {isLoading ? (
@@ -1105,7 +1064,7 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
         </div>
       ) : showEmpty ? (
         <div className="flex flex-1 items-center justify-center">
-          <EmptyState onCreate={() => setShowCreate(true)} />
+          <EmptyState onCreate={() => navigation.push(paths.newAgent())} />
         </div>
       ) : (
         <>
@@ -1245,20 +1204,6 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
         onClear={() => setSelectedIds(new Set())}
       />
 
-      {showCreate && (
-        <CreateAgentDialog
-          runtimes={runtimes}
-          runtimesLoading={runtimesLoading}
-          members={members}
-          currentUserId={currentUser?.id ?? null}
-          template={duplicateTemplate}
-          onClose={() => {
-            setShowCreate(false);
-            setDuplicateTemplate(null);
-          }}
-          onCreate={handleCreate}
-        />
-      )}
     </div>
   );
 }

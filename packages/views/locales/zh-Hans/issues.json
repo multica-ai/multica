@@ -224,6 +224,7 @@
     "archive_tooltip": "归档",
     "pin_tooltip": "固定到侧边栏",
     "unpin_tooltip": "从侧边栏取消固定",
+    "thread_nav_label": "快速跳转到讨论",
     "sidebar_tooltip": "切换侧边栏",
     "find": {
       "placeholder": "在 issue 中查找...",

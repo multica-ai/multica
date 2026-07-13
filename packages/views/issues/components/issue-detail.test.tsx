@@ -298,6 +298,15 @@ vi.mock("@multica/core/issues/stores", () => ({
       }),
     },
   ),
+  useCommentComposerStore: Object.assign(
+    (selector?: any) => {
+      const state = { sticky: true, toggleSticky: () => {} };
+      return selector ? selector(state) : state;
+    },
+    {
+      getState: () => ({ sticky: true, toggleSticky: () => {} }),
+    },
+  ),
 }));
 
 // Mock react-virtuoso: jsdom has no real layout, so the real Virtuoso would

@@ -2138,11 +2138,19 @@ func (d *Daemon) handleLocalSkillList(ctx context.Context, rt Runtime, requestID
 		})
 		return
 	}
+	mcpServers, mcpSupported, err := listRuntimeLocalMcpServers(rt.Provider)
+	if err != nil {
+		d.logger.Warn("runtime local MCP discovery failed", "runtime_id", rt.ID, "provider", rt.Provider, "error", err)
+		mcpServers = []runtimeLocalMcpServerSummary{}
+		mcpSupported = false
+	}
 
 	d.reportLocalSkillListResult(ctx, rt, requestID, map[string]any{
-		"status":    "completed",
-		"skills":    skills,
-		"supported": supported,
+		"status":        "completed",
+		"skills":        skills,
+		"supported":     supported,
+		"mcp_servers":   mcpServers,
+		"mcp_supported": mcpSupported,
 	})
 }
 
@@ -3523,6 +3531,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		IssueID:                          task.IssueID,
 		TriggerCommentID:                 task.TriggerCommentID,
 		TriggerThreadID:                  task.TriggerThreadID,
+		CommentReplyTargets:              commentReplyThreads(task),
 		NewCommentCount:                  task.NewCommentCount,
 		NewCommentsSince:                 task.NewCommentsSince,
 		PriorSessionResumed:              task.PriorSessionID != "",
@@ -3588,9 +3597,19 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// Squad-leader tasks also skip reuse so a pre-fix leader session recorded
 	// against the user's local_directory cannot be re-entered without a lock.
 	var agentMcpConfig json.RawMessage
+	var effectiveMcpConfig json.RawMessage
 	var cursorMcpAuthSource string
 	if task.Agent != nil {
 		agentMcpConfig = task.Agent.McpConfig
+		effectiveMcpConfig = agentMcpConfig
+		if merged, mergeErr := mergeRuntimeAndAgentMcpConfig(provider, agentMcpConfig); mergeErr != nil {
+			taskLog.Warn("mcp_config: runtime merge failed; using agent configuration only",
+				"provider", provider,
+				"error", mergeErr,
+			)
+		} else {
+			effectiveMcpConfig = merged
+		}
 		if provider == "cursor" {
 			cursorMcpAuthSource = strings.TrimSpace(task.Agent.CustomEnv[execenv.CursorMcpAuthSourceEnv])
 		}
@@ -3611,7 +3630,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			Provider:            provider,
 			CodexVersion:        codexVersion,
 			OpenclawBin:         openclawBin,
-			McpConfig:           agentMcpConfig,
+			McpConfig:           effectiveMcpConfig,
 			CursorMcpAuthSource: cursorMcpAuthSource,
 			OpenclawGateway:     openclawGateway,
 			Task:                taskCtx,
@@ -3627,7 +3646,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			Provider:            provider,
 			CodexVersion:        codexVersion,
 			OpenclawBin:         openclawBin,
-			McpConfig:           agentMcpConfig,
+			McpConfig:           effectiveMcpConfig,
 			CursorMcpAuthSource: cursorMcpAuthSource,
 			OpenclawGateway:     openclawGateway,
 			Task:                taskCtx,
@@ -3839,7 +3858,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	var mcpConfig json.RawMessage
 	if task.Agent != nil {
 		customArgs = task.Agent.CustomArgs
-		mcpConfig = task.Agent.McpConfig
+		mcpConfig = effectiveMcpConfig
 	}
 	// Two-tier model resolution: an explicit agent.model wins,
 	// then the daemon-wide MULTICA_<PROVIDER>_MODEL env var. If
@@ -3940,7 +3959,10 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		"timeout", execOpts.Timeout,
 	)
 
-	result, tools, err := d.executeAndDrain(ctx, backend, prompt, execOpts, taskLog, task.ID)
+	// Shared across the resume-retry below so the retry's transcript rows
+	// keep ascending seq values for the same task.
+	var msgSeq atomic.Int32
+	result, tools, err := d.executeAndDrain(ctx, backend, prompt, execOpts, taskLog, task.ID, &msgSeq)
 	if err != nil {
 		return TaskResult{}, err
 	}
@@ -3952,7 +3974,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		firstUsage := result.Usage
 		taskLog.Warn("session resume failed, retrying with fresh session", "error", result.Error)
 		execOpts.ResumeSessionID = ""
-		retryResult, retryTools, retryErr := d.executeAndDrain(ctx, backend, prompt, execOpts, taskLog, task.ID)
+		retryResult, retryTools, retryErr := d.executeAndDrain(ctx, backend, prompt, execOpts, taskLog, task.ID, &msgSeq)
 		if retryErr != nil {
 			taskLog.Error("fresh session also failed to start", "error", retryErr)
 		} else {
@@ -4144,8 +4166,11 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 }
 
 // executeAndDrain runs a backend, drains its message stream (forwarding to the
-// server), and waits for the final result.
-func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, prompt string, opts agent.ExecOptions, taskLog *slog.Logger, taskID string) (agent.Result, int32, error) {
+// server), and waits for the final result. msgSeq numbers the reported task
+// messages and is owned by the caller so a same-task retry continues the
+// sequence instead of restarting at 1 — the server orders the transcript by
+// seq alone, and duplicate seqs would interleave the two attempts' rows.
+func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, prompt string, opts agent.ExecOptions, taskLog *slog.Logger, taskID string, msgSeq *atomic.Int32) (agent.Result, int32, error) {
 	// Wrap the caller's ctx so the idle watchdog (below) can interrupt both
 	// the agent subprocess (via the ctx passed to backend.Execute) AND the
 	// drain loop with a single cancel. Without this layer the backend would
@@ -4204,8 +4229,12 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 		go d.runIdleWatchdog(agentCtx, idleWindow, d.cfg.AgentToolWatchdog, &lastActivityAt, &inFlightTools, &idleWatchdogFired, &idleWatchdogThreshold, agentCancel, session.Messages, taskLog, taskID)
 	}
 
+	// drainFinished closes after the drain goroutine has flushed the last
+	// message batch, so the result hand-off below can wait for the transcript
+	// tail to be persisted.
+	drainFinished := make(chan struct{})
 	go func() {
-		var seq atomic.Int32
+		defer close(drainFinished)
 		var mu sync.Mutex
 		var pendingText strings.Builder
 		var pendingThinking strings.Builder
@@ -4215,7 +4244,7 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 		flush := func() {
 			mu.Lock()
 			if pendingThinking.Len() > 0 {
-				s := seq.Add(1)
+				s := msgSeq.Add(1)
 				batch = append(batch, TaskMessageData{
 					Seq:     int(s),
 					Type:    "thinking",
@@ -4224,7 +4253,7 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 				pendingThinking.Reset()
 			}
 			if pendingText.Len() > 0 {
-				s := seq.Add(1)
+				s := msgSeq.Add(1)
 				batch = append(batch, TaskMessageData{
 					Seq:     int(s),
 					Type:    "text",
@@ -4251,7 +4280,9 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 		defer ticker.Stop()
 
 		done := make(chan struct{})
+		tickerDone := make(chan struct{})
 		go func() {
+			defer close(tickerDone)
 			for {
 				select {
 				case <-ticker.C:
@@ -4301,7 +4332,7 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 						callIDToTool[msg.CallID] = msg.Tool
 						mu.Unlock()
 					}
-					s := seq.Add(1)
+					s := msgSeq.Add(1)
 					mu.Lock()
 					batch = append(batch, TaskMessageData{
 						Seq:   int(s),
@@ -4325,7 +4356,7 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 							break
 						}
 					}
-					s := seq.Add(1)
+					s := msgSeq.Add(1)
 					output := msg.Output
 					if len(output) > 8192 {
 						output = output[:8192]
@@ -4360,7 +4391,7 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 					}
 				case agent.MessageError:
 					taskLog.Error("agent error", "content", msg.Content)
-					s := seq.Add(1)
+					s := msgSeq.Add(1)
 					mu.Lock()
 					batch = append(batch, TaskMessageData{
 						Seq:     int(s),
@@ -4375,11 +4406,39 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 		}
 	drainDone:
 		close(done)
+		// Let any tick-driven flush finish before the final one: a flush still
+		// in flight would otherwise keep posting batches after this goroutine
+		// signalled that the transcript tail was persisted.
+		<-tickerDone
 		flush()
 	}()
 
+	// waitForDrain blocks until the drain goroutine has flushed the transcript
+	// tail, so every terminal return below hands control back only after the
+	// task's reported messages are persisted — a consumer reading them at the
+	// terminal transition would otherwise see a transcript that is non-empty
+	// but truncated, indistinguishable from a complete one. Bounded so a
+	// backend that never closes its message channel cannot stall the terminal
+	// transition: after 10s the drain loop is cancelled and given a window
+	// wide enough for its worst-case exit — an in-flight tick flush plus the
+	// final one, each capped by the 5s ReportTaskMessages timeout and neither
+	// interruptible by the cancel (they post on context.Background()).
+	waitForDrain := func() {
+		select {
+		case <-drainFinished:
+		case <-time.After(10 * time.Second):
+			drainCancel()
+			select {
+			case <-drainFinished:
+			case <-time.After(12 * time.Second):
+				taskLog.Warn("transcript drain did not stop after cancel; completing anyway")
+			}
+		}
+	}
+
 	select {
 	case result := <-session.Result:
+		waitForDrain()
 		if idleWatchdogFired.Load() {
 			// The backend's wait goroutine (e.g. claude.go) translates the
 			// SIGKILL we delivered via agentCancel into Status="aborted".
@@ -4393,6 +4452,11 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 		}
 		return result, toolCount.Load(), nil
 	case <-drainCtx.Done():
+		// The drain loop is exiting on this same Done signal; wait for its
+		// final flush so the timeout/watchdog/cancel terminals below cannot
+		// hand back (and let runTask fail-and-broadcast) a still-flushing
+		// transcript either.
+		waitForDrain()
 		// Idle watchdog cancels via agentCancel(), which propagates here as
 		// context.Canceled. Check this BEFORE the generic cancelled/timeout
 		// classifiers so a watchdog-induced stop isn't misreported as

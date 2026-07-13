@@ -224,6 +224,7 @@
     "archive_tooltip": "보관",
     "pin_tooltip": "사이드바에 고정",
     "unpin_tooltip": "사이드바 고정 해제",
+    "thread_nav_label": "스레드로 이동",
     "sidebar_tooltip": "사이드바 열기/닫기",
     "find": {
       "placeholder": "이슈에서 찾기...",

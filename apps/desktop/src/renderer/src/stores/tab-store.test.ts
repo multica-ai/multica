@@ -320,6 +320,59 @@ describe("useTabStore actions", () => {
   });
 });
 
+describe("bulk tab closing", () => {
+  it("closes other unpinned tabs, preserves pinned tabs, and activates the target", () => {
+    vi.useFakeTimers();
+    try {
+      const store = useTabStore.getState();
+      store.switchWorkspace("acme");
+      const issuesId = useTabStore.getState().byWorkspace.acme.tabs[0].id;
+      const projectsId = store.addTab("/acme/projects", "Projects", "FolderKanban");
+      const agentsId = store.addTab("/acme/agents", "Agents", "Bot");
+      const settingsId = store.addTab("/acme/settings", "Settings", "Settings");
+      store.togglePin(issuesId);
+      store.setActiveTab(agentsId);
+
+      const before = useTabStore.getState().byWorkspace.acme.tabs;
+      const agentsDispose = vi.mocked(before.find((tab) => tab.id === agentsId)!.router.dispose);
+      const settingsDispose = vi.mocked(
+        before.find((tab) => tab.id === settingsId)!.router.dispose,
+      );
+
+      store.closeOtherTabs(projectsId);
+
+      const group = useTabStore.getState().byWorkspace.acme;
+      expect(group.tabs.map((tab) => tab.id)).toEqual([issuesId, projectsId]);
+      expect(group.activeTabId).toBe(projectsId);
+      expect(agentsDispose).not.toHaveBeenCalled();
+      expect(settingsDispose).not.toHaveBeenCalled();
+
+      vi.runAllTimers();
+      expect(agentsDispose).toHaveBeenCalledOnce();
+      expect(settingsDispose).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps a surviving active tab when closing other tabs", () => {
+    const store = useTabStore.getState();
+    store.switchWorkspace("acme");
+    const issuesId = useTabStore.getState().byWorkspace.acme.tabs[0].id;
+    const projectsId = store.addTab("/acme/projects", "Projects", "FolderKanban");
+    store.addTab("/acme/agents", "Agents", "Bot");
+    store.addTab("/acme/settings", "Settings", "Settings");
+    store.togglePin(issuesId);
+    store.setActiveTab(issuesId);
+
+    store.closeOtherTabs(projectsId);
+
+    const group = useTabStore.getState().byWorkspace.acme;
+    expect(group.tabs.map((tab) => tab.id)).toEqual([issuesId, projectsId]);
+    expect(group.activeTabId).toBe(issuesId);
+  });
+});
+
 describe("togglePin", () => {
   it("flips a tab's pinned state", () => {
     const store = useTabStore.getState();

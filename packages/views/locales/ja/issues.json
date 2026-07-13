@@ -224,6 +224,7 @@
     "archive_tooltip": "アーカイブ",
     "pin_tooltip": "サイドバーにピン留め",
     "unpin_tooltip": "サイドバーのピン留めを解除",
+    "thread_nav_label": "スレッドへ移動",
     "sidebar_tooltip": "サイドバーの開閉",
     "find": {
       "placeholder": "イシュー内を検索...",

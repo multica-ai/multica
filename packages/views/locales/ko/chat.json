@@ -1,7 +1,8 @@
 {
   "page": {
     "title": "채팅",
-    "select_prompt": "대화를 선택하거나 +로 새로 시작하세요"
+    "select_prompt": "대화를 선택하거나 +로 새로 시작하세요",
+    "agent_link_no_access": "이 에이전트와 채팅할 권한이 없습니다."
   },
   "fab": {
     "running": "Multica가 작업 중입니다...",
@@ -25,6 +26,8 @@
     "show_details": "세부 정보 보기",
     "replied_in": "{{elapsed}} 만에 답변",
     "failed_after": "{{elapsed}} 후 실패",
+    "finished_in": "{{elapsed}} 만에 완료",
+    "no_response": "에이전트가 텍스트 답변 없이 이 턴을 마쳤습니다.",
     "failure": {
       "agent_error": "에이전트에 오류가 발생하여 답변을 완료하지 못했습니다. 다시 시도해 주세요.",
       "timeout": "시간이 너무 오래 걸려 완료 전에 중단되었습니다. 다시 시도하거나 요청을 더 작게 나눠 보세요.",
@@ -141,6 +144,7 @@
     "failed": "전송 실패",
     "you_prefix": "나: ",
     "no_messages": "아직 메시지가 없습니다",
+    "no_response_preview": "텍스트 답변 없음",
     "quick_agents": "자주 쓰는 Agent",
     "add": "추가",
     "add_agent": "자주 쓰는 Agent 추가",

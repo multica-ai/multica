@@ -852,6 +852,10 @@ func (h *Handler) loadAgentForUser(w http.ResponseWriter, r *http.Request, agent
 		writeError(w, http.StatusNotFound, "agent not found")
 		return db.Agent{}, false
 	}
+	if agent.Kind != "user" {
+		writeError(w, http.StatusNotFound, "agent not found")
+		return db.Agent{}, false
+	}
 	return agent, true
 }
 

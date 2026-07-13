@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -1067,7 +1068,8 @@ func TestExecuteAndDrain_ResumeFailureFallback(t *testing.T) {
 
 	// First attempt: resume fails (no SessionID in result).
 	opts := agent.ExecOptions{ResumeSessionID: "stale-id"}
-	result, _, err := d.executeAndDrain(ctx, fb, "prompt", opts, taskLog, "task-1")
+	var msgSeq atomic.Int32
+	result, _, err := d.executeAndDrain(ctx, fb, "prompt", opts, taskLog, "task-1", &msgSeq)
 	if err != nil {
 		t.Fatalf("first call error: %v", err)
 	}
@@ -1079,7 +1081,7 @@ func TestExecuteAndDrain_ResumeFailureFallback(t *testing.T) {
 	if result.Status == "failed" && result.SessionID == "" {
 		firstUsage := result.Usage
 		opts.ResumeSessionID = ""
-		retryResult, _, retryErr := d.executeAndDrain(ctx, fb, "prompt", opts, taskLog, "task-1")
+		retryResult, _, retryErr := d.executeAndDrain(ctx, fb, "prompt", opts, taskLog, "task-1", &msgSeq)
 		if retryErr != nil {
 			t.Fatalf("retry error: %v", retryErr)
 		}
@@ -1103,6 +1105,178 @@ func TestExecuteAndDrain_ResumeFailureFallback(t *testing.T) {
 	}
 }
 
+// transcriptBackend emits a tool_use and a text message before returning its
+// result — the first call fails like a broken resume, the second completes.
+type transcriptBackend struct {
+	calls atomic.Int32
+}
+
+func (b *transcriptBackend) Execute(_ context.Context, _ string, _ agent.ExecOptions) (*agent.Session, error) {
+	n := b.calls.Add(1)
+	msgCh := make(chan agent.Message, 2)
+	msgCh <- agent.Message{Type: agent.MessageToolUse, Tool: "bash"}
+	msgCh <- agent.Message{Type: agent.MessageText, Content: fmt.Sprintf("attempt %d", n)}
+	close(msgCh)
+	resCh := make(chan agent.Result, 1)
+	if n == 1 {
+		resCh <- agent.Result{Status: "failed", Error: "session not found"}
+	} else {
+		resCh <- agent.Result{Status: "completed", Output: "done", SessionID: "sess-2"}
+	}
+	return &agent.Session{Messages: msgCh, Result: resCh}, nil
+}
+
+// transcriptRecorder collects the task messages a daemon reports to its
+// message endpoint.
+type transcriptRecorder struct {
+	mu       sync.Mutex
+	messages []TaskMessageData
+}
+
+func (r *transcriptRecorder) snapshot() []TaskMessageData {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return slices.Clone(r.messages)
+}
+
+// newTranscriptRecorder returns a daemon whose message endpoint appends every
+// reported batch to the returned recorder.
+func newTranscriptRecorder(t *testing.T) (*Daemon, *transcriptRecorder) {
+	t.Helper()
+	rec := &transcriptRecorder{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/messages") {
+			var body struct {
+				Messages []TaskMessageData `json:"messages"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err == nil {
+				rec.mu.Lock()
+				rec.messages = append(rec.messages, body.Messages...)
+				rec.mu.Unlock()
+			}
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(srv.Close)
+	return &Daemon{client: NewClient(srv.URL), logger: slog.Default()}, rec
+}
+
+// TestExecuteAndDrain_FlushesTranscriptBeforeReturningResult pins the
+// completion contract: once the agent result is handed back, the task's
+// messages have been reported. Without the wait the drain goroutine is still
+// in flight, so a consumer reading the transcript sees it truncated.
+func TestExecuteAndDrain_FlushesTranscriptBeforeReturningResult(t *testing.T) {
+	t.Parallel()
+
+	d, rec := newTranscriptRecorder(t)
+
+	result, _, err := d.executeAndDrain(context.Background(), &transcriptBackend{}, "p", agent.ExecOptions{}, slog.Default(), "task-flush", new(atomic.Int32))
+	if err != nil {
+		t.Fatalf("executeAndDrain: %v", err)
+	}
+	if result.Status != "failed" {
+		t.Fatalf("expected the backend's result, got %+v", result)
+	}
+
+	if got := rec.snapshot(); len(got) != 2 {
+		t.Fatalf("expected the transcript flushed before the result hand-off, got %d messages: %+v", len(got), got)
+	}
+}
+
+// TestExecuteAndDrain_SeqContinuesAcrossRetry pins the transcript's ordering
+// key: the server sorts a task's messages by seq alone, so a same-task resume
+// retry must keep numbering upwards instead of restarting at 1 and
+// interleaving its rows with the failed attempt's.
+func TestExecuteAndDrain_SeqContinuesAcrossRetry(t *testing.T) {
+	t.Parallel()
+
+	d, rec := newTranscriptRecorder(t)
+	fb := &transcriptBackend{}
+	var msgSeq atomic.Int32
+
+	result, _, err := d.executeAndDrain(context.Background(), fb, "p", agent.ExecOptions{ResumeSessionID: "stale"}, slog.Default(), "task-seq", &msgSeq)
+	if err != nil {
+		t.Fatalf("first call: %v", err)
+	}
+	if result.Status != "failed" {
+		t.Fatalf("expected failed first result, got %+v", result)
+	}
+
+	result, _, err = d.executeAndDrain(context.Background(), fb, "p", agent.ExecOptions{}, slog.Default(), "task-seq", &msgSeq)
+	if err != nil {
+		t.Fatalf("retry: %v", err)
+	}
+	if result.Status != "completed" {
+		t.Fatalf("expected completed retry result, got %+v", result)
+	}
+
+	got := rec.snapshot()
+	if len(got) != 4 {
+		t.Fatalf("expected 4 messages total, got %d: %+v", len(got), got)
+	}
+	for i, m := range got {
+		if m.Seq != i+1 {
+			t.Fatalf("expected strictly ascending seq across the retry, got %+v", got)
+		}
+	}
+}
+
+// sessionBackend hands out a pre-built session, leaving the test in control
+// of message and result delivery.
+type sessionBackend struct {
+	session *agent.Session
+}
+
+func (b sessionBackend) Execute(_ context.Context, _ string, _ agent.ExecOptions) (*agent.Session, error) {
+	return b.session, nil
+}
+
+// TestExecuteAndDrain_ContextCancelled_FlushesPendingTranscript pins the same
+// flush-before-return contract for the drainCtx.Done() terminal: when a
+// cancellation (or timeout/watchdog) ends the run with a message still
+// pending, executeAndDrain must not return until that tail is reported —
+// otherwise runTask fails-and-broadcasts while the last batch is in flight.
+func TestExecuteAndDrain_ContextCancelled_FlushesPendingTranscript(t *testing.T) {
+	t.Parallel()
+
+	d, rec := newTranscriptRecorder(t)
+
+	// Unbuffered: the send below returns only once the drain loop has
+	// consumed the message. The result channel never delivers, so only the
+	// context cancellation can end the drain.
+	msgCh := make(chan agent.Message)
+	b := sessionBackend{session: &agent.Session{Messages: msgCh, Result: make(chan agent.Result)}}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	type ret struct {
+		result agent.Result
+		err    error
+	}
+	retCh := make(chan ret, 1)
+	go func() {
+		result, _, err := d.executeAndDrain(ctx, b, "p", agent.ExecOptions{}, slog.Default(), "task-cancel-flush", new(atomic.Int32))
+		retCh <- ret{result, err}
+	}()
+
+	msgCh <- agent.Message{Type: agent.MessageText, Content: "pending tail"}
+	cancel()
+
+	r := <-retCh
+	if r.err != nil {
+		t.Fatalf("executeAndDrain: %v", r.err)
+	}
+	if r.result.Status != "cancelled" {
+		t.Fatalf("expected status=cancelled, got %q (err=%q)", r.result.Status, r.result.Error)
+	}
+
+	got := rec.snapshot()
+	if len(got) != 1 || got[0].Type != "text" || got[0].Content != "pending tail" {
+		t.Fatalf("expected the pending tail flushed before the cancelled return, got %+v", got)
+	}
+}
+
 func TestExecuteAndDrain_NoRetryWhenSessionEstablished(t *testing.T) {
 	t.Parallel()
 
@@ -1115,7 +1289,7 @@ func TestExecuteAndDrain_NoRetryWhenSessionEstablished(t *testing.T) {
 	}
 
 	opts := agent.ExecOptions{ResumeSessionID: "some-id"}
-	result, _, err := d.executeAndDrain(context.Background(), fb, "p", opts, slog.Default(), "t")
+	result, _, err := d.executeAndDrain(context.Background(), fb, "p", opts, slog.Default(), "t", new(atomic.Int32))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1185,7 +1359,7 @@ func TestExecuteAndDrain_CodexInactivityReportsToolResultTranscript(t *testing.T
 	result, tools, err := d.executeAndDrain(context.Background(), backend, "prompt", agent.ExecOptions{
 		Timeout:                   5 * time.Second,
 		SemanticInactivityTimeout: 100 * time.Millisecond,
-	}, slog.Default(), "task-stale")
+	}, slog.Default(), "task-stale", new(atomic.Int32))
 	if err != nil {
 		t.Fatalf("executeAndDrain: %v", err)
 	}
@@ -1240,7 +1414,7 @@ func TestExecuteAndDrain_ContextCancelled_ReportsCancelled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	result, _, err := d.executeAndDrain(ctx, blockingBackend{}, "p", agent.ExecOptions{}, slog.Default(), "t")
+	result, _, err := d.executeAndDrain(ctx, blockingBackend{}, "p", agent.ExecOptions{}, slog.Default(), "t", new(atomic.Int32))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1279,7 +1453,7 @@ func TestExecuteAndDrain_IdleWatchdog_FiresOnInactivity(t *testing.T) {
 	t.Cleanup(cancel)
 
 	start := time.Now()
-	result, _, err := d.executeAndDrain(ctx, idleWatchdogBackend{emitOne: true}, "p", agent.ExecOptions{}, slog.Default(), "t-idle")
+	result, _, err := d.executeAndDrain(ctx, idleWatchdogBackend{emitOne: true}, "p", agent.ExecOptions{}, slog.Default(), "t-idle", new(atomic.Int32))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1309,7 +1483,7 @@ func TestExecuteAndDrain_IdleWatchdog_FiresWhenNoMessageEverArrives(t *testing.T
 	// emitOne=false models a backend that hangs before sending any message.
 	// lastActivityAt is initialised at executeAndDrain entry, so the same
 	// window applies even with zero traffic.
-	result, _, err := d.executeAndDrain(ctx, idleWatchdogBackend{emitOne: false}, "p", agent.ExecOptions{}, slog.Default(), "t-idle-zero")
+	result, _, err := d.executeAndDrain(ctx, idleWatchdogBackend{emitOne: false}, "p", agent.ExecOptions{}, slog.Default(), "t-idle-zero", new(atomic.Int32))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1330,7 +1504,7 @@ func TestExecuteAndDrain_IdleWatchdog_DisabledWhenZero(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	time.AfterFunc(80*time.Millisecond, cancel)
 
-	result, _, err := d.executeAndDrain(ctx, idleWatchdogBackend{emitOne: true}, "p", agent.ExecOptions{}, slog.Default(), "t-idle-off")
+	result, _, err := d.executeAndDrain(ctx, idleWatchdogBackend{emitOne: true}, "p", agent.ExecOptions{}, slog.Default(), "t-idle-off", new(atomic.Int32))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1356,7 +1530,7 @@ func TestExecuteAndDrain_IdleWatchdog_HappyPathDoesNotFire(t *testing.T) {
 		},
 	}
 
-	result, _, err := d.executeAndDrain(context.Background(), fb, "p", agent.ExecOptions{}, slog.Default(), "t-idle-happy")
+	result, _, err := d.executeAndDrain(context.Background(), fb, "p", agent.ExecOptions{}, slog.Default(), "t-idle-happy", new(atomic.Int32))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1429,6 +1603,7 @@ func TestExecuteAndDrain_IdleWatchdog_DoesNotFireDuringInFlightToolCall(t *testi
 		agent.ExecOptions{},
 		slog.Default(),
 		"t-long-tool",
+		new(atomic.Int32),
 	)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -1468,7 +1643,7 @@ func TestExecuteAndDrain_IdleWatchdog_FiresOnStuckInFlightTool(t *testing.T) {
 	t.Cleanup(cancel)
 
 	start := time.Now()
-	result, _, err := d.executeAndDrain(ctx, stuckInFlightToolBackend{}, "p", agent.ExecOptions{}, slog.Default(), "t-stuck-tool")
+	result, _, err := d.executeAndDrain(ctx, stuckInFlightToolBackend{}, "p", agent.ExecOptions{}, slog.Default(), "t-stuck-tool", new(atomic.Int32))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1504,7 +1679,7 @@ func TestExecuteAndDrain_IdleWatchdog_FiresAfterToolResultIfBackendStaysSilent(t
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 
-	result, _, err := d.executeAndDrain(ctx, tailIdleAfterToolBackend{}, "p", agent.ExecOptions{}, slog.Default(), "t-tail-idle")
+	result, _, err := d.executeAndDrain(ctx, tailIdleAfterToolBackend{}, "p", agent.ExecOptions{}, slog.Default(), "t-tail-idle", new(atomic.Int32))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
