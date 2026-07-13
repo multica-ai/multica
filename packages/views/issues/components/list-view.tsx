@@ -15,6 +15,7 @@ import {
   type DragOverEvent,
 } from "@dnd-kit/core";
 import { SortableContext, verticalListSortingStrategy, arrayMove } from "@dnd-kit/sortable";
+import { Virtuoso } from "react-virtuoso";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
 import { Button } from "@multica/ui/components/ui/button";
 import type { Issue, IssueStatus, Project } from "@multica/core/types";
@@ -294,6 +295,13 @@ export function ListView({
     [issues, groups, onMoveIssue, groupIds, groupMap, sortBy, beginSettle, setColumns, columnsRef, isDraggingRef],
   );
 
+  // The single scroll container is shared by every status panel's Virtuoso as
+  // its customScrollParent, so a callback ref hands the element to the panels
+  // once it mounts. Keeping one scroller (rather than one per panel) preserves
+  // the current sticky-header + cross-section scroll behavior; only the rows
+  // inside each expanded panel virtualize.
+  const [scrollEl, setScrollEl] = useState<HTMLDivElement | null>(null);
+
   const content = (
     <Accordion.Root
       multiple
@@ -327,6 +335,7 @@ export function ListView({
             isExpanded={isExpanded}
             sortLabel={sortLabel}
             sort={sort}
+            scrollParent={scrollEl}
           />
         );
       })}
@@ -335,7 +344,7 @@ export function ListView({
 
   if (!dragEnabled) {
     return (
-      <div className="flex-1 min-h-0 overflow-y-auto p-2 pt-0">
+      <div ref={setScrollEl} className="flex-1 min-h-0 overflow-y-auto p-2 pt-0">
         {content}
       </div>
     );
@@ -349,7 +358,7 @@ export function ListView({
       onDragOver={handleDragOver}
       onDragEnd={handleDragEnd}
     >
-      <div className="flex-1 min-h-0 overflow-y-auto p-2 pt-0">
+      <div ref={setScrollEl} className="flex-1 min-h-0 overflow-y-auto p-2 pt-0">
         {content}
       </div>
 
@@ -378,6 +387,7 @@ function StatusAccordionItem({
   isExpanded,
   sortLabel,
   sort,
+  scrollParent,
 }: {
   status: IssueStatus;
   issueIds: string[];
@@ -391,6 +401,7 @@ function StatusAccordionItem({
   isExpanded: boolean;
   sortLabel: string | null;
   sort?: IssueSortParam;
+  scrollParent: HTMLElement | null;
 }) {
   const { t } = useT("issues");
   const selection = useIssueSurfaceSelection();
@@ -421,6 +432,52 @@ function StatusAccordionItem({
   });
 
   const disableSorting = !!sortLabel;
+
+  // The infinite-scroll sentinel rides Virtuoso's Footer so it sits at the true
+  // end of the virtualized rows and still fires loadMore when scrolled to it.
+  const listComponents = useMemo(
+    () =>
+      hasMore
+        ? { Footer: () => <InfiniteScrollSentinel onVisible={loadMore} loading={isLoading} /> }
+        : undefined,
+    [hasMore, loadMore, isLoading],
+  );
+
+  // Rows virtualize into the page's shared scroll parent. Only mount the
+  // Virtuoso when the section is expanded and that parent exists — a Virtuoso
+  // in a collapsed (0-height / hidden) panel has no viewport to measure. The
+  // droppable, SortableContext, sticky header, and collapse are unchanged;
+  // virtualization only decides whether an off-screen row is in the DOM.
+  const rows =
+    isExpanded && scrollParent && issues.length > 0 ? (
+      <Virtuoso
+        customScrollParent={scrollParent}
+        data={issues}
+        computeItemKey={(_index, issue) => issue.id}
+        increaseViewportBy={{ top: 400, bottom: 400 }}
+        components={listComponents}
+        itemContent={(_index, issue) =>
+          dragEnabled ? (
+            <DraggableListRow
+              issue={issue}
+              childProgress={childProgressMap.get(issue.id)}
+              project={
+                issue.project_id ? projectMap?.get(issue.project_id) : undefined
+              }
+              disableSorting={disableSorting}
+            />
+          ) : (
+            <ListRow
+              issue={issue}
+              childProgress={childProgressMap.get(issue.id)}
+              project={
+                issue.project_id ? projectMap?.get(issue.project_id) : undefined
+              }
+            />
+          )
+        }
+      />
+    ) : null;
 
   return (
     <Accordion.Item value={status} ref={dragEnabled ? setDroppableRef : undefined}>
@@ -482,37 +539,10 @@ function StatusAccordionItem({
         {issues.length > 0 ? (
           dragEnabled ? (
             <SortableContext items={issueIds} strategy={verticalListSortingStrategy}>
-              {issues.map((issue) => (
-                <DraggableListRow
-                  key={issue.id}
-                  issue={issue}
-                  childProgress={childProgressMap.get(issue.id)}
-                  project={
-                    issue.project_id ? projectMap?.get(issue.project_id) : undefined
-                  }
-                  disableSorting={disableSorting}
-                />
-              ))}
-              {hasMore && (
-                <InfiniteScrollSentinel onVisible={loadMore} loading={isLoading} />
-              )}
+              {rows}
             </SortableContext>
           ) : (
-            <>
-              {issues.map((issue) => (
-                <ListRow
-                  key={issue.id}
-                  issue={issue}
-                  childProgress={childProgressMap.get(issue.id)}
-                  project={
-                    issue.project_id ? projectMap?.get(issue.project_id) : undefined
-                  }
-                />
-              ))}
-              {hasMore && (
-                <InfiniteScrollSentinel onVisible={loadMore} loading={isLoading} />
-              )}
-            </>
+            rows
           )
         ) : (
           <p className="py-6 text-center text-xs text-muted-foreground">
