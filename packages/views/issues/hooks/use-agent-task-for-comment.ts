@@ -33,13 +33,29 @@ export function useAgentTaskForComment(
   sourceTaskId: string | null | undefined,
 ): AgentTask | null {
   const queryClient = useQueryClient();
+  // Only react to mutations on this issue's tasks cache — the hook
+  // must not re-evaluate on every query mutation app-wide. The
+  // prefix-match subscription is the same invalidation scope that
+  // issueKeys.tasks(issueId) declares via WS `task:*` events.
   const subscribe = (onChange: () => void) =>
-    queryClient.getQueryCache().subscribe(() => onChange());
+    queryClient.getQueryCache().subscribe((event) => {
+      const key = event.query.queryKey as readonly unknown[];
+      if (key[0] === "issues" && key[1] === "tasks" && key[2] === issueId) {
+        onChange();
+      }
+    });
   const getSnapshot = (): AgentTask | null => {
     if (!sourceTaskId) return null;
     const tasks = queryClient.getQueryData<AgentTask[]>(issueKeys.tasks(issueId));
     if (!tasks) return null;
-    return tasks.find((t) => t.id === sourceTaskId) ?? null;
+    // Workspace guard: even if the cache contains the source_task_id
+    // (e.g. from a corrupted row or cross-issue reuse), reject mismatches
+    // so the resolver returns null and the GC explainer fires instead
+    // of the wrong-workspace transcript.
+    const match = tasks.find(
+      (t) => t.id === sourceTaskId && t.issue_id === issueId,
+    );
+    return match ?? null;
   };
   return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
 }
