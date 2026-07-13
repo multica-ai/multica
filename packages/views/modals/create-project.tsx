@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef } from "react";
-import { ChevronRight, FolderOpen, Maximize2, Minimize2, Search, X as XIcon, UserMinus } from "lucide-react";
+import { CalendarClock, CalendarDays, ChevronRight, FolderOpen, Maximize2, Minimize2, MoreHorizontal, Search, X as XIcon, UserMinus } from "lucide-react";
 
 /**
  * GitHub mark — lucide-react v1 dropped brand icons, so we inline the
@@ -59,32 +59,13 @@ import {
 } from "../projects/components/labels";
 import { ProjectStartDatePicker } from "../projects/components/project-start-date-picker";
 import { ProjectDueDatePicker } from "../projects/components/project-due-date-picker";
+import { PillButton } from "../common/pill-button";
 import {
   isDesktopShell,
   pickDirectory,
   validateLocalDirectory,
 } from "../platform/local-directory";
 import { useLocalDaemonStatus } from "../platform/use-local-daemon-status";
-
-function PillButton({
-  children,
-  className,
-  ...props
-}: React.ButtonHTMLAttributes<HTMLButtonElement>) {
-  return (
-    <button
-      type="button"
-      className={cn(
-        "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs",
-        "hover:bg-accent/60 transition-colors cursor-pointer",
-        className,
-      )}
-      {...props}
-    >
-      {children}
-    </button>
-  );
-}
 
 function RepoUrlText({
   url,
@@ -138,6 +119,10 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
   const [icon, setIcon] = useState<string | undefined>(draft.icon);
   const [startDate, setStartDate] = useState<string>(draft.startDate ?? "");
   const [dueDate, setDueDate] = useState<string>(draft.dueDate ?? "");
+  // Dates are collapsed into the ⋯ overflow by default (progressive
+  // disclosure, mirroring create-issue); these flip a pill inline + open.
+  const [startDatePickerOpen, setStartDatePickerOpen] = useState(false);
+  const [dueDatePickerOpen, setDueDatePickerOpen] = useState(false);
   const [iconPickerOpen, setIconPickerOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
@@ -407,14 +392,13 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
           </p>
         </div>
 
-        {/* Footer: properties (left, wrap) + Create button (right). Single row
-            so the modal stays compact — Linear-style.
+        {/* Property toolbar — mirrors the create-issue footer: a wrapping pill
+            row whose low-frequency fields (start/due date) collapse into a ⋯
+            overflow, with the primary action in a separate bar below.
             Repos lives here alongside the property pills for now. Once we
             support more resource types (Linear / Notion / Figma / Slack), pull
-            them out into a dedicated Resources strip above this footer — a
-            single Repos pill on its own row looked too sparse. */}
-        <div className="flex items-center justify-between gap-2 px-4 py-3 border-t shrink-0">
-          <div className="flex items-center gap-1.5 flex-wrap min-w-0">
+            them out into a dedicated Resources strip above this footer. */}
+        <div className="flex items-center gap-1.5 px-4 py-2 shrink-0 flex-wrap">
           <DropdownMenu>
             <DropdownMenuTrigger
               render={
@@ -549,17 +533,27 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
             </PopoverContent>
           </Popover>
 
-          <ProjectStartDatePicker
-            startDate={startDate || null}
-            onUpdate={(u) => updateStartDate(u.start_date ?? "")}
-            triggerRender={<PillButton />}
-          />
+          {/* Start date — collapsed into ⋯ unless it has a value or was just
+              opened from the overflow (the calendar anchors on the inline pill). */}
+          {(startDate || startDatePickerOpen) && (
+            <ProjectStartDatePicker
+              startDate={startDate || null}
+              onUpdate={(u) => updateStartDate(u.start_date ?? "")}
+              triggerRender={<PillButton />}
+              open={startDatePickerOpen}
+              onOpenChange={setStartDatePickerOpen}
+            />
+          )}
 
-          <ProjectDueDatePicker
-            dueDate={dueDate || null}
-            onUpdate={(u) => updateDueDate(u.due_date ?? "")}
-            triggerRender={<PillButton />}
-          />
+          {(dueDate || dueDatePickerOpen) && (
+            <ProjectDueDatePicker
+              dueDate={dueDate || null}
+              onUpdate={(u) => updateDueDate(u.due_date ?? "")}
+              triggerRender={<PillButton />}
+              open={dueDatePickerOpen}
+              onOpenChange={setDueDatePickerOpen}
+            />
+          )}
 
           <Popover
             open={repoPopoverOpen}
@@ -809,8 +803,40 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
               )}
             </PopoverContent>
           </Popover>
-          </div>
 
+          {/* Overflow — always the last child so it stays at the end of the
+              wrap flow. Only rendered while a date is still collapsible; when
+              both are set there is nothing left to add. */}
+          {(!startDate || !dueDate) && (
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                render={
+                  <PillButton aria-label={t(($) => $.create_project.more_options_aria)}>
+                    <MoreHorizontal className="size-3.5" />
+                  </PillButton>
+                }
+              />
+              <DropdownMenuContent align="start" className="w-auto">
+                {!dueDate && (
+                  <DropdownMenuItem onClick={() => setDueDatePickerOpen(true)}>
+                    <CalendarDays className="h-3.5 w-3.5" />
+                    {t(($) => $.create_project.set_due_date)}
+                  </DropdownMenuItem>
+                )}
+                {!startDate && (
+                  <DropdownMenuItem onClick={() => setStartDatePickerOpen(true)}>
+                    <CalendarClock className="h-3.5 w-3.5" />
+                    {t(($) => $.create_project.set_start_date)}
+                  </DropdownMenuItem>
+                )}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
+        </div>
+
+        {/* Footer action bar — primary action in its own strip, matching
+            create-issue. */}
+        <div className="flex items-center justify-end border-t px-4 py-3 shrink-0">
           <Button
             size="sm"
             onClick={handleSubmit}

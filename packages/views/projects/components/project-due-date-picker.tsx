@@ -30,15 +30,22 @@ export function ProjectDueDatePicker({
   onUpdate,
   triggerRender,
   align = "start",
+  open: controlledOpen,
+  onOpenChange: controlledOnOpenChange,
 }: {
   dueDate: string | null;
   onUpdate: (updates: Partial<UpdateProjectRequest>) => void;
   /** Custom trigger element (e.g. a pill button in the create modal). */
   triggerRender?: React.ReactElement;
   align?: "start" | "center" | "end";
+  /** Controlled open state — lets a ⋯ overflow menu reveal + open the pill. */
+  open?: boolean;
+  onOpenChange?: (v: boolean) => void;
 }) {
   const { t } = useT("projects");
-  const [open, setOpen] = useState(false);
+  const [internalOpen, setInternalOpen] = useState(false);
+  const open = controlledOpen ?? internalOpen;
+  const setOpen = controlledOnOpenChange ?? setInternalOpen;
   const date = dateOnlyToLocalDate(dueDate);
   const isOverdue = isPastDateOnly(dueDate);
 

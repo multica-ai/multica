@@ -181,10 +181,18 @@ describe("CreateProjectModal", () => {
     expect(screen.getByRole("tooltip", { name: longRepoUrl })).toBeInTheDocument();
   });
 
-  it("renders the start-date and due-date pills", () => {
+  it("reveals the start/due date pickers from the ⋯ overflow menu", async () => {
+    const user = userEvent.setup();
     renderWithI18n(<CreateProjectModal onClose={vi.fn()} />);
 
+    // Dates are collapsed behind the overflow by default (progressive disclosure).
+    expect(screen.queryByRole("button", { name: "Start date" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Due date" })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /Set start date/ }));
     expect(screen.getByRole("button", { name: "Start date" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /Set due date/ }));
     expect(screen.getByRole("button", { name: "Due date" })).toBeInTheDocument();
   });
 
