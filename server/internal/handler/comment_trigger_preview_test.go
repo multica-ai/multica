@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -1065,10 +1066,12 @@ func TestPreviewCommentTriggers_AllSuppressesAssigneeAndPendingDedupes(t *testin
 		t.Fatalf("@all preview agents = %d, want 0: %+v", got, allPreview.Agents)
 	}
 
-	if _, err := testPool.Exec(ctx, `
+	var pendingTaskID string
+	if err := testPool.QueryRow(ctx, `
 		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status)
 		VALUES ($1, $2, $3, 'queued')
-	`, agentID, handlerTestRuntimeID(t), issueID); err != nil {
+		RETURNING id
+	`, agentID, handlerTestRuntimeID(t), issueID).Scan(&pendingTaskID); err != nil {
 		t.Fatalf("seed queued task: %v", err)
 	}
 
@@ -1078,6 +1081,21 @@ func TestPreviewCommentTriggers_AllSuppressesAssigneeAndPendingDedupes(t *testin
 	requirePreviewAgents(t, pendingPreview, agentID)
 	if pendingPreview.Agents[0].Source != string(commentTriggerSourceIssueAssignee) {
 		t.Fatalf("pending preview source = %q, want %q", pendingPreview.Agents[0].Source, commentTriggerSourceIssueAssignee)
+	}
+	if !pendingPreview.Agents[0].AlreadyPending {
+		t.Fatal("pending preview did not identify the already queued task")
+	}
+	if got := pendingPreview.Agents[0].PendingTaskID; got == nil || *got != pendingTaskID {
+		t.Fatalf("pending preview task id = %v, want %s", got, pendingTaskID)
+	}
+	if got := pendingPreview.Agents[0].PendingTaskStatus; got == nil || *got != "queued" {
+		t.Fatalf("pending preview task status = %v, want queued", got)
+	}
+	if got := pendingPreview.Agents[0].PendingTaskAgeSeconds; got == nil || *got < 0 {
+		t.Fatalf("pending preview task age = %v, want non-negative", got)
+	}
+	if !strings.Contains(pendingPreview.Agents[0].Reason, pendingTaskID) {
+		t.Fatalf("pending preview reason = %q, want task id %s", pendingPreview.Agents[0].Reason, pendingTaskID)
 	}
 
 	postCommentForTriggerPreviewTest(t, issueID, map[string]any{

@@ -55,6 +55,7 @@ function sourceLabel(source: string, t: IssuesT): string {
 // just restate it. Only the squad-leader link (non-obvious) and the unknown
 // fallback carry information the header doesn't.
 function sourceReason(agent: CommentTriggerPreviewAgent, t: IssuesT): string | null {
+  if (agent.already_pending) return agent.reason;
   switch (agent.source) {
     case "issue_assignee":
     case "mention_agent":

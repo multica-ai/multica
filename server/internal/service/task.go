@@ -1735,6 +1735,17 @@ func (s *TaskService) StartTask(ctx context.Context, taskID pgtype.UUID) (*db.Ag
 	return &task, nil
 }
 
+// HeartbeatTaskExecution records that the daemon worker assigned to this task
+// is still alive. This is deliberately task-scoped: a runtime heartbeat can
+// stay fresh while one of several concurrent task workers is wedged.
+func (s *TaskService) HeartbeatTaskExecution(ctx context.Context, taskID pgtype.UUID) (*db.AgentTaskQueue, error) {
+	task, err := s.Queries.TouchAgentTaskExecutionHeartbeat(ctx, taskID)
+	if err != nil {
+		return nil, fmt.Errorf("heartbeat task execution: %w", err)
+	}
+	return &task, nil
+}
+
 func (s *TaskService) cancelDeferredEscalationsForTask(ctx context.Context, taskID pgtype.UUID) {
 	cancelled, err := s.Queries.CancelDeferredEscalationsForTask(ctx, taskID)
 	if err != nil {
