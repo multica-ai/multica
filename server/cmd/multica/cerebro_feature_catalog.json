@@ -43,6 +43,13 @@
   ],
   "flags": [
     {
+      "key": "cerebro_mini_apps",
+      "label": "Apps and workflow builder",
+      "description": "Add the Apps catalog, app builder, visual workflow builder, and interactive in-chat app views. Off hides every user-facing entry while keeping stored apps and runs intact.",
+      "group": "workspace",
+      "default": false
+    },
+    {
       "key": "cerebro_agent_page_redesign",
       "label": "Agent page redesign (preview)",
       "description": "Preview the redesigned agent detail page: a single framed card with a breadcrumb top bar, a redesigned identity rail (avatar, properties, details, skills), and a flat tab strip for Tasks, Instructions, Skills, Tools, and Capabilities. Off keeps the current agent page. All tabs reuse the existing data and permissions.",

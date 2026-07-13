@@ -9,12 +9,8 @@
       "gate": "cerebro_capability:use_apps"
     },
     {
-      "id": "POST /api/cerebro/app-workflows/{workflowId}/{state}",
+      "id": "POST /api/cerebro/app-workflows/{workflowId}/{state:enable|disable}",
       "gate": "cerebro_capability:build_apps"
-    },
-    {
-      "id": "GET /api/cerebro/app-workflows/{workflowId}/runs",
-      "gate": "cerebro_capability:use_apps"
     },
     {
       "id": "POST /api/cerebro/apps/",
@@ -39,10 +35,6 @@
     {
       "id": "POST /api/cerebro/apps/{id}/approve-scopes",
       "gate": "cerebro_capability:approve_app_scopes"
-    },
-    {
-      "id": "GET /api/cerebro/apps/{id}/storage/{key}",
-      "gate": "cerebro_capability:use_apps"
     },
     {
       "id": "PUT /api/cerebro/apps/{id}/storage/{key}",
@@ -2286,11 +2278,11 @@
     },
     {
       "id": "app workflow disable",
-      "gate": "via:POST /api/cerebro/app-workflows/{workflowId}/{state}"
+      "gate": "via:POST /api/cerebro/app-workflows/{workflowId}/{state:enable|disable}"
     },
     {
       "id": "app workflow enable",
-      "gate": "via:POST /api/cerebro/app-workflows/{workflowId}/{state}"
+      "gate": "via:POST /api/cerebro/app-workflows/{workflowId}/{state:enable|disable}"
     },
     {
       "id": "app workflow runs",
