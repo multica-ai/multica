@@ -207,9 +207,10 @@ func (d *Daemon) sendWSHeartbeats(ctx context.Context, runtimeIDs []string, writ
 		if ctx.Err() != nil {
 			return
 		}
+		d.refreshHeartbeatAccount(rid) // CEREBRO-PATCH(ws-heartbeat-account-payload): FIR-3118 keep the provider login current.
 		frame, err := json.Marshal(protocol.Message{
 			Type:    protocol.EventDaemonHeartbeat,
-			Payload: marshalRaw(protocol.DaemonHeartbeatRequestPayload{RuntimeID: rid, SupportsBatchImport: true}),
+			Payload: marshalRaw(protocol.DaemonHeartbeatRequestPayload{RuntimeID: rid, SupportsBatchImport: true, Account: d.heartbeatAccountFor(rid)}), // CEREBRO-PATCH(ws-heartbeat-account-payload): FIR-3118 match HTTP account registration.
 		})
 		if err != nil {
 			d.logger.Debug("ws heartbeat marshal failed", "error", err, "runtime_id", rid)

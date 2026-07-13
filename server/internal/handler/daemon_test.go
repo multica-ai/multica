@@ -607,7 +607,7 @@ func TestHandleDaemonWSHeartbeat_RuntimeGoneReturnsAckNotError(t *testing.T) {
 	missingRuntime := uuid.New().String()
 	ack, err := testHandler.HandleDaemonWSHeartbeat(context.Background(),
 		daemonws.ClientIdentity{WorkspaceID: testWorkspaceID},
-		missingRuntime, false)
+		protocol.DaemonHeartbeatRequestPayload{RuntimeID: missingRuntime}) // CEREBRO-PATCH(ws-heartbeat-handler-payload): FIR-3118 exercise the full WS heartbeat payload signature.
 	if err != nil {
 		t.Fatalf("HandleDaemonWSHeartbeat: unexpected error %v", err)
 	}

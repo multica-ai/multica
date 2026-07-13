@@ -66,3 +66,16 @@ func TestHeartbeatCarriesAccountIdentity(t *testing.T) {
 		t.Fatal("heartbeat/register must refresh the identity-probe cache; an upstream sync likely removed the Cerebro wiring")
 	}
 }
+
+func TestWSHeartbeatCarriesAccountIdentity(t *testing.T) {
+	t.Parallel()
+
+	src, err := os.ReadFile("wakeup.go")
+	if err != nil {
+		t.Fatalf("read wakeup.go: %v", err)
+	}
+
+	if !strings.Contains(string(src), "Account: d.heartbeatAccountFor(rid)") {
+		t.Fatal("WebSocket heartbeat must carry account identity; otherwise its ack cannot start the provider usage poll")
+	}
+}
