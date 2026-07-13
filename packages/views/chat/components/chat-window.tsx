@@ -21,6 +21,7 @@ import { api } from "@multica/core/api";
 import { useAgentPresenceDetail, useWorkspaceAgentAvailability } from "@multica/core/agents";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
 import { ActorAvatar } from "../../common/actor-avatar";
+import { useAppForeground } from "../../common/use-app-foreground";
 import {
   PickerEmpty,
   PickerItem,
@@ -325,19 +326,23 @@ export function ChatWindow() {
   // stays current even when this window is closed. See packages/core/realtime/.
 
   // Auto mark-as-read whenever the user is looking at a session with unread
-  // state: window open + a session active + has_unread → PATCH.
-  // has_unread comes from the list query; WS handlers invalidate it on
-  // chat:done so a reply arriving while the user watches triggers this
-  // effect again and is instantly cleared.
+  // state: window open + app in the foreground + a session active + has_unread
+  // → PATCH. has_unread comes from the list query; WS handlers invalidate it on
+  // chat:done so a reply arriving while the user watches triggers this effect
+  // again and is instantly cleared. `appForeground` gates the "is looking"
+  // assumption: a reply landing while the window is open but the app is
+  // backgrounded must stay unread so the sidebar badges it (MUL-4485), then
+  // clears when the user refocuses and this effect re-runs.
+  const appForeground = useAppForeground();
   const currentHasUnread =
     sessions.find((s) => s.id === activeSessionId)?.has_unread ?? false;
   useEffect(() => {
-    if (!isOpen || !activeSessionId) return;
+    if (!isOpen || !appForeground || !activeSessionId) return;
     if (!currentHasUnread) return;
     uiLogger.info("auto markRead", { sessionId: activeSessionId });
     markRead.mutate(activeSessionId);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- markRead ref stable
-  }, [isOpen, activeSessionId, currentHasUnread]);
+  }, [isOpen, appForeground, activeSessionId, currentHasUnread]);
 
   const { uploadWithToast } = useFileUpload(api);
 
