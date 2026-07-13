@@ -1,0 +1,127 @@
+import { spawn } from "node:child_process";
+import { readFile } from "node:fs/promises";
+import { dirname, extname, join, resolve, sep } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const UUID = "[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}";
+const SEMVER = "(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?";
+const FRONTEND_ROUTE = new RegExp(`^/apps/(${UUID})/(${SEMVER})(?:/(.*))?$`, "i");
+const WORKER_ROUTE = new RegExp(`^/workers/(${UUID})/(${SEMVER})/invoke$`, "i");
+const RUNNER = join(dirname(fileURLToPath(import.meta.url)), "worker-runner.mjs");
+const MIME = new Map([
+  [".css", "text/css; charset=utf-8"],
+  [".html", "text/html; charset=utf-8"],
+  [".js", "text/javascript; charset=utf-8"],
+  [".json", "application/json; charset=utf-8"],
+  [".svg", "image/svg+xml"],
+]);
+
+const json = (value, status = 200) =>
+  new Response(JSON.stringify(value), { status, headers: { "content-type": "application/json; charset=utf-8" } });
+
+function safePath(root, ...parts) {
+  const target = resolve(root, ...parts);
+  const prefix = resolve(root) + sep;
+  return target.startsWith(prefix) ? target : null;
+}
+
+export function createAppsRuntime(options = {}) {
+  const bundleRoot = resolve(options.bundleRoot ?? process.env.APP_BUNDLE_ROOT ?? "/var/lib/multica-apps");
+  const workerTimeoutMs = options.workerTimeoutMs ?? Number(process.env.APP_WORKER_TIMEOUT_MS ?? 5_000);
+  const workerMemoryMb = options.workerMemoryMb ?? Number(process.env.APP_WORKER_MEMORY_MB ?? 64);
+
+  return {
+    async fetch(request) {
+      const url = new URL(request.url);
+      if (url.pathname === "/healthz") return json({ status: "ok" });
+
+      const frontend = FRONTEND_ROUTE.exec(url.pathname);
+      if (request.method === "GET" && frontend) {
+        const [, appID, version, requested = ""] = frontend;
+        const relative = requested === "" || requested.endsWith("/") ? requested + "index.html" : requested;
+        const path = safePath(bundleRoot, appID, version, "frontend", relative);
+        if (!path) return json({ error: "Not found" }, 404);
+        try {
+          const body = await readFile(path);
+          return new Response(body, {
+            headers: {
+              "cache-control": "public, max-age=31536000, immutable",
+              "content-type": MIME.get(extname(path)) ?? "application/octet-stream",
+              "content-security-policy": "default-src 'self'; connect-src 'self' https://registry.firtal.com; frame-ancestors 'self'",
+            },
+          });
+        } catch {
+          return json({ error: "App frontend not found" }, 404);
+        }
+      }
+
+      const worker = WORKER_ROUTE.exec(url.pathname);
+      if (request.method === "POST" && worker) {
+        const [, appID, version] = worker;
+        const modulePath = safePath(bundleRoot, appID, version, "backend", "index.mjs");
+        if (!modulePath) return json({ error: "App backend not found" }, 404);
+        let input;
+        try {
+          input = await request.json();
+        } catch {
+          return json({ error: "Request body must be valid JSON" }, 400);
+        }
+        try {
+          return json(await runWorker({ modulePath, input, appID, version, workerTimeoutMs, workerMemoryMb }));
+        } catch (error) {
+          return json({ error: error instanceof Error ? error.message : "App worker failed" }, 502);
+        }
+      }
+
+      return json({ error: "Not found" }, 404);
+    },
+  };
+}
+
+function runWorker({ modulePath, input, appID, version, workerTimeoutMs, workerMemoryMb }) {
+  return new Promise((resolvePromise, reject) => {
+    const child = spawn(process.execPath, [`--max-old-space-size=${workerMemoryMb}`, RUNNER, modulePath], {
+      stdio: ["pipe", "pipe", "pipe"],
+      env: {
+        PATH: process.env.PATH ?? "",
+        NODE_ENV: "production",
+        MULTICA_APP_ID: appID,
+        MULTICA_APP_VERSION: version,
+        MULTICA_APP_TOKEN_ENDPOINT: process.env.MULTICA_APP_TOKEN_ENDPOINT ?? "",
+      },
+    });
+    let stdout = "";
+    let stderr = "";
+    const timer = setTimeout(() => {
+      child.kill("SIGKILL");
+      reject(new Error("App worker exceeded its execution deadline"));
+    }, workerTimeoutMs);
+    child.stdout.setEncoding("utf8");
+    child.stderr.setEncoding("utf8");
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk;
+      if (stdout.length > 1_048_576) child.kill("SIGKILL");
+    });
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk;
+      if (stderr.length > 65_536) child.kill("SIGKILL");
+    });
+    child.once("error", (error) => {
+      clearTimeout(timer);
+      reject(error);
+    });
+    child.once("close", (code) => {
+      clearTimeout(timer);
+      if (code !== 0) {
+        reject(new Error(stderr.trim() || "App worker failed"));
+        return;
+      }
+      try {
+        resolvePromise(JSON.parse(stdout));
+      } catch {
+        reject(new Error("App worker returned invalid JSON"));
+      }
+    });
+    child.stdin.end(JSON.stringify(input));
+  });
+}

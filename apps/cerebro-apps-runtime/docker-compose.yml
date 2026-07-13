@@ -1,0 +1,21 @@
+services:
+  cerebro-apps-runtime:
+    build:
+      context: ../..
+      dockerfile: apps/cerebro-apps-runtime/Dockerfile
+    ports:
+      - "4310:4310"
+    environment:
+      MULTICA_APP_TOKEN_ENDPOINT: http://host.docker.internal:8080/api/cerebro/apps
+    volumes:
+      - ./fixtures:/var/lib/multica-apps:ro
+    mem_limit: 256m
+    cpus: 1.0
+    read_only: true
+    tmpfs:
+      - /tmp:size=32m
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:4310/healthz"]
+      interval: 10s
+      timeout: 2s
+      retries: 3
