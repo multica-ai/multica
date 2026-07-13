@@ -269,7 +269,7 @@ export function createKoDict(allowSignup: boolean): LandingDict {
       },
       entries: [
         {
-          version: "0.3.44",
+          version: "0.4.0",
           date: "2026-07-13",
           title: "맞춤 단축키, 대화로 만드는 에이전트, 그리고 새로워진 모습",
           changes: [],

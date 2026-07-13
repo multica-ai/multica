@@ -270,7 +270,7 @@ export function createJaDict(allowSignup: boolean): LandingDict {
       },
       entries: [
         {
-          version: "0.3.44",
+          version: "0.4.0",
           date: "2026-07-13",
           title: "カスタム ショートカット、対話でのエージェント作成、そして新しい見た目",
           changes: [],

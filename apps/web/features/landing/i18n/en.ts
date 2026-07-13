@@ -294,7 +294,7 @@ export function createEnDict(allowSignup: boolean): LandingDict {
     },
     entries: [
       {
-        version: "0.3.44",
+        version: "0.4.0",
         date: "2026-07-13",
         title: "Custom shortcuts, conversational agent creation, and a fresh new look",
         changes: [],

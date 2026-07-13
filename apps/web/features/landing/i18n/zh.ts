@@ -294,7 +294,7 @@ export function createZhDict(allowSignup: boolean): LandingDict {
     },
     entries: [
       {
-        version: "0.3.44",
+        version: "0.4.0",
         date: "2026-07-13",
         title: "自定义快捷键、对话式创建智能体，界面焕新",
         changes: [],
