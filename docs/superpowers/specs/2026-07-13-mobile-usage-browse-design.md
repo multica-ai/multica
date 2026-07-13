@@ -107,38 +107,64 @@ Each read method on `apps/mobile/data/api.ts` uses `fetchValidated`
 against the matching zod schema already exported from
 `packages/core/api/schemas.ts` (pure exports, on the sharing whitelist).
 
-### 2. Display logic — `apps/mobile/lib/usage-display.ts` (new, highest-risk file this round)
+### 2. Display logic — two new `apps/mobile/lib/` files (highest-risk work this round)
 
-Mirror (not import) from `packages/views/runtimes/utils.ts`:
+Confirmed by directly reading both source files during plan-writing:
+`DashboardPage` draws its pricing primitives from `packages/views/runtimes/utils.ts`
+but its actual aggregation functions from a **second, sibling file**,
+`packages/views/dashboard/utils.ts` — not from `runtimes/utils.ts`'s own
+`aggregateByDate`. The mobile port mirrors this same two-file split:
 
-- `MODEL_PRICING` table (~40 rows, USD/1M tokens) and `estimateCost` /
-  `resolvePricing` / `canonicalCandidates` — the 4 model-id
-  normalization tolerances (strip `provider/` prefix, Anthropic
-  dot↔dash, strip dated snapshot suffix, strip trailing `[1m]` tag),
-  applied in the same order.
-- `estimateCacheSavings`.
-- `aggregateByDate` and `aggregateByWeek` — pre-zeroed trailing ISO
-  (Monday-start) weeks so sparse weeks render as empty bars, not gaps
-  (this exact bug was previously fixed as MUL-2382 on web; mobile must
-  not reintroduce it), current week marked `partial: true`, pure
-  `YYYY-MM-DD` string math (no host-tz/DST drift).
-- `todayIso(tz)` / `addDaysIso` — confirmed as what `DashboardPage`
-  actually calls (not `sliceWindow`, which is surface-A-only and unused
-  here): the selected period's cutoff date is
+**`apps/mobile/lib/usage-pricing.ts`** mirrors the pricing primitives from
+`packages/views/runtimes/utils.ts`: `MODEL_PRICING` table (~40 rows,
+USD/1M tokens), `estimateCost` / `resolvePricing` / `canonicalCandidates`
+— the 4 model-id normalization tolerances (strip `provider/` prefix,
+Anthropic dot↔dash, strip dated snapshot suffix, strip trailing `[1m]`
+tag), applied in the same order — plus `formatTokens` and a small
+`fmtMoney` formatter (mirrored from `dashboard-page.tsx` itself, where it
+is a private, unexported helper).
+
+**`apps/mobile/lib/usage-display.ts`** mirrors the dashboard-specific
+aggregation from `packages/views/dashboard/utils.ts`, plus the
+shared week/date helpers from `runtimes/utils.ts` that both surfaces
+reuse:
+
+- `aggregateDailyCost`, `aggregateDailyTokens`, `computeDailyTotals` — one
+  row per date; cost math calls into `usage-pricing.ts`'s
+  `estimateCost`/`estimateCostBreakdown`.
+- `aggregateAgentTokens`, `mergeAgentDashboardRows` — per-agent token
+  rollup merged with the per-agent run-time rollup; `task_count` prefers
+  the run-time rollup (the token rollup double-counts a task that spans
+  2 models).
+- `bucketUnknownAgentRows` / `DELETED_AGENTS_ROW_ID` — folds any per-agent
+  row whose agent has been hard-deleted into one synthetic "Deleted
+  agents" row so the leaderboard sum reconciles with the KPI total. This
+  is the exact class of hazard the mobile CLAUDE.md's inbox-dedup
+  incident warns about.
+- `aggregateByWeek` (shared, from `runtimes/utils.ts`), plus
+  `aggregateWeeklyTime`/`aggregateWeeklyTasks` (dashboard-specific) — all
+  three pre-zero trailing ISO (Monday-start) weeks so sparse weeks render
+  as empty bars, not gaps (the MUL-2382 bug, previously fixed on web;
+  mobile must not reintroduce it), current week marked `partial: true`,
+  pure `YYYY-MM-DD` string math (no host-tz/DST drift).
+- `aggregateDailyTime`/`aggregateDailyTasks` (dashboard-specific).
+- `todayIso(tz)` / `addDaysIso` (shared, from `runtimes/utils.ts`) — the
+  selected period's cutoff date is
   `addDaysIso(todayIso(viewTZ), -(days - 1))`, then daily/runtime rows
   are filtered to `date >= cutoff`, where `viewTZ` is the **viewing**
   timezone (see below), not device-local.
-- `bucketUnknownAgentRows` / `DELETED_AGENTS_ROW_ID` — folds any
-  per-agent row whose agent has been hard-deleted into one synthetic
-  "Deleted agents" row so the leaderboard sum reconciles with the KPI
-  total. This is the exact class of hazard the mobile CLAUDE.md's
-  inbox-dedup incident warns about: skip it and the leaderboard rows
-  won't sum to the visible KPI total.
-- `mergeAgentDashboardRows` — merges the token rollup with the runtime
-  rollup per agent; `task_count` prefers the runtime rollup (the token
-  rollup double-counts tasks that span 2 models).
-- `formatTokens` (1.2K / 3.4M) and `formatDuration` (compact "1h 23m" /
-  "<1m").
+- `formatDuration` (dashboard's own `(seconds, lessThanMinuteLabel)`
+  version — there are 3 unrelated functions named `formatDuration`
+  elsewhere in `packages/views`; this is specifically the one
+  `dashboard/utils.ts` exports, not `runtimes/utils.ts`'s or either of
+  the other two).
+
+**Confirmed NOT needed** (present in `runtimes/utils.ts` but used only by
+the per-runtime `UsageSection`, surface A, never by `DashboardPage`) —
+do not port these: `sliceWindow`, `aggregateByDate`, `estimateCacheSavings`,
+`isModelPriced`/`modelGroupingKey`/`aggregateCostByAgent`/`aggregateCostByModel`/
+`collectUnmappedModels` (the "cost by agent/model" tabs and the unmapped-
+pricing banner are surface-A-only UI that `DashboardPage` doesn't have).
 
 New `apps/mobile/lib/use-viewing-timezone.ts`, mirroring
 `packages/views/common/use-viewing-timezone.ts`'s fallback chain: stored
