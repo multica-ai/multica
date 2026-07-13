@@ -28,6 +28,8 @@ function workspaceScoped(slug: string) {
     channels: () => `${ws}/channels`,
     channelDetail: (id: string) => `${ws}/channels/${encode(id)}`,
     projects: () => `${ws}/projects`,
+    rocks: () => `${ws}/rocks`, // CEREBRO-PATCH(operating-system-paths): FIR-2816 Rocks route.
+    strategy: () => `${ws}/strategy`, // CEREBRO-PATCH(operating-system-paths): FIR-2816 Strategy route.
     projectDetail: (id: string) => `${ws}/projects/${encode(id)}`,
     // CEREBRO-PATCH(sprint-detail-path): TECH-3684 sprint opens as its own board view.
     sprintDetail: (id: string) => `${ws}/sprints/${encode(id)}`,

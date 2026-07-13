@@ -971,6 +971,38 @@ type CerebroReminder struct {
 	ChatMessageID    pgtype.UUID        `json:"chat_message_id"`
 }
 
+type CerebroObjectConnection struct {
+	ID               pgtype.UUID        `json:"id"`
+	WorkspaceID      pgtype.UUID        `json:"workspace_id"`
+	SourceType       string             `json:"source_type"`
+	SourceID         pgtype.UUID        `json:"source_id"`
+	TargetType       string             `json:"target_type"`
+	TargetID         pgtype.UUID        `json:"target_id"`
+	RelationshipType string             `json:"relationship_type"`
+	Provenance       string             `json:"provenance"`
+	CreatedByType    string             `json:"created_by_type"`
+	CreatedByID      pgtype.UUID        `json:"created_by_id"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+}
+
+type CerebroOperatingSystemSetting struct {
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	Terminology []byte             `json:"terminology"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
+type CerebroRock struct {
+	ProjectID      pgtype.UUID        `json:"project_id"`
+	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
+	PeriodStart    pgtype.Date        `json:"period_start"`
+	PeriodEnd      pgtype.Date        `json:"period_end"`
+	Confidence     int32              `json:"confidence"`
+	ReportedHealth string             `json:"reported_health"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+}
+
 type CerebroRole struct {
 	ID          pgtype.UUID        `json:"id"`
 	WorkspaceID pgtype.UUID        `json:"workspace_id"`
@@ -1128,6 +1160,20 @@ type CerebroStatusModel struct {
 	CreatedAt        pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
 	WorkspaceDefault bool               `json:"workspace_default"`
+}
+
+type CerebroStrategyItem struct {
+	ID           pgtype.UUID        `json:"id"`
+	WorkspaceID  pgtype.UUID        `json:"workspace_id"`
+	Kind         string             `json:"kind"`
+	Title        string             `json:"title"`
+	Description  string             `json:"description"`
+	HorizonUnit  pgtype.Text        `json:"horizon_unit"`
+	HorizonCount pgtype.Int4        `json:"horizon_count"`
+	Position     int32              `json:"position"`
+	State        string             `json:"state"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
 }
 
 type CerebroTaskContextFootprint struct {

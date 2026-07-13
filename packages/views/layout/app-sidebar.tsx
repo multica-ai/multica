@@ -97,6 +97,7 @@ import { AgentPassesNavItem } from "@multica/cerebro-agent-passes/views/agent-pa
 import { NotesNavItem } from "@multica/cerebro-notes/views/notes-nav-item";
 // CEREBRO-PATCH(cerebro-reminders-sidebar): FIR-394 sidebar entry for the Reminders overview
 import { RemindersNavItem } from "@multica/cerebro-reminders/views/reminders-nav-item";
+import { OperatingSystemNavItems } from "./cerebro-operating-system-nav"; // CEREBRO-PATCH(operating-system-sidebar): FIR-2816 Strategy and Rocks navigation.
 import { useAuthStore } from "@multica/core/auth";
 import { useCurrentWorkspace, useWorkspacePaths, paths } from "@multica/core/paths";
 import { workspaceListOptions, myInvitationListOptions, workspaceKeys } from "@multica/core/workspace/queries";
@@ -873,6 +874,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                 <NotesNavItem workspaceSlug={workspace?.slug ?? ""} onClick={handleNavClick} />
                 {/* CEREBRO-PATCH(cerebro-reminders-sidebar): FIR-394 Reminders entry in workspace group */}
                 <RemindersNavItem workspaceSlug={workspace?.slug ?? ""} onClick={handleNavClick} />
+                <OperatingSystemNavItems workspaceSlug={workspace?.slug ?? ""} onClick={handleNavClick} /> {/* CEREBRO-PATCH(operating-system-sidebar): FIR-2816 gated fork navigation. */}
                 {/* CEREBRO-PATCH(projects-flag-gate): TECH-2880 wrap Projects collapsible in cerebro_projects gate */}
                 {projectsEnabled && (
                 // CEREBRO-PATCH(projects-sidebar-default-collapsed): TECH-3687 start Projects collapsed on load.

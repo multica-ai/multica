@@ -43,6 +43,7 @@ import (
 	// CEREBRO-PATCH(cerebro-dashboard-route): JEH-684 dashboard handler import
 	cerebrodashboard "github.com/multica-ai/multica/server/internal/cerebro/dashboard"
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
+	operatingsystem "github.com/multica-ai/multica/server/internal/cerebro/operatingsystem" // CEREBRO-PATCH(operating-system-routes): FIR-2816 fork route module.
 	// CEREBRO-PATCH(cerebro-workflows-loop-planning): FIR-2283 loop planning-dispatch materializer import
 	cerebroloops "github.com/multica-ai/multica/server/internal/cerebro/loops"
 	// CEREBRO-PATCH(cerebro-cost-optimization-routes): FIR-2325 per-workspace saving-mode handler import.
@@ -813,6 +814,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	cerebroAgentAvatarHandler := cerebroagentavatar.New(store, queries)
 	// CEREBRO-PATCH(cerebro-sprints-routes): FIR-2666 project sprint handler instance
 	cerebroSprintsHandler := cerebrosprints.NewHandler(cerebroQueries, pool, queries)
+	cerebroOperatingSystemHandler := operatingsystem.NewHandler(operatingsystem.NewService(cerebroQueries, queries)) // CEREBRO-PATCH(operating-system-routes): FIR-2816 wire Strategy/Rocks service.
 	// CEREBRO-PATCH(cerebro-issue-date-times-routes): FIR-1597 issue start/due time-of-day handler instance
 	cerebroIssueDateTimeHandler := cerebroissuedatetime.NewHandler(cerebroQueries, queries)
 	// CEREBRO-PATCH(cerebro-issue-date-times-routes): FIR-1597 workspace default agent-start handler instance
@@ -2215,6 +2217,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Put("/", cerebroSprintsHandler.AssignIssue)
 			})
 			r.Get("/api/cerebro/issues/{issueID}/selectable-sprints", cerebroSprintsHandler.ListSelectableSprints) // CEREBRO-PATCH(cerebro-sprints-selectable): FIR-1657 cross-project sprint picker.
+			cerebroOperatingSystemHandler.MountRoutes(r)                                                           // CEREBRO-PATCH(operating-system-routes): FIR-2816 mount fork-owned Strategy/Rocks endpoints.
 			// CEREBRO-PATCH(cerebro-issue-date-times-routes): FIR-1597 optional start/due time-of-day per issue.
 			r.Route("/api/cerebro/issues/{issueID}/date-times", func(r chi.Router) {
 				r.Get("/", cerebroIssueDateTimeHandler.Get)

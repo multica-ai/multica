@@ -596,6 +596,13 @@
       "default": false
     },
     {
+      "key": "cerebro_operating_system",
+      "label": "Operating System",
+      "description": "Plan strategy horizons and treat existing Projects as Rocks with transparent Issue rollups. Off hides the Strategy and Rocks routes and navigation. FIR-2816.",
+      "group": "workspace",
+      "default": false
+    },
+    {
       "key": "cerebro_comment_chapters",
       "label": "Comment sessions",
       "description": "Wrap an issue's comment timeline in named sessions with a status chip, a Start fresh action, and a Handoff brief. OFF — the phase-1 model was unsound: comments were never linked to a session, so sessions rendered empty and the actions did nothing. Being rebuilt around threads=sessions (FIR-1741). Off renders the plain flat comment timeline. FIR-1704. (Internal key kept as cerebro_comment_chapters so existing overrides keep working.)",

@@ -824,6 +824,24 @@ var catalog = []Capability{
 			"PUT /api/cerebro/issues/{issueID}/sprint/",
 		},
 	},
+	{
+		Key:           "manage_operating_system",
+		Title:         "Manage Rocks / Strategy",
+		Category:      CategoryProjects,
+		Description:   "Create, edit, or delete Rocks and Strategy items, connect them to other objects, and customise operating-system terminology.",
+		DescriptionZh: "创建、编辑或删除 Rocks 与 Strategy 项目，将其连接到其他对象，并自定义 operating-system 术语。",
+		Ops: []string{
+			"PUT /api/cerebro/operating-system/settings/",
+			"POST /api/cerebro/strategy-items/",
+			"PUT /api/cerebro/strategy-items/{id}",
+			"DELETE /api/cerebro/strategy-items/{id}",
+			"POST /api/cerebro/rocks/",
+			"PUT /api/cerebro/rocks/{projectID}",
+			"DELETE /api/cerebro/rocks/{projectID}",
+			"POST /api/cerebro/object-connections/",
+			"DELETE /api/cerebro/object-connections/{id}",
+		},
+	},
 
 	// --- Workspace (medlemmer, settings, integrationer) ----------------------
 	{

@@ -36,6 +36,11 @@ describe("cerebro feature flag grouping", () => {
     expect(CEREBRO_FLAG_DEFAULTS.cerebro_member_override).toBe(true);
   });
 
+  it("ships the operating system dark by default", () => {
+    expect(CEREBRO_FLAG_DEFAULTS.cerebro_operating_system).toBe(false);
+    expect(CEREBRO_FLAGS.find((flag) => flag.key === "cerebro_operating_system")?.group).toBe("workspace");
+  });
+
   it("has unique group keys", () => {
     expect(groupKeys.size).toBe(CEREBRO_FLAG_GROUPS.length);
   });
