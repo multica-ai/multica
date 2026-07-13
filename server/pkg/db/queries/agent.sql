@@ -322,9 +322,9 @@ RETURNING *;
 -- name: CancelAgentTasksByIssue :many
 -- Cancels every active task on the issue and returns the affected rows so the
 -- caller can reconcile each agent's status and broadcast task:cancelled events
--- (#1587). Prior :exec form silently dropped that info, so internal cancel
--- paths (issue status flips to cancelled/done, etc.) left agents stuck at
--- status="working" with no self-correction.
+-- (#1587). Prior :exec form silently dropped that info, leaving agents stuck at
+-- status="working" with no self-correction. Only issue-deletion cleanup calls
+-- this now; a status flip to cancelled/done no longer does (MUL-4465).
 UPDATE agent_task_queue
 SET status = 'cancelled', completed_at = now(), prepare_lease_expires_at = NULL
 WHERE issue_id = $1 AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory', 'deferred')
