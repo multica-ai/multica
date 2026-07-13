@@ -17,6 +17,12 @@ import (
 // to HTTP.
 var errWSRPCUnavailable = errors.New("ws rpc: no active connection")
 
+// errWSRPCUncertain is returned when a request's frame WAS sent but the
+// connection dropped before a definitive response. The outcome is unknown (the
+// server may have committed), so the caller must NOT fall back to another
+// transport for the same work — that risks a double claim (MUL-4257).
+var errWSRPCUncertain = errors.New("ws rpc: sent but outcome unknown (connection lost)")
+
 // wsRPCResponseGrace is how much longer the daemon waits for an RPC response
 // beyond the server-side execution budget it requested, so a claim that
 // committed just before the server deadline still reports back before the
@@ -141,8 +147,12 @@ func (c *wsRPCClient) Call(ctx context.Context, method string, serverTimeout tim
 	select {
 	case resp, ok := <-ch:
 		if !ok {
-			// Connection detached mid-flight.
-			return 0, errWSRPCUnavailable
+			// The connection detached AFTER we sent this request's frame, so
+			// the server may or may not have processed it. Signal uncertainty
+			// so the caller does NOT immediately re-claim the same work over a
+			// different transport (which would double-claim); reclaim / the
+			// next poll recovers any orphaned server-side claim.
+			return 0, errWSRPCUncertain
 		}
 		if resp.Status >= 200 && resp.Status < 300 {
 			if respBody != nil && len(resp.Body) > 0 {
@@ -211,6 +221,14 @@ func (d *Daemon) ClaimTasksWSFirst(ctx context.Context, daemonID string, runtime
 		}, &resp)
 		if err == nil {
 			return resp.Tasks, nil
+		}
+		if errors.Is(err, errWSRPCUncertain) {
+			// The WS claim may have committed server-side; claiming the same
+			// free slots again over HTTP would double-claim. Skip this cycle —
+			// an orphaned server-side claim is recovered by stale reclaim and
+			// the next poll picks up anything still queued.
+			d.logger.Debug("ws claim outcome uncertain after disconnect; skipping fallback this cycle")
+			return nil, nil
 		}
 		d.logger.Debug("ws claim failed; falling back to http", "error", err)
 	}

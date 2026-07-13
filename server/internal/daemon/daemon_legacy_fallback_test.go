@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 // TestClaimTasksWSFirst_LegacyFallbackWhenBatchRouteMissing pins the MUL-4257
@@ -67,5 +68,54 @@ func TestClaimTasksWSFirst_LegacyFallbackWhenBatchRouteMissing(t *testing.T) {
 	}
 	if batchCalls.Load() != 1 {
 		t.Fatalf("batch route retried after being marked unsupported; calls=%d", batchCalls.Load())
+	}
+}
+
+// TestClaimTasksWSFirst_NoDoubleClaimOnDetach pins the Sol-Boy review fix: if
+// the WS connection detaches while a tasks.claim RPC is in flight (its frame
+// already sent), ClaimTasksWSFirst must NOT fall back to an HTTP claim for the
+// same free slots — the WS claim may have committed server-side, and a second
+// HTTP claim would double-claim. It returns no tasks; reclaim / the next poll
+// recovers.
+func TestClaimTasksWSFirst_NoDoubleClaimOnDetach(t *testing.T) {
+	var httpClaims atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "/claim") {
+			httpClaims.Add(1)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"tasks":[{"id":"http-t","runtime_id":"rt1","agent":{"name":"a"}}]}`))
+	}))
+	defer srv.Close()
+
+	d := New(Config{ServerBaseURL: srv.URL, MaxConcurrentTasks: 4}, slog.New(slog.NewTextHandler(noopWriter{}, nil)))
+	// Sender accepts (enqueues) the frame but the server never replies —
+	// simulating an in-flight claim that outlives the connection.
+	d.wsRPC.attach(func([]byte) error { return nil })
+
+	done := make(chan struct{})
+	var tasks []*Task
+	var err error
+	go func() {
+		tasks, err = d.ClaimTasksWSFirst(context.Background(), "daemon-x", []string{"rt1"}, 2)
+		close(done)
+	}()
+
+	time.Sleep(50 * time.Millisecond) // let Call send the frame and block on the response
+	d.wsRPC.attach(nil)               // detach mid-flight (reconnect / teardown)
+
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("ClaimTasksWSFirst did not return after detach")
+	}
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(tasks) != 0 {
+		t.Fatalf("expected no tasks on uncertain WS outcome, got %d", len(tasks))
+	}
+	if httpClaims.Load() != 0 {
+		t.Fatalf("HTTP fallback claimed %d times after an uncertain WS claim; must be 0 to avoid double-claim", httpClaims.Load())
 	}
 }

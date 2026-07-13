@@ -88,8 +88,9 @@ func TestWSRPCClient_ServerError(t *testing.T) {
 	}
 }
 
-// TestWSRPCClient_DetachFailsPending: detaching (disconnect) unblocks in-flight
-// Calls with errWSRPCUnavailable so they fall back to HTTP.
+// TestWSRPCClient_DetachFailsPending: detaching (disconnect) unblocks an
+// in-flight Call whose frame was already sent with errWSRPCUncertain — the
+// caller must not blindly re-claim over HTTP (MUL-4257).
 func TestWSRPCClient_DetachFailsPending(t *testing.T) {
 	c := newWSRPCClient(2 * time.Second)
 	c.attach(func([]byte) error { return nil })
@@ -102,8 +103,8 @@ func TestWSRPCClient_DetachFailsPending(t *testing.T) {
 	c.attach(nil) // detach
 	select {
 	case err := <-done:
-		if !errors.Is(err, errWSRPCUnavailable) {
-			t.Fatalf("err = %v, want errWSRPCUnavailable", err)
+		if !errors.Is(err, errWSRPCUncertain) {
+			t.Fatalf("err = %v, want errWSRPCUncertain", err)
 		}
 	case <-time.After(time.Second):
 		t.Fatal("Call did not return after detach")

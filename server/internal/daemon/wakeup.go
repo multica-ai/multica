@@ -200,9 +200,18 @@ func (d *Daemon) runTaskWakeupConnection(ctx context.Context, runtimeIDs []strin
 	// LIFO defer order would close writes before the sender stops, so the
 	// teardown is folded into a single deferred function instead.
 	defer func() {
-		// Detach RPC first so no new Call can send, and flip the closed flag
-		// under sendMu so any in-flight guarded send finishes before we close
-		// the writes channel below.
+		// Close the socket FIRST, before failing pending RPCs. Otherwise a
+		// queued tasks.claim frame would still be flushed to the (on a normal
+		// runtimeSetCh reconnect) still-alive socket AFTER attach(nil) has made
+		// the RPC fall over to HTTP — the server would then commit that WS
+		// claim on top of the HTTP fallback, double-claiming the same free
+		// slots (MUL-4257, Sol-Boy review). With the conn closed here,
+		// runWSWriter's next write errors and it DISCARDS the queue instead of
+		// delivering it.
+		conn.Close()
+		// Detach RPC (fails pending → HTTP fallback, now safe since the queued
+		// frame will be dropped), and flip the send-closed flag under sendMu so
+		// any in-flight guarded send finishes before we close writes.
 		d.wsRPC.attach(nil)
 		sendMu.Lock()
 		sendClosed = true
