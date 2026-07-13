@@ -5,6 +5,45 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+describe("ApiClient label response schemas", () => {
+  it("falls back safely for malformed label catalog, label, and resource responses", async () => {
+    const fetchMock = vi.fn().mockImplementation(() =>
+      Promise.resolve(
+        new Response(JSON.stringify({ labels: "not-an-array", total: "not-a-number" }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new ApiClient("https://api.example.test");
+
+    await expect(client.listLabels("agent")).resolves.toEqual({ labels: [], total: 0 });
+    await expect(client.getLabel("label-1")).resolves.toMatchObject({ id: "" });
+    await expect(
+      client.createLabel({ resource_type: "agent", name: "Ops", color: "#3b82f6" }),
+    ).resolves.toMatchObject({ id: "" });
+    await expect(
+      client.updateLabel("label-1", { name: "Operations" }),
+    ).resolves.toMatchObject({ id: "" });
+
+    await expect(client.listLabelsForIssue("issue-1")).resolves.toEqual({ labels: [] });
+    await expect(client.attachLabel("issue-1", "label-1")).resolves.toEqual({ labels: [] });
+    await expect(client.detachLabel("issue-1", "label-1")).resolves.toEqual({ labels: [] });
+
+    await expect(client.listLabelsForResource("agent", "agent-1")).resolves.toEqual({ labels: [] });
+    await expect(
+      client.attachLabelToResource("agent", "agent-1", "label-1"),
+    ).resolves.toEqual({ labels: [] });
+    await expect(
+      client.detachLabelFromResource("agent", "agent-1", "label-1"),
+    ).resolves.toEqual({ labels: [] });
+
+    expect(fetchMock).toHaveBeenCalledTimes(10);
+  });
+});
+
 describe("ApiClient", () => {
   it("preserves HTTP status on failed requests", async () => {
     vi.stubGlobal(

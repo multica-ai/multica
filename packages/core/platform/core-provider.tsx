@@ -18,6 +18,7 @@ import { defaultStorage } from "./storage";
 import { AuthInitializer } from "./auth-initializer";
 import type { CoreProviderProps, ClientIdentity } from "./types";
 import type { StorageAdapter } from "../types/storage";
+import { configureShortcutPlatform } from "../shortcuts/platform";
 
 // Module-level singletons — created once at first render, never recreated.
 // Vite HMR preserves module-level state, so these survive hot reloads.
@@ -33,6 +34,15 @@ function initCore(
   identity?: ClientIdentity,
 ) {
   if (initialized) return;
+
+  configureShortcutPlatform(
+    identity?.os === "macos" ||
+      identity?.os === "windows" ||
+      identity?.os === "linux" ||
+      identity?.os === "unknown"
+      ? identity.os
+      : null,
+  );
 
   const api = new ApiClient(apiBaseUrl, {
     logger: createLogger("api"),

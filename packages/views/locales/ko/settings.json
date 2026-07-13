@@ -1,5 +1,12 @@
 {
+  "auto_save": {
+    "saving": "저장 중…",
+    "saved": "저장됨",
+    "failed": "저장하지 못했습니다",
+    "toast_saved": "변경사항을 저장했습니다"
+  },
   "preferences": {
+    "general_title": "일반",
     "theme": {
       "title": "테마",
       "light": "라이트",
@@ -19,6 +26,65 @@
       "browser_suffix": " (브라우저)",
       "hint": "대시보드, 차트, 사용자에게 표시되는 '오늘' 레이블에 사용됩니다. 모든 워크스페이스에 적용되는 개인 설정입니다.",
       "sync_failed": "시간대 설정을 저장하지 못했습니다."
+    },
+    "sticky_comment_bar": {
+      "title": "댓글 입력창 고정",
+      "hint": "이슈 페이지를 스크롤할 때 댓글 입력창을 항상 하단에 고정합니다."
+    }
+  },
+  "shortcuts": {
+    "title": "키보드 단축키",
+    "description": "이 기기에서 제품 동작의 단축키를 설정합니다. 단축키를 클릭한 다음 새 키 조합을 누르세요.",
+    "search_placeholder": "동작 검색...",
+    "reset_all": "기본값 복원",
+    "reset_confirm": {
+      "title": "모든 단축키를 기본값으로 복원할까요?",
+      "description": "이 기기의 모든 사용자 지정 단축키를 삭제하고 기본 설정으로 복원합니다.",
+      "cancel": "취소",
+      "confirm": "모두 기본값으로 복원"
+    },
+    "reset": "재설정",
+    "disable": "사용 안 함",
+    "reset_action": "{{action}} 재설정",
+    "disable_action": "{{action}} 단축키 사용 안 함",
+    "record_aria": "{{action}} 단축키 변경",
+    "recording": "키를 누르세요",
+    "record_hint": "Esc 취소 · Delete 지우기",
+    "unassigned": "지정되지 않음",
+    "no_results": "일치하는 단축키 동작이 없습니다.",
+    "conflict_error": "이미 {{action}}에서 사용 중입니다.",
+    "reserved_error": "브라우저 또는 데스크톱 창에서 예약된 단축키입니다.",
+    "send_error": "보내기는 Enter 또는 Mod+Enter만 사용할 수 있습니다.",
+    "unsafe_error": "이 키는 텍스트 입력이나 기본 키보드 탐색을 방해합니다.",
+    "send_enter_hint": "Shift+Enter로 단락을 삽입하거나 목록을 이어가고 코드 블록에서 줄을 바꿀 수 있습니다.",
+    "categories": { "general": "일반", "navigation": "탐색" },
+    "actions": {
+      "openSearch": { "label": "검색 열기", "description": "어디서나 검색하고 명령을 실행합니다." },
+      "createIssue": { "label": "Issue 만들기", "description": "선호하는 issue 만들기 흐름을 엽니다." },
+      "toggleSidebar": { "label": "사이드바 전환", "description": "기본 사이드바를 표시하거나 숨깁니다." },
+      "findInIssue": { "label": "Issue에서 찾기", "description": "열린 issue 상세 내용에서 검색합니다." },
+      "send": { "label": "보내기", "description": "채팅, 댓글, 답글, 피드백 및 프롬프트를 보냅니다." },
+      "goInbox": { "label": "받은 편지함으로 이동", "description": "워크스페이스 받은 편지함을 엽니다." },
+      "goChat": { "label": "채팅으로 이동", "description": "워크스페이스 채팅을 엽니다." },
+      "goMyIssues": { "label": "내 Issues로 이동", "description": "나에게 할당된 issue를 엽니다." },
+      "goIssues": { "label": "Issues로 이동", "description": "Issue 목록을 엽니다." },
+      "goProjects": { "label": "프로젝트로 이동", "description": "프로젝트 목록을 엽니다." },
+      "goAutopilots": { "label": "자동화로 이동", "description": "워크스페이스 자동화를 엽니다." },
+      "goAgents": { "label": "에이전트로 이동", "description": "에이전트 목록을 엽니다." },
+      "goSquads": { "label": "스쿼드로 이동", "description": "스쿼드 목록을 엽니다." },
+      "goUsage": { "label": "사용량으로 이동", "description": "사용량 분석을 엽니다." },
+      "goRuntimes": { "label": "런타임으로 이동", "description": "런타임 설정을 엽니다." },
+      "goSkills": { "label": "Skills로 이동", "description": "Skill 라이브러리를 엽니다." },
+      "goSettings": { "label": "설정으로 이동", "description": "워크스페이스 설정을 엽니다." }
+    },
+    "fixed": {
+      "title": "고정 시스템 단축키",
+      "description": "창 및 접근성 단축키는 안정성을 위해 고정됩니다. 확대/축소 및 탭 제어는 데스크톱 앱에 적용됩니다.",
+      "close_tab": "활성 탭 닫기",
+      "zoom_in": "확대",
+      "zoom_out": "축소",
+      "reset_zoom": "확대/축소 재설정",
+      "close_dialog": "대화상자 또는 메뉴 닫기"
     }
   },
   "chat": {
@@ -33,6 +99,7 @@
     "tabs": {
       "profile": "프로필",
       "preferences": "환경설정",
+      "shortcuts": "단축키",
       "chat": "채팅",
       "notifications": "알림",
       "tokens": "API 토큰",
@@ -41,11 +108,57 @@
       "github": "GitHub",
       "integrations": "연동",
       "labs": "실험실",
-      "members": "멤버"
+      "members": "멤버",
+      "labels": "레이블"
+    }
+  },
+  "labels": {
+    "title": "레이블",
+    "description": "이 워크스페이스의 이슈, 에이전트, 스킬 레이블을 각각 관리합니다.",
+    "scopes": {
+      "issue": "이슈",
+      "agent": "에이전트",
+      "skill": "스킬"
+    },
+    "search_placeholder": "이름 또는 설명으로 필터링...",
+    "new_label": "새 레이블",
+    "columns": {
+      "name": "이름",
+      "description": "설명",
+      "usage": "사용 수",
+      "updated": "업데이트"
+    },
+    "usage_count": "{{count}}개에서 사용",
+    "loading": "레이블 불러오는 중...",
+    "empty": "{{scope}} 레이블이 없습니다",
+    "no_results": "일치하는 레이블이 없습니다",
+    "save_failed": "레이블을 저장하지 못했습니다",
+    "actions": { "open": "{{name}} 작업", "edit": "편집", "delete": "삭제" },
+    "editor": {
+      "create_title": "새 레이블",
+      "edit_title": "레이블 편집",
+      "scope_hint": "이 레이블은 {{scope}} 카탈로그에만 속합니다.",
+      "name": "이름",
+      "name_placeholder": "예: Bug",
+      "description": "설명",
+      "description_placeholder": "이 레이블을 사용할 때를 설명하세요",
+      "color": "색상",
+      "custom_color": "사용자 지정 색상 선택",
+      "cancel": "취소",
+      "save": "레이블 저장",
+      "saving": "저장 중..."
+    },
+    "delete_dialog": {
+      "title": "레이블을 삭제할까요?",
+      "description": "\"{{name}}\" 레이블을 삭제할까요? {{count}}개 리소스에서 제거되며 되돌릴 수 없습니다.",
+      "cancel": "취소",
+      "confirm": "레이블 삭제",
+      "failed": "레이블을 삭제하지 못했습니다"
     }
   },
   "account": {
-    "section_profile": "프로필",
+    "section_profile": "개인 정보",
+    "avatar_label": "아바타",
     "click_avatar_hint": "클릭해서 아바타 업로드",
     "name_label": "이름",
     "profile_description_label": "내 소개",
@@ -102,7 +215,10 @@
   },
   "tokens": {
     "title": "API 토큰",
-    "description": "개인 액세스 토큰을 사용하면 CLI와 외부 연동이 내 계정으로 인증할 수 있습니다.",
+    "description": "개인 액세스 토큰을 사용하면 CLI와 외부 연동이 내 계정으로 인증할 수 있습니다. multica login --token 으로 사용하거나 API 호출 시 Bearer 토큰으로 보낼 수 있습니다.",
+    "security_note": "토큰은 계정에 대한 전체 접근 권한을 부여하므로 비밀번호처럼 안전하게 보관하세요.",
+    "empty": "아직 API 토큰이 없습니다. 위에서 만들어 시작하세요.",
+    "load_failed": "API 토큰을 불러오지 못했습니다. 페이지를 새로고침한 뒤 다시 시도하세요.",
     "name_placeholder": "토큰 이름(예: 내 CLI)",
     "expiry": {
       "30": "30일",
@@ -129,14 +245,20 @@
       "confirm": "폐기"
     },
     "created_dialog": {
-      "title": "토큰 생성됨",
-      "description": "지금 개인 액세스 토큰을 복사하세요. 다시 볼 수 없습니다.",
+      "title": "개인 액세스 토큰이 생성되었습니다",
+      "warning_prefix": "새 개인 액세스 토큰이 생성되었습니다. 보안상의 이유로 ",
+      "warning_emphasis": "이번 한 번만 표시됩니다",
+      "warning_suffix": ". 안전하게 보관하고 공유하지 마세요. 분실한 토큰은 복구할 수 없으며 폐기 후 새로 만들어야 합니다.",
+      "confirm_stored": "이 토큰을 안전하게 보관했습니다.",
       "copy_tooltip": "토큰 복사",
+      "cli_hint": "다음 명령으로 CLI에 로그인하세요:",
+      "copy_command_tooltip": "명령 복사",
       "done": "완료"
     }
   },
   "workspace": {
-    "section_general": "일반",
+    "section_general": "워크스페이스 정보",
+    "logo_label": "워크스페이스 로고",
     "change_logo_aria": "워크스페이스 로고 변경",
     "click_logo_hint": "로고를 클릭하여 새 이미지를 업로드하세요",
     "toast_logo_updated": "워크스페이스 로고를 업데이트했습니다",
@@ -245,6 +367,10 @@
     "edit_aria": "저장소 수정",
     "cancel_aria": "수정 취소",
     "delete_aria": "저장소 삭제",
+    "delete_confirm_title": "저장소를 삭제할까요?",
+    "delete_confirm_description": "이 저장소는 워크스페이스에서 즉시 제거됩니다.",
+    "delete_confirm_cancel": "취소",
+    "delete_confirm_action": "저장소 삭제",
     "manage_hint": "관리자와 소유자만 저장소를 관리할 수 있습니다.",
     "toast_saved": "저장소를 저장했습니다",
     "toast_save_failed": "저장소를 저장하지 못했습니다"

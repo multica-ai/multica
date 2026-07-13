@@ -6,6 +6,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/go-chi/chi/v5"
 )
 
 // TestListSkills_OmitsContent guards the fix for GH multica-ai/multica#2174:
@@ -108,6 +110,54 @@ func TestListAgentSkills_OmitsContent(t *testing.T) {
 		if _, ok := row["content"]; ok {
 			t.Fatalf("ListAgentSkills: response must not include `content` field, got: %v", row)
 		}
+	}
+}
+
+func TestSetAgentSkillEnabledControlsExecutionWithoutRemovingAssignment(t *testing.T) {
+	agentID := createHandlerTestAgent(t, "Handler Skill Toggle Test", nil)
+	skillID := insertHandlerTestSkill(t, "agent-skill-toggle", "# Toggle me")
+	if _, err := testPool.Exec(context.Background(),
+		`INSERT INTO agent_skill (agent_id, skill_id) VALUES ($1, $2)`,
+		agentID, skillID,
+	); err != nil {
+		t.Fatalf("attach skill to agent: %v", err)
+	}
+
+	setEnabled := func(enabled bool) *httptest.ResponseRecorder {
+		t.Helper()
+		w := httptest.NewRecorder()
+		req := newRequest("PUT", "/api/agents/"+agentID+"/skills/"+skillID+"/enabled", map[string]any{
+			"enabled": enabled,
+		})
+		rctx := chi.NewRouteContext()
+		rctx.URLParams.Add("id", agentID)
+		rctx.URLParams.Add("skillId", skillID)
+		req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+		testHandler.SetAgentSkillEnabled(w, req)
+		return w
+	}
+
+	if w := setEnabled(false); w.Code != 200 {
+		t.Fatalf("disable skill: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// Disabled assignments remain visible to management surfaces.
+	rows, err := testHandler.Queries.ListAgentSkillSummaries(context.Background(), parseUUID(agentID))
+	if err != nil || len(rows) != 1 || rows[0].Enabled {
+		t.Fatalf("disabled assignment not preserved: rows=%+v err=%v", rows, err)
+	}
+	// Execution only receives enabled skills.
+	active, err := testHandler.Queries.ListAgentSkills(context.Background(), parseUUID(agentID))
+	if err != nil || len(active) != 0 {
+		t.Fatalf("disabled skill leaked into execution: skills=%+v err=%v", active, err)
+	}
+
+	if w := setEnabled(true); w.Code != 200 {
+		t.Fatalf("enable skill: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	active, err = testHandler.Queries.ListAgentSkills(context.Background(), parseUUID(agentID))
+	if err != nil || len(active) != 1 || active[0].Name == "" {
+		t.Fatalf("re-enabled skill missing from execution: skills=%+v err=%v", active, err)
 	}
 }
 

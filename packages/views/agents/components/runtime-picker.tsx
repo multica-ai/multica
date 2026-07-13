@@ -16,7 +16,7 @@ import { useT } from "../../i18n";
 import {
   buildRuntimeMachines,
   filterRuntimeMachines,
-  splitRuntimeName,
+  runtimeRowLabel,
 } from "../../runtimes/components/runtime-machines";
 
 export type RuntimeFilter = "mine" | "all";
@@ -308,17 +308,6 @@ export function RuntimePicker({
       </Popover>
     </div>
   );
-}
-
-// The per-row label inside a machine group. When the machine already carries a
-// name (its own custom name or device name in the header), repeating it on
-// every row is noise — so a row shows its provider base (e.g. "Claude"). An
-// individual per-runtime rename that differs from the machine name is shown
-// verbatim so it stays visible.
-function runtimeRowLabel(runtime: RuntimeDevice, machineTitle: string): string {
-  const custom = runtime.custom_name?.trim();
-  if (custom && custom !== machineTitle) return custom;
-  return splitRuntimeName(runtime.name).base;
 }
 
 // Visibility gate exposed so the parent can defend Create against a locked

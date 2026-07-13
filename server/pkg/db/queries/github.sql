@@ -9,8 +9,8 @@ ORDER BY created_at ASC;
 
 -- name: ListGitHubInstallationsByInstallationID :many
 -- One installation_id can be bound to several workspaces; webhook routing lists
--- every binding and picks the target workspace via the repos registry. Ordered
--- so the oldest binding is the deterministic routing fallback (insts[0]).
+-- every binding and fans the event out to each bound workspace. Ordered oldest
+-- first so processing is deterministic and replay-stable.
 SELECT * FROM github_installation
 WHERE installation_id = $1
 ORDER BY created_at ASC, id ASC;

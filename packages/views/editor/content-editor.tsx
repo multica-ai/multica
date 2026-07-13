@@ -120,8 +120,6 @@ interface ContentEditorProps {
   onUploadFile?: (file: File) => Promise<UploadResult | null>;
   /** Show the floating formatting toolbar on text selection. Defaults true. */
   showBubbleMenu?: boolean;
-  /** When true, bare Enter submits (chat-style). Mod-Enter always submits. */
-  submitOnEnter?: boolean;
   /**
    * ID of the issue this editor belongs to. When set, the bubble menu exposes
    * a "Create sub-issue from selection" action that parents the new issue
@@ -198,7 +196,6 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
       onBlur,
       onUploadFile,
       showBubbleMenu = true,
-      submitOnEnter = false,
       currentIssueId,
       disableMentions = false,
       mentionMode = "default",
@@ -391,7 +388,6 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
         queryClient,
         onSubmitRef,
         onUploadFileRef,
-        submitOnEnter,
         disableMentions,
         mentionMode,
         getMentionContextItems: () => mentionContextItemsRef.current,

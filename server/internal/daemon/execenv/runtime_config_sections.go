@@ -382,7 +382,13 @@ func writeWorkflowComment(b *strings.Builder, provider string, ctx TaskContextFo
 	}
 	b.WriteString("6. If a reply IS warranted: do any requested work first, then **decide whether to include any `@mention` link.** The default is NO mention. Only mention when you are escalating to a human owner who is not yet involved, delegating a concrete new sub-task to another agent for the first time, or the user explicitly asked you to loop someone in. Never @mention the agent you are replying to as a thank-you or sign-off.\n")
 	b.WriteString("7. **If you reply, post it as a comment — this step is mandatory when you reply.** Text in your terminal or run logs is NOT delivered to the user. ")
-	b.WriteString(buildCommentReplyInstructionsSlim(provider, ctx.IssueID, ctx.TriggerCommentID))
+	if len(ctx.CommentReplyTargets) >= 2 {
+		// Cross-thread coalesced run: fan out one reply per root thread, matching
+		// the per-turn prompt so the two reply-instruction sources agree (MUL-4348).
+		b.WriteString(BuildMultiThreadCommentReplyInstructions(ctx.IssueID, ctx.CommentReplyTargets))
+	} else {
+		b.WriteString(buildCommentReplyInstructionsSlim(provider, ctx.IssueID, ctx.TriggerCommentID))
+	}
 	b.WriteString("8. Before exiting: only if this run produced a fact that clears the high bar (important AND likely to be re-read by future runs on this same issue, e.g. a new PR URL or deploy URL), or you noticed a metadata key from entry that is now stale, pin or clear it via `multica issue metadata set`/`delete`. Most runs write nothing here — that is the expected outcome, not a gap. When in doubt, do not write. See the `## Issue Metadata` section above for the full bar.\n")
 	b.WriteString("9. Do NOT change the issue status unless the comment explicitly asks for it\n\n")
 }
@@ -415,7 +421,8 @@ func writeSubIssueCreation(b *strings.Builder) {
 
 // writeSkills emits the Skills section listing skill names + descriptions.
 func writeSkills(b *strings.Builder, provider string, ctx TaskContextForEnv) {
-	if len(ctx.AgentSkills) == 0 {
+	skills := modelVisibleSkills(ctx.AgentSkills)
+	if len(skills) == 0 {
 		return
 	}
 	b.WriteString("## Skills\n\n")
@@ -429,7 +436,7 @@ func writeSkills(b *strings.Builder, provider string, ctx TaskContextForEnv) {
 	default:
 		b.WriteString("Detailed skill instructions are in `.agent_context/skills/`. Each subdirectory contains a `SKILL.md`.\n\n")
 	}
-	for _, skill := range ctx.AgentSkills {
+	for _, skill := range skills {
 		if desc := strings.TrimSpace(skill.Description); desc != "" {
 			fmt.Fprintf(b, "- **%s** — %s\n", skill.Name, desc)
 		} else {

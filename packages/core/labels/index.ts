@@ -1,4 +1,4 @@
-export { labelKeys, labelListOptions, issueLabelsOptions } from "./queries";
+export { labelKeys, labelListOptions, issueLabelsOptions, resourceLabelsOptions } from "./queries";
 export {
   useCreateLabel,
   useUpdateLabel,
@@ -6,4 +6,6 @@ export {
   useAttachLabel,
   useAttachLabelToIssue,
   useDetachLabel,
+  useAttachResourceLabel,
+  useDetachResourceLabel,
 } from "./mutations";

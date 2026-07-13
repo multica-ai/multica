@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useMemo, useRef, Fragment } from "react";
-import { Virtuoso } from "react-virtuoso";
+import { Virtuoso, type VirtuosoHandle } from "react-virtuoso";
 import { useDefaultLayout, usePanelRef } from "react-resizable-panels";
 import { AppLink } from "../../navigation";
 import { useNavigation } from "../../navigation";
@@ -58,6 +58,7 @@ import { LocalDirectoryHint } from "../../projects/components/local-directory-hi
 import { CommentCard } from "./comment-card";
 import { CommentInput } from "./comment-input";
 import { ResolvedThreadBar } from "./resolved-thread-bar";
+import { ThreadMinimap, type ThreadMinimapThread } from "./thread-minimap";
 import { collectThreadReplies, deriveThreadResolution } from "./thread-utils";
 import { IssueAgentHeaderChip } from "./issue-agent-header-chip";
 import { ExecutionLogSection } from "./execution-log-section";
@@ -74,7 +75,7 @@ import { projectDetailOptions } from "@multica/core/projects/queries";
 import { ProjectIcon } from "../../projects/components/project-icon";
 import { issueLabelsOptions } from "@multica/core/labels";
 import { memberListOptions, agentListOptions } from "@multica/core/workspace/queries";
-import { useRecentIssuesStore } from "@multica/core/issues/stores";
+import { useCommentComposerStore, useRecentIssuesStore } from "@multica/core/issues/stores";
 import { useIssueSelectionStore } from "@multica/core/issues/stores/selection-store";
 import { BatchActionToolbar } from "./batch-action-toolbar";
 import { useIssueTimeline } from "../hooks/use-issue-timeline";
@@ -774,6 +775,8 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   // that: setState triggers the re-render that hands Virtuoso the element.
   const [scrollContainerEl, setScrollContainerEl] = useState<HTMLDivElement | null>(null);
   const [highlightedId, setHighlightedId] = useState<string | null>(null);
+  // User preference: pin the bottom comment bar to the scroll viewport.
+  const stickyComposer = useCommentComposerStore((s) => s.sticky);
 
   // Per-session: which resolved threads the user has temporarily expanded.
   // Not persisted (matches Linear) — reload collapses everything back to bars.
@@ -1079,6 +1082,59 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     return items.findIndex((it) => it.id === rootId);
   }, [items, highlightCommentId, replyToRoot]);
 
+  // Quick-jump minimap rail: one tick per comment thread (folded resolved
+  // bars included), activity groups skipped. Derived from the same flat
+  // `items` array Virtuoso renders so tick order always matches the page.
+  const minimapThreads = useMemo<ThreadMinimapThread[]>(
+    () =>
+      items.flatMap((it) =>
+        it.kind === "comment" || it.kind === "resolved-bar"
+          ? [{ id: it.id, entry: it.entry }]
+          : [],
+      ),
+    [items],
+  );
+
+  // When the timeline renders flat (deep-link or in-page find), there is no
+  // Virtuoso instance — minimap jumps drive the scroll container directly.
+  const isFlatTimeline = !!highlightCommentId || find.open;
+  const virtuosoRef = useRef<VirtuosoHandle>(null);
+  const jumpFlashTimerRef = useRef<number | null>(null);
+  useEffect(
+    () => () => {
+      if (jumpFlashTimerRef.current !== null) window.clearTimeout(jumpFlashTimerRef.current);
+    },
+    [],
+  );
+  const jumpToThread = useCallback(
+    (threadId: string) => {
+      if (isFlatTimeline) {
+        // Flat mode mounts every row, so the anchor is always in the DOM.
+        // Drive the container's scrollTop directly — never native
+        // scrollIntoView, which also scrolls the desktop shell (#3929).
+        const el = document.getElementById(`comment-${threadId}`);
+        const container = scrollContainerEl;
+        if (!el || !container) return;
+        const c = container.getBoundingClientRect();
+        const e = el.getBoundingClientRect();
+        container.scrollTop = Math.max(0, container.scrollTop + (e.top - c.top) - 16);
+      } else {
+        // Virtualized mode: the target row may not be mounted, so scroll by
+        // index and let Virtuoso mount it. Offset leaves a small top gap.
+        const index = items.findIndex((it) => it.id === threadId);
+        if (index < 0) return;
+        virtuosoRef.current?.scrollToIndex({ index, align: "start", offset: -16 });
+      }
+      // Flash the landed thread the same way inbox deep-links do, so the eye
+      // has an anchor after the instant jump. (Folded resolved bars don't
+      // take the highlight prop — the scroll itself is the feedback there.)
+      setHighlightedId(threadId);
+      if (jumpFlashTimerRef.current !== null) window.clearTimeout(jumpFlashTimerRef.current);
+      jumpFlashTimerRef.current = window.setTimeout(() => setHighlightedId(null), 2000);
+    },
+    [isFlatTimeline, items, scrollContainerEl],
+  );
+
   const {
     reactions: issueReactions,
     toggleReaction: handleToggleIssueReaction,
@@ -1366,7 +1422,9 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
           <Skeleton className="h-4 w-24" />
         </div>
         <div className="flex flex-1 min-h-0">
-          <div className="flex-1 overflow-y-auto">
+          {/* Same scrollbar-gutter as the loaded scroller below, so the skeleton
+              column doesn't shift sideways when real content mounts. */}
+          <div className="flex-1 overflow-y-auto [scrollbar-gutter:stable_both-edges]">
             <div className="mx-auto w-full max-w-4xl px-8 py-8 space-y-6">
               <Skeleton className="h-8 w-3/4" />
               <div className="space-y-2">
@@ -1796,9 +1854,13 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     <div className="relative flex h-full min-w-0 flex-1 flex-col">
         {/* In-page find bar — floats over the top-right of the content column
             (below the breadcrumb header), outside the scroll container so it
-            stays put while the timeline scrolls and its own text isn't walked. */}
+            stays put while the timeline scrolls and its own text isn't walked.
+            z-30: must beat every sticky affordance pinned at the timeline's
+            top-0 (comment headers z-10, resolve collapse bars z-20) — at equal
+            z the later-in-DOM sticky bar paints over the find bar and orphans
+            its close button (MUL-4414). */}
         {find.open && (
-          <FindBar find={find} className="absolute right-4 top-14 z-20" />
+          <FindBar find={find} className="absolute right-4 top-14 z-30" />
         )}
         <BreadcrumbHeader
           segments={breadcrumbSegments}
@@ -1898,10 +1960,16 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
           }
         />
 
+        {/* scrollbar-gutter both-edges: with classic (space-taking) scrollbars —
+            macOS with a mouse or "always show", Windows, Linux — the global
+            `scrollbar-width: thin` carves ~11px off the right side only, so the
+            centered column reads 32px left vs 43px right (MUL-4404). Mirroring
+            the gutter restores symmetry; overlay-scrollbar platforms reserve
+            nothing and render unchanged. */}
         <div
           ref={setScrollContainerEl}
           data-tab-scroll-root
-          className="relative flex-1 overflow-y-auto"
+          className="relative flex-1 overflow-y-auto [scrollbar-gutter:stable_both-edges]"
         >
         <div className="mx-auto w-full max-w-4xl px-8 py-8">
           <TitleEditor
@@ -2196,6 +2264,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                   <div className="mt-4">
                     <Virtuoso
                       key={`${wsId}:${id}`}
+                      ref={virtuosoRef}
                       customScrollParent={scrollContainerEl}
                       data={items}
                       increaseViewportBy={{ top: 800, bottom: 800 }}
@@ -2220,18 +2289,50 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
               )
             )}
 
-            {/* Bottom comment input — no avatar, full width */}
-            <div className="mt-4">
-              {/* key={id}: web's /issues/[id] route doesn't remount on
-                  issueId change, so without an explicit key the editor
-                  keeps the previous issue's in-memory content and the
-                  next keystroke would flush it into the new issue's
-                  draft key. */}
-              <CommentInput key={id} issueId={id} onSubmit={submitComment} />
-            </div>
+          </div>
+
+          {/* Bottom comment input — no avatar, full width. Direct child of
+              the content column (not the Activity section): a sticky box
+              can't leave its containing block, and the Activity div only
+              spans the timeline — at column level `sticky bottom-0` can pin
+              the composer across the whole scroll range.
+
+              Sticky treatment mirrors list-grid's sticky header, bottom
+              edge: opaque bg-background under/around the card (its rounded
+              corners would otherwise leak scrolled text), a 16px gradient
+              fade above (exactly the mt-4 gap, so at rest it sits over the
+              page background and is invisible), and pb-4 so the card floats
+              off the viewport edge — with -mb-4 giving the padding back to
+              the column's py-8 so the at-rest layout doesn't shift. */}
+          <div
+            className={cn(
+              "mt-4",
+              stickyComposer &&
+                "sticky bottom-0 z-10 -mb-4 bg-background pb-4 before:pointer-events-none before:absolute before:inset-x-0 before:bottom-full before:h-4 before:bg-gradient-to-t before:from-background before:to-transparent",
+            )}
+          >
+            {/* key={id}: web's /issues/[id] route doesn't remount on
+                issueId change, so without an explicit key the editor
+                keeps the previous issue's in-memory content and the
+                next keystroke would flush it into the new issue's
+                draft key. */}
+            <CommentInput key={id} issueId={id} onSubmit={submitComment} />
           </div>
         </div>
         </div>
+
+        {/* Thread quick-jump rail — overlays the scroll container's left
+            gutter (inside the px-8 content padding, so it never covers
+            text). Hover previews a thread, click jumps to it. Hidden on
+            mobile: no hover, and the gutter is too tight. */}
+        {!isMobile && (
+          <ThreadMinimap
+            threads={minimapThreads}
+            scrollContainerEl={scrollContainerEl}
+            onJump={jumpToThread}
+            className="absolute bottom-0 left-2 top-12"
+          />
+        )}
       </div>
   );
 
