@@ -21,13 +21,14 @@ async function fixture() {
 
 test("serves an immutable app frontend version", async () => {
   const root = await fixture();
-  const runtime = createAppsRuntime({ bundleRoot: root });
+  const runtime = createAppsRuntime({ bundleRoot: root, frameAncestors: "https://multica.example" });
   const response = await runtime.fetch(
     new Request("http://runtime/apps/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/1.0.0/"),
   );
   assert.equal(response.status, 200);
   assert.match(await response.text(), /Allergen Formatter/);
   assert.equal(response.headers.get("cache-control"), "public, max-age=31536000, immutable");
+  assert.match(response.headers.get("content-security-policy"), /frame-ancestors https:\/\/multica\.example/);
 });
 
 test("isolates backend execution and strips registry system credentials", async () => {

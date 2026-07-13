@@ -29,6 +29,7 @@ export function createAppsRuntime(options = {}) {
   const bundleRoot = resolve(options.bundleRoot ?? process.env.APP_BUNDLE_ROOT ?? "/var/lib/multica-apps");
   const workerTimeoutMs = options.workerTimeoutMs ?? Number(process.env.APP_WORKER_TIMEOUT_MS ?? 5_000);
   const workerMemoryMb = options.workerMemoryMb ?? Number(process.env.APP_WORKER_MEMORY_MB ?? 64);
+  const frameAncestors = options.frameAncestors ?? process.env.MULTICA_FRAME_ANCESTORS ?? "'self'";
 
   return {
     async fetch(request) {
@@ -47,7 +48,7 @@ export function createAppsRuntime(options = {}) {
             headers: {
               "cache-control": "public, max-age=31536000, immutable",
               "content-type": MIME.get(extname(path)) ?? "application/octet-stream",
-              "content-security-policy": "default-src 'self'; connect-src 'self' https://registry.firtal.com; frame-ancestors 'self'",
+              "content-security-policy": `default-src 'self'; connect-src 'self' https://registry.firtal.com; frame-ancestors ${frameAncestors}`,
             },
           });
         } catch {

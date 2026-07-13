@@ -7,6 +7,7 @@ services:
       - "4310:4310"
     environment:
       MULTICA_APP_TOKEN_ENDPOINT: http://host.docker.internal:8080/api/cerebro/apps
+      MULTICA_FRAME_ANCESTORS: http://localhost:3000
     volumes:
       - ./fixtures:/var/lib/multica-apps:ro
     mem_limit: 256m

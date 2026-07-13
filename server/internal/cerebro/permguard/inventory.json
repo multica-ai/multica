@@ -21,6 +21,26 @@
       "gate": "cerebro_capability:use_apps"
     },
     {
+      "id": "POST /api/cerebro/apps/{id}/approve-scopes",
+      "gate": "cerebro_capability:approve_app_scopes"
+    },
+    {
+      "id": "GET /api/cerebro/apps/{id}/storage/{key}",
+      "gate": "cerebro_capability:use_apps"
+    },
+    {
+      "id": "PUT /api/cerebro/apps/{id}/storage/{key}",
+      "gate": "cerebro_capability:use_apps"
+    },
+    {
+      "id": "DELETE /api/cerebro/apps/{id}/storage/{key}",
+      "gate": "cerebro_capability:use_apps"
+    },
+    {
+      "id": "POST /api/cerebro/apps/{id}/views/{viewId}/submissions",
+      "gate": "cerebro_capability:use_apps"
+    },
+    {
       "id": "POST /api/cerebro/apps/workflow-runs/{runId}/token",
       "gate": "cerebro_capability:use_apps"
     },

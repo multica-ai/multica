@@ -34,6 +34,7 @@
     "@multica/cerebro-connections": "workspace:*",
     "@multica/cerebro-credentials": "workspace:*",
     "@multica/cerebro-dashboard": "workspace:*",
+    "@multica/cerebro-apps": "workspace:*",
     "@multica/cerebro-display-currency": "workspace:*",
     "@multica/cerebro-feature-flags": "workspace:*",
     "@multica/cerebro-firtal-welcome": "workspace:*",

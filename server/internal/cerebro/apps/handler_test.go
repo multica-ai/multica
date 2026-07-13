@@ -3,6 +3,8 @@ package apps
 import (
 	"encoding/json"
 	"testing"
+
+	"github.com/multica-ai/multica/server/internal/cerebro/apps/tokens"
 )
 
 func TestValidateCreateRequestRequiresStableIdentity(t *testing.T) {
@@ -67,5 +69,22 @@ func TestValidateWorkflowDefinitionSupportsV1LinearChain(t *testing.T) {
 	}
 	if err := validateWorkflowDefinition(json.RawMessage(`{"schema_version":"1","steps":[]}`)); err == nil {
 		t.Fatal("workflow without a trigger was accepted")
+	}
+}
+
+func TestValidateScopesRejectsUnknownOrEmptyCeilings(t *testing.T) {
+	valid := []tokens.Scope{{ResourceType: "data_source", ResourceID: "products", Access: "read_write"}}
+	if err := validateScopes(valid); err != nil {
+		t.Fatalf("valid scopes rejected: %v", err)
+	}
+	for _, scopes := range [][]tokens.Scope{
+		nil,
+		{{ResourceType: "unknown", ResourceID: "products", Access: "read"}},
+		{{ResourceType: "data_source", ResourceID: "", Access: "read"}},
+		{{ResourceType: "data_source", ResourceID: "products", Access: "admin"}},
+	} {
+		if err := validateScopes(scopes); err == nil {
+			t.Fatalf("invalid scopes accepted: %+v", scopes)
+		}
 	}
 }

@@ -82,6 +82,21 @@ CREATE TABLE IF NOT EXISTS cerebro_app_kv (
     PRIMARY KEY (app_id, key)
 );
 
+CREATE TABLE IF NOT EXISTS cerebro_app_view_submission (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    app_id UUID NOT NULL REFERENCES cerebro_app(id) ON DELETE CASCADE,
+    app_version TEXT NOT NULL,
+    view_id TEXT NOT NULL,
+    submitted_by UUID NOT NULL REFERENCES "user"(id) ON DELETE CASCADE,
+    value JSONB NOT NULL,
+    status TEXT NOT NULL DEFAULT 'submitted'
+        CHECK (status IN ('submitted', 'accepted', 'rejected')),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_cerebro_app_view_submission_app
+    ON cerebro_app_view_submission(app_id, created_at DESC);
+
 CREATE TABLE IF NOT EXISTS cerebro_app_workflow_def (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     workspace_id UUID NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,

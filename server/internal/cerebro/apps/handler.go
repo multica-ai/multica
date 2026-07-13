@@ -58,6 +58,20 @@ type tokenRequest struct {
 	Version string `json:"version"`
 }
 
+type approveScopesRequest struct {
+	Version string         `json:"version"`
+	Scopes  []tokens.Scope `json:"scopes"`
+}
+
+type storageRequest struct {
+	Value json.RawMessage `json:"value"`
+}
+
+type viewSubmissionRequest struct {
+	Version string          `json:"version"`
+	Value   json.RawMessage `json:"value"`
+}
+
 type appResponse struct {
 	ID             string    `json:"id"`
 	WorkspaceID    string    `json:"workspace_id"`
@@ -107,6 +121,32 @@ func validateSnapshot(raw json.RawMessage) error {
 		return errors.New("snapshot.manifest requires schema_version and name")
 	}
 	return nil
+}
+
+func validateScopes(scopes []tokens.Scope) error {
+	resourceTypes := map[string]bool{"data_source": true, "data_destination": true, "app": true, "function": true, "integration": true, "bigquery_credential": true}
+	accessTypes := map[string]bool{"read": true, "write": true, "read_write": true}
+	if len(scopes) == 0 {
+		return errors.New("at least one scope is required")
+	}
+	for _, scope := range scopes {
+		if !resourceTypes[scope.ResourceType] || strings.TrimSpace(scope.ResourceID) == "" || !accessTypes[scope.Access] {
+			return errors.New("scope requires a supported resource_type, resource_id, and access")
+		}
+	}
+	return nil
+}
+
+func snapshotScopes(raw json.RawMessage) ([]tokens.Scope, error) {
+	var snapshot struct {
+		Manifest struct {
+			Scopes []tokens.Scope `json:"scopes"`
+		} `json:"manifest"`
+	}
+	if err := json.Unmarshal(raw, &snapshot); err != nil {
+		return nil, err
+	}
+	return snapshot.Manifest.Scopes, nil
 }
 
 func validateWorkflowDefinition(raw json.RawMessage) error {
@@ -244,6 +284,18 @@ func (h *Handler) Publish(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusConflict, "version already exists")
 		return
 	}
+	scopes, err := snapshotScopes(req.Snapshot)
+	if err != nil {
+		writeError(w, 400, "snapshot manifest scopes are invalid")
+		return
+	}
+	if len(scopes) > 0 {
+		rawScopes, _ := json.Marshal(scopes)
+		if _, err = tx.Exec(r.Context(), `INSERT INTO cerebro_app_grant (app_id,version,scopes,status,requested_by) VALUES ($1,$2,$3,'pending',$4) ON CONFLICT (app_id,version) DO NOTHING`, app.ID, req.Version, rawScopes, userID); err != nil {
+			writeError(w, 500, "failed to request app scopes")
+			return
+		}
+	}
 	if _, err = tx.Exec(r.Context(), `UPDATE cerebro_app SET current_version=$2,status='published',updated_at=now() WHERE id=$1`, app.ID, req.Version); err != nil {
 		writeError(w, 500, "failed to publish app")
 		return
@@ -278,6 +330,159 @@ func (h *Handler) Rollback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"app_id": app.ID, "version": req.Version})
+}
+
+func (h *Handler) ApproveScopes(w http.ResponseWriter, r *http.Request) {
+	app, ok := h.loadApp(w, r)
+	if !ok {
+		return
+	}
+	approverID, ok := requestUserID(w, r)
+	if !ok {
+		return
+	}
+	var req approveScopesRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	if !semverPattern.MatchString(req.Version) {
+		writeError(w, http.StatusBadRequest, "version must be semantic versioning")
+		return
+	}
+	if err := validateScopes(req.Scopes); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	rawScopes, _ := json.Marshal(req.Scopes)
+	result, err := h.pool.Exec(r.Context(), `
+		INSERT INTO cerebro_app_grant (app_id,version,scopes,registry_profile_ref,status,approved_by,approved_at)
+		SELECT $1,$2,$3,$4,'approved',$5,now()
+		WHERE EXISTS (SELECT 1 FROM cerebro_app_version WHERE app_id=$1 AND version=$2)
+		ON CONFLICT (app_id,version) DO UPDATE SET scopes=EXCLUDED.scopes,
+		registry_profile_ref=EXCLUDED.registry_profile_ref,status='approved',approved_by=EXCLUDED.approved_by,
+		approved_at=now(),updated_at=now()`, app.ID, req.Version, rawScopes, "via_app:"+app.ID+"@"+req.Version, approverID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to approve app scopes")
+		return
+	}
+	if result.RowsAffected() == 0 {
+		writeError(w, http.StatusNotFound, "app version not found")
+		return
+	}
+	_, _ = h.pool.Exec(r.Context(), `INSERT INTO cerebro_app_audit_log (workspace_id,app_id,actor_type,actor_id,action,metadata) VALUES ($1,$2,'user',$3,'app.scopes.approved',jsonb_build_object('version',$4))`, app.WorkspaceID, app.ID, approverID.String(), req.Version)
+	writeJSON(w, http.StatusOK, map[string]any{"app_id": app.ID, "version": req.Version, "status": "approved", "scopes": req.Scopes})
+}
+
+func (h *Handler) GetStorage(w http.ResponseWriter, r *http.Request) {
+	app, ok := h.loadApp(w, r)
+	if !ok {
+		return
+	}
+	key, ok := storageKey(w, r)
+	if !ok {
+		return
+	}
+	var value json.RawMessage
+	err := h.pool.QueryRow(r.Context(), `SELECT value FROM cerebro_app_kv WHERE app_id=$1 AND key=$2`, app.ID, key).Scan(&value)
+	if errors.Is(err, pgx.ErrNoRows) {
+		writeError(w, http.StatusNotFound, "app storage key not found")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to read app storage")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"key": key, "value": value})
+}
+
+func (h *Handler) PutStorage(w http.ResponseWriter, r *http.Request) {
+	app, ok := h.loadApp(w, r)
+	if !ok {
+		return
+	}
+	memberID, ok := requestUserID(w, r)
+	if !ok {
+		return
+	}
+	key, ok := storageKey(w, r)
+	if !ok {
+		return
+	}
+	var req storageRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	if len(req.Value) == 0 || !json.Valid(req.Value) {
+		writeError(w, http.StatusBadRequest, "value must be valid JSON")
+		return
+	}
+	_, err := h.pool.Exec(r.Context(), `INSERT INTO cerebro_app_kv (app_id,key,value,updated_by) VALUES ($1,$2,$3,$4) ON CONFLICT (app_id,key) DO UPDATE SET value=EXCLUDED.value,updated_by=EXCLUDED.updated_by,updated_at=now()`, app.ID, key, req.Value, memberID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to write app storage")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"key": key, "value": req.Value})
+}
+
+func (h *Handler) DeleteStorage(w http.ResponseWriter, r *http.Request) {
+	app, ok := h.loadApp(w, r)
+	if !ok {
+		return
+	}
+	key, ok := storageKey(w, r)
+	if !ok {
+		return
+	}
+	_, err := h.pool.Exec(r.Context(), `DELETE FROM cerebro_app_kv WHERE app_id=$1 AND key=$2`, app.ID, key)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to delete app storage")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *Handler) SubmitView(w http.ResponseWriter, r *http.Request) {
+	app, ok := h.loadApp(w, r)
+	if !ok {
+		return
+	}
+	memberID, ok := requestUserID(w, r)
+	if !ok {
+		return
+	}
+	viewID := strings.TrimSpace(chi.URLParam(r, "viewId"))
+	if viewID == "" || len(viewID) > 100 {
+		writeError(w, http.StatusBadRequest, "invalid view id")
+		return
+	}
+	var req viewSubmissionRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	if app.CurrentVersion == nil || req.Version != *app.CurrentVersion {
+		writeError(w, http.StatusConflict, "view submission must target the current published version")
+		return
+	}
+	if len(req.Value) == 0 || !json.Valid(req.Value) {
+		writeError(w, http.StatusBadRequest, "value must be valid JSON")
+		return
+	}
+	var submissionID uuid.UUID
+	err := h.pool.QueryRow(r.Context(), `INSERT INTO cerebro_app_view_submission (app_id,app_version,view_id,submitted_by,value) VALUES ($1,$2,$3,$4,$5) RETURNING id`, app.ID, req.Version, viewID, memberID, req.Value).Scan(&submissionID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to submit app view")
+		return
+	}
+	writeJSON(w, http.StatusCreated, map[string]any{"id": submissionID, "status": "submitted"})
+}
+
+func storageKey(w http.ResponseWriter, r *http.Request) (string, bool) {
+	key := strings.TrimSpace(chi.URLParam(r, "key"))
+	if key == "" || len(key) > 200 || strings.Contains(key, "/") {
+		writeError(w, http.StatusBadRequest, "invalid app storage key")
+		return "", false
+	}
+	return key, true
 }
 
 // IssueToken exchanges Cerebro's registry credential for a short-lived key

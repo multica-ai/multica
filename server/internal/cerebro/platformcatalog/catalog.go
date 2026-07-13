@@ -133,6 +133,10 @@ var catalog = []Capability{
 		Ops: []string{
 			"POST /api/cerebro/apps/{id}/token",
 			"POST /api/cerebro/apps/workflow-runs/{runId}/token",
+			"GET /api/cerebro/apps/{id}/storage/{key}",
+			"PUT /api/cerebro/apps/{id}/storage/{key}",
+			"DELETE /api/cerebro/apps/{id}/storage/{key}",
+			"POST /api/cerebro/apps/{id}/views/{viewId}/submissions",
 		},
 	},
 	{
@@ -154,7 +158,7 @@ var catalog = []Capability{
 		Category:      CategoryApps,
 		Description:   "Approve the registry data access ceiling requested by an app version.",
 		DescriptionZh: "批准应用版本请求的 registry 数据访问上限。",
-		Evidence:      []string{"server/internal/cerebro/apps/handler.go:71"},
+		Ops:           []string{"POST /api/cerebro/apps/{id}/approve-scopes"},
 	},
 	// --- Issues ---------------------------------------------------------------
 	{
