@@ -11,6 +11,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { useActionSheet } from "@expo/react-native-action-sheet";
 import SegmentedControl from "@react-native-segmented-control/segmented-control";
+import { BarChart } from "react-native-gifted-charts";
 import type {
   DashboardAgentRunTime,
   DashboardRunTimeDaily,
@@ -30,8 +31,22 @@ import {
   dashboardUsageByAgentOptions,
   dashboardUsageDailyOptions,
 } from "@/data/queries/usage";
-import { addDaysIso, computeDailyTotals, formatDuration, todayIso } from "@/lib/usage-display";
+import {
+  addDaysIso,
+  aggregateByWeek,
+  aggregateDailyCost,
+  aggregateDailyTasks,
+  aggregateDailyTime,
+  aggregateDailyTokens,
+  aggregateWeeklyTasks,
+  aggregateWeeklyTime,
+  computeDailyTotals,
+  formatDuration,
+  todayIso,
+} from "@/lib/usage-display";
 import { fmtMoney, formatTokens } from "@/lib/usage-pricing";
+import { useColorScheme } from "@/lib/use-color-scheme";
+import { THEME } from "@/lib/theme";
 
 type Dim = "daily" | "weekly";
 
@@ -156,6 +171,120 @@ export default function UsagePage() {
     return { totalSeconds, taskCount, failedCount };
   }, [runTimeRows]);
 
+  type Metric = "cost" | "tokens" | "time" | "tasks";
+  const [metric, setMetric] = useState<Metric>("tokens");
+
+  const dailyCost = useMemo(() => aggregateDailyCost(dailyUsageInWindow), [dailyUsageInWindow]);
+  const dailyTokens = useMemo(() => aggregateDailyTokens(dailyUsageInWindow), [dailyUsageInWindow]);
+  const runTimeDailyInWindow = useMemo(
+    () => runTimeDailyRows.filter((r) => r.date >= dailyCutoffIso),
+    [runTimeDailyRows, dailyCutoffIso],
+  );
+  const dailyTime = useMemo(() => aggregateDailyTime(runTimeDailyInWindow), [runTimeDailyInWindow]);
+  const dailyTasks = useMemo(() => aggregateDailyTasks(runTimeDailyInWindow), [runTimeDailyInWindow]);
+
+  // Weekly aggregates use the raw over-fetched series (chartFetchDays),
+  // NOT the windowed one — mirrors DashboardPage exactly, so the leftmost
+  // week isn't truncated.
+  const weekly = useMemo(() => aggregateByWeek(dailyUsage, viewTZ, weekCount), [dailyUsage, viewTZ, weekCount]);
+  const weeklyTime = useMemo(
+    () => aggregateWeeklyTime(runTimeDailyRows, viewTZ, weekCount),
+    [runTimeDailyRows, viewTZ, weekCount],
+  );
+  const weeklyTasks = useMemo(
+    () => aggregateWeeklyTasks(runTimeDailyRows, viewTZ, weekCount),
+    [runTimeDailyRows, viewTZ, weekCount],
+  );
+
+  const { colorScheme } = useColorScheme();
+  const theme = THEME[colorScheme];
+  const lessThanMinuteLabel = t("duration.less_than_minute");
+
+  // Per-metric chart data. Cost/Tokens are stacked series (input/output/
+  // cache-write for Cost — cache-read excluded; input/output/cache-read/
+  // cache-write for Tokens); Time is a single unstacked series; Tasks is
+  // a stacked 2-series (completed/failed) — mirrors DashboardPage's
+  // DailyCostChart/DailyTokensChart/DailyTimeChart/DailyTasksChart (and
+  // their Weekly siblings) exactly, per
+  // packages/views/runtimes/components/charts/*.
+  //
+  // Explicit ChartStackRow/ChartBarRow types (rather than the two `as`
+  // casts inferring loose inline shapes) so this stays checked against
+  // react-native-gifted-charts' actual stackDataItem/barDataItem prop
+  // types instead of `any`.
+  type ChartStackRow = { label: string; stacks: { value: number; color: string }[] };
+  type ChartBarRow = { label: string; value: number; frontColor: string };
+  const chartBarData = useMemo<(ChartStackRow | ChartBarRow)[]>(() => {
+    const stackColors = {
+      input: theme.chart1,
+      output: theme.chart2,
+      cacheRead: theme.chart4,
+      cacheWrite: theme.chart3,
+      completed: theme.chart1,
+      failed: theme.chart5,
+      single: theme.chart1,
+    };
+    const stacked = (
+      rows: { label: string }[],
+      segments: { key: string; color: string }[],
+      getValue: (row: any, key: string) => number,
+    ): ChartStackRow[] =>
+      rows.map((row) => ({
+        label: row.label,
+        stacks: segments.map((s) => ({ value: getValue(row, s.key), color: s.color })),
+      }));
+
+    if (metric === "cost") {
+      const rows = dim === "weekly" ? weekly.weeklyCostStack : dailyCost;
+      return stacked(
+        rows,
+        [
+          { key: "input", color: stackColors.input },
+          { key: "output", color: stackColors.output },
+          { key: "cacheWrite", color: stackColors.cacheWrite },
+        ],
+        (r, k) => r[k],
+      );
+    }
+    if (metric === "tokens") {
+      const rows = dim === "weekly" ? weekly.weeklyTokens : dailyTokens;
+      return stacked(
+        rows,
+        [
+          { key: "input", color: stackColors.input },
+          { key: "output", color: stackColors.output },
+          { key: "cacheRead", color: stackColors.cacheRead },
+          { key: "cacheWrite", color: stackColors.cacheWrite },
+        ],
+        (r, k) => r[k],
+      );
+    }
+    if (metric === "time") {
+      const rows = dim === "weekly" ? weeklyTime : dailyTime;
+      return rows.map((row) => ({ label: row.label, value: row.totalSeconds, frontColor: stackColors.single }));
+    }
+    const rows = dim === "weekly" ? weeklyTasks : dailyTasks;
+    return stacked(
+      rows,
+      [
+        { key: "completed", color: stackColors.completed },
+        { key: "failed", color: stackColors.failed },
+      ],
+      (r, k) => r[k],
+    );
+  }, [metric, dim, dailyCost, dailyTokens, dailyTime, dailyTasks, weekly, weeklyTime, weeklyTasks, theme]);
+
+  // Empty-state mirrors DashboardPage's per-metric `isEmpty` (sum/every of
+  // the metric's own values), NOT chartBarData.length — aggregateByWeek /
+  // aggregateWeeklyTime / aggregateWeeklyTasks always emit `weekCount` week
+  // shells regardless of underlying data (see buildWeekShells), so a length
+  // check can never be 0 in the weekly dimension and would silently break
+  // the empty-state on a brand-new workspace viewed in Weekly mode.
+  const chartIsEmpty = useMemo(
+    () => chartBarData.every((row) => ("stacks" in row ? row.stacks.every((s) => s.value === 0) : row.value === 0)),
+    [chartBarData],
+  );
+
   return (
     <SafeAreaView className="flex-1 bg-background" edges={[]}>
       {isLoading ? (
@@ -210,6 +339,45 @@ export default function UsagePage() {
               value={String(runTimeTotals.taskCount)}
               hint={t("kpi.tasks_hint", { failed: runTimeTotals.failedCount })}
             />
+          </View>
+
+          <View className="px-4 pt-4">
+            <SegmentedControl
+              values={[t("metric.tokens"), t("metric.cost"), t("metric.time"), t("metric.tasks")]}
+              selectedIndex={["tokens", "cost", "time", "tasks"].indexOf(metric)}
+              onChange={(e) =>
+                setMetric((["tokens", "cost", "time", "tasks"] as const)[e.nativeEvent.selectedSegmentIndex])
+              }
+            />
+            <View className="pt-3">
+              {chartIsEmpty ? (
+                <Text className="text-sm text-muted-foreground text-center py-8">{t("empty.title")}</Text>
+              ) : metric === "time" ? (
+                <BarChart
+                  data={chartBarData as ChartBarRow[]}
+                  height={180}
+                  barWidth={dim === "weekly" ? 24 : 12}
+                  spacing={dim === "weekly" ? 16 : 6}
+                  noOfSections={4}
+                  yAxisTextStyle={{ color: theme.mutedForeground }}
+                  xAxisLabelTextStyle={{ color: theme.mutedForeground, fontSize: 10 }}
+                  formatYLabel={(v: string) => formatDuration(Number(v), lessThanMinuteLabel)}
+                />
+              ) : (
+                <BarChart
+                  stackData={chartBarData as ChartStackRow[]}
+                  height={180}
+                  barWidth={dim === "weekly" ? 24 : 12}
+                  spacing={dim === "weekly" ? 16 : 6}
+                  noOfSections={4}
+                  yAxisTextStyle={{ color: theme.mutedForeground }}
+                  xAxisLabelTextStyle={{ color: theme.mutedForeground, fontSize: 10 }}
+                  formatYLabel={(v: string) =>
+                    metric === "cost" ? fmtMoney(Number(v)) : metric === "tokens" ? formatTokens(Number(v)) : v
+                  }
+                />
+              )}
+            </View>
           </View>
         </ScrollView>
       )}
