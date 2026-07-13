@@ -3,6 +3,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { fireEvent, screen, waitFor } from "@testing-library/react";
 import type { UploadResult } from "@multica/core/hooks/use-file-upload";
+import { useCommentComposerStore } from "@multica/core/issues/stores";
 import { renderWithI18n } from "../../test/i18n";
 import { CommentInput } from "./comment-input";
 import { ReplyInput } from "./reply-input";
@@ -114,7 +115,9 @@ function renderReplyInput({
 }
 
 function getSubmitButton(container: HTMLElement): HTMLButtonElement {
-  const button = container.querySelectorAll("button")[1];
+  // Submit is always the last button in a composer's action cluster.
+  const buttons = container.querySelectorAll("button");
+  const button = buttons[buttons.length - 1];
   if (!button) throw new Error("Expected submit button to render");
   return button;
 }
@@ -122,6 +125,7 @@ function getSubmitButton(container: HTMLElement): HTMLButtonElement {
 beforeEach(() => {
   uploadWithToast.mockReset();
   localStorage.clear();
+  useCommentComposerStore.setState({ sticky: true });
 });
 
 describe("comment composers", () => {
@@ -221,5 +225,21 @@ describe("comment composers", () => {
     await waitFor(() => expect(onSubmit).toHaveBeenCalled());
     // Failed send must NOT clear — the box still has content, submit stays live.
     await waitFor(() => expect(getSubmitButton(container)).not.toBeDisabled());
+  });
+});
+
+describe("sticky composer preference", () => {
+  it("caps the editor height while the sticky preference is on (default)", () => {
+    renderCommentInput();
+
+    // The height cap lives on the editor wrapper, not the card shell.
+    expect(screen.getByTestId("editor").parentElement?.className).toContain("max-h-[40vh]");
+  });
+
+  it("lets the editor grow when the preference is off", () => {
+    useCommentComposerStore.setState({ sticky: false });
+    renderCommentInput();
+
+    expect(screen.getByTestId("editor").parentElement?.className).not.toContain("max-h-[40vh]");
   });
 });

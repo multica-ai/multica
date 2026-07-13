@@ -2,6 +2,7 @@ import { useCallback, useState } from "react";
 import { AlertCircle, ArrowDownToLine, Check, Loader2 } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
 import { useT } from "@multica/views/i18n";
+import { SettingsCard, SettingsRow, SettingsTab } from "@multica/views/settings";
 
 type CheckState =
   | { status: "idle" }
@@ -30,48 +31,44 @@ export function UpdatesSettingsTab() {
   }, []);
 
   return (
-    <div>
-      <h2 className="text-lg font-semibold">{t(($) => $.desktop.updates.title)}</h2>
-      <p className="text-sm text-muted-foreground mt-1">
-        {t(($) => $.desktop.updates.description)}
-      </p>
+    <SettingsTab
+      title={t(($) => $.desktop.updates.title)}
+      description={t(($) => $.desktop.updates.description)}
+    >
+      <SettingsCard>
+        <SettingsRow label={t(($) => $.desktop.updates.current_version)}>
+          <span className="font-mono text-xs text-muted-foreground">
+            v{currentVersion}
+          </span>
+        </SettingsRow>
 
-      <div className="mt-6 divide-y">
-        <div className="flex items-center justify-between gap-6 py-4">
-          <div className="min-w-0">
-            <p className="text-sm font-medium">{t(($) => $.desktop.updates.current_version)}</p>
-            <p className="text-sm text-muted-foreground mt-0.5 font-mono">
-              v{currentVersion}
-            </p>
-          </div>
-        </div>
-
-        <div className="flex items-start justify-between gap-6 py-4">
-          <div className="min-w-0">
-            <p className="text-sm font-medium">{t(($) => $.desktop.updates.check_section_title)}</p>
-            <p className="text-sm text-muted-foreground mt-0.5">
-              {t(($) => $.desktop.updates.check_section_description)}
-            </p>
+        <SettingsRow
+          label={t(($) => $.desktop.updates.check_section_title)}
+          align="start"
+          description={
+            <>
+              <p>{t(($) => $.desktop.updates.check_section_description)}</p>
             {state.status === "up-to-date" && (
-              <p className="text-sm text-muted-foreground mt-2 inline-flex items-center gap-1.5">
+              <p className="mt-2 inline-flex items-center gap-1.5">
                 <Check className="size-3.5 text-success" />
                 {t(($) => $.desktop.updates.up_to_date)}
               </p>
             )}
             {state.status === "available" && (
-              <p className="text-sm text-muted-foreground mt-2 inline-flex items-center gap-1.5">
+              <p className="mt-2 inline-flex items-center gap-1.5">
                 <ArrowDownToLine className="size-3.5 text-primary" />
                 {t(($) => $.desktop.updates.downloading, { version: state.latestVersion })}
               </p>
             )}
             {state.status === "error" && (
-              <p className="text-sm text-destructive mt-2 inline-flex items-center gap-1.5">
+              <p className="mt-2 inline-flex items-center gap-1.5 text-destructive">
                 <AlertCircle className="size-3.5" />
                 {state.message}
               </p>
             )}
-          </div>
-          <div className="shrink-0">
+            </>
+          }
+        >
             <Button
               variant="outline"
               size="sm"
@@ -87,9 +84,8 @@ export function UpdatesSettingsTab() {
                 t(($) => $.desktop.updates.check_now)
               )}
             </Button>
-          </div>
-        </div>
-      </div>
-    </div>
+        </SettingsRow>
+      </SettingsCard>
+    </SettingsTab>
   );
 }

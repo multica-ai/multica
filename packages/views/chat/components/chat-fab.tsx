@@ -4,7 +4,11 @@ import { MessageCircle } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { cn } from "@multica/ui/lib/utils";
 import { useChatStore } from "@multica/core/chat";
-import { chatSessionsOptions, hasPendingChatTasksOptions } from "@multica/core/chat/queries";
+import {
+  chatSessionsOptions,
+  countUnreadChatSessions,
+  hasPendingChatTasksOptions,
+} from "@multica/core/chat/queries";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { createLogger } from "@multica/core/logger";
 import {
@@ -33,7 +37,7 @@ export function ChatFab() {
 
   if (isOpen) return null;
 
-  const unreadSessionCount = sessions.filter((s) => s.has_unread).length;
+  const unreadSessionCount = countUnreadChatSessions(sessions);
   const isRunning = hasPending?.has_pending ?? false;
 
   const handleClick = () => {
@@ -53,8 +57,9 @@ export function ChatFab() {
     <Tooltip>
       <TooltipTrigger
         onClick={handleClick}
+        aria-label={tooltip}
         className={cn(
-          "absolute bottom-2 right-2 z-50 flex size-10 cursor-pointer items-center justify-center rounded-full ring-1 ring-foreground/10 bg-card text-muted-foreground shadow-sm transition-transform hover:scale-110 hover:text-accent-foreground active:scale-95",
+          "absolute bottom-2 right-2 z-50 flex size-10 touch-manipulation items-center justify-center rounded-full bg-surface-raised text-muted-foreground shadow-[var(--floating-shadow)] ring-1 ring-surface-border transition-[background-color,color,box-shadow] hover:bg-surface-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/70 focus-visible:ring-offset-2 focus-visible:ring-offset-page-canvas active:bg-surface-hover",
           // Impulse the button itself while a chat task is running — no
           // outer ring to keep things calm.
           isRunning && "animate-chat-impulse",

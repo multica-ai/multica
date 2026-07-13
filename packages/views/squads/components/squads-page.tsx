@@ -82,7 +82,11 @@ import { ActorAvatar as ActorAvatarBase } from "@multica/ui/components/common/ac
 import { ActorAvatar } from "../../common/actor-avatar";
 import { FILTER_ITEM_CLASS, HoverCheck } from "../../common/hover-check";
 import { useRowLink } from "../../navigation";
-import { PageHeader } from "../../layout/page-header";
+import {
+  CollectionPageHeader,
+  CollectionPageHeaderAction,
+  CollectionPageState,
+} from "../../layout/collection-page";
 import { useT } from "../../i18n";
 
 // Column template — the simplest member of the ListGrid family (squads are
@@ -887,46 +891,35 @@ export function SquadsPage() {
 
   return (
     <div className="flex flex-1 min-h-0 flex-col">
-      <PageHeader className="justify-between px-5">
-        <div className="flex items-center gap-2">
-          <Users className="h-4 w-4 text-muted-foreground" />
-          <h1 className="text-sm font-medium">{t(($) => $.page.title)}</h1>
-          {squads.length > 0 && (
-            <span className="font-mono text-xs tabular-nums text-muted-foreground/70">
-              {squads.length}
-            </span>
-          )}
-        </div>
-        {/* Quiet chrome button (outline, icon-only below md) — primary is
-            reserved for the empty state. */}
-        <Button
-          size="sm"
-          variant="outline"
-          className="h-8 w-8 gap-1 px-0 md:w-auto md:px-2.5"
-          aria-label={t(($) => $.page.new_button)}
-          onClick={() => useModalStore.getState().open("create-squad")}
-        >
-          <Plus className="h-3.5 w-3.5" />
-          <span className="hidden md:inline">{t(($) => $.page.new_button)}</span>
-        </Button>
-      </PageHeader>
+      <CollectionPageHeader
+        icon={Users}
+        title={t(($) => $.page.title)}
+        count={squads.length}
+        actions={
+          <CollectionPageHeaderAction
+            icon={Plus}
+            label={t(($) => $.page.new_button)}
+            onClick={() => useModalStore.getState().open("create-squad")}
+          />
+        }
+      />
 
       {isLoading ? (
         <LoadingSkeleton />
       ) : squads.length === 0 ? (
-        <div className="flex flex-1 flex-col items-center justify-center gap-3 py-16 text-center">
-          <Users className="size-10 text-muted-foreground/50" />
-          <p className="text-sm text-muted-foreground">
-            {t(($) => $.page.empty_no_squads)}
-          </p>
-          <Button
-            size="sm"
-            onClick={() => useModalStore.getState().open("create-squad")}
-          >
-            <Plus className="size-3.5" />
-            {t(($) => $.page.new_button)}
-          </Button>
-        </div>
+        <CollectionPageState
+          icon={Users}
+          title={t(($) => $.page.empty_no_squads)}
+          actions={
+            <Button
+              size="sm"
+              onClick={() => useModalStore.getState().open("create-squad")}
+            >
+              <Plus aria-hidden="true" className="size-3.5" />
+              {t(($) => $.page.new_button)}
+            </Button>
+          }
+        />
       ) : (
         <>
           <SquadListToolbar

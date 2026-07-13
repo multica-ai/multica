@@ -42,6 +42,7 @@ import { useWorkspaceId } from "@multica/core";
 import { useWorkspacePaths } from "@multica/core/paths";
 import type { WorkspacePaths } from "@multica/core/paths";
 import { useModalStore } from "@multica/core/modals";
+import { createShortcutChord } from "@multica/core/shortcuts";
 import { memberListOptions } from "@multica/core/workspace/queries";
 import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
 import { StatusIcon } from "../issues/components";
@@ -49,6 +50,7 @@ import { ProjectIcon } from "../projects/components/project-icon";
 import { PROJECT_STATUS_CONFIG } from "@multica/core/projects/config";
 import type { ProjectStatus } from "@multica/core/types";
 import { ActorAvatar } from "../common/actor-avatar";
+import { ShortcutKeycaps } from "../common/shortcut-keycaps";
 import { ActorAvatar as ActorAvatarBase } from "@multica/ui/components/common/actor-avatar";
 import {
   Dialog,
@@ -333,18 +335,6 @@ export function SearchCommand() {
     results.projects.length > 0 ||
     filteredMembers.length > 0;
 
-  // Global Cmd+K / Ctrl+K shortcut
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "k" && (e.metaKey || e.ctrlKey)) {
-        e.preventDefault();
-        useSearchStore.getState().toggle();
-      }
-    };
-    document.addEventListener("keydown", handleKeyDown);
-    return () => document.removeEventListener("keydown", handleKeyDown);
-  }, []);
-
   // Close on single ESC — capture phase fires before base-ui Dialog's handlers
   useEffect(() => {
     if (!open) return;
@@ -483,9 +473,10 @@ export function SearchCommand() {
               onValueChange={handleValueChange}
               className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
             />
-            <kbd className="hidden shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground sm:inline">
-              ESC
-            </kbd>
+            <ShortcutKeycaps
+              shortcut={createShortcutChord("Escape")}
+              className="hidden shrink-0 sm:inline-flex"
+            />
           </div>
 
           {/* Results list */}

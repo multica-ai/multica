@@ -198,6 +198,47 @@ func TestLoginTokenFlagWiring(t *testing.T) {
 	}
 }
 
+// TestLoginTokenHelpOutputRendersCleanly renders loginCmd's flag help through
+// the same pflag path `multica login -h` uses (FlagUsagesWrapped) and locks the
+// user-visible help contract that regressed. The original bug had two causes,
+// both invisible to the flag-wiring/parsing tests above:
+//   - The NoOptDefVal sentinel was "\x00prompt". pflag renders NoOptDefVal
+//     verbatim into the flag column AND uses "\x00" as its own column-alignment
+//     marker, so the split-at-first-NUL logic mispadded the line and printed a
+//     raw NUL to the terminal.
+//   - The usage string wrapped the PAT example in backticks, so pflag's
+//     UnquoteUsage hijacked it as the flag's value placeholder and stripped a
+//     backtick pair from the description.
+//
+// A comment can't prevent either from recurring; only rendering the real output
+// and asserting on it can. This is the regression guard for that output.
+func TestLoginTokenHelpOutputRendersCleanly(t *testing.T) {
+	help := loginCmd.Flags().FlagUsages()
+
+	// No control byte may reach the terminal. pflag emits only spaces and
+	// newlines for layout, so any other sub-0x20 rune (notably the NUL the old
+	// "\x00prompt" sentinel leaked) means the help rendering is corrupted.
+	for _, r := range help {
+		if r < 0x20 && r != '\n' && r != '\t' {
+			t.Fatalf("login help contains control byte %#x; rendered flag usage:\n%q", r, help)
+		}
+	}
+
+	// The --token line must show the standard optional-value form. This single
+	// assertion pins both root causes: the placeholder is `string` (backticks
+	// removed, so UnquoteUsage no longer hijacks the PAT example) and the
+	// optional value is the printable `prompt` (no NUL-prefixed sentinel).
+	if want := `--token string[="prompt"]`; !strings.Contains(help, want) {
+		t.Fatalf("login help missing %q; rendered flag usage:\n%q", want, help)
+	}
+
+	// The description must survive intact — a swallowed backtick pair used to
+	// truncate it, so assert the tail of the sentence is still present.
+	if want := "to be prompted interactively."; !strings.Contains(help, want) {
+		t.Fatalf("login help missing description tail %q; rendered flag usage:\n%q", want, help)
+	}
+}
+
 // TestLoginTokenFlagParsing exercises every documented invocation form
 // against a cobra command wired up exactly the same way as the production
 // loginCmd, then runs runAuthLogin's flag-resolution logic to confirm the
