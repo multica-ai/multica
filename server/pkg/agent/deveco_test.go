@@ -246,3 +246,100 @@ func TestDevecoHandleErrorEventNilError(t *testing.T) {
 		t.Errorf("error: got %q, want %q", errMsg, "unknown deveco error")
 	}
 }
+
+// devecoMainPackageNative returns the postinstall-copied native binary path
+// under the scoped main package for a given npm prefix dir.
+func devecoMainPackageNative(prefix string) string {
+	return filepath.Join(prefix, "node_modules", "@deveco", "deveco-code", "bin", "deveco.exe")
+}
+
+func TestResolveDevecoNativeFromShimPrefersMainPackageCopy(t *testing.T) {
+	t.Parallel()
+
+	// postinstall copies the CPU-variant-selected binary into the main
+	// package's own bin/, so that copy is the primary target.
+	prefix := filepath.Join("C:\\nvm4w", "nodejs")
+	shim := filepath.Join(prefix, "deveco.cmd")
+	native := devecoMainPackageNative(prefix)
+
+	got := resolveDevecoNativeFromShim(shim, fakeStat(native))
+	if got != native {
+		t.Errorf("got %q, want %q", got, native)
+	}
+}
+
+func TestResolveDevecoNativeFromShimFallsBackToPlatformPackage(t *testing.T) {
+	t.Parallel()
+
+	// When the main-package copy is absent (e.g. postinstall skipped), the
+	// resolver falls through to the windows-x64 platform sub-package.
+	prefix := filepath.Join("C:\\nvm4w", "nodejs")
+	shim := filepath.Join(prefix, "deveco.cmd")
+	platform := filepath.Join(prefix, "node_modules", "@deveco", "deveco-code-windows-x64", "bin", "deveco.exe")
+
+	got := resolveDevecoNativeFromShim(shim, fakeStat(platform))
+	if got != platform {
+		t.Errorf("got %q, want %q", got, platform)
+	}
+}
+
+func TestResolveDevecoNativeFromShimFallsBackToBaseline(t *testing.T) {
+	t.Parallel()
+
+	// Older CPUs without AVX2 get the -baseline platform package. Resolver
+	// should find it when neither the main copy nor the default x64 package
+	// is present.
+	prefix := filepath.Join("C:\\nvm4w", "nodejs")
+	shim := filepath.Join(prefix, "deveco.cmd")
+	baseline := filepath.Join(prefix, "node_modules", "@deveco", "deveco-code-windows-x64-baseline", "bin", "deveco.exe")
+
+	got := resolveDevecoNativeFromShim(shim, fakeStat(baseline))
+	if got != baseline {
+		t.Errorf("got %q, want %q", got, baseline)
+	}
+}
+
+func TestResolveDevecoNativeFromShimReturnsEmptyWhenNativeMissing(t *testing.T) {
+	t.Parallel()
+
+	// Shim ends in .cmd but no bundled native binary is present. Caller must
+	// keep the original shim path so PATH lookup still wins.
+	shim := filepath.Join("C:\\nvm4w", "nodejs", "deveco.cmd")
+
+	got := resolveDevecoNativeFromShim(shim, fakeStat())
+	if got != "" {
+		t.Errorf("got %q, want empty (missing native binary)", got)
+	}
+}
+
+func TestResolveDevecoNativeFromShimSkipsNonCmdPath(t *testing.T) {
+	t.Parallel()
+
+	// On macOS/Linux exec.LookPath returns the native binary directly (no
+	// .cmd), so no rewrite is needed and the helper returns empty.
+	cases := []string{
+		"/usr/local/bin/deveco",
+		"C:\\nvm4w\\nodejs\\deveco.exe",
+		"",
+	}
+	for _, p := range cases {
+		if got := resolveDevecoNativeFromShim(p, fakeStat("anything")); got != "" {
+			t.Errorf("path %q: got %q, want empty", p, got)
+		}
+	}
+}
+
+func TestResolveDevecoNativeFromShimAcceptsUppercaseExtension(t *testing.T) {
+	t.Parallel()
+
+	// Windows filesystem extensions are case-insensitive and PATHEXT tokens
+	// are commonly uppercase, so exec.LookPath may return `.CMD`.
+	prefix := filepath.Join("C:\\nvm4w", "nodejs")
+	shim := filepath.Join(prefix, "deveco.CMD")
+	native := devecoMainPackageNative(prefix)
+
+	got := resolveDevecoNativeFromShim(shim, fakeStat(native))
+	if got != native {
+		t.Errorf("got %q, want %q", got, native)
+	}
+}

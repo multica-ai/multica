@@ -32,7 +32,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"sync/atomic"
 	"syscall"
@@ -77,6 +80,12 @@ func (b *devecoBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	resolved, err := exec.LookPath(execPath)
 	if err != nil {
 		return nil, fmt.Errorf("deveco executable not found at %q: %w", execPath, err)
+	}
+	if runtime.GOOS == "windows" {
+		if native := resolveDevecoNativeFromShim(resolved, os.Stat); native != "" {
+			b.cfg.Logger.Info("deveco resolved to native binary to avoid .cmd shim argv truncation", "shim", resolved, "native", native)
+			resolved = native
+		}
 	}
 	execPath = resolved
 
@@ -232,6 +241,56 @@ func (b *devecoBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	}()
 
 	return &Session{Messages: msgCh, Result: resCh}, nil
+}
+
+// resolveDevecoNativeFromShim returns the path to the native DevEco executable
+// bundled inside the npm package, given the path to the npm `deveco.cmd` shim
+// that PATH lookup found on Windows. Returns "" if the shim doesn't end in
+// `.cmd` or no candidate native binary is present, in which case the caller
+// keeps the original shim path.
+//
+// This mirrors the OpenCode fix (resolveOpenCodeNativeFromShim) — DevEco is
+// npm-distributed the same way, so it inherits the same defect: Windows batch
+// argument forwarding via `%*` drops everything after the first newline, so a
+// multi-line positional prompt (daemon system context + user message) is
+// truncated before the shim hands off to the JS entrypoint. Spawning the native
+// binary skips the cmd.exe layer entirely. The two resolvers are kept separate
+// (not shared) so DevEco's independent backend can't be broken by an OpenCode
+// change and vice versa; the divergence in package layout below is exactly why.
+//
+// DevEco's npm layout differs from OpenCode's (verified against the real
+// `@deveco/deveco-code` 0.1.2 tarball):
+//
+//   - The package is scoped (`@deveco/deveco-code`), so it lives under
+//     `node_modules\@deveco\deveco-code\...` rather than a flat name.
+//   - The native binary is named `deveco.exe`, and each platform sub-package
+//     (`@deveco/deveco-code-windows-x64{,-baseline}`) exposes it at `bin\deveco.exe`.
+//   - `postinstall.mjs` copies the CPU-variant-selected binary into the main
+//     package's own `bin\deveco.exe`, so that copy is the most reliable target
+//     (it already reflects the AVX2/baseline decision) and is tried first.
+//   - There is no `windows-arm64` package (DevEco ships Windows x64 only), so
+//     the candidate list omits it.
+//
+// statFn is injected so this is testable on non-Windows hosts.
+func resolveDevecoNativeFromShim(shimPath string, statFn func(string) (os.FileInfo, error)) string {
+	if !strings.EqualFold(filepath.Ext(shimPath), ".cmd") {
+		return ""
+	}
+	prefix := filepath.Dir(shimPath)
+	scope := filepath.Join(prefix, "node_modules", "@deveco")
+	candidates := []string{
+		// postinstall copies the selected native binary here; most reliable.
+		filepath.Join(scope, "deveco-code", "bin", "deveco.exe"),
+		// Fall back to the platform sub-packages directly if the copy is absent.
+		filepath.Join(scope, "deveco-code-windows-x64", "bin", "deveco.exe"),
+		filepath.Join(scope, "deveco-code-windows-x64-baseline", "bin", "deveco.exe"),
+	}
+	for _, candidate := range candidates {
+		if _, err := statFn(candidate); err == nil {
+			return candidate
+		}
+	}
+	return ""
 }
 
 // ── Event handlers ──
