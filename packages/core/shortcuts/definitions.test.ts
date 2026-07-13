@@ -135,14 +135,38 @@ describe("keyboard shortcut definitions", () => {
     ).toBe(false);
   });
 
-  it("reserves browser-owned accelerators on web but frees them on desktop", () => {
+  it("reserves browser-owned accelerators on web but frees the bare chords on desktop", () => {
     for (const key of ["P", "L", "T", "N", "D", "U"]) {
       const chord = createShortcutChord(key, { primary: true });
       expect(isReservedShortcut(chord, "macos", "web")).toBe(true);
       expect(isReservedShortcut(chord, "windows", "web")).toBe(true);
       expect(isReservedShortcut(chord, "macos", "desktop")).toBe(false);
       expect(isReservedShortcut(chord, "windows", "desktop")).toBe(false);
+      // Only the bare primary chord opens up — extra modifiers keep the
+      // historical reservation on every runtime.
+      for (const extra of [{ shift: true }, { alt: true }, { control: true }]) {
+        const variant = createShortcutChord(key, { primary: true, ...extra });
+        expect(isReservedShortcut(variant, "macos", "desktop")).toBe(true);
+        expect(isReservedShortcut(variant, "macos", "web")).toBe(true);
+      }
     }
+    // OS-owned combos that motivated the narrowing must stay reserved on
+    // desktop: Option+Cmd+D toggles the macOS Dock, Ctrl+Alt+T opens a
+    // terminal on common Linux desktops.
+    expect(
+      isReservedShortcut(
+        createShortcutChord("D", { primary: true, alt: true }),
+        "macos",
+        "desktop",
+      ),
+    ).toBe(true);
+    expect(
+      isReservedShortcut(
+        createShortcutChord("T", { primary: true, alt: true }),
+        "linux",
+        "desktop",
+      ),
+    ).toBe(true);
   });
 
   it("keeps app-owned and editing accelerators reserved on desktop", () => {
@@ -157,12 +181,12 @@ describe("keyboard shortcut definitions", () => {
     ).toBe(true);
   });
 
-  it("allows recording Cmd/Ctrl+P for an action on desktop only", () => {
+  it("allows recording bare Cmd/Ctrl+P for an action on desktop only", () => {
     const cmdP = createShortcutChord("P", { primary: true });
     expect(isShortcutAllowedForAction("openSearch", cmdP, "macos", "desktop")).toBe(true);
     expect(isShortcutAllowedForAction("openSearch", cmdP, "macos", "web")).toBe(false);
     expect(isShortcutAllowedForAction("goIssues", cmdP, "windows", "desktop")).toBe(true);
-    // The reservation keys on primary+key, so shifted variants open up too.
+    // Modifier variants keep the historical reservation even on desktop.
     expect(
       isShortcutAllowedForAction(
         "openSearch",
@@ -170,7 +194,7 @@ describe("keyboard shortcut definitions", () => {
         "macos",
         "desktop",
       ),
-    ).toBe(true);
+    ).toBe(false);
     // Send stays locked to Enter / Mod+Enter regardless of runtime.
     expect(isShortcutAllowedForAction("send", cmdP, "macos", "desktop")).toBe(false);
   });

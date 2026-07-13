@@ -249,9 +249,13 @@ const PRIMARY_RESERVED_KEYS = new Set([
 
 // Accelerators owned by the browser UI around a tab: print, address bar,
 // new tab/window, bookmark, view source. A web page cannot reliably own
-// them, but the Electron renderer receives them as plain keydowns — neither
-// Electron's default menu nor the desktop shell binds any of them — so they
-// are recordable on desktop (MUL-4457).
+// them, but the Electron renderer receives the bare primary chords as plain
+// keydowns — neither Electron's default menu nor the desktop shell binds
+// any of them — so exactly those are recordable on desktop (MUL-4457).
+// Variants with extra modifiers stay reserved on both runtimes: several
+// belong to the OS or window manager (Option+Cmd+D toggles the macOS Dock,
+// Ctrl+Alt+T opens a terminal on common Linux desktops), which even the
+// desktop app cannot own.
 const BROWSER_ONLY_PRIMARY_RESERVED_KEYS = new Set([
   "P", "L", "T", "N", "D", "U",
 ]);
@@ -265,12 +269,10 @@ export function isReservedShortcut(
   const { modifiers, key } = shortcut;
   if (key === "F5") return true;
   if (modifiers.primary && PRIMARY_RESERVED_KEYS.has(key)) return true;
-  if (
-    runtime === "web" &&
-    modifiers.primary &&
-    BROWSER_ONLY_PRIMARY_RESERVED_KEYS.has(key)
-  ) {
-    return true;
+  if (modifiers.primary && BROWSER_ONLY_PRIMARY_RESERVED_KEYS.has(key)) {
+    const barePrimary =
+      !modifiers.control && !modifiers.meta && !modifiers.alt && !modifiers.shift;
+    if (runtime !== "desktop" || !barePrimary) return true;
   }
 
   if (platform === "macos") {
