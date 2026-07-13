@@ -1,6 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   aggregateAgentTokens,
+  aggregateByWeek,
+  aggregateWeeklyTasks,
+  aggregateWeeklyTime,
   bucketUnknownAgentRows,
   computeDailyTotals,
   DELETED_AGENTS_ROW_ID,
@@ -143,5 +146,122 @@ describe("formatDuration", () => {
 
   it("formats multi-day durations as days and hours", () => {
     expect(formatDuration(90000, "<1m")).toBe("1d 1h");
+  });
+});
+
+// "Today" pinned to Wednesday 2026-07-15 (UTC) for all three describes below,
+// so the current-week partial/daysCovered math is deterministic instead of
+// depending on the day the suite happens to run. Verified externally:
+// 2026-07-13 is a Monday, 2026-07-19 is a Sunday, so the current
+// (Mon-anchored) week is 07-13..07-19 and the prior closed week is
+// 07-06..07-12.
+describe("weekly aggregation (today pinned to 2026-07-15T12:00:00Z)", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-15T12:00:00Z"));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  describe("aggregateByWeek", () => {
+    it("pre-zeros both trailing weeks, folds rows into the correct week, and marks only the current week partial", () => {
+      const { weeklyTokens, weeklyCostStack } = aggregateByWeek(
+        [
+          {
+            date: "2026-07-06", // prior (closed) week
+            model: "claude-sonnet-4-6",
+            provider: "anthropic",
+            input_tokens: 1_000_000,
+            output_tokens: 0,
+            cache_read_tokens: 0,
+            cache_write_tokens: 0,
+          },
+          {
+            date: "2026-07-14", // current (partial) week
+            model: "claude-sonnet-4-6",
+            provider: "anthropic",
+            input_tokens: 2_000_000,
+            output_tokens: 0,
+            cache_read_tokens: 0,
+            cache_write_tokens: 0,
+          },
+        ],
+        "UTC",
+        2,
+      );
+
+      expect(weeklyTokens).toHaveLength(2);
+      expect(weeklyTokens[0]).toMatchObject({
+        weekStart: "2026-07-06",
+        weekEnd: "2026-07-12",
+        rangeLabel: "Jul 6 – Jul 12",
+        partial: false,
+        daysCovered: 7,
+        input: 1_000_000,
+      });
+      expect(weeklyTokens[1]).toMatchObject({
+        weekStart: "2026-07-13",
+        weekEnd: "2026-07-19",
+        rangeLabel: "Jul 13 – Jul 19",
+        partial: true,
+        daysCovered: 3, // Mon 13, Tue 14, Wed 15 (today) elapsed
+        input: 2_000_000,
+      });
+
+      // 1M input tokens @ claude-sonnet-4-6 ($3/1M) = $3; 2M = $6.
+      expect(weeklyCostStack[0]).toMatchObject({ weekStart: "2026-07-06", input: 3, total: 3 });
+      expect(weeklyCostStack[1]).toMatchObject({ weekStart: "2026-07-13", input: 6, total: 6 });
+    });
+
+    it("excludes rows outside the trailing window", () => {
+      const { weeklyTokens } = aggregateByWeek(
+        [
+          {
+            date: "2026-06-01", // weeks before the 2-week trailing window
+            model: "claude-sonnet-4-6",
+            input_tokens: 5_000_000,
+            output_tokens: 0,
+            cache_read_tokens: 0,
+            cache_write_tokens: 0,
+          },
+        ],
+        "UTC",
+        2,
+      );
+      expect(weeklyTokens[0]?.input).toBe(0);
+      expect(weeklyTokens[1]?.input).toBe(0);
+    });
+  });
+
+  describe("aggregateWeeklyTime", () => {
+    it("sums total_seconds per trailing week", () => {
+      const weeks = aggregateWeeklyTime(
+        [
+          { date: "2026-07-06", total_seconds: 120, task_count: 2, failed_count: 0 },
+          { date: "2026-07-15", total_seconds: 60, task_count: 1, failed_count: 0 },
+        ],
+        "UTC",
+        2,
+      );
+      expect(weeks[0]).toMatchObject({ weekStart: "2026-07-06", totalSeconds: 120 });
+      expect(weeks[1]).toMatchObject({ weekStart: "2026-07-13", totalSeconds: 60, partial: true });
+    });
+  });
+
+  describe("aggregateWeeklyTasks", () => {
+    it("splits completed/failed per trailing week", () => {
+      const weeks = aggregateWeeklyTasks(
+        [
+          { date: "2026-07-06", total_seconds: 0, task_count: 5, failed_count: 2 },
+          { date: "2026-07-15", total_seconds: 0, task_count: 3, failed_count: 1 },
+        ],
+        "UTC",
+        2,
+      );
+      expect(weeks[0]).toMatchObject({ weekStart: "2026-07-06", completed: 3, failed: 2 });
+      expect(weeks[1]).toMatchObject({ weekStart: "2026-07-13", completed: 2, failed: 1 });
+    });
   });
 });

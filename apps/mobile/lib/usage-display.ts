@@ -300,7 +300,7 @@ function buildWeekShells(tz: string, weekCount: number): WeekShell[] {
       weekStart,
       weekEnd,
       label: formatShortDate(weekStart),
-      rangeLabel: `${formatShortDate(weekStart)} - ${formatShortDate(weekEnd)}`,
+      rangeLabel: `${formatShortDate(weekStart)} – ${formatShortDate(weekEnd)}`,
       partial,
       daysCovered: partial ? elapsed : 7,
     });
@@ -421,7 +421,7 @@ export function aggregateByWeek(
       weekStart,
       weekEnd,
       label: formatShortDate(weekStart),
-      rangeLabel: `${formatShortDate(weekStart)} - ${formatShortDate(weekEnd)}`,
+      rangeLabel: `${formatShortDate(weekStart)} – ${formatShortDate(weekEnd)}`,
       partial,
       daysCovered: partial ? elapsedDays : 7,
     };
