@@ -7,7 +7,7 @@ import { issueKeys } from "@multica/core/issues/queries";
 import type { CommentTriggerPreviewAgent } from "@multica/core/types";
 
 const COMMENT_TRIGGER_PREVIEW_DEBOUNCE_MS = 300;
-const MENTION_RE = /\[@?(.+?)\]\(mention:\/\/(member|agent|squad|issue|all)\/([0-9a-fA-F-]+|all)\)/g;
+const MENTION_RE = /\[@?(.+?)\]\(mention:\/\/(member|agent|squad|issue|project|all|skill)\/([0-9a-fA-F-]+|all)\)/g;
 const NOTE_COMMAND_RE = /^\/note(?:$|\s)/i;
 
 export interface UseCommentTriggerPreviewResult {

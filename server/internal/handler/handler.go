@@ -414,6 +414,28 @@ func parseUUIDSliceOrBadRequest(w http.ResponseWriter, ids []string, fieldName s
 	return uuids, true
 }
 
+// parseSkillMentionAgents decodes the skill→agent routing map sent by the
+// frontend's smart-routing layer (assignee > recency > online). Each key is
+// a skill ID from the mention link; each value is the agent the frontend
+// resolved for it. Invalid UUIDs in the map abort with a 400 so a single
+// malformed entry doesn't slip through and trigger the wrong agent. An empty
+// map is valid — it just means the client opted into backend-only routing.
+func parseSkillMentionAgents(w http.ResponseWriter, in map[string]string, fieldName string) (map[string]pgtype.UUID, bool) {
+	if len(in) == 0 {
+		return nil, true
+	}
+	out := make(map[string]pgtype.UUID, len(in))
+	for skillID, agentID := range in {
+		u, err := util.ParseUUID(agentID)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid "+fieldName)
+			return nil, false
+		}
+		out[skillID] = u
+	}
+	return out, true
+}
+
 // publish sends a domain event through the event bus.
 func (h *Handler) publish(eventType, workspaceID, actorType, actorID string, payload any) {
 	h.Bus.Publish(events.Event{

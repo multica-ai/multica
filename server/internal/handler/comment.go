@@ -976,12 +976,19 @@ type CreateCommentRequest struct {
 	ParentID         *string  `json:"parent_id"`
 	AttachmentIDs    []string `json:"attachment_ids"`
 	SuppressAgentIDs []string `json:"suppress_agent_ids"`
+	// SkillMentionAgents carries the frontend's pre-resolved skill→agent
+	// mapping from the smart routing layer (assignee > recency > online). The
+	// backend uses this to short-circuit the agent_skill lookup when set;
+	// missing/empty entries fall back to the junction-table lookup and then
+	// to the issue assignee (R12/R13).
+	SkillMentionAgents map[string]string `json:"skill_mention_agents"`
 }
 
 type CommentTriggerPreviewRequest struct {
-	Content          string  `json:"content"`
-	ParentID         *string `json:"parent_id"`
-	EditingCommentID *string `json:"editing_comment_id"`
+	Content           string            `json:"content"`
+	ParentID          *string           `json:"parent_id"`
+	EditingCommentID  *string           `json:"editing_comment_id"`
+	SkillMentionAgents map[string]string `json:"skill_mention_agents"`
 }
 
 type CommentTriggerPreviewResponse struct {
@@ -1002,8 +1009,14 @@ const (
 	commentTriggerSourceIssueAssignee      commentAgentTriggerSource = "issue_assignee"
 	commentTriggerSourceMentionAgent       commentAgentTriggerSource = "mention_agent"
 	commentTriggerSourceMentionSquadLeader commentAgentTriggerSource = "mention_squad_leader"
-	commentTriggerSourceThreadParent       commentAgentTriggerSource = "thread_parent"
-	commentTriggerSourceConversation       commentAgentTriggerSource = "conversation_continuation"
+	// commentTriggerSourceMentionSkill marks triggers produced by an @skill
+	// mention. The frontend's smart routing (assignee > recency > online) lives
+	// in the client; the backend resolves the skill-to-agent binding from the
+	// agent_skill junction table and applies the issue-assignee fallback when
+	// no agents have the skill bound.
+	commentTriggerSourceMentionSkill commentAgentTriggerSource = "mention_skill"
+	commentTriggerSourceThreadParent commentAgentTriggerSource = "thread_parent"
+	commentTriggerSourceConversation commentAgentTriggerSource = "conversation_continuation"
 )
 
 const defaultCommentRoutingEscalationDelay = 5 * time.Minute
@@ -1048,6 +1061,14 @@ type commentTriggerComputeOptions struct {
 	// by the originator, not the immediate agent principal. Members are their
 	// own originator so this may be empty for member-authored triggers.
 	OriginatorUserID string
+	// SkillMentionAgents maps a skill mention ID (the uuid serialized in the
+	// mention://skill/<id> link) to the agent the frontend pre-resolved via
+	// its smart routing (assignee > recency > online). When present, the
+	// backend short-circuits the agent_skill lookup for that mention and uses
+	// this agent ID directly. Nil/empty means no pre-resolution was supplied
+	// (e.g. legacy client or the preview endpoint) — the backend then falls
+	// back to the junction-table lookup or the issue-assignee fallback.
+	SkillMentionAgents map[string]pgtype.UUID
 }
 
 func commentAgentTriggerReason(trigger commentAgentTrigger) string {
@@ -1058,6 +1079,8 @@ func commentAgentTriggerReason(trigger commentAgentTrigger) string {
 		return "This agent was mentioned in the comment."
 	case commentTriggerSourceMentionSquadLeader:
 		return "A mentioned squad will trigger its leader."
+	case commentTriggerSourceMentionSkill:
+		return "A mentioned skill will trigger the best available agent for it."
 	case commentTriggerSourceThreadParent:
 		return "This reply will trigger the parent comment's author."
 	case commentTriggerSourceConversation:
@@ -1095,8 +1118,14 @@ func (h *Handler) PreviewCommentTriggers(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	skillAgents, ok := parseSkillMentionAgents(w, req.SkillMentionAgents, "skill_mention_agents")
+	if !ok {
+		return
+	}
+
 	var editingComment *db.Comment
 	var opts commentTriggerComputeOptions
+	opts.SkillMentionAgents = skillAgents
 	if req.EditingCommentID != nil {
 		editingID, ok := parseUUIDOrBadRequest(w, *req.EditingCommentID, "editing_comment_id")
 		if !ok {
@@ -1233,6 +1262,10 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	skillMentionAgents, ok := parseSkillMentionAgents(w, req.SkillMentionAgents, "skill_mention_agents")
+	if !ok {
+		return
+	}
 
 	// Determine author identity: agent (via X-Agent-ID header) or member.
 	authorType, authorID := h.resolveActor(r, userID, uuidToString(issue.WorkspaceID))
@@ -1356,7 +1389,7 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	}
 
 	originatorUserID := h.invokeOriginatorFromRequest(r, authorType, authorID)
-	h.triggerTasksForComment(r.Context(), issue, comment, parentComment, authorType, authorID, originatorUserID, suppressAgentIDs)
+	h.triggerTasksForComment(r.Context(), issue, comment, parentComment, authorType, authorID, originatorUserID, suppressAgentIDs, skillMentionAgents)
 
 	writeJSON(w, http.StatusCreated, resp)
 }
@@ -1379,13 +1412,14 @@ func isNoteComment(content string) bool {
 	return strings.EqualFold(firstToken, noteCommentPrefix)
 }
 
-func (h *Handler) triggerTasksForComment(ctx context.Context, issue db.Issue, comment db.Comment, parentComment *db.Comment, actorType, actorID, originatorUserID string, suppressAgentIDs []pgtype.UUID) {
+func (h *Handler) triggerTasksForComment(ctx context.Context, issue db.Issue, comment db.Comment, parentComment *db.Comment, actorType, actorID, originatorUserID string, suppressAgentIDs []pgtype.UUID, skillMentionAgents map[string]pgtype.UUID) {
 	if isNoteComment(comment.Content) {
 		return
 	}
 	triggers := h.computeCommentAgentTriggers(ctx, issue, comment.Content, parentComment, actorType, actorID, commentTriggerComputeOptions{
 		ExcludeTriggerCommentID: comment.ID,
 		OriginatorUserID:        originatorUserID,
+		SkillMentionAgents:      skillMentionAgents,
 	})
 	triggers = filterSuppressedCommentAgentTriggers(triggers, suppressAgentIDs)
 	h.enqueueCommentAgentTriggers(ctx, issue, comment.ID, triggers)
@@ -1571,6 +1605,18 @@ func (h *Handler) enqueueSingleCommentTrigger(ctx context.Context, issue db.Issu
 				"agent_id", uuidToString(trigger.Agent.ID),
 				"error", err)
 		}
+	case commentTriggerSourceMentionSkill:
+		// Skill mention → resolves to a specific agent (front-end smart
+		// routing, or backend agent_skill lookup). Enqueue semantics are
+		// identical to a direct @agent mention: the agent gets a fresh
+		// mention-driven task on this issue, deduped against any pending
+		// task for the same (issue, agent).
+		if _, err := h.TaskService.EnqueueTaskForMention(ctx, issue, trigger.Agent.ID, triggerCommentID); err != nil {
+			slog.Warn("enqueue mention skill task failed",
+				"issue_id", uuidToString(issue.ID),
+				"agent_id", uuidToString(trigger.Agent.ID),
+				"error", err)
+		}
 	case commentTriggerSourceThreadParent, commentTriggerSourceConversation:
 		var task db.AgentTaskQueue
 		var err error
@@ -1682,7 +1728,7 @@ func (h *Handler) computeCommentAgentTriggers(ctx context.Context, issue db.Issu
 
 func hasAgentOrSquadMention(mentions []util.Mention) bool {
 	for _, m := range mentions {
-		if m.Type == "agent" || m.Type == "squad" {
+		if m.Type == "agent" || m.Type == "squad" || m.Type == "skill" {
 			return true
 		}
 	}
@@ -1974,6 +2020,12 @@ func (h *Handler) resolveMentionedAgentCommentTriggers(ctx context.Context, issu
 			add(commentAgentTrigger{Agent: agent, Source: commentTriggerSourceMentionSquadLeader, Squad: &squad, AlreadyPending: hasPending})
 			continue
 		}
+		if m.Type == "skill" {
+			if trigger, ok := h.resolveSkillMentionTrigger(ctx, issue, m, authorType, authorID, opts); ok {
+				add(trigger)
+			}
+			continue
+		}
 		if m.Type != "agent" {
 			continue
 		}
@@ -2003,6 +2055,91 @@ func (h *Handler) resolveMentionedAgentCommentTriggers(ctx context.Context, issu
 		add(commentAgentTrigger{Agent: agent, Source: commentTriggerSourceMentionAgent, AlreadyPending: hasPending})
 	}
 	return triggers
+}
+
+// resolveSkillMentionTrigger turns a single @skill mention into an agent
+// trigger. The frontend's smart routing (assignee > recency > online) is
+// currently unimplemented client-side — opts.SkillMentionAgents is reserved
+// for a future iteration. Today the routing always uses the agent_skill
+// junction table; the issue assignee wins the tie when they have the skill
+// (R13). If no binding is found, the mention is silently dropped — the same
+// contract member mentions use.
+//
+// All error paths use `continue` upstream so a single malformed/invalid skill
+// ID never aborts the whole trigger computation.
+func (h *Handler) resolveSkillMentionTrigger(ctx context.Context, issue db.Issue, m util.Mention, authorType, authorID string, opts commentTriggerComputeOptions) (commentAgentTrigger, bool) {
+	wsID := uuidToString(issue.WorkspaceID)
+
+	// Confirm the skill exists in this workspace. An unknown / cross-workspace
+	// ID is silently dropped to keep the contract symmetric with @squad.
+	if _, err := h.Queries.GetSkillInWorkspace(ctx, db.GetSkillInWorkspaceParams{
+		ID:          parseUUID(m.ID),
+		WorkspaceID: issue.WorkspaceID,
+	}); err != nil {
+		return commentAgentTrigger{}, false
+	}
+
+	// Path 1: frontend pre-resolved the target agent.
+	var resolvedAgentID pgtype.UUID
+	if pre, ok := opts.SkillMentionAgents[m.ID]; ok && pre.Valid {
+		resolvedAgentID = pre
+	}
+
+	// Path 2: backend resolves from agent_skill, preferring the issue assignee
+	// when they have the skill bound.
+	if !resolvedAgentID.Valid {
+		bindings, err := h.Queries.ListAgentSkillsByWorkspace(ctx, issue.WorkspaceID)
+		if err != nil {
+			return commentAgentTrigger{}, false
+		}
+		skillUUID := parseUUID(m.ID)
+		var candidates []pgtype.UUID
+		for _, b := range bindings {
+			if !b.Enabled {
+				continue
+			}
+			if b.ID != skillUUID {
+				continue
+			}
+			candidates = append(candidates, b.AgentID)
+		}
+		// Prefer the issue's current assignee agent if they have the skill.
+		if issue.AssigneeType.Valid && issue.AssigneeType.String == "agent" && issue.AssigneeID.Valid {
+			for _, c := range candidates {
+				if c == issue.AssigneeID {
+					resolvedAgentID = c
+					break
+				}
+			}
+		}
+		// Otherwise pick the first enabled binding. The recency priority
+		// (#2 of the smart routing) requires backend-side recency data that
+		// doesn't exist yet — the frontend closes that gap by passing a
+		// pre-resolved agent ID via opts.SkillMentionAgents.
+		if !resolvedAgentID.Valid && len(candidates) > 0 {
+			resolvedAgentID = candidates[0]
+		}
+	}
+
+	if !resolvedAgentID.Valid {
+		return commentAgentTrigger{}, false
+	}
+
+	agent, err := h.Queries.GetAgentInWorkspace(ctx, db.GetAgentInWorkspaceParams{
+		ID:          resolvedAgentID,
+		WorkspaceID: issue.WorkspaceID,
+	})
+	if err != nil || !agent.RuntimeID.Valid || agent.ArchivedAt.Valid {
+		return commentAgentTrigger{}, false
+	}
+	if !h.canInvokeAgent(ctx, agent, authorType, authorID, opts.OriginatorUserID, wsID) {
+		return commentAgentTrigger{}, false
+	}
+	hasPending, err := h.hasPendingTaskForIssueAndAgent(ctx, issue.ID, resolvedAgentID, opts)
+	if err != nil {
+		return commentAgentTrigger{}, false
+	}
+	return commentAgentTrigger{Agent: agent, Source: commentTriggerSourceMentionSkill, AlreadyPending: hasPending}, true
 }
 
 func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
@@ -2122,7 +2259,7 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 		}
 
 		h.retriggerCancelledTaskSurvivors(r.Context(), issue, cancelled, existing.ID)
-		h.triggerTasksForComment(r.Context(), issue, comment, parentComment, actorType, actorID, h.invokeOriginatorFromRequest(r, actorType, actorID), suppressAgentIDs)
+		h.triggerTasksForComment(r.Context(), issue, comment, parentComment, actorType, actorID, h.invokeOriginatorFromRequest(r, actorType, actorID), suppressAgentIDs, nil)
 	}
 
 	// Replace the comment attachment set when a modern client sends
