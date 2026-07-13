@@ -115,7 +115,7 @@ func TestPrepareCodexSessionsDir_MigratesLegacySymlinkNoResume(t *testing.T) {
 	// unrelated per-task DB that must NOT be touched.
 	writeFile(t, filepath.Join(codexHome, "state_5.sqlite"), "stale")
 	writeFile(t, filepath.Join(codexHome, "state_5.sqlite-wal"), "stale")
-	writeFile(t, filepath.Join(codexHome, "session_index.jsonl"), "stale")
+	writeFile(t, filepath.Join(codexHome, "session_index.jsonl"), "names")
 	writeFile(t, filepath.Join(codexHome, "goals_1.sqlite"), "keep")
 
 	if err := prepareCodexSessionsDir(codexHome, filepath.Dir(sharedSessions), CodexHomeOptions{}, testLogger()); err != nil {
@@ -139,10 +139,11 @@ func TestPrepareCodexSessionsDir_MigratesLegacySymlinkNoResume(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(sharedSessions, "2026", "07", "13", "rollout-2026-07-13T00-00-00-other-session-a.jsonl")); err != nil {
 		t.Errorf("shared history must not be deleted: %v", err)
 	}
-	// Session-derived state dropped; unrelated DB preserved.
+	// Rebuildable SQLite state dropped; the thread-name index and unrelated DBs
+	// are preserved.
 	assertAbsent(t, filepath.Join(codexHome, "state_5.sqlite"))
 	assertAbsent(t, filepath.Join(codexHome, "state_5.sqlite-wal"))
-	assertAbsent(t, filepath.Join(codexHome, "session_index.jsonl"))
+	assertPresent(t, filepath.Join(codexHome, "session_index.jsonl"))
 	assertPresent(t, filepath.Join(codexHome, "goals_1.sqlite"))
 }
 
@@ -162,15 +163,11 @@ func TestPrepareCodexSessionsDir_MigrateWithResumeExposesOnlyThatRollout(t *test
 		t.Fatalf("prepareCodexSessionsDir: %v", err)
 	}
 
-	// The resumed rollout is exposed at the same YYYY/MM/DD relative path.
+	// The resumed rollout is exposed at the same YYYY/MM/DD relative path, and
+	// materialised as a zero-copy link (never a copy) to keep it off the
+	// initialize critical path.
 	exposed := filepath.Join(codexHome, "sessions", "2026", "07", "13", filepath.Base(resumeSrc))
-	li, err := os.Lstat(exposed)
-	if err != nil {
-		t.Fatalf("resume rollout not exposed: %v", err)
-	}
-	if li.Mode()&os.ModeSymlink == 0 {
-		t.Error("resume rollout must be a symlink (never a copy) to avoid an unbounded copy on the critical path")
-	}
+	assertZeroCopyLink(t, resumeSrc, exposed)
 	if data, err := os.ReadFile(exposed); err != nil || len(data) != 32 {
 		t.Errorf("resume rollout must be readable through the link, err=%v len=%d", err, len(data))
 	}
@@ -206,27 +203,20 @@ func TestExposeResumeRollout_LinksLargeFileWithoutCopying(t *testing.T) {
 	// A deliberately large rollout — copying it onto the critical path is
 	// exactly what MUL-4424 forbids.
 	const big = 4 << 20 // 4 MiB
-	seedFakeRollout(t, shared, "2026", "07", "13", "big-session", big)
+	src := seedFakeRollout(t, shared, "2026", "07", "13", "big-session", big)
 
 	if err := exposeResumeRollout(shared, local, "big-session", testLogger()); err != nil {
-		if runtime.GOOS == "windows" {
-			t.Skipf("symlink unavailable on this Windows session: %v", err)
-		}
 		t.Fatalf("exposeResumeRollout: %v", err)
 	}
 
+	// Must share an inode with the source — a hard link (or symlink) — never a
+	// 4 MiB copy. A hard link needs no special privilege and works on Windows
+	// within a volume, so this path is exercised identically on CI.
 	dst := filepath.Join(local, "2026", "07", "13", "rollout-2026-07-13T00-00-00-big-session.jsonl")
-	li, err := os.Lstat(dst)
-	if err != nil {
+	if _, err := os.Lstat(dst); err != nil {
 		t.Fatalf("exposed rollout missing: %v", err)
 	}
-	if li.Mode()&os.ModeSymlink == 0 {
-		t.Fatal("large rollout must be symlinked, not copied")
-	}
-	// A symlink's own size is the link target length, never the 4 MiB payload.
-	if li.Size() >= big {
-		t.Errorf("dst looks like a full copy (size=%d); must be a symlink", li.Size())
-	}
+	assertZeroCopyLink(t, src, dst)
 }
 
 func TestResetCodexSessionState_OnlyRemovesSessionDerived(t *testing.T) {
@@ -234,9 +224,12 @@ func TestResetCodexSessionState_OnlyRemovesSessionDerived(t *testing.T) {
 	home := t.TempDir()
 	sessionDerived := []string{
 		"state_5.sqlite", "state_5.sqlite-shm", "state_5.sqlite-wal",
-		"state_6.sqlite", "session_index.jsonl",
+		"state_6.sqlite",
 	}
 	preserved := []string{
+		// session_index.jsonl holds thread-name mappings not rebuildable from
+		// rollouts, so it must survive the SQLite-only reset.
+		"session_index.jsonl",
 		"goals_1.sqlite", "logs_2.sqlite", "memories_1.sqlite",
 		"config.toml", "auth.json", "models_cache.json",
 	}
@@ -251,6 +244,173 @@ func TestResetCodexSessionState_OnlyRemovesSessionDerived(t *testing.T) {
 	}
 	for _, n := range preserved {
 		assertPresent(t, filepath.Join(home, n))
+	}
+}
+
+func TestPrepareCodexSessionsDir_MigratePreservesSessionIndex(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	codexHome := filepath.Join(root, "codex-home")
+	sharedSessions := filepath.Join(root, "shared", "sessions")
+	seedFakeRollout(t, sharedSessions, "2026", "07", "13", "some-session", 16)
+	seedLegacySessionsSymlink(t, codexHome, sharedSessions)
+	writeFile(t, filepath.Join(codexHome, "state_5.sqlite"), "stale")
+	writeFile(t, filepath.Join(codexHome, "session_index.jsonl"), `{"id":"x","thread_name":"My thread"}`)
+
+	if err := prepareCodexSessionsDir(codexHome, filepath.Dir(sharedSessions), CodexHomeOptions{}, testLogger()); err != nil {
+		t.Fatalf("prepareCodexSessionsDir: %v", err)
+	}
+
+	// SQLite state is rebuilt; the thread-name index (not rebuildable from
+	// rollouts) is preserved.
+	assertAbsent(t, filepath.Join(codexHome, "state_5.sqlite"))
+	assertPresent(t, filepath.Join(codexHome, "session_index.jsonl"))
+	if data, _ := os.ReadFile(filepath.Join(codexHome, "session_index.jsonl")); string(data) != `{"id":"x","thread_name":"My thread"}` {
+		t.Errorf("session_index.jsonl content changed: %q", data)
+	}
+}
+
+func TestExposeResumeRollout_FindsCompressedAndFlatLayouts(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	shared := filepath.Join(root, "shared", "sessions")
+	local := filepath.Join(root, "local", "sessions")
+	if err := os.MkdirAll(local, 0o755); err != nil {
+		t.Fatalf("mkdir local: %v", err)
+	}
+	// Codex background-compresses cold rollouts to .jsonl.zst and also supports
+	// a flat layout (rollout directly under sessions/). Both are legit history.
+	compressed := seedRolloutAt(t, filepath.Join(shared, "2026", "07", "13", "rollout-2026-07-13T00-00-00-zst-session.jsonl.zst"), 8)
+	flat := seedRolloutAt(t, filepath.Join(shared, "rollout-2026-07-13T00-00-00-flat-session.jsonl"), 8)
+
+	for _, tc := range []struct {
+		id, src, rel string
+	}{
+		{"zst-session", compressed, filepath.Join("2026", "07", "13", "rollout-2026-07-13T00-00-00-zst-session.jsonl.zst")},
+		{"flat-session", flat, "rollout-2026-07-13T00-00-00-flat-session.jsonl"},
+	} {
+		if err := exposeResumeRollout(shared, local, tc.id, testLogger()); err != nil {
+			t.Fatalf("expose %s: %v", tc.id, err)
+		}
+		assertZeroCopyLink(t, tc.src, filepath.Join(local, tc.rel))
+	}
+}
+
+func TestCodexResumeRolloutPresent(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	codexHome := filepath.Join(root, "codex-home")
+	sessions := filepath.Join(codexHome, "sessions")
+	seedRolloutAt(t, filepath.Join(sessions, "2026", "07", "13", "rollout-2026-07-13T00-00-00-nested.jsonl"), 8)
+	seedRolloutAt(t, filepath.Join(sessions, "rollout-2026-07-13T00-00-00-flat.jsonl.zst"), 8)
+
+	for _, id := range []string{"nested", "flat"} {
+		if !CodexResumeRolloutPresent(codexHome, id) {
+			t.Errorf("expected rollout %q to be found", id)
+		}
+	}
+	if CodexResumeRolloutPresent(codexHome, "absent") {
+		t.Error("absent session must not be reported present")
+	}
+	if CodexResumeRolloutPresent("", "nested") || CodexResumeRolloutPresent(codexHome, "") {
+		t.Error("empty codexHome/sessionID must be reported absent")
+	}
+}
+
+func TestPrepareCodexSessionsDir_LocalDirectoryKeepsSharedSymlink(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	codexHome := filepath.Join(root, "codex-home")
+	if err := os.MkdirAll(codexHome, 0o755); err != nil {
+		t.Fatalf("mkdir codex-home: %v", err)
+	}
+	sharedHome := filepath.Join(root, "shared")
+
+	if err := prepareCodexSessionsDir(codexHome, sharedHome, CodexHomeOptions{IsLocalDirectory: true}, testLogger()); err != nil {
+		t.Fatalf("prepareCodexSessionsDir: %v", err)
+	}
+
+	sessions := filepath.Join(codexHome, "sessions")
+	fi, err := os.Lstat(sessions)
+	if err != nil {
+		t.Fatalf("sessions not created: %v", err)
+	}
+	if fi.Mode()&os.ModeSymlink == 0 && runtime.GOOS != "windows" {
+		t.Error("local_directory sessions must symlink the shared home for cross-task-ID resume")
+	}
+	if fi.Mode()&os.ModeSymlink != 0 {
+		if target, _ := os.Readlink(sessions); target != filepath.Join(sharedHome, "sessions") {
+			t.Errorf("symlink target = %q, want %q", target, filepath.Join(sharedHome, "sessions"))
+		}
+	}
+}
+
+// Two consecutive local_directory tasks share one project dir but get a fresh
+// codex-home each (the daemon never reuses their workdir). The second run must
+// still see the first run's rollout via the shared-sessions symlink — this is
+// the regression Elon's review flagged.
+func TestPrepareCodexSessionsDir_LocalDirectoryResumeAcrossTaskIDs(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	sharedHome := filepath.Join(root, "shared")
+	sessionID := "019f59d9-a6aa-7a53-b173-1eccc4b4c873"
+
+	// Round 1: a fresh per-task codex-home symlinks the shared sessions.
+	home1 := filepath.Join(root, "task-1", "codex-home")
+	if err := os.MkdirAll(home1, 0o755); err != nil {
+		t.Fatalf("mkdir home1: %v", err)
+	}
+	if err := prepareCodexSessionsDir(home1, sharedHome, CodexHomeOptions{IsLocalDirectory: true}, testLogger()); err != nil {
+		t.Fatalf("round 1 prepare: %v", err)
+	}
+	// Codex writes the round-1 rollout through the symlink into the shared home.
+	seedRolloutAt(t, filepath.Join(home1, "sessions", "2026", "07", "13", "rollout-2026-07-13T00-00-00-"+sessionID+".jsonl"), 32)
+
+	// Round 2: a brand-new task ID → brand-new codex-home, same project dir.
+	home2 := filepath.Join(root, "task-2", "codex-home")
+	if err := os.MkdirAll(home2, 0o755); err != nil {
+		t.Fatalf("mkdir home2: %v", err)
+	}
+	if err := prepareCodexSessionsDir(home2, sharedHome, CodexHomeOptions{IsLocalDirectory: true, ResumeSessionID: sessionID}, testLogger()); err != nil {
+		t.Fatalf("round 2 prepare: %v", err)
+	}
+
+	// The round-2 home must be able to resolve the round-1 rollout — otherwise
+	// the daemon would silently drop the conversation.
+	if !CodexResumeRolloutPresent(home2, sessionID) {
+		t.Fatal("round-2 local_directory task cannot see round-1 rollout — context would be silently lost")
+	}
+}
+
+func seedRolloutAt(t *testing.T, path string, size int) string {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("mkdir rollout dir: %v", err)
+	}
+	body := make([]byte, size)
+	for i := range body {
+		body[i] = 'x'
+	}
+	if err := os.WriteFile(path, body, 0o644); err != nil {
+		t.Fatalf("write rollout: %v", err)
+	}
+	return path
+}
+
+// assertZeroCopyLink verifies dst resolves to the same inode as src — a hard
+// link or symlink, never a byte copy.
+func assertZeroCopyLink(t *testing.T, src, dst string) {
+	t.Helper()
+	si, err := os.Stat(src)
+	if err != nil {
+		t.Fatalf("stat src %s: %v", src, err)
+	}
+	di, err := os.Stat(dst)
+	if err != nil {
+		t.Fatalf("stat dst %s: %v", dst, err)
+	}
+	if !os.SameFile(si, di) {
+		t.Errorf("%s is a copy of %s, expected a zero-copy hard/sym link", dst, src)
 	}
 }
 

@@ -983,6 +983,50 @@ func newRepoReadyTestDaemon(t *testing.T, handler http.HandlerFunc) *Daemon {
 	return d
 }
 
+func TestGateCodexResumeToRolloutPresence(t *testing.T) {
+	t.Parallel()
+
+	// Seed a codex-home whose sessions dir holds exactly one rollout.
+	codexHome := filepath.Join(t.TempDir(), "codex-home")
+	present := filepath.Join(codexHome, "sessions", "2026", "07", "13",
+		"rollout-2026-07-13T00-00-00-present-session.jsonl")
+	if err := os.MkdirAll(filepath.Dir(present), 0o755); err != nil {
+		t.Fatalf("mkdir sessions: %v", err)
+	}
+	if err := os.WriteFile(present, []byte("{}"), 0o644); err != nil {
+		t.Fatalf("write rollout: %v", err)
+	}
+
+	tests := []struct {
+		name        string
+		provider    string
+		sessionID   string
+		codexHome   string
+		wantSession string
+	}{
+		{name: "rollout present keeps resume", provider: "codex", sessionID: "present-session", codexHome: codexHome, wantSession: "present-session"},
+		{name: "rollout absent drops resume", provider: "codex", sessionID: "gone-session", codexHome: codexHome, wantSession: ""},
+		{name: "non-codex provider is a no-op", provider: "claude", sessionID: "present-session", codexHome: codexHome, wantSession: "present-session"},
+		{name: "empty codex home is a no-op", provider: "codex", sessionID: "present-session", codexHome: "", wantSession: "present-session"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			task := Task{PriorSessionID: tt.sessionID}
+			taskCtx := execenv.TaskContextForEnv{PriorSessionResumed: tt.sessionID != ""}
+
+			gateCodexResumeToRolloutPresence(&task, &taskCtx, tt.provider, tt.codexHome, slog.Default())
+
+			if task.PriorSessionID != tt.wantSession {
+				t.Fatalf("PriorSessionID = %q, want %q", task.PriorSessionID, tt.wantSession)
+			}
+			if taskCtx.PriorSessionResumed != (tt.wantSession != "") {
+				t.Fatalf("PriorSessionResumed = %v, want %v", taskCtx.PriorSessionResumed, tt.wantSession != "")
+			}
+		})
+	}
+}
+
 func TestGateResumeToReusedWorkdir(t *testing.T) {
 	t.Parallel()
 

@@ -45,6 +45,14 @@ type CodexHomeOptions struct {
 	// history back in. Empty means a fresh thread (no rollout to expose). See
 	// prepareCodexSessionsDir (MUL-4424).
 	ResumeSessionID string
+	// IsLocalDirectory marks a local_directory task — one running in the user's
+	// own project directory. These tasks get a fresh codex-home per task ID (the
+	// daemon never reuses their workdir), and the only stable, GC-safe session
+	// store that survives across those task IDs is the user's own shared
+	// ~/.codex/sessions. So they keep the historical shared-sessions symlink for
+	// resume continuity instead of the task-local isolation the managed flow
+	// uses. See prepareCodexSessionsDir (MUL-4424).
+	IsLocalDirectory bool
 }
 
 // prepareCodexHome is a thin wrapper around prepareCodexHomeWithOpts kept for
@@ -158,19 +166,23 @@ func resolveSharedCodexHome() string {
 	return filepath.Join(home, ".codex")
 }
 
-// codexSessionStateGlobs are the session-derived state artifacts Codex builds
+// codexSessionStateGlobs are the session-derived SQLite state Codex builds
 // inside a CODEX_HOME by indexing everything under sessions/. They are dropped
 // during the legacy-symlink migration (prepareCodexSessionsDir) so Codex
 // rebuilds them from the now task-local sessions instead of keeping the
 // thousands of stale rows it backfilled from the shared ~/.codex/sessions
 // history. Everything matched here is a rebuildable derived index — never
-// authoritative data. Sibling per-task DBs with different prefixes (goals_*,
-// logs_*, memories_*) are NOT session-derived and are deliberately left intact.
+// authoritative data.
+//
+// Deliberately NOT listed: session_index.jsonl, which Codex 0.144.x uses as the
+// authoritative store for thread-id → user-set thread name (name edits land in
+// SQLite AND this file, never back in the rollout), so it cannot be rebuilt from
+// rollouts; and sibling per-task DBs with different prefixes (goals_*, logs_*,
+// memories_*) which are not session-derived. All are left intact.
 var codexSessionStateGlobs = []string{
 	"state_*.sqlite",
 	"state_*.sqlite-shm",
 	"state_*.sqlite-wal",
-	"session_index.jsonl",
 }
 
 // prepareCodexSessionsDir makes codex-home/sessions a real, task-local
@@ -184,6 +196,7 @@ var codexSessionStateGlobs = []string{
 // task produced no output before it was cancelled. A task's fresh session has
 // no business carrying the whole machine's Codex history, so we isolate it:
 //
+//   - local_directory task: keep the shared-sessions symlink (see below).
 //   - Fresh task: sessions/ is absent — create an empty local dir so backfill
 //     is trivial.
 //   - Reused task whose sessions/ is already a real dir: it is authoritative —
@@ -194,6 +207,18 @@ var codexSessionStateGlobs = []string{
 //     session-state DB so Codex rebuilds it from the task-local sessions.
 func prepareCodexSessionsDir(codexHome, sharedHome string, opts CodexHomeOptions, logger *slog.Logger) error {
 	dst := filepath.Join(codexHome, "sessions")
+
+	// local_directory tasks get a fresh codex-home per task ID and the daemon
+	// never reuses their workdir, so task-local isolation would strand every
+	// follow-up run with an empty sessions dir and silently drop the prior
+	// conversation. Their only stable, GC-safe cross-task store is the user's
+	// own shared ~/.codex/sessions, so keep the historical symlink. The daemon
+	// still verifies the specific rollout is actually present before claiming a
+	// resume (see CodexResumeRolloutPresent), so a missing one no longer
+	// masquerades as a resume.
+	if opts.IsLocalDirectory {
+		return ensureCodexSessionsSymlink(dst, filepath.Join(sharedHome, "sessions"))
+	}
 
 	fi, err := os.Lstat(dst)
 	switch {
@@ -258,27 +283,88 @@ func resetCodexSessionState(codexHome string, logger *slog.Logger) {
 	}
 }
 
-// exposeResumeRollout links the single rollout file for sessionID out of the
-// shared sessions history into the task-local sessions dir, preserving Codex's
-// sessions/YYYY/MM/DD layout so thread/resume can find it.
-//
-// It symlinks rather than copies: a rollout can be large (one reporter saw a
-// single 1.5 GiB file), and this runs on `initialize`'s critical path, so an
-// unbounded copy would reintroduce the very stall we are fixing. os.Symlink is
-// used directly (no copy fallback) — if the link can't be created (e.g. Windows
-// without the privilege) the resume is skipped and the caller falls back to a
-// fresh thread rather than copying gigabytes.
-func exposeResumeRollout(sharedSessions, localSessions, sessionID string, logger *slog.Logger) error {
-	if sharedSessions == "" || sessionID == "" {
+// ensureCodexSessionsSymlink points codex-home/sessions (dst) at the shared
+// ~/.codex/sessions (src), creating the shared dir if needed. Used for
+// local_directory tasks, which rely on the shared history for cross-task-ID
+// resume (see prepareCodexSessionsDir). Idempotent: a correct symlink is left
+// as-is; anything else at dst is replaced.
+func ensureCodexSessionsSymlink(dst, src string) error {
+	if err := os.MkdirAll(src, 0o755); err != nil {
+		return fmt.Errorf("create shared sessions dir %s: %w", src, err)
+	}
+	if fi, err := os.Lstat(dst); err == nil {
+		if fi.Mode()&os.ModeSymlink != 0 {
+			if target, rlErr := os.Readlink(dst); rlErr == nil && target == src {
+				return nil
+			}
+		}
+		if err := os.RemoveAll(dst); err != nil {
+			return fmt.Errorf("remove stale sessions path %s: %w", dst, err)
+		}
+	}
+	return createDirLink(src, dst)
+}
+
+// codexRolloutGlobs returns the glob patterns that match a session's rollout
+// under a Codex sessions directory. It covers the layouts Codex 0.14x writes:
+// date-nested (sessions/YYYY/MM/DD/) and flat (directly under sessions/), each
+// as a plain .jsonl or a background-compressed .jsonl.zst.
+func codexRolloutGlobs(sessionsDir, sessionID string) []string {
+	name := "rollout-*-" + sessionID + ".jsonl*" // .jsonl and .jsonl.zst
+	return []string{
+		filepath.Join(sessionsDir, name),
+		filepath.Join(sessionsDir, "*", "*", "*", name),
+	}
+}
+
+// findCodexRollouts returns every rollout file for sessionID under sessionsDir,
+// across the supported layouts.
+func findCodexRollouts(sessionsDir, sessionID string) []string {
+	if sessionsDir == "" || sessionID == "" {
 		return nil
 	}
-	// Rollout files are named rollout-<timestamp>-<sessionID>.jsonl under
-	// sessions/YYYY/MM/DD/. Match by the trailing session ID.
-	pattern := filepath.Join(sharedSessions, "*", "*", "*", "rollout-*-"+sessionID+".jsonl")
-	matches, err := filepath.Glob(pattern)
-	if err != nil {
-		return fmt.Errorf("glob rollout for %s: %w", sessionID, err)
+	var out []string
+	seen := map[string]bool{}
+	for _, pattern := range codexRolloutGlobs(sessionsDir, sessionID) {
+		matches, err := filepath.Glob(pattern)
+		if err != nil {
+			continue
+		}
+		for _, m := range matches {
+			if !seen[m] {
+				seen[m] = true
+				out = append(out, m)
+			}
+		}
 	}
+	return out
+}
+
+// CodexResumeRolloutPresent reports whether sessionID's rollout is present in
+// the task's codex-home sessions dir. The daemon uses this after preparing the
+// environment to avoid claiming a resume Codex would silently restart from
+// scratch — the rollout may be absent when a legacy home's migration could not
+// locate it, or when a local_directory task's shared history has been pruned
+// (MUL-4424).
+func CodexResumeRolloutPresent(codexHome, sessionID string) bool {
+	if codexHome == "" || sessionID == "" {
+		return false
+	}
+	return len(findCodexRollouts(filepath.Join(codexHome, "sessions"), sessionID)) > 0
+}
+
+// exposeResumeRollout links sessionID's rollout(s) out of the shared sessions
+// history into the task-local sessions dir, preserving the relative layout so
+// thread/resume can find it. Covers plain and compressed rollouts in both the
+// nested and flat layouts.
+//
+// It links rather than copies: a rollout can be large (one reporter saw a
+// single 1.5 GiB file) and this runs on `initialize`'s critical path, so an
+// unbounded copy would reintroduce the very stall we are fixing. See
+// linkCodexRollout for the hard-link-then-symlink strategy; if neither works
+// the caller treats the resume as unavailable and falls back to a fresh thread.
+func exposeResumeRollout(sharedSessions, localSessions, sessionID string, logger *slog.Logger) error {
+	matches := findCodexRollouts(sharedSessions, sessionID)
 	if len(matches) == 0 {
 		return fmt.Errorf("no rollout found for session %s under %s", sessionID, sharedSessions)
 	}
@@ -292,13 +378,25 @@ func exposeResumeRollout(sharedSessions, localSessions, sessionID string, logger
 		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 			return fmt.Errorf("create rollout dir %s: %w", filepath.Dir(dst), err)
 		}
-		if err := os.Symlink(src, dst); err != nil {
+		if err := linkCodexRollout(src, dst); err != nil {
 			return fmt.Errorf("link rollout %s: %w", src, err)
 		}
 		linked++
 	}
 	logger.Info("execenv: exposed resume rollout into task-local sessions", "session_id", sessionID, "files", linked)
 	return nil
+}
+
+// linkCodexRollout materialises src at dst without copying its bytes: a hard
+// link first (zero-copy, needs no special privilege and works on Windows within
+// a volume), falling back to a symlink across filesystems. It never copies — a
+// rollout can be gigabytes and this runs on initialize's critical path, so a
+// copy would reintroduce the stall MUL-4424 fixes.
+func linkCodexRollout(src, dst string) error {
+	if err := os.Link(src, dst); err == nil {
+		return nil
+	}
+	return os.Symlink(src, dst)
 }
 
 func syncCodexModelCatalog(codexHome, sharedHome string) error {

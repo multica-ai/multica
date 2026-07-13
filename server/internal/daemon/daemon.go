@@ -3273,6 +3273,28 @@ func gateResumeToReusedWorkdir(task *Task, taskCtx *execenv.TaskContextForEnv, e
 	return reused
 }
 
+// gateCodexResumeToRolloutPresence drops the prior Codex session when its
+// rollout is not actually present in the task's CODEX_HOME sessions. A reused
+// workdir keeps PriorSessionID (gateResumeToReusedWorkdir), but Codex session
+// isolation (MUL-4424) means the rollout may be missing: a migrated legacy home
+// that could not locate it, or a local_directory task whose shared history was
+// pruned. Codex would then silently thread/start from scratch, so we clear the
+// resume claim from both the backend (PriorSessionID) and the brief
+// (PriorSessionResumed) instead of pretending the conversation continues.
+// No-op for non-Codex providers or when there is nothing to resume.
+func gateCodexResumeToRolloutPresence(task *Task, taskCtx *execenv.TaskContextForEnv, provider, codexHome string, taskLog *slog.Logger) {
+	if provider != "codex" || task.PriorSessionID == "" || codexHome == "" {
+		return
+	}
+	if execenv.CodexResumeRolloutPresent(codexHome, task.PriorSessionID) {
+		return
+	}
+	taskLog.Warn("dropping prior codex session: rollout not present in task CODEX_HOME; starting a fresh thread",
+		"session_id", task.PriorSessionID, "codex_home", codexHome)
+	task.PriorSessionID = ""
+	taskCtx.PriorSessionResumed = false
+}
+
 func (d *Daemon) ensureTaskSkillBundles(ctx context.Context, task *Task) error {
 	if task == nil || task.Agent == nil || len(task.Agent.SkillRefs) == 0 {
 		return nil
@@ -3682,6 +3704,14 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	_ = d.client.ReportProgress(ctx, task.ID, fmt.Sprintf("Launching %s", provider), 1, 2)
 
 	reused := gateResumeToReusedWorkdir(&task, &taskCtx, env.WorkDir, taskLog)
+	// A reused workdir is necessary but not sufficient for a Codex resume: the
+	// prior thread's rollout must actually be present in this task's CODEX_HOME
+	// sessions (MUL-4424 isolates them). Drop the resume before the brief is
+	// generated below if it isn't, so we never tell the agent it is continuing a
+	// conversation Codex will silently restart from scratch.
+	if reused {
+		gateCodexResumeToRolloutPresence(&task, &taskCtx, provider, env.CodexHome, taskLog)
+	}
 
 	// Inject runtime-specific config (meta skill) so the agent discovers .agent_context/.
 	runtimeBrief, err := execenv.InjectRuntimeConfig(env.WorkDir, provider, taskCtx)
