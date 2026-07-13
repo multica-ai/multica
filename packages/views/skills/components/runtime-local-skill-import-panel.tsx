@@ -50,6 +50,7 @@ import {
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { useScrollFade } from "@multica/ui/hooks/use-scroll-fade";
 import { useT } from "../../i18n";
+import { HighlightText } from "../../search/highlight-text";
 import { isNameConflictError } from "../lib/utils";
 
 // ---------------------------------------------------------------------------
@@ -140,6 +141,7 @@ function SkillItem({
   editDescription,
   onNameChange,
   onDescriptionChange,
+  query = "",
 }: {
   skill: RuntimeLocalSkillSummary;
   checked: boolean;
@@ -150,6 +152,8 @@ function SkillItem({
   editDescription?: string;
   onNameChange?: (v: string) => void;
   onDescriptionChange?: (v: string) => void;
+  /** Active search term; matched substrings are highlighted in this row. */
+  query?: string;
 }) {
   const { t } = useT("skills");
   return (
@@ -177,16 +181,27 @@ function SkillItem({
         />
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
-            <span className="truncate text-sm font-medium">{skill.name}</span>
-            <Badge variant="secondary">{skill.provider}</Badge>
+            <span className="truncate text-sm font-medium">
+              <HighlightText text={skill.name} query={query} />
+            </span>
+            <Badge variant="secondary">
+              <HighlightText text={skill.provider} query={query} />
+            </Badge>
           </div>
           {skill.description && (
-            <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">
-              {skill.description}
+            // Drop the 2-line clamp while searching so a highlighted match that
+            // falls past the first two lines stays visible instead of being
+            // clipped out of view.
+            <p
+              className={`mt-1 text-xs text-muted-foreground ${
+                query.trim() ? "" : "line-clamp-2"
+              }`}
+            >
+              <HighlightText text={skill.description} query={query} />
             </p>
           )}
           <p className="mt-1 truncate font-mono text-xs text-muted-foreground">
-            {skill.source_path}
+            <HighlightText text={skill.source_path} query={query} />
           </p>
         </div>
         <Badge variant="outline" className="shrink-0">
@@ -547,15 +562,14 @@ export function RuntimeLocalSkillImportPanel({
     const query = skillSearchQuery.trim().toLowerCase();
     if (!query) return runtimeSkills;
 
+    // Search only over fields the row actually renders (name, provider,
+    // description, path) so every match can be highlighted in the result —
+    // `skill.key` is intentionally excluded because it is not displayed, and a
+    // key-only match would surface a result with no visible reason.
     return runtimeSkills.filter((skill) =>
-      [
-        skill.name,
-        skill.key,
-        skill.description,
-        skill.provider,
-        skill.source_path,
-      ]
-        .some((value) => value?.toLowerCase().includes(query) ?? false),
+      [skill.name, skill.description, skill.provider, skill.source_path].some(
+        (value) => value?.toLowerCase().includes(query) ?? false,
+      ),
     );
   }, [runtimeSkills, skillSearchQuery]);
 
@@ -1106,6 +1120,7 @@ export function RuntimeLocalSkillImportPanel({
                 }
                 onNameChange={setEditName}
                 onDescriptionChange={setEditDescription}
+                query={skillSearchQuery}
               />
             ))}
           </>
