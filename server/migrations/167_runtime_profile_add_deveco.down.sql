@@ -1,4 +1,4 @@
--- Reverse migration 164: remove 'deveco' from the runtime_profile
+-- Reverse migration 167: remove 'deveco' from the runtime_profile
 -- protocol_family whitelist, restoring the post-136 set (qoder + traecli).
 ALTER TABLE runtime_profile DROP CONSTRAINT IF EXISTS runtime_profile_protocol_family_check;
 
