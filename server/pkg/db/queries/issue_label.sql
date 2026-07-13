@@ -55,6 +55,33 @@ DELETE FROM agent_to_label WHERE agent_id = $1;
 -- name: DeleteSkillLabelAssignmentsBySkill :exec
 DELETE FROM skill_to_label WHERE skill_id = $1;
 
+-- The single-entity cleanups above cover one agent/skill at a time. The batch
+-- variants below cover the bulk hard-delete entry points (runtime, runtime
+-- profile, and workspace deletion), where the owning agents/skills disappear
+-- without ever passing through a per-entity delete. agent_to_label and
+-- skill_to_label carry no foreign keys, so these rows must be cleared in the
+-- same transaction as the owner removal or they accumulate as permanent,
+-- invisible orphans once resource labels are enabled.
+
+-- name: DeleteAgentLabelAssignmentsByRuntime :exec
+-- Runtime teardown hard-deletes every agent bound to the runtime (archived and
+-- system; active agents are refused by a 409 guard). Clear their label links by
+-- runtime so none survive the agent hard-delete.
+DELETE FROM agent_to_label
+WHERE agent_id IN (SELECT id FROM agent WHERE runtime_id = $1);
+
+-- name: DeleteAgentLabelAssignmentsByWorkspace :exec
+-- Workspace delete removes agents via a database cascade, but agent_to_label has
+-- no workspace_id and no foreign key, so it must be swept explicitly before the
+-- cascade fires (once the agent rows are gone the subquery finds nothing).
+DELETE FROM agent_to_label
+WHERE agent_id IN (SELECT id FROM agent WHERE workspace_id = $1);
+
+-- name: DeleteSkillLabelAssignmentsByWorkspace :exec
+-- Skill mirror of DeleteAgentLabelAssignmentsByWorkspace, same orphan hazard.
+DELETE FROM skill_to_label
+WHERE skill_id IN (SELECT id FROM skill WHERE workspace_id = $1);
+
 -- name: AttachLabelToIssue :exec
 -- Workspace-guarded INSERT: the WHERE EXISTS clauses ensure both the issue
 -- and the label belong to the given workspace. A future caller that forgets
