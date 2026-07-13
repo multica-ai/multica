@@ -32,6 +32,18 @@ export function formatDateOnly(date: Date): string {
   return `${y}-${m}-${d}`;
 }
 
+/** Reformat a YYYY-MM-DD date-only string to DD-MM. Malformed input passes through unchanged. */
+export function formatDateOnlyShort(value: string): string {
+  if (!DATE_LAYOUT_RE.test(value)) return value;
+  const [, m, d] = value.split("-");
+  return `${d}-${m}`;
+}
+
+/** FIR-2817: compact "DD-MM - DD-MM" range for sprint headers/lists (no year, matches Jesper's requested format). */
+export function formatSprintDateRange(startDate: string, endDate: string): string {
+  return `${formatDateOnlyShort(startDate)} - ${formatDateOnlyShort(endDate)}`;
+}
+
 function isoWeekday(date: Date): number {
   const w = date.getUTCDay(); // Sun=0..Sat=6
   return w === 0 ? 7 : w;

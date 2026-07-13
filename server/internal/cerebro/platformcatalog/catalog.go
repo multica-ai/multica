@@ -409,6 +409,10 @@ var catalog = []Capability{
 			"DELETE /api/notes/{id}/comments/{commentId}",
 			"POST /api/notes/{id}/comments/{commentId}/resolve",
 			"POST /api/notes/{id}/comments/{commentId}/suggestion",
+			// FIR-3102: create a standalone issue from one comment. Gated by
+			// requireCanComment (same access level as posting a comment), so it
+			// belongs to manage_notes, not the create_issue capability.
+			"POST /api/notes/{id}/comments/{commentId}/create-issue",
 			"POST /api/notes/{id}/versions",
 			"POST /api/notes/{id}/versions/{versionId}/restore",
 			"POST /api/notes/{id}/lock",

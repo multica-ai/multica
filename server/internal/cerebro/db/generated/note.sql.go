@@ -374,10 +374,12 @@ SELECT DISTINCT a.id, a.workspace_id, a.folder_id, a.title, a.body,
        n.owner_id, n.visibility, n.pinned, n.pinned_at
 FROM cerebro_note n
 JOIN artifact a ON a.id = n.artifact_id
-JOIN cerebro_note_reference ref ON ref.note_id = n.artifact_id
+LEFT JOIN cerebro_note_reference ref
+  ON ref.note_id = n.artifact_id
+ AND ref.object = $2
+ AND ref.ref_id = $3
 WHERE a.workspace_id = $1
-  AND ref.object = $2
-  AND ref.ref_id = $3
+  AND (ref.id IS NOT NULL OR ($2 = 'issue' AND a.issue_id::text = $3))
   AND (
     (
       (

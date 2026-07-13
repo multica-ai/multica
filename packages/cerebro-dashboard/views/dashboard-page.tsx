@@ -24,6 +24,7 @@ import { DashboardTabBar } from "./components/dashboard-tab-bar";
 import { useDashboardStore } from "../core/store";
 import { dashboardOverviewOptions } from "../core/queries";
 import { AnalyticsDashboard } from "./components/analytics-dashboard";
+import { RunsControlRoom } from "./components/runs-control-room";
 import { DEFAULT_ANALYTICS_VISUALS } from "../core/analytics";
 
 // Workspace operations dashboard. JEH-684. v2 — replaces the v1 placeholder
@@ -141,7 +142,13 @@ export function DashboardPage() {
           )}
 
           {tab === "runs" && (
-            <AnalyticsDashboard workspaceId={workspace.id} initialVisuals={DEFAULT_ANALYTICS_VISUALS.filter((visual) => visual.id === "runs")} />
+            <>
+              <RunsControlRoom workspaceId={workspace.id} />
+              <section aria-label="Custom visuals" className="space-y-2">
+                <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Custom visuals</h2>
+                <AnalyticsDashboard workspaceId={workspace.id} initialVisuals={[]} />
+              </section>
+            </>
           )}
 
           {tab === "messages" && (

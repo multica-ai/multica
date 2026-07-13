@@ -865,6 +865,7 @@ type CerebroNoteComment struct {
 	CreatedAt       pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
 	SentToAgentAt   pgtype.Timestamptz `json:"sent_to_agent_at"`
+	IssueID         pgtype.UUID        `json:"issue_id"`
 }
 
 type CerebroNoteReference struct {

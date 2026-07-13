@@ -574,7 +574,10 @@ export function DocumentViewPage({
                   }
                 />
               ) : (
-                <ArtifactContent artifact={artifact} />
+                // FIR-3190 — readonly documents (tables, PDFs, etc.) were missing the
+                // same 70ch-cap override the editable path already applies above,
+                // squeezing wide tables into a narrow column and shredding cell text.
+                <ArtifactContent artifact={artifact} className="!max-w-none" />
               )}
             </div>
           </div>

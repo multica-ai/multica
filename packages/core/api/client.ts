@@ -4778,4 +4778,23 @@ export class ApiClient {
       body: JSON.stringify(payload),
     });
   }
+  // CEREBRO-PATCH(cerebro-note-comment-create-issue): FIR-3102 — turn one note
+  // comment into a standalone issue. Every field optional (empty title → server
+  // uses the comment's first line). Response shape is generic so
+  // @multica/cerebro-notes owns the zod schema.
+  async createIssueFromNoteComment<T = unknown>(
+    noteId: string,
+    commentId: string,
+    payload: {
+      title?: string;
+      project_id?: string;
+      assignee_type?: string;
+      assignee_id?: string;
+    },
+  ): Promise<T> {
+    return this.fetch<T>(
+      `/api/notes/${noteId}/comments/${commentId}/create-issue`,
+      { method: "POST", body: JSON.stringify(payload) },
+    );
+  }
 }

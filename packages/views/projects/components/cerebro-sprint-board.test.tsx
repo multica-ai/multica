@@ -1,4 +1,5 @@
 // CEREBRO-PATCH(sprint-header-breadcrumb): FIR-2817 test for the BreadcrumbHeader swap.
+// CEREBRO-PATCH(sprint-header-date-range): FIR-2817 test for the DD-MM - DD-MM date format.
 import { describe, it, expect, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -87,7 +88,7 @@ describe("SprintBoard header", () => {
 
     expect(await screen.findByText("Tech Sprint 3 2026")).toBeInTheDocument();
     expect(screen.getByText("Planned")).toBeInTheDocument();
-    expect(screen.getByText(/2026-07-06.*2026-07-19/)).toBeInTheDocument();
+    expect(screen.getByText(/06-07 - 19-07/)).toBeInTheDocument();
   });
 
   it("still mounts the (stubbed) project issues surface below the header", async () => {

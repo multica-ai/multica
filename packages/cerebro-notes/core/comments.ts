@@ -33,6 +33,10 @@ export const NoteCommentSchema = z.object({
   // FIR-1621 — null while the comment is an unsent local draft; an RFC3339
   // timestamp once it has been dispatched to the coupled issue/chat agent.
   sent_to_agent_at: z.string().nullable().default(null),
+  // FIR-3102 — the comment's OWN issue: the UUID of the standalone issue created
+  // from this comment (Create issue), or null when the comment has none. This is
+  // the COMMENT-level coupling; it is independent of the note's own issue.
+  issue_id: z.string().nullable().default(null),
 });
 
 export type NoteComment = z.infer<typeof NoteCommentSchema>;
@@ -239,6 +243,82 @@ export function useSendNoteComments(noteId: string) {
               : undefined,
           destination_object: input?.destination?.object || undefined,
           destination_ref_id: input?.destination?.refId || undefined,
+        }),
+      ),
+    onSettled: invalidate,
+  });
+}
+
+// ---------------------------------------------------------------------------
+// FIR-3102 — Create issue from a single note comment. The server seeds a new
+// standalone issue from the comment (its body becomes the issue description, its
+// first line the default title), links the comment to that issue
+// (cerebro_note_comment.issue_id), and stamps the issue's origin back to the
+// comment. Endpoint: POST /api/notes/{id}/comments/{commentId}/create-issue
+// (server/internal/cerebro/note/create_issue.go).
+// ---------------------------------------------------------------------------
+
+// commentIssueTitle derives the default issue title from a comment body: the
+// first non-empty line, trimmed. Empty when the body is blank (so the dialog
+// keeps Create disabled until the user types a title). Mirrors the server's
+// firstLineTitle so the prefilled title matches what the server would pick.
+export function commentIssueTitle(body: string): string {
+  const line = body
+    .split("\n")
+    .map((l) => l.replace(/^#+\s*/, "").trim())
+    .find((l) => l.length > 0);
+  if (!line) return "";
+  return line.length > 120 ? line.slice(0, 120).trim() : line;
+}
+
+// CreateIssueFromCommentInput drives the create. Title/project/assignee are all
+// optional: an empty title lets the server fall back to the comment's first
+// line; project/assignee are left unset (issue lands unassigned in the inbox).
+export interface CreateIssueFromCommentInput {
+  commentId: string;
+  title?: string;
+  projectId?: string;
+  assigneeType?: string;
+  assigneeId?: string;
+}
+
+// The server echoes the new issue plus the updated comment (now carrying its
+// issue_id) so the panel can render "opened <issue>" on that exact comment
+// without a refetch. Every field defaulted (API Response Compatibility rule).
+export const CreateIssueFromCommentResultSchema = z.object({
+  issue_id: z.string().default(""),
+  number: z.number().default(0),
+  // A missing comment defaults to a fully-shaped (empty) NoteComment, not a bare
+  // {}, so readers of result.comment.* never hit undefined. `.default()` returns
+  // its value without re-parsing, so parse an empty comment to get real defaults.
+  comment: NoteCommentSchema.default(() => NoteCommentSchema.parse({})),
+});
+
+export type CreateIssueFromCommentResult = z.infer<
+  typeof CreateIssueFromCommentResultSchema
+>;
+
+export function safeParseCreateIssueResult(
+  raw: unknown,
+): CreateIssueFromCommentResult {
+  const r = CreateIssueFromCommentResultSchema.safeParse(raw);
+  if (r.success) return r.data;
+  console.warn("[cerebro-notes] create-issue response failed validation", r.error);
+  return CreateIssueFromCommentResultSchema.parse({ comment: {} });
+}
+
+// useCreateIssueFromNoteComment turns one note comment into a standalone issue.
+// Invalidates the comment list so the created issue shows on the comment.
+export function useCreateIssueFromNoteComment(noteId: string) {
+  const invalidate = useNoteCommentInvalidate(noteId);
+  return useMutation({
+    mutationFn: async (input: CreateIssueFromCommentInput) =>
+      safeParseCreateIssueResult(
+        await api.createIssueFromNoteComment(noteId, input.commentId, {
+          title: input.title?.trim() || undefined,
+          project_id: input.projectId || undefined,
+          assignee_type: input.assigneeType || undefined,
+          assignee_id: input.assigneeId || undefined,
         }),
       ),
     onSettled: invalidate,

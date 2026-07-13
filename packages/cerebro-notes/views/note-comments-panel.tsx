@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { MessageSquarePlus, Check, X, Reply, Trash2, CornerDownRight, Send } from "lucide-react";
+import { MessageSquarePlus, Check, X, Reply, Trash2, CornerDownRight, Send, ListPlus } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@multica/ui/components/ui/button";
 import {
@@ -59,6 +59,8 @@ import { useCommentAnchors } from "./use-comment-anchors";
 import { DRAFT_ANCHOR_ID, type CommentAnchor } from "./comment-anchor-plugin";
 import { NoteCoupleAndSend } from "./note-couple-and-send";
 import { NoteSuggestIssueReference } from "./note-suggest-issue-reference";
+import { NoteCommentCreateIssueDialog } from "./note-comment-create-issue-dialog";
+import { NoteCommentIssueLink } from "./note-comment-issue-link";
 
 // FIR-1621 — the reference `object` kinds a note can be coupled to as a send
 // destination. Mirrors couplingIssue/couplingChat in the Go send handler.
@@ -164,13 +166,11 @@ export function NoteCommentsPanel({
   // single-coupling label + the per-comment select affordance.
   const couplings = React.useMemo(() => {
     const explicit = references.filter(
-      (r) => r.object === COUPLE_ISSUE || r.object === COUPLE_CHAT,
+      (r) => r.object === COUPLE_CHAT,
     );
-    if (explicit.length > 0) return explicit;
-    // FIR-1852 — no explicit reference, but the note is unified to an issue via
-    // issue_id: surface that as an implicit issue coupling so the Send buttons
-    // appear and the comments go to the issue. Explicit references take
-    // precedence (handled above), matching the server.
+    // FIR-3102 — note.issue_id is the one canonical note-level issue coupling.
+    // Legacy issue References are ignored when it exists; migration 9133 turns
+    // old extra issue references into comment-level links.
     const issueId = note?.issue_id;
     if (issueId) {
       const implicit: NoteReference = {
@@ -185,9 +185,13 @@ export function NoteCommentsPanel({
         created_at: "",
         updated_at: "",
       };
-      return [implicit];
+      return [implicit, ...explicit];
     }
-    return [];
+    // Compatibility for a pre-migration response: old issue references remain
+    // usable only when the note has no canonical issue_id yet.
+    return references.filter(
+      (r) => r.object === COUPLE_ISSUE || r.object === COUPLE_CHAT,
+    );
   }, [references, note?.issue_id, noteId]);
   const coupling = couplings[0] ?? null;
   const multiCoupled = couplings.length > 1;
@@ -744,7 +748,7 @@ function ThreadView({
           “{root.anchor_quote}”
         </div>
       )}
-      <CommentRow c={root} nameFor={nameFor} avatarFor={avatarFor} myId={myId} noteId={noteId} canDelete={root.author_id === myId || isOwner} onDelete={() => del.mutate(root.id)} selectable={selectable} selected={selected.has(root.id)} onToggleSelect={onToggleSelect} />
+      <CommentRow c={root} nameFor={nameFor} avatarFor={avatarFor} myId={myId} noteId={noteId} canDelete={root.author_id === myId || isOwner} onDelete={() => del.mutate(root.id)} selectable={selectable} selected={selected.has(root.id)} onToggleSelect={onToggleSelect} allowCreateIssue={!isSuggestion} />
 
       {isSuggestion && (
         <div className="mt-1.5 rounded bg-emerald-500/10 p-2 text-sm">
@@ -771,7 +775,7 @@ function ThreadView({
       {replies.length > 0 && (
         <div className="mt-3 ml-3 flex flex-col gap-3 border-l border-border/70 pl-3">
           {replies.map((r) => (
-            <CommentRow key={r.id} c={r} nameFor={nameFor} avatarFor={avatarFor} myId={myId} noteId={noteId} canDelete={r.author_id === myId || isOwner} onDelete={() => del.mutate(r.id)} selectable={selectable} selected={selected.has(r.id)} onToggleSelect={onToggleSelect} />
+            <CommentRow key={r.id} c={r} nameFor={nameFor} avatarFor={avatarFor} myId={myId} noteId={noteId} canDelete={r.author_id === myId || isOwner} onDelete={() => del.mutate(r.id)} selectable={selectable} selected={selected.has(r.id)} onToggleSelect={onToggleSelect} allowCreateIssue />
           ))}
         </div>
       )}
@@ -857,11 +861,13 @@ function CommentRow({
   nameFor,
   avatarFor,
   myId,
+  noteId,
   canDelete,
   onDelete,
   selectable = false,
   selected = false,
   onToggleSelect,
+  allowCreateIssue = false,
 }: {
   c: NoteComment;
   nameFor: (id: string) => string;
@@ -873,8 +879,11 @@ function CommentRow({
   selectable?: boolean;
   selected?: boolean;
   onToggleSelect?: (id: string) => void;
+  allowCreateIssue?: boolean;
 }) {
   const unsent = isUnsentToAgent(c);
+  const [creatingIssue, setCreatingIssue] = React.useState(false);
+  const canCreateIssue = allowCreateIssue && !c.issue_id && c.kind !== "suggestion";
   // FIR-2826 — lead each comment with the author's avatar so rows read as
   // distinct messages instead of one continuous block of text.
   const authorName = c.author_id === myId ? "You" : nameFor(c.author_id);
@@ -911,15 +920,30 @@ function CommentRow({
               Unsent
             </Badge>
           )}
-          {canDelete && (
-            <button
-              onClick={onDelete}
-              className="ml-auto text-muted-foreground opacity-0 transition-opacity hover:text-destructive group-hover/comment:opacity-100"
-              aria-label="Delete comment"
-            >
-              <Trash2 className="size-3" />
-            </button>
-          )}
+          <div className="ml-auto flex items-center gap-1">
+            {canCreateIssue && (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setCreatingIssue(true);
+                }}
+                className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-muted-foreground opacity-100 transition-colors hover:bg-muted hover:text-foreground focus-visible:opacity-100 sm:opacity-0 sm:group-hover/comment:opacity-100"
+                aria-label="Create issue from comment"
+              >
+                <ListPlus className="size-3" /> Create issue
+              </button>
+            )}
+            {canDelete && (
+              <button
+                onClick={onDelete}
+                className="text-muted-foreground opacity-0 transition-opacity hover:text-destructive group-hover/comment:opacity-100"
+                aria-label="Delete comment"
+              >
+                <Trash2 className="size-3" />
+              </button>
+            )}
+          </div>
         </div>
         {c.body && c.body !== "Suggested edit" && (
           // FIR-1647 — render markdown so an @-mention shows as a chip, not raw
@@ -929,6 +953,15 @@ function CommentRow({
             className="mt-1 break-words text-sm leading-relaxed"
           />
         )}
+        {/* FIR-3102 — this comment was turned into an issue: show a chip that
+            opens it. Shows on the root or a reply, wherever the issue was made. */}
+        {c.issue_id && <NoteCommentIssueLink issueId={c.issue_id} />}
+        <NoteCommentCreateIssueDialog
+          noteId={noteId}
+          comment={c}
+          open={creatingIssue}
+          onOpenChange={setCreatingIssue}
+        />
       </div>
     </div>
   );

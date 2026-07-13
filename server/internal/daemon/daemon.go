@@ -2067,7 +2067,7 @@ func (d *Daemon) handleHeartbeatActions(ctx context.Context, runtimeID string, r
 	// CEREBRO-PATCH(heartbeat-account-id-ack): cache server-registered account id for task usage reports.
 	if d.accountIdentities != nil && resp.CerebroAccountID != "" {
 		d.accountIdentities.setAccountID(runtimeID, resp.CerebroAccountID)
-		go d.maybeReportProviderUsageWindows(ctx, runtimeID, resp.CerebroAccountID, d.logger) // CEREBRO-PATCH(heartbeat-usage-poll): FIR-3118 usagepal-style periodic poll, throttled per account.
+		go d.maybeReportProviderUsageWindows(d.recoveryContext(), runtimeID, resp.CerebroAccountID, d.logger) // CEREBRO-PATCH(heartbeat-usage-poll): FIR-3118 root-scoped usagepal-style periodic poll, throttled per account.
 	}
 	execenv.ApplyFeatureFlagSnapshot(resp.FeatureFlags)
 	if resp.PendingUpdate != nil || resp.PendingModelList != nil || resp.PendingLocalSkills != nil || resp.PendingLocalSkillImport != nil {

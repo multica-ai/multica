@@ -5,6 +5,8 @@ import {
   computeEnd,
   computeNextStart,
   formatDateOnly,
+  formatDateOnlyShort,
+  formatSprintDateRange,
   parseDateOnly,
 } from "./template";
 
@@ -84,5 +86,22 @@ describe("parseDateOnly", () => {
     expect(parseDateOnly("2026-02-31")).toBeNull();
     expect(parseDateOnly("not-a-date")).toBeNull();
     expect(parseDateOnly("2026-06-01")).not.toBeNull();
+  });
+});
+
+describe("formatDateOnlyShort", () => {
+  it("reformats YYYY-MM-DD to DD-MM", () => {
+    expect(formatDateOnlyShort("2026-07-09")).toBe("09-07");
+    expect(formatDateOnlyShort("2026-12-01")).toBe("01-12");
+  });
+
+  it("passes malformed input through unchanged", () => {
+    expect(formatDateOnlyShort("not-a-date")).toBe("not-a-date");
+  });
+});
+
+describe("formatSprintDateRange", () => {
+  it("joins two dates as DD-MM - DD-MM", () => {
+    expect(formatSprintDateRange("2026-07-09", "2026-07-22")).toBe("09-07 - 22-07");
   });
 });

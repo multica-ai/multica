@@ -20,6 +20,7 @@ import { ReferenceRow } from "./reference-row";
 // frontend change.
 const GROUP_LABELS: Record<string, string> = {
   github_pr: "GitHub pull requests",
+  note_comment: "Note comments",
 };
 
 function groupLabel(object: ReferenceObject): string {

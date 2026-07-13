@@ -85,6 +85,79 @@ func sendRequest(t *testing.T, h *Handler, noteID pgtype.UUID, body string) *htt
 	return w
 }
 
+func referenceRequest(t *testing.T, h *Handler, method string, noteID pgtype.UUID, refID, body string) *httptest.ResponseRecorder {
+	t.Helper()
+	path := "/api/notes/" + uuidStr(noteID) + "/references"
+	if refID != "" {
+		path += "/" + refID
+	}
+	r := httptest.NewRequest(method, path, strings.NewReader(body))
+	r.Header.Set("X-User-ID", uuidStr(w3UserA))
+	ctx := middleware.SetMemberContext(r.Context(), uuidStr(w3WsID), db.Member{})
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("id", uuidStr(noteID))
+	if refID != "" {
+		rctx.URLParams.Add("refId", refID)
+	}
+	ctx = context.WithValue(ctx, chi.RouteCtxKey, rctx)
+	w := httptest.NewRecorder()
+	switch method {
+	case http.MethodGet:
+		h.ListReferences(w, r.WithContext(ctx))
+	case http.MethodPost:
+		h.CreateReference(w, r.WithContext(ctx))
+	case http.MethodDelete:
+		h.DeleteReference(w, r.WithContext(ctx))
+	}
+	return w
+}
+
+func TestIssueReferenceUsesCanonicalArtifactScope(t *testing.T) {
+	if w3Pool == nil {
+		t.Skip("no test DB")
+	}
+	ctx := context.Background()
+	noteID := makeNote(t, ctx, "Canonical coupling", "body")
+	issueID := makeIssue(t, ctx, "Primary issue")
+	otherIssueID := makeIssue(t, ctx, "Other issue")
+
+	w := referenceRequest(t, w3H, http.MethodPost, noteID, "", `{"object":"issue","ref_id":"`+uuidStr(issueID)+`"}`)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create issue reference: status %d, body %s", w.Code, w.Body.String())
+	}
+	artifact, err := w3H.Upstream.GetArtifact(ctx, db.GetArtifactParams{ID: noteID, WorkspaceID: w3WsID})
+	if err != nil {
+		t.Fatalf("load artifact: %v", err)
+	}
+	if !artifact.IssueID.Valid || uuidStr(artifact.IssueID) != uuidStr(issueID) {
+		t.Fatalf("artifact issue_id = %s, want %s", uuidStr(artifact.IssueID), uuidStr(issueID))
+	}
+	var legacyCount int
+	if err := w3Pool.QueryRow(ctx, `SELECT COUNT(*) FROM cerebro_note_reference WHERE note_id=$1 AND object='issue'`, noteID).Scan(&legacyCount); err != nil {
+		t.Fatalf("count legacy refs: %v", err)
+	}
+	if legacyCount != 0 {
+		t.Fatalf("created %d legacy issue references, want 0", legacyCount)
+	}
+
+	w = referenceRequest(t, w3H, http.MethodGet, noteID, "", "")
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"id":"primary-issue"`) {
+		t.Fatalf("list canonical reference: status %d, body %s", w.Code, w.Body.String())
+	}
+	w = referenceRequest(t, w3H, http.MethodPost, noteID, "", `{"object":"issue","ref_id":"`+uuidStr(otherIssueID)+`"}`)
+	if w.Code != http.StatusConflict {
+		t.Fatalf("replace primary issue: status %d, want 409; body %s", w.Code, w.Body.String())
+	}
+	w = referenceRequest(t, w3H, http.MethodDelete, noteID, primaryIssueReferenceID, "")
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("delete primary reference: status %d, body %s", w.Code, w.Body.String())
+	}
+	artifact, err = w3H.Upstream.GetArtifact(ctx, db.GetArtifactParams{ID: noteID, WorkspaceID: w3WsID})
+	if err != nil || artifact.IssueID.Valid {
+		t.Fatalf("artifact issue_id still set after delete: %+v, err=%v", artifact.IssueID, err)
+	}
+}
+
 func TestListNotesReferencingObject(t *testing.T) {
 	if w3Pool == nil {
 		t.Skip("no test DB")
@@ -97,7 +170,9 @@ func TestListNotesReferencingObject(t *testing.T) {
 	if err := w3H.Cerebro.SetNoteVisibility(ctx, cerebrodb.SetNoteVisibilityParams{ArtifactID: openNote, Visibility: "workspace"}); err != nil {
 		t.Fatalf("set visibility: %v", err)
 	}
-	addIssueRef(t, ctx, openNote, issueID)
+	if _, err := w3H.Upstream.UpdateArtifactScope(ctx, db.UpdateArtifactScopeParams{ID: openNote, WorkspaceID: w3WsID, IssueID: issueID}); err != nil {
+		t.Fatalf("set canonical issue: %v", err)
+	}
 
 	// A private note (owned by A) coupled to the same issue: only A sees it.
 	privNote := makeNote(t, ctx, "Private", "secret note")
