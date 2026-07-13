@@ -9,7 +9,13 @@ import {
   shortcutFromEvent,
   shortcutMatchesEvent,
 } from "./definitions";
-import { configureShortcutPlatform, detectShortcutPlatform } from "./platform";
+import {
+  configureShortcutPlatform,
+  configureShortcutRuntime,
+  detectShortcutPlatform,
+  detectShortcutRuntime,
+  getShortcutRuntime,
+} from "./platform";
 
 function keyEvent(
   key: string,
@@ -27,6 +33,7 @@ function keyEvent(
 
 afterEach(() => {
   configureShortcutPlatform(null);
+  configureShortcutRuntime(null);
   vi.unstubAllGlobals();
 });
 
@@ -126,6 +133,59 @@ describe("keyboard shortcut definitions", () => {
     expect(
       isReservedShortcut(createShortcutChord("K", { primary: true }), "windows"),
     ).toBe(false);
+  });
+
+  it("reserves browser-owned accelerators on web but frees them on desktop", () => {
+    for (const key of ["P", "L", "T", "N", "D", "U"]) {
+      const chord = createShortcutChord(key, { primary: true });
+      expect(isReservedShortcut(chord, "macos", "web")).toBe(true);
+      expect(isReservedShortcut(chord, "windows", "web")).toBe(true);
+      expect(isReservedShortcut(chord, "macos", "desktop")).toBe(false);
+      expect(isReservedShortcut(chord, "windows", "desktop")).toBe(false);
+    }
+  });
+
+  it("keeps app-owned and editing accelerators reserved on desktop", () => {
+    for (const key of ["W", "R", "Q", "A", "C", "V", "X", "Y", "Z", "0", "Minus", "Plus"]) {
+      expect(
+        isReservedShortcut(createShortcutChord(key, { primary: true }), "macos", "desktop"),
+      ).toBe(true);
+    }
+    expect(isReservedShortcut(createShortcutChord("F5"), "windows", "desktop")).toBe(true);
+    expect(
+      isReservedShortcut(createShortcutChord("Space", { primary: true }), "macos", "desktop"),
+    ).toBe(true);
+  });
+
+  it("allows recording Cmd/Ctrl+P for an action on desktop only", () => {
+    const cmdP = createShortcutChord("P", { primary: true });
+    expect(isShortcutAllowedForAction("openSearch", cmdP, "macos", "desktop")).toBe(true);
+    expect(isShortcutAllowedForAction("openSearch", cmdP, "macos", "web")).toBe(false);
+    expect(isShortcutAllowedForAction("goIssues", cmdP, "windows", "desktop")).toBe(true);
+    // The reservation keys on primary+key, so shifted variants open up too.
+    expect(
+      isShortcutAllowedForAction(
+        "openSearch",
+        createShortcutChord("P", { primary: true, shift: true }),
+        "macos",
+        "desktop",
+      ),
+    ).toBe(true);
+    // Send stays locked to Enter / Mod+Enter regardless of runtime.
+    expect(isShortcutAllowedForAction("send", cmdP, "macos", "desktop")).toBe(false);
+  });
+
+  it("detects the desktop runtime from preload globals with a configure override", () => {
+    expect(detectShortcutRuntime()).toBe("web");
+    vi.stubGlobal("window", { desktopAPI: {} });
+    expect(detectShortcutRuntime()).toBe("desktop");
+    vi.stubGlobal("window", { electron: {} });
+    expect(detectShortcutRuntime()).toBe("desktop");
+    vi.stubGlobal("window", {});
+    expect(detectShortcutRuntime()).toBe("web");
+    expect(getShortcutRuntime()).toBe("web");
+    configureShortcutRuntime("desktop");
+    expect(getShortcutRuntime()).toBe("desktop");
   });
 
   it("rejects modifier-only, composition-only, and unidentified key events", () => {
