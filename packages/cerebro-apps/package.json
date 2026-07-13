@@ -10,7 +10,8 @@
     "@multica/core": "workspace:*",
     "@multica/ui": "workspace:*",
     "@multica/views": "workspace:*",
-    "lucide-react": "catalog:"
+    "lucide-react": "catalog:",
+    "zod": "catalog:"
   },
   "peerDependencies": { "react": "catalog:", "react-dom": "catalog:" },
   "devDependencies": {

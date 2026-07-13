@@ -86,3 +86,18 @@ test("allergen fixture makes one AI call on the personal key", async () => {
   assert.deepEqual(await response.json(), { formatted_ingredients: "WHEAT flour, MILK", allergens: ["WHEAT", "MILK"] });
   assert.equal(calls, 1);
 });
+
+test("allergen fixture loads a CSP-safe client that obtains a personal token before invoking its worker", async () => {
+  const fixtureRoot = join(fileURLToPath(new URL(".", import.meta.url)), "fixtures");
+  const runtime = createAppsRuntime({ bundleRoot: fixtureRoot });
+  const page = await runtime.fetch(new Request("http://runtime/apps/f1540000-0000-4154-8154-000000000001/1.0.0/"));
+  const html = await page.text();
+  assert.match(html, /<script src="\.\/app\.js"><\/script>/);
+  assert.doesNotMatch(html, /<script>[^<]/);
+
+  const script = await runtime.fetch(new Request("http://runtime/apps/f1540000-0000-4154-8154-000000000001/1.0.0/app.js"));
+  const source = await script.text();
+  assert.match(source, /api\/cerebro\/apps\/\$\{appId\}\/token/);
+  assert.match(source, /registryKey:\s*token\.key/);
+  assert.match(source, /api\/ai\/proxy\/v1/);
+});

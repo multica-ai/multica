@@ -110,6 +110,28 @@ type appResponse struct {
 	UpdatedAt      time.Time `json:"updated_at"`
 }
 
+type appVersionResponse struct {
+	Version      string          `json:"version"`
+	ReleaseNotes string          `json:"release_notes"`
+	GrantStatus  string          `json:"grant_status"`
+	Scopes       json.RawMessage `json:"scopes"`
+	CreatedAt    time.Time       `json:"created_at"`
+}
+
+type appWorkflowResponse struct {
+	ID         string          `json:"id"`
+	Name       string          `json:"name"`
+	Version    string          `json:"version"`
+	Enabled    bool            `json:"enabled"`
+	Definition json.RawMessage `json:"definition"`
+}
+
+type appDetailResponse struct {
+	appResponse
+	Versions  []appVersionResponse  `json:"versions"`
+	Workflows []appWorkflowResponse `json:"workflows"`
+}
+
 func validateCreateRequest(req createRequest) error {
 	if strings.TrimSpace(req.Name) == "" {
 		return errors.New("name is required")
@@ -230,6 +252,49 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 		apps = append(apps, app)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"apps": apps})
+}
+
+func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
+	app, ok := h.loadApp(w, r)
+	if !ok {
+		return
+	}
+	versionRows, err := h.pool.Query(r.Context(), `
+		SELECT v.version,v.release_notes,v.created_at,
+		       COALESCE(g.status,'not_requested'),COALESCE(g.scopes,'[]'::jsonb)
+		FROM cerebro_app_version v
+		LEFT JOIN cerebro_app_grant g ON g.app_id=v.app_id AND g.version=v.version
+		WHERE v.app_id=$1 ORDER BY v.created_at DESC`, app.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to read app versions")
+		return
+	}
+	defer versionRows.Close()
+	versions := make([]appVersionResponse, 0)
+	for versionRows.Next() {
+		var version appVersionResponse
+		if err := versionRows.Scan(&version.Version, &version.ReleaseNotes, &version.CreatedAt, &version.GrantStatus, &version.Scopes); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to read app versions")
+			return
+		}
+		versions = append(versions, version)
+	}
+	workflowRows, err := h.pool.Query(r.Context(), `SELECT id::text,name,version,enabled,definition FROM cerebro_app_workflow_def WHERE app_id=$1 ORDER BY updated_at DESC`, app.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to read app workflows")
+		return
+	}
+	defer workflowRows.Close()
+	workflows := make([]appWorkflowResponse, 0)
+	for workflowRows.Next() {
+		var workflow appWorkflowResponse
+		if err := workflowRows.Scan(&workflow.ID, &workflow.Name, &workflow.Version, &workflow.Enabled, &workflow.Definition); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to read app workflows")
+			return
+		}
+		workflows = append(workflows, workflow)
+	}
+	writeJSON(w, http.StatusOK, appDetailResponse{appResponse: app, Versions: versions, Workflows: workflows})
 }
 
 func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {

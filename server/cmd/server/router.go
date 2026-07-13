@@ -2159,6 +2159,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Use(cerebroAppsHandler.RequireEnabled)
 				r.Get("/", cerebroAppsHandler.List)
 				r.Post("/", cerebroAppsHandler.Create)
+				// CEREBRO-PATCH(cerebro-mini-app-detail-route): FIR-3172 app detail screen reads one app, its versions, and workflows.
+				r.Get("/{id}", cerebroAppsHandler.Get)
 				r.Post("/{id}/preview", cerebroAppsHandler.Preview)
 				r.Post("/{id}/publish", cerebroAppsHandler.Publish)
 				r.Post("/{id}/rollback", cerebroAppsHandler.Rollback)

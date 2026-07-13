@@ -95,8 +95,9 @@ func (h *Handler) SetWorkflowEnabled(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"id": id, "enabled": enabled})
 }
 
-// TestWorkflow records a durable identity envelope and queues the same run
-// contract consumed by Hatchet workers. No registry key is stored in the row.
+// TestWorkflow records a durable identity envelope and executes the same
+// workflow contract with deterministic sample adapters. No registry key is
+// stored in the row and test runs cannot mutate live Registry data.
 func (h *Handler) TestWorkflow(w http.ResponseWriter, r *http.Request) {
 	workspaceID, ok := requestWorkspaceID(w, r)
 	if !ok {
@@ -123,13 +124,14 @@ func (h *Handler) TestWorkflow(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var workflowVersion, appID, appVersion string
+	var definition json.RawMessage
 	var rawScopes json.RawMessage
 	err = h.pool.QueryRow(r.Context(), `
-		SELECT d.version,a.id::text,a.current_version,g.scopes
+		SELECT d.version,a.id::text,a.current_version,g.scopes,d.definition
 		FROM cerebro_app_workflow_def d
 		JOIN cerebro_app a ON a.id=d.app_id AND a.workspace_id=d.workspace_id
 		JOIN cerebro_app_grant g ON g.app_id=a.id AND g.version=a.current_version AND g.status='approved'
-		WHERE d.id=$1 AND d.workspace_id=$2`, id, workspaceID).Scan(&workflowVersion, &appID, &appVersion, &rawScopes)
+		WHERE d.id=$1 AND d.workspace_id=$2`, id, workspaceID).Scan(&workflowVersion, &appID, &appVersion, &rawScopes, &definition)
 	if errors.Is(err, pgx.ErrNoRows) {
 		writeError(w, http.StatusConflict, "workflow requires a published app with approved scopes")
 		return
@@ -154,7 +156,22 @@ func (h *Handler) TestWorkflow(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to queue app workflow run")
 		return
 	}
-	writeJSON(w, http.StatusAccepted, map[string]any{"id": runID, "status": "queued", "workflow_id": id})
+	var trigger any
+	if err := json.Unmarshal(req.TriggerPayload, &trigger); err != nil {
+		writeError(w, http.StatusBadRequest, "trigger_payload must be valid JSON")
+		return
+	}
+	startedAt := time.Now()
+	_, _ = h.pool.Exec(r.Context(), `UPDATE cerebro_app_workflow_run SET status='running',started_at=$2 WHERE id=$1`, runID, startedAt)
+	result, runErr := runWorkflowTest(r.Context(), definition, trigger)
+	stepLog, _ := json.Marshal(result.Steps)
+	status, runError := result.Status, ""
+	if runErr != nil {
+		status, runError = "failed", runErr.Error()
+	}
+	finishedAt := time.Now()
+	_, _ = h.pool.Exec(r.Context(), `UPDATE cerebro_app_workflow_run SET status=$2,step_log=$3,error=$4,finished_at=$5 WHERE id=$1`, runID, status, stepLog, runError, finishedAt)
+	writeJSON(w, http.StatusOK, map[string]any{"id": runID, "status": status, "workflow_id": id, "step_log": result.Steps, "error": runError})
 }
 
 func (h *Handler) ListWorkflowRuns(w http.ResponseWriter, r *http.Request) {

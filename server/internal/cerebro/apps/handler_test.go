@@ -1,9 +1,12 @@
 package apps
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"strings"
 	"testing"
 
 	"github.com/multica-ai/multica/server/internal/cerebro/apps/tokens"
@@ -105,5 +108,37 @@ func TestValidateScopesRejectsUnknownOrEmptyCeilings(t *testing.T) {
 		if err := validateScopes(scopes); err == nil {
 			t.Fatalf("invalid scopes accepted: %+v", scopes)
 		}
+	}
+}
+
+func TestWorkflowTestExecutorConsumesTheDefinitionAndReturnsVisibleStepLog(t *testing.T) {
+	definition := json.RawMessage(`{
+		"schema_version":"1",
+		"trigger":{"id":"trigger","type":"manual","config":{}},
+		"steps":[
+			{"id":"read","type":"registry.read","config":{"resource_id":"products"}},
+			{"id":"filter","type":"filter","config":{"field":"read.count","operator":"gt","value":0}},
+			{"id":"write","type":"registry.write","config":{"resource_id":"products"}}
+		]
+	}`)
+	result, err := runWorkflowTest(context.Background(), definition, map[string]any{"sku": "123"})
+	if err != nil {
+		t.Fatalf("run workflow test: %v", err)
+	}
+	if result.Status != "succeeded" || len(result.Steps) != 3 {
+		t.Fatalf("unexpected workflow result: %+v", result)
+	}
+	if result.Steps[0].Status != "succeeded" || result.Steps[2].Status != "succeeded" {
+		t.Fatalf("step log did not show completed work: %+v", result.Steps)
+	}
+}
+
+func TestMiniAppsRouterExposesAppDetail(t *testing.T) {
+	raw, err := os.ReadFile("../../../cmd/server/router.go")
+	if err != nil {
+		t.Fatalf("read router: %v", err)
+	}
+	if !strings.Contains(string(raw), `r.Get("/{id}", cerebroAppsHandler.Get)`) {
+		t.Fatal("mini apps detail route is missing")
 	}
 }

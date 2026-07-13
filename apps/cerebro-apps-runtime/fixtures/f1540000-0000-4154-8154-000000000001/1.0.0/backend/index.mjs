@@ -2,7 +2,7 @@ export default async function formatAllergens(input) {
   if (!input?.ingredients || !input?.registryKey || !input?.aiBaseUrl) {
     throw new Error("ingredients, registryKey, and aiBaseUrl are required");
   }
-  const response = await fetch(`${String(input.aiBaseUrl).replace(/\/$/, "")}/v1/chat/completions`, {
+  const response = await fetch(`${String(input.aiBaseUrl).replace(/\/$/, "")}/chat/completions`, {
     method: "POST",
     headers: { authorization: `Bearer ${input.registryKey}`, "content-type": "application/json" },
     body: JSON.stringify({

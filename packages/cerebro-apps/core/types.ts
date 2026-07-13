@@ -17,3 +17,28 @@ export type CatalogApp = {
   current_version?: string;
   status: "draft" | "published" | "disabled";
 };
+
+export type AppVersion = {
+  version: string;
+  release_notes: string;
+  grant_status: "pending" | "approved" | "revoked" | "not_requested";
+  scopes: AppScope[];
+  created_at?: string;
+};
+
+export type AppWorkflow = {
+  id: string;
+  name: string;
+  version: string;
+  enabled: boolean;
+  definition: AppWorkflowDefinition;
+};
+
+export type AppDetail = CatalogApp & { versions: AppVersion[]; workflows: AppWorkflow[] };
+
+export type WorkflowRun = {
+  id: string;
+  status: "queued" | "running" | "waiting" | "succeeded" | "failed" | "cancelled";
+  step_log?: Array<{ id: string; type?: string; status: string; output?: unknown }>;
+  error?: string;
+};
