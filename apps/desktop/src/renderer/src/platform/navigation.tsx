@@ -14,6 +14,7 @@ import {
   getActiveTab,
 } from "@/stores/tab-store";
 import { useWindowOverlayStore } from "@/stores/window-overlay-store";
+import { navigateByDelta } from "./history-mirror";
 
 function requireRuntimeAppUrl(scope: string): string {
   const runtimeConfig = window.desktopAPI.runtimeConfig;
@@ -212,7 +213,8 @@ export function DesktopNavigationProvider({
         active?.router.navigate(path, { replace: true });
       },
       back: () => {
-        currentActiveTab()?.router.navigate(-1);
+        const active = currentActiveTab();
+        if (active) void navigateByDelta(active.router, -1);
       },
       pathname: location.pathname,
       searchParams: new URLSearchParams(location.search),
@@ -287,7 +289,7 @@ export function TabNavigationProvider({
         if (tryRouteToOtherWorkspace(path)) return;
         router.navigate(path, { replace: true });
       },
-      back: () => router.navigate(-1),
+      back: () => void navigateByDelta(router, -1),
       pathname: location.pathname,
       searchParams: new URLSearchParams(location.search),
       openInNewTab: (

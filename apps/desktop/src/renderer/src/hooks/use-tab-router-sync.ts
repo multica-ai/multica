@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 import type { DataRouter } from "react-router-dom";
 import { useTabStore, resolveRouteIcon } from "@/stores/tab-store";
-import { popDirectionHints } from "./use-tab-history";
+import { consumePendingDelta } from "@/platform/history-mirror";
 
 /**
  * Subscribe to a tab's memory router and sync path + history tracking
@@ -27,15 +27,14 @@ export function useTabRouterSync(tabId: string, router: DataRouter) {
         indexRef.current += 1;
         lengthRef.current = indexRef.current + 1;
       } else if (action === "POP") {
-        // Determine direction from the hint set by goBack/goForward
-        const hint = popDirectionHints.get(router);
-        popDirectionHints.delete(router);
-        if (hint === "forward") {
-          indexRef.current = Math.min(indexRef.current + 1, lengthRef.current - 1);
-        } else {
-          // Default to back
-          indexRef.current = Math.max(0, indexRef.current - 1);
-        }
+        // Move by the exact delta recorded by navigateByDelta — every POP in
+        // the app is a self-initiated back/forward, so the delta is known.
+        // Default to a single step back if one is somehow missing.
+        const delta = consumePendingDelta(router) ?? -1;
+        indexRef.current = Math.max(
+          0,
+          Math.min(indexRef.current + delta, lengthRef.current - 1),
+        );
       }
       // REPLACE: index and length stay the same
 
