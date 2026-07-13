@@ -22,6 +22,11 @@ Go backend + monorepo frontend (pnpm workspaces + Turborepo) with shared package
 - `packages/views/` - Shared business pages/components
 - `packages/tsconfig/` - Shared TypeScript config
 
+### Knowledge Store
+
+- `docs/solutions/` - Documented solutions to past problems (bugs, best practices, workflow patterns), organized by category with YAML frontmatter (`module`, `tags`, `problem_type`). Relevant when implementing or debugging in documented areas.
+- `CONCEPTS.md` - Shared domain vocabulary (entities, named processes, status concepts) — relevant when orienting to the codebase or discussing domain concepts.
+
 ### State Management (critical)
 
 - **React Query** owns all server state (issues, members, agents, inbox, workspace list)
