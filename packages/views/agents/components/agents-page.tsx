@@ -44,7 +44,7 @@ import {
   memberListOptions,
   workspaceKeys,
 } from "@multica/core/workspace/queries";
-import { runtimeListOptions } from "@multica/core/runtimes";
+import { runtimeDisplayLabel, runtimeListOptions } from "@multica/core/runtimes";
 import { Button } from "@multica/ui/components/ui/button";
 import { Checkbox } from "@multica/ui/components/ui/checkbox";
 import {
@@ -428,7 +428,7 @@ function RuntimeCell({ row }: { row: AgentListRow }) {
     <ListGridCell className="hidden @2xl:flex">
       {runtime ? (
         <span className="min-w-0 truncate text-xs text-muted-foreground">
-          {runtime.name}
+          {runtimeDisplayLabel(runtime)}
         </span>
       ) : (
         <span className="text-xs text-muted-foreground/40">—</span>
