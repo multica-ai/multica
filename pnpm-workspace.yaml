@@ -2,6 +2,11 @@ packages:
   - "apps/*"
   - "packages/*"
 
+overrides:
+  "@types/react": "catalog:"
+  "@types/react-dom": "catalog:"
+  "@xmldom/xmldom": "^0.8.13"
+
 catalog:
   # Core React
   react: "19.2.3"

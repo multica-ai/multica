@@ -7,6 +7,8 @@ import {
   useCreateModeStore,
   type CreateMode,
 } from "@multica/core/issues/stores/create-mode-store";
+import { useIssueDraftStore } from "@multica/core/issues/stores/draft-store";
+import { useQuickCreateStore } from "@multica/core/issues/stores/quick-create-store";
 import { AgentCreatePanel } from "./quick-create-issue";
 import { ManualCreatePanel, manualDialogContentClass } from "./create-issue";
 
@@ -40,9 +42,17 @@ export function CreateIssueDialog({
   data?: Record<string, unknown> | null;
 }) {
   const setLastMode = useCreateModeStore((s) => s.setLastMode);
+  const clearDraft = useIssueDraftStore((s) => s.clearDraft);
+  const clearPrompt = useQuickCreateStore((s) => s.clearPrompt);
   const [mode, setMode] = useState<CreateMode>(initialMode);
   const [panelData, setPanelData] = useState(data ?? null);
   const [isExpanded, setIsExpanded] = useState(false);
+
+  const closeDialog = () => {
+    if (mode === "manual") clearDraft();
+    if (mode === "agent") clearPrompt();
+    onClose();
+  };
 
   const switchTo = (next: CreateMode) => (carry?: Record<string, unknown> | null) => {
     setLastMode(next);
@@ -70,7 +80,7 @@ export function CreateIssueDialog({
       : manualDialogContentClass(isExpanded);
 
   return (
-    <Dialog open onOpenChange={(v) => { if (!v) onClose(); }}>
+    <Dialog open onOpenChange={(v) => { if (!v) closeDialog(); }}>
       <DialogContent
         finalFocus={false}
         showCloseButton={false}
@@ -78,7 +88,7 @@ export function CreateIssueDialog({
       >
         {mode === "agent" ? (
           <AgentCreatePanel
-            onClose={onClose}
+            onClose={closeDialog}
             onSwitchMode={switchTo("manual")}
             data={panelData}
             isExpanded={isExpanded}
@@ -86,7 +96,7 @@ export function CreateIssueDialog({
           />
         ) : (
           <ManualCreatePanel
-            onClose={onClose}
+            onClose={closeDialog}
             onSwitchMode={switchTo("agent")}
             data={panelData}
             isExpanded={isExpanded}

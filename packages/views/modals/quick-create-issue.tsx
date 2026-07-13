@@ -260,6 +260,22 @@ export function AgentCreatePanel({
   const [sentCount, setSentCount] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [pendingAttachments, setPendingAttachments] = useState<Attachment[]>([]);
+  const closingRef = useRef(false);
+
+  useEffect(() => {
+    closingRef.current = false;
+    return () => {
+      closingRef.current = true;
+      clearPrompt();
+    };
+  }, [clearPrompt]);
+
+  const closeAndClearPrompt = useCallback(() => {
+    closingRef.current = true;
+    clearPrompt();
+    setPendingAttachments([]);
+    onClose();
+  }, [clearPrompt, onClose]);
 
   // Image paste/drop support: route uploads through the same helper Advanced
   // uses, so users can paste screenshots straight into the prompt and the
@@ -267,6 +283,7 @@ export function AgentCreatePanel({
   const { uploadWithToast, uploading } = useFileUpload(api);
   const handleUploadFile = useCallback(async (file: File) => {
     const result = await uploadWithToast(file);
+    if (closingRef.current) return result;
     if (result) {
       setPendingAttachments((prev) =>
         prev.some((a) => a.id === result.id) ? prev : [...prev, result],
@@ -330,7 +347,7 @@ export function AgentCreatePanel({
         setTimeout(() => setJustSent(false), 1500);
         requestAnimationFrame(() => editorRef.current?.focus());
       } else {
-        onClose();
+        closeAndClearPrompt();
       }
     } catch (e) {
       // Server returns 422 with { code, ... } for the structured rejection
@@ -430,7 +447,7 @@ export function AgentCreatePanel({
             </button>
             <button
               type="button"
-              onClick={onClose}
+              onClick={closeAndClearPrompt}
               title={t(($) => $.common.close)}
               aria-label={t(($) => $.common.close)}
               className="rounded-sm p-1.5 opacity-70 hover:opacity-100 hover:bg-accent/60 transition-all cursor-pointer"
@@ -486,6 +503,7 @@ export function AgentCreatePanel({
             defaultValue={initialPrompt}
             placeholder={t(($) => $.create_issue.agent.prompt_placeholder)}
             onUpdate={(md) => {
+              if (closingRef.current) return;
               setHasContent(md.trim().length > 0);
               setPrompt(md);
             }}

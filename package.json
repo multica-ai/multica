@@ -28,17 +28,6 @@
     "generate:reserved-slugs": "node scripts/generate-reserved-slugs.mjs"
   },
   "packageManager": "pnpm@10.28.2",
-  "pnpm": {
-    "onlyBuiltDependencies": [
-      "esbuild",
-      "electron"
-    ],
-    "overrides": {
-      "@types/react": "catalog:",
-      "@types/react-dom": "catalog:",
-      "@xmldom/xmldom": "^0.8.13"
-    }
-  },
   "devDependencies": {
     "@playwright/test": "^1.58.2",
     "@types/node": "catalog:",
