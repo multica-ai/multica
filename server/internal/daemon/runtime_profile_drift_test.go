@@ -236,12 +236,52 @@ func TestSyncWorkspacesSkipsRuntimeProfileRefreshOnExistingWorkspace(t *testing.
 	d.workspaces[workspaceID].profileSetSig = profileSetSignature(nil)
 	d.runtimeIndex["rt-1"] = Runtime{ID: "rt-1", Provider: "codex"}
 
-	if err := d.syncWorkspacesFromAPI(context.Background()); err != nil {
+	if err := d.syncWorkspacesFromAPI(context.Background(), false); err != nil {
 		t.Fatalf("syncWorkspacesFromAPI: %v", err)
 	}
 
 	if got := profileCalls.Load(); got != 0 {
 		t.Fatalf("workspace sync polled runtime-profiles %d times, want 0", got)
+	}
+}
+
+// TestSyncWorkspacesRefreshesRuntimeProfilesOnReconcile preserves the
+// reliability backstop for a profile mutation that happened while the daemon
+// WebSocket was disconnected. The reconnect broadcast must make one on-demand
+// request for each tracked workspace; otherwise removing the ticker polling
+// would leave the daemon permanently stale until it restarted.
+func TestSyncWorkspacesRefreshesRuntimeProfilesOnReconcile(t *testing.T) {
+	t.Parallel()
+
+	const workspaceID = "ws-1"
+	var profileCalls atomic.Int32
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/workspaces":
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode([]WorkspaceInfo{{ID: workspaceID, Name: "ws"}})
+		case "/api/daemon/workspaces/" + workspaceID + "/runtime-profiles":
+			profileCalls.Add(1)
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(RuntimeProfilesResponse{WorkspaceID: workspaceID})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	d := freshDaemon(srv.URL)
+	d.workspaces[workspaceID] = newWorkspaceState(workspaceID, []string{"rt-1"}, "", nil, nil)
+	d.workspaces[workspaceID].profileSetSig = profileSetSignature(nil)
+	d.runtimeIndex["rt-1"] = Runtime{ID: "rt-1", Provider: "codex"}
+
+	if err := d.syncWorkspacesFromAPI(context.Background(), true); err != nil {
+		t.Fatalf("syncWorkspacesFromAPI: %v", err)
+	}
+
+	if got := profileCalls.Load(); got != 1 {
+		t.Fatalf("reconcile fetched runtime-profiles %d times, want 1", got)
 	}
 }
 

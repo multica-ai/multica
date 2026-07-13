@@ -1514,8 +1514,8 @@ func (d *Daemon) refreshWorkspaceRuntimeProfiles(ctx context.Context, workspaceI
 // The workspaceState pointer is preserved: the workspace itself is still a
 // valid workspace the user belongs to, just one with no agents on this
 // daemon for the moment. If the user re-enables a profile or installs a
-// built-in agent, the next sync tick's profile-drift detection (or a daemon
-// restart) will register it again.
+// built-in agent, the profile-change notification or the next daemon WS
+// reconnect will register it again.
 func (d *Daemon) convergeWorkspaceRuntimesToZero(ctx context.Context, workspaceID, profileSig string) error {
 	d.mu.Lock()
 	ws, ok := d.workspaces[workspaceID]
@@ -1640,7 +1640,7 @@ const DefaultTokenRenewalInterval = 3 * 24 * time.Hour
 // register runtimes once one appears.
 func (d *Daemon) preflightAuth(ctx context.Context) error {
 	d.tryRenewToken(ctx)
-	return d.syncWorkspacesFromAPI(ctx)
+	return d.syncWorkspacesFromAPI(ctx, false)
 }
 
 // tokenRenewalLoop keeps the daemon's PAT alive by periodically asking the
@@ -1699,10 +1699,10 @@ func (d *Daemon) tryRenewToken(ctx context.Context) {
 
 // workspaceSyncLoop periodically fetches the user's workspaces from the API
 // and registers runtimes for any new ones. A WS connect/reconnect broadcast
-// triggers an immediate sync so workspace and runtime changes the server
-// applied during the WS gap are picked up sub-second instead of after the
-// next 30s tick. Repository bindings and workspace settings refresh on demand
-// when a checkout needs them.
+// triggers an immediate sync and one runtime-profile reconciliation so changes
+// made during the WS gap are picked up sub-second without putting profile
+// fetches back on the 30s ticker. Repository bindings and workspace settings
+// refresh on demand when a checkout needs them.
 func (d *Daemon) workspaceSyncLoop(ctx context.Context) {
 	ticker := time.NewTicker(DefaultWorkspaceSyncInterval)
 	defer ticker.Stop()
@@ -1712,8 +1712,8 @@ func (d *Daemon) workspaceSyncLoop(ctx context.Context) {
 		reconcileCh = d.reconcile.notify()
 	}
 
-	sync := func() {
-		if err := d.syncWorkspacesFromAPI(ctx); err != nil {
+	sync := func(reconcileProfiles bool) {
+		if err := d.syncWorkspacesFromAPI(ctx, reconcileProfiles); err != nil {
 			d.logger.Debug("workspace sync failed", "error", err)
 		}
 	}
@@ -1726,17 +1726,20 @@ func (d *Daemon) workspaceSyncLoop(ctx context.Context) {
 			if d.reconcile != nil {
 				reconcileCh = d.reconcile.notify()
 			}
-			sync()
+			sync(true)
 		case <-ticker.C:
-			sync()
+			sync(false)
 		}
 	}
 }
 
 // syncWorkspacesFromAPI fetches all workspaces the user belongs to and
-// registers runtimes for any that aren't already tracked. Workspaces the user
-// has left are cleaned up.
-func (d *Daemon) syncWorkspacesFromAPI(ctx context.Context) error {
+// registers runtimes for any that aren't already tracked. When
+// reconcileProfiles is true (after a daemon WS connect/reconnect), tracked
+// workspaces reconcile custom runtime profiles once so a change made while the
+// WS was unavailable is not lost. The normal 30s ticker passes false and makes
+// no runtime-profile requests. Workspaces the user has left are cleaned up.
+func (d *Daemon) syncWorkspacesFromAPI(ctx context.Context, reconcileProfiles bool) error {
 	d.reloading.Lock()
 	defer d.reloading.Unlock()
 
@@ -1765,6 +1768,11 @@ func (d *Daemon) syncWorkspacesFromAPI(ctx context.Context) error {
 	var removed int
 	for id, name := range apiIDs {
 		if currentIDs[id] {
+			if reconcileProfiles {
+				if err := d.refreshWorkspaceRuntimeProfiles(ctx, id); err != nil {
+					d.logger.Debug("workspace reconcile: profile refresh failed", "workspace_id", id, "error", err)
+				}
+			}
 			// Only intervene further if the workspace lost all of its
 			// runtimes (most commonly because handleRuntimeGone pruned them
 			// and its inline re-register failed). The pointer is not replaced
