@@ -7,6 +7,7 @@ export type AnalyticsMetric =
   | "input_tokens"
   | "output_tokens"
   | "cost_cents"
+  | "missing_cost_runs"
   | "saved_cents"
   | "duration_seconds"
   | "quality_pass_rate"
@@ -16,11 +17,13 @@ export type AnalyticsDimension =
   | "person"
   | "agent"
   | "project"
+  | "runtime"
   | "source"
   | "provider"
   | "model"
   | "skill"
   | "status"
+  | "cost_kind"
   | "quality_type"
   | "quality_category"
   | "context"
@@ -46,8 +49,8 @@ export interface AnalyticsQuery {
 
 const AnalyticsCatalogSchema = z.object({
   populations: z.array(z.enum(["agent", "gateway", "all"])),
-  metrics: z.array(z.enum(["runs", "input_tokens", "output_tokens", "cost_cents", "saved_cents", "duration_seconds", "quality_pass_rate", "skill_invocations"])),
-  dimensions: z.array(z.enum(["time", "person", "agent", "project", "source", "provider", "model", "skill", "status", "quality_type", "quality_category", "context", "run", "source_id", "reference", "reference_label", "debug_link", "trace"])),
+  metrics: z.array(z.enum(["runs", "input_tokens", "output_tokens", "cost_cents", "missing_cost_runs", "saved_cents", "duration_seconds", "quality_pass_rate", "skill_invocations"])),
+  dimensions: z.array(z.enum(["time", "person", "agent", "project", "runtime", "source", "provider", "model", "skill", "status", "cost_kind", "quality_type", "quality_category", "context", "run", "source_id", "reference", "reference_label", "debug_link", "trace"])),
   grains: z.array(z.enum(["none", "hour", "day", "week", "month"])),
   operators: z.array(z.enum(["in", "not_in", "eq", "gte", "lte"])),
 });

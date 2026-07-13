@@ -47,6 +47,33 @@ func TestBuildSQLAddsTimezoneAwareGrainAndCursor(t *testing.T) {
 	}
 }
 
+func TestBuildSQLSupportsTimeFiltersAndMissingCostMetric(t *testing.T) {
+	query := Query{
+		Population: PopulationAll,
+		Metrics:    []Metric{MetricRuns, MetricMissingCostRuns},
+		Dimensions: []Dimension{DimensionCostKind},
+		Filters: []Filter{
+			{Dimension: DimensionTime, Operator: OperatorGreaterEqual, Values: []string{"2026-07-13T00:00:00Z"}},
+			{Dimension: DimensionCostKind, Operator: OperatorIn, Values: []string{"missing"}},
+		},
+		Page: Page{Limit: 10},
+	}
+	plan, err := BuildSQL(query, "workspace-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, fragment := range []string{
+		"r.cost_kind AS cost_kind",
+		"COUNT(DISTINCT r.run_id) FILTER (WHERE r.cost_kind = 'missing')::bigint AS missing_cost_runs",
+		"r.started_at >= ($2::timestamptz[])[1]",
+		"r.cost_kind = ANY($3::text[])",
+	} {
+		if !strings.Contains(plan.SQL, fragment) {
+			t.Errorf("SQL missing %q:\n%s", fragment, plan.SQL)
+		}
+	}
+}
+
 func TestBuildSQLRejectsMissingWorkspace(t *testing.T) {
 	if _, err := BuildSQL(Query{Population: PopulationAgent}, ""); err == nil {
 		t.Fatal("BuildSQL() error = nil")
@@ -84,6 +111,25 @@ func TestBuildSQLExposesRunAndDebugLinkDimensions(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, fragment := range []string{"r.run_id::text AS run", "r.source_id::text AS source_id", "ref.reference_id AS reference", "ref.label AS reference_label", "ref.href AS debug_link", "r.trace_id AS trace"} {
+		if !strings.Contains(plan.SQL, fragment) {
+			t.Errorf("SQL missing %q:\n%s", fragment, plan.SQL)
+		}
+	}
+}
+
+func TestBuildSQLExposesAndFiltersRuntime(t *testing.T) {
+	query := Query{
+		Population: PopulationAll,
+		Metrics:    []Metric{MetricRuns},
+		Dimensions: []Dimension{DimensionRuntime},
+		Filters:    []Filter{{Dimension: DimensionRuntime, Operator: OperatorIn, Values: []string{"Codex Local"}}},
+		Page:       Page{Limit: 20},
+	}
+	plan, err := BuildSQL(query, "workspace-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, fragment := range []string{"r.runtime_label AS runtime", "r.runtime_label = ANY($2::text[])"} {
 		if !strings.Contains(plan.SQL, fragment) {
 			t.Errorf("SQL missing %q:\n%s", fragment, plan.SQL)
 		}

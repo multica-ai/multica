@@ -15,7 +15,7 @@ export const DEFAULT_FILTER: DashboardFilter = {
   scope: "all",
   actorId: null,
   actorName: null,
-  range: "7d",
+  range: "30d",
 };
 
 export function timeRangeToDays(range: TimeRange): number {

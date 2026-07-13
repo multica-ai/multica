@@ -1,0 +1,46 @@
+// @vitest-environment jsdom
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { RunsToolbar } from "./runs-toolbar";
+
+afterEach(cleanup);
+
+describe("RunsToolbar", () => {
+  it("matches the mockup controls and applies a shared filter", () => {
+    const onAddFilter = vi.fn();
+    const onCustomize = vi.fn();
+    const onNewVisual = vi.fn();
+    const onClear = vi.fn();
+    const onRangeChange = vi.fn();
+    render(
+      <RunsToolbar
+        range="30d"
+        onRangeChange={onRangeChange}
+        filters={[{ dimension: "person", operator: "in", values: ["Lone"] }]}
+        onAddFilter={onAddFilter}
+        onRemoveFilter={vi.fn()}
+        onClear={onClear}
+        onCustomize={onCustomize}
+        onNewVisual={onNewVisual}
+      />,
+    );
+
+    expect(screen.getByText("Last 30 days")).toBeTruthy();
+    fireEvent.change(screen.getByLabelText("Time range"), { target: { value: "7d" } });
+    expect(onRangeChange).toHaveBeenCalledWith("7d");
+    expect(screen.getByRole("button", { name: "Person: Lone ×" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Customize layout" }));
+    expect(onCustomize).toHaveBeenCalledOnce();
+    fireEvent.click(screen.getByRole("button", { name: "New visual" }));
+    expect(onNewVisual).toHaveBeenCalledOnce();
+    fireEvent.click(screen.getByRole("button", { name: "Clear all" }));
+    expect(onClear).toHaveBeenCalledOnce();
+
+    fireEvent.click(screen.getByRole("button", { name: "Add filter" }));
+    fireEvent.change(screen.getByLabelText("Filter dimension"), { target: { value: "provider" } });
+    fireEvent.change(screen.getByLabelText("Filter operator"), { target: { value: "not_in" } });
+    fireEvent.change(screen.getByLabelText("Filter value"), { target: { value: "Anthropic" } });
+    fireEvent.click(screen.getByRole("button", { name: "Apply filter" }));
+    expect(onAddFilter).toHaveBeenCalledWith("provider", "Anthropic", "not_in");
+  });
+});

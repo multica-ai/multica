@@ -1,13 +1,12 @@
 "use client";
 
 import { cn } from "@multica/ui/lib/utils";
-import { BarChart3, ListChecks, MessageSquare } from "lucide-react";
 import { useDashboardStore, type DashboardTab } from "../../core/store";
 
-const TABS: { id: DashboardTab; label: string; icon: React.ReactNode }[] = [
-  { id: "overview", label: "Overview", icon: <BarChart3 className="size-3.5" /> },
-  { id: "runs", label: "Runs", icon: <ListChecks className="size-3.5" /> },
-  { id: "messages", label: "Messages", icon: <MessageSquare className="size-3.5" /> },
+const TABS: { id: DashboardTab; label: string }[] = [
+  { id: "overview", label: "Overview" },
+  { id: "runs", label: "Runs" },
+  { id: "messages", label: "Messages" },
 ];
 
 export function DashboardTabBar() {
@@ -15,23 +14,22 @@ export function DashboardTabBar() {
   const setTab = useDashboardStore((s) => s.setTab);
 
   return (
-    <div className="inline-flex items-center gap-0.5 rounded-md bg-muted p-0.5">
+    <nav aria-label="Dashboard sections" className="inline-flex h-full items-stretch gap-6">
       {TABS.map((t) => (
         <button
           key={t.id}
           type="button"
           onClick={() => setTab(t.id)}
           className={cn(
-            "flex items-center gap-1.5 rounded-sm px-2.5 py-1 text-xs font-medium transition-colors",
+            "flex items-center border-b-2 px-0 text-xs font-medium transition-colors",
             t.id === tab
-              ? "bg-background text-foreground shadow-sm"
-              : "text-muted-foreground hover:text-foreground",
+              ? "border-primary text-foreground"
+              : "border-transparent text-muted-foreground hover:text-foreground",
           )}
         >
-          {t.icon}
           {t.label}
         </button>
       ))}
-    </div>
+    </nav>
   );
 }

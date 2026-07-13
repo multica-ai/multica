@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { buildVisualQuery, DEFAULT_ANALYTICS_VISUALS, filtersFromSearchParams, filtersToSearchParams, toggleAnalyticsFilter } from "./analytics";
+import {
+  buildVisualQuery,
+  DEFAULT_ANALYTICS_VISUALS,
+  filtersFromSearchParams,
+  filtersToSearchParams,
+  presentationToVisualKind,
+  toggleAnalyticsFilter,
+  visualPresentationFromDisplay,
+} from "./analytics";
 
 describe("dashboard analytics model", () => {
   it("builds every visual from the canonical analytics contract", () => {
@@ -37,5 +45,15 @@ describe("dashboard analytics model", () => {
     const params = filtersToSearchParams(filters, new URLSearchParams("tab=runs"));
     expect(params.toString()).toBe("tab=runs&provider=openai&exclude.status=failed");
     expect(filtersFromSearchParams(params)).toEqual(filters);
+  });
+
+  it("maps every visual builder presentation onto the persisted visual contract", () => {
+    expect(presentationToVisualKind("line")).toBe("bars");
+    expect(presentationToVisualKind("activity")).toBe("activity");
+    expect(presentationToVisualKind("stacked")).toBe("bars");
+    expect(presentationToVisualKind("table")).toBe("table");
+    expect(presentationToVisualKind("metric")).toBe("table");
+    expect(visualPresentationFromDisplay({ presentation: "metric" }, "table")).toBe("metric");
+    expect(visualPresentationFromDisplay({ presentation: "unknown" }, "activity")).toBe("activity");
   });
 });

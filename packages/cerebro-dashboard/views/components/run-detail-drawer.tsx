@@ -120,7 +120,7 @@ export function RunDetailDrawer({
           <Dl>
             <Row label="Provider" value={str(run.provider) ?? "—"} />
             <Row label="Model" value={str(run.model) ?? "—"} />
-            <Row label="Source" value={source} />
+            <Row label="Runtime" value={str(run.runtime) ?? "—"} />
             <Row label="Duration" value={duration(run.duration_seconds)} />
           </Dl>
         </Section>
@@ -150,6 +150,15 @@ export function RunDetailDrawer({
               ))}
             </Dl>
           )}
+        </Section>
+
+        <Section title="Trace preview">
+          <ol className="space-y-2 border-l border-primary/30 pl-3 text-[11px] text-muted-foreground">
+            <li>Run context loaded</li>
+            {debugLink && <li>Source reference linked</li>}
+            <li>Usage and economics measured</li>
+            <li className={status.toLowerCase() === "completed" ? "text-emerald-600" : "text-foreground"}>Run {status.toLowerCase()}</li>
+          </ol>
         </Section>
 
         {isUrl(trace) ? (

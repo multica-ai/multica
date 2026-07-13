@@ -39,12 +39,11 @@ func BuildSQL(query Query, workspaceID string) (SQLPlan, error) {
 	}
 
 	for _, filter := range query.Filters {
-		expr, ok := filterDimensionSQL[filter.Dimension]
-		if !ok {
-			return SQLPlan{}, fmt.Errorf("analytics: dimension %q is not queryable yet", filter.Dimension)
-		}
 		args = append(args, filter.Values)
-		param := "$" + strconv.Itoa(len(args)) + "::text[]"
+		expr, param, err := filterExpression(filter.Dimension, len(args))
+		if err != nil {
+			return SQLPlan{}, err
+		}
 		switch filter.Operator {
 		case OperatorIn:
 			where = append(where, expr+" = ANY("+param+")")
@@ -141,8 +140,19 @@ func parseOffsetCursor(cursor string) (int, bool) {
 }
 
 var filterDimensionSQL = map[Dimension]string{
-	DimensionPerson: "r.person_label", DimensionAgent: "r.agent_label", DimensionProject: "r.project_label", DimensionSource: "r.source_type", DimensionProvider: "r.provider", DimensionModel: "r.model", DimensionSkill: "sk.skill_name", DimensionStatus: "r.status", DimensionQualityType: "q.measurement_type", DimensionQualityCategory: "q.category", DimensionContext: "ref.reference_kind",
+	DimensionPerson: "r.person_label", DimensionAgent: "r.agent_label", DimensionProject: "r.project_label", DimensionRuntime: "r.runtime_label", DimensionSource: "r.source_type", DimensionProvider: "r.provider", DimensionModel: "r.model", DimensionSkill: "sk.skill_name", DimensionStatus: "r.status", DimensionCostKind: "r.cost_kind", DimensionQualityType: "q.measurement_type", DimensionQualityCategory: "q.category", DimensionContext: "ref.reference_kind",
 	DimensionRun: "r.run_id::text", DimensionSourceID: "r.source_id::text", DimensionReference: "ref.reference_id", DimensionReferenceLabel: "ref.label", DimensionDebugLink: "ref.href", DimensionTrace: "r.trace_id",
+}
+
+func filterExpression(d Dimension, argIndex int) (string, string, error) {
+	if d == DimensionTime {
+		return "r.started_at", "$" + strconv.Itoa(argIndex) + "::timestamptz[]", nil
+	}
+	expr, ok := filterDimensionSQL[d]
+	if !ok {
+		return "", "", fmt.Errorf("analytics: dimension %q is not queryable yet", d)
+	}
+	return expr, "$" + strconv.Itoa(argIndex) + "::text[]", nil
 }
 
 func dimensionSQL(d Dimension, grain Grain, timezone string, args *[]any) (string, error) {
@@ -160,5 +170,5 @@ func dimensionSQL(d Dimension, grain Grain, timezone string, args *[]any) (strin
 }
 
 var metricSQL = map[Metric]string{
-	MetricRuns: "COUNT(DISTINCT r.run_id)::bigint", MetricInputTokens: "SUM(r.input_tokens)::bigint", MetricOutputTokens: "SUM(r.output_tokens)::bigint", MetricCostCents: "SUM(r.cost_cents)::bigint", MetricSavedCents: "SUM(s.saved_cents)::bigint", MetricDurationSeconds: "SUM(r.duration_seconds)::bigint", MetricQualityPassRate: "AVG(CASE WHEN q.verdict IN ('pass','success') THEN 1.0 ELSE 0.0 END)", MetricSkillInvocations: "SUM(sk.invocation_count)::bigint",
+	MetricRuns: "COUNT(DISTINCT r.run_id)::bigint", MetricInputTokens: "SUM(r.input_tokens)::bigint", MetricOutputTokens: "SUM(r.output_tokens)::bigint", MetricCostCents: "SUM(r.cost_cents)::bigint", MetricMissingCostRuns: "COUNT(DISTINCT r.run_id) FILTER (WHERE r.cost_kind = 'missing')::bigint", MetricSavedCents: "SUM(s.saved_cents)::bigint", MetricDurationSeconds: "SUM(r.duration_seconds)::bigint", MetricQualityPassRate: "AVG(CASE WHEN q.verdict IN ('pass','success') THEN 1.0 ELSE 0.0 END)", MetricSkillInvocations: "SUM(sk.invocation_count)::bigint",
 }

@@ -1,8 +1,9 @@
 "use client";
 
 import { useState } from "react";
-import type { AnalyticsCatalog, AnalyticsDimension, AnalyticsQueryResult } from "@multica/cerebro-usage";
+import type { AnalyticsCatalog, AnalyticsDimension, AnalyticsOperator, AnalyticsQueryResult } from "@multica/cerebro-usage";
 import type { AnalyticsFilter, AnalyticsVisual } from "../../core/analytics";
+import { VisualBuilderDrawer } from "./visual-builder-drawer";
 
 type Results = Record<string, AnalyticsQueryResult | undefined>;
 
@@ -11,33 +12,42 @@ interface AnalyticsWorkbenchProps {
   results: Results;
   filters: AnalyticsFilter[];
   onFilter: (dimension: AnalyticsDimension, value: string, operator: "in" | "not_in") => void;
+  onRemoveFilter: (dimension: AnalyticsDimension, value: string, operator: AnalyticsOperator) => void;
   onNext: (visualId: string, cursor: string) => void;
   onPrevious?: (visualId: string) => void;
   canPrevious?: Record<string, boolean>;
   onAddVisual: (visual: AnalyticsVisual) => void;
   onConfigure?: (visual: AnalyticsVisual) => void;
   catalog?: AnalyticsCatalog;
+  showToolbar?: boolean;
+  builderOpen?: boolean;
+  onBuilderOpenChange?: (open: boolean) => void;
 }
 
 const DIMENSIONS = new Set<AnalyticsDimension>([
-  "time", "person", "agent", "project", "source", "provider", "model", "skill", "status", "quality_type", "quality_category", "context", "run", "source_id", "reference", "reference_label",
+  "time", "person", "agent", "project", "runtime", "source", "provider", "model", "skill", "status", "cost_kind", "quality_type", "quality_category", "context", "run", "source_id", "reference", "reference_label",
 ]);
 
-export function AnalyticsWorkbench({ visuals, results, filters, onFilter, onNext, onPrevious, canPrevious = {}, onAddVisual, onConfigure, catalog }: AnalyticsWorkbenchProps) {
-  const [creating, setCreating] = useState(false);
+export function AnalyticsWorkbench({ visuals, results, filters, onFilter, onRemoveFilter, onNext, onPrevious, canPrevious = {}, onAddVisual, onConfigure, catalog, showToolbar = true, builderOpen, onBuilderOpenChange }: AnalyticsWorkbenchProps) {
+  const [internalCreating, setInternalCreating] = useState(false);
   const [editing, setEditing] = useState<AnalyticsVisual | null>(null);
+  const creating = builderOpen ?? internalCreating;
+  const setCreating = (open: boolean) => {
+    if (builderOpen === undefined) setInternalCreating(open);
+    onBuilderOpenChange?.(open);
+  };
   return (
     <div className="space-y-4" aria-label="Analytics workspace">
-      <div className="flex flex-wrap items-center justify-between gap-2 border-b pb-3">
+      {showToolbar && <div className="flex flex-wrap items-center justify-between gap-2 border-b pb-3">
         <div className="flex flex-wrap gap-1.5" aria-label="Active filters">
           {filters.length === 0 ? <span className="text-xs text-muted-foreground">All workspace activity</span> : filters.flatMap((filter) => filter.values.map((value) => (
-            <button key={`${filter.dimension}:${filter.operator}:${value}`} type="button" onClick={() => onFilter(filter.dimension, value, filter.operator)} className="rounded border bg-muted/40 px-2 py-1 text-xs">
+            <button key={`${filter.dimension}:${filter.operator}:${value}`} type="button" onClick={() => onRemoveFilter(filter.dimension, value, filter.operator)} className="rounded border bg-muted/40 px-2 py-1 text-xs">
               {filter.dimension} {filter.operator === "not_in" ? "≠" : "="} {value} ×
             </button>
           )))}
         </div>
         <button type="button" aria-label="New visual" onClick={() => setCreating(true)} className="rounded-md border bg-background px-3 py-1.5 text-xs font-medium hover:bg-muted">New visual</button>
-      </div>
+      </div>}
 
       <div className="grid gap-3 xl:grid-cols-2">
         {visuals.map((visual) => (
@@ -53,8 +63,8 @@ export function AnalyticsWorkbench({ visuals, results, filters, onFilter, onNext
           />
         ))}
       </div>
-      {creating && <VisualDialog catalog={catalog} onClose={() => setCreating(false)} onSave={(visual) => { onAddVisual(visual); setCreating(false); }} />}
-      {editing && <VisualDialog catalog={catalog} initial={editing} onClose={() => setEditing(null)} onSave={(visual) => { onConfigure?.(visual); setEditing(null); }} />}
+      {creating && <div className="fixed bottom-0 right-0 top-12 z-50"><VisualBuilderDrawer catalog={catalog} onClose={() => setCreating(false)} onSave={(visual) => { onAddVisual(visual); setCreating(false); }} /></div>}
+      {editing && <div className="fixed bottom-0 right-0 top-12 z-50"><VisualBuilderDrawer catalog={catalog} initial={editing} onClose={() => setEditing(null)} onSave={(visual) => { onConfigure?.(visual); setEditing(null); }} /></div>}
     </div>
   );
 }
@@ -68,7 +78,13 @@ function VisualBlock({ visual, result, onFilter, onNext, onPrevious, canPrevious
         <div><h2 className="text-sm font-medium">{visual.title}</h2><p className="text-[11px] text-muted-foreground">{visual.metrics.join(" · ")} by {visual.dimensions.join(" · ")}</p></div>
         <button type="button" onClick={() => onConfigure?.(visual)} className="rounded px-2 py-1 text-xs text-muted-foreground hover:bg-muted hover:text-foreground">Configure</button>
       </header>
-      {visual.kind === "activity" ? (
+      {visual.presentation === "metric" ? (
+        <MetricVisual visual={visual} rows={rows} />
+      ) : visual.presentation === "line" ? (
+        <LineVisual visual={visual} rows={rows} />
+      ) : visual.presentation === "stacked" ? (
+        <BarVisual visual={visual} rows={rows} onFilter={onFilter} />
+      ) : visual.kind === "activity" ? (
         <div className="grid grid-cols-7 gap-1 p-4" aria-label="Activity grid">
           {rows.map((row, index) => {
             const runs = numeric(row.runs);
@@ -92,20 +108,55 @@ function VisualBlock({ visual, result, onFilter, onNext, onPrevious, canPrevious
   );
 }
 
-function VisualDialog({ initial, catalog, onClose, onSave }: { initial?: AnalyticsVisual; catalog?: AnalyticsCatalog; onClose: () => void; onSave: (visual: AnalyticsVisual) => void }) {
-  const [title, setTitle] = useState(initial?.title ?? "Untitled visual");
-  const [kind, setKind] = useState<AnalyticsVisual["kind"]>(initial?.kind ?? "table");
-  const [metric, setMetric] = useState(initial?.metrics[0] ?? catalog?.metrics[0] ?? "runs");
-  const [dimension, setDimension] = useState(initial?.dimensions[0] ?? catalog?.dimensions[0] ?? "time");
-  const [grain, setGrain] = useState(initial?.grain ?? "day");
-  const metrics = catalog?.metrics.length ? catalog.metrics : ["runs", "cost_cents", "saved_cents", "quality_pass_rate"] as const;
-  const dimensions = catalog?.dimensions.length ? catalog.dimensions : ["time", "person", "project", "source", "provider", "model", "skill", "status", "quality_category", "context", "run", "reference_label", "debug_link", "trace"] as const;
-  const grains = catalog?.grains.length ? catalog.grains : ["hour", "day", "week", "month"] as const;
-  const submitLabel = initial ? "Save visual" : "Create visual";
-  return <div role="dialog" aria-label={initial ? "Configure visual" : "New visual"} className="fixed inset-0 z-50 grid place-items-center bg-black/20 p-4"><form onSubmit={(event) => { event.preventDefault(); onSave({ id: initial?.id ?? `custom-${Date.now()}`, title, kind, metrics: [metric], dimensions: [dimension], grain: dimension === "time" ? grain : "none", limit: initial?.limit ?? 12 }); }} className="w-full max-w-md space-y-4 rounded-lg border bg-background p-5 shadow-lg"><div><h2 className="font-medium">{initial ? "Configure visual" : "New visual"}</h2><p className="text-xs text-muted-foreground">Build from the same metrics and filters as every Dashboard block.</p></div><label className="block text-xs font-medium">Visual title<input aria-label="Visual title" value={title} onChange={(event) => setTitle(event.target.value)} className="mt-1 w-full rounded border bg-muted/30 px-3 py-2 font-normal" /></label><div className="grid grid-cols-2 gap-3"><Select label="Visual type" value={kind} values={["table", "bars", "activity"]} onChange={(value) => setKind(value as AnalyticsVisual["kind"])} /><Select label="Metric" value={metric} values={metrics} onChange={(value) => setMetric(value as typeof metric)} /><Select label="Dimension" value={dimension} values={dimensions} onChange={(value) => setDimension(value as typeof dimension)} /><Select label="Grain" value={grain} values={grains} onChange={(value) => setGrain(value as typeof grain)} /></div><div className="flex justify-end gap-2"><button type="button" onClick={onClose} className="rounded px-3 py-2 text-xs">Cancel</button><button type="submit" className="rounded bg-primary px-3 py-2 text-xs text-primary-foreground">{submitLabel}</button></div></form></div>;
+function MetricVisual({ visual, rows }: { visual: AnalyticsVisual; rows: Record<string, unknown>[] }) {
+  const metric = visual.metrics[0];
+  return (
+    <div className="p-6">
+      <p className="text-[10px] uppercase tracking-wide text-muted-foreground">{metric?.replaceAll("_", " ")}</p>
+      <p className="mt-2 font-mono text-3xl font-semibold">{formatValue(metric ? rows[0]?.[metric] : 0)}</p>
+    </div>
+  );
 }
 
-function Select({ label, value, values, onChange }: { label: string; value: string; values: readonly string[]; onChange: (value: string) => void }) { return <label className="block text-xs font-medium">{label}<select aria-label={label} value={value} onChange={(event) => onChange(event.target.value)} className="mt-1 w-full rounded border bg-muted/30 px-3 py-2 font-normal">{values.map((item) => <option key={item} value={item}>{item.replaceAll("_", " ")}</option>)}</select></label>; }
+function LineVisual({ visual, rows }: { visual: AnalyticsVisual; rows: Record<string, unknown>[] }) {
+  const metric = visual.metrics[0];
+  const values = rows.map((row) => numeric(metric ? row[metric] : 0));
+  const max = Math.max(1, ...values);
+  const points = values.map((value, index) => {
+    const x = values.length <= 1 ? 50 : (index / (values.length - 1)) * 100;
+    const y = 38 - (value / max) * 34;
+    return `${x},${y}`;
+  }).join(" ");
+  return (
+    <figure className="p-4" aria-label={`${visual.title} chart`} role="img">
+      <svg viewBox="0 0 100 42" className="h-40 w-full overflow-visible text-primary" preserveAspectRatio="none">
+        <path d="M0 39H100" className="stroke-border" strokeWidth="0.4" />
+        <polyline points={points} fill="none" stroke="currentColor" strokeWidth="1.4" vectorEffect="non-scaling-stroke" />
+      </svg>
+    </figure>
+  );
+}
+
+function BarVisual({ visual, rows, onFilter }: { visual: AnalyticsVisual; rows: Record<string, unknown>[]; onFilter: AnalyticsWorkbenchProps["onFilter"] }) {
+  const metric = visual.metrics[0];
+  const dimension = visual.dimensions[0];
+  const max = Math.max(1, ...rows.map((row) => numeric(metric ? row[metric] : 0)));
+  return (
+    <div className="space-y-2 p-4">
+      {rows.map((row, index) => {
+        const value = numeric(metric ? row[metric] : 0);
+        const dimensionValue = dimension ? String(row[dimension] ?? "Unknown") : `Row ${index + 1}`;
+        return (
+          <button key={`${dimensionValue}:${index}`} type="button" onClick={() => dimension && onFilter(dimension, dimensionValue, "in")} className="grid w-full grid-cols-[110px_1fr_50px] items-center gap-3 text-left text-xs">
+            <span className="truncate text-muted-foreground">{dimensionValue}</span>
+            <span className="h-2 overflow-hidden rounded bg-muted"><span className="block h-full rounded bg-primary" style={{ width: `${(value / max) * 100}%` }} /></span>
+            <span className="text-right font-mono">{formatValue(value)}</span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
 
 function numeric(value: unknown): number { return typeof value === "number" ? value : Number(value) || 0; }
 function formatValue(value: unknown): string { if (value == null || value === "") return "Unknown"; if (typeof value === "number") return new Intl.NumberFormat("en", { maximumFractionDigits: 2 }).format(value); return String(value); }

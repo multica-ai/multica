@@ -7,24 +7,52 @@ import type {
 } from "@multica/cerebro-usage";
 
 export type AnalyticsVisualKind = "activity" | "table" | "bars";
+export type AnalyticsVisualPresentation = "line" | "activity" | "stacked" | "table" | "metric";
 
 export interface AnalyticsVisual {
   id: string;
   title: string;
   kind: AnalyticsVisualKind;
+  presentation?: AnalyticsVisualPresentation;
   metrics: AnalyticsMetric[];
   dimensions: AnalyticsDimension[];
   grain: AnalyticsGrain;
   limit: number;
 }
 
+const VISUAL_PRESENTATIONS = new Set<AnalyticsVisualPresentation>([
+  "line",
+  "activity",
+  "stacked",
+  "table",
+  "metric",
+]);
+
+export function presentationToVisualKind(presentation: AnalyticsVisualPresentation): AnalyticsVisualKind {
+  if (presentation === "activity") return "activity";
+  if (presentation === "table" || presentation === "metric") return "table";
+  return "bars";
+}
+
+export function visualPresentationFromDisplay(
+  display: Record<string, unknown> | undefined,
+  fallbackKind: AnalyticsVisualKind,
+): AnalyticsVisualPresentation {
+  const presentation = display?.presentation;
+  if (typeof presentation === "string" && VISUAL_PRESENTATIONS.has(presentation as AnalyticsVisualPresentation)) {
+    return presentation as AnalyticsVisualPresentation;
+  }
+  return fallbackKind === "bars" ? "stacked" : fallbackKind;
+}
+
 export type AnalyticsFilter = {
   dimension: AnalyticsDimension;
-  operator: Extract<AnalyticsOperator, "in" | "not_in">;
+  operator: AnalyticsOperator;
   values: string[];
 };
 
-const FILTER_DIMENSIONS: AnalyticsDimension[] = ["person", "agent", "project", "source", "provider", "model", "skill", "status", "quality_type", "quality_category", "context", "run", "source_id", "reference", "reference_label", "trace"];
+const FILTER_DIMENSIONS: AnalyticsDimension[] = ["time", "person", "agent", "project", "runtime", "source", "provider", "model", "skill", "status", "cost_kind", "quality_type", "quality_category", "context", "run", "source_id", "reference", "reference_label", "trace"];
+const RANGE_OPERATORS: Extract<AnalyticsOperator, "gte" | "lte">[] = ["gte", "lte"];
 
 export const DEFAULT_ANALYTICS_VISUALS: AnalyticsVisual[] = [
   { id: "activity", title: "Activity", kind: "activity", metrics: ["runs", "cost_cents", "saved_cents"], dimensions: ["time"], grain: "day", limit: 42 },
@@ -59,7 +87,7 @@ export function toggleAnalyticsFilter(
   filters: AnalyticsFilter[],
   dimension: AnalyticsDimension,
   value: string,
-  operator: AnalyticsFilter["operator"],
+  operator: Extract<AnalyticsOperator, "in" | "not_in">,
 ): AnalyticsFilter[] {
   const opposite = operator === "in" ? "not_in" : "in";
   const withoutOpposite = filters
@@ -83,6 +111,21 @@ export function toggleAnalyticsFilter(
     .filter((filter) => filter.values.length > 0);
 }
 
+export function removeAnalyticsFilterValue(
+  filters: AnalyticsFilter[],
+  dimension: AnalyticsDimension,
+  value: string,
+  operator: AnalyticsOperator,
+): AnalyticsFilter[] {
+  return filters
+    .map((filter) =>
+      filter.dimension === dimension && filter.operator === operator
+        ? { ...filter, values: filter.values.filter((item) => item !== value) }
+        : filter,
+    )
+    .filter((filter) => filter.values.length > 0);
+}
+
 export function filtersFromSearchParams(params: URLSearchParams): AnalyticsFilter[] {
   const filters: AnalyticsFilter[] = [];
   for (const dimension of FILTER_DIMENSIONS) {
@@ -90,6 +133,10 @@ export function filtersFromSearchParams(params: URLSearchParams): AnalyticsFilte
     const exclude = [...new Set(params.getAll(`exclude.${dimension}`))].sort();
     if (include.length) filters.push({ dimension, operator: "in", values: include });
     if (exclude.length) filters.push({ dimension, operator: "not_in", values: exclude });
+    for (const operator of RANGE_OPERATORS) {
+      const values = [...new Set(params.getAll(`${dimension}.${operator}`))].sort();
+      if (values.length) filters.push({ dimension, operator, values });
+    }
   }
   return filters;
 }
@@ -99,9 +146,15 @@ export function filtersToSearchParams(filters: AnalyticsFilter[], current = new 
   for (const dimension of FILTER_DIMENSIONS) {
     params.delete(dimension);
     params.delete(`exclude.${dimension}`);
+    for (const operator of RANGE_OPERATORS) params.delete(`${dimension}.${operator}`);
   }
   for (const filter of filters) {
-    const key = filter.operator === "not_in" ? `exclude.${filter.dimension}` : filter.dimension;
+    const key =
+      filter.operator === "not_in"
+        ? `exclude.${filter.dimension}`
+        : filter.operator === "gte" || filter.operator === "lte"
+          ? `${filter.dimension}.${filter.operator}`
+          : filter.dimension;
     filter.values.forEach((value) => params.append(key, value));
   }
   return params;

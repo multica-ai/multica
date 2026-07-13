@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useCurrentWorkspace } from "@multica/core/paths";
 import { useFeatureFlag } from "@multica/cerebro-feature-flags";
@@ -25,7 +26,7 @@ import { useDashboardStore } from "../core/store";
 import { dashboardOverviewOptions } from "../core/queries";
 import { AnalyticsDashboard } from "./components/analytics-dashboard";
 import { RunsControlRoom } from "./components/runs-control-room";
-import { DEFAULT_ANALYTICS_VISUALS } from "../core/analytics";
+import { DEFAULT_ANALYTICS_VISUALS, filtersFromSearchParams, type AnalyticsFilter } from "../core/analytics";
 
 // Workspace operations dashboard. JEH-684. v2 — replaces the v1 placeholder
 // version with a single /api/cerebro/dashboard overview query that drives
@@ -41,6 +42,10 @@ export function DashboardPage() {
   const actorName = useDashboardStore((s) => s.actorName);
   const tab = useDashboardStore((s) => s.tab);
   const setActor = useDashboardStore((s) => s.setActor);
+  const [visualBuilderOpen, setVisualBuilderOpen] = useState(false);
+  const [analyticsFilters, setAnalyticsFilters] = useState<AnalyticsFilter[]>(() =>
+    typeof window === "undefined" ? [] : filtersFromSearchParams(new URLSearchParams(window.location.search)),
+  );
   const wsId = workspace?.id ?? "";
   const overview = useQuery(dashboardOverviewOptions(wsId, range, scope, actorId));
 
@@ -58,20 +63,21 @@ export function DashboardPage() {
 
   return (
     <div className="flex h-full flex-col">
-      <PageHeader className="justify-start gap-3">
+      <PageHeader className="justify-between gap-3">
         <div className="flex shrink-0 items-center gap-3">
           <div className="flex min-w-0 flex-col">
             <h1 className="text-sm font-semibold">Dashboard</h1>
             <p className="truncate text-[11px] text-muted-foreground">
               {data
-                ? `${formatPeriodLabel(data.period_start, data.period_end)} — ${actorName ?? scopeLabel(scope)}`
+                ? tab === "runs"
+                  ? `Workspace operations · ${formatPeriodLabel(data.period_start, data.period_end)}`
+                  : `${formatPeriodLabel(data.period_start, data.period_end)} — ${actorName ?? scopeLabel(scope)}`
                 : "Loading overview…"}
             </p>
           </div>
-          <DashboardTabBar />
         </div>
         <div className="flex shrink-0 items-center gap-2">
-          {actorId && (
+          {tab !== "runs" && actorId && (
             <button
               type="button"
               onClick={() => setActor(null)}
@@ -80,15 +86,16 @@ export function DashboardPage() {
               {actorName ?? "Actor"} x
             </button>
           )}
-          <ActorTabs />
-          <TimeRangePicker />
+          {tab !== "runs" && <ActorTabs />}
+          {tab !== "runs" && <TimeRangePicker />}
+          <DashboardTabBar />
         </div>
       </PageHeader>
 
       {tab === "messages" && <ActorMessagePanel wsId={workspace.id} workspaceSlug={workspace.slug} />}
 
       <div className="flex-1 min-h-0 overflow-y-auto">
-        <div className="flex flex-col gap-6 p-6">
+        <div className={tab === "runs" ? "flex min-h-full flex-col" : "flex flex-col gap-6 p-6"}>
           {overview.isError && (
             <p className="text-xs text-destructive">
               Failed to load dashboard:{" "}
@@ -98,7 +105,12 @@ export function DashboardPage() {
 
           {tab === "overview" && (
             <>
-              <AnalyticsDashboard workspaceId={workspace.id} initialVisuals={DEFAULT_ANALYTICS_VISUALS.filter((visual) => visual.id !== "runs")} />
+              <AnalyticsDashboard
+                workspaceId={workspace.id}
+                initialVisuals={DEFAULT_ANALYTICS_VISUALS.filter((visual) => visual.id !== "runs")}
+                filters={analyticsFilters}
+                onFiltersChange={setAnalyticsFilters}
+              />
 
               <section aria-label="KPIs">
                 <KpiCards
@@ -143,11 +155,26 @@ export function DashboardPage() {
 
           {tab === "runs" && (
             <>
-              <RunsControlRoom workspaceId={workspace.id} />
-              <section aria-label="Custom visuals" className="space-y-2">
-                <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Custom visuals</h2>
-                <AnalyticsDashboard workspaceId={workspace.id} initialVisuals={[]} />
-              </section>
+              <div className={visualBuilderOpen ? "pr-[350px]" : undefined}>
+                <RunsControlRoom
+                  workspaceId={workspace.id}
+                  filters={analyticsFilters}
+                  onFiltersChange={setAnalyticsFilters}
+                  onNewVisual={() => setVisualBuilderOpen(true)}
+                  onRunPanelOpen={() => setVisualBuilderOpen(false)}
+                />
+              </div>
+              <div className={`px-6 pb-6 ${visualBuilderOpen ? "pr-[374px]" : ""}`}>
+                <AnalyticsDashboard
+                  workspaceId={workspace.id}
+                  initialVisuals={[]}
+                  filters={analyticsFilters}
+                  onFiltersChange={setAnalyticsFilters}
+                  showToolbar={false}
+                  builderOpen={visualBuilderOpen}
+                  onBuilderOpenChange={setVisualBuilderOpen}
+                />
+              </div>
             </>
           )}
 
