@@ -10,6 +10,7 @@ import {
 import { useConfigStore } from "@multica/core/config";
 import type { Attachment as AttachmentRecord } from "@multica/core/types";
 import { useWorkspacePaths } from "@multica/core/paths";
+import { MENTION_TYPE_REGISTRY } from "@multica/core/mention";
 import { IssueMentionCard } from "../issues/components/issue-mention-card";
 import { useResolveIssueIdentifier } from "../issues/hooks";
 import { ProjectChip } from "../projects/components/project-chip";
@@ -60,6 +61,10 @@ function AutolinkedIssueMention({ identifier }: { identifier: string }): React.R
   return <IssueMentionCard issueId={issue.id} fallbackLabel={identifier} />;
 }
 
+/**
+ * Default renderMention that delegates to entity chips for issue/project mentions
+ * and renders a styled span for other registered mention types.
+ */
 function defaultRenderMention({
   type,
   id,
@@ -67,6 +72,8 @@ function defaultRenderMention({
   type: string;
   id: string;
 }): React.ReactNode {
+  // Registry-driven dispatch. Issue has special autolink identifier handling;
+  // project gets a dedicated chip; other registered types get a generic span.
   if (type === "issue") {
     // A bare identifier (from the autolink preprocessor) is carried as the id
     // segment; a real mention carries a UUID. Dispatch on the id shape.
@@ -77,6 +84,15 @@ function defaultRenderMention({
   }
   if (type === "project") {
     return <ProjectMentionCard projectId={id} />;
+  }
+  // Other registered mention types (member, agent, squad, all, skill, etc.)
+  // get a generic styled mention span.
+  if (type in MENTION_TYPE_REGISTRY) {
+    return (
+      <span className="text-primary font-semibold mx-0.5">
+        @{id}
+      </span>
+    );
   }
   return null;
 }
