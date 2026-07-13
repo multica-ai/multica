@@ -10,6 +10,11 @@ import { renderWithI18n } from "../../test/i18n";
 // Capture every queryKey passed to useQuery. queryOptions() inside the
 // dashboard options builders runs for real, so the key is the production key.
 const queryKeys = vi.hoisted(() => [] as unknown[][]);
+const dashboardDataRef = vi.hoisted(() => ({ current: false }));
+
+function todayIso() {
+  return new Date().toISOString().slice(0, 10);
+}
 
 vi.mock("@tanstack/react-query", async () => {
   const actual =
@@ -20,6 +25,43 @@ vi.mock("@tanstack/react-query", async () => {
     ...actual,
     useQuery: (opts: { queryKey: unknown[] }) => {
       queryKeys.push(opts.queryKey);
+      if (dashboardDataRef.current) {
+        const kind = opts.queryKey[2];
+        const data =
+          kind === "daily"
+            ? [
+                {
+                  date: todayIso(),
+                  provider: "anthropic",
+                  model: "claude-sonnet-4-6",
+                  input_tokens: 1_000,
+                  output_tokens: 2_000,
+                  cache_read_tokens: 0,
+                  cache_write_tokens: 0,
+                  task_count: 2,
+                },
+              ]
+            : kind === "agent-runtime"
+              ? [
+                  {
+                    agent_id: "agent-1",
+                    total_seconds: 3 * 3_600 + 17 * 60,
+                    task_count: 12,
+                    failed_count: 1,
+                  },
+                ]
+              : kind === "runtime-daily"
+                ? [
+                    {
+                      date: todayIso(),
+                      total_seconds: 3 * 3_600 + 17 * 60,
+                      task_count: 12,
+                      failed_count: 1,
+                    },
+                  ]
+                : [];
+        return { data, isLoading: false, isSuccess: true };
+      }
       return { data: undefined, isLoading: true };
     },
   };
@@ -56,6 +98,7 @@ import { DashboardPage } from "./dashboard-page";
 describe("DashboardPage — viewing timezone drives the query key", () => {
   beforeEach(() => {
     queryKeys.length = 0;
+    dashboardDataRef.current = false;
     cleanup();
   });
 
@@ -96,5 +139,28 @@ describe("DashboardPage — viewing timezone drives the query key", () => {
     for (let i = 0; i < utcKeys.length; i++) {
       expect(utcKeys[i]).not.toEqual(tokyoKeys[i]);
     }
+  });
+
+  it("renders every workspace KPI as an animated number", () => {
+    dashboardDataRef.current = true;
+    tzRef.current = "UTC";
+
+    const { container } = renderWithI18n(<DashboardPage />);
+    const flows = Array.from(
+      container.querySelectorAll("number-flow-react"),
+    );
+
+    expect(flows).toHaveLength(5);
+    expect(flows.map((flow) => flow.getAttribute("aria-label"))).toEqual(
+      expect.arrayContaining(["$0.03", "3K", "12"]),
+    );
+    expect(container).toHaveTextContent("3h 17m");
+    expect(
+      flows.every(
+        (flow) =>
+          (flow as HTMLElement & { respectMotionPreference?: boolean })
+            .respectMotionPreference === true,
+      ),
+    ).toBe(true);
   });
 });

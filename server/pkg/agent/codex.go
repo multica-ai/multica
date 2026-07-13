@@ -2,7 +2,6 @@ package agent
 
 import (
 	"bufio"
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -128,14 +127,7 @@ func buildCodexArgs(opts ExecOptions, logger *slog.Logger) []string {
 // managed set — strict mode, no global fallback); only SQL NULL or the
 // literal JSON `null` count as absent (CLI default).
 func hasManagedCodexMcpConfig(raw json.RawMessage) bool {
-	trimmed := bytes.TrimSpace(raw)
-	if len(trimmed) == 0 {
-		return false
-	}
-	if bytes.Equal(trimmed, []byte("null")) {
-		return false
-	}
-	return true
+	return hasManagedMcpConfig(raw)
 }
 
 // codexManagedMcpConfigKeyRe matches the daemon-managed config namespace

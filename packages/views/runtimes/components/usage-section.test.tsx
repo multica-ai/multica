@@ -58,13 +58,28 @@ vi.mock("@tanstack/react-query", async () => {
     await vi.importActual<typeof import("@tanstack/react-query")>(
       "@tanstack/react-query",
     );
+  const dateDaysAgo = (days: number) => {
+    const date = new Date();
+    date.setUTCDate(date.getUTCDate() - days);
+    return date.toISOString().slice(0, 10);
+  };
   const usageRows = [
     {
       runtime_id: "r-1",
-      date: "2026-05-19",
+      date: dateDaysAgo(0),
       provider: "anthropic",
       model: "claude-sonnet-4-6",
       input_tokens: 1_000,
+      output_tokens: 0,
+      cache_read_tokens: 0,
+      cache_write_tokens: 0,
+    },
+    {
+      runtime_id: "r-1",
+      date: dateDaysAgo(15),
+      provider: "anthropic",
+      model: "claude-sonnet-4-6",
+      input_tokens: 2_000,
       output_tokens: 0,
       cache_read_tokens: 0,
       cache_write_tokens: 0,
@@ -145,5 +160,24 @@ describe("UsageSection — Viewing timezone wiring", () => {
     fireEvent.click(screen.getByRole("button", { name: "Heatmap" }));
 
     expect(screen.getByTestId("heatmap-tz").textContent).toBe(VIEWER_TZ);
+  });
+
+  it("renders KPI values with NumberFlow and updates them when the period changes", () => {
+    render(<UsageSection runtime={RUNTIME} />, { wrapper: Wrapper });
+
+    const flows = Array.from(document.querySelectorAll("number-flow-react"));
+    expect(flows).toHaveLength(3);
+    expect(flows.at(-1)).toHaveAttribute("aria-label", "3K");
+    expect(
+      flows.every(
+        (flow) =>
+          (flow as HTMLElement & { respectMotionPreference?: boolean })
+            .respectMotionPreference === true,
+      ),
+    ).toBe(true);
+
+    fireEvent.click(screen.getByRole("button", { name: "7d" }));
+
+    expect(flows.at(-1)).toHaveAttribute("aria-label", "1K");
   });
 });

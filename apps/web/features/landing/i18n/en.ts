@@ -294,6 +294,30 @@ export function createEnDict(allowSignup: boolean): LandingDict {
     },
     entries: [
       {
+        version: "0.3.43",
+        date: "2026-07-10",
+        title: "New Codex models, issue-key autolinks, and avatar cropping",
+        changes: [],
+        features: [
+          "You can now run your agents on the new Codex gpt-5.6 models — Sol, Terra, and Luna.",
+          "Type or paste an issue key like MUL-123 and it turns into a clickable issue link on its own.",
+          "When you upload an avatar, you can now crop, zoom, and rotate it before saving.",
+          "When an agent ends without a text reply, chat now shows a clear no-reply note instead of a blank message.",
+          "Mention a busy agent across several separate comment threads and each thread now gets its own answer.",
+        ],
+        improvements: [
+          "Agent, squad, and workspace avatars are now round everywhere, matching your member avatar.",
+          "Changing the status of several sub-issues at once now applies right away, without a needless confirm step.",
+          "A chat message you send while an agent is still replying is now picked up by its next reply, never missed.",
+          "The background service on your machine keeps its own log small, so it can no longer fill up your disk.",
+        ],
+        fixes: [
+          "Linking a Lark bot now works even when your computer's clock is slightly off from the server.",
+          "Cursor agents now pick up their connected tools correctly again.",
+          "A Claude agent session that stalled while resuming now recovers and keeps going.",
+        ],
+      },
+      {
         version: "0.3.42",
         date: "2026-07-09",
         title: "A dedicated Chat tab, plus reliability fixes",

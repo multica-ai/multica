@@ -347,7 +347,7 @@ describe("AgentCreatePanel", () => {
     await user.type(editor, "New agent prompt");
     expect(mockSetPrompt).toHaveBeenLastCalledWith("New agent prompt");
 
-    await user.click(screen.getByRole("button", { name: /^Create \(/i }));
+    await user.click(screen.getByRole("button", { name: /^Create$/i }));
 
     await waitFor(() => {
       expect(mockQuickCreateIssue).toHaveBeenCalledWith({
@@ -385,7 +385,7 @@ describe("AgentCreatePanel", () => {
       },
     });
 
-    await user.click(screen.getByRole("button", { name: /^Create \(/i }));
+    await user.click(screen.getByRole("button", { name: /^Create$/i }));
 
     await waitFor(() => {
       expect(mockQuickCreateIssue).toHaveBeenCalledWith({
@@ -421,7 +421,7 @@ describe("AgentCreatePanel", () => {
     await user.clear(editor);
     await user.type(editor, "Investigate the regression");
 
-    await user.click(screen.getByRole("button", { name: /^Create \(/i }));
+    await user.click(screen.getByRole("button", { name: /^Create$/i }));
 
     await waitFor(() => {
       expect(mockQuickCreateIssue).toHaveBeenCalledWith({
@@ -506,7 +506,7 @@ describe("AgentCreatePanel", () => {
     await user.clear(editor);
     await user.type(editor, "Investigate the regression");
 
-    await user.click(screen.getByRole("button", { name: /^Create \(/i }));
+    await user.click(screen.getByRole("button", { name: /^Create$/i }));
 
     await waitFor(() => {
       expect(mockQuickCreateIssue).toHaveBeenCalledWith({

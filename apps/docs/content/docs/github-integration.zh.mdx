@@ -20,6 +20,19 @@ import { Callout } from "fumadocs-ui/components/callout";
 
 只镜像 PR 本身。Commit、没开 PR 的分支、CI 检查状态都**不**入库——集成有意保持窄边界。
 
+## 多个工作区
+
+同一个 GitHub App installation 可以同时连接到**多个**工作区——比如同一组织下不同团队各自用独立工作区。此时每个已连接的工作区都会**各自独立**收到每个仓库的 `pull_request` 事件：
+
+- 每个工作区各自镜像 PR，并按**自己的** [issue 前缀](/workspaces) 和 GitHub 功能开关做自动关联。一个同时引用 `MUL-1` 和 `ENG-2` 的 PR，会在前缀为 `MUL` 的工作区关联 `MUL-1`、在前缀为 `ENG` 的工作区关联 `ENG-2`，两边互不可见对方的 issue。
+- 从某个工作区断开连接，只会让**该**工作区停止接收事件，其它工作区照常工作。
+
+仓库范围由你授予 GitHub App 的权限决定（全部仓库或指定子集）。在工作区连接这个 installation 本身就是一次订阅——Multica 里不需要再单独逐仓库勾选。
+
+<Callout type="warning">
+**升级 self-host 部署时注意：** 事件投递以 GitHub 连接为准，而不是工作区的代码仓库列表。如果某个工作区之前是在**没有**连接 GitHub 的情况下、仅靠代码仓库列表里登记该仓库来接收 PR 事件，升级后它将不再收到事件。要恢复投递，需在该工作区的 **Settings → GitHub** 里**连接同一个 GitHub installation**。
+</Callout>
+
 ## 编号是怎么匹配的
 
 Webhook 从三个字段抽取编号，顺序是：**PR head 分支** → **PR 标题** → **PR 正文**。匹配规则：

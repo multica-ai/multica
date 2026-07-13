@@ -196,6 +196,18 @@ func (q *Queries) DeleteStaleOfflineRuntimes(ctx context.Context, staleSeconds f
 	return items, nil
 }
 
+const deleteSystemAgentsByRuntime = `-- name: DeleteSystemAgentsByRuntime :exec
+DELETE FROM agent WHERE runtime_id = $1 AND kind = 'system'
+`
+
+// System agents are invisible execution infrastructure (for example the Agent
+// Builder). Remove them before deleting their runtime so the RESTRICT runtime
+// FK cannot block an otherwise dependency-free delete.
+func (q *Queries) DeleteSystemAgentsByRuntime(ctx context.Context, runtimeID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteSystemAgentsByRuntime, runtimeID)
+	return err
+}
+
 const failTasksForOfflineRuntimes = `-- name: FailTasksForOfflineRuntimes :many
 UPDATE agent_task_queue
 SET status = 'failed', completed_at = now(), error = 'runtime went offline',

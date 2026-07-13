@@ -1,5 +1,12 @@
-import { describe, expect, it, vi, beforeEach } from "vitest";
-import { render, fireEvent, within } from "@testing-library/react";
+import { afterAll, describe, expect, it, vi, beforeEach } from "vitest";
+import {
+  render,
+  renderHook,
+  fireEvent,
+  waitFor,
+  within,
+} from "@testing-library/react";
+import { useScrollFade } from "@multica/ui/hooks/use-scroll-fade";
 
 type MockTab = {
   id: string;
@@ -22,6 +29,7 @@ const state = vi.hoisted(() => ({
   } as Record<string, { activeTabId: string; tabs: MockTab[] }>,
   togglePin: vi.fn<(tabId: string) => void>(),
   closeTab: vi.fn<(tabId: string) => void>(),
+  closeOtherTabs: vi.fn<(tabId: string) => void>(),
   setActiveTab: vi.fn<(tabId: string) => void>(),
   moveTab: vi.fn<(from: number, to: number) => void>(),
   addTab: vi.fn<(path: string, title: string, icon: string) => string>(),
@@ -37,6 +45,7 @@ vi.mock("@/stores/tab-store", () => {
     },
     togglePin: state.togglePin,
     closeTab: state.closeTab,
+    closeOtherTabs: state.closeOtherTabs,
     setActiveTab: state.setActiveTab,
     moveTab: state.moveTab,
     addTab: state.addTab,
@@ -77,12 +86,35 @@ function reset() {
   };
   state.togglePin.mockReset();
   state.closeTab.mockReset();
+  state.closeOtherTabs.mockReset();
   state.setActiveTab.mockReset();
   state.moveTab.mockReset();
   state.addTab.mockReset();
 }
 
-beforeEach(reset);
+beforeEach(() => {
+  reset();
+  vi.stubGlobal("matchMedia", (query: string) => ({
+    matches: false,
+    media: query,
+    onchange: null,
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+    addListener: vi.fn(),
+    removeListener: vi.fn(),
+    dispatchEvent: vi.fn(),
+  }));
+  vi.stubGlobal(
+    "ResizeObserver",
+    class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    },
+  );
+});
+
+afterAll(() => vi.unstubAllGlobals());
 
 describe("TabBar hover action buttons", () => {
   it("renders a Pin button on every unpinned tab and an Unpin button on every pinned tab", () => {
@@ -148,4 +180,235 @@ describe("TabBar hover action buttons", () => {
     expect(unpinnedTab.querySelector(".lucide-list-todo.size-3\\.5")).toBeTruthy();
     expect(unpinnedTab.querySelector(".lucide-pin.size-3\\.5")).toBeNull();
   });
+});
+
+describe("TabBar overflow", () => {
+  it("keeps tabs readable in a bounded horizontal scroller", () => {
+    state.byWorkspace.acme.tabs = Array.from({ length: 8 }, (_, index) => ({
+      id: `t${index}`,
+      path: `/acme/tab-${index}`,
+      title: `Tab ${index}`,
+      icon: "ListTodo",
+      pinned: index === 0,
+    }));
+
+    const { container, getByLabelText } = render(<TabBar />);
+    const tabBar = container.firstElementChild;
+    const tabScroller = container.querySelector("[data-tab-scroll-container]");
+
+    expect(tabBar).toHaveClass("min-w-0", "max-w-full");
+    expect(tabScroller).toHaveClass(
+      "min-w-0",
+      "no-scrollbar",
+      "overflow-x-auto",
+      "overflow-y-hidden",
+    );
+    expect(getByLabelText("Tab 1").closest("[data-tab-frame]")).toHaveClass(
+      "w-40",
+      "min-w-32",
+    );
+
+    const newTabButton = getByLabelText("New tab");
+    expect(tabScroller).not.toContainElement(newTabButton);
+  });
+
+  it("uses a directional mask instead of a visible scrollbar", async () => {
+    const tabScroller = document.createElement("div");
+    Object.defineProperties(tabScroller, {
+      clientWidth: { configurable: true, value: 320 },
+      scrollWidth: { configurable: true, value: 960 },
+    });
+    const tabScrollRef = { current: tabScroller };
+    const { result } = renderHook(() =>
+      useScrollFade(tabScrollRef, 24, "horizontal"),
+    );
+
+    tabScroller.scrollLeft = 0;
+    fireEvent.scroll(tabScroller);
+
+    await waitFor(() => {
+      expect(result.current?.maskImage).toBe(
+        "linear-gradient(to right, black 0%, black calc(100% - 24px), transparent 100%)",
+      );
+    });
+
+    tabScroller.scrollLeft = 240;
+    fireEvent.scroll(tabScroller);
+
+    await waitFor(() => {
+      expect(result.current?.maskImage).toBe(
+        "linear-gradient(to right, transparent 0%, black 24px, black calc(100% - 24px), transparent 100%)",
+      );
+    });
+  });
+
+  it("scrolls only the tab strip when the active tab moves out of view", () => {
+    state.byWorkspace.acme.tabs = Array.from({ length: 6 }, (_, index) => ({
+      id: `t${index}`,
+      path: `/acme/tab-${index}`,
+      title: `Tab ${index}`,
+      icon: "ListTodo",
+      pinned: false,
+    }));
+    state.byWorkspace.acme.activeTabId = "t0";
+
+    const { container, getByLabelText, rerender } = render(<TabBar />);
+    const tabScroller = container.querySelector(
+      "[data-tab-scroll-container]",
+    ) as HTMLDivElement;
+    const lastTab = getByLabelText("Tab 5");
+
+    vi.spyOn(tabScroller, "getBoundingClientRect").mockReturnValue({
+      left: 100,
+      right: 420,
+    } as DOMRect);
+    vi.spyOn(lastTab, "getBoundingClientRect").mockReturnValue({
+      left: 450,
+      right: 578,
+    } as DOMRect);
+    Object.defineProperties(tabScroller, {
+      clientWidth: { configurable: true, value: 320 },
+      scrollWidth: { configurable: true, value: 960 },
+    });
+    tabScroller.scrollLeft = 40;
+
+    state.byWorkspace.acme.activeTabId = "t5";
+    rerender(<TabBar />);
+
+    expect(tabScroller.scrollLeft).toBe(222);
+  });
+
+  it("smoothly reveals a newly added active tab", () => {
+    state.byWorkspace.acme.tabs = Array.from({ length: 6 }, (_, index) => ({
+      id: `t${index}`,
+      path: `/acme/tab-${index}`,
+      title: `Tab ${index}`,
+      icon: "ListTodo",
+      pinned: false,
+    }));
+    state.byWorkspace.acme.activeTabId = "t0";
+
+    const rectSpy = vi
+      .spyOn(HTMLElement.prototype, "getBoundingClientRect")
+      .mockImplementation(function (this: HTMLElement) {
+        if (this.matches("[data-tab-scroll-container]")) {
+          return { left: 100, right: 420 } as DOMRect;
+        }
+        if (this.matches('[data-tab-id="t6"]')) {
+          return { left: 450, right: 578 } as DOMRect;
+        }
+        return { left: 120, right: 248 } as DOMRect;
+      });
+
+    const { container, getByLabelText, rerender } = render(<TabBar />);
+    const tabScroller = container.querySelector(
+      "[data-tab-scroll-container]",
+    ) as HTMLDivElement;
+    Object.defineProperties(tabScroller, {
+      clientWidth: { configurable: true, value: 320 },
+      scrollWidth: { configurable: true, value: 960 },
+    });
+    tabScroller.scrollLeft = 40;
+    const scrollTo = vi.fn(({ left }: ScrollToOptions) => {
+      if (typeof left === "number") tabScroller.scrollLeft = left;
+    });
+    Object.defineProperty(tabScroller, "scrollTo", {
+      configurable: true,
+      value: scrollTo,
+    });
+
+    state.byWorkspace.acme.tabs = [
+      ...state.byWorkspace.acme.tabs,
+      {
+        id: "t6",
+        path: "/acme/tab-6",
+        title: "Tab 6",
+        icon: "ListTodo",
+        pinned: false,
+      },
+    ];
+    state.byWorkspace.acme.activeTabId = "t6";
+    rerender(<TabBar />);
+
+    expect(getByLabelText("Tab 6")).toHaveAttribute(
+      "data-tab-entering",
+      "true",
+    );
+    expect(scrollTo).toHaveBeenCalledWith({ left: 222, behavior: "smooth" });
+    rectSpy.mockRestore();
+  });
+
+  it("keeps background additions offscreen and acknowledges them at the edge", () => {
+    state.byWorkspace.acme.tabs = Array.from({ length: 6 }, (_, index) => ({
+      id: `t${index}`,
+      path: `/acme/tab-${index}`,
+      title: `Tab ${index}`,
+      icon: "ListTodo",
+      pinned: false,
+    }));
+    state.byWorkspace.acme.activeTabId = "t0";
+
+    const rectSpy = vi
+      .spyOn(HTMLElement.prototype, "getBoundingClientRect")
+      .mockImplementation(function (this: HTMLElement) {
+        if (this.matches("[data-tab-scroll-container]")) {
+          return { left: 100, right: 420 } as DOMRect;
+        }
+        if (this.matches('[data-tab-id="t6"]')) {
+          return { left: 450, right: 578 } as DOMRect;
+        }
+        return { left: 120, right: 248 } as DOMRect;
+      });
+
+    const { container, rerender } = render(<TabBar />);
+    const tabScroller = container.querySelector(
+      "[data-tab-scroll-container]",
+    ) as HTMLDivElement;
+    Object.defineProperties(tabScroller, {
+      clientWidth: { configurable: true, value: 320 },
+      scrollWidth: { configurable: true, value: 960 },
+    });
+    tabScroller.scrollLeft = 40;
+    const scrollTo = vi.fn();
+    Object.defineProperty(tabScroller, "scrollTo", {
+      configurable: true,
+      value: scrollTo,
+    });
+
+    state.byWorkspace.acme.tabs = [
+      ...state.byWorkspace.acme.tabs,
+      {
+        id: "t6",
+        path: "/acme/tab-6",
+        title: "Tab 6",
+        icon: "ListTodo",
+        pinned: false,
+      },
+    ];
+    rerender(<TabBar />);
+
+    expect(tabScroller.scrollLeft).toBe(40);
+    expect(scrollTo).not.toHaveBeenCalled();
+    expect(
+      container.querySelector('[data-new-tab-edge-feedback="true"]'),
+    ).toBeInTheDocument();
+    rectSpy.mockRestore();
+  });
+});
+
+describe("TabBar context menu", () => {
+  it("closes other tabs from the context menu", async () => {
+    state.byWorkspace.acme.tabs = [
+      { id: "tA", path: "/acme/issues", title: "Issues", icon: "ListTodo", pinned: true },
+      { id: "tB", path: "/acme/projects", title: "Projects", icon: "ListTodo", pinned: false },
+      { id: "tC", path: "/acme/agents", title: "Agents", icon: "Bot", pinned: false },
+    ];
+
+    const { findByText, getByLabelText } = render(<TabBar />);
+    fireEvent.contextMenu(getByLabelText("Projects"));
+    fireEvent.click(await findByText("Close other tabs"));
+
+    expect(state.closeOtherTabs).toHaveBeenCalledWith("tB");
+  });
+
 });

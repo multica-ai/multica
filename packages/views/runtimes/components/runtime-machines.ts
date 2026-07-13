@@ -77,6 +77,20 @@ export function splitRuntimeName(name: string): {
   return { base: m[1], hostname: m[2] };
 }
 
+// The label for a runtime rendered under (or next to) its machine's name.
+// A machine-level rename stamps the same custom_name on every runtime of
+// the daemon (MUL-4217), so repeating it per runtime is noise — fall back
+// to the provider base (e.g. "Claude"). A one-off per-runtime rename that
+// differs from the machine name stays visible verbatim.
+export function runtimeRowLabel(
+  runtime: AgentRuntime,
+  machineTitle: string,
+): string {
+  const custom = runtime.custom_name?.trim();
+  if (custom && custom !== machineTitle) return custom;
+  return splitRuntimeName(runtime.name).base;
+}
+
 export function buildRuntimeMachines(
   runtimes: AgentRuntime[],
   options: RuntimeMachineOptions,

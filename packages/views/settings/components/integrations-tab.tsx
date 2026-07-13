@@ -9,6 +9,7 @@ import { composioToolkitsOptions } from "@multica/core/composio";
 import { useFeatureEnabled } from "@multica/core/config";
 import { COMPOSIO_MCP_APPS_FLAG } from "@multica/core/feature-flags";
 import { useT } from "../../i18n";
+import { SettingsSection, SettingsTab } from "./settings-layout";
 
 // Integrations is the umbrella tab for third-party platform connections.
 // GitHub has its own top-level tab (see github-tab.tsx); everything else
@@ -31,21 +32,18 @@ export function IntegrationsTab() {
     composioToolkits.error instanceof ApiError && composioToolkits.error.status === 503;
 
   return (
-    <div className="space-y-10">
-      <section className="space-y-4">
-        <h2 className="text-sm font-semibold">{t(($) => $.lark.section_title)}</h2>
+    <SettingsTab title={t(($) => $.page.tabs.integrations)}>
+      <SettingsSection title={t(($) => $.lark.section_title)}>
         <LarkTab />
-      </section>
+      </SettingsSection>
       {composioEnabled && !composioUnconfigured && (
-        <section className="space-y-4">
-          <h2 className="text-sm font-semibold">{t(($) => $.composio.section_title)}</h2>
+        <SettingsSection title={t(($) => $.composio.section_title)}>
           <ComposioTab />
-        </section>
+        </SettingsSection>
       )}
-      <section className="space-y-4">
-        <h2 className="text-sm font-semibold">{t(($) => $.slack.section_title)}</h2>
+      <SettingsSection title={t(($) => $.slack.section_title)}>
         <SlackTab />
-      </section>
-    </div>
+      </SettingsSection>
+    </SettingsTab>
   );
 }

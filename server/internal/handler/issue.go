@@ -160,12 +160,14 @@ func (h *Handler) labelsByIssue(ctx context.Context, wsUUID pgtype.UUID, issueID
 	for _, r := range rows {
 		issueID := uuidToString(r.IssueID)
 		out[issueID] = append(out[issueID], LabelResponse{
-			ID:          uuidToString(r.ID),
-			WorkspaceID: uuidToString(r.WorkspaceID),
-			Name:        r.Name,
-			Color:       r.Color,
-			CreatedAt:   timestampToString(r.CreatedAt),
-			UpdatedAt:   timestampToString(r.UpdatedAt),
+			ID:           uuidToString(r.ID),
+			WorkspaceID:  uuidToString(r.WorkspaceID),
+			ResourceType: r.ResourceType,
+			Name:         r.Name,
+			Description:  r.Description,
+			Color:        r.Color,
+			CreatedAt:    timestampToString(r.CreatedAt),
+			UpdatedAt:    timestampToString(r.UpdatedAt),
 		})
 	}
 	return out
@@ -1023,7 +1025,7 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 
 	query := fmt.Sprintf(`SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
        i.assignee_type, i.assignee_id, i.creator_type, i.creator_id,
-       i.parent_issue_id, i.position, i.start_date, i.due_date, i.created_at, i.updated_at, i.number, i.project_id, i.metadata
+       i.parent_issue_id, i.position, i.start_date, i.due_date, i.created_at, i.updated_at, i.number, i.project_id, i.metadata, i.stage
 FROM issue i
 WHERE %s
 ORDER BY %s
@@ -1060,6 +1062,7 @@ LIMIT %s OFFSET %s`, whereSql, orderBy, limitRef, offsetRef)
 			&row.Number,
 			&row.ProjectID,
 			&row.Metadata,
+			&row.Stage,
 		); err != nil {
 			slog.Warn("ListIssues scan failed", "error", err)
 			writeError(w, http.StatusInternalServerError, "failed to list issues")
@@ -1519,8 +1522,8 @@ WITH ranked AS (
 	SELECT
 		i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
 		i.assignee_type, i.assignee_id, i.creator_type, i.creator_id,
-		i.parent_issue_id, i.position, i.due_date, i.created_at, i.updated_at,
-		i.number, i.project_id, i.metadata,
+		i.parent_issue_id, i.position, i.start_date, i.due_date, i.created_at, i.updated_at,
+		i.number, i.project_id, i.metadata, i.stage,
 		COUNT(*) OVER (PARTITION BY i.assignee_type, i.assignee_id) AS group_total,
 		ROW_NUMBER() OVER (
 			PARTITION BY i.assignee_type, i.assignee_id
@@ -1532,8 +1535,8 @@ WITH ranked AS (
 SELECT
 	id, workspace_id, title, description, status, priority,
 	assignee_type, assignee_id, creator_type, creator_id,
-	parent_issue_id, position, due_date, created_at, updated_at,
-	number, project_id, metadata, group_total
+	parent_issue_id, position, start_date, due_date, created_at, updated_at,
+	number, project_id, metadata, stage, group_total
 FROM ranked
 WHERE rn > %s AND rn <= %s + %s
 ORDER BY
@@ -1571,12 +1574,14 @@ ORDER BY
 			&row.CreatorID,
 			&row.ParentIssueID,
 			&row.Position,
+			&row.StartDate,
 			&row.DueDate,
 			&row.CreatedAt,
 			&row.UpdatedAt,
 			&row.Number,
 			&row.ProjectID,
 			&row.Metadata,
+			&row.Stage,
 			&row.GroupTotal,
 		); err != nil {
 			slog.Warn("ListGroupedIssues scan failed", "error", err)

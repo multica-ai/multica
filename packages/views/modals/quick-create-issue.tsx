@@ -25,7 +25,8 @@ import {
   MIN_QUICK_CREATE_CLI_VERSION,
 } from "@multica/core/runtimes";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
-import { formatShortcut, modKey, enterKey } from "@multica/core/platform";
+import { useShortcut } from "@multica/core/shortcuts";
+import { ShortcutKeycaps } from "../common/shortcut-keycaps";
 import { contentReferencesAttachment, type Agent, type Attachment, type Squad } from "@multica/core/types";
 import { ActorAvatar } from "../common/actor-avatar";
 import { PillButton } from "../common/pill-button";
@@ -82,6 +83,7 @@ export function AgentCreatePanel({
   setIsExpanded: (v: boolean) => void;
 }) {
   const { t } = useT("modals");
+  const sendShortcut = useShortcut("send");
   const workspaceName = useCurrentWorkspace()?.name;
   const wsId = useWorkspaceId();
   const userId = useAuthStore((s) => s.user?.id);
@@ -580,7 +582,19 @@ export function AgentCreatePanel({
             >
               {submitting ? t(($) => $.create_issue.agent.sending) : uploading ? t(($) => $.create_issue.agent.uploading) : justSent ? (
                 <span className="flex items-center gap-1"><Check className="size-3.5" />{t(($) => $.create_issue.agent.sent_label)}</span>
-              ) : `${t(($) => $.create_issue.agent.submit)} (${formatShortcut(modKey, enterKey)})`}
+              ) : (
+                <>
+                  {t(($) => $.create_issue.agent.submit)}
+                  {sendShortcut ? (
+                    <ShortcutKeycaps
+                      shortcut={sendShortcut}
+                      decorative
+                      className="ml-1"
+                      keyClassName="border-background/30 bg-background/15 text-primary-foreground shadow-none"
+                    />
+                  ) : null}
+                </>
+              )}
             </Button>
           </div>
         </div>

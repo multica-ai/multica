@@ -668,10 +668,11 @@ func renderIssueContext(provider string, ctx TaskContextForEnv) string {
 	b.WriteString("## Quick Start\n\n")
 	fmt.Fprintf(&b, "Run `multica issue get %s --output json` to fetch the full issue details.\n\n", ctx.IssueID)
 
-	if len(ctx.AgentSkills) > 0 {
+	skills := modelVisibleSkills(ctx.AgentSkills)
+	if len(skills) > 0 {
 		b.WriteString("## Agent Skills\n\n")
 		b.WriteString("The following skills are available to you:\n\n")
-		for _, skill := range ctx.AgentSkills {
+		for _, skill := range skills {
 			fmt.Fprintf(&b, "- **%s**\n", skill.Name)
 		}
 		b.WriteString("\n")
@@ -692,9 +693,10 @@ func renderQuickCreateContext(ctx TaskContextForEnv) string {
 	b.WriteString("> ")
 	b.WriteString(ctx.QuickCreatePrompt)
 	b.WriteString("\n\n")
-	if len(ctx.AgentSkills) > 0 {
+	skills := modelVisibleSkills(ctx.AgentSkills)
+	if len(skills) > 0 {
 		b.WriteString("## Agent Skills\n\n")
-		for _, skill := range ctx.AgentSkills {
+		for _, skill := range skills {
 			fmt.Fprintf(&b, "- **%s**\n", skill.Name)
 		}
 		b.WriteString("\n")
@@ -731,10 +733,11 @@ func renderAutopilotContext(ctx TaskContextForEnv) string {
 		b.WriteString("\n\n")
 	}
 
-	if len(ctx.AgentSkills) > 0 {
+	skills := modelVisibleSkills(ctx.AgentSkills)
+	if len(skills) > 0 {
 		b.WriteString("## Agent Skills\n\n")
 		b.WriteString("The following skills are available to you:\n\n")
-		for _, skill := range ctx.AgentSkills {
+		for _, skill := range skills {
 			fmt.Fprintf(&b, "- **%s**\n", skill.Name)
 		}
 		b.WriteString("\n")

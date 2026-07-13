@@ -776,6 +776,10 @@ func (h *Handler) DeleteAgentRuntime(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to clean up archived agents")
 		return
 	}
+	if err := qtx.DeleteSystemAgentsByRuntime(r.Context(), rt.ID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to clean up system agents")
+		return
+	}
 
 	if err := qtx.DeleteAgentRuntime(r.Context(), rt.ID); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to delete runtime")
@@ -1030,6 +1034,10 @@ func (h *Handler) ArchiveAgentsAndDeleteRuntime(w http.ResponseWriter, r *http.R
 	}
 	if err := qtx.DeleteArchivedAgentsByRuntime(r.Context(), rt.ID); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to clean up archived agents")
+		return
+	}
+	if err := qtx.DeleteSystemAgentsByRuntime(r.Context(), rt.ID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to clean up system agents")
 		return
 	}
 
