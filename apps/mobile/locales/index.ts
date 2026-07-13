@@ -7,6 +7,7 @@ import enProjects from "./en/projects.json";
 import enRuntimes from "./en/runtimes.json";
 import enSettings from "./en/settings.json";
 import enSkills from "./en/skills.json";
+import enUsage from "./en/usage.json";
 import enWorkspace from "./en/workspace.json";
 import zhHansAuth from "./zh-Hans/auth.json";
 import zhHansChat from "./zh-Hans/chat.json";
@@ -17,6 +18,7 @@ import zhHansProjects from "./zh-Hans/projects.json";
 import zhHansRuntimes from "./zh-Hans/runtimes.json";
 import zhHansSettings from "./zh-Hans/settings.json";
 import zhHansSkills from "./zh-Hans/skills.json";
+import zhHansUsage from "./zh-Hans/usage.json";
 import zhHansWorkspace from "./zh-Hans/workspace.json";
 
 export type SupportedLocale = "en" | "zh-Hans";
@@ -32,6 +34,7 @@ export const RESOURCES = {
     runtimes: enRuntimes,
     settings: enSettings,
     skills: enSkills,
+    usage: enUsage,
     workspace: enWorkspace,
   },
   "zh-Hans": {
@@ -44,6 +47,7 @@ export const RESOURCES = {
     runtimes: zhHansRuntimes,
     settings: zhHansSettings,
     skills: zhHansSkills,
+    usage: zhHansUsage,
     workspace: zhHansWorkspace,
   },
 } satisfies Record<SupportedLocale, Record<string, Record<string, unknown>>>;

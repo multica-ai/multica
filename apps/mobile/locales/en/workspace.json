@@ -40,7 +40,8 @@
       "issues": "Issues",
       "projects": "Projects",
       "skills": "Skills",
-      "runtimes": "Runtimes"
+      "runtimes": "Runtimes",
+      "usage": "Usage"
     },
     "account_settings_a11y": "Account settings",
     "switch_workspace_a11y": "Switch workspace",

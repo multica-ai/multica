@@ -112,6 +112,7 @@ export default function WorkspaceLayout() {
   const { t: tSettings } = useTranslation("settings");
   const { t: tRuntimes } = useTranslation("runtimes");
   const { t: tSkills } = useTranslation("skills");
+  const { t: tUsage } = useTranslation("usage");
   const { t: tWorkspace } = useTranslation("workspace");
   const { t: tChat } = useTranslation("chat");
   const { t: tCommon } = useTranslation("common");
@@ -367,6 +368,13 @@ export default function WorkspaceLayout() {
           name="more/runtimes"
           options={{
             title: tRuntimes("list.header_title"),
+            headerBackTitle: tCommon("nav.back"),
+          }}
+        />
+        <Stack.Screen
+          name="more/usage"
+          options={{
+            title: tUsage("list.header_title"),
             headerBackTitle: tCommon("nav.back"),
           }}
         />
