@@ -8,6 +8,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -48,6 +49,14 @@ var daemonStatusCmd = &cobra.Command{
 	Use:   "status",
 	Short: "Show daemon status",
 	RunE:  runDaemonStatus,
+}
+
+var daemonRecoverOrphansCmd = &cobra.Command{
+	Use:   "recover-orphans <runtime-id>",
+	Short: "Recover orphaned tasks for a runtime",
+	Long:  "Fail any orphaned tasks owned by the given runtime and let the server decide whether they can be retried.",
+	Args:  exactArgs(1),
+	RunE:  runDaemonRecoverOrphans,
 }
 
 var daemonRestartCmd = &cobra.Command{
@@ -125,8 +134,11 @@ func init() {
 	daemonCmd.AddCommand(daemonStopCmd)
 	daemonCmd.AddCommand(daemonRestartCmd)
 	daemonCmd.AddCommand(daemonStatusCmd)
+	daemonCmd.AddCommand(daemonRecoverOrphansCmd)
 	daemonCmd.AddCommand(daemonLogsCmd)
 	daemonCmd.AddCommand(daemonDiskUsageCmd)
+
+	daemonRecoverOrphansCmd.Flags().String("output", "table", "Output format: table or json")
 }
 
 // daemonDirForProfile returns the state directory for the given profile.
@@ -736,6 +748,35 @@ func runDaemonStatus(cmd *cobra.Command, _ []string) error {
 	default:
 		fmt.Fprintf(os.Stdout, "%s: stopped\n", label)
 	}
+	return nil
+}
+
+// --- daemon orphan recovery ---
+
+func runDaemonRecoverOrphans(cmd *cobra.Command, args []string) error {
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+
+	ctx, cancel := cli.APIContext(context.Background())
+	defer cancel()
+
+	runtimeID := args[0]
+	path := "/api/daemon/runtimes/" + url.PathEscape(runtimeID) + "/recover-orphans"
+
+	var result map[string]any
+	if err := client.PostJSON(ctx, path, map[string]any{}, &result); err != nil {
+		return fmt.Errorf("recover orphaned tasks: %w", err)
+	}
+
+	output, _ := cmd.Flags().GetString("output")
+	if output == "json" {
+		return cli.PrintJSON(os.Stdout, result)
+	}
+
+	fmt.Fprintf(os.Stdout, "Recovered orphaned tasks for runtime %s: orphaned=%v retried=%v\n",
+		runtimeID, result["orphaned"], result["retried"])
 	return nil
 }
 
