@@ -18,11 +18,11 @@
 -- raised by Elon). `NOT VALID` skips the initial scan, but Postgres STILL checks a
 -- pre-existing row whenever a later UPDATE touches it — even an UPDATE that leaves the
 -- attribution columns alone. Cross-deployment stale queued/running tasks predate
--- `167_agent_task_accountable_user`, so they carry (originator_user_id set,
+-- `168_agent_task_accountable_user`, so they carry (originator_user_id set,
 -- accountable_user_id NULL); their next claim / complete / cancel by the new backend
 -- would fail a bare invariant CHECK.
 --
--- `originator_source` was added by `166` with no default/backfill, so a NULL there does
+-- `originator_source` was added by `167` with no default/backfill, so a NULL there does
 -- NOT strictly mean "row predates the migration" — it means the row was written by a
 -- writer that does not populate attribution: (a) rows created before this PR's
 -- migrations; (b) during a rolling deploy, NEW rows an older, not-yet-replaced backend
