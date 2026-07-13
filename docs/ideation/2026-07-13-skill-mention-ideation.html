@@ -1,0 +1,627 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ideation: @ Mention 支持 Skill 引用</title>
+<style>
+  :root {
+    --bg: #ffffff;
+    --surface: #f8f9fa;
+    --surface-alt: #f0f1f3;
+    --border: #e2e4e8;
+    --border-accent: #c8ccd2;
+    --text: #1a1d23;
+    --text-secondary: #5a6070;
+    --text-muted: #8a8f9c;
+    --accent: #4f46e5;
+    --accent-soft: #eef2ff;
+    --accent-text: #3730a3;
+    --success: #059669;
+    --success-soft: #ecfdf5;
+    --warn: #d97706;
+    --warn-soft: #fffbeb;
+    --info: #0284c7;
+    --info-soft: #f0f9ff;
+    --font-body: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    --font-mono: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0f1117;
+      --surface: #1a1d27;
+      --surface-alt: #22253a;
+      --border: #2d3148;
+      --border-accent: #3d4260;
+      --text: #e8eaef;
+      --text-secondary: #a0a5b8;
+      --text-muted: #6b7089;
+      --accent: #818cf8;
+      --accent-soft: #1e1b4b;
+      --accent-text: #a5b4fc;
+      --success: #34d399;
+      --success-soft: #064e3b;
+      --warn: #fbbf24;
+      --warn-soft: #451a03;
+      --info: #38bdf8;
+      --info-soft: #0c4a6e;
+    }
+  }
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: var(--font-body);
+    font-size: 15px;
+    line-height: 1.65;
+    color: var(--text);
+    background: var(--bg);
+    -webkit-font-smoothing: antialiased;
+  }
+  .container {
+    max-width: 900px;
+    margin: 0 auto;
+    padding: 3rem 2rem 4rem;
+  }
+  h1 { font-size: 1.75rem; font-weight: 700; margin-bottom: 0.5rem; letter-spacing: -0.02em; }
+  h2 { font-size: 1.25rem; font-weight: 650; margin: 2.5rem 0 1rem; letter-spacing: -0.01em; color: var(--accent); }
+  h3 { font-size: 1.05rem; font-weight: 600; margin: 0 0 0.35rem; }
+  p { margin-bottom: 0.75rem; max-width: 70ch; }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  code {
+    font-family: var(--font-mono);
+    font-size: 0.88em;
+    background: var(--surface);
+    padding: 0.1em 0.35em;
+    border-radius: 4px;
+    border: 1px solid var(--border);
+  }
+
+  /* Metadata */
+  .meta-bar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1rem;
+    margin-bottom: 2rem;
+    padding-bottom: 1rem;
+    border-bottom: 1px solid var(--border);
+  }
+  .meta-item { font-size: 0.82rem; color: var(--text-secondary); }
+  .meta-item strong { color: var(--text); font-weight: 600; }
+
+  /* Stats strip */
+  .stats-strip {
+    display: flex;
+    gap: 1.5rem;
+    flex-wrap: wrap;
+    margin: 1.5rem 0;
+    padding: 1rem 1.25rem;
+    background: var(--surface);
+    border-radius: 8px;
+    border: 1px solid var(--border);
+  }
+  .stat { text-align: center; }
+  .stat-value { font-size: 1.5rem; font-weight: 700; color: var(--accent); }
+  .stat-label { font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; }
+
+  /* Axes */
+  .axes-list { list-style: none; display: flex; flex-wrap: wrap; gap: 0.5rem; margin: 1rem 0; }
+  .axes-list li {
+    font-size: 0.82rem;
+    padding: 0.3em 0.75em;
+    background: var(--accent-soft);
+    color: var(--accent-text);
+    border-radius: 999px;
+    font-weight: 500;
+  }
+
+  /* Jump list */
+  .jump-list {
+    list-style: none;
+    margin: 1rem 0 1.5rem;
+    padding: 0.75rem 1rem;
+    background: var(--surface);
+    border-radius: 8px;
+    border: 1px solid var(--border);
+  }
+  .jump-list li { margin: 0.25rem 0; font-size: 0.88rem; }
+  .jump-list a { font-weight: 500; }
+  .jump-list .rank { color: var(--text-muted); font-weight: 400; margin-right: 0.25rem; }
+  .jump-list .axis-tag {
+    font-size: 0.72rem;
+    padding: 0.1em 0.5em;
+    border-radius: 999px;
+    background: var(--surface-alt);
+    color: var(--text-muted);
+    margin-left: 0.5rem;
+  }
+
+  /* Idea cards */
+  .idea-card {
+    margin: 1.5rem 0;
+    padding: 1.25rem 1.5rem;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--bg);
+    position: relative;
+  }
+  .idea-card::before {
+    content: attr(data-rank);
+    position: absolute;
+    top: -0.6rem;
+    left: 1rem;
+    font-size: 0.72rem;
+    font-weight: 700;
+    padding: 0.15em 0.6em;
+    border-radius: 999px;
+    background: var(--accent);
+    color: #fff;
+  }
+  .idea-header { display: flex; justify-content: space-between; align-items: baseline; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 0.5rem; }
+  .idea-header h3 { font-size: 1.05rem; }
+  .idea-badges { display: flex; gap: 0.4rem; flex-wrap: wrap; }
+  .badge {
+    font-size: 0.7rem;
+    padding: 0.15em 0.55em;
+    border-radius: 999px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+  }
+  .badge-axis { background: var(--info-soft); color: var(--info); }
+  .badge-conf-high { background: var(--success-soft); color: var(--success); }
+  .badge-conf-med { background: var(--warn-soft); color: var(--warn); }
+  .badge-complexity-low { background: var(--surface-alt); color: var(--text-secondary); }
+  .badge-complexity-med { background: var(--warn-soft); color: var(--warn); }
+  .badge-complexity-high { background: #fce4ec; color: #c62828; }
+  @media (prefers-color-scheme: dark) {
+    .badge-complexity-high { background: #3b1111; color: #ef9a9a; }
+  }
+
+  .idea-field { margin: 0.6rem 0; }
+  .idea-field-label {
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-muted);
+    margin-bottom: 0.2rem;
+  }
+  .idea-field p { margin-bottom: 0; font-size: 0.92rem; }
+
+  .basis-tag {
+    display: inline-block;
+    font-size: 0.7rem;
+    font-weight: 700;
+    padding: 0.1em 0.4em;
+    border-radius: 3px;
+    margin-right: 0.3em;
+    font-family: var(--font-mono);
+  }
+  .basis-direct { background: var(--success-soft); color: var(--success); }
+  .basis-external { background: var(--info-soft); color: var(--info); }
+  .basis-reasoned { background: var(--warn-soft); color: var(--warn); }
+
+  /* Diagram */
+  .diagram-container {
+    margin: 1rem 0;
+    padding: 1rem;
+    background: var(--surface);
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    overflow-x: auto;
+  }
+  .diagram-container svg { display: block; margin: 0 auto; }
+  .diagram-caption {
+    font-size: 0.78rem;
+    color: var(--text-muted);
+    text-align: center;
+    margin-top: 0.5rem;
+    font-style: italic;
+  }
+
+  /* Rejection table */
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.88rem;
+    margin: 1rem 0;
+  }
+  th, td {
+    text-align: left;
+    padding: 0.5rem 0.75rem;
+    border-bottom: 1px solid var(--border);
+  }
+  th {
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-muted);
+    background: var(--surface);
+  }
+  td { color: var(--text-secondary); }
+  td:first-child { font-weight: 500; color: var(--text); white-space: nowrap; }
+
+  /* Footer */
+  footer.composition-signal {
+    margin-top: 3rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--border);
+    font-size: 0.78rem;
+    color: var(--text-muted);
+  }
+
+  /* Grounding section */
+  .grounding-section {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1rem 1.25rem;
+    margin: 1rem 0;
+    font-size: 0.9rem;
+  }
+  .grounding-section p { max-width: none; }
+
+  /* Rejection summary collapsible */
+  details.rejection-table { margin: 1rem 0; }
+  details.rejection-table summary {
+    cursor: pointer;
+    font-weight: 600;
+    color: var(--text-secondary);
+    font-size: 0.92rem;
+    padding: 0.5rem 0;
+  }
+</style>
+</head>
+<body>
+<div class="container">
+
+<h1>Ideation: @ Mention 支持 Skill 引用</h1>
+
+<div class="meta-bar">
+  <span class="meta-item"><strong>Date:</strong> 2026-07-13</span>
+  <span class="meta-item"><strong>Topic:</strong> skill-mention</span>
+  <span class="meta-item"><strong>Focus:</strong> @ mention 语法支持引用工作区 skill</span>
+  <span class="meta-item"><strong>Mode:</strong> repo-grounded</span>
+</div>
+
+<div class="stats-strip">
+  <div class="stat"><div class="stat-value">38</div><div class="stat-label">Raw Ideas</div></div>
+  <div class="stat"><div class="stat-value">28</div><div class="stat-label">After Dedup</div></div>
+  <div class="stat"><div class="stat-value">7</div><div class="stat-label">Survivors</div></div>
+  <div class="stat"><div class="stat-value">4</div><div class="stat-label">Axes</div></div>
+  <div class="stat"><div class="stat-value">13</div><div class="stat-label">Agents</div></div>
+</div>
+
+<h2>Grounding Context</h2>
+<div class="grounding-section">
+<p><strong>Codebase:</strong> Multica is a TypeScript + Go monorepo — Next.js (web), Electron (desktop), Expo (mobile). AI-native task management for small teams with agents as first-class assignees.</p>
+<p><strong>Current @ mention system:</strong> Tiptap v3 editor extension supporting 6 types (<code>member</code>, <code>agent</code>, <code>squad</code>, <code>issue</code>, <code>project</code>, <code>all</code>). Serialized as <code>[@Label](mention://type/uuid)</code> markdown. Backend regex in <code>mention.go:16</code>, frontend type union in <code>mention-suggestion.tsx:51-65</code>. Data sourced from Query cache (<code>workspaceKeys.members/agents/squads</code>, <code>issueKeys.list</code>).</p>
+<p><strong>Skill system:</strong> Workspace-level reusable instruction packages (<code>SKILL.md</code> + optional files). Full CRUD API exists. React Query hooks: <code>workspaceKeys.skills(wsId)</code>, <code>skillListOptions(wsId)</code>. Skills are currently only accessible via <code>/</code> slash commands (for agent invocation), <strong>not</strong> via <code>@</code> mentions.</p>
+<p><strong>Key insight:</strong> Skills are the mechanism by which agents gain capabilities. Making them <code>@</code>-mentionable creates a unified entity graph where any first-class object (people, agents, squads, issues, skills) can be referenced inline. The existing architecture has clear extension points but requires coordinated changes across 8+ files — which is why the registry pattern (Survivor #1) is the highest-leverage investment.</p>
+<p><strong>External prior art:</strong> Notion's unified <code>@</code> dropdown with grouped entity types is the closest UX analog. GitHub Copilot Chat uses typed <code>@</code> prefixes (<code>@file</code>, <code>@workspace</code>). Slack separates triggers (<code>@</code>, <code>#</code>, <code>/</code>). The industry trend is toward entity-graph mentions where any first-class object is mentionable.</p>
+</div>
+
+<h2>Topic Axes</h2>
+<ul class="axes-list">
+  <li>自动补全与发现</li>
+  <li>行内渲染与视觉识别</li>
+  <li>语义行为</li>
+  <li>跨界面一致性</li>
+</ul>
+
+<h2>Ranked Ideas</h2>
+
+<div class="jump-list">
+  <div style="font-size:0.75rem;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;color:var(--text-muted);margin-bottom:0.4rem;">Jump to</div>
+  <li><span class="rank">1.</span><a href="#idea-1">MentionType 注册表</a><span class="axis-tag">自动补全</span></li>
+  <li><span class="rank">2.</span><a href="#idea-2">@ 弹窗中展示 Skills</a><span class="axis-tag">自动补全</span></li>
+  <li><span class="rank">3.</span><a href="#idea-3">Skill 优先的 Mention 反转</a><span class="axis-tag">语义行为</span></li>
+  <li><span class="rank">4.</span><a href="#idea-4">Skill Mention Hover Card</a><span class="axis-tag">渲染</span></li>
+  <li><span class="rank">5.</span><a href="#idea-5">SkillChip 视觉识别</a><span class="axis-tag">渲染</span></li>
+  <li><span class="rank">6.</span><a href="#idea-6">修复 Mention 渲染缺失</a><span class="axis-tag">跨界面</span></li>
+  <li><span class="rank">7.</span><a href="#idea-7">聊天中发现 Skills</a><span class="axis-tag">跨界面</span></li>
+</div>
+
+<!-- Idea 1 -->
+<article class="idea-card" data-rank="1" id="idea-1">
+  <div class="idea-header">
+    <h3>MentionType 注册表 — 一个扩展点统管所有未来类型</h3>
+    <div class="idea-badges">
+      <span class="badge badge-axis">自动补全与发现</span>
+      <span class="badge badge-conf-high">Conf High</span>
+      <span class="badge badge-complexity-high">Cx High</span>
+    </div>
+  </div>
+  <div class="idea-field">
+    <div class="idea-field-label">Description</div>
+    <p>今天添加一个 mention 类型需要修改至少 8 个硬编码位置：<code>MentionItem.type</code> 联合类型、Go 正则 <code>MentionRe</code>、<code>readonly-content.tsx</code> 正则、<code>MentionView</code> if/else 分发、<code>groupItems()</code> 分组、<code>ActorMentionType</code> 守卫、<code>renderMarkdown</code> 前缀逻辑、<code>defaultRenderMention</code> 分发。建立一个 <code>MentionTypeRegistry</code> — 声明式映射 <code>{ type, labelPrefix, chipVariant, groupLabel, renderComponent }</code> — 让每个调用点遍历注册表而不是 switch 字面量联合。Skill mention 成为第一个消费者；后续每个新类型只需一行注册。</p>
+  </div>
+
+  <div class="diagram-container">
+    <svg width="780" height="220" viewBox="0 0 780 220" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <!-- Before -->
+      <text x="120" y="20" fill="#6b7089" font-size="11" font-weight="600" text-anchor="middle">TODAY: 添加新类型需要改 8 处</text>
+      <rect x="60" y="35" width="120" height="30" rx="5" fill="#fce4ec" stroke="#c62828" stroke-width="1"/>
+      <text x="120" y="55" fill="#c62828" font-size="11" text-anchor="middle" font-weight="500">MentionItem.type</text>
+      <rect x="200" y="35" width="120" height="30" rx="5" fill="#fce4ec" stroke="#c62828" stroke-width="1"/>
+      <text x="260" y="55" fill="#c62828" font-size="11" text-anchor="middle" font-weight="500">Go MentionRe</text>
+      <rect x="340" y="35" width="120" height="30" rx="5" fill="#fce4ec" stroke="#c62828" stroke-width="1"/>
+      <text x="400" y="55" fill="#c62828" font-size="11" text-anchor="middle" font-weight="500">MentionView</text>
+      <rect x="480" y="35" width="120" height="30" rx="5" fill="#fce4ec" stroke="#c62828" stroke-width="1"/>
+      <text x="540" y="55" fill="#c62828" font-size="11" text-anchor="middle" font-weight="500">groupItems()</text>
+      <rect x="60" y="75" width="120" height="30" rx="5" fill="#fce4ec" stroke="#c62828" stroke-width="1"/>
+      <text x="120" y="95" fill="#c62828" font-size="11" text-anchor="middle" font-weight="500">readonly-content</text>
+      <rect x="200" y="75" width="120" height="30" rx="5" fill="#fce4ec" stroke="#c62828" stroke-width="1"/>
+      <text x="260" y="95" fill="#c62828" font-size="11" text-anchor="middle" font-weight="500">renderMarkdown</text>
+      <rect x="340" y="75" width="120" height="30" rx="5" fill="#fce4ec" stroke="#c62828" stroke-width="1"/>
+      <text x="400" y="95" fill="#c62828" font-size="11" text-anchor="middle" font-weight="500">HoverCard</text>
+      <rect x="480" y="75" width="120" height="30" rx="5" fill="#fce4ec" stroke="#c62828" stroke-width="1"/>
+      <text x="540" y="95" fill="#c62828" font-size="11" text-anchor="middle" font-weight="500">defaultRender</text>
+      <text x="330" y="125" fill="#c62828" font-size="12" font-weight="600">8 文件 × 每次 = O(n) 改动</text>
+
+      <!-- Arrow -->
+      <text x="680" y="75" fill="#6b7089" font-size="24">→</text>
+
+      <!-- After -->
+      <text x="680" y="20" fill="#6b7089" font-size="11" font-weight="600" text-anchor="middle">FUTURE: 注册一次</text>
+      <rect x="620" y="35" width="140" height="60" rx="8" fill="#eef2ff" stroke="#4f46e5" stroke-width="1.5"/>
+      <text x="690" y="55" fill="#4f46e5" font-size="11" text-anchor="middle" font-weight="600">MentionTypeRegistry</text>
+      <text x="690" y="72" fill="#6b7089" font-size="10" text-anchor="middle">{ type, chip, group, … }</text>
+      <text x="690" y="86" fill="#6b7089" font-size="10" text-anchor="middle">register("skill", { … })</text>
+      <text x="690" y="115" fill="#059669" font-size="12" font-weight="600">1 行注册 = O(1)</text>
+    </svg>
+    <div class="diagram-caption">示意：从 8 处硬编码到 1 行注册</div>
+  </div>
+
+  <div class="idea-field">
+    <div class="idea-field-label">Basis</div>
+    <p><span class="basis-tag basis-direct">direct:</span> 代码确认 8 处独立的类型分发：<code>MentionItem.type</code> 联合类型 (mention-suggestion.tsx:51-65)、<code>ActorMentionType</code> (actor-mention-chip.tsx:30)、<code>MentionView</code> if/else (mention-view.tsx:35-62)、<code>MentionHoverCard</code> 三元链 (mention-hover-card.tsx:39-48)、<code>ReadonlyContent</code> 正则 (readonly-content.tsx:266)、<code>renderMarkdown</code> 前缀 (mention-extension.ts:109-110)、<code>defaultRenderMention</code> (markdown.tsx:63-81)、<code>groupItems</code> 桶逻辑 (mention-suggestion.tsx:87-115)。</p>
+  </div>
+  <div class="idea-field">
+    <div class="idea-field-label">Rationale</div>
+    <p>这是最高杠杆的单一投资。添加第 7、第 8 或第 12 个 mention 类型的边际成本从多文件、多包重构降到一行配置。Skill mention 是第一个消费者，验证模式；后续每个新实体类型（文档、模板、里程碑）只需一行注册。</p>
+  </div>
+  <div class="idea-field">
+    <div class="idea-field-label">Downsides</div>
+    <p>高前期投入。需要重构现有 6 种类型的分发逻辑，同时保持行为不变。后端正则也需要抽象（Go 没有 TypeScript 那样的注册表模式，可能需要配置驱动的正则构建）。</p>
+  </div>
+</article>
+
+<!-- Idea 2 -->
+<article class="idea-card" data-rank="2" id="idea-2">
+  <div class="idea-header">
+    <h3>@ 弹窗中展示工作区 Skills</h3>
+    <div class="idea-badges">
+      <span class="badge badge-axis">自动补全与发现</span>
+      <span class="badge badge-conf-high">Conf High</span>
+      <span class="badge badge-complexity-med">Cx Medium</span>
+    </div>
+  </div>
+  <div class="idea-field">
+    <div class="idea-field-label">Description</div>
+    <p>用户目前无法通过 <code>@</code> 发现或引用 skills。<code>buildSyncItems()</code> 从 4 个缓存读取（成员、代理、小队、issues）但从不读取 skills 查询缓存。<code>MentionItem</code> 类型联合中没有 <code>"skill"</code>。扩展方案：在 <code>MentionItem.type</code> 中加入 <code>"skill"</code>，在 <code>buildSyncItems()</code> 中读取 <code>workspaceKeys.skills(wsId)</code>，在 <code>groupItems()</code> 中添加 "Skills" 分组，实现 <code>MentionRow</code> 的 skill 分支渲染。</p>
+  </div>
+  <div class="idea-field">
+    <div class="idea-field-label">Basis</div>
+    <p><span class="basis-tag basis-direct">direct:</span> <code>mention-suggestion.tsx:538-548</code> 确认只读取 <code>workspaceKeys.members</code>、<code>.agents</code>、<code>.squads</code> 和 <code>issueKeys.list</code> — 从不读取 skills。<code>workspaceKeys.skills(wsId)</code> 在 <code>queries.ts:18</code> 已存在，<code>skillListOptions(wsId)</code> 在 <code>queries.ts:74-79</code> 提供完整的 React Query 配置。</p>
+  </div>
+  <div class="idea-field">
+    <div class="idea-field-label">Rationale</div>
+    <p>Skills 是产品的核心可复用指令包，却只能通过 <code>/</code> 斜杠命令路径发现，该路径要求用户先选择一个 agent 然后才知道输入 <code>/</code>。这使 skills 对任何从 <code>@</code> 开始的用户流程实际上不可见。</p>
+  </div>
+  <div class="idea-field">
+    <div class="idea-field-label">Downsides</div>
+    <p>增加下拉菜单的复杂度（从 6 种到 7 种类型）。需要决定 skill 是否参与最近使用排序、如何处理大量 skills 的情况（分页或搜索阈值）。</p>
+  </div>
+</article>
+
+<!-- Idea 3 -->
+<article class="idea-card" data-rank="3" id="idea-3">
+  <div class="idea-header">
+    <h3>Skill 优先的 Mention 反转 — 说「做什么」而非「谁来做」</h3>
+    <div class="idea-badges">
+      <span class="badge badge-axis">语义行为</span>
+      <span class="badge badge-conf-high">Conf High</span>
+      <span class="badge badge-complexity-med">Cx Medium</span>
+    </div>
+  </div>
+  <div class="idea-field">
+    <div class="idea-field-label">Description</div>
+    <p>反转当前 agent 优先模型。今天用户先 <code>@AgentA</code>，再用 <code>/</code> 附加 skill。翻转：用户直接 <code>@code-review</code>，系统通过 <code>selectSkillAssignments</code> 解析哪个 agent 执行。Agent 变成实现细节而非主要选择面。结合自动路由（优先当前 issue 指派人 > 最近使用 > 在线状态）和 hover card 上显示 "via Agent Alpha"，用户可以点击切换。</p>
+  </div>
+
+  <div class="diagram-container">
+    <svg width="780" height="160" viewBox="0 0 780 160" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <!-- Current model -->
+      <text x="200" y="20" fill="#6b7089" font-size="11" font-weight="600" text-anchor="middle">当前: Agent 优先</text>
+      <rect x="60" y="35" width="100" height="36" rx="6" fill="#eef2ff" stroke="#4f46e5" stroke-width="1"/>
+      <text x="110" y="58" fill="#4f46e5" font-size="11" text-anchor="middle" font-weight="500">@Agent-Alpha</text>
+      <text x="185" y="58" fill="#6b7089" font-size="14">→</text>
+      <rect x="205" y="35" width="100" height="36" rx="6" fill="#fffbeb" stroke="#d97706" stroke-width="1"/>
+      <text x="255" y="58" fill="#d97706" font-size="11" text-anchor="middle" font-weight="500">/code-review</text>
+      <text x="170" y="90" fill="#c62828" font-size="10" text-anchor="middle">两步操作 · 需知道谁有此 skill</text>
+
+      <!-- Arrow -->
+      <text x="390" y="58" fill="#6b7089" font-size="24">→</text>
+
+      <!-- Inverted model -->
+      <text x="590" y="20" fill="#6b7089" font-size="11" font-weight="600" text-anchor="middle">反转: Skill 优先</text>
+      <rect x="470" y="35" width="100" height="36" rx="6" fill="#ecfdf5" stroke="#059669" stroke-width="1.5"/>
+      <text x="520" y="58" fill="#059669" font-size="11" text-anchor="middle" font-weight="500">@code-review</text>
+      <text x="595" y="45" fill="#6b7089" font-size="12">→</text>
+      <text x="595" y="60" fill="#6b7089" font-size="10">自动</text>
+      <rect x="620" y="35" width="120" height="36" rx="6" fill="#f0f9ff" stroke="#0284c7" stroke-width="1"/>
+      <text x="680" y="50" fill="#0284c7" font-size="10" text-anchor="middle" font-weight="500">via Agent-Alpha</text>
+      <text x="680" y="64" fill="#0284c7" font-size="9" text-anchor="middle">(可点击切换)</text>
+      <text x="580" y="90" fill="#059669" font-size="10" text-anchor="middle">一步操作 · 系统解析执行者</text>
+    </svg>
+    <div class="diagram-caption">从「告诉系统谁来做」到「告诉系统做什么」</div>
+  </div>
+
+  <div class="idea-field">
+    <div class="idea-field-label">Basis</div>
+    <p><span class="basis-tag basis-direct">direct:</span> <code>selectSkillAssignments</code> 在 <code>queries.ts:101-115</code> 已构建 <code>Map&lt;skillId, Agent[]&gt;</code> — 这正是从 skill 解析到 agent 所需的数据结构。后端 <code>computeCommentAgentTriggers</code> 在 <code>comment.go</code> 中已有 squad → leader 的解析模式，可类比扩展到 skill → agent。待处理任务去重逻辑 (<code>comment.go:1970-1973</code>) 已处理同一 agent 对同一 issue 重复排队的情况。</p>
+  </div>
+  <div class="idea-field">
+    <div class="idea-field-label">Rationale</div>
+    <p>用户以结果为导向思考（「运行代码审查」）而非路由（「调用拥有代码审查 skill 的 Agent Alpha」）。Skill-assignment 数据模型已经支持这种反转；只有 UI 强制了 agent 优先的路径。</p>
+  </div>
+  <div class="idea-field">
+    <div class="idea-field-label">Downsides</div>
+    <p>多 agent 拥有同一 skill 时的路由策略需要设计（默认选谁？）。对 agent 拥有大量 skills 的工作区，@ 弹窗可能过于拥挤。需要决定触发语义：纯引用链接 vs 触发 agent 执行。</p>
+  </div>
+</article>
+
+<!-- Idea 4 -->
+<article class="idea-card" data-rank="4" id="idea-4">
+  <div class="idea-header">
+    <h3>Skill Mention Hover Card — 悬停即发现</h3>
+    <div class="idea-badges">
+      <span class="badge badge-axis">行内渲染与视觉识别</span>
+      <span class="badge badge-conf-high">Conf High</span>
+      <span class="badge badge-complexity-low">Cx Low</span>
+    </div>
+  </div>
+  <div class="idea-field">
+    <div class="idea-field-label">Description</div>
+    <p>扩展 <code>MentionHoverCard</code> 为 <code>type === "skill"</code> 渲染 <code>SkillProfileCard</code>。卡片展示 skill 的名称、描述，以及关键信息 — 当前绑定了哪些 agents（使用 <code>selectSkillAssignments</code> 的 <code>Map&lt;skillId, Agent[]&gt;</code>）。每个行内 skill mention 变成交互式发现表面：悬停即可看到 "绑定于: Agent-Alpha, Agent-Beta" 并可点击跳转。</p>
+  </div>
+  <div class="idea-field">
+    <div class="idea-field-label">Basis</div>
+    <p><span class="basis-tag basis-direct">direct:</span> <code>MentionView</code> 已将 actor 类型分发到 <code>ActorMentionChip</code> + <code>MentionHoverCard</code> (mention-view.tsx:65-71)。<code>MentionHoverCard</code> 使用类型驱动的三元链选择 profile card 组件 (mention-hover-card.tsx:39-48)。<code>selectSkillAssignments</code> (queries.ts:101-115) 已在 Query 缓存中提供 skill→agent 映射。</p>
+  </div>
+  <div class="idea-field">
+    <div class="idea-field-label">Rationale</div>
+    <p>Agent-skill 绑定目前在上下文中不可见 — 只能在 agent 设置页或 skill 详情页看到。在上下文中（评论、issues、聊天）暴露它创建被动发现能力：每个 skill mention 教会每个读者哪些 agent 可以执行它。随时间推移，这在无需刻意培训的情况下提高工作区整体的 AI 素养。</p>
+  </div>
+  <div class="idea-field">
+    <div class="idea-field-label">Downsides</div>
+    <p>需要设计 <code>SkillProfileCard</code> 组件。当 skill 绑定了很多 agents 时，hover card 需要截断或滚动。</p>
+  </div>
+</article>
+
+<!-- Idea 5 -->
+<article class="idea-card" data-rank="5" id="idea-5">
+  <div class="idea-header">
+    <h3>SkillChip 视觉识别 — 技能一目了然</h3>
+    <div class="idea-badges">
+      <span class="badge badge-axis">行内渲染与视觉识别</span>
+      <span class="badge badge-conf-high">Conf High</span>
+      <span class="badge badge-complexity-low">Cx Low</span>
+    </div>
+  </div>
+  <div class="idea-field">
+    <div class="idea-field-label">Description</div>
+    <p>创建专属 <code>SkillChip</code> 组件，使用 <code>BookOpenText</code> 图标和紫色调（与 skill-import-search ideation 一致），遵循 <code>TYPE_STYLES</code> 的颜色映射模式。Skill mention 应可从视觉上与人/agent mention 立即区分。在 <code>MentionView</code> 中为 <code>type === "skill"</code> 添加渲染分支：类似 <code>IssueChip</code> 模式（可导航链接到 skill 详情页），而非 actor 模式。</p>
+  </div>
+  <div class="idea-field">
+    <div class="idea-field-label">Basis</div>
+    <p><span class="basis-tag basis-direct">direct:</span> <code>TYPE_STYLES</code> 在 <code>actor-mention-chip.tsx:57-62</code> 已建立每类型颜色映射模式（member=muted, agent=brand, squad=info, all=warning）。<code>IssueChip</code> 和 <code>ProjectChip</code> 已证明「mention chip + 可导航链接」模式可行。<code>MentionView</code> 对未知类型回退到纯文本 <code>&lt;span className="mention"&gt;@{name}&lt;/span&gt;</code> — skill 会命中此路径。</p>
+  </div>
+  <div class="idea-field">
+    <div class="idea-field-label">Rationale</div>
+    <p>如果用户无法在不阅读文本的情况下区分 mention 类型，mention 系统的可信度下降。视觉识别是最低成本、最高感知的改进。</p>
+  </div>
+  <div class="idea-field">
+    <div class="idea-field-label">Downsides</div>
+    <p>需要选择一致的视觉语言（颜色、图标）。如果后续有更多实体类型，每种都需要视觉设计。</p>
+  </div>
+</article>
+
+<!-- Idea 6 -->
+<article class="idea-card" data-rank="6" id="idea-6">
+  <div class="idea-header">
+    <h3>修复非编辑器上下文中 Agent/Member Mention 渲染缺失</h3>
+    <div class="idea-badges">
+      <span class="badge badge-axis">跨界面一致性</span>
+      <span class="badge badge-conf-high">Conf High</span>
+      <span class="badge badge-complexity-low">Cx Low</span>
+    </div>
+  </div>
+  <div class="idea-field">
+    <div class="idea-field-label">Description</div>
+    <p>共享 markdown 组件中的 <code>defaultRenderMention</code> 函数只处理 <code>issue</code> 和 <code>project</code> 类型，对所有其他类型返回 <code>null</code>。这意味着 agent、member、squad、@all 的 mention 在聊天历史、skill 输出、或任何 <code>MemoizedMarkdown</code> 上下文中渲染为空白。数据存在于 markdown 中，但渲染被静默吞没。修复此 bug 同时为 skill mention 的跨界面渲染铺平道路。</p>
+  </div>
+  <div class="idea-field">
+    <div class="idea-field-label">Basis</div>
+    <p><span class="basis-tag basis-direct">direct:</span> <code>packages/views/common/markdown.tsx:63-82</code>：<code>defaultRenderMention</code> 检查 <code>type === "issue"</code> 和 <code>type === "project"</code>，然后 fall through 到 <code>return null</code>。每个 agent、member、squad、@all mention 在此代码路径中渲染为空。</p>
+  </div>
+  <div class="idea-field">
+    <div class="idea-field-label">Rationale</div>
+    <p>用户看到 agent mention 消失会认为系统坏了。mention 数据在 markdown 中保留但渲染被静默吞没，造成「写了什么」和「显示了什么」之间的断裂。这也是确保 skill mention 在所有界面一致渲染的前提。</p>
+  </div>
+  <div class="idea-field">
+    <div class="idea-field-label">Downsides</div>
+    <p>修复需要为每种类型实现渲染逻辑 — 如果同时做 Survivor #1 的注册表，可一并解决。</p>
+  </div>
+</article>
+
+<!-- Idea 7 -->
+<article class="idea-card" data-rank="7" id="idea-7">
+  <div class="idea-header">
+    <h3>聊天中发现 Skills — 对话内引用</h3>
+    <div class="idea-badges">
+      <span class="badge badge-axis">跨界面一致性</span>
+      <span class="badge badge-conf-med">Conf Medium</span>
+      <span class="badge badge-complexity-low">Cx Low</span>
+    </div>
+  </div>
+  <div class="idea-field">
+    <div class="idea-field-label">Description</div>
+    <p>聊天输入的 <code>mentionMode: "context"</code> 目前只展示当前/最近的 issues 和 projects。扩展为也展示当前聊天 agent 的绑定 skills。当用户与 Agent-Alpha 聊天时，输入 <code>@</code> 应在建议列表顶部展示 Agent-Alpha 的绑定 skills，在 "Agent Skills" 标题下分组。在聊天中插入 skill mention 给 agent 提供该 skill 指令的上下文感知，无需切换到斜杠命令或离开对话。</p>
+  </div>
+  <div class="idea-field">
+    <div class="idea-field-label">Basis</div>
+    <p><span class="basis-tag basis-direct">direct:</span> <code>use-chat-context-items.ts:75-116</code> 从 issues 和 projects 构建 <code>MentionItem[]</code> — skills 被排除是构造性的，不是设计性的。<code>workspaceKeys.skills(wsId)</code> 缓存已存在且被 realtime 事件保持新鲜 (<code>use-realtime-sync.ts:343</code>)。斜杠命令系统已在 <code>slash-command-suggestion.tsx:181</code> 读取 <code>activeAgent?.skills</code> — 相同数据源可喂给 <code>@</code> mention 自动补全。</p>
+  </div>
+  <div class="idea-field">
+    <div class="idea-field-label">Rationale</div>
+    <p>聊天是 ad-hoc agent 交互的主要界面。如果用户不能在那里引用 skills，他们必须上下文切换到评论或使用斜杠命令，打断对话流。</p>
+  </div>
+  <div class="idea-field">
+    <div class="idea-field-label">Downsides</div>
+    <p>聊天中 @ 弹窗的 items 增加可能影响响应速度。需要决定是否在非 agent 聊天场景也展示 skills。</p>
+  </div>
+</article>
+
+<h2>Rejection Summary</h2>
+<details class="rejection-table">
+<summary>查看 21 个被拒 ideas 及理由</summary>
+<table>
+<thead><tr><th>#</th><th>Idea</th><th>Reason Rejected</th></tr></thead>
+<tbody>
+<tr><td>A2</td><td>Data-Driven Rendering Registry</td><td>被 A1 注册表模式包含</td></tr>
+<tr><td>A3</td><td>Cross-Surface Serialization Contract</td><td>流程改进，非产品 idea</td></tr>
+<tr><td>A4</td><td>Entity-Graph Type Cascade Pattern</td><td>文档任务，非产品 idea</td></tr>
+<tr><td>B3</td><td>Auto-Route Skill to Best Agent</td><td>B2 skill-first 愿景的子集</td></tr>
+<tr><td>B4</td><td>Recency-Weighted Skill Routing</td><td>二阶效应，B2 落地前过早</td></tr>
+<tr><td>B5</td><td>Skill Mention as Context Injection</td><td>WEAK 基础 — 代码差距被夸大</td></tr>
+<tr><td>B6</td><td>Skill Mention as Behavioral Contract</td><td>与 B2 重叠；触发语义待 brainstorm 决定</td></tr>
+<tr><td>C1</td><td>Unified Dropdown — Merge Slash/At</td><td>WEAK 基础 — 共享基础设施被夸大</td></tr>
+<tr><td>C2</td><td>Contextual @ Dropdown</td><td>被 B1 范围包含</td></tr>
+<tr><td>C3</td><td># Prefix for Skills</td><td>独立触发器与 B1 统一愿景冲突</td></tr>
+<tr><td>C4</td><td>Formula Autocomplete Preview</td><td>增量 UX 精修，低于野心底线</td></tr>
+<tr><td>C5</td><td>Category-Narrowing Breadcrumbs</td><td>增量 UX 精修，低于野心底线</td></tr>
+<tr><td>C6</td><td>Sidebar Skill Browser</td><td>锦上添花，非核心 mention 功能</td></tr>
+<tr><td>C7</td><td>Skill Autofill in Chat</td><td>被 F4（聊天发现）包含</td></tr>
+<tr><td>D3</td><td>Status-Aware Skill Badges</td><td>初始范围过度工程化</td></tr>
+<tr><td>D4</td><td>Skill Mentions Without @ Prefix</td><td>视觉细节，延至 brainstorm</td></tr>
+<tr><td>E2</td><td>Agent Self-Documentation</td><td>WEAK — 假设 agent 行为变化</td></tr>
+<tr><td>E3</td><td>Live Trigger Composer</td><td>范围溢出 — 独立功能</td></tr>
+<tr><td>E4</td><td>Multi-Skill Composition</td><td>初始范围过于激进</td></tr>
+<tr><td>E5</td><td>Parameterized Invocation</td><td>WEAK — 需新解析器，无先例</td></tr>
+<tr><td>F2</td><td>Mobile Sentinel Stabilization</td><td>独立移动端关注点，非 skill 特定</td></tr>
+<tr><td>F3</td><td>Protocol Upgrade</td><td>基础设施变更，独立项目</td></tr>
+<tr><td>G1</td><td>@member Silently Inert</td><td>真实痛点但属既有问题，非 skill 特定</td></tr>
+<tr><td>G2</td><td>@all Suppresses Triggers</td><td>真实痛点但属既有问题，非 skill 特定</td></tr>
+<tr><td>G3</td><td>Agent Hover Card Hides Skills</td><td>好的后续，被 D2 的模式包含</td></tr>
+<tr><td>G4</td><td>Recency Ignores Slash Usage</td><td>好的后续，延至 B2 实现</td></tr>
+</tbody>
+</table>
+</details>
+
+<footer class="composition-signal">Composed 2026-07-13T12:00Z by ce-ideate</footer>
+
+</div>
+</body>
+</html>
