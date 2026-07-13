@@ -57,6 +57,8 @@ import {
   useProjectStatusLabels,
   useProjectPriorityLabels,
 } from "../projects/components/labels";
+import { ProjectStartDatePicker } from "../projects/components/project-start-date-picker";
+import { ProjectDueDatePicker } from "../projects/components/project-due-date-picker";
 import {
   isDesktopShell,
   pickDirectory,
@@ -134,6 +136,8 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
   const [leadType, setLeadType] = useState<"member" | "agent" | undefined>(draft.leadType);
   const [leadId, setLeadId] = useState<string | undefined>(draft.leadId);
   const [icon, setIcon] = useState<string | undefined>(draft.icon);
+  const [startDate, setStartDate] = useState<string>(draft.startDate ?? "");
+  const [dueDate, setDueDate] = useState<string>(draft.dueDate ?? "");
   const [iconPickerOpen, setIconPickerOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
@@ -212,6 +216,8 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
     setDraft({ leadType: type, leadId: id });
   };
   const updateIcon = (v: string | undefined) => { setIcon(v); setDraft({ icon: v }); };
+  const updateStartDate = (v: string) => { setStartDate(v); setDraft({ startDate: v || undefined }); };
+  const updateDueDate = (v: string) => { setDueDate(v); setDraft({ dueDate: v || undefined }); };
 
   const [leadOpen, setLeadOpen] = useState(false);
   const [leadFilter, setLeadFilter] = useState("");
@@ -266,6 +272,8 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
         priority,
         lead_type: leadType,
         lead_id: leadId,
+        start_date: startDate || undefined,
+        due_date: dueDate || undefined,
         // Server attaches these in the same transaction as the project.
         resources,
       });
@@ -540,6 +548,18 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
               </div>
             </PopoverContent>
           </Popover>
+
+          <ProjectStartDatePicker
+            startDate={startDate || null}
+            onUpdate={(u) => updateStartDate(u.start_date ?? "")}
+            triggerRender={<PillButton />}
+          />
+
+          <ProjectDueDatePicker
+            dueDate={dueDate || null}
+            onUpdate={(u) => updateDueDate(u.due_date ?? "")}
+            triggerRender={<PillButton />}
+          />
 
           <Popover
             open={repoPopoverOpen}
