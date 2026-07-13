@@ -255,6 +255,60 @@ func TestMergeCommentIntoPendingTask_KeepsAccountableEqualsOriginator(t *testing
 	}
 }
 
+// TestAttributionForMergedComment_HonorsFailClosedPolicy is Elon's must-fix
+// regression: folding a comment that resolves to NO precise human into a queued task
+// re-opens the fail-closed decision. On a fail-closed workspace the merge must be
+// REFUSED (ErrAttributionFailClosed) so the queued task keeps its original precise
+// snapshot instead of being re-stamped to a degraded owner_fallback; on a fail-open
+// workspace the same comment degrades to owner_fallback (accountable = agent owner)
+// with no error, exactly as a fresh enqueue would (MUL-4302).
+func TestAttributionForMergedComment_HonorsFailClosedPolicy(t *testing.T) {
+	pool := newResolveOriginatorPool(t)
+	ctx := context.Background()
+	q := db.New(pool)
+	workspaceID, ownerID, agentID, issueID := seedAttributionFixture(t, pool)
+	svc := &TaskService{Queries: q, TxStarter: pool, Bus: events.New()}
+	agent, err := q.GetAgent(ctx, util.MustParseUUID(agentID))
+	if err != nil {
+		t.Fatalf("get agent: %v", err)
+	}
+
+	// An agent-authored comment with no source-task lineage → no precise human.
+	var commentID string
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content)
+		VALUES ($1, $2, 'agent', $3, 'autonomous ping') RETURNING id`,
+		issueID, workspaceID, agentID).Scan(&commentID); err != nil {
+		t.Fatalf("seed comment: %v", err)
+	}
+
+	// Fail-CLOSED: the merge must be refused, not degraded.
+	if _, err := pool.Exec(ctx, `UPDATE workspace SET attribution_fail_closed = true WHERE id = $1`, workspaceID); err != nil {
+		t.Fatalf("set fail-closed: %v", err)
+	}
+	if _, err := svc.AttributionForMergedComment(ctx, util.MustParseUUID(workspaceID), util.MustParseUUID(commentID), false, agent); !errors.Is(err, ErrAttributionFailClosed) {
+		t.Fatalf("fail-closed merge must return ErrAttributionFailClosed, got %v", err)
+	}
+
+	// Fail-OPEN (default): the same comment degrades to owner_fallback, no error.
+	if _, err := pool.Exec(ctx, `UPDATE workspace SET attribution_fail_closed = false WHERE id = $1`, workspaceID); err != nil {
+		t.Fatalf("clear fail-closed: %v", err)
+	}
+	attr, err := svc.AttributionForMergedComment(ctx, util.MustParseUUID(workspaceID), util.MustParseUUID(commentID), false, agent)
+	if err != nil {
+		t.Fatalf("fail-open merge must not error, got %v", err)
+	}
+	if attr.Source != attribution.SourceOwnerFallback {
+		t.Errorf("fail-open unattributable merge source = %q, want owner_fallback", attr.Source)
+	}
+	if !attr.AccountableUserID.Valid || attr.AccountableUserID.Bytes != util.MustParseUUID(ownerID).Bytes {
+		t.Errorf("owner_fallback accountable = %s, want agent owner %s", util.UUIDToString(attr.AccountableUserID), ownerID)
+	}
+	if attr.UserID.Valid {
+		t.Errorf("owner_fallback must not set originator (authorization stays NULL), got %s", util.UUIDToString(attr.UserID))
+	}
+}
+
 // TestAttributionInvariantCheck_RejectsBypass verifies the DB-level cross-column
 // CHECK (MUL-4302): any write that sets originator_user_id but leaves
 // accountable_user_id NULL — or different — is rejected at the database, so a future
@@ -317,10 +371,10 @@ func TestTriggerOwnerAttribution_ScheduleTriggerCreator(t *testing.T) {
 	}
 	t.Cleanup(func() { pool.Exec(context.Background(), `DELETE FROM autopilot WHERE id = $1`, autopilotID) })
 
-	// Schedule trigger created by the member.
+	// Schedule trigger whose responsible publisher is the creating member.
 	var triggerID string
 	if err := pool.QueryRow(ctx, `
-		INSERT INTO autopilot_trigger (autopilot_id, kind, enabled, cron_expression, created_by_type, created_by_id)
+		INSERT INTO autopilot_trigger (autopilot_id, kind, enabled, cron_expression, published_by_type, published_by_id)
 		VALUES ($1, 'schedule', true, '0 * * * *', 'member', $2) RETURNING id`,
 		autopilotID, creatorID).Scan(&triggerID); err != nil {
 		t.Fatalf("seed trigger: %v", err)
@@ -382,6 +436,119 @@ func TestTriggerOwnerAttribution_LegacyTriggerFallsBackToRuleOwner(t *testing.T)
 	}
 	if !got.AccountableUserID.Valid || got.AccountableUserID.Bytes != util.MustParseUUID(publisherID).Bytes {
 		t.Errorf("accountable = %s, want rule publisher %s", util.UUIDToString(got.AccountableUserID), publisherID)
+	}
+}
+
+// seedExtraMember inserts a standalone user + workspace member and returns the
+// user id, so a test can model an EDITOR distinct from the trigger creator.
+func seedExtraMember(t *testing.T, pool *pgxpool.Pool, workspaceID, label string) string {
+	t.Helper()
+	ctx := context.Background()
+	suffix := time.Now().UnixNano()
+	var userID string
+	if err := pool.QueryRow(ctx, `INSERT INTO "user" (name, email) VALUES ($1, $2) RETURNING id`,
+		label, fmt.Sprintf("%s-%d@multica.test", label, suffix)).Scan(&userID); err != nil {
+		t.Fatalf("seed %s user: %v", label, err)
+	}
+	t.Cleanup(func() { pool.Exec(context.Background(), `DELETE FROM "user" WHERE id = $1`, userID) })
+	if _, err := pool.Exec(ctx, `INSERT INTO member (workspace_id, user_id, role) VALUES ($1, $2, 'member')`,
+		workspaceID, userID); err != nil {
+		t.Fatalf("seed %s member: %v", label, err)
+	}
+	return userID
+}
+
+// TestTriggerOwnerAttribution_TransfersToSubstantiveEditor is Elon's must-fix
+// acceptance test: it drives the REAL triggerOwnerAttribution resolver (not the
+// ruleOwnerAttribution helper) across the SAME queries the handlers use, and proves
+// both halves of the pinned model — (1) responsibility TRANSFERS from the creator to
+// whoever substantively edits the trigger, and (2) a trigger-scoped edit re-stamps
+// ONLY that trigger, never a sibling. It also proves an autopilot-level edit bumps
+// every trigger together (MUL-4302).
+func TestTriggerOwnerAttribution_TransfersToSubstantiveEditor(t *testing.T) {
+	pool := newResolveOriginatorPool(t)
+	ctx := context.Background()
+	q := db.New(pool)
+	workspaceID, creatorA, agentID, _ := seedAttributionFixture(t, pool)
+	editorB := seedExtraMember(t, pool, workspaceID, "editor-b")
+	editorC := seedExtraMember(t, pool, workspaceID, "editor-c")
+
+	var autopilotID string
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO autopilot (workspace_id, title, assignee_id, execution_mode, created_by_type, created_by_id)
+		VALUES ($1, 'transfer-ap', $2, 'run_only', 'member', $3) RETURNING id`,
+		workspaceID, agentID, creatorA).Scan(&autopilotID); err != nil {
+		t.Fatalf("seed autopilot: %v", err)
+	}
+	t.Cleanup(func() { pool.Exec(context.Background(), `DELETE FROM autopilot WHERE id = $1`, autopilotID) })
+
+	// Two triggers, both initially published by creator A (the create-site default).
+	seedTrigger := func(cron string) string {
+		var id string
+		if err := pool.QueryRow(ctx, `
+			INSERT INTO autopilot_trigger (autopilot_id, kind, enabled, cron_expression, published_by_type, published_by_id)
+			VALUES ($1, 'schedule', true, $2, 'member', $3) RETURNING id`,
+			autopilotID, cron, creatorA).Scan(&id); err != nil {
+			t.Fatalf("seed trigger: %v", err)
+		}
+		return id
+	}
+	trigger1 := seedTrigger("0 * * * *")
+	trigger2 := seedTrigger("0 0 * * *")
+
+	accountableOf := func(triggerID string) string {
+		got := triggerOwnerAttribution(ctx, q,
+			util.MustParseUUID(triggerID), util.MustParseUUID(workspaceID), util.MustParseUUID(autopilotID),
+			attribution.EvidenceAutopilotRun, util.MustParseUUID(autopilotID))
+		if got.Source != attribution.SourceTriggerOwner {
+			t.Fatalf("trigger %s: source = %q, want trigger_owner", triggerID, got.Source)
+		}
+		if got.UserID.Valid {
+			t.Fatalf("trigger_owner is audit-only; originator must stay NULL, got %s", util.UUIDToString(got.UserID))
+		}
+		return util.UUIDToString(got.AccountableUserID)
+	}
+
+	// Baseline: both triggers attribute to creator A.
+	if a := accountableOf(trigger1); a != creatorA {
+		t.Fatalf("trigger1 baseline accountable = %s, want creator %s", a, creatorA)
+	}
+	if a := accountableOf(trigger2); a != creatorA {
+		t.Fatalf("trigger2 baseline accountable = %s, want creator %s", a, creatorA)
+	}
+
+	// B substantively edits trigger1 — the SAME query UpdateAutopilotTrigger runs.
+	if err := q.SetAutopilotTriggerPublisher(ctx, db.SetAutopilotTriggerPublisherParams{
+		ID:              util.MustParseUUID(trigger1),
+		PublishedByType: pgtype.Text{String: "member", Valid: true},
+		PublishedByID:   util.MustParseUUID(editorB),
+	}); err != nil {
+		t.Fatalf("SetAutopilotTriggerPublisher: %v", err)
+	}
+
+	// Transfer: trigger1 now attributes to editor B, NOT the original creator.
+	if a := accountableOf(trigger1); a != editorB {
+		t.Fatalf("after edit, trigger1 accountable = %s, want editor %s (responsibility must transfer)", a, editorB)
+	}
+	// Isolation: editing trigger1 must NOT move trigger2 — it stays with creator A.
+	if a := accountableOf(trigger2); a != creatorA {
+		t.Fatalf("trigger2 accountable = %s, want creator %s (editing a sibling must not transfer)", a, creatorA)
+	}
+
+	// C makes an autopilot-level substantive edit — the SAME bump-all query
+	// UpdateAutopilot runs — which governs every trigger of the autopilot.
+	if err := q.SetAutopilotTriggerPublishersByAutopilot(ctx, db.SetAutopilotTriggerPublishersByAutopilotParams{
+		AutopilotID:     util.MustParseUUID(autopilotID),
+		PublishedByType: pgtype.Text{String: "member", Valid: true},
+		PublishedByID:   util.MustParseUUID(editorC),
+	}); err != nil {
+		t.Fatalf("SetAutopilotTriggerPublishersByAutopilot: %v", err)
+	}
+	if a := accountableOf(trigger1); a != editorC {
+		t.Fatalf("after autopilot-level edit, trigger1 accountable = %s, want %s", a, editorC)
+	}
+	if a := accountableOf(trigger2); a != editorC {
+		t.Fatalf("after autopilot-level edit, trigger2 accountable = %s, want %s", a, editorC)
 	}
 }
 
@@ -692,6 +859,88 @@ func TestDispatchRunOnlyManualStampsDirectHuman(t *testing.T) {
 	}
 	if ruleVersion.Valid {
 		t.Errorf("manual direct_human must not set rule_version_id, got %s", util.UUIDToString(ruleVersion))
+	}
+}
+
+// TestDispatchRunOnlyScheduleTransfersToEditor is Elon's must-fix REAL dispatch test:
+// it drives dispatchRunOnly end to end (schedule-style, no member actor) and asserts
+// the PERSISTED agent_task_queue row's accountable_user_id follows the trigger's
+// current responsible publisher after a substantive edit — the creator seeds it, then
+// a later editor's re-stamp (the same SetAutopilotTriggerPublisher the UpdateTrigger
+// handler runs) makes future runs attribute to the editor, with originator still NULL
+// (MUL-4302). The resolver-level before/after and per-trigger isolation are covered by
+// TestTriggerOwnerAttribution_TransfersToSubstantiveEditor.
+func TestDispatchRunOnlyScheduleTransfersToEditor(t *testing.T) {
+	pool := newResolveOriginatorPool(t)
+	ctx := context.Background()
+	q := db.New(pool)
+	workspaceID, creatorA, agentID, _ := seedAttributionFixture(t, pool)
+	editorB := seedExtraMember(t, pool, workspaceID, "dispatch-editor-b")
+
+	var autopilotID string
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO autopilot (workspace_id, title, assignee_type, assignee_id, status, execution_mode, created_by_type, created_by_id)
+		VALUES ($1, 'dispatch-transfer-ap', 'agent', $2, 'active', 'run_only', 'member', $3) RETURNING id`,
+		workspaceID, agentID, creatorA).Scan(&autopilotID); err != nil {
+		t.Fatalf("seed autopilot: %v", err)
+	}
+	t.Cleanup(func() { pool.Exec(context.Background(), `DELETE FROM autopilot WHERE id = $1`, autopilotID) })
+
+	// Schedule trigger initially published by creator A, then edited by B.
+	var triggerID string
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO autopilot_trigger (autopilot_id, kind, enabled, cron_expression, published_by_type, published_by_id)
+		VALUES ($1, 'schedule', true, '0 * * * *', 'member', $2) RETURNING id`,
+		autopilotID, creatorA).Scan(&triggerID); err != nil {
+		t.Fatalf("seed trigger: %v", err)
+	}
+	if err := q.SetAutopilotTriggerPublisher(ctx, db.SetAutopilotTriggerPublisherParams{
+		ID:              util.MustParseUUID(triggerID),
+		PublishedByType: pgtype.Text{String: "member", Valid: true},
+		PublishedByID:   util.MustParseUUID(editorB),
+	}); err != nil {
+		t.Fatalf("SetAutopilotTriggerPublisher: %v", err)
+	}
+
+	// A running schedule run bound to that trigger — the shape the scheduler dispatches.
+	var runID string
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO autopilot_run (autopilot_id, trigger_id, source, status)
+		VALUES ($1, $2, 'schedule', 'running') RETURNING id`,
+		autopilotID, triggerID).Scan(&runID); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+
+	svc := &AutopilotService{Queries: q, TxStarter: pool, Bus: events.New(), TaskSvc: &TaskService{Queries: q, TxStarter: pool, Bus: events.New()}}
+	ap, err := q.GetAutopilot(ctx, util.MustParseUUID(autopilotID))
+	if err != nil {
+		t.Fatalf("get autopilot: %v", err)
+	}
+	run, err := q.GetAutopilotRun(ctx, util.MustParseUUID(runID))
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	// No member actor → schedule/webhook-style trigger_owner attribution.
+	if err := svc.dispatchRunOnly(ctx, ap, &run, pgtype.UUID{}); err != nil {
+		t.Fatalf("dispatchRunOnly: %v", err)
+	}
+
+	var source pgtype.Text
+	var originator, accountable pgtype.UUID
+	if err := pool.QueryRow(ctx, `
+		SELECT originator_source, originator_user_id, accountable_user_id
+		FROM agent_task_queue WHERE autopilot_run_id = $1`, run.ID).Scan(&source, &originator, &accountable); err != nil {
+		t.Fatalf("read stored attribution: %v", err)
+	}
+	if source.String != string(attribution.SourceTriggerOwner) {
+		t.Errorf("originator_source = %q, want trigger_owner", source.String)
+	}
+	if originator.Valid {
+		t.Errorf("schedule dispatch must NOT set originator, got %s", util.UUIDToString(originator))
+	}
+	if !accountable.Valid || accountable.Bytes != util.MustParseUUID(editorB).Bytes {
+		t.Errorf("accountable_user_id = %s, want editor %s (dispatch must follow the transferred publisher, not creator %s)",
+			util.UUIDToString(accountable), editorB, creatorA)
 	}
 }
 

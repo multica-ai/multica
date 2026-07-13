@@ -905,6 +905,17 @@ func (h *Handler) UpdateAutopilot(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "failed to update autopilot")
 			return
 		}
+		// An autopilot-level substantive edit governs every trigger, so responsibility
+		// for each firing trigger transfers to this editor (source=trigger_owner). A
+		// trigger-scoped edit re-stamps only its own row (see UpdateAutopilotTrigger).
+		if err := qtx.SetAutopilotTriggerPublishersByAutopilot(r.Context(), db.SetAutopilotTriggerPublishersByAutopilotParams{
+			AutopilotID:     autopilot.ID,
+			PublishedByType: pgtype.Text{String: "member", Valid: true},
+			PublishedByID:   parseUUID(userID),
+		}); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to update autopilot")
+			return
+		}
 	}
 
 	if replaceSubscribers {
@@ -1314,10 +1325,11 @@ func (h *Handler) CreateAutopilotTrigger(w http.ResponseWriter, r *http.Request)
 		NextRunAt:      nextRunAt,
 		Label:          ptrToText(req.Label),
 		WebhookToken:   webhookToken,
-		// Record the creating member so runs this trigger fires attribute to them
+		// Seed the responsible publisher = creator; a later substantive edit re-stamps
+		// it to the editor so runs attribute to whoever last shaped this trigger
 		// (source=trigger_owner, MUL-4302).
-		CreatedByType: pgtype.Text{String: "member", Valid: publisherID.Valid},
-		CreatedByID:   publisherID,
+		PublishedByType: pgtype.Text{String: "member", Valid: publisherID.Valid},
+		PublishedByID:   publisherID,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create trigger")
@@ -1380,10 +1392,10 @@ func (h *Handler) createWebhookTriggerWithMintedToken(
 			WebhookToken: pgtype.Text{String: token, Valid: true},
 			Provider:     pgtype.Text{String: provider, Valid: provider != ""},
 			EventFilters: eventFilters,
-			// Record the creating member so runs this webhook fires attribute to
-			// them (source=trigger_owner, MUL-4302).
-			CreatedByType: pgtype.Text{String: "member", Valid: publisherID.Valid},
-			CreatedByID:   publisherID,
+			// Seed the responsible publisher = creator; re-stamped to the editor on a
+			// later substantive edit (source=trigger_owner, MUL-4302).
+			PublishedByType: pgtype.Text{String: "member", Valid: publisherID.Valid},
+			PublishedByID:   publisherID,
 		})
 		if err != nil {
 			tx.Rollback(ctx)
@@ -1621,6 +1633,17 @@ func (h *Handler) UpdateAutopilotTrigger(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	if err := h.recordAutopilotRuleVersion(r.Context(), qtx, ap, "member", parseUUID(userID)); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to update trigger")
+		return
+	}
+	// Responsibility for THIS trigger's runs transfers to the editor. Scoped to the
+	// single row so editing one trigger never reassigns another's accountability —
+	// the per-firing-trigger granularity the autopilot-scoped rule_version can't give.
+	if err := qtx.SetAutopilotTriggerPublisher(r.Context(), db.SetAutopilotTriggerPublisherParams{
+		ID:              trigger.ID,
+		PublishedByType: pgtype.Text{String: "member", Valid: true},
+		PublishedByID:   parseUUID(userID),
+	}); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to update trigger")
 		return
 	}

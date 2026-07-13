@@ -169,16 +169,23 @@ func (s *TaskService) ResolveOriginatorFromTriggerComment(ctx context.Context, w
 // attribution.Result; re-stamping only the person columns would leave a run showing
 // B accountable while still pointing at A's stale source / evidence / level. isMention
 // picks the agent-authored label (delegation for a mention / thread-parent, otherwise
-// comment_source), matching the fresh-enqueue routing. The task is already admitted,
-// so an unresolved comment degrades to owner_fallback (accountable = agent owner)
-// rather than refusing — the fail-closed gate already ran at the original enqueue.
-func (s *TaskService) AttributionForMergedComment(ctx context.Context, workspaceID, commentID pgtype.UUID, isMention bool, agent db.Agent) attribution.Result {
+// comment_source), matching the fresh-enqueue routing.
+//
+// The merge re-opens the same fail-closed decision the original enqueue faced: a merge
+// swaps the effective trigger, responsible human, and evidence to the NEW comment, so
+// "the enqueue already checked" does not carry over. It runs the comment through
+// applyAttributionFallback — the identical fail-closed gate the fresh-enqueue path uses
+// — and returns ErrAttributionFailClosed when the new comment cannot be attributed
+// precisely and the workspace forbids the owner_fallback degrade. The caller must then
+// REFUSE the merge and keep the original (precisely-attributed) task snapshot rather
+// than re-stamp a queued run to a degraded owner_fallback (Elon must-fix).
+func (s *TaskService) AttributionForMergedComment(ctx context.Context, workspaceID, commentID pgtype.UUID, isMention bool, agent db.Agent) (attribution.Result, error) {
 	agentAuthoredSource := attribution.SourceCommentSource
 	if isMention {
 		agentAuthoredSource = attribution.SourceDelegation
 	}
 	attr := s.attributionFromTriggerComment(ctx, workspaceID, commentID, agentAuthoredSource)
-	return attribution.OwnerFallback(attr, agent.OwnerID)
+	return s.applyAttributionFallback(ctx, attr, agent)
 }
 
 // BuildCommentTriggerSummary is the exported wrapper used by the comment-merge
@@ -420,9 +427,10 @@ func (s *TaskService) attributionForIssueTask(ctx context.Context, issue db.Issu
 	}
 	// Autopilot-origin issues (origin_id is the autopilot id) from a schedule /
 	// webhook trigger: no human authorized the run, so originator stays NULL, but it
-	// is accountable to the human who CREATED the firing trigger — trigger_owner
-	// (MUL-4302; Bohan's refinement), degrading to the rule publisher when that
-	// creator is not recoverable. Resolved the same way run_only dispatch resolves
+	// is accountable to the human currently RESPONSIBLE for the firing trigger's
+	// effective config (creator, then last substantive editor) — trigger_owner
+	// (MUL-4302; Elon must-fix), degrading to the rule publisher when no such member
+	// is recoverable. Resolved the same way run_only dispatch resolves
 	// it, so both autopilot execution modes attribute identically. (A manual trigger
 	// carries an actor and is already handled above.) The issue only stores the
 	// autopilot id, so bridge issue → active run → trigger_id to find the trigger.
@@ -486,18 +494,25 @@ func ruleOwnerAttribution(ctx context.Context, q *db.Queries, workspaceID, autop
 }
 
 // triggerOwnerAttribution resolves an autopilot schedule/webhook run to the human
-// who CREATED the firing trigger (MUL-4302; Bohan's refinement). triggerID is the
-// autopilot_run's trigger_id. When it resolves to a member-created trigger, the run
-// is trigger_owner-accountable to that member. A trigger with no recorded creator
-// (created before per-trigger creators were captured) or an agent-created trigger
-// degrades to ruleOwnerAttribution (rule publisher, then owner_fallback) — the same
-// coarser behavior autopilots had before this change, so nothing regresses. Never
-// errors: attribution must not fail an enqueue.
+// currently RESPONSIBLE for the firing trigger's effective config (MUL-4302; Bohan +
+// Elon must-fix). triggerID is the autopilot_run's trigger_id. The trigger row's
+// published_by starts at the creator and transfers to whoever later substantively
+// edits it, so the run attributes to whoever last shaped what fires it — not the
+// original creator. A trigger with no recorded publisher (predating this migration)
+// or an agent publisher degrades to ruleOwnerAttribution (rule publisher, then
+// owner_fallback) — the same coarser behavior autopilots had before, so nothing
+// regresses. Never errors: attribution must not fail an enqueue.
 func triggerOwnerAttribution(ctx context.Context, q *db.Queries, triggerID, workspaceID, autopilotID pgtype.UUID, evidenceKind attribution.EvidenceKind, evidenceRefID pgtype.UUID) attribution.Result {
 	if q != nil && triggerID.Valid {
+		// published_by is the member CURRENTLY responsible for this trigger's
+		// effective config: the creator until someone substantively edits it (that
+		// trigger's cron/filter/webhook, or an autopilot-level change that bumps all
+		// its triggers), then the editor. So a run attributes to whoever last shaped
+		// what fires it, not the original creator — and editing another trigger never
+		// moves this one (MUL-4302; Elon must-fix).
 		if trig, err := q.GetAutopilotTrigger(ctx, triggerID); err == nil &&
-			trig.CreatedByType.Valid && trig.CreatedByType.String == "member" && trig.CreatedByID.Valid {
-			return attribution.TriggerOwner(trig.CreatedByID, evidenceKind, evidenceRefID)
+			trig.PublishedByType.Valid && trig.PublishedByType.String == "member" && trig.PublishedByID.Valid {
+			return attribution.TriggerOwner(trig.PublishedByID, evidenceKind, evidenceRefID)
 		}
 	}
 	return ruleOwnerAttribution(ctx, q, workspaceID, autopilotID, evidenceKind, evidenceRefID)

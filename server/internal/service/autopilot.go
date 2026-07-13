@@ -650,9 +650,10 @@ func (s *AutopilotService) dispatchRunOnly(ctx context.Context, ap db.Autopilot,
 	// the triggering member is direct_human and becomes BOTH originator (so the run
 	// carries their authorization context) and accountable (MUL-4302 §4). A
 	// schedule / webhook trigger has no human — originator_user_id stays NULL and
-	// the audit-accountable human is the member who CREATED the firing trigger —
-	// trigger_owner, resolved from run.TriggerID (MUL-4302; Bohan's refinement) —
-	// degrading to the rule version publisher (rule_owner) when that creator is not
+	// the audit-accountable human is the member currently RESPONSIBLE for the firing
+	// trigger's effective config (its creator, then whoever last substantively edited
+	// it) — trigger_owner, resolved from run.TriggerID (MUL-4302; Elon must-fix) —
+	// degrading to the rule version publisher (rule_owner) when no such member is
 	// recoverable, then to unattributed. Either way evidence points at the autopilot
 	// run and the row is never a NULL-source bypass.
 	var autopilotAttr attribution.Result

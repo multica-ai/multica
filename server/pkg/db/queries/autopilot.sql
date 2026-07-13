@@ -123,14 +123,32 @@ WHERE id = $1;
 INSERT INTO autopilot_trigger (
     autopilot_id, kind, enabled, cron_expression, timezone,
     next_run_at, webhook_token, label, provider, event_filters,
-    created_by_type, created_by_id
+    published_by_type, published_by_id
 ) VALUES (
     $1, $2, $3, sqlc.narg('cron_expression'), sqlc.narg('timezone'),
     sqlc.narg('next_run_at'), sqlc.narg('webhook_token'), sqlc.narg('label'),
     COALESCE(sqlc.narg('provider')::text, 'generic'),
     sqlc.narg('event_filters'),
-    sqlc.narg('created_by_type'), sqlc.narg('created_by_id')
+    sqlc.narg('published_by_type'), sqlc.narg('published_by_id')
 ) RETURNING *;
+
+-- name: SetAutopilotTriggerPublisher :exec
+-- Re-stamp a single trigger's responsible publisher after a substantive edit of
+-- THAT trigger (cron / filter / enabled / webhook security). Future runs it fires
+-- become accountable to this member (MUL-4302 trigger_owner transfer).
+UPDATE autopilot_trigger
+SET published_by_type = $2, published_by_id = $3, updated_at = now()
+WHERE id = $1;
+
+-- name: SetAutopilotTriggerPublishersByAutopilot :exec
+-- Re-stamp ALL of an autopilot's triggers' responsible publisher after a substantive
+-- AUTOPILOT-level edit (target / instructions / assignee / execution-mode / enable).
+-- Such a change governs every trigger's future runs, so responsibility transfers to
+-- the editing member for all of them; a per-trigger edit uses the single-trigger
+-- variant so it never reassigns another trigger (MUL-4302).
+UPDATE autopilot_trigger
+SET published_by_type = $2, published_by_id = $3, updated_at = now()
+WHERE autopilot_id = $1;
 
 -- name: UpdateAutopilotTrigger :one
 UPDATE autopilot_trigger SET

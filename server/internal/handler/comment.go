@@ -1508,7 +1508,22 @@ func (h *Handler) mergeCommentIntoPendingTask(ctx context.Context, issue db.Issu
 	// issue-assignee reaction is comment_source; a mention / thread-parent /
 	// conversation hop is delegation.
 	isMention := trigger.Source != commentTriggerSourceIssueAssignee
-	attr := h.TaskService.AttributionForMergedComment(ctx, issue.WorkspaceID, newTriggerCommentID, isMention, trigger.Agent)
+	attr, err := h.TaskService.AttributionForMergedComment(ctx, issue.WorkspaceID, newTriggerCommentID, isMention, trigger.Agent)
+	if err != nil {
+		// Fail-closed: the new comment cannot be precisely attributed and this
+		// workspace forbids the owner_fallback degrade. REFUSE the merge — keep the
+		// existing queued task on its original (precise) snapshot instead of
+		// re-stamping it to a degraded owner_fallback. The task still runs and reads
+		// the full thread, so the comment's instruction is not lost; only the audit
+		// re-attribution is declined (MUL-4302, Elon must-fix). Treat as handled so we
+		// never spawn a duplicate task under the one-pending-per-(issue,agent) index.
+		slog.Warn("refused comment merge: attribution fail-closed, keeping original task snapshot",
+			"issue_id", uuidToString(issue.ID),
+			"agent_id", uuidToString(trigger.Agent.ID),
+			"new_trigger_comment_id", uuidToString(newTriggerCommentID),
+			"error", err)
+		return true
+	}
 	overlay, connectedApps := h.TaskService.BuildRuntimeMCPOverlayForMerge(ctx, attr.UserID, trigger.Agent)
 	row, err := h.Queries.MergeCommentIntoPendingTask(ctx, db.MergeCommentIntoPendingTaskParams{
 		IssueID:                 issue.ID,
