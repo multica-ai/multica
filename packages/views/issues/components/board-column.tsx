@@ -1,6 +1,7 @@
 "use client";
 
-import { memo, useMemo, type ReactNode } from "react";
+import { memo, useCallback, useMemo, useState, type ReactNode } from "react";
+import { Virtuoso } from "react-virtuoso";
 import { EyeOff, MoreHorizontal, Plus, UserMinus } from "lucide-react";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
 import { useDroppable } from "@dnd-kit/core";
@@ -85,6 +86,28 @@ export const BoardColumn = memo(function BoardColumn({
     [issueIds, issueMap],
   );
 
+  // The column's scroll container is both dnd-kit's droppable and Virtuoso's
+  // customScrollParent, so a merged callback ref feeds the element to both.
+  // useDroppable's setNodeRef is stable across renders. Keeping the droppable
+  // on the always-mounted scroll container (not on individual cards) is what
+  // lets cross-column drops survive virtualization — only the cards inside
+  // window in/out of the DOM.
+  const [scrollEl, setScrollEl] = useState<HTMLDivElement | null>(null);
+  const mergedRef = useCallback(
+    (el: HTMLDivElement | null) => {
+      setNodeRef(el);
+      setScrollEl(el);
+    },
+    [setNodeRef],
+  );
+  // Infinite-scroll sentinel rides Virtuoso's Footer slot so it sits at the
+  // real end of the virtualized list and its IntersectionObserver still fires
+  // loadMore when scrolled to the bottom.
+  const footerComponents = useMemo(
+    () => (footer ? { Footer: () => <>{footer}</> } : undefined),
+    [footer],
+  );
+
   return (
     <div style={{ width: BOARD_COL_WIDTH }} className={`flex shrink-0 flex-col rounded-xl ${cfg?.columnBg ?? "bg-muted/40"} p-2`}>
       <div className="mb-2 flex items-center justify-between px-1.5">
@@ -143,8 +166,8 @@ export const BoardColumn = memo(function BoardColumn({
           </div>
         )}
         <div
-          ref={setNodeRef}
-          className={`absolute inset-0 space-y-2 overflow-y-auto rounded-lg p-1 transition-colors ${
+          ref={mergedRef}
+          className={`absolute inset-0 overflow-y-auto rounded-lg p-1 transition-colors ${
             isOver && sortLabel
               ? "ring-2 ring-brand/25 bg-accent/15"
               : isOver
@@ -152,25 +175,43 @@ export const BoardColumn = memo(function BoardColumn({
                 : ""
           }`}
         >
-          <SortableContext items={issueIds} strategy={verticalListSortingStrategy}>
-            {resolvedIssues.map((issue) => (
-              <DraggableBoardCard
-                key={issue.id}
-                issue={issue}
-                childProgress={childProgressMap?.get(issue.id)}
-                project={
-                  issue.project_id ? projectMap?.get(issue.project_id) : undefined
-                }
-                disableSorting={!!sortLabel}
-              />
-            ))}
-          </SortableContext>
-          {issueIds.length === 0 && (
-            <p className="py-8 text-center text-xs text-muted-foreground">
-              {t(($) => $.board.empty_column)}
-            </p>
+          {resolvedIssues.length > 0 ? (
+            <SortableContext items={issueIds} strategy={verticalListSortingStrategy}>
+              {scrollEl && (
+                <Virtuoso
+                  customScrollParent={scrollEl}
+                  data={resolvedIssues}
+                  computeItemKey={(_index, issue) => issue.id}
+                  increaseViewportBy={{ top: 300, bottom: 300 }}
+                  components={footerComponents}
+                  itemContent={(index, issue) => (
+                    // pt-2 on every card but the first reproduces the previous
+                    // `space-y-2` gap; padding (not margin) is inside Virtuoso's
+                    // measured item box so its height math stays correct.
+                    <div className={index === 0 ? undefined : "pt-2"}>
+                      <DraggableBoardCard
+                        issue={issue}
+                        childProgress={childProgressMap?.get(issue.id)}
+                        project={
+                          issue.project_id ? projectMap?.get(issue.project_id) : undefined
+                        }
+                        disableSorting={!!sortLabel}
+                      />
+                    </div>
+                  )}
+                />
+              )}
+            </SortableContext>
+          ) : (
+            <>
+              {issueIds.length === 0 && (
+                <p className="py-8 text-center text-xs text-muted-foreground">
+                  {t(($) => $.board.empty_column)}
+                </p>
+              )}
+              {footer}
+            </>
           )}
-          {footer}
         </div>
       </div>
     </div>
