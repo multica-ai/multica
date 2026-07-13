@@ -3,12 +3,16 @@ package handler
 import (
 	"bytes"
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -411,6 +415,14 @@ func postWebhook(t *testing.T, token string, body any, headers map[string]string
 	return w
 }
 
+func makeMulticaWebhookSignature(secret, timestamp string, body []byte) string {
+	mac := hmac.New(sha256.New, []byte(secret))
+	mac.Write([]byte(timestamp))
+	mac.Write([]byte("."))
+	mac.Write(body)
+	return "sha256=" + hex.EncodeToString(mac.Sum(nil))
+}
+
 // ── Tests ───────────────────────────────────────────────────────────────────
 
 func TestCreateWebhookTrigger_GeneratesToken(t *testing.T) {
@@ -476,6 +488,54 @@ func TestWebhookHandler_404OnUnknownToken(t *testing.T) {
 	w := postWebhook(t, "awt_unknown_token_value", map[string]any{"hello": "world"}, nil)
 	if w.Code != http.StatusNotFound {
 		t.Fatalf("expected 404, got %d body=%s", w.Code, w.Body.String())
+	}
+}
+
+func TestWebhookHandler_AcceptsStaticHeaderSecretOnTriggerIDPath(t *testing.T) {
+	agentID := createWebhookTestAgent(t, "WebhookHeaderSecret Agent")
+	apID := createWebhookTestAutopilot(t, agentID, "active", "run_only")
+	trig := createWebhookTriggerViaHandler(t, apID)
+
+	w := postWebhook(t, trig.ID, map[string]any{"hello": "world"}, map[string]string{
+		"Authorization": "Bearer " + *trig.WebhookToken,
+	})
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", w.Code, w.Body.String())
+	}
+}
+
+func TestWebhookHandler_RejectsTriggerIDPathWithoutHeaderAuth(t *testing.T) {
+	agentID := createWebhookTestAgent(t, "WebhookHeaderMissing Agent")
+	apID := createWebhookTestAutopilot(t, agentID, "active", "run_only")
+	trig := createWebhookTriggerViaHandler(t, apID)
+
+	w := postWebhook(t, trig.ID, map[string]any{"hello": "world"}, nil)
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d body=%s", w.Code, w.Body.String())
+	}
+}
+
+func TestWebhookHandler_AcceptsMulticaHMACOnTriggerIDPath(t *testing.T) {
+	agentID := createWebhookTestAgent(t, "WebhookHMAC Agent")
+	apID := createWebhookTestAutopilot(t, agentID, "active", "run_only")
+	trig := createWebhookTriggerViaHandler(t, apID)
+	secret := "0123456789abcdef0123456789abcdef"
+	if _, err := testHandler.Queries.SetAutopilotTriggerSigningSecret(context.Background(),
+		db.SetAutopilotTriggerSigningSecretParams{
+			ID:            parseUUID(trig.ID),
+			SigningSecret: pgtype.Text{String: secret, Valid: true},
+		}); err != nil {
+		t.Fatalf("set signing secret: %v", err)
+	}
+
+	body := []byte(`{"hello":"world"}`)
+	timestamp := time.Now().UTC().Format(time.RFC3339)
+	w := postWebhook(t, trig.ID, body, map[string]string{
+		"X-Multica-Timestamp": timestamp,
+		"X-Multica-Signature": makeMulticaWebhookSignature(secret, timestamp, body),
+	})
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", w.Code, w.Body.String())
 	}
 }
 

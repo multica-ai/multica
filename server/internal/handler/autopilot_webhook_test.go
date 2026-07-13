@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 )
 
 // ── Token generation ────────────────────────────────────────────────────────
@@ -44,6 +45,34 @@ func TestGenerateWebhookToken_NoUnsafeURLChars(t *testing.T) {
 	}
 	if strings.ContainsAny(token, "+/= ") {
 		t.Fatalf("token has unsafe characters: %q", token)
+	}
+}
+
+func TestVerifyMulticaSignature_AcceptsFreshTimestampedSignature(t *testing.T) {
+	body := []byte(`{"hello":"world"}`)
+	secret := "0123456789abcdef0123456789abcdef"
+	now := time.Date(2026, 5, 20, 12, 0, 0, 0, time.UTC)
+	timestamp := now.Format(time.RFC3339)
+	headers := http.Header{}
+	headers.Set("X-Multica-Timestamp", timestamp)
+	headers.Set("X-Multica-Signature", makeMulticaWebhookSignature(secret, timestamp, body))
+
+	if !verifyMulticaSignature(secret, headers, body, now) {
+		t.Fatal("expected fresh timestamped signature to verify")
+	}
+}
+
+func TestVerifyMulticaSignature_RejectsStaleTimestamp(t *testing.T) {
+	body := []byte(`{"hello":"world"}`)
+	secret := "0123456789abcdef0123456789abcdef"
+	now := time.Date(2026, 5, 20, 12, 0, 0, 0, time.UTC)
+	timestamp := now.Add(-10 * time.Minute).Format(time.RFC3339)
+	headers := http.Header{}
+	headers.Set("X-Multica-Timestamp", timestamp)
+	headers.Set("X-Multica-Signature", makeMulticaWebhookSignature(secret, timestamp, body))
+
+	if verifyMulticaSignature(secret, headers, body, now) {
+		t.Fatal("expected stale timestamped signature to be rejected")
 	}
 }
 

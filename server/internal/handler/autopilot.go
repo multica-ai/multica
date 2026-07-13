@@ -116,6 +116,14 @@ type AutopilotTriggerResponse struct {
 	// configured; clients then build the URL themselves from webhook_path
 	// plus their API base / current origin.
 	WebhookURL *string `json:"webhook_url"`
+	// WebhookHeaderPath is a non-secret ingress path using the trigger ID
+	// instead of the bearer token. Callers authenticate it with
+	// Authorization: Bearer <webhook_token>, X-Multica-Webhook-Secret, or a
+	// valid HMAC signature. Nil for non-webhook triggers.
+	WebhookHeaderPath *string `json:"webhook_header_path"`
+	// WebhookHeaderURL is the absolute form of WebhookHeaderPath when
+	// MULTICA_PUBLIC_URL is configured.
+	WebhookHeaderURL *string `json:"webhook_header_url"`
 	// Provider names the per-endpoint signing/dedupe convention. For now:
 	// "generic" (bearer URL only, Idempotency-Key for dedupe) or "github"
 	// (X-Hub-Signature-256 + X-GitHub-Delivery). Omitted for non-webhook
@@ -212,9 +220,13 @@ func (h *Handler) triggerToResponse(t db.AutopilotTrigger) AutopilotTriggerRespo
 	if t.Kind == "webhook" && t.WebhookToken.Valid && t.WebhookToken.String != "" {
 		path := webhookPathForToken(t.WebhookToken.String)
 		resp.WebhookPath = &path
+		headerPath := webhookHeaderPathForTriggerID(uuidToString(t.ID))
+		resp.WebhookHeaderPath = &headerPath
 		if h.cfg.PublicURL != "" {
 			full := h.cfg.PublicURL + path
 			resp.WebhookURL = &full
+			headerFull := h.cfg.PublicURL + headerPath
+			resp.WebhookHeaderURL = &headerFull
 		}
 		provider := t.Provider
 		if provider == "" {
@@ -256,6 +268,10 @@ func signingSecretHint(secret string) string {
 // expected URLs without instantiating a Handler can call it.
 func webhookPathForToken(token string) string {
 	return "/api/webhooks/autopilots/" + token
+}
+
+func webhookHeaderPathForTriggerID(triggerID string) string {
+	return "/api/webhooks/autopilots/" + triggerID
 }
 
 func runToResponse(r db.AutopilotRun) AutopilotRunResponse {
