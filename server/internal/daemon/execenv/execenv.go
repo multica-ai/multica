@@ -326,7 +326,14 @@ type ReuseParams struct {
 	WorkDir        string
 	Provider       string
 	CodexVersion   string // only used when Provider == "codex"
-	OpenclawBin    string // only used when Provider == "openclaw"; empty = PATH lookup
+	// ResumeSessionID is the prior Codex thread/session ID this reused task
+	// intends to resume, when any. Only consulted when Provider == "codex" and
+	// only used while migrating a legacy per-task home whose sessions/ still
+	// symlinks the shared ~/.codex/sessions — the single rollout for this ID is
+	// exposed into the new task-local sessions dir so thread/resume still finds
+	// it. Empty means a fresh thread. See prepareCodexSessionsDir (MUL-4424).
+	ResumeSessionID string
+	OpenclawBin     string // only used when Provider == "openclaw"; empty = PATH lookup
 	// McpConfig is the agent's saved `mcp_config` JSON. Reused on reuse so a
 	// freshly-saved managed set re-materialises into the wrapper before the
 	// task starts — without this a stale wrapper from a prior run would keep
@@ -438,7 +445,7 @@ func Reuse(params ReuseParams, logger *slog.Logger) *Environment {
 	// config (especially sandbox/network access) is up to date.
 	if params.Provider == "codex" {
 		codexHome := filepath.Join(env.RootDir, "codex-home")
-		if err := prepareCodexHomeWithOpts(codexHome, CodexHomeOptions{CodexVersion: params.CodexVersion}, logger); err != nil {
+		if err := prepareCodexHomeWithOpts(codexHome, CodexHomeOptions{CodexVersion: params.CodexVersion, ResumeSessionID: params.ResumeSessionID}, logger); err != nil {
 			logger.Warn("execenv: refresh codex-home failed", "error", err)
 		} else {
 			env.CodexHome = codexHome

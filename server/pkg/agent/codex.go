@@ -1054,9 +1054,12 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 		c.usageMu.Unlock()
 
 		// Fallback: if no usage from JSON-RPC, scan Codex session JSONL logs.
-		// Codex writes token_count events to ~/.codex/sessions/YYYY/MM/DD/*.jsonl.
+		// Codex writes token_count events to $CODEX_HOME/sessions/YYYY/MM/DD/*.jsonl;
+		// scan this backend's per-task CODEX_HOME, since sessions are isolated
+		// there rather than in the shared ~/.codex/sessions (MUL-4424).
 		if u.InputTokens == 0 && u.OutputTokens == 0 {
-			if scanned := scanCodexSessionUsage(startTime); scanned != nil {
+			taskCodexHome := strings.TrimSpace(b.cfg.Env["CODEX_HOME"])
+			if scanned := scanCodexSessionUsage(startTime, taskCodexHome); scanned != nil {
 				u = scanned.usage
 				if scanned.model != "" && opts.Model == "" {
 					opts.Model = scanned.model
@@ -2079,9 +2082,11 @@ type codexSessionUsage struct {
 
 // scanCodexSessionUsage scans Codex session JSONL files written after startTime
 // to extract token usage. Codex writes token_count events to
-// ~/.codex/sessions/YYYY/MM/DD/*.jsonl.
-func scanCodexSessionUsage(startTime time.Time) *codexSessionUsage {
-	root := codexSessionRoot()
+// $CODEX_HOME/sessions/YYYY/MM/DD/*.jsonl. codexHome is the backend's per-task
+// CODEX_HOME; sessions are isolated there rather than in the shared
+// ~/.codex/sessions (MUL-4424), so usage must be read from it.
+func scanCodexSessionUsage(startTime time.Time, codexHome string) *codexSessionUsage {
+	root := codexSessionRoot(codexHome)
 	if root == "" {
 		return nil
 	}
@@ -2117,9 +2122,15 @@ func scanCodexSessionUsage(startTime time.Time) *codexSessionUsage {
 	return &result
 }
 
-// codexSessionRoot returns the Codex sessions directory.
-func codexSessionRoot() string {
-	if codexHome := os.Getenv("CODEX_HOME"); codexHome != "" {
+// codexSessionRoot returns the Codex sessions directory. It prefers the
+// explicit per-task codexHome the backend is running with (so usage is read
+// from the same task-local sessions Codex actually wrote to), then the ambient
+// CODEX_HOME, then ~/.codex.
+func codexSessionRoot(codexHome string) string {
+	if codexHome = strings.TrimSpace(codexHome); codexHome == "" {
+		codexHome = os.Getenv("CODEX_HOME")
+	}
+	if codexHome != "" {
 		dir := filepath.Join(codexHome, "sessions")
 		if info, err := os.Stat(dir); err == nil && info.IsDir() {
 			return dir

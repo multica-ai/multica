@@ -11,13 +11,6 @@ import (
 	"github.com/pelletier/go-toml/v2"
 )
 
-// Directories to symlink from the shared ~/.codex/ into the per-task CODEX_HOME.
-// The shared directory is created if it doesn't exist, ensuring Codex session
-// logs are always written to the global home where users can find them.
-var codexSymlinkedDirs = []string{
-	"sessions",
-}
-
 // Files to symlink from the shared ~/.codex/ into the per-task CODEX_HOME.
 // Symlinks share state (e.g. auth tokens) so changes propagate automatically.
 var codexSymlinkedFiles = []string{
@@ -44,6 +37,14 @@ type CodexHomeOptions struct {
 	// Empty means use runtime.GOOS. Primarily exists so tests can exercise
 	// both macOS and Linux paths deterministically.
 	GOOS string
+	// ResumeSessionID is the Codex thread/session ID this run intends to
+	// resume, when any. It is only consulted while migrating a legacy per-task
+	// home whose sessions/ still symlinks the shared ~/.codex/sessions: the
+	// single rollout for this ID is exposed into the new task-local sessions
+	// dir so thread/resume can still find it without pulling the whole shared
+	// history back in. Empty means a fresh thread (no rollout to expose). See
+	// prepareCodexSessionsDir (MUL-4424).
+	ResumeSessionID string
 }
 
 // prepareCodexHome is a thin wrapper around prepareCodexHomeWithOpts kept for
@@ -65,13 +66,11 @@ func prepareCodexHomeWithOpts(codexHome string, opts CodexHomeOptions, logger *s
 		return fmt.Errorf("create codex-home dir: %w", err)
 	}
 
-	// Symlink shared directories (sessions) so logs stay in the global home.
-	for _, name := range codexSymlinkedDirs {
-		src := filepath.Join(sharedHome, name)
-		dst := filepath.Join(codexHome, name)
-		if err := ensureDirSymlink(src, dst); err != nil {
-			logger.Warn("execenv: codex-home dir symlink failed", "dir", name, "error", err)
-		}
+	// Give the task its own local sessions/ directory instead of symlinking the
+	// shared ~/.codex/sessions in — a huge shared history would otherwise stall
+	// Codex's `initialize` state backfill (MUL-4424). See prepareCodexSessionsDir.
+	if err := prepareCodexSessionsDir(codexHome, sharedHome, opts, logger); err != nil {
+		logger.Warn("execenv: codex-home sessions dir prepare failed", "error", err)
 	}
 
 	// Symlink shared files (auth).
@@ -157,6 +156,149 @@ func resolveSharedCodexHome() string {
 		return filepath.Join(os.TempDir(), ".codex") // last resort fallback
 	}
 	return filepath.Join(home, ".codex")
+}
+
+// codexSessionStateGlobs are the session-derived state artifacts Codex builds
+// inside a CODEX_HOME by indexing everything under sessions/. They are dropped
+// during the legacy-symlink migration (prepareCodexSessionsDir) so Codex
+// rebuilds them from the now task-local sessions instead of keeping the
+// thousands of stale rows it backfilled from the shared ~/.codex/sessions
+// history. Everything matched here is a rebuildable derived index — never
+// authoritative data. Sibling per-task DBs with different prefixes (goals_*,
+// logs_*, memories_*) are NOT session-derived and are deliberately left intact.
+var codexSessionStateGlobs = []string{
+	"state_*.sqlite",
+	"state_*.sqlite-shm",
+	"state_*.sqlite-wal",
+	"session_index.jsonl",
+}
+
+// prepareCodexSessionsDir makes codex-home/sessions a real, task-local
+// directory rather than a symlink into the shared ~/.codex/sessions.
+//
+// Background (MUL-4424): Codex 0.143+ backfills a per-home session-state DB by
+// enumerating every rollout visible under sessions/ during `initialize`. When
+// the per-task home symlinked the shared sessions dir in, a machine that had
+// accumulated thousands of rollouts (one reporter hit ~2000 files / ~22 GiB)
+// stalled `initialize` for tens of seconds — the app-server started but the
+// task produced no output before it was cancelled. A task's fresh session has
+// no business carrying the whole machine's Codex history, so we isolate it:
+//
+//   - Fresh task: sessions/ is absent — create an empty local dir so backfill
+//     is trivial.
+//   - Reused task whose sessions/ is already a real dir: it is authoritative —
+//     the prior run's rollout already lives here — so leave it untouched.
+//   - Reused task still holding a legacy symlink (created by an older build):
+//     migrate in place. Replace the symlink with a real dir; when resuming,
+//     expose only the single rollout being resumed; and drop the stale
+//     session-state DB so Codex rebuilds it from the task-local sessions.
+func prepareCodexSessionsDir(codexHome, sharedHome string, opts CodexHomeOptions, logger *slog.Logger) error {
+	dst := filepath.Join(codexHome, "sessions")
+
+	fi, err := os.Lstat(dst)
+	switch {
+	case os.IsNotExist(err):
+		return os.MkdirAll(dst, 0o755) // fresh task — empty local dir
+	case err != nil:
+		return fmt.Errorf("stat sessions dir %s: %w", dst, err)
+	}
+
+	if fi.Mode()&os.ModeSymlink == 0 {
+		// Already a real directory (task-local, authoritative). Ensure it
+		// exists (no-op) and leave its contents alone.
+		return os.MkdirAll(dst, 0o755)
+	}
+
+	// Legacy symlink into the shared sessions dir — migrate it in place.
+	sharedSessions, _ := os.Readlink(dst)
+	if sharedSessions == "" {
+		sharedSessions = filepath.Join(sharedHome, "sessions")
+	}
+	if err := os.Remove(dst); err != nil {
+		return fmt.Errorf("remove legacy sessions symlink %s: %w", dst, err)
+	}
+	if err := os.MkdirAll(dst, 0o755); err != nil {
+		return fmt.Errorf("create task-local sessions dir %s: %w", dst, err)
+	}
+
+	// Drop the session-derived state so Codex re-indexes the task-local
+	// sessions instead of the stale rows it built from the shared home.
+	resetCodexSessionState(codexHome, logger)
+
+	// When this run intends to resume a specific session, expose just that one
+	// rollout so thread/resume can find it — without pulling the whole shared
+	// history back in.
+	if opts.ResumeSessionID != "" {
+		if err := exposeResumeRollout(sharedSessions, dst, opts.ResumeSessionID, logger); err != nil {
+			logger.Warn("execenv: codex-home expose resume rollout failed; task will fall back to a fresh thread",
+				"session_id", opts.ResumeSessionID, "error", err)
+		}
+	}
+
+	logger.Info("execenv: migrated codex-home sessions from shared symlink to task-local dir",
+		"codex_home", codexHome, "resume_session", opts.ResumeSessionID != "")
+	return nil
+}
+
+// resetCodexSessionState removes the rebuildable, session-derived Codex state
+// files from a per-task CODEX_HOME so the next `initialize` re-derives them from
+// the task-local sessions. Only session-derived indexes are touched; unrelated
+// per-task DBs (goals_*, logs_*, memories_*) are left intact.
+func resetCodexSessionState(codexHome string, logger *slog.Logger) {
+	for _, pattern := range codexSessionStateGlobs {
+		matches, err := filepath.Glob(filepath.Join(codexHome, pattern))
+		if err != nil {
+			continue
+		}
+		for _, m := range matches {
+			if err := os.Remove(m); err != nil && !os.IsNotExist(err) {
+				logger.Warn("execenv: codex-home reset session state failed", "path", m, "error", err)
+			}
+		}
+	}
+}
+
+// exposeResumeRollout links the single rollout file for sessionID out of the
+// shared sessions history into the task-local sessions dir, preserving Codex's
+// sessions/YYYY/MM/DD layout so thread/resume can find it.
+//
+// It symlinks rather than copies: a rollout can be large (one reporter saw a
+// single 1.5 GiB file), and this runs on `initialize`'s critical path, so an
+// unbounded copy would reintroduce the very stall we are fixing. os.Symlink is
+// used directly (no copy fallback) — if the link can't be created (e.g. Windows
+// without the privilege) the resume is skipped and the caller falls back to a
+// fresh thread rather than copying gigabytes.
+func exposeResumeRollout(sharedSessions, localSessions, sessionID string, logger *slog.Logger) error {
+	if sharedSessions == "" || sessionID == "" {
+		return nil
+	}
+	// Rollout files are named rollout-<timestamp>-<sessionID>.jsonl under
+	// sessions/YYYY/MM/DD/. Match by the trailing session ID.
+	pattern := filepath.Join(sharedSessions, "*", "*", "*", "rollout-*-"+sessionID+".jsonl")
+	matches, err := filepath.Glob(pattern)
+	if err != nil {
+		return fmt.Errorf("glob rollout for %s: %w", sessionID, err)
+	}
+	if len(matches) == 0 {
+		return fmt.Errorf("no rollout found for session %s under %s", sessionID, sharedSessions)
+	}
+	linked := 0
+	for _, src := range matches {
+		rel, err := filepath.Rel(sharedSessions, src)
+		if err != nil {
+			rel = filepath.Base(src)
+		}
+		dst := filepath.Join(localSessions, rel)
+		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+			return fmt.Errorf("create rollout dir %s: %w", filepath.Dir(dst), err)
+		}
+		if err := os.Symlink(src, dst); err != nil {
+			return fmt.Errorf("link rollout %s: %w", src, err)
+		}
+		linked++
+	}
+	logger.Info("execenv: exposed resume rollout into task-local sessions", "session_id", sessionID, "files", linked)
+	return nil
 }
 
 func syncCodexModelCatalog(codexHome, sharedHome string) error {
@@ -259,31 +401,6 @@ func exposeSharedCodexPluginCache(codexHome, sharedHome string) error {
 		return fmt.Errorf("expose shared plugin cache: %w", err)
 	}
 	return nil
-}
-
-// ensureDirSymlink creates a symlink dst → src for a directory.
-// Unlike ensureSymlink, it creates the source directory if it doesn't exist,
-// so Codex can write to it immediately.
-func ensureDirSymlink(src, dst string) error {
-	if err := os.MkdirAll(src, 0o755); err != nil {
-		return fmt.Errorf("create shared dir %s: %w", src, err)
-	}
-
-	// Check if dst already exists.
-	if fi, err := os.Lstat(dst); err == nil {
-		if fi.Mode()&os.ModeSymlink != 0 {
-			target, err := os.Readlink(dst)
-			if err == nil && target == src {
-				return nil // already correct
-			}
-			os.Remove(dst)
-		} else {
-			// Regular file/dir exists — don't overwrite.
-			return nil
-		}
-	}
-
-	return createDirLink(src, dst)
 }
 
 // ensureSymlink ensures dst tracks src. If src doesn't exist, it's a no-op.

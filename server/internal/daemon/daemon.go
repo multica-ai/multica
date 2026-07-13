@@ -3616,6 +3616,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			WorkDir:             task.PriorWorkDir,
 			Provider:            provider,
 			CodexVersion:        codexVersion,
+			ResumeSessionID:     task.PriorSessionID,
 			OpenclawBin:         openclawBin,
 			McpConfig:           effectiveMcpConfig,
 			CursorMcpAuthSource: cursorMcpAuthSource,
