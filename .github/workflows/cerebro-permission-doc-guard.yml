@@ -44,8 +44,14 @@ jobs:
           # resolved and stamped into the sandbox policy the daemon receives
           # (e.g. the agent-browser unix-socket bind, FIR-1428). FIR-1609 deleted
           # that stamping with no doc/guard catching it; watching this file closes
-          # that blind spot.
-          PERM_REGEX='^(server/internal/cerebro/(credentials|toolpolicy|grouppermissions|mentiongate|sandboxprofile|access|permissions|grants|permgate)/|server/internal/cerebro/runtime/(tools_registry|approval_gate|firtal_gateway_tools_extended|firtal_gateway_config)\.go|server/internal/daemon/sandbox\.go|server/internal/handler/daemon\.go)'
+          # that blind spot. `grants` was dropped 2026-07 (FIR-1777 removed the
+          # operator grant control plane) — kept out of the directory list below.
+          # server/internal/handler/daemon_tool_policy_cerebro.go is the live
+          # resolve endpoint for local Claude Code daemon tool calls; connections/,
+          # connectiontools/, approvals/, webfetchpolicy/, localtoolpolicy/, and
+          # delegationorigin/ are live enforcement/decision surfaces documented in
+          # permission-system.md that were missing from this list until this pass.
+          PERM_REGEX='^(server/internal/cerebro/(credentials|toolpolicy|grouppermissions|mentiongate|sandboxprofile|access|permissions|permgate|connections|connectiontools|approvals|webfetchpolicy|localtoolpolicy|delegationorigin)/|server/internal/cerebro/runtime/(tools_registry|approval_gate|firtal_gateway_tools_extended|firtal_gateway_config)\.go|server/internal/daemon/sandbox\.go|server/internal/handler/daemon\.go|server/internal/handler/daemon_tool_policy_cerebro\.go)'
           DOC='docs/agents/permission-system.md'
 
           PERM_CHANGED=$(echo "$CHANGED" | grep -E "$PERM_REGEX" || true)

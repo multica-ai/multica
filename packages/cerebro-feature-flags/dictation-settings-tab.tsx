@@ -1,6 +1,6 @@
 // FIR-1797 — inline settings for the Dictation feature, shown under its toggle
 // in the Cerebro features tab (registered in FLAG_SETTINGS). Lets the user keep
-// a personal glossary (decoding bias) and turn the cleanup pass on/off.
+// a personal glossary (post-transcription correction) and cleanup on/off.
 "use client";
 
 import { useEffect, useState } from "react";
@@ -39,9 +39,9 @@ export function DictationSettings() {
       <div className="space-y-1.5">
         <Label className="text-sm font-medium">Extra glossary terms</Label>
         <p className="text-xs text-muted-foreground">
-          Your teammates', agents' and projects' names are added automatically.
-          Use this for anything else — brand and product names, jargon — one per
-          line, so the model spells them correctly when you dictate.
+          Workspace and business-object names are checked automatically after
+          transcription. Add anything else here — brand and product names or
+          jargon — one per line.
         </p>
         <Textarea
           value={glossaryDraft}

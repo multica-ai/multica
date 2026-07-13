@@ -42,7 +42,7 @@ const status = (overrides: Partial<RoundStatus> = {}): RoundStatus => ({
     created_at: "", updated_at: "",
   },
   active_run: null,
-  members: [{ round_id: "round-1", issue_id: "issue-1", added_by_type: "member", added_by_id: "owner", held_trigger_count: 2, waiting_count: 1, queued_count: 0, state: "waiting", created_at: "" }],
+  members: [{ round_id: "round-1", issue_id: "issue-1", added_by_type: "member", added_by_id: "owner", held_trigger_count: 2, waiting_count: 1, queued_count: 0, retry_count: 0, state: "waiting", created_at: "" }],
   ...overrides,
 });
 const openCycle = (overrides: Partial<RoundStatus> = {}): RoundStatus => {
@@ -59,20 +59,64 @@ describe("RoundsBlock", () => {
     expect(within(block).queryByText("Daily ideas")).not.toBeInTheDocument();
   });
 
-  it("searches the inbox rows inside the expanded block", () => {
+  it("searches message titles without keeping the matching Round wrapper", () => {
     const second = status({ round: { ...status().round, id: "round-2", name: "Weekly" }, members: [{ ...status().members[0]!, round_id: "round-2", issue_id: "issue-2" }] });
     render(<RoundsBlock statuses={[status(), second]} issueTitles={{ "issue-1": "Alpha returns", "issue-2": "Beta pricing" }} onStart={vi.fn()} onSelectIssue={vi.fn()} />);
     fireEvent.change(screen.getByRole("searchbox", { name: "Search Rounds" }), { target: { value: "beta" } });
     expect(screen.queryByText("Daily ideas")).not.toBeInTheDocument();
-    expect(screen.getByText("Weekly")).toBeInTheDocument();
+    expect(screen.queryByText("Weekly")).not.toBeInTheDocument();
+    expect(screen.getByText("Beta pricing")).toBeInTheDocument();
   });
 
-  it("expands a round automatically when the search matches one of its issues (FIR-3108)", () => {
+  it("switches search results to the flat All messages row with its Round action", () => {
+    const removeFromRound = vi.fn();
+    const second = status({
+      round: { ...status().round, id: "round-2", name: "Weekly" },
+      members: [
+        {
+          ...status().members[0]!,
+          round_id: "round-2",
+          issue_id: "issue-2",
+        },
+      ],
+    });
+    render(
+      <RoundsBlock
+        statuses={[status(), second]}
+        issueTitles={{ "issue-1": "Alpha returns", "issue-2": "Beta pricing" }}
+        onStart={vi.fn()}
+        onSelectIssue={vi.fn()}
+        renderIssue={(issueId) => (
+          <div data-testid={`all-messages-row-${issueId}`}>
+            {issueId}
+            <button type="button" onClick={removeFromRound}>
+              Remove from Weekly
+            </button>
+          </div>
+        )}
+      />,
+    );
+
+    fireEvent.change(screen.getByRole("searchbox", { name: "Search Rounds" }), {
+      target: { value: "beta" },
+    });
+
+    expect(screen.getByTestId("all-messages-row-issue-2")).toBeInTheDocument();
+    expect(screen.queryByTestId("all-messages-row-issue-1")).not.toBeInTheDocument();
+    expect(screen.queryByText("Weekly")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Ready to start")).not.toBeInTheDocument();
+    expect(screen.queryByText("Waiting")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Remove from Weekly" }));
+    expect(removeFromRound).toHaveBeenCalledOnce();
+  });
+
+  it("shows a matching issue directly without requiring its Round to expand", () => {
     const second = status({ round: { ...status().round, id: "round-2", name: "Weekly" }, members: [{ ...status().members[0]!, round_id: "round-2", issue_id: "issue-2" }] });
     render(<RoundsBlock statuses={[status(), second]} issueTitles={{ "issue-1": "Alpha returns", "issue-2": "Beta pricing" }} onStart={vi.fn()} onSelectIssue={vi.fn()} />);
     expect(screen.queryByText("Beta pricing")).not.toBeInTheDocument();
     fireEvent.change(screen.getByRole("searchbox", { name: "Search Rounds" }), { target: { value: "beta" } });
-    expect(screen.getByRole("button", { name: "Collapse Weekly" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Collapse Weekly" })).not.toBeInTheDocument();
     expect(screen.getByText("Beta pricing")).toBeInTheDocument();
   });
 
@@ -89,12 +133,12 @@ describe("RoundsBlock", () => {
     expect(screen.queryByText("Alpha returns")).not.toBeInTheDocument();
   });
 
-  it("expands every matching round when a search term matches issues in more than one round", () => {
+  it("shows matching messages from multiple Rounds in one flat result list", () => {
     const second = status({ round: { ...status().round, id: "round-2", name: "Weekly" }, members: [{ ...status().members[0]!, round_id: "round-2", issue_id: "issue-2" }] });
     render(<RoundsBlock statuses={[status(), second]} issueTitles={{ "issue-1": "Returns queue", "issue-2": "Returns follow-up" }} onStart={vi.fn()} onSelectIssue={vi.fn()} />);
     fireEvent.change(screen.getByRole("searchbox", { name: "Search Rounds" }), { target: { value: "returns" } });
-    expect(screen.getByRole("button", { name: "Collapse Daily ideas" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Collapse Weekly" })).toBeInTheDocument();
+    expect(screen.queryByText("Daily ideas")).not.toBeInTheDocument();
+    expect(screen.queryByText("Weekly")).not.toBeInTheDocument();
     expect(screen.getByText("Returns queue")).toBeInTheDocument();
     expect(screen.getByText("Returns follow-up")).toBeInTheDocument();
   });
@@ -121,28 +165,68 @@ describe("RoundsBlock", () => {
     expect(screen.getByRole("button", { name: "Expand Daily ideas" })).toBeInTheDocument();
   });
 
-  it("folds answered members behind a collapse in batch and live alike (FIR-3114 review, point 1)", () => {
+  it("keeps answered members directly openable in the unfolded list (FIR-3179)", () => {
     const answered = status({ members: [{ ...status().members[0]!, state: "answered", waiting_count: 0 }] });
     render(<RoundsBlock statuses={[answered]} issueTitles={{ "issue-1": "FIR-42 · Investigate returns" }} onStart={vi.fn()} onSelectIssue={vi.fn()} />);
     fireEvent.click(screen.getByRole("button", { name: "Expand Daily ideas" }));
-    expect(screen.queryByText("FIR-42 · Investigate returns")).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Expand answered in Daily ideas" }));
-    expect(screen.getByText("Answered (1)")).toBeInTheDocument();
     expect(screen.getByText("FIR-42 · Investigate returns")).toBeInTheDocument();
+    expect(screen.getByText("Answered")).toBeInTheDocument();
   });
 
-  it("hides working and queued members entirely until the next round (FIR-3114 review, point 3)", () => {
+  it("keeps working and queued members available without presenting them as actions (FIR-3179)", () => {
     const mixed = openCycle({ members: [
       { ...status().members[0]!, state: "working", waiting_count: 0, held_trigger_count: 0 },
       { ...status().members[0]!, issue_id: "issue-2", state: "waiting", waiting_count: 4, held_trigger_count: 0 },
       { ...status().members[0]!, issue_id: "issue-3", state: "queued", waiting_count: 0, queued_count: 2, held_trigger_count: 0 },
     ] });
     render(<RoundsBlock statuses={[mixed]} issueTitles={{ "issue-1": "Agent busy", "issue-2": "Needs me", "issue-3": "Replied after my answer" }} onStart={vi.fn()} onSelectIssue={vi.fn()} />);
-    expect(screen.getByText("4 waiting")).toBeInTheDocument();
+    expect(screen.getByText("4 to answer")).toBeInTheDocument();
     expect(screen.getByText("Needs me")).toBeInTheDocument();
-    expect(screen.queryByText("Agent busy")).not.toBeInTheDocument();
-    expect(screen.queryByText("Replied after my answer")).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Expand answered in Daily ideas" })).not.toBeInTheDocument();
+    expect(screen.getByText("Agent busy")).toBeInTheDocument();
+    expect(screen.getByText("Replied after my answer")).toBeInTheDocument();
+    expect(screen.getByText("Working")).toBeInTheDocument();
+    expect(screen.getByText("Queued")).toBeInTheDocument();
+  });
+
+  it("shows every message state in one openable list and only emphasizes Waiting (FIR-3179)", () => {
+    const states = openCycle({ members: [
+      { ...status().members[0]!, issue_id: "waiting", state: "waiting", waiting_count: 1, held_trigger_count: 0 },
+      { ...status().members[0]!, issue_id: "working", state: "working", waiting_count: 0, held_trigger_count: 0 },
+      { ...status().members[0]!, issue_id: "queued", state: "queued", waiting_count: 0, queued_count: 1, held_trigger_count: 0 },
+      { ...status().members[0]!, issue_id: "planned", state: "planned", waiting_count: 0, held_trigger_count: 0 },
+      { ...status().members[0]!, issue_id: "answered", state: "answered", waiting_count: 0, held_trigger_count: 0 },
+      { ...status().members[0]!, issue_id: "failed", state: "failed", retry_count: 3, waiting_count: 0, held_trigger_count: 0 },
+    ] });
+    const onSelectIssue = vi.fn();
+    render(<RoundsBlock
+      statuses={[states]}
+      issueTitles={{ waiting: "Needs my answer", working: "Agent is working", queued: "Queued reply", planned: "Not started", answered: "Already answered", failed: "Retries exhausted" }}
+      onStart={vi.fn()}
+      onSelectIssue={onSelectIssue}
+    />);
+
+    for (const label of ["Waiting", "Working", "Queued", "Planned", "Answered", "Failed"]) {
+      expect(screen.getByText(label)).toBeInTheDocument();
+    }
+    for (const title of ["Needs my answer", "Agent is working", "Queued reply", "Not started", "Already answered", "Retries exhausted"]) {
+      fireEvent.click(screen.getByRole("button", { name: title }));
+    }
+    expect(onSelectIssue.mock.calls.map(([issueId]) => issueId)).toEqual(["waiting", "working", "queued", "planned", "answered", "failed"]);
+    expect(screen.getByRole("button", { name: "Needs my answer" }).closest('[data-round-action="waiting"]')).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Agent is working" }).closest("[data-round-action]")).toBeNull();
+    expect(screen.getByText("3 retries failed")).toBeInTheDocument();
+  });
+
+  it("moves a replied message out of the active Waiting state without hiding its conversation (FIR-3179)", () => {
+    const member = { ...status().members[0]!, issue_id: "issue-1", state: "waiting" as const, waiting_count: 1, held_trigger_count: 0 };
+    const { rerender } = render(<RoundsBlock statuses={[openCycle({ members: [member] })]} issueTitles={{ "issue-1": "Reply to me" }} onStart={vi.fn()} onSelectIssue={vi.fn()} />);
+    expect(screen.getByText("Waiting")).toBeInTheDocument();
+
+    rerender(<RoundsBlock statuses={[openCycle({ members: [{ ...member, state: "answered", waiting_count: 0 }] })]} issueTitles={{ "issue-1": "Reply to me" }} onStart={vi.fn()} onSelectIssue={vi.fn()} />);
+
+    expect(screen.queryByText("Waiting")).not.toBeInTheDocument();
+    expect(screen.getByText("Answered")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Reply to me" })).toBeInTheDocument();
   });
 
   it("pauses an open cycle while a run is dispatching (FIR-3114 review, point 4)", () => {
@@ -166,7 +250,8 @@ describe("RoundsBlock", () => {
     expect(screen.getByText(/Next/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Expand Daily ideas" }));
     expect(screen.getByText("FIR-42 · Investigate returns")).toBeInTheDocument();
-    expect(screen.getByText("2 held responses")).toBeInTheDocument();
+    expect(screen.getByText("2 ready to start")).toBeInTheDocument();
+    expect(screen.getByText("Waiting")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Run Daily ideas" }));
     expect(onStart).toHaveBeenCalledWith("round-1");
   });
@@ -196,19 +281,19 @@ describe("RoundsBlock", () => {
     const { container } = render(<RoundsBlock statuses={[openCycle({
       members: [{ ...status().members[0]!, waiting_count: 9 }],
     })]} issueTitles={{}} onStart={vi.fn()} onSelectIssue={vi.fn()} />);
-    expect(within(container).getByText("9 waiting")).toBeInTheDocument();
+    expect(within(container).getByText("9 to answer")).toBeInTheDocument();
   });
 
-  it("shows progress while dispatching, then surfaces the next cycle's messages", () => {
+  it("keeps background agent work visually quiet, then surfaces the next cycle's messages", () => {
     const { container, rerender } = render(<RoundsBlock statuses={[status({ active_run: {
       id: "run-1", round_id: "round-1", status: "running", total_count: 4,
       responded_count: 2, stalled_count: 0, nudged_count: 1, started_at: "",
       ready_at: null, completed_at: null, created_at: "",
     } })]} issueTitles={{ "issue-1": "FIR-42 · Investigate returns" }} onStart={vi.fn()} onSelectIssue={vi.fn()} />);
 
-    expect(within(container).getByRole("progressbar", { name: "Daily ideas progress" })).toHaveAttribute("aria-valuenow", "2");
-    expect(within(container).getByText("1 nudged")).toBeInTheDocument();
-    expect(within(container).getByText("2/4 running")).toBeInTheDocument();
+    expect(within(container).queryByRole("progressbar")).not.toBeInTheDocument();
+    expect(within(container).queryByText("1 nudged")).not.toBeInTheDocument();
+    expect(within(container).getByText("Agents working")).toBeInTheDocument();
 
     rerender(<RoundsBlock statuses={[openCycle({
       members: [{ ...status().members[0]!, held_trigger_count: 0 }],
@@ -230,9 +315,9 @@ describe("RoundsBlock", () => {
     render(<RoundsBlock statuses={[answering, done, empty]} issueTitles={{}} onStart={vi.fn()} onSelectIssue={vi.fn()} />);
     const group = screen.getByLabelText("Ready to start");
     expect(group).toBeInTheDocument();
-    expect(screen.getByText("1 waiting")).toBeInTheDocument();
+    expect(screen.getByText("1 to answer")).toBeInTheDocument();
     expect(screen.getByText("Distractions")).toBeInTheDocument();
-    expect(screen.getByText("3 queued")).toBeInTheDocument();
+    expect(screen.getByText("3 ready to answer")).toBeInTheDocument();
     // A round with 0 messages goes inactive and disappears from the block.
     expect(screen.queryByText("Hooks")).not.toBeInTheDocument();
   });

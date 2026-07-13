@@ -13,7 +13,7 @@ from unittest.mock import patch
 
 from app.config import Settings
 from app.hviske import cleanup as cleanup_mod
-from app.hviske.cleanup import cleanup_transcript
+from app.hviske.cleanup import _select_relevant_terms, cleanup_transcript
 
 RAW = "bestil dafni og simon levelt fra helsebixen og send en påmindelse i morgen"
 
@@ -51,6 +51,43 @@ def test_normal_cleanup_is_returned():
     polished = "Bestil Dafni og Simon Levelt fra Helsebixen og send en påmindelse i morgen."
     with _gateway_returns(polished):
         assert cleanup_transcript(_settings(), RAW) == polished
+
+
+def test_glossary_correction_runs_when_format_cleanup_is_off():
+    corrected = "bestil Dafni og Simon Levelt fra Helsebixen og send en påmindelse i morgen"
+    with _gateway_returns(corrected):
+        assert (
+            cleanup_transcript(
+                _settings(),
+                RAW,
+                glossary="Dafni, Simon Levelt, Helsebixen",
+                format_text=False,
+            )
+            == corrected
+        )
+
+
+def test_glossary_correction_rejects_words_not_in_transcript_or_glossary():
+    invented = "bestil Dafni og Simon Levelt fra Helsebixen gratis i morgen"
+    with _gateway_returns(invented):
+        assert (
+            cleanup_transcript(
+                _settings(),
+                RAW,
+                glossary="Dafni, Simon Levelt, Helsebixen",
+                format_text=False,
+            )
+            == RAW
+        )
+
+
+def test_only_glossary_terms_resembling_the_transcript_are_checked():
+    selected = _select_relevant_terms(
+        "bestil noget fra helse biksen i morgen",
+        ["Helsebixen", "made4men", "Dafni", "Simon Levelt"],
+    )
+
+    assert selected == ["Helsebixen"]
 
 
 def test_refusal_or_rambling_is_discarded():

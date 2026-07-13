@@ -61,6 +61,18 @@ def test_hviske_transcribe_returns_text_in_mock_mode(client, auth_headers):
     assert body["language"] == "da"
 
 
+def test_hviske_glossary_is_not_used_during_audio_decoding(client, auth_headers):
+    r = client.post(
+        "/hviske/transcribe",
+        headers=auth_headers,
+        files={"file": ("clip.webm", b"abcdef", "audio/webm")},
+        data={"glossary": "Helsebixen, made4men"},
+    )
+
+    assert r.status_code == 200
+    assert "+glossary" not in r.json()["text"]
+
+
 def test_hviske_transcribe_rejects_empty_upload(client, auth_headers):
     r = client.post(
         "/hviske/transcribe",

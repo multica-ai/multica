@@ -21,7 +21,7 @@ Skærmen **Tools & permissions** (på en agent, en runtime, en gruppe eller et m
 - **Repos** — kode-repositories: hvad agenten må med hvert repo (fx læse, hente koden ned eller skubbe ændringer op).
 - **Connections** — forbindelser til eksterne systemer (fx kundeservice-systemet eller dataregistret) samt credential-bokse (opbevarede adgangsnøgler).
 
-Hver linje har **én knap** der viser beslutningen: **Allow** (ja), **Ask** (spørg et menneske først) eller **Deny** (nej). Klikker du på knappen, åbner et lille panel hvor du både vælger beslutningen og kan sætte en **When**-betingelse — altså hvornår reglen gælder (fx kun bestemte handlinger). Alt om én regel bor dermed ét sted; der er ikke længere en separat When-knap.
+Hver linje har **én knap** der viser beslutningen: **Allow** (ja), **Ask** (spørg et menneske først), **Deny** (nej), eller **Inherit** (arv beslutningen fra niveauet ovenover i stedet for at sætte en selv). På arbejdsområde-niveau er der desuden en femte mulighed, **Disable** — den gør en tilladelse til en fast spærring som intet lavere niveau (agent, gruppe, bruger) kan åbne igen, modsat Deny som stadig kan åbnes af et lavere niveau. Klikker du på knappen, åbner et lille panel hvor du både vælger beslutningen og kan sætte en **When**-betingelse — altså hvornår reglen gælder (fx kun bestemte handlinger). Alt om én regel bor dermed ét sted; der er ikke længere en separat When-knap.
 
 Folder du en forbindelse eller et repo ud, ser du dens enkelte værktøjer og handlinger som linjer i fuld bredde med præcis samme knap. Et enkelt værktøj kan aldrig være mere åbent end hele forbindelsen — du kan kun stramme, ikke løsne, under-niveauet.
 

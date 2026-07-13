@@ -42,9 +42,15 @@ import { Button } from "@multica/ui/components/ui/button";
 import { Calendar } from "@multica/ui/components/ui/calendar";
 import { CerebroReminderWheel } from "./cerebro-reminder-wheel";
 import { useMarkInboxRead } from "@multica/core/inbox/mutations";
+import { useWorkspaceId } from "@multica/core/hooks";
 import type { InboxItem } from "@multica/core/types";
 import { useFeatureFlag } from "@multica/cerebro-feature-flags";
-import { RoundPickerDialog } from "@multica/cerebro-rounds";
+import {
+  RoundPickerDialog,
+  useRemoveIssueFromRound,
+  useRoundStatuses,
+  type RoundStatus,
+} from "@multica/cerebro-rounds";
 import {
   useMuteInbox,
   useUnmuteInbox,
@@ -87,6 +93,17 @@ interface Props {
   onArchive: () => void;
 }
 
+export function roundRowAction(statuses: RoundStatus[], issueId: string | null | undefined) {
+  const current = issueId
+    ? statuses.find((status) =>
+        status.members.some((member) => member.issue_id === issueId),
+      )
+    : undefined;
+  return current
+    ? { label: `Remove from ${current.round.name}`, roundId: current.round.id }
+    : { label: "Add to Round", roundId: null };
+}
+
 function animateRowArchiveExit(
   row: HTMLElement | null,
   rowWidth: number,
@@ -121,6 +138,12 @@ export function CerebroInboxRowActions({ item, onArchive }: Props) {
   // feature-flag toggle doesn't change the hook count between renders.
   const enabled = useFeatureFlag("cerebro_inbox_row_actions");
   const roundsEnabled = useFeatureFlag("cerebro_inbox_rounds");
+  const workspaceId = useWorkspaceId();
+  const { data: roundStatuses = [] } = useRoundStatuses(
+    workspaceId,
+    roundsEnabled && !!item.issue_id,
+  );
+  const removeFromRound = useRemoveIssueFromRound(workspaceId);
   const isMobile = useIsMobile();
   const markRead = useMarkInboxRead();
   const markUnread = useMarkInboxUnread();
@@ -132,6 +155,15 @@ export function CerebroInboxRowActions({ item, onArchive }: Props) {
   const muted = isMuted(item.muted_until);
   const [reminderOpen, setReminderOpen] = useState(false);
   const [roundPickerOpen, setRoundPickerOpen] = useState(false);
+  const roundAction = roundRowAction(roundStatuses, item.issue_id);
+  const handleRoundAction = useCallback(() => {
+    if (!item.issue_id) return;
+    if (roundAction.roundId) {
+      removeFromRound.mutate({ roundId: roundAction.roundId, issueId: item.issue_id });
+      return;
+    }
+    setRoundPickerOpen(true);
+  }, [item.issue_id, removeFromRound, roundAction.roundId]);
   const [customReminder, setCustomReminder] = useState(() =>
     toDateTimeLocalValue(nextBusinessDayNineAm()),
   );
@@ -182,7 +214,8 @@ export function CerebroInboxRowActions({ item, onArchive }: Props) {
       onToggleRead={handleToggleRead}
       onToggleMute={handleToggleMute}
       onArchive={onArchive}
-      onAddToRound={roundsEnabled && item.issue_id ? () => setRoundPickerOpen(true) : undefined}
+      onAddToRound={roundsEnabled && item.issue_id ? handleRoundAction : undefined}
+      roundActionLabel={roundAction.label}
     />
   );
 
@@ -195,7 +228,7 @@ export function CerebroInboxRowActions({ item, onArchive }: Props) {
           onArchive={onArchive}
           onToggleRead={handleToggleRead}
           onToggleMute={handleToggleMute}
-          onAddToRound={roundsEnabled && item.issue_id ? () => setRoundPickerOpen(true) : undefined}
+          onAddToRound={roundsEnabled && item.issue_id ? handleRoundAction : undefined}
           unread={!item.read}
           renderDrawerMenu={(close) => (
             // The long-press drawer is NOT a Menu.Root — Base UI's
@@ -221,8 +254,9 @@ export function CerebroInboxRowActions({ item, onArchive }: Props) {
               }}
               onAddToRound={roundsEnabled && item.issue_id ? () => {
                 close();
-                setRoundPickerOpen(true);
+                handleRoundAction();
               } : undefined}
+              roundActionLabel={roundAction.label}
             />
           )}
         />
@@ -1028,6 +1062,7 @@ function MenuItems({
   onToggleMute,
   onArchive,
   onAddToRound,
+  roundActionLabel,
 }: {
   item: InboxItem;
   muted: boolean;
@@ -1036,6 +1071,7 @@ function MenuItems({
   onToggleMute: () => void;
   onArchive: () => void;
   onAddToRound?: () => void;
+  roundActionLabel: string;
 }) {
   // Same items rendered inside DropdownMenu, ContextMenu, and Drawer — the
   // primitives all accept the shadcn DropdownMenuItem children since their
@@ -1054,7 +1090,7 @@ function MenuItems({
         {muted ? <BellRing className="size-4" /> : <BellOff className="size-4" />}
         {muted ? strings.unmute : strings.mute}
       </DropdownMenuItem>
-      {onAddToRound && <DropdownMenuItem onClick={onAddToRound}><Layers3 className="size-4" />Add to Round</DropdownMenuItem>}
+      {onAddToRound && <DropdownMenuItem onClick={onAddToRound}><Layers3 className="size-4" />{roundActionLabel}</DropdownMenuItem>}
       <DropdownMenuItem onClick={onArchive}>
         <Archive className="size-4" />
         {strings.archive_label}
@@ -1077,6 +1113,7 @@ function DrawerActionList({
   onToggleMute,
   onArchive,
   onAddToRound,
+  roundActionLabel,
 }: {
   item: InboxItem;
   muted: boolean;
@@ -1085,6 +1122,7 @@ function DrawerActionList({
   onToggleMute: () => void;
   onArchive: () => void;
   onAddToRound?: () => void;
+  roundActionLabel: string;
 }) {
   return (
     <div className="flex flex-col gap-1">
@@ -1100,7 +1138,7 @@ function DrawerActionList({
         {muted ? <BellRing className="size-5" /> : <BellOff className="size-5" />}
         <span>{muted ? strings.unmute : strings.mute}</span>
       </DrawerActionButton>
-      {onAddToRound && <DrawerActionButton onClick={onAddToRound}><Layers3 className="size-5" /><span>Round</span></DrawerActionButton>}
+      {onAddToRound && <DrawerActionButton onClick={onAddToRound}><Layers3 className="size-5" /><span>{roundActionLabel}</span></DrawerActionButton>}
       <DrawerActionButton onClick={onArchive}>
         <Archive className="size-5" />
         <span>{strings.archive_label}</span>

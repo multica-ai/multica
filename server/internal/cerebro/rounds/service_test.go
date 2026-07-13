@@ -63,6 +63,18 @@ func TestMemberStatePrecedence(t *testing.T) {
 	}
 }
 
+func TestMemberStateWithRetryKeepsWaitingActionableAndSurfacesTerminalFailure(t *testing.T) {
+	if got := memberStateWithRetry(1, 0, 0, false, false, true, true); got != MemberWaiting {
+		t.Fatalf("waiting with an old failure = %q, want waiting", got)
+	}
+	if got := memberStateWithRetry(0, 0, 0, false, true, false, true); got != MemberQueued {
+		t.Fatalf("retry ready = %q, want queued", got)
+	}
+	if got := memberStateWithRetry(0, 0, 0, false, false, true, true); got != MemberFailed {
+		t.Fatalf("exhausted retries = %q, want failed", got)
+	}
+}
+
 func TestNormalizeModeAcceptsOnlyLiveOrBatch(t *testing.T) {
 	for _, tt := range []struct{ in, want string }{{"live", "live"}, {"batch", "batch"}, {"", "batch"}} {
 		got, err := normalizeMode(tt.in)
@@ -81,5 +93,16 @@ func TestShouldHoldCommentOnlyForBatchRounds(t *testing.T) {
 	}
 	if !shouldHoldComment("batch") {
 		t.Fatal("batch rounds must hold comments until Run")
+	}
+}
+
+func TestRetryTriggerStateStopsAfterThreeRetries(t *testing.T) {
+	for _, tt := range []struct {
+		retryCount int
+		want       string
+	}{{0, "retry"}, {1, "retry"}, {2, "retry"}, {3, "failed"}} {
+		if got := retryTriggerState(tt.retryCount); got != tt.want {
+			t.Fatalf("retryTriggerState(%d) = %q, want %q", tt.retryCount, got, tt.want)
+		}
 	}
 }

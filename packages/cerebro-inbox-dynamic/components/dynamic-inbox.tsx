@@ -1196,6 +1196,7 @@ export function DynamicInbox() {
                           onSelectIssue={(issueId) => {
                             const entry = entries.find((candidate) => candidate.kind === "notif" && candidate.item.issue_id === issueId);
                             if (entry) onSelect(entry);
+                            else push(paths.issueDetail(issueId));
                           }}
                           renderIssue={(issueId) => {
                             const entry = entries.find((candidate) => candidate.kind === "notif" && candidate.item.issue_id === issueId);

@@ -14,14 +14,13 @@ const roundSchema = z.object({
 const memberSchema = z.object({
   round_id: z.string(), issue_id: z.string(), added_by_type: z.string().default(""),
   added_by_id: z.string().default(""), held_trigger_count: z.number().int().nonnegative().default(0),
-  // Owner-perspective state (FIR-3114 review): only 'waiting' members surface
-  // in the round list; 'answered' folds away; 'working' and 'queued' hide
-  // until the next cycle surfaces their responses. Older servers omit these
-  // fields — default to 'planned'/0, which degrades to showing every member
-  // (the pre-review behavior).
+  // Owner-perspective state. Every state remains openable inside an expanded
+  // round; only waiting is presented as an action for the owner (FIR-3179).
+  // Older servers omit these fields, so keep defensive defaults.
   waiting_count: z.number().int().nonnegative().default(0),
   queued_count: z.number().int().nonnegative().default(0),
-  state: z.enum(["waiting", "answered", "working", "queued", "planned"]).catch("planned").default("planned"),
+  retry_count: z.number().int().nonnegative().default(0),
+  state: z.enum(["waiting", "answered", "working", "queued", "planned", "failed"]).catch("planned").default("planned"),
   created_at: z.string().default(""),
 }).loose();
 const runSchema = z.object({
@@ -47,10 +46,11 @@ export function roundActivity(status: RoundStatus) {
   const queued = status.members.reduce((total, m) => total + m.queued_count, 0);
   const held = status.members.reduce((total, m) => total + m.held_trigger_count, 0);
   const working = status.members.some((m) => m.state === "working");
+  const failed = status.members.some((m) => m.state === "failed");
   const running = status.active_run?.status === "running";
   const cycleOpen = status.round.cycle_opened_at != null;
-  const hasContent = status.members.length > 0 && (waiting > 0 || queued > 0 || held > 0 || working || running || cycleOpen);
-  return { waiting, queued, held, working, running, cycleOpen, hasContent };
+  const hasContent = status.members.length > 0 && (waiting > 0 || queued > 0 || held > 0 || working || failed || running || cycleOpen);
+  return { waiting, queued, held, working, failed, running, cycleOpen, hasContent };
 }
 export function roundIssueIdsToExclude(statuses: RoundStatus[], blockActive = true): Set<string> {
   if (!blockActive) return new Set();

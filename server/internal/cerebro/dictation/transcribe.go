@@ -80,16 +80,20 @@ func (h *Handler) Transcribe(w http.ResponseWriter, r *http.Request) {
 	if header != nil && header.Filename != "" {
 		filename = header.Filename
 	}
-	// FIR-1797: bias decoding toward the proper nouns people actually say, and
-	// run the optional cleanup pass. The glossary is built automatically from
-	// (1) the workspace's own objects (agents, squads, projects, teammates) and
-	// (2) Firtal's business objects from the data catalog (brands, categories,
-	// suppliers); the user's manual terms are merged on top. Both glossary and
-	// cleanup are advisory — the inference service ignores an empty glossary and
-	// only cleans up when its own key is configured.
-	autoGlossary := mergeGlossary(h.workspaceGlossary(r.Context(), workspaceID), businessObjectGlossary(r.Context()))
-	glossary := mergeGlossary(r.FormValue("glossary"), autoGlossary)
-	body, contentType, err := buildMultipart(file, filename, r.FormValue("language"), glossary, r.FormValue("cleanup"))
+	// FIR-2048: glossary terms are correction candidates for the post-transcript
+	// check. The inference service deliberately keeps them out of audio decoding.
+	glossary := mergeGlossary(
+		r.FormValue("glossary"),
+		h.workspaceGlossary(r.Context(), workspaceID),
+		businessObjectGlossary(r.Context()),
+	)
+	body, contentType, err := buildMultipart(
+		file,
+		filename,
+		r.FormValue("language"),
+		glossary,
+		r.FormValue("cleanup"),
+	)
 	if err != nil {
 		slog.Warn("dictation transcribe request build failed", "error", err)
 		writeJSONError(w, http.StatusInternalServerError, "internal_error", "Could not prepare the transcription request.")
@@ -243,7 +247,7 @@ func (h *Handler) transcribeOnce(
 }
 
 // buildMultipart wraps a clip as a multipart `file` field (plus optional
-// language hint, glossary bias, and cleanup flag) and returns the encoded body
+// language hint, correction glossary, and cleanup flag) and returns the encoded body
 // and its content type, so the retry layer can replay the exact bytes on every
 // attempt.
 func buildMultipart(file io.Reader, filename, language, glossary, cleanup string) ([]byte, string, error) {

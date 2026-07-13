@@ -33,4 +33,17 @@ describe("round API compatibility", () => {
     expect(roundMembershipLabel(rounds, "i")).toBe("Daily · queued · 2 held responses");
     expect(roundMembershipLabel(rounds, "other")).toBeNull();
   });
+
+  it("parses terminal failed members and defaults retry data from older servers (FIR-3179)", () => {
+    const rounds = parseRoundStatuses({ rounds: [{
+      round: { id: "r", name: "Daily" },
+      members: [
+        { round_id: "r", issue_id: "failed", state: "failed", retry_count: 3 },
+        { round_id: "r", issue_id: "legacy", state: "answered" },
+      ],
+    }] });
+
+    expect(rounds[0]?.members[0]).toMatchObject({ state: "failed", retry_count: 3 });
+    expect(rounds[0]?.members[1]).toMatchObject({ state: "answered", retry_count: 0 });
+  });
 });

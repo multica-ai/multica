@@ -1,5 +1,5 @@
-// FIR-1797 — user-configurable dictation tuning: a personal glossary that
-// biases the speech-to-text model toward your own terms (brand/product names,
+// FIR-1797 — user-configurable dictation tuning: a personal glossary used to
+// correct likely spelling mistakes after transcription (brand/product names,
 // jargon) and an opt-in cleanup pass that polishes punctuation and structure
 // (the "Wispr Flow"-style finish). Persisted in the server-synced
 // user.preferences blob (like the Secretary criteria), so the choice follows
@@ -17,7 +17,7 @@ export const DICTATION_SETTINGS_KEY = "cerebro_dictation_settings";
 export interface DictationSettings {
   /**
    * Free-text glossary of domain terms (one per line or comma separated). Sent
-   * to the model as a decoding hint so proper nouns are spelled correctly.
+   * to the post-transcription check so proper nouns are spelled correctly.
    */
   glossary: string;
   /**
