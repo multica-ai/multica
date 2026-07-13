@@ -572,7 +572,7 @@ function CommentRow({
   const reactions = entry.reactions ?? [];
 
   return (
-    <div className="py-1.5">
+    <div className="py-1.5 group">
       {/* Header pins to the timeline's scroll parent within this reply's own
           row box, so a LONG reply keeps its
           author + actions visible while you scroll its body, then releases once
@@ -743,7 +743,7 @@ function CommentRow({
             issueId={issueId}
             sourceTaskId={entry.source_task_id ?? null}
             agentName={getActorName(entry.actor_type, entry.actor_id)}
-            className="mt-2 pl-12 pr-4"
+            className="mt-2 pl-12 pr-4 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity motion-reduce:transition-none"
             viewRunLabel={t(($) => $.execution_log.view_run)}
           />
           <GcTooltipSlot
@@ -1045,7 +1045,7 @@ function CommentCardImpl({
                   issueId={issueId}
                   sourceTaskId={entry.source_task_id ?? null}
                   agentName={getActorName(entry.actor_type, entry.actor_id)}
-                  className="mt-2 pl-10"
+                  className="mt-2 pl-10 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity motion-reduce:transition-none"
                   viewRunLabel={t(($) => $.execution_log.view_run)}
                 />
                 <GcTooltipSlot
