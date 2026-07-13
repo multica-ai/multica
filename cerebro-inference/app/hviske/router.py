@@ -19,8 +19,8 @@ async def transcribe(
     request: Request,
     file: UploadFile = File(...),
     language: str | None = Form(default=None),
-    # FIR-1797: optional comma-separated domain terms to bias decoding, and an
-    # opt-in flag to run the LLM punctuation/structure cleanup pass.
+    # FIR-2048: optional correction candidates for the post-transcript check.
+    # They are deliberately never passed into audio decoding.
     glossary: str | None = Form(default=None),
     cleanup: bool = Form(default=False),
 ) -> dict[str, str]:
@@ -43,8 +43,14 @@ async def transcribe(
             detail=f"audio exceeds {MAX_AUDIO_BYTES} bytes",
         )
 
-    text = hviske.transcribe(audio, language=language, glossary=glossary)
-    if cleanup and text.strip():
-        # Off the event loop: the cleanup call is a blocking stdlib HTTP request.
-        text = await asyncio.to_thread(cleanup_transcript, get_settings(), text)
+    text = hviske.transcribe(audio, language=language)
+    if (cleanup or glossary) and text.strip():
+        # Off the event loop: the correction call is a blocking stdlib request.
+        text = await asyncio.to_thread(
+            cleanup_transcript,
+            get_settings(),
+            text,
+            glossary=glossary,
+            format_text=cleanup,
+        )
     return {"text": text, "language": language or hviske.default_language}

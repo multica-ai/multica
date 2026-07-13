@@ -18,8 +18,10 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import urllib.error
 import urllib.request
+from difflib import SequenceMatcher
 
 from app.config import Settings
 
@@ -32,7 +34,7 @@ _TIMEOUT_S = 8.0
 
 # Words-only polish: the model must not paraphrase, translate, answer, or add
 # anything — only repair the mechanics of the dictated text.
-_SYSTEM_PROMPT = (
+_FORMAT_PROMPT = (
     "You are a formatter for raw speech-to-text transcripts. Your ONLY job is "
     "to repair the mechanics of the dictated text: fix punctuation, "
     "capitalisation, obvious mis-spacing and paragraph breaks so it reads well. "
@@ -44,8 +46,23 @@ _SYSTEM_PROMPT = (
     "cleaned text. If it is already clean, return it unchanged."
 )
 
+_CORRECTION_PROMPT = (
+    "The user supplied a glossary of allowed names and business terms. Correct "
+    "an obvious phonetic or spelling mistake only when the intended replacement "
+    "is one of those exact glossary terms. Never insert a glossary term merely "
+    "because it is available."
+)
 
-def cleanup_transcript(settings: Settings, text: str) -> str:
+_WORD_RE = re.compile(r"[^\W_]+", re.UNICODE)
+
+
+def cleanup_transcript(
+    settings: Settings,
+    text: str,
+    *,
+    glossary: str | None = None,
+    format_text: bool = True,
+) -> str:
     """Return a punctuation/structure-cleaned version of `text`, or `text`
     unchanged if cleanup is disabled, the gateway is unconfigured, or it fails."""
     if not settings.hviske_cleanup_enabled:
@@ -58,13 +75,23 @@ def cleanup_transcript(settings: Settings, text: str) -> str:
     if not stripped:
         return text
 
+    all_glossary_terms = [term.strip() for term in (glossary or "").split(",") if term.strip()]
+    glossary_terms = _select_relevant_terms(stripped, all_glossary_terms)
+    if not format_text and not glossary_terms:
+        return text
+    instructions = _FORMAT_PROMPT if format_text else (
+        "Keep punctuation, capitalisation and paragraph breaks unchanged."
+    )
+    if glossary_terms:
+        instructions += " " + _CORRECTION_PROMPT
+    user_content = {"transcript": stripped, "glossary": glossary_terms}
     payload = {
         "model": settings.hviske_cleanup_model,
         "max_tokens": min(2048, len(stripped) // 2 + 256),
         "stream": False,
         "messages": [
-            {"role": "system", "content": _SYSTEM_PROMPT},
-            {"role": "user", "content": stripped},
+            {"role": "system", "content": instructions},
+            {"role": "user", "content": json.dumps(user_content, ensure_ascii=False)},
         ],
     }
     req = urllib.request.Request(
@@ -101,7 +128,52 @@ def cleanup_transcript(settings: Settings, text: str) -> str:
             len(stripped),
         )
         return text
+    if not _uses_only_original_or_glossary_words(stripped, cleaned, glossary_terms):
+        log.warning("transcript correction introduced unapproved words; keeping raw")
+        return text
     return cleaned
+
+
+def _normalised_words(value: str) -> list[str]:
+    return [match.group(0).casefold() for match in _WORD_RE.finditer(value)]
+
+
+def _select_relevant_terms(
+    transcript: str, glossary_terms: list[str], *, limit: int = 24
+) -> list[str]:
+    """Shortlist terms that resemble something actually present in the raw
+    transcript. This keeps a large business-object catalog out of the model
+    prompt unless a term is plausibly the word the speech model heard."""
+    transcript_words = _normalised_words(transcript)
+    scored: list[tuple[float, int, str]] = []
+    for index, term in enumerate(glossary_terms):
+        term_words = _normalised_words(term)
+        if not term_words:
+            continue
+        target = "".join(term_words)
+        best = 0.0
+        for size in range(max(1, len(term_words) - 1), len(term_words) + 2):
+            for start in range(0, len(transcript_words) - size + 1):
+                candidate = "".join(transcript_words[start : start + size])
+                best = max(best, SequenceMatcher(None, target, candidate).ratio())
+        if best >= 0.62:
+            scored.append((best, index, term))
+    scored.sort(key=lambda item: (-item[0], item[1]))
+    return [term for _, _, term in scored[:limit]]
+
+
+def _uses_only_original_or_glossary_words(
+    original: str, corrected: str, glossary_terms: list[str]
+) -> bool:
+    original_words = _normalised_words(original)
+    corrected_words = _normalised_words(corrected)
+    allowed = set(original_words)
+    for term in glossary_terms:
+        allowed.update(_normalised_words(term))
+    if any(word not in allowed for word in corrected_words):
+        return False
+    max_delta = max(2, len(original_words) // 7)
+    return abs(len(corrected_words) - len(original_words)) <= max_delta
 
 
 def _extract_content(body: object) -> str:
