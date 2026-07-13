@@ -152,6 +152,25 @@ func (q *Queries) DeleteAgentLabelAssignmentsByLabel(ctx context.Context, labelI
 	return err
 }
 
+const deleteAgentLabelAssignmentsByRuntime = `-- name: DeleteAgentLabelAssignmentsByRuntime :exec
+
+DELETE FROM agent_to_label
+WHERE agent_id IN (SELECT id FROM agent WHERE runtime_id = $1)
+`
+
+// The single-entity cleanups above cover one agent/skill at a time. The runtime
+// variant below covers runtime and runtime-profile bulk hard deletes, where the
+// owning agents disappear without passing through a per-entity delete.
+// Workspace-wide cleanup lives in DeleteWorkspace so it is atomic with that
+// workspace's existing multi-table teardown.
+// Runtime teardown hard-deletes every agent bound to the runtime (archived and
+// system; active agents are refused by a 409 guard). Clear their label links by
+// runtime so none survive the agent hard-delete.
+func (q *Queries) DeleteAgentLabelAssignmentsByRuntime(ctx context.Context, runtimeID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteAgentLabelAssignmentsByRuntime, runtimeID)
+	return err
+}
+
 const deleteIssueLabelAssignmentsByLabel = `-- name: DeleteIssueLabelAssignmentsByLabel :exec
 
 DELETE FROM issue_to_label WHERE label_id = $1
