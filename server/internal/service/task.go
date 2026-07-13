@@ -1824,7 +1824,12 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 							"agent_id", util.UUIDToString(task.AgentID),
 						)
 					} else {
-						s.createAgentComment(ctx, task.IssueID, task.AgentID, redact.Text(body), "comment", task.TriggerCommentID, pgtype.UUID{})
+						// Stamp source_task_id so this synthesized success
+						// comment is attributable back to the run that produced
+						// it — mirrors the failure path below. Without it, the
+						// comment→run lookup is blind to the most common agent
+						// output and the "View run" affordance can't resolve it.
+						s.createAgentComment(ctx, task.IssueID, task.AgentID, redact.Text(body), "comment", task.TriggerCommentID, task.ID)
 					}
 				}
 			}
