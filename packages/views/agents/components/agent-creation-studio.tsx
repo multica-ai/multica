@@ -15,6 +15,8 @@ import {
 import { toast } from "sonner";
 import { api } from "@multica/core/api";
 import { useAuthStore } from "@multica/core/auth";
+import { useFeatureEnabled } from "@multica/core/config";
+import { AGENT_BUILDER_FLAG } from "@multica/core/feature-flags";
 import {
   agentTemplateDetailOptions,
   agentTemplateListOptions,
@@ -26,7 +28,10 @@ import {
 } from "@multica/core/chat/queries";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
-import { runtimeListOptions } from "@multica/core/runtimes";
+import {
+  runtimeListOptions,
+  runtimeModelsOptions,
+} from "@multica/core/runtimes";
 import type {
   Agent,
   AgentInvocationTargetInput,
@@ -35,6 +40,7 @@ import type {
   CreateAgentRequest,
   MemberWithUser,
   RuntimeDevice,
+  RuntimeModel,
 } from "@multica/core/types";
 import {
   agentListOptions,
@@ -113,6 +119,7 @@ export function AgentCreationStudio() {
   const navigation = useNavigation();
   const qc = useQueryClient();
   const currentUser = useAuthStore((state) => state.user);
+  const agentBuilderEnabled = useFeatureEnabled(AGENT_BUILDER_FLAG, false);
   const duplicateId = navigation.searchParams.get("duplicate");
   const squadId = navigation.searchParams.get("squad");
 
@@ -223,6 +230,34 @@ export function AgentCreationStudio() {
       ),
     [currentUser?.id, runtimes],
   );
+  const selectedRuntime =
+    runtimes.find((runtime) => runtime.id === draft.runtimeId) ?? null;
+  const builderModelsQuery = useQuery(
+    runtimeModelsOptions(
+      mode === "ai" && selectedRuntime?.status === "online"
+        ? selectedRuntime.id
+        : null,
+    ),
+  );
+  // `null` means discovery is not available yet (or failed), while `[]` is
+  // an authoritative catalog with no selectable models. In both cases the
+  // builder may preserve the user's current value but cannot invent one.
+  const builderModelCatalog = useMemo(
+    () =>
+      builderModelsQuery.isSuccess
+        ? builderModelsQuery.data.supported
+          ? builderModelsQuery.data.models
+          : []
+        : null,
+    [builderModelsQuery.data, builderModelsQuery.isSuccess],
+  );
+  const validBuilderModelIds = useMemo(
+    () =>
+      builderModelCatalog === null
+        ? null
+        : new Set(builderModelCatalog.map((model) => model.id)),
+    [builderModelCatalog],
+  );
 
   useEffect(() => {
     if (draft.runtimeId || usableRuntimes.length === 0) return;
@@ -284,12 +319,21 @@ export function AgentCreationStudio() {
     const payload = parseBuilderDraft(latestBuilderDraftMessageContent);
     if (!payload) return;
     appliedAssistantMessageRef.current = latestBuilderDraftMessageId;
-    setDraft((current) => mergeBuilderDraft(current, payload, skillIdSet, memberIdSet));
+    setDraft((current) =>
+      mergeBuilderDraft(
+        current,
+        payload,
+        skillIdSet,
+        memberIdSet,
+        validBuilderModelIds,
+      ),
+    );
   }, [
     latestBuilderDraftMessageContent,
     latestBuilderDraftMessageId,
     memberIdSet,
     skillIdSet,
+    validBuilderModelIds,
   ]);
 
   const filteredTemplates = useMemo(() => {
@@ -303,8 +347,6 @@ export function AgentCreationStudio() {
     );
   }, [templateSearch, templates]);
 
-  const selectedRuntime =
-    runtimes.find((runtime) => runtime.id === draft.runtimeId) ?? null;
   const accessInvalid =
     draft.permissionScope === "members" &&
     draft.memberIds.size === 0 &&
@@ -425,6 +467,8 @@ export function AgentCreationStudio() {
         draft,
         workspaceSkills,
         members,
+        selectedRuntime,
+        builderModelCatalog,
       );
       const result = await api.sendChatMessage(
         builderSessionId,
@@ -618,8 +662,8 @@ export function AgentCreationStudio() {
       {mode === "choose" && (
         <ModeChooser
           onBlank={chooseBlank}
-          onTemplate={() => setMode("templates")}
           onAI={() => setMode("ai")}
+          agentBuilderEnabled={agentBuilderEnabled}
         />
       )}
 
@@ -730,12 +774,12 @@ export function AgentCreationStudio() {
 
 function ModeChooser({
   onBlank,
-  onTemplate,
   onAI,
+  agentBuilderEnabled,
 }: {
   onBlank: () => void;
-  onTemplate: () => void;
   onAI: () => void;
+  agentBuilderEnabled: boolean;
 }) {
   const { t } = useT("agents");
   const modes = [
@@ -745,19 +789,15 @@ function ModeChooser({
       description: t(($) => $.creation_studio.modes.blank.description),
       action: onBlank,
     },
-    {
-      icon: Bot,
-      title: t(($) => $.creation_studio.modes.template.title),
-      description: t(($) => $.creation_studio.modes.template.description),
-      action: onTemplate,
-    },
-    {
-      icon: MessageSquare,
-      title: t(($) => $.creation_studio.modes.ai.title),
-      description: t(($) => $.creation_studio.modes.ai.description),
-      action: onAI,
-      recommended: true,
-    },
+    ...(agentBuilderEnabled
+      ? [{
+          icon: MessageSquare,
+          title: t(($) => $.creation_studio.modes.ai.title),
+          description: t(($) => $.creation_studio.modes.ai.description),
+          action: onAI,
+          recommended: true,
+        }]
+      : []),
   ];
   return (
     <main className="flex min-h-0 flex-1 items-center justify-center overflow-y-auto px-5 py-10">
@@ -773,7 +813,7 @@ function ModeChooser({
             {t(($) => $.creation_studio.choose_description)}
           </p>
         </div>
-        <div className="mt-9 grid gap-4 md:grid-cols-3">
+        <div className="mx-auto mt-9 grid max-w-3xl gap-4 md:grid-cols-2">
           {modes.map(({ icon: Icon, title, description, action, recommended }) => (
             <button
               key={title}
@@ -1429,6 +1469,8 @@ export function encodeBuilderInput(
   draft: AgentDraft,
   skills: Array<{ id: string; name: string; description: string }>,
   members: Array<{ user_id: string; name: string }>,
+  runtime: Pick<RuntimeDevice, "id" | "name" | "provider"> | null,
+  models: RuntimeModel[] | null,
 ): string {
   return (
     BUILDER_INPUT_PREFIX +
@@ -1444,6 +1486,21 @@ export function encodeBuilderInput(
           permission_scope: draft.permissionScope,
           member_ids: [...draft.memberIds],
         },
+        selected_runtime: runtime
+          ? {
+              id: runtime.id,
+              name: runtime.name,
+              provider: runtime.provider,
+            }
+          : null,
+        available_runtime_models:
+          models === null
+            ? null
+            : models.map((model) => ({
+                id: model.id,
+                label: model.label,
+                provider: model.provider,
+              })),
         available_workspace_skills: skills.map((skill) => ({
           id: skill.id,
           name: skill.name,
@@ -1479,6 +1536,7 @@ export function mergeBuilderDraft(
   payload: BuilderDraftPayload,
   validSkillIds: Set<string>,
   validMemberIds: Set<string>,
+  validModelIds: ReadonlySet<string> | null,
 ): AgentDraft {
   const scope =
     payload.permission_scope === "workspace" ||
@@ -1498,6 +1556,17 @@ export function mergeBuilderDraft(
           typeof id === "string" && validMemberIds.has(id),
       )
     : [...current.memberIds];
+  // The current value may be a deliberate custom entry from ModelDropdown,
+  // so preserving it is always safe. Only catalog IDs may be introduced by
+  // the builder; failed discovery therefore cannot turn into fail-open input.
+  const model =
+    typeof payload.model === "string" &&
+    (payload.model === current.model ||
+      (validModelIds !== null &&
+        validModelIds.size > 0 &&
+        (payload.model === "" || validModelIds.has(payload.model))))
+      ? payload.model
+      : current.model;
 
   return {
     ...current,
@@ -1510,7 +1579,7 @@ export function mergeBuilderDraft(
       typeof payload.instructions === "string"
         ? payload.instructions
         : current.instructions,
-    model: typeof payload.model === "string" ? payload.model : current.model,
+    model,
     skillIds: new Set(skillIds),
     permissionScope: scope,
     memberIds: new Set(scope === "members" ? memberIds : []),

@@ -390,9 +390,9 @@ RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, c
 
 // Cancels every active task on the issue and returns the affected rows so the
 // caller can reconcile each agent's status and broadcast task:cancelled events
-// (#1587). Prior :exec form silently dropped that info, so internal cancel
-// paths (issue status flips to cancelled/done, etc.) left agents stuck at
-// status="working" with no self-correction.
+// (#1587). Prior :exec form silently dropped that info, leaving agents stuck at
+// status="working" with no self-correction. Only issue-deletion cleanup calls
+// this now; a status flip to cancelled/done no longer does (MUL-4465).
 func (q *Queries) CancelAgentTasksByIssue(ctx context.Context, issueID pgtype.UUID) ([]AgentTaskQueue, error) {
 	rows, err := q.db.Query(ctx, cancelAgentTasksByIssue, issueID)
 	if err != nil {

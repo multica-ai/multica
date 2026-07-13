@@ -120,11 +120,19 @@ and is hidden from the PR list.
 | Backlog → non-backlog (not done/cancelled) enqueues on update | `server/internal/handler/issue.go:2537-2540` | `:2523` |
 | Same contract in batch update | `server/internal/handler/issue.go:3021-3024` | new citation |
 | Child → `done` notifies + wakes the parent, gated by the stage barrier | `server/internal/handler/issue_child_done.go:66` (`notifyParentOfChildDone`; doc comment at `:15`; barrier gate at `:115`) | func def `:51` |
+| Status change (incl. → `cancelled`) does NOT cancel in-flight tasks; only issue deletion does (MUL-4465) | no-cancel note in `server/internal/handler/issue.go:2652-2658` (`UpdateIssue`) and `:3170-3171` (`BatchUpdateIssues`); deletion still cancels at `:2863` (`DeleteIssue`) / `:3239` (`BatchDeleteIssues`) via `CancelTasksForIssue` (`server/internal/service/task.go:1229`) | new citation |
 
 Creation with `--status todo` (or any non-backlog status) on an agent-assigned
 issue fires the agent immediately; `--status backlog` parks it with the assignee
 set but no trigger. Promoting `backlog → todo` later fires it then (update path,
 line 2537).
+
+Moving an issue to `cancelled` used to call `CancelTasksForIssue` and stop every
+active task on it (the old #940 behavior). MUL-4465 removed that from both
+`UpdateIssue` and `BatchUpdateIssues`: a status flip — `cancelled` included —
+never cancels tasks now. `CancelTasksForIssue` fires only from the issue-deletion
+paths (`DeleteIssue` / `BatchDeleteIssues`), where the owning issue row is going
+away, so no task is left orphaned.
 
 ## Sub-issue stages (barrier wake)
 

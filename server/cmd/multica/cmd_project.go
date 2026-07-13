@@ -135,6 +135,8 @@ func init() {
 	projectCreateCmd.Flags().String("status", "", "Project status")
 	projectCreateCmd.Flags().String("icon", "", "Project icon (emoji)")
 	projectCreateCmd.Flags().String("lead", "", "Lead name (member or agent)")
+	projectCreateCmd.Flags().String("start-date", "", "Start date (calendar day, YYYY-MM-DD)")
+	projectCreateCmd.Flags().String("due-date", "", "Due date (calendar day, YYYY-MM-DD)")
 	projectCreateCmd.Flags().StringArray("repo", nil, "Attach a github_repo resource by URL (may be repeated)")
 	projectCreateCmd.Flags().String("output", "json", "Output format: table or json")
 
@@ -178,6 +180,8 @@ func init() {
 	projectUpdateCmd.Flags().String("status", "", "New status")
 	projectUpdateCmd.Flags().String("icon", "", "New icon (emoji)")
 	projectUpdateCmd.Flags().String("lead", "", "New lead name (member or agent)")
+	projectUpdateCmd.Flags().String("start-date", "", "New start date (calendar day, YYYY-MM-DD; pass empty string to clear)")
+	projectUpdateCmd.Flags().String("due-date", "", "New due date (calendar day, YYYY-MM-DD; pass empty string to clear)")
 	projectUpdateCmd.Flags().String("output", "json", "Output format: table or json")
 
 	// project delete
@@ -332,6 +336,12 @@ func runProjectCreate(cmd *cobra.Command, _ []string) error {
 		body["lead_type"] = aType
 		body["lead_id"] = aID
 	}
+	if v, _ := cmd.Flags().GetString("start-date"); v != "" {
+		body["start_date"] = v
+	}
+	if v, _ := cmd.Flags().GetString("due-date"); v != "" {
+		body["due_date"] = v
+	}
 
 	// Bundle resources into the create payload so the server attaches them in
 	// the same transaction; this avoids leaving a half-attached project on
@@ -417,9 +427,19 @@ func runProjectUpdate(cmd *cobra.Command, args []string) error {
 		body["lead_type"] = aType
 		body["lead_id"] = aID
 	}
+	// Changed() (not "") so an explicit --start-date "" reaches the server as a
+	// clear, mirroring the issue update CLI.
+	if cmd.Flags().Changed("start-date") {
+		v, _ := cmd.Flags().GetString("start-date")
+		body["start_date"] = v
+	}
+	if cmd.Flags().Changed("due-date") {
+		v, _ := cmd.Flags().GetString("due-date")
+		body["due_date"] = v
+	}
 
 	if len(body) == 0 {
-		return fmt.Errorf("no fields to update; use flags like --title, --status, --description, --icon, --lead")
+		return fmt.Errorf("no fields to update; use flags like --title, --status, --description, --icon, --lead, --start-date, --due-date")
 	}
 
 	var result map[string]any

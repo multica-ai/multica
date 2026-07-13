@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { createShortcutChord } from "./definitions";
+import { configureShortcutRuntime } from "./platform";
 import {
   findShortcutConflict,
   getShortcut,
@@ -10,6 +11,7 @@ import {
 
 afterEach(() => {
   useShortcutStore.getState().resetAll();
+  configureShortcutRuntime(null);
 });
 
 describe("shortcut store", () => {
@@ -66,6 +68,21 @@ describe("shortcut store", () => {
         send: createShortcutChord("Enter", { shift: true }),
       }),
     ).toEqual({});
+  });
+
+  it("keeps browser-only bindings when the runtime is desktop", () => {
+    const cmdP = createShortcutChord("P", { primary: true });
+
+    configureShortcutRuntime("desktop");
+    expect(sanitizeShortcutOverrides({ openSearch: cmdP })).toEqual({
+      openSearch: cmdP,
+    });
+    useShortcutStore.getState().setShortcut("openSearch", cmdP);
+    expect(getShortcut("openSearch")).toEqual(cmdP);
+
+    // The same persisted value hydrating in a browser falls back to default.
+    configureShortcutRuntime("web");
+    expect(sanitizeShortcutOverrides({ openSearch: cmdP })).toEqual({});
   });
 
   it("finds conflicts against defaults and overrides", () => {

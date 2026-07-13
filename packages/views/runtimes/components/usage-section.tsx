@@ -5,6 +5,10 @@ import { BarChart3, ChevronRight, AlertCircle } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { Button } from "@multica/ui/components/ui/button";
+import {
+  CompactNumberFlow,
+  CurrencyNumberFlow,
+} from "@multica/ui/components/ui/number-flow";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { agentListOptions } from "@multica/core/workspace/queries";
 import type { RuntimeUsage, AgentRuntime } from "@multica/core/types";
@@ -128,7 +132,7 @@ function fmtMoney(n: number): string {
 // ---------------------------------------------------------------------------
 
 export function UsageSection({ runtime }: { runtime: AgentRuntime }) {
-  const { t } = useT("runtimes");
+  const { t, i18n } = useT("runtimes");
   const runtimeId = runtime.id;
   // Reports render in the viewer's timezone — the backend slices the UTC
   // hourly rollup on the same `tz` we pass here, so every frontend window
@@ -175,6 +179,7 @@ export function UsageSection({ runtime }: { runtime: AgentRuntime }) {
     cacheableTokens > 0 ? Math.round((totals.cacheRead / cacheableTokens) * 100) : 0;
 
   const costDelta = pctChange(totals.cost, prevTotals.cost);
+  const locales = i18n.resolvedLanguage ?? i18n.language;
 
   return (
     <div className="space-y-5">
@@ -224,7 +229,13 @@ export function UsageSection({ runtime }: { runtime: AgentRuntime }) {
       <div className="grid grid-cols-3 divide-x rounded-lg border bg-card">
         <KpiCard
           label={t(($) => $.usage.kpi_cost_label, { days })}
-          value={fmtMoney(totals.cost)}
+          value={
+            <CurrencyNumberFlow
+              value={totals.cost}
+              locales={locales}
+              aria-label={fmtMoney(totals.cost)}
+            />
+          }
           hint={
             costDelta == null ? undefined : (
               <span
@@ -246,7 +257,13 @@ export function UsageSection({ runtime }: { runtime: AgentRuntime }) {
         />
         <KpiCard
           label={t(($) => $.usage.kpi_cache_label, { days })}
-          value={fmtMoney(totals.cacheSavings)}
+          value={
+            <CurrencyNumberFlow
+              value={totals.cacheSavings}
+              locales={locales}
+              aria-label={fmtMoney(totals.cacheSavings)}
+            />
+          }
           accent={totals.cacheSavings > 0 ? "success" : "default"}
           hint={
             <span>
@@ -259,7 +276,13 @@ export function UsageSection({ runtime }: { runtime: AgentRuntime }) {
         />
         <KpiCard
           label={t(($) => $.usage.kpi_tokens_label, { days })}
-          value={formatTokens(tokensTotal)}
+          value={
+            <CompactNumberFlow
+              value={tokensTotal}
+              locales={locales}
+              aria-label={formatTokens(tokensTotal)}
+            />
+          }
           hint={
             <span>
               {t(($) => $.usage.kpi_tokens_hint, {
@@ -870,4 +893,3 @@ function computeTotals(rows: RuntimeUsage[]): UsageTotals {
     { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, cacheSavings: 0 },
   );
 }
-

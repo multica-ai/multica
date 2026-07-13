@@ -9,10 +9,12 @@ import {
   DuplicateIssueErrorBodySchema,
   EMPTY_CREATE_FEEDBACK_RESPONSE,
   EMPTY_INBOX_UNREAD_SUMMARY,
+  EMPTY_SEARCH_PROJECTS_RESPONSE,
   EMPTY_USER,
   InboxUnreadSummarySchema,
   IssueTriggerPreviewSchema,
   ListIssuesResponseSchema,
+  SearchProjectsResponseSchema,
   RuntimeHourlyActivityListSchema,
   RuntimeUsageByAgentListSchema,
   RuntimeUsageByHourListSchema,
@@ -576,5 +578,54 @@ describe("InboxUnreadSummarySchema", () => {
         ENDPOINT,
       ),
     ).toBe(EMPTY_INBOX_UNREAD_SUMMARY);
+  });
+});
+
+describe("SearchProjectsResponseSchema date drift", () => {
+  const ENDPOINT = { endpoint: "GET /api/projects/search" };
+
+  const baseProject = {
+    id: "p-1",
+    workspace_id: "ws-1",
+    title: "Launch",
+    description: null,
+    icon: null,
+    status: "in_progress",
+    priority: "high",
+    lead_type: null,
+    lead_id: null,
+    created_at: "2026-01-01T00:00:00Z",
+    updated_at: "2026-01-01T00:00:00Z",
+    issue_count: 0,
+    done_count: 0,
+    resource_count: 0,
+    match_source: "title",
+  };
+
+  it("parses start_date / due_date when the backend returns them", () => {
+    const parsed = parseWithFallback(
+      { projects: [{ ...baseProject, start_date: "2026-03-01", due_date: "2026-03-31" }], total: 1 },
+      SearchProjectsResponseSchema,
+      EMPTY_SEARCH_PROJECTS_RESPONSE,
+      ENDPOINT,
+    );
+    expect(parsed.projects[0]?.start_date).toBe("2026-03-01");
+    expect(parsed.projects[0]?.due_date).toBe("2026-03-31");
+  });
+
+  // Frontend deploys before backend: an older backend omits the new keys. The
+  // .default(null) must keep the whole batch parseable (→ null), not degrade
+  // it to the empty fallback and blank the search results.
+  it("defaults missing start_date / due_date to null without dropping results", () => {
+    const parsed = parseWithFallback(
+      { projects: [baseProject], total: 1 },
+      SearchProjectsResponseSchema,
+      EMPTY_SEARCH_PROJECTS_RESPONSE,
+      ENDPOINT,
+    );
+    expect(parsed).not.toBe(EMPTY_SEARCH_PROJECTS_RESPONSE);
+    expect(parsed.projects).toHaveLength(1);
+    expect(parsed.projects[0]?.start_date).toBeNull();
+    expect(parsed.projects[0]?.due_date).toBeNull();
   });
 });

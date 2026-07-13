@@ -199,14 +199,14 @@ These set a **fleet-wide default** layer of CLI flags for a backend — a conven
 
 | Variable | Default | Description |
 |---|---|---|
-| `FRONTEND_ORIGIN` | empty | Frontend address. Invite email links, the CORS allowlist, and the cookie domain are all derived from this. When unset, invite email links fall back to the hosted domain `https://app.multica.ai` — self-host must set this explicitly |
+| `FRONTEND_ORIGIN` | empty | Frontend address. Invite email links, the CORS allowlist, and the cookie domain are all derived from this. When unset, invite email links fall back to the hosted domain `https://multica.ai` — self-host must set this explicitly |
 | `MULTICA_APP_URL` | empty | Frontend URL for CLI login flow. Also used by the web UI to show self-host daemon setup commands with your app domain; for same-origin deployments this is also used as daemon `server_url` when `MULTICA_PUBLIC_URL` is unset |
 | `MULTICA_PUBLIC_URL` | empty | Public API URL, without trailing slash. Used for autopilot webhook URLs and by the web UI as the daemon `server_url` |
 | `CORS_ALLOWED_ORIGINS` | empty | Additional allowed CORS origins (comma-separated) |
 | `ALLOWED_ORIGINS` | empty | WebSocket-specific origin allowlist (comma-separated); when unset, fallback order is `CORS_ALLOWED_ORIGINS` → `FRONTEND_ORIGIN` → `localhost:3000/5173/5174` |
 
 <Callout type="warning">
-**Leaving `FRONTEND_ORIGIN` unset creates two silent failures**: (1) invite email links point at `https://app.multica.ai` (the hosted domain), and clicking them doesn't bring users back to your self-hosted instance; (2) WebSocket Origin checks fall back to `localhost:3000 / 5173 / 5174`, so every WebSocket connection in a production deployment is rejected and the frontend appears to "lose real-time updates."
+**Leaving `FRONTEND_ORIGIN` unset creates two silent failures**: (1) invite email links point at `https://multica.ai` (the hosted domain), and clicking them doesn't bring users back to your self-hosted instance; (2) WebSocket Origin checks fall back to `localhost:3000 / 5173 / 5174`, so every WebSocket connection in a production deployment is rejected and the frontend appears to "lose real-time updates."
 </Callout>
 
 ## GitHub integration

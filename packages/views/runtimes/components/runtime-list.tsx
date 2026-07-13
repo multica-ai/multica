@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { useQuery } from "@tanstack/react-query";
+import { CurrencyNumberFlow } from "@multica/ui/components/ui/number-flow";
 import type {
   Agent,
   AgentRuntime,
@@ -360,8 +361,9 @@ function HealthCell({
 const COST_CELL_DAYS = 14;
 
 export function CostCell({ runtimeId }: { runtimeId: string }) {
-  const { t } = useT("runtimes");
+  const { t, i18n } = useT("runtimes");
   const tz = useViewingTimezone();
+  const locales = i18n.resolvedLanguage ?? i18n.language;
   const { data: usage = [] } = useQuery(
     runtimeUsageOptions(runtimeId, COST_CELL_DAYS, tz),
   );
@@ -396,7 +398,12 @@ export function CostCell({ runtimeId }: { runtimeId: string }) {
         : `${delta > 0 ? "↑" : "↓"}${Math.abs(delta)}%`;
   return (
     <div className="flex w-full flex-col items-end leading-tight">
-      <span className="text-sm font-medium tabular-nums">{fmt}</span>
+      <CurrencyNumberFlow
+        value={cost7d}
+        locales={locales}
+        aria-label={fmt}
+        className="text-sm font-medium"
+      />
       {deltaLabel && (
         <span className={`text-[11px] tabular-nums ${deltaTone}`}>
           {deltaLabel}
