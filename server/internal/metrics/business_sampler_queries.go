@@ -3,6 +3,7 @@ package metrics
 import (
 	"context"
 	"fmt"
+	"log/slog"
 
 	"github.com/jackc/pgx/v5"
 )
@@ -223,6 +224,64 @@ LIMIT 100
 		snap.taskStuck[NormalizeTaskSource(rawSource)] += float64(n)
 	}
 	return rows.Err()
+}
+
+// queryQueuedExpiredCreateIssue exposes the durable backlog that needs an
+// operator alert when runtime reconnect recovery has not produced a child
+// task. No issue/runtime labels are emitted, keeping metric cardinality fixed.
+func (c *BusinessSamplerCollector) queryQueuedExpiredCreateIssue(
+	ctx context.Context, tx pgx.Tx, snap *samplerSnapshot,
+) error {
+	const stmt = `
+WITH affected AS (
+  SELECT
+    t.completed_at,
+    i.id::text AS issue_id,
+    i.workspace_id::text AS workspace_id,
+    COALESCE(t.runtime_id::text, '') AS runtime_id
+  FROM agent_task_queue t
+  JOIN issue i ON i.id = t.issue_id
+  JOIN autopilot a ON a.id = i.origin_id
+  WHERE t.status = 'failed'
+    AND t.failure_reason = 'queued_expired'
+    AND t.parent_task_id IS NULL
+    AND t.trigger_comment_id IS NULL
+    AND t.autopilot_run_id IS NULL
+    AND i.origin_type = 'autopilot'
+    AND i.status = 'blocked'
+    AND i.metadata ->> 'pipeline_status' = 'queued_expired'
+    AND a.execution_mode = 'create_issue'
+    AND NOT EXISTS (
+      SELECT 1 FROM agent_task_queue other
+      WHERE other.issue_id = t.issue_id AND other.id <> t.id
+    )
+)
+SELECT
+  count(*) AS affected,
+  COALESCE(max(EXTRACT(EPOCH FROM (now() - completed_at))), 0) AS oldest_age_seconds,
+  COALESCE((SELECT issue_id FROM affected ORDER BY completed_at ASC LIMIT 1), '') AS oldest_issue_id,
+  COALESCE((SELECT workspace_id FROM affected ORDER BY completed_at ASC LIMIT 1), '') AS oldest_workspace_id,
+  COALESCE((SELECT runtime_id FROM affected ORDER BY completed_at ASC LIMIT 1), '') AS oldest_runtime_id
+FROM affected
+`
+	var count int64
+	var oldestAge float64
+	var oldestIssueID, oldestWorkspaceID, oldestRuntimeID string
+	if err := tx.QueryRow(ctx, stmt).Scan(&count, &oldestAge, &oldestIssueID, &oldestWorkspaceID, &oldestRuntimeID); err != nil {
+		return fmt.Errorf("queued_expired_create_issue: %w", err)
+	}
+	snap.queuedExpiredCreateIssueCount = float64(count)
+	snap.queuedExpiredCreateIssueOldestAgeSeconds = oldestAge
+	if count > 0 {
+		slog.Debug("queued-expired create_issue backlog identity",
+			"count", count,
+			"oldest_age_seconds", oldestAge,
+			"oldest_issue_id", oldestIssueID,
+			"oldest_workspace_id", oldestWorkspaceID,
+			"oldest_runtime_id", oldestRuntimeID,
+		)
+	}
+	return nil
 }
 
 // queryRuntimeOnline counts agent_runtime rows whose last_seen_at is within

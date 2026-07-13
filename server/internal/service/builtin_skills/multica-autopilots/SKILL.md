@@ -62,6 +62,14 @@ For "why didn't it run":
 5. For webhooks, inspect delivery status: `queued` means the worker has not completed dispatch; `failed` carries the worker error. A provider retry with the same `X-GitHub-Delivery` / `Idempotency-Key` reuses the original delivery.
 6. For `create_issue`, inspect the created issue if the run records one.
 
+If a scheduled `create_issue` task stays queued past its server TTL, the issue
+is moved to `blocked`, receives a system comment, and records
+`pipeline_status=queued_expired` plus `waiting_on=runtime_reconnect`. When that
+same runtime reconnects, the server may enqueue one recovery attempt only if no
+other task has worked the issue and the retry budget remains. Repeated
+heartbeats do not create duplicate attempts. `run_only` and ordinary issue
+tasks keep their existing failure behavior.
+
 ## Side effects
 
 These mutate durable state or start work: `create`, `update`, `delete`, trigger add/update/delete/rotate, `trigger`, and webhook calls to `/api/webhooks/autopilots/{token}`.
