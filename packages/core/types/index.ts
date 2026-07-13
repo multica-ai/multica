@@ -22,6 +22,7 @@ export type {
   CreateRuntimeProfileRequest,
   UpdateRuntimeProfileRequest,
   CreateAgentRequest,
+  AgentBuilderSession,
   AgentTemplate,
   AgentTemplateSummary,
   AgentTemplateSkillRef,

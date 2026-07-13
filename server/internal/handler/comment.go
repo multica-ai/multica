@@ -1265,8 +1265,9 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 				if err == nil && task.IssueID.Valid && uuidToString(task.IssueID) == uuidToString(issue.ID) {
 					if task.TriggerCommentID.Valid {
 						if !taskCoversReplyParent(task, parentID) {
+							// Keep this error actionable for agents (MUL-4417 / GH #5266).
 							writeError(w, http.StatusConflict,
-								"parent_id must be this task's trigger comment id ("+uuidToString(task.TriggerCommentID)+") or one of the earlier comments it coalesced")
+								"comment-triggered tasks cannot create top-level comments; set parent_id (--parent) to "+uuidToString(task.TriggerCommentID)+" or a coalesced comment id")
 							return
 						}
 					}

@@ -17,7 +17,6 @@ import { toast } from "sonner";
 import type {
   Agent,
   AgentRuntime,
-  CreateAgentRequest,
   MemberWithUser,
 } from "@multica/core/types";
 import {
@@ -80,7 +79,6 @@ import {
   CollectionPageState,
 } from "../../layout/collection-page";
 import { availabilityConfig } from "../presence";
-import { CreateAgentDialog } from "./create-agent-dialog";
 import { AgentRowActions } from "./agent-row-actions";
 import {
   AgentListToolbar,
@@ -793,7 +791,6 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
   const paths = useWorkspacePaths();
   const navigation = useNavigation();
   const rowLink = useRowLink();
-  const qc = useQueryClient();
   const currentUser = useAuthStore((s) => s.user);
 
   const {
@@ -802,7 +799,7 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
     error: listError,
     refetch: refetchList,
   } = useQuery(agentListOptions(wsId));
-  const { data: runtimes = [], isLoading: runtimesLoading } = useQuery(
+  const { data: runtimes = [] } = useQuery(
     runtimeListOptions(wsId),
   );
   const { data: members = [] } = useQuery(memberListOptions(wsId));
@@ -810,10 +807,6 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
   const { byAgent: presenceMap } = useWorkspacePresenceMap(wsId);
   const { byAgent: activityMap } = useWorkspaceActivityMap(wsId);
 
-  const [showCreate, setShowCreate] = useState(false);
-  const [duplicateTemplate, setDuplicateTemplate] = useState<Agent | null>(
-    null,
-  );
   const [selectedIds, setSelectedIds] = useState<ReadonlySet<string>>(
     new Set(),
   );
@@ -1020,25 +1013,9 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
     overscan: 10,
   });
 
-  const handleCreate = async (data: CreateAgentRequest): Promise<Agent> => {
-    const agent = await api.createAgent(data);
-    qc.setQueryData<Agent[]>(workspaceKeys.agents(wsId), (current = []) => {
-      const exists = current.some((a) => a.id === agent.id);
-      return exists
-        ? current.map((a) => (a.id === agent.id ? agent : a))
-        : [...current, agent];
-    });
-    setShowCreate(false);
-    setDuplicateTemplate(null);
-    navigation.push(paths.agentDetail(agent.id));
-    qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
-    return agent;
-  };
-
   const handleDuplicate = useCallback((agent: Agent) => {
-    setDuplicateTemplate(agent);
-    setShowCreate(true);
-  }, []);
+    navigation.push(`${paths.newAgent()}?duplicate=${encodeURIComponent(agent.id)}`);
+  }, [navigation, paths]);
 
   const selectedRows = rows.filter((row) => selectedIds.has(row.agent.id));
   const allSelected = rows.length > 0 && selectedRows.length === rows.length;
@@ -1062,7 +1039,7 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
   if (listError) {
     return (
       <ListError
-        onCreate={() => setShowCreate(true)}
+        onCreate={() => navigation.push(paths.newAgent())}
         listError={listError}
         onRetry={() => refetchList()}
       />
@@ -1078,7 +1055,7 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
     <div className="relative flex flex-1 min-h-0 flex-col">
       <PageHeaderBar
         totalCount={totalCount}
-        onCreate={() => setShowCreate(true)}
+        onCreate={() => navigation.push(paths.newAgent())}
       />
 
       {isLoading ? (
@@ -1087,7 +1064,7 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
         </div>
       ) : showEmpty ? (
         <div className="flex flex-1 items-center justify-center">
-          <EmptyState onCreate={() => setShowCreate(true)} />
+          <EmptyState onCreate={() => navigation.push(paths.newAgent())} />
         </div>
       ) : (
         <>
@@ -1227,20 +1204,6 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
         onClear={() => setSelectedIds(new Set())}
       />
 
-      {showCreate && (
-        <CreateAgentDialog
-          runtimes={runtimes}
-          runtimesLoading={runtimesLoading}
-          members={members}
-          currentUserId={currentUser?.id ?? null}
-          template={duplicateTemplate}
-          onClose={() => {
-            setShowCreate(false);
-            setDuplicateTemplate(null);
-          }}
-          onCreate={handleCreate}
-        />
-      )}
     </div>
   );
 }

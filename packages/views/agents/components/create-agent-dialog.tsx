@@ -227,6 +227,7 @@ export function CreateAgentDialog({
         model: model.trim() || undefined,
         instructions: trimmedInstructions || undefined,
         avatar_url: avatarUrl ?? undefined,
+        skill_ids: [...selectedSkillIds],
       };
       if (accessPickerEnabled) {
         // New MUL-3963 shape: send the authoritative permission fields and
@@ -272,29 +273,6 @@ export function CreateAgentDialog({
         }
       }
       const createdAgent = await onCreate(data);
-      // Follow-up: attach selected skills to the newly created agent.
-      // onCreate returns the created Agent for this path; if the caller
-      // doesn't return it we fall back to skipping (preserves
-      // backward compatibility with non-skill-aware callers).
-      if (createdAgent && selectedSkillIds.size > 0) {
-        try {
-          await api.setAgentSkills(createdAgent.id, {
-            skill_ids: [...selectedSkillIds],
-          });
-          if (wsId) {
-            queryClient.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
-          }
-        } catch (skillErr) {
-          // Non-fatal: agent exists, skills can be added on the detail
-          // page. Surface as a warning toast so the user knows.
-          toast.warning(
-            t(($) => $.create_dialog.skill_attach_failed_toast, {
-              error:
-                skillErr instanceof Error ? skillErr.message : "unknown error",
-            }),
-          );
-        }
-      }
       // Squad context: attach the agent after skills land so the
       // squad's Members tab shows the agent with its skills already
       // in place. Atomicity is best-effort by design (see plan in

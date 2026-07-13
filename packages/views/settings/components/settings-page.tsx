@@ -13,6 +13,7 @@ import {
   Plug,
   MessageCircle,
   Tags,
+  Keyboard,
 } from "lucide-react";
 import { GitHubMark } from "./github-mark";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@multica/ui/components/ui/tabs";
@@ -31,12 +32,14 @@ import { IntegrationsTab } from "./integrations-tab";
 import { LabsTab } from "./labs-tab";
 import { NotificationsTab } from "./notifications-tab";
 import { LabelsTab } from "./labels-tab";
+import { KeyboardShortcutsTab } from "./keyboard-shortcuts-tab";
 import { useT } from "../../i18n";
 
-const ACCOUNT_TAB_KEYS = ["profile", "preferences", "chat", "notifications", "tokens"] as const;
+const ACCOUNT_TAB_KEYS = ["profile", "preferences", "shortcuts", "chat", "notifications", "tokens"] as const;
 const ACCOUNT_TAB_ICONS = {
   profile: User,
   preferences: SlidersHorizontal,
+  shortcuts: Keyboard,
   chat: MessageCircle,
   notifications: Bell,
   tokens: Key,
@@ -197,6 +200,7 @@ export function SettingsPage({ extraAccountTabs }: SettingsPageProps = {}) {
         <div className={`mx-auto w-full p-4 sm:p-6 md:p-8 ${activeTab === "labels" ? "max-w-5xl" : "max-w-3xl"}`}>
           <TabsContent value="profile"><AccountTab /></TabsContent>
           <TabsContent value="preferences"><PreferencesTab /></TabsContent>
+          <TabsContent value="shortcuts"><KeyboardShortcutsTab /></TabsContent>
           <TabsContent value="chat"><ChatTab /></TabsContent>
           <TabsContent value="notifications"><NotificationsTab /></TabsContent>
           <TabsContent value="tokens"><TokensTab /></TabsContent>

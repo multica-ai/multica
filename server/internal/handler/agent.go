@@ -948,6 +948,9 @@ type CreateAgentRequest struct {
 	// event still fires with `template=""`, which is the correct signal
 	// for "manually authored agent".
 	Template string `json:"template"`
+	// SkillIDs are attached inside the same transaction as the agent row so a
+	// create never becomes visible in a partially configured state.
+	SkillIDs []string `json:"skill_ids"`
 }
 
 func decodeJSONBodyWithRawFields(body io.Reader, dst any) (map[string]json.RawMessage, error) {
@@ -1097,7 +1100,29 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		allowlist = nil
 	}
 
-	created, err := h.Queries.CreateAgent(r.Context(), db.CreateAgentParams{
+	skillUUIDs, ok := parseUUIDSliceOrBadRequest(w, req.SkillIDs, "skill_ids")
+	if !ok {
+		return
+	}
+	for _, skillID := range skillUUIDs {
+		if _, err := h.Queries.GetSkillInWorkspace(r.Context(), db.GetSkillInWorkspaceParams{
+			ID:          skillID,
+			WorkspaceID: wsUUID,
+		}); err != nil {
+			writeError(w, http.StatusBadRequest, "skill does not belong to this workspace")
+			return
+		}
+	}
+
+	tx, err := h.TxStarter.Begin(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to start agent create transaction")
+		return
+	}
+	defer tx.Rollback(r.Context())
+	qtx := h.Queries.WithTx(tx)
+
+	created, err := qtx.CreateAgent(r.Context(), db.CreateAgentParams{
 		WorkspaceID:              wsUUID,
 		Name:                     req.Name,
 		Description:              req.Description,
@@ -1129,14 +1154,24 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to create agent: "+err.Error())
 		return
 	}
-	slog.Info("agent created", append(logger.RequestAttrs(r), "agent_id", uuidToString(created.ID), "name", created.Name, "workspace_id", workspaceID)...)
-
-	// Persist the invocation allow-list (MUL-3963). Best-effort log on failure
-	// but do not fail the create — the agent row already exists and defaults
-	// to no targets (deny-by-default private).
-	if err := h.replaceInvocationTargets(r.Context(), created.ID, parseUUID(ownerID), perm.targets); err != nil {
-		slog.Warn("create agent: persist invocation targets failed", append(logger.RequestAttrs(r), "error", err, "agent_id", uuidToString(created.ID))...)
+	if err := replaceInvocationTargetsWithQueries(r.Context(), qtx, created.ID, parseUUID(ownerID), perm.targets); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to save agent access")
+		return
 	}
+	for _, skillID := range skillUUIDs {
+		if err := qtx.AddAgentSkill(r.Context(), db.AddAgentSkillParams{
+			AgentID: created.ID,
+			SkillID: skillID,
+		}); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to attach agent skill")
+			return
+		}
+	}
+	if err := tx.Commit(r.Context()); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to commit agent create")
+		return
+	}
+	slog.Info("agent created", append(logger.RequestAttrs(r), "agent_id", uuidToString(created.ID), "name", created.Name, "workspace_id", workspaceID)...)
 
 	if runtime.Status == "online" {
 		h.TaskService.ReconcileAgentStatus(r.Context(), created.ID)
@@ -1144,14 +1179,17 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resp := agentToResponse(created)
+	if err := h.attachAgentSkills(r.Context(), &resp, created.ID); err != nil {
+		slog.Warn("create agent: load skills for response failed", append(logger.RequestAttrs(r), "error", err, "agent_id", uuidToString(created.ID))...)
+	}
 	if err := h.enrichAgentResponseWithTargets(r.Context(), &resp, created.ID); err != nil {
 		slog.Warn("create agent: load invocation targets for response failed", append(logger.RequestAttrs(r), "error", err, "agent_id", uuidToString(created.ID))...)
 	}
 	actorType, actorID := h.resolveActor(r, ownerID, workspaceID)
 	h.publish(protocol.EventAgentCreated, workspaceID, actorType, actorID, map[string]any{"agent": broadcastAgentResponse(resp)})
 
-	// Kick off a "meet your new agent" chat so the agent introduces itself
-	// (LLM-generated via a real run, not a canned template). Best effort.
+	// Start the existing proactive introduction only after the complete Agent
+	// configuration has committed, so the first run sees its skills and access.
 	h.sendAgentWelcomeChat(r.Context(), created, ownerID, workspaceID)
 
 	obsmetrics.RecordEvent(h.Analytics, h.Metrics, analytics.AgentCreated(

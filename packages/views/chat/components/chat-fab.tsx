@@ -4,7 +4,11 @@ import { MessageCircle } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { cn } from "@multica/ui/lib/utils";
 import { useChatStore } from "@multica/core/chat";
-import { chatSessionsOptions, hasPendingChatTasksOptions } from "@multica/core/chat/queries";
+import {
+  chatSessionsOptions,
+  countUnreadChatSessions,
+  hasPendingChatTasksOptions,
+} from "@multica/core/chat/queries";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { createLogger } from "@multica/core/logger";
 import {
@@ -33,7 +37,7 @@ export function ChatFab() {
 
   if (isOpen) return null;
 
-  const unreadSessionCount = sessions.filter((s) => s.has_unread).length;
+  const unreadSessionCount = countUnreadChatSessions(sessions);
   const isRunning = hasPending?.has_pending ?? false;
 
   const handleClick = () => {

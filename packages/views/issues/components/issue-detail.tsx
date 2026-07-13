@@ -75,7 +75,7 @@ import { projectDetailOptions } from "@multica/core/projects/queries";
 import { ProjectIcon } from "../../projects/components/project-icon";
 import { issueLabelsOptions } from "@multica/core/labels";
 import { memberListOptions, agentListOptions } from "@multica/core/workspace/queries";
-import { useRecentIssuesStore } from "@multica/core/issues/stores";
+import { useCommentComposerStore, useRecentIssuesStore } from "@multica/core/issues/stores";
 import { useIssueSelectionStore } from "@multica/core/issues/stores/selection-store";
 import { BatchActionToolbar } from "./batch-action-toolbar";
 import { useIssueTimeline } from "../hooks/use-issue-timeline";
@@ -775,6 +775,8 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   // that: setState triggers the re-render that hands Virtuoso the element.
   const [scrollContainerEl, setScrollContainerEl] = useState<HTMLDivElement | null>(null);
   const [highlightedId, setHighlightedId] = useState<string | null>(null);
+  // User preference: pin the bottom comment bar to the scroll viewport.
+  const stickyComposer = useCommentComposerStore((s) => s.sticky);
 
   // Per-session: which resolved threads the user has temporarily expanded.
   // Not persisted (matches Linear) — reload collapses everything back to bars.
@@ -2287,15 +2289,34 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
               )
             )}
 
-            {/* Bottom comment input — no avatar, full width */}
-            <div className="mt-4">
-              {/* key={id}: web's /issues/[id] route doesn't remount on
-                  issueId change, so without an explicit key the editor
-                  keeps the previous issue's in-memory content and the
-                  next keystroke would flush it into the new issue's
-                  draft key. */}
-              <CommentInput key={id} issueId={id} onSubmit={submitComment} />
-            </div>
+          </div>
+
+          {/* Bottom comment input — no avatar, full width. Direct child of
+              the content column (not the Activity section): a sticky box
+              can't leave its containing block, and the Activity div only
+              spans the timeline — at column level `sticky bottom-0` can pin
+              the composer across the whole scroll range.
+
+              Sticky treatment mirrors list-grid's sticky header, bottom
+              edge: opaque bg-background under/around the card (its rounded
+              corners would otherwise leak scrolled text), a 16px gradient
+              fade above (exactly the mt-4 gap, so at rest it sits over the
+              page background and is invisible), and pb-4 so the card floats
+              off the viewport edge — with -mb-4 giving the padding back to
+              the column's py-8 so the at-rest layout doesn't shift. */}
+          <div
+            className={cn(
+              "mt-4",
+              stickyComposer &&
+                "sticky bottom-0 z-10 -mb-4 bg-background pb-4 before:pointer-events-none before:absolute before:inset-x-0 before:bottom-full before:h-4 before:bg-gradient-to-t before:from-background before:to-transparent",
+            )}
+          >
+            {/* key={id}: web's /issues/[id] route doesn't remount on
+                issueId change, so without an explicit key the editor
+                keeps the previous issue's in-memory content and the
+                next keystroke would flush it into the new issue's
+                draft key. */}
+            <CommentInput key={id} issueId={id} onSubmit={submitComment} />
           </div>
         </div>
         </div>
