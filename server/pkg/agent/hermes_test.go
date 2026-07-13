@@ -579,48 +579,97 @@ func (b *bufferWriter) String() string {
 }
 
 // TestHermesClientAutoApprovesPermissionRequest asserts that when an
-// ACP agent sends us `session/request_permission` (kimi does this on
-// every Shell / file-mutating tool call), the client replies with
-// `approve_for_session` — without this the agent blocks 300s and the
-// task hangs. The id in the reply must match the agent's request id
-// so its in-flight future resolves.
+// ACP agent sends us `session/request_permission`, the client replies by
+// selecting one of the optionIds the agent *actually offered* — an id the
+// agent never offered is treated as a denial and, on Hermes' edit path,
+// silently blocks every file write (GitHub multica#5300). The reply must
+// prefer session-scoped over single-use over a permanent grant, and echo
+// the agent's request id so its in-flight future resolves.
 func TestHermesClientAutoApprovesPermissionRequest(t *testing.T) {
 	t.Parallel()
 
-	w := &bufferWriter{}
-	c := &hermesClient{
-		cfg:     Config{Logger: slog.Default()},
-		stdin:   w,
-		pending: make(map[int]*pendingRPC),
+	cases := []struct {
+		name    string
+		options string
+		wantID  string
+	}{
+		{
+			// Hermes edit-approval offers only these two and requires
+			// exactly "allow_once"; this is the multica#5300 regression
+			// the old hardcoded "approve_for_session" reply broke.
+			name:    "hermes edit approval",
+			options: `[{"optionId":"allow_once","name":"Allow edit","kind":"allow_once"},{"optionId":"deny","name":"Deny","kind":"reject_once"}]`,
+			wantID:  "allow_once",
+		},
+		{
+			// Hermes command approval offers a session option; prefer it
+			// over the permanent "allow_always" (which persists an on-disk
+			// allowlist) and over single-use "allow_once".
+			name:    "command approval prefers session over permanent",
+			options: `[{"optionId":"allow_once","kind":"allow_once"},{"optionId":"allow_session","kind":"allow_always"},{"optionId":"allow_always","kind":"allow_always"},{"optionId":"deny","kind":"reject_once"},{"optionId":"deny_always","kind":"reject_always"}]`,
+			wantID:  "allow_session",
+		},
+		{
+			// A permanent grant is selected only when it is the sole grant.
+			name:    "permanent grant only as last resort",
+			options: `[{"optionId":"allow_always","kind":"allow_always"},{"optionId":"deny","kind":"reject_once"}]`,
+			wantID:  "allow_always",
+		},
+		{
+			// Other ACP agents' session-scoped id is honoured when offered.
+			name:    "session-scoped id honoured",
+			options: `[{"optionId":"approve","kind":"allow_once"},{"optionId":"approve_for_session","kind":"allow_always"},{"optionId":"reject","kind":"reject_once"}]`,
+			wantID:  "approve_for_session",
+		},
+		{
+			// No offered options: fall back to the legacy id rather than hang.
+			name:    "no options falls back to legacy id",
+			options: `[]`,
+			wantID:  "approve_for_session",
+		},
 	}
 
-	c.handleLine(`{"jsonrpc":"2.0","id":42,"method":"session/request_permission","params":{"sessionId":"ses_1","options":[{"optionId":"approve","name":"Approve once","kind":"allow_once"},{"optionId":"approve_for_session","name":"Approve for this session","kind":"allow_always"},{"optionId":"reject","name":"Reject","kind":"reject_once"}],"toolCall":{"toolCallId":"tc_1","title":"Shell","content":[]}}}`)
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 
-	got := w.String()
-	var resp struct {
-		JSONRPC string `json:"jsonrpc"`
-		ID      int    `json:"id"`
-		Result  struct {
-			Outcome struct {
-				Outcome  string `json:"outcome"`
-				OptionID string `json:"optionId"`
-			} `json:"outcome"`
-		} `json:"result"`
-	}
-	if err := json.Unmarshal([]byte(strings.TrimSpace(got)), &resp); err != nil {
-		t.Fatalf("reply is not valid JSON: %q err=%v", got, err)
-	}
-	if resp.JSONRPC != "2.0" {
-		t.Errorf("jsonrpc: got %q, want 2.0", resp.JSONRPC)
-	}
-	if resp.ID != 42 {
-		t.Errorf("id: got %d, want 42 (must echo agent's request id)", resp.ID)
-	}
-	if resp.Result.Outcome.Outcome != "selected" {
-		t.Errorf("outcome.outcome: got %q, want %q", resp.Result.Outcome.Outcome, "selected")
-	}
-	if resp.Result.Outcome.OptionID != "approve_for_session" {
-		t.Errorf("outcome.optionId: got %q, want %q", resp.Result.Outcome.OptionID, "approve_for_session")
+			w := &bufferWriter{}
+			c := &hermesClient{
+				cfg:     Config{Logger: slog.Default()},
+				stdin:   w,
+				pending: make(map[int]*pendingRPC),
+			}
+
+			c.handleLine(`{"jsonrpc":"2.0","id":42,"method":"session/request_permission","params":{"sessionId":"ses_1","options":` + tc.options + `,"toolCall":{"toolCallId":"tc_1","title":"write: reply.md","content":[]}}}`)
+
+			got := w.String()
+			var resp struct {
+				JSONRPC string `json:"jsonrpc"`
+				ID      int    `json:"id"`
+				Result  struct {
+					Outcome struct {
+						Outcome  string `json:"outcome"`
+						OptionID string `json:"optionId"`
+					} `json:"outcome"`
+				} `json:"result"`
+			}
+			if err := json.Unmarshal([]byte(strings.TrimSpace(got)), &resp); err != nil {
+				t.Fatalf("reply is not valid JSON: %q err=%v", got, err)
+			}
+			if resp.JSONRPC != "2.0" {
+				t.Errorf("jsonrpc: got %q, want 2.0", resp.JSONRPC)
+			}
+			if resp.ID != 42 {
+				t.Errorf("id: got %d, want 42 (must echo agent's request id)", resp.ID)
+			}
+			if resp.Result.Outcome.Outcome != "selected" {
+				t.Errorf("outcome.outcome: got %q, want %q", resp.Result.Outcome.Outcome, "selected")
+			}
+			if resp.Result.Outcome.OptionID != tc.wantID {
+				t.Errorf("outcome.optionId: got %q, want %q", resp.Result.Outcome.OptionID, tc.wantID)
+			}
+		})
 	}
 }
 

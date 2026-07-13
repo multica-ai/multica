@@ -555,10 +555,12 @@ func (c *hermesClient) handleLine(line string) {
 	}
 
 	// Agent → client request: has id + method (no result / error yet).
-	// Kimi uses this for session/request_permission; if we don't answer,
-	// the agent blocks for 300s and the task hangs. Hermes doesn't send
-	// these when launched with HERMES_YOLO_MODE=1, but we still handle
-	// the case generically for any future ACP backend we bolt on.
+	// Kimi and Hermes both use session/request_permission; if we don't
+	// answer, the agent blocks for its internal timeout and the task
+	// hangs. HERMES_YOLO_MODE=1 only suppresses Hermes' dangerous-shell-
+	// command prompts (tools/approval.py); its ACP edit-approval guard
+	// (acp_adapter/edit_approval.py) still asks before every file write,
+	// so we must handle these requests for Hermes too.
 	if _, hasID := raw["id"]; hasID {
 		if _, hasResult := raw["result"]; hasResult {
 			c.handleResponse(raw)
@@ -583,10 +585,17 @@ func (c *hermesClient) handleLine(line string) {
 // handleAgentRequest replies to JSON-RPC requests the agent sends
 // us (agent → client direction). The only one we care about today is
 // `session/request_permission`: the daemon is headless and cannot
-// actually prompt a user, so we auto-approve every action. Using
-// `approve_for_session` rather than `approve` means subsequent
-// identical actions (every Shell invocation, every file write) don't
-// round-trip through us — the agent remembers them locally.
+// actually prompt a user, so we auto-approve every action.
+//
+// The reply MUST select one of the optionIds the agent actually
+// offered — the ACP permission contract is "pick from these options",
+// and an id the agent never offered is treated as a denial. Hermes'
+// edit-approval path offers only ["allow_once","deny"] and rejects
+// anything but exactly "allow_once" (acp_adapter/edit_approval.py), so
+// the previous hardcoded "approve_for_session" silently blocked every
+// file write on the Hermes ACP runtime (GitHub multica#5300).
+// selectACPApprovalOptionID echoes a granting option instead, so this
+// works across Hermes' edit and command paths and other ACP backends.
 func (c *hermesClient) handleAgentRequest(raw map[string]json.RawMessage) {
 	var method string
 	_ = json.Unmarshal(raw["method"], &method)
@@ -599,17 +608,18 @@ func (c *hermesClient) handleAgentRequest(raw map[string]json.RawMessage) {
 	var resp map[string]any
 	switch method {
 	case "session/request_permission":
+		optionID := selectACPApprovalOptionID(raw["params"])
 		resp = map[string]any{
 			"jsonrpc": "2.0",
 			"id":      json.RawMessage(rawID),
 			"result": map[string]any{
 				"outcome": map[string]any{
 					"outcome":  "selected",
-					"optionId": "approve_for_session",
+					"optionId": optionID,
 				},
 			},
 		}
-		c.cfg.Logger.Debug("auto-approved agent permission request", "method", method)
+		c.cfg.Logger.Debug("auto-approved agent permission request", "method", method, "optionId", optionID)
 	default:
 		// Unknown agent→client method — reply with standard "method
 		// not found" so the agent doesn't block waiting for us. Better
@@ -634,6 +644,91 @@ func (c *hermesClient) handleAgentRequest(raw map[string]json.RawMessage) {
 	if err := c.writeLine(data); err != nil {
 		c.cfg.Logger.Warn("write agent-request response", "method", method, "error", err)
 	}
+}
+
+// acpPermissionOption is one entry in a session/request_permission
+// request's `options` array. `kind` is the ACP-level classification
+// (allow_once / allow_always / reject_once / reject_always); `optionId`
+// is the agent-defined string we echo back to select that option.
+type acpPermissionOption struct {
+	OptionID string `json:"optionId"`
+	Kind     string `json:"kind"`
+}
+
+// legacyACPApprovalOptionID is returned only when a request_permission
+// carries no usable options at all (a non-conforming or older ACP
+// agent). It preserves the id ACP backends relied on before we began
+// echoing offered options.
+const legacyACPApprovalOptionID = "approve_for_session"
+
+// acpApprovalOptionPreference ranks known granting optionIds; lower
+// index = preferred. Session scope avoids a per-action round-trip
+// without the permanent on-disk allowlist write a permanent grant
+// ("allow_always") triggers on Hermes (tools/approval.py's
+// save_permanent_allowlist), which would outlive the task and change
+// the runtime owner's local Hermes config. Single-use is the safe
+// universal fallback.
+var acpApprovalOptionPreference = []string{
+	"allow_session",       // Hermes command approval: session-scoped, not persisted
+	"approve_for_session", // other ACP agents' session-scoped id
+	"allow_once",          // Hermes edit + command approval: single action
+	"approve",             // other ACP agents' single-action id
+}
+
+// selectACPApprovalOptionID picks which optionId to return for an
+// auto-approved session/request_permission. It only ever returns an id
+// the agent actually offered, restricted to granting options (never a
+// reject), and prefers session-scoped > single-use > any other grant so
+// a permanent "allow_always" is chosen only when it is the sole grant
+// offered. Falls back to legacyACPApprovalOptionID when the request
+// carries no options.
+func selectACPApprovalOptionID(params json.RawMessage) string {
+	var p struct {
+		Options []acpPermissionOption `json:"options"`
+	}
+	if len(params) > 0 {
+		_ = json.Unmarshal(params, &p)
+	}
+
+	grants := make([]acpPermissionOption, 0, len(p.Options))
+	for _, opt := range p.Options {
+		if opt.OptionID == "" || isACPRejectOption(opt) {
+			continue
+		}
+		grants = append(grants, opt)
+	}
+	if len(grants) == 0 {
+		return legacyACPApprovalOptionID
+	}
+
+	// 1. Preferred known ids, in order.
+	for _, want := range acpApprovalOptionPreference {
+		for _, opt := range grants {
+			if opt.OptionID == want {
+				return opt.OptionID
+			}
+		}
+	}
+	// 2. Any explicitly single-use grant, to avoid a permanent allowlist write.
+	for _, opt := range grants {
+		if strings.EqualFold(strings.TrimSpace(opt.Kind), "allow_once") {
+			return opt.OptionID
+		}
+	}
+	// 3. First remaining grant (last resort; may be a permanent grant).
+	return grants[0].OptionID
+}
+
+// isACPRejectOption reports whether an option denies rather than grants.
+// ACP reject options carry a reject_* kind; we also treat a deny/reject
+// optionId as a denial so an agent that omits kind can't trick us into
+// selecting a rejection.
+func isACPRejectOption(opt acpPermissionOption) bool {
+	if strings.HasPrefix(strings.ToLower(strings.TrimSpace(opt.Kind)), "reject") {
+		return true
+	}
+	lowerID := strings.ToLower(opt.OptionID)
+	return strings.Contains(lowerID, "deny") || strings.Contains(lowerID, "reject")
 }
 
 // acpRPCError is a JSON-RPC error frame returned by the agent process.
