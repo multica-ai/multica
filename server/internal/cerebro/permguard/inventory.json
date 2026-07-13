@@ -1157,6 +1157,10 @@
       "gate": "workspace_member"
     },
     {
+      "id": "POST /api/notes/{id}/comments/{commentId}/create-issue",
+      "gate": "workspace_member"
+    },
+    {
       "id": "POST /api/notes/{id}/comments/{commentId}/resolve",
       "gate": "workspace_member"
     },

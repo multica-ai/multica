@@ -273,10 +273,10 @@ ORDER BY n.pinned DESC, n.pinned_at DESC NULLS LAST, a.updated_at DESC
 LIMIT $3;
 
 -- name: ListNotesReferencingObject :many
--- FIR-1621 — reverse lookup for the note↔object coupling. Returns every note the
--- viewer may see that carries a reference pointing at the given (object, ref_id)
--- — e.g. all notes coupled to one issue. This is the read behind "coupled notes
--- show up in the issue's document list" (the two-way view). Same visibility rule
+-- FIR-1621 / FIR-3102 — reverse lookup for note↔object coupling. Issue lookup
+-- uses the canonical artifact.issue_id while legacy references remain readable
+-- during migration. This is the read behind "coupled notes show up in the
+-- issue's document list" (the two-way view). Same visibility rule
 -- as ListNotesForUser (owner / workspace / shared) AND folder-chain visibility,
 -- so a private note coupled to an issue is still only visible to its owner.
 SELECT DISTINCT a.id, a.workspace_id, a.folder_id, a.title, a.body,
@@ -284,10 +284,15 @@ SELECT DISTINCT a.id, a.workspace_id, a.folder_id, a.title, a.body,
        n.owner_id, n.visibility, n.pinned, n.pinned_at
 FROM cerebro_note n
 JOIN artifact a ON a.id = n.artifact_id
-JOIN cerebro_note_reference ref ON ref.note_id = n.artifact_id
+LEFT JOIN cerebro_note_reference ref
+  ON ref.note_id = n.artifact_id
+ AND ref.object = sqlc.arg(object)
+ AND ref.ref_id = sqlc.arg(ref_id)
 WHERE a.workspace_id = sqlc.arg(workspace_id)
-  AND ref.object = sqlc.arg(object)
-  AND ref.ref_id = sqlc.arg(ref_id)
+  AND (
+    ref.id IS NOT NULL
+    OR (sqlc.arg(object) = 'issue' AND a.issue_id::text = sqlc.arg(ref_id))
+  )
   AND (
     (
       (

@@ -1,7 +1,9 @@
 // References on notes (TECH-3421). Mirrors the issue-reference feature
 // (server/internal/cerebro/references) but keyed by note_id (the note's
 // artifact id). A note reference is a generic typed pointer attached to a
-// note — an issue today, business objects later. The table shape is
+// note — chats and business objects live here; the one primary issue lives on
+// artifact.issue_id and is exposed through the same API as a synthetic row.
+// The legacy table shape is
 // intentionally generic: `(object, type, ref_id)` describes what is being
 // pointed at, `metadata` carries object-specific fields, so new reference
 // kinds can be added without a migration per kind.
@@ -24,6 +26,7 @@ import (
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/util"
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
 // WS event types broadcast on the workspace channel when a note reference is
@@ -33,6 +36,19 @@ const (
 	EventNoteReferenceCreated = "cerebro.note_reference.created"
 	EventNoteReferenceDeleted = "cerebro.note_reference.deleted"
 )
+
+const primaryIssueReferenceID = "primary-issue"
+
+func primaryIssueReference(a db.Artifact) NoteReferenceResponse {
+	label := "Primary issue"
+	referenceType := primaryIssueReferenceID
+	return NoteReferenceResponse{
+		ID: primaryIssueReferenceID, NoteID: uuidStr(a.ID), Object: "issue",
+		Type: &referenceType, RefID: uuidStr(a.IssueID), Label: &label,
+		Metadata: json.RawMessage("{}"), CreatedByType: a.AuthorType,
+		CreatedByID: uuidStr(a.AuthorID), CreatedAt: tsStr(a.CreatedAt), UpdatedAt: tsStr(a.UpdatedAt),
+	}
+}
 
 // NoteReferenceResponse is the JSON shape returned to clients and embedded in
 // WS payloads. Mirrors references.ReferenceResponse but with note_id in place
@@ -93,7 +109,7 @@ func (h *Handler) ListReferences(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	_, ownerUUID, ok := h.scope(w, r, userID)
+	wsUUID, ownerUUID, ok := h.scope(w, r, userID)
 	if !ok {
 		return
 	}
@@ -111,7 +127,10 @@ func (h *Handler) ListReferences(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to load references")
 		return
 	}
-	out := make([]NoteReferenceResponse, 0, len(rows))
+	out := make([]NoteReferenceResponse, 0, len(rows)+1)
+	if artifact, err := h.Upstream.GetArtifact(r.Context(), db.GetArtifactParams{ID: noteID, WorkspaceID: wsUUID}); err == nil && artifact.IssueID.Valid {
+		out = append(out, primaryIssueReference(artifact))
+	}
 	for _, row := range rows {
 		out = append(out, noteRefToResponse(row))
 	}
@@ -133,10 +152,9 @@ func (h *Handler) requireCanCouple(w http.ResponseWriter, r *http.Request, artif
 	return h.requireCanComment(w, r, artifactID, userUUID)
 }
 
-// CreateReference handles POST /api/notes/{id}/references. Owner-only. UPSERT
-// semantics on (note_id, object, ref_id): re-posting the same identifier
-// refreshes type/label/url/metadata and the updated_at timestamp without
-// rewriting the original creator. Returns 201 on first insert, 200 on update.
+// CreateReference handles POST /api/notes/{id}/references. Owner-only. An issue
+// becomes the artifact's one primary issue; other objects keep UPSERT semantics
+// on (note_id, object, ref_id). Returns 201 on first insert, 200 on update.
 func (h *Handler) CreateReference(w http.ResponseWriter, r *http.Request) {
 	userID, ok := requireUserID(w, r)
 	if !ok {
@@ -172,6 +190,40 @@ func (h *Handler) CreateReference(w http.ResponseWriter, r *http.Request) {
 	metadata := normalizeNoteRefMetadata(req.Metadata)
 	if metadata == nil {
 		writeError(w, http.StatusBadRequest, "metadata must be a JSON object")
+		return
+	}
+	if req.Object == "issue" {
+		issueID, err := util.ParseUUID(req.RefID)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid issue ref_id")
+			return
+		}
+		if _, err := h.Upstream.GetIssueInWorkspace(r.Context(), db.GetIssueInWorkspaceParams{ID: issueID, WorkspaceID: wsUUID}); err != nil {
+			writeError(w, http.StatusBadRequest, "issue does not belong to this workspace")
+			return
+		}
+		artifact, err := h.Upstream.GetArtifact(r.Context(), db.GetArtifactParams{ID: noteID, WorkspaceID: wsUUID})
+		if err != nil {
+			writeError(w, http.StatusNotFound, "note not found")
+			return
+		}
+		status := http.StatusCreated
+		if artifact.IssueID.Valid {
+			if uuidStr(artifact.IssueID) != uuidStr(issueID) {
+				writeError(w, http.StatusConflict, "note is already linked to another issue; link this issue from a specific comment")
+				return
+			}
+			status = http.StatusOK
+		} else {
+			artifact, err = h.Upstream.UpdateArtifactScope(r.Context(), db.UpdateArtifactScopeParams{ID: noteID, WorkspaceID: wsUUID, IssueID: issueID})
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "failed to link note to issue")
+				return
+			}
+		}
+		resp := primaryIssueReference(artifact)
+		h.publishNoteReference(EventNoteReferenceCreated, uuidStr(wsUUID), "member", uuidStr(ownerUUID), resp)
+		writeJSON(w, status, resp)
 		return
 	}
 
@@ -218,6 +270,21 @@ func (h *Handler) DeleteReference(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !h.requireCanCouple(w, r, noteID, ownerUUID) {
+		return
+	}
+	if chi.URLParam(r, "refId") == primaryIssueReferenceID {
+		artifact, err := h.Upstream.GetArtifact(r.Context(), db.GetArtifactParams{ID: noteID, WorkspaceID: wsUUID})
+		if err != nil || !artifact.IssueID.Valid {
+			writeError(w, http.StatusNotFound, "reference not found")
+			return
+		}
+		resp := primaryIssueReference(artifact)
+		if _, err := h.Upstream.UpdateArtifactScope(r.Context(), db.UpdateArtifactScopeParams{ID: noteID, WorkspaceID: wsUUID}); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to unlink note from issue")
+			return
+		}
+		h.publishNoteReference(EventNoteReferenceDeleted, uuidStr(wsUUID), "member", uuidStr(ownerUUID), resp)
+		w.WriteHeader(http.StatusNoContent)
 		return
 	}
 	refUUID, err := util.ParseUUID(chi.URLParam(r, "refId"))

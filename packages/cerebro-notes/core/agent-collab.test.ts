@@ -37,6 +37,7 @@ function comment(over: Partial<NoteComment>): NoteComment {
     created_at: "",
     updated_at: "",
     sent_to_agent_at: null,
+    issue_id: null,
     ...over,
   };
 }

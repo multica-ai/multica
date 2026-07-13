@@ -76,6 +76,10 @@ type CommentResponse struct {
 	// SentToAgentAt (FIR-1621) is null while the comment is an unsent local
 	// draft, and the dispatch timestamp once it has been sent to an agent.
 	SentToAgentAt *string `json:"sent_to_agent_at"`
+	// IssueID (FIR-3102) is the comment's OWN issue when it has been turned
+	// into / linked to its own issue via "Create issue from this comment";
+	// null means the comment inherits the note's overarching issue.
+	IssueID *string `json:"issue_id"`
 }
 
 func commentToResponse(c cerebrodb.CerebroNoteComment) CommentResponse {
@@ -100,6 +104,7 @@ func commentToResponse(c cerebrodb.CerebroNoteComment) CommentResponse {
 		CreatedAt:       tsStr(c.CreatedAt),
 		UpdatedAt:       tsStr(c.UpdatedAt),
 		SentToAgentAt:   tsPtr(c.SentToAgentAt),
+		IssueID:         uuidPtr(c.IssueID),
 	}
 }
 

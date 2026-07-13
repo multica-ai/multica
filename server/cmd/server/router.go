@@ -685,6 +685,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	channelListenSvc.AgentTriggerGate = mentionGate.ChannelListenGate()
 	cerebroNoteHandler.Gate = mentionGate                                          // CEREBRO-PATCH(cerebro-notes-handler): FIR-1621 gate send-to-issue agent triggers.
 	cerebroNoteHandler.Pool = pool                                                 // CEREBRO-PATCH(cerebro-note-search): FIR-2022 raw pool for FTS note/document search.
+	cerebroNoteHandler.Issues = h                                                  // CEREBRO-PATCH(cerebro-note-comment-issue): FIR-3102 create-issue-from-comment via shared IssueService.Create.
 	h.CommentTargetGuard = cerebrocommentguard.New(cerebroQueries)                 // CEREBRO-PATCH(router-comment-target-guard): FIR-2674 — gated by the cerebro_comment_target_guard feature flag (registry.ts), resolved per workspace; default off.
 	h.ChannelCreateGuard = cerebrochannels.NewCreateGuard(cerebroQueries, queries) // CEREBRO-PATCH(router-channel-create-guard): FIR-2660 — gated by the cerebro_channel_create_restricted feature flag (registry.ts); default off so any member/agent can still create until an admin turns it on.
 	// CEREBRO-PATCH(router-private-agent-run-request): FIR-2385 — member tag of an unowned private agent → owner inbox run-request.

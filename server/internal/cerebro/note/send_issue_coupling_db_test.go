@@ -96,13 +96,12 @@ func TestResolveCouplingNoIssueNoRefsStill409(t *testing.T) {
 	}
 }
 
-func TestResolveCouplingExplicitRefWinsOverIssueID(t *testing.T) {
+func TestResolveCouplingPrimaryIssueWinsOverLegacyReference(t *testing.T) {
 	if w3Pool == nil {
 		t.Skip("no test DB")
 	}
 	ctx := context.Background()
-	// Note linked to issue A via issue_id, but explicitly coupled to issue B via a
-	// reference row → the explicit reference must win (no regression).
+	// The canonical issue_id wins over a stale legacy reference row.
 	issueA := makeIssue(t, ctx, "issue A (issue_id)")
 	issueB := makeIssue(t, ctx, "issue B (explicit ref)")
 	noteID := makeNoteOnIssue(t, ctx, issueA)
@@ -113,7 +112,7 @@ func TestResolveCouplingExplicitRefWinsOverIssueID(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected resolved, got %d: %s", w.Code, w.Body.String())
 	}
-	if object != couplingIssue || refID != uuidStr(issueB) {
-		t.Fatalf("explicit ref should win: got (%q,%q), want (issue,%s)", object, refID, uuidStr(issueB))
+	if object != couplingIssue || refID != uuidStr(issueA) {
+		t.Fatalf("primary issue should win: got (%q,%q), want (issue,%s)", object, refID, uuidStr(issueA))
 	}
 }

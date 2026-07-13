@@ -69,6 +69,10 @@ type Handler struct {
 	// similarity threshold; sqlc cannot express the dynamic text-vs-kind SQL.
 	// Optional: nil makes GET /api/notes/search return 503 (e.g. in unit tests).
 	Pool *pgxpool.Pool
+	// Issues creates an issue from a single note comment (FIR-3102). Optional:
+	// nil makes POST /{id}/comments/{commentId}/create-issue return 503 (e.g. in
+	// unit tests that do not exercise issue creation).
+	Issues IssueCreator
 }
 
 // New constructs the handler. The router wires both query packages, the event
@@ -226,6 +230,8 @@ func (h *Handler) Routes(r chi.Router) {
 	r.Delete("/{id}/comments/{commentId}", h.DeleteComment)
 	r.Post("/{id}/comments/{commentId}/resolve", h.ResolveComment)
 	r.Post("/{id}/comments/{commentId}/suggestion", h.DecideSuggestion)
+	// FIR-3102 — create a standalone issue from one comment (see create_issue.go).
+	r.Post("/{id}/comments/{commentId}/create-issue", h.CreateIssueFromComment)
 	// FIR-1621 — dispatch selected/all unsent comments to the coupled destination.
 	r.Post("/{id}/comments/send", h.SendComments)
 
@@ -459,20 +465,6 @@ func (h *Handler) CreateNote(w http.ResponseWriter, r *http.Request) {
 
 	// FIR-2810: seed per-line attribution — every initial line is the creator's.
 	lineAttrs := h.advanceAndSaveLineAttrs(r.Context(), artifact.ID, "", artifact.Body, userID)
-
-	// FIR-2145: when the note is scoped to an issue, auto-create a reference so
-	// the note's References panel shows the issue link immediately, without the
-	// user or agent needing a separate API call.
-	if issueID.Valid {
-		_, _ = h.Cerebro.UpsertNoteReference(r.Context(), cerebrodb.UpsertNoteReferenceParams{
-			NoteID:        artifact.ID,
-			Object:        "issue",
-			RefID:         uuidStr(issueID),
-			Metadata:      []byte("{}"),
-			CreatedByType: "member",
-			CreatedByID:   ownerUUID,
-		})
-	}
 
 	writeJSON(w, http.StatusCreated, NoteResponse{
 		ID:          uuidStr(artifact.ID),
