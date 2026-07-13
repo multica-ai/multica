@@ -51,7 +51,18 @@ const (
 	// matching tool_result would otherwise run forever. This is the backstop for
 	// that stuck-tool case (MUL-3064). Set MULTICA_AGENT_TOOL_WATCHDOG=0 to
 	// disable, in which case an in-flight tool never force-stops the run.
-	DefaultAgentToolWatchdog       = 2 * time.Hour
+	DefaultAgentToolWatchdog = 2 * time.Hour
+	// DefaultAgentZeroOutputWatchdog force-stops a run that has produced zero
+	// user-visible timeline items (text, thinking, tool_use, tool_result, error)
+	// for this long. Unlike the idle watchdog — which resets on every backend
+	// message including internal frames — this watchdog only resets on messages
+	// that produce user-visible output. A stuck --resume session that emits
+	// system/init frames but no content will trip this watchdog while the idle
+	// watchdog stays silent (#4407). 5 minutes is short enough for fast UX
+	// recovery but long enough that a legitimately slow cold-start (model
+	// loading, MCP handshake) won't be killed prematurely.
+	// Set MULTICA_AGENT_ZERO_OUTPUT_WATCHDOG=0 to disable.
+	DefaultAgentZeroOutputWatchdog = 5 * time.Minute
 	DefaultRuntimeName             = "Local Agent"
 	DefaultWorkspaceSyncInterval   = 30 * time.Second
 	DefaultHealthPort              = 19514
@@ -101,6 +112,7 @@ type Config struct {
 	CodexHandshakeTimeout          time.Duration
 	AgentIdleWatchdog              time.Duration // force-stop a run when the backend goes silent this long with an empty queue (0 = disabled)
 	AgentToolWatchdog              time.Duration // force-stop a run when a single tool call stays in flight (silent) this long (0 = disabled); backstop for hung tools now that there is no wall-clock cap
+	AgentZeroOutputWatchdog        time.Duration // force-stop a run when it has produced zero user-visible timeline items (text, thinking, tool_use, tool_result, error) for this long (0 = disabled); catches stuck --resume sessions that emit internal frames but no user-visible output (#4407)
 	ClaudeArgs                     []string
 	CodexArgs                      []string
 	CodebuddyArgs                  []string
@@ -396,6 +408,13 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		return Config{}, err
 	}
 
+	// MULTICA_AGENT_ZERO_OUTPUT_WATCHDOG=0 disables the zero-output watchdog;
+	// any positive duration overrides DefaultAgentZeroOutputWatchdog.
+	agentZeroOutputWatchdog, err := durationFromEnv("MULTICA_AGENT_ZERO_OUTPUT_WATCHDOG", DefaultAgentZeroOutputWatchdog)
+	if err != nil {
+		return Config{}, err
+	}
+
 	maxConcurrentTasks, err := intFromEnv("MULTICA_DAEMON_MAX_CONCURRENT_TASKS", DefaultMaxConcurrentTasks)
 	if err != nil {
 		return Config{}, err
@@ -546,6 +565,7 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		CodexHandshakeTimeout:          codexHandshakeTimeout,
 		AgentIdleWatchdog:              agentIdleWatchdog,
 		AgentToolWatchdog:              agentToolWatchdog,
+		AgentZeroOutputWatchdog:        agentZeroOutputWatchdog,
 		ClaudeArgs:                     claudeArgs,
 		CodexArgs:                      codexArgs,
 		CodebuddyArgs:                  codebuddyArgs,

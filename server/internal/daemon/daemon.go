@@ -4199,12 +4199,15 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 	// message also trips the watchdog.
 	var lastActivityAt atomic.Int64
 	lastActivityAt.Store(time.Now().UnixNano())
-	// inFlightTools counts tool_use messages that haven't yet been paired
-	// with a matching tool_result. A non-zero count means the agent is
-	// legitimately waiting on a tool (e.g. `npm install`, `docker build`)
-	// that may run far longer than the idle window without emitting any
-	// message — so while a tool is in flight the watchdog applies the larger
-	// AgentToolWatchdog budget instead of treating that silence as a hang.
+	// lastUserVisibleActivityAt records when the drain loop most recently
+	// received a user-visible message (text, thinking, tool_use, tool_result,
+	// or error). The idle watchdog uses this to distinguish a backend that is
+	// emitting internal frames (status/init) from one that is producing real
+	// output the user can see. Without this, a stuck --resume that emits
+	// system frames keeps resetting lastActivityAt and the idle watchdog
+	// never fires (#4407).
+	var lastUserVisibleActivityAt atomic.Int64
+	lastUserVisibleActivityAt.Store(time.Now().UnixNano())
 	var inFlightTools atomic.Int32
 	var idleWatchdogFired atomic.Bool
 	// idleWatchdogThreshold records (as nanos) which silence budget actually
@@ -4213,8 +4216,9 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 	var idleWatchdogThreshold atomic.Int64
 	idleWatchdogThreshold.Store(int64(d.cfg.AgentIdleWatchdog))
 	idleWindow := d.cfg.AgentIdleWatchdog
-	if idleWindow > 0 {
-		go d.runIdleWatchdog(agentCtx, idleWindow, d.cfg.AgentToolWatchdog, &lastActivityAt, &inFlightTools, &idleWatchdogFired, &idleWatchdogThreshold, agentCancel, session.Messages, taskLog, taskID)
+	zeroOutputWindow := d.cfg.AgentZeroOutputWatchdog
+	if idleWindow > 0 || zeroOutputWindow > 0 {
+		go d.runIdleWatchdog(agentCtx, idleWindow, d.cfg.AgentToolWatchdog, zeroOutputWindow, &lastActivityAt, &lastUserVisibleActivityAt, &inFlightTools, &idleWatchdogFired, &idleWatchdogThreshold, agentCancel, session.Messages, taskLog, taskID)
 	}
 
 	// drainFinished closes after the drain goroutine has flushed the last
@@ -4294,6 +4298,18 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 				// slow downstream call (mu.Lock contention, batch resize)
 				// can't be misattributed to backend silence.
 				lastActivityAt.Store(time.Now().UnixNano())
+				// Stamp user-visible activity only for message types
+				// that produce timeline items the user can see. The
+				// zero-output watchdog uses this to detect stuck
+				// --resume sessions that emit internal frames
+				// (MessageStatus for session init, MessageLog for
+				// debug output) but no real content (#4407).
+				switch msg.Type {
+				case agent.MessageText, agent.MessageThinking,
+					agent.MessageToolUse, agent.MessageToolResult,
+					agent.MessageError:
+					lastUserVisibleActivityAt.Store(time.Now().UnixNano())
+				}
 				switch msg.Type {
 				case agent.MessageStatus:
 					// Persist the session/work_dir as soon as the backend
@@ -4435,7 +4451,12 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 			// generic "agent_error" bucket the aborted path falls into.
 			result.Status = "idle_watchdog"
 			if result.Error == "" {
-				result.Error = idleWatchdogReason(time.Duration(idleWatchdogThreshold.Load()))
+				tripped := time.Duration(idleWatchdogThreshold.Load())
+				if d.cfg.AgentZeroOutputWatchdog > 0 && tripped == d.cfg.AgentZeroOutputWatchdog {
+					result.Error = zeroOutputWatchdogReason(tripped)
+				} else {
+					result.Error = idleWatchdogReason(tripped)
+				}
 			}
 		}
 		return result, toolCount.Load(), nil
@@ -4450,9 +4471,14 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 		// classifiers so a watchdog-induced stop isn't misreported as
 		// "task cancelled by server".
 		if idleWatchdogFired.Load() {
+			tripped := time.Duration(idleWatchdogThreshold.Load())
+			reason := idleWatchdogReason(tripped)
+			if d.cfg.AgentZeroOutputWatchdog > 0 && tripped == d.cfg.AgentZeroOutputWatchdog {
+				reason = zeroOutputWatchdogReason(tripped)
+			}
 			return agent.Result{
 				Status: "idle_watchdog",
-				Error:  idleWatchdogReason(time.Duration(idleWatchdogThreshold.Load())),
+				Error:  reason,
 			}, toolCount.Load(), nil
 		}
 		// Distinguish external cancellation (e.g. server-initiated cancel
@@ -4480,35 +4506,58 @@ func idleWatchdogReason(window time.Duration) string {
 	return fmt.Sprintf("agent produced no new messages for %s and message queue was empty; force-stopped by idle watchdog", window)
 }
 
+// zeroOutputWatchdogReason formats the explanation for zero-output watchdog
+// dispositions. Unlike the idle watchdog (which fires on total backend
+// silence), the zero-output watchdog fires when the backend is emitting
+// internal frames but no user-visible timeline items.
+func zeroOutputWatchdogReason(window time.Duration) string {
+	return fmt.Sprintf("agent produced no user-visible output for %s despite emitting internal frames; force-stopped by zero-output watchdog", window)
+}
+
 // runIdleWatchdog ticks until either agentCtx is cancelled or the backend has
 // been silent past the applicable budget. On firing, it records the tripped
 // threshold, sets fired, and calls cancel, which propagates to the agent
-// subprocess (via the ctx passed to backend.Execute) and to drainCtx. The
-// silence budget depends on whether a tool call is in flight:
+// subprocess (via the ctx passed to backend.Execute) and to drainCtx.
 //
-//  1. No tool in flight — a silent backend is a hang after `window`.
-//  2. A tool in flight (tool_use with no matching tool_result yet) — a real
-//     tool (e.g. `npm install`, `docker build`) legitimately runs silently for
-//     many minutes, so the larger `toolWindow` applies instead. toolWindow <= 0
-//     keeps the historical behavior of never force-stopping while a tool is in
-//     flight. Without this in-flight budget a backend that emits tool_use and
-//     never the matching tool_result would run forever now that there is no
-//     wall-clock cap (MUL-3064).
+// Three silence budgets operate in parallel:
 //
-// In both cases the watchdog also requires the session.Messages buffer to be
-// empty — a buffered-but-undrained message means the drain loop is behind, not
-// the backend.
+//  1. Zero-output window — if the run has produced zero user-visible timeline
+//     items (text, thinking, tool_use, tool_result, error) for this long, fire
+//     immediately. This catches stuck --resume sessions that emit internal
+//     frames (status/init) but no content (#4407). zeroOutputWindow <= 0
+//     disables this check.
 //
-// Tick interval is window/2 (floored at 30 s in production, but the floor only
-// kicks in for windows >= 1 min so tests can pass tiny windows like 50 ms and
-// see the watchdog fire within a few ticks).
-func (d *Daemon) runIdleWatchdog(agentCtx context.Context, window, toolWindow time.Duration, lastActivityAt *atomic.Int64, inFlightTools *atomic.Int32, fired *atomic.Bool, firedThreshold *atomic.Int64, cancel context.CancelFunc, messages <-chan agent.Message, taskLog *slog.Logger, taskID string) {
+//  2. Idle window (no tool in flight) — a silent backend is a hang after
+//     `window`.
+//
+//  3. Tool window (tool in flight) — a real tool (e.g. `npm install`,
+//     `docker build`) legitimately runs silently for many minutes, so the
+//     larger `toolWindow` applies instead. toolWindow <= 0 keeps the
+//     historical behavior of never force-stopping while a tool is in flight.
+//
+// In all cases the watchdog also requires the session.Messages buffer to be
+// empty — a buffered-but-undrained message means the drain loop is behind,
+// not the backend.
+//
+// Tick interval is the smallest applicable window/2 (floored at 30 s in
+// production, but the floor only kicks in for windows >= 1 min so tests can
+// pass tiny windows like 50 ms and see the watchdog fire within a few ticks).
+func (d *Daemon) runIdleWatchdog(agentCtx context.Context, window, toolWindow, zeroOutputWindow time.Duration, lastActivityAt, lastUserVisibleActivityAt *atomic.Int64, inFlightTools *atomic.Int32, fired *atomic.Bool, firedThreshold *atomic.Int64, cancel context.CancelFunc, messages <-chan agent.Message, taskLog *slog.Logger, taskID string) {
+	// Compute tick interval: the smallest applicable window / 2.
 	interval := window / 2
+	if interval <= 0 {
+		interval = zeroOutputWindow / 2
+	}
+	if zeroOutputWindow > 0 && zeroOutputWindow/2 > 0 && zeroOutputWindow/2 < interval {
+		interval = zeroOutputWindow / 2
+	}
 	if window >= time.Minute && interval < 30*time.Second {
 		interval = 30 * time.Second
 	}
 	if interval <= 0 {
-		interval = window
+		// Both windows are 0 or negative — should never reach here because
+		// the caller guards with `if idleWindow > 0 || zeroOutputWindow > 0`.
+		return
 	}
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
@@ -4517,12 +4566,45 @@ func (d *Daemon) runIdleWatchdog(agentCtx context.Context, window, toolWindow ti
 		case <-agentCtx.Done():
 			return
 		case <-ticker.C:
-			// Pick the silence budget. A tool in flight is expected to be
-			// silent (a long build/install/test emits nothing between
-			// tool_use and tool_result), so it gets the larger toolWindow;
-			// toolWindow <= 0 disables the in-flight bound entirely.
-			threshold := window
+			// A buffered-but-undrained message means the drain loop is
+			// behind, not the backend. Wait one more tick rather than
+			// killing a backend that is still producing output.
+			if len(messages) > 0 {
+				continue
+			}
+
 			toolInFlight := inFlightTools.Load() > 0
+
+			// Check 1: Zero-output watchdog. If no user-visible timeline
+			// items have been produced for zeroOutputWindow, fire. This
+			// catches stuck --resume sessions that emit internal frames
+			// (keeps lastActivityAt fresh) but no user-visible content.
+			// Skipped when a tool is in flight: a legitimate long-running
+			// tool (npm install, docker build) may run silently for hours
+			// after tool_use, and the tool watchdog (2h) is the correct
+			// budget for that case.
+			if zeroOutputWindow > 0 && !toolInFlight {
+				lastVisible := time.Unix(0, lastUserVisibleActivityAt.Load())
+				silentFor := time.Since(lastVisible)
+				if silentFor >= zeroOutputWindow {
+					taskLog.Warn("zero-output watchdog firing: no user-visible output, force-stopping run",
+						"task", shortID(taskID),
+						"silent_for", silentFor.Round(time.Second).String(),
+						"threshold", zeroOutputWindow.String(),
+					)
+					firedThreshold.Store(int64(zeroOutputWindow))
+					fired.Store(true)
+					cancel()
+					return
+				}
+			}
+
+			// Check 2: Idle watchdog. Pick the silence budget based on
+			// whether a tool is in flight.
+			if window <= 0 {
+				continue
+			}
+			threshold := window
 			if toolInFlight {
 				if toolWindow <= 0 {
 					continue
@@ -4532,12 +4614,6 @@ func (d *Daemon) runIdleWatchdog(agentCtx context.Context, window, toolWindow ti
 			last := time.Unix(0, lastActivityAt.Load())
 			idleFor := time.Since(last)
 			if idleFor < threshold {
-				continue
-			}
-			// A buffered-but-undrained message means the drain loop is
-			// behind, not the backend. Wait one more tick rather than
-			// killing a backend that is still producing output.
-			if len(messages) > 0 {
 				continue
 			}
 			taskLog.Warn("idle watchdog firing: no agent activity, force-stopping run",
