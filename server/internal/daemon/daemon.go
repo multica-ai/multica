@@ -1882,6 +1882,14 @@ func (d *Daemon) syncWorkspacesFromAPI(ctx context.Context) error {
 			}
 		}
 
+		// CEREBRO-PATCH(daemon-account-prime-on-register): JEH-997 warm the
+		// identity-probe cache so the very first heartbeat (which fires
+		// almost immediately after register) already carries the runtime's
+		// detected login identity instead of a nil Account field.
+		for _, rt := range resp.Runtimes {
+			d.refreshHeartbeatAccount(rt.ID)
+		}
+
 		d.logger.Info("watching workspace", "workspace_id", id, "name", name, "runtimes", len(resp.Runtimes), "repos", len(resp.Repos))
 		registered++
 	}
@@ -2006,7 +2014,23 @@ func (d *Daemon) runHeartbeatTick(ctx context.Context, rid string) {
 		return
 	}
 	d.logger.Debug("heartbeat: HTTP tick", "runtime_id", rid)
-	resp, err := d.client.SendHeartbeat(ctx, rid)
+	// CEREBRO-PATCH(daemon-heartbeat-account-refresh): JEH-997 re-probe the
+	// runtime's login identity right before the beat so a fresh login
+	// propagates within one tick instead of one daemon restart. Probe is
+	// cheap (one fstat + one JSON parse) and the result is cached.
+	d.refreshHeartbeatAccount(rid)
+	opts := SendHeartbeatOpts{Account: d.heartbeatAccountFor(rid)}
+	// W4.2: advertise the runtime's current CLI version + tool capabilities
+	// so the server can update its capabilities snapshot on drift. Skipped
+	// when we couldn't resolve the runtime (e.g. just deregistered) or when
+	// the provider has no detected version yet.
+	if rt := d.findRuntime(rid); rt != nil {
+		if v := d.agentVersion(rt.Provider); v != "" {
+			opts.CLIVersion = v
+			opts.Capabilities = providerCapabilities(rt.Provider)
+		}
+	}
+	resp, err := d.client.SendHeartbeat(ctx, rid, opts)
 	if err != nil {
 		if ctx.Err() == nil {
 			if isRuntimeNotFoundError(err) {
@@ -2039,6 +2063,10 @@ func (d *Daemon) runHeartbeatTick(ctx context.Context, rid string) {
 func (d *Daemon) handleHeartbeatActions(ctx context.Context, runtimeID string, resp *HeartbeatResponse) {
 	if resp == nil {
 		return
+	}
+	// CEREBRO-PATCH(heartbeat-account-id-ack): cache server-registered account id for task usage reports.
+	if d.accountIdentities != nil && resp.CerebroAccountID != "" {
+		d.accountIdentities.setAccountID(runtimeID, resp.CerebroAccountID)
 	}
 	execenv.ApplyFeatureFlagSnapshot(resp.FeatureFlags)
 	if resp.PendingUpdate != nil || resp.PendingModelList != nil || resp.PendingLocalSkills != nil || resp.PendingLocalSkillImport != nil {

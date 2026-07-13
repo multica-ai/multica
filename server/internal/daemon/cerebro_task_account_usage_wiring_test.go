@@ -24,3 +24,32 @@ func TestTaskCompletionReportsAccountUsage(t *testing.T) {
 		t.Fatal("task completion must report account usage; an upstream sync likely removed the Cerebro wiring")
 	}
 }
+
+func TestHeartbeatAckCachesAccountID(t *testing.T) {
+	t.Parallel()
+
+	src, err := os.ReadFile("daemon.go")
+	if err != nil {
+		t.Fatalf("read daemon.go: %v", err)
+	}
+
+	if !strings.Contains(string(src), "d.accountIdentities.setAccountID(") {
+		t.Fatal("heartbeat ack must cache the cerebro account id; an upstream sync likely removed the Cerebro wiring")
+	}
+}
+
+func TestHeartbeatCarriesAccountIdentity(t *testing.T) {
+	t.Parallel()
+
+	src, err := os.ReadFile("daemon.go")
+	if err != nil {
+		t.Fatalf("read daemon.go: %v", err)
+	}
+
+	if !strings.Contains(string(src), "SendHeartbeatOpts{Account: d.heartbeatAccountFor(") {
+		t.Fatal("HTTP heartbeat must piggyback the runtime's login identity; an upstream sync likely removed the Cerebro wiring")
+	}
+	if !strings.Contains(string(src), "d.refreshHeartbeatAccount(") {
+		t.Fatal("heartbeat/register must refresh the identity-probe cache; an upstream sync likely removed the Cerebro wiring")
+	}
+}
