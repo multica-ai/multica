@@ -286,7 +286,12 @@
     "conflict_footer": "{{count}}개의 충돌 결정이 남아 있습니다.",
     "conflict_apply_button": "결정 적용",
     "conflict_missing_resolution": "이 충돌을 처리할 방법을 선택하세요.",
-    "conflict_name_still_exists": "해당 이름이 이미 있습니다. 다른 이름을 선택하거나 건너뛰세요."
+    "conflict_name_still_exists": "해당 이름이 이미 있습니다. 다른 이름을 선택하거나 건너뛰세요.",
+    "provider_group_heading": "프로바이더 스킬",
+    "universal_group_heading": "범용 스킬",
+    "other_group_heading": "기타 스킬",
+    "search_empty": "\"{{query}}\"과(와) 일치하는 스킬이 없습니다",
+    "group_count": "{{count}}개 스킬"
   },
   "file_tree": {
     "no_files": "파일 없음"
