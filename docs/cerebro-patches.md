@@ -1492,6 +1492,12 @@ comment for SQL/CSS/SBPL/JSON-with-_comment-field).
 | `chat-run-stream` (`handler-chat-stream` field, `chat-run-stream-route` import+route, `chat-run-stream-wire`) | server/internal/handler/chat_stream_cerebro.go (new)<br>server/internal/cerebro/chatstream/ (new package)<br>server/internal/handler/handler.go (1 marked field)<br>server/cmd/server/router.go (marked import + wire + route lines) | 3 marked sites + new cerebro files | FIR-2835 Phase 1 — `GET /api/chat/sessions/{sessionId}/stream` streams a chat run as SSE in the Vercel AI SDK UI-message-stream (v1) protocol (`start` → `text-*` → `finish` with taskId/elapsedMs/usage metadata → `[DONE]`; failures as in-stream `error` chunks carrying the real failure text). Replaces the create→send→poll loop embedding apps (Finance AI CFO first) hand-roll today. `?task_id=` follows a specific run; without it the pending task is used and 204 signals "nothing active" (AI SDK resume contract). Runs finished before connect replay from the persisted assistant message, so the send→open-stream race is safe. |
 | `model-registry-cache-ttl` | packages/core/types/model-registry.ts | 1 marked field | FIR-2698 — exposes editable per-model cache lifetime metadata to the Cerebro model-registry UI while keeping the registry API type aligned with the backend snapshot. |
 
+# cerebro-operating-system-foundation
+
+| `operating-system-paths` | packages/core/paths/paths.ts (2 marked route builders) | 2 inline | FIR-2816 — shared workspace paths for the fork-owned Rocks and Strategy pages. |
+| `operating-system-sidebar-component` + `operating-system-sidebar` | packages/views/layout/cerebro-operating-system-nav.tsx (fork-owned sibling) + app-sidebar.tsx (1 import, 1 mount) | sibling + 2 inline | FIR-2816 — feature-flagged Strategy/Rocks navigation; all behavior stays in the named sibling and the upstream sidebar only mounts it. |
+| `operating-system-routes` | server/cmd/server/router.go (1 import, 1 constructor, 1 mount) | 3 inline | FIR-2816 — mounts the fork-owned Strategy/Rocks service; endpoint definitions remain in `server/internal/cerebro/operatingsystem`. |
+
 # cerebro-workflow-cli-management
 
 - Location: `server/cmd/multica/cmd_workflow.go`

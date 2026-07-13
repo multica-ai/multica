@@ -12,6 +12,8 @@ describe("paths.workspace(slug)", () => {
       "/acme/cerebro/references/github_pr/org%2Frepo%2342",
     );
     expect(ws.projects()).toBe("/acme/projects");
+    expect(ws.rocks()).toBe("/acme/rocks");
+    expect(ws.strategy()).toBe("/acme/strategy");
     expect(ws.projectDetail("p1")).toBe("/acme/projects/p1");
     expect(ws.autopilots()).toBe("/acme/autopilots");
     expect(ws.autopilotDetail("a1")).toBe("/acme/autopilots/a1");

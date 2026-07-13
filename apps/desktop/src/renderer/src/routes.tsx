@@ -47,6 +47,7 @@ import { useMembersTabCerebroExtras } from "@multica/cerebro-members/views";
 import { useNavigation } from "@multica/views/navigation";
 import { useCurrentWorkspace } from "@multica/core/paths";
 import { TasksPage } from "@multica/cerebro-tasks";
+import { RocksPage, StrategyPage } from "@multica/cerebro-operating-system/views";
 import { ApprovalsPage } from "@multica/cerebro-approvals";
 import { NotesPage } from "@multica/cerebro-notes/views";
 import { NoteCommentsPanel } from "@multica/cerebro-notes/views/note-comments-panel";
@@ -328,6 +329,8 @@ export const appRoutes: RouteObject[] = [
           { path: "inbox", element: <CerebroInboxSwitcher />, handle: { title: "Inbox" } },
           { path: "search", element: <SearchPage />, handle: { title: "Search" } },
           { path: "tasks", element: <TasksPage />, handle: { title: "Tasks" } },
+          { path: "rocks", element: <RocksPage />, handle: { title: "Rocks" } },
+          { path: "strategy", element: <StrategyPage />, handle: { title: "Strategy" } },
           {
             path: "approvals",
             element: <ApprovalsPage />,

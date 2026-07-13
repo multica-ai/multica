@@ -161,6 +161,10 @@
       "gate": "workspace_member"
     },
     {
+      "id": "DELETE /api/cerebro/object-connections/{id}",
+      "gate": "workspace_member"
+    },
+    {
       "id": "DELETE /api/cerebro/projects/{projectID}/sprint-settings/",
       "gate": "via:DELETE /api/cerebro/projects/{projectID}/sprint-settings/"
     },
@@ -175,6 +179,10 @@
     {
       "id": "DELETE /api/cerebro/reminders/{id}",
       "gate": "self_only"
+    },
+    {
+      "id": "DELETE /api/cerebro/rocks/{projectID}",
+      "gate": "workspace_member"
     },
     {
       "id": "DELETE /api/cerebro/rounds/{roundId}/",
@@ -247,6 +255,10 @@
     {
       "id": "DELETE /api/cerebro/status-models/{id}",
       "gate": "workspace_admin"
+    },
+    {
+      "id": "DELETE /api/cerebro/strategy-items/{id}",
+      "gate": "workspace_member"
     },
     {
       "id": "DELETE /api/cerebro/terminal/sessions/{sessionId}",
@@ -721,6 +733,10 @@
       "gate": "workspace_member"
     },
     {
+      "id": "POST /api/cerebro/object-connections/",
+      "gate": "workspace_member"
+    },
+    {
       "id": "POST /api/cerebro/presence/ping",
       "gate": "workspace_member"
     },
@@ -749,8 +765,16 @@
       "gate": "self_only"
     },
     {
+      "id": "POST /api/cerebro/rocks/",
+      "gate": "workspace_member"
+    },
+    {
       "id": "POST /api/cerebro/status-models/",
       "gate": "workspace_admin"
+    },
+    {
+      "id": "POST /api/cerebro/strategy-items/",
+      "gate": "workspace_member"
     },
     {
       "id": "POST /api/cerebro/terminal/sessions",
@@ -1601,6 +1625,10 @@
       "gate": "workspace_member"
     },
     {
+      "id": "PUT /api/cerebro/operating-system/settings/",
+      "gate": "workspace_member"
+    },
+    {
       "id": "PUT /api/cerebro/projects/{projectID}/sprint-settings/",
       "gate": "via:PUT /api/cerebro/projects/{projectID}/sprint-settings/"
     },
@@ -1613,12 +1641,20 @@
       "gate": "via:PUT /api/cerebro/sprint-recurring-tasks/{id}/"
     },
     {
+      "id": "PUT /api/cerebro/rocks/{projectID}",
+      "gate": "workspace_member"
+    },
+    {
       "id": "PUT /api/cerebro/sprints/{sprintID}/",
       "gate": "via:PUT /api/cerebro/sprints/{sprintID}/"
     },
     {
       "id": "PUT /api/cerebro/status-models/{id}",
       "gate": "workspace_admin"
+    },
+    {
+      "id": "PUT /api/cerebro/strategy-items/{id}",
+      "gate": "workspace_member"
     },
     {
       "id": "PUT /api/cerebro/terminal/runtimes/{runtimeId}/presentation-mode",

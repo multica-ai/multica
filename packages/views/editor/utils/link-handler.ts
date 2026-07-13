@@ -24,6 +24,8 @@ const WORKSPACE_ROUTE_SEGMENTS = new Set([
   "issues",
   "channels",
   "projects",
+  "rocks", // CEREBRO-PATCH(operating-system-paths): FIR-2816 workspace-relative Rocks links.
+  "strategy",
   "documents",
   "attachments",
   "autopilots",

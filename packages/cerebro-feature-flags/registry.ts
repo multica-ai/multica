@@ -217,6 +217,7 @@ export type CerebroFlagKey =
   | "cerebro_workspace_logo"
   // FIR-2666: project sprint feature (sprint settings, auto-create next sprint, recurring tasks).
   | "cerebro_sprints"
+  | "cerebro_operating_system"
   // TECH-3064: recurring issues — mark an issue recurring; on close, spawn the next occurrence.
   | "cerebro_recurring_issues"
   // FIR-1704: comment sessions UI. OFF — phase 1 model was unsound (comments never linked to a session); rebuilding as threads=sessions (FIR-1741). Internal key kept as `cerebro_comment_chapters` so existing per-user overrides keep working; everything user-facing now says "session".
@@ -608,6 +609,7 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   // when ready. Hides the Sprints tab on the project page, the sprint picker
   // in the issue sidebar, and skips the sprint sweeper.
   cerebro_sprints: false,
+  cerebro_operating_system: false,
   // TECH-3064: OFF by default. Hides the recurring panel on issues and skips
   // the recurring-issue sweeper.
   cerebro_recurring_issues: false,
@@ -1464,6 +1466,13 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     group: "workspace",
     description:
       "Turn a project into a sprint container: per-project sprint settings (duration, start-day, lead days for auto-create, move-incomplete), a Sprints tab on the project page, a sprint picker in the issue sidebar, and a daily sweeper that creates the next sprint, moves incomplete issues, and clones recurring tasks. Every period (lead days, duration) is a setting — no hardcoded values. FIR-2666.",
+  },
+  {
+    key: "cerebro_operating_system",
+    label: "Operating System",
+    group: "workspace",
+    description:
+      "Plan strategy horizons and treat existing Projects as Rocks with transparent Issue rollups. Off hides the Strategy and Rocks routes and navigation. FIR-2816.",
   },
   {
     key: "cerebro_comment_chapters",

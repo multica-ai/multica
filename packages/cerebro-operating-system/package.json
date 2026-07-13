@@ -1,12 +1,11 @@
 {
-  "name": "@multica/cerebro-saved-filters",
+  "name": "@multica/cerebro-operating-system",
   "version": "0.0.0",
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./core/index.ts",
+    ".": "./index.ts",
     "./core": "./core/index.ts",
-    "./core/queries": "./core/queries.ts",
     "./views": "./views/index.ts"
   },
   "scripts": {
@@ -14,14 +13,11 @@
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
-    "@multica/cerebro-feature-flags": "workspace:*",
-    "@multica/cerebro-groups": "workspace:*",
     "@multica/core": "workspace:*",
+    "@multica/cerebro-feature-flags": "workspace:*",
     "@multica/ui": "workspace:*",
     "@tanstack/react-query": "catalog:",
     "lucide-react": "catalog:",
-    "sonner": "^2.0.7",
-    "zustand": "catalog:",
     "zod": "catalog:"
   },
   "peerDependencies": {
