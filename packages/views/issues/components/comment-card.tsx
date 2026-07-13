@@ -28,6 +28,7 @@ import { ActorAvatar } from "../../common/actor-avatar";
 import { ReactionBar } from "@multica/ui/components/common/reaction-bar";
 import { ViewRunButton } from "./view-run-button";
 import { useAgentTaskForComment } from "../hooks/use-agent-task-for-comment";
+import { HoverCard, HoverCardTrigger, HoverCardContent } from "@multica/ui/components/ui/hover-card";
 import { cn } from "@multica/ui/lib/utils";
 import { copyText } from "@multica/ui/lib/clipboard";
 import { useActorName } from "@multica/core/workspace/hooks";
@@ -285,6 +286,37 @@ function ViewRunButtonSlot({
       title={viewRunLabel}
       className={className}
     />
+  );
+}
+
+/**
+ * Hit-area that surfaces a hover card explaining *why* the View run chip is
+ * absent on a comment that *should* have one. Renders only when:
+ *   - source_task_id is set (the comment was produced by a run), AND
+ *   - the AgentTask cannot be resolved from cache (task was GC'd, the
+ *     backfill hasn't reached this row, or the row is in a workspace
+ *     scoped out of the cache).
+ * Picking a dedicated invisible hit-area (decision c) over card-wide hover
+ * keeps the affordance predictable and avoids accidental triggers during
+ * scrolling or text selection.
+ */
+function GcTooltipSlot({
+  sourceTaskId,
+  className,
+  message,
+}: {
+  sourceTaskId: string | null;
+  className?: string;
+  message: string;
+}) {
+  if (!sourceTaskId) return null;
+  return (
+    <HoverCard>
+      <HoverCardTrigger render={<span className={cn("inline-flex h-4 w-4 cursor-help", className)} aria-label={message} />} />
+      <HoverCardContent side="bottom" sideOffset={6}>
+        {message}
+      </HoverCardContent>
+    </HoverCard>
   );
 }
 
@@ -714,6 +746,11 @@ function CommentRow({
             className="mt-2 pl-12 pr-4"
             viewRunLabel={t(($) => $.execution_log.view_run)}
           />
+          <GcTooltipSlot
+            sourceTaskId={entry.source_task_id ?? null}
+            className="ml-1"
+            message={t(($) => $.execution_log.view_run_cleaned_up)}
+          />
           <ReactionBar
             reactions={reactions}
             currentUserId={currentUserId}
@@ -1010,6 +1047,11 @@ function CommentCardImpl({
                   agentName={getActorName(entry.actor_type, entry.actor_id)}
                   className="mt-2 pl-10"
                   viewRunLabel={t(($) => $.execution_log.view_run)}
+                />
+                <GcTooltipSlot
+                  sourceTaskId={entry.source_task_id ?? null}
+                  className="ml-1"
+                  message={t(($) => $.execution_log.view_run_cleaned_up)}
                 />
                 <ReactionBar
                   reactions={reactions}
