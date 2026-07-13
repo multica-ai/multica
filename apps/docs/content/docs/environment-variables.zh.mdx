@@ -42,7 +42,7 @@ Multica 支持两种邮件发送通道——[Resend](https://resend.com/) 适合
 | 环境变量 | 默认值 | 说明 |
 |---|---|---|
 | `RESEND_API_KEY` | 空 | Resend API key |
-| `RESEND_FROM_EMAIL` | `noreply@multica.ai` | 发件地址（必须是 Resend 账号已验证的域名；走 SMTP 时同时作为 `From:` 头）|
+| `RESEND_FROM_EMAIL` | `noreply@multica.ai` | Resend 发件地址（必须是 Resend 账号已验证的域名；`SMTP_FROM_EMAIL` 未设置时，SMTP 也会使用它）|
 
 ### SMTP relay
 
@@ -52,6 +52,7 @@ Multica 支持两种邮件发送通道——[Resend](https://resend.com/) 适合
 | `SMTP_PORT` | `25` | SMTP 端口。STARTTLS 提交端口用 `587`；SMTPS（隐式 TLS，自动启用）用 `465` |
 | `SMTP_USERNAME` | 空 | SMTP 用户名。留空表示未认证 relay |
 | `SMTP_PASSWORD` | 空 | SMTP 密码 |
+| `SMTP_FROM_EMAIL` | 空 | SMTP 的 `MAIL FROM` 和 `From:` 发件地址。未设置时回退到 `RESEND_FROM_EMAIL` |
 | `SMTP_TLS` | `starttls` | TLS 模式。`implicit`（别名 `smtps`、`ssl`）在连接时立即进行 TLS 握手（SMTPS）；`465` 端口会自动启用。未设置 / `starttls` 则在连接后通过 STARTTLS 升级 |
 | `SMTP_TLS_INSECURE` | `false` | 设为 `true` 跳过 TLS 证书校验（仅限私有 CA / 自签证书）|
 | `SMTP_EHLO_NAME` | 机器主机名 | 向 relay 通告的 EHLO/HELO 名称。当严格的 relay（例如 Google Workspace `smtp-relay.gmail.com`）拒绝来自公网 IP 的默认问候时，填一个真实的 FQDN——否则 relay 会直接断开连接，并在后续某条命令上表现为一个不知所云的 `EOF` |
