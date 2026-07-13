@@ -133,12 +133,10 @@ var catalog = []Capability{
 		Ops: []string{
 			"POST /api/cerebro/apps/{id}/token",
 			"POST /api/cerebro/apps/workflow-runs/{runId}/token",
-			"GET /api/cerebro/apps/{id}/storage/{key}",
 			"PUT /api/cerebro/apps/{id}/storage/{key}",
 			"DELETE /api/cerebro/apps/{id}/storage/{key}",
 			"POST /api/cerebro/apps/{id}/views/{viewId}/submissions",
 			"POST /api/cerebro/app-workflows/{workflowId}/test",
-			"GET /api/cerebro/app-workflows/{workflowId}/runs",
 		},
 	},
 	{
@@ -153,7 +151,7 @@ var catalog = []Capability{
 			"POST /api/cerebro/apps/{id}/publish",
 			"POST /api/cerebro/apps/{id}/rollback",
 			"POST /api/cerebro/app-workflows/",
-			"POST /api/cerebro/app-workflows/{workflowId}/{state}",
+			"POST /api/cerebro/app-workflows/{workflowId}/{state:enable|disable}",
 		},
 	},
 	{
