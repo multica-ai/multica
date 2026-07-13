@@ -26,6 +26,8 @@ import {
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@multica/ui/components/ui/collapsible";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { ReactionBar } from "@multica/ui/components/common/reaction-bar";
+import { ViewRunButton } from "./view-run-button";
+import { useAgentTaskForComment } from "../hooks/use-agent-task-for-comment";
 import { cn } from "@multica/ui/lib/utils";
 import { copyText } from "@multica/ui/lib/clipboard";
 import { useActorName } from "@multica/core/workspace/hooks";
@@ -257,6 +259,32 @@ function retryableAgentFailureComment(entry: TimelineEntry): entry is TimelineEn
     entry.comment_type === "system" &&
     typeof entry.source_task_id === "string" &&
     entry.source_task_id.length > 0
+  );
+}
+
+function ViewRunButtonSlot({
+  issueId,
+  sourceTaskId,
+  agentName,
+  className,
+  viewRunLabel,
+}: {
+  issueId: string;
+  sourceTaskId: string | null;
+  agentName: string | undefined;
+  className?: string;
+  viewRunLabel: string;
+}) {
+  // Sync cache read; no useQuery, no network — must not perturb memoization.
+  const agentTask = useAgentTaskForComment(issueId, sourceTaskId ?? null);
+  if (!agentTask) return null;
+  return (
+    <ViewRunButton
+      agentTask={agentTask}
+      agentName={agentName ?? ""}
+      title={viewRunLabel}
+      className={className}
+    />
   );
 }
 
@@ -679,6 +707,13 @@ function CommentRow({
               className="mt-2 pl-12 pr-4"
             />
           )}
+          <ViewRunButtonSlot
+            issueId={issueId}
+            sourceTaskId={entry.source_task_id ?? null}
+            agentName={getActorName(entry.actor_type, entry.actor_id)}
+            className="mt-2 pl-12 pr-4"
+            viewRunLabel={t(($) => $.execution_log.view_run)}
+          />
           <ReactionBar
             reactions={reactions}
             currentUserId={currentUserId}
@@ -969,6 +1004,13 @@ function CommentCardImpl({
                     className="mt-2 pl-10"
                   />
                 )}
+                <ViewRunButtonSlot
+                  issueId={issueId}
+                  sourceTaskId={entry.source_task_id ?? null}
+                  agentName={getActorName(entry.actor_type, entry.actor_id)}
+                  className="mt-2 pl-10"
+                  viewRunLabel={t(($) => $.execution_log.view_run)}
+                />
                 <ReactionBar
                   reactions={reactions}
                   currentUserId={currentUserId}

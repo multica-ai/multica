@@ -373,6 +373,7 @@
     "retry_task_aria": "Retry task",
     "retry_failed": "Failed to retry task",
     "transcript_tooltip": "View transcript",
+    "view_run": "View run",
     "cancel_failed": "Failed to cancel task",
     "trigger_retry": "Retry",
     "trigger_retry_attempt": "Retry #{{attempt}}",
