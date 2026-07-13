@@ -38,7 +38,10 @@ func (c *SkillBundleCache) Load(workspaceID string, ref SkillRefData) (SkillData
 	}
 	if c.legacyRoot != "" {
 		if bundle, ok := c.loadFromRoot(c.legacyRoot, workspaceID, ref); ok {
-			_ = c.Store(workspaceID, bundle)
+			legacyDir := bundleDirForRoot(c.legacyRoot, workspaceID, ref)
+			if err := c.Store(workspaceID, bundle); err == nil {
+				_ = os.RemoveAll(legacyDir)
+			}
 			return bundle, true
 		}
 	}

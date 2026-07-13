@@ -87,6 +87,65 @@ func TestSkillBundleCacheMigratesLegacyLayout(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(cache.bundleDir("ws-1", ref), "SKILL.md")); err != nil {
 		t.Fatalf("migrated bundle missing SKILL.md: %v", err)
 	}
+	if _, err := os.Stat(legacyDir); !os.IsNotExist(err) {
+		t.Fatalf("expected legacy bundle to be reclaimed after successful migration, stat err=%v", err)
+	}
+}
+
+func TestSkillBundleCacheKeepsLegacyLayoutWhenMigrationWriteFails(t *testing.T) {
+	base := t.TempDir()
+	v2Root := filepath.Join(base, "v2")
+	if err := os.WriteFile(v2Root, []byte("not a dir"), 0o644); err != nil {
+		t.Fatalf("seed blocking v2 root: %v", err)
+	}
+	cache := NewSkillBundleCache(v2Root)
+	bundle := testSkillBundle()
+	ref := skillRefFromBundle(bundle)
+
+	legacyDir := bundleDirForRoot(cache.legacyRoot, "ws-1", ref)
+	if err := os.MkdirAll(legacyDir, 0o755); err != nil {
+		t.Fatalf("seed legacy dir: %v", err)
+	}
+	raw, err := json.Marshal(bundle)
+	if err != nil {
+		t.Fatalf("marshal bundle: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(legacyDir, ".skill-bundle.json"), raw, 0o644); err != nil {
+		t.Fatalf("seed legacy meta: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(legacyDir, "SKILL.md"), []byte("main"), 0o644); err != nil {
+		t.Fatalf("seed legacy SKILL.md: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(legacyDir, "rules.md"), []byte("rules"), 0o644); err != nil {
+		t.Fatalf("seed legacy support file: %v", err)
+	}
+
+	got, ok := cache.Load("ws-1", ref)
+	if !ok {
+		t.Fatal("expected cache hit from legacy layout")
+	}
+	if got.Content != bundle.Content {
+		t.Fatalf("loaded legacy bundle = %+v, want %+v", got, bundle)
+	}
+	if _, err := os.Stat(filepath.Join(cache.bundleDir("ws-1", ref), "SKILL.md")); err == nil {
+		t.Fatal("expected v2 migration write to fail, but bundle dir exists")
+	}
+	if _, err := os.Stat(legacyDir); err != nil {
+		t.Fatalf("expected legacy bundle to remain after failed migration, stat err=%v", err)
+	}
+}
+
+func TestConvertSkillsForEnvSkipsMissingCacheDir(t *testing.T) {
+	cache := NewSkillBundleCache(filepath.Join(t.TempDir(), "v2"))
+	skills := []SkillData{testSkillBundle()}
+
+	got := convertSkillsForEnv("ws-1", skills, cache)
+	if len(got) != 1 {
+		t.Fatalf("convertSkillsForEnv returned %d skills, want 1", len(got))
+	}
+	if got[0].CacheDir != "" {
+		t.Fatalf("CacheDir = %q, want empty when bundle dir is missing", got[0].CacheDir)
+	}
 }
 
 func testSkillBundle() SkillData {

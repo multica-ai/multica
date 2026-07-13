@@ -3029,6 +3029,65 @@ func TestPrepareCodexLinksWorkspaceSkillCache(t *testing.T) {
 	}
 }
 
+// TestPrepareCodexCopiesWorkspaceSkillWhenCacheMissing proves the fallback
+// path still materializes a usable skill tree when the shared cache entry is
+// unavailable, which is the migration-failure safety net.
+func TestPrepareCodexCopiesWorkspaceSkillWhenCacheMissing(t *testing.T) {
+	// Cannot use t.Parallel() with t.Setenv.
+
+	sharedHome := t.TempDir()
+	t.Setenv("CODEX_HOME", sharedHome)
+
+	missingCacheDir := filepath.Join(t.TempDir(), "skill-cache", "ws-1", "workspace", "skill-1", "sha256-missing")
+
+	env, err := Prepare(PrepareParams{
+		WorkspacesRoot: t.TempDir(),
+		WorkspaceID:    "ws-codex-cache-copy",
+		TaskID:         "b1c2d3e4-f5a6-7890-abcd-ef1234567890",
+		AgentName:      "Codex Agent",
+		Provider:       "codex",
+		Task: TaskContextForEnv{
+			IssueID: "codex-cache-copy-test",
+			AgentSkills: []SkillContextForEnv{
+				{
+					Name:        "Writing",
+					Description: "Missing shared cache",
+					Content:     "body",
+					Files:       []SkillFileContextForEnv{{Path: "docs/guide.md", Content: "guide"}},
+					CacheDir:    missingCacheDir,
+				},
+			},
+		},
+	}, testLogger())
+	if err != nil {
+		t.Fatalf("Prepare failed: %v", err)
+	}
+	defer env.Cleanup(true)
+
+	dst := filepath.Join(env.CodexHome, "skills", "writing")
+	fi, err := os.Lstat(dst)
+	if err != nil {
+		t.Fatalf("materialized skill missing: %v", err)
+	}
+	if fi.Mode()&os.ModeSymlink != 0 {
+		t.Fatal("expected fallback to copy the skill, not symlink a missing cache dir")
+	}
+	data, err := os.ReadFile(filepath.Join(dst, "SKILL.md"))
+	if err != nil {
+		t.Fatalf("copied SKILL.md missing: %v", err)
+	}
+	if string(data) != "body" {
+		t.Fatalf("copied SKILL.md = %q, want %q", data, "body")
+	}
+	support, err := os.ReadFile(filepath.Join(dst, "docs", "guide.md"))
+	if err != nil {
+		t.Fatalf("copied support file missing: %v", err)
+	}
+	if string(support) != "guide" {
+		t.Fatalf("copied support file = %q, want %q", support, "guide")
+	}
+}
+
 // TestPrepareCodexWorkspaceSkillBeatsUserSkillOnConflict checks that when a
 // workspace-assigned skill shares a sanitized name with a user-installed
 // skill, the workspace version fully replaces the user version (rather than

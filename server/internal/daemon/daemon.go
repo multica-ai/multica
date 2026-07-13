@@ -4688,7 +4688,10 @@ func convertSkillsForEnv(workspaceID string, skills []SkillData, skillCache *Ski
 	for i, s := range skills {
 		cacheDir := ""
 		if skillCache != nil {
-			cacheDir = skillCache.bundleDir(workspaceID, skillRefFromBundle(s))
+			candidate := skillCache.bundleDir(workspaceID, skillRefFromBundle(s))
+			if info, err := os.Stat(candidate); err == nil && info.IsDir() {
+				cacheDir = candidate
+			}
 		}
 		result[i] = execenv.SkillContextForEnv{
 			Name:        s.Name,

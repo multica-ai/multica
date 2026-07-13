@@ -544,8 +544,10 @@ func installCodexSkillBundle(skillsDir string, skill SkillContextForEnv) error {
 		return fmt.Errorf("allocate skill dir for %q: %w", skill.Name, err)
 	}
 	if skill.CacheDir != "" {
-		if err := createDirLink(skill.CacheDir, dst); err == nil {
-			return nil
+		if info, err := os.Stat(skill.CacheDir); err == nil && info.IsDir() {
+			if err := createDirLink(skill.CacheDir, dst); err == nil {
+				return nil
+			}
 		}
 	}
 	// Fall back to a materialized copy when the shared cache is unavailable or
