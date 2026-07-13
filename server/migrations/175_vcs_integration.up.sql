@@ -11,7 +11,7 @@
 -- Mirrored pull requests and commit statuses are stored in vcs_pull_request
 -- and vcs_commit_status tables, separate from GitHub tables.
 
-CREATE TABLE vcs_connection (
+CREATE TABLE IF NOT EXISTS vcs_connection (
     id                       UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     workspace_id             UUID NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,
     provider                 TEXT NOT NULL DEFAULT 'forgejo'
@@ -26,9 +26,9 @@ CREATE TABLE vcs_connection (
     UNIQUE (workspace_id, instance_url)
 );
 
-CREATE INDEX idx_vcs_connection_workspace ON vcs_connection(workspace_id);
+CREATE INDEX IF NOT EXISTS idx_vcs_connection_workspace ON vcs_connection(workspace_id);
 
-CREATE TABLE vcs_pull_request (
+CREATE TABLE IF NOT EXISTS vcs_pull_request (
     id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     workspace_id      UUID NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,
     connection_id     UUID NOT NULL REFERENCES vcs_connection(id) ON DELETE CASCADE,
@@ -57,10 +57,10 @@ CREATE TABLE vcs_pull_request (
     UNIQUE (connection_id, repo_owner, repo_name, pr_number)
 );
 
-CREATE INDEX idx_vcs_pull_request_workspace ON vcs_pull_request(workspace_id);
-CREATE INDEX idx_vcs_pull_request_connection ON vcs_pull_request(connection_id);
+CREATE INDEX IF NOT EXISTS idx_vcs_pull_request_workspace ON vcs_pull_request(workspace_id);
+CREATE INDEX IF NOT EXISTS idx_vcs_pull_request_connection ON vcs_pull_request(connection_id);
 
-CREATE TABLE issue_vcs_pull_request (
+CREATE TABLE IF NOT EXISTS issue_vcs_pull_request (
     issue_id        UUID NOT NULL REFERENCES issue(id) ON DELETE CASCADE,
     pull_request_id UUID NOT NULL REFERENCES vcs_pull_request(id) ON DELETE CASCADE,
     close_intent    BOOLEAN NOT NULL DEFAULT FALSE,
@@ -70,9 +70,9 @@ CREATE TABLE issue_vcs_pull_request (
     PRIMARY KEY (issue_id, pull_request_id)
 );
 
-CREATE INDEX idx_issue_vcs_pull_request_pr ON issue_vcs_pull_request(pull_request_id);
+CREATE INDEX IF NOT EXISTS idx_issue_vcs_pull_request_pr ON issue_vcs_pull_request(pull_request_id);
 
-CREATE TABLE vcs_commit_status (
+CREATE TABLE IF NOT EXISTS vcs_commit_status (
     connection_id UUID NOT NULL REFERENCES vcs_connection(id) ON DELETE CASCADE,
     sha           TEXT NOT NULL,
     context       TEXT NOT NULL,
@@ -83,5 +83,5 @@ CREATE TABLE vcs_commit_status (
     PRIMARY KEY (connection_id, sha, context)
 );
 
-CREATE INDEX idx_vcs_commit_status_lookup
+CREATE INDEX IF NOT EXISTS idx_vcs_commit_status_lookup
     ON vcs_commit_status(connection_id, sha);
