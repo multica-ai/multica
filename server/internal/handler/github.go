@@ -581,7 +581,12 @@ func (h *Handler) ListPullRequestsForIssue(w http.ResponseWriter, r *http.Reques
 // uppercase. Word boundary on the left prevents matching inside email-style
 // strings (e.g. "abc@MUL-1") and the digit anchor on the right rules out
 // version numbers like "v1.2-3".
-var identifierRe = regexp.MustCompile(`(?i)\b([a-z][a-z0-9]{1,9})-(\d+)\b`)
+//
+// Workspace issue prefixes are configurable and the API does not cap them at
+// the historical 10-character parser limit, so accept longer alphanumeric
+// prefixes here and let lookupIssueByIdentifier apply the workspace-specific
+// prefix check.
+var identifierRe = regexp.MustCompile(`(?i)\b([a-z][a-z0-9]{1,62})-(\d+)\b`)
 
 // closingIdentifierRe extracts identifiers that appear immediately after a
 // GitHub-style closing keyword ("close[sd]?", "fix(e[sd])?", "resolve[sd]?"),
@@ -628,6 +633,8 @@ func (h *Handler) HandleGitHubWebhook(w http.ResponseWriter, r *http.Request) {
 		h.handleInstallationEvent(ctx, body)
 	case "pull_request":
 		h.handlePullRequestEvent(ctx, body)
+	case "issue_comment":
+		h.handleIssueCommentEvent(ctx, body)
 	case "check_suite":
 		h.handleCheckSuiteEvent(ctx, body)
 	default:
@@ -889,109 +896,215 @@ func (h *Handler) mirrorPullRequestForWorkspace(ctx context.Context, wsID pgtype
 	// switch is off).
 	linkedIssueIDs := make([]string, 0)
 	if h.workspaceAutoLinkPRsEnabled(ctx, wsID) {
-		idents := extractIdentifiers(p.PullRequest.Title, p.PullRequest.Body, p.PullRequest.Head.Ref)
-		// closingIdents is the subset of identifiers that this PR explicitly
-		// declared via a closing keyword ("Closes/Fixes/Resolves MUL-X").
-		// Linking still happens for every mention (idents above), but the
-		// link row's close_intent column — and therefore whether the
-		// auto-advance gate eventually fires — is only set for keyword-
-		// declared identifiers. Bare title prefixes and branch-name
-		// references are link-only.
-		closingIdents := map[string]struct{}{}
-		for _, c := range extractClosingIdentifiers(p.PullRequest.Title, p.PullRequest.Body) {
-			closingIdents[c] = struct{}{}
-		}
-		// qualifyingIdents are the identifiers that genuinely tie this PR to an
-		// issue: a title prefix, a branch-name reference, or a body closing
-		// keyword. Any identifier that is linked but NOT in this set was matched
-		// only by a bare mention in the PR body ("Related MUL-1", "Follow up in
-		// MUL-1"). Those links are still recorded (auto-link stays generous so
-		// close_intent can be tracked across edits) but are flagged
-		// reference_only and hidden from the issue's PR list — a passing mention
-		// should not surface the PR as a working PR for that issue (MUL-3739).
-		qualifyingIdents := map[string]struct{}{}
-		for _, id := range extractIdentifiers(p.PullRequest.Title, p.PullRequest.Head.Ref) {
-			qualifyingIdents[id] = struct{}{}
-		}
-		for c := range closingIdents {
-			qualifyingIdents[c] = struct{}{}
-		}
-		// close_intent should follow the PR title/body while the PR is still
-		// editable before its terminal close event. Once GitHub has delivered
-		// a terminal event, later edit/synchronize webhooks must not rewrite
-		// the merge-time close decision.
-		preserveCloseIntent := p.Action != "closed" && (state == "merged" || state == "closed")
-		prefix := h.getIssuePrefix(ctx, wsID)
-		// reevalIssues collects each issue whose link row we just touched so
-		// we can re-run the auto-advance gate against the persisted aggregate
-		// after every link upsert in this event. Driving the gate off
-		// persisted state (instead of "did *this* webhook declare closing
-		// intent?") is what fixes the multi-PR sibling case: a PR with
-		// `Closes MUL-1` merges first while a link-only sibling is still
-		// open, then the sibling closes later — its webhook has no closing
-		// keyword, but the earlier link row carries close_intent=true, so
-		// MUL-1 still advances.
-		reevalIssues := make([]db.Issue, 0, len(idents))
-		for _, id := range idents {
-			issue, ok := h.lookupIssueByIdentifier(ctx, wsID, prefix, id)
-			if !ok {
-				continue
-			}
-			_, declared := closingIdents[id]
-			closeIntent := declared && !preserveCloseIntent
-			_, qualifies := qualifyingIdents[id]
-			referenceOnly := !qualifies
-			if err := h.Queries.LinkIssueToPullRequest(ctx, db.LinkIssueToPullRequestParams{
-				IssueID:             issue.ID,
-				PullRequestID:       pr.ID,
-				CloseIntent:         closeIntent,
-				ReferenceOnly:       referenceOnly,
-				PreserveCloseIntent: preserveCloseIntent,
-				LinkedByType:        strToText("system"),
-				LinkedByID:          pgtype.UUID{},
-			}); err != nil {
-				slog.Warn("github: link failed", "err", err)
-				continue
-			}
-			linkedIssueIDs = append(linkedIssueIDs, uuidToString(issue.ID))
-			reevalIssues = append(reevalIssues, issue)
-		}
-
-		// A terminal PR event (`merged` or `closed`) may be the moment the
-		// last in-flight sibling resolves. We re-evaluate every issue we
-		// just linked once both the PR row and the link row are persisted,
-		// so the aggregate query sees the freshest state. We advance the
-		// issue to done when:
-		//   1. the issue isn't already terminal (`done` / `cancelled`);
-		//   2. no linked PR is still `open` / `draft`;
-		//   3. at least one merged linked PR declared close_intent (a
-		//      "Closes/Fixes/Resolves" keyword on its link row).
-		// Rule (3) is what prevents "Follow up in MUL-2" / "Unblocks MUL-3"
-		// references from being treated the same as "Closes MUL-1", and
-		// also prevents an "all closed-without-merge" sequence from
-		// silently auto-closing the issue — if nothing carrying closing
-		// intent was ever delivered, the user should decide manually.
-		if state == "merged" || state == "closed" {
-			for _, issue := range reevalIssues {
-				if issue.Status == "done" || issue.Status == "cancelled" {
-					continue
-				}
-				counts, err := h.Queries.GetIssuePullRequestCloseAggregate(ctx, issue.ID)
-				if err != nil {
-					slog.Warn("github: count linked pr states failed", "err", err, "issue_id", uuidToString(issue.ID))
-					continue
-				}
-				if counts.OpenCount == 0 && counts.MergedWithCloseIntentCount > 0 {
-					h.advanceIssueToDone(ctx, issue, workspaceID)
-				}
-			}
-		}
+		linkedIssueIDs = h.linkPullRequestReferencesForWorkspace(ctx, wsID, pr.ID, state, p.Action, p.PullRequest.Title, p.PullRequest.Body, p.PullRequest.Head.Ref)
 	}
 
 	// Broadcast PR change to the workspace so any open issue detail page
 	// re-queries its PR list.
 	h.publish(protocol.EventPullRequestUpdated, workspaceID, "system", "", map[string]any{
 		"pull_request":     resp,
+		"linked_issue_ids": linkedIssueIDs,
+	})
+}
+
+// linkPullRequestReferencesForWorkspace applies the title/body/branch reference
+// rules for a mirrored PR row and returns the issue IDs touched by this event.
+func (h *Handler) linkPullRequestReferencesForWorkspace(ctx context.Context, wsID pgtype.UUID, prID pgtype.UUID, state, action, title, body, branch string) []string {
+	idents := extractIdentifiers(title, body, branch)
+	// closingIdents is the subset of identifiers that this PR explicitly
+	// declared via a closing keyword ("Closes/Fixes/Resolves MUL-X").
+	// Linking still happens for every mention (idents above), but the
+	// link row's close_intent column — and therefore whether the
+	// auto-advance gate eventually fires — is only set for keyword-
+	// declared identifiers. Bare title prefixes and branch-name
+	// references are link-only.
+	closingIdents := map[string]struct{}{}
+	for _, c := range extractClosingIdentifiers(title, body) {
+		closingIdents[c] = struct{}{}
+	}
+	// qualifyingIdents are the identifiers that genuinely tie this PR to an
+	// issue: a title prefix, a branch-name reference, or a body closing
+	// keyword. Any identifier that is linked but NOT in this set was matched
+	// only by a bare mention in the PR body ("Related MUL-1", "Follow up in
+	// MUL-1"). Those links are still recorded (auto-link stays generous so
+	// close_intent can be tracked across edits) but are flagged
+	// reference_only and hidden from the issue's PR list — a passing mention
+	// should not surface the PR as a working PR for that issue (MUL-3739).
+	qualifyingIdents := map[string]struct{}{}
+	for _, id := range extractIdentifiers(title, branch) {
+		qualifyingIdents[id] = struct{}{}
+	}
+	for c := range closingIdents {
+		qualifyingIdents[c] = struct{}{}
+	}
+	// close_intent should follow the PR title/body while the PR is still
+	// editable before its terminal close event. Once GitHub has delivered
+	// a terminal event, later edit/synchronize webhooks must not rewrite
+	// the merge-time close decision.
+	preserveCloseIntent := action != "closed" && (state == "merged" || state == "closed")
+	prefix := h.getIssuePrefix(ctx, wsID)
+	// reevalIssues collects each issue whose link row we just touched so
+	// we can re-run the auto-advance gate against the persisted aggregate
+	// after every link upsert in this event. Driving the gate off
+	// persisted state (instead of "did *this* webhook declare closing
+	// intent?") is what fixes the multi-PR sibling case: a PR with
+	// `Closes MUL-1` merges first while a link-only sibling is still
+	// open, then the sibling closes later — its webhook has no closing
+	// keyword, but the earlier link row carries close_intent=true, so
+	// MUL-1 still advances.
+	linkedIssueIDs := make([]string, 0, len(idents))
+	reevalIssues := make([]db.Issue, 0, len(idents))
+	for _, id := range idents {
+		issue, ok := h.lookupIssueByIdentifier(ctx, wsID, prefix, id)
+		if !ok {
+			continue
+		}
+		_, declared := closingIdents[id]
+		closeIntent := declared && !preserveCloseIntent
+		_, qualifies := qualifyingIdents[id]
+		referenceOnly := !qualifies
+		if err := h.Queries.LinkIssueToPullRequest(ctx, db.LinkIssueToPullRequestParams{
+			IssueID:             issue.ID,
+			PullRequestID:       prID,
+			CloseIntent:         closeIntent,
+			ReferenceOnly:       referenceOnly,
+			PreserveCloseIntent: preserveCloseIntent,
+			LinkedByType:        strToText("system"),
+			LinkedByID:          pgtype.UUID{},
+		}); err != nil {
+			slog.Warn("github: link failed", "err", err)
+			continue
+		}
+		linkedIssueIDs = append(linkedIssueIDs, uuidToString(issue.ID))
+		reevalIssues = append(reevalIssues, issue)
+	}
+
+	// A terminal PR event (`merged` or `closed`) may be the moment the
+	// last in-flight sibling resolves. We re-evaluate every issue we
+	// just linked once both the PR row and the link row are persisted,
+	// so the aggregate query sees the freshest state. We advance the
+	// issue to done when:
+	//   1. the issue isn't already terminal (`done` / `cancelled`);
+	//   2. no linked PR is still `open` / `draft`;
+	//   3. at least one merged linked PR declared close_intent (a
+	//      "Closes/Fixes/Resolves" keyword on its link row).
+	// Rule (3) is what prevents "Follow up in MUL-2" / "Unblocks MUL-3"
+	// references from being treated the same as "Closes MUL-1", and
+	// also prevents an "all closed-without-merge" sequence from
+	// silently auto-closing the issue — if nothing carrying closing
+	// intent was ever delivered, the user should decide manually.
+	if state == "merged" || state == "closed" {
+		workspaceID := uuidToString(wsID)
+		for _, issue := range reevalIssues {
+			if issue.Status == "done" || issue.Status == "cancelled" {
+				continue
+			}
+			counts, err := h.Queries.GetIssuePullRequestCloseAggregate(ctx, issue.ID)
+			if err != nil {
+				slog.Warn("github: count linked pr states failed", "err", err, "issue_id", uuidToString(issue.ID))
+				continue
+			}
+			if counts.OpenCount == 0 && counts.MergedWithCloseIntentCount > 0 {
+				h.advanceIssueToDone(ctx, issue, workspaceID)
+			}
+		}
+	}
+	return linkedIssueIDs
+}
+
+type ghIssueCommentPayload struct {
+	Action string `json:"action"`
+	Issue  struct {
+		Number      int32 `json:"number"`
+		PullRequest *struct {
+			URL     string `json:"url"`
+			HTMLURL string `json:"html_url"`
+		} `json:"pull_request"`
+	} `json:"issue"`
+	Comment struct {
+		Body string `json:"body"`
+	} `json:"comment"`
+	Repository struct {
+		Name  string `json:"name"`
+		Owner struct {
+			Login string `json:"login"`
+		} `json:"owner"`
+	} `json:"repository"`
+	Installation struct {
+		ID int64 `json:"id"`
+	} `json:"installation"`
+}
+
+func (h *Handler) handleIssueCommentEvent(ctx context.Context, body []byte) {
+	var p ghIssueCommentPayload
+	if err := json.Unmarshal(body, &p); err != nil {
+		slog.Warn("github: bad issue_comment payload", "err", err)
+		return
+	}
+	if p.Installation.ID == 0 || p.Issue.PullRequest == nil {
+		return
+	}
+	switch p.Action {
+	case "created", "edited":
+	default:
+		return
+	}
+	insts, err := h.Queries.ListGitHubInstallationsByInstallationID(ctx, p.Installation.ID)
+	if err != nil {
+		slog.Warn("github: lookup installation failed", "err", err)
+		return
+	}
+	for _, inst := range insts {
+		h.linkPullRequestCommentForWorkspace(ctx, inst.WorkspaceID, &p)
+	}
+}
+
+func (h *Handler) linkPullRequestCommentForWorkspace(ctx context.Context, wsID pgtype.UUID, p *ghIssueCommentPayload) {
+	if !h.workspaceAutoLinkPRsEnabled(ctx, wsID) {
+		return
+	}
+	idents := extractIdentifiers(p.Comment.Body)
+	if len(idents) == 0 {
+		return
+	}
+	pr, err := h.Queries.GetGitHubPullRequest(ctx, db.GetGitHubPullRequestParams{
+		WorkspaceID: wsID,
+		RepoOwner:   p.Repository.Owner.Login,
+		RepoName:    p.Repository.Name,
+		PrNumber:    p.Issue.Number,
+	})
+	if err != nil {
+		if !errors.Is(err, pgx.ErrNoRows) {
+			slog.Warn("github: lookup pr for issue_comment failed", "err", err)
+		}
+		return
+	}
+	prefix := h.getIssuePrefix(ctx, wsID)
+	linkedIssueIDs := make([]string, 0, len(idents))
+	for _, id := range idents {
+		issue, ok := h.lookupIssueByIdentifier(ctx, wsID, prefix, id)
+		if !ok {
+			continue
+		}
+		if err := h.Queries.LinkIssueToPullRequest(ctx, db.LinkIssueToPullRequestParams{
+			IssueID:             issue.ID,
+			PullRequestID:       pr.ID,
+			CloseIntent:         false,
+			ReferenceOnly:       false,
+			PreserveCloseIntent: true,
+			LinkedByType:        strToText("system"),
+			LinkedByID:          pgtype.UUID{},
+		}); err != nil {
+			slog.Warn("github: link issue_comment failed", "err", err)
+			continue
+		}
+		linkedIssueIDs = append(linkedIssueIDs, uuidToString(issue.ID))
+	}
+	if len(linkedIssueIDs) == 0 {
+		return
+	}
+	h.publish(protocol.EventPullRequestUpdated, uuidToString(wsID), "system", "", map[string]any{
+		"pull_request":     githubPullRequestToResponse(pr),
 		"linked_issue_ids": linkedIssueIDs,
 	})
 }
