@@ -2168,6 +2168,13 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Post("/{id}/views/{viewId}/submissions", cerebroAppsHandler.SubmitView)
 				r.Post("/workflow-runs/{runId}/token", cerebroAppsHandler.IssueWorkflowToken)
 			})
+			// CEREBRO-PATCH(cerebro-mini-app-workflow-routes): FIR-3172 shared JSON workflow lifecycle.
+			r.Route("/api/cerebro/app-workflows", func(r chi.Router) {
+				r.Post("/", cerebroAppsHandler.CreateWorkflow)
+				r.Post("/{workflowId}/test", cerebroAppsHandler.TestWorkflow)
+				r.Post("/{workflowId}/{state:enable|disable}", cerebroAppsHandler.SetWorkflowEnabled)
+				r.Get("/{workflowId}/runs", cerebroAppsHandler.ListWorkflowRuns)
+			})
 			// CEREBRO-PATCH(cerebro-note-types-routes): TECH-3511 note types REST surface.
 			r.Route("/api/cerebro/note-types", func(r chi.Router) {
 				r.Get("/", cerebroNoteTypesHandler.ListNoteTypes)

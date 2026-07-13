@@ -1,6 +1,22 @@
 {
   "http": [
     {
+      "id": "POST /api/cerebro/app-workflows/",
+      "gate": "cerebro_capability:build_apps"
+    },
+    {
+      "id": "POST /api/cerebro/app-workflows/{workflowId}/test",
+      "gate": "cerebro_capability:use_apps"
+    },
+    {
+      "id": "POST /api/cerebro/app-workflows/{workflowId}/{state}",
+      "gate": "cerebro_capability:build_apps"
+    },
+    {
+      "id": "GET /api/cerebro/app-workflows/{workflowId}/runs",
+      "gate": "cerebro_capability:use_apps"
+    },
+    {
       "id": "POST /api/cerebro/apps/",
       "gate": "cerebro_capability:build_apps"
     },
@@ -2243,6 +2259,46 @@
     {
       "id": "analytics query",
       "exempt": "read-only — wraps POST /api/analytics/query, which only resolves workspace-scoped aggregates"
+    },
+    {
+      "id": "app create",
+      "gate": "via:POST /api/cerebro/apps/"
+    },
+    {
+      "id": "app list",
+      "exempt": "read-only — wraps GET /api/cerebro/apps/"
+    },
+    {
+      "id": "app preview",
+      "gate": "via:POST /api/cerebro/apps/{id}/preview"
+    },
+    {
+      "id": "app publish",
+      "gate": "via:POST /api/cerebro/apps/{id}/publish"
+    },
+    {
+      "id": "app rollback",
+      "gate": "via:POST /api/cerebro/apps/{id}/rollback"
+    },
+    {
+      "id": "app workflow create",
+      "gate": "via:POST /api/cerebro/app-workflows/"
+    },
+    {
+      "id": "app workflow disable",
+      "gate": "via:POST /api/cerebro/app-workflows/{workflowId}/{state}"
+    },
+    {
+      "id": "app workflow enable",
+      "gate": "via:POST /api/cerebro/app-workflows/{workflowId}/{state}"
+    },
+    {
+      "id": "app workflow runs",
+      "exempt": "read-only — wraps GET /api/cerebro/app-workflows/{workflowId}/runs"
+    },
+    {
+      "id": "app workflow test",
+      "gate": "via:POST /api/cerebro/app-workflows/{workflowId}/test"
     },
     {
       "id": "agent archive",

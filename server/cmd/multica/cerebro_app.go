@@ -35,6 +35,7 @@ func init() {
 		command.Flags().String("output", "json", "Output format: json")
 	}
 	appCmd.AddCommand(appCreateCmd, appPreviewCmd, appPublishCmd, appRollbackCmd, appListCmd)
+	appCmd.AddCommand(appWorkflowCmd)
 }
 
 func appClient(cmd *cobra.Command) (*cli.APIClient, context.Context, context.CancelFunc, error) {
