@@ -89,6 +89,12 @@ const (
 	EventLabelDeleted       = "label:deleted"
 	EventIssueLabelsChanged = "issue_labels:changed"
 
+	// Custom property events. Definitions are archived, never deleted, so
+	// there is no property:deleted — archive arrives as property:updated.
+	EventPropertyCreated        = "property:created"
+	EventPropertyUpdated        = "property:updated"
+	EventIssuePropertiesChanged = "issue_properties:changed"
+
 	// Pin events
 	EventPinCreated   = "pin:created"
 	EventPinDeleted   = "pin:deleted"
