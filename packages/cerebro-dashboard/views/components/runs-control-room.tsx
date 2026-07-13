@@ -22,14 +22,15 @@ import {
   type AnalyticsQueryResult,
 } from "@multica/cerebro-usage";
 import {
-  filtersFromSearchParams,
   filtersToSearchParams,
+  removeAnalyticsFilterValue,
   toggleAnalyticsFilter,
   type AnalyticsFilter,
 } from "../../core/analytics";
 import { useDashboardStore } from "../../core/store";
 import { timeRangeToDays } from "../../core/types";
 import { RunDetailDrawer, type RunRow } from "./run-detail-drawer";
+import { RunsToolbar } from "./runs-toolbar";
 
 type Result = AnalyticsQueryResult | undefined;
 type HeatGrain = Extract<AnalyticsGrain, "hour" | "day" | "month">;
@@ -63,16 +64,15 @@ function passClass(rate: number): string {
 // built directly on the canonical analytics engine so every panel shares the
 // same filters, time range and drill-down. Clicking any cell filters the whole
 // view; clicking a run row opens the debug/trace rail.
-export function RunsControlRoom({ workspaceId }: { workspaceId: string }) {
+export function RunsControlRoom({ workspaceId, filters, onFiltersChange, onNewVisual, onRunPanelOpen }: { workspaceId: string; filters: AnalyticsFilter[]; onFiltersChange: React.Dispatch<React.SetStateAction<AnalyticsFilter[]>>; onNewVisual: () => void; onRunPanelOpen?: () => void }) {
   const range = useDashboardStore((s) => s.range);
+  const setRange = useDashboardStore((s) => s.setRange);
   const timezone = useMemo(() => Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC", []);
-  const [filters, setFilters] = useState<AnalyticsFilter[]>(() =>
-    typeof window === "undefined" ? [] : filtersFromSearchParams(new URLSearchParams(window.location.search)),
-  );
-  const [heatGrain, setHeatGrain] = useState<HeatGrain>("day");
+  const [heatGrain, setHeatGrain] = useState<HeatGrain>("hour");
   const [search, setSearch] = useState("");
   const [runsCursors, setRunsCursors] = useState<string[]>([]);
   const [selectedRun, setSelectedRun] = useState<RunRow | null>(null);
+  const [compactLayout, setCompactLayout] = useState(false);
 
   // Time-range floor, recomputed only when the range changes so query keys stay
   // stable across renders. Every panel query inherits this filter.
@@ -109,7 +109,7 @@ export function RunsControlRoom({ workspaceId }: { workspaceId: string }) {
     queries: [
       // 0 KPI totals
       analyticsQueryOptions(workspaceId, build(
-        ["runs", "input_tokens", "output_tokens", "cost_cents", "saved_cents", "quality_pass_rate", "skill_invocations"],
+        ["runs", "input_tokens", "output_tokens", "cost_cents", "missing_cost_runs", "saved_cents", "quality_pass_rate", "skill_invocations"],
         [],
         { page: { limit: 1 } },
       )),
@@ -133,8 +133,8 @@ export function RunsControlRoom({ workspaceId }: { workspaceId: string }) {
       analyticsQueryOptions(workspaceId, build(["runs"], ["source"], { page: { limit: 8 } })),
       // 6 people x source
       analyticsQueryOptions(workspaceId, build(["runs"], ["person", "source"], { page: { limit: 60 } })),
-      // 7 provider / model / skill chips
-      analyticsQueryOptions(workspaceId, build(["runs", "skill_invocations"], ["provider", "model", "skill"], { page: { limit: 12 } })),
+      // 7 runtime / provider / model / skill chips
+      analyticsQueryOptions(workspaceId, build(["runs", "skill_invocations"], ["runtime", "provider", "model", "skill"], { page: { limit: 12 } })),
       // 8 people x project
       analyticsQueryOptions(workspaceId, build(["runs", "cost_cents", "quality_pass_rate"], ["person", "project"], { page: { limit: 200 } })),
       // 9 quality observations by category
@@ -144,7 +144,7 @@ export function RunsControlRoom({ workspaceId }: { workspaceId: string }) {
       // 11 matching runs
       analyticsQueryOptions(workspaceId, build(
         ["cost_cents", "skill_invocations", "input_tokens", "output_tokens", "saved_cents", "duration_seconds"],
-        ["run", "time", "person", "source", "provider", "model", "status", "reference_label", "debug_link", "trace"],
+        ["run", "time", "person", "source", "runtime", "provider", "model", "status", "cost_kind", "reference_label", "debug_link", "trace"],
         { page: { limit: 25, ...(runsCursor ? { cursor: runsCursor } : {}) }, sort: [{ field: "time", direction: "desc" }] },
       )),
     ],
@@ -155,7 +155,26 @@ export function RunsControlRoom({ workspaceId }: { workspaceId: string }) {
   const loading = queries.some((q) => q.isLoading);
 
   const onFilter = (dimension: AnalyticsDimension, value: string, operator: "in" | "not_in" = "in") => {
-    setFilters((current) => toggleAnalyticsFilter(current, dimension, value, operator));
+    if (!value) return;
+    onFiltersChange((current) => toggleAnalyticsFilter(current, dimension, value, operator));
+    setRunsCursors([]);
+  };
+  const onRemoveFilter = (dimension: AnalyticsDimension, value: string, operator: AnalyticsOperator) => {
+    onFiltersChange((current) => removeAnalyticsFilterValue(current, dimension, value, operator));
+    setRunsCursors([]);
+  };
+  const onTimeBucketFilter = (value: string) => {
+    const start = new Date(value);
+    if (Number.isNaN(start.getTime())) return;
+    const end = new Date(start);
+    if (heatGrain === "hour") end.setHours(end.getHours() + 1);
+    else if (heatGrain === "month") end.setMonth(end.getMonth() + 1);
+    else end.setDate(end.getDate() + 1);
+    onFiltersChange((current) => [
+      ...current.filter((filter) => !(filter.dimension === "time" && (filter.operator === "gte" || filter.operator === "lte"))),
+      { dimension: "time", operator: "gte", values: [start.toISOString()] },
+      { dimension: "time", operator: "lte", values: [end.toISOString()] },
+    ]);
     setRunsCursors([]);
   };
 
@@ -164,8 +183,20 @@ export function RunsControlRoom({ workspaceId }: { workspaceId: string }) {
 
   return (
     <div className="flex min-h-0 flex-1">
-      <div className="min-w-0 flex-1 space-y-3">
-        <FilterBar filters={filters} range={range} onFilter={onFilter} onClear={() => setFilters([])} />
+      <div className={`min-w-0 flex-1 p-6 ${compactLayout ? "space-y-2" : "space-y-3"}`}>
+        <RunsToolbar
+          range={range}
+          onRangeChange={setRange}
+          filters={filters}
+          onAddFilter={onFilter}
+          onRemoveFilter={onRemoveFilter}
+          onClear={() => onFiltersChange([])}
+          onCustomize={() => setCompactLayout((compact) => !compact)}
+          onNewVisual={() => {
+            setSelectedRun(null);
+            onNewVisual();
+          }}
+        />
 
         {/* KPI strip */}
         <section aria-label="Usage KPIs" className="grid grid-cols-2 divide-x divide-y overflow-hidden rounded-lg border bg-card sm:grid-cols-3 lg:grid-cols-5 lg:divide-y-0">
@@ -173,7 +204,7 @@ export function RunsControlRoom({ workspaceId }: { workspaceId: string }) {
           <Kpi label="Tokens" value={compact(num(kpiRow.input_tokens) + num(kpiRow.output_tokens))} note="input + output" />
           <Kpi label="Gateway cost" value={dollars(kpiRow.cost_cents)} note="measured spend" />
           <Kpi label="Measured savings" value={dollars(kpiRow.saved_cents)} note="graphify & context" accent="text-emerald-600" />
-          <Kpi label="Gate pass" value={pct(gatePass)} note="judge verdicts" accent={passClass(gatePass)} />
+          <Kpi label="Missing cost data" value={compact(kpiRow.missing_cost_runs)} note="runs without cost" accent={num(kpiRow.missing_cost_runs) > 0 ? "text-amber-600" : "text-emerald-600"} />
         </section>
 
         {/* Activity grid */}
@@ -188,7 +219,7 @@ export function RunsControlRoom({ workspaceId }: { workspaceId: string }) {
             />
           }
         >
-          <ActivityHeatmap result={heat} onFilter={(value) => onFilter("time", value)} />
+          <ActivityHeatmap result={heat} onFilter={onTimeBucketFilter} />
         </Panel>
 
         <div className="grid gap-3 xl:grid-cols-3">
@@ -220,7 +251,7 @@ export function RunsControlRoom({ workspaceId }: { workspaceId: string }) {
                 ))}
               </div>
               <PeopleSourceMatrix result={peopleSource} onFilter={onFilter} />
-              <Eyebrow>Provider · model · skill</Eyebrow>
+              <Eyebrow>Runtime · provider · model · skill</Eyebrow>
               <div className="flex flex-wrap gap-1.5">
                 {chipItems(chips).map((chip) => (
                   <button
@@ -317,7 +348,10 @@ export function RunsControlRoom({ workspaceId }: { workspaceId: string }) {
             result={runsResult}
             search={search}
             selectedRunId={selectedRun ? (str(selectedRun.run) ?? "") : null}
-            onSelect={setSelectedRun}
+            onSelect={(run) => {
+              onRunPanelOpen?.();
+              setSelectedRun(run);
+            }}
             onFilter={onFilter}
             canPrevious={runsCursors.length > 0}
             onPrevious={() => setRunsCursors((c) => c.slice(0, -1))}
@@ -400,53 +434,9 @@ function Segments<T extends string>({ options, value, onChange }: { options: T[]
   );
 }
 
-// ---------- filter bar ----------
-
-function FilterBar({
-  filters,
-  range,
-  onFilter,
-  onClear,
-}: {
-  filters: AnalyticsFilter[];
-  range: string;
-  onFilter: (dimension: AnalyticsDimension, value: string, operator: "in" | "not_in") => void;
-  onClear: () => void;
-}) {
-  const chips = filters.flatMap((filter) => filter.values.map((value) => ({ ...filter, value })));
-  return (
-    <div className="flex flex-wrap items-center gap-2 border-b pb-3">
-      <span className="rounded-md border bg-muted/40 px-2.5 py-1 text-xs text-muted-foreground">Last {range}</span>
-      {chips.length === 0 ? (
-        <span className="text-xs text-muted-foreground">All workspace activity</span>
-      ) : (
-        chips.map((chip) => (
-          <button
-            key={`${chip.dimension}:${chip.operator}:${chip.value}`}
-            type="button"
-            onClick={() => onFilter(chip.dimension, chip.value, chip.operator)}
-            className={`rounded-md px-2 py-1 text-xs ${
-              chip.operator === "not_in"
-                ? "border border-dashed border-amber-500/50 bg-amber-500/5 text-amber-700"
-                : "border border-primary/30 bg-primary/10 text-primary"
-            }`}
-          >
-            {chip.dimension} {chip.operator === "not_in" ? "≠" : "="} {chip.value} ×
-          </button>
-        ))
-      )}
-      {chips.length > 0 && (
-        <button type="button" onClick={onClear} className="ml-auto text-xs text-muted-foreground hover:text-foreground">
-          Clear all
-        </button>
-      )}
-    </div>
-  );
-}
-
 // ---------- panels ----------
 
-function ActivityHeatmap({ result, onFilter }: { result: Result; onFilter: (value: string) => void }) {
+export function ActivityHeatmap({ result, onFilter }: { result: Result; onFilter: (value: string) => void }) {
   const rows = result?.rows ?? [];
   const max = rows.reduce((acc, row) => Math.max(acc, num(row.runs)), 0);
   const level = (value: number) => {
@@ -461,7 +451,12 @@ function ActivityHeatmap({ result, onFilter }: { result: Result; onFilter: (valu
     return <p className="p-6 text-center text-xs text-muted-foreground">No activity in this range.</p>;
   }
   return (
-    <div className="flex flex-wrap gap-1 p-4">
+    <div
+      role="grid"
+      aria-label="Activity by time bucket"
+      className="grid gap-1 overflow-hidden p-4"
+      style={{ gridTemplateColumns: "repeat(42, minmax(0, 1fr))" }}
+    >
       {rows.map((row, index) => {
         const value = num(row.runs);
         const label = str(row.time) ?? "";
@@ -471,7 +466,7 @@ function ActivityHeatmap({ result, onFilter }: { result: Result; onFilter: (valu
             type="button"
             title={`${label} · ${value} runs`}
             onClick={() => onFilter(label)}
-            className={`size-4 rounded-sm ${level(value)} hover:ring-2 hover:ring-foreground/40`}
+            className={`h-4 min-w-3 rounded-sm ${level(value)} hover:ring-2 hover:ring-foreground/40`}
           />
         );
       })}
@@ -497,8 +492,8 @@ function TimeSeries({ result }: { result: Result }) {
           <YAxis yAxisId="left" tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }} tickLine={false} axisLine={false} width={34} />
           <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }} tickLine={false} axisLine={false} width={34} />
           <Tooltip contentStyle={{ fontSize: 11 }} />
-          <Line yAxisId="left" type="monotone" dataKey="Runs" stroke="#6557d8" strokeWidth={2} dot={false} />
-          <Line yAxisId="right" type="monotone" dataKey="Savings" stroke="#27865a" strokeWidth={2} dot={false} />
+          <Line yAxisId="left" type="monotone" dataKey="Runs" stroke="hsl(var(--primary))" strokeWidth={2} dot={false} />
+          <Line yAxisId="right" type="monotone" dataKey="Savings" stroke="hsl(var(--chart-2))" strokeWidth={2} dot={false} />
         </LineChart>
       </ResponsiveContainer>
     </div>
@@ -605,6 +600,7 @@ function chipItems(result: Result): { dimension: AnalyticsDimension; value: stri
     else seen.set(key, { dimension, value, count });
   };
   for (const row of rows) {
+    add("runtime", str(row.runtime), num(row.runs));
     add("provider", str(row.provider), num(row.runs));
     add("model", str(row.model), num(row.runs));
     add("skill", str(row.skill), num(row.skill_invocations));
@@ -739,8 +735,14 @@ function RunsTable({
                   onClick={() => onSelect(row)}
                   className={`cursor-pointer border-t hover:bg-primary/5 ${selectedRunId === runId ? "bg-primary/10" : ""}`}
                 >
-                  <td className="px-4 py-2 text-muted-foreground">{shortStamp(str(row.time))}</td>
-                  <td className="px-4 py-2"><Badge>{str(row.source) ?? "—"}</Badge></td>
+                  <td className="px-4 py-2">
+                    <button type="button" aria-label={`Open run context ${str(row.reference_label) ?? runId}`} onClick={(event) => { event.stopPropagation(); onSelect(row); }} className="text-muted-foreground underline-offset-2 hover:text-foreground hover:underline">
+                      {shortStamp(str(row.time))}
+                    </button>
+                  </td>
+                  <td className="px-4 py-2">
+                    <Cell onClick={(event) => { event.stopPropagation(); onFilter("source", str(row.source) ?? ""); }} badge>{str(row.source) ?? "—"}</Cell>
+                  </td>
                   <td className="px-4 py-2">
                     <span className="flex items-center gap-1 text-[11px]">
                       <Cell onClick={(event) => { event.stopPropagation(); onFilter("person", str(row.person) ?? ""); }}>{str(row.person) ?? "—"}</Cell>
@@ -750,9 +752,19 @@ function RunsTable({
                       <Cell onClick={(event) => { event.stopPropagation(); onFilter("model", str(row.model) ?? ""); }}>{str(row.model) ?? "—"}</Cell>
                     </span>
                   </td>
-                  <td className="max-w-[160px] truncate px-4 py-2 text-muted-foreground">{str(row.reference_label) ?? "—"}</td>
-                  <td className="px-4 py-2"><StatusPill status={status} /></td>
-                  <td className="px-4 py-2 font-mono">{dollars(row.cost_cents)}</td>
+                  <td className="max-w-[160px] px-4 py-2">
+                    <Cell onClick={(event) => { event.stopPropagation(); onFilter("reference_label", str(row.reference_label) ?? ""); }}>{str(row.reference_label) ?? "—"}</Cell>
+                  </td>
+                  <td className="px-4 py-2">
+                    <Cell onClick={(event) => { event.stopPropagation(); onFilter("status", status); }}>
+                      <StatusPill status={status} />
+                    </Cell>
+                  </td>
+                  <td className="px-4 py-2 font-mono">
+                    <Cell onClick={(event) => { event.stopPropagation(); onFilter("cost_kind", str(row.cost_kind) ?? ""); }}>
+                      {str(row.cost_kind) === "missing" ? "Missing" : dollars(row.cost_cents)}
+                    </Cell>
+                  </td>
                   <td className="px-4 py-2 tabular-nums">{compact(row.skill_invocations)}</td>
                 </tr>
               );
@@ -781,7 +793,7 @@ function Donut({ value }: { value: number }) {
   return (
     <div
       className="relative mx-auto mt-2 size-28 rounded-full"
-      style={{ background: `conic-gradient(#27865a 0 ${pctValue}%, hsl(var(--muted)) ${pctValue}% 100%)` }}
+      style={{ background: `conic-gradient(hsl(var(--chart-2)) 0 ${pctValue}%, hsl(var(--muted)) ${pctValue}% 100%)` }}
     >
       <div className="absolute inset-4 grid place-items-center rounded-full bg-card font-mono text-lg font-bold">{pctValue}%</div>
     </div>
@@ -794,10 +806,10 @@ function Th({ children }: { children: React.ReactNode }) {
 function Badge({ children }: { children: React.ReactNode }) {
   return <span className="rounded bg-primary/10 px-1.5 py-0.5 text-[10px] text-primary">{children}</span>;
 }
-function Cell({ children, onClick }: { children: React.ReactNode; onClick: (event: React.MouseEvent) => void }) {
+function Cell({ children, onClick, badge }: { children: React.ReactNode; onClick: (event: React.MouseEvent) => void; badge?: boolean }) {
   return (
-    <button type="button" onClick={onClick} className="rounded px-1 py-0.5 hover:bg-muted">
-      {children}
+    <button type="button" onClick={onClick} className="max-w-full truncate rounded px-1 py-0.5 text-left hover:bg-muted">
+      {badge ? <Badge>{children}</Badge> : children}
     </button>
   );
 }

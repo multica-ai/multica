@@ -4,7 +4,7 @@ import { TestApiClient } from "./fixtures";
 
 const databaseUrl = process.env.DATABASE_URL!;
 
-test("Dashboard shares filters, drills into runs, and persists a new visual", async ({ page }) => {
+test("Dashboard shares filters, drills into runs, and persists a new visual", async ({ page }, testInfo) => {
   const api = new TestApiClient();
   await api.login("fir-2996@multica.test", "FIR 2996");
   const workspace = await api.ensureWorkspace("Usage Explorer", "usage-explorer");
@@ -79,6 +79,7 @@ test("Dashboard shares filters, drills into runs, and persists a new visual", as
 
     const token = api.getToken()!;
     await page.addInitScript((value) => localStorage.setItem("multica_token", value), token);
+    await page.setViewportSize({ width: 1600, height: 1400 });
     await page.goto(`/${workspace.slug}/dashboard`);
 
     await expect(page.getByRole("heading", { name: "Activity", exact: true })).toBeVisible();
@@ -87,21 +88,62 @@ test("Dashboard shares filters, drills into runs, and persists a new visual", as
     await expect(page).toHaveURL(/provider=openai/);
 
     await page.getByRole("button", { name: "Runs", exact: true }).click();
-    await expect(page.getByRole("heading", { name: "Matching runs" })).toBeVisible();
-    // Click the run row (plain context cell) to open the debug/trace rail.
-    await page.getByRole("cell", { name: "Usage run", exact: true }).first().click();
+    await expect(page.getByText("Missing cost data")).toBeVisible();
+    const matchingRuns = page.getByRole("region", { name: "Matching runs" });
+    await expect(matchingRuns.getByRole("heading", { name: "Matching runs" })).toBeVisible();
+    await matchingRuns.getByRole("button", { name: "issue" }).first().click();
+    await expect(page).toHaveURL(/source=issue/);
+    await page.getByRole("button", { name: "Source: issue ×" }).click();
+
+    await matchingRuns.getByRole("button", { name: "Usage run", exact: true }).click();
+    await expect(page).toHaveURL(/reference_label=Usage\+run/);
+    await page.getByRole("button", { name: "Reference label: Usage run ×" }).click();
+
+    await matchingRuns.getByRole("button", { name: "completed" }).click();
+    await expect(page).toHaveURL(/status=completed/);
+    await page.getByRole("button", { name: "Status: completed ×" }).click();
+
+    await matchingRuns.getByRole("button", { name: "$0" }).click();
+    await expect(page).toHaveURL(/cost_kind=actual/);
+    await page.getByRole("button", { name: "Cost kind: actual ×" }).click();
+
+    await page.locator("section[aria-label='Activity grid'] button[title*=' runs']").first().click();
+    await expect(page).toHaveURL(/time\.gte=/);
+    await page.getByRole("button", { name: "Overview", exact: true }).click();
+    const timeFilterChips = page.getByRole("button", { name: /time = .*×/ });
+    await expect(timeFilterChips).toHaveCount(2);
+    await timeFilterChips.first().click();
+    await timeFilterChips.first().click();
+    await expect(page).not.toHaveURL(/time\.(gte|lte)=/);
+
+    await page.getByRole("button", { name: "Runs", exact: true }).click();
+    await matchingRuns.getByRole("button", { name: "Open run context Usage run" }).click();
     await expect(page.getByRole("complementary", { name: "Run and debug context" })).toBeVisible();
     await expect(page.getByText(run.rows[0].id, { exact: true }).first()).toBeVisible();
     await expect(page.locator(`aside a[href*="${issue.id}"]`)).toBeVisible();
+    await page.screenshot({ path: testInfo.outputPath("dashboard-runs-1600x1400.png") });
+    await page.getByRole("button", { name: "Close run context" }).click();
+    await expect(page.getByRole("complementary", { name: "Run and debug context" })).toBeHidden();
 
     await page.getByRole("button", { name: "New visual" }).click();
-    await page.getByLabel("Visual title").fill("Models by cost");
+    await page.setViewportSize({ width: 1600, height: 1000 });
+    const visualBuilder = page.getByRole("complementary", { name: "New visual" });
+    await expect(visualBuilder).toBeVisible();
+    const builderBox = await visualBuilder.boundingBox();
+    const kpiBox = await page.getByRole("region", { name: "Usage KPIs" }).boundingBox();
+    expect(kpiBox).not.toBeNull();
+    expect(builderBox).not.toBeNull();
+    expect(kpiBox!.x + kpiBox!.width).toBeLessThanOrEqual(builderBox!.x);
+    await page.getByRole("button", { name: "Line chart" }).click();
     await page.getByLabel("Metric").selectOption("cost_cents");
     await page.getByLabel("Dimension").selectOption("model");
-    await page.getByRole("button", { name: "Create visual" }).click();
-    await expect(page.getByRole("heading", { name: "Models by cost" })).toBeVisible();
+    await page.getByLabel("Breakdown").selectOption("provider");
+    await page.screenshot({ path: testInfo.outputPath("dashboard-new-visual-1600x1000.png") });
+    await page.getByRole("button", { name: "Add visual to Dashboard" }).click();
+    await expect(page.getByRole("heading", { name: "Model cost cents by provider" })).toBeVisible();
     await page.reload();
-    await expect(page.getByRole("heading", { name: "Models by cost" })).toBeVisible();
+    await page.getByRole("button", { name: "Runs", exact: true }).click();
+    await expect(page.getByRole("heading", { name: "Model cost cents by provider" })).toBeVisible();
   } finally {
     await db.query(`DELETE FROM cerebro_analytics_visual WHERE workspace_id=$1`, [workspace.id]).catch(() => {});
     await db.end();

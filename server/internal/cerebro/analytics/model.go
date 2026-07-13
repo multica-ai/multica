@@ -15,6 +15,7 @@ const (
 	MetricInputTokens      Metric = "input_tokens"
 	MetricOutputTokens     Metric = "output_tokens"
 	MetricCostCents        Metric = "cost_cents"
+	MetricMissingCostRuns  Metric = "missing_cost_runs"
 	MetricSavedCents       Metric = "saved_cents"
 	MetricDurationSeconds  Metric = "duration_seconds"
 	MetricQualityPassRate  Metric = "quality_pass_rate"
@@ -28,11 +29,13 @@ const (
 	DimensionPerson          Dimension = "person"
 	DimensionAgent           Dimension = "agent"
 	DimensionProject         Dimension = "project"
+	DimensionRuntime         Dimension = "runtime"
 	DimensionSource          Dimension = "source"
 	DimensionProvider        Dimension = "provider"
 	DimensionModel           Dimension = "model"
 	DimensionSkill           Dimension = "skill"
 	DimensionStatus          Dimension = "status"
+	DimensionCostKind        Dimension = "cost_kind"
 	DimensionQualityType     Dimension = "quality_type"
 	DimensionQualityCategory Dimension = "quality_category"
 	DimensionContext         Dimension = "context"
@@ -117,7 +120,7 @@ func ContractCatalog() Catalog {
 }
 
 var allPopulations = []Population{PopulationAgent, PopulationGateway, PopulationAll}
-var allMetrics = []Metric{MetricRuns, MetricInputTokens, MetricOutputTokens, MetricCostCents, MetricSavedCents, MetricDurationSeconds, MetricQualityPassRate, MetricSkillInvocations}
-var allDimensions = []Dimension{DimensionTime, DimensionPerson, DimensionAgent, DimensionProject, DimensionSource, DimensionProvider, DimensionModel, DimensionSkill, DimensionStatus, DimensionQualityType, DimensionQualityCategory, DimensionContext, DimensionRun, DimensionSourceID, DimensionReference, DimensionReferenceLabel, DimensionDebugLink, DimensionTrace}
+var allMetrics = []Metric{MetricRuns, MetricInputTokens, MetricOutputTokens, MetricCostCents, MetricMissingCostRuns, MetricSavedCents, MetricDurationSeconds, MetricQualityPassRate, MetricSkillInvocations}
+var allDimensions = []Dimension{DimensionTime, DimensionPerson, DimensionAgent, DimensionProject, DimensionRuntime, DimensionSource, DimensionProvider, DimensionModel, DimensionSkill, DimensionStatus, DimensionCostKind, DimensionQualityType, DimensionQualityCategory, DimensionContext, DimensionRun, DimensionSourceID, DimensionReference, DimensionReferenceLabel, DimensionDebugLink, DimensionTrace}
 var allGrains = []Grain{GrainNone, GrainHour, GrainDay, GrainWeek, GrainMonth}
 var allOperators = []Operator{OperatorIn, OperatorNotIn, OperatorEqual, OperatorGreaterEqual, OperatorLessEqual}

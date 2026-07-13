@@ -74,7 +74,7 @@ func TestQueryNormalizeCanonicalizesFilters(t *testing.T) {
 
 func TestCatalogExposesEverySupportedValue(t *testing.T) {
 	catalog := ContractCatalog()
-	if len(catalog.Populations) != 3 || len(catalog.Metrics) != 8 || len(catalog.Dimensions) != 18 {
+	if len(catalog.Populations) != 3 || len(catalog.Metrics) != 9 || len(catalog.Dimensions) != 20 {
 		t.Fatalf("unexpected catalog sizes: populations=%d metrics=%d dimensions=%d", len(catalog.Populations), len(catalog.Metrics), len(catalog.Dimensions))
 	}
 }

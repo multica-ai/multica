@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type Dispatch, type SetStateAction } from "react";
 import { useMutation, useQueries, useQuery } from "@tanstack/react-query";
 import {
   analyticsCatalogOptions,
@@ -15,14 +15,18 @@ import {
   DEFAULT_ANALYTICS_VISUALS,
   filtersFromSearchParams,
   filtersToSearchParams,
+  removeAnalyticsFilterValue,
   toggleAnalyticsFilter,
   type AnalyticsFilter,
   type AnalyticsVisual,
+  visualPresentationFromDisplay,
 } from "../../core/analytics";
 import { AnalyticsWorkbench } from "./analytics-workbench";
 
-export function AnalyticsDashboard({ workspaceId, initialVisuals = DEFAULT_ANALYTICS_VISUALS }: { workspaceId: string; initialVisuals?: AnalyticsVisual[] }) {
-  const [filters, setFilters] = useState<AnalyticsFilter[]>(() => typeof window === "undefined" ? [] : filtersFromSearchParams(new URLSearchParams(window.location.search)));
+export function AnalyticsDashboard({ workspaceId, initialVisuals = DEFAULT_ANALYTICS_VISUALS, showToolbar = true, builderOpen, onBuilderOpenChange, filters: controlledFilters, onFiltersChange }: { workspaceId: string; initialVisuals?: AnalyticsVisual[]; showToolbar?: boolean; builderOpen?: boolean; onBuilderOpenChange?: (open: boolean) => void; filters?: AnalyticsFilter[]; onFiltersChange?: Dispatch<SetStateAction<AnalyticsFilter[]>> }) {
+  const [internalFilters, setInternalFilters] = useState<AnalyticsFilter[]>(() => typeof window === "undefined" ? [] : filtersFromSearchParams(new URLSearchParams(window.location.search)));
+  const filters = controlledFilters ?? internalFilters;
+  const setFilters = onFiltersChange ?? setInternalFilters;
   const [visuals, setVisuals] = useState<AnalyticsVisual[]>(initialVisuals);
   const [cursorHistory, setCursorHistory] = useState<Record<string, string[]>>({});
   const timezone = useMemo(() => Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC", []);
@@ -41,6 +45,7 @@ export function AnalyticsDashboard({ workspaceId, initialVisuals = DEFAULT_ANALY
         id: saved.id,
         title: saved.name,
         kind: saved.visual_type,
+        presentation: visualPresentationFromDisplay(saved.display, saved.visual_type),
         metrics: saved.query.metrics ?? ["runs"],
         dimensions: saved.query.dimensions ?? ["time"],
         grain: saved.query.grain ?? "none",
@@ -77,12 +82,21 @@ export function AnalyticsDashboard({ workspaceId, initialVisuals = DEFAULT_ANALY
     setFilters((current) => toggleAnalyticsFilter(current, dimension, value, operator));
     setCursorHistory({});
   };
+  const removeFilter = (
+    dimension: AnalyticsDimension,
+    value: string,
+    operator: AnalyticsFilter["operator"],
+  ) => {
+    setFilters((current) => removeAnalyticsFilterValue(current, dimension, value, operator));
+    setCursorHistory({});
+  };
   return (
     <AnalyticsWorkbench
       visuals={visuals}
       results={results}
       filters={filters}
       onFilter={toggleFilter}
+      onRemoveFilter={removeFilter}
       onNext={(visualId, cursor) =>
         setCursorHistory((current) => ({
           ...current,
@@ -98,15 +112,18 @@ export function AnalyticsDashboard({ workspaceId, initialVisuals = DEFAULT_ANALY
       canPrevious={canPrevious}
       onAddVisual={(visual) => {
         setVisuals((current) => [...current, visual]);
-        createVisual.mutate({ name: visual.title, visual_type: visual.kind, query: buildVisualQuery(visual, [], timezone), display: {}, position: visuals.length });
+        createVisual.mutate({ name: visual.title, visual_type: visual.kind, query: buildVisualQuery(visual, filters, timezone), display: { presentation: visual.presentation }, position: visuals.length });
       }}
       onConfigure={(visual) => {
         setVisuals((current) => current.map((item) => item.id === visual.id ? visual : item));
         if (!DEFAULT_ANALYTICS_VISUALS.some((item) => item.id === visual.id) && !visual.id.startsWith("custom-")) {
-          updateVisual.mutate({ id: visual.id, input: { name: visual.title, visual_type: visual.kind, query: buildVisualQuery(visual, [], timezone), display: {}, position: visuals.findIndex((item) => item.id === visual.id) } });
+          updateVisual.mutate({ id: visual.id, input: { name: visual.title, visual_type: visual.kind, query: buildVisualQuery(visual, filters, timezone), display: { presentation: visual.presentation }, position: visuals.findIndex((item) => item.id === visual.id) } });
         }
       }}
       catalog={catalog.data}
+      showToolbar={showToolbar}
+      builderOpen={builderOpen}
+      onBuilderOpenChange={onBuilderOpenChange}
     />
   );
 }
