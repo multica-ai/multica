@@ -167,16 +167,25 @@ describe("AccountsSettingsTab", () => {
     expect(screen.getByText("85% left")).toBeInTheDocument();
   });
 
-  it("falls back to measured token totals when no window pct is reported (FIR-3118)", () => {
+  it("keeps remaining usage primary and shows token totals as the secondary line (FIR-3118)", () => {
     mockListAccounts.mockReturnValue({
-      data: [{ ...acc1, tokens_5h: 1_500, tokens_7d: 2_400_000 }],
+      data: [
+        {
+          ...acc1,
+          usage_5h_pct: 40,
+          tokens_5h: 1_500,
+          tokens_7d: 2_400_000,
+        },
+      ],
       isLoading: false,
     });
 
     render(<AccountsSettingsTab />);
 
-    expect(screen.getByText("1.5k tok")).toBeInTheDocument();
-    expect(screen.getByText("2.4M tok")).toBeInTheDocument();
+    expect(screen.getByText("60% left")).toBeInTheDocument();
+    expect(screen.getByText("No data yet")).toBeInTheDocument();
+    expect(screen.getByText("1.5k tok used")).toBeInTheDocument();
+    expect(screen.getByText("2.4M tok used")).toBeInTheDocument();
   });
 
   it("shows the empty state when no accounts are registered", () => {

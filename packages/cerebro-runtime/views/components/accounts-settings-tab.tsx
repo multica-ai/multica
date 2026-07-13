@@ -23,8 +23,8 @@ import {
 } from "./use-cerebro-accounts";
 import {
   formatTokens,
+  remainingBarColorClass,
   remainingPct,
-  usageBarColorClass,
   usedPct5h,
   usedPct7d,
 } from "./account-usage";
@@ -162,9 +162,10 @@ export function AccountsSettingsTab() {
 }
 
 /**
- * Compact remaining-usage meter for one rolling window. When the provider
- * hasn't reported a window percentage yet, falls back to the token total we
- * measured ourselves so the column is never empty.
+ * Compact remaining-usage meter for one rolling window. The primary signal
+ * is how much of the window is LEFT (usagepal-style): big "% left" value and
+ * a bar that drains as the account is used up. The token total we measured
+ * ourselves is the secondary line underneath.
  */
 function UsageMeter({
   label,
@@ -178,20 +179,23 @@ function UsageMeter({
   const left = remainingPct(usedPct);
   return (
     <div className="w-32" aria-label={`${label} usage`}>
-      <div className="flex items-center justify-between text-[11px] text-muted-foreground">
-        <span>{label}</span>
-        <span className="tabular-nums">
-          {left !== null ? `${Math.round(left)}% left` : `${formatTokens(tokens)} tok`}
+      <div className="flex items-center justify-between text-[11px]">
+        <span className="text-muted-foreground">{label}</span>
+        <span className="tabular-nums font-medium">
+          {left !== null ? `${Math.round(left)}% left` : "No data yet"}
         </span>
       </div>
-      {usedPct !== null && (
-        <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-muted">
+      <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-muted">
+        {left !== null && (
           <div
-            className={`h-full ${usageBarColorClass(usedPct)}`}
-            style={{ width: `${usedPct}%` }}
+            className={`h-full ${remainingBarColorClass(left)}`}
+            style={{ width: `${left}%` }}
           />
-        </div>
-      )}
+        )}
+      </div>
+      <div className="mt-0.5 text-right text-[10px] tabular-nums text-muted-foreground">
+        {formatTokens(tokens)} tok used
+      </div>
     </div>
   );
 }

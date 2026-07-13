@@ -24,8 +24,8 @@ import {
 import {
   formatResetsIn,
   formatTokens,
+  remainingBarColorClass,
   remainingPct,
-  usageBarColorClass,
   usedPct5h,
   usedPct7d,
 } from "./account-usage";
@@ -135,7 +135,8 @@ function BackLink({ href }: { href: string }) {
 }
 
 /**
- * One rolling-window card: big "% left" number, consumed-meter, reset
+ * One rolling-window card: big "% left" number, a bar that drains as the
+ * window is used up (usagepal-style — the fill IS what's left), reset
  * countdown and the exact token total we measured. When the provider hasn't
  * reported a window percentage the card still shows the token total.
  */
@@ -167,11 +168,11 @@ function UsageWindowCard({
       <div className="mt-2 text-2xl font-semibold tabular-nums">
         {left !== null ? `${Math.round(left)}% left` : "No data yet"}
       </div>
-      {usedPct !== null && (
+      {left !== null && (
         <div className="mt-2 h-2 overflow-hidden rounded-full bg-muted">
           <div
-            className={`h-full ${usageBarColorClass(usedPct)}`}
-            style={{ width: `${usedPct}%` }}
+            className={`h-full ${remainingBarColorClass(left)}`}
+            style={{ width: `${left}%` }}
           />
         </div>
       )}

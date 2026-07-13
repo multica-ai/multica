@@ -38,6 +38,19 @@ func TestHeartbeatAckCachesAccountID(t *testing.T) {
 	}
 }
 
+func TestHeartbeatAckPollsProviderUsage(t *testing.T) {
+	t.Parallel()
+
+	src, err := os.ReadFile("daemon.go")
+	if err != nil {
+		t.Fatalf("read daemon.go: %v", err)
+	}
+
+	if !strings.Contains(string(src), "d.maybeReportProviderUsageWindows(") {
+		t.Fatal("heartbeat ack must poll provider usage windows (FIR-3118); an upstream sync likely removed the Cerebro wiring")
+	}
+}
+
 func TestHeartbeatCarriesAccountIdentity(t *testing.T) {
 	t.Parallel()
 

@@ -1,12 +1,14 @@
 // CEREBRO-PATCH(daemon-claude-oauth-usage): FIR-3118 exact account usage
-// windows. After each task run on a "claude" runtime the daemon calls
-// Claude's OAuth usage endpoint (the same source usagepal reads) with the
-// Claude Code access token from the local credential store, and reports the
-// 5-hour / 7-day window utilization + reset times to
-// /api/daemon/accounts/{id}/usage. Net-new fork file in the upstream daemon
-// package — response/credential parsing lives in
-// server/internal/cerebro/account (oauth_usage.go); this file only carries
-// credential resolution and HTTP plumbing.
+// windows. The daemon calls Claude's OAuth usage endpoint (the same source
+// usagepal reads) with the Claude Code access token from the local
+// credential store, and reports the 5-hour / 7-day window utilization +
+// reset times to /api/daemon/accounts/{id}/usage. Fired from two places:
+// after each task run AND on every heartbeat ack (usagepal-style periodic
+// poll, so remaining-usage stays fresh even when no tasks run) — both
+// throttled to one fetch per account per claudeOAuthUsageMinInterval.
+// Net-new fork file in the upstream daemon package — response/credential
+// parsing lives in server/internal/cerebro/account (oauth_usage.go); this
+// file only carries credential resolution and HTTP plumbing.
 package daemon
 
 import (
@@ -29,10 +31,11 @@ import (
 
 const (
 	claudeOAuthUsageURL = "https://api.anthropic.com/api/oauth/usage"
-	// claudeOAuthUsageMinInterval throttles endpoint calls per account so a
-	// burst of task completions doesn't hammer the provider — usage barely
-	// moves in under a minute anyway. Shared by all provider fetchers.
-	claudeOAuthUsageMinInterval = time.Minute
+	// claudeOAuthUsageMinInterval throttles endpoint calls per account so
+	// heartbeat ticks and task-completion bursts don't hammer the provider.
+	// usagepal uses the same 5-minute floor for this endpoint. Shared by
+	// all provider fetchers.
+	claudeOAuthUsageMinInterval = 5 * time.Minute
 )
 
 var claudeOAuthUsageHTTP = &http.Client{Timeout: 10 * time.Second}

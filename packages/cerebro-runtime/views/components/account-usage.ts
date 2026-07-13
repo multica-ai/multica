@@ -58,9 +58,9 @@ export function formatResetsIn(
   return `resets in ${minutes}m`;
 }
 
-/** Meter color by how much of the window is CONSUMED. */
-export function usageBarColorClass(usedPct: number): string {
-  if (usedPct >= 90) return "bg-red-500";
-  if (usedPct >= 75) return "bg-amber-500";
+/** Meter color by how much of the window is LEFT. */
+export function remainingBarColorClass(leftPct: number): string {
+  if (leftPct <= 10) return "bg-red-500";
+  if (leftPct <= 25) return "bg-amber-500";
   return "bg-emerald-500";
 }
