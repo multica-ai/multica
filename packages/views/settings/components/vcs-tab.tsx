@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Copy, GitBranch, Trash2 } from "lucide-react";
+import { Copy, GitBranch, RefreshCw, Trash2 } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
 import { Card, CardContent } from "@multica/ui/components/ui/card";
 import { Input } from "@multica/ui/components/ui/input";
@@ -53,6 +53,8 @@ export function VCSTab() {
   const [token, setToken] = useState("");
   const [connecting, setConnecting] = useState(false);
   const [justConnected, setJustConnected] = useState<ConnectVCSResponse | null>(null);
+  const [rotateTarget, setRotateTarget] = useState<string | null>(null);
+  const [rotating, setRotating] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
 
@@ -74,6 +76,22 @@ export function VCSTab() {
       toast.error(e instanceof Error ? e.message : t(($) => $.vcs.toast_connect_failed));
     } finally {
       setConnecting(false);
+    }
+  }
+
+  async function handleRotateWebhook() {
+    if (!rotateTarget || rotating) return;
+    setRotating(true);
+    try {
+      const resp = await api.rotateVCSWebhook(wsId, rotateTarget);
+      await qc.invalidateQueries({ queryKey: ["vcs", wsId] });
+      setJustConnected(resp);
+      setRotateTarget(null);
+      toast.success(t(($) => $.vcs.toast_rotated));
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : t(($) => $.vcs.toast_rotate_failed));
+    } finally {
+      setRotating(false);
     }
   }
 
@@ -125,10 +143,20 @@ export function VCSTab() {
                   </div>
                 </div>
                 {canManage && (
-                  <Button variant="outline" size="sm" onClick={() => setDeleteTarget(c.id)}>
-                    <Trash2 className="h-3 w-3" />
-                    {t(($) => $.vcs.disconnect)}
-                  </Button>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setRotateTarget(c.id)}
+                    >
+                      <RefreshCw className="h-3 w-3" />
+                      {t(($) => $.vcs.regenerate_webhook)}
+                    </Button>
+                    <Button variant="outline" size="sm" onClick={() => setDeleteTarget(c.id)}>
+                      <Trash2 className="h-3 w-3" />
+                      {t(($) => $.vcs.disconnect)}
+                    </Button>
+                  </div>
                 )}
               </CardContent>
             </Card>
@@ -234,6 +262,30 @@ export function VCSTab() {
       {!canManage && connections.length === 0 && (
         <p className="text-xs text-muted-foreground">{t(($) => $.vcs.contact_admin)}</p>
       )}
+
+      <AlertDialog
+        open={!!rotateTarget}
+        onOpenChange={(v) => {
+          if (!v && !rotating) setRotateTarget(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t(($) => $.vcs.rotate_confirm_title)}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {t(($) => $.vcs.rotate_confirm_description)}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={rotating}>
+              {t(($) => $.vcs.rotate_confirm_cancel)}
+            </AlertDialogCancel>
+            <AlertDialogAction onClick={handleRotateWebhook} disabled={rotating}>
+              {rotating ? t(($) => $.vcs.rotating) : t(($) => $.vcs.rotate_confirm_action)}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <AlertDialog
         open={!!deleteTarget}

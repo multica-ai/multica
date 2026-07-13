@@ -384,7 +384,15 @@
     "toast_connected": "Provider connected",
     "toast_connect_failed": "Could not connect to the provider",
     "toast_disconnected": "Provider disconnected",
-    "toast_disconnect_failed": "Could not disconnect"
+    "toast_disconnect_failed": "Could not disconnect",
+    "regenerate_webhook": "Regenerate webhook",
+    "rotate_confirm_title": "Regenerate webhook secret?",
+    "rotate_confirm_description": "The current webhook secret will stop working immediately. Deliveries from your Git provider will fail until you update the webhook secret in provider settings.",
+    "rotate_confirm_cancel": "Cancel",
+    "rotate_confirm_action": "Regenerate",
+    "rotating": "Regenerating...",
+    "toast_rotated": "Webhook secret regenerated",
+    "toast_rotate_failed": "Could not regenerate webhook secret"
   },
   "repositories": {
     "section_title": "저장소",

@@ -25,6 +25,38 @@ func (q *Queries) DeleteVCSConnection(ctx context.Context, arg DeleteVCSConnecti
 	return err
 }
 
+const rotateVCSConnectionWebhookSecret = `-- name: RotateVCSConnectionWebhookSecret :one
+UPDATE vcs_connection
+SET webhook_secret_encrypted = $3,
+    updated_at = now()
+WHERE id = $1 AND workspace_id = $2
+RETURNING id, workspace_id, instance_url, account_login, access_token_encrypted, webhook_secret_encrypted, connected_by_id, created_at, updated_at, provider
+`
+
+type RotateVCSConnectionWebhookSecretParams struct {
+	ID                     pgtype.UUID `json:"id"`
+	WorkspaceID            pgtype.UUID `json:"workspace_id"`
+	WebhookSecretEncrypted string      `json:"webhook_secret_encrypted"`
+}
+
+func (q *Queries) RotateVCSConnectionWebhookSecret(ctx context.Context, arg RotateVCSConnectionWebhookSecretParams) (VcsConnection, error) {
+	row := q.db.QueryRow(ctx, rotateVCSConnectionWebhookSecret, arg.ID, arg.WorkspaceID, arg.WebhookSecretEncrypted)
+	var i VcsConnection
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.InstanceUrl,
+		&i.AccountLogin,
+		&i.AccessTokenEncrypted,
+		&i.WebhookSecretEncrypted,
+		&i.ConnectedByID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Provider,
+	)
+	return i, err
+}
+
 const getVCSConnectionByID = `-- name: GetVCSConnectionByID :one
 SELECT id, workspace_id, instance_url, account_login, access_token_encrypted, webhook_secret_encrypted, connected_by_id, created_at, updated_at, provider FROM vcs_connection
 WHERE id = $1

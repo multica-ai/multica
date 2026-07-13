@@ -391,7 +391,15 @@
     "toast_connected": "已连接代码托管",
     "toast_connect_failed": "无法连接代码托管",
     "toast_disconnected": "已断开代码托管连接",
-    "toast_disconnect_failed": "断开连接失败"
+    "toast_disconnect_failed": "断开连接失败",
+    "regenerate_webhook": "重新生成 Webhook",
+    "rotate_confirm_title": "重新生成 Webhook 密钥？",
+    "rotate_confirm_description": "当前的 Webhook 密钥将立即失效。在代码托管设置中更新密钥前，来自该平台的推送将无法送达。",
+    "rotate_confirm_cancel": "取消",
+    "rotate_confirm_action": "重新生成",
+    "rotating": "重新生成中…",
+    "toast_rotated": "已重新生成 Webhook 密钥",
+    "toast_rotate_failed": "重新生成 Webhook 密钥失败"
   },
   "lark": {
     "section_title": "飞书",

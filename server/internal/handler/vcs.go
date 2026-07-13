@@ -242,6 +242,60 @@ func (h *Handler) DeleteVCSConnection(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// RotateVCSConnectionWebhook (POST /workspaces/{id}/vcs/connections/{connectionId}/rotate-webhook)
+// generates a fresh webhook secret for an existing VCS connection, stores it encrypted,
+// and returns the connection plus the one-time plaintext secret.
+func (h *Handler) RotateVCSConnectionWebhook(w http.ResponseWriter, r *http.Request) {
+	workspaceID := chi.URLParam(r, "id")
+	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace id")
+	if !ok {
+		return
+	}
+	connID := chi.URLParam(r, "connectionId")
+	connUUID, ok := parseUUIDOrBadRequest(w, connID, "connection id")
+	if !ok {
+		return
+	}
+	if !h.isVCSConfigured() {
+		writeError(w, http.StatusServiceUnavailable, "vcs integration not configured (MULTICA_VCS_SECRET_KEY unset)")
+		return
+	}
+
+	conn, err := h.Queries.GetVCSConnectionByID(r.Context(), connUUID)
+	if err != nil || uuidToString(conn.WorkspaceID) != uuidToString(wsUUID) {
+		writeError(w, http.StatusNotFound, "vcs connection not found")
+		return
+	}
+
+	webhookSecret, err := newVCSWebhookSecret()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to mint webhook secret")
+		return
+	}
+	secretEnc, err := h.sealVCSSecret(webhookSecret)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to encrypt webhook secret")
+		return
+	}
+
+	updated, err := h.Queries.RotateVCSConnectionWebhookSecret(r.Context(), db.RotateVCSConnectionWebhookSecretParams{
+		ID:                     connUUID,
+		WorkspaceID:            wsUUID,
+		WebhookSecretEncrypted: secretEnc,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to rotate webhook secret")
+		return
+	}
+
+	resp := h.vcsConnectionToResponse(updated)
+	h.publish(protocol.EventVCSConnectionCreated, workspaceID, "system", "", map[string]any{"id": resp.ID})
+	writeJSON(w, http.StatusOK, VCSConnectResponse{
+		VCSConnectionResponse: resp,
+		WebhookSecret:         webhookSecret,
+	})
+}
+
 // newVCSWebhookSecret returns a 32-byte random secret as hex (64 chars).
 func newVCSWebhookSecret() (string, error) {
 	b := make([]byte, 32)

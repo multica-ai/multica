@@ -32,6 +32,13 @@ RETURNING *;
 -- name: DeleteVCSConnection :exec
 DELETE FROM vcs_connection WHERE id = $1 AND workspace_id = $2;
 
+-- name: RotateVCSConnectionWebhookSecret :one
+UPDATE vcs_connection
+SET webhook_secret_encrypted = $3,
+    updated_at = now()
+WHERE id = $1 AND workspace_id = $2
+RETURNING *;
+
 -- =====================
 -- VCS Pull Request
 -- =====================
