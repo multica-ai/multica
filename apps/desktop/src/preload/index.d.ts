@@ -143,6 +143,7 @@ interface DaemonAPI {
   reauthenticate: (
     token: string,
     userId: string,
+    apiBaseUrl?: string,
   ) => Promise<DaemonReauthResult>;
   isCliInstalled: () => Promise<boolean>;
   getPrefs: () => Promise<DaemonPrefs>;

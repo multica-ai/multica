@@ -40,6 +40,23 @@ export function isAuthStatusError(err: unknown): boolean {
   );
 }
 
+function isFetchFailure(err: unknown): boolean {
+  return err instanceof Error && err.message === "fetch failed";
+}
+
+export function reauthTransientMessage(
+  err: unknown,
+  apiBaseUrl: string | null,
+): string {
+  if (isFetchFailure(err) && apiBaseUrl) {
+    return `Couldn't reach ${apiBaseUrl} to refresh daemon credentials. Check your internet connection or VPN, then try Sign in again.`;
+  }
+  if (isFetchFailure(err)) {
+    return "Couldn't reach the Multica API to refresh daemon credentials. Check your internet connection or VPN, then try Sign in again.";
+  }
+  return err instanceof Error ? err.message : String(err);
+}
+
 export function classifyAuthProbe(outcome: AuthProbeOutcome): AuthProbeResult {
   // No credential to validate → the user must sign in.
   if (outcome.noToken) return "auth_expired";

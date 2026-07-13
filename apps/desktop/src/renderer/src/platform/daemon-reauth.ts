@@ -28,7 +28,14 @@ export async function reauthenticateDaemon(): Promise<void> {
   }
 
   try {
-    const result = await window.daemonAPI.reauthenticate(token, user.id);
+    const apiBaseUrl = window.desktopAPI.runtimeConfig.ok
+      ? window.desktopAPI.runtimeConfig.config.apiUrl
+      : undefined;
+    const result = await window.daemonAPI.reauthenticate(
+      token,
+      user.id,
+      apiBaseUrl,
+    );
     if (result.ok) return; // daemon restarting; status flips via onStatusChange
     if (result.reason === "session_invalid") {
       // The session token itself is rejected (401) — full re-login.

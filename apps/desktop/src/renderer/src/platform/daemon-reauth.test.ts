@@ -25,6 +25,17 @@ beforeEach(() => {
   vi.clearAllMocks();
   localStorage.clear();
   (window as unknown as { daemonAPI: typeof daemonAPI }).daemonAPI = daemonAPI;
+  (window as unknown as { desktopAPI: { runtimeConfig: unknown } }).desktopAPI = {
+    runtimeConfig: {
+      ok: true,
+      config: {
+        schemaVersion: 1,
+        apiUrl: "https://api.multica.ai",
+        wsUrl: "wss://api.multica.ai/ws",
+        appUrl: "https://multica.ai",
+      },
+    },
+  };
   mockGetState.mockReturnValue({ user: { id: "user-1" }, logout });
 });
 
@@ -35,9 +46,29 @@ describe("reauthenticateDaemon", () => {
 
     await reauthenticateDaemon();
 
-    expect(daemonAPI.reauthenticate).toHaveBeenCalledWith("jwt-abc", "user-1");
+    expect(daemonAPI.reauthenticate).toHaveBeenCalledWith(
+      "jwt-abc",
+      "user-1",
+      "https://api.multica.ai",
+    );
     expect(logout).not.toHaveBeenCalled();
     expect(toastError).not.toHaveBeenCalled();
+  });
+
+  it("falls back to the main-process target URL when runtime config is unavailable", async () => {
+    (window as unknown as { desktopAPI: { runtimeConfig: unknown } }).desktopAPI = {
+      runtimeConfig: { ok: false, error: { message: "bad config" } },
+    };
+    localStorage.setItem("multica_token", "jwt-abc");
+    daemonAPI.reauthenticate.mockResolvedValue({ ok: true });
+
+    await reauthenticateDaemon();
+
+    expect(daemonAPI.reauthenticate).toHaveBeenCalledWith(
+      "jwt-abc",
+      "user-1",
+      undefined,
+    );
   });
 
   it("logs out only when the session token itself is rejected (401)", async () => {

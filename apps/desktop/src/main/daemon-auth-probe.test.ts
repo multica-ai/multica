@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { classifyAuthProbe, isAuthStatusError } from "./daemon-auth-probe";
+import {
+  classifyAuthProbe,
+  isAuthStatusError,
+  reauthTransientMessage,
+} from "./daemon-auth-probe";
 
 describe("classifyAuthProbe", () => {
   it("treats a 401 as expired login", () => {
@@ -52,5 +56,24 @@ describe("isAuthStatusError", () => {
     expect(isAuthStatusError(undefined)).toBe(false);
     expect(isAuthStatusError(null)).toBe(false);
     expect(isAuthStatusError("401")).toBe(false);
+  });
+});
+
+describe("reauthTransientMessage", () => {
+  it("turns low-level fetch failures into an actionable API reachability message", () => {
+    expect(
+      reauthTransientMessage(new Error("fetch failed"), "https://api.multica.ai"),
+    ).toBe(
+      "Couldn't reach https://api.multica.ai to refresh daemon credentials. Check your internet connection or VPN, then try Sign in again.",
+    );
+  });
+
+  it("preserves non-network failure details", () => {
+    expect(
+      reauthTransientMessage(
+        new Error("mint PAT failed: 503 Service Unavailable"),
+        "https://api.multica.ai",
+      ),
+    ).toBe("mint PAT failed: 503 Service Unavailable");
   });
 });
