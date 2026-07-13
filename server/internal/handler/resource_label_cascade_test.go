@@ -165,16 +165,8 @@ func TestDeleteRuntimeProfile_CleansAgentLabelAssignments(t *testing.T) {
 	}
 }
 
-// TestDeleteWorkspace_CleansResourceLabelAssignments: workspace delete cascades
-// away the agents and skills, but the junction tables have no workspace_id and
-// no foreign key, so both must be swept before the cascade or they orphan.
-func TestDeleteWorkspace_CleansResourceLabelAssignments(t *testing.T) {
-	if testHandler == nil {
-		t.Skip("database not available")
-	}
-	ctx := context.Background()
-
-	const slug = "handler-tests-delete-labels"
+func seedWorkspaceResourceLabelFixture(t *testing.T, ctx context.Context, slug string) (string, string, string) {
+	t.Helper()
 	_, _ = testPool.Exec(ctx, `DELETE FROM workspace WHERE slug = $1`, slug)
 
 	var wsID string
@@ -182,7 +174,7 @@ func TestDeleteWorkspace_CleansResourceLabelAssignments(t *testing.T) {
 		INSERT INTO workspace (name, slug, description)
 		VALUES ($1, $2, $3)
 		RETURNING id
-	`, "Handler Test Delete Labels", slug, "resource-label orphan cleanup test").Scan(&wsID); err != nil {
+	`, "Handler Test Delete Labels", slug, "resource-label atomic cleanup test").Scan(&wsID); err != nil {
 		t.Fatalf("create workspace: %v", err)
 	}
 	t.Cleanup(func() {
@@ -228,6 +220,24 @@ func TestDeleteWorkspace_CleansResourceLabelAssignments(t *testing.T) {
 	}
 	seedAgentLabel(t, ctx, wsID, agentID)
 	seedSkillLabel(t, ctx, wsID, skillID)
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM agent_to_label WHERE agent_id = $1`, agentID)
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM skill_to_label WHERE skill_id = $1`, skillID)
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM workspace WHERE id = $1`, wsID)
+	})
+
+	return wsID, agentID, skillID
+}
+
+// TestDeleteWorkspace_CleansResourceLabelAssignments: workspace delete cascades
+// away the agents and skills, but the junction tables have no workspace_id and
+// no foreign key, so both must be swept before the cascade or they orphan.
+func TestDeleteWorkspace_CleansResourceLabelAssignments(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	wsID, agentID, skillID := seedWorkspaceResourceLabelFixture(t, ctx, "handler-tests-delete-labels")
 
 	w := httptest.NewRecorder()
 	req := newRequest("DELETE", "/api/workspaces/"+wsID, nil)
@@ -242,5 +252,54 @@ func TestDeleteWorkspace_CleansResourceLabelAssignments(t *testing.T) {
 	}
 	if n := countSkillLabelAssignments(t, ctx, skillID); n != 0 {
 		t.Fatalf("skill_to_label rows survived workspace delete: %d", n)
+	}
+}
+
+// TestDeleteWorkspace_RollsBackResourceLabelCleanup verifies the cleanup and
+// final workspace delete share one database statement. A restrictive test-only
+// foreign key makes the final delete fail; both junction rows must remain.
+func TestDeleteWorkspace_RollsBackResourceLabelCleanup(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	wsID, agentID, skillID := seedWorkspaceResourceLabelFixture(t, ctx, "handler-tests-delete-labels-rollback")
+
+	const guardTable = "workspace_delete_resource_label_rollback_guard"
+	_, _ = testPool.Exec(ctx, `DROP TABLE IF EXISTS `+guardTable)
+	if _, err := testPool.Exec(ctx, `
+		CREATE TABLE `+guardTable+` (
+			workspace_id UUID NOT NULL REFERENCES workspace(id)
+		)
+	`); err != nil {
+		t.Fatalf("create workspace delete guard: %v", err)
+	}
+	if _, err := testPool.Exec(ctx, `INSERT INTO `+guardTable+` (workspace_id) VALUES ($1)`, wsID); err != nil {
+		t.Fatalf("insert workspace delete guard: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `DROP TABLE IF EXISTS `+guardTable)
+	})
+
+	w := httptest.NewRecorder()
+	req := newRequest("DELETE", "/api/workspaces/"+wsID, nil)
+	req = withURLParam(req, "id", wsID)
+	testHandler.DeleteWorkspace(w, req)
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("DeleteWorkspace: expected 500, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var workspaceExists bool
+	if err := testPool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM workspace WHERE id = $1)`, wsID).Scan(&workspaceExists); err != nil {
+		t.Fatalf("check workspace after failed delete: %v", err)
+	}
+	if !workspaceExists {
+		t.Fatal("workspace was removed despite the injected delete failure")
+	}
+	if n := countAgentLabelAssignments(t, ctx, agentID); n != 1 {
+		t.Fatalf("agent_to_label rows after failed workspace delete = %d, want 1", n)
+	}
+	if n := countSkillLabelAssignments(t, ctx, skillID); n != 1 {
+		t.Fatalf("skill_to_label rows after failed workspace delete = %d, want 1", n)
 	}
 }

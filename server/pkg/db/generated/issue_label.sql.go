@@ -158,31 +158,16 @@ DELETE FROM agent_to_label
 WHERE agent_id IN (SELECT id FROM agent WHERE runtime_id = $1)
 `
 
-// The single-entity cleanups above cover one agent/skill at a time. The batch
-// variants below cover the bulk hard-delete entry points (runtime, runtime
-// profile, and workspace deletion), where the owning agents/skills disappear
-// without ever passing through a per-entity delete. agent_to_label and
-// skill_to_label carry no foreign keys, so these rows must be cleared in the
-// same transaction as the owner removal or they accumulate as permanent,
-// invisible orphans once resource labels are enabled.
+// The single-entity cleanups above cover one agent/skill at a time. The runtime
+// variant below covers runtime and runtime-profile bulk hard deletes, where the
+// owning agents disappear without passing through a per-entity delete.
+// Workspace-wide cleanup lives in DeleteWorkspace so it is atomic with that
+// workspace's existing multi-table teardown.
 // Runtime teardown hard-deletes every agent bound to the runtime (archived and
 // system; active agents are refused by a 409 guard). Clear their label links by
 // runtime so none survive the agent hard-delete.
 func (q *Queries) DeleteAgentLabelAssignmentsByRuntime(ctx context.Context, runtimeID pgtype.UUID) error {
 	_, err := q.db.Exec(ctx, deleteAgentLabelAssignmentsByRuntime, runtimeID)
-	return err
-}
-
-const deleteAgentLabelAssignmentsByWorkspace = `-- name: DeleteAgentLabelAssignmentsByWorkspace :exec
-DELETE FROM agent_to_label
-WHERE agent_id IN (SELECT id FROM agent WHERE workspace_id = $1)
-`
-
-// Workspace delete removes agents via a database cascade, but agent_to_label has
-// no workspace_id and no foreign key, so it must be swept explicitly before the
-// cascade fires (once the agent rows are gone the subquery finds nothing).
-func (q *Queries) DeleteAgentLabelAssignmentsByWorkspace(ctx context.Context, workspaceID pgtype.UUID) error {
-	_, err := q.db.Exec(ctx, deleteAgentLabelAssignmentsByWorkspace, workspaceID)
 	return err
 }
 
@@ -234,17 +219,6 @@ DELETE FROM skill_to_label WHERE skill_id = $1
 
 func (q *Queries) DeleteSkillLabelAssignmentsBySkill(ctx context.Context, skillID pgtype.UUID) error {
 	_, err := q.db.Exec(ctx, deleteSkillLabelAssignmentsBySkill, skillID)
-	return err
-}
-
-const deleteSkillLabelAssignmentsByWorkspace = `-- name: DeleteSkillLabelAssignmentsByWorkspace :exec
-DELETE FROM skill_to_label
-WHERE skill_id IN (SELECT id FROM skill WHERE workspace_id = $1)
-`
-
-// Skill mirror of DeleteAgentLabelAssignmentsByWorkspace, same orphan hazard.
-func (q *Queries) DeleteSkillLabelAssignmentsByWorkspace(ctx context.Context, workspaceID pgtype.UUID) error {
-	_, err := q.db.Exec(ctx, deleteSkillLabelAssignmentsByWorkspace, workspaceID)
 	return err
 }
 
