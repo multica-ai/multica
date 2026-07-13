@@ -271,3 +271,79 @@ func TestClaimTasksByRuntime_RequiresDaemonID(t *testing.T) {
 		t.Fatalf("expected 400 when daemon_id is missing, got %d: %s", w.Code, w.Body.String())
 	}
 }
+
+// TestClaimTasksByRuntime_RepairsStaleCommentPlan pins the MUL-4257 review
+// must-fix: when a claimed task's trigger comment was deleted (only coalesced
+// survivors remain), the batch path must NOT finalize+dispatch it (which would
+// silently drop the surviving comment). Instead it cancels the stale task,
+// omits it from the batch, and replays the surviving comment as a fresh plan.
+func TestClaimTasksByRuntime_RepairsStaleCommentPlan(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	rt := createClaimReclaimRuntime(t, ctx, "Stale plan rt")
+	agentID, issueID := createClaimReclaimAgentAndIssue(t, ctx, rt, "Stale plan agent")
+	// Assign the issue to the agent so the surviving comment re-routes to it.
+	if _, err := testPool.Exec(ctx, `UPDATE issue SET assignee_type='agent', assignee_id=$1 WHERE id=$2`, agentID, issueID); err != nil {
+		t.Fatalf("assign issue: %v", err)
+	}
+
+	// A surviving member comment on the issue.
+	var survivorID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO comment (workspace_id, issue_id, author_type, author_id, content)
+		VALUES ($1, $2, 'member', $3, 'please still handle this')
+		RETURNING id
+	`, testWorkspaceID, issueID, testUserID).Scan(&survivorID); err != nil {
+		t.Fatalf("seed survivor comment: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM comment WHERE id = $1`, survivorID) })
+
+	// Stale plan: trigger_comment_id NULL, only coalesced survivor remains.
+	var staleID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, coalesced_comment_ids)
+		VALUES ($1, $2, $3, 'queued', 0, ARRAY[$4]::uuid[])
+		RETURNING id
+	`, agentID, rt, issueID, survivorID).Scan(&staleID); err != nil {
+		t.Fatalf("seed stale task: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE id = $1`, staleID) })
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE issue_id = $1`, issueID) })
+
+	w := postBatchClaim(t, testWorkspaceID, []string{rt}, 5)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp batchClaimReceiptResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	// (1) The stale task must not be returned.
+	for _, task := range resp.Tasks {
+		if task.ID == staleID {
+			t.Fatalf("stale-plan task %s was dispatched by the batch path; want it repaired/omitted", staleID)
+		}
+	}
+	// (2) The stale task must be cancelled.
+	var status string
+	if err := testPool.QueryRow(ctx, `SELECT status FROM agent_task_queue WHERE id = $1`, staleID).Scan(&status); err != nil {
+		t.Fatalf("read stale status: %v", err)
+	}
+	if status != "cancelled" {
+		t.Fatalf("stale task status = %s, want cancelled", status)
+	}
+	// (3) The surviving comment was rebuilt into a fresh plan (a new task with
+	// the survivor as its trigger).
+	var rebuilt int
+	if err := testPool.QueryRow(ctx, `
+		SELECT count(*) FROM agent_task_queue
+		WHERE issue_id = $1 AND trigger_comment_id = $2 AND id <> $3
+	`, issueID, survivorID, staleID).Scan(&rebuilt); err != nil {
+		t.Fatalf("count rebuilt: %v", err)
+	}
+	if rebuilt < 1 {
+		t.Fatalf("expected the surviving comment rebuilt into a new trigger task, found %d", rebuilt)
+	}
+}

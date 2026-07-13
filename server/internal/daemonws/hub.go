@@ -92,12 +92,41 @@ type client struct {
 	identity ClientIdentity
 	runtimes map[string]struct{}
 
+	// ctx is cancelled when the connection tears down, so async RPC handlers
+	// stop instead of running against a dead socket. cancel is invoked from
+	// readPump's defer.
+	ctx    context.Context
+	cancel context.CancelFunc
+
+	// sendMu guards sendClosed so a late async send (e.g. an RPC response
+	// goroutine) can never write to the closed send channel. teardown flips
+	// sendClosed under sendMu before closing send.
+	sendMu     sync.Mutex
+	sendClosed bool
+
 	dedupMu  sync.Mutex
 	seenIDs  map[string]struct{}
 	seenList []string
 
 	// rpcSem bounds concurrent RPC handlers for this connection.
 	rpcSem chan struct{}
+}
+
+// trySend delivers frame to the write pump without blocking and without ever
+// writing to a closed channel (safe against concurrent teardown). Returns false
+// when the buffer is full or the connection is closing.
+func (c *client) trySend(frame []byte) bool {
+	c.sendMu.Lock()
+	defer c.sendMu.Unlock()
+	if c.sendClosed {
+		return false
+	}
+	select {
+	case c.send <- frame:
+		return true
+	default:
+		return false
+	}
 }
 
 const eventDedupCapacity = 128
@@ -279,6 +308,7 @@ func (h *Hub) HandleWebSocket(w http.ResponseWriter, r *http.Request, identity C
 		runtimes: runtimes,
 		rpcSem:   make(chan struct{}, maxInFlightRPCPerClient),
 	}
+	c.ctx, c.cancel = context.WithCancel(context.Background())
 	h.register(c)
 
 	go c.writePump()
@@ -523,7 +553,10 @@ func (h *Hub) unregister(c *client) {
 			}
 		}
 	}
+	c.sendMu.Lock()
+	c.sendClosed = true
 	close(c.send)
+	c.sendMu.Unlock()
 	total := len(h.clients)
 	h.mu.Unlock()
 
@@ -541,6 +574,9 @@ func (h *Hub) unregister(c *client) {
 
 func (c *client) readPump() {
 	defer func() {
+		// Cancel first so async RPC handlers stop before we close the send
+		// channel, then unregister (which marks send closed).
+		c.cancel()
 		c.hub.unregister(c)
 		c.conn.Close()
 	}()
@@ -623,9 +659,10 @@ func (c *client) handleRPCFrame(raw json.RawMessage) {
 	}
 	go func() {
 		defer func() { <-c.rpcSem }()
-		// Bound by the connection lifetime; the conn closing unblocks any
-		// wedged handler via the daemon's own request timeout + fallback.
-		status, body, err := handler(context.Background(), c.identity, req.Method, req.Body)
+		// Use the connection ctx so a slow handler (e.g. a DB-bound claim) is
+		// cancelled when the socket tears down, rather than running on against
+		// a dead connection with context.Background().
+		status, body, err := handler(c.ctx, c.identity, req.Method, req.Body)
 		if err != nil {
 			if status < 400 {
 				status = http.StatusInternalServerError
@@ -651,12 +688,10 @@ func (c *client) sendRPCResponse(requestID string, status int, body json.RawMess
 		slog.Debug("daemon websocket rpc response marshal failed", "error", err)
 		return
 	}
-	select {
-	case c.send <- frame:
-	default:
-		// Send buffer full — drop the response; the daemon's per-request
-		// timeout fires and it falls back to HTTP.
-		slog.Debug("daemon websocket rpc response dropped: send buffer full",
+	if !c.trySend(frame) {
+		// Send buffer full or connection closing — drop the response; the
+		// daemon's per-request timeout fires and it falls back to HTTP.
+		slog.Debug("daemon websocket rpc response dropped",
 			"daemon_id", c.identity.DaemonID, "request_id", requestID)
 	}
 }
@@ -715,12 +750,9 @@ func (c *client) handleHeartbeatFrame(raw json.RawMessage) {
 		slog.Debug("daemon websocket heartbeat ack marshal failed", "error", err)
 		return
 	}
-	select {
-	case c.send <- frame:
-	default:
-		// Send buffer is full — slow client. Don't block the read pump; the
-		// next writePump tick or notifyFrame eviction will clean up.
-		slog.Debug("daemon websocket heartbeat ack dropped: send buffer full",
+	if !c.trySend(frame) {
+		// Send buffer full or connection closing — drop; HTTP heartbeat resumes.
+		slog.Debug("daemon websocket heartbeat ack dropped",
 			"daemon_id", c.identity.DaemonID,
 			"runtime_id", payload.RuntimeID)
 	}

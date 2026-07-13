@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
@@ -106,5 +107,33 @@ func TestWSRPCClient_DetachFailsPending(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("Call did not return after detach")
+	}
+}
+
+// TestWSRPCClient_DeliverDetachRaceNoPanic hammers deliver racing with
+// attach(nil) (disconnect). Before the fix, deliver could send on a channel
+// attach(nil) had just closed → "send on closed channel" panic. Run under
+// -race; passing means the two are serialized under the mutex.
+func TestWSRPCClient_DeliverDetachRaceNoPanic(t *testing.T) {
+	for iter := 0; iter < 300; iter++ {
+		c := newWSRPCClient(time.Second)
+		c.attach(func([]byte) error { return nil })
+		id := "req"
+		ch := make(chan protocol.RPCResponsePayload, 1)
+		c.mu.Lock()
+		c.pending[id] = ch
+		c.mu.Unlock()
+
+		var wg sync.WaitGroup
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			c.deliver(protocol.RPCResponsePayload{RequestID: id, Status: 200})
+		}()
+		go func() {
+			defer wg.Done()
+			c.attach(nil) // closes + deletes pending under the same mutex
+		}()
+		wg.Wait()
 	}
 }

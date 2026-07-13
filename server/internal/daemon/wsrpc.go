@@ -151,16 +151,19 @@ func (c *wsRPCClient) Call(ctx context.Context, method string, reqBody, respBody
 	}
 }
 
-// deliver routes an inbound rpc_response frame to the waiting Call. Unknown
-// request ids (already timed out / detached) are dropped.
+// deliver routes an inbound rpc_response frame to the waiting Call. The send
+// happens under the mutex so it is serialized with attach(nil)'s close+delete:
+// a channel present in pending is guaranteed not yet closed, so this never
+// sends on a closed channel. Unknown request ids (already timed out / detached)
+// are dropped.
 func (c *wsRPCClient) deliver(resp protocol.RPCResponsePayload) {
 	if c == nil {
 		return
 	}
 	c.mu.Lock()
-	ch := c.pending[resp.RequestID]
-	c.mu.Unlock()
-	if ch == nil {
+	defer c.mu.Unlock()
+	ch, ok := c.pending[resp.RequestID]
+	if !ok {
 		return
 	}
 	select {

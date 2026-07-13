@@ -114,3 +114,42 @@ func TestRPCDispatch_NoHandler(t *testing.T) {
 		t.Fatalf("resp = %+v, want req-3 with 503", resp)
 	}
 }
+
+// TestRPCDispatch_DisconnectDuringHandlerNoPanic pins the server-side fix: an
+// RPC handler that finishes AFTER the connection tears down must not send on
+// the closed send channel. The handler blocks until the client has
+// disconnected, then returns and attempts to write its response. Run under
+// -race; passing means the guarded send + connection-ctx teardown are safe.
+func TestRPCDispatch_DisconnectDuringHandlerNoPanic(t *testing.T) {
+	hub := NewHub()
+	release := make(chan struct{})
+	entered := make(chan struct{}, 1)
+	hub.SetRPCHandler(func(ctx context.Context, identity ClientIdentity, method string, body json.RawMessage) (int, json.RawMessage, error) {
+		select {
+		case entered <- struct{}{}:
+		default:
+		}
+		<-release // return only after the client disconnects
+		return http.StatusOK, json.RawMessage(`{"ok":true}`), nil
+	})
+	conn := dialRPCTestConn(t, hub, ClientIdentity{DaemonID: "daemon-1", RuntimeIDs: []string{"rt-1"}})
+
+	frame, _ := json.Marshal(protocol.Message{
+		Type:    protocol.EventDaemonRPCRequest,
+		Payload: mustMarshalRaw(protocol.RPCRequestPayload{RequestID: "req-1", Method: "tasks.claim"}),
+	})
+	if err := conn.WriteMessage(websocket.TextMessage, frame); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	select {
+	case <-entered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("handler never started")
+	}
+
+	conn.Close() // client disconnect → server readPump exits → cancel + close send
+	time.Sleep(50 * time.Millisecond)
+	close(release) // handler returns and tries to send its response
+	time.Sleep(100 * time.Millisecond)
+	// No panic == pass.
+}

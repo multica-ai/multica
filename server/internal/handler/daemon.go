@@ -1321,6 +1321,45 @@ func parseRuntimeConnectedAppsForClaim(raw []byte, taskID pgtype.UUID) []runtime
 	return apps
 }
 
+// repairStaleCommentPlanIfNeeded handles the edit/delete race where a claimed
+// task's trigger_comment_id was cleared but coalesced_comment_ids survive: such
+// a task must never be dispatched as a generic assignment — its user-scoped MCP
+// overlay still belongs to the deleted author, and the prompt would read issue
+// history exposing that stale user's capabilities. When it applies, the task is
+// cancelled and its surviving comments are replayed through normal routing
+// (which recomputes originator + connected-app context).
+//
+// Returns handled=true when the task must NOT be dispatched — either a clean
+// repair (failure==nil) or a hard failure (failure!=nil, carrying the
+// status/message/outcome the per-runtime endpoint renders). handled=false means
+// proceed with a normal claim. Shared by the per-runtime and batch claim
+// handlers so the batch path can't silently drop surviving comments (MUL-4257).
+func (h *Handler) repairStaleCommentPlanIfNeeded(ctx context.Context, task *db.AgentTaskQueue, runtimeWorkspaceID string) (handled bool, failure *claimBuildFailure) {
+	if task.TriggerCommentID.Valid || len(task.CoalescedCommentIds) == 0 {
+		return false, nil
+	}
+	if !task.IssueID.Valid {
+		return true, &claimBuildFailure{outcome: "error_stale_comment_plan", status: http.StatusInternalServerError, message: "comment task has no issue"}
+	}
+	issue, loadErr := h.Queries.GetIssue(ctx, task.IssueID)
+	if loadErr != nil {
+		return true, &claimBuildFailure{outcome: "error_stale_comment_plan", status: http.StatusInternalServerError, message: "failed to repair stale comment task"}
+	}
+	if uuidToString(issue.WorkspaceID) != runtimeWorkspaceID {
+		if _, cancelErr := h.TaskService.CancelTask(ctx, task.ID); cancelErr != nil {
+			slog.Error("task claim: cancel stale cross-workspace task failed",
+				"task_id", uuidToString(task.ID), "error", cancelErr)
+		}
+		return true, &claimBuildFailure{outcome: "error_workspace", status: http.StatusInternalServerError, message: "task workspace isolation check failed"}
+	}
+	cancelled, cancelErr := h.TaskService.CancelTask(ctx, task.ID)
+	if cancelErr != nil {
+		return true, &claimBuildFailure{outcome: "error_stale_comment_plan", status: http.StatusInternalServerError, message: "failed to repair stale comment task"}
+	}
+	h.retriggerCancelledTaskSurvivors(ctx, issue, []db.AgentTaskQueue{*cancelled}, pgtype.UUID{})
+	return true, nil
+}
+
 // claimBatchMaxTasksCap bounds how many tasks a single machine-level batch
 // claim may return, so one request can neither build an unbounded payload nor
 // hold the DB for an unbounded number of per-agent claim transactions. The
@@ -1455,6 +1494,14 @@ func (h *Handler) ClaimTasksByRuntime(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		rtWorkspaceID := uuidToString(rt.WorkspaceID)
+		// Stale comment-plan repair must run for the batch path too: otherwise a
+		// task whose trigger was deleted (only coalesced survive) would be
+		// finalized+dispatched with no comment input, silently dropping the
+		// surviving user comment. On repair (or hard failure) the task is
+		// cancelled / left for reclaim and omitted from the batch.
+		if handled, _ := h.repairStaleCommentPlanIfNeeded(r.Context(), &task, rtWorkspaceID); handled {
+			continue
+		}
 		resp, deliveredCommentIDs, _, _, failure := h.buildClaimedTaskResponse(r, &task, rt, uuidToString(task.RuntimeID), rtWorkspaceID)
 		if failure != nil {
 			// Builder rejected this task (workspace isolation / chat-input);
@@ -2365,42 +2412,17 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !task.TriggerCommentID.Valid && len(task.CoalescedCommentIds) > 0 {
-		// A legacy edit/delete race can leave a plan whose trigger FK was
-		// cleared while its user-scoped MCP overlay still belongs to the deleted
-		// author. Never dispatch it as a generic assignment: that prompt reads
-		// issue history and would still expose the stale user's capabilities.
-		// Cancel the stale row and replay every survivor through normal routing,
-		// which recomputes originator and connected-app context.
-		if !task.IssueID.Valid {
-			outcome = "error_stale_comment_plan"
-			writeError(w, http.StatusInternalServerError, "comment task has no issue")
-			return
-		}
-		issue, loadErr := h.Queries.GetIssue(r.Context(), task.IssueID)
-		if loadErr != nil {
-			outcome = "error_stale_comment_plan"
-			writeError(w, http.StatusInternalServerError, "failed to repair stale comment task")
-			return
-		}
-		if uuidToString(issue.WorkspaceID) != runtimeWorkspaceID {
-			outcome = "error_workspace"
-			if _, cancelErr := h.TaskService.CancelTask(r.Context(), task.ID); cancelErr != nil {
-				slog.Error("task claim: cancel stale cross-workspace task failed",
-					"task_id", uuidToString(task.ID), "error", cancelErr)
+		handled, failure := h.repairStaleCommentPlanIfNeeded(r.Context(), task, runtimeWorkspaceID)
+		if handled {
+			if failure != nil {
+				outcome = failure.outcome
+				writeError(w, failure.status, failure.message)
+				return
 			}
-			writeError(w, http.StatusInternalServerError, "task workspace isolation check failed")
+			outcome = "repaired_stale_comment_plan"
+			payloadBytes, _ = writeMeasuredJSON(w, http.StatusOK, map[string]any{"task": nil})
 			return
 		}
-		cancelled, cancelErr := h.TaskService.CancelTask(r.Context(), task.ID)
-		if cancelErr != nil {
-			outcome = "error_stale_comment_plan"
-			writeError(w, http.StatusInternalServerError, "failed to repair stale comment task")
-			return
-		}
-		h.retriggerCancelledTaskSurvivors(r.Context(), issue, []db.AgentTaskQueue{*cancelled}, pgtype.UUID{})
-		outcome = "repaired_stale_comment_plan"
-		payloadBytes, _ = writeMeasuredJSON(w, http.StatusOK, map[string]any{"task": nil})
-		return
 	}
 
 	outcome = "claimed"
