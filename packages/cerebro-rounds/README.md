@@ -4,6 +4,12 @@ Rounds hold issue triggers until the owner starts a controlled run. Released
 tasks keep the normal task lifecycle, progress events, cancellation and usage
 recording.
 
+An expanded Round keeps every member openable and labels its owner-perspective
+state (`waiting`, `answered`, `working`, `queued`, `planned`, or `failed`). Only
+`waiting` is visually actionable. Failed jobs are retried on the next Run,
+using the original comment and target; after three failed retries they remain
+visible as `failed` and are not enqueued again.
+
 ## Safe AI batch execution
 
 The server-owned `firtal-gateway` runtime may submit a released Round task to

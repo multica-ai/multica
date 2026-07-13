@@ -2,7 +2,23 @@
 import "@testing-library/jest-dom/vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { MobileRowActions } from "./cerebro-inbox-row-actions";
+import { MobileRowActions, roundRowAction } from "./cerebro-inbox-row-actions";
+
+describe("roundRowAction", () => {
+  it("turns the existing row menu action into a direct Remove from <Round> action", () => {
+    const result = roundRowAction([
+      {
+        round: { id: "round-1", name: "Weekly commercial review" },
+        members: [{ issue_id: "issue-1" }],
+      },
+    ] as never, "issue-1");
+
+    expect(result).toEqual({
+      label: "Remove from Weekly commercial review",
+      roundId: "round-1",
+    });
+  });
+});
 
 describe("MobileRowActions round access", () => {
   it("reveals Add to Round in the mobile swipe actions and invokes it", () => {

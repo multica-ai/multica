@@ -69,20 +69,21 @@ func shouldHoldComment(mode string) bool { return mode == "batch" }
 // Member state, from the round owner's point of view (FIR-3114 review):
 //   - waiting:  agent responses surfaced by the open answer cycle (created
 //     before the cycle opened, newer than the owner's last reply) — the issue
-//     needs the owner and is the only state that surfaces in the round list.
-//   - answered: the owner replied last (held for batch, or sent in live) —
-//     folded away behind "Answered".
-//   - working:  an agent task is queued/dispatched/running — hidden until the
-//     next cycle surfaces the agent's response.
-//   - queued:   agent responses accumulated outside the open cycle — hidden
-//     until the next Start surfaces them (FIR-3114 review round 3, point 3).
+//     needs the owner and is the only visually actionable state.
+//   - answered: the owner replied last (held for batch, or sent in live).
+//   - working:  an agent task is queued/dispatched/running.
+//   - queued:   agent responses or a failed job wait for the next Start.
 //   - planned:  no agent response yet and nothing in flight.
+//   - failed:   the original attempt and three retries all failed.
+//
+// Every state remains openable in an expanded Round (FIR-3179).
 const (
 	MemberWaiting  = "waiting"
 	MemberAnswered = "answered"
 	MemberWorking  = "working"
 	MemberQueued   = "queued"
 	MemberPlanned  = "planned"
+	MemberFailed   = "failed"
 )
 
 type Member struct {
@@ -93,8 +94,31 @@ type Member struct {
 	HeldTriggerCount int       `json:"held_trigger_count"`
 	WaitingCount     int       `json:"waiting_count"`
 	QueuedCount      int       `json:"queued_count"`
+	RetryCount       int       `json:"retry_count"`
 	State            string    `json:"state"`
 	CreatedAt        time.Time `json:"created_at"`
+}
+
+func memberStateWithRetry(waitingCount, heldCount, queuedCount int, working, retryReady, failed, hasResponses bool) string {
+	switch {
+	case waitingCount > 0:
+		return MemberWaiting
+	case working:
+		return MemberWorking
+	case failed:
+		return MemberFailed
+	case retryReady:
+		return MemberQueued
+	default:
+		return memberState(waitingCount, heldCount, queuedCount, working, hasResponses)
+	}
+}
+
+func retryTriggerState(retryCount int) string {
+	if retryCount >= 3 {
+		return "failed"
+	}
+	return "retry"
 }
 
 func memberState(waitingCount, heldCount, queuedCount int, working, hasResponses bool) string {
@@ -275,7 +299,7 @@ func (s *Service) AddMember(ctx context.Context, workspaceID, ownerID, roundID, 
 // open cycle every unanswered response is queued, so nothing surfaces until
 // the owner starts the round (FIR-3114 review round 3, points 1+3).
 const memberSelect = `SELECT m.round_id::text,m.issue_id::text,m.added_by_type,m.added_by_id::text,
-	(SELECT count(*)::int FROM cerebro_round_held_trigger h WHERE h.round_id=m.round_id AND h.issue_id=m.issue_id AND h.state='held'),
+	(SELECT count(*)::int FROM cerebro_round_held_trigger h WHERE h.round_id=m.round_id AND h.issue_id=m.issue_id AND h.state IN ('held','retry')),
 	(SELECT count(*)::int FROM comment c WHERE c.issue_id=m.issue_id AND c.author_type='agent' AND c.type='comment'
 		AND r.cycle_opened_at IS NOT NULL AND c.created_at <= r.cycle_opened_at
 		AND c.created_at > COALESCE((SELECT max(c2.created_at) FROM comment c2 WHERE c2.issue_id=m.issue_id AND c2.author_type='member' AND c2.author_id=r.owner_id AND c2.type='comment'), '-infinity'::timestamptz)),
@@ -283,15 +307,20 @@ const memberSelect = `SELECT m.round_id::text,m.issue_id::text,m.added_by_type,m
 		AND (r.cycle_opened_at IS NULL OR c.created_at > r.cycle_opened_at)
 		AND c.created_at > COALESCE((SELECT max(c2.created_at) FROM comment c2 WHERE c2.issue_id=m.issue_id AND c2.author_type='member' AND c2.author_id=r.owner_id AND c2.type='comment'), '-infinity'::timestamptz)),
 	EXISTS(SELECT 1 FROM agent_task_queue q WHERE q.issue_id=m.issue_id AND q.status IN ('queued','dispatched','running')),
+	COALESCE((SELECT max(h.retry_count)::int FROM cerebro_round_held_trigger h WHERE h.round_id=m.round_id AND h.issue_id=m.issue_id),0),
+	EXISTS(SELECT 1 FROM cerebro_round_held_trigger h WHERE h.round_id=m.round_id AND h.issue_id=m.issue_id AND h.state='retry'),
+	EXISTS(SELECT 1 FROM cerebro_round_held_trigger h WHERE h.round_id=m.round_id AND h.issue_id=m.issue_id AND h.state='failed'
+		AND NOT EXISTS(SELECT 1 FROM cerebro_round_held_trigger newer WHERE newer.round_id=h.round_id AND newer.issue_id=h.issue_id
+			AND newer.target_type=h.target_type AND newer.target_id IS NOT DISTINCT FROM h.target_id AND newer.created_at>h.created_at AND newer.state<>'cancelled')),
 	EXISTS(SELECT 1 FROM comment c WHERE c.issue_id=m.issue_id AND c.author_type='agent' AND c.type='comment'),
 	m.created_at
 	FROM cerebro_round_member m JOIN cerebro_round r ON r.id=m.round_id`
 
 func scanMember(row pgx.Row) (Member, error) {
 	var m Member
-	var working, hasResponses bool
-	err := row.Scan(&m.RoundID, &m.IssueID, &m.AddedByType, &m.AddedByID, &m.HeldTriggerCount, &m.WaitingCount, &m.QueuedCount, &working, &hasResponses, &m.CreatedAt)
-	m.State = memberState(m.WaitingCount, m.HeldTriggerCount, m.QueuedCount, working, hasResponses)
+	var working, retryReady, failed, hasResponses bool
+	err := row.Scan(&m.RoundID, &m.IssueID, &m.AddedByType, &m.AddedByID, &m.HeldTriggerCount, &m.WaitingCount, &m.QueuedCount, &working, &m.RetryCount, &retryReady, &failed, &hasResponses, &m.CreatedAt)
+	m.State = memberStateWithRetry(m.WaitingCount, m.HeldTriggerCount, m.QueuedCount, working, retryReady, failed, hasResponses)
 	return m, err
 }
 
@@ -496,6 +525,12 @@ func (s *Service) dispatchHeld(ctx context.Context, roundID pgtype.UUID) (Run, e
 		return Run{}, err
 	}
 	defer tx.Rollback(ctx)
+	// Serialize Start for one round so two clicks cannot dispatch the same
+	// retry before its durable trigger has been claimed.
+	var lockedRoundID pgtype.UUID
+	if err = tx.QueryRow(ctx, `SELECT id FROM cerebro_round WHERE id=$1 FOR UPDATE`, roundID).Scan(&lockedRoundID); err != nil {
+		return Run{}, err
+	}
 	// A new run supersedes the previous one: the partial unique index allows a
 	// single 'running' run per round, and legacy 'ready' runs would otherwise
 	// linger forever (nothing else completes runs).
@@ -503,31 +538,45 @@ func (s *Service) dispatchHeld(ctx context.Context, roundID pgtype.UUID) (Run, e
 		return Run{}, err
 	}
 	var run Run
-	err = tx.QueryRow(ctx, `INSERT INTO cerebro_round_run(round_id,total_count) SELECT $1,count(*) FROM cerebro_round_held_trigger WHERE round_id=$1 AND state='held' RETURNING id::text,round_id::text,status,total_count,responded_count,stalled_count,nudged_count,started_at,ready_at,completed_at,created_at`, roundID).Scan(&run.ID, &run.RoundID, &run.Status, &run.TotalCount, &run.RespondedCount, &run.StalledCount, &run.NudgedCount, &run.StartedAt, &run.ReadyAt, &run.CompletedAt, &run.CreatedAt)
+	err = tx.QueryRow(ctx, `INSERT INTO cerebro_round_run(round_id,total_count) SELECT $1,count(*) FROM (SELECT DISTINCT issue_id,target_type,target_id FROM cerebro_round_held_trigger WHERE round_id=$1 AND state IN ('held','retry')) jobs RETURNING id::text,round_id::text,status,total_count,responded_count,stalled_count,nudged_count,started_at,ready_at,completed_at,created_at`, roundID).Scan(&run.ID, &run.RoundID, &run.Status, &run.TotalCount, &run.RespondedCount, &run.StalledCount, &run.NudgedCount, &run.StartedAt, &run.ReadyAt, &run.CompletedAt, &run.CreatedAt)
 	if err != nil {
 		return Run{}, err
 	}
-	rows, err := tx.Query(ctx, `SELECT DISTINCT issue_id,comment_id,target_type,target_id FROM cerebro_round_held_trigger WHERE round_id=$1 AND state='held' ORDER BY issue_id`, roundID)
+	rows, err := tx.Query(ctx, `WITH candidates AS (
+		SELECT DISTINCT ON (issue_id,target_type,target_id) id
+		FROM cerebro_round_held_trigger
+		WHERE round_id=$1 AND state IN ('held','retry')
+		ORDER BY issue_id,target_type,target_id,state='retry' DESC,created_at DESC
+	) SELECT h.id,h.issue_id,h.comment_id,h.target_type,h.target_id,h.state,h.retry_count
+	FROM cerebro_round_held_trigger h JOIN candidates c ON c.id=h.id
+	ORDER BY h.issue_id FOR UPDATE OF h`, roundID)
 	if err != nil {
 		return Run{}, err
 	}
 	type held struct {
-		i, c       pgtype.UUID
+		id, i, c   pgtype.UUID
 		targetType string
 		targetID   pgtype.UUID
+		state      string
+		retryCount int
 	}
 	var hs []held
 	for rows.Next() {
 		var h held
-		if err := rows.Scan(&h.i, &h.c, &h.targetType, &h.targetID); err != nil {
+		if err := rows.Scan(&h.id, &h.i, &h.c, &h.targetType, &h.targetID, &h.state, &h.retryCount); err != nil {
 			rows.Close()
 			return Run{}, err
 		}
 		hs = append(hs, h)
 	}
 	rows.Close()
-	if _, err = tx.Exec(ctx, `UPDATE cerebro_round_held_trigger SET state='released',released_at=now() WHERE round_id=$1 AND state='held'`, roundID); err != nil {
-		return Run{}, err
+	for i := range hs {
+		if hs[i].state == "retry" {
+			hs[i].retryCount++
+		}
+		if _, err = tx.Exec(ctx, `UPDATE cerebro_round_held_trigger SET state='released',retry_count=$2,released_at=now() WHERE id=$1`, hs[i].id, hs[i].retryCount); err != nil {
+			return Run{}, err
+		}
 	}
 	if err = tx.Commit(ctx); err != nil {
 		return Run{}, err
@@ -536,7 +585,7 @@ func (s *Service) dispatchHeld(ctx context.Context, roundID pgtype.UUID) (Run, e
 	for _, h := range hs {
 		issue, e := s.Queries.GetIssue(ctx, h.i)
 		if e != nil {
-			s.markItem(ctx, runID, h.i, h.targetType, h.targetID, "failed", pgtype.UUID{})
+			s.markItem(ctx, runID, h.id, h.i, h.targetType, h.targetID, "failed", pgtype.UUID{})
 			continue
 		}
 		var task db.AgentTaskQueue
@@ -554,7 +603,7 @@ func (s *Service) dispatchHeld(ctx context.Context, roundID pgtype.UUID) (Run, e
 			task, e = s.Tasks.EnqueueTaskForIssue(ctx, issue, h.c)
 		}
 		if e != nil {
-			s.markItem(ctx, runID, h.i, h.targetType, h.targetID, "failed", pgtype.UUID{})
+			s.markItem(ctx, runID, h.id, h.i, h.targetType, h.targetID, "failed", pgtype.UUID{})
 			continue
 		}
 		// Rounds explicitly permit a tool-less batch attempt. The gateway
@@ -563,14 +612,20 @@ func (s *Service) dispatchHeld(ctx context.Context, roundID pgtype.UUID) (Run, e
 		// existing synchronous tool loop.
 		contextJSON := fmt.Sprintf(`{"type":%q,"run_id":%q,"batch_tool_mode":"none"}`, service.RoundTaskContextType, run.ID)
 		_, _ = s.Pool.Exec(ctx, `UPDATE agent_task_queue SET context=$2::jsonb WHERE id=$1`, task.ID, contextJSON)
-		s.markItem(ctx, runID, h.i, h.targetType, h.targetID, "queued", task.ID)
+		s.markItem(ctx, runID, h.id, h.i, h.targetType, h.targetID, "queued", task.ID)
 	}
 	s.RefreshRun(ctx, runID)
 	return s.GetRun(ctx, runID)
 }
 
-func (s *Service) markItem(ctx context.Context, runID, issueID pgtype.UUID, targetType string, targetID pgtype.UUID, status string, taskID pgtype.UUID) {
-	_, _ = s.Pool.Exec(ctx, `INSERT INTO cerebro_round_run_item(run_id,issue_id,target_type,target_id,status,task_id) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(run_id,issue_id,target_type,target_id) DO UPDATE SET status=EXCLUDED.status,task_id=EXCLUDED.task_id,updated_at=now()`, runID, issueID, targetType, targetID, status, taskID)
+func (s *Service) markItem(ctx context.Context, runID, triggerID, issueID pgtype.UUID, targetType string, targetID pgtype.UUID, status string, taskID pgtype.UUID) {
+	_, _ = s.Pool.Exec(ctx, `INSERT INTO cerebro_round_run_item(run_id,trigger_id,issue_id,target_type,target_id,status,task_id) VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT(run_id,issue_id,target_type,target_id) DO UPDATE SET trigger_id=EXCLUDED.trigger_id,status=EXCLUDED.status,task_id=EXCLUDED.task_id,updated_at=now()`, runID, triggerID, issueID, targetType, targetID, status, taskID)
+	if status == "failed" {
+		var retryCount int
+		if err := s.Pool.QueryRow(ctx, `SELECT retry_count FROM cerebro_round_held_trigger WHERE id=$1`, triggerID).Scan(&retryCount); err == nil {
+			_, _ = s.Pool.Exec(ctx, `UPDATE cerebro_round_held_trigger SET state=$2 WHERE id=$1 AND state='released'`, triggerID, retryTriggerState(retryCount))
+		}
+	}
 }
 func (s *Service) GetRun(ctx context.Context, id pgtype.UUID) (Run, error) {
 	var r Run
@@ -586,6 +641,7 @@ func (s *Service) RefreshRun(ctx context.Context, id pgtype.UUID) {
 		}
 	}
 	_, _ = s.Pool.Exec(ctx, `UPDATE cerebro_round_run_item i SET status='stalled',updated_at=now() FROM agent_task_queue q WHERE i.run_id=$1 AND q.id=i.task_id AND q.status='running' AND q.started_at < now()-$2::interval`, id, stalledTaskTimeout.String())
+	_, _ = s.Pool.Exec(ctx, `UPDATE cerebro_round_held_trigger h SET state=CASE WHEN h.retry_count>=3 THEN 'failed' ELSE 'retry' END FROM cerebro_round_run_item i LEFT JOIN agent_task_queue q ON q.id=i.task_id WHERE i.run_id=$1 AND i.trigger_id=h.id AND h.state='released' AND (i.status IN ('failed','stalled') OR q.status='failed')`, id)
 	// A finished run completes silently: the responses stay queued behind the
 	// round until the owner starts the next answer cycle — they must not
 	// re-surface on their own (FIR-3114 review round 3, point 3).
