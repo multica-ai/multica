@@ -214,3 +214,142 @@ func TestNormalizeWebhookPayload_XEventTypeHeader(t *testing.T) {
 		t.Fatalf("event: %q", env.Event)
 	}
 }
+
+// ── Event filter helpers ────────────────────────────────────────────────────
+
+func TestWebhookEventAllowedByTriggerScope_NoFiltersAllowsAll(t *testing.T) {
+	if !webhookEventAllowedByTriggerScope(nil, WebhookEnvelope{Event: "github.push"}) {
+		t.Fatal("nil filters should allow all")
+	}
+	if !webhookEventAllowedByTriggerScope([]byte{}, WebhookEnvelope{Event: "github.push"}) {
+		t.Fatal("empty filters should allow all")
+	}
+	if !webhookEventAllowedByTriggerScope([]byte("[]"), WebhookEnvelope{Event: "github.push"}) {
+		t.Fatal("empty JSON array should allow all")
+	}
+}
+
+func TestWebhookEventAllowedByTriggerScope_FiltersUndeclaredEvent(t *testing.T) {
+	filters := []byte(`[{"event":"workflow_run","actions":["completed"]}]`)
+	env := WebhookEnvelope{Event: "github.push", EventPayload: json.RawMessage(`{"action":"pushed"}`)}
+	if webhookEventAllowedByTriggerScope(filters, env) {
+		t.Fatal("undeclared event should be filtered")
+	}
+}
+
+func TestWebhookEventAllowedByTriggerScope_FiltersUndeclaredAction(t *testing.T) {
+	filters := []byte(`[{"event":"workflow_run","actions":["completed"]}]`)
+	env := WebhookEnvelope{Event: "github.workflow_run.in_progress", EventPayload: json.RawMessage(`{"action":"in_progress"}`)}
+	if webhookEventAllowedByTriggerScope(filters, env) {
+		t.Fatal("undeclared action should be filtered")
+	}
+}
+
+func TestWebhookEventAllowedByTriggerScope_AllowsDeclaredAction(t *testing.T) {
+	filters := []byte(`[{"event":"workflow_run","actions":["completed"]}]`)
+	env := WebhookEnvelope{Event: "github.workflow_run.completed", EventPayload: json.RawMessage(`{"action":"completed"}`)}
+	if !webhookEventAllowedByTriggerScope(filters, env) {
+		t.Fatal("declared action should be allowed")
+	}
+}
+
+func TestWebhookEventAllowedByTriggerScope_AnyActionWhenEmpty(t *testing.T) {
+	filters := []byte(`[{"event":"workflow_run"}]`)
+	env := WebhookEnvelope{Event: "github.workflow_run.in_progress", EventPayload: json.RawMessage(`{"action":"in_progress"}`)}
+	if !webhookEventAllowedByTriggerScope(filters, env) {
+		t.Fatal("empty actions should allow any action for the event")
+	}
+}
+
+// TestWebhookEventAllowedByTriggerScope_MultipleFiltersSameEvent pins the
+// fix for PR #3231 review: the matcher used to return false as soon as it
+// hit the first event-name match whose actions didn't line up, which made
+// later filters covering the same event but different actions unreachable
+// (order-dependent silent drops). The fix is to keep scanning and only
+// short-circuit on a positive match.
+func TestWebhookEventAllowedByTriggerScope_MultipleFiltersSameEvent(t *testing.T) {
+	filters := []byte(`[
+		{"event":"workflow_run","actions":["completed"]},
+		{"event":"workflow_run","actions":["requested"]}
+	]`)
+
+	completed := WebhookEnvelope{
+		Event:        "github.workflow_run.completed",
+		EventPayload: json.RawMessage(`{"action":"completed"}`),
+	}
+	if !webhookEventAllowedByTriggerScope(filters, completed) {
+		t.Fatal("workflow_run.completed should match the first filter")
+	}
+
+	requested := WebhookEnvelope{
+		Event:        "github.workflow_run.requested",
+		EventPayload: json.RawMessage(`{"action":"requested"}`),
+	}
+	if !webhookEventAllowedByTriggerScope(filters, requested) {
+		t.Fatal("workflow_run.requested should match the second filter — pre-fix this silently dropped")
+	}
+
+	inProgress := WebhookEnvelope{
+		Event:        "github.workflow_run.in_progress",
+		EventPayload: json.RawMessage(`{"action":"in_progress"}`),
+	}
+	if webhookEventAllowedByTriggerScope(filters, inProgress) {
+		t.Fatal("workflow_run.in_progress is in neither filter and should be filtered out")
+	}
+}
+
+// TestWebhookEventAllowedByTriggerScope_MalformedDenies pins the
+// fail-closed behavior for corrupted rows. Strict write-time validation
+// (validateWebhookEventFilters) is the primary defense; this is the
+// defense-in-depth check for "what if a malformed row somehow exists".
+func TestWebhookEventAllowedByTriggerScope_MalformedDenies(t *testing.T) {
+	corrupt := []byte(`{not a json array}`)
+	env := WebhookEnvelope{
+		Event:        "github.workflow_run.completed",
+		EventPayload: json.RawMessage(`{"action":"completed"}`),
+	}
+	if webhookEventAllowedByTriggerScope(corrupt, env) {
+		t.Fatal("malformed event_filters must fail closed (deny), never widen the allowlist")
+	}
+}
+
+func TestWebhookEventAllowedByTriggerScope_MultipleFilters(t *testing.T) {
+	filters := []byte(`[{"event":"workflow_run","actions":["completed"]},{"event":"check_suite","actions":["completed","failure"]}]`)
+
+	allowed1 := WebhookEnvelope{Event: "github.check_suite.completed", EventPayload: json.RawMessage(`{"action":"completed"}`)}
+	if !webhookEventAllowedByTriggerScope(filters, allowed1) {
+		t.Fatal("check_suite.completed should be allowed")
+	}
+
+	allowed2 := WebhookEnvelope{Event: "github.check_suite.failure", EventPayload: json.RawMessage(`{"action":"failure"}`)}
+	if !webhookEventAllowedByTriggerScope(filters, allowed2) {
+		t.Fatal("check_suite.failure should be allowed")
+	}
+
+	filtered := WebhookEnvelope{Event: "github.check_suite.requested", EventPayload: json.RawMessage(`{"action":"requested"}`)}
+	if webhookEventAllowedByTriggerScope(filters, filtered) {
+		t.Fatal("check_suite.requested should be filtered")
+	}
+}
+
+func TestSplitWebhookEvent(t *testing.T) {
+	tests := []struct {
+		input           string
+		wantProvider    string
+		wantName        string
+		wantAction      string
+	}{
+		{"github.workflow_run.completed", "github", "workflow_run", "completed"},
+		{"github.push", "github", "push", ""},
+		{"gitlab.Merge Request Hook", "gitlab", "Merge Request Hook", ""},
+		{"webhook.received", "", "webhook", "received"},
+		{"custom", "", "custom", ""},
+	}
+	for _, tc := range tests {
+		p, n, a := splitWebhookEvent(tc.input)
+		if p != tc.wantProvider || n != tc.wantName || a != tc.wantAction {
+			t.Fatalf("splitWebhookEvent(%q) = (%q, %q, %q), want (%q, %q, %q)",
+				tc.input, p, n, a, tc.wantProvider, tc.wantName, tc.wantAction)
+		}
+	}
+}

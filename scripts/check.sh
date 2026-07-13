@@ -18,13 +18,8 @@ set -a
 . "$ENV_FILE"
 set +a
 
-POSTGRES_DB="${POSTGRES_DB:-multica}"
-POSTGRES_USER="${POSTGRES_USER:-multica}"
-POSTGRES_PORT="${POSTGRES_PORT:-5432}"
-PORT="${PORT:-8080}"
-FRONTEND_PORT="${FRONTEND_PORT:-3000}"
-PLAYWRIGHT_BASE_URL="${PLAYWRIGHT_BASE_URL:-http://localhost:${FRONTEND_PORT}}"
-export PLAYWRIGHT_BASE_URL
+# shellcheck disable=SC1091
+. scripts/local-env.sh
 
 BACKEND_PID=""
 FRONTEND_PID=""

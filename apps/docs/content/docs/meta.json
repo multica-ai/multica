@@ -30,7 +30,10 @@
     "---Inbox---",
     "inbox",
     "---Integrations---",
+    "channels",
     "github-integration",
+    "lark-bot-integration",
+    "slack-bot-integration",
     "---Self-hosting & ops---",
     "environment-variables",
     "auth-setup",
@@ -39,6 +42,7 @@
     "cli",
     "auth-tokens",
     "desktop-app",
+    "mobile-app",
     "---Developers---",
     "developers"
   ]

@@ -4,13 +4,14 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -30,10 +31,7 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	}
 
 	timeout := opts.Timeout
-	if timeout == 0 {
-		timeout = 20 * time.Minute
-	}
-	runCtx, cancel := context.WithTimeout(ctx, timeout)
+	runCtx, cancel := runContext(ctx, timeout)
 
 	args := buildClaudeArgs(opts, b.cfg.Logger)
 
@@ -42,14 +40,14 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	// instead of inheriting from the outer Claude Code session.
 	var mcpConfigPath string
 	var mcpFileCleanup func() // non-nil while this function owns the temp file
-	if len(opts.McpConfig) > 0 {
+	if hasManagedMcpConfig(opts.McpConfig) {
 		path, err := writeMcpConfigToTemp(opts.McpConfig)
 		if err != nil {
 			cancel()
 			return nil, err
 		}
 		mcpConfigPath = path
-		mcpFileCleanup = func() { os.Remove(mcpConfigPath) }
+		mcpFileCleanup = func() { cleanupMcpConfigTemp(mcpConfigPath) }
 		args = append(args, "--mcp-config", mcpConfigPath)
 	}
 	// Clean up the temp file if we return before the goroutine takes ownership.
@@ -67,6 +65,10 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		cmd.Dir = opts.Cwd
 	}
 	cmd.Env = buildEnv(b.cfg.Env)
+	if err := claudeRootSudoPreflight(args, cmd.Env); err != nil {
+		cancel()
+		return nil, err
+	}
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -78,12 +80,8 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		cancel()
 		return nil, fmt.Errorf("claude stdin pipe: %w", err)
 	}
-	closeStdin := func() {
-		if stdin != nil {
-			_ = stdin.Close()
-			stdin = nil
-		}
-	}
+	var closeStdinOnce sync.Once
+	closeStdin := func() { closeStdinOnce.Do(func() { _ = stdin.Close() }) }
 	// Capture stderr into both the daemon log (as before) and a bounded tail
 	// buffer so we can include the last few KB in Result.Error when claude
 	// exits unexpectedly. Without the tail, an exit-code-only failure looks
@@ -97,19 +95,6 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		cancel()
 		return nil, fmt.Errorf("start claude: %w", err)
 	}
-	if err := writeClaudeInput(stdin, prompt); err != nil {
-		// claude almost certainly died during startup (broken pipe). The
-		// real reason is sitting in stderrBuf — surface it the same way the
-		// post-handshake error path does, otherwise the daemon log is the
-		// only place that knows whether it was a V8 abort, a missing native
-		// module, or anything else. cmd.Wait() flushes os/exec's stderr
-		// copy goroutine, so stderrBuf.Tail() is safe to read.
-		closeStdin()
-		cancel()
-		_ = cmd.Wait()
-		return nil, errors.New(withAgentStderr(fmt.Sprintf("write claude input: %v", err), "claude", stderrBuf.Tail()))
-	}
-	closeStdin()
 
 	b.cfg.Logger.Info("claude started", "pid", cmd.Process.Pid, "cwd", opts.Cwd, "model", opts.Model)
 
@@ -119,12 +104,35 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	msgCh := make(chan Message, 256)
 	resCh := make(chan Result, 1)
 
+	// writeClaudeInput runs in its own goroutine so it cannot deadlock
+	// against the stdout reader. With --verbose --output-format stream-json
+	// the CLI emits a startup banner before reading its first stdin frame;
+	// if nothing is draining stdout while we write the prompt, claude blocks
+	// writing stdout, never reads stdin, and our Write blocks until runCtx
+	// fires. The field symptom is "write |1: The pipe has been ended."
+	// surfacing exactly at the per-task timeout when the kill invalidates
+	// the still-blocked pipe.
+	//
+	// Keep stdin open after the initial user message. Claude's stream-json
+	// protocol can emit control_request events mid-run and expects matching
+	// control_response frames on the same input stream; closing stdin here
+	// leaves the child stuck waiting for a response until its own fallback
+	// timeout.
+	writeDone := make(chan error, 1)
+	go func() {
+		err := writeClaudeInput(stdin, prompt)
+		if err != nil {
+			closeStdin()
+		}
+		writeDone <- err
+	}()
+
 	go func() {
 		defer cancel()
 		defer close(msgCh)
 		defer close(resCh)
 		if mcpConfigPath != "" {
-			defer os.Remove(mcpConfigPath)
+			defer cleanupMcpConfigTemp(mcpConfigPath)
 		}
 
 		startTime := time.Now()
@@ -132,11 +140,13 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		var sessionID string
 		finalStatus := "completed"
 		var finalError string
+		sawAsyncLaunch := false
 		usage := make(map[string]TokenUsage)
 
 		// Close stdout when the context is cancelled so scanner.Scan() unblocks.
 		go func() {
 			<-runCtx.Done()
+			closeStdin()
 			_ = stdout.Close()
 		}()
 
@@ -158,14 +168,15 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 			case "assistant":
 				b.handleAssistant(msg, msgCh, &output, usage)
 			case "user":
-				b.handleUser(msg, msgCh)
+				if b.handleUser(msg, msgCh) {
+					sawAsyncLaunch = true
+				}
 			case "system":
 				if msg.SessionID != "" {
 					sessionID = msg.SessionID
 				}
 				trySend(msgCh, Message{Type: MessageStatus, Status: "running", SessionID: sessionID})
 			case "result":
-				closeStdin()
 				sessionID = msg.SessionID
 				if msg.ResultText != "" {
 					output.Reset()
@@ -178,6 +189,7 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 					finalStatus = "failed"
 					finalError = msg.ResultText
 				}
+				closeStdin()
 			case "log":
 				if msg.Log != nil {
 					trySend(msgCh, Message{
@@ -186,22 +198,41 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 						Content: msg.Log.Message,
 					})
 				}
+			case "control_request":
+				b.handleControlRequest(msg, stdin)
 			}
 		}
+
+		closeStdin()
 
 		// Wait for process exit
 		exitErr := cmd.Wait()
 		duration := time.Since(startTime)
+		// writeDone is buffered (cap 1) and the writer always sends — by the
+		// time cmd has exited, the prompt write has either succeeded, hit a
+		// broken pipe, or been unblocked by the kill that ended cmd.
+		writeErr := <-writeDone
 
-		if runCtx.Err() == context.DeadlineExceeded {
+		switch {
+		case runCtx.Err() == context.DeadlineExceeded:
 			finalStatus = "timeout"
 			finalError = fmt.Sprintf("claude timed out after %s", timeout)
-		} else if runCtx.Err() == context.Canceled {
+		case runCtx.Err() == context.Canceled:
 			finalStatus = "aborted"
 			finalError = "execution cancelled"
-		} else if exitErr != nil && finalStatus == "completed" {
+		case writeErr != nil && finalStatus == "completed" && sessionID == "":
+			// No result event landed and the prompt write failed — claude
+			// died before reading the prompt. Surface the write error; the
+			// stderr tail attached below carries the real reason.
+			finalStatus = "failed"
+			finalError = fmt.Sprintf("write claude input: %v", writeErr)
+		case exitErr != nil && finalStatus == "completed":
 			finalStatus = "failed"
 			finalError = fmt.Sprintf("claude exited with error: %v", exitErr)
+		}
+		if finalStatus == "completed" && sawAsyncLaunch {
+			finalStatus = "failed"
+			finalError = "claude launched an async background task; Multica-managed runs require foreground execution"
 		}
 
 		// cmd.Wait() has returned — os/exec's stderr copy goroutine has
@@ -209,13 +240,14 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		// stderrBuf.Tail() is safe to sample now. Attach the tail to any
 		// non-empty failure message; callers upstream surface this as the
 		// task's error field, which is the only place users see it.
+		stderrTail := stderrBuf.Tail()
 		if finalError != "" {
-			finalError = withAgentStderr(finalError, "claude", stderrBuf.Tail())
+			finalError = withAgentStderr(finalError, "claude", stderrTail)
 		}
 
 		b.cfg.Logger.Info("claude finished", "pid", cmd.Process.Pid, "status", finalStatus, "duration", duration.Round(time.Millisecond).String())
 
-		reportedSessionID := resolveSessionID(opts.ResumeSessionID, sessionID, finalStatus == "failed")
+		reportedSessionID := resolveSessionID(opts.ResumeSessionID, sessionID, finalStatus == "failed", stderrTail)
 		if reportedSessionID != sessionID {
 			b.cfg.Logger.Info("claude resume did not land; clearing fresh session id for daemon fallback",
 				"requested_resume", opts.ResumeSessionID,
@@ -278,17 +310,21 @@ func (b *claudeBackend) handleAssistant(msg claudeSDKMessage, ch chan<- Message,
 	}
 }
 
-func (b *claudeBackend) handleUser(msg claudeSDKMessage, ch chan<- Message) {
+func (b *claudeBackend) handleUser(msg claudeSDKMessage, ch chan<- Message) bool {
 	var content claudeMessageContent
 	if err := json.Unmarshal(msg.Message, &content); err != nil {
-		return
+		return false
 	}
 
+	sawAsyncLaunch := false
 	for _, block := range content.Content {
 		if block.Type == "tool_result" {
 			resultStr := ""
 			if block.Content != nil {
 				resultStr = string(block.Content)
+				if claudeToolResultHasAsyncLaunch(block.Content) {
+					sawAsyncLaunch = true
+				}
 			}
 			trySend(ch, Message{
 				Type:   MessageToolResult,
@@ -297,6 +333,7 @@ func (b *claudeBackend) handleUser(msg claudeSDKMessage, ch chan<- Message) {
 			})
 		}
 	}
+	return sawAsyncLaunch
 }
 
 func (b *claudeBackend) handleControlRequest(msg claudeSDKMessage, stdin interface{ Write([]byte) (int, error) }) {
@@ -312,6 +349,12 @@ func (b *claudeBackend) handleControlRequest(msg claudeSDKMessage, stdin interfa
 	}
 	if inputMap == nil {
 		inputMap = map[string]any{}
+	}
+	if forceClaudeToolInputForeground(inputMap) {
+		b.cfg.Logger.Info("claude: forced foreground tool execution",
+			"request_id", msg.RequestID,
+			"tool", req.ToolName,
+		)
 	}
 
 	response := map[string]any{
@@ -335,6 +378,50 @@ func (b *claudeBackend) handleControlRequest(msg claudeSDKMessage, stdin interfa
 	if _, err := stdin.Write(data); err != nil {
 		b.cfg.Logger.Warn("claude: failed to write control response", "error", err)
 	}
+}
+
+func forceClaudeToolInputForeground(input map[string]any) bool {
+	if runInBackground, ok := input["run_in_background"].(bool); ok && runInBackground {
+		input["run_in_background"] = false
+		return true
+	}
+	return false
+}
+
+func claudeToolResultHasAsyncLaunch(raw json.RawMessage) bool {
+	if len(raw) == 0 {
+		return false
+	}
+	var value any
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return false
+	}
+	switch v := value.(type) {
+	case map[string]any:
+		if claudeMapHasAsyncLaunchStatus(v) {
+			return true
+		}
+		if content, ok := v["content"].([]any); ok {
+			return claudeArrayHasAsyncLaunchStatus(content)
+		}
+	case []any:
+		return claudeArrayHasAsyncLaunchStatus(v)
+	}
+	return false
+}
+
+func claudeArrayHasAsyncLaunchStatus(values []any) bool {
+	for _, value := range values {
+		if item, ok := value.(map[string]any); ok && claudeMapHasAsyncLaunchStatus(item) {
+			return true
+		}
+	}
+	return false
+}
+
+func claudeMapHasAsyncLaunchStatus(value map[string]any) bool {
+	status, ok := value["status"].(string)
+	return ok && status == "async_launched"
 }
 
 // ── Claude SDK JSON types ──
@@ -484,7 +571,6 @@ func buildClaudeArgs(opts ExecOptions, logger *slog.Logger) []string {
 		"--output-format", "stream-json",
 		"--input-format", "stream-json",
 		"--verbose",
-		"--strict-mcp-config",
 		"--permission-mode", "bypassPermissions",
 		// AskUserQuestion is Claude Code's built-in interactive question tool.
 		// The daemon runs Claude in non-interactive stream-json mode and has
@@ -493,6 +579,12 @@ func buildClaudeArgs(opts ExecOptions, logger *slog.Logger) []string {
 		// never sees the question (see GitHub #2588). User-facing
 		// clarification belongs in an issue comment instead.
 		"--disallowedTools", "AskUserQuestion",
+	}
+	if hasManagedMcpConfig(opts.McpConfig) {
+		// A saved agent-level config is authoritative, including an explicitly
+		// empty object. With no managed config, omit strict mode so Claude can
+		// inherit the user's local runtime MCP servers.
+		args = append(args, "--strict-mcp-config")
 	}
 	if opts.Model != "" {
 		args = append(args, "--model", opts.Model)
@@ -551,20 +643,69 @@ func buildClaudeInput(prompt string) ([]byte, error) {
 
 // resolveSessionID decides which session id to report on the Result. When the
 // caller requested --resume but claude emitted a fresh, different session id
-// AND the run failed, the resume did not land (claude prints
-// "No conversation found with session ID: ..." to stderr, generates a fresh
-// session, and exits). Returning "" in that case keeps the daemon's
-// retry-with-fresh-session fallback able to trigger, instead of silently
-// persisting a brand-new id as if resume had succeeded.
-func resolveSessionID(requestedResume, emitted string, failed bool) string {
+// AND the run failed, the resume did not land. Claude can also report the
+// requested id while printing "No conversation found with session ID: ..." to
+// stderr. Returning "" in those cases keeps the daemon's retry-with-fresh-
+// session fallback able to trigger instead of persisting the dead resume id.
+func resolveSessionID(requestedResume, emitted string, failed bool, stderrTail ...string) string {
+	if failed && requestedResume != "" && claudeNoConversationFound(stderrTail...) {
+		return ""
+	}
 	if failed && requestedResume != "" && emitted != "" && emitted != requestedResume {
 		return ""
 	}
 	return emitted
 }
 
+func claudeNoConversationFound(stderrTail ...string) bool {
+	for _, tail := range stderrTail {
+		if strings.Contains(strings.ToLower(tail), "no conversation found") {
+			return true
+		}
+	}
+	return false
+}
+
 func buildEnv(extra map[string]string) []string {
 	return mergeEnv(os.Environ(), extra)
+}
+
+func claudeRootSudoPreflight(args, env []string) error {
+	if !argsRequestBypassPermissions(args) || os.Geteuid() != 0 || envHasSandbox(env) {
+		return nil
+	}
+	return fmt.Errorf("Claude Code refuses bypassPermissions under root/sudo privileges. Run the Multica daemon as a non-root user, or set IS_SANDBOX=1 if running in a genuine container/sandbox")
+}
+
+func argsRequestBypassPermissions(args []string) bool {
+	for i, arg := range args {
+		if arg == "--dangerously-skip-permissions" {
+			return true
+		}
+		if arg == "--permission-mode" && i+1 < len(args) && args[i+1] == "bypassPermissions" {
+			return true
+		}
+	}
+	return false
+}
+
+func envHasSandbox(env []string) bool {
+	for i := len(env) - 1; i >= 0; i-- {
+		key, value, ok := strings.Cut(env[i], "=")
+		if key != "IS_SANDBOX" {
+			continue
+		}
+		if !ok {
+			return false
+		}
+		switch strings.ToLower(value) {
+		case "1", "true", "yes", "on":
+			return true
+		default:
+			return false
+		}
+	}
+	return false
 }
 
 func mergeEnv(base []string, extra map[string]string) []string {
@@ -582,10 +723,36 @@ func mergeEnv(base []string, extra map[string]string) []string {
 	return env
 }
 
+// isFilteredChildEnvKey reports whether an inherited env var is an internal
+// Claude Code runtime/session marker that must NOT leak into the spawned child
+// (otherwise the child mistakes itself for a nested or resumed session, or
+// inherits the parent's exec path / transport).
+//
+// It must NOT strip the user-facing CLAUDE_CODE_* configuration namespace
+// (CLAUDE_CODE_GIT_BASH_PATH, CLAUDE_CODE_USE_BEDROCK, CLAUDE_CODE_USE_VERTEX,
+// CLAUDE_CODE_MAX_OUTPUT_TOKENS, CLAUDE_CODE_TMPDIR, ...): users set those
+// deliberately and the child needs them. Blanket-stripping the whole prefix is
+// what broke Windows — CLAUDE_CODE_GIT_BASH_PATH was silently removed, so Claude
+// Code could not find bash.exe and exited immediately. Strip internal markers by
+// exact name and let every other CLAUDE_CODE_* var through.
+//
+// The denylist holds only undocumented, per-process runtime markers. Anything in
+// the public env-vars reference (https://code.claude.com/docs/en/env-vars) is
+// user config and stays out of this list — including CLAUDE_CODE_TMPDIR, a
+// documented temp-dir override under which Claude Code creates its own
+// per-session subdir, so inheriting it is harmless.
 func isFilteredChildEnvKey(key string) bool {
-	return key == "CLAUDECODE" ||
-		strings.HasPrefix(key, "CLAUDECODE_") ||
-		strings.HasPrefix(key, "CLAUDE_CODE_")
+	switch key {
+	case "CLAUDECODE", // "1" when running inside Claude Code
+		"CLAUDE_CODE_ENTRYPOINT", // entrypoint marker (cli/sdk-cli/...)
+		"CLAUDE_CODE_EXECPATH",   // path to the running CLI binary
+		"CLAUDE_CODE_SESSION_ID", // per-session identifier
+		"CLAUDE_CODE_SSE_PORT":   // IDE-extension transport port
+		return true
+	}
+	// CLAUDECODE_* (no underscore between CLAUDE and CODE) is wholly internal;
+	// keep stripping it. The user-facing config namespace is CLAUDE_CODE_*.
+	return strings.HasPrefix(key, "CLAUDECODE_")
 }
 
 // blockedArgMode specifies whether a blocked arg takes a value or is standalone.
@@ -602,18 +769,24 @@ const (
 // only block args that would break the communication protocol, not every
 // possible dangerous flag. Workspace members are trusted to configure agents
 // sensibly, same as with custom_env.
+//
+// Shell quoting is stripped from each arg before processing: users commonly
+// type custom_args in config fields using shell syntax (e.g.
+// --deny-tool='write'). Since the daemon spawns processes directly without a
+// shell, those quotes would otherwise be passed literally to the child process,
+// which typically rejects them as unrecognised flag values.
 func filterCustomArgs(args []string, blocked map[string]blockedArgMode, logger *slog.Logger) []string {
 	if len(args) == 0 {
 		return args
 	}
 	filtered := make([]string, 0, len(args))
 	skip := false
-	for _, arg := range args {
+	for _, raw := range args {
 		if skip {
 			skip = false
 			continue
 		}
-		// Check if this arg is a blocked flag or starts with "blockedFlag=".
+		arg := unshellQuoteArg(raw)
 		flag := arg
 		hasInlineValue := false
 		if idx := strings.Index(arg, "="); idx > 0 {
@@ -634,28 +807,100 @@ func filterCustomArgs(args []string, blocked map[string]blockedArgMode, logger *
 	return filtered
 }
 
-// writeMcpConfigToTemp writes raw MCP config JSON to a temporary file and returns
-// its path. The caller is responsible for removing the file when done.
-func writeMcpConfigToTemp(raw json.RawMessage) (string, error) {
-	f, err := os.CreateTemp("", "multica-mcp-*.json")
-	if err != nil {
-		return "", fmt.Errorf("create mcp config temp file: %w", err)
+// unshellQuoteArg strips a single layer of shell-style single or double quotes
+// from an argument. It handles two forms:
+//
+//   - --flag='value' or --flag="value" → --flag=value
+//   - 'standalone' or "standalone"     → standalone
+//
+// Only flag-style args (`-x=…`, `--flag=…`) get inline value unquoting. Plain
+// assignment syntax like `model="o3"` is left alone because the quotes may be
+// semantic for the child process (for example Codex `-c model="o3"`). Only
+// matching outer quotes are stripped; no escape processing is done.
+func unshellQuoteArg(arg string) string {
+	if strings.HasPrefix(arg, "-") {
+		if idx := strings.Index(arg, "="); idx > 0 {
+			value := arg[idx+1:]
+			if unquoted, ok := stripSurroundingQuotes(value); ok {
+				return arg[:idx+1] + unquoted
+			}
+			return arg
+		}
 	}
-	if _, err := f.Write(raw); err != nil {
-		f.Close()
-		os.Remove(f.Name())
-		return "", fmt.Errorf("write mcp config temp file: %w", err)
+	if unquoted, ok := stripSurroundingQuotes(arg); ok {
+		return unquoted
 	}
-	if err := f.Close(); err != nil {
-		os.Remove(f.Name())
-		return "", fmt.Errorf("close mcp config temp file: %w", err)
-	}
-	return f.Name(), nil
+	return arg
 }
 
+// stripSurroundingQuotes removes a matching outer pair of single or double
+// quotes from s and returns (unquoted, true). Returns (s, false) if s does not
+// start and end with the same quote character.
+func stripSurroundingQuotes(s string) (string, bool) {
+	if len(s) >= 2 {
+		if (s[0] == '\'' && s[len(s)-1] == '\'') || (s[0] == '"' && s[len(s)-1] == '"') {
+			return s[1 : len(s)-1], true
+		}
+	}
+	return s, false
+}
+
+// writeMcpConfigToTemp writes MCP config JSON to a temporary file and returns
+// its path. The caller is responsible for removing it via cleanupMcpConfigTemp.
+func writeMcpConfigToTemp(raw json.RawMessage) (string, error) {
+	dir, err := os.MkdirTemp("", "multica-mcp-*")
+	if err != nil {
+		return "", fmt.Errorf("create mcp config temp dir: %w", err)
+	}
+	data, err := hardenBrowserMcpConfig(raw, dir)
+	if err != nil {
+		cleanupMcpConfigTemp(filepath.Join(dir, "mcp-config.json"))
+		return "", err
+	}
+	path := filepath.Join(dir, "mcp-config.json")
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		cleanupMcpConfigTemp(path)
+		return "", fmt.Errorf("write mcp config temp file: %w", err)
+	}
+	return path, nil
+}
+
+func cleanupMcpConfigTemp(path string) {
+	if path == "" {
+		return
+	}
+	dir := filepath.Dir(path)
+	if strings.HasPrefix(filepath.Base(dir), "multica-mcp-") {
+		_ = os.RemoveAll(dir)
+		return
+	}
+	_ = os.Remove(path)
+}
+
+// detectVersionTimeout bounds a single `<cli> --version` probe. Version
+// detection runs inside the daemon's blocking preflight (registerRuntimesForWorkspace),
+// so a CLI that never returns from `--version` — e.g. a brew-installed claude
+// wedged by a bun regression (MUL-3812) — would otherwise stall the whole
+// registration loop, the daemon would never flip /health from "starting" to
+// "running", and *every* runtime on the host would appear disconnected. A real
+// `--version` returns well under this bound even on a cold cache or with
+// Windows AV scanning; the timeout exists only to fail a wedged probe fast and
+// in isolation so the remaining runtimes still register. A var (not const) so
+// tests can shrink it without waiting out the real bound.
+var detectVersionTimeout = 10 * time.Second
+
 func detectCLIVersion(ctx context.Context, execPath string) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, detectVersionTimeout)
+	defer cancel()
+
 	cmd := exec.CommandContext(ctx, execPath, "--version")
 	hideAgentWindow(cmd)
+	// exec.CommandContext only kills the direct child on timeout. A broken CLI
+	// (node/bun shim) can leave grandchildren that inherited and still hold our
+	// stdout pipe open, and cmd.Output() blocks in Wait() until that pipe
+	// closes — defeating the timeout above. WaitDelay forces the pipes shut and
+	// reaps shortly after the context fires so this call always returns.
+	cmd.WaitDelay = 2 * time.Second
 	data, err := cmd.Output()
 	if err != nil {
 		return "", fmt.Errorf("detect version for %s: %w", execPath, err)

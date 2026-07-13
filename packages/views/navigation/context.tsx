@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useContext, useMemo, useTransition } from "react";
+import { createContext, use, useMemo, useTransition } from "react";
 import type { NavigationAdapter } from "./types";
 
 const NavigationContext = createContext<NavigationAdapter | null>(null);
@@ -37,7 +37,7 @@ export function NavigationProvider({
 }
 
 export function useNavigation(): NavigationAdapter {
-  const ctx = useContext(NavigationContext);
+  const ctx = use(NavigationContext);
   if (!ctx)
     throw new Error("useNavigation must be used within NavigationProvider");
   return ctx;
@@ -45,5 +45,5 @@ export function useNavigation(): NavigationAdapter {
 
 /** True while a transition-wrapped push/replace is committing. */
 export function useIsNavigating(): boolean {
-  return useContext(NavigationPendingContext);
+  return use(NavigationPendingContext);
 }

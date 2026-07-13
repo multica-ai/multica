@@ -33,12 +33,12 @@ func TestDeriveSquadMemberStatus(t *testing.T) {
 		{"offline runtime, stale heartbeat", false, offline, tsAgo(2 * time.Hour), false, "offline"},
 		{"offline runtime, no heartbeat", false, offline, tsNone, false, "offline"},
 		{"no runtime row", false, missing, tsNone, false, "offline"},
-		// Archived agents always report offline regardless of any leftover
+		// Archived agents always report archived regardless of any leftover
 		// runtime row or task — they should appear in the squad listing
-		// but never look like they're still working.
-		{"archived agent with active task", true, online, tsAgo(time.Second), true, "offline"},
-		{"archived agent with online runtime", true, online, tsAgo(time.Second), false, "offline"},
-		{"archived agent already offline", true, offline, tsAgo(time.Hour), false, "offline"},
+		// but never look like they're still working or merely offline.
+		{"archived agent with active task", true, online, tsAgo(time.Second), true, "archived"},
+		{"archived agent with online runtime", true, online, tsAgo(time.Second), false, "archived"},
+		{"archived agent already offline", true, offline, tsAgo(time.Hour), false, "archived"},
 	}
 
 	for _, tc := range cases {

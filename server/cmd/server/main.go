@@ -11,6 +11,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/daemonws"
 	"github.com/multica-ai/multica/server/internal/events"
@@ -18,8 +19,10 @@ import (
 	"github.com/multica-ai/multica/server/internal/logger"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/realtime"
+	"github.com/multica-ai/multica/server/internal/scheduler"
 	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/featureflag"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -30,7 +33,11 @@ var (
 
 func newNamedRedisClient(base *redis.Options, suffix string) *redis.Client {
 	opts := *base
-	opts.ClientName = redisClientName(opts.ClientName, suffix)
+	if envBool("REDIS_DISABLE_CLIENT_NAME", false) {
+		opts.ClientName = ""
+	} else {
+		opts.ClientName = redisClientName(opts.ClientName, suffix)
+	}
 	return redis.NewClient(&opts)
 }
 
@@ -59,6 +66,7 @@ func shardedRelayConfigFromEnv() realtime.ShardedStreamRelayConfig {
 	cfg.StreamMaxLen = envPositiveInt64("REALTIME_RELAY_STREAM_MAXLEN", cfg.StreamMaxLen)
 	cfg.ReadCount = envPositiveInt64("REALTIME_RELAY_XREAD_COUNT", cfg.ReadCount)
 	cfg.ReadBlock = envDuration("REALTIME_RELAY_XREAD_BLOCK", cfg.ReadBlock)
+	cfg.ReplayGrace = envDuration("REALTIME_RELAY_REPLAY_GRACE", cfg.ReplayGrace)
 	return cfg
 }
 
@@ -116,6 +124,19 @@ func envDuration(name string, def time.Duration) time.Duration {
 	return v
 }
 
+func envBool(name string, def bool) bool {
+	raw := os.Getenv(name)
+	if raw == "" {
+		return def
+	}
+	v, err := strconv.ParseBool(raw)
+	if err != nil {
+		slog.Warn("invalid env var, using default", "name", name, "value", raw, "default", def, "error", err)
+		return def
+	}
+	return v
+}
+
 func main() {
 	logger.Init()
 
@@ -138,6 +159,23 @@ func main() {
 	if port == "" {
 		port = "8080"
 	}
+
+	// Feature flags: loaded once at startup from MULTICA_FEATURE_FLAGS_FILE
+	// (a YAML rule set) with FF_<KEY> env overrides layered on top.
+	// See docs/feature-flags.md for the schema and lifecycle rules.
+	//
+	// Booting the server without any flag config is intentional: when the
+	// env var is unset, every IsEnabled call falls through to the caller's
+	// default, so existing code paths are unchanged until someone adds a
+	// rule. A misconfigured (malformed / missing) file surfaces as a hard
+	// error so operators see misconfig the same way they do for any other
+	// MULTICA_*_FILE knob.
+	flags, err := featureflag.NewServiceFromEnv(featureflag.WithLogger(slog.Default()))
+	if err != nil {
+		slog.Error("feature flag configuration failed to load", "error", err)
+		os.Exit(1)
+	}
+	_ = flags // adopted by the router (opts.FeatureFlags) and server-side toggle points; see docs/feature-flags.md
 
 	dbURL := os.Getenv("DATABASE_URL")
 	if dbURL == "" {
@@ -199,6 +237,9 @@ func main() {
 		if err != nil {
 			slog.Error("invalid REDIS_URL — falling back to in-memory hub", "error", err)
 		} else {
+			if envBool("REDIS_DISABLE_CLIENT_NAME", false) {
+				slog.Info("redis: CLIENT SETNAME disabled (REDIS_DISABLE_CLIENT_NAME=true) for managed Redis compatibility")
+			}
 			storeRedis = newNamedRedisClient(opts, "store")
 			relayWriteRedis = newNamedRedisClient(opts, "realtime-write")
 
@@ -259,15 +300,40 @@ func main() {
 	metricsConfig := obsmetrics.ConfigFromEnv()
 	var metricsServer *http.Server
 	var httpMetrics *obsmetrics.HTTPMetrics
+	var businessMetrics *obsmetrics.BusinessMetrics
+	var samplerPool *pgxpool.Pool
 	if metricsConfig.Enabled() {
+		// Build a dedicated tiny pool for the BusinessSamplerCollector
+		// so a stalled scrape can never starve business traffic. If the
+		// pool fails to construct we log and continue without the
+		// sampler — the rest of /metrics is still useful.
+		var err error
+		samplerPool, err = newSamplerDBPool(ctx, dbURL)
+		if err != nil {
+			slog.Warn("metrics: failed to build sampler pgxpool; sampler disabled", "error", err)
+			samplerPool = nil
+		}
+
 		metricsRegistry := obsmetrics.NewRegistry(obsmetrics.RegistryOptions{
 			Pool:     pool,
 			Realtime: realtime.M,
 			DaemonWS: daemonws.M,
 			Version:  version,
 			Commit:   commit,
+			BusinessSampler: func() *obsmetrics.BusinessSamplerOptions {
+				if samplerPool == nil {
+					return nil
+				}
+				return &obsmetrics.BusinessSamplerOptions{Pool: samplerPool}
+			}(),
 		})
 		httpMetrics = metricsRegistry.HTTP
+		businessMetrics = metricsRegistry.Business
+		// Forward inbound daemon WS frames into the per-kind counter so
+		// dashboards can split heartbeat / unknown / invalid traffic.
+		if daemonHub != nil {
+			daemonHub.SetMessageKindRecorder(businessMetrics)
+		}
 		metricsServer = obsmetrics.NewServer(metricsConfig.Addr, metricsRegistry.Gatherer)
 		if !obsmetrics.IsLoopbackAddr(metricsConfig.Addr) {
 			slog.Warn(
@@ -276,6 +342,9 @@ func main() {
 			)
 		}
 	}
+	if samplerPool != nil {
+		defer samplerPool.Close()
+	}
 
 	// Construct the BatchedHeartbeatScheduler before the router so it can
 	// be injected into the Handler. The Run goroutine starts below
@@ -283,10 +352,12 @@ func main() {
 	// shutdown so any pending bumps are flushed before we exit.
 	heartbeatScheduler := handler.NewBatchedHeartbeatScheduler(queries, handler.DefaultHeartbeatBatchInterval)
 
-	r := NewRouterWithOptions(pool, hub, bus, analyticsClient, storeRedis, RouterOptions{
+	r, h := NewRouterWithOptions(pool, hub, bus, analyticsClient, storeRedis, RouterOptions{
 		HTTPMetrics:        httpMetrics,
+		BusinessMetrics:    businessMetrics,
 		DaemonHub:          daemonHub,
 		DaemonWakeup:       daemonWakeup,
+		FeatureFlags:       flags,
 		HeartbeatScheduler: heartbeatScheduler,
 	})
 
@@ -300,6 +371,7 @@ func main() {
 	autopilotCtx, autopilotCancel := context.WithCancel(context.Background())
 	taskSvc := service.NewTaskService(queries, pool, hub, bus, daemonWakeup)
 	taskSvc.Analytics = analyticsClient
+	taskSvc.Metrics = businessMetrics
 	autopilotSvc := service.NewAutopilotService(queries, pool, bus, taskSvc)
 	registerAutopilotListeners(bus, autopilotSvc)
 
@@ -315,9 +387,50 @@ func main() {
 	// Start background sweeper to mark stale runtimes as offline.
 	go runRuntimeSweeper(sweepCtx, queries, liveness, taskSvc, bus)
 	go heartbeatScheduler.Run(sweepCtx)
-	go runAutopilotScheduler(autopilotCtx, queries, autopilotSvc)
 	go runAutopilotFailureMonitor(autopilotCtx, queries, bus, envFailureMonitorConfig())
 	go runDBStatsLogger(sweepCtx, pool)
+
+	// Channel inbound supervisor (MUL-3620): holds the §4.4 WS lease per
+	// installation and drives each channel.Channel. It is built
+	// unconditionally (it is channel-agnostic, not Lark-specific), so it
+	// always exists here; with no platform registered or no installation
+	// rows it simply idles. Lifecycle is bound to sweepCtx so it winds down
+	// alongside the other long-running workers, AFTER the HTTP server has
+	// drained.
+	if h.ChannelSupervisor != nil {
+		go h.ChannelSupervisor.Run(sweepCtx)
+	}
+
+	// MUL-2957: DB-backed execution scheduler. The scheduler turns the
+	// `sys_cron_executions` table into the distributed lease + audit
+	// log for internal periodic jobs. The first job is
+	// `rollup_task_usage_hourly`, which replaces the previously
+	// operator-registered `pg_cron` entry (still safe to run
+	// concurrently — the SQL function holds advisory lock 4246).
+	//
+	// A failure to register the job is treated as fatal here only at
+	// the registration step (a duplicate name is the only realistic
+	// cause and indicates a code bug). Once running, the manager
+	// surfaces transient errors — DB unreachable, sys_cron_executions
+	// missing because of an unusual partial-migration state — by
+	// logging them on the tick that fails and retrying on the next
+	// cycle, so a temporary outage does not crash the server.
+	schedulerMgr := scheduler.NewManager(pool, scheduler.Options{})
+	if err := schedulerMgr.Register(scheduler.TaskUsageHourlyJob(pool)); err != nil {
+		slog.Warn("scheduler: failed to register task_usage_hourly rollup job", "error", err)
+	}
+	// MUL-3551: scheduled-Autopilot dispatch runs on the same DB-backed
+	// scheduler. The job owns its plan_times via PlansForScope (each
+	// trigger has its own cron expression, so the Cadence planner does
+	// not fit). Crash recovery, occurrence-level idempotency, lease
+	// theft, and retry are all reused from the manager + sys_cron_executions
+	// — there is no separate goroutine for scheduled Autopilot anymore.
+	if err := schedulerMgr.Register(scheduler.AutopilotScheduleDispatchJob(pool, queries, autopilotSvc)); err != nil {
+		slog.Warn("scheduler: failed to register autopilot_schedule_dispatch job", "error", err)
+	}
+	go func() {
+		_ = schedulerMgr.Run(sweepCtx)
+	}()
 
 	if metricsServer != nil {
 		go func() {
@@ -359,6 +472,29 @@ func main() {
 	// final batch of queued heartbeat bumps.
 	sweepCancel()
 	heartbeatScheduler.Stop()
+
+	// Join the channel supervisor's per-installation goroutines so the
+	// lease renewer can issue a final release before process exit;
+	// otherwise the next replica would have to wait the full LeaseTTL
+	// before picking up the installation on the other side of the
+	// redeploy. The wait is bounded — if a supervisor is wedged (DB
+	// pool stalled, a connector ignoring ctx, etc.) the fallback is the
+	// natural LeaseTTL expiry on the other side, which is strictly better
+	// than holding shutdown open forever. Then drain the Feishu runtime:
+	// the supervisors have stopped delivering inbound events, so flush the
+	// debounced run triggers and join any in-flight outbound replies
+	// (each bounded by ReplyTimeout) so a binding card / offline notice is
+	// not lost on shutdown.
+	if h.ChannelSupervisor != nil {
+		if !h.ChannelSupervisor.WaitWithTimeout(h.ChannelSupervisor.ShutdownTimeout()) {
+			slog.Warn("channel supervisor: connections did not exit within shutdown timeout; proceeding",
+				"timeout", h.ChannelSupervisor.ShutdownTimeout().String(),
+			)
+		}
+		if h.ChannelRouter != nil {
+			h.ChannelRouter.Drain()
+		}
+	}
 
 	if metricsServer != nil {
 		metricsShutdownCtx, metricsShutdownCancel := context.WithTimeout(context.Background(), 3*time.Second)

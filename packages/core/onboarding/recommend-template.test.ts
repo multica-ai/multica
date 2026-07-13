@@ -26,19 +26,19 @@ const ALL_ROLES: Role[] = [
   "other",
 ];
 
-describe("recommendTemplate (v2)", () => {
+describe("recommendTemplate", () => {
   describe("engineer × use_case tiebreaker", () => {
     it.each<UseCase>(["manage_team", "plan_research"])(
-      "engineer × %s → planning",
+      "engineer × [%s] → planning",
       (use_case) => {
-        expect(recommendTemplate({ role: "engineer", use_case })).toBe(
-          "planning",
-        );
+        expect(
+          recommendTemplate({ role: "engineer", use_case: [use_case] }),
+        ).toBe("planning");
       },
     );
-    it("engineer × write_publish → writing", () => {
+    it("engineer × [write_publish] → writing", () => {
       expect(
-        recommendTemplate({ role: "engineer", use_case: "write_publish" }),
+        recommendTemplate({ role: "engineer", use_case: ["write_publish"] }),
       ).toBe("writing");
     });
     it.each<UseCase>([
@@ -47,32 +47,72 @@ describe("recommendTemplate (v2)", () => {
       "automate_ops",
       "evaluate",
       "other",
-    ])("engineer × %s → coding", (use_case) => {
-      expect(recommendTemplate({ role: "engineer", use_case })).toBe("coding");
+    ])("engineer × [%s] → coding", (use_case) => {
+      expect(
+        recommendTemplate({ role: "engineer", use_case: [use_case] }),
+      ).toBe("coding");
     });
-    it("engineer × null → coding", () => {
-      expect(recommendTemplate({ role: "engineer", use_case: null })).toBe(
+    it("engineer × [] → coding", () => {
+      expect(recommendTemplate({ role: "engineer", use_case: [] })).toBe(
         "coding",
       );
     });
   });
 
-  describe("product × use_case", () => {
-    it("product × ship_code → coding", () => {
+  describe("multi-select priority (first matching branch wins)", () => {
+    // Engineer + (manage_team OR plan_research) wins over write_publish
+    // wins over the default coding fallback. The order inside the
+    // recommendTemplate switch is the implicit priority.
+    it("engineer × [ship_code, manage_team] → planning (manage_team wins over default)", () => {
       expect(
-        recommendTemplate({ role: "product", use_case: "ship_code" }),
+        recommendTemplate({
+          role: "engineer",
+          use_case: ["ship_code", "manage_team"],
+        }),
+      ).toBe("planning");
+    });
+    it("engineer × [write_publish, ship_code] → writing", () => {
+      expect(
+        recommendTemplate({
+          role: "engineer",
+          use_case: ["write_publish", "ship_code"],
+        }),
+      ).toBe("writing");
+    });
+    it("engineer × [manage_team, write_publish] → planning (earlier branch wins)", () => {
+      expect(
+        recommendTemplate({
+          role: "engineer",
+          use_case: ["manage_team", "write_publish"],
+        }),
+      ).toBe("planning");
+    });
+    it("null × [ship_code, write_publish] → coding (fallback priority)", () => {
+      expect(
+        recommendTemplate({
+          role: null,
+          use_case: ["ship_code", "write_publish"],
+        }),
+      ).toBe("coding");
+    });
+  });
+
+  describe("product × use_case", () => {
+    it("product × [ship_code] → coding", () => {
+      expect(
+        recommendTemplate({ role: "product", use_case: ["ship_code"] }),
       ).toBe("coding");
     });
     it.each<UseCase>(["manage_team", "plan_research", "evaluate", "other"])(
-      "product × %s → planning",
+      "product × [%s] → planning",
       (use_case) => {
-        expect(recommendTemplate({ role: "product", use_case })).toBe(
-          "planning",
-        );
+        expect(
+          recommendTemplate({ role: "product", use_case: [use_case] }),
+        ).toBe("planning");
       },
     );
-    it("product × null → planning", () => {
-      expect(recommendTemplate({ role: "product", use_case: null })).toBe(
+    it("product × [] → planning", () => {
+      expect(recommendTemplate({ role: "product", use_case: [] })).toBe(
         "planning",
       );
     });
@@ -80,69 +120,71 @@ describe("recommendTemplate (v2)", () => {
 
   describe("marketing × use_case", () => {
     it.each<UseCase>(["write_publish", "plan_research"])(
-      "marketing × %s → writing",
+      "marketing × [%s] → writing",
       (use_case) => {
-        expect(recommendTemplate({ role: "marketing", use_case })).toBe(
-          "writing",
-        );
+        expect(
+          recommendTemplate({ role: "marketing", use_case: [use_case] }),
+        ).toBe("writing");
       },
     );
-    it("marketing × manage_team → planning", () => {
+    it("marketing × [manage_team] → planning", () => {
       expect(
-        recommendTemplate({ role: "marketing", use_case: "manage_team" }),
+        recommendTemplate({ role: "marketing", use_case: ["manage_team"] }),
       ).toBe("planning");
     });
   });
 
   describe("single-template roles", () => {
-    it.each(ALL_USE_CASES)("writer × %s → writing", (use_case) => {
-      expect(recommendTemplate({ role: "writer", use_case })).toBe("writing");
-    });
-    it.each(ALL_USE_CASES)("designer × %s → assistant", (use_case) => {
-      expect(recommendTemplate({ role: "designer", use_case })).toBe(
-        "assistant",
+    it.each(ALL_USE_CASES)("writer × [%s] → writing", (use_case) => {
+      expect(recommendTemplate({ role: "writer", use_case: [use_case] })).toBe(
+        "writing",
       );
     });
-    it.each(ALL_USE_CASES)("research × %s → planning", (use_case) => {
-      expect(recommendTemplate({ role: "research", use_case })).toBe(
-        "planning",
-      );
+    it.each(ALL_USE_CASES)("designer × [%s] → assistant", (use_case) => {
+      expect(
+        recommendTemplate({ role: "designer", use_case: [use_case] }),
+      ).toBe("assistant");
+    });
+    it.each(ALL_USE_CASES)("research × [%s] → planning", (use_case) => {
+      expect(
+        recommendTemplate({ role: "research", use_case: [use_case] }),
+      ).toBe("planning");
     });
     it.each<Role>(["founder", "ops", "student", "other"])(
       "%s → assistant",
       (role) => {
-        expect(recommendTemplate({ role, use_case: null })).toBe("assistant");
+        expect(recommendTemplate({ role, use_case: [] })).toBe("assistant");
       },
     );
   });
 
   describe("role skipped — use_case fallback", () => {
-    it("null × ship_code → coding", () => {
-      expect(recommendTemplate({ role: null, use_case: "ship_code" })).toBe(
+    it("null × [ship_code] → coding", () => {
+      expect(recommendTemplate({ role: null, use_case: ["ship_code"] })).toBe(
         "coding",
       );
     });
-    it("null × write_publish → writing", () => {
+    it("null × [write_publish] → writing", () => {
       expect(
-        recommendTemplate({ role: null, use_case: "write_publish" }),
+        recommendTemplate({ role: null, use_case: ["write_publish"] }),
       ).toBe("writing");
     });
     it.each<UseCase>(["manage_team", "plan_research"])(
-      "null × %s → planning",
+      "null × [%s] → planning",
       (use_case) => {
-        expect(recommendTemplate({ role: null, use_case })).toBe("planning");
+        expect(recommendTemplate({ role: null, use_case: [use_case] })).toBe(
+          "planning",
+        );
       },
     );
-    it("both null → assistant", () => {
-      expect(recommendTemplate({ role: null, use_case: null })).toBe(
-        "assistant",
-      );
+    it("both empty → assistant", () => {
+      expect(recommendTemplate({ role: null, use_case: [] })).toBe("assistant");
     });
   });
 
   describe("exhaustive role coverage", () => {
     it.each(ALL_ROLES)("role=%s returns a valid template id", (role) => {
-      const result = recommendTemplate({ role, use_case: null });
+      const result = recommendTemplate({ role, use_case: [] });
       expect(["coding", "planning", "writing", "assistant"]).toContain(result);
     });
   });

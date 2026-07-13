@@ -2,6 +2,11 @@ package protocol
 
 import "encoding/json"
 
+const (
+	DaemonCapabilitySkillBundlesV1      = "skill-bundles-v1"
+	DaemonCapabilityCoalescedCommentsV1 = "coalesced-comments-v1"
+)
+
 // Message is the envelope for all WebSocket messages.
 type Message struct {
 	Type    string          `json:"type"`
@@ -23,6 +28,15 @@ type TaskAvailablePayload struct {
 	TaskID    string `json:"task_id,omitempty"`
 }
 
+// RuntimeProfilesChangedPayload is sent from server to daemon as a wakeup hint
+// when a workspace custom runtime profile is created, edited, disabled, or
+// deleted. The daemon still fetches profiles and registers runtimes through the
+// existing HTTP endpoints.
+type RuntimeProfilesChangedPayload struct {
+	WorkspaceID      string `json:"workspace_id"`
+	RuntimeProfileID string `json:"runtime_profile_id,omitempty"`
+}
+
 // TaskProgressPayload is sent from daemon to server during task execution.
 type TaskProgressPayload struct {
 	TaskID  string `json:"task_id"`
@@ -40,14 +54,15 @@ type TaskCompletedPayload struct {
 
 // TaskMessagePayload represents a single agent execution message (tool call, text, etc.)
 type TaskMessagePayload struct {
-	TaskID  string         `json:"task_id"`
-	IssueID string         `json:"issue_id,omitempty"`
-	Seq     int            `json:"seq"`
-	Type    string         `json:"type"`              // "text", "tool_use", "tool_result", "error"
-	Tool    string         `json:"tool,omitempty"`    // tool name for tool_use/tool_result
-	Content string         `json:"content,omitempty"` // text content
-	Input   map[string]any `json:"input,omitempty"`   // tool input (tool_use only)
-	Output  string         `json:"output,omitempty"`  // tool output (tool_result only)
+	TaskID    string         `json:"task_id"`
+	IssueID   string         `json:"issue_id,omitempty"`
+	Seq       int            `json:"seq"`
+	Type      string         `json:"type"`              // "text", "tool_use", "tool_result", "error"
+	Tool      string         `json:"tool,omitempty"`    // tool name for tool_use/tool_result
+	Content   string         `json:"content,omitempty"` // text content
+	Input     map[string]any `json:"input,omitempty"`   // tool input (tool_use only)
+	Output    string         `json:"output,omitempty"`  // tool output (tool_result only)
+	CreatedAt string         `json:"created_at,omitempty"`
 }
 
 // DaemonRegisterPayload is sent from daemon to server on connection.
@@ -74,11 +89,30 @@ type ChatMessagePayload struct {
 	CreatedAt     string `json:"created_at"`
 }
 
+// Chat message kinds (chat_message.message_kind). Additive: unknown values
+// degrade to ChatMessageKindMessage on older readers.
+const (
+	// ChatMessageKindMessage is an ordinary user/assistant message.
+	ChatMessageKindMessage = "message"
+	// ChatMessageKindNoResponse marks a direct-chat turn the agent completed
+	// without any text reply — a visible, deliberate terminal outcome rather
+	// than a silently-dropped turn (MUL-4351).
+	ChatMessageKindNoResponse = "no_response"
+)
+
 // ChatDonePayload is broadcast when an agent finishes responding to a chat
 // message. Carries the freshly-persisted assistant ChatMessage so the client
 // can write it into the messages cache inline — avoids a refetch round-trip
 // during the live-timeline → AssistantMessage handoff that previously caused
 // a visible flicker (#2123).
+//
+// MessageKind is additive (MUL-4351): older clients ignore it and fall back to
+// the non-empty Content the server always sends, so a no_response turn still
+// renders a real bubble instead of an empty one. Because direct-chat completion
+// now always writes exactly one assistant row (message or no_response),
+// MessageID/Content/CreatedAt/ElapsedMs are always populated for direct chat —
+// the omitempty tags only elide fields for the legacy paths that broadcast
+// without a row.
 type ChatDonePayload struct {
 	ChatSessionID string `json:"chat_session_id"`
 	TaskID        string `json:"task_id"`
@@ -86,6 +120,7 @@ type ChatDonePayload struct {
 	Content       string `json:"content,omitempty"`
 	ElapsedMs     int64  `json:"elapsed_ms,omitempty"`
 	CreatedAt     string `json:"created_at,omitempty"`
+	MessageKind   string `json:"message_kind,omitempty"`
 }
 
 // ChatSessionReadPayload is broadcast when the creator marks a session as read.
@@ -108,7 +143,13 @@ type ChatSessionDeletedPayload struct {
 type ChatSessionUpdatedPayload struct {
 	ChatSessionID string `json:"chat_session_id"`
 	Title         string `json:"title"`
-	UpdatedAt     string `json:"updated_at"`
+	// Pinned is set only by the pin/unpin path; nil on a plain rename so a
+	// receiver leaves the existing pin state untouched.
+	Pinned *bool `json:"pinned,omitempty"`
+	// Status is set only by the archive/unarchive path ("active"/"archived");
+	// nil on rename/pin so a receiver leaves the existing status untouched.
+	Status    *string `json:"status,omitempty"`
+	UpdatedAt string  `json:"updated_at"`
 }
 
 // DaemonHeartbeatRequestPayload is sent from daemon to server over WebSocket

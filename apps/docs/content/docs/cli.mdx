@@ -54,14 +54,23 @@ For the difference between token types, see [Authentication and tokens](/auth-to
 | `multica issue get <id>` | Show a single issue (accepts an issue key or a UUID) |
 | `multica issue create --title "..."` | Create a new issue |
 | `multica issue update <id> ...` | Update an issue (status, priority, assignee, etc.) |
-| `multica issue assign <id> --agent <slug>` | Assign to an agent (triggers a task immediately) |
-| `multica issue status <id> --set <status>` | Shortcut to change status |
+| `multica issue assign <id> --to <name>` | Assign to a member, agent, or squad (assigning to an agent triggers a run) |
+| `multica issue status <id> <status>` | Shortcut to change status |
 | `multica issue search <query>` | Keyword search |
+| `multica issue children <id>` | List sub-issues grouped by stage |
+| `multica issue pull-requests <id>` | List linked pull requests and their status |
 | `multica issue runs <id>` | Show agent runs on an issue |
+| `multica issue run-messages <task-id>` | Show messages for one execution |
+| `multica issue usage <id>` | Show aggregated token usage for an issue |
 | `multica issue rerun <id>` | Re-enqueue a fresh task for the issue's current agent assignee |
+| `multica issue cancel-task <task-id>` | Cancel a queued or running task |
 | `multica issue comment <id> ...` | Nested: view / post comments |
+| `multica issue comment resolve/unresolve <comment-id>` | Mark a comment thread resolved or unresolved |
 | `multica issue subscriber <id> ...` | Nested: subscribe / unsubscribe |
+| `multica issue metadata <id> ...` | Nested: read / write issue metadata |
+| `multica issue label <id> ...` | Nested: manage labels on an issue |
 | `multica project list/get/create/update/delete/status` | Project CRUD |
+| `multica label list/create/update/delete` | Workspace label CRUD |
 
 ## Agents and skills
 
@@ -74,10 +83,31 @@ For the difference between token types, see [Authentication and tokens](/auth-to
 | `multica agent archive <slug>` | Archive |
 | `multica agent restore <slug>` | Restore an archived agent |
 | `multica agent tasks <slug>` | Show an agent's task history |
+| `multica agent avatar <slug>` | Upload an agent avatar |
+| `multica agent env <slug> ...` | Read or replace an agent's custom environment variables |
 | `multica agent skills ...` | Nested: attach / detach skills |
 | `multica skill list/get/create/update/delete` | Skill CRUD |
 | `multica skill import ...` | Import a skill from GitHub, ClawHub, or the local machine |
 | `multica skill files ...` | Nested: manage a skill's files |
+
+### Skill import conflicts
+
+`multica skill import --url <url>` defaults to `--on-conflict fail`. If a skill
+with the same name already exists, the command exits with a structured
+`conflict` result and does not change the workspace.
+
+Use `--on-conflict overwrite` when you created the existing skill and want to
+replace its content while preserving its ID and agent bindings. Use
+`--on-conflict rename` to import a copy with an automatic suffix such as `-2`.
+Use `--on-conflict skip` to leave the existing skill untouched and report
+`skipped`.
+
+```bash
+multica skill import --url https://skills.sh/acme/repo/review-helper
+multica skill import --url https://skills.sh/acme/repo/review-helper --on-conflict overwrite
+multica skill import --url https://skills.sh/acme/repo/review-helper --on-conflict rename
+multica skill import --url https://skills.sh/acme/repo/review-helper --on-conflict skip
+```
 
 ## Squads
 
@@ -88,7 +118,7 @@ For the difference between token types, see [Authentication and tokens](/auth-to
 | `multica squad create --name "..." --leader <agent>` | Create a squad (owner / admin) |
 | `multica squad update <id> ...` | Update name, description, instructions, leader, or avatar |
 | `multica squad delete <id>` | Archive (soft-delete) — transfers assigned issues to the leader |
-| `multica squad member list/add/remove <squad-id>` | Manage squad members |
+| `multica squad member list/add/remove/set-role <squad-id>` | Manage squad members and update roles in place |
 | `multica squad activity <issue-id> <action\|no_action\|failed> --reason "..."` | Used by squad leader agents to record an evaluation per turn |
 
 See [Squads](/squads) for the full model.
@@ -104,6 +134,12 @@ See [Squads](/squads) for the full model.
 | `multica autopilot delete <id>` | Delete |
 | `multica autopilot runs <id>` | Show run history |
 | `multica autopilot trigger <id>` | Trigger a run manually |
+| `multica autopilot trigger-add/update/delete <id>` | Manage schedule or webhook triggers |
+| `multica autopilot trigger-rotate-url <id> <trigger-id>` | Rotate a webhook trigger URL |
+
+`multica autopilot create/update` also accepts `--subscriber` to set default
+subscribers for issues created by a `create_issue` autopilot; update accepts
+`--clear-subscribers` to remove them.
 
 ## Daemon and runtimes
 
@@ -117,7 +153,9 @@ See [Squads](/squads) for the full model.
 | `multica runtime list` | List runtimes in the current workspace |
 | `multica runtime usage` | Show resource usage |
 | `multica runtime activity` | Recent activity log |
-| `multica runtime update <id> ...` | Update a runtime's configuration |
+| `multica runtime update <id> ...` | Initiate a CLI update on a runtime |
+| `multica runtime delete <id> [--cascade]` | Delete a runtime, optionally archiving bound agents |
+| `multica runtime profile ...` | Manage custom runtime profiles and local path overrides |
 
 ## Miscellaneous
 

@@ -188,6 +188,13 @@ func TestClassifyResumeUnsafeTimeout(t *testing.T) {
 			wantReason: FailureReasonCodexSemanticInactivity,
 		},
 		{
+			name:       "codex first turn no progress",
+			provider:   "codex",
+			errMsg:     agent.CodexFirstTurnNoProgressMarker + ` after 30s: received turn start but no item, turn/completed, or error event`,
+			wantOK:     true,
+			wantReason: FailureReasonCodexSemanticInactivity,
+		},
+		{
 			name:     "codex ordinary timeout remains resumable",
 			provider: "codex",
 			errMsg:   "codex timed out after 30m0s",

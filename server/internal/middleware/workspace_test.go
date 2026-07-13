@@ -146,6 +146,28 @@ func TestResolveWorkspaceIDFromRequest(t *testing.T) {
 			},
 			wantEmpty: true,
 		},
+		{
+			// MUL-2600: a mat_ task token authenticates the request and
+			// the auth middleware writes the token-bound workspace into
+			// X-Workspace-ID along with X-Actor-Source=task_token. Any
+			// other workspace identifier the agent puts on the wire — a
+			// slug pointing at a sibling workspace, a different
+			// workspace_id — must be ignored. Otherwise an agent could
+			// route owner-token traffic at any workspace its host is
+			// also a member of.
+			name: "task_token actor: client-supplied slug/id cannot override token-bound workspace",
+			setup: func(r *http.Request) {
+				r.Header.Set("X-Actor-Source", "task_token")
+				r.Header.Set("X-Workspace-ID", uuidA)
+				// All of these should be ignored under task_token.
+				r.Header.Set("X-Workspace-Slug", testResolverSlug)
+				q := r.URL.Query()
+				q.Set("workspace_slug", testResolverSlug)
+				q.Set("workspace_id", uuidB)
+				r.URL.RawQuery = q.Encode()
+			},
+			want: uuidA,
+		},
 	}
 
 	for _, tc := range cases {

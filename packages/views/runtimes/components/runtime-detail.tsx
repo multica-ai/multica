@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from "react";
 import {
-  ArrowLeft,
   Trash2,
   ChevronRight,
   Cpu,
@@ -11,12 +10,21 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { useQuery } from "@tanstack/react-query";
-import type { AgentRuntime, Agent, MemberWithUser } from "@multica/core/types";
+import type {
+  AgentRuntime,
+  Agent,
+  MemberWithUser,
+  RuntimeProfile,
+} from "@multica/core/types";
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { memberListOptions, agentListOptions } from "@multica/core/workspace/queries";
-import { useDeleteRuntime, useUpdateRuntime } from "@multica/core/runtimes/mutations";
-import { deriveRuntimeHealth } from "@multica/core/runtimes";
+import { useUpdateRuntime } from "@multica/core/runtimes/mutations";
+import {
+  deriveRuntimeHealth,
+  runtimeDisplayName,
+  runtimeProfileListOptions,
+} from "@multica/core/runtimes";
 import {
   type AgentPresenceDetail,
   useWorkspacePresenceMap,
@@ -24,30 +32,21 @@ import {
 import { useWorkspacePaths } from "@multica/core/paths";
 import { Button } from "@multica/ui/components/ui/button";
 import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@multica/ui/components/ui/alert-dialog";
-import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
 } from "@multica/ui/components/ui/tooltip";
 import { ActorAvatar } from "../../common/actor-avatar";
-import { TimezoneSelect } from "../../common/timezone-select";
-import { AppLink } from "../../navigation";
+import { BreadcrumbHeader } from "../../layout/breadcrumb-header";
+import { AppLink, useNavigation } from "../../navigation";
 import { availabilityConfig, workloadConfig } from "../../agents/presence";
-import { formatLastSeen } from "../utils";
 import { HealthBadge } from "./shared";
 import { ProviderLogo } from "./provider-logo";
 import { UpdateSection } from "./update-section";
 import { UsageSection } from "./usage-section";
-import { useT } from "../../i18n";
+import { DeleteRuntimeDialog } from "./delete-runtime-dialog";
+import { DeleteRuntimeProfileDialog } from "./delete-runtime-profile-dialog";
+import { useT, useTimeAgo } from "../../i18n";
 
 function getCliVersion(metadata: Record<string, unknown>): string | null {
   if (
@@ -91,8 +90,19 @@ function useNowTick(intervalMs = 30_000): number {
   return now;
 }
 
-export function RuntimeDetail({ runtime }: { runtime: AgentRuntime }) {
+export function RuntimeDetail({
+  runtime,
+  machineHref,
+  machineLabel,
+  afterDeleteHref,
+}: {
+  runtime: AgentRuntime;
+  machineHref?: string;
+  machineLabel?: string;
+  afterDeleteHref?: string;
+}) {
   const { t } = useT("runtimes");
+  const timeAgo = useTimeAgo();
   const cliVersion =
     runtime.runtime_mode === "local" ? getCliVersion(runtime.metadata) : null;
   const launchedBy =
@@ -101,10 +111,11 @@ export function RuntimeDetail({ runtime }: { runtime: AgentRuntime }) {
   const user = useAuthStore((s) => s.user);
   const wsId = useWorkspaceId();
   const paths = useWorkspacePaths();
+  const navigation = useNavigation();
   const { data: members = [] } = useQuery(memberListOptions(wsId));
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
+  const { data: profiles = [] } = useQuery(runtimeProfileListOptions(wsId));
   const { byAgent: presenceMap } = useWorkspacePresenceMap(wsId);
-  const deleteMutation = useDeleteRuntime(wsId);
   const now = useNowTick();
 
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -121,72 +132,60 @@ export function RuntimeDetail({ runtime }: { runtime: AgentRuntime }) {
     ? currentMember.role === "owner" || currentMember.role === "admin"
     : false;
   const isRuntimeOwner = user && runtime.owner_id === user.id;
-  const canDelete = isAdmin || isRuntimeOwner;
+  const canEditRuntime = isAdmin || isRuntimeOwner;
+  const runtimeProfile: RuntimeProfile | null = runtime.profile_id
+    ? profiles.find((p) => p.id === runtime.profile_id) ?? null
+    : null;
+  const isCustomRuntime = !!runtime.profile_id;
+  const canDelete = isCustomRuntime
+    ? isAdmin && !!runtimeProfile
+    : canEditRuntime;
 
   const servingAgents = agents.filter(
     (a) => a.runtime_id === runtime.id && !a.archived_at,
   );
 
-  const handleDelete = () => {
-    deleteMutation.mutate(runtime.id, {
-      onSuccess: () => {
-        toast.success(t(($) => $.detail.toast_deleted));
-        setDeleteOpen(false);
-      },
-      onError: (e) => {
-        toast.error(e instanceof Error ? e.message : t(($) => $.detail.toast_delete_failed));
-      },
-    });
+  const deleteDestination = afterDeleteHref ?? paths.runtimes();
+
+  const handleRuntimeDeleted = () => {
+    setDeleteOpen(false);
+    navigation.replace(deleteDestination);
+    toast.success(t(($) => $.detail.toast_deleted));
+  };
+
+  const handleProfileDeleted = () => {
+    setDeleteOpen(false);
+    navigation.replace(deleteDestination);
   };
 
   const daemonShort = shortDaemonId(runtime.daemon_id);
-  const lastSeen = formatLastSeen(runtime.last_seen_at);
+  const lastSeen = runtime.last_seen_at
+    ? timeAgo(runtime.last_seen_at)
+    : t(($) => $.detail.never_seen);
 
   return (
     <div className="flex h-full flex-col">
-      {/* Topbar — back link + breadcrumb + right-side actions. Mirrors the
-          skill-detail-page topbar so users build one mental model for
-          "go back to the index" across the dashboard. */}
-      <div className="flex h-12 shrink-0 items-center gap-2 border-b px-3">
-        <Button
-          variant="ghost"
-          size="xs"
-          render={<AppLink href={paths.runtimes()} />}
-        >
-          <ArrowLeft className="h-3 w-3" />
-          {t(($) => $.detail.all_runtimes)}
-        </Button>
-        <ChevronRight className="h-3 w-3 text-muted-foreground" />
-        <span className="truncate font-mono text-xs text-foreground">
-          {runtime.name}
-        </span>
-        <div className="ml-auto flex items-center gap-2">
-          {!canDelete && (
+      <BreadcrumbHeader
+        segments={[
+          { href: paths.runtimes(), label: t(($) => $.page.title) },
+          ...(machineHref && machineLabel
+            ? [{ href: machineHref, label: machineLabel }]
+            : []),
+        ]}
+        leaf={
+          <span className="truncate font-mono text-xs text-foreground">
+            {runtimeDisplayName(runtime)}
+          </span>
+        }
+        actions={
+          !canEditRuntime ? (
             <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
               <Lock className="h-3 w-3" />
               {t(($) => $.detail.read_only)}
             </span>
-          )}
-          {canDelete && (
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <Button
-                    variant="ghost"
-                    size="icon-sm"
-                    onClick={() => setDeleteOpen(true)}
-                    className="text-muted-foreground hover:text-destructive"
-                    aria-label={t(($) => $.detail.delete_aria)}
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </Button>
-                }
-              />
-              <TooltipContent>{t(($) => $.detail.delete_tooltip)}</TooltipContent>
-            </Tooltip>
-          )}
-        </div>
-      </div>
+          ) : null
+        }
+      />
 
       {/* Body — single scroll container that owns the Hero card AND the
           analytic blocks below. Putting Hero inside the scroll (instead of
@@ -218,6 +217,7 @@ export function RuntimeDetail({ runtime }: { runtime: AgentRuntime }) {
               runtime={runtime}
               cliVersion={cliVersion}
               launchedBy={launchedBy}
+              canEdit={!!canEditRuntime}
               canDelete={!!canDelete}
               onDelete={() => setDeleteOpen(true)}
             />
@@ -225,27 +225,23 @@ export function RuntimeDetail({ runtime }: { runtime: AgentRuntime }) {
         </div>
       </div>
 
-      {/* Delete confirmation */}
-      <AlertDialog open={deleteOpen} onOpenChange={(v) => { if (!v) setDeleteOpen(false); }}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>{t(($) => $.detail.delete_dialog.title)}</AlertDialogTitle>
-            <AlertDialogDescription>
-              {t(($) => $.detail.delete_dialog.description, { name: runtime.name })}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>{t(($) => $.detail.delete_dialog.cancel)}</AlertDialogCancel>
-            <AlertDialogAction
-              variant="destructive"
-              onClick={handleDelete}
-              disabled={deleteMutation.isPending}
-            >
-              {deleteMutation.isPending ? t(($) => $.detail.delete_dialog.deleting) : t(($) => $.detail.delete_dialog.confirm)}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      {isCustomRuntime && runtimeProfile ? (
+        <DeleteRuntimeProfileDialog
+          open={deleteOpen}
+          onOpenChange={setDeleteOpen}
+          profile={runtimeProfile}
+          wsId={wsId}
+          onDeleted={handleProfileDeleted}
+        />
+      ) : (
+        <DeleteRuntimeDialog
+          open={deleteOpen}
+          onOpenChange={setDeleteOpen}
+          runtime={runtime}
+          wsId={wsId}
+          onDeleted={handleRuntimeDeleted}
+        />
+      )}
     </div>
   );
 }
@@ -294,7 +290,7 @@ function HeroCard({
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
             <h2 className="truncate text-base font-semibold tracking-tight">
-              {runtime.name}
+              {runtimeDisplayName(runtime)}
             </h2>
             <HealthBadge health={health} />
             <span className="text-xs text-muted-foreground">
@@ -308,13 +304,13 @@ function HeroCard({
           Replaces the older dense `·`-separated meta strip that mixed
           everything (including dev-only IDs) at the same visual weight. */}
       <dl className="grid grid-cols-1 divide-y sm:grid-cols-3 sm:divide-x sm:divide-y-0">
-        <Fact label="Owner">
+        <Fact label={t(($) => $.detail.fact_owner)}>
           {ownerMember ? (
             <span className="inline-flex min-w-0 items-center gap-1.5">
               <ActorAvatar
                 actorType="member"
                 actorId={ownerMember.user_id}
-                size={18}
+                size="sm"
                 enableHoverCard
               />
               <span className="cursor-pointer truncate text-sm">{ownerMember.name}</span>
@@ -323,7 +319,7 @@ function HeroCard({
             <span className="text-sm text-muted-foreground">—</span>
           )}
         </Fact>
-        <Fact label="Device">
+        <Fact label={t(($) => $.detail.fact_device)}>
           {device?.hostname ? (
             <Tooltip>
               <TooltipTrigger
@@ -339,7 +335,7 @@ function HeroCard({
             <span className="text-sm text-muted-foreground">—</span>
           )}
         </Fact>
-        <Fact label="Runtime">
+        <Fact label={t(($) => $.detail.fact_runtime)}>
           <span className="block truncate text-sm">
             {device?.runtime ?? (
               <span className="capitalize">{runtime.provider}</span>
@@ -356,7 +352,7 @@ function HeroCard({
           <button
             type="button"
             onClick={() => setShowDetails((v) => !v)}
-            className="flex w-full items-center gap-1 px-4 py-2 text-xs text-muted-foreground transition-colors hover:text-foreground"
+            className="flex w-full items-center gap-1 px-4 py-2 text-xs text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
           >
             <ChevronRight
               className={`h-3 w-3 transition-transform ${
@@ -368,12 +364,12 @@ function HeroCard({
           {showDetails && (
             <dl className="grid grid-cols-1 gap-y-2 border-t bg-muted/30 px-4 py-3 sm:grid-cols-2">
               {cliVersion && (
-                <Fact label="Daemon CLI" mono compact>
+                <Fact label={t(($) => $.detail.fact_daemon_cli)} mono compact>
                   {cliVersion}
                 </Fact>
               )}
               {daemonShort && (
-                <Fact label="Daemon ID" mono compact>
+                <Fact label={t(($) => $.detail.fact_daemon_id)} mono compact>
                   {daemonShort}
                 </Fact>
               )}
@@ -449,7 +445,7 @@ function ServingAgentsCard({
                 href={agentHref(agent.id)}
                 className="group flex items-center gap-2 px-4 py-2 transition-colors hover:bg-accent/40 focus-visible:bg-accent/40 focus-visible:outline-none"
               >
-                <ActorAvatar actorType="agent" actorId={agent.id} size={20} enableHoverCard showStatusDot />
+                <ActorAvatar actorType="agent" actorId={agent.id} size="sm" enableHoverCard showStatusDot />
                 <div className="min-w-0 flex-1">
                   <div className="truncate text-xs font-medium">
                     {agent.name}
@@ -490,20 +486,19 @@ function DiagnosticsCard({
   runtime,
   cliVersion,
   launchedBy,
+  canEdit,
   canDelete,
   onDelete,
 }: {
   runtime: AgentRuntime;
   cliVersion: string | null;
   launchedBy: string | null;
+  canEdit: boolean;
   canDelete: boolean;
   onDelete: () => void;
 }) {
   const { t } = useT("runtimes");
   const isLocal = runtime.runtime_mode === "local";
-  // canDelete here doubles as the "can edit runtime" predicate — it already
-  // means "workspace owner/admin OR runtime owner", which is the same gate
-  // the server enforces for the visibility PATCH.
   return (
     <div className="rounded-lg border">
       <div className="border-b px-4 py-2.5">
@@ -514,20 +509,10 @@ function DiagnosticsCard({
           <div className="mb-1.5 text-[11px] uppercase tracking-wide text-muted-foreground">
             {t(($) => $.detail.diagnostics_visibility)}
           </div>
-          {canDelete ? (
+          {canEdit ? (
             <VisibilityEditor runtime={runtime} />
           ) : (
             <VisibilityReadout runtime={runtime} />
-          )}
-        </div>
-        <div className="border-t pt-3">
-          <div className="mb-1.5 text-[11px] uppercase tracking-wide text-muted-foreground">
-            {t(($) => $.detail.diagnostics_timezone)}
-          </div>
-          {canDelete ? (
-            <TimezoneEditor runtime={runtime} />
-          ) : (
-            <TimezoneReadout runtime={runtime} />
           )}
         </div>
         {isLocal && (
@@ -544,6 +529,12 @@ function DiagnosticsCard({
           </div>
         )}
         {canDelete && (
+          // The button stays clickable even when the runtime is a live
+          // local daemon (self-healing). The owner explicitly asked for
+          // it (MUL-3352) — disabling here left them looking at a button
+          // they had every permission to click but couldn't. The dialog
+          // raises a self-heal banner so the user sees the trade-off
+          // before confirming.
           <div className="border-t pt-3">
             <Button
               variant="ghost"
@@ -679,61 +670,5 @@ function VisibilityChoice({
       />
       <TooltipContent>{tooltip}</TooltipContent>
     </Tooltip>
-  );
-}
-
-function TimezoneReadout({ runtime }: { runtime: AgentRuntime }) {
-  const { t } = useT("runtimes");
-  return (
-    <div className="space-y-1.5">
-      <div className="rounded-md border bg-muted/30 px-2 py-1.5 font-mono text-xs">
-        {runtime.timezone || "UTC"}
-      </div>
-      <p className="text-[11px] leading-snug text-muted-foreground">
-        {t(($) => $.detail.timezone_hint)}
-      </p>
-    </div>
-  );
-}
-
-// TimezoneEditor renders the current runtime tz, a dropdown of supported IANA
-// zones (plus the runtime's current value if it is unusual), and commits the
-// change via PATCH /api/runtimes/:id. We deliberately don't gate this behind a
-// separate "edit" mode because the change is reversible.
-function TimezoneEditor({ runtime }: { runtime: AgentRuntime }) {
-  const { t } = useT("runtimes");
-  const wsId = useWorkspaceId();
-  const updateRuntime = useUpdateRuntime(wsId);
-  const current = runtime.timezone || "UTC";
-
-  const handleTimezoneChange = (next: string) => {
-    if (next === current) return;
-    updateRuntime.mutate(
-      { runtimeId: runtime.id, patch: { timezone: next } },
-      {
-        onSuccess: () =>
-          toast.success(t(($) => $.detail.timezone_toast_updated, { tz: next })),
-        onError: (err) =>
-          toast.error(
-            err instanceof Error && err.message
-              ? err.message
-              : t(($) => $.detail.timezone_toast_failed),
-          ),
-      },
-    );
-  };
-
-  return (
-    <div className="space-y-1.5">
-      <TimezoneSelect
-        value={current}
-        onValueChange={handleTimezoneChange}
-        browserSuffix={t(($) => $.detail.timezone_browser_suffix)}
-        disabled={updateRuntime.isPending}
-      />
-      <p className="text-[11px] leading-snug text-muted-foreground">
-        {t(($) => $.detail.timezone_hint)}
-      </p>
-    </div>
   );
 }

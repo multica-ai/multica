@@ -34,6 +34,7 @@ type TimelineEntry struct {
 	ResolvedAt     *string              `json:"resolved_at,omitempty"`
 	ResolvedByType *string              `json:"resolved_by_type,omitempty"`
 	ResolvedByID   *string              `json:"resolved_by_id,omitempty"`
+	SourceTaskID   *string              `json:"source_task_id,omitempty"`
 }
 
 // timelineHardCap bounds the per-issue timeline payload. Sized as a defensive
@@ -188,6 +189,7 @@ func (h *Handler) commentsToEntries(r *http.Request, comments []db.Comment) []Ti
 			ResolvedAt:     timestampToPtr(c.ResolvedAt),
 			ResolvedByType: textToPtr(c.ResolvedByType),
 			ResolvedByID:   uuidToPtr(c.ResolvedByID),
+			SourceTaskID:   uuidToPtr(c.SourceTaskID),
 		}
 	}
 	return out

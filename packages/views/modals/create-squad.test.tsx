@@ -86,19 +86,19 @@ vi.mock("../common/actor-avatar", () => ({
   ),
 }));
 
-vi.mock("../agents/components/avatar-picker", () => ({
-  AvatarPicker: ({
+vi.mock("../common/avatar-upload-control", () => ({
+  AvatarUploadControl: ({
     value,
-    onChange,
+    onUploaded,
   }: {
     value: string | null;
-    onChange: (v: string | null) => void;
+    onUploaded: (v: string) => void;
   }) => (
     <button
       type="button"
       data-testid="avatar-picker"
       data-value={value ?? ""}
-      onClick={() => onChange("https://example.com/avatar.png")}
+      onClick={() => onUploaded("https://example.com/avatar.png")}
     >
       avatar
     </button>
@@ -202,10 +202,10 @@ function makeAgent(overrides: Partial<Agent> & { id: string; name: string; owner
     avatar_url: null,
     runtime_mode: "local",
     runtime_config: {},
-    custom_env: {},
     custom_args: [],
-    custom_env_redacted: false,
     visibility: "private",
+    permission_mode: "private",
+    invocation_targets: [],
     status: "idle",
     max_concurrent_tasks: 1,
     model: "",

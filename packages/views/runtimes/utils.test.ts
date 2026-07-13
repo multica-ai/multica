@@ -1,14 +1,17 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from "vitest";
 import { useCustomPricingStore } from "@multica/core/runtimes/custom-pricing-store";
-import type { RuntimeUsage } from "@multica/core/types";
+import type { AgentRuntime, RuntimeUsage } from "@multica/core/types";
 
 import {
   addDaysIso,
   aggregateByWeek,
   aggregateCostByModel,
   collectUnmappedModels,
+  computeCostInWindow,
   estimateCost,
+  estimateCostBreakdown,
   isModelPriced,
+  isSelfHealingRuntime,
   sliceWindow,
   todayIso,
   weekStartIso,
@@ -25,6 +28,61 @@ const zeroUsage = {
   cache_read_tokens: 0,
   cache_write_tokens: 0,
 };
+
+describe("isSelfHealingRuntime", () => {
+  function makeRuntime(overrides: Partial<AgentRuntime>): AgentRuntime {
+    return {
+      id: "rt-1",
+      workspace_id: "ws-1",
+      daemon_id: null,
+      name: "rt",
+      runtime_mode: "local",
+      provider: "claude",
+      launch_header: "",
+      status: "online",
+      device_info: "",
+      metadata: {},
+      owner_id: null,
+      visibility: "private",
+      last_seen_at: null,
+      created_at: "2026-01-01T00:00:00Z",
+      updated_at: "2026-01-01T00:00:00Z",
+      ...overrides,
+    };
+  }
+
+  it("flags an online local runtime as self-healing", () => {
+    expect(
+      isSelfHealingRuntime(
+        makeRuntime({ runtime_mode: "local", status: "online" }),
+      ),
+    ).toBe(true);
+  });
+
+  it("treats an offline local runtime as safe to delete", () => {
+    // Daemon isn't running, so the server-side delete is final — no
+    // re-registration race to worry about.
+    expect(
+      isSelfHealingRuntime(
+        makeRuntime({ runtime_mode: "local", status: "offline" }),
+      ),
+    ).toBe(false);
+  });
+
+  it("treats cloud runtimes as safe to delete regardless of status", () => {
+    // Cloud workers are managed by Fleet, not a self-restarting local daemon.
+    expect(
+      isSelfHealingRuntime(
+        makeRuntime({ runtime_mode: "cloud", status: "online" }),
+      ),
+    ).toBe(false);
+    expect(
+      isSelfHealingRuntime(
+        makeRuntime({ runtime_mode: "cloud", status: "offline" }),
+      ),
+    ).toBe(false);
+  });
+});
 
 describe("estimateCost", () => {
   it("prices the canonical Anthropic Sonnet 4.6 SKU", () => {
@@ -72,6 +130,30 @@ describe("estimateCost", () => {
     expect(cost).toBeCloseTo(5 + 25, 5);
   });
 
+  it("prices Claude Fable 5 at the Mythos-class tier", () => {
+    const cost = estimateCost({
+      ...zeroUsage,
+      model: "claude-fable-5",
+      input_tokens: 1_000_000,
+      output_tokens: 1_000_000,
+      cache_read_tokens: 1_000_000,
+      cache_write_tokens: 1_000_000,
+    });
+    expect(cost).toBeCloseTo(10 + 50 + 1 + 12.5, 5);
+  });
+
+  it("prices Claude Sonnet 5 at Anthropic's intro $2 / $10 tier", () => {
+    const cost = estimateCost({
+      ...zeroUsage,
+      model: "claude-sonnet-5",
+      input_tokens: 1_000_000,
+      output_tokens: 1_000_000,
+      cache_read_tokens: 1_000_000,
+      cache_write_tokens: 1_000_000,
+    });
+    expect(cost).toBeCloseTo(2 + 10 + 0.2 + 2.5, 5);
+  });
+
   it("prices the provider-prefixed Anthropic form (anthropic/claude-sonnet-4.6)", () => {
     // openclaw / opencode emit `<provider>/<model>`. Same SKU as the
     // bare form, must hit the same rate.
@@ -109,6 +191,24 @@ describe("estimateCost", () => {
     expect(cost).toBeCloseTo(5 + 25, 5);
   });
 
+  it("prices the 1M-context Anthropic tag form (claude-opus-4-7[1m]) at the standard Opus tier", () => {
+    // Claude Code reports the 1M-context beta as `claude-opus-4-7[1m]`.
+    // Anthropic prices it at the standard Opus rate for prompts ≤200K
+    // input tokens (with a 2× surcharge above that, which we can't see
+    // from aggregated daily totals). Strip the bracketed context tag so
+    // the tokens still land in the cost total at standard pricing —
+    // mild under-estimate, but the alternative was excluding them
+    // entirely (the bug this fixes).
+    const cost = estimateCost({
+      ...zeroUsage,
+      model: "claude-opus-4-7[1m]",
+      input_tokens: 1_000_000,
+      output_tokens: 1_000_000,
+    });
+    expect(cost).toBeCloseTo(5 + 25, 5);
+    expect(isModelPriced("claude-opus-4-7[1m]")).toBe(true);
+  });
+
   it("prices each dotted Codex catalog SKU at its own tier, not gpt-5", () => {
     // Every dotted minor version is priced independently. The resolver does
     // exact-match-after-date-strip (no startsWith fallback), so each row
@@ -137,6 +237,43 @@ describe("estimateCost", () => {
     ).toBeCloseTo(1.75 + 14, 5);
   });
 
+  it("prices the gpt-5.6 series per OpenAI's official cache-aware rates", () => {
+    // Official announcement rates. 5.6 is the first OpenAI generation to bill
+    // cache writes separately: cacheRead = 0.1x input, cacheWrite = 1.25x
+    // input. Cover every model x every token category so a wrong cache rate
+    // can't hide behind an input-only assertion. `total` is 1M of each of the
+    // four categories priced at its own rate.
+    const cases = [
+      { model: "gpt-5.6-sol", input: 5, cacheRead: 0.5, cacheWrite: 6.25, output: 30, total: 41.75 },
+      { model: "gpt-5.6-terra", input: 2.5, cacheRead: 0.25, cacheWrite: 3.125, output: 15, total: 20.875 },
+      { model: "gpt-5.6-luna", input: 1, cacheRead: 0.1, cacheWrite: 1.25, output: 6, total: 8.35 },
+    ];
+    for (const c of cases) {
+      const breakdown = estimateCostBreakdown({
+        ...zeroUsage,
+        model: c.model,
+        input_tokens: 1_000_000,
+        cache_read_tokens: 1_000_000,
+        cache_write_tokens: 1_000_000,
+        output_tokens: 1_000_000,
+      });
+      expect(breakdown.input).toBeCloseTo(c.input, 5);
+      expect(breakdown.cacheRead).toBeCloseTo(c.cacheRead, 5);
+      expect(breakdown.cacheWrite).toBeCloseTo(c.cacheWrite, 5);
+      expect(breakdown.output).toBeCloseTo(c.output, 5);
+      expect(
+        estimateCost({
+          ...zeroUsage,
+          model: c.model,
+          input_tokens: 1_000_000,
+          cache_read_tokens: 1_000_000,
+          cache_write_tokens: 1_000_000,
+          output_tokens: 1_000_000,
+        }),
+      ).toBeCloseTo(c.total, 5);
+    }
+  });
+
   it("flags catalog SKUs without a published price (gpt-5.5-mini) as unmapped", () => {
     // `gpt-5.5-mini` is in the Codex catalog but OpenAI hasn't published a
     // public rate. We refuse to absorb it into `gpt-5.5` — the diagnostic
@@ -157,6 +294,12 @@ describe("estimateCost", () => {
     // silently inherit `gpt-5` pricing.
     expect(isModelPriced("gpt-5.99-codex")).toBe(false);
     expect(isModelPriced("gpt-5-foo")).toBe(false);
+    // Dash-normalized 5.6 ids must also miss: the real Codex slug is dotted
+    // (`gpt-5.6-luna`) and this resolver does NOT dash-normalize non-claude
+    // ids, so a dashed variant surfaces as unmapped — matching the backend's
+    // literal-dot alias in server/internal/metrics/pricing.go (MUL-4347).
+    expect(isModelPriced("gpt-5-6-luna")).toBe(false);
+    expect(isModelPriced("gpt-5-6-sol")).toBe(false);
     expect(
       estimateCost({
         ...zeroUsage,
@@ -175,10 +318,165 @@ describe("estimateCost", () => {
       }),
     ).toBe(0);
   });
+
+  it("prices Cursor Composer rows at the published rates without cache-write spend", () => {
+    // Cursor's ids are unprefixed generic names, so they're provider-qualified
+    // (`cursor/auto`) and only resolve when the row carries provider "cursor".
+    const costWithAllTokenTypes = (model: string) =>
+      estimateCost({
+        ...zeroUsage,
+        provider: "cursor",
+        model,
+        input_tokens: 1_000_000,
+        output_tokens: 1_000_000,
+        cache_read_tokens: 1_000_000,
+        cache_write_tokens: 1_000_000,
+      });
+
+    expect(costWithAllTokenTypes("auto")).toBeCloseTo(1.25 + 6 + 0.25, 5);
+    expect(costWithAllTokenTypes("composer-2.5-fast")).toBeCloseTo(
+      3 + 15 + 0.5,
+      5,
+    );
+    expect(costWithAllTokenTypes("composer-2.5")).toBeCloseTo(0.5 + 2.5 + 0.2, 5);
+    expect(costWithAllTokenTypes("composer-2-fast")).toBeCloseTo(
+      1.5 + 7.5 + 0.35,
+      5,
+    );
+    expect(costWithAllTokenTypes("composer-2")).toBeCloseTo(0.5 + 2.5 + 0.2, 5);
+    expect(costWithAllTokenTypes("composer-1.5")).toBeCloseTo(
+      3.5 + 17.5 + 0.35,
+      5,
+    );
+    expect(costWithAllTokenTypes("composer-1")).toBeCloseTo(
+      1.25 + 10 + 0.125,
+      5,
+    );
+    // The legacy `cursor` fallback equals the provider name, so it stays
+    // unqualified and resolves regardless of the row's provider.
+    expect(costWithAllTokenTypes("cursor")).toBeCloseTo(3 + 15 + 0.5, 5);
+  });
+
+  it("scopes the generic `auto` id by provider so collisions don't borrow a price", () => {
+    const auto = (provider?: string) =>
+      estimateCost({ ...zeroUsage, provider, model: "auto", input_tokens: 1_000_000 });
+
+    // Cursor's `auto` is priced via the `cursor/auto` row.
+    expect(auto("cursor")).toBeCloseTo(1.25, 5);
+    // A different provider reporting `auto` has no row
+    // yet — it must NOT inherit Cursor's price; it stays unmapped ($0).
+    expect(auto("acme")).toBe(0);
+    // No provider at all → also unmapped, never silently Cursor's price.
+    expect(auto(undefined)).toBe(0);
+  });
+
+  it("reports provider-qualified keys for unmapped generic model ids", () => {
+    const unmapped = collectUnmappedModels([
+      { ...zeroUsage, provider: "acme", model: "auto" },
+      { ...zeroUsage, provider: "cursor", model: "auto" },
+    ]);
+    // Same bare id, two providers → two distinct, priceable-by-key entries.
+    // `cursor/auto` is priced, so only the genuinely-unmapped one surfaces.
+    expect(unmapped).toEqual(["acme/auto"]);
+  });
+
+  // The Chinese-model rates below are spot-checked against the literal
+  // numbers on the three official price sheets cited in MODEL_PRICING's
+  // header comment. Pinning them in tests is what catches a future edit
+  // that copies a price from a near-named neighbour by accident — the
+  // mistake the previous attempt (PR #3170, closed) made.
+  it("prices deepseek-v4-flash at the official $0.14/$0.28 with ~50× cache-hit discount", () => {
+    // 1M input × $0.14 + 1M output × $0.28 + 1M cache read × $0.0028 = $0.4228.
+    const cost = estimateCost({
+      ...zeroUsage,
+      model: "deepseek-v4-flash",
+      input_tokens: 1_000_000,
+      output_tokens: 1_000_000,
+      cache_read_tokens: 1_000_000,
+    });
+    expect(cost).toBeCloseTo(0.14 + 0.28 + 0.0028, 5);
+  });
+
+  it("prices the deepseek-chat / deepseek-reasoner aliases at the same rate as deepseek-v4-flash", () => {
+    // The DeepSeek docs explicitly route both legacy names to v4-flash —
+    // they must hit the same numbers, not the older $0.27/$1.10 tier.
+    const flash = estimateCost({
+      ...zeroUsage,
+      model: "deepseek-v4-flash",
+      input_tokens: 1_000_000,
+    });
+    expect(
+      estimateCost({
+        ...zeroUsage,
+        model: "deepseek-chat",
+        input_tokens: 1_000_000,
+      }),
+    ).toBeCloseTo(flash, 5);
+    expect(
+      estimateCost({
+        ...zeroUsage,
+        model: "deepseek-reasoner",
+        input_tokens: 1_000_000,
+      }),
+    ).toBeCloseTo(flash, 5);
+  });
+
+  it("prices kimi-k2.6 at the official $0.95 / $4.00 tier (not the K2 tier)", () => {
+    // Moonshot's K2.6 page is the only authoritative source today; K2.6 is
+    // explicitly NOT priced like K2. 1M input × $0.95 + 1M output × $4.00 = $4.95.
+    expect(
+      estimateCost({
+        ...zeroUsage,
+        model: "kimi-k2.6",
+        input_tokens: 1_000_000,
+        output_tokens: 1_000_000,
+      }),
+    ).toBeCloseTo(4.95, 5);
+  });
+
+  it("prices glm-5.1 at the official $1.4 / $4.4 tier", () => {
+    expect(
+      estimateCost({
+        ...zeroUsage,
+        model: "glm-5.1",
+        input_tokens: 1_000_000,
+        output_tokens: 1_000_000,
+      }),
+    ).toBeCloseTo(1.4 + 4.4, 5);
+  });
+
+  it("prices glm-4.5-flash at the official Free tier ($0)", () => {
+    // z.ai currently ships Free tiers for the *-flash family; $0 is the
+    // literal price on the page, not a placeholder. Anything non-zero
+    // here would mean we mis-copied a paid SKU's number into the row.
+    expect(isModelPriced("glm-4.5-flash")).toBe(true);
+    expect(isModelPriced("glm-4.7-flash")).toBe(true);
+    expect(
+      estimateCost({
+        ...zeroUsage,
+        model: "glm-4.5-flash",
+        input_tokens: 1_000_000,
+        output_tokens: 1_000_000,
+      }),
+    ).toBe(0);
+  });
+
+  it("recognises the provider-prefixed forms emitted by OpenRouter-style runtimes", () => {
+    // opencode + OpenRouter route IDs through as `<provider>/<model>`.
+    // canonicalCandidates strips the prefix; without this the rows above
+    // would only fire on bare IDs and the dashboard would still show
+    // $0.00 for the runtime that actually triggered this work.
+    expect(isModelPriced("deepseek/deepseek-v4-flash")).toBe(true);
+    expect(isModelPriced("moonshotai/kimi-k2.6")).toBe(true);
+    expect(isModelPriced("zhipuai/glm-5.1")).toBe(true);
+    expect(isModelPriced("zhipuai/glm-4.5-air")).toBe(true);
+  });
 });
 
 describe("isModelPriced", () => {
   it("recognises both Claude and Codex/GPT families", () => {
+    expect(isModelPriced("claude-sonnet-5")).toBe(true);
+    expect(isModelPriced("claude-fable-5")).toBe(true);
     expect(isModelPriced("claude-sonnet-4-6")).toBe(true);
     expect(isModelPriced("gpt-5-codex")).toBe(true);
     expect(isModelPriced("gpt-5-mini")).toBe(true);
@@ -191,6 +489,7 @@ describe("isModelPriced", () => {
     // while Anthropic's own CLIs use dashes (`claude-opus-4-7`). Both must
     // hit the same catalog row, otherwise Copilot-routed usage gets bucketed
     // as "unmapped" and the user has to type the price in by hand.
+    expect(isModelPriced("claude-sonnet-5")).toBe(true);
     expect(isModelPriced("claude-haiku-4.5")).toBe(true);
     expect(isModelPriced("claude-sonnet-4.5")).toBe(true);
     expect(isModelPriced("claude-sonnet-4.6")).toBe(true);
@@ -202,6 +501,8 @@ describe("isModelPriced", () => {
   it("recognises provider-prefixed Anthropic IDs (openclaw / opencode form)", () => {
     // openclaw / opencode emit `<provider>/<model>` in `meta.agentMeta.model`.
     // The provider prefix is routing metadata, not part of the SKU.
+    expect(isModelPriced("anthropic/claude-sonnet-5")).toBe(true);
+    expect(isModelPriced("anthropic/claude-fable-5")).toBe(true);
     expect(isModelPriced("anthropic/claude-opus-4.7")).toBe(true);
     expect(isModelPriced("anthropic/claude-sonnet-4-6")).toBe(true);
   });
@@ -280,6 +581,23 @@ describe("user-supplied custom pricing", () => {
     ).toBeCloseTo(2, 5);
   });
 
+  it("resolves a provider-qualified override only for the matching provider", () => {
+    // The dialog stores the override under the provider-qualified key that
+    // `collectUnmappedModels` surfaced, so it must price a provider-scoped
+    // `auto` row without leaking onto another provider's `auto`.
+    useCustomPricingStore.getState().setCustomPricing("acme/auto", {
+      input: 2,
+      output: 8,
+      cacheRead: 0.2,
+      cacheWrite: 2,
+    });
+    expect(
+      estimateCost({ ...zeroUsage, provider: "acme", model: "auto", input_tokens: 1_000_000 }),
+    ).toBeCloseTo(2, 5);
+    // A row with no provider must not pick up the provider-scoped override.
+    expect(isModelPriced("auto")).toBe(false);
+  });
+
   it("removeCustomPricing clears the override", () => {
     const store = useCustomPricingStore.getState();
     store.setCustomPricing("gpt-5.5-mini", {
@@ -318,12 +636,31 @@ describe("user-supplied custom pricing", () => {
     ];
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const byModel = aggregateCostByModel(rows as any);
+    // Priced vendor-prefixed id stays bare; the unmapped generic id is
+    // provider-qualified so it matches the unmapped notice / pricing dialog.
     const sonnet = byModel.find((r) => r.key === "claude-sonnet-4-6");
-    const fictional = byModel.find((r) => r.key === "fictional-model-x");
+    const fictional = byModel.find((r) => r.key === "fictional/fictional-model-x");
     expect(sonnet?.cost).toBeCloseTo(3, 5);
     expect(fictional?.cost).toBe(0);
+    // The unmapped key is provider-qualified so a user can price this exact
+    // (provider, model) pair without affecting another provider's same id.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    expect(collectUnmappedModels(rows as any)).toEqual(["fictional-model-x"]);
+    expect(collectUnmappedModels(rows as any)).toEqual(["fictional/fictional-model-x"]);
+  });
+
+  it("keeps the same generic model id from two providers as distinct by-model rows", () => {
+    // Two providers reporting the bare id `auto` must not collapse into one
+    // mislabelled `auto` row — each is provider-qualified so the priced
+    // (cursor) and unpriced (other) sides stay separable.
+    const rows = [
+      { ...zeroUsage, model: "auto", provider: "cursor", input_tokens: 1_000_000, date: "2026-01-01" },
+      { ...zeroUsage, model: "auto", provider: "acme", input_tokens: 1_000_000, date: "2026-01-01" },
+    ];
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const byModel = aggregateCostByModel(rows as any);
+    expect(byModel.map((r) => r.key).toSorted()).toEqual(["acme/auto", "cursor/auto"]);
+    expect(byModel.find((r) => r.key === "cursor/auto")?.cost).toBeCloseTo(1.25, 5);
+    expect(byModel.find((r) => r.key === "acme/auto")?.cost).toBe(0);
   });
 
   it("aggregateCostByModel reflects a newly-saved custom price on re-call with the same input", () => {
@@ -601,5 +938,82 @@ describe("aggregateByWeek", () => {
       expect(w.input).toBe(0);
       expect(w.output).toBe(0);
     }
+  });
+});
+
+// computeCostInWindow drives the runtime-list cost cell and its ↑/↓ delta.
+// The `tz` argument was inserted as the THIRD positional parameter (before
+// `offsetDays`) in the timezone-architecture RFC — a positional-arg slip
+// here is otherwise silent, so the window math, the end-exclusive boundary,
+// the offset shift, and the tz-of-"today" all need explicit coverage.
+describe("computeCostInWindow", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  // claude-sonnet-4-6 is priced at $3 / 1M input tokens, so a row with
+  // 1M input tokens contributes exactly $3.
+  function priced(date: string, inputTokens: number): RuntimeUsage {
+    return {
+      runtime_id: "r",
+      date,
+      provider: "anthropic",
+      model: "claude-sonnet-4-6",
+      input_tokens: inputTokens,
+      output_tokens: 0,
+      cache_read_tokens: 0,
+      cache_write_tokens: 0,
+    };
+  }
+
+  it("sums cost over the trailing daysBack window, end-exclusive of today", () => {
+    // 2026-05-19 23:00 UTC is already 2026-05-20 in Asia/Shanghai, so
+    // "today" is 2026-05-20 and the 7-day window is [2026-05-13, 2026-05-20).
+    vi.setSystemTime(new Date("2026-05-19T23:00:00Z"));
+    const rows = [
+      priced("2026-05-12", 1_000_000), // before window — excluded
+      priced("2026-05-13", 1_000_000), // window start — included
+      priced("2026-05-19", 1_000_000), // included
+      priced("2026-05-20", 1_000_000), // today — excluded (end-exclusive)
+    ];
+    expect(computeCostInWindow(rows, 7, "Asia/Shanghai")).toBeCloseTo(6, 5);
+  });
+
+  it("offsetDays shifts the window back to the prior period", () => {
+    // today = 2026-05-20; offsetDays=7, daysBack=7 → window [05-06, 05-13).
+    vi.setSystemTime(new Date("2026-05-20T12:00:00Z"));
+    const rows = [
+      priced("2026-05-05", 1_000_000), // before prior window — excluded
+      priced("2026-05-06", 1_000_000), // prior window start — included
+      priced("2026-05-12", 1_000_000), // included
+      priced("2026-05-13", 1_000_000), // in the current window, not prior — excluded
+    ];
+    expect(computeCostInWindow(rows, 7, "UTC", 7)).toBeCloseTo(6, 5);
+  });
+
+  it("reads 'today' in the supplied tz, not the host clock", () => {
+    // Host clock is 2026-05-19 in UTC but already 2026-05-20 in Shanghai.
+    // A row dated 2026-05-19 falls inside the 1-day window only when the
+    // tz pushes "today" forward to 2026-05-20.
+    vi.setSystemTime(new Date("2026-05-19T20:00:00Z"));
+    const rows = [priced("2026-05-19", 1_000_000)];
+    expect(computeCostInWindow(rows, 1, "UTC")).toBe(0); // today=05-19, window [05-18,05-19)
+    expect(computeCostInWindow(rows, 1, "Asia/Shanghai")).toBeCloseTo(3, 5);
+  });
+
+  it("returns 0 for an unpriced model rather than NaN", () => {
+    vi.setSystemTime(new Date("2026-05-20T12:00:00Z"));
+    const rows: RuntimeUsage[] = [
+      { ...priced("2026-05-19", 1_000_000), model: "totally-made-up-model" },
+    ];
+    expect(computeCostInWindow(rows, 7, "UTC")).toBe(0);
+  });
+
+  it("returns 0 for an empty row set", () => {
+    vi.setSystemTime(new Date("2026-05-20T12:00:00Z"));
+    expect(computeCostInWindow([], 7, "UTC")).toBe(0);
   });
 });

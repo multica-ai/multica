@@ -30,6 +30,59 @@ function Test-CommandExists {
     $null -ne (Get-Command $Name -ErrorAction SilentlyContinue)
 }
 
+function New-RandomHex {
+    param([int]$ByteCount)
+
+    $bytes = New-Object byte[] $ByteCount
+    $rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+    try {
+        $rng.GetBytes($bytes)
+    } finally {
+        $rng.Dispose()
+    }
+    return -join ($bytes | ForEach-Object { "{0:x2}" -f $_ })
+}
+
+function Get-EnvFileValue {
+    param(
+        [string]$Path,
+        [string]$Name,
+        [string]$Default
+    )
+
+    if (-not (Test-Path $Path)) {
+        return $Default
+    }
+
+    $prefix = "$Name="
+    $line = Get-Content $Path |
+        Where-Object { $_.StartsWith($prefix) } |
+        Select-Object -Last 1
+    if (-not $line) {
+        return $Default
+    }
+
+    $value = $line.Substring($prefix.Length).Trim().Trim('"').Trim("'")
+    if ([string]::IsNullOrWhiteSpace($value)) {
+        return $Default
+    }
+    return $value
+}
+
+function Get-SelfHostBackendPort {
+    foreach ($name in @("BACKEND_PORT", "API_PORT", "SERVER_PORT", "PORT")) {
+        $value = Get-EnvFileValue -Path (Join-Path $InstallDir ".env") -Name $name -Default ""
+        if (-not [string]::IsNullOrWhiteSpace($value)) {
+            return $value
+        }
+    }
+    return "8080"
+}
+
+function Get-SelfHostFrontendPort {
+    return Get-EnvFileValue -Path (Join-Path $InstallDir ".env") -Name "FRONTEND_PORT" -Default "3000"
+}
+
 function Get-LatestVersion {
     try {
         $release = Invoke-RestMethod -Uri "https://api.github.com/repos/multica-ai/multica/releases/latest" -ErrorAction Stop
@@ -371,11 +424,16 @@ function Install-Server {
     Write-Ok "Repository ready at $InstallDir ($serverRef)"
 
     if (-not (Test-Path ".env")) {
-        Write-Info "Creating .env with random JWT_SECRET..."
+        Write-Info "Creating .env with random secrets..."
         Copy-Item ".env.example" ".env"
-        $jwt = -join ((1..32) | ForEach-Object { "{0:x2}" -f (Get-Random -Maximum 256) })
-        (Get-Content ".env") -replace '^JWT_SECRET=.*', "JWT_SECRET=$jwt" | Set-Content ".env"
-        Write-Ok "Generated .env with random JWT_SECRET"
+        $jwt = New-RandomHex 32
+        $pgpass = New-RandomHex 24
+        $content = Get-Content ".env"
+        $content = $content -replace '^JWT_SECRET=.*', "JWT_SECRET=$jwt"
+        $content = $content -replace '^POSTGRES_PASSWORD=.*', "POSTGRES_PASSWORD=$pgpass"
+        $content = $content -replace '^(DATABASE_URL=postgres://[^:]+:)[^@]*(@.*)', "`${1}$pgpass`${2}"
+        $content | Set-Content ".env"
+        Write-Ok "Generated .env with random JWT_SECRET and POSTGRES_PASSWORD"
     } else {
         Write-Ok "Using existing .env"
     }
@@ -386,10 +444,11 @@ function Install-Server {
     docker compose -f docker-compose.selfhost.yml up -d
 
     Write-Info "Waiting for backend to be ready..."
+    $backendPort = Get-SelfHostBackendPort
     $ready = $false
     for ($i = 1; $i -le 45; $i++) {
         try {
-            $null = Invoke-WebRequest -Uri "http://localhost:8080/health" -UseBasicParsing -TimeoutSec 2
+            $null = Invoke-WebRequest -Uri "http://localhost:$backendPort/health" -UseBasicParsing -TimeoutSec 2
             $ready = $true
             break
         } catch {
@@ -451,8 +510,10 @@ function Start-LocalInstall {
     Write-Host "  [OK] Multica server is running and CLI is ready!" -ForegroundColor Green
     Write-Host "  ============================================" -ForegroundColor Green
     Write-Host ""
-    Write-Host "  Frontend:  http://localhost:3000"
-    Write-Host "  Backend:   http://localhost:8080"
+    $frontendPort = Get-SelfHostFrontendPort
+    $backendPort = Get-SelfHostBackendPort
+    Write-Host "  Frontend:  http://localhost:$frontendPort"
+    Write-Host "  Backend:   http://localhost:$backendPort"
     Write-Host "  Server at: $InstallDir"
     Write-Host ""
     Write-Host "  Next: configure your CLI to connect"

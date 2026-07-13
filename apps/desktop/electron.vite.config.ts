@@ -23,7 +23,7 @@ export default defineConfig({
       alias: {
         "@": resolve("src/renderer/src"),
       },
-      dedupe: ["react", "react-dom"],
+      dedupe: ["react", "react-dom", "@tanstack/react-query"],
     },
   },
 });

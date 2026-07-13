@@ -6,7 +6,7 @@ import { useEffect } from "react";
 // records every method call so we can assert openInNewTab does NOT activate
 // the new tab (i.e. setActiveTab is never invoked on the same-workspace path).
 type MockRouter = {
-  state: { location: { pathname: string } };
+  state: { location: { pathname: string; search: string; hash: string } };
   navigate: ReturnType<typeof vi.fn>;
 };
 
@@ -17,9 +17,9 @@ type MockTab = {
   router: MockRouter;
 };
 
-function makeMockRouter(pathname: string): MockRouter {
+function makeMockRouter(pathname: string, search = "", hash = ""): MockRouter {
   return {
-    state: { location: { pathname } },
+    state: { location: { pathname, search, hash } },
     navigate: vi.fn(),
   };
 }
@@ -263,6 +263,32 @@ describe("DesktopNavigationProvider.push with pinned active tab", () => {
   });
 });
 
+describe("DesktopNavigationProvider.push duplicate path guard", () => {
+  it("does not navigate when the target exactly matches the active tab location", () => {
+    const activeRouter = makeMockRouter("/acme/issues/child");
+    state.byWorkspace.acme.tabs[0] = {
+      id: "tA",
+      path: "/acme/issues/child",
+      pinned: false,
+      router: activeRouter,
+    };
+
+    let adapter: ReturnType<typeof useNavigation> | null = null;
+    const Probe = captureAdapter((a) => {
+      adapter = a;
+    });
+    render(
+      <DesktopNavigationProvider>
+        <Probe />
+      </DesktopNavigationProvider>,
+    );
+
+    adapter!.push("/acme/issues/child");
+
+    expect(activeRouter.navigate).not.toHaveBeenCalled();
+  });
+});
+
 describe("TabNavigationProvider.openInNewTab", () => {
   function renderTabProvider() {
     let adapter: ReturnType<typeof useNavigation> | null = null;
@@ -299,6 +325,46 @@ describe("TabNavigationProvider.openInNewTab", () => {
   });
 });
 
+describe("TabNavigationProvider.push duplicate path guard", () => {
+  function renderTabProviderAt(
+    pathname: string,
+    search = "",
+    hash = "",
+  ) {
+    let adapter: ReturnType<typeof useNavigation> | null = null;
+    const Probe = captureAdapter((a) => {
+      adapter = a;
+    });
+    const fakeRouter = {
+      state: { location: { pathname, search, hash } },
+      subscribe: () => () => {},
+      navigate: vi.fn(),
+    } as unknown as Parameters<typeof TabNavigationProvider>[0]["router"];
+    render(
+      <TabNavigationProvider router={fakeRouter}>
+        <Probe />
+      </TabNavigationProvider>,
+    );
+    return { getAdapter: () => adapter!, fakeRouter };
+  }
+
+  it("does not navigate when the target exactly matches the current full location", () => {
+    const { getAdapter, fakeRouter } = renderTabProviderAt("/acme/issues/child");
+
+    getAdapter().push("/acme/issues/child");
+
+    expect(fakeRouter.navigate).not.toHaveBeenCalled();
+  });
+
+  it("still navigates when only search or hash differs", () => {
+    const { getAdapter, fakeRouter } = renderTabProviderAt("/acme/issues");
+
+    getAdapter().push("/acme/issues?filter=open#top");
+
+    expect(fakeRouter.navigate).toHaveBeenCalledWith("/acme/issues?filter=open#top");
+  });
+});
+
 describe("TabNavigationProvider.push with pinned active tab", () => {
   type ProviderRouter = Parameters<typeof TabNavigationProvider>[0]["router"];
 
@@ -310,7 +376,7 @@ describe("TabNavigationProvider.push with pinned active tab", () => {
     // router.navigate when no interception fires. In real desktop usage they
     // are the same router instance; this helper mirrors that invariant.
     const fakeRouter = {
-      state: { location: { pathname, search: "" } },
+      state: { location: { pathname, search: "", hash: "" } },
       subscribe: () => () => {},
       navigate: vi.fn(),
     } as unknown as ProviderRouter;

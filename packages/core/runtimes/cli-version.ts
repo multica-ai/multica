@@ -2,15 +2,15 @@
  * Frontend mirror of the server's MinQuickCreateCLIVersion gate. The
  * agent-create flow (Quick Create modal) requires the daemon's bundled
  * multica CLI to be at least this version — older daemons either
- * double-create issues on partial CLI failures or mishandle pasted
- * screenshot URLs (see PR #1851 / MUL-1496).
+ * double-create issues on partial CLI failures, drop quick-create attachment
+ * bindings, or mishandle pasted screenshot URLs (see PR #1851 / MUL-1496).
  *
  * Both the frontend pre-validation in the modal and the server's
  * `/api/issues/quick-create` handler enforce this; the server is the
  * authoritative trust boundary, the frontend just lets us tell the user
  * "your daemon needs an upgrade" before they hit submit.
  */
-export const MIN_QUICK_CREATE_CLI_VERSION = "0.2.20";
+export const MIN_QUICK_CREATE_CLI_VERSION = "0.2.21";
 
 export type CliVersionState = "ok" | "too_old" | "missing";
 
@@ -71,4 +71,34 @@ export function checkQuickCreateCliVersion(detected: string | undefined | null):
 export function readRuntimeCliVersion(metadata: Record<string, unknown> | undefined): string {
   const v = metadata?.cli_version;
   return typeof v === "string" ? v : "";
+}
+
+/**
+ * Frontend mirror of the server's `MinHandoffCLIVersion` soft gate
+ * (`server/pkg/agent/version.go`). The assignment handoff note is only rendered
+ * into the run's opening prompt by daemons at or above this multica CLI version
+ * (MUL-3375); older daemons silently drop it. Unlike the quick-create gate this
+ * never blocks the assignment — the UI just grays out the note box and warns.
+ *
+ * Keep in lockstep with the server constant; the two are enforced independently
+ * (the server is authoritative) but must agree so the warning matches reality.
+ */
+export const MIN_HANDOFF_CLI_VERSION = "0.3.28";
+
+/**
+ * Whether a daemon-reported CLI version is new enough to render a handoff note.
+ * Mirrors server `agent.HandoffSupported`: missing / unparsable / below-minimum
+ * all degrade to `false`, and dev-built daemons (git-describe shape) always
+ * pass — the version string is the shared signal, so frontend and server agree
+ * by construction. Pure and synchronous, so the note box can settle from the
+ * already-warm runtime cache instead of waiting on the trigger-preview
+ * round-trip, exactly like the quick-create version gate.
+ */
+export function handoffSupported(detected: string | undefined | null): boolean {
+  const current = (detected ?? "").trim();
+  if (!current) return false;
+  if (DEV_DESCRIBE_RE.test(current)) return true;
+  const parsed = parseSemver(current);
+  if (!parsed) return false;
+  return !lessThan(parsed, parseSemver(MIN_HANDOFF_CLI_VERSION)!);
 }

@@ -11,18 +11,13 @@ import { i18n, type Lang } from "@/lib/i18n";
 import { uiTranslations, localeLabels } from "@/lib/translations";
 import { DocsSettings } from "@/components/docs-settings";
 
+// Inter (Latin UI face) is exposed under `--font-inter`. The full `--font-sans`
+// stack — Inter + the per-locale CJK fallback chain, including the Japanese-first
+// override scoped to `<html lang="ja">` — is composed in static CSS in
+// ./global.css (CSP-safe, no inline <style>). Mirrors apps/web/app/layout.tsx.
 const inter = Inter({
   subsets: ["latin"],
-  variable: "--font-sans",
-  fallback: [
-    "-apple-system",
-    "BlinkMacSystemFont",
-    "Segoe UI",
-    "PingFang SC",
-    "Microsoft YaHei",
-    "Noto Sans CJK SC",
-    "sans-serif",
-  ],
+  variable: "--font-inter",
 });
 
 const geistMono = Geist_Mono({

@@ -755,17 +755,31 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 		// The comment payload can come as handler.CommentResponse from the
 		// HTTP handler, or as map[string]any from the agent comment path in
 		// task.go. Handle both.
-		var issueID, commentID, commentContent string
+		var issueID, commentID, commentContent, authorType string
 		switch c := payload["comment"].(type) {
 		case handler.CommentResponse:
 			issueID = c.IssueID
 			commentID = c.ID
 			commentContent = c.Content
+			authorType = c.AuthorType
 		case map[string]any:
 			issueID, _ = c["issue_id"].(string)
 			commentID, _ = c["id"].(string)
 			commentContent, _ = c["content"].(string)
+			authorType, _ = c["author_type"].(string)
 		default:
+			return
+		}
+
+		// Platform-authored system comments (MUL-2538 child-done parent
+		// notify) must NOT create inbox rows or parse mentions from their
+		// body — the comment is a controlled platform signal, not a human
+		// commenter. Mention parsing is the dangerous bit: if the body
+		// transcluded a child title containing `mention://member/<uuid>`,
+		// the parent's assignee inbox would light up via the generic path.
+		// Skip the listener entirely; the WS broadcast still delivers the
+		// comment to the issue timeline.
+		if authorType == "system" {
 			return
 		}
 

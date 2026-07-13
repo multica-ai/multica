@@ -15,17 +15,27 @@ import {
   Minimize2,
   Play,
   Rocket,
+  Users,
   Webhook,
   X as XIcon,
   Zap,
 } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
+import { copyText } from "@multica/ui/lib/clipboard";
 import {
   Dialog,
   DialogContent,
   DialogTitle,
 } from "@multica/ui/components/ui/dialog";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
+import {
+  Popover,
+  PopoverTrigger,
+  PopoverContent,
+  PopoverHeader,
+  PopoverTitle,
+  PopoverDescription,
+} from "@multica/ui/components/ui/popover";
 import { Button } from "@multica/ui/components/ui/button";
 import {
   Select,
@@ -50,6 +60,7 @@ import { buildAutopilotWebhookUrl } from "@multica/core/autopilots";
 import { api } from "@multica/core/api";
 import type {
   AutopilotAssigneeType,
+  AutopilotCollaborator,
   AutopilotExecutionMode,
   AutopilotTrigger,
 } from "@multica/core/types";
@@ -58,6 +69,8 @@ import { ActorAvatar } from "../../common/actor-avatar";
 import { ProjectPicker } from "../../projects/components/project-picker";
 import { ProjectIcon } from "../../projects/components/project-icon";
 import { AgentPicker, type AssigneeSelection } from "./pickers/agent-picker";
+import { SubscriberMultiSelect } from "./subscriber-multi-select";
+import { AutopilotAccessManager } from "./autopilot-access-manager";
 import {
   getDefaultTriggerConfig,
   getLocalTimezone,
@@ -66,8 +79,10 @@ import {
   type TriggerConfig,
   type TriggerFrequency,
 } from "./trigger-config";
+import { WebhookEventFilterSection } from "./webhook-event-filter-section";
 import { useT } from "../../i18n";
 import { formatSchedulePartialFailureToast } from "./autopilot-dialog-toast";
+import type { WebhookEventFilter } from "@multica/core/types";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -80,6 +95,7 @@ export interface AutopilotInitial {
   assignee_type: AutopilotAssigneeType;
   assignee_id: string;
   execution_mode: AutopilotExecutionMode;
+  subscriber_user_ids?: string[];
 }
 
 export type AutopilotDialogProps =
@@ -97,6 +113,8 @@ export type AutopilotDialogProps =
       autopilotId: string;
       initial: AutopilotInitial;
       triggers: AutopilotTrigger[];
+      collaborators: AutopilotCollaborator[];
+      canManageAccess: boolean;
     };
 
 // ---------------------------------------------------------------------------
@@ -227,6 +245,20 @@ function formatNextRunAbsolute(date: Date, timezone: string): string {
 }
 
 // ---------------------------------------------------------------------------
+// Webhook event-filter dirty detection
+// ---------------------------------------------------------------------------
+
+// serializeEventFilters returns a stable JSON string so the edit-mode dirty
+// check can compare the current filters against the snapshot taken on open
+// without depending on reference equality. Normalizes empty Actions to []
+// so omitted-vs-explicit-empty doesn't show as a phantom change.
+function serializeEventFilters(filters: WebhookEventFilter[]): string {
+  return JSON.stringify(
+    filters.map((f) => ({ event: f.event, actions: f.actions ?? [] })),
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Live "now" ticker for countdown
 // ---------------------------------------------------------------------------
 
@@ -268,6 +300,9 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
   const [executionMode, setExecutionMode] = useState<AutopilotExecutionMode>(
     initial.execution_mode ?? "create_issue",
   );
+  const [subscriberUserIds, setSubscriberUserIds] = useState<string[]>(
+    initial.subscriber_user_ids ?? [],
+  );
 
   const initialCfg: TriggerConfig = (() => {
     if (isCreate) {
@@ -296,11 +331,18 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
   })();
   const [triggerKind, setTriggerKind] = useState<"schedule" | "webhook">(initialKind);
 
+  const initialEventFilters: WebhookEventFilter[] =
+    !isCreate && props.triggers[0]?.event_filters ? props.triggers[0].event_filters : [];
+  const [eventFilters, setEventFilters] = useState<WebhookEventFilter[]>(initialEventFilters);
+
   const initialCronRef = useRef(toCronExpression(initialCfg));
   const initialTimezoneRef = useRef(initialCfg.timezone);
+  const initialEventFiltersRef = useRef(serializeEventFilters(initialEventFilters));
   const scheduleDirty =
     toCronExpression(triggerConfig) !== initialCronRef.current ||
     triggerConfig.timezone !== initialTimezoneRef.current;
+  const eventFiltersDirty =
+    serializeEventFilters(eventFilters) !== initialEventFiltersRef.current;
 
   const firstTriggerIdRef = useRef(
     !isCreate && props.triggers[0] ? props.triggers[0].id : null,
@@ -355,6 +397,10 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
           assignee_type: assigneeType,
           assignee_id: assigneeId,
           execution_mode: executionMode,
+          subscribers: subscriberUserIds.map((user_id) => ({
+            user_type: "member" as const,
+            user_id,
+          })),
         });
         let triggerOk = true;
         let triggerErrMessage: string | null = null;
@@ -364,6 +410,7 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
             webhookTrigger = await createTrigger.mutateAsync({
               autopilotId: autopilot.id,
               kind: "webhook",
+              event_filters: eventFilters.length > 0 ? eventFilters : undefined,
             });
           } else {
             await createTrigger.mutateAsync({
@@ -403,9 +450,13 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
           assignee_type: assigneeType,
           assignee_id: assigneeId,
           execution_mode: executionMode,
+          subscribers: subscriberUserIds.map((user_id) => ({
+            user_type: "member" as const,
+            user_id,
+          })),
         });
-        let scheduleOk = true;
-        let scheduleErrMessage: string | null = null;
+        let triggerOk = true;
+        let triggerErrMessage: string | null = null;
         // Skip the schedule sync when the autopilot's first trigger is a
         // webhook — there's no cron to update there, and the schedule
         // panel isn't even rendered for webhook autopilots.
@@ -428,16 +479,38 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
               });
             }
           } catch (err) {
-            scheduleOk = false;
-            scheduleErrMessage =
+            triggerOk = false;
+            triggerErrMessage =
+              err instanceof Error && err.message ? err.message : null;
+          }
+        }
+        // Webhook autopilots have no schedule, but the user can still edit
+        // event_filters from the same dialog. PATCH only when the snapshot
+        // taken on open differs from the live state. Sending an explicit
+        // empty array clears filters server-side (tri-state semantics — see
+        // UpdateAutopilotTriggerRequest in autopilot.go).
+        if (
+          triggerKind === "webhook" &&
+          eventFiltersDirty &&
+          firstTriggerIdRef.current
+        ) {
+          try {
+            await updateTrigger.mutateAsync({
+              autopilotId: props.autopilotId,
+              triggerId: firstTriggerIdRef.current,
+              event_filters: eventFilters,
+            });
+          } catch (err) {
+            triggerOk = false;
+            triggerErrMessage =
               err instanceof Error && err.message ? err.message : null;
           }
         }
         onOpenChange(false);
-        if (scheduleOk) {
+        if (triggerOk) {
           toast.success(t(($) => $.dialog.toast_updated));
         } else {
-          toast.error(formatSchedulePartialFailureToast(t, "update", scheduleErrMessage));
+          toast.error(formatSchedulePartialFailureToast(t, "update", triggerErrMessage));
         }
       }
     } catch (err) {
@@ -495,10 +568,34 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
             )}
           </div>
           <div className="flex items-center gap-1">
+            {!isCreate && props.canManageAccess && (
+              <>
+                <Popover>
+                  <PopoverTrigger className="flex items-center gap-1.5 rounded-sm px-2 py-1 text-xs text-muted-foreground opacity-90 transition-all hover:bg-accent/60 hover:text-foreground hover:opacity-100 cursor-pointer">
+                    <Users className="size-3.5" />
+                    <span>{t(($) => $.access.title)}</span>
+                  </PopoverTrigger>
+                  <PopoverContent align="end" sideOffset={6} keepMounted className="w-80">
+                    <PopoverHeader>
+                      <PopoverTitle>{t(($) => $.access.title)}</PopoverTitle>
+                      <PopoverDescription className="text-xs">
+                        {t(($) => $.access.description)}
+                      </PopoverDescription>
+                    </PopoverHeader>
+                    <AutopilotAccessManager
+                      autopilotId={props.autopilotId}
+                      collaborators={props.collaborators}
+                    />
+                  </PopoverContent>
+                </Popover>
+                <span className="mx-0.5 h-4 w-px bg-border" />
+              </>
+            )}
             <Tooltip>
               <TooltipTrigger
                 render={
                   <button
+                    type="button"
                     onClick={() => setIsExpanded((v) => !v)}
                     className="rounded-sm p-1.5 opacity-70 hover:opacity-100 hover:bg-accent/60 transition-all cursor-pointer"
                   >
@@ -514,6 +611,7 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
               <TooltipTrigger
                 render={
                   <button
+                    type="button"
                     onClick={() => onOpenChange(false)}
                     className="rounded-sm p-1.5 opacity-70 hover:opacity-100 hover:bg-accent/60 transition-all cursor-pointer"
                   >
@@ -539,10 +637,10 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
         {/* Body: two columns (stacks on narrow screens via flex-wrap at container level) */}
         <div
           key={contentKey}
-          className="flex-1 min-h-0 flex flex-col lg:flex-row overflow-hidden"
+          className="flex-1 min-h-0 flex flex-col lg:flex-row overflow-y-auto lg:overflow-hidden"
         >
           {/* Left: Runbook */}
-          <div className="flex-1 min-h-0 flex flex-col border-b lg:border-b-0 lg:border-r">
+          <div className="flex-none lg:flex-1 min-h-0 flex flex-col border-b lg:border-b-0 lg:border-r">
             <div className="px-6 pt-5 pb-3 shrink-0">
               <TitleEditor
                 autoFocus={isCreate}
@@ -563,8 +661,8 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
               </span>
             </div>
 
-            <div className="flex-1 min-h-0 px-6 pb-6 flex flex-col">
-              <div className="h-full overflow-y-auto rounded-lg border border-border bg-background transition-colors focus-within:border-input px-4 py-3">
+            <div className="flex-1 min-h-0 px-6 pb-6 flex flex-col lg:h-full">
+              <div className="min-h-[200px] lg:min-h-0 lg:h-full overflow-y-auto rounded-lg border border-border bg-background transition-colors focus-within:border-input px-4 py-3">
                 <ContentEditor
                   defaultValue={initial.description ?? ""}
                   placeholder={t(($) => $.dialog.description_placeholder)}
@@ -577,7 +675,7 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
           </div>
 
           {/* Right: Configuration */}
-          <aside className="w-full lg:w-[340px] shrink-0 overflow-y-auto px-5 py-5 space-y-5 bg-muted/30">
+          <aside className="w-full lg:w-[340px] shrink-0 overflow-visible lg:overflow-y-auto px-5 py-5 space-y-5 bg-muted/30">
             <AgentSection
               selectedType={assigneeType}
               selectedId={assigneeId}
@@ -593,6 +691,13 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
                 projectId={projectId}
                 selectedProject={selectedProject}
                 onChange={setProjectId}
+              />
+            )}
+
+            {executionMode === "create_issue" && (
+              <SubscribersSection
+                selectedUserIds={subscriberUserIds}
+                onChange={setSubscriberUserIds}
               />
             )}
 
@@ -612,7 +717,11 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
                 }
               />
             ) : (
-              <WebhookHelpSection isCreate={isCreate} />
+              <WebhookSection
+                isCreate={isCreate}
+                eventFilters={eventFilters}
+                onEventFiltersChange={setEventFilters}
+              />
             )}
           </aside>
         </div>
@@ -691,7 +800,7 @@ function AgentSection({
               <ActorAvatar
                 actorType={selectedType}
                 actorId={selectedId}
-                size={28}
+                size="md"
                 showStatusDot={selectedType === "agent"}
               />
             ) : (
@@ -812,6 +921,28 @@ function ProjectSection({
             <ChevronDown className="size-3.5 text-muted-foreground shrink-0" />
           </button>
         }
+      />
+    </div>
+  );
+}
+
+function SubscribersSection({
+  selectedUserIds,
+  onChange,
+}: {
+  selectedUserIds: string[];
+  onChange: (next: string[]) => void;
+}) {
+  const { t } = useT("autopilots");
+  return (
+    <div>
+      <SectionLabel>{t(($) => $.dialog.section_subscribers)}</SectionLabel>
+      <p className="mb-2 text-[11px] text-muted-foreground">
+        {t(($) => $.dialog.subscribers_hint)}
+      </p>
+      <SubscriberMultiSelect
+        selectedIds={selectedUserIds}
+        onChange={onChange}
       />
     </div>
   );
@@ -1008,16 +1139,30 @@ function TriggerKindButton({
   );
 }
 
-function WebhookHelpSection({ isCreate }: { isCreate: boolean }) {
+function WebhookSection({
+  isCreate,
+  eventFilters,
+  onEventFiltersChange,
+}: {
+  isCreate: boolean;
+  eventFilters: WebhookEventFilter[];
+  onEventFiltersChange: (filters: WebhookEventFilter[]) => void;
+}) {
   const { t } = useT("autopilots");
   return (
-    <div>
-      <SectionLabel>{t(($) => $.dialog.section_webhook)}</SectionLabel>
-      <p className="rounded-md border bg-background px-3 py-2 text-xs text-muted-foreground leading-relaxed">
-        {isCreate
-          ? t(($) => $.dialog.webhook_help_create)
-          : t(($) => $.dialog.webhook_help_edit)}
-      </p>
+    <div className="space-y-3">
+      <div>
+        <SectionLabel>{t(($) => $.dialog.section_webhook)}</SectionLabel>
+        <p className="rounded-md border bg-background px-3 py-2 text-xs text-muted-foreground leading-relaxed">
+          {isCreate
+            ? t(($) => $.dialog.webhook_help_create)
+            : t(($) => $.dialog.webhook_help_edit)}
+        </p>
+      </div>
+      <WebhookEventFilterSection
+        filters={eventFilters}
+        onChange={onEventFiltersChange}
+      />
     </div>
   );
 }
@@ -1048,12 +1193,11 @@ function WebhookCreatedPanel({
 
   const handleCopy = async () => {
     if (!url) return;
-    try {
-      await navigator.clipboard.writeText(url);
+    if (await copyText(url)) {
       setCopied(true);
       toast.success(t(($) => $.trigger_row.url_copied));
       setTimeout(() => setCopied(false), 1500);
-    } catch {
+    } else {
       toast.error(t(($) => $.trigger_row.url_copy_failed));
     }
   };

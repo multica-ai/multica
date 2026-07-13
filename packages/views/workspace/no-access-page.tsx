@@ -1,8 +1,13 @@
 "use client";
 
 import { useEffect } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { Button } from "@multica/ui/components/ui/button";
-import { paths } from "@multica/core/paths";
+import {
+  resolvePostAuthDestination,
+  useHasOnboarded,
+} from "@multica/core/paths";
+import { workspaceListOptions } from "@multica/core/workspace/queries";
 import { useNavigation } from "../navigation";
 import { useLogout } from "../auth";
 import { DragStrip } from "../platform";
@@ -18,19 +23,29 @@ export function NoAccessPage() {
   const { t } = useT("workspace");
   const nav = useNavigation();
   const logout = useLogout();
+  const hasOnboarded = useHasOnboarded();
+  const { data: workspaces = [] } = useQuery(workspaceListOptions());
 
   // Clear stale `last_workspace_slug` cookie. The web proxy redirects `/` to
-  // `/<lastSlug>/issues` based on this cookie alone (no access check). When
-  // the cookie points at a workspace the user has just lost access to, the
-  // user gets trapped in a loop: NoAccessPage → click "Go to my workspaces"
-  // → `/` → proxy redirects back to the same bad slug → NoAccessPage.
-  // Clearing the cookie here lets the proxy fall through to the landing page,
-  // which then resolves the correct destination via the workspace list.
+  // `/<lastSlug>/issues` based on this cookie alone (no access check). When the
+  // cookie points at a workspace the user has just lost access to, any hit on
+  // `/` — manual navigation, a browser Back into `/`, or a fresh page load —
+  // bounces the user straight back to the bad slug and re-traps them on
+  // NoAccessPage. The recovery button no longer routes through `/` (recover()
+  // resolves a concrete destination directly), but clearing the cookie here
+  // keeps those other `/` entry points from re-triggering the loop.
   // No-op outside the browser (desktop renderer also has document, harmless).
   useEffect(() => {
     if (typeof document === "undefined") return;
     document.cookie = "last_workspace_slug=; path=/; max-age=0; SameSite=Lax";
   }, []);
+
+  // replace, not push: the failed `/<bad-slug>` URL must not stay in history,
+  // or a browser Back would land the user right back on this NoAccessPage.
+  const recover = () => {
+    nav.replace(resolvePostAuthDestination(workspaces, hasOnboarded));
+  };
+
   return (
     <div className="flex min-h-svh flex-col">
       <DragStrip />
@@ -44,7 +59,7 @@ export function NoAccessPage() {
           </p>
         </div>
         <div className="flex flex-col gap-2 sm:flex-row">
-          <Button onClick={() => nav.push(paths.root())}>
+          <Button onClick={recover}>
             {t(($) => $.no_access.go_to_workspaces)}
           </Button>
           <Button variant="outline" onClick={logout}>

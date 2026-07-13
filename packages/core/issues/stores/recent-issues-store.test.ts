@@ -35,6 +35,65 @@ describe("useRecentIssuesStore.recordVisit", () => {
   });
 });
 
+describe("useRecentIssuesStore.forgetIssue", () => {
+  it("removes a single id from the workspace bucket", () => {
+    const { recordVisit, forgetIssue } = useRecentIssuesStore.getState();
+    recordVisit("ws-a", "issue-1");
+    recordVisit("ws-a", "issue-2");
+    recordVisit("ws-a", "issue-3");
+
+    forgetIssue("ws-a", "issue-2");
+
+    const ids = useRecentIssuesStore
+      .getState()
+      .byWorkspace["ws-a"]?.map((e) => e.id);
+    expect(ids).toEqual(["issue-3", "issue-1"]);
+  });
+
+  it("drops the bucket entirely when the last id is removed", () => {
+    const { recordVisit, forgetIssue } = useRecentIssuesStore.getState();
+    recordVisit("ws-a", "issue-1");
+    recordVisit("ws-b", "issue-2");
+
+    forgetIssue("ws-a", "issue-1");
+
+    const state = useRecentIssuesStore.getState().byWorkspace;
+    expect(state["ws-a"]).toBeUndefined();
+    expect(state["ws-b"]?.map((e) => e.id)).toEqual(["issue-2"]);
+  });
+
+  it("does not touch other workspaces' buckets", () => {
+    const { recordVisit, forgetIssue } = useRecentIssuesStore.getState();
+    recordVisit("ws-a", "issue-1");
+    recordVisit("ws-b", "issue-1");
+
+    forgetIssue("ws-a", "issue-1");
+
+    const state = useRecentIssuesStore.getState().byWorkspace;
+    expect(state["ws-a"]).toBeUndefined();
+    expect(state["ws-b"]?.map((e) => e.id)).toEqual(["issue-1"]);
+  });
+
+  it("is a no-op when the id is not in the bucket", () => {
+    const { recordVisit, forgetIssue } = useRecentIssuesStore.getState();
+    recordVisit("ws-a", "issue-1");
+    const before = useRecentIssuesStore.getState().byWorkspace;
+
+    forgetIssue("ws-a", "issue-missing");
+
+    expect(useRecentIssuesStore.getState().byWorkspace).toBe(before);
+  });
+
+  it("is a no-op when the workspace has no bucket", () => {
+    const { forgetIssue } = useRecentIssuesStore.getState();
+    const before = useRecentIssuesStore.getState().byWorkspace;
+
+    forgetIssue("ws-missing", "issue-1");
+
+    expect(useRecentIssuesStore.getState().byWorkspace).toBe(before);
+  });
+});
+
 describe("useRecentIssuesStore.pruneWorkspaces", () => {
   it("drops buckets for workspaces not in the active set", () => {
     const { recordVisit, pruneWorkspaces } = useRecentIssuesStore.getState();

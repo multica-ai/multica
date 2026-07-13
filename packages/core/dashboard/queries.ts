@@ -1,45 +1,55 @@
 import { queryOptions } from "@tanstack/react-query";
 import { api } from "../api";
 
-// Workspace dashboard query options. All three endpoints share the same
-// (wsId, days, projectId) key shape so workspace switching, time-range
-// changes, and the project filter each invalidate the cache cleanly.
-//
-// The cache key includes `wsId` explicitly: TanStack Query already isolates
-// per workspace via the key, but threading wsId into the queryFn lets
-// callers fail fast (return [] on empty wsId) instead of issuing a request
-// the server would reject.
-//
-// `projectId` is normalised to `null` (not undefined / "all") so the
-// queryKey shape is stable across renders even when the dropdown sits on
-// "all projects".
-
 export const dashboardKeys = {
   all: (wsId: string) => ["dashboard", wsId] as const,
-  daily: (wsId: string, days: number, projectId: string | null) =>
-    [...dashboardKeys.all(wsId), "daily", days, projectId] as const,
-  byAgent: (wsId: string, days: number, projectId: string | null) =>
-    [...dashboardKeys.all(wsId), "by-agent", days, projectId] as const,
-  agentRuntime: (wsId: string, days: number, projectId: string | null) =>
-    [...dashboardKeys.all(wsId), "agent-runtime", days, projectId] as const,
-  runTimeDaily: (wsId: string, days: number, projectId: string | null) =>
-    [...dashboardKeys.all(wsId), "runtime-daily", days, projectId] as const,
+  daily: (
+    wsId: string,
+    days: number,
+    projectId: string | null,
+    tz: string,
+  ) => [...dashboardKeys.all(wsId), "daily", days, projectId, tz] as const,
+  byAgent: (
+    wsId: string,
+    days: number,
+    projectId: string | null,
+    tz: string,
+  ) => [...dashboardKeys.all(wsId), "by-agent", days, projectId, tz] as const,
+  agentRuntime: (
+    wsId: string,
+    days: number,
+    projectId: string | null,
+    tz: string,
+  ) => [...dashboardKeys.all(wsId), "agent-runtime", days, projectId, tz] as const,
+  runTimeDaily: (
+    wsId: string,
+    days: number,
+    projectId: string | null,
+    tz: string,
+  ) => [...dashboardKeys.all(wsId), "runtime-daily", days, projectId, tz] as const,
 };
 
-// 60s staleTime matches the per-runtime usage queries — the data is rollup-
-// driven on the server (5-min rollup cadence) and the dashboard isn't a
-// real-time view, so background refetches every minute are plenty.
+// 5-min rollup cadence on the server, 60s background refetch on the client.
 const STALE_TIME = 60 * 1000;
 
+// `tz` participates in every dashboard key so a Preferences change
+// repoints the cache. All four series — token rollups and the
+// atq.completed_at-based run-time series — slice their day boundary in
+// the viewer's tz, so the four dashboard tabs always agree.
 export function dashboardUsageDailyOptions(
   wsId: string,
   days: number,
   projectId: string | null,
+  tz: string,
 ) {
   return queryOptions({
-    queryKey: dashboardKeys.daily(wsId, days, projectId),
+    queryKey: dashboardKeys.daily(wsId, days, projectId, tz),
     queryFn: () =>
-      api.getDashboardUsageDaily({ days, project_id: projectId ?? undefined }),
+      api.getDashboardUsageDaily({
+        days,
+        project_id: projectId ?? undefined,
+        tz,
+      }),
     enabled: !!wsId,
     staleTime: STALE_TIME,
   });
@@ -49,11 +59,16 @@ export function dashboardUsageByAgentOptions(
   wsId: string,
   days: number,
   projectId: string | null,
+  tz: string,
 ) {
   return queryOptions({
-    queryKey: dashboardKeys.byAgent(wsId, days, projectId),
+    queryKey: dashboardKeys.byAgent(wsId, days, projectId, tz),
     queryFn: () =>
-      api.getDashboardUsageByAgent({ days, project_id: projectId ?? undefined }),
+      api.getDashboardUsageByAgent({
+        days,
+        project_id: projectId ?? undefined,
+        tz,
+      }),
     enabled: !!wsId,
     staleTime: STALE_TIME,
   });
@@ -63,11 +78,16 @@ export function dashboardAgentRunTimeOptions(
   wsId: string,
   days: number,
   projectId: string | null,
+  tz: string,
 ) {
   return queryOptions({
-    queryKey: dashboardKeys.agentRuntime(wsId, days, projectId),
+    queryKey: dashboardKeys.agentRuntime(wsId, days, projectId, tz),
     queryFn: () =>
-      api.getDashboardAgentRunTime({ days, project_id: projectId ?? undefined }),
+      api.getDashboardAgentRunTime({
+        days,
+        project_id: projectId ?? undefined,
+        tz,
+      }),
     enabled: !!wsId,
     staleTime: STALE_TIME,
   });
@@ -77,11 +97,16 @@ export function dashboardRunTimeDailyOptions(
   wsId: string,
   days: number,
   projectId: string | null,
+  tz: string,
 ) {
   return queryOptions({
-    queryKey: dashboardKeys.runTimeDaily(wsId, days, projectId),
+    queryKey: dashboardKeys.runTimeDaily(wsId, days, projectId, tz),
     queryFn: () =>
-      api.getDashboardRunTimeDaily({ days, project_id: projectId ?? undefined }),
+      api.getDashboardRunTimeDaily({
+        days,
+        project_id: projectId ?? undefined,
+        tz,
+      }),
     enabled: !!wsId,
     staleTime: STALE_TIME,
   });

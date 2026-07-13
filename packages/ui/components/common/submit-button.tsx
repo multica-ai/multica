@@ -22,8 +22,12 @@ interface SubmitButtonProps {
    * free of `@multica/core` (platform-detection) and i18n imports.
    */
   tooltip?: ReactNode;
+  /** Accessible name for the icon-only submit button. */
+  ariaLabel?: string;
   /** Tooltip shown over the stop button while a run is in progress. */
   stopTooltip?: ReactNode;
+  /** Accessible name for the icon-only stop button. */
+  stopAriaLabel?: string;
 }
 
 function SubmitButton({
@@ -33,12 +37,19 @@ function SubmitButton({
   running,
   onStop,
   tooltip,
+  ariaLabel,
   stopTooltip,
+  stopAriaLabel,
 }: SubmitButtonProps) {
   if (running) {
     const stopButton = (
-      <Button size="icon-sm" onClick={onStop}>
-        <Square className="fill-current" />
+      <Button
+        size="icon-sm"
+        className="rounded-full"
+        onClick={onStop}
+        aria-label={stopAriaLabel}
+      >
+        <Square className="fill-current" aria-hidden="true" />
       </Button>
     );
     if (!stopTooltip) return stopButton;
@@ -51,8 +62,18 @@ function SubmitButton({
   }
 
   const submitButton = (
-    <Button size="icon-sm" disabled={disabled || loading} onClick={onClick}>
-      {loading ? <Loader2 className="animate-spin" /> : <ArrowUp />}
+    <Button
+      size="icon-sm"
+      className="rounded-full"
+      disabled={disabled || loading}
+      onClick={onClick}
+      aria-label={ariaLabel}
+    >
+      {loading ? (
+        <Loader2 className="animate-spin" aria-hidden="true" />
+      ) : (
+        <ArrowUp aria-hidden="true" />
+      )}
     </Button>
   );
   if (!tooltip) return submitButton;

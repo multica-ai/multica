@@ -5,6 +5,7 @@ import type { Agent, MemberRole } from "@multica/core/types";
 import { useWorkspaceId } from "@multica/core";
 import { agentRunCounts30dOptions } from "@multica/core/agents";
 import { agentListOptions, memberListOptions } from "@multica/core/workspace/queries";
+import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { ActorAvatar as ActorAvatarBase } from "@multica/ui/components/common/actor-avatar";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
@@ -80,8 +81,8 @@ export function MemberProfileCard({ userId }: MemberProfileCardProps) {
         <ActorAvatarBase
           name={member.name}
           initials={initials}
-          avatarUrl={member.avatar_url}
-          size={40}
+          avatarUrl={resolvePublicFileUrl(member.avatar_url)}
+          size="xl"
           className="rounded-full"
         />
         <div className="min-w-0 flex-1">
@@ -139,9 +140,9 @@ function OwnedAgentsSection({ agents }: { agents: Agent[] }) {
             <ActorAvatar
               actorType="agent"
               actorId={a.id}
-              size={20}
+              size="sm"
               showStatusDot
-              className="mt-0.5 shrink-0 rounded-md"
+              className="mt-0.5 shrink-0"
             />
             <div className="min-w-0 flex-1">
               <div className="truncate font-medium">{a.name}</div>

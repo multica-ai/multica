@@ -12,22 +12,30 @@ const OTHER_INPUT_MAX_LENGTH = 80;
  * explicit Continue button gates the transition so users can change
  * their mind before committing). The `Other` variant swaps its
  * label area for a free-text input when selected.
+ *
+ * `mode` controls ARIA role: `"radio"` for single-select questions
+ * (role), `"checkbox"` for multi-select (source, use case). Visual
+ * style is identical — the border/shadow treatment already conveys
+ * "selected"; multi-select cards just additionally don't deselect
+ * other cards when clicked, which is the parent's responsibility.
  */
 export function IconOptionCard({
   icon,
   label,
   selected,
   onSelect,
+  mode = "radio",
 }: {
   icon: ReactNode;
   label: string;
   selected: boolean;
   onSelect: () => void;
+  mode?: "radio" | "checkbox";
 }) {
   return (
     <button
       type="button"
-      role="radio"
+      role={mode}
       aria-checked={selected}
       onClick={onSelect}
       className={cn(
@@ -65,6 +73,7 @@ export function IconOtherOptionCard({
   onOtherChange,
   onConfirm,
   placeholder,
+  mode = "radio",
 }: {
   icon: ReactNode;
   label: string;
@@ -74,10 +83,11 @@ export function IconOtherOptionCard({
   onOtherChange: (value: string) => void;
   onConfirm: () => void;
   placeholder: string;
+  mode?: "radio" | "checkbox";
 }) {
   return (
     <div
-      role="radio"
+      role={mode}
       aria-checked={selected}
       onClick={() => {
         if (!selected) onSelect();

@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // Wrapper around `electron-builder` that keeps the Desktop version in
 // lockstep with the CLI. Both are derived from `git describe --tags
-// --always --dirty` — the same source GoReleaser reads for the CLI
+// --match 'v[0-9]*' --always --dirty` — the same source GoReleaser reads
+// for the CLI
 // binary via the `main.version` ldflag — so a single `vX.Y.Z` tag push
 // produces matching CLI and Desktop versions.
 //
@@ -21,10 +22,11 @@
 // build, set `CSC_IDENTITY_AUTO_DISCOVERY=false` so electron-builder falls
 // back to an ad-hoc signature instead of requiring a Developer ID cert.
 //
-// The `normalizeGitVersion` helper is exported so tests can cover the
-// version-derivation logic without shelling out.
+// The `normalizeGitVersion`, `deriveVersion`, and `DESCRIBE_ARGS` exports let
+// tests cover version derivation both as a pure string transform and as the
+// real `git describe` invocation against a throwaway repo.
 
-import { execFileSync, spawnSync, execSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { delimiter, dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -70,9 +72,17 @@ const MAC_ALL_PLATFORM_TARGETS = [
   { platform: "linux", arch: "arm64" },
 ];
 
-function sh(cmd) {
+// Run a git subcommand with its arguments handed straight to the binary,
+// never through a shell. A match pattern like `v[0-9]*` must reach git as a
+// single literal argument on every platform. Passing the whole command as a
+// shell string (execSync) is unsafe on Windows: cmd.exe does not strip the
+// POSIX single quotes around 'v[0-9]*', so git receives the quotes verbatim,
+// matches no tag, and the version silently degrades to the 0.0.0-g<hash>
+// fallback — which is exactly how a `0.0.0-…` Windows Desktop build once
+// escaped to a GitHub Release.
+function git(args, cwd) {
   try {
-    return execSync(cmd, { encoding: "utf-8" }).trim();
+    return execFileSync("git", args, { encoding: "utf-8", cwd }).trim();
   } catch {
     return "";
   }
@@ -98,22 +108,51 @@ export function stripLeadingSeparator(argv) {
  *   - "v0.1.36"                → "0.1.36"
  *   - "v0.1.35-14-gf1415e96"   → "0.1.35-14-gf1415e96"  (semver prerelease)
  *   - "v0.1.35-…-dirty"        → same, dirty suffix preserved
- *   - "f1415e96" (no tag)      → "0.0.0-f1415e96"        (fallback)
+ *   - "f1415e96" (no tag)      → "0.0.0-gf1415e96"       (fallback)
+ *   - "2f24057b" (no tag, hash begins with a digit) → "0.0.0-g2f24057b"
+ *   - "0123456"  (no tag, all-digit hash w/ leading zero) → "0.0.0-g0123456"
  *
  * Leading `v` is stripped so the result is valid semver for package.json.
+ * The fallback matters because a bare commit hash is never valid semver —
+ * even one that happens to start with a digit (e.g. "2f24057b") — and
+ * electron-updater throws on launch if package.json carries such a version.
+ * The hash is prefixed with `g` so the pre-release identifier is always
+ * alphanumeric; a bare all-digit hash with a leading zero (e.g. "0123456")
+ * would otherwise form `0.0.0-0123456`, which is invalid semver.
  */
 export function normalizeGitVersion(raw) {
   if (!raw) return null;
   const stripped = raw.replace(/^v/, "");
-  if (!/^\d/.test(stripped)) {
-    // No reachable tag — `git describe` fell back to just the commit hash.
-    return `0.0.0-${stripped}`;
+  // A real version begins with major.minor.patch. The bare commit hash
+  // that `git describe --always` falls back to (no reachable tag) does not,
+  // so coerce it to a 0.0.0 prerelease rather than passing it through.
+  // Prefix the hash with `g` (mirroring `git describe`'s own `g<hash>`
+  // shorthand) so a hash like "0123456" yields "0.0.0-g0123456" — a single
+  // alphanumeric identifier — instead of the invalid "0.0.0-0123456".
+  if (!/^\d+\.\d+\.\d+/.test(stripped)) {
+    return `0.0.0-g${stripped}`;
   }
   return stripped;
 }
 
-function deriveVersion() {
-  return normalizeGitVersion(sh("git describe --tags --always --dirty"));
+// The exact argv handed to `git describe` for version derivation. Kept as a
+// standalone array — never a shell command string — so the `v[0-9]*` match
+// pattern reaches git as one literal argument regardless of platform (see the
+// git() note above for why a shell string breaks on Windows).
+export const DESCRIBE_ARGS = [
+  "describe",
+  "--tags",
+  "--match",
+  "v[0-9]*",
+  "--always",
+  "--dirty",
+];
+
+// Exported (with an optional cwd) so tests can exercise the real describe
+// invocation against a throwaway repo, not just normalizeGitVersion in
+// isolation — the gap that let the Windows quoting regression through CI.
+export function deriveVersion(cwd) {
+  return normalizeGitVersion(git(DESCRIBE_ARGS, cwd));
 }
 
 function uniqueOrdered(values) {

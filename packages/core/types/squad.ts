@@ -2,6 +2,12 @@ export type SquadMemberType = "agent" | "member";
 
 export type SquadActivityOutcome = "action" | "no_action" | "failed";
 
+export interface SquadMemberPreview {
+  member_type: SquadMemberType;
+  member_id: string;
+  role: string;
+}
+
 export interface Squad {
   id: string;
   workspace_id: string;
@@ -15,6 +21,8 @@ export interface Squad {
   updated_at: string;
   archived_at: string | null;
   archived_by: string | null;
+  member_count?: number;
+  member_preview?: SquadMemberPreview[];
 }
 
 export interface SquadMember {
@@ -77,12 +85,17 @@ export interface CreateSquadActivityLogRequest {
   details?: unknown;
 }
 
-// SquadMemberStatus mirrors the four-way bucket the back-end derives in
+// SquadMemberStatus mirrors the five-way bucket the back-end derives in
 // handler/squad.go::deriveSquadMemberStatus. Kept as a string union here
 // (rather than re-derived from snapshot data) so the squad page can render
 // the freshest server-side judgement without re-fetching the agent
-// snapshot / runtime list.
-export type SquadMemberStatusValue = "working" | "idle" | "offline" | "unstable";
+// snapshot / runtime list. `archived` wins over every runtime/task signal.
+export type SquadMemberStatusValue =
+  | "working"
+  | "idle"
+  | "offline"
+  | "unstable"
+  | "archived";
 
 export interface SquadActiveIssueBrief {
   issue_id: string;

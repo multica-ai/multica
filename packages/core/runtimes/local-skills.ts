@@ -48,6 +48,8 @@ export async function resolveRuntimeLocalSkills(
   return {
     skills: current.skills ?? [],
     supported: current.supported,
+	mcpServers: current.mcp_servers ?? [],
+	mcpSupported: current.mcp_supported === true,
   };
 }
 
@@ -67,6 +69,16 @@ export async function resolveRuntimeLocalSkillImport(
     current = await api.getImportLocalSkillResult(runtimeId, initial.id);
   }
 
+  if (current.status === "conflict") {
+    if (!current.conflict) {
+      throw new Error("runtime local skill import conflict missing details");
+    }
+    return {
+      status: "conflict",
+      conflict: current.conflict,
+    };
+  }
+
   if (current.status === "failed" || current.status === "timeout") {
     throw new Error(current.error || "runtime local skill import failed");
   }
@@ -74,7 +86,10 @@ export async function resolveRuntimeLocalSkillImport(
     throw new Error("runtime local skill import did not return a skill");
   }
 
-  return { skill: current.skill };
+  return {
+    status: current.action === "overwrite" ? "updated" : "created",
+    skill: current.skill,
+  };
 }
 
 export function runtimeLocalSkillsOptions(runtimeId: string | null | undefined) {
@@ -88,3 +103,8 @@ export function runtimeLocalSkillsOptions(runtimeId: string | null | undefined) 
     retry: false,
   });
 }
+
+// The daemon returns both local skills and a redacted MCP inventory from the
+// same round trip. Keep the original export for import flows and use this
+// capability-oriented alias on Agent detail surfaces.
+export const runtimeCapabilitiesOptions = runtimeLocalSkillsOptions;

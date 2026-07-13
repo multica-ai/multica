@@ -3,6 +3,9 @@
 import { useState } from "react";
 import { Check, Copy, Terminal } from "lucide-react";
 import { Card, CardContent } from "@multica/ui/components/ui/card";
+import { CODE_LIGATURE_CLASS } from "@multica/ui/lib/code-style";
+import { cn } from "@multica/ui/lib/utils";
+import { copyText } from "@multica/ui/lib/clipboard";
 import { useT } from "../../i18n";
 
 const INSTALL_CMD =
@@ -14,9 +17,11 @@ function CopyButton({ text }: { text: string }) {
   const [copied, setCopied] = useState(false);
 
   const handleCopy = () => {
-    navigator.clipboard.writeText(text);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    void copyText(text).then((ok) => {
+      if (!ok) return;
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
   };
 
   return (
@@ -43,7 +48,12 @@ function Step({ n, label, cmd }: { n: number; label: string; cmd: string }) {
       </p>
       <div className="flex items-start gap-2 rounded-lg bg-muted px-3 py-2.5 font-mono text-sm">
         <Terminal className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-        <code className="min-w-0 flex-1 whitespace-pre-wrap break-all">
+        <code
+          className={cn(
+            "min-w-0 flex-1 whitespace-pre-wrap break-all",
+            CODE_LIGATURE_CLASS,
+          )}
+        >
           {cmd}
         </code>
         <CopyButton text={cmd} />

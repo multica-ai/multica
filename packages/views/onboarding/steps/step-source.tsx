@@ -16,6 +16,7 @@ import {
   OpenAIIcon,
   XIcon,
   YouTubeIcon,
+  GitHubIcon,
 } from "../components/brand-icons";
 import { StepQuestion, type QuestionOption } from "./step-question";
 import { useT } from "../../i18n";
@@ -45,6 +46,7 @@ export function StepSource({
     { slug: "social_x", icon: <XIcon className="h-[15px] w-[15px]" />, label: t(($) => $.questions.source.social_x) },
     { slug: "social_linkedin", icon: <LinkedInIcon className="h-[18px] w-[18px]" />, label: t(($) => $.questions.source.social_linkedin) },
     { slug: "social_youtube", icon: <YouTubeIcon className="h-[18px] w-[18px]" />, label: t(($) => $.questions.source.social_youtube) },
+    { slug: "social_github", icon: <GitHubIcon className="h-[18px] w-[18px]" />, label: t(($) => $.questions.source.social_github) },
     { slug: "social_other", icon: <Globe className="h-4 w-4" />, label: t(($) => $.questions.source.social_misc) },
     { slug: "blog_newsletter", icon: <Newspaper className="h-4 w-4" />, label: t(($) => $.questions.source.blog_newsletter) },
     { slug: "ai_assistant", icon: <OpenAIIcon className="h-[16px] w-[16px]" />, label: t(($) => $.questions.source.ai_assistant) },
@@ -54,6 +56,27 @@ export function StepSource({
     { slug: "other", icon: <MoreHorizontal className="h-4 w-4" />, label: t(($) => $.questions.source.other), isOther: true },
   ];
 
+  // Single-select on the primary acquisition source. The server schema
+  // keeps `source` as a string array for back-compat with v2 multi-
+  // select rows, but the UI only ever commits a one-element array —
+  // primary-source attribution is the documented industry default for
+  // HDYHAU prompts (Fairing, Recast, HockeyStack) and keeps channel
+  // weights clean for analytics.
+  const selected: readonly string[] = answers.source?.[0] ? [answers.source[0]] : [];
+
+  const pick = (slug: string) => {
+    const typed = slug as Source;
+    onChange({
+      source: [typed],
+      // Switching off Other clears the free-text input so a stale
+      // value can't leak into the next pick. Picking Other keeps the
+      // existing text so the user can finish typing without losing
+      // their input.
+      source_other: typed === "other" ? answers.source_other : null,
+      source_skipped: false,
+    });
+  };
+
   return (
     <StepQuestion
       step="source"
@@ -61,24 +84,14 @@ export function StepSource({
       eyebrow={t(($) => $.questions.eyebrow_about_you)}
       question={t(($) => $.questions.source.question)}
       options={options}
-      selectedSlug={answers.source ?? (answers.source_other ? "other" : null)}
+      selectedSlugs={selected}
       otherValue={answers.source_other ?? ""}
       onOtherChange={(v) => onChange({ source_other: v })}
       otherPlaceholder={t(($) => $.questions.source.other_placeholder)}
-      onAnswer={(slug) => {
-        if (slug === "other") {
-          onChange({ source: "other", source_skipped: false });
-        } else {
-          onChange({
-            source: slug as Source,
-            source_other: null,
-            source_skipped: false,
-          });
-        }
-      }}
+      onAnswer={pick}
       onAdvance={onAdvance}
       onSkip={() => {
-        onChange({ source: null, source_other: null, source_skipped: true });
+        onChange({ source: [], source_other: null, source_skipped: true });
         onSkip();
       }}
       onBack={onBack}

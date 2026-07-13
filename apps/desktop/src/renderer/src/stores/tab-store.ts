@@ -76,6 +76,8 @@ interface TabStore {
    * "every live workspace has at least one tab" holds.
    */
   closeTab: (tabId: string) => void;
+  /** Close every other unpinned tab in the target tab's workspace. */
+  closeOtherTabs: (tabId: string) => void;
   /**
    * Activate a tab. Finds it across all workspaces. Sets both the owning
    * workspace as active and that group's activeTabId; needed for any code
@@ -86,6 +88,16 @@ interface TabStore {
   updateTab: (tabId: string, patch: Partial<Pick<Tab, "path" | "title" | "icon">>) => void;
   /** Patch history tracking of a tab. Finds across groups. */
   updateTabHistory: (tabId: string, historyIndex: number, historyLength: number) => void;
+  /** Recreate the active tab's router at the same path after a route-level crash. */
+  reloadActiveTab: () => void;
+  /**
+   * Close the active tab. The always-safe escape from a route-level crash:
+   * unlike reloadActiveTab (recreates the same crashing path) or navigating
+   * to a "safe" route (which may itself be the route that crashed), closing
+   * destroys the crashing router entirely and falls back to a sibling tab
+   * (or a reseeded default if it was the last tab).
+   */
+  closeActiveTab: () => void;
   /**
    * Reorder within the active workspace's group only. Clamped so a tab can
    * never cross the pinned / unpinned boundary — a drag that would move a
@@ -247,6 +259,44 @@ function findTabLocation(
   return null;
 }
 
+function buildCloseOtherTabsResult(
+  byWorkspace: Record<string, WorkspaceTabGroup>,
+  tabId: string,
+): {
+  nextByWorkspace: Record<string, WorkspaceTabGroup>;
+  closingTabs: Tab[];
+} | null {
+  const hit = findTabLocation(byWorkspace, tabId);
+  if (!hit) return null;
+  const { slug, group } = hit;
+  const closingTabs = group.tabs.filter(
+    (tab) => !tab.pinned && tab.id !== tabId,
+  );
+  if (closingTabs.length === 0) return null;
+
+  const closingIds = new Set(closingTabs.map((tab) => tab.id));
+  const nextTabs = group.tabs.filter((tab) => !closingIds.has(tab.id));
+  const nextActiveTabId = closingIds.has(group.activeTabId)
+    ? tabId
+    : group.activeTabId;
+
+  return {
+    nextByWorkspace: {
+      ...byWorkspace,
+      [slug]: { tabs: nextTabs, activeTabId: nextActiveTabId },
+    },
+    closingTabs,
+  };
+}
+
+function disposeTabRoutersAfterUnmount(tabs: readonly Tab[]) {
+  if (tabs.length === 0) return;
+  // Let React unmount every closed tab's RouterProvider before disposal.
+  window.setTimeout(() => {
+    for (const tab of tabs) tab.router.dispose();
+  }, 0);
+}
+
 // ---------------------------------------------------------------------------
 // Store
 // ---------------------------------------------------------------------------
@@ -378,10 +428,6 @@ export const useTabStore = create<TabStore>()(
         const { slug, group, index } = hit;
 
         const closing = group.tabs[index];
-        const disposeClosingRouter = () => {
-          // Let React unmount the tab's RouterProvider before disposing it.
-          window.setTimeout(() => closing.router.dispose(), 0);
-        };
 
         if (group.tabs.length === 1) {
           // Last tab in this workspace — reseed a default so the workspace
@@ -394,7 +440,7 @@ export const useTabStore = create<TabStore>()(
               [slug]: { tabs: [fresh], activeTabId: fresh.id },
             },
           });
-          disposeClosingRouter();
+          disposeTabRoutersAfterUnmount([closing]);
           return;
         }
 
@@ -410,7 +456,15 @@ export const useTabStore = create<TabStore>()(
             [slug]: { tabs: nextTabs, activeTabId: nextActiveTabId },
           },
         });
-        disposeClosingRouter();
+        disposeTabRoutersAfterUnmount([closing]);
+      },
+
+      closeOtherTabs(tabId) {
+        const { byWorkspace } = get();
+        const result = buildCloseOtherTabsResult(byWorkspace, tabId);
+        if (!result) return;
+        set({ byWorkspace: result.nextByWorkspace });
+        disposeTabRoutersAfterUnmount(result.closingTabs);
       },
 
       setActiveTab(tabId) {
@@ -473,6 +527,38 @@ export const useTabStore = create<TabStore>()(
             [slug]: { ...group, tabs: nextTabs },
           },
         });
+      },
+
+      reloadActiveTab() {
+        const { activeWorkspaceSlug, byWorkspace } = get();
+        if (!activeWorkspaceSlug) return;
+        const group = byWorkspace[activeWorkspaceSlug];
+        if (!group) return;
+        const index = group.tabs.findIndex((t) => t.id === group.activeTabId);
+        if (index < 0) return;
+        const current = group.tabs[index];
+        const nextTabs = [...group.tabs];
+        nextTabs[index] = {
+          ...current,
+          router: createTabRouter(current.path),
+          historyIndex: 0,
+          historyLength: 1,
+        };
+        set({
+          byWorkspace: {
+            ...byWorkspace,
+            [activeWorkspaceSlug]: { ...group, tabs: nextTabs },
+          },
+        });
+        window.setTimeout(() => current.router.dispose(), 0);
+      },
+
+      closeActiveTab() {
+        const { activeWorkspaceSlug, byWorkspace, closeTab } = get();
+        if (!activeWorkspaceSlug) return;
+        const group = byWorkspace[activeWorkspaceSlug];
+        if (!group) return;
+        closeTab(group.activeTabId);
       },
 
       moveTab(fromIndex, toIndex) {
@@ -555,6 +641,24 @@ export const useTabStore = create<TabStore>()(
         if (nextActive && !validSlugs.has(nextActive)) {
           nextActive = Object.keys(nextByWorkspace)[0] ?? null;
           changed = true;
+        }
+
+        if (!nextActive) {
+          nextActive = Object.keys(nextByWorkspace)[0] ?? null;
+          if (nextActive) changed = true;
+        }
+
+        if (!nextActive) {
+          const fallbackSlug = validSlugs.values().next().value;
+          if (fallbackSlug) {
+            const fresh = defaultTabFor(fallbackSlug);
+            nextByWorkspace[fallbackSlug] = {
+              tabs: [fresh],
+              activeTabId: fresh.id,
+            };
+            nextActive = fallbackSlug;
+            changed = true;
+          }
         }
 
         if (!changed) return;

@@ -34,6 +34,14 @@ interface RuntimeMachineOptions {
   now: number;
   localDaemonId?: string | null;
   localMachineName?: string | null;
+  /**
+   * The viewing user's id. Used to scope the device-name consolidation
+   * below: the runtime list is workspace-wide (every member's runtimes),
+   * so matching purely on a host name could promote another member's
+   * identically-named machine to "this machine". Only a local runtime
+   * OWNED by the current user may be consolidated by device name.
+   */
+  currentUserId?: string | null;
   workloadByRuntimeId?: Map<string, RuntimeWorkloadSummary>;
   /**
    * When true, guarantee that the result contains a machine flagged
@@ -67,6 +75,20 @@ export function splitRuntimeName(name: string): {
   const m = name.match(/^(.+?)\s+\(([^)]+)\)$/);
   if (!m || !m[1] || !m[2]) return { base: name, hostname: null };
   return { base: m[1], hostname: m[2] };
+}
+
+// The label for a runtime rendered under (or next to) its machine's name.
+// A machine-level rename stamps the same custom_name on every runtime of
+// the daemon (MUL-4217), so repeating it per runtime is noise — fall back
+// to the provider base (e.g. "Claude"). A one-off per-runtime rename that
+// differs from the machine name stays visible verbatim.
+export function runtimeRowLabel(
+  runtime: AgentRuntime,
+  machineTitle: string,
+): string {
+  const custom = runtime.custom_name?.trim();
+  if (custom && custom !== machineTitle) return custom;
+  return splitRuntimeName(runtime.name).base;
 }
 
 export function buildRuntimeMachines(
@@ -143,6 +165,7 @@ export function filterRuntimeMachines(
       machine.daemonId,
       machine.providerNames.join(" "),
       machine.runtimes.map((runtime) => runtime.name).join(" "),
+      machine.runtimes.map((runtime) => runtime.custom_name ?? "").join(" "),
     ]
       .filter(Boolean)
       .join(" ")
@@ -168,13 +191,26 @@ function finalizeRuntimeMachine(
   draft: RuntimeMachineDraft,
   options: RuntimeMachineOptions,
 ): RuntimeMachine {
-  const runtimes = [...draft.runtimes].sort((a, b) =>
+  const runtimes = draft.runtimes.toSorted((a, b) =>
     a.provider.localeCompare(b.provider),
   );
   const first = runtimes[0];
   const providerNames = Array.from(new Set(runtimes.map((r) => r.provider))).sort();
+  // Device-name consolidation is only safe for the current user's own
+  // local runtimes — the list spans the whole workspace, so a host-name
+  // match alone could claim another member's identically-named machine.
+  const ownsLocalRuntime =
+    !!options.currentUserId &&
+    runtimes.some((r) => r.owner_id === options.currentUserId);
+  const matchesLocalName = (value: string | null | undefined): boolean =>
+    !!value && value.toLowerCase() === options.localMachineName?.toLowerCase();
   const isCurrent =
-    !!options.localDaemonId && draft.daemonId === options.localDaemonId;
+    (!!options.localDaemonId && draft.daemonId === options.localDaemonId) ||
+    (draft.mode === "local" &&
+      !!options.localMachineName &&
+      ownsLocalRuntime &&
+      (matchesLocalName(draft.daemonId) ||
+        runtimes.some((r) => matchesLocalName(runtimeDeviceName(r)))));
   const title = machineTitle(runtimes, {
     isCurrent,
     localMachineName: options.localMachineName,
@@ -247,10 +283,28 @@ function runtimeDeviceName(runtime: AgentRuntime): string | null {
   return raw.split(" · ")[0]?.trim() || null;
 }
 
+// The custom name shared by every runtime on a machine (MUL-4217). A
+// machine-level rename writes the same custom_name to all runtimes on the
+// daemon, so a name shared by all of them is the machine's label. A one-off
+// per-runtime rename (not shared) is deliberately ignored here so it can't
+// masquerade as the whole machine's name.
+export function sharedCustomName(runtimes: AgentRuntime[]): string | null {
+  if (runtimes.length === 0) return null;
+  const names = runtimes.map((r) => r.custom_name?.trim() ?? "");
+  const first = names[0];
+  if (!first) return null;
+  return names.every((n) => n === first) ? first : null;
+}
+
 function machineTitle(
   runtimes: AgentRuntime[],
   options: { isCurrent: boolean; localMachineName?: string | null },
 ): string {
+  // An explicit user-set machine name wins over everything, including the
+  // OS-reported local machine name.
+  const shared = sharedCustomName(runtimes);
+  if (shared) return shared;
+
   if (options.isCurrent && options.localMachineName) {
     return options.localMachineName;
   }

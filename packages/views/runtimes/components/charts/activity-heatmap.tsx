@@ -71,7 +71,7 @@ export function ActivityHeatmap({
     }
 
     // Anchor the grid on the Monday of the week containing "today" in the
-    // runtime's tz, then walk back HEATMAP_WEEKS-1 weeks. All dates are
+    // viewer's tz, then walk back HEATMAP_WEEKS-1 weeks. All dates are
     // string-based YYYY-MM-DD so the host browser's tz can't shift a column.
     // We stop drawing cells once we pass `today` so the in-progress week is
     // partial (cells for "tomorrow onward" aren't rendered) — matches the

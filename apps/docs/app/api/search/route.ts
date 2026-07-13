@@ -17,8 +17,42 @@ function tokenizeCJK(raw: string): string[] {
   return tokens;
 }
 
+// Japanese mixes Hiragana, Katakana and Kanji; the English regex strips them
+// all, and the zh tokenizer only keeps Han (Kanji), dropping kana entirely.
+// Tokenize each kana/Kanji codepoint on its own and keep Latin/digit runs
+// whole — same character-level recall strategy as tokenizeCJK, extended to
+// the Hiragana (\u3040-\u309f) and Katakana (\u30a0-\u30ff) blocks, plus the
+// ideographic iteration mark \u3005 which sits just below the kana blocks and
+// recurs in common words (e.g. the JP for "various", "daily", "individual").
+function tokenizeJapanese(raw: string): string[] {
+  const tokens: string[] = [];
+  const regex = /[\u3005\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff]|[A-Za-z0-9]+/g;
+  const lower = raw.toLowerCase();
+  let match: RegExpExecArray | null;
+  while ((match = regex.exec(lower)) !== null) {
+    tokens.push(match[0]);
+  }
+  return tokens;
+}
+
 export const { GET } = createFromSource(source, {
   localeMap: {
+    ko: {
+      components: {
+        tokenizer: {
+          language: "english",
+        },
+      },
+    },
+    ja: {
+      components: {
+        tokenizer: {
+          language: "english",
+          normalizationCache: new Map(),
+          tokenize: tokenizeJapanese,
+        },
+      },
+    },
     zh: {
       components: {
         tokenizer: {

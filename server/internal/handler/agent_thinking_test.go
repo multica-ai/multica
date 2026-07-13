@@ -214,12 +214,15 @@ func TestUpdateAgent_RuntimeSwitch_PreservesValidValueRejectsInvalid(t *testing.
 		testPool.Exec(ctx, `DELETE FROM agent WHERE workspace_id = $1 AND name LIKE 'runtime-switch-%'`, testWorkspaceID)
 	})
 
+	// Direction is Codex → Claude: Codex's enum is a superset of Claude's
+	// (it adds none/minimal plus the gpt-5.6 max/ultra levels), so a
+	// Codex-only token is the value that becomes invalid on switch.
 	t.Run("existing value still valid for new runtime is kept", func(t *testing.T) {
-		// `high` is valid for both Claude and Codex enums — switching
+		// `high` is valid for both Codex and Claude enums — switching
 		// runtime without touching thinking_level should keep it.
-		agentID := createAgentOnRuntime(t, "runtime-switch-keep", claudeRuntimeID, "high")
+		agentID := createAgentOnRuntime(t, "runtime-switch-keep", codexRuntimeID, "high")
 		body := map[string]any{
-			"runtime_id": codexRuntimeID,
+			"runtime_id": claudeRuntimeID,
 		}
 		w := httptest.NewRecorder()
 		req := withURLParam(newRequest(http.MethodPatch, "/api/agents/"+agentID, body), "id", agentID)
@@ -235,12 +238,12 @@ func TestUpdateAgent_RuntimeSwitch_PreservesValidValueRejectsInvalid(t *testing.
 	})
 
 	t.Run("existing value invalid for new runtime is 400, not silent", func(t *testing.T) {
-		// `max` is Claude-only; switching to Codex must NOT silently
-		// keep it. Behaviour stays consistent with the explicit-set
-		// path: always 400 on literal-invalid.
-		agentID := createAgentOnRuntime(t, "runtime-switch-reject", claudeRuntimeID, "max")
+		// `ultra` is Codex-only (added for the gpt-5.6 series); switching to
+		// Claude must NOT silently keep it. Behaviour stays consistent with
+		// the explicit-set path: always 400 on literal-invalid.
+		agentID := createAgentOnRuntime(t, "runtime-switch-reject", codexRuntimeID, "ultra")
 		body := map[string]any{
-			"runtime_id": codexRuntimeID,
+			"runtime_id": claudeRuntimeID,
 		}
 		w := httptest.NewRecorder()
 		req := withURLParam(newRequest(http.MethodPatch, "/api/agents/"+agentID, body), "id", agentID)
@@ -255,9 +258,9 @@ func TestUpdateAgent_RuntimeSwitch_PreservesValidValueRejectsInvalid(t *testing.
 		// the same PATCH and the switch goes through with a cleared
 		// value. This is the documented escape hatch in the error
 		// message; the test pins it so the contract holds.
-		agentID := createAgentOnRuntime(t, "runtime-switch-clear", claudeRuntimeID, "max")
+		agentID := createAgentOnRuntime(t, "runtime-switch-clear", codexRuntimeID, "ultra")
 		body := map[string]any{
-			"runtime_id":     codexRuntimeID,
+			"runtime_id":     claudeRuntimeID,
 			"thinking_level": "",
 		}
 		w := httptest.NewRecorder()
@@ -276,10 +279,10 @@ func TestUpdateAgent_RuntimeSwitch_PreservesValidValueRejectsInvalid(t *testing.
 	t.Run("simultaneous explicit set to valid value lets the switch through", func(t *testing.T) {
 		// The other recovery: caller picks a value valid for the new
 		// runtime. Same PATCH, no need for a separate roundtrip.
-		agentID := createAgentOnRuntime(t, "runtime-switch-replace", claudeRuntimeID, "max")
+		agentID := createAgentOnRuntime(t, "runtime-switch-replace", codexRuntimeID, "ultra")
 		body := map[string]any{
-			"runtime_id":     codexRuntimeID,
-			"thinking_level": "minimal",
+			"runtime_id":     claudeRuntimeID,
+			"thinking_level": "high",
 		}
 		w := httptest.NewRecorder()
 		req := withURLParam(newRequest(http.MethodPatch, "/api/agents/"+agentID, body), "id", agentID)
@@ -289,8 +292,119 @@ func TestUpdateAgent_RuntimeSwitch_PreservesValidValueRejectsInvalid(t *testing.
 		}
 		var resp map[string]any
 		_ = json.NewDecoder(w.Body).Decode(&resp)
-		if resp["thinking_level"] != "minimal" {
-			t.Errorf("expected thinking_level=minimal, got %v", resp["thinking_level"])
+		if resp["thinking_level"] != "high" {
+			t.Errorf("expected thinking_level=high, got %v", resp["thinking_level"])
+		}
+	})
+}
+
+// TestUpdateAgent_RuntimeSwitch_ClearsKnownIncompatibleModel covers the
+// runtime/model persistence bug from MUL-3341: a runtime_id-only PATCH used
+// to preserve a provider-native model string, so switching a Claude Code
+// agent to Codex could leave agent.model = "claude-..." and fail at task
+// execution. Unknown custom models are intentionally preserved because the
+// API supports manual entries and cannot prove they are invalid.
+func TestUpdateAgent_RuntimeSwitch_ClearsKnownIncompatibleModel(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+	claudeRuntimeID := createClaudeProviderRuntime(t)
+	codexRuntimeID := createCodexProviderRuntime(t)
+
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM agent WHERE workspace_id = $1 AND name LIKE 'runtime-model-switch-%'`, testWorkspaceID)
+	})
+
+	t.Run("runtime-only switch clears known foreign model", func(t *testing.T) {
+		agentID := createAgentOnRuntimeWithModel(t, "runtime-model-switch-clear", claudeRuntimeID, "claude-sonnet-4-6")
+		body := map[string]any{
+			"runtime_id": codexRuntimeID,
+		}
+		w := httptest.NewRecorder()
+		req := withURLParam(newRequest(http.MethodPatch, "/api/agents/"+agentID, body), "id", agentID)
+		testHandler.UpdateAgent(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("expected 200 switching runtime with incompatible model, got %d: %s", w.Code, w.Body.String())
+		}
+		var resp map[string]any
+		_ = json.NewDecoder(w.Body).Decode(&resp)
+		if resp["model"] != "" {
+			t.Errorf("expected model cleared across Claude->Codex runtime switch, got %v", resp["model"])
+		}
+	})
+
+	t.Run("runtime-only switch clears provider-prefixed model not accepted by target", func(t *testing.T) {
+		agentID := createAgentOnRuntimeWithModel(t, "runtime-model-switch-prefixed", claudeRuntimeID, "openai/gpt-4o")
+		body := map[string]any{
+			"runtime_id": codexRuntimeID,
+		}
+		w := httptest.NewRecorder()
+		req := withURLParam(newRequest(http.MethodPatch, "/api/agents/"+agentID, body), "id", agentID)
+		testHandler.UpdateAgent(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("expected 200 switching runtime with provider-prefixed model, got %d: %s", w.Code, w.Body.String())
+		}
+		var resp map[string]any
+		_ = json.NewDecoder(w.Body).Decode(&resp)
+		if resp["model"] != "" {
+			t.Errorf("expected provider-prefixed model cleared across runtime switch, got %v", resp["model"])
+		}
+	})
+
+	t.Run("runtime-only switch keeps exact target accepted model", func(t *testing.T) {
+		agentID := createAgentOnRuntimeWithModel(t, "runtime-model-switch-accepted", claudeRuntimeID, "gpt-5.5")
+		body := map[string]any{
+			"runtime_id": codexRuntimeID,
+		}
+		w := httptest.NewRecorder()
+		req := withURLParam(newRequest(http.MethodPatch, "/api/agents/"+agentID, body), "id", agentID)
+		testHandler.UpdateAgent(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("expected 200 preserving exact target accepted model, got %d: %s", w.Code, w.Body.String())
+		}
+		var resp map[string]any
+		_ = json.NewDecoder(w.Body).Decode(&resp)
+		if resp["model"] != "gpt-5.5" {
+			t.Errorf("expected exact target model preserved, got %v", resp["model"])
+		}
+	})
+
+	t.Run("explicit replacement model wins during switch", func(t *testing.T) {
+		agentID := createAgentOnRuntimeWithModel(t, "runtime-model-switch-replace", claudeRuntimeID, "claude-sonnet-4-6")
+		body := map[string]any{
+			"runtime_id": codexRuntimeID,
+			"model":      "gpt-5.5",
+		}
+		w := httptest.NewRecorder()
+		req := withURLParam(newRequest(http.MethodPatch, "/api/agents/"+agentID, body), "id", agentID)
+		testHandler.UpdateAgent(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("expected 200 with explicit replacement model, got %d: %s", w.Code, w.Body.String())
+		}
+		var resp map[string]any
+		_ = json.NewDecoder(w.Body).Decode(&resp)
+		if resp["model"] != "gpt-5.5" {
+			t.Errorf("expected explicit model to be persisted, got %v", resp["model"])
+		}
+	})
+
+	t.Run("unknown custom model is preserved", func(t *testing.T) {
+		agentID := createAgentOnRuntimeWithModel(t, "runtime-model-switch-custom", claudeRuntimeID, "private-lab-model")
+		body := map[string]any{
+			"runtime_id": codexRuntimeID,
+		}
+		w := httptest.NewRecorder()
+		req := withURLParam(newRequest(http.MethodPatch, "/api/agents/"+agentID, body), "id", agentID)
+		testHandler.UpdateAgent(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("expected 200 preserving unknown custom model, got %d: %s", w.Code, w.Body.String())
+		}
+		var resp map[string]any
+		_ = json.NewDecoder(w.Body).Decode(&resp)
+		if resp["model"] != "private-lab-model" {
+			t.Errorf("expected unknown custom model preserved, got %v", resp["model"])
 		}
 	})
 }
@@ -364,6 +478,27 @@ func createAgentOnRuntime(t *testing.T, name, runtimeID, level string) string {
 	`, testWorkspaceID, name, runtimeID, testUserID, levelArg).Scan(&agentID)
 	if err != nil {
 		t.Fatalf("create agent on runtime %s: %v", runtimeID, err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent WHERE id = $1`, agentID)
+	})
+	return agentID
+}
+
+func createAgentOnRuntimeWithModel(t *testing.T, name, runtimeID, model string) string {
+	t.Helper()
+	var agentID string
+	err := testPool.QueryRow(context.Background(), `
+		INSERT INTO agent (
+			workspace_id, name, description, runtime_mode, runtime_config,
+			runtime_id, visibility, max_concurrent_tasks, owner_id,
+			instructions, custom_env, custom_args, model
+		)
+		VALUES ($1, $2, '', 'cloud', '{}'::jsonb, $3, 'private', 1, $4, '', '{}'::jsonb, '[]'::jsonb, $5)
+		RETURNING id
+	`, testWorkspaceID, name, runtimeID, testUserID, model).Scan(&agentID)
+	if err != nil {
+		t.Fatalf("create agent on runtime %s with model %s: %v", runtimeID, model, err)
 	}
 	t.Cleanup(func() {
 		testPool.Exec(context.Background(), `DELETE FROM agent WHERE id = $1`, agentID)

@@ -30,6 +30,7 @@ import { api } from "@multica/core/api";
 import type { Workspace } from "@multica/core/types";
 import { useNavigation } from "../../navigation";
 import { useT } from "../../i18n";
+import { SettingsTab } from "./settings-layout";
 import { GitHubMark } from "./github-mark";
 
 type SettingsKey =
@@ -70,9 +71,6 @@ export function GitHubTab() {
   const [disconnectTarget, setDisconnectTarget] = useState<string | null>(null);
   const [disconnecting, setDisconnecting] = useState(false);
 
-  const githubRepoCount =
-    workspace?.repos?.filter((r) => /github\.com/i.test(r.url ?? "")).length ?? 0;
-
   async function persistSetting(key: SettingsKey, next: boolean) {
     if (!workspace || savingKey) return;
     setSavingKey(key);
@@ -85,6 +83,9 @@ export function GitHubTab() {
       qc.setQueryData(workspaceKeys.list(), (old: Workspace[] | undefined) =>
         old?.map((ws) => (ws.id === updated.id ? updated : ws)),
       );
+      toast.success(t(($) => $.auto_save.toast_saved), {
+        id: "settings-auto-save",
+      });
     } catch (e) {
       toast.error(e instanceof Error ? e.message : t(($) => $.github.toast_failed));
     } finally {
@@ -128,13 +129,10 @@ export function GitHubTab() {
   const repositoriesHref = `${navigation.pathname}?tab=repositories`;
 
   return (
-    <div className="space-y-8">
-      <section className="space-y-1">
-        <p className="text-sm text-muted-foreground">
-          {t(($) => $.github.page_description)}
-        </p>
-      </section>
-
+    <SettingsTab
+      title={t(($) => $.page.tabs.github)}
+      description={t(($) => $.github.page_description)}
+    >
       <section className="space-y-3">
         <Card>
           <CardContent>
@@ -258,8 +256,8 @@ export function GitHubTab() {
 
       <section className="space-y-3">
         <h2 className="text-sm font-semibold">{t(($) => $.github.section_features)}</h2>
-        <Card>
-          <CardContent className="space-y-4">
+        <Card className="gap-0 py-0">
+          <CardContent className="divide-y divide-surface-border px-0">
             <FeatureRow
               id="github-pr-sidebar"
               icon={<PanelRight className="h-4 w-4" />}
@@ -314,14 +312,9 @@ export function GitHubTab() {
         <Card>
           <CardContent>
             <div className="flex flex-wrap items-center justify-between gap-3">
-              <div className="space-y-1">
-                <p className="text-sm font-medium">
-                  {t(($) => $.github.repositories_shortcut_label)}
-                </p>
-                <p className="text-xs text-muted-foreground tabular-nums">
-                  {githubRepoCount}
-                </p>
-              </div>
+              <p className="text-sm font-medium">
+                {t(($) => $.github.repositories_shortcut_label)}
+              </p>
               <Button
                 variant="outline"
                 size="sm"
@@ -362,7 +355,7 @@ export function GitHubTab() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </div>
+    </SettingsTab>
   );
 }
 
@@ -384,7 +377,7 @@ function FeatureRow({
   onCheckedChange: (v: boolean) => void;
 }) {
   return (
-    <div className="flex items-start justify-between gap-4">
+    <div className="flex items-start justify-between gap-4 px-4 py-3.5">
       <div className="flex items-start gap-3">
         <div className="rounded-md border bg-muted/50 p-2 text-muted-foreground">{icon}</div>
         <div className="space-y-1">

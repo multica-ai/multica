@@ -9,6 +9,8 @@ import (
 	"log/slog"
 	"net/http"
 	"net/netip"
+	"strconv"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
@@ -16,14 +18,22 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/auth"
+	"github.com/multica-ai/multica/server/internal/cloudruntime"
 	"github.com/multica-ai/multica/server/internal/daemonws"
 	"github.com/multica-ai/multica/server/internal/events"
+	"github.com/multica-ai/multica/server/internal/integrations/channel/engine"
+	composio "github.com/multica-ai/multica/server/internal/integrations/composio"
+	"github.com/multica-ai/multica/server/internal/integrations/lark"
+	"github.com/multica-ai/multica/server/internal/integrations/slack"
+	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/realtime"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/storage"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/featureflag"
+	"github.com/multica-ai/multica/server/pkg/llm"
 )
 
 // randomID returns a random 16-byte hex string used as a request ID for
@@ -48,27 +58,13 @@ type Config struct {
 	AllowSignup         bool
 	AllowedEmails       []string
 	AllowedEmailDomains []string
-	// UseDailyRollupForRuntimeUsage routes ListRuntimeUsage to the
-	// task_usage_daily rollup table when true. Default false: the read
-	// path stays on the raw task_usage stream so rollup-related issues
-	// (pg_cron not running, backfill not yet performed, watermark stuck)
-	// can never make the dashboard return empty/stale data. Operators
-	// flip this on per environment AFTER:
-	//   1) migrations 072..076 applied,
-	//   2) backfill_task_usage_daily ran successfully,
-	//   3) cron job scheduled and task_usage_rollup_lag_seconds() < 900.
-	UseDailyRollupForRuntimeUsage bool
-	// UseDailyRollupForDashboard routes the workspace `/dashboard` page's
-	// token-aggregation reads to `task_usage_dashboard_daily` (migration
-	// 084). Mirrors UseDailyRollupForRuntimeUsage above with the same
-	// fail-safe default (false → raw scan). Operators flip per
-	// environment AFTER:
-	//   1) migration 084 applied,
-	//   2) `backfill_task_usage_dashboard_daily` succeeded and stamped
-	//      the dashboard rollup watermark,
-	//   3) cron job scheduled (`rollup_task_usage_dashboard_daily`) and
-	//      `task_usage_dashboard_rollup_lag_seconds()` < 900.
-	UseDailyRollupForDashboard bool
+	// DisableWorkspaceCreation, when true, makes POST /api/workspaces return
+	// 403 for every caller. There is no role/owner exception because the repo
+	// has no platform-admin concept; operators bootstrap the workspace with
+	// the flag off, then flip it on and restart so subsequent users join via
+	// invitation only. The public /api/config endpoint mirrors this flag so
+	// the UI can hide every "Create workspace" affordance — see #3433.
+	DisableWorkspaceCreation bool
 	// PublicURL is the absolute base URL the API is reachable at from the
 	// public internet, with no trailing slash (e.g. "https://app.multica.ai").
 	// Used only to build webhook_url responses for autopilot webhook triggers
@@ -87,6 +83,39 @@ type Config struct {
 	// webhook limiter from being bypassed by a spoofed XFF on deployments
 	// without a header-stripping reverse proxy in front.
 	TrustedProxies []netip.Prefix
+	// CloudRuntimeFleetURL enables the SaaS-only remote Fleet adapter when set.
+	// Empty keeps self-hosted deployments explicit: cloud runtime endpoints
+	// return 503 instead of attempting to dial a hard-coded private service.
+	CloudRuntimeFleetURL     string
+	CloudRuntimeFleetTimeout time.Duration
+	AttachmentDownloadMode   string
+	AttachmentDownloadURLTTL time.Duration
+	// AttachmentFrameAncestors are trusted browser origins allowed to embed
+	// attachment preview responses. In production this should mirror the
+	// frontend/CORS origin allowlist so split app/api self-hosted deployments
+	// can frame API-hosted PDFs without allowing arbitrary third-party frames.
+	AttachmentFrameAncestors []string
+	// LLM* configure the basic LLM API layer (MUL-4238). They back the
+	// server-internal LLM helpers in pkg/llm (e.g. chat title generation).
+	// The generic OpenAI-compatible passthrough endpoints were removed in
+	// MUL-4309; LLM access is internal-only now. When both LLMAPIKey and
+	// LLMBaseURL are empty the layer is disabled and callers fall back
+	// silently (see maybeGenerateChatTitleAsync).
+	//   - LLMAPIKey       -> MULTICA_LLM_API_KEY
+	//   - LLMBaseURL       -> MULTICA_LLM_BASE_URL (OpenAI or any compatible gateway)
+	//   - LLMDefaultModel  -> MULTICA_LLM_DEFAULT_MODEL (used when a request omits `model`)
+	LLMAPIKey       string
+	LLMBaseURL      string
+	LLMDefaultModel string
+}
+
+type cloudRuntimeProxy interface {
+	Enabled() bool
+	Do(ctx context.Context, req cloudruntime.Request) (*cloudruntime.Response, error)
+}
+
+type RuntimeProfileRefreshNotifier interface {
+	NotifyRuntimeProfilesChanged(workspaceID, profileID string)
 }
 
 type Handler struct {
@@ -95,25 +124,99 @@ type Handler struct {
 	TxStarter             txStarter
 	Hub                   *realtime.Hub
 	DaemonHub             *daemonws.Hub
+	DaemonProfileRefresh  RuntimeProfileRefreshNotifier
 	Bus                   *events.Bus
 	TaskService           *service.TaskService
+	IssueService          *service.IssueService
 	AutopilotService      *service.AutopilotService
 	EmailService          *service.EmailService
 	UpdateStore           UpdateStore
 	ModelListStore        ModelListStore
 	LocalSkillListStore   LocalSkillListStore
 	LocalSkillImportStore LocalSkillImportStore
+	FeatureFlags          *featureflag.Service
 	LivenessStore         LivenessStore
 	HeartbeatScheduler    HeartbeatScheduler
 	Storage               storage.Storage
 	CFSigner              *auth.CloudFrontSigner
 	Analytics             analytics.Client
-	PATCache              *auth.PATCache
-	DaemonTokenCache      *auth.DaemonTokenCache
-	MembershipCache       *auth.MembershipCache
-	WebhookRateLimiter    WebhookRateLimiter
-	WebhookIPRateLimiter  WebhookRateLimiter
-	cfg                   Config
+	// Metrics is the shared business-metrics collector built by main.go.
+	// May be nil in tests / self-hosted with the metrics listener disabled;
+	// every Record* method is nil-safe and obsmetrics.RecordEvent treats a
+	// nil Metrics as "PostHog only".
+	Metrics              *obsmetrics.BusinessMetrics
+	PATCache             *auth.PATCache
+	DaemonTokenCache     *auth.DaemonTokenCache
+	MembershipCache      *auth.MembershipCache
+	WebhookRateLimiter   WebhookRateLimiter
+	WebhookIPRateLimiter WebhookRateLimiter
+	CloudRuntime         cloudRuntimeProxy
+	// Lark integration. All three are nil when the Lark master key
+	// (MULTICA_LARK_SECRET_KEY) is unset; the corresponding HTTP
+	// handlers return 503 in that case so a misconfigured self-host
+	// deployment surfaces a clear error instead of silently using a
+	// zero key. Wired in cmd/server/router.go after handler.New.
+	LarkInstallations *lark.InstallationService
+	LarkBindingTokens *lark.BindingTokenService
+	// LarkRegistration owns the device-flow install lifecycle: begin
+	// a registration session against accounts.feishu.cn, poll, and
+	// on success write lark_installation + the installer's
+	// lark_user_binding in one DB transaction. Nil when the at-rest
+	// key is unset or the RegistrationService failed to construct at
+	// boot.
+	LarkRegistration *lark.RegistrationService
+	// LarkAPIClient is the live transport that backs SendInteractiveCard,
+	// PatchInteractiveCard, SendBindingPromptCard, GetBotInfo. The
+	// router wires the real Lark HTTP client whenever
+	// MULTICA_LARK_SECRET_KEY is set; tests that need a no-op
+	// behaviour can swap in `lark.NewStubAPIClient(...)` directly. The
+	// UI consults IsConfigured() to decide whether to surface install
+	// entry points.
+	LarkAPIClient lark.APIClient
+	// Composio integration (MUL-3720). Nil when COMPOSIO_API_KEY is unset;
+	// the composio HTTP handlers return 503 in that case. Wired in
+	// cmd/server/router.go after handler.New.
+	Composio *composio.Service
+	// ChannelSupervisor owns the per-installation supervisor goroutines
+	// that hold the §4.4 WS lease and drive each channel.Channel
+	// (MUL-3620 generalized the Feishu-only Hub into this channel-agnostic
+	// engine). The router constructs it UNCONDITIONALLY — it drives any
+	// channel type, not just Feishu, so it does not depend on the Lark
+	// master key; each platform registers its Factory only when configured
+	// (Feishu when MULTICA_LARK_SECRET_KEY is set). The router does NOT
+	// call Run; the process owner (main.go) starts it under a long-running
+	// context and joins via WaitWithTimeout (bounded, fenced by
+	// ShutdownTimeout) during graceful shutdown so the lease renewer yields
+	// cleanly when the DB is healthy without blocking process exit if the
+	// pool is frozen — at worst the next replica waits the full TTL.
+	ChannelSupervisor *engine.Supervisor
+	// ChannelRouter is the channel-agnostic inbound pipeline (the shared
+	// handler the Supervisor injects into every Channel). main.go calls
+	// Drain on it during shutdown, after the Supervisor has stopped
+	// delivering events, to flush debounced run triggers and join in-flight
+	// reply goroutines. Built unconditionally (even without Lark).
+	ChannelRouter *engine.Router
+	// SlackInstall owns the bring-your-own-app Slack install lifecycle (register
+	// pasted tokens / list / revoke) and the at-rest encryption of each app's bot
+	// + app tokens (MUL-3666). Nil unless MULTICA_SLACK_SECRET_KEY is set.
+	SlackInstall *slack.InstallService
+	// SlackBindingTokens mints/redeems the user-binding tokens behind the
+	// "link your Slack account" prompt (MUL-3666). Nil unless Slack is
+	// configured (MULTICA_SLACK_SECRET_KEY set).
+	SlackBindingTokens *slack.BindingTokenService
+	// SlackHistory backs the agent-facing `multica chat history` command: it
+	// reads a chat session's bound Slack conversation on demand (MUL-3871). Nil
+	// unless Slack is configured; GetChatChannelHistory then reports "no channel
+	// integration". A future platform satisfies the same reader interface.
+	SlackHistory ChatChannelHistoryReader
+	// LLM is the basic LLM API layer (MUL-4238): a thin wrapper over the
+	// OpenAI Go SDK backing server-internal one-shot LLM helpers such as chat
+	// title generation. The generic passthrough endpoints were removed in
+	// MUL-4309, so it is internal-only now. Always non-nil (New builds it from
+	// Config); when unconfigured its Enabled() reports false and callers fall
+	// back silently.
+	LLM *llm.Client
+	cfg Config
 }
 
 func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *events.Bus, emailService *service.EmailService, store storage.Storage, cfSigner *auth.CloudFrontSigner, analyticsClient analytics.Client, cfg Config, daemonHubs ...*daemonws.Hub) *Handler {
@@ -125,10 +228,23 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 	if analyticsClient == nil {
 		analyticsClient = analytics.NoopClient{}
 	}
+	if mode, ok := normalizeAttachmentDownloadMode(cfg.AttachmentDownloadMode); ok {
+		cfg.AttachmentDownloadMode = string(mode)
+	} else {
+		slog.Warn("invalid ATTACHMENT_DOWNLOAD_MODE, using auto", "value", cfg.AttachmentDownloadMode)
+		cfg.AttachmentDownloadMode = string(attachmentDownloadModeAuto)
+	}
+	if cfg.AttachmentDownloadURLTTL <= 0 {
+		cfg.AttachmentDownloadURLTTL = defaultAttachmentDownloadURLTTL
+	}
 
 	var daemonHub *daemonws.Hub
 	if len(daemonHubs) > 0 {
 		daemonHub = daemonHubs[0]
+	}
+	var daemonProfileRefresh RuntimeProfileRefreshNotifier
+	if daemonHub != nil {
+		daemonProfileRefresh = daemonHub
 	}
 
 	taskSvc := service.NewTaskService(queries, txStarter, hub, bus, daemonHub)
@@ -139,8 +255,10 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 		TxStarter:             txStarter,
 		Hub:                   hub,
 		DaemonHub:             daemonHub,
+		DaemonProfileRefresh:  daemonProfileRefresh,
 		Bus:                   bus,
 		TaskService:           taskSvc,
+		IssueService:          service.NewIssueService(queries, txStarter, bus, analyticsClient, taskSvc),
 		AutopilotService:      service.NewAutopilotService(queries, txStarter, bus, taskSvc),
 		EmailService:          emailService,
 		UpdateStore:           NewInMemoryUpdateStore(),
@@ -154,14 +272,56 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 		Analytics:             analyticsClient,
 		WebhookRateLimiter:    NewMemoryWebhookRateLimiter(DefaultWebhookRateLimit()),
 		WebhookIPRateLimiter:  NewMemoryWebhookIPRateLimiter(DefaultWebhookIPRateLimit()),
-		cfg:                   cfg,
+		CloudRuntime: cloudruntime.NewClient(cloudruntime.Config{
+			BaseURL: cfg.CloudRuntimeFleetURL,
+			Timeout: cfg.CloudRuntimeFleetTimeout,
+		}),
+		LLM: llm.New(llm.Config{
+			APIKey:       cfg.LLMAPIKey,
+			BaseURL:      cfg.LLMBaseURL,
+			DefaultModel: cfg.LLMDefaultModel,
+		}),
+		cfg: cfg,
 	}
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
+	// Marshal the body up front so we can advertise an accurate Content-Length
+	// header. Streaming straight into the ResponseWriter after WriteHeader forces
+	// net/http into chunked transfer encoding, which omits Content-Length; buffering
+	// first lets clients (and proxies) see the exact body size.
+	body, err := json.Marshal(v)
+	if err != nil {
+		// Fall back to a minimal, self-describing error payload rather than leaving
+		// the client with a half-written response.
+		body = []byte(`{"error":"failed to encode response"}`)
+		status = http.StatusInternalServerError
+	}
+	// Match the trailing newline that json.Encoder.Encode historically appended.
+	body = append(body, '\n')
 	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Content-Length", strconv.Itoa(len(body)))
 	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(v)
+	_, _ = w.Write(body)
+}
+
+// writeMeasuredJSON behaves like writeJSON but returns the encoded body size so
+// callers can record payload bytes in slow-endpoint diagnostics. It measures the
+// uncompressed JSON length and is unrelated to transport compression.
+func writeMeasuredJSON(w http.ResponseWriter, status int, v any) (int, error) {
+	body, err := json.Marshal(v)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to encode response")
+		return 0, err
+	}
+	body = append(body, '\n')
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Content-Length", strconv.Itoa(len(body)))
+	w.WriteHeader(status)
+	if _, err := w.Write(body); err != nil {
+		return len(body), err
+	}
+	return len(body), nil
 }
 
 func writeError(w http.ResponseWriter, status int, msg string) {
@@ -187,8 +347,43 @@ func ptrToText(s *string) pgtype.Text               { return util.PtrToText(s) }
 func strToText(s string) pgtype.Text                { return util.StrToText(s) }
 func timestampToString(t pgtype.Timestamptz) string { return util.TimestampToString(t) }
 func timestampToPtr(t pgtype.Timestamptz) *string   { return util.TimestampToPtr(t) }
+func dateToPtr(d pgtype.Date) *string               { return util.DateToPtr(d) }
 func uuidToPtr(u pgtype.UUID) *string               { return util.UUIDToPtr(u) }
-func int8ToPtr(v pgtype.Int8) *int64                { return util.Int8ToPtr(v) }
+
+// uuidsToStrings maps a UUID array column to string ids, skipping NULL/invalid
+// entries. Returns nil (not an empty slice) when there is nothing to emit so
+// `omitempty` JSON fields drop out cleanly (MUL-4195).
+func uuidsToStrings(us []pgtype.UUID) []string {
+	if len(us) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(us))
+	for _, u := range us {
+		if u.Valid {
+			out = append(out, uuidToString(u))
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// uuidStringsOrEmpty preserves the distinction between a modern, authoritative
+// empty UUID-array value (`[]`) and a field omitted by a legacy server. Delivery
+// receipts use this so clients never mistake zero delivered comments for an
+// unknown receipt and fall back to the enqueue-time plan.
+func uuidStringsOrEmpty(us []pgtype.UUID) []string {
+	out := uuidsToStrings(us)
+	if out == nil {
+		return []string{}
+	}
+	return out
+}
+
+func int8ToPtr(v pgtype.Int8) *int64 { return util.Int8ToPtr(v) }
+func int4ToPtr(v pgtype.Int4) *int32 { return util.Int4ToPtr(v) }
+func ptrToInt4(v *int32) pgtype.Int4 { return util.PtrToInt4(v) }
 
 // parseUUIDOrBadRequest validates a UUID string sourced from user input
 // (URL params, request body, headers). On invalid input it writes a 400
@@ -265,25 +460,44 @@ func isUniqueViolation(err error) bool {
 	return errors.As(err, &pgErr) && pgErr.Code == "23505"
 }
 
+// isCheckViolation reports whether err is a PostgreSQL CHECK constraint
+// violation (SQLSTATE 23514). Used to translate column-level CHECK failures
+// into a 4xx instead of a generic 500.
+func isCheckViolation(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "23514"
+}
+
 func requestUserID(r *http.Request) string {
 	return r.Header.Get("X-User-ID")
 }
 
 // resolveActor determines whether the request is from an agent or a human member.
-// To claim "agent" identity the request MUST carry both X-Agent-ID and a valid
-// X-Task-ID, and the task must belong to the claimed agent. Otherwise we fall
-// back to "member" using the user ID from the session.
+//
+// First-class signal: X-Actor-Source set to "task_token" means the request
+// authenticated via an `mat_` task-scoped token. The auth middleware sets
+// that header (and stripped any client-supplied value first), so it is
+// authoritative — the bound (agent_id, task_id) cannot be forged or
+// stripped by the agent process. This is the path MUL-2600 relies on to
+// reject agent-process traffic on owner-only endpoints.
+//
+// Fallback signal (legacy CLI / member-token paths): the request MUST
+// carry both X-Agent-ID and a valid X-Task-ID, and the task must belong
+// to the claimed agent. Otherwise we fall back to "member".
 //
 // X-Agent-ID alone is not trusted: any workspace member can guess or observe
 // an agent's UUID, and a member-supplied X-Agent-ID would otherwise let that
 // member impersonate the agent and bypass the private-agent gate (#2359
-// review). The daemon always pairs the two headers — X-Agent-ID names the
-// agent claiming the request, X-Task-ID names the in-flight task that
-// authorizes it — so requiring both has no effect on legitimate agent
-// callers but closes the impersonation path.
+// review). The daemon always pairs the two headers, so requiring both has
+// no effect on legitimate agent callers but closes the impersonation path.
 //
 // Returns ("agent", agentID) on success, ("member", userID) otherwise.
 func (h *Handler) resolveActor(r *http.Request, userID, workspaceID string) (actorType, actorID string) {
+	if r.Header.Get("X-Actor-Source") == "task_token" {
+		// Server-set header — auth middleware also forced X-Agent-ID
+		// from the token row. Trust it directly without re-querying.
+		return "agent", r.Header.Get("X-Agent-ID")
+	}
 	agentID := r.Header.Get("X-Agent-ID")
 	if agentID == "" {
 		return "member", userID
@@ -592,6 +806,10 @@ func (h *Handler) loadAgentForUser(w http.ResponseWriter, r *http.Request, agent
 		WorkspaceID: wsUUID,
 	})
 	if err != nil {
+		writeError(w, http.StatusNotFound, "agent not found")
+		return db.Agent{}, false
+	}
+	if agent.Kind != "user" {
 		writeError(w, http.StatusNotFound, "agent not found")
 		return db.Agent{}, false
 	}

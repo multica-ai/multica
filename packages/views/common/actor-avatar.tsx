@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { ActorAvatar as ActorAvatarBase } from "@multica/ui/components/common/actor-avatar";
+import { AVATAR_SIZE_PX, type AvatarSize } from "@multica/ui/lib/avatar-size";
 import {
   HoverCard,
   HoverCardTrigger,
@@ -13,6 +14,7 @@ import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
 import { AgentProfileCard } from "../agents/components/agent-profile-card";
 import { AgentLivePeekCard } from "../agents/components/agent-live-peek-card";
 import { MemberProfileCard } from "../members/member-profile-card";
+import { SquadProfileCard } from "../squads/components/squad-profile-card";
 import { availabilityConfig } from "../agents/presence";
 import { useNavigation } from "../navigation";
 
@@ -33,7 +35,7 @@ export type AgentHoverCardVariant = "profile" | "live";
 interface ActorAvatarProps {
   actorType: string;
   actorId: string;
-  size?: number;
+  size?: AvatarSize;
   className?: string;
   /**
    * Wrap the avatar in a hover-card preview on dwell. Use for "who is this?"
@@ -106,13 +108,17 @@ export function ActorAvatar({
     avatar
   );
   const shouldLinkToProfile =
-    profileLink ?? (actorType === "member" || actorType === "agent");
-  const profileHref =
-    shouldLinkToProfile && actorType === "member"
+    profileLink ??
+    (actorType === "member" || actorType === "agent" || actorType === "squad");
+  const profileHref = shouldLinkToProfile
+    ? actorType === "member"
       ? paths.memberDetail(actorId)
-      : shouldLinkToProfile && actorType === "agent"
+      : actorType === "agent"
         ? paths.agentDetail(actorId)
-        : null;
+        : actorType === "squad"
+          ? paths.squadDetail(actorId)
+          : null
+    : null;
   const content = profileHref ? (
     <ActorAvatarProfileLink href={profileHref}>{dotted}</ActorAvatarProfileLink>
   ) : (
@@ -131,6 +137,9 @@ export function ActorAvatar({
   }
   if (actorType === "member") {
     return <MemberAvatarHoverCard userId={actorId}>{content}</MemberAvatarHoverCard>;
+  }
+  if (actorType === "squad") {
+    return <SquadAvatarHoverCard squadId={actorId}>{content}</SquadAvatarHoverCard>;
   }
   return content;
 }
@@ -185,13 +194,16 @@ function ActorAvatarProfileLink({
 // 14 px owner sub-avatar in agents-list rows) stay visually clean. The dot
 // scales with the avatar size — anything ≥24 px gets the standard 8 px dot,
 // smaller avatars use a 6 px dot so the indicator doesn't overwhelm them.
-function AgentStatusDot({ agentId, size }: { agentId: string; size?: number }) {
+// Exported for surfaces that render the base avatar directly (e.g. comment
+// trigger chips) but still want the standard presence dot.
+export function AgentStatusDot({ agentId, size }: { agentId: string; size?: AvatarSize }) {
   const ws = useCurrentWorkspace();
   const detail = useAgentPresenceDetail(ws?.id, agentId);
   if (detail === "loading") return null;
 
   const { dotClass, label } = availabilityConfig[detail.availability];
-  const dotSize = (size ?? 24) >= 24 ? "h-1.5 w-1.5" : "h-1 w-1";
+  const px = size ? AVATAR_SIZE_PX[size] : 24;
+  const dotSize = px >= 24 ? "h-1.5 w-1.5" : "h-1 w-1";
 
   return (
     <span
@@ -239,6 +251,20 @@ function MemberAvatarHoverCard({
 }) {
   return (
     <ActorAvatarHoverCardShell content={<MemberProfileCard userId={userId} />}>
+      {children}
+    </ActorAvatarHoverCardShell>
+  );
+}
+
+function SquadAvatarHoverCard({
+  squadId,
+  children,
+}: {
+  squadId: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <ActorAvatarHoverCardShell content={<SquadProfileCard squadId={squadId} />}>
       {children}
     </ActorAvatarHoverCardShell>
   );

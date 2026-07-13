@@ -11,14 +11,32 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync/atomic"
+	"syscall"
 	"time"
 )
+
+// opencodeTerminateGraceNanos optionally overrides, in nanoseconds, how long a
+// cancelled opencode process is given to exit after SIGTERM before it (and its
+// whole process group) is SIGKILLed. Zero means use the default. It is atomic
+// so tests can shorten the grace without racing the cancellation goroutine that
+// reads it. See the cancellation handler in Execute for why termination must
+// precede closing the stdout pipe (#4533).
+var opencodeTerminateGraceNanos atomic.Int64
+
+func opencodeTerminateGrace() time.Duration {
+	if n := opencodeTerminateGraceNanos.Load(); n > 0 {
+		return time.Duration(n)
+	}
+	return 5 * time.Second
+}
 
 // opencodeBlockedArgs are flags hardcoded by the daemon that must not be
 // overridden by user-configured custom_args.
 var opencodeBlockedArgs = map[string]blockedArgMode{
 	"--format":                       blockedWithValue,  // json output format for daemon communication
 	"--dir":                          blockedWithValue,  // task workdir anchor for skill / AGENTS.md discovery
+	"--variant":                      blockedWithValue,  // owned by agent.thinking_level
 	"--dangerously-skip-permissions": blockedStandalone, // daemon manages non-interactive permission prompts
 }
 
@@ -46,10 +64,7 @@ func (b *opencodeBackend) Execute(ctx context.Context, prompt string, opts ExecO
 	execPath = resolved
 
 	timeout := opts.Timeout
-	if timeout == 0 {
-		timeout = 20 * time.Minute
-	}
-	runCtx, cancel := context.WithTimeout(ctx, timeout)
+	runCtx, cancel := runContext(ctx, timeout)
 
 	args := []string{"run", "--format", "json", "--dangerously-skip-permissions"}
 	// Anchor OpenCode's project discovery (AGENTS.md walk-up + .opencode/skills/
@@ -67,6 +82,9 @@ func (b *opencodeBackend) Execute(ctx context.Context, prompt string, opts ExecO
 	if opts.Model != "" {
 		args = append(args, "--model", opts.Model)
 	}
+	if opts.ThinkingLevel != "" {
+		args = append(args, "--variant", opts.ThinkingLevel)
+	}
 	if opts.SystemPrompt != "" {
 		args = append(args, "--prompt", opts.SystemPrompt)
 	}
@@ -81,6 +99,18 @@ func (b *opencodeBackend) Execute(ctx context.Context, prompt string, opts ExecO
 
 	cmd := exec.CommandContext(runCtx, execPath, args...)
 	hideAgentWindow(cmd)
+	// Run opencode in its own process group so cancellation can reach the
+	// whole tree (opencode plus any tool subprocess it spawns), not just the
+	// direct child — otherwise a cancelled or restarted run can orphan a
+	// descendant that keeps spinning (#4533).
+	configureProcessGroup(cmd)
+	// Take over context cancellation. The default CommandContext behaviour
+	// SIGKILLs only the leader the instant runCtx is done; we instead drive a
+	// graceful, group-wide SIGTERM→SIGKILL from the cancellation goroutine
+	// below and close the stdout read end only after the tree has been
+	// signalled. Returning nil here keeps os/exec from racing us with its own
+	// kill; WaitDelay remains the hard backstop.
+	cmd.Cancel = func() error { return nil }
 	b.cfg.Logger.Info("agent command", "exec", execPath, "args", args)
 	cmd.WaitDelay = 10 * time.Second
 	if opts.Cwd != "" {
@@ -103,6 +133,28 @@ func (b *opencodeBackend) Execute(ctx context.Context, prompt string, opts ExecO
 	if opts.Cwd != "" {
 		env = append(env, "PWD="+opts.Cwd)
 	}
+	// Project agent.mcp_config into OpenCode via OPENCODE_CONFIG_CONTENT —
+	// OpenCode's general inline-config injection mechanism that merges at
+	// "local" scope (after the project-config loop, before remote / managed
+	// configs). MCP is the only field we currently project there; if a
+	// future Multica field needs the same channel it would assemble a
+	// combined OpenCode config slice before the env append.
+	//
+	// This deliberately leaves <workdir>/opencode.json untouched — the
+	// workdir is reused across turns for the same (agent, issue), and any
+	// agent- or user-written model / tools / permission settings in it must
+	// survive across runs.
+	mcpContent, err := buildOpenCodeMCPConfigContent(opts.McpConfig)
+	if err != nil {
+		cancel()
+		return nil, err
+	}
+	if mcpContent != "" {
+		if _, dup := b.cfg.Env["OPENCODE_CONFIG_CONTENT"]; dup {
+			b.cfg.Logger.Warn("agent.custom_env sets OPENCODE_CONFIG_CONTENT but agent.mcp_config takes precedence and overrides it")
+		}
+		env = append(env, "OPENCODE_CONFIG_CONTENT="+mcpContent)
+	}
 	cmd.Env = env
 
 	stdout, err := cmd.StdoutPipe()
@@ -122,9 +174,34 @@ func (b *opencodeBackend) Execute(ctx context.Context, prompt string, opts ExecO
 	msgCh := make(chan Message, 256)
 	resCh := make(chan Result, 1)
 
-	// Close stdout when the context is cancelled so the scanner unblocks.
+	// procDone closes once cmd.Wait() returns, letting the cancellation handler
+	// skip a process that already exited and avoid signalling a dead pid.
+	procDone := make(chan struct{})
+
+	// On cancellation / timeout, terminate opencode (and the tool subprocesses
+	// it spawned) BEFORE unblocking the scanner. The previous implementation
+	// closed the stdout read end immediately, which left opencode writing into
+	// a closed pipe: every write returns EPIPE and, per anomalyco/opencode#33653,
+	// can spin the orphaned process at 100% CPU. Instead we SIGTERM the whole
+	// process group, give it a grace period to exit cleanly, then SIGKILL it.
+	// SIGKILL is uncatchable, so once it is delivered no group member can run
+	// (or write) again — only then is it safe to close the stdout read end as a
+	// last-resort unblock for a scanner that a wedged descendant still keeps
+	// open. WaitDelay is the final backstop (#4533).
 	go func() {
-		<-runCtx.Done()
+		select {
+		case <-procDone:
+			return // finished on its own; nothing to terminate
+		case <-runCtx.Done():
+		}
+		if cmd.Process != nil {
+			signalProcessGroup(cmd.Process, syscall.SIGTERM)
+			select {
+			case <-procDone: // exited within the grace window
+			case <-time.After(opencodeTerminateGrace()):
+				signalProcessGroup(cmd.Process, syscall.SIGKILL)
+			}
+		}
 		_ = stdout.Close()
 	}()
 
@@ -136,8 +213,9 @@ func (b *opencodeBackend) Execute(ctx context.Context, prompt string, opts ExecO
 		startTime := time.Now()
 		scanResult := b.processEvents(stdout, msgCh)
 
-		// Wait for process exit.
+		// Wait for process exit, then release the cancellation handler.
 		exitErr := cmd.Wait()
+		close(procDone)
 		duration := time.Since(startTime)
 
 		if runCtx.Err() == context.DeadlineExceeded {

@@ -67,7 +67,7 @@ interface LoginPageProps {
 // Helpers
 // ---------------------------------------------------------------------------
 
-function redirectToCliCallback(url: string, token: string, state: string) {
+export function redirectToCliCallback(url: string, token: string, state: string) {
   const separator = url.includes("?") ? "&" : "?";
   window.location.href = `${url}${separator}token=${encodeURIComponent(token)}&state=${encodeURIComponent(state)}`;
 }
@@ -349,6 +349,7 @@ export function LoginPage({
           </CardHeader>
           <CardContent className="flex flex-col items-center gap-4">
             <InputOTP
+              autoFocus
               maxLength={6}
               value={code}
               onChange={(value) => {

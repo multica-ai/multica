@@ -1,0 +1,186 @@
+---
+title: ログインとサインアップの構成
+description: メール + 認証コードログイン、Google OAuth、サインアップ許可リスト、ローカルテストコードを構成します。
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+import { Mermaid } from "@/components/mermaid";
+
+Multica は 2 つのログイン方式をサポートしています。**メール + 認証コード**（デフォルト）と **Google OAuth**（オプション）です。ログインに成功すると、サーバーは 30 日間有効な JWT クッキーを発行します。このページでは、各方式の構成方法、誰がサインアップできるかを制限する方法、そしてセルフホストのデプロイで最も陥りやすい落とし穴を 1 つ取り上げます。
+
+以下で参照する環境変数の一覧は[環境変数](/environment-variables)を参照してください。トークンの使い方とライフサイクルの詳細は[認証とトークン](/auth-tokens)を参照してください。
+
+## メール + 認証コードログインの仕組み
+
+ユーザーがログインページでメールを入力します → サーバーが 6 桁のコードを送信します → ユーザーがコードを入力します → サーバーがコードを検証します → JWT クッキーが発行されます。標準的なフローです。2 つの送信バックエンドがサポートされているので、デプロイ環境に合うほうを選んでください。
+
+### オプション A: Resend（クラウド / 公開インターネットのデプロイに推奨）
+
+1. [Resend](https://resend.com/) アカウントを作成し、ドメインを認証します
+2. API キーを作成します
+3. 環境変数を設定します:
+
+    ```bash
+    RESEND_API_KEY=re_xxxxxxxxxxxxxxxx
+    RESEND_FROM_EMAIL=noreply@yourdomain.com  # must be a domain verified in Resend
+    ```
+
+4. サーバーを再起動します
+
+### オプション B: SMTP relay（セルフホスト / オンプレミスのデプロイ用）
+
+デプロイ環境から `api.resend.com` に到達できない場合や、すでに内部メール relay（Microsoft Exchange、Postfix、オンプレミスの SendGrid など）がある場合に使用してください。両方が設定されている場合は `SMTP_HOST` が `RESEND_API_KEY` より優先されます。`SMTP_HOST` が空でなければ、`RESEND_API_KEY` も併せて構成されていても、サーバーは常に SMTP を経由するため、認証メールと招待メールが内部ネットワークの外に出ることは決してありません。
+
+SMTP 経路は、ほとんどのオンプレミスメールサーバー（特に Microsoft Exchange の receive connector）が公開する 3 つの relay モードをサポートします。
+
+| モード | ポート | 認証 | TLS |
+|---|---|---|---|
+| 匿名内部 relay | `25` | なし — IP / サブネットで送信を信頼 | 伝送経路上はなし（内部セグメント専用） |
+| 認証付き送信（submission） | `587` | `SMTP_USERNAME` + `SMTP_PASSWORD` | STARTTLS、自動アップグレード |
+| 暗黙的 TLS（SMTPS） | `465` | 任意（`SMTP_USERNAME` + `SMTP_PASSWORD`） | 接続時に TLS ハンドシェイク — ポート `465` で自動的に有効化、非標準ポートでは `SMTP_TLS=implicit` で強制 |
+
+**ポート 25 の匿名 Exchange relay** — 認証情報なしで信頼されたサブネットからのメールを受け入れる、典型的な「internal SMTP relay」/ Exchange 匿名 receive connector:
+
+```bash
+SMTP_HOST=exchange.internal.example.com
+SMTP_PORT=25
+SMTP_USERNAME=
+SMTP_PASSWORD=
+SMTP_TLS_INSECURE=false
+RESEND_FROM_EMAIL=noreply@yourdomain.com  # reused as the From: header
+```
+
+**ポート 587 の認証付き送信** — サービスアカウントを必要とする relay 用。サーバーが STARTTLS のサポートを通知すると自動的にアップグレードされます:
+
+```bash
+SMTP_HOST=smtp.internal.example.com
+SMTP_PORT=587
+SMTP_USERNAME=multica
+SMTP_PASSWORD=...
+SMTP_TLS_INSECURE=false        # set true only for self-signed / private CA
+RESEND_FROM_EMAIL=noreply@yourdomain.com
+```
+
+**ポート 465 の暗黙的 TLS（SMTPS）** — SMTPS のみを提供し STARTTLS を通知しないプロバイダー（例: Aliyun / Tencent のエンタープライズメール）向け。ポート `465` は暗黙的 TLS を自動的に有効化します。`SMTP_TLS=implicit`（別名: `smtps`、`ssl`）は非標準の SMTPS ポートでこれを強制します:
+
+```bash
+SMTP_HOST=smtp.qiye.aliyun.com
+SMTP_PORT=465                  # implicit TLS auto-enabled on 465
+SMTP_USERNAME=multica@yourdomain.com
+SMTP_PASSWORD=...
+SMTP_TLS=implicit              # optional on 465; required on a non-standard SMTPS port
+RESEND_FROM_EMAIL=noreply@yourdomain.com
+```
+
+**厳格な公開 relay（例: Google Workspace `smtp-relay.gmail.com`）** はさらに有効な EHLO 名を必要とします。これらの relay は公開 IP からのデフォルトの `localhost` 挨拶を拒否し、relay が接続を切断します — これは挨拶の時点ではなく、後続のコマンドで不明瞭な `EOF`（`smtp auth: EOF`）として表面化します。`SMTP_EHLO_NAME` を relay が期待する FQDN に設定してください。デフォルトはマシンのホスト名で、コンテナ内では通常は有効な FQDN ではありません。
+
+```bash
+SMTP_HOST=smtp-relay.gmail.com
+SMTP_PORT=587
+SMTP_EHLO_NAME=mail.yourdomain.com   # FQDN the relay accepts; defaults to the (non-FQDN) container hostname
+RESEND_FROM_EMAIL=noreply@yourdomain.com
+```
+
+起動時に、サーバーは選択したプロバイダーを、ネゴシエートされた TLS モードも含めて出力します。例えば `EmailService: SMTP relay exchange.internal.example.com:25 (starttls) from=noreply@example.com` や `… smtp.qiye.aliyun.com:465 (implicit-tls) from=…`（または `Resend API` / `DEV mode`）のように表示されます。パスワードがログに記録されることは決してありません。再起動後に SMTP の行が見えない場合は `SMTP_HOST` がプロセスに届いていないので、コンテナ環境（`docker compose -f docker-compose.selfhost.yml exec backend env | grep SMTP`）を確認してください。
+
+**どちらも設定しない場合**: サーバーはエラーを出しませんが、**送信されるはずだったすべてのメールがサーバーの stdout にのみ書き出されます**。ローカル開発には便利ですが（ログからコードをコピーできます）、プロダクションではブラックホールになります。
+
+## 固定ローカルテストコード
+
+<Callout type="warning">
+**公開アクセス可能なインスタンスでは固定の認証コードを有効にしないでください。**
+
+非プロダクションのインスタンスがデフォルトで `888888` を受け入れていた従来の動作は削除されました。明示的に構成しない限り、`888888` の入力は他の誤ったコードと同じように扱われます。
+
+メールバックエンドをまったく構成していない（Resend も SMTP もない）ローカル開発では、サーバーログに出力される生成されたコードを使用してください。決定論的なローカル / プライベートの自動化が必要な場合は、`MULTICA_DEV_VERIFICATION_CODE` を `888888` のような 6 桁の値に設定し、`APP_ENV` を非プロダクションに保ってください:
+
+```bash
+APP_ENV=development
+MULTICA_DEV_VERIFICATION_CODE=888888
+```
+
+このショートカットは `APP_ENV=production` のときは無視されます。
+</Callout>
+
+プロダクションのデプロイでは `MULTICA_DEV_VERIFICATION_CODE` を空のままにし、`APP_ENV=production` に設定してください。`make selfhost` / `docker-compose.selfhost.yml` でデプロイする場合、`APP_ENV` はデフォルトで `production` です。
+
+## Google OAuth の構成
+
+オプションです。構成しないとメール + 認証コードのみが利用可能で、構成するとログインページに「Sign in with Google」ボタンが追加されます。
+
+1. [Google Cloud Console](https://console.cloud.google.com/) で OAuth 2.0 クライアントを作成します
+2. **Authorized redirect URIs** を Multica フロントエンドのアドレスに `/auth/callback` を加えた値に設定します。例:
+
+    ```text
+    https://multica.yourdomain.com/auth/callback
+    ```
+
+3. クライアント ID とクライアント secret を取得したら、3 つの環境変数を設定します:
+
+    ```bash
+    GOOGLE_CLIENT_ID=xxxxx.apps.googleusercontent.com
+    GOOGLE_CLIENT_SECRET=GOCSPX-xxxxxxxxxxxxxxx
+    GOOGLE_REDIRECT_URI=https://multica.yourdomain.com/auth/callback
+    ```
+
+4. サーバーを再起動します。
+
+**ランタイムで反映されます**: フロントエンドは `/api/config` を通じてランタイムにこれらの設定を読み込みます — 変更後にサーバーを再起動すると、フロントエンドはリビルドや再デプロイなしで新しい値を取得します。
+
+<Callout type="warning">
+**リダイレクト URI は Google Console と `GOOGLE_REDIRECT_URI` の両方で完全に一致している必要があります** — プロトコル（`http` と `https`）、末尾のスラッシュ、ポートを含みます。少しでも一致しないと Google は OAuth フロー全体を拒否し、ユーザーに表示されるエラーは `redirect_uri_mismatch` です。
+</Callout>
+
+## 誰がサインアップできるかを制限する
+
+3 つの環境変数が優先順位に従って組み合わされます。
+
+<Mermaid chart={`
+graph TD
+    Start[New user first sign-in] --> A{Email in<br/>ALLOWED_EMAILS?}
+    A -- Yes --> Allow[Allow signup]
+    A -- No --> B{Domain in<br/>ALLOWED_EMAIL_DOMAINS?}
+    B -- Yes --> Allow
+    B -- No --> C{Any allowlist<br/>non-empty?}
+    C -- Yes --> Block[Reject]
+    C -- No --> D{ALLOW_SIGNUP<br/>= true?}
+    D -- Yes --> Allow
+    D -- No --> Block
+`} />
+
+**既存のユーザーはいつでも再ログインできます** — サインアップ許可リストは**初回サインアップ**にのみ適用され、戻ってくるユーザーは妨げられません。
+
+- **`ALLOWED_EMAILS`**（最高優先度） — 明示的なメール許可リスト、カンマ区切り。**空でない場合、リストにあるメールのみがサインアップできます。**
+- **`ALLOWED_EMAIL_DOMAINS`** — ドメイン許可リスト、カンマ区切り（例: `company.io,partner.com`）。
+- **`ALLOW_SIGNUP`** — マスタースイッチ、デフォルト `true`。`false` に設定するとサインアップが完全に無効になります。
+
+<Callout type="warning">
+**3 つの層は OR ではなく AND のセマンティクスです。** よくある誤った直感は、`ALLOWED_EMAIL_DOMAINS=company.io` + `ALLOW_SIGNUP=true` が「company.io に加えて他の全員を許可する」という意味だと考えることです。そうでは**ありません**。いずれかの層に空でない値があると、**それに一致しないメールはただちに拒否され**、`ALLOW_SIGNUP=true` はそれを無効にできません。
+
+実際に「全員を許可」するには、3 つの変数をすべて空のままにしてください（または `ALLOW_SIGNUP=true` を維持してください）。
+</Callout>
+
+**典型的な構成**:
+
+| 目的 | 構成 |
+|---|---|
+| 内部専用、`company.io` の従業員のみ | `ALLOWED_EMAIL_DOMAINS=company.io` |
+| 内部 + 少数の外部コラボレーター | `ALLOWED_EMAIL_DOMAINS=company.io` + コラボレーターのアドレスを `ALLOWED_EMAILS` に追加 |
+| セルフサービスのサインアップを完全に無効化、招待のみ | `ALLOW_SIGNUP=false` |
+| 開放型サインアップ（プロダクションには非推奨） | 3 つすべて空 |
+
+## サインアップを無効にしても人を招待できますか?
+
+**すでに Multica アカウントを持っている人のみ可能です。** 招待の受諾はサインアップ許可リストをチェックしません — 招待された人がすでにサインアップ済み（例えば別のワークスペースで）であれば、招待リンクをクリックしてログインすれば受諾できます。
+
+**しかし一度もサインアップしていない人は招待で救うことはできません。** 受諾する前にまずログインする必要があり、ログインの最初のステップ（認証コードの要求）はサインアップ許可リストのチェックを通過します。`ALLOW_SIGNUP=false` であるか、そのメールが `ALLOWED_EMAILS` / `ALLOWED_EMAIL_DOMAINS` にない場合、**サインアップを完了できず**、したがって招待を受諾することもできません。
+
+まだサインアップしていない外部コラボレーターを招待するには: そのメールを `ALLOWED_EMAILS` に一時的に追加し、その人がサインアップして招待を受諾するのを待ってから、エントリを削除してください。
+
+招待の作成と使用方法については[メンバーとロール](/members-roles)を参照してください。
+
+## 次に
+
+- [環境変数](/environment-variables) — このページで使用するすべての変数の完全な定義
+- [認証とトークン](/auth-tokens) — JWT / PAT / デーモントークンの分類と使い方
+- [トラブルシューティング](/troubleshooting) — 認証コードが届かない、OAuth `redirect_uri_mismatch`、サインアップ拒否

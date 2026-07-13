@@ -64,8 +64,8 @@ export function aggregateDailyCost(usage: DashboardUsageDaily[]): DailyCostStack
     map.set(u.date, entry);
   }
   const round = (n: number) => Math.round(n * 100) / 100;
-  return [...map.entries()]
-    .sort(([a], [b]) => a.localeCompare(b))
+  return Array.from(map.entries())
+    .toSorted(([a], [b]) => a.localeCompare(b))
     .map(([date, s]) => {
       const input = round(s.input);
       const output = round(s.output);
@@ -105,8 +105,8 @@ export function aggregateDailyTokens(usage: DashboardUsageDaily[]): DailyTokenDa
     entry.cacheWrite += u.cache_write_tokens;
     map.set(u.date, entry);
   }
-  return [...map.entries()]
-    .sort(([a], [b]) => a.localeCompare(b))
+  return Array.from(map.entries())
+    .toSorted(([a], [b]) => a.localeCompare(b))
     .map(([date, t]) => ({
       date,
       label: formatDateLabel(date),
@@ -170,7 +170,7 @@ export function aggregateAgentTokens(rows: DashboardUsageByAgent[]): AgentCostRo
     entry.taskCount += r.task_count;
     map.set(r.agent_id, entry);
   }
-  return [...map.values()].sort((a, b) => b.cost - a.cost);
+  return Array.from(map.values()).toSorted((a, b) => b.cost - a.cost);
 }
 
 export interface AgentDashboardRow {
@@ -221,10 +221,60 @@ export function mergeAgentDashboardRows(
       taskCount: r.task_count,
     });
   }
-  return [...merged.values()].sort((a, b) => {
+  return Array.from(merged.values()).toSorted((a, b) => {
     if (b.cost !== a.cost) return b.cost - a.cost;
     return b.seconds - a.seconds;
   });
+}
+
+// Synthetic agentId for the row that aggregates all hard-deleted agents.
+// Sentinel (not a real UUID) so the component can detect it and render a
+// placeholder instead of looking the id up in the agent list.
+export const DELETED_AGENTS_ROW_ID = "__deleted_agents__";
+
+// Fold usage rows whose agent no longer exists in the workspace into a single
+// aggregated "Deleted agents" row instead of dropping them. The agent list is
+// fetched with `include_archived: true`, so archived agents keep their names
+// and stay on the leaderboard as themselves; only hard-deleted agents fall out
+// of `knownAgentIds` and collapse into the bucket.
+//
+// MUL-3771 (PR #4637) originally *dropped* these rows so they'd stop rendering
+// as a bare UUID — but the top-line Cost/Tokens KPIs still count their spend
+// (those totals aggregate `task_usage_hourly` without joining `agent`), so the
+// per-agent breakdown no longer reconciled with the totals (MUL-3776, #4640).
+// Aggregating instead of dropping keeps `sum(visible rows) == KPI total` while
+// still never exposing a UUID. The bucket carries tokens + cost only; seconds
+// and taskCount stay 0 because the run-time rollups inner-join `agent`, so
+// deleted agents already contribute nothing to the Time/Tasks KPIs — the
+// component renders those two columns as "—" for this row.
+//
+// `knownAgentIds` is `null` while the agent list is still loading; callers
+// pass `null` in that case so the rows pass through untouched instead of the
+// whole leaderboard collapsing into one bucket on a slow fetch.
+export function bucketUnknownAgentRows(
+  rows: AgentDashboardRow[],
+  knownAgentIds: ReadonlySet<string> | null,
+): AgentDashboardRow[] {
+  if (!knownAgentIds) return rows;
+  const known: AgentDashboardRow[] = [];
+  const bucket: AgentDashboardRow = {
+    agentId: DELETED_AGENTS_ROW_ID,
+    tokens: 0,
+    cost: 0,
+    seconds: 0,
+    taskCount: 0,
+  };
+  let hasDeleted = false;
+  for (const r of rows) {
+    if (knownAgentIds.has(r.agentId)) {
+      known.push(r);
+      continue;
+    }
+    hasDeleted = true;
+    bucket.tokens += r.tokens;
+    bucket.cost += r.cost;
+  }
+  return hasDeleted ? [...known, bucket] : known;
 }
 
 // ---------------------------------------------------------------------------
@@ -328,8 +378,7 @@ export function aggregateWeeklyTasks(
 // DailyTimeChart. Sorted ascending so the x-axis reads oldest-to-newest,
 // matching the cost / tokens aggregators.
 export function aggregateDailyTime(rows: DashboardRunTimeDaily[]): DailyTimeData[] {
-  return [...rows]
-    .sort((a, b) => a.date.localeCompare(b.date))
+  return rows.toSorted((a, b) => a.date.localeCompare(b.date))
     .map((r) => ({
       date: r.date,
       label: formatDateLabel(r.date),
@@ -341,8 +390,7 @@ export function aggregateDailyTime(rows: DashboardRunTimeDaily[]): DailyTimeData
 // counts for the DailyTasksChart's stacked bar (failed_count is a subset
 // of task_count, so completed = task_count - failed_count).
 export function aggregateDailyTasks(rows: DashboardRunTimeDaily[]): DailyTasksData[] {
-  return [...rows]
-    .sort((a, b) => a.date.localeCompare(b.date))
+  return rows.toSorted((a, b) => a.date.localeCompare(b.date))
     .map((r) => {
       const failed = r.failed_count;
       const completed = Math.max(0, r.task_count - failed);

@@ -99,6 +99,7 @@ function TreeNodeItem({
     return (
       <div>
         <button
+          type="button"
           onClick={() => setExpanded(!expanded)}
           className="flex w-full items-center gap-1.5 py-1 text-left text-xs hover:bg-accent/50 rounded-sm"
           style={{ paddingLeft: `${depth * 12 + 8}px` }}
@@ -128,6 +129,7 @@ function TreeNodeItem({
 
   return (
     <button
+      type="button"
       onClick={() => onSelect(node.path)}
       className={cn(
         "flex w-full items-center gap-1.5 py-1 text-left text-xs rounded-sm",

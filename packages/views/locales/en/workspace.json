@@ -21,6 +21,10 @@
     "description": "One workspace where you and your AI teammates work side by side — taking issues, leaving comments, sharing the same context.",
     "invite_hint": "You can invite teammates once your workspace is ready."
   },
+  "creation_disabled": {
+    "title": "Workspace creation is disabled",
+    "description": "This Multica instance does not allow new workspaces to be created. Ask your administrator for an invitation to an existing workspace."
+  },
   "no_access": {
     "title": "Workspace not available",
     "description": "This workspace doesn't exist or you don't have access.",

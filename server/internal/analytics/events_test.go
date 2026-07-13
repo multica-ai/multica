@@ -15,22 +15,7 @@ func TestRuntimeReadyOmitsUnmeasuredDuration(t *testing.T) {
 }
 
 func TestFailedEventsUseWillRetry(t *testing.T) {
-	ctx := TaskContext{
-		UserID:      "user-1",
-		WorkspaceID: "workspace-1",
-		AgentID:     "agent-1",
-		TaskID:      "task-1",
-		Source:      SourceManual,
-	}
-	taskEv := AgentTaskFailed(ctx, 10, "runtime_offline", "runtime", true)
-	if got := taskEv.Properties["will_retry"]; got != true {
-		t.Fatalf("task will_retry = %v, want true", got)
-	}
-	if _, ok := taskEv.Properties["recoverable"]; ok {
-		t.Fatalf("task failure should not emit recoverable")
-	}
-
-	runEv := AutopilotRunFailed("user-1", "workspace-1", "autopilot-1", "run-1", AutopilotAssignee{AgentID: "agent-1", AssigneeType: "agent"}, "manual", "task failed", "task_error", false, 10)
+	runEv := AutopilotRunFailed("user-1", "workspace-1", "autopilot-1", "run-1", "manual", AutopilotAssignee{AgentID: "agent-1", AssigneeType: "agent"}, "manual", "task failed", "task_error", false, 10)
 	if got := runEv.Properties["will_retry"]; got != false {
 		t.Fatalf("autopilot will_retry = %v, want false", got)
 	}
@@ -39,29 +24,26 @@ func TestFailedEventsUseWillRetry(t *testing.T) {
 	}
 }
 
-func TestAgentTaskDispatchedUsesTaskCoreProperties(t *testing.T) {
-	ctx := TaskContext{
-		UserID:      "user-1",
-		WorkspaceID: "workspace-1",
-		AgentID:     "agent-1",
-		TaskID:      "task-1",
-		IssueID:     "issue-1",
-		Source:      SourceManual,
-		RuntimeMode: "local",
-		Provider:    "codex",
+func TestIsMetricsOnly(t *testing.T) {
+	// As of MUL-4127, PostHog is retired for server-side product analytics:
+	// every server-side event is Prometheus-only and must not ship to PostHog.
+	for _, name := range []string{
+		// runtime / autopilot execution-lifecycle telemetry
+		EventRuntimeRegistered, EventRuntimeReady, EventRuntimeFailed, EventRuntimeOffline,
+		EventAutopilotRunStarted, EventAutopilotRunCompleted, EventAutopilotRunFailed,
+		// product-behaviour events (now DB + Grafana only)
+		EventSignup, EventWorkspaceCreated, EventIssueCreated, EventIssueExecuted,
+		EventChatMessageSent, EventTeamInviteSent, EventTeamInviteAccepted,
+		EventOnboardingStarted, EventOnboardingQuestionnaireSubmit, EventAgentCreated,
+		EventOnboardingCompleted, EventCloudWaitlistJoined, EventFeedbackSubmitted,
+		EventContactSalesSubmitted, EventSquadCreated, EventAutopilotCreated,
+	} {
+		if !IsMetricsOnly(name) {
+			t.Errorf("IsMetricsOnly(%q) = false, want true (server events stay out of PostHog since MUL-4127)", name)
+		}
 	}
-	ev := AgentTaskDispatched(ctx)
-
-	if ev.Name != EventAgentTaskDispatched {
-		t.Fatalf("event name = %q, want %q", ev.Name, EventAgentTaskDispatched)
-	}
-	if got := ev.WorkspaceID; got != "workspace-1" {
-		t.Fatalf("workspace_id = %q, want workspace-1", got)
-	}
-	if got := ev.Properties["task_id"]; got != "task-1" {
-		t.Fatalf("task_id = %v, want task-1", got)
-	}
-	if got := ev.Properties["runtime_mode"]; got != "local" {
-		t.Fatalf("runtime_mode = %v, want local", got)
+	// A name that isn't a declared server event is not metrics-only.
+	if IsMetricsOnly("$exception") {
+		t.Errorf("IsMetricsOnly(%q) = true, want false (frontend-only event)", "$exception")
 	}
 }

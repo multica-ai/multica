@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   Eye,
   EyeOff,
@@ -10,11 +10,18 @@ import {
   Save,
   Trash2,
 } from "lucide-react";
+import { api } from "@multica/core/api";
 import type { Agent } from "@multica/core/types";
 import { Button } from "@multica/ui/components/ui/button";
 import { Input } from "@multica/ui/components/ui/input";
 import { toast } from "sonner";
 import { useT } from "../../../i18n";
+
+// Env values never reach this component until the user clicks
+// "Reveal & edit" — the agent resource feed no longer carries
+// custom_env at all after MUL-2600. Until then we display only the
+// configured-key count from `agent.custom_env_key_count`, which is
+// safe because it's not the values themselves.
 
 let nextEnvId = 0;
 
@@ -47,39 +54,68 @@ function entriesToEnvMap(entries: EnvEntry[]): Record<string, string> {
 
 export function EnvTab({
   agent,
-  readOnly = false,
-  onSave,
   onDirtyChange,
+  onSaved,
 }: {
   agent: Agent;
-  readOnly?: boolean;
-  onSave: (updates: Partial<Agent>) => Promise<void>;
   onDirtyChange?: (dirty: boolean) => void;
+  // Notifier so the parent page can refresh its agent cache after a
+  // successful PUT — the parent owns the `Agent` object the rest of
+  // the page reads (name, has_custom_env, etc.). Optional so call
+  // sites without invalidation logic stay simple.
+  onSaved?: () => void;
 }) {
   const { t } = useT("agents");
-  const [envEntries, setEnvEntries] = useState<EnvEntry[]>(
-    envMapToEntries(agent.custom_env ?? {}),
-  );
+
+  // revealed === null means "haven't fetched yet"; revealed === [] is
+  // a legitimate empty map after a successful reveal. We do NOT
+  // pre-populate from `agent` here because the agent resource shape
+  // no longer carries values — only the dedicated `/env` endpoint
+  // does, and that endpoint writes an audit row per call so we never
+  // fetch implicitly on mount.
+  const [revealed, setRevealed] = useState<EnvEntry[] | null>(null);
+  const [originalMap, setOriginalMap] = useState<Record<string, string>>({});
+  const [revealing, setRevealing] = useState(false);
   const [saving, setSaving] = useState(false);
 
-  const currentEnvMap = entriesToEnvMap(envEntries);
-  const originalEnvMap = agent.custom_env ?? {};
+  const keyCount = agent.custom_env_key_count ?? 0;
+
+  const currentEnvMap = revealed ? entriesToEnvMap(revealed) : originalMap;
   const dirty =
-    JSON.stringify(currentEnvMap) !== JSON.stringify(originalEnvMap);
+    revealed !== null &&
+    JSON.stringify(currentEnvMap) !== JSON.stringify(originalMap);
 
   useEffect(() => {
     onDirtyChange?.(dirty);
   }, [dirty, onDirtyChange]);
 
+  const handleReveal = useCallback(async () => {
+    setRevealing(true);
+    try {
+      const resp = await api.getAgentEnv(agent.id);
+      const env = resp.custom_env ?? {};
+      setOriginalMap(env);
+      setRevealed(envMapToEntries(env));
+    } catch (err) {
+      toast.error(
+        err instanceof Error && err.message
+          ? err.message
+          : t(($) => $.tab_body.env.reveal_failed_toast),
+      );
+    } finally {
+      setRevealing(false);
+    }
+  }, [agent.id, t]);
+
   const addEnvEntry = () => {
-    setEnvEntries([
-      ...envEntries,
+    setRevealed((prev) => [
+      ...(prev ?? []),
       { id: nextEnvId++, key: "", value: "", visible: true },
     ]);
   };
 
   const removeEnvEntry = (index: number) => {
-    setEnvEntries(envEntries.filter((_, i) => i !== index));
+    setRevealed((prev) => (prev ?? []).filter((_, i) => i !== index));
   };
 
   const updateEnvEntry = (
@@ -87,23 +123,24 @@ export function EnvTab({
     field: "key" | "value",
     val: string,
   ) => {
-    setEnvEntries(
-      envEntries.map((entry, i) =>
+    setRevealed((prev) =>
+      (prev ?? []).map((entry, i) =>
         i === index ? { ...entry, [field]: val } : entry,
       ),
     );
   };
 
   const toggleEnvVisibility = (index: number) => {
-    setEnvEntries(
-      envEntries.map((entry, i) =>
+    setRevealed((prev) =>
+      (prev ?? []).map((entry, i) =>
         i === index ? { ...entry, visible: !entry.visible } : entry,
       ),
     );
   };
 
   const handleSave = async () => {
-    const keys = envEntries.filter((e) => e.key.trim()).map((e) => e.key.trim());
+    if (revealed === null) return;
+    const keys = revealed.filter((e) => e.key.trim()).map((e) => e.key.trim());
     const uniqueKeys = new Set(keys);
     if (uniqueKeys.size < keys.length) {
       toast.error(t(($) => $.tab_body.env.duplicate_keys_toast));
@@ -112,8 +149,14 @@ export function EnvTab({
 
     setSaving(true);
     try {
-      await onSave({ custom_env: currentEnvMap });
+      const resp = await api.updateAgentEnv(agent.id, {
+        custom_env: currentEnvMap,
+      });
+      const env = resp.custom_env ?? {};
+      setOriginalMap(env);
+      setRevealed(envMapToEntries(env));
       toast.success(t(($) => $.tab_body.env.saved_toast));
+      onSaved?.();
     } catch (err) {
       toast.error(
         err instanceof Error && err.message
@@ -125,42 +168,49 @@ export function EnvTab({
     }
   };
 
-  if (readOnly) {
+  // Pre-reveal state: show count + Reveal button. We never auto-fetch
+  // on mount so a member just navigating between tabs doesn't trigger
+  // an audit-log entry; the reveal must be intentional.
+  if (revealed === null) {
     return (
       <div className="space-y-4">
-        <p className="text-xs text-muted-foreground">
-          {t(($) => $.tab_body.env.intro_readonly)}
-        </p>
-        {envEntries.length > 0 ? (
-          <div className="space-y-2">
-            {envEntries.map((entry) => (
-              <div key={entry.id} className="flex items-center gap-2">
-                <Input
-                  value={entry.key}
-                  readOnly
-                  className="w-[40%] bg-muted font-mono text-xs"
-                />
-                <div className="relative flex-1">
-                  <Input
-                    type="password"
-                    value="****"
-                    readOnly
-                    className="bg-muted pr-8 font-mono text-xs"
-                  />
-                  <Lock className="absolute right-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-                </div>
-              </div>
-            ))}
+        <div className="flex items-start justify-between gap-3">
+          <div className="space-y-1">
+            <p className="flex items-center gap-2 text-sm font-medium">
+              <Lock className="h-3.5 w-3.5 text-muted-foreground" />
+              {keyCount > 0
+                ? t(($) => $.tab_body.env.not_revealed_title, {
+                    count: keyCount,
+                  })
+                : t(($) => $.tab_body.env.not_revealed_empty)}
+            </p>
+            <p className="text-xs text-muted-foreground">
+              {t(($) => $.tab_body.env.not_revealed_hint)}
+            </p>
           </div>
-        ) : (
-          <p className="text-xs italic text-muted-foreground">
-            {t(($) => $.tab_body.env.empty_readonly)}
-          </p>
-        )}
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={revealing}
+            onClick={handleReveal}
+            className="shrink-0"
+          >
+            {revealing ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Eye className="h-3.5 w-3.5" />
+            )}
+            {revealing
+              ? t(($) => $.tab_body.env.revealing)
+              : t(($) => $.tab_body.env.reveal_action)}
+          </Button>
+        </div>
       </div>
     );
   }
 
+  // Editable state — only entered after a successful reveal.
   return (
     <div className="space-y-4">
       <div className="flex items-start justify-between gap-3">
@@ -187,9 +237,9 @@ export function EnvTab({
         </Button>
       </div>
 
-      {envEntries.length > 0 && (
+      {revealed.length > 0 ? (
         <div className="space-y-2">
-          {envEntries.map((entry, index) => (
+          {revealed.map((entry, index) => (
             <div key={entry.id} className="flex items-center gap-2">
               <Input
                 value={entry.key}
@@ -232,6 +282,10 @@ export function EnvTab({
             </div>
           ))}
         </div>
+      ) : (
+        <p className="text-xs italic text-muted-foreground">
+          {t(($) => $.tab_body.env.empty_editable)}
+        </p>
       )}
 
       <div className="flex items-center justify-end gap-3">

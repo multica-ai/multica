@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
@@ -523,7 +524,22 @@ func (h *Handler) HandleAutopilotWebhook(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// 11. Dispatch synchronously. DispatchAutopilot publishes WS events,
+	// 11. Event filter scope → ignored. If the trigger declares a concrete
+	//     event_filters list and the incoming event is outside that scope,
+	//     record an ignored delivery without creating an expensive run/task.
+	if !webhookEventAllowedByTriggerScope(trigRow.EventFilters, envelope) {
+		respBody := map[string]any{
+			"status":      "ignored",
+			"delivery_id": uuidToString(delivery.ID),
+			"reason":      "event_filtered",
+			"event":       envelope.Event,
+		}
+		h.finaliseDeliveryTerminal(r, delivery.ID, deliveryStatusIgnored, http.StatusOK, respBody, "event_filtered")
+		writeJSON(w, http.StatusOK, respBody)
+		return
+	}
+
+	// 12. Dispatch synchronously. DispatchAutopilot publishes WS events,
 	//     persists trigger_payload on autopilot_run, runs the admission
 	//     check (offline runtime → skipped), and bumps last_run_at.
 	run, err := h.AutopilotService.DispatchAutopilot(
@@ -553,7 +569,7 @@ func (h *Handler) HandleAutopilotWebhook(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// 12. Bump last_fired_at after dispatch returns — including the skipped
+	// 13. Bump last_fired_at after dispatch returns — including the skipped
 	//     path — so paused early-returns above don't corrupt "last fired".
 	if err := h.Queries.TouchAutopilotTriggerFiredAt(r.Context(), trigRow.ID); err != nil {
 		slog.Warn("webhook: failed to touch last_fired_at",
@@ -562,7 +578,7 @@ func (h *Handler) HandleAutopilotWebhook(w http.ResponseWriter, r *http.Request)
 		)
 	}
 
-	// 13. Persist the linkage delivery → run.
+	// 14. Persist the linkage delivery → run.
 	//
 	// The delivery row is always `dispatched` once we reach here: from the
 	// ingress's perspective we handed the payload off to the autopilot
@@ -591,6 +607,154 @@ func (h *Handler) HandleAutopilotWebhook(w http.ResponseWriter, r *http.Request)
 	h.finaliseDeliveryWithRun(r, delivery.ID, deliveryStatusDispatched, run.ID, http.StatusOK, respBody)
 
 	writeJSON(w, http.StatusOK, respBody)
+}
+
+// ── Event filter helpers ────────────────────────────────────────────────────
+
+// WebhookEventFilter declares one event and an optional list of actions.
+// A nil/empty Actions means "any action" for this event.
+type WebhookEventFilter struct {
+	Event   string   `json:"event"`
+	Actions []string `json:"actions,omitempty"`
+}
+
+// validateWebhookEventFilters enforces the contract at the HTTP boundary so
+// that malformed shapes never reach the database. The matcher (read path)
+// trusts whatever is stored — see webhookEventAllowedByTriggerScope.
+func validateWebhookEventFilters(filters []WebhookEventFilter) error {
+	for i, f := range filters {
+		if strings.TrimSpace(f.Event) == "" {
+			return fmt.Errorf("event_filters[%d].event must not be empty", i)
+		}
+		for j, a := range f.Actions {
+			if strings.TrimSpace(a) == "" {
+				return fmt.Errorf("event_filters[%d].actions[%d] must not be empty", i, j)
+			}
+		}
+	}
+	return nil
+}
+
+// encodeWebhookEventFilters returns the JSONB bytes to persist for a CREATE.
+// nil/empty input maps to nil bytes (column stays NULL → matcher allows
+// every event), so we never write an explicit `[]` on create.
+func encodeWebhookEventFilters(filters []WebhookEventFilter) ([]byte, error) {
+	if len(filters) == 0 {
+		return nil, nil
+	}
+	return json.Marshal(filters)
+}
+
+// encodeWebhookEventFiltersAlways always returns non-nil bytes, even for an
+// empty slice (`[]byte("[]")`). The UPDATE handler uses this so an explicit
+// empty array in the PATCH body can overwrite (via COALESCE) the existing
+// row to a cleared state — passing nil would be indistinguishable from
+// "field omitted, leave alone".
+func encodeWebhookEventFiltersAlways(filters []WebhookEventFilter) ([]byte, error) {
+	if filters == nil {
+		filters = []WebhookEventFilter{}
+	}
+	return json.Marshal(filters)
+}
+
+// webhookEventAllowedByTriggerScope returns true when the trigger has no
+// filters (NULL / empty) or when the incoming envelope matches at least one
+// declared filter.
+func webhookEventAllowedByTriggerScope(eventFilters []byte, envelope WebhookEnvelope) bool {
+	if len(eventFilters) == 0 {
+		return true
+	}
+	var filters []WebhookEventFilter
+	if err := json.Unmarshal(eventFilters, &filters); err != nil {
+		// Strict write-time validation should prevent malformed bytes
+		// from ever reaching this branch. If a corrupt row somehow
+		// exists, fail closed — silently widening the allowlist on a
+		// "only allow X" policy is worse than dropping events until an
+		// operator notices.
+		slog.Warn("webhook: malformed event_filters, denying", "error", err)
+		return false
+	}
+	if len(filters) == 0 {
+		return true
+	}
+	_, eventName, eventAction := splitWebhookEvent(envelope.Event)
+	actionCandidates := webhookActionCandidates(eventAction, envelope.EventPayload)
+	for _, f := range filters {
+		if f.Event != eventName {
+			continue
+		}
+		if len(f.Actions) == 0 {
+			return true
+		}
+		for _, action := range actionCandidates {
+			for _, allowed := range f.Actions {
+				if action == allowed {
+					return true
+				}
+			}
+		}
+		// Intentionally do NOT return false here: the UI allows several
+		// filters that share the same event name (e.g. two workflow_run
+		// rows covering disjoint actions). Earlier code short-circuited
+		// on the first event-name hit, which made one row silently shadow
+		// the others depending on iteration order — see PR #3231 review.
+		// Keep scanning so any later filter still gets its chance.
+	}
+	return false
+}
+
+// splitWebhookEvent splits a normalized event like "github.workflow_run.completed"
+// into (provider, eventName, action). For unqualified events it returns ("", event, "").
+func splitWebhookEvent(event string) (provider, name, action string) {
+	parts := strings.Split(event, ".")
+	if isKnownProvider(parts[0]) {
+		if len(parts) >= 3 {
+			return parts[0], parts[1], strings.Join(parts[2:], ".")
+		}
+		if len(parts) == 2 {
+			return parts[0], parts[1], ""
+		}
+		return parts[0], "", ""
+	}
+	if len(parts) >= 2 {
+		return "", parts[0], strings.Join(parts[1:], ".")
+	}
+	return "", event, ""
+}
+
+func isKnownProvider(prefix string) bool {
+	switch prefix {
+	case "github", "gitlab", "bitbucket", "gitea":
+		return true
+	}
+	return false
+}
+
+// webhookActionCandidates extracts possible action values from the event
+// action suffix and from well-known payload fields.
+func webhookActionCandidates(eventAction string, payload json.RawMessage) []string {
+	seen := map[string]struct{}{}
+	add := func(v string) {
+		v = strings.TrimSpace(v)
+		if v == "" {
+			return
+		}
+		seen[v] = struct{}{}
+	}
+	add(eventAction)
+	var obj map[string]any
+	if err := json.Unmarshal(payload, &obj); err == nil {
+		for _, key := range []string{"action", "state", "conclusion", "status"} {
+			if v, ok := obj[key].(string); ok {
+				add(v)
+			}
+		}
+	}
+	out := make([]string, 0, len(seen))
+	for v := range seen {
+		out = append(out, v)
+	}
+	return out
 }
 
 // ── Persistence helpers ─────────────────────────────────────────────────────
@@ -689,6 +853,7 @@ func (h *Handler) finaliseDeliveryTerminal(
 			"error", err,
 		)
 	}
+	h.Metrics.RecordWebhookDelivery(h.deliveryProvider(r.Context(), id), status)
 }
 
 // finaliseDeliveryWithRun records a delivery that produced (or was admission-
@@ -716,6 +881,23 @@ func (h *Handler) finaliseDeliveryWithRun(
 			"error", err,
 		)
 	}
+	h.Metrics.RecordWebhookDelivery(h.deliveryProvider(r.Context(), id), status)
+}
+
+// deliveryProvider best-effort reads the provider for a delivery id so the
+// webhook delivery metric carries useful provenance. On lookup failure we
+// fall back to "generic" — the metric must always be incremented exactly
+// once per finalise call so the dashboard counts line up with autopilot_run
+// volume.
+func (h *Handler) deliveryProvider(ctx context.Context, id pgtype.UUID) string {
+	if h.Queries == nil {
+		return "generic"
+	}
+	row, err := h.Queries.GetWebhookDelivery(ctx, id)
+	if err != nil || row.Provider == "" {
+		return "generic"
+	}
+	return row.Provider
 }
 
 // ── Rate-limit / IP plumbing ────────────────────────────────────────────────

@@ -37,6 +37,28 @@ Mentioning the same person multiple times in one comment still produces **only o
 **Use `@all` carefully.** In a larger workspace, a single `@all` generates that many inbox notifications instantly. Reserve it for things everyone genuinely needs to know — not day-to-day updates.
 </Callout>
 
+## Referencing issues
+
+To link another issue, choose it from the comment mention picker. Multica stores issue links as an explicit `[MUL-123](mention://issue/<uuid>)` mention link. Issue links are cross-references only: they do not notify people and they do not trigger agents.
+
+Typing a bare issue key, such as `MUL-123`, keeps it as plain text. This also keeps branch names and paths, such as `feature/MUL-123`, from being rewritten inside comments.
+
+<Callout type="info">
+Markdown emphasis follows CommonMark rules. When bold text ends with punctuation or a closing quote and is immediately followed by a Korean particle, the closing `**` may not be recognized.
+
+Prefer moving the quote outside the bold span:
+
+```markdown
+"**무엇을 먼저 정해두고 시작할지**"가
+```
+
+instead of:
+
+```markdown
+**"무엇을 먼저 정해두고 시작할지"**가
+```
+</Callout>
+
 ## Editing and deleting a comment
 
 Only the author of a comment can edit or delete it.

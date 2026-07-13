@@ -22,6 +22,12 @@ vi.mock("@multica/core/paths", () => ({
   }),
 }));
 
+vi.mock("@multica/core/api", () => ({
+  api: {
+    getBaseUrl: () => "http://127.0.0.1:8080",
+  },
+}));
+
 // AppLink is just a plain anchor here — wiring the navigation adapter would
 // add nothing to these assertions.
 vi.mock("../../navigation", () => ({
@@ -107,9 +113,7 @@ function makeAgent(overrides: Record<string, unknown> = {}) {
     avatar_url: null,
     runtime_mode: "local" as const,
     runtime_config: {},
-    custom_env: {},
     custom_args: [],
-    custom_env_redacted: false,
     visibility: "private" as const,
     status: "idle" as const,
     max_concurrent_tasks: 1,

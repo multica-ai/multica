@@ -42,12 +42,15 @@ import { useWorkspaceId } from "@multica/core";
 import { useWorkspacePaths } from "@multica/core/paths";
 import type { WorkspacePaths } from "@multica/core/paths";
 import { useModalStore } from "@multica/core/modals";
+import { createShortcutChord } from "@multica/core/shortcuts";
 import { memberListOptions } from "@multica/core/workspace/queries";
+import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
 import { StatusIcon } from "../issues/components";
 import { ProjectIcon } from "../projects/components/project-icon";
-import { STATUS_CONFIG } from "@multica/core/issues/config";
 import { PROJECT_STATUS_CONFIG } from "@multica/core/projects/config";
 import type { ProjectStatus } from "@multica/core/types";
+import { ActorAvatar } from "../common/actor-avatar";
+import { ShortcutKeycaps } from "../common/shortcut-keycaps";
 import { ActorAvatar as ActorAvatarBase } from "@multica/ui/components/common/actor-avatar";
 import {
   Dialog,
@@ -57,55 +60,12 @@ import {
   DialogDescription,
 } from "@multica/ui/components/ui/dialog";
 import { useTheme } from "@multica/ui/components/common/theme-provider";
+import { copyText } from "@multica/ui/lib/clipboard";
 import { useNavigation } from "../navigation";
 import { useT } from "../i18n";
 import { matchesPinyin } from "../editor/extensions/pinyin-match";
+import { HighlightText } from "./highlight-text";
 import { useSearchStore } from "./search-store";
-
-function HighlightText({ text, query }: { text: string; query: string }) {
-  const parts = useMemo(() => {
-    if (!query.trim()) return [{ text, highlight: false }];
-    // Build regex that matches the full phrase OR individual terms
-    const terms = query.trim().split(/\s+/).filter(Boolean);
-    const escaped = query.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    const patterns: string[] = [escaped];
-    if (terms.length > 1) {
-      for (const term of terms) {
-        const e = term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-        if (e && !patterns.includes(e)) patterns.push(e);
-      }
-    }
-    const regex = new RegExp(`(${patterns.join("|")})`, "gi");
-    const result: { text: string; highlight: boolean }[] = [];
-    let lastIndex = 0;
-    let match: RegExpExecArray | null;
-    while ((match = regex.exec(text)) !== null) {
-      if (match.index > lastIndex) {
-        result.push({ text: text.slice(lastIndex, match.index), highlight: false });
-      }
-      result.push({ text: match[0], highlight: true });
-      lastIndex = regex.lastIndex;
-    }
-    if (lastIndex < text.length) {
-      result.push({ text: text.slice(lastIndex), highlight: false });
-    }
-    return result.length > 0 ? result : [{ text, highlight: false }];
-  }, [text, query]);
-
-  return (
-    <>
-      {parts.map((part, i) =>
-        part.highlight ? (
-          <mark key={i} className="bg-yellow-200 dark:bg-yellow-900/60 text-inherit rounded-sm">
-            {part.text}
-          </mark>
-        ) : (
-          part.text
-        ),
-      )}
-    </>
-  );
-}
 
 // Nav items reference WorkspacePaths method names so they can be resolved
 // against the current workspace slug at render time (see SearchCommand body).
@@ -144,6 +104,25 @@ function matchesMember(member: MemberWithUser, query: string) {
     member.email.toLowerCase().includes(query) ||
     (query.length >= 3 && member.role.startsWith(query)) ||
     matchesPinyin(member.name, query)
+  );
+}
+
+function IssueAssigneeAvatar({
+  assigneeType,
+  assigneeId,
+}: {
+  assigneeType?: string | null;
+  assigneeId?: string | null;
+}) {
+  if (!assigneeType || !assigneeId) return null;
+  return (
+    <ActorAvatar
+      actorType={assigneeType}
+      actorId={assigneeId}
+      size="sm"
+      profileLink={false}
+      className="shrink-0"
+    />
   );
 }
 
@@ -264,8 +243,9 @@ export function SearchCommand() {
           icon: Link2,
           keywords: ["copy", "link", "share", "url", identifier.toLowerCase()],
           onSelect: () => {
-            void navigator.clipboard.writeText(getShareableUrl(pathname));
-            toast.success(t(($) => $.toast.link_copied));
+            void copyText(getShareableUrl(pathname)).then((ok) => {
+              if (ok) toast.success(t(($) => $.toast.link_copied));
+            });
             setOpen(false);
           },
         },
@@ -275,8 +255,9 @@ export function SearchCommand() {
           icon: Copy,
           keywords: ["copy", "id", "identifier", identifier.toLowerCase()],
           onSelect: () => {
-            void navigator.clipboard.writeText(identifier);
-            toast.success(t(($) => $.toast.copied_identifier, { identifier }));
+            void copyText(identifier).then((ok) => {
+              if (ok) toast.success(t(($) => $.toast.copied_identifier, { identifier }));
+            });
             setOpen(false);
           },
         },
@@ -353,18 +334,6 @@ export function SearchCommand() {
     results.issues.length > 0 ||
     results.projects.length > 0 ||
     filteredMembers.length > 0;
-
-  // Global Cmd+K / Ctrl+K shortcut
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "k" && (e.metaKey || e.ctrlKey)) {
-        e.preventDefault();
-        useSearchStore.getState().toggle();
-      }
-    };
-    document.addEventListener("keydown", handleKeyDown);
-    return () => document.removeEventListener("keydown", handleKeyDown);
-  }, []);
 
   // Close on single ESC — capture phase fires before base-ui Dialog's handlers
   useEffect(() => {
@@ -504,9 +473,10 @@ export function SearchCommand() {
               onValueChange={handleValueChange}
               className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
             />
-            <kbd className="hidden shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground sm:inline">
-              ESC
-            </kbd>
+            <ShortcutKeycaps
+              shortcut={createShortcutChord("Escape")}
+              className="hidden shrink-0 sm:inline-flex"
+            />
           </div>
 
           {/* Results list */}
@@ -571,8 +541,8 @@ export function SearchCommand() {
                     <ActorAvatarBase
                       name={member.name}
                       initials={memberInitials(member.name)}
-                      avatarUrl={member.avatar_url}
-                      size={22}
+                      avatarUrl={resolvePublicFileUrl(member.avatar_url)}
+                      size="md"
                     />
                     <div className="min-w-0 flex-1">
                       <div className="truncate">
@@ -662,14 +632,13 @@ export function SearchCommand() {
                       <span className="text-xs text-muted-foreground shrink-0">
                         {issue.identifier}
                       </span>
-                      <span className="truncate">
+                      <span className="min-w-0 flex-1 truncate">
                         <HighlightText text={issue.title} query={query} />
                       </span>
-                      <span
-                        className={`ml-auto text-xs shrink-0 ${STATUS_CONFIG[issue.status].iconColor}`}
-                      >
-                        {STATUS_CONFIG[issue.status].label}
-                      </span>
+                      <IssueAssigneeAvatar
+                        assigneeType={issue.assignee_type}
+                        assigneeId={issue.assignee_id}
+                      />
                     </div>
                     {issue.matched_description_snippet && (
                       <div className="flex items-start gap-2 pl-[26px]">
@@ -718,12 +687,11 @@ export function SearchCommand() {
                     <span className="text-xs text-muted-foreground shrink-0">
                       {item.identifier}
                     </span>
-                    <span className="truncate">{item.title}</span>
-                    <span
-                      className={`ml-auto text-xs shrink-0 ${STATUS_CONFIG[item.status]?.iconColor ?? ""}`}
-                    >
-                      {STATUS_CONFIG[item.status]?.label ?? ""}
-                    </span>
+                    <span className="min-w-0 flex-1 truncate">{item.title}</span>
+                    <IssueAssigneeAvatar
+                      assigneeType={item.assignee_type}
+                      assigneeId={item.assignee_id}
+                    />
                   </CommandPrimitive.Item>
                 ))}
               </CommandPrimitive.Group>

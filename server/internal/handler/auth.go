@@ -22,6 +22,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/auth"
 	"github.com/multica-ai/multica/server/internal/logger"
+	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -46,14 +47,18 @@ const devVerificationCodeEnv = "MULTICA_DEV_VERIFICATION_CODE"
 var supportedLanguages = map[string]struct{}{
 	"en":      {},
 	"zh-Hans": {},
+	"ko":      {},
+	"ja":      {},
 }
 
 type UserResponse struct {
-	ID                      string          `json:"id"`
-	Name                    string          `json:"name"`
-	Email                   string          `json:"email"`
-	AvatarURL               *string         `json:"avatar_url"`
-	Language                *string         `json:"language"`
+	ID        string  `json:"id"`
+	Name      string  `json:"name"`
+	Email     string  `json:"email"`
+	AvatarURL *string `json:"avatar_url"`
+	Language  *string `json:"language"`
+	// Pinned IANA tz; nil = no preference (use browser-detected tz).
+	Timezone                *string         `json:"timezone"`
 	OnboardedAt             *string         `json:"onboarded_at"`
 	OnboardingQuestionnaire json.RawMessage `json:"onboarding_questionnaire"`
 	StarterContentState     *string         `json:"starter_content_state"`
@@ -82,6 +87,7 @@ func userToResponse(u db.User) UserResponse {
 		Email:                   u.Email,
 		AvatarURL:               textToPtr(u.AvatarUrl),
 		Language:                textToPtr(u.Language),
+		Timezone:                textToPtr(u.Timezone),
 		OnboardedAt:             timestampToPtr(u.OnboardedAt),
 		OnboardingQuestionnaire: json.RawMessage(q),
 		StarterContentState:     textToPtr(u.StarterContentState),
@@ -385,7 +391,7 @@ func (h *Handler) VerifyCode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if isNew {
-		h.Analytics.Capture(analytics.Signup(uuidToString(user.ID), user.Email, signupSourceFromRequest(r)))
+		obsmetrics.RecordEvent(h.Analytics, h.Metrics, analytics.Signup(uuidToString(user.ID), user.Email, signupSourceFromRequest(r)))
 	}
 
 	tokenString, err := h.issueJWT(user)
@@ -434,6 +440,8 @@ type UpdateMeRequest struct {
 	AvatarURL          *string `json:"avatar_url"`
 	Language           *string `json:"language"`
 	ProfileDescription *string `json:"profile_description"`
+	// IANA tz to pin; "" clears back to NULL; nil leaves untouched.
+	Timezone *string `json:"timezone"`
 }
 
 type GoogleLoginRequest struct {
@@ -553,7 +561,7 @@ func (h *Handler) GoogleLogin(w http.ResponseWriter, r *http.Request) {
 	if isNew {
 		evt := analytics.Signup(uuidToString(user.ID), user.Email, signupSourceFromRequest(r))
 		evt.Properties["auth_method"] = "google"
-		h.Analytics.Capture(evt)
+		obsmetrics.RecordEvent(h.Analytics, h.Metrics, evt)
 	}
 
 	// Update name and avatar from Google profile if the user was just created
@@ -688,6 +696,20 @@ func (h *Handler) UpdateMe(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		params.ProfileDescription = pgtype.Text{String: desc, Valid: true}
+	}
+
+	if req.Timezone != nil {
+		// Valid=false → column untouched; Valid=true + "" → clear to
+		// NULL; Valid=true + IANA → set. Three-way semantics enforced
+		// in the UpdateUser SQL CASE.
+		tz := strings.TrimSpace(*req.Timezone)
+		if tz != "" {
+			if loc, err := time.LoadLocation(tz); err != nil || loc == nil {
+				writeError(w, http.StatusBadRequest, "invalid timezone")
+				return
+			}
+		}
+		params.Timezone = pgtype.Text{String: tz, Valid: true}
 	}
 
 	updatedUser, err := h.Queries.UpdateUser(r.Context(), params)
