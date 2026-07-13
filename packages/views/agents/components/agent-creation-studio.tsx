@@ -15,6 +15,8 @@ import {
 import { toast } from "sonner";
 import { api } from "@multica/core/api";
 import { useAuthStore } from "@multica/core/auth";
+import { useFeatureEnabled } from "@multica/core/config";
+import { AGENT_BUILDER_FLAG } from "@multica/core/feature-flags";
 import {
   agentTemplateDetailOptions,
   agentTemplateListOptions,
@@ -117,6 +119,7 @@ export function AgentCreationStudio() {
   const navigation = useNavigation();
   const qc = useQueryClient();
   const currentUser = useAuthStore((state) => state.user);
+  const agentBuilderEnabled = useFeatureEnabled(AGENT_BUILDER_FLAG, false);
   const duplicateId = navigation.searchParams.get("duplicate");
   const squadId = navigation.searchParams.get("squad");
 
@@ -660,6 +663,7 @@ export function AgentCreationStudio() {
         <ModeChooser
           onBlank={chooseBlank}
           onAI={() => setMode("ai")}
+          agentBuilderEnabled={agentBuilderEnabled}
         />
       )}
 
@@ -771,9 +775,11 @@ export function AgentCreationStudio() {
 function ModeChooser({
   onBlank,
   onAI,
+  agentBuilderEnabled,
 }: {
   onBlank: () => void;
   onAI: () => void;
+  agentBuilderEnabled: boolean;
 }) {
   const { t } = useT("agents");
   const modes = [
@@ -783,13 +789,15 @@ function ModeChooser({
       description: t(($) => $.creation_studio.modes.blank.description),
       action: onBlank,
     },
-    {
-      icon: MessageSquare,
-      title: t(($) => $.creation_studio.modes.ai.title),
-      description: t(($) => $.creation_studio.modes.ai.description),
-      action: onAI,
-      recommended: true,
-    },
+    ...(agentBuilderEnabled
+      ? [{
+          icon: MessageSquare,
+          title: t(($) => $.creation_studio.modes.ai.title),
+          description: t(($) => $.creation_studio.modes.ai.description),
+          action: onAI,
+          recommended: true,
+        }]
+      : []),
   ];
   return (
     <main className="flex min-h-0 flex-1 items-center justify-center overflow-y-auto px-5 py-10">

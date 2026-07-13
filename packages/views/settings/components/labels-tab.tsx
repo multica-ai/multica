@@ -4,6 +4,8 @@ import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { MoreHorizontal, Pencil, Plus, Search, Tag, Trash2 } from "lucide-react";
 import { toast } from "sonner";
+import { useFeatureEnabled } from "@multica/core/config";
+import { RESOURCE_LABELS_FLAG } from "@multica/core/feature-flags";
 import { useWorkspaceId } from "@multica/core/hooks";
 import {
   labelListOptions,
@@ -45,6 +47,7 @@ import { useT } from "../../i18n";
 import { SettingsTab } from "./settings-layout";
 
 const RESOURCE_TYPES: LabelResourceType[] = ["issue", "agent", "skill"];
+const ISSUE_RESOURCE_TYPES: LabelResourceType[] = ["issue"];
 const LABEL_COLORS = [
   "#6b7280",
   "#ef4444",
@@ -73,12 +76,22 @@ const EMPTY_DRAFT: LabelDraft = {
 export function LabelsTab() {
   const { t } = useT("settings");
   const wsId = useWorkspaceId();
+  const resourceLabelsEnabled = useFeatureEnabled(RESOURCE_LABELS_FLAG, false);
 
   const [resourceType, setResourceType] = useState<LabelResourceType>("issue");
   const [query, setQuery] = useState("");
   const [editing, setEditing] = useState<Label | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<Label | null>(null);
+
+  const resourceTypes = resourceLabelsEnabled ? RESOURCE_TYPES : ISSUE_RESOURCE_TYPES;
+
+  useEffect(() => {
+    if (!resourceLabelsEnabled && resourceType !== "issue") {
+      setResourceType("issue");
+      setQuery("");
+    }
+  }, [resourceLabelsEnabled, resourceType]);
 
   const { data: labels = [], isLoading } = useQuery(
     labelListOptions(wsId, resourceType),
@@ -102,7 +115,7 @@ export function LabelsTab() {
     >
       <div className="space-y-5">
         <div className="flex flex-wrap items-center gap-2 border-b border-surface-border pb-3">
-          {RESOURCE_TYPES.map((type) => (
+          {resourceTypes.map((type) => (
             <Button
               key={type}
               type="button"

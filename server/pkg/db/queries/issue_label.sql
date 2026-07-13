@@ -36,6 +36,25 @@ DELETE FROM issue_label
 WHERE id = $1 AND workspace_id = $2
 RETURNING id;
 
+-- The resource-label junctions deliberately have no foreign keys. Keeping
+-- their cleanup in the same application transaction as the owner deletion
+-- avoids database-level cascades with unreviewed locking and audit behavior.
+
+-- name: DeleteIssueLabelAssignmentsByLabel :exec
+DELETE FROM issue_to_label WHERE label_id = $1;
+
+-- name: DeleteAgentLabelAssignmentsByLabel :exec
+DELETE FROM agent_to_label WHERE label_id = $1;
+
+-- name: DeleteSkillLabelAssignmentsByLabel :exec
+DELETE FROM skill_to_label WHERE label_id = $1;
+
+-- name: DeleteAgentLabelAssignmentsByAgent :exec
+DELETE FROM agent_to_label WHERE agent_id = $1;
+
+-- name: DeleteSkillLabelAssignmentsBySkill :exec
+DELETE FROM skill_to_label WHERE skill_id = $1;
+
 -- name: AttachLabelToIssue :exec
 -- Workspace-guarded INSERT: the WHERE EXISTS clauses ensure both the issue
 -- and the label belong to the given workspace. A future caller that forgets
