@@ -46,6 +46,35 @@ func TestParseCodexUsageResponseMissingRateLimit(t *testing.T) {
 	}
 }
 
+func TestParseCodexUsageResponseClassifiesSingleWeeklyPrimaryByDuration(t *testing.T) {
+	now := time.Date(2026, 7, 13, 19, 0, 0, 0, time.UTC)
+	body := []byte(`{
+		"plan_type": "pro",
+		"rate_limit": {
+			"primary_window": {
+				"used_percent": 42,
+				"reset_after_seconds": 520518,
+				"limit_window_seconds": 604800
+			},
+			"secondary_window": null
+		}
+	}`)
+
+	snap, err := ParseCodexUsageResponse(body, now)
+	if err != nil {
+		t.Fatalf("ParseCodexUsageResponse: %v", err)
+	}
+	if snap.FiveHourPct != nil || snap.FiveHourResetsAt != nil {
+		t.Fatalf("5-hour fields = (%v, %v), want empty for a weekly-only plan", snap.FiveHourPct, snap.FiveHourResetsAt)
+	}
+	if snap.SevenDayPct == nil || *snap.SevenDayPct != 42 {
+		t.Fatalf("SevenDayPct = %v, want 42", snap.SevenDayPct)
+	}
+	if snap.SevenDayResetsAt == nil || !snap.SevenDayResetsAt.Equal(now.Add(520518*time.Second)) {
+		t.Fatalf("SevenDayResetsAt = %v, want reset_after_seconds applied to the weekly field", snap.SevenDayResetsAt)
+	}
+}
+
 func TestParseCodexUsageResponseClamps(t *testing.T) {
 	body := []byte(`{"rate_limit": {"primary_window": {"used_percent": 140}, "secondary_window": {"used_percent": -3}}}`)
 	snap, err := ParseCodexUsageResponse(body, time.Now())
