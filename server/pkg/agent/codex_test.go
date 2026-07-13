@@ -1502,6 +1502,86 @@ func TestCodexExecuteSurfacesStderrWhenChildExitsEarly(t *testing.T) {
 	}
 }
 
+func TestCodexExecuteStartupRPCsHaveBoundedHandshakeTimeout(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+
+	const handshakeTimeout = 500 * time.Millisecond
+	tests := []struct {
+		name   string
+		method string
+		body   string
+		opts   ExecOptions
+	}{
+		{
+			name:   "initialize",
+			method: "initialize",
+			body: "" +
+				`read line` + "\n" +
+				`read line` + "\n",
+		},
+		{
+			name:   "thread start",
+			method: "thread/start",
+			body: "" +
+				`read line` + "\n" +
+				`echo '{"jsonrpc":"2.0","id":1,"result":{}}'` + "\n" +
+				`read line` + "\n" +
+				`read line` + "\n" +
+				`read line` + "\n",
+		},
+		{
+			name:   "thread resume",
+			method: "thread/resume",
+			body: "" +
+				`read line` + "\n" +
+				`echo '{"jsonrpc":"2.0","id":1,"result":{}}'` + "\n" +
+				`read line` + "\n" +
+				`read line` + "\n" +
+				`read line` + "\n",
+			opts: ExecOptions{ResumeSessionID: "thr-prior"},
+		},
+		{
+			name:   "turn start",
+			method: "turn/start",
+			body: "" +
+				`read line` + "\n" +
+				`echo '{"jsonrpc":"2.0","id":1,"result":{}}'` + "\n" +
+				`read line` + "\n" +
+				`read line` + "\n" +
+				`echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thr-timeout"}}}'` + "\n" +
+				`read line` + "\n" +
+				`read line` + "\n",
+		},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			fakePath := writeFakeCodexAppServer(t, tc.body)
+			tc.opts.HandshakeTimeout = handshakeTimeout
+			tc.opts.SemanticInactivityTimeout = 5 * time.Second
+
+			started := time.Now()
+			result := executeFakeCodex(t, fakePath, tc.opts)
+			elapsed := time.Since(started)
+
+			if result.Status != "failed" {
+				t.Fatalf("expected failed, got status=%q error=%q", result.Status, result.Error)
+			}
+			for _, want := range []string{CodexHandshakeTimeoutMarker, tc.method, handshakeTimeout.String()} {
+				if !strings.Contains(result.Error, want) {
+					t.Fatalf("expected error to contain %q, got %q", want, result.Error)
+				}
+			}
+			if elapsed > 2*time.Second {
+				t.Fatalf("handshake timeout took %s, expected < 2s", elapsed)
+			}
+		})
+	}
+}
+
 func TestCodexExecuteTimesOutWhenTurnStopsAfterToolResult(t *testing.T) {
 	t.Parallel()
 	if runtime.GOOS == "windows" {
