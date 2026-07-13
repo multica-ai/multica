@@ -98,7 +98,7 @@ export function aggregateDailyCost(usage: DashboardUsageDaily[]): DailyCostStack
   }
   const round = (n: number) => Math.round(n * 100) / 100;
   return Array.from(map.entries())
-    .toSorted(([a], [b]) => a.localeCompare(b))
+    .sort(([a], [b]) => a.localeCompare(b))
     .map(([date, s]) => {
       const input = round(s.input);
       const output = round(s.output);
@@ -127,7 +127,7 @@ export function aggregateDailyTokens(usage: DashboardUsageDaily[]): DailyTokenDa
     map.set(u.date, entry);
   }
   return Array.from(map.entries())
-    .toSorted(([a], [b]) => a.localeCompare(b))
+    .sort(([a], [b]) => a.localeCompare(b))
     .map(([date, t]) => ({ date, label: formatDateLabel(date), ...t }));
 }
 
@@ -138,8 +138,8 @@ export interface DailyTimeData {
 }
 
 export function aggregateDailyTime(rows: DashboardRunTimeDaily[]): DailyTimeData[] {
-  return rows
-    .toSorted((a, b) => a.date.localeCompare(b.date))
+  return [...rows]
+    .sort((a, b) => a.date.localeCompare(b.date))
     .map((r) => ({ date: r.date, label: formatDateLabel(r.date), totalSeconds: r.total_seconds }));
 }
 
@@ -151,8 +151,8 @@ export interface DailyTasksData {
 }
 
 export function aggregateDailyTasks(rows: DashboardRunTimeDaily[]): DailyTasksData[] {
-  return rows
-    .toSorted((a, b) => a.date.localeCompare(b.date))
+  return [...rows]
+    .sort((a, b) => a.date.localeCompare(b.date))
     .map((r) => {
       const failed = r.failed_count;
       const completed = Math.max(0, r.task_count - failed);
@@ -203,7 +203,7 @@ export function aggregateAgentTokens(rows: DashboardUsageByAgent[]): AgentCostRo
     entry.taskCount += r.task_count;
     map.set(r.agent_id, entry);
   }
-  return Array.from(map.values()).toSorted((a, b) => b.cost - a.cost);
+  return Array.from(map.values()).sort((a, b) => b.cost - a.cost);
 }
 
 export interface AgentDashboardRow {
@@ -238,7 +238,7 @@ export function mergeAgentDashboardRows(
     if (merged.has(r.agent_id)) continue;
     merged.set(r.agent_id, { agentId: r.agent_id, tokens: 0, cost: 0, seconds: r.total_seconds, taskCount: r.task_count });
   }
-  return Array.from(merged.values()).toSorted((a, b) => {
+  return Array.from(merged.values()).sort((a, b) => {
     if (b.cost !== a.cost) return b.cost - a.cost;
     return b.seconds - a.seconds;
   });
@@ -428,11 +428,11 @@ export function aggregateByWeek(
   };
 
   const weeklyTokens: WeeklyTokenData[] = Array.from(tokenMap.values())
-    .toSorted((a, b) => a.weekStart.localeCompare(b.weekStart))
+    .sort((a, b) => a.weekStart.localeCompare(b.weekStart))
     .map((t) => ({ ...decorate(t.weekStart), input: t.input, output: t.output, cacheRead: t.cacheRead, cacheWrite: t.cacheWrite }));
 
   const weeklyCostStack: WeeklyCostStackData[] = Array.from(stackMap.entries())
-    .toSorted(([a], [b]) => a.localeCompare(b))
+    .sort(([a], [b]) => a.localeCompare(b))
     .map(([weekStart, s]) => {
       const round = (n: number) => Math.round(n * 100) / 100;
       const input = round(s.input);
