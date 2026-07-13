@@ -97,10 +97,16 @@ function CommentInput({ issueId, onSubmit }: CommentInputProps) {
   // write INTO an existing content draft — never create a content-less draft
   // just to record these — and always write the current value (incl. `[]`) so
   // clearing a suppression leaves no stale array to re-apply on remount.
+  //
+  // `content` is a dependency so this also re-runs when the (debounced) content
+  // draft is first created: an upload result sets `pendingAttachments` before
+  // that flush, so depending on `pendingAttachments` alone would evaluate the
+  // guard while no draft exists yet and never persist the attachment.
   useEffect(() => {
+    if (content.trim().length === 0) return;
     if (useCommentDraftStore.getState().getDraft(draftKey) === undefined) return;
     setDraft(draftKey, { attachments: pendingAttachments });
-  }, [pendingAttachments, draftKey, setDraft]);
+  }, [content, pendingAttachments, draftKey, setDraft]);
 
   useEffect(() => {
     if (useCommentDraftStore.getState().getDraft(draftKey) === undefined) return;

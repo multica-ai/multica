@@ -10,12 +10,14 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { Attachment, TimelineEntry } from "@multica/core/types";
 import { useCommentDraftStore } from "@multica/core/issues/stores";
 import { CommentInput } from "./comment-input";
+import { ReplyInput } from "./reply-input";
 import { useEditAttachmentState } from "./comment-card";
 
 // One controllable trigger agent so a suppression chip renders. Hoisted +
 // stable so the composer's "reconcile suppressed against visible agents" effect
 // runs once and toggling doesn't churn it.
 const mockAgents = vi.hoisted(() => [{ id: "ag-1", name: "Walt", source: "mention_agent" }]);
+const uploadWithToast = vi.hoisted(() => vi.fn());
 
 vi.mock("../hooks/use-comment-trigger-preview", () => ({
   useCommentTriggerPreview: () => ({ agents: mockAgents }),
@@ -50,7 +52,24 @@ vi.mock("./comment-trigger-chips", () => ({
 vi.mock("@multica/core/api", () => ({ api: {} }));
 
 vi.mock("@multica/core/hooks/use-file-upload", () => ({
-  useFileUpload: () => ({ uploadWithToast: vi.fn() }),
+  useFileUpload: () => ({ uploadWithToast }),
+}));
+
+vi.mock("@multica/ui/components/common/file-upload-button", () => ({
+  FileUploadButton: ({ onSelect }: { onSelect: (f: File) => void }) => (
+    <button
+      type="button"
+      data-testid="upload-btn"
+      onClick={() => onSelect(new File(["x"], "a.png"))}
+    >
+      attach
+    </button>
+  ),
+}));
+
+vi.mock("../../common/actor-avatar", () => ({
+  ActorAvatar: () => null,
+  AgentStatusDot: () => null,
 }));
 
 vi.mock("../../i18n", () => ({
@@ -68,9 +87,11 @@ vi.mock("../../editor", () => ({
     {
       defaultValue,
       onUpdate,
+      onUploadFile,
     }: {
       defaultValue?: string;
       onUpdate?: (markdown: string) => void;
+      onUploadFile?: (file: File) => Promise<unknown>;
     },
     ref: Ref<unknown>,
   ) {
@@ -82,7 +103,12 @@ vi.mock("../../editor", () => ({
       },
       focus: () => {},
       blur: () => {},
-      uploadFile: async () => {},
+      // The upload result lands, but the content flush is DEBOUNCED — we
+      // deliberately do NOT call onUpdate here, so tests drive the
+      // "upload result first, content draft after" ordering explicitly.
+      uploadFile: async (file: File) => {
+        await onUploadFile?.(file);
+      },
       hasActiveUploads: () => false,
     }));
     return (
@@ -121,6 +147,7 @@ function makeAttachment(id: string, url: string): Attachment {
 beforeEach(() => {
   localStorage.clear();
   useCommentDraftStore.setState({ drafts: {} });
+  uploadWithToast.mockReset();
 });
 
 describe("comment composer suppression persistence", () => {
@@ -251,6 +278,110 @@ describe("edit composer attachment persistence", () => {
       "edited body http://x/att-1.png",
       ["att-1"],
       undefined,
+    );
+  });
+});
+
+// The real timing: an upload result lands (pendingAttachments set) BEFORE the
+// debounced content flush creates the draft. The persist effect must re-run
+// when the draft is created — not only when pendingAttachments changes — or the
+// attachment is never persisted.
+describe("attachment persist survives the upload-before-content-draft ordering", () => {
+  it("comment-input: an upload landing before the debounced content draft is still persisted", async () => {
+    const att = makeAttachment("att-1", "http://x/att-1.png");
+    uploadWithToast.mockResolvedValue(att);
+    render(
+      <CommentInput issueId="issue-1" onSubmit={vi.fn().mockResolvedValue(true)} />,
+    );
+
+    // Upload result lands first — pendingAttachments set, no content draft yet.
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("upload-btn"));
+    });
+    expect(useCommentDraftStore.getState().getDraft("new:issue-1")).toBeUndefined();
+
+    // Debounced content flush arrives → draft created → attachment persisted.
+    fireEvent.change(screen.getByTestId("editor"), {
+      target: { value: "body http://x/att-1.png" },
+    });
+    await waitFor(() =>
+      expect(
+        useCommentDraftStore.getState().getDraft("new:issue-1")?.attachments,
+      ).toEqual([att]),
+    );
+  });
+
+  it("reply-input: same ordering, persisted into the reply draft", async () => {
+    const att = makeAttachment("att-2", "http://x/att-2.png");
+    uploadWithToast.mockResolvedValue(att);
+    const draftKey = "reply:issue-1:c-root" as const;
+    render(
+      <ReplyInput
+        issueId="issue-1"
+        parentId="c-root"
+        avatarType="member"
+        avatarId="u1"
+        onSubmit={vi.fn().mockResolvedValue(true)}
+        draftKey={draftKey}
+      />,
+    );
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("upload-btn"));
+    });
+    expect(useCommentDraftStore.getState().getDraft(draftKey)).toBeUndefined();
+
+    fireEvent.change(screen.getByTestId("editor"), {
+      target: { value: "reply http://x/att-2.png" },
+    });
+    await waitFor(() =>
+      expect(useCommentDraftStore.getState().getDraft(draftKey)?.attachments).toEqual([
+        att,
+      ]),
+    );
+  });
+
+  it("comment-card edit: an upload during edit before the content flush is persisted", async () => {
+    const att = makeAttachment("att-3", "http://x/att-3.png");
+    uploadWithToast.mockResolvedValue(att);
+    const entry = {
+      id: "c-1",
+      content: "original",
+      attachments: [],
+      parent_id: null,
+    } as unknown as TimelineEntry;
+
+    let api: EditApi | null = null;
+    render(
+      <EditHarness
+        entry={entry}
+        onEdit={vi.fn().mockResolvedValue(undefined)}
+        capture={(a) => {
+          api = a;
+        }}
+      />,
+    );
+
+    act(() => {
+      api!.startEdit();
+    });
+    // Upload result lands during edit — no content flush yet, so no edit draft.
+    await act(async () => {
+      await api!.handleUpload(new File(["x"], "a.png"));
+    });
+    expect(
+      useCommentDraftStore.getState().getDraft("edit:issue-1:c-1"),
+    ).toBeUndefined();
+
+    // The debounced onUpdate: setContent + setDraft(content) → draft created.
+    act(() => {
+      api!.setContent("edited http://x/att-3.png");
+      api!.setDraft(api!.draftKey, { content: "edited http://x/att-3.png" });
+    });
+    await waitFor(() =>
+      expect(
+        useCommentDraftStore.getState().getDraft("edit:issue-1:c-1")?.attachments,
+      ).toEqual([att]),
     );
   });
 });

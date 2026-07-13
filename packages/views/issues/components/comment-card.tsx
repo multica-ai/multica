@@ -394,11 +394,19 @@ export function useEditAttachmentState(
   // remount (desktop tab switch / virtualization) can restore them via
   // startEdit — only into an existing content draft, always writing the
   // current value (incl. `[]`). See CommentInput for the rationale.
+  //
+  // `content` is a dependency so this re-runs when the (debounced) content
+  // draft is first created: an upload result sets `pendingAttachments` before
+  // that flush, so `pendingAttachments` alone would evaluate the guard while no
+  // draft exists yet and never persist the attachment. The draft-existence
+  // guard also keeps startEdit (content = the comment body, no draft yet) from
+  // fabricating a content-less draft.
   useEffect(() => {
     if (!editing) return;
+    if (content.trim().length === 0) return;
     if (useCommentDraftStore.getState().getDraft(draftKey) === undefined) return;
     setDraft(draftKey, { attachments: pendingAttachments });
-  }, [editing, pendingAttachments, draftKey, setDraft]);
+  }, [editing, content, pendingAttachments, draftKey, setDraft]);
 
   useEffect(() => {
     if (!editing) return;

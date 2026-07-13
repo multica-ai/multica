@@ -115,12 +115,15 @@ function ReplyInput({
   // Persist attachments + suppressed choices — only when a draftKey is present
   // AND a content draft already exists (never create a content-less draft).
   // Always write the current value (incl. `[]`) so clearing a suppression
-  // leaves no stale array to re-apply on remount.
+  // leaves no stale array to re-apply on remount. `content` is a dependency so
+  // this also re-runs when the (debounced) content draft is first created —
+  // an upload result can land before that flush (see CommentInput).
   useEffect(() => {
     if (!draftKey) return;
+    if (content.trim().length === 0) return;
     if (useCommentDraftStore.getState().getDraft(draftKey) === undefined) return;
     setDraft(draftKey, { attachments: pendingAttachments });
-  }, [draftKey, pendingAttachments, setDraft]);
+  }, [draftKey, content, pendingAttachments, setDraft]);
 
   useEffect(() => {
     if (!draftKey) return;
