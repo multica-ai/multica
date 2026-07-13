@@ -17,14 +17,14 @@ func TestWSRPCClient_CallRoundTrip(t *testing.T) {
 	c := newWSRPCClient(time.Second)
 
 	// Fake transport: capture the frame, and reply asynchronously with a 200.
-	c.attach(func(frame []byte) error {
+	c.attach(func(frame []byte) (*wsOutbound, error) {
 		var msg protocol.Message
 		if err := json.Unmarshal(frame, &msg); err != nil {
-			return err
+			return nil, err
 		}
 		var req protocol.RPCRequestPayload
 		if err := json.Unmarshal(msg.Payload, &req); err != nil {
-			return err
+			return nil, err
 		}
 		if req.Method != "tasks.claim" {
 			t.Errorf("method = %q, want tasks.claim", req.Method)
@@ -34,7 +34,7 @@ func TestWSRPCClient_CallRoundTrip(t *testing.T) {
 			Status:    200,
 			Body:      json.RawMessage(`{"tasks":[{"id":"t1"}]}`),
 		})
-		return nil
+		return &wsOutbound{data: frame}, nil
 	})
 
 	var resp struct {
@@ -63,7 +63,7 @@ func TestWSRPCClient_Unavailable(t *testing.T) {
 // TestWSRPCClient_Timeout: no response arrives within the per-request timeout.
 func TestWSRPCClient_Timeout(t *testing.T) {
 	c := newWSRPCClient(50 * time.Millisecond)
-	c.attach(func([]byte) error { return nil }) // send succeeds, never replies
+	c.attach(func(frame []byte) (*wsOutbound, error) { return &wsOutbound{data: frame}, nil }) // send succeeds, never replies
 	status, err := c.Call(context.Background(), "tasks.claim", 0, nil, nil)
 	if err == nil || status != 0 {
 		t.Fatalf("status=%d err=%v, want timeout (status 0, err)", status, err)
@@ -74,13 +74,13 @@ func TestWSRPCClient_Timeout(t *testing.T) {
 // server-provided message, and a non-zero status so the caller can classify.
 func TestWSRPCClient_ServerError(t *testing.T) {
 	c := newWSRPCClient(time.Second)
-	c.attach(func(frame []byte) error {
+	c.attach(func(frame []byte) (*wsOutbound, error) {
 		var msg protocol.Message
 		json.Unmarshal(frame, &msg)
 		var req protocol.RPCRequestPayload
 		json.Unmarshal(msg.Payload, &req)
 		go c.deliver(protocol.RPCResponsePayload{RequestID: req.RequestID, Status: 400, Error: "bad daemon_id"})
-		return nil
+		return &wsOutbound{data: frame}, nil
 	})
 	status, err := c.Call(context.Background(), "tasks.claim", 0, nil, nil)
 	if status != 400 || err == nil {
@@ -93,13 +93,25 @@ func TestWSRPCClient_ServerError(t *testing.T) {
 // caller must not blindly re-claim over HTTP (MUL-4257).
 func TestWSRPCClient_DetachFailsPending(t *testing.T) {
 	c := newWSRPCClient(2 * time.Second)
-	c.attach(func([]byte) error { return nil })
+	var mu sync.Mutex
+	var item *wsOutbound
+	c.attach(func(frame []byte) (*wsOutbound, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		item = &wsOutbound{data: frame}
+		return item, nil
+	})
 	done := make(chan error, 1)
 	go func() {
 		_, err := c.Call(context.Background(), "tasks.claim", 0, nil, nil)
 		done <- err
 	}()
 	time.Sleep(30 * time.Millisecond)
+	// Simulate the writer having put the frame on the wire before the
+	// disconnect, so the server may have processed it → outcome is uncertain.
+	mu.Lock()
+	item.beginWrite()
+	mu.Unlock()
 	c.attach(nil) // detach
 	select {
 	case err := <-done:
@@ -118,7 +130,7 @@ func TestWSRPCClient_DetachFailsPending(t *testing.T) {
 func TestWSRPCClient_DeliverDetachRaceNoPanic(t *testing.T) {
 	for iter := 0; iter < 300; iter++ {
 		c := newWSRPCClient(time.Second)
-		c.attach(func([]byte) error { return nil })
+		c.attach(func(frame []byte) (*wsOutbound, error) { return &wsOutbound{data: frame}, nil })
 		id := "req"
 		ch := make(chan protocol.RPCResponsePayload, 1)
 		c.mu.Lock()
@@ -136,5 +148,99 @@ func TestWSRPCClient_DeliverDetachRaceNoPanic(t *testing.T) {
 			c.attach(nil) // closes + deletes pending under the same mutex
 		}()
 		wg.Wait()
+	}
+}
+
+// TestWSOutbound_CancelBeforeWriteDropsFrame: a caller that gives up before the
+// writer sends the frame cancels it, and the writer then skips it (never
+// delivered) — the core guarantee that a delayed frame cannot double-claim
+// after an HTTP fallback (MUL-4257).
+func TestWSOutbound_CancelBeforeWriteDropsFrame(t *testing.T) {
+	o := &wsOutbound{data: []byte("x")}
+	if !o.cancel() {
+		t.Fatal("cancel of a pending frame should succeed")
+	}
+	if o.beginWrite() {
+		t.Fatal("writer must skip a cancelled frame")
+	}
+}
+
+// TestWSOutbound_WriteBeforeCancelDelivers: once the writer has begun sending a
+// frame it can no longer be cancelled, so the caller must treat the outcome as
+// uncertain rather than falling back.
+func TestWSOutbound_WriteBeforeCancelDelivers(t *testing.T) {
+	o := &wsOutbound{data: []byte("x")}
+	if !o.beginWrite() {
+		t.Fatal("writer should send a pending frame")
+	}
+	if o.cancel() {
+		t.Fatal("cancel must fail once the frame has been sent")
+	}
+}
+
+// TestWSRPCClient_TimeoutCancelsUnsentFrame reproduces the Sol-Boy backpressure
+// blocker: the frame is enqueued but the writer is stalled, so the client times
+// out before it is sent. The timeout must cancel the queued frame (so the
+// stalled writer later DROPS it) and report a not-sent outcome that is safe to
+// HTTP-fall-back — never delivering the stale claim on top of the fallback.
+func TestWSRPCClient_TimeoutCancelsUnsentFrame(t *testing.T) {
+	c := newWSRPCClient(20 * time.Millisecond)
+	var mu sync.Mutex
+	var item *wsOutbound
+	c.attach(func(frame []byte) (*wsOutbound, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		item = &wsOutbound{data: frame}
+		return item, nil // enqueued; no writer ever drains it
+	})
+	status, err := c.Call(context.Background(), "tasks.claim", 30*time.Millisecond, nil, nil)
+	if status != 0 {
+		t.Fatalf("status = %d, want 0", status)
+	}
+	if !errors.Is(err, errWSRPCUnavailable) {
+		t.Fatalf("err = %v, want errWSRPCUnavailable (not-sent → safe fallback)", err)
+	}
+	if errors.Is(err, errWSRPCUncertain) {
+		t.Fatal("unsent frame must not be reported uncertain")
+	}
+	// The stalled writer now wakes up: the frame must have been cancelled so it
+	// is dropped, not delivered after the fallback.
+	mu.Lock()
+	sent := item.beginWrite()
+	mu.Unlock()
+	if sent {
+		t.Fatal("timed-out frame must be dropped by the writer to avoid double-claim")
+	}
+}
+
+// TestWSRPCClient_TimeoutUncertainWhenAlreadySent: if the writer already put the
+// frame on the wire, a subsequent client timeout is uncertain (the server may
+// have it) and must NOT fall back.
+func TestWSRPCClient_TimeoutUncertainWhenAlreadySent(t *testing.T) {
+	c := newWSRPCClient(30 * time.Millisecond)
+	var mu sync.Mutex
+	var item *wsOutbound
+	c.attach(func(frame []byte) (*wsOutbound, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		item = &wsOutbound{data: frame}
+		return item, nil
+	})
+	done := make(chan error, 1)
+	go func() {
+		_, err := c.Call(context.Background(), "tasks.claim", 40*time.Millisecond, nil, nil)
+		done <- err
+	}()
+	time.Sleep(10 * time.Millisecond)
+	mu.Lock()
+	item.beginWrite() // writer sends it before the timeout fires
+	mu.Unlock()
+	select {
+	case err := <-done:
+		if !errors.Is(err, errWSRPCUncertain) {
+			t.Fatalf("err = %v, want errWSRPCUncertain", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Call did not return")
 	}
 }

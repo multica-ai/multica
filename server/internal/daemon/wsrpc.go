@@ -40,10 +40,49 @@ var errWSRPCWriteBufferFull = errors.New("ws rpc: write buffer full")
 // (which pushes onto the active connection's write channel); when no connection
 // is attached, Call fails fast with errWSRPCUnavailable and the caller uses
 // HTTP.
+// wsOutbound is a frame queued for the WS writer. It is cancelable so an RPC
+// caller that gives up (timeout/detach) before the frame has hit the socket can
+// prevent it from being delivered later — otherwise a backpressured writer
+// could deliver a stale tasks.claim after the daemon already HTTP-fell-back,
+// double-claiming (MUL-4257, Sol-Boy review). sent/cancel race under mu so the
+// decision is atomic: whoever wins determines whether the frame is delivered.
+type wsOutbound struct {
+	data     []byte
+	mu       sync.Mutex
+	sent     bool
+	canceled bool
+}
+
+// beginWrite is called by the writer immediately before WriteMessage. It
+// returns false when the frame was already cancelled (skip it); otherwise it
+// marks the frame sent so a concurrent cancel() can no longer un-send it.
+func (o *wsOutbound) beginWrite() bool {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if o.canceled {
+		return false
+	}
+	o.sent = true
+	return true
+}
+
+// cancel is called by an RPC caller giving up. Returns true if the frame was
+// still pending (now cancelled — the writer will skip it, so it is guaranteed
+// NOT delivered); false if the writer already began sending it.
+func (o *wsOutbound) cancel() bool {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if o.sent {
+		return false
+	}
+	o.canceled = true
+	return true
+}
+
 type wsRPCClient struct {
 	mu        sync.Mutex
 	pending   map[string]chan protocol.RPCResponsePayload
-	sendFrame func([]byte) error
+	sendFrame func([]byte) (*wsOutbound, error)
 	// grace is added to a call's server-side timeout budget to get how long the
 	// daemon waits for the response, so a claim that committed just before the
 	// server deadline still reports back before the daemon gives up (MUL-4257).
@@ -60,7 +99,7 @@ func newWSRPCClient(grace time.Duration) *wsRPCClient {
 // attach binds a live connection's frame writer. Passing nil detaches (on
 // disconnect), after which Call fails fast until the next attach. Any pending
 // requests are failed so their callers fall back to HTTP immediately.
-func (c *wsRPCClient) attach(sendFrame func([]byte) error) {
+func (c *wsRPCClient) attach(sendFrame func([]byte) (*wsOutbound, error)) {
 	c.mu.Lock()
 	c.sendFrame = sendFrame
 	if sendFrame == nil {
@@ -130,8 +169,21 @@ func (c *wsRPCClient) Call(ctx context.Context, method string, serverTimeout tim
 		c.mu.Unlock()
 	}()
 
-	if err := send(frame); err != nil {
+	item, err := send(frame)
+	if err != nil {
 		return 0, fmt.Errorf("ws rpc: send: %w", err)
+	}
+
+	// giveUp resolves an abandoned request. If the frame is still queued we
+	// cancel it so the writer never delivers it — a definitively-not-sent
+	// outcome that is safe to HTTP-fall-back. If the writer already began
+	// sending it, it may reach the server, so the outcome is uncertain and the
+	// caller must NOT fall back (that would double-claim, MUL-4257).
+	giveUp := func() error {
+		if item.cancel() {
+			return errWSRPCUnavailable
+		}
+		return errWSRPCUncertain
 	}
 
 	// Wait the server-side budget PLUS a grace margin: a claim that committed
@@ -147,12 +199,10 @@ func (c *wsRPCClient) Call(ctx context.Context, method string, serverTimeout tim
 	select {
 	case resp, ok := <-ch:
 		if !ok {
-			// The connection detached AFTER we sent this request's frame, so
-			// the server may or may not have processed it. Signal uncertainty
-			// so the caller does NOT immediately re-claim the same work over a
-			// different transport (which would double-claim); reclaim / the
-			// next poll recovers any orphaned server-side claim.
-			return 0, errWSRPCUncertain
+			// The connection detached. Whether the server saw this request
+			// depends on whether the frame had already left the writer, so let
+			// giveUp() decide (not-sent → safe fallback; sent → uncertain).
+			return 0, giveUp()
 		}
 		if resp.Status >= 200 && resp.Status < 300 {
 			if respBody != nil && len(resp.Body) > 0 {
@@ -168,8 +218,16 @@ func (c *wsRPCClient) Call(ctx context.Context, method string, serverTimeout tim
 		}
 		return resp.Status, errors.New(msg)
 	case <-timer.C:
-		return 0, fmt.Errorf("ws rpc: timeout after %s", timeout)
+		// The budget elapsed. If the frame is still queued behind a
+		// backpressured writer, cancel it so it is never delivered after we
+		// fall back (giveUp → not-sent). If it already left the writer, the
+		// outcome is uncertain and we must not fall back.
+		if err := giveUp(); errors.Is(err, errWSRPCUncertain) {
+			return 0, err
+		}
+		return 0, fmt.Errorf("ws rpc: timeout after %s: %w", timeout, errWSRPCUnavailable)
 	case <-ctx.Done():
+		item.cancel()
 		return 0, ctx.Err()
 	}
 }

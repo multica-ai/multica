@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -89,9 +90,17 @@ func TestClaimTasksWSFirst_NoDoubleClaimOnDetach(t *testing.T) {
 	defer srv.Close()
 
 	d := New(Config{ServerBaseURL: srv.URL, MaxConcurrentTasks: 4}, slog.New(slog.NewTextHandler(noopWriter{}, nil)))
-	// Sender accepts (enqueues) the frame but the server never replies —
-	// simulating an in-flight claim that outlives the connection.
-	d.wsRPC.attach(func([]byte) error { return nil })
+	// Sender enqueues the frame and hands back its cancelable handle; we then
+	// mark it written to simulate the writer having put it on the wire, so the
+	// disconnect leaves a genuinely uncertain outcome (the server may commit).
+	var mu sync.Mutex
+	var item *wsOutbound
+	d.wsRPC.attach(func(frame []byte) (*wsOutbound, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		item = &wsOutbound{data: frame}
+		return item, nil
+	})
 
 	done := make(chan struct{})
 	var tasks []*Task
@@ -102,7 +111,10 @@ func TestClaimTasksWSFirst_NoDoubleClaimOnDetach(t *testing.T) {
 	}()
 
 	time.Sleep(50 * time.Millisecond) // let Call send the frame and block on the response
-	d.wsRPC.attach(nil)               // detach mid-flight (reconnect / teardown)
+	mu.Lock()
+	item.beginWrite() // frame is now on the wire — cannot be un-sent
+	mu.Unlock()
+	d.wsRPC.attach(nil) // detach mid-flight (reconnect / teardown)
 
 	select {
 	case <-done:
