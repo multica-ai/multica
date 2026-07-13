@@ -15,6 +15,7 @@ import { memberListOptions } from "@multica/core/workspace/queries";
 import { AgentContextVersionsPanel } from "./components/agent-context-versions-panel";
 import { AgentContextChangeRequestQueue } from "./components/agent-context-change-request-queue";
 import { AgentContextProposeDialog } from "./components/agent-context-propose-dialog";
+import { AgentContextObservabilityPanel } from "./components/agent-context-observability-panel";
 
 export interface AgentDetailTabExtension {
   id: string;
@@ -56,22 +57,12 @@ export function CerebroAgentContextTab({
 
   return (
     <div className="space-y-5 p-4 md:p-6">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <h3 className="text-sm font-semibold">Instructions</h3>
-          <p className="mt-0.5 max-w-prose text-xs text-muted-foreground">
-            This agent&apos;s instructions and configuration are versioned and
-            reviewable. Edit through Propose change — review pending proposals,
-            compare versions, and roll back — so the harness stays auditable
-            instead of drifting.
-          </p>
-        </div>
-        <AgentContextProposeDialog agent={agent} canReview={canManage} />
-      </div>
+      <AgentContextProposeDialog agent={agent} canReview={canManage} />
 
       <div className="my-1 h-px bg-border" />
 
       <div className="space-y-5">
+        <AgentContextObservabilityPanel agent={agent} />
         <AgentContextChangeRequestQueue
           agent={agent}
           wsId={wsId}

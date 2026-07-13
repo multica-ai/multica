@@ -29,6 +29,8 @@ import (
 	cerebroskillsync "github.com/multica-ai/multica/server/internal/cerebro/skillsync"
 	// CEREBRO-PATCH(main-wakeup): FIR-3013 agent wakeup scheduler.
 	cerebrowakeup "github.com/multica-ai/multica/server/internal/cerebro/wakeup"
+	// CEREBRO-PATCH(main-rounds): FIR-2736 scheduled round starts.
+	cerebrorounds "github.com/multica-ai/multica/server/internal/cerebro/rounds"
 	// CEREBRO-PATCH(main-runtime-tool-backfill): JEH-1710 bid 6 cloud-tool registry backfill import
 	cerebroruntimetools "github.com/multica-ai/multica/server/internal/cerebro/runtimetools"
 	// CEREBRO-PATCH(main-workflows-engine): JEH-1047 cerebro workflow engine import
@@ -407,6 +409,8 @@ func main() {
 	go runAutopilotScheduler(autopilotCtx, queries, autopilotSvc)
 	// CEREBRO-PATCH(main-wakeup): FIR-3013 due-time wakeup sweeper.
 	go cerebrowakeup.RunSweeper(sweepCtx, wakeupSvc, 30*time.Second)
+	// CEREBRO-PATCH(main-rounds): due schedules release held round replies.
+	go cerebrorounds.New(pool, queries, taskSvc).RunSweeper(sweepCtx, 30*time.Second)
 	// CEREBRO-PATCH(inbox-reminders-due): due reminders re-enter inbox live and can fire reminder-only mobile push.
 	go runReminderDueSweeper(sweepCtx, queries, bus)
 	// CEREBRO-PATCH(cerebro-reminder): FIR-394 — fire standalone reminders and re-surface the source conversation in the inbox.

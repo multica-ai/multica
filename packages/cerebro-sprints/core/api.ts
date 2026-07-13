@@ -1,5 +1,6 @@
 import { api, parseWithFallback } from "@multica/core/api";
 import {
+  completeSprintResponseSchema,
   EMPTY_RECURRING_TASKS_LIST,
   EMPTY_SELECTABLE_SPRINTS_LIST,
   EMPTY_SPRINT_ISSUES_LIST,
@@ -14,6 +15,8 @@ import {
   sprintsListSchema,
 } from "./api-schemas";
 import type {
+  CompleteSprintInput,
+  CompleteSprintResponse,
   RecurringTask,
   RecurringTasksResponse,
   RecurringTaskWriteInput,
@@ -123,6 +126,21 @@ export async function updateSprint(
 
 export async function deleteSprint(sprintId: string): Promise<void> {
   await api.cerebroRequest<void>(`/api/cerebro/sprints/${sprintId}`, { method: "DELETE" });
+}
+
+// FIR-2828: end a sprint and choose what happens to any issue still assigned
+// to it (leave it, move it to the backlog, or move it into another sprint).
+export async function completeSprint(
+  sprintId: string,
+  payload: CompleteSprintInput,
+): Promise<CompleteSprintResponse | null> {
+  const raw = await api.cerebroRequest<unknown>(`/api/cerebro/sprints/${sprintId}/complete`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+  return parseWithFallback(raw, completeSprintResponseSchema, null, {
+    endpoint: "completeSprint",
+  });
 }
 
 export async function fetchSprintIssues(sprintId: string): Promise<SprintIssuesResponse> {

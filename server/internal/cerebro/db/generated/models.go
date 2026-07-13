@@ -310,16 +310,20 @@ type BudgetState struct {
 }
 
 type CerebroAccount struct {
-	ID             pgtype.UUID        `json:"id"`
-	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
-	Provider       string             `json:"provider"`
-	LoginIdentity  string             `json:"login_identity"`
-	CreatedAt      pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
-	UsageWindowPct pgtype.Float4      `json:"usage_window_pct"`
-	ThrottledUntil pgtype.Timestamptz `json:"throttled_until"`
-	ExtraSpendOn   bool               `json:"extra_spend_on"`
-	PausedManual   bool               `json:"paused_manual"`
+	ID              pgtype.UUID        `json:"id"`
+	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
+	Provider        string             `json:"provider"`
+	LoginIdentity   string             `json:"login_identity"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+	UsageWindowPct  pgtype.Float4      `json:"usage_window_pct"`
+	ThrottledUntil  pgtype.Timestamptz `json:"throttled_until"`
+	ExtraSpendOn    bool               `json:"extra_spend_on"`
+	PausedManual    bool               `json:"paused_manual"`
+	Usage5hPct      pgtype.Float4      `json:"usage_5h_pct"`
+	Usage5hResetsAt pgtype.Timestamptz `json:"usage_5h_resets_at"`
+	Usage7dPct      pgtype.Float4      `json:"usage_7d_pct"`
+	Usage7dResetsAt pgtype.Timestamptz `json:"usage_7d_resets_at"`
 }
 
 type CerebroAccountTokenUsage struct {
@@ -837,6 +841,7 @@ type CerebroNote struct {
 	LockedBy        pgtype.UUID        `json:"locked_by"`
 	LockedAt        pgtype.Timestamptz `json:"locked_at"`
 	LockHeartbeatAt pgtype.Timestamptz `json:"lock_heartbeat_at"`
+	AuthorCodes     bool               `json:"author_codes"`
 }
 
 type CerebroNoteComment struct {
@@ -860,6 +865,7 @@ type CerebroNoteComment struct {
 	CreatedAt       pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
 	SentToAgentAt   pgtype.Timestamptz `json:"sent_to_agent_at"`
+	IssueID         pgtype.UUID        `json:"issue_id"`
 }
 
 type CerebroNoteReference struct {
@@ -902,6 +908,14 @@ type CerebroNoteType struct {
 	NumberingEnabled     bool               `json:"numbering_enabled"`
 	NextNumber           int32              `json:"next_number"`
 	AnchorWeekday        pgtype.Int2        `json:"anchor_weekday"`
+	AuthorCodes          bool               `json:"author_codes"`
+}
+
+type CerebroNoteLineAttr struct {
+	ArtifactID pgtype.UUID        `json:"artifact_id"`
+	BaseBody   string             `json:"base_body"`
+	Attrs      []byte             `json:"attrs"`
+	UpdatedAt  pgtype.Timestamptz `json:"updated_at"`
 }
 
 type CerebroNoteVersion struct {
@@ -1145,6 +1159,34 @@ type CerebroToolPolicy struct {
 	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
 	ResourcePattern string             `json:"resource_pattern"`
 	Conditions      []byte             `json:"conditions"`
+}
+
+type CerebroToolPolicyAudit struct {
+	ID              pgtype.UUID        `json:"id"`
+	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
+	ToolKey         string             `json:"tool_key"`
+	Layer           string             `json:"layer"`
+	SubjectID       pgtype.UUID        `json:"subject_id"`
+	ResourcePattern string             `json:"resource_pattern"`
+	Action          string             `json:"action"`
+	OldSetting      string             `json:"old_setting"`
+	NewSetting      string             `json:"new_setting"`
+	ActorType       string             `json:"actor_type"`
+	ActorID         pgtype.UUID        `json:"actor_id"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+}
+
+type CerebroToolPolicyUsage struct {
+	ID               pgtype.UUID        `json:"id"`
+	WorkspaceID      pgtype.UUID        `json:"workspace_id"`
+	ToolKey          string             `json:"tool_key"`
+	EnforcementPoint string             `json:"enforcement_point"`
+	SubjectType      string             `json:"subject_type"`
+	SubjectID        pgtype.UUID        `json:"subject_id"`
+	Resource         string             `json:"resource"`
+	Decision         string             `json:"decision"`
+	DecidedBy        string             `json:"decided_by"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
 }
 
 type CerebroUserInfisicalFolder struct {

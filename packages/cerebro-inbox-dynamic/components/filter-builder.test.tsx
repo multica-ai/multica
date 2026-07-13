@@ -38,13 +38,7 @@ vi.mock("@multica/ui/components/ui/command", () => {
     CommandList: Pass,
     CommandEmpty: Pass,
     CommandGroup: Pass,
-    CommandItem: ({
-      children,
-      onSelect,
-    }: {
-      children?: React.ReactNode;
-      onSelect?: () => void;
-    }) => <button onClick={onSelect}>{children}</button>,
+    CommandItem: Pass,
   };
 });
 
@@ -110,46 +104,5 @@ describe("FilterBuilder Match all / Match any (FIR-1731)", () => {
 
     await user.click(screen.getByRole("button", { name: /Match any — at least one/ }));
     expect(onMatchChange).toHaveBeenCalledWith("any");
-  });
-});
-
-describe("FilterBuilder status picker (FIR-1917)", () => {
-  it("adds and labels a multi-select status condition", async () => {
-    const user = userEvent.setup();
-    const onChange = vi.fn();
-    render(
-      <FilterBuilder filters={[]} projects={[]} onChange={onChange} onMatchChange={vi.fn()} />,
-    );
-
-    await user.click(screen.getByRole("button", { name: "Done" }));
-    expect(onChange).toHaveBeenLastCalledWith([{ field: "status", statusValues: ["done"] }]);
-
-    cleanup();
-    render(
-      <FilterBuilder
-        filters={[{ field: "status", statusValues: ["done", "cancelled"] }]}
-        projects={[]}
-        onChange={vi.fn()}
-        onMatchChange={vi.fn()}
-      />,
-    );
-
-    expect(screen.getByText("Status: Done, Cancelled")).toBeTruthy();
-  });
-
-  it("clears the status condition with No status filter", async () => {
-    const user = userEvent.setup();
-    const onChange = vi.fn();
-    render(
-      <FilterBuilder
-        filters={[{ field: "unread" }, { field: "status", statusValues: ["done"] }]}
-        projects={[]}
-        onChange={onChange}
-        onMatchChange={vi.fn()}
-      />,
-    );
-
-    await user.click(screen.getByRole("button", { name: /No status filter/ }));
-    expect(onChange).toHaveBeenCalledWith([{ field: "unread" }]);
   });
 });

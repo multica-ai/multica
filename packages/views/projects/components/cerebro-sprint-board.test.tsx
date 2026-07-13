@@ -1,4 +1,5 @@
 // CEREBRO-PATCH(sprint-header-breadcrumb): FIR-2817 test for the BreadcrumbHeader swap.
+// CEREBRO-PATCH(sprint-header-date-range): FIR-2817 test for the DD-MM - DD-MM date format.
 import { describe, it, expect, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -44,6 +45,13 @@ vi.mock("./project-detail", () => ({
   ProjectIssuesSurface: () => <div data-testid="issues-surface" />,
 }));
 
+// CEREBRO-PATCH(sprint-sidebar): FIR-2828 the sidebar is exercised by its own
+// tests — stub it here so this header test doesn't need to mock every hook
+// (useUpdateSprint/useDeleteSprint/CompleteSprintDialog) it pulls in.
+vi.mock("./cerebro-sprint-sidebar", () => ({
+  SprintSidebar: () => <div data-testid="sprint-sidebar" />,
+}));
+
 function makeAdapter(): NavigationAdapter {
   return {
     push: vi.fn(),
@@ -80,7 +88,7 @@ describe("SprintBoard header", () => {
 
     expect(await screen.findByText("Tech Sprint 3 2026")).toBeInTheDocument();
     expect(screen.getByText("Planned")).toBeInTheDocument();
-    expect(screen.getByText(/2026-07-06.*2026-07-19/)).toBeInTheDocument();
+    expect(screen.getByText(/06-07 - 19-07/)).toBeInTheDocument();
   });
 
   it("still mounts the (stubbed) project issues surface below the header", async () => {

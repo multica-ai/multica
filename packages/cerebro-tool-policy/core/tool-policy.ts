@@ -51,6 +51,16 @@ export interface ToolPolicyEffective {
   capped_by: string;
   /** Human-readable explanation, e.g. "Capped by user". */
   reason: string;
+  /**
+   * True when the verdict resolved under the member-override model (FIR-3091):
+   * a member layer (Group/User) may still OPEN a broader default, so a plain
+   * workspace Deny is openable — not a locked floor. False for tighten-only
+   * resolutions (hard floors: credentials, sandbox, repo, agent-browser; and any
+   * row when member-override is off), which the lock affordance treats as
+   * unopenable. Server-computed so the client never re-derives the mode. Absent
+   * on an older backend → drifts to false (fail safe: shown as an unopenable floor).
+   */
+  openable: boolean;
 }
 
 /**
@@ -219,11 +229,43 @@ export interface ClearToolPolicyRequest {
 // --- pure helpers -----------------------------------------------------------
 
 /**
+ * Specificity of the human/member layers under the member-override model
+ * (resolveOpenable Stage A): the MOST specific explicit member setting wins and
+ * MAY loosen a broader default — User over Group over Workspace. Runtime, Agent,
+ * On-behalf-of and System are NOT here: they sit above the member ceiling and can
+ * only tighten (handled via capped_by / the tighten-only branch), so they never
+ * take part in the member-specificity comparison.
+ */
+const MEMBER_SPECIFICITY: Partial<Record<ToolLayer, number>> = {
+  workspace: 0,
+  group: 1,
+  user: 2,
+};
+
+/**
  * Whether the effective verdict is forced by a layer the given editLayer cannot
- * loosen — a higher group/user cap (capped_by) OR a workspace/runtime base that
- * decided a restriction (decided_by ≠ editLayer). The chain only ever tightens,
- * so once another layer decides Ask/Deny this page can never reach a looser
- * result: that is exactly when a control should read as locked (TECH-3287 hul 2).
+ * loosen — i.e. the control should read as locked, and a looser write on it would
+ * be futile (the "no effect" warning). This is the single definition the table,
+ * the connection sheet and the bulk action all share.
+ *
+ * FIR-3091: the old rule was tighten-only ("any higher layer that decided a
+ * non-Allow locks it"), which is correct for hard floors but WRONG once
+ * member-override is on — there a Group/User Allow legitimately OPENS a plain
+ * workspace Deny, so the old rule fired a false lock + false "no effect" toast.
+ * The lock is now mode- and specificity-aware, mirroring resolveOpenable:
+ *
+ *   (c) a genuine tighten-cap above the member ceiling (runtime/agent/system,
+ *       surfaced as capped_by) can never be loosened here → locked;
+ *   otherwise, for a tighten-only row (a hard floor, or any row when
+ *       member-override is off — eff.openable === false): keep the old rule —
+ *       any OTHER layer's non-Allow decision is an unopenable ceiling;
+ *   for an openable (member-override) row:
+ *   (a) an explicit workspace Disable is the one unopenable member floor → locked;
+ *   (d) a MORE-specific member layer than editLayer already decided the verdict
+ *       (User over Group over Workspace) → this broader control can't change it;
+ *       the Agent layer may open a workspace default but never an explicit
+ *       Group/User ceiling; Runtime/System stay tighten-only.
+ *
  * Lives in core so both the table and the connection sheet share one definition.
  */
 export function isLockedFromElsewhere(
@@ -231,8 +273,47 @@ export function isLockedFromElsewhere(
   editLayer: ToolLayer,
 ): boolean {
   const eff = row.effective;
+
+  // (c) A genuine tighten-cap from a machine layer above the member ceiling
+  // (runtime/agent/on_behalf_of/system) is a hard ceiling no page can loosen.
   if (eff.capped_by) return true;
-  return !!eff.decided_by && eff.decided_by !== editLayer && eff.setting !== "allow";
+
+  // Nothing is being blocked when the verdict is already Allow, so no control is
+  // locked from elsewhere and no looser write could be futile.
+  if (eff.setting === "allow") return false;
+
+  if (!eff.openable) {
+    // Tighten-only world (hard floors, or member-override off): any OTHER layer's
+    // non-Allow decision is an unopenable ceiling. This is the pre-FIR-3091 rule,
+    // now scoped to exactly the resolutions where it is correct.
+    return !!eff.decided_by && eff.decided_by !== editLayer;
+  }
+
+  // Openable (member-override) world — mirror resolveOpenable.
+  // (a) An explicit workspace Disable is the one unopenable member floor.
+  if (row.layers.workspace === "disable") return true;
+
+  const decidedBy = eff.decided_by as ToolLayer;
+  const decidedRank = MEMBER_SPECIFICITY[decidedBy];
+  const editRank = MEMBER_SPECIFICITY[editLayer];
+
+  if (editRank !== undefined) {
+    // Editing a member layer (Workspace/Group/User). Locked when the verdict was
+    // set by a strictly MORE specific member layer (which this one can't override)
+    // or by a machine tighten layer above the member ceiling (runtime/agent/…).
+    if (decidedRank !== undefined) return decidedRank > editRank;
+    return decidedBy !== editLayer;
+  }
+
+  if (editLayer === "agent") {
+    // The Agent layer may OPEN a workspace default, but an explicit Group/User
+    // ceiling — or a machine layer above the agent — is absolute (Stage B).
+    return decidedBy !== "workspace" && decidedBy !== "agent";
+  }
+
+  // Runtime/System are tighten-only even here: a non-Allow decided elsewhere is a
+  // ceiling they cannot loosen.
+  return !!eff.decided_by && eff.decided_by !== editLayer;
 }
 
 /**
@@ -349,8 +430,12 @@ const toolPolicyRowSchema = z.object({
       decided_by: z.string().default(""),
       capped_by: z.string().default(""),
       reason: z.string().default(""),
+      // FIR-3091: a display hint for the lock affordance. Defaults to false so an
+      // older backend that omits it fails safe (the row reads as an unopenable
+      // floor — the pre-fix, more-locked behaviour) rather than crashing.
+      openable: z.boolean().default(false),
     })
-    .default({ setting: "deny", decided_by: "", capped_by: "", reason: "" }),
+    .default({ setting: "deny", decided_by: "", capped_by: "", reason: "", openable: false }),
   // Group attribution drifts to an empty list rather than failing the parse — a
   // missing/odd value just means "no named group", never a crash.
   capped_by_groups: z

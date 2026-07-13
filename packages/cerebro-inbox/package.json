@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@multica/cerebro-feature-flags": "workspace:*",
+    "@multica/cerebro-rounds": "workspace:*",
     "@multica/cerebro-types": "workspace:*",
     "@multica/core": "workspace:*",
     "@multica/ui": "workspace:*",
@@ -25,7 +26,10 @@
   },
   "devDependencies": {
     "@multica/tsconfig": "workspace:*",
+    "@testing-library/jest-dom": "catalog:",
+    "@testing-library/react": "catalog:",
     "@types/react": "catalog:",
+    "jsdom": "catalog:",
     "typescript": "catalog:",
     "vitest": "catalog:"
   }

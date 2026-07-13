@@ -487,6 +487,15 @@ func (s *Service) dispatchPhaseRunOnIssue(ctx context.Context, wf workflow, te T
 	if err != nil {
 		return fmt.Errorf("run_skill: load target issue: %w", err)
 	}
+	if s.planDocuments != nil {
+		status := "Plan phase started. The agent is writing the plan."
+		if phase != "plan" {
+			status = "Build phase started. The agent is building from the plan."
+		}
+		if _, _, err := s.planDocuments.AppendIssueStatus(ctx, issue.WorkspaceID, issue.ID, status); err != nil {
+			return fmt.Errorf("run_skill: update plan document: %w", err)
+		}
+	}
 
 	comment, err := s.issues.CreateComment(ctx, db.CreateCommentParams{
 		IssueID:     issue.ID,
@@ -519,7 +528,7 @@ func (s *Service) dispatchPhaseRunOnIssue(ctx context.Context, wf workflow, te T
 		originalUserID = wf.createdByID
 	}
 
-	taskContext := mustJSON(map[string]any{
+	phaseContext := map[string]any{
 		"type": "workflow_phase",
 		// Bookkeeping mirrored from the quick_create variant so the workflow
 		// log and the completion-time session stamper read the same fields.
@@ -529,7 +538,17 @@ func (s *Service) dispatchPhaseRunOnIssue(ctx context.Context, wf workflow, te T
 		"workflow_target_issue_id": te.IssueID,
 		"loop_phase":               phase,
 		"plan_mode":                cfg.PlanMode,
-	})
+	}
+	// FIR-3052 step hook: a plan-phase run carries the statuses the loop must
+	// advance through when it completes, so LoopPhaseAdvancer can move the issue
+	// PlanningStatus -> BuildStatus (firing loop:dispatch-build) without the plan
+	// agent flipping the status by hand. Only stamped for the plan phase; the
+	// build phase has no further step to auto-advance to here.
+	if phase == "plan" && cfg.AdvanceToStatus != "" {
+		phaseContext["loop_advance_from_status"] = cfg.AdvanceFromStatus
+		phaseContext["loop_advance_to_status"] = cfg.AdvanceToStatus
+	}
+	taskContext := mustJSON(phaseContext)
 	task, err := s.issues.CreateAgentTask(ctx, db.CreateAgentTaskParams{
 		AgentID:           agentID,
 		RuntimeID:         agent.RuntimeID,

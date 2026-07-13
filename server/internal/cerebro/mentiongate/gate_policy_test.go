@@ -53,7 +53,7 @@ func TestCanTriggerMention_PolicyDenyRemovesAdminMasterKey(t *testing.T) {
 		t.Fatalf("set agent Deny: %v", err)
 	}
 	t.Cleanup(func() {
-		_ = store.Clear(context.Background(), mentionGateWorkspaceID, triggerOtherAgentKey, toolpolicy.LayerAgent, agentID, "")
+		_ = store.Clear(context.Background(), mentionGateWorkspaceID, triggerOtherAgentKey, toolpolicy.LayerAgent, agentID, "", pgtype.UUID{})
 	})
 
 	req2 := httptest.NewRequest("POST", "/api/issues/comment", nil)
@@ -98,7 +98,7 @@ func TestCanTriggerMention_PolicyAllowGrantsBlockedMember(t *testing.T) {
 		t.Fatalf("set user Allow: %v", err)
 	}
 	t.Cleanup(func() {
-		_ = store.Clear(context.Background(), mentionGateWorkspaceID, triggerOtherAgentKey, toolpolicy.LayerUser, commenterID, "")
+		_ = store.Clear(context.Background(), mentionGateWorkspaceID, triggerOtherAgentKey, toolpolicy.LayerUser, commenterID, "", pgtype.UUID{})
 	})
 
 	req2 := httptest.NewRequest("POST", "/api/issues/comment", nil)

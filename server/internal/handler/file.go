@@ -18,7 +18,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 
-	pdftext "github.com/multica-ai/multica/packages/cerebro-pdf-text"
+	attachmenttext "github.com/multica-ai/multica/packages/cerebro-attachment-text" // CEREBRO-PATCH(attachment-text-runtime-tool): one server-side extractor serves every runtime.
 
 	"github.com/multica-ai/multica/server/internal/cerebro/attachmentserve" // CEREBRO-PATCH(rangeable-attachment-serve): range-aware media serving (FIR-1673).
 
@@ -676,7 +676,9 @@ func (h *Handler) GetAttachmentContent(w http.ResponseWriter, r *http.Request) {
 
 	attachmentID := uuidToString(att.ID)
 
-	if !isTextPreviewable(att.ContentType, att.Filename) {
+	agentRead := r.URL.Query().Get("agent_read") == "1" // CEREBRO-PATCH(attachment-agent-text): keep Office extraction exclusive to agent/CLI reads.
+	if (!agentRead && !isTextPreviewable(att.ContentType, att.Filename)) ||
+		(agentRead && !isTextPreviewable(att.ContentType, att.Filename) && !attachmenttext.IsPreviewable(att.ContentType, att.Filename)) {
 		writeError(w, http.StatusUnsupportedMediaType, "preview not supported for this file type")
 		return
 	}
@@ -704,7 +706,7 @@ func (h *Handler) GetAttachmentContent(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusRequestEntityTooLarge, "file too large for inline preview")
 		return
 	}
-	if previewErr := pdftext.ExtractPreviewInto(&body, att.ContentType, att.Filename, maxPreviewTextSize); previewErr != nil { // CEREBRO-PATCH(pdf-attachment-text): delegate PDF text extraction to cerebro package.
+	if previewErr := attachmenttext.ExtractPreviewInto(r.Context(), &body, att.ContentType, att.Filename, maxPreviewTextSize); previewErr != nil { // CEREBRO-PATCH(attachment-text-runtime-tool): portable OCR and Office extraction.
 		writeError(w, previewErr.StatusCode, previewErr.Message)
 		return
 	}
@@ -727,7 +729,7 @@ func isTextPreviewable(contentType, filename string) bool {
 	if strings.HasPrefix(ct, "text/") {
 		return true
 	}
-	if pdftext.IsPreviewable(ct, filename) {
+	if ct == "application/pdf" || strings.ToLower(path.Ext(filename)) == ".pdf" { // CEREBRO-PATCH(attachment-text-runtime-tool): UI proxy stays PDF-only; legacy Office formats extract via read_attachment, not this endpoint.
 		return true
 	}
 	switch ct {

@@ -2,6 +2,7 @@ import type { ComponentType } from "react";
 import {
   BookOpenText,
   Brain,
+  Cog,
   FileText,
   KeyRound,
   KeySquare,
@@ -18,6 +19,7 @@ export type RedesignTab =
   | "tasks"
   | "instructions"
   | "skills"
+  | "advanced"
   | "env"
   | "infisical"
   | "custom_args"
@@ -38,15 +40,19 @@ const BASE_TABS: AgentPageTab[] = [
   { id: "tasks", label: "Tasks", icon: ListTodo },
   { id: "instructions", label: "Instructions", icon: FileText },
   { id: "skills", label: "Skills", icon: BookOpenText },
-  { id: "env", label: "Env", icon: KeyRound },
-  { id: "infisical", label: "Infisical", icon: KeySquare },
-  { id: "custom_args", label: "Custom args", icon: Terminal },
-  { id: "sandbox", label: "Sandbox", icon: Shield },
-  { id: "mcp_config", label: "MCP Config", icon: Plug },
+  { id: "advanced", label: "Advanced", icon: Cog },
   { id: "integrations", label: "Integrations", icon: Webhook },
   { id: "tools", label: "Tools", icon: Wrench },
   { id: "capabilities", label: "Capabilities", icon: ShieldCheck },
   { id: "memory", label: "Memory", icon: Brain },
+];
+
+const ADVANCED_TABS: AgentPageTab[] = [
+  { id: "infisical", label: "Infisical secrets", icon: KeySquare },
+  { id: "sandbox", label: "Sandbox", icon: Shield },
+  { id: "mcp_config", label: "MCP Config", icon: Plug },
+  { id: "custom_args", label: "Custom args", icon: Terminal },
+  { id: "env", label: "Env", icon: KeyRound },
 ];
 
 export function agentPageTabs(options: {
@@ -65,4 +71,12 @@ export function agentPageTabIds(options: {
   integrations: boolean;
 }): RedesignTab[] {
   return agentPageTabs(options).map((tab) => tab.id);
+}
+
+export function advancedTabs(options: { mcpConfig: boolean }): AgentPageTab[] {
+  return ADVANCED_TABS.filter((tab) => tab.id !== "mcp_config" || options.mcpConfig);
+}
+
+export function advancedTabIds(options: { mcpConfig: boolean }): RedesignTab[] {
+  return advancedTabs(options).map((tab) => tab.id);
 }

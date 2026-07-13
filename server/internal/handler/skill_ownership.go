@@ -94,6 +94,9 @@ type CreateSkillChangeRequestRequest struct {
 type ReviewSkillChangeRequestRequest struct {
 	Action  string `json:"action"` // "approve" | "reject"
 	Comment string `json:"comment"`
+	// CEREBRO-PATCH(skill-review-edit-content): FIR-2924 — reviewer may edit the
+	// proposed content inline before approving; empty means "use as proposed".
+	EditedContent string `json:"edited_content,omitempty"`
 }
 
 type ForkSkillRequest struct {
@@ -467,10 +470,17 @@ func (h *Handler) ReviewSkillChangeRequest(w http.ResponseWriter, r *http.Reques
 			return
 		}
 
+		// CEREBRO-PATCH(skill-review-edit-content): FIR-2924 — reviewer edits win
+		// over the original proposal when present.
+		finalContent := locked.ProposedContent
+		if strings.TrimSpace(req.EditedContent) != "" {
+			finalContent = req.EditedContent
+		}
+
 		updatedSkill, err := qtx.UpdateSkillCurrentVersion(r.Context(), db.UpdateSkillCurrentVersionParams{
 			ID:             skill.ID,
 			CurrentVersion: locked.ProposedVersion,
-			Content:        locked.ProposedContent,
+			Content:        finalContent,
 		})
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to apply change: "+err.Error())
@@ -496,7 +506,7 @@ func (h *Handler) ReviewSkillChangeRequest(w http.ResponseWriter, r *http.Reques
 		if _, err := qtx.CreateSkillVersion(r.Context(), db.CreateSkillVersionParams{
 			SkillID:     updatedSkill.ID,
 			Version:     locked.ProposedVersion,
-			Content:     locked.ProposedContent,
+			Content:     finalContent,
 			Files:       locked.ProposedFiles,
 			Description: locked.Title,
 			CreatedBy:   parseUUID(userID),
@@ -505,11 +515,15 @@ func (h *Handler) ReviewSkillChangeRequest(w http.ResponseWriter, r *http.Reques
 			return
 		}
 
+		// CEREBRO-PATCH(skill-review-edit-content): FIR-2924 — persist the
+		// merged content on the change request too, so its own history/diff
+		// reflects what was actually applied, not just what was proposed.
 		updatedCR, err := qtx.ReviewSkillChangeRequest(r.Context(), db.ReviewSkillChangeRequestParams{
-			ID:            locked.ID,
-			Status:        "merged",
-			ReviewedBy:    parseUUID(userID),
-			ReviewComment: req.Comment,
+			ID:              locked.ID,
+			Status:          "merged",
+			ReviewedBy:      parseUUID(userID),
+			ReviewComment:   req.Comment,
+			ProposedContent: finalContent,
 		})
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to mark merged: "+err.Error())
@@ -525,11 +539,14 @@ func (h *Handler) ReviewSkillChangeRequest(w http.ResponseWriter, r *http.Reques
 		writeJSON(w, http.StatusOK, skillChangeRequestToResponse(updatedCR))
 
 	case "reject":
+		// CEREBRO-PATCH(skill-review-edit-content): FIR-2924 — rejects always
+		// refer to the proposal as originally submitted, never a reviewer edit.
 		updatedCR, err := h.Queries.ReviewSkillChangeRequest(r.Context(), db.ReviewSkillChangeRequestParams{
-			ID:            cr.ID,
-			Status:        "rejected",
-			ReviewedBy:    parseUUID(userID),
-			ReviewComment: req.Comment,
+			ID:              cr.ID,
+			Status:          "rejected",
+			ReviewedBy:      parseUUID(userID),
+			ReviewComment:   req.Comment,
+			ProposedContent: cr.ProposedContent,
 		})
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to reject: "+err.Error())

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	attachmenttext "github.com/multica-ai/multica/packages/cerebro-attachment-text"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -134,6 +135,13 @@ func (t *FirtalReadAttachmentTool) Call(ctx context.Context, args map[string]any
 	att, err := t.queries.GetAttachment(ctx, db.GetAttachmentParams{ID: id, WorkspaceID: t.tctx.WorkspaceID})
 	if err != nil {
 		return "", err
+	}
+	if attachmenttext.IsPreviewable(att.ContentType, att.Filename) {
+		text, err := gatewayAttachmentText(ctx, store, att)
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("Attachment %q contents:\n%s", att.Filename, text), nil
 	}
 	blocks, err := gatewayAttachmentBlocks(ctx, store, att)
 	if err != nil {

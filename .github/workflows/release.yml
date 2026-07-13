@@ -463,13 +463,13 @@ jobs:
 
   # Build the Desktop installers for Linux, Windows and macOS and upload
   # them to the GitHub Release that the `release` job above just published.
-  # macOS is built UNSIGNED here (ad-hoc signature, notarization skipped —
-  # see the APPLE_TEAM_ID note below): users get the dmg straight from the
-  # release and approve it once via right-click → Open. A fully signed +
-  # notarized macOS build still requires the manual `release-desktop` skill
-  # with Apple Developer credentials, which are not (yet) wired into CI.
+  # macOS and Windows use platform signing when credentials are present.
+  # Until Firtal has those credentials, the package script disables identity
+  # auto-discovery and publishes unsigned installers instead. macOS is
+  # notarized only when its Apple credentials are configured. Linux packages
+  # do not require platform signing.
   desktop:
-    needs: release
+    needs: [release, tap-mirror]
     strategy:
       fail-fast: false
       matrix:
@@ -512,15 +512,12 @@ jobs:
       - name: Package Desktop installers (${{ matrix.target }})
         working-directory: apps/desktop
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
           # electron-builder's GitHub publisher reads this:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Disable code signing on all platforms for now — the public
-          # release is unsigned, the CLI carries the trust boundary. On
-          # macOS this yields an ad-hoc signature; notarization is skipped
-          # automatically because APPLE_TEAM_ID is unset (see
-          # scripts/package.mjs). Set CSC_LINK (plus APPLE_ID /
-          # APPLE_APP_SPECIFIC_PASSWORD / APPLE_TEAM_ID for macOS) in repo
-          # secrets to enable signing later.
-          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+          GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
+          CSC_LINK: ${{ matrix.target == 'mac' && secrets.MACOS_CSC_LINK || matrix.target == 'win' && secrets.WINDOWS_CSC_LINK || '' }}
+          CSC_KEY_PASSWORD: ${{ matrix.target == 'mac' && secrets.MACOS_CSC_KEY_PASSWORD || matrix.target == 'win' && secrets.WINDOWS_CSC_KEY_PASSWORD || '' }}
+          APPLE_ID: ${{ matrix.target == 'mac' && secrets.APPLE_ID || '' }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ matrix.target == 'mac' && secrets.APPLE_APP_SPECIFIC_PASSWORD || '' }}
+          APPLE_TEAM_ID: ${{ matrix.target == 'mac' && secrets.APPLE_TEAM_ID || '' }}
         run: node scripts/package.mjs --${{ matrix.target }} --x64 --arm64 --publish always

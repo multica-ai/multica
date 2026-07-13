@@ -15,10 +15,10 @@ import { CerebroBrowserPage } from "./pages/cerebro-browser-page";
 import { SprintDetailPage } from "./pages/sprint-detail-page";
 import { AutopilotDetailPage } from "./pages/autopilot-detail-page";
 import { AutopilotCreatePage, AutopilotEditPage } from "@multica/cerebro-autopilot-pages";
-import { agentCapabilitiesSettingsTab } from "@multica/cerebro-agent-capabilities";
 import { SkillDetailPage } from "./pages/skill-detail-page";
 import { AgentDetailPage } from "./pages/agent-detail-page";
 import { RuntimeDetailPage } from "./pages/runtime-detail-page";
+import { AccountDetailPage } from "./pages/account-detail-page";
 import { IssuesPage } from "@multica/views/issues/components";
 import { ProjectsPage } from "@multica/views/projects/components";
 import { FileManagerPage } from "@multica/cerebro-artifacts/views/components";
@@ -42,6 +42,7 @@ import { NotificationsPage } from "@multica/cerebro-notifications/views";
 import { SettingsPage } from "@multica/views/settings";
 import { MemberDetailPage as CerebroMemberDetailPage } from "@multica/cerebro-users/views";
 import { GroupDetailView } from "@multica/cerebro-groups/views";
+import { PermissionDetailPage } from "@multica/cerebro-tool-policy/views";
 import { useMembersTabCerebroExtras } from "@multica/cerebro-members/views";
 import { useNavigation } from "@multica/views/navigation";
 import { useCurrentWorkspace } from "@multica/core/paths";
@@ -130,7 +131,6 @@ function SettingsRoute() {
           icon: Download,
           content: <UpdatesSettingsTab />,
         },
-        agentCapabilitiesSettingsTab,
         ...cerebroCostOptimizationTabs,
         ...cerebroNotesSettingsTabs,
         ...cerebroFeatureFlagTabs,
@@ -320,6 +320,11 @@ export const appRoutes: RouteObject[] = [
             element: <GroupDetailRoute />,
             handle: { title: "Group" },
           },
+          {
+            path: "cerebro/permissions/:toolKey",
+            element: <PermissionDetailRoute />,
+            handle: { title: "Permission" },
+          },
           { path: "inbox", element: <CerebroInboxSwitcher />, handle: { title: "Inbox" } },
           { path: "search", element: <SearchPage />, handle: { title: "Search" } },
           { path: "tasks", element: <TasksPage />, handle: { title: "Tasks" } },
@@ -360,6 +365,11 @@ export const appRoutes: RouteObject[] = [
             path: "settings",
             element: <SettingsRoute />,
             handle: { title: "Settings" },
+          },
+          {
+            path: "settings/accounts/:id",
+            element: <AccountDetailPage />,
+            handle: { title: "Account" },
           },
         ],
       },
@@ -497,6 +507,23 @@ function GroupDetailRoute() {
       groupId={params.id ?? ""}
       onBack={() =>
         navigation.push(`/${workspace?.slug ?? ""}/settings?tab=groups`)
+      }
+    />
+  );
+}
+
+// FIR-3091 punkt 8 (fase 1b): per-permission detail route. Mirrors
+// GroupDetailRoute — reads the tool key from the URL and delegates to the shared
+// view, which gates itself on cerebro_permission_detail.
+function PermissionDetailRoute() {
+  const params = useParams<{ toolKey: string }>();
+  const navigation = useNavigation();
+  const workspace = useCurrentWorkspace();
+  return (
+    <PermissionDetailPage
+      toolKey={decodeURIComponent(params.toolKey ?? "")}
+      onBack={() =>
+        navigation.push(`/${workspace?.slug ?? ""}/settings?tab=permissions`)
       }
     />
   );

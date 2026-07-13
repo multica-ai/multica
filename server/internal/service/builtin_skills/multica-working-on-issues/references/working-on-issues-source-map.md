@@ -163,6 +163,9 @@ cd server
 grep -n '"workflow"'                          cmd/multica/cmd_workflow.go cmd/multica/cmd_issue.go
 grep -n 'WorkflowID \*string'                 internal/handler/issue.go
 grep -n 'ActivateForIssue'                    internal/cerebro/workflows/handler.go internal/handler/issue.go
+<!-- CEREBRO-PATCH(cerebro-workflow-agent-guidance): FIR-2937 workflow CLI/MCP source trace. -->
+grep -n 'runWorkflow\|workflowCmd'            cmd/multica/cmd_workflow.go
+grep -n 'registerWorkflowTools'               internal/cerebro/clitools/mcp_tools_workflow.go internal/cerebro/clitools/mcp_tools.go
 grep -n 'pull-requests <id>'                 cmd/multica/cmd_issue.go
 grep -n 'ListPullRequestsForIssue'           cmd/server/router.go internal/handler/github.go
 grep -n 'func issuePullRequestRowToResponse\|type GitHubPullRequestResponse struct\|func derivePRState\|func extractIdentifiers\|func extractClosingIdentifiers\|closingIdentifierRe' internal/handler/github.go

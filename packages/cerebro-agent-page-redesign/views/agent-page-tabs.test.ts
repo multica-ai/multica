@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { agentPageTabIds } from "./agent-page-tabs";
+import { advancedTabIds, agentPageTabIds } from "./agent-page-tabs";
 
 describe("agentPageTabIds", () => {
   it("keeps the shipped setup tabs from the old agent detail page", () => {
@@ -7,11 +7,7 @@ describe("agentPageTabIds", () => {
       "tasks",
       "instructions",
       "skills",
-      "env",
-      "infisical",
-      "custom_args",
-      "sandbox",
-      "mcp_config",
+      "advanced",
       "integrations",
       "tools",
       "capabilities",
@@ -24,13 +20,26 @@ describe("agentPageTabIds", () => {
       "tasks",
       "instructions",
       "skills",
-      "env",
-      "infisical",
-      "custom_args",
-      "sandbox",
+      "advanced",
       "tools",
       "capabilities",
       "memory",
+    ]);
+  });
+
+  it("groups runtime settings in Advanced in their requested order", () => {
+    expect(advancedTabIds({ mcpConfig: true })).toEqual([
+      "infisical",
+      "sandbox",
+      "mcp_config",
+      "custom_args",
+      "env",
+    ]);
+    expect(advancedTabIds({ mcpConfig: false })).toEqual([
+      "infisical",
+      "sandbox",
+      "custom_args",
+      "env",
     ]);
   });
 });

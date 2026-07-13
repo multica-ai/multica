@@ -146,6 +146,17 @@ export class TestApiClient {
     await this.authedFetch(`/api/issues/${id}`, { method: "DELETE" });
   }
 
+  async createComment(issueId: string, content: string) {
+    const res = await this.authedFetch(`/api/issues/${issueId}/comments`, {
+      method: "POST",
+      body: JSON.stringify({ content }),
+    });
+    if (!res.ok) {
+      throw new Error(`createComment failed: ${res.status} ${await res.text()}`);
+    }
+    return res.json();
+  }
+
   // FIR-2680 — create a named channel (kind='channel'). Channels are issues, so
   // the returned id is tracked in createdIssueIds and torn down by cleanup().
   async createChannel(name: string, memberIds: string[] = [], agentIds: string[] = []) {

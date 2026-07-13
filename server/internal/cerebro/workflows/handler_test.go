@@ -359,7 +359,7 @@ func TestPublicWebhookURL_DerivesFromRequest(t *testing.T) {
 func TestActivateForIssue_NotWired(t *testing.T) {
 	h := &Handler{}
 	var zero pgtype.UUID
-	err := h.ActivateForIssue(context.Background(), zero, zero, zero, zero, "member")
+	err := h.ActivateForIssue(context.Background(), zero, zero, zero, zero, zero, "member")
 	if err == nil || !strings.Contains(err.Error(), "not wired") {
 		t.Fatalf("expected a 'not wired' error, got %v", err)
 	}

@@ -51,10 +51,9 @@ export function createWarmup(url: string): () => void {
  * `url` is the workspace-scoped endpoint, e.g.
  * `/api/workspaces/${wsId}/cerebro/dictation/transcribe`.
  *
- * `glossary` (comma-separated domain terms) biases decoding toward the user's
- * own words; `cleanup` opts into the LLM punctuation/structure pass. Both are
- * advisory — the backend ignores an empty glossary and only cleans up when its
- * own key is configured (FIR-1797).
+ * `glossary` (comma-separated domain terms) supplies post-transcription
+ * correction candidates; `cleanup` opts into punctuation/structure cleanup.
+ * Both are advisory and fail open to the raw transcript (FIR-1797).
  */
 export function createHttpTranscriber(
   url: string,

@@ -102,6 +102,19 @@ FROM cerebro_sprint
 WHERE project_id = $1
 ORDER BY sequence_no DESC;
 
+-- name: ListCerebroSprintsByWorkspace :many
+-- FIR-2500: workspace-wide sprint listing so the CLI can find sprints (for
+-- example the active one) without knowing the owning project up front.
+-- $1 = workspace_id; sqlc.narg('status') optionally filters by sprint status.
+SELECT s.id, s.workspace_id, s.project_id, s.name, s.sequence_no, s.status,
+       s.start_date, s.end_date, s.goal, s.created_at, s.updated_at,
+       p.title AS project_title
+FROM cerebro_sprint s
+JOIN project p ON p.id = s.project_id
+WHERE s.workspace_id = $1
+  AND (sqlc.narg('status')::text IS NULL OR s.status = sqlc.narg('status')::text)
+ORDER BY (s.status = 'active') DESC, p.title ASC, s.sequence_no DESC;
+
 -- name: ListSelectableCerebroSprintsForIssue :many
 -- FIR-1657: the sprints an issue may be assigned to. Always the issue's own
 -- project sprints, PLUS sprints of any other project in the same workspace
@@ -200,6 +213,18 @@ FROM cerebro_sprint_issue
 WHERE sprint_id = $1
 ORDER BY added_at ASC;
 
+-- name: ListCerebroSprintIssueDetailsBySprint :many
+-- FIR-2500: sprint overview for the CLI — each issue in the sprint joined
+-- with its upstream title/status so an agent gets the full picture in one
+-- call instead of N follow-up issue lookups.
+SELECT csi.issue_id, csi.sprint_id, csi.added_at,
+       i.number, i.title, i.status, i.priority,
+       i.assignee_type, i.assignee_id
+FROM cerebro_sprint_issue csi
+JOIN issue i ON i.id = csi.issue_id
+WHERE csi.sprint_id = $1
+ORDER BY i.number ASC;
+
 -- name: ListIncompleteIssuesInCerebroSprint :many
 -- Sweeper helper. Returns the upstream issue rows still in a non-terminal
 -- status that belong to the given sprint, so the sweeper can move them to
@@ -222,6 +247,11 @@ UPDATE cerebro_sprint_issue
 SET sprint_id = $1,
     added_at  = now()
 WHERE issue_id = ANY($2::uuid[]);
+
+-- name: RemoveCerebroSprintIssuesBatch :exec
+-- FIR-2828: bulk-unassign issues from a sprint that is being completed, e.g.
+-- when the operator chose "move remaining issues to backlog".
+DELETE FROM cerebro_sprint_issue WHERE issue_id = ANY($1::uuid[]);
 
 -- ===========================================================================
 -- cerebro_sprint_recurring_task

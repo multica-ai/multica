@@ -47,6 +47,13 @@ func isUndefinedTable(err error) bool {
 // the feature packages whose policy it resolves.
 const connectionToolKeyPrefix = "connection:"
 
+// ConnectionToolKey builds the tool_key a connection's policy rows are stored
+// under ("connection:<name>"), so enforcement points can attribute a usage-log
+// row to the right permission key (FIR-3091 punkt 8 fase 3).
+func ConnectionToolKey(name string) string {
+	return connectionToolKeyPrefix + name
+}
+
 // connectionToolSource labels per-tool rows for MCP (mcp_http) connections, and
 // connectionEndpointSource labels per-endpoint+method rows for REST (api)
 // connections. Both carry a non-empty resource_pattern (the tool name, or

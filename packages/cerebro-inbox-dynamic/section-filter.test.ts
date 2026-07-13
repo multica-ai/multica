@@ -12,7 +12,6 @@ import {
   sortEntries,
   matchesViewFilter,
   entryIsMuted,
-  entryIssueStatus,
   groupSectionEntries,
   type DynInboxEntry,
   type SectionFilterContext,
@@ -27,6 +26,7 @@ import {
   makeUserInboxPresetsBlob,
   operatorPreset,
   readUserInboxPresets,
+  SECTION_CATALOG,
   sectionLabel,
   upsertUserInboxPreset,
   type InboxLayout,
@@ -84,6 +84,7 @@ describe("section-filter", () => {
     expect(entryIsUnread(notifEntry(1, { read: false }))).toBe(true);
     expect(entryIsUnread(notifEntry(1, { read: true }))).toBe(false);
     expect(entryIsUnread(channelEntry(1, { unread_count: 3 }))).toBe(true);
+    expect(entryIsUnread(channelEntry(1, { unread_count: 0, has_unread_activity: true }))).toBe(true);
     expect(entryIsUnread(channelEntry(1, { unread_count: 0 }))).toBe(false);
   });
 
@@ -321,56 +322,6 @@ describe("section-filter", () => {
     expect(entryMatchesSection(inP2, allExcludeP1, ctx)).toBe(true);
   });
 
-  it("FIR-1917 — status filters include matching issue rows and exclude non-issue rows", () => {
-    const done = notifEntry(1, { issue_status: "done" });
-    const cancelled = notifEntry(1, { issue_status: "cancelled" });
-    const todo = notifEntry(1, { issue_status: "todo" });
-    const noStatus = notifEntry(1, { issue_status: null });
-    const statusFilter = {
-      id: "s",
-      kind: "filter" as const,
-      filters: [{ field: "status" as const, statusValues: ["done" as const, "cancelled" as const] }],
-    };
-
-    expect(entryIssueStatus(done)).toBe("done");
-    expect(entryMatchesSection(done, statusFilter, ctx)).toBe(true);
-    expect(entryMatchesSection(cancelled, statusFilter, ctx)).toBe(true);
-    expect(entryMatchesSection(todo, statusFilter, ctx)).toBe(false);
-    expect(entryMatchesSection(noStatus, statusFilter, ctx)).toBe(false);
-    expect(entryMatchesSection(channelEntry(1), statusFilter, ctx)).toBe(false);
-  });
-
-  it("FIR-1917 — status filters work on All messages and support is not", () => {
-    const done = notifEntry(1, { issue_status: "done" });
-    const todo = notifEntry(1, { issue_status: "todo" });
-    const allNotDone = {
-      id: "s",
-      kind: "all" as const,
-      filters: [{ field: "status" as const, statusValues: ["done" as const], negate: true }],
-    };
-
-    expect(entryMatchesSection(done, allNotDone, ctx)).toBe(false);
-    expect(entryMatchesSection(todo, allNotDone, ctx)).toBe(true);
-    expect(entryMatchesSection(channelEntry(1), allNotDone, ctx)).toBe(true);
-  });
-
-  it("FIR-1917 — an empty status condition is a no-op", () => {
-    const emptyStatus = {
-      id: "s",
-      kind: "filter" as const,
-      filters: [{ field: "status" as const, statusValues: [] }],
-    };
-    const negatedEmptyStatus = {
-      id: "s",
-      kind: "filter" as const,
-      filters: [{ field: "status" as const, statusValues: [], negate: true }],
-    };
-
-    expect(entryMatchesSection(notifEntry(1, { issue_status: "done" }), emptyStatus, ctx)).toBe(true);
-    expect(entryMatchesSection(channelEntry(1), emptyStatus, ctx)).toBe(true);
-    expect(entryMatchesSection(notifEntry(1, { issue_status: "done" }), negatedEmptyStatus, ctx)).toBe(true);
-  });
-
   it("FIR-1731 — match 'any' ORs the conditions; default 'all' ANDs them", () => {
     const unreadOnly = notifEntry(1, { read: false, issue_id: "other" });
     const pinnedOnly = notifEntry(1, { read: true, issue_id: "pinned-iss" });
@@ -417,6 +368,11 @@ describe("section-filter", () => {
 });
 
 describe("layout", () => {
+  it("offers Rounds as an optional section without adding it to the default inbox", () => {
+    expect(SECTION_CATALOG).toContainEqual({ kind: "rounds", label: "Rounds" });
+    expect(operatorPreset().tabs.flatMap((tab) => tab.sections).some((section) => section.kind === "rounds")).toBe(false);
+  });
+
   it("operator preset is a valid layout", () => {
     expect(isValidLayout(operatorPreset())).toBe(true);
   });

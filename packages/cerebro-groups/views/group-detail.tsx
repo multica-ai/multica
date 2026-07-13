@@ -16,6 +16,7 @@ import {
   ArrowLeft,
   Bot,
   Cpu,
+  KeyRound,
   Plus,
   Trash2,
   UserPlus,
@@ -1066,6 +1067,48 @@ function AgentsSection({
   );
 }
 
+// FIR-3091 slice 2 — the four group capabilities are a boolean-grant system
+// (present/absent), separate from the tool-policy chain. We render them in the
+// same catalog card skin used by the Permissions section below, so the Groups
+// page shows one consistent card design instead of a switch-stripe stacked on
+// top of the card catalog. A Switch stays the correct control for a grant
+// (there is no allow/ask/deny verdict here).
+const GROUP_CAPABILITIES: {
+  key: string;
+  label: string;
+  tooltip: string;
+  testId: string;
+}[] = [
+  {
+    key: "create_runtime",
+    label: "Create runtimes",
+    tooltip:
+      "Members of this group can create their own runtimes. They automatically get access to runtimes they created themselves, regardless of other group permissions.",
+    testId: "capability-create-runtime",
+  },
+  {
+    key: "create_agent",
+    label: "Create agents",
+    tooltip:
+      "Members of this group can create their own agents. They automatically get access to agents they created themselves, regardless of other group permissions.",
+    testId: "capability-create-agent",
+  },
+  {
+    key: "create_shared_filters",
+    label: "Create shared filters",
+    tooltip:
+      "Members of this group can save issue filters and share them with colleagues, groups or the whole team. Everyone can always create personal filters; this only controls sharing.",
+    testId: "capability-create-shared-filters",
+  },
+  {
+    key: "create_memory",
+    label: "Create memory",
+    tooltip:
+      "Members of this group can use agent & member memory: enable it on an agent for themselves and write memories. Default deny — without this, memory stays read-only company context at most. Requires the workspace memory switch to be on.",
+    testId: "capability-create-memory",
+  },
+];
+
 function CapabilitiesSection({
   groupId,
   isAdmin,
@@ -1081,6 +1124,7 @@ function CapabilitiesSection({
   const revoke = useRemoveCerebroGroupCapability(groupId);
 
   const has = (cap: string) => rows.some((r) => r.capability === cap);
+  const pending = grant.isPending || revoke.isPending;
 
   const onToggle = async (cap: string, next: boolean) => {
     try {
@@ -1098,45 +1142,31 @@ function CapabilitiesSection({
 
   return (
     <section
-      className="rounded-md border border-border"
+      className="overflow-hidden rounded-xl border bg-background shadow-sm"
       data-testid="capabilities-section"
     >
-      <header className="border-b border-border px-4 py-3 text-sm font-medium">
-        Capabilities
+      <header className="flex flex-wrap items-center justify-between gap-3 border-b bg-muted/40 px-4 py-3">
+        <div className="flex items-center gap-2 text-sm font-semibold">
+          <KeyRound className="size-[15px] text-muted-foreground" />
+          Capabilities
+          <span className="font-mono text-[11px] font-normal text-muted-foreground">
+            {GROUP_CAPABILITIES.length}{" "}
+            {GROUP_CAPABILITIES.length === 1 ? "capability" : "capabilities"}
+          </span>
+        </div>
       </header>
-      <div className="space-y-4 p-4">
-        <CapabilityRow
-          label="Create runtimes"
-          tooltip="Members of this group can create their own runtimes. They automatically get access to runtimes they created themselves, regardless of other group permissions."
-          checked={has("create_runtime")}
-          disabled={!isAdmin || grant.isPending || revoke.isPending}
-          onChange={(next) => onToggle("create_runtime", next)}
-          testId="capability-create-runtime"
-        />
-        <CapabilityRow
-          label="Create agents"
-          tooltip="Members of this group can create their own agents. They automatically get access to agents they created themselves, regardless of other group permissions."
-          checked={has("create_agent")}
-          disabled={!isAdmin || grant.isPending || revoke.isPending}
-          onChange={(next) => onToggle("create_agent", next)}
-          testId="capability-create-agent"
-        />
-        <CapabilityRow
-          label="Create shared filters"
-          tooltip="Members of this group can save issue filters and share them with colleagues, groups or the whole team. Everyone can always create personal filters; this only controls sharing."
-          checked={has("create_shared_filters")}
-          disabled={!isAdmin || grant.isPending || revoke.isPending}
-          onChange={(next) => onToggle("create_shared_filters", next)}
-          testId="capability-create-shared-filters"
-        />
-        <CapabilityRow
-          label="Create memory"
-          tooltip="Members of this group can use agent & member memory: enable it on an agent for themselves and write memories. Default deny — without this, memory stays read-only company context at most. Requires the workspace memory switch to be on."
-          checked={has("create_memory")}
-          disabled={!isAdmin || grant.isPending || revoke.isPending}
-          onChange={(next) => onToggle("create_memory", next)}
-          testId="capability-create-memory"
-        />
+      <div>
+        {GROUP_CAPABILITIES.map((cap) => (
+          <CapabilityRow
+            key={cap.key}
+            label={cap.label}
+            tooltip={cap.tooltip}
+            checked={has(cap.key)}
+            disabled={!isAdmin || pending}
+            onChange={(next) => onToggle(cap.key, next)}
+            testId={cap.testId}
+          />
+        ))}
       </div>
     </section>
   );
@@ -1158,30 +1188,32 @@ function CapabilityRow({
   testId: string;
 }) {
   return (
-    <div className="flex items-start justify-between gap-4">
-      <div className="min-w-0 flex-1">
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <button
-                type="button"
-                className="cursor-help text-left text-sm font-medium"
-                data-testid={testId}
-              >
-                {label}
-              </button>
-            }
-          />
-          <TooltipContent>{tooltip}</TooltipContent>
-        </Tooltip>
-        <p className="mt-0.5 text-xs text-muted-foreground">{tooltip}</p>
+    <div className="border-t first:border-t-0">
+      <div className="flex items-start justify-between gap-4 px-4 py-3">
+        <div className="min-w-0 flex-1">
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <button
+                  type="button"
+                  className="cursor-help text-left text-sm font-medium"
+                  data-testid={testId}
+                >
+                  {label}
+                </button>
+              }
+            />
+            <TooltipContent>{tooltip}</TooltipContent>
+          </Tooltip>
+          <p className="mt-0.5 text-xs text-muted-foreground">{tooltip}</p>
+        </div>
+        <Switch
+          checked={checked}
+          disabled={disabled}
+          onCheckedChange={onChange}
+          aria-label={label}
+        />
       </div>
-      <Switch
-        checked={checked}
-        disabled={disabled}
-        onCheckedChange={onChange}
-        aria-label={label}
-      />
     </div>
   );
 }

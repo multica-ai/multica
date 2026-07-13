@@ -26,11 +26,8 @@ class HviskeModel(ABC):
         self,
         audio_bytes: bytes,
         language: str | None = None,
-        glossary: str | None = None,
     ) -> str:
-        """Decode `audio_bytes` (any ffmpeg-readable container) and return the
-        transcribed text. `glossary` is an optional list of domain terms (comma
-        separated) used to bias decoding toward proper nouns / brand names."""
+        """Decode `audio_bytes` and return the transcribed text."""
 
     def close(self) -> None:
         return None
@@ -58,10 +55,8 @@ class MockHviskeModel(HviskeModel):
         self,
         audio_bytes: bytes,
         language: str | None = None,
-        glossary: str | None = None,
     ) -> str:
-        suffix = " +glossary" if glossary else ""
-        return f"(mock transcription, {len(audio_bytes)} bytes{suffix})"
+        return f"(mock transcription, {len(audio_bytes)} bytes)"
 
 
 class RealHviskeModel(HviskeModel):
@@ -111,64 +106,24 @@ class RealHviskeModel(HviskeModel):
         self,
         audio_bytes: bytes,
         language: str | None = None,
-        glossary: str | None = None,
     ) -> str:
         assert self._pipe is not None
         generate_kwargs = {
             "language": language or self.default_language,
             "task": "transcribe",
         }
-        prompt_ids = self._build_prompt_ids(glossary)
-        if prompt_ids is not None:
-            generate_kwargs["prompt_ids"] = prompt_ids
         with tempfile.NamedTemporaryFile(suffix=".audio", delete=False) as f:
             f.write(audio_bytes)
             path = f.name
         try:
-            try:
-                out = self._pipe(
-                    path,
-                    generate_kwargs=generate_kwargs,
-                    chunk_length_s=self.settings.hviske_chunk_length_s,
-                )
-            except Exception:
-                # Glossary biasing (prompt_ids) is the only optional input, and
-                # Whisper's prompt+long-form-chunking combo is brittle across
-                # transformers versions. Never let it break a transcription:
-                # drop the bias and retry the proven path once.
-                if "prompt_ids" not in generate_kwargs:
-                    raise
-                log.warning(
-                    "hviske transcribe with glossary failed; retrying unbiased",
-                    exc_info=True,
-                )
-                generate_kwargs.pop("prompt_ids", None)
-                out = self._pipe(
-                    path,
-                    generate_kwargs=generate_kwargs,
-                    chunk_length_s=self.settings.hviske_chunk_length_s,
-                )
+            out = self._pipe(
+                path,
+                generate_kwargs=generate_kwargs,
+                chunk_length_s=self.settings.hviske_chunk_length_s,
+            )
         finally:
             os.unlink(path)
         return (out.get("text") or "").strip()
-
-    def _build_prompt_ids(self, glossary: str | None):
-        """Turn a glossary string into Whisper `prompt_ids` that bias decoding
-        toward those terms. Returns None (no bias) for an empty glossary or if
-        the tokenizer cannot build the prompt — transcription must never depend
-        on this succeeding."""
-        if not glossary or not glossary.strip():
-            return None
-        try:
-            tokenizer = self._pipe.tokenizer
-            prompt_ids = tokenizer.get_prompt_ids(glossary.strip(), return_tensors="pt")
-            device = getattr(self._pipe.model, "device", None)
-            if device is not None:
-                prompt_ids = prompt_ids.to(device)
-            return prompt_ids
-        except Exception:
-            log.warning("hviske glossary prompt build failed; ignoring", exc_info=True)
-            return None
 
     def close(self) -> None:
         # Drop the reference so torch frees the weights at GC.

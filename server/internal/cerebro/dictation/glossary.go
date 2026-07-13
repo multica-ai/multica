@@ -9,18 +9,14 @@ import (
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
-// maxGlossaryTerms caps the auto-glossary so the combined Whisper prompt stays
-// within its ~224-token budget (the prompt also carries the language hint and
-// any manual terms).
-const maxGlossaryTerms = 64
+const (
+	maxWorkspaceGlossaryTerms = 64
+	maxGlossaryTerms          = 328
+)
 
-// workspaceGlossary assembles a decoding-bias glossary from the workspace's own
-// business objects — agent, squad, project and teammate names — so dictation
-// spells the proper nouns people actually say correctly, without anyone
-// maintaining a list. This mirrors how the meeting app auto-discovers the
-// attendee names + meeting title and feeds them to Whisper. Best-effort: a
-// failing source is logged and skipped, never fatal, because the glossary must
-// never break a transcription.
+// workspaceGlossary returns bounded correction candidates from the current
+// workspace. These terms are used after transcription; they must never be fed
+// into Whisper's audio decoder.
 func (h *Handler) workspaceGlossary(ctx context.Context, workspaceID string) string {
 	if h.queries == nil {
 		return ""
@@ -30,78 +26,68 @@ func (h *Handler) workspaceGlossary(ctx context.Context, workspaceID string) str
 		return ""
 	}
 
+	terms := make([]string, 0, maxWorkspaceGlossaryTerms)
 	seen := map[string]struct{}{}
-	terms := make([]string, 0, maxGlossaryTerms)
-	add := func(name string) {
-		name = strings.TrimSpace(name)
-		if name == "" || len(terms) >= maxGlossaryTerms {
+	add := func(value string) {
+		value = strings.TrimSpace(value)
+		key := strings.ToLower(value)
+		if value == "" || len(terms) >= maxWorkspaceGlossaryTerms {
 			return
 		}
-		key := strings.ToLower(name)
-		if _, ok := seen[key]; ok {
+		if _, exists := seen[key]; exists {
 			return
 		}
 		seen[key] = struct{}{}
-		terms = append(terms, name)
+		terms = append(terms, value)
 	}
 
-	// Order encodes priority: the highest-value, lowest-cardinality proper nouns
-	// first, so the cap drops the long tail (teammates) rather than agents or
-	// projects.
 	if agents, err := h.queries.ListAgents(ctx, wsUUID); err != nil {
 		slog.Debug("dictation glossary: list agents failed", "error", err)
 	} else {
-		for _, a := range agents {
-			add(a.Name)
+		for _, agent := range agents {
+			add(agent.Name)
 		}
 	}
 	if squads, err := h.queries.ListSquads(ctx, wsUUID); err != nil {
 		slog.Debug("dictation glossary: list squads failed", "error", err)
 	} else {
-		for _, s := range squads {
-			add(s.Name)
+		for _, squad := range squads {
+			add(squad.Name)
 		}
 	}
 	if projects, err := h.queries.ListProjects(ctx, db.ListProjectsParams{WorkspaceID: wsUUID}); err != nil {
 		slog.Debug("dictation glossary: list projects failed", "error", err)
 	} else {
-		for _, p := range projects {
-			add(p.Title)
+		for _, project := range projects {
+			add(project.Title)
 		}
 	}
 	if members, err := h.queries.ListMembersWithUser(ctx, wsUUID); err != nil {
 		slog.Debug("dictation glossary: list members failed", "error", err)
 	} else {
-		for _, m := range members {
-			add(m.UserName)
+		for _, member := range members {
+			add(member.UserName)
 		}
 	}
-
 	return strings.Join(terms, ", ")
 }
 
-// mergeGlossary combines the user's manual terms with the auto-glossary,
-// deduping case-insensitively. Manual terms come first — the user explicitly
-// cared about them — and the comma-separated result is what the inference
-// service receives as the decoding hint.
-func mergeGlossary(manual, auto string) string {
+func mergeGlossary(inputs ...string) string {
+	terms := make([]string, 0, maxGlossaryTerms)
 	seen := map[string]struct{}{}
-	parts := []string{}
-	addAll := func(s string) {
-		for _, t := range strings.Split(s, ",") {
-			t = strings.TrimSpace(t)
-			if t == "" {
+	for _, input := range inputs {
+		for _, raw := range strings.Split(input, ",") {
+			term := strings.TrimSpace(raw)
+			key := strings.ToLower(term)
+			if term == "" || len(terms) >= maxGlossaryTerms {
 				continue
 			}
-			key := strings.ToLower(t)
-			if _, ok := seen[key]; ok {
+			if _, exists := seen[key]; exists {
 				continue
 			}
 			seen[key] = struct{}{}
-			parts = append(parts, t)
+			terms = append(terms, term)
 		}
 	}
-	addAll(manual)
-	addAll(auto)
-	return strings.Join(parts, ", ")
+	return strings.Join(terms, ", ")
 }

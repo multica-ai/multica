@@ -118,6 +118,18 @@ func (m *Module) BuildMCPConfigForActor(ctx context.Context, workspaceID, runtim
 	})
 }
 
+// MCPServerEntryForActor builds one relay entry with the claim actor embedded
+// in its bearer token. The unified connection resolver uses this at claim time;
+// using Module directly would mint the legacy workspace-only token.
+func (m *Module) MCPServerEntryForActor(c connections.Connection, runtimeID, agentID, ownerID, initiatorID pgtype.UUID) map[string]any {
+	return connections.MCPServerEntry(c, actorRewriter{
+		mod: m,
+		actor: ConnActor{
+			RuntimeID: runtimeID, AgentID: agentID, OwnerID: ownerID, OnBehalfOfID: initiatorID,
+		},
+	})
+}
+
 // actorRewriter is a per-claim connections.MCPURLRewriter that mints
 // actor-scoped relay tokens. It exists so BuildMCPConfigForActor can thread the
 // claim's actor into the token without changing the shared MCPURLRewriter

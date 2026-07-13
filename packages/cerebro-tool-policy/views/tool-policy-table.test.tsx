@@ -1396,6 +1396,7 @@ describe("silent-failure feedback (FIR-2706 follow-up)", () => {
         decided_by: "user",
         capped_by: "user",
         reason: "Capped by user",
+        openable: false,
         ...effective,
       },
       capped_by_groups: [],
@@ -1453,6 +1454,44 @@ describe("silent-failure feedback (FIR-2706 follow-up)", () => {
           "ask",
         ),
       ).toBeNull();
+    });
+
+    // FIR-3091 punkt 1: a Group Allow on an openable workspace Deny actually opens
+    // it, so there must be NO false "no effect" warning.
+    it("is silent when a Group opens an openable workspace Deny", () => {
+      const row = cappedRow(
+        { setting: "deny", decided_by: "workspace", capped_by: "", openable: true },
+        {
+          layers: {
+            workspace: "deny",
+            runtime: null,
+            agent: null,
+            group: null,
+            user: null,
+            system: null,
+          },
+        },
+      );
+      expect(futileWriteWarning(row, "group", "allow")).toBeNull();
+    });
+
+    // A workspace Disable is a real, unopenable floor — the warning must still fire.
+    it("still warns when the workspace layer is Disable", () => {
+      const row = cappedRow(
+        { setting: "deny", decided_by: "workspace", capped_by: "", openable: true },
+        {
+          layers: {
+            workspace: "disable",
+            runtime: null,
+            agent: null,
+            group: null,
+            user: null,
+            system: null,
+          },
+        },
+      );
+      const msg = futileWriteWarning(row, "group", "allow");
+      expect(msg).not.toBeNull();
     });
   });
 

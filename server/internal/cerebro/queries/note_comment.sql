@@ -88,3 +88,14 @@ WHERE note_id = $1 AND sent_to_agent_at IS NULL;
 SELECT * FROM cerebro_note_comment
 WHERE note_id = $1 AND sent_to_agent_at IS NULL
 ORDER BY created_at ASC, id ASC;
+
+-- name: SetNoteCommentIssue :one
+-- FIR-3102 — attach (or detach with NULL) a comment's OWN issue. The "Create
+-- issue from this comment" flow points the comment at the issue it spawned, so
+-- the note UI can show "opened <issue>" on that exact comment. NULL detaches,
+-- letting the comment fall back to the note's overarching issue.
+UPDATE cerebro_note_comment
+SET issue_id   = sqlc.narg(issue_id),
+    updated_at = now()
+WHERE id = sqlc.arg(id)
+RETURNING *;

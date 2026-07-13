@@ -10,6 +10,8 @@ import { useWorkspaceId } from "@multica/core/hooks";
 
 export const cerebroAccountKeys = {
   all: (wsId: string) => ["cerebro-accounts", wsId] as const,
+  usageHistory: (wsId: string, accountId: string) =>
+    ["cerebro-accounts", wsId, "usage-history", accountId] as const,
 };
 
 export function cerebroAccountsListOptions(wsId: string) {
@@ -41,6 +43,19 @@ export function useCerebroAccount(
     account: accounts.find((a) => a.id === accountId) ?? null,
     isLoading: false,
   };
+}
+
+/**
+ * Hourly token-usage buckets for one account over the last 7 days
+ * (FIR-3118). Backs the account detail page chart.
+ */
+export function useCerebroAccountUsageHistory(accountId: string) {
+  const wsId = useWorkspaceId();
+  return useQuery({
+    queryKey: cerebroAccountKeys.usageHistory(wsId, accountId),
+    queryFn: () => api.getCerebroAccountUsageHistory(wsId, accountId),
+    enabled: Boolean(wsId) && Boolean(accountId),
+  });
 }
 
 export function useCreateCerebroAccount() {

@@ -121,7 +121,10 @@ export function InboxDetailLabel({ item }: { item: InboxItem }) {
       return <span>{typeLabels[item.type]}</span>;
     }
     case "reaction_added": {
+      // CEREBRO-PATCH(inbox-reaction-label-actor): FIR-2954 — reactor name + emoji, bold, in the mention/label slot ("Mads Reacted with 👍").
       const emoji = details.emoji;
+      const reactor = item.actor_id ? getActorName(item.actor_type ?? "member", item.actor_id) : "";
+      if (emoji && reactor) return <span className="font-semibold">{reactor} Reacted with {emoji}</span>;
       if (emoji) return <span>{t(($) => $.labels.reacted_to_comment, { emoji })}</span>;
       return <span>{typeLabels[item.type]}</span>;
     }

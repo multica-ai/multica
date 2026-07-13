@@ -15,7 +15,7 @@ import (
 )
 
 // newAudioRequest builds a multipart `file` POST the Transcribe handler accepts.
-func newAudioRequest(t *testing.T, token string) *http.Request {
+func newAudioRequest(t *testing.T, token string, glossary ...string) *http.Request {
 	t.Helper()
 	var body bytes.Buffer
 	mw := multipart.NewWriter(&body)
@@ -25,6 +25,9 @@ func newAudioRequest(t *testing.T, token string) *http.Request {
 	}
 	_, _ = part.Write([]byte("fake-audio-bytes"))
 	_ = mw.WriteField("language", "da")
+	if len(glossary) > 0 {
+		_ = mw.WriteField("glossary", glossary[0])
+	}
 	if err := mw.Close(); err != nil {
 		t.Fatalf("close multipart: %v", err)
 	}
@@ -34,6 +37,42 @@ func newAudioRequest(t *testing.T, token string) *http.Request {
 	req.Header.Set("Authorization", "Bearer "+token)
 	ctx := middleware.SetMemberContext(req.Context(), testWorkspaceID, db.Member{})
 	return req.WithContext(ctx)
+}
+
+// TestTranscribeBuildsCorrectionGlossary verifies that manual and automatic
+// terms reach the inference service as post-transcription correction candidates.
+// The inference service owns the separate invariant that these terms never bias
+// audio decoding.
+func TestTranscribeBuildsCorrectionGlossary(t *testing.T) {
+	t.Setenv(envBusinessObjectsBQProject, "")
+	tokenString := signedTestToken(t, testUserID)
+
+	receivedGlossary := make(chan string, 1)
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedGlossary <- r.FormValue("glossary")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"text":"dette er en test","language":"da"}`)
+	}))
+	defer upstream.Close()
+
+	queries, database := newCountingMemberQueries(testUserID, testWorkspaceID)
+	handler := New(Options{
+		TranscribeURL: upstream.URL,
+		Queries:       queries,
+	})
+
+	rec := httptest.NewRecorder()
+	handler.Transcribe(rec, newAudioRequest(t, tokenString, "Helsebixen"))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	if got := <-receivedGlossary; got != "Helsebixen" {
+		t.Fatalf("upstream glossary = %q, want only the explicit user glossary", got)
+	}
+	if got := database.queryCalls.Load(); got == 0 {
+		t.Fatal("automatic glossary did not query workspace business objects")
+	}
 }
 
 // TestTranscribeRetriesColdStart proves the cold-start fix (Jesper, FIR-1637):

@@ -362,4 +362,27 @@ describe("GroupDetailView", () => {
       screen.getByText(/automatically get access to agents/i),
     ).toBeInTheDocument();
   });
+
+  // FIR-3091 slice 2 — the capabilities section must share the catalog card
+  // skin (rounded-xl + shadow-sm), not the old rounded-md box, so the Groups
+  // page shows one consistent card design instead of switch-stripe + cards.
+  it("renders group capabilities in the catalog card design", async () => {
+    renderDetail();
+    const section = await screen.findByTestId("capabilities-section");
+    expect(section.className).toContain("rounded-xl");
+    expect(section.className).toContain("shadow-sm");
+    expect(section.className).not.toContain("rounded-md");
+
+    // All four boolean capabilities still render, each with a Switch control
+    // (the correct control for a grant — not an allow/ask/deny verdict pill).
+    for (const testId of [
+      "capability-create-runtime",
+      "capability-create-agent",
+      "capability-create-shared-filters",
+      "capability-create-memory",
+    ]) {
+      expect(screen.getByTestId(testId)).toBeInTheDocument();
+    }
+    expect(screen.getAllByRole("switch")).toHaveLength(4);
+  });
 });

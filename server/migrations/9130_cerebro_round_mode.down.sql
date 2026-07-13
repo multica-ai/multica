@@ -1,0 +1,1 @@
+ALTER TABLE cerebro_round DROP COLUMN IF EXISTS mode;

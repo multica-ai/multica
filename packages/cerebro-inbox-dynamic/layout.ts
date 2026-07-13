@@ -6,9 +6,6 @@
 // server-synced user.preferences blob (see use-inbox-layout.ts), with an
 // optional separate layout for the mobile/PWA view.
 
-// FIR-1917 — issue status multi-select filter needs the IssueStatus type.
-import type { IssueStatus } from "@multica/core/types/issue";
-
 // TECH-3413 #5 / TECH-3502 #3 — one condition in the filter builder. Most
 // predicates are pure booleans; `project` needs a projectId (and may include
 // its sub-projects); `kind` needs an entryKind.
@@ -20,9 +17,7 @@ export type FilterField =
   | "muted"
   | "running"
   | "kind"
-  | "project"
-  // FIR-1917 — issue status multi-select (matches issue_status on InboxItem).
-  | "status";
+  | "project";
 
 /** TECH-3502 #3 — narrow a "kind" condition to one row type. */
 export type EntryKindFilter = "issue" | "chat" | "channel";
@@ -38,9 +33,6 @@ export interface FilterCondition {
   includeSubprojects?: boolean;
   /** Required when field === "kind". */
   entryKind?: EntryKindFilter;
-  // FIR-1917 — field === "status": which statuses to match (multi-select).
-  // Empty / absent = incomplete condition (no-op).
-  statusValues?: IssueStatus[];
   // FIR-1731 — negate this condition: match rows that do NOT satisfy the
   // predicate (e.g. "exclude project X", "not unread"). Optional and defaults
   // to false, so layouts saved before negation existed parse unchanged. Applies
@@ -81,7 +73,8 @@ export type SectionKind =
   // sort, group-by-type) instead of the full-screen ⋯ → "Show archived" view.
   // Rendered by a dedicated component (ArchivedInboxBlock) over its own archived
   // queries, like the Chat block — not a slice of the live merged feed.
-  | "archived";
+  | "archived"
+  | "rounds";
 
 /** How rows inside a section are grouped under sub-headers. TECH-3541 #2 —
  *  widened to the full classic-inbox set (project / agent / type) so the "All
@@ -268,6 +261,7 @@ export const SECTION_CATALOG: SectionCatalogEntry[] = [
   { kind: "secretary", label: "Secretary" },
   // FIR-1645 — Archived: always available in the dynamic inbox (no extra flag).
   { kind: "archived", label: "Archived" },
+  { kind: "rounds", label: "Rounds" },
 ];
 
 export function sectionLabel(section: InboxSectionConfig): string {

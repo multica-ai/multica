@@ -37,6 +37,97 @@ func (q *Queries) DeleteCerebroToolPolicy(ctx context.Context, arg DeleteCerebro
 	return err
 }
 
+const getCerebroToolPolicySetting = `-- name: GetCerebroToolPolicySetting :one
+SELECT setting
+FROM cerebro_tool_policy
+WHERE workspace_id = $1 AND tool_key = $2 AND layer = $3 AND subject_id = $4 AND resource_pattern = $5
+`
+
+type GetCerebroToolPolicySettingParams struct {
+	WorkspaceID     pgtype.UUID `json:"workspace_id"`
+	ToolKey         string      `json:"tool_key"`
+	Layer           string      `json:"layer"`
+	SubjectID       pgtype.UUID `json:"subject_id"`
+	ResourcePattern string      `json:"resource_pattern"`
+}
+
+// The current explicit setting for one exact (tool, layer, subject,
+// resource_pattern) row, read just before a Set/Clear so the audit row can
+// record the old -> new transition (FIR-3091 punkt 8 fase 2). sql.ErrNoRows
+// means the layer held no explicit choice (Inherit).
+func (q *Queries) GetCerebroToolPolicySetting(ctx context.Context, arg GetCerebroToolPolicySettingParams) (string, error) {
+	row := q.db.QueryRow(ctx, getCerebroToolPolicySetting,
+		arg.WorkspaceID,
+		arg.ToolKey,
+		arg.Layer,
+		arg.SubjectID,
+		arg.ResourcePattern,
+	)
+	var setting string
+	err := row.Scan(&setting)
+	return setting, err
+}
+
+const listCerebroToolPolicyAuditForTool = `-- name: ListCerebroToolPolicyAuditForTool :many
+SELECT id, layer, subject_id, resource_pattern, action, old_setting, new_setting, actor_type, actor_id, created_at
+FROM cerebro_tool_policy_audit
+WHERE workspace_id = $1 AND tool_key = $2
+ORDER BY created_at DESC, id DESC
+LIMIT $3
+`
+
+type ListCerebroToolPolicyAuditForToolParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	ToolKey     string      `json:"tool_key"`
+	RowLimit    int32       `json:"row_limit"`
+}
+
+type ListCerebroToolPolicyAuditForToolRow struct {
+	ID              pgtype.UUID        `json:"id"`
+	Layer           string             `json:"layer"`
+	SubjectID       pgtype.UUID        `json:"subject_id"`
+	ResourcePattern string             `json:"resource_pattern"`
+	Action          string             `json:"action"`
+	OldSetting      string             `json:"old_setting"`
+	NewSetting      string             `json:"new_setting"`
+	ActorType       string             `json:"actor_type"`
+	ActorID         pgtype.UUID        `json:"actor_id"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+}
+
+// One tool's change history, newest first. Backs the "Changes" tab of the
+// per-permission detail page (FIR-3091 punkt 8 fase 2).
+func (q *Queries) ListCerebroToolPolicyAuditForTool(ctx context.Context, arg ListCerebroToolPolicyAuditForToolParams) ([]ListCerebroToolPolicyAuditForToolRow, error) {
+	rows, err := q.db.Query(ctx, listCerebroToolPolicyAuditForTool, arg.WorkspaceID, arg.ToolKey, arg.RowLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListCerebroToolPolicyAuditForToolRow{}
+	for rows.Next() {
+		var i ListCerebroToolPolicyAuditForToolRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Layer,
+			&i.SubjectID,
+			&i.ResourcePattern,
+			&i.Action,
+			&i.OldSetting,
+			&i.NewSetting,
+			&i.ActorType,
+			&i.ActorID,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listCerebroToolPolicyForContext = `-- name: ListCerebroToolPolicyForContext :many
 
 SELECT layer, subject_id, setting, conditions
@@ -187,6 +278,187 @@ func (q *Queries) ListCerebroToolPolicyForSubject(ctx context.Context, arg ListC
 		return nil, err
 	}
 	return items, nil
+}
+
+const listCerebroToolPolicyHolders = `-- name: ListCerebroToolPolicyHolders :many
+SELECT layer, subject_id, resource_pattern, setting, updated_by, updated_at
+FROM cerebro_tool_policy
+WHERE workspace_id = $1 AND tool_key = $2
+ORDER BY layer ASC, subject_id ASC, resource_pattern ASC
+`
+
+type ListCerebroToolPolicyHoldersParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	ToolKey     string      `json:"tool_key"`
+}
+
+type ListCerebroToolPolicyHoldersRow struct {
+	Layer           string             `json:"layer"`
+	SubjectID       pgtype.UUID        `json:"subject_id"`
+	ResourcePattern string             `json:"resource_pattern"`
+	Setting         string             `json:"setting"`
+	UpdatedBy       pgtype.UUID        `json:"updated_by"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+}
+
+// Every explicit setting for one tool across all layers and subjects in the
+// workspace — the reverse of ListCerebroToolPolicyForSubject. Backs the
+// per-permission detail page (FIR-3091 punkt 8): "who has this permission and
+// which layer grants it."
+func (q *Queries) ListCerebroToolPolicyHolders(ctx context.Context, arg ListCerebroToolPolicyHoldersParams) ([]ListCerebroToolPolicyHoldersRow, error) {
+	rows, err := q.db.Query(ctx, listCerebroToolPolicyHolders, arg.WorkspaceID, arg.ToolKey)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListCerebroToolPolicyHoldersRow{}
+	for rows.Next() {
+		var i ListCerebroToolPolicyHoldersRow
+		if err := rows.Scan(
+			&i.Layer,
+			&i.SubjectID,
+			&i.ResourcePattern,
+			&i.Setting,
+			&i.UpdatedBy,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listCerebroToolPolicyUsageForTool = `-- name: ListCerebroToolPolicyUsageForTool :many
+SELECT id, enforcement_point, subject_type, subject_id, resource, decision, decided_by, created_at
+FROM cerebro_tool_policy_usage
+WHERE workspace_id = $1 AND tool_key = $2
+ORDER BY created_at DESC, id DESC
+LIMIT $3
+`
+
+type ListCerebroToolPolicyUsageForToolParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	ToolKey     string      `json:"tool_key"`
+	RowLimit    int32       `json:"row_limit"`
+}
+
+type ListCerebroToolPolicyUsageForToolRow struct {
+	ID               pgtype.UUID        `json:"id"`
+	EnforcementPoint string             `json:"enforcement_point"`
+	SubjectType      string             `json:"subject_type"`
+	SubjectID        pgtype.UUID        `json:"subject_id"`
+	Resource         string             `json:"resource"`
+	Decision         string             `json:"decision"`
+	DecidedBy        string             `json:"decided_by"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+}
+
+// One tool's usage history, newest first. Backs the "Usage" tab of the
+// per-permission detail page (FIR-3091 punkt 8 fase 3).
+func (q *Queries) ListCerebroToolPolicyUsageForTool(ctx context.Context, arg ListCerebroToolPolicyUsageForToolParams) ([]ListCerebroToolPolicyUsageForToolRow, error) {
+	rows, err := q.db.Query(ctx, listCerebroToolPolicyUsageForTool, arg.WorkspaceID, arg.ToolKey, arg.RowLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListCerebroToolPolicyUsageForToolRow{}
+	for rows.Next() {
+		var i ListCerebroToolPolicyUsageForToolRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.EnforcementPoint,
+			&i.SubjectType,
+			&i.SubjectID,
+			&i.Resource,
+			&i.Decision,
+			&i.DecidedBy,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const recordCerebroToolPolicyAudit = `-- name: RecordCerebroToolPolicyAudit :exec
+INSERT INTO cerebro_tool_policy_audit (
+    workspace_id, tool_key, layer, subject_id, resource_pattern,
+    action, old_setting, new_setting, actor_type, actor_id
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+`
+
+type RecordCerebroToolPolicyAuditParams struct {
+	WorkspaceID     pgtype.UUID `json:"workspace_id"`
+	ToolKey         string      `json:"tool_key"`
+	Layer           string      `json:"layer"`
+	SubjectID       pgtype.UUID `json:"subject_id"`
+	ResourcePattern string      `json:"resource_pattern"`
+	Action          string      `json:"action"`
+	OldSetting      string      `json:"old_setting"`
+	NewSetting      string      `json:"new_setting"`
+	ActorType       string      `json:"actor_type"`
+	ActorID         pgtype.UUID `json:"actor_id"`
+}
+
+// Append one change-log row for a completed Set/Clear on cerebro_tool_policy
+// (FIR-3091 punkt 8 fase 2). The log is append-only; rows are never updated.
+func (q *Queries) RecordCerebroToolPolicyAudit(ctx context.Context, arg RecordCerebroToolPolicyAuditParams) error {
+	_, err := q.db.Exec(ctx, recordCerebroToolPolicyAudit,
+		arg.WorkspaceID,
+		arg.ToolKey,
+		arg.Layer,
+		arg.SubjectID,
+		arg.ResourcePattern,
+		arg.Action,
+		arg.OldSetting,
+		arg.NewSetting,
+		arg.ActorType,
+		arg.ActorID,
+	)
+	return err
+}
+
+const recordCerebroToolPolicyUsage = `-- name: RecordCerebroToolPolicyUsage :exec
+INSERT INTO cerebro_tool_policy_usage (
+    workspace_id, tool_key, enforcement_point, subject_type, subject_id,
+    resource, decision, decided_by
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+`
+
+type RecordCerebroToolPolicyUsageParams struct {
+	WorkspaceID      pgtype.UUID `json:"workspace_id"`
+	ToolKey          string      `json:"tool_key"`
+	EnforcementPoint string      `json:"enforcement_point"`
+	SubjectType      string      `json:"subject_type"`
+	SubjectID        pgtype.UUID `json:"subject_id"`
+	Resource         string      `json:"resource"`
+	Decision         string      `json:"decision"`
+	DecidedBy        string      `json:"decided_by"`
+}
+
+// Append one usage-log row after a permission decision was applied at an
+// enforcement point (FIR-3091 punkt 8 fase 3). The log is append-only; rows
+// are never updated.
+func (q *Queries) RecordCerebroToolPolicyUsage(ctx context.Context, arg RecordCerebroToolPolicyUsageParams) error {
+	_, err := q.db.Exec(ctx, recordCerebroToolPolicyUsage,
+		arg.WorkspaceID,
+		arg.ToolKey,
+		arg.EnforcementPoint,
+		arg.SubjectType,
+		arg.SubjectID,
+		arg.Resource,
+		arg.Decision,
+		arg.DecidedBy,
+	)
+	return err
 }
 
 const upsertCerebroToolPolicy = `-- name: UpsertCerebroToolPolicy :one

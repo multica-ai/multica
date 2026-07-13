@@ -116,13 +116,16 @@ func TestActivateForIssue_StartsPlanPhaseWithPlanModePrompt(t *testing.T) {
 	// GetIssue must return the real target issue so the issue-bound dispatch
 	// anchors comment + task on it.
 	fake.ParentIssue = db.Issue{ID: issueID, WorkspaceID: f.workspaceID, Title: "Plan me", Status: "todo"}
-	svc := &Service{queries: cq, issues: fake, enabled: true, sessionStamper: NewSessionPhaseStamper(pool)}
+	planDocs := NewPlanDocumentService(db.New(pool))
+	svc := (&Service{queries: cq, issues: fake, enabled: true, sessionStamper: NewSessionPhaseStamper(pool)}).WithPlanDocuments(planDocs)
 	h := NewHandler(cq).
 		WithService(svc).
+		WithPlanDocuments(planDocs).
 		WithIssueLoopColumns(cols).
 		WithIssueLoopCompiler(&planKickoffFakeCompiler{cq: cq, planSkill: "plan", planAgent: planAgent, planStatus: "todo"})
 
-	if err := h.ActivateForIssue(ctx, f.workspaceID, recipe.ID, issueID, f.userID, "member"); err != nil {
+	agentActorID := mustUUID("aaaaaaaa-1111-2222-3333-444444444444")
+	if err := h.ActivateForIssue(ctx, f.workspaceID, recipe.ID, issueID, agentActorID, f.userID, "agent"); err != nil {
 		t.Fatalf("activate for issue: %v", err)
 	}
 
@@ -168,6 +171,28 @@ func TestActivateForIssue_StartsPlanPhaseWithPlanModePrompt(t *testing.T) {
 	// And the agent it dispatched to is the recipe's build/plan agent.
 	if got := uuidString(fake.IssueTaskQueued.AgentID); got != planAgent {
 		t.Fatalf("plan dispatched to agent %s, want %s", got, planAgent)
+	}
+	artifacts, err := db.New(pool).ListArtifactsByIssue(ctx, db.ListArtifactsByIssueParams{
+		IssueID:     issueID,
+		WorkspaceID: f.workspaceID,
+	})
+	if err != nil {
+		t.Fatalf("list plan artifacts: %v", err)
+	}
+	if len(artifacts) != 1 {
+		t.Fatalf("plan artifact count = %d, want 1", len(artifacts))
+	}
+	if !strings.Contains(artifacts[0].Body, "Workflow activated. Plan phase is starting.") {
+		t.Fatalf("plan artifact missing activation status: %q", artifacts[0].Body)
+	}
+	if !strings.Contains(artifacts[0].Body, "Plan phase started. The agent is writing the plan.") {
+		t.Fatalf("plan artifact missing plan-start status: %q", artifacts[0].Body)
+	}
+	if artifacts[0].Kind != "plan" {
+		t.Fatalf("plan artifact kind = %q, want plan", artifacts[0].Kind)
+	}
+	if artifacts[0].RequesterUserID != f.userID {
+		t.Fatalf("plan artifact requester = %s, want member %s", uuidString(artifacts[0].RequesterUserID), uuidString(f.userID))
 	}
 }
 
@@ -225,7 +250,7 @@ func TestActivateForIssue_NonPlanningStartsBuildPhase(t *testing.T) {
 	compiler := &buildKickoffFakeCompiler{cq: cq, buildSkill: "build", buildAgent: buildAgent, buildStatus: "in_progress"}
 	h := NewHandler(cq).WithService(svc).WithIssueLoopColumns(cols).WithIssueLoopCompiler(compiler)
 
-	if err := h.ActivateForIssue(ctx, f.workspaceID, recipe.ID, issueID, f.userID, "member"); err != nil {
+	if err := h.ActivateForIssue(ctx, f.workspaceID, recipe.ID, issueID, f.userID, f.userID, "member"); err != nil {
 		t.Fatalf("activate for issue: %v", err)
 	}
 	if fake.TaskQueued.Context == nil {

@@ -23,6 +23,9 @@ import { MessageSpendTable } from "./components/message-spend-table";
 import { DashboardTabBar } from "./components/dashboard-tab-bar";
 import { useDashboardStore } from "../core/store";
 import { dashboardOverviewOptions } from "../core/queries";
+import { AnalyticsDashboard } from "./components/analytics-dashboard";
+import { RunsControlRoom } from "./components/runs-control-room";
+import { DEFAULT_ANALYTICS_VISUALS } from "../core/analytics";
 
 // Workspace operations dashboard. JEH-684. v2 — replaces the v1 placeholder
 // version with a single /api/cerebro/dashboard overview query that drives
@@ -38,7 +41,6 @@ export function DashboardPage() {
   const actorName = useDashboardStore((s) => s.actorName);
   const tab = useDashboardStore((s) => s.tab);
   const setActor = useDashboardStore((s) => s.setActor);
-
   const wsId = workspace?.id ?? "";
   const overview = useQuery(dashboardOverviewOptions(wsId, range, scope, actorId));
 
@@ -56,8 +58,8 @@ export function DashboardPage() {
 
   return (
     <div className="flex h-full flex-col">
-      <PageHeader className="justify-between gap-3">
-        <div className="flex min-w-0 items-center gap-3">
+      <PageHeader className="justify-start gap-3">
+        <div className="flex shrink-0 items-center gap-3">
           <div className="flex min-w-0 flex-col">
             <h1 className="text-sm font-semibold">Dashboard</h1>
             <p className="truncate text-[11px] text-muted-foreground">
@@ -68,7 +70,7 @@ export function DashboardPage() {
           </div>
           <DashboardTabBar />
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex shrink-0 items-center gap-2">
           {actorId && (
             <button
               type="button"
@@ -94,8 +96,10 @@ export function DashboardPage() {
             </p>
           )}
 
-          {tab === "issues" && (
+          {tab === "overview" && (
             <>
+              <AnalyticsDashboard workspaceId={workspace.id} initialVisuals={DEFAULT_ANALYTICS_VISUALS.filter((visual) => visual.id !== "runs")} />
+
               <section aria-label="KPIs">
                 <KpiCards
                   data={data}
@@ -133,6 +137,16 @@ export function DashboardPage() {
                   isLoading={overview.isLoading}
                   workspaceSlug={workspace.slug}
                 />
+              </section>
+            </>
+          )}
+
+          {tab === "runs" && (
+            <>
+              <RunsControlRoom workspaceId={workspace.id} />
+              <section aria-label="Custom visuals" className="space-y-2">
+                <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Custom visuals</h2>
+                <AnalyticsDashboard workspaceId={workspace.id} initialVisuals={[]} />
               </section>
             </>
           )}

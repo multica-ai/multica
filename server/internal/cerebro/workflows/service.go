@@ -58,11 +58,20 @@ type Service struct {
 	// TaskService) still badges the session when the run finishes. Wired via
 	// WithSessionStamper from main.go.
 	sessionStamper *SessionPhaseStamper
+
+	// planDocuments appends deterministic, human-readable workflow status to
+	// the issue's shared plan artifact. Optional and nil-safe.
+	planDocuments *PlanDocumentService
 }
 
 // WithSessionStamper plugs in the dispatch-time session badge writer.
 func (s *Service) WithSessionStamper(st *SessionPhaseStamper) *Service {
 	s.sessionStamper = st
+	return s
+}
+
+func (s *Service) WithPlanDocuments(pd *PlanDocumentService) *Service {
+	s.planDocuments = pd
 	return s
 }
 

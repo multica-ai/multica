@@ -47,6 +47,9 @@ type Handler struct {
 	issueLoopColumns *IssueLoopColumnStore
 	// loopCheckStore is optional and nil-safe: see issue_loop_state.go.
 	loopCheckStore LoopCheckStore
+	// planDocuments is optional and nil-safe: when wired, issue workflow
+	// activation maintains the shared plan artifact under Agents > Workflow.
+	planDocuments *PlanDocumentService
 	// issueLookup is optional and nil-safe: without it, the per-issue
 	// activation endpoints (FIR-2283 v2 point 8) are unavailable. Wired via
 	// WithIssueLookup from router.go — reuses the IssueLookup interface
@@ -70,6 +73,11 @@ func (h *Handler) WithIssueLookup(l IssueLookup) *Handler {
 // Returns the receiver for chainable init.
 func (h *Handler) WithIssueLoopColumns(s *IssueLoopColumnStore) *Handler {
 	h.issueLoopColumns = s
+	return h
+}
+
+func (h *Handler) WithPlanDocuments(s *PlanDocumentService) *Handler {
+	h.planDocuments = s
 	return h
 }
 
@@ -1154,7 +1162,7 @@ func (h *Handler) ApproveHumanCheck(w http.ResponseWriter, r *http.Request) {
 //
 // CEREBRO-PATCH(cerebro-workflows-activate-for-issue): FIR-2283 followup —
 // shared activation used by the CLI/API create-with-workflow path.
-func (h *Handler) ActivateForIssue(ctx context.Context, workspaceID, workflowID, issueID, creatorID pgtype.UUID, createdByType string) error {
+func (h *Handler) ActivateForIssue(ctx context.Context, workspaceID, workflowID, issueID, creatorID, requesterID pgtype.UUID, createdByType string) error {
 	if h.issueLoopColumns == nil || h.issueLoopCompiler == nil {
 		return fmt.Errorf("issue workflow activation is not wired on this server")
 	}
@@ -1174,6 +1182,20 @@ func (h *Handler) ActivateForIssue(ctx context.Context, workspaceID, workflowID,
 	}
 	if len(fields.LoopSpec) == 0 {
 		return fmt.Errorf("this recipe has no loop_spec to compile")
+	}
+	if h.planDocuments != nil {
+		if _, err := h.planDocuments.Ensure(ctx, PlanDocumentEnsureParams{
+			WorkspaceID:   workspaceID,
+			IssueID:       issueID,
+			WorkflowID:    row.ID,
+			WorkflowName:  row.Name,
+			AuthorID:      creatorID,
+			AuthorType:    createdByType,
+			RequesterID:   requesterID,
+			InitialStatus: "Workflow activated. Plan phase is starting.",
+		}); err != nil {
+			return fmt.Errorf("create workflow plan document: %w", err)
+		}
 	}
 	if err := h.issueLoopCompiler.ActivateOnIssue(ctx, workspaceID, row.ID, row.ProjectID, creatorID, issueID, createdByType, fields.LoopSpec); err != nil {
 		return err
@@ -1306,7 +1328,12 @@ func (h *Handler) ActivateWorkflow(w http.ResponseWriter, r *http.Request) {
 	}
 	// ActivateForIssue re-loads and validates the recipe (issue_loop + has a
 	// loop_spec); the earlier load here was redundant, so it is gone.
-	if err := h.ActivateForIssue(r.Context(), wsUUID, row.ID, issueID, creatorID, actorType(r)); err != nil {
+	requesterID, err := util.ParseUUID(userID)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid requester id")
+		return
+	}
+	if err := h.ActivateForIssue(r.Context(), wsUUID, row.ID, issueID, creatorID, requesterID, actorType(r)); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}

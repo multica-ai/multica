@@ -1,6 +1,26 @@
 {
   "http": [
     {
+      "id": "DELETE /api/analytics/visuals/{visualId}",
+      "gate": "workspace_member"
+    },
+    {
+      "id": "POST /api/analytics/backfill",
+      "gate": "workspace_admin"
+    },
+    {
+      "id": "POST /api/analytics/query",
+      "exempt": "read-only analytics query — resolves workspace-scoped aggregates without mutating data"
+    },
+    {
+      "id": "POST /api/analytics/visuals",
+      "gate": "workspace_member"
+    },
+    {
+      "id": "PUT /api/analytics/visuals/{visualId}",
+      "gate": "workspace_member"
+    },
+    {
       "id": "DELETE /api/agents/{id}/tool-grants",
       "gate": "workspace_admin"
     },
@@ -23,6 +43,10 @@
     {
       "id": "POST /api/agents/{id}/context/rollback",
       "gate": "agent_context_manage"
+    },
+    {
+      "id": "POST /api/agents/context/lint/repo-file",
+      "exempt": "read-only analysis — the POST only submits repo-file content to be linted against the harness; nothing is written"
     },
     {
       "id": "PUT /api/agents/{id}/context/ownership",
@@ -101,6 +125,34 @@
       "gate": "self_only"
     },
     {
+      "id": "DELETE /api/cerebro/rounds/{roundId}/",
+      "gate": "self_only"
+    },
+    {
+      "id": "DELETE /api/cerebro/rounds/{roundId}/members/{issueId}",
+      "gate": "self_only"
+    },
+    {
+      "id": "PATCH /api/cerebro/rounds/{roundId}/",
+      "gate": "self_only"
+    },
+    {
+      "id": "POST /api/cerebro/rounds/",
+      "gate": "workspace_member"
+    },
+    {
+      "id": "POST /api/cerebro/rounds/{roundId}/members",
+      "gate": "self_only"
+    },
+    {
+      "id": "POST /api/cerebro/rounds/{roundId}/dismiss",
+      "gate": "self_only"
+    },
+    {
+      "id": "POST /api/cerebro/rounds/{roundId}/start",
+      "gate": "self_only"
+    },
+    {
       "id": "DELETE /api/cerebro/saved-filters/{id}",
       "gate": "workspace_member"
     },
@@ -131,6 +183,10 @@
     {
       "id": "DELETE /api/cerebro/sprints/{sprintID}/",
       "gate": "via:DELETE /api/cerebro/sprints/{sprintID}/"
+    },
+    {
+      "id": "POST /api/cerebro/sprints/{sprintID}/complete",
+      "gate": "via:POST /api/cerebro/sprints/{sprintID}/complete"
     },
     {
       "id": "DELETE /api/cerebro/status-models/default",
@@ -321,7 +377,7 @@
       "gate": "workspace_owner"
     },
     {
-      "id": "DELETE /api/workspaces/{id}/accounts/{id}",
+      "id": "DELETE /api/workspaces/{id}/accounts/{accountID}",
       "gate": "workspace_admin"
     },
     {
@@ -449,7 +505,7 @@
       "gate": "workspace_admin"
     },
     {
-      "id": "PATCH /api/workspaces/{id}/accounts/{id}/controls",
+      "id": "PATCH /api/workspaces/{id}/accounts/{accountID}/controls",
       "gate": "workspace_member"
     },
     {
@@ -877,6 +933,10 @@
       "gate": "daemon_auth"
     },
     {
+      "id": "POST /api/daemon/tasks/{taskId}/skill-usage",
+      "gate": "daemon_auth"
+    },
+    {
       "id": "POST /api/daemon/tasks/{taskId}/start",
       "gate": "daemon_auth"
     },
@@ -1097,6 +1157,10 @@
       "gate": "workspace_member"
     },
     {
+      "id": "POST /api/notes/{id}/comments/{commentId}/create-issue",
+      "gate": "workspace_member"
+    },
+    {
       "id": "POST /api/notes/{id}/comments/{commentId}/resolve",
       "gate": "workspace_member"
     },
@@ -1215,6 +1279,10 @@
     {
       "id": "POST /api/skills/",
       "gate": "workspace_member"
+    },
+    {
+      "id": "POST /api/skills/{id}/auto-learn",
+      "gate": "skill_ownership"
     },
     {
       "id": "POST /api/skills/change-requests/{crId}/review",
@@ -1545,6 +1613,10 @@
       "gate": "workspace_member"
     },
     {
+      "id": "PUT /api/notes/{id}/author-codes",
+      "gate": "workspace_member"
+    },
+    {
       "id": "PUT /api/notes/{id}/comments/{commentId}",
       "gate": "workspace_member"
     },
@@ -1675,6 +1747,14 @@
   ],
   "mcp": [
     {
+      "id": "analytics_catalog",
+      "exempt": "read-only — wraps GET /api/analytics/catalog"
+    },
+    {
+      "id": "analytics_query",
+      "exempt": "read-only — wraps POST /api/analytics/query, which only resolves workspace-scoped aggregates"
+    },
+    {
       "id": "add_attachment",
       "gate": "via:POST /api/upload-file"
     },
@@ -1751,6 +1831,10 @@
       "exempt": "read-only — wraps GET /api/agents/{id}/context/diff, no mutation"
     },
     {
+      "id": "agent_context_lint",
+      "exempt": "read-only — lint analysis over GET /api/agents/{id}/context/lint, GET /api/agents/context/lint, and POST /api/agents/context/lint/repo-file (the POST only submits file content for analysis; nothing is written)"
+    },
+    {
       "id": "agent_context_propose",
       "gate": "via:POST /api/agents/{id}/context/change-requests"
     },
@@ -1783,6 +1867,10 @@
       "gate": "via:POST /api/cerebro/wakeups/{id}/cancel"
     },
     {
+      "id": "activate_workflow",
+      "gate": "via:POST /api/cerebro/workflows/{id}/activate"
+    },
+    {
       "id": "complete_work",
       "gate": "via:PUT /api/work-sessions/{id}/complete"
     },
@@ -1799,6 +1887,10 @@
       "gate": "via:POST /api/workspaces/{id}/connections"
     },
     {
+      "id": "create_workflow",
+      "gate": "via:POST /api/cerebro/workflows"
+    },
+    {
       "id": "create_group",
       "gate": "via:POST /api/workspaces/{id}/groups"
     },
@@ -1807,20 +1899,44 @@
       "gate": "via:DELETE /api/workspaces/{id}/connections/{connId}"
     },
     {
+      "id": "delete_workflow",
+      "gate": "via:DELETE /api/cerebro/workflows/{id}"
+    },
+    {
       "id": "get_connection",
       "exempt": "read-only — wraps GET /api/workspaces/{id}/connections/{connId}"
+    },
+    {
+      "id": "get_active_workflow",
+      "exempt": "read-only — wraps GET /api/cerebro/workflows/for-issue/{issueId}"
+    },
+    {
+      "id": "get_workflow",
+      "exempt": "read-only — wraps GET /api/cerebro/workflows/{id}"
     },
     {
       "id": "list_connections",
       "exempt": "read-only — wraps GET /api/workspaces/{id}/connections"
     },
     {
+      "id": "list_workflows",
+      "exempt": "read-only — wraps GET /api/cerebro/workflows"
+    },
+    {
       "id": "test_connection",
       "gate": "via:POST /api/workspaces/{id}/connections/test"
     },
     {
+      "id": "toggle_workflow",
+      "gate": "via:POST /api/cerebro/workflows/{id}/toggle"
+    },
+    {
       "id": "update_connection",
       "gate": "via:PUT /api/workspaces/{id}/connections/{connId}"
+    },
+    {
+      "id": "update_workflow",
+      "gate": "via:PUT /api/cerebro/workflows/{id}"
     },
     {
       "id": "create_issue",
@@ -1995,6 +2111,10 @@
       "exempt": "read-only — GET /api/skills/audit, no mutation"
     },
     {
+      "id": "skill_diff",
+      "exempt": "read-only — renders a diff from GET /api/skills/{id}/versions, no mutation"
+    },
+    {
       "id": "skill_fork",
       "gate": "via:POST /api/skills/{id}/forks"
     },
@@ -2039,8 +2159,20 @@
       "gate": "via:POST /api/skill-observations"
     },
     {
+      "id": "skill_set_auto_learn",
+      "gate": "via:POST /api/skills/{id}/auto-learn"
+    },
+    {
       "id": "skill_review_change_request",
       "gate": "via:POST /api/skills/change-requests/{crId}/review"
+    },
+    {
+      "id": "skill_set_ownership",
+      "gate": "via:PUT /api/skills/{id}/ownership"
+    },
+    {
+      "id": "skill_update",
+      "gate": "via:PUT /api/skills/{id}"
     },
     {
       "id": "update_artifact",
@@ -2065,6 +2197,18 @@
   ],
   "cli": [
     {
+      "id": "analytics backfill",
+      "gate": "via:POST /api/analytics/backfill"
+    },
+    {
+      "id": "analytics catalog",
+      "exempt": "read-only — wraps GET /api/analytics/catalog"
+    },
+    {
+      "id": "analytics query",
+      "exempt": "read-only — wraps POST /api/analytics/query, which only resolves workspace-scoped aggregates"
+    },
+    {
       "id": "agent archive",
       "gate": "via:POST /api/agents/{id}/archive"
     },
@@ -2085,12 +2229,24 @@
       "exempt": "read-only — wraps GET /api/agents/{id}/context/diff"
     },
     {
+      "id": "agent context lint",
+      "exempt": "read-only — lint analysis over GET /api/agents/[{id}/]context/lint and POST /api/agents/context/lint/repo-file (the POST only submits file content for analysis; nothing is written)"
+    },
+    {
       "id": "agent context ownership",
       "gate": "via:PUT /api/agents/{id}/context/ownership"
     },
     {
       "id": "agent context propose",
       "gate": "via:POST /api/agents/{id}/context/change-requests"
+    },
+    {
+      "id": "agent context region-sync",
+      "exempt": "local-only — rewrites the sealed Agent Office managed region in a repo CLAUDE.md/AGENTS.md on the caller's own disk (FIR-1775 §10); no API call, and the result is still gated by PR review + scripts/validate-agent-office-region.sh in CI"
+    },
+    {
+      "id": "agent context region-verify",
+      "exempt": "read-only, local-only — parses a repo CLAUDE.md/AGENTS.md on the caller's own disk and checks the managed-region seal (FIR-1775 §10); no API call, nothing is written"
     },
     {
       "id": "agent context review",
@@ -2343,6 +2499,14 @@
     {
       "id": "document update",
       "gate": "via:PUT /api/artifacts/{id}"
+    },
+    {
+      "id": "feature get",
+      "exempt": "read-only — embedded catalog + wraps GET /api/workspaces/{id}/feature-flags"
+    },
+    {
+      "id": "feature list",
+      "exempt": "read-only — embedded catalog + wraps GET /api/workspaces/{id}/feature-flags"
     },
     {
       "id": "group agent add",
@@ -2849,6 +3013,10 @@
       "exempt": "read-only — wraps GET /api/skills/{id}/observations"
     },
     {
+      "id": "skill auto-learn",
+      "gate": "via:POST /api/skills/{id}/auto-learn"
+    },
+    {
       "id": "skill ownership",
       "gate": "via:PUT /api/skills/{id}/ownership"
     },
@@ -2874,27 +3042,31 @@
     },
     {
       "id": "sprint assign",
-      "gate": "via:PUT /api/issues/{id}"
+      "gate": "via:PUT /api/cerebro/issues/{id}/sprint + PUT /api/issues/{id} (legacy fallback)"
     },
     {
       "id": "sprint create",
-      "gate": "via:POST /api/projects/ + PUT /api/projects/{id}/parent"
+      "gate": "via:POST /api/cerebro/projects/{id}/sprints + POST /api/projects/ + PUT /api/projects/{id}/parent (legacy fallback)"
     },
     {
       "id": "sprint delete",
-      "gate": "via:DELETE /api/projects/{id}/"
+      "gate": "via:DELETE /api/cerebro/sprints/{id} + DELETE /api/projects/{id}/ (legacy fallback)"
     },
     {
       "id": "sprint get",
-      "exempt": "read-only - wraps GET /api/projects/{id}"
+      "exempt": "read-only - wraps GET /api/cerebro/sprints/{id} (legacy fallback: GET /api/projects/{id})"
+    },
+    {
+      "id": "sprint issues",
+      "exempt": "read-only - wraps GET /api/cerebro/sprints/{id}/issues"
     },
     {
       "id": "sprint list",
-      "exempt": "read-only - wraps GET /api/projects/tree"
+      "exempt": "read-only - wraps GET /api/cerebro/sprints (legacy fallback: GET /api/projects/tree)"
     },
     {
       "id": "sprint update",
-      "gate": "via:PUT /api/projects/{id}/"
+      "gate": "via:PUT /api/cerebro/sprints/{id} + PUT /api/projects/{id}/ (legacy fallback)"
     },
     {
       "id": "squad activity",
@@ -2935,6 +3107,30 @@
     {
       "id": "squad update",
       "gate": "via:PUT /api/squads/{id}/"
+    },
+    {
+      "id": "round add",
+      "gate": "via:POST /api/cerebro/rounds/{roundId}/members"
+    },
+    {
+      "id": "round create",
+      "gate": "via:POST /api/cerebro/rounds/"
+    },
+    {
+      "id": "round list",
+      "exempt": "read-only — wraps GET /api/cerebro/rounds"
+    },
+    {
+      "id": "round remove",
+      "gate": "via:DELETE /api/cerebro/rounds/{roundId}/members/{issueId}"
+    },
+    {
+      "id": "round start",
+      "gate": "via:POST /api/cerebro/rounds/{roundId}/start"
+    },
+    {
+      "id": "round status",
+      "exempt": "read-only — wraps GET /api/cerebro/rounds/{roundId}/status"
     },
     {
       "id": "tool-policy explain",
@@ -2987,6 +3183,34 @@
     {
       "id": "workflow list",
       "exempt": "read-only — wraps GET /api/cerebro/workflows"
+    },
+    {
+      "id": "workflow activate",
+      "gate": "via:POST /api/cerebro/workflows/{id}/activate"
+    },
+    {
+      "id": "workflow create",
+      "gate": "via:POST /api/cerebro/workflows"
+    },
+    {
+      "id": "workflow delete",
+      "gate": "via:DELETE /api/cerebro/workflows/{id}"
+    },
+    {
+      "id": "workflow for-issue",
+      "exempt": "read-only — wraps GET /api/cerebro/workflows/for-issue/{issueId}"
+    },
+    {
+      "id": "workflow get",
+      "exempt": "read-only — wraps GET /api/cerebro/workflows/{id}"
+    },
+    {
+      "id": "workflow toggle",
+      "gate": "via:POST /api/cerebro/workflows/{id}/toggle"
+    },
+    {
+      "id": "workflow update",
+      "gate": "via:PUT /api/cerebro/workflows/{id}"
     },
     {
       "id": "workspace get",

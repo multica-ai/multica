@@ -146,6 +146,12 @@ type UsageUpdate struct {
 	UsageWindowPct *NullableFloat32
 	ThrottledUntil *NullableTime
 	Tokens         *int64
+	// FIR-3118: provider-reported rolling windows (Claude OAuth usage
+	// endpoint). Same outer/inner pointer semantics as the fields above.
+	Usage5hPct      *NullableFloat32
+	Usage5hResetsAt *NullableTime
+	Usage7dPct      *NullableFloat32
+	Usage7dResetsAt *NullableTime
 }
 
 // NullableFloat32 / NullableTime distinguish "absent from the patch" (the
@@ -183,6 +189,36 @@ func (s *Service) UpdateUsage(ctx context.Context, workspaceID, actorID, account
 			params.ThrottledUntil = *v
 		}
 	}
+	if update.Usage5hPct != nil {
+		params.Usage5hPctSet = true
+		if v := update.Usage5hPct.Value; v != nil {
+			if *v < 0 || *v > 100 {
+				return Account{}, ErrInvalidUsagePct
+			}
+			params.Usage5hPct = pgtype.Float4{Float32: *v, Valid: true}
+		}
+	}
+	if update.Usage5hResetsAt != nil {
+		params.Usage5hResetsAtSet = true
+		if v := update.Usage5hResetsAt.Value; v != nil {
+			params.Usage5hResetsAt = *v
+		}
+	}
+	if update.Usage7dPct != nil {
+		params.Usage7dPctSet = true
+		if v := update.Usage7dPct.Value; v != nil {
+			if *v < 0 || *v > 100 {
+				return Account{}, ErrInvalidUsagePct
+			}
+			params.Usage7dPct = pgtype.Float4{Float32: *v, Valid: true}
+		}
+	}
+	if update.Usage7dResetsAt != nil {
+		params.Usage7dResetsAtSet = true
+		if v := update.Usage7dResetsAt.Value; v != nil {
+			params.Usage7dResetsAt = *v
+		}
+	}
 	if update.Tokens != nil {
 		if *update.Tokens < 0 {
 			return Account{}, ErrInvalidTokenCount
@@ -197,7 +233,9 @@ func (s *Service) UpdateUsage(ctx context.Context, workspaceID, actorID, account
 			}
 		}
 	}
-	if !params.UsageWindowPctSet && !params.ThrottledUntilSet {
+	if !params.UsageWindowPctSet && !params.ThrottledUntilSet &&
+		!params.Usage5hPctSet && !params.Usage5hResetsAtSet &&
+		!params.Usage7dPctSet && !params.Usage7dResetsAtSet {
 		if update.Tokens != nil {
 			a, err := s.Get(ctx, workspaceID, accountID)
 			if err != nil {
@@ -218,6 +256,15 @@ func (s *Service) UpdateUsage(ctx context.Context, workspaceID, actorID, account
 	a := accountFromUpdateUsage(r)
 	s.publish(EventAccountUpdated, workspaceID, actorID, actorType, map[string]any{"account": accountResponseFromModel(a)})
 	return a, nil
+}
+
+// UsageHistory returns hourly token-usage buckets for the account over the
+// last 7 days (FIR-3118). Workspace-scoped like Get.
+func (s *Service) UsageHistory(ctx context.Context, workspaceID, accountID pgtype.UUID) ([]cerebrodb.ListCerebroAccountTokenUsageHistoryRow, error) {
+	if _, err := s.Get(ctx, workspaceID, accountID); err != nil {
+		return nil, err
+	}
+	return s.Cerebro.ListCerebroAccountTokenUsageHistory(ctx, accountID)
 }
 
 // ControlsUpdate is the partial input for UpdateControls. Same nil / set

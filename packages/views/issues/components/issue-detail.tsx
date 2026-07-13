@@ -4,6 +4,7 @@
 // CEREBRO-PATCH(channels-flag-gate): cerebro_channels feature flag controls channel/DM chrome
 
 import { useFeatureFlag } from "@multica/cerebro-feature-flags";
+import { useDescriptionDraft, DescriptionDraftBanner } from "@multica/cerebro-description-draft";
 // CEREBRO-PATCH(display-currency-issue-detail): FIR-40 cost in workspace currency.
 import { useCostFormatter } from "@multica/cerebro-display-currency/views";
 import { useState, useEffect, useCallback, useMemo, useRef, type ReactNode } from "react";
@@ -35,6 +36,10 @@ import {
   Users,
   X, // CEREBRO-PATCH(remove-parent-issue): issue sidebar clear-parent affordance.
   Inbox, // CEREBRO-PATCH(cerebro-inbox-add-issue): "Add to inbox" in the detail toolbar menu.
+  // CEREBRO-PATCH(issue-detail-add-property-cerebro-rows): FIR-2827 menu icons for Sprint/Workflow/Recurring.
+  Timer,
+  Workflow as WorkflowIcon,
+  Repeat,
 } from "lucide-react";
 import { toast } from "sonner";
 import { PageHeader } from "../../layout/page-header";
@@ -124,6 +129,11 @@ import { WorkflowPicker } from "@multica/cerebro-workflows/views/workflow-picker
 import { IssueTimePicker } from "@multica/cerebro-issue-datetime/views";
 // CEREBRO-PATCH(issue-detail-recurrence-panel): TECH-3064 recurring-issue sidebar panel, gated on cerebro_recurring_issues.
 import { RecurrencePanel } from "@multica/cerebro-recurring-issues/views";
+// CEREBRO-PATCH(issue-detail-add-property-cerebro-rows): FIR-2827 — Sprint/Workflow/Recurring rows
+// hide behind "+ Add property" until they carry a value; these queries answer "is it set?".
+import { issueSprintAssignmentOptions } from "@multica/cerebro-sprints/core/queries";
+import { cerebroActiveWorkflowForIssueOptions } from "@multica/cerebro-workflows/core/queries";
+import { issueRecurrenceOptions } from "@multica/cerebro-recurring-issues/core/queries";
 // CEREBRO-PATCH(comment-sessions-ui): FIR-1741 groups the comment timeline into sessions derived from start markers.
 // CEREBRO-PATCH(session-activity-context): FIR-1769 P2/P3 — per-session activity fold + context hairline.
 // CEREBRO-PATCH(session-review-fir1787): context indicator moves above the composer (SessionContextBar) per FIR-1787 review.
@@ -142,6 +152,8 @@ import { CommentCard, isWakeupComment } from "./comment-card"; // CEREBRO-PATCH(
 // CEREBRO-PATCH(issue-description-image-tray): FIR-2693 — numbered image tray on the description editor.
 import { CommentComposer, EditorImageTray } from "@multica/cerebro-composer";
 import { AgentLiveCard, TaskRunHistory, WorkSessionHistory } from "./agent-live-card";
+// CEREBRO-PATCH(rounds-held-reply-bar): FIR-3114 — held-reply banner for batch Rounds.
+import { RoundHeldReplyBar } from "@multica/cerebro-rounds";
 import { PullRequestList } from "./pull-request-list";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@multica/ui/components/ui/tabs";
 import { BacklogAgentHintDialog } from "./backlog-agent-hint-dialog";
@@ -333,6 +345,14 @@ const EMPTY_REPLIES: TimelineEntry[] = [];
 // menu all flow from this one list.
 const OPTIONAL_PROP_KEYS = ["priority", "start_date", "due_date", "labels"] as const;
 type OptionalPropKey = (typeof OPTIONAL_PROP_KEYS)[number];
+
+// CEREBRO-PATCH(issue-detail-add-property-cerebro-rows): FIR-2827 — the cerebro
+// sidebar rows (Sprint / Workflow / Recurring) follow the same progressive
+// disclosure as the optional upstream props: hidden until the issue carries a
+// value, revealed for the session via "+ Add property". Kept as a separate key
+// list because "is it set?" comes from cerebro queries, not issue fields.
+const CEREBRO_OPTIONAL_PROP_KEYS = ["sprint", "workflow", "recurring"] as const;
+type CerebroOptionalPropKey = (typeof CEREBRO_OPTIONAL_PROP_KEYS)[number];
 
 function isOptionalPropSet(
   issue: Issue,
@@ -732,7 +752,8 @@ interface IssueDetailProps {
   linkSelfInBreadcrumb?: boolean;
   // CEREBRO-PATCH(issue-detail-seed-from-list): FIR-2684 — embedded hosts (inbox) pass false so opening a message doesn't cold-load the whole board issue-list just to seed parent/self from cache. Default true keeps issues-page behavior.
   seedFromIssueList?: boolean;
-  // CEREBRO-PATCH(issue-detail-extensions-slot): JEH-838b — cerebro slot for issue-attached panels (references) rendered after attachments/artifacts. Apps supply the node.
+  // CEREBRO-PATCH(issue-detail-extensions-slot): JEH-838b — cerebro slot for issue-attached panels (references). Apps supply the node.
+  // CEREBRO-PATCH(issue-sidebar-references): FIR-2827 — the slot renders in the sidebar directly above Pull requests.
   extensions?: ReactNode;
 }
 
@@ -796,11 +817,15 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [backlogHintOpen, setBacklogHintOpen] = useState(false);
   const [propertiesOpen, setPropertiesOpen] = useState(true);
-  const [detailsOpen, setDetailsOpen] = useState(true);
+  // CEREBRO-PATCH(issue-sidebar-reorder): FIR-2827 — Details starts collapsed (moved to the sidebar bottom).
+  const [detailsOpen, setDetailsOpen] = useState(false);
   const [parentIssueOpen, setParentIssueOpen] = useState(true);
   // CEREBRO-PATCH(issue-dependencies): collapsible state for the dependencies section.
-  const [dependenciesOpen, setDependenciesOpen] = useState(true);
+  // CEREBRO-PATCH(issue-sidebar-reorder): FIR-2827 — Dependencies starts collapsed (moved to the sidebar bottom).
+  const [dependenciesOpen, setDependenciesOpen] = useState(false);
   const [pullRequestsOpen, setPullRequestsOpen] = useState(true);
+  // CEREBRO-PATCH(issue-sidebar-sub-issues): FIR-2827 — sub-issues live in the sidebar now.
+  const [subIssuesOpen, setSubIssuesOpen] = useState(true);
   const [metadataOpen, setMetadataOpen] = useState(false);
   const [tokenUsageOpen, setTokenUsageOpen] = useState(true);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -1188,7 +1213,8 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
     ...childIssuesOptions(wsId, parentIssueId ?? ""),
     enabled: !!parentIssueId,
   });
-  const [subIssuesCollapsed, setSubIssuesCollapsed] = useState(false);
+  // CEREBRO-PATCH(issue-sidebar-sub-issues): FIR-2827 — collapse state moved to
+  // the sidebar section (subIssuesOpen above); the main-column block is gone.
 
   // Selection store is global (workspace-scoped); clear it whenever this
   // issue detail is mounted or switched, so leftover selections from the
@@ -1244,6 +1270,8 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
   const issueDateTimesEnabled = useFeatureFlag("cerebro_issue_date_times");
   // CEREBRO-PATCH(issue-detail-recurrence-panel): TECH-3064 gate the sidebar recurrence panel.
   const recurringIssuesEnabled = useFeatureFlag("cerebro_recurring_issues");
+  // CEREBRO-PATCH(issue-sidebar-subscribers): FIR-2827 — subscribers listed in the sidebar, split by type.
+  const sidebarSubscribersEnabled = useFeatureFlag("cerebro_issue_sidebar_subscribers");
   // CEREBRO-PATCH(comment-sessions-flag): FIR-1741 gate sessions UI; off renders the flat timeline.
   const sessionsEnabled = useFeatureFlag("cerebro_comment_chapters");
   // CEREBRO-PATCH(session-activity-context): FIR-1769 P2/P3 gates; both no-op unless sessions on.
@@ -1288,6 +1316,11 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
   // Called before the `if (!issue)` early return so hook order stays stable.
   const actions = useIssueActions(issue);
   const handleUpdateField = actions.updateField;
+
+  // CEREBRO-PATCH(description-drafts): FIR-2648 — mirror every edit locally so
+  // a session expiry cannot silently discard text before the save completes.
+  const descriptionDraft = useDescriptionDraft(id, issue?.description ?? "");
+  const [descRestoreEpoch, setDescRestoreEpoch] = useState(0);
 
   // Labels live in their own query (not on the issue body) — fetch the count
   // here so seeding can decide whether the "Labels" optional row should be
@@ -1348,6 +1381,68 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
     if (autoOpenProp === null) return;
     setAutoOpenProp(null);
   }, [autoOpenProp]);
+
+  // CEREBRO-PATCH(issue-detail-add-property-cerebro-rows): FIR-2827 — same
+  // seeding contract as visibleOptionalProps above, but "is it set?" comes
+  // from the cerebro queries (sprint assignment / active workflow / recurrence)
+  // instead of issue fields. Rows stay visible after a clear within the same
+  // session; the set resets only on issue switch.
+  const sprintAssignmentQuery = useQuery({
+    ...issueSprintAssignmentOptions(wsId, issue?.id ?? ""),
+    enabled: !!wsId && !!issue?.id && !isChat && sprintsEnabled && !!issue?.project_id,
+  });
+  const activeWorkflowQuery = useQuery({
+    ...cerebroActiveWorkflowForIssueOptions(wsId, issue?.id ?? ""),
+    enabled: !!wsId && !!issue?.id && !isChat && workflowsEnabled,
+  });
+  const recurrenceQuery = useQuery({
+    ...issueRecurrenceOptions(wsId, issue?.id ?? ""),
+    enabled: !!wsId && !!issue?.id && !isChat && recurringIssuesEnabled,
+  });
+  const sprintIsSet = !!sprintAssignmentQuery.data;
+  const workflowIsSet = activeWorkflowQuery.data?.active === true;
+  const recurringIsSet = !!recurrenceQuery.data;
+  const [visibleCerebroProps, setVisibleCerebroProps] = useState<Set<CerebroOptionalPropKey>>(
+    () => new Set(),
+  );
+  const cerebroSeededIssueIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!issue) return;
+    const isNewIssue = cerebroSeededIssueIdRef.current !== issue.id;
+    if (isNewIssue) cerebroSeededIssueIdRef.current = issue.id;
+    const setByKey: Record<CerebroOptionalPropKey, boolean> = {
+      sprint: sprintIsSet,
+      workflow: workflowIsSet,
+      recurring: recurringIsSet,
+    };
+    setVisibleCerebroProps((prev) => {
+      let next = isNewIssue ? new Set<CerebroOptionalPropKey>() : prev;
+      for (const k of CEREBRO_OPTIONAL_PROP_KEYS) {
+        if (setByKey[k] && !next.has(k)) {
+          if (next === prev) next = new Set(prev);
+          next.add(k);
+        }
+      }
+      return next;
+    });
+  }, [issue, sprintIsSet, workflowIsSet, recurringIsSet]);
+  const addCerebroProp = useCallback((key: CerebroOptionalPropKey) => {
+    setVisibleCerebroProps((prev) => {
+      if (prev.has(key)) return prev;
+      const next = new Set(prev);
+      next.add(key);
+      return next;
+    });
+    setAddPropPopoverOpen(false);
+  }, []);
+  // Which cerebro rows can be offered in "+ Add property" right now (flag on,
+  // applicable to this issue, not already visible).
+  const addableCerebroProps = CEREBRO_OPTIONAL_PROP_KEYS.filter((k) => {
+    if (visibleCerebroProps.has(k)) return false;
+    if (k === "sprint") return sprintsEnabled && !!issue?.project_id;
+    if (k === "workflow") return workflowsEnabled;
+    return recurringIssuesEnabled;
+  });
 
   const handleToggleSidebar = useCallback(() => {
     if (isMobile) {
@@ -1558,19 +1653,20 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
             <ProjectPicker projectId={issue.project_id} onUpdate={handleUpdateField} />
           </PropRow>
           {/* CEREBRO-PATCH(issue-detail-sprint-picker): TECH-3620 sprint picker; assigns via the sprint join, keeps project_id. Renders with the flag on and a project that has real sprints. */}
-          {sprintsEnabled && issue.project_id && (
+          {/* CEREBRO-PATCH(issue-detail-add-property-cerebro-rows): FIR-2827 — Sprint/Workflow/Recurring hide behind "+ Add property" until set. */}
+          {sprintsEnabled && issue.project_id && visibleCerebroProps.has("sprint") && (
             <PropRow label="Sprint">
               <SprintPicker workspaceId={wsId} projectId={issue.project_id} issueId={issue.id} />
             </PropRow>
           )}
           {/* CEREBRO-PATCH(issue-detail-workflow-picker): FIR-2283 v2 point 8 — activate an Issue workflow recipe on this issue; recipe stays reusable, this compiles rules scoped to this issue alone. */}
-          {workflowsEnabled && (
+          {workflowsEnabled && visibleCerebroProps.has("workflow") && (
             <PropRow label="Workflow">
               <WorkflowPicker workspaceId={wsId} issueId={issue.id} />
             </PropRow>
           )}
           {/* CEREBRO-PATCH(issue-detail-recurrence-panel): TECH-3064 recurring-issue panel, gated on cerebro_recurring_issues. */}
-          {recurringIssuesEnabled && (
+          {recurringIssuesEnabled && visibleCerebroProps.has("recurring") && (
             <PropRow label="Recurring">
               <RecurrencePanel workspaceId={wsId} issueId={issue.id} />
             </PropRow>
@@ -1644,7 +1740,7 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
               not yet displayed. Hidden once every optional field is on
               screen. Sits inside the same grid as a full-row, with its
               own padding so the visual rhythm follows the rows above. */}
-          {OPTIONAL_PROP_KEYS.some((k) => !visibleOptionalProps.has(k)) && (
+          {(OPTIONAL_PROP_KEYS.some((k) => !visibleOptionalProps.has(k)) || addableCerebroProps.length > 0) && (
             <div className="col-span-2 mt-1">
               <Popover open={addPropPopoverOpen} onOpenChange={setAddPropPopoverOpen}>
                 <PopoverTrigger
@@ -1685,6 +1781,31 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
                       </span>
                     </button>
                   ))}
+                  {/* CEREBRO-PATCH(issue-detail-add-property-cerebro-rows): FIR-2827 —
+                      Sprint / Workflow / Recurring join the same menu. */}
+                  {addableCerebroProps.map((k) => (
+                    <button
+                      key={k}
+                      type="button"
+                      onClick={() => addCerebroProp(k)}
+                      className="flex w-full items-center gap-2 rounded-md px-2 py-1 text-xs text-foreground/90 transition-colors hover:bg-accent focus-visible:bg-accent focus-visible:outline-none"
+                    >
+                      {k === "sprint" && (
+                        <Timer className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                      )}
+                      {k === "workflow" && (
+                        <WorkflowIcon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                      )}
+                      {k === "recurring" && (
+                        <Repeat className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                      )}
+                      <span className="truncate">
+                        {k === "sprint" && "Sprint"}
+                        {k === "workflow" && "Workflow"}
+                        {k === "recurring" && "Recurring"}
+                      </span>
+                    </button>
+                  ))}
                 </PopoverContent>
               </Popover>
             </div>
@@ -1716,6 +1837,38 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
               ownerId={issue.assignee_id}
             />
           </div>
+        </div>
+      )}
+
+      {/* CEREBRO-PATCH(issue-sidebar-subscribers): FIR-2827 — subscribers live in
+          the sidebar for regular issues too, split by type (Members / Agents),
+          with the same add/remove popover the chat Participants section uses.
+          Every row here is a wake-trigger candidate, so seeing them per type
+          answers "who can this issue dispatch to?" at a glance. */}
+      {!isChat && sidebarSubscribersEnabled && (
+        <div>
+          <div className="flex items-center justify-between px-2 py-1 mb-2">
+            <span className="text-xs font-medium">Subscribers</span>
+            {participantPopover}
+          </div>
+          {subscribers.length > 0 && (
+            <div className="space-y-3 pl-2">
+              <ParticipantGroup
+                heading="Members"
+                subscribers={subscribers.filter((s) => s.user_type === "member")}
+                getActorName={getActorName}
+                ownerType={issue.assignee_type}
+                ownerId={issue.assignee_id}
+              />
+              <ParticipantGroup
+                heading="Agents"
+                subscribers={subscribers.filter((s) => s.user_type === "agent")}
+                getActorName={getActorName}
+                ownerType={issue.assignee_type}
+                ownerId={issue.assignee_id}
+              />
+            </div>
+          )}
         </div>
       )}
 
@@ -1760,19 +1913,77 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
         </div>
       )}
 
-      {/* Dependencies — CEREBRO-PATCH(issue-dependencies): FIR-823 blocks/blocked-by/related */}
+      {/* CEREBRO-PATCH(issue-sidebar-sub-issues): FIR-2827 — sub-issues render as a
+          sidebar section (mirroring Parent issue) instead of a main-column block. */}
       {!isChat && (
-        <div>
-          <button
-            className={`flex w-full items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-colors mb-2 hover:bg-accent/70 ${dependenciesOpen ? "" : "text-muted-foreground hover:text-foreground"}`}
-            onClick={() => setDependenciesOpen(!dependenciesOpen)}
-          >
-            {t(($) => $.detail.section_dependencies)}
-            <ChevronRight className={`!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform ${dependenciesOpen ? "rotate-90" : ""}`} />
-          </button>
-          {dependenciesOpen && <div className="pl-2"><DependenciesSection issueId={id} /></div>}
+        <div className="group/sub-issues">
+          <div className="flex items-center gap-1 mb-2">
+            <button
+              type="button"
+              className={`flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-colors hover:bg-accent/70 ${subIssuesOpen ? "" : "text-muted-foreground hover:text-foreground"}`}
+              onClick={() => setSubIssuesOpen(!subIssuesOpen)}
+            >
+              {t(($) => $.detail.sub_issues_label)}
+              <ChevronRight className={`!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform ${subIssuesOpen ? "rotate-90" : ""}`} />
+            </button>
+            {childIssues.length > 0 && (
+              <div className="inline-flex items-center gap-1.5 rounded-full bg-muted/60 px-2 py-0.5">
+                <ProgressRing done={childIssues.filter((c) => c.status === "done").length} total={childIssues.length} size={11} />
+                <span className="text-[11px] text-muted-foreground tabular-nums font-medium">
+                  {childIssues.filter((c) => c.status === "done").length}/{childIssues.length}
+                </span>
+              </div>
+            )}
+            {childIssues.length > 0 && (
+              <input
+                type="checkbox"
+                checked={allChildrenSelected}
+                ref={(el) => {
+                  if (el) el.indeterminate = someChildrenSelected && !allChildrenSelected;
+                }}
+                onChange={handleToggleSelectAllChildren}
+                aria-label="Select all sub-issues"
+                className={cn(
+                  "ml-1 cursor-pointer accent-primary transition-opacity",
+                  someChildrenSelected
+                    ? "opacity-100"
+                    : "opacity-0 group-hover/sub-issues:opacity-100 focus-visible:opacity-100",
+                )}
+              />
+            )}
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <button
+                    type="button"
+                    className="ml-auto inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+                    onClick={() => actions.openCreateSubIssue()}
+                    aria-label={t(($) => $.detail.add_sub_issue_aria)}
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                  </button>
+                }
+              />
+              <TooltipContent side="bottom">{t(($) => $.detail.add_sub_issue_tooltip)}</TooltipContent>
+            </Tooltip>
+          </div>
+          {subIssuesOpen && childIssues.length > 0 && (
+            <div className="pl-2">
+              <BatchActionToolbar placement="inline" />
+              <div className="overflow-hidden rounded-lg border bg-card/30 divide-y divide-border/60">
+                {childIssues.map((child) => (
+                  <SubIssueRow key={child.id} child={child} />
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       )}
+
+      {/* CEREBRO-PATCH(issue-sidebar-references): FIR-2827 — the extensions slot
+          (issue references, JEH-838b) renders in the sidebar directly above Pull
+          requests instead of the main column. The slot brings its own header. */}
+      {!isChat && extensions && <div className="px-2">{extensions}</div>}
 
       {/* Pull requests */}
       {!isChat && (
@@ -1788,59 +1999,6 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
           {pullRequestsOpen && <div className="pl-2"><PullRequestList issueId={id} /></div>}
         </div>
       )}
-
-      {/* Metadata is an agent-facing free-form bag. Keep the sidebar quiet,
-          but expose the raw payload when it exists. */}
-      {Object.keys(issue.metadata ?? {}).length > 0 && (
-        <>
-          <button
-            type="button"
-            className="flex w-full items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent/70 hover:text-foreground"
-            onClick={() => setMetadataOpen(true)}
-          >
-            <span>
-              {t(($) => $.detail.section_metadata)}{" "}
-              <span className="tabular-nums">
-                · {Object.keys(issue.metadata ?? {}).length}
-              </span>
-            </span>
-          </button>
-          <Dialog open={metadataOpen} onOpenChange={setMetadataOpen}>
-            <DialogContent className="max-w-2xl">
-              <DialogHeader>
-                <DialogTitle>{t(($) => $.detail.section_metadata)}</DialogTitle>
-              </DialogHeader>
-              <pre className="max-h-[60vh] overflow-auto rounded-md bg-muted p-3 font-mono text-xs">
-                {JSON.stringify(issue.metadata ?? {}, null, 2)}
-              </pre>
-            </DialogContent>
-          </Dialog>
-        </>
-      )}
-
-      {/* Details */}
-      <div>
-        <button
-          type="button"
-          className={`flex w-full items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-colors mb-2 hover:bg-accent/70 ${detailsOpen ? "" : "text-muted-foreground hover:text-foreground"}`}
-          onClick={() => setDetailsOpen(!detailsOpen)}
-        >
-          {t(($) => $.detail.section_details)}
-          <ChevronRight className={`!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform ${detailsOpen ? "rotate-90" : ""}`} />
-        </button>
-        {detailsOpen && <div className="grid grid-cols-[auto_1fr] gap-x-2 gap-y-0.5 pl-2">
-          <PropRow label={t(($) => $.detail.prop_created_by)}>
-            <ActorAvatar actorType={issue.creator_type} actorId={issue.creator_id} size={18} enableHoverCard />
-            <span className="cursor-pointer truncate">{getActorName(issue.creator_type, issue.creator_id)}</span>
-          </PropRow>
-          <PropRow label={t(($) => $.detail.prop_created)}>
-            <span className="text-muted-foreground">{shortDate(issue.created_at)}</span>
-          </PropRow>
-          <PropRow label={t(($) => $.detail.prop_updated)}>
-            <span className="text-muted-foreground">{shortDate(issue.updated_at)}</span>
-          </PropRow>
-        </div>}
-      </div>
 
       {/* Execution log — active runs + collapsed past runs. Self-contained;
           owns its own collapse state and WS subscriptions. Hides itself
@@ -1899,6 +2057,76 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
           FIR-1521: pass the issue UUID (issue.id), not the route identifier (id) —
           the /api/cerebro/wakeups list endpoint requires a UUID and 400s on an identifier. */}
       {!isChat && issue?.id && <CerebroWakeupSection issueId={issue.id} />}
+
+      {/* CEREBRO-PATCH(issue-sidebar-reorder): FIR-2827 — Dependencies, Details and
+          Metadata moved to the bottom of the sidebar; Dependencies and Details
+          start collapsed. */}
+      {/* Dependencies — CEREBRO-PATCH(issue-dependencies): FIR-823 blocks/blocked-by/related */}
+      {!isChat && (
+        <div>
+          <button
+            className={`flex w-full items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-colors mb-2 hover:bg-accent/70 ${dependenciesOpen ? "" : "text-muted-foreground hover:text-foreground"}`}
+            onClick={() => setDependenciesOpen(!dependenciesOpen)}
+          >
+            {t(($) => $.detail.section_dependencies)}
+            <ChevronRight className={`!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform ${dependenciesOpen ? "rotate-90" : ""}`} />
+          </button>
+          {dependenciesOpen && <div className="pl-2"><DependenciesSection issueId={id} /></div>}
+        </div>
+      )}
+
+      {/* Details */}
+      <div>
+        <button
+          type="button"
+          className={`flex w-full items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-colors mb-2 hover:bg-accent/70 ${detailsOpen ? "" : "text-muted-foreground hover:text-foreground"}`}
+          onClick={() => setDetailsOpen(!detailsOpen)}
+        >
+          {t(($) => $.detail.section_details)}
+          <ChevronRight className={`!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform ${detailsOpen ? "rotate-90" : ""}`} />
+        </button>
+        {detailsOpen && <div className="grid grid-cols-[auto_1fr] gap-x-2 gap-y-0.5 pl-2">
+          <PropRow label={t(($) => $.detail.prop_created_by)}>
+            <ActorAvatar actorType={issue.creator_type} actorId={issue.creator_id} size={18} enableHoverCard />
+            <span className="cursor-pointer truncate">{getActorName(issue.creator_type, issue.creator_id)}</span>
+          </PropRow>
+          <PropRow label={t(($) => $.detail.prop_created)}>
+            <span className="text-muted-foreground">{shortDate(issue.created_at)}</span>
+          </PropRow>
+          <PropRow label={t(($) => $.detail.prop_updated)}>
+            <span className="text-muted-foreground">{shortDate(issue.updated_at)}</span>
+          </PropRow>
+        </div>}
+      </div>
+
+      {/* Metadata is an agent-facing free-form bag. Keep the sidebar quiet,
+          but expose the raw payload when it exists. */}
+      {Object.keys(issue.metadata ?? {}).length > 0 && (
+        <>
+          <button
+            type="button"
+            className="flex w-full items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent/70 hover:text-foreground"
+            onClick={() => setMetadataOpen(true)}
+          >
+            <span>
+              {t(($) => $.detail.section_metadata)}{" "}
+              <span className="tabular-nums">
+                · {Object.keys(issue.metadata ?? {}).length}
+              </span>
+            </span>
+          </button>
+          <Dialog open={metadataOpen} onOpenChange={setMetadataOpen}>
+            <DialogContent className="max-w-2xl">
+              <DialogHeader>
+                <DialogTitle>{t(($) => $.detail.section_metadata)}</DialogTitle>
+              </DialogHeader>
+              <pre className="max-h-[60vh] overflow-auto rounded-md bg-muted p-3 font-mono text-xs">
+                {JSON.stringify(issue.metadata ?? {}, null, 2)}
+              </pre>
+            </DialogContent>
+          </Dialog>
+        </>
+      )}
     </div>
   );
 
@@ -2384,12 +2612,25 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
             // CEREBRO-PATCH(description-image-gallery): FIR-2710 — description body + attachment images page as one gallery.
             <ImageGalleryProvider>
             <div {...descDropZoneProps} className="relative mt-5 rounded-lg">
+              {/* CEREBRO-PATCH(description-drafts): FIR-2648 — restore text that never reached the server. */}
+              {descriptionDraft.hasRecoverableDraft && (
+                <DescriptionDraftBanner
+                  onRestore={() => {
+                    setDescRestoreEpoch((n) => n + 1);
+                    descriptionDraft.dismissBanner();
+                  }}
+                  onDiscard={() => descriptionDraft.discard()}
+                />
+              )}
               <EditorImageTray
                 ref={descEditorRef}
-                key={id}
-                defaultValue={issue.description || ""}
+                key={`${id}-${descRestoreEpoch}`}
+                defaultValue={descRestoreEpoch > 0 ? descriptionDraft.draftValue : (issue.description || "")}
                 placeholder={t(($) => $.detail.desc_placeholder)}
-                onUpdate={(md) => handleUpdateField({ description: md })}
+                onUpdate={(md) => {
+                  descriptionDraft.save(md);
+                  handleUpdateField({ description: md });
+                }}
                 onUploadFile={handleDescriptionUpload}
                 debounceMs={1500}
                 currentIssueId={id}
@@ -2426,95 +2667,10 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
           {!isChat && <ArtifactList issueId={issue.id} className="mt-3" />}
 
           {/* CEREBRO-PATCH(issue-detail-extensions-slot): JEH-838b — cerebro issue-attached panels (references). */}
-          {!isChat && extensions}
+          {/* CEREBRO-PATCH(issue-sidebar-references): FIR-2827 — the slot renders in the sidebar now (above Pull requests). */}
 
-          {/* Sub-issues — task-only. Channels and DMs don't carry the
-              hierarchical breakdown that issues do, so skip both the
-              empty-state CTA and the populated list. */}
-          {!isChat && childIssues.length === 0 && (
-            <div className="mt-6">
-              <button
-                type="button"
-                className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
-                onClick={() => actions.openCreateSubIssue()}
-              >
-                <Plus className="h-3.5 w-3.5" />
-                <span>{t(($) => $.detail.add_sub_issues)}</span>
-              </button>
-            </div>
-          )}
-          {!isChat && childIssues.length > 0 && (() => {
-            const doneCount = childIssues.filter((c) => c.status === "done").length;
-            return (
-              <div className="mt-10 group/sub-issues">
-                {/* Header */}
-                <div className="flex items-center gap-2 mb-2">
-                  <button
-                    type="button"
-                    onClick={() => setSubIssuesCollapsed((v) => !v)}
-                    className="flex items-center gap-1.5 text-sm font-medium text-foreground hover:text-foreground/80 transition-colors"
-                  >
-                    <ChevronDown
-                      className={cn(
-                        "h-3.5 w-3.5 text-muted-foreground transition-transform",
-                        subIssuesCollapsed && "-rotate-90",
-                      )}
-                    />
-                    <span>{t(($) => $.detail.sub_issues_label)}</span>
-                  </button>
-                  <div className="inline-flex items-center gap-1.5 rounded-full bg-muted/60 px-2 py-0.5">
-                    <ProgressRing done={doneCount} total={childIssues.length} size={11} />
-                    <span className="text-[11px] text-muted-foreground tabular-nums font-medium">
-                      {doneCount}/{childIssues.length}
-                    </span>
-                  </div>
-                  <input
-                    type="checkbox"
-                    checked={allChildrenSelected}
-                    ref={(el) => {
-                      if (el) el.indeterminate = someChildrenSelected && !allChildrenSelected;
-                    }}
-                    onChange={handleToggleSelectAllChildren}
-                    aria-label="Select all sub-issues"
-                    className={cn(
-                      "ml-1 cursor-pointer accent-primary transition-opacity",
-                      someChildrenSelected
-                        ? "opacity-100"
-                        : "opacity-0 group-hover/sub-issues:opacity-100 focus-visible:opacity-100",
-                    )}
-                  />
-                  <Tooltip>
-                    <TooltipTrigger
-                      render={
-                        <button
-                          type="button"
-                          className="ml-auto inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
-                          onClick={() => actions.openCreateSubIssue()}
-                          aria-label={t(($) => $.detail.add_sub_issue_aria)}
-                        >
-                          <Plus className="h-4 w-4" />
-                        </button>
-                      }
-                    />
-                    <TooltipContent side="bottom">{t(($) => $.detail.add_sub_issue_tooltip)}</TooltipContent>
-                  </Tooltip>
-                </div>
-
-                {/* Inline batch toolbar — appears next to the rows when
-                    selections exist, instead of as a far-away fixed bar. */}
-                <BatchActionToolbar placement="inline" />
-
-                {/* List */}
-                {!subIssuesCollapsed && (
-                  <div className="overflow-hidden rounded-lg border bg-card/30 divide-y divide-border/60">
-                    {childIssues.map((child) => (
-                      <SubIssueRow key={child.id} child={child} />
-                    ))}
-                  </div>
-                )}
-              </div>
-            );
-          })()}
+          {/* CEREBRO-PATCH(issue-sidebar-sub-issues): FIR-2827 — sub-issues moved
+              from this main-column block into the sidebar section above. */}
 
           <div className="my-8 border-t" />
 
@@ -2535,7 +2691,10 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
                   >
                     {isSubscribed ? t(($) => $.detail.unsubscribe) : t(($) => $.detail.subscribe)}
                   </button>
-                  {participantPopover}
+                  {/* CEREBRO-PATCH(issue-sidebar-subscribers): FIR-2827 — the avatar
+                      popover moved to the sidebar Subscribers section; keep it here
+                      only while that flag is off. */}
+                  {!sidebarSubscribersEnabled && participantPopover}
                 </div>
               )}
             </div>
@@ -2551,6 +2710,8 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
                 bar instead of a separate banner. wakeupIssueId is the issue UUID (issue.id),
                 not the route identifier (id): the wakeups list endpoint requires a UUID. */}
             {!isChat && <AgentLiveCard key={id} issueId={id} wakeupIssueId={issue?.id} />}
+            {/* CEREBRO-PATCH(rounds-held-reply-bar): FIR-3114 — a member reply held for a batch Round renders a wakeup-style banner here. */}
+            {!isChat && issue?.id && <RoundHeldReplyBar issueId={issue.id} />}
 
             {/* CEREBRO-PATCH(issue-detail-tabs-anchor): JEH-1518 — scroll anchor for NavOverlayButton tab-section scroll */}
             <div ref={tabsRef} />
@@ -2558,9 +2719,10 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
               {!isChat && (
                 <TabsList variant="line">
                   <TabsTrigger value="comments">Comments</TabsTrigger>
-                  <TabsTrigger value="agent-runs">Agent Runs</TabsTrigger>
-                  {/* CEREBRO-PATCH(cli-runs-tab-flag): FIR-1839 — "Sessions" tab renamed to "CLI runs", hidden unless cerebro_cli_runs_tab is on. */}
-                  {cliRunsTabEnabled && <TabsTrigger value="cli-runs">CLI runs</TabsTrigger>}
+                  {/* CEREBRO-PATCH(runs-tab-merged): FIR-2827 — "Agent Runs" and "CLI runs"
+                      merged into one "Runs" tab: agent runs on top, CLI runs below
+                      (CLI section still gated on cerebro_cli_runs_tab, FIR-1839). */}
+                  <TabsTrigger value="agent-runs">Runs</TabsTrigger>
                   {/* CEREBRO-PATCH(attachments-tab): FIR-2034 — issue attachments as a tab. */}
                   {attachmentsTabEnabled && (
                     <TabsTrigger value="attachments">
@@ -2572,17 +2734,17 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
 
               {!isChat && (
                 <TabsContent value="agent-runs">
+                  {/* CEREBRO-PATCH(runs-tab-merged): FIR-2827 — one Runs tab; agent
+                      runs first, CLI work-sessions below under their own heading. */}
                   <div className="mt-2">
                     <TaskRunHistory issueId={id} />
                   </div>
-                </TabsContent>
-              )}
-
-              {!isChat && cliRunsTabEnabled && (
-                <TabsContent value="cli-runs">
-                  <div className="mt-2">
-                    <WorkSessionHistory issueId={id} />
-                  </div>
+                  {cliRunsTabEnabled && (
+                    <div className="mt-6">
+                      <div className="mb-2 text-xs font-medium text-muted-foreground">CLI runs</div>
+                      <WorkSessionHistory issueId={id} />
+                    </div>
+                  )}
                 </TabsContent>
               )}
 

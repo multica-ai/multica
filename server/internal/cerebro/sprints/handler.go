@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -234,6 +235,38 @@ func (h *Handler) ListSprints(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"sprints": out})
 }
 
+// ListWorkspaceSprints returns every sprint in the caller's workspace,
+// optionally filtered by ?status=. FIR-2500: this is the entry point for
+// agents (CLI) that need to find the active sprint without knowing the
+// owning project up front, so each row carries the project title.
+func (h *Handler) ListWorkspaceSprints(w http.ResponseWriter, r *http.Request) {
+	if _, ok := requireUserID(w, r); !ok {
+		return
+	}
+	wsUUID, ok := workspaceFromContext(w, r)
+	if !ok {
+		return
+	}
+	status := strings.TrimSpace(r.URL.Query().Get("status"))
+	if status != "" && !validSprintStatus(status) {
+		writeError(w, http.StatusBadRequest, "invalid status")
+		return
+	}
+	rows, err := h.Cerebro.ListCerebroSprintsByWorkspace(r.Context(), cerebrodb.ListCerebroSprintsByWorkspaceParams{
+		WorkspaceID: wsUUID,
+		Status:      pgTextFromString(status),
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "list sprints failed")
+		return
+	}
+	out := make([]WorkspaceSprintResponse, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, workspaceSprintToResponse(row))
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"sprints": out})
+}
+
 // CreateSprint creates a manual sprint (used when the admin wants to start
 // the sequence before the sweeper has had a chance).
 func (h *Handler) CreateSprint(w http.ResponseWriter, r *http.Request) {
@@ -449,18 +482,53 @@ func (h *Handler) ListSprintIssues(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	rows, err := h.Cerebro.ListCerebroSprintIssuesBySprint(r.Context(), sprintID)
+	// FIR-2500: verify the sprint belongs to the caller's workspace before
+	// listing — the join rows carry issue titles now, so this endpoint must
+	// not answer for foreign-workspace sprint IDs.
+	sprint, err := h.Cerebro.GetCerebroSprint(r.Context(), sprintID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			writeError(w, http.StatusNotFound, "sprint not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "load sprint failed")
+		return
+	}
+	if !ensureWorkspaceMatch(w, r, sprint.WorkspaceID) {
+		return
+	}
+	rows, err := h.Cerebro.ListCerebroSprintIssueDetailsBySprint(r.Context(), sprintID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "list sprint issues failed")
 		return
 	}
-	out := make([]map[string]string, 0, len(rows))
+	// The issue identifier (PREFIX-number) is a workspace-level concern; one
+	// lookup covers every row. Best-effort: on failure rows ship without it.
+	issuePrefix := ""
+	if ws, wsErr := h.Upstream.GetWorkspace(r.Context(), sprint.WorkspaceID); wsErr == nil {
+		issuePrefix = ws.IssuePrefix
+	}
+	out := make([]map[string]any, 0, len(rows))
 	for _, row := range rows {
-		out = append(out, map[string]string{
+		item := map[string]any{
 			"issue_id":  util.UUIDToString(row.IssueID),
 			"sprint_id": util.UUIDToString(row.SprintID),
 			"added_at":  tsString(row.AddedAt),
-		})
+			"number":    row.Number,
+			"title":     row.Title,
+			"status":    row.Status,
+			"priority":  row.Priority,
+		}
+		if issuePrefix != "" {
+			item["identifier"] = issuePrefix + "-" + strconv.Itoa(int(row.Number))
+		}
+		if row.AssigneeType.Valid {
+			item["assignee_type"] = row.AssigneeType.String
+		}
+		if row.AssigneeID.Valid {
+			item["assignee_id"] = util.UUIDToString(row.AssigneeID)
+		}
+		out = append(out, item)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"issues": out})
 }

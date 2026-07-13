@@ -16,9 +16,31 @@ SET visibility = EXCLUDED.visibility,
 RETURNING artifact_id, owner_id, visibility, pinned, pinned_at, created_at, updated_at;
 
 -- name: GetNote :one
-SELECT artifact_id, owner_id, visibility, pinned, pinned_at, created_at, updated_at
+SELECT artifact_id, owner_id, visibility, pinned, pinned_at, author_codes, created_at, updated_at
 FROM cerebro_note
 WHERE artifact_id = $1;
+
+-- name: SetNoteAuthorCodes :exec
+-- FIR-2810: per-note toggle — stamp the writer's member code on every line.
+UPDATE cerebro_note
+SET author_codes = $2, updated_at = now()
+WHERE artifact_id = $1;
+
+-- name: GetNoteLineAttr :one
+-- FIR-2810: per-line attribution state for a note. base_body is the body the
+-- attrs array was computed for; a mismatch with the current artifact body
+-- means an out-of-band edit happened and the caller must self-heal.
+SELECT artifact_id, base_body, attrs, updated_at
+FROM cerebro_note_line_attr
+WHERE artifact_id = $1;
+
+-- name: UpsertNoteLineAttr :exec
+INSERT INTO cerebro_note_line_attr (artifact_id, base_body, attrs, updated_at)
+VALUES ($1, $2, $3, now())
+ON CONFLICT (artifact_id) DO UPDATE
+SET base_body  = EXCLUDED.base_body,
+    attrs      = EXCLUDED.attrs,
+    updated_at = now();
 
 -- name: SetNoteVisibility :exec
 UPDATE cerebro_note
@@ -251,10 +273,10 @@ ORDER BY n.pinned DESC, n.pinned_at DESC NULLS LAST, a.updated_at DESC
 LIMIT $3;
 
 -- name: ListNotesReferencingObject :many
--- FIR-1621 — reverse lookup for the note↔object coupling. Returns every note the
--- viewer may see that carries a reference pointing at the given (object, ref_id)
--- — e.g. all notes coupled to one issue. This is the read behind "coupled notes
--- show up in the issue's document list" (the two-way view). Same visibility rule
+-- FIR-1621 / FIR-3102 — reverse lookup for note↔object coupling. Issue lookup
+-- uses the canonical artifact.issue_id while legacy references remain readable
+-- during migration. This is the read behind "coupled notes show up in the
+-- issue's document list" (the two-way view). Same visibility rule
 -- as ListNotesForUser (owner / workspace / shared) AND folder-chain visibility,
 -- so a private note coupled to an issue is still only visible to its owner.
 SELECT DISTINCT a.id, a.workspace_id, a.folder_id, a.title, a.body,
@@ -262,10 +284,15 @@ SELECT DISTINCT a.id, a.workspace_id, a.folder_id, a.title, a.body,
        n.owner_id, n.visibility, n.pinned, n.pinned_at
 FROM cerebro_note n
 JOIN artifact a ON a.id = n.artifact_id
-JOIN cerebro_note_reference ref ON ref.note_id = n.artifact_id
+LEFT JOIN cerebro_note_reference ref
+  ON ref.note_id = n.artifact_id
+ AND ref.object = sqlc.arg(object)
+ AND ref.ref_id = sqlc.arg(ref_id)
 WHERE a.workspace_id = sqlc.arg(workspace_id)
-  AND ref.object = sqlc.arg(object)
-  AND ref.ref_id = sqlc.arg(ref_id)
+  AND (
+    ref.id IS NOT NULL
+    OR (sqlc.arg(object) = 'issue' AND a.issue_id::text = sqlc.arg(ref_id))
+  )
   AND (
     (
       (

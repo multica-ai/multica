@@ -635,6 +635,9 @@ export interface CreateSkillChangeRequestRequest {
 export interface ReviewSkillChangeRequestRequest {
   action: "approve" | "reject";
   comment?: string;
+  // CEREBRO-PATCH(skill-review-edit-content): FIR-2924 — reviewer's edited
+  // proposal (approve only). Omit/empty to merge as originally proposed.
+  edited_content?: string;
 }
 
 export interface ForkSkillRequest {
@@ -720,6 +723,45 @@ export interface ReviewAgentContextChangeRequestRequest {
 export interface RollbackAgentContextRequest {
   version: string;
   comment?: string;
+}
+
+// CEREBRO-PATCH(agent-office-observability-types): FIR-1775 Phase 4 — the
+// read-only "overblik og målinger" overview. How often an agent's context
+// changes, who approves the changes, and how much drift the lint finds.
+export interface AgentContextChangeRequestCounts {
+  pending: number;
+  approved: number;
+  rejected: number;
+  merged: number;
+  total: number;
+}
+
+export interface AgentContextApproverStat {
+  user_id: string;
+  name: string;
+  approved: number;
+  merged: number;
+  rejected: number;
+  total: number;
+}
+
+export interface AgentContextDriftSummary {
+  total: number;
+  errors: number;
+  warnings: number;
+  infos: number;
+}
+
+export interface AgentContextObservability {
+  agent_id: string;
+  agent_name: string;
+  context_version: string;
+  version_count: number;
+  versions_last_30d: number;
+  last_changed_at: string | null;
+  change_requests: AgentContextChangeRequestCounts;
+  approvers: AgentContextApproverStat[];
+  drift: AgentContextDriftSummary;
 }
 
 export interface CreateSkillRequest {

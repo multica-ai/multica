@@ -19,6 +19,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/auth"
+	cerebroanalytics "github.com/multica-ai/multica/server/internal/cerebro/analytics" // CEREBRO-PATCH(analytics-projection): wire Cerebro-owned analytics projection into upstream handler.
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
 	"github.com/multica-ai/multica/server/internal/cerebro/duplicatecheck"
 	cerebroinfisical "github.com/multica-ai/multica/server/internal/cerebro/infisical"
@@ -103,6 +104,11 @@ type cloudRuntimeProxy interface {
 }
 
 type Handler struct {
+	// CEREBRO-PATCH(analytics-projection-seam): FIR-2996 keeps canonical analytics behind cerebro-owned interfaces.
+	AnalyticsProjector  cerebroanalytics.RunProjector
+	AnalyticsBackfiller interface {
+		BackfillWorkspace(ctx context.Context, workspaceID, afterCursor string, limit int) (string, int, error)
+	}
 	Queries *db.Queries
 	// CEREBRO-PATCH(agent-infisical-secrets): cerebro queries for per-agent secret refs.
 	CerebroQueries        *cerebrodb.Queries
@@ -144,6 +150,9 @@ type Handler struct {
 	// CEREBRO-PATCH(handler-chat-mute): TECH-3352 — cerebro chat-session snooze
 	// seam (read muted_until onto the chat list, clear it on read).
 	ChatMute ChatMuteInvoker
+	// CEREBRO-PATCH(handler-chat-stream): FIR-2835 Phase 1 — chat run SSE
+	// stream broker seam (interface lives in chat_stream_cerebro.go).
+	ChatStream ChatRunStreamBroker
 	// CEREBRO-PATCH(handler-runtime-pause): cerebro runtime pause/unpause service.
 	RuntimePause RuntimePauseInvoker
 	// CEREBRO-PATCH(handler-group-permissions): cerebro group-permission gate.
@@ -152,6 +161,8 @@ type Handler struct {
 	MentionTriggerGate MentionTriggerGateInvoker
 	// CEREBRO-PATCH(handler-comment-target-guard): FIR-2674 reject agent comments with no target.
 	CommentTargetGuard CommentTargetGuardInvoker
+	// CEREBRO-PATCH(cerebro-rounds): hold member replies until a round starts.
+	RoundCommentGate RoundCommentGate
 	// CEREBRO-PATCH(handler-channel-create-guard): FIR-2660 restrict channel creation to owners/admins.
 	ChannelCreateGuard ChannelCreateGuardInvoker
 	// CEREBRO-PATCH(handler-channel-perms): TECH-3698 per-channel permission gate (rename/add-remove/leave).
@@ -262,17 +273,29 @@ type Handler struct {
 	// CEREBRO-PATCH(handler-capability-card-conns): TECH-3642 capabilities card reuses the connections list.
 	CapabilityConnections AgentCapabilityConnectionsLister
 	// CEREBRO-PATCH(handler-api-connection-brief): FIR-2388 shared api-connection resolver for the claim brief.
-	APIConnectionBrief CerebroAPIConnectionBriefResolver
+	APIConnectionBrief          CerebroAPIConnectionBriefResolver
+	ConnectionInstructionsBrief CerebroConnectionInstructionsBriefResolver // CEREBRO-PATCH(handler-connection-instructions): FIR-2760 claim-time guidance seam.
 	// CEREBRO-PATCH(handler-agent-memory-settings): FIR-1794 Gate 3 — per-(user,agent) memory read/write toggle.
 	AgentMemory AgentMemorySettingsService
 	// CEREBRO-PATCH(handler-memory-autorecall): FIR-1794 layer 3 — automatic memory recall for daemon claims.
 	MemoryAutoRecall CerebroMemoryAutoRecaller
+	// CEREBRO-PATCH(handler-agent-office-direct-edit): FIR-1775 Phase 2 — direct UpdateAgent edits land in agent context version history.
+	AgentContextDirectEdit CerebroAgentContextDirectEditRecorder
 	// CEREBRO-PATCH(handler-issue-workflow-activator): FIR-2283 followup —
 	// attaches an Issue workflow recipe to a freshly created issue when the
 	// create request (HTTP or CLI) carries workflow_id, so agents get the same
 	// "start an issue on a workflow" reach the manual create modal already has.
 	// Nil on a server without cerebro workflows wired.
 	IssueWorkflowActivator IssueWorkflowActivator
+}
+
+func (h *Handler) projectAnalyticsRun(ctx context.Context, taskID string) {
+	if h.AnalyticsProjector == nil {
+		return
+	}
+	if err := h.AnalyticsProjector.ProjectRun(ctx, taskID); err != nil {
+		slog.Warn("project analytics run failed", "task_id", taskID, "error", err)
+	}
 }
 
 // IssueWorkflowActivator is the upstream-side seam for attaching a cerebro
@@ -288,7 +311,8 @@ type Handler struct {
 type IssueWorkflowActivator interface {
 	ActivateForIssue(
 		ctx context.Context,
-		workspaceID, workflowID, issueID, creatorID pgtype.UUID,
+		// CEREBRO-PATCH(cerebro-workflow-agent-requester): preserve the human requester when an agent activates a workflow.
+		workspaceID, workflowID, issueID, creatorID, requesterID pgtype.UUID,
 		createdByType string,
 	) error
 }

@@ -15,9 +15,11 @@ vi.mock("@multica/core/api", async () => {
 import {
   clearToolPolicy,
   fetchToolPolicyTable,
+  isLockedFromElsewhere,
   permissionDescription,
   setToolPolicy,
 } from "./tool-policy";
+import type { ToolPolicyRow } from "./tool-policy";
 
 beforeEach(() => {
   mockCerebroRequest.mockReset();
@@ -208,5 +210,123 @@ describe("setToolPolicy / clearToolPolicy", () => {
     expect(path).toContain("layer=user");
     expect(path).toContain("subject_id=u1");
     expect(init.method).toBe("DELETE");
+  });
+});
+
+// --- isLockedFromElsewhere --------------------------------------------------
+
+describe("isLockedFromElsewhere", () => {
+  const NO_LAYERS: ToolPolicyRow["layers"] = {
+    workspace: null,
+    runtime: null,
+    agent: null,
+    group: null,
+    user: null,
+    system: null,
+  };
+  const NO_CONDITIONS: ToolPolicyRow["conditions"] = {
+    workspace: null,
+    runtime: null,
+    agent: null,
+    user: null,
+    system: null,
+  };
+
+  function makeRow(
+    effective: Partial<ToolPolicyRow["effective"]> = {},
+    layers: Partial<ToolPolicyRow["layers"]> = {},
+  ): ToolPolicyRow {
+    return {
+      tool_key: "slack.post_message",
+      resource_pattern: "",
+      title: "Post Slack message",
+      category: "MCP · Slack",
+      source: "scan",
+      managed_externally: false,
+      layers: { ...NO_LAYERS, ...layers },
+      conditions: { ...NO_CONDITIONS },
+      effective: {
+        setting: "deny",
+        decided_by: "workspace",
+        capped_by: "",
+        reason: "",
+        openable: true,
+        ...effective,
+      },
+      capped_by_groups: [],
+    };
+  }
+
+  // The reported bug (FIR-3091 punkt 1): under member-override a Group Allow
+  // opens a plain workspace Deny — the Group control must NOT read as locked, so
+  // no false "no effect" warning fires.
+  it("does NOT lock a Group editing an openable workspace Deny", () => {
+    const row = makeRow(
+      { setting: "deny", decided_by: "workspace", openable: true },
+      { workspace: "deny" },
+    );
+    expect(isLockedFromElsewhere(row, "group")).toBe(false);
+    expect(isLockedFromElsewhere(row, "user")).toBe(false);
+    expect(isLockedFromElsewhere(row, "agent")).toBe(false);
+  });
+
+  // A workspace Disable is the one unopenable member floor — still locked.
+  it("locks any member layer when the workspace layer is Disable", () => {
+    const row = makeRow(
+      { setting: "deny", decided_by: "workspace", openable: true },
+      { workspace: "disable" },
+    );
+    expect(isLockedFromElsewhere(row, "group")).toBe(true);
+    expect(isLockedFromElsewhere(row, "user")).toBe(true);
+    expect(isLockedFromElsewhere(row, "agent")).toBe(true);
+  });
+
+  it("locks a broader member layer when a more specific member layer decided", () => {
+    const row = makeRow(
+      { setting: "deny", decided_by: "user", openable: true },
+      { workspace: "deny", user: "deny" },
+    );
+    // Group is broader than the deciding User layer → cannot change the verdict.
+    expect(isLockedFromElsewhere(row, "group")).toBe(true);
+    expect(isLockedFromElsewhere(row, "workspace")).toBe(true);
+    // The User layer itself decided → editing it is not locked.
+    expect(isLockedFromElsewhere(row, "user")).toBe(false);
+  });
+
+  it("locks the Agent layer on an explicit Group/User ceiling but not on a workspace default", () => {
+    const wsDefault = makeRow(
+      { setting: "deny", decided_by: "workspace", openable: true },
+      { workspace: "deny" },
+    );
+    expect(isLockedFromElsewhere(wsDefault, "agent")).toBe(false);
+
+    const userCeiling = makeRow(
+      { setting: "deny", decided_by: "user", openable: true },
+      { workspace: "deny", user: "deny" },
+    );
+    expect(isLockedFromElsewhere(userCeiling, "agent")).toBe(true);
+  });
+
+  it("locks via a genuine tighten-cap regardless of mode", () => {
+    const row = makeRow({ setting: "deny", decided_by: "agent", capped_by: "agent", openable: true });
+    expect(isLockedFromElsewhere(row, "group")).toBe(true);
+  });
+
+  it("never locks when the verdict is already Allow", () => {
+    const row = makeRow({ setting: "allow", decided_by: "user", openable: true });
+    expect(isLockedFromElsewhere(row, "group")).toBe(false);
+  });
+
+  it("keeps the tighten-only rule for a hard floor (openable=false)", () => {
+    // A hard floor (e.g. credential.*) resolves tighten-only: a workspace Deny is
+    // an unopenable ceiling for a Group/Agent, exactly as before FIR-3091.
+    const floor = makeRow(
+      { setting: "deny", decided_by: "workspace", openable: false },
+      { workspace: "deny" },
+    );
+    expect(isLockedFromElsewhere(floor, "group")).toBe(true);
+    expect(isLockedFromElsewhere(floor, "agent")).toBe(true);
+    // The deciding layer editing itself is not locked.
+    expect(isLockedFromElsewhere(floor, "workspace")).toBe(false);
   });
 });

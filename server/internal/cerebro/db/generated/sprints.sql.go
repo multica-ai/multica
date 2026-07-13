@@ -409,6 +409,61 @@ func (q *Queries) GetLatestCerebroSprintByProject(ctx context.Context, projectID
 	return i, err
 }
 
+const listCerebroSprintIssueDetailsBySprint = `-- name: ListCerebroSprintIssueDetailsBySprint :many
+SELECT csi.issue_id, csi.sprint_id, csi.added_at,
+       i.number, i.title, i.status, i.priority,
+       i.assignee_type, i.assignee_id
+FROM cerebro_sprint_issue csi
+JOIN issue i ON i.id = csi.issue_id
+WHERE csi.sprint_id = $1
+ORDER BY i.number ASC
+`
+
+type ListCerebroSprintIssueDetailsBySprintRow struct {
+	IssueID      pgtype.UUID        `json:"issue_id"`
+	SprintID     pgtype.UUID        `json:"sprint_id"`
+	AddedAt      pgtype.Timestamptz `json:"added_at"`
+	Number       int32              `json:"number"`
+	Title        string             `json:"title"`
+	Status       string             `json:"status"`
+	Priority     string             `json:"priority"`
+	AssigneeType pgtype.Text        `json:"assignee_type"`
+	AssigneeID   pgtype.UUID        `json:"assignee_id"`
+}
+
+// FIR-2500: sprint overview for the CLI — each issue in the sprint joined
+// with its upstream title/status so an agent gets the full picture in one
+// call instead of N follow-up issue lookups.
+func (q *Queries) ListCerebroSprintIssueDetailsBySprint(ctx context.Context, sprintID pgtype.UUID) ([]ListCerebroSprintIssueDetailsBySprintRow, error) {
+	rows, err := q.db.Query(ctx, listCerebroSprintIssueDetailsBySprint, sprintID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListCerebroSprintIssueDetailsBySprintRow{}
+	for rows.Next() {
+		var i ListCerebroSprintIssueDetailsBySprintRow
+		if err := rows.Scan(
+			&i.IssueID,
+			&i.SprintID,
+			&i.AddedAt,
+			&i.Number,
+			&i.Title,
+			&i.Status,
+			&i.Priority,
+			&i.AssigneeType,
+			&i.AssigneeID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listCerebroSprintIssuesBySprint = `-- name: ListCerebroSprintIssuesBySprint :many
 SELECT issue_id, sprint_id, added_at
 FROM cerebro_sprint_issue
@@ -691,6 +746,73 @@ func (q *Queries) ListCerebroSprintsByProject(ctx context.Context, projectID pgt
 	return items, nil
 }
 
+const listCerebroSprintsByWorkspace = `-- name: ListCerebroSprintsByWorkspace :many
+SELECT s.id, s.workspace_id, s.project_id, s.name, s.sequence_no, s.status,
+       s.start_date, s.end_date, s.goal, s.created_at, s.updated_at,
+       p.title AS project_title
+FROM cerebro_sprint s
+JOIN project p ON p.id = s.project_id
+WHERE s.workspace_id = $1
+  AND ($2::text IS NULL OR s.status = $2::text)
+ORDER BY (s.status = 'active') DESC, p.title ASC, s.sequence_no DESC
+`
+
+type ListCerebroSprintsByWorkspaceParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	Status      pgtype.Text `json:"status"`
+}
+
+type ListCerebroSprintsByWorkspaceRow struct {
+	ID           pgtype.UUID        `json:"id"`
+	WorkspaceID  pgtype.UUID        `json:"workspace_id"`
+	ProjectID    pgtype.UUID        `json:"project_id"`
+	Name         string             `json:"name"`
+	SequenceNo   int32              `json:"sequence_no"`
+	Status       string             `json:"status"`
+	StartDate    pgtype.Date        `json:"start_date"`
+	EndDate      pgtype.Date        `json:"end_date"`
+	Goal         pgtype.Text        `json:"goal"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
+	ProjectTitle string             `json:"project_title"`
+}
+
+// FIR-2500: workspace-wide sprint listing so the CLI can find sprints (for
+// example the active one) without knowing the owning project up front.
+// $1 = workspace_id; sqlc.narg('status') optionally filters by sprint status.
+func (q *Queries) ListCerebroSprintsByWorkspace(ctx context.Context, arg ListCerebroSprintsByWorkspaceParams) ([]ListCerebroSprintsByWorkspaceRow, error) {
+	rows, err := q.db.Query(ctx, listCerebroSprintsByWorkspace, arg.WorkspaceID, arg.Status)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListCerebroSprintsByWorkspaceRow{}
+	for rows.Next() {
+		var i ListCerebroSprintsByWorkspaceRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.ProjectID,
+			&i.Name,
+			&i.SequenceNo,
+			&i.Status,
+			&i.StartDate,
+			&i.EndDate,
+			&i.Goal,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.ProjectTitle,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listExpiredActiveCerebroSprints = `-- name: ListExpiredActiveCerebroSprints :many
 SELECT id, workspace_id, project_id, name, sequence_no, status,
        start_date, end_date, goal, created_at, updated_at
@@ -872,6 +994,17 @@ type MoveIncompleteCerebroSprintIssuesToStatusParams struct {
 
 func (q *Queries) MoveIncompleteCerebroSprintIssuesToStatus(ctx context.Context, arg MoveIncompleteCerebroSprintIssuesToStatusParams) error {
 	_, err := q.db.Exec(ctx, moveIncompleteCerebroSprintIssuesToStatus, arg.Column1, arg.Status)
+	return err
+}
+
+const removeCerebroSprintIssuesBatch = `-- name: RemoveCerebroSprintIssuesBatch :exec
+DELETE FROM cerebro_sprint_issue WHERE issue_id = ANY($1::uuid[])
+`
+
+// FIR-2828: bulk-unassign issues from a sprint that is being completed, e.g.
+// when the operator chose "move remaining issues to backlog".
+func (q *Queries) RemoveCerebroSprintIssuesBatch(ctx context.Context, dollar_1 []pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, removeCerebroSprintIssuesBatch, dollar_1)
 	return err
 }
 

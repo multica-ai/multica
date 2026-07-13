@@ -101,6 +101,13 @@ type Capability struct {
 	// ManagedExternally is true when the tool-policy gate is NOT this action's
 	// enforcement point (see package doc). Shown for visibility; phase 2 skips it.
 	ManagedExternally bool
+	// Surfaced marks a capability that appears in the Permissions table behind the
+	// light agent-start gate (cerebro_agent_trigger_permissions), NOT only behind
+	// the full-catalog flag (cerebro_platform_capabilities). It is set on the
+	// "start someone else's agent" family (FIR-3091 slice 4) so an admin can see
+	// and set those rules in the same screen as reported tools without opening the
+	// whole platform catalog. SurfacedKeys() is the canonical list.
+	Surfaced bool
 	// Ops are the permguard inventory ids (http surface) this capability covers.
 	// Traceability + coverage tripwire: every id must be a real, current route.
 	Ops []string
@@ -171,6 +178,7 @@ var catalog = []Capability{
 		Key:           "rerun_issue",
 		Title:         "Re-run / cancel issue agent",
 		Category:      CategoryIssues,
+		Surfaced:      true,
 		Description:   "Re-trigger the assigned agent on an issue, or cancel a running task.",
 		DescriptionZh: "重新触发工单上分配的 agent，或取消正在运行的任务。",
 		Ops: []string{
@@ -279,6 +287,7 @@ var catalog = []Capability{
 		Key:           "trigger_autopilot",
 		Title:         "Trigger autopilot",
 		Category:      CategoryAutopilots,
+		Surfaced:      true,
 		Description:   "Fire an autopilot manually, or replay a past delivery.",
 		DescriptionZh: "手动触发 autopilot，或重放一次过往投递。",
 		Ops: []string{
@@ -349,6 +358,8 @@ var catalog = []Capability{
 			"DELETE /api/notes/{id}",
 			"PUT /api/notes/{id}/pin",
 			"PUT /api/notes/{id}/visibility",
+			// FIR-2810: per-note toggle for per-line author-code stamping.
+			"PUT /api/notes/{id}/author-codes",
 			"POST /api/notes/{id}/references",
 			"DELETE /api/notes/{id}/references/{refId}",
 			// Wave 3 (TECH-3556): comments + suggestions, versions, edit lock.
@@ -358,6 +369,10 @@ var catalog = []Capability{
 			"DELETE /api/notes/{id}/comments/{commentId}",
 			"POST /api/notes/{id}/comments/{commentId}/resolve",
 			"POST /api/notes/{id}/comments/{commentId}/suggestion",
+			// FIR-3102: create a standalone issue from one comment. Gated by
+			// requireCanComment (same access level as posting a comment), so it
+			// belongs to manage_notes, not the create_issue capability.
+			"POST /api/notes/{id}/comments/{commentId}/create-issue",
 			"POST /api/notes/{id}/versions",
 			"POST /api/notes/{id}/versions/{versionId}/restore",
 			"POST /api/notes/{id}/lock",
@@ -454,6 +469,7 @@ var catalog = []Capability{
 		Key:           "trigger_other_agent",
 		Title:         "Trigger someone else's agent",
 		Category:      CategoryAgents,
+		Surfaced:      true,
 		Description:   "Whether you may start an agent you do not own (via an @mention or run-request). FIR-2409: now settable on the controllable engine at workspace / group / member / agent level. With no rule set, the hardcoded default applies (owners/admins master key, members blocked); an explicit Deny removes the master key, an explicit Allow grants a blocked member.",
 		DescriptionZh: "是否可启动不属于你的 agent（通过 @提及 或运行请求）。FIR-2409：现可在工作区/群组/成员/agent 层级于可控引擎上设置。未设规则时套用硬编码默认（所有者/管理员持万能钥匙，成员被阻止）；显式 Deny 移除万能钥匙，显式 Allow 放行被阻止的成员。",
 		Evidence: []string{
@@ -465,6 +481,7 @@ var catalog = []Capability{
 		Key:           "schedule_agent_wakeup",
 		Title:         "Schedule agent wakeup",
 		Category:      CategoryAgents,
+		Surfaced:      true,
 		Description:   "Create or cancel a scheduled wakeup that starts an agent on an issue later or when a watched event happens.",
 		DescriptionZh: "创建或取消计划唤醒，在稍后或监视事件发生时于工单上启动 agent。",
 		Ops: []string{
@@ -547,8 +564,8 @@ var catalog = []Capability{
 		DescriptionZh: "添加、移除或更改 runtime 所用的模型/供应商账户的管控。",
 		Ops: []string{
 			"POST /api/workspaces/{id}/accounts",
-			"DELETE /api/workspaces/{id}/accounts/{id}",
-			"PATCH /api/workspaces/{id}/accounts/{id}/controls",
+			"DELETE /api/workspaces/{id}/accounts/{accountID}",
+			"PATCH /api/workspaces/{id}/accounts/{accountID}/controls",
 		},
 	},
 	{
@@ -791,8 +808,8 @@ var catalog = []Capability{
 		Key:           "manage_project_sprints",
 		Title:         "Manage project sprints",
 		Category:      CategoryProjects,
-		Description:   "Create, edit, delete, and assign project sprints and recurring sprint tasks.",
-		DescriptionZh: "创建、编辑、删除并分配项目冲刺与周期性冲刺任务。",
+		Description:   "Create, edit, complete, delete, and assign project sprints and recurring sprint tasks.",
+		DescriptionZh: "创建、编辑、完成、删除并分配项目冲刺与周期性冲刺任务。",
 		Ops: []string{
 			"PUT /api/cerebro/projects/{projectID}/sprint-settings/",
 			"DELETE /api/cerebro/projects/{projectID}/sprint-settings/",
@@ -801,6 +818,7 @@ var catalog = []Capability{
 			"POST /api/cerebro/projects/{projectID}/sprint-recurring-tasks/",
 			"PUT /api/cerebro/sprint-recurring-tasks/{id}/",
 			"DELETE /api/cerebro/sprint-recurring-tasks/{id}/",
+			"POST /api/cerebro/sprints/{sprintID}/complete",
 			"PUT /api/cerebro/sprints/{sprintID}/",
 			"DELETE /api/cerebro/sprints/{sprintID}/",
 			"PUT /api/cerebro/issues/{issueID}/sprint/",
@@ -846,6 +864,20 @@ var catalog = []Capability{
 			"PUT /api/cerebro/workspaces/{id}/auth-settings/",
 			"POST /api/workspaces/{id}/pause-tasks",
 			"POST /api/workspaces/{id}/generate-logo",
+		},
+	},
+	{
+		Key:           "manage_analytics",
+		Title:         "Use and manage analytics",
+		Category:      CategoryWorkspace,
+		Description:   "Query workspace analytics, rebuild the analytics projection, and create, update, or delete saved visuals.",
+		DescriptionZh: "查询工作区分析、重建分析投影，以及创建、更新或删除已保存的可视化。",
+		Ops: []string{
+			"POST /api/analytics/query",
+			"POST /api/analytics/backfill",
+			"POST /api/analytics/visuals",
+			"PUT /api/analytics/visuals/{visualId}",
+			"DELETE /api/analytics/visuals/{visualId}",
 		},
 	},
 	{
@@ -904,6 +936,8 @@ var catalog = []Capability{
 			"DELETE /api/skills/{id}/files/{fileId}",
 			// CEREBRO-PATCH(skill-observations-catalog): TECH-3077 agent runtime learning signal.
 			"POST /api/skill-observations",
+			// CEREBRO-PATCH(skill-autolearn-catalog): TECH-3692 — toggle a skill's self-learning switch.
+			"POST /api/skills/{id}/auto-learn",
 		},
 	},
 
@@ -1053,50 +1087,57 @@ var catalog = []Capability{
 var excluded = map[string]string{
 	// self_only — operates on the caller's own data/identity; there is no other
 	// actor to gate on, so the tool-policy engine has nothing to decide.
-	"POST /api/workspaces/":                        "self_only — create-workspace is pre-workspace; any authenticated user, no workspace context to gate within",
-	"POST /api/workspaces/{id}/leave":              "self_only — leaving is the caller's own membership",
-	"POST /api/channels/{id}/leave":                "self_only — TECH-3758, leaving a channel removes the caller's own subscription",
-	"POST /api/workspaces/{id}/connections/test":   "admin_only — validates a connection config for the current workspace; not an agent runtime tool",
-	"POST /api/workspaces/{id}/cerebro/copy":       "admin_only — owner/admin-gated workspace copy (TECH-3582); RequireWorkspaceRoleFromURL, not wired to the tool-policy engine, no agent runtime tool equivalent",
-	"POST /api/inbox/add-issue":                    "self_only — caller pinning any issue into their own inbox",
-	"DELETE /api/me/profile":                       "self_only — caller's own profile",
-	"PATCH /api/me":                                "self_only — caller's own profile",
-	"PUT /api/me/profile":                          "self_only — caller's own profile",
-	"PATCH /api/me/onboarding":                     "self_only — caller's own onboarding",
-	"PATCH /api/me/preferences":                    "self_only — caller's own preferences",
-	"POST /api/me/onboarding/complete":             "self_only — caller's own onboarding",
-	"POST /api/me/onboarding/cloud-waitlist":       "self_only — caller's own onboarding",
-	"POST /api/me/onboarding/no-runtime-bootstrap": "self_only — caller's own onboarding",
-	"POST /api/me/onboarding/runtime-bootstrap":    "self_only — caller's own onboarding",
-	"PUT /api/notification-preferences/":           "self_only — caller's own notification prefs",
-	"POST /api/feedback":                           "self_only — caller submitting feedback",
-	"POST /api/cli-token":                          "self_only — caller's own CLI token",
-	"POST /api/tokens/":                            "self_only — caller's own API token",
-	"POST /api/tokens/current/renew":               "self_only — caller's own API token",
-	"DELETE /api/tokens/{id}":                      "self_only — caller's own API token",
-	"POST /api/pins/":                              "self_only — caller's own pins",
-	"PUT /api/pins/reorder":                        "self_only — caller's own pins",
-	"DELETE /api/pins/{itemType}/{itemId}":         "self_only — caller's own pins",
-	"POST /api/push/subscribe":                     "self_only — caller's own push subscription",
-	"POST /api/push/unsubscribe":                   "self_only — caller's own push subscription",
-	"POST /api/inbox/archive-all":                  "self_only — caller's own inbox",
-	"POST /api/inbox/archive-all-read":             "self_only — caller's own inbox",
-	"POST /api/inbox/archive-completed":            "self_only — caller's own inbox",
-	"POST /api/inbox/mark-all-read":                "self_only — caller's own inbox",
-	"POST /api/inbox/notifications/archive-all":    "self_only — caller's own inbox",
-	"POST /api/inbox/notifications/mark-all-read":  "self_only — caller's own inbox",
-	"POST /api/inbox/reminders":                    "self_only — caller's own inbox",
-	"POST /api/cerebro/reminders/":                 "self_only — caller's own reminders (FIR-394)",
-	"POST /api/cerebro/reminders/{id}/done":        "self_only — caller's own reminders (FIR-394)",
-	"POST /api/cerebro/reminders/{id}/snooze":      "self_only — caller's own reminders (FIR-394)",
-	"DELETE /api/cerebro/reminders/{id}":           "self_only — caller's own reminders (FIR-394)",
-	"POST /api/inbox/{id}/archive":                 "self_only — caller's own inbox",
-	"POST /api/inbox/{id}/mute":                    "self_only — caller's own inbox",
-	"DELETE /api/inbox/{id}/mute":                  "self_only — caller's own inbox",
-	"POST /api/inbox/{id}/read":                    "self_only — caller's own inbox",
-	"POST /api/inbox/{id}/unread":                  "self_only — caller's own inbox",
-	"POST /api/inbox/{id}/unarchive":               "self_only — caller's own inbox",
-	"POST /api/inbox/{id}/run-private-agent":       "self_only — caller running their own private agent from their inbox",
+	"POST /api/workspaces/":                                  "self_only — create-workspace is pre-workspace; any authenticated user, no workspace context to gate within",
+	"POST /api/workspaces/{id}/leave":                        "self_only — leaving is the caller's own membership",
+	"POST /api/channels/{id}/leave":                          "self_only — TECH-3758, leaving a channel removes the caller's own subscription",
+	"POST /api/workspaces/{id}/connections/test":             "admin_only — validates a connection config for the current workspace; not an agent runtime tool",
+	"POST /api/workspaces/{id}/cerebro/copy":                 "admin_only — owner/admin-gated workspace copy (TECH-3582); RequireWorkspaceRoleFromURL, not wired to the tool-policy engine, no agent runtime tool equivalent",
+	"POST /api/inbox/add-issue":                              "self_only — caller pinning any issue into their own inbox",
+	"DELETE /api/me/profile":                                 "self_only — caller's own profile",
+	"PATCH /api/me":                                          "self_only — caller's own profile",
+	"PUT /api/me/profile":                                    "self_only — caller's own profile",
+	"PATCH /api/me/onboarding":                               "self_only — caller's own onboarding",
+	"PATCH /api/me/preferences":                              "self_only — caller's own preferences",
+	"POST /api/me/onboarding/complete":                       "self_only — caller's own onboarding",
+	"POST /api/me/onboarding/cloud-waitlist":                 "self_only — caller's own onboarding",
+	"POST /api/me/onboarding/no-runtime-bootstrap":           "self_only — caller's own onboarding",
+	"POST /api/me/onboarding/runtime-bootstrap":              "self_only — caller's own onboarding",
+	"PUT /api/notification-preferences/":                     "self_only — caller's own notification prefs",
+	"POST /api/feedback":                                     "self_only — caller submitting feedback",
+	"POST /api/cli-token":                                    "self_only — caller's own CLI token",
+	"POST /api/tokens/":                                      "self_only — caller's own API token",
+	"POST /api/tokens/current/renew":                         "self_only — caller's own API token",
+	"DELETE /api/tokens/{id}":                                "self_only — caller's own API token",
+	"POST /api/pins/":                                        "self_only — caller's own pins",
+	"PUT /api/pins/reorder":                                  "self_only — caller's own pins",
+	"DELETE /api/pins/{itemType}/{itemId}":                   "self_only — caller's own pins",
+	"POST /api/push/subscribe":                               "self_only — caller's own push subscription",
+	"POST /api/push/unsubscribe":                             "self_only — caller's own push subscription",
+	"POST /api/inbox/archive-all":                            "self_only — caller's own inbox",
+	"POST /api/inbox/archive-all-read":                       "self_only — caller's own inbox",
+	"POST /api/inbox/archive-completed":                      "self_only — caller's own inbox",
+	"POST /api/inbox/mark-all-read":                          "self_only — caller's own inbox",
+	"POST /api/inbox/notifications/archive-all":              "self_only — caller's own inbox",
+	"POST /api/inbox/notifications/mark-all-read":            "self_only — caller's own inbox",
+	"POST /api/inbox/reminders":                              "self_only — caller's own inbox",
+	"POST /api/cerebro/reminders/":                           "self_only — caller's own reminders (FIR-394)",
+	"POST /api/cerebro/reminders/{id}/done":                  "self_only — caller's own reminders (FIR-394)",
+	"POST /api/cerebro/reminders/{id}/snooze":                "self_only — caller's own reminders (FIR-394)",
+	"DELETE /api/cerebro/reminders/{id}":                     "self_only — caller's own reminders (FIR-394)",
+	"POST /api/cerebro/rounds/":                              "self_only — caller's own inbox rounds (FIR-2736)",
+	"PATCH /api/cerebro/rounds/{roundId}/":                   "self_only — caller's own inbox rounds (FIR-2736)",
+	"DELETE /api/cerebro/rounds/{roundId}/":                  "self_only — caller's own inbox rounds (FIR-2736)",
+	"POST /api/cerebro/rounds/{roundId}/members":             "self_only — caller's own inbox rounds (FIR-2736)",
+	"DELETE /api/cerebro/rounds/{roundId}/members/{issueId}": "self_only — caller's own inbox rounds (FIR-2736)",
+	"POST /api/cerebro/rounds/{roundId}/start":               "self_only — caller's own inbox rounds (FIR-2736)",
+	"POST /api/cerebro/rounds/{roundId}/dismiss":             "self_only — caller's own inbox rounds (FIR-3114)",
+	"POST /api/inbox/{id}/archive":                           "self_only — caller's own inbox",
+	"POST /api/inbox/{id}/mute":                              "self_only — caller's own inbox",
+	"DELETE /api/inbox/{id}/mute":                            "self_only — caller's own inbox",
+	"POST /api/inbox/{id}/read":                              "self_only — caller's own inbox",
+	"POST /api/inbox/{id}/unread":                            "self_only — caller's own inbox",
+	"POST /api/inbox/{id}/unarchive":                         "self_only — caller's own inbox",
+	"POST /api/inbox/{id}/run-private-agent":                 "self_only — caller running their own private agent from their inbox",
 
 	// cerebro focus-list — personal task queue, caller's own items only.
 	"POST /api/cerebro/focus-list/":            "self_only — caller's own focus list",
@@ -1170,6 +1211,7 @@ var excluded = map[string]string{
 	"POST /api/daemon/tasks/{taskId}/session":                                      "daemon-token — runtime daemon callback",
 	"POST /api/daemon/tasks/{taskId}/start":                                        "daemon-token — runtime daemon callback",
 	"POST /api/daemon/tasks/{taskId}/usage":                                        "daemon-token — runtime daemon callback",
+	"POST /api/daemon/tasks/{taskId}/skill-usage":                                  "daemon-token — runtime daemon callback",
 	"POST /api/daemon/tasks/{taskId}/wait-local-directory":                         "daemon-token — runtime daemon callback",
 	"POST /api/daemon/workspaces/{workspaceId}/repo/check":                         "daemon-token — runtime daemon callback",
 	"POST /api/daemon/workspaces/{workspaceId}/tool-policy/resolve":                "daemon-token — runtime daemon callback; the local-runtime per-tool resolve seam itself runs the tool-policy gate internally (TECH-3173)",
@@ -1215,6 +1257,7 @@ var excluded = map[string]string{
 	"POST /api/agents/backfill-avatars":              "cosmetic — avatar backfill maintenance",
 	"POST /api/capabilities/report":                  "runtime-self-report — a runtime reporting its own tools, not a user action",
 	"POST /api/workspaces/{id}/cerebro/test-as-user": "read-only — resolves another user+agent's tool verdict (Test as user); reads policy, changes no state; gated in-handler by tools:test-as-user",
+	"POST /api/agents/context/lint/repo-file":        "read-only — drift lint of a repo CLAUDE.md/AGENTS.md's content posted in the body (FIR-1775 Phase 3); pure analysis, changes no state",
 	"POST /api/issues/{id}/squad-evaluated":          "system-callback — squad-evaluation marker set by the platform, not a user action",
 }
 
@@ -1232,6 +1275,48 @@ func Keys() []string {
 		out[i] = c.Key
 	}
 	return out
+}
+
+// SurfacedKeys returns the keys marked Surfaced (the agent-start family), in
+// catalog order. These are the capabilities the Permissions table shows behind
+// the light agent-start gate, without opening the whole platform catalog
+// (FIR-3091 slice 4).
+func SurfacedKeys() []string {
+	var out []string
+	for _, c := range catalog {
+		if c.Surfaced {
+			out = append(out, c.Key)
+		}
+	}
+	return out
+}
+
+// notEnforcedKeys is the closed set of capability keys that are Surfaced in the
+// Permissions table but whose stored setting does NOT yet gate anything at
+// runtime — "surfaced but not yet wired". Today these are the three agent-start
+// family keys added as Surfaced=true (FIR-3091 slice 4 / FIR-2409): the table
+// shows and lets an admin author them, but only trigger_other_agent is actually
+// read by the gate, so the other three are cosmetic until their gate lands. See
+// the Surfaced doc + SurfacedKeys() above for the surfacing side.
+//
+// Kept as an explicit exception list, not a per-entry flag, so the DEFAULT is
+// "enforced" (Jesper's rule, FIR-3091 punkt 8): every permission is enforced
+// unless it is one of these known-unwired keys, and a new capability is enforced
+// the moment it is added without touching every catalog entry.
+var notEnforcedKeys = map[string]bool{
+	"rerun_issue":           true,
+	"schedule_agent_wakeup": true,
+	"trigger_autopilot":     true,
+}
+
+// Enforced reports whether a policy setting authored on this tool_key is actually
+// read by the runtime gate today (FIR-3091 punkt 8). It backs the per-permission
+// detail page's "is this live or cosmetic" signal: true for every key except the
+// known "surfaced but not yet wired" exceptions in notEnforcedKeys. An unknown
+// key returns true (enforced by default), matching Jesper's rule that a
+// capability is enforced unless explicitly listed otherwise.
+func Enforced(key string) bool {
+	return !notEnforcedKeys[key]
 }
 
 // ByKey looks a capability up by its stable key.

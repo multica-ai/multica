@@ -27,8 +27,12 @@ COPY server/ ./server/
 # VERSION=dev reports "dev", which reads as "no version reported" and disables
 # Create with agent. So the default below is a real release baseline, never
 # "dev". CI / the runtime-deploy skill SHOULD override it with the exact source
-# version: --build-arg VERSION=$(git describe --tags --match 'v*' --always).
-ARG VERSION=v1.0.1
+# version: --build-arg VERSION=$(git describe --tags --match 'v[0-9].[0-9]*' --always).
+# When no build-arg is passed (e.g. Sliplane auto-deploy, which does not pass one),
+# this default is what the runtime reports in `multica runtime list`, so keep it
+# bumped to the current release line (homebrew-tap latest) instead of letting it
+# drift back to a stale baseline.
+ARG VERSION=v1.11.2
 ARG COMMIT=unknown
 RUN cd server && CGO_ENABLED=0 go build -ldflags "-s -w -X main.version=${VERSION} -X main.commit=${COMMIT}" -o bin/multica ./cmd/multica
 

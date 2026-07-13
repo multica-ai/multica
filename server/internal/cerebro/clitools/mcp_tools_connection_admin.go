@@ -97,6 +97,7 @@ func registerCerebroConnectionAdminTools(srv *mcp.Server, client *cli.APIClient)
 				"cf_access_id":     map[string]any{"type": "string", "description": "Cloudflare Access service-token client ID"},
 				"cf_access_secret": map[string]any{"type": "string", "description": "Cloudflare Access service-token client secret"},
 				"default_access":   map[string]any{"type": "string", "description": "Baseline verdict for actors with no explicit rule: allow, ask, or deny (default deny)", "enum": []string{"allow", "ask", "deny"}},
+				"on_behalf_of":     map[string]any{"type": "boolean", "description": "type=api connections only: stamp the calling agent's identity onto every dispatch as X-On-Behalf-Of: agent:<uuid>, so the remote API authorizes the call as that agent's own delegation grant instead of the shared connection key (FIR-2668)"},
 			},
 		},
 	}, func(ctx context.Context, args map[string]any) (mcp.CallToolResult, error) {
@@ -157,6 +158,7 @@ func registerCerebroConnectionAdminTools(srv *mcp.Server, client *cli.APIClient)
 				"cf_access_id":     map[string]any{"type": "string", "description": "Cloudflare Access service-token client ID"},
 				"cf_access_secret": map[string]any{"type": "string", "description": "Cloudflare Access service-token client secret"},
 				"default_access":   map[string]any{"type": "string", "description": "allow, ask, or deny", "enum": []string{"allow", "ask", "deny"}},
+				"on_behalf_of":     map[string]any{"type": "boolean", "description": "type=api connections only: stamp the calling agent's identity onto every dispatch as X-On-Behalf-Of: agent:<uuid>, so the remote API authorizes the call as that agent's own delegation grant instead of the shared connection key (FIR-2668)"},
 			},
 		},
 	}, func(ctx context.Context, args map[string]any) (mcp.CallToolResult, error) {
@@ -305,6 +307,9 @@ func connectionAuthFromArgs(args map[string]any) map[string]any {
 	}
 	if v := optString(args, "cf_access_secret"); v != "" {
 		auth["cf_access_secret"] = v
+	}
+	if v, ok := args["on_behalf_of"].(bool); ok {
+		auth["on_behalf_of"] = map[string]any{"enabled": v}
 	}
 	return auth
 }

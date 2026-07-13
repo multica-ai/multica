@@ -2,6 +2,7 @@ import { queryOptions, useMutation, useQueryClient } from "@tanstack/react-query
 
 import {
   assignIssueToSprint,
+  completeSprint,
   createRecurringTask,
   createSprint,
   deleteRecurringTask,
@@ -20,6 +21,7 @@ import {
   upsertSprintSettings,
 } from "./api";
 import type {
+  CompleteSprintInput,
   RecurringTaskWriteInput,
   SprintCreateInput,
   SprintSettingsWriteInput,
@@ -169,6 +171,28 @@ export function useDeleteSprint(wsId: string, projectId: string) {
     mutationFn: (id: string) => deleteSprint(id),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: sprintsKeys.projectSprints(wsId, projectId) });
+    },
+  });
+}
+
+// FIR-2828: end a sprint. Invalidates the sprint itself, the project's
+// sprint list (status badge changes), and both sprints' issue lists since
+// issues may have moved to the backlog or into a target sprint.
+export function useCompleteSprint(wsId: string, projectId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, payload }: { id: string; payload: CompleteSprintInput }) =>
+      completeSprint(id, payload),
+    onSuccess: (_data, { id, payload }) => {
+      qc.invalidateQueries({ queryKey: sprintsKeys.projectSprints(wsId, projectId) });
+      qc.invalidateQueries({ queryKey: sprintsKeys.sprint(wsId, id) });
+      qc.invalidateQueries({ queryKey: sprintsKeys.sprintIssues(wsId, id) });
+      qc.invalidateQueries({ queryKey: ["issues"] });
+      if (payload.target_sprint_id) {
+        qc.invalidateQueries({
+          queryKey: sprintsKeys.sprintIssues(wsId, payload.target_sprint_id),
+        });
+      }
     },
   });
 }

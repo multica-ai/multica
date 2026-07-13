@@ -237,5 +237,7 @@ func (h *Handler) recordBundledReadUsage(r *http.Request, issue db.Issue, payloa
 	}
 	if err := h.CerebroQueries.RecordCerebroCostOptimizationMeasurement(r.Context(), bundledReadMeasurementParams(issue.WorkspaceID, taskUUID, costSavingModeOn, payloadChars)); err != nil {
 		slog.Warn("bundled-read cost-saving: record usage failed", "task_id", ts.TaskID, "error", err)
+	} else {
+		h.projectAnalyticsRun(r.Context(), ts.TaskID)
 	}
 }

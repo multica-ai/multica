@@ -78,7 +78,7 @@ The unified tool-policy chain is the model we want **everything** to converge on
   (`validSetting` + DB CHECK `cerebro_tool_policy_disable_workspace_only`, migration
   `9122`); workspace-layer writes already require owner/admin, so Disable needs no new
   write gate. UI: only the workspace-layer decision control offers it.
-- **Member-override resolver (FIR-2175, flag `cerebro_member_override`, default OFF):**
+- **Member-override resolver (FIR-2175/FIR-3062, flag `cerebro_member_override`, default ON):**
   `toolpolicy.ResolveMemberOverride` (pure, `chain.go:245`) is a two-stage variant — Stage A
   resolves the human layers `Workspace › Group › User` by **specificity** (most specific wins,
   so a member's own Allow can OPEN what their group denied — it can LOOSEN, not only tighten),
@@ -129,7 +129,7 @@ The unified tool-policy chain is the model we want **everything** to converge on
 | Gate | Where | Live? |
 |---|---|---|
 | agent-browser unix-socket (`tools:agent-browser`, **Base=Deny**) | `daemon_tool_policy_cerebro.go:281` | live |
-| repo checkout (`repo.checkout`, Base=Allow) | `daemon.go:3059` `CheckDaemonRepoCapability` | live |
+| repo checkout (`repo.checkout`, Base=Allow) | `handler/repo_approval_cerebro.go:42` `CheckDaemonRepoCapability` | live |
 | `create_local_runtime` | `group_permissions_cerebro.go:186` | live |
 | `manage_connections` | `group_permissions_cerebro.go:237` (+ router middleware) | live |
 | connection per-tool Deny/Ask | `table_connection.go:305` `ConnectionToolEffective` | live |
@@ -138,7 +138,7 @@ The unified tool-policy chain is the model we want **everything** to converge on
 | local-CLI tool calls (Claude/Codex/Cursor/Gemini, via `ResolveGeneral`) | `daemon_tool_policy_cerebro.go:68` | **off by default** (flags `cerebro_local_tool_policy`(+`_enforce`)) |
 
 Both **general** gates resolve through `Store.ResolveGeneral`, so when `cerebro_member_override`
-(FIR-2175, default OFF) is on for the workspace they apply the member-override model; OFF keeps
+(FIR-2175, default ON) is on for the workspace they apply the member-override model; OFF keeps
 them identical to `Resolve`. The **floor** gates in this table — agent-browser unix-socket
 (Base=Deny), repo checkout, connection per-tool — keep calling `Resolve` directly and are NOT
 affected by that flag.
@@ -158,33 +158,46 @@ buried code gates become settable instead of invisible**. Each entry carries: `K
 it is not a single route). A capability MUST have at least one of `Ops` or `Evidence` — that
 is the traceability tripwire.
 
-**This catalog is the canonical scope of platform actions.** It is **57 capabilities** in 17
-categories. It is surfaced in the tool-policy table **only when the `cerebro_platform_capabilities`
+**This catalog is the canonical scope of platform actions.** It is **62 capabilities** in 17
+categories (count `catalog` directly in `platformcatalog/catalog.go` — the table below lists a
+representative subset, not every key). It is surfaced in the tool-policy table **only when the `cerebro_platform_capabilities`
 feature flag is on (default OFF)** and the server gate `toolpolicy.PlatformCapabilitiesEnabled`
 passes — so today it is an **inventory, not an enforcement point**. Wiring it on is part of FIR-1496.
 
+**Light agent-start surface (FIR-3091 slice 4).** The four "start someone else's agent"
+capabilities — `trigger_other_agent`, `rerun_issue`, `schedule_agent_wakeup`, `trigger_autopilot`
+(marked `Surfaced` in the catalog, see `platformcatalog.SurfacedKeys`) — also surface on their own,
+behind the lighter `cerebro_agent_trigger_permissions` flag (gate `toolpolicy.AgentStartCapabilitiesEnabled`,
+`TableQuery.IncludeAgentStart`), **without** opening the rest of the catalog. This makes that family
+visible/settable in Permissions next to the friendly Agent-start tab. Enforcement is unchanged: only
+`trigger_other_agent` is enforced through the tool-policy chain (`mentiongate`, FIR-2409); the other
+three surface for visibility and are not yet an enforcement point.
+
 | Category | Capabilities (`tool_key`) |
 |---|---|
-| Issues | `create_issue`, `update_issue`, `delete_issue`, `rerun_issue`, `subscribe_issue`, `manage_labels`, `manage_share_tokens`, `manage_issue_recurrence` |
-| Comments | `add_comment`, `update_comment` |
+| Issues | `create_issue`, `update_issue`, `delete_issue`, `rerun_issue`, `subscribe_issue`, `manage_labels`, `manage_issue_recurrence` |
+| Comments | `add_comment`, `update_comment`, `manage_sessions` |
 | Autopilots | `create_autopilot`, `trigger_autopilot`, `autopilot_scope`, `autopilot_webhook` ⚠ |
 | Artifacts | `manage_artifacts`, `manage_notes`, `manage_note_types` |
-| Agents | `create_agent`, `update_agent`, `trigger_other_agent`, `schedule_agent_wakeup`, `manage_agent_passes`, `manage_work_sessions` |
+| Agents | `create_agent`, `update_agent`, `trigger_other_agent`, `schedule_agent_wakeup`, `manage_agent_passes`, `manage_work_sessions`, `create_memory` |
 | Runtimes | `manage_runtime`, `manage_runtime_tool_access`, `manage_runtime_accounts`, `manage_cloud_runtime`, `create_runtime`, `create_local_runtime`, `use_other_runtime`, `daemon_runtime_callback` ⚠ |
 | Groups | `manage_group`, `manage_group_members` |
-| Permissions | `manage_roles`, `manage_tool_policy`, `manage_agent_vault_access`, `decide_approval` |
+| Permissions | `manage_roles`, `manage_tool_policy`, `manage_agent_vault_access`, `decide_approval`, `manage_credential_access`, `manage_group_overrides`, `manage_workspace_overrides`, `manage_collections` |
 | Projects | `manage_project`, `manage_project_access` ⚠, `manage_status_models`, `manage_project_sprints` |
-| Workspace | `manage_entity_folders`, `manage_workspace_members`, `manage_workspace_settings`, `delete_workspace`, `manage_integrations` |
+| Workspace | `manage_entity_folders`, `manage_workspace_members`, `manage_workspace_settings`, `delete_workspace`, `manage_integrations`, `manage_analytics`, `manage_model_registry` |
 | Skills | `manage_skills` |
 | Squads | `manage_squad` |
 | Connections | `manage_connections` |
 | Credentials | `manage_credentials` |
 | Workflows | `manage_workflows` |
-| Channels | `manage_channels` |
+| Channels | `manage_channels`, `gateway_channel_delivery` ⚠ |
 | Read access | `read_issues` ⚠, `read_projects` ⚠ |
 
-⚠ = `ManagedExternally: true` (5 total: `autopilot_webhook`, `daemon_runtime_callback`,
-`manage_project_access`, `read_issues`, `read_projects`). For these the tool-policy gate is
+(`manage_share_tokens` was removed with the share-token feature and no longer exists; drop it if
+you find it cited elsewhere.)
+
+⚠ = `ManagedExternally: true` (6 total: `autopilot_webhook`, `daemon_runtime_callback`,
+`manage_project_access`, `read_issues`, `read_projects`, `gateway_channel_delivery`). For these the tool-policy gate is
 **not** the enforcement point — they are listed for visibility only and a policy row on them
 does nothing. They are a permanent code-only set, not a backlog item.
 
@@ -195,7 +208,7 @@ does nothing. They are a permanent code-only set, not a backlog item.
   `tools:<Name>` (built-ins), `mcp__<server>__<tool>` (MCP), `connection:<name>`
   (connections). These come from `cerebro_capability` (runtime-reported, registered by
   `runtime_capabilities_cerebro.go`) and the registry in `tools_registry.go`
-  (`ToolStatusExcluded` removes ~47). The 5 interfaces resolve both dimensions through the
+  (`ToolStatusExcluded` removes 81). The 5 interfaces resolve both dimensions through the
   same `cerebro_tool_policy` table; the catalog above is only the platform-action half.
 
 ---
@@ -257,7 +270,7 @@ there is no workspace/runtime/agent/user authoring of these capabilities, only g
 | **Credentials** `enforce` | `credentials/service.go:95`; chain `cerebro_credentials_policy.go:248` | attach/read/reveal/rotate/revoke a secret | **deny-by-default for agents** | the **grant resolver** (`permissions/resolver.go`, now a deny-by-default floor — `cerebro_workspace_grant` dropped, FIR-1512) + owner check + tool-policy chain |
 | **web_fetch host policy** | `webfetchpolicy/policy.go:73,156`; gate `firtal_gateway_tools_extended.go:830` | which hosts `web_fetch` reaches | allow-list `{firtal.com, docs.anthropic.com}` | `cerebro_web_fetch_policy` table |
 | **firtal_registry scope** | `firtal_gateway_tools_extended.go:630,545` `loadGrantConfig` | data-source/app/write scope | **deny-by-default** (`allow_write` not implied by read) | per-agent `agent_tool_grant.config_json` |
-| **agentvault** | `agentvault/resolver.go:50` `AllowedVaults` | which secret boxes the agent token is scoped to | empty → no brokering | per-agent `Access[]` list; flag `cerebro_agent_vault` (off) |
+| **agentvault** | `agentvault/store.go` `ListForAgent`/`SetAccess`, reconciled via `mirror.go` | which secret boxes the agent token is scoped to | empty → no brokering | per-agent `Access[]` list; flag `cerebro_agent_vault` (off) |
 | **autopilot scope** | `access/autopilot_scope.go:118,150,179` `CanSee/Edit/Trigger` | autopilot visibility/edit/trigger | unknown scope → **fail closed**; private → creator-only | `autopilot.scope` columns |
 | **sandbox profile** (OS wall) | `sandboxprofile/profile.go:91-139`; `daemon/sandbox.go:98` | network mode, writable/denied paths, shell deny, keychain | empty → Developer (open); ReadOnly → DenyShell; keychain **deny-by-default** for new agents | hardcoded preset → `sandbox_policy` jsonb |
 | **commentguard** | `commentguard/guard.go` | reject agent comment with no recipient + sub-issue rules | **flags default OFF**; DB err → fail-open | feature flags |

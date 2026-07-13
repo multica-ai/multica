@@ -596,6 +596,16 @@ func discoverPiModels(ctx context.Context, executablePath string) ([]Model, erro
 	runCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(runCtx, executablePath, "--list-models")
+	// CEREBRO-PATCH(pi-model-discovery-stable-dir): FIR-2992
+	// Desktop daemons can outlive the temporary directory they were launched
+	// from. Pi's Node.js bootstrap calls process.cwd(), which crashes when that
+	// inherited directory has been removed. Model discovery is user-scoped, so
+	// run it from the user's stable home directory instead.
+	if homeDir, err := os.UserHomeDir(); err == nil {
+		if info, statErr := os.Stat(homeDir); statErr == nil && info.IsDir() {
+			cmd.Dir = homeDir
+		}
+	}
 	hideAgentWindow(cmd)
 	var stderr strings.Builder
 	cmd.Stderr = &stderr

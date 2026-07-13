@@ -31,11 +31,13 @@ func NewPlanningMaterializer(queries *cerebrodb.Queries) *PlanningMaterializer {
 	return &PlanningMaterializer{queries: queries}
 }
 
-// CreatePlanningDispatch persists PlanningDispatchRule(agentID, skillName, "")
+// CreatePlanningDispatch persists PlanningDispatchRule(agentID, skillName, "", "")
 // as its own enabled cerebro_workflow row, owned by the same workspace/creator
-// as the run_skill workflow that requested it.
+// as the run_skill workflow that requested it. The standalone loop_planning
+// toggle carries no authored spec, so planning/build statuses fall to their
+// defaults (todo -> in_progress) inside PlanningDispatchRule.
 func (m *PlanningMaterializer) CreatePlanningDispatch(ctx context.Context, workspaceID, createdByID pgtype.UUID, createdByType, agentID, skillName string) error {
-	rule := PlanningDispatchRule(agentID, skillName, "")
+	rule := PlanningDispatchRule(agentID, skillName, "", "")
 
 	triggerConfigJSON, err := json.Marshal(rule.TriggerConfig)
 	if err != nil {

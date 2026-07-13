@@ -34,6 +34,9 @@ var pushNotifier mobilePushNotifier
 // CEREBRO-PATCH(channel-mention-members-only): FIR-2680 — hook to drop @mentioned non-participants in channels/groups. Identity by default; the cerebro wiring binds it to the real guard (see cerebro_channel_mention_guard.go).
 var filterChannelMentionRecipients = func(_ context.Context, _ events.Event, _ string, ids map[string]bool) map[string]bool { return ids }
 
+// CEREBRO-PATCH(rounds-push-suppression): FIR-3114 — hook to silence push/banner for issues in the recipient's rounds. False by default; the cerebro wiring binds it (see cerebro_rounds_push_guard.go).
+var suppressPushForRoundIssue = func(_ context.Context, _ string, _, _ string) bool { return false }
+
 // Apple Web Push enforces a hard ~4 KB ceiling on the encrypted payload.
 // After AES-128-GCM padding the plaintext budget shrinks to roughly 3 KB —
 // and full comment bodies routinely exceeded that, which made Apple reject
@@ -134,6 +137,8 @@ type inboxItemDraft struct {
 	Actor              events.Event
 	IsAssignee         bool
 	SuppressMobilePush bool
+	// CEREBRO-PATCH(reaction-soft-inbox-row): FIR-2954 — create the row already-read (soft) so it shows without counting as unread.
+	CreateAsRead bool
 }
 
 // dispatchToMember resolves the recipient's per-channel preferences for this
@@ -156,7 +161,9 @@ func dispatchToMember(
 
 	inboxOn := resolveChannelChoice(ctx, queries, d.RecipientType, d.RecipientID, channelInbox, key)
 	notifOn := resolveChannelChoice(ctx, queries, d.RecipientType, d.RecipientID, channelNotifications, key)
-	if !inboxOn && !notifOn {
+	// CEREBRO-PATCH(reaction-soft-inbox-row): FIR-2954 — a reaction always leaves a soft (read) inbox row; the Inbox setting only gates unread.
+	softReaction := d.NotifType == "reaction_added" && !inboxOn
+	if !inboxOn && !notifOn && !softReaction {
 		return false
 	}
 
@@ -165,6 +172,9 @@ func dispatchToMember(
 		if createInboxItemForChannel(ctx, queries, bus, d, routeInbox) {
 			created = true
 		}
+	} else if softReaction {
+		d.CreateAsRead = true // CEREBRO-PATCH(reaction-soft-inbox-row): FIR-2954 — soft row, already-read; leaves `created` false so no push fires.
+		createInboxItemForChannel(ctx, queries, bus, d, routeInbox)
 	}
 	if notifOn {
 		if createInboxItemForChannel(ctx, queries, bus, d, routeNotifications) {
@@ -182,10 +192,16 @@ func dispatchToMember(
 		pushTitle, pushBody = dmPushContent(ctx, queries, d.RecipientID, d.Actor.ActorType, d.Actor.ActorID, d.Body)
 	}
 
+	// CEREBRO-PATCH(rounds-push-suppression): FIR-3114 — an issue in one of the
+	// recipient's rounds notifies only inside the round: the inbox row above is
+	// still created (the round list renders its unread state), but no push and
+	// no in-app banner fires for it.
+	roundQuiet := suppressPushForRoundIssue(ctx, d.RecipientType, d.RecipientID, d.IssueID)
+
 	// Mobile push fires only when something landed in the user's inbox or
 	// notifications page — push is a bell-ring on top of an existing item,
 	// not a standalone notification. Targets the user's phone-class devices.
-	if created && !d.SuppressMobilePush && resolveChannelChoice(ctx, queries, d.RecipientType, d.RecipientID, channelMobile, key) {
+	if created && !d.SuppressMobilePush && !roundQuiet && resolveChannelChoice(ctx, queries, d.RecipientType, d.RecipientID, channelMobile, key) { // CEREBRO-PATCH(rounds-push-suppression): FIR-3114
 		pushItemToMember(ctx, queries, d.RecipientType, d.RecipientID, d.WorkspaceID, d.IssueID, d.NotifType, pushTitle, pushBody, service.DeviceClassMobile, channelMobile)
 	}
 
@@ -193,7 +209,7 @@ func dispatchToMember(
 	// rule. It delivers two ways: a Web Push to the user's computer-class
 	// browsers (so it works with the tab closed) AND the in-app banner that
 	// rides the WS hub via EventDesktopNotify for the Electron desktop app.
-	if created && resolveChannelChoice(ctx, queries, d.RecipientType, d.RecipientID, channelDesktop, key) {
+	if created && !roundQuiet && resolveChannelChoice(ctx, queries, d.RecipientType, d.RecipientID, channelDesktop, key) { // CEREBRO-PATCH(rounds-push-suppression): FIR-3114
 		pushItemToMember(ctx, queries, d.RecipientType, d.RecipientID, d.WorkspaceID, d.IssueID, d.NotifType, pushTitle, pushBody, service.DeviceClassDesktop, channelDesktop)
 		bus.Publish(events.Event{
 			Type:        protocol.EventDesktopNotify,
@@ -242,6 +258,11 @@ func createInboxItemForChannel(
 		slog.Error("inbox item creation failed",
 			"recipient_id", d.RecipientID, "type", d.NotifType, "route", route, "error", err)
 		return false
+	}
+	if d.CreateAsRead { // CEREBRO-PATCH(reaction-soft-inbox-row): FIR-2954 — mark the fresh row read so the live event and DB agree it is soft.
+		if r, e := queries.MarkInboxRead(ctx, item.ID); e == nil {
+			item = r
+		}
 	}
 	resp := inboxItemToResponse(item)
 	if d.IssueStatus != "" {
@@ -340,6 +361,48 @@ func notifyCreatorIssueStarted(
 		WorkspaceID:   issue.WorkspaceID,
 		RecipientType: "member",
 		RecipientID:   issue.CreatorID,
+		IssueID:       issue.ID,
+		IssueStatus:   issue.Status,
+		NotifType:     "issue_started",
+		Severity:      "info",
+		Title:         issue.Title,
+		Body:          "",
+		Details:       emptyDetails,
+		Actor:         e,
+	}, routeInbox)
+}
+
+// CEREBRO-PATCH(triggered-agent-started-inbox): agent-created issues notify the member they were created for.
+func notifyTriggeredMemberIssueStarted(
+	ctx context.Context,
+	queries *db.Queries,
+	bus *events.Bus,
+	e events.Event,
+	issue handler.IssueResponse,
+	triggeringTaskID string,
+) {
+	if issue.CreatorType != "agent" || triggeringTaskID == "" {
+		return
+	}
+	if !issueStartsImmediately(issue.Status) || !startedIssuesInInboxEnabled(ctx, queries, issue.WorkspaceID) {
+		return
+	}
+	memberID := lookupTriggeringMember(queries, triggeringTaskID)
+	if memberID == "" || memberID == issue.CreatorID {
+		return
+	}
+	subscribed, err := queries.IsIssueSubscriber(ctx, db.IsIssueSubscriberParams{
+		IssueID:  parseUUID(issue.ID),
+		UserType: "member",
+		UserID:   parseUUID(memberID),
+	})
+	if err != nil || !subscribed {
+		return
+	}
+	createInboxItemForChannel(ctx, queries, bus, inboxItemDraft{
+		WorkspaceID:   issue.WorkspaceID,
+		RecipientType: "member",
+		RecipientID:   memberID,
 		IssueID:       issue.ID,
 		IssueStatus:   issue.Status,
 		NotifType:     "issue_started",
@@ -803,6 +866,9 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries, pushSvc
 		skip := map[string]bool{e.ActorID: true}
 
 		notifyCreatorIssueStarted(ctx, queries, bus, e, issue)
+		if triggeringTaskID, _ := payload["triggering_task_id"].(string); triggeringTaskID != "" {
+			notifyTriggeredMemberIssueStarted(ctx, queries, bus, e, issue, triggeringTaskID)
+		}
 
 		// Direct notification to assignee
 		if issue.AssigneeType != nil && issue.AssigneeID != nil {

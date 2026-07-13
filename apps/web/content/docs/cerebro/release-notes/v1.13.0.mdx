@@ -1,0 +1,142 @@
+---
+title: "Multica v1.13.0"
+description: "121 release bullets: 58 new, 39 fixed, 2 improved, plus 22 more."
+date: 2026-07-10
+---
+
+**Release summary:** 121 release bullets: 58 new, 39 fixed, 2 improved, plus 22 more.
+
+Changes since [v1.12.1](https://github.com/firtal-group/firtal-cerebro/compare/v1.12.1...v1.13.0) — bump: **minor**
+
+## New
+
+- Add universal explorer and run drilldown (FIR-2996)
+- Expose auto-learn toggle as MCP tool + catalog op (TECH-3692)
+- Add auto-learn switch for existing skills (TECH-3692)
+- Read PowerPoint (.pptx) attachments in chat + issues (TECH-3416)
+- Skill_diff/skill_update/skill_set_ownership MCP tools — close skill-governance MCP gaps (FIR-1775 §5) [#2210](https://github.com/firtal-group/firtal-cerebro/pull/2210)
+- Expose --on-behalf-of toggle for api connections (FIR-2668) [#2198](https://github.com/firtal-group/firtal-cerebro/pull/2198)
+- Agent Office managed region + CI write-gate for repo CLAUDE.md/AGENTS.md (FIR-1775 §10) [#2208](https://github.com/firtal-group/firtal-cerebro/pull/2208)
+- Per-line attribution (line authors) + author-code stamping (FIR-2810) [#2162](https://github.com/firtal-group/firtal-cerebro/pull/2162)
+- Context lint + repo CLAUDE.md/AGENTS.md drift lint (FIR-1775 Phase 3) [#2201](https://github.com/firtal-group/firtal-cerebro/pull/2201)
+- Add a way to end a sprint (FIR-2828)
+- Record agent_context_version on direct UpdateAgent edits (FIR-1775 Phase 2) [#2199](https://github.com/firtal-group/firtal-cerebro/pull/2199)
+- Multica feature list/get — cerebro feature flags CLI (FIR-3009) [#2197](https://github.com/firtal-group/firtal-cerebro/pull/2197)
+- Add ACP wrapper (FIR-2820)
+- Reactions always leave a soft inbox row; setting only gates unread (FIR-2954)
+- Reaction row shows "\<name> Reacted with \<emoji>" in bold (FIR-2954)
+- Create + manage workspace connections via CLI and MCP [#2187](https://github.com/firtal-group/firtal-cerebro/pull/2187)
+- Document versioning, folder suggestions, agent-runs structure, attachment folder (FIR-2697)
+- Write path for note comments + granular note↔issue coupling
+- Archived channels/DMs show in Archived block + view (FIR-2791)
+- Add workspace-only "Disable" permission state (FIR-2351)
+- Connection + data-source sub-rows use the single Decision pill (FIR-2706)
+- Issue-workflow phase runs dispatch ON the issue with a visible session (FIR-2283)
+- Single-source model registry + Settings UI + versioning (FIR-2698)
+- Unify Repos + credential groups onto the single Decision pill (FIR-2706)
+- Route context rollback through review-before-apply (FIR-1775)
+- Unify all image opens into one surface gallery (FIR-2710 phase 2+3)
+- Gate catalog on permissions flag + single Decision-with-When control (FIR-2706)
+- Per-agent X-On-Behalf-Of delegation on api-type connections (FIR-2668)
+- Workspace-wide change-request review for owners (FIR-2742)
+- Nest credential permissions by name (track › owner › credential) (FIR-2441)
+- Expand connection/data-source rows inline in the capability catalog (FIR-2706)
+- Workspace Deny openable default + Manage permissions
+- Image tray everywhere + left-aligned scrollable posted images (FIR-2714)
+- Route agent brief to cerebro-agent-triggers skill (FIR-2679)
+- Paginated image gallery lightbox for comment images (FIR-2710)
+- Inbox notification when an agent-context change is proposed (FIR-1775)
+- Let an agent read its own capabilities card (FIR-2243)
+- Credential-audit issue/task context + agent read trail (FIR-2243 B3)
+- Gateway-trace for API-connection tool calls (FIR-2243 B2)
+- Runtime tool+permission decision trace (FIR-2243 B1)
+- Numbered image tray in field editors (FIR-2693)
+- Prompt-cache warm/cold countdown on the context bar
+- Split Resources tab into Repos and Connections (FIR-2706)
+- Loop guard + cheaper-model checks (FIR-2679 Spor 1)
+- Numbered image tray for inserted images (FIR-2693)
+- Channel mentions must respect membership (FIR-2680)
+- Redesign shared Tools & permissions into capability cards (FIR-2670 #8)
+- Deep-linkable folder URLs + Collections sync (FIR-2688)
+- Restore Activity, Skills add/remove, editable settings (FIR-2670)
+- Readable widths for connection page and endpoint permissions sheet (FIR-2640)
+- Daemon-version column + mobile unbox + icon-only add button (FIR-2669)
+- Mobile card lists + computer-name column (FIR-2669)
+- Preview of redesigned agent detail page (FIR-2670)
+- Configurable columns + full-field search (FIR-2669)
+- Fall back to public docs when the credential is rejected (FIR-2640)
+- Gør Claude Sonnet 5 valgbar i model-vælgeren
+- Tilføj Claude Sonnet 5 til pris- og context-window-registeret
+- Issue workflow v2 points 4 + 7 + 8 (FIR-2283)
+
+## Fixed
+
+- Inventory auto-learn permissions
+- Let an agent owner manage their own agent regardless of visibility
+- Restore live inbox run-marker + wakeup refresh on task events (FIR-2173)
+- Note author-code follow-ups — no self-conflicts, stamp on line finish, latching pull (FIR-2810)
+- Classify lint repo-file + note author-codes routes in platform catalog (FIR-1775) [#2205](https://github.com/firtal-group/firtal-cerebro/pull/2205)
+- Fix run log transcript crash (FIR-2942)
+- Include connection MCP tools in runtime matrix [#2189](https://github.com/firtal-group/firtal-cerebro/pull/2189)
+- Smart-unread channels land in Unread, not Done (FIR-2954)
+- Add comments inbox setting (FIR-2826)
+- Sprint page header matches project page header [#2182](https://github.com/firtal-group/firtal-cerebro/pull/2182)
+- Board column counts use the populated cache key
+- Keep progress text out of final output [#2178](https://github.com/firtal-group/firtal-cerebro/pull/2178)
+- Drop orphaned version rows before repointing FK (FIR-2697) [#2177](https://github.com/firtal-group/firtal-cerebro/pull/2177)
+- Restore runtime details [#2133](https://github.com/firtal-group/firtal-cerebro/pull/2133)
+- Validate local flags before config lookup [#2170](https://github.com/firtal-group/firtal-cerebro/pull/2170)
+- Normalize repo URLs when checking workspace repo allowlist
+- Drop whole-run wall-clock cap on gateway runs (FIR-2803)
+- Auto-create after cancelled future sprint (FIR-2813)
+- Explain permission writes a higher layer overrides (FIR-2706)
+- Decide pure scope conditions before side-effecting gate ops (FIR-2283)\n\nconditionsHold evaluated check_passes (which materializes gate state,\ncheck runs, and human approvals via EvaluateCheckGate) inside the\ncondition loop, while pure conditions like the issue.id scope filter\nwere collected and only evaluated at the end. Every issue-scoped\ndelivery gate in the workspace therefore opened a gate round on ANY\nissue entering in_review: N stale gates -> N duplicate human approvals\nand N detached quick_create check tasks per event.\n\nPure conditions now decide first; evidence_present and check_passes\nonly run when the scope filter holds. Regression test proves the gate\nevaluator is not invoked for an out-of-scope issue.\n\nCo-Authored-By: Claude Fable 5 \<noreply@anthropic.com>
+- Issue workflow recipes no longer create globally-firing rules on save (Tine live-test)
+- Mobile Skills page scroll + personal review alert data (FIR-2748)
+- Mobile full-screen review sheet + consolidate entry into personal alert (FIR-2748)
+- Full-screen mobile review sheet + drop line-number gutter (FIR-2708)
+- Restore permission/profile wirings dropped by upstream syncs #4454/#4530 (FIR-2743)
+- Make shared modals scroll by default so tall content can't clip (FIR-2730)
+- Validate Issue-workflow skills exist at save time (FIR-2283)
+- Warn when composer loses connection
+- Bake prod /version from Sliplane SLIPLANE_COMMIT_HASH (FIR-2048)
+- Mobile layout for permission sheets + rows (FIR-2640)
+- Mobile toolbar fit + search by account email and agent name (FIR-2669)
+- Word-level highlighting for edited sentences in skill diff
+- Collapse unchanged context in skill diff view
+- Sidebar New message from an open inbox message (FIR-2677)
+- Trim whitespace from connection credentials (FIR-2640)
+- Standard page shell, scroll, Account/version, Message + New issue (FIR-2670)
+- Say when the spec fetch rejected the credential (FIR-2640)
+- Fall back on unrecognized status/priority instead of crashing
+- Keep comment draft after failed submit (FIR-2648)
+
+## Improved
+
+- Document redesigned Tools & permissions screen (FIR-2706)
+- Record the FIR-2743 enforcement outage window in permission-system.md
+
+## Other changes
+
+- FIR-2751 centralize agent failure routing [#2215](https://github.com/firtal-group/firtal-cerebro/pull/2215)
+- Revert "fix(cerebro-inbox): restore live inbox run-marker + wakeup refresh on task events (FIR-2173)"
+- FIR-2736: add inbox rounds foundation [#2206](https://github.com/firtal-group/firtal-cerebro/pull/2206)
+- FIR-2804 route on-behalf started issues to inbox [#2160](https://github.com/firtal-group/firtal-cerebro/pull/2160)
+- Fix Pi model discovery after launcher directory removal (FIR-2992) [#2196](https://github.com/firtal-group/firtal-cerebro/pull/2196)
+- Add GLM-5.2 to model registry (pending change request, FIR-2998) [#2191](https://github.com/firtal-group/firtal-cerebro/pull/2191)
+- Expose GPT-5.6 Codex models [#2192](https://github.com/firtal-group/firtal-cerebro/pull/2192)
+- Add workflow step model and thinking overrides
+- FIR-2826: open note comments from a mention, clearer rows, resizable rail [#2169](https://github.com/firtal-group/firtal-cerebro/pull/2169)
+- FIR-2351 add group scope picker for permissions
+- Auto-recall: inject relevant memories into agent context at run start (FIR-1794 layer 3)
+- Restore claim-time cost-saving call sites dropped by upstream sync #4454
+- Wire Cognee memory tools to agents through the three memory gates (FIR-1794)
+- Issue workflows: start the plan phase on activation + session phase badge (FIR-2283 followup)
+- Raise firtalGatewayMaxToolDefs 50->200 and warn-log on tool truncation
+- Issue workflows: agents can drive them; real plan mode; loop controls on runs page (FIR-2283 followup)
+- Clarify owner/admin exemption in override capability descriptions (FIR-2351)
+- FIR-2438 fix sidebar inbox query mock
+- FIR-2438 translate recurring note type dialog
+- FIR-2139: reset stale desktop staging config
+- FIR-2139: guard desktop browser bridge until workspace resolves
+- FIR-2139: default desktop app to Firtal runtime

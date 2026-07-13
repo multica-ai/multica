@@ -76,6 +76,10 @@ type CommentResponse struct {
 	// SentToAgentAt (FIR-1621) is null while the comment is an unsent local
 	// draft, and the dispatch timestamp once it has been sent to an agent.
 	SentToAgentAt *string `json:"sent_to_agent_at"`
+	// IssueID (FIR-3102) is the comment's OWN issue when it has been turned
+	// into / linked to its own issue via "Create issue from this comment";
+	// null means the comment inherits the note's overarching issue.
+	IssueID *string `json:"issue_id"`
 }
 
 func commentToResponse(c cerebrodb.CerebroNoteComment) CommentResponse {
@@ -100,6 +104,7 @@ func commentToResponse(c cerebrodb.CerebroNoteComment) CommentResponse {
 		CreatedAt:       tsStr(c.CreatedAt),
 		UpdatedAt:       tsStr(c.UpdatedAt),
 		SentToAgentAt:   tsPtr(c.SentToAgentAt),
+		IssueID:         uuidPtr(c.IssueID),
 	}
 }
 
@@ -446,6 +451,12 @@ func (h *Handler) applySuggestion(ctx context.Context, wsUUID, noteID, ownerUUID
 		return errCannotApply("failed to apply suggestion")
 	}
 	h.snapshotVersion(ctx, noteID, ownerUUID, "member", updated.Title, updated.Body, "edit", "", false)
+
+	// FIR-2810: credit the changed lines to the suggestion's author — accepting
+	// publishes THEIR words, so the line attribution should carry their name.
+	if updated.Body != artifact.Body {
+		h.advanceAndSaveLineAttrs(ctx, noteID, artifact.Body, updated.Body, uuidStr(c.AuthorID))
+	}
 	return nil
 }
 

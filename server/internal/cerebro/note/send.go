@@ -5,15 +5,14 @@
 // Two reads/writes live here:
 //
 //   - ListNotesForReference (GET /api/notes/by-reference?object=&ref_id=) is the
-//     reverse side of the existing note→issue reference: it lists the notes that
-//     point AT a given object (an issue today), so the issue page can show its
-//     coupled notes in the document list. The forward side (note→issue) already
-//     exists in references.go; this makes the link two-way.
+//     reverse side of the canonical artifact.issue_id coupling (with legacy
+//     references supported during migration), so the issue page can show its
+//     coupled notes in the document list.
 //
 //   - SendComments (POST /api/notes/{id}/comments/send) dispatches the selected
 //     (or all) unsent comments on a note to the destination the note is coupled
-//     to. Coupling is the same generic note-reference machinery: object='issue'
-//     bundles the comments into one issue comment and wakes any @-mentioned
+//     to. A note's canonical issue_id or explicit chat reference determines the
+//     destination. An issue destination bundles comments and wakes any @-mentioned
 //     agent via the existing issue mention-trigger; object='chat_session' posts
 //     them as a chat message and enqueues the bound agent. Sending is always an
 //     explicit user action — there is no auto-fire on @-mention inside a note.
@@ -123,10 +122,9 @@ func (h *Handler) ListNotesForReference(w http.ResponseWriter, r *http.Request) 
 // in the list are ignored (the operation only ever sends drafts).
 //
 // FIR-1753 — DestinationObject/DestinationRefID are an optional disambiguator:
-// a note may be linked to more than one issue/chat (References lets you link
-// several issues for context), but a send needs exactly one destination. When
-// the note has multiple couplings the client passes the chosen one here; the
-// server validates it is actually one of the note's couplings before using it.
+// a note may have one primary issue and explicit chat destinations. When it has
+// multiple send destinations the client passes the chosen one here; the server
+// validates it is actually one of the note's couplings before using it.
 // Empty (the common single-coupling case) keeps the old "resolve the one
 // coupling" behaviour.
 type sendCommentsRequest struct {
@@ -273,22 +271,20 @@ func (h *Handler) resolveCoupling(w http.ResponseWriter, r *http.Request, noteID
 		writeError(w, http.StatusInternalServerError, "failed to load note references")
 		return "", "", false
 	}
-	var found []cerebrodb.CerebroNoteReference
+	type coupling struct{ object, refID string }
+	var found []coupling
+	// artifact.issue_id is the canonical note-level issue coupling (FIR-3102).
+	if issueID != "" {
+		found = append(found, coupling{object: couplingIssue, refID: issueID})
+	}
 	for _, ref := range refs {
-		if ref.Object == couplingIssue || ref.Object == couplingChat {
-			found = append(found, ref)
+		// Legacy issue references are only a compatibility fallback for records
+		// that have not yet been migrated. They never override artifact.issue_id.
+		if ref.Object == couplingChat || (ref.Object == couplingIssue && issueID == "") {
+			found = append(found, coupling{object: ref.Object, refID: ref.RefID})
 		}
 	}
 	if len(found) == 0 {
-		// FIR-1852/FIR-1782 — a note unified to an issue via issue_id (the same
-		// white-card link a document uses) carries no explicit reference row, but
-		// that issue_id IS its issue coupling. Fall back to it so the note's
-		// comments can be sent to the issue without a duplicate reference row.
-		// This only runs when there are no explicit references, so notes that the
-		// user has explicitly coupled keep their exact prior behaviour.
-		if issueID != "" {
-			return couplingIssue, issueID, true
-		}
 		writeError(w, http.StatusConflict, "note is not coupled to an issue or chat — couple it first")
 		return "", "", false
 	}
@@ -296,8 +292,8 @@ func (h *Handler) resolveCoupling(w http.ResponseWriter, r *http.Request, noteID
 	if hintRefID != "" {
 		hintObject = strings.TrimSpace(hintObject)
 		for _, ref := range found {
-			if ref.RefID == hintRefID && (hintObject == "" || ref.Object == hintObject) {
-				return ref.Object, ref.RefID, true
+			if ref.refID == hintRefID && (hintObject == "" || ref.object == hintObject) {
+				return ref.object, ref.refID, true
 			}
 		}
 		writeError(w, http.StatusConflict, "the chosen destination is not linked to this note")
@@ -307,7 +303,7 @@ func (h *Handler) resolveCoupling(w http.ResponseWriter, r *http.Request, noteID
 		writeError(w, http.StatusConflict, "this note is linked to more than one task or chat — choose which one to send to")
 		return "", "", false
 	}
-	return found[0].Object, found[0].RefID, true
+	return found[0].object, found[0].refID, true
 }
 
 // gatherUnsentComments resolves the comments to send. With no ids it returns

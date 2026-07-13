@@ -57,6 +57,7 @@ import type {
   CreateAgentContextChangeRequestRequest,
   ReviewAgentContextChangeRequestRequest,
   RollbackAgentContextRequest,
+  AgentContextObservability,
   // CEREBRO-PATCH(model-registry-api-types): FIR-2698 model registry governance types.
   ModelRegistry,
   ModelRegistryVersion,
@@ -272,6 +273,8 @@ import {
 // CEREBRO-PATCH(api-client-active-terminal-session): inline zod schema for active terminal session lookup.
 import { z } from "zod";
 const ActiveTerminalSessionSchema = z.object({ session_id: z.string(), attach_path: z.string(), created_at: z.string() }).loose();
+// CEREBRO-PATCH(runtime-distribution-version): FIR-3064 parse the fork-owned latest runtime version response.
+const LatestRuntimeVersionSchema = z.object({ version: z.string() }).loose();
 
 // CEREBRO-PATCH(channel-message-search-client): FIR-407 — per-channel/DM message search response schema + type.
 const ChannelMessageSearchResponseSchema = z.object({ messages: z.array(z.object({ id: z.string(), parent_id: z.string().nullable().optional(), author_type: z.string(), author_id: z.string(), content: z.string(), snippet: z.string(), created_at: z.string() }).loose()).default([]), total: z.number().default(0) }).loose();
@@ -388,6 +391,11 @@ export interface CerebroAccount {
   login_identity: string;
   usage_window_pct: number | null;
   throttled_until: string | null;
+  // CEREBRO-PATCH(cerebro-account-client): FIR-3118 provider-reported rolling usage windows.
+  usage_5h_pct: number | null;
+  usage_5h_resets_at: string | null;
+  usage_7d_pct: number | null;
+  usage_7d_resets_at: string | null;
   tokens_5h: number; // CEREBRO-PATCH(cerebro-account-client): JEH-1365 rolling account token load.
   tokens_7d: number;
   extra_spend_on: boolean;
@@ -407,6 +415,11 @@ export interface CreateCerebroAccountRequest {
 export interface UpdateCerebroAccountControlsRequest {
   extra_spend_on?: boolean;
   paused_manual?: boolean;
+}
+// CEREBRO-PATCH(cerebro-account-client): FIR-3118 hourly token-usage history bucket.
+export interface CerebroAccountUsageBucket {
+  bucket: string;
+  tokens: number;
 }
 
 const EMPTY_ONBOARDING_NO_RUNTIME_BOOTSTRAP_RESPONSE:
@@ -919,6 +932,14 @@ export class ApiClient {
     await this.fetch(`/api/workspaces/${wsId}/accounts/${id}`, {
       method: "DELETE",
     });
+  }
+
+  // CEREBRO-PATCH(cerebro-account-client): FIR-3118 hourly usage history for the account detail page.
+  async getCerebroAccountUsageHistory(
+    wsId: string,
+    id: string,
+  ): Promise<CerebroAccountUsageBucket[]> {
+    return this.fetch(`/api/workspaces/${wsId}/accounts/${id}/usage-history`);
   }
 
   // CEREBRO-PATCH(cerebro-account-client): JEH-998 UI-driven control toggles.
@@ -2503,6 +2524,17 @@ export class ApiClient {
     });
   }
 
+  // CEREBRO-PATCH(runtime-distribution-version): FIR-3064 keep GitHub release coordinates behind the server boundary.
+  async getLatestRuntimeVersion(): Promise<string | null> {
+    const raw = await this.fetch<unknown>("/api/runtimes/latest-version");
+    return parseWithFallback(
+      raw,
+      LatestRuntimeVersionSchema,
+      { version: null as string | null },
+      { endpoint: "GET /api/runtimes/latest-version" },
+    ).version;
+  }
+
   async getUpdateResult(
     runtimeId: string,
     updateId: string,
@@ -3304,6 +3336,16 @@ export class ApiClient {
       method: "POST",
       body: JSON.stringify(data),
     });
+  }
+
+  // CEREBRO-PATCH(agent-office-observability-api): FIR-1775 Phase 4 — read-only
+  // observability overview for one agent (change frequency, approvers, drift).
+  // The panel normalizes the response defensively (normalizeAgentObservability)
+  // so a drifted server shape never white-screens the agent page.
+  async getAgentContextObservability(
+    id: string,
+  ): Promise<AgentContextObservability> {
+    return this.fetch(`/api/agents/${id}/context/observability`);
   }
 
   // CEREBRO-PATCH(model-registry-api-methods): FIR-2698 model registry — the single source for model prices,
@@ -4590,6 +4632,15 @@ export class ApiClient {
     });
   }
 
+  // CEREBRO-PATCH(cerebro-note-author-codes): FIR-2810 — per-note toggle that
+  // stamps the writer's member code (e.g. "JEH") on every line they write.
+  async setNoteAuthorCodes<T = unknown>(id: string, authorCodes: boolean): Promise<T> {
+    return this.fetch<T>(`/api/notes/${id}/author-codes`, {
+      method: "PUT",
+      body: JSON.stringify({ author_codes: authorCodes }),
+    });
+  }
+
   // CEREBRO-PATCH(cerebro-notes-client): TECH-3421 — Note references: mirror of
   // the issue-reference methods above, keyed by the note's artifact id.
   //   GET    /api/notes/{id}/references            — list references on a note
@@ -4726,5 +4777,24 @@ export class ApiClient {
       method: "POST",
       body: JSON.stringify(payload),
     });
+  }
+  // CEREBRO-PATCH(cerebro-note-comment-create-issue): FIR-3102 — turn one note
+  // comment into a standalone issue. Every field optional (empty title → server
+  // uses the comment's first line). Response shape is generic so
+  // @multica/cerebro-notes owns the zod schema.
+  async createIssueFromNoteComment<T = unknown>(
+    noteId: string,
+    commentId: string,
+    payload: {
+      title?: string;
+      project_id?: string;
+      assignee_type?: string;
+      assignee_id?: string;
+    },
+  ): Promise<T> {
+    return this.fetch<T>(
+      `/api/notes/${noteId}/comments/${commentId}/create-issue`,
+      { method: "POST", body: JSON.stringify(payload) },
+    );
   }
 }

@@ -206,6 +206,15 @@ describe("classifyInboxAction — chats and channels", () => {
     ).toBe("act_now");
   });
 
+  it("puts a smart-unread channel (activity but no mention) in Unread — FIR-2010", () => {
+    expect(
+      classifyInboxAction(
+        { kind: "channel", channel: { id: "ch-1", unread_count: 0, has_unread_activity: true, last_message: { author_type: "member", author_id: "other-user" } } },
+        ctx(),
+      ),
+    ).toBe("act_now");
+  });
+
   it("puts a read channel where I sent the last message in Pending", () => {
     expect(
       classifyInboxAction(

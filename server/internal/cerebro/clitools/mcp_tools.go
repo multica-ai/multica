@@ -97,6 +97,8 @@ func optBool(args map[string]any, key string, defaultVal bool) bool {
 }
 
 func RegisterTools(srv *mcp.Server, client *cli.APIClient, session *SessionState, workspaceID, projectID, gitRoot string) {
+	// CEREBRO-PATCH(analytics-mcp): FIR-2996 canonical analytics query tools.
+	registerAnalyticsTools(srv, client)
 	registerArtifactTools(srv, client)
 	registerAttachmentReadTools(srv, client)
 	// CEREBRO-PATCH(cerebro-groups-mcp): JEH-1172 register group MCP tools.
@@ -107,6 +109,8 @@ func RegisterTools(srv *mcp.Server, client *cli.APIClient, session *SessionState
 	registerCredentialTools(srv, client, workspaceID)
 	// CEREBRO-PATCH(mcp-skill-governance-tools): FIR-2655 skill ownership/change-request/version/fork MCP tools.
 	registerSkillGovernanceTools(srv, client)
+	// FIR-1775 §5: skill_diff / skill_update / skill_set_ownership close the CLI-only governance gaps.
+	registerSkillGovernanceGapTools(srv, client)
 	// CEREBRO-PATCH(mcp-agent-office-tools): FIR-1775 agent context versioning + governance MCP tools.
 	registerAgentOfficeTools(srv, client)
 	// CEREBRO-PATCH(mcp-skill-metadata-tools): TECH-3077 skill metadata filtering and audit tools.
@@ -125,6 +129,8 @@ func RegisterTools(srv *mcp.Server, client *cli.APIClient, session *SessionState
 	// CEREBRO-PATCH(cerebro-connections-admin-mcp): FIR-2835 connection registry CRUD tools
 	// (create/list/get/update/delete/test connections), gated on manage_connections.
 	registerCerebroConnectionAdminTools(srv, client)
+	// CEREBRO-PATCH(cerebro-workflow-mcp): FIR-2937 workflow management tools.
+	registerWorkflowTools(srv, client)
 
 	// -----------------------------------------------------------------------
 	// list_issues

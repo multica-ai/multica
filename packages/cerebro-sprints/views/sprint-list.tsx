@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { CalendarRange } from "lucide-react";
+import { CalendarRange, MoreHorizontal } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
 import { Badge } from "@multica/ui/components/ui/badge";
 import { Input } from "@multica/ui/components/ui/input";
@@ -16,6 +16,13 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@multica/ui/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@multica/ui/components/ui/dropdown-menu";
 import { cn } from "@multica/ui/lib/utils";
 import { useWorkspacePaths } from "@multica/core/paths";
 // Imported as a leaf primitive WITHOUT declaring `@multica/views` in this
@@ -30,13 +37,16 @@ import {
   sprintSettingsOptions,
   useCreateSprint,
   useDeleteSprint,
+  useUpdateSprint,
 } from "../core/queries";
 import type { Sprint, SprintStatus } from "../core/types";
+import { CompleteSprintDialog } from "./complete-sprint-dialog";
 import {
   applyNameTemplate,
   computeEnd,
   computeNextStart,
   formatDateOnly,
+  formatSprintDateRange,
   parseDateOnly,
 } from "../core/template";
 
@@ -137,9 +147,11 @@ export function SprintList({ workspaceId, projectId }: Props) {
   const settingsQuery = useQuery(sprintSettingsOptions(workspaceId, projectId));
   const createSprint = useCreateSprint(workspaceId, projectId);
   const deleteSprint = useDeleteSprint(workspaceId, projectId);
+  const updateSprint = useUpdateSprint(workspaceId, projectId);
   const paths = useWorkspacePaths();
 
   const [open, setOpen] = useState(false);
+  const [completingSprint, setCompletingSprint] = useState<Sprint | null>(null);
   const [form, setForm] = useState({
     name: "Sprint 1",
     start_date: "",
@@ -324,28 +336,71 @@ export function SprintList({ workspaceId, projectId }: Props) {
                     </Badge>
                   </div>
                   <span className="text-xs text-muted-foreground">
-                    {sprint.start_date} → {sprint.end_date}
+                    {formatSprintDateRange(sprint.start_date, sprint.end_date)}
                     {sprint.goal ? ` · ${sprint.goal}` : ""}
                   </span>
                 </div>
               </div>
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={() => {
-                  if (!window.confirm(`Delete sprint "${sprint.name}"?`)) return;
-                  deleteSprint.mutate(sprint.id, {
-                    onSuccess: () => toast.success("Sprint deleted"),
-                    onError: () => toast.error("Failed to delete sprint"),
-                  });
-                }}
-              >
-                Delete
-              </Button>
+              <DropdownMenu>
+                <DropdownMenuTrigger
+                  render={
+                    <Button size="sm" variant="ghost">
+                      <MoreHorizontal className="h-4 w-4" />
+                    </Button>
+                  }
+                />
+                <DropdownMenuContent align="end">
+                  {sprint.status !== "done" && sprint.status !== "cancelled" && (
+                    <>
+                      <DropdownMenuItem onClick={() => setCompletingSprint(sprint)}>
+                        Complete sprint…
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        onClick={() =>
+                          updateSprint.mutate(
+                            { id: sprint.id, payload: { status: "cancelled" } },
+                            {
+                              onSuccess: () => toast.success("Sprint cancelled"),
+                              onError: () => toast.error("Failed to cancel sprint"),
+                            },
+                          )
+                        }
+                      >
+                        Cancel sprint
+                      </DropdownMenuItem>
+                      <DropdownMenuSeparator />
+                    </>
+                  )}
+                  <DropdownMenuItem
+                    variant="destructive"
+                    onClick={() => {
+                      if (!window.confirm(`Delete sprint "${sprint.name}"?`)) return;
+                      deleteSprint.mutate(sprint.id, {
+                        onSuccess: () => toast.success("Sprint deleted"),
+                        onError: () => toast.error("Failed to delete sprint"),
+                      });
+                    }}
+                  >
+                    Delete
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
             </li>
           );
         })}
       </ul>
+
+      {completingSprint && (
+        <CompleteSprintDialog
+          workspaceId={workspaceId}
+          projectId={projectId}
+          sprint={completingSprint}
+          open={!!completingSprint}
+          onOpenChange={(next) => {
+            if (!next) setCompletingSprint(null);
+          }}
+        />
+      )}
     </div>
   );
 }

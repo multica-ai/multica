@@ -125,14 +125,16 @@ type CanUserEditNoteParams struct {
 }
 
 // Returns true when the user may EDIT and SAVE the note (not just read it).
-// FIR-2595: edit/save is driven by folder access — folders are the ONLY note
-// permission control now. A user may write when
+// FIR-2595: edit/save is driven by folder access — folders are now the ONLY
+// permission control for notes (Jesper: "a user must be able to edit and save
+// all notes in folders they have access to"). A user may write when
 //   - they own the note (baseline — nobody is ever locked out of their own note,
 //     including personal notes at the workspace root that carry no folder), OR
 //   - they reach the note's folder (or any ancestor) via ANY Collections grant.
 //
 // Access to the folder IS edit access; there is no read-only tier for notes.
-// Additive to the legacy owner-only gate: it only ever GRANTS write.
+// Additive to the legacy owner-only gate: it only ever GRANTS write; it never
+// removes anyone's existing access.
 func (q *Queries) CanUserEditNote(ctx context.Context, arg CanUserEditNoteParams) (bool, error) {
 	row := q.db.QueryRow(ctx, canUserEditNote, arg.ArtifactID, arg.OwnerID)
 	var allowed bool
@@ -189,19 +191,20 @@ func (q *Queries) DeleteNote(ctx context.Context, artifactID pgtype.UUID) error 
 }
 
 const getNote = `-- name: GetNote :one
-SELECT artifact_id, owner_id, visibility, pinned, pinned_at, created_at, updated_at
+SELECT artifact_id, owner_id, visibility, pinned, pinned_at, author_codes, created_at, updated_at
 FROM cerebro_note
 WHERE artifact_id = $1
 `
 
 type GetNoteRow struct {
-	ArtifactID pgtype.UUID        `json:"artifact_id"`
-	OwnerID    pgtype.UUID        `json:"owner_id"`
-	Visibility string             `json:"visibility"`
-	Pinned     bool               `json:"pinned"`
-	PinnedAt   pgtype.Timestamptz `json:"pinned_at"`
-	CreatedAt  pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt  pgtype.Timestamptz `json:"updated_at"`
+	ArtifactID  pgtype.UUID        `json:"artifact_id"`
+	OwnerID     pgtype.UUID        `json:"owner_id"`
+	Visibility  string             `json:"visibility"`
+	Pinned      bool               `json:"pinned"`
+	PinnedAt    pgtype.Timestamptz `json:"pinned_at"`
+	AuthorCodes bool               `json:"author_codes"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
 }
 
 func (q *Queries) GetNote(ctx context.Context, artifactID pgtype.UUID) (GetNoteRow, error) {
@@ -213,7 +216,29 @@ func (q *Queries) GetNote(ctx context.Context, artifactID pgtype.UUID) (GetNoteR
 		&i.Visibility,
 		&i.Pinned,
 		&i.PinnedAt,
+		&i.AuthorCodes,
 		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getNoteLineAttr = `-- name: GetNoteLineAttr :one
+SELECT artifact_id, base_body, attrs, updated_at
+FROM cerebro_note_line_attr
+WHERE artifact_id = $1
+`
+
+// FIR-2810: per-line attribution state for a note. base_body is the body the
+// attrs array was computed for; a mismatch with the current artifact body
+// means an out-of-band edit happened and the caller must self-heal.
+func (q *Queries) GetNoteLineAttr(ctx context.Context, artifactID pgtype.UUID) (CerebroNoteLineAttr, error) {
+	row := q.db.QueryRow(ctx, getNoteLineAttr, artifactID)
+	var i CerebroNoteLineAttr
+	err := row.Scan(
+		&i.ArtifactID,
+		&i.BaseBody,
+		&i.Attrs,
 		&i.UpdatedAt,
 	)
 	return i, err
@@ -349,10 +374,12 @@ SELECT DISTINCT a.id, a.workspace_id, a.folder_id, a.title, a.body,
        n.owner_id, n.visibility, n.pinned, n.pinned_at
 FROM cerebro_note n
 JOIN artifact a ON a.id = n.artifact_id
-JOIN cerebro_note_reference ref ON ref.note_id = n.artifact_id
+LEFT JOIN cerebro_note_reference ref
+  ON ref.note_id = n.artifact_id
+ AND ref.object = $2
+ AND ref.ref_id = $3
 WHERE a.workspace_id = $1
-  AND ref.object = $2
-  AND ref.ref_id = $3
+  AND (ref.id IS NOT NULL OR ($2 = 'issue' AND a.issue_id::text = $3))
   AND (
     (
       (
@@ -642,6 +669,23 @@ func (q *Queries) SearchNotesForUser(ctx context.Context, arg SearchNotesForUser
 	return items, nil
 }
 
+const setNoteAuthorCodes = `-- name: SetNoteAuthorCodes :exec
+UPDATE cerebro_note
+SET author_codes = $2, updated_at = now()
+WHERE artifact_id = $1
+`
+
+type SetNoteAuthorCodesParams struct {
+	ArtifactID  pgtype.UUID `json:"artifact_id"`
+	AuthorCodes bool        `json:"author_codes"`
+}
+
+// FIR-2810: per-note toggle — stamp the writer's member code on every line.
+func (q *Queries) SetNoteAuthorCodes(ctx context.Context, arg SetNoteAuthorCodesParams) error {
+	_, err := q.db.Exec(ctx, setNoteAuthorCodes, arg.ArtifactID, arg.AuthorCodes)
+	return err
+}
+
 const setNotePinned = `-- name: SetNotePinned :exec
 UPDATE cerebro_note
 SET pinned = $2,
@@ -731,4 +775,24 @@ func (q *Queries) UpsertNote(ctx context.Context, arg UpsertNoteParams) (UpsertN
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const upsertNoteLineAttr = `-- name: UpsertNoteLineAttr :exec
+INSERT INTO cerebro_note_line_attr (artifact_id, base_body, attrs, updated_at)
+VALUES ($1, $2, $3, now())
+ON CONFLICT (artifact_id) DO UPDATE
+SET base_body  = EXCLUDED.base_body,
+    attrs      = EXCLUDED.attrs,
+    updated_at = now()
+`
+
+type UpsertNoteLineAttrParams struct {
+	ArtifactID pgtype.UUID `json:"artifact_id"`
+	BaseBody   string      `json:"base_body"`
+	Attrs      []byte      `json:"attrs"`
+}
+
+func (q *Queries) UpsertNoteLineAttr(ctx context.Context, arg UpsertNoteLineAttrParams) error {
+	_, err := q.db.Exec(ctx, upsertNoteLineAttr, arg.ArtifactID, arg.BaseBody, arg.Attrs)
+	return err
 }

@@ -36,6 +36,7 @@ export type CerebroFlagKey =
   // instead of auto-advancing to the next message. Per-user preference.
   | "cerebro_inbox_archive_to_list"
   | "cerebro_inbox_dynamic"
+  | "cerebro_inbox_rounds"
   // FIR-1854: split a channel/DM thread with unread replies into its own
   // inbox row so replies buried in a thread are not missed.
   | "cerebro_inbox_thread_split"
@@ -226,6 +227,8 @@ export type CerebroFlagKey =
   | "cerebro_session_context_hairline"
   // FIR-1839: the "CLI runs" tab (the local Claude Code / CLI work-sessions list, formerly the "Sessions" tab). OFF by default — hidden unless a workspace opts in.
   | "cerebro_cli_runs_tab"
+  // FIR-2827: sidebar "Subscribers" section on regular issues — subscribers split by type (Members / Agents) with the add/remove popover, replacing the avatar stack next to the Activity header.
+  | "cerebro_issue_sidebar_subscribers"
   // FIR-1597: optional time-of-day on an issue's start/due date; start time auto-starts an agent, due time times the reminder.
   | "cerebro_issue_date_times"
   // FIR-1659: personal saved filters — name a filter on the issue list and recall it with one click. Sharing + permissions land in later phases.
@@ -236,6 +239,8 @@ export type CerebroFlagKey =
   | "cerebro_capability_drift_watcher"
   // TECH-3511: note types — reusable note templates with recurrence (business reviews).
   | "cerebro_note_types"
+  // FIR-2810: per-line note attribution (see who wrote/edited every line) + the per-note "stamp my member code on each line" toggle.
+  | "cerebro_note_line_authors"
   // FIR-2661: render uploaded PDFs inline (native browser PDF view) instead of dumping extracted text.
   | "cerebro_pdf_inline_render"
   // FIR-1673: recover a stalled/half-loaded image on the document page — loading
@@ -263,6 +268,12 @@ export type CerebroFlagKey =
   | "cerebro_comment_target_guard_wakeup_exempt"
   // FIR-2409: friendly "Agent-start" permission tab — who may trigger an agent they don't own.
   | "cerebro_agent_trigger_permissions"
+  // FIR-3091 slice 5: surface the web_fetch host allow/deny list inside the unified
+  // Permissions screen instead of its own separate "Web fetch" settings tab.
+  | "cerebro_web_fetch_permissions"
+  // FIR-3091 punkt 8: per-permission detail page (who holds a tool permission,
+  // which layer grants it, and — later phases — its change log and usage log).
+  | "cerebro_permission_detail"
   // TECH-2880: collapsible Projects entry in the sidebar (with nested project tree).
   | "cerebro_projects"
   // FIR-2660: restrict channel creation to workspace owners/admins. Default off
@@ -363,6 +374,9 @@ export type CerebroFlagKey =
   // TECH-3491: per-device draft persistence for the comment / channel / DM
   // composers — a half-written message survives navigating away or a reload.
   | "cerebro_comment_drafts"
+  // FIR-2648: per-device draft persistence for the issue description editor —
+  // recovers text that never reached the server (e.g. session expired mid-edit).
+  | "cerebro_description_drafts"
   // TECH-3698: per-channel permission settings (who may rename / add-remove
   // participants / leave) surfaced in the channel settings sheet and the
   // create-channel dialog. Gates only the configuration UI.
@@ -428,6 +442,7 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   // OFF: preserve today's auto-advance-to-next behavior unless the user opts in.
   cerebro_inbox_archive_to_list: false,
   cerebro_inbox_dynamic: false,
+  cerebro_inbox_rounds: false,
   // FIR-1854 (Jesper): ON — a thread reply that would otherwise hide inside
   // the channel row gets its own inbox row so it is not missed.
   cerebro_inbox_thread_split: true,
@@ -605,6 +620,9 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   // FIR-1839: OFF by default — the "CLI runs" tab (local CLI work-sessions) is
   // hidden unless a workspace opts in.
   cerebro_cli_runs_tab: false,
+  // FIR-2827: ON by default — subscribers listed in the issue sidebar, split by
+  // type. Off falls back to the avatar stack next to the Activity header.
+  cerebro_issue_sidebar_subscribers: true,
   // FIR-1597: OFF by default. Hides the time-of-day control next to the
   // start/due date pickers. The sweeper still treats a no-time date as before.
   cerebro_issue_date_times: false,
@@ -622,6 +640,9 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   // TECH-3511: OFF by default. Hides the Note types admin in Documents and
   // skips the note-types sweeper until a workspace opts in.
   cerebro_note_types: false,
+  // FIR-2810: ON by default. Line authors is opt-in per note (a toggle in the
+  // note's ⋯ menu), so the flag only controls whether the toggles exist.
+  cerebro_note_line_authors: true,
   // FIR-2661: ON by default. Uploaded PDFs in Documents and the attachment
   // viewer render in the browser's native PDF view (scroll, zoom, search).
   // Off restores the prior behaviour (extracted-text dump in the attachment
@@ -662,6 +683,16 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   cerebro_comment_target_guard_wakeup_exempt: false,
   // FIR-2409: opt-in until the Agent-start tab + per-agent rows are reviewed.
   cerebro_agent_trigger_permissions: false,
+  // FIR-3091 slice 5: OFF by default. When on, the web_fetch host list moves
+  // into the Permissions screen and the standalone "Web fetch" tab is hidden.
+  // Pure UI relocation — the standalone tab (cerebro_web_fetch_policy) is the
+  // fallback whenever this is off, so the change is reversible.
+  cerebro_web_fetch_permissions: false,
+  // FIR-3091 punkt 8: OFF by default. When on, a per-permission detail page is
+  // reachable; it shows who holds a tool permission and which layer grants it
+  // (later phases add its change log and usage log). Nothing links to the page
+  // while off, so the change is reversible.
+  cerebro_permission_detail: false,
   // TECH-2880: OFF by default — workspace opts in to surface the Projects
   // collapsible (header + sub-items) in the sidebar.
   cerebro_projects: false,
@@ -747,12 +778,12 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   // admin flips this on, after the grant→tool-policy migration is verified 1:1.
   // No deploy-time behaviour change; can never open a default-allow hole on reveal.
   cerebro_credential_chain_grant: false,
-  // FIR-2175: OFF by default — the general tool-policy gate stays pure
-  // tighten-only (Resolve) until an admin opts a workspace into member-override.
+  // FIR-3062: ON by default — workspace permissions are defaults, group
+  // permissions combine by maximum access, and a direct member rule wins.
   // Flipping it on can only affect the visible tool-policy permissions; the
   // deny-by-default floors are never wired to it, so it can never widen
   // credential, sandbox, repo-checkout, or approval-cap access.
-  cerebro_member_override: false,
+  cerebro_member_override: true,
   // TECH-3196: OFF by default — Agent Vault per-agent secret brokering ships
   // dormant until an admin opts in and the access table is configured.
   cerebro_agent_vault: false,
@@ -761,6 +792,10 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   // is the intended behaviour change. Off restores the old "lose it on navigate"
   // behaviour and hides the "Kladde gemt" hint.
   cerebro_comment_drafts: true,
+  // FIR-2648: ON by default — recovering a description edit that never
+  // reached the server is the whole point of the feature. Off restores the
+  // old "lose it on session expiry" behaviour and hides the restore banner.
+  cerebro_description_drafts: true,
   // TECH-3582: OFF by default. Ships dormant — the Workspace copy console only
   // appears in Settings once an admin opts in to run a one-time workspace merge.
   cerebro_workspace_copy: false,
@@ -1057,6 +1092,13 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
       "Let each user build their own inbox out of stackable sections (Unread / Running / Pinned / Project / Assigned …) inside one box, with tabs at the top and per-section filter, grouping and sort. Users switch between the Classic and Dynamic inbox from the inbox's ⋯ menu; the layout is saved per user and follows them across devices, with an optional separate layout for mobile/PWA.",
   },
   {
+    key: "cerebro_inbox_rounds",
+    label: "Inbox rounds",
+    group: "inbox",
+    description:
+      "Queue issue replies into named rounds and release a whole round manually or on its schedule. Active round issues stay out of All messages while their progress remains visible in the inbox.",
+  },
+  {
     key: "cerebro_note_inbox_pane",
     label: "Open notes in inbox pane",
     group: "inbox",
@@ -1328,6 +1370,20 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
       "Add a friendly 'Agent-start' tab under Settings → Permissions to control who may start (trigger) an agent they don't own — a workspace-wide default plus a per-agent override (Allow / run-request / owner-only). Reuses the tool-policy engine; server enforcement is unchanged when off. FIR-2409.",
   },
   {
+    key: "cerebro_web_fetch_permissions",
+    label: "Web fetch in Permissions",
+    group: "permissions",
+    description:
+      "Show the web_fetch host list (which URLs agents may fetch) inside the unified Permissions screen instead of its own separate 'Web fetch' settings tab. Pure UI relocation — the mode and host rules, and how they are enforced, are unchanged. When off, the standalone 'Web fetch' tab (cerebro_web_fetch_policy) is used instead, so the move is reversible. FIR-3091.",
+  },
+  {
+    key: "cerebro_permission_detail",
+    label: "Permission detail page",
+    group: "permissions",
+    description:
+      "Open a detail page for a single tool permission that shows who holds it (which agents, people, groups and runtimes have it set) and which layer grants it. Permissions that are shown but not enforced at runtime yet are greyed out. Off by default while it is built; nothing links to the page until it is turned on, so the change is reversible. Later phases add a change log and a usage log. FIR-3091.",
+  },
+  {
     key: "cerebro_image_reload",
     label: "Reload stalled images",
     group: "workspace",
@@ -1426,6 +1482,13 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
       "Show the \"CLI runs\" tab on an issue — the list of local Claude Code / CLI work-sessions started from a terminal (start, stop, resume, fork, transcript). This was previously the \"Sessions\" tab; renamed to avoid colliding with comment sessions. OFF by default — hidden unless a workspace opts in. FIR-1839.",
   },
   {
+    key: "cerebro_issue_sidebar_subscribers",
+    label: "Sidebar subscribers",
+    group: "workspace",
+    description:
+      "List an issue's subscribers in the sidebar, split by type (Members / Agents), with the same add/remove popover the chat Participants section uses. Every subscriber is a potential wake target, so the per-type split answers \"who can this issue dispatch to?\" at a glance. Off falls back to the avatar stack next to the Activity header. ON by default. FIR-2827.",
+  },
+  {
     key: "cerebro_recurring_issues",
     label: "Recurring issues",
     group: "workspace",
@@ -1480,6 +1543,13 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     group: "workspace",
     description:
       "Reusable note templates with recurrence, for business reviews. Create a note type with a fixed template plus a behaviour: one rolling document with the newest section prepended each period, or a fresh note per period in a folder. A daily sweeper materialises scheduled types (weekly/monthly/quarterly) and a 'run now' action covers off-cycle reviews. Off hides the Note types admin in Documents and skips the sweeper. TECH-3511.",
+  },
+  {
+    key: "cerebro_note_line_authors",
+    label: "Note line authors",
+    group: "workspace",
+    description:
+      "Per-line attribution on notes: switch on 'Line authors' in a note's ⋯ menu to see who wrote and who last edited every line in the margin, and switch on 'Author codes' to stamp your member code (e.g. JEH) on each line you write — also available on a recurring note so business reviews start with it on. Off hides both toggles. FIR-2810.",
   },
   {
     key: "cerebro_skill_folders",
@@ -1639,6 +1709,14 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     description:
       "Keep what you have typed in a comment, channel message, DM, or thread reply if you navigate away, reload, or the editor scrolls out of view — it reappears when you come back. Saved on this device only (not synced across devices). A small \"Kladde gemt\" hint shows when a draft is stored. Off restores the old behaviour where an unsent message is lost on navigate. TECH-3491.",
   },
+  // FIR-2648: per-device drafts for the issue description editor.
+  {
+    key: "cerebro_description_drafts",
+    label: "Recover unsaved description edits",
+    group: "issues",
+    description:
+      "Keep what you have typed into an issue description on this device, independent of whether the save actually reached the server. If the last save never reached the backend (e.g. the Cloudflare Access session expired mid-edit), a small banner offers to restore or discard it the next time the description editor is opened. Saved on this device only (not synced across devices). Off restores the old behaviour where an edit that never saved is silently lost. FIR-2648.",
+  },
   // TECH-3582: Workspace copy console — one-time workspace merge tool.
   {
     key: "cerebro_workspace_copy",
@@ -1748,7 +1826,7 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     label: "Member overrides group on the tool-policy gate",
     group: "permissions",
     description:
-      "Resolve the visible per-tool Allow / Ask / Block policy with the member-override model: a member's own setting wins over an inherited group or workspace default by specificity (most specific wins, so a member Allow can OPEN what their group denied), and the runtime + agent layers may then only tighten that member verdict. Off by default — the gate stays pure most-restrictive-wins. This only affects the general tool-policy permissions an operator sees in the table; the deny-by-default floors (credentials, OS sandbox, repo checkout, the repo-approval cap) are never resolved through it and stay strictly tighten-only, so turning it on can never widen access to a secret, the sandbox, or a repo. FIR-2175.",
+      "Resolve the visible per-tool Allow / Ask / Block policy with the member-override model: workspace is the default, the highest permission across groups wins, and a member's own setting wins over both. On by default. This only affects the general tool-policy permissions an operator sees in the table; the deny-by-default floors (credentials, OS sandbox, repo checkout, the repo-approval cap) are never resolved through it and stay strictly tighten-only, so it can never widen access to a secret, the sandbox, or a repo. FIR-2175, FIR-3062.",
   },
 ];
 
@@ -1837,6 +1915,8 @@ export const CEREBRO_FLAG_SUBGROUP_OF: Partial<Record<CerebroFlagKey, string>> =
   cerebro_simple_tool_policy: "tool_permissions",
   cerebro_runtime_tool_grant_ui: "tool_permissions",
   cerebro_web_fetch_policy: "tool_permissions",
+  cerebro_web_fetch_permissions: "tool_permissions",
+  cerebro_permission_detail: "tool_permissions",
   cerebro_platform_capabilities: "tool_permissions",
   cerebro_approval_gate: "tool_permissions",
   cerebro_local_tool_policy: "tool_permissions",

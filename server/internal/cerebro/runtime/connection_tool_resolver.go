@@ -244,17 +244,28 @@ type mcpToolVerdictResolver interface {
 // Satisfied in production by connections.MCPServerEntry (via defaultMCPEntry);
 // a fake in tests avoids depending on relay wiring.
 type mcpEntryBuilder func(c connections.Connection) map[string]any
+type claimMCPEntryBuilder func(c connections.Connection, ident ConnectionIdentity) map[string]any
 
 // ConnectionToolResolver is the one resolver spanning both connection types. It
 // is stateless beyond its store handles, so every consumer building one gets
 // identical semantics — the whole point of collapsing the two paths.
 type ConnectionToolResolver struct {
-	api      *APIConnectionResolver
-	conns    apiConnectionLister
-	verdicts mcpToolVerdictResolver
-	flags    apiConnectionFlagChecker
-	entryFor mcpEntryBuilder
-	logger   *slog.Logger
+	api           *APIConnectionResolver
+	conns         apiConnectionLister
+	verdicts      mcpToolVerdictResolver
+	flags         apiConnectionFlagChecker
+	entryFor      mcpEntryBuilder
+	claimEntryFor claimMCPEntryBuilder
+	logger        *slog.Logger
+}
+
+// SetClaimMCPEntryBuilder supplies the actor-aware relay entry builder used only
+// at daemon claim time. Other consumers keep the ordinary entry builder because
+// they either run in-process or do not have a claim actor.
+func (r *ConnectionToolResolver) SetClaimMCPEntryBuilder(builder func(connections.Connection, ConnectionIdentity) map[string]any) {
+	if r != nil {
+		r.claimEntryFor = builder
+	}
 }
 
 // NewConnectionToolResolver builds the resolver. api is the reused Category-A
@@ -298,6 +309,13 @@ func defaultMCPEntry(c connections.Connection) map[string]any {
 // tool loop. Fail-closed everywhere policy could not be verified — this fronts
 // the secrets box.
 func (r *ConnectionToolResolver) Resolve(ctx context.Context, ident ConnectionIdentity) ResolvedConnectionTools {
+	if r == nil {
+		return ResolvedConnectionTools{}
+	}
+	return r.resolveWithMCPEntry(ctx, ident, r.entryFor)
+}
+
+func (r *ConnectionToolResolver) resolveWithMCPEntry(ctx context.Context, ident ConnectionIdentity, entryFor mcpEntryBuilder) ResolvedConnectionTools {
 	var out ResolvedConnectionTools
 	if r == nil || !ident.WorkspaceID.Valid || !ident.AgentID.Valid {
 		return out
@@ -330,7 +348,7 @@ func (r *ConnectionToolResolver) Resolve(ctx context.Context, ident ConnectionId
 	}
 
 	// --- Category B: mcp_http connections ---
-	r.resolveMCP(ctx, ident, &out)
+	r.resolveMCP(ctx, ident, entryFor, &out)
 	return out
 }
 
@@ -338,7 +356,7 @@ func (r *ConnectionToolResolver) Resolve(ctx context.Context, ident ConnectionId
 // connection once and the per-tool verdict table once (both fail closed): a
 // discovery or resolve error withholds the whole mcp_http half rather than
 // letting an unverified tool through.
-func (r *ConnectionToolResolver) resolveMCP(ctx context.Context, ident ConnectionIdentity, out *ResolvedConnectionTools) {
+func (r *ConnectionToolResolver) resolveMCP(ctx context.Context, ident ConnectionIdentity, entryFor mcpEntryBuilder, out *ResolvedConnectionTools) {
 	if r.conns == nil || r.verdicts == nil {
 		return
 	}
@@ -405,7 +423,7 @@ func (r *ConnectionToolResolver) resolveMCP(ctx context.Context, ident Connectio
 		// withholds the connection from the raw relay list — its Allow siblings
 		// must not drag the Ask/Deny tools in.
 		if allowOnly {
-			servers[c.Name] = r.entryFor(c)
+			servers[c.Name] = entryFor(c)
 		} else {
 			out.Evaluations = append(out.Evaluations, PolicyEvaluation{
 				Connection: c.Name,

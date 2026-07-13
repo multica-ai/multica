@@ -36,6 +36,7 @@ import (
 	"context"
 	"encoding/json"
 
+	"github.com/multica-ai/multica/server/internal/cerebro/connections"
 	"github.com/multica-ai/multica/server/internal/handler"
 )
 
@@ -52,7 +53,7 @@ func (r *ConnectionToolResolver) ClaimConnectionMCP(ctx context.Context, ident h
 		// Not authoritative — the caller runs the legacy path.
 		return nil, nil, false
 	}
-	out := r.Resolve(ctx, ConnectionIdentity{
+	actor := ConnectionIdentity{
 		WorkspaceID: ident.WorkspaceID,
 		RuntimeID:   ident.RuntimeID,
 		AgentID:     ident.AgentID,
@@ -61,6 +62,13 @@ func (r *ConnectionToolResolver) ClaimConnectionMCP(ctx context.Context, ident h
 		// policy layer, so a member-denied connection tool is withheld at claim
 		// across every agent they drive (FIR-2441).
 		InitiatorID: ident.InitiatorID,
-	})
+	}
+	entryFor := r.entryFor
+	if r.claimEntryFor != nil {
+		entryFor = func(c connections.Connection) map[string]any {
+			return r.claimEntryFor(c, actor)
+		}
+	}
+	out := r.resolveWithMCPEntry(ctx, actor, entryFor)
 	return out.MCPServers, out.Deny, true
 }

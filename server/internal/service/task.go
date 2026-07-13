@@ -18,7 +18,9 @@ import (
 	// CEREBRO-PATCH(task-title-builder): cerebro-owned LLM title generator.
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/cerebro/agent_title"
+	cerebroanalytics "github.com/multica-ai/multica/server/internal/cerebro/analytics" // CEREBRO-PATCH(analytics-projection): project completed/failed tasks into canonical analytics.
 	"github.com/multica-ai/multica/server/internal/cerebro/delegationorigin"
+	"github.com/multica-ai/multica/server/internal/cerebro/failrouter" // CEREBRO-PATCH(failure-router): FIR-2751 central failure routing policy.
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/mention"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
@@ -37,13 +39,14 @@ import (
 const cancelledByUserMarker = "_(stoppet af bruger)_"
 
 type TaskService struct {
-	Queries   *db.Queries
-	TxStarter TxStarter
-	Hub       *realtime.Hub
-	Bus       *events.Bus
-	Analytics analytics.Client
-	Metrics   *obsmetrics.BusinessMetrics
-	Wakeup    TaskWakeupNotifier
+	Queries            *db.Queries
+	TxStarter          TxStarter
+	Hub                *realtime.Hub
+	Bus                *events.Bus
+	Analytics          analytics.Client
+	Metrics            *obsmetrics.BusinessMetrics
+	AnalyticsProjector cerebroanalytics.RunProjector // CEREBRO-PATCH(analytics-projection-seam): FIR-2996 refresh on terminal task writes.
+	Wakeup             TaskWakeupNotifier
 	// EmptyClaim caches "this runtime has no queued task" so the daemon
 	// poll path can skip a Postgres scan on the steady-state empty case.
 	// Optional — a nil cache disables the fast path and every claim
@@ -73,6 +76,10 @@ type TaskService struct {
 	// completion (not dependent on the agent calling rename_session). Set from
 	// router.go; nil-safe.
 	WorkflowSessionStamper WorkflowSessionStamper
+	// CEREBRO-PATCH(workflow-loop-advancer): FIR-3052 — advance Plan -> Build on
+	// plan-task completion so the loop moves without a manual status flip. Set
+	// from router.go; nil-safe.
+	WorkflowLoopAdvancer WorkflowLoopAdvancer
 
 	analyticsContextMu    sync.Mutex
 	analyticsContextCache map[string]analytics.TaskContext
@@ -89,7 +96,8 @@ type TaskService struct {
 type IssueWorkflowActivator interface {
 	ActivateForIssue(
 		ctx context.Context,
-		workspaceID, workflowID, issueID, creatorID pgtype.UUID,
+		// CEREBRO-PATCH(cerebro-workflow-agent-requester): preserve the human requester across quick-create activation.
+		workspaceID, workflowID, issueID, creatorID, requesterID pgtype.UUID,
 		createdByType string,
 	) error
 }
@@ -105,12 +113,20 @@ type WorkflowSessionStamper interface {
 	StampOnComplete(ctx context.Context, task db.AgentTaskQueue)
 }
 
+// CEREBRO-PATCH(workflow-loop-advancer-iface): FIR-3052 step-hook seam.
+// Implemented by cerebro/workflows.LoopPhaseAdvancer; the interface keeps the
+// upstream service package free of a cerebro import.
+type WorkflowLoopAdvancer interface {
+	AdvanceOnComplete(ctx context.Context, task db.AgentTaskQueue)
+}
+
 // CEREBRO-PATCH(auto-pause-invoker): cerebro auto-pause invoker seam.
 // The concrete implementation lives in cerebro/runtime/auto_pause.go;
 // the upstream service package only sees this interface to avoid an
 // import cycle (cerebro/runtime → service → would loop back here).
 type AutoPauseInvoker interface {
 	MaybeAutoPauseOnFailure(ctx context.Context, task db.AgentTaskQueue) bool
+	AlertRuntimeFailure(ctx context.Context, task db.AgentTaskQueue) // CEREBRO-PATCH(failure-router): alert runtime owners for actionable setup failures.
 	// CEREBRO-PATCH(auto-pause-reset): FIR-2476 — clear the consecutive
 	// auto-pause circuit-breaker counter when a task completes successfully.
 	ResetAutoPauseCount(ctx context.Context, runtimeID pgtype.UUID)
@@ -173,6 +189,15 @@ type WakeupTaskContext struct {
 	WakeupID    string `json:"wakeup_id"`
 	TriggerType string `json:"trigger_type"`
 	Prompt      string `json:"prompt"`
+}
+
+// CEREBRO-PATCH(inbox-rounds): persist Round release and batch eligibility without bypassing the normal task queue (FIR-2736).
+const RoundTaskContextType = "inbox_round"
+
+type RoundTaskContext struct {
+	Type          string `json:"type"`
+	RunID         string `json:"run_id"`
+	BatchToolMode string `json:"batch_tool_mode,omitempty"`
 }
 
 func memberCommentDelegationContext(userID string, source string) (TaskDelegationContext, error) {
@@ -353,6 +378,15 @@ func (s *TaskService) captureTaskCompleted(ctx context.Context, task db.AgentTas
 	if s.Metrics != nil {
 		source, runtimeMode, _ := s.taskMetricsContext(ctx, task)
 		s.Metrics.RecordTaskTerminal(util.UUIDToString(task.ID), source, runtimeMode, task.Status, taskRunSeconds(task), taskTotalSeconds(task), task.Attempt)
+	}
+}
+
+func (s *TaskService) projectAnalyticsRun(ctx context.Context, taskID pgtype.UUID) {
+	if s.AnalyticsProjector == nil {
+		return
+	}
+	if err := s.AnalyticsProjector.ProjectRun(ctx, util.UUIDToString(taskID)); err != nil {
+		slog.Warn("project analytics run failed", "task_id", util.UUIDToString(taskID), "error", err)
 	}
 }
 
@@ -1685,6 +1719,7 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 
 	slog.Info("task completed", "task_id", util.UUIDToString(task.ID), "issue_id", util.UUIDToString(task.IssueID))
 	s.captureTaskCompleted(ctx, task)
+	s.projectAnalyticsRun(ctx, task.ID)
 	// CEREBRO-PATCH(auto-pause-reset): FIR-2476 — a success clears the runtime's auto-pause circuit breaker.
 	if s.AutoPause != nil && task.RuntimeID.Valid {
 		s.AutoPause.ResetAutoPauseCount(ctx, task.RuntimeID)
@@ -1751,6 +1786,10 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 	// carried loop_phase; runs post-commit so it never blocks completion.
 	if s.WorkflowSessionStamper != nil {
 		s.WorkflowSessionStamper.StampOnComplete(ctx, task)
+	}
+	// CEREBRO-PATCH(workflow-loop-advancer-call): FIR-3052 — advance Plan -> Build.
+	if s.WorkflowLoopAdvancer != nil {
+		s.WorkflowLoopAdvancer.AdvanceOnComplete(ctx, task)
 	}
 
 	// For chat tasks, broadcast chat:done. The assistant reply, the
@@ -1876,12 +1915,28 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 
 	slog.Warn("task failed", "task_id", util.UUIDToString(task.ID), "issue_id", util.UUIDToString(task.IssueID), "error", errMsg, "failure_reason", failureReason)
 	s.captureTaskFailed(ctx, task)
+	s.projectAnalyticsRun(ctx, task.ID)
 
 	// CEREBRO-PATCH(auto-pause-on-failure): check rate-limit / monthly-cap /
 	// expired auth BEFORE auto-retry. When paused, skip retry creation so the
 	// fail-safe 5-min loop does not re-queue the same task indefinitely. See
 	// cerebro/runtime/auto_pause.go for the full trade-off explanation.
 	autoPaused := s.AutoPause != nil && s.AutoPause.MaybeAutoPauseOnFailure(ctx, task)
+	route, _ := failrouter.Lookup(failureReason) // CEREBRO-PATCH(failure-router): use the exhaustive Cerebro policy table.
+	if route.Action == "" {
+		route.Action = failrouter.ActionSurface
+	}
+	if autoPaused {
+		route.Action = failrouter.ActionPause
+	} else if route.Action == failrouter.ActionPause {
+		route.Action = failrouter.ActionSurface
+	} else if route.Action == failrouter.ActionAlert && s.AutoPause != nil {
+		s.AutoPause.AlertRuntimeFailure(ctx, task)
+	}
+	s.Metrics.RecordTaskFailureDecision(failureReason, string(route.Action))
+	if message := failrouter.UserMessage(failureReason); message != "" {
+		errMsg = message
+	}
 
 	// Auto-retry eligible failures (orphan, timeout, runtime_offline,
 	// runtime_recovery). The helper itself enforces attempt < max_attempts
@@ -1958,14 +2013,10 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 // allowed to act on. Agent-side errors (compile failures, model rejections,
 // etc.) are intentionally excluded — those are real problems that the user
 // should see, not infrastructure flakiness.
-var retryableReasons = map[string]bool{
-	"runtime_offline":           true,
-	"runtime_recovery":          true,
-	"timeout":                   true,
-	"codex_semantic_inactivity": true,
-}
-
 func resumeUnsafeFailureReason(reason string) bool {
+	if route, ok := failrouter.Lookup(reason); ok && route.FreshSession { // CEREBRO-PATCH(failure-router): fresh retries cannot reuse poisoned sessions.
+		return true
+	}
 	switch reason {
 	// Keep in sync with GetLastTaskSession / GetLastChatTaskSession and
 	// CreateRetryTask's fresh-session CASE WHEN.
@@ -1994,7 +2045,11 @@ func (s *TaskService) MaybeRetryFailedTask(ctx context.Context, parent db.AgentT
 	if parent.FailureReason.Valid {
 		reason = parent.FailureReason.String
 	}
-	if !retryableReasons[reason] {
+	route, ok := failrouter.Lookup(reason) // CEREBRO-PATCH(failure-router): all retry eligibility comes from one table.
+	if !ok || route.Action != failrouter.ActionRetry {
+		return nil, nil
+	}
+	if route.RetryLimit > 0 && parent.Attempt > route.RetryLimit {
 		return nil, nil
 	}
 	if parent.Attempt >= parent.MaxAttempts {
@@ -2925,7 +2980,7 @@ func (s *TaskService) notifyQuickCreateCompleted(ctx context.Context, task db.Ag
 		if workflowID, perr := util.ParseUUID(qc.WorkflowID); perr != nil {
 			slog.Warn("quick-create completion: invalid workflow id",
 				"task_id", util.UUIDToString(task.ID), "workflow_id", qc.WorkflowID, "error", perr)
-		} else if aerr := s.IssueWorkflowActivator.ActivateForIssue(ctx, workspaceID, workflowID, issue.ID, requesterID, "member"); aerr != nil {
+		} else if aerr := s.IssueWorkflowActivator.ActivateForIssue(ctx, workspaceID, workflowID, issue.ID, requesterID, requesterID, "member"); aerr != nil {
 			slog.Warn("quick-create completion: workflow activation failed",
 				"task_id", util.UUIDToString(task.ID),
 				"issue_id", util.UUIDToString(issue.ID),

@@ -11,6 +11,36 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const agentContextVersionStats = `-- name: AgentContextVersionStats :one
+
+SELECT
+    COUNT(*)::bigint AS version_count,
+    COUNT(*) FILTER (WHERE created_at >= NOW() - INTERVAL '30 days')::bigint AS versions_last_30d,
+    MAX(created_at)::timestamptz AS last_changed_at
+FROM agent_context_version
+WHERE agent_id = $1
+`
+
+type AgentContextVersionStatsRow struct {
+	VersionCount    int64              `json:"version_count"`
+	VersionsLast30d int64              `json:"versions_last_30d"`
+	LastChangedAt   pgtype.Timestamptz `json:"last_changed_at"`
+}
+
+// --- Context observability (FIR-1775 Phase 4) ---
+// Read-only aggregates that answer "how often does an agent change, who
+// approves, where does drift concentrate". Drift itself is computed in memory
+// by the lint (reused by the observability handler); these queries cover the
+// change-frequency and approver dimensions.
+// AgentContextVersionStats returns the change-frequency stats for one agent:
+// total versions, versions cut in the last 30 days, and when it last changed.
+func (q *Queries) AgentContextVersionStats(ctx context.Context, agentID pgtype.UUID) (AgentContextVersionStatsRow, error) {
+	row := q.db.QueryRow(ctx, agentContextVersionStats, agentID)
+	var i AgentContextVersionStatsRow
+	err := row.Scan(&i.VersionCount, &i.VersionsLast30d, &i.LastChangedAt)
+	return i, err
+}
+
 const applyAgentContextSnapshot = `-- name: ApplyAgentContextSnapshot :one
 UPDATE agent SET
     instructions    = $2,
@@ -58,6 +88,57 @@ func (q *Queries) ApplyAgentContextSnapshot(ctx context.Context, arg ApplyAgentC
 		arg.RuntimeConfig,
 		arg.ContextVersion,
 	)
+	var i Agent
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.Name,
+		&i.AvatarUrl,
+		&i.RuntimeMode,
+		&i.RuntimeConfig,
+		&i.Visibility,
+		&i.Status,
+		&i.MaxConcurrentTasks,
+		&i.OwnerID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Description,
+		&i.RuntimeID,
+		&i.Instructions,
+		&i.ArchivedAt,
+		&i.ArchivedBy,
+		&i.CustomEnv,
+		&i.CustomArgs,
+		&i.McpConfig,
+		&i.Model,
+		&i.ThinkingLevel,
+		&i.PersonaSandbox,
+		&i.SurfaceVisibility,
+		&i.ContextOwnerID,
+		&i.ContextApproverIds,
+		&i.ContextVersion,
+	)
+	return i, err
+}
+
+const bumpAgentContextVersion = `-- name: BumpAgentContextVersion :one
+UPDATE agent SET
+    context_version = $2,
+    updated_at      = now()
+WHERE id = $1
+RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, persona_sandbox, surface_visibility, context_owner_id, context_approver_ids, context_version
+`
+
+type BumpAgentContextVersionParams struct {
+	ID             pgtype.UUID `json:"id"`
+	ContextVersion string      `json:"context_version"`
+}
+
+// BumpAgentContextVersion advances only the version pointer. The direct-edit
+// path has already written the new field values through the generic agent
+// update; unlike ApplyAgentContextSnapshot nothing else may be rewritten here.
+func (q *Queries) BumpAgentContextVersion(ctx context.Context, arg BumpAgentContextVersionParams) (Agent, error) {
+	row := q.db.QueryRow(ctx, bumpAgentContextVersion, arg.ID, arg.ContextVersion)
 	var i Agent
 	err := row.Scan(
 		&i.ID,
@@ -368,6 +449,46 @@ func (q *Queries) GetAgentContextVersion(ctx context.Context, arg GetAgentContex
 	return i, err
 }
 
+const getLatestAgentContextVersion = `-- name: GetLatestAgentContextVersion :one
+SELECT id, agent_id, version, snapshot, description, created_by, created_at FROM agent_context_version
+WHERE agent_id = $1
+ORDER BY created_at DESC, version DESC
+LIMIT 1
+`
+
+// GetLatestAgentContextVersion returns the most recent snapshot row for the
+// agent. The direct-edit recorder compares against it to skip edits that did
+// not change any versioned field, and to keep the version pointer monotonic
+// if it ever drifted behind the history.
+func (q *Queries) GetLatestAgentContextVersion(ctx context.Context, agentID pgtype.UUID) (AgentContextVersion, error) {
+	row := q.db.QueryRow(ctx, getLatestAgentContextVersion, agentID)
+	var i AgentContextVersion
+	err := row.Scan(
+		&i.ID,
+		&i.AgentID,
+		&i.Version,
+		&i.Snapshot,
+		&i.Description,
+		&i.CreatedBy,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const getWorkspaceReposForContextLint = `-- name: GetWorkspaceReposForContextLint :one
+SELECT repos FROM workspace
+WHERE id = $1
+`
+
+// GetWorkspaceReposForContextLint returns the workspace-level repos JSONB
+// (array of {url, description}) used to resolve repo links in instructions.
+func (q *Queries) GetWorkspaceReposForContextLint(ctx context.Context, id pgtype.UUID) ([]byte, error) {
+	row := q.db.QueryRow(ctx, getWorkspaceReposForContextLint, id)
+	var repos []byte
+	err := row.Scan(&repos)
+	return repos, err
+}
+
 const insertAgentSkillForContext = `-- name: InsertAgentSkillForContext :exec
 INSERT INTO agent_skill (agent_id, skill_id)
 VALUES ($1, $2)
@@ -382,6 +503,76 @@ type InsertAgentSkillForContextParams struct {
 func (q *Queries) InsertAgentSkillForContext(ctx context.Context, arg InsertAgentSkillForContextParams) error {
 	_, err := q.db.Exec(ctx, insertAgentSkillForContext, arg.AgentID, arg.SkillID)
 	return err
+}
+
+const listAgentChangeRequestStats = `-- name: ListAgentChangeRequestStats :many
+SELECT status, COUNT(*)::bigint AS count
+FROM agent_change_request
+WHERE agent_id = $1
+GROUP BY status
+`
+
+type ListAgentChangeRequestStatsRow struct {
+	Status string `json:"status"`
+	Count  int64  `json:"count"`
+}
+
+// ListAgentChangeRequestStats returns one agent's change-request counts grouped
+// by status (pending/approved/rejected/merged).
+func (q *Queries) ListAgentChangeRequestStats(ctx context.Context, agentID pgtype.UUID) ([]ListAgentChangeRequestStatsRow, error) {
+	rows, err := q.db.Query(ctx, listAgentChangeRequestStats, agentID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListAgentChangeRequestStatsRow{}
+	for rows.Next() {
+		var i ListAgentChangeRequestStatsRow
+		if err := rows.Scan(&i.Status, &i.Count); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAgentChangeRequestStatsByWorkspace = `-- name: ListAgentChangeRequestStatsByWorkspace :many
+SELECT cr.agent_id, cr.status, COUNT(*)::bigint AS count
+FROM agent_change_request cr
+JOIN agent a ON a.id = cr.agent_id
+WHERE a.workspace_id = $1 AND a.archived_at IS NULL
+GROUP BY cr.agent_id, cr.status
+`
+
+type ListAgentChangeRequestStatsByWorkspaceRow struct {
+	AgentID pgtype.UUID `json:"agent_id"`
+	Status  string      `json:"status"`
+	Count   int64       `json:"count"`
+}
+
+// ListAgentChangeRequestStatsByWorkspace returns change-request counts grouped
+// by agent and status across every non-archived agent in the workspace.
+func (q *Queries) ListAgentChangeRequestStatsByWorkspace(ctx context.Context, workspaceID pgtype.UUID) ([]ListAgentChangeRequestStatsByWorkspaceRow, error) {
+	rows, err := q.db.Query(ctx, listAgentChangeRequestStatsByWorkspace, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListAgentChangeRequestStatsByWorkspaceRow{}
+	for rows.Next() {
+		var i ListAgentChangeRequestStatsByWorkspaceRow
+		if err := rows.Scan(&i.AgentID, &i.Status, &i.Count); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listAgentChangeRequestsByAgent = `-- name: ListAgentChangeRequestsByAgent :many
@@ -417,6 +608,158 @@ func (q *Queries) ListAgentChangeRequestsByAgent(ctx context.Context, agentID pg
 			&i.WorkSessionID,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAgentContextApproverStats = `-- name: ListAgentContextApproverStats :many
+SELECT
+    cr.reviewed_by AS user_id,
+    COALESCE(u.name, '')::text AS name,
+    cr.status,
+    COUNT(*)::bigint AS count
+FROM agent_change_request cr
+LEFT JOIN "user" u ON u.id = cr.reviewed_by
+WHERE cr.agent_id = $1
+  AND cr.reviewed_by IS NOT NULL
+  AND cr.status IN ('approved', 'rejected', 'merged')
+GROUP BY cr.reviewed_by, u.name, cr.status
+`
+
+type ListAgentContextApproverStatsRow struct {
+	UserID pgtype.UUID `json:"user_id"`
+	Name   string      `json:"name"`
+	Status string      `json:"status"`
+	Count  int64       `json:"count"`
+}
+
+// ListAgentContextApproverStats returns who reviewed one agent's change
+// requests and how many they approved/merged/rejected. The reviewer name
+// resolves inline so the overview never shows a bare UUID.
+func (q *Queries) ListAgentContextApproverStats(ctx context.Context, agentID pgtype.UUID) ([]ListAgentContextApproverStatsRow, error) {
+	rows, err := q.db.Query(ctx, listAgentContextApproverStats, agentID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListAgentContextApproverStatsRow{}
+	for rows.Next() {
+		var i ListAgentContextApproverStatsRow
+		if err := rows.Scan(
+			&i.UserID,
+			&i.Name,
+			&i.Status,
+			&i.Count,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAgentContextApproverStatsByWorkspace = `-- name: ListAgentContextApproverStatsByWorkspace :many
+SELECT
+    cr.reviewed_by AS user_id,
+    COALESCE(u.name, '')::text AS name,
+    cr.status,
+    COUNT(*)::bigint AS count
+FROM agent_change_request cr
+JOIN agent a ON a.id = cr.agent_id
+LEFT JOIN "user" u ON u.id = cr.reviewed_by
+WHERE a.workspace_id = $1 AND a.archived_at IS NULL
+  AND cr.reviewed_by IS NOT NULL
+  AND cr.status IN ('approved', 'rejected', 'merged')
+GROUP BY cr.reviewed_by, u.name, cr.status
+`
+
+type ListAgentContextApproverStatsByWorkspaceRow struct {
+	UserID pgtype.UUID `json:"user_id"`
+	Name   string      `json:"name"`
+	Status string      `json:"status"`
+	Count  int64       `json:"count"`
+}
+
+// ListAgentContextApproverStatsByWorkspace is the workspace-wide approver
+// leaderboard: who reviews agent-context change requests across all agents.
+func (q *Queries) ListAgentContextApproverStatsByWorkspace(ctx context.Context, workspaceID pgtype.UUID) ([]ListAgentContextApproverStatsByWorkspaceRow, error) {
+	rows, err := q.db.Query(ctx, listAgentContextApproverStatsByWorkspace, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListAgentContextApproverStatsByWorkspaceRow{}
+	for rows.Next() {
+		var i ListAgentContextApproverStatsByWorkspaceRow
+		if err := rows.Scan(
+			&i.UserID,
+			&i.Name,
+			&i.Status,
+			&i.Count,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAgentContextVersionStatsByWorkspace = `-- name: ListAgentContextVersionStatsByWorkspace :many
+SELECT
+    a.id AS agent_id,
+    a.name AS agent_name,
+    a.context_version,
+    COUNT(v.id)::bigint AS version_count,
+    COUNT(v.id) FILTER (WHERE v.created_at >= NOW() - INTERVAL '30 days')::bigint AS versions_last_30d,
+    MAX(v.created_at)::timestamptz AS last_changed_at
+FROM agent a
+LEFT JOIN agent_context_version v ON v.agent_id = a.id
+WHERE a.workspace_id = $1 AND a.archived_at IS NULL
+GROUP BY a.id, a.name, a.context_version
+ORDER BY versions_last_30d DESC, version_count DESC, a.name
+`
+
+type ListAgentContextVersionStatsByWorkspaceRow struct {
+	AgentID         pgtype.UUID        `json:"agent_id"`
+	AgentName       string             `json:"agent_name"`
+	ContextVersion  string             `json:"context_version"`
+	VersionCount    int64              `json:"version_count"`
+	VersionsLast30d int64              `json:"versions_last_30d"`
+	LastChangedAt   pgtype.Timestamptz `json:"last_changed_at"`
+}
+
+// ListAgentContextVersionStatsByWorkspace returns one row per non-archived
+// agent with its change-frequency stats, ordered so the most-churned agents
+// surface first in the workspace overview.
+func (q *Queries) ListAgentContextVersionStatsByWorkspace(ctx context.Context, workspaceID pgtype.UUID) ([]ListAgentContextVersionStatsByWorkspaceRow, error) {
+	rows, err := q.db.Query(ctx, listAgentContextVersionStatsByWorkspace, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListAgentContextVersionStatsByWorkspaceRow{}
+	for rows.Next() {
+		var i ListAgentContextVersionStatsByWorkspaceRow
+		if err := rows.Scan(
+			&i.AgentID,
+			&i.AgentName,
+			&i.ContextVersion,
+			&i.VersionCount,
+			&i.VersionsLast30d,
+			&i.LastChangedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -493,6 +836,101 @@ func (q *Queries) ListAgentSkillIDsForContext(ctx context.Context, agentID pgtyp
 	return items, nil
 }
 
+const listAgentSkillsForContextLint = `-- name: ListAgentSkillsForContextLint :many
+
+SELECT s.id, s.name, s.content
+FROM agent_skill ask
+JOIN skill s ON s.id = ask.skill_id
+WHERE ask.agent_id = $1
+ORDER BY s.name
+`
+
+type ListAgentSkillsForContextLintRow struct {
+	ID      pgtype.UUID `json:"id"`
+	Name    string      `json:"name"`
+	Content string      `json:"content"`
+}
+
+// --- Context lint (FIR-1775 Phase 3) ---
+// ListAgentSkillsForContextLint returns the skills currently bound to the
+// agent with their content, so the lint can detect rules duplicated between
+// the instructions and a bound skill (or between two bound skills).
+func (q *Queries) ListAgentSkillsForContextLint(ctx context.Context, agentID pgtype.UUID) ([]ListAgentSkillsForContextLintRow, error) {
+	rows, err := q.db.Query(ctx, listAgentSkillsForContextLint, agentID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListAgentSkillsForContextLintRow{}
+	for rows.Next() {
+		var i ListAgentSkillsForContextLintRow
+		if err := rows.Scan(&i.ID, &i.Name, &i.Content); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAgentsForContextLint = `-- name: ListAgentsForContextLint :many
+SELECT id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, persona_sandbox, surface_visibility, context_owner_id, context_approver_ids, context_version FROM agent
+WHERE workspace_id = $1 AND archived_at IS NULL
+ORDER BY name
+`
+
+// ListAgentsForContextLint returns the non-archived agents of a workspace for
+// the workspace-wide lint sweep and for the repo-file drift lint's harness set.
+func (q *Queries) ListAgentsForContextLint(ctx context.Context, workspaceID pgtype.UUID) ([]Agent, error) {
+	rows, err := q.db.Query(ctx, listAgentsForContextLint, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Agent{}
+	for rows.Next() {
+		var i Agent
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.Name,
+			&i.AvatarUrl,
+			&i.RuntimeMode,
+			&i.RuntimeConfig,
+			&i.Visibility,
+			&i.Status,
+			&i.MaxConcurrentTasks,
+			&i.OwnerID,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.Description,
+			&i.RuntimeID,
+			&i.Instructions,
+			&i.ArchivedAt,
+			&i.ArchivedBy,
+			&i.CustomEnv,
+			&i.CustomArgs,
+			&i.McpConfig,
+			&i.Model,
+			&i.ThinkingLevel,
+			&i.PersonaSandbox,
+			&i.SurfaceVisibility,
+			&i.ContextOwnerID,
+			&i.ContextApproverIds,
+			&i.ContextVersion,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listPendingAgentChangeRequestsByWorkspace = `-- name: ListPendingAgentChangeRequestsByWorkspace :many
 SELECT cr.id, cr.agent_id, cr.title, cr.description, cr.base_version, cr.proposed_version, cr.proposed_snapshot, cr.status, cr.proposed_by, cr.reviewed_by, cr.reviewed_at, cr.review_comment, cr.work_session_id, cr.created_at, cr.updated_at
 FROM agent_change_request cr
@@ -527,6 +965,68 @@ func (q *Queries) ListPendingAgentChangeRequestsByWorkspace(ctx context.Context,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listWorkspaceGithubRepoRefsForContextLint = `-- name: ListWorkspaceGithubRepoRefsForContextLint :many
+SELECT resource_ref FROM project_resource
+WHERE workspace_id = $1 AND resource_type = 'github_repo'
+`
+
+// ListWorkspaceGithubRepoRefsForContextLint returns the project-bound
+// github_repo resource refs ({url: ...}) of a workspace; together with the
+// workspace repos these form the known-repo set for the stale-link check.
+func (q *Queries) ListWorkspaceGithubRepoRefsForContextLint(ctx context.Context, workspaceID pgtype.UUID) ([][]byte, error) {
+	rows, err := q.db.Query(ctx, listWorkspaceGithubRepoRefsForContextLint, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := [][]byte{}
+	for rows.Next() {
+		var resource_ref []byte
+		if err := rows.Scan(&resource_ref); err != nil {
+			return nil, err
+		}
+		items = append(items, resource_ref)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listWorkspaceSkillsForContextLint = `-- name: ListWorkspaceSkillsForContextLint :many
+SELECT id, name, content FROM skill
+WHERE workspace_id = $1
+ORDER BY name
+`
+
+type ListWorkspaceSkillsForContextLintRow struct {
+	ID      pgtype.UUID `json:"id"`
+	Name    string      `json:"name"`
+	Content string      `json:"content"`
+}
+
+// ListWorkspaceSkillsForContextLint returns every skill in the workspace so
+// skill-name references in instructions can be resolved (dead vs unbound).
+func (q *Queries) ListWorkspaceSkillsForContextLint(ctx context.Context, workspaceID pgtype.UUID) ([]ListWorkspaceSkillsForContextLintRow, error) {
+	rows, err := q.db.Query(ctx, listWorkspaceSkillsForContextLint, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListWorkspaceSkillsForContextLintRow{}
+	for rows.Next() {
+		var i ListWorkspaceSkillsForContextLintRow
+		if err := rows.Scan(&i.ID, &i.Name, &i.Content); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

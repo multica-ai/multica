@@ -23,6 +23,8 @@ import {
   Check,
   Copy,
   GitMerge,
+  Users,
+  PenLine,
 } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
 import { Input } from "@multica/ui/components/ui/input";
@@ -84,7 +86,9 @@ import {
   useNoteEditLock,
   useNoteComments,
   useSetNoteFolder,
+  useSetNoteAuthorCodes,
   firstLineTitle,
+  memberCode,
   NoteConflictError,
 } from "../core";
 import type { Note } from "../core";
@@ -104,6 +108,9 @@ import { NoteConflictDialog } from "./note-conflict-dialog";
 import type { NoteConflict } from "./note-conflict-dialog";
 import { useCommentAnchors } from "./use-comment-anchors";
 import { useFindHighlight } from "./use-find-highlight";
+import { useAuthorCodeStamper } from "./use-author-codes";
+import { LineAuthorsGutter } from "./line-authors-gutter";
+import { PULL_WIDTH, useLineAuthorsPull } from "./use-line-authors-pull";
 import {
   DRAFT_ANCHOR_ID,
   type CommentAnchor,
@@ -853,6 +860,19 @@ export function NoteEditor({
     setConflictMergeEnabled(next);
     localStorage.setItem(`note:conflict-merge:${note.id}`, next ? "1" : "0");
   }
+  // FIR-2810: per-note (and per-user) toggle showing the line-authors gutter —
+  // who wrote / last edited every line, Apple Notes-style. Defaults to OFF;
+  // stored in localStorage like the conflict-merge toggle above.
+  const lineAuthorsEnabled = useFeatureFlag("cerebro_note_line_authors");
+  const [showLineAuthors, setShowLineAuthors] = React.useState(
+    () => localStorage.getItem(`note:line-authors:${note.id}`) === "1",
+  );
+  function toggleLineAuthors() {
+    const next = !showLineAuthors;
+    setShowLineAuthors(next);
+    localStorage.setItem(`note:line-authors:${note.id}`, next ? "1" : "0");
+  }
+  const setAuthorCodesMutation = useSetNoteAuthorCodes();
   const isMobile = useIsMobile();
 
   // FIR-1317 Plan A: track the server's updated_at when we last fetched/saved
@@ -965,6 +985,55 @@ export function NoteEditor({
   const canEdit = isOwner || noteDetail?.can_edit === true;
   const readOnly = !canEdit || (lockEnabled && editLock.blockedByOther);
 
+  // FIR-2810: line attribution + author codes. The single-note read carries
+  // the per-line attribution and the note's author-codes toggle; member names
+  // resolve the stored user ids into member codes ("JEH") for the gutter and
+  // the stamper.
+  const authorCodesOn = noteDetail?.author_codes === true;
+  const lineAttrs = React.useMemo(
+    () => noteDetail?.line_attrs ?? [],
+    [noteDetail],
+  );
+  const { data: gutterMembers = [] } = useQuery(memberListOptions(wsId));
+  const membersById = React.useMemo(
+    () =>
+      new Map(
+        (gutterMembers as OwnerInfo[]).map((m) => [
+          m.user_id,
+          { name: m.name },
+        ]),
+      ),
+    [gutterMembers],
+  );
+  const myCode = memberCode(
+    (myId && membersById.get(myId)?.name) || "",
+  );
+  useAuthorCodeStamper(
+    editor,
+    lineAuthorsEnabled && authorCodesOn && !readOnly,
+    myCode,
+  );
+  const showGutter = lineAuthorsEnabled && showLineAuthors;
+  const editorWrapRef = React.useRef<HTMLDivElement>(null);
+  // FIR-2810: temporary reveal — drag the left-edge handle (desktop) or
+  // pull the body right and HOLD (mobile) to latch the gutter open; a click
+  // on the revealed field closes it. Disabled while the permanent toggle
+  // already shows it.
+  const contentSlideRef = React.useRef<HTMLDivElement>(null);
+  const gutterBoxRef = React.useRef<HTMLDivElement>(null);
+  const pull = useLineAuthorsPull({
+    enabled: lineAuthorsEnabled && !showGutter,
+    slideRef: contentSlideRef,
+    gutterRef: gutterBoxRef,
+  });
+  const gutterMounted = showGutter || pull.visible;
+  // Bump after every (debounced) editor change so the gutter re-measures the
+  // rendered blocks; also when the comments rail opens/closes (layout reflow).
+  const [gutterVersion, setGutterVersion] = React.useState(0);
+  React.useEffect(() => {
+    if (gutterMounted) setGutterVersion((v) => v + 1);
+  }, [gutterMounted, liveBody, showComments, readOnly]);
+
   const { data: comments = [] } = useNoteComments(note.id);
   const { data: folders = [] } = useQuery(
     artifactFoldersOptions(wsId, { kind: "note" }),
@@ -1037,9 +1106,30 @@ export function NoteEditor({
   // FIR-1317 Plan A: sends base_updated_at (when conflict merge is on) so the
   // backend can detect if someone else saved in the meantime. On a 409 the
   // NoteConflictError is caught and the merge dialog opens.
+  //
+  // FIR-2810 follow-up: saves are SERIALIZED — at most one in flight, the
+  // newest body queued behind it. Firing a second save before the first
+  // response refreshed baseUpdatedAt made the backend see a stale base and
+  // answer 409, so the "two people edited this note" dialog opened for a user
+  // typing alone (the author-code stamp plus the blur + debounce double-save
+  // made this frequent). lastSentBody additionally drops no-change saves.
+  const saveInFlight = React.useRef(false);
+  const queuedBody = React.useRef<string | null>(null);
+  const lastSentBody = React.useRef<string | null>(note.body);
+
   function saveBody(markdown: string) {
     setLiveBody(markdown);
-    if (markdown === note.body) return;
+    pushSave(markdown);
+  }
+
+  function pushSave(markdown: string) {
+    if (saveInFlight.current) {
+      queuedBody.current = markdown;
+      return;
+    }
+    if (markdown === lastSentBody.current) return;
+    saveInFlight.current = true;
+    lastSentBody.current = markdown;
     updateNote.mutate(
       {
         id: note.id,
@@ -1053,8 +1143,20 @@ export function NoteEditor({
         },
         onError: (err) => {
           if (err instanceof NoteConflictError) {
+            // The dialog takes over; anything queued predates the conflict
+            // and must not fire behind the user's resolution.
+            queuedBody.current = null;
             setConflict(err.conflict);
+          } else {
+            // Failed save: forget the body so the next edit retries it.
+            lastSentBody.current = null;
           }
+        },
+        onSettled: () => {
+          saveInFlight.current = false;
+          const next = queuedBody.current;
+          queuedBody.current = null;
+          if (next !== null) pushSave(next);
         },
       },
     );
@@ -1235,6 +1337,32 @@ export function NoteEditor({
               icon: GitMerge,
               onSelect: toggleConflictMerge,
             },
+            // FIR-2810: show/hide the line-authors gutter (who wrote / last
+            // edited every line). Per-user view preference, like conflict merge.
+            lineAuthorsEnabled && {
+              key: "line-authors",
+              label: showLineAuthors
+                ? "Line authors: On"
+                : "Line authors: Off",
+              icon: Users,
+              onSelect: toggleLineAuthors,
+            },
+            // FIR-2810: per-note author-codes toggle — stamp the writer's
+            // member code (e.g. JEH) on every line they write. Saved on the
+            // note itself, so it is on for everyone who writes in it.
+            lineAuthorsEnabled &&
+              !readOnly && {
+                key: "author-codes",
+                label: authorCodesOn
+                  ? "Author codes: On"
+                  : "Author codes: Off",
+                icon: PenLine,
+                onSelect: () =>
+                  setAuthorCodesMutation.mutate({
+                    id: note.id,
+                    authorCodes: !authorCodesOn,
+                  }),
+              },
             // Delete is owner-only (the backend rejects others with 403). Show
             // it solely to the owner so the action never silently fails
             // (FIR-1460, request 2). The onSuccess navigates back to the
@@ -1291,6 +1419,62 @@ export function NoteEditor({
               the note is locked by someone else we render it read-only instead.
               The bubble menu's "Comment" icon (commentsEnabled) opens the
               comments panel anchored to the selected text. */}
+          {/* FIR-2810: the relative wrapper hosts the line-authors gutter,
+              which measures the rendered blocks inside it. With the gutter on,
+              the body shifts right to make room for the attribution column.
+              With it off, a click-and-drag on the left-edge handle (desktop)
+              or a pull-right-and-hold on the body (mobile) slides the body
+              aside and latches the gutter open; a click on the revealed
+              field closes it. */}
+          <div
+            ref={editorWrapRef}
+            {...pull.wrapperProps}
+            className={cn(
+              "relative flex min-h-0 flex-1 flex-col overflow-x-clip",
+              showGutter && "pl-24",
+            )}
+          >
+          {gutterMounted && (
+            // The temporary pull reveals a narrower, left-aligned strip —
+            // just wide enough for the author codes (Jesper, 2026-07-11
+            // round 4: only far enough to see who edited, text left-
+            // aligned). A click on the revealed field closes it.
+            <div
+              ref={gutterBoxRef}
+              {...pull.gutterProps}
+              className={cn(
+                "absolute inset-y-0 left-0",
+                showGutter && "w-24",
+              )}
+              style={
+                showGutter ? undefined : { opacity: 0, width: PULL_WIDTH }
+              }
+            >
+              <LineAuthorsGutter
+                contentRef={editorWrapRef}
+                body={noteDetail?.body ?? note.body}
+                attrs={lineAttrs}
+                membersById={membersById}
+                version={gutterVersion}
+                align={showGutter ? "right" : "left"}
+              />
+            </div>
+          )}
+          {lineAuthorsEnabled && !showGutter && !isMobile && (
+            // Desktop grab handle for the temporary peek; the faint bar shows
+            // on hover so the affordance is discoverable without being loud.
+            <div
+              {...pull.stripProps}
+              aria-hidden
+              className="group absolute inset-y-0 left-0 z-10 w-3 cursor-ew-resize touch-none"
+            >
+              <div className="absolute left-[3px] top-1/2 h-10 w-1 -translate-y-1/2 rounded-full bg-border opacity-0 transition-opacity group-hover:opacity-100" />
+            </div>
+          )}
+          <div
+            ref={contentSlideRef}
+            className="flex min-h-0 flex-1 flex-col bg-background"
+          >
           {readOnly ? (
             <ReadonlyContent content={note.body} className="min-h-[50vh] flex-1" />
           ) : (
@@ -1329,6 +1513,8 @@ export function NoteEditor({
               />
             </div>
           )}
+          </div>
+          </div>
         </div>
 
         {/* Heading navigation ("Oversigt") + word/character count, shared with
@@ -1436,6 +1622,11 @@ export function NoteEditor({
             setConflict(null);
             // Save the resolved body without the base_updated_at check so it
             // goes through unconditionally (the user just made the decision).
+            // Runs through the same in-flight bookkeeping as pushSave so a
+            // queued autosave can never race the resolution.
+            saveInFlight.current = true;
+            lastSentBody.current = resolvedBody;
+            queuedBody.current = null;
             updateNote.mutate(
               { id: note.id, body: resolvedBody },
               {
@@ -1444,6 +1635,12 @@ export function NoteEditor({
                   setLiveBody(resolvedBody);
                   // Remount the editor so it shows the resolved content.
                   setReplaceToken((t) => t + 1);
+                },
+                onSettled: () => {
+                  saveInFlight.current = false;
+                  const next = queuedBody.current;
+                  queuedBody.current = null;
+                  if (next !== null) pushSave(next);
                 },
               },
             );

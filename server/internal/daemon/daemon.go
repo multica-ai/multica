@@ -813,6 +813,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 	// readiness wait blocks on, so success is reported only after startup
 	// actually completed, not merely because the health port came up.
 	d.ready.Store(true)
+	d.startTraceUpload(ctx) // CEREBRO-PATCH(daemon-trace-upload): start the Registry uploader after runtimes are registered (FIR-2757)
 	d.logger.Debug("background loops launched (workspace-sync, task-wakeup, heartbeat, gc, auto-update, token-renewal); health now reporting ready")
 	err = d.pollLoop(ctx, taskWakeups)
 	d.logger.Debug("daemon main loop returning", "error", err)
@@ -1881,6 +1882,14 @@ func (d *Daemon) syncWorkspacesFromAPI(ctx context.Context) error {
 			}
 		}
 
+		// CEREBRO-PATCH(daemon-account-prime-on-register): JEH-997 warm the
+		// identity-probe cache so the very first heartbeat (which fires
+		// almost immediately after register) already carries the runtime's
+		// detected login identity instead of a nil Account field.
+		for _, rt := range resp.Runtimes {
+			d.refreshHeartbeatAccount(rt.ID)
+		}
+
 		d.logger.Info("watching workspace", "workspace_id", id, "name", name, "runtimes", len(resp.Runtimes), "repos", len(resp.Repos))
 		registered++
 	}
@@ -2005,7 +2014,23 @@ func (d *Daemon) runHeartbeatTick(ctx context.Context, rid string) {
 		return
 	}
 	d.logger.Debug("heartbeat: HTTP tick", "runtime_id", rid)
-	resp, err := d.client.SendHeartbeat(ctx, rid)
+	// CEREBRO-PATCH(daemon-heartbeat-account-refresh): JEH-997 re-probe the
+	// runtime's login identity right before the beat so a fresh login
+	// propagates within one tick instead of one daemon restart. Probe is
+	// cheap (one fstat + one JSON parse) and the result is cached.
+	d.refreshHeartbeatAccount(rid)
+	opts := SendHeartbeatOpts{Account: d.heartbeatAccountFor(rid)}
+	// W4.2: advertise the runtime's current CLI version + tool capabilities
+	// so the server can update its capabilities snapshot on drift. Skipped
+	// when we couldn't resolve the runtime (e.g. just deregistered) or when
+	// the provider has no detected version yet.
+	if rt := d.findRuntime(rid); rt != nil {
+		if v := d.agentVersion(rt.Provider); v != "" {
+			opts.CLIVersion = v
+			opts.Capabilities = providerCapabilities(rt.Provider)
+		}
+	}
+	resp, err := d.client.SendHeartbeat(ctx, rid, opts)
 	if err != nil {
 		if ctx.Err() == nil {
 			if isRuntimeNotFoundError(err) {
@@ -2038,6 +2063,11 @@ func (d *Daemon) runHeartbeatTick(ctx context.Context, rid string) {
 func (d *Daemon) handleHeartbeatActions(ctx context.Context, runtimeID string, resp *HeartbeatResponse) {
 	if resp == nil {
 		return
+	}
+	// CEREBRO-PATCH(heartbeat-account-id-ack): cache server-registered account id for task usage reports.
+	if d.accountIdentities != nil && resp.CerebroAccountID != "" {
+		d.accountIdentities.setAccountID(runtimeID, resp.CerebroAccountID)
+		go d.maybeReportProviderUsageWindows(d.recoveryContext(), runtimeID, resp.CerebroAccountID, d.logger) // CEREBRO-PATCH(heartbeat-usage-poll): FIR-3118 root-scoped usagepal-style periodic poll, throttled per account.
 	}
 	execenv.ApplyFeatureFlagSnapshot(resp.FeatureFlags)
 	if resp.PendingUpdate != nil || resp.PendingModelList != nil || resp.PendingLocalSkills != nil || resp.PendingLocalSkillImport != nil {
@@ -2302,12 +2332,24 @@ func (d *Daemon) handleUpdate(ctx context.Context, runtimeID string, update *Pen
 		return
 	}
 
-	// Prevent concurrent update attempts.
-	if !d.updating.CompareAndSwap(false, true) {
-		d.logger.Warn("update already in progress, ignoring", "runtime_id", runtimeID, "update_id", update.ID)
+	// Use the same strict idle barrier as the periodic updater. This prevents
+	// a server-triggered restart from cancelling an active task or a claim that
+	// is already in flight.
+	if !d.tryBeginServerUpdate() {
+		d.logger.Info("CLI update deferred: task, claim, or update in progress", "runtime_id", runtimeID, "update_id", update.ID)
+		d.reportUpdateResult(ctx, runtimeID, update.ID, map[string]any{
+			"status": "failed",
+			"error":  "update deferred until the runtime is idle",
+		})
 		return
 	}
-	defer d.updating.Store(false)
+	restarting := false
+	defer func() {
+		if !restarting {
+			d.releaseClaimBarrier()
+			d.updating.Store(false)
+		}
+	}()
 
 	d.logger.Info("CLI update requested", "runtime_id", runtimeID, "update_id", update.ID, "target_version", update.TargetVersion)
 
@@ -2333,7 +2375,20 @@ func (d *Daemon) handleUpdate(ctx context.Context, runtimeID string, update *Pen
 	})
 
 	// Trigger daemon restart with the new binary.
+	restarting = true
 	d.triggerRestart()
+}
+
+// CEREBRO-PATCH(runtime-online-auto-update): FIR-3064 acquire the strict idle barrier for heartbeat-triggered updates.
+func (d *Daemon) tryBeginServerUpdate() bool {
+	if !d.updating.CompareAndSwap(false, true) {
+		return false
+	}
+	if !d.trySetClaimBarrier() {
+		d.updating.Store(false)
+		return false
+	}
+	return true
 }
 
 // runUpdate executes the brew-or-download upgrade against targetVersion and
@@ -2941,6 +2996,7 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 			taskLog.Warn("report task usage failed", "error", usageErr)
 		}
 	}
+	d.reportTaskSkillUsage(ctx, task, provider, result) // CEREBRO-PATCH(task-skill-usage-report): FIR-2996 extract explicit SKILL.md reads from supported runtime transcripts.
 
 	// Check if we were cancelled by the polling goroutine.
 	select {
@@ -2976,6 +3032,8 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 		return
 	}
 
+	// CEREBRO-PATCH(daemon-task-account-usage): JEH-881/JEH-1365 parse the task
+	d.maybeReportAccountUsage(ctx, task.RuntimeID, result.Comment, result.Logs, result.Usage, taskLog) // CEREBRO-PATCH(daemon-task-account-token-usage): include exact task tokens in account usage telemetry.
 	d.reportTaskResult(ctx, task.ID, result, taskLog)
 
 	// Write GC metadata after the task finishes so the periodic GC loop
@@ -3509,6 +3567,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		IssueID:                          task.IssueID,
 		TriggerCommentID:                 task.TriggerCommentID,
 		TriggerThreadID:                  task.TriggerThreadID,
+		PlanMode:                         task.PlanMode, // CEREBRO-PATCH(session-plan-mode): carry the thread mode into runtime context.
 		NewCommentCount:                  task.NewCommentCount,
 		NewCommentsSince:                 task.NewCommentsSince,
 		PriorSessionResumed:              task.PriorSessionID != "",

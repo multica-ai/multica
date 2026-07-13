@@ -1,18 +1,10 @@
-import { createElement } from "react";
-import { ShieldCheck } from "lucide-react";
-import { AgentCapabilitiesSettingsTab } from "./settings-tab";
-
-export { AgentCapabilitiesSettingsTab } from "./settings-tab";
 // TECH-3642 — per-agent capabilities detail tab (skills/tools/credentials/limits).
+// FIR-3091 slice 3: the workspace "Agent capabilities" settings tab was retired;
+// its living cards now live in the unified Permissions screen
+// (@multica/cerebro-tool-policy → CapabilityIsolationSections). Only the
+// per-agent detail tab remains here.
 export {
   createAgentCapabilitiesTabs,
   CerebroCapabilitiesTab,
   type AgentCapabilitiesTabExtension,
 } from "./capabilities-tab";
-
-export const agentCapabilitiesSettingsTab = {
-  value: "agent-capabilities",
-  label: "Agent capabilities",
-  icon: ShieldCheck,
-  content: createElement(AgentCapabilitiesSettingsTab),
-};

@@ -19,9 +19,17 @@
 // for free from ZoomableImage, which resets to fit whenever `src` changes — so
 // paging to a new image always starts fit-to-screen.
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { ChevronLeft, ChevronRight, Download, ExternalLink, X } from "lucide-react";
+import {
+  ChevronLeft,
+  ChevronRight,
+  Download,
+  ExternalLink,
+  Loader2,
+  RotateCw,
+  X,
+} from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
 import { ZoomableImage } from "./zoomable-image";
 
@@ -52,6 +60,18 @@ function clamp(i: number, count: number): number {
   return Math.min(Math.max(i, 0), count - 1);
 }
 
+const MAX_AUTO_RETRIES = 2;
+const RETRY_DELAY_MS = 600;
+const STALL_TIMEOUT_MS = 10_000;
+
+type LoadStatus = "loading" | "loaded" | "error";
+
+function withReloadParam(src: string, attempt: number): string {
+  if (attempt === 0) return src;
+  const separator = src.includes("?") ? "&" : "?";
+  return `${src}${separator}_reload=${attempt}`;
+}
+
 export function ImageGallery({
   images,
   startIndex = 0,
@@ -60,12 +80,58 @@ export function ImageGallery({
 }: ImageGalleryProps) {
   const count = images.length;
   const [index, setIndex] = useState(() => clamp(startIndex, count));
+  const [attempt, setAttempt] = useState(0);
+  const [loadStatus, setLoadStatus] = useState<LoadStatus>("loading");
+  const autoRetriesRef = useRef(0);
+  const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Re-sync to the clicked thumbnail every time the gallery (re)opens or the
   // caller points it at a new start image.
   useEffect(() => {
     if (open) setIndex(clamp(startIndex, count));
   }, [open, startIndex, count]);
+
+  const safeIndex = clamp(index, count);
+  const current = images[safeIndex];
+
+  useEffect(() => {
+    if (!open || !current) return;
+    autoRetriesRef.current = 0;
+    setAttempt(0);
+    setLoadStatus("loading");
+  }, [open, safeIndex, current?.src]);
+
+  useEffect(
+    () => () => {
+      if (retryTimerRef.current) clearTimeout(retryTimerRef.current);
+    },
+    [],
+  );
+
+  const registerFailure = useCallback(() => {
+    if (autoRetriesRef.current < MAX_AUTO_RETRIES) {
+      autoRetriesRef.current += 1;
+      retryTimerRef.current = setTimeout(() => {
+        setLoadStatus("loading");
+        setAttempt((value) => value + 1);
+      }, RETRY_DELAY_MS);
+      return;
+    }
+    setLoadStatus("error");
+  }, []);
+
+  useEffect(() => {
+    if (!open || !current || loadStatus !== "loading") return;
+    const timer = setTimeout(registerFailure, STALL_TIMEOUT_MS);
+    return () => clearTimeout(timer);
+  }, [open, current, loadStatus, attempt, registerFailure]);
+
+  const handleManualReload = useCallback(() => {
+    if (retryTimerRef.current) clearTimeout(retryTimerRef.current);
+    autoRetriesRef.current = 0;
+    setLoadStatus("loading");
+    setAttempt((value) => value + 1);
+  }, []);
 
   const go = useCallback(
     (delta: number) => setIndex((i) => clamp(i + delta, count)),
@@ -85,8 +151,6 @@ export function ImageGallery({
 
   if (!open || count === 0 || typeof document === "undefined") return null;
 
-  const safeIndex = clamp(index, count);
-  const current = images[safeIndex];
   if (!current) return null;
   const multi = count > 1;
   const hasPrev = safeIndex > 0;
@@ -113,6 +177,20 @@ export function ImageGallery({
           </span>
         )}
         <div className="ml-auto flex items-center gap-1">
+          {loadStatus === "loading" && (
+            <span className="mr-1 flex items-center gap-1.5 text-xs text-white/70">
+              <Loader2 className="size-4 animate-spin" /> Loading…
+            </span>
+          )}
+          <button
+            type="button"
+            className="rounded-md p-1.5 text-white/80 transition-colors hover:bg-white/10 hover:text-white"
+            title="Reload image"
+            aria-label="Reload image"
+            onClick={handleManualReload}
+          >
+            <RotateCw className="size-5" />
+          </button>
           {current.pageHref && (
             <a
               href={current.pageHref}
@@ -151,10 +229,31 @@ export function ImageGallery({
 
       <div className="relative min-h-0 flex-1">
         <ZoomableImage
-          src={current.src}
+          src={withReloadParam(current.src, attempt)}
           alt={current.alt}
           viewportClassName="h-full w-full"
+          onLoad={() => {
+            autoRetriesRef.current = 0;
+            setLoadStatus("loaded");
+          }}
+          onError={registerFailure}
         />
+
+        {loadStatus === "error" && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-black/70 text-center text-white">
+            <p className="text-sm text-white/80">The image couldn’t finish loading.</p>
+            <button
+              type="button"
+              className="inline-flex items-center gap-2 rounded-md border border-white/30 px-3 py-2 text-sm hover:bg-white/10"
+              onClick={(event) => {
+                event.stopPropagation();
+                handleManualReload();
+              }}
+            >
+              <RotateCw className="size-4" /> Reload image
+            </button>
+          </div>
+        )}
 
         {multi && (
           <>

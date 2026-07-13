@@ -11,29 +11,28 @@ import { api } from "@multica/core/api";
 import type { RuntimeUpdateStatus } from "@multica/core/types";
 import { useT } from "../../i18n";
 
-const GITHUB_RELEASES_URL =
-  "https://api.github.com/repos/multica-ai/multica/releases/latest";
 const CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
 
 let cachedLatestVersion: string | null = null;
 let cachedAt = 0;
 
-async function fetchLatestVersion(): Promise<string | null> {
+// CEREBRO-PATCH(runtime-distribution-version): FIR-3064 consume the server-owned fork version instead of upstream GitHub.
+export async function fetchLatestVersion(): Promise<string | null> {
   if (cachedLatestVersion && Date.now() - cachedAt < CACHE_TTL_MS) {
     return cachedLatestVersion;
   }
   try {
-    const resp = await fetch(GITHUB_RELEASES_URL, {
-      headers: { Accept: "application/vnd.github+json" },
-    });
-    if (!resp.ok) return null;
-    const data = await resp.json();
-    cachedLatestVersion = data.tag_name ?? null;
+    cachedLatestVersion = await api.getLatestRuntimeVersion();
     cachedAt = Date.now();
     return cachedLatestVersion;
   } catch {
     return null;
   }
+}
+
+export function resetLatestVersionCache(): void {
+  cachedLatestVersion = null;
+  cachedAt = 0;
 }
 
 function stripV(v: string): string {

@@ -76,7 +76,7 @@ func registerAttachmentReadTools(srv *mcp.Server, client *cli.APIClient) {
 			return mcp.ErrorResult("attachment_id is required"), nil
 		}
 
-		text, _, err := client.GetText(ctx, "/api/attachments/"+url.PathEscape(attachmentID)+"/content")
+		text, _, err := client.GetText(ctx, "/api/attachments/"+url.PathEscape(attachmentID)+"/content?agent_read=1")
 		if err != nil {
 			return mcp.ErrorResult(err.Error()), nil
 		}

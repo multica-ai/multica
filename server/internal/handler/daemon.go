@@ -991,7 +991,8 @@ func (h *Handler) DaemonHeartbeat(w http.ResponseWriter, r *http.Request) {
 // and tells the daemon to drop the stale runtime and re-register. Other DB
 // errors still propagate as errors so they keep their existing Warn logging
 // and the daemon does not mistake a hiccup for a deletion.
-func (h *Handler) HandleDaemonWSHeartbeat(ctx context.Context, identity daemonws.ClientIdentity, runtimeID string, supportsBatchImport bool) (*protocol.DaemonHeartbeatAckPayload, error) {
+func (h *Handler) HandleDaemonWSHeartbeat(ctx context.Context, identity daemonws.ClientIdentity, payload protocol.DaemonHeartbeatRequestPayload) (*protocol.DaemonHeartbeatAckPayload, error) { // CEREBRO-PATCH(ws-heartbeat-handler-payload): FIR-3118 consume the full heartbeat payload.
+	runtimeID := payload.RuntimeID
 	runtimeUUID, err := util.ParseUUID(runtimeID)
 	if err != nil {
 		return nil, fmt.Errorf("invalid runtime_id: %w", err)
@@ -1010,7 +1011,7 @@ func (h *Handler) HandleDaemonWSHeartbeat(ctx context.Context, identity daemonws
 	if !identity.AllowsWorkspace(uuidToString(rt.WorkspaceID)) {
 		return nil, fmt.Errorf("runtime not in connection workspace")
 	}
-	ack, _, err := h.processHeartbeat(ctx, rt, supportsBatchImport, nil)
+	ack, _, err := h.processHeartbeat(ctx, rt, payload.SupportsBatchImport, payload.Account) // CEREBRO-PATCH(ws-heartbeat-handler-payload): FIR-3118 register and ack the runtime account.
 	return ack, err
 }
 
@@ -1094,6 +1095,7 @@ func (h *Handler) processHeartbeat(ctx context.Context, rt db.AgentRuntime, supp
 		Status:    "ok",
 	}
 	ack.CerebroAccountID = h.recordHeartbeatAccount(ctx, rt, account)
+	h.maybeScheduleRuntimeUpdate(ctx, rt) // CEREBRO-PATCH(runtime-online-auto-update): FIR-3064 queue fork CLI updates on heartbeat.
 
 	probeUpdateCtx, cancelProbeUpdate := context.WithTimeout(ctx, heartbeatHasPendingTimeout)
 	hasUpdate, probeUpdateErr := h.UpdateStore.HasPending(probeUpdateCtx, runtimeID)
@@ -1613,6 +1615,13 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 				resp.TriggerThreadID = uuidToString(comment.ID)
 				if comment.ParentID.Valid {
 					resp.TriggerThreadID = uuidToString(comment.ParentID)
+				}
+				var sessionMode string // CEREBRO-PATCH(session-plan-mode): resolve mode from the triggering thread.
+				if err := h.DB.QueryRow(r.Context(), `
+					SELECT mode FROM cerebro_session
+					WHERE issue_id = $1 AND root_comment_id = $2`,
+					comment.IssueID, parseUUID(resp.TriggerThreadID)).Scan(&sessionMode); err == nil {
+					resp.PlanMode = sessionMode == "plan"
 				}
 				resp.TriggerAuthorType = comment.AuthorType
 				// The triggering comment's author is the task initiator — the
@@ -2411,6 +2420,7 @@ func (h *Handler) ReportTaskUsage(w http.ResponseWriter, r *http.Request) {
 		h.TaskService.CaptureTaskUsage(r.Context(), task, provider, u.Model, u.InputTokens, u.OutputTokens, u.CacheReadTokens, u.CacheWriteTokens)
 		h.recordUsageBudgetAndAccount(r.Context(), task, u)
 		h.recordCerebroTaskContextFootprint(r.Context(), taskID, u) // CEREBRO-PATCH(handler-daemon-context-footprint): FIR-1856 persist last-turn footprint for the window indicator.
+		h.projectAnalyticsRun(r.Context(), taskID)                  // CEREBRO-PATCH(analytics-projection): FIR-2996 refresh canonical usage after cost writes.
 	}
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
