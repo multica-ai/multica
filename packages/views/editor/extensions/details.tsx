@@ -45,7 +45,7 @@ import { ReadonlyContent } from "../readonly-content";
 // only to detect the `open` flag); group 2 = summary inner text; group 3 = the
 // body between </summary> and </details>.
 const DETAILS_BLOCK_RE =
-  /^<details((?:\s[^>]*)?)>[ \t]*\n?[ \t]*<summary>([\s\S]*?)<\/summary>([\s\S]*?)<\/details>[ \t]*(?:\n|$)/;
+  /^<details((?:\s[^>]*)?)>\s*<summary>([\s\S]*?)<\/summary>([\s\S]*?)<\/details>[ \t]*(?:\n|$)/;
 
 // ---------------------------------------------------------------------------
 // React NodeView — a native <details> so the browser handles the collapse,
@@ -141,13 +141,18 @@ export const DetailsBlockExtension = Node.create({
       // leaving a dangling opener in the body. Decline so it falls back to
       // the flattened rendering instead of producing a broken round-trip.
       if (/<details[\s>]/.test(body)) return undefined;
+      // A body ending mid-code-fence means the lazy </details> match truncated
+      // inside a fenced sample that itself contained a </details>. An odd fence
+      // count is the tell-tale of that truncation — decline so the block falls
+      // back to flat rendering instead of leaking an unterminated fence.
+      if (((body.match(/```/g) ?? []).length) % 2 !== 0) return undefined;
       return {
         type: "detailsBlock",
         raw: match[0],
         attributes: {
           summary: (match[2] ?? "").trim(),
           body,
-          open: /\bopen\b/.test(match[1] ?? ""),
+          open: /(^|\s)open(\s|=|$)/.test(match[1] ?? ""),
         },
       };
     },
