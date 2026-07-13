@@ -9,6 +9,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -25,8 +26,17 @@ import (
 // knows the moment it comes back up, so we let it report orphan recovery.
 func (h *Handler) RecoverOrphanedTasks(w http.ResponseWriter, r *http.Request) {
 	runtimeID := chi.URLParam(r, "runtimeId")
-	if _, ok := h.requireDaemonRuntimeAccess(w, r, runtimeID); !ok {
+	rt, ok := h.requireDaemonRuntimeAccess(w, r, runtimeID)
+	if !ok {
 		return
+	}
+	if middleware.DaemonWorkspaceIDFromContext(r.Context()) == "" {
+		// Human callers can still use the recovery command, but only if they
+		// own the workspace. Plain members must not be able to force a healthy
+		// runtime to fail its active work.
+		if _, ok := h.requireWorkspaceRole(w, r, uuidToString(rt.WorkspaceID), "not found", "owner"); !ok {
+			return
+		}
 	}
 
 	rows, err := h.Queries.RecoverOrphanedTasksForRuntime(r.Context(), parseUUID(runtimeID))
