@@ -1008,7 +1008,7 @@ func (s *TaskService) enqueueIssueTaskWithCommentPlan(ctx context.Context, issue
 	originatorUserID := attr.UserID
 	runtimeMCPOverlay := s.buildRuntimeMCPOverlay(ctx, originatorUserID, agent)
 	attrSource, attrDelegatedFrom, attrEvidenceKind, attrEvidenceRef := attributionCreateParams(attr)
-	task, err := s.Queries.CreateAgentTask(ctx, db.CreateAgentTaskParams{
+	task, err := s.createIssueAgentTaskLocked(ctx, issue.ID, db.CreateAgentTaskParams{
 		AgentID:              issue.AssigneeID,
 		RuntimeID:            agent.RuntimeID,
 		IssueID:              issue.ID,
@@ -1052,6 +1052,38 @@ func (s *TaskService) enqueueIssueTaskWithCommentPlan(ctx context.Context, issue
 	s.broadcastTaskEvent(ctx, protocol.EventTaskQueued, task)
 	s.NotifyTaskEnqueued(ctx, task)
 	return task, nil
+}
+
+// createIssueAgentTaskLocked serializes every ordinary issue-linked enqueue
+// with queued-expired recovery's issue-row lock. Preparation (including any
+// external overlay lookup) stays outside the short transaction; only the final
+// enqueue decision and insert hold the row lock.
+func (s *TaskService) createIssueAgentTaskLocked(ctx context.Context, issueID pgtype.UUID, params db.CreateAgentTaskParams) (db.AgentTaskQueue, error) {
+	var task db.AgentTaskQueue
+	var oldIssue, updatedIssue db.Issue
+	err := s.runInTx(ctx, func(qtx *db.Queries) error {
+		if _, err := qtx.LockIssueForTaskEnqueue(ctx, issueID); err != nil {
+			return fmt.Errorf("lock issue task queue: %w", err)
+		}
+		var err error
+		oldIssue, err = qtx.GetIssue(ctx, issueID)
+		if err != nil {
+			return fmt.Errorf("load locked issue: %w", err)
+		}
+		if err := qtx.SupersedeQueuedExpiredIssueWithNewWork(ctx, issueID); err != nil {
+			return fmt.Errorf("supersede queued-expired recovery: %w", err)
+		}
+		updatedIssue, err = qtx.GetIssue(ctx, issueID)
+		if err != nil {
+			return fmt.Errorf("load updated issue: %w", err)
+		}
+		task, err = qtx.CreateAgentTask(ctx, params)
+		return err
+	})
+	if err == nil && oldIssue.Status != updatedIssue.Status {
+		s.broadcastIssueUpdated(updatedIssue, oldIssue.Status)
+	}
+	return task, err
 }
 
 // EnqueueTaskForMention creates a queued task for a mentioned agent on an issue.
@@ -1125,7 +1157,7 @@ func (s *TaskService) enqueueMentionTaskWithCommentPlan(ctx context.Context, iss
 	originatorUserID := attr.UserID
 	runtimeMCPOverlay := s.buildRuntimeMCPOverlay(ctx, originatorUserID, agent)
 	attrSource, attrDelegatedFrom, attrEvidenceKind, attrEvidenceRef := attributionCreateParams(attr)
-	task, err := s.Queries.CreateAgentTask(ctx, db.CreateAgentTaskParams{
+	task, err := s.createIssueAgentTaskLocked(ctx, issue.ID, db.CreateAgentTaskParams{
 		AgentID:              agentID,
 		RuntimeID:            agent.RuntimeID,
 		IssueID:              issue.ID,
@@ -3227,6 +3259,94 @@ func (s *TaskService) MaybeRetryFailedTask(ctx context.Context, parent db.AgentT
 	return &child, nil
 }
 
+const queuedExpiredReconnectBatchSize = 100
+
+type queuedExpiredRecovery struct {
+	parent   db.AgentTaskQueue
+	child    db.AgentTaskQueue
+	issue    db.Issue
+	oldState string
+}
+
+// RecoverQueuedExpiredCreateIssueTasksForRuntime queues one bounded recovery
+// attempt when a runtime reconnects. The parent-task row lock plus the
+// sole-task predicate make concurrent heartbeats idempotent; attempt/max_attempts
+// provide the hard retry ceiling.
+func (s *TaskService) RecoverQueuedExpiredCreateIssueTasksForRuntime(ctx context.Context, runtimeID pgtype.UUID) (int, error) {
+	var recoveries []queuedExpiredRecovery
+	err := s.runInTx(ctx, func(qtx *db.Queries) error {
+		parents, err := qtx.LockRecoverableQueuedExpiredCreateIssueTasks(ctx, db.LockRecoverableQueuedExpiredCreateIssueTasksParams{
+			RuntimeID:       runtimeID,
+			MaxPerReconnect: queuedExpiredReconnectBatchSize,
+		})
+		if err != nil {
+			return fmt.Errorf("lock recoverable queued-expired tasks: %w", err)
+		}
+		for _, parent := range parents {
+			issue, err := qtx.GetIssue(ctx, parent.IssueID)
+			if err != nil {
+				return fmt.Errorf("load queued-expired issue: %w", err)
+			}
+			child, err := qtx.CreateRetryTask(ctx, db.CreateRetryTaskParams{ID: parent.ID})
+			if err != nil {
+				return fmt.Errorf("create queued-expired recovery task: %w", err)
+			}
+			if _, err := qtx.SetIssueMetadataKey(ctx, db.SetIssueMetadataKeyParams{
+				Key:         "pipeline_status",
+				Value:       []byte(`"recovery_queued"`),
+				ID:          issue.ID,
+				WorkspaceID: issue.WorkspaceID,
+			}); err != nil {
+				return fmt.Errorf("set queued-expired recovery pipeline status: %w", err)
+			}
+			if _, err := qtx.SetIssueMetadataKey(ctx, db.SetIssueMetadataKeyParams{
+				Key:         "waiting_on",
+				Value:       []byte(`"runtime_execution"`),
+				ID:          issue.ID,
+				WorkspaceID: issue.WorkspaceID,
+			}); err != nil {
+				return fmt.Errorf("set queued-expired recovery waiting_on: %w", err)
+			}
+			updated, err := qtx.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{
+				ID:          issue.ID,
+				Status:      "todo",
+				WorkspaceID: issue.WorkspaceID,
+			})
+			if err != nil {
+				return fmt.Errorf("reopen queued-expired issue: %w", err)
+			}
+			recoveries = append(recoveries, queuedExpiredRecovery{
+				parent:   parent,
+				child:    child,
+				issue:    updated,
+				oldState: issue.Status,
+			})
+		}
+		return nil
+	})
+	if err != nil {
+		return 0, err
+	}
+
+	for _, recovery := range recoveries {
+		s.broadcastIssueUpdated(recovery.issue, recovery.oldState)
+		s.broadcastTaskEvent(ctx, protocol.EventTaskQueued, recovery.child)
+		s.NotifyTaskEnqueued(ctx, recovery.child)
+		s.createAgentComment(ctx, recovery.issue.ID, recovery.child.AgentID,
+			"Runtime reconnected. One automatic recovery attempt was queued.",
+			"system", pgtype.UUID{}, recovery.child.ID)
+		slog.Info("queued create_issue task recovered on runtime reconnect",
+			"issue_id", util.UUIDToString(recovery.issue.ID),
+			"parent_task_id", util.UUIDToString(recovery.parent.ID),
+			"recovery_task_id", util.UUIDToString(recovery.child.ID),
+			"runtime_id", util.UUIDToString(runtimeID),
+			"attempt", recovery.child.Attempt,
+			"max_attempts", recovery.child.MaxAttempts,
+		)
+	}
+	return len(recoveries), nil
+}
+
 // RerunIssue creates a fresh queued task for an agent on the issue. Used by
 // the manual rerun endpoint.
 //
@@ -3283,7 +3403,6 @@ func (s *TaskService) RerunIssue(ctx context.Context, issueID pgtype.UUID, sourc
 	if err != nil {
 		return nil, fmt.Errorf("load issue: %w", err)
 	}
-
 	// Determine the target agent for the rerun.
 	var (
 		agentID             pgtype.UUID
@@ -3344,27 +3463,99 @@ func (s *TaskService) RerunIssue(ctx context.Context, issueID pgtype.UUID, sourc
 	// so a since-reassigned issue can't be used to re-fire a private agent the
 	// operator may only view. A block fails closed: no prior task is cancelled,
 	// no new task is created.
+	agent, err := s.Queries.GetAgent(ctx, agentID)
+	if err != nil {
+		return nil, fmt.Errorf("load target agent: %w", err)
+	}
 	if canInvoke != nil {
-		targetAgent, err := s.Queries.GetAgent(ctx, agentID)
-		if err != nil {
-			return nil, fmt.Errorf("load target agent: %w", err)
-		}
-		if !canInvoke(targetAgent) {
+		if !canInvoke(agent) {
 			return nil, ErrRerunInvokeNotAllowed
 		}
 	}
+	if agent.ArchivedAt.Valid {
+		return nil, fmt.Errorf("agent is archived")
+	}
+	if !agent.RuntimeID.Valid {
+		return nil, fmt.Errorf("agent has no runtime")
+	}
 
-	// Cancel only the target agent's active/queued tasks on this issue.
-	cancelled, err := s.Queries.CancelAgentTasksByIssueAndAgent(ctx, db.CancelAgentTasksByIssueAndAgentParams{
-		IssueID: issueID,
-		AgentID: agentID,
+	attrSourceKind := attribution.SourceDelegation
+	if issue.AssigneeType.String == "agent" && issue.AssigneeID.Valid &&
+		util.UUIDToString(issue.AssigneeID) == util.UUIDToString(agentID) {
+		attrSourceKind = attribution.SourceCommentSource
+	}
+	attr := s.attributionForIssueTask(ctx, issue, triggerCommentID, attrSourceKind, actorUserID)
+	attr, err = s.applyAttributionFallback(ctx, attr, agent)
+	if err != nil {
+		return nil, err
+	}
+	originatorUserID := attr.UserID
+	runtimeMCPOverlay := s.buildRuntimeMCPOverlay(ctx, originatorUserID, agent)
+	attrSource, attrDelegatedFrom, attrEvidenceKind, attrEvidenceRef := attributionCreateParams(attr)
+	params := db.CreateAgentTaskParams{
+		AgentID:              agentID,
+		RuntimeID:            agent.RuntimeID,
+		IssueID:              issue.ID,
+		Priority:             priorityToInt(issue.Priority),
+		TriggerCommentID:     triggerCommentID,
+		CoalescedCommentIds:  coalescedCommentIDs,
+		TriggerSummary:       s.buildCommentTriggerSummary(ctx, issue.WorkspaceID, triggerCommentID),
+		IsLeaderTask:         pgtype.Bool{Bool: isLeader, Valid: isLeader},
+		ForceFreshSession:    pgtype.Bool{Bool: true, Valid: true},
+		SquadID:              squadID,
+		OriginatorUserID:     originatorUserID,
+		AccountableUserID:    attr.AccountableUserID,
+		RuleVersionID:        attr.RuleVersionID,
+		RerunOfTaskID:        sourceTaskID,
+		RuntimeMcpOverlay:    runtimeMCPOverlay.Overlay,
+		RuntimeConnectedApps: runtimeMCPOverlay.ConnectedApps,
+		OriginatorSource:     attrSource,
+		DelegatedFromTaskID:  attrDelegatedFrom,
+		TriggerEvidenceKind:  attrEvidenceKind,
+		TriggerEvidenceRefID: attrEvidenceRef,
+		HeadSha:              headShaText(s.ResolveIssueReviewSHA(ctx, issue.ID)),
+	}
+
+	var cancelled []db.AgentTaskQueue
+	var task db.AgentTaskQueue
+	var lockedIssue, updatedIssue db.Issue
+	err = s.runInTx(ctx, func(qtx *db.Queries) error {
+		// One transaction owns the issue-row decision, recovery suppression,
+		// cancellation, and replacement insert. Any validation/insert failure
+		// rolls everything back, leaving reconnect recovery eligible.
+		if _, err := qtx.LockIssueForTaskEnqueue(ctx, issueID); err != nil {
+			return fmt.Errorf("lock rerun issue: %w", err)
+		}
+		var err error
+		lockedIssue, err = qtx.GetIssue(ctx, issueID)
+		if err != nil {
+			return fmt.Errorf("load locked rerun issue: %w", err)
+		}
+		if err := qtx.MarkQueuedExpiredIssueManualRerun(ctx, issueID); err != nil {
+			return fmt.Errorf("claim queued-expired manual rerun: %w", err)
+		}
+		updatedIssue, err = qtx.GetIssue(ctx, issueID)
+		if err != nil {
+			return fmt.Errorf("load updated rerun issue: %w", err)
+		}
+		cancelled, err = qtx.CancelAgentTasksByIssueAndAgent(ctx, db.CancelAgentTasksByIssueAndAgentParams{
+			IssueID: issueID,
+			AgentID: agentID,
+		})
+		if err != nil {
+			return fmt.Errorf("cancel prior tasks: %w", err)
+		}
+		task, err = qtx.CreateAgentTask(ctx, params)
+		if err != nil {
+			return fmt.Errorf("create rerun task: %w", err)
+		}
+		return nil
 	})
 	if err != nil {
-		slog.Warn("rerun: cancel prior tasks failed",
-			"issue_id", util.UUIDToString(issueID),
-			"agent_id", util.UUIDToString(agentID),
-			"error", err,
-		)
+		return nil, err
+	}
+	if lockedIssue.Status != updatedIssue.Status {
+		s.broadcastIssueUpdated(updatedIssue, lockedIssue.Status)
 	}
 	for _, t := range cancelled {
 		s.captureTaskCancelled(ctx, t)
@@ -3372,15 +3563,8 @@ func (s *TaskService) RerunIssue(ctx context.Context, issueID pgtype.UUID, sourc
 		s.broadcastTaskEvent(ctx, protocol.EventTaskCancelled, t)
 	}
 
-	// A manual rerun is a NEW direct_human trigger attributed to the rerunning
-	// member, not the original run's human (MUL-4302 §5); actorUserID carries them.
-	// sourceTaskID is the rerun lineage: it rides the CreateAgentTask insert
-	// (rerun_of_task_id) so the queued event / daemon claim never sees a NULL
-	// lineage, and it stays distinct from system-retry's retry_of_task_id (§5).
-	task, err := s.enqueueRerunTask(ctx, issue, agentID, triggerCommentID, coalescedCommentIDs, isLeader, squadID, actorUserID, sourceTaskID)
-	if err != nil {
-		return nil, err
-	}
+	s.broadcastTaskEvent(ctx, protocol.EventTaskQueued, task)
+	s.NotifyTaskEnqueued(ctx, task)
 	slog.Info("issue rerun enqueued",
 		"task_id", util.UUIDToString(task.ID),
 		"issue_id", util.UUIDToString(issueID),
@@ -3442,26 +3626,51 @@ func (s *TaskService) promoteNewestSurvivingComment(ctx context.Context, ids []p
 	return survivors[newest].id, remaining, nil
 }
 
-// enqueueRerunTask enqueues a fresh task for the given agent on the issue.
-// When the target agent is the issue's single-agent assignee we use the
-// assignee-driven path (enqueueIssueTask) so the issue-assignee bookkeeping
-// stays in sync; otherwise (squad member, prior assignee that has since been
-// reassigned, mention agent) we use the mention path.
-//
-// force_fresh_session is pinned to true on every rerun row on purpose. It is
-// the rollback-safe legacy signal: an OLD claim handler (mid rolling deploy)
-// gates the whole resume lookup on !force_fresh_session, so it starts clean
-// instead of resuming via the (agent, issue) most-recent query — which could
-// pick a different execution than the one the user clicked. The NEW claim
-// handler ignores this flag for reruns and instead reads the exact source task
-// (rerun_of_task_id) to reuse its workdir and, when the failure did not poison
-// the conversation, resume its session (MUL-4869).
-func (s *TaskService) enqueueRerunTask(ctx context.Context, issue db.Issue, agentID pgtype.UUID, triggerCommentID pgtype.UUID, coalescedCommentIDs []pgtype.UUID, isLeader bool, squadID pgtype.UUID, actorUserID pgtype.UUID, rerunOfTaskID pgtype.UUID) (db.AgentTaskQueue, error) {
-	if issue.AssigneeType.String == "agent" && issue.AssigneeID.Valid &&
-		util.UUIDToString(issue.AssigneeID) == util.UUIDToString(agentID) {
-		return s.enqueueIssueTaskWithCommentPlan(ctx, issue, triggerCommentID, coalescedCommentIDs, true, "", actorUserID, rerunOfTaskID)
+const queuedExpiredCreateIssueComment = "Scheduled agent run expired before its runtime claimed it. The issue is blocked and will receive at most one automatic recovery attempt when that runtime reconnects. An operator can also use issue rerun."
+
+// surfaceQueuedExpiredCreateIssue makes a create_issue queue expiry durable on
+// the issue itself. Ordinary issue tasks and run_only autopilots are excluded:
+// only an active create_issue run has an autopilot_run linked through issue_id.
+func (s *TaskService) surfaceQueuedExpiredCreateIssue(ctx context.Context, task db.AgentTaskQueue) {
+	if !task.IssueID.Valid || task.AutopilotRunID.Valid ||
+		!task.FailureReason.Valid || task.FailureReason.String != string(taskfailure.ReasonQueuedExpired) {
+		return
 	}
-	return s.enqueueMentionTaskWithCommentPlan(ctx, issue, agentID, triggerCommentID, coalescedCommentIDs, isLeader, squadID, true, "", actorUserID, rerunOfTaskID)
+	var issue, updated db.Issue
+	err := s.runInTx(ctx, func(qtx *db.Queries) error {
+		var err error
+		if _, err = qtx.LockIssueForTaskEnqueue(ctx, task.IssueID); err != nil {
+			return fmt.Errorf("lock issue task queue: %w", err)
+		}
+		issue, err = qtx.GetQueuedExpiredCreateIssueForSurface(ctx, task.ID)
+		if err != nil {
+			return err
+		}
+		if _, err = qtx.SetIssueMetadataKey(ctx, db.SetIssueMetadataKeyParams{
+			Key: "pipeline_status", Value: []byte(`"queued_expired"`), ID: issue.ID, WorkspaceID: issue.WorkspaceID,
+		}); err != nil {
+			return fmt.Errorf("persist pipeline status: %w", err)
+		}
+		if _, err = qtx.SetIssueMetadataKey(ctx, db.SetIssueMetadataKeyParams{
+			Key: "waiting_on", Value: []byte(`"runtime_reconnect"`), ID: issue.ID, WorkspaceID: issue.WorkspaceID,
+		}); err != nil {
+			return fmt.Errorf("persist waiting_on: %w", err)
+		}
+		updated, err = qtx.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{
+			ID: issue.ID, Status: "blocked", WorkspaceID: issue.WorkspaceID,
+		})
+		return err
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return
+	}
+	if err != nil {
+		slog.Warn("queued expiry: durable issue transition failed", "issue_id", util.UUIDToString(task.IssueID), "task_id", util.UUIDToString(task.ID), "error", err)
+		return
+	}
+	s.broadcastIssueUpdated(updated, issue.Status)
+	s.createAgentComment(ctx, issue.ID, task.AgentID, queuedExpiredCreateIssueComment, "system", pgtype.UUID{}, task.ID)
+	slog.Warn("queued create_issue task surfaced", "issue_id", util.UUIDToString(issue.ID), "task_id", util.UUIDToString(task.ID), "runtime_id", util.UUIDToString(task.RuntimeID))
 }
 
 // HandleFailedTasks runs the post-failure side effects for a batch of
@@ -3484,6 +3693,8 @@ func (s *TaskService) HandleFailedTasks(ctx context.Context, tasks []db.AgentTas
 	retried := 0
 
 	for _, t := range tasks {
+		s.surfaceQueuedExpiredCreateIssue(ctx, t)
+
 		// Auto-retry first so the issue stays in_progress rather than
 		// flapping todo → in_progress within a tick.
 		if child, _ := s.MaybeRetryFailedTask(ctx, t); child != nil {

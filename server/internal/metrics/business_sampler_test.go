@@ -51,6 +51,8 @@ func filledSnapshot(now time.Time) *samplerSnapshot {
 	snap.taskRunning[taskRunningKey{source: "issue", runtimeMode: "local"}] = 1
 
 	snap.taskStuck["issue"] = 1
+	snap.queuedExpiredCreateIssueCount = 4
+	snap.queuedExpiredCreateIssueOldestAgeSeconds = 7200
 
 	snap.runtimeOnline[runtimeOnlineKey{runtimeMode: "local", provider: "claude"}] = 4
 	snap.runtimeOnline[runtimeOnlineKey{runtimeMode: "cloud", provider: "kiro"}] = 2
@@ -115,6 +117,8 @@ func TestBusinessSamplerCollectorEmitsExpectedMetrics(t *testing.T) {
 		`multica_agent_task_running{runtime_mode="cloud",source="chat"} 3`,
 		`multica_agent_task_running{runtime_mode="local",source="issue"} 1`,
 		`multica_agent_task_stuck_total{source="issue"} 1`,
+		`multica_create_issue_queued_expired 4`,
+		`multica_create_issue_queued_expired_oldest_age_seconds 7200`,
 		`multica_runtime_online{provider="claude",runtime_mode="local"} 4`,
 		`multica_runtime_online{provider="kiro",runtime_mode="cloud"} 2`,
 		`multica_runtime_heartbeat_age_seconds_count{runtime_mode="local"} 3`,
