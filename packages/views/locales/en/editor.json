@@ -65,7 +65,10 @@
     "group_search": "Search results",
     "skill_no_agents": "No agents assigned",
     "skill_bound_to": "Bound to",
-    "skill_bound_to_count": "Bound to ({{count}})"
+    "skill_bound_to_count": "Bound to ({{count}})",
+    "skill_show_details": "Show {{count}} more",
+    "skill_hide_details": "Hide details",
+    "skill_view_full": "View full skill →"
   },
   "slash_command": {
     "no_skills_configured": "No skills configured",

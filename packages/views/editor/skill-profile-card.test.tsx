@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { renderWithI18n } from "../test/i18n";
@@ -191,16 +191,56 @@ describe("SkillProfileCard", () => {
         />
       </TestHarness>,
     );
+    // The skill's top-level description comes from the API and is rendered
+    // in the header above; the frontmatter's `description` key is
+    // intentionally skipped to avoid duplicating the same value.
     await waitFor(() => {
-      expect(screen.getByText("description")).toBeInTheDocument();
+      expect(screen.getByText("team-standup")).toBeInTheDocument();
     });
+    // No duplicate "description" label in the frontmatter dl.
     expect(
-      screen.getByText("Daily team standup facilitation"),
-    ).toBeInTheDocument();
+      Array.from(screen.queryAllByText("description")).filter(
+        (el) => el.tagName === "DT",
+      ),
+    ).toHaveLength(0);
+    // Promoted keys reach the always-visible summary; github is on the
+    // allowlist so it renders without expanding.
+    expect(screen.getByText("github")).toBeInTheDocument();
     expect(screen.getByText("team-handbook/repos")).toBeInTheDocument();
   });
 
-  it("does not render a frontmatter panel when the body has none", async () => {
+  it("collapses non-promoted frontmatter behind an expand control", async () => {
+    const skillWithMany: Skill = {
+      ...skillWithoutFrontmatter,
+      content:
+        "---\nversion: 1.2.3\nrepository: repo/org\nfree_field_a: a value\nfree_field_b: b value\n---\n\nBody.",
+    };
+    renderWithI18n(
+      <TestHarness skill={skillWithMany}>
+        <SkillProfileCard
+          skillId={skillWithMany.id}
+          skillName={skillWithMany.name}
+        />
+      </TestHarness>,
+    );
+    // Two promoted fields (version, repository) render immediately.
+    await waitFor(() => {
+      expect(screen.getByText("version")).toBeInTheDocument();
+    });
+    expect(screen.getByText("repository")).toBeInTheDocument();
+
+    // Non-promoted fields are hidden until the user expands.
+    expect(screen.queryByText("free_field_a")).toBeNull();
+    expect(screen.queryByText("free_field_b")).toBeNull();
+
+    // Expand.
+    fireEvent.click(screen.getByRole("button", { name: /show.*more/i }));
+
+    expect(screen.getByText("free_field_a")).toBeInTheDocument();
+    expect(screen.getByText("free_field_b")).toBeInTheDocument();
+  });
+
+  it("always renders a deep link to the skill detail page", async () => {
     renderWithI18n(
       <TestHarness skill={skillWithoutFrontmatter}>
         <SkillProfileCard skillId={skillWithoutFrontmatter.id} />
@@ -209,12 +249,8 @@ describe("SkillProfileCard", () => {
     await waitFor(() => {
       expect(screen.getByText("code-review")).toBeInTheDocument();
     });
-    // No frontmatter key cell exists in this fixture's content.
-    expect(
-      Array.from(screen.queryAllByText(/^[a-z-]+$/)).find(
-        (el) => el.textContent === "description",
-      ),
-    ).toBeUndefined();
+    const link = screen.getByRole("link", { name: /view full skill/i });
+    expect(link).toHaveAttribute("href", "/acme/skills/skill-1");
   });
 
   it("lists bound agents", async () => {
