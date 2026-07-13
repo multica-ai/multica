@@ -227,8 +227,9 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		cmd := envOrDefault(envVar, defaultCmd)
 		if path, err := resolveAgentExecutablePath(cmd); err == nil {
 			return AgentEntry{
-				Path:  path,
-				Model: strings.TrimSpace(os.Getenv(modelEnv)),
+				Path:    path,
+				Command: cmd,
+				Model:   strings.TrimSpace(os.Getenv(modelEnv)),
 			}, true
 		}
 		// The shell fallback only rescues bare command names. An operator
@@ -240,8 +241,9 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		}
 		if path, ok := getShellResolved()[cmd]; ok {
 			return AgentEntry{
-				Path:  path,
-				Model: strings.TrimSpace(os.Getenv(modelEnv)),
+				Path:    path,
+				Command: cmd,
+				Model:   strings.TrimSpace(os.Getenv(modelEnv)),
 			}, true
 		}
 		if defaultCmd == "codex" && cmd == defaultCmd {
@@ -250,8 +252,9 @@ func LoadConfig(overrides Overrides) (Config, error) {
 			for _, p := range codexDesktopAppBundlePaths() {
 				if _, err := os.Stat(p); err == nil {
 					return AgentEntry{
-						Path:  p,
-						Model: strings.TrimSpace(os.Getenv(modelEnv)),
+						Path:    p,
+						Command: cmd,
+						Model:   strings.TrimSpace(os.Getenv(modelEnv)),
 					}, true
 				}
 			}
@@ -303,8 +306,9 @@ func LoadConfig(overrides Overrides) (Config, error) {
 	qoderPath := envOrDefault("MULTICA_QODER_PATH", "qodercli")
 	if path, err := resolveAgentExecutablePath(qoderPath); err == nil {
 		agents["qoder"] = AgentEntry{
-			Path:  path,
-			Model: strings.TrimSpace(os.Getenv("MULTICA_QODER_MODEL")),
+			Path:    path,
+			Command: qoderPath,
+			Model:   strings.TrimSpace(os.Getenv("MULTICA_QODER_MODEL")),
 		}
 	}
 	// ByteDance official TRAE CLI (the `traecli` binary from https://docs.trae.cn/cli),
@@ -689,6 +693,47 @@ func resolveAgentExecutablePath(cmd string) (string, error) {
 		}
 	}
 	return canonicalExecutablePath(resolved), nil
+}
+
+// agentExecutablePresent reports whether path currently resolves to a runnable
+// executable, using the exact check the agent backends apply at launch
+// (exec.LookPath). A pinned AgentEntry.Path that fails this has vanished from
+// disk — typically because a version manager did an in-place upgrade and
+// deleted the old versioned directory the path pointed into (MUL-4486).
+func agentExecutablePresent(path string) bool {
+	if path == "" {
+		return false
+	}
+	_, err := exec.LookPath(path)
+	return err == nil
+}
+
+// reresolveAgentCommand re-runs the startup resolution for a single agent
+// command name, returning the freshly resolved absolute path. It mirrors the
+// probe() order in LoadConfig: exec.LookPath (with the ~/.multica/hooks
+// exclusion preserved via resolveAgentExecutablePath) first, then the login
+// shell fallback for a bare command name a GUI-launched daemon can't see on
+// its own PATH. It is only called on the miss path — when a previously pinned
+// path has disappeared — so the login-shell cost is paid rarely, never on a
+// normal launch.
+func reresolveAgentCommand(cmd string) (string, bool) {
+	if cmd == "" {
+		return "", false
+	}
+	if path, err := resolveAgentExecutablePath(cmd); err == nil {
+		return path, true
+	}
+	// A bare command name the daemon's own PATH can't see: retry via the
+	// user's login shell, exactly as the startup probe does for
+	// fnm/nvm/native-installer prefixes. Absolute/relative overrides skip
+	// this — an operator-pinned MULTICA_*_PATH that no longer exists should
+	// stay a hard miss rather than silently resolve a different binary.
+	if !strings.ContainsAny(cmd, "/\\") {
+		if path, ok := resolveAgentsViaLoginShell([]string{cmd})[cmd]; ok {
+			return path, true
+		}
+	}
+	return "", false
 }
 
 func lookPathExcludingMulticaHooks(cmd string) (string, error) {

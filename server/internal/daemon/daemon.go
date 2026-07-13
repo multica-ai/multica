@@ -172,6 +172,16 @@ type Daemon struct {
 	versionsMu    sync.RWMutex      // guards agentVersions
 	agentVersions map[string]string // provider -> detected CLI version (set during registration)
 
+	// resolvedPathsMu guards resolvedPaths, the self-healed executable paths.
+	// The daemon pins each agent's absolute path at startup so a later PATH
+	// change can't redirect a task launch. When that pinned path later vanishes
+	// (a version manager did an in-place upgrade — Homebrew Cask, nvm/fnm),
+	// resolveAgentEntry re-resolves the original command once and records the
+	// result here so subsequent launches, model lists, and registrations reuse
+	// it without re-resolving. Keyed by provider. See MUL-4486.
+	resolvedPathsMu sync.RWMutex
+	resolvedPaths   map[string]string
+
 	wsHBMu      sync.RWMutex         // guards wsHBLastAck
 	wsHBLastAck map[string]time.Time // runtime_id -> last successful WS heartbeat ack timestamp
 
@@ -263,6 +273,7 @@ func New(cfg Config, logger *slog.Logger) *Daemon {
 		profileLaunchSpecs:        make(map[string]profileLaunchSpec),
 		runtimeSet:                newRuntimeSetWatcher(),
 		agentVersions:             make(map[string]string),
+		resolvedPaths:             make(map[string]string),
 		wsHBLastAck:               make(map[string]time.Time),
 		activeEnvRoots:            make(map[string]int),
 		localPathLocks:            NewLocalPathLocker(),
@@ -291,6 +302,61 @@ func (d *Daemon) agentVersion(provider string) string {
 	d.versionsMu.RLock()
 	defer d.versionsMu.RUnlock()
 	return d.agentVersions[provider]
+}
+
+// resolveAgentEntry returns entry with a usable executable path, self-healing
+// the pinned Path when it has vanished from disk (MUL-4486).
+//
+// The daemon pins each agent's absolute, symlink-resolved path at startup so a
+// later PATH change cannot redirect a task launch. But a version manager
+// (Homebrew Cask, nvm/fnm) upgrading in place deletes the old versioned
+// directory that pinned path points into and repoints the stable command name
+// at the new version — leaving the daemon holding a path that no longer exists
+// until it restarts. Every consumer of entry.Path (task launch, model listing,
+// version detection at registration) then hard-fails with "executable not
+// found".
+//
+// Behaviour:
+//   - Pinned Path still present -> returned unchanged. The anti-redirect
+//     guarantee holds for the normal case: a live pinned binary is never
+//     second-guessed even if PATH now points elsewhere.
+//   - Pinned Path gone -> reuse a previously self-healed path if it is still
+//     present, otherwise re-resolve entry.Command once (preserving the
+//     ~/.multica/hooks exclusion and the login-shell fallback) and remember the
+//     result for later calls. This reproduces exactly what a daemon restart
+//     would resolve, so it is no less safe than the documented restart
+//     workaround — only automatic.
+//   - Re-resolution fails (binary genuinely uninstalled) -> entry is returned
+//     unchanged so the downstream "executable not found" error still surfaces.
+func (d *Daemon) resolveAgentEntry(provider string, entry AgentEntry) AgentEntry {
+	if agentExecutablePresent(entry.Path) {
+		return entry
+	}
+
+	d.resolvedPathsMu.RLock()
+	healed, ok := d.resolvedPaths[provider]
+	d.resolvedPathsMu.RUnlock()
+	if ok && agentExecutablePresent(healed) {
+		entry.Path = healed
+		return entry
+	}
+
+	newPath, found := reresolveAgentCommand(entry.Command)
+	if !found {
+		return entry
+	}
+
+	d.resolvedPathsMu.Lock()
+	if d.resolvedPaths == nil {
+		d.resolvedPaths = make(map[string]string)
+	}
+	d.resolvedPaths[provider] = newPath
+	d.resolvedPathsMu.Unlock()
+
+	d.logger.Info("re-resolved agent executable after pinned path vanished (in-place upgrade)",
+		"provider", provider, "command", entry.Command, "old_path", entry.Path, "new_path", newPath)
+	entry.Path = newPath
+	return entry
 }
 
 func (d *Daemon) notifyRuntimeSetChanged() {
@@ -929,6 +995,10 @@ func (d *Daemon) registerRuntimesForWorkspace(ctx context.Context, workspaceID s
 	var runtimes []map[string]string
 	var failedProfiles []map[string]string
 	for name, entry := range d.cfg.Agents {
+		// Self-heal a pinned executable path an in-place upgrade deleted
+		// (MUL-4486) so version detection — and thus staying registered/online
+		// — recovers without a daemon restart.
+		entry = d.resolveAgentEntry(name, entry)
 		version, err := detectAgentVersion(ctx, entry.Path)
 		if err != nil {
 			d.logger.Warn("skip registering runtime", "name", name, "error", err)
@@ -2052,6 +2122,8 @@ func (d *Daemon) handleModelList(ctx context.Context, rt Runtime, requestID stri
 		})
 		return
 	}
+	// Self-heal a pinned executable path an in-place upgrade deleted (MUL-4486).
+	entry = d.resolveAgentEntry(rt.Provider, entry)
 
 	models, err := agent.ListModels(ctx, rt.Provider, entry.Path)
 	if err != nil {
@@ -3472,6 +3544,12 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	defer d.clearTaskRepoRefs(task.WorkspaceID, task.ID)
 
 	entry, ok := d.cfg.Agents[provider]
+	if ok {
+		// Self-heal a pinned executable path that an in-place upgrade deleted
+		// (MUL-4486). Done before the custom-profile override below so a
+		// custom runtime's own path is never second-guessed.
+		entry = d.resolveAgentEntry(provider, entry)
+	}
 	// A custom runtime profile (MUL-3284) overrides the executable path: the
 	// runtime's protocol_family is the provider (so agent.New still selects
 	// the right backend), but the actual binary on PATH is the profile's
