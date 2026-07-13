@@ -60,3 +60,15 @@ SET properties = properties - sqlc.arg('key')::text,
     updated_at = now()
 WHERE id = sqlc.arg('id')::uuid AND workspace_id = sqlc.arg('workspace_id')::uuid
 RETURNING *;
+
+-- name: CountIssuesUsingPropertyOptions :many
+-- Usage census for specific option ids of one property. jsonb `?` matches
+-- both value shapes: array element for multi_select, string equality for
+-- select. Only options with at least one referencing issue come back.
+SELECT opt::text AS option_id, COUNT(i.id) AS usage_count
+FROM unnest(sqlc.arg('option_ids')::text[]) AS opt
+LEFT JOIN issue i
+  ON i.workspace_id = sqlc.arg('workspace_id')::uuid
+ AND (i.properties -> sqlc.arg('property_key')::text) ? opt
+GROUP BY opt
+HAVING COUNT(i.id) > 0;

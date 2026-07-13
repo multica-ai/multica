@@ -128,11 +128,26 @@ export const EMPTY_LIST_PROPERTIES_RESPONSE: ListPropertiesResponse = {
 };
 
 // Value bag: keyed by definition UUID; values are primitives or string
-// arrays (multi_select). Unknown shapes are dropped per-key rather than
-// failing the whole issue parse.
-export const IssuePropertyValuesSchema = z
-  .record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.array(z.string())]))
-  .default({});
+// arrays (multi_select). The preprocess step drops entries with unknown
+// shapes BEFORE validation — a newer server shipping an object-shaped value
+// (future actor/relation types) must degrade to "that one property missing",
+// never fail the whole IssueSchema and blank the list via parseWithFallback.
+export const IssuePropertyValuesSchema = z.preprocess(
+  (raw) => {
+    if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return {};
+    const out: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(raw)) {
+      const ok =
+        typeof value === "string" ||
+        typeof value === "number" ||
+        typeof value === "boolean" ||
+        (Array.isArray(value) && value.every((item) => typeof item === "string"));
+      if (ok) out[key] = value;
+    }
+    return out;
+  },
+  z.record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.array(z.string())])).default({}),
+);
 
 export const IssuePropertiesResponseSchema = z.object({
   properties: IssuePropertyValuesSchema,

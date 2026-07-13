@@ -348,3 +348,53 @@ func TestValidatePropertyNameReserved(t *testing.T) {
 		t.Fatalf("legit name rejected: %v", err)
 	}
 }
+
+// TestPropertyOptionRemovalGuard: removing a select option still referenced
+// by issues is rejected with a usage census; renames (same id) and removal
+// of unused options pass.
+func TestPropertyOptionRemovalGuard(t *testing.T) {
+	property := createTestProperty(t, map[string]any{
+		"name": "Guard" + uuid.NewString()[:8], "type": "select",
+		"config": map[string]any{"options": []map[string]any{
+			{"name": "Used", "color": "#ef4444"},
+			{"name": "Unused", "color": "#6b7280"},
+		}},
+	})
+	usedID := property.Config.Options[0].ID
+	unusedID := property.Config.Options[1].ID
+	issueID := createPropertyTestIssue(t, "option removal guard")
+	if w := setIssuePropertyRaw(t, issueID, property.ID, usedID); w.Code != http.StatusOK {
+		t.Fatalf("seed value: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	patchConfig := func(options []map[string]any) *httptest.ResponseRecorder {
+		w := httptest.NewRecorder()
+		req := newRequest("PATCH", "/api/properties/"+property.ID, map[string]any{
+			"config": map[string]any{"options": options},
+		})
+		req = withURLParam(req, "id", property.ID)
+		testHandler.UpdateProperty(w, req)
+		return w
+	}
+
+	// Dropping the in-use option → 409 naming it with the census.
+	w := patchConfig([]map[string]any{{"id": unusedID, "name": "Unused", "color": "#6b7280"}})
+	if w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), "Used") || !strings.Contains(w.Body.String(), "1 issues") {
+		t.Fatalf("in-use removal: expected 409 with census, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// Renaming the in-use option (id preserved) → 200.
+	w = patchConfig([]map[string]any{
+		{"id": usedID, "name": "Used (renamed)", "color": "#ef4444"},
+		{"id": unusedID, "name": "Unused", "color": "#6b7280"},
+	})
+	if w.Code != http.StatusOK {
+		t.Fatalf("rename: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// Dropping only the unused option → 200.
+	w = patchConfig([]map[string]any{{"id": usedID, "name": "Used (renamed)", "color": "#ef4444"}})
+	if w.Code != http.StatusOK {
+		t.Fatalf("unused removal: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+}

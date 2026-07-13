@@ -129,7 +129,7 @@
       "usage": "使用",
       "updated": "更新时间"
     },
-    "usage_count": "{{count}} 个 Issue",
+    "usage_count_other": "{{count}} 个 Issue",
     "loading": "正在加载属性...",
     "empty": "还没有属性",
     "empty_hint": "创建 Severity、Environment 这类类型化字段——agent 可带校验地读写它们。",

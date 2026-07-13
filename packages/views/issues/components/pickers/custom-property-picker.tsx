@@ -319,6 +319,7 @@ function TextishPropertyEditor({
           <Input
             autoFocus
             type={property.type === "number" ? "number" : "text"}
+            step={property.type === "number" ? "any" : undefined}
             inputMode={property.type === "number" ? "decimal" : undefined}
             value={draft}
             onChange={(event) => setDraft(event.target.value)}

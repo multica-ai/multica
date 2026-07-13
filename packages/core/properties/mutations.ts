@@ -4,12 +4,14 @@ import { propertyKeys } from "./queries";
 import { useWorkspaceId } from "../hooks";
 import { issueKeys } from "../issues/queries";
 import { onIssuePropertiesChanged } from "../issues/ws-updaters";
+import { findIssueLocation } from "../issues/cache-helpers";
 import type {
   CreatePropertyRequest,
   UpdatePropertyRequest,
   Issue,
   IssuePropertyValue,
   IssuePropertyValues,
+  ListIssuesCache,
 } from "../types";
 
 export function useCreateProperty() {
@@ -44,15 +46,39 @@ export function useUpdateProperty() {
   });
 }
 
+/**
+ * Read the issue's current property bag from whichever cache holds it: the
+ * detail cache first, then any list cache bucket. Board/list surfaces never
+ * populate the detail cache, so stopping there would make the optimistic
+ * merge below overwrite the whole bag with a single key.
+ */
 function readIssueProperties(qc: ReturnType<typeof useQueryClient>, wsId: string, issueId: string): IssuePropertyValues | undefined {
-  return qc.getQueryData<Issue>(issueKeys.detail(wsId, issueId))?.properties;
+  const detail = qc.getQueryData<Issue>(issueKeys.detail(wsId, issueId));
+  if (detail) return detail.properties ?? {};
+  for (const [, data] of qc.getQueriesData<ListIssuesCache>({ queryKey: issueKeys.list(wsId) })) {
+    if (!data) continue;
+    const location = findIssueLocation(data, issueId);
+    if (location) return location.issue.properties ?? {};
+  }
+  return undefined;
 }
 
+
 /**
- * Optimistic single-property write on an issue (canonical toggle/field-patch
- * pattern per the state rules): patch the caches through the same helper the
- * WS event uses, roll back on failure, reconcile with the server's
- * post-mutation bag on success.
+ * Optimistic single-property write on an issue.
+ *
+ * Concurrency contract (MUL-4463 review round 1/2):
+ *   - Mutations for the SAME issue serialize via TanStack's mutation
+ *     `scope`, so full-bag responses cannot land out of order and rapid
+ *     multi-select toggles cannot interleave.
+ *   - The optimistic patch merges into the bag read from ANY cache
+ *     (detail or list) — never replaces it — so board-only surfaces keep
+ *     the issue's other property values.
+ *   - Failure restores the snapshot; if no snapshot existed, it falls back
+ *     to invalidation.
+ *   - The LAST settled mutation for the issue does an authoritative
+ *     invalidate of the detail cache plus the definition catalog (usage
+ *     counts), reconciling any raced WS snapshots under staleTime:Infinity.
  */
 export function useSetIssueProperty() {
   const qc = useQueryClient();
@@ -60,6 +86,8 @@ export function useSetIssueProperty() {
   return useMutation({
     mutationFn: ({ issueId, propertyId, value }: { issueId: string; propertyId: string; value: IssuePropertyValue }) =>
       api.setIssueProperty(issueId, propertyId, value),
+    scope: { id: `issue-properties:${wsId}` },
+    mutationKey: ["issue-properties", wsId],
     onMutate: async ({ issueId, propertyId, value }) => {
       await qc.cancelQueries({ queryKey: issueKeys.detail(wsId, issueId) });
       const prev = readIssueProperties(qc, wsId, issueId);
@@ -67,10 +95,15 @@ export function useSetIssueProperty() {
       return { prev, issueId };
     },
     onError: (_err, _vars, ctx) => {
-      if (ctx?.prev !== undefined) onIssuePropertiesChanged(qc, wsId, ctx.issueId, ctx.prev);
+      if (!ctx) return;
+      if (ctx.prev !== undefined) onIssuePropertiesChanged(qc, wsId, ctx.issueId, ctx.prev);
+      else qc.invalidateQueries({ queryKey: issueKeys.detail(wsId, ctx.issueId) });
     },
     onSuccess: (data, { issueId }) => {
       onIssuePropertiesChanged(qc, wsId, issueId, data.properties ?? {});
+    },
+    onSettled: (_data, _err, { issueId }) => {
+      settleIssuePropertyCaches(qc, wsId, issueId);
     },
   });
 }
@@ -81,6 +114,8 @@ export function useUnsetIssueProperty() {
   return useMutation({
     mutationFn: ({ issueId, propertyId }: { issueId: string; propertyId: string }) =>
       api.unsetIssueProperty(issueId, propertyId),
+    scope: { id: `issue-properties:${wsId}` },
+    mutationKey: ["issue-properties", wsId],
     onMutate: async ({ issueId, propertyId }) => {
       await qc.cancelQueries({ queryKey: issueKeys.detail(wsId, issueId) });
       const prev = readIssueProperties(qc, wsId, issueId);
@@ -92,10 +127,22 @@ export function useUnsetIssueProperty() {
       return { prev, issueId };
     },
     onError: (_err, _vars, ctx) => {
-      if (ctx?.prev !== undefined) onIssuePropertiesChanged(qc, wsId, ctx.issueId, ctx.prev);
+      if (!ctx) return;
+      if (ctx.prev !== undefined) onIssuePropertiesChanged(qc, wsId, ctx.issueId, ctx.prev);
+      else qc.invalidateQueries({ queryKey: issueKeys.detail(wsId, ctx.issueId) });
     },
     onSuccess: (data, { issueId }) => {
       onIssuePropertiesChanged(qc, wsId, issueId, data.properties ?? {});
     },
+    onSettled: (_data, _err, { issueId }) => {
+      settleIssuePropertyCaches(qc, wsId, issueId);
+    },
   });
+}
+
+/** Authoritative reconcile once the LAST in-flight property write settles. */
+function settleIssuePropertyCaches(qc: ReturnType<typeof useQueryClient>, wsId: string, issueId: string) {
+  if (qc.isMutating({ mutationKey: ["issue-properties", wsId] }) > 1) return;
+  qc.invalidateQueries({ queryKey: issueKeys.detail(wsId, issueId) });
+  qc.invalidateQueries({ queryKey: propertyKeys.all(wsId) });
 }

@@ -355,6 +355,39 @@ func validatePropertyValue(def db.IssueProperty, raw json.RawMessage) ([]byte, e
 	}
 }
 
+// removedOptionIDs returns option ids present in the stored config but
+// absent from the incoming replacement.
+func removedOptionIDs(existingConfig, nextConfig []byte) []string {
+	next := propertyOptionIDs(parsePropertyConfig(nextConfig))
+	var removed []string
+	for _, opt := range parsePropertyConfig(existingConfig).Options {
+		if _, kept := next[opt.ID]; !kept {
+			removed = append(removed, opt.ID)
+		}
+	}
+	return removed
+}
+
+// describeOptionsInUse renders the 409 body for in-use option removal, e.g.
+// `cannot remove options still in use: "Critical" (3 issues); clear or
+// change those values first`.
+func describeOptionsInUse(existingConfig []byte, rows []db.CountIssuesUsingPropertyOptionsRow) string {
+	names := make(map[string]string)
+	for _, opt := range parsePropertyConfig(existingConfig).Options {
+		names[opt.ID] = opt.Name
+	}
+	parts := make([]string, len(rows))
+	for i, row := range rows {
+		name := names[row.OptionID]
+		if name == "" {
+			name = row.OptionID
+		}
+		parts[i] = fmt.Sprintf("%q (%d issues)", name, row.UsageCount)
+	}
+	sort.Strings(parts)
+	return "cannot remove options still in use: " + strings.Join(parts, ", ") + "; clear or change those values first"
+}
+
 // parseIssueProperties mirrors parseIssueMetadata for the properties bag.
 func parseIssueProperties(raw []byte) map[string]any {
 	if len(raw) == 0 {
@@ -556,6 +589,27 @@ func (h *Handler) UpdateProperty(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
+		}
+		// Removing an option that issues still reference would silently
+		// orphan those values (they render as unset and vanish from
+		// property-grouped boards). Reject with the usage census so the
+		// admin can migrate values first. Renames keep the option id and
+		// pass untouched.
+		if removed := removedOptionIDs(existing.Config, configJSON); len(removed) > 0 {
+			rows, err := h.Queries.CountIssuesUsingPropertyOptions(r.Context(), db.CountIssuesUsingPropertyOptionsParams{
+				OptionIds:   removed,
+				WorkspaceID: wsUUID,
+				PropertyKey: uuidToString(existing.ID),
+			})
+			if err != nil {
+				slog.Warn("CountIssuesUsingPropertyOptions failed", append(logger.RequestAttrs(r), "error", err)...)
+				writeError(w, http.StatusInternalServerError, "failed to update property")
+				return
+			}
+			if len(rows) > 0 {
+				writeError(w, http.StatusConflict, describeOptionsInUse(existing.Config, rows))
+				return
+			}
 		}
 		params.Config = configJSON
 	}

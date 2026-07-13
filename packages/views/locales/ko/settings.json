@@ -126,7 +126,7 @@
       "usage": "사용",
       "updated": "업데이트"
     },
-    "usage_count": "{{count}}개 Issue",
+    "usage_count_other": "{{count}}개 Issue",
     "loading": "속성을 불러오는 중...",
     "empty": "아직 속성이 없습니다",
     "empty_hint": "Severity, Environment 같은 타입 필드를 만들어 보세요. 에이전트가 검증과 함께 읽고 씁니다.",

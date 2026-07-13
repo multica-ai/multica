@@ -126,7 +126,7 @@
       "usage": "使用数",
       "updated": "更新日時"
     },
-    "usage_count": "{{count}} 件の Issue",
+    "usage_count_other": "{{count}} 件の Issue",
     "loading": "プロパティを読み込み中...",
     "empty": "プロパティはまだありません",
     "empty_hint": "Severity や Environment のような型付きフィールドを作成できます。エージェントはバリデーション付きで読み書きします。",

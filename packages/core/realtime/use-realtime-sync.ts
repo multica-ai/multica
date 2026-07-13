@@ -411,6 +411,7 @@ function invalidateWorkspaceScopedQueries(qc: QueryClient): void {
     qc.invalidateQueries({ queryKey: agentRunCountsKeys.all(wsId) });
     qc.invalidateQueries({ queryKey: chatKeys.all(wsId) });
     qc.invalidateQueries({ queryKey: labelKeys.all(wsId) });
+    qc.invalidateQueries({ queryKey: propertyKeys.all(wsId) });
   }
   // Cross-workspace, so outside the wsId guard: a reconnect may have missed
   // inbox events from any workspace, so re-pull the switcher-dot summary.
@@ -748,7 +749,13 @@ export function useRealtimeSync(
       const { issue_id, properties } = p as IssuePropertiesChangedPayload;
       if (!issue_id) return;
       const wsId = getCurrentWsId();
-      if (wsId) onIssuePropertiesChanged(qc, wsId, issue_id, properties ?? {});
+      if (wsId) {
+        onIssuePropertiesChanged(qc, wsId, issue_id, properties ?? {});
+        // The catalog embeds per-definition usage counts; every value
+        // set/unset shifts them. The list is tiny, so a refetch beats
+        // trying to patch counts client-side.
+        qc.invalidateQueries({ queryKey: propertyKeys.all(wsId) });
+      }
     });
 
     // Definition changes (create / rename / options / archive) — refetch the

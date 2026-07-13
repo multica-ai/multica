@@ -23,6 +23,50 @@ func (q *Queries) CountActiveIssueProperties(ctx context.Context, workspaceID pg
 	return count, err
 }
 
+const countIssuesUsingPropertyOptions = `-- name: CountIssuesUsingPropertyOptions :many
+SELECT opt::text AS option_id, COUNT(i.id) AS usage_count
+FROM unnest($1::text[]) AS opt
+LEFT JOIN issue i
+  ON i.workspace_id = $2::uuid
+ AND (i.properties -> $3::text) ? opt
+GROUP BY opt
+HAVING COUNT(i.id) > 0
+`
+
+type CountIssuesUsingPropertyOptionsParams struct {
+	OptionIds   []string    `json:"option_ids"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	PropertyKey string      `json:"property_key"`
+}
+
+type CountIssuesUsingPropertyOptionsRow struct {
+	OptionID   string `json:"option_id"`
+	UsageCount int64  `json:"usage_count"`
+}
+
+// Usage census for specific option ids of one property. jsonb `?` matches
+// both value shapes: array element for multi_select, string equality for
+// select. Only options with at least one referencing issue come back.
+func (q *Queries) CountIssuesUsingPropertyOptions(ctx context.Context, arg CountIssuesUsingPropertyOptionsParams) ([]CountIssuesUsingPropertyOptionsRow, error) {
+	rows, err := q.db.Query(ctx, countIssuesUsingPropertyOptions, arg.OptionIds, arg.WorkspaceID, arg.PropertyKey)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []CountIssuesUsingPropertyOptionsRow{}
+	for rows.Next() {
+		var i CountIssuesUsingPropertyOptionsRow
+		if err := rows.Scan(&i.OptionID, &i.UsageCount); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const createIssueProperty = `-- name: CreateIssueProperty :one
 INSERT INTO issue_property (workspace_id, name, type, description, config, position)
 SELECT $1::uuid,

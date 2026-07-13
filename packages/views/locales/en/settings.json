@@ -129,7 +129,8 @@
       "usage": "Used by",
       "updated": "Updated"
     },
-    "usage_count": "{{count}} issues",
+    "usage_count_one": "{{count}} issue",
+    "usage_count_other": "{{count}} issues",
     "loading": "Loading properties...",
     "empty": "No properties yet",
     "empty_hint": "Create typed fields like Severity or Environment — agents can read and write them with validation.",

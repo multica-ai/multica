@@ -122,12 +122,22 @@ describe("IssueSchema (via ListIssuesResponseSchema)", () => {
     expect(parsed.issues[0]?.properties).toEqual({});
   });
 
-  it("rejects properties with nested-object values", () => {
+  it("drops unknown-shaped property values instead of failing the issue parse", () => {
+    // Forward compat: a future server type (actor/relation) may ship object
+    // values. That one entry must disappear; the issue and its other
+    // properties must survive — a full parse failure would blank the whole
+    // list through parseWithFallback on installed desktop builds.
     const payload = {
-      issues: [{ ...baseIssue, properties: { "def-1": { nested: 1 } } }],
+      issues: [
+        {
+          ...baseIssue,
+          properties: { "def-1": { nested: 1 }, "def-2": "opt-a" },
+        },
+      ],
       total: 1,
     };
-    expect(ListIssuesResponseSchema.safeParse(payload).success).toBe(false);
+    const parsed = ListIssuesResponseSchema.parse(payload);
+    expect(parsed.issues[0]?.properties).toEqual({ "def-2": "opt-a" });
   });
 });
 
