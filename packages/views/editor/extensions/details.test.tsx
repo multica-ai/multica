@@ -137,4 +137,86 @@ nested
     expect(out).toContain("Inner");
     expect(out).toContain("nested");
   });
+
+  it("tolerates blank lines between the opening tag and <summary>", () => {
+    const md = `<details>
+
+<summary>Spaced out</summary>
+
+Body.
+</details>`;
+    editor = makeEditor();
+    editor.commands.setContent(md, { contentType: "markdown" });
+
+    const blocks = findAll(editor.getJSON() as JsonNode, "detailsBlock");
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0]?.attrs?.summary).toBe("Spaced out");
+    expect(blocks[0]?.attrs?.body).toBe("Body.");
+  });
+
+  it("does not treat `open` inside another attribute value as the open flag", () => {
+    const md = `<details class="is open">
+<summary>Not actually open</summary>
+
+Body.
+</details>`;
+    editor = makeEditor();
+    editor.commands.setContent(md, { contentType: "markdown" });
+
+    const blocks = findAll(editor.getJSON() as JsonNode, "detailsBlock");
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0]?.attrs?.open).toBe(false);
+  });
+
+  it("round-trips an empty body", () => {
+    const md = `<details>
+<summary>Empty</summary>
+
+
+</details>`;
+    editor = makeEditor();
+    editor.commands.setContent(md, { contentType: "markdown" });
+
+    const blocks = findAll(editor.getJSON() as JsonNode, "detailsBlock");
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0]?.attrs?.summary).toBe("Empty");
+    expect(blocks[0]?.attrs?.body).toBe("");
+  });
+
+  it("parses two consecutive <details> blocks independently", () => {
+    const md = `${SIMPLE}
+
+<details>
+<summary>Second</summary>
+
+Another body.
+</details>`;
+    editor = makeEditor();
+    editor.commands.setContent(md, { contentType: "markdown" });
+
+    const blocks = findAll(editor.getJSON() as JsonNode, "detailsBlock");
+    expect(blocks).toHaveLength(2);
+    expect(blocks[0]?.attrs?.summary).toBe("Click to expand");
+    expect(blocks[1]?.attrs?.summary).toBe("Second");
+  });
+
+  it("declines a body truncated inside a code fence (stray </details>)", () => {
+    // The lazy </details> match would stop inside the fenced sample; the odd
+    // fence count signals the truncation, so the block declines and falls back
+    // to flat rendering rather than leaking an unterminated fence.
+    const md = `<details>
+<summary>Has a fenced sample</summary>
+
+\`\`\`html
+</details>
+\`\`\`
+</details>`;
+    editor = makeEditor();
+    editor.commands.setContent(md, { contentType: "markdown" });
+
+    const blocks = findAll(editor.getJSON() as JsonNode, "detailsBlock");
+    expect(blocks).toHaveLength(0);
+    // No content is destroyed by the fallback.
+    expect(editor.getMarkdown()).toContain("Has a fenced sample");
+  });
 });
