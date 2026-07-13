@@ -755,7 +755,7 @@ func isExecutableFile(path string) bool {
 // list to pre-fetch canonical paths for every known agent in a single shell
 // invocation, instead of paying the cost-per-miss.
 var defaultAgentCommandNames = []string{
-	"claude", "codex", "opencode", "openclaw", "hermes",
+	"claude", "codex", "opencode", "deveco", "openclaw", "hermes",
 	"pi", "cursor-agent", "copilot", "kimi", "kiro-cli", "codebuddy", "agy", "traecli",
 }
 
