@@ -1,7 +1,9 @@
 package daemon
 
 import (
+	"encoding/json"
 	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -12,6 +14,16 @@ func TestSkillBundleCacheLoadStore(t *testing.T) {
 
 	if err := cache.Store("ws-1", bundle); err != nil {
 		t.Fatalf("Store: %v", err)
+	}
+	if data, err := os.ReadFile(filepath.Join(cache.bundleDir("ws-1", ref), "SKILL.md")); err != nil {
+		t.Fatalf("bundle dir missing SKILL.md: %v", err)
+	} else if string(data) != "---\nname: deploy\n---\n\nmain" {
+		t.Fatalf("bundle dir SKILL.md = %q, want normalized frontmatter", data)
+	}
+	if data, err := os.ReadFile(filepath.Join(cache.bundleDir("ws-1", ref), "rules.md")); err != nil {
+		t.Fatalf("bundle dir missing supporting file: %v", err)
+	} else if string(data) != "rules" {
+		t.Fatalf("bundle dir rules.md = %q, want %q", data, "rules")
 	}
 	got, ok := cache.Load("ws-1", ref)
 	if !ok {
@@ -39,6 +51,41 @@ func TestSkillBundleCacheRejectsCorruptBundle(t *testing.T) {
 	}
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
 		t.Fatalf("expected corrupt cache file to be removed, stat err=%v", err)
+	}
+}
+
+func TestSkillBundleCacheMigratesLegacyLayout(t *testing.T) {
+	cache := NewSkillBundleCache(filepath.Join(t.TempDir(), "v2"))
+	bundle := testSkillBundle()
+	ref := skillRefFromBundle(bundle)
+
+	legacyDir := bundleDirForRoot(cache.legacyRoot, "ws-1", ref)
+	if err := os.MkdirAll(filepath.Join(legacyDir, "nested"), 0o755); err != nil {
+		t.Fatalf("seed legacy dir: %v", err)
+	}
+	raw, err := json.Marshal(bundle)
+	if err != nil {
+		t.Fatalf("marshal bundle: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(legacyDir, ".skill-bundle.json"), raw, 0o644); err != nil {
+		t.Fatalf("seed legacy meta: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(legacyDir, "SKILL.md"), []byte("main"), 0o644); err != nil {
+		t.Fatalf("seed legacy SKILL.md: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(legacyDir, "rules.md"), []byte("rules"), 0o644); err != nil {
+		t.Fatalf("seed legacy support file: %v", err)
+	}
+
+	got, ok := cache.Load("ws-1", ref)
+	if !ok {
+		t.Fatal("expected cache hit from legacy layout")
+	}
+	if got.Content != bundle.Content {
+		t.Fatalf("loaded legacy bundle = %+v, want %+v", got, bundle)
+	}
+	if _, err := os.Stat(filepath.Join(cache.bundleDir("ws-1", ref), "SKILL.md")); err != nil {
+		t.Fatalf("migrated bundle missing SKILL.md: %v", err)
 	}
 }
 

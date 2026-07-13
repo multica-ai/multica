@@ -6,37 +6,43 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 
+	"github.com/multica-ai/multica/server/internal/daemon/execenv"
 	"github.com/multica-ai/multica/server/pkg/skillbundle"
 )
 
 type SkillBundleCache struct {
-	root  string
-	mu    sync.Mutex
-	locks map[string]*sync.Mutex
+	root       string
+	legacyRoot  string
+	mu         sync.Mutex
+	locks      map[string]*sync.Mutex
 }
 
 func NewSkillBundleCache(root string) *SkillBundleCache {
-	return &SkillBundleCache{root: root, locks: make(map[string]*sync.Mutex)}
+	cache := &SkillBundleCache{root: root, locks: make(map[string]*sync.Mutex)}
+	if filepath.Base(root) == "v2" {
+		cache.legacyRoot = filepath.Join(filepath.Dir(root), "v1")
+	}
+	return cache
 }
 
 func (c *SkillBundleCache) Load(workspaceID string, ref SkillRefData) (SkillData, bool) {
 	if c == nil || c.root == "" {
 		return SkillData{}, false
 	}
-	keyPath := c.bundlePath(workspaceID, ref)
-	data, err := os.ReadFile(keyPath)
-	if err != nil {
-		return SkillData{}, false
+	if bundle, ok := c.loadFromRoot(c.root, workspaceID, ref); ok {
+		return bundle, true
 	}
-	var bundle SkillData
-	if err := json.Unmarshal(data, &bundle); err != nil || !validateSkillBundle(ref, bundle) {
-		_ = os.Remove(keyPath)
-		return SkillData{}, false
+	if c.legacyRoot != "" {
+		if bundle, ok := c.loadFromRoot(c.legacyRoot, workspaceID, ref); ok {
+			_ = c.Store(workspaceID, bundle)
+			return bundle, true
+		}
 	}
-	return bundle, true
+	return SkillData{}, false
 }
 
 func (c *SkillBundleCache) Store(workspaceID string, bundle SkillData) error {
@@ -44,7 +50,7 @@ func (c *SkillBundleCache) Store(workspaceID string, bundle SkillData) error {
 		return nil
 	}
 	ref := SkillRefData{ID: bundle.ID, Source: bundle.Source, Hash: bundle.Hash}
-	dir := filepath.Dir(c.bundlePath(workspaceID, ref))
+	dir := c.bundleDir(workspaceID, ref)
 	tmp, err := os.MkdirTemp(filepath.Dir(dir), ".bundle-*")
 	if err != nil {
 		if mkErr := os.MkdirAll(filepath.Dir(dir), 0o755); mkErr != nil {
@@ -61,8 +67,21 @@ func (c *SkillBundleCache) Store(workspaceID string, bundle SkillData) error {
 	if err != nil {
 		return err
 	}
-	if err := os.WriteFile(filepath.Join(tmp, "bundle.json"), data, 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(tmp, ".skill-bundle.json"), data, 0o644); err != nil {
 		return err
+	}
+	body := execenv.EnsureSkillFrontmatter(bundle.Content, sanitizeSkillName(bundle.Name), bundle.Description)
+	if err := os.WriteFile(filepath.Join(tmp, "SKILL.md"), []byte(body), 0o644); err != nil {
+		return err
+	}
+	for _, file := range bundle.Files {
+		target := filepath.Join(tmp, file.Path)
+		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+			return err
+		}
+		if err := os.WriteFile(target, []byte(file.Content), 0o644); err != nil {
+			return err
+		}
 	}
 	_ = os.RemoveAll(dir)
 	if err := os.Rename(tmp, dir); err != nil {
@@ -94,14 +113,45 @@ func (c *SkillBundleCache) lockForKey(key string) *sync.Mutex {
 }
 
 func (c *SkillBundleCache) bundlePath(workspaceID string, ref SkillRefData) string {
+	return filepath.Join(c.bundleDir(workspaceID, ref), ".skill-bundle.json")
+}
+
+func (c *SkillBundleCache) bundleDir(workspaceID string, ref SkillRefData) string {
+	return bundleDirForRoot(c.root, workspaceID, ref)
+}
+
+func bundleDirForRoot(root, workspaceID string, ref SkillRefData) string {
 	return filepath.Join(
-		c.root,
+		root,
 		safeCacheSegment(workspaceID),
 		safeCacheSegment(ref.Source),
 		safeCacheSegment(ref.ID),
 		safeCacheSegment(ref.Hash),
-		"bundle.json",
 	)
+}
+
+func (c *SkillBundleCache) loadFromRoot(root, workspaceID string, ref SkillRefData) (SkillData, bool) {
+	dir := bundleDirForRoot(root, workspaceID, ref)
+	data, err := os.ReadFile(filepath.Join(dir, ".skill-bundle.json"))
+	if err != nil {
+		return SkillData{}, false
+	}
+	var bundle SkillData
+	if err := json.Unmarshal(data, &bundle); err != nil || !validateSkillBundle(ref, bundle) {
+		_ = os.RemoveAll(dir)
+		return SkillData{}, false
+	}
+	if _, err := os.Stat(filepath.Join(dir, "SKILL.md")); err != nil {
+		_ = os.RemoveAll(dir)
+		return SkillData{}, false
+	}
+	for _, file := range bundle.Files {
+		if _, err := os.Stat(filepath.Join(dir, file.Path)); err != nil {
+			_ = os.RemoveAll(dir)
+			return SkillData{}, false
+		}
+	}
+	return bundle, true
 }
 
 func validateSkillBundle(ref SkillRefData, bundle SkillData) bool {
@@ -168,6 +218,18 @@ func safeCacheSegment(s string) string {
 	out := b.String()
 	if out == "." || out == ".." {
 		return fmt.Sprintf("_%s", out)
+	}
+	return out
+}
+
+var nonAlphaNum = regexp.MustCompile(`[^a-z0-9]+`)
+
+func sanitizeSkillName(name string) string {
+	s := strings.ToLower(strings.TrimSpace(name))
+	s = nonAlphaNum.ReplaceAllString(s, "-")
+	out := strings.Trim(s, "-")
+	if out == "" {
+		return "skill"
 	}
 	return out
 }

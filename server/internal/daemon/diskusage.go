@@ -46,6 +46,8 @@ type DiskUsageReport struct {
 	WorkspacesRoot         string               `json:"workspaces_root"`
 	GeneratedAt            time.Time            `json:"generated_at"`
 	ArtifactPatterns       []string             `json:"artifact_patterns"`
+	SharedSkillCacheBytes  int64                `json:"shared_skill_cache_bytes"`
+	SharedSkillCacheCount  int                  `json:"shared_skill_cache_count"`
 	Tasks                  []TaskDiskUsage      `json:"tasks"`
 	Workspaces             []WorkspaceDiskUsage `json:"workspaces"`
 	TotalTaskCount         int                  `json:"total_task_count"`
@@ -78,6 +80,8 @@ type AggregateDiskUsageReport struct {
 	GeneratedAt            time.Time       `json:"generated_at"`
 	ArtifactPatterns       []string        `json:"artifact_patterns"`
 	Roots                  []RootDiskUsage `json:"roots"`
+	SharedSkillCacheBytes  int64           `json:"shared_skill_cache_bytes"`
+	SharedSkillCacheCount  int             `json:"shared_skill_cache_count"`
 	TotalTaskCount         int             `json:"total_task_count"`
 	TotalWorkspaceCount    int             `json:"total_workspace_count"`
 	TotalSizeBytes         int64           `json:"total_size_bytes"`
@@ -100,6 +104,8 @@ func ScanDiskUsageRoots(roots []DiskUsageRoot, artifactPatterns []string) (Aggre
 			return agg, err
 		}
 		agg.Roots = append(agg.Roots, RootDiskUsage{Profile: r.Profile, Report: report})
+		agg.SharedSkillCacheBytes += report.SharedSkillCacheBytes
+		agg.SharedSkillCacheCount += report.SharedSkillCacheCount
 		agg.TotalTaskCount += report.TotalTaskCount
 		agg.TotalWorkspaceCount += report.TotalWorkspaceCount
 		agg.TotalSizeBytes += report.TotalSizeBytes
@@ -133,6 +139,7 @@ func ScanDiskUsage(workspacesRoot string, artifactPatterns []string) (DiskUsageR
 
 	patternSet := buildPatternSet(artifactPatterns)
 	report.ArtifactPatterns = sortedKeys(patternSet)
+	report.SharedSkillCacheBytes, report.SharedSkillCacheCount = scanSharedSkillCache(workspacesRoot)
 
 	wsEntries, err := os.ReadDir(workspacesRoot)
 	if err != nil {
@@ -261,6 +268,39 @@ func buildTaskUsage(taskDir, wsID, taskShort string, patternSet map[string]struc
 
 	usage.SizeBytes, usage.ArtifactSizeBytes = taskSize(taskDir, patternSet)
 	return usage
+}
+
+func scanSharedSkillCache(workspacesRoot string) (bytes int64, bundleCount int) {
+	if workspacesRoot == "" {
+		return 0, 0
+	}
+	cacheRoot := filepath.Join(workspacesRoot, ".skill-cache")
+	_ = filepath.WalkDir(cacheRoot, func(path string, entry os.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		if entry.Type()&os.ModeSymlink != 0 {
+			return nil
+		}
+		if entry.IsDir() {
+			if entry.Name() == ".git" {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		info, infoErr := entry.Info()
+		if infoErr != nil {
+			return nil
+		}
+		if info.Mode().IsRegular() {
+			bytes += info.Size()
+			if entry.Name() == ".skill-bundle.json" {
+				bundleCount++
+			}
+		}
+		return nil
+	})
+	return bytes, bundleCount
 }
 
 // taskSize walks taskDir and returns (totalBytes, artifactBytes). Both honor

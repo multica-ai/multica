@@ -432,6 +432,13 @@ func ensureSkillFrontmatter(content, slug, description string) string {
 	return content[:fmStart] + "name: " + slug + "\n" + content[fmStart:]
 }
 
+// EnsureSkillFrontmatter exposes the SKILL.md normalization logic to other
+// daemon packages that need to materialize the same on-disk layout as the
+// provider prep path.
+func EnsureSkillFrontmatter(content, slug, description string) string {
+	return ensureSkillFrontmatter(content, slug, description)
+}
+
 // synthesizeFrontmatter produces a SKILL.md body with a YAML frontmatter block
 // carrying at least `name` and (when non-empty) `description`. The description
 // is always escaped as a double-quoted YAML string so values containing colons,

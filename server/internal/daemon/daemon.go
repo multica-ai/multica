@@ -247,7 +247,7 @@ type profileLaunchSpec struct {
 // New creates a new Daemon instance.
 func New(cfg Config, logger *slog.Logger) *Daemon {
 	cacheRoot := filepath.Join(cfg.WorkspacesRoot, ".repos")
-	skillCacheRoot := filepath.Join(cfg.WorkspacesRoot, ".skill-cache", "v1")
+	skillCacheRoot := filepath.Join(cfg.WorkspacesRoot, ".skill-cache", "v2")
 	client := NewClient(cfg.ServerBaseURL)
 	// Tag every daemon HTTP request with the daemon's CLI version so the
 	// server can split logs/metrics by client version (parallel to the CLI).
@@ -802,6 +802,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 	go d.taskWakeupLoop(ctx, taskWakeups)
 	go d.heartbeatLoop(ctx)
 	go d.gcLoop(ctx)
+	go d.diskPressureLoop(ctx)
 	go d.autoUpdateLoop(ctx)
 	go d.tokenRenewalLoop(ctx)
 
@@ -811,7 +812,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 	// readiness wait blocks on, so success is reported only after startup
 	// actually completed, not merely because the health port came up.
 	d.ready.Store(true)
-	d.logger.Debug("background loops launched (workspace-sync, task-wakeup, heartbeat, gc, auto-update, token-renewal); health now reporting ready")
+	d.logger.Debug("background loops launched (workspace-sync, task-wakeup, heartbeat, gc, disk-pressure, auto-update, token-renewal); health now reporting ready")
 	err = d.pollLoop(ctx, taskWakeups)
 	d.logger.Debug("daemon main loop returning", "error", err)
 	return err
@@ -3509,6 +3510,10 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	stopPrepareLease := d.startTaskPrepareLeaseExtender(ctx, task, taskLog)
 	defer stopPrepareLease()
 
+	if err := d.guardDiskPressure(ctx, true); err != nil {
+		return TaskResult{}, err
+	}
+
 	if err := d.ensureTaskSkillBundles(ctx, &task); err != nil {
 		return TaskResult{}, err
 	}
@@ -3538,7 +3543,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		AgentID:                          agentID,
 		AgentName:                        agentName,
 		AgentInstructions:                instructions,
-		AgentSkills:                      convertSkillsForEnv(skills),
+		AgentSkills:                      convertSkillsForEnv(task.WorkspaceID, skills, d.skillCache),
 		Repos:                            convertReposForEnv(task.Repos),
 		ProjectID:                        task.ProjectID,
 		ProjectTitle:                     task.ProjectTitle,
@@ -4675,16 +4680,21 @@ func truncateLog(s string, maxLen int) string {
 	return s[:maxLen] + "…"
 }
 
-func convertSkillsForEnv(skills []SkillData) []execenv.SkillContextForEnv {
+func convertSkillsForEnv(workspaceID string, skills []SkillData, skillCache *SkillBundleCache) []execenv.SkillContextForEnv {
 	if len(skills) == 0 {
 		return nil
 	}
 	result := make([]execenv.SkillContextForEnv, len(skills))
 	for i, s := range skills {
+		cacheDir := ""
+		if skillCache != nil {
+			cacheDir = skillCache.bundleDir(workspaceID, skillRefFromBundle(s))
+		}
 		result[i] = execenv.SkillContextForEnv{
 			Name:        s.Name,
 			Description: s.Description,
 			Content:     s.Content,
+			CacheDir:    cacheDir,
 		}
 		for _, f := range s.Files {
 			result[i].Files = append(result[i].Files, execenv.SkillFileContextForEnv{

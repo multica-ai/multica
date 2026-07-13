@@ -2967,6 +2967,68 @@ func TestPrepareCodexSeedsUserSkills(t *testing.T) {
 	}
 }
 
+// TestPrepareCodexLinksWorkspaceSkillCache proves the new shared-delivery path:
+// workspace-assigned skills should land in CODEX_HOME as links to the shared
+// bundle cache instead of full copies.
+func TestPrepareCodexLinksWorkspaceSkillCache(t *testing.T) {
+	// Cannot use t.Parallel() with t.Setenv.
+
+	sharedHome := t.TempDir()
+	t.Setenv("CODEX_HOME", sharedHome)
+
+	cacheDir := filepath.Join(t.TempDir(), "skill-cache", "ws-1", "workspace", "skill-1", "sha256-good")
+	if err := os.MkdirAll(filepath.Join(cacheDir, "docs"), 0o755); err != nil {
+		t.Fatalf("seed cache dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(cacheDir, "SKILL.md"), []byte("body"), 0o644); err != nil {
+		t.Fatalf("seed cache SKILL.md: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(cacheDir, "docs", "guide.md"), []byte("guide"), 0o644); err != nil {
+		t.Fatalf("seed cache support file: %v", err)
+	}
+
+	env, err := Prepare(PrepareParams{
+		WorkspacesRoot: t.TempDir(),
+		WorkspaceID:    "ws-codex-cache-link",
+		TaskID:         "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+		AgentName:      "Codex Agent",
+		Provider:       "codex",
+		Task: TaskContextForEnv{
+			IssueID: "codex-cache-link-test",
+			AgentSkills: []SkillContextForEnv{
+				{
+					Name:        "Writing",
+					Description: "Shared cache skill",
+					Content:     "body",
+					Files:       []SkillFileContextForEnv{{Path: "docs/guide.md", Content: "guide"}},
+					CacheDir:    cacheDir,
+				},
+			},
+		},
+	}, testLogger())
+	if err != nil {
+		t.Fatalf("Prepare failed: %v", err)
+	}
+	defer env.Cleanup(true)
+
+	dst := filepath.Join(env.CodexHome, "skills", "writing")
+	assertDirLinkTarget(t, dst, cacheDir)
+	data, err := os.ReadFile(filepath.Join(dst, "SKILL.md"))
+	if err != nil {
+		t.Fatalf("linked SKILL.md missing: %v", err)
+	}
+	if string(data) != "body" {
+		t.Fatalf("linked SKILL.md = %q, want %q", data, "body")
+	}
+	support, err := os.ReadFile(filepath.Join(dst, "docs", "guide.md"))
+	if err != nil {
+		t.Fatalf("linked support file missing: %v", err)
+	}
+	if string(support) != "guide" {
+		t.Fatalf("linked support file = %q, want %q", support, "guide")
+	}
+}
+
 // TestPrepareCodexWorkspaceSkillBeatsUserSkillOnConflict checks that when a
 // workspace-assigned skill shares a sanitized name with a user-installed
 // skill, the workspace version fully replaces the user version (rather than

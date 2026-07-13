@@ -976,9 +976,10 @@ func printAggregateDiskUsage(w io.Writer, agg daemon.AggregateDiskUsageReport, b
 			printDiskUsageTaskTable(w, root.Report)
 		}
 	}
-	fmt.Fprintf(w, "\nGrand total: %s across %d task(s) in %d root(s); %s reclaimable as artifacts (%.1f%%).\n",
+	fmt.Fprintf(w, "\nGrand total: %s across %d task(s) in %d root(s); %s reclaimable as artifacts (%.1f%%). Shared skill cache: %s across %d bundle(s).\n",
 		formatBytes(agg.TotalSizeBytes), agg.TotalTaskCount, len(agg.Roots),
-		formatBytes(agg.TotalArtifactSizeBytes), agg.TotalArtifactRatio*100)
+		formatBytes(agg.TotalArtifactSizeBytes), agg.TotalArtifactRatio*100,
+		formatBytes(agg.SharedSkillCacheBytes), agg.SharedSkillCacheCount)
 }
 
 func printDiskUsageTaskTable(w io.Writer, report daemon.DiskUsageReport) {
@@ -1002,6 +1003,10 @@ func printDiskUsageTaskTable(w io.Writer, report daemon.DiskUsageReport) {
 		})
 	}
 	cli.PrintTable(w, []string{"PATH", "KIND", "STATUS", "AGE", "SIZE", "ARTIFACTS"}, rows)
+	if report.SharedSkillCacheBytes > 0 {
+		fmt.Fprintf(w, "\nShared skill cache: %s across %d bundle(s).\n",
+			formatBytes(report.SharedSkillCacheBytes), report.SharedSkillCacheCount)
+	}
 
 	if len(report.Tasks) < report.TotalTaskCount {
 		// Report-wide totals stay anchored to the full scan; the displayed
@@ -1040,6 +1045,10 @@ func printDiskUsageWorkspaceTable(w io.Writer, report daemon.DiskUsageReport) {
 		})
 	}
 	cli.PrintTable(w, []string{"WORKSPACE", "TASKS", "SIZE", "ARTIFACTS", "ARTIFACT %", "OLDEST"}, rows)
+	if report.SharedSkillCacheBytes > 0 {
+		fmt.Fprintf(w, "\nShared skill cache: %s across %d bundle(s).\n",
+			formatBytes(report.SharedSkillCacheBytes), report.SharedSkillCacheCount)
+	}
 
 	if len(report.Workspaces) < report.TotalWorkspaceCount {
 		fmt.Fprintf(w, "\nShowing top %d of %d workspace(s). Displayed: %s (%s artifacts). Scan total: %s (%s artifacts, %.1f%% reclaimable).\n",

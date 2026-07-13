@@ -59,6 +59,8 @@ const (
 	DefaultGCTTL                   = 24 * time.Hour // 1 day — AI-coding issues rarely stay open long
 	DefaultGCOrphanTTL             = 72 * time.Hour // 3 days — orphans with no meta (crashes, pre-GC leftovers)
 	DefaultGCArtifactTTL           = 12 * time.Hour // 12h — drop regenerable artifacts on completed but still-open issues
+	DefaultDiskPressureCheckInterval = 5 * time.Minute
+	DefaultDiskPressureMinFreeBytes  = int64(5 << 30)
 	DefaultAutoUpdateCheckInterval = 6 * time.Hour  // how often the daemon polls GitHub for a newer CLI release
 )
 
@@ -91,6 +93,8 @@ type Config struct {
 	GCOrphanTTL                    time.Duration         // clean orphan dirs with no meta, or dirs whose issue gc-check returns 404, once they exceed this age (default: 72h). The 404 path uses the same TTL — a scoped-down token can't instantly wipe live workspaces.
 	GCArtifactTTL                  time.Duration         // when a task has been completed for at least this long but its issue is still open, drop regenerable artifacts (default: 12h, set 0 to disable)
 	GCArtifactPatterns             []string              // basename patterns whose subtrees are removed during artifact cleanup (default: node_modules, .next, .turbo)
+	DiskPressureCheckInterval      time.Duration         // how often the daemon rechecks free disk space and runs GC early when pressure is high
+	DiskPressureMinFreeBytes       int64                 // minimum free bytes before pressure guard triggers GC
 	AutoUpdateEnabled              bool                  // periodically check for a newer CLI release and self-update when idle (default: true on Multica Cloud, false on self-host)
 	AutoUpdateCheckInterval        time.Duration         // how often the auto-update loop polls for a new release (default: 6h)
 	PollInterval                   time.Duration
@@ -475,6 +479,14 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		return Config{}, err
 	}
 	gcArtifactPatterns := patternsFromEnv("MULTICA_GC_ARTIFACT_PATTERNS", DefaultGCArtifactPatterns)
+	diskPressureCheckInterval, err := durationFromEnv("MULTICA_DISK_PRESSURE_CHECK_INTERVAL", DefaultDiskPressureCheckInterval)
+	if err != nil {
+		return Config{}, err
+	}
+	diskPressureMinFreeBytes, err := int64FromEnv("MULTICA_DISK_PRESSURE_MIN_FREE_BYTES", DefaultDiskPressureMinFreeBytes)
+	if err != nil {
+		return Config{}, err
+	}
 
 	// Auto-update config: default -> env override -> CLI override.
 	//
@@ -521,6 +533,8 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		GCOrphanTTL:                    gcOrphanTTL,
 		GCArtifactTTL:                  gcArtifactTTL,
 		GCArtifactPatterns:             gcArtifactPatterns,
+		DiskPressureCheckInterval:      diskPressureCheckInterval,
+		DiskPressureMinFreeBytes:       diskPressureMinFreeBytes,
 		AutoUpdateEnabled:              autoUpdateEnabled,
 		AutoUpdateCheckInterval:        autoUpdateInterval,
 		HealthPort:                     healthPort,
