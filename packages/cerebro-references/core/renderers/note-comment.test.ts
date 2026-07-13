@@ -35,7 +35,7 @@ describe("note_comment renderer", () => {
   it("builds a workspace-local URL to the exact note comment", () => {
     vi.stubGlobal("window", { location: { pathname: "/acme/issues/issue-1" } });
     expect(resolveNoteCommentUrl(makeRef())).toBe(
-      "/acme/notes?note=note-1&comment=comment-1",
+      "/acme/notes/note-1?comment=comment-1",
     );
     vi.unstubAllGlobals();
   });
@@ -44,7 +44,7 @@ describe("note_comment renderer", () => {
     vi.stubGlobal("window", { location: { pathname: "/acme/inbox" } });
     expect(
       resolveNoteCommentUrl(makeRef({ metadata: { note_id: "note-2" }, ref_id: "comment-2" })),
-    ).toBe("/acme/notes?note=note-2&comment=comment-2");
+    ).toBe("/acme/notes/note-2?comment=comment-2");
     vi.unstubAllGlobals();
   });
 
@@ -54,7 +54,7 @@ describe("note_comment renderer", () => {
     expect(renderer.formatTitle(makeRef())).toBe("Source note comment");
     expect(renderer.formatBadge(makeRef())).toBe("Note comment");
     expect(renderer.resolveUrl(makeRef())).toBe(
-      "/acme/notes?note=note-1&comment=comment-1",
+      "/acme/notes/note-1?comment=comment-1",
     );
     vi.unstubAllGlobals();
   });

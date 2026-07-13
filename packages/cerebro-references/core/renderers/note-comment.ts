@@ -20,8 +20,8 @@ export function resolveNoteCommentUrl(ref: IssueReference): string | null {
     workspace = window.location.pathname.split("/").filter(Boolean)[0] ?? "";
   }
   if (!workspace) return null;
-  const query = new URLSearchParams({ note: noteId, comment: commentId });
-  return `/${encodeURIComponent(workspace)}/notes?${query.toString()}`;
+  const query = new URLSearchParams({ comment: commentId });
+  return `/${encodeURIComponent(workspace)}/notes/${encodeURIComponent(noteId)}?${query.toString()}`;
 }
 
 registerObjectRenderer({
