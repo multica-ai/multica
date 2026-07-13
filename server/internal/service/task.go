@@ -1782,6 +1782,19 @@ func (s *TaskService) ClaimTasksForRuntimes(ctx context.Context, runtimeIDs []pg
 	// 4. One candidate SELECT across the non-empty set.
 	candidates, err := s.Queries.ListQueuedClaimCandidatesByRuntimes(ctx, nonEmpty)
 	if err != nil {
+		// Steps 2/6 commit reclaimed/claimed tasks in their own transactions,
+		// so `claimed` may already hold tasks dispatched server-side. Dropping
+		// them with a 500 makes the daemon HTTP-fall-back and claim a SECOND
+		// batch into the same free slots (the first batch then waits for stale
+		// reclaim) — the same double-claim this PR set out to remove
+		// (MUL-4257). Prefer partial success: hand back what committed so the
+		// handler finalizes and returns it; the errored candidates stay queued
+		// for the next poll.
+		if len(claimed) > 0 {
+			slog.Error("batch claim: candidate query failed after partial success; returning claimed tasks to avoid loss",
+				"error", err, "claimed", len(claimed))
+			return claimed, nil
+		}
 		return nil, fmt.Errorf("list queued claim candidates: %w", err)
 	}
 
@@ -1816,6 +1829,16 @@ func (s *TaskService) ClaimTasksForRuntimes(ctx context.Context, runtimeIDs []pg
 
 		task, err := s.ClaimTask(ctx, candidates[i].AgentID)
 		if err != nil {
+			// Each ClaimTask commits in its own transaction, so earlier
+			// iterations (and step-2 reclaims) are already dispatched
+			// server-side. Returning nil here would drop them and force the
+			// daemon to double-claim via HTTP fallback (MUL-4257). Return the
+			// partial batch instead; the failed agent's task stays queued.
+			if len(claimed) > 0 {
+				slog.Error("batch claim: claim task failed after partial success; returning claimed tasks to avoid loss",
+					"error", err, "claimed", len(claimed))
+				return claimed, nil
+			}
 			return nil, fmt.Errorf("claim task: %w", err)
 		}
 		if task == nil {
