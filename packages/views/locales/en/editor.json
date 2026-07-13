@@ -56,12 +56,16 @@
   "mention": {
     "group_users": "Users",
     "group_issues": "Issues",
+    "group_skills": "Skills",
     "all_members": "All members",
     "searching": "Searching...",
     "no_results": "No results",
     "group_current": "Current page",
     "group_recent": "Recently viewed",
-    "group_search": "Search results"
+    "group_search": "Search results",
+    "skill_no_agents": "No agents assigned",
+    "skill_bound_to": "Bound to",
+    "skill_bound_to_count": "Bound to ({{count}})"
   },
   "slash_command": {
     "no_skills_configured": "No skills configured",

@@ -56,12 +56,16 @@
   "mention": {
     "group_users": "ユーザー",
     "group_issues": "イシュー",
+    "group_skills": "スキル",
     "all_members": "すべてのメンバー",
     "searching": "検索中...",
     "no_results": "結果なし",
     "group_current": "現在のページ",
     "group_recent": "最近見た項目",
-    "group_search": "検索結果"
+    "group_search": "検索結果",
+    "skill_no_agents": "割り当てられたエージェントなし",
+    "skill_bound_to": "バインド先",
+    "skill_bound_to_count": "バインド先 ({{count}})"
   },
   "code_block": {
     "copy_code": "コードをコピー",

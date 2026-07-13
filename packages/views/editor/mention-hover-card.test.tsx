@@ -23,6 +23,19 @@ vi.mock("../squads/components/squad-profile-card", () => ({
     <span data-testid="squad-profile-card">{squadId}</span>
   ),
 }));
+vi.mock("./skill-profile-card", () => ({
+  SkillProfileCard: ({
+    skillId,
+    skillName,
+  }: {
+    skillId: string;
+    skillName: string;
+  }) => (
+    <span data-testid="skill-profile-card">
+      {skillId}:{skillName}
+    </span>
+  ),
+}));
 
 import { MentionHoverCard } from "./mention-hover-card";
 
@@ -77,5 +90,30 @@ describe("MentionHoverCard", () => {
       expect(screen.getByText("All members")).toBeInTheDocument();
     });
     expect(screen.queryByTestId("agent-profile-card")).not.toBeInTheDocument();
+  });
+
+  it("renders the SkillProfileCard for a skill mention", async () => {
+    await openHover(
+      <MentionHoverCard type="skill" id="sk-1" label="code-review">
+        <span>chip</span>
+      </MentionHoverCard>,
+    );
+    const card = await waitFor(() => screen.getByTestId("skill-profile-card"));
+    expect(card.textContent).toBe("sk-1:code-review");
+  });
+
+  it("passes description to SkillProfileCard", async () => {
+    await openHover(
+      <MentionHoverCard
+        type="skill"
+        id="sk-1"
+        label="code-review"
+        description="Automated reviews"
+      >
+        <span>chip</span>
+      </MentionHoverCard>,
+    );
+    const card = await waitFor(() => screen.getByTestId("skill-profile-card"));
+    expect(card.textContent).toBe("sk-1:code-review");
   });
 });

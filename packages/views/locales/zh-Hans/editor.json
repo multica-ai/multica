@@ -56,12 +56,16 @@
   "mention": {
     "group_users": "用户",
     "group_issues": "Issues",
+    "group_skills": "技能",
     "all_members": "所有成员",
     "searching": "搜索中...",
     "no_results": "无结果",
     "group_current": "当前页面",
     "group_recent": "最近浏览",
-    "group_search": "搜索结果"
+    "group_search": "搜索结果",
+    "skill_no_agents": "未分配 Agent",
+    "skill_bound_to": "绑定至",
+    "skill_bound_to_count": "绑定至 ({{count}})"
   },
   "slash_command": {
     "no_skills_configured": "暂无配置的技能",
