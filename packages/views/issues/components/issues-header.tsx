@@ -923,10 +923,20 @@ export function IssueDisplayControls({
   const counts = useIssueCounts(scopedIssues);
   const showDateFilter = !!onDateFilterChange;
 
+  // Only count filters whose definition is still active — a filter pinned to
+  // an archived definition is stripped by the surface controller and must
+  // not light the badge for an effect that no longer exists.
+  const effectivePropertyFilters = useMemo(() => {
+    const activeIds = new Set(filterableProperties.map((p) => p.id));
+    return Object.fromEntries(
+      Object.entries(propertyFilters).filter(([id, selected]) => selected.length > 0 && activeIds.has(id)),
+    );
+  }, [filterableProperties, propertyFilters]);
+
   const activeFilterCount = getActiveFilterCount({
     statusFilters,
     priorityFilters,
-    propertyFilters,
+    propertyFilters: effectivePropertyFilters,
     assigneeFilters,
     includeNoAssignee,
     creatorFilters,

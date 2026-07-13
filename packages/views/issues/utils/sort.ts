@@ -14,12 +14,23 @@ export function sortIssues(
 ): Issue[] {
   // `property:<id>` sorts by the custom-property value. Number values sort
   // numerically; date values are date-only "YYYY-MM-DD" strings, which sort
-  // correctly lexically. Issues without a value always sort last regardless
-  // of direction (matching start_date/due_date semantics).
+  // correctly lexically. Direction applies to the VALUE comparison only —
+  // issues without a value sort last in both directions (a whole-array
+  // reverse would flip them to the front on desc).
   const propertyId = propertyIdFromViewKey(field);
   if (propertyId) {
-    const sorted = issues.toSorted((a, b) => comparePropertyValues(a, b, propertyId));
-    return direction === "desc" ? sorted.reverse() : sorted;
+    const dir = direction === "desc" ? -1 : 1;
+    return issues.toSorted((a, b) => {
+      const av = a.properties?.[propertyId];
+      const bv = b.properties?.[propertyId];
+      const aMissing = av === undefined || Array.isArray(av);
+      const bMissing = bv === undefined || Array.isArray(bv);
+      if (aMissing && bMissing) return 0;
+      if (aMissing) return 1;
+      if (bMissing) return -1;
+      if (typeof av === "number" && typeof bv === "number") return dir * (av - bv);
+      return dir * String(av).localeCompare(String(bv));
+    });
   }
 
   const sorted = issues.toSorted((a, b) => {
@@ -57,16 +68,4 @@ export function sortIssues(
     }
   });
   return direction === "desc" ? sorted.reverse() : sorted;
-}
-
-function comparePropertyValues(a: Issue, b: Issue, propertyId: string): number {
-  const av = a.properties?.[propertyId];
-  const bv = b.properties?.[propertyId];
-  const aMissing = av === undefined || Array.isArray(av);
-  const bMissing = bv === undefined || Array.isArray(bv);
-  if (aMissing && bMissing) return 0;
-  if (aMissing) return 1;
-  if (bMissing) return -1;
-  if (typeof av === "number" && typeof bv === "number") return av - bv;
-  return String(av).localeCompare(String(bv));
 }

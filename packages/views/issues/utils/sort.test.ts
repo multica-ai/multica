@@ -22,13 +22,13 @@ describe("sortIssues property sorts", () => {
     expect(sorted.map((i) => i.id)).toEqual(["small", "big", "none"]);
   });
 
-  it("desc reverses values but keeps semantics", () => {
+  it("desc reverses values but keeps missing values last", () => {
     const sorted = sortIssues(
-      [issueWith("small", 2), issueWith("big", 10)],
+      [issueWith("none"), issueWith("small", 2), issueWith("big", 10)],
       `property:${propertyId}`,
       "desc",
     );
-    expect(sorted.map((i) => i.id)).toEqual(["big", "small"]);
+    expect(sorted.map((i) => i.id)).toEqual(["big", "small", "none"]);
   });
 
   it("sorts date-only strings chronologically via lexical compare", () => {

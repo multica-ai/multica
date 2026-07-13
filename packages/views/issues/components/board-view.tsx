@@ -193,6 +193,13 @@ export function BoardView({
   // deleted, other workspace) falls back to status columns.
   const grouping: IssueGrouping =
     groupingPropertyId && !groupingProperty ? "status" : storeGrouping;
+  const groupingOptionIds = useMemo(
+    () =>
+      groupingProperty
+        ? new Set((groupingProperty.config.options ?? []).map((option) => option.id))
+        : undefined,
+    [groupingProperty],
+  );
   const setIssuePropertyMutation = useSetIssueProperty();
   const unsetIssuePropertyMutation = useUnsetIssueProperty();
   const applyPropertyGroupValue = useCallback(
@@ -303,13 +310,13 @@ export function BoardView({
     recentlyMovedRef,
     settleVersion,
     beginSettle,
-  } = useDragSettle(() => buildColumns(groupedIssues, groups, grouping));
+  } = useDragSettle(() => buildColumns(groupedIssues, groups, grouping, groupingOptionIds));
 
   useEffect(() => {
     if (!isDraggingRef.current && !isSettlingRef.current) {
-      setColumns(buildColumns(groupedIssues, groups, grouping));
+      setColumns(buildColumns(groupedIssues, groups, grouping, groupingOptionIds));
     }
-  }, [groupedIssues, groups, grouping, settleVersion, setColumns, isDraggingRef, isSettlingRef]);
+  }, [groupedIssues, groups, grouping, groupingOptionIds, settleVersion, setColumns, isDraggingRef, isSettlingRef]);
 
   // --- Issue map ---
   // Frozen during drag so BoardColumn/DraggableBoardCard props stay
@@ -374,7 +381,7 @@ export function BoardView({
       setActiveIssue(null);
 
       const resetColumns = () =>
-        setColumns(buildColumns(groupedIssues, groups, grouping));
+        setColumns(buildColumns(groupedIssues, groups, grouping, groupingOptionIds));
 
       if (!over) {
         resetColumns();
@@ -469,7 +476,7 @@ export function BoardView({
       onMoveIssue(activeId, getMoveUpdates(finalGroup, newPosition), beginSettle());
       applyPropertyGroupValue(finalGroup, activeId);
     },
-    [groupedIssues, groups, grouping, onMoveIssue, groupIds, groupMap, sortBy, beginSettle, columnsRef, isDraggingRef, setColumns, applyPropertyGroupValue],
+    [groupedIssues, groups, grouping, groupingOptionIds, onMoveIssue, groupIds, groupMap, sortBy, beginSettle, columnsRef, isDraggingRef, setColumns, applyPropertyGroupValue],
   );
 
   return (

@@ -42,12 +42,24 @@ export function assigneeGroupId(
   return type && id ? `assignee:${type}:${id}` : UNASSIGNED_GROUP_ID;
 }
 
-export function getIssueGroupId(issue: Issue, grouping: IssueGrouping): string {
+export function getIssueGroupId(
+  issue: Issue,
+  grouping: IssueGrouping,
+  knownOptionIds?: ReadonlySet<string>,
+): string {
   if (grouping === "status") return statusGroupId(issue.status);
   const propertyId = propertyIdFromViewKey(grouping);
   if (propertyId) {
     const value = issue.properties?.[propertyId];
-    return propertyGroupId(propertyId, typeof value === "string" ? value : null);
+    let optionId = typeof value === "string" ? value : null;
+    // A value referencing an option no longer in the definition (removed
+    // before the in-use guard existed, or by a newer server) must bucket
+    // into the No-value column — an unmatched column id would silently drop
+    // the issue from the board.
+    if (optionId !== null && knownOptionIds && !knownOptionIds.has(optionId)) {
+      optionId = null;
+    }
+    return propertyGroupId(propertyId, optionId);
   }
   return assigneeGroupId(issue.assignee_type, issue.assignee_id);
 }
@@ -56,11 +68,12 @@ export function buildColumns(
   issues: Issue[],
   groups: BoardColumnGroup[],
   grouping: IssueGrouping,
+  knownOptionIds?: ReadonlySet<string>,
 ): Record<string, string[]> {
   const cols: Record<string, string[]> = {};
   for (const group of groups) cols[group.id] = [];
   for (const issue of issues) {
-    const gid = getIssueGroupId(issue, grouping);
+    const gid = getIssueGroupId(issue, grouping, knownOptionIds);
     if (cols[gid]) cols[gid].push(issue.id);
   }
   return cols;

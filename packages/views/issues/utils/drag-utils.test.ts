@@ -94,6 +94,18 @@ describe("property grouping", () => {
     expect(issueMatchesGroup(withoutValue, noneColumn)).toBe(true);
   });
 
+  it("unknown option values bucket into the none column when the catalog is known", () => {
+    const stale = { id: "C", properties: { [propertyId]: "opt-deleted" } } as unknown as Issue;
+    const known = new Set(["opt-staging"]);
+    expect(getIssueGroupId(stale, `property:${propertyId}`, known)).toBe(
+      propertyGroupId(propertyId, null),
+    );
+    // Without the catalog, the raw bucket is preserved (caller may still map it).
+    expect(getIssueGroupId(stale, `property:${propertyId}`)).toBe(
+      propertyGroupId(propertyId, "opt-deleted"),
+    );
+  });
+
   it("getMoveUpdates for property columns only carries position", () => {
     expect(getMoveUpdates({ id: "c1", title: "Staging", propertyId, propertyOptionId: "opt-staging" }, 5)).toEqual({ position: 5 });
   });

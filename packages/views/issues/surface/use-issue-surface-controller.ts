@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo } from "react";
+import { useQuery } from "@tanstack/react-query";
 import type { QueryKey } from "@tanstack/react-query";
 import type {
   Issue,
@@ -22,6 +23,7 @@ import {
 import type { IssueScope } from "@multica/core/issues/surface/scope";
 import type { IssueDateFilter, SortField } from "@multica/core/issues/stores/view-store";
 import { sortIssues } from "../utils/sort";
+import { propertyListOptions } from "@multica/core/properties";
 import { propertyIdFromViewKey } from "@multica/core/issues/stores/view-store";
 import { useViewStore } from "@multica/core/issues/stores/view-store-context";
 import type { IssueFilters } from "../utils/filter";
@@ -158,10 +160,29 @@ export function useIssueSurfaceController({
     () => issueDateFilterToApiParams(dateFilter),
     [dateFilter],
   );
+  // Active property catalog. Persisted view state can outlive definitions
+  // (archive/delete): filters keyed by a non-active definition are stripped
+  // before they reach the predicates, and a sort on a non-active definition
+  // degrades to manual order — matching what the header already shows.
+  const { data: workspaceProperties = [] } = useQuery(propertyListOptions(wsId));
+  const activePropertyIds = useMemo(
+    () => new Set(workspaceProperties.map((p) => p.id)),
+    [workspaceProperties],
+  );
+  const effectivePropertyFilters = useMemo(() => {
+    const entries = Object.entries(propertyFilters).filter(
+      ([propertyId, selected]) => selected.length > 0 && activePropertyIds.has(propertyId),
+    );
+    if (entries.length === Object.keys(propertyFilters).length) return propertyFilters;
+    return Object.fromEntries(entries);
+  }, [activePropertyIds, propertyFilters]);
+
   // Custom-property sorts (`property:<id>`) are client-side only — the
   // server sort enum is fixed, so the query falls back to position order and
   // the surface lists re-sort below via sortIssues.
-  const propertySortId = propertyIdFromViewKey(sortBy);
+  const rawPropertySortId = propertyIdFromViewKey(sortBy);
+  const propertySortId =
+    rawPropertySortId && activePropertyIds.has(rawPropertySortId) ? rawPropertySortId : null;
   const sort = useMemo<IssueSortParam>(
     () => ({
       sort_by: propertySortId
@@ -208,7 +229,7 @@ export function useIssueSurfaceController({
     projectFilters: viewProjectFilters,
     includeNoProject: viewIncludeNoProject,
     labelFilters,
-    propertyFilters,
+    propertyFilters: effectivePropertyFilters,
     agentRunningFilter,
     showSubIssues,
     loadProjects:
@@ -225,19 +246,19 @@ export function useIssueSurfaceController({
   const propertySortedIssues = useMemo(
     () =>
       propertySortId
-        ? sortIssues(data.issues, sortBy, sortDirection)
+        ? sortIssues(data.issues, `property:${propertySortId}`, sortDirection)
         : data.issues,
-    [data.issues, propertySortId, sortBy, sortDirection],
+    [data.issues, propertySortId, sortDirection],
   );
   const propertySortedAssigneeGroups = useMemo(
     () =>
       propertySortId && data.assigneeGroups
         ? data.assigneeGroups.map((group) => ({
             ...group,
-            issues: sortIssues(group.issues, sortBy, sortDirection),
+            issues: sortIssues(group.issues, `property:${propertySortId}`, sortDirection),
           }))
         : data.assigneeGroups,
-    [data.assigneeGroups, propertySortId, sortBy, sortDirection],
+    [data.assigneeGroups, propertySortId, sortDirection],
   );
 
   return {
