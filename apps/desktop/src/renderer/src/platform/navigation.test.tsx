@@ -2,41 +2,36 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 import { render } from "@testing-library/react";
 import { useEffect } from "react";
 
-// Shared in-memory state that the mocked tab store reads / mutates. The test
-// records every method call so we can assert openInNewTab does NOT activate
-// the new tab (i.e. setActiveTab is never invoked on the same-workspace path).
+// The active tab's live router now lives in the tab runtime registry, not the
+// store. A single shared mock router stands in for it — the mocked store's
+// active tab and the mocked registry's getActiveRouter both point at it, which
+// mirrors the production invariant that they are the same instance.
 type MockRouter = {
   state: { location: { pathname: string; search: string; hash: string } };
   navigate: ReturnType<typeof vi.fn>;
+  subscribe: () => () => void;
 };
 
-type MockTab = {
-  id: string;
-  path: string;
-  pinned: boolean;
-  router: MockRouter;
-};
-
-function makeMockRouter(pathname: string, search = "", hash = ""): MockRouter {
-  return {
-    state: { location: { pathname, search, hash } },
+const active = vi.hoisted(() => ({
+  router: {
+    state: { location: { pathname: "/acme/issues", search: "", hash: "" } },
     navigate: vi.fn(),
-  };
+    subscribe: () => () => {},
+  } as MockRouter,
+}));
+
+function setActiveLocation(pathname: string, search = "", hash = "") {
+  active.router.state.location = { pathname, search, hash };
 }
+
+type MockTab = { id: string; path: string; pinned: boolean };
 
 const state = vi.hoisted(() => ({
   activeWorkspaceSlug: "acme" as string | null,
   byWorkspace: {
     acme: {
       activeTabId: "tA",
-      tabs: [
-        {
-          id: "tA",
-          path: "/acme/issues",
-          pinned: false,
-          router: makeMockRouter("/acme/issues"),
-        },
-      ] as MockTab[],
+      tabs: [{ id: "tA", path: "/acme/issues", pinned: false }] as MockTab[],
     },
   } as Record<string, { activeTabId: string; tabs: MockTab[] }>,
   openTab: vi.fn<(path: string, title?: string, icon?: string) => string>(),
@@ -74,16 +69,19 @@ vi.mock("@/stores/tab-store", () => {
       ? (state.byWorkspace[state.activeWorkspaceSlug]?.activeTabId ?? null)
       : null,
   });
-  const useActiveTabRouter = () => null;
   const resolveRouteIcon = () => "File";
   return {
     useTabStore,
     getActiveTab,
     useActiveTabIdentity,
-    useActiveTabRouter,
     resolveRouteIcon,
   };
 });
+
+vi.mock("./tab-runtime", () => ({
+  tabRuntimeRegistry: { getActiveRouter: () => active.router },
+  useActiveTabRouter: () => active.router,
+}));
 
 vi.mock("@/stores/window-overlay-store", () => ({
   useWindowOverlayStore: Object.assign(
@@ -114,16 +112,11 @@ beforeEach(() => {
   state.byWorkspace = {
     acme: {
       activeTabId: "tA",
-      tabs: [
-        {
-          id: "tA",
-          path: "/acme/issues",
-          pinned: false,
-          router: makeMockRouter("/acme/issues"),
-        },
-      ],
+      tabs: [{ id: "tA", path: "/acme/issues", pinned: false }],
     },
   };
+  active.router.navigate.mockReset();
+  setActiveLocation("/acme/issues");
   Object.defineProperty(window, "desktopAPI", {
     configurable: true,
     value: {
@@ -202,12 +195,8 @@ describe("DesktopNavigationProvider.openInNewTab", () => {
 
 describe("DesktopNavigationProvider.push with pinned active tab", () => {
   function pinActive(pathname: string) {
-    state.byWorkspace.acme.tabs[0] = {
-      id: "tA",
-      path: pathname,
-      pinned: true,
-      router: makeMockRouter(pathname),
-    };
+    state.byWorkspace.acme.tabs[0] = { id: "tA", path: pathname, pinned: true };
+    setActiveLocation(pathname);
   }
 
   it("redirects push to a new foreground tab when pathname differs", () => {
@@ -265,13 +254,12 @@ describe("DesktopNavigationProvider.push with pinned active tab", () => {
 
 describe("DesktopNavigationProvider.push duplicate path guard", () => {
   it("does not navigate when the target exactly matches the active tab location", () => {
-    const activeRouter = makeMockRouter("/acme/issues/child");
     state.byWorkspace.acme.tabs[0] = {
       id: "tA",
       path: "/acme/issues/child",
       pinned: false,
-      router: activeRouter,
     };
+    setActiveLocation("/acme/issues/child");
 
     let adapter: ReturnType<typeof useNavigation> | null = null;
     const Probe = captureAdapter((a) => {
@@ -285,7 +273,7 @@ describe("DesktopNavigationProvider.push duplicate path guard", () => {
 
     adapter!.push("/acme/issues/child");
 
-    expect(activeRouter.navigate).not.toHaveBeenCalled();
+    expect(active.router.navigate).not.toHaveBeenCalled();
   });
 });
 
@@ -369,23 +357,18 @@ describe("TabNavigationProvider.push with pinned active tab", () => {
   type ProviderRouter = Parameters<typeof TabNavigationProvider>[0]["router"];
 
   function renderPinnedTabProvider(pathname: string) {
-    // The active tab and the per-tab router must share the same pathname:
-    // tryRouteToPinnedNewTab reads the *active tab's* router for the current
-    // pathname (so query-only pushes routed via React Router still compare
-    // correctly), while the TabNavigationProvider falls back to *its own*
-    // router.navigate when no interception fires. In real desktop usage they
-    // are the same router instance; this helper mirrors that invariant.
+    // The active tab and the per-tab router share a pathname:
+    // tryRouteToPinnedNewTab reads the active router (from the registry) for
+    // the current pathname, while the TabNavigationProvider falls back to its
+    // own router.navigate when no interception fires. In real desktop usage
+    // they are the same router instance; this helper mirrors that invariant.
     const fakeRouter = {
       state: { location: { pathname, search: "", hash: "" } },
       subscribe: () => () => {},
       navigate: vi.fn(),
     } as unknown as ProviderRouter;
-    state.byWorkspace.acme.tabs[0] = {
-      id: "tA",
-      path: pathname,
-      pinned: true,
-      router: fakeRouter as unknown as MockRouter,
-    };
+    state.byWorkspace.acme.tabs[0] = { id: "tA", path: pathname, pinned: true };
+    setActiveLocation(pathname);
 
     let adapter: ReturnType<typeof useNavigation> | null = null;
     const Probe = captureAdapter((a) => {

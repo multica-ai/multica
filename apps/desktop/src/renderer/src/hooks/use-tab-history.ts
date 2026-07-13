@@ -1,32 +1,31 @@
 import { useCallback } from "react";
-import { useActiveTabRouter, useActiveTabHistory } from "@/stores/tab-store";
+import { useActiveTabHistory } from "@/stores/tab-store";
+import { useActiveTabRouter } from "@/platform/tab-runtime";
 import { navigateByDelta } from "@/platform/history-mirror";
 
 /**
  * Per-tab back/forward navigation derived from the active workspace's
  * active tab.
  *
- * Subscribed via primitive selectors so this hook only re-renders when
- * the numeric history state actually changes — path ticks on the active
- * tab (which don't shift historyIndex) don't churn the back/forward
- * buttons.
+ * `canGoBack` / `canGoForward` come from the active tab's persisted history
+ * session (via `useActiveTabHistory`), so they update only on real
+ * navigations. The live router comes from the runtime registry
+ * (`useActiveTabRouter`). Relative navigation goes through the single
+ * `navigateByDelta` helper so the history mirror records the exact delta.
  */
 export function useTabHistory() {
   const router = useActiveTabRouter();
-  const { historyIndex, historyLength } = useActiveTabHistory();
-
-  const canGoBack = historyIndex > 0;
-  const canGoForward = historyIndex < historyLength - 1;
+  const { canGoBack, canGoForward } = useActiveTabHistory();
 
   const goBack = useCallback(() => {
-    if (!router || historyIndex <= 0) return;
+    if (!router || !canGoBack) return;
     void navigateByDelta(router, -1);
-  }, [router, historyIndex]);
+  }, [router, canGoBack]);
 
   const goForward = useCallback(() => {
-    if (!router || historyIndex >= historyLength - 1) return;
+    if (!router || !canGoForward) return;
     void navigateByDelta(router, 1);
-  }, [router, historyIndex, historyLength]);
+  }, [router, canGoForward]);
 
   return { canGoBack, canGoForward, goBack, goForward };
 }

@@ -4,6 +4,7 @@ import { AlertTriangle, RotateCw, Send, X } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
 import { useModalStore } from "@multica/core/modals";
 import { useTabStore } from "@/stores/tab-store";
+import { tabRuntimeRegistry } from "@/platform/tab-runtime";
 
 type DesktopAppInfo = {
   version?: string;
@@ -83,7 +84,7 @@ export function DesktopRouteErrorPage() {
         <Button
           type="button"
           variant="outline"
-          onClick={() => useTabStore.getState().reloadActiveTab()}
+          onClick={() => tabRuntimeRegistry.reloadActive()}
         >
           <RotateCw className="mr-2 h-4 w-4" aria-hidden="true" />
           Reload tab

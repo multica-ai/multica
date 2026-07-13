@@ -3,8 +3,10 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { createMemoryRouter, RouterProvider } from "react-router-dom";
 
 const openModal = vi.fn();
-const reloadActiveTab = vi.fn();
 const closeActiveTab = vi.fn();
+// Hoisted because the tab-runtime mock factory references it directly (not
+// lazily inside a getState closure like the store mock does).
+const { reloadActive } = vi.hoisted(() => ({ reloadActive: vi.fn() }));
 
 vi.mock("@multica/core/modals", () => ({
   useModalStore: {
@@ -14,8 +16,12 @@ vi.mock("@multica/core/modals", () => ({
 
 vi.mock("@/stores/tab-store", () => ({
   useTabStore: {
-    getState: () => ({ reloadActiveTab, closeActiveTab }),
+    getState: () => ({ closeActiveTab }),
   },
+}));
+
+vi.mock("@/platform/tab-runtime", () => ({
+  tabRuntimeRegistry: { reloadActive },
 }));
 
 import { DesktopRouteErrorPage, formatRouteErrorReport } from "./route-error-page";
@@ -28,7 +34,7 @@ function Boom(): null {
 describe("DesktopRouteErrorPage", () => {
   beforeEach(() => {
     openModal.mockReset();
-    reloadActiveTab.mockReset();
+    reloadActive.mockReset();
     closeActiveTab.mockReset();
     vi.spyOn(console, "error").mockImplementation(() => {});
   });
@@ -49,7 +55,7 @@ describe("DesktopRouteErrorPage", () => {
       "Something went wrong in this tab",
     );
     fireEvent.click(screen.getByRole("button", { name: /reload tab/i }));
-    expect(reloadActiveTab).toHaveBeenCalledTimes(1);
+    expect(reloadActive).toHaveBeenCalledTimes(1);
   });
 
   it("offers Close tab as the always-safe escape from a crashing route", async () => {

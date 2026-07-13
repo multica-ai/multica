@@ -10,11 +10,11 @@ import {
   useTabStore,
   resolveRouteIcon,
   useActiveTabIdentity,
-  useActiveTabRouter,
   getActiveTab,
 } from "@/stores/tab-store";
 import { useWindowOverlayStore } from "@/stores/window-overlay-store";
 import { navigateByDelta } from "./history-mirror";
+import { tabRuntimeRegistry, useActiveTabRouter } from "./tab-runtime";
 
 function requireRuntimeAppUrl(scope: string): string {
   const runtimeConfig = window.desktopAPI.runtimeConfig;
@@ -135,7 +135,8 @@ function tryRouteToPinnedNewTab(path: string): boolean {
   // Use the live router pathname rather than `active.path` so query-only
   // navigations performed via React Router (which only sync pathname back
   // to the store) still compare correctly.
-  const currentPathname = active.router.state.location.pathname;
+  const currentPathname =
+    tabRuntimeRegistry.getActiveRouter()?.state.location.pathname ?? active.path;
   const newPathname = path.split("?")[0].split("#")[0];
   if (currentPathname === newPathname) return false;
 
@@ -199,22 +200,22 @@ export function DesktopNavigationProvider({
           useAuthStore.getState().logout();
           return;
         }
-        const active = currentActiveTab();
-        if (tryRouteToOverlay(path, active?.router)) return;
-        if (active && routerLocationPath(active.router) === path) return;
+        const router = tabRuntimeRegistry.getActiveRouter();
+        if (tryRouteToOverlay(path, router ?? undefined)) return;
+        if (router && routerLocationPath(router) === path) return;
         if (tryRouteToOtherWorkspace(path)) return;
         if (tryRouteToPinnedNewTab(path)) return;
-        active?.router.navigate(path);
+        router?.navigate(path);
       },
       replace: (path: string) => {
-        const active = currentActiveTab();
-        if (tryRouteToOverlay(path, active?.router)) return;
+        const router = tabRuntimeRegistry.getActiveRouter();
+        if (tryRouteToOverlay(path, router ?? undefined)) return;
         if (tryRouteToOtherWorkspace(path)) return;
-        active?.router.navigate(path, { replace: true });
+        router?.navigate(path, { replace: true });
       },
       back: () => {
-        const active = currentActiveTab();
-        if (active) void navigateByDelta(active.router, -1);
+        const router = tabRuntimeRegistry.getActiveRouter();
+        if (router) void navigateByDelta(router, -1);
       },
       pathname: location.pathname,
       searchParams: new URLSearchParams(location.search),
@@ -246,10 +247,6 @@ export function DesktopNavigationProvider({
   );
 
   return <NavigationProvider value={adapter}>{children}</NavigationProvider>;
-}
-
-function currentActiveTab() {
-  return getActiveTab(useTabStore.getState());
 }
 
 /**

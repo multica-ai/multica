@@ -1,20 +1,10 @@
-import { Activity, useEffect } from "react";
+import { Activity, useEffect, useState, type ReactNode } from "react";
 import { RouterProvider } from "react-router-dom";
-import { useActiveGroup } from "@/stores/tab-store";
+import { useActiveGroup, type Tab } from "@/stores/tab-store";
 import { TabNavigationProvider } from "@/platform/navigation";
-import { useTabRouterSync } from "@/hooks/use-tab-router-sync";
+import { tabRuntimeRegistry } from "@/platform/tab-runtime";
+import { useTabRuntimeSync } from "@/hooks/use-tab-runtime-sync";
 import { useTabScrollRestore } from "@/hooks/use-tab-scroll-restore";
-import type { Tab } from "@/stores/tab-store";
-
-/**
- * Inner wrapper rendered inside each tab's RouterProvider. The router
- * reference is stable for a tab's lifetime, so passing it in directly
- * (instead of re-deriving from the store) avoids needless re-renders.
- */
-function TabRouterInner({ tab }: { tab: Tab }) {
-  useTabRouterSync(tab.id, tab.router);
-  return null;
-}
 
 /**
  * Wraps a tab's subtree so its scroll position survives the round trip
@@ -28,7 +18,7 @@ function TabScrollRestoreWrapper({
   children,
 }: {
   tabPath: string;
-  children: React.ReactNode;
+  children: ReactNode;
 }) {
   const ref = useTabScrollRestore(tabPath);
   return (
@@ -39,8 +29,31 @@ function TabScrollRestoreWrapper({
 }
 
 /**
- * Renders the active workspace's tabs using Activity for state preservation.
- * Only the active tab is visible; hidden tabs keep their DOM and React state.
+ * One tab's rendered subtree. The live router + history mirror come from the
+ * tab runtime registry (seeded from the tab's persisted session); the sync
+ * hook feeds the mirror back into the store as the tab session. Mounted once
+ * per acquired runtime — TabContent keys this by `tab.id:generation`, so a
+ * tab reload (generation bump) remounts on a fresh runtime instead of mutating
+ * the RouterProvider's `router` prop (which React Router forbids).
+ */
+function TabView({ tab, active }: { tab: Tab; active: boolean }) {
+  const [runtime] = useState(() => tabRuntimeRegistry.getOrCreate(tab));
+  useTabRuntimeSync(tab.id, runtime);
+  return (
+    <Activity mode={active ? "visible" : "hidden"}>
+      <TabScrollRestoreWrapper tabPath={tab.path}>
+        <TabNavigationProvider router={runtime.router}>
+          <RouterProvider router={runtime.router} />
+        </TabNavigationProvider>
+      </TabScrollRestoreWrapper>
+    </Activity>
+  );
+}
+
+/**
+ * Renders the active workspace's tabs. Only the active tab is visible; hidden
+ * tabs keep their DOM and React state via <Activity>. The routers themselves
+ * live in the tab runtime registry, not the store.
  *
  * When switching workspaces, the previous workspace's tabs unmount entirely
  * and the new workspace's tabs mount fresh — cross-workspace state
@@ -63,17 +76,11 @@ export function TabContent() {
   return (
     <>
       {group.tabs.map((tab) => (
-        <Activity
-          key={tab.id}
-          mode={tab.id === group.activeTabId ? "visible" : "hidden"}
-        >
-          <TabScrollRestoreWrapper tabPath={tab.path}>
-            <TabNavigationProvider router={tab.router}>
-              <RouterProvider router={tab.router} />
-              <TabRouterInner tab={tab} />
-            </TabNavigationProvider>
-          </TabScrollRestoreWrapper>
-        </Activity>
+        <TabView
+          key={`${tab.id}:${tab.generation}`}
+          tab={tab}
+          active={tab.id === group.activeTabId}
+        />
       ))}
     </>
   );

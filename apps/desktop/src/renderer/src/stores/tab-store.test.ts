@@ -1,28 +1,17 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 
-// createTabRouter transitively pulls in route modules that expect a browser
-// router context. For pure store tests we stub it to a minimal disposable.
-const createTabRouterMock = vi.hoisted(() =>
-  vi.fn(() => ({
-    dispose: vi.fn(),
-    state: { location: { pathname: "/" } },
-    navigate: vi.fn(),
-    subscribe: vi.fn(() => () => {}),
-  })),
-);
-vi.mock("../routes", () => ({
-  createTabRouter: createTabRouterMock,
-}));
-
+// The store no longer creates routers — the live router/mirror live in the tab
+// runtime registry (platform/tab-runtime), so these are pure store tests with
+// no router stubbing needed.
 import {
   sanitizeTabPath,
   migrateV1ToV2,
   migrateV2ToV3,
+  migrateV3ToV4,
   useTabStore,
 } from "./tab-store";
 
 beforeEach(() => {
-  createTabRouterMock.mockClear();
   useTabStore.getState().reset();
 });
 
@@ -181,33 +170,7 @@ describe("useTabStore actions", () => {
     expect(s.byWorkspace.acme.tabs[0].id).not.toBe(onlyTabId); // fresh tab
   });
 
-  it("defers disposing the closed tab router until after the store update", () => {
-    vi.useFakeTimers();
-    try {
-      const store = useTabStore.getState();
-      store.switchWorkspace("acme");
-      const closedTabId = store.addTab("/acme/settings", "Settings", "Settings");
-      const closingTab = useTabStore
-        .getState()
-        .byWorkspace.acme.tabs.find((t) => t.id === closedTabId);
-      const dispose = vi.mocked(closingTab!.router.dispose);
-
-      store.closeTab(closedTabId);
-
-      expect(dispose).not.toHaveBeenCalled();
-      expect(
-        useTabStore.getState().byWorkspace.acme.tabs.some((t) => t.id === closedTabId),
-      ).toBe(false);
-
-      vi.runAllTimers();
-
-      expect(dispose).toHaveBeenCalledOnce();
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it("ignores router-sync updates from a tab after it has been closed", () => {
+  it("ignores runtime-sync updates from a tab after it has been closed", () => {
     const store = useTabStore.getState();
     store.switchWorkspace("acme");
     const closedTabId = store.addTab("/acme/settings", "Settings", "Settings");
@@ -215,8 +178,11 @@ describe("useTabStore actions", () => {
     store.closeTab(closedTabId);
     const before = useTabStore.getState().byWorkspace.acme;
 
-    store.updateTab(closedTabId, { path: "/acme/runtimes", icon: "Monitor" });
-    store.updateTabHistory(closedTabId, 1, 2);
+    store.syncTabRuntime(closedTabId, {
+      path: "/acme/runtimes",
+      icon: "Monitor",
+      session: { entries: ["/acme/runtimes"], index: 0 },
+    });
 
     expect(useTabStore.getState().byWorkspace.acme).toBe(before);
     expect(
@@ -224,16 +190,59 @@ describe("useTabStore actions", () => {
     ).toBe(false);
   });
 
-  it("does not replace the tab group for no-op router-sync updates", () => {
+  it("does not replace the tab group for no-op runtime-sync updates", () => {
     const store = useTabStore.getState();
     store.switchWorkspace("acme");
     const tab = useTabStore.getState().byWorkspace.acme.tabs[0];
     const before = useTabStore.getState().byWorkspace.acme;
 
-    store.updateTab(tab.id, { path: tab.path, icon: tab.icon, title: tab.title });
-    store.updateTabHistory(tab.id, tab.historyIndex, tab.historyLength);
+    store.syncTabRuntime(tab.id, {
+      path: tab.path,
+      icon: tab.icon,
+      session: tab.session,
+    });
 
     expect(useTabStore.getState().byWorkspace.acme).toBe(before);
+  });
+
+  it("syncTabRuntime updates path, icon and session together", () => {
+    const store = useTabStore.getState();
+    store.switchWorkspace("acme");
+    const tab = useTabStore.getState().byWorkspace.acme.tabs[0];
+
+    store.syncTabRuntime(tab.id, {
+      path: "/acme/issues/bug-1",
+      icon: "ListTodo",
+      session: {
+        entries: ["/acme/issues", "/acme/issues/bug-1"],
+        index: 1,
+      },
+    });
+
+    const updated = useTabStore.getState().byWorkspace.acme.tabs[0];
+    expect(updated.path).toBe("/acme/issues/bug-1");
+    expect(updated.session).toEqual({
+      entries: ["/acme/issues", "/acme/issues/bug-1"],
+      index: 1,
+    });
+  });
+
+  it("resetTabRuntime resets the session and bumps generation", () => {
+    const store = useTabStore.getState();
+    store.switchWorkspace("acme");
+    const tab = useTabStore.getState().byWorkspace.acme.tabs[0];
+    store.syncTabRuntime(tab.id, {
+      path: "/acme/issues/bug-1",
+      icon: "ListTodo",
+      session: { entries: ["/acme/issues", "/acme/issues/bug-1"], index: 1 },
+    });
+
+    store.resetTabRuntime(tab.id);
+
+    const reset = useTabStore.getState().byWorkspace.acme.tabs[0];
+    // Session collapses to a single entry at the tab's current path.
+    expect(reset.session).toEqual({ entries: ["/acme/issues/bug-1"], index: 0 });
+    expect(reset.generation).toBe(1);
   });
 
   it("validateWorkspaceSlugs drops groups for slugs not in the valid set and repoints active", () => {
@@ -287,7 +296,6 @@ describe("useTabStore actions", () => {
     // The only persisted group points at a workspace the user has lost access
     // to — the stale-tab heal path WorkspaceRouteLayout drives.
     store.switchWorkspace("stale");
-    const staleRouter = useTabStore.getState().byWorkspace.stale.tabs[0].router;
 
     store.validateWorkspaceSlugs(new Set(["acme"]));
 
@@ -296,8 +304,8 @@ describe("useTabStore actions", () => {
     expect(s.activeWorkspaceSlug).toBe("acme");
     expect(s.byWorkspace.acme.tabs).toHaveLength(1);
     expect(s.byWorkspace.acme.tabs[0].path).toBe("/acme/issues");
-    // The dropped stale group's router must be disposed, not leaked.
-    expect(staleRouter.dispose).toHaveBeenCalled();
+    // Disposing the dropped group's runtime is the registry's job — see
+    // tab-runtime.test.
   });
 
   it("reset wipes the whole store", () => {
@@ -322,37 +330,20 @@ describe("useTabStore actions", () => {
 
 describe("bulk tab closing", () => {
   it("closes other unpinned tabs, preserves pinned tabs, and activates the target", () => {
-    vi.useFakeTimers();
-    try {
-      const store = useTabStore.getState();
-      store.switchWorkspace("acme");
-      const issuesId = useTabStore.getState().byWorkspace.acme.tabs[0].id;
-      const projectsId = store.addTab("/acme/projects", "Projects", "FolderKanban");
-      const agentsId = store.addTab("/acme/agents", "Agents", "Bot");
-      const settingsId = store.addTab("/acme/settings", "Settings", "Settings");
-      store.togglePin(issuesId);
-      store.setActiveTab(agentsId);
+    const store = useTabStore.getState();
+    store.switchWorkspace("acme");
+    const issuesId = useTabStore.getState().byWorkspace.acme.tabs[0].id;
+    const projectsId = store.addTab("/acme/projects", "Projects", "FolderKanban");
+    const agentsId = store.addTab("/acme/agents", "Agents", "Bot");
+    store.addTab("/acme/settings", "Settings", "Settings");
+    store.togglePin(issuesId);
+    store.setActiveTab(agentsId);
 
-      const before = useTabStore.getState().byWorkspace.acme.tabs;
-      const agentsDispose = vi.mocked(before.find((tab) => tab.id === agentsId)!.router.dispose);
-      const settingsDispose = vi.mocked(
-        before.find((tab) => tab.id === settingsId)!.router.dispose,
-      );
+    store.closeOtherTabs(projectsId);
 
-      store.closeOtherTabs(projectsId);
-
-      const group = useTabStore.getState().byWorkspace.acme;
-      expect(group.tabs.map((tab) => tab.id)).toEqual([issuesId, projectsId]);
-      expect(group.activeTabId).toBe(projectsId);
-      expect(agentsDispose).not.toHaveBeenCalled();
-      expect(settingsDispose).not.toHaveBeenCalled();
-
-      vi.runAllTimers();
-      expect(agentsDispose).toHaveBeenCalledOnce();
-      expect(settingsDispose).toHaveBeenCalledOnce();
-    } finally {
-      vi.useRealTimers();
-    }
+    const group = useTabStore.getState().byWorkspace.acme;
+    expect(group.tabs.map((tab) => tab.id)).toEqual([issuesId, projectsId]);
+    expect(group.activeTabId).toBe(projectsId);
   });
 
   it("keeps a surviving active tab when closing other tabs", () => {
@@ -522,5 +513,48 @@ describe("migrateV2ToV3", () => {
     const v3 = migrateV2ToV3({ activeWorkspaceSlug: null } as Parameters<typeof migrateV2ToV3>[0]);
     expect(v3.byWorkspace).toEqual({});
     expect(v3.activeWorkspaceSlug).toBeNull();
+  });
+});
+
+describe("migrateV3ToV4", () => {
+  it("seeds a single-entry session from each tab's path", () => {
+    const v3 = {
+      activeWorkspaceSlug: "acme",
+      byWorkspace: {
+        acme: {
+          activeTabId: "t1",
+          tabs: [
+            { id: "t1", path: "/acme/issues", title: "Issues", icon: "ListTodo", pinned: false },
+            { id: "t2", path: "/acme/projects", title: "Projects", icon: "FolderKanban", pinned: true },
+          ],
+        },
+      },
+    };
+    const v4 = migrateV3ToV4(v3);
+    expect(v4.activeWorkspaceSlug).toBe("acme");
+    expect(v4.byWorkspace.acme.tabs).toEqual([
+      {
+        id: "t1",
+        path: "/acme/issues",
+        title: "Issues",
+        icon: "ListTodo",
+        pinned: false,
+        session: { entries: ["/acme/issues"], index: 0 },
+      },
+      {
+        id: "t2",
+        path: "/acme/projects",
+        title: "Projects",
+        icon: "FolderKanban",
+        pinned: true,
+        session: { entries: ["/acme/projects"], index: 0 },
+      },
+    ]);
+  });
+
+  it("handles missing byWorkspace gracefully", () => {
+    const v4 = migrateV3ToV4({ activeWorkspaceSlug: null } as Parameters<typeof migrateV3ToV4>[0]);
+    expect(v4.byWorkspace).toEqual({});
+    expect(v4.activeWorkspaceSlug).toBeNull();
   });
 });

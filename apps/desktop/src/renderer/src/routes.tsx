@@ -1,10 +1,5 @@
 import { useEffect } from "react";
-import {
-  createMemoryRouter,
-  Navigate,
-  Outlet,
-  useMatches,
-} from "react-router-dom";
+import { Navigate, Outlet, useMatches } from "react-router-dom";
 import type { RouteObject } from "react-router-dom";
 import { IssueDetailPage } from "./pages/issue-detail-page";
 import { ProjectDetailPage } from "./pages/project-detail-page";
@@ -218,10 +213,3 @@ export const appRoutes: RouteObject[] = [
     ],
   },
 ];
-
-/** Create an independent memory router for a tab. */
-export function createTabRouter(initialPath: string) {
-  return createMemoryRouter(appRoutes, {
-    initialEntries: [initialPath],
-  });
-}

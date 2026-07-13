@@ -4,12 +4,19 @@ import { arrayMove } from "@dnd-kit/sortable";
 import { createPersistStorage, defaultStorage } from "@multica/core/platform";
 import { createSafeId } from "@multica/core/utils";
 import { isReservedSlug } from "@multica/core/paths";
-import type { DataRouter } from "react-router-dom";
-import { createTabRouter } from "../routes";
+import type { HistorySnapshot } from "@/platform/history-mirror";
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
+
+/**
+ * A tab's serializable navigation session: the full memory-router history
+ * stack (`entries` = `pathname+search+hash` strings) plus the current index.
+ * The live router/mirror that produces this lives in the tab runtime registry
+ * (platform/tab-runtime), not in the store.
+ */
+export type TabSession = HistorySnapshot;
 
 export interface Tab {
   id: string;
@@ -17,9 +24,13 @@ export interface Tab {
   path: string;
   title: string;
   icon: string;
-  router: DataRouter;
-  historyIndex: number;
-  historyLength: number;
+  /** Serializable history session; the live router lives in the registry. */
+  session: TabSession;
+  /**
+   * Bumped by `resetTabRuntime` (tab reload) to force the tab subtree to
+   * remount on a fresh runtime. Ephemeral — never persisted.
+   */
+  generation: number;
   /**
    * Pinned tabs render at the left of the tab bar as icon-only, suppress the
    * X close button, and turn any `navigation.push()` originating in them into
@@ -84,18 +95,29 @@ interface TabStore {
    * path that "jumps" to a tab belonging to a non-active workspace.
    */
   setActiveTab: (tabId: string) => void;
-  /** Patch metadata of a tab (router-sync, title-sync). Finds across groups. */
+  /** Patch metadata of a tab (title-sync). Finds across groups. */
   updateTab: (tabId: string, patch: Partial<Pick<Tab, "path" | "title" | "icon">>) => void;
-  /** Patch history tracking of a tab. Finds across groups. */
-  updateTabHistory: (tabId: string, historyIndex: number, historyLength: number) => void;
-  /** Recreate the active tab's router at the same path after a route-level crash. */
-  reloadActiveTab: () => void;
+  /**
+   * Sync a tab's live runtime state (current path/icon + history session) back
+   * into the store. Called by the tab runtime sync on every committed
+   * navigation. Finds across groups; no-ops when nothing changed.
+   */
+  syncTabRuntime: (
+    tabId: string,
+    patch: { path: string; icon: string; session: TabSession },
+  ) => void;
+  /**
+   * Reset a tab's session to a single entry at its current path and bump its
+   * generation, forcing the tab subtree to remount on a fresh runtime — the
+   * crash-recovery path (registry.reloadActive drives this).
+   */
+  resetTabRuntime: (tabId: string) => void;
   /**
    * Close the active tab. The always-safe escape from a route-level crash:
-   * unlike reloadActiveTab (recreates the same crashing path) or navigating
+   * unlike reloading the tab (recreates the same crashing path) or navigating
    * to a "safe" route (which may itself be the route that crashed), closing
-   * destroys the crashing router entirely and falls back to a sibling tab
-   * (or a reseeded default if it was the last tab).
+   * removes the tab entirely (the registry then disposes its router) and falls
+   * back to a sibling tab (or a reseeded default if it was the last tab).
    */
   closeActiveTab: () => void;
   /**
@@ -219,11 +241,37 @@ function makeTab(path: string, title: string, icon: string): Tab {
     path,
     title,
     icon,
-    router: createTabRouter(path),
-    historyIndex: 0,
-    historyLength: 1,
+    session: { entries: [path], index: 0 },
+    generation: 0,
     pinned: false,
   };
+}
+
+/** Structural equality for two history sessions (no-op guard for sync). */
+function sameSession(a: TabSession, b: TabSession): boolean {
+  return (
+    a.index === b.index &&
+    a.entries.length === b.entries.length &&
+    a.entries.every((entry, i) => entry === b.entries[i])
+  );
+}
+
+/** Validate a persisted session, falling back to a fresh single-entry one. */
+function sanitizeSession(
+  session: TabSession | undefined,
+  fallbackPath: string,
+): TabSession {
+  if (
+    session &&
+    Array.isArray(session.entries) &&
+    session.entries.length > 0 &&
+    session.entries.every((entry) => typeof entry === "string") &&
+    typeof session.index === "number"
+  ) {
+    const index = Math.max(0, Math.min(session.index, session.entries.length - 1));
+    return { entries: session.entries, index };
+  }
+  return { entries: [fallbackPath], index: 0 };
 }
 
 /** Index of the first unpinned tab in a group (== pinned count). */
@@ -287,14 +335,6 @@ function buildCloseOtherTabsResult(
     },
     closingTabs,
   };
-}
-
-function disposeTabRoutersAfterUnmount(tabs: readonly Tab[]) {
-  if (tabs.length === 0) return;
-  // Let React unmount every closed tab's RouterProvider before disposal.
-  window.setTimeout(() => {
-    for (const tab of tabs) tab.router.dispose();
-  }, 0);
 }
 
 // ---------------------------------------------------------------------------
@@ -427,8 +467,6 @@ export const useTabStore = create<TabStore>()(
         if (!hit) return;
         const { slug, group, index } = hit;
 
-        const closing = group.tabs[index];
-
         if (group.tabs.length === 1) {
           // Last tab in this workspace — reseed a default so the workspace
           // always has at least one tab. Closing a workspace as an explicit
@@ -440,7 +478,6 @@ export const useTabStore = create<TabStore>()(
               [slug]: { tabs: [fresh], activeTabId: fresh.id },
             },
           });
-          disposeTabRoutersAfterUnmount([closing]);
           return;
         }
 
@@ -456,7 +493,6 @@ export const useTabStore = create<TabStore>()(
             [slug]: { tabs: nextTabs, activeTabId: nextActiveTabId },
           },
         });
-        disposeTabRoutersAfterUnmount([closing]);
       },
 
       closeOtherTabs(tabId) {
@@ -464,7 +500,6 @@ export const useTabStore = create<TabStore>()(
         const result = buildCloseOtherTabsResult(byWorkspace, tabId);
         if (!result) return;
         set({ byWorkspace: result.nextByWorkspace });
-        disposeTabRoutersAfterUnmount(result.closingTabs);
       },
 
       setActiveTab(tabId) {
@@ -506,19 +541,25 @@ export const useTabStore = create<TabStore>()(
         });
       },
 
-      updateTabHistory(tabId, historyIndex, historyLength) {
+      syncTabRuntime(tabId, patch) {
         const { byWorkspace } = get();
         const hit = findTabLocation(byWorkspace, tabId);
         if (!hit) return;
         const { slug, group, index } = hit;
         const current = group.tabs[index];
         if (
-          current.historyIndex === historyIndex &&
-          current.historyLength === historyLength
+          current.path === patch.path &&
+          current.icon === patch.icon &&
+          sameSession(current.session, patch.session)
         ) {
           return;
         }
-        const next: Tab = { ...current, historyIndex, historyLength };
+        const next: Tab = {
+          ...current,
+          path: patch.path,
+          icon: patch.icon,
+          session: patch.session,
+        };
         const nextTabs = [...group.tabs];
         nextTabs[index] = next;
         set({
@@ -529,28 +570,25 @@ export const useTabStore = create<TabStore>()(
         });
       },
 
-      reloadActiveTab() {
-        const { activeWorkspaceSlug, byWorkspace } = get();
-        if (!activeWorkspaceSlug) return;
-        const group = byWorkspace[activeWorkspaceSlug];
-        if (!group) return;
-        const index = group.tabs.findIndex((t) => t.id === group.activeTabId);
-        if (index < 0) return;
+      resetTabRuntime(tabId) {
+        const { byWorkspace } = get();
+        const hit = findTabLocation(byWorkspace, tabId);
+        if (!hit) return;
+        const { slug, group, index } = hit;
         const current = group.tabs[index];
-        const nextTabs = [...group.tabs];
-        nextTabs[index] = {
+        const next: Tab = {
           ...current,
-          router: createTabRouter(current.path),
-          historyIndex: 0,
-          historyLength: 1,
+          session: { entries: [current.path], index: 0 },
+          generation: current.generation + 1,
         };
+        const nextTabs = [...group.tabs];
+        nextTabs[index] = next;
         set({
           byWorkspace: {
             ...byWorkspace,
-            [activeWorkspaceSlug]: { ...group, tabs: nextTabs },
+            [slug]: { ...group, tabs: nextTabs },
           },
         });
-        window.setTimeout(() => current.router.dispose(), 0);
       },
 
       closeActiveTab() {
@@ -633,7 +671,6 @@ export const useTabStore = create<TabStore>()(
             nextByWorkspace[slug] = byWorkspace[slug];
           } else {
             changed = true;
-            for (const t of byWorkspace[slug].tabs) t.router.dispose();
           }
         }
 
@@ -666,16 +703,14 @@ export const useTabStore = create<TabStore>()(
       },
 
       reset() {
-        const { byWorkspace } = get();
-        for (const slug of Object.keys(byWorkspace)) {
-          for (const t of byWorkspace[slug].tabs) t.router.dispose();
-        }
+        // Runtime disposal is the registry's job — it reacts to byWorkspace
+        // going empty and disposes every orphaned router/mirror.
         set({ activeWorkspaceSlug: null, byWorkspace: {} });
       },
     }),
     {
       name: "multica_tabs",
-      version: 3,
+      version: 4,
       storage: createJSONStorage(() => createPersistStorage(defaultStorage)),
       migrate: (persistedState, version) => {
         // v1 → v2: flat `tabs` array → per-workspace grouping.
@@ -691,7 +726,13 @@ export const useTabStore = create<TabStore>()(
         if (version < 3 && state && typeof state === "object") {
           state = migrateV2ToV3(state as V2Persisted);
         }
-        return state as V3Persisted;
+        // v3 → v4: introduce the per-tab history `session`, seeded from the
+        // tab's last path. Router/history were never persisted, so there is
+        // nothing else to carry over.
+        if (version < 4 && state && typeof state === "object") {
+          state = migrateV3ToV4(state as V3Persisted);
+        }
+        return state as V4Persisted;
       },
       partialize: (state) => ({
         activeWorkspaceSlug: state.activeWorkspaceSlug,
@@ -700,20 +741,16 @@ export const useTabStore = create<TabStore>()(
             slug,
             {
               activeTabId: group.activeTabId,
+              // Persist the session; `generation` is ephemeral runtime state.
               tabs: group.tabs.map(
-                ({
-                  router: _router,
-                  historyIndex: _hi,
-                  historyLength: _hl,
-                  ...rest
-                }) => rest,
+                ({ generation: _generation, ...rest }) => rest,
               ),
             },
           ]),
         ),
       }),
       merge: (persistedState, currentState) => {
-        const persisted = persistedState as Partial<V3Persisted> | undefined;
+        const persisted = persistedState as Partial<V4Persisted> | undefined;
         if (!persisted?.byWorkspace) return currentState;
 
         const byWorkspace: Record<string, WorkspaceTabGroup> = {};
@@ -737,9 +774,8 @@ export const useTabStore = create<TabStore>()(
               path: clean,
               title: pTab.title,
               icon: pTab.icon,
-              router: createTabRouter(clean),
-              historyIndex: 0,
-              historyLength: 1,
+              session: sanitizeSession(pTab.session, clean),
+              generation: 0,
               pinned: pTab.pinned === true,
             });
           }
@@ -830,6 +866,42 @@ export function migrateV2ToV3(v2: V2Persisted): V3Persisted {
   };
 }
 
+interface V4PersistedTab {
+  id: string;
+  path: string;
+  title: string;
+  icon: string;
+  pinned: boolean;
+  session: TabSession;
+}
+
+interface V4PersistedGroup {
+  tabs: V4PersistedTab[];
+  activeTabId: string;
+}
+
+interface V4Persisted {
+  activeWorkspaceSlug: string | null;
+  byWorkspace: Record<string, V4PersistedGroup>;
+}
+
+export function migrateV3ToV4(v3: V3Persisted): V4Persisted {
+  const byWorkspace: Record<string, V4PersistedGroup> = {};
+  for (const [slug, group] of Object.entries(v3.byWorkspace ?? {})) {
+    byWorkspace[slug] = {
+      activeTabId: group.activeTabId,
+      tabs: group.tabs.map((t) => ({
+        ...t,
+        session: { entries: [t.path], index: 0 },
+      })),
+    };
+  }
+  return {
+    activeWorkspaceSlug: v3.activeWorkspaceSlug ?? null,
+    byWorkspace,
+  };
+}
+
 export function migrateV1ToV2(v1: Partial<V1Persisted>): V2Persisted {
   const byWorkspace: Record<string, V2PersistedGroup> = {};
   const oldTabs = v1.tabs ?? [];
@@ -891,12 +963,11 @@ export function getActiveTab(s: TabStore): Tab | null {
 /**
  * The active workspace's tab group, or null when no workspace is active.
  *
- * Zustand compares selector returns with `Object.is`. Because `updateTab`
- * /  `updateTabHistory` replace the group object on every router tick
- * (immutable update), this selector returns a new reference on every
- * router event — that's fine for TabBar which needs to observe tab-list
- * changes, but don't use this selector from components that only care
- * about one primitive (use `useActiveTabHistory` / `useActiveTabRouter`
+ * Zustand compares selector returns with `Object.is`. Because `syncTabRuntime`
+ * replaces the group object on every committed navigation (immutable update),
+ * this selector returns a new reference on every navigation — that's fine for
+ * TabBar which needs to observe tab-list changes, but don't use this selector
+ * from components that only care about one primitive (use `useActiveTabHistory`
  * instead).
  */
 export function useActiveGroup(): WorkspaceTabGroup | null {
@@ -924,25 +995,23 @@ export function useActiveTabIdentity(): { slug: string | null; tabId: string | n
 }
 
 /**
- * Active tab's router — a stable reference across tab updates, because
- * routers are created once per tab and never replaced by `updateTab`.
- * Subscribers only re-render when the active tab *changes*, not on
- * router events within the current tab.
- */
-export function useActiveTabRouter(): DataRouter | null {
-  return useTabStore((s) => getActiveTab(s)?.router ?? null);
-}
-
-/**
- * History tracking for the active tab as primitives. Subscribers re-render
- * only when the numeric index / length change (i.e. on actual navigations),
- * not on unrelated store updates.
+ * Back/forward availability for the active tab, derived from its history
+ * session. Primitive selectors so consumers re-render only when the numbers
+ * change (i.e. on real navigations), not on unrelated store updates. The
+ * active tab's live router itself lives in the registry — see
+ * `useActiveTabRouter` in platform/tab-runtime.
  */
 export function useActiveTabHistory(): {
-  historyIndex: number;
-  historyLength: number;
+  canGoBack: boolean;
+  canGoForward: boolean;
 } {
-  const historyIndex = useTabStore((s) => getActiveTab(s)?.historyIndex ?? 0);
-  const historyLength = useTabStore((s) => getActiveTab(s)?.historyLength ?? 1);
-  return { historyIndex, historyLength };
+  const canGoBack = useTabStore((s) => {
+    const tab = getActiveTab(s);
+    return tab ? tab.session.index > 0 : false;
+  });
+  const canGoForward = useTabStore((s) => {
+    const tab = getActiveTab(s);
+    return tab ? tab.session.index < tab.session.entries.length - 1 : false;
+  });
+  return { canGoBack, canGoForward };
 }
