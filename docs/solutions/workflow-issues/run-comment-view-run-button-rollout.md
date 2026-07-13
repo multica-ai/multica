@@ -8,10 +8,10 @@ component: "deployment_workflow"
 severity: "medium"
 applies_when:
   - "Deploying the run-comment View run button feature (commits 1c79939..HEAD on feat/run-comment-view-run-button)"
-  - "Running migration 158 (backfill comment.source_task_id)"
+  - "Running migration 166 (backfill comment.source_task_id)"
   - "Operating the comment → run → task transcript rendering pipeline"
   - "Investigating why a comment shows the View run chip or the GC hover-card explainer"
-tags: [deployment, runbook, backfill, source_task_id, view-run, migration-158, self-hosted, post-upgrade]
+tags: [deployment, runbook, backfill, source_task_id, view-run, migration-166, self-hosted, post-upgrade]
 ---
 
 # Run-comment View run button — deployment runbook
@@ -26,7 +26,7 @@ on issue comments. The change spans four commits on
    — U1. Backend: `task.go` completion path now passes `task.ID` as the
    synthesized-success comment's `source_task_id`, mirroring the failure
    path. Includes a DB-backed Go regression test (skips without DB).
-2. `feat(comments): add migration 158 to backfill source_task_id on
+2. `feat(comments): add migration 166 to backfill source_task_id on
    historical comments` — U2. SQL migration that backfills
    `source_task_id` on historical agent-authored comments whose
    `parent_id` resolves through `agent_task_queue.trigger_comment_id`,
@@ -79,7 +79,7 @@ baseline, something is wrong with the staging data.
 
 ### 2. Production code deploy (U1 + U3 + U4)
 
-Deploy the application code without running migration 158 yet. This
+Deploy the application code without running migration 166 yet. This
 ships the going-forward stamp (U1) and the UI (U3/U4) without
 backfilled data, so users see:
 
@@ -103,12 +103,12 @@ For a non-transactional dry run on production, see the baseline +
 skip-category monitoring SQL below. The migration is idempotent and
 safe to re-run.
 
-### 4. Production migration 158 (U2)
+### 4. Production migration 166 (U2)
 
 Run the migration during a low-traffic window. The migration is a
 single UPDATE with a `WHERE c.source_task_id IS NULL` guard, so it is
 idempotent. Monitor progress with the migration notes' SQL
-(`server/migrations/158_backfill_comment_source_task_id.notes.md`).
+(`server/migrations/166_backfill_comment_source_task_id.notes.md`).
 
 ### 5. Post-migration verification
 
@@ -262,7 +262,7 @@ they did before the feature (no chip, no explainer). No data impact.
 
 ### Migration 158 (U2)
 
-`158_backfill_comment_source_task_id.down.sql` is intentionally a
+`166_backfill_comment_source_task_id.down.sql` is intentionally a
 `SELECT 1` (no-op). Backfill cannot be rolled back without an
 audit table, and the migration is idempotent: re-running the
 `up.sql` will fill any rows the previous run missed (for example,
