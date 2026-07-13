@@ -11,6 +11,12 @@ import { useQuery } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { useActionSheet } from "@expo/react-native-action-sheet";
 import SegmentedControl from "@react-native-segmented-control/segmented-control";
+import type {
+  DashboardAgentRunTime,
+  DashboardRunTimeDaily,
+  DashboardUsageByAgent,
+  DashboardUsageDaily,
+} from "@multica/core/types";
 import { Text } from "@/components/ui/text";
 import { Button } from "@/components/ui/button";
 import { UsageStatCard } from "@/components/usage/usage-stat-card";
@@ -28,6 +34,15 @@ import { addDaysIso, computeDailyTotals, formatDuration, todayIso } from "@/lib/
 import { fmtMoney, formatTokens } from "@/lib/usage-pricing";
 
 type Dim = "daily" | "weekly";
+
+// Stable references — `data ?? []` would create a new empty array on every
+// render while a query is loading, which breaks useMemo's reference-equality
+// dep check and trips the exhaustive-deps lint rule. Mirrors
+// packages/views/dashboard/components/dashboard-page.tsx's EMPTY_* constants.
+const EMPTY_DAILY: DashboardUsageDaily[] = [];
+const EMPTY_BY_AGENT: DashboardUsageByAgent[] = [];
+const EMPTY_RUNTIME: DashboardAgentRunTime[] = [];
+const EMPTY_RUNTIME_DAILY: DashboardRunTimeDaily[] = [];
 
 // Legal periods per dimension + default-on-switch, confirmed against
 // packages/views/dashboard/components/dashboard-page.tsx's
@@ -110,10 +125,10 @@ export default function UsagePage() {
     runTimeDailyQuery.refetch();
   };
 
-  const dailyUsage = dailyQuery.data ?? [];
-  const byAgentUsage = byAgentQuery.data ?? [];
-  const runTimeRows = runTimeQuery.data ?? [];
-  const runTimeDailyRows = runTimeDailyQuery.data ?? [];
+  const dailyUsage = dailyQuery.data ?? EMPTY_DAILY;
+  const byAgentUsage = byAgentQuery.data ?? EMPTY_BY_AGENT;
+  const runTimeRows = runTimeQuery.data ?? EMPTY_RUNTIME;
+  const runTimeDailyRows = runTimeDailyQuery.data ?? EMPTY_RUNTIME_DAILY;
 
   // Client-side day-window re-slice, mirroring DashboardPage's
   // dailyCutoffIso — dailyQuery/runTimeDailyQuery are over-fetched to
