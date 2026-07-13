@@ -358,6 +358,7 @@
     "retry_task_aria": "重试 task",
     "retry_failed": "重试 task 失败",
     "transcript_tooltip": "查看记录",
+    "view_run": "查看 run",
     "cancel_failed": "取消 task 失败",
     "trigger_retry": "重试",
     "trigger_retry_attempt": "重试 #{{attempt}}",

@@ -358,6 +358,7 @@
     "retry_task_aria": "작업 다시 시도",
     "retry_failed": "작업을 다시 시도하지 못했습니다",
     "transcript_tooltip": "트랜스크립트 보기",
+    "view_run": "런 보기",
     "cancel_failed": "작업을 취소하지 못했습니다",
     "trigger_retry": "다시 시도",
     "trigger_retry_attempt": "{{attempt}}번째 다시 시도",
