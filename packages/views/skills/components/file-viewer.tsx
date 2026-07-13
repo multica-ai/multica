@@ -5,10 +5,8 @@ import { Pencil, Eye } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
 import { Textarea } from "@multica/ui/components/ui/textarea";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
-import {
-  parseFrontmatter,
-  type SkillFrontmatter,
-} from "@multica/core/skills/frontmatter";
+import { parseFrontmatter } from "@multica/core/skills/frontmatter";
+import { FrontmatterCard } from "./frontmatter-card";
 import { Markdown } from "../../common/markdown";
 import { useT } from "../../i18n";
 
@@ -16,28 +14,8 @@ function isMarkdown(path: string) {
   return path.endsWith(".md") || path.endsWith(".mdx");
 }
 
-// ---------------------------------------------------------------------------
-// Frontmatter display
-// ---------------------------------------------------------------------------
-
-function FrontmatterCard({ data }: { data: SkillFrontmatter }) {
-  return (
-    <div className="mb-4 rounded-lg border bg-muted/30 px-4 py-3">
-      <div className="grid gap-1.5">
-        {Object.entries(data).map(([key, value]) => (
-          <div key={key} className="flex gap-2 text-xs">
-            <span className="shrink-0 font-medium text-muted-foreground min-w-[80px]">
-              {key}
-            </span>
-            <span className="text-foreground whitespace-pre-wrap break-words">
-              {value.trimEnd()}
-            </span>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
+// Frontmatter display — see ./frontmatter-card for the shared component used
+// by SkillProfileCard as well.
 
 // ---------------------------------------------------------------------------
 // File viewer

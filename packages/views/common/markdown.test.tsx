@@ -99,17 +99,20 @@ describe("Markdown", () => {
 
   // AE4 acceptance example: a squad mention must render as a chip, not as
   // raw link text. The regex fix in @multica/ui/markdown/Markdown.tsx added
-  // 'squad' to the mention alternation; without it the regex wouldn't match
-  // and the link would render as plain text.
+  // 'squad' to the mention alternation. After the dispatch refactor, squad
+  // mentions route through ActorMentionChip (which carries an avatar glyph
+  // and the actor-mention-chip class), not the legacy `.mention` plain-text
+  // fallback. The chip + aria-label confirm the chip path was reached.
   it("renders squad mention links as squad chips, not raw text (AE4)", () => {
     const { container } = render(
       <Markdown>{"[DevTeam](mention://squad/squad-uuid)"}</Markdown>,
     );
 
-    // Squad mentions render as interactive hover-card anchors with the squad
-    // class. Before the fix, the link rendered as raw text inside <a href="mention://...">.
-    expect(container.querySelector(".mention")).not.toBeNull();
-    expect(screen.getByText("DevTeam")).toBeInTheDocument();
+    expect(container.querySelector(".mention")).toBeNull();
+    expect(container.querySelector(".actor-mention-chip")).not.toBeNull();
+    expect(
+      container.querySelector('[aria-label*="squad"]'),
+    ).toBeInTheDocument();
   });
 });
 
