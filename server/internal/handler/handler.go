@@ -253,6 +253,7 @@ type Handler struct {
 	ConnectionClaimResolver CerebroConnectionClaimResolver
 	// CEREBRO-PATCH(handler-agentvault-broker): TECH-3196 per-agent secret brokering at claim.
 	AgentVaultBroker AgentVaultBroker
+	// CEREBRO-PATCH(personal-browser-secure-fill): FIR-3006 server-only Agent Vault value bridge.
 	// PersonalBrowserSecrets is the server-only Agent Vault reader used by
 	// secure-fill. Its returned value must never enter an agent response or log.
 	PersonalBrowserSecrets PersonalBrowserSecretReader
