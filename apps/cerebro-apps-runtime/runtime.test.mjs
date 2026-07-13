@@ -99,5 +99,9 @@ test("allergen fixture loads a CSP-safe client that obtains a personal token bef
   const source = await script.text();
   assert.match(source, /api\/cerebro\/apps\/\$\{appId\}\/token/);
   assert.match(source, /registryKey:\s*token\.key/);
-  assert.match(source, /api\/ai\/proxy\/v1/);
+  assert.match(source, /aiBaseUrl:\s*token\.ai_base_url/);
+  // An app must never pin itself to one environment: the gateway it may call is
+  // whatever the token broker handed out, so staging and local can never leak
+  // traffic to the production registry.
+  assert.doesNotMatch(source, /https?:\/\/[^"']*registry/);
 });

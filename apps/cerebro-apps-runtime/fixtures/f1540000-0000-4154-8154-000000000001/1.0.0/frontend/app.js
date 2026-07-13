@@ -24,7 +24,7 @@ document.querySelector("form").addEventListener("submit", async (event) => {
       body: JSON.stringify({
         ingredients: document.querySelector("#ingredients").value,
         registryKey: token.key,
-        aiBaseUrl: "https://registry.firtal.com/api/ai/proxy/v1",
+        aiBaseUrl: token.ai_base_url,
       }),
     });
     const result = await response.json();

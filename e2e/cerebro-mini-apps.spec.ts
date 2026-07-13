@@ -1,24 +1,34 @@
 import { expect, test } from "@playwright/test";
-import { readFile } from "node:fs/promises";
+import { createServer, type Server } from "node:http";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import pg from "pg";
 import { createTestApi, loginAsDefault } from "./helpers";
 
 const appID = "f1540000-0000-4154-8154-000000000001";
 const databaseURL = process.env.DATABASE_URL ?? "postgres://multica:multica@localhost:5432/multica?sslmode=disable";
-const fixtureRoot = join(process.cwd(), "apps/cerebro-apps-runtime/fixtures", appID, "1.0.0", "frontend");
+// The web proxy at /api/cerebro/apps-runtime forwards to this port, so the real
+// runtime has to answer there for the app to load and its worker to run.
+const runtimePort = Number(new URL(process.env.CEREBRO_APPS_RUNTIME_URL ?? "http://127.0.0.1:4310").port);
 
 test("opens the allergen app and completes its demo workflow", async ({ page }) => {
   const api = await createTestApi();
   await api.setWorkspaceFeatureFlag("cerebro_mini_apps", true);
   const db = new pg.Client(databaseURL);
   await db.connect();
+  const gateway = await startStubGateway();
+  const runtime = await startAppsRuntime();
   try {
     await seedFixtures(db, api.getWorkspaceId()!, api.getUserId()!);
-    await page.route(`**/api/cerebro/apps-runtime/apps/${appID}/1.0.0/`, async (route) => route.fulfill({ contentType: "text/html", body: await readFile(join(fixtureRoot, "index.html"), "utf8") }));
-    await page.route(`**/api/cerebro/apps-runtime/apps/${appID}/1.0.0/app.js`, async (route) => route.fulfill({ contentType: "text/javascript", body: await readFile(join(fixtureRoot, "app.js"), "utf8") }));
-    await page.route(`**/api/cerebro/apps/${appID}/token`, async (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify({ key: "sk_e2e", session_id: "session-e2e", expires_at: "2099-01-01T00:00:00Z" }) }));
-    await page.route(`**/api/cerebro/apps-runtime/workers/${appID}/1.0.0/invoke`, async (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify({ formatted_ingredients: "WHEAT flour, MILK", allergens: ["WHEAT", "MILK"] }) }));
+    // Only the token broker is stubbed — it fronts the Firtal registry, which an
+    // e2e run must not call. Everything the app itself does stays real: page and
+    // script come from the runtime, and the worker really runs and really calls
+    // the gateway with the payload the frontend built. That keeps the
+    // frontend/worker contract under test instead of asserting on a mock.
+    await page.route(`**/api/cerebro/apps/${appID}/token`, async (route) => route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({ key: "sk_e2e", session_id: "session-e2e", expires_at: "2099-01-01T00:00:00Z", ai_base_url: gateway.url }),
+    }));
 
     const slug = await loginAsDefault(page);
     await page.goto(`/${slug}/apps`);
@@ -27,6 +37,9 @@ test("opens the allergen app and completes its demo workflow", async ({ page }) 
     await frame.getByLabel("Ingredients").fill("wheat flour, milk");
     await frame.getByRole("button", { name: "Format ingredients" }).click();
     await expect(frame.getByText(/WHEAT flour, MILK/)).toBeVisible();
+    // The worker reached the gateway on the app's personal key, which only
+    // happens when the frontend sent every field the backend requires.
+    expect(gateway.calls()).toEqual(["Bearer sk_e2e"]);
 
     await page.getByRole("button", { name: "Test workflow" }).click();
     await expect(page.getByText("Workflow test succeeded")).toBeVisible();
@@ -34,6 +47,8 @@ test("opens the allergen app and completes its demo workflow", async ({ page }) 
     await db.query("DELETE FROM cerebro_app WHERE id=$1", [appID]);
     await api.setWorkspaceFeatureFlag("cerebro_mini_apps", false);
     await db.end();
+    await runtime.close();
+    await gateway.close();
   }
 });
 
@@ -50,6 +65,51 @@ test("keeps the app catalog usable at phone width", async ({ page }) => {
     await api.setWorkspaceFeatureFlag("cerebro_mini_apps", false);
   }
 });
+
+async function startAppsRuntime() {
+  const { createAppsRuntime } = await import(pathToFileURL(join(process.cwd(), "apps/cerebro-apps-runtime/runtime.mjs")).href);
+  const runtime = createAppsRuntime({
+    bundleRoot: join(process.cwd(), "apps/cerebro-apps-runtime/fixtures"),
+    frameAncestors: process.env.PLAYWRIGHT_BASE_URL ?? "http://localhost:3000",
+  });
+  const server = createServer(async (req, res) => {
+    const chunks: Buffer[] = [];
+    for await (const chunk of req) chunks.push(chunk as Buffer);
+    const response: Response = await runtime.fetch(new Request(`http://127.0.0.1${req.url ?? "/"}`, {
+      method: req.method,
+      headers: req.headers as Record<string, string>,
+      body: chunks.length ? Buffer.concat(chunks) : undefined,
+    }));
+    res.writeHead(response.status, Object.fromEntries(response.headers.entries()));
+    res.end(Buffer.from(await response.arrayBuffer()));
+  });
+  await listen(server, runtimePort);
+  return { close: () => close(server) };
+}
+
+async function startStubGateway() {
+  const calls: string[] = [];
+  const server = createServer((req, res) => {
+    calls.push(req.headers.authorization ?? "");
+    res.setHeader("content-type", "application/json");
+    res.end(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ formatted_ingredients: "WHEAT flour, MILK", allergens: ["WHEAT", "MILK"] }) } }] }));
+  });
+  await listen(server, 0);
+  const address = server.address();
+  if (typeof address === "string" || address === null) throw new Error("stub gateway did not bind a port");
+  return { url: `http://127.0.0.1:${address.port}`, calls: () => calls, close: () => close(server) };
+}
+
+function listen(server: Server, port: number) {
+  return new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(port, "127.0.0.1", resolve);
+  });
+}
+
+function close(server: Server) {
+  return new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
+}
 
 async function seedFixtures(db: pg.Client, workspaceID: string, userID: string) {
   await db.query(`INSERT INTO cerebro_app (id,workspace_id,slug,name,description,icon,folder,owner_id,current_version,status)

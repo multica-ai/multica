@@ -67,6 +67,11 @@ func TestBrokerIssuesAppBoundPersonalKeyAndCachesIt(t *testing.T) {
 	if first.Key != "sk_personal" || first.SessionID == "" || second.Key != first.Key {
 		t.Fatalf("unexpected tokens: first=%+v second=%+v", first, second)
 	}
+	// The app calls whichever gateway belongs to the registry the key came from,
+	// so it never has to hard code an environment of its own.
+	if first.AIBaseURL != server.URL+"/api/ai/proxy/v1" {
+		t.Fatalf("token must carry the gateway base URL for this registry; got %q", first.AIBaseURL)
+	}
 	if calls.Load() != 1 {
 		t.Fatalf("cached key should avoid another exchange; calls=%d", calls.Load())
 	}

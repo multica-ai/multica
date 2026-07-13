@@ -24,6 +24,7 @@ import (
 
 const (
 	exchangePath  = "/api/registry/v1/sessions/exchange"
+	aiProxyPath   = "/api/ai/proxy/v1"
 	defaultTTL    = 3600
 	expirySkew    = 60 * time.Second
 	responseLimit = 64 << 10
@@ -60,6 +61,10 @@ type Token struct {
 	Key       string    `json:"key"`
 	SessionID string    `json:"session_id"`
 	ExpiresAt time.Time `json:"expires_at"`
+	// AIBaseURL is the gateway the app must call with this key. Apps never hard
+	// code an environment: the broker hands out the base URL that belongs to the
+	// registry the key was exchanged against.
+	AIBaseURL string `json:"ai_base_url"`
 }
 
 type Config struct {
@@ -212,7 +217,12 @@ func (b *Broker) exchange(ctx context.Context, identity Identity) (Token, error)
 	if err != nil || response.Key == "" || response.Session.ID == "" {
 		return Token{}, errors.New("app token exchange: response is missing key, session id, or expiry")
 	}
-	return Token{Key: response.Key, SessionID: response.Session.ID, ExpiresAt: expiresAt}, nil
+	return Token{
+		Key:       response.Key,
+		SessionID: response.Session.ID,
+		ExpiresAt: expiresAt,
+		AIBaseURL: strings.TrimRight(b.config.BaseURL, "/") + aiProxyPath,
+	}, nil
 }
 
 func identityCacheKey(identity Identity) (string, error) {

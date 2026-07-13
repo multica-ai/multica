@@ -11,6 +11,7 @@ export type AppToken = {
   key: string;
   session_id: string;
   expires_at: string;
+  ai_base_url: string;
 };
 
 export type AppClientOptions = {
