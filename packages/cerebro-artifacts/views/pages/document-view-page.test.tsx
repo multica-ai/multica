@@ -79,7 +79,9 @@ vi.mock("@multica/views/common/actor-avatar", () => ({
 }));
 
 vi.mock("../components/artifact-content", () => ({
-  ArtifactContent: () => <div data-testid="readonly-artifact-content" />,
+  ArtifactContent: ({ className }: { className?: string }) => (
+    <div data-testid="readonly-artifact-content" data-classname={className} />
+  ),
 }));
 
 vi.mock("@multica/views/editor", () => ({
@@ -193,5 +195,16 @@ describe("DocumentViewPage markdown body", () => {
     );
 
     expect(screen.getByLabelText("Markdown editor")).toBeInTheDocument();
+  });
+
+  // FIR-3190 — the readonly path was missing the same 70ch-cap override the
+  // editable path applies, squeezing wide tables (e.g. AI CFO reports) into a
+  // narrow column and shredding cell text mid-word.
+  it("lifts the 70ch readability cap on readonly document bodies so wide tables can use the full width", () => {
+    renderPage(artifact({ format: "pdf" }));
+
+    expect(
+      screen.getByTestId("readonly-artifact-content"),
+    ).toHaveAttribute("data-classname", "!max-w-none");
   });
 });
