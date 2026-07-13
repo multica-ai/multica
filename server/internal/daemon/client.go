@@ -166,10 +166,20 @@ func (c *Client) setIdentityHeaders(req *http.Request) {
 	if c.os != "" {
 		req.Header.Set("X-Client-OS", c.os)
 	}
-	req.Header.Set("X-Client-Capabilities", strings.Join([]string{
+	req.Header.Set("X-Client-Capabilities", daemonClientCapabilities())
+}
+
+// daemonClientCapabilities is the X-Client-Capabilities value the daemon
+// advertises on BOTH the HTTP control-plane requests and the WS handshake, so a
+// claim built over WS gets the same capability gating (skill refs,
+// coalesced-comments) as the HTTP path. rpc-v1 advertises WS request/response
+// support (MUL-4257).
+func daemonClientCapabilities() string {
+	return strings.Join([]string{
 		protocol.DaemonCapabilitySkillBundlesV1,
 		protocol.DaemonCapabilityCoalescedCommentsV1,
-	}, ","))
+		protocol.DaemonCapabilityRPCV1,
+	}, ",")
 }
 
 // SetToken sets the auth token for authenticated requests.

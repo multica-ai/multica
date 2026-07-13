@@ -217,7 +217,7 @@ type Daemon struct {
 	// race where a new task slipping in during the release-metadata fetch
 	// would be cancelled by triggerRestart's root-ctx cancel.
 	claimMu        sync.Mutex
-	pauseClaims    bool // when true, runRuntimePoller skips ClaimTask
+	pauseClaims    bool // when true, the batch poller skips claiming
 	claimsInFlight int  // pollers that have decided to claim but haven't yet handed the task off to handleTask
 
 	activeEnvRootsMu sync.Mutex
@@ -2490,67 +2490,49 @@ func (d *Daemon) triggerRestart() {
 	}
 }
 
-// pollLoop supervises one runtimePoller goroutine per registered runtime,
-// fans wake-up signals out to all of them, and waits for in-flight tasks to
-// drain on shutdown. Per-runtime workers replace the previous round-robin
-// loop so that a slow ClaimTask call (HTTP 30s timeout) for one runtime no
-// longer delays claims on every other runtime — that was the cross-workspace
-// stall mode reported in MUL-1744.
+// pollLoop runs the machine-level batch claim poller (MUL-4257): a single
+// goroutine claims across ALL of the daemon's runtimes per cycle via
+// ClaimTasksWSFirst (WS-first, HTTP fallback), replacing the previous
+// one-HTTP-poller-per-runtime model. Wake-up signals — a WS task_available /
+// catch-up nudge or a runtime-set change — all collapse to one nudge because a
+// batch claim already covers every runtime. On shutdown it stops the poller,
+// then drains in-flight tasks.
+//
+// This trades the per-runtime isolation the old model gave (MUL-1744) for a
+// single request; the head-of-line risk is bounded by ClaimTasksWSFirst's short
+// per-request timeout (WS) / the client's timeout (HTTP fallback), and the
+// server-side batch claim is index-backed + short.
 func (d *Daemon) pollLoop(ctx context.Context, taskWakeups <-chan taskWakeup) error {
 	sem := newTaskSlotSemaphore(d.cfg.MaxConcurrentTasks)
-	var taskWG sync.WaitGroup   // tracks in-flight handleTask goroutines
-	var pollerWG sync.WaitGroup // tracks runRuntimePoller goroutines
+	var taskWG sync.WaitGroup // tracks in-flight handleTask goroutines
 
 	runtimeSetCh, unsub := d.runtimeSet.Subscribe()
 	defer unsub()
 
-	type pollerHandle struct {
-		cancel context.CancelFunc
-		wakeup chan struct{}
-	}
-	pollers := make(map[string]*pollerHandle)
-
-	syncPollers := func() {
-		want := make(map[string]struct{})
-		for _, rid := range d.allRuntimeIDs() {
-			want[rid] = struct{}{}
-		}
-		for rid, h := range pollers {
-			if _, ok := want[rid]; !ok {
-				h.cancel()
-				delete(pollers, rid)
-			}
-		}
-		for rid := range want {
-			if _, ok := pollers[rid]; ok {
-				continue
-			}
-			pctx, pcancel := context.WithCancel(ctx)
-			wakeup := make(chan struct{}, 1)
-			pollers[rid] = &pollerHandle{cancel: pcancel, wakeup: wakeup}
-			pollerWG.Add(1)
-			go func(rid string, pctx context.Context, wakeup <-chan struct{}) {
-				defer pollerWG.Done()
-				d.runRuntimePoller(pctx, ctx, rid, sem, wakeup, &taskWG)
-			}(rid, pctx, wakeup)
+	wakeup := make(chan struct{}, 1)
+	nudge := func() {
+		select {
+		case wakeup <- struct{}{}:
+		default:
 		}
 	}
 
-	syncPollers()
+	pollerCtx, pollerCancel := context.WithCancel(ctx)
+	pollerDone := make(chan struct{})
+	go func() {
+		defer close(pollerDone)
+		d.runBatchPoller(pollerCtx, ctx, sem, wakeup, &taskWG)
+	}()
 
 	for {
 		select {
 		case <-ctx.Done():
 			d.logger.Info("poll loop stopping, waiting for in-flight tasks", "max_wait", "30s")
-			for _, h := range pollers {
-				h.cancel()
-			}
-			// Wait for all pollers to fully return before waiting on taskWG.
-			// Otherwise a poller that's between ClaimTask and taskWG.Add(1)
-			// could race with taskWG.Wait when the counter is zero, which
-			// is an undefined sync.WaitGroup misuse.
-			pollerWG.Wait()
-
+			pollerCancel()
+			// Wait for the poller to fully return before waiting on taskWG so a
+			// poller between ClaimTasksWSFirst and taskWG.Add(1) cannot race
+			// taskWG.Wait at a zero counter.
+			<-pollerDone
 			waitDone := make(chan struct{})
 			go func() { taskWG.Wait(); close(waitDone) }()
 			select {
@@ -2560,69 +2542,31 @@ func (d *Daemon) pollLoop(ctx context.Context, taskWakeups <-chan taskWakeup) er
 			}
 			return ctx.Err()
 		case <-runtimeSetCh:
-			syncPollers()
-		case wakeup := <-taskWakeups:
-			if wakeup.runtimeID != "" {
-				if h, ok := pollers[wakeup.runtimeID]; ok {
-					d.logger.Debug("task wakeup: signaling runtime poller", "runtime_id", wakeup.runtimeID)
-					select {
-					case h.wakeup <- struct{}{}:
-					default:
-					}
-				} else {
-					d.logger.Debug("task wakeup: runtime poller not found", "runtime_id", wakeup.runtimeID, "pollers", len(pollers))
-				}
-				continue
-			}
-
-			// A wakeup without a runtime_id is a catch-up signal (for example,
-			// immediately after the websocket connects). Fan it out so queued
-			// work that existed before the connection is still discovered.
-			d.logger.Debug("task wakeup: fanning out to pollers", "pollers", len(pollers))
-			for _, h := range pollers {
-				select {
-				case h.wakeup <- struct{}{}:
-				default:
-				}
-			}
+			// The batch poller re-derives allRuntimeIDs() each cycle; nudge it to
+			// pick up a registered/removed runtime promptly.
+			nudge()
+		case <-taskWakeups:
+			// Targeted-runtime and catch-up wakeups both trigger one batch claim
+			// across the whole runtime set.
+			nudge()
 		}
 	}
 }
 
-// runRuntimePoller is the per-runtime claim+dispatch loop. It owns its own
-// poll cadence and wakeup channel so that a slow HTTP claim for this runtime
-// cannot delay any other runtime's claims.
+// runBatchPoller is the single machine-level claim+dispatch loop. Each cycle it
+// acquires whatever execution slots are free (slot-before-claim, so a claimed
+// task never sits server-side `dispatched` without local capacity to run it and
+// race the dispatch-timeout sweeper), asks the server for up to that many tasks
+// across all of the daemon's runtimes in one call, and dispatches each returned
+// task — routed to its runtime by handleTask — into a slot.
 //
-// The execution slot is acquired BEFORE ClaimTask. The alternative —
-// claiming first and then waiting for a slot — would let claimed tasks pile
-// up in the server-side `dispatched` state without a corresponding
-// StartTask, and the server's sweeper would fail them as `failed/timeout`
-// after dispatchTimeoutSeconds=300s (runtime_sweeper.go:25). That is the
-// exact user-visible failure this issue is fixing, so we cannot risk
-// recreating it under load.
-//
-// Slot-before-claim does mean a slow claim holds a slot during its HTTP
-// roundtrip; the upper bound is `client.Timeout = 30s` (client.go:59), well
-// below the 300s dispatch timeout, so other runtimes' tasks stay in
-// server-side `queued` state (which has no timeout) rather than entering
-// `dispatched` and racing the sweeper.
-//
-// pollerCtx is cancelled when this runtime is removed from the watched set
-// (e.g. workspace de-registered). parentCtx is the daemon's root ctx and is
-// passed to handleTask so an in-flight task is not killed just because the
-// runtime set changed mid-flight — the task continues to run until the
-// daemon itself shuts down (or the server cancels it).
-func (d *Daemon) runRuntimePoller(
-	pollerCtx, parentCtx context.Context,
-	rid string,
-	sem chan int,
-	wakeup <-chan struct{},
-	taskWG *sync.WaitGroup,
-) {
-	if offset := runtimePollOffset(rid, d.cfg.PollInterval); offset > 0 {
-		d.logger.Debug("poll: initial offset", "runtime_id", rid, "offset", offset)
-		if err := sleepWithContextOrWakeup(pollerCtx, offset, wakeup); err != nil {
-			return
+// pollerCtx is cancelled on shutdown. parentCtx is the daemon root ctx passed to
+// handleTask so an in-flight task is not killed just because the poll loop is
+// stopping mid-flight.
+func (d *Daemon) runBatchPoller(pollerCtx, parentCtx context.Context, sem chan int, wakeup <-chan struct{}, taskWG *sync.WaitGroup) {
+	releaseSlots := func(slots []int) {
+		for _, sl := range slots {
+			sem <- sl
 		}
 	}
 
@@ -2631,15 +2575,21 @@ func (d *Daemon) runRuntimePoller(
 			return
 		}
 
-		// Acquire an execution slot before claiming. If at capacity, sleep
-		// without claiming so we don't push a task into `dispatched` and
-		// then race the 5-min server-side dispatch timeout while waiting.
+		runtimeIDs := d.allRuntimeIDs()
+		if len(runtimeIDs) == 0 {
+			if err := sleepWithContextOrWakeup(pollerCtx, d.cfg.PollInterval, wakeup); err != nil {
+				return
+			}
+			continue
+		}
+
+		// Acquire at least one slot (blocking briefly), then grab any other free
+		// slots so a single batch claim can fill them all.
 		slot, acquired, woke, err := waitForTaskSlot(pollerCtx, sem, wakeup, taskSlotWaitTimeout)
 		if err != nil {
 			return
 		}
 		if !acquired {
-			d.logger.Debug("poll: at capacity", "runtime_id", rid, "running", d.cfg.MaxConcurrentTasks)
 			if woke {
 				continue
 			}
@@ -2648,34 +2598,24 @@ func (d *Daemon) runRuntimePoller(
 			}
 			continue
 		}
+		slots := append([]int{slot}, drainAvailableSlots(sem, d.cfg.MaxConcurrentTasks-1)...)
 
-		// Refuse new claims while an auto-update is preparing to roll the
-		// process. The barrier is paired with a re-check of claimsInFlight +
-		// activeTasks inside tryAutoUpdate, so once we get past tryEnterClaim
-		// the auto-update path is guaranteed to defer until this poller has
-		// handed the task off (or given up).
+		// Auto-update barrier: refuse to claim while an update prepares to roll
+		// the process (paired with the re-check in tryAutoUpdate).
 		if !d.tryEnterClaim() {
-			sem <- slot
+			releaseSlots(slots)
 			if err := sleepWithContextOrWakeup(pollerCtx, d.cfg.PollInterval, wakeup); err != nil {
 				return
 			}
 			continue
 		}
 
-		task, err := d.client.ClaimTask(pollerCtx, rid)
+		tasks, err := d.ClaimTasksWSFirst(pollerCtx, d.cfg.DaemonID, runtimeIDs, len(slots))
 		if err != nil {
 			d.exitClaim()
-			sem <- slot
+			releaseSlots(slots)
 			if pollerCtx.Err() == nil {
-				if isRuntimeNotFoundError(err) {
-					// Server says this runtime is gone — recover and exit
-					// the poller; the runtime-set watcher will tear this
-					// goroutine down via pollerCtx once the workspace is
-					// re-registered with a new runtime ID.
-					go d.handleRuntimeGone(rid)
-					return
-				}
-				d.logger.Warn("claim task failed", "runtime_id", rid, "error", err)
+				d.logger.Warn("batch claim failed", "error", err)
 			}
 			if err := sleepWithContextOrWakeup(pollerCtx, d.cfg.PollInterval, wakeup); err != nil {
 				return
@@ -2683,40 +2623,63 @@ func (d *Daemon) runRuntimePoller(
 			continue
 		}
 
-		if task == nil {
-			d.exitClaim()
-			sem <- slot
-			if err := sleepWithContextOrWakeup(pollerCtx, d.cfg.PollInterval, wakeup); err != nil {
-				return
+		// Dispatch each claimed task into a slot. activeTasks is incremented for
+		// every dispatched task BEFORE exitClaim so the auto-update barrier never
+		// sees a zero-claims / zero-active window between claim and dispatch.
+		dispatched := 0
+		for i := range tasks {
+			if i >= len(slots) || tasks[i] == nil {
+				break
 			}
-			continue
+			t := *tasks[i]
+			slot := slots[i]
+			taskTarget := t.IssueID
+			if taskTarget == "" && t.ChatSessionID != "" {
+				taskTarget = "chat:" + shortID(t.ChatSessionID)
+			}
+			d.logger.Info("task received", "task", shortID(t.ID), "target", taskTarget)
+			taskWG.Add(1)
+			d.activeTasks.Add(1)
+			go func(t Task, slot int) {
+				defer taskWG.Done()
+				defer d.activeTasks.Add(-1)
+				defer func() { sem <- slot }()
+				d.handleTask(parentCtx, t, slot)
+			}(t, slot)
+			dispatched++
+		}
+		d.exitClaim()
+		if dispatched < len(slots) {
+			releaseSlots(slots[dispatched:])
 		}
 
-		taskTarget := task.IssueID
-		if taskTarget == "" && task.ChatSessionID != "" {
-			taskTarget = "chat:" + shortID(task.ChatSessionID)
+		// If we filled every slot, more work may be queued — loop immediately.
+		// Otherwise wait for the next wakeup / poll interval.
+		if dispatched > 0 && dispatched == len(slots) {
+			continue
 		}
-		d.logger.Info("task received", "task", shortID(task.ID), "target", taskTarget)
-		taskWG.Add(1)
-		d.activeTasks.Add(1)
-		go func(t Task, slot int) {
-			defer taskWG.Done()
-			defer d.exitClaim()
-			defer d.activeTasks.Add(-1)
-			defer func() { sem <- slot }()
-			d.handleTask(parentCtx, t, slot)
-		}(*task, slot)
-		// Loop immediately: more tasks may already be queued for this runtime.
+		if err := sleepWithContextOrWakeup(pollerCtx, d.cfg.PollInterval, wakeup); err != nil {
+			return
+		}
 	}
 }
 
-func runtimePollOffset(runtimeID string, interval time.Duration) time.Duration {
-	if interval <= 0 || runtimeID == "" {
-		return 0
+// drainAvailableSlots non-blockingly pulls up to max additional slots from the
+// semaphore, returning immediately when none are free.
+func drainAvailableSlots(sem chan int, max int) []int {
+	if max <= 0 {
+		return nil
 	}
-	h := fnv.New64a()
-	_, _ = h.Write([]byte(runtimeID))
-	return time.Duration(h.Sum64() % uint64(interval))
+	var slots []int
+	for len(slots) < max {
+		select {
+		case s := <-sem:
+			slots = append(slots, s)
+		default:
+			return slots
+		}
+	}
+	return slots
 }
 
 func capacityBackoff(pollInterval time.Duration) time.Duration {
