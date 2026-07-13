@@ -133,3 +133,4 @@ func TestFailureSystemCommentStampsSourceTaskID(t *testing.T) {
 		t.Fatalf("failure system comment source_task_id = %q, want %q (task.ID)", got, want)
 	}
 }
+

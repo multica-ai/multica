@@ -40,7 +40,6 @@ var legacyDuplicateMigrationStems = map[string][]string{
 	"111": {"111_issue_origin_lark_chat", "111_workspace_avatar"},
 	"112": {"112_issue_dates_to_date", "112_lark_installation_bot_union_id"},
 	"113": {"113_lark_inbound_dedup_per_installation", "113_sys_cron_executions"},
-	"118": {"118_workspace_invitation_preauth", "118_workspace_invitation_welcome_seen"},
 	"119": {"119_invitation_invitee_name", "119_user_created_at_index"},
 	"120": {"120_autopilot_subscriber", "120_comment_source_task_id", "120_github_pending_installation", "120_runtime_profile"},
 	"122": {"122_lark_chat_session_binding_thread_reply", "122_task_handoff_note"},
