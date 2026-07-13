@@ -450,6 +450,17 @@
     "delete_issue": "Delete issue"
   },
   "pickers": {
+    "custom_property": {
+      "empty": "Empty",
+      "clear_action": "Clear",
+      "true_label": "Yes",
+      "false_label": "No",
+      "value_placeholder": "Enter value…",
+      "url_placeholder": "https://…",
+      "number_placeholder": "0",
+      "open_link": "Open link",
+      "archived_hint": "Archived property — value is read-only"
+    },
     "filter_options_aria": "Filter options",
     "no_results": "No results",
     "assignee": {

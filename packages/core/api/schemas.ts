@@ -18,6 +18,9 @@ import type {
   GroupedIssuesResponse,
   InboxWorkspaceUnread,
   Label,
+  IssueProperty,
+  ListPropertiesResponse,
+  IssuePropertiesResponse,
   ListIssuesResponse,
   ListLabelsResponse,
   ListWebhookDeliveriesResponse,
@@ -75,6 +78,68 @@ export const ResourceLabelsResponseSchema = z.object({
 
 export const EMPTY_RESOURCE_LABELS_RESPONSE: ResourceLabelsResponse = {
   labels: [],
+};
+
+// Custom property definitions. `type` stays a lenient string so newer server
+// types don't break installed clients; UI narrows with isKnownPropertyType.
+export const IssuePropertySchema = z.object({
+  id: z.string(),
+  workspace_id: z.string(),
+  name: z.string(),
+  type: z.string(),
+  description: z.string().optional().default(""),
+  config: z.object({
+    options: z.array(z.object({
+      id: z.string(),
+      name: z.string(),
+      color: z.string().optional().default("#6b7280"),
+    }).loose()).optional(),
+  }).loose().default({}),
+  position: z.number().optional().default(0),
+  archived: z.boolean().optional().default(false),
+  archived_at: z.string().nullable().optional(),
+  usage_count: z.number().optional().default(0),
+  created_at: z.string(),
+  updated_at: z.string(),
+}).loose();
+
+export const EMPTY_ISSUE_PROPERTY: IssueProperty = {
+  id: "",
+  workspace_id: "",
+  name: "",
+  type: "text",
+  description: "",
+  config: {},
+  position: 0,
+  archived: false,
+  usage_count: 0,
+  created_at: "",
+  updated_at: "",
+};
+
+export const ListPropertiesResponseSchema = z.object({
+  properties: z.array(IssuePropertySchema).default([]),
+  total: z.number().default(0),
+}).loose();
+
+export const EMPTY_LIST_PROPERTIES_RESPONSE: ListPropertiesResponse = {
+  properties: [],
+  total: 0,
+};
+
+// Value bag: keyed by definition UUID; values are primitives or string
+// arrays (multi_select). Unknown shapes are dropped per-key rather than
+// failing the whole issue parse.
+export const IssuePropertyValuesSchema = z
+  .record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.array(z.string())]))
+  .default({});
+
+export const IssuePropertiesResponseSchema = z.object({
+  properties: IssuePropertyValuesSchema,
+}).loose();
+
+export const EMPTY_ISSUE_PROPERTIES_RESPONSE: IssuePropertiesResponse = {
+  properties: {},
 };
 
 export interface AppConfigResponse {
@@ -333,6 +398,9 @@ export const IssueSchema = z.object({
   start_date: z.string().nullable(),
   due_date: z.string().nullable(),
   metadata: IssueMetadataSchema,
+  // Older backends predate custom properties; default {} so consumers never
+  // nil-guard issue.properties.
+  properties: IssuePropertyValuesSchema,
   reactions: z.array(z.unknown()).optional(),
   labels: z.array(z.unknown()).optional(),
   created_at: z.string(),

@@ -361,6 +361,7 @@ const issueDefaults = {
   position: 0,
   stage: null,
   metadata: {},
+  properties: {},
 };
 
 const mockIssues: Issue[] = [

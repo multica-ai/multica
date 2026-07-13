@@ -20,6 +20,7 @@ import {
   Pin,
   PinOff,
   Plus,
+  SlidersHorizontal,
   Tag,
   Unlink,
   Users,
@@ -52,6 +53,7 @@ import { useUpdateIssue } from "@multica/core/issues/mutations";
 import { toast } from "sonner";
 import { StatusIcon, PriorityIcon, StatusPicker, PriorityPicker, StagePicker, StartDatePicker, DueDatePicker, AssigneePicker, LabelPicker } from ".";
 import { maxSiblingStage } from "./pickers/stage-picker";
+import { CustomPropertyValueEditor } from "./pickers/custom-property-picker";
 import { IssueActionsDropdown, useIssueActions } from "../actions";
 import { ProjectPicker } from "../../projects/components/project-picker";
 import { LocalDirectoryHint } from "../../projects/components/local-directory-hint";
@@ -74,6 +76,7 @@ import { issueListOptions, issueDetailOptions, childIssuesOptions, issueUsageOpt
 import { projectDetailOptions } from "@multica/core/projects/queries";
 import { ProjectIcon } from "../../projects/components/project-icon";
 import { issueLabelsOptions } from "@multica/core/labels";
+import { propertyListOptions } from "@multica/core/properties";
 import { memberListOptions, agentListOptions } from "@multica/core/workspace/queries";
 import { useCommentComposerStore, useRecentIssuesStore } from "@multica/core/issues/stores";
 import { useIssueSelectionStore } from "@multica/core/issues/stores/selection-store";
@@ -760,6 +763,10 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   const [visibleOptionalProps, setVisibleOptionalProps] = useState<Set<OptionalPropKey>>(
     () => new Set(),
   );
+  // Same progressive-disclosure machinery for custom properties, keyed by
+  // property definition id instead of a static key union.
+  const [visibleCustomProps, setVisibleCustomProps] = useState<Set<string>>(() => new Set());
+  const [autoOpenCustomProp, setAutoOpenCustomProp] = useState<string | null>(null);
   // Optional property to auto-open as soon as it's mounted (the user just
   // picked it from "+ Add property" and we want them dropped straight into
   // edit state). Consumed by the row that matches this key, cleared after.
@@ -1336,6 +1343,11 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   const { data: attachedLabels = [] } = useQuery(issueLabelsOptions(wsId, id));
   const attachedLabelsCount = attachedLabels.length;
 
+  // Custom property catalog. Includes archived definitions: an issue can
+  // still carry a value written before the archive, and that row must stay
+  // renderable (read-only) until someone clears it.
+  const { data: workspaceProperties = [] } = useQuery(propertyListOptions(wsId, true));
+
   // Seed the visible-optional-props set:
   //   - on issue switch, reset to whichever fields are currently set
   //   - on the SAME issue, additively pick up fields the user just set
@@ -1347,11 +1359,13 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     if (seededIssueIdRef.current !== issue.id) {
       seededIssueIdRef.current = issue.id;
       setAutoOpenProp(null);
+      setAutoOpenCustomProp(null);
       const seed = new Set<OptionalPropKey>();
       for (const k of OPTIONAL_PROP_KEYS) {
         if (isOptionalPropSet(issue, k, attachedLabelsCount)) seed.add(k);
       }
       setVisibleOptionalProps(seed);
+      setVisibleCustomProps(new Set(Object.keys(issue.properties ?? {})));
       return;
     }
     setVisibleOptionalProps((prev) => {
@@ -1360,6 +1374,16 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
         if (isOptionalPropSet(issue, k, attachedLabelsCount) && !next.has(k)) {
           if (next === prev) next = new Set(prev);
           next.add(k);
+        }
+      }
+      return next;
+    });
+    setVisibleCustomProps((prev) => {
+      let next = prev;
+      for (const propertyId of Object.keys(issue.properties ?? {})) {
+        if (!next.has(propertyId)) {
+          if (next === prev) next = new Set(prev);
+          next.add(propertyId);
         }
       }
       return next;
@@ -1382,6 +1406,17 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     [],
   );
 
+  const addCustomProp = useCallback((propertyId: string) => {
+    setVisibleCustomProps((prev) => {
+      if (prev.has(propertyId)) return prev;
+      const next = new Set(prev);
+      next.add(propertyId);
+      return next;
+    });
+    setAutoOpenCustomProp(propertyId);
+    setAddPropPopoverOpen(false);
+  }, []);
+
   // Clear the auto-open flag after the next render so pickers (which read
   // `defaultOpen` once via a useState initializer) keep the open state they
   // captured on mount, but later interactions don't re-trigger it.
@@ -1389,6 +1424,11 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     if (autoOpenProp === null) return;
     setAutoOpenProp(null);
   }, [autoOpenProp]);
+
+  useEffect(() => {
+    if (autoOpenCustomProp === null) return;
+    setAutoOpenCustomProp(null);
+  }, [autoOpenCustomProp]);
 
   const handleToggleSidebar = useCallback(() => {
     if (isMobile) {
@@ -1558,11 +1598,32 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
             </PropRow>
           )}
 
+          {/* Custom properties — same progressive disclosure as the
+              built-in optional props: a row renders when the issue has a
+              value OR the user added the property this session. Archived
+              definitions render read-only until their value is cleared. */}
+          {workspaceProperties
+            .filter(
+              (p) =>
+                issue.properties?.[p.id] !== undefined ||
+                (!p.archived && visibleCustomProps.has(p.id)),
+            )
+            .map((p) => (
+              <PropRow key={p.id} label={p.name}>
+                <CustomPropertyValueEditor
+                  issue={issue}
+                  property={p}
+                  defaultOpen={autoOpenCustomProp === p.id}
+                />
+              </PropRow>
+            ))}
+
           {/* "+ Add property" — opens a Popover listing optional fields
               not yet displayed. Hidden once every optional field is on
               screen. Sits inside the same grid as a full-row, with its
               own padding so the visual rhythm follows the rows above. */}
-          {OPTIONAL_PROP_KEYS.some((k) => !visibleOptionalProps.has(k) && (k !== "stage" || issue.parent_issue_id != null)) && (
+          {(OPTIONAL_PROP_KEYS.some((k) => !visibleOptionalProps.has(k) && (k !== "stage" || issue.parent_issue_id != null)) ||
+            workspaceProperties.some((p) => !p.archived && !visibleCustomProps.has(p.id) && issue.properties?.[p.id] === undefined)) && (
             <div className="col-span-2 mt-1">
               <Popover open={addPropPopoverOpen} onOpenChange={setAddPropPopoverOpen}>
                 <PopoverTrigger
@@ -1607,6 +1668,31 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                       </span>
                     </button>
                   ))}
+                  {(() => {
+                    const addable = workspaceProperties.filter(
+                      (p) =>
+                        !p.archived &&
+                        !visibleCustomProps.has(p.id) &&
+                        issue.properties?.[p.id] === undefined,
+                    );
+                    if (addable.length === 0) return null;
+                    return (
+                      <>
+                        <div className="my-1 h-px bg-border" />
+                        {addable.map((p) => (
+                          <button
+                            key={p.id}
+                            type="button"
+                            onClick={() => addCustomProp(p.id)}
+                            className="flex w-full items-center gap-2 rounded-md px-2 py-1 text-xs text-foreground/90 transition-colors hover:bg-accent focus-visible:bg-accent focus-visible:outline-none"
+                          >
+                            <SlidersHorizontal className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                            <span className="truncate">{p.name}</span>
+                          </button>
+                        ))}
+                      </>
+                    );
+                  })()}
                 </PopoverContent>
               </Popover>
             </div>

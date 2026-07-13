@@ -13,7 +13,7 @@ import {
   patchIssueInBuckets,
 } from "./cache-helpers";
 import { cleanupDeletedIssueCaches } from "./delete-cache";
-import type { Issue, IssueLabelsResponse, IssueMetadata, Label } from "../types";
+import type { Issue, IssueLabelsResponse, IssueMetadata, IssuePropertyValues, Label } from "../types";
 import type { ListIssuesCache } from "../types";
 
 export function onIssueCreated(
@@ -201,6 +201,27 @@ export function onIssueMetadataChanged(
   }
   qc.setQueryData<Issue>(issueKeys.detail(wsId, issueId), (old) =>
     old ? { ...old, metadata } : old,
+  );
+  qc.invalidateQueries({ queryKey: issueKeys.myAll(wsId) });
+}
+
+/**
+ * Apply a custom-property bag snapshot to the issue detail + list caches.
+ * Mirrors onIssueMetadataChanged: the server emits the FULL post-mutation
+ * bag on every single-key write, so we replace rather than merge. Also used
+ * directly by the useSetIssueProperty/useUnsetIssueProperty optimistic path.
+ */
+export function onIssuePropertiesChanged(
+  qc: QueryClient,
+  wsId: string,
+  issueId: string,
+  properties: IssuePropertyValues,
+) {
+  for (const [key, data] of qc.getQueriesData<ListIssuesCache>({ queryKey: issueKeys.list(wsId) })) {
+    if (data) qc.setQueryData<ListIssuesCache>(key, patchIssueInBuckets(data, issueId, { properties }));
+  }
+  qc.setQueryData<Issue>(issueKeys.detail(wsId, issueId), (old) =>
+    old ? { ...old, properties } : old,
   );
   qc.invalidateQueries({ queryKey: issueKeys.myAll(wsId) });
 }
