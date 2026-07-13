@@ -199,12 +199,12 @@ S3 앞에 CloudFront를 두는 경우 세 가지 변수가 적용됩니다: `CLO
 
 | 변수 | 기본값 | 설명 |
 |---|---|---|
-| `FRONTEND_ORIGIN` | 비어 있음 | 프론트엔드 주소. 초대 이메일 링크, CORS 허용 목록, cookie 도메인이 모두 이 값에서 파생됩니다. 설정하지 않으면 초대 이메일 링크는 호스팅 도메인 `https://app.multica.ai`로 폴백합니다 — 자체 호스팅은 이를 명시적으로 설정해야 합니다 |
+| `FRONTEND_ORIGIN` | 비어 있음 | 프론트엔드 주소. 초대 이메일 링크, CORS 허용 목록, cookie 도메인이 모두 이 값에서 파생됩니다. 설정하지 않으면 초대 이메일 링크는 호스팅 도메인 `https://multica.ai`로 폴백합니다 — 자체 호스팅은 이를 명시적으로 설정해야 합니다 |
 | `CORS_ALLOWED_ORIGINS` | 비어 있음 | 추가로 허용할 CORS origin (쉼표로 구분) |
 | `ALLOWED_ORIGINS` | 비어 있음 | WebSocket 전용 origin 허용 목록 (쉼표로 구분); 설정하지 않으면 폴백 순서는 `CORS_ALLOWED_ORIGINS` → `FRONTEND_ORIGIN` → `localhost:3000/5173/5174`입니다 |
 
 <Callout type="warning">
-**`FRONTEND_ORIGIN`을 설정하지 않으면 두 가지 조용한 실패가 발생합니다**: (1) 초대 이메일 링크가 `https://app.multica.ai`(호스팅 도메인)를 가리켜, 클릭해도 사용자가 자체 호스팅 인스턴스로 돌아오지 않습니다; (2) WebSocket Origin 검사가 `localhost:3000 / 5173 / 5174`로 폴백하여, 프로덕션 배포의 모든 WebSocket 연결이 거부되고 프론트엔드가 "실시간 업데이트를 받지 못하는" 것처럼 보입니다.
+**`FRONTEND_ORIGIN`을 설정하지 않으면 두 가지 조용한 실패가 발생합니다**: (1) 초대 이메일 링크가 `https://multica.ai`(호스팅 도메인)를 가리켜, 클릭해도 사용자가 자체 호스팅 인스턴스로 돌아오지 않습니다; (2) WebSocket Origin 검사가 `localhost:3000 / 5173 / 5174`로 폴백하여, 프로덕션 배포의 모든 WebSocket 연결이 거부되고 프론트엔드가 "실시간 업데이트를 받지 못하는" 것처럼 보입니다.
 </Callout>
 
 ## GitHub 연동

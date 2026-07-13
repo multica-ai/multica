@@ -139,8 +139,8 @@ func newComposioTestHandler(t *testing.T, sdkFake composio.SDK, store composio.S
 	t.Helper()
 	svc, err := composio.NewService(sdkFake, store, composio.Config{
 		StateSecret:     []byte("handler-test-secret"),
-		CallbackBaseURL: "https://app.multica.ai",
-		FrontendBaseURL: "https://app.multica.ai",
+		CallbackBaseURL: "https://multica.ai",
+		FrontendBaseURL: "https://multica.ai",
 	})
 	if err != nil {
 		t.Fatalf("NewService: %v", err)
