@@ -3,6 +3,10 @@ import { selectSkillAssignments } from "./queries";
 import type { Agent } from "../types/agent";
 
 function makeAgent(overrides: Partial<Agent> & { id: string }): Agent {
+  // This factory only sets the fields that selectSkillAssignments reads.
+  // The full Agent shape has more required fields (status, runtime_id format,
+  // etc.) that the function under test doesn't touch, so we cast to keep the
+  // test focused on the selector's logic, not on Agent-shape plumbing.
   return {
     workspace_id: "ws-1",
     runtime_id: "rt-1",
@@ -10,11 +14,12 @@ function makeAgent(overrides: Partial<Agent> & { id: string }): Agent {
     description: "",
     instructions: "",
     avatar_url: null,
-    runtime_mode: "autonomous",
+    runtime_mode: "cloud",
     runtime_config: {},
     custom_args: [],
-    invocation_policy: {},
-    visibility: "public_to_workspace",
+    visibility: "workspace",
+    permission_mode: "public_to",
+    invocation_targets: [],
     owner_id: null,
     skills: [],
     created_at: "2026-01-01T00:00:00Z",
@@ -22,7 +27,7 @@ function makeAgent(overrides: Partial<Agent> & { id: string }): Agent {
     archived_at: null,
     archived_by: null,
     ...overrides,
-  };
+  } as Agent;
 }
 
 function makeSkillSummary(id: string) {
