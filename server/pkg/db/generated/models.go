@@ -824,9 +824,9 @@ type Project struct {
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
 	Priority    string             `json:"priority"`
-	SpaceID     pgtype.UUID        `json:"space_id"`
 	StartDate   pgtype.Date        `json:"start_date"`
 	DueDate     pgtype.Date        `json:"due_date"`
+	SpaceID     pgtype.UUID        `json:"space_id"`
 }
 
 type ProjectResource struct {

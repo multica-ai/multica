@@ -47,7 +47,7 @@ func defaultSpaceKeyFromSlug(slug string) string {
 	return key
 }
 
-// normalizeSpaceKey mirrors pg_temp.normalize_space_key in migration 161 (minus
+// normalizeSpaceKey mirrors pg_temp.normalize_space_key in migration 167 (minus
 // the 'SPACE' fallback, which callers decide): uppercase, strip characters
 // outside [A-Z0-9], truncate to 7, and prefix digit-leading keys with 'T'.
 func normalizeSpaceKey(raw string) string {

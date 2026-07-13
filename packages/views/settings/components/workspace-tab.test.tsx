@@ -9,6 +9,7 @@ import enSettings from "../../locales/en/settings.json";
 const mockUpdateWorkspace = vi.hoisted(() => vi.fn());
 const mockNavigationPush = vi.hoisted(() => vi.fn());
 const mockNavigationReplace = vi.hoisted(() => vi.fn());
+const mockInvalidateQueries = vi.hoisted(() => vi.fn());
 const mockToastSuccess = vi.hoisted(() => vi.fn());
 const workspaceRef = vi.hoisted(() => ({
   current: {
@@ -17,6 +18,7 @@ const workspaceRef = vi.hoisted(() => ({
     slug: "test-workspace",
     description: "",
     context: "",
+    issue_prefix: "TES",
     repos: [] as { url: string }[],
   },
 }));
@@ -37,7 +39,7 @@ vi.mock("@tanstack/react-query", () => ({
   useQueryClient: () => ({
     setQueryData: vi.fn(),
     getQueryData: vi.fn(() => []),
-    invalidateQueries: vi.fn(),
+    invalidateQueries: mockInvalidateQueries,
   }),
 }));
 
@@ -150,6 +152,7 @@ describe("WorkspaceTab — automatic updates", () => {
       slug: "test-workspace",
       description: "",
       context: "",
+      issue_prefix: "TES",
       repos: [],
     };
     membersRef.current = [{ user_id: "user-1", role: "owner" }];
@@ -161,6 +164,9 @@ describe("WorkspaceTab — automatic updates", () => {
       async (_id: string, payload: Record<string, unknown>) => ({
         ...workspaceRef.current,
         ...payload,
+        issue_prefix:
+          (payload.issue_prefix as string | undefined) ??
+          workspaceRef.current.issue_prefix,
       }),
     );
   });
@@ -191,6 +197,17 @@ describe("WorkspaceTab — automatic updates", () => {
     expect(input.value).toBe("newworkspace");
   });
 
+  it("uppercases and strips non-alphanumeric prefix input", async () => {
+    const user = setupUser();
+    render(<WorkspaceTab />, { wrapper: I18nWrapper });
+    const input = screen.getByPlaceholderText("TES") as HTMLInputElement;
+
+    await user.clear(input);
+    await user.type(input, "ab-12!cd");
+
+    expect(input.value).toBe("AB12CD");
+  });
+
   it("auto-saves ordinary workspace fields", async () => {
     const user = setupUser();
     render(<WorkspaceTab />, { wrapper: I18nWrapper });
@@ -210,6 +227,30 @@ describe("WorkspaceTab — automatic updates", () => {
         "Workspace settings saved",
         { id: "settings-auto-save" },
       );
+    });
+    expect(mockInvalidateQueries).not.toHaveBeenCalled();
+  });
+
+  it("confirms a prefix change and invalidates issue caches", async () => {
+    const user = setupUser();
+    render(<WorkspaceTab />, { wrapper: I18nWrapper });
+    const input = screen.getByPlaceholderText("TES") as HTMLInputElement;
+
+    await user.clear(input);
+    await user.type(input, "NEW");
+    await user.tab();
+
+    expect(mockUpdateWorkspace).not.toHaveBeenCalled();
+    await screen.findByText(/Change issue prefix/i);
+    await user.click(screen.getByRole("button", { name: "Confirm" }));
+
+    await waitFor(() => {
+      expect(mockUpdateWorkspace).toHaveBeenCalledWith("workspace-1", {
+        issue_prefix: "NEW",
+      });
+    });
+    expect(mockInvalidateQueries).toHaveBeenCalledWith({
+      queryKey: ["issues", "workspace-1"],
     });
   });
 

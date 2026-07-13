@@ -70,7 +70,7 @@ func TestBuildSearchQuery_WithNumber(t *testing.T) {
 		t.Error("query should contain number match in WHERE clause")
 	}
 	// Identifier search constrains by the issue's own Space key (wt, from the
-	// query's base join) — issue.space_id is NOT NULL as of migration 162, so
+	// query's base join) — issue.space_id is NOT NULL as of migration 168, so
 	// no fallback join is needed.
 	if !strings.Contains(query, "lower(wt.key) = lower(") {
 		t.Error("identifier search should constrain by lower(wt.key)")

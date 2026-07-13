@@ -15,7 +15,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/migrations"
 )
 
-// Migration B (162_space_number_cutover) end-to-end invariant test.
+// Migration B (168_space_number_cutover) end-to-end invariant test.
 //
 // The full migration chain cannot be replayed locally (084/101 need pg15+
 // UNIQUE NULLS NOT DISTINCT and the dev box only has pg14), and Docker is
@@ -24,15 +24,15 @@ import (
 // and if Postgres is unreachable it SKIPS cleanly — the same pattern as
 // migrate_concurrent_test.go and every other live-Postgres test in the repo.
 //
-// Rather than replay all 162 migrations, it builds a *synthetic minimal
+// Rather than replay all migrations, it builds a *synthetic minimal
 // schema* — just the tables and the uq_issue_workspace_number constraint that
-// 161 and 162 actually reference — inside a private throwaway schema
+// 167 and 168 actually reference — inside a private throwaway schema
 // (cutover_test_<ts>_<rand>) with search_path pinned to it. Then it applies the
-// real 161 + 162 SQL files through the production runMigrations loop and
+// real 167 + 168 SQL files through the production runMigrations loop and
 // asserts the numbering invariant:
 //
 //   - re-backfill: a NULL-space straggler written during the deploy window is
-//     assigned the default Space by 162;
+//     assigned the default Space by 168;
 //   - counter sync: the default Space's issue_counter never regresses and rises
 //     to cover both max(number) and the legacy workspace.issue_counter;
 //   - cutover: issue.space_id / autopilot.space_id become NOT NULL, the legacy
@@ -92,8 +92,8 @@ func newCutoverSchema(t *testing.T) (*pgxpool.Pool, string) {
 	return pool, schema
 }
 
-// syntheticBaseSchema is the minimal pre-161 schema: only the columns and
-// constraints that migrations 161 and 162 read or alter. Names must match
+// syntheticBaseSchema is the minimal pre-167 schema: only the columns and
+// constraints that migrations 167 and 168 read or alter. Names must match
 // exactly (uq_issue_workspace_number, member/project/user FK targets).
 const syntheticBaseSchema = `
 CREATE TABLE "user" (
@@ -162,25 +162,25 @@ func applyCutoverMigration(pool *pgxpool.Pool, schema, path string) error {
 	})
 }
 
-func cutoverFilePaths(t *testing.T) (up161, up162 string) {
+func cutoverFilePaths(t *testing.T) (up167, up168 string) {
 	t.Helper()
 	dir, err := migrations.ResolveDir()
 	if err != nil {
 		t.Fatalf("resolve migrations dir: %v", err)
 	}
-	up161 = filepath.Join(dir, "161_workspace_space.up.sql")
-	up162 = filepath.Join(dir, "162_space_number_cutover.up.sql")
-	for _, p := range []string{up161, up162} {
+	up167 = filepath.Join(dir, "167_workspace_space.up.sql")
+	up168 = filepath.Join(dir, "168_space_number_cutover.up.sql")
+	for _, p := range []string{up167, up168} {
 		if _, err := os.Stat(p); err != nil {
 			t.Fatalf("migration file missing: %s: %v", p, err)
 		}
 	}
-	return up161, up162
+	return up167, up168
 }
 
-// seedPre161 creates one workspace (prefix ENG, counter 3) with an owner and
+// seedPre167 creates one workspace (prefix ENG, counter 3) with an owner and
 // three legacy issues (numbers 1..3, NULL space) and returns the workspace id.
-func seedPre161(t *testing.T, pool *pgxpool.Pool) string {
+func seedPre167(t *testing.T, pool *pgxpool.Pool) string {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -228,15 +228,15 @@ func constraintExistsOn(t *testing.T, pool *pgxpool.Pool, table, name string) bo
 	return exists
 }
 
-func TestMigration162CutoverInvariant(t *testing.T) {
+func TestMigration168CutoverInvariant(t *testing.T) {
 	pool, schema := newCutoverSchema(t)
-	up161, up162 := cutoverFilePaths(t)
+	up167, up168 := cutoverFilePaths(t)
 
 	execCutover(t, pool, syntheticBaseSchema)
-	wsID := seedPre161(t, pool)
+	wsID := seedPre167(t, pool)
 
-	if err := applyCutoverMigration(pool, schema, up161); err != nil {
-		t.Fatalf("apply 161: %v", err)
+	if err := applyCutoverMigration(pool, schema, up167); err != nil {
+		t.Fatalf("apply 167: %v", err)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -250,8 +250,8 @@ func TestMigration162CutoverInvariant(t *testing.T) {
 	execCutover(t, pool, `INSERT INTO issue (workspace_id, number, status, project_id) VALUES ($1, 4, 'todo', $2)`, wsID, windowProjectID)
 	execCutover(t, pool, `UPDATE workspace SET issue_counter = 5 WHERE id = $1`, wsID)
 
-	if err := applyCutoverMigration(pool, schema, up162); err != nil {
-		t.Fatalf("apply 162: %v", err)
+	if err := applyCutoverMigration(pool, schema, up168); err != nil {
+		t.Fatalf("apply 168: %v", err)
 	}
 
 	// Re-backfill: no Project or Issue may still carry a NULL space_id.
@@ -272,7 +272,7 @@ func TestMigration162CutoverInvariant(t *testing.T) {
 	// Counter sync: default space counter = GREATEST(seeded 3, max number 4,
 	// legacy ws counter 5) = 5. It must never regress. No is_default flag — the
 	// default space is identified the same way GetDefaultWorkspaceSpace and
-	// migration 162 itself do: the workspace's earliest-created Space.
+	// migration 168 itself do: the workspace's earliest-created Space.
 	var defaultSpaceID string
 	var defaultCounter int
 	var defaultKey string
@@ -374,14 +374,14 @@ func TestMigration162CutoverInvariant(t *testing.T) {
 	}
 }
 
-func TestMigration162PreflightRejectsDuplicateSpaceNumber(t *testing.T) {
+func TestMigration168PreflightRejectsDuplicateSpaceNumber(t *testing.T) {
 	pool, schema := newCutoverSchema(t)
-	up161, up162 := cutoverFilePaths(t)
+	up167, up168 := cutoverFilePaths(t)
 
 	execCutover(t, pool, syntheticBaseSchema)
-	wsID := seedPre161(t, pool)
-	if err := applyCutoverMigration(pool, schema, up161); err != nil {
-		t.Fatalf("apply 161: %v", err)
+	wsID := seedPre167(t, pool)
+	if err := applyCutoverMigration(pool, schema, up167); err != nil {
+		t.Fatalf("apply 167: %v", err)
 	}
 
 	// Force a duplicate (space_id, number): the legacy constraint normally makes
@@ -392,9 +392,9 @@ func TestMigration162PreflightRejectsDuplicateSpaceNumber(t *testing.T) {
 		INSERT INTO issue (workspace_id, space_id, number, status)
 		SELECT $1, wt.id, 1, 'todo' FROM workspace_space wt WHERE wt.workspace_id = $1`, wsID)
 
-	err := applyCutoverMigration(pool, schema, up162)
+	err := applyCutoverMigration(pool, schema, up168)
 	if err == nil {
-		t.Fatal("expected 162 to fail on duplicate (space_id, number)")
+		t.Fatal("expected 168 to fail on duplicate (space_id, number)")
 	}
 	if !strings.Contains(err.Error(), "duplicate") {
 		t.Fatalf("error %q does not mention duplicate preflight", err)
@@ -405,26 +405,26 @@ func TestMigration162PreflightRejectsDuplicateSpaceNumber(t *testing.T) {
 	}
 }
 
-func TestMigration162PreflightRejectsNullSpace(t *testing.T) {
+func TestMigration168PreflightRejectsNullSpace(t *testing.T) {
 	pool, schema := newCutoverSchema(t)
-	up161, up162 := cutoverFilePaths(t)
+	up167, up168 := cutoverFilePaths(t)
 
 	execCutover(t, pool, syntheticBaseSchema)
-	wsID := seedPre161(t, pool)
-	if err := applyCutoverMigration(pool, schema, up161); err != nil {
-		t.Fatalf("apply 161: %v", err)
+	wsID := seedPre167(t, pool)
+	if err := applyCutoverMigration(pool, schema, up167); err != nil {
+		t.Fatalf("apply 167: %v", err)
 	}
 
 	// Create an un-backfillable straggler: null out an issue's space and archive
 	// the workspace's only Space, so it's no longer a valid re-backfill target
-	// (162's re-backfill only considers archived_at IS NULL Spaces — there is no
+	// (168's re-backfill only considers archived_at IS NULL Spaces — there is no
 	// is_default flag to strip instead).
 	execCutover(t, pool, `UPDATE issue SET space_id = NULL WHERE workspace_id = $1 AND number = 1`, wsID)
 	execCutover(t, pool, `UPDATE workspace_space SET archived_at = now() WHERE workspace_id = $1`, wsID)
 
-	err := applyCutoverMigration(pool, schema, up162)
+	err := applyCutoverMigration(pool, schema, up168)
 	if err == nil {
-		t.Fatal("expected 162 to fail on remaining NULL space_id")
+		t.Fatal("expected 168 to fail on remaining NULL space_id")
 	}
 	if !strings.Contains(err.Error(), "NULL space_id") {
 		t.Fatalf("error %q does not mention the NULL space_id preflight", err)

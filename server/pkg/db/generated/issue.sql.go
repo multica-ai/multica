@@ -664,7 +664,7 @@ type GetIssueBySpaceKeyAndNumberParams struct {
 	Number      int32       `json:"number"`
 }
 
-// issue.space_id is NOT NULL as of migration 162, which ships in the same
+// issue.space_id is NOT NULL as of migration 167, which ships in the same
 // release as this query, so no null-space fallback is needed.
 func (q *Queries) GetIssueBySpaceKeyAndNumber(ctx context.Context, arg GetIssueBySpaceKeyAndNumberParams) (Issue, error) {
 	row := q.db.QueryRow(ctx, getIssueBySpaceKeyAndNumber, arg.WorkspaceID, arg.Lower, arg.Number)

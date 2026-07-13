@@ -15,7 +15,7 @@ CREATE TABLE issue_identifier_alias (
 
 CREATE INDEX idx_issue_identifier_alias_issue ON issue_identifier_alias(issue_id);
 
--- Backfill aliases for the renaming migration 161 already performed. 161
+-- Backfill aliases for the renaming migration 167 already performed. 167
 -- normalized every workspace's legacy issue_prefix into a Space key
 -- satisfying ^[A-Z][A-Z0-9]{0,6}$ (uppercase, strip non-alnum, truncate to 7).
 -- Legacy prefixes longer than 7 chars, digit-first, or punctuated therefore

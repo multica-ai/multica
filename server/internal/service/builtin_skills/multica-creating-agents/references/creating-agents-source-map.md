@@ -75,7 +75,7 @@ only.
 
 | Contract | Source | Behavior |
 |---|---|---|
-| Persisted mode and selected-Space relation | `migrations/169_agent_space_availability.up.sql` | Adds constrained `agent.availability_mode` plus workspace-consistent `agent_available_space`; legacy public agents backfill to workspace and private agents stay private |
+| Persisted mode and selected-Space relation | `migrations/175_agent_space_availability.up.sql` | Adds constrained `agent.availability_mode` plus workspace-consistent `agent_available_space`; legacy public agents backfill to workspace and private agents stay private |
 | Relation replacement | `pkg/db/queries/agent_availability.sql` | Deletes only stale rows and upserts the desired set inside the caller transaction |
 | Handler invocation location gate | `internal/handler/agent_availability.go:agentLocationAllowsInvocation` | Private owner/Space visibility, exact Selected Space match, or active Workspace Space; Selected fails without context |
 | Service structural Issue gate | `internal/service/agent_availability.go:AgentAvailableInSpace` | Rechecks location for continuations and non-HTTP Issue paths before enqueue |

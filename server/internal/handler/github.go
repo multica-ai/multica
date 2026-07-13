@@ -583,7 +583,7 @@ func (h *Handler) ListPullRequestsForIssue(w http.ResponseWriter, r *http.Reques
 // strings (e.g. "abc@MUL-1") and the digit anchor on the right rules out
 // version numbers like "v1.2-3". The key group allows up to 9 chars (not the
 // Space key's 7-char cap) because legacy issue_prefix values up to 10 chars
-// still resolve via the issue_identifier_alias backfill (see migration 163);
+// still resolve via the issue_identifier_alias backfill (see migration 169);
 // extraction only needs to find a candidate, the DB lookup (current key,
 // then alias) decides validity.
 var identifierRe = regexp.MustCompile(`(?i)\b([a-z][a-z0-9]{0,9})-(\d+)\b`)

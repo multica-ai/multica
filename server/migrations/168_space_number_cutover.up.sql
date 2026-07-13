@@ -50,7 +50,7 @@
 -- 1. Re-backfill stragglers written by old instances during the deploy window,
 --    to the same workspace's earliest active Space — the same fallback
 --    GetDefaultWorkspaceSpace resolves to at runtime (no is_default flag; see
---    161's comment on workspace_space).
+--    166's comment on workspace_space).
 UPDATE issue i
 SET space_id = wt.id
 FROM workspace_space wt
@@ -93,7 +93,7 @@ WHERE wt.workspace_id = p.workspace_id
 -- 2. Sync counters upward. GREATEST of the current counter, the max number
 --    actually minted into the Space, and (for the workspace's earliest Space
 --    only — there is no is_default flag, but that Space is always the one
---    migration 161 backfilled from the legacy workspace counter, since no
+--    migration 167 backfilled from the legacy workspace counter, since no
 --    other Space could have existed before that migration ran) the legacy
 --    workspace counter old writers incremented. Deliberately not filtered to
 --    archived_at IS NULL: this identifies which Space historically inherited

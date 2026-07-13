@@ -504,7 +504,7 @@ func buildSearchQueryForSpace(phrase string, terms []string, queryNum int, query
 	numParam := ""
 	spaceKeyParam := ""
 	// identifierKeyExpr is the Space key an identifier search ("MUL-123") matches
-	// against. issue.space_id is NOT NULL as of migration 162, so wt.key (the
+	// against. issue.space_id is NOT NULL as of migration 168, so wt.key (the
 	// issue's own Space) is always present via the wt join.
 	identifierKeyExpr := "wt.key"
 	if hasNum {
