@@ -130,7 +130,10 @@ var catalog = []Capability{
 		Category:      CategoryApps,
 		Description:   "Open and use published workspace apps and interactive app views.",
 		DescriptionZh: "打开并使用已发布的工作区应用和交互式应用视图。",
-		Evidence:      []string{"server/internal/cerebro/apps/handler.go:127"},
+		Ops: []string{
+			"POST /api/cerebro/apps/{id}/token",
+			"POST /api/cerebro/apps/workflow-runs/{runId}/token",
+		},
 	},
 	{
 		Key:           "build_apps",

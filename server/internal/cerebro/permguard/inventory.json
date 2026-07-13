@@ -17,6 +17,14 @@
       "gate": "cerebro_capability:build_apps"
     },
     {
+      "id": "POST /api/cerebro/apps/{id}/token",
+      "gate": "cerebro_capability:use_apps"
+    },
+    {
+      "id": "POST /api/cerebro/apps/workflow-runs/{runId}/token",
+      "gate": "cerebro_capability:use_apps"
+    },
+    {
       "id": "DELETE /api/analytics/visuals/{visualId}",
       "gate": "workspace_member"
     },

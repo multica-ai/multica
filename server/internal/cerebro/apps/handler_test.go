@@ -42,6 +42,16 @@ func TestValidatePublishRequestRequiresSemverReleaseNotesAndManifest(t *testing.
 	}
 }
 
+func TestValidatePreviewSnapshotAcceptsTheAppFileDirectly(t *testing.T) {
+	snapshot := json.RawMessage(`{"manifest":{"schema_version":"1","name":"Allergen Formatter"},"frontend":{"entry":"index.js"}}`)
+	if err := validateSnapshot(snapshot); err != nil {
+		t.Fatalf("valid preview rejected: %v", err)
+	}
+	if err := validateSnapshot(json.RawMessage(`{"manifest":{}}`)); err == nil {
+		t.Fatal("preview without a valid manifest was accepted")
+	}
+}
+
 func TestValidateWorkflowDefinitionSupportsV1LinearChain(t *testing.T) {
 	valid := json.RawMessage(`{
 		"schema_version":"1",

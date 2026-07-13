@@ -3,6 +3,7 @@
 package apps
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -15,15 +16,25 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/multica-ai/multica/server/internal/cerebro/apps/tokens"
 	"github.com/multica-ai/multica/server/internal/middleware"
 )
 
 var slugPattern = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*$`)
 var semverPattern = regexp.MustCompile(`^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?$`)
 
-type Handler struct{ pool *pgxpool.Pool }
+type tokenIssuer interface {
+	PersonalKey(rctx context.Context, identity tokens.Identity) (tokens.Token, error)
+}
 
-func NewHandler(pool *pgxpool.Pool) *Handler { return &Handler{pool: pool} }
+type Handler struct {
+	pool   *pgxpool.Pool
+	tokens tokenIssuer
+}
+
+func NewHandler(pool *pgxpool.Pool) *Handler {
+	return &Handler{pool: pool, tokens: tokens.NewBroker(tokens.ConfigFromEnv(), nil)}
+}
 
 type createRequest struct {
 	Name        string `json:"name"`
@@ -40,6 +51,10 @@ type publishRequest struct {
 }
 
 type rollbackRequest struct {
+	Version string `json:"version"`
+}
+
+type tokenRequest struct {
 	Version string `json:"version"`
 }
 
@@ -75,13 +90,17 @@ func validatePublishRequest(req publishRequest) error {
 	if strings.TrimSpace(req.ReleaseNotes) == "" {
 		return errors.New("release_notes is required")
 	}
+	return validateSnapshot(req.Snapshot)
+}
+
+func validateSnapshot(raw json.RawMessage) error {
 	var snapshot struct {
 		Manifest struct {
 			SchemaVersion string `json:"schema_version"`
 			Name          string `json:"name"`
 		} `json:"manifest"`
 	}
-	if err := json.Unmarshal(req.Snapshot, &snapshot); err != nil {
+	if err := json.Unmarshal(raw, &snapshot); err != nil {
 		return fmt.Errorf("snapshot: %w", err)
 	}
 	if snapshot.Manifest.SchemaVersion == "" || snapshot.Manifest.Name == "" {
@@ -187,15 +206,15 @@ func (h *Handler) Preview(w http.ResponseWriter, r *http.Request) {
 	if _, ok := h.loadApp(w, r); !ok {
 		return
 	}
-	var req publishRequest
+	var req json.RawMessage
 	if !decodeJSON(w, r, &req) {
 		return
 	}
-	if err := validatePublishRequest(req); err != nil {
+	if err := validateSnapshot(req); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"preview": true, "version": req.Version, "snapshot": req.Snapshot})
+	writeJSON(w, http.StatusOK, map[string]any{"preview": true, "snapshot": req})
 }
 
 func (h *Handler) Publish(w http.ResponseWriter, r *http.Request) {
@@ -259,6 +278,98 @@ func (h *Handler) Rollback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"app_id": app.ID, "version": req.Version})
+}
+
+// IssueToken exchanges Cerebro's registry credential for a short-lived key
+// bounded by both the current human and the app's approved grant ceiling.
+func (h *Handler) IssueToken(w http.ResponseWriter, r *http.Request) {
+	app, ok := h.loadApp(w, r)
+	if !ok {
+		return
+	}
+	memberID, ok := requestUserID(w, r)
+	if !ok {
+		return
+	}
+	var req tokenRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	if app.CurrentVersion == nil {
+		writeError(w, http.StatusConflict, "app has no published version")
+		return
+	}
+	version := *app.CurrentVersion
+	if req.Version != "" && req.Version != version {
+		writeError(w, http.StatusConflict, "only the current published app version can request a token")
+		return
+	}
+	var rawScopes []byte
+	err := h.pool.QueryRow(r.Context(), `
+		SELECT scopes FROM cerebro_app_grant
+		WHERE app_id=$1 AND version=$2 AND status='approved'`, app.ID, version).Scan(&rawScopes)
+	if errors.Is(err, pgx.ErrNoRows) {
+		writeError(w, http.StatusForbidden, "app scopes have not been approved")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load approved app scopes")
+		return
+	}
+	var scopes []tokens.Scope
+	if err := json.Unmarshal(rawScopes, &scopes); err != nil || len(scopes) == 0 {
+		writeError(w, http.StatusInternalServerError, "approved app scopes are invalid")
+		return
+	}
+	token, err := h.tokens.PersonalKey(r.Context(), tokens.Identity{
+		MemberID: memberID.String(),
+		App:      tokens.AppGrant{ID: app.ID, Version: version, Scopes: scopes},
+	})
+	if err != nil {
+		writeError(w, http.StatusBadGateway, "failed to issue app token")
+		return
+	}
+	writeJSON(w, http.StatusCreated, token)
+}
+
+// IssueWorkflowToken resolves the immutable identity envelope captured when a
+// run was created. Long-running workers therefore renew as the original human
+// and app version instead of retaining an expired key.
+func (h *Handler) IssueWorkflowToken(w http.ResponseWriter, r *http.Request) {
+	workspaceID, ok := requestWorkspaceID(w, r)
+	if !ok {
+		return
+	}
+	runID, err := uuid.Parse(chi.URLParam(r, "runId"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid workflow run id")
+		return
+	}
+	var rawEnvelope []byte
+	err = h.pool.QueryRow(r.Context(), `
+		SELECT r.identity_envelope
+		FROM cerebro_app_workflow_run r
+		JOIN cerebro_app_workflow_def d ON d.id=r.workflow_id
+		WHERE r.id=$1 AND d.workspace_id=$2`, runID, workspaceID).Scan(&rawEnvelope)
+	if errors.Is(err, pgx.ErrNoRows) {
+		writeError(w, http.StatusNotFound, "workflow run not found")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load workflow identity")
+		return
+	}
+	identity, err := tokens.ParseWorkflowIdentityEnvelope(rawEnvelope)
+	if err != nil {
+		writeError(w, http.StatusConflict, "workflow identity envelope is invalid")
+		return
+	}
+	token, err := h.tokens.PersonalKey(r.Context(), identity)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, "failed to issue workflow token")
+		return
+	}
+	writeJSON(w, http.StatusCreated, token)
 }
 
 func (h *Handler) loadApp(w http.ResponseWriter, r *http.Request) (appResponse, bool) {

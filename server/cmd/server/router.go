@@ -2160,6 +2160,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Post("/{id}/preview", cerebroAppsHandler.Preview)
 				r.Post("/{id}/publish", cerebroAppsHandler.Publish)
 				r.Post("/{id}/rollback", cerebroAppsHandler.Rollback)
+				r.Post("/{id}/token", cerebroAppsHandler.IssueToken)
+				r.Post("/workflow-runs/{runId}/token", cerebroAppsHandler.IssueWorkflowToken)
 			})
 			// CEREBRO-PATCH(cerebro-note-types-routes): TECH-3511 note types REST surface.
 			r.Route("/api/cerebro/note-types", func(r chi.Router) {
