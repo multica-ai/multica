@@ -37,13 +37,6 @@ func (d *Daemon) taskWakeupLoop(ctx context.Context, taskWakeups chan<- taskWake
 
 	for {
 		runtimeIDs := d.allRuntimeIDs()
-		if len(runtimeIDs) == 0 {
-			if err := sleepWithContextOrRuntimeChange(ctx, 5*time.Second, runtimeSetCh); err != nil {
-				return
-			}
-			continue
-		}
-
 		connectedFor, err := d.runTaskWakeupConnection(ctx, runtimeIDs, taskWakeups, runtimeSetCh)
 		if ctx.Err() != nil {
 			return
@@ -329,6 +322,10 @@ func (d *Daemon) readTaskWakeupMessages(conn *websocket.Conn, taskWakeups chan<-
 				continue
 			}
 			go d.handleRuntimeProfilesChanged(payload)
+		case protocol.EventDaemonWorkspacesChanged:
+			if d.workspaceChanges != nil {
+				d.workspaceChanges.broadcast()
+			}
 		case protocol.EventDaemonHeartbeatAck:
 			var ack HeartbeatResponse
 			if err := json.Unmarshal(msg.Payload, &ack); err != nil {
@@ -399,7 +396,9 @@ func taskWakeupURL(baseURL string, runtimeIDs []string) (string, error) {
 	q := u.Query()
 	ids := append([]string(nil), runtimeIDs...)
 	sort.Strings(ids)
-	q.Set("runtime_ids", strings.Join(ids, ","))
+	if len(ids) > 0 {
+		q.Set("runtime_ids", strings.Join(ids, ","))
+	}
 	u.RawQuery = q.Encode()
 	u.Fragment = ""
 	return u.String(), nil

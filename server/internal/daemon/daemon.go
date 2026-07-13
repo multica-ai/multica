@@ -177,9 +177,14 @@ type Daemon struct {
 
 	// reconcile fans out a "re-check server state now" signal to subscribers
 	// (watchTaskCancellation, workspaceSyncLoop) so the WS connect/reconnect
-	// path can shrink the 5s / 30s reconciliation gap to sub-second. See
+	// path can shrink coarse fallback reconciliation gaps to sub-second. See
 	// reconcile.go and runTaskWakeupConnection.
 	reconcile *reconcileBroadcaster
+	// workspaceChanges is the account-scoped server hint for membership-set
+	// changes. It stays separate from reconcile because a membership hint only
+	// needs the minimal workspace list, while a WS reconnect also reconciles
+	// runtime profiles that may have changed during the gap.
+	workspaceChanges *reconcileBroadcaster
 
 	// runtimeGoneMu guards runtimeGoneInflight, reregisterNextAttempt, and
 	// reregisterLastCompletedAt. The state lets heartbeat / poller / WS-ack
@@ -271,6 +276,7 @@ func New(cfg Config, logger *slog.Logger) *Daemon {
 		reregisterLastCompletedAt: make(map[string]time.Time),
 		cancelPollInterval:        5 * time.Second,
 		reconcile:                 newReconcileBroadcaster(),
+		workspaceChanges:          newReconcileBroadcaster(),
 	}
 	d.runner = taskRunnerFunc(d.runTask)
 	d.runUpdateFn = d.runUpdate
@@ -1697,25 +1703,54 @@ func (d *Daemon) tryRenewToken(ctx context.Context) {
 	}
 }
 
-// workspaceSyncLoop periodically fetches the user's workspaces from the API
-// and registers runtimes for any new ones. A WS connect/reconnect broadcast
-// triggers an immediate sync and one runtime-profile reconciliation so changes
-// made during the WS gap are picked up sub-second without putting profile
-// fetches back on the 30s ticker. Repository bindings and workspace settings
-// refresh on demand when a checkout needs them.
+var workspaceSyncCoalesceWindow = time.Second
+
+// workspaceSyncLoop reconciles the user's workspace membership set. Daemons
+// with runtimes and account-scoped WS support use a thirty-minute jittered
+// consistency check; daemons talking to older servers retain a five-minute
+// fallback. Bootstrap daemons without runtimes keep the shorter interval needed
+// to discover their first workspace. Account-scoped WS hints trigger an
+// immediate minimal sync, while a WS reconnect also reconciles runtime profiles
+// changed during the connection gap.
 func (d *Daemon) workspaceSyncLoop(ctx context.Context) {
-	ticker := time.NewTicker(DefaultWorkspaceSyncInterval)
-	defer ticker.Stop()
+	timer := time.NewTimer(jitterDuration(d.workspaceSyncBaseInterval()))
+	defer timer.Stop()
 
 	var reconcileCh <-chan struct{}
 	if d.reconcile != nil {
 		reconcileCh = d.reconcile.notify()
 	}
+	var workspaceChangesCh <-chan struct{}
+	if d.workspaceChanges != nil {
+		workspaceChangesCh = d.workspaceChanges.notify()
+	}
 
-	sync := func(reconcileProfiles bool) {
-		if err := d.syncWorkspacesFromAPI(ctx, reconcileProfiles); err != nil {
-			d.logger.Debug("workspace sync failed", "error", err)
+	var consecutiveFailures int
+	var lastSuccessfulSync time.Time
+	resetTimer := func() {
+		interval := workspaceSyncBackoff(d.workspaceSyncBaseInterval(), consecutiveFailures)
+		if !timer.Stop() {
+			select {
+			case <-timer.C:
+			default:
+			}
 		}
+		timer.Reset(jitterDuration(interval))
+	}
+
+	syncNow := func(reconcileProfiles bool) {
+		if !reconcileProfiles && consecutiveFailures == 0 && !lastSuccessfulSync.IsZero() && time.Since(lastSuccessfulSync) < workspaceSyncCoalesceWindow {
+			resetTimer()
+			return
+		}
+		if err := d.syncWorkspacesFromAPI(ctx, reconcileProfiles); err != nil {
+			consecutiveFailures++
+			d.logger.Debug("workspace sync failed", "error", err)
+		} else {
+			consecutiveFailures = 0
+			lastSuccessfulSync = time.Now()
+		}
+		resetTimer()
 	}
 
 	for {
@@ -1726,19 +1761,53 @@ func (d *Daemon) workspaceSyncLoop(ctx context.Context) {
 			if d.reconcile != nil {
 				reconcileCh = d.reconcile.notify()
 			}
-			sync(true)
-		case <-ticker.C:
-			sync(false)
+			syncNow(true)
+		case <-workspaceChangesCh:
+			if d.workspaceChanges != nil {
+				workspaceChangesCh = d.workspaceChanges.notify()
+			}
+			syncNow(false)
+		case <-timer.C:
+			syncNow(false)
 		}
 	}
+}
+
+func (d *Daemon) workspaceSyncBaseInterval() time.Duration {
+	if len(d.allRuntimeIDs()) == 0 {
+		return DefaultWorkspaceBootstrapSyncInterval
+	}
+	if d.client.usesLegacyWorkspaceEndpoint() {
+		return DefaultWorkspaceLegacySyncInterval
+	}
+	return DefaultWorkspaceSyncInterval
+}
+
+func workspaceSyncBackoff(base time.Duration, consecutiveFailures int) time.Duration {
+	maxInterval := DefaultWorkspaceSyncMaxBackoff
+	if base == DefaultWorkspaceBootstrapSyncInterval {
+		maxInterval = DefaultWorkspaceLegacySyncInterval
+	}
+	interval := base
+	for i := 0; i < consecutiveFailures; i++ {
+		if interval >= maxInterval/2 {
+			return maxInterval
+		}
+		interval *= 2
+	}
+	if interval > maxInterval {
+		return maxInterval
+	}
+	return interval
 }
 
 // syncWorkspacesFromAPI fetches all workspaces the user belongs to and
 // registers runtimes for any that aren't already tracked. When
 // reconcileProfiles is true (after a daemon WS connect/reconnect), tracked
 // workspaces reconcile custom runtime profiles once so a change made while the
-// WS was unavailable is not lost. The normal 30s ticker passes false and makes
-// no runtime-profile requests. Workspaces the user has left are cleaned up.
+// WS was unavailable is not lost. Normal timers and workspace-change hints
+// pass false and make no runtime-profile requests. Workspaces the user has
+// left are cleaned up.
 func (d *Daemon) syncWorkspacesFromAPI(ctx context.Context, reconcileProfiles bool) error {
 	d.reloading.Lock()
 	defer d.reloading.Unlock()

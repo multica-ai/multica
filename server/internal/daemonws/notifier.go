@@ -71,3 +71,27 @@ func (n *RelayNotifier) NotifyRuntimeProfilesChanged(workspaceID, profileID stri
 	}
 	M.WakeupPublishedTotal.Add(1)
 }
+
+func (n *RelayNotifier) NotifyWorkspacesChanged(userID string) {
+	if userID == "" {
+		return
+	}
+	eventID := ulid.Make().String()
+	if n.local != nil {
+		n.local.notifyWorkspacesChanged(userID, eventID)
+	}
+	if n.relay == nil {
+		return
+	}
+	frame, err := workspacesChangedFrame()
+	if err != nil {
+		M.WakeupPublishErrors.Add(1)
+		return
+	}
+	if err := n.relay.PublishWithID(realtime.ScopeDaemonRuntime, userID, "", frame, eventID); err != nil {
+		M.WakeupPublishErrors.Add(1)
+		slog.Warn("daemon websocket workspace refresh publish failed", "error", err, "user_id", userID)
+		return
+	}
+	M.WakeupPublishedTotal.Add(1)
+}

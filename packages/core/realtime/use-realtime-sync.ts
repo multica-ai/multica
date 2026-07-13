@@ -185,12 +185,10 @@ function patchLatestChatMessagePage(
 }
 
 /**
- * Apply a workspace:updated event to the cache. Always refreshes the
- * workspace list. If the incoming `issue_prefix` differs from what's
- * currently cached, also invalidates issueKeys.all for that workspace,
- * since every issue's rendered identifier (`MUL-123`) is recomputed from
- * the workspace prefix at read time. Without this, the UI keeps showing
- * the old `OLD-N` keys until the next hard refresh.
+ * Apply a workspace:updated event directly to the cached workspace list.
+ * If the incoming `issue_prefix` differs from what's currently cached, also
+ * invalidates issueKeys.all for that workspace, since every issue's rendered
+ * identifier (`MUL-123`) is recomputed from the workspace prefix at read time.
  *
  * If the workspace isn't in the cached list (first observation), we
  * conservatively invalidate — the prefix is effectively "new" relative to
@@ -203,13 +201,21 @@ export function applyWorkspaceUpdatedToCache(
 ): void {
   const next = payload.workspace;
   if (next?.id) {
-    const cached =
-      qc
-        .getQueryData<Workspace[]>(workspaceKeys.list())
-        ?.find((w) => w.id === next.id) ?? null;
-    if (!cached || cached.issue_prefix !== next.issue_prefix) {
+    const list = qc.getQueryData<Workspace[]>(workspaceKeys.list());
+    const cached = list?.find((w) => w.id === next.id) ?? null;
+    if (cached && cached.issue_prefix !== next.issue_prefix) {
       qc.invalidateQueries({ queryKey: issueKeys.all(next.id) });
     }
+    if (cached && list) {
+      qc.setQueryData<Workspace[]>(
+        workspaceKeys.list(),
+        list.map((workspace) => (workspace.id === next.id ? next : workspace)),
+      );
+      return;
+    }
+    // Do not seed an absent list with one workspace: staleTime is Infinity,
+    // so doing so would hide every other membership until a hard refresh.
+    qc.invalidateQueries({ queryKey: issueKeys.all(next.id) });
   }
   qc.invalidateQueries({ queryKey: workspaceKeys.list() });
 }

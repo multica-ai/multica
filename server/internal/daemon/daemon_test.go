@@ -2620,21 +2620,21 @@ func TestWatchTaskCancellation_ReconcileWithRunningTaskStaysAlive(t *testing.T) 
 }
 
 // TestWorkspaceSyncLoop_ReconcileBroadcastTriggersImmediateSync pins that the
-// 30s workspace sync ticker is also short-circuited by reconcile broadcasts.
-// Without this, runtime/repo changes the server made during a WS disconnect
-// stay invisible to the daemon for up to 30 seconds.
+// long-period workspace consistency timer is short-circuited by reconnect
+// broadcasts. Without this, changes made during a WS disconnect stay invisible
+// until the next fallback sync.
 func TestWorkspaceSyncLoop_ReconcileBroadcastTriggersImmediateSync(t *testing.T) {
 	t.Parallel()
 
 	var calls atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/workspaces" {
+		if r.URL.Path != "/api/daemon/workspaces" {
 			http.NotFound(w, r)
 			return
 		}
 		calls.Add(1)
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"workspaces":[]}`))
+		_, _ = w.Write([]byte(`[]`))
 	}))
 	t.Cleanup(srv.Close)
 
@@ -2687,6 +2687,69 @@ func TestWorkspaceSyncLoop_ReconcileBroadcastTriggersImmediateSync(t *testing.T)
 	}
 }
 
+func TestWorkspaceSyncLoop_WorkspaceChangeTriggersImmediateSync(t *testing.T) {
+	t.Parallel()
+
+	var calls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/daemon/workspaces" {
+			http.NotFound(w, r)
+			return
+		}
+		calls.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`[]`))
+	}))
+	t.Cleanup(srv.Close)
+
+	d := &Daemon{
+		client:           NewClient(srv.URL),
+		logger:           slog.Default(),
+		workspaces:       make(map[string]*workspaceState),
+		workspaceChanges: newReconcileBroadcaster(),
+	}
+	d.workspaceChanges.minBroadcastInterval = 0
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	loopDone := make(chan struct{})
+	go func() {
+		defer close(loopDone)
+		d.workspaceSyncLoop(ctx)
+	}()
+
+	d.workspaceChanges.broadcast()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) && calls.Load() < 1 {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if calls.Load() < 1 {
+		cancel()
+		<-loopDone
+		t.Fatal("workspace change did not trigger an immediate sync")
+	}
+
+	cancel()
+	<-loopDone
+}
+
+func TestWorkspaceSyncBackoff(t *testing.T) {
+	tests := []struct {
+		failures int
+		want     time.Duration
+	}{
+		{failures: 0, want: 30 * time.Second},
+		{failures: 1, want: time.Minute},
+		{failures: 2, want: 2 * time.Minute},
+		{failures: 10, want: DefaultWorkspaceLegacySyncInterval},
+	}
+	for _, tt := range tests {
+		if got := workspaceSyncBackoff(30*time.Second, tt.failures); got != tt.want {
+			t.Fatalf("workspaceSyncBackoff(30s, %d) = %s, want %s", tt.failures, got, tt.want)
+		}
+	}
+}
+
 // TestWorkspaceSyncLoop_ReplaysBroadcastFromBeforeStart pins the daemon-
 // startup race fix: broadcast() that fired while no one was subscribed
 // MUST still wake the loop on its first subscription. Without the
@@ -2698,13 +2761,13 @@ func TestWorkspaceSyncLoop_ReplaysBroadcastFromBeforeStart(t *testing.T) {
 
 	var calls atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/workspaces" {
+		if r.URL.Path != "/api/daemon/workspaces" {
 			http.NotFound(w, r)
 			return
 		}
 		calls.Add(1)
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"workspaces":[]}`))
+		_, _ = w.Write([]byte(`[]`))
 	}))
 	t.Cleanup(srv.Close)
 

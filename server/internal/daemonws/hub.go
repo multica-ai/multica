@@ -143,6 +143,7 @@ type Hub struct {
 	clients     map[*client]bool
 	byRuntime   map[string]map[*client]bool
 	byWorkspace map[string]map[*client]bool
+	byUser      map[string]map[*client]bool
 
 	hbMu        sync.RWMutex
 	onHeartbeat HeartbeatHandler
@@ -164,6 +165,7 @@ func NewHub() *Hub {
 		clients:     make(map[*client]bool),
 		byRuntime:   make(map[string]map[*client]bool),
 		byWorkspace: make(map[string]map[*client]bool),
+		byUser:      make(map[string]map[*client]bool),
 	}
 }
 
@@ -209,8 +211,8 @@ func (h *Hub) messageKindRecorder() MessageKindRecorder {
 }
 
 func (h *Hub) HandleWebSocket(w http.ResponseWriter, r *http.Request, identity ClientIdentity) {
-	if len(identity.RuntimeIDs) == 0 {
-		http.Error(w, `{"error":"runtime_ids required"}`, http.StatusBadRequest)
+	if len(identity.RuntimeIDs) == 0 && identity.UserID == "" {
+		http.Error(w, `{"error":"runtime_ids or user identity required"}`, http.StatusBadRequest)
 		return
 	}
 
@@ -226,12 +228,6 @@ func (h *Hub) HandleWebSocket(w http.ResponseWriter, r *http.Request, identity C
 			runtimes[runtimeID] = struct{}{}
 		}
 	}
-	if len(runtimes) == 0 {
-		conn.WriteMessage(websocket.TextMessage, []byte(`{"error":"runtime_ids required"}`))
-		conn.Close()
-		return
-	}
-
 	c := &client{
 		hub:      h,
 		conn:     conn,
@@ -254,6 +250,12 @@ func (h *Hub) NotifyTaskAvailable(runtimeID, taskID string) {
 // runtime profiles after a create, update, disable, or delete.
 func (h *Hub) NotifyRuntimeProfilesChanged(workspaceID, profileID string) {
 	h.notifyRuntimeProfilesChanged(workspaceID, profileID, "")
+}
+
+// NotifyWorkspacesChanged asks every connected daemon authenticated as userID
+// to reconcile its workspace membership set.
+func (h *Hub) NotifyWorkspacesChanged(userID string) {
+	h.notifyWorkspacesChanged(userID, "")
 }
 
 func (h *Hub) notifyTaskAvailable(runtimeID, taskID, eventID string) {
@@ -281,6 +283,17 @@ func (h *Hub) notifyRuntimeProfilesChanged(workspaceID, profileID, eventID strin
 		return
 	}
 	h.notifyWorkspaceFrame(workspaceID, data, eventID)
+}
+
+func (h *Hub) notifyWorkspacesChanged(userID, eventID string) {
+	if h == nil || userID == "" {
+		return
+	}
+	data, err := workspacesChangedFrame()
+	if err != nil {
+		return
+	}
+	h.notifyUserFrame(userID, data, eventID)
 }
 
 func (h *Hub) DeliverDaemonRuntime(scopeID string, frame []byte, eventID string) {
@@ -316,6 +329,13 @@ func (h *Hub) DeliverDaemonRuntime(scopeID string, frame []byte, eventID string)
 			return
 		}
 		delivered, deduped := h.notifyWorkspaceFrame(payload.WorkspaceID, frame, eventID)
+		if delivered {
+			M.WakeupDeliveredHit.Add(1)
+		} else if !deduped {
+			M.WakeupDeliveredMiss.Add(1)
+		}
+	case protocol.EventDaemonWorkspacesChanged:
+		delivered, deduped := h.notifyUserFrame(scopeID, frame, eventID)
 		if delivered {
 			M.WakeupDeliveredHit.Add(1)
 		} else if !deduped {
@@ -383,6 +403,34 @@ func (h *Hub) notifyWorkspaceFrame(workspaceID string, data []byte, eventID stri
 	return delivered, deduped
 }
 
+func (h *Hub) notifyUserFrame(userID string, data []byte, eventID string) (delivered bool, deduped bool) {
+	h.mu.RLock()
+	clients := h.byUser[userID]
+	slow := make([]*client, 0)
+	for c := range clients {
+		if !c.markSeen(eventID) {
+			deduped = true
+			continue
+		}
+		select {
+		case c.send <- data:
+			delivered = true
+		default:
+			slow = append(slow, c)
+		}
+	}
+	h.mu.RUnlock()
+
+	for _, c := range slow {
+		h.unregister(c)
+		c.conn.Close()
+	}
+	if len(slow) > 0 {
+		M.SlowEvictionsTotal.Add(int64(len(slow)))
+	}
+	return delivered, deduped
+}
+
 func taskAvailableFrame(runtimeID, taskID string) ([]byte, error) {
 	return json.Marshal(protocol.Message{
 		Type: protocol.EventDaemonTaskAvailable,
@@ -400,6 +448,13 @@ func runtimeProfilesChangedFrame(workspaceID, profileID string) ([]byte, error) 
 			WorkspaceID:      workspaceID,
 			RuntimeProfileID: profileID,
 		}),
+	})
+}
+
+func workspacesChangedFrame() ([]byte, error) {
+	return json.Marshal(protocol.Message{
+		Type:    protocol.EventDaemonWorkspacesChanged,
+		Payload: mustMarshalRaw(protocol.WorkspacesChangedPayload{}),
 	})
 }
 
@@ -423,6 +478,12 @@ func (h *Hub) WorkspaceConnectionCount(workspaceID string) int {
 	return len(h.byWorkspace[workspaceID])
 }
 
+func (h *Hub) UserConnectionCount(userID string) int {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	return len(h.byUser[userID])
+}
+
 func (h *Hub) register(c *client) {
 	h.mu.Lock()
 	h.clients[c] = true
@@ -440,6 +501,14 @@ func (h *Hub) register(c *client) {
 		if conns == nil {
 			conns = make(map[*client]bool)
 			h.byWorkspace[workspaceID] = conns
+		}
+		conns[c] = true
+	}
+	if userID := c.identity.UserID; userID != "" {
+		conns := h.byUser[userID]
+		if conns == nil {
+			conns = make(map[*client]bool)
+			h.byUser[userID] = conns
 		}
 		conns[c] = true
 	}
@@ -480,6 +549,14 @@ func (h *Hub) unregister(c *client) {
 			delete(conns, c)
 			if len(conns) == 0 {
 				delete(h.byWorkspace, workspaceID)
+			}
+		}
+	}
+	if userID := c.identity.UserID; userID != "" {
+		if conns := h.byUser[userID]; conns != nil {
+			delete(conns, c)
+			if len(conns) == 0 {
+				delete(h.byUser, userID)
 			}
 		}
 	}

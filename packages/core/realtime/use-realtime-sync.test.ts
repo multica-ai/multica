@@ -241,9 +241,12 @@ describe("applyWorkspaceUpdatedToCache", () => {
     expect(invalidate).toHaveBeenCalledWith({
       queryKey: issueKeys.all(wsId),
     });
-    expect(invalidate).toHaveBeenCalledWith({
+    expect(invalidate).not.toHaveBeenCalledWith({
       queryKey: workspaceKeys.list(),
     });
+    expect(
+      qc.getQueryData<Workspace[]>(workspaceKeys.list())?.[0]?.issue_prefix,
+    ).toBe("NEW");
   });
 
   it("does not invalidate issue cache when only non-prefix fields change", () => {
@@ -260,9 +263,12 @@ describe("applyWorkspaceUpdatedToCache", () => {
     expect(invalidate).not.toHaveBeenCalledWith({
       queryKey: issueKeys.all(wsId),
     });
-    expect(invalidate).toHaveBeenCalledWith({
+    expect(invalidate).not.toHaveBeenCalledWith({
       queryKey: workspaceKeys.list(),
     });
+    expect(qc.getQueryData<Workspace[]>(workspaceKeys.list())?.[0]?.name).toBe(
+      "New name",
+    );
   });
 
   it("invalidates issue cache when the workspace isn't in the cached list yet", () => {
@@ -279,6 +285,9 @@ describe("applyWorkspaceUpdatedToCache", () => {
 
     expect(invalidate).toHaveBeenCalledWith({
       queryKey: issueKeys.all(wsId),
+    });
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: workspaceKeys.list(),
     });
   });
 });

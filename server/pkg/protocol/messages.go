@@ -37,6 +37,11 @@ type RuntimeProfilesChangedPayload struct {
 	RuntimeProfileID string `json:"runtime_profile_id,omitempty"`
 }
 
+// WorkspacesChangedPayload is an account-scoped hint that asks a daemon to
+// reconcile its workspace membership set. The server remains authoritative;
+// no workspace data is embedded in the event.
+type WorkspacesChangedPayload struct{}
+
 // TaskProgressPayload is sent from daemon to server during task execution.
 type TaskProgressPayload struct {
 	TaskID  string `json:"task_id"`

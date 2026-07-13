@@ -25,9 +25,6 @@ export function useCreateWorkspace() {
     onSuccess: (newWs) => {
       qc.setQueryData(workspaceKeys.list(), (old: Workspace[] = []) => [...old, newWs]);
     },
-    onSettled: () => {
-      qc.invalidateQueries({ queryKey: workspaceKeys.list() });
-    },
   });
 }
 

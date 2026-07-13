@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -104,6 +105,12 @@ type Client struct {
 	platform string
 	version  string
 	os       string
+
+	workspaceMu                    sync.Mutex
+	workspaceETag                  string
+	workspaceCache                 []WorkspaceInfo
+	workspaceCacheValid            bool
+	legacyWorkspaceEndpointEnabled bool
 }
 
 // NewClient creates a new daemon API client.
@@ -404,13 +411,78 @@ func (c *Client) RenewToken(ctx context.Context) (*RenewTokenResponse, error) {
 	return &resp, nil
 }
 
-// ListWorkspaces fetches all workspaces the authenticated user belongs to.
+// ListWorkspaces fetches the minimal workspace membership set used by the
+// daemon. New servers expose a daemon-specific endpoint with ETag support;
+// when an installed daemon talks to an older server, the first 404 switches
+// this process to the legacy full-workspace endpoint for compatibility.
 func (c *Client) ListWorkspaces(ctx context.Context) ([]WorkspaceInfo, error) {
+	c.workspaceMu.Lock()
+	defer c.workspaceMu.Unlock()
+
+	if c.legacyWorkspaceEndpointEnabled {
+		return c.listLegacyWorkspaces(ctx)
+	}
+
+	const path = "/api/daemon/workspaces"
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+path, nil)
+	if err != nil {
+		return nil, err
+	}
+	if c.token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.token)
+	}
+	c.setIdentityHeaders(req)
+	if c.workspaceETag != "" {
+		req.Header.Set("If-None-Match", c.workspaceETag)
+	}
+
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusNotFound {
+		_, _ = io.Copy(io.Discard, resp.Body)
+		c.legacyWorkspaceEndpointEnabled = true
+		c.workspaceETag = ""
+		c.workspaceCache = nil
+		c.workspaceCacheValid = false
+		return c.listLegacyWorkspaces(ctx)
+	}
+	if resp.StatusCode == http.StatusNotModified {
+		if !c.workspaceCacheValid {
+			return nil, fmt.Errorf("GET %s returned 304 without a cached workspace set", path)
+		}
+		return append([]WorkspaceInfo(nil), c.workspaceCache...), nil
+	}
+	if resp.StatusCode >= 400 {
+		data, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return nil, &requestError{Method: http.MethodGet, Path: path, StatusCode: resp.StatusCode, Body: strings.TrimSpace(string(data))}
+	}
+
+	var workspaces []WorkspaceInfo
+	if err := json.NewDecoder(resp.Body).Decode(&workspaces); err != nil {
+		return nil, err
+	}
+	c.workspaceETag = resp.Header.Get("ETag")
+	c.workspaceCache = append([]WorkspaceInfo(nil), workspaces...)
+	c.workspaceCacheValid = true
+	return append([]WorkspaceInfo(nil), workspaces...), nil
+}
+
+func (c *Client) listLegacyWorkspaces(ctx context.Context) ([]WorkspaceInfo, error) {
 	var workspaces []WorkspaceInfo
 	if err := c.getJSON(ctx, "/api/workspaces", &workspaces); err != nil {
 		return nil, err
 	}
 	return workspaces, nil
+}
+
+func (c *Client) usesLegacyWorkspaceEndpoint() bool {
+	c.workspaceMu.Lock()
+	defer c.workspaceMu.Unlock()
+	return c.legacyWorkspaceEndpointEnabled
 }
 
 // IssueGCStatus holds the minimal issue info returned by the GC check endpoint.

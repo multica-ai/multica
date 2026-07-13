@@ -7,6 +7,24 @@ JOIN workspace w ON w.id = m.workspace_id
 WHERE m.user_id = $1
 ORDER BY w.created_at ASC;
 
+-- name: ListDaemonWorkspaces :many
+-- Daemons only need the membership set and display name to discover which
+-- workspaces should have local runtimes. Keep this projection intentionally
+-- narrow so the periodic consistency check never reads UI-only JSON/text
+-- columns such as settings, repos, or context.
+SELECT w.id, w.name
+FROM member m
+JOIN workspace w ON w.id = m.workspace_id
+WHERE m.user_id = $1
+ORDER BY w.id ASC;
+
+-- name: GetDaemonWorkspace :one
+-- Workspace-scoped daemon tokens do not carry a user ID. This narrow lookup
+-- lets them use the same endpoint without widening their token scope.
+SELECT id, name
+FROM workspace
+WHERE id = $1;
+
 -- name: GetWorkspace :one
 SELECT * FROM workspace
 WHERE id = $1;

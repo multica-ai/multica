@@ -102,6 +102,26 @@ func (q *Queries) DeleteWorkspace(ctx context.Context, id pgtype.UUID) error {
 	return err
 }
 
+const getDaemonWorkspace = `-- name: GetDaemonWorkspace :one
+SELECT id, name
+FROM workspace
+WHERE id = $1
+`
+
+type GetDaemonWorkspaceRow struct {
+	ID   pgtype.UUID `json:"id"`
+	Name string      `json:"name"`
+}
+
+// Workspace-scoped daemon tokens do not carry a user ID. This narrow lookup
+// lets them use the same endpoint without widening their token scope.
+func (q *Queries) GetDaemonWorkspace(ctx context.Context, id pgtype.UUID) (GetDaemonWorkspaceRow, error) {
+	row := q.db.QueryRow(ctx, getDaemonWorkspace, id)
+	var i GetDaemonWorkspaceRow
+	err := row.Scan(&i.ID, &i.Name)
+	return i, err
+}
+
 const getWorkspace = `-- name: GetWorkspace :one
 SELECT id, name, slug, description, settings, created_at, updated_at, context, repos, issue_prefix, issue_counter, avatar_url FROM workspace
 WHERE id = $1
@@ -163,6 +183,43 @@ func (q *Queries) IncrementIssueCounter(ctx context.Context, id pgtype.UUID) (in
 	var issue_counter int32
 	err := row.Scan(&issue_counter)
 	return issue_counter, err
+}
+
+const listDaemonWorkspaces = `-- name: ListDaemonWorkspaces :many
+SELECT w.id, w.name
+FROM member m
+JOIN workspace w ON w.id = m.workspace_id
+WHERE m.user_id = $1
+ORDER BY w.id ASC
+`
+
+type ListDaemonWorkspacesRow struct {
+	ID   pgtype.UUID `json:"id"`
+	Name string      `json:"name"`
+}
+
+// Daemons only need the membership set and display name to discover which
+// workspaces should have local runtimes. Keep this projection intentionally
+// narrow so the periodic consistency check never reads UI-only JSON/text
+// columns such as settings, repos, or context.
+func (q *Queries) ListDaemonWorkspaces(ctx context.Context, userID pgtype.UUID) ([]ListDaemonWorkspacesRow, error) {
+	rows, err := q.db.Query(ctx, listDaemonWorkspaces, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListDaemonWorkspacesRow{}
+	for rows.Next() {
+		var i ListDaemonWorkspacesRow
+		if err := rows.Scan(&i.ID, &i.Name); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listWorkspaces = `-- name: ListWorkspaces :many
