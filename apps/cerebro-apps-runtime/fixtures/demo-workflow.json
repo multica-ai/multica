@@ -1,0 +1,10 @@
+{
+  "schema_version": "1",
+  "trigger": { "id": "trigger", "type": "data_event", "config": { "source_id": "products" } },
+  "steps": [
+    { "id": "read", "type": "registry.read", "config": { "resource_id": "products" } },
+    { "id": "filter", "type": "filter", "config": { "field": "read.count", "operator": "gt", "value": 0 } },
+    { "id": "confirm", "type": "view.show_and_wait", "config": { "view_id": "formatter" } },
+    { "id": "write", "type": "registry.write", "config": { "resource_id": "products" } }
+  ]
+}

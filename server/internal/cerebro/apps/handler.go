@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
 	"regexp"
 	"strings"
 	"time"
@@ -28,12 +29,34 @@ type tokenIssuer interface {
 }
 
 type Handler struct {
-	pool   *pgxpool.Pool
-	tokens tokenIssuer
+	pool    *pgxpool.Pool
+	tokens  tokenIssuer
+	enabled bool
 }
 
 func NewHandler(pool *pgxpool.Pool) *Handler {
-	return &Handler{pool: pool, tokens: tokens.NewBroker(tokens.ConfigFromEnv(), nil)}
+	return &Handler{pool: pool, tokens: tokens.NewBroker(tokens.ConfigFromEnv(), nil), enabled: envFlagEnabled("CEREBRO_MINI_APPS_ENABLED")}
+}
+
+func envFlagEnabled(name string) bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv(name))) {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
+	}
+}
+
+// RequireEnabled keeps the entire server surface default-off alongside the UI
+// feature flag. Disabled routes look unavailable and cannot mutate app state.
+func (h *Handler) RequireEnabled(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if h == nil || !h.enabled {
+			writeError(w, http.StatusNotFound, "not found")
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 type createRequest struct {

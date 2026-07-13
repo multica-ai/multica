@@ -2155,6 +2155,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			})
 			// CEREBRO-PATCH(cerebro-mini-apps-routes): FIR-3172 app catalog lifecycle.
 			r.Route("/api/cerebro/apps", func(r chi.Router) {
+				r.Use(cerebroAppsHandler.RequireEnabled)
 				r.Get("/", cerebroAppsHandler.List)
 				r.Post("/", cerebroAppsHandler.Create)
 				r.Post("/{id}/preview", cerebroAppsHandler.Preview)
@@ -2170,6 +2171,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			})
 			// CEREBRO-PATCH(cerebro-mini-app-workflow-routes): FIR-3172 shared JSON workflow lifecycle.
 			r.Route("/api/cerebro/app-workflows", func(r chi.Router) {
+				r.Use(cerebroAppsHandler.RequireEnabled)
 				r.Post("/", cerebroAppsHandler.CreateWorkflow)
 				r.Post("/{workflowId}/test", cerebroAppsHandler.TestWorkflow)
 				r.Post("/{workflowId}/{state:enable|disable}", cerebroAppsHandler.SetWorkflowEnabled)

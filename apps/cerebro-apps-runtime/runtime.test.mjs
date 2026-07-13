@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import test from "node:test";
 
 import { createAppsRuntime } from "./runtime.mjs";
@@ -62,4 +63,26 @@ test("rejects path traversal before touching the filesystem", async () => {
   const runtime = createAppsRuntime({ bundleRoot: await fixture() });
   const response = await runtime.fetch(new Request("http://runtime/apps/not-an-id/1.0.0/../../secret"));
   assert.equal(response.status, 404);
+});
+
+test("allergen fixture makes one AI call on the personal key", async () => {
+  let calls = 0;
+  const ai = (await import("node:http")).createServer((req, res) => {
+    calls++;
+    assert.equal(req.headers.authorization, "Bearer sk_personal");
+    res.setHeader("content-type", "application/json");
+    res.end(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ formatted_ingredients: "WHEAT flour, MILK", allergens: ["WHEAT", "MILK"] }) } }] }));
+  });
+  await new Promise((resolve) => ai.listen(0, "127.0.0.1", resolve));
+  const address = ai.address();
+  const fixtureRoot = join(fileURLToPath(new URL(".", import.meta.url)), "fixtures");
+  const runtime = createAppsRuntime({ bundleRoot: fixtureRoot, workerTimeoutMs: 2_000 });
+  const response = await runtime.fetch(new Request("http://runtime/workers/f1540000-0000-4154-8154-000000000001/1.0.0/invoke", {
+    method: "POST",
+    body: JSON.stringify({ ingredients: "wheat flour, milk", registryKey: "sk_personal", aiBaseUrl: `http://127.0.0.1:${address.port}` }),
+  }));
+  ai.close();
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { formatted_ingredients: "WHEAT flour, MILK", allergens: ["WHEAT", "MILK"] });
+  assert.equal(calls, 1);
 });

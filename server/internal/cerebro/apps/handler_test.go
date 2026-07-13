@@ -2,6 +2,8 @@ package apps
 
 import (
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/multica-ai/multica/server/internal/cerebro/apps/tokens"
@@ -19,6 +21,23 @@ func TestValidateCreateRequestRequiresStableIdentity(t *testing.T) {
 		if err := validateCreateRequest(req); err == nil {
 			t.Fatalf("invalid app accepted: %+v", req)
 		}
+	}
+}
+
+func TestMiniAppsServerSurfaceDefaultsOff(t *testing.T) {
+	t.Setenv("CEREBRO_MINI_APPS_ENABLED", "")
+	h := NewHandler(nil)
+	recorder := httptest.NewRecorder()
+	h.RequireEnabled(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) })).ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/", nil))
+	if recorder.Code != http.StatusNotFound {
+		t.Fatalf("default-off surface returned %d", recorder.Code)
+	}
+	t.Setenv("CEREBRO_MINI_APPS_ENABLED", "true")
+	h = NewHandler(nil)
+	recorder = httptest.NewRecorder()
+	h.RequireEnabled(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) })).ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/", nil))
+	if recorder.Code != http.StatusNoContent {
+		t.Fatalf("enabled surface returned %d", recorder.Code)
 	}
 }
 
