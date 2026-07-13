@@ -66,7 +66,7 @@ type Config struct {
 	// the UI can hide every "Create workspace" affordance — see #3433.
 	DisableWorkspaceCreation bool
 	// PublicURL is the absolute base URL the API is reachable at from the
-	// public internet, with no trailing slash (e.g. "https://app.multica.ai").
+	// public internet, with no trailing slash (e.g. "https://multica.ai").
 	// Used only to build webhook_url responses for autopilot webhook triggers
 	// — never for auth, routing, or workspace resolution. Empty when unset,
 	// in which case clients fall back to webhook_path + their own origin.
@@ -421,6 +421,28 @@ func parseUUIDSliceOrBadRequest(w http.ResponseWriter, ids []string, fieldName s
 		uuids[i] = u
 	}
 	return uuids, true
+}
+
+// parseSkillMentionAgents decodes the skill→agent routing map sent by the
+// frontend's smart-routing layer (assignee > recency > online). Each key is
+// a skill ID from the mention link; each value is the agent the frontend
+// resolved for it. Invalid UUIDs in the map abort with a 400 so a single
+// malformed entry doesn't slip through and trigger the wrong agent. An empty
+// map is valid — it just means the client opted into backend-only routing.
+func parseSkillMentionAgents(w http.ResponseWriter, in map[string]string, fieldName string) (map[string]pgtype.UUID, bool) {
+	if len(in) == 0 {
+		return nil, true
+	}
+	out := make(map[string]pgtype.UUID, len(in))
+	for skillID, agentID := range in {
+		u, err := util.ParseUUID(agentID)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid "+fieldName)
+			return nil, false
+		}
+		out[skillID] = u
+	}
+	return out, true
 }
 
 // publish sends a domain event through the event bus.

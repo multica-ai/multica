@@ -145,6 +145,8 @@ export function Markdown({
       //   mention://member/<uuid>  → no-op (no member profile screen yet)
       //   mention://agent/<uuid>   → no-op (no agent profile screen yet)
       //   mention://squad/<uuid>   → no-op (no squad profile screen yet)
+      //   mention://skill/<uuid>   → no-op (no skill detail screen yet)
+      //   mention://project/<uuid> → no-op (no project detail screen yet)
       //   mention://all/all        → no-op (semantic only — "everyone")
       //   anything malformed       → no-op
       if (url.startsWith("mention://")) {

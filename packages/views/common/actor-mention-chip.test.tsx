@@ -50,7 +50,7 @@ describe("ActorMentionChip", () => {
     const pill = container.querySelector(".actor-mention-chip")!;
     expect(pill.className).toContain("bg-info/10");
     expect(pill.className).toContain("border-info/20");
-    // Upstream unified all avatars to circles (MUL-4277); squads are round too.
+    // On origin/main all actor avatars render as rounded-full (circle).
     const avatar = container.querySelector('[data-slot="avatar"]')!;
     expect(avatar.className).toContain("rounded-full");
   });

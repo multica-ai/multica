@@ -3,6 +3,8 @@ import { mergeAttributes } from "@tiptap/core";
 import { ReactNodeViewRenderer } from "@tiptap/react";
 import { MentionView } from "./mention-view";
 import { escapeMarkdownLabel } from "../utils/escape-markdown-label";
+import type { MentionType } from "@multica/core/mention";
+import { getMentionPrefix } from "@multica/core/mention";
 
 const MENTION_LINK_MARKER = "](mention://";
 
@@ -47,7 +49,7 @@ export const BaseMentionExtension = Mention.extend({
   },
   renderHTML({ node, HTMLAttributes }) {
     const type = node.attrs.type ?? "member";
-    const prefix = type === "issue" || type === "project" ? "" : "@";
+    const prefix = getMentionPrefix(type as MentionType) ? "@" : "";
     return [
       "span",
       mergeAttributes(
@@ -107,7 +109,7 @@ export const BaseMentionExtension = Mention.extend({
   },
   renderMarkdown: (node: any) => {
     const { id, label, type = "member" } = node.attrs || {};
-    const prefix = type === "issue" || type === "project" ? "" : "@";
+    const prefix = getMentionPrefix(type as MentionType) ? "@" : "";
     // Escape [ ] \ ( ) in the label so the markdown link syntax is not broken
     // and the label survives the linear tokenizer (which now treats "\" as an
     // escape lead, not an ordinary char). Must stay in sync with the unescape

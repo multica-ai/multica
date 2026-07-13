@@ -159,7 +159,10 @@ on it. These are the contracts, not advice:
 - **`done`** on a child issue posts a system comment on its parent. If a PR
   carries close intent (`Closes MUL-XXXX`), it advances the issue to `done`
   itself on merge — you do not also need to flip it manually.
-- **`cancelled`** stops outstanding work; treat it as a user-driven decision.
+- **`cancelled`** is a terminal, user-driven decision to close the issue. Like
+  `done` it enqueues no new agent work, but it does **not** stop tasks already in
+  flight — a run in progress keeps going (MUL-4465). To stop a running task,
+  cancel the task itself.
 
 ## Sub-issues: `todo` starts work now, `backlog` parks it
 

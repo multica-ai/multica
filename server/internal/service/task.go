@@ -1216,11 +1216,16 @@ func (s *TaskService) SendDirectChatMessage(ctx context.Context, session db.Chat
 // affected agent's status, and broadcasts task:cancelled events so frontends
 // clear their live cards.
 //
-// Before #1587 this path was "cancel rows and return" — issue-status flips
-// (e.g. user marks the issue `done` or `cancelled` while a task is still
-// running) left the agent stuck at status="working" indefinitely, requiring a
-// manual `multica agent update <id> --status idle` to unwedge. Matches the
-// pattern already used by CancelTask and RerunIssue.
+// Callers are explicit issue-lifecycle cleanup paths only — DeleteIssue and
+// BatchDeleteIssues, where the owning issue row is going away so its tasks
+// must not be left orphaned. A plain status flip, `cancelled` included, no
+// longer routes here (MUL-4465): cancelling an issue is not an implicit "stop
+// all runs" switch. Do not re-add a status-driven caller.
+//
+// Before #1587 this path was "cancel rows and return", which left each affected
+// agent stuck at status="working" indefinitely, requiring a manual
+// `multica agent update <id> --status idle` to unwedge. It now reconciles agent
+// status and broadcasts task:cancelled, matching CancelTask and RerunIssue.
 func (s *TaskService) CancelTasksForIssue(ctx context.Context, issueID pgtype.UUID) error {
 	cancelled, err := s.Queries.CancelAgentTasksByIssue(ctx, issueID)
 	if err != nil {

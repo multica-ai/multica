@@ -202,14 +202,14 @@ API 返回的 `download_url` 在未配置 CloudFront 签名时会指向 `GET /ap
 
 | 环境变量 | 默认值 | 说明 |
 |---|---|---|
-| `FRONTEND_ORIGIN` | 空 | 前端地址。邀请邮件里的链接、CORS 白名单、cookie domain 都从这里推导。邮件链接在不设时会 fallback 到托管版域名 `https://app.multica.ai`——self-host 必须显式填 |
+| `FRONTEND_ORIGIN` | 空 | 前端地址。邀请邮件里的链接、CORS 白名单、cookie domain 都从这里推导。邮件链接在不设时会 fallback 到托管版域名 `https://multica.ai`——self-host 必须显式填 |
 | `MULTICA_APP_URL` | 空 | CLI 登录流程使用的前端 URL。Web UI 也会用它显示带你自己 app domain 的 self-host 守护进程 setup 命令；同源部署中，如果 `MULTICA_PUBLIC_URL` 未设置，它也会作为守护进程的 `server_url` |
 | `MULTICA_PUBLIC_URL` | 空 | 公开 API URL，不带结尾 slash。用于 autopilot webhook URL，也会被 Web UI 用作守护进程的 `server_url` |
 | `CORS_ALLOWED_ORIGINS` | 空 | 额外的 CORS 允许来源（逗号分隔）|
 | `ALLOWED_ORIGINS` | 空 | WebSocket 专用的 origin 白名单（逗号分隔）；不设就按 `CORS_ALLOWED_ORIGINS` → `FRONTEND_ORIGIN` → `localhost:3000/5173/5174` 顺序回落 |
 
 <Callout type="warning">
-**`FRONTEND_ORIGIN` 不设就有两个静默失败**：（1）邀请邮件里的链接指向 `https://app.multica.ai`（托管版的域名），用户点了跳不回你的 self-host 实例；（2）WebSocket 连接的 Origin 校验回落到 `localhost:3000 / 5173 / 5174`，生产部署的 WebSocket 全部被拒，前端看起来「实时更新不工作」。
+**`FRONTEND_ORIGIN` 不设就有两个静默失败**：（1）邀请邮件里的链接指向 `https://multica.ai`（托管版的域名），用户点了跳不回你的 self-host 实例；（2）WebSocket 连接的 Origin 校验回落到 `localhost:3000 / 5173 / 5174`，生产部署的 WebSocket 全部被拒，前端看起来「实时更新不工作」。
 </Callout>
 
 ## GitHub 集成

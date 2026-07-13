@@ -116,6 +116,7 @@
     "./skills/frontmatter": "./skills/frontmatter.ts",
     "./skills/stores": "./skills/stores/index.ts",
     "./autopilots/stores": "./autopilots/stores/index.ts",
+    "./mention": "./mention/index.ts",
     "./admin": "./admin/index.ts"
   },
   "dependencies": {

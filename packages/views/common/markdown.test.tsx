@@ -96,6 +96,24 @@ describe("Markdown", () => {
     expect(screen.getByTestId("project-chip")).toHaveTextContent("project-123");
     expect(screen.getByRole("link")).toHaveAttribute("href", "/projects/project-123");
   });
+
+  // AE4 acceptance example: a squad mention must render as a chip, not as
+  // raw link text. The regex fix in @multica/ui/markdown/Markdown.tsx added
+  // 'squad' to the mention alternation. After the dispatch refactor, squad
+  // mentions route through ActorMentionChip (which carries an avatar glyph
+  // and the actor-mention-chip class), not the legacy `.mention` plain-text
+  // fallback. The chip + aria-label confirm the chip path was reached.
+  it("renders squad mention links as squad chips, not raw text (AE4)", () => {
+    const { container } = render(
+      <Markdown>{"[DevTeam](mention://squad/squad-uuid)"}</Markdown>,
+    );
+
+    expect(container.querySelector(".mention")).toBeNull();
+    expect(container.querySelector(".actor-mention-chip")).not.toBeNull();
+    expect(
+      container.querySelector('[aria-label*="squad"]'),
+    ).toBeInTheDocument();
+  });
 });
 
 describe("Markdown bare issue identifier autolink", () => {

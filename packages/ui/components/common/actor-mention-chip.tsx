@@ -3,7 +3,6 @@
 import { Users } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
 import { ActorAvatar } from "./actor-avatar";
-import { AVATAR_SIZE_PX, type AvatarSize } from "@multica/ui/lib/avatar-size";
 
 /**
  * ActorMentionChip — the inline "avatar pill" for actor mentions
@@ -13,15 +12,13 @@ import { AVATAR_SIZE_PX, type AvatarSize } from "@multica/ui/lib/avatar-size";
  * form.
  *
  * Type distinction is carried by the pill's background + border tint
- * (member=muted, agent=brand, squad=info, @all=warning); all avatar types
- * render as circles (upstream's unified avatar shape invariant, MUL-4277).
- * The chip is purely visual
+ * (member=muted, agent=brand, squad=info, @all=warning) and by the avatar
+ * shape/icons delegated to {@link ActorAvatar}. The chip is purely visual
  * confirmation — it has no click navigation. The chip owns its type-tinted
  * hover; callers wrap it in a hover card and control focusability.
  *
- * Size budget: must fit within a 14px / 1.625 prose line-box when used inline
- * — hence `py-0.5` + `text-xs` + a 16px avatar (xs tier, 16px + 4px padding
- * + 2px border = 22px, fits the 22.75px box; same budget IssueChip proved).
+ * Size budget: must fit within a 14px / 1.625 prose line-box when used inline —
+ * hence `py-0.5` + `text-xs` + a 14px avatar (same budget IssueChip proved).
  *
  * Focusability is caller-controlled (R14): the editor opts in (`focusable`)
  * so keyboard users get the hover card on focus; readonly leaves it off so a
@@ -75,8 +72,7 @@ function ariaLabelFor(type: ActorMentionType, label: string): string {
     : `Mention: ${label}, ${type}`;
 }
 
-const AVATAR_SIZE: AvatarSize = "xs";
-const AVATAR_PX = AVATAR_SIZE_PX[AVATAR_SIZE]; // 16
+const AVATAR_SIZE = 14;
 
 export function ActorMentionChip({
   type,
@@ -107,9 +103,9 @@ export function ActorMentionChip({
           data-slot="avatar"
           aria-hidden
           className="inline-flex shrink-0 items-center justify-center rounded-full bg-muted text-warning"
-          style={{ width: AVATAR_PX, height: AVATAR_PX }}
+          style={{ width: AVATAR_SIZE, height: AVATAR_SIZE }}
         >
-          <Users style={{ width: AVATAR_PX * 0.55, height: AVATAR_PX * 0.55 }} />
+          <Users style={{ width: AVATAR_SIZE * 0.55, height: AVATAR_SIZE * 0.55 }} />
         </span>
       ) : (
         <ActorAvatar
@@ -118,7 +114,7 @@ export function ActorMentionChip({
           avatarUrl={avatarUrl}
           isAgent={type === "agent"}
           isSquad={type === "squad"}
-          size={AVATAR_SIZE}
+          size="xs"
         />
       )}
       <span data-slot="label" className="min-w-0 shrink truncate max-w-[8rem]">
