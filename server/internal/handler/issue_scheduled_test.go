@@ -102,3 +102,59 @@ func TestListIssues_ScheduledFilter(t *testing.T) {
 		t.Fatalf("scheduled total: want 3, got %d", scheduledTotal)
 	}
 }
+
+func TestListIssuesReturnsStage(t *testing.T) {
+	ctx := context.Background()
+	suffix := time.Now().UnixNano()
+
+	var projectID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO project (workspace_id, title) VALUES ($1, $2) RETURNING id
+	`, testWorkspaceID, fmt.Sprintf("Stage List %d", suffix)).Scan(&projectID); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM project WHERE id = $1`, projectID) })
+
+	var number int
+	if err := testPool.QueryRow(ctx, `
+		UPDATE workspace
+		SET issue_counter = GREATEST(issue_counter, (SELECT COALESCE(MAX(number), 0) FROM issue WHERE workspace_id = $1)) + 1
+		WHERE id = $1 RETURNING issue_counter
+	`, testWorkspaceID).Scan(&number); err != nil {
+		t.Fatalf("next issue number: %v", err)
+	}
+
+	var issueID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (workspace_id, title, status, priority, creator_type, creator_id, position, number, project_id, stage)
+		VALUES ($1, $2, 'todo', 'none', 'member', $3, 0, $4, $5, 2)
+		RETURNING id
+	`, testWorkspaceID, fmt.Sprintf("stage-list-%d", suffix), testUserID, number, projectID).Scan(&issueID); err != nil {
+		t.Fatalf("create issue: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, issueID) })
+
+	path := fmt.Sprintf("/api/issues?workspace_id=%s&project_id=%s&limit=500", testWorkspaceID, projectID)
+	w := httptest.NewRecorder()
+	testHandler.ListIssues(w, newRequest("GET", path, nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("ListIssues: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp struct {
+		Issues []IssueResponse `json:"issues"`
+		Total  int64           `json:"total"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode list response: %v", err)
+	}
+	if resp.Total != 1 || len(resp.Issues) != 1 {
+		t.Fatalf("expected one staged issue, total=%d len=%d", resp.Total, len(resp.Issues))
+	}
+	if resp.Issues[0].ID != issueID {
+		t.Fatalf("returned issue id = %s, want %s", resp.Issues[0].ID, issueID)
+	}
+	if resp.Issues[0].Stage == nil || *resp.Issues[0].Stage != 2 {
+		t.Fatalf("stage = %#v, want 2", resp.Issues[0].Stage)
+	}
+}

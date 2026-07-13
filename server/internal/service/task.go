@@ -1964,6 +1964,9 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 	// no_response row has role='assistant' and a fresh created_at, so it counts
 	// as unread just like a text reply, no per-reply stamping needed.
 	if task.ChatSessionID.Valid {
+		// The assistant outcome row (message / no_response) and any attachment
+		// binding were written inside the completion transaction above by
+		// writeChatCompletionOutcome. Broadcast chat:done AFTER commit.
 		s.broadcastChatDone(ctx, task, chatAssistantMsg)
 	}
 
@@ -2009,9 +2012,29 @@ func (s *TaskService) writeChatCompletionOutcome(ctx context.Context, qtx *db.Qu
 	body := util.UnescapeBackslashEscapes(payload.Output)
 	isEmpty := strings.TrimSpace(body) == ""
 
-	// Channel/legacy empty completion: emit no assistant row, only an empty
-	// chat:done for typing/lifecycle. Keeps the Slack/Lark silent-drop path.
-	if isEmpty && !task.ChatInputTaskID.Valid {
+	// Attachments the agent uploaded during this task (tagged with task_id, not
+	// yet bound to any owner) are part of this reply. They make an empty-text
+	// turn a real image/file response — NOT a no_response — and need a row to
+	// hang on. Count + bind run on qtx so message creation and binding are one
+	// atomic outcome.
+	wsUUID, _ := util.ParseUUID(s.ResolveTaskWorkspaceID(ctx, task))
+	var pendingAttachments int64
+	if wsUUID.Valid {
+		n, err := qtx.CountUnboundChatAttachmentsForTask(ctx, db.CountUnboundChatAttachmentsForTaskParams{
+			WorkspaceID: wsUUID,
+			TaskID:      task.ID,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("count chat attachments: %w", err)
+		}
+		pendingAttachments = n
+	}
+
+	// Channel/legacy empty completion with nothing to show: emit no assistant
+	// row, only an empty chat:done for typing/lifecycle. Keeps the Slack/Lark
+	// silent-drop path. Attachments still force a row — the agent produced a
+	// deliverable the user must see.
+	if isEmpty && pendingAttachments == 0 && !task.ChatInputTaskID.Valid {
 		return nil, nil
 	}
 
@@ -2021,17 +2044,42 @@ func (s *TaskService) writeChatCompletionOutcome(ctx context.Context, qtx *db.Qu
 		TaskID:        task.ID,
 		ElapsedMs:     computeChatElapsedMs(task),
 	}
-	if isEmpty {
-		// Task-owned direct task: explicit, visible no_response outcome.
-		params.Content = chatNoResponseFallback
-		params.MessageKind = pgtype.Text{String: protocol.ChatMessageKindNoResponse, Valid: true}
-	} else {
+	switch {
+	case !isEmpty:
 		params.Content = redact.Text(body)
 		// message_kind left NULL → COALESCE defaults to 'message'.
+	case pendingAttachments > 0:
+		// Image/file-only reply: a real 'message' outcome with empty text — the
+		// attachment cards ARE the response, so it must not read as no_response.
+		params.Content = ""
+	default:
+		// Task-owned direct task, empty output, no attachments: explicit,
+		// visible no_response outcome.
+		params.Content = chatNoResponseFallback
+		params.MessageKind = pgtype.Text{String: protocol.ChatMessageKindNoResponse, Valid: true}
 	}
 	row, err := qtx.CreateChatMessage(ctx, params)
 	if err != nil {
 		return nil, err
+	}
+
+	// Bind the task's still-unclaimed attachments to the reply we just wrote.
+	if pendingAttachments > 0 && wsUUID.Valid {
+		bound, err := qtx.BindChatAttachmentsToMessage(ctx, db.BindChatAttachmentsToMessageParams{
+			ChatMessageID: row.ID,
+			WorkspaceID:   wsUUID,
+			TaskID:        task.ID,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("bind chat attachments: %w", err)
+		}
+		if len(bound) > 0 {
+			slog.Info("bound chat attachments to assistant reply",
+				"task_id", util.UUIDToString(task.ID),
+				"message_id", util.UUIDToString(row.ID),
+				"count", len(bound),
+			)
+		}
 	}
 	return &row, nil
 }

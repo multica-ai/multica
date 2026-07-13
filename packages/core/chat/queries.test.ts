@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { TaskMessagePayload } from "../types/events";
 import type { ChatSession } from "../types/chat";
 import {
+  countUnreadChatSessions,
   isTaskMessageTaskId,
   mergeTaskMessagesBySeq,
   sortChatSessions,
@@ -101,5 +102,50 @@ describe("sortChatSessions", () => {
     const snapshot = input.map((s) => s.id);
     sortChatSessions(input);
     expect(input.map((s) => s.id)).toEqual(snapshot);
+  });
+});
+
+describe("countUnreadChatSessions", () => {
+  const session = (over: Partial<ChatSession>): ChatSession => ({
+    id: "s",
+    workspace_id: "w",
+    agent_id: "a",
+    creator_id: "c",
+    title: "t",
+    status: "active",
+    has_unread: false,
+    created_at: "2026-01-01T00:00:00Z",
+    updated_at: "2026-01-01T00:00:00Z",
+    ...over,
+  });
+
+  it("counts only active sessions that have unread", () => {
+    const sessions = [
+      session({ id: "active-unread", status: "active", has_unread: true }),
+      session({ id: "active-read", status: "active", has_unread: false }),
+    ];
+
+    expect(countUnreadChatSessions(sessions)).toBe(1);
+  });
+
+  it("excludes archived sessions even when they carry unread", () => {
+    // The stuck-badge bug: an archived session keeps has_unread, but it is
+    // hidden from the default list and read-only, so the badge must ignore it
+    // (MUL-4372).
+    const sessions = [
+      session({ id: "archived-unread", status: "archived", has_unread: true }),
+      session({ id: "active-unread", status: "active", has_unread: true }),
+    ];
+
+    expect(countUnreadChatSessions(sessions)).toBe(1);
+  });
+
+  it("returns 0 when the only unread sessions are archived", () => {
+    const sessions = [
+      session({ id: "archived-1", status: "archived", has_unread: true }),
+      session({ id: "archived-2", status: "archived", has_unread: true }),
+    ];
+
+    expect(countUnreadChatSessions(sessions)).toBe(0);
   });
 });

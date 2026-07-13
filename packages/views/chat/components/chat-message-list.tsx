@@ -133,7 +133,9 @@ export function ChatMessageList({
     scrollRef.current = node;
     setScrollContainerEl(node);
   }, []);
-  const fadeStyle = useScrollFade(scrollRef);
+  // Soft edge fade hinting more content above/below. Kept small so it barely
+  // grazes full-bleed previews (image / HTML) at the edges.
+  const fadeStyle = useScrollFade(scrollRef, 16);
 
   const pendingTaskId = pendingTask?.task_id ?? null;
 

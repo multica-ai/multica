@@ -5,6 +5,12 @@ import { BarChart3, FolderKanban, Trash2 } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import {
+  CompactNumberFlow,
+  CurrencyNumberFlow,
+  NumberFlow,
+  NumberFlowGroup,
+} from "@multica/ui/components/ui/number-flow";
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -103,11 +109,6 @@ const EMPTY_RUNTIME: import("@multica/core/types").DashboardAgentRunTime[] = [];
 const EMPTY_RUNTIME_DAILY: import("@multica/core/types").DashboardRunTimeDaily[] = [];
 const EMPTY_AGENTS: Agent[] = [];
 
-function fmtMoney(n: number): string {
-  if (n >= 100) return `$${n.toFixed(0)}`;
-  return `$${n.toFixed(2)}`;
-}
-
 // Local segmented control — same visual language the runtime usage section
 // uses for its period / tab toggles. shadcn's Tabs is wired for full tab
 // pages with ARIA semantics the compact toolbar pill doesn't need.
@@ -140,6 +141,43 @@ function Segmented<T extends string | number>({
   );
 }
 
+function DurationNumberFlow({
+  seconds,
+  lessThanMinuteLabel,
+  locales,
+}: {
+  seconds: number;
+  lessThanMinuteLabel: string;
+  locales?: Intl.LocalesArgument;
+}) {
+  const label = formatDuration(seconds, lessThanMinuteLabel);
+  const parts = Array.from(label.matchAll(/(\d+)([a-z]+)/gi), (match) => ({
+    value: Number(match[1]),
+    unit: match[2] ?? "",
+  }));
+
+  if (parts.length === 0) return label;
+
+  return (
+    <>
+      <span className="sr-only">{label}</span>
+      <NumberFlowGroup>
+        <span aria-hidden className="inline-flex items-baseline gap-1">
+          {parts.map((part) => (
+            <NumberFlow
+              key={part.unit}
+              value={part.value}
+              locales={locales}
+              suffix={part.unit}
+              format={{ maximumFractionDigits: 0, useGrouping: false }}
+            />
+          ))}
+        </span>
+      </NumberFlowGroup>
+    </>
+  );
+}
+
 /**
  * Workspace + project token / run-time dashboard.
  *
@@ -152,9 +190,10 @@ function Segmented<T extends string | number>({
  * and the runtime page using one pricing table.
  */
 export function DashboardPage() {
-  const { t } = useT("usage");
+  const { t, i18n } = useT("usage");
   const wsId = useWorkspaceId();
   const viewTZ = useViewingTimezone();
+  const locales = i18n.resolvedLanguage ?? i18n.language;
   const [dim, setDim] = useState<Dim>("daily");
   const [days, setDays] = useState<TimeRange>(30);
   const [projectValue, setProjectValue] = useState<string>(ALL_PROJECTS);
@@ -389,13 +428,23 @@ export function DashboardPage() {
               <div className="grid grid-cols-1 divide-y rounded-lg border bg-card sm:grid-cols-2 sm:divide-x sm:divide-y-0 lg:grid-cols-4">
                 <KpiCard
                   label={t(($) => $.kpi.cost_label, { days })}
-                  value={fmtMoney(totals.cost)}
+                  value={
+                    <CurrencyNumberFlow value={totals.cost} locales={locales} />
+                  }
                 />
                 <KpiCard
                   label={t(($) => $.kpi.tokens_label, { days })}
-                  value={formatTokens(
-                    totals.input + totals.output + totals.cacheRead + totals.cacheWrite,
-                  )}
+                  value={
+                    <CompactNumberFlow
+                      value={
+                        totals.input +
+                        totals.output +
+                        totals.cacheRead +
+                        totals.cacheWrite
+                      }
+                      locales={locales}
+                    />
+                  }
                   hint={t(($) => $.kpi.tokens_hint, {
                     input: formatTokens(totals.input),
                     output: formatTokens(totals.output),
@@ -403,17 +452,27 @@ export function DashboardPage() {
                 />
                 <KpiCard
                   label={t(($) => $.kpi.run_time_label, { days })}
-                  value={formatDuration(
-                    runTimeTotals.totalSeconds,
-                    t(($) => $.duration.less_than_minute),
-                  )}
+                  value={
+                    <DurationNumberFlow
+                      seconds={runTimeTotals.totalSeconds}
+                      lessThanMinuteLabel={t(($) => $.duration.less_than_minute)}
+                      locales={locales}
+                    />
+                  }
                   hint={t(($) => $.kpi.run_time_hint, {
                     tasks: runTimeTotals.taskCount,
                   })}
                 />
                 <KpiCard
                   label={t(($) => $.kpi.tasks_label, { days })}
-                  value={String(runTimeTotals.taskCount)}
+                  value={
+                    <NumberFlow
+                      value={runTimeTotals.taskCount}
+                      locales={locales}
+                      format={{ maximumFractionDigits: 0 }}
+                      aria-label={String(runTimeTotals.taskCount)}
+                    />
+                  }
                   hint={t(($) => $.kpi.tasks_hint, {
                     failed: runTimeTotals.failedCount,
                   })}

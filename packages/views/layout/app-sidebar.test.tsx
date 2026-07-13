@@ -302,6 +302,8 @@ describe("personal nav — Chat", () => {
   // and renders the label + badge as its children.
   const chatNav = (container: HTMLElement) =>
     container.querySelector<HTMLElement>('button[data-href="/acme/chat"]');
+  const chatBadge = (container: HTMLElement) =>
+    chatNav(container)?.querySelector("number-flow-react") ?? null;
 
   it("renders a Chat nav link to the workspace chat route", () => {
     const { container } = render(<AppSidebar />);
@@ -311,13 +313,13 @@ describe("personal nav — Chat", () => {
   it("badges the Chat nav with the summed unread_count of chat sessions", () => {
     chatSessions.current = [{ id: "a", unread_count: 3 }, { id: "b", unread_count: 2 }, { id: "c", unread_count: 0 }];
     const { container } = render(<AppSidebar />);
-    expect(chatNav(container)?.textContent).toContain("5");
+    expect(chatBadge(container)).toHaveAttribute("aria-label", "5");
   });
 
   it("shows no Chat unread badge when every session is read", () => {
     chatSessions.current = [{ id: "a", unread_count: 0 }, { id: "b" }];
     const { container } = render(<AppSidebar />);
-    expect(chatNav(container)?.textContent ?? "").not.toMatch(/\d/);
+    expect(chatBadge(container)).toBeNull();
   });
 
   it("excludes the session being viewed on the chat page from the badge", () => {
@@ -328,7 +330,7 @@ describe("personal nav — Chat", () => {
     navigation.current = { pathname: "/acme/chat" };
     chatStore.current = { activeSessionId: "a", isOpen: false };
     const { container } = render(<AppSidebar />);
-    expect(chatNav(container)?.textContent).toContain("3");
+    expect(chatBadge(container)).toHaveAttribute("aria-label", "3");
   });
 
   it("excludes the viewed session when the floating chat window is open off-route", () => {
@@ -336,7 +338,7 @@ describe("personal nav — Chat", () => {
     navigation.current = { pathname: "/acme/issues" };
     chatStore.current = { activeSessionId: "a", isOpen: true };
     const { container } = render(<AppSidebar />);
-    expect(chatNav(container)?.textContent).toContain("3");
+    expect(chatBadge(container)).toHaveAttribute("aria-label", "3");
   });
 
   it("still counts a remembered selection when no chat surface is showing it", () => {
@@ -346,6 +348,6 @@ describe("personal nav — Chat", () => {
     navigation.current = { pathname: "/acme/issues" };
     chatStore.current = { activeSessionId: "a", isOpen: false };
     const { container } = render(<AppSidebar />);
-    expect(chatNav(container)?.textContent).toContain("5");
+    expect(chatBadge(container)).toHaveAttribute("aria-label", "5");
   });
 });
