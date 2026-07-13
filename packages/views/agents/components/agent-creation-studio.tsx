@@ -659,7 +659,6 @@ export function AgentCreationStudio() {
       {mode === "choose" && (
         <ModeChooser
           onBlank={chooseBlank}
-          onTemplate={() => setMode("templates")}
           onAI={() => setMode("ai")}
         />
       )}
@@ -771,11 +770,9 @@ export function AgentCreationStudio() {
 
 function ModeChooser({
   onBlank,
-  onTemplate,
   onAI,
 }: {
   onBlank: () => void;
-  onTemplate: () => void;
   onAI: () => void;
 }) {
   const { t } = useT("agents");
@@ -785,12 +782,6 @@ function ModeChooser({
       title: t(($) => $.creation_studio.modes.blank.title),
       description: t(($) => $.creation_studio.modes.blank.description),
       action: onBlank,
-    },
-    {
-      icon: Bot,
-      title: t(($) => $.creation_studio.modes.template.title),
-      description: t(($) => $.creation_studio.modes.template.description),
-      action: onTemplate,
     },
     {
       icon: MessageSquare,
@@ -814,7 +805,7 @@ function ModeChooser({
             {t(($) => $.creation_studio.choose_description)}
           </p>
         </div>
-        <div className="mt-9 grid gap-4 md:grid-cols-3">
+        <div className="mx-auto mt-9 grid max-w-3xl gap-4 md:grid-cols-2">
           {modes.map(({ icon: Icon, title, description, action, recommended }) => (
             <button
               key={title}
