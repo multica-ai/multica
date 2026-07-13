@@ -421,7 +421,8 @@ func writeSubIssueCreation(b *strings.Builder) {
 
 // writeSkills emits the Skills section listing skill names + descriptions.
 func writeSkills(b *strings.Builder, provider string, ctx TaskContextForEnv) {
-	if len(ctx.AgentSkills) == 0 {
+	skills := modelVisibleSkills(ctx.AgentSkills)
+	if len(skills) == 0 {
 		return
 	}
 	b.WriteString("## Skills\n\n")
@@ -435,7 +436,7 @@ func writeSkills(b *strings.Builder, provider string, ctx TaskContextForEnv) {
 	default:
 		b.WriteString("Detailed skill instructions are in `.agent_context/skills/`. Each subdirectory contains a `SKILL.md`.\n\n")
 	}
-	for _, skill := range ctx.AgentSkills {
+	for _, skill := range skills {
 		if desc := strings.TrimSpace(skill.Description); desc != "" {
 			fmt.Fprintf(b, "- **%s** — %s\n", skill.Name, desc)
 		} else {
