@@ -1,6 +1,22 @@
 {
   "http": [
     {
+      "id": "POST /api/cerebro/apps/",
+      "gate": "cerebro_capability:build_apps"
+    },
+    {
+      "id": "POST /api/cerebro/apps/{id}/preview",
+      "gate": "cerebro_capability:build_apps"
+    },
+    {
+      "id": "POST /api/cerebro/apps/{id}/publish",
+      "gate": "cerebro_capability:build_apps"
+    },
+    {
+      "id": "POST /api/cerebro/apps/{id}/rollback",
+      "gate": "cerebro_capability:build_apps"
+    },
+    {
       "id": "DELETE /api/analytics/visuals/{visualId}",
       "gate": "workspace_member"
     },

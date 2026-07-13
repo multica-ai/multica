@@ -102,6 +102,8 @@ import (
 	cerebroterminal "github.com/multica-ai/multica/server/internal/cerebro/terminal"
 	// CEREBRO-PATCH(cerebro-workflows-routes): JEH-1047 workflow engine REST handler import
 	cerebroworkflows "github.com/multica-ai/multica/server/internal/cerebro/workflows"
+	// CEREBRO-PATCH(cerebro-mini-apps-routes): FIR-3172 app catalog and publishing.
+	cerebroapps "github.com/multica-ai/multica/server/internal/cerebro/apps"
 	// CEREBRO-PATCH(cerebro-status-models-routes): FIR-1550 workflow v2a status-model handler import
 	cerebrostatusmodels "github.com/multica-ai/multica/server/internal/cerebro/statusmodels"
 	// CEREBRO-PATCH(cerebro-sprints-routes): FIR-2666 project sprint handler import
@@ -576,6 +578,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	h.ChatStream = cerebrochatstream.NewBroker(bus)
 	// CEREBRO-PATCH(cerebro-dashboard-route): JEH-684 dashboard handler instance
 	cerebroDashboardHandler := cerebrodashboard.New(cerebroQueries, queries)
+	// CEREBRO-PATCH(cerebro-mini-apps-routes): FIR-3172 isolated app catalog service.
+	cerebroAppsHandler := cerebroapps.NewHandler(pool)
 	// CEREBRO-PATCH(cerebro-pricing-route): FIR-2471 pricing endpoint handler instance (service key from CEREBRO_PRICING_KEY).
 	cerebroPricingHandler := cerebropricing.New(os.Getenv("CEREBRO_PRICING_KEY"))
 	// CEREBRO-PATCH(cerebro-exchange-rates-ingest-route): FIR-43 exchange-rate ingest handler instance (service key from CEREBRO_EXCHANGE_INGEST_KEY).
@@ -1728,7 +1732,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Post("/context/change-requests", cerebroAgentOfficeHandler.CreateChangeRequest)
 					r.Get("/context/diff", cerebroAgentOfficeHandler.Diff)
 					r.Post("/context/rollback", cerebroAgentOfficeHandler.Rollback)
-					r.Get("/context/lint", cerebroAgentOfficeHandler.LintAgent)                    // CEREBRO-PATCH(cerebro-agent-office-lint-routes): FIR-1775 Phase 3 — per-agent context lint.
+					r.Get("/context/lint", cerebroAgentOfficeHandler.LintAgent)                   // CEREBRO-PATCH(cerebro-agent-office-lint-routes): FIR-1775 Phase 3 — per-agent context lint.
 					r.Get("/context/observability", cerebroAgentOfficeHandler.ObservabilityAgent) // CEREBRO-PATCH(cerebro-agent-office-observability-routes): FIR-1775 Phase 4 — per-agent context observability.
 					// CEREBRO-PATCH(agent-capabilities-card-task-route): FIR-2243 — GET /capabilities is registered in the task-allowlist group above (AllowTaskScopeForAgent) so an agent's own task token can also reach it; chi forbids a duplicate flat+nested registration of the same path.
 					// CEREBRO-PATCH(agent-tools-routes): cerebro tool grant admin endpoints.
@@ -2148,6 +2152,14 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				// CEREBRO-PATCH(cerebro-workflows-issue-loop-runs-route): FIR-2283 v2 point 7 — list the issues that have run through a recipe's loop.
 				r.Get("/{id}/loop-runs", cerebroWorkflowsHandler.LoopRuns)
 				r.Post("/_test/cron-sweep", cerebroWorkflowsHandler.TestSweepCron)
+			})
+			// CEREBRO-PATCH(cerebro-mini-apps-routes): FIR-3172 app catalog lifecycle.
+			r.Route("/api/cerebro/apps", func(r chi.Router) {
+				r.Get("/", cerebroAppsHandler.List)
+				r.Post("/", cerebroAppsHandler.Create)
+				r.Post("/{id}/preview", cerebroAppsHandler.Preview)
+				r.Post("/{id}/publish", cerebroAppsHandler.Publish)
+				r.Post("/{id}/rollback", cerebroAppsHandler.Rollback)
 			})
 			// CEREBRO-PATCH(cerebro-note-types-routes): TECH-3511 note types REST surface.
 			r.Route("/api/cerebro/note-types", func(r chi.Router) {

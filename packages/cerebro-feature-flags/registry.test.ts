@@ -36,6 +36,11 @@ describe("cerebro feature flag grouping", () => {
     expect(CEREBRO_FLAG_DEFAULTS.cerebro_member_override).toBe(true);
   });
 
+  it("keeps mini apps unavailable until an admin enables the product", () => {
+    expect(CEREBRO_FLAGS.some((flag) => flag.key === "cerebro_mini_apps")).toBe(true);
+    expect(CEREBRO_FLAG_DEFAULTS.cerebro_mini_apps).toBe(false);
+  });
+
   it("has unique group keys", () => {
     expect(groupKeys.size).toBe(CEREBRO_FLAG_GROUPS.length);
   });
