@@ -21,6 +21,7 @@ import {
   addIssueToBuckets,
   getBucket,
   setBucket,
+  upsertChildIssueByNumber,
 } from "./cache-helpers";
 import {
   cleanupDeletedIssueCaches,
@@ -200,8 +201,13 @@ export function useCreateIssue() {
       useRecentIssuesStore.getState().recordVisit(wsId, newIssue.id);
       // Invalidate parent's children query so sub-issues list updates immediately
       if (newIssue.parent_issue_id) {
+        qc.setQueryData<Issue[]>(
+          issueKeys.children(wsId, newIssue.parent_issue_id),
+          (old) => (old ? upsertChildIssueByNumber(old, newIssue) : old),
+        );
         qc.invalidateQueries({ queryKey: issueKeys.children(wsId, newIssue.parent_issue_id) });
         qc.invalidateQueries({ queryKey: issueKeys.childProgress(wsId) });
+        qc.invalidateQueries({ queryKey: issueKeys.childrenByParentsAll(wsId) });
       }
     },
     onSettled: () => {
