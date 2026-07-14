@@ -42,7 +42,7 @@ Gitea는 자체 호스팅이므로 GitHub App 설치 흐름이 없습니다. 모
 
 ## 저장소 webhook 설정하기
 
-인스턴스를 연결하면 Multica가 그것을 **읽을** 수 있게 됩니다. PR 이벤트를 밀어 넣는 것은 **webhook**입니다. 미러링하려는 각 Gitea 저장소에 webhook을 추가하세요(**Repo → Settings → Webhooks → Add Webhook → Gitea**).
+인스턴스를 연결하면 Multica가 그것을 **읽을** 수 있게 됩니다. PR 이벤트를 밀어 넣는 것은 **webhook**입니다. Multica는 **Settings → Integrations → Gitea**에 **Payload URL**을 복사 버튼과 함께 표시합니다. 또한 저장소에 쓰는 것은 부수 효과이므로, 기본적으로 꺼져 있는 **webhook 자동 생성** 토글도 있습니다. 켜고 `owner/repo`를 입력하면 Multica가 연결의 토큰으로 해당 저장소에 webhook을 추가합니다(한 번에 하나씩, 멱등 — 이미 Multica를 가리키는 저장소는 건너뜀). 수동으로 구성하려면 미러링하려는 각 Gitea 저장소에 webhook을 추가하세요(**Repo → Settings → Webhooks → Add Webhook → Gitea**).
 
 | 필드 | 값 |
 |---|---|

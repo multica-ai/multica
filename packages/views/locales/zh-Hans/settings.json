@@ -398,7 +398,17 @@
     "webhook_secret_hint": "Secret 填写该部署配置的",
     "webhook_unconfigured": "当前部署未设置 webhook secret，接口会返回 503，PR 镜像在运维设置以下变量前不会生效：",
     "webhook_copy": "复制 URL",
-    "webhook_copy_failed": "复制 webhook URL 失败"
+    "webhook_copy_failed": "复制 webhook URL 失败",
+    "webhook_autocreate_label": "帮我自动创建 webhook",
+    "webhook_autocreate_hint": "用连接的令牌为你指定的仓库添加 webhook。这会写入你的 Gitea 仓库，因此默认关闭。需要已连接实例、公网 URL 和 webhook secret。",
+    "webhook_autocreate_instance_label": "Gitea 实例",
+    "webhook_autocreate_repo_placeholder": "owner/repo",
+    "webhook_autocreate_button": "创建",
+    "webhook_autocreate_creating": "创建中…",
+    "webhook_autocreate_repo_required": "请输入仓库（owner/repo）",
+    "toast_webhook_created": "已在该仓库创建 webhook",
+    "toast_webhook_exists": "该仓库已存在指向 Multica 的 webhook",
+    "toast_webhook_failed": "创建 webhook 失败"
   },
   "lark": {
     "section_title": "飞书",

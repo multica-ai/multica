@@ -889,6 +889,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					// Gitea connect/disconnect (PAT model — no OAuth redirect).
 					r.Post("/gitea/connections", h.GiteaConnect)
 					r.Delete("/gitea/connections/{connectionId}", h.DeleteGiteaConnection)
+					// Opt-in: auto-create a repo webhook via the connection's PAT.
+					r.Post("/gitea/connections/{connectionId}/hooks", h.CreateGiteaWebhook)
 				})
 
 				// Lark integration. Every endpoint here only requires

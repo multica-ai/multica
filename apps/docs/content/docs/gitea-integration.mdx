@@ -42,7 +42,7 @@ The token itself is sealed with the server's Gitea encryption key and stored wri
 
 ## Configuring the repo webhook
 
-Connecting the instance lets Multica read it; the **webhook** is what pushes PR events in. Add a webhook on each Gitea repo you want mirrored (**Repo → Settings → Webhooks → Add Webhook → Gitea**):
+Connecting the instance lets Multica read it; the **webhook** is what pushes PR events in. Multica shows the exact **Payload URL** under **Settings → Integrations → Gitea** with a copy button, and — because writing to your repo is a side effect — an opt-in **Create the webhook for me** toggle: enable it, enter an `owner/repo`, and Multica adds the webhook through the connection's token, one repo at a time (idempotent — it skips a repo that already points at Multica). To wire it by hand instead, add a webhook on each Gitea repo you want mirrored (**Repo → Settings → Webhooks → Add Webhook → Gitea**):
 
 | Field | Value |
 |---|---|

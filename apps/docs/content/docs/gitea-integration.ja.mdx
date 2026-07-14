@@ -42,7 +42,7 @@ Gitea は自ホスト型なので、GitHub App のインストールフローは
 
 ## リポジトリ webhook を設定する
 
-インスタンスを連携すると Multica はそれを**読める**ようになります。PR イベントを送り込むのが **webhook** です。ミラーしたい各 Gitea リポジトリに webhook を追加します（**Repo → Settings → Webhooks → Add Webhook → Gitea**）。
+インスタンスを連携すると Multica はそれを**読める**ようになります。PR イベントを送り込むのが **webhook** です。Multica は **Settings → Integrations → Gitea** に **Payload URL**（コピーボタン付き）を表示します。さらに、あなたのリポジトリへの書き込みは副作用のため、既定でオフの **webhook を自動作成する** トグルもあります。オンにして `owner/repo` を入力すると、Multica は接続のトークンを使ってそのリポジトリに webhook を追加します（1 リポジトリずつ、冪等 — 既に Multica を指しているリポジトリはスキップ）。手動で設定する場合は、ミラーしたい各 Gitea リポジトリに webhook を追加します（**Repo → Settings → Webhooks → Add Webhook → Gitea**）。
 
 | フィールド | 値 |
 |---|---|

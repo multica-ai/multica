@@ -391,7 +391,17 @@
     "webhook_secret_hint": "Secret にはこのデプロイに設定された次の値を指定します：",
     "webhook_unconfigured": "このデプロイでは webhook secret が未設定のため、エンドポイントは 503 を返します。運用者が次を設定するまで PR ミラーリングは無効です：",
     "webhook_copy": "URL をコピー",
-    "webhook_copy_failed": "webhook URL のコピーに失敗しました"
+    "webhook_copy_failed": "webhook URL のコピーに失敗しました",
+    "webhook_autocreate_label": "webhook を自動作成する",
+    "webhook_autocreate_hint": "接続のトークンを使って、指定したリポジトリに webhook を追加します。あなたの Gitea リポジトリに書き込むため、既定ではオフです。接続・公開 URL・webhook secret が必要です。",
+    "webhook_autocreate_instance_label": "Gitea インスタンス",
+    "webhook_autocreate_repo_placeholder": "owner/repo",
+    "webhook_autocreate_button": "作成",
+    "webhook_autocreate_creating": "作成中…",
+    "webhook_autocreate_repo_required": "リポジトリを owner/repo 形式で入力してください",
+    "toast_webhook_created": "リポジトリに webhook を作成しました",
+    "toast_webhook_exists": "このリポジトリには既に Multica 宛ての webhook があります",
+    "toast_webhook_failed": "webhook の作成に失敗しました"
   },
   "lark": {
     "section_title": "Lark",

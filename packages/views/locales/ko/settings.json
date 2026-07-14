@@ -391,7 +391,17 @@
     "webhook_secret_hint": "Secret에는 이 배포에 설정된 다음 값을 입력하세요:",
     "webhook_unconfigured": "이 배포에는 webhook secret이 설정되지 않아 엔드포인트가 503을 반환하며, 운영자가 다음을 설정하기 전까지 PR 미러링이 비활성화됩니다:",
     "webhook_copy": "URL 복사",
-    "webhook_copy_failed": "webhook URL 복사 실패"
+    "webhook_copy_failed": "webhook URL 복사 실패",
+    "webhook_autocreate_label": "webhook 자동 생성",
+    "webhook_autocreate_hint": "연결의 토큰으로 지정한 저장소에 webhook을 추가합니다. Gitea 저장소에 쓰기 때문에 기본적으로 꺼져 있습니다. 연결, 공개 URL, webhook secret이 필요합니다.",
+    "webhook_autocreate_instance_label": "Gitea 인스턴스",
+    "webhook_autocreate_repo_placeholder": "owner/repo",
+    "webhook_autocreate_button": "생성",
+    "webhook_autocreate_creating": "생성 중…",
+    "webhook_autocreate_repo_required": "저장소를 owner/repo 형식으로 입력하세요",
+    "toast_webhook_created": "저장소에 webhook을 생성했습니다",
+    "toast_webhook_exists": "이 저장소에는 이미 Multica를 가리키는 webhook이 있습니다",
+    "toast_webhook_failed": "webhook 생성에 실패했습니다"
   },
   "repositories": {
     "section_title": "저장소",

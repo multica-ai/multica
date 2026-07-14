@@ -42,7 +42,7 @@ Gitea 是自建的，所以没有 GitHub App 的安装流程。它的模型是 *
 
 ## 配置仓库 webhook
 
-连接实例让 Multica 能**读**它；**webhook** 才是把 PR 事件推进来的东西。给每个要镜像的 Gitea 仓库加一个 webhook（**Repo → Settings → Webhooks → Add Webhook → Gitea**）：
+连接实例让 Multica 能**读**它；**webhook** 才是把 PR 事件推进来的东西。Multica 在 **Settings → Integrations → Gitea** 里直接展示 **Payload URL**（带一键复制）；又因为往你的仓库写入是副作用，那里还有一个默认关闭的 **帮我自动创建 webhook** 开关：打开后填 `owner/repo`，Multica 会用连接的令牌为该仓库添加 webhook，一次一个、且幂等（已指向 Multica 的仓库会跳过）。若想手动配置，则给每个要镜像的 Gitea 仓库加一个 webhook（**Repo → Settings → Webhooks → Add Webhook → Gitea**）：
 
 | 字段 | 值 |
 |---|---|

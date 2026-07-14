@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -134,6 +135,105 @@ func verifyGiteaPAT(ctx context.Context, baseURL, token string) (giteaAccount, e
 	return giteaAccount{Login: body.Login, AvatarURL: body.AvatarURL}, nil
 }
 
+// splitOwnerRepo parses "owner/repo" into its two non-empty segments. It rejects
+// anything with a different segment count so a pasted URL or blank does not slip
+// through as an owner or repo.
+func splitOwnerRepo(s string) (owner, repo string, ok bool) {
+	parts := strings.Split(strings.Trim(strings.TrimSpace(s), "/"), "/")
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		return "", "", false
+	}
+	return parts[0], parts[1], true
+}
+
+type giteaHook struct {
+	Config struct {
+		URL string `json:"url"`
+	} `json:"config"`
+}
+
+// createGiteaRepoWebhook adds a pull_request webhook on {owner}/{repo} pointing
+// at targetURL, using the connection's PAT. It is idempotent: if a hook already
+// targets the same URL it returns created=false rather than adding a duplicate
+// (Gitea does not dedupe hooks itself).
+func createGiteaRepoWebhook(ctx context.Context, baseURL, token, owner, repo, targetURL, secret string) (bool, error) {
+	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	hooksAPI := strings.TrimRight(baseURL, "/") + "/api/v1/repos/" + owner + "/" + repo + "/hooks"
+
+	existing, err := giteaRepoHooks(ctx, hooksAPI, token)
+	if err != nil {
+		return false, err
+	}
+	for _, hook := range existing {
+		if hook.Config.URL == targetURL {
+			return false, nil
+		}
+	}
+
+	payload, _ := json.Marshal(map[string]any{
+		"type":   "gitea",
+		"active": true,
+		"events": []string{"pull_request"},
+		"config": map[string]string{
+			"url":          targetURL,
+			"content_type": "json",
+			"secret":       secret,
+		},
+	})
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, hooksAPI, bytes.NewReader(payload))
+	if err != nil {
+		return false, errors.New("could not reach the Gitea instance")
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Authorization", "token "+token)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return false, errors.New("could not reach the Gitea instance")
+	}
+	defer resp.Body.Close()
+	switch {
+	case resp.StatusCode == http.StatusCreated || resp.StatusCode == http.StatusOK:
+		return true, nil
+	default:
+		return false, giteaHookStatusError(resp.StatusCode)
+	}
+}
+
+func giteaRepoHooks(ctx context.Context, hooksAPI, token string) ([]giteaHook, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, hooksAPI+"?limit=50", nil)
+	if err != nil {
+		return nil, errors.New("could not reach the Gitea instance")
+	}
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Authorization", "token "+token)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, errors.New("could not reach the Gitea instance")
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, giteaHookStatusError(resp.StatusCode)
+	}
+	var hooks []giteaHook
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&hooks); err != nil {
+		return nil, errors.New("the base URL did not respond with a Gitea API payload")
+	}
+	return hooks, nil
+}
+
+func giteaHookStatusError(status int) error {
+	switch status {
+	case http.StatusNotFound:
+		return errors.New("repository not found, or the token cannot access it")
+	case http.StatusUnauthorized, http.StatusForbidden:
+		return errors.New("the token lacks permission to manage this repository's webhooks")
+	default:
+		return fmt.Errorf("the Gitea instance returned an unexpected status %d", status)
+	}
+}
+
 // ── Connect ─────────────────────────────────────────────────────────────────
 
 // GiteaConnect (POST /api/workspaces/{id}/gitea/connections) validates the PAT
@@ -246,6 +346,81 @@ func (h *Handler) ListGiteaConnections(w http.ResponseWriter, r *http.Request) {
 		"webhook_url":        webhookURL,
 		"webhook_configured": giteaWebhookSecret() != "",
 	})
+}
+
+type giteaCreateWebhookRequest struct {
+	Repo string `json:"repo"`
+}
+
+// CreateGiteaWebhook (POST /gitea/connections/{connectionId}/hooks) uses the
+// connection's stored PAT to add a pull_request webhook on {owner}/{repo}
+// pointing back at this deployment. It writes to the user's Gitea repo, so it is
+// opt-in and one repo at a time — the UI gates it behind an explicit toggle.
+func (h *Handler) CreateGiteaWebhook(w http.ResponseWriter, r *http.Request) {
+	workspaceID := chi.URLParam(r, "id")
+	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace id")
+	if !ok {
+		return
+	}
+	connUUID, ok := parseUUIDOrBadRequest(w, chi.URLParam(r, "connectionId"), "connection id")
+	if !ok {
+		return
+	}
+	if h.GiteaSecretBox == nil {
+		writeError(w, http.StatusServiceUnavailable, "gitea integration is not configured on this server")
+		return
+	}
+	if h.cfg.PublicURL == "" {
+		writeError(w, http.StatusBadRequest, "server has no public URL; set MULTICA_PUBLIC_URL before auto-creating webhooks")
+		return
+	}
+	secret := giteaWebhookSecret()
+	if secret == "" {
+		writeError(w, http.StatusBadRequest, "webhook secret is unset; set MULTICA_GITEA_WEBHOOK_SECRET before auto-creating webhooks")
+		return
+	}
+
+	var req giteaCreateWebhookRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	owner, repo, ok := splitOwnerRepo(req.Repo)
+	if !ok {
+		writeError(w, http.StatusBadRequest, "repo must be in owner/repo form")
+		return
+	}
+
+	// No dedicated by-id query: the per-workspace list is small, so filter in Go.
+	conns, err := h.Queries.ListGiteaConnectionsByWorkspace(r.Context(), wsUUID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load connection")
+		return
+	}
+	var conn *db.GiteaConnection
+	for i := range conns {
+		if conns[i].ID == connUUID {
+			conn = &conns[i]
+			break
+		}
+	}
+	if conn == nil {
+		writeError(w, http.StatusNotFound, "gitea connection not found")
+		return
+	}
+	tokenBytes, err := h.GiteaSecretBox.Open(conn.TokenEncrypted)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to read connection token")
+		return
+	}
+
+	targetURL := h.cfg.PublicURL + "/api/webhooks/gitea"
+	created, err := createGiteaRepoWebhook(r.Context(), conn.BaseUrl, string(tokenBytes), owner, repo, targetURL, secret)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, redact.Text(err.Error()))
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"created": created, "already_exists": !created})
 }
 
 func (h *Handler) DeleteGiteaConnection(w http.ResponseWriter, r *http.Request) {

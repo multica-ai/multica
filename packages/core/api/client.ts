@@ -2431,6 +2431,17 @@ export class ApiClient {
     });
   }
 
+  async giteaCreateWebhook(
+    workspaceId: string,
+    connectionId: string,
+    req: { repo: string },
+  ): Promise<{ created: boolean; already_exists: boolean }> {
+    return this.fetch(
+      `/api/workspaces/${workspaceId}/gitea/connections/${connectionId}/hooks`,
+      { method: "POST", body: JSON.stringify(req) },
+    );
+  }
+
   // Lark integration
   async listLarkInstallations(workspaceId: string): Promise<ListLarkInstallationsResponse> {
     return this.fetch(`/api/workspaces/${workspaceId}/lark/installations`);

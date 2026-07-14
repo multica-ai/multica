@@ -9,6 +9,8 @@ import { Button } from "@multica/ui/components/ui/button";
 import { Card, CardContent } from "@multica/ui/components/ui/card";
 import { Input } from "@multica/ui/components/ui/input";
 import { Label } from "@multica/ui/components/ui/label";
+import { Switch } from "@multica/ui/components/ui/switch";
+import { NativeSelect, NativeSelectOption } from "@multica/ui/components/ui/native-select";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -51,6 +53,35 @@ export function GiteaTab() {
   const [disconnectTarget, setDisconnectTarget] = useState<string | null>(null);
   const [disconnecting, setDisconnecting] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [autoCreate, setAutoCreate] = useState(false);
+  const [hookRepo, setHookRepo] = useState("");
+  const [hookConnId, setHookConnId] = useState("");
+  const [creatingHook, setCreatingHook] = useState(false);
+
+  const canAutoCreate = connections.length > 0 && !!webhookUrl && webhookConfigured;
+
+  async function handleCreateHook() {
+    const connId = hookConnId || connections[0]?.id;
+    const repo = hookRepo.trim();
+    if (!connId || !repo) {
+      toast.error(t(($) => $.gitea.webhook_autocreate_repo_required));
+      return;
+    }
+    setCreatingHook(true);
+    try {
+      const res = await api.giteaCreateWebhook(wsId, connId, { repo });
+      toast.success(
+        res.already_exists
+          ? t(($) => $.gitea.toast_webhook_exists)
+          : t(($) => $.gitea.toast_webhook_created),
+      );
+      setHookRepo("");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : t(($) => $.gitea.toast_webhook_failed));
+    } finally {
+      setCreatingHook(false);
+    }
+  }
 
   async function handleCopyWebhook() {
     const value = webhookUrl ?? "/api/webhooks/gitea";
@@ -257,6 +288,63 @@ export function GiteaTab() {
                     </code>
                   </span>
                 </p>
+              )}
+
+              {canManage && (
+                <div className="space-y-3 border-t border-surface-border pt-4">
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="space-y-0.5">
+                      <Label htmlFor="gitea-autocreate" className="text-sm font-medium">
+                        {t(($) => $.gitea.webhook_autocreate_label)}
+                      </Label>
+                      <p className="text-xs text-muted-foreground">
+                        {t(($) => $.gitea.webhook_autocreate_hint)}
+                      </p>
+                    </div>
+                    <Switch
+                      id="gitea-autocreate"
+                      checked={autoCreate}
+                      onCheckedChange={setAutoCreate}
+                      disabled={!canAutoCreate}
+                    />
+                  </div>
+
+                  {autoCreate && (
+                    <div className="space-y-2">
+                      {connections.length > 1 && (
+                        <NativeSelect
+                          aria-label={t(($) => $.gitea.webhook_autocreate_instance_label)}
+                          value={hookConnId || connections[0]?.id}
+                          onChange={(e) => setHookConnId(e.target.value)}
+                          disabled={creatingHook}
+                        >
+                          {connections.map((c) => (
+                            <NativeSelectOption key={c.id} value={c.id}>
+                              {c.base_url}
+                            </NativeSelectOption>
+                          ))}
+                        </NativeSelect>
+                      )}
+                      <div className="flex items-center gap-2">
+                        <Input
+                          value={hookRepo}
+                          onChange={(e) => setHookRepo(e.target.value)}
+                          placeholder={t(($) => $.gitea.webhook_autocreate_repo_placeholder)}
+                          disabled={creatingHook}
+                        />
+                        <Button
+                          size="sm"
+                          onClick={handleCreateHook}
+                          disabled={creatingHook || !hookRepo.trim()}
+                        >
+                          {creatingHook
+                            ? t(($) => $.gitea.webhook_autocreate_creating)
+                            : t(($) => $.gitea.webhook_autocreate_button)}
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+                </div>
               )}
             </CardContent>
           </Card>

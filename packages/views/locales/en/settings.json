@@ -398,7 +398,17 @@
     "webhook_secret_hint": "Set the webhook Secret to the value of",
     "webhook_unconfigured": "No webhook secret is set on this deployment, so the endpoint returns 503 and PR mirroring stays off until an operator sets",
     "webhook_copy": "Copy URL",
-    "webhook_copy_failed": "Failed to copy the webhook URL"
+    "webhook_copy_failed": "Failed to copy the webhook URL",
+    "webhook_autocreate_label": "Create the webhook for me",
+    "webhook_autocreate_hint": "Uses the connection's token to add the webhook to a repo you name. This writes to your Gitea repo, so it is off by default. Needs a connection, a public URL, and the webhook secret.",
+    "webhook_autocreate_instance_label": "Gitea instance",
+    "webhook_autocreate_repo_placeholder": "owner/repo",
+    "webhook_autocreate_button": "Create",
+    "webhook_autocreate_creating": "Creating…",
+    "webhook_autocreate_repo_required": "Enter a repository as owner/repo",
+    "toast_webhook_created": "Webhook created on the repo",
+    "toast_webhook_exists": "That repo already has a webhook pointing at Multica",
+    "toast_webhook_failed": "Failed to create the webhook"
   },
   "lark": {
     "section_title": "Lark",

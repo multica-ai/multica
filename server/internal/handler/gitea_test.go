@@ -377,3 +377,90 @@ func TestGiteaWebhook_MergedPR_AdvancesLinkedIssueToDone(t *testing.T) {
 		t.Errorf("expected 1 gitea PR row after replay, got %d", prCount)
 	}
 }
+
+func TestSplitOwnerRepo(t *testing.T) {
+	cases := []struct {
+		in, owner, repo string
+		ok              bool
+	}{
+		{"acme/app", "acme", "app", true},
+		{"  acme/app  ", "acme", "app", true},
+		{"/acme/app/", "acme", "app", true},
+		{"acme", "", "", false},
+		{"acme/app/extra", "", "", false},
+		{"acme/", "", "", false},
+		{"", "", "", false},
+	}
+	for _, c := range cases {
+		o, r, ok := splitOwnerRepo(c.in)
+		if ok != c.ok || o != c.owner || r != c.repo {
+			t.Errorf("splitOwnerRepo(%q) = (%q,%q,%v), want (%q,%q,%v)", c.in, o, r, ok, c.owner, c.repo, c.ok)
+		}
+	}
+}
+
+func TestCreateGiteaRepoWebhook(t *testing.T) {
+	const target = "https://multica.example/api/webhooks/gitea"
+
+	t.Run("creates when absent", func(t *testing.T) {
+		posted := false
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Header.Get("Authorization") != "token pat-xyz" {
+				w.WriteHeader(http.StatusUnauthorized)
+				return
+			}
+			switch r.Method {
+			case http.MethodGet:
+				_, _ = w.Write([]byte(`[]`))
+			case http.MethodPost:
+				posted = true
+				w.WriteHeader(http.StatusCreated)
+			}
+		}))
+		defer srv.Close()
+		created, err := createGiteaRepoWebhook(context.Background(), srv.URL, "pat-xyz", "acme", "app", target, "sekret")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !created {
+			t.Fatal("expected created=true")
+		}
+		if !posted {
+			t.Fatal("expected a POST to be issued")
+		}
+	})
+
+	t.Run("skips when a hook already targets the URL", func(t *testing.T) {
+		posted := false
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			switch r.Method {
+			case http.MethodGet:
+				_, _ = w.Write([]byte(`[{"config":{"url":"` + target + `"}}]`))
+			case http.MethodPost:
+				posted = true
+				w.WriteHeader(http.StatusCreated)
+			}
+		}))
+		defer srv.Close()
+		created, err := createGiteaRepoWebhook(context.Background(), srv.URL, "pat", "acme", "app", target, "sekret")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if created {
+			t.Fatal("expected created=false (idempotent)")
+		}
+		if posted {
+			t.Fatal("expected no POST when a matching hook already exists")
+		}
+	})
+
+	t.Run("maps 404 to an error", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusNotFound)
+		}))
+		defer srv.Close()
+		if _, err := createGiteaRepoWebhook(context.Background(), srv.URL, "pat", "acme", "app", target, "sekret"); err == nil {
+			t.Fatal("expected an error for a 404 repo")
+		}
+	})
+}
