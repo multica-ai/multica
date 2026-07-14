@@ -58,7 +58,7 @@ multica autopilot trigger <autopilot-id>
 https://<your-multica-host>/api/webhooks/autopilots/awt_…
 ```
 
-그 URL로 아무 JSON이나 POST하세요. Multica는 먼저 전달을 영구 저장하고 `202 Accepted`를 반환한 뒤, 데이터베이스-backed worker가 `source = webhook` 실행을 기록하고 에이전트를 디스패치합니다. 수신과 디스패치 사이에 서버가 재시작되어도 큐에 저장된 전달은 유실되지 않습니다.
+그 URL로 아무 JSON이나 POST하세요. Multica는 먼저 전달을 영구 저장하고 멱등 실행을 동기적으로 승인한 뒤, `status = accepted | skipped`와 `run_id`가 포함된 `200 OK`를 반환합니다. 이후 데이터베이스-backed worker가 accepted 실행을 재개하고 에이전트를 디스패치합니다. 수신과 디스패치 사이에 서버가 재시작되어도 큐에 저장된 전달은 유실되지 않습니다.
 
 ```bash
 curl -X POST "$MULTICA_WEBHOOK_URL" \
@@ -173,7 +173,7 @@ curl -X POST "$MULTICA_WEBHOOK_URL" \
   -H 'X-GitHub-Event: workflow_run' \
   -H 'Content-Type: application/json' \
   -d '{"action":"completed"}'
-# → 202 {"status":"queued", "delivery_id":"…", ...}
+# → 200 {"status":"accepted", "delivery_id":"…", "run_id":"…", ...}
 
 # Filtered — same event, action not in allowlist
 curl -X POST "$MULTICA_WEBHOOK_URL" \
@@ -194,9 +194,14 @@ curl -X POST "$MULTICA_WEBHOOK_URL" \
 
 ### 상태 코드 의미
 
-유효하고 활성 상태인 전달은 영구 저장된 뒤 `202 Accepted`로 확인됩니다. `{"status":"queued","delivery_id":"…"}`는 worker가 디스패치를 맡았음을 뜻합니다. no-op과 중복은 `200 OK`를 반환합니다.
+유효하고 활성 상태인 전달은 전달과 멱등 실행이 모두 영구 저장된 뒤 `200 OK`로 확인됩니다.
 
-- `{"status":"duplicate","delivery_id":"…","run_id":"…"}` — 같은 멱등 키의 전달이 이미 수신되었습니다. 원본 전달이 아직 큐에 있으면 `run_id`는 생략됩니다.
+- `{"status":"accepted","delivery_id":"…","run_id":"…","autopilot_id":"…","trigger_id":"…"}` — 승인이 완료되었고 worker가 복구 가능한 디스패치를 맡습니다.
+- `{"status":"skipped","delivery_id":"…","run_id":"…","reason":"…"}` — 예를 들어 담당 에이전트의 런타임이 오프라인인 경우 영구 저장된 skipped 실행이 생성되었습니다.
+
+no-op과 중복도 `200 OK`를 반환합니다.
+
+- `{"status":"duplicate","delivery_id":"…","run_id":"…"}` — 같은 멱등 키의 전달이 이미 수신되었습니다. 원본 요청이 실행 승인 전에 종료된 경우에만 `run_id`가 생략되며 worker가 이를 복구합니다.
 - `{"status":"ignored","reason":"trigger_disabled"}` — 트리거가 비활성화되어 있습니다.
 - `{"status":"ignored","reason":"autopilot_paused"}` — 오토파일럿이 일시 정지되어 있습니다.
 - `{"status":"ignored","reason":"autopilot_archived"}` — 오토파일럿이 보관되어 있습니다.

@@ -308,7 +308,7 @@ func selectedHeadersJSON(headers http.Header) []byte {
 // autopilots. It runs OUTSIDE the authenticated route group: the bearer
 // token in the URL path IS the credential.
 //
-// Flow (persist-first, durable async dispatch):
+// Flow (persist-first, synchronous admission + durable async dispatch):
 //
 //  1. High absolute per-IP ceiling plus a non-consuming check for prior
 //     bad-credential debt (both before DB I/O).
@@ -326,12 +326,14 @@ func selectedHeadersJSON(headers http.Header) []byte {
 //     delivery → rejected, return 401.
 //  9. If trigger disabled / autopilot paused / archived: UPDATE delivery →
 //     ignored, return 200.
-//  10. Persist the 202 acknowledgement and wake the database-leased worker.
-//     The worker re-checks state/filter scope, dispatches idempotently, and
-//     bumps last_fired_at after it owns a run.
+//  10. Create or reuse the delivery's idempotent run, persist the compatible
+//     200 accepted/skipped acknowledgement, and wake the database-leased
+//     worker. The worker re-checks state/filter scope, dispatches idempotently,
+//     and bumps last_fired_at.
 //
 // Response shapes:
-//   - 202 {"status":"queued",    "delivery_id", "autopilot_id", "trigger_id"}
+//   - 200 {"status":"accepted",  "delivery_id", "run_id", "autopilot_id", "trigger_id"}
+//   - 200 {"status":"skipped",   "delivery_id", "run_id", "reason"}
 //   - 200 {"status":"ignored",   "delivery_id", "reason"}
 //   - 200 {"status":"duplicate", "delivery_id", "run_id?"}
 //   - 400 {"error":"..."}                                          — invalid JSON / scalar / empty
@@ -427,6 +429,11 @@ func (h *Handler) HandleAutopilotWebhook(w http.ResponseWriter, r *http.Request)
 	envelope, err := normalizeWebhookPayload(body, r.Header)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	envelopeBytes, err := json.Marshal(envelope)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to encode envelope")
 		return
 	}
 	// 6. Provider + dedupe + signature.
@@ -535,20 +542,52 @@ func (h *Handler) HandleAutopilotWebhook(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// 11. The queued INSERT above is the durable admission point. Best-effort
-	//     persist the exact acknowledgement for operator correlation, then wake
-	//     the worker. An acknowledgement metadata write failure must not turn an
-	//     already-durable delivery into an HTTP failure.
+	// 11. Allocate the idempotent run synchronously so existing webhook clients
+	//     keep the v0.4.0 response contract. The queued delivery remains the
+	//     durable dispatch source: the worker resumes this run after the response
+	//     and can recover it after a process crash.
+	run, err := h.AutopilotService.AdmitAutopilotWebhookDelivery(
+		r.Context(),
+		autopilot,
+		trigRow.ID,
+		envelopeBytes,
+		delivery.ID,
+	)
+	if err != nil {
+		slog.Warn("webhook admission failed",
+			"trigger_id", uuidToString(trigRow.ID),
+			"autopilot_id", uuidToString(autopilot.ID),
+			"delivery_id", uuidToString(delivery.ID),
+			"error", err,
+		)
+		if h.WebhookDeliveryWorker != nil {
+			h.WebhookDeliveryWorker.Notify()
+		}
+		writeError(w, http.StatusInternalServerError, "failed to admit autopilot")
+		return
+	}
+
 	respBody := map[string]any{
-		"status":       "queued",
+		"status":       "accepted",
 		"delivery_id":  uuidToString(delivery.ID),
+		"run_id":       uuidToString(run.ID),
 		"autopilot_id": uuidToString(autopilot.ID),
 		"trigger_id":   uuidToString(trigRow.ID),
+	}
+	if run.Status == "skipped" {
+		respBody = map[string]any{
+			"status":      "skipped",
+			"delivery_id": uuidToString(delivery.ID),
+			"run_id":      uuidToString(run.ID),
+		}
+		if run.FailureReason.Valid {
+			respBody["reason"] = run.FailureReason.String
+		}
 	}
 	bodyJSON, _ := json.Marshal(respBody)
 	if _, err := h.Queries.AcknowledgeWebhookDelivery(r.Context(), db.AcknowledgeWebhookDeliveryParams{
 		ID:             delivery.ID,
-		ResponseStatus: pgtype.Int4{Int32: http.StatusAccepted, Valid: true},
+		ResponseStatus: pgtype.Int4{Int32: http.StatusOK, Valid: true},
 		ResponseBody:   pgtype.Text{String: string(bodyJSON), Valid: true},
 	}); err != nil {
 		slog.Warn("webhook: persist acknowledgement metadata failed",
@@ -559,7 +598,7 @@ func (h *Handler) HandleAutopilotWebhook(w http.ResponseWriter, r *http.Request)
 	if h.WebhookDeliveryWorker != nil {
 		h.WebhookDeliveryWorker.Notify()
 	}
-	writeJSON(w, http.StatusAccepted, respBody)
+	writeJSON(w, http.StatusOK, respBody)
 }
 
 // ── Event filter helpers ────────────────────────────────────────────────────

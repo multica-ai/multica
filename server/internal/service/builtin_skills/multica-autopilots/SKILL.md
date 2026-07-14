@@ -23,7 +23,7 @@ Do not run `trigger`, `delete`, `trigger-delete`, or `trigger-rotate-url` to tes
 
 An autopilot is not an agent. It is a rule that dispatches work to an agent, or to a squad's leader agent.
 
-The chain is: trigger fires (`schedule`, `webhook`, or `manual`) -> `autopilot_run` row -> `execution_mode` decides output -> assignee readiness check -> issue/task execution -> run status sync. Webhooks have a durable admission step in front: HTTP ingress stores a queued `webhook_delivery` and returns `202`; a database-leased worker creates or reuses the delivery's idempotent run.
+The chain is: trigger fires (`schedule`, `webhook`, or `manual`) -> `autopilot_run` row -> `execution_mode` decides output -> assignee readiness check -> issue/task execution -> run status sync. Webhooks have a durable admission step in front: HTTP ingress stores a queued `webhook_delivery`, synchronously creates or reuses its idempotent run, and returns `200` with `status=accepted|skipped` plus `run_id`; a database-leased worker then resumes accepted runs and owns recoverable issue/task dispatch.
 
 Execution modes:
 
