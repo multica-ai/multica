@@ -44,7 +44,7 @@ func flattenContent(msgType, rawContent string) string {
 	case "sticker":
 		return "[Sticker]"
 	case "interactive":
-		return "[interactive card]"
+		return flattenInteractiveContent(rawContent)
 	case "share_chat":
 		return "[Shared Chat]"
 	case "share_user":
@@ -161,4 +161,43 @@ func flattenPostParagraph(spans []larkPostSpan) string {
 		}
 	}
 	return strings.Join(parts, " ")
+}
+
+// larkInteractiveContent models the renderable bits of an `interactive`
+// card body.content. Lark card schemas vary — a link-share card (the
+// shape a forwarded message-link renders as) carries title + card_link.url;
+// a generic template card carries an elements[] array we don't model. So
+// this is best-effort: anything we can resolve becomes text, the rest
+// degrades to the [interactive card] placeholder so the agent at least
+// sees that a card was attached.
+type larkInteractiveContent struct {
+	Title    string `json:"title"`
+	CardLink struct {
+		URL string `json:"url"`
+	} `json:"card_link"`
+}
+
+// flattenInteractiveContent turns an `interactive` card into "title (url)"
+// when both resolve, falling back to whichever is present, and finally to
+// the bracketed placeholder. The URL is the load-bearing field for a
+// link-share card: without it the agent cannot reach the shared resource,
+// so we never silently drop it.
+func flattenInteractiveContent(raw string) string {
+	if raw == "" {
+		return ""
+	}
+	var doc larkInteractiveContent
+	if err := json.Unmarshal([]byte(raw), &doc); err != nil {
+		return "[interactive card]"
+	}
+	switch {
+	case doc.Title != "" && doc.CardLink.URL != "":
+		return doc.Title + " (" + doc.CardLink.URL + ")"
+	case doc.CardLink.URL != "":
+		return doc.CardLink.URL
+	case doc.Title != "":
+		return doc.Title
+	default:
+		return "[interactive card]"
+	}
 }

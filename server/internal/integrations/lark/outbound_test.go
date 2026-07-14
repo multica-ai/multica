@@ -269,6 +269,35 @@ func TestPatcherRoutesMarkdownReplyToCard(t *testing.T) {
 	}
 }
 
+func TestPatcherRedactsEmptyAltLocalImageBeforeRouting(t *testing.T) {
+	p, q, api := newTestPatcher(t)
+	taskID := uuidFromString(t, "ee454545-ee45-ee45-ee45-eeeeeeeeeeee")
+	localPath := "/var/run/app/session/card-image.png"
+
+	p.handleEvent(events.Event{
+		Type:          protocol.EventChatDone,
+		TaskID:        uuidString(taskID),
+		ChatSessionID: uuidString(q.binding.ChatSessionID),
+		Payload: protocol.ChatDonePayload{
+			TaskID:        uuidString(taskID),
+			ChatSessionID: uuidString(q.binding.ChatSessionID),
+			Content:       "Scan this:\n\n![](" + localPath + ")",
+		},
+	})
+
+	api.mu.Lock()
+	defer api.mu.Unlock()
+	if len(api.textSent) != 1 {
+		t.Fatalf("expected one SendTextMessage call; got %d", len(api.textSent))
+	}
+	if got := api.textSent[0].Text; got != "Scan this:\n\n[image omitted]" {
+		t.Errorf("local image must be redacted before routing; got %q", got)
+	}
+	if len(api.mdCardSent) != 0 {
+		t.Errorf("redacted plain-text body must not use SendMarkdownCard; got %d", len(api.mdCardSent))
+	}
+}
+
 // TestPatcherRoutesPlainReplyToText is the inverse: a short prose
 // reply without any markdown syntax should stay on the cheap
 // msg_type=text path so the user sees a normal IM bubble.

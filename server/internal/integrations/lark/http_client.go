@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -61,6 +62,22 @@ const (
 	codeTokenExpired = 99991663
 	codeTokenInvalid = 99991664
 )
+
+var localMarkdownImageRE = regexp.MustCompile(`(?i)!\[([^\]]*)\]\(\s*(?:file:[^)\s]+|/[^)\s]+|[a-z]:[\\/][^)\s]+)\s*\)`)
+
+func sanitizeMarkdownForLarkCard(markdown string) string {
+	return localMarkdownImageRE.ReplaceAllStringFunc(markdown, func(match string) string {
+		parts := localMarkdownImageRE.FindStringSubmatch(match)
+		if len(parts) != 2 {
+			return match
+		}
+		label := strings.TrimSpace(parts[1])
+		if label == "" {
+			label = "image"
+		}
+		return fmt.Sprintf("[%s omitted]", label)
+	})
+}
 
 // HTTPClientConfig configures the production Lark HTTP APIClient.
 type HTTPClientConfig struct {
@@ -358,11 +375,12 @@ func (c *httpAPIClient) SendMarkdownCard(ctx context.Context, p SendMarkdownCard
 	if err != nil {
 		return "", err
 	}
+	markdown := sanitizeMarkdownForLarkCard(p.Markdown)
 	card := map[string]any{
 		"schema": "2.0",
 		"body": map[string]any{
 			"elements": []any{
-				map[string]any{"tag": "markdown", "content": p.Markdown},
+				map[string]any{"tag": "markdown", "content": markdown},
 			},
 		},
 	}

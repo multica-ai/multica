@@ -359,6 +359,7 @@ func (p *Patcher) sendChatReply(ctx context.Context, creds InstallationCredentia
 	if content == "" {
 		return nil
 	}
+	content = sanitizeMarkdownForLarkCard(content)
 	target := threadReplyTarget(binding)
 	if containsMarkdown(content) {
 		return sendWithThreadFallback(p.cfg.Logger, "send markdown card", target, func(t ReplyTarget) error {
