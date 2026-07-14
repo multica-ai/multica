@@ -1863,14 +1863,15 @@ func TestInjectRuntimeConfigHermes(t *testing.T) {
 	if !strings.Contains(s, "Coding") {
 		t.Error("AGENTS.md missing skill name")
 	}
-	// Hermes has no native skill discovery path wired up, so AGENTS.md must
-	// point the agent at the .agent_context/skills/ fallback — NOT claim that
-	// skills are "discovered automatically".
-	if strings.Contains(s, "discovered automatically") {
-		t.Error("AGENTS.md for Hermes should not claim native skill discovery")
+	// Hermes now discovers skills from the daemon-seeded per-task
+	// HERMES_HOME/skills (see hermes_home.go), so AGENTS.md must use the
+	// "discovered automatically" framing and must NOT point the agent at the
+	// old .agent_context/skills/ fallback it never read (issue #5242).
+	if !strings.Contains(s, "discovered automatically") {
+		t.Error("AGENTS.md for Hermes should describe skills as discovered automatically")
 	}
-	if !strings.Contains(s, ".agent_context/skills/") {
-		t.Error("AGENTS.md for Hermes should reference .agent_context/skills/ fallback path")
+	if strings.Contains(s, ".agent_context/skills/") {
+		t.Error("AGENTS.md for Hermes should not reference the .agent_context/skills/ fallback path")
 	}
 
 	// CLAUDE.md should NOT exist.
@@ -1879,7 +1880,13 @@ func TestInjectRuntimeConfigHermes(t *testing.T) {
 	}
 }
 
-func TestWriteContextFilesHermesFallbackSkills(t *testing.T) {
+// TestWriteContextFilesHermesSkipsWorkdirSkills asserts that Hermes skills are
+// NOT materialized into the workdir. Hermes has no workspace-relative skill
+// discovery; the daemon seeds them into a per-task HERMES_HOME/skills instead
+// (see prepareHermesHome / TestPrepareHermesHome). Writing the old
+// .agent_context/skills/ fallback was pure dead weight the CLI never read
+// (issue #5242).
+func TestWriteContextFilesHermesSkipsWorkdirSkills(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 
@@ -1894,14 +1901,15 @@ func TestWriteContextFilesHermesFallbackSkills(t *testing.T) {
 		t.Fatalf("writeContextFiles failed: %v", err)
 	}
 
-	// Skills should be in the fallback .agent_context/skills/ path since
-	// Hermes has no native skills discovery directory.
-	skillMd, err := os.ReadFile(filepath.Join(dir, ".agent_context", "skills", "go-conventions", "SKILL.md"))
-	if err != nil {
-		t.Fatalf("failed to read .agent_context/skills/go-conventions/SKILL.md: %v", err)
+	// No skills dir should be created in the workdir for Hermes — not the old
+	// fallback, and not an empty leftover directory either.
+	if _, err := os.Stat(filepath.Join(dir, ".agent_context", "skills")); !os.IsNotExist(err) {
+		t.Errorf("expected no .agent_context/skills/ for Hermes, got err=%v", err)
 	}
-	if !strings.Contains(string(skillMd), "Follow Go conventions.") {
-		t.Error("SKILL.md missing content")
+
+	// issue_context.md should still be written under .agent_context/.
+	if _, err := os.Stat(filepath.Join(dir, ".agent_context", "issue_context.md")); err != nil {
+		t.Errorf("expected .agent_context/issue_context.md to exist: %v", err)
 	}
 }
 

@@ -179,6 +179,25 @@ func TestReconcileBroadcaster_ReSubscribesEachWake(t *testing.T) {
 	}
 }
 
+func TestWorkspaceChangeSignalCoalescesUntilConsumed(t *testing.T) {
+	s := newWorkspaceChangeSignal()
+	if !s.broadcast() {
+		t.Fatal("first workspace change was not recorded")
+	}
+	if s.broadcast() {
+		t.Fatal("duplicate workspace change should coalesce while dirty")
+	}
+
+	select {
+	case <-s.notify():
+	case <-time.After(time.Second):
+		t.Fatal("recorded workspace change was not delivered")
+	}
+	if !s.broadcast() {
+		t.Fatal("workspace change after consumption was not recorded")
+	}
+}
+
 // TestReconcileBroadcaster_ConcurrentBroadcastAndNotify exercises the lock
 // boundary: heavy concurrent notify/broadcast traffic must not panic, dead-
 // lock, or fail under the race detector. Run with `go test -race`.

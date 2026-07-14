@@ -1,11 +1,11 @@
 ---
 title: エージェントランタイムをインストールする
-description: Multica はあなたのマシンにインストールされている AI コーディングツールを駆動します。このページでは、デーモンがそれらを検出できるように、サポートされている 14 種のツールをそれぞれインストールする方法を説明します。
+description: Multica はあなたのマシンにインストールされている AI コーディングツールを駆動します。このページでは、デーモンがそれらを検出できるように、サポートされている 15 種のツールをそれぞれインストールする方法を説明します。
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
 
-Multica における**ランタイム**とは、あなたのマシンのデーモンと、デーモンが `PATH` で見つけた AI コーディングツール 1 つが組になったものです。オンボーディングの「ランタイムを接続」ステップで **No supported tools detected** と表示される場合、それはデーモンが `PATH` をスキャンしたものの、駆動方法を知っている 14 種のツールのいずれも見つけられなかったことを意味します。以下のツールのいずれか（または複数）をインストールしてから、そのステップに戻って再スキャンしてください — 数秒以内にランタイムが表示されます。
+Multica における**ランタイム**とは、あなたのマシンのデーモンと、デーモンが `PATH` で見つけた AI コーディングツール 1 つが組になったものです。オンボーディングの「ランタイムを接続」ステップで **No supported tools detected** と表示される場合、それはデーモンが `PATH` をスキャンしたものの、駆動方法を知っている 15 種のツールのいずれも見つけられなかったことを意味します。以下のツールのいずれか（または複数）をインストールしてから、そのステップに戻って再スキャンしてください — 数秒以内にランタイムが表示されます。
 
 このページは次のドキュメントのインストール側の補完ドキュメントです。
 
@@ -31,9 +31,9 @@ multica daemon restart
 
 または、デスクトップアプリではアプリを再起動するだけで構いません。デーモンは起動するたびに `PATH` を再スキャンします。
 
-## サポートされている 14 種のツール
+## サポートされている 15 種のツール
 
-おおよそ利用者の多い順に並べています。すでに認証情報を持っているものを選んで使ってください — 14 種すべてをインストールする必要はありません。
+おおよそ利用者の多い順に並べています。すでに認証情報を持っているものを選んで使ってください — 15 種すべてをインストールする必要はありません。
 
 ### Claude Code (Anthropic)
 
@@ -86,6 +86,17 @@ Cursor エディタに対応する CLI です。**セッション再開は動作
 | デーモンが探す名前 | `opencode` |
 | インストール | [opencode.ai](https://opencode.ai/) の公式ガイド、または GitHub リポジトリ [github.com/sst/opencode](https://github.com/sst/opencode) に従ってください。一般的な方法はインストールスクリプトまたは npm パッケージです。 |
 | 認証 | OpenCode のドキュメントに従ってモデルプロバイダー（Anthropic、OpenAI など）を構成してください。 |
+
+### DevEco Code (Huawei)
+
+**DevEco Code** は Huawei の HarmonyOS 開発向け独立コーディングエージェントで、OpenCode エンジンをベースに構築されています。独自のモデルカタログと Huawei アカウント認証を備えます。Multica は `deveco run --format json` で駆動し、モデルは `deveco models` から動的に探索されます（内蔵 `deveco/GLM-5.1`）。MCP サーバーは DevEco ネイティブ設定（`DEVECO_CONFIG_CONTENT`）で行います。Multica 側の `mcp_config` 連携は開発中です。
+
+| | |
+|---|---|
+| デーモンが探す名前 | `deveco` |
+| インストール | `npm install -g @deveco/deveco-code`。公式 README [gitcode.com/openharmony-sig/deveco-code](https://gitcode.com/openharmony-sig/deveco-code/blob/develop/README.en.md) または npm ページ [npmjs.com/package/@deveco/deveco-code](https://www.npmjs.com/package/@deveco/deveco-code) を参照してください。 |
+| 対応プラットフォーム | Windows x64 と macOS（arm64/x64）のみ。Linux ビルドは提供されていません。 |
+| 認証 | DevEco CLI 経由の Huawei アカウントログイン。 |
 
 ### Kiro CLI (Amazon)
 

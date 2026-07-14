@@ -51,16 +51,19 @@ const (
 	// matching tool_result would otherwise run forever. This is the backstop for
 	// that stuck-tool case (MUL-3064). Set MULTICA_AGENT_TOOL_WATCHDOG=0 to
 	// disable, in which case an in-flight tool never force-stops the run.
-	DefaultAgentToolWatchdog       = 2 * time.Hour
-	DefaultRuntimeName             = "Local Agent"
-	DefaultWorkspaceSyncInterval   = 30 * time.Second
-	DefaultHealthPort              = 19514
-	DefaultMaxConcurrentTasks      = 20
-	DefaultGCInterval              = 1 * time.Hour
-	DefaultGCTTL                   = 24 * time.Hour // 1 day — AI-coding issues rarely stay open long
-	DefaultGCOrphanTTL             = 72 * time.Hour // 3 days — orphans with no meta (crashes, pre-GC leftovers)
-	DefaultGCArtifactTTL           = 12 * time.Hour // 12h — drop regenerable artifacts on completed but still-open issues
-	DefaultAutoUpdateCheckInterval = 6 * time.Hour  // how often the daemon polls GitHub for a newer CLI release
+	DefaultAgentToolWatchdog              = 2 * time.Hour
+	DefaultRuntimeName                    = "Local Agent"
+	DefaultWorkspaceBootstrapSyncInterval = 30 * time.Second
+	DefaultWorkspaceLegacySyncInterval    = 5 * time.Minute
+	DefaultWorkspaceSyncInterval          = 30 * time.Minute
+	DefaultWorkspaceSyncMaxBackoff        = 30 * time.Minute
+	DefaultHealthPort                     = 19514
+	DefaultMaxConcurrentTasks             = 20
+	DefaultGCInterval                     = 1 * time.Hour
+	DefaultGCTTL                          = 24 * time.Hour // 1 day — AI-coding issues rarely stay open long
+	DefaultGCOrphanTTL                    = 72 * time.Hour // 3 days — orphans with no meta (crashes, pre-GC leftovers)
+	DefaultGCArtifactTTL                  = 12 * time.Hour // 12h — drop regenerable artifacts on completed but still-open issues
+	DefaultAutoUpdateCheckInterval        = 6 * time.Hour  // how often the daemon polls GitHub for a newer CLI release
 )
 
 // DefaultGCArtifactPatterns lists basename matches that the GC loop treats as
@@ -227,8 +230,9 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		cmd := envOrDefault(envVar, defaultCmd)
 		if path, err := resolveAgentExecutablePath(cmd); err == nil {
 			return AgentEntry{
-				Path:  path,
-				Model: strings.TrimSpace(os.Getenv(modelEnv)),
+				Path:    path,
+				Command: cmd,
+				Model:   strings.TrimSpace(os.Getenv(modelEnv)),
 			}, true
 		}
 		// The shell fallback only rescues bare command names. An operator
@@ -240,8 +244,9 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		}
 		if path, ok := getShellResolved()[cmd]; ok {
 			return AgentEntry{
-				Path:  path,
-				Model: strings.TrimSpace(os.Getenv(modelEnv)),
+				Path:    path,
+				Command: cmd,
+				Model:   strings.TrimSpace(os.Getenv(modelEnv)),
 			}, true
 		}
 		if defaultCmd == "codex" && cmd == defaultCmd {
@@ -250,8 +255,9 @@ func LoadConfig(overrides Overrides) (Config, error) {
 			for _, p := range codexDesktopAppBundlePaths() {
 				if _, err := os.Stat(p); err == nil {
 					return AgentEntry{
-						Path:  p,
-						Model: strings.TrimSpace(os.Getenv(modelEnv)),
+						Path:    p,
+						Command: cmd,
+						Model:   strings.TrimSpace(os.Getenv(modelEnv)),
 					}, true
 				}
 			}
@@ -268,6 +274,9 @@ func LoadConfig(overrides Overrides) (Config, error) {
 	}
 	if e, ok := probe("MULTICA_OPENCODE_PATH", "opencode", "MULTICA_OPENCODE_MODEL"); ok {
 		agents["opencode"] = e
+	}
+	if e, ok := probe("MULTICA_DEVECO_PATH", "deveco", "MULTICA_DEVECO_MODEL"); ok {
+		agents["deveco"] = e
 	}
 	if e, ok := probe("MULTICA_OPENCLAW_PATH", "openclaw", "MULTICA_OPENCLAW_MODEL"); ok {
 		agents["openclaw"] = e
@@ -303,8 +312,9 @@ func LoadConfig(overrides Overrides) (Config, error) {
 	qoderPath := envOrDefault("MULTICA_QODER_PATH", "qodercli")
 	if path, err := resolveAgentExecutablePath(qoderPath); err == nil {
 		agents["qoder"] = AgentEntry{
-			Path:  path,
-			Model: strings.TrimSpace(os.Getenv("MULTICA_QODER_MODEL")),
+			Path:    path,
+			Command: qoderPath,
+			Model:   strings.TrimSpace(os.Getenv("MULTICA_QODER_MODEL")),
 		}
 	}
 	// ByteDance official TRAE CLI (the `traecli` binary from https://docs.trae.cn/cli),
@@ -315,7 +325,7 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		agents["traecli"] = e
 	}
 	if len(agents) == 0 {
-		return Config{}, fmt.Errorf("no agent CLI found: install claude, codebuddy, codex, copilot, opencode, openclaw, hermes, pi, cursor-agent, kimi, kiro-cli, agy, qodercli, or traecli and ensure it is on PATH")
+		return Config{}, fmt.Errorf("no agent CLI found: install claude, codebuddy, codex, copilot, opencode, deveco, openclaw, hermes, pi, cursor-agent, kimi, kiro-cli, agy, qodercli, or traecli and ensure it is on PATH")
 	}
 
 	claudeArgs, err := shellArgsFromEnv("MULTICA_CLAUDE_ARGS")
@@ -691,6 +701,47 @@ func resolveAgentExecutablePath(cmd string) (string, error) {
 	return canonicalExecutablePath(resolved), nil
 }
 
+// agentExecutablePresent reports whether path currently resolves to a runnable
+// executable, using the exact check the agent backends apply at launch
+// (exec.LookPath). A pinned AgentEntry.Path that fails this has vanished from
+// disk — typically because a version manager did an in-place upgrade and
+// deleted the old versioned directory the path pointed into (MUL-4486).
+func agentExecutablePresent(path string) bool {
+	if path == "" {
+		return false
+	}
+	_, err := exec.LookPath(path)
+	return err == nil
+}
+
+// reresolveAgentCommand re-runs the startup resolution for a single agent
+// command name, returning the freshly resolved absolute path. It mirrors the
+// probe() order in LoadConfig: exec.LookPath (with the ~/.multica/hooks
+// exclusion preserved via resolveAgentExecutablePath) first, then the login
+// shell fallback for a bare command name a GUI-launched daemon can't see on
+// its own PATH. It is only called on the miss path — when a previously pinned
+// path has disappeared — so the login-shell cost is paid rarely, never on a
+// normal launch.
+func reresolveAgentCommand(cmd string) (string, bool) {
+	if cmd == "" {
+		return "", false
+	}
+	if path, err := resolveAgentExecutablePath(cmd); err == nil {
+		return path, true
+	}
+	// A bare command name the daemon's own PATH can't see: retry via the
+	// user's login shell, exactly as the startup probe does for
+	// fnm/nvm/native-installer prefixes. Absolute/relative overrides skip
+	// this — an operator-pinned MULTICA_*_PATH that no longer exists should
+	// stay a hard miss rather than silently resolve a different binary.
+	if !strings.ContainsAny(cmd, "/\\") {
+		if path, ok := resolveAgentsViaLoginShell([]string{cmd})[cmd]; ok {
+			return path, true
+		}
+	}
+	return "", false
+}
+
 func lookPathExcludingMulticaHooks(cmd string) (string, error) {
 	for _, dir := range filepath.SplitList(os.Getenv("PATH")) {
 		if dir == "" {
@@ -767,7 +818,7 @@ func isExecutableFile(path string) bool {
 // list to pre-fetch canonical paths for every known agent in a single shell
 // invocation, instead of paying the cost-per-miss.
 var defaultAgentCommandNames = []string{
-	"claude", "codex", "opencode", "openclaw", "hermes",
+	"claude", "codex", "opencode", "deveco", "openclaw", "hermes",
 	"pi", "cursor-agent", "copilot", "kimi", "kiro-cli", "codebuddy", "agy", "traecli",
 }
 

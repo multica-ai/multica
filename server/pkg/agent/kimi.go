@@ -53,8 +53,9 @@ func (b *kimiBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 
 	// `kimi acp` ignores --yolo / --auto-approve (they're flags on the
 	// root `kimi` command, not on the `acp` subcommand). Instead, the
-	// daemon auto-approves in hermesClient.handleAgentRequest by replying
-	// "approve_for_session" to every session/request_permission request.
+	// daemon auto-approves in hermesClient.handleAgentRequest by selecting
+	// a safe granting option the agent offered (see
+	// selectACPApprovalOptionID) for each session/request_permission request.
 	kimiArgs := append([]string{"acp"}, filterCustomArgs(opts.CustomArgs, kimiBlockedArgs, b.cfg.Logger)...)
 	cmd := exec.CommandContext(runCtx, execPath, kimiArgs...)
 	hideAgentWindow(cmd)

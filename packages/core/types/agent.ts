@@ -109,6 +109,7 @@ export const RUNTIME_PROFILE_PROTOCOL_FAMILIES = [
   "codex",
   "copilot",
   "opencode",
+  "deveco",
   "openclaw",
   "hermes",
   "pi",

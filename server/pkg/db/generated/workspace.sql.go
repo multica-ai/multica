@@ -55,6 +55,18 @@ const deleteWorkspace = `-- name: DeleteWorkspace :exec
 WITH ws_installations AS (
     SELECT id FROM channel_installation WHERE workspace_id = $1
 ),
+ws_agents AS (
+    SELECT id FROM agent WHERE workspace_id = $1
+),
+ws_skills AS (
+    SELECT id FROM skill WHERE workspace_id = $1
+),
+cleared_agent_label_assignments AS (
+    DELETE FROM agent_to_label WHERE agent_id IN (SELECT id FROM ws_agents)
+),
+cleared_skill_label_assignments AS (
+    DELETE FROM skill_to_label WHERE skill_id IN (SELECT id FROM ws_skills)
+),
 cleared_chat_sessions AS (
     DELETE FROM channel_chat_session_binding WHERE installation_id IN (SELECT id FROM ws_installations)
     RETURNING chat_session_id
@@ -90,16 +102,33 @@ deleted_pending_check_suites AS (
 DELETE FROM workspace WHERE workspace.id = $1
 `
 
-// The channel_* tables carry NO FK to workspace (MUL-3515 §4), so — unlike the
-// CASCADE-backed tables the DELETE below sweeps — they are not cleaned up
-// implicitly. Remove this workspace's channel installations, and every dependent
-// row of each, here so a deleted workspace never leaves an orphaned installation
-// occupying its bot's (channel_type, config->>'app_id') routing slot, which would
-// make that bot un-rebindable anywhere until an operator hand-deletes the row
-// (#4810). All in one statement so it commits atomically with the workspace row.
+// The channel_* tables (MUL-3515 §4) and resource-label junctions carry NO FK to
+// workspace, so — unlike the CASCADE-backed tables the DELETE below sweeps —
+// they are not cleaned up implicitly. Remove their workspace-owned rows here so
+// they commit or roll back atomically with the workspace row.
 func (q *Queries) DeleteWorkspace(ctx context.Context, id pgtype.UUID) error {
 	_, err := q.db.Exec(ctx, deleteWorkspace, id)
 	return err
+}
+
+const getDaemonWorkspace = `-- name: GetDaemonWorkspace :one
+SELECT id, name
+FROM workspace
+WHERE id = $1
+`
+
+type GetDaemonWorkspaceRow struct {
+	ID   pgtype.UUID `json:"id"`
+	Name string      `json:"name"`
+}
+
+// Workspace-scoped daemon tokens do not carry a user ID. This narrow lookup
+// lets them use the same endpoint without widening their token scope.
+func (q *Queries) GetDaemonWorkspace(ctx context.Context, id pgtype.UUID) (GetDaemonWorkspaceRow, error) {
+	row := q.db.QueryRow(ctx, getDaemonWorkspace, id)
+	var i GetDaemonWorkspaceRow
+	err := row.Scan(&i.ID, &i.Name)
+	return i, err
 }
 
 const getWorkspace = `-- name: GetWorkspace :one
@@ -163,6 +192,43 @@ func (q *Queries) IncrementIssueCounter(ctx context.Context, id pgtype.UUID) (in
 	var issue_counter int32
 	err := row.Scan(&issue_counter)
 	return issue_counter, err
+}
+
+const listDaemonWorkspaces = `-- name: ListDaemonWorkspaces :many
+SELECT w.id, w.name
+FROM member m
+JOIN workspace w ON w.id = m.workspace_id
+WHERE m.user_id = $1
+ORDER BY w.id ASC
+`
+
+type ListDaemonWorkspacesRow struct {
+	ID   pgtype.UUID `json:"id"`
+	Name string      `json:"name"`
+}
+
+// Daemons only need the membership set and display name to discover which
+// workspaces should have local runtimes. Keep this projection intentionally
+// narrow so the periodic consistency check never reads UI-only JSON/text
+// columns such as settings, repos, or context.
+func (q *Queries) ListDaemonWorkspaces(ctx context.Context, userID pgtype.UUID) ([]ListDaemonWorkspacesRow, error) {
+	rows, err := q.db.Query(ctx, listDaemonWorkspaces, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListDaemonWorkspacesRow{}
+	for rows.Next() {
+		var i ListDaemonWorkspacesRow
+		if err := rows.Scan(&i.ID, &i.Name); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listWorkspaces = `-- name: ListWorkspaces :many

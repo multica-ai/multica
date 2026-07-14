@@ -1,11 +1,11 @@
 ---
 title: AI 编程工具对照
-description: Multica 支持 14 款 AI 编程工具；它们实现同一套接口，但能力细节差异很大。
+description: Multica 支持 15 款 AI 编程工具；它们实现同一套接口，但能力细节差异很大。
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
 
-Multica 内置支持 **14 款 AI 编程工具**。它们都实现了同一套接口——排队、派发、执行、结果回传，所以你可以从 Multica 的同一个看板上指挥任意一款。**但它们在能力细节上差异很大**：会话恢复是否真用、是否支持 MCP、skill 文件该放在哪里、模型怎么选。这一页是完整对照。
+Multica 内置支持 **15 款 AI 编程工具**。它们都实现了同一套接口——排队、派发、执行、结果回传，所以你可以从 Multica 的同一个看板上指挥任意一款。**但它们在能力细节上差异很大**：会话恢复是否真用、是否支持 MCP、skill 文件该放在哪里、模型怎么选。这一页是完整对照。
 
 创建智能体时挑选工具的指引见 [创建和配置智能体](/agents-create)。
 
@@ -19,10 +19,11 @@ Multica 内置支持 **14 款 AI 编程工具**。它们都实现了同一套接
 | **Codex** | OpenAI | ✅ | ✅ | `$CODEX_HOME/skills/` | 静态 |
 | **Copilot** | GitHub | ✅ | ❌ | `.github/skills/` | 静态（账号权益决定）|
 | **Cursor** | Anysphere | ✅ | ✅ | `.cursor/skills/` | 动态发现 |
-| **Hermes** | Nous Research | ✅ | ✅ | `.agent_context/skills/` （fallback）| 动态发现 |
+| **Hermes** | Nous Research | ✅ | ✅ | `HERMES_HOME/skills/` （单次任务 home）| 动态发现 |
 | **Kimi** | Moonshot | ✅ | ✅ | `.kimi/skills/` | 动态发现 |
 | **Kiro CLI** | Amazon | ✅ | ✅ | `.kiro/skills/` | 动态发现 |
 | **OpenCode** | SST | ✅ | ✅ | `.opencode/skills/` | 动态发现 + variant |
+| **DevEco Code** | 华为 | ✅ | ❌ | `.deveco/skills/` | 动态发现（`deveco models`）|
 | **OpenClaw** | 开源项目 | ✅ | ✅ | `.agent_context/skills/` （fallback）| 绑定在智能体上，不能在任务里切换 |
 | **Pi** | Inflection AI | ✅（session 为文件路径）| ❌ | `.pi/skills/` | 动态发现 |
 | **Qoder** | Alibaba | ✅ | ✅ | `.qoder/skills/` | 动态发现 |
@@ -56,7 +57,7 @@ Anysphere 出品，Cursor 编辑器的 CLI 对应物。**会话恢复可用**—
 
 ### Hermes
 
-Nous Research 出品。使用 ACP 协议（和 Kimi 共享传输层）。会话恢复真用，MCP 配置通过 ACP `mcpServers` 传入。但 **skill 注入路径是通用 fallback**（`.agent_context/skills/`），不是专用路径——如果 Hermes CLI 本身不读这路径，skill 对它可能不起作用。需要结合实测再确认。
+Nous Research 出品。使用 ACP 协议（和 Kimi 共享传输层）。会话恢复真用，MCP 配置通过 ACP `mcpServers` 传入。Hermes 只从自己的 home 目录（`~/.hermes/skills/`）和配置的 `skills.external_dirs` 发现 skill，没有工作区相对发现。因此，**只有当智能体分配了 skill 时**，Multica 才会把 `HERMES_HOME` 指向你 `~/.hermes/` 的单次任务 overlay：真实 home 用软链镜像（含 auth／密钥，令牌刷新可传播），派生的 `config.yaml` 把你已有的 skill 作为只读 external root 引用，只有被分配的 skill 写入它的 `skills/` 目录并具更高优先级。你的全局 skill 照常可用。Multica 不会直接写你的共享 `~/.hermes/`（只读取并链接进去），但 Hermes 自己通过被镜像的软链写入时（如刷新令牌）会传播。`custom_args` 里的 `-p`/`--profile` 选择会被尊重：overlay 从该 profile 的 home 播种，且该标志会从启动命令里消费掉，无法绕过 overlay。任务记忆按任务隔离：一个全新的 `memories/` 目录，外加在派生配置里禁用外部 `memory.provider` 后端，所以磁盘上的笔记和共享的 Supermemory/Hindsight 之类记忆库都不会在任务间串用（受管、按 agent 隔离的记忆后端是后续单独决策）。没有分配 skill 的 Hermes 任务按真实 home 原样运行。另外,home 的平台默认值在原生 Windows 上是 `%LOCALAPPDATA%\hermes`。
 
 **指定 Hermes profile。** 要让 Hermes 使用某个 profile 启动，把智能体的 `custom_args` 设成 profile flag 和 profile 名两个独立条目。例如使用名为 `research` 的 profile：
 
@@ -77,6 +78,10 @@ Amazon 出品。通过 `kiro-cli acp` 使用 ACP stdio 协议。会话恢复走 
 ### OpenCode
 
 SST 出品，开源。动态发现可用模型和模型 variant（扫 CLI 的配置文件）。会话恢复真用，会消费智能体的 `mcp_config` 字段——Multica 通过 `OPENCODE_CONFIG_CONTENT` 环境变量内联注入，让智能体的 MCP server 直接到达 OpenCode，**不会去碰任务工作目录里的 `opencode.json`**（那个文件归智能体或用户所有）。当模型暴露 variant 时，Multica 会把它显示成智能体的思考强度选择，并通过 `opencode run --variant` 传给 OpenCode。**适合爱折腾、想自定义模型目录**的开发者。
+
+### DevEco Code
+
+**DevEco Code** 是华为面向鸿蒙开发的独立编程智能体（`deveco` CLI，[gitcode.com/openharmony-sig/deveco-code](https://gitcode.com/openharmony-sig/deveco-code)）。它基于 OpenCode 引擎构建，自身已是一款完整成熟的产品——自带模型目录与 provider（内置 `deveco/GLM-5.1`）、自带华为账号认证、自有配置与 skill 体系（`~/.config/deveco/` 与 `.deveco/skills/`）。Multica 通过 `deveco run --format json` 驱动它，解析其 NDJSON 事件流。**会话恢复可用**（`--session <id>`），模型通过 `deveco models` 动态发现，系统上下文通过单次任务的 `AGENTS.md` 投递。MCP server 通过 DevEco 原生的 `DEVECO_CONFIG_CONTENT` 通道配置；Multica 侧的 `mcp_config` 透传正在开发中，因此目前 DevEco 智能体的 MCP 标签页暂先隐藏。认证用 `deveco auth login`（华为账号）。
 
 ### OpenClaw
 
@@ -100,7 +105,7 @@ ByteDance 官方 TRAE CLI（`traecli`，搭配 Trae IDE，**不是**开源的 `b
 
 ## MCP 配置：按工具不同
 
-**14 款工具里有 11 款实际消费 `mcp_config`：Claude Code、CodeBuddy、Codex、Cursor、Hermes、Kimi、Kiro CLI、OpenCode、OpenClaw、Qoder、Trae CLI**。其他 3 款会接收这个字段但**忽略**——不报错、不警告，只是配置不生效。
+**15 款工具里有 11 款实际消费 `mcp_config`：Claude Code、CodeBuddy、Codex、Cursor、Hermes、Kimi、Kiro CLI、OpenCode、OpenClaw、Qoder、Trae CLI**。其他 4 款（Antigravity、Copilot、DevEco Code、Pi）会接收这个字段但**忽略**——不报错、不警告，只是配置不生效。
 
 各工具的接入方式不同：Claude Code 和 CodeBuddy 通过 `--mcp-config` 加 `--strict-mcp-config` 接收；Codex 会把 daemon 管理的 `mcp_servers` block 写入单次任务的 `$CODEX_HOME/config.toml`；Cursor 会写入 `.cursor/mcp.json`，并把项目 approval 写到单次任务的 `CURSOR_DATA_DIR`；Hermes、Kimi、Kiro CLI、Qoder、Trae CLI 通过 ACP `mcpServers` 接收；OpenCode 通过 `OPENCODE_CONFIG_CONTENT` 环境变量内联接收；OpenClaw 通过 Multica 的单次任务配置 wrapper 接收 `mcp.servers`。OpenCode 这条路径**不会**改写项目里的 `opencode.json`。
 
@@ -122,14 +127,15 @@ ByteDance 官方 TRAE CLI（`traecli`，搭配 Trae IDE，**不是**开源的 `b
 | Kimi | `.kimi/skills/` | ✅ 原生 |
 | Kiro CLI | `.kiro/skills/` | ✅ 原生 |
 | OpenCode | `.opencode/skills/` | ✅ 原生 |
+| DevEco Code | `.deveco/skills/` | ✅ 原生 |
 | Pi | `.pi/skills/` | ✅ 原生 |
 | Qoder | `.qoder/skills/` | ✅ 原生 |
 | Trae CLI | `.traecli/skills/` | ✅ 原生 |
 | Antigravity | `.agents/skills/` | ✅ 原生（沿用 Gemini CLI 的 workspace 布局——见 [Antigravity 文档](https://antigravity.google/docs/gcli-migration)）|
-| Hermes | `.agent_context/skills/` | ⚠️ 通用 fallback |
+| Hermes | `HERMES_HOME/skills/` （单次任务 home）| ✅ 原生（每个任务从 `~/.hermes/` 播种）|
 | OpenClaw | `.agent_context/skills/` | ⚠️ 通用 fallback |
 
-fallback 路径对应的工具是否真的读取这个目录，取决于工具本身的文档——没保证。如果你的 skill 对 Hermes / OpenClaw 没起效，先查这个问题。
+fallback 路径对应的工具是否真的读取这个目录，取决于工具本身的文档——没保证。如果你的 skill 对 OpenClaw 没起效，先查这个问题。
 
 对原生项目级路径来说，repo-scoped discovery 是预期行为：如果检出的仓库已经包含对应目录，底层工具可以自己发现这些提交在仓库里的 Skill。你不需要为了在这个仓库里使用这些 repo skills 而先把它们导入 Multica。Multica 会保持这些仓库文件不变。如果某个工作区 Skill 的自然目录名相同，守护进程会把工作区副本写到类似 `review-helper-multica` 的无冲突 sibling 目录。
 

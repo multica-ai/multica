@@ -235,6 +235,7 @@ func (h *Handler) CreateWorkspace(w http.ResponseWriter, r *http.Request) {
 	// emit time. Stamping here would race under concurrent creates without
 	// a schema change, and the event stream answers the question exactly.
 	obsmetrics.RecordEvent(h.Analytics, h.Metrics, analytics.WorkspaceCreated(userID, wsID))
+	h.notifyDaemonWorkspacesChanged(userID)
 
 	slog.Info("workspace created", append(logger.RequestAttrs(r), "workspace_id", wsID, "name", ws.Name, "slug", ws.Slug)...)
 	writeJSON(w, http.StatusCreated, workspaceToResponse(ws))
@@ -353,6 +354,15 @@ func (h *Handler) UpdateWorkspace(w http.ResponseWriter, r *http.Request) {
 	slog.Info("workspace updated", append(logger.RequestAttrs(r), "workspace_id", id)...)
 	userID := requestUserID(r)
 	h.publish(protocol.EventWorkspaceUpdated, uuidToString(ws.ID), "member", userID, map[string]any{"workspace": workspaceToResponse(ws)})
+	if req.Name != nil {
+		if members, err := h.Queries.ListMembers(r.Context(), ws.ID); err == nil {
+			userIDs := make([]string, 0, len(members))
+			for _, member := range members {
+				userIDs = append(userIDs, uuidToString(member.UserID))
+			}
+			h.notifyDaemonWorkspacesChanged(userIDs...)
+		}
+	}
 
 	writeJSON(w, http.StatusOK, workspaceToResponse(ws))
 }
@@ -520,6 +530,7 @@ func (h *Handler) CreateMember(w http.ResponseWriter, r *http.Request) {
 		eventPayload["workspace_name"] = ws.Name
 	}
 	h.publish(protocol.EventMemberAdded, uuidToString(requester.WorkspaceID), "member", userID, eventPayload)
+	h.notifyDaemonWorkspacesChanged(uuidToString(user.ID))
 
 	writeJSON(w, http.StatusCreated, memberWithUserResponse(member, user))
 }
@@ -659,6 +670,7 @@ func (h *Handler) DeleteMember(w http.ResponseWriter, r *http.Request) {
 		"workspace_id": wsIDStr,
 		"user_id":      uuidToString(target.UserID),
 	})
+	h.notifyDaemonWorkspacesChanged(uuidToString(target.UserID))
 
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -701,6 +713,7 @@ func (h *Handler) LeaveWorkspace(w http.ResponseWriter, r *http.Request) {
 		"workspace_id": workspaceID,
 		"user_id":      uuidToString(member.UserID),
 	})
+	h.notifyDaemonWorkspacesChanged(uuidToString(member.UserID))
 
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -725,9 +738,13 @@ func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 	// After CASCADE deletes the member rows, cache entries become harmless
 	// orphans (downstream lookups for the deleted workspace will fail), but
 	// proactive invalidation prevents any stale-access window up to TTL.
+	var affectedUserIDs []string
 	if members, err := h.Queries.ListMembers(r.Context(), requester.WorkspaceID); err == nil {
+		affectedUserIDs = make([]string, 0, len(members))
 		for _, m := range members {
-			h.MembershipCache.Invalidate(r.Context(), uuidToString(m.UserID), workspaceID)
+			userID := uuidToString(m.UserID)
+			h.MembershipCache.Invalidate(r.Context(), userID, workspaceID)
+			affectedUserIDs = append(affectedUserIDs, userID)
 		}
 	}
 
@@ -749,6 +766,7 @@ func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 	h.publish(protocol.EventWorkspaceDeleted, workspaceID, "member", requestUserID(r), map[string]any{
 		"workspace_id": workspaceID,
 	})
+	h.notifyDaemonWorkspacesChanged(affectedUserIDs...)
 
 	w.WriteHeader(http.StatusNoContent)
 }

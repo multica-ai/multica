@@ -75,7 +75,7 @@ func TestSyncWorkspacesSkipsReposRefreshOnExistingWorkspace(t *testing.T) {
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/api/workspaces":
+		case "/api/daemon/workspaces":
 			json.NewEncoder(w).Encode([]WorkspaceInfo{{ID: workspaceID, Name: "ws"}})
 		case "/api/daemon/workspaces/" + workspaceID + "/repos":
 			repoCalls.Add(1)

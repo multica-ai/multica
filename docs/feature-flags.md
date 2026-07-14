@@ -191,17 +191,22 @@ agents_agent_builder:
   default: true
 settings_resource_labels:
   default: true
-agents_skill_toggles:
-  default: true
 ```
 
-Keep all three off for v0.3.44: it is a schema-only deployment for these
+Keep both off for v0.3.44: it is a schema-only deployment for these
 features. A later rollout may enable them only after it ships and verifies a
-rollback normalizer for builder agents, resource-label rows, and disabled
-skill rows. Do not rely on turning the flags off to make a database safe for
-an older binary; it prevents new writes but cannot remove states that already
-exist. Until that normalizer exists, rollbacks must target a version that
-understands these states or happen before any of the flags is enabled.
+rollback normalizer for builder agents and resource-label rows. Do not rely on
+turning the flags off to make a database safe for an older binary; it prevents
+new writes but cannot remove states that already exist. Until that normalizer
+exists, rollbacks must target a version that understands these states or happen
+before either flag is enabled.
+
+Agent skill toggles have completed this rollout and are now always available.
+Current clients render the switch without a release flag, and the backend no
+longer gates the write endpoint. `/api/config` still reports
+`agents_skill_toggles: true` so installed v0.4.0 desktop clients also expose the
+switch; this is a client-compatibility decision, not an operator-controlled
+flag.
 
 ### Security note: never rely on the frontend alone
 

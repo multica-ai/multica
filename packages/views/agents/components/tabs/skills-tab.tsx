@@ -17,8 +17,6 @@ import type {
   RuntimeLocalSkillSummary,
 } from "@multica/core/types";
 import { api, ApiError } from "@multica/core/api";
-import { useFeatureEnabled } from "@multica/core/config";
-import { AGENT_SKILL_TOGGLES_FLAG } from "@multica/core/feature-flags";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { runtimeCapabilitiesOptions } from "@multica/core/runtimes";
 import {
@@ -57,7 +55,6 @@ export function SkillsTab({
   const { t } = useT("agents");
   const qc = useQueryClient();
   const wsId = useWorkspaceId();
-  const skillTogglesEnabled = useFeatureEnabled(AGENT_SKILL_TOGGLES_FLAG, false);
   const { data: workspaceSkills = [] } = useQuery(skillListOptions(wsId));
   const runtimeId =
     runtime?.runtime_mode === "local" && runtime.status === "online"
@@ -170,7 +167,7 @@ export function SkillsTab({
                     <>
                       {busy ? (
                         <Loader2 className="h-4 w-4 animate-spin text-muted-foreground motion-reduce:animate-none" />
-                      ) : skillTogglesEnabled ? (
+                      ) : (
                         <Switch
                           checked={enabled}
                           onCheckedChange={(checked) => handleToggle(skill.id, checked)}
@@ -178,7 +175,7 @@ export function SkillsTab({
                             name: skill.name,
                           })}
                         />
-                      ) : null}
+                      )}
                       <Button
                         variant="ghost"
                         size="icon-sm"

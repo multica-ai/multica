@@ -1236,6 +1236,7 @@ func (s *TaskService) CancelTasksForIssue(ctx context.Context, issueID pgtype.UU
 		s.ReconcileAgentStatus(ctx, t.AgentID)
 		s.broadcastTaskEvent(ctx, protocol.EventTaskCancelled, t)
 	}
+	s.notifyTasksFinished(cancelled)
 	return nil
 }
 
@@ -1258,6 +1259,7 @@ func (s *TaskService) CancelTasksForAgent(ctx context.Context, agentID pgtype.UU
 	// working→available based on remaining task counts, no need to call
 	// per row (the rows we just cancelled all belong to the same agent).
 	s.ReconcileAgentStatus(ctx, agentID)
+	s.notifyTasksFinished(cancelled)
 	return cancelled, nil
 }
 
@@ -1275,6 +1277,7 @@ func (s *TaskService) CancelTasksByTriggerComment(ctx context.Context, commentID
 		s.ReconcileAgentStatus(ctx, t.AgentID)
 		s.broadcastTaskEvent(ctx, protocol.EventTaskCancelled, t)
 	}
+	s.notifyTasksFinished(cancelled)
 	return cancelled, nil
 }
 
@@ -1288,6 +1291,7 @@ func (s *TaskService) BroadcastCancelledTasks(ctx context.Context, cancelled []d
 		s.ReconcileAgentStatus(ctx, t.AgentID)
 		s.broadcastTaskEvent(ctx, protocol.EventTaskCancelled, t)
 	}
+	s.notifyTasksFinished(cancelled)
 }
 
 func (s *TaskService) CaptureCancelledTasks(ctx context.Context, cancelled []db.AgentTaskQueue) {
@@ -1346,6 +1350,7 @@ func (s *TaskService) CancelTaskWithResult(ctx context.Context, taskID pgtype.UU
 
 	// Broadcast cancellation as a task:failed event so frontends clear the live card
 	s.broadcastTaskEvent(ctx, protocol.EventTaskCancelled, task)
+	s.NotifyTaskFinished(task)
 
 	return &CancelTaskResult{
 		Task:                 task,
@@ -1673,6 +1678,190 @@ func (s *TaskService) RequeueTaskAfterClaimFailure(ctx context.Context, task db.
 		"runtime_id", util.UUIDToString(requeued.RuntimeID),
 	)
 	return &requeued, nil
+}
+
+// ClaimTasksForRuntimes is the machine-level (MUL-4257) batch counterpart of
+// ClaimTaskForRuntime: it claims up to maxTasks tasks across every runtime in
+// runtimeIDs in a single call, so a daemon can poll for all of its runtimes
+// with one HTTP request and a constant number of DB queries instead of one
+// request (and one promote/reclaim/list cycle) per runtime.
+//
+// It preserves the exact per-runtime semantics, just set-ified:
+//  1. promote due deferred tasks across the set (one UPDATE);
+//  2. reclaim up to maxTasks stale-dispatched tasks across the set (one UPDATE)
+//     — done before the empty-cache check because a lost claim response moves
+//     the task out of `queued`, which the empty-queued cache cannot represent;
+//  3. short-circuit runtimes whose empty-claim verdict is cached, sampling the
+//     invalidation version for the rest BEFORE the candidate SELECT;
+//  4. list queued candidates across the non-empty set (one SELECT);
+//  5. mark still-empty runtimes so their next idle poll skips Postgres;
+//  6. claim per distinct agent via ClaimTask (unchanged — preserves the
+//     per-(issue, agent) serialization, the agent concurrency cap, and every
+//     dispatch side effect) until maxTasks is reached.
+//
+// The returned slice contains both reclaimed and freshly-claimed tasks, each
+// already carrying its runtime_id so the daemon routes it to the matching
+// runtime locally.
+func (s *TaskService) ClaimTasksForRuntimes(ctx context.Context, runtimeIDs []pgtype.UUID, maxTasks int) ([]db.AgentTaskQueue, error) {
+	if len(runtimeIDs) == 0 || maxTasks <= 0 {
+		return nil, nil
+	}
+
+	// De-dup runtime IDs defensively so MarkEmpty/version bookkeeping stays
+	// unambiguous even if a daemon ever sends a duplicate.
+	seen := make(map[string]struct{}, len(runtimeIDs))
+	uniqueIDs := make([]pgtype.UUID, 0, len(runtimeIDs))
+	runtimeInSet := make(map[string]struct{}, len(runtimeIDs))
+	for _, rid := range runtimeIDs {
+		key := util.UUIDToString(rid)
+		runtimeInSet[key] = struct{}{}
+		if _, dup := seen[key]; dup {
+			continue
+		}
+		seen[key] = struct{}{}
+		uniqueIDs = append(uniqueIDs, rid)
+	}
+
+	claimed := make([]db.AgentTaskQueue, 0, maxTasks)
+
+	// 1. Promote due deferred tasks across the whole set (promote-first, like
+	// the singular path). Replay the per-row side effects the singular service
+	// method PromoteDueDeferredTasksForRuntime performs — crucially
+	// EmptyClaim.Bump (via NotifyTaskEnqueued → notifyTaskAvailable) so a
+	// just-promoted deferred task invalidates its runtime's cached empty
+	// verdict BEFORE the empty-cache filter in step 3; otherwise a stale
+	// MarkEmpty from a prior idle poll would short-circuit the runtime and the
+	// promoted task would sit unclaimed until the empty key's TTL. Also emits
+	// the deferred→queued UI event and the enqueue analytics sample.
+	promoted, err := s.Queries.PromoteDueDeferredTasksForRuntimes(ctx, uniqueIDs)
+	if err != nil {
+		return nil, fmt.Errorf("promote deferred tasks: %w", err)
+	}
+	for _, task := range promoted {
+		slog.Info("deferred fallback task promoted (batch)",
+			"task_id", util.UUIDToString(task.ID),
+			"runtime_id", util.UUIDToString(task.RuntimeID),
+			"agent_id", util.UUIDToString(task.AgentID),
+		)
+		s.broadcastTaskEvent(ctx, protocol.EventTaskQueued, task)
+		s.NotifyTaskEnqueued(ctx, task)
+	}
+
+	// 2. Reclaim lost-response dispatched tasks across the set, up to maxTasks.
+	reclaimed, err := s.Queries.ReclaimStaleDispatchedTasksForRuntimes(ctx, db.ReclaimStaleDispatchedTasksForRuntimesParams{
+		RuntimeIds:        uniqueIDs,
+		ClaimRecoverySecs: claimResponseRecoveryWindow.Seconds(),
+		PrepareLeaseSecs:  prepareLeaseDuration.Seconds(),
+		MaxTasks:          int32(maxTasks),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("reclaim stale dispatched tasks: %w", err)
+	}
+	for i := range reclaimed {
+		claimed = append(claimed, reclaimed[i])
+		slog.Info("stale dispatched task reclaimed (batch)",
+			"task_id", util.UUIDToString(reclaimed[i].ID),
+			"runtime_id", util.UUIDToString(reclaimed[i].RuntimeID),
+			"agent_id", util.UUIDToString(reclaimed[i].AgentID),
+		)
+	}
+	if len(claimed) >= maxTasks {
+		return claimed[:maxTasks], nil
+	}
+
+	// 3. Empty-cache short-circuit + version sampling for the remaining runtimes.
+	nonEmpty := make([]pgtype.UUID, 0, len(uniqueIDs))
+	versions := make(map[string]int64, len(uniqueIDs))
+	for _, rid := range uniqueIDs {
+		key := util.UUIDToString(rid)
+		if s.EmptyClaim.IsEmpty(ctx, key) {
+			continue
+		}
+		versions[key] = s.EmptyClaim.CurrentVersion(ctx, key)
+		nonEmpty = append(nonEmpty, rid)
+	}
+	if len(nonEmpty) == 0 {
+		return claimed, nil
+	}
+
+	// 4. One candidate SELECT across the non-empty set.
+	candidates, err := s.Queries.ListQueuedClaimCandidatesByRuntimes(ctx, nonEmpty)
+	if err != nil {
+		// Steps 2/6 commit reclaimed/claimed tasks in their own transactions,
+		// so `claimed` may already hold tasks dispatched server-side. Dropping
+		// them with a 500 makes the daemon HTTP-fall-back and claim a SECOND
+		// batch into the same free slots (the first batch then waits for stale
+		// reclaim) — the same double-claim this PR set out to remove
+		// (MUL-4257). Prefer partial success: hand back what committed so the
+		// handler finalizes and returns it; the errored candidates stay queued
+		// for the next poll.
+		if len(claimed) > 0 {
+			slog.Error("batch claim: candidate query failed after partial success; returning claimed tasks to avoid loss",
+				"error", err, "claimed", len(claimed))
+			return claimed, nil
+		}
+		return nil, fmt.Errorf("list queued claim candidates: %w", err)
+	}
+
+	// 5. Mark runtimes with zero candidates empty so their next idle poll skips
+	// Postgres. Runtimes that had at least one candidate are intentionally not
+	// marked (positive results always re-check the DB, matching the singular
+	// path).
+	withCandidates := make(map[string]struct{}, len(candidates))
+	for i := range candidates {
+		withCandidates[util.UUIDToString(candidates[i].RuntimeID)] = struct{}{}
+	}
+	for _, rid := range nonEmpty {
+		key := util.UUIDToString(rid)
+		if _, ok := withCandidates[key]; !ok {
+			s.EmptyClaim.MarkEmpty(ctx, key, versions[key])
+		}
+	}
+
+	// 6. Claim per distinct agent (unchanged path → same per-(issue, agent)
+	// serialization, capacity cap, and dispatch side effects) until maxTasks is
+	// reached.
+	triedAgents := make(map[string]struct{}, len(candidates))
+	for i := range candidates {
+		if len(claimed) >= maxTasks {
+			break
+		}
+		agentKey := util.UUIDToString(candidates[i].AgentID)
+		if _, tried := triedAgents[agentKey]; tried {
+			continue
+		}
+		triedAgents[agentKey] = struct{}{}
+
+		task, err := s.ClaimTask(ctx, candidates[i].AgentID)
+		if err != nil {
+			// Each ClaimTask commits in its own transaction, so earlier
+			// iterations (and step-2 reclaims) are already dispatched
+			// server-side. Returning nil here would drop them and force the
+			// daemon to double-claim via HTTP fallback (MUL-4257). Return the
+			// partial batch instead; the failed agent's task stays queued.
+			if len(claimed) > 0 {
+				slog.Error("batch claim: claim task failed after partial success; returning claimed tasks to avoid loss",
+					"error", err, "claimed", len(claimed))
+				return claimed, nil
+			}
+			return nil, fmt.Errorf("claim task: %w", err)
+		}
+		if task == nil {
+			continue
+		}
+		// ClaimAgentTask selects by agent only; guard that the claimed task
+		// belongs to a runtime this daemon hosts. An agent with a
+		// higher-priority queued task on ANOTHER daemon's runtime could
+		// otherwise be dispatched here and dropped — matching the singular
+		// path's runtime_id guard. Such a stray dispatch is recovered by the
+		// reclaim path on the owning daemon's next poll.
+		if _, ok := runtimeInSet[util.UUIDToString(task.RuntimeID)]; !ok {
+			continue
+		}
+		claimed = append(claimed, *task)
+	}
+
+	return claimed, nil
 }
 
 func (s *TaskService) PromoteDueDeferredTasksForRuntime(ctx context.Context, runtimeID pgtype.UUID) error {
@@ -2688,6 +2877,7 @@ func (s *TaskService) HandleFailedTasks(ctx context.Context, tasks []db.AgentTas
 	for _, agentID := range affectedAgents {
 		s.ReconcileAgentStatus(ctx, agentID)
 	}
+	s.notifyTasksFinished(tasks)
 	return retried
 }
 
@@ -2935,6 +3125,33 @@ func (s *TaskService) NotifyTaskEnqueued(ctx context.Context, task db.AgentTaskQ
 	s.notifyTaskAvailable(task)
 }
 
+// NotifyTaskFinished invalidates a runtime's empty-claim verdict and emits a
+// best-effort daemon wakeup after a task reaches a terminal state. The task ID
+// is deliberately omitted from the wakeup payload: the completed task itself
+// is not available; the hint only means that a queued successor may have
+// become claimable because an agent-capacity or serialization barrier cleared.
+func (s *TaskService) NotifyTaskFinished(task db.AgentTaskQueue) {
+	s.notifyRuntimeMayHaveWork(task.RuntimeID, "")
+}
+
+// notifyTasksFinished is the batch form used by bulk terminal transitions.
+// Coalesce by runtime so cancelling many tasks on one machine produces one
+// cache bump and one websocket hint rather than a burst of identical work.
+func (s *TaskService) notifyTasksFinished(tasks []db.AgentTaskQueue) {
+	seen := make(map[string]struct{}, len(tasks))
+	for _, task := range tasks {
+		if !task.RuntimeID.Valid {
+			continue
+		}
+		runtimeKey := util.UUIDToString(task.RuntimeID)
+		if _, ok := seen[runtimeKey]; ok {
+			continue
+		}
+		seen[runtimeKey] = struct{}{}
+		s.notifyRuntimeMayHaveWork(task.RuntimeID, "")
+	}
+}
+
 // notifyTaskAvailable runs after a task has been inserted: bumps the
 // runtime's invalidation version so any in-flight claim that is about
 // to write an "empty" verdict will have it rejected on read, then
@@ -2943,10 +3160,16 @@ func (s *TaskService) NotifyTaskEnqueued(ctx context.Context, task db.AgentTaskQ
 // otherwise the wakeup-driven claim could read the still-current
 // empty verdict and return null.
 func (s *TaskService) notifyTaskAvailable(task db.AgentTaskQueue) {
-	if !task.RuntimeID.Valid {
+	s.notifyRuntimeMayHaveWork(task.RuntimeID, util.UUIDToString(task.ID))
+}
+
+// notifyRuntimeMayHaveWork is the shared bump-before-wakeup primitive for both
+// fresh enqueues and terminal transitions that can unblock queued work.
+func (s *TaskService) notifyRuntimeMayHaveWork(runtimeID pgtype.UUID, taskID string) {
+	if !runtimeID.Valid {
 		return
 	}
-	runtimeKey := util.UUIDToString(task.RuntimeID)
+	runtimeKey := util.UUIDToString(runtimeID)
 	// Use a background context: the cache bump / wakeup must outlive
 	// the request that created the task, otherwise an early client
 	// disconnect could leave the empty verdict in place and stall the
@@ -2957,7 +3180,7 @@ func (s *TaskService) notifyTaskAvailable(task db.AgentTaskQueue) {
 	if s.Wakeup == nil {
 		return
 	}
-	s.Wakeup.NotifyTaskAvailable(runtimeKey, util.UUIDToString(task.ID))
+	s.Wakeup.NotifyTaskAvailable(runtimeKey, taskID)
 }
 
 func (s *TaskService) broadcastTaskDispatch(ctx context.Context, task db.AgentTaskQueue) {
