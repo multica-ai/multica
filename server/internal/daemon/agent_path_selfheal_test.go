@@ -229,6 +229,56 @@ func TestResolveAgentEntry_ReturnsVersionPairedWithCachedPath(t *testing.T) {
 	}
 }
 
+// TestResolveAgentEntry_HealedPathWinsOverReappearingPinnedPath covers the
+// follow-up edge from the third-round review: after a self-heal to v2, if the
+// originally pinned v1 path reappears on disk (a downgrade / reinstall that
+// recreates the old versioned directory) while the healed v2 binary is still
+// present, resolveAgentEntry must keep returning the healed {v2, its version}
+// pair. Returning the reappeared v1 path here would pair the old binary with
+// the healed v2 version — the mismatched {old path, new version} the review
+// flagged.
+func TestResolveAgentEntry_HealedPathWinsOverReappearingPinnedPath(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink/exec-bit layout is POSIX-specific")
+	}
+	stubDetectVersionFromPath(t)
+
+	root := t.TempDir()
+	stableBin := filepath.Join(root, "bin")
+	t.Setenv("PATH", stableBin)
+	t.Setenv("SHELL", filepath.Join(t.TempDir(), "fish"))
+
+	v1 := installVersionedCodex(t, root, "0.144.1", stableBin)
+	d := newSelfHealTestDaemon()
+	d.setAgentVersion("codex", "0.144.1")
+	entry := AgentEntry{Path: v1, Command: "codex"}
+	ctx := context.Background()
+
+	// In-place upgrade: drop v1, repoint the stable symlink at v2, and heal.
+	if err := os.RemoveAll(filepath.Join(root, "Caskroom", "codex", "0.144.1")); err != nil {
+		t.Fatalf("remove v1 tree: %v", err)
+	}
+	v2 := installVersionedCodex(t, root, "0.144.3", stableBin)
+	if got, ver := d.resolveAgentEntry(ctx, "codex", entry); got.Path != v2 || ver != "0.144.3" {
+		t.Fatalf("initial heal wrong: got (%q, %q), want (%q, %q)", got.Path, ver, v2, "0.144.3")
+	}
+
+	// The originally pinned v1 path reappears (a reinstall recreating the old
+	// versioned dir) while the healed v2 binary is still present on disk.
+	writeExecStub(t, v1)
+	if !agentExecutablePresent(v1) {
+		t.Fatalf("v1 path should be runnable again after reinstall: %q", v1)
+	}
+
+	got, ver := d.resolveAgentEntry(ctx, "codex", entry)
+	if got.Path != v2 {
+		t.Fatalf("reappearing pinned path hijacked the launch: got %q, want healed %q", got.Path, v2)
+	}
+	if ver != "0.144.3" {
+		t.Fatalf("returned version not paired with healed path: got %q, want %q", ver, "0.144.3")
+	}
+}
+
 // TestResolveAgentEntry_UninstalledLeavesEntryUnchanged verifies that when the
 // binary is genuinely gone (not just moved by an upgrade), resolveAgentEntry
 // returns the entry untouched so the downstream "executable not found" error

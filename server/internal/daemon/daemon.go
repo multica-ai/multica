@@ -343,31 +343,38 @@ type healedAgent struct {
 // updating.
 //
 // Behaviour:
-//   - Pinned Path still present -> returned unchanged, paired with its
-//     registration-detected version. The anti-redirect guarantee holds for the
-//     normal case: a live pinned binary is never second-guessed even if PATH
-//     now points elsewhere.
-//   - Pinned Path gone -> reuse a previously self-healed {path, version} if the
-//     path is still present, otherwise re-resolve entry.Command once (preserving
-//     the ~/.multica/hooks exclusion and the login-shell fallback). Before
-//     adopting the re-resolved binary it is version-detected and run through the
-//     same minimum-version gate registration applies. This reproduces exactly
-//     what a daemon restart would resolve, so it is no less safe than the
-//     documented restart workaround — only automatic.
+//   - A previous self-heal that is still live -> returned with its paired
+//     version. This is checked first so that once we've re-resolved to a new
+//     binary, a reappearing stale path (a downgrade / reinstall recreating the
+//     old versioned directory) cannot re-pair that old binary with the healed
+//     version — a mismatched {old path, new version} (MUL-4486 review).
+//   - Otherwise, pinned Path still present -> returned unchanged, paired with
+//     its registration-detected version. The anti-redirect guarantee holds for
+//     the normal (never-healed) case: a live pinned binary is never
+//     second-guessed even if PATH now points elsewhere.
+//   - Pinned Path gone and no live heal -> re-resolve entry.Command once
+//     (preserving the ~/.multica/hooks exclusion and the login-shell fallback).
+//     Before adopting the re-resolved binary it is version-detected and run
+//     through the same minimum-version gate registration applies. This
+//     reproduces exactly what a daemon restart would resolve, so it is no less
+//     safe than the documented restart workaround — only automatic.
 //   - Re-resolution fails, the candidate can't be version-detected, or it is
 //     below the minimum supported version -> entry is returned unchanged so the
 //     candidate is never launched and the downstream error still surfaces.
 func (d *Daemon) resolveAgentEntry(ctx context.Context, provider string, entry AgentEntry) (AgentEntry, string) {
-	if agentExecutablePresent(entry.Path) {
-		return entry, d.agentVersion(provider)
-	}
-
+	// A prior self-heal wins over the original pinned path: it carries a
+	// {path, version} pair we already verified together, so it can never regress
+	// to the mismatched pairing a reappearing stale path would produce.
 	d.resolvedPathsMu.RLock()
 	healed, ok := d.resolvedPaths[provider]
 	d.resolvedPathsMu.RUnlock()
 	if ok && agentExecutablePresent(healed.path) {
 		entry.Path = healed.path
 		return entry, healed.version
+	}
+
+	if agentExecutablePresent(entry.Path) {
+		return entry, d.agentVersion(provider)
 	}
 
 	if entry.Command == "" {
@@ -3745,8 +3752,10 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	var env *execenv.Environment
 	// For a built-in codex task, use the version paired with the resolved path
 	// so an in-place upgrade can't leave the sandbox policy on the old version
-	// (MUL-4486). Other providers / custom profiles fall back to the cached
-	// codex version, which they don't consume anyway.
+	// (MUL-4486). A custom codex runtime skips the self-heal, so resolvedVersion
+	// is empty and it keeps the existing cached-version fallback — its binary is
+	// the profile's own command, which the daemon never pins or version-detects.
+	// Non-codex providers carry the value through without consuming it.
 	codexVersion := d.agentVersion("codex")
 	if provider == "codex" && resolvedVersion != "" {
 		codexVersion = resolvedVersion
