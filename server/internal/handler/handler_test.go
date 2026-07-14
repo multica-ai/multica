@@ -68,6 +68,7 @@ func TestMain(m *testing.M) {
 	// the rest of the suite hermetic.
 	testHandler.WebhookRateLimiter = NewMemoryWebhookRateLimiter(WebhookRateLimit{Limit: 1_000_000, Window: time.Minute})
 	testHandler.WebhookIPRateLimiter = NewMemoryWebhookIPRateLimiter(WebhookRateLimit{Limit: 1_000_000, Window: time.Minute})
+	testHandler.WebhookAbsoluteIPRateLimiter = NewMemoryWebhookAbsoluteIPRateLimiter(WebhookRateLimit{Limit: 1_000_000, Window: time.Minute})
 	testPool = pool
 
 	testUserID, testWorkspaceID, err = setupHandlerTestFixture(ctx, pool)

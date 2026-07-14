@@ -918,6 +918,10 @@ const WebhookDeliverySchema = z.object({
   signature_status: z.string(),
   status: z.string(),
   attempt_count: z.number().default(0),
+  // Older servers predate the durable dispatch queue. Defaults preserve
+  // compatibility while the UI rolls out alongside the new worker.
+  dispatch_attempts: z.number().default(0),
+  available_at: z.string().default(""),
   content_type: z.string().nullable(),
   response_status: z.number().nullable(),
   autopilot_run_id: z.string().nullable(),
@@ -1002,6 +1006,8 @@ export const EMPTY_WEBHOOK_DELIVERY: WebhookDelivery = {
   signature_status: "not_required",
   status: "queued",
   attempt_count: 0,
+  dispatch_attempts: 0,
+  available_at: "",
   content_type: null,
   response_status: null,
   autopilot_run_id: null,

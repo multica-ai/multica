@@ -54,6 +54,7 @@ type businessEventMetrics struct {
 	autopilotRunTerminal            *prometheus.CounterVec
 	autopilotRunSkipped             *prometheus.CounterVec
 	webhookDelivery                 *prometheus.CounterVec
+	webhookRateLimited              *prometheus.CounterVec
 	githubEventReceived             *prometheus.CounterVec
 	githubPRReview                  *prometheus.CounterVec
 	githubPRMergeSeconds            prometheus.Histogram
@@ -162,6 +163,10 @@ func newBusinessEventMetrics() *businessEventMetrics {
 			Name: "multica_webhook_delivery_total",
 			Help: "Total inbound webhook deliveries by provider and outcome.",
 		}, metricLabels("multica_webhook_delivery_total")),
+		webhookRateLimited: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "multica_webhook_rate_limited_total",
+			Help: "Total webhook admissions or worker dispatches delayed by a bounded safety gate.",
+		}, metricLabels("multica_webhook_rate_limited_total")),
 		githubEventReceived: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "multica_github_event_received_total",
 			Help: "Total GitHub webhook events received by event kind and action.",
@@ -224,6 +229,7 @@ func (e *businessEventMetrics) collectors() []prometheus.Collector {
 		e.autopilotRunTerminal,
 		e.autopilotRunSkipped,
 		e.webhookDelivery,
+		e.webhookRateLimited,
 		e.githubEventReceived,
 		e.githubPRReview,
 		e.githubPRMergeSeconds,
@@ -379,6 +385,13 @@ func (m *BusinessMetrics) RecordWebhookDelivery(provider, status string) {
 		NormalizeWebhookProvider(provider),
 		NormalizeWebhookDeliveryStatus(status),
 	).Inc()
+}
+
+func (m *BusinessMetrics) RecordWebhookRateLimited(gate string) {
+	if m == nil || m.events == nil {
+		return
+	}
+	m.events.webhookRateLimited.WithLabelValues(NormalizeWebhookRateLimitGate(gate)).Inc()
 }
 
 // RecordGithubEventReceived counts a GitHub webhook event by event kind / action.

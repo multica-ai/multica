@@ -203,6 +203,8 @@
       "received_at": "Received",
       "last_attempt_at": "Last attempt",
       "attempt_count": "Attempts",
+      "dispatch_attempts": "Dispatch attempts",
+      "available_at": "Next dispatch",
       "response_status": "Response",
       "dedupe_key": "Dedupe key",
       "dedupe_source": "Dedupe source",

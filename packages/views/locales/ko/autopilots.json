@@ -203,6 +203,8 @@
       "received_at": "수신",
       "last_attempt_at": "마지막 시도",
       "attempt_count": "시도 횟수",
+      "dispatch_attempts": "디스패치 시도 횟수",
+      "available_at": "다음 디스패치",
       "response_status": "응답",
       "dedupe_key": "중복 제거 키",
       "dedupe_source": "중복 제거 소스",
