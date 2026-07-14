@@ -59,9 +59,10 @@ on the autopilot detail page; Multica generates a unique URL of the shape:
 https://<your-multica-host>/api/webhooks/autopilots/awt_…
 ```
 
-POST any JSON to that URL. Multica first stores a durable delivery and returns
-`202 Accepted`, then a database-backed worker records a run with
-`source = webhook`, stores the body as the run's `trigger_payload`, and
+POST any JSON to that URL. Multica first stores a durable delivery and
+synchronously admits an idempotent run, returning `200 OK` with
+`status = accepted | skipped` and its `run_id`. A database-backed worker then
+resumes accepted runs, stores the body as the run's `trigger_payload`, and
 dispatches the agent exactly the way a schedule trigger would. A server restart
 between admission and dispatch does not lose the queued delivery.
 
@@ -216,7 +217,7 @@ curl -X POST "$MULTICA_WEBHOOK_URL" \
   -H 'X-GitHub-Event: workflow_run' \
   -H 'Content-Type: application/json' \
   -d '{"action":"completed"}'
-# → 202 {"status":"queued", "delivery_id":"…", ...}
+# → 200 {"status":"accepted", "delivery_id":"…", "run_id":"…", ...}
 
 # Filtered — same event, action not in allowlist
 curl -X POST "$MULTICA_WEBHOOK_URL" \
@@ -242,18 +243,21 @@ autopilot. Treat it like a token:
 
 ### Status-code semantics
 
-Multica acknowledges an active, valid delivery only after it is durable:
+Multica acknowledges an active, valid delivery only after both its delivery and
+idempotent run are durable:
 
-- `202 {"status":"queued","delivery_id":"…","autopilot_id":"…","trigger_id":"…"}`
-  — the delivery is stored and the worker owns dispatch. The eventual run and
-  any admission skip are visible in delivery/run history.
+- `200 {"status":"accepted","delivery_id":"…","run_id":"…","autopilot_id":"…","trigger_id":"…"}`
+  — admission succeeded and the worker owns recoverable dispatch.
+- `200 {"status":"skipped","delivery_id":"…","run_id":"…","reason":"…"}`
+  — admission produced a durable skipped run, for example when the assignee's
+  runtime is offline.
 
 Normal no-op and deduplication outcomes return `200 OK` so providers do not
 retry them indefinitely:
 
 - `{"status":"duplicate","delivery_id":"…","run_id":"…"}` — the provider's
-  idempotency key was already admitted. `run_id` is omitted while the original
-  delivery is still queued.
+  idempotency key was already admitted. `run_id` is omitted only if the original
+  request ended before its run could be admitted; the worker will recover it.
 - `{"status":"ignored","reason":"trigger_disabled"}` — the trigger is disabled.
 - `{"status":"ignored","reason":"autopilot_paused"}` — the autopilot is paused.
 - `{"status":"ignored","reason":"autopilot_archived"}` — the autopilot is archived.

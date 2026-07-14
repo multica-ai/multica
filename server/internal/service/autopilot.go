@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/events"
@@ -74,6 +75,97 @@ func (s *AutopilotService) DispatchAutopilot(
 	return s.dispatchAutopilot(ctx, autopilot, triggerID, source, payload, pgtype.Timestamptz{}, pgtype.UUID{})
 }
 
+// AdmitAutopilotWebhookDelivery creates or reuses the idempotent run for a
+// durable webhook delivery without executing its downstream issue/task side
+// effect. The HTTP ingress calls this synchronously so the public webhook
+// response can retain its 200 accepted/skipped + run_id contract while the
+// database-backed worker still owns recoverable dispatch.
+func (s *AutopilotService) AdmitAutopilotWebhookDelivery(
+	ctx context.Context,
+	autopilot db.Autopilot,
+	triggerID pgtype.UUID,
+	payload []byte,
+	deliveryID pgtype.UUID,
+) (*db.AutopilotRun, error) {
+	if !deliveryID.Valid {
+		return nil, fmt.Errorf("admit webhook delivery: delivery_id is required")
+	}
+
+	existing, err := s.Queries.GetAutopilotRunByWebhookDelivery(ctx, deliveryID)
+	switch {
+	case err == nil:
+		return &existing, nil
+	case !errors.Is(err, pgx.ErrNoRows):
+		return nil, fmt.Errorf("admit webhook delivery: lookup existing run: %w", err)
+	}
+
+	if reason, skip := s.shouldSkipDispatch(ctx, autopilot); skip {
+		run, err := s.recordSkippedRun(
+			ctx,
+			autopilot,
+			triggerID,
+			"webhook",
+			payload,
+			pgtype.Timestamptz{},
+			deliveryID,
+			reason,
+		)
+		if err != nil {
+			return s.recoverConcurrentWebhookAdmission(
+				ctx,
+				deliveryID,
+				fmt.Errorf("admit webhook delivery: create skipped run: %w", err),
+			)
+		}
+		return run, nil
+	}
+
+	initialStatus := "issue_created"
+	if autopilot.ExecutionMode == "run_only" {
+		initialStatus = "running"
+	}
+	run, err := s.Queries.CreateAutopilotRun(ctx, db.CreateAutopilotRunParams{
+		AutopilotID:       autopilot.ID,
+		TriggerID:         triggerID,
+		Source:            "webhook",
+		Status:            initialStatus,
+		TriggerPayload:    payload,
+		SquadID:           autopilotSquadAttribution(autopilot),
+		WebhookDeliveryID: deliveryID,
+	})
+	if err != nil {
+		return s.recoverConcurrentWebhookAdmission(
+			ctx,
+			deliveryID,
+			fmt.Errorf("admit webhook delivery: create run: %w", err),
+		)
+	}
+	s.captureAutopilotRunStarted(autopilot, run, "webhook")
+	return &run, nil
+}
+
+func (s *AutopilotService) recoverConcurrentWebhookAdmission(
+	ctx context.Context,
+	deliveryID pgtype.UUID,
+	cause error,
+) (*db.AutopilotRun, error) {
+	// Another server replica may have claimed the durable delivery after
+	// ingress persisted it but before the admission lookup. The unique
+	// delivery/run index chooses one winner; the loser reuses that run.
+	var pgErr *pgconn.PgError
+	if !errors.As(cause, &pgErr) || pgErr.Code != "23505" {
+		return nil, cause
+	}
+	existing, err := s.Queries.GetAutopilotRunByWebhookDelivery(ctx, deliveryID)
+	if err == nil {
+		return &existing, nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return nil, fmt.Errorf("admit webhook delivery: reload concurrent run: %w", err)
+	}
+	return nil, cause
+}
+
 // DispatchAutopilotForWebhookDelivery is the durable webhook worker entry
 // point. webhook_delivery_id is persisted on the run and protected by a
 // partial unique index, so reclaiming a queued delivery after a process crash
@@ -85,46 +177,40 @@ func (s *AutopilotService) DispatchAutopilotForWebhookDelivery(
 	payload []byte,
 	deliveryID pgtype.UUID,
 ) (*db.AutopilotRun, error) {
-	if !deliveryID.Valid {
-		return nil, fmt.Errorf("dispatch for webhook delivery: delivery_id is required")
+	run, err := s.AdmitAutopilotWebhookDelivery(ctx, autopilot, triggerID, payload, deliveryID)
+	if err != nil {
+		return nil, err
 	}
-
-	existing, err := s.Queries.GetAutopilotRunByWebhookDelivery(ctx, deliveryID)
-	switch {
-	case err == nil && isAutopilotRunComplete(existing):
-		if autopilot.ExecutionMode == "create_issue" && existing.IssueID.Valid {
-			if repairErr := s.ensureWebhookCreateIssueTask(ctx, autopilot, existing); repairErr != nil {
-				return &existing, repairErr
+	if isAutopilotRunComplete(*run) {
+		if autopilot.ExecutionMode == "create_issue" && run.IssueID.Valid {
+			if repairErr := s.ensureWebhookCreateIssueTask(ctx, autopilot, *run); repairErr != nil {
+				return run, repairErr
 			}
 		}
-		return &existing, nil
-	case err == nil:
-		// A run_only task may have committed immediately before the process
-		// died while linking task_id back to the run. Repair that linkage and
-		// wake the daemon; otherwise continue the same partial run below.
-		if autopilot.ExecutionMode == "run_only" && !existing.TaskID.Valid {
-			task, taskErr := s.Queries.GetAutopilotTaskByRun(ctx, existing.ID)
-			switch {
-			case taskErr == nil:
-				updated, updateErr := s.Queries.UpdateAutopilotRunRunning(ctx, db.UpdateAutopilotRunRunningParams{
-					ID:     existing.ID,
-					TaskID: task.ID,
-				})
-				if updateErr != nil {
-					return &existing, fmt.Errorf("dispatch for webhook delivery: repair task linkage: %w", updateErr)
-				}
-				s.TaskSvc.NotifyTaskEnqueued(ctx, task)
-				return &updated, nil
-			case !errors.Is(taskErr, pgx.ErrNoRows):
-				return &existing, fmt.Errorf("dispatch for webhook delivery: lookup linked task: %w", taskErr)
-			}
-		}
-		return s.dispatchAutopilotRun(ctx, autopilot, triggerID, "webhook", &existing)
-	case !errors.Is(err, pgx.ErrNoRows):
-		return nil, fmt.Errorf("dispatch for webhook delivery: lookup existing run: %w", err)
+		return run, nil
 	}
 
-	return s.dispatchAutopilot(ctx, autopilot, triggerID, "webhook", payload, pgtype.Timestamptz{}, deliveryID)
+	// A run_only task may have committed immediately before the process died
+	// while linking task_id back to the run. Repair that linkage and wake the
+	// daemon; otherwise continue the same partial run below.
+	if autopilot.ExecutionMode == "run_only" && !run.TaskID.Valid {
+		task, taskErr := s.Queries.GetAutopilotTaskByRun(ctx, run.ID)
+		switch {
+		case taskErr == nil:
+			updated, updateErr := s.Queries.UpdateAutopilotRunRunning(ctx, db.UpdateAutopilotRunRunningParams{
+				ID:     run.ID,
+				TaskID: task.ID,
+			})
+			if updateErr != nil {
+				return run, fmt.Errorf("dispatch for webhook delivery: repair task linkage: %w", updateErr)
+			}
+			s.TaskSvc.NotifyTaskEnqueued(ctx, task)
+			return &updated, nil
+		case !errors.Is(taskErr, pgx.ErrNoRows):
+			return run, fmt.Errorf("dispatch for webhook delivery: lookup linked task: %w", taskErr)
+		}
+	}
+	return s.dispatchAutopilotRun(ctx, autopilot, triggerID, "webhook", run)
 }
 
 // ensureWebhookCreateIssueTask repairs the create_issue crash window after the

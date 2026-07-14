@@ -58,7 +58,7 @@ multica autopilot trigger <autopilot-id>
 https://<your-multica-host>/api/webhooks/autopilots/awt_…
 ```
 
-その URL に任意の JSON を POST してください。Multica はまず配信を永続化して `202 Accepted` を返し、その後データベース-backed worker が `source = webhook` の実行を記録してエージェントをディスパッチします。受付とディスパッチの間にサーバーが再起動しても、キュー済みの配信は失われません。
+その URL に任意の JSON を POST してください。Multica はまず配信を永続化し、冪等な実行を同期的に受け付け、`status = accepted | skipped` と `run_id` を含む `200 OK` を返します。その後データベース-backed worker が accepted の実行を再開してエージェントをディスパッチします。受付とディスパッチの間にサーバーが再起動しても、キュー済みの配信は失われません。
 
 ```bash
 curl -X POST "$MULTICA_WEBHOOK_URL" \
@@ -173,7 +173,7 @@ curl -X POST "$MULTICA_WEBHOOK_URL" \
   -H 'X-GitHub-Event: workflow_run' \
   -H 'Content-Type: application/json' \
   -d '{"action":"completed"}'
-# → 202 {"status":"queued", "delivery_id":"…", ...}
+# → 200 {"status":"accepted", "delivery_id":"…", "run_id":"…", ...}
 
 # Filtered — same event, action not in allowlist
 curl -X POST "$MULTICA_WEBHOOK_URL" \
@@ -194,9 +194,14 @@ curl -X POST "$MULTICA_WEBHOOK_URL" \
 
 ### ステータスコードの意味
 
-有効でアクティブな配信は、永続化された後に `202 Accepted` で確認されます。`{"status":"queued","delivery_id":"…"}` は worker がディスパッチを所有したことを示します。no-op と重複は `200 OK` を返します。
+有効でアクティブな配信は、配信と冪等な実行の両方が永続化された後に `200 OK` で確認されます。
 
-- `{"status":"duplicate","delivery_id":"…","run_id":"…"}` — 同じ冪等キーの配信は既に受け付け済みです。元の配信がまだキュー中なら `run_id` はありません。
+- `{"status":"accepted","delivery_id":"…","run_id":"…","autopilot_id":"…","trigger_id":"…"}` — 受付が成功し、worker が復旧可能なディスパッチを所有します。
+- `{"status":"skipped","delivery_id":"…","run_id":"…","reason":"…"}` — たとえば担当エージェントのランタイムがオフラインの場合に、永続化された skipped の実行が作成されました。
+
+no-op と重複も `200 OK` を返します。
+
+- `{"status":"duplicate","delivery_id":"…","run_id":"…"}` — 同じ冪等キーの配信は既に受け付け済みです。元のリクエストが実行の受付前に終了した場合のみ `run_id` はなく、worker が復旧します。
 - `{"status":"ignored","reason":"trigger_disabled"}` — トリガーが無効になっています。
 - `{"status":"ignored","reason":"autopilot_paused"}` — オートパイロットが一時停止しています。
 - `{"status":"ignored","reason":"autopilot_archived"}` — オートパイロットがアーカイブされています。

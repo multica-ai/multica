@@ -153,7 +153,7 @@ func TestWebhookHandler_AllowsDeclaredEvent(t *testing.T) {
 		"action":       "completed",
 		"workflow_run": map[string]any{"id": 123},
 	}, map[string]string{"X-GitHub-Event": "workflow_run"})
-	delivery := processQueuedWebhookDelivery(t, requireQueuedWebhookResponse(t, w))
+	delivery := processQueuedWebhookDelivery(t, requireAcceptedWebhookResponse(t, w))
 	if delivery.Status != deliveryStatusDispatched || !delivery.AutopilotRunID.Valid {
 		t.Fatalf("expected worker dispatch, got status=%s run=%v", delivery.Status, delivery.AutopilotRunID.Valid)
 	}
@@ -168,7 +168,7 @@ func TestWebhookHandler_EmptyFiltersAllowsAll(t *testing.T) {
 		"action":       "in_progress",
 		"workflow_run": map[string]any{"id": 123},
 	}, map[string]string{"X-GitHub-Event": "workflow_run"})
-	delivery := processQueuedWebhookDelivery(t, requireQueuedWebhookResponse(t, w))
+	delivery := processQueuedWebhookDelivery(t, requireAcceptedWebhookResponse(t, w))
 	if delivery.Status != deliveryStatusDispatched || !delivery.AutopilotRunID.Valid {
 		t.Fatalf("expected worker dispatch, got status=%s run=%v", delivery.Status, delivery.AutopilotRunID.Valid)
 	}
@@ -400,21 +400,24 @@ func postWebhook(t *testing.T, token string, body any, headers map[string]string
 	return w
 }
 
-func requireQueuedWebhookResponse(t *testing.T, w *httptest.ResponseRecorder) string {
+func requireAcceptedWebhookResponse(t *testing.T, w *httptest.ResponseRecorder) string {
 	t.Helper()
-	if w.Code != http.StatusAccepted {
-		t.Fatalf("expected 202 queued, got %d body=%s", w.Code, w.Body.String())
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 accepted/skipped, got %d body=%s", w.Code, w.Body.String())
 	}
 	var resp map[string]any
 	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("decode queued response: %v", err)
+		t.Fatalf("decode accepted response: %v", err)
 	}
-	if resp["status"] != "queued" {
-		t.Fatalf("expected queued status, got %#v", resp)
+	if resp["status"] != "accepted" && resp["status"] != "skipped" {
+		t.Fatalf("expected accepted or skipped status, got %#v", resp)
 	}
 	deliveryID, _ := resp["delivery_id"].(string)
 	if deliveryID == "" {
-		t.Fatalf("queued response missing delivery_id: %#v", resp)
+		t.Fatalf("accepted response missing delivery_id: %#v", resp)
+	}
+	if runID, _ := resp["run_id"].(string); runID == "" {
+		t.Fatalf("accepted response missing run_id: %#v", resp)
 	}
 	return deliveryID
 }
@@ -601,8 +604,22 @@ func TestWebhookHandler_ActiveDispatchesRunWithPayload(t *testing.T) {
 		"event":        "demo.received",
 		"eventPayload": map[string]any{"k": "v"},
 	}, nil)
-	delivery := processQueuedWebhookDelivery(t, requireQueuedWebhookResponse(t, w))
-	runID := uuidToString(delivery.AutopilotRunID)
+	deliveryID := requireAcceptedWebhookResponse(t, w)
+	var resp map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode accepted response: %v", err)
+	}
+	if resp["status"] != "accepted" {
+		t.Fatalf("expected accepted, got %#v", resp)
+	}
+	runID := resp["run_id"].(string)
+
+	// The run ID is allocated synchronously, while durable dispatch remains
+	// owned by the queued delivery worker.
+	delivery := processQueuedWebhookDelivery(t, deliveryID)
+	if got := uuidToString(delivery.AutopilotRunID); got != runID {
+		t.Fatalf("delivery run_id mismatch: got %q want %q", got, runID)
+	}
 
 	// Validate the persisted run carries the normalized envelope.
 	run, err := testHandler.Queries.GetAutopilotRun(context.Background(), parseUUID(runID))
@@ -639,6 +656,55 @@ func TestWebhookHandler_ActiveDispatchesRunWithPayload(t *testing.T) {
 	}
 }
 
+func TestWebhookHandler_ActiveSkippedRunReturnsLegacyContract(t *testing.T) {
+	var offlineRuntimeID string
+	if err := testPool.QueryRow(context.Background(), `
+		INSERT INTO agent_runtime (
+			workspace_id, daemon_id, name, runtime_mode, provider, status,
+			device_info, metadata, owner_id, last_seen_at
+		) VALUES ($1, NULL, $2, 'cloud', $3, 'offline', $4, '{}'::jsonb, $5, now())
+		RETURNING id
+	`, testWorkspaceID, "Webhook Offline Runtime", "webhook_test_runtime", "Webhook test runtime", testUserID).Scan(&offlineRuntimeID); err != nil {
+		t.Fatalf("create offline runtime: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent_runtime WHERE id = $1`, offlineRuntimeID)
+	})
+
+	agentID := createWebhookTestAgent(t, "WebhookSkipped Agent")
+	if _, err := testPool.Exec(context.Background(), `UPDATE agent SET runtime_id = $1 WHERE id = $2`, offlineRuntimeID, agentID); err != nil {
+		t.Fatalf("bind offline agent runtime: %v", err)
+	}
+	apID := createWebhookTestAutopilot(t, agentID, "active", "run_only")
+	trig := createWebhookTriggerViaHandler(t, apID)
+
+	w := postWebhook(t, *trig.WebhookToken, map[string]any{"event": "demo.skipped"}, nil)
+	deliveryID := requireAcceptedWebhookResponse(t, w)
+	var resp map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode skipped response: %v", err)
+	}
+	if resp["status"] != "skipped" {
+		t.Fatalf("expected skipped, got %#v", resp)
+	}
+	if reason, _ := resp["reason"].(string); reason == "" {
+		t.Fatalf("skipped response missing reason: %#v", resp)
+	}
+	runID := resp["run_id"].(string)
+	run, err := testHandler.Queries.GetAutopilotRun(context.Background(), parseUUID(runID))
+	if err != nil {
+		t.Fatalf("load skipped run: %v", err)
+	}
+	if run.Status != "skipped" {
+		t.Fatalf("run status: got %q want skipped", run.Status)
+	}
+
+	delivery := processQueuedWebhookDelivery(t, deliveryID)
+	if delivery.Status != deliveryStatusDispatched || uuidToString(delivery.AutopilotRunID) != runID {
+		t.Fatalf("skipped run was not linked to delivery: status=%s run_id=%s", delivery.Status, uuidToString(delivery.AutopilotRunID))
+	}
+}
+
 func TestWebhookHandler_GitHubHeaderInferredEvent(t *testing.T) {
 	agentID := createWebhookTestAgent(t, "WebhookGH Agent")
 	apID := createWebhookTestAutopilot(t, agentID, "active", "run_only")
@@ -650,7 +716,7 @@ func TestWebhookHandler_GitHubHeaderInferredEvent(t *testing.T) {
 			"number": 42,
 		},
 	}, map[string]string{"X-GitHub-Event": "pull_request"})
-	delivery := processQueuedWebhookDelivery(t, requireQueuedWebhookResponse(t, w))
+	delivery := processQueuedWebhookDelivery(t, requireAcceptedWebhookResponse(t, w))
 	runID := uuidToString(delivery.AutopilotRunID)
 	run, err := testHandler.Queries.GetAutopilotRun(context.Background(), parseUUID(runID))
 	if err != nil {
@@ -676,9 +742,7 @@ func TestWebhookHandler_ValidBurstPersistsWithoutHTTP429(t *testing.T) {
 
 	for i := 0; i < 3; i++ {
 		w := postWebhook(t, *trig.WebhookToken, map[string]any{"i": i}, nil)
-		if w.Code != http.StatusAccepted {
-			t.Fatalf("request %d: expected durable 202, got %d body=%s", i, w.Code, w.Body.String())
-		}
+		requireAcceptedWebhookResponse(t, w)
 	}
 	if got := len(listDeliveries(t, apID)); got != 3 {
 		t.Fatalf("all valid burst deliveries must be persisted, got %d", got)
@@ -711,9 +775,7 @@ func TestRotateWebhookToken_ReplacesOldToken(t *testing.T) {
 	}
 	// New token should accept.
 	resNew := postWebhook(t, *rotated.WebhookToken, map[string]any{"x": 1}, nil)
-	if resNew.Code != http.StatusAccepted {
-		t.Fatalf("new token should be 202, got %d body=%s", resNew.Code, resNew.Body.String())
-	}
+	requireAcceptedWebhookResponse(t, resNew)
 }
 
 // ── Additional coverage (PR #2348 review) ──────────────────────────────────
@@ -827,9 +889,7 @@ func TestWebhookHandler_AbsoluteIPRateLimitRetainsEmergencyCeiling(t *testing.T)
 	testHandler.WebhookAbsoluteIPRateLimiter = NewMemoryWebhookAbsoluteIPRateLimiter(WebhookRateLimit{Limit: 1, Window: time.Minute})
 	t.Cleanup(func() { testHandler.WebhookAbsoluteIPRateLimiter = prev })
 
-	if first := postWebhook(t, *trig.WebhookToken, map[string]any{"n": 1}, nil); first.Code != http.StatusAccepted {
-		t.Fatalf("first valid request: expected 202, got %d", first.Code)
-	}
+	requireAcceptedWebhookResponse(t, postWebhook(t, *trig.WebhookToken, map[string]any{"n": 1}, nil))
 	second := postWebhook(t, *trig.WebhookToken, map[string]any{"n": 2}, nil)
 	if second.Code != http.StatusTooManyRequests {
 		t.Fatalf("absolute ceiling: expected 429, got %d body=%s", second.Code, second.Body.String())
@@ -965,7 +1025,7 @@ func TestGetAutopilotRun_ReturnsFullPayload(t *testing.T) {
 		"event":        "demo.x",
 		"eventPayload": map[string]any{"answer": 42},
 	}, nil)
-	delivery := processQueuedWebhookDelivery(t, requireQueuedWebhookResponse(t, post))
+	delivery := processQueuedWebhookDelivery(t, requireAcceptedWebhookResponse(t, post))
 	runID := uuidToString(delivery.AutopilotRunID)
 
 	// LIST: trigger_payload should be omitted (slim response).
