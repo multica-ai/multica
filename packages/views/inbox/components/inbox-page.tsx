@@ -52,7 +52,8 @@ import {
 } from "@multica/ui/components/ui/dropdown-menu";
 import { useIsMobile } from "@multica/ui/hooks/use-mobile";
 import { PageHeader } from "../../layout/page-header";
-import { InboxListItem, useTimeAgo } from "./inbox-list-item";
+import { useTimeAgo } from "./inbox-list-item";
+import { InboxList } from "./inbox-list";
 import { useTypeLabels } from "./inbox-detail-label";
 import { getInboxDisplayTitle } from "./inbox-display";
 import { useT } from "../../i18n";
@@ -271,23 +272,13 @@ export function InboxPage() {
     </PageHeader>
   );
 
-  const listBody = items.length === 0 ? (
-    <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
-      <Inbox className="mb-3 h-8 w-8 text-muted-foreground/50" />
-      <p className="text-sm">{t(($) => $.list.empty)}</p>
-    </div>
-  ) : (
-    <div className="px-2 py-1">
-      {items.map((item) => (
-        <InboxListItem
-          key={item.id}
-          item={item}
-          isSelected={(item.issue_id ?? item.id) === selectedKey}
-          onClick={() => handleSelect(item)}
-          onArchive={() => handleArchive(item.id)}
-        />
-      ))}
-    </div>
+  const list = (
+    <InboxList
+      items={items}
+      selectedKey={selectedKey}
+      onSelect={handleSelect}
+      onArchive={handleArchive}
+    />
   );
 
   const detailContent = selected?.issue_id ? (
@@ -418,9 +409,7 @@ export function InboxPage() {
     return (
       <div className="flex flex-1 flex-col min-h-0">
         {listHeader}
-        <div className="flex-1 min-h-0 overflow-y-auto">
-          {listBody}
-        </div>
+        {list}
       </div>
     );
   }
@@ -464,9 +453,7 @@ export function InboxPage() {
       <ResizablePanel id="list" defaultSize={320} minSize={240} maxSize={480} groupResizeBehavior="preserve-pixel-size">
       <div className="flex flex-col border-r h-full">
         {listHeader}
-        <div className="flex-1 min-h-0 overflow-y-auto">
-          {listBody}
-        </div>
+        {list}
       </div>
       </ResizablePanel>
       <ResizableHandle />
