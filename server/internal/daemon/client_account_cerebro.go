@@ -76,6 +76,12 @@ func (c *Client) ReportAccountUsageWindows(ctx context.Context, accountID string
 		if snap.SevenDayResetsAt != nil {
 			body["usage_7d_resets_at"] = snap.SevenDayResetsAt.UTC().Format(time.RFC3339)
 		}
+		// Plans that only expose the weekly window (Codex Pro) would otherwise
+		// leave the legacy column empty, so mirror the week when there is no
+		// 5h window to mirror.
+		if snap.FiveHourPct == nil {
+			body["usage_window_pct"] = *snap.SevenDayPct
+		}
 	}
 	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/accounts/%s/usage", accountID), body, nil)
 }
