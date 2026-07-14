@@ -13,6 +13,9 @@
 -- id is the deleted user chat message's id: globally unique (it was a
 -- chat_message PK), stable for client-side dedup, and one restore per task is
 -- guaranteed by the atomic deferred-finalize claim.
+--
+-- The chat_session_id lookup index lives in migration 183: every production
+-- index is built CONCURRENTLY in its own single-statement file.
 CREATE TABLE chat_draft_restore (
     id              UUID PRIMARY KEY,
     chat_session_id UUID NOT NULL,
@@ -23,5 +26,3 @@ CREATE TABLE chat_draft_restore (
     attachment_ids  UUID[] NOT NULL DEFAULT '{}',
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 );
-
-CREATE INDEX idx_chat_draft_restore_session ON chat_draft_restore(chat_session_id);
