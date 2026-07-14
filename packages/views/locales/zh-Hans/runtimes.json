@@ -94,6 +94,15 @@
     "about_to_gc": {
       "label": "即将清理",
       "description": "离线 6 天以上。如不重连，将在 7 天时自动删除。"
+    },
+    "on_hold": {
+      "label": "暂停中",
+      "resumes_in": "{{time}}恢复",
+      "soon": "即将",
+      "tooltip": "此运行时已暂停 — 任务已排队，将在恢复后自动运行。",
+      "resume_button": "恢复",
+      "resume_toast": "运行时已恢复",
+      "resume_failed": "恢复运行时失败"
     }
   },
   "detail": {

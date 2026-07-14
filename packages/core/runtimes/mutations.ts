@@ -65,3 +65,13 @@ export function useUpdateRuntime(wsId: string) {
     },
   });
 }
+
+export function useResumeRuntime(wsId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (runtimeId: string) => api.resumeRuntime(runtimeId),
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: runtimeKeys.all(wsId) });
+    },
+  });
+}

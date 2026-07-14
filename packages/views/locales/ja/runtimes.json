@@ -94,6 +94,15 @@
     "about_to_gc": {
       "label": "まもなく削除",
       "description": "6 日以上オフラインです。再接続しない限り、7 日目に自動削除されます。"
+    },
+    "on_hold": {
+      "label": "保留中",
+      "resumes_in": "{{time}}に再開",
+      "soon": "まもなく",
+      "tooltip": "このランタイムは一時停止中です — タスクはキューに入っており、再開時に自動的に処理されます。",
+      "resume_button": "再開",
+      "resume_toast": "ランタイムを再開しました",
+      "resume_failed": "ランタイムの再開に失敗しました"
     }
   },
   "detail": {

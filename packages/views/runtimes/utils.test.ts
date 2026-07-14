@@ -10,6 +10,7 @@ import {
   computeCostInWindow,
   estimateCost,
   estimateCostBreakdown,
+  formatHoldUntil,
   isModelPriced,
   isSelfHealingRuntime,
   sliceWindow,
@@ -1015,5 +1016,41 @@ describe("computeCostInWindow", () => {
   it("returns 0 for an empty row set", () => {
     vi.setSystemTime(new Date("2026-05-20T12:00:00Z"));
     expect(computeCostInWindow([], 7, "UTC")).toBe(0);
+  });
+});
+
+describe("formatHoldUntil", () => {
+  // Fixed injected "now" so the countdown math is deterministic.
+  const now = Date.UTC(2026, 0, 1, 12, 0, 0);
+  const inMs = (ms: number) => new Date(now + ms).toISOString();
+
+  it("returns null when there is no hold", () => {
+    expect(formatHoldUntil(null, now)).toBeNull();
+    expect(formatHoldUntil(undefined, now)).toBeNull();
+  });
+
+  it("returns the localized soon label once the margin has passed", () => {
+    const hold = inMs(-10 * 60_000); // 10m past hold_until (> 5m margin)
+    expect(formatHoldUntil(hold, now, "en", "soon")).toBe("soon");
+    expect(formatHoldUntil(hold, now, "zh-Hans", "即将")).toBe("即将");
+  });
+
+  it("formats a compound hours+minutes countdown (margin included)", () => {
+    const hold = inMs(5 * 3_600_000 + 18 * 60_000); // +5h18m, +5m margin => 5h23m
+    expect(formatHoldUntil(hold, now, "en")).toBe("in 5h 23m");
+    expect(formatHoldUntil(hold, now, "ja")).toBe("5時間23分後");
+    expect(formatHoldUntil(hold, now, "ko")).toBe("5시간 23분 후");
+    expect(formatHoldUntil(hold, now, "zh-Hans")).toBe("5小时23分钟后");
+  });
+
+  it("drops the minutes when they round to zero", () => {
+    const hold = inMs(115 * 60_000); // +1h55m, +5m margin => exactly 2h
+    expect(formatHoldUntil(hold, now, "en")).toBe("in 2h");
+  });
+
+  it("formats a minutes-only countdown", () => {
+    const hold = inMs(7 * 60_000); // +7m, +5m margin => 12m
+    expect(formatHoldUntil(hold, now, "en")).toBe("in 12m");
+    expect(formatHoldUntil(hold, now, "ja")).toBe("12分後");
   });
 });

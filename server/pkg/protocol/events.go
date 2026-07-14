@@ -127,6 +127,10 @@ const (
 	EventDaemonRPCRequest  = "daemon:rpc_request"
 	EventDaemonRPCResponse = "daemon:rpc_response"
 
+	// Runtime hold events
+	EventRuntimeHeld    = "runtime:held"
+	EventRuntimeResumed = "runtime:resumed"
+
 	// GitHub integration events
 	EventGitHubInstallationCreated = "github_installation:created"
 	EventGitHubInstallationDeleted = "github_installation:deleted"

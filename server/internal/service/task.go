@@ -640,6 +640,8 @@ func taskErrorType(reason string) string {
 		return "agent_output"
 	case "cancelled", "user_cancelled":
 		return "cancelled"
+	case "session_limit":
+		return "session_limit"
 	default:
 		return "agent_error"
 	}
@@ -1450,8 +1452,9 @@ func (s *TaskService) ClaimTask(ctx context.Context, agentID pgtype.UUID) (*db.A
 
 		t0 = time.Now()
 		task, err := qtx.ClaimAgentTask(ctx, db.ClaimAgentTaskParams{
-			AgentID:          agentID,
-			PrepareLeaseSecs: prepareLeaseDuration.Seconds(),
+			AgentID:                 agentID,
+			PrepareLeaseSecs:        prepareLeaseDuration.Seconds(),
+			HoldExpiryMarginSeconds: HoldExpiryMargin.Seconds(),
 		})
 		claimAgentMs = time.Since(t0).Milliseconds()
 		if err != nil {
@@ -1573,7 +1576,10 @@ func (s *TaskService) ClaimTaskForRuntime(ctx context.Context, runtimeID pgtype.
 	preSelectVersion := s.EmptyClaim.CurrentVersion(ctx, runtimeKey)
 
 	t0 := time.Now()
-	tasks, err := s.Queries.ListQueuedClaimCandidatesByRuntime(ctx, runtimeID)
+	tasks, err := s.Queries.ListQueuedClaimCandidatesByRuntime(ctx, db.ListQueuedClaimCandidatesByRuntimeParams{
+		RuntimeID:               runtimeID,
+		HoldExpiryMarginSeconds: HoldExpiryMargin.Seconds(),
+	})
 	listMs = time.Since(t0).Milliseconds()
 	listCount = len(tasks)
 	if err != nil {
@@ -2321,16 +2327,34 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 		if parent, perr := s.Queries.GetAgentTask(ctx, taskID); perr != nil {
 			slog.Warn("fail task auto-retry: load parent failed",
 				"task_id", util.UUIDToString(taskID), "error", perr)
-		} else if retryEligible(failureReason, parent) {
-			wantRetry = true
-			if agent, aerr := s.Queries.GetAgent(ctx, parent.AgentID); aerr != nil {
-				// Best-effort: a missing overlay is not retry-fatal — the child
-				// simply runs without the Composio overlay.
-				slog.Warn("fail task auto-retry: load agent for overlay failed",
-					"task_id", util.UUIDToString(taskID),
-					"agent_id", util.UUIDToString(parent.AgentID), "error", aerr)
-			} else {
-				retryOverlay = s.buildRuntimeMCPOverlay(ctx, parent.OriginatorUserID, agent)
+		} else {
+			// Session limit: hold the runtime up front, independent of retry
+			// eligibility — a throttled provider should be held even when this
+			// task's retry budget is spent, so other tasks aren't dispatched
+			// into it. The retry is then gated on the hold having been placed:
+			// the retry clone carries the same runtime_id and every claim path
+			// skips held runtimes, so it waits for the reset instead of being
+			// re-dispatched immediately and hot-looping until max_attempts.
+			// This mirrors MaybeRetryFailedTask's runtimeOnHold gate, keeping
+			// the two retry paths in sync. When the reset time is unparseable
+			// HoldRuntimeIfSessionLimit places no bounded hold and returns
+			// false, so no retry is queued.
+			held := true
+			if failureReason == "session_limit" {
+				held = parent.RuntimeID.Valid &&
+					s.HoldRuntimeIfSessionLimit(ctx, parent.RuntimeID, taskID, errMsg)
+			}
+			if held && retryEligible(failureReason, parent) {
+				wantRetry = true
+				if agent, aerr := s.Queries.GetAgent(ctx, parent.AgentID); aerr != nil {
+					// Best-effort: a missing overlay is not retry-fatal — the child
+					// simply runs without the Composio overlay.
+					slog.Warn("fail task auto-retry: load agent for overlay failed",
+						"task_id", util.UUIDToString(taskID),
+						"agent_id", util.UUIDToString(parent.AgentID), "error", aerr)
+				} else {
+					retryOverlay = s.buildRuntimeMCPOverlay(ctx, parent.OriginatorUserID, agent)
+				}
 			}
 		}
 	}
@@ -2488,6 +2512,7 @@ var retryableReasons = map[string]bool{
 	"runtime_recovery":          true,
 	"timeout":                   true,
 	"codex_semantic_inactivity": true,
+	"session_limit":             true,
 }
 
 func resumeUnsafeFailureReason(reason string) bool {
@@ -2532,6 +2557,19 @@ func (s *TaskService) MaybeRetryFailedTask(ctx context.Context, parent db.AgentT
 		reason = parent.FailureReason.String
 	}
 	if !retryableReasons[reason] {
+		return nil, nil
+	}
+	// session_limit is only safe to auto-retry once the runtime is on hold.
+	// The retry clone carries the same runtime_id, and every claim path skips
+	// held runtimes, so the retry waits for the reset instead of being
+	// re-dispatched immediately. If the runtime is not held — e.g. the reset
+	// time was unparseable so HoldRuntimeIfSessionLimit placed no hold — the
+	// retry would be claimed at once and hot-loop the task until max_attempts.
+	if reason == "session_limit" && !s.runtimeOnHold(ctx, parent.RuntimeID) {
+		slog.Warn("session_limit auto-retry skipped: runtime not on hold",
+			"task_id", util.UUIDToString(parent.ID),
+			"runtime_id", util.UUIDToString(parent.RuntimeID),
+		)
 		return nil, nil
 	}
 	if parent.Attempt >= parent.MaxAttempts {

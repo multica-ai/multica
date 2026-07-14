@@ -180,6 +180,7 @@ func TestTaskFailureClassifiers(t *testing.T) {
 		{reason: "iteration_limit", wantType: "agent_output", wantResumeOK: false, wantRetry: false},
 		{reason: "api_invalid_request", wantType: "agent_error", wantResumeOK: false, wantRetry: false},
 		{reason: "agent_error", wantType: "agent_error", wantResumeOK: true, wantRetry: false},
+		{reason: "session_limit", wantType: "session_limit", wantResumeOK: true, wantRetry: true},
 	}
 
 	for _, tc := range cases {
