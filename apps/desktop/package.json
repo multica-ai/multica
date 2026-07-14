@@ -61,6 +61,7 @@
   "devDependencies": {
     "@electron-toolkit/tsconfig": "^2.0.0",
     "@multica/eslint-config": "workspace:*",
+    "@multica/perf-recorder": "workspace:*",
     "@multica/tsconfig": "workspace:*",
     "@tailwindcss/vite": "^4",
     "@testing-library/jest-dom": "catalog:",

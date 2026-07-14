@@ -1,0 +1,15 @@
+{
+  "extends": "@multica/tsconfig/base.json",
+  "compilerOptions": {
+    "outDir": "dist",
+    "rootDir": ".",
+    "lib": ["ESNext", "DOM", "DOM.Iterable"],
+    "types": ["vitest/globals"],
+    "declaration": false,
+    "declarationMap": false,
+    "sourceMap": false,
+    "noEmit": true
+  },
+  "include": ["src/**/*.ts", "test/**/*.ts"],
+  "exclude": ["node_modules", "dist"]
+}

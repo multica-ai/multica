@@ -135,6 +135,20 @@ export default async function RootLayout({
             strategy="beforeInteractive"
           />
         )}
+        {/*
+          perf-recorder: dev-only frontend performance flight recorder (MUL-4466).
+          Same server-gated, beforeInteractive pattern as react-grab so the hook
+          installs before React hydrates and the <Script> is omitted from HTML
+          entirely in Production. Opt-in per developer via VITE_PERF_RECORDER in a
+          local, gitignored env file. In the in-repo phase the self-executing
+          global is served from public/ (copy packages/perf-recorder/dist/
+          auto.global.js → apps/web/public/__perf-recorder.global.js); after the
+          module is extracted this src becomes the published //unpkg.com/... URL,
+          exactly like react-grab above — no other change.
+        */}
+        {process.env.NODE_ENV === "development" && process.env.VITE_PERF_RECORDER && (
+          <Script src="/__perf-recorder.global.js" strategy="beforeInteractive" />
+        )}
         <ThemeProvider>
           <WebProviders locale={locale} resources={resources}>
             {children}

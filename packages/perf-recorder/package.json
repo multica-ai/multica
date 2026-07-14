@@ -1,0 +1,32 @@
+{
+  "name": "@multica/perf-recorder",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Dev/Profiling-only frontend performance flight recorder. Browser-only, self-contained, no Multica domain dependencies. See MUL-4466.",
+  "exports": {
+    ".": "./src/index.ts",
+    "./install": "./src/install.ts",
+    "./auto": "./src/auto.ts"
+  },
+  "browser": "./dist/auto.global.js",
+  "scripts": {
+    "build": "tsup",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "bippy": "0.6.0"
+  },
+  "devDependencies": {
+    "@multica/eslint-config": "workspace:*",
+    "@multica/tsconfig": "workspace:*",
+    "@types/react": "catalog:",
+    "jsdom": "catalog:",
+    "tsup": "^8.5.0",
+    "typescript": "catalog:",
+    "vitest": "catalog:",
+    "zod": "catalog:"
+  }
+}
