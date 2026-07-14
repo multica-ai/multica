@@ -60,8 +60,11 @@ export function AccessPicker({
   canEdit?: boolean;
   hasComposioAllowlist?: boolean;
   onDirtyChange?: (dirty: boolean) => void;
-  /** Fires when the draft becomes committable / non-committable. */
-  onReadyChange?: (ready: boolean) => void;
+  /** Notified when the draft becomes committable / non-committable.
+   *  The optional second argument is the current AccessChange when the draft
+   *  is ready, so the parent can store it for immediate use (e.g. the bulk
+   *  dialog's Apply button). */
+  onReadyChange?: (ready: boolean, change?: AccessChange) => void;
   onChange?: (next: AccessChange) => Promise<void> | void;
   /** When true, suppress the bottom Save footer — the parent dialog owns
    *  the apply trigger (e.g. the bulk "Set access scope" dialog). */
@@ -91,6 +94,17 @@ export function AccessPicker({
   const [draftScope, setDraftScope] = useState<AccessScope>(persistedScope);
   const [draftMembers, setDraftMembers] = useState(persistedMembers);
   const [saving, setSaving] = useState(false);
+  /** Tracks whether the user has explicitly selected a scope (clicked any
+   *  radio). Once true, the picker considers the draft "ready" even if the
+   *  selection matches the persisted default — applying the default to a
+   *  bulk selection is still a valid action. */
+  const [hasInteracted, setHasInteracted] = useState(false);
+
+  /** Wrapper that marks the picker as interacted and updates the draft scope. */
+  const selectDraftScope = (scope: AccessScope) => {
+    setHasInteracted(true);
+    setDraftScope(scope);
+  };
 
   // Only reset the draft when the PERSISTED values actually change by value,
   // not by reference. A prop like invocationTargets={[]} creates a new array
@@ -124,19 +138,41 @@ export function AccessPicker({
     draftScope !== persistedScope ||
     (draftScope === "members" && !sameMembers);
   const hasMemberTarget = draftMembers.length > 0;
-  /** Committable when the draft differs from the persisted state AND the
-   *  members branch has at least one target. */
-  const ready = dirty && (draftScope !== "members" || hasMemberTarget);
+  /** Ready once the user has explicitly selected a scope (hasInteracted)
+   *  AND the members-branch condition is satisfied. Does NOT require the
+   *  draft to differ from the persisted state — applying the default scope
+   *  to a bulk selection is a valid action. */
+  const ready = hasInteracted && (draftScope !== "members" || hasMemberTarget);
 
   useEffect(() => {
     onDirtyChange?.(dirty);
     return () => onDirtyChange?.(false);
   }, [dirty, onDirtyChange]);
 
+  const buildChange = (): AccessChange | null => {
+    if (draftScope === "private") {
+      return { permission_mode: "private", invocation_targets: [] };
+    }
+    const targets: AgentInvocationTargetInput[] = [];
+    if (draftScope === "workspace") {
+      targets.push({ target_type: "workspace" });
+    }
+    if (draftScope === "members") {
+      if (draftMembers.length === 0) return null;
+      for (const id of draftMembers) {
+        targets.push({ target_type: "member", target_id: id });
+      }
+      for (const id of teamIds) {
+        targets.push({ target_type: "team", target_id: id });
+      }
+    }
+    return { permission_mode: "public_to", invocation_targets: targets };
+  };
+
   useEffect(() => {
-    onReadyChange?.(ready);
+    onReadyChange?.(ready, ready ? buildChange() ?? undefined : undefined);
     return () => onReadyChange?.(false);
-  }, [ready, onReadyChange]);
+  }, [ready, onReadyChange, buildChange]);
 
   const toggleMember = (userId: string, checked: boolean) => {
     setDraftMembers((current) => {
@@ -147,29 +183,16 @@ export function AccessPicker({
     });
   };
 
-  const save = async () => {
-    if (!onChange || !dirty || saving || (draftScope === "members" && !hasMemberTarget)) {
-      return;
-    }
-    const targets: AgentInvocationTargetInput[] = [];
-    if (draftScope === "workspace") {
-      targets.push({ target_type: "workspace" });
-    }
-    if (draftScope === "members") {
-      for (const id of draftMembers) {
-        targets.push({ target_type: "member", target_id: id });
-      }
-      for (const id of teamIds) {
-        targets.push({ target_type: "team", target_id: id });
-      }
-    }
+  /** Build the current AccessChange from the draft state. Returns null if the
+   *  draft is not in a committable state (specific-people with zero targets). */
 
+  const save = async () => {
+    if (!onChange || saving) return;
+    const change = buildChange();
+    if (!change) return;
     setSaving(true);
     try {
-      await onChange({
-        permission_mode: draftScope === "private" ? "private" : "public_to",
-        invocation_targets: draftScope === "private" ? [] : targets,
-      });
+      await onChange(change);
     } finally {
       setSaving(false);
     }
@@ -217,7 +240,7 @@ export function AccessPicker({
           title={t(($) => $.access.private_title)}
           description={t(($) => $.access.private_desc)}
           selected={draftScope === "private"}
-          onSelect={() => setDraftScope("private")}
+          onSelect={() => selectDraftScope("private")}
         />
         <AccessChoice
           name="agent-access-mode"
@@ -226,7 +249,7 @@ export function AccessPicker({
           title={t(($) => $.access.workspace_title)}
           description={t(($) => $.access.workspace_desc)}
           selected={draftScope === "workspace"}
-          onSelect={() => setDraftScope("workspace")}
+          onSelect={() => selectDraftScope("workspace")}
         />
         <AccessChoice
           name="agent-access-mode"
@@ -235,7 +258,7 @@ export function AccessPicker({
           title={t(($) => $.access.members_title)}
           description={t(($) => $.access.members_desc)}
           selected={draftScope === "members"}
-          onSelect={() => setDraftScope("members")}
+          onSelect={() => selectDraftScope("members")}
         />
       </div>
 

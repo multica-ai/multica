@@ -50,7 +50,6 @@ export function AgentBatchToolbar({
   const qc = useQueryClient();
   const [confirmArchive, setConfirmArchive] = useState(false);
   const [confirmAccess, setConfirmAccess] = useState(false);
-  const [accessDraftReady, setAccessDraftReady] = useState(false);
   const [accessChange, setAccessChange] = useState<AccessChange | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -65,7 +64,7 @@ export function AgentBatchToolbar({
   const invalidate = () =>
     qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
 
-  const accessConfirmEnabled = accessDraftReady;
+  const accessConfirmEnabled = accessChange !== null;
 
   const applyAccessBulk = async (change: AccessChange) => {
     const summary = await runBatch(
@@ -250,8 +249,7 @@ export function AgentBatchToolbar({
             ownerId={currentUserId}
             canEdit
             hideFooter
-            onReadyChange={setAccessDraftReady}
-            onChange={(next) => setAccessChange(next)}
+            onReadyChange={(ready, change) => { if (ready && change) setAccessChange(change); else if (!ready) setAccessChange(null); }}
           />
           <DialogFooter>
             <Button
