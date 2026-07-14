@@ -22,6 +22,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/multica-ai/multica/server/internal/cerebro/sessionmode"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/service"
@@ -192,7 +193,7 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 	mode, valid := normalizeMode(req.Mode)
 	if !valid {
-		writeError(w, http.StatusBadRequest, "mode must be default or plan")
+		writeError(w, http.StatusBadRequest, "mode must be auto, plan, build, research, or review")
 		return
 	}
 	session, err := upsertThreadSession(r.Context(), tx, issue.ID, rootID, name, mode, normalizePhase(req.Phase), normalizeHandoff(req.Handoff))
@@ -498,7 +499,7 @@ func upsertThreadSession(ctx context.Context, tx pgx.Tx, issueID, rootID pgtype.
 	case pgx.ErrNoRows:
 		row := tx.QueryRow(ctx, `
 			INSERT INTO cerebro_session (issue_id, root_comment_id, position, name, mode, phase, handoff)
-			VALUES ($1, $2, 0, $3, COALESCE($4, 'default'), $5, $6::jsonb)
+			VALUES ($1, $2, 0, $3, COALESCE($4, 'auto'), $5, $6::jsonb)
 			RETURNING id, issue_id, root_comment_id, position, name, mode, phase, handoff, created_at, updated_at`,
 			issueID, rootID, name, mode, phase, raw)
 		return scanSession(row)
@@ -643,10 +644,11 @@ func normalizeMode(in *string) (*string, bool) {
 	if in == nil {
 		return nil, true
 	}
-	v := strings.ToLower(strings.TrimSpace(*in))
-	if v != "default" && v != "plan" {
+	mode, ok := sessionmode.Normalize(*in)
+	if !ok {
 		return nil, false
 	}
+	v := string(mode)
 	return &v, true
 }
 

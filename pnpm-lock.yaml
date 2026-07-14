@@ -1902,6 +1902,9 @@ importers:
       '@multica/cerebro-inbox':
         specifier: workspace:*
         version: link:../cerebro-inbox
+      '@multica/cerebro-sessions':
+        specifier: workspace:*
+        version: link:../cerebro-sessions
       '@multica/core':
         specifier: workspace:*
         version: link:../core

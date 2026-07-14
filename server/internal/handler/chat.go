@@ -7,11 +7,8 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
-
-
 	"strconv"
 	"time"
-
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
@@ -97,7 +94,7 @@ func (h *Handler) CreateChatSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusCreated, chatSessionToResponse(session))
+	writeJSON(w, http.StatusCreated, h.chatSessionResponse(r.Context(), session)) // CEREBRO-PATCH(chat-session-modes): FIR-3111 include profile.
 }
 
 func (h *Handler) ListChatSessions(w http.ResponseWriter, r *http.Request) {
@@ -115,6 +112,7 @@ func (h *Handler) ListChatSessions(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		resp := make([]ChatSessionResponse, len(raw))
+		modes := h.chatSessionModes(r.Context(), parseUUID(workspaceID), pgtype.UUID{}) // CEREBRO-PATCH(chat-session-modes): FIR-3111 list profiles.
 		for i, s := range raw {
 			resp[i] = ChatSessionResponse{
 				ID:          uuidToString(s.ID),
@@ -123,6 +121,7 @@ func (h *Handler) ListChatSessions(w http.ResponseWriter, r *http.Request) {
 				CreatorID:   uuidToString(s.CreatorID),
 				Title:       s.Title,
 				Status:      s.Status,
+				Mode:        modes[uuidToString(s.ID)], // CEREBRO-PATCH(chat-session-modes): FIR-3111 list profile.
 				HasUnread:   s.HasUnread,
 				CreatedAt:   timestampToString(s.CreatedAt),
 				UpdatedAt:   timestampToString(s.UpdatedAt),
@@ -187,6 +186,7 @@ func (h *Handler) ListChatSessions(w http.ResponseWriter, r *http.Request) {
 		chatMuted = h.ChatMute.ChatMutedForUser(r.Context(), userID, workspaceID)
 	}
 	resp := make([]ChatSessionResponse, len(rows))
+	modes := h.chatSessionModes(r.Context(), parseUUID(workspaceID), parseUUID(userID)) // CEREBRO-PATCH(chat-session-modes): FIR-3111 list profiles.
 	for i, s := range rows {
 		resp[i] = ChatSessionResponse{
 			ID:          uuidToString(s.ID),
@@ -195,6 +195,7 @@ func (h *Handler) ListChatSessions(w http.ResponseWriter, r *http.Request) {
 			CreatorID:   uuidToString(s.CreatorID),
 			Title:       s.Title,
 			Status:      s.Status,
+			Mode:        modes[uuidToString(s.ID)], // CEREBRO-PATCH(chat-session-modes): FIR-3111 list profile.
 			HasUnread:   s.HasUnread,
 			CreatedAt:   timestampToString(s.CreatedAt),
 			UpdatedAt:   timestampToString(s.UpdatedAt),
@@ -277,7 +278,7 @@ func (h *Handler) GetChatSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, chatSessionToResponse(session))
+	writeJSON(w, http.StatusOK, h.chatSessionResponse(r.Context(), session)) // CEREBRO-PATCH(chat-session-modes): FIR-3111 include profile.
 }
 
 // GetChatSessionUsage returns aggregate token + cost spend for a chat
@@ -887,6 +888,7 @@ type ChatSessionResponse struct {
 	CreatorID   string `json:"creator_id"`
 	Title       string `json:"title"`
 	Status      string `json:"status"`
+	Mode        string `json:"mode"` // CEREBRO-PATCH(chat-session-modes): FIR-3111 visible execution profile.
 	// Only populated by list endpoints — single-session fetches return false.
 	HasUnread bool   `json:"has_unread"`
 	CreatedAt string `json:"created_at"`
@@ -925,6 +927,7 @@ func chatSessionToResponse(s db.ChatSession) ChatSessionResponse {
 		CreatorID:   uuidToString(s.CreatorID),
 		Title:       s.Title,
 		Status:      s.Status,
+		Mode:        "auto", // CEREBRO-PATCH(chat-session-modes): FIR-3111 safe fallback; handler overlays persisted profile.
 		CreatedAt:   timestampToString(s.CreatedAt),
 		UpdatedAt:   timestampToString(s.UpdatedAt),
 	}

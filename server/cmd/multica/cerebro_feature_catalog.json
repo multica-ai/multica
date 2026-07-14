@@ -617,6 +617,13 @@
       "default": false
     },
     {
+      "key": "cerebro_session_modes",
+      "label": "Session modes",
+      "description": "Add Auto, Plan, Build, Research, and Review to issue and chat session headers. The selected mode is persisted and applies a matching runtime profile to the next agent run. Workflow phases select their matching mode automatically. FIR-3111.",
+      "group": "workspace",
+      "default": false
+    },
+    {
       "key": "cerebro_session_activity_fold",
       "label": "Session activity fold",
       "description": "Within each session, collapse all activity events (status changes, task started/failed/completed, linked PRs, attachments) into a single foldable \"Activity\" section so comments stay prominent. No effect unless Comment sessions is on. FIR-1769 (P2).",

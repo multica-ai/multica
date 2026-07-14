@@ -32,6 +32,34 @@ func TestUpdateSessionModeRoundTripsAndPersistsWhenOmitted(t *testing.T) {
 	}
 }
 
+func TestUpdateSessionAcceptsAllCanonicalModesAndLegacyDefault(t *testing.T) {
+	issueID, workspaceID := seedIssue(t)
+	rootID := seedRootComment(t, issueID, workspaceID)
+	h := NewHandler(sessTestPool, db.New(sessTestPool), nil, nil)
+
+	for _, tc := range []struct {
+		input string
+		want  string
+	}{
+		{"auto", "auto"},
+		{"plan", "plan"},
+		{"build", "build"},
+		{"research", "research"},
+		{"review", "review"},
+		{"default", "build"},
+	} {
+		rec := callUpdate(h, issueID, workspaceID, rootID, `{"name":"Mode","mode":"`+tc.input+`"}`)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("mode %q: code=%d body=%s", tc.input, rec.Code, strings.TrimSpace(rec.Body.String()))
+		}
+		var got sessionResponse
+		_ = json.Unmarshal(rec.Body.Bytes(), &got)
+		if got.Mode != tc.want {
+			t.Fatalf("mode %q normalized to %q, want %q", tc.input, got.Mode, tc.want)
+		}
+	}
+}
+
 func TestUpdateSessionRejectsUnknownMode(t *testing.T) {
 	issueID, workspaceID := seedIssue(t)
 	rootID := seedRootComment(t, issueID, workspaceID)

@@ -28,15 +28,17 @@ export function useUpdateChatSession() {
       sessionId,
       title,
       status,
+      mode,
     }: {
       sessionId: string;
       title?: string;
       status?: "active" | "archived";
+      mode?: "auto" | "plan" | "build" | "research" | "review";
     }) => {
       logger.info("updateChatSession.start", { sessionId, title, status });
-      return api.updateChatSession(sessionId, { title, status });
+      return api.updateChatSession(sessionId, { title, status, mode });
     },
-    onMutate: async ({ sessionId, title, status }) => {
+    onMutate: async ({ sessionId, title, status, mode }) => {
       await qc.cancelQueries({ queryKey: chatKeys.sessions(wsId) });
       await qc.cancelQueries({ queryKey: chatKeys.allSessions(wsId) });
 
@@ -47,6 +49,7 @@ export function useUpdateChatSession() {
         ...s,
         ...(title !== undefined ? { title } : {}),
         ...(status !== undefined ? { status } : {}),
+        ...(mode !== undefined ? { mode } : {}),
       });
       // When archiving, the session leaves the "active" list (which only
       // contains active sessions) but stays in the "all" list so the history

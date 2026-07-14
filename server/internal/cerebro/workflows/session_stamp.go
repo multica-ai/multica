@@ -29,6 +29,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/multica-ai/multica/server/internal/cerebro/sessionmode"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -146,15 +147,20 @@ func (s *SessionPhaseStamper) StampSession(ctx context.Context, issueID, rootCom
 	if s == nil || s.pool == nil {
 		return nil
 	}
+	mode, ok := sessionmode.Normalize(phase)
+	if !ok || mode == sessionmode.Auto {
+		mode = sessionmode.Auto
+	}
 	_, err := s.pool.Exec(ctx, `
-		INSERT INTO cerebro_session (issue_id, root_comment_id, position, name, phase)
-		VALUES ($1, $2, 0, $3, $4)
+		INSERT INTO cerebro_session (issue_id, root_comment_id, position, name, phase, mode)
+		VALUES ($1, $2, 0, $3, $4, $5)
 		ON CONFLICT (root_comment_id) WHERE root_comment_id IS NOT NULL
 		DO UPDATE SET
 			phase = EXCLUDED.phase,
+			mode = EXCLUDED.mode,
 			name = CASE WHEN cerebro_session.name = '' THEN EXCLUDED.name ELSE cerebro_session.name END,
 			updated_at = now()`,
-		issueID, rootCommentID, name, phase)
+		issueID, rootCommentID, name, phase, mode)
 	return err
 }
 

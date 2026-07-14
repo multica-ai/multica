@@ -287,6 +287,8 @@ declare module "@multica/core/types/channel" {
 declare module "@multica/core/types/chat" {
   interface ChatSession {
     muted_until?: string | null;
+    /** Fixed execution profile; older servers omit it and older clients used `default`. */
+    mode?: "auto" | "plan" | "build" | "research" | "review" | "default";
   }
 }
 

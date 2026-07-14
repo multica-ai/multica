@@ -77,6 +77,7 @@ export function registerCerebroHandlers(
       chat_session_id: string;
       title: string;
       status: string;
+      mode: ChatSession["mode"];
     };
     const wsId = getCurrentWsId();
     if (!wsId) return;
@@ -84,6 +85,7 @@ export function registerCerebroHandlers(
       ...s,
       title: payload.title,
       status: payload.status as ChatSession["status"],
+      mode: payload.mode,
     });
     qc.setQueryData<ChatSession[]>(chatKeys.allSessions(wsId), (old) =>
       old?.map((s) => (s.id === payload.chat_session_id ? apply(s) : s)),

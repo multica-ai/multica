@@ -21,6 +21,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/auth"
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
 	"github.com/multica-ai/multica/server/internal/cerebro/localtoolpolicy" // CEREBRO-PATCH(daemon-tool-policy-ipc): TECH-2563 staged local tool-policy import.
+	"github.com/multica-ai/multica/server/internal/cerebro/sessionmode"     // CEREBRO-PATCH(session-modes): FIR-3111 normalize claim profiles.
 	"github.com/multica-ai/multica/server/internal/daemonws"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/middleware"
@@ -1616,12 +1617,15 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 				if comment.ParentID.Valid {
 					resp.TriggerThreadID = uuidToString(comment.ParentID)
 				}
-				var sessionMode string // CEREBRO-PATCH(session-plan-mode): resolve mode from the triggering thread.
+				var rawSessionMode string // CEREBRO-PATCH(session-modes): FIR-3111 resolve the triggering thread profile.
 				if err := h.DB.QueryRow(r.Context(), `
 					SELECT mode FROM cerebro_session
 					WHERE issue_id = $1 AND root_comment_id = $2`,
-					comment.IssueID, parseUUID(resp.TriggerThreadID)).Scan(&sessionMode); err == nil {
-					resp.PlanMode = sessionMode == "plan"
+					comment.IssueID, parseUUID(resp.TriggerThreadID)).Scan(&rawSessionMode); err == nil {
+					if normalized, valid := sessionmode.Normalize(rawSessionMode); valid {
+						resp.SessionMode = string(normalized)
+						resp.PlanMode = normalized == sessionmode.Plan
+					} // CEREBRO-PATCH(session-modes): FIR-3111 canonical profile + old-daemon Plan compatibility.
 				}
 				resp.TriggerAuthorType = comment.AuthorType
 				// The triggering comment's author is the task initiator — the
@@ -1720,6 +1724,10 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 			resp.WorkspaceID = uuidToString(cs.WorkspaceID)
 			resp.ChatSessionID = uuidToString(cs.ID)
 			resp.ThreadName = cs.Title
+			if normalized, valid := sessionmode.Normalize(h.chatSessionMode(r.Context(), cs.ID)); valid {
+				resp.SessionMode = string(normalized)
+				resp.PlanMode = normalized == sessionmode.Plan
+			} // CEREBRO-PATCH(session-modes): FIR-3111 chat profile.
 			// CEREBRO-PATCH(user-profile-prompt): JEH-304 — apply the chat session
 			// creator's communication profile.
 			resp.UserProfilePrompt = h.compileProfileForUser(r.Context(), cs.CreatorID)

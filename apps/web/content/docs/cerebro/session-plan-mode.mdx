@@ -1,23 +1,29 @@
 ---
-title: "Plan"
-description: "Keep one issue session focused on planning without allowing implementation work."
+title: "Session modes"
+description: "Choose how an agent should work in one Issue or Chat session."
 ---
 
-# Plan
+# Session modes
 
-**Plan** turns one issue session into a planning-only session. The agent may investigate the issue and produce a plan, but it must not edit code, run migrations, deploy, or open a pull request.
+Session modes let you choose how an agent should approach the next run in an Issue or Chat session. The selected mode stays on the session after a reload.
 
-## When to use it
+## Available modes
 
-Use **Plan** when you want the agent to think through a larger or unclear task before anybody starts building. You can review and adjust the direction while keeping implementation safely out of the session.
+- **Auto** lets the agent choose the working style that fits the request.
+- **Plan** allows investigation and planning, but no implementation or external changes.
+- **Build** allows implementation and verification within the agent's existing permissions and approvals.
+- **Research** is a read-only investigation that finishes with sources and uncertainty.
+- **Review** reviews existing work without changing, merging, or deploying it.
 
-## How to use Plan
+Each mode also applies a matching thinking level, maximum run time, turn limit, and completion instruction. Existing permissions and approval rules always remain the hard limit.
 
-1. Open an issue and find the session you want to control.
-2. Open the mode select in the session header and choose **Plan**. The highlighted control confirms that Plan mode is active.
-3. Send your message in the same session. Every new agent run in that session receives the planning-only restriction automatically.
-4. Choose **Build** in the same select to return the session to normal execution.
+## Choose a mode
 
-The choice is stored on the session, so it remains active after a reload.
+1. Open an Issue or Chat session.
+2. Open the mode select in the session header.
+3. Choose **Auto**, **Plan**, **Build**, **Research**, or **Review**.
+4. Send the next message in that session.
+
+Workflow phases automatically select **Plan**, **Build**, or **Review** when that phase starts. You can still choose another mode from the header afterward.
 
 [Open Issues](https://multica.firtal.com/firtal/issues) · [Open the Multica help document](https://multica.firtal.com/firtal/documents/019f552d-6cc4-7d57-87a8-7080180e7e0b)

@@ -4,6 +4,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/cerebro/sessionmode"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
@@ -22,6 +24,7 @@ import (
 type UpdateChatSessionRequest struct {
 	Title  *string `json:"title,omitempty"`
 	Status *string `json:"status,omitempty"`
+	Mode   *string `json:"mode,omitempty"`
 }
 
 // UpdateChatSession applies a partial update to a chat session — title rename
@@ -42,13 +45,23 @@ func (h *Handler) UpdateChatSession(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-	if req.Title == nil && req.Status == nil {
+	if req.Title == nil && req.Status == nil && req.Mode == nil {
 		writeError(w, http.StatusBadRequest, "no fields to update")
 		return
 	}
 	if req.Status != nil && *req.Status != "active" && *req.Status != "archived" {
 		writeError(w, http.StatusBadRequest, "status must be 'active' or 'archived'")
 		return
+	}
+	var mode *string
+	if req.Mode != nil {
+		normalized, valid := sessionmode.Normalize(*req.Mode)
+		if !valid {
+			writeError(w, http.StatusBadRequest, "mode must be auto, plan, build, research, or review")
+			return
+		}
+		value := string(normalized)
+		mode = &value
 	}
 
 	session, ok := h.loadChatSessionForUser(w, r, userID, workspaceID, sessionID)
@@ -84,15 +97,59 @@ func (h *Handler) UpdateChatSession(w http.ResponseWriter, r *http.Request) {
 		}
 		updated = next
 	}
+	if mode != nil && *mode != h.chatSessionMode(r.Context(), session.ID) {
+		if _, err := h.DB.Exec(r.Context(), `UPDATE chat_session SET mode = $2, updated_at = now() WHERE id = $1`, session.ID, *mode); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to update chat session mode")
+			return
+		}
+	}
 
 	resolvedSessionID := uuidToString(updated.ID)
 	h.publishChat(protocol.EventChatSessionUpdated, workspaceID, "member", userID, resolvedSessionID, protocol.ChatSessionUpdatedPayload{
 		ChatSessionID: resolvedSessionID,
 		Title:         updated.Title,
 		Status:        updated.Status,
+		Mode:          h.chatSessionMode(r.Context(), updated.ID),
 	})
 
-	writeJSON(w, http.StatusOK, chatSessionToResponse(updated))
+	writeJSON(w, http.StatusOK, h.chatSessionResponse(r.Context(), updated))
+}
+
+func (h *Handler) chatSessionMode(ctx context.Context, id pgtype.UUID) string {
+	var mode string
+	if err := h.DB.QueryRow(ctx, `SELECT mode FROM chat_session WHERE id = $1`, id).Scan(&mode); err != nil || mode == "" {
+		return string(sessionmode.Auto)
+	}
+	return mode
+}
+
+func (h *Handler) chatSessionResponse(ctx context.Context, session db.ChatSession) ChatSessionResponse {
+	response := chatSessionToResponse(session)
+	response.Mode = h.chatSessionMode(ctx, session.ID)
+	return response
+}
+
+func (h *Handler) chatSessionModes(ctx context.Context, workspaceID, creatorID pgtype.UUID) map[string]string {
+	query := `SELECT id, mode FROM chat_session WHERE workspace_id = $1`
+	args := []any{workspaceID}
+	if creatorID.Valid {
+		query += ` AND creator_id = $2`
+		args = append(args, creatorID)
+	}
+	rows, err := h.DB.Query(ctx, query, args...)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+	modes := make(map[string]string)
+	for rows.Next() {
+		var id pgtype.UUID
+		var mode string
+		if rows.Scan(&id, &mode) == nil {
+			modes[uuidToString(id)] = mode
+		}
+	}
+	return modes
 }
 
 // ConvertChatSessionToIssueResponse is the result of converting a chat session

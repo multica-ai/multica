@@ -1,4 +1,5 @@
 export * from "./types";
+export * from "./modes";
 export * from "./grouping";
 export * from "./partition";
 export * from "./context-estimate";

@@ -18,6 +18,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/multica-ai/multica/server/internal/cerebro/sessionmode"
 	"github.com/multica-ai/multica/server/internal/cerebro/traceupload"
 	"github.com/multica-ai/multica/server/internal/cli"
 	"github.com/multica-ai/multica/server/internal/daemon/execenv"
@@ -3567,7 +3568,8 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		IssueID:                          task.IssueID,
 		TriggerCommentID:                 task.TriggerCommentID,
 		TriggerThreadID:                  task.TriggerThreadID,
-		PlanMode:                         task.PlanMode, // CEREBRO-PATCH(session-plan-mode): carry the thread mode into runtime context.
+		PlanMode:                         task.PlanMode,    // CEREBRO-PATCH(session-plan-mode): carry the thread mode into runtime context.
+		SessionMode:                      task.SessionMode, // CEREBRO-PATCH(session-modes): FIR-3111 carry profile into runtime context.
 		NewCommentCount:                  task.NewCommentCount,
 		NewCommentsSince:                 task.NewCommentsSince,
 		PriorSessionResumed:              task.PriorSessionID != "",
@@ -3894,6 +3896,14 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	if task.ThinkingOverride != "" {
 		thinkingLevel = task.ThinkingOverride
 	}
+	mode, validMode := sessionmode.Normalize(task.SessionMode)
+	if task.SessionMode == "" && task.PlanMode {
+		mode, validMode = sessionmode.Plan, true
+	} // CEREBRO-PATCH(session-modes): old-server compatibility.
+	modeProfile := sessionmode.ProfileFor(mode)
+	if thinkingLevel == "" && validMode {
+		thinkingLevel = modeProfile.ThinkingLevel
+	} // CEREBRO-PATCH(session-modes): profile override precedes agent default.
 	if task.Agent != nil {
 		if thinkingLevel == "" {
 			thinkingLevel = task.Agent.ThinkingLevel
@@ -3927,11 +3937,13 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			thinkingLevel = ""
 		}
 	}
+	effectiveTimeout := sessionmode.EffectiveTimeout(d.cfg.AgentTimeout, modeProfile.Timeout)
 	execOpts := agent.ExecOptions{
 		Cwd:                       env.WorkDir,
 		Model:                     model,
 		ThreadName:                deriveTaskThreadName(task),
-		Timeout:                   d.cfg.AgentTimeout,
+		Timeout:                   effectiveTimeout,     // CEREBRO-PATCH(session-modes): FIR-3111 hard time guard.
+		MaxTurns:                  modeProfile.MaxTurns, // CEREBRO-PATCH(session-modes): FIR-3111 provider-supported spend guard.
 		SemanticInactivityTimeout: d.cfg.CodexSemanticInactivityTimeout,
 		ResumeSessionID:           task.PriorSessionID,
 		ExtraArgs:                 extraArgs,
@@ -4087,7 +4099,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		// goes through the FailTask path that forwards session info.
 		comment := result.Error
 		if comment == "" {
-			comment = fmt.Sprintf("%s timed out after %s", provider, d.cfg.AgentTimeout)
+			comment = fmt.Sprintf("%s timed out after %s", provider, effectiveTimeout)
 		}
 		failureReason := "timeout"
 		if reason, ok := classifyResumeUnsafeTimeout(provider, comment); ok {

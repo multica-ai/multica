@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/multica-ai/multica/server/internal/cerebro/sessionmode"
 	skillpkg "github.com/multica-ai/multica/server/internal/skill"
 )
 
@@ -419,8 +420,13 @@ func renderIssueContext(provider string, ctx TaskContextForEnv) string {
 
 	b.WriteString("# Task Assignment\n\n")
 	fmt.Fprintf(&b, "**Issue ID:** %s\n\n", ctx.IssueID)
-	if ctx.PlanMode { // CEREBRO-PATCH(session-plan-mode): enforce the selected mode in the agent brief.
-		b.WriteString("## PLAN MODE\n\nThis session is planning-only. You may produce and save a plan, but you must NOT write or edit code, run migrations or deploy, or open a pull request.\n\n")
+	mode, validMode := sessionmode.Normalize(ctx.SessionMode)
+	if ctx.SessionMode == "" && ctx.PlanMode {
+		mode, validMode = sessionmode.Plan, true
+	}
+	if validMode { // CEREBRO-PATCH(session-modes): FIR-3111 enforce the selected profile in the agent brief.
+		profile := sessionmode.ProfileFor(mode)
+		fmt.Fprintf(&b, "## %s MODE\n\n%s\n\n", strings.ToUpper(string(mode)), profile.Instruction)
 	}
 
 	if ctx.TriggerCommentID != "" {

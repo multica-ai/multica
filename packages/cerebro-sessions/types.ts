@@ -17,7 +17,8 @@ export interface Session {
   root_comment_id: string | null;
   position: number;
   name: string;
-  mode?: "default" | "plan";
+  /** `default` is accepted only from pre-Modes servers and normalizes to Build. */
+  mode?: SessionMode | "default";
   // FIR-2283 followup: the workflow phase this session (thread) belongs to,
   // when it was started by an Issue workflow — "plan" | "build" | "review".
   // Null/absent for ordinary (non-workflow) sessions.
@@ -123,3 +124,4 @@ export interface ContextTimeline {
   has_data: boolean;
   points: ContextTimelinePoint[];
 }
+import type { SessionMode } from "./modes";

@@ -8,6 +8,7 @@ import type {
   Session,
   UsageBreakdown,
 } from "./types";
+import type { SessionMode } from "./modes";
 
 const base = (issueId: string) => `/api/cerebro/issues/${issueId}/sessions`;
 
@@ -158,7 +159,7 @@ export function startFresh(issueId: string, input: HandoffActionInput): Promise<
 
 export function updateSession(issueId: string, sessionId: string, input: {
   name?: string;
-  mode?: "default" | "plan";
+  mode?: SessionMode;
   handoff?: HandoffBrief;
 }): Promise<Session> {
   return api.cerebroRequest<Session>(`${base(issueId)}/${sessionId}`, {

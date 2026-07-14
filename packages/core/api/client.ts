@@ -3497,7 +3497,8 @@ export class ApiClient {
   // CEREBRO-PATCH(api-chat-session-actions): JEH-799 chat-session header actions.
   async updateChatSession(
     id: string,
-    data: { title?: string; status?: "active" | "archived" },
+    // CEREBRO-PATCH(api-chat-session-modes): FIR-3111 session execution profile.
+    data: { title?: string; status?: "active" | "archived"; mode?: string },
   ): Promise<ChatSession> {
     return this.fetch(`/api/chat/sessions/${id}`, {
       method: "PATCH",

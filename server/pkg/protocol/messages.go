@@ -123,6 +123,7 @@ type ChatSessionUpdatedPayload struct {
 	ChatSessionID string `json:"chat_session_id"`
 	Title         string `json:"title"`
 	Status        string `json:"status"`
+	Mode          string `json:"mode"` // CEREBRO-PATCH(chat-session-modes): FIR-3111 keep other tabs in sync.
 	UpdatedAt     string `json:"updated_at"`
 }
 

@@ -11,8 +11,10 @@ import {
   SelectValue,
 } from "@multica/ui/components/ui/select";
 import { cn } from "@multica/ui/lib/utils";
+import { useFeatureFlag } from "@multica/cerebro-feature-flags";
 import type { Session } from "./types";
 import { useUpdateSession } from "./use-sessions";
+import { SESSION_MODES, SESSION_MODE_STYLES, normalizeSessionMode, type SessionMode } from "./modes";
 
 // FIR-2283 followup: workflow phase badge shown next to Open/Resolved.
 const PHASE_LABELS: Record<string, string> = {
@@ -65,10 +67,12 @@ export function SessionHeader({
   onToggleHandoff?: () => void;
 }) {
   const update = useUpdateSession(issueId);
+  const modesEnabled = useFeatureFlag("cerebro_session_modes");
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(session.name);
   // The implicit "Session 1" has no DB row yet, so it cannot be renamed.
   const canRename = session.id !== "default";
+  const mode = normalizeSessionMode(session.mode);
 
   function startEdit() {
     if (!canRename) return;
@@ -138,36 +142,36 @@ export function SessionHeader({
       )}
       {!editing && (
         <div className="flex shrink-0 items-center gap-2">
-          {/* FIR-3087 (Jesper): the mode is a select between Plan and Build, not a
-              toggle. "Build" is the ordinary run mode and maps to the stored
-              "default" so the server/daemon contract is unchanged. */}
-          <Select
-            value={session.mode ?? "default"}
-            items={{ plan: "Plan", default: "Build" }}
-            onValueChange={(v) =>
-              update.mutateAsync({
-                sessionId: session.id,
-                input: { mode: v === "plan" ? "plan" : "default" },
-              })
-            }
-          >
-            <SelectTrigger
-              size="sm"
-              aria-label="Session mode"
-              className={cn(
-                "h-auto rounded-full border px-2 py-0.5 text-xs transition-colors",
-                (session.mode ?? "default") === "plan"
-                  ? "border-amber-500/30 bg-amber-500/10 text-amber-600 dark:text-amber-400"
-                  : "text-muted-foreground hover:bg-muted/60 hover:text-foreground",
-              )}
+          {modesEnabled && (
+            <Select
+              value={mode}
+              items={Object.fromEntries(SESSION_MODES.map(({ value, label }) => [value, label]))}
+              onValueChange={(v) =>
+                update.mutateAsync({
+                  sessionId: session.id,
+                  input: { mode: v as SessionMode },
+                })
+              }
             >
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="plan">Plan</SelectItem>
-              <SelectItem value="default">Build</SelectItem>
-            </SelectContent>
-          </Select>
+              <SelectTrigger
+                size="sm"
+                aria-label="Session mode"
+                className={cn(
+                  "h-auto rounded-full border px-2 py-0.5 text-xs transition-colors",
+                  SESSION_MODE_STYLES[mode],
+                )}
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {SESSION_MODES.map(({ value, label }) => (
+                  <SelectItem key={value} value={value}>
+                    {label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
           {hasHandoff && onToggleHandoff ? (
             <button
               type="button"

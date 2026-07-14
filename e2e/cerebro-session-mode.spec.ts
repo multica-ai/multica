@@ -9,6 +9,7 @@ test.describe("Cerebro session mode", () => {
   test.beforeEach(async ({ page }) => {
     api = await createTestApi();
     await api.setWorkspaceFeatureFlag("cerebro_comment_chapters", true);
+    await api.setWorkspaceFeatureFlag("cerebro_session_modes", true);
     const issue = await api.createIssue(`E2E Session Mode ${Date.now()}`);
     issueId = issue.id;
     await loginAsDefault(page);
@@ -16,6 +17,7 @@ test.describe("Cerebro session mode", () => {
 
   test.afterEach(async () => {
     await api.setWorkspaceFeatureFlag("cerebro_comment_chapters", false).catch(() => {});
+    await api.setWorkspaceFeatureFlag("cerebro_session_modes", false).catch(() => {});
     await api.cleanup();
   });
 
@@ -35,7 +37,7 @@ test.describe("Cerebro session mode", () => {
 
     const modeSelect = page.getByRole("combobox", { name: "Session mode" }).last();
     await expect(modeSelect).toBeVisible();
-    await expect(modeSelect).toHaveText(/Build/);
+    await expect(modeSelect).toHaveText(/Auto/);
     await modeSelect.click();
     await page.getByRole("option", { name: "Plan" }).click();
     await expect(modeSelect).toHaveText(/Plan/);

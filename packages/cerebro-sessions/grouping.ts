@@ -1,5 +1,6 @@
 import type { TimelineEntry } from "@multica/core/types";
 import type { Session } from "./types";
+import { normalizeSessionMode } from "./modes";
 
 export type TimelineGroup = { type: "activities" | "comment"; entries: TimelineEntry[] };
 
@@ -20,7 +21,7 @@ export function defaultSession(issueId: string, name = "Session 1"): Session {
     root_comment_id: null,
     position: 0,
     name,
-    mode: "default",
+    mode: "auto",
     phase: null,
     handoff: null,
     created_at: "",
@@ -63,7 +64,7 @@ export function groupTimelineByThread(
         root_comment_id: root.id,
         position: row?.position ?? n,
         name,
-        mode: row?.mode ?? "default",
+        mode: normalizeSessionMode(row?.mode),
         phase: row?.phase ?? null,
         handoff: row?.handoff ?? null,
         created_at: row?.created_at ?? root.created_at,

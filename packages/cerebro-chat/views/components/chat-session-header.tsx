@@ -31,6 +31,7 @@ import { useWorkspacePaths } from "@multica/core/paths";
 import { useNavigation } from "@multica/views/navigation";
 import { chatSessionUsageOptions } from "@multica/core/chat/queries";
 import { useCostFormatter } from "@multica/cerebro-display-currency/views";
+import { useFeatureFlag } from "@multica/cerebro-feature-flags";
 import type { ChatSession } from "@multica/core/types";
 import {
   useUpdateChatSession,
@@ -38,6 +39,7 @@ import {
   useConvertChatSessionToIssue,
 } from "../../mutations";
 import { useCerebroChatHeaderStrings } from "../../strings";
+import { ChatSessionModeSelect } from "./chat-session-mode-select";
 
 type Pending = "archive" | "unarchive" | "convert" | null;
 
@@ -55,6 +57,7 @@ export function ChatSessionHeader({ session }: { session: ChatSession | null }) 
   const wsPaths = useWorkspacePaths();
   const router = useNavigation();
   const update = useUpdateChatSession();
+  const modesEnabled = useFeatureFlag("cerebro_session_modes");
   const archive = useArchiveActiveChatSession();
   const convert = useConvertChatSessionToIssue();
   const [editing, setEditing] = useState(false);
@@ -207,6 +210,13 @@ export function ChatSessionHeader({ session }: { session: ChatSession | null }) 
       )}
 
       <div className="flex shrink-0 items-center gap-1">
+        {modesEnabled && (
+          <ChatSessionModeSelect
+            mode={session.mode}
+            disabled={update.isPending}
+            onChange={(mode) => update.mutate({ sessionId: session.id, mode })}
+          />
+        )}
         {/* JEH-736 — session price chip with token breakdown tooltip.
             Hidden until the session has logged at least one task so a brand-new
             session doesn't carry a misleading "$0.00" badge. */}

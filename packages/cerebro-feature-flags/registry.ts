@@ -224,6 +224,8 @@ export type CerebroFlagKey =
   | "cerebro_recurring_issues"
   // FIR-1704: comment sessions UI. OFF — phase 1 model was unsound (comments never linked to a session); rebuilding as threads=sessions (FIR-1741). Internal key kept as `cerebro_comment_chapters` so existing per-user overrides keep working; everything user-facing now says "session".
   | "cerebro_comment_chapters"
+  // FIR-3111: five session modes in issue and chat headers, plus runtime profiles.
+  | "cerebro_session_modes"
   // FIR-1769 (P2): fold a session's activity events into one collapsed "Activity" section so comments stay prominent. Requires cerebro_comment_chapters.
   | "cerebro_session_activity_fold"
   // FIR-1769 (P3): whisper-subtle context-window hairline on the active session + an almost-full nudge to Start fresh. Requires cerebro_comment_chapters.
@@ -620,6 +622,8 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   // a session -> empty sessions, dead buttons). Hidden while rebuilt as
   // threads=sessions (FIR-1741). Off renders the flat comment timeline.
   cerebro_comment_chapters: false,
+  // FIR-3111: OFF until the five-mode flow has passed staging QA.
+  cerebro_session_modes: false,
   // FIR-1769 (P2/P3): OFF by default — ship dark behind the sessions rebuild,
   // turn on per-workspace once QA'd. Both no-op unless cerebro_comment_chapters
   // is also on.
@@ -1483,6 +1487,13 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     group: "workspace",
     description:
       "Wrap an issue's comment timeline in named sessions with a status chip, a Start fresh action, and a Handoff brief. OFF — the phase-1 model was unsound: comments were never linked to a session, so sessions rendered empty and the actions did nothing. Being rebuilt around threads=sessions (FIR-1741). Off renders the plain flat comment timeline. FIR-1704. (Internal key kept as cerebro_comment_chapters so existing overrides keep working.)",
+  },
+  {
+    key: "cerebro_session_modes",
+    label: "Session modes",
+    group: "workspace",
+    description:
+      "Add Auto, Plan, Build, Research, and Review to issue and chat session headers. The selected mode is persisted and applies a matching runtime profile to the next agent run. Workflow phases select their matching mode automatically. FIR-3111.",
   },
   {
     key: "cerebro_session_activity_fold",

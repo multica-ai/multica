@@ -1072,19 +1072,21 @@ export function useRealtimeSync(
       const payload = p as {
         chat_session_id: string;
         title?: string;
+        mode?: string; // CEREBRO-PATCH(chat-session-modes): FIR-3111 sync execution profile.
         updated_at?: string;
       };
       chatWsLogger.info("chat:session_updated (global)", payload);
       const id = getCurrentWsId();
       if (!id) return;
       const patch = (
-        old?: { id: string; title: string; updated_at: string }[],
+        old?: { id: string; title: string; mode?: string; updated_at: string }[], // CEREBRO-PATCH(chat-session-modes): FIR-3111 cache shape.
       ) =>
         old?.map((s) =>
           s.id === payload.chat_session_id
             ? {
                 ...s,
                 title: payload.title ?? s.title,
+                mode: payload.mode ?? s.mode, // CEREBRO-PATCH(chat-session-modes): FIR-3111 sync execution profile.
                 updated_at: payload.updated_at ?? s.updated_at,
               }
             : s,

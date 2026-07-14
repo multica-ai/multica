@@ -81,10 +81,10 @@ func TestStampOnComplete_BadgesPlanSessionRoot(t *testing.T) {
 	NewSessionPhaseStamper(pool).StampOnComplete(ctx, planTask(agentID, issueID, "plan", ""))
 
 	var gotRoot pgtype.UUID
-	var gotPhase, gotName string
+	var gotPhase, gotName, gotMode string
 	if err := pool.QueryRow(ctx, `
-		SELECT root_comment_id, phase, name FROM cerebro_session WHERE issue_id = $1`,
-		issueID).Scan(&gotRoot, &gotPhase, &gotName); err != nil {
+		SELECT root_comment_id, phase, name, mode FROM cerebro_session WHERE issue_id = $1`,
+		issueID).Scan(&gotRoot, &gotPhase, &gotName, &gotMode); err != nil {
 		t.Fatalf("load stamped session: %v", err)
 	}
 	if uuidString(gotRoot) != uuidString(rootID) {
@@ -95,6 +95,9 @@ func TestStampOnComplete_BadgesPlanSessionRoot(t *testing.T) {
 	}
 	if gotName != "Plan" {
 		t.Fatalf("session name = %q, want \"Plan\"", gotName)
+	}
+	if gotMode != "plan" {
+		t.Fatalf("session mode = %q, want \"plan\"", gotMode)
 	}
 }
 
@@ -117,10 +120,10 @@ func TestStampOnComplete_UpdatesBadgeButKeepsExistingName(t *testing.T) {
 
 	NewSessionPhaseStamper(pool).StampOnComplete(ctx, planTask(agentID, issueID, "plan", ""))
 
-	var gotPhase, gotName string
+	var gotPhase, gotName, gotMode string
 	if err := pool.QueryRow(ctx, `
-		SELECT phase, name FROM cerebro_session WHERE issue_id = $1 AND root_comment_id = $2`,
-		issueID, rootID).Scan(&gotPhase, &gotName); err != nil {
+		SELECT phase, name, mode FROM cerebro_session WHERE issue_id = $1 AND root_comment_id = $2`,
+		issueID, rootID).Scan(&gotPhase, &gotName, &gotMode); err != nil {
 		t.Fatalf("load session: %v", err)
 	}
 	if gotPhase != "plan" {
@@ -128,6 +131,9 @@ func TestStampOnComplete_UpdatesBadgeButKeepsExistingName(t *testing.T) {
 	}
 	if gotName != "My chosen name" {
 		t.Fatalf("session name = %q, want the pre-existing \"My chosen name\"", gotName)
+	}
+	if gotMode != "plan" {
+		t.Fatalf("session mode = %q, want \"plan\"", gotMode)
 	}
 }
 
