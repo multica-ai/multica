@@ -29,6 +29,26 @@ function findAll(node: JsonNode, type: string, acc: JsonNode[] = []): JsonNode[]
   return acc;
 }
 
+// Mimics what the NodeView's editable controls do: patch the detailsBlock
+// node's attributes in place (the same effect as `updateAttributes`).
+function editDetailsAttrs(ed: Editor, attrs: Record<string, unknown>): void {
+  const { state } = ed;
+  let pos = -1;
+  let current: Record<string, unknown> = {};
+  state.doc.descendants((n, p) => {
+    if (n.type.name === "detailsBlock") {
+      pos = p;
+      current = n.attrs;
+      return false;
+    }
+    return true;
+  });
+  if (pos < 0) throw new Error("no detailsBlock node found");
+  ed.view.dispatch(
+    state.tr.setNodeMarkup(pos, undefined, { ...current, ...attrs }),
+  );
+}
+
 let editor: Editor | null = null;
 
 afterEach(() => {
@@ -218,5 +238,43 @@ Another body.
     expect(blocks).toHaveLength(0);
     // No content is destroyed by the fallback.
     expect(editor.getMarkdown()).toContain("Has a fenced sample");
+  });
+
+  it("re-serializes summary and body edits back to <details> markdown", () => {
+    editor = makeEditor();
+    editor.commands.setContent(SIMPLE, { contentType: "markdown" });
+
+    editDetailsAttrs(editor, {
+      summary: "Edited summary",
+      body: "Edited **body** text.",
+    });
+
+    const out = editor.getMarkdown().trim();
+    expect(out).toContain("<summary>Edited summary</summary>");
+    expect(out).toContain("Edited **body** text.");
+
+    // Full round-trip: reloading the edited markdown yields the edited attrs,
+    // so an in-editor edit survives a save/reload cycle.
+    editor.commands.setContent(out, { contentType: "markdown" });
+    const block = findAll(editor.getJSON() as JsonNode, "detailsBlock")[0];
+    expect(block?.attrs?.summary).toBe("Edited summary");
+    expect(block?.attrs?.body).toBe("Edited **body** text.");
+  });
+
+  it("keeps surrounding content intact when the block is edited", () => {
+    const doc = `Intro paragraph.
+
+${SIMPLE}
+
+Outro paragraph.`;
+    editor = makeEditor();
+    editor.commands.setContent(doc, { contentType: "markdown" });
+
+    editDetailsAttrs(editor, { summary: "Changed" });
+
+    const out = editor.getMarkdown();
+    expect(out).toContain("Intro paragraph.");
+    expect(out).toContain("<summary>Changed</summary>");
+    expect(out).toContain("Outro paragraph.");
   });
 });
