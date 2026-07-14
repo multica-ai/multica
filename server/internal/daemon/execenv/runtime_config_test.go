@@ -8,6 +8,17 @@ import (
 	"testing"
 )
 
+// CEREBRO-PATCH(create-issue-runtime-brief-test): Keep FIR-3266 guidance in the injected brief.
+func TestRuntimeBriefIncludesCreateIssuePermissionContract(t *testing.T) {
+	t.Parallel()
+	out := buildMetaSkillContent("claude", TaskContextForEnv{})
+	for _, want := range []string{"multica-working-on-issues", "Allow/Ask/Deny", "never duplicate a pending create"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("runtime brief missing create-issue permission guidance %q", want)
+		}
+	}
+}
+
 // Sub-issue Creation section — after MUL-2538 the platform posts the
 // child-done parent notification itself, so the brief no longer carries
 // any parent-notification rule (per Bohan's call on PR #3055: delete the

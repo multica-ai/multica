@@ -80,7 +80,9 @@ middleware runs, downstream handlers see:
 - The token row's `agent_id` is dereferenced to set `X-User-ID` to the
   agent's `owner_id`. The agent therefore acts as its owner: every
   workspace, role, and permission the owner has is granted to the
-  agent for the lifetime of the task.
+  agent for the lifetime of the task. Agent platform mutations are additionally
+  bounded by the tool-policy chain; for example, `create_issue` may Allow, Ask,
+  or Deny even when the owner is a workspace member.
 - `X-Agent-ID` and `X-Task-ID` are set so comments and other writes
   show the agent as the author rather than the human owner.
 - Agent-authored comments that mention another agent only enqueue the

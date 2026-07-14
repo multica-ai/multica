@@ -28,14 +28,25 @@ name if a line moved.
 
 1. **"Is the new tool-policy chain deciding this call?"** — Almost never, today.
    The chain (`Allow/Ask/Deny/Inherit`, folded Workspace › Runtime › Agent ›
-   Group › User) is wired live for exactly **two** things: repo checkout (row 10)
-   and local-runtime creation (`create_local_runtime`, row 11). As a general gate
+   Group › User) is wired live for repo checkout, local-runtime creation, and
+   the server-owned `create_issue` platform action. As a general gate
    on agent *tool* calls it is dormant behind an env switch.
 
 2. **"Is this agent action gated at all, by anything?"** — Very often, yes, by
    one of the live subsystems in the table below.
 
 Keep these apart. This doc answers question 2 honestly.
+
+### Create issue is an always-on platform action
+
+`create_issue` is enforced before mutation for authoritative agent/task actors
+by `server/internal/cerebro/platformaction` on REST/CLI, workspace HTTP MCP, and
+the Firtal Gateway runtime. `Allow` creates normally, `Deny` returns
+`platform_action_denied`, and `Ask` returns/reuses one
+`platform_action_pending` approval without creating an issue. Root issues and
+sub-issues use the same capability. Member-created issues and internal system
+materialisation are not agent platform actions and remain unchanged. This floor
+does not depend on `CEREBRO_APPROVAL_GATE_MODE` or the runtime rollout flags.
 
 > **FIR-2175 / FIR-3062 (flag `cerebro_member_override`, default ON):** when this general
 > gate IS deciding a call (question 1), a workspace uses the

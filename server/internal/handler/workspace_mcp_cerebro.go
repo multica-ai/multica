@@ -113,6 +113,13 @@ func (h *Handler) createIssueFromWorkspaceMCP(ctx context.Context, r *http.Reque
 	}
 
 	creatorType, actualCreatorID := h.resolveActor(r, userID, workspaceID)
+	if answer := h.authorizeCreateIssue(ctx, r, wsUUID, creatorType, actualCreatorID, "workspace_mcp", args, args); !answer.Allowed {
+		code := "platform_action_denied"
+		if answer.Pending {
+			code = "platform_action_pending: approval_id=" + uuidToString(answer.ApprovalID)
+		}
+		return mcp.ErrorResult(code), nil
+	}
 	analyticsAgentID := ""
 	if assigneeType.Valid && assigneeType.String == "agent" {
 		analyticsAgentID = uuidToString(assigneeID)

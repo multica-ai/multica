@@ -17,6 +17,7 @@ import (
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
 	cerebroloops "github.com/multica-ai/multica/server/internal/cerebro/loops"
 	"github.com/multica-ai/multica/server/internal/cerebro/permgate"
+	"github.com/multica-ai/multica/server/internal/cerebro/platformaction"
 	"github.com/multica-ai/multica/server/internal/cerebro/toolpolicy"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/mcp"
@@ -73,7 +74,8 @@ type FirtalGatewayExecutor struct {
 	// Allow/Ask/Deny rows authored in the permission table actually gate real
 	// tool calls. Nil by default — it is only set under the toolpolicy gate mode
 	// (see MaybeEnableApprovalGate), keeping production on the prior behaviour.
-	toolPolicy *toolpolicy.Store
+	toolPolicy         *toolpolicy.Store
+	platformActionGate *platformaction.Gate
 
 	// connDeny enforces per-tool workspace-connection Deny rows on the
 	// firtal-gateway path (TECH-3174). Unlike toolPolicy it is ALWAYS set and
@@ -102,6 +104,13 @@ type FirtalGatewayExecutor struct {
 	// Set only by SetInProcessBridge, which the server calls under the
 	// MULTICA_SERVER_FIRTAL_GATEWAY_INPROCESS_BRIDGE env flag.
 	routerHandler http.Handler
+}
+
+// SetPlatformActionGate wires the always-on server floor for Multica platform mutations.
+func (e *FirtalGatewayExecutor) SetPlatformActionGate(g *platformaction.Gate) {
+	if e != nil {
+		e.platformActionGate = g
+	}
 }
 
 // SetConnectionDenyStore wires the always-on connection per-tool deny resolver

@@ -37,12 +37,10 @@ Endpoints (mounted in `server/cmd/server/router.go`):
 Terminal decisions are race-safe: only a still-`pending` row transitions, so two
 concurrent approvers can't both win — the loser gets HTTP 409.
 
-## Feature flag
+## Platform-action asks
 
-Gated by `cerebro_approvals` (default off until browser-verified + deployed).
-
-## Status
-
-The live gate wiring (calling `Service.Intake` from the runtime/MCP enforcement
-path) lands once phase 2's enforcement is wired in; until then the admin-only
-`/approvals/intake` endpoint exercises the full inbox flow end-to-end.
+The `create_issue` server floor is always active for agents. An Ask is created
+through `EvaluateDecisionReusing`: retries for the same agent, capability, and
+resource reuse the pending or approved row instead of duplicating Approval
+inbox entries. REST returns HTTP 202 and MCP returns
+`platform_action_pending`; no issue is written before approval.

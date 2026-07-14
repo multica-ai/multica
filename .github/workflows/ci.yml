@@ -143,6 +143,56 @@ jobs:
         env:
           GONOSUMDB: github.com/hvejsel/firtal-persona
 
+  create-issue-permission-eval:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_DB: multica
+          POSTGRES_USER: multica
+          POSTGRES_PASSWORD: multica
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U multica -d multica"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      DATABASE_URL: postgres://multica:multica@localhost:5432/multica?sslmode=disable
+      JWT_SECRET: ci-jwt-secret-padding-padding-padding-padding-padding-padding-pad
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - name: Setup Go
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version: "1.26.1"
+          cache-dependency-path: server/go.sum
+      - name: Run migrations
+        run: cd server && go run ./cmd/migrate up
+        env:
+          GONOSUMDB: github.com/hvejsel/firtal-persona
+      - name: Run create issue permission eval
+        run: |
+          cd server
+          go test ./internal/handler ./internal/cerebro/runtime \
+            -run 'TestCreateIssuePermission_|TestWorkspaceMCPCreateIssuePermission_|TestGatewayCreateIssuePermission_' \
+            -count=1 -v | tee create-issue-permission-eval.log
+          printf '%s\n' 'Multica base report: mention://artifact/019f60ee-76a1-7d53-a141-238a0b17a54d' > create-issue-permission-eval-report.txt
+        env:
+          GONOSUMDB: github.com/hvejsel/firtal-persona
+      - name: Upload create issue permission evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: create-issue-permission-eval
+          path: |
+            server/create-issue-permission-eval.log
+            server/create-issue-permission-eval-report.txt
+          if-no-files-found: error
+
   installer:
     # Stub-driven shell tests for scripts/install.sh. Kept off the heavy
     # backend job so installer regressions surface independently, and

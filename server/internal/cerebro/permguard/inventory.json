@@ -1130,7 +1130,7 @@
     },
     {
       "id": "POST /api/issues/",
-      "gate": "workspace_member"
+      "gate": "platform_action:create_issue (agents) + workspace_member (members)"
     },
     {
       "id": "POST /api/issues/batch-delete",
@@ -2040,7 +2040,7 @@
     },
     {
       "id": "create_issue",
-      "gate": "via:POST /api/issues/"
+      "gate": "platform_action:create_issue"
     },
     {
       "id": "create_project",
@@ -2790,7 +2790,7 @@
     },
     {
       "id": "issue create",
-      "gate": "via:POST /api/issues/"
+      "gate": "platform_action:create_issue"
     },
     {
       "id": "issue get",

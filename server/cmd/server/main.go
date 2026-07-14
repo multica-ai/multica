@@ -18,6 +18,7 @@ import (
 	// CEREBRO-PATCH(main-agent-pass-gate): JEH-1327 cerebro agent-pass gate import
 	cerebroagentpass "github.com/multica-ai/multica/server/internal/cerebro/agentpass"
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
+	cerebroplatformaction "github.com/multica-ai/multica/server/internal/cerebro/platformaction" // CEREBRO-PATCH(main-platform-action-gate): FIR-3266 gateway mutation floor.
 	// CEREBRO-PATCH(main-gws-group-sync): FIR-2596 Google Workspace group sync worker import
 	cerebroconnections "github.com/multica-ai/multica/server/internal/cerebro/connections"
 	cerebroidentitysync "github.com/multica-ai/multica/server/internal/cerebro/identitysync"
@@ -447,6 +448,7 @@ func main() {
 		os.Exit(1)
 	} else if gatewayCfg.Enabled {
 		gatewayExecutor := cerebroruntime.NewFirtalGatewayExecutor(gatewayCfg, queries, cerebrodb.New(pool), taskSvc, bus, nil, nil, cerebroruntime.NewRegistry(pool)) // CEREBRO-PATCH(main-firtal-gateway-tool-registry): give server runtime DB-backed tool grants.
+		gatewayExecutor.SetPlatformActionGate(cerebroplatformaction.NewDefault(cerebrotoolpolicy.NewStore(pool), queries, cerebrodb.New(pool), pool, bus))             // CEREBRO-PATCH(main-platform-action-gate): FIR-3266 always-on gateway mutation floor.
 		gatewayExecutor.SetAttachmentStorage(cerebroruntime.FirtalGatewayAttachmentStorage())                                                                          // CEREBRO-PATCH(main-firtal-gateway-attachment-storage): wire server-side attachment storage into the gateway runtime.
 		cerebroruntime.MaybeEnableApprovalGate(gatewayExecutor, cerebrodb.New(pool), pool, bus)                                                                        // CEREBRO-PATCH(main-firtal-gateway-approval-gate): FIR-2193 default-off approval enforcement gate, controlled rollout via env.
 		// CEREBRO-PATCH(main-firtal-gateway-connection-deny): TECH-3174 always-on per-tool connection Deny on the gateway path.

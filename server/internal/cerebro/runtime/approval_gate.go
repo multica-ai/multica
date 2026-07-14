@@ -16,6 +16,7 @@ package runtime
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -28,6 +29,7 @@ import (
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
 	"github.com/multica-ai/multica/server/internal/cerebro/permgate"
 	"github.com/multica-ai/multica/server/internal/cerebro/permissions"
+	"github.com/multica-ai/multica/server/internal/cerebro/platformaction"
 	"github.com/multica-ai/multica/server/internal/cerebro/toolpolicy"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/util"
@@ -207,6 +209,9 @@ func (e *FirtalGatewayExecutor) guardToolCall(
 	if e == nil {
 		return true, ""
 	}
+	if toolName == "create_issue" {
+		return e.guardPlatformAction(ctx, agentID, workspaceID, toolName, args, meta)
+	}
 	// FIR-2243 B1: emit one structured runtime decision line per tool call, tying
 	// the tool to the permission verdict it ran under — for EVERY call, including
 	// the default-off common path that previously logged nothing. decision is set
@@ -367,6 +372,52 @@ func (e *FirtalGatewayExecutor) guardToolCall(
 		return false, r
 	}
 	return true, ""
+}
+
+func (e *FirtalGatewayExecutor) guardPlatformAction(ctx context.Context, agentID, workspaceID pgtype.UUID, toolName string, args map[string]any, meta GatewayRequestMeta) (bool, string) {
+	if e.platformActionGate != nil {
+		var taskID pgtype.UUID
+		if meta.TaskID != "" {
+			taskID, _ = util.ParseUUID(meta.TaskID)
+		}
+		result, err := e.platformActionGate.Authorize(ctx, platformaction.Request{
+			WorkspaceID: workspaceID, AgentID: agentID, TaskID: taskID,
+			Capability: toolName, Resource: gatewayPlatformActionResource(args), Surface: "firtal_gateway",
+			Context: args, IsSystem: meta.TriggerUserID == "",
+		})
+		if err != nil {
+			return false, err.Error()
+		}
+		if result.Outcome == permgate.OutcomeAllowed || result.Outcome == permgate.OutcomeApproved {
+			return true, ""
+		}
+		return false, result.Reason
+	}
+	// Tests and partially wired executors still fail closed from the real policy
+	// store; production always wires platformActionGate in main.
+	if e.toolPolicy == nil {
+		return false, "platform action gate unavailable"
+	}
+	agent, err := e.queries.GetAgent(ctx, agentID)
+	if err != nil {
+		return false, err.Error()
+	}
+	effective, err := e.toolPolicy.ResolveGeneral(ctx, toolpolicy.Query{
+		WorkspaceID: workspaceID, ToolKey: toolName, RuntimeID: agent.RuntimeID,
+		AgentID: agentID, UserID: agent.OwnerID, Base: toolpolicy.SettingAllow,
+	}, e.toolPolicy.MemberOverrideEnabled(ctx, workspaceID))
+	if err != nil {
+		return false, err.Error()
+	}
+	if effective.Setting == toolpolicy.SettingAllow {
+		return true, ""
+	}
+	return false, effective.Reason
+}
+
+func gatewayPlatformActionResource(value any) string {
+	raw, _ := json.Marshal(value)
+	return fmt.Sprintf("request:%x", sha256.Sum256(raw))
 }
 
 // logToolDecision emits the FIR-2243 B1 runtime audit line: one structured record

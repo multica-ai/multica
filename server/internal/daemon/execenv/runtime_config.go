@@ -817,6 +817,8 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 	b.WriteString("When a task includes attachment IDs and you need the files, inspect `multica attachment --help` and use the authenticated CLI path. Do not open Multica resource URLs directly.\n\n")
 
 	b.WriteString("## Important: Always Use the `multica` CLI\n\n")
+	// CEREBRO-PATCH(create-issue-runtime-brief): Keep FIR-3266 guidance in every injected runtime brief.
+	b.WriteString("Issue creation is governed by the canonical `multica-working-on-issues` skill; obey Allow/Ask/Deny and never duplicate a pending create.\n\n")
 	b.WriteString("All interactions with Multica platform resources — including issues, comments, attachments, images, files, and any other platform data — **must** go through the `multica` CLI. ")
 	b.WriteString("Do NOT use `curl`, `wget`, or any other HTTP client to access Multica URLs or APIs directly. ")
 	b.WriteString("Multica resource URLs require authenticated access that only the `multica` CLI can provide.\n\n")

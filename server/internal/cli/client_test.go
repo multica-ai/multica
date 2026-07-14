@@ -85,6 +85,29 @@ func TestPostJSON(t *testing.T) {
 		}
 	})
 
+	// CEREBRO-PATCH(cli-post-json-status-test): Lock FIR-3266's structured 202 client contract.
+	t.Run("returns accepted status", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusAccepted)
+			json.NewEncoder(w).Encode(respBody{ID: "approval-123"})
+		}))
+		defer srv.Close()
+
+		client := NewAPIClient(srv.URL, "", "test-token")
+		var out respBody
+		status, err := client.PostJSONStatus(context.Background(), "/test", reqBody{Name: "pending"}, &out)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if status != http.StatusAccepted {
+			t.Fatalf("expected status 202, got %d", status)
+		}
+		if out.ID != "approval-123" {
+			t.Fatalf("expected approval payload, got %+v", out)
+		}
+	})
+
 	t.Run("workspace and agent context headers", func(t *testing.T) {
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if ws := r.Header.Get("X-Workspace-ID"); ws != "ws-abc" {

@@ -23,7 +23,8 @@ import (
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
 	"github.com/multica-ai/multica/server/internal/cerebro/duplicatecheck"
 	cerebroinfisical "github.com/multica-ai/multica/server/internal/cerebro/infisical"
-	"github.com/multica-ai/multica/server/internal/cerebro/permgate" // CEREBRO-PATCH(handler-approval-gate): FIR-2586 shared approval seam.
+	"github.com/multica-ai/multica/server/internal/cerebro/permgate"       // CEREBRO-PATCH(handler-approval-gate): FIR-2586 shared approval seam.
+	"github.com/multica-ai/multica/server/internal/cerebro/platformaction" // CEREBRO-PATCH(handler-platform-action-gate): FIR-3266 server-owned agent mutation floor.
 	"github.com/multica-ai/multica/server/internal/cloudruntime"
 	"github.com/multica-ai/multica/server/internal/daemonws"
 	"github.com/multica-ai/multica/server/internal/events"
@@ -211,7 +212,8 @@ type Handler struct {
 	// daemon repo checkout. nil when CEREBRO_APPROVAL_GATE_ENABLED is off, so an
 	// "Ask" verdict keeps its prior block; non-nil routes it to the one /approvals
 	// inbox (CheckDaemonRepoCapability creates the ask, the daemon long-polls it).
-	ApprovalGate *permgate.Gate
+	ApprovalGate       *permgate.Gate
+	PlatformActionGate *platformaction.Gate // CEREBRO-PATCH(handler-platform-action-gate): FIR-3266 server-owned agent mutation floor.
 	// CEREBRO-PATCH(handler-semantic-search): FIR-2604 hybrid (FTS+vector) seam.
 	SemanticSearch SemanticSearchInvoker
 

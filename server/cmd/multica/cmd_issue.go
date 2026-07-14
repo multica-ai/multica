@@ -784,12 +784,53 @@ func runIssueCreate(cmd *cobra.Command, _ []string) error {
 	}
 
 	var result map[string]any
-	if err := client.PostJSON(ctx, "/api/issues", body, &result); err != nil {
+	// CEREBRO-PATCH(create-issue-approval-cli): Preserve the server-owned FIR-3266 Ask contract in the CLI.
+	statusCode, err := client.PostJSONStatus(ctx, "/api/issues", body, &result)
+	if err != nil {
 		if msg, ok := activeDuplicateIssueCreateMessage(err); ok {
 			return errors.New(msg)
 		}
+		var httpErr *cli.HTTPError
+		if errors.As(err, &httpErr) && httpErr.StatusCode == http.StatusForbidden && strings.Contains(httpErr.Body, "platform_action_denied") {
+			return errors.New("Create issue is blocked by Permissions")
+		}
 		return fmt.Errorf("create issue: %w", err)
 	}
+	if statusCode == http.StatusAccepted && strVal(result, "code") == "platform_action_pending" {
+		approvalID := strVal(result, "approval_id")
+		if approvalID == "" {
+			return errors.New("create issue approval is pending without an approval id")
+		}
+		approvalCtx, approvalCancel := context.WithTimeout(cmd.Context(), 5*time.Minute)
+		defer approvalCancel()
+		for {
+			var approval map[string]any
+			if err := client.GetJSON(approvalCtx, "/api/workspaces/"+url.PathEscape(client.WorkspaceID)+"/approvals/"+url.PathEscape(approvalID), &approval); err != nil {
+				return fmt.Errorf("check create issue approval: %w", err)
+			}
+			switch strVal(approval, "status") {
+			case "approved":
+				result = map[string]any{}
+				retryStatus, err := client.PostJSONStatus(approvalCtx, "/api/issues", body, &result)
+				if err != nil {
+					return fmt.Errorf("resume approved issue create: %w", err)
+				}
+				if retryStatus == http.StatusAccepted || strVal(result, "code") == "platform_action_pending" {
+					return errors.New("Create issue approval remained pending after approval")
+				}
+				goto issueCreated
+			case "rejected", "expired", "cancelled":
+				return errors.New("Create issue approval was rejected or expired")
+			}
+			select {
+			case <-approvalCtx.Done():
+				return errors.New("Create issue approval timed out")
+			case <-time.After(2 * time.Second):
+			}
+		}
+	}
+
+issueCreated:
 
 	// Upload attachments and link them to the newly created issue.
 	// Failures here are partial-success: the issue exists already, so

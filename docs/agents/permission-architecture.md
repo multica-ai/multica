@@ -132,6 +132,7 @@ The unified tool-policy chain is the model we want **everything** to converge on
 | repo checkout (`repo.checkout`, Base=Allow) | `handler/repo_approval_cerebro.go:42` `CheckDaemonRepoCapability` | live |
 | `create_local_runtime` | `group_permissions_cerebro.go:186` | live |
 | `manage_connections` | `group_permissions_cerebro.go:237` (+ router middleware) | live |
+| `create_issue` platform action | `platformaction/gate.go`; REST hook `handler/issue.go`; workspace MCP hook `handler/workspace_mcp_cerebro.go`; Gateway hook `runtime/approval_gate.go` | live, always-on for agents |
 | connection per-tool Deny/Ask | `table_connection.go:305` `ConnectionToolEffective` | live |
 | mention `trigger_other_agent` (layered over a code baseline) | `mentiongate/gate.go:92` | live |
 | general gateway tool calls (`guardToolCallViaPolicy`, via `ResolveGeneral`) | `approval_gate.go:314` | **off by default** (env `CEREBRO_APPROVAL_GATE_ENABLED` + `MODE=toolpolicy`) |

@@ -164,6 +164,15 @@ multica issue status <child-id> todo   # promote when the previous step is truly
 
 Creating every serial step as `todo` enqueues the whole chain at once.
 
+<!-- CEREBRO-PATCH(create-issue-permission-skill): Document FIR-3266 outcomes in the canonical issue skill. -->
+## Create issue permission outcomes
+
+`multica issue create` and the same command with `--parent` use the single
+`create_issue` permission. The server may allow the create, deny it with
+`platform_action_denied`, or return `platform_action_pending` while an Approval
+inbox request is open. Do not bypass a deny or create a second issue on retry;
+pending retries must reuse the approval id.
+
 <!-- CEREBRO-PATCH(create-issue-workflow-skill): FIR-2283 followup — document starting a new issue on an Issue workflow from the CLI/API. -->
 
 ## Start a new issue on an Issue workflow (`--workflow`)

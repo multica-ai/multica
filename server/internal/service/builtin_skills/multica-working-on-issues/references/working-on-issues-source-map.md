@@ -6,6 +6,16 @@ after the latest `main` merge; the prior skill cited pre-merge lines that have
 since moved (see the "drifted" column). Re-confirm with the verification command
 at the bottom before relying on an exact line.
 
+<!-- CEREBRO-PATCH(create-issue-permission-source-map): Map FIR-3266 guidance to enforcement sources. -->
+## Create issue permission
+
+| Behavior | Source |
+|---|---|
+| Shared Allow/Ask/Deny decision and approval reuse | `server/internal/cerebro/platformaction/gate.go` |
+| REST/CLI enforcement before `IssueService.Create` | `server/internal/handler/issue.go`, `platform_action_guard_cerebro.go` |
+| Workspace MCP enforcement before mutation | `server/internal/handler/workspace_mcp_cerebro.go` |
+| Gateway enforcement independent of runtime gate mode | `server/internal/cerebro/runtime/approval_gate.go` |
+
 ## `multica issue pull-requests` — read PR links from Multica
 
 | Behavior | File:line | Drifted from |

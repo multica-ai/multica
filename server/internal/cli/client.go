@@ -274,27 +274,35 @@ func (c *APIClient) DeleteJSONWithBody(ctx context.Context, path string, body an
 
 // PostJSON performs a POST request with a JSON body.
 func (c *APIClient) PostJSON(ctx context.Context, path string, body any, out any) error {
+	_, err := c.PostJSONStatus(ctx, path, body, out)
+	return err
+}
+
+// CEREBRO-PATCH(cli-post-json-status): Expose successful status codes for FIR-3266 approval responses.
+// PostJSONStatus is PostJSON plus the successful HTTP status code. Callers
+// with a structured 202 contract use it without changing every POST call.
+func (c *APIClient) PostJSONStatus(ctx context.Context, path string, body any, out any) (int, error) {
 	data, err := json.Marshal(body)
 	if err != nil {
-		return err
+		return 0, err
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+path, bytes.NewReader(data))
 	if err != nil {
-		return err
+		return 0, err
 	}
 	req.Header.Set("Content-Type", "application/json")
 	c.setHeaders(req)
 
 	resp, err := c.HTTPClient.Do(req)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= 400 {
 		respData, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return &HTTPError{
+		return resp.StatusCode, &HTTPError{
 			Method:     http.MethodPost,
 			Path:       path,
 			StatusCode: resp.StatusCode,
@@ -302,9 +310,9 @@ func (c *APIClient) PostJSON(ctx context.Context, path string, body any, out any
 		}
 	}
 	if out == nil {
-		return nil
+		return resp.StatusCode, nil
 	}
-	return json.NewDecoder(resp.Body).Decode(out)
+	return resp.StatusCode, json.NewDecoder(resp.Body).Decode(out)
 }
 
 // PutJSON performs a PUT request with a JSON body.

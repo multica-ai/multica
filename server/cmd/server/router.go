@@ -43,7 +43,8 @@ import (
 	// CEREBRO-PATCH(cerebro-dashboard-route): JEH-684 dashboard handler import
 	cerebrodashboard "github.com/multica-ai/multica/server/internal/cerebro/dashboard"
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
-	operatingsystem "github.com/multica-ai/multica/server/internal/cerebro/operatingsystem" // CEREBRO-PATCH(operating-system-routes): FIR-2816 fork route module.
+	operatingsystem "github.com/multica-ai/multica/server/internal/cerebro/operatingsystem"      // CEREBRO-PATCH(operating-system-routes): FIR-2816 fork route module.
+	cerebroplatformaction "github.com/multica-ai/multica/server/internal/cerebro/platformaction" // CEREBRO-PATCH(router-platform-action-gate): FIR-3266 always-on agent mutation floor.
 	// CEREBRO-PATCH(cerebro-workflows-loop-planning): FIR-2283 loop planning-dispatch materializer import
 	cerebroloops "github.com/multica-ai/multica/server/internal/cerebro/loops"
 	// CEREBRO-PATCH(cerebro-cost-optimization-routes): FIR-2325 per-workspace saving-mode handler import.
@@ -704,6 +705,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// checkout (h.ApprovalGate) and credential governance (newCredentialsPolicy).
 	sharedApprovalGate := cerebroruntime.BuildApprovalGate(cerebroQueries, pool, bus)
 	h.ApprovalGate = sharedApprovalGate
+	h.PlatformActionGate = cerebroplatformaction.NewDefault(cerebrotoolpolicy.NewStore(pool), queries, cerebroQueries, pool, bus) // CEREBRO-PATCH(router-platform-action-gate): FIR-3266 always-on agent mutation floor.
 	// CEREBRO-PATCH(router-semantic-search): FIR-2604 wire semantic provider + worker.
 	semanticCfg := cerebrosemantic.LoadConfig()
 	h.SemanticSearch = handler.NewSemanticSearch(pool, semanticCfg.BuildProvider(), semanticCfg)

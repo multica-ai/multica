@@ -1515,6 +1515,25 @@ comment for SQL/CSS/SBPL/JSON-with-_comment-field).
 - Reason: Expose the Cerebro-zone app detail handler so the FIR-3172 app screen can read one app, its published versions, and its workflows.
 - Approver: Jesper Hvejsel, FIR-3172 comment “byg”, 2026-07-13.
 
+# FIR-3266 create-issue platform action floor
+
+| Patch | Location | Reason |
+|---|---|---|
+| `handler-platform-action-gate` | `server/internal/handler/handler.go` | Expose the Cerebro-owned platform-action seam to upstream handlers. |
+| `create-issue-platform-action` | `server/internal/handler/issue.go` | Enforce `create_issue` after authoritative actor resolution and before mutation. |
+| `router-platform-action-gate` | `server/cmd/server/router.go` | Wire the always-on REST and Workspace MCP gate. |
+| `main-platform-action-gate` | `server/cmd/server/main.go` | Wire the same always-on floor into the Firtal Gateway runtime. |
+| `create-issue-approval-cli` | `server/cmd/multica/cmd_issue.go` | Preserve Ask as a pending approval and resume the same request after approval. |
+| `cli-post-json-status` | `server/internal/cli/client.go` | Return successful HTTP status codes so the CLI can distinguish 202 from 201. |
+| `create-issue-runtime-brief` | `server/internal/daemon/execenv/runtime_config.go` | Point every runtime at the canonical create-issue permission guidance. |
+| `cli-post-json-status-test` | `server/internal/cli/client_test.go` | Lock the structured 202 response exposed to the CLI. |
+| `create-issue-runtime-brief-test` | `server/internal/daemon/execenv/runtime_config_test.go` | Keep the permission contract in every injected runtime brief. |
+| `handler-test-platform-action-gate` | `server/internal/handler/handler_test.go` | Wire the real floor into shared REST and Workspace MCP tests. |
+| `create-issue-permission-skill` | `server/internal/service/builtin_skills/multica-working-on-issues/SKILL.md` | Document Allow, Ask and Deny behavior for agents. |
+| `create-issue-permission-source-map` | `server/internal/service/builtin_skills/multica-working-on-issues/references/working-on-issues-source-map.md` | Link skill guidance to enforcement sources. |
+
+Approved by FIR-3266 and implementation plan artifact `019f60d7-a728-7663-82d3-7ad6198f15bf`.
+
 ## FIR-2873 — Scheduled messages
 
 - `packages/views/channels/components/channel-detail.tsx` and `thread-side-panel.tsx`: enable scheduling on the shared Channel/DM composer.

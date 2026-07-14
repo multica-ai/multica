@@ -76,6 +76,9 @@ for.
 
 Tools and commands are thin proxies to HTTP. Use the form
 `via:<HTTP route>` so a reader can follow the chain to the actual gate.
+Agent-owned Multica mutations that use the shared server floor instead use
+`platform_action:<capability>`; a `via:` entry is not sufficient evidence for
+those operations.
 Read-only entries (those that hit a `GET` endpoint) use the standard
 `exempt` form with reason `"read-only — wraps GET …"`.
 

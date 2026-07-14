@@ -7,10 +7,12 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+	"github.com/multica-ai/multica/server/internal/cerebro/toolpolicy"
 	"github.com/multica-ai/multica/server/internal/middleware"
 )
 
@@ -85,6 +87,56 @@ func TestWorkspaceMCPCreateIssueCreatesInURLWorkspace(t *testing.T) {
 	}
 }
 
+func TestWorkspaceMCPCreateIssuePermission_DenyBlocksWithoutMutation(t *testing.T) {
+	setCreateIssueWorkspacePolicy(t, toolpolicy.SettingDeny)
+	title := "Workspace MCP denied " + uuid.NewString()
+	cleanupIssuesByTitle(t, title)
+
+	rec := exerciseWorkspaceMCPAsAgent(t, map[string]any{
+		"jsonrpc": "2.0",
+		"id":      21,
+		"method":  "tools/call",
+		"params": map[string]any{
+			"name":      "create_issue",
+			"arguments": map[string]any{"title": title, "allow_duplicate": true},
+		},
+	})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("Workspace MCP Deny status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "platform_action_denied") {
+		t.Fatalf("Workspace MCP Deny response missing platform_action_denied: %s", rec.Body.String())
+	}
+	if got := issueCountByTitle(t, title); got != 0 {
+		t.Fatalf("Workspace MCP Deny mutated %d issue rows, want 0", got)
+	}
+}
+
+func TestWorkspaceMCPCreateIssuePermission_AskReturnsPendingWithoutMutation(t *testing.T) {
+	setCreateIssueWorkspacePolicy(t, toolpolicy.SettingAsk)
+	title := "Workspace MCP pending " + uuid.NewString()
+	cleanupIssuesByTitle(t, title)
+
+	rec := exerciseWorkspaceMCPAsAgent(t, map[string]any{
+		"jsonrpc": "2.0",
+		"id":      22,
+		"method":  "tools/call",
+		"params": map[string]any{
+			"name":      "create_issue",
+			"arguments": map[string]any{"title": title, "allow_duplicate": true},
+		},
+	})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("Workspace MCP Ask status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "platform_action_pending") {
+		t.Fatalf("Workspace MCP Ask response missing platform_action_pending: %s", rec.Body.String())
+	}
+	if got := issueCountByTitle(t, title); got != 0 {
+		t.Fatalf("Workspace MCP Ask mutated %d issue rows before approval, want 0", got)
+	}
+}
+
 func TestWorkspaceMCPTaskTokenCannotCrossWorkspaceDirectly(t *testing.T) {
 	otherWorkspaceID := uuid.NewString()
 	req := httptest.NewRequest(http.MethodPost, "/api/workspaces/"+otherWorkspaceID+"/mcp", bytes.NewReader(mustJSON(t, map[string]any{
@@ -110,6 +162,22 @@ func exerciseWorkspaceMCP(t *testing.T, workspaceID, userID string, payload map[
 	req := httptest.NewRequest(http.MethodPost, "/api/workspaces/"+workspaceID+"/mcp", bytes.NewReader(mustJSON(t, payload)))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-User-ID", userID)
+	rec := httptest.NewRecorder()
+	workspaceMCPTestRouter().ServeHTTP(rec, req)
+	return rec
+}
+
+func exerciseWorkspaceMCPAsAgent(t *testing.T, payload map[string]any) *httptest.ResponseRecorder {
+	t.Helper()
+	agentID := createHandlerTestAgent(t, "workspace-mcp-permission-"+uuid.NewString(), []byte(`{}`))
+	taskID := createHandlerTestTaskForAgent(t, agentID)
+	req := httptest.NewRequest(http.MethodPost, "/api/workspaces/"+testWorkspaceID+"/mcp", bytes.NewReader(mustJSON(t, payload)))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-User-ID", testUserID)
+	req.Header.Set("X-Actor-Source", "task_token")
+	req.Header.Set("X-Workspace-ID", testWorkspaceID)
+	req.Header.Set("X-Agent-ID", agentID)
+	req.Header.Set("X-Task-ID", taskID)
 	rec := httptest.NewRecorder()
 	workspaceMCPTestRouter().ServeHTTP(rec, req)
 	return rec

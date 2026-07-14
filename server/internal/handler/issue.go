@@ -2337,6 +2337,11 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 
 	// Determine creator identity: agent (via X-Agent-ID header) or member.
 	creatorType, actualCreatorID := h.resolveActor(r, creatorID, workspaceID)
+	// CEREBRO-PATCH(create-issue-platform-action): FIR-3266 enforce the shared agent permission before mutation.
+	if answer := h.authorizeCreateIssue(r.Context(), r, wsUUID, creatorType, actualCreatorID, "rest_api", map[string]any{"title": req.Title, "parent_issue_id": req.ParentIssueID}, req); !answer.Allowed {
+		writeCreateIssuePlatformAction(w, answer)
+		return
+	}
 
 	// Optional origin stamping (quick-create / autopilot). Only the
 	// allowed origin types are accepted; anything else is rejected so a

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -315,6 +316,51 @@ func TestRunIssueCreateShowsDuplicateMessage(t *testing.T) {
 	}
 	if got := err.Error(); got != want {
 		t.Fatalf("error = %q, want %q", got, want)
+	}
+}
+
+// CEREBRO-PATCH(create-issue-approval-cli-test): Lock approved retries to the exact pending request body.
+func TestRunIssueCreatePermissionPendingApprovedRetriesIdenticalBodyOnce(t *testing.T) {
+	var posts, polls int
+	var postedBodies [][]byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/api/issues":
+			posts++
+			body, err := io.ReadAll(r.Body)
+			if err != nil {
+				t.Fatalf("read request body: %v", err)
+			}
+			postedBodies = append(postedBodies, body)
+			if posts == 1 {
+				w.WriteHeader(http.StatusAccepted)
+				_ = json.NewEncoder(w).Encode(map[string]any{"code": "platform_action_pending", "approval_id": "approval-1"})
+				return
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": "issue-1", "identifier": "MUL-1", "title": "Approved issue", "status": "todo", "priority": "none"})
+		case r.Method == http.MethodGet && r.URL.Path == "/api/workspaces/ws-1/approvals/approval-1":
+			polls++
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": "approval-1", "status": "approved"})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+	cmd := newIssueCreateTestCmd()
+	cmd.SetContext(context.Background())
+	_ = cmd.Flags().Set("title", "Approved issue")
+	if err := runIssueCreate(cmd, nil); err != nil {
+		t.Fatalf("runIssueCreate: %v", err)
+	}
+	if posts != 2 || polls != 1 {
+		t.Fatalf("posts=%d polls=%d, want posts=2 polls=1", posts, polls)
+	}
+	if len(postedBodies) != 2 || !bytes.Equal(postedBodies[0], postedBodies[1]) {
+		t.Fatalf("approved retry changed request body: %q != %q", postedBodies[0], postedBodies[1])
 	}
 }
 
