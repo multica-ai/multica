@@ -14,11 +14,15 @@ export function clampPct(v: number | null | undefined): number | null {
 }
 
 /**
- * Consumed % of the 5-hour window. Prefers the exact provider-reported
- * usage_5h_pct; falls back to the legacy log-scraped usage_window_pct.
+ * Consumed % of the 5-hour window. A structured weekly window makes an
+ * absent 5-hour window authoritative; only fully legacy records fall back
+ * to the log-scraped usage_window_pct.
  */
 export function usedPct5h(account: CerebroAccount): number | null {
-  return clampPct(account.usage_5h_pct) ?? clampPct(account.usage_window_pct);
+  const exact5h = clampPct(account.usage_5h_pct);
+  if (exact5h !== null) return exact5h;
+  if (clampPct(account.usage_7d_pct) !== null) return null;
+  return clampPct(account.usage_window_pct);
 }
 
 /** Consumed % of the 7-day (weekly) window, when the provider reports it. */

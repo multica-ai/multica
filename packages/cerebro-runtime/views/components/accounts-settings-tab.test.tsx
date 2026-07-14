@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { CerebroAccount } from "@multica/core/api";
 
@@ -165,6 +165,46 @@ describe("AccountsSettingsTab", () => {
     expect(screen.getByText("60% left")).toBeInTheDocument();
     expect(screen.getByText("This week")).toBeInTheDocument();
     expect(screen.getByText("85% left")).toBeInTheDocument();
+  });
+
+  it("does not relabel a weekly-only provider window as Next 5h (FIR-3118)", () => {
+    mockListAccounts.mockReturnValue({
+      data: [
+        {
+          ...acc1,
+          provider: "codex",
+          usage_window_pct: 73,
+          usage_5h_pct: null,
+          usage_7d_pct: 73,
+        },
+      ],
+      isLoading: false,
+    });
+
+    render(<AccountsSettingsTab />);
+
+    expect(
+      within(screen.getByLabelText("Next 5h usage")).getByText("No data yet"),
+    ).toBeInTheDocument();
+    expect(
+      within(screen.getByLabelText("This week usage")).getByText("27% left"),
+    ).toBeInTheDocument();
+  });
+
+  it("keeps the legacy Next 5h fallback when no exact windows exist (FIR-3118)", () => {
+    mockListAccounts.mockReturnValue({
+      data: [{ ...acc1, usage_window_pct: 40 }],
+      isLoading: false,
+    });
+
+    render(<AccountsSettingsTab />);
+
+    expect(
+      within(screen.getByLabelText("Next 5h usage")).getByText("60% left"),
+    ).toBeInTheDocument();
+    expect(
+      within(screen.getByLabelText("This week usage")).getByText("No data yet"),
+    ).toBeInTheDocument();
   });
 
   it("keeps remaining usage primary and shows token totals as the secondary line (FIR-3118)", () => {
