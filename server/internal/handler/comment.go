@@ -1139,7 +1139,13 @@ func (h *Handler) PreviewCommentTriggers(w http.ResponseWriter, r *http.Request)
 		parentComment = &parent
 	}
 
-	content := req.Content
+	// Normalize with the SAME entry point CreateComment/UpdateComment apply
+	// before persisting (sanitizeNullBytes), so the preview computes triggers on
+	// the exact content that will be stored and enqueued on submit. Otherwise a
+	// mention hidden behind a byte the DB strips (e.g. a NUL inside
+	// mention://agent/<uuid>) reads as inert in preview but enqueues the agent on
+	// submit — a preview/side-effect divergence (GH #5388 review).
+	content := sanitizeNullBytes(req.Content)
 	if content == "" {
 		writeJSON(w, http.StatusOK, CommentTriggerPreviewResponse{Agents: []CommentTriggerAgentResponse{}})
 		return
@@ -1200,6 +1206,15 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Strip bytes PostgreSQL's TEXT column rejects before the empty check. The
+	// case reachable over the JSON API is an embedded NUL (0x00, SQLSTATE
+	// 22021) that survives a JSON round trip; sanitizeNullBytes also drops
+	// invalid UTF-8 as defense-in-depth. A stray such byte in agent-written
+	// content (notably via --content-file) otherwise fails the INSERT with an
+	// opaque 500 the CLI renders as "server unavailable" and retries forever —
+	// the plausible cause of GH #5388. Mirrors the skill-import sanitization;
+	// normalizing first means all-NUL content is correctly treated as empty.
+	req.Content = sanitizeNullBytes(req.Content)
 	if req.Content == "" {
 		writeError(w, http.StatusBadRequest, "content is required")
 		return
@@ -2054,6 +2069,10 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
+	// See CreateComment: strip NUL / invalid-UTF-8 bytes PostgreSQL's TEXT column
+	// rejects before the empty check, so an edit that introduces such a byte
+	// can't 500 (GH #5388).
+	req.Content = sanitizeNullBytes(req.Content)
 	if req.Content == "" {
 		writeError(w, http.StatusBadRequest, "content is required")
 		return
