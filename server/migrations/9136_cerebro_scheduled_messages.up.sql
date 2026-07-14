@@ -1,4 +1,4 @@
-CREATE TABLE cerebro_scheduled_message (
+CREATE TABLE IF NOT EXISTS cerebro_scheduled_message (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     workspace_id uuid NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,
     issue_id uuid NOT NULL REFERENCES issue(id) ON DELETE CASCADE,
@@ -14,8 +14,8 @@ CREATE TABLE cerebro_scheduled_message (
     updated_at timestamptz NOT NULL DEFAULT now()
 );
 
-CREATE INDEX cerebro_scheduled_message_due_idx
+CREATE INDEX IF NOT EXISTS cerebro_scheduled_message_due_idx
     ON cerebro_scheduled_message (send_at) WHERE status = 'pending';
-CREATE INDEX cerebro_scheduled_message_owner_idx
+CREATE INDEX IF NOT EXISTS cerebro_scheduled_message_owner_idx
     ON cerebro_scheduled_message (workspace_id, author_user_id, issue_id, send_at)
     WHERE status IN ('pending', 'processing', 'failed');

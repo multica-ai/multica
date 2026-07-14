@@ -277,6 +277,19 @@ var catalog = []Capability{
 		},
 	},
 	{
+		Key:           "manage_scheduled_messages",
+		Title:         "Manage scheduled messages",
+		Category:      CategoryComments,
+		Description:   "Schedule, edit, delete, or immediately send a scheduled message.",
+		DescriptionZh: "计划、编辑、删除或立即发送计划消息。",
+		Ops: []string{
+			"POST /api/issues/{id}/scheduled-messages",
+			"PATCH /api/scheduled-messages/{scheduledMessageId}",
+			"DELETE /api/scheduled-messages/{scheduledMessageId}",
+			"POST /api/scheduled-messages/{scheduledMessageId}/send",
+		},
+	},
+	{
 		Key:           "update_comment",
 		Title:         "Edit / delete comment",
 		Category:      CategoryComments,
