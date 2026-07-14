@@ -85,6 +85,7 @@ function ListGridHeaderCell({
   if (!onSort) {
     return (
       <div
+        role="columnheader"
         className={cn(
           "flex min-w-0 items-center px-2 text-xs text-muted-foreground",
           align === "right" && "justify-end",
@@ -99,6 +100,14 @@ function ListGridHeaderCell({
   const Arrow = sorted === "asc" ? ArrowUp : ArrowDown;
   return (
     <div
+      role="columnheader"
+      aria-sort={
+        sorted === "asc"
+          ? "ascending"
+          : sorted === "desc"
+            ? "descending"
+            : undefined
+      }
       className={cn(
         "flex min-w-0 items-center px-2",
         align === "right" && "justify-end",
@@ -145,6 +154,7 @@ function ListGridBody({
 }: React.ComponentProps<"div">) {
   return (
     <div
+      role="rowgroup"
       className={cn(
         "col-span-full grid grid-cols-subgrid content-start",
         className,
@@ -196,6 +206,7 @@ function ListGridCell({
 }: React.HTMLAttributes<HTMLDivElement>) {
   return (
     <div
+      role="cell"
       className={cn("flex min-w-0 items-center px-2", className)}
       {...props}
     />

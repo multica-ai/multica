@@ -133,12 +133,12 @@ type workspaceState struct {
 	lastRepoSyncErr string
 	repoRefreshMu   sync.Mutex
 	// profileSetSig is a content hash of the workspace's custom runtime
-	// profile list (MUL-3332) as last seen from the server. The
-	// workspaceSyncLoop compares the live signature with this cached value;
-	// any drift triggers a re-register so newly-added (or edited / disabled)
-	// custom runtimes appear without a daemon restart. Empty before the
-	// first successful profile fetch (older server / network blip); guarded
-	// by Daemon.mu like every other field on this struct.
+	// profile list (MUL-3332) as last seen from the server. An on-demand
+	// refresh compares the live signature with this cached value; any drift
+	// triggers a re-register so newly-added (or edited / disabled) custom
+	// runtimes appear without a daemon restart. Empty before the first
+	// successful profile fetch (older server / network blip); guarded by
+	// Daemon.mu like every other field on this struct.
 	profileSetSig string
 }
 
@@ -959,18 +959,18 @@ func (d *Daemon) registerRuntimesForWorkspace(ctx context.Context, workspaceID s
 	// whose command_name is not on PATH is skipped (the host doesn't have it).
 	//
 	// profileSig is a content hash of the workspace's profile list captured
-	// here so the workspaceSyncLoop can detect server-side profile changes
-	// between sync ticks without making an extra round trip on every tick
-	// (MUL-3332). An empty string means the fetch failed and the caller must
-	// keep whatever signature was previously cached on the workspaceState.
+	// here so an on-demand server notification can skip re-registration when
+	// the effective profile set is already current (MUL-3332). An empty string
+	// means the fetch failed and the caller must keep whatever signature was
+	// previously cached on the workspaceState.
 	profileSig := d.appendProfileRuntimes(ctx, workspaceID, &runtimes, &failedProfiles)
 
 	if len(runtimes) == 0 && len(failedProfiles) == 0 {
 		// profileSig is still meaningful even when nothing resolves: the
-		// drift-refresh path uses it to remember "we already converged on the
-		// disabled-everywhere state" so the next sync tick is a no-op instead
-		// of a re-empty-register loop. Initial-registration callers that don't
-		// care about the sig discard it via _.
+		// refresh path uses it to remember "we already converged on the
+		// disabled-everywhere state" so duplicate change notifications are a
+		// no-op instead of a re-empty-register loop. Initial-registration
+		// callers that don't care about the sig discard it via _.
 		return nil, profileSig, ErrNoRuntimesToRegister
 	}
 
@@ -1014,12 +1014,12 @@ func (d *Daemon) registerRuntimesForWorkspace(ctx context.Context, workspaceID s
 // version, status = "online", plus the profile_id the server validates.
 //
 // Returns a content signature of the fetched profile list (MUL-3332). The
-// signature is used by the workspace sync loop to detect server-side profile
-// changes between sync ticks and trigger a re-register without a daemon
-// restart. Returns the empty string when the fetch failed — callers must
-// treat that as "unknown, do not overwrite a previously-stored signature"
-// (otherwise a transient 5xx would silently flip the daemon into thinking the
-// workspace has zero profiles).
+// signature is used by on-demand profile refreshes to ignore duplicate change
+// notifications while still triggering a re-register without a daemon
+// restart. Returns the empty string when the fetch failed — callers must treat
+// that as "unknown, do not overwrite a previously-stored signature" (otherwise
+// a transient 5xx would silently flip the daemon into thinking the workspace
+// has zero profiles).
 func (d *Daemon) appendProfileRuntimes(ctx context.Context, workspaceID string, runtimes *[]map[string]string, failedProfiles *[]map[string]string) string {
 	resp, err := d.client.GetRuntimeProfiles(ctx, workspaceID)
 	if err != nil {
@@ -1125,11 +1125,10 @@ func (d *Daemon) appendProfileRuntimes(ctx context.Context, workspaceID string, 
 }
 
 // profileSetSignature is a stable content hash of the workspace's custom
-// runtime profile list (MUL-3332). The workspaceSyncLoop diffs this against
-// the cached value on each tick: a mismatch means the user added, edited, or
-// disabled a profile via the web UI / CLI between syncs and the daemon must
-// re-register so the new runtime instance shows up in the list without a
-// restart.
+// runtime profile list (MUL-3332). An on-demand refresh diffs this against the
+// cached value after the server reports a create, edit, disable, or delete; a
+// mismatch makes the daemon re-register so the new runtime instance appears
+// without a restart.
 //
 // The hashed projection covers exactly the fields that affect what the
 // daemon sends in a Register call: ID, Enabled, ProtocolFamily, CommandName,
@@ -1402,15 +1401,13 @@ func (d *Daemon) refreshWorkspaceRepos(ctx context.Context, workspaceID string) 
 // refreshWorkspaceRuntimeProfiles fetches the workspace's enabled custom
 // runtime profile list (MUL-3332), compares its content signature against
 // the value cached on the workspaceState, and triggers a re-register when
-// the signature has drifted. This is the entry point that lets profiles
-// added / edited / disabled via the web UI or CLI become visible in the
-// runtime list within one workspaceSyncLoop tick instead of requiring a
-// daemon restart.
+// the signature has drifted. This is the entry point used by the daemon
+// WebSocket change notification so profiles added / edited / disabled via the
+// web UI or CLI become visible without a daemon restart.
 //
-// Best-effort: a fetch error (older server, network blip) is logged and
-// swallowed — the cached signature is preserved so the next tick can still
-// detect a real drift. A successfully-fetched-but-unchanged signature is the
-// expected steady state and short-circuits without any further work.
+// Best-effort: a fetch error (older server, network blip) preserves the cached
+// signature. A successfully-fetched-but-unchanged signature can result from a
+// duplicate notification and short-circuits without any further work.
 //
 // On drift the function takes a path that deliberately differs from
 // reregisterWorkspaceAfterRuntimeGone in two ways:
@@ -1438,8 +1435,8 @@ func (d *Daemon) refreshWorkspaceRuntimeProfiles(ctx context.Context, workspaceI
 
 	resp, err := d.client.GetRuntimeProfiles(refreshCtx, workspaceID)
 	if err != nil {
-		// Older server (no profiles route) returns 404; the daemon should not
-		// log a noisy warning on every sync tick in that case.
+		// Older server (no profiles route) returns 404; let the on-demand caller
+		// log the failure at debug level.
 		return err
 	}
 	var profiles []RuntimeProfile
@@ -1452,7 +1449,7 @@ func (d *Daemon) refreshWorkspaceRuntimeProfiles(ctx context.Context, workspaceI
 	ws, ok := d.workspaces[workspaceID]
 	if !ok {
 		d.mu.Unlock()
-		// Workspace was removed between sync ticks — nothing to do.
+		// Workspace was removed while the refresh was in flight — nothing to do.
 		return nil
 	}
 	cached := ws.profileSetSig
@@ -1517,8 +1514,8 @@ func (d *Daemon) refreshWorkspaceRuntimeProfiles(ctx context.Context, workspaceI
 // The workspaceState pointer is preserved: the workspace itself is still a
 // valid workspace the user belongs to, just one with no agents on this
 // daemon for the moment. If the user re-enables a profile or installs a
-// built-in agent, the next sync tick's profile-drift detection (or a daemon
-// restart) will register it again.
+// built-in agent, the profile-change notification or the next daemon WS
+// reconnect will register it again.
 func (d *Daemon) convergeWorkspaceRuntimesToZero(ctx context.Context, workspaceID, profileSig string) error {
 	d.mu.Lock()
 	ws, ok := d.workspaces[workspaceID]
@@ -1573,10 +1570,10 @@ func (d *Daemon) ensureRepoReady(ctx context.Context, workspaceID, repoURL strin
 	//
 	//   - cacheHitOnEntry=true: the repo is already cloned; we still must
 	//     refresh `workspaceState.settings` because the /repo/checkout
-	//     handler reads workspaceCoAuthoredByEnabled right after this and
-	//     the 30s workspaceSyncLoop tick is too slow for a freshly-flipped
-	//     GitHub master switch / `co_authored_by_enabled` toggle to feel
-	//     live (RFC MUL-2414 §4.8; PR #2847 review by Emacs).
+	//     handler reads workspaceCoAuthoredByEnabled right after this. The
+	//     periodic workspace sync deliberately does not refresh repos or
+	//     settings, so this is the point at which a freshly-flipped GitHub
+	//     master switch / `co_authored_by_enabled` toggle becomes live.
 	//
 	//   - cacheHitOnEntry=false but cache hit *after* we acquire the mutex:
 	//     a sibling goroutine on a concurrent cold-miss already refreshed
@@ -1643,7 +1640,7 @@ const DefaultTokenRenewalInterval = 3 * 24 * time.Hour
 // register runtimes once one appears.
 func (d *Daemon) preflightAuth(ctx context.Context) error {
 	d.tryRenewToken(ctx)
-	return d.syncWorkspacesFromAPI(ctx)
+	return d.syncWorkspacesFromAPI(ctx, false)
 }
 
 // tokenRenewalLoop keeps the daemon's PAT alive by periodically asking the
@@ -1702,8 +1699,10 @@ func (d *Daemon) tryRenewToken(ctx context.Context) {
 
 // workspaceSyncLoop periodically fetches the user's workspaces from the API
 // and registers runtimes for any new ones. A WS connect/reconnect broadcast
-// triggers an immediate sync so runtime/repo changes the server applied during
-// the WS gap are picked up sub-second instead of after the next 30s tick.
+// triggers an immediate sync and one runtime-profile reconciliation so changes
+// made during the WS gap are picked up sub-second without putting profile
+// fetches back on the 30s ticker. Repository bindings and workspace settings
+// refresh on demand when a checkout needs them.
 func (d *Daemon) workspaceSyncLoop(ctx context.Context) {
 	ticker := time.NewTicker(DefaultWorkspaceSyncInterval)
 	defer ticker.Stop()
@@ -1713,8 +1712,8 @@ func (d *Daemon) workspaceSyncLoop(ctx context.Context) {
 		reconcileCh = d.reconcile.notify()
 	}
 
-	sync := func() {
-		if err := d.syncWorkspacesFromAPI(ctx); err != nil {
+	sync := func(reconcileProfiles bool) {
+		if err := d.syncWorkspacesFromAPI(ctx, reconcileProfiles); err != nil {
 			d.logger.Debug("workspace sync failed", "error", err)
 		}
 	}
@@ -1727,17 +1726,20 @@ func (d *Daemon) workspaceSyncLoop(ctx context.Context) {
 			if d.reconcile != nil {
 				reconcileCh = d.reconcile.notify()
 			}
-			sync()
+			sync(true)
 		case <-ticker.C:
-			sync()
+			sync(false)
 		}
 	}
 }
 
 // syncWorkspacesFromAPI fetches all workspaces the user belongs to and
-// registers runtimes for any that aren't already tracked. Workspaces the user
-// has left are cleaned up.
-func (d *Daemon) syncWorkspacesFromAPI(ctx context.Context) error {
+// registers runtimes for any that aren't already tracked. When
+// reconcileProfiles is true (after a daemon WS connect/reconnect), tracked
+// workspaces reconcile custom runtime profiles once so a change made while the
+// WS was unavailable is not lost. The normal 30s ticker passes false and makes
+// no runtime-profile requests. Workspaces the user has left are cleaned up.
+func (d *Daemon) syncWorkspacesFromAPI(ctx context.Context, reconcileProfiles bool) error {
 	d.reloading.Lock()
 	defer d.reloading.Unlock()
 
@@ -1766,25 +1768,10 @@ func (d *Daemon) syncWorkspacesFromAPI(ctx context.Context) error {
 	var removed int
 	for id, name := range apiIDs {
 		if currentIDs[id] {
-			// Already tracked: refresh the cached workspace settings so
-			// feature toggles flipped in the web UI take effect on the next
-			// gated operation without a daemon restart (see RFC MUL-2414 §4.8;
-			// reviewed in PR #2847). refreshWorkspaceRepos covers settings +
-			// repos in a single round trip.
-			if _, err := d.refreshWorkspaceRepos(ctx, id); err != nil {
-				d.logger.Debug("workspace sync: refresh settings failed", "workspace_id", id, "error", err)
-			}
-			// Pick up custom runtime profiles created/edited/disabled via
-			// the web UI or CLI between sync ticks (MUL-3332). Without this,
-			// a profile added on the server would only become a runtime row
-			// after a daemon restart or a runtime_gone recovery, because the
-			// already-tracked branch never re-runs registerRuntimesForWorkspace
-			// otherwise. refreshWorkspaceRuntimeProfiles is best-effort and
-			// only re-registers when it observes a real signature drift, so
-			// quiet workspaces incur exactly one cheap GetRuntimeProfiles
-			// round trip per sync tick.
-			if err := d.refreshWorkspaceRuntimeProfiles(ctx, id); err != nil {
-				d.logger.Debug("workspace sync: profile refresh failed", "workspace_id", id, "error", err)
+			if reconcileProfiles {
+				if err := d.refreshWorkspaceRuntimeProfiles(ctx, id); err != nil {
+					d.logger.Debug("workspace reconcile: profile refresh failed", "workspace_id", id, "error", err)
+				}
 			}
 			// Only intervene further if the workspace lost all of its
 			// runtimes (most commonly because handleRuntimeGone pruned them
@@ -1814,9 +1801,9 @@ func (d *Daemon) syncWorkspacesFromAPI(ctx context.Context) error {
 		}
 		d.mu.Lock()
 		ws := newWorkspaceState(id, runtimeIDs, resp.ReposVersion, resp.Repos, resp.Settings)
-		// Seed the profile signature so the next sync tick can detect drift
-		// without re-registering on a transient fetch failure (empty sig is
-		// the explicit "unknown — keep the previous value" sentinel from
+		// Seed the profile signature so later on-demand change notifications can
+		// detect drift without re-registering on duplicates (empty sig is the
+		// explicit "unknown — keep the previous value" sentinel from
 		// appendProfileRuntimes; on first registration there is no previous
 		// value, so empty stays empty).
 		ws.profileSetSig = profileSig
@@ -2138,11 +2125,19 @@ func (d *Daemon) handleLocalSkillList(ctx context.Context, rt Runtime, requestID
 		})
 		return
 	}
+	mcpServers, mcpSupported, err := listRuntimeLocalMcpServers(rt.Provider)
+	if err != nil {
+		d.logger.Warn("runtime local MCP discovery failed", "runtime_id", rt.ID, "provider", rt.Provider, "error", err)
+		mcpServers = []runtimeLocalMcpServerSummary{}
+		mcpSupported = false
+	}
 
 	d.reportLocalSkillListResult(ctx, rt, requestID, map[string]any{
-		"status":    "completed",
-		"skills":    skills,
-		"supported": supported,
+		"status":        "completed",
+		"skills":        skills,
+		"supported":     supported,
+		"mcp_servers":   mcpServers,
+		"mcp_supported": mcpSupported,
 	})
 }
 
@@ -3589,9 +3584,19 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// Squad-leader tasks also skip reuse so a pre-fix leader session recorded
 	// against the user's local_directory cannot be re-entered without a lock.
 	var agentMcpConfig json.RawMessage
+	var effectiveMcpConfig json.RawMessage
 	var cursorMcpAuthSource string
 	if task.Agent != nil {
 		agentMcpConfig = task.Agent.McpConfig
+		effectiveMcpConfig = agentMcpConfig
+		if merged, mergeErr := mergeRuntimeAndAgentMcpConfig(provider, agentMcpConfig); mergeErr != nil {
+			taskLog.Warn("mcp_config: runtime merge failed; using agent configuration only",
+				"provider", provider,
+				"error", mergeErr,
+			)
+		} else {
+			effectiveMcpConfig = merged
+		}
 		if provider == "cursor" {
 			cursorMcpAuthSource = strings.TrimSpace(task.Agent.CustomEnv[execenv.CursorMcpAuthSourceEnv])
 		}
@@ -3612,7 +3617,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			Provider:            provider,
 			CodexVersion:        codexVersion,
 			OpenclawBin:         openclawBin,
-			McpConfig:           agentMcpConfig,
+			McpConfig:           effectiveMcpConfig,
 			CursorMcpAuthSource: cursorMcpAuthSource,
 			OpenclawGateway:     openclawGateway,
 			Task:                taskCtx,
@@ -3628,7 +3633,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			Provider:            provider,
 			CodexVersion:        codexVersion,
 			OpenclawBin:         openclawBin,
-			McpConfig:           agentMcpConfig,
+			McpConfig:           effectiveMcpConfig,
 			CursorMcpAuthSource: cursorMcpAuthSource,
 			OpenclawGateway:     openclawGateway,
 			Task:                taskCtx,
@@ -3840,7 +3845,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	var mcpConfig json.RawMessage
 	if task.Agent != nil {
 		customArgs = task.Agent.CustomArgs
-		mcpConfig = task.Agent.McpConfig
+		mcpConfig = effectiveMcpConfig
 	}
 	// Two-tier model resolution: an explicit agent.model wins,
 	// then the daemon-wide MULTICA_<PROVIDER>_MODEL env var. If
@@ -3897,6 +3902,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		ThreadName:                deriveTaskThreadName(task),
 		Timeout:                   d.cfg.AgentTimeout,
 		SemanticInactivityTimeout: d.cfg.CodexSemanticInactivityTimeout,
+		HandshakeTimeout:          d.cfg.CodexHandshakeTimeout,
 		ResumeSessionID:           task.PriorSessionID,
 		ExtraArgs:                 extraArgs,
 		CustomArgs:                customArgs,
@@ -3941,7 +3947,10 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		"timeout", execOpts.Timeout,
 	)
 
-	result, tools, err := d.executeAndDrain(ctx, backend, prompt, execOpts, taskLog, task.ID)
+	// Shared across the resume-retry below so the retry's transcript rows
+	// keep ascending seq values for the same task.
+	var msgSeq atomic.Int32
+	result, tools, err := d.executeAndDrain(ctx, backend, prompt, execOpts, taskLog, task.ID, &msgSeq)
 	if err != nil {
 		return TaskResult{}, err
 	}
@@ -3953,7 +3962,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		firstUsage := result.Usage
 		taskLog.Warn("session resume failed, retrying with fresh session", "error", result.Error)
 		execOpts.ResumeSessionID = ""
-		retryResult, retryTools, retryErr := d.executeAndDrain(ctx, backend, prompt, execOpts, taskLog, task.ID)
+		retryResult, retryTools, retryErr := d.executeAndDrain(ctx, backend, prompt, execOpts, taskLog, task.ID, &msgSeq)
 		if retryErr != nil {
 			taskLog.Error("fresh session also failed to start", "error", retryErr)
 		} else {
@@ -4145,8 +4154,11 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 }
 
 // executeAndDrain runs a backend, drains its message stream (forwarding to the
-// server), and waits for the final result.
-func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, prompt string, opts agent.ExecOptions, taskLog *slog.Logger, taskID string) (agent.Result, int32, error) {
+// server), and waits for the final result. msgSeq numbers the reported task
+// messages and is owned by the caller so a same-task retry continues the
+// sequence instead of restarting at 1 — the server orders the transcript by
+// seq alone, and duplicate seqs would interleave the two attempts' rows.
+func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, prompt string, opts agent.ExecOptions, taskLog *slog.Logger, taskID string, msgSeq *atomic.Int32) (agent.Result, int32, error) {
 	// Wrap the caller's ctx so the idle watchdog (below) can interrupt both
 	// the agent subprocess (via the ctx passed to backend.Execute) AND the
 	// drain loop with a single cancel. Without this layer the backend would
@@ -4205,8 +4217,12 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 		go d.runIdleWatchdog(agentCtx, idleWindow, d.cfg.AgentToolWatchdog, &lastActivityAt, &inFlightTools, &idleWatchdogFired, &idleWatchdogThreshold, agentCancel, session.Messages, taskLog, taskID)
 	}
 
+	// drainFinished closes after the drain goroutine has flushed the last
+	// message batch, so the result hand-off below can wait for the transcript
+	// tail to be persisted.
+	drainFinished := make(chan struct{})
 	go func() {
-		var seq atomic.Int32
+		defer close(drainFinished)
 		var mu sync.Mutex
 		var pendingText strings.Builder
 		var pendingThinking strings.Builder
@@ -4216,7 +4232,7 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 		flush := func() {
 			mu.Lock()
 			if pendingThinking.Len() > 0 {
-				s := seq.Add(1)
+				s := msgSeq.Add(1)
 				batch = append(batch, TaskMessageData{
 					Seq:     int(s),
 					Type:    "thinking",
@@ -4225,7 +4241,7 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 				pendingThinking.Reset()
 			}
 			if pendingText.Len() > 0 {
-				s := seq.Add(1)
+				s := msgSeq.Add(1)
 				batch = append(batch, TaskMessageData{
 					Seq:     int(s),
 					Type:    "text",
@@ -4252,7 +4268,9 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 		defer ticker.Stop()
 
 		done := make(chan struct{})
+		tickerDone := make(chan struct{})
 		go func() {
+			defer close(tickerDone)
 			for {
 				select {
 				case <-ticker.C:
@@ -4302,7 +4320,7 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 						callIDToTool[msg.CallID] = msg.Tool
 						mu.Unlock()
 					}
-					s := seq.Add(1)
+					s := msgSeq.Add(1)
 					mu.Lock()
 					batch = append(batch, TaskMessageData{
 						Seq:   int(s),
@@ -4326,7 +4344,7 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 							break
 						}
 					}
-					s := seq.Add(1)
+					s := msgSeq.Add(1)
 					output := msg.Output
 					if len(output) > 8192 {
 						output = output[:8192]
@@ -4361,7 +4379,7 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 					}
 				case agent.MessageError:
 					taskLog.Error("agent error", "content", msg.Content)
-					s := seq.Add(1)
+					s := msgSeq.Add(1)
 					mu.Lock()
 					batch = append(batch, TaskMessageData{
 						Seq:     int(s),
@@ -4376,11 +4394,39 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 		}
 	drainDone:
 		close(done)
+		// Let any tick-driven flush finish before the final one: a flush still
+		// in flight would otherwise keep posting batches after this goroutine
+		// signalled that the transcript tail was persisted.
+		<-tickerDone
 		flush()
 	}()
 
+	// waitForDrain blocks until the drain goroutine has flushed the transcript
+	// tail, so every terminal return below hands control back only after the
+	// task's reported messages are persisted — a consumer reading them at the
+	// terminal transition would otherwise see a transcript that is non-empty
+	// but truncated, indistinguishable from a complete one. Bounded so a
+	// backend that never closes its message channel cannot stall the terminal
+	// transition: after 10s the drain loop is cancelled and given a window
+	// wide enough for its worst-case exit — an in-flight tick flush plus the
+	// final one, each capped by the 5s ReportTaskMessages timeout and neither
+	// interruptible by the cancel (they post on context.Background()).
+	waitForDrain := func() {
+		select {
+		case <-drainFinished:
+		case <-time.After(10 * time.Second):
+			drainCancel()
+			select {
+			case <-drainFinished:
+			case <-time.After(12 * time.Second):
+				taskLog.Warn("transcript drain did not stop after cancel; completing anyway")
+			}
+		}
+	}
+
 	select {
 	case result := <-session.Result:
+		waitForDrain()
 		if idleWatchdogFired.Load() {
 			// The backend's wait goroutine (e.g. claude.go) translates the
 			// SIGKILL we delivered via agentCancel into Status="aborted".
@@ -4394,6 +4440,11 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 		}
 		return result, toolCount.Load(), nil
 	case <-drainCtx.Done():
+		// The drain loop is exiting on this same Done signal; wait for its
+		// final flush so the timeout/watchdog/cancel terminals below cannot
+		// hand back (and let runTask fail-and-broadcast) a still-flushing
+		// transcript either.
+		waitForDrain()
 		// Idle watchdog cancels via agentCancel(), which propagates here as
 		// context.Canceled. Check this BEFORE the generic cancelled/timeout
 		// classifiers so a watchdog-induced stop isn't misreported as

@@ -251,7 +251,7 @@ func (h *Hub) NotifyTaskAvailable(runtimeID, taskID string) {
 }
 
 // NotifyRuntimeProfilesChanged asks connected daemons in workspaceID to pull
-// runtime profiles now instead of waiting for their periodic sync loop.
+// runtime profiles after a create, update, disable, or delete.
 func (h *Hub) NotifyRuntimeProfilesChanged(workspaceID, profileID string) {
 	h.notifyRuntimeProfilesChanged(workspaceID, profileID, "")
 }

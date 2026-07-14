@@ -13,7 +13,7 @@ import { SubmitButton } from "@multica/ui/components/common/submit-button";
 import { ChatAddMenu } from "./chat-add-menu";
 import { useChatStore, newSessionDraftKey } from "@multica/core/chat";
 import { createLogger } from "@multica/core/logger";
-import { enterKey, formatShortcut, modKey } from "@multica/core/platform";
+import { formatShortcut, useShortcut } from "@multica/core/shortcuts";
 import type { UploadResult } from "@multica/core/hooks/use-file-upload";
 import type { MentionItem } from "../../editor/extensions/mention-suggestion";
 import type { Attachment } from "@multica/core/types";
@@ -90,6 +90,13 @@ interface ChatInputProps {
    *  0 (the initial value) is inert, so a plain deep-link open never steals
    *  focus; only an explicit bump does. */
   focusRequest?: number;
+  /**
+   * Optional storage/identity isolation for embedded chat surfaces that use
+   * the shared composer without participating in the global chat selection
+   * store (for example Agent Builder).
+   */
+  draftKeyOverride?: string;
+  editorKeyOverride?: string;
 }
 
 export function ChatInput({
@@ -106,8 +113,11 @@ export function ChatInput({
   leftAdornment,
   contextItems,
   focusRequest,
+  draftKeyOverride,
+  editorKeyOverride,
 }: ChatInputProps) {
   const { t } = useT("chat");
+  const sendShortcut = useShortcut("send");
   const editorRef = useRef<ContentEditorRef>(null);
   const activeSessionId = useChatStore((s) => s.activeSessionId);
   const selectedAgentId = useChatStore((s) => s.selectedAgentId);
@@ -138,7 +148,8 @@ export function ChatInput({
   // user would see the image flash on then disappear. Keeping editor
   // identity stable across the lazy-create event is what makes
   // first-upload-creates-session work the same as second-upload.
-  const draftKey = activeSessionId ?? newSessionDraftKey(selectedAgentId);
+  const draftKey =
+    draftKeyOverride ?? activeSessionId ?? newSessionDraftKey(selectedAgentId);
   // Select a primitive — empty-string fallback keeps referential stability.
   const inputDraft = useChatStore((s) => s.inputDrafts[draftKey] ?? "");
   const draftAttachments = useChatStore(
@@ -151,7 +162,7 @@ export function ChatInput({
   const [isEmpty, setIsEmpty] = useState(!inputDraft.trim());
   const [isSubmitting, setIsSubmitting] = useState(false);
   const consumedRestoreIdRef = useRef<string | null>(null);
-  const editorKey = selectedAgentId ?? "no-agent";
+  const editorKey = editorKeyOverride ?? selectedAgentId ?? "no-agent";
   // Number of in-flight uploads. We track this explicitly (rather than
   // peeking at the editor on every render) so the SubmitButton visibly
   // disables the instant an upload starts and re-enables the instant it
@@ -365,7 +376,7 @@ export function ChatInput({
       <div
         {...(uploadEnabled ? dropZoneProps : {})}
         className={cn(
-          "relative mx-auto flex min-h-16 max-h-40 w-full max-w-4xl flex-col rounded-lg bg-card pb-9 border-1 border-border transition-colors focus-within:border-brand",
+          "relative mx-auto flex min-h-16 max-h-40 w-full max-w-4xl flex-col rounded-lg border border-surface-border bg-surface pb-9 transition-[border-color,box-shadow] focus-within:border-brand focus-within:ring-2 focus-within:ring-ring/20",
           // Visual + interaction lock when there's no agent. We don't
           // toggle ContentEditor's editable mode (Tiptap can't switch
           // cleanly post-mount, and the prop has been removed); instead
@@ -406,11 +417,6 @@ export function ChatInput({
             // Chat is short-form — the floating formatting toolbar is
             // more distraction than feature here.
             showBubbleMenu={false}
-            // Chat intentionally leaves submitOnEnter at its default false:
-            // Mod+Enter submits, while bare Enter falls through to Tiptap's
-            // default behavior for lists, quotes, and paragraph breaks.
-            // Without this, Enter-as-send would steal the only key that
-            // continues a bullet list, leaving users stuck after one item.
           />
         </div>
         {(uploadEnabled || leftAdornment) && (
@@ -425,14 +431,17 @@ export function ChatInput({
         )}
         <div className="absolute bottom-1 right-1.5 flex items-center gap-1">
           <SubmitButton
-            shape="circle"
             onClick={handleSend}
             disabled={isEmpty || isSubmitting || !!disabled || !!noAgent || pendingUploads > 0}
             loading={isSubmitting}
             running={isRunning}
             onStop={onStop}
-            tooltip={`${t(($) => $.input.send_tooltip)} · ${formatShortcut(modKey, enterKey)}`}
+            tooltip={sendShortcut
+              ? `${t(($) => $.input.send_tooltip)} · ${formatShortcut(sendShortcut)}`
+              : t(($) => $.input.send_tooltip)}
+            ariaLabel={t(($) => $.input.send_tooltip)}
             stopTooltip={t(($) => $.input.stop_tooltip)}
+            stopAriaLabel={t(($) => $.input.stop_tooltip)}
           />
         </div>
         {uploadEnabled && isDragOver && <FileDropOverlay />}

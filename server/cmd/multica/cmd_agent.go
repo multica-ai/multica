@@ -281,7 +281,12 @@ func newAPIClient(cmd *cobra.Command) (*cli.APIClient, error) {
 	return client, nil
 }
 
-func resolveServerURL(cmd *cobra.Command) string {
+const (
+	defaultCloudServerURL = "https://api.multica.ai"
+	defaultCloudAppURL    = "https://multica.ai"
+)
+
+func tryResolveServerURL(cmd *cobra.Command) string {
 	val := cli.FlagOrEnv(cmd, "server-url", "MULTICA_SERVER_URL", "")
 	if val != "" {
 		return normalizeAPIBaseURL(val)
@@ -291,9 +296,23 @@ func resolveServerURL(cmd *cobra.Command) string {
 	if err == nil && cfg.ServerURL != "" {
 		return normalizeAPIBaseURL(cfg.ServerURL)
 	}
+	return ""
+}
+
+func resolveServerURL(cmd *cobra.Command) string {
+	if val := tryResolveServerURL(cmd); val != "" {
+		return val
+	}
 	fmt.Fprintln(os.Stderr, "No server configured. Run 'multica setup' first.")
 	os.Exit(1)
 	return "" // unreachable
+}
+
+func resolveLoginTokenServerURL(cmd *cobra.Command) string {
+	if val := tryResolveServerURL(cmd); val != "" {
+		return val
+	}
+	return defaultCloudServerURL
 }
 
 func normalizeAPIBaseURL(raw string) string {

@@ -49,8 +49,8 @@ import { CodeBlockView } from "./code-block-view";
 import { PatchedListItem, PatchedTaskItem } from "./list-item";
 import { createMarkdownPasteExtension } from "./markdown-paste";
 import { createMarkdownCopyExtension } from "./markdown-copy";
-import { createSubmitExtension } from "./submit-shortcut";
 import { createBlurShortcutExtension } from "./blur-shortcut";
+import { createSubmitShortcutExtension } from "./submit-shortcut";
 import { createFileUploadExtension } from "./file-upload";
 import { FileCardExtension } from "./file-card";
 import { ImageView } from "./image-view";
@@ -134,8 +134,6 @@ export interface EditorExtensionsOptions {
   onUploadFileRef?: RefObject<
     ((file: File) => Promise<UploadResult | null>) | undefined
   >;
-  /** When true, bare Enter also submits (chat-style). Default false. */
-  submitOnEnter?: boolean;
   /**
    * When true, the `@` suggestion picker is not attached. The mention node
    * type is still registered in the schema so any mention pasted in from
@@ -250,15 +248,12 @@ export function createEditorExtensions(
     Typography,
     Placeholder.configure({ placeholder: placeholderText }),
     createMarkdownPasteExtension(),
-    createSubmitExtension(
-      () => {
-        const fn = options.onSubmitRef?.current;
-        if (!fn) return false; // no submit wired — let default Enter insert newline
-        fn();
-        return true;
-      },
-      { submitOnEnter: options.submitOnEnter ?? false },
-    ),
+    createSubmitShortcutExtension(() => {
+      const fn = options.onSubmitRef?.current;
+      if (!fn) return false;
+      fn();
+      return true;
+    }),
     createBlurShortcutExtension(),
     createFileUploadExtension(options.onUploadFileRef!),
   ];

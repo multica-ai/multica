@@ -227,6 +227,7 @@
     "archive_tooltip": "Archive",
     "pin_tooltip": "Pin to sidebar",
     "unpin_tooltip": "Unpin from sidebar",
+    "thread_nav_label": "Jump to comment thread",
     "sidebar_tooltip": "Toggle sidebar",
     "find": {
       "placeholder": "Find in issue...",

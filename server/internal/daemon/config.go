@@ -28,6 +28,7 @@ const (
 	// hard ceiling for cost/resource control can set MULTICA_AGENT_TIMEOUT.
 	DefaultAgentTimeout                   = 0
 	DefaultCodexSemanticInactivityTimeout = 10 * time.Minute
+	DefaultCodexHandshakeTimeout          = 30 * time.Second
 	// DefaultAgentIdleWatchdog is the per-task safety net that force-stops a
 	// run when the backend has emitted no message for this long AND its
 	// message queue is empty. Backends like Claude Code can hang indefinitely
@@ -97,6 +98,7 @@ type Config struct {
 	HeartbeatInterval              time.Duration
 	AgentTimeout                   time.Duration
 	CodexSemanticInactivityTimeout time.Duration
+	CodexHandshakeTimeout          time.Duration
 	AgentIdleWatchdog              time.Duration // force-stop a run when the backend goes silent this long with an empty queue (0 = disabled)
 	AgentToolWatchdog              time.Duration // force-stop a run when a single tool call stays in flight (silent) this long (0 = disabled); backstop for hung tools now that there is no wall-clock cap
 	ClaudeArgs                     []string
@@ -123,6 +125,7 @@ type Overrides struct {
 	// distinguishable from "flag not passed". nil = use env/default.
 	AgentTimeout                   *time.Duration
 	CodexSemanticInactivityTimeout time.Duration
+	CodexHandshakeTimeout          time.Duration
 	MaxConcurrentTasks             int
 	DaemonID                       string
 	DeviceName                     string
@@ -367,6 +370,17 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		codexSemanticInactivityTimeout = overrides.CodexSemanticInactivityTimeout
 	}
 
+	codexHandshakeTimeout, err := durationFromEnv("MULTICA_CODEX_HANDSHAKE_TIMEOUT", DefaultCodexHandshakeTimeout)
+	if err != nil {
+		return Config{}, err
+	}
+	if codexHandshakeTimeout <= 0 {
+		codexHandshakeTimeout = DefaultCodexHandshakeTimeout
+	}
+	if overrides.CodexHandshakeTimeout > 0 {
+		codexHandshakeTimeout = overrides.CodexHandshakeTimeout
+	}
+
 	// MULTICA_AGENT_IDLE_WATCHDOG=0 disables the per-task idle watchdog. We
 	// route 0 through durationFromEnv so the operator can opt out without
 	// patching the binary; any positive duration overrides DefaultAgentIdleWatchdog.
@@ -529,6 +543,7 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		HeartbeatInterval:              heartbeatInterval,
 		AgentTimeout:                   agentTimeout,
 		CodexSemanticInactivityTimeout: codexSemanticInactivityTimeout,
+		CodexHandshakeTimeout:          codexHandshakeTimeout,
 		AgentIdleWatchdog:              agentIdleWatchdog,
 		AgentToolWatchdog:              agentToolWatchdog,
 		ClaudeArgs:                     claudeArgs,
@@ -756,12 +771,22 @@ var defaultAgentCommandNames = []string{
 	"pi", "cursor-agent", "copilot", "kimi", "kiro-cli", "codebuddy", "agy", "traecli",
 }
 
+// codexDesktopAppBundlePaths returns candidate macOS app-bundle locations for
+// the bundled Codex CLI. OpenAI relocated the Desktop app from Codex.app to
+// ChatGPT.app (#5205). Candidates are ordered by install location first
+// (system /Applications before user ~/Applications); within each location the
+// new ChatGPT.app path is tried before the legacy Codex.app path, so updated
+// installs win while older installs still resolve.
 var codexDesktopAppBundlePaths = func() []string {
 	paths := []string{
+		"/Applications/ChatGPT.app/Contents/Resources/codex",
 		"/Applications/Codex.app/Contents/Resources/codex",
 	}
 	if home, err := os.UserHomeDir(); err == nil {
-		paths = append(paths, filepath.Join(home, "Applications", "Codex.app", "Contents", "Resources", "codex"))
+		paths = append(paths,
+			filepath.Join(home, "Applications", "ChatGPT.app", "Contents", "Resources", "codex"),
+			filepath.Join(home, "Applications", "Codex.app", "Contents", "Resources", "codex"),
+		)
 	}
 	return paths
 }

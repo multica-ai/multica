@@ -44,7 +44,7 @@ if err != nil { /* ... */ }
 link, err := client.CreateLink(ctx, composio.CreateLinkRequest{
     AuthConfigID: "ac_xxxxxxxx",          // configured in the Composio dashboard
     UserID:       multicaUserID.String(), // your own user id
-    CallbackURL:  "https://app.multica.ai/api/integrations/composio/callback",
+    CallbackURL:  "https://multica.ai/api/integrations/composio/callback",
 })
 // → http.Redirect(w, r, link.RedirectURL, http.StatusFound)
 
@@ -58,7 +58,7 @@ accounts, err := client.ListConnectedAccounts(ctx, composio.ListConnectedAccount
 session, err := client.CreateSession(ctx, composio.CreateSessionRequest{
     UserID: multicaUserID.String(),
     ManageConnections: &composio.ManageConnections{
-        CallbackURL: "https://app.multica.ai/settings/integrations",
+        CallbackURL: "https://multica.ai/settings/integrations",
     },
 })
 mcpURL  := session.MCP.URL

@@ -772,8 +772,19 @@ func (h *Handler) DeleteAgentRuntime(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to clean up chat pins")
 		return
 	}
+	// agent_to_label has no agent_id FK, so clear the runtime's agents' label
+	// links before those agents are hard-deleted below; otherwise they survive
+	// as invisible orphan rows once resource labels are enabled.
+	if err := qtx.DeleteAgentLabelAssignmentsByRuntime(r.Context(), rt.ID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to clean up agent label assignments")
+		return
+	}
 	if err := qtx.DeleteArchivedAgentsByRuntime(r.Context(), rt.ID); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to clean up archived agents")
+		return
+	}
+	if err := qtx.DeleteSystemAgentsByRuntime(r.Context(), rt.ID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to clean up system agents")
 		return
 	}
 
@@ -1028,8 +1039,19 @@ func (h *Handler) ArchiveAgentsAndDeleteRuntime(w http.ResponseWriter, r *http.R
 		writeError(w, http.StatusInternalServerError, "failed to clean up chat pins")
 		return
 	}
+	// agent_to_label has no agent_id FK, so clear the runtime's agents' label
+	// links before those agents are hard-deleted below; otherwise they survive
+	// as invisible orphan rows once resource labels are enabled.
+	if err := qtx.DeleteAgentLabelAssignmentsByRuntime(r.Context(), rt.ID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to clean up agent label assignments")
+		return
+	}
 	if err := qtx.DeleteArchivedAgentsByRuntime(r.Context(), rt.ID); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to clean up archived agents")
+		return
+	}
+	if err := qtx.DeleteSystemAgentsByRuntime(r.Context(), rt.ID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to clean up system agents")
 		return
 	}
 

@@ -42,6 +42,7 @@ import {
   ResizableHandle,
 } from "@multica/ui/components/ui/resizable";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
+import { NumberFlow } from "@multica/ui/components/ui/number-flow";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -227,9 +228,12 @@ export function InboxPage() {
       <div className="flex items-center gap-2">
         <h1 className="text-sm font-semibold">{t(($) => $.page.title)}</h1>
         {unreadCount > 0 && (
-          <span className="text-xs text-muted-foreground">
-            {unreadCount}
-          </span>
+          <NumberFlow
+            value={unreadCount}
+            format={{ maximumFractionDigits: 0 }}
+            aria-label={String(unreadCount)}
+            className="text-xs text-muted-foreground"
+          />
         )}
       </div>
       <DropdownMenu>
@@ -375,7 +379,7 @@ export function InboxPage() {
           </div>
           <div className="flex-1 min-h-0 overflow-y-auto space-y-1 p-2">
             {Array.from({ length: 5 }).map((_, i) => (
-              <div key={i} className="flex items-center gap-3 px-4 py-2.5">
+              <div key={i} className="flex items-center gap-3 px-2 py-2.5">
                 <Skeleton className="h-7 w-7 shrink-0 rounded-full" />
                 <div className="flex-1 space-y-2">
                   <Skeleton className="h-4 w-3/4" />
@@ -433,7 +437,7 @@ export function InboxPage() {
             </div>
             <div className="flex-1 min-h-0 overflow-y-auto space-y-1 p-2">
               {Array.from({ length: 5 }).map((_, i) => (
-                <div key={i} className="flex items-center gap-3 px-4 py-2.5">
+                <div key={i} className="flex items-center gap-3 px-2 py-2.5">
                   <Skeleton className="h-7 w-7 shrink-0 rounded-full" />
                   <div className="flex-1 space-y-2">
                     <Skeleton className="h-4 w-3/4" />

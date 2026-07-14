@@ -38,6 +38,7 @@ import type {
   ChatPendingTask,
 } from "@multica/core/types";
 import { useT } from "../../i18n";
+import { useAppForeground } from "../../common/use-app-foreground";
 
 const uiLogger = createLogger("chat.ui");
 const apiLogger = createLogger("chat.api");
@@ -203,8 +204,12 @@ export function useChatController(opts?: { isActive?: boolean }) {
   const setActiveSession = useChatStore((s) => s.setActiveSession);
   const setSelectedAgentId = useChatStore((s) => s.setSelectedAgentId);
   const user = useAuthStore((s) => s.user);
-  const { data: agents = [] } = useQuery(agentListOptions(wsId));
-  const { data: members = [] } = useQuery(memberListOptions(wsId));
+  const { data: agents = [], isSuccess: agentsLoaded } = useQuery(
+    agentListOptions(wsId),
+  );
+  const { data: members = [], isSuccess: membersLoaded } = useQuery(
+    memberListOptions(wsId),
+  );
   const { data: sessions = [], isSuccess: sessionsLoaded } = useQuery(
     chatSessionsOptions(wsId),
   );
@@ -265,6 +270,13 @@ export function useChatController(opts?: { isActive?: boolean }) {
   const availableAgents = agents.filter(
     (a) => !a.archived_at && canAssignAgent(a, user?.id, memberRole),
   );
+  // `availableAgents` is only trustworthy once BOTH queries above succeeded:
+  // the permission filter reads the member role, so agents-without-members
+  // misreports a public_to agent as unavailable. Consumers that must tell
+  // "still loading" apart from "settled and not available" (the `?agent=`
+  // deep link) gate on this instead of sniffing list emptiness. Query errors
+  // deliberately keep this false — a failed fetch is not a permission verdict.
+  const agentsSettled = agentsLoaded && membersLoaded;
 
   // The agent bound to the OPEN session, resolved from the full agent list
   // (archived included, since agentListOptions passes include_archived). An
@@ -296,16 +308,20 @@ export function useChatController(opts?: { isActive?: boolean }) {
 
   // Auto mark-as-read whenever the user is actively looking at a session with
   // unread state. `isActive` lets the caller say "my surface is on screen":
-  // the floating overlay passes `isOpen`, the tab passes `true`.
+  // the floating overlay passes `isOpen`, the tab passes `true`. `appForeground`
+  // additionally requires the window to be visible and focused: a reply landing
+  // while the app is backgrounded must stay unread so the sidebar badges it
+  // (MUL-4485); it clears the moment the user returns and this effect re-runs.
+  const appForeground = useAppForeground();
   const currentHasUnread =
     sessions.find((s) => s.id === activeSessionId)?.has_unread ?? false;
   useEffect(() => {
-    if (!isActive || !activeSessionId) return;
+    if (!isActive || !appForeground || !activeSessionId) return;
     if (!currentHasUnread) return;
     uiLogger.info("auto markRead", { sessionId: activeSessionId });
     markRead.mutate(activeSessionId);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- markRead ref stable
-  }, [isActive, activeSessionId, currentHasUnread]);
+  }, [isActive, appForeground, activeSessionId, currentHasUnread]);
 
   const { uploadWithToast } = useFileUpload(api);
 
@@ -655,6 +671,7 @@ export function useChatController(opts?: { isActive?: boolean }) {
     user,
     agents,
     availableAgents,
+    agentsSettled,
     sessions,
     activeSessionId,
     selectedAgentId,

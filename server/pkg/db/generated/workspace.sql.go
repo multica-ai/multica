@@ -55,6 +55,18 @@ const deleteWorkspace = `-- name: DeleteWorkspace :exec
 WITH ws_installations AS (
     SELECT id FROM channel_installation WHERE workspace_id = $1
 ),
+ws_agents AS (
+    SELECT id FROM agent WHERE workspace_id = $1
+),
+ws_skills AS (
+    SELECT id FROM skill WHERE workspace_id = $1
+),
+cleared_agent_label_assignments AS (
+    DELETE FROM agent_to_label WHERE agent_id IN (SELECT id FROM ws_agents)
+),
+cleared_skill_label_assignments AS (
+    DELETE FROM skill_to_label WHERE skill_id IN (SELECT id FROM ws_skills)
+),
 cleared_chat_sessions AS (
     DELETE FROM channel_chat_session_binding WHERE installation_id IN (SELECT id FROM ws_installations)
     RETURNING chat_session_id
@@ -90,13 +102,10 @@ deleted_pending_check_suites AS (
 DELETE FROM workspace WHERE workspace.id = $1
 `
 
-// The channel_* tables carry NO FK to workspace (MUL-3515 §4), so — unlike the
-// CASCADE-backed tables the DELETE below sweeps — they are not cleaned up
-// implicitly. Remove this workspace's channel installations, and every dependent
-// row of each, here so a deleted workspace never leaves an orphaned installation
-// occupying its bot's (channel_type, config->>'app_id') routing slot, which would
-// make that bot un-rebindable anywhere until an operator hand-deletes the row
-// (#4810). All in one statement so it commits atomically with the workspace row.
+// The channel_* tables (MUL-3515 §4) and resource-label junctions carry NO FK to
+// workspace, so — unlike the CASCADE-backed tables the DELETE below sweeps —
+// they are not cleaned up implicitly. Remove their workspace-owned rows here so
+// they commit or roll back atomically with the workspace row.
 func (q *Queries) DeleteWorkspace(ctx context.Context, id pgtype.UUID) error {
 	_, err := q.db.Exec(ctx, deleteWorkspace, id)
 	return err
@@ -198,39 +207,6 @@ func (q *Queries) ListWorkspaces(ctx context.Context, userID pgtype.UUID) ([]Wor
 			&i.IssueCounter,
 			&i.AvatarUrl,
 		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listWorkspacesWithRepos = `-- name: ListWorkspacesWithRepos :many
-SELECT id, repos FROM workspace
-WHERE repos IS NOT NULL AND repos <> '[]'::jsonb
-ORDER BY id
-`
-
-type ListWorkspacesWithReposRow struct {
-	ID    pgtype.UUID `json:"id"`
-	Repos []byte      `json:"repos"`
-}
-
-// Workspaces with a non-empty repo registry, to route a webhook to the repo's
-// owning workspace. ORDER BY id keeps the resolver's tie-break stable on replay.
-func (q *Queries) ListWorkspacesWithRepos(ctx context.Context) ([]ListWorkspacesWithReposRow, error) {
-	rows, err := q.db.Query(ctx, listWorkspacesWithRepos)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []ListWorkspacesWithReposRow{}
-	for rows.Next() {
-		var i ListWorkspacesWithReposRow
-		if err := rows.Scan(&i.ID, &i.Repos); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

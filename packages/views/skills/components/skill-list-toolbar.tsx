@@ -188,6 +188,7 @@ export function SkillListToolbar({
           <Input
             value={search}
             onChange={(e) => onSearchChange(e.target.value)}
+            aria-label={t(($) => $.page.search_placeholder)}
             placeholder={t(($) => $.page.search_placeholder)}
             className="h-8 w-64 pl-8 text-sm"
           />

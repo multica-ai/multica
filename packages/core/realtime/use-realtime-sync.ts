@@ -483,14 +483,17 @@ export function useRealtimeSync(
         }
       },
       label: () => {
-        // label:created/updated/deleted — also refresh issues, since each
-        // issue carries a denormalized snapshot of its labels (rename/recolor
-        // /delete on a label needs to flush the chips on every issue showing
-        // it).
+        // Label catalogs are independently scoped to issues, agents, and
+        // skills. The generic event prefix does not carry the scope into this
+        // dispatcher, so refresh all three resource projections. Issue rows
+        // embed label snapshots; agent/skill label pickers use their resource
+        // cache plus the shared label query tree.
         const wsId = getCurrentWsId();
         if (wsId) {
           qc.invalidateQueries({ queryKey: ["labels", wsId] });
           qc.invalidateQueries({ queryKey: issueKeys.all(wsId) });
+          qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
+          qc.invalidateQueries({ queryKey: workspaceKeys.skills(wsId) });
         }
       },
       pin: () => {
