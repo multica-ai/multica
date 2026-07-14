@@ -1494,8 +1494,16 @@ func (h *Handler) enqueueCommentAgentTriggers(ctx context.Context, issue db.Issu
 			// queued (not-yet-claimed) task so a single run still covers every
 			// comment, re-stamping the run's originator/overlay to the new
 			// comment (mergeCommentIntoPendingTask).
-			if h.mergeCommentIntoPendingTask(ctx, issue, trigger, triggerCommentID) {
-				record(trigger, DispatchCoalesced, ReasonCoalesced)
+			//
+			// The merge reports HOW it resolved: a real merge is coalesced, a
+			// fail-closed / failed merge is blocked (attribution_blocked /
+			// internal_error) — never mislabeled as success (MUL-4525 §2, Elon
+			// round 5). Only "no queued task to fold into" falls through to the
+			// active-task decision below.
+			if status, reason, terminal := commentMergeTerminalOutcome(
+				h.mergeCommentIntoPendingTask(ctx, issue, trigger, triggerCommentID),
+			); terminal {
+				record(trigger, status, reason)
 				continue
 			}
 			// The merge found no queued task to fold into: the existing task
@@ -1640,36 +1648,62 @@ func decideSuppressedLeaderOutcome(active bool, activeErr error) (DispatchStatus
 	}
 }
 
-// mergeCommentIntoPendingTask folds a newly-arrived comment into an existing
-// not-yet-started task for (issue, agent) instead of dropping it (MUL-4195).
-// Returns true when the comment was HANDLED — either merged, or a non-fatal DB
-// error we deliberately do not convert into a duplicate task. Returns false
-// only when no pending task exists anymore (pgx.ErrNoRows: it was
-// claimed/started between the dedup check and now), so the caller enqueues a
-// fresh task and the deliberate comment is never lost.
-//
-// The merge is GATED on the originator being unchanged (MUL-4195 review
+// commentMergeResult distinguishes how a pending-task merge attempt resolved so
+// the caller can report an HONEST outcome (MUL-4525, Elon round 5). A real merge
+// is coalesced, but a REFUSED or FAILED merge — even when we correctly fail
+// closed by keeping the original task and not enqueuing a duplicate — must NOT
+// be reported as a success-shaped coalesced.
+type commentMergeResult int
+
+const (
+	// commentMergeSucceeded: the comment folded into the queued task → coalesced.
+	commentMergeSucceeded commentMergeResult = iota
+	// commentMergeNoPendingTask: no queued task to merge into anymore (it was
+	// claimed/started between the dedup check and now). The caller runs the
+	// active-task decision (defer vs fresh enqueue).
+	commentMergeNoPendingTask
+	// commentMergeAttributionBlocked: fail-closed attribution refused re-stamping
+	// the merge. The original task is kept and no fresh task is enqueued, but the
+	// re-attribution did NOT happen → outcome attribution_blocked, not success.
+	commentMergeAttributionBlocked
+	// commentMergeError: an unknown attribution/DB error. Fail closed (keep the
+	// task, no duplicate enqueue), but the merge did not complete → outcome
+	// internal_error, not success.
+	commentMergeError
+)
+
+// commentMergeTerminalOutcome maps a merge result that carries its own final
+// outcome (everything except commentMergeNoPendingTask, which needs the
+// active-task decision) to the reported (status, reason). terminal=false only
+// for commentMergeNoPendingTask.
+func commentMergeTerminalOutcome(result commentMergeResult) (status DispatchStatus, reason DispatchReasonCode, terminal bool) {
+	switch result {
+	case commentMergeSucceeded:
+		return DispatchCoalesced, ReasonCoalesced, true
+	case commentMergeAttributionBlocked:
+		return DispatchBlocked, ReasonAttributionBlocked, true
+	case commentMergeError:
+		return DispatchBlocked, ReasonInternalError, true
+	default: // commentMergeNoPendingTask
+		return "", "", false
+	}
+}
+
 // mergeCommentIntoPendingTask folds a newly-arrived comment into the existing
 // QUEUED (not-yet-claimed) task for (issue, agent) instead of dropping it
-// (MUL-4195). Returns true when the comment was handled (merged, or a
-// non-fatal DB error we deliberately do not turn into a duplicate). Returns
-// false only when no queued task exists to merge into (pgx.ErrNoRows) — the
-// existing task is already dispatched/running, or was just claimed — in which
-// case the caller decides between deferring to completion reconcile and a fresh
-// enqueue.
+// (MUL-4195). It reports HOW it resolved via commentMergeResult so the caller
+// never mislabels a refused/failed merge as success (MUL-4525 §2). No path here
+// enqueues a duplicate: on any failure the original task is kept intact, so the
+// comment is still read by that run and its instruction is not lost — only the
+// re-attribution / merge bookkeeping is declined, and that is surfaced honestly.
 //
-// Recompute-on-merge (MUL-4195 review must-fix #1): the run's
+// Recompute-on-merge (MUL-4195 review must-fix #1): on success the run's
 // originator_user_id, runtime_mcp_overlay and runtime_connected_apps are
 // re-stamped to the NEW trigger comment's originator, and trigger_summary is
-// refreshed. This is what lets a different member's comment safely fold into a
-// task another member created: the single coalescing run then carries the
-// latest instruction's originator and the matching connected-app overlay,
-// instead of answering the new comment under the original user's capabilities
-// and audit identity. It also replaces the earlier originator gate + fresh
-// fallback, which could not create a second pending task anyway (the
-// one-pending-per-(issue,agent) unique index) and so silently dropped the
-// mismatched-originator comment.
-func (h *Handler) mergeCommentIntoPendingTask(ctx context.Context, issue db.Issue, trigger commentAgentTrigger, newTriggerCommentID pgtype.UUID) bool {
+// refreshed — so a different member's comment safely folds into a task another
+// member created, the coalescing run carrying the latest instruction's
+// originator and matching connected-app overlay.
+func (h *Handler) mergeCommentIntoPendingTask(ctx context.Context, issue db.Issue, trigger commentAgentTrigger, newTriggerCommentID pgtype.UUID) commentMergeResult {
 	// Re-attribute the coalescing run to the new comment's human atomically: the
 	// whole attribution snapshot moves, not just the person columns (MUL-4302). An
 	// issue-assignee reaction is comment_source; a mention / thread-parent /
@@ -1677,19 +1711,20 @@ func (h *Handler) mergeCommentIntoPendingTask(ctx context.Context, issue db.Issu
 	isMention := trigger.Source != commentTriggerSourceIssueAssignee
 	attr, err := h.TaskService.AttributionForMergedComment(ctx, issue.WorkspaceID, newTriggerCommentID, isMention, trigger.Agent)
 	if err != nil {
-		// Fail-closed: the new comment cannot be precisely attributed and this
-		// workspace forbids the owner_fallback degrade. REFUSE the merge — keep the
-		// existing queued task on its original (precise) snapshot instead of
-		// re-stamping it to a degraded owner_fallback. The task still runs and reads
-		// the full thread, so the comment's instruction is not lost; only the audit
-		// re-attribution is declined (MUL-4302, Elon must-fix). Treat as handled so we
-		// never spawn a duplicate task under the one-pending-per-(issue,agent) index.
-		slog.Warn("refused comment merge: attribution fail-closed, keeping original task snapshot",
+		// The new comment cannot be re-attributed. REFUSE the merge — keep the
+		// existing queued task on its original (precise) snapshot rather than
+		// re-stamp it to a degraded owner_fallback, and never spawn a duplicate.
+		// A fail-closed refusal is a distinct, honest outcome (attribution_blocked);
+		// any other error is unclassified (internal_error) — neither is success.
+		slog.Warn("refused comment merge: attribution failed, keeping original task snapshot",
 			"issue_id", uuidToString(issue.ID),
 			"agent_id", uuidToString(trigger.Agent.ID),
 			"new_trigger_comment_id", uuidToString(newTriggerCommentID),
 			"error", err)
-		return true
+		if errors.Is(err, service.ErrAttributionFailClosed) {
+			return commentMergeAttributionBlocked
+		}
+		return commentMergeError
 	}
 	overlay, connectedApps := h.TaskService.BuildRuntimeMCPOverlayForMerge(ctx, attr.UserID, trigger.Agent)
 	row, err := h.Queries.MergeCommentIntoPendingTask(ctx, db.MergeCommentIntoPendingTaskParams{
@@ -1712,15 +1747,16 @@ func (h *Handler) mergeCommentIntoPendingTask(ctx context.Context, issue db.Issu
 			// No pre-claim (queued/deferred) task to merge into. The caller
 			// defers to completion reconcile when an active task exists, or
 			// enqueues fresh when none does.
-			return false
+			return commentMergeNoPendingTask
 		}
 		// Unknown error: the pending task most likely still exists, so do NOT
-		// risk enqueuing a duplicate. Log and treat as handled.
+		// risk enqueuing a duplicate — but the merge did not happen, so this is
+		// not a success.
 		slog.Warn("merge comment into pending task failed",
 			"issue_id", uuidToString(issue.ID),
 			"agent_id", uuidToString(trigger.Agent.ID),
 			"error", err)
-		return true
+		return commentMergeError
 	}
 	slog.Info("merged comment into pending task",
 		"task_id", uuidToString(row.ID),
@@ -1728,7 +1764,7 @@ func (h *Handler) mergeCommentIntoPendingTask(ctx context.Context, issue db.Issu
 		"agent_id", uuidToString(trigger.Agent.ID),
 		"new_trigger_comment_id", uuidToString(newTriggerCommentID),
 		"coalesced_count", len(row.CoalescedCommentIds))
-	return true
+	return commentMergeSucceeded
 }
 
 // enqueueSingleCommentTrigger creates a fresh task for one computed trigger.

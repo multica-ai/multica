@@ -86,8 +86,25 @@ func TestMergeCommentIntoPendingTask_FailClosedKeepsOriginalSnapshot(t *testing.
 		testPool.Exec(context.Background(), `UPDATE workspace SET attribution_fail_closed = false WHERE id = $1`, testWorkspaceID)
 	})
 
-	if handled := testHandler.mergeCommentIntoPendingTask(ctx, issue, trigger, parseUUID(cidB)); !handled {
-		t.Fatal("fail-closed merge must be treated as handled (no duplicate task), got false")
+	countTasks := func() int {
+		var n int
+		if err := testPool.QueryRow(ctx, `SELECT count(*) FROM agent_task_queue WHERE issue_id = $1 AND agent_id = $2`, issueID, agentID).Scan(&n); err != nil {
+			t.Fatalf("count tasks: %v", err)
+		}
+		return n
+	}
+	before := countTasks()
+
+	if result := testHandler.mergeCommentIntoPendingTask(ctx, issue, trigger, parseUUID(cidB)); result != commentMergeAttributionBlocked {
+		t.Fatalf("fail-closed merge result = %d, want commentMergeAttributionBlocked (refused, non-success)", result)
+	}
+	if after := countTasks(); after != before {
+		t.Errorf("task count changed %d -> %d on refused merge; a fail-closed refusal must not spawn a task", before, after)
+	}
+	// The refused merge must surface as a non-success blocked/attribution_blocked
+	// outcome, never a fabricated coalesced success.
+	if status, reason, terminal := commentMergeTerminalOutcome(commentMergeAttributionBlocked); !terminal || status != DispatchBlocked || reason != ReasonAttributionBlocked {
+		t.Errorf("attribution-blocked outcome = %s/%s (terminal=%v), want blocked/attribution_blocked", status, reason, terminal)
 	}
 	tc, orig, acc, src := readSnapshot()
 	if tc != cidA {
@@ -104,8 +121,8 @@ func TestMergeCommentIntoPendingTask_FailClosedKeepsOriginalSnapshot(t *testing.
 	if _, err := testPool.Exec(ctx, `UPDATE workspace SET attribution_fail_closed = false WHERE id = $1`, testWorkspaceID); err != nil {
 		t.Fatalf("clear fail-closed: %v", err)
 	}
-	if handled := testHandler.mergeCommentIntoPendingTask(ctx, issue, trigger, parseUUID(cidB)); !handled {
-		t.Fatal("fail-open merge should be handled, got false")
+	if result := testHandler.mergeCommentIntoPendingTask(ctx, issue, trigger, parseUUID(cidB)); result != commentMergeSucceeded {
+		t.Fatalf("fail-open merge result = %d, want commentMergeSucceeded", result)
 	}
 	tc2, orig2, _, src2 := readSnapshot()
 	if tc2 != cidB {
