@@ -8,6 +8,10 @@ import { setupDaemonManager } from "./daemon-manager";
 import { setupLocalDirectory } from "./local-directory";
 import { openExternalSafely, downloadURLSafely } from "./external-url";
 import { installContextMenu } from "./context-menu";
+import {
+  PendingDownloadAuthorizations,
+  sanitizeBearerAuthorization,
+} from "./download-authorization";
 import { handleAppShortcut } from "./keyboard-shortcuts";
 import { installNavigationGestures } from "./navigation-gestures";
 import { getAppVersion } from "./app-version";
@@ -86,6 +90,7 @@ if (process.platform !== "win32") {
 }
 
 const PROTOCOL = "multica";
+const pendingDownloadAuthorizations = new PendingDownloadAuthorizations();
 
 // Where the main process parks a freeze/crash breadcrumb until the next
 // renderer boot flushes it to telemetry. Lives in userData so it survives a
@@ -212,9 +217,15 @@ function createWindow(): void {
   // Strip Origin header from WebSocket upgrade requests so the server's
   // origin whitelist doesn't reject connections from localhost dev origins.
   window.webContents.session.webRequest.onBeforeSendHeaders(
-    { urls: ["wss://*/*", "ws://*/*"] },
+    { urls: ["http://*/*", "https://*/*", "ws://*/*", "wss://*/*"] },
     (details, callback) => {
-      delete details.requestHeaders["Origin"];
+      if (details.url.startsWith("ws://") || details.url.startsWith("wss://")) {
+        delete details.requestHeaders["Origin"];
+      }
+      const authorization = pendingDownloadAuthorizations.consume(details.url);
+      if (authorization) {
+        details.requestHeaders["Authorization"] = authorization;
+      }
       callback({ requestHeaders: details.requestHeaders });
     },
   );
@@ -440,13 +451,24 @@ if (!gotTheLock) {
       mainWindow?.close();
     });
 
-    ipcMain.handle("file:download-url", (_event, url: string) => {
-      if (!mainWindow) {
-        console.warn("[download] ignored file:download-url — mainWindow torn down");
-        return;
-      }
-      downloadURLSafely(mainWindow, url);
-    });
+    ipcMain.handle(
+      "file:download-url",
+      (_event, url: string, options?: { authorization?: string }) => {
+        if (!mainWindow) {
+          console.warn(
+            "[download] ignored file:download-url — mainWindow torn down",
+          );
+          return;
+        }
+        const authorization = sanitizeBearerAuthorization(
+          options?.authorization,
+        );
+        if (authorization) {
+          pendingDownloadAuthorizations.register(url, authorization);
+        }
+        downloadURLSafely(mainWindow, url);
+      },
+    );
 
     // Sync IPC: app version + normalized OS for preload. Sync (not invoke) so
     // preload can attach the values to `desktopAPI.appInfo` before any renderer

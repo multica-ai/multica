@@ -44,6 +44,7 @@ afterEach(() => {
   vi.restoreAllMocks();
   // Scrub the desktop bridge between tests so suites don't leak state.
   delete (window as unknown as { desktopAPI?: unknown }).desktopAPI;
+  window.localStorage.removeItem("multica_token");
 });
 
 describe("useDownloadAttachment (web)", () => {
@@ -264,6 +265,33 @@ describe("useDownloadAttachment (desktop)", () => {
 
     expect(downloadURL).toHaveBeenCalledWith(
       "https://api.example.test/api/attachments/att-1/download",
+    );
+  });
+
+  it("passes bearer auth for stable API attachment downloads on desktop", async () => {
+    const downloadURL = vi.fn();
+    (window as unknown as { desktopAPI: { downloadURL: typeof downloadURL } }).desktopAPI = {
+      downloadURL,
+    };
+    window.localStorage.setItem("multica_token", "jwt-desktop");
+    getBaseUrlMock.mockReturnValue("https://api.example.test");
+    getAttachmentMock.mockResolvedValueOnce({
+      id: "11111111-2222-3333-4444-555555555555",
+      url: "/uploads/report.html",
+      download_url:
+        "/api/attachments/11111111-2222-3333-4444-555555555555/download",
+      filename: "report.html",
+    });
+
+    const { result } = renderHook(() => useDownloadAttachment());
+
+    await act(async () => {
+      await result.current("11111111-2222-3333-4444-555555555555");
+    });
+
+    expect(downloadURL).toHaveBeenCalledWith(
+      "https://api.example.test/api/attachments/11111111-2222-3333-4444-555555555555/download",
+      { authorization: "Bearer jwt-desktop" },
     );
   });
 
