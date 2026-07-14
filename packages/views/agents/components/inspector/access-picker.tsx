@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Globe, Loader2, Lock, Users } from "lucide-react";
 import type {
   AgentInvocationTarget,
@@ -92,10 +92,26 @@ export function AccessPicker({
   const [draftMembers, setDraftMembers] = useState(persistedMembers);
   const [saving, setSaving] = useState(false);
 
+  // Only reset the draft when the PERSISTED values actually change by value,
+  // not by reference. A prop like invocationTargets={[]} creates a new array
+  // on every parent render, which would otherwise cause this effect to fire
+  // on every render and reset the user's in-progress edits.
+  const prevPersistedScopeRef = useRef(persistedScope);
+  const prevPersistedMembersRef = useRef(persistedMembers);
   useEffect(() => {
-    setDraftScope(persistedScope);
-    setDraftMembers(persistedMembers);
-  }, [persistedMembers, persistedScope]);
+    const scopeChanged = persistedScope !== prevPersistedScopeRef.current;
+    const membersChanged =
+      persistedMembers.length !== prevPersistedMembersRef.current.length ||
+      persistedMembers.some(
+        (id, i) => id !== prevPersistedMembersRef.current[i],
+      );
+    if (scopeChanged || membersChanged) {
+      setDraftScope(persistedScope);
+      setDraftMembers(persistedMembers);
+      prevPersistedScopeRef.current = persistedScope;
+      prevPersistedMembersRef.current = persistedMembers;
+    }
+  }, [persistedScope, persistedMembers]);
 
   const editableMembers = ownerId
     ? members.filter((member) => member.user_id !== ownerId)

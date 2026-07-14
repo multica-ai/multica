@@ -21,6 +21,9 @@ import { useT } from "../../i18n";
 import { AccessPicker, type AccessChange } from "./inspector/access-picker";
 import type { AgentListRow } from "./agents-page";
 
+// Stable empty array — passing [] inline creates a new reference each render,
+// which resets AccessPicker's draft via its useEffect dependency cascade.
+
 /**
  * Floating batch-toolbar for the agents list page. Renders archive/restore
  * actions (existing) and a "Set access scope" action (new, MUL-4302 / 2026-07-14)
@@ -241,7 +244,7 @@ export function AgentBatchToolbar({
           </DialogHeader>
           <AccessPicker
             permissionMode="private"
-            invocationTargets={[]}
+            invocationTargets={undefined}
             visibility="private"
             members={members}
             ownerId={currentUserId}
