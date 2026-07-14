@@ -9,9 +9,15 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
+
+type recoverOrphansRequest struct {
+	DryRun  bool `json:"dry_run"`
+	Confirm bool `json:"confirm"`
+}
 
 // RecoverOrphanedTasks is called by the daemon at startup for each runtime
 // it owns. It atomically fails only active tasks that carry an older daemon
@@ -24,12 +30,67 @@ import (
 // stale-runtime sweeper during rolling upgrades.
 func (h *Handler) RecoverOrphanedTasks(w http.ResponseWriter, r *http.Request) {
 	runtimeID := chi.URLParam(r, "runtimeId")
-	_, ok := h.requireDaemonRuntimeAccess(w, r, runtimeID)
-	if !ok {
+	callerIsDaemon := middleware.DaemonWorkspaceIDFromContext(r.Context()) != ""
+	var runtime db.AgentRuntime
+	if callerIsDaemon {
+		var ok bool
+		runtime, ok = h.requireDaemonRuntimeAccess(w, r, runtimeID)
+		if !ok {
+			return
+		}
+	} else {
+		runtimeIDUUID, ok := parseUUIDOrBadRequest(w, runtimeID, "runtime_id")
+		if !ok {
+			return
+		}
+		var err error
+		runtime, err = h.Queries.GetAgentRuntime(r.Context(), runtimeIDUUID)
+		if err != nil {
+			if isNotFound(err) {
+				writeError(w, http.StatusNotFound, "runtime not found")
+			} else {
+				slog.Warn("get runtime for orphan recovery failed", "runtime_id", runtimeID, "error", err)
+				writeError(w, http.StatusInternalServerError, "failed to load runtime")
+			}
+			return
+		}
+		if _, ok := h.requireWorkspaceRole(w, r, uuidToString(runtime.WorkspaceID), "runtime not found", "owner"); !ok {
+			return
+		}
+	}
+
+	var req recoverOrphansRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil && err != io.EOF {
+		writeError(w, http.StatusBadRequest, "invalid recovery request")
+		return
+	}
+	if req.DryRun && req.Confirm {
+		writeError(w, http.StatusBadRequest, "recovery request cannot be both dry_run and confirm")
 		return
 	}
 
-	rows, err := h.Queries.RecoverOrphanedTasksForRuntime(r.Context(), parseUUID(runtimeID))
+	if !callerIsDaemon {
+		preview, err := h.Queries.ListRecoverableOrphanedTasksForRuntime(r.Context(), runtime.ID)
+		if err != nil {
+			slog.Warn("recover-orphans preview failed", "runtime_id", runtimeID, "error", err)
+			writeError(w, http.StatusInternalServerError, "preview orphaned tasks failed")
+			return
+		}
+		taskIDs := make([]string, 0, len(preview))
+		for _, task := range preview {
+			taskIDs = append(taskIDs, uuidToString(task.ID))
+		}
+		if req.DryRun || !req.Confirm {
+			writeJSON(w, http.StatusOK, map[string]any{
+				"orphaned":  len(preview),
+				"task_ids":  taskIDs,
+				"confirmed": false,
+			})
+			return
+		}
+	}
+
+	rows, err := h.Queries.RecoverOrphanedTasksForRuntime(r.Context(), runtime.ID)
 	if err != nil {
 		slog.Warn("recover-orphans failed", "runtime_id", runtimeID, "error", err)
 		writeError(w, http.StatusInternalServerError, "recover orphans failed")

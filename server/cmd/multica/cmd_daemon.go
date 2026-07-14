@@ -8,6 +8,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -48,6 +49,14 @@ var daemonStatusCmd = &cobra.Command{
 	Use:   "status",
 	Short: "Show daemon status",
 	RunE:  runDaemonStatus,
+}
+
+var daemonRecoverOrphansCmd = &cobra.Command{
+	Use:   "recover-orphans <runtime-id>",
+	Short: "Preview or recover tasks from an older daemon session",
+	Long:  "Preview only the tasks proven to belong to an older daemon session. Re-run with --confirm to recover that same class of task.",
+	Args:  exactArgs(1),
+	RunE:  runDaemonRecoverOrphans,
 }
 
 var daemonRestartCmd = &cobra.Command{
@@ -97,6 +106,7 @@ func init() {
 	daemonLogsCmd.Flags().IntP("lines", "n", 50, "Number of lines to show")
 
 	daemonStatusCmd.Flags().String("output", "table", "Output format: table or json")
+	daemonRecoverOrphansCmd.Flags().Bool("confirm", false, "Confirm recovery after reviewing the affected-task preview")
 
 	// restart shares all the same flags as start
 	rf := daemonRestartCmd.Flags()
@@ -125,8 +135,11 @@ func init() {
 	daemonCmd.AddCommand(daemonStopCmd)
 	daemonCmd.AddCommand(daemonRestartCmd)
 	daemonCmd.AddCommand(daemonStatusCmd)
+	daemonCmd.AddCommand(daemonRecoverOrphansCmd)
 	daemonCmd.AddCommand(daemonLogsCmd)
 	daemonCmd.AddCommand(daemonDiskUsageCmd)
+
+	daemonRecoverOrphansCmd.Flags().String("output", "table", "Output format: table or json")
 }
 
 // daemonDirForProfile returns the state directory for the given profile.
@@ -736,6 +749,46 @@ func runDaemonStatus(cmd *cobra.Command, _ []string) error {
 	default:
 		fmt.Fprintf(os.Stdout, "%s: stopped\n", label)
 	}
+	return nil
+}
+
+// --- daemon orphan recovery ---
+
+func runDaemonRecoverOrphans(cmd *cobra.Command, args []string) error {
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+
+	ctx, cancel := cli.APIContext(context.Background())
+	defer cancel()
+
+	runtimeID := args[0]
+	path := "/api/daemon/runtimes/" + url.PathEscape(runtimeID) + "/recover-orphans"
+	confirm, _ := cmd.Flags().GetBool("confirm")
+	body := map[string]any{"dry_run": !confirm}
+	if confirm {
+		body["confirm"] = true
+	}
+
+	var result map[string]any
+	if err := client.PostJSON(ctx, path, body, &result); err != nil {
+		return fmt.Errorf("recover orphaned tasks: %w", err)
+	}
+
+	output, _ := cmd.Flags().GetString("output")
+	if output == "json" {
+		return cli.PrintJSON(os.Stdout, result)
+	}
+
+	if !confirm {
+		fmt.Fprintf(os.Stdout, "Recovery preview for runtime %s: affected=%v task_ids=%v\nRe-run with --confirm to recover only these stale-session tasks.\n",
+			runtimeID, result["orphaned"], result["task_ids"])
+		return nil
+	}
+
+	fmt.Fprintf(os.Stdout, "Recovered orphaned tasks for runtime %s: orphaned=%v retried=%v\n",
+		runtimeID, result["orphaned"], result["retried"])
 	return nil
 }
 

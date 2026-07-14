@@ -762,6 +762,20 @@ WHERE runtime_id = $1
   )
 RETURNING *;
 
+-- name: ListRecoverableOrphanedTasksForRuntime :many
+-- The operator CLI previews the exact task generation mismatch that a
+-- confirmed recovery would atomically transition. Matching the recovery
+-- predicate keeps a human from treating a merely-active task as an orphan.
+SELECT task.id, task.agent_id, task.issue_id, task.status
+FROM agent_task_queue AS task
+JOIN agent_runtime AS runtime ON runtime.id = task.runtime_id
+WHERE task.runtime_id = $1
+  AND task.status IN ('dispatched', 'running', 'waiting_local_directory')
+  AND task.daemon_session_id IS NOT NULL
+  AND runtime.daemon_session_id IS NOT NULL
+  AND runtime.daemon_session_id <> task.daemon_session_id
+ORDER BY task.started_at ASC NULLS FIRST, task.id ASC;
+
 -- name: FailStaleTasks :many
 -- Fails tasks stuck in dispatched/running beyond the given thresholds.
 --

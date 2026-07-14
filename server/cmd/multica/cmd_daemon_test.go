@@ -2,6 +2,10 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,6 +16,117 @@ import (
 
 	"github.com/multica-ai/multica/server/internal/daemon"
 )
+
+func newDaemonRecoverOrphansTestCmd() *cobra.Command {
+	cmd := &cobra.Command{Use: "recover-orphans"}
+	cmd.Flags().String("server-url", "", "")
+	cmd.Flags().String("workspace-id", "", "")
+	cmd.Flags().String("profile", "", "")
+	cmd.Flags().String("token", "", "")
+	cmd.Flags().String("output", "table", "")
+	cmd.Flags().Bool("confirm", false, "")
+	return cmd
+}
+
+func TestRunDaemonRecoverOrphans(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("MULTICA_SERVER_URL", "")
+	t.Setenv("MULTICA_WORKSPACE_ID", "")
+	t.Setenv("MULTICA_TOKEN", "")
+
+	previous, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("get cwd: %v", err)
+	}
+	workingDir := t.TempDir()
+	if err := os.Chdir(workingDir); err != nil {
+		t.Fatalf("chdir to temp dir: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := os.Chdir(previous); err != nil {
+			t.Fatalf("restore cwd: %v", err)
+		}
+	})
+
+	var method, path, body string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		method = r.Method
+		path = r.URL.Path
+		raw, _ := io.ReadAll(r.Body)
+		body = string(raw)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"orphaned": 1, "task_ids": []string{"task-1"}})
+	}))
+	t.Cleanup(server.Close)
+
+	cmd := newDaemonRecoverOrphansTestCmd()
+	_ = cmd.Flags().Set("server-url", server.URL)
+	_ = cmd.Flags().Set("workspace-id", "ws-123")
+	_ = cmd.Flags().Set("token", "test-token")
+	out, err := captureStdout(t, func() error {
+		return runDaemonRecoverOrphans(cmd, []string{"rt-123"})
+	})
+	if err != nil {
+		t.Fatalf("runDaemonRecoverOrphans: %v", err)
+	}
+	if method != http.MethodPost || path != "/api/daemon/runtimes/rt-123/recover-orphans" {
+		t.Fatalf("request = %s %s, want POST recovery endpoint", method, path)
+	}
+	if strings.TrimSpace(body) != `{"dry_run":true}` {
+		t.Fatalf("body = %q, want preview request", body)
+	}
+	if !strings.Contains(out, "Recovery preview for runtime rt-123: affected=1 task_ids=[task-1]") {
+		t.Fatalf("stdout = %q, want recovery preview", out)
+	}
+}
+
+func TestRunDaemonRecoverOrphansConfirm(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("MULTICA_SERVER_URL", "")
+	t.Setenv("MULTICA_WORKSPACE_ID", "")
+	t.Setenv("MULTICA_TOKEN", "")
+
+	previous, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("get cwd: %v", err)
+	}
+	workingDir := t.TempDir()
+	if err := os.Chdir(workingDir); err != nil {
+		t.Fatalf("chdir to temp dir: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := os.Chdir(previous); err != nil {
+			t.Fatalf("restore cwd: %v", err)
+		}
+	})
+
+	var body string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		body = string(raw)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"orphaned": 1, "retried": 1})
+	}))
+	t.Cleanup(server.Close)
+
+	cmd := newDaemonRecoverOrphansTestCmd()
+	_ = cmd.Flags().Set("server-url", server.URL)
+	_ = cmd.Flags().Set("workspace-id", "ws-123")
+	_ = cmd.Flags().Set("token", "test-token")
+	_ = cmd.Flags().Set("confirm", "true")
+	out, err := captureStdout(t, func() error {
+		return runDaemonRecoverOrphans(cmd, []string{"rt-123"})
+	})
+	if err != nil {
+		t.Fatalf("runDaemonRecoverOrphans: %v", err)
+	}
+	if strings.TrimSpace(body) != `{"confirm":true,"dry_run":false}` {
+		t.Fatalf("body = %q, want confirmed recovery request", body)
+	}
+	if !strings.Contains(out, "Recovered orphaned tasks for runtime rt-123: orphaned=1 retried=1") {
+		t.Fatalf("stdout = %q, want recovery summary", out)
+	}
+}
 
 // TestDaemonAlive locks in the liveness predicate the lifecycle commands rely
 // on: both a ready ("running") and a still-booting ("starting") daemon count as

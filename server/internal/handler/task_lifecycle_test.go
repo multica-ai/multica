@@ -170,7 +170,7 @@ func TestRecoverOrphanedTasks_RequeuesDeadSession(t *testing.T) {
 	assertRecoverOrphanedTaskState(t, ctx, fixture.agentID, fixture.issueID, fixture.taskID)
 }
 
-func TestRecoverOrphanedTasks_RejectsWorkspaceOwner(t *testing.T) {
+func TestRecoverOrphanedTasks_OwnerPreviewIsNonMutating(t *testing.T) {
 	if testHandler == nil || testPool == nil {
 		t.Skip("database not available")
 	}
@@ -182,17 +182,58 @@ func TestRecoverOrphanedTasks_RejectsWorkspaceOwner(t *testing.T) {
 	req := newRequestAs(testUserID, "POST", "/api/daemon/runtimes/"+fixture.runtimeID+"/recover-orphans", nil)
 	req = withURLParams(req, "runtimeId", fixture.runtimeID)
 	testHandler.RecoverOrphanedTasks(w, req)
-	if w.Code != http.StatusConflict {
-		t.Fatalf("RecoverOrphanedTasks owner: expected 409, got %d: %s", w.Code, w.Body.String())
+	if w.Code != http.StatusOK {
+		t.Fatalf("RecoverOrphanedTasks owner preview: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp struct {
+		Orphaned  int      `json:"orphaned"`
+		TaskIDs   []string `json:"task_ids"`
+		Confirmed bool     `json:"confirmed"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode recovery preview: %v", err)
+	}
+	if resp.Confirmed || resp.Orphaned != 1 || len(resp.TaskIDs) != 1 || resp.TaskIDs[0] != fixture.taskID {
+		t.Fatalf("recovery preview = %+v, want one unconfirmed stale-session task", resp)
 	}
 
 	var taskStatus, failureReason string
 	if err := testPool.QueryRow(ctx, `SELECT status, COALESCE(failure_reason, '') FROM agent_task_queue WHERE id = $1`, fixture.taskID).Scan(&taskStatus, &failureReason); err != nil {
-		t.Fatalf("read task after owner rejection: %v", err)
+		t.Fatalf("read task after owner preview: %v", err)
 	}
 	if taskStatus != "running" || failureReason != "" {
-		t.Fatalf("task changed after owner rejection: status=%s failure=%s", taskStatus, failureReason)
+		t.Fatalf("task changed after owner preview: status=%s failure=%s", taskStatus, failureReason)
 	}
+}
+
+func TestRecoverOrphanedTasks_OwnerConfirmRecoversOlderSession(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+	fixture := createRecoverOrphanFixture(t, ctx, "Recover owner confirm")
+
+	w := httptest.NewRecorder()
+	req := newRequestAs(testUserID, "POST", "/api/daemon/runtimes/"+fixture.runtimeID+"/recover-orphans", map[string]bool{"confirm": true})
+	req = withURLParams(req, "runtimeId", fixture.runtimeID)
+	testHandler.RecoverOrphanedTasks(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("RecoverOrphanedTasks owner confirm: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp struct {
+		Orphaned int `json:"orphaned"`
+		Retried  int `json:"retried"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode confirmed recovery: %v", err)
+	}
+	if resp.Orphaned != 1 || resp.Retried != 1 {
+		t.Fatalf("confirmed recovery = %+v, want one recovered task and retry", resp)
+	}
+	assertRecoverOrphanedTaskState(t, ctx, fixture.agentID, fixture.issueID, fixture.taskID)
 }
 
 func TestRecoverOrphanedTasks_RejectsPlainMember(t *testing.T) {
@@ -208,8 +249,8 @@ func TestRecoverOrphanedTasks_RejectsPlainMember(t *testing.T) {
 	req := newRequestAs(memberID, "POST", "/api/daemon/runtimes/"+fixture.runtimeID+"/recover-orphans", nil)
 	req = withURLParams(req, "runtimeId", fixture.runtimeID)
 	testHandler.RecoverOrphanedTasks(w, req)
-	if w.Code != http.StatusConflict {
-		t.Fatalf("RecoverOrphanedTasks member: expected 409, got %d: %s", w.Code, w.Body.String())
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("RecoverOrphanedTasks member: expected 403, got %d: %s", w.Code, w.Body.String())
 	}
 
 	var taskStatus, failureReason string
