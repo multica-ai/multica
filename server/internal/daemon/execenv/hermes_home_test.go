@@ -69,7 +69,7 @@ func TestPrepareHermesHomeOverlay(t *testing.T) {
 		t.Fatalf("prepareHermesHome failed: %v", err)
 	}
 
-	for _, name := range []string{"auth.json", ".env", "plugins", "oauth_state.json"} {
+	for _, name := range []string{"auth.json", "plugins", "oauth_state.json"} {
 		fi, err := os.Lstat(filepath.Join(hermesHome, name))
 		if err != nil {
 			t.Fatalf("%s not mirrored into overlay: %v", name, err)
@@ -77,6 +77,21 @@ func TestPrepareHermesHomeOverlay(t *testing.T) {
 		if fi.Mode()&os.ModeSymlink == 0 {
 			t.Errorf("%s should be a symlink into the shared home", name)
 		}
+	}
+
+	// .env is overlay-owned/derived (not symlinked): it preserves the source's
+	// credentials but pins HERMES_HOME to the overlay so Hermes' override=True
+	// dotenv load can't relocate the home past it.
+	envPath := filepath.Join(hermesHome, ".env")
+	if fi, err := os.Lstat(envPath); err != nil {
+		t.Fatalf(".env missing from overlay: %v", err)
+	} else if fi.Mode()&os.ModeSymlink != 0 {
+		t.Error(".env should be a derived copy, not a symlink into the shared home")
+	}
+	if data, _ := os.ReadFile(envPath); !strings.Contains(string(data), "API_KEY=abc") {
+		t.Error("derived .env dropped the source credentials")
+	} else if !strings.Contains(string(data), "HERMES_HOME='"+hermesHome+"'") {
+		t.Errorf("derived .env must pin HERMES_HOME to the overlay, got:\n%s", data)
 	}
 
 	cfgPath := filepath.Join(hermesHome, "config.yaml")
@@ -452,6 +467,127 @@ func TestHermesExternalDirsExpandsAgainstSelectedProfileHome(t *testing.T) {
 	}
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Errorf("external_dirs =\n%v\nwant\n%v", got, want)
+	}
+}
+
+// TestHermesOverlayEnvPinsHomeAfterDotenvOverride is the review's blocker 1: a
+// source .env that sets HERMES_HOME must not relocate the home past the overlay.
+// Hermes loads <HERMES_HOME>/.env with override=True right after profile
+// resolution; we replay that last-wins/override order over the derived overlay
+// .env and prove the effective HERMES_HOME stays the overlay — so bound-skill
+// discovery and task-local memory keep using it — while source creds survive.
+func TestHermesOverlayEnvPinsHomeAfterDotenvOverride(t *testing.T) {
+	t.Parallel()
+	sourceHome := t.TempDir()
+	mustWrite(t, filepath.Join(sourceHome, ".env"),
+		"ANTHROPIC_API_KEY=sk-source\nexport HERMES_HOME=/home/u/.hermes/profiles/coder\n")
+
+	hermesHome := filepath.Join(t.TempDir(), "hermes-home")
+	skills := []SkillContextForEnv{{Name: "Review Helper", Content: "x"}}
+	if err := prepareHermesHome(hermesHome, sourceHome, false, skills, nil, testLogger()); err != nil {
+		t.Fatalf("prepareHermesHome failed: %v", err)
+	}
+
+	envPath := filepath.Join(hermesHome, ".env")
+	if fi, err := os.Stat(envPath); err != nil {
+		t.Fatalf(".env missing: %v", err)
+	} else if perm := fi.Mode().Perm(); perm != 0o600 {
+		t.Errorf(".env perms = %o, want 600 (holds credentials)", perm)
+	}
+
+	env := applyDotenvOverride(t, envPath)
+	if env["HERMES_HOME"] != hermesHome {
+		t.Errorf("after override=True dotenv load HERMES_HOME = %q, want the overlay %q", env["HERMES_HOME"], hermesHome)
+	}
+	if env["ANTHROPIC_API_KEY"] != "sk-source" {
+		t.Errorf("source credential dropped: ANTHROPIC_API_KEY = %q", env["ANTHROPIC_API_KEY"])
+	}
+	// HERMES_HOME pinned to the overlay ⇒ skill discovery and memory use the
+	// overlay's own dirs.
+	if _, err := os.Stat(filepath.Join(hermesHome, "skills", "review-helper", "SKILL.md")); err != nil {
+		t.Errorf("bound skill not in overlay skills dir: %v", err)
+	}
+	if fi, err := os.Stat(filepath.Join(hermesHome, "memories")); err != nil || !fi.IsDir() {
+		t.Errorf("overlay memories dir missing: %v", err)
+	}
+}
+
+// TestHermesOverlayEnvCreatedWhenSourceHasNone ensures a minimal overlay .env is
+// written even when the source has none, so Hermes' project-.env fallback (loaded
+// with override=True only when no user .env loaded) can't relocate the home.
+func TestHermesOverlayEnvCreatedWhenSourceHasNone(t *testing.T) {
+	t.Parallel()
+	sourceHome := t.TempDir() // no .env present
+	hermesHome := filepath.Join(t.TempDir(), "hermes-home")
+	skills := []SkillContextForEnv{{Name: "Review Helper", Content: "x"}}
+	if err := prepareHermesHome(hermesHome, sourceHome, false, skills, nil, testLogger()); err != nil {
+		t.Fatalf("prepareHermesHome failed: %v", err)
+	}
+	env := applyDotenvOverride(t, filepath.Join(hermesHome, ".env"))
+	if env["HERMES_HOME"] != hermesHome {
+		t.Errorf("overlay .env must exist and pin HERMES_HOME even with no source .env; got %q", env["HERMES_HOME"])
+	}
+}
+
+// applyDotenvOverride replays python-dotenv's single-file override=True load over
+// a .env: KEY=VALUE lines in order, last assignment wins, surrounding quotes and
+// a leading `export` stripped. It mirrors how Hermes loads <HERMES_HOME>/.env.
+func applyDotenvOverride(t *testing.T, path string) map[string]string {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read overlay .env: %v", err)
+	}
+	env := map[string]string{}
+	for _, line := range strings.Split(string(data), "\n") {
+		s := strings.TrimSpace(line)
+		if s == "" || strings.HasPrefix(s, "#") {
+			continue
+		}
+		if rest := strings.TrimPrefix(s, "export"); rest != s && rest != "" && (rest[0] == ' ' || rest[0] == '\t') {
+			s = strings.TrimSpace(rest)
+		}
+		eq := strings.IndexByte(s, '=')
+		if eq <= 0 {
+			continue
+		}
+		key := strings.TrimSpace(s[:eq])
+		val := strings.TrimSpace(s[eq+1:])
+		if len(val) >= 2 && (val[0] == '\'' || val[0] == '"') && val[len(val)-1] == val[0] {
+			val = val[1 : len(val)-1]
+		}
+		env[key] = val // last wins (override=True)
+	}
+	return env
+}
+
+// TestHermesRootFromHomeResolvesSymlinks is the review's blocker 2: a HERMES_HOME
+// symlinked into <native>/profiles/<x> must root at native (so -p default
+// re-roots to native and -p <sibling> is a native sibling), which requires
+// resolving symlinks for the containment decision — lexical containment alone
+// would treat the symlink path as its own root.
+func TestHermesRootFromHomeResolvesSymlinks(t *testing.T) {
+	t.Parallel()
+	native := t.TempDir()
+	coder := filepath.Join(native, "profiles", "coder")
+	if err := os.MkdirAll(coder, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(t.TempDir(), "coder-home")
+	if err := os.Symlink(coder, link); err != nil {
+		t.Skipf("symlink unsupported here: %v", err)
+	}
+
+	root := hermesRootFromHomeFor(link, native)
+	if root != native {
+		t.Fatalf("symlinked profile home: root = %q, want native %q", root, native)
+	}
+	if home, _, err := hermesProfileDir(root, "default"); err != nil || home != native {
+		t.Fatalf("-p default: home=%q err=%v, want %q", home, err, native)
+	}
+	sibling := filepath.Join(native, "profiles", "research")
+	if home, _, err := hermesProfileDir(root, "research"); err != nil || home != sibling {
+		t.Fatalf("-p sibling: home=%q err=%v, want %q", home, err, sibling)
 	}
 }
 

@@ -69,12 +69,24 @@ import (
 // overlay's skills and memory isolation. Keeping active_profile out of the
 // overlay means Hermes finds none and stays put. The overlay is already seeded
 // from the correct (possibly profile) source home.
+//
+// .env is overlay-owned too, but unlike the others it is DERIVED, not just
+// omitted (see writeDerivedHermesEnv): Hermes runs _apply_profile_override()
+// and then load_hermes_dotenv(), which loads <HERMES_HOME>/.env with
+// override=True. A source .env carrying an out-of-band HERMES_HOME= would
+// overwrite the overlay's HERMES_HOME after the argv/sticky-profile protections
+// ran, repointing skill discovery and memory back at the source home. The
+// derived overlay .env preserves the source's credentials/settings but pins
+// HERMES_HOME to the overlay, and is written even when the source has none so
+// Hermes' project-.env fallback (loaded with override=True only when no user
+// .env loaded) can't relocate the home either.
 var hermesOverriddenEntries = map[string]struct{}{
 	"skills":         {},
 	"config.yaml":    {},
 	"memories":       {},
 	"active_profile": {},
 	"profiles":       {},
+	".env":           {},
 }
 
 // platformDefaultHermesHome returns Hermes' platform-native default home:
@@ -208,20 +220,57 @@ func ResolveHermesProfile(customEnvHome, name string, found, inline bool) Hermes
 // root for profile-level operations. If base is the platform default or lives
 // under it (normal or profile mode) the root is the platform default; otherwise
 // (Docker/custom home) a <...>/profiles/<name> layout roots at the grandparent,
-// and any other path is its own root. Symlinks are not resolved (Hermes uses
-// Path.resolve()); the daemon's homes are real dirs, so this matches in practice.
+// and any other path is its own root.
 func hermesRootFromHome(base string) string {
-	native := platformDefaultHermesHome()
+	return hermesRootFromHomeFor(base, platformDefaultHermesHome())
+}
+
+// hermesRootFromHomeFor is the pure core of hermesRootFromHome with the native
+// home injected for testability. The containment test resolves symlinks on both
+// sides (like get_default_hermes_root's env_path.resolve().relative_to(
+// native_home.resolve())), so a HERMES_HOME symlinked into <native>/profiles/<x>
+// still roots at native. The RETURNED value stays unresolved, matching Hermes,
+// which returns native_home / the lexical grandparent of the original env_path.
+func hermesRootFromHomeFor(base, native string) string {
 	if base == "" {
 		return native
 	}
-	if isPathUnder(native, base) {
+	if isPathUnder(resolvePathBestEffort(native), resolvePathBestEffort(base)) {
 		return native
 	}
 	if filepath.Base(filepath.Dir(base)) == "profiles" {
 		return filepath.Dir(filepath.Dir(base))
 	}
 	return base
+}
+
+// resolvePathBestEffort resolves symlinks like Python's Path.resolve(strict=False):
+// it follows every symlink in the existing prefix of p and appends the remaining
+// non-existent tail unchanged, rather than failing (as filepath.EvalSymlinks does)
+// when p doesn't fully exist. The result is absolute.
+func resolvePathBestEffort(p string) string {
+	if p == "" {
+		return p
+	}
+	if abs, err := filepath.Abs(p); err == nil {
+		p = abs
+	}
+	if resolved, err := filepath.EvalSymlinks(p); err == nil {
+		return resolved
+	}
+	dir := p
+	var tail []string
+	for {
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return p // reached the root without an existing ancestor
+		}
+		tail = append([]string{filepath.Base(dir)}, tail...)
+		dir = parent
+		if resolved, err := filepath.EvalSymlinks(dir); err == nil {
+			return filepath.Join(append([]string{resolved}, tail...)...)
+		}
+	}
 }
 
 // isPathUnder reports whether child is parent or nested under it.
@@ -323,7 +372,81 @@ func prepareHermesHome(hermesHome, sourceHome string, sourceMustExist bool, work
 	if err := writeDerivedHermesConfig(sharedHome, hermesHome, env, logger); err != nil {
 		return fmt.Errorf("derive hermes config: %w", err)
 	}
+	if err := writeDerivedHermesEnv(sharedHome, hermesHome); err != nil {
+		return fmt.Errorf("derive hermes .env: %w", err)
+	}
 	return writeHermesBoundSkills(hermesHome, workspaceSkills, logger)
+}
+
+// writeDerivedHermesEnv writes the task-local .env: the source home's .env
+// contents (credentials/settings preserved) with any HERMES_HOME assignment
+// removed, then a pinned HERMES_HOME pointing at the overlay appended last so it
+// wins. Hermes loads <HERMES_HOME>/.env with override=True right after profile
+// resolution, so without this an out-of-band HERMES_HOME= in the source .env
+// would relocate the home past the overlay (dropping bound skills and memory
+// isolation). We always write the file — even when the source has none — so the
+// overlay .env "loads" and Hermes' project-.env fallback (override=True only when
+// no user .env loaded) can't relocate the home either. Written 0600 via atomic
+// replace since it can hold API-key secrets; reuse also repairs prior perms.
+func writeDerivedHermesEnv(sharedHome, hermesHome string) error {
+	dst := filepath.Join(hermesHome, ".env")
+
+	var body []byte
+	src, err := os.ReadFile(filepath.Join(sharedHome, ".env"))
+	if err != nil {
+		if !os.IsNotExist(err) {
+			return fmt.Errorf("read shared .env: %w", err)
+		}
+	} else {
+		body = stripDotenvAssignment(src, "HERMES_HOME")
+	}
+
+	var buf strings.Builder
+	if len(body) > 0 {
+		buf.Write(body)
+		if body[len(body)-1] != '\n' {
+			buf.WriteByte('\n')
+		}
+	}
+	// Pin HERMES_HOME to the overlay. Single-quote the value so python-dotenv
+	// treats it literally (no escaping / var expansion) — task home paths can
+	// contain spaces or other characters under the workspaces root.
+	fmt.Fprintf(&buf, "HERMES_HOME='%s'\n", hermesHome)
+
+	return writeFileAtomic(dst, []byte(buf.String()), 0o600)
+}
+
+// stripDotenvAssignment drops every line of a .env file that assigns key,
+// tolerating a leading `export ` and surrounding whitespace the way python-dotenv
+// does. Other lines (including comments and blanks) are preserved verbatim.
+func stripDotenvAssignment(content []byte, key string) []byte {
+	lines := strings.Split(string(content), "\n")
+	out := lines[:0]
+	for _, line := range lines {
+		if dotenvLineKey(line) == key {
+			continue
+		}
+		out = append(out, line)
+	}
+	return []byte(strings.Join(out, "\n"))
+}
+
+// dotenvLineKey returns the variable name a .env line assigns, or "" for a
+// comment/blank/non-assignment line.
+func dotenvLineKey(line string) string {
+	s := strings.TrimSpace(line)
+	if s == "" || strings.HasPrefix(s, "#") {
+		return ""
+	}
+	if rest := strings.TrimPrefix(s, "export"); rest != s && rest != "" &&
+		(rest[0] == ' ' || rest[0] == '\t') {
+		s = strings.TrimSpace(rest)
+	}
+	eq := strings.IndexByte(s, '=')
+	if eq <= 0 {
+		return ""
+	}
+	return strings.TrimSpace(s[:eq])
 }
 
 // mirrorSharedHermesHome symlinks every top-level entry of the shared ~/.hermes/
