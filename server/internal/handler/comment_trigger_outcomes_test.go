@@ -255,7 +255,7 @@ func TestCreateComment_TwoSquadsSharingLeaderCoalescesNonWinner(t *testing.T) {
 // Elon's round-3 must-fix 2: a squad leader's own @mention of its squad is
 // suppressed by the self-trigger guard, but when its latest task is already
 // TERMINAL (no active run), the outcome must NOT be a success-shaped `deferred`
-// — it is a non-success `blocked/already_handled`, and no new task is enqueued.
+// — it is a non-success `blocked/self_trigger_suppressed`, and no new task runs.
 func TestCreateComment_SquadLeaderSelfMentionCompletedTaskDoesNotFakeSuccess(t *testing.T) {
 	if testHandler == nil || testPool == nil {
 		t.Skip("database not available")
@@ -302,8 +302,8 @@ func TestCreateComment_SquadLeaderSelfMentionCompletedTaskDoesNotFakeSuccess(t *
 	if o.TargetType != "squad" || o.TargetID != squadID {
 		t.Fatalf("outcome target = %+v, want squad %s", o, squadID)
 	}
-	if o.Status != DispatchBlocked || o.ReasonCode != ReasonAlreadyHandled {
-		t.Errorf("outcome = %+v, want blocked/already_handled (must not fake success)", o)
+	if o.Status != DispatchBlocked || o.ReasonCode != ReasonSelfTriggerSuppressed {
+		t.Errorf("outcome = %+v, want blocked/self_trigger_suppressed (must not fake success)", o)
 	}
 	// No new task was enqueued (only the pre-seeded completed one exists).
 	var total int

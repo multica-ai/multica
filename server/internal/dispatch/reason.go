@@ -36,12 +36,13 @@ const (
 	// ReasonAlreadyActive: a run is already active/pending for this target and
 	// this trigger did not coalesce.
 	ReasonAlreadyActive ReasonCode = "already_active"
-	// ReasonAlreadyHandled: the target was intentionally not (re-)triggered
-	// because the acting agent's own prior activity already covered it and no
-	// active run remains — e.g. a squad leader's self-@mention that the
-	// self-trigger guard suppresses with no active task left. Not a permission
-	// block, but NOT success: nothing new runs.
-	ReasonAlreadyHandled ReasonCode = "already_handled"
+	// ReasonSelfTriggerSuppressed: the target was intentionally not (re-)triggered
+	// because doing so would be a self-trigger the guard suppresses, and no active
+	// run remains to cover it — e.g. a squad leader's own @mention of its squad
+	// whose latest task is already terminal. Not a permission block, but NOT
+	// success: nothing new runs. (Named to avoid implying the NEW comment was
+	// already processed.)
+	ReasonSelfTriggerSuppressed ReasonCode = "self_trigger_suppressed"
 	// ReasonInternalError: an unexpected server error prevented a clean decision.
 	ReasonInternalError ReasonCode = "internal_error"
 )
