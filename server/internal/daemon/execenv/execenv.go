@@ -438,13 +438,20 @@ func Reuse(params ReuseParams, logger *slog.Logger) *Environment {
 	// config (especially sandbox/network access) is up to date.
 	if params.Provider == "codex" {
 		codexHome := filepath.Join(env.RootDir, "codex-home")
+		// Fail closed on reuse: a codex-home prepare failure — the scoped hooks
+		// fail-loud (design ②), or a sandbox / model-catalog error — must
+		// abandon reuse (return nil) so the daemon falls back to a fresh Prepare
+		// that surfaces the error, rather than reuse an env that silently lacks
+		// the per-task codex-home or the user's hooks. Without this the ②
+		// fail-loud is defeated on every reused task. Mirrors the cursor /
+		// openclaw fail-closed blocks below.
 		if err := prepareCodexHomeWithOpts(codexHome, CodexHomeOptions{CodexVersion: params.CodexVersion}, logger); err != nil {
 			logger.Warn("execenv: refresh codex-home failed", "error", err)
-		} else {
-			env.CodexHome = codexHome
-			if err := hydrateCodexSkills(codexHome, params.Task.AgentSkills, logger); err != nil {
-				logger.Warn("execenv: refresh codex skills failed", "error", err)
-			}
+			return nil
+		}
+		env.CodexHome = codexHome
+		if err := hydrateCodexSkills(codexHome, params.Task.AgentSkills, logger); err != nil {
+			logger.Warn("execenv: refresh codex skills failed", "error", err)
 		}
 	}
 
