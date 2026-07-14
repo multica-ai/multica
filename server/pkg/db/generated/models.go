@@ -134,7 +134,6 @@ type AgentTaskQueue struct {
 	ChatInputTaskID        pgtype.UUID        `json:"chat_input_task_id"`
 	LastHeartbeatAt        pgtype.Timestamptz `json:"last_heartbeat_at"`
 	ChatFinalizeDeferredAt pgtype.Timestamptz `json:"chat_finalize_deferred_at"`
-	DaemonSessionID        pgtype.UUID        `json:"daemon_session_id"`
 	// Waterfall level that resolved originator_user_id for this run: direct_human | delegation | comment_source | rule_owner | owner_fallback | backfill | unattributed. Audit/visibility metadata only — never consulted for authorization. TEXT with no CHECK so new trigger paths can add a source without a migration (MUL-4302 §7). NULL on pre-migration rows.
 	OriginatorSource pgtype.Text `json:"originator_source"`
 	// For originator_source=delegation: the parent task whose accountable human was copied onto this run. Value is copied, not chained, so delegation cycles are harmless (MUL-4302 §3.2). No FK; app-layer integrity only.
@@ -151,6 +150,7 @@ type AgentTaskQueue struct {
 	TriggerEvidenceRefID pgtype.UUID `json:"trigger_evidence_ref_id"`
 	// The one human accountable for this run, for audit / visibility / cost only — NEVER consulted for authorization (that is originator_user_id). Invariant: when originator_user_id IS NOT NULL, this equals it; the two diverge only when originator_user_id IS NULL (autopilot rule_owner / degraded owner_fallback name an accountable human while authorization carries none). No FK, no cascade (MUL-4302 §1/§7). NULL means no accountable human was resolved: a pre-migration row, OR a NEW row whose audit source is not-yet-resolved / unattributed (e.g. run_only autopilot until rule_owner lands) — NOT pre-migration only.
 	AccountableUserID pgtype.UUID `json:"accountable_user_id"`
+	DaemonSessionID   pgtype.UUID `json:"daemon_session_id"`
 }
 
 type AgentToLabel struct {
