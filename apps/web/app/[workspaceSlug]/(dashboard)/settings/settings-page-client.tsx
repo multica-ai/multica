@@ -6,10 +6,13 @@ import { cerebroFeatureFlagTabs } from "@multica/cerebro-feature-flags/settings-
 import { cerebroNotesSettingsTabs } from "@multica/cerebro-notes/settings-tabs";
 import { useCerebroDisplayCurrencyTabs } from "@multica/cerebro-display-currency/settings-tabs";
 import { SettingsPage, type ExtraSettingsTab } from "@multica/views/settings";
+import { useNavigation } from "@multica/views/navigation";
+import { useCurrentWorkspace } from "@multica/core/paths";
 import { useMembersTabCerebroExtras } from "@multica/cerebro-members/views";
 import {
   useCerebroToolPolicySettingsTabs,
   useCerebroAgentTriggerSettingsTabs,
+  permissionDetailPath,
 } from "@multica/cerebro-tool-policy/views";
 // CEREBRO-PATCH(cerebro-connections-settings-tab): TECH-3108 workspace connections tab.
 import { useCerebroConnectionsSettingsTabs } from "@multica/cerebro-connections/views";
@@ -38,10 +41,15 @@ export function SettingsPageClient({
   documentationContent?: ReactNode;
 }) {
   const membersTabCerebroExtras = useMembersTabCerebroExtras();
+  const navigation = useNavigation();
+  const workspace = useCurrentWorkspace();
   // FIR-2284 Bid 5: the workspace Permissions tab, present only when the
   // cerebro_tool_policy flag is on. Merged here (not in the module-level const)
   // because the flag is read via a hook.
-  const toolPolicyTabs = useCerebroToolPolicySettingsTabs();
+  const toolPolicyTabs = useCerebroToolPolicySettingsTabs((toolKey) => {
+    if (!workspace?.slug) return;
+    navigation.push(permissionDetailPath(workspace.slug, toolKey));
+  });
   // FIR-2409: the friendly "Agent-start" tab, present only when the
   // cerebro_agent_trigger_permissions flag is on.
   const agentTriggerTabs = useCerebroAgentTriggerSettingsTabs();

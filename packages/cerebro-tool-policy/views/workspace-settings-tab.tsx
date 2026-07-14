@@ -36,7 +36,11 @@ export interface ExtraSettingsTab {
 //   Runtime      — runtime and daemon tools
 //   Multica      — all other platform tools (issues, comments, agents, etc.)
 //   Connections  — workspace connection tools (one row per configured connection)
-export function WorkspacePermissionsTab() {
+export function WorkspacePermissionsTab({
+  onOpenPermission,
+}: {
+  onOpenPermission?: (toolKey: string) => void;
+}) {
   const wsId = useWorkspaceId();
   // FIR-3091 slice 5: when on, the web_fetch host list is rendered here instead
   // of its own "Web fetch" settings tab (which suppresses itself in the same
@@ -51,7 +55,12 @@ export function WorkspacePermissionsTab() {
           and member below can only tighten what is set here — never loosen it.
         </p>
       </div>
-      <ToolPolicyTabs wsId={wsId} view="workspace" subjectId={wsId} />
+      <ToolPolicyTabs
+        wsId={wsId}
+        view="workspace"
+        subjectId={wsId}
+        onOpenPermission={onOpenPermission}
+      />
       {/* FIR-3091 slice 3: the OS-sandbox network profiles, per-runtime
           overrides, and per-agent blocked MCP servers — a parallel isolation
           layer shown alongside the tool-policy catalog, rehomed from the retired
@@ -73,7 +82,9 @@ export function WorkspacePermissionsTab() {
 // cerebro_tool_policy flag is on, and nothing when it is off — so the tab only
 // appears once the feature is enabled. The platform layer (web + desktop) spreads
 // the result into SettingsPage's extraAccountTabs.
-export function useCerebroToolPolicySettingsTabs(): ExtraSettingsTab[] {
+export function useCerebroToolPolicySettingsTabs(
+  onOpenPermission?: (toolKey: string) => void,
+): ExtraSettingsTab[] {
   const enabled = useFeatureFlag("cerebro_tool_policy");
   if (!enabled) return [];
   return [
@@ -81,7 +92,9 @@ export function useCerebroToolPolicySettingsTabs(): ExtraSettingsTab[] {
       value: "permissions",
       label: "Permissions",
       icon: Wrench,
-      content: <WorkspacePermissionsTab />,
+      content: (
+        <WorkspacePermissionsTab onOpenPermission={onOpenPermission} />
+      ),
       // FIR-1404: the permission catalog is a wide multi-column table — give it
       // the full settings pane instead of the narrow max-w-3xl column.
       wide: true,

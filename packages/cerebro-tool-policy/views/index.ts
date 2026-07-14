@@ -48,6 +48,7 @@ export {
   CerebroTestAsUserDialogHost,
 } from "./cerebro-test-as-user-menu";
 export { PermissionDetailPage } from "./permission-detail-page";
+export { permissionDetailPath } from "./permission-detail-path";
 export {
   getPermissionHolders,
   type PermissionHolder,

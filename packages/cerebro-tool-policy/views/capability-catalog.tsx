@@ -12,7 +12,15 @@
 // call site, so production keeps the flat table until the flag flips.
 
 import { useState, type ReactNode } from "react";
-import { ChevronRight, FolderGit2, KeyRound, LayoutGrid, Plug, Terminal } from "lucide-react";
+import {
+  ArrowUpRight,
+  ChevronRight,
+  FolderGit2,
+  KeyRound,
+  LayoutGrid,
+  Plug,
+  Terminal,
+} from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
 import type { ToolEffectiveSetting, ToolPolicyRow } from "../core";
 import { permissionType, type PermissionType } from "./tool-policy-table";
@@ -130,6 +138,8 @@ export interface CapabilityCatalogProps {
    * panel below the row. Returning null keeps the row a plain leaf.
    */
   renderDetail?: (row: ToolPolicyRow) => ReactNode | null;
+  /** Opens the shared per-permission detail page when that feature is enabled. */
+  onOpenPermission?: (toolKey: string) => void;
 }
 
 // CapabilityCatalog renders the flat catalog as grouped capability cards. It is
@@ -141,6 +151,7 @@ export function CapabilityCatalog({
   renderDecision,
   renderGroupAction,
   renderDetail,
+  onOpenPermission,
 }: CapabilityCatalogProps) {
   const groups = groupByCapability(rows);
   // FIR-2706 — which rows are expanded to show their inline group. Keyed by the
@@ -220,6 +231,23 @@ export function CapabilityCatalog({
                           </span>
                         </span>
                       </button>
+                    ) : onOpenPermission ? (
+                      <button
+                        type="button"
+                        onClick={() => onOpenPermission(row.tool_key)}
+                        aria-label={`Open details for ${row.title || row.tool_key}`}
+                        className="group flex min-w-0 flex-1 items-center gap-2 text-left"
+                      >
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate text-sm font-medium group-hover:underline">
+                            {row.title || row.tool_key}
+                          </span>
+                          <span className="block truncate font-mono text-xs text-muted-foreground">
+                            {row.tool_key}
+                          </span>
+                        </span>
+                        <ArrowUpRight className="size-3.5 shrink-0 text-muted-foreground" />
+                      </button>
                     ) : (
                       <div className="min-w-0 flex-1">
                         <div className="truncate text-sm font-medium">
@@ -231,6 +259,16 @@ export function CapabilityCatalog({
                       </div>
                     )}
                     <div className="flex shrink-0 items-center gap-2">
+                      {detail != null && onOpenPermission ? (
+                        <button
+                          type="button"
+                          onClick={() => onOpenPermission(row.tool_key)}
+                          aria-label={`Open details for ${row.title || row.tool_key}`}
+                          className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+                        >
+                          <ArrowUpRight className="size-3.5" />
+                        </button>
+                      ) : null}
                       {renderDecision(row)}
                     </div>
                   </div>

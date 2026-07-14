@@ -42,7 +42,10 @@ import { NotificationsPage } from "@multica/cerebro-notifications/views";
 import { SettingsPage } from "@multica/views/settings";
 import { MemberDetailPage as CerebroMemberDetailPage } from "@multica/cerebro-users/views";
 import { GroupDetailView } from "@multica/cerebro-groups/views";
-import { PermissionDetailPage } from "@multica/cerebro-tool-policy/views";
+import {
+  PermissionDetailPage,
+  permissionDetailPath,
+} from "@multica/cerebro-tool-policy/views";
 import { useMembersTabCerebroExtras } from "@multica/cerebro-members/views";
 import { useNavigation } from "@multica/views/navigation";
 import { useCurrentWorkspace } from "@multica/core/paths";
@@ -104,9 +107,14 @@ function PageShell() {
 function SettingsRoute() {
   const { t } = useT("settings");
   const membersTabCerebroExtras = useMembersTabCerebroExtras();
+  const navigation = useNavigation();
+  const workspace = useCurrentWorkspace();
   // FIR-2284 Bid 5: workspace Permissions tab, present only when the
   // cerebro_tool_policy flag is on.
-  const toolPolicyTabs = useCerebroToolPolicySettingsTabs();
+  const toolPolicyTabs = useCerebroToolPolicySettingsTabs((toolKey) => {
+    if (!workspace?.slug) return;
+    navigation.push(permissionDetailPath(workspace.slug, toolKey));
+  });
   // FIR-1590 → Collections: the Collections tab, present only when the
   // cerebro_collections flag is on.
   const collectionsTabs = useCerebroCollectionsSettingsTabs();
