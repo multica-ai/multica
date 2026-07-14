@@ -5,10 +5,10 @@
 -- already validates the referenced delivery, while avoiding a new FK keeps
 -- deploys and rollback independent of existing webhook_delivery cascades.
 ALTER TABLE webhook_delivery
-    ADD COLUMN available_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    ADD COLUMN lease_token UUID,
-    ADD COLUMN lease_expires_at TIMESTAMPTZ,
-    ADD COLUMN dispatch_attempts INTEGER NOT NULL DEFAULT 0;
+    ADD COLUMN IF NOT EXISTS available_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    ADD COLUMN IF NOT EXISTS lease_token UUID,
+    ADD COLUMN IF NOT EXISTS lease_expires_at TIMESTAMPTZ,
+    ADD COLUMN IF NOT EXISTS dispatch_attempts INTEGER NOT NULL DEFAULT 0;
 
 ALTER TABLE autopilot_run
-    ADD COLUMN webhook_delivery_id UUID;
+    ADD COLUMN IF NOT EXISTS webhook_delivery_id UUID;
