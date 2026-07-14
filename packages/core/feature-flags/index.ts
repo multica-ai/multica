@@ -19,7 +19,6 @@ export { StaticProvider } from "./static-provider";
 export { ChainProvider } from "./chain-provider";
 export {
   AGENT_BUILDER_FLAG,
-  AGENT_SKILL_TOGGLES_FLAG,
   COMPOSIO_MCP_APPS_FLAG,
   RESOURCE_LABELS_FLAG,
 } from "./keys";

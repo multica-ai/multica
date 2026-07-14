@@ -302,6 +302,9 @@ func TestGetConfigExposesFrontendFeatureFlags(t *testing.T) {
 	if cfg.FeatureFlags["composio_mcp_apps"] {
 		t.Fatalf("composio_mcp_apps: want false by default, got true")
 	}
+	if !cfg.FeatureFlags["agents_skill_toggles"] {
+		t.Fatalf("agents_skill_toggles: want true for installed v0.4.0 clients, got false")
+	}
 
 	withComposioMCPAppsFlag(t, h, true)
 	w = httptest.NewRecorder()
