@@ -1,11 +1,12 @@
+import { RECORDER_HOST_ID } from "./constants";
 import type { Recorder, LiveStatus } from "./recorder";
 import type { Incident, InteractionType } from "./types";
 
 // The panel is built with plain DOM inside a Shadow root — deliberately NOT
 // React. That keeps the recorder free of a React dependency AND means the panel
 // produces zero React commits and its internal DOM mutations are encapsulated
-// in the shadow tree, so the recorder never observes itself (MUL-4466 §10).
-const HOST_ID = "multica-perf-recorder";
+// in the shadow tree. Interactions with the panel still bubble to window, so the
+// recorder excludes them via RECORDER_HOST_ID in composedPath (MUL-4466 §10).
 
 const STYLE = `
 :host { all: initial; }
@@ -22,7 +23,8 @@ const STYLE = `
 .bar { display: flex; align-items: center; gap: 6px; padding: 8px 10px; border-bottom: 1px solid #1f2937; }
 .bar button { background: #1f2937; color: #e5e7eb; border: 1px solid #374151; border-radius: 6px;
   padding: 4px 8px; cursor: pointer; font: inherit; }
-.bar button:hover { background: #374151; }
+.bar button:hover:not(:disabled) { background: #374151; }
+.bar button:disabled { opacity: .4; cursor: not-allowed; }
 .stats { margin-left: auto; display: flex; gap: 10px; color: #9ca3af; font-variant-numeric: tabular-nums; }
 .chips { display: flex; gap: 6px; padding: 6px 10px; border-bottom: 1px solid #1f2937; flex-wrap: wrap; }
 .chip { background: #111827; border: 1px solid #374151; border-radius: 999px; padding: 2px 8px; cursor: pointer; color: #9ca3af; }
@@ -55,11 +57,11 @@ export function mountPanel(recorder: Recorder): PanelHandle {
   if (typeof document === "undefined") {
     return { destroy: () => {} };
   }
-  const existing = document.getElementById(HOST_ID);
+  const existing = document.getElementById(RECORDER_HOST_ID);
   if (existing) existing.remove();
 
   const host = document.createElement("div");
-  host.id = HOST_ID;
+  host.id = RECORDER_HOST_ID;
   const shadow = host.attachShadow({ mode: "open" });
   const style = document.createElement("style");
   style.textContent = STYLE;
@@ -106,7 +108,10 @@ export function mountPanel(recorder: Recorder): PanelHandle {
       else recorder.start();
     }));
     bar.appendChild(button("Clear", () => recorder.clear()));
-    bar.appendChild(button("Export", () => downloadReport(recorder)));
+    // RFC §7: export is only available in the stopped state.
+    bar.appendChild(
+      button("Export", () => downloadReport(recorder), !recorder.canExport()),
+    );
     bar.appendChild(button("×", () => {
       expanded = false;
       render();
@@ -226,6 +231,9 @@ function severity(ms: number): string {
 
 export function downloadReport(recorder: Recorder): void {
   if (typeof document === "undefined") return;
+  // RFC §7: no-op unless stopped, so a stray call can't dump a mid-recording
+  // report even if the disabled control were bypassed.
+  if (!recorder.canExport()) return;
   const report = recorder.export();
   const blob = new Blob([JSON.stringify(report, null, 2)], { type: "application/json" });
   const url = URL.createObjectURL(blob);
@@ -248,9 +256,13 @@ function text(tag: string, content: string, className = ""): HTMLElement {
   return node;
 }
 
-function button(label: string, onClick: () => void): HTMLElement {
-  const b = el("button");
+function button(label: string, onClick: () => void, disabled = false): HTMLButtonElement {
+  const b = el("button") as HTMLButtonElement;
   b.textContent = label;
-  b.onclick = onClick;
+  b.disabled = disabled;
+  // A disabled <button> fires no click, but guard the handler too for safety.
+  b.onclick = () => {
+    if (!b.disabled) onClick();
+  };
   return b;
 }

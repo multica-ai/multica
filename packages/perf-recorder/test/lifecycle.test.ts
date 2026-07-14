@@ -64,4 +64,19 @@ describe("recording lifecycle", () => {
     recorder.stop();
     expect(() => recorder.stop()).not.toThrow();
   });
+
+  it("only allows export in the stopped state (RFC §7)", () => {
+    const recorder = new Recorder({ appVersion: "t", surface: "web", mode: "development" });
+    // idle
+    expect(recorder.canExport()).toBe(false);
+    expect(() => recorder.export()).toThrow();
+    // recording
+    recorder.start();
+    expect(recorder.canExport()).toBe(false);
+    expect(() => recorder.export()).toThrow();
+    // stopped
+    recorder.stop();
+    expect(recorder.canExport()).toBe(true);
+    expect(() => recorder.export()).not.toThrow();
+  });
 });

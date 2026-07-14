@@ -1,5 +1,6 @@
 import { detectCapabilities } from "./capabilities";
 import { subscribeCommit, type CommitRoot } from "./install";
+import { isRecorderEvent } from "./self-surface";
 import { extractCommitEvidence } from "./react-commit";
 import { sanitizeUrl } from "./sanitize-url";
 import {
@@ -137,11 +138,19 @@ export class Recorder {
     this.emitIncidents();
   }
 
+  /** RFC §7: a report may only be exported once the session is stopped. */
+  canExport(): boolean {
+    return this.state === "stopped";
+  }
+
   export(): Report {
-    // Export is only meaningful once stopped; finalize defensively regardless.
+    // RFC §7: export is only available in the stopped state. Enforced at the
+    // recorder layer so a programmatic caller can't dump a mid-recording report;
+    // the panel additionally disables/no-ops the Export control until stopped.
+    if (this.state !== "stopped") {
+      throw new Error("perf-recorder: export() is only available after stop() (RFC §7)");
+    }
     this.finalizeAll();
-    const durationMs =
-      (this.sessionEnd || now()) - (this.sessionStart || this.sessionEnd || now());
     const incidents = this.incidents.map(stripInternal);
     return {
       schemaVersion: SCHEMA_VERSION,
@@ -149,9 +158,15 @@ export class Recorder {
       host: { appVersion: this.appVersion, surface: this.surface, mode: this.mode },
       capabilities: this.capabilities,
       thresholdsMs: this.thresholds,
-      session: { durationMs: Math.max(0, Math.round(durationMs)), incidentCount: incidents.length },
+      session: { durationMs: this.sessionDurationMs(), incidentCount: incidents.length },
       incidents,
     };
+  }
+
+  private sessionDurationMs(): number {
+    if (!this.sessionStart) return 0;
+    const end = this.sessionEnd || now();
+    return Math.max(0, Math.round(end - this.sessionStart));
   }
 
   getIncidents(): Incident[] {
@@ -258,6 +273,11 @@ export class Recorder {
   private installInteractionListeners(): void {
     if (typeof window === "undefined") return;
     const handler = (type: InteractionType) => (event: Event) => {
+      // Exclude the recorder's own surface: a click/scroll/keydown inside the
+      // panel's Shadow root still retargets and bubbles to window, so without
+      // this the panel's own buttons would be logged as app interactions
+      // (MUL-4466 §10.2).
+      if (isRecorderEvent(event)) return;
       const testId = this.resolveTestId(event.target);
       this.openInteraction(type, testId);
     };
@@ -498,7 +518,8 @@ export class Recorder {
       fps: this.fps,
       jankCount: this.jankCount,
       longTaskCount: this.longTaskCount,
-      durationMs: this.state === "recording" ? round(now() - this.sessionStart) : this.export().session.durationMs,
+      durationMs:
+        this.state === "recording" ? round(now() - this.sessionStart) : this.sessionDurationMs(),
       incidentCount: this.incidents.length,
     };
     for (const listener of this.statusListeners) {
