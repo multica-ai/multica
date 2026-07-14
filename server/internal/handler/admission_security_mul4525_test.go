@@ -103,6 +103,20 @@ func TestSendChatMessage_InvokeRevokedAfterSessionCreate(t *testing.T) {
 		t.Fatalf("revoke invoke: %v", err)
 	}
 
+	// A valid, still-unbound attachment uploaded by the sender. A successful send
+	// would claim it into the session/message (LinkAttachmentsToChatMessage sets
+	// chat_session_id + chat_message_id); the blocked send must not — the invoke
+	// gate runs BEFORE attachment binding, so this guards against anyone later
+	// moving the binding ahead of the permission gate.
+	var attachmentID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO attachment (workspace_id, uploader_type, uploader_id, filename, url, content_type, size_bytes)
+		VALUES ($1, 'member', $2, 'unbound.png', 'https://cdn.test/unbound.png', 'image/png', 10)
+		RETURNING id`, testWorkspaceID, testUserID).Scan(&attachmentID); err != nil {
+		t.Fatalf("seed unbound attachment: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM attachment WHERE id = $1`, attachmentID) })
+
 	countMessages := func() int {
 		var n int
 		if err := testPool.QueryRow(ctx, `SELECT count(*) FROM chat_message WHERE chat_session_id = $1`, session.ID).Scan(&n); err != nil {
@@ -121,10 +135,12 @@ func TestSendChatMessage_InvokeRevokedAfterSessionCreate(t *testing.T) {
 		t.Fatalf("precondition: session should have no messages/tasks yet")
 	}
 
-	// The send must be refused before anything is written.
+	// The send must be refused before anything is written — including the
+	// attachment binding.
 	sendW := httptest.NewRecorder()
 	sendReq := withChatTestWorkspaceCtx(t, newRequest("POST", "/api/chat/sessions/"+session.ID+"/messages", map[string]any{
-		"content": "are you still there?",
+		"content":        "are you still there?",
+		"attachment_ids": []string{attachmentID},
 	}))
 	sendReq = withURLParam(sendReq, "sessionId", session.ID)
 	testHandler.SendChatMessage(sendW, sendReq)
@@ -140,6 +156,19 @@ func TestSendChatMessage_InvokeRevokedAfterSessionCreate(t *testing.T) {
 	}
 	if got := countTasks(); got != 0 {
 		t.Errorf("blocked send persisted %d tasks, want 0", got)
+	}
+	// The attachment must remain unbound: neither claimed into the session nor
+	// linked to a message.
+	var boundSession, boundMessage pgtype.UUID
+	if err := testPool.QueryRow(ctx, `SELECT chat_session_id, chat_message_id FROM attachment WHERE id = $1`, attachmentID).
+		Scan(&boundSession, &boundMessage); err != nil {
+		t.Fatalf("read attachment binding: %v", err)
+	}
+	if boundSession.Valid {
+		t.Errorf("blocked send set attachment chat_session_id = %s, want NULL", util.UUIDToString(boundSession))
+	}
+	if boundMessage.Valid {
+		t.Errorf("blocked send set attachment chat_message_id = %s, want NULL", util.UUIDToString(boundMessage))
 	}
 }
 
@@ -182,6 +211,16 @@ func TestRerunIssue_PrivateHistoricalAgent(t *testing.T) {
 	}
 	origID := util.UUIDToString(orig.ID)
 
+	// Reassign the issue to a SECOND agent that testUserID CAN invoke (a
+	// workspace-invocable public_to agent). Now the issue's CURRENT assignee and
+	// the source task's HISTORICAL agent differ: if the rerun wrongly validated
+	// the current assignee, testUserID would be allowed — so the 403 below proves
+	// the gate is keyed on the historical private agent named by task_id.
+	currentAgentID := createHandlerTestAgent(t, "RerunCurrentAssignee", []byte("[]"))
+	if _, err := testPool.Exec(ctx, `UPDATE issue SET assignee_id = $1 WHERE id = $2`, currentAgentID, issueID); err != nil {
+		t.Fatalf("reassign issue to second agent: %v", err)
+	}
+
 	taskCount := func() int {
 		var n int
 		if err := testPool.QueryRow(ctx, `SELECT count(*) FROM agent_task_queue WHERE issue_id = $1`, issueID).Scan(&n); err != nil {
@@ -198,13 +237,14 @@ func TestRerunIssue_PrivateHistoricalAgent(t *testing.T) {
 	}
 	beforeCount, beforeStatus := taskCount(), origStatus()
 
-	// DENY: testUserID (workspace owner) can view the issue but cannot invoke the
-	// private agent → structured 403, and nothing is cancelled or created.
+	// DENY: testUserID (workspace owner) can view the issue AND can invoke the
+	// current assignee, but cannot invoke the HISTORICAL private agent named by
+	// task_id → structured 403, and nothing is cancelled or created.
 	denyW := httptest.NewRecorder()
 	denyReq := withURLParam(newRequest("POST", "/api/issues/"+issueID+"/rerun", map[string]any{"task_id": origID}), "id", issueID)
 	testHandler.RerunIssue(denyW, denyReq)
 	if denyW.Code != http.StatusForbidden {
-		t.Fatalf("RerunIssue as non-invoker: expected 403, got %d: %s", denyW.Code, denyW.Body.String())
+		t.Fatalf("RerunIssue as non-invoker of historical agent: expected 403, got %d: %s", denyW.Code, denyW.Body.String())
 	}
 	if code := readReasonCode(t, denyW.Body.Bytes()); code != string(dispatch.ReasonInvocationNotAllowed) {
 		t.Errorf("reason_code = %q, want invocation_not_allowed", code)
@@ -216,11 +256,25 @@ func TestRerunIssue_PrivateHistoricalAgent(t *testing.T) {
 		t.Errorf("blocked rerun changed original task status: got %q, want %q", got, beforeStatus)
 	}
 
-	// ALLOW: the agent owner may rerun their own private agent.
+	// ALLOW: the HISTORICAL agent's owner may rerun it, and the new task must
+	// target the historical agent — not the issue's current assignee.
 	allowW := httptest.NewRecorder()
 	allowReq := withURLParam(newRequestAs(ownerID, "POST", "/api/issues/"+issueID+"/rerun", map[string]any{"task_id": origID}), "id", issueID)
 	testHandler.RerunIssue(allowW, allowReq)
 	if allowW.Code != http.StatusAccepted {
-		t.Fatalf("RerunIssue as agent owner: expected 202, got %d: %s", allowW.Code, allowW.Body.String())
+		t.Fatalf("RerunIssue as historical agent owner: expected 202, got %d: %s", allowW.Code, allowW.Body.String())
+	}
+	var reran struct {
+		ID      string `json:"id"`
+		AgentID string `json:"agent_id"`
+	}
+	if err := json.Unmarshal(allowW.Body.Bytes(), &reran); err != nil {
+		t.Fatalf("decode rerun response: %v", err)
+	}
+	if reran.AgentID != agentID {
+		t.Errorf("reran task agent_id = %q, want historical agent %q (not current assignee %q)", reran.AgentID, agentID, currentAgentID)
+	}
+	if reran.ID == origID {
+		t.Errorf("expected a new task id, got the original %q", origID)
 	}
 }
