@@ -147,33 +147,42 @@ func TestPrepareCodexSessionsDir_MigratesLegacySymlinkNoResume(t *testing.T) {
 	assertPresent(t, filepath.Join(codexHome, "goals_1.sqlite"))
 }
 
-func TestPrepareCodexSessionsDir_MigrateWithResumeExposesOnlyThatRollout(t *testing.T) {
+func TestPrepareCodexSessionsDir_MigrateWithResumeRoutesThroughStore(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
+	sharedHome := filepath.Join(root, "shared")
 	codexHome := filepath.Join(root, "codex-home")
-	sharedSessions := filepath.Join(root, "shared", "sessions")
+	sharedSessions := filepath.Join(sharedHome, "sessions")
 	resumeID := "019f59d9-a6aa-7a53-b173-1eccc4b4c873"
 	resumeSrc := seedFakeRollout(t, sharedSessions, "2026", "07", "13", resumeID, 32)
 	seedFakeRollout(t, sharedSessions, "2026", "07", "11", "unrelated-session", 32)
 	seedLegacySessionsSymlink(t, codexHome, sharedSessions)
 	writeFile(t, filepath.Join(codexHome, "state_5.sqlite"), "stale")
 
-	err := prepareCodexSessionsDir(codexHome, filepath.Dir(sharedSessions), CodexHomeOptions{ResumeSessionID: resumeID}, testLogger())
+	key := filepath.Join("agent-1", "issue-1")
+	err := prepareCodexSessionsDir(codexHome, sharedHome, CodexHomeOptions{ResumeSessionID: resumeID, SessionStoreKey: key}, testLogger())
 	if err != nil {
 		t.Fatalf("prepareCodexSessionsDir: %v", err)
 	}
 
-	// The resumed rollout is exposed at the same YYYY/MM/DD relative path, and
-	// materialised as a zero-copy link (never a copy) to keep it off the
-	// initialize critical path.
-	exposed := filepath.Join(codexHome, "sessions", "2026", "07", "13", filepath.Base(resumeSrc))
-	assertZeroCopyLink(t, resumeSrc, exposed)
-	if data, err := os.ReadFile(exposed); err != nil || len(data) != 32 {
-		t.Errorf("resume rollout must be readable through the link, err=%v len=%d", err, len(data))
+	// sessions/ is now a directory link to the per-issue store on the shared
+	// volume — the cross-volume-safe exposure (a same-volume hard link into the
+	// store + a directory link into the task home), never a task-local file copy.
+	sessions := filepath.Join(codexHome, "sessions")
+	assertSessionsLinkedToStore(t, sessions, codexSessionStoreDir(sharedHome, key))
+
+	// The resume rollout is present in the task home (through the link) and
+	// materialised as a zero-copy hard link from the shared history.
+	if !CodexResumeRolloutPresent(codexHome, resumeID) {
+		t.Fatal("resume rollout must be visible in the task CODEX_HOME after migration")
 	}
+	stored := filepath.Join(codexSessionStoreDir(sharedHome, key), "2026", "07", "13", filepath.Base(resumeSrc))
+	assertZeroCopyLink(t, resumeSrc, stored)
 	// The unrelated session must NOT be pulled in.
-	assertAbsent(t, filepath.Join(codexHome, "sessions", "2026", "07", "11", "rollout-2026-07-11T00-00-00-unrelated-session.jsonl"))
-	// Stale state dropped so Codex rebuilds from the single exposed rollout.
+	if CodexResumeRolloutPresent(codexHome, "unrelated-session") {
+		t.Error("unrelated shared history must not be exposed to the task")
+	}
+	// Stale state dropped so Codex rebuilds from the scoped store.
 	assertAbsent(t, filepath.Join(codexHome, "state_5.sqlite"))
 }
 
@@ -317,7 +326,7 @@ func TestCodexResumeRolloutPresent(t *testing.T) {
 	}
 }
 
-func TestPrepareCodexSessionsDir_LocalDirectoryKeepsSharedSymlink(t *testing.T) {
+func TestPrepareCodexSessionsDir_LocalDirectoryUsesPerIssueStore(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
 	codexHome := filepath.Join(root, "codex-home")
@@ -325,60 +334,127 @@ func TestPrepareCodexSessionsDir_LocalDirectoryKeepsSharedSymlink(t *testing.T) 
 		t.Fatalf("mkdir codex-home: %v", err)
 	}
 	sharedHome := filepath.Join(root, "shared")
+	// A machine with accumulated global history that must NOT be exposed to the task.
+	seedFakeRollout(t, filepath.Join(sharedHome, "sessions"), "2026", "07", "13", "other-a", 16)
+	seedFakeRollout(t, filepath.Join(sharedHome, "sessions"), "2026", "07", "12", "other-b", 16)
+
+	key := filepath.Join("agent-1", "issue-1")
+	if err := prepareCodexSessionsDir(codexHome, sharedHome, CodexHomeOptions{IsLocalDirectory: true, SessionStoreKey: key}, testLogger()); err != nil {
+		t.Fatalf("prepareCodexSessionsDir: %v", err)
+	}
+
+	// sessions/ links the per-issue store, not the shared ~/.codex/sessions.
+	sessions := filepath.Join(codexHome, "sessions")
+	assertSessionsLinkedToStore(t, sessions, codexSessionStoreDir(sharedHome, key))
+	// The store holds only this issue's history — the machine's global rollouts
+	// are invisible, so `initialize` never enumerates them (the MUL-4424 stall).
+	entries, _ := os.ReadDir(sessions)
+	if len(entries) != 0 {
+		t.Errorf("per-issue store must start empty, has %d entries (whole-history leak?)", len(entries))
+	}
+	if CodexResumeRolloutPresent(codexHome, "other-a") {
+		t.Error("machine-global history must not be visible to a local_directory task")
+	}
+}
+
+// With no stable per-issue key (e.g. a non-issue task), a local_directory task
+// must NOT collapse back to exposing the whole shared history — it falls back to
+// an empty local dir.
+func TestPrepareCodexSessionsDir_LocalDirectoryNoKeyFallsBackToEmptyDir(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	codexHome := filepath.Join(root, "codex-home")
+	if err := os.MkdirAll(codexHome, 0o755); err != nil {
+		t.Fatalf("mkdir codex-home: %v", err)
+	}
+	sharedHome := filepath.Join(root, "shared")
+	seedFakeRollout(t, filepath.Join(sharedHome, "sessions"), "2026", "07", "13", "other", 16)
 
 	if err := prepareCodexSessionsDir(codexHome, sharedHome, CodexHomeOptions{IsLocalDirectory: true}, testLogger()); err != nil {
 		t.Fatalf("prepareCodexSessionsDir: %v", err)
 	}
-
 	sessions := filepath.Join(codexHome, "sessions")
 	fi, err := os.Lstat(sessions)
 	if err != nil {
 		t.Fatalf("sessions not created: %v", err)
 	}
-	if fi.Mode()&os.ModeSymlink == 0 && runtime.GOOS != "windows" {
-		t.Error("local_directory sessions must symlink the shared home for cross-task-ID resume")
-	}
 	if fi.Mode()&os.ModeSymlink != 0 {
-		if target, _ := os.Readlink(sessions); target != filepath.Join(sharedHome, "sessions") {
-			t.Errorf("symlink target = %q, want %q", target, filepath.Join(sharedHome, "sessions"))
-		}
+		t.Error("no-key local_directory must not link the shared history")
+	}
+	if CodexResumeRolloutPresent(codexHome, "other") {
+		t.Error("machine-global history must not be visible")
 	}
 }
 
 // Two consecutive local_directory tasks share one project dir but get a fresh
 // codex-home each (the daemon never reuses their workdir). The second run must
-// still see the first run's rollout via the shared-sessions symlink — this is
-// the regression Elon's review flagged.
+// still see the first run's rollout via the per-issue store — this is the
+// regression Elon's review flagged.
 func TestPrepareCodexSessionsDir_LocalDirectoryResumeAcrossTaskIDs(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
 	sharedHome := filepath.Join(root, "shared")
 	sessionID := "019f59d9-a6aa-7a53-b173-1eccc4b4c873"
+	key := filepath.Join("agent-1", "issue-1")
 
-	// Round 1: a fresh per-task codex-home symlinks the shared sessions.
+	// Round 1: a fresh per-task codex-home links the per-issue store.
 	home1 := filepath.Join(root, "task-1", "codex-home")
 	if err := os.MkdirAll(home1, 0o755); err != nil {
 		t.Fatalf("mkdir home1: %v", err)
 	}
-	if err := prepareCodexSessionsDir(home1, sharedHome, CodexHomeOptions{IsLocalDirectory: true}, testLogger()); err != nil {
+	if err := prepareCodexSessionsDir(home1, sharedHome, CodexHomeOptions{IsLocalDirectory: true, SessionStoreKey: key}, testLogger()); err != nil {
 		t.Fatalf("round 1 prepare: %v", err)
 	}
-	// Codex writes the round-1 rollout through the symlink into the shared home.
+	// Codex writes the round-1 rollout through the link into the store.
 	seedRolloutAt(t, filepath.Join(home1, "sessions", "2026", "07", "13", "rollout-2026-07-13T00-00-00-"+sessionID+".jsonl"), 32)
 
-	// Round 2: a brand-new task ID → brand-new codex-home, same project dir.
+	// Round 2: a brand-new task ID → brand-new codex-home, same issue key.
 	home2 := filepath.Join(root, "task-2", "codex-home")
 	if err := os.MkdirAll(home2, 0o755); err != nil {
 		t.Fatalf("mkdir home2: %v", err)
 	}
-	if err := prepareCodexSessionsDir(home2, sharedHome, CodexHomeOptions{IsLocalDirectory: true, ResumeSessionID: sessionID}, testLogger()); err != nil {
+	if err := prepareCodexSessionsDir(home2, sharedHome, CodexHomeOptions{IsLocalDirectory: true, SessionStoreKey: key, ResumeSessionID: sessionID}, testLogger()); err != nil {
 		t.Fatalf("round 2 prepare: %v", err)
 	}
 
-	// The round-2 home must be able to resolve the round-1 rollout — otherwise
-	// the daemon would silently drop the conversation.
+	// The round-2 home must resolve the round-1 rollout through the shared store —
+	// otherwise the daemon would silently drop the conversation.
 	if !CodexResumeRolloutPresent(home2, sessionID) {
 		t.Fatal("round-2 local_directory task cannot see round-1 rollout — context would be silently lost")
+	}
+}
+
+// A managed home migrated on a prior reuse already links the per-issue store; a
+// subsequent reuse must treat that link as authoritative and not re-migrate it.
+func TestPrepareCodexSessionsDir_ReusedStoreLinkIsAuthoritative(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	sharedHome := filepath.Join(root, "shared")
+	codexHome := filepath.Join(root, "codex-home")
+	if err := os.MkdirAll(codexHome, 0o755); err != nil {
+		t.Fatalf("mkdir codex-home: %v", err)
+	}
+	key := filepath.Join("agent-1", "issue-1")
+	storeDir := codexSessionStoreDir(sharedHome, key)
+	if err := os.MkdirAll(storeDir, 0o755); err != nil {
+		t.Fatalf("mkdir store: %v", err)
+	}
+	if err := os.Symlink(storeDir, filepath.Join(codexHome, "sessions")); err != nil {
+		if runtime.GOOS == "windows" {
+			t.Skipf("directory symlink unavailable on this Windows session: %v", err)
+		}
+		t.Fatalf("seed store link: %v", err)
+	}
+	sessionID := "019f59d9-a6aa-7a53-b173-1eccc4b4c873"
+	seedRolloutAt(t, filepath.Join(storeDir, "2026", "07", "13", "rollout-2026-07-13T00-00-00-"+sessionID+".jsonl"), 16)
+
+	if err := prepareCodexSessionsDir(codexHome, sharedHome, CodexHomeOptions{SessionStoreKey: key, ResumeSessionID: sessionID}, testLogger()); err != nil {
+		t.Fatalf("prepareCodexSessionsDir: %v", err)
+	}
+
+	assertSessionsLinkedToStore(t, filepath.Join(codexHome, "sessions"), storeDir)
+	if !CodexResumeRolloutPresent(codexHome, sessionID) {
+		t.Error("existing store rollout must remain resumable after reuse")
 	}
 }
 
@@ -395,6 +471,36 @@ func seedRolloutAt(t *testing.T, path string, size int) string {
 		t.Fatalf("write rollout: %v", err)
 	}
 	return path
+}
+
+// assertSessionsLinkedToStore verifies codex-home/sessions is a directory link
+// that resolves to the per-issue store (storeDir), i.e. the task home reaches
+// only that issue's history and not the machine-global ~/.codex/sessions.
+func assertSessionsLinkedToStore(t *testing.T, sessions, storeDir string) {
+	t.Helper()
+	fi, err := os.Lstat(sessions)
+	if err != nil {
+		t.Fatalf("sessions link missing: %v", err)
+	}
+	if runtime.GOOS != "windows" {
+		if fi.Mode()&os.ModeSymlink == 0 {
+			t.Fatalf("sessions must link the per-issue store, got mode %v", fi.Mode())
+		}
+		if target, _ := os.Readlink(sessions); filepath.Clean(target) != filepath.Clean(storeDir) {
+			t.Errorf("sessions link target = %q, want store %q", target, storeDir)
+		}
+	}
+	realSessions, err := filepath.EvalSymlinks(sessions)
+	if err != nil {
+		t.Fatalf("eval sessions link: %v", err)
+	}
+	realStore, err := filepath.EvalSymlinks(storeDir)
+	if err != nil {
+		t.Fatalf("eval store: %v", err)
+	}
+	if realSessions != realStore {
+		t.Errorf("sessions resolves to %q, want store %q", realSessions, realStore)
+	}
 }
 
 // assertZeroCopyLink verifies dst resolves to the same inode as src — a hard

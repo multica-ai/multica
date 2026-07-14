@@ -1023,6 +1023,12 @@ func TestGateCodexResumeToRolloutPresence(t *testing.T) {
 			if taskCtx.PriorSessionResumed != (tt.wantSession != "") {
 				t.Fatalf("PriorSessionResumed = %v, want %v", taskCtx.PriorSessionResumed, tt.wantSession != "")
 			}
+			// A dropped resume (had a session, now cleared) must be surfaced to
+			// the user via the brief; a kept/no-op resume must not.
+			wantUnavailable := tt.sessionID != "" && tt.wantSession == ""
+			if taskCtx.PriorSessionResumeUnavailable != wantUnavailable {
+				t.Fatalf("PriorSessionResumeUnavailable = %v, want %v", taskCtx.PriorSessionResumeUnavailable, wantUnavailable)
+			}
 		})
 	}
 }
@@ -1087,6 +1093,12 @@ func TestGateResumeToReusedWorkdir(t *testing.T) {
 			}
 			if taskCtx.PriorSessionResumed != (tt.wantSession != "") {
 				t.Fatalf("PriorSessionResumed = %v, want %v", taskCtx.PriorSessionResumed, tt.wantSession != "")
+			}
+			// A dropped resume (had a session, now cleared) must be surfaced to
+			// the user via the brief; a kept/no-op resume must not.
+			wantUnavailable := tt.sessionID != "" && tt.wantSession == ""
+			if taskCtx.PriorSessionResumeUnavailable != wantUnavailable {
+				t.Fatalf("PriorSessionResumeUnavailable = %v, want %v", taskCtx.PriorSessionResumeUnavailable, wantUnavailable)
 			}
 		})
 	}

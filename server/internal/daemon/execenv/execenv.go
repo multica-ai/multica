@@ -80,29 +80,37 @@ type TaskContextForEnv struct {
 	// telling it "one comment" and the other "one per thread". Same-thread
 	// follow-ups collapse to a single group upstream, so this stays empty and
 	// the single-parent path is used (no duplicate replies).
-	CommentReplyTargets     []ThreadReplyTarget
-	NewCommentCount         int    // issue-wide comments since this agent's last run (excludes its own and the injected trigger)
-	NewCommentsSince        string // RFC3339 anchor (last run's started_at) the count is measured from; empty on cold start
-	PriorSessionResumed     bool   // true when the daemon will resume an existing provider session for this task
-	AgentID                 string // unique ID of the dispatched agent
-	AgentName               string
-	AgentInstructions       string // agent identity/persona instructions, injected into CLAUDE.md
-	AgentSkills             []SkillContextForEnv
-	Repos                   []RepoContextForEnv     // workspace repos available for checkout
-	ProjectID               string                  // issue's project, when present
-	ProjectTitle            string                  // human-readable project title
-	ProjectDescription      string                  // durable project-level context, rendered into the brief's Project Context section
-	ProjectResources        []ProjectResourceForEnv // resources attached to the project
-	ChatSessionID           string                  // non-empty for chat tasks
-	AutopilotRunID          string                  // non-empty for autopilot run_only tasks
-	AutopilotID             string
-	AutopilotTitle          string
-	AutopilotDescription    string
-	AutopilotSource         string
-	AutopilotTriggerPayload string
-	QuickCreatePrompt       string // non-empty for quick-create tasks
-	HandoffNote             string // assignment handoff instruction; rendered into issue_context.md (MUL-3375)
-	IsSquadLeader           bool   // true when the agent is acting as a squad leader (may exit silently on no_action)
+	CommentReplyTargets []ThreadReplyTarget
+	NewCommentCount     int    // issue-wide comments since this agent's last run (excludes its own and the injected trigger)
+	NewCommentsSince    string // RFC3339 anchor (last run's started_at) the count is measured from; empty on cold start
+	PriorSessionResumed bool   // true when the daemon will resume an existing provider session for this task
+	// PriorSessionResumeUnavailable is true when this task carried a prior
+	// session the daemon expected to resume but could NOT (the reused workdir was
+	// gone, or the Codex rollout was not present in the task CODEX_HOME). The
+	// brief surfaces this so the agent tells the user its previous conversation
+	// context is gone and this run starts fresh — turning a silent context loss
+	// into a user-visible one (MUL-4424). Distinct from an ordinary cold start,
+	// which never had a prior session to lose.
+	PriorSessionResumeUnavailable bool
+	AgentID                       string // unique ID of the dispatched agent
+	AgentName                     string
+	AgentInstructions             string // agent identity/persona instructions, injected into CLAUDE.md
+	AgentSkills                   []SkillContextForEnv
+	Repos                         []RepoContextForEnv     // workspace repos available for checkout
+	ProjectID                     string                  // issue's project, when present
+	ProjectTitle                  string                  // human-readable project title
+	ProjectDescription            string                  // durable project-level context, rendered into the brief's Project Context section
+	ProjectResources              []ProjectResourceForEnv // resources attached to the project
+	ChatSessionID                 string                  // non-empty for chat tasks
+	AutopilotRunID                string                  // non-empty for autopilot run_only tasks
+	AutopilotID                   string
+	AutopilotTitle                string
+	AutopilotDescription          string
+	AutopilotSource               string
+	AutopilotTriggerPayload       string
+	QuickCreatePrompt             string // non-empty for quick-create tasks
+	HandoffNote                   string // assignment handoff instruction; rendered into issue_context.md (MUL-3375)
+	IsSquadLeader                 bool   // true when the agent is acting as a squad leader (may exit silently on no_action)
 	// WorkspaceContext is the workspace-level system prompt (workspace.context
 	// in the DB). Rendered into the brief as `## Workspace Context` when
 	// non-empty so every agent in the workspace sees the same shared context,
@@ -265,7 +273,7 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 	// For Codex, set up a per-task CODEX_HOME seeded from ~/.codex/ with skills.
 	if params.Provider == "codex" {
 		codexHome := filepath.Join(envRoot, "codex-home")
-		if err := prepareCodexHomeWithOpts(codexHome, CodexHomeOptions{CodexVersion: params.CodexVersion, IsLocalDirectory: params.LocalWorkDir != ""}, logger); err != nil {
+		if err := prepareCodexHomeWithOpts(codexHome, CodexHomeOptions{CodexVersion: params.CodexVersion, IsLocalDirectory: params.LocalWorkDir != "", SessionStoreKey: codexSessionStoreKey(params.Task.AgentID, params.Task.IssueID)}, logger); err != nil {
 			return nil, fmt.Errorf("execenv: prepare codex-home: %w", err)
 		}
 		if err := hydrateCodexSkills(codexHome, params.Task.AgentSkills, logger); err != nil {
@@ -445,7 +453,7 @@ func Reuse(params ReuseParams, logger *slog.Logger) *Environment {
 	// config (especially sandbox/network access) is up to date.
 	if params.Provider == "codex" {
 		codexHome := filepath.Join(env.RootDir, "codex-home")
-		if err := prepareCodexHomeWithOpts(codexHome, CodexHomeOptions{CodexVersion: params.CodexVersion, ResumeSessionID: params.ResumeSessionID, IsLocalDirectory: params.LocalDirectory}, logger); err != nil {
+		if err := prepareCodexHomeWithOpts(codexHome, CodexHomeOptions{CodexVersion: params.CodexVersion, ResumeSessionID: params.ResumeSessionID, IsLocalDirectory: params.LocalDirectory, SessionStoreKey: codexSessionStoreKey(params.Task.AgentID, params.Task.IssueID)}, logger); err != nil {
 			logger.Warn("execenv: refresh codex-home failed", "error", err)
 		} else {
 			env.CodexHome = codexHome

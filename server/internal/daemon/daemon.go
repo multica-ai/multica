@@ -3269,6 +3269,9 @@ func gateResumeToReusedWorkdir(task *Task, taskCtx *execenv.TaskContextForEnv, e
 		)
 		task.PriorSessionID = ""
 		taskCtx.PriorSessionResumed = false
+		// The user expected this run to continue the prior conversation; surface
+		// the loss in the brief instead of silently restarting (MUL-4424).
+		taskCtx.PriorSessionResumeUnavailable = true
 	}
 	return reused
 }
@@ -3293,6 +3296,9 @@ func gateCodexResumeToRolloutPresence(task *Task, taskCtx *execenv.TaskContextFo
 		"session_id", task.PriorSessionID, "codex_home", codexHome)
 	task.PriorSessionID = ""
 	taskCtx.PriorSessionResumed = false
+	// The user expected this run to continue the prior conversation; surface the
+	// loss in the brief instead of silently restarting (MUL-4424).
+	taskCtx.PriorSessionResumeUnavailable = true
 }
 
 func (d *Daemon) ensureTaskSkillBundles(ctx context.Context, task *Task) error {
