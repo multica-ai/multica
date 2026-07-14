@@ -248,21 +248,6 @@ vi.mock("@dnd-kit/utilities", () => ({
   CSS: { Transform: { toString: () => undefined } },
 }));
 
-// Mock react-virtuoso: jsdom has no layout, so the real Virtuoso renders
-// nothing (and throws on its resize plumbing). Render every lane inline so the
-// virtualized swimlane exposes its lanes/cells/cards to the DOM, matching the
-// non-virtualized behavior these tests assert.
-vi.mock("react-virtuoso", () => ({
-  Virtuoso: ({ data, itemContent, components }: any) => (
-    <div data-testid="virtuoso-mock">
-      {(data ?? []).map((item: any, i: number) => (
-        <div key={i}>{itemContent(i, item)}</div>
-      ))}
-      {components?.Footer ? <components.Footer /> : null}
-    </div>
-  ),
-}));
-
 const mockIssues: Issue[] = [
   {
     id: "parent-1",
