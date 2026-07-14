@@ -389,7 +389,6 @@
     "attribution": {
       "on_behalf_of": "{{name}} 님을 대신하여",
       "someone": "어떤 멤버",
-      "unattributed": "책임 멤버 없음",
       "source_direct_human": "멤버 직접 작업",
       "source_delegation": "다른 실행에서 위임됨",
       "source_comment_source": "댓글 스레드에서",

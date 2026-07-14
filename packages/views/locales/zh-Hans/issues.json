@@ -389,7 +389,6 @@
     "attribution": {
       "on_behalf_of": "代表 {{name}}",
       "someone": "某位成员",
-      "unattributed": "无责任成员",
       "source_direct_human": "成员直接操作",
       "source_delegation": "由其他运行委托",
       "source_comment_source": "来自评论线程",

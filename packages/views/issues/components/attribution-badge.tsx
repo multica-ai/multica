@@ -26,9 +26,10 @@ function initialsOf(name: string): string {
  * the "on behalf of <member>" provenance, with the resolution source and a
  * distinct warning tone for degraded (non-precise) attribution.
  *
- * Two shapes:
- *  - `variant="badge"` (default): the full "on behalf of <name>" chip, with an
- *    explicit "unattributed" chip when no responsible member resolved.
+ * Two shapes, both silent when no responsible member resolved (MUL-4765):
+ *  - `variant="badge"` (default): the full "on behalf of <name>" chip. Renders
+ *    nothing when there's no accountable member, so an unassigned run reads as
+ *    plain rather than a warning.
  *  - `variant="avatar"`: just the accountable member's avatar, with the name +
  *    source in a hover tooltip. Compact enough for a dense task row. Renders
  *    nothing when there's no accountable member — an avatar-only surface has
@@ -132,19 +133,11 @@ export function AttributionBadge({
     );
   }
 
-  if (!initiator) {
-    return (
-      <Badge
-        variant="outline"
-        className={cn("max-w-40 min-w-0 gap-1 font-normal text-warning", className)}
-        title={sourceLabel}
-      >
-        <span className="min-w-0 truncate">
-          {t(($) => $.execution_log.attribution.unattributed)}
-        </span>
-      </Badge>
-    );
-  }
+  // No resolved responsible member: render nothing rather than a warning chip.
+  // An empty accountable member is a normal state (e.g. an unassigned task), not
+  // something to flag — so the badge variant stays silent, matching the avatar
+  // variant above (MUL-4765).
+  if (!initiator) return null;
 
   const name = initiator.name || t(($) => $.execution_log.attribution.someone);
   return (

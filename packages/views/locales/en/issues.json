@@ -407,7 +407,6 @@
     "attribution": {
       "on_behalf_of": "on behalf of {{name}}",
       "someone": "someone",
-      "unattributed": "No responsible member",
       "source_direct_human": "Direct member action",
       "source_delegation": "Delegated from another run",
       "source_comment_source": "From a comment thread",

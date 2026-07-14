@@ -62,7 +62,7 @@ describe("AttributionBadge", () => {
     expect(screen.getByText("on behalf of someone")).toBeInTheDocument();
   });
 
-  it("renders an unattributed chip when no responsible member resolved", () => {
+  it("renders nothing when no responsible member resolved (MUL-4765)", () => {
     const attribution: TaskAttribution = {
       source: "unattributed",
       precise: false,
@@ -71,8 +71,9 @@ describe("AttributionBadge", () => {
       <AttributionBadge attribution={attribution} />,
     );
 
-    expect(screen.getByText("No responsible member")).toBeInTheDocument();
-    expect(container.querySelector(".text-warning")).not.toBeNull();
+    // An unassigned run is a normal state, not a warning — the badge stays silent
+    // rather than showing a "No responsible member" chip.
+    expect(container).toBeEmptyDOMElement();
   });
 
   it("degrades gracefully for an unknown source label", () => {
