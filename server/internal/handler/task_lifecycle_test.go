@@ -208,8 +208,8 @@ func TestRecoverOrphanedTasks_RejectsPlainMember(t *testing.T) {
 	req := newRequestAs(memberID, "POST", "/api/daemon/runtimes/"+fixture.runtimeID+"/recover-orphans", nil)
 	req = withURLParams(req, "runtimeId", fixture.runtimeID)
 	testHandler.RecoverOrphanedTasks(w, req)
-	if w.Code != http.StatusForbidden {
-		t.Fatalf("RecoverOrphanedTasks member: expected 403, got %d: %s", w.Code, w.Body.String())
+	if w.Code != http.StatusConflict {
+		t.Fatalf("RecoverOrphanedTasks member: expected 409, got %d: %s", w.Code, w.Body.String())
 	}
 
 	var taskStatus, failureReason string
