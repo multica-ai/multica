@@ -90,6 +90,12 @@ var (
 		"unknown":  "unknown",
 	}
 
+	knownSquadLeaderEvaluationOutcomes = map[string]string{
+		"action":    "action",
+		"no_action": "no_action",
+		"failed":    "failed",
+	}
+
 	knownAutopilotSkipReasons = map[string]string{
 		"already_running":   "already_running",
 		"recent_run":        "recent_run",
@@ -318,6 +324,14 @@ func NormalizeAutopilotTrigger(value string) string {
 
 func NormalizeAutopilotSkipReason(value string) string {
 	return normalizeFromAllowList(value, knownAutopilotSkipReasons, "other")
+}
+
+// NormalizeSquadLeaderEvaluationOutcome canonicalises the outcome of a squad
+// leader's per-trigger evaluation (`action` | `no_action` | `failed`). Any
+// other value collapses to `other` so a future outcome value cannot blow up
+// metric cardinality before the allow-list is updated.
+func NormalizeSquadLeaderEvaluationOutcome(value string) string {
+	return normalizeFromAllowList(value, knownSquadLeaderEvaluationOutcomes, "other")
 }
 
 func NormalizeWebhookProvider(value string) string {

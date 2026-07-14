@@ -53,6 +53,7 @@ type businessEventMetrics struct {
 	autopilotRunStarted             *prometheus.CounterVec
 	autopilotRunTerminal            *prometheus.CounterVec
 	autopilotRunSkipped             *prometheus.CounterVec
+	squadLeaderEvaluation           *prometheus.CounterVec
 	webhookDelivery                 *prometheus.CounterVec
 	githubEventReceived             *prometheus.CounterVec
 	githubPRReview                  *prometheus.CounterVec
@@ -158,6 +159,10 @@ func newBusinessEventMetrics() *businessEventMetrics {
 			Name: "multica_autopilot_run_skipped_total",
 			Help: "Total autopilot runs that admission-skipped (concurrency / cooldown / other).",
 		}, metricLabels("multica_autopilot_run_skipped_total")),
+		squadLeaderEvaluation: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "multica_squad_leader_evaluation_total",
+			Help: "Total squad-leader evaluation decisions recorded per trigger, labelled by outcome (action | no_action | failed).",
+		}, metricLabels("multica_squad_leader_evaluation_total")),
 		webhookDelivery: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "multica_webhook_delivery_total",
 			Help: "Total inbound webhook deliveries by provider and outcome.",
@@ -223,6 +228,7 @@ func (e *businessEventMetrics) collectors() []prometheus.Collector {
 		e.autopilotRunStarted,
 		e.autopilotRunTerminal,
 		e.autopilotRunSkipped,
+		e.squadLeaderEvaluation,
 		e.webhookDelivery,
 		e.githubEventReceived,
 		e.githubPRReview,
@@ -358,6 +364,21 @@ func (m *BusinessMetrics) IncForEvent(ev analytics.Event) {
 }
 
 // ---- non-PostHog Record* helpers (typed; no analytics.Event source) -------
+
+// RecordSquadLeaderEvaluation counts a squad-leader evaluation decision
+// recorded per trigger. The outcome label is the same allow-listed value
+// the leader records via `multica squad activity` (action | no_action |
+// failed); unknown values collapse to "other" so cardinality stays bounded.
+// Prometheus-only — there is no paired PostHog event because this fires on
+// every leader turn and is operational observability, not product behaviour.
+func (m *BusinessMetrics) RecordSquadLeaderEvaluation(outcome string) {
+	if m == nil || m.events == nil {
+		return
+	}
+	m.events.squadLeaderEvaluation.WithLabelValues(
+		NormalizeSquadLeaderEvaluationOutcome(outcome),
+	).Inc()
+}
 
 // RecordAutopilotRunSkipped counts an autopilot admission-skip with reason.
 func (m *BusinessMetrics) RecordAutopilotRunSkipped(cadence, reason string) {

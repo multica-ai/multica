@@ -1,3 +1,14 @@
+-- name: GetLatestAgentCommentOnIssue :one
+-- The most recent agent-authored comment on an issue, used by the squad-leader
+-- evaluation recorder to recover the leader's delegation comment (and its
+-- @mention list) without forcing the leader to repeat itself in the activity
+-- payload. NULL row if the agent has not commented yet — caller treats that
+-- as "no delegated_to recorded".
+SELECT * FROM comment
+WHERE issue_id = $1 AND author_type = 'agent' AND author_id = $2
+ORDER BY created_at DESC, id DESC
+LIMIT 1;
+
 -- name: ListCommentsForIssue :many
 -- All comments for an issue in chronological order, capped at $3 (DB safety
 -- net). Issue p99 is ~30 comments, max ever observed in prod is ~1.1k, so
