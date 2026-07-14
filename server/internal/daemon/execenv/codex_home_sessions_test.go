@@ -466,7 +466,8 @@ func TestPrepareCodexSessionsDir_ReusedStoreLinkIsAuthoritative(t *testing.T) {
 func TestPruneCodexSessionStores(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("CODEX_HOME", home)
-	storeRoot := filepath.Join(home, codexSessionStoreRoot)
+	// Stores live under the profile namespace; the default profile is "".
+	storeRoot := filepath.Join(home, codexSessionStoreRoot, codexSessionStoreNamespace(""))
 
 	freshStore := filepath.Join(storeRoot, "agent-1", "issue-fresh")
 	staleStore := filepath.Join(storeRoot, "agent-1", "issue-stale")
@@ -480,7 +481,7 @@ func TestPruneCodexSessionStores(t *testing.T) {
 	// Age only the stale store's whole tree well past retention.
 	chtimesTree(t, staleStore, now.Add(-30*24*time.Hour))
 
-	removed, bytes := PruneCodexSessionStores(retention, now, nil, testLogger())
+	removed, bytes := PruneCodexSessionStores("", retention, now, nil, testLogger())
 	if removed != 1 {
 		t.Fatalf("removed = %d, want 1 (only the store idle past retention)", removed)
 	}
@@ -496,7 +497,7 @@ func TestPruneCodexSessionStores(t *testing.T) {
 
 	// retention <= 0 disables pruning even for an aged store.
 	chtimesTree(t, freshStore, now.Add(-30*24*time.Hour))
-	if removed, _ := PruneCodexSessionStores(0, now, nil, testLogger()); removed != 0 {
+	if removed, _ := PruneCodexSessionStores("", 0, now, nil, testLogger()); removed != 0 {
 		t.Errorf("retention<=0 must disable pruning, removed=%d", removed)
 	}
 	assertPresent(t, freshStore)
@@ -509,8 +510,7 @@ func TestPruneCodexSessionStores(t *testing.T) {
 func TestPruneCodexSessionStores_ReopenedStoreNotReclaimed(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("CODEX_HOME", home)
-	key := filepath.Join("agent-1", "issue-old")
-	storeDir := codexSessionStoreDir(home, key)
+	storeDir := codexSessionStoreDir(home, codexSessionStoreKey("", "agent-1", "issue-old"))
 	sessionID := "019f59d9-a6aa-7a53-b173-1eccc4b4c873"
 	// A long-idle (30-day) store that still holds a resumable rollout.
 	seedRolloutAt(t, filepath.Join(storeDir, "2026", "06", "01", "rollout-2026-06-01T00-00-00-"+sessionID+".jsonl"), 16)
@@ -529,7 +529,7 @@ func TestPruneCodexSessionStores_ReopenedStoreNotReclaimed(t *testing.T) {
 	}
 
 	// A GC cycle now — before the resumed turn writes anything — must keep it.
-	if removed, _ := PruneCodexSessionStores(14*24*time.Hour, time.Now(), nil, testLogger()); removed != 0 {
+	if removed, _ := PruneCodexSessionStores("", 14*24*time.Hour, time.Now(), nil, testLogger()); removed != 0 {
 		t.Fatalf("removed = %d, want 0 (a just-reopened store must survive GC)", removed)
 	}
 	assertPresent(t, storeDir)
@@ -545,8 +545,7 @@ func TestPruneCodexSessionStores_ReopenedStoreNotReclaimed(t *testing.T) {
 func TestPruneCodexSessionStores_ActiveStoreNotReclaimed(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("CODEX_HOME", home)
-	key := filepath.Join("agent-1", "issue-active")
-	storeDir := codexSessionStoreDir(home, key)
+	storeDir := codexSessionStoreDir(home, codexSessionStoreKey("", "agent-1", "issue-active"))
 	seedRolloutAt(t, filepath.Join(storeDir, "2026", "06", "01", "rollout-2026-06-01T00-00-00-x.jsonl"), 16)
 	// Idle past retention on disk (no remount refresh), but currently in use.
 	chtimesTree(t, storeDir, time.Now().Add(-30*24*time.Hour))
@@ -558,16 +557,43 @@ func TestPruneCodexSessionStores_ActiveStoreNotReclaimed(t *testing.T) {
 		}
 		return func() {}, true
 	}
-	if removed, _ := PruneCodexSessionStores(14*24*time.Hour, time.Now(), held, testLogger()); removed != 0 {
+	if removed, _ := PruneCodexSessionStores("", 14*24*time.Hour, time.Now(), held, testLogger()); removed != 0 {
 		t.Fatalf("removed = %d, want 0 (a reserved/in-use store must never be reclaimed)", removed)
 	}
 	assertPresent(t, storeDir)
 
 	// Once reservable, the same idle store is reclaimed.
-	if removed, _ := PruneCodexSessionStores(14*24*time.Hour, time.Now(), nil, testLogger()); removed != 1 {
+	if removed, _ := PruneCodexSessionStores("", 14*24*time.Hour, time.Now(), nil, testLogger()); removed != 1 {
 		t.Fatalf("removed = %d, want 1 (idle store reclaimed when reservable)", removed)
 	}
 	assertAbsent(t, storeDir)
+}
+
+// TestPruneCodexSessionStores_IsolatesProfiles is Elon's cross-profile blocker:
+// two profile-daemons share one ~/.codex, so one daemon's GC must never reclaim
+// another profile's store — the in-process reservation guard cannot span
+// processes, but the per-profile namespace makes their store trees disjoint so a
+// GC only ever sees, and reclaims, its own (MUL-4424).
+func TestPruneCodexSessionStores_IsolatesProfiles(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("CODEX_HOME", home)
+	// A store owned by the "staging" profile daemon, idle past retention.
+	stagingStore := codexSessionStoreDir(home, codexSessionStoreKey("staging", "agent-1", "issue-1"))
+	seedRolloutAt(t, filepath.Join(stagingStore, "2026", "06", "01", "rollout-2026-06-01T00-00-00-s.jsonl"), 16)
+	chtimesTree(t, stagingStore, time.Now().Add(-30*24*time.Hour))
+
+	// The production (default) daemon prunes — it must NOT touch staging's store,
+	// even with no guard, because staging is a different namespace it never scans.
+	if removed, _ := PruneCodexSessionStores("", 14*24*time.Hour, time.Now(), nil, testLogger()); removed != 0 {
+		t.Fatalf("removed = %d, want 0 — another profile's store must be out of scope", removed)
+	}
+	assertPresent(t, stagingStore)
+
+	// The staging daemon prunes its own namespace → reclaims its idle store.
+	if removed, _ := PruneCodexSessionStores("staging", 14*24*time.Hour, time.Now(), nil, testLogger()); removed != 1 {
+		t.Fatalf("removed = %d, want 1 — the owning profile reclaims its idle store", removed)
+	}
+	assertAbsent(t, stagingStore)
 }
 
 // TestPruneCodexSessionStores_RemovesEmptyAgentDir confirms an agent directory
@@ -576,13 +602,13 @@ func TestPruneCodexSessionStores_ActiveStoreNotReclaimed(t *testing.T) {
 func TestPruneCodexSessionStores_RemovesEmptyAgentDir(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("CODEX_HOME", home)
-	storeRoot := filepath.Join(home, codexSessionStoreRoot)
+	storeRoot := filepath.Join(home, codexSessionStoreRoot, codexSessionStoreNamespace(""))
 	onlyStore := filepath.Join(storeRoot, "agent-lonely", "issue-1")
 	seedRolloutAt(t, filepath.Join(onlyStore, "2026", "06", "01", "rollout-2026-06-01T00-00-00-x.jsonl"), 16)
 
 	now := time.Now()
 	chtimesTree(t, onlyStore, now.Add(-30*24*time.Hour))
-	if removed, _ := PruneCodexSessionStores(14*24*time.Hour, now, nil, testLogger()); removed != 1 {
+	if removed, _ := PruneCodexSessionStores("", 14*24*time.Hour, now, nil, testLogger()); removed != 1 {
 		t.Fatalf("removed = %d, want 1", removed)
 	}
 	assertAbsent(t, filepath.Join(storeRoot, "agent-lonely"))

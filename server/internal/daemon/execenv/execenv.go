@@ -39,9 +39,13 @@ type PrepareParams struct {
 	WorkspaceID    string // workspace UUID — tasks are grouped under this
 	TaskID         string // task UUID — used for directory name
 	AgentName      string // for git branch naming only
-	Provider       string // agent provider (determines runtime config and skill injection paths)
-	CodexVersion   string // detected Codex CLI version (only used when Provider == "codex")
-	OpenclawBin    string // resolved openclaw CLI path (only used when Provider == "openclaw"); empty = look up on PATH
+	// Profile is the daemon's profile name (empty = default). It namespaces the
+	// per-issue Codex session store so a second profile-daemon sharing the same
+	// ~/.codex cannot see or GC this daemon's stores (MUL-4424).
+	Profile      string
+	Provider     string // agent provider (determines runtime config and skill injection paths)
+	CodexVersion string // detected Codex CLI version (only used when Provider == "codex")
+	OpenclawBin  string // resolved openclaw CLI path (only used when Provider == "openclaw"); empty = look up on PATH
 	// McpConfig is the agent's saved `mcp_config` JSON, forwarded to the
 	// provider-specific config preparer when that provider materialises MCP
 	// via a per-task config file. Cursor and OpenClaw consume it here; other
@@ -296,7 +300,7 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 	// For Codex, set up a per-task CODEX_HOME seeded from ~/.codex/ with skills.
 	if params.Provider == "codex" {
 		codexHome := filepath.Join(envRoot, "codex-home")
-		if err := prepareCodexHomeWithOpts(codexHome, CodexHomeOptions{CodexVersion: params.CodexVersion, IsLocalDirectory: params.LocalWorkDir != "", SessionStoreKey: codexSessionStoreKey(params.Task.AgentID, params.Task.IssueID)}, logger); err != nil {
+		if err := prepareCodexHomeWithOpts(codexHome, CodexHomeOptions{CodexVersion: params.CodexVersion, IsLocalDirectory: params.LocalWorkDir != "", SessionStoreKey: codexSessionStoreKey(params.Profile, params.Task.AgentID, params.Task.IssueID)}, logger); err != nil {
 			return nil, fmt.Errorf("execenv: prepare codex-home: %w", err)
 		}
 		if err := hydrateCodexSkills(codexHome, params.Task.AgentSkills, logger); err != nil {
@@ -389,6 +393,10 @@ type ReuseParams struct {
 	// OpenclawGateway is the per-task Gateway pin re-applied on reuse so the
 	// agent picks up any runtime_config changes saved since the prior run.
 	OpenclawGateway OpenclawGatewayPin
+	// Profile is the daemon's profile name (empty = default), mirroring
+	// PrepareParams.Profile so a reused task keys its per-issue Codex session
+	// store into the same profile namespace (MUL-4424).
+	Profile string
 	// LocalDirectory is true when the reused WorkDir is a user-supplied
 	// directory (the local_directory flow). The flag is propagated into
 	// the returned Environment so downstream callers (notably the GC
@@ -496,7 +504,7 @@ func Reuse(params ReuseParams, logger *slog.Logger) *Environment {
 	// config (especially sandbox/network access) is up to date.
 	if params.Provider == "codex" {
 		codexHome := filepath.Join(env.RootDir, "codex-home")
-		if err := prepareCodexHomeWithOpts(codexHome, CodexHomeOptions{CodexVersion: params.CodexVersion, ResumeSessionID: params.ResumeSessionID, IsLocalDirectory: params.LocalDirectory, SessionStoreKey: codexSessionStoreKey(params.Task.AgentID, params.Task.IssueID)}, logger); err != nil {
+		if err := prepareCodexHomeWithOpts(codexHome, CodexHomeOptions{CodexVersion: params.CodexVersion, ResumeSessionID: params.ResumeSessionID, IsLocalDirectory: params.LocalDirectory, SessionStoreKey: codexSessionStoreKey(params.Profile, params.Task.AgentID, params.Task.IssueID)}, logger); err != nil {
 			logger.Warn("execenv: refresh codex-home failed", "error", err)
 		} else {
 			env.CodexHome = codexHome

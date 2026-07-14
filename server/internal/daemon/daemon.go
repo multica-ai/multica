@@ -3925,7 +3925,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// store's stale (pre-remount) mtime cannot reclaim it out from under a resume
 	// of a long-idle issue (MUL-4424). No-op for non-Codex tasks / no stable key.
 	if provider == "codex" {
-		if store := execenv.CodexSessionStorePath(task.AgentID, task.IssueID); store != "" {
+		if store := execenv.CodexSessionStorePath(d.cfg.Profile, task.AgentID, task.IssueID); store != "" {
 			d.markActiveCodexStore(store)
 			defer d.unmarkActiveCodexStore(store)
 		}
@@ -3933,6 +3933,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	if task.PriorWorkDir != "" && localAssignment == nil && !task.IsLeaderTask {
 		env = execenv.Reuse(execenv.ReuseParams{
 			WorkspacesRoot:        d.cfg.WorkspacesRoot,
+			Profile:               d.cfg.Profile,
 			WorkDir:               task.PriorWorkDir,
 			Provider:              provider,
 			CodexVersion:          codexVersion,
@@ -3951,6 +3952,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		var err error
 		prepParams := execenv.PrepareParams{
 			WorkspacesRoot:        d.cfg.WorkspacesRoot,
+			Profile:               d.cfg.Profile,
 			WorkspaceID:           task.WorkspaceID,
 			TaskID:                task.ID,
 			AgentName:             agentName,

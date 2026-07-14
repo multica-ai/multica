@@ -210,12 +210,25 @@ func codexSessionStoreDir(sharedHome, key string) string {
 	return filepath.Join(sharedHome, codexSessionStoreRoot, key)
 }
 
-// codexSessionStoreKey builds the per-(agent, issue) key for a task's persistent
-// Codex sessions store. Both IDs are server-issued UUIDs; they are sanitized to
-// bare path segments defensively so a malformed value can never escape the store
-// root. Returns "" when there is no issue to key on (the store is issue-scoped),
-// leaving sessions/ task-local.
-func codexSessionStoreKey(agentID, issueID string) string {
+// codexSessionStoreNamespace isolates one profile-daemon's session stores from
+// another's when several run on the same machine sharing one ~/.codex (profiles
+// get separate daemon state but the same Codex home). Each daemon writes under,
+// and only ever reclaims, its own namespace, so a staging daemon's GC can never
+// delete a production task's live store and vice versa. Empty profile ->
+// "default". See CodexSessionStorePath / PruneCodexSessionStores (MUL-4424).
+func codexSessionStoreNamespace(profile string) string {
+	if ns := sanitizeCodexPathSegment(profile); ns != "" {
+		return ns
+	}
+	return "default"
+}
+
+// codexSessionStoreKey builds the per-(profile, agent, issue) key for a task's
+// persistent Codex sessions store. The agent/issue IDs are server-issued UUIDs;
+// all three segments are sanitized to bare path segments defensively so a
+// malformed value can never escape the store root. Returns "" when there is no
+// issue to key on (the store is issue-scoped), leaving sessions/ task-local.
+func codexSessionStoreKey(profile, agentID, issueID string) string {
 	issue := sanitizeCodexPathSegment(issueID)
 	if issue == "" {
 		return ""
@@ -224,7 +237,7 @@ func codexSessionStoreKey(agentID, issueID string) string {
 	if agent == "" {
 		agent = "_"
 	}
-	return filepath.Join(agent, issue)
+	return filepath.Join(codexSessionStoreNamespace(profile), agent, issue)
 }
 
 // sanitizeCodexPathSegment reduces s to the characters a UUID uses (hex plus
@@ -255,19 +268,24 @@ func sanitizeCodexPathSegment(s string) string {
 // never reclaimed; a store idle past retention is removed, giving deleted issues
 // an eventual-reclamation guarantee. retention <= 0 disables pruning entirely.
 //
+// It scans ONLY the caller profile's namespace, so a daemon never reclaims a
+// store owned by another profile-daemon sharing the same ~/.codex — the
+// in-process reservation guard cannot span processes, and the namespace makes
+// their store trees disjoint so it does not need to (MUL-4424).
+//
 // reserve (may be nil) atomically claims a store for deletion: it returns
 // ok=false when a live task holds the store — leaving it — and otherwise returns
 // a commit to run once removal finishes. Because the caller's reservation and a
 // task's mark-active go through one lock in the same process, a store a task is
 // about to mount is never removed out from under it — the confirm-inactive and
 // the remove are effectively atomic, closing the stat->remove race a plain
-// point-in-time active check leaves open (MUL-4424). nil disables the guard
-// (tests): every idle store is removed.
-func PruneCodexSessionStores(retention time.Duration, now time.Time, reserve func(storeDir string) (commit func(), ok bool), logger *slog.Logger) (removed int, bytesFreed int64) {
+// point-in-time active check leaves open. nil disables the guard (tests): every
+// idle store is removed.
+func PruneCodexSessionStores(profile string, retention time.Duration, now time.Time, reserve func(storeDir string) (commit func(), ok bool), logger *slog.Logger) (removed int, bytesFreed int64) {
 	if retention <= 0 {
 		return 0, 0
 	}
-	root := filepath.Join(resolveSharedCodexHome(), codexSessionStoreRoot)
+	root := filepath.Join(resolveSharedCodexHome(), codexSessionStoreRoot, codexSessionStoreNamespace(profile))
 	agents, err := os.ReadDir(root)
 	if err != nil {
 		return 0, 0 // not created yet, or unreadable — nothing to prune
@@ -483,12 +501,12 @@ func touchCodexSessionStore(storeDir string, logger *slog.Logger) {
 }
 
 // CodexSessionStorePath returns the per-issue Codex session store directory for
-// (agentID, issueID) on the shared home, or "" when there is no stable key. The
-// daemon marks this path in-use for the duration of a task so PruneCodexSession-
-// Stores never reclaims a store mid-mount, closing the stat→remove race the
-// mtime refresh alone cannot (MUL-4424).
-func CodexSessionStorePath(agentID, issueID string) string {
-	key := codexSessionStoreKey(agentID, issueID)
+// (profile, agentID, issueID) on the shared home, or "" when there is no stable
+// key. The daemon marks this path in-use for the duration of a task so
+// PruneCodexSessionStores never reclaims a store mid-mount, closing the
+// stat→remove race the mtime refresh alone cannot (MUL-4424).
+func CodexSessionStorePath(profile, agentID, issueID string) string {
+	key := codexSessionStoreKey(profile, agentID, issueID)
 	if key == "" {
 		return ""
 	}
