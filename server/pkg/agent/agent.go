@@ -142,6 +142,7 @@ type Config struct {
 	TaskID         string
 	RuntimeID      string
 	DaemonVersion  string
+	CodexVersion   string
 }
 
 // New creates a Backend for the given agent type.

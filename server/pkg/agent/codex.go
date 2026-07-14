@@ -63,7 +63,11 @@ var activeCodexLaunches atomic.Int64
 var maxActiveCodexLaunchesObserved atomic.Int64
 var codexCleanupConfirmationOverride atomic.Int32
 
-var codexDiagnosticSecretRe = regexp.MustCompile(`(?i)(authorization|api[_-]?key|token|secret|password)(\s*[:=]\s*)([^\s,;]+)`)
+var (
+	codexAuthorizationHeaderRe = regexp.MustCompile(`(?im)(authorization\s*:\s*)[^\r\n]+`)
+	codexJSONSecretRe          = regexp.MustCompile(`(?i)("(?:token|auth|authorization|api[_-]?key|secret|password)"\s*:\s*)"(?:\\.|[^"\\])*"`)
+	codexDiagnosticSecretRe    = regexp.MustCompile(`(?i)(authorization|auth|api[_-]?key|token|secret|password)(\s*[:=]\s*)([^\s,;]+)`)
+)
 
 func sanitizeCodexDiagnostic(value string) string {
 	value = strings.Map(func(r rune) rune {
@@ -72,6 +76,8 @@ func sanitizeCodexDiagnostic(value string) string {
 		}
 		return r
 	}, value)
+	value = codexAuthorizationHeaderRe.ReplaceAllString(value, `$1[REDACTED]`)
+	value = codexJSONSecretRe.ReplaceAllString(value, `$1"[REDACTED]"`)
 	return codexDiagnosticSecretRe.ReplaceAllString(value, `$1$2[REDACTED]`)
 }
 
@@ -744,7 +750,10 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 		}
 	}
 	launchStarted := time.Now()
-	codexVersion := detectCodexVersionForDiagnostics(ctx, execPath, cmd.Env, b.cfg.Logger)
+	codexVersion := strings.TrimSpace(b.cfg.CodexVersion)
+	if codexVersion == "" {
+		codexVersion = "unknown"
+	}
 
 	b.cfg.Logger.Info("codex lifecycle", "phase", "spawn", "task_id", b.cfg.TaskID, "runtime_id", b.cfg.RuntimeID, "pid", cmd.Process.Pid, "process_group", cmd.Process.Pid, "cwd", opts.Cwd, "attempt", attempt, "active_launches", activeLaunches, "codex_version", codexVersion, "daemon_version", b.cfg.DaemonVersion)
 
@@ -857,6 +866,7 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 	//     stay open.
 	var waitOnce sync.Once
 	var cleanupConfirmed bool
+	var waitReturned bool
 	var cleanupWaitErr error
 	drainAndWait := func() {
 		waitOnce.Do(func() {
@@ -893,6 +903,7 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 			}()
 			select {
 			case <-waitCh:
+				waitReturned = true
 				// reaped cleanly.
 			case <-time.After(grace):
 				b.cfg.Logger.Warn("codex process still alive after reader exited; forcing shutdown",
@@ -905,8 +916,12 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 				// descendant, cmd.Wait() returns within WaitDelay of the
 				// cancel.
 				<-waitCh
+				waitReturned = true
 			}
-			cleanupConfirmed = cmd.ProcessState != nil && cmd.ProcessState.Exited()
+			// Wait returning with a ProcessState is the os/exec reap boundary.
+			// On Unix, ProcessState.Exited reports false for a process terminated
+			// by SIGKILL even though Wait successfully reaped it.
+			cleanupConfirmed = waitReturned && cmd.ProcessState != nil
 			if codexCleanupConfirmationOverride.Load() < 0 {
 				cleanupConfirmed = false
 			}
