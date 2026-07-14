@@ -23,6 +23,7 @@ import { StatusIcon } from "./status-icon";
 import { PriorityIcon } from "./priority-icon";
 import { IssueActionsContextMenu } from "../actions";
 import { sortIssues } from "../utils/sort";
+import { useClearIssueNavigation } from "../hooks";
 import { useT } from "../../i18n";
 
 // ---------------------------------------------------------------------------
@@ -442,6 +443,11 @@ function ScheduledRow({
 
 export function GanttView({ issues }: { issues: Issue[] }) {
   const { t } = useT("issues");
+  // A timeline has no column to step through, so clear this workspace's
+  // published columns rather than let the detail offer navigation unrelated to
+  // this view.
+  const wsId = useWorkspaceId();
+  useClearIssueNavigation(wsId);
   const zoom = useViewStore((s) => s.ganttZoom);
   const showCompleted = useViewStore((s) => s.ganttShowCompleted);
   const sortBy = useViewStore((s) => s.sortBy);

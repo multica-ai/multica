@@ -234,6 +234,8 @@
       "next": "다음 일치",
       "close": "찾기 닫기"
     },
+    "prev_issue_tooltip": "이전 이슈",
+    "next_issue_tooltip": "다음 이슈",
     "update_failed": "이슈를 업데이트하지 못했습니다",
     "link_copied": "링크를 복사했습니다",
     "link_copy_failed": "링크를 복사하지 못했습니다",
