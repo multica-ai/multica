@@ -3,17 +3,12 @@
 import { useCallback, useMemo, useRef, useState } from "react";
 import {
   AlertCircle,
-  Archive,
-  ArchiveRestore,
   Bot,
-  Loader2,
   Lock,
   Plus,
-  X,
 } from "lucide-react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { toast } from "sonner";
 import type {
   Agent,
   AgentRuntime,
@@ -22,12 +17,14 @@ import type {
 import {
   type AgentActivity,
   agentRunCounts30dOptions,
+  effectiveAccessScope,
   useWorkspaceActivityMap,
   useWorkspacePresenceMap,
   VISIBILITY_TOOLTIP,
   type AgentPresenceDetail,
 } from "@multica/core/agents";
 import {
+  type AgentListFilters,
   useAgentsViewStore,
   AGENT_DEFAULT_HIDDEN_COLUMNS,
   AGENT_SCOPES,
@@ -35,26 +32,16 @@ import {
   type AgentsScope,
   type AgentSortField,
 } from "@multica/core/agents/stores";
-import { api } from "@multica/core/api";
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
 import {
   agentListOptions,
   memberListOptions,
-  workspaceKeys,
 } from "@multica/core/workspace/queries";
 import { runtimeDisplayLabel, runtimeListOptions } from "@multica/core/runtimes";
 import { Button } from "@multica/ui/components/ui/button";
 import { Checkbox } from "@multica/ui/components/ui/checkbox";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@multica/ui/components/ui/dialog";
 import {
   LIST_GRID_BOTTOM_CLEARANCE,
   ListGrid,
@@ -98,7 +85,7 @@ import { matchesPinyin } from "../../editor/extensions/pinyin-match";
 // the documented exception to the single-line management-list rule.
 const GRID_COLS =
   "grid-cols-[0.75rem_minmax(120px,1fr)_var(--agc-status-mobile)_1.75rem_0.75rem] " +
-  "@2xl:grid-cols-[0.75rem_1rem_minmax(200px,1fr)_var(--agc-status-desktop)_var(--agc-owner)_var(--agc-runtime)_var(--agc-lastactive)_var(--agc-runs)_var(--agc-model)_var(--agc-created)_1.75rem_0.75rem]";
+  "@2xl:grid-cols-[0.75rem_1rem_minmax(200px,1fr)_var(--agc-status-desktop)_var(--agc-owner)_var(--agc-access)_var(--agc-runtime)_var(--agc-lastactive)_var(--agc-runs)_var(--agc-model)_var(--agc-created)_1.75rem_0.75rem]";
 
 // Two-line rows; the virtualizer's fixed-size contract.
 const ROW_HEIGHT = 64;
@@ -110,6 +97,8 @@ const COLUMN_WIDTHS: Record<AgentColumnKey, number> = {
   // idle rows show only the dot + label and leave some in-track slack.
   status: 144,
   owner: 144,
+  // Fits the longest label "Specific people" (~120px incl. padding).
+  access: 132,
   runtime: 144,
   lastActive: 120,
   runs: 88,
@@ -137,6 +126,7 @@ function columnTrackVars(
     "--agc-status-mobile": isVisible("status") ? "96px" : "0px",
     "--agc-status-desktop": width("status"),
     "--agc-owner": width("owner"),
+    "--agc-access": width("access"),
     "--agc-runtime": width("runtime"),
     "--agc-lastactive": width("lastActive"),
     "--agc-runs": width("runs"),
@@ -181,6 +171,67 @@ function matchesAgentSearch(row: AgentListRow, query: string): boolean {
     (agent.description ? matchesPinyin(agent.description, query) : false)
   );
 }
+
+/**
+ * Pure row-filter predicate: returns true if the row matches all active
+ * filter dimensions. Empty filter arrays are inactive (the row passes). The
+ * `access` dimension derives its key via `effectiveAccessScope` so the column
+ * and the filter share one derivation. Exported for testing — the page wires
+ * it inside its `useMemo`.
+ */
+export function rowMatchesFilters(
+  row: AgentListRow,
+  filters: AgentListFilters,
+  query: string,
+): boolean {
+  if (!matchesAgentSearch(row, query.trim().toLowerCase())) return false;
+  if (
+    filters.availability.length > 0 &&
+    (!row.presence || !filters.availability.includes(row.presence.availability))
+  ) {
+    return false;
+  }
+  if (
+    filters.runtimes.length > 0 &&
+    !filters.runtimes.includes(row.agent.runtime_id)
+  ) {
+    return false;
+  }
+  if (
+    filters.owners.length > 0 &&
+    (!row.agent.owner_id || !filters.owners.includes(row.agent.owner_id))
+  ) {
+    return false;
+  }
+  if (
+    filters.models.length > 0 &&
+    !filters.models.includes(row.agent.model)
+  ) {
+    return false;
+  }
+  if (
+    filters.access.length > 0 &&
+    !filters.access.includes(
+      effectiveAccessScope(
+        row.agent.permission_mode,
+        row.agent.invocation_targets,
+      ),
+    )
+  ) {
+    return false;
+  }
+  return true;
+}
+
+/**
+ * Bulk-access dialog confirm-button enablement is centralized in
+ * `@multica/core/agents` as `isAccessChangeReady` (MUL-3963). The dialog
+ * consumes it; the picker also gates its internal Save button on the same
+ * predicate (its own Save button is hidden via `hideFooter` in the bulk flow).
+ */
+import { isAccessChangeReady } from "@multica/core/agents";
+import { AgentBatchToolbar } from "./agent-batch-toolbar";
+export { isAccessChangeReady };
 
 export interface AgentsPageProps {
   /** Desktop-only daemon wiring, currently unused by the list (kept for
@@ -422,6 +473,35 @@ function OwnerCell({ row }: { row: AgentListRow }) {
   );
 }
 
+// Effective access scope derived from permission_mode + invocation_targets
+// (not the lossy derived `visibility`). Text label, not icon-only, so screen
+// readers announce the scope.
+export function AccessCell({ row }: { row: AgentListRow }) {
+  const { t } = useT("agents");
+  const scope = useMemo(
+    () =>
+      effectiveAccessScope(
+        row.agent.permission_mode,
+        row.agent.invocation_targets,
+      ),
+    [row.agent.permission_mode, row.agent.invocation_targets],
+  );
+  const label = t(($) =>
+    scope === "workspace"
+      ? $.access.scope_labels.workspace
+      : scope === "specific-people"
+        ? $.access.scope_labels.specific_people
+        : $.access.scope_labels.owner_only,
+  );
+  return (
+    <ListGridCell className="hidden @2xl:flex">
+      <span className="min-w-0 truncate text-xs text-muted-foreground">
+        {label}
+      </span>
+    </ListGridCell>
+  );
+}
+
 function RuntimeCell({ row }: { row: AgentListRow }) {
   const runtime = row.runtime;
   return (
@@ -518,6 +598,13 @@ function AgentListHeader({
       ) : (
         <ListGridHeaderCell className="hidden px-0 @2xl:flex" />
       )}
+      {isColVisible("access") ? (
+        <ListGridHeaderCell className="hidden @2xl:flex">
+          {t(($) => $.columns.access)}
+        </ListGridHeaderCell>
+      ) : (
+        <ListGridHeaderCell className="hidden px-0 @2xl:flex" />
+      )}
       {isColVisible("runtime") ? (
         <ListGridHeaderCell className="hidden @2xl:flex">
           {t(($) => $.columns.runtime)}
@@ -597,6 +684,9 @@ function LoadingSkeleton() {
           <Skeleton className="h-3 w-14" />
         </ListGridHeaderCell>
         <ListGridHeaderCell className="hidden @2xl:flex">
+          <Skeleton className="h-3 w-14" />
+        </ListGridHeaderCell>
+        <ListGridHeaderCell className="hidden @2xl:flex">
           <Skeleton className="h-3 w-10" />
         </ListGridHeaderCell>
         <ListGridHeaderCell className="hidden px-0 @2xl:flex" />
@@ -621,6 +711,9 @@ function LoadingSkeleton() {
             <Skeleton className="h-3 w-12" />
           </ListGridCell>
           <ListGridCell className="hidden @2xl:flex">
+            <Skeleton className="h-3 w-14" />
+          </ListGridCell>
+          <ListGridCell className="hidden @2xl:flex">
             <Skeleton className="h-3 w-16" />
           </ListGridCell>
           <ListGridCell className="hidden @2xl:flex">
@@ -640,148 +733,6 @@ function LoadingSkeleton() {
 
 // ---------------------------------------------------------------------------
 // Batch toolbar — archive (with confirm; archiving cancels active tasks) and
-// restore, mirroring the single-row actions. No delete: the API has none.
-// ---------------------------------------------------------------------------
-
-function AgentBatchToolbar({
-  rows,
-  onClear,
-}: {
-  rows: AgentListRow[];
-  onClear: () => void;
-}) {
-  const { t } = useT("agents");
-  const wsId = useWorkspaceId();
-  const qc = useQueryClient();
-  const [confirmArchive, setConfirmArchive] = useState(false);
-  const [busy, setBusy] = useState(false);
-
-  if (rows.length === 0) return null;
-
-  const allManageable = rows.every((r) => r.canManage);
-  const anyActive = rows.some((r) => !r.agent.archived_at);
-  const anyArchived = rows.some((r) => !!r.agent.archived_at);
-
-  const invalidate = () =>
-    qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
-
-  const runBatch = async (
-    fn: (id: string) => Promise<unknown>,
-    targets: AgentListRow[],
-  ) => {
-    setBusy(true);
-    try {
-      for (const row of targets) {
-        await fn(row.agent.id);
-      }
-      invalidate();
-      onClear();
-    } catch (e) {
-      invalidate();
-      toast.error(e instanceof Error ? e.message : String(e));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <>
-      {/* Anchored to the page root (relative), NOT the viewport. */}
-      <div className="absolute bottom-6 left-1/2 z-50 flex -translate-x-1/2 items-center gap-1 rounded-lg border bg-background px-2 py-1.5 shadow-lg">
-        <div className="mr-1 flex items-center gap-1.5 border-r pl-1 pr-2">
-          <span className="text-sm font-medium">
-            {t(($) => $.actions.selected, { count: rows.length })}
-          </span>
-          <button
-            type="button"
-            aria-label={t(($) => $.actions.clear_selection)}
-            onClick={onClear}
-            className="rounded p-0.5 transition-colors hover:bg-accent"
-          >
-            <X className="size-3.5 text-muted-foreground" />
-          </button>
-        </div>
-
-        {anyActive && (
-          <Button
-            variant="ghost"
-            size="sm"
-            disabled={!allManageable || busy}
-            onClick={() => setConfirmArchive(true)}
-          >
-            <Archive className="mr-1 size-3.5" />
-            {t(($) => $.row_actions.archive)}
-          </Button>
-        )}
-        {anyArchived && (
-          <Button
-            variant="ghost"
-            size="sm"
-            disabled={!allManageable || busy}
-            onClick={() =>
-              runBatch(
-                (id) => api.restoreAgent(id),
-                rows.filter((r) => !!r.agent.archived_at),
-              )
-            }
-          >
-            <ArchiveRestore className="mr-1 size-3.5" />
-            {t(($) => $.row_actions.restore)}
-          </Button>
-        )}
-      </div>
-
-      <Dialog open={confirmArchive} onOpenChange={setConfirmArchive}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>
-              {t(($) => $.row_actions.archive_dialog_title, {
-                name:
-                  rows.length === 1 && rows[0]
-                    ? rows[0].agent.name
-                    : String(rows.length),
-              })}
-            </DialogTitle>
-            <DialogDescription>
-              {t(($) => $.row_actions.archive_dialog_description)}
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              disabled={busy}
-              onClick={() => setConfirmArchive(false)}
-            >
-              {t(($) => $.row_actions.archive_dialog_cancel)}
-            </Button>
-            <Button
-              type="button"
-              variant="destructive"
-              size="sm"
-              disabled={busy}
-              onClick={async () => {
-                await runBatch(
-                  (id) => api.archiveAgent(id),
-                  rows.filter((r) => !r.agent.archived_at),
-                );
-                setConfirmArchive(false);
-              }}
-            >
-              {busy ? (
-                <Loader2 className="mr-1 size-3.5 animate-spin" />
-              ) : null}
-              {t(($) => $.row_actions.archive_dialog_confirm)}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-    </>
-  );
-}
-
-// ---------------------------------------------------------------------------
 // Page
 // ---------------------------------------------------------------------------
 
@@ -923,36 +874,7 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
 
   // Visible rows: local search + filters, then sort.
   const rows = useMemo<AgentListRow[]>(() => {
-    const q = search.trim().toLowerCase();
-    const filtered = scopeRows.filter((row) => {
-      if (!matchesAgentSearch(row, q)) return false;
-      if (
-        filters.availability.length > 0 &&
-        (!row.presence ||
-          !filters.availability.includes(row.presence.availability))
-      ) {
-        return false;
-      }
-      if (
-        filters.runtimes.length > 0 &&
-        !filters.runtimes.includes(row.agent.runtime_id)
-      ) {
-        return false;
-      }
-      if (
-        filters.owners.length > 0 &&
-        (!row.agent.owner_id || !filters.owners.includes(row.agent.owner_id))
-      ) {
-        return false;
-      }
-      if (
-        filters.models.length > 0 &&
-        !filters.models.includes(row.agent.model)
-      ) {
-        return false;
-      }
-      return true;
-    });
+    const filtered = scopeRows.filter((row) => rowMatchesFilters(row, filters, search));
 
     const dir = sortDirection === "asc" ? 1 : -1;
     filtered.sort((a, b) => {
@@ -1167,6 +1089,11 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
                       ) : (
                         <ListGridCell className="hidden px-0 @2xl:flex" />
                       )}
+                      {isColVisible("access") ? (
+                        <AccessCell row={row} />
+                      ) : (
+                        <ListGridCell className="hidden px-0 @2xl:flex" />
+                      )}
                       {isColVisible("runtime") ? (
                         <RuntimeCell row={row} />
                       ) : (
@@ -1226,6 +1153,8 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
 
       <AgentBatchToolbar
         rows={selectedRows}
+        members={members}
+        currentUserId={currentUser?.id ?? null}
         onClear={() => setSelectedIds(new Set())}
       />
 
