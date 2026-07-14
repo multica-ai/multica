@@ -19,7 +19,10 @@ import (
 
 var errRuntimeSetChanged = errors.New("runtime set changed")
 
-const taskWakeupMaxBackoff = 30 * time.Second
+const (
+	taskWakeupMaxBackoff = 30 * time.Second
+	taskWakeupReadLimit  = 4 * 1024 * 1024
+)
 
 var (
 	taskWakeupPongWait          = 60 * time.Second
@@ -395,7 +398,7 @@ func (d *Daemon) readTaskWakeupMessages(conn *websocket.Conn, taskWakeups chan<-
 }
 
 func (d *Daemon) configureTaskWakeupReadLiveness(conn *websocket.Conn) {
-	conn.SetReadLimit(64 * 1024)
+	conn.SetReadLimit(taskWakeupReadLimit)
 	if err := d.extendTaskWakeupReadDeadline(conn); err != nil {
 		d.logger.Debug("task wakeup websocket read deadline failed", "error", err)
 	}

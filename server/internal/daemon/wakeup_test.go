@@ -93,6 +93,68 @@ func TestWSHeartbeatFreshnessSuppressesHTTP(t *testing.T) {
 	}
 }
 
+func TestReadTaskWakeupMessagesAcceptsClaimResponseLargerThan64KiB(t *testing.T) {
+	claimResponseFrame := mustProtocolFrame(t, protocol.Message{
+		Type: protocol.EventDaemonRPCResponse,
+		Payload: marshalRaw(protocol.RPCResponsePayload{
+			RequestID: "request-1",
+			Status:    http.StatusOK,
+			Body: json.RawMessage(
+				`{"tasks":[{"description":"` + strings.Repeat("x", 128*1024) + `"}]}`,
+			),
+		}),
+	})
+	if len(claimResponseFrame) <= 64*1024 {
+		t.Fatalf("claim response frame size = %d, want larger than 64 KiB", len(claimResponseFrame))
+	}
+	taskFrame := mustProtocolFrame(t, protocol.Message{
+		Type: protocol.EventDaemonTaskAvailable,
+		Payload: marshalRaw(protocol.TaskAvailablePayload{
+			RuntimeID: "runtime-1",
+			TaskID:    "task-1",
+		}),
+	})
+
+	upgrader := websocket.Upgrader{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+
+		if !writeWSMessage(t, conn, websocket.TextMessage, claimResponseFrame) {
+			return
+		}
+		writeWSMessage(t, conn, websocket.TextMessage, taskFrame)
+	}))
+	defer srv.Close()
+
+	conn, _, err := websocket.DefaultDialer.Dial(taskWakeupTestWSURL(srv.URL), nil)
+	if err != nil {
+		t.Fatalf("dial websocket: %v", err)
+	}
+	defer conn.Close()
+
+	d := New(Config{}, slog.Default())
+	taskWakeups := make(chan taskWakeup, 1)
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- d.readTaskWakeupMessages(conn, taskWakeups)
+	}()
+
+	select {
+	case wakeup := <-taskWakeups:
+		if wakeup.runtimeID != "runtime-1" {
+			t.Fatalf("wakeup runtimeID = %q, want runtime-1", wakeup.runtimeID)
+		}
+	case err := <-errCh:
+		t.Fatalf("readTaskWakeupMessages returned before consuming large claim response: %v", err)
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for task wakeup after large claim response")
+	}
+}
+
 func TestReadTaskWakeupMessagesTimesOutWithoutPeerTraffic(t *testing.T) {
 	overrideTaskWakeupTimings(t, 60*time.Millisecond, 20*time.Millisecond, taskWakeupBackoffResetAfter)
 
