@@ -1,6 +1,22 @@
 {
   "http": [
     {
+      "id": "DELETE /api/scheduled-messages/{scheduledMessageId}",
+      "gate": "self_only"
+    },
+    {
+      "id": "PATCH /api/scheduled-messages/{scheduledMessageId}",
+      "gate": "self_only"
+    },
+    {
+      "id": "POST /api/issues/{id}/scheduled-messages",
+      "gate": "issue_scope"
+    },
+    {
+      "id": "POST /api/scheduled-messages/{scheduledMessageId}/send",
+      "gate": "self_only"
+    },
+    {
       "id": "POST /api/cerebro/app-workflows/",
       "gate": "cerebro_capability:build_apps"
     },

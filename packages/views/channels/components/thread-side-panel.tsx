@@ -198,6 +198,8 @@ export function ThreadSidePanel({
           draftKey={`reply:${channelId}:${parentEntry.id}`}
           avatar={currentUserId ? { type: "member", id: currentUserId } : null}
           onSubmit={(content, ids) => onSubmit(parentEntry.id, content, ids)}
+          allowScheduling
+          scheduleParentId={parentEntry.id} /* CEREBRO-PATCH(scheduled-messages): FIR-2873 */
           confirmBeforeSend={confirmBeforeSend} // CEREBRO-PATCH(channel-mention-members-only): FIR-2680 — gate reply @mentions of non-participants.
         />
       </div>
