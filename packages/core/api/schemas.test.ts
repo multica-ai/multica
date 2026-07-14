@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   AppConfigSchema,
+  AutopilotTriggerResponseSchema,
   AgentTaskListSchema,
   DashboardAgentRunTimeListSchema,
   DashboardUsageByAgentListSchema,
@@ -8,10 +9,13 @@ import {
   CreateFeedbackResponseSchema,
   DuplicateIssueErrorBodySchema,
   EMPTY_CREATE_FEEDBACK_RESPONSE,
+  EMPTY_AUTOPILOT_TRIGGER,
+  EMPTY_GET_AUTOPILOT_RESPONSE,
   EMPTY_INBOX_UNREAD_SUMMARY,
   EMPTY_SEARCH_PROJECTS_RESPONSE,
   EMPTY_USER,
   InboxUnreadSummarySchema,
+  GetAutopilotResponseSchema,
   IssueTriggerPreviewSchema,
   ListIssuesResponseSchema,
   SearchProjectsResponseSchema,
@@ -627,5 +631,95 @@ describe("SearchProjectsResponseSchema date drift", () => {
     expect(parsed.projects).toHaveLength(1);
     expect(parsed.projects[0]?.start_date).toBeNull();
     expect(parsed.projects[0]?.due_date).toBeNull();
+  });
+});
+
+describe("AutopilotTriggerResponseSchema", () => {
+  const ENDPOINT = { endpoint: "POST /api/autopilots/:id/triggers" };
+  const baseTrigger = {
+    id: "trigger-1",
+    autopilot_id: "autopilot-1",
+    kind: "schedule",
+    enabled: true,
+    cron_expression: "*/5 * * * *",
+    timezone: "UTC",
+    next_run_at: "2026-07-13T17:05:00Z",
+    webhook_token: null,
+    label: null,
+    last_fired_at: null,
+    created_at: "2026-07-13T17:00:00Z",
+    updated_at: "2026-07-13T17:00:00Z",
+  };
+
+  it("converts overlap_policy to camelCase", () => {
+    const parsed = parseWithFallback(
+      { ...baseTrigger, overlap_policy: "coalesce" },
+      AutopilotTriggerResponseSchema,
+      EMPTY_AUTOPILOT_TRIGGER,
+      ENDPOINT,
+    );
+    expect(parsed.overlapPolicy).toBe("coalesce");
+    expect(parsed).not.toHaveProperty("overlap_policy");
+  });
+
+  it("defaults an older server response to allow", () => {
+    const parsed = parseWithFallback(
+      baseTrigger,
+      AutopilotTriggerResponseSchema,
+      EMPTY_AUTOPILOT_TRIGGER,
+      ENDPOINT,
+    );
+    expect(parsed.overlapPolicy).toBe("allow");
+  });
+
+  it("falls back for a malformed overlap policy shape", () => {
+    const parsed = parseWithFallback(
+      { ...baseTrigger, overlap_policy: 42 },
+      AutopilotTriggerResponseSchema,
+      EMPTY_AUTOPILOT_TRIGGER,
+      ENDPOINT,
+    );
+    expect(parsed).toBe(EMPTY_AUTOPILOT_TRIGGER);
+  });
+});
+
+describe("GetAutopilotResponseSchema", () => {
+  it("normalizes nested trigger overlap policies", () => {
+    const trigger = {
+      id: "trigger-1",
+      autopilot_id: "autopilot-1",
+      kind: "schedule",
+      enabled: true,
+      cron_expression: "*/5 * * * *",
+      timezone: "UTC",
+      overlap_policy: "coalesce",
+      next_run_at: null,
+      webhook_token: null,
+      label: null,
+      last_fired_at: null,
+      created_at: "2026-07-13T17:00:00Z",
+      updated_at: "2026-07-13T17:00:00Z",
+    };
+    const autopilot = {
+      ...EMPTY_GET_AUTOPILOT_RESPONSE.autopilot,
+      id: "autopilot-1",
+      workspace_id: "workspace-1",
+      title: "Scheduled delivery",
+      assignee_id: "agent-1",
+      created_by_type: "member",
+      created_by_id: "user-1",
+      created_at: "2026-07-13T17:00:00Z",
+      updated_at: "2026-07-13T17:00:00Z",
+    };
+
+    const parsed = parseWithFallback(
+      { autopilot, triggers: [trigger] },
+      GetAutopilotResponseSchema,
+      EMPTY_GET_AUTOPILOT_RESPONSE,
+      { endpoint: "GET /api/autopilots/:id" },
+    );
+
+    expect(parsed.triggers[0]?.overlapPolicy).toBe("coalesce");
+    expect(parsed.triggers[0]).not.toHaveProperty("overlap_policy");
   });
 });

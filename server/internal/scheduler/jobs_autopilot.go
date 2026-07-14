@@ -42,14 +42,14 @@ const maxAutopilotScheduleLateness = 5 * time.Minute
 // package (and the cmd/server integration tests) can stub it without
 // pulling in the rest of the service layer.
 type AutopilotScheduleDispatcher interface {
-	DispatchAutopilotForPlan(
+	DispatchScheduledAutopilotForPlan(
 		ctx context.Context,
 		autopilot db.Autopilot,
-		triggerID pgtype.UUID,
+		trigger db.AutopilotTrigger,
 		source string,
 		payload []byte,
 		plannedAt time.Time,
-	) (*db.AutopilotRun, error)
+	) (*service.ScheduledAutopilotDispatchResult, error)
 }
 
 // AutopilotScheduleDispatchJob returns the JobSpec that drives
@@ -370,35 +370,30 @@ func autopilotHandler(
 			}}, nil
 		}
 
-		run, err := dispatcher.DispatchAutopilotForPlan(
-			ctx, autopilot, trigger.ID, "schedule", nil, in.PlanTime,
+		dispatch, err := dispatcher.DispatchScheduledAutopilotForPlan(
+			ctx, autopilot, trigger, "schedule", nil, in.PlanTime,
 		)
 		if err != nil {
 			return HandlerResult{}, fmt.Errorf("dispatch for plan: %w", err)
 		}
-
-		// Advance the display-only next_run_at to the upcoming slot and
-		// bump last_fired_at in the same write, so the trigger UI stops
-		// showing a "next run" that has already fired (MUL-3749). The
-		// value stays on the app local clock — consistent with the trigger
-		// create/update display path — but is floored at the plan_time
-		// that just fired (see advancedNextRun), so a lagging app clock can
-		// never recompute the slot we just dispatched. Errors are not
-		// fatal: the canonical record is autopilot_run.created_at and the
-		// next dispatch refreshes the value regardless; on a cron/timezone
-		// parse failure we fall back to the last_fired_at-only bump so the
-		// fire is still recorded.
-		tz := DefaultAutopilotScheduleTimezone
-		if trigger.Timezone.Valid && trigger.Timezone.String != "" {
-			tz = trigger.Timezone.String
+		if dispatch.SkippedReason == "" {
+			advanceAutopilotTriggerAfterPlan(ctx, queries, trigger, in.PlanTime)
 		}
-		if next, ok := advancedNextRun(trigger.CronExpression.String, tz, in.PlanTime, time.Now()); ok {
-			_ = queries.AdvanceTriggerNextRun(ctx, db.AdvanceTriggerNextRunParams{
-				ID:        trigger.ID,
-				NextRunAt: pgtype.Timestamptz{Time: next, Valid: true},
-			})
-		} else {
-			_ = queries.TouchAutopilotTriggerFiredAt(ctx, trigger.ID)
+		if dispatch.SkippedReason != "" {
+			return HandlerResult{RowsAffected: 0, Result: map[string]any{
+				"skipped_reason": dispatch.SkippedReason,
+			}}, nil
+		}
+		if dispatch.Coalesced {
+			result := map[string]any{"skipped_reason": "autopilot_active"}
+			if dispatch.Run != nil {
+				result["active_run_id"] = util.UUIDToString(dispatch.Run.ID)
+			}
+			return HandlerResult{RowsAffected: 0, Result: result}, nil
+		}
+		run := dispatch.Run
+		if run == nil {
+			return HandlerResult{}, fmt.Errorf("dispatch for plan returned no run")
 		}
 
 		return HandlerResult{
@@ -409,6 +404,31 @@ func autopilotHandler(
 			},
 		}, nil
 	}
+}
+
+// advanceAutopilotTriggerAfterPlan advances the display-only next_run_at and
+// bumps last_fired_at after both dispatched and coalesced occurrences. A
+// coalesced occurrence is still a successfully evaluated cron slot; returning
+// before this write would leave the UI and cold-start planner anchored in the
+// past. Errors remain non-fatal because sys_cron_executions is canonical.
+func advanceAutopilotTriggerAfterPlan(
+	ctx context.Context,
+	queries *db.Queries,
+	trigger db.AutopilotTrigger,
+	planTime time.Time,
+) {
+	tz := DefaultAutopilotScheduleTimezone
+	if trigger.Timezone.Valid && trigger.Timezone.String != "" {
+		tz = trigger.Timezone.String
+	}
+	if next, ok := advancedNextRun(trigger.CronExpression.String, tz, planTime, time.Now()); ok {
+		_ = queries.AdvanceTriggerNextRun(ctx, db.AdvanceTriggerNextRunParams{
+			ID:        trigger.ID,
+			NextRunAt: pgtype.Timestamptz{Time: next, Valid: true},
+		})
+		return
+	}
+	_ = queries.TouchAutopilotTriggerFiredAt(ctx, trigger.ID)
 }
 
 // advancedNextRun computes the display-only next_run_at value to write

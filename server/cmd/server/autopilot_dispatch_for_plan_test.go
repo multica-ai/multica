@@ -12,6 +12,14 @@ import (
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
+type scheduleTestWakeup struct {
+	notifications chan string
+}
+
+func (w *scheduleTestWakeup) NotifyTaskAvailable(_, taskID string) {
+	w.notifications <- taskID
+}
+
 // TestDispatchAutopilotForPlanIsIdempotent locks in the
 // occurrence-level idempotency contract (MUL-3551):
 //
@@ -72,6 +80,9 @@ func TestDispatchAutopilotForPlanIsIdempotent(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatalf("CreateAutopilotTrigger: %v", err)
+	}
+	if trigger.OverlapPolicy != "allow" {
+		t.Fatalf("schedule trigger must default overlap_policy=allow, got %q", trigger.OverlapPolicy)
 	}
 
 	// Use a fixed planned_at so the partial unique index has something
@@ -146,6 +157,231 @@ func TestDispatchAutopilotForPlanIsIdempotent(t *testing.T) {
 	}
 	if rowCount != 2 {
 		t.Fatalf("expected 2 autopilot_run rows after distinct planned_ats, got %d", rowCount)
+	}
+}
+
+func TestDispatchScheduledAutopilotForPlanCoalescesActiveRun(t *testing.T) {
+	ctx := context.Background()
+	queries := db.New(testPool)
+	bus := events.New()
+	taskSvc := service.NewTaskService(queries, testPool, nil, bus)
+	wakeups := &scheduleTestWakeup{notifications: make(chan string, 4)}
+	taskSvc.Wakeup = wakeups
+	autopilotSvc := service.NewAutopilotService(queries, testPool, bus, taskSvc)
+
+	var agentID string
+	if err := testPool.QueryRow(ctx,
+		`SELECT id::text FROM agent WHERE workspace_id = $1 ORDER BY created_at ASC LIMIT 1`,
+		testWorkspaceID,
+	).Scan(&agentID); err != nil {
+		t.Fatalf("load fixture agent: %v", err)
+	}
+
+	ap, err := queries.CreateAutopilot(ctx, db.CreateAutopilotParams{
+		WorkspaceID:        parseUUID(testWorkspaceID),
+		Title:              "Coalesce active scheduled run",
+		Description:        pgtype.Text{String: "single-flight schedule test", Valid: true},
+		AssigneeType:       "agent",
+		AssigneeID:         parseUUID(agentID),
+		Status:             "active",
+		ExecutionMode:      "run_only",
+		IssueTitleTemplate: pgtype.Text{},
+		CreatedByType:      "member",
+		CreatedByID:        parseUUID(testUserID),
+	})
+	if err != nil {
+		t.Fatalf("CreateAutopilot: %v", err)
+	}
+	t.Cleanup(func() {
+		if _, err := testPool.Exec(context.Background(),
+			`DELETE FROM autopilot WHERE id = $1`, ap.ID); err != nil {
+			t.Logf("cleanup autopilot: %v", err)
+		}
+	})
+
+	trigger, err := queries.CreateAutopilotTrigger(ctx, db.CreateAutopilotTriggerParams{
+		AutopilotID:    ap.ID,
+		Kind:           "schedule",
+		Enabled:        true,
+		CronExpression: pgtype.Text{String: "*/5 * * * *", Valid: true},
+		Timezone:       pgtype.Text{String: "UTC", Valid: true},
+		OverlapPolicy:  pgtype.Text{String: "coalesce", Valid: true},
+	})
+	if err != nil {
+		t.Fatalf("CreateAutopilotTrigger: %v", err)
+	}
+
+	firstPlan := time.Now().UTC().Truncate(time.Second).Add(-30 * time.Second)
+	first, err := autopilotSvc.DispatchScheduledAutopilotForPlan(
+		ctx, ap, trigger, "schedule", nil, firstPlan,
+	)
+	if err != nil {
+		t.Fatalf("first scheduled dispatch: %v", err)
+	}
+	if first.Coalesced {
+		t.Fatal("first scheduled dispatch must create work")
+	}
+	if first.Run == nil || !first.Run.TaskID.Valid {
+		t.Fatal("first scheduled dispatch must create a linked task")
+	}
+	select {
+	case <-wakeups.notifications:
+	default:
+		t.Fatal("first scheduled dispatch must wake the task runtime after commit")
+	}
+
+	// The caller can carry a stale pre-update snapshot. Live policy must be
+	// reloaded under the admission lock so allow -> coalesce cannot leak one
+	// extra run while the earlier task is active.
+	staleAllowTrigger := trigger
+	staleAllowTrigger.OverlapPolicy = "allow"
+	second, err := autopilotSvc.DispatchScheduledAutopilotForPlan(
+		ctx, ap, staleAllowTrigger, "schedule", nil, firstPlan.Add(5*time.Minute),
+	)
+	if err != nil {
+		t.Fatalf("second scheduled dispatch: %v", err)
+	}
+	if !second.Coalesced {
+		t.Fatal("second scheduled dispatch must coalesce while the first task is active")
+	}
+	if second.Run == nil || second.Run.ID != first.Run.ID {
+		t.Fatal("coalesced result must point at the active run")
+	}
+
+	var runCount, taskCount int
+	if err := testPool.QueryRow(ctx,
+		`SELECT COUNT(*) FROM autopilot_run WHERE autopilot_id = $1`, ap.ID,
+	).Scan(&runCount); err != nil {
+		t.Fatalf("count runs: %v", err)
+	}
+	if err := testPool.QueryRow(ctx, `
+		SELECT COUNT(*)
+		  FROM agent_task_queue task
+		  JOIN autopilot_run run ON run.id = task.autopilot_run_id
+		 WHERE run.autopilot_id = $1
+	`, ap.ID).Scan(&taskCount); err != nil {
+		t.Fatalf("count tasks: %v", err)
+	}
+	if runCount != 1 || taskCount != 1 {
+		t.Fatalf("active coalescing must leave exactly one run/task, got runs=%d tasks=%d", runCount, taskCount)
+	}
+	for i, status := range []string{"dispatched", "running", "waiting_local_directory"} {
+		if _, err := testPool.Exec(ctx, `
+			UPDATE agent_task_queue SET status = $2 WHERE id = $1
+		`, first.Run.TaskID, status); err != nil {
+			t.Fatalf("set first task status=%s: %v", status, err)
+		}
+		out, err := autopilotSvc.DispatchScheduledAutopilotForPlan(
+			ctx, ap, trigger, "schedule", nil, firstPlan.Add(time.Duration(i+2)*5*time.Minute),
+		)
+		if err != nil {
+			t.Fatalf("dispatch while task status=%s: %v", status, err)
+		}
+		if !out.Coalesced || out.Run == nil || out.Run.ID != first.Run.ID {
+			t.Fatalf("task status=%s must coalesce onto the active run", status)
+		}
+	}
+
+	// A terminal task releases the single-flight gate. Race two later plan
+	// times through separate goroutines to model two scheduler replicas: one
+	// may create the next run, while the other must observe it and coalesce.
+	if _, err := testPool.Exec(ctx, `
+		UPDATE agent_task_queue
+		   SET status = 'completed', completed_at = now()
+		 WHERE id = $1
+	`, first.Run.TaskID); err != nil {
+		t.Fatalf("complete first task: %v", err)
+	}
+	completedTask, err := queries.GetAgentTask(ctx, first.Run.TaskID)
+	if err != nil {
+		t.Fatalf("reload completed task: %v", err)
+	}
+	autopilotSvc.SyncRunFromTask(ctx, completedTask)
+
+	retried, err := autopilotSvc.DispatchScheduledAutopilotForPlan(
+		ctx, ap, trigger, "schedule", nil, firstPlan,
+	)
+	if err != nil {
+		t.Fatalf("exact-plan retry after completion: %v", err)
+	}
+	if retried.Coalesced || retried.Run == nil || retried.Run.ID != first.Run.ID {
+		t.Fatal("exact-plan retry must reuse the completed run without coalescing")
+	}
+	select {
+	case taskID := <-wakeups.notifications:
+		t.Fatalf("exact-plan retry must not re-wake the completed task %s", taskID)
+	default:
+	}
+
+	type concurrentResult struct {
+		result *service.ScheduledAutopilotDispatchResult
+		err    error
+	}
+	results := make(chan concurrentResult, 2)
+	for _, plan := range []time.Time{firstPlan.Add(25 * time.Minute), firstPlan.Add(30 * time.Minute)} {
+		plan := plan
+		go func() {
+			result, err := autopilotSvc.DispatchScheduledAutopilotForPlan(
+				ctx, ap, trigger, "schedule", nil, plan,
+			)
+			results <- concurrentResult{result: result, err: err}
+		}()
+	}
+	created, coalesced := 0, 0
+	for range 2 {
+		out := <-results
+		if out.err != nil {
+			t.Fatalf("concurrent scheduled dispatch: %v", out.err)
+		}
+		if out.result.Coalesced {
+			coalesced++
+		} else {
+			created++
+		}
+	}
+	if created != 1 || coalesced != 1 {
+		t.Fatalf("concurrent dispatches must create one and coalesce one, got created=%d coalesced=%d", created, coalesced)
+	}
+
+	if err := testPool.QueryRow(ctx,
+		`SELECT COUNT(*) FROM autopilot_run WHERE autopilot_id = $1`, ap.ID,
+	).Scan(&runCount); err != nil {
+		t.Fatalf("count runs after terminal release: %v", err)
+	}
+	if err := testPool.QueryRow(ctx, `
+		SELECT COUNT(*)
+		  FROM agent_task_queue task
+		  JOIN autopilot_run run ON run.id = task.autopilot_run_id
+		 WHERE run.autopilot_id = $1
+	`, ap.ID).Scan(&taskCount); err != nil {
+		t.Fatalf("count tasks after terminal release: %v", err)
+	}
+	if runCount != 2 || taskCount != 2 {
+		t.Fatalf("terminal release plus concurrent admission must leave two total run/tasks, got runs=%d tasks=%d", runCount, taskCount)
+	}
+
+	if _, err := queries.UpdateAutopilot(ctx, db.UpdateAutopilotParams{
+		ID:     ap.ID,
+		Status: pgtype.Text{String: "paused", Valid: true},
+	}); err != nil {
+		t.Fatalf("pause autopilot: %v", err)
+	}
+	paused, err := autopilotSvc.DispatchScheduledAutopilotForPlan(
+		ctx, ap, trigger, "schedule", nil, firstPlan.Add(35*time.Minute),
+	)
+	if err != nil {
+		t.Fatalf("dispatch with stale active snapshot: %v", err)
+	}
+	if paused.SkippedReason != "autopilot_inactive" || paused.Run != nil {
+		t.Fatalf("locked status recheck must fail closed, got %+v", paused)
+	}
+	if err := testPool.QueryRow(ctx,
+		`SELECT COUNT(*) FROM autopilot_run WHERE autopilot_id = $1`, ap.ID,
+	).Scan(&runCount); err != nil {
+		t.Fatalf("count runs after paused race: %v", err)
+	}
+	if runCount != 2 {
+		t.Fatalf("paused race must create zero runs, got total=%d", runCount)
 	}
 }
 

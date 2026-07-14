@@ -106,6 +106,7 @@ type AutopilotTriggerResponse struct {
 	Enabled        bool    `json:"enabled"`
 	CronExpression *string `json:"cron_expression"`
 	Timezone       *string `json:"timezone"`
+	OverlapPolicy  string  `json:"overlap_policy"`
 	NextRunAt      *string `json:"next_run_at"`
 	WebhookToken   *string `json:"webhook_token"`
 	// WebhookPath is computed from webhook_token. Always present for webhook
@@ -202,6 +203,7 @@ func (h *Handler) triggerToResponse(t db.AutopilotTrigger) AutopilotTriggerRespo
 		Enabled:        t.Enabled,
 		CronExpression: textToPtr(t.CronExpression),
 		Timezone:       textToPtr(t.Timezone),
+		OverlapPolicy:  t.OverlapPolicy,
 		NextRunAt:      timestampToPtr(t.NextRunAt),
 		WebhookToken:   textToPtr(t.WebhookToken),
 		Label:          textToPtr(t.Label),
@@ -332,6 +334,7 @@ type CreateAutopilotTriggerRequest struct {
 	Kind           string  `json:"kind"`
 	CronExpression *string `json:"cron_expression"`
 	Timezone       *string `json:"timezone"`
+	OverlapPolicy  *string `json:"overlap_policy"`
 	Label          *string `json:"label"`
 	// Provider is currently only meaningful for kind=webhook. Allowed
 	// values: "generic" (default) or "github". Unset → "generic".
@@ -358,6 +361,7 @@ type UpdateAutopilotTriggerRequest struct {
 	Enabled        *bool   `json:"enabled"`
 	CronExpression *string `json:"cron_expression"`
 	Timezone       *string `json:"timezone"`
+	OverlapPolicy  *string `json:"overlap_policy"`
 	Label          *string `json:"label"`
 	// EventFilters is the desired event-filter set with tri-state PATCH
 	// semantics:
@@ -880,6 +884,38 @@ func (h *Handler) UpdateAutopilot(w http.ResponseWriter, r *http.Request) {
 	}
 	defer tx.Rollback(r.Context())
 	qtx := h.Queries.WithTx(tx)
+	lockedAutopilot, err := qtx.LockAutopilotForSchedulePolicy(r.Context(), prev.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to lock autopilot")
+		return
+	}
+	if req.ExecutionMode != nil && *req.ExecutionMode != "run_only" {
+		triggers, err := qtx.ListAutopilotTriggers(r.Context(), lockedAutopilot.ID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to validate schedule overlap policy")
+			return
+		}
+		for _, trigger := range triggers {
+			if trigger.Kind == "schedule" && trigger.OverlapPolicy == "coalesce" {
+				writeError(w, http.StatusBadRequest, "execution_mode must remain run_only while a schedule trigger uses overlap_policy=coalesce")
+				return
+			}
+		}
+	}
+	// Fields whose PATCH contract uses explicit values rather than COALESCE
+	// must preserve the row we locked, not the earlier authorization snapshot.
+	if _, sent := rawFields["description"]; !sent {
+		params.Description = lockedAutopilot.Description
+	}
+	if _, sent := rawFields["issue_title_template"]; !sent {
+		params.IssueTitleTemplate = lockedAutopilot.IssueTitleTemplate
+	}
+	if _, sent := rawFields["project_id"]; !sent {
+		params.ProjectID = lockedAutopilot.ProjectID
+	}
+	if !idSent {
+		params.AssigneeID = lockedAutopilot.AssigneeID
+	}
 
 	autopilot, err := qtx.UpdateAutopilot(r.Context(), params)
 	if err != nil {
@@ -1143,6 +1179,22 @@ func (h *Handler) CreateAutopilotTrigger(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusBadRequest, "timezone is not valid for webhook triggers")
 		return
 	}
+	overlapPolicy := "allow"
+	if req.OverlapPolicy != nil && *req.OverlapPolicy != "" {
+		if req.Kind != "schedule" {
+			writeError(w, http.StatusBadRequest, "overlap_policy is only valid for schedule triggers")
+			return
+		}
+		if *req.OverlapPolicy != "allow" && *req.OverlapPolicy != "coalesce" {
+			writeError(w, http.StatusBadRequest, "overlap_policy must be allow or coalesce")
+			return
+		}
+		overlapPolicy = *req.OverlapPolicy
+	}
+	if overlapPolicy == "coalesce" && ap.ExecutionMode != "run_only" {
+		writeError(w, http.StatusBadRequest, "overlap_policy=coalesce requires execution_mode=run_only")
+		return
+	}
 	if req.Kind != "webhook" && len(req.EventFilters) > 0 {
 		// event_filters narrows webhook ingress — it has no meaning for a
 		// schedule trigger and would otherwise be silently dropped.
@@ -1226,7 +1278,23 @@ func (h *Handler) CreateAutopilotTrigger(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	trigger, err := h.Queries.CreateAutopilotTrigger(r.Context(), db.CreateAutopilotTriggerParams{
+	tx, err := h.TxStarter.Begin(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to create trigger")
+		return
+	}
+	defer tx.Rollback(r.Context())
+	qtx := h.Queries.WithTx(tx)
+	lockedAutopilot, err := qtx.LockAutopilotForSchedulePolicy(r.Context(), ap.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to lock autopilot")
+		return
+	}
+	if overlapPolicy == "coalesce" && lockedAutopilot.ExecutionMode != "run_only" {
+		writeError(w, http.StatusBadRequest, "overlap_policy=coalesce requires execution_mode=run_only")
+		return
+	}
+	trigger, err := qtx.CreateAutopilotTrigger(r.Context(), db.CreateAutopilotTriggerParams{
 		AutopilotID:    ap.ID,
 		Kind:           req.Kind,
 		Enabled:        true,
@@ -1235,8 +1303,13 @@ func (h *Handler) CreateAutopilotTrigger(w http.ResponseWriter, r *http.Request)
 		NextRunAt:      nextRunAt,
 		Label:          ptrToText(req.Label),
 		WebhookToken:   webhookToken,
+		OverlapPolicy:  pgtype.Text{String: overlapPolicy, Valid: true},
 	})
 	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to create trigger")
+		return
+	}
+	if err := tx.Commit(r.Context()); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create trigger")
 		return
 	}
@@ -1388,15 +1461,26 @@ func (h *Handler) UpdateAutopilotTrigger(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	prev, err := h.Queries.GetAutopilotTrigger(r.Context(), triggerUUID)
-	if err != nil || uuidToString(prev.AutopilotID) != uuidToString(ap.ID) {
-		writeError(w, http.StatusNotFound, "trigger not found")
-		return
-	}
-
 	var req UpdateAutopilotTriggerRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	tx, err := h.TxStarter.Begin(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to update trigger")
+		return
+	}
+	defer tx.Rollback(r.Context())
+	qtx := h.Queries.WithTx(tx)
+	lockedAutopilot, err := qtx.LockAutopilotForSchedulePolicy(r.Context(), ap.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to lock autopilot")
+		return
+	}
+	prev, err := qtx.LockAutopilotTriggerForSchedulePolicy(r.Context(), triggerUUID)
+	if err != nil || uuidToString(prev.AutopilotID) != uuidToString(lockedAutopilot.ID) {
+		writeError(w, http.StatusNotFound, "trigger not found")
 		return
 	}
 
@@ -1411,6 +1495,10 @@ func (h *Handler) UpdateAutopilotTrigger(w http.ResponseWriter, r *http.Request)
 		}
 		if req.Timezone != nil {
 			writeError(w, http.StatusBadRequest, "timezone is only valid for schedule triggers")
+			return
+		}
+		if req.OverlapPolicy != nil {
+			writeError(w, http.StatusBadRequest, "overlap_policy is only valid for schedule triggers")
 			return
 		}
 	}
@@ -1439,6 +1527,17 @@ func (h *Handler) UpdateAutopilotTrigger(w http.ResponseWriter, r *http.Request)
 	}
 	if req.Label != nil {
 		params.Label = pgtype.Text{String: *req.Label, Valid: true}
+	}
+	if req.OverlapPolicy != nil {
+		if *req.OverlapPolicy != "allow" && *req.OverlapPolicy != "coalesce" {
+			writeError(w, http.StatusBadRequest, "overlap_policy must be allow or coalesce")
+			return
+		}
+		if *req.OverlapPolicy == "coalesce" && lockedAutopilot.ExecutionMode != "run_only" {
+			writeError(w, http.StatusBadRequest, "overlap_policy=coalesce requires execution_mode=run_only")
+			return
+		}
+		params.OverlapPolicy = pgtype.Text{String: *req.OverlapPolicy, Valid: true}
 	}
 	// Tri-state PATCH for event_filters. A nil pointer (field omitted or
 	// JSON null) leaves the existing row untouched — params.EventFilters
@@ -1484,8 +1583,12 @@ func (h *Handler) UpdateAutopilotTrigger(w http.ResponseWriter, r *http.Request)
 		params.NextRunAt = pgtype.Timestamptz{Time: t, Valid: true}
 	}
 
-	trigger, err := h.Queries.UpdateAutopilotTrigger(r.Context(), params)
+	trigger, err := qtx.UpdateAutopilotTrigger(r.Context(), params)
 	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to update trigger")
+		return
+	}
+	if err := tx.Commit(r.Context()); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to update trigger")
 		return
 	}
@@ -1493,7 +1596,7 @@ func (h *Handler) UpdateAutopilotTrigger(w http.ResponseWriter, r *http.Request)
 	resp := h.triggerToResponse(trigger)
 	userID, _ := requireUserID(w, r)
 	h.publish(protocol.EventAutopilotUpdated, workspaceID, "member", userID, map[string]any{
-		"autopilot_id": uuidToString(ap.ID),
+		"autopilot_id": uuidToString(lockedAutopilot.ID),
 		"trigger":      resp,
 	})
 	writeJSON(w, http.StatusOK, resp)

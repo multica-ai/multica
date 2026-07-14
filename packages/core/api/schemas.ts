@@ -5,6 +5,7 @@ import type {
   AgentTemplateSummary,
   AgentBuilderSession,
   Attachment,
+  AutopilotTrigger,
   BillingBalance,
   BillingBatchesPage,
   BillingCheckoutSessionStatus,
@@ -15,6 +16,7 @@ import type {
   CreateAgentFromTemplateResponse,
   CreateBillingCheckoutSessionResponse,
   CreateBillingPortalSessionResponse,
+  GetAutopilotResponse,
   GroupedIssuesResponse,
   InboxWorkspaceUnread,
   Label,
@@ -988,6 +990,80 @@ export const ListAutopilotsResponseSchema = z.object({
 export const EMPTY_LIST_AUTOPILOTS_RESPONSE = {
   autopilots: [],
   total: 0,
+};
+
+// Trigger responses keep their established wire fields while converting the
+// new overlap policy to camelCase at the TypeScript boundary. Older servers
+// omit overlap_policy; their behavior is the backward-compatible `allow`.
+export const AutopilotTriggerResponseSchema = z.object({
+  id: z.string(),
+  autopilot_id: z.string(),
+  kind: z.string(),
+  enabled: z.boolean(),
+  cron_expression: z.string().nullable(),
+  timezone: z.string().nullable(),
+  overlap_policy: z.string().default("allow"),
+  next_run_at: z.string().nullable(),
+  webhook_token: z.string().nullable(),
+  webhook_path: z.string().nullable().optional(),
+  webhook_url: z.string().nullable().optional(),
+  label: z.string().nullable(),
+  event_filters: z.array(z.unknown()).nullable().optional(),
+  last_fired_at: z.string().nullable(),
+  created_at: z.string(),
+  updated_at: z.string(),
+}).loose().transform(({ overlap_policy, ...trigger }) => ({
+  ...trigger,
+  overlapPolicy: overlap_policy,
+}));
+
+export const EMPTY_AUTOPILOT_TRIGGER: AutopilotTrigger = {
+  id: "",
+  autopilot_id: "",
+  kind: "schedule",
+  enabled: false,
+  cron_expression: null,
+  timezone: null,
+  overlapPolicy: "allow",
+  next_run_at: null,
+  webhook_token: null,
+  label: null,
+  last_fired_at: null,
+  created_at: "",
+  updated_at: "",
+};
+
+const AutopilotCollaboratorSchema = z.object({
+  user_type: z.literal("member"),
+  user_id: z.string(),
+  granted_by: z.string(),
+  created_at: z.string(),
+}).loose();
+
+export const GetAutopilotResponseSchema = z.object({
+  autopilot: AutopilotListItemSchema,
+  triggers: z.array(AutopilotTriggerResponseSchema).default([]),
+  collaborators: z.array(AutopilotCollaboratorSchema).optional(),
+}).loose();
+
+export const EMPTY_GET_AUTOPILOT_RESPONSE: GetAutopilotResponse = {
+  autopilot: {
+    id: "",
+    workspace_id: "",
+    title: "",
+    description: null,
+    assignee_type: "agent",
+    assignee_id: "",
+    status: "active",
+    execution_mode: "run_only",
+    issue_title_template: null,
+    created_by_type: "",
+    created_by_id: "",
+    last_run_at: null,
+    created_at: "",
+    updated_at: "",
+  },
+  triggers: [],
 };
 
 export const EMPTY_WEBHOOK_DELIVERY: WebhookDelivery = {

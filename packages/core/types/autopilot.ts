@@ -9,6 +9,7 @@ export type AutopilotExecutionMode = "create_issue" | "run_only";
 export type AutopilotAssigneeType = "agent" | "squad";
 
 export type AutopilotTriggerKind = "schedule" | "webhook" | "api";
+export type AutopilotOverlapPolicy = "allow" | "coalesce";
 
 // `skipped` is emitted by the backend pre-flight admission check
 // (assignee runtime offline at dispatch time, MUL-1899). The frontend MUST
@@ -92,6 +93,7 @@ export interface AutopilotTrigger {
   enabled: boolean;
   cron_expression: string | null;
   timezone: string | null;
+  overlapPolicy: AutopilotOverlapPolicy;
   next_run_at: string | null;
   webhook_token: string | null;
   // webhook_path is computed server-side from webhook_token (always
@@ -165,6 +167,7 @@ export interface CreateAutopilotTriggerRequest {
   kind: AutopilotTriggerKind;
   cron_expression?: string;
   timezone?: string;
+  overlapPolicy?: AutopilotOverlapPolicy;
   label?: string;
   // event_filters is only meaningful for webhook triggers.
   event_filters?: WebhookEventFilter[];
@@ -174,6 +177,7 @@ export interface UpdateAutopilotTriggerRequest {
   enabled?: boolean;
   cron_expression?: string;
   timezone?: string;
+  overlapPolicy?: AutopilotOverlapPolicy;
   label?: string;
   // event_filters is only meaningful for webhook triggers.
   event_filters?: WebhookEventFilter[] | null;

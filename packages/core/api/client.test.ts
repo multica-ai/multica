@@ -168,8 +168,9 @@ describe("ApiClient", () => {
       kind: "schedule",
       cron_expression: "0 9 * * *",
       timezone: "UTC",
+      overlapPolicy: "coalesce",
     });
-    await client.updateAutopilotTrigger("ap-1", "tr-1", { enabled: false });
+    await client.updateAutopilotTrigger("ap-1", "tr-1", { enabled: false, overlapPolicy: "allow" });
     await client.deleteAutopilotTrigger("ap-1", "tr-1");
     await client.rotateAutopilotTriggerWebhookToken("ap-1", "tr-1");
 
@@ -207,12 +208,13 @@ describe("ApiClient", () => {
           kind: "schedule",
           cron_expression: "0 9 * * *",
           timezone: "UTC",
+          overlap_policy: "coalesce",
         }),
       },
       {
         url: "https://api.example.test/api/autopilots/ap-1/triggers/tr-1",
         method: "PATCH",
-        body: JSON.stringify({ enabled: false }),
+        body: JSON.stringify({ enabled: false, overlap_policy: "allow" }),
       },
       { url: "https://api.example.test/api/autopilots/ap-1/triggers/tr-1", method: "DELETE" },
       {

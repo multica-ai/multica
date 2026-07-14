@@ -531,6 +531,94 @@ func TestAutopilotScheduleJobPausedAutopilotSkipsAtHandler(t *testing.T) {
 	}
 }
 
+func TestAutopilotScheduleJobCoalescesActiveRunAsSuccessfulNoOp(t *testing.T) {
+	ctx := context.Background()
+	queries := db.New(testPool)
+	trigger, mgr, autopilotSvc := setupAutopilotScheduleJob(t, "*/1 * * * *")
+
+	if _, err := testPool.Exec(ctx, `
+		UPDATE autopilot_trigger
+		   SET overlap_policy = 'coalesce'
+		 WHERE id = $1
+	`, trigger.ID); err != nil {
+		t.Fatalf("enable coalescing overlap policy: %v", err)
+	}
+	trigger, err := queries.GetAutopilotTrigger(ctx, trigger.ID)
+	if err != nil {
+		t.Fatalf("reload trigger: %v", err)
+	}
+	autopilot, err := queries.GetAutopilot(ctx, trigger.AutopilotID)
+	if err != nil {
+		t.Fatalf("load autopilot: %v", err)
+	}
+
+	firstPlan := time.Now().UTC().Truncate(time.Minute).Add(-time.Minute)
+	first, err := autopilotSvc.DispatchScheduledAutopilotForPlan(
+		ctx, autopilot, trigger, "schedule", nil, firstPlan,
+	)
+	if err != nil {
+		t.Fatalf("seed active scheduled run: %v", err)
+	}
+	if first.Run == nil || first.Coalesced {
+		t.Fatal("seed dispatch must create the active run")
+	}
+
+	if err := mgr.RunOnce(ctx); err != nil {
+		t.Fatalf("scheduler tick: %v", err)
+	}
+
+	var status, skippedReason, activeRunID string
+	var rowsAffected int64
+	var auditedPlan time.Time
+	if err := testPool.QueryRow(ctx, `
+		SELECT status, rows_affected, result->>'skipped_reason',
+		       result->>'active_run_id', plan_time
+		  FROM sys_cron_executions
+		 WHERE job_name = $1 AND scope_kind = $2 AND scope_id = $3
+		 ORDER BY plan_time DESC
+		 LIMIT 1
+	`, scheduler.JobNameAutopilotScheduleDispatch, scheduler.ScopeKindAutopilotTrigger,
+		util.UUIDToString(trigger.ID)).Scan(
+		&status, &rowsAffected, &skippedReason, &activeRunID, &auditedPlan,
+	); err != nil {
+		t.Fatalf("load scheduler audit row: %v", err)
+	}
+	if status != "SUCCESS" || rowsAffected != 0 || skippedReason != "autopilot_active" {
+		t.Fatalf("coalesced audit mismatch: status=%s rows=%d skipped_reason=%q", status, rowsAffected, skippedReason)
+	}
+	if activeRunID != util.UUIDToString(first.Run.ID) {
+		t.Fatalf("active_run_id mismatch: got %q want %q", activeRunID, util.UUIDToString(first.Run.ID))
+	}
+	advanced, err := queries.GetAutopilotTrigger(ctx, trigger.ID)
+	if err != nil {
+		t.Fatalf("reload advanced trigger: %v", err)
+	}
+	if !advanced.LastFiredAt.Valid {
+		t.Fatal("coalesced occurrence must update last_fired_at")
+	}
+	if !advanced.NextRunAt.Valid || !advanced.NextRunAt.Time.After(auditedPlan) {
+		t.Fatalf("coalesced occurrence must advance next_run_at past %s, got %v", auditedPlan, advanced.NextRunAt)
+	}
+
+	var runCount, taskCount int
+	if err := testPool.QueryRow(ctx,
+		`SELECT COUNT(*) FROM autopilot_run WHERE trigger_id = $1`, trigger.ID,
+	).Scan(&runCount); err != nil {
+		t.Fatalf("count runs: %v", err)
+	}
+	if err := testPool.QueryRow(ctx, `
+		SELECT COUNT(*)
+		  FROM agent_task_queue task
+		  JOIN autopilot_run run ON run.id = task.autopilot_run_id
+		 WHERE run.trigger_id = $1
+	`, trigger.ID).Scan(&taskCount); err != nil {
+		t.Fatalf("count tasks: %v", err)
+	}
+	if runCount != 1 || taskCount != 1 {
+		t.Fatalf("coalesced handler must create zero additional work, got runs=%d tasks=%d", runCount, taskCount)
+	}
+}
+
 // TestAutopilotScheduleJobBadCronStaysSilent locks in the failure
 // surface for malformed cron expressions: the trigger create/update
 // handlers reject bad cron at HTTP time (so this is a defence in

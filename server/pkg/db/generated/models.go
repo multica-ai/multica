@@ -223,6 +223,8 @@ type AutopilotTrigger struct {
 	Provider       string             `json:"provider"`
 	SigningSecret  pgtype.Text        `json:"signing_secret"`
 	EventFilters   []byte             `json:"event_filters"`
+	// Schedule overlap policy: allow creates every occurrence; coalesce skips new work while an earlier run_only task is active.
+	OverlapPolicy string `json:"overlap_policy"`
 }
 
 type ChannelBindingToken struct {

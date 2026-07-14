@@ -149,6 +149,7 @@ export type {
   AutopilotCollaboratorsResponse,
   AutopilotTrigger,
   AutopilotTriggerKind,
+  AutopilotOverlapPolicy,
   AutopilotRun,
   AutopilotRunStatus,
   AutopilotRunSource,

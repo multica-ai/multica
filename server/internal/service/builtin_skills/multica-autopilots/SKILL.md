@@ -31,6 +31,14 @@ Execution modes:
 - `run_only` creates an agent task directly. No issue is created; any durable
   report location has to come from other task context or instructions.
 
+Schedule overlap policies:
+
+- `allow` (default) dispatches every planned occurrence.
+- `coalesce` is available for `run_only` autopilots. While an earlier task is
+  queued, dispatched, running, or waiting for a local directory, the next
+  schedule occurrence is recorded by the scheduler as a successful no-op and
+  creates no additional run or task.
+
 `issue-title-template` only supports `{{date}}`. Do not invent `{{trigger_id}}`, `{{branch}}`, or other variables.
 
 ## CLI
@@ -41,7 +49,8 @@ multica autopilot get <autopilot-id> --output json
 multica autopilot create --title "<title>" --description "<task prompt>" --agent <agent-name-or-id> --mode create_issue|run_only --output json
 multica autopilot update <autopilot-id> --status active|paused --output json
 multica autopilot runs <autopilot-id> --output json
-multica autopilot trigger-add <autopilot-id> --kind schedule --cron "0 9 * * *" --timezone Asia/Shanghai --output json
+multica autopilot trigger-add <autopilot-id> --kind schedule --cron "0 9 * * *" --timezone Asia/Shanghai --overlap-policy allow|coalesce --output json
+multica autopilot trigger-update <autopilot-id> <trigger-id> --overlap-policy allow|coalesce --output json
 multica autopilot trigger-add <autopilot-id> --kind webhook --label "ci" --output json
 multica autopilot trigger <autopilot-id> --output json
 multica autopilot trigger-rotate-url <autopilot-id> <trigger-id> --yes --output json
