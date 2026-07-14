@@ -1965,6 +1965,13 @@ func (h *Handler) resolveMentionedAgentCommentTriggers(ctx context.Context, issu
 			}
 			// Private-agent gate: prevent triggering a private leader via squad mention.
 			if !h.canInvokeAgent(ctx, agent, authorType, authorID, opts.OriginatorUserID, wsID) {
+				slog.Info("comment mention dropped: actor cannot invoke agent",
+					"mention_kind", "squad_leader",
+					"issue_id", uuidToString(issue.ID),
+					"target_agent_id", uuidToString(agent.ID),
+					"actor_type", authorType,
+					"originator_resolved", opts.OriginatorUserID != "",
+				)
 				continue
 			}
 			hasPending, err := h.hasPendingTaskForIssueAndAgent(ctx, issue.ID, leaderID, opts)
@@ -1994,6 +2001,13 @@ func (h *Handler) resolveMentionedAgentCommentTriggers(ctx context.Context, issu
 		// Private-agent gate (member→private requires allowed_principals;
 		// agent→agent always passes).
 		if !h.canInvokeAgent(ctx, agent, authorType, authorID, opts.OriginatorUserID, wsID) {
+			slog.Info("comment mention dropped: actor cannot invoke agent",
+				"mention_kind", "agent",
+				"issue_id", uuidToString(issue.ID),
+				"target_agent_id", uuidToString(agent.ID),
+				"actor_type", authorType,
+				"originator_resolved", opts.OriginatorUserID != "",
+			)
 			continue
 		}
 		hasPending, err := h.hasPendingTaskForIssueAndAgent(ctx, issue.ID, agentUUID, opts)
