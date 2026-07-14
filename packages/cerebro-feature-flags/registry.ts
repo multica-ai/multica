@@ -329,7 +329,7 @@ export type CerebroFlagKey =
   | "cerebro_wakeup_issue_status"
   | "cerebro_wakeup_github_ci"
   // FIR-2679: loop-guard — cap how many self-wakeups an agent may chain on one
-  // issue without a human replying. The cap itself is a per-workspace number
+  // issue without objective progress. The cap itself is a per-workspace number
   // setting; this flag turns the guard on/off.
   | "cerebro_wakeup_loop_guard"
   // FIR-1521: prominent orange "scheduled wakeup" banner at the top of an issue,
@@ -1797,7 +1797,7 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     label: "Wakeup: loop guard",
     group: "agents",
     description:
-      "Stop an agent from waking itself in an endless loop: once it has scheduled the configured number of wakeups on the same issue without a human replying, the next wakeup is rejected and the agent is told to post a status or question instead. A human comment resets the count. Set the number under 'Max consecutive wakeup loops per issue' in the wakeup settings. Off lets agents chain self-wakeups without the cap. FIR-2679.",
+      "Stop an agent from waking itself in an endless loop: once it has scheduled the configured number of wakeups on the same issue without objective progress, the next wakeup is rejected. A member reply or issue status/progress event resets the count; ordinary agent comments and pull-request updates do not. Set the number under 'Max consecutive wakeup loops per issue' in the wakeup settings. Off lets agents chain self-wakeups without the cap. FIR-3098.",
   },
   {
     key: "cerebro_wakeup_bar",

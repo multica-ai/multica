@@ -1,9 +1,8 @@
 package wakeup
 
-// FIR-2679 Spor 1a: the wakeup loop-guard caps how many self-wakeups an agent
-// may chain on one issue since the last human (member) comment. These tests use
-// wkOtherIssue (no member comment in the fixture) so the "since last human"
-// window is the whole history, then add a member comment to prove the reset.
+// FIR-3098: the wakeup loop guard caps self-wakeups without objective progress.
+// These tests use wkOtherIssue so the initial progress window is empty, then
+// add each accepted progress signal to prove the reset.
 //
 // Skips cleanly when no test DB is reachable, same pattern as service_db_test.go.
 
@@ -62,6 +61,16 @@ func TestLoopGuardBlocksAfterCap(t *testing.T) {
 	}
 	setLoopCap(t, ctx, svc, 2)
 	seedDispatchedWakeups(t, ctx, wkOtherIssue, 2)
+	var commentaryID pgtype.UUID
+	if err := wkPool.QueryRow(ctx,
+		`INSERT INTO comment (workspace_id, issue_id, author_type, author_id, content, type)
+		 VALUES ($1, $2, 'agent', $3, 'I am checking again now', 'comment') RETURNING id`,
+		wkWorkspaceID, wkOtherIssue, wkAgentID).Scan(&commentaryID); err != nil {
+		t.Fatalf("insert empty-loop commentary: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = wkPool.Exec(context.Background(), `DELETE FROM comment WHERE id = $1`, commentaryID)
+	})
 
 	_, err := svc.Create(ctx, wkWorkspaceID, CreateRequest{
 		AgentID:     wkAgentID,
@@ -110,6 +119,86 @@ func TestLoopGuardResetsAfterMemberComment(t *testing.T) {
 		FireAt:      pgtype.Timestamptz{Time: time.Now().Add(time.Hour), Valid: true},
 	}); err != nil {
 		t.Fatalf("expected wakeup allowed after member comment reset, got: %v", err)
+	}
+}
+
+func TestLoopGuardResetsAfterIssueStatusProgress(t *testing.T) {
+	if wkPool == nil {
+		t.Skip("no test DB")
+	}
+	ctx := context.Background()
+	svc := wkService()
+	if _, err := wkPool.Exec(ctx, `DELETE FROM cerebro_agent_wakeup WHERE agent_id = $1 AND issue_id = $2`, wkAgentID, wkOtherIssue); err != nil {
+		t.Fatalf("clear wakeups: %v", err)
+	}
+	setLoopCap(t, ctx, svc, 2)
+	seedDispatchedWakeups(t, ctx, wkOtherIssue, 2)
+
+	var commentID pgtype.UUID
+	if err := wkPool.QueryRow(ctx,
+		`INSERT INTO comment (workspace_id, issue_id, author_type, author_id, content, type)
+		 VALUES ($1, $2, 'agent', $3, 'status changed from todo to in_progress', 'status_change') RETURNING id`,
+		wkWorkspaceID, wkOtherIssue, wkAgentID).Scan(&commentID); err != nil {
+		t.Fatalf("insert status progress: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = wkPool.Exec(context.Background(), `DELETE FROM comment WHERE id = $1`, commentID)
+	})
+
+	if _, err := svc.Create(ctx, wkWorkspaceID, CreateRequest{
+		AgentID:     wkAgentID,
+		IssueID:     wkOtherIssue,
+		Prompt:      "allowed after status progress",
+		TriggerType: TriggerTime,
+		FireAt:      pgtype.Timestamptz{Time: time.Now().Add(time.Hour), Valid: true},
+	}); err != nil {
+		t.Fatalf("expected wakeup allowed after issue status progress, got: %v", err)
+	}
+}
+
+func TestLoopGuardDoesNotResetAfterLinkedPullRequestUpdate(t *testing.T) {
+	if wkPool == nil {
+		t.Skip("no test DB")
+	}
+	ctx := context.Background()
+	svc := wkService()
+	if _, err := wkPool.Exec(ctx, `DELETE FROM cerebro_agent_wakeup WHERE agent_id = $1 AND issue_id = $2`, wkAgentID, wkOtherIssue); err != nil {
+		t.Fatalf("clear wakeups: %v", err)
+	}
+	setLoopCap(t, ctx, svc, 2)
+	seedDispatchedWakeups(t, ctx, wkOtherIssue, 2)
+
+	var pullRequestID pgtype.UUID
+	if err := wkPool.QueryRow(ctx,
+		`INSERT INTO github_pull_request
+		   (workspace_id, installation_id, repo_owner, repo_name, pr_number, title, state,
+		    html_url, pr_created_at, pr_updated_at, head_sha)
+		 VALUES ($1, 1, 'firtal-group', 'wakeup-progress-test', 3098, 'FIR-3098 progress',
+		         'open', 'https://example.test/pr/3098', now(), now(), 'new-head')
+		 RETURNING id`, wkWorkspaceID).Scan(&pullRequestID); err != nil {
+		t.Fatalf("insert pull request progress: %v", err)
+	}
+	if _, err := wkPool.Exec(ctx,
+		`INSERT INTO issue_pull_request (issue_id, pull_request_id) VALUES ($1, $2)`,
+		wkOtherIssue, pullRequestID); err != nil {
+		t.Fatalf("link pull request progress: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = wkPool.Exec(context.Background(), `DELETE FROM github_pull_request WHERE id = $1`, pullRequestID)
+	})
+
+	_, err := svc.Create(ctx, wkWorkspaceID, CreateRequest{
+		AgentID:     wkAgentID,
+		IssueID:     wkOtherIssue,
+		Prompt:      "blocked despite pull request churn",
+		TriggerType: TriggerTime,
+		FireAt:      pgtype.Timestamptz{Time: time.Now().Add(time.Hour), Valid: true},
+	})
+	if err == nil {
+		t.Fatal("expected pull-request churn not to reset the empty-loop guard")
+	}
+	if !strings.Contains(err.Error(), "loop guard") {
+		t.Fatalf("expected a loop-guard error, got: %v", err)
 	}
 }
 

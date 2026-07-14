@@ -12,11 +12,12 @@ WHERE workspace_id = $1
   AND state <> 'cancelled';
 
 -- name: CountConsecutiveSelfWakeupsForAgentIssue :one
--- FIR-2679 Spor 1a: how many self-wakeups this agent has stacked on this issue
--- since the last time a human (member) commented on it. A member comment is what
--- breaks a self-wakeup loop, so only wakeups created after the latest member
--- comment count toward the consecutive-loop cap. Cancelled wakeups don't count.
--- When the issue has no member comment, every non-cancelled wakeup counts.
+-- FIR-3098: how many self-wakeups this agent has stacked on this issue since
+-- the latest objective progress signal. Ordinary agent comments deliberately
+-- do not reset the streak: only status/progress events and member replies do.
+-- Pull-request churn is deliberately excluded because repeated CI/deploy checks
+-- can change a PR while the agent still makes no useful progress. Cancelled
+-- wakeups don't count.
 SELECT count(*)
 FROM cerebro_agent_wakeup w
 WHERE w.workspace_id = $1
@@ -24,10 +25,13 @@ WHERE w.workspace_id = $1
   AND w.issue_id = $3
   AND w.state <> 'cancelled'
   AND w.created_at > COALESCE(
-        (SELECT max(c.created_at)
-         FROM comment c
-         WHERE c.issue_id = $3
-           AND c.author_type = 'member'),
+        (SELECT max(progress_at)
+         FROM (
+           SELECT c.created_at AS progress_at
+           FROM comment c
+           WHERE c.issue_id = $3
+             AND (c.author_type = 'member' OR c.type IN ('status_change', 'progress_update'))
+         ) progress),
         '-infinity'::timestamptz
       );
 
