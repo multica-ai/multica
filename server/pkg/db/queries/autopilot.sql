@@ -199,10 +199,12 @@ RETURNING *;
 -- idempotency: a stale-steal retry at the same plan_time cannot create
 -- a second run for the same (trigger_id, planned_at) pair (MUL-3551).
 INSERT INTO autopilot_run (
-    autopilot_id, trigger_id, source, status, trigger_payload, squad_id, planned_at
+    autopilot_id, trigger_id, source, status, trigger_payload, squad_id, planned_at,
+    webhook_delivery_id
 ) VALUES (
     $1, sqlc.narg('trigger_id'), $2, $3, sqlc.narg('trigger_payload'),
-    sqlc.narg('squad_id'), sqlc.narg('planned_at')
+    sqlc.narg('squad_id'), sqlc.narg('planned_at'),
+    sqlc.narg('webhook_delivery_id')
 ) RETURNING *;
 
 -- name: GetAutopilotRunByTriggerAndPlanned :one
@@ -217,6 +219,11 @@ INSERT INTO autopilot_run (
 SELECT * FROM autopilot_run
 WHERE trigger_id = $1
   AND planned_at = $2
+LIMIT 1;
+
+-- name: GetAutopilotRunByWebhookDelivery :one
+SELECT * FROM autopilot_run
+WHERE webhook_delivery_id = $1
 LIMIT 1;
 
 -- name: RecoverPartialAutopilotRun :exec
@@ -335,6 +342,14 @@ ORDER BY t.id;
 INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, autopilot_run_id, trigger_summary)
 VALUES ($1, $2, NULL, 'queued', $3, $4, sqlc.narg(trigger_summary))
 RETURNING *;
+
+-- name: GetAutopilotTaskByRun :one
+-- Repairs the narrow run_only crash window where the task INSERT committed
+-- but the following autopilot_run.task_id update did not.
+SELECT * FROM agent_task_queue
+WHERE autopilot_run_id = $1
+ORDER BY created_at
+LIMIT 1;
 
 -- =====================
 -- Run lookup by linked entities

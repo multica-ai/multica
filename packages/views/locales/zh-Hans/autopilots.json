@@ -203,6 +203,8 @@
       "received_at": "接收时间",
       "last_attempt_at": "最近一次尝试",
       "attempt_count": "尝试次数",
+      "dispatch_attempts": "分发尝试次数",
+      "available_at": "下次分发时间",
       "response_status": "响应状态码",
       "dedupe_key": "去重 Key",
       "dedupe_source": "去重来源",

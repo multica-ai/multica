@@ -226,6 +226,8 @@ export interface WebhookDelivery {
   signature_status: WebhookSignatureStatus;
   status: WebhookDeliveryStatus;
   attempt_count: number;
+  dispatch_attempts: number;
+  available_at: string;
   content_type: string | null;
   response_status: number | null;
   autopilot_run_id: string | null;
