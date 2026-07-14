@@ -37,6 +37,7 @@ import { useWorkspacePaths } from "@multica/core/paths";
 import { issueDetailOptions } from "@multica/core/issues/queries";
 import { AppLink } from "../../../navigation";
 import { TranscriptButton } from "../../../common/task-transcript";
+import { AttributionBadge } from "../../../issues/components/attribution-badge";
 import { taskStatusConfig } from "../../config";
 import { failureReasonLabel } from "./task-failure";
 import { Sparkline } from "../sparkline";
@@ -639,6 +640,14 @@ function TaskRow({
               <span className="text-destructive">{failureLabel}</span>
             </>
           )}
+          {/* Accountable member (MUL-4302 §9): whose behalf this run is on.
+              Avatar-only keeps the meta line tight; renders nothing when the
+              run has no resolved responsible member. */}
+          <AttributionBadge
+            attribution={task.attribution}
+            variant="avatar"
+            className="ml-0.5"
+          />
         </div>
       </div>
 

@@ -86,4 +86,31 @@ describe("AttributionBadge", () => {
     // Unknown sources fall through to the raw label so nothing renders blank.
     expect(screen.getByTitle("future_source")).toBeInTheDocument();
   });
+
+  it("avatar variant renders just the accountable member's avatar", () => {
+    const attribution: TaskAttribution = {
+      source: "direct_human",
+      precise: true,
+      initiator: { id: "u1", name: "Ada Lovelace" },
+    };
+    renderWithI18n(
+      <AttributionBadge attribution={attribution} variant="avatar" />,
+    );
+
+    // Only the avatar (name plumbs through the stub) — no "on behalf of" chip.
+    expect(screen.getByTestId("actor-avatar")).toHaveTextContent("Ada Lovelace");
+    expect(screen.queryByText("on behalf of Ada Lovelace")).toBeNull();
+  });
+
+  it("avatar variant renders nothing without an accountable member", () => {
+    const attribution: TaskAttribution = {
+      source: "unattributed",
+      precise: false,
+    };
+    const { container } = renderWithI18n(
+      <AttributionBadge attribution={attribution} variant="avatar" />,
+    );
+
+    expect(container).toBeEmptyDOMElement();
+  });
 });
