@@ -63,6 +63,14 @@ CREATE TABLE IF NOT EXISTS cerebro_round_run_item (
     UNIQUE NULLS NOT DISTINCT (run_id, issue_id, target_type, target_id)
 );
 
-CREATE INDEX IF NOT EXISTS cerebro_round_due_idx ON cerebro_round(next_run_at) WHERE next_run_at IS NOT NULL;
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'cerebro_round' AND column_name = 'next_run_at'
+    ) THEN
+        CREATE INDEX IF NOT EXISTS cerebro_round_due_idx ON cerebro_round(next_run_at) WHERE next_run_at IS NOT NULL;
+    END IF;
+END $$;
 CREATE INDEX IF NOT EXISTS cerebro_round_held_idx ON cerebro_round_held_trigger(round_id, state, created_at);
 CREATE INDEX IF NOT EXISTS cerebro_round_run_task_idx ON cerebro_round_run_item(task_id) WHERE task_id IS NOT NULL;

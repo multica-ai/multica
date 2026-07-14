@@ -107,7 +107,7 @@ import { SecretarySection, secretaryEntryKey } from "./secretary-section";
 import { NotesInboxBox, NoteInboxBox, NoteInboxDetail } from "@multica/cerebro-notes/views";
 import { SkillChangeInboxDetail } from "@multica/cerebro-skill-ownership/views";
 import { opensInDynamicInboxPane } from "../notification-routing";
-import { AddToRoundAction, ConnectedRoundManager, RoundsBlock, roundIssueIdsToExclude, useDismissRound, useRoundStatuses, useStartRound } from "@multica/cerebro-rounds";
+import { AddToRoundAction, ConnectedRoundManager, RoundsBlock, useRoundStatuses, useStartRound } from "@multica/cerebro-rounds";
 
 function replaceTab(layout: InboxLayout, tabId: string, fn: (t: InboxTabConfig) => InboxTabConfig): InboxLayout {
   return { ...layout, tabs: layout.tabs.map((t) => (t.id === tabId ? fn(t) : t)) };
@@ -189,7 +189,6 @@ export function DynamicInbox() {
   const roundsEnabled = useFeatureFlag("cerebro_inbox_rounds");
   const { data: roundStatuses = [] } = useRoundStatuses(wsId);
   const startRound = useStartRound(wsId);
-  const dismissRound = useDismissRound(wsId);
   const roundIssueIds = useMemo(() => [...new Set(roundStatuses.flatMap((status) => status.members.map((member) => member.issue_id)))], [roundStatuses]);
   const roundIssueQueries = useQueries({ queries: roundIssueIds.map((issueId) => issueDetailOptions(wsId, issueId)) });
   const roundIssueTitles = useMemo(() => Object.fromEntries(roundIssueQueries.flatMap((query, index) => {
@@ -464,12 +463,8 @@ export function DynamicInbox() {
   // section filter/sort sees the entry's selection-time state, not the
   // just-marked-read state. Matched on stable identity; falls through cleanly
   // if the row was archived/removed.
-  const roundBlockActive = roundsEnabled && activeSections.some((section) => section.kind === "rounds") && roundStatuses.some(
-    (status) => status.members.length > 0 || status.round.next_run_at || status.active_run,
-  );
   const displayEntries = useMemo(() => {
-    const excluded = roundIssueIdsToExclude(roundStatuses, roundBlockActive);
-    const availableEntries = entries.filter((e) => e.kind !== "notif" || !e.item.issue_id || !excluded.has(e.item.issue_id));
+    const availableEntries = entries;
     if (!selectedSnapshot) return availableEntries;
     const target = entryIdentity(selectedSnapshot);
     let swapped = false;
@@ -481,7 +476,7 @@ export function DynamicInbox() {
       return e;
     });
     return swapped ? next : availableEntries;
-  }, [entries, selectedSnapshot, roundBlockActive, roundStatuses]);
+  }, [entries, selectedSnapshot]);
 
   // TECH-3413 #1 — drag-to-reorder sections (5px threshold so clicks inside a
   // section still register).
@@ -1192,7 +1187,8 @@ export function DynamicInbox() {
                           defaultCollapsed={section.defaultCollapsed}
                           onRemove={() => removeSection(section.id)}
                           onStart={(roundId) => startRound.mutate(roundId)}
-                          onDismiss={(roundId) => dismissRound.mutate(roundId)}
+                          issueRunStates={filterContext.action.issueRunStates}
+                          wakeupIssueIds={filterContext.action.wakeupIssueIds}
                           onSelectIssue={(issueId) => {
                             const entry = entries.find((candidate) => candidate.kind === "notif" && candidate.item.issue_id === issueId);
                             if (entry) onSelect(entry);
@@ -1201,12 +1197,7 @@ export function DynamicInbox() {
                           renderIssue={(issueId) => {
                             const entry = entries.find((candidate) => candidate.kind === "notif" && candidate.item.issue_id === issueId);
                             if (!entry || entry.kind !== "notif") return null;
-                            // FIR-3114 — outside an open answer cycle a round member never
-                            // reads as unread: responses accumulate quietly until the next
-                            // round surfaces them (the row itself stays visible in the round).
-                            const surfaced = roundStatuses.some((status) => status.round.cycle_opened_at != null && status.members.some((member) => member.issue_id === issueId));
-                            const displayEntry = surfaced || entry.item.read ? entry : { ...entry, item: { ...entry.item, read: true } };
-                            return <DynamicInboxRow key={entry.id} entry={displayEntry} isSelected={entry.id === selected?.id} agentRunState={runStateFor(entry, filterContext)} favoritesEnabled={favoritesEnabled} isFavorite={filterContext.isFavorite?.(entry) ?? false} onToggleFavorite={toggleFavorite} onSelect={onSelect} onArchive={onArchive} />;
+                            return <DynamicInboxRow key={entry.id} entry={entry} isSelected={entry.id === selected?.id} agentRunState={runStateFor(entry, filterContext)} favoritesEnabled={favoritesEnabled} isFavorite={filterContext.isFavorite?.(entry) ?? false} onToggleFavorite={toggleFavorite} onSelect={onSelect} onArchive={onArchive} />;
                           }}
                         />
                       ) : section.kind === "notes" ? (

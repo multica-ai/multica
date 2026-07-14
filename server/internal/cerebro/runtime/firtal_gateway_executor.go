@@ -511,31 +511,7 @@ func (e *FirtalGatewayExecutor) executeTask(parent context.Context, task db.Agen
 	}
 }
 
-// completeGatewayToolless uses Anthropic's asynchronous batch transport only
-// for tasks carrying the explicit Round tool-less contract. Capability,
-// authentication, transport, timeout and result failures all return to the
-// existing synchronous path. Once a job was accepted, CompleteBatch attempts
-// cancellation before returning, avoiding an unobserved duplicate request.
-func (e *FirtalGatewayExecutor) completeGatewayToolless(ctx context.Context, cfg FirtalGatewayRuntimeConfig, task db.AgentTaskQueue, model string, messages []GatewayMessage, meta GatewayRequestMeta) (GatewayCompletion, error) {
-	if !gatewayBatchTaskEligible(task, false) {
-		return e.completeGateway(ctx, cfg, model, messages, meta)
-	}
-	batchCtx, cancel := gatewayCallContext(ctx, cfg)
-	defer cancel()
-	client := e.gateway
-	if client == nil {
-		client = NewGatewayClient(cfg, nil)
-	}
-	completion, accepted, batchErr := client.CompleteBatch(batchCtx, model, messages, meta, defaultGatewayBatchPollInterval)
-	if batchErr == nil {
-		completion.PromptInputChars = messagesChars(messages)
-		e.logger.Info("firtal gateway batch completed", "task_id", meta.TaskID, "model", completion.Model)
-		return completion, nil
-	}
-	if ctx.Err() != nil {
-		return GatewayCompletion{}, ctx.Err()
-	}
-	e.logger.Warn("firtal gateway batch fell back to synchronous execution", "task_id", meta.TaskID, "accepted", accepted, "error", batchErr)
+func (e *FirtalGatewayExecutor) completeGatewayToolless(ctx context.Context, cfg FirtalGatewayRuntimeConfig, _ db.AgentTaskQueue, model string, messages []GatewayMessage, meta GatewayRequestMeta) (GatewayCompletion, error) {
 	return e.completeGateway(ctx, cfg, model, messages, meta)
 }
 

@@ -1,35 +1,13 @@
 # Cerebro Rounds
 
-Rounds hold issue triggers until the owner starts a controlled run. Released
-tasks keep the normal task lifecycle, progress events, cancellation and usage
-recording.
+A Round is a named group of issue conversations. It never pauses, reroutes or
+otherwise changes the normal inbox and trigger flow.
 
-An expanded Round keeps every member openable and labels its owner-perspective
-state (`waiting`, `answered`, `working`, `queued`, `planned`, or `failed`). Only
-`waiting` is visually actionable. Failed jobs are retried on the next Run,
-using the original comment and target; after three failed retries they remain
-visible as `failed` and are not enqueued again.
+Pressing Play creates an answer snapshot from member issues that currently have
+an open inbox message and no active task or wakeup. The Ready view shows the
+unhandled snapshot items, Handled this round shows items answered after that
+snapshot began, and All messages always shows the full member list with the
+same rows used by the normal inbox.
 
-## Safe AI batch execution
-
-The server-owned `firtal-gateway` runtime may submit a released Round task to
-the registry Anthropic Message Batches API only when all of these are true:
-
-- task context explicitly contains `batch_tool_mode: "none"`;
-- current tool resolution finds no callable tools for the agent;
-- the selected logical model advertises `supports_batch: true` in the live
-  registry model catalog.
-
-This path is intentionally unavailable to daemon, CLI and ACP runtimes. A Round
-task whose agent can call tools (including coding or connection tools) uses the
-existing synchronous tool loop.
-
-Before the registry accepts a job, unsupported capability, authentication,
-transport and malformed responses fall back to the existing synchronous model
-call. After acceptance, the runtime polls the job and reads its JSONL result.
-Timeouts and invalid results trigger a best-effort batch cancellation before
-synchronous fallback. Cancellation of the parent task cancels the batch and
-does not start fallback work.
-
-Batch completions use the same task message, token usage, cost, progress and
-completion recording as synchronous completions.
+Starting again replaces the active snapshot. Replies continue through their
+ordinary trigger path and only add a handled timestamp to the current snapshot.

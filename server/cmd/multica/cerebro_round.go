@@ -26,8 +26,6 @@ func init() {
 		c.Flags().String("output", "json", "Output format")
 	}
 	roundCreateCmd.Flags().String("name", "", "Round name (required)")
-	roundCreateCmd.Flags().String("schedule-cron", "", "Optional five-field cron schedule")
-	roundCreateCmd.Flags().String("timezone", "UTC", "IANA timezone")
 	for _, c := range []*cobra.Command{roundAddCmd, roundRemoveCmd, roundStartCmd, roundStatusCmd} {
 		c.Flags().String("round", "", "Round ID (required)")
 	}
@@ -63,13 +61,11 @@ func runRoundCreate(cmd *cobra.Command, args []string) error {
 		return e
 	}
 	name, _ := cmd.Flags().GetString("name")
-	schedule, _ := cmd.Flags().GetString("schedule-cron")
-	timezone, _ := cmd.Flags().GetString("timezone")
 	if strings.TrimSpace(name) == "" {
 		return fmt.Errorf("--name is required")
 	}
 	var v map[string]any
-	e = c.PostJSON(context.Background(), "/api/cerebro/rounds", map[string]any{"name": name, "schedule_cron": schedule, "timezone": timezone}, &v)
+	e = c.PostJSON(context.Background(), "/api/cerebro/rounds", map[string]any{"name": name}, &v)
 	if e != nil {
 		return e
 	}

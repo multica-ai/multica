@@ -26,25 +26,7 @@ func TestBuildChatPrompt_SingleMessage(t *testing.T) {
 	}
 }
 
-// CEREBRO-PATCH(inbox-rounds): lock the release-time relevance prompt (FIR-2736).
-func TestBuildCommentPrompt_RoundRequiresRelevanceDecision(t *testing.T) {
-	prompt := buildCommentPrompt(Task{
-		IssueID:               "issue-1",
-		TriggerCommentID:      "comment-1",
-		TriggerCommentContent: "Please review this when the round starts",
-		RoundRelevanceCheck:   true,
-	}, "codex")
-	for _, want := range []string{
-		"This task was released as part of an inbox Round.",
-		"First decide whether the triggering comment still requires action",
-		"If it is no longer relevant, exit without posting a reply",
-	} {
-		if !strings.Contains(prompt, want) {
-			t.Fatalf("round prompt missing %q\n---\n%s", want, prompt)
-		}
-	}
-}
-
+// CEREBRO-PATCH(rounds-answer-snapshots): FIR-3179 — obsolete Round-release prompt coverage was removed; ordinary prompt coverage remains.
 // TestBuildChatPrompt_MultipleMessages covers the mid-stream coalesce case:
 // the user fired a follow-up while the agent was still responding. The prompt
 // must include every queued user message (oldest first) so the agent can

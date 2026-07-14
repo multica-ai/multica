@@ -221,10 +221,6 @@
       "gate": "self_only"
     },
     {
-      "id": "POST /api/cerebro/rounds/{roundId}/dismiss",
-      "gate": "self_only"
-    },
-    {
       "id": "POST /api/cerebro/rounds/{roundId}/start",
       "gate": "self_only"
     },

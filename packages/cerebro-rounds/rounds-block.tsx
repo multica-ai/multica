@@ -1,7 +1,7 @@
 "use client";
 
-import { ChevronDown, ChevronRight, Pause, Pencil, Play, Plus, Search, Settings, Trash2, X } from "lucide-react";
-import { useEffect, useState, type ReactNode } from "react";
+import { ChevronDown, ChevronRight, Pencil, Play, Plus, Search, Settings, Trash2, X } from "lucide-react";
+import { useState, type ReactNode } from "react";
 import { Button } from "@multica/ui/components/ui/button";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@multica/ui/components/ui/dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@multica/ui/components/ui/dropdown-menu";
@@ -11,90 +11,47 @@ import { Drawer, DrawerContent, DrawerHeader, DrawerTitle } from "@multica/ui/co
 import { useIsMobile } from "@multica/ui/hooks/use-mobile";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useAddIssueToRound, useCreateRound, useDeleteRound, useRemoveIssueFromRound, useRoundStatuses, useUpdateRound } from "./queries";
-import { roundActivity, roundMembershipLabel, type RoundStatus } from "./schemas";
+import { roundMembershipLabel, type RoundStatus } from "./schemas";
 import type { RoundInput } from "./api";
 
-function nextRunLabel(value: string | null | undefined): string | null {
-  if (!value) return null;
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return null;
-  return `Next ${new Intl.DateTimeFormat(undefined, { weekday: "short", hour: "2-digit", minute: "2-digit" }).format(date)}`;
-}
+type RoundView = "ready" | "handled" | "all";
 
-export function RoundsBlock({ statuses, issueTitles, onStart, onDismiss, onSelectIssue, settings, renderIssue, dragHandle, defaultCollapsed, onRemove }: {
-  statuses: RoundStatus[]; issueTitles: Record<string, string>; onStart: (id: string) => void; onDismiss?: (id: string) => void; onSelectIssue: (id: string) => void;
+export function RoundsBlock({ statuses, issueTitles, issueRunStates = new Map(), wakeupIssueIds = new Set(), onStart, onSelectIssue, settings, renderIssue, dragHandle, defaultCollapsed, onRemove }: {
+  statuses: RoundStatus[];
+  issueTitles: Record<string, string>;
+  issueRunStates?: ReadonlyMap<string, unknown>;
+  wakeupIssueIds?: ReadonlySet<string>;
+  onStart: (id: string) => void;
+  onSelectIssue: (id: string) => void;
   settings?: ReactNode;
   renderIssue?: (issueId: string) => ReactNode;
   dragHandle?: ReactNode;
   defaultCollapsed?: boolean;
   onRemove?: () => void;
 }) {
-  // A round with 0 messages is inactive and disappears from the block
-  // entirely (FIR-3114 review round 3, point 4) — it stays reachable through
-  // Manage rounds and reappears the moment content arrives.
-  const visible = statuses.filter((s) => roundActivity(s).hasContent);
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
   const [collapsed, setCollapsed] = useState(defaultCollapsed === true);
   const [query, setQuery] = useState("");
-  // A round whose answer cycle just opened expands on its own — that is the
-  // moment its waiting messages surface for the owner.
-  const openCycleIds = visible.filter((status) => roundActivity(status).cycleOpen).map((status) => status.round.id).join(",");
-  useEffect(() => {
-    if (!openCycleIds) return;
-    setExpandedIds((prev) => new Set([...prev, ...openCycleIds.split(",")]));
-  }, [openCycleIds]);
+  const [views, setViews] = useState<Record<string, RoundView>>({});
   const needle = query.trim().toLocaleLowerCase();
-  // Search deliberately leaves the round hierarchy behind and becomes the
-  // same flat, actionable message list as All messages. `renderIssue` supplies
-  // that shared inbox row, including its existing Round menu.
-  const searchMembers = needle
-    ? [...new Map(
-        visible
-          .flatMap((status) => status.members)
-          .filter((member) =>
-            (issueTitles[member.issue_id] ?? "")
-              .toLocaleLowerCase()
-              .includes(needle),
-          )
-          .map((member) => [member.issue_id, member]),
-      ).values()]
-    : [];
-  // A round with an open answer cycle needs the owner now; everything else —
-  // done, dispatching, or accumulating responses — drops into the "Ready to
-  // start" group at the bottom (FIR-3114 review round 3, point 2).
-  const activeRounds = visible.filter((status) => roundActivity(status).cycleOpen);
-  const restingRounds = visible.filter((status) => !roundActivity(status).cycleOpen);
-  const renderSearchMember = (member: RoundStatus["members"][number]) => {
-    const sharedRow = renderIssue?.(member.issue_id);
-    return <div key={member.issue_id}>{sharedRow ?? <button type="button" aria-label={issueTitles[member.issue_id] ?? member.issue_id} onClick={() => onSelectIssue(member.issue_id)} className="flex w-full min-w-0 items-center px-4 py-2.5 text-left text-xs hover:bg-muted">
-      <span className="min-w-0 flex-1 truncate">{issueTitles[member.issue_id] ?? member.issue_id}</span>
-    </button>}</div>;
-  };
+
+  const renderMember = (issueId: string) => <div key={issueId}>
+    {renderIssue?.(issueId) ?? <button type="button" aria-label={issueTitles[issueId] ?? issueId} onClick={() => onSelectIssue(issueId)} className="flex w-full min-w-0 items-center px-4 py-2.5 text-left text-xs hover:bg-muted">
+      <span className="min-w-0 flex-1 truncate">{issueTitles[issueId] ?? issueId}</span>
+    </button>}
+  </div>;
+
   const renderRound = (s: RoundStatus) => {
-    const { waiting, queued, held, working, failed, running, cycleOpen } = roundActivity(s);
-    // Nothing to surface or release: Run stays off until a response queues
-    // for the next round or a paused cycle left replies held.
-    const runnable = queued > 0 || held > 0;
     const open = expandedIds.has(s.round.id);
-    const schedule = nextRunLabel(s.round.next_run_at);
-    const displayedMembers = needle
-      ? s.members.filter((member) => (issueTitles[member.issue_id] ?? "").toLocaleLowerCase().includes(needle))
-      : s.members;
-    // The header number is what waits for the owner while the cycle is open;
-    // a resting round summarizes what the next start will bring.
-    const countLabel = cycleOpen
-      ? `${waiting} to answer`
-      : running
-        ? "Agents working"
-        : queued > 0
-          ? `${queued} ready to answer`
-          : held > 0
-            ? `${held} ready to start`
-            : failed
-              ? "Failed"
-            : working
-              ? "Agents working"
-              : "Ready";
+    const view = views[s.round.id] ?? "ready";
+    const allIds = s.members.map((member) => member.issue_id);
+    const readyIds = (s.active_cycle?.items ?? [])
+      .filter((item) => item.handled_at == null && !issueRunStates.has(item.issue_id) && !wakeupIssueIds.has(item.issue_id))
+      .map((item) => item.issue_id);
+    const handledIds = (s.active_cycle?.items ?? []).filter((item) => item.handled_at != null).map((item) => item.issue_id);
+    const ids = (view === "ready" ? readyIds : view === "handled" ? handledIds : allIds)
+      .filter((issueId) => !needle || (issueTitles[issueId] ?? issueId).toLocaleLowerCase().includes(needle));
+    const summary = s.active_cycle ? `${readyIds.length} ready` : "Ready to start";
     return <div key={s.round.id}>
       <div className="flex items-center gap-2 px-3 py-2">
         <button type="button" aria-label={`${open ? "Collapse" : "Expand"} ${s.round.name}`} className="flex min-w-0 flex-1 items-center gap-2 text-left" onClick={() => setExpandedIds((prev) => {
@@ -104,37 +61,25 @@ export function RoundsBlock({ statuses, issueTitles, onStart, onDismiss, onSelec
         })}>
           {open ? <ChevronDown className="size-3.5" /> : <ChevronRight className="size-3.5" />}
           <span className="truncate text-sm font-medium">{s.round.name}</span>
-          <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">{s.round.mode === "live" ? "Live" : "Batch"}</span>
-          {schedule && !running && !cycleOpen && <span className="hidden text-xs text-muted-foreground sm:inline">{schedule}</span>}
-          <span className="ml-auto text-xs text-muted-foreground">{countLabel}</span>
+          <span className="ml-auto text-xs text-muted-foreground">{summary}</span>
         </button>
-        {cycleOpen && onDismiss && <Button size="sm" variant="ghost" onClick={() => {
-          setExpandedIds((prev) => { const next = new Set(prev); next.delete(s.round.id); return next; });
-          onDismiss(s.round.id);
-        }} aria-label={`Pause ${s.round.name}`}><Pause className="size-3.5" /><span className="sr-only">Pause</span></Button>}
-        {(!cycleOpen || (s.round.mode === "batch" && held > 0)) && <Button size="sm" variant={!cycleOpen && runnable ? "default" : "ghost"} disabled={!runnable} onClick={() => onStart(s.round.id)} aria-label={`Run ${s.round.name}`}><Play className="size-3.5" /><span className="sr-only">Run</span></Button>}
+        <Button size="sm" variant="ghost" onClick={() => {
+          setViews((current) => ({ ...current, [s.round.id]: "ready" }));
+          setExpandedIds((current) => new Set([...current, s.round.id]));
+          onStart(s.round.id);
+        }} aria-label={`Play ${s.round.name}`}><Play className="size-3.5" /><span className="sr-only">Play</span></Button>
       </div>
-      {open && (() => {
-        const stateLabel = (state: RoundStatus["members"][number]["state"]) => state[0]!.toUpperCase() + state.slice(1);
-        const stateRank: Record<RoundStatus["members"][number]["state"], number> = {
-          waiting: 0, working: 1, queued: 2, planned: 3, answered: 4, failed: 5,
-        };
-        const renderMember = (m: RoundStatus["members"][number]) => {
-          const sharedRow = renderIssue?.(m.issue_id);
-          const fallbackRow = <button type="button" aria-label={issueTitles[m.issue_id] ?? m.issue_id} onClick={() => onSelectIssue(m.issue_id)} className="flex w-full min-w-0 items-center px-4 py-2.5 text-left text-xs hover:bg-muted">
-            <span className="min-w-0 flex-1 truncate">{issueTitles[m.issue_id] ?? m.issue_id}</span>
-          </button>;
-          return <div key={m.issue_id} data-round-action={m.state === "waiting" ? "waiting" : undefined} className={`flex items-center ${m.state === "waiting" ? "border-l-2 border-primary bg-primary/[0.03]" : "border-l-2 border-transparent"}`}>
-            <div className="min-w-0 flex-1">{sharedRow ?? fallbackRow}</div>
-            <div className="flex shrink-0 flex-col items-end gap-0.5 pr-3 text-[10px] text-muted-foreground">
-              <span className={m.state === "waiting" ? "font-semibold text-primary" : undefined}>{stateLabel(m.state)}</span>
-              {m.state === "failed" && <span>{m.retry_count} retries failed</span>}
-            </div>
-          </div>;
-        };
-        const sortedMembers = [...displayedMembers].sort((a, b) => stateRank[a.state] - stateRank[b.state]);
-        return <div className="divide-y divide-border/60 border-t border-border/50">{sortedMembers.map(renderMember)}</div>;
-      })()}
+      {open && <>
+        <div className="flex gap-1 border-t border-border/50 px-3 py-2" role="group" aria-label={`${s.round.name} view`}>
+          {(["ready", "handled", "all"] as const).map((value) => <Button key={value} size="sm" variant={view === value ? "secondary" : "ghost"} aria-pressed={view === value} onClick={() => setViews((current) => ({ ...current, [s.round.id]: value }))}>
+            {value === "ready" ? "Ready" : value === "handled" ? "Handled this round" : "All messages"}
+          </Button>)}
+        </div>
+        <div className="divide-y divide-border/60 border-t border-border/50">
+          {ids.map(renderMember)}
+          {ids.length === 0 && <p className="px-3 py-3 text-xs text-muted-foreground">Nothing here right now.</p>}
+        </div>
+      </>}
     </div>;
   };
   return <section className="overflow-hidden rounded-xl border border-border bg-card" aria-label="Rounds">
@@ -149,17 +94,10 @@ export function RoundsBlock({ statuses, issueTitles, onStart, onDismiss, onSelec
     </header>
     {!collapsed && <>
       <div className="border-b border-border px-3 py-2"><div className="relative"><Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" /><Input type="search" aria-label="Search Rounds" placeholder="Search Rounds…" className="pl-8" value={query} onChange={(event) => setQuery(event.target.value)} /></div></div>
-      {needle ? <div className="divide-y divide-border/60">
-        {searchMembers.map(renderSearchMember)}
-        {searchMembers.length === 0 && <p className="px-3 py-3 text-xs text-muted-foreground">Nothing here right now.</p>}
-      </div> : <div className="divide-y divide-border/60">
-          {activeRounds.map(renderRound)}
-          {restingRounds.length > 0 && <div>
-            <p className="px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground" aria-label="Ready to start">Ready to start</p>
-            <div className="divide-y divide-border/60 border-t border-border/40">{restingRounds.map(renderRound)}</div>
-          </div>}
-          {visible.length === 0 && <p className="px-3 py-3 text-xs text-muted-foreground">Nothing here right now.</p>}
-        </div>}
+      <div className="divide-y divide-border/60">
+        {statuses.map(renderRound)}
+        {statuses.length === 0 && <p className="px-3 py-3 text-xs text-muted-foreground">Nothing here right now.</p>}
+      </div>
     </>}
   </section>;
 }
@@ -206,19 +144,10 @@ export function RoundManager({ statuses, issueTitles, onCreate, onUpdate, onDele
   const [editing, setEditing] = useState<RoundStatus | null>(null);
   const [creating, setCreating] = useState(false);
   const [name, setName] = useState("");
-  const [mode, setMode] = useState<"live" | "batch">("batch");
-  const [schedulePreset, setSchedulePreset] = useState<"manual" | "daily" | "weekdays" | "weekly">("manual");
-  const [scheduleTime, setScheduleTime] = useState("09:00");
-  const [timezone, setTimezone] = useState(Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC");
-  const beginCreate = () => { setEditing(null); setName(""); setMode("batch"); setSchedulePreset("manual"); setScheduleTime("09:00"); setCreating(true); };
-  const presetFor = (cron: string | null | undefined) => !cron ? "manual" : cron.endsWith("* * 1-5") ? "weekdays" : cron.endsWith("* * 1") ? "weekly" : "daily";
-  const timeFor = (cron: string | null | undefined) => { const parts = cron?.split(" "); return parts && parts.length >= 2 ? `${parts[1]!.padStart(2, "0")}:${parts[0]!.padStart(2, "0")}` : "09:00"; };
-  const beginEdit = (s: RoundStatus) => { setEditing(s); setName(s.round.name); setMode(s.round.mode); setSchedulePreset(presetFor(s.round.schedule_cron)); setScheduleTime(timeFor(s.round.schedule_cron)); setTimezone(s.round.timezone ?? "UTC"); setCreating(true); };
+  const beginCreate = () => { setEditing(null); setName(""); setCreating(true); };
+  const beginEdit = (s: RoundStatus) => { setEditing(s); setName(s.round.name); setCreating(true); };
   const save = () => {
-    const [hour = "9", minute = "0"] = scheduleTime.split(":");
-    const suffix = schedulePreset === "weekdays" ? "* * 1-5" : schedulePreset === "weekly" ? "* * 1" : "* * *";
-    const schedule = schedulePreset === "manual" ? null : `${Number(minute)} ${Number(hour)} ${suffix}`;
-    const input = { name: name.trim(), mode, schedule_cron: schedule, timezone: timezone.trim() || "UTC" };
+    const input = { name: name.trim() };
     if (!input.name) return;
     if (editing) onUpdate(editing.round.id, input); else onCreate(input);
     setCreating(false);
@@ -228,10 +157,6 @@ export function RoundManager({ statuses, issueTitles, onCreate, onUpdate, onDele
         {/* No autoFocus on mobile: it opens the keyboard over the lower half
             of the form before the user has seen it (FIR-3107). */}
         <div className="grid gap-1.5"><Label htmlFor="round-name">Round name</Label><Input id="round-name" value={name} onChange={(e) => setName(e.target.value)} autoFocus={!isMobile} /></div>
-        <fieldset className="grid gap-2"><legend className="text-sm font-medium">Type</legend><div className="grid grid-cols-2 gap-2">{(["live", "batch"] as const).map((value) => <Button key={value} type="button" variant={mode === value ? "default" : "outline"} role="radio" aria-checked={mode === value} aria-label={value === "live" ? "Live" : "Batch"} onClick={() => setMode(value)}>{value === "live" ? "Live" : "Batch"}</Button>)}</div><p className="text-xs text-muted-foreground">{mode === "live" ? "Agents work immediately; replies wait in this Round." : "Work waits until you press Run."}</p></fieldset>
-        <fieldset className="grid gap-2"><legend className="text-sm font-medium">Schedule</legend><div className="grid grid-cols-2 gap-2">{(["manual", "daily", "weekdays", "weekly"] as const).map((value) => <Button key={value} type="button" variant={schedulePreset === value ? "default" : "outline"} onClick={() => setSchedulePreset(value)}>{value[0]!.toUpperCase() + value.slice(1)}</Button>)}</div></fieldset>
-        {schedulePreset !== "manual" && <div className="grid gap-1.5"><Label htmlFor="round-time">Time</Label><Input id="round-time" type="time" value={scheduleTime} onChange={(event) => setScheduleTime(event.target.value)} /></div>}
-        <div className="grid gap-1.5"><Label htmlFor="round-timezone">Timezone</Label><Input id="round-timezone" value={timezone} onChange={(e) => setTimezone(e.target.value)} /></div>
         {/* Sticky: Save/Cancel stay on screen while the form above scrolls or
             the mobile keyboard pushes content out of view (FIR-3107). The
             opaque background keeps scrolled-under fields from showing through. */}
@@ -239,7 +164,7 @@ export function RoundManager({ statuses, issueTitles, onCreate, onUpdate, onDele
       </div> : <div className="grid gap-3">
         <Button variant="outline" onClick={beginCreate} aria-label="Create round"><Plus className="size-4" />Create round</Button>
         {statuses.map((s) => <div key={s.round.id} className="rounded-lg border p-3">
-          <div className="flex items-center gap-2"><div className="min-w-0 flex-1"><p className="truncate font-medium">{s.round.name}</p><p className="text-xs text-muted-foreground">{s.round.mode === "live" ? "Live" : "Batch"} · {presetFor(s.round.schedule_cron)[0]!.toUpperCase() + presetFor(s.round.schedule_cron).slice(1)}</p></div>
+          <div className="flex items-center gap-2"><div className="min-w-0 flex-1"><p className="truncate font-medium">{s.round.name}</p></div>
             <Button variant="ghost" size="icon-sm" aria-label={`Edit ${s.round.name}`} onClick={() => beginEdit(s)}><Pencil className="size-3.5" /></Button>
             <Button variant="ghost" size="icon-sm" aria-label={`Delete ${s.round.name}`} onClick={() => onDelete(s.round.id)}><Trash2 className="size-3.5" /></Button>
           </div>
@@ -290,7 +215,7 @@ export function RoundPickerDialog({ issueId, open, onOpenChange }: { issueId: st
         {available.map((status) => <Button key={status.round.id} variant="outline" className="h-auto justify-start px-3 py-2 text-left" onClick={() => {
           void moveTo(status.round.id);
           onOpenChange(false);
-        }}><span className="min-w-0 flex-1"><span className="block truncate font-medium">{status.round.name}</span><span className="block text-xs text-muted-foreground">{status.round.mode === "live" ? "Live" : "Batch"}</span></span></Button>)}
+        }}><span className="min-w-0 flex-1"><span className="block truncate font-medium">{status.round.name}</span></span></Button>)}
         {current && <Button variant="outline" className="h-auto justify-start px-3 py-2 text-left" onClick={() => {
           remove.mutate({ roundId: current.round.id, issueId });
           onOpenChange(false);

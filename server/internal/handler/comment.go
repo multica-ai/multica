@@ -1239,16 +1239,10 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// CEREBRO-PATCH(cerebro-rounds): a human reply on a round issue is durable,
-	// but intentionally does not enter any agent trigger path until the whole
-	// round is started manually or by its schedule.
-	if h.RoundCommentGate != nil && authorType == "member" {
-		held, holdErr := h.RoundCommentGate.HoldComment(r.Context(), issue.WorkspaceID, issue.ID, comment.ID, authorType, authorID, comment.Content)
-		if holdErr != nil {
-			slog.Warn("round comment hold failed", "issue_id", issueID, "error", holdErr)
-		} else if held {
-			writeJSON(w, http.StatusCreated, resp)
-			return
+	if authorType == "member" { // CEREBRO-PATCH(cerebro-rounds): grouping observes replies and never changes the normal trigger chain.
+		ownerID, err := util.ParseUUID(authorID)
+		if err == nil {
+			observeRoundReply(r.Context(), h.RoundReplyObserver, issue.WorkspaceID, issue.ID, ownerID)
 		}
 	}
 

@@ -165,8 +165,7 @@ type Task struct {
 	GraphifyNudge string `json:"graphify_nudge,omitempty"`
 	// CEREBRO-PATCH(daemon-memory-autorecall): FIR-1794 layer 3 — automatically recalled memories shipped at claim time when cerebro_memory is on.
 	MemoryContext string `json:"memory_context,omitempty"`
-	// CEREBRO-PATCH(inbox-rounds): identify released Round work so the daemon performs a relevance check (FIR-2736).
-	RoundRelevanceCheck bool `json:"round_relevance_check,omitempty"`
+	// CEREBRO-PATCH(rounds-answer-snapshots): FIR-3179 — no Round-only daemon task flag; Round replies use the standard task shape.
 	// CEREBRO-PATCH(daemon-task-presentation-mode): receive runtime
 	// presentation_mode from claim response. "interactive" tells the daemon
 	// to mirror agent stdout to the cerebro terminal broker so a browser

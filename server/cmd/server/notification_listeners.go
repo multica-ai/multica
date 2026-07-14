@@ -34,9 +34,6 @@ var pushNotifier mobilePushNotifier
 // CEREBRO-PATCH(channel-mention-members-only): FIR-2680 — hook to drop @mentioned non-participants in channels/groups. Identity by default; the cerebro wiring binds it to the real guard (see cerebro_channel_mention_guard.go).
 var filterChannelMentionRecipients = func(_ context.Context, _ events.Event, _ string, ids map[string]bool) map[string]bool { return ids }
 
-// CEREBRO-PATCH(rounds-push-suppression): FIR-3114 — hook to silence push/banner for issues in the recipient's rounds. False by default; the cerebro wiring binds it (see cerebro_rounds_push_guard.go).
-var suppressPushForRoundIssue = func(_ context.Context, _ string, _, _ string) bool { return false }
-
 // Apple Web Push enforces a hard ~4 KB ceiling on the encrypted payload.
 // After AES-128-GCM padding the plaintext budget shrinks to roughly 3 KB —
 // and full comment bodies routinely exceeded that, which made Apple reject
@@ -192,16 +189,10 @@ func dispatchToMember(
 		pushTitle, pushBody = dmPushContent(ctx, queries, d.RecipientID, d.Actor.ActorType, d.Actor.ActorID, d.Body)
 	}
 
-	// CEREBRO-PATCH(rounds-push-suppression): FIR-3114 — an issue in one of the
-	// recipient's rounds notifies only inside the round: the inbox row above is
-	// still created (the round list renders its unread state), but no push and
-	// no in-app banner fires for it.
-	roundQuiet := suppressPushForRoundIssue(ctx, d.RecipientType, d.RecipientID, d.IssueID)
-
 	// Mobile push fires only when something landed in the user's inbox or
 	// notifications page — push is a bell-ring on top of an existing item,
 	// not a standalone notification. Targets the user's phone-class devices.
-	if created && !d.SuppressMobilePush && !roundQuiet && resolveChannelChoice(ctx, queries, d.RecipientType, d.RecipientID, channelMobile, key) { // CEREBRO-PATCH(rounds-push-suppression): FIR-3114
+	if created && !d.SuppressMobilePush && resolveChannelChoice(ctx, queries, d.RecipientType, d.RecipientID, channelMobile, key) { // CEREBRO-PATCH(rounds-normal-notifications): Round membership no longer suppresses normal inbox behavior.
 		pushItemToMember(ctx, queries, d.RecipientType, d.RecipientID, d.WorkspaceID, d.IssueID, d.NotifType, pushTitle, pushBody, service.DeviceClassMobile, channelMobile)
 	}
 
@@ -209,7 +200,7 @@ func dispatchToMember(
 	// rule. It delivers two ways: a Web Push to the user's computer-class
 	// browsers (so it works with the tab closed) AND the in-app banner that
 	// rides the WS hub via EventDesktopNotify for the Electron desktop app.
-	if created && !roundQuiet && resolveChannelChoice(ctx, queries, d.RecipientType, d.RecipientID, channelDesktop, key) { // CEREBRO-PATCH(rounds-push-suppression): FIR-3114
+	if created && resolveChannelChoice(ctx, queries, d.RecipientType, d.RecipientID, channelDesktop, key) { // CEREBRO-PATCH(rounds-normal-notifications): Round membership no longer suppresses normal inbox behavior.
 		pushItemToMember(ctx, queries, d.RecipientType, d.RecipientID, d.WorkspaceID, d.IssueID, d.NotifType, pushTitle, pushBody, service.DeviceClassDesktop, channelDesktop)
 		bus.Publish(events.Event{
 			Type:        protocol.EventDesktopNotify,

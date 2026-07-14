@@ -1,6 +1,6 @@
 import { api, parseWithFallback } from "@multica/core/api";
 import { z } from "zod";
-import { memberSchema, roundSchema, roundStatusSchema, runSchema, type RoundStatus } from "./schemas";
+import { cycleSchema, memberSchema, roundSchema, roundStatusSchema, type RoundStatus } from "./schemas";
 
 const listSchema = z.object({ rounds: z.array(roundSchema).default([]) }).loose();
 export type Round = z.infer<typeof roundSchema>;
@@ -20,12 +20,9 @@ export async function addIssueToRound(roundId: string, issueId: string) {
 }
 export async function startRound(roundId: string) {
   const path = `/api/cerebro/rounds/${roundId}/start`;
-  return parseWithFallback(await api.cerebroRequest<unknown>(path, { method: "POST" }), runSchema, null, { endpoint: path });
+  return parseWithFallback(await api.cerebroRequest<unknown>(path, { method: "POST" }), cycleSchema, null, { endpoint: path });
 }
-export async function dismissRound(roundId: string): Promise<void> {
-  await api.cerebroRequest(`/api/cerebro/rounds/${roundId}/dismiss`, { method: "POST" });
-}
-export type RoundInput = { name: string; mode: "live" | "batch"; schedule_cron: string | null; timezone: string | null };
+export type RoundInput = { name: string };
 export async function createRound(input: RoundInput): Promise<Round | null> {
   const path = "/api/cerebro/rounds";
   return parseWithFallback(await api.cerebroRequest<unknown>(path, { method: "POST", body: JSON.stringify(input) }), roundSchema, null, { endpoint: path });

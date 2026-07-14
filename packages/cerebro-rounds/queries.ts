@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { addIssueToRound, createRound, deleteRound, dismissRound, getRoundStatus, listRounds, removeIssueFromRound, startRound, updateRound, type RoundInput } from "./api";
+import { addIssueToRound, createRound, deleteRound, getRoundStatus, listRounds, removeIssueFromRound, startRound, updateRound, type RoundInput } from "./api";
 
 export const roundKeys = { all: (wsId: string) => ["cerebro-rounds", wsId] as const };
 
@@ -11,7 +11,6 @@ export function useRoundStatuses(wsId: string, enabled = true) {
 }
 function useInvalidate(wsId: string) { const qc = useQueryClient(); return () => qc.invalidateQueries({ queryKey: roundKeys.all(wsId) }); }
 export function useStartRound(wsId: string) { const invalidate = useInvalidate(wsId); return useMutation({ mutationFn: startRound, onSettled: invalidate }); }
-export function useDismissRound(wsId: string) { const invalidate = useInvalidate(wsId); return useMutation({ mutationFn: dismissRound, onSettled: invalidate }); }
 export function useAddIssueToRound(wsId: string) { const invalidate = useInvalidate(wsId); return useMutation({ mutationFn: ({ roundId, issueId }: {roundId:string; issueId:string}) => addIssueToRound(roundId, issueId), onSettled: invalidate }); }
 export function useCreateRound(wsId: string) { const invalidate = useInvalidate(wsId); return useMutation({ mutationFn: createRound, onSettled: invalidate }); }
 export function useUpdateRound(wsId: string) { const invalidate = useInvalidate(wsId); return useMutation({ mutationFn: ({ id, input }: { id: string; input: RoundInput }) => updateRound(id, input), onSettled: invalidate }); }

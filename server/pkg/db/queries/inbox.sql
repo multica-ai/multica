@@ -162,13 +162,12 @@ WHERE workspace_id = $1 AND issue_id = $2 AND type = $3 AND archived = false
 RETURNING recipient_type, recipient_id;
 
 -- name: CountUnreadInbox :one
+-- CEREBRO-PATCH(rounds-answer-snapshots): FIR-3179 — Round members remain in every normal unread count.
 SELECT count(*) FROM inbox_item
 WHERE inbox_item.workspace_id = $1 AND recipient_type = $2 AND recipient_id = $3
   AND read = false AND archived = false AND route = 'inbox'
   -- CEREBRO-PATCH(sqlc-inbox): muted items don't contribute to the unread badge.
-  AND (muted_until IS NULL OR muted_until <= NOW())
-  -- CEREBRO-PATCH(rounds-badge-exclusion): FIR-3114 — issues in the recipient's rounds notify only inside the round, never in count badges.
-  AND NOT EXISTS (SELECT 1 FROM cerebro_round_member crm JOIN cerebro_round cr ON cr.id = crm.round_id WHERE crm.issue_id = inbox_item.issue_id AND cr.owner_id = inbox_item.recipient_id);
+  AND (muted_until IS NULL OR muted_until <= NOW());
 
 -- name: CountUnreadInboxForUserAllWorkspaces :one
 -- Number of unread inbox "threads" for a member across every workspace.
@@ -191,8 +190,6 @@ SELECT count(*) FROM (
     FROM inbox_item
     WHERE recipient_type = 'member' AND recipient_id = $1
       AND archived = false AND route = 'inbox'
-      -- CEREBRO-PATCH(rounds-badge-exclusion): FIR-3114 — issues in the recipient's rounds notify only inside the round, never in the OS badge.
-      AND NOT EXISTS (SELECT 1 FROM cerebro_round_member crm JOIN cerebro_round cr ON cr.id = crm.round_id WHERE crm.issue_id = inbox_item.issue_id AND cr.owner_id = inbox_item.recipient_id)
     ORDER BY CASE WHEN type = 'reminder' THEN id ELSE COALESCE(issue_id, id) END, created_at DESC
 ) latest
 WHERE read = false
@@ -204,9 +201,7 @@ SELECT count(*) FROM inbox_item
 WHERE inbox_item.workspace_id = $1 AND recipient_type = $2 AND recipient_id = $3
   AND read = false AND archived = false AND route = 'notifications'
   -- CEREBRO-PATCH(sqlc-inbox): muted items don't contribute to the unread badge.
-  AND (muted_until IS NULL OR muted_until <= NOW())
-  -- CEREBRO-PATCH(rounds-badge-exclusion): FIR-3114 — issues in the recipient's rounds notify only inside the round, never in count badges.
-  AND NOT EXISTS (SELECT 1 FROM cerebro_round_member crm JOIN cerebro_round cr ON cr.id = crm.round_id WHERE crm.issue_id = inbox_item.issue_id AND cr.owner_id = inbox_item.recipient_id);
+  AND (muted_until IS NULL OR muted_until <= NOW());
 
 -- name: MarkAllInboxRead :execrows
 UPDATE inbox_item SET read = true

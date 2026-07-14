@@ -191,14 +191,7 @@ type WakeupTaskContext struct {
 	Prompt      string `json:"prompt"`
 }
 
-// CEREBRO-PATCH(inbox-rounds): persist Round release and batch eligibility without bypassing the normal task queue (FIR-2736).
-const RoundTaskContextType = "inbox_round"
-
-type RoundTaskContext struct {
-	Type          string `json:"type"`
-	RunID         string `json:"run_id"`
-	BatchToolMode string `json:"batch_tool_mode,omitempty"`
-}
+// CEREBRO-PATCH(rounds-answer-snapshots): FIR-3179 — Round starts no longer create special task context; replies use the ordinary trigger path.
 
 func memberCommentDelegationContext(userID string, source string) (TaskDelegationContext, error) {
 	uid, err := util.ParseUUID(userID)

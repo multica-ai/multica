@@ -66,41 +66,23 @@ The Rounds inbox surface is an optional `rounds` section in the dynamic Inbox
 layout; it is never injected outside the user's saved section order. It uses the
 same sortable, removable, collapsible block contract as other Inbox sections.
 Collapsed Rounds shows no count. Expanded Rounds provides in-block search and
-renders every member through the shared Inbox row renderer. When an Inbox row
-is temporarily unavailable, the issue title remains as a small openable
-fallback so a counted message never becomes invisible.
+renders each selected list through the shared Inbox row renderer. When an Inbox
+row is temporarily unavailable, the issue title remains as a small openable
+fallback.
 
-Round-member issues notify **only inside the Rounds box** (FIR-3114): their
-inbox rows are excluded from the other dynamic-inbox sections, from every
-unread count badge (sidebar/dock hook `useCerebroInboxUnreadCount`, the three
-server count queries in `server/pkg/db/queries/inbox.sql`), and from
-mobile/desktop push + in-app banner (`suppressPushForRoundIssue` in
-`server/cmd/server/notification_listeners.go`). The inbox_item rows are still
-created and keep their read state — inside the Rounds box a member row renders
-unread only while its round has an active run; outside a run new responses
-accumulate quietly until the next round surfaces them. Each member carries an
-owner-perspective `state`: `waiting` (agent responses newer than the owner's
-last reply), `answered` (owner replied last), `working` (an agent task is
-queued/dispatched/running), `queued` (a response waits for the next answer
-cycle), `planned` (nothing yet), and `failed` (the original attempt plus three
-retries all failed). An unfolded round lists every state as an openable row;
-only `waiting` receives action emphasis. Once the owner replies, the server
-changes that row to `answered`, so it leaves the active Waiting state but stays
-available for inspection. The header counts the waiting messages
-(`waiting_count` sum), not run bookkeeping. Background work stays a quiet
-"Agents working" label instead of a progress panel. Pause
-(`POST /api/cerebro/rounds/{roundId}/dismiss`) closes the
-active run whether `ready` or `running`; dispatched agents finish on their own
-and unanswered messages stay waiting for the next round. A batch round
-auto-starts only while a ready run is surfaced AND nothing anywhere in the
-round waits for the owner — replies seeded into an idle or paused round queue
-until Run or the schedule.
+A Round is grouping plus an answer snapshot; it does not own execution. Round
+membership never suppresses a normal inbox row, unread badge, push notification,
+in-app banner, or agent trigger. It adds no schedule, retry, pause, Live/Batch,
+held-reply, or gateway-batch behavior.
 
-Failed Round jobs are durable. A failure marks its released trigger for retry,
-but does not immediately enqueue more work. The next manual or scheduled Run
-reuses the original comment and target. After three failed retries the trigger
-becomes `failed`, no fourth retry is created, and the member remains openable
-with `retry_count: 3`.
+Pressing Play replaces the active snapshot with member issues that have an open
+inbox message and no active task or wakeup. The expanded Round defaults to
+**Ready**, which shows the unhandled snapshot items. **Handled this round**
+shows snapshot items answered after Play, and **All messages** always shows the
+full member list. Search filters whichever of those three flat views is active.
+An owner reply marks the matching active snapshot item handled while continuing
+through the ordinary comment-trigger path. A later agent reply remains a normal
+inbox message and appears in the next snapshot when Play is pressed again.
 
 The mobile surface is **one shared component**, `MobileRowActions`, exported
 from `@multica/cerebro-inbox`, reused by every row kind so mobile behaviour is

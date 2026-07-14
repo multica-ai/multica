@@ -21,7 +21,7 @@ describe("round mutations", () => {
     const invalidate = vi.spyOn(client, "invalidateQueries");
     const wrapper = ({ children }: { children: ReactNode }) => <QueryClientProvider client={client}>{children}</QueryClientProvider>;
     const { result } = renderHook(() => useCreateRound("ws-1"), { wrapper });
-    await act(async () => result.current.mutate({ name: "Round Alpha", mode: "batch", schedule_cron: null, timezone: "UTC" }));
+    await act(async () => result.current.mutate({ name: "Round Alpha" }));
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
     expect(invalidate).toHaveBeenCalledWith({ queryKey: roundKeys.all("ws-1") });
   });
