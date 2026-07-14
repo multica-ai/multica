@@ -1,6 +1,7 @@
 ---
 title: "Member Display Name Management"
 date: 2026-06-15
+last_updated: 2026-07-14
 category: architecture-pattern
 module: workspace/auth/admin
 problem_type: architecture_pattern
@@ -45,9 +46,9 @@ Critical invariant: introduce a `hadInviteName bool` return value from `findOrCr
 
 ```go
 // findOrCreateUser returns (user, isNew, hadInviteName, err)
-func (h *Handler) findOrCreateUser(ctx context.Context, email, providerID string) (db.User, bool, bool, error) {
+func (h *Handler) findOrCreateUser(ctx context.Context, email string) (user db.User, isNew bool, hadInviteName bool, err error) {
     // ... on new user path:
-    inv, err := h.DB.GetLatestPendingInvitationNameByEmail(ctx, email)
+    inv, err := h.Queries.GetLatestPendingInvitationNameByEmail(ctx, email)
     if err == nil && inv.InviteeName.Valid {
         // set the name from the invitation
         hadInviteName = true
@@ -55,10 +56,12 @@ func (h *Handler) findOrCreateUser(ctx context.Context, email, providerID string
     return user, true, hadInviteName, nil
 }
 
-// In GoogleLogin — only override name from OAuth if no invitation name was set:
-user, isNew, hadInviteName, err := h.findOrCreateUser(ctx, email, googleID)
-if isNew && !hadInviteName {
-    user.Name = googleProfile.Name
+// In GoogleLogin — only override name from OAuth if no invitation name was set
+// AND the user's name still equals the email prefix (not already customized):
+user, isNew, hadInviteName, err := h.findOrCreateUser(ctx, email)
+if !hadInviteName && gUser.Name != "" && user.Name == strings.Split(email, "@")[0] {
+    newName = gUser.Name
+    needsUpdate = true
 }
 ```
 
@@ -68,7 +71,10 @@ The invitation lookup query must guard on `expires_at > now()` and use `ORDER BY
 -- GetLatestPendingInvitationNameByEmail
 SELECT invitee_name FROM workspace_invitation
 WHERE invitee_email = $1
+  AND status = 'pending'
   AND expires_at > now()
+  AND invitee_name IS NOT NULL
+  AND invitee_name <> ''
 ORDER BY created_at DESC, id DESC
 LIMIT 1;
 ```
@@ -79,15 +85,10 @@ Identify super-admins by email, configured via `SUPER_ADMIN_EMAILS` env var (com
 
 ```go
 func (h *Handler) isSuperAdmin(email string) bool {
-    if len(h.Config.SuperAdminEmails) == 0 {
+    if len(h.cfg.SuperAdminEmails) == 0 {
         return false // deny-all when unconfigured — NOT allow-all
     }
-    for _, e := range h.Config.SuperAdminEmails {
-        if strings.EqualFold(e, email) {
-            return true
-        }
-    }
-    return false
+    return contains(h.cfg.SuperAdminEmails, email)
 }
 ```
 
@@ -97,7 +98,7 @@ Cover the deny-all invariant with an explicit unit test:
 
 ```go
 func TestSuperAdmin_EmptyList_DenyAll(t *testing.T) {
-    h := &Handler{Config: Config{SuperAdminEmails: []string{}}}
+    h := &Handler{cfg: &Config{SuperAdminEmails: []string{}}}
     assert.False(t, h.isSuperAdmin("anyone@example.com"))
     assert.False(t, h.isSuperAdmin(""))
 }
@@ -113,11 +114,11 @@ func TestSuperAdmin_EmptyList_DenyAll(t *testing.T) {
 - For user-supplied UUID path parameters, use a dedicated parser that returns 400 Bad Request — not a generic panic
 
 ```go
-func parseUUIDOrBadRequest(w http.ResponseWriter, s string) (uuid.UUID, bool) {
-    id, err := uuid.Parse(s)
+func parseUUIDOrBadRequest(w http.ResponseWriter, s, fieldName string) (pgtype.UUID, bool) {
+    id, err := util.ParseUUID(s)
     if err != nil {
-        http.Error(w, "invalid user id", http.StatusBadRequest)
-        return uuid.UUID{}, false
+        http.Error(w, fmt.Sprintf("invalid %s", fieldName), http.StatusBadRequest)
+        return pgtype.UUID{}, false
     }
     return id, true
 }
@@ -131,7 +132,7 @@ Common failure mode: editing only one file, or accidentally deleting existing ke
 
 ### 5. Hand-writing sqlc output when code-gen is unavailable
 
-If `sqlc` is not installed, study existing generated files in `db/generated/` to understand the exact patterns:
+If `sqlc` is not installed, study existing generated files in `server/pkg/db/generated/` to understand the exact patterns:
 
 - Struct field order matches the `RETURNING` clause column order exactly
 - `pgtype.Text` for nullable `TEXT` columns with pgx/v5 driver
@@ -230,8 +231,11 @@ LIMIT 1;
 ```
 
 **i18n parity — all 4 locales must have identical keys (`parity.test.ts` CI check):**
+
+As of 2026-07-14, `admin.json` has **56 keys** across all 4 locales (en, zh-Hans, ja, ko), covering invitations, workspace management, role editing, and admin user operations. The subset below covers the user-management section; always verify the full key set with `parity.test.ts` after adding new keys.
+
 ```json
-// packages/views/locales/en/admin.json (and zh-Hans, ja, ko with same keys)
+// packages/views/locales/en/admin.json (partial — user-management keys only)
 {
   "page_title": "User Management",
   "search_placeholder": "Search by name or email",
