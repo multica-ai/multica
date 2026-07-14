@@ -1070,6 +1070,51 @@ describe("ToolPolicyTable Permissions/Connections tab split (FIR-2281, FIR-2706)
     );
   }
 
+  it("opens permission details only while the detail feature flag is enabled", async () => {
+    const onOpenPermission = vi.fn();
+    mockCerebroRequest.mockResolvedValue(SPLIT);
+    mockUseFeatureFlag.mockImplementation(
+      (key: string) =>
+        key === "cerebro_tool_policy" || key === "cerebro_permission_detail",
+    );
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const { rerender } = render(
+      <QueryClientProvider client={qc}>
+        <ToolPolicyTable
+          wsId="ws-1"
+          view="workspace"
+          subjectId="ws-1"
+          tabFilter="permissions"
+          onOpenPermission={onOpenPermission}
+        />
+      </QueryClientProvider>,
+    );
+
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Open details for Bash" }),
+    );
+    expect(onOpenPermission).toHaveBeenCalledWith("tools:Bash");
+
+    mockUseFeatureFlag.mockImplementation(
+      (key: string) => key === "cerebro_tool_policy",
+    );
+    rerender(
+      <QueryClientProvider client={qc}>
+        <ToolPolicyTable
+          wsId="ws-1"
+          view="workspace"
+          subjectId="ws-1"
+          tabFilter="permissions"
+          onOpenPermission={onOpenPermission}
+        />
+      </QueryClientProvider>,
+    );
+
+    expect(
+      screen.queryByRole("button", { name: "Open details for Bash" }),
+    ).not.toBeInTheDocument();
+  });
+
   it("Permissions tab shows every flat capability (Multica + Runtime), not connections", async () => {
     mockCerebroRequest.mockResolvedValue(SPLIT);
     renderTab("permissions");

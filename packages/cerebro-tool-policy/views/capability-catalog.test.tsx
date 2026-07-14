@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import type { ToolPolicyRow } from "../core";
 import { CapabilityCatalog, groupByCapability } from "./capability-catalog";
@@ -62,6 +62,65 @@ describe("groupByCapability", () => {
 });
 
 describe("CapabilityCatalog", () => {
+  it("opens a leaf permission detail without triggering its decision control", () => {
+    const onOpenPermission = vi.fn();
+    const onDecision = vi.fn();
+
+    render(
+      <CapabilityCatalog
+        rows={[
+          row({
+            tool_key: "tools:Web fetch/read",
+            title: "Web fetch",
+            category: "tools",
+            source: "multica",
+          }),
+        ]}
+        renderDecision={() => (
+          <button type="button" onClick={onDecision}>
+            Allow
+          </button>
+        )}
+        onOpenPermission={onOpenPermission}
+      />,
+    );
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Open details for Web fetch" }),
+    );
+
+    expect(onOpenPermission).toHaveBeenCalledWith("tools:Web fetch/read");
+    expect(onDecision).not.toHaveBeenCalled();
+  });
+
+  it("keeps group expansion separate from its permission detail action", () => {
+    const onOpenPermission = vi.fn();
+    const group = row({
+      tool_key: "connection:acme",
+      title: "Acme",
+      category: "Acme",
+      source: "connection",
+    });
+
+    render(
+      <CapabilityCatalog
+        rows={[group]}
+        renderDecision={() => <button type="button">Allow</button>}
+        renderDetail={() => <div>Acme tools</div>}
+        onOpenPermission={onOpenPermission}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId("tool-expand-connection:acme"));
+    expect(screen.getByText("Acme tools")).toBeInTheDocument();
+    expect(onOpenPermission).not.toHaveBeenCalled();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Open details for Acme" }),
+    );
+    expect(onOpenPermission).toHaveBeenCalledWith("connection:acme");
+  });
+
   it("renders a card per group and delegates the decision cell to the caller", () => {
     const rows = [
       row({ tool_key: "slack_post", title: "Post to Slack", category: "Slack", source: "multica" }),

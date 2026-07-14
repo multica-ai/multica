@@ -158,6 +158,8 @@ export interface ToolPolicyTableProps {
   /** The viewing user + their groups, so the Effective column reflects the ceiling. */
   userId?: string | null;
   groupIds?: string[];
+  /** Opens the existing reverse lookup page for one permission. */
+  onOpenPermission?: (toolKey: string) => void;
   /**
    * Which slice of the flade this instance renders (FIR-2281, split further by FIR-2706):
    *   "permissions" — flat capability rows that are not a connection (Multica +
@@ -307,6 +309,7 @@ export function ToolPolicyTable({
   userId,
   groupIds,
   tabFilter,
+  onOpenPermission,
 }: ToolPolicyTableProps) {
   // Each surface assembles only the chain context it authors. The workspace
   // root layer is always loaded server-side from wsId, so the workspace view
@@ -353,6 +356,9 @@ export function ToolPolicyTable({
   // tab, runtime, group, member, autopilot, connections, collections, settings)
   // shows it. The classic table below only serves installs with tool-policy off.
   const showCatalog = useFeatureFlag("cerebro_tool_policy");
+  // FIR-3199: FIR-3091 shipped the detail route but no entry point. Keep the
+  // catalog unchanged until the same feature flag that guards the page is on.
+  const showPermissionDetail = useFeatureFlag("cerebro_permission_detail");
 
   // The layer this page authors, and the subject those writes target.
   const editLayer: ToolLayer = VIEW_EDIT_LAYER[view];
@@ -710,6 +716,9 @@ export function ToolPolicyTable({
               rows={filtered}
               renderDecision={renderDecision}
               renderDetail={renderCatalogDetail}
+              onOpenPermission={
+                showPermissionDetail ? onOpenPermission : undefined
+              }
             />
           )}
 
