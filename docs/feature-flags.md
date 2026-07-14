@@ -179,6 +179,30 @@ function Checkout() {
 
 Outside a `FeatureFlagsProvider` (Storybook, unit tests, error pages) `useFlag` / `useVariant` return the supplied default. You never have to mount the provider just to render a component in isolation.
 
+### v0.3.44 compatibility rollout
+
+The following release flags default to `false` so the schema can ship before
+the new persisted states are visible to older server pods or a rollback:
+
+```yaml
+# Enable only after every v0.3.43 server pod has drained and rollback reads
+# have been validated against the migrated database.
+agents_agent_builder:
+  default: true
+settings_resource_labels:
+  default: true
+agents_skill_toggles:
+  default: true
+```
+
+Keep all three off for v0.3.44: it is a schema-only deployment for these
+features. A later rollout may enable them only after it ships and verifies a
+rollback normalizer for builder agents, resource-label rows, and disabled
+skill rows. Do not rely on turning the flags off to make a database safe for
+an older binary; it prevents new writes but cannot remove states that already
+exist. Until that normalizer exists, rollbacks must target a version that
+understands these states or happen before any of the flags is enabled.
+
 ### Security note: never rely on the frontend alone
 
 A frontend feature flag controls what the user *sees*. It does NOT enforce access. Any API route exposing the same capability MUST evaluate the matching backend flag independently. The two flags can share a key but they live in two `Service` instances and the backend value is the source of truth.

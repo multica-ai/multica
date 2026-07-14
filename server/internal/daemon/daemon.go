@@ -133,12 +133,12 @@ type workspaceState struct {
 	lastRepoSyncErr string
 	repoRefreshMu   sync.Mutex
 	// profileSetSig is a content hash of the workspace's custom runtime
-	// profile list (MUL-3332) as last seen from the server. The
-	// workspaceSyncLoop compares the live signature with this cached value;
-	// any drift triggers a re-register so newly-added (or edited / disabled)
-	// custom runtimes appear without a daemon restart. Empty before the
-	// first successful profile fetch (older server / network blip); guarded
-	// by Daemon.mu like every other field on this struct.
+	// profile list (MUL-3332) as last seen from the server. An on-demand
+	// refresh compares the live signature with this cached value; any drift
+	// triggers a re-register so newly-added (or edited / disabled) custom
+	// runtimes appear without a daemon restart. Empty before the first
+	// successful profile fetch (older server / network blip); guarded by
+	// Daemon.mu like every other field on this struct.
 	profileSetSig string
 }
 
@@ -959,18 +959,18 @@ func (d *Daemon) registerRuntimesForWorkspace(ctx context.Context, workspaceID s
 	// whose command_name is not on PATH is skipped (the host doesn't have it).
 	//
 	// profileSig is a content hash of the workspace's profile list captured
-	// here so the workspaceSyncLoop can detect server-side profile changes
-	// between sync ticks without making an extra round trip on every tick
-	// (MUL-3332). An empty string means the fetch failed and the caller must
-	// keep whatever signature was previously cached on the workspaceState.
+	// here so an on-demand server notification can skip re-registration when
+	// the effective profile set is already current (MUL-3332). An empty string
+	// means the fetch failed and the caller must keep whatever signature was
+	// previously cached on the workspaceState.
 	profileSig := d.appendProfileRuntimes(ctx, workspaceID, &runtimes, &failedProfiles)
 
 	if len(runtimes) == 0 && len(failedProfiles) == 0 {
 		// profileSig is still meaningful even when nothing resolves: the
-		// drift-refresh path uses it to remember "we already converged on the
-		// disabled-everywhere state" so the next sync tick is a no-op instead
-		// of a re-empty-register loop. Initial-registration callers that don't
-		// care about the sig discard it via _.
+		// refresh path uses it to remember "we already converged on the
+		// disabled-everywhere state" so duplicate change notifications are a
+		// no-op instead of a re-empty-register loop. Initial-registration
+		// callers that don't care about the sig discard it via _.
 		return nil, profileSig, ErrNoRuntimesToRegister
 	}
 
@@ -1014,12 +1014,12 @@ func (d *Daemon) registerRuntimesForWorkspace(ctx context.Context, workspaceID s
 // version, status = "online", plus the profile_id the server validates.
 //
 // Returns a content signature of the fetched profile list (MUL-3332). The
-// signature is used by the workspace sync loop to detect server-side profile
-// changes between sync ticks and trigger a re-register without a daemon
-// restart. Returns the empty string when the fetch failed — callers must
-// treat that as "unknown, do not overwrite a previously-stored signature"
-// (otherwise a transient 5xx would silently flip the daemon into thinking the
-// workspace has zero profiles).
+// signature is used by on-demand profile refreshes to ignore duplicate change
+// notifications while still triggering a re-register without a daemon
+// restart. Returns the empty string when the fetch failed — callers must treat
+// that as "unknown, do not overwrite a previously-stored signature" (otherwise
+// a transient 5xx would silently flip the daemon into thinking the workspace
+// has zero profiles).
 func (d *Daemon) appendProfileRuntimes(ctx context.Context, workspaceID string, runtimes *[]map[string]string, failedProfiles *[]map[string]string) string {
 	resp, err := d.client.GetRuntimeProfiles(ctx, workspaceID)
 	if err != nil {
@@ -1125,11 +1125,10 @@ func (d *Daemon) appendProfileRuntimes(ctx context.Context, workspaceID string, 
 }
 
 // profileSetSignature is a stable content hash of the workspace's custom
-// runtime profile list (MUL-3332). The workspaceSyncLoop diffs this against
-// the cached value on each tick: a mismatch means the user added, edited, or
-// disabled a profile via the web UI / CLI between syncs and the daemon must
-// re-register so the new runtime instance shows up in the list without a
-// restart.
+// runtime profile list (MUL-3332). An on-demand refresh diffs this against the
+// cached value after the server reports a create, edit, disable, or delete; a
+// mismatch makes the daemon re-register so the new runtime instance appears
+// without a restart.
 //
 // The hashed projection covers exactly the fields that affect what the
 // daemon sends in a Register call: ID, Enabled, ProtocolFamily, CommandName,
@@ -1402,15 +1401,13 @@ func (d *Daemon) refreshWorkspaceRepos(ctx context.Context, workspaceID string) 
 // refreshWorkspaceRuntimeProfiles fetches the workspace's enabled custom
 // runtime profile list (MUL-3332), compares its content signature against
 // the value cached on the workspaceState, and triggers a re-register when
-// the signature has drifted. This is the entry point that lets profiles
-// added / edited / disabled via the web UI or CLI become visible in the
-// runtime list within one workspaceSyncLoop tick instead of requiring a
-// daemon restart.
+// the signature has drifted. This is the entry point used by the daemon
+// WebSocket change notification so profiles added / edited / disabled via the
+// web UI or CLI become visible without a daemon restart.
 //
-// Best-effort: a fetch error (older server, network blip) is logged and
-// swallowed — the cached signature is preserved so the next tick can still
-// detect a real drift. A successfully-fetched-but-unchanged signature is the
-// expected steady state and short-circuits without any further work.
+// Best-effort: a fetch error (older server, network blip) preserves the cached
+// signature. A successfully-fetched-but-unchanged signature can result from a
+// duplicate notification and short-circuits without any further work.
 //
 // On drift the function takes a path that deliberately differs from
 // reregisterWorkspaceAfterRuntimeGone in two ways:
@@ -1438,8 +1435,8 @@ func (d *Daemon) refreshWorkspaceRuntimeProfiles(ctx context.Context, workspaceI
 
 	resp, err := d.client.GetRuntimeProfiles(refreshCtx, workspaceID)
 	if err != nil {
-		// Older server (no profiles route) returns 404; the daemon should not
-		// log a noisy warning on every sync tick in that case.
+		// Older server (no profiles route) returns 404; let the on-demand caller
+		// log the failure at debug level.
 		return err
 	}
 	var profiles []RuntimeProfile
@@ -1452,7 +1449,7 @@ func (d *Daemon) refreshWorkspaceRuntimeProfiles(ctx context.Context, workspaceI
 	ws, ok := d.workspaces[workspaceID]
 	if !ok {
 		d.mu.Unlock()
-		// Workspace was removed between sync ticks — nothing to do.
+		// Workspace was removed while the refresh was in flight — nothing to do.
 		return nil
 	}
 	cached := ws.profileSetSig
@@ -1517,8 +1514,8 @@ func (d *Daemon) refreshWorkspaceRuntimeProfiles(ctx context.Context, workspaceI
 // The workspaceState pointer is preserved: the workspace itself is still a
 // valid workspace the user belongs to, just one with no agents on this
 // daemon for the moment. If the user re-enables a profile or installs a
-// built-in agent, the next sync tick's profile-drift detection (or a daemon
-// restart) will register it again.
+// built-in agent, the profile-change notification or the next daemon WS
+// reconnect will register it again.
 func (d *Daemon) convergeWorkspaceRuntimesToZero(ctx context.Context, workspaceID, profileSig string) error {
 	d.mu.Lock()
 	ws, ok := d.workspaces[workspaceID]
@@ -1643,7 +1640,7 @@ const DefaultTokenRenewalInterval = 3 * 24 * time.Hour
 // register runtimes once one appears.
 func (d *Daemon) preflightAuth(ctx context.Context) error {
 	d.tryRenewToken(ctx)
-	return d.syncWorkspacesFromAPI(ctx)
+	return d.syncWorkspacesFromAPI(ctx, false)
 }
 
 // tokenRenewalLoop keeps the daemon's PAT alive by periodically asking the
@@ -1702,10 +1699,10 @@ func (d *Daemon) tryRenewToken(ctx context.Context) {
 
 // workspaceSyncLoop periodically fetches the user's workspaces from the API
 // and registers runtimes for any new ones. A WS connect/reconnect broadcast
-// triggers an immediate sync so workspace and runtime changes the server
-// applied during the WS gap are picked up sub-second instead of after the
-// next 30s tick. Repository bindings and workspace settings refresh on demand
-// when a checkout needs them.
+// triggers an immediate sync and one runtime-profile reconciliation so changes
+// made during the WS gap are picked up sub-second without putting profile
+// fetches back on the 30s ticker. Repository bindings and workspace settings
+// refresh on demand when a checkout needs them.
 func (d *Daemon) workspaceSyncLoop(ctx context.Context) {
 	ticker := time.NewTicker(DefaultWorkspaceSyncInterval)
 	defer ticker.Stop()
@@ -1715,8 +1712,8 @@ func (d *Daemon) workspaceSyncLoop(ctx context.Context) {
 		reconcileCh = d.reconcile.notify()
 	}
 
-	sync := func() {
-		if err := d.syncWorkspacesFromAPI(ctx); err != nil {
+	sync := func(reconcileProfiles bool) {
+		if err := d.syncWorkspacesFromAPI(ctx, reconcileProfiles); err != nil {
 			d.logger.Debug("workspace sync failed", "error", err)
 		}
 	}
@@ -1729,17 +1726,20 @@ func (d *Daemon) workspaceSyncLoop(ctx context.Context) {
 			if d.reconcile != nil {
 				reconcileCh = d.reconcile.notify()
 			}
-			sync()
+			sync(true)
 		case <-ticker.C:
-			sync()
+			sync(false)
 		}
 	}
 }
 
 // syncWorkspacesFromAPI fetches all workspaces the user belongs to and
-// registers runtimes for any that aren't already tracked. Workspaces the user
-// has left are cleaned up.
-func (d *Daemon) syncWorkspacesFromAPI(ctx context.Context) error {
+// registers runtimes for any that aren't already tracked. When
+// reconcileProfiles is true (after a daemon WS connect/reconnect), tracked
+// workspaces reconcile custom runtime profiles once so a change made while the
+// WS was unavailable is not lost. The normal 30s ticker passes false and makes
+// no runtime-profile requests. Workspaces the user has left are cleaned up.
+func (d *Daemon) syncWorkspacesFromAPI(ctx context.Context, reconcileProfiles bool) error {
 	d.reloading.Lock()
 	defer d.reloading.Unlock()
 
@@ -1768,17 +1768,10 @@ func (d *Daemon) syncWorkspacesFromAPI(ctx context.Context) error {
 	var removed int
 	for id, name := range apiIDs {
 		if currentIDs[id] {
-			// Pick up custom runtime profiles created/edited/disabled via
-			// the web UI or CLI between sync ticks (MUL-3332). Without this,
-			// a profile added on the server would only become a runtime row
-			// after a daemon restart or a runtime_gone recovery, because the
-			// already-tracked branch never re-runs registerRuntimesForWorkspace
-			// otherwise. refreshWorkspaceRuntimeProfiles is best-effort and
-			// only re-registers when it observes a real signature drift, so
-			// quiet workspaces incur exactly one cheap GetRuntimeProfiles
-			// round trip per sync tick.
-			if err := d.refreshWorkspaceRuntimeProfiles(ctx, id); err != nil {
-				d.logger.Debug("workspace sync: profile refresh failed", "workspace_id", id, "error", err)
+			if reconcileProfiles {
+				if err := d.refreshWorkspaceRuntimeProfiles(ctx, id); err != nil {
+					d.logger.Debug("workspace reconcile: profile refresh failed", "workspace_id", id, "error", err)
+				}
 			}
 			// Only intervene further if the workspace lost all of its
 			// runtimes (most commonly because handleRuntimeGone pruned them
@@ -1808,9 +1801,9 @@ func (d *Daemon) syncWorkspacesFromAPI(ctx context.Context) error {
 		}
 		d.mu.Lock()
 		ws := newWorkspaceState(id, runtimeIDs, resp.ReposVersion, resp.Repos, resp.Settings)
-		// Seed the profile signature so the next sync tick can detect drift
-		// without re-registering on a transient fetch failure (empty sig is
-		// the explicit "unknown — keep the previous value" sentinel from
+		// Seed the profile signature so later on-demand change notifications can
+		// detect drift without re-registering on duplicates (empty sig is the
+		// explicit "unknown — keep the previous value" sentinel from
 		// appendProfileRuntimes; on first registration there is no previous
 		// value, so empty stays empty).
 		ws.profileSetSig = profileSig

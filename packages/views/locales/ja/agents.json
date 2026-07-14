@@ -62,7 +62,8 @@
     "last_active": "最終アクティブ",
     "model": "モデル",
     "created": "作成日時",
-    "owner": "オーナー"
+    "owner": "オーナー",
+    "access": "アクセス"
   },
   "row": {
     "you": "あなた",
@@ -86,6 +87,12 @@
     "duplicate": "複製",
     "restore": "復元",
     "archive": "アーカイブ",
+    "set_access": "アクセス範囲を設定",
+    "set_access_dialog_title": "アクセス範囲を設定",
+    "set_access_applies_to": "{{count}} 件の agent に適用します。",
+    "set_access_skipped": "{{count}} 件スキップ(あなた所有ではありません)。",
+    "set_access_dialog_confirm": "適用",
+    "set_access_bulk_partial": "{{succeeded}} 件適用、{{failed}} 件失敗(現在の状態を維持)。",
     "agent_archived_toast": "エージェントをアーカイブしました",
     "archive_failed_toast": "エージェントをアーカイブできませんでした",
     "agent_restored_toast": "エージェントを復元しました",
@@ -583,6 +590,11 @@
     "tooltip": "アクセス · 誰がこのエージェントを実行できるか",
     "trigger_private": "自分のみ",
     "trigger_workspace": "ワークスペース",
+    "scope_labels": {
+      "workspace": "ワークスペース",
+      "specific_people": "特定のメンバー",
+      "owner_only": "オーナーのみ"
+    },
     "trigger_members_count": "{{count}} 人",
     "trigger_members_empty": "特定のメンバー",
     "trigger_team": "チーム",
@@ -670,6 +682,7 @@
     "filter_active_count_other": "{{count}} 件のフィルター",
     "clear_filters": "フィルターをクリア",
     "section_availability": "可用性",
+    "section_access": "アクセス",
     "section_runtime": "ランタイム",
     "display": "表示",
     "sort_by": "並び替え",

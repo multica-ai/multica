@@ -578,49 +578,161 @@ func (b *bufferWriter) String() string {
 	return b.buf.String()
 }
 
-// TestHermesClientAutoApprovesPermissionRequest asserts that when an
-// ACP agent sends us `session/request_permission` (kimi does this on
-// every Shell / file-mutating tool call), the client replies with
-// `approve_for_session` — without this the agent blocks 300s and the
-// task hangs. The id in the reply must match the agent's request id
-// so its in-flight future resolves.
+// TestHermesClientAutoApprovesPermissionRequest asserts how the client
+// answers an ACP agent's `session/request_permission`. It must select an
+// optionId the agent *actually offered* — an id the agent never offered is
+// treated as a denial and, on Hermes' edit path, silently blocks every file
+// write (GitHub multica#5300). It prefers a session-scoped grant over a
+// single-use one, refuses to auto-select a permanent "allow_always" (which
+// persists to the runtime owner's on-disk allowlist), denies a single action
+// by selecting an offered reject_once rather than replying "cancelled" (which
+// other ACP backends read as cancelling the whole turn), and returns a
+// protocol error when nothing is safely selectable. The reply always echoes
+// the agent's request id.
 func TestHermesClientAutoApprovesPermissionRequest(t *testing.T) {
 	t.Parallel()
 
-	w := &bufferWriter{}
-	c := &hermesClient{
-		cfg:     Config{Logger: slog.Default()},
-		stdin:   w,
-		pending: make(map[int]*pendingRPC),
+	cases := []struct {
+		name    string
+		options string
+		wantErr bool   // true → JSON-RPC error reply, no outcome
+		wantID  string // expected selected optionId when wantErr == false
+	}{
+		{
+			// Hermes edit-approval offers only these two and requires
+			// exactly "allow_once"; this is the multica#5300 regression
+			// the old hardcoded "approve_for_session" reply broke.
+			name:    "hermes edit approval selects allow_once",
+			options: `[{"optionId":"allow_once","name":"Allow edit","kind":"allow_once"},{"optionId":"deny","name":"Deny","kind":"reject_once"}]`,
+			wantID:  "allow_once",
+		},
+		{
+			// Hermes command approval offers a session option; prefer it over
+			// both the permanent "allow_always" and single-use "allow_once".
+			name:    "command approval prefers session over permanent",
+			options: `[{"optionId":"allow_once","kind":"allow_once"},{"optionId":"allow_session","kind":"allow_always"},{"optionId":"allow_always","kind":"allow_always"},{"optionId":"deny","kind":"reject_once"},{"optionId":"deny_always","kind":"reject_always"}]`,
+			wantID:  "allow_session",
+		},
+		{
+			// Other ACP agents' session-scoped id is honoured when offered.
+			name:    "session-scoped id honoured",
+			options: `[{"optionId":"approve","kind":"allow_once"},{"optionId":"approve_for_session","kind":"allow_always"},{"optionId":"reject","kind":"reject_once"}]`,
+			wantID:  "approve_for_session",
+		},
+		{
+			// Grant nature comes from the ACP kind, not the opaque optionId:
+			// a single-use option with a non-standard id is still selected.
+			name:    "non-standard single-use id selected by kind",
+			options: `[{"optionId":"yolo-42","kind":"allow_once"},{"optionId":"nope","kind":"reject_once"}]`,
+			wantID:  "yolo-42",
+		},
+		{
+			// Only a permanent grant offered: never auto-persist it; deny this
+			// action by selecting the offered single-use reject instead.
+			name:    "permanent grant refused, offered reject_once selected",
+			options: `[{"optionId":"allow_always","kind":"allow_always"},{"optionId":"deny","kind":"reject_once"}]`,
+			wantID:  "deny",
+		},
+		{
+			// No grant at all: deny this action via the offered reject_once.
+			name:    "reject-only selects reject_once",
+			options: `[{"optionId":"deny","kind":"reject_once"},{"optionId":"deny_always","kind":"reject_always"}]`,
+			wantID:  "deny",
+		},
+		{
+			// Unknown / future kind is not a grant; fall through to reject_once.
+			name:    "unknown kind selects offered reject_once",
+			options: `[{"optionId":"allow_forever","kind":"allow_super"},{"optionId":"deny","kind":"reject_once"}]`,
+			wantID:  "deny",
+		},
+		{
+			// Permanent grant with no single-use reject: nothing safely
+			// selectable → protocol error, not a fabricated outcome.
+			name:    "permanent-only without reject_once errors",
+			options: `[{"optionId":"allow_always","kind":"allow_always"}]`,
+			wantErr: true,
+		},
+		{
+			// Only a permanent reject offered: we don't auto-persist a denial
+			// either → protocol error.
+			name:    "reject_always-only errors",
+			options: `[{"optionId":"deny_always","kind":"reject_always"}]`,
+			wantErr: true,
+		},
+		{
+			// No options at all: protocol error rather than fabricate a reply.
+			name:    "empty options errors",
+			options: `[]`,
+			wantErr: true,
+		},
+		{
+			// Malformed options payload (not an array): protocol error.
+			name:    "malformed options errors",
+			options: `"not-an-array"`,
+			wantErr: true,
+		},
 	}
 
-	c.handleLine(`{"jsonrpc":"2.0","id":42,"method":"session/request_permission","params":{"sessionId":"ses_1","options":[{"optionId":"approve","name":"Approve once","kind":"allow_once"},{"optionId":"approve_for_session","name":"Approve for this session","kind":"allow_always"},{"optionId":"reject","name":"Reject","kind":"reject_once"}],"toolCall":{"toolCallId":"tc_1","title":"Shell","content":[]}}}`)
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 
-	got := w.String()
-	var resp struct {
-		JSONRPC string `json:"jsonrpc"`
-		ID      int    `json:"id"`
-		Result  struct {
-			Outcome struct {
-				Outcome  string `json:"outcome"`
-				OptionID string `json:"optionId"`
-			} `json:"outcome"`
-		} `json:"result"`
-	}
-	if err := json.Unmarshal([]byte(strings.TrimSpace(got)), &resp); err != nil {
-		t.Fatalf("reply is not valid JSON: %q err=%v", got, err)
-	}
-	if resp.JSONRPC != "2.0" {
-		t.Errorf("jsonrpc: got %q, want 2.0", resp.JSONRPC)
-	}
-	if resp.ID != 42 {
-		t.Errorf("id: got %d, want 42 (must echo agent's request id)", resp.ID)
-	}
-	if resp.Result.Outcome.Outcome != "selected" {
-		t.Errorf("outcome.outcome: got %q, want %q", resp.Result.Outcome.Outcome, "selected")
-	}
-	if resp.Result.Outcome.OptionID != "approve_for_session" {
-		t.Errorf("outcome.optionId: got %q, want %q", resp.Result.Outcome.OptionID, "approve_for_session")
+			w := &bufferWriter{}
+			c := &hermesClient{
+				cfg:     Config{Logger: slog.Default()},
+				stdin:   w,
+				pending: make(map[int]*pendingRPC),
+			}
+
+			c.handleLine(`{"jsonrpc":"2.0","id":42,"method":"session/request_permission","params":{"sessionId":"ses_1","options":` + tc.options + `,"toolCall":{"toolCallId":"tc_1","title":"write: reply.md","content":[]}}}`)
+
+			got := w.String()
+			var resp struct {
+				JSONRPC string `json:"jsonrpc"`
+				ID      int    `json:"id"`
+				Result  *struct {
+					Outcome struct {
+						Outcome  string `json:"outcome"`
+						OptionID string `json:"optionId"`
+					} `json:"outcome"`
+				} `json:"result"`
+				Error *struct {
+					Code    int    `json:"code"`
+					Message string `json:"message"`
+				} `json:"error"`
+			}
+			if err := json.Unmarshal([]byte(strings.TrimSpace(got)), &resp); err != nil {
+				t.Fatalf("reply is not valid JSON: %q err=%v", got, err)
+			}
+			if resp.JSONRPC != "2.0" {
+				t.Errorf("jsonrpc: got %q, want 2.0", resp.JSONRPC)
+			}
+			if resp.ID != 42 {
+				t.Errorf("id: got %d, want 42 (must echo agent's request id)", resp.ID)
+			}
+			if tc.wantErr {
+				if resp.Error == nil {
+					t.Errorf("want a JSON-RPC error reply, got result %+v", resp.Result)
+				}
+				if resp.Result != nil {
+					t.Errorf("error reply must not carry a result, got %+v", resp.Result)
+				}
+				return
+			}
+			if resp.Error != nil {
+				t.Fatalf("unexpected JSON-RPC error reply: %+v", resp.Error)
+			}
+			if resp.Result == nil {
+				t.Fatalf("want a selected outcome, got no result: %q", got)
+			}
+			if resp.Result.Outcome.Outcome != "selected" {
+				t.Errorf("outcome.outcome: got %q, want %q", resp.Result.Outcome.Outcome, "selected")
+			}
+			if resp.Result.Outcome.OptionID != tc.wantID {
+				t.Errorf("outcome.optionId: got %q, want %q", resp.Result.Outcome.OptionID, tc.wantID)
+			}
+		})
 	}
 }
 

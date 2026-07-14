@@ -2,18 +2,26 @@ import { describe, expect, it } from "vitest";
 import { NextRequest } from "next/server";
 import { proxy } from "./proxy";
 
-function makeRequest(path: string, cookies: Record<string, string> = {}) {
+function makeRequest(
+  path: string,
+  cookies: Record<string, string> = {},
+  host = "app.multica.test",
+) {
   const cookieHeader = Object.entries(cookies)
     .map(([key, value]) => `${key}=${value}`)
     .join("; ");
 
-  return new NextRequest(`https://app.multica.test${path}`, {
+  return new NextRequest(`https://${host}${path}`, {
     headers: cookieHeader ? { cookie: cookieHeader } : undefined,
   });
 }
 
-function redirectLocation(path: string, cookies: Record<string, string> = {}) {
-  return proxy(makeRequest(path, cookies)).headers.get("location");
+function redirectLocation(
+  path: string,
+  cookies: Record<string, string> = {},
+  host?: string,
+) {
+  return proxy(makeRequest(path, cookies, host)).headers.get("location");
 }
 
 describe("proxy legacy workspace route redirects", () => {
@@ -60,5 +68,24 @@ describe("proxy legacy workspace route redirects", () => {
 
   it("does not redirect workspace-scoped URLs whose first segment is already a slug", () => {
     expect(redirectLocation("/acme/squads", sessionCookies)).toBeNull();
+  });
+
+  it("redirects app-host root URLs to the last workspace", () => {
+    expect(redirectLocation("/", sessionCookies)).toBe(
+      "https://app.multica.test/acme/issues",
+    );
+  });
+
+  it.each(["multica.ai", "www.multica.ai"])(
+    "does not redirect public marketing root on %s",
+    (host) => {
+      expect(redirectLocation("/", sessionCookies, host)).toBeNull();
+    },
+  );
+
+  it("still redirects explicit legacy app routes on the public marketing host", () => {
+    expect(redirectLocation("/issues/ABC-123", sessionCookies, "multica.ai")).toBe(
+      "https://multica.ai/acme/issues/ABC-123",
+    );
   });
 });
