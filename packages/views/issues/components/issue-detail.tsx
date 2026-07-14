@@ -61,7 +61,7 @@ import { IssueAgentHeaderChip } from "./issue-agent-header-chip";
 import { ExecutionLogSection } from "./execution-log-section";
 import { PullRequestList } from "./pull-request-list";
 import { useGitHubSettings } from "@multica/core/github";
-import { useQueries, useQuery } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useActorName } from "@multica/core/workspace/hooks";
@@ -714,12 +714,8 @@ async function pollOpenIdeCommandStatus(issueId: string, commandId: string) {
 
 function OpenIssueInIntelliJButton({
   issueId,
-  childIssueIds = [],
-  childIssueIdsLoading = false,
 }: {
   issueId: string;
-  childIssueIds?: string[];
-  childIssueIdsLoading?: boolean;
 }) {
   const { t } = useT("issues");
   const [pending, setPending] = useState(false);
@@ -728,21 +724,10 @@ function OpenIssueInIntelliJButton({
     queryFn: () => api.listTasksByIssue(issueId),
     staleTime: 30_000,
   });
-  const childTaskQueries = useQueries({
-    queries: childIssueIdsLoading
-      ? []
-      : childIssueIds.map((childIssueId) => ({
-          queryKey: issueKeys.tasks(childIssueId),
-          queryFn: () => api.listTasksByIssue(childIssueId),
-          staleTime: 30_000,
-        })),
-  });
-  const childTasksLoading = childIssueIdsLoading || childTaskQueries.some((query) => query.isLoading);
-  const childTasks = childTaskQueries.flatMap((query) => query.data ?? []);
-  const taskId = pickOpenIdeTaskId(childTasks) ?? pickOpenIdeTaskId(tasks);
+  const taskId = pickOpenIdeTaskId(tasks);
 
   const handleOpen = useCallback(async () => {
-    if (pending || tasksLoading || childTasksLoading) return;
+    if (pending || tasksLoading) return;
     setPending(true);
     try {
       const command = await api.openIssueInIde(issueId, "intellij_idea", { taskId });
@@ -768,7 +753,7 @@ function OpenIssueInIntelliJButton({
     } finally {
       setPending(false);
     }
-  }, [childTasksLoading, issueId, pending, taskId, tasksLoading, t]);
+  }, [issueId, pending, taskId, tasksLoading, t]);
 
   return (
     <Tooltip>
@@ -780,7 +765,7 @@ function OpenIssueInIntelliJButton({
             size="icon-xs"
             className="shrink-0 text-muted-foreground"
             aria-label={t(($) => $.detail.open_intellij_aria)}
-            disabled={pending || tasksLoading || childTasksLoading}
+            disabled={pending || tasksLoading}
             onClick={handleOpen}
           >
             <Code2 className="size-3.5" />
@@ -1564,11 +1549,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                 onUpdate={handleUpdateField}
               />
               {issue.project_id && (
-                <OpenIssueInIntelliJButton
-                  issueId={issue.id}
-                  childIssueIds={childIssueIds}
-                  childIssueIdsLoading={childIssuesLoading}
-                />
+                <OpenIssueInIntelliJButton issueId={issue.id} />
               )}
             </div>
           </PropRow>

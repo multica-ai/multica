@@ -905,7 +905,7 @@ describe("IssueDetail (shared)", () => {
     });
   });
 
-  it("prefers a child issue task when opening IntelliJ IDEA from a parent issue", async () => {
+  it("does not use child issue tasks when opening IntelliJ IDEA from a parent issue", async () => {
     mockApiObj.getIssue.mockResolvedValue({ ...mockIssue, project_id: "project-1" });
     mockApiObj.getProject.mockResolvedValue({
       id: "project-1",
@@ -981,13 +981,83 @@ describe("IssueDetail (shared)", () => {
       name: "Open working directory in IntelliJ IDEA",
     });
     await waitFor(() => {
-      expect(mockApiObj.listTasksByIssue).toHaveBeenCalledWith("child-issue-1");
+      expect(mockApiObj.listTasksByIssue).toHaveBeenCalledWith("issue-1");
       expect(button).toBeEnabled();
     });
     fireEvent.click(button);
 
     await waitFor(() => {
-      expect(mockApiObj.openIssueInIde).toHaveBeenCalledWith("issue-1", "intellij_idea", { taskId: "child-task" });
+      expect(mockApiObj.openIssueInIde).toHaveBeenCalledWith("issue-1", "intellij_idea", { taskId: "parent-task" });
+    });
+  });
+
+  it("does not fall back to child issue tasks when the parent issue has no work directory", async () => {
+    mockApiObj.getIssue.mockResolvedValue({ ...mockIssue, project_id: "project-1" });
+    mockApiObj.getProject.mockResolvedValue({
+      id: "project-1",
+      workspace_id: "ws-1",
+      title: "Project",
+      description: null,
+      icon: null,
+      status: "in_progress",
+      priority: "none",
+      lead_type: null,
+      lead_id: null,
+      created_at: "2026-01-01T00:00:00Z",
+      updated_at: "2026-01-01T00:00:00Z",
+      issue_count: 0,
+      done_count: 0,
+      resource_count: 0,
+    });
+    mockApiObj.listChildIssues.mockResolvedValue({
+      issues: [
+        {
+          ...mockIssue,
+          id: "child-issue-1",
+          identifier: "TES-2",
+          number: 2,
+          title: "Child execution issue",
+          parent_issue_id: "issue-1",
+          project_id: "project-1",
+        },
+      ],
+    });
+    mockApiObj.listTasksByIssue.mockImplementation((issueId: string) => {
+      if (issueId === "child-issue-1") {
+        return Promise.resolve([
+          {
+            id: "child-task",
+            agent_id: "agent-1",
+            runtime_id: "",
+            issue_id: "child-issue-1",
+            status: "completed",
+            priority: 0,
+            dispatched_at: null,
+            started_at: null,
+            completed_at: null,
+            result: null,
+            error: null,
+            created_at: "2026-01-01T00:00:00Z",
+            relative_work_dir: "ws/child/workdir",
+          },
+        ]);
+      }
+      return Promise.resolve([]);
+    });
+
+    renderIssueDetail();
+
+    const button = await screen.findByRole("button", {
+      name: "Open working directory in IntelliJ IDEA",
+    });
+    await waitFor(() => {
+      expect(mockApiObj.listTasksByIssue).toHaveBeenCalledWith("issue-1");
+      expect(button).toBeEnabled();
+    });
+    fireEvent.click(button);
+
+    await waitFor(() => {
+      expect(mockApiObj.openIssueInIde).toHaveBeenCalledWith("issue-1", "intellij_idea", { taskId: undefined });
     });
   });
 
