@@ -71,9 +71,10 @@ func TestUpsertIssueExternalIdentityConcurrentIndependentRequestsConverge(t *tes
 		_, _ = testPool.Exec(t.Context(), `DELETE FROM issue WHERE workspace_id=$1 AND title=$2`, testWorkspaceID, title)
 	})
 	type result struct {
-		id   string
-		code int
-		body string
+		id                 string
+		receiptWorkspaceID string
+		code               int
+		body               string
 	}
 	results := make(chan result, 2)
 	start := make(chan struct{})
@@ -91,7 +92,7 @@ func TestUpsertIssueExternalIdentityConcurrentIndependentRequestsConverge(t *tes
 				Receipt authority.WriteReceipt `json:"receipt"`
 			}
 			_ = json.Unmarshal(w.Body.Bytes(), &env)
-			results <- result{id: env.Issue.ID, code: w.Code, body: w.Body.String()}
+			results <- result{id: env.Issue.ID, receiptWorkspaceID: env.Receipt.WorkspaceID, code: w.Code, body: w.Body.String()}
 		}()
 	}
 	close(start)
@@ -104,6 +105,9 @@ func TestUpsertIssueExternalIdentityConcurrentIndependentRequestsConverge(t *tes
 	}
 	if first.id == "" || first.id != second.id {
 		t.Fatalf("issue ids = %q/%q, want same non-empty", first.id, second.id)
+	}
+	if first.receiptWorkspaceID != testWorkspaceID || second.receiptWorkspaceID != testWorkspaceID {
+		t.Fatalf("receipt workspace ids = %q/%q, want %q", first.receiptWorkspaceID, second.receiptWorkspaceID, testWorkspaceID)
 	}
 	var issueCount, aliasCount int
 	if err := testPool.QueryRow(t.Context(), `SELECT count(*) FROM issue WHERE workspace_id=$1 AND title=$2`, testWorkspaceID, title).Scan(&issueCount); err != nil {

@@ -1291,8 +1291,11 @@ func runIssueUpsertExternal(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return fmt.Errorf("decode external upsert issue: %w", err)
 	}
+	if err := validateExternalUpsertWorkspace(result, client.WorkspaceID); err != nil {
+		return err
+	}
 	issueID := strVal(result, "id")
-	expected := authority.WriteReceiptExpectation{Operation: authority.OperationIssueUpsertExternal, RequestSHA256: fmt.Sprintf("%x", requestDigest), ResourceID: issueID, Nonce: nonce}
+	expected := authority.WriteReceiptExpectation{Operation: authority.OperationIssueUpsertExternal, RequestSHA256: fmt.Sprintf("%x", requestDigest), ResourceID: issueID, WorkspaceID: client.WorkspaceID, Nonce: nonce}
 	if err := authority.VerifyBoundWriteReceipt(envelope.Receipt, expected, *cfg.AuthorityPin, client.BaseURL, time.Now(), 2*time.Minute, 30*time.Second); err != nil {
 		return fmt.Errorf("verify write receipt: %w", err)
 	}
@@ -1309,6 +1312,15 @@ func runIssueUpsertExternal(cmd *cobra.Command, _ []string) error {
 		return nil
 	}
 	return cli.PrintJSON(os.Stdout, result)
+}
+
+func validateExternalUpsertWorkspace(result map[string]any, configuredWorkspaceID string) error {
+	configuredWorkspaceID = strings.TrimSpace(configuredWorkspaceID)
+	returnedWorkspaceID, ok := result["workspace_id"].(string)
+	if configuredWorkspaceID == "" || !ok || returnedWorkspaceID != configuredWorkspaceID {
+		return fmt.Errorf("external upsert issue workspace does not match configured workspace")
+	}
+	return nil
 }
 
 func decodeExternalUpsertIssueStrict(raw json.RawMessage) (map[string]any, error) {

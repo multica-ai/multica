@@ -82,17 +82,18 @@ func TestIssueUpsertExternalVerifiesReceiptBoundToExactWrite(t *testing.T) {
 				t.Fatalf("request nonce: %v", err)
 			}
 			issue := map[string]any{
-				"id":         "11111111-1111-1111-1111-111111111111",
-				"title":      "Imported",
-				"status":     "todo",
-				"priority":   "none",
-				"identifier": "EXT-1",
-				"metadata":   map[string]any{},
+				"id":           "11111111-1111-1111-1111-111111111111",
+				"workspace_id": "ws-123",
+				"title":        "Imported",
+				"status":       "todo",
+				"priority":     "none",
+				"identifier":   "EXT-1",
+				"metadata":     map[string]any{},
 			}
 			digest := sha256.Sum256(raw)
 			receipt, err := authority.SignWriteReceipt(priv, authority.WriteReceiptStatement{
 				Protocol: authority.WriteReceiptProtocolVersion, Operation: "issue.upsert-external",
-				RequestSHA256: fmt.Sprintf("%x", digest), ResourceID: issue["id"].(string), Nonce: request.Nonce,
+				RequestSHA256: fmt.Sprintf("%x", digest), ResourceID: issue["id"].(string), WorkspaceID: "ws-123", Nonce: request.Nonce,
 				AuthorityID: "local-dev-authority", DBIdentity: dbID, IssuedAt: time.Now().UTC(), ServerCommit: "test-commit",
 			})
 			if err != nil {
@@ -137,6 +138,10 @@ func TestIssueUpsertExternalRejectsUnboundOrMalformedReceipt(t *testing.T) {
 		{name: "resource", mutate: func(r *authority.WriteReceipt, _ *map[string]any) {
 			r.ResourceID = "22222222-2222-2222-2222-222222222222"
 		}},
+		{name: "receipt workspace", mutate: func(r *authority.WriteReceipt, _ *map[string]any) { r.WorkspaceID = "ws-999" }},
+		{name: "issue workspace", mutate: func(_ *authority.WriteReceipt, env *map[string]any) {
+			(*env)["issue"].(map[string]any)["workspace_id"] = "ws-999"
+		}},
 		{name: "unknown field", mutate: func(_ *authority.WriteReceipt, env *map[string]any) { (*env)["unexpected"] = true }},
 		{name: "unknown issue field", mutate: func(_ *authority.WriteReceipt, env *map[string]any) {
 			(*env)["issue"].(map[string]any)["unexpected"] = true
@@ -154,9 +159,9 @@ func TestIssueUpsertExternalRejectsUnboundOrMalformedReceipt(t *testing.T) {
 					Nonce string `json:"nonce"`
 				}
 				_ = json.Unmarshal(raw, &request)
-				issue := map[string]any{"id": "11111111-1111-1111-1111-111111111111", "title": "Imported", "status": "todo", "priority": "none", "identifier": "EXT-1", "metadata": map[string]any{}}
+				issue := map[string]any{"id": "11111111-1111-1111-1111-111111111111", "workspace_id": "ws-123", "title": "Imported", "status": "todo", "priority": "none", "identifier": "EXT-1", "metadata": map[string]any{}}
 				digest := sha256.Sum256(raw)
-				receipt, signErr := authority.SignWriteReceipt(priv, authority.WriteReceiptStatement{Protocol: authority.WriteReceiptProtocolVersion, Operation: "issue.upsert-external", RequestSHA256: fmt.Sprintf("%x", digest), ResourceID: issue["id"].(string), Nonce: request.Nonce, AuthorityID: "local-dev-authority", DBIdentity: dbID, IssuedAt: time.Now().UTC(), ServerCommit: "test-commit"})
+				receipt, signErr := authority.SignWriteReceipt(priv, authority.WriteReceiptStatement{Protocol: authority.WriteReceiptProtocolVersion, Operation: "issue.upsert-external", RequestSHA256: fmt.Sprintf("%x", digest), ResourceID: issue["id"].(string), WorkspaceID: "ws-123", Nonce: request.Nonce, AuthorityID: "local-dev-authority", DBIdentity: dbID, IssuedAt: time.Now().UTC(), ServerCommit: "test-commit"})
 				if signErr != nil {
 					t.Fatal(signErr)
 				}
