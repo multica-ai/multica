@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import type { MemberWithUser } from "@multica/core/types";
@@ -18,7 +18,7 @@ import {
 } from "@multica/ui/components/ui/dialog";
 import { Archive, ArchiveRestore, Loader2, X } from "lucide-react";
 import { useT } from "../../i18n";
-import { AccessPicker, type AccessChange, type AccessPickerHandle } from "./inspector/access-picker";
+import { AccessPicker, type AccessChange } from "./inspector/access-picker";
 import type { AgentListRow } from "./agents-page";
 
 /**
@@ -48,7 +48,7 @@ export function AgentBatchToolbar({
   const [confirmArchive, setConfirmArchive] = useState(false);
   const [confirmAccess, setConfirmAccess] = useState(false);
   const [accessDraftReady, setAccessDraftReady] = useState(false);
-  const pickerRef = useRef<AccessPickerHandle | null>(null);
+  const [accessChange, setAccessChange] = useState<AccessChange | null>(null);
   const [busy, setBusy] = useState(false);
 
   if (rows.length === 0) return null;
@@ -212,7 +212,7 @@ export function AgentBatchToolbar({
       </Dialog>
 
       {/* Bulk access dialog — AccessPicker's internal Save is hidden (hideFooter)
-          so this dialog's Confirm button is the sole apply trigger via ref.commit().
+          so this dialog's Confirm button is the sole apply trigger via onChange.
           a11y: focus trap + restore via Dialog; aria-live summary; accessible name. */}
       <Dialog
         open={confirmAccess}
@@ -240,7 +240,6 @@ export function AgentBatchToolbar({
             </DialogDescription>
           </DialogHeader>
           <AccessPicker
-            ref={pickerRef}
             permissionMode="private"
             invocationTargets={[]}
             visibility="private"
@@ -249,6 +248,7 @@ export function AgentBatchToolbar({
             canEdit
             hideFooter
             onReadyChange={setAccessDraftReady}
+            onChange={(next) => setAccessChange(next)}
           />
           <DialogFooter>
             <Button
@@ -265,8 +265,8 @@ export function AgentBatchToolbar({
               size="sm"
               disabled={busy || !accessConfirmEnabled}
               onClick={async () => {
-                const change = pickerRef.current?.commit();
-                if (!change) return;
+                if (!accessChange) return;
+                const change = accessChange;
                 setConfirmAccess(false);
                 await applyAccessBulk(change);
               }}

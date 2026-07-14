@@ -1,6 +1,6 @@
 "use client";
 
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Globe, Loader2, Lock, Users } from "lucide-react";
 import type {
   AgentInvocationTarget,
@@ -15,23 +15,13 @@ import { Checkbox } from "@multica/ui/components/ui/checkbox";
 import { ActorAvatar } from "../../../common/actor-avatar";
 import { useT } from "../../../i18n";
 
-/** Local UI draft key for the 3-way radio; distinct from the canonical
- *  `AccessScope` returned by `effectiveAccessScope`. */
-type DraftScope = "private" | "workspace" | "members";
-
 export type AccessChange = {
   permission_mode: AgentPermissionMode;
   invocation_targets: AgentInvocationTargetInput[];
 };
 
-export type AccessPickerHandle = {
-  /** Build an `AccessChange` from the current draft. Returns `null` if the
-   *  draft is not committable (e.g. specific-people with zero member
-   *  targets). The caller is responsible for persisting. */
-  commit: () => AccessChange | null;
-  /** Read-only access to whether the current draft is committable. */
-  isReady: () => boolean;
-};
+type AccessScope = "private" | "workspace" | "members";
+
 
 function selectedTargetIds(
   targets: AgentInvocationTarget[] | undefined | null,
@@ -47,29 +37,9 @@ function selectedTargetIds(
 /**
  * Draft-first access editor. Visibility changes are security-sensitive, so
  * choosing a scope only updates the draft; nothing is persisted until the
- * owner explicitly commits the complete selection. The parent invokes
- * `commit()` (via ref) to apply — the single Save button is wired to the
- * same imperative handle, so the bulk dialog (which hides the Save
- * button) can drive apply through the same surface.
+ * owner explicitly saves the complete selection.
  */
-export const AccessPicker = forwardRef<AccessPickerHandle, {
-  permissionMode: AgentPermissionMode;
-  invocationTargets: AgentInvocationTarget[] | undefined;
-  visibility: AgentVisibility;
-  members: MemberWithUser[];
-  ownerId?: string | null;
-  canEdit?: boolean;
-  hasComposioAllowlist?: boolean;
-  onDirtyChange?: (dirty: boolean) => void;
-  /** Notified when the draft becomes committable / non-committable. Use
-   *  this for gates that must re-render the parent (a ref-based
-   *  `isReady()` is also exposed for synchronous checks). */
-  onReadyChange?: (ready: boolean) => void;
-  onChange?: (next: AccessChange) => Promise<void> | void;
-  /** When true, suppress the bottom Save footer — the parent dialog owns
-   *  the apply trigger (e.g. the bulk "Set access scope" dialog). */
-  hideFooter?: boolean;
-}>(function AccessPicker({
+export function AccessPicker({
   permissionMode,
   invocationTargets,
   visibility: _visibility,
@@ -81,17 +51,34 @@ export const AccessPicker = forwardRef<AccessPickerHandle, {
   onReadyChange,
   onChange,
   hideFooter = false,
-}, ref) {
+}: {
+  permissionMode: AgentPermissionMode;
+  invocationTargets: AgentInvocationTarget[] | undefined;
+  visibility: AgentVisibility;
+  members: MemberWithUser[];
+  ownerId?: string | null;
+  canEdit?: boolean;
+  hasComposioAllowlist?: boolean;
+  onDirtyChange?: (dirty: boolean) => void;
+  /** Fires when the draft becomes committable / non-committable. */
+  onReadyChange?: (ready: boolean) => void;
+  onChange?: (next: AccessChange) => Promise<void> | void;
+  /** When true, suppress the bottom Save footer — the parent dialog owns
+   *  the apply trigger (e.g. the bulk "Set access scope" dialog). */
+  hideFooter?: boolean;
+}) {
   const { t } = useT("agents");
   const { t: tc } = useT("common");
-  // Centralized derivation (MUL-3963) keeps the picker in lockstep with
-  // the agents list and the bulk-dialog gate. Map the canonical scope to
-  // the picker's local draft key (private / workspace / members).
-  const persistedScope: DraftScope = (() => {
-    const canonical = effectiveAccessScope(permissionMode, invocationTargets);
-    if (permissionMode === "private") return "private";
-    return canonical === "workspace" ? "workspace" : "members";
-  })();
+  // Centralized derivation (MUL-3963): map canonical scope to picker's
+  // local draft key (private / workspace / members).
+  const canonical = effectiveAccessScope(permissionMode, invocationTargets);
+  const persistedPrivate = permissionMode === "private";
+  const persistedWorkspace = canonical === "workspace";
+  const persistedScope: AccessScope = persistedPrivate
+    ? "private"
+    : persistedWorkspace
+      ? "workspace"
+      : "members";
   const persistedMembers = useMemo(
     () => selectedTargetIds(invocationTargets, "member"),
     [invocationTargets],
@@ -101,7 +88,7 @@ export const AccessPicker = forwardRef<AccessPickerHandle, {
     [invocationTargets],
   );
 
-  const [draftScope, setDraftScope] = useState<DraftScope>(persistedScope);
+  const [draftScope, setDraftScope] = useState<AccessScope>(persistedScope);
   const [draftMembers, setDraftMembers] = useState(persistedMembers);
   const [saving, setSaving] = useState(false);
 
@@ -144,10 +131,9 @@ export const AccessPicker = forwardRef<AccessPickerHandle, {
     });
   };
 
-  /** Build the `AccessChange` from the current draft without persisting. */
-  const buildChange = useCallback((): AccessChange | null => {
-    if (draftScope === "private") {
-      return { permission_mode: "private", invocation_targets: [] };
+  const save = async () => {
+    if (!onChange || !dirty || saving || (draftScope === "members" && !hasMemberTarget)) {
+      return;
     }
     const targets: AgentInvocationTargetInput[] = [];
     if (draftScope === "workspace") {
@@ -161,39 +147,22 @@ export const AccessPicker = forwardRef<AccessPickerHandle, {
         targets.push({ target_type: "team", target_id: id });
       }
     }
-    return { permission_mode: "public_to", invocation_targets: targets };
-  }, [draftScope, draftMembers, teamIds]);
 
-  useImperativeHandle(
-    ref,
-    () => ({
-      commit: () => {
-        if (!ready || saving) {
-          return null;
-        }
-        return buildChange();
-      },
-      isReady: () => ready,
-    }),
-    [ready, buildChange, saving],
-  );
-
-  const save = async () => {
-    if (saving) return;
-    const change = buildChange();
-    if (!change || !onChange) return;
     setSaving(true);
     try {
-      await onChange(change);
+      await onChange({
+        permission_mode: draftScope === "private" ? "private" : "public_to",
+        invocation_targets: draftScope === "private" ? [] : targets,
+      });
     } finally {
       setSaving(false);
     }
   };
 
   if (!canEdit) {
-    const summaryLabel = persistedScope === "private"
+    const summaryLabel = persistedPrivate
       ? t(($) => $.access.trigger_private)
-      : persistedScope === "workspace"
+      : persistedWorkspace
         ? t(($) => $.access.trigger_workspace)
         : persistedMembers.length > 0
           ? t(($) => $.access.trigger_members_count, {
@@ -305,7 +274,7 @@ export const AccessPicker = forwardRef<AccessPickerHandle, {
         </div>
       ) : null}
 
-      {hasComposioAllowlist && persistedScope === "private" && draftScope !== "private" ? (
+      {hasComposioAllowlist && persistedPrivate && draftScope !== "private" ? (
         <div className="border-t border-surface-border bg-muted/20 px-4 py-4 sm:px-6">
           <p className="border-l-2 border-warning pl-3 text-xs leading-5 text-muted-foreground">
             {t(($) => $.access.composio_switch_hint)}
@@ -319,10 +288,7 @@ export const AccessPicker = forwardRef<AccessPickerHandle, {
             type="button"
             onClick={() => void save()}
             disabled={
-              !onChange ||
-              !dirty ||
-              saving ||
-              (draftScope === "members" && !hasMemberTarget)
+              !onChange || !dirty || saving || (draftScope === "members" && !hasMemberTarget)
             }
           >
             {saving ? (
@@ -337,7 +303,7 @@ export const AccessPicker = forwardRef<AccessPickerHandle, {
       )}
     </fieldset>
   );
-});
+}
 
 function AccessChoice({
   name,
