@@ -30,7 +30,7 @@ import { Button } from "@multica/ui/components/ui/button";
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@multica/ui/components/ui/resizable";
 import { Sheet, SheetContent } from "@multica/ui/components/ui/sheet";
 import { useIsMobile } from "@multica/ui/hooks/use-mobile";
-import { ContentEditor, type ContentEditorRef, TitleEditor, useFileDropZone, FileDropOverlay } from "../../editor";
+import { ContentEditor, type ContentEditorRef, ReadonlyContent, TitleEditor, type TitleEditorRef, useFileDropZone, FileDropOverlay, useLazyEditor } from "../../editor";
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
 import {
   Tooltip,
@@ -1292,9 +1292,30 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   }, [highlightCommentId, items, targetIdx, scrollContainerEl, replyToRoot, expandedResolved, timelineView, toggleResolvedExpand]);
 
   const descEditorRef = useRef<ContentEditorRef>(null);
+  // Readonly-first description + title. Always-mounted Tiptap editors made
+  // every issue open pay full editor-assembly cost on the first commit
+  // (measured 1.5s main-thread freeze on a 22k-char description; ~70-460ms
+  // even for the single-line title). Default render is a static stand-in —
+  // ReadonlyContent shares the editor's `rich-text-editor` stylesheet, so
+  // the swap is visually seamless. The click that used to place a caret now
+  // calls `activate`; useLazyEditor mounts the editor hidden, swaps it in on
+  // `onReady`, and lands the caret at the clicked coordinates.
+  const descLazy = useLazyEditor({ editorRef: descEditorRef });
+  const titleEditorRef = useRef<TitleEditorRef>(null);
+  const titleLazy = useLazyEditor({ editorRef: titleEditorRef });
   const { isDragOver: descDragOver, dropZoneProps: descDropZoneProps } = useFileDropZone({
-    onDrop: (files) => files.forEach((f) => descEditorRef.current?.uploadFile(f)),
+    onDrop: descLazy.uploadOrQueue,
   });
+  const handleDescReadonlyClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    const target = e.target as HTMLElement;
+    // Links, copy buttons, attachment cards etc. inside the readonly render
+    // keep their own behavior — only a click on plain content enters editing.
+    if (target.closest("a, button, input, textarea, [role='button']")) return;
+    // A drag-selection (copying text) must not summon the editor.
+    const sel = window.getSelection();
+    if (sel && !sel.isCollapsed) return;
+    descLazy.activate({ x: e.clientX, y: e.clientY });
+  };
   // Pending uploads in the description editor. We don't pass `issueId` on
   // upload (to avoid orphaning attachments when the user deletes the file
   // from the markdown), so they start unattached and we re-bind them via
@@ -1320,10 +1341,16 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     [uploadWithToast],
   );
 
+  const resetDescLazy = descLazy.reset;
+  const resetTitleLazy = titleLazy.reset;
   useEffect(() => {
     descPendingAttachmentsRef.current = [];
     setDescPendingAttachments([]);
-  }, [id]);
+    // Back to readonly-first on issue switch (the web route reuses this
+    // component instead of remounting it).
+    resetDescLazy();
+    resetTitleLazy();
+  }, [id, resetDescLazy, resetTitleLazy]);
 
   // Shared issue actions (mutations, pin, copy-link, modal dispatch, etc.).
   // Called before the `if (!issue)` early return so hook order stays stable.
@@ -1972,16 +1999,43 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
           className="relative flex-1 overflow-y-auto [scrollbar-gutter:stable_both-edges]"
         >
         <div className="mx-auto w-full max-w-4xl px-8 py-8">
-          <TitleEditor
-            key={`title-${id}`}
-            defaultValue={issue.title}
-            placeholder={t(($) => $.detail.title_placeholder)}
-            className="w-full text-2xl font-bold leading-snug tracking-tight"
-            onBlur={(value) => {
-              const trimmed = value.trim();
-              if (trimmed && trimmed !== issue.title) handleUpdateField({ title: trimmed });
-            }}
-          />
+          {titleLazy.active && (
+            <div className={titleLazy.ready ? undefined : "hidden"}>
+              <TitleEditor
+                key={`title-${id}`}
+                ref={titleEditorRef}
+                defaultValue={issue.title}
+                placeholder={t(($) => $.detail.title_placeholder)}
+                className="w-full text-2xl font-bold leading-snug tracking-tight"
+                onReady={titleLazy.onReady}
+                onBlur={(value) => {
+                  const trimmed = value.trim();
+                  if (trimmed && trimmed !== issue.title) handleUpdateField({ title: trimmed });
+                }}
+              />
+            </div>
+          )}
+          {!titleLazy.ready && (
+            <div
+              role="button"
+              tabIndex={0}
+              className="w-full cursor-text text-2xl font-bold leading-snug tracking-tight"
+              onClick={(e) => {
+                // A drag-selection (copying the title) must not summon the editor.
+                const sel = window.getSelection();
+                if (sel && !sel.isCollapsed) return;
+                titleLazy.activate({ x: e.clientX, y: e.clientY });
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  titleLazy.activate();
+                }
+              }}
+            >
+              {issue.title}
+            </div>
+          )}
 
           {parentIssue && (
             <AppLink
@@ -2009,11 +2063,14 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
           )}
 
           <div {...descDropZoneProps} className="relative mt-5 rounded-lg">
+            {descLazy.active && (
+            <div className={descLazy.ready ? undefined : "hidden"}>
             <ContentEditor
               ref={descEditorRef}
               key={id}
               defaultValue={issue.description || ""}
               placeholder={t(($) => $.detail.desc_placeholder)}
+              onReady={descLazy.onReady}
               onUpdate={(md) => {
                 // Bind any pending uploads still referenced in the markdown
                 // so they appear in `issueAttachments` after refresh and the
@@ -2046,6 +2103,28 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
               currentIssueId={id}
               attachments={descEditorAttachments}
             />
+            </div>
+            )}
+
+            {/* Static description — shown until the live editor is ready
+                (also covers the window between click and editor creation,
+                so the content never blanks). Same rich-text stylesheet as
+                the editor, so the swap is visually seamless. */}
+            {!descLazy.ready &&
+              (issue.description?.trim() ? (
+                <div className="cursor-text text-sm" onClick={handleDescReadonlyClick}>
+                  <ReadonlyContent content={issue.description} attachments={issueAttachments} />
+                </div>
+              ) : (
+                <div
+                  className="cursor-text rich-text-editor text-sm"
+                  onClick={handleDescReadonlyClick}
+                >
+                  {/* <p> under rich-text-editor: same type metrics as the
+                      editor's empty paragraph — no height jump on swap. */}
+                  <p className="text-muted-foreground">{t(($) => $.detail.desc_placeholder)}</p>
+                </div>
+              ))}
 
             <div className="flex items-center gap-1 mt-3">
               <ReactionBar
@@ -2057,7 +2136,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
               <FileUploadButton
                 size="sm"
                 multiple
-                onSelect={(file) => descEditorRef.current?.uploadFile(file)}
+                onSelect={(file) => descLazy.uploadOrQueue([file])}
               />
             </div>
             {descDragOver && <FileDropOverlay />}

@@ -165,12 +165,28 @@ interface ContentEditorProps {
    * before the modal closes.
    */
   flushPendingOnUnmount?: boolean;
+  /**
+   * Called once when the Tiptap instance exists and its initial content is
+   * set (creation is deferred past first paint by `immediatelyRender: false`).
+   * Readonly-first hosts (issue description) use this as the signal to swap
+   * their static render for the live editor.
+   */
+  onReady?: () => void;
 }
 
 interface ContentEditorRef {
   getMarkdown: () => string;
   clearContent: () => void;
   focus: () => void;
+  /**
+   * Focus and place the caret at the document position under the given
+   * viewport coordinates. Used by readonly-first hosts so the click that
+   * summoned the editor lands the caret where the user clicked, matching
+   * the always-mounted editor's behavior. Falls back to focusing the end
+   * when no position resolves (click below the last line). Must be called
+   * while the editor element is laid out (not display: none).
+   */
+  focusAtCoords: (coords: { x: number; y: number }) => void;
   /** Drop focus from the editor — used by chat after send so the caret
    *  stops competing with the StatusPill / streaming reply for the user's
    *  attention. */
@@ -204,6 +220,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
       slashCommandMode = "skill",
       attachments,
       flushPendingOnUnmount = false,
+      onReady,
     },
     ref,
   ) {
@@ -216,6 +233,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
     const onUpdateRef = useRef(onUpdate);
     const onSubmitRef = useRef(onSubmit);
     const onBlurRef = useRef(onBlur);
+    const onReadyRef = useRef(onReady);
     const onUploadFileRef = useRef<
       ((file: File) => Promise<UploadResult | null>) | undefined
     >(undefined);
@@ -299,6 +317,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
     onUpdateRef.current = onUpdate;
     onSubmitRef.current = onSubmit;
     onBlurRef.current = onBlur;
+    onReadyRef.current = onReady;
     onUploadFileRef.current = wrappedOnUploadFile;
     mentionContextItemsRef.current = mentionContextItems ?? [];
     flushPendingOnUnmountRef.current = flushPendingOnUnmount;
@@ -435,6 +454,16 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
       },
     });
 
+    // Signal hosts that the deferred editor instance now exists. Fired from a
+    // passive effect (not `onCreate`) so it runs after the commit in which
+    // <EditorContent> attached the editor DOM — callers can measure/focus it.
+    const readyFiredRef = useRef(false);
+    useEffect(() => {
+      if (!editor || readyFiredRef.current) return;
+      readyFiredRef.current = true;
+      onReadyRef.current?.();
+    }, [editor]);
+
     // Cleanup on unmount. A pending debounced update is DROPPED by default,
     // not flushed — see the `flushPendingOnUnmount` prop doc for why. When the
     // owner opted in, emit the markdown cached at `onUpdate` time so a long
@@ -561,6 +590,16 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
         if (editor) editor.commands.focus();
         // Editor not mounted yet — defer the focus to `onCreate`.
         else focusOnReadyRef.current = true;
+      },
+      focusAtCoords: (coords: { x: number; y: number }) => {
+        if (!editor) {
+          // Editor not mounted yet — degrade to the latched plain focus.
+          focusOnReadyRef.current = true;
+          return;
+        }
+        const pos = editor.view.posAtCoords({ left: coords.x, top: coords.y });
+        if (pos) editor.commands.focus(pos.pos);
+        else editor.commands.focus("end");
       },
       blur: () => {
         editor?.commands.blur();

@@ -1,4 +1,4 @@
-import { forwardRef, useRef, useState, useImperativeHandle } from "react";
+import { forwardRef, useEffect, useRef, useState, useImperativeHandle } from "react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -110,7 +110,12 @@ vi.mock("../../navigation", () => ({
 }));
 
 // Mock editor components (Tiptap requires real DOM)
-vi.mock("../../editor", () => ({
+vi.mock("../../editor", async () => ({
+  // Real lazy-mount controller (pure React, no Tiptap) so readonly-first
+  // shell → activate → ready flows behave exactly as in production.
+  ...(await vi.importActual<typeof import("../../editor/use-lazy-editor")>(
+    "../../editor/use-lazy-editor",
+  )),
   useFileDropZone: () => ({ isDragOver: false, dropZoneProps: {} }),
   FileDropOverlay: () => null,
   // No-op so comment-card's AttachmentList can render without hitting the
@@ -129,15 +134,20 @@ vi.mock("../../editor", () => ({
     <div data-testid="readonly-content">{content}</div>
   ),
   ContentEditor: forwardRef(function MockContentEditor(
-    { defaultValue, onUpdate, placeholder, flushPendingOnUnmount }: any,
+    { defaultValue, onUpdate, placeholder, flushPendingOnUnmount, onReady }: any,
     ref: any,
   ) {
     const valueRef = useRef(defaultValue || "");
     const [value, setValue] = useState(defaultValue || "");
+    useEffect(() => {
+      onReady?.();
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
     useImperativeHandle(ref, () => ({
       getMarkdown: () => valueRef.current,
       clearContent: () => { valueRef.current = ""; setValue(""); },
       focus: () => {},
+      focusAtCoords: () => {},
       uploadFile: () => {},
     }));
     return (
@@ -155,14 +165,19 @@ vi.mock("../../editor", () => ({
     );
   }),
   TitleEditor: forwardRef(function MockTitleEditor(
-    { defaultValue, placeholder, onBlur, onChange }: any,
+    { defaultValue, placeholder, onBlur, onChange, onReady }: any,
     ref: any,
   ) {
     const valueRef = useRef(defaultValue || "");
     const [value, setValue] = useState(defaultValue || "");
+    useEffect(() => {
+      onReady?.();
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
     useImperativeHandle(ref, () => ({
       getText: () => valueRef.current,
       focus: () => {},
+      focusAtCoords: () => {},
     }));
     return (
       <input
@@ -556,11 +571,15 @@ describe("IssueDetail (shared)", () => {
   it("renders issue title and description after loading", async () => {
     renderIssueDetail();
 
+    // Readonly-first: title and description render as static views (no
+    // editors mounted) until the user clicks into them.
     await waitFor(() => {
-      expect(screen.getByDisplayValue("Implement authentication")).toBeInTheDocument();
+      expect(screen.getByText("Implement authentication")).toBeInTheDocument();
     });
 
-    expect(screen.getByDisplayValue("Add JWT auth to the backend")).toBeInTheDocument();
+    expect(screen.getByText("Add JWT auth to the backend")).toBeInTheDocument();
+    expect(screen.queryByTestId("title-editor")).not.toBeInTheDocument();
+    expect(screen.queryByPlaceholderText("Add description...")).not.toBeInTheDocument();
   });
 
   it("opts the description editor into the unmount flush", async () => {
@@ -571,6 +590,10 @@ describe("IssueDetail (shared)", () => {
     // markdown and its attachment_ids bind (MUL-3254). The flush behavior
     // itself is covered in content-editor.test.tsx; this pins the wiring.
     renderIssueDetail();
+
+    // Readonly-first: click the static description to summon the editor.
+    const readonly = await screen.findByText("Add JWT auth to the backend");
+    fireEvent.click(readonly);
 
     const description = await screen.findByDisplayValue("Add JWT auth to the backend");
     expect(description).toHaveAttribute("data-flush-on-unmount", "true");
@@ -682,7 +705,7 @@ describe("IssueDetail (shared)", () => {
     renderIssueDetail();
 
     await waitFor(() => {
-      expect(screen.getByDisplayValue("Implement authentication")).toBeInTheDocument();
+      expect(screen.getByText("Implement authentication")).toBeInTheDocument();
     });
 
     expect(screen.queryByTestId("panel-group")).not.toBeInTheDocument();
@@ -1282,6 +1305,10 @@ describe("IssueDetail (shared)", () => {
 
   it("sends empty description when editor is cleared", async () => {
     renderIssueDetail();
+
+    // Readonly-first: click the static description to summon the editor.
+    const readonly = await screen.findByText("Add JWT auth to the backend");
+    fireEvent.click(readonly);
 
     await waitFor(() => {
       expect(screen.getByDisplayValue("Add JWT auth to the backend")).toBeInTheDocument();
