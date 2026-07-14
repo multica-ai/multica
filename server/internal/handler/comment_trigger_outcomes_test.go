@@ -128,25 +128,96 @@ func TestCreateComment_BlockedMentionReasonDoesNotEnumeratePrivateAgent(t *testi
 	}
 }
 
-// TestCreateComment_AgentAndSameLeaderSquadYieldsOneTaskTwoOutcomes is Elon's
-// round-2 must-fix 1 acceptance test: when a comment names BOTH @Agent A and
-// @Squad S whose leader is A, the run is correctly coalesced to ONE task, but
-// each explicitly-named target still gets its own outcome — execution dedup must
-// not drop a named target's result (MUL-4525 §2).
-func TestCreateComment_AgentAndSameLeaderSquadYieldsOneTaskTwoOutcomes(t *testing.T) {
+// TestCreateComment_AgentAndSameLeaderSquad is Elon's round-3 must-fix 1
+// acceptance test: when a comment names BOTH @Agent A and @Squad S whose leader
+// is A, the run coalesces to ONE task that carries the LEADER role
+// (is_leader_task + squad_id=S, so the daemon injects S's briefing) regardless
+// of mention order, and each explicitly-named target still gets its own outcome
+// (MUL-4525). The old first-mention-wins dedup could drop the leader role when
+// @Agent A came first — this asserts the role independent of order.
+func TestCreateComment_AgentAndSameLeaderSquad(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+
+	cases := []struct {
+		name    string
+		content func(agentID, squadID string) string
+	}{
+		{"agent mention first", func(a, s string) string {
+			return fmt.Sprintf("[@A](mention://agent/%s) [@S](mention://squad/%s) please", a, s)
+		}},
+		{"squad mention first", func(a, s string) string {
+			return fmt.Sprintf("[@S](mention://squad/%s) [@A](mention://agent/%s) please", s, a)
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			agentID := createHandlerTestAgent(t, "Shared Leader Agent "+tc.name, nil)
+			squadID := createCommentTriggerPreviewSquad(t, "Shared Leader Squad "+tc.name, agentID)
+			issueID := createCommentTriggerPreviewIssue(t, "same-leader "+tc.name, "", "")
+
+			w := httptest.NewRecorder()
+			r := withURLParam(newRequest(http.MethodPost, "/api/issues/"+issueID+"/comments", map[string]any{"content": tc.content(agentID, squadID)}), "id", issueID)
+			testHandler.CreateComment(w, r)
+			if w.Code != http.StatusCreated {
+				t.Fatalf("CreateComment: expected 201, got %d: %s", w.Code, w.Body.String())
+			}
+			var resp CommentResponse
+			if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+				t.Fatalf("decode comment: %v", err)
+			}
+
+			// One coalesced execution carrying the leader role for squad S.
+			var taskCount int
+			var isLeader bool
+			var taskSquadID string
+			if err := testPool.QueryRow(ctx, `
+				SELECT count(*), COALESCE(bool_or(is_leader_task), false), COALESCE(max(squad_id::text), '')
+				FROM agent_task_queue WHERE issue_id = $1 AND agent_id = $2 AND status = 'queued'
+			`, issueID, agentID).Scan(&taskCount, &isLeader, &taskSquadID); err != nil {
+				t.Fatalf("read task role: %v", err)
+			}
+			if taskCount != 1 {
+				t.Fatalf("queued tasks = %d, want 1 (coalesced execution)", taskCount)
+			}
+			if !isLeader {
+				t.Errorf("execution is_leader_task = false, want true (leader role must win regardless of order)")
+			}
+			if taskSquadID != squadID {
+				t.Errorf("execution squad_id = %q, want %q", taskSquadID, squadID)
+			}
+
+			// Two outcomes — one per explicitly-named target — both queued.
+			if len(resp.TriggerOutcomes) != 2 {
+				t.Fatalf("trigger_outcomes = %+v, want 2 (agent + squad)", resp.TriggerOutcomes)
+			}
+			if o := findCommentOutcome(t, resp.TriggerOutcomes, agentID); o.TargetType != "agent" || o.Status != DispatchQueued {
+				t.Errorf("agent outcome = %+v, want agent/queued", o)
+			}
+			if o := findCommentOutcome(t, resp.TriggerOutcomes, squadID); o.TargetType != "squad" || o.Status != DispatchQueued {
+				t.Errorf("squad outcome = %+v, want squad/queued", o)
+			}
+		})
+	}
+}
+
+// TestCreateComment_TwoSquadsSharingLeaderCoalescesNonWinner is Elon's round-3
+// must-fix 1 (multi-squad case): two DIFFERENT squads share the same leader and
+// both are @mentioned. The single leader agent runs ONCE carrying one squad's
+// context; the other squad's mention folds into that run and is reported
+// coalesced — never a second task, and never both reported queued (MUL-4525).
+func TestCreateComment_TwoSquadsSharingLeaderCoalescesNonWinner(t *testing.T) {
 	if testHandler == nil || testPool == nil {
 		t.Skip("database not available")
 	}
 
-	agentID := createHandlerTestAgent(t, "Shared Leader Agent", nil)
-	// Squad whose leader is the very same agent.
-	squadID := createCommentTriggerPreviewSquad(t, "Shared Leader Squad", agentID)
-	issueID := createCommentTriggerPreviewIssue(t, "agent and same-leader squad outcomes", "", "")
-
-	content := fmt.Sprintf(
-		"[@A](mention://agent/%s) [@S](mention://squad/%s) please take a look",
-		agentID, squadID,
-	)
+	leaderID := createHandlerTestAgent(t, "Two-Squad Shared Leader", nil)
+	squad1 := createCommentTriggerPreviewSquad(t, "Two-Squad S1", leaderID)
+	squad2 := createCommentTriggerPreviewSquad(t, "Two-Squad S2", leaderID)
+	issueID := createCommentTriggerPreviewIssue(t, "two squads sharing leader", "", "")
+	content := fmt.Sprintf("[@S1](mention://squad/%s) [@S2](mention://squad/%s) please", squad1, squad2)
 
 	w := httptest.NewRecorder()
 	r := withURLParam(newRequest(http.MethodPost, "/api/issues/"+issueID+"/comments", map[string]any{"content": content}), "id", issueID)
@@ -159,21 +230,87 @@ func TestCreateComment_AgentAndSameLeaderSquadYieldsOneTaskTwoOutcomes(t *testin
 		t.Fatalf("decode comment: %v", err)
 	}
 
-	// One coalesced execution: exactly one queued task for the shared leader.
-	if got := countQueuedCommentTriggerTasks(t, issueID, agentID); got != 1 {
-		t.Fatalf("shared-leader queued tasks = %d, want 1 (coalesced execution)", got)
+	// Exactly one queued task (a single leader agent can only run once).
+	if got := countQueuedCommentTriggerTasks(t, issueID, leaderID); got != 1 {
+		t.Fatalf("queued tasks = %d, want 1", got)
+	}
+	// Two squad outcomes; exactly one queued (the executed squad) and one
+	// coalesced (the folded squad) — never both queued.
+	if len(resp.TriggerOutcomes) != 2 {
+		t.Fatalf("trigger_outcomes = %+v, want 2", resp.TriggerOutcomes)
+	}
+	statuses := map[DispatchStatus]int{}
+	for _, o := range resp.TriggerOutcomes {
+		if o.TargetType != "squad" {
+			t.Errorf("outcome %+v: want squad target", o)
+		}
+		statuses[o.Status]++
+	}
+	if statuses[DispatchQueued] != 1 || statuses[DispatchCoalesced] != 1 {
+		t.Errorf("outcome statuses = %v, want exactly 1 queued + 1 coalesced (not both queued)", statuses)
+	}
+}
+
+// TestCreateComment_SquadLeaderSelfMentionCompletedTaskDoesNotFakeSuccess is
+// Elon's round-3 must-fix 2: a squad leader's own @mention of its squad is
+// suppressed by the self-trigger guard, but when its latest task is already
+// TERMINAL (no active run), the outcome must NOT be a success-shaped `deferred`
+// — it is a non-success `blocked/already_handled`, and no new task is enqueued.
+func TestCreateComment_SquadLeaderSelfMentionCompletedTaskDoesNotFakeSuccess(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+
+	leaderID := createHandlerTestAgent(t, "Self-Mention Leader", nil)
+	squadID := createCommentTriggerPreviewSquad(t, "Self-Mention Squad", leaderID)
+	issueID := createCommentTriggerPreviewIssue(t, "self-mention completed task", "", "")
+
+	// The leader's latest task on this issue is a COMPLETED leader task: the
+	// self-trigger guard suppresses (latest role is leader) AND there is no
+	// active run to cover the comment.
+	var completedTaskID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, status, priority, issue_id, is_leader_task, squad_id, started_at, completed_at)
+		VALUES ($1, $2, 'completed', 0, $3, true, $4, now(), now())
+		RETURNING id
+	`, leaderID, handlerTestRuntimeID(t), issueID, squadID).Scan(&completedTaskID); err != nil {
+		t.Fatalf("seed completed leader task: %v", err)
 	}
 
-	// Two outcomes — one per explicitly-named target — both success-shaped.
-	if len(resp.TriggerOutcomes) != 2 {
-		t.Fatalf("trigger_outcomes = %+v, want 2 (agent + squad)", resp.TriggerOutcomes)
+	content := fmt.Sprintf("[@S](mention://squad/%s) revisit please", squadID)
+	w := httptest.NewRecorder()
+	r := withURLParam(newRequest(http.MethodPost, "/api/issues/"+issueID+"/comments", map[string]any{"content": content}), "id", issueID)
+	// Author the comment AS the leader agent (A2A self-mention).
+	r.Header.Set("X-Agent-ID", leaderID)
+	r.Header.Set("X-Task-ID", completedTaskID)
+	testHandler.CreateComment(w, r)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateComment: expected 201, got %d: %s", w.Code, w.Body.String())
 	}
-	agentOutcome := findCommentOutcome(t, resp.TriggerOutcomes, agentID)
-	if agentOutcome.TargetType != "agent" || agentOutcome.Status != DispatchQueued {
-		t.Errorf("agent outcome = %+v, want agent/queued", agentOutcome)
+	var resp CommentResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode comment: %v", err)
 	}
-	squadOutcome := findCommentOutcome(t, resp.TriggerOutcomes, squadID)
-	if squadOutcome.TargetType != "squad" || squadOutcome.Status != DispatchQueued {
-		t.Errorf("squad outcome = %+v, want squad/queued", squadOutcome)
+
+	// The self-mention neither re-fired the leader nor is covered by an active
+	// run: the outcome is non-success, never a fake `deferred`.
+	if len(resp.TriggerOutcomes) != 1 {
+		t.Fatalf("trigger_outcomes = %+v, want 1", resp.TriggerOutcomes)
+	}
+	o := resp.TriggerOutcomes[0]
+	if o.TargetType != "squad" || o.TargetID != squadID {
+		t.Fatalf("outcome target = %+v, want squad %s", o, squadID)
+	}
+	if o.Status != DispatchBlocked || o.ReasonCode != ReasonAlreadyHandled {
+		t.Errorf("outcome = %+v, want blocked/already_handled (must not fake success)", o)
+	}
+	// No new task was enqueued (only the pre-seeded completed one exists).
+	var total int
+	if err := testPool.QueryRow(ctx, `SELECT count(*) FROM agent_task_queue WHERE issue_id = $1 AND agent_id = $2`, issueID, leaderID).Scan(&total); err != nil {
+		t.Fatalf("count leader tasks: %v", err)
+	}
+	if total != 1 {
+		t.Errorf("leader tasks = %d, want 1 (self-mention suppressed, no new task)", total)
 	}
 }

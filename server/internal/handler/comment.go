@@ -1452,9 +1452,14 @@ func filterSuppressedCommentAgentTriggers(triggers []commentAgentTrigger, suppre
 }
 
 // commentEnqueueResult is the domain outcome of enqueuing ONE executing agent.
+// execSquadID is the squad whose leader context the run actually carries (set
+// only for a squad-leader execution), so a DIFFERENT squad that shares this
+// leader can be reported honestly as coalesced rather than as if its own leader
+// context ran.
 type commentEnqueueResult struct {
-	status DispatchStatus
-	reason DispatchReasonCode
+	status      DispatchStatus
+	reason      DispatchReasonCode
+	execSquadID string
 }
 
 // enqueueCommentAgentTriggers enqueues each resolved trigger (already deduped by
@@ -1475,7 +1480,11 @@ func (h *Handler) enqueueCommentAgentTriggers(ctx context.Context, issue db.Issu
 	}
 	results := make(map[string]commentEnqueueResult, len(triggers))
 	record := func(trigger commentAgentTrigger, status DispatchStatus, reason DispatchReasonCode) {
-		results[uuidToString(trigger.Agent.ID)] = commentEnqueueResult{status: status, reason: reason}
+		execSquadID := ""
+		if trigger.Squad != nil {
+			execSquadID = uuidToString(trigger.Squad.ID)
+		}
+		results[uuidToString(trigger.Agent.ID)] = commentEnqueueResult{status: status, reason: reason, execSquadID: execSquadID}
 	}
 	for _, trigger := range triggers {
 		if trigger.AlreadyPending {
@@ -1531,7 +1540,16 @@ func commentTriggerOutcomes(targets []commentMentionTarget, enqueued map[string]
 			if !ok {
 				continue
 			}
-			outcomes = append(outcomes, CommentTriggerOutcome{TargetType: t.TargetType, TargetID: t.TargetID, Status: res.status, ReasonCode: res.reason})
+			status, reason := res.status, res.reason
+			// A @squad whose shared leader ran, but under a DIFFERENT squad's
+			// context, did not get its own leader briefing injected — the single
+			// leader run (one task per issue+agent) merely folds it in. Report
+			// coalesced, not queued, so we never claim this squad's leader
+			// context executed (MUL-4525, Elon round 3).
+			if t.TargetType == "squad" && res.execSquadID != "" && res.execSquadID != t.TargetID && status == DispatchQueued {
+				status, reason = DispatchCoalesced, ReasonCoalesced
+			}
+			outcomes = append(outcomes, CommentTriggerOutcome{TargetType: t.TargetType, TargetID: t.TargetID, Status: status, ReasonCode: reason})
 			continue
 		}
 		outcomes = append(outcomes, CommentTriggerOutcome{TargetType: t.TargetType, TargetID: t.TargetID, Status: t.Status, ReasonCode: t.ReasonCode})
@@ -2098,14 +2116,22 @@ func (h *Handler) resolveMentionedAgentCommentTriggers(ctx context.Context, issu
 	wsID := uuidToString(issue.WorkspaceID)
 	triggers := make([]commentAgentTrigger, 0, len(mentions))
 	// seen dedups EXECUTION by resolved agent id: two mentions resolving to the
-	// same agent still enqueue only one task.
-	seen := make(map[string]struct{}, len(mentions))
+	// same agent enqueue only one task. Mapping to the trigger's index lets a
+	// squad-leader mention UPGRADE an already-added plain @agent trigger for the
+	// same agent — the leader task is a strict superset (it sets is_leader_task
+	// and squad_id so the daemon injects the squad briefing), so the merged run
+	// must carry that role regardless of mention order.
+	seen := make(map[string]int, len(mentions))
 	add := func(trigger commentAgentTrigger) {
 		id := uuidToString(trigger.Agent.ID)
-		if _, ok := seen[id]; ok {
+		if idx, ok := seen[id]; ok {
+			if triggers[idx].Source != commentTriggerSourceMentionSquadLeader &&
+				trigger.Source == commentTriggerSourceMentionSquadLeader {
+				triggers[idx] = trigger
+			}
 			return
 		}
-		seen[id] = struct{}{}
+		seen[id] = len(triggers)
 		triggers = append(triggers, trigger)
 	}
 	// targets record one outcome per EXPLICIT mention — deduped by the target
@@ -2143,12 +2169,21 @@ func (h *Handler) resolveMentionedAgentCommentTriggers(ctx context.Context, issu
 			}
 			leaderID := squad.LeaderID
 			// A2A self-suppression: the author IS this squad's leader and its
-			// last activity here was a worker task for this squad, so we do not
-			// re-fire the leader. This is recognized-and-handled, not a block —
-			// it reports a definite `deferred` outcome (leader already active).
+			// most recent task on this issue was a leader/generic role (NOT a
+			// fresh same-squad worker→leader handoff), so we do not re-fire the
+			// leader from its own @mention. The outcome must reflect reality, not
+			// assume success (MUL-4525, Elon round 3): report `deferred` only when
+			// a real non-terminal task is still active (its completion reconcile
+			// covers this comment); otherwise the latest task is already terminal
+			// and nothing runs, so report a non-success `already_handled` — never
+			// a success-shaped `deferred`.
 			if authorType == "agent" && authorID == uuidToString(leaderID) &&
 				h.shouldSuppressSquadLeaderSelfTrigger(ctx, issue.ID, leaderID, squad.ID) {
-				addTarget(commentMentionTarget{TargetType: "squad", TargetID: m.ID, Status: DispatchDeferred, ReasonCode: ReasonAlreadyActive})
+				if h.hasActiveTaskForIssueAndAgent(ctx, issue.ID, leaderID) {
+					addTarget(commentMentionTarget{TargetType: "squad", TargetID: m.ID, Status: DispatchDeferred, ReasonCode: ReasonAlreadyActive})
+				} else {
+					addTarget(commentMentionTarget{TargetType: "squad", TargetID: m.ID, Status: DispatchBlocked, ReasonCode: ReasonAlreadyHandled})
+				}
 				continue
 			}
 			agent, err := h.Queries.GetAgentInWorkspace(ctx, db.GetAgentInWorkspaceParams{

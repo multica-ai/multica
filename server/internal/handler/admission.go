@@ -58,6 +58,7 @@ const (
 	ReasonRuntimeOffline       = dispatch.ReasonRuntimeOffline
 	ReasonAttributionBlocked   = dispatch.ReasonAttributionBlocked
 	ReasonAlreadyActive        = dispatch.ReasonAlreadyActive
+	ReasonAlreadyHandled       = dispatch.ReasonAlreadyHandled
 	ReasonInternalError        = dispatch.ReasonInternalError
 )
 
