@@ -5,6 +5,7 @@ import type {
   AgentTemplateSummary,
   AgentBuilderSession,
   Attachment,
+  AutopilotRun,
   BillingBalance,
   BillingBatchesPage,
   BillingCheckoutSessionStatus,
@@ -1017,6 +1018,45 @@ export const ListAutopilotsResponseSchema = z.object({
 export const EMPTY_LIST_AUTOPILOTS_RESPONSE = {
   autopilots: [],
   total: 0,
+};
+
+// Autopilot run (POST /trigger, GET /runs). Consumed by the "run now" flow,
+// which branches on `status` to avoid a false-success toast (MUL-4525), so the
+// response must be schema-parsed. `reason_code` is an additive, stable
+// classification of a non-success run the UI localizes; older servers omit it.
+// Defaults are conservative: an unreadable run degrades to a non-success status
+// so the UI never shows success it cannot confirm. .loose() tolerates new fields.
+export const AutopilotRunSchema = z.object({
+  id: z.string().default(""),
+  autopilot_id: z.string().default(""),
+  trigger_id: z.string().nullable().default(null),
+  source: z.string().default("manual"),
+  status: z.string().default("failed"),
+  issue_id: z.string().nullable().default(null),
+  task_id: z.string().nullable().default(null),
+  triggered_at: z.string().default(""),
+  completed_at: z.string().nullable().default(null),
+  failure_reason: z.string().nullable().default(null),
+  reason_code: z.string().optional(),
+  trigger_payload: z.unknown().default(null),
+  result: z.unknown().default(null),
+  created_at: z.string().default(""),
+}).loose();
+
+export const FALLBACK_AUTOPILOT_RUN: AutopilotRun = {
+  id: "",
+  autopilot_id: "",
+  trigger_id: null,
+  source: "manual",
+  status: "failed",
+  issue_id: null,
+  task_id: null,
+  triggered_at: "",
+  completed_at: null,
+  failure_reason: null,
+  trigger_payload: null,
+  result: null,
+  created_at: "",
 };
 
 export const EMPTY_WEBHOOK_DELIVERY: WebhookDelivery = {

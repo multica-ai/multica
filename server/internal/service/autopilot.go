@@ -270,7 +270,7 @@ func (s *AutopilotService) dispatchAutopilot(
 	plannedAt pgtype.Timestamptz,
 	actorUserID pgtype.UUID,
 ) (*db.AutopilotRun, error) {
-	if reason, skip := s.shouldSkipDispatch(ctx, autopilot); skip {
+	if reason, skip := s.shouldSkipDispatch(ctx, autopilot, actorUserID); skip {
 		return s.recordSkippedRun(ctx, autopilot, triggerID, source, payload, plannedAt, reason)
 	}
 
@@ -487,12 +487,12 @@ func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopi
 	// autopilot-origin issue resolves to rule_owner. The *WithHandoff variants are
 	// the existing actor-carrying enqueue methods; the handoff note is empty here.
 	if ap.AssigneeType == "squad" {
-		// Fail-closed invocation gate: verify the autopilot creator may still
-		// invoke the leader under the permission model. Catches configs that
-		// predate the save-time gate, and admin-created configs that no longer
-		// pass (MUL-3963).
-		if !s.canCreatorInvokeAgent(ctx, ap, leader) {
-			return fmt.Errorf("autopilot creator cannot access private squad leader")
+		// Fail-closed invocation gate: verify the admission principal (manual
+		// clicker, else creator — see autopilotAdmitInvoke) may still invoke the
+		// leader. Catches configs that predate the save-time gate, and configs
+		// that no longer pass (MUL-3963 / MUL-4525).
+		if !s.autopilotAdmitInvoke(ctx, ap, leader, actorUserID) {
+			return fmt.Errorf("not allowed to invoke private squad leader")
 		}
 		if actorUserID.Valid {
 			if _, err := s.TaskSvc.EnqueueTaskForSquadLeaderWithHandoff(ctx, issue, leader.ID, ap.AssigneeID, "", actorUserID); err != nil {
@@ -641,9 +641,10 @@ func (s *AutopilotService) dispatchRunOnly(ctx context.Context, ap db.Autopilot,
 		return &errDispatchSkipped{reason: formatAdmissionReason(ap, reason)}
 	}
 
-	// Fail-closed invocation gate for squad autopilots.
-	if ap.AssigneeType == "squad" && !s.canCreatorInvokeAgent(ctx, ap, agent) {
-		return &errDispatchSkipped{reason: formatAdmissionReason(ap, "creator cannot access private squad leader")}
+	// Fail-closed invocation gate for squad autopilots (admission principal =
+	// manual clicker, else creator — see autopilotAdmitInvoke).
+	if ap.AssigneeType == "squad" && !s.autopilotAdmitInvoke(ctx, ap, agent, actorUserID) {
+		return &errDispatchSkipped{reason: formatAdmissionReason(ap, "not allowed to invoke private squad leader")}
 	}
 
 	// Attribution splits on the trigger. A MANUAL trigger is a direct human action:
@@ -947,7 +948,7 @@ func (s *AutopilotService) failRun(ctx context.Context, runID pgtype.UUID, reaso
 //     scheduled run. Migration 096 removed the agent FK on autopilot, so an
 //     agent assignee being missing is now a real condition the gate must
 //     handle (previously cascade-deleted).
-func (s *AutopilotService) shouldSkipDispatch(ctx context.Context, ap db.Autopilot) (string, bool) {
+func (s *AutopilotService) shouldSkipDispatch(ctx context.Context, ap db.Autopilot, actorUserID pgtype.UUID) (string, bool) {
 	if !ap.AssigneeID.Valid {
 		return "autopilot has no assignee", true
 	}
@@ -1005,13 +1006,19 @@ func (s *AutopilotService) shouldSkipDispatch(ctx context.Context, ap db.Autopil
 			return formatAdmissionReason(ap, reason), true
 		}
 	}
-	// Invocation gate at the autopilot layer (MUL-3963). Effective user = the
-	// autopilot's creator: if the creator may not invoke the target agent
-	// under the permission model, the dispatch is recorded as `skipped`.
-	// Admins do NOT bypass a private agent they do not own; agent-created
-	// autopilots are judged as workspace principals. For squad autopilots the
-	// gate runs against the resolved leader.
-	if !s.canCreatorInvokeAgent(ctx, ap, agent) {
+	// Invocation gate at the autopilot layer (MUL-3963 / MUL-4525). The
+	// admission principal depends on how the dispatch was triggered: a MANUAL
+	// "run now" (actorUserID valid) is a direct human action gated by the
+	// current CLICKER's access — not the autopilot creator's — so admission and
+	// attribution credit the same member and never fork. Automation (schedule /
+	// webhook / api, actorUserID invalid) has no human in the loop and falls
+	// back to the creator. Admins do NOT bypass a private agent they do not own;
+	// agent-created autopilots are judged as workspace principals. For squad
+	// autopilots the gate runs against the resolved leader.
+	if !s.autopilotAdmitInvoke(ctx, ap, agent, actorUserID) {
+		if actorUserID.Valid {
+			return "you are not allowed to trigger this autopilot's assignee agent", true
+		}
 		return "autopilot creator lacks access to private assignee agent", true
 	}
 	return "", false
@@ -1504,6 +1511,61 @@ func (s *AutopilotService) getIssuePrefix(workspaceID pgtype.UUID) string {
 //     admits the matching creator; team targets are inert.
 //
 // Fail-closed on any lookup error.
+// autopilotAdmitInvoke decides whether the dispatch's admission principal may
+// invoke the target agent (MUL-4525). A MANUAL "run now" (actorUserID valid) is
+// a direct human action gated by the CURRENT clicker's access, so admission and
+// attribution credit the same member. Automation (schedule / webhook / api,
+// actorUserID invalid) has no human in the loop and falls back to the autopilot
+// creator. Both branches fail closed and never grant an admin bypass.
+func (s *AutopilotService) autopilotAdmitInvoke(ctx context.Context, ap db.Autopilot, agent db.Agent, actorUserID pgtype.UUID) bool {
+	if actorUserID.Valid {
+		return s.canMemberInvokeAgent(ctx, agent, actorUserID, ap.WorkspaceID)
+	}
+	return s.canCreatorInvokeAgent(ctx, ap, agent)
+}
+
+// canMemberInvokeAgent checks whether a specific member may invoke the agent
+// under the invocation-permission model (MUL-3963). It mirrors
+// handler.canInvokeAgent with a member effective user — used for a manual
+// autopilot "run now" where the clicker, not the creator, is the admission
+// principal. Fail-closed on any lookup error; no admin bypass.
+func (s *AutopilotService) canMemberInvokeAgent(ctx context.Context, agent db.Agent, memberUserID pgtype.UUID, workspaceID pgtype.UUID) bool {
+	userID := util.UUIDToString(memberUserID)
+	if userID == "" {
+		return false
+	}
+	if util.UUIDToString(agent.OwnerID) == userID {
+		return true
+	}
+	if agent.PermissionMode != "public_to" {
+		return false
+	}
+	targets, err := s.Queries.ListAgentInvocationTargets(ctx, agent.ID)
+	if err != nil {
+		return false
+	}
+	isWorkspaceMember := false
+	if _, err := s.Queries.GetMemberByUserAndWorkspace(ctx, db.GetMemberByUserAndWorkspaceParams{
+		UserID:      memberUserID,
+		WorkspaceID: workspaceID,
+	}); err == nil {
+		isWorkspaceMember = true
+	}
+	for _, t := range targets {
+		switch t.TargetType {
+		case "workspace":
+			if isWorkspaceMember {
+				return true
+			}
+		case "member":
+			if util.UUIDToString(t.TargetID) == userID {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func (s *AutopilotService) canCreatorInvokeAgent(ctx context.Context, ap db.Autopilot, agent db.Agent) bool {
 	creatorID := util.UUIDToString(ap.CreatedByID)
 	if ap.CreatedByType == "member" && util.UUIDToString(agent.OwnerID) == creatorID {

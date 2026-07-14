@@ -142,16 +142,22 @@ type AutopilotTriggerResponse struct {
 }
 
 type AutopilotRunResponse struct {
-	ID             string  `json:"id"`
-	AutopilotID    string  `json:"autopilot_id"`
-	TriggerID      *string `json:"trigger_id"`
-	Source         string  `json:"source"`
-	Status         string  `json:"status"`
-	IssueID        *string `json:"issue_id"`
-	TaskID         *string `json:"task_id"`
-	TriggeredAt    string  `json:"triggered_at"`
-	CompletedAt    *string `json:"completed_at"`
-	FailureReason  *string `json:"failure_reason"`
+	ID            string  `json:"id"`
+	AutopilotID   string  `json:"autopilot_id"`
+	TriggerID     *string `json:"trigger_id"`
+	Source        string  `json:"source"`
+	Status        string  `json:"status"`
+	IssueID       *string `json:"issue_id"`
+	TaskID        *string `json:"task_id"`
+	TriggeredAt   string  `json:"triggered_at"`
+	CompletedAt   *string `json:"completed_at"`
+	FailureReason *string `json:"failure_reason"`
+	// ReasonCode is a stable, localizable, enumeration-safe classification of a
+	// non-success run (skipped/failed), derived from FailureReason. The "run now"
+	// UI localizes it instead of echoing the raw English reason (which may name a
+	// private assignee agent). Additive: nil for success-path runs and ignored by
+	// old clients (MUL-4525).
+	ReasonCode     *string `json:"reason_code,omitempty"`
 	TriggerPayload any     `json:"trigger_payload"`
 	Result         any     `json:"result"`
 	CreatedAt      string  `json:"created_at"`
@@ -279,10 +285,49 @@ func runToResponse(r db.AutopilotRun) AutopilotRunResponse {
 		TriggeredAt:    timestampToString(r.TriggeredAt),
 		CompletedAt:    timestampToPtr(r.CompletedAt),
 		FailureReason:  textToPtr(r.FailureReason),
+		ReasonCode:     autopilotRunReasonCode(r.Status, textToPtr(r.FailureReason)),
 		TriggerPayload: payload,
 		Result:         result,
 		CreatedAt:      timestampToString(r.CreatedAt),
 	}
+}
+
+// autopilotRunReasonCode maps a non-success autopilot run to a stable, wire-safe
+// DispatchReasonCode the UI can localize (MUL-4525), so the "run now" affordance
+// can warn without echoing the raw English failure_reason — which may name a
+// private assignee agent and is not enumeration-safe. Returns nil for
+// success-path runs. Classification is substring-based over the fixed set of
+// reasons shouldSkipDispatch / formatAdmissionReason / failRun produce; an
+// unmatched reason falls back to internal_error rather than leaking the text.
+func autopilotRunReasonCode(status string, failureReason *string) *string {
+	if status != "skipped" && status != "failed" {
+		return nil
+	}
+	reason := ""
+	if failureReason != nil {
+		reason = strings.ToLower(*failureReason)
+	}
+	var code DispatchReasonCode
+	switch {
+	case strings.Contains(reason, "not allowed to trigger"),
+		strings.Contains(reason, "not allowed to invoke"),
+		strings.Contains(reason, "lacks access"),
+		strings.Contains(reason, "cannot access private"):
+		code = ReasonInvocationNotAllowed
+	case strings.Contains(reason, "runtime is "):
+		// AgentReadiness phrasings: "... runtime is offline/starting/... at
+		// dispatch time" — the target exists and is permitted but not ready.
+		code = ReasonRuntimeOffline
+	case strings.Contains(reason, "no assignee"),
+		strings.Contains(reason, "archived"),
+		strings.Contains(reason, "no longer exists"),
+		strings.Contains(reason, "cannot be resolved"):
+		code = ReasonTargetUnavailable
+	default:
+		code = ReasonInternalError
+	}
+	s := string(code)
+	return &s
 }
 
 // runToResponseSlim mirrors runToResponse but omits TriggerPayload, intended

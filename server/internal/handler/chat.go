@@ -623,6 +623,21 @@ func (h *Handler) SendChatMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Re-run the INVOKE gate on every send, not just the softer view gate in
+	// gateChatSessionForUser (MUL-4525). canAccessPrivateAgent lets a workspace
+	// admin keep reading a transcript, but sending a message enqueues a run and
+	// must satisfy canInvokeAgent — which has no admin bypass. A session created
+	// while the user could invoke the agent must stop enqueuing work the instant
+	// that permission is revoked (agent flipped private, ownership moved, target
+	// removed from the allow-list), and it must fail BEFORE we persist the user
+	// message / attachments / task. Blocked returns a structured, enumeration-safe
+	// reason so the composer can explain it without leaking private-agent details.
+	actorType, actorID := h.resolveActor(r, userID, workspaceID)
+	if !h.canInvokeAgent(r.Context(), agent, actorType, actorID, h.invokeOriginatorFromRequest(r, actorType, actorID), workspaceID) {
+		h.writeDispatchBlocked(w, http.StatusForbidden, ReasonInvocationNotAllowed)
+		return
+	}
+
 	// Detect whether this is the very first human message in the session,
 	// BEFORE we insert the new row. This scopes LLM auto-titling (MUL-4295) to
 	// the opening turn: we upgrade the default/original title exactly once, off
@@ -640,8 +655,8 @@ func (h *Handler) SendChatMessage(w http.ResponseWriter, r *http.Request) {
 	// all commit together, and the daemon is only notified after the commit. For
 	// web chat the sender is the authenticated request user (sessions are
 	// creator-only), so they are the task initiator — surfaced to the agent
-	// under `## Task Initiator`.
-	actorType, actorID := h.resolveActor(r, userID, workspaceID)
+	// under `## Task Initiator`. actorType/actorID were resolved above for the
+	// invoke gate.
 	sent, err := h.TaskService.SendDirectChatMessage(r.Context(), session, agent, parseUUID(userID), req.Content, attachmentIDs, actorType, parseUUID(actorID))
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to send chat message: "+err.Error())

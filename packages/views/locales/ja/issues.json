@@ -356,6 +356,7 @@
     "retry_task_tooltip": "タスクを再試行",
     "retry_task_aria": "タスクを再試行",
     "retry_failed": "タスクを再試行できませんでした",
+    "retry_blocked": "再試行されませんでした — このエージェントを実行する権限がありません",
     "transcript_tooltip": "トランスクリプトを表示",
     "cancel_failed": "タスクをキャンセルできませんでした",
     "trigger_retry": "再試行",

@@ -12,7 +12,7 @@ import { useWorkspaceId } from "@multica/core/hooks";
 import { useAuthStore } from "@multica/core/auth";
 import { agentListOptions, memberListOptions } from "@multica/core/workspace/queries";
 import { canAssignAgent } from "@multica/views/issues/components";
-import { api } from "@multica/core/api";
+import { api, dispatchReasonCode } from "@multica/core/api";
 import { useAgentPresenceDetail, useWorkspaceAgentAvailability } from "@multica/core/agents";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
 import {
@@ -466,7 +466,13 @@ export function useChatController(opts?: { isActive?: boolean }) {
         sessionId = await ensureSession(finalContent);
       } catch (err) {
         apiLogger.error("sendChatMessage.ensureSession.error", err);
-        toast.error(t(($) => $.input.send_failed_toast));
+        // A revoked invoke permission blocks session create with a structured
+        // 403 (MUL-4525) — name the cause instead of a generic failure.
+        toast.error(
+          dispatchReasonCode(err) === "invocation_not_allowed"
+            ? t(($) => $.input.send_blocked_toast)
+            : t(($) => $.input.send_failed_toast),
+        );
         return false;
       }
       if (!sessionId) {
@@ -518,7 +524,15 @@ export function useChatController(opts?: { isActive?: boolean }) {
           attachments: draftAttachments,
           sessionId,
         });
-        toast.error(t(($) => $.input.send_failed_toast));
+        // Invoke permission can be revoked mid-session; the send is refused with
+        // a structured 403 before anything persists (MUL-4525). Surface the
+        // specific cause so the user knows it is a permission change, not a
+        // transient failure they should retry.
+        toast.error(
+          dispatchReasonCode(err) === "invocation_not_allowed"
+            ? t(($) => $.input.send_blocked_toast)
+            : t(($) => $.input.send_failed_toast),
+        );
         return false;
       }
       apiLogger.info("sendChatMessage.success", {

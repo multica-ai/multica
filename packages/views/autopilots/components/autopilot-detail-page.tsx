@@ -695,9 +695,35 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
   // doesn't send the field (older backend).
   const canManageAccess = autopilot.can_manage_access ?? canWrite;
 
+  // Maps a blocked/failed run's stable reason_code to a localized "not
+  // triggered" message. A server-driven code always has a default branch so an
+  // unknown/newer code degrades to a generic message instead of nothing.
+  const runNowBlockedMessage = (reasonCode?: string): string => {
+    switch (reasonCode) {
+      case "invocation_not_allowed":
+        return t(($) => $.detail.run_blocked_invocation_not_allowed);
+      case "runtime_offline":
+        return t(($) => $.detail.run_blocked_runtime_offline);
+      case "target_unavailable":
+        return t(($) => $.detail.run_blocked_target_unavailable);
+      case "attribution_blocked":
+        return t(($) => $.detail.run_blocked_attribution);
+      default:
+        return t(($) => $.detail.run_blocked_generic);
+    }
+  };
+
   const handleRunNow = async () => {
     try {
-      await triggerAutopilot.mutateAsync(autopilotId);
+      const run = await triggerAutopilot.mutateAsync(autopilotId);
+      // A blocked or not-ready dispatch returns 200 with a non-success run
+      // status (MUL-4525): never show success for skipped/failed. reason_code is
+      // the stable, localized cause; an unknown code falls back to a generic
+      // "not triggered" message rather than echoing the raw server reason.
+      if (run?.status === "skipped" || run?.status === "failed") {
+        toast.warning(runNowBlockedMessage(run?.reason_code));
+        return;
+      }
       toast.success(t(($) => $.detail.toast_triggered));
     } catch (e: any) {
       toast.error(e?.message || t(($) => $.detail.toast_trigger_failed));

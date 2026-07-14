@@ -356,6 +356,7 @@
     "retry_task_tooltip": "重试 task",
     "retry_task_aria": "重试 task",
     "retry_failed": "重试 task 失败",
+    "retry_blocked": "未重试——你无权触发该 Agent",
     "transcript_tooltip": "查看记录",
     "cancel_failed": "取消 task 失败",
     "trigger_retry": "重试",
