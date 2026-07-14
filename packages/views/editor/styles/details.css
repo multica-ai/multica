@@ -42,3 +42,36 @@
 .rich-text-editor .details-block-body > .rich-text-editor {
   margin: 0;
 }
+
+/* Editing mode: the read-only preview is replaced by form controls that write
+   back to the node attributes. The container stays a bordered panel so the
+   block is still visually recognizable while both fields are exposed. */
+.rich-text-editor .details-block--editing {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.rich-text-editor .details-block-summary-input,
+.rich-text-editor .details-block-body-input {
+  width: 100%;
+  background: var(--background);
+  border: 1px solid var(--border);
+  border-radius: calc(var(--radius) - 2px);
+  color: inherit;
+  font: inherit;
+  padding: 0.35rem 0.5rem;
+}
+
+.rich-text-editor .details-block-summary-input {
+  font-weight: 500;
+}
+
+.rich-text-editor .details-block-body-input {
+  resize: vertical;
+  min-height: 4.5rem;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 0.9em;
+  line-height: 1.5;
+  white-space: pre;
+}

@@ -24,10 +24,15 @@
  * the SAME `ReadonlyContent` renderer the autopilot view uses, so a collapsed
  * block on an issue looks identical to the autopilot view.
  *
- * Trade-off (consistent with the other atom nodes): the body is edited as a unit
- * (via markdown source) rather than inline. That fits real usage — these blocks
- * are authored by autopilots and mostly *viewed* on generated issues; the
- * priority is safe round-trip over in-place authoring.
+ * Editing: the node stays an `atom`, but in an editable editor the NodeView
+ * swaps its read-only preview for form controls — an inline `<input>` for the
+ * summary and a source-edit `<textarea>` for the body — that write straight
+ * back to the `summary`/`body` attributes via `updateAttributes`. Because the
+ * attributes remain the verbatim source of truth, an edit still round-trips to
+ * `<details>` markdown unchanged. Keeping the body as a markdown source field
+ * (rather than promoting it to real ProseMirror content) is deliberate: it
+ * preserves that verbatim round-trip for arbitrary bodies (code fences, lists),
+ * which real ProseMirror content could not guarantee.
  *
  * Known limitation: a `<details>` nested inside another `<details>` is not parsed
  * as collapsible — the tokenizer declines it (the inner block's `</details>`
@@ -48,14 +53,40 @@ const DETAILS_BLOCK_RE =
   /^<details((?:\s[^>]*)?)>\s*<summary>([\s\S]*?)<\/summary>([\s\S]*?)<\/details>[ \t]*(?:\n|$)/;
 
 // ---------------------------------------------------------------------------
-// React NodeView — a native <details> so the browser handles the collapse,
-// with the body rendered through the shared ReadonlyContent markdown renderer.
+// React NodeView. When the editor is read-only it renders a native <details>
+// so the browser handles the collapse, with the body rendered through the
+// shared ReadonlyContent markdown renderer. When the editor is editable it
+// swaps in form controls that write edits back to the node attributes.
 // ---------------------------------------------------------------------------
 
-export function DetailsBlockView({ node }: NodeViewProps) {
+export function DetailsBlockView({ node, updateAttributes, editor }: NodeViewProps) {
   const summary = String(node.attrs.summary ?? "");
   const body = String(node.attrs.body ?? "");
   const open = Boolean(node.attrs.open);
+  const editable = editor?.isEditable ?? false;
+
+  if (!editable) {
+    return (
+      <NodeViewWrapper
+        as="div"
+        className="details-block-node"
+        data-type="detailsBlock"
+      >
+        <details className="details-block" open={open} contentEditable={false}>
+          <summary className="details-block-summary">{summary || "Details"}</summary>
+          <div className="details-block-body">
+            <ReadonlyContent content={body} />
+          </div>
+        </details>
+      </NodeViewWrapper>
+    );
+  }
+
+  // Keep keystrokes and pointer gestures inside the form controls so ProseMirror
+  // keymaps (Backspace deleting the node, Enter splitting, etc.) don't fire while
+  // the user is typing in a field. The controls live in a contentEditable=false
+  // shell, matching the other atom node views.
+  const stop = (e: { stopPropagation: () => void }) => e.stopPropagation();
 
   return (
     <NodeViewWrapper
@@ -63,12 +94,28 @@ export function DetailsBlockView({ node }: NodeViewProps) {
       className="details-block-node"
       data-type="detailsBlock"
     >
-      <details className="details-block" open={open} contentEditable={false}>
-        <summary className="details-block-summary">{summary || "Details"}</summary>
-        <div className="details-block-body">
-          <ReadonlyContent content={body} />
-        </div>
-      </details>
+      <div className="details-block details-block--editing" contentEditable={false}>
+        <input
+          className="details-block-summary-input"
+          type="text"
+          value={summary}
+          placeholder="Details"
+          aria-label="Summary"
+          onChange={(e) => updateAttributes({ summary: e.target.value })}
+          onKeyDown={stop}
+          onMouseDown={stop}
+        />
+        <textarea
+          className="details-block-body-input"
+          value={body}
+          placeholder="Body (Markdown)"
+          aria-label="Details body (Markdown)"
+          rows={Math.max(3, body.split("\n").length)}
+          onChange={(e) => updateAttributes({ body: e.target.value })}
+          onKeyDown={stop}
+          onMouseDown={stop}
+        />
+      </div>
     </NodeViewWrapper>
   );
 }
