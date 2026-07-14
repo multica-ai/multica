@@ -127,6 +127,11 @@ type Result struct {
 	DurationMs int64
 	SessionID  string
 	Usage      map[string]TokenUsage // keyed by model name
+	// codexInitializeRetrySafe is provider-internal evidence that an
+	// initialize timeout happened before semantic activity and after the
+	// process tree was reaped. It is intentionally not part of the public
+	// result contract.
+	codexInitializeRetrySafe bool
 }
 
 // Config configures a Backend instance.
@@ -134,6 +139,9 @@ type Config struct {
 	ExecutablePath string            // path to CLI binary (claude, codebuddy, codex, copilot, opencode, openclaw, hermes, pi, cursor, kimi, kiro-cli, agy, qodercli)
 	Env            map[string]string // extra environment variables
 	Logger         *slog.Logger
+	TaskID         string
+	RuntimeID      string
+	DaemonVersion  string
 }
 
 // New creates a Backend for the given agent type.
