@@ -127,10 +127,11 @@ type AgentTaskQueue struct {
 	// Top-of-chain human originator for this run. For human-triggered tasks (comment by a member, chat, quick-create) equals that member. For agent-fanout tasks inherited from the parent task's originator_user_id via comment.source_task_id. NULL when no human is in the chain (autopilot, system-driven). Used by canInvokeAgent to judge A2A by the originator; the Composio overlay now follows invocation permission and uses the agent owner's connection, so this is audit/attribution + A2A gating, NOT a Composio owner==originator gate (MUL-3963).
 	OriginatorUserID pgtype.UUID `json:"originator_user_id"`
 	// Non-secret per-task connected app metadata corresponding to runtime_mcp_overlay, used by the daemon brief to tell agents which app capabilities are mounted. Cleared with runtime_mcp_overlay after task completion.
-	RuntimeConnectedApps []byte        `json:"runtime_connected_apps"`
-	CoalescedCommentIds  []pgtype.UUID `json:"coalesced_comment_ids"`
-	DeliveredCommentIds  []pgtype.UUID `json:"delivered_comment_ids"`
-	ChatInputTaskID      pgtype.UUID   `json:"chat_input_task_id"`
+	RuntimeConnectedApps   []byte             `json:"runtime_connected_apps"`
+	CoalescedCommentIds    []pgtype.UUID      `json:"coalesced_comment_ids"`
+	DeliveredCommentIds    []pgtype.UUID      `json:"delivered_comment_ids"`
+	ChatInputTaskID        pgtype.UUID        `json:"chat_input_task_id"`
+	ChatFinalizeDeferredAt pgtype.Timestamptz `json:"chat_finalize_deferred_at"`
 }
 
 type AgentToLabel struct {
@@ -305,6 +306,15 @@ type ChannelUserBinding struct {
 	ChannelUserID  string             `json:"channel_user_id"`
 	Config         []byte             `json:"config"`
 	BoundAt        pgtype.Timestamptz `json:"bound_at"`
+}
+
+type ChatDraftRestore struct {
+	ID            pgtype.UUID        `json:"id"`
+	ChatSessionID pgtype.UUID        `json:"chat_session_id"`
+	TaskID        pgtype.UUID        `json:"task_id"`
+	Content       string             `json:"content"`
+	AttachmentIds []pgtype.UUID      `json:"attachment_ids"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
 }
 
 type ChatMessage struct {

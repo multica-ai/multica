@@ -1075,7 +1075,22 @@ func (h *Handler) sendAgentWelcomeChat(ctx context.Context, agent db.Agent, crea
 	if !agent.RuntimeID.Valid {
 		return // no runtime → the agent can't run; skip the welcome
 	}
-	session, err := h.Queries.CreateChatSession(ctx, db.CreateChatSessionParams{
+	// Create inside a tx that first takes FOR KEY SHARE on the workspace row — the
+	// creator half of the #5219 delete/create protocol, so the intro session cannot
+	// be created into a workspace mid-delete (see LockWorkspaceForChatSessionCreate).
+	tx, err := h.TxStarter.Begin(ctx)
+	if err != nil {
+		slog.Warn("agent welcome: begin tx failed", "agent_id", uuidToString(agent.ID), "error", err)
+		return
+	}
+	defer tx.Rollback(ctx)
+	qtx := h.Queries.WithTx(tx)
+
+	if _, err := qtx.LockWorkspaceForChatSessionCreate(ctx, parseUUID(workspaceID)); err != nil {
+		slog.Warn("agent welcome: lock workspace failed", "agent_id", uuidToString(agent.ID), "error", err)
+		return
+	}
+	session, err := qtx.CreateChatSession(ctx, db.CreateChatSessionParams{
 		WorkspaceID:  parseUUID(workspaceID),
 		AgentID:      agent.ID,
 		CreatorID:    parseUUID(creatorID),
@@ -1084,6 +1099,10 @@ func (h *Handler) sendAgentWelcomeChat(ctx context.Context, agent db.Agent, crea
 	})
 	if err != nil {
 		slog.Warn("agent welcome: create session failed", "agent_id", uuidToString(agent.ID), "error", err)
+		return
+	}
+	if err := tx.Commit(ctx); err != nil {
+		slog.Warn("agent welcome: commit session failed", "agent_id", uuidToString(agent.ID), "error", err)
 		return
 	}
 

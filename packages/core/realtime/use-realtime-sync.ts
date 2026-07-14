@@ -81,6 +81,7 @@ import type {
   TaskFailedPayload,
   TaskCancelledPayload,
   ChatDonePayload,
+  ChatCancelFinalizedPayload,
   ChatMessage,
   ChatPendingTask,
   ChatMessagesPage,
@@ -234,6 +235,91 @@ export function applyChatSessionUpdatedToCache(
       ? next
       : sortChatSessions(next);
   });
+}
+
+function removeChatMessageFromPageCache(
+  qc: QueryClient,
+  sessionId: string,
+  messageId: string,
+) {
+  qc.setQueryData<InfiniteData<ChatMessagesPage> | undefined>(
+    chatKeys.messagesPage(sessionId),
+    (old) => {
+      if (!old) return old;
+      return {
+        ...old,
+        pages: old.pages.map((page) => ({
+          ...page,
+          messages: page.messages.filter((m) => m.id !== messageId),
+        })),
+      };
+    },
+  );
+}
+
+export function removeChatMessageFromCaches(
+  qc: QueryClient,
+  sessionId: string,
+  messageId: string,
+) {
+  qc.setQueryData<ChatMessage[]>(
+    chatKeys.messages(sessionId),
+    (old) => old?.filter((m) => m.id !== messageId) ?? old,
+  );
+  removeChatMessageFromPageCache(qc, sessionId, messageId);
+}
+
+/**
+ * Apply a chat:cancel_finalized event (#5219): the deferred outcome of a
+ * cancelled chat task, settled after the daemon's transcript flush.
+ *
+ * - outcome "stopped": a late "Stopped." assistant row was persisted —
+ *   insert it exactly like a chat:done message.
+ * - outcome "restored": the triggering user message was deleted — drop it
+ *   from the caches. The deleted prompt itself never rides this
+ *   workspace-wide broadcast: it is durable server-side and only the
+ *   initiator's client refetches it through the creator-authorized
+ *   draft-restores query, which the session's composer applies and consumes.
+ *
+ * The draft-restores invalidation is gated to the task's initiator and fails
+ * closed when initiator_user_id is missing — nothing is lost either way,
+ * because the durable restore is fetched again on the next composer mount or
+ * network reconnect. Cache patches stay unconditional — they are no-ops for
+ * anyone not viewing the session.
+ */
+export function applyChatCancelFinalizedToCache(
+  qc: QueryClient,
+  payload: ChatCancelFinalizedPayload,
+  currentUserId?: string,
+) {
+  const sessionId = payload.chat_session_id;
+  if (!sessionId) return;
+  if (payload.outcome === "stopped") {
+    applyChatDoneToCache(qc, {
+      chat_session_id: sessionId,
+      task_id: payload.task_id,
+      message_id: payload.message_id,
+      content: payload.content,
+      elapsed_ms: payload.elapsed_ms,
+      created_at: payload.created_at,
+      message_kind: payload.message_kind,
+    });
+    return;
+  }
+  if (payload.outcome === "restored") {
+    if (payload.message_id) {
+      removeChatMessageFromCaches(qc, sessionId, payload.message_id);
+    }
+    qc.setQueryData(chatKeys.pendingTask(sessionId), {});
+    invalidateChatMessageQueries(qc, sessionId);
+    const isInitiator =
+      !!payload.initiator_user_id &&
+      !!currentUserId &&
+      payload.initiator_user_id === currentUserId;
+    if (isInitiator) {
+      void qc.invalidateQueries({ queryKey: chatKeys.draftRestores(sessionId) });
+    }
+  }
 }
 
 /**
@@ -433,6 +519,10 @@ function invalidateWorkspaceScopedQueries(qc: QueryClient): void {
   qc.invalidateQueries({ queryKey: chatKeys.messagesPageAll() });
   qc.invalidateQueries({ queryKey: chatKeys.pendingTaskAll() });
   qc.invalidateQueries({ queryKey: chatKeys.taskMessagesAll() });
+  // A chat:cancel_finalized broadcast missed while disconnected is exactly
+  // what the durable draft-restore rows exist for (#5219) — re-pull them so
+  // a mounted composer recovers the prompt without a remount.
+  qc.invalidateQueries({ queryKey: chatKeys.draftRestoresAll() });
   qc.invalidateQueries({ queryKey: workspaceKeys.list() });
 }
 
@@ -667,8 +757,8 @@ export function useRealtimeSync(
       "subscriber:added", "subscriber:removed",
       "daemon:heartbeat",
       // Chat events are handled explicitly below; do not double-invalidate.
-      "chat:message", "chat:done", "chat:session_read", "chat:session_deleted",
-      "chat:session_updated",
+      "chat:message", "chat:done", "chat:cancel_finalized", "chat:session_read",
+      "chat:session_deleted", "chat:session_updated",
       // task:message stays out of the prefix path because it fires per
       // streamed message during a long run — invalidating the snapshot on
       // every message would flood the network. Specific chat handlers below
@@ -1033,6 +1123,24 @@ export function useRealtimeSync(
       invalidateSessionLists();
     });
 
+    // Deferred cancellation outcome (#5219): the server settles the
+    // empty/non-empty judgment only after the daemon's transcript flush, so
+    // this event arrives seconds after the cancel HTTP response — nothing
+    // else re-fetches at that point.
+    const unsubChatCancelFinalized = ws.on("chat:cancel_finalized", (p) => {
+      const payload = p as ChatCancelFinalizedPayload;
+      chatWsLogger.info("chat:cancel_finalized (global)", {
+        task_id: payload.task_id,
+        chat_session_id: payload.chat_session_id,
+        outcome: payload.outcome,
+      });
+      applyChatCancelFinalizedToCache(qc, payload, authStore.getState().user?.id);
+      if (payload.outcome === "stopped") {
+        // A Stopped. assistant row just landed → session previews change.
+        invalidateSessionLists();
+      }
+    });
+
     // Chat task lifecycle writethrough: keep `chatKeys.pendingTask(sessionId)`
     // synchronized with the server state machine via setQueryData rather than
     // invalidate-refetch. Same pattern as task:message — the WS payload
@@ -1248,6 +1356,7 @@ export function useRealtimeSync(
       unsubTaskMessage();
       unsubChatMessage();
       unsubChatDone();
+      unsubChatCancelFinalized();
       unsubTaskQueued();
       unsubTaskDispatch();
       unsubTaskRunning();

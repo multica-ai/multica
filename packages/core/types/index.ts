@@ -92,6 +92,8 @@ export type {
   SendChatMessageResponse,
   CancelledChatMessage,
   CancelTaskResponse,
+  ChatDraftRestore,
+  ChatDraftRestoresResponse,
 } from "./chat";
 export type { StorageAdapter } from "./storage";
 export type {

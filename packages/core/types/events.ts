@@ -54,6 +54,7 @@ export type WSEventType =
   | "issue_reaction:removed"
   | "chat:message"
   | "chat:done"
+  | "chat:cancel_finalized"
   | "chat:session_read"
   | "chat:session_deleted"
   | "chat:session_updated"
@@ -357,6 +358,36 @@ export interface ChatDonePayload {
   message_kind?: import("./chat").ChatMessageKind;
 }
 
+/**
+ * Deferred outcome of a cancelled chat task (#5219). The cancel HTTP response
+ * cannot carry it — the empty/non-empty judgment settles only after the
+ * daemon's transcript flush — so the server broadcasts it here instead:
+ * outcome "stopped" describes a freshly-persisted "Stopped." assistant row
+ * (ChatDonePayload-shaped fields), outcome "restored" is a content-free
+ * invalidation hint — the deleted prompt itself is durable server-side and
+ * the initiator's client fetches it from the creator-authorized
+ * draft-restores endpoint. All fields beyond the discriminator are optional —
+ * treat defensively and fall back to a refetch.
+ */
+export interface ChatCancelFinalizedPayload {
+  outcome: "stopped" | "restored";
+  chat_session_id: string;
+  task_id: string;
+  /**
+   * The user who triggered the cancelled task. Only this user's client needs
+   * to refetch draft restores; treat a missing value as "not me" (fail
+   * closed — the durable restore is still picked up on the next session
+   * open).
+   */
+  initiator_user_id?: string;
+  message_id?: string;
+  /** "Stopped." assistant row fields — set only for outcome "stopped". */
+  content?: string;
+  message_kind?: import("./chat").ChatMessageKind;
+  created_at?: string;
+  elapsed_ms?: number;
+}
+
 export interface ChatSessionReadPayload {
   chat_session_id: string;
 }
@@ -452,6 +483,7 @@ export interface WSEventPayloadMap {
   "activity:created": ActivityCreatedPayload;
   "chat:message": ChatMessageEventPayload;
   "chat:done": ChatDonePayload;
+  "chat:cancel_finalized": ChatCancelFinalizedPayload;
   "chat:session_read": ChatSessionReadPayload;
   "chat:session_deleted": ChatSessionDeletedPayload;
   "chat:session_updated": unknown;

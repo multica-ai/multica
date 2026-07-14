@@ -29,6 +29,8 @@ import {
   useSetChatSessionArchived,
 } from "@multica/core/chat/mutations";
 import { useChatStore } from "@multica/core/chat";
+import { removeChatMessageFromCaches } from "@multica/core/realtime";
+import { useChatDraftRestore } from "./use-chat-draft-restore";
 import { createLogger } from "@multica/core/logger";
 import type {
   Agent,
@@ -115,38 +117,6 @@ function appendChatMessageToLatestPageCache(
       };
     },
   );
-}
-
-function removeChatMessageFromPageCache(
-  qc: ReturnType<typeof useQueryClient>,
-  sessionId: string,
-  messageId: string,
-) {
-  qc.setQueryData<InfiniteData<ChatMessagesPage> | undefined>(
-    chatKeys.messagesPage(sessionId),
-    (old) => {
-      if (!old) return old;
-      return {
-        ...old,
-        pages: old.pages.map((page) => ({
-          ...page,
-          messages: page.messages.filter((m) => m.id !== messageId),
-        })),
-      };
-    },
-  );
-}
-
-export function removeChatMessageFromCaches(
-  qc: ReturnType<typeof useQueryClient>,
-  sessionId: string,
-  messageId: string,
-) {
-  qc.setQueryData<ChatMessage[]>(
-    chatKeys.messages(sessionId),
-    (old) => old?.filter((m) => m.id !== messageId) ?? old,
-  );
-  removeChatMessageFromPageCache(qc, sessionId, messageId);
 }
 
 function replaceOptimisticChatMessageId(
@@ -237,15 +207,18 @@ export function useChatController(opts?: { isActive?: boolean }) {
   );
   const pendingTaskId = pendingTask?.task_id ?? null;
   const stopRequestedBeforeTaskRef = useRef(false);
-  const [restoreDraftRequest, setRestoreDraftRequest] = useState<{
-    id: string;
-    content: string;
-    attachments?: Attachment[];
-    sessionId?: string;
-  } | null>(null);
-  const handleRestoreDraftConsumed = useCallback(() => {
-    setRestoreDraftRequest(null);
-  }, []);
+  // Durable deferred-cancellation draft restores (#5219). The whole lifecycle —
+  // fetch, offer, skip-and-re-offer, apply, consume, reconcile — lives in this
+  // hook, shared with the floating chat window.
+  //
+  // Gated on isActive AND app foreground: a backgrounded browser tab still renders
+  // this controller, and it must not fetch/apply/consume a restore the user is
+  // waiting on in a foreground surface. It recovers on its next fetch once the
+  // surface is on screen and the app is refocused. (appForeground also gates auto
+  // mark-read below.)
+  const appForeground = useAppForeground();
+  const { restoreDraftRequest, enqueueLocalRestore, handleRestoreDraftApplied } =
+    useChatDraftRestore(activeSessionId, isActive && appForeground);
   // Nonce handed to ChatInput to pull focus into the compose box when a new
   // chat starts. Bumped by handleNewChat / handleStartNewChat only, so
   // selecting an existing chat or a deep link never steals focus.
@@ -325,7 +298,6 @@ export function useChatController(opts?: { isActive?: boolean }) {
   // read via cleanup; the store re-check is a belt-and-suspenders guard. Only a
   // session that stays active past the tick — a real select, deep link, or
   // refresh — is read.
-  const appForeground = useAppForeground();
   const currentHasUnread =
     sessions.find((s) => s.id === activeSessionId)?.has_unread ?? false;
   useEffect(() => {
@@ -421,7 +393,7 @@ export function useChatController(opts?: { isActive?: boolean }) {
         if (restored?.restore_to_input) {
           removeChatMessageFromCaches(qc, restored.chat_session_id, restored.message_id);
           if (options.restoreDraftToInput && restored.chat_session_id === sessionId) {
-            setRestoreDraftRequest({
+            enqueueLocalRestore({
               id: restored.message_id,
               content: restored.content,
               attachments: restored.attachments,
@@ -448,7 +420,7 @@ export function useChatController(opts?: { isActive?: boolean }) {
         return null;
       }
     },
-    [qc],
+    [qc, enqueueLocalRestore],
   );
 
   const handleSend = useCallback(
@@ -535,7 +507,7 @@ export function useChatController(opts?: { isActive?: boolean }) {
         stopRequestedBeforeTaskRef.current = false;
         removeChatMessageFromCaches(qc, sessionId, optimistic.id);
         qc.setQueryData(chatKeys.pendingTask(sessionId), {});
-        setRestoreDraftRequest({
+        enqueueLocalRestore({
           id: `send-failed-${optimistic.id}`,
           content: finalContent,
           attachments: draftAttachments,
@@ -588,6 +560,7 @@ export function useChatController(opts?: { isActive?: boolean }) {
       cancelChatTask,
       qc,
       setActiveSession,
+      enqueueLocalRestore,
       t,
     ],
   );
@@ -711,7 +684,7 @@ export function useChatController(opts?: { isActive?: boolean }) {
     fetchOlderMessages,
     // draft restore
     restoreDraftRequest,
-    handleRestoreDraftConsumed,
+    handleRestoreDraftApplied,
     // compose-box focus nonce (bumped on new chat)
     focusInputRequest,
     // actions

@@ -138,3 +138,51 @@ describe("chat store — floating window preference", () => {
     expect(storage.getItem("multica:chat:floatingChatEnabled")).toBe("true");
   });
 });
+
+// The ledger is what makes a durable draft restore (#5219) apply at most once.
+// A consume request can be lost — retries exhausted, app closed mid-flight — and
+// the row then comes back on the next fetch. Without a record that survives the
+// reload, the prompt would be restored into the composer a second time, after
+// the user has already sent it.
+describe("chat store — applied draft-restore ledger", () => {
+  it("survives a reload so a lost consume cannot re-offer the restore", () => {
+    const storage = memStorage();
+    const store = createChatStore({ storage });
+
+    store.getState().markDraftRestoreApplied("restore-1");
+    expect(store.getState().appliedDraftRestoreIds).toEqual(["restore-1"]);
+
+    const reloaded = createChatStore({ storage });
+    expect(reloaded.getState().appliedDraftRestoreIds).toEqual(["restore-1"]);
+  });
+
+  it("is idempotent and drops the entry once the row is confirmed gone", () => {
+    const store = createChatStore({ storage: memStorage() });
+
+    store.getState().markDraftRestoreApplied("restore-1");
+    store.getState().markDraftRestoreApplied("restore-1");
+    expect(store.getState().appliedDraftRestoreIds).toEqual(["restore-1"]);
+
+    store.getState().forgetDraftRestoreApplied("restore-1");
+    expect(store.getState().appliedDraftRestoreIds).toEqual([]);
+  });
+
+  // Every entry in here is an unconfirmed consume: its row is still on the
+  // server. Evicting one to cap the ledger would re-arm the restore it was
+  // suppressing — the next fetch offers an already-applied prompt again and the
+  // user can send it twice. Only server confirmation may compact this.
+  it("never evicts an unconfirmed entry, however many pile up", () => {
+    const store = createChatStore({ storage: memStorage() });
+    for (let i = 0; i < 60; i++) store.getState().markDraftRestoreApplied(`r-${i}`);
+
+    const ids = store.getState().appliedDraftRestoreIds;
+    expect(ids).toHaveLength(60);
+    expect(ids[0]).toBe("r-0");
+    expect(ids[59]).toBe("r-59");
+
+    // The one exit: the server confirmed the row is gone.
+    store.getState().forgetDraftRestoreApplied("r-0");
+    expect(store.getState().appliedDraftRestoreIds).toHaveLength(59);
+    expect(store.getState().appliedDraftRestoreIds[0]).toBe("r-1");
+  });
+});

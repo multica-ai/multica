@@ -60,7 +60,14 @@ interface ChatInputProps {
      */
     sessionId?: string;
   } | null;
-  onRestoreDraftConsumed?: () => void;
+  /**
+   * Fired when — and only when — the restore's content/attachments were written
+   * into the draft. A restore the composer cannot apply yet (the user has work
+   * in progress) is NOT reported: it stays pending and lands as soon as the
+   * draft is clear. Owners holding a durable server-side restore (#5219) can
+   * therefore treat this as the single terminal transition and consume the row.
+   */
+  onRestoreDraftApplied?: () => void;
   /** Receives a File and returns the attachment row (with id + CDN link).
    *  The wrapper owner (ChatWindow) lazy-creates a chat_session if needed
    *  and forwards `chatSessionId` to the upload — chat-input only cares
@@ -102,7 +109,7 @@ interface ChatInputProps {
 export function ChatInput({
   onSend,
   restoreDraftRequest,
-  onRestoreDraftConsumed,
+  onRestoreDraftApplied,
   onUploadFile,
   onStop,
   isRunning,
@@ -161,7 +168,17 @@ export function ChatInput({
   const clearInputDraft = useChatStore((s) => s.clearInputDraft);
   const [isEmpty, setIsEmpty] = useState(!inputDraft.trim());
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const consumedRestoreIdRef = useRef<string | null>(null);
+  // `isEmpty` tracks the LIVE editor, which the persisted draft lags by a
+  // debounce, so the send affordance cannot be derived from `inputDraft` alone.
+  // But `isEmpty` is never re-derived when the composer switches draft slots
+  // either: ChatInput does not remount on a session switch, and ContentEditor's
+  // defaultValue-sync pushes the incoming draft in with `emitUpdate: false`, so
+  // no onUpdate fires. Read BOTH signals — a draft `isEmpty` has not seen yet (a
+  // restored or parked one, or any persisted draft the user typed in another
+  // session) still enables the button. A false enable costs nothing: handleSend
+  // reads the live editor and bails when it is empty.
+  const hasNothingToSend = isEmpty && !inputDraft.trim();
+  const appliedRestoreIdRef = useRef<string | null>(null);
   const editorKey = editorKeyOverride ?? selectedAgentId ?? "no-agent";
   // Number of in-flight uploads. We track this explicitly (rather than
   // peeking at the editor on every render) so the SubmitButton visibly
@@ -196,10 +213,10 @@ export function ChatInput({
 
   useEffect(() => {
     if (!restoreDraftRequest) {
-      consumedRestoreIdRef.current = null;
+      appliedRestoreIdRef.current = null;
       return;
     }
-    if (consumedRestoreIdRef.current === restoreDraftRequest.id) return;
+    if (appliedRestoreIdRef.current === restoreDraftRequest.id) return;
     // Session-scoped restore: if this draft belongs to a specific session,
     // wait until the user is actually viewing it. A fire-and-forget send that
     // failed after the user navigated away must not dump its content into the
@@ -208,23 +225,29 @@ export function ChatInput({
     if (restoreDraftRequest.sessionId && restoreDraftRequest.sessionId !== draftKey) {
       return;
     }
-    consumedRestoreIdRef.current = restoreDraftRequest.id;
-    if (inputDraft.trim()) {
-      logger.info("input.restore skipped: draft already has content", {
+    // A draft with text OR staged attachments is user work in progress — never
+    // overwrite either with a restore (the attachment write below replaces the
+    // whole staged list). This is a WAIT, not a decision: the request stays
+    // pending and this effect re-runs on every draft change, so the restore
+    // lands as soon as the user sends or clears what they were typing. Marking
+    // it done here would strand it for the rest of this composer's life.
+    if (inputDraft.trim() || draftAttachments.length > 0) {
+      logger.debug("input.restore waiting: draft has content", {
         draftKey,
         restoreId: restoreDraftRequest.id,
       });
-      onRestoreDraftConsumed?.();
       return;
     }
+    appliedRestoreIdRef.current = restoreDraftRequest.id;
     setInputDraft(draftKey, restoreDraftRequest.content);
     setInputDraftAttachments(draftKey, restoreDraftRequest.attachments ?? []);
     setIsEmpty(!restoreDraftRequest.content.trim());
-    onRestoreDraftConsumed?.();
+    onRestoreDraftApplied?.();
   }, [
     draftKey,
     inputDraft,
-    onRestoreDraftConsumed,
+    draftAttachments,
+    onRestoreDraftApplied,
     restoreDraftRequest,
     setInputDraft,
     setInputDraftAttachments,
@@ -432,7 +455,7 @@ export function ChatInput({
         <div className="absolute bottom-1 right-1.5 flex items-center gap-1">
           <SubmitButton
             onClick={handleSend}
-            disabled={isEmpty || isSubmitting || !!disabled || !!noAgent || pendingUploads > 0}
+            disabled={hasNothingToSend || isSubmitting || !!disabled || !!noAgent || pendingUploads > 0}
             loading={isSubmitting}
             running={isRunning}
             onStop={onStop}

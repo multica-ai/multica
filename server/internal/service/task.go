@@ -1316,10 +1316,27 @@ type CancelTaskResult struct {
 	CancelledChatMessage *CancelledChatMessageResult
 }
 
+// CancelTaskOptions carries what the caller knows about the client that asked
+// for the cancellation.
+type CancelTaskOptions struct {
+	// ClientSupportsDraftRestore is true when the caller can recover a prompt
+	// through the durable draft-restore path (#5219). Only such a client may be
+	// handed a deferred outcome; for anyone else the empty-transcript judgment
+	// stays synchronous, because the cancel response is their only chance to get
+	// the prompt back. See protocol.AppCapabilityChatDraftRestoreV1.
+	ClientSupportsDraftRestore bool
+}
+
 // CancelTask cancels a single task by ID. It broadcasts a task:cancelled event
 // so frontends can update immediately.
 func (s *TaskService) CancelTask(ctx context.Context, taskID pgtype.UUID) (*db.AgentTaskQueue, error) {
-	result, err := s.CancelTaskWithResult(ctx, taskID)
+	// Every caller of this wrapper cancels a non-chat task — issue/autopilot
+	// tasks through the issue-scoped endpoint, plus the daemon and sweeper paths
+	// — so finalizeCancelledChatMessage returns before the gate is even read.
+	// Should a chat task ever reach here, there is no client waiting on a
+	// synchronous restore anyway, and the durable path is the only one that can
+	// hand the prompt back at all.
+	result, err := s.CancelTaskWithResult(ctx, taskID, CancelTaskOptions{ClientSupportsDraftRestore: true})
 	if err != nil {
 		return nil, err
 	}
@@ -1328,7 +1345,7 @@ func (s *TaskService) CancelTask(ctx context.Context, taskID pgtype.UUID) (*db.A
 
 // CancelTaskWithResult cancels a single task and returns any chat-specific
 // cleanup result needed by user-facing callers.
-func (s *TaskService) CancelTaskWithResult(ctx context.Context, taskID pgtype.UUID) (*CancelTaskResult, error) {
+func (s *TaskService) CancelTaskWithResult(ctx context.Context, taskID pgtype.UUID, opts CancelTaskOptions) (*CancelTaskResult, error) {
 	task, err := s.Queries.CancelAgentTask(ctx, taskID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		existing, err := s.Queries.GetAgentTask(ctx, taskID)
@@ -1343,7 +1360,7 @@ func (s *TaskService) CancelTaskWithResult(ctx context.Context, taskID pgtype.UU
 
 	slog.Info("task cancelled", "task_id", util.UUIDToString(task.ID), "issue_id", util.UUIDToString(task.IssueID))
 	s.captureTaskCancelled(ctx, task)
-	cancelledChatMessage := s.finalizeCancelledChatMessage(ctx, task)
+	cancelledChatMessage := s.finalizeCancelledChatMessage(ctx, task, opts)
 
 	// Reconcile agent status
 	s.ReconcileAgentStatus(ctx, task.AgentID)
@@ -1358,7 +1375,7 @@ func (s *TaskService) CancelTaskWithResult(ctx context.Context, taskID pgtype.UU
 	}, nil
 }
 
-func (s *TaskService) finalizeCancelledChatMessage(ctx context.Context, task db.AgentTaskQueue) *CancelledChatMessageResult {
+func (s *TaskService) finalizeCancelledChatMessage(ctx context.Context, task db.AgentTaskQueue, opts CancelTaskOptions) *CancelledChatMessageResult {
 	if !task.ChatSessionID.Valid {
 		return nil
 	}
@@ -1367,6 +1384,26 @@ func (s *TaskService) finalizeCancelledChatMessage(ctx context.Context, task db.
 		messages, err := qtx.ListTaskMessages(ctx, task.ID)
 		if err != nil {
 			return fmt.Errorf("list cancelled chat task messages: %w", err)
+		}
+		if len(messages) == 0 && task.StartedAt.Valid && opts.ClientSupportsDraftRestore {
+			// A started task's daemon learns of the cancellation by polling
+			// and may still be flushing its transcript tail, so "empty" is
+			// not trustworthy yet. Defer the judgment until the daemon acks
+			// its flush (cancel-ack) or the sweeper grace period expires
+			// (#5219). "Non-empty" needs no deferral: late rows only append.
+			//
+			// Deferring is gated on the client: clients and server do not
+			// upgrade together, and a client that cannot read the durable
+			// restore would take an empty cancel response as "nothing to put
+			// back" and lose the prompt. Such a client falls through to the
+			// legacy synchronous branch below — it keeps the pre-#5219 race
+			// (an in-flight transcript tail can still be misjudged as empty),
+			// which is exactly the behaviour it has against an old server, and
+			// strictly better than dropping the input.
+			if _, err := qtx.MarkChatFinalizeDeferred(ctx, task.ID); err != nil {
+				return fmt.Errorf("mark chat finalize deferred: %w", err)
+			}
+			return nil
 		}
 		if len(messages) == 0 {
 			// Detach attachments BEFORE deleting the user message — the
@@ -1411,6 +1448,155 @@ func (s *TaskService) finalizeCancelledChatMessage(ctx context.Context, task db.
 		return nil
 	}
 	return cancelled
+}
+
+// FinalizeDeferredCancelledChat settles the empty/non-empty judgment that
+// finalizeCancelledChatMessage deferred for a started-but-empty cancelled
+// chat task (#5219). Called from the daemon's cancel-ack (transcript flush
+// complete) and from the sweeper grace-period fallback; the marker claim is
+// atomic, so concurrent callers cannot finalize the same task twice and a
+// call with no pending marker is a no-op. The settled outcome is broadcast
+// as chat:cancel_finalized since the cancel HTTP response has long returned.
+func (s *TaskService) FinalizeDeferredCancelledChat(ctx context.Context, taskID pgtype.UUID) {
+	var (
+		task    db.AgentTaskQueue
+		payload protocol.ChatCancelFinalizedPayload
+		settled bool
+	)
+	if err := s.runInTx(ctx, func(qtx *db.Queries) error {
+		// Lock the task's chat_session first. chat_draft_restore has no FK
+		// (MUL-3515), so the insert below takes no lock of its own on the
+		// session — without this, a workspace/agent/session delete that swept
+		// the table just before we commit would leave our restore row (holding
+		// the user's prompt) orphaned forever. The deleters take the same lock
+		// before their sweep, so one of us blocks: either they wait and their
+		// sweep sees our row, or we wait and find no session left to restore
+		// into. Locking the session BEFORE the task claim also fixes the global
+		// lock order (chat_session -> agent_task_queue) that keeps this from
+		// deadlocking against the deleters' cascade.
+		_, err := qtx.LockChatSessionForTask(ctx, taskID)
+		sessionGone := errors.Is(err, pgx.ErrNoRows)
+		if err != nil && !sessionGone {
+			return fmt.Errorf("lock chat session for deferred finalize: %w", err)
+		}
+
+		// Claim the marker inside the settlement tx: a failed settlement then
+		// rolls the claim back so the sweeper can retry, instead of leaving the
+		// task with a cleared marker and no finalized outcome. The row lock
+		// still serializes the daemon ack and the sweeper — the loser's UPDATE
+		// blocks until the winner commits, then matches no row (ErrNoRows) — so
+		// the same task is never finalized twice.
+		claimed, err := qtx.ClaimChatFinalizeDeferred(ctx, taskID)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("claim deferred chat finalize: %w", err)
+		}
+		task = claimed
+		if sessionGone {
+			// The session cascaded away (its FK NULLs the column below anyway):
+			// there is no transcript to settle and nowhere to put a restore. The
+			// claim above still cleared the marker, so the sweeper stops retrying.
+			return nil
+		}
+		if !claimed.ChatSessionID.Valid {
+			return nil
+		}
+		settled = true
+		payload.ChatSessionID = util.UUIDToString(claimed.ChatSessionID)
+		payload.TaskID = util.UUIDToString(claimed.ID)
+		payload.InitiatorUserID = util.UUIDToString(claimed.InitiatorUserID)
+
+		messages, err := qtx.ListTaskMessages(ctx, claimed.ID)
+		if err != nil {
+			return fmt.Errorf("list cancelled chat task messages: %w", err)
+		}
+		if len(messages) == 0 {
+			// The transcript stayed empty through the daemon flush: same
+			// outcome as the synchronous empty branch, but the cancel HTTP
+			// response is long gone and the broadcast is best-effort. The
+			// restore is persisted in this same tx and served by the
+			// creator-authorized draft-restores endpoint, so a client that
+			// misses the event recovers it on the next session open; the
+			// event itself carries no content and is only an invalidation
+			// hint.
+			detached, err := qtx.DetachAttachmentsFromUserChatMessageByTask(ctx, claimed.ID)
+			if err != nil {
+				return fmt.Errorf("detach cancelled chat message attachments: %w", err)
+			}
+			deleted, err := qtx.DeleteUserChatMessageByTask(ctx, claimed.ID)
+			if errors.Is(err, pgx.ErrNoRows) {
+				payload.Outcome = ""
+				return nil
+			}
+			if err != nil {
+				return fmt.Errorf("delete empty cancelled chat user message: %w", err)
+			}
+			attachmentIDs := make([]pgtype.UUID, 0, len(detached))
+			for _, a := range detached {
+				attachmentIDs = append(attachmentIDs, a.ID)
+			}
+			if _, err := qtx.CreateChatDraftRestore(ctx, db.CreateChatDraftRestoreParams{
+				ID:            deleted.ID,
+				ChatSessionID: claimed.ChatSessionID,
+				TaskID:        claimed.ID,
+				Content:       deleted.Content,
+				AttachmentIds: attachmentIDs,
+			}); err != nil {
+				return fmt.Errorf("create chat draft restore: %w", err)
+			}
+			payload.Outcome = protocol.ChatCancelOutcomeRestored
+			payload.MessageID = util.UUIDToString(deleted.ID)
+			return nil
+		}
+		row, err := qtx.CreateChatMessage(ctx, db.CreateChatMessageParams{
+			ChatSessionID: claimed.ChatSessionID,
+			Role:          "assistant",
+			Content:       "Stopped.",
+			TaskID:        claimed.ID,
+			ElapsedMs:     computeChatElapsedMs(claimed),
+		})
+		if err != nil {
+			return fmt.Errorf("create cancelled chat message: %w", err)
+		}
+		payload.Outcome = protocol.ChatCancelOutcomeStopped
+		payload.MessageID = util.UUIDToString(row.ID)
+		payload.Content = row.Content
+		payload.MessageKind = row.MessageKind
+		if row.CreatedAt.Valid {
+			payload.CreatedAt = row.CreatedAt.Time.UTC().Format(time.RFC3339Nano)
+		}
+		if row.ElapsedMs.Valid {
+			payload.ElapsedMs = row.ElapsedMs.Int64
+		}
+		return nil
+	}); err != nil {
+		slog.Error("failed to finalize deferred cancelled chat",
+			"task_id", util.UUIDToString(taskID),
+			"error", err,
+		)
+		return
+	}
+	if !settled || payload.Outcome == "" {
+		return
+	}
+	s.broadcastChatCancelFinalized(ctx, task, payload)
+}
+
+func (s *TaskService) broadcastChatCancelFinalized(ctx context.Context, task db.AgentTaskQueue, payload protocol.ChatCancelFinalizedPayload) {
+	workspaceID := s.ResolveTaskWorkspaceID(ctx, task)
+	if workspaceID == "" {
+		return
+	}
+	s.Bus.Publish(events.Event{
+		Type:          protocol.EventChatCancelFinalized,
+		WorkspaceID:   workspaceID,
+		ActorType:     "system",
+		ActorID:       "",
+		ChatSessionID: util.UUIDToString(task.ChatSessionID),
+		Payload:       payload,
+	})
 }
 
 // ClaimTask atomically claims the next queued task for an agent,

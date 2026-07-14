@@ -784,6 +784,32 @@ SET status = 'cancelled', completed_at = now(), prepare_lease_expires_at = NULL
 WHERE id = $1 AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory', 'deferred')
 RETURNING *;
 
+-- name: MarkChatFinalizeDeferred :one
+-- Arms the deferred chat-finalize marker for a cancelled chat task whose
+-- empty-transcript judgment must wait for the daemon's flush ack (#5219).
+UPDATE agent_task_queue
+SET chat_finalize_deferred_at = now()
+WHERE id = $1
+RETURNING *;
+
+-- name: ClaimChatFinalizeDeferred :one
+-- Atomically claims the deferred marker so the daemon ack and the sweeper
+-- cannot both finalize the same task (double-"Stopped." guard).
+UPDATE agent_task_queue
+SET chat_finalize_deferred_at = NULL
+WHERE id = $1 AND chat_finalize_deferred_at IS NOT NULL
+RETURNING *;
+
+-- name: ListChatFinalizeDeferredExpired :many
+-- Deferred chat finalizations whose grace period elapsed without a daemon
+-- ack (dead or partitioned daemon). Batch-capped like the other sweeper
+-- queries so one tick can't monopolise the DB.
+SELECT * FROM agent_task_queue
+WHERE chat_finalize_deferred_at IS NOT NULL
+  AND chat_finalize_deferred_at < now() - make_interval(secs => @grace_secs::double precision)
+ORDER BY chat_finalize_deferred_at
+LIMIT @max_per_tick::int;
+
 -- name: CountRunningTasks :one
 SELECT count(*) FROM agent_task_queue
 WHERE agent_id = $1 AND status IN ('dispatched', 'running', 'waiting_local_directory');

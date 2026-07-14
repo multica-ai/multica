@@ -1296,7 +1296,9 @@ func logClaimEndpointSlow(runtimeID, outcome string, start time.Time, authMs, cl
 	)
 }
 
-func requestHasDaemonCapability(r *http.Request, capability string) bool {
+// requestHasClientCapability reports whether the caller advertised a capability
+// in X-Client-Capabilities. Daemons and app clients share the header.
+func requestHasClientCapability(r *http.Request, capability string) bool {
 	for _, part := range strings.Split(r.Header.Get("X-Client-Capabilities"), ",") {
 		if strings.TrimSpace(part) == capability {
 			return true
@@ -1586,7 +1588,7 @@ type claimBuildFailure struct {
 func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQueue, runtime db.AgentRuntime, runtimeID, runtimeWorkspaceID string) (resp AgentTaskResponse, deliveredCommentIDs []pgtype.UUID, agentSkillCount, builtinSkillCount int, failure *claimBuildFailure) {
 	// Build response with fresh agent data (name + skills + custom_env + custom_args).
 	resp = taskToResponse(*task, runtimeWorkspaceID)
-	supportsCoalescedComments := requestHasDaemonCapability(r, protocol.DaemonCapabilityCoalescedCommentsV1)
+	supportsCoalescedComments := requestHasClientCapability(r, protocol.DaemonCapabilityCoalescedCommentsV1)
 	// Empty-but-non-nil so pgx persists '{}' rather than NULL for tasks without
 	// comment input. Comment tasks replace this with the ids actually embedded
 	// in the capability-aware response built below.
@@ -1596,7 +1598,7 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 		resp.ConnectedApps = parseRuntimeConnectedAppsForClaim(task.RuntimeConnectedApps, task.ID)
 	}
 	if agent, err := h.Queries.GetAgent(r.Context(), task.AgentID); err == nil {
-		useSkillRefs := requestHasDaemonCapability(r, protocol.DaemonCapabilitySkillBundlesV1)
+		useSkillRefs := requestHasClientCapability(r, protocol.DaemonCapabilitySkillBundlesV1)
 		var customEnv map[string]string
 		if agent.CustomEnv != nil {
 			if err := json.Unmarshal(agent.CustomEnv, &customEnv); err != nil {
@@ -3480,6 +3482,20 @@ func (h *Handler) ReportTaskMessages(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+// AckTaskCancelled receives the daemon's acknowledgement that it observed a
+// task cancellation and finished flushing the transcript. Settles the chat
+// finalization that CancelTaskWithResult deferred for a started-but-empty
+// transcript (#5219); idempotent when nothing was deferred.
+func (h *Handler) AckTaskCancelled(w http.ResponseWriter, r *http.Request) {
+	taskID := chi.URLParam(r, "taskId")
+	task, ok := h.requireDaemonTaskAccess(w, r, taskID)
+	if !ok {
+		return
+	}
+	h.TaskService.FinalizeDeferredCancelledChat(r.Context(), task.ID)
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 

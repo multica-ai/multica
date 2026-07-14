@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ApiClient, ApiError } from "./client";
+import { ApiClient, ApiError, CHAT_DRAFT_RESTORE_CAPABILITY } from "./client";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -722,6 +722,25 @@ describe("ApiClient", () => {
         content: "restore me",
         restore_to_input: true,
       });
+    });
+
+    // The server only defers the empty-transcript judgment — and so only
+    // withholds the synchronous restore — for clients that advertise this
+    // capability (#5219). Drop the header and this client is treated as a
+    // pre-#5219 build, quietly losing the deferred path it actually implements.
+    it("advertises the durable draft-restore capability", async () => {
+      const fetchMock = vi.fn().mockResolvedValue(
+        new Response(JSON.stringify(taskResponse), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
+      vi.stubGlobal("fetch", fetchMock);
+
+      await new ApiClient("https://api.example.test").cancelTaskById("task-1");
+
+      const init = fetchMock.mock.calls[0]?.[1] as { headers: Record<string, string> };
+      expect(init.headers["X-Client-Capabilities"]).toBe(CHAT_DRAFT_RESTORE_CAPABILITY);
     });
 
     it("treats a null cancelled chat message as absent", async () => {

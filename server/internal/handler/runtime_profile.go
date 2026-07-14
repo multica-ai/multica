@@ -474,6 +474,13 @@ func (h *Handler) DeleteRuntimeProfile(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "failed to clean up agent label assignments")
 			return
 		}
+		// chat_session cascades from agent, and chat_draft_restore has no FK to
+		// follow it (#5219). This path deletes only archived agents, so the prune
+		// is scoped to them too — system agents keep their sessions here.
+		if err := pruneRuntimeAgentChatDraftRestores(r.Context(), qtx, rid, false); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to clean up chat draft restores")
+			return
+		}
 		if err := qtx.DeleteArchivedAgentsByRuntime(r.Context(), rid); err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to clean up archived agents")
 			return

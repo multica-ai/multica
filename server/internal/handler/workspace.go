@@ -748,7 +748,42 @@ func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if err := h.Queries.DeleteChatPinnedAgentsByWorkspace(r.Context(), requester.WorkspaceID); err != nil {
+	// The teardown runs in one transaction so the chat_session row locks below
+	// are still held when DeleteWorkspace sweeps chat_draft_restore. Without
+	// them, FinalizeDeferredCancelledChat could commit a restore for one of
+	// these sessions after the sweep's snapshot was taken: the session cascades
+	// away, the restore has no FK to follow it (MUL-3515) and no reaper, and the
+	// user's prompt is stranded forever (#5219). The finalizer takes the same
+	// lock before inserting, so it either blocks until the session is gone and
+	// skips the insert, or commits first and the sweep sees its row.
+	//
+	// The workspace row is locked first, because the session locks only cover
+	// sessions that already exist: a CreateChatSession committing inside the
+	// delete window would otherwise slip in a session nobody locked, and its
+	// restore would outlive the cascade the same way. Holding the workspace row
+	// FOR UPDATE blocks that insert on its workspace FK (FOR KEY SHARE).
+	tx, err := h.TxStarter.Begin(r.Context())
+	if err != nil {
+		slog.Warn("begin workspace delete tx failed", append(logger.RequestAttrs(r), "error", err, "workspace_id", workspaceID)...)
+		writeError(w, http.StatusInternalServerError, "failed to delete workspace")
+		return
+	}
+	defer tx.Rollback(r.Context())
+	qtx := h.Queries.WithTx(tx)
+
+	if _, err := qtx.LockWorkspaceForDelete(r.Context(), requester.WorkspaceID); err != nil {
+		slog.Warn("lock workspace for delete failed", append(logger.RequestAttrs(r), "error", err, "workspace_id", workspaceID)...)
+		writeError(w, http.StatusInternalServerError, "failed to delete workspace")
+		return
+	}
+
+	if _, err := qtx.LockChatSessionsByWorkspace(r.Context(), requester.WorkspaceID); err != nil {
+		slog.Warn("lock workspace chat sessions failed", append(logger.RequestAttrs(r), "error", err, "workspace_id", workspaceID)...)
+		writeError(w, http.StatusInternalServerError, "failed to delete workspace")
+		return
+	}
+
+	if err := qtx.DeleteChatPinnedAgentsByWorkspace(r.Context(), requester.WorkspaceID); err != nil {
 		slog.Warn("delete workspace chat pins failed", append(logger.RequestAttrs(r), "error", err, "workspace_id", workspaceID)...)
 		writeError(w, http.StatusInternalServerError, "failed to delete workspace")
 		return
@@ -756,8 +791,14 @@ func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 
 	// At this point workspaceMember has resolved → workspaceID is a valid UUID
 	// (the lookup would have errored otherwise), so reuse the resolved value.
-	if err := h.Queries.DeleteWorkspace(r.Context(), requester.WorkspaceID); err != nil {
+	if err := qtx.DeleteWorkspace(r.Context(), requester.WorkspaceID); err != nil {
 		slog.Warn("delete workspace failed", append(logger.RequestAttrs(r), "error", err, "workspace_id", workspaceID)...)
+		writeError(w, http.StatusInternalServerError, "failed to delete workspace")
+		return
+	}
+
+	if err := tx.Commit(r.Context()); err != nil {
+		slog.Warn("commit workspace delete failed", append(logger.RequestAttrs(r), "error", err, "workspace_id", workspaceID)...)
 		writeError(w, http.StatusInternalServerError, "failed to delete workspace")
 		return
 	}

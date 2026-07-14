@@ -335,6 +335,15 @@ func (c *Client) MarkTaskWaitingLocalDirectory(ctx context.Context, taskID, reas
 	}, nil)
 }
 
+// AckTaskCancelled tells the server this daemon observed the task's
+// cancellation and has finished flushing the transcript (runner.run only
+// returns after executeAndDrain's drain wait), so the server can settle its
+// deferred chat finalization now instead of waiting out the sweeper grace
+// period (#5219). Idempotent server-side.
+func (c *Client) AckTaskCancelled(ctx context.Context, taskID string) error {
+	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/tasks/%s/cancel-ack", taskID), map[string]any{}, nil)
+}
+
 func (c *Client) ReportProgress(ctx context.Context, taskID, summary string, step, total int) error {
 	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/tasks/%s/progress", taskID), map[string]any{
 		"summary": summary,

@@ -3158,6 +3158,12 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 	select {
 	case <-cancelledByPoll:
 		taskLog.Info("task cancelled during execution, discarding result")
+		// runner.run has returned, so the transcript flush is complete —
+		// tell the server it can settle its deferred chat finalization
+		// (#5219). Best-effort: the sweeper grace period covers a lost ack.
+		if ackErr := d.client.AckTaskCancelled(ctx, task.ID); ackErr != nil {
+			taskLog.Warn("cancel ack failed; server sweeper will finalize", "error", ackErr)
+		}
 		return
 	default:
 	}
@@ -3185,6 +3191,11 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 	// signals as the in-flight watcher.
 	if status, err := d.client.GetTaskStatus(ctx, task.ID); shouldInterruptAgent(status, err) {
 		taskLog.Info("task cancelled during execution, discarding result", "status", status, "error", err)
+		// Same contract as the poll-cancelled path above: the transcript is
+		// flushed, so let the server settle its deferred chat finalization.
+		if ackErr := d.client.AckTaskCancelled(ctx, task.ID); ackErr != nil {
+			taskLog.Warn("cancel ack failed; server sweeper will finalize", "error", ackErr)
+		}
 		return
 	}
 

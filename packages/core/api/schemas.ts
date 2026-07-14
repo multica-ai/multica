@@ -12,6 +12,7 @@ import type {
   BillingTopupsPage,
   BillingTransactionsPage,
   CancelTaskResponse,
+  ChatDraftRestoresResponse,
   CreateAgentFromTemplateResponse,
   CreateBillingCheckoutSessionResponse,
   CreateBillingPortalSessionResponse,
@@ -639,6 +640,29 @@ export const CancelTaskResponseSchema = AgentTaskSchema.extend({
   cancelled_chat_message: CancelledChatMessageSchema.nullish()
     .transform((value) => value ?? undefined),
 }).loose();
+
+// Deferred-cancellation draft restores
+// (`GET /api/chat/sessions/{id}/draft-restores`, #5219) feed the composer
+// directly: `content` becomes the draft text, `attachments` re-bind on
+// re-send, and `id` is the consume key. A malformed response falls back to
+// an empty list — the durable row stays pending server-side, so nothing is
+// lost by skipping a fetch.
+const ChatDraftRestoreSchema = z.object({
+  id: z.string(),
+  chat_session_id: z.string(),
+  task_id: z.string().optional(),
+  content: z.string().default(""),
+  attachments: z.array(AttachmentSchema).optional(),
+  created_at: z.string().optional(),
+}).loose();
+
+export const ChatDraftRestoresResponseSchema = z.object({
+  restores: z.array(ChatDraftRestoreSchema).default([]),
+}).loose();
+
+export const EMPTY_CHAT_DRAFT_RESTORES: ChatDraftRestoresResponse = {
+  restores: [],
+};
 
 export const EMPTY_CANCEL_TASK_RESPONSE: CancelTaskResponse = {
   id: "",

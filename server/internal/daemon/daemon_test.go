@@ -3213,3 +3213,138 @@ func TestHermesLaunchArgsAndEnvByScenario(t *testing.T) {
 		t.Errorf("overlay task must redirect HERMES_HOME to the overlay, got %q", overlayEnv["HERMES_HOME"])
 	}
 }
+
+// TestHandleTask_AcksCancelAfterPollCancelled verifies the daemon posts
+// cancel-ack when the poll goroutine interrupts the run — by then
+// runner.run has returned, so the transcript flush is complete and the
+// server may settle its deferred chat finalization (#5219).
+func TestHandleTask_AcksCancelAfterPollCancelled(t *testing.T) {
+	t.Parallel()
+
+	var callOrder []string
+	var mu sync.Mutex
+	recordCall := func(name string) {
+		mu.Lock()
+		callOrder = append(callOrder, name)
+		mu.Unlock()
+	}
+
+	var statusCallCount atomic.Int64
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/cancel-ack"):
+			recordCall("cancel-ack")
+			w.WriteHeader(http.StatusOK)
+		case strings.HasSuffix(r.URL.Path, "/status"):
+			if statusCallCount.Add(1) == 1 {
+				recordCall("poll-status")
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusOK)
+				_, _ = w.Write([]byte(`{"status":"cancelled"}`))
+			} else {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusOK)
+				_, _ = w.Write([]byte(`{"status":"running"}`))
+			}
+		default:
+			w.WriteHeader(http.StatusOK)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	d := &Daemon{
+		client:             NewClient(srv.URL),
+		logger:             slog.New(slog.NewTextHandler(io.Discard, nil)),
+		workspaces:         make(map[string]*workspaceState),
+		runtimeIndex:       map[string]Runtime{"rt-1": {ID: "rt-1", Provider: "claude"}},
+		cancelPollInterval: 10 * time.Millisecond,
+	}
+
+	d.runner = taskRunnerFunc(func(runCtx context.Context, _ Task, _ string, _ int, _ *slog.Logger) (TaskResult, error) {
+		<-runCtx.Done()
+		return TaskResult{Status: "aborted"}, nil
+	})
+
+	task := Task{
+		ID:        "task-ack-poll",
+		RuntimeID: "rt-1",
+		IssueID:   "issue-ack-poll",
+		Agent:     &AgentData{Name: "test-agent"},
+	}
+
+	d.handleTask(context.Background(), task, 0)
+
+	mu.Lock()
+	order := make([]string, len(callOrder))
+	copy(order, callOrder)
+	mu.Unlock()
+
+	pollStatusIdx, ackIdx := -1, -1
+	for i, name := range order {
+		switch name {
+		case "poll-status":
+			pollStatusIdx = i
+		case "cancel-ack":
+			ackIdx = i
+		}
+	}
+	if pollStatusIdx == -1 {
+		t.Fatalf("poll goroutine never fired (order: %v)", order)
+	}
+	if ackIdx == -1 {
+		t.Fatalf("cancel-ack was never posted on the poll-cancelled path (order: %v)", order)
+	}
+	if ackIdx < pollStatusIdx {
+		t.Fatalf("cancel-ack before the poll observed the cancellation (order: %v)", order)
+	}
+}
+
+// TestHandleTask_AcksCancelOnPostRunStatusCheck verifies cancel-ack is also
+// posted when the cancellation is only discovered by the pre-completion
+// status check (the run finished before the poll noticed).
+func TestHandleTask_AcksCancelOnPostRunStatusCheck(t *testing.T) {
+	t.Parallel()
+
+	var ackCalls atomic.Int64
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/cancel-ack"):
+			ackCalls.Add(1)
+			w.WriteHeader(http.StatusOK)
+		case strings.HasSuffix(r.URL.Path, "/status"):
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"status":"cancelled"}`))
+		default:
+			w.WriteHeader(http.StatusOK)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	d := &Daemon{
+		client:             NewClient(srv.URL),
+		logger:             slog.New(slog.NewTextHandler(io.Discard, nil)),
+		workspaces:         make(map[string]*workspaceState),
+		runtimeIndex:       map[string]Runtime{"rt-1": {ID: "rt-1", Provider: "claude"}},
+		cancelPollInterval: time.Hour, // disable the poll path; exercise the post-run check
+	}
+
+	d.runner = taskRunnerFunc(func(_ context.Context, _ Task, _ string, _ int, _ *slog.Logger) (TaskResult, error) {
+		return TaskResult{Status: "completed"}, nil
+	})
+
+	task := Task{
+		ID:        "task-ack-postrun",
+		RuntimeID: "rt-1",
+		IssueID:   "issue-ack-postrun",
+		Agent:     &AgentData{Name: "test-agent"},
+	}
+
+	d.handleTask(context.Background(), task, 0)
+
+	if got := ackCalls.Load(); got != 1 {
+		t.Fatalf("cancel-ack calls = %d, want 1", got)
+	}
+}
