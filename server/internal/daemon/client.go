@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -104,6 +105,12 @@ type Client struct {
 	platform string
 	version  string
 	os       string
+
+	workspaceMu                    sync.Mutex
+	workspaceETag                  string
+	workspaceCache                 []WorkspaceInfo
+	workspaceCacheValid            bool
+	legacyWorkspaceEndpointEnabled bool
 }
 
 // NewClient creates a new daemon API client.
@@ -166,10 +173,20 @@ func (c *Client) setIdentityHeaders(req *http.Request) {
 	if c.os != "" {
 		req.Header.Set("X-Client-OS", c.os)
 	}
-	req.Header.Set("X-Client-Capabilities", strings.Join([]string{
+	req.Header.Set("X-Client-Capabilities", daemonClientCapabilities())
+}
+
+// daemonClientCapabilities is the X-Client-Capabilities value the daemon
+// advertises on BOTH the HTTP control-plane requests and the WS handshake, so a
+// claim built over WS gets the same capability gating (skill refs,
+// coalesced-comments) as the HTTP path. rpc-v1 advertises WS request/response
+// support (MUL-4257).
+func daemonClientCapabilities() string {
+	return strings.Join([]string{
 		protocol.DaemonCapabilitySkillBundlesV1,
 		protocol.DaemonCapabilityCoalescedCommentsV1,
-	}, ","))
+		protocol.DaemonCapabilityRPCV1,
+	}, ",")
 }
 
 // SetToken sets the auth token for authenticated requests.
@@ -190,6 +207,86 @@ func (c *Client) ClaimTask(ctx context.Context, runtimeID string) (*Task, error)
 		return nil, err
 	}
 	return resp.Task, nil
+}
+
+// batchClaimRequestTimeout is the short, request-scoped deadline for the
+// machine-level batch claim (MUL-4257). Unlike the per-runtime claim — which
+// gets the full 30s control-plane timeout because a stall there only blocks
+// that one runtime's goroutine — the batch call covers every runtime the
+// daemon hosts in a single request, so a slow claim would delay ALL of them
+// (the head-of-line coupling the per-runtime pollers were split to avoid,
+// MUL-1744). Bounding the batch to a few seconds caps that worst-case
+// starvation; a claim that commits server-side after the client gives up is
+// recovered by ReclaimStaleDispatchedTasksForRuntimes on the next poll. Kept
+// comfortably above p99 claim latency so recovery stays the exception.
+const batchClaimRequestTimeout = 5 * time.Second
+
+// ClaimTasks is the machine-level (MUL-4257) batch counterpart of ClaimTask:
+// it asks the server, in a single request, to claim up to maxTasks tasks across
+// every runtime the daemon hosts. daemonID scopes the request to this machine —
+// the server rejects any runtime_id whose runtime.daemon_id doesn't match, so a
+// stale/crossed runtime set can't claim another machine's tasks. Each returned
+// Task carries its own RuntimeID so the daemon routes it to the matching
+// runtime locally. The request runs under a short, request-scoped deadline
+// (batchClaimRequestTimeout) rather than the shared 30s control-plane timeout so
+// one slow claim cannot stall the whole batch; the deadline propagates to the
+// server and cancels the in-flight query there too.
+func (c *Client) ClaimTasks(ctx context.Context, daemonID string, runtimeIDs []string, maxTasks int) ([]*Task, error) {
+	reqCtx, cancel := context.WithTimeout(ctx, batchClaimRequestTimeout)
+	defer cancel()
+	var resp struct {
+		Tasks []*Task `json:"tasks"`
+	}
+	if err := c.postJSON(reqCtx, "/api/daemon/tasks/claim", map[string]any{
+		"daemon_id":   daemonID,
+		"runtime_ids": runtimeIDs,
+		"max_tasks":   maxTasks,
+	}, &resp); err != nil {
+		return nil, err
+	}
+	return resp.Tasks, nil
+}
+
+// isBatchClaimUnsupported reports whether err is a 404 from the batch claim
+// endpoint — i.e. the server predates the /api/daemon/tasks/claim route and the
+// daemon must fall back to the legacy per-runtime claim (MUL-4257). The batch
+// handler itself never returns 404, so a 404 here means the route is
+// unregistered on an un-upgraded server.
+func isBatchClaimUnsupported(err error) bool {
+	var reqErr *requestError
+	if !errors.As(err, &reqErr) {
+		return false
+	}
+	return reqErr.StatusCode == http.StatusNotFound
+}
+
+// claimTasksLegacy is the pre-batch compatibility fallback (MUL-4257): claim per
+// runtime via the legacy POST /api/daemon/runtimes/{id}/tasks/claim so a new
+// daemon still works against a server that has no batch route. Returns up to
+// maxTasks tasks. A per-runtime error is only propagated when nothing has been
+// claimed yet; otherwise the partial result is returned and the next poll
+// retries the rest.
+func (c *Client) claimTasksLegacy(ctx context.Context, runtimeIDs []string, maxTasks int) ([]*Task, error) {
+	if maxTasks <= 0 {
+		return nil, nil
+	}
+	out := make([]*Task, 0, maxTasks)
+	for _, rid := range runtimeIDs {
+		if len(out) >= maxTasks {
+			break
+		}
+		task, err := c.ClaimTask(ctx, rid)
+		if err != nil {
+			if len(out) == 0 {
+				return nil, err
+			}
+			return out, nil
+		}
+		if task != nil {
+			out = append(out, task)
+		}
+	}
+	return out, nil
 }
 
 // ResolveSkillBundle downloads a single skill bundle. It uses bundleClient (no
@@ -404,13 +501,78 @@ func (c *Client) RenewToken(ctx context.Context) (*RenewTokenResponse, error) {
 	return &resp, nil
 }
 
-// ListWorkspaces fetches all workspaces the authenticated user belongs to.
+// ListWorkspaces fetches the minimal workspace membership set used by the
+// daemon. New servers expose a daemon-specific endpoint with ETag support;
+// when an installed daemon talks to an older server, the first 404 switches
+// this process to the legacy full-workspace endpoint for compatibility.
 func (c *Client) ListWorkspaces(ctx context.Context) ([]WorkspaceInfo, error) {
+	c.workspaceMu.Lock()
+	defer c.workspaceMu.Unlock()
+
+	if c.legacyWorkspaceEndpointEnabled {
+		return c.listLegacyWorkspaces(ctx)
+	}
+
+	const path = "/api/daemon/workspaces"
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+path, nil)
+	if err != nil {
+		return nil, err
+	}
+	if c.token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.token)
+	}
+	c.setIdentityHeaders(req)
+	if c.workspaceETag != "" {
+		req.Header.Set("If-None-Match", c.workspaceETag)
+	}
+
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusNotFound {
+		_, _ = io.Copy(io.Discard, resp.Body)
+		c.legacyWorkspaceEndpointEnabled = true
+		c.workspaceETag = ""
+		c.workspaceCache = nil
+		c.workspaceCacheValid = false
+		return c.listLegacyWorkspaces(ctx)
+	}
+	if resp.StatusCode == http.StatusNotModified {
+		if !c.workspaceCacheValid {
+			return nil, fmt.Errorf("GET %s returned 304 without a cached workspace set", path)
+		}
+		return append([]WorkspaceInfo(nil), c.workspaceCache...), nil
+	}
+	if resp.StatusCode >= 400 {
+		data, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return nil, &requestError{Method: http.MethodGet, Path: path, StatusCode: resp.StatusCode, Body: strings.TrimSpace(string(data))}
+	}
+
+	var workspaces []WorkspaceInfo
+	if err := json.NewDecoder(resp.Body).Decode(&workspaces); err != nil {
+		return nil, err
+	}
+	c.workspaceETag = resp.Header.Get("ETag")
+	c.workspaceCache = append([]WorkspaceInfo(nil), workspaces...)
+	c.workspaceCacheValid = true
+	return append([]WorkspaceInfo(nil), workspaces...), nil
+}
+
+func (c *Client) listLegacyWorkspaces(ctx context.Context) ([]WorkspaceInfo, error) {
 	var workspaces []WorkspaceInfo
 	if err := c.getJSON(ctx, "/api/workspaces", &workspaces); err != nil {
 		return nil, err
 	}
 	return workspaces, nil
+}
+
+func (c *Client) usesLegacyWorkspaceEndpoint() bool {
+	c.workspaceMu.Lock()
+	defer c.workspaceMu.Unlock()
+	return c.legacyWorkspaceEndpointEnabled
 }
 
 // IssueGCStatus holds the minimal issue info returned by the GC check endpoint.

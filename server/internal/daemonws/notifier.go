@@ -71,3 +71,31 @@ func (n *RelayNotifier) NotifyRuntimeProfilesChanged(workspaceID, profileID stri
 	}
 	M.WakeupPublishedTotal.Add(1)
 }
+
+func (n *RelayNotifier) NotifyWorkspacesChanged(userID string) {
+	if userID == "" {
+		return
+	}
+	eventID := ulid.Make().String()
+	if n.local != nil {
+		n.local.notifyWorkspacesChanged(userID, eventID)
+	}
+	if n.relay == nil {
+		return
+	}
+	frame, err := workspacesChangedFrame()
+	if err != nil {
+		M.WakeupPublishErrors.Add(1)
+		return
+	}
+	// ScopeDaemonRuntime is the relay's daemon-only transport scope; the frame
+	// type tells Hub.DeliverDaemonRuntime whether scopeID is a runtime,
+	// workspace, or user key. Keeping one transport scope preserves compatibility
+	// with existing relay consumers while the hub enforces user-scoped delivery.
+	if err := n.relay.PublishWithID(realtime.ScopeDaemonRuntime, userID, "", frame, eventID); err != nil {
+		M.WakeupPublishErrors.Add(1)
+		slog.Warn("daemon websocket workspace refresh publish failed", "error", err, "user_id", userID)
+		return
+	}
+	M.WakeupPublishedTotal.Add(1)
+}

@@ -13,14 +13,38 @@ const (
 	// The access model exists to gate Composio sharing, so the two ship on the
 	// same switch.
 	ComposioMCPApps = "composio_mcp_apps"
+	// AgentBuilder controls writes of system builder agents. It stays disabled
+	// through the schema-only rollout so an older server cannot expose them.
+	AgentBuilder = "agents_agent_builder"
+	// ResourceLabels controls the agent- and skill-scoped label namespaces.
+	// Issue labels remain available while this release flag is off.
+	ResourceLabels = "settings_resource_labels"
+	// AgentSkillToggles controls writes of agent_skill.enabled=false. Older
+	// servers do not filter that state when preparing an agent task.
+	AgentSkillToggles = "agents_skill_toggles"
 )
 
 var frontendPublicFlags = []string{
 	ComposioMCPApps,
+	AgentBuilder,
+	ResourceLabels,
+	AgentSkillToggles,
 }
 
 func ComposioMCPAppsEnabled(ctx context.Context, flags *featureflag.Service) bool {
 	return flags.IsEnabled(ctx, ComposioMCPApps, false)
+}
+
+func AgentBuilderEnabled(ctx context.Context, flags *featureflag.Service) bool {
+	return flags.IsEnabled(ctx, AgentBuilder, false)
+}
+
+func ResourceLabelsEnabled(ctx context.Context, flags *featureflag.Service) bool {
+	return flags.IsEnabled(ctx, ResourceLabels, false)
+}
+
+func AgentSkillTogglesEnabled(ctx context.Context, flags *featureflag.Service) bool {
+	return flags.IsEnabled(ctx, AgentSkillToggles, false)
 }
 
 func EvaluateFrontendPublicFlags(ctx context.Context, flags *featureflag.Service) map[string]bool {

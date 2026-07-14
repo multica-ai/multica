@@ -118,6 +118,14 @@ const (
 	EventDaemonRegister               = "daemon:register"
 	EventDaemonTaskAvailable          = "daemon:task_available"
 	EventDaemonRuntimeProfilesChanged = "daemon:runtime_profiles_changed"
+	EventDaemonWorkspacesChanged      = "daemon:workspaces_changed"
+	// Generic daemon→server request/response over the WebSocket control
+	// connection (MUL-4257). The daemon sends EventDaemonRPCRequest with a
+	// correlation id + method + body; the server replies EventDaemonRPCResponse
+	// with the same request id. This is the transport for WS-first claim (with
+	// HTTP fallback) and any future daemon→server RPC.
+	EventDaemonRPCRequest  = "daemon:rpc_request"
+	EventDaemonRPCResponse = "daemon:rpc_response"
 
 	// GitHub integration events
 	EventGitHubInstallationCreated = "github_installation:created"

@@ -133,12 +133,12 @@ type workspaceState struct {
 	lastRepoSyncErr string
 	repoRefreshMu   sync.Mutex
 	// profileSetSig is a content hash of the workspace's custom runtime
-	// profile list (MUL-3332) as last seen from the server. The
-	// workspaceSyncLoop compares the live signature with this cached value;
-	// any drift triggers a re-register so newly-added (or edited / disabled)
-	// custom runtimes appear without a daemon restart. Empty before the
-	// first successful profile fetch (older server / network blip); guarded
-	// by Daemon.mu like every other field on this struct.
+	// profile list (MUL-3332) as last seen from the server. An on-demand
+	// refresh compares the live signature with this cached value; any drift
+	// triggers a re-register so newly-added (or edited / disabled) custom
+	// runtimes appear without a daemon restart. Empty before the first
+	// successful profile fetch (older server / network blip); guarded by
+	// Daemon.mu like every other field on this struct.
 	profileSetSig string
 }
 
@@ -177,9 +177,27 @@ type Daemon struct {
 
 	// reconcile fans out a "re-check server state now" signal to subscribers
 	// (watchTaskCancellation, workspaceSyncLoop) so the WS connect/reconnect
-	// path can shrink the 5s / 30s reconciliation gap to sub-second. See
+	// path can shrink coarse fallback reconciliation gaps to sub-second. See
 	// reconcile.go and runTaskWakeupConnection.
 	reconcile *reconcileBroadcaster
+	// workspaceChanges is the account-scoped server hint for membership-set
+	// changes. It stays separate from reconcile because a membership hint only
+	// needs the minimal workspace list, while a WS reconnect also reconciles
+	// runtime profiles that may have changed during the gap.
+	workspaceChanges *workspaceChangeSignal
+
+	// wsRPC carries generic request/response RPCs (e.g. tasks.claim, MUL-4257)
+	// over the task-wakeup WS connection. It is attached to the live
+	// connection in runTaskWakeupConnection and detached on disconnect; when
+	// detached, callers fall back to HTTP.
+	wsRPC *wsRPCClient
+
+	// batchClaimUnsupported is set once a batch claim gets a 404 from the
+	// server (no /api/daemon/tasks/claim route — an un-upgraded server), so
+	// subsequent polls skip WS+batch and use the legacy per-runtime claim
+	// directly. Reset when the WS (re)connects, so a server upgrade that
+	// bounces the connection re-probes the batch route (MUL-4257).
+	batchClaimUnsupported atomic.Bool
 
 	// runtimeGoneMu guards runtimeGoneInflight, reregisterNextAttempt, and
 	// reregisterLastCompletedAt. The state lets heartbeat / poller / WS-ack
@@ -211,7 +229,7 @@ type Daemon struct {
 	// race where a new task slipping in during the release-metadata fetch
 	// would be cancelled by triggerRestart's root-ctx cancel.
 	claimMu        sync.Mutex
-	pauseClaims    bool // when true, runRuntimePoller skips ClaimTask
+	pauseClaims    bool // when true, the batch poller skips claiming
 	claimsInFlight int  // pollers that have decided to claim but haven't yet handed the task off to handleTask
 
 	activeEnvRootsMu sync.Mutex
@@ -271,6 +289,8 @@ func New(cfg Config, logger *slog.Logger) *Daemon {
 		reregisterLastCompletedAt: make(map[string]time.Time),
 		cancelPollInterval:        5 * time.Second,
 		reconcile:                 newReconcileBroadcaster(),
+		workspaceChanges:          newWorkspaceChangeSignal(),
+		wsRPC:                     newWSRPCClient(wsRPCResponseGrace),
 	}
 	d.runner = taskRunnerFunc(d.runTask)
 	d.runUpdateFn = d.runUpdate
@@ -959,18 +979,18 @@ func (d *Daemon) registerRuntimesForWorkspace(ctx context.Context, workspaceID s
 	// whose command_name is not on PATH is skipped (the host doesn't have it).
 	//
 	// profileSig is a content hash of the workspace's profile list captured
-	// here so the workspaceSyncLoop can detect server-side profile changes
-	// between sync ticks without making an extra round trip on every tick
-	// (MUL-3332). An empty string means the fetch failed and the caller must
-	// keep whatever signature was previously cached on the workspaceState.
+	// here so an on-demand server notification can skip re-registration when
+	// the effective profile set is already current (MUL-3332). An empty string
+	// means the fetch failed and the caller must keep whatever signature was
+	// previously cached on the workspaceState.
 	profileSig := d.appendProfileRuntimes(ctx, workspaceID, &runtimes, &failedProfiles)
 
 	if len(runtimes) == 0 && len(failedProfiles) == 0 {
 		// profileSig is still meaningful even when nothing resolves: the
-		// drift-refresh path uses it to remember "we already converged on the
-		// disabled-everywhere state" so the next sync tick is a no-op instead
-		// of a re-empty-register loop. Initial-registration callers that don't
-		// care about the sig discard it via _.
+		// refresh path uses it to remember "we already converged on the
+		// disabled-everywhere state" so duplicate change notifications are a
+		// no-op instead of a re-empty-register loop. Initial-registration
+		// callers that don't care about the sig discard it via _.
 		return nil, profileSig, ErrNoRuntimesToRegister
 	}
 
@@ -1014,12 +1034,12 @@ func (d *Daemon) registerRuntimesForWorkspace(ctx context.Context, workspaceID s
 // version, status = "online", plus the profile_id the server validates.
 //
 // Returns a content signature of the fetched profile list (MUL-3332). The
-// signature is used by the workspace sync loop to detect server-side profile
-// changes between sync ticks and trigger a re-register without a daemon
-// restart. Returns the empty string when the fetch failed — callers must
-// treat that as "unknown, do not overwrite a previously-stored signature"
-// (otherwise a transient 5xx would silently flip the daemon into thinking the
-// workspace has zero profiles).
+// signature is used by on-demand profile refreshes to ignore duplicate change
+// notifications while still triggering a re-register without a daemon
+// restart. Returns the empty string when the fetch failed — callers must treat
+// that as "unknown, do not overwrite a previously-stored signature" (otherwise
+// a transient 5xx would silently flip the daemon into thinking the workspace
+// has zero profiles).
 func (d *Daemon) appendProfileRuntimes(ctx context.Context, workspaceID string, runtimes *[]map[string]string, failedProfiles *[]map[string]string) string {
 	resp, err := d.client.GetRuntimeProfiles(ctx, workspaceID)
 	if err != nil {
@@ -1125,11 +1145,10 @@ func (d *Daemon) appendProfileRuntimes(ctx context.Context, workspaceID string, 
 }
 
 // profileSetSignature is a stable content hash of the workspace's custom
-// runtime profile list (MUL-3332). The workspaceSyncLoop diffs this against
-// the cached value on each tick: a mismatch means the user added, edited, or
-// disabled a profile via the web UI / CLI between syncs and the daemon must
-// re-register so the new runtime instance shows up in the list without a
-// restart.
+// runtime profile list (MUL-3332). An on-demand refresh diffs this against the
+// cached value after the server reports a create, edit, disable, or delete; a
+// mismatch makes the daemon re-register so the new runtime instance appears
+// without a restart.
 //
 // The hashed projection covers exactly the fields that affect what the
 // daemon sends in a Register call: ID, Enabled, ProtocolFamily, CommandName,
@@ -1402,15 +1421,13 @@ func (d *Daemon) refreshWorkspaceRepos(ctx context.Context, workspaceID string) 
 // refreshWorkspaceRuntimeProfiles fetches the workspace's enabled custom
 // runtime profile list (MUL-3332), compares its content signature against
 // the value cached on the workspaceState, and triggers a re-register when
-// the signature has drifted. This is the entry point that lets profiles
-// added / edited / disabled via the web UI or CLI become visible in the
-// runtime list within one workspaceSyncLoop tick instead of requiring a
-// daemon restart.
+// the signature has drifted. This is the entry point used by the daemon
+// WebSocket change notification so profiles added / edited / disabled via the
+// web UI or CLI become visible without a daemon restart.
 //
-// Best-effort: a fetch error (older server, network blip) is logged and
-// swallowed — the cached signature is preserved so the next tick can still
-// detect a real drift. A successfully-fetched-but-unchanged signature is the
-// expected steady state and short-circuits without any further work.
+// Best-effort: a fetch error (older server, network blip) preserves the cached
+// signature. A successfully-fetched-but-unchanged signature can result from a
+// duplicate notification and short-circuits without any further work.
 //
 // On drift the function takes a path that deliberately differs from
 // reregisterWorkspaceAfterRuntimeGone in two ways:
@@ -1438,8 +1455,8 @@ func (d *Daemon) refreshWorkspaceRuntimeProfiles(ctx context.Context, workspaceI
 
 	resp, err := d.client.GetRuntimeProfiles(refreshCtx, workspaceID)
 	if err != nil {
-		// Older server (no profiles route) returns 404; the daemon should not
-		// log a noisy warning on every sync tick in that case.
+		// Older server (no profiles route) returns 404; let the on-demand caller
+		// log the failure at debug level.
 		return err
 	}
 	var profiles []RuntimeProfile
@@ -1452,7 +1469,7 @@ func (d *Daemon) refreshWorkspaceRuntimeProfiles(ctx context.Context, workspaceI
 	ws, ok := d.workspaces[workspaceID]
 	if !ok {
 		d.mu.Unlock()
-		// Workspace was removed between sync ticks — nothing to do.
+		// Workspace was removed while the refresh was in flight — nothing to do.
 		return nil
 	}
 	cached := ws.profileSetSig
@@ -1517,8 +1534,8 @@ func (d *Daemon) refreshWorkspaceRuntimeProfiles(ctx context.Context, workspaceI
 // The workspaceState pointer is preserved: the workspace itself is still a
 // valid workspace the user belongs to, just one with no agents on this
 // daemon for the moment. If the user re-enables a profile or installs a
-// built-in agent, the next sync tick's profile-drift detection (or a daemon
-// restart) will register it again.
+// built-in agent, the profile-change notification or the next daemon WS
+// reconnect will register it again.
 func (d *Daemon) convergeWorkspaceRuntimesToZero(ctx context.Context, workspaceID, profileSig string) error {
 	d.mu.Lock()
 	ws, ok := d.workspaces[workspaceID]
@@ -1643,7 +1660,7 @@ const DefaultTokenRenewalInterval = 3 * 24 * time.Hour
 // register runtimes once one appears.
 func (d *Daemon) preflightAuth(ctx context.Context) error {
 	d.tryRenewToken(ctx)
-	return d.syncWorkspacesFromAPI(ctx)
+	return d.syncWorkspacesFromAPI(ctx, false)
 }
 
 // tokenRenewalLoop keeps the daemon's PAT alive by periodically asking the
@@ -1700,25 +1717,46 @@ func (d *Daemon) tryRenewToken(ctx context.Context) {
 	}
 }
 
-// workspaceSyncLoop periodically fetches the user's workspaces from the API
-// and registers runtimes for any new ones. A WS connect/reconnect broadcast
-// triggers an immediate sync so workspace and runtime changes the server
-// applied during the WS gap are picked up sub-second instead of after the
-// next 30s tick. Repository bindings and workspace settings refresh on demand
-// when a checkout needs them.
+// workspaceSyncLoop reconciles the user's workspace membership set. Daemons
+// with runtimes and account-scoped WS support use a thirty-minute jittered
+// consistency check; daemons talking to older servers retain a five-minute
+// fallback. Bootstrap daemons without runtimes keep the shorter interval needed
+// to discover their first workspace. Account-scoped WS hints trigger an
+// immediate minimal sync, while a WS reconnect also reconciles runtime profiles
+// changed during the connection gap.
 func (d *Daemon) workspaceSyncLoop(ctx context.Context) {
-	ticker := time.NewTicker(DefaultWorkspaceSyncInterval)
-	defer ticker.Stop()
+	timer := time.NewTimer(jitterDuration(d.workspaceSyncBaseInterval()))
+	defer timer.Stop()
 
 	var reconcileCh <-chan struct{}
 	if d.reconcile != nil {
 		reconcileCh = d.reconcile.notify()
 	}
+	var workspaceChangesCh <-chan struct{}
+	if d.workspaceChanges != nil {
+		workspaceChangesCh = d.workspaceChanges.notify()
+	}
 
-	sync := func() {
-		if err := d.syncWorkspacesFromAPI(ctx); err != nil {
-			d.logger.Debug("workspace sync failed", "error", err)
+	var consecutiveFailures int
+	resetTimer := func() {
+		interval := workspaceSyncBackoff(d.workspaceSyncBaseInterval(), consecutiveFailures)
+		if !timer.Stop() {
+			select {
+			case <-timer.C:
+			default:
+			}
 		}
+		timer.Reset(jitterDuration(interval))
+	}
+
+	syncNow := func(reconcileProfiles bool) {
+		if err := d.syncWorkspacesFromAPI(ctx, reconcileProfiles); err != nil {
+			consecutiveFailures++
+			d.logger.Debug("workspace sync failed", "error", err)
+		} else {
+			consecutiveFailures = 0
+		}
+		resetTimer()
 	}
 
 	for {
@@ -1729,17 +1767,51 @@ func (d *Daemon) workspaceSyncLoop(ctx context.Context) {
 			if d.reconcile != nil {
 				reconcileCh = d.reconcile.notify()
 			}
-			sync()
-		case <-ticker.C:
-			sync()
+			syncNow(true)
+		case <-workspaceChangesCh:
+			syncNow(false)
+		case <-timer.C:
+			syncNow(false)
 		}
 	}
 }
 
+func (d *Daemon) workspaceSyncBaseInterval() time.Duration {
+	if len(d.allRuntimeIDs()) == 0 {
+		return DefaultWorkspaceBootstrapSyncInterval
+	}
+	if d.client.usesLegacyWorkspaceEndpoint() {
+		return DefaultWorkspaceLegacySyncInterval
+	}
+	return DefaultWorkspaceSyncInterval
+}
+
+func workspaceSyncBackoff(base time.Duration, consecutiveFailures int) time.Duration {
+	maxInterval := DefaultWorkspaceSyncMaxBackoff
+	if base == DefaultWorkspaceBootstrapSyncInterval {
+		maxInterval = DefaultWorkspaceLegacySyncInterval
+	}
+	interval := base
+	for i := 0; i < consecutiveFailures; i++ {
+		if interval >= maxInterval/2 {
+			return maxInterval
+		}
+		interval *= 2
+	}
+	if interval > maxInterval {
+		return maxInterval
+	}
+	return interval
+}
+
 // syncWorkspacesFromAPI fetches all workspaces the user belongs to and
-// registers runtimes for any that aren't already tracked. Workspaces the user
-// has left are cleaned up.
-func (d *Daemon) syncWorkspacesFromAPI(ctx context.Context) error {
+// registers runtimes for any that aren't already tracked. When
+// reconcileProfiles is true (after a daemon WS connect/reconnect), tracked
+// workspaces reconcile custom runtime profiles once so a change made while the
+// WS was unavailable is not lost. Normal timers and workspace-change hints
+// pass false and make no runtime-profile requests. Workspaces the user has
+// left are cleaned up.
+func (d *Daemon) syncWorkspacesFromAPI(ctx context.Context, reconcileProfiles bool) error {
 	d.reloading.Lock()
 	defer d.reloading.Unlock()
 
@@ -1768,17 +1840,10 @@ func (d *Daemon) syncWorkspacesFromAPI(ctx context.Context) error {
 	var removed int
 	for id, name := range apiIDs {
 		if currentIDs[id] {
-			// Pick up custom runtime profiles created/edited/disabled via
-			// the web UI or CLI between sync ticks (MUL-3332). Without this,
-			// a profile added on the server would only become a runtime row
-			// after a daemon restart or a runtime_gone recovery, because the
-			// already-tracked branch never re-runs registerRuntimesForWorkspace
-			// otherwise. refreshWorkspaceRuntimeProfiles is best-effort and
-			// only re-registers when it observes a real signature drift, so
-			// quiet workspaces incur exactly one cheap GetRuntimeProfiles
-			// round trip per sync tick.
-			if err := d.refreshWorkspaceRuntimeProfiles(ctx, id); err != nil {
-				d.logger.Debug("workspace sync: profile refresh failed", "workspace_id", id, "error", err)
+			if reconcileProfiles {
+				if err := d.refreshWorkspaceRuntimeProfiles(ctx, id); err != nil {
+					d.logger.Debug("workspace reconcile: profile refresh failed", "workspace_id", id, "error", err)
+				}
 			}
 			// Only intervene further if the workspace lost all of its
 			// runtimes (most commonly because handleRuntimeGone pruned them
@@ -1808,9 +1873,9 @@ func (d *Daemon) syncWorkspacesFromAPI(ctx context.Context) error {
 		}
 		d.mu.Lock()
 		ws := newWorkspaceState(id, runtimeIDs, resp.ReposVersion, resp.Repos, resp.Settings)
-		// Seed the profile signature so the next sync tick can detect drift
-		// without re-registering on a transient fetch failure (empty sig is
-		// the explicit "unknown — keep the previous value" sentinel from
+		// Seed the profile signature so later on-demand change notifications can
+		// detect drift without re-registering on duplicates (empty sig is the
+		// explicit "unknown — keep the previous value" sentinel from
 		// appendProfileRuntimes; on first registration there is no previous
 		// value, so empty stays empty).
 		ws.profileSetSig = profileSig
@@ -2477,67 +2542,49 @@ func (d *Daemon) triggerRestart() {
 	}
 }
 
-// pollLoop supervises one runtimePoller goroutine per registered runtime,
-// fans wake-up signals out to all of them, and waits for in-flight tasks to
-// drain on shutdown. Per-runtime workers replace the previous round-robin
-// loop so that a slow ClaimTask call (HTTP 30s timeout) for one runtime no
-// longer delays claims on every other runtime — that was the cross-workspace
-// stall mode reported in MUL-1744.
+// pollLoop runs the machine-level batch claim poller (MUL-4257): a single
+// goroutine claims across ALL of the daemon's runtimes per cycle via
+// ClaimTasksWSFirst (WS-first, HTTP fallback), replacing the previous
+// one-HTTP-poller-per-runtime model. Wake-up signals — a WS task_available /
+// catch-up nudge or a runtime-set change — all collapse to one nudge because a
+// batch claim already covers every runtime. On shutdown it stops the poller,
+// then drains in-flight tasks.
+//
+// This trades the per-runtime isolation the old model gave (MUL-1744) for a
+// single request; the head-of-line risk is bounded by ClaimTasksWSFirst's short
+// per-request timeout (WS) / the client's timeout (HTTP fallback), and the
+// server-side batch claim is index-backed + short.
 func (d *Daemon) pollLoop(ctx context.Context, taskWakeups <-chan taskWakeup) error {
 	sem := newTaskSlotSemaphore(d.cfg.MaxConcurrentTasks)
-	var taskWG sync.WaitGroup   // tracks in-flight handleTask goroutines
-	var pollerWG sync.WaitGroup // tracks runRuntimePoller goroutines
+	var taskWG sync.WaitGroup // tracks in-flight handleTask goroutines
 
 	runtimeSetCh, unsub := d.runtimeSet.Subscribe()
 	defer unsub()
 
-	type pollerHandle struct {
-		cancel context.CancelFunc
-		wakeup chan struct{}
-	}
-	pollers := make(map[string]*pollerHandle)
-
-	syncPollers := func() {
-		want := make(map[string]struct{})
-		for _, rid := range d.allRuntimeIDs() {
-			want[rid] = struct{}{}
-		}
-		for rid, h := range pollers {
-			if _, ok := want[rid]; !ok {
-				h.cancel()
-				delete(pollers, rid)
-			}
-		}
-		for rid := range want {
-			if _, ok := pollers[rid]; ok {
-				continue
-			}
-			pctx, pcancel := context.WithCancel(ctx)
-			wakeup := make(chan struct{}, 1)
-			pollers[rid] = &pollerHandle{cancel: pcancel, wakeup: wakeup}
-			pollerWG.Add(1)
-			go func(rid string, pctx context.Context, wakeup <-chan struct{}) {
-				defer pollerWG.Done()
-				d.runRuntimePoller(pctx, ctx, rid, sem, wakeup, &taskWG)
-			}(rid, pctx, wakeup)
+	wakeup := make(chan struct{}, 1)
+	nudge := func() {
+		select {
+		case wakeup <- struct{}{}:
+		default:
 		}
 	}
 
-	syncPollers()
+	pollerCtx, pollerCancel := context.WithCancel(ctx)
+	pollerDone := make(chan struct{})
+	go func() {
+		defer close(pollerDone)
+		d.runBatchPoller(pollerCtx, ctx, sem, wakeup, &taskWG)
+	}()
 
 	for {
 		select {
 		case <-ctx.Done():
 			d.logger.Info("poll loop stopping, waiting for in-flight tasks", "max_wait", "30s")
-			for _, h := range pollers {
-				h.cancel()
-			}
-			// Wait for all pollers to fully return before waiting on taskWG.
-			// Otherwise a poller that's between ClaimTask and taskWG.Add(1)
-			// could race with taskWG.Wait when the counter is zero, which
-			// is an undefined sync.WaitGroup misuse.
-			pollerWG.Wait()
-
+			pollerCancel()
+			// Wait for the poller to fully return before waiting on taskWG so a
+			// poller between ClaimTasksWSFirst and taskWG.Add(1) cannot race
+			// taskWG.Wait at a zero counter.
+			<-pollerDone
 			waitDone := make(chan struct{})
 			go func() { taskWG.Wait(); close(waitDone) }()
 			select {
@@ -2547,69 +2594,31 @@ func (d *Daemon) pollLoop(ctx context.Context, taskWakeups <-chan taskWakeup) er
 			}
 			return ctx.Err()
 		case <-runtimeSetCh:
-			syncPollers()
-		case wakeup := <-taskWakeups:
-			if wakeup.runtimeID != "" {
-				if h, ok := pollers[wakeup.runtimeID]; ok {
-					d.logger.Debug("task wakeup: signaling runtime poller", "runtime_id", wakeup.runtimeID)
-					select {
-					case h.wakeup <- struct{}{}:
-					default:
-					}
-				} else {
-					d.logger.Debug("task wakeup: runtime poller not found", "runtime_id", wakeup.runtimeID, "pollers", len(pollers))
-				}
-				continue
-			}
-
-			// A wakeup without a runtime_id is a catch-up signal (for example,
-			// immediately after the websocket connects). Fan it out so queued
-			// work that existed before the connection is still discovered.
-			d.logger.Debug("task wakeup: fanning out to pollers", "pollers", len(pollers))
-			for _, h := range pollers {
-				select {
-				case h.wakeup <- struct{}{}:
-				default:
-				}
-			}
+			// The batch poller re-derives allRuntimeIDs() each cycle; nudge it to
+			// pick up a registered/removed runtime promptly.
+			nudge()
+		case <-taskWakeups:
+			// Targeted-runtime and catch-up wakeups both trigger one batch claim
+			// across the whole runtime set.
+			nudge()
 		}
 	}
 }
 
-// runRuntimePoller is the per-runtime claim+dispatch loop. It owns its own
-// poll cadence and wakeup channel so that a slow HTTP claim for this runtime
-// cannot delay any other runtime's claims.
+// runBatchPoller is the single machine-level claim+dispatch loop. Each cycle it
+// acquires whatever execution slots are free (slot-before-claim, so a claimed
+// task never sits server-side `dispatched` without local capacity to run it and
+// race the dispatch-timeout sweeper), asks the server for up to that many tasks
+// across all of the daemon's runtimes in one call, and dispatches each returned
+// task — routed to its runtime by handleTask — into a slot.
 //
-// The execution slot is acquired BEFORE ClaimTask. The alternative —
-// claiming first and then waiting for a slot — would let claimed tasks pile
-// up in the server-side `dispatched` state without a corresponding
-// StartTask, and the server's sweeper would fail them as `failed/timeout`
-// after dispatchTimeoutSeconds=300s (runtime_sweeper.go:25). That is the
-// exact user-visible failure this issue is fixing, so we cannot risk
-// recreating it under load.
-//
-// Slot-before-claim does mean a slow claim holds a slot during its HTTP
-// roundtrip; the upper bound is `client.Timeout = 30s` (client.go:59), well
-// below the 300s dispatch timeout, so other runtimes' tasks stay in
-// server-side `queued` state (which has no timeout) rather than entering
-// `dispatched` and racing the sweeper.
-//
-// pollerCtx is cancelled when this runtime is removed from the watched set
-// (e.g. workspace de-registered). parentCtx is the daemon's root ctx and is
-// passed to handleTask so an in-flight task is not killed just because the
-// runtime set changed mid-flight — the task continues to run until the
-// daemon itself shuts down (or the server cancels it).
-func (d *Daemon) runRuntimePoller(
-	pollerCtx, parentCtx context.Context,
-	rid string,
-	sem chan int,
-	wakeup <-chan struct{},
-	taskWG *sync.WaitGroup,
-) {
-	if offset := runtimePollOffset(rid, d.cfg.PollInterval); offset > 0 {
-		d.logger.Debug("poll: initial offset", "runtime_id", rid, "offset", offset)
-		if err := sleepWithContextOrWakeup(pollerCtx, offset, wakeup); err != nil {
-			return
+// pollerCtx is cancelled on shutdown. parentCtx is the daemon root ctx passed to
+// handleTask so an in-flight task is not killed just because the poll loop is
+// stopping mid-flight.
+func (d *Daemon) runBatchPoller(pollerCtx, parentCtx context.Context, sem chan int, wakeup <-chan struct{}, taskWG *sync.WaitGroup) {
+	releaseSlots := func(slots []int) {
+		for _, sl := range slots {
+			sem <- sl
 		}
 	}
 
@@ -2618,15 +2627,21 @@ func (d *Daemon) runRuntimePoller(
 			return
 		}
 
-		// Acquire an execution slot before claiming. If at capacity, sleep
-		// without claiming so we don't push a task into `dispatched` and
-		// then race the 5-min server-side dispatch timeout while waiting.
+		runtimeIDs := d.allRuntimeIDs()
+		if len(runtimeIDs) == 0 {
+			if err := sleepWithContextOrWakeup(pollerCtx, d.cfg.PollInterval, wakeup); err != nil {
+				return
+			}
+			continue
+		}
+
+		// Acquire at least one slot (blocking briefly), then grab any other free
+		// slots so a single batch claim can fill them all.
 		slot, acquired, woke, err := waitForTaskSlot(pollerCtx, sem, wakeup, taskSlotWaitTimeout)
 		if err != nil {
 			return
 		}
 		if !acquired {
-			d.logger.Debug("poll: at capacity", "runtime_id", rid, "running", d.cfg.MaxConcurrentTasks)
 			if woke {
 				continue
 			}
@@ -2635,34 +2650,24 @@ func (d *Daemon) runRuntimePoller(
 			}
 			continue
 		}
+		slots := append([]int{slot}, drainAvailableSlots(sem, d.cfg.MaxConcurrentTasks-1)...)
 
-		// Refuse new claims while an auto-update is preparing to roll the
-		// process. The barrier is paired with a re-check of claimsInFlight +
-		// activeTasks inside tryAutoUpdate, so once we get past tryEnterClaim
-		// the auto-update path is guaranteed to defer until this poller has
-		// handed the task off (or given up).
+		// Auto-update barrier: refuse to claim while an update prepares to roll
+		// the process (paired with the re-check in tryAutoUpdate).
 		if !d.tryEnterClaim() {
-			sem <- slot
+			releaseSlots(slots)
 			if err := sleepWithContextOrWakeup(pollerCtx, d.cfg.PollInterval, wakeup); err != nil {
 				return
 			}
 			continue
 		}
 
-		task, err := d.client.ClaimTask(pollerCtx, rid)
+		tasks, err := d.ClaimTasksWSFirst(pollerCtx, d.cfg.DaemonID, runtimeIDs, len(slots))
 		if err != nil {
 			d.exitClaim()
-			sem <- slot
+			releaseSlots(slots)
 			if pollerCtx.Err() == nil {
-				if isRuntimeNotFoundError(err) {
-					// Server says this runtime is gone — recover and exit
-					// the poller; the runtime-set watcher will tear this
-					// goroutine down via pollerCtx once the workspace is
-					// re-registered with a new runtime ID.
-					go d.handleRuntimeGone(rid)
-					return
-				}
-				d.logger.Warn("claim task failed", "runtime_id", rid, "error", err)
+				d.logger.Warn("batch claim failed", "error", err)
 			}
 			if err := sleepWithContextOrWakeup(pollerCtx, d.cfg.PollInterval, wakeup); err != nil {
 				return
@@ -2670,40 +2675,63 @@ func (d *Daemon) runRuntimePoller(
 			continue
 		}
 
-		if task == nil {
-			d.exitClaim()
-			sem <- slot
-			if err := sleepWithContextOrWakeup(pollerCtx, d.cfg.PollInterval, wakeup); err != nil {
-				return
+		// Dispatch each claimed task into a slot. activeTasks is incremented for
+		// every dispatched task BEFORE exitClaim so the auto-update barrier never
+		// sees a zero-claims / zero-active window between claim and dispatch.
+		dispatched := 0
+		for i := range tasks {
+			if i >= len(slots) || tasks[i] == nil {
+				break
 			}
-			continue
+			t := *tasks[i]
+			slot := slots[i]
+			taskTarget := t.IssueID
+			if taskTarget == "" && t.ChatSessionID != "" {
+				taskTarget = "chat:" + shortID(t.ChatSessionID)
+			}
+			d.logger.Info("task received", "task", shortID(t.ID), "target", taskTarget)
+			taskWG.Add(1)
+			d.activeTasks.Add(1)
+			go func(t Task, slot int) {
+				defer taskWG.Done()
+				defer d.activeTasks.Add(-1)
+				defer func() { sem <- slot }()
+				d.handleTask(parentCtx, t, slot)
+			}(t, slot)
+			dispatched++
+		}
+		d.exitClaim()
+		if dispatched < len(slots) {
+			releaseSlots(slots[dispatched:])
 		}
 
-		taskTarget := task.IssueID
-		if taskTarget == "" && task.ChatSessionID != "" {
-			taskTarget = "chat:" + shortID(task.ChatSessionID)
+		// If we filled every slot, more work may be queued — loop immediately.
+		// Otherwise wait for the next wakeup / poll interval.
+		if dispatched > 0 && dispatched == len(slots) {
+			continue
 		}
-		d.logger.Info("task received", "task", shortID(task.ID), "target", taskTarget)
-		taskWG.Add(1)
-		d.activeTasks.Add(1)
-		go func(t Task, slot int) {
-			defer taskWG.Done()
-			defer d.exitClaim()
-			defer d.activeTasks.Add(-1)
-			defer func() { sem <- slot }()
-			d.handleTask(parentCtx, t, slot)
-		}(*task, slot)
-		// Loop immediately: more tasks may already be queued for this runtime.
+		if err := sleepWithContextOrWakeup(pollerCtx, d.cfg.PollInterval, wakeup); err != nil {
+			return
+		}
 	}
 }
 
-func runtimePollOffset(runtimeID string, interval time.Duration) time.Duration {
-	if interval <= 0 || runtimeID == "" {
-		return 0
+// drainAvailableSlots non-blockingly pulls up to max additional slots from the
+// semaphore, returning immediately when none are free.
+func drainAvailableSlots(sem chan int, max int) []int {
+	if max <= 0 {
+		return nil
 	}
-	h := fnv.New64a()
-	_, _ = h.Write([]byte(runtimeID))
-	return time.Duration(h.Sum64() % uint64(interval))
+	var slots []int
+	for len(slots) < max {
+		select {
+		case s := <-sem:
+			slots = append(slots, s)
+		default:
+			return slots
+		}
+	}
+	return slots
 }
 
 func capacityBackoff(pollInterval time.Duration) time.Duration {
