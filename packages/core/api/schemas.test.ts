@@ -4,6 +4,7 @@ import {
   AgentTaskListSchema,
   AutopilotRunSchema,
   FALLBACK_AUTOPILOT_RUN,
+  CommentTriggerPreviewSchema,
   DashboardAgentRunTimeListSchema,
   DashboardUsageByAgentListSchema,
   DashboardUsageDailyListSchema,
@@ -673,5 +674,36 @@ describe("AutopilotRunSchema", () => {
     const parsed = parseWithFallback("not-an-object", AutopilotRunSchema, FALLBACK_AUTOPILOT_RUN, ENDPOINT);
     expect(parsed).toBe(FALLBACK_AUTOPILOT_RUN);
     expect(parsed.status).toBe("failed");
+  });
+});
+
+// The comment composer branches on preview.blocked to warn before sending
+// (MUL-4525 §2), so the additive field must parse and degrade gracefully.
+describe("CommentTriggerPreviewSchema.blocked", () => {
+  it("parses blocked mention outcomes alongside agents", () => {
+    const parsed = CommentTriggerPreviewSchema.parse({
+      agents: [{ id: "a1", source: "mention_agent", reason: "" }],
+      blocked: [
+        { target_type: "squad", target_id: "s1", status: "blocked", reason_code: "invocation_not_allowed" },
+      ],
+    });
+    expect(parsed.agents).toHaveLength(1);
+    expect(parsed.blocked).toEqual([
+      { target_type: "squad", target_id: "s1", status: "blocked", reason_code: "invocation_not_allowed" },
+    ]);
+  });
+
+  it("defaults blocked to [] when an older server omits it", () => {
+    const parsed = CommentTriggerPreviewSchema.parse({ agents: [] });
+    expect(parsed.blocked).toEqual([]);
+  });
+
+  it("degrades a malformed blocked field to [] without dropping agents", () => {
+    const parsed = CommentTriggerPreviewSchema.parse({
+      agents: [{ id: "a1", source: "mention_agent", reason: "" }],
+      blocked: "nope",
+    });
+    expect(parsed.agents).toHaveLength(1);
+    expect(parsed.blocked).toEqual([]);
   });
 });

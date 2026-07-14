@@ -182,6 +182,7 @@ function CommentInput({ issueId, onSubmit }: CommentInputProps) {
       <div className="absolute bottom-1 left-2 right-28 min-w-0">
         <CommentTriggerChips
           agents={triggerPreview.agents}
+          blocked={triggerPreview.blocked}
           suppressedAgentIds={suppressedAgentIds}
           onToggle={toggleSuppressedAgent}
         />

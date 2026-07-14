@@ -1,7 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import type { CommentTriggerPreviewAgent } from "@multica/core/types";
+import { TriangleAlert } from "lucide-react";
+import type { CommentTriggerPreviewAgent, CommentTriggerOutcome } from "@multica/core/types";
 import { useAgentPresenceDetail } from "@multica/core/agents";
 import { useCurrentWorkspace } from "@multica/core/paths";
 import { ActorAvatar as ActorAvatarBase } from "@multica/ui/components/common/actor-avatar";
@@ -31,11 +32,28 @@ const MAX_STACK_HEADS = 4;
 
 interface CommentTriggerChipsProps {
   agents: CommentTriggerPreviewAgent[];
+  // Explicit @agent / @squad mentions that will NOT trigger if posted as-is
+  // (MUL-4525 §2). Shown as a warning chip so the user is not surprised by a
+  // silent no-op after sending.
+  blocked?: CommentTriggerOutcome[];
   suppressedAgentIds: Set<string>;
   onToggle: (agentId: string) => void;
 }
 
 type IssuesT = ReturnType<typeof useT<"issues">>["t"];
+
+function blockedReasonLabel(reasonCode: string, t: IssuesT): string {
+  switch (reasonCode) {
+    case "invocation_not_allowed":
+      return t(($) => $.comment.trigger_blocked_invocation_not_allowed);
+    case "target_unavailable":
+      return t(($) => $.comment.trigger_blocked_target_unavailable);
+    case "runtime_offline":
+      return t(($) => $.comment.trigger_blocked_runtime_offline);
+    default:
+      return t(($) => $.comment.trigger_blocked_generic);
+  }
+}
 
 function sourceLabel(source: string, t: IssuesT): string {
   switch (source) {
@@ -114,6 +132,7 @@ function TriggerAgentTooltipBody({
 
 export function CommentTriggerChips({
   agents,
+  blocked = [],
   suppressedAgentIds,
   onToggle,
 }: CommentTriggerChipsProps) {
@@ -121,27 +140,67 @@ export function CommentTriggerChips({
 
   // Loading and errors render nothing: the preview is an enhancement, and
   // any interim chrome here reads as composer noise.
-  if (agents.length === 0) return null;
+  if (agents.length === 0 && blocked.length === 0) return null;
 
-  if (agents.length === 1) {
-    const agent = agents[0]!;
-    return (
+  const allowed =
+    agents.length === 1 ? (
       <SingleTriggerChip
-        agent={agent}
-        suppressed={suppressedAgentIds.has(agent.id)}
+        agent={agents[0]!}
+        suppressed={suppressedAgentIds.has(agents[0]!.id)}
         onToggle={onToggle}
         t={t}
       />
-    );
-  }
+    ) : agents.length > 1 ? (
+      <MultiTriggerChip
+        agents={agents}
+        suppressedAgentIds={suppressedAgentIds}
+        onToggle={onToggle}
+        t={t}
+      />
+    ) : null;
+
+  if (blocked.length === 0) return allowed;
 
   return (
-    <MultiTriggerChip
-      agents={agents}
-      suppressedAgentIds={suppressedAgentIds}
-      onToggle={onToggle}
-      t={t}
-    />
+    <div className="flex flex-wrap items-center gap-1.5">
+      {allowed}
+      <BlockedTriggerChip blocked={blocked} t={t} />
+    </div>
+  );
+}
+
+function BlockedTriggerChip({
+  blocked,
+  t,
+}: {
+  blocked: CommentTriggerOutcome[];
+  t: IssuesT;
+}) {
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <span
+            className="inline-flex h-6 min-w-0 max-w-full animate-in fade-in items-center gap-1 rounded-md px-1.5 text-[11px] font-medium text-destructive"
+            aria-label={t(($) => $.comment.trigger_blocked_count, { count: blocked.length })}
+          >
+            <TriangleAlert className="size-3 shrink-0" />
+            <span className="truncate">
+              {t(($) => $.comment.trigger_blocked_count, { count: blocked.length })}
+            </span>
+          </span>
+        }
+      />
+      <TooltipContent side="top" className="max-w-72 text-xs">
+        <div className="space-y-0.5">
+          {blocked.map((outcome) => (
+            <div key={`${outcome.target_type}:${outcome.target_id}`}>
+              {blockedReasonLabel(outcome.reason_code, t)}
+            </div>
+          ))}
+        </div>
+      </TooltipContent>
+    </Tooltip>
   );
 }
 

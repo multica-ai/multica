@@ -34,6 +34,7 @@ import {
   type ToggleCommentReactionVars,
 } from "@multica/core/issues/mutations";
 import { sortTimelineEntriesAsc } from "@multica/core/issues/timeline-sort";
+import { blockedCommentTriggerOutcomes } from "@multica/core/issues/comment-trigger-outcomes";
 import { useWSEvent, useWSReconnect } from "@multica/core/realtime";
 import { toast } from "sonner";
 import { useT } from "../../i18n";
@@ -259,6 +260,20 @@ export function useIssueTimeline(issueId: string, userId?: string) {
 
   // --- Mutation functions ---
 
+  // The comment saved, but a mention was blocked (no invoke permission, target
+  // unavailable, runtime offline). Warn instead of a silent no-op (MUL-4525 §2):
+  // the comment IS posted, but N explicitly-named targets were not triggered.
+  const warnBlockedTriggers = useCallback(
+    (triggerOutcomes: unknown) => {
+      const blocked = blockedCommentTriggerOutcomes(triggerOutcomes);
+      if (blocked.length === 0) return;
+      toast.warning(
+        t(($) => $.comment.posted_partial_trigger, { count: blocked.length }),
+      );
+    },
+    [t],
+  );
+
   // Returns true on success, false on failure. The composer keeps the user's
   // text (editor locked + button spinning) until this settles and clears only
   // on success — so a slow send no longer leaves the box full next to an
@@ -267,7 +282,8 @@ export function useIssueTimeline(issueId: string, userId?: string) {
     async (content: string, attachmentIds?: string[], suppressAgentIds?: string[]): Promise<boolean> => {
       if (!content.trim() || !userId) return false;
       try {
-        await createComment({ content, attachmentIds, suppressAgentIds });
+        const comment = await createComment({ content, attachmentIds, suppressAgentIds });
+        warnBlockedTriggers(comment?.trigger_outcomes);
         return true;
       } catch (err) {
         toast.error(
@@ -278,20 +294,21 @@ export function useIssueTimeline(issueId: string, userId?: string) {
         return false;
       }
     },
-    [userId, createComment, t],
+    [userId, createComment, warnBlockedTriggers, t],
   );
 
   const submitReply = useCallback(
     async (parentId: string, content: string, attachmentIds?: string[], suppressAgentIds?: string[]): Promise<boolean> => {
       if (!content.trim() || !userId) return false;
       try {
-        await createComment({
+        const comment = await createComment({
           content,
           type: "comment",
           parentId,
           attachmentIds,
           suppressAgentIds,
         });
+        warnBlockedTriggers(comment?.trigger_outcomes);
         return true;
       } catch (err) {
         toast.error(
@@ -302,13 +319,14 @@ export function useIssueTimeline(issueId: string, userId?: string) {
         return false;
       }
     },
-    [userId, createComment, t],
+    [userId, createComment, warnBlockedTriggers, t],
   );
 
   const editComment = useCallback(
     async (commentId: string, content: string, attachmentIds: string[], suppressAgentIds?: string[]) => {
       try {
-        await updateComment({ commentId, content, attachmentIds, suppressAgentIds });
+        const comment = await updateComment({ commentId, content, attachmentIds, suppressAgentIds });
+        warnBlockedTriggers(comment?.trigger_outcomes);
       } catch (err) {
         toast.error(
           err instanceof Error && err.message
@@ -317,7 +335,7 @@ export function useIssueTimeline(issueId: string, userId?: string) {
         );
       }
     },
-    [updateComment, t],
+    [updateComment, warnBlockedTriggers, t],
   );
 
   const deleteComment = useCallback(
