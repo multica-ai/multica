@@ -4,6 +4,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { Issue, TimelineEntry } from "@multica/core/types";
 import { I18nProvider } from "@multica/core/i18n/react";
+import { useResolvedExpandStore } from "@multica/core/issues/stores/resolved-expand-store";
 import enCommon from "../../locales/en/common.json";
 import enIssues from "../../locales/en/issues.json";
 
@@ -256,7 +257,13 @@ vi.mock("@multica/core/issues/config", () => ({
 
 // Mock recent issues store
 const mockRecordVisit = vi.fn();
-vi.mock("@multica/core/issues/stores", () => ({
+vi.mock("@multica/core/issues/stores", async () => ({
+  // Real store, not a stub: resolved-thread expand/collapse behavior under
+  // test runs through it. Deep import keeps the persisted sibling stores
+  // (which need localStorage) out of this mock.
+  ...(await vi.importActual<
+    typeof import("@multica/core/issues/stores/resolved-expand-store")
+  >("@multica/core/issues/stores/resolved-expand-store")),
   useRecentIssuesStore: Object.assign(
     (selector?: any) => {
       const state = { byWorkspace: {}, recordVisit: mockRecordVisit, pruneWorkspaces: vi.fn() };
@@ -355,6 +362,9 @@ beforeEach(() => {
     writable: true,
     value: scrollIntoViewSpy,
   });
+  // The resolved-expand store is module-global (not per-mount like the old
+  // useState); reset so one test's expansions can't leak into the next.
+  useResolvedExpandStore.setState({ expandedByIssue: {} });
 });
 
 // Mock modals

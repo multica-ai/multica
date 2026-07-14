@@ -75,7 +75,12 @@ import { projectDetailOptions } from "@multica/core/projects/queries";
 import { ProjectIcon } from "../../projects/components/project-icon";
 import { issueLabelsOptions } from "@multica/core/labels";
 import { memberListOptions, agentListOptions } from "@multica/core/workspace/queries";
-import { useCommentComposerStore, useRecentIssuesStore } from "@multica/core/issues/stores";
+import {
+  selectExpandedResolved,
+  useCommentComposerStore,
+  useRecentIssuesStore,
+  useResolvedExpandStore,
+} from "@multica/core/issues/stores";
 import { useIssueSelectionStore } from "@multica/core/issues/stores/selection-store";
 import { BatchActionToolbar } from "./batch-action-toolbar";
 import { useIssueTimeline } from "../hooks/use-issue-timeline";
@@ -780,14 +785,12 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
 
   // Per-session: which resolved threads the user has temporarily expanded.
   // Not persisted (matches Linear) — reload collapses everything back to bars.
-  const [expandedResolved, setExpandedResolved] = useState<Set<string>>(() => new Set());
+  // Store-backed (not component state) so the command palette's fold/unfold
+  // all-comments commands can drive it from outside this page.
+  const expandedResolved = useResolvedExpandStore(selectExpandedResolved(id));
+  const setResolvedExpanded = useResolvedExpandStore((s) => s.setExpanded);
   const toggleResolvedExpand = useCallback((commentId: string, expand: boolean) => {
-    setExpandedResolved((prev) => {
-      const next = new Set(prev);
-      if (expand) next.add(commentId);
-      else next.delete(commentId);
-      return next;
-    });
+    setResolvedExpanded(id, commentId, expand);
     // On collapse the thread shrinks and the viewport would jump to whatever was
     // below; pull the just-folded thread back into view with the smallest
     // movement. rAF waits for the collapse to land before measuring.
@@ -796,15 +799,10 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
         document.getElementById(`comment-${commentId}`)?.scrollIntoView({ block: "nearest" }),
       );
     }
-  }, []);
+  }, [id, setResolvedExpanded]);
   const clearResolvedExpand = useCallback((commentId: string) => {
-    setExpandedResolved((prev) => {
-      if (!prev.has(commentId)) return prev;
-      const next = new Set(prev);
-      next.delete(commentId);
-      return next;
-    });
-  }, []);
+    setResolvedExpanded(id, commentId, false);
+  }, [id, setResolvedExpanded]);
 
   // Per-session activity-block expansion overrides. The default rule is
   // "only the trailing block is expanded" (computed from timelineView.groups
