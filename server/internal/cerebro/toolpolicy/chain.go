@@ -34,6 +34,19 @@
 //
 // Resolve is pure: settings in, decision out. It has no database dependency so
 // it is exhaustively unit-testable.
+//
+// Resolve's pure tighten-only fold is the model for the deny-by-default FLOORS
+// (credentials, the OS sandbox, repo checkout, the repo-approval cap) — those
+// must never be loosened by a lower layer and always call Resolve directly.
+// It is NOT the live default for the GENERAL tool-policy gate (the visible
+// per-tool Allow/Ask/Deny an operator authors in the policy table): that gate
+// calls ResolveGeneral, which as of FIR-2175/FIR-3062 resolves through
+// ResolveMemberOverride by default (registry flag cerebro_member_override,
+// default ON) — a two-stage model where a member's own setting can LOOSEN an
+// inherited group/workspace default by specificity. Resolve stays reachable
+// under ResolveGeneral only as the fallback when member-override is off for a
+// workspace. See ResolveGeneral (store.go) and ResolveMemberOverride below for
+// the two models side by side.
 package toolpolicy
 
 import "fmt"

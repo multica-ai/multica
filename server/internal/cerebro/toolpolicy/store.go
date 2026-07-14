@@ -160,10 +160,13 @@ func (s *Store) Resolve(ctx context.Context, in Query) (Effective, error) {
 
 // FlagMemberOverride is the workspace feature-flag key that switches the GENERAL
 // tool-policy gate from the pure tighten-only Resolve to ResolveMemberOverride
-// (FIR-2175). Default OFF: an unset flag keeps the tighten-only chain, so the
-// gate is behaviour-identical until an admin opts the workspace in. The handlers
-// read it next to their policyCELEvaluator flag read and pass the result into
-// ResolveGeneral.
+// (FIR-2175 / FIR-3062). Registry default is ON (`true` in
+// packages/cerebro-feature-flags/registry.ts): a workspace with no explicit
+// flag row uses the member-override model unless an admin opts back out. The
+// handlers read it next to their policyCELEvaluator flag read and pass the
+// result into ResolveGeneral. Note: MemberOverrideEnabled below still resolves
+// a missing/errored workspace row to OFF, not the registry default — see its
+// doc comment.
 const FlagMemberOverride = "cerebro_member_override"
 
 // ResolveGeneral folds the chain for the GENERAL tool-policy gate — the visible
@@ -194,13 +197,16 @@ func (s *Store) ResolveGeneral(ctx context.Context, in Query, memberOverride boo
 	return ResolveWithMode(mode, input), nil
 }
 
-// MemberOverrideEnabled reports whether the default-on cerebro_member_override
-// flag is on for the workspace — read from the workspace-level row (the all-zero
-// sentinel user_id), exactly like the gateway (runtime.memberOverrideEnabled) and
+// MemberOverrideEnabled reports whether cerebro_member_override is on for the
+// workspace — read from the workspace-level row (the all-zero sentinel
+// user_id), exactly like the gateway (runtime.memberOverrideEnabled) and
 // local-runtime (daemonMemberOverrideEnabled) gates, so a display surface that
 // consults it can never disagree with enforcement. A lookup miss or DB error
-// resolves to OFF (the flag's default): a path that can LOOSEN access must never
-// switch itself on by accident.
+// resolves to OFF here, which is NOT the registry default (ON, see
+// FlagMemberOverride) — this is a fail-safe fallback for a workspace whose flag
+// row was never written or a query that errors, so a path that can LOOSEN
+// access never switches itself on by accident. Whether that gap (registry says
+// ON, missing row resolves OFF) needs closing is tracked in FIR-3176, not here.
 func (s *Store) MemberOverrideEnabled(ctx context.Context, workspaceID pgtype.UUID) bool {
 	if s == nil || s.q == nil {
 		return false

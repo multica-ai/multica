@@ -433,14 +433,17 @@ func (h *Handler) localToolPolicyMode(ctx context.Context, wsID pgtype.UUID) loc
 	return localtoolpolicy.ModeFromFlags(enabled, enforce)
 }
 
-// daemonMemberOverrideEnabled reports whether the default-on cerebro_member_override
-// flag is on for the workspace — the switch that makes the local-runtime GENERAL
-// tool-policy gate resolve through the member-override model (a member may loosen
-// an inherited group default) instead of the pure tighten-only chain. It mirrors
+// daemonMemberOverrideEnabled reports whether cerebro_member_override is on for
+// the workspace — the switch that makes the local-runtime GENERAL tool-policy
+// gate resolve through the member-override model (a member may loosen an
+// inherited group default) instead of the pure tighten-only chain. It mirrors
 // the gateway twin (runtime.memberOverrideEnabled) so a local CLI and a gateway
-// tool call see the same model. A lookup miss or DB error resolves to OFF (the
-// flag's default): a path that can LOOSEN access must never switch on by accident.
-// Only the general gate calls this; the agent-browser sandbox gate stays on Resolve.
+// tool call see the same model. The registry default is ON
+// (packages/cerebro-feature-flags/registry.ts), but a lookup miss or DB error
+// still resolves to OFF here: a path that can LOOSEN access must never switch
+// on by accident just because a workspace row is missing (registry-vs-missing-
+// row gap tracked in FIR-3176). Only the general gate calls this; the
+// agent-browser sandbox gate stays on Resolve.
 func (h *Handler) daemonMemberOverrideEnabled(ctx context.Context, wsID pgtype.UUID) bool {
 	if h.CerebroQueries == nil {
 		return false

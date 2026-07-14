@@ -608,13 +608,16 @@ func (e *FirtalGatewayExecutor) approvalInboxActive(ctx context.Context, agentID
 	return e.workspaceApprovalGateEnabled(ctx, workspaceID)
 }
 
-// memberOverrideEnabled reports whether the default-on cerebro_member_override
-// flag is on for the workspace — the switch that makes the GENERAL tool-policy
-// gate resolve through the member-override model (a member may loosen a group
-// default) instead of the pure tighten-only chain. A DB lookup miss or error
-// resolves to OFF (the flag's default), like policyCELEvaluator and unlike the
-// always-on gates: a path that can LOOSEN access must never switch itself on by
-// accident. The deny-by-default floors never call this — they stay on Resolve.
+// memberOverrideEnabled reports whether cerebro_member_override is on for the
+// workspace — the switch that makes the GENERAL tool-policy gate resolve
+// through the member-override model (a member may loosen a group default)
+// instead of the pure tighten-only chain. The registry default is ON
+// (packages/cerebro-feature-flags/registry.ts), but a DB lookup miss or error
+// still resolves to OFF here, like policyCELEvaluator and unlike the always-on
+// gates: a path that can LOOSEN access must never switch itself on by accident
+// just because a workspace row is missing. The deny-by-default floors never
+// call this — they stay on Resolve. (Registry-vs-missing-row gap tracked in
+// FIR-3176.)
 func (e *FirtalGatewayExecutor) memberOverrideEnabled(ctx context.Context, workspaceID pgtype.UUID) bool {
 	if e == nil || e.cerebro == nil {
 		return false

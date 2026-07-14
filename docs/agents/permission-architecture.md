@@ -358,12 +358,18 @@ set**. Use it as follows:
   practice. The engine grants nothing beyond owner access; the resolver remains as the
   deny-by-default floor the call sites layer their allow authority on (see §5.3).
 
-### 5.3 Consolidation path — via the engine-flip (FIR-1512), never a blind drop
+### 5.3 Consolidation path — via the engine-flip, never a blind drop
+
+**FIR-1512 ("Engine-flip — pensionér grants") is closed** (2026-07-13), **superseded by
+FIR-3176**, which now owns the remaining consolidation work below plus the broader "every
+gate on one engine" sweep. The steps below marked **done** were completed under FIR-1512
+before it closed and remain accurate; any step still open is now tracked under FIR-3176, not
+FIR-1512.
+
 The end state moves credential (and other) grant authority off `cerebro_workspace_grant` and
-onto the unified tool-policy chain, then retires the table. That is **FIR-1512** ("Engine-flip —
-pensionér grants") + FIR-1739 — a deliberate change, **not** a one-shot delete. Because the
-resolver + permgate are wired into the live credential / approval / repo paths, an unsequenced
-`DROP` breaks those gates. Safe sequence:
+onto the unified tool-policy chain, then retires the table (+ FIR-1739) — a deliberate change,
+**not** a one-shot delete. Because the resolver + permgate are wired into the live credential /
+approval / repo paths, an unsequenced `DROP` breaks those gates. Safe sequence:
 1. Credential keystone on the chain — **done** (flag-gated, §5.2).
 2. Migrate any real grants → tool-policy Allow rows (fail-closed if not 1:1), then flip the
    credential flag on and retire the deny-by-default floor.
@@ -445,8 +451,8 @@ The end state we are building toward (FIR-1496):
    credential rows and is now retired (§5.4) — it was never wired into `Check` as a parallel
    enforcement path.
 4. **Persona service removed** (§5.1, done); the **capability engine** (§5.2) is a documented,
-   usable function that consolidates onto the chain via the engine-flip (FIR-1512, §5.3) — never
-   an ad-hoc drop.
+   usable function that consolidates onto the chain via the engine-flip (§5.3, tracked in
+   FIR-3176 — FIR-1512 closed 2026-07-13 as superseded) — never an ad-hoc drop.
 5. **Visible enforcement state.** The flags that decide whether policy rows are actually
    enforced (`cerebro_local_tool_policy(_enforce)`, `cerebro_approval_gate`) must be shown next
    to the policy tables — an admin setting Deny must see whether enforcement is on.
