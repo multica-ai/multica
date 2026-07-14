@@ -169,6 +169,9 @@ importers:
       '@multica/core':
         specifier: workspace:*
         version: link:../../packages/core
+      '@multica/perf-recorder':
+        specifier: workspace:*
+        version: link:../../packages/perf-recorder
       '@multica/ui':
         specifier: workspace:*
         version: link:../../packages/ui
@@ -218,9 +221,6 @@ importers:
       '@multica/eslint-config':
         specifier: workspace:*
         version: link:../../packages/eslint-config
-      '@multica/perf-recorder':
-        specifier: workspace:*
-        version: link:../../packages/perf-recorder
       '@multica/tsconfig':
         specifier: workspace:*
         version: link:../../packages/tsconfig

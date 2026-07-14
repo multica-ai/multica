@@ -43,6 +43,7 @@
     "@fontsource-variable/source-serif-4": "^5.2.9",
     "@fontsource/geist-mono": "^5.2.7",
     "@multica/core": "workspace:*",
+    "@multica/perf-recorder": "workspace:*",
     "@multica/ui": "workspace:*",
     "@multica/views": "workspace:*",
     "@tanstack/react-query": "catalog:",
@@ -61,7 +62,6 @@
   "devDependencies": {
     "@electron-toolkit/tsconfig": "^2.0.0",
     "@multica/eslint-config": "workspace:*",
-    "@multica/perf-recorder": "workspace:*",
     "@multica/tsconfig": "workspace:*",
     "@tailwindcss/vite": "^4",
     "@testing-library/jest-dom": "catalog:",
