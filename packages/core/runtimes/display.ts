@@ -28,10 +28,40 @@ export function runtimeDisplayLabel(
   const hasCustom = !!runtime.custom_name?.trim();
   const provider = runtime.provider?.trim();
   if (!hasCustom || !provider) return display;
-  return `${display} (${providerLabel(provider)})`;
+  return `${display} (${providerDisplayName(provider)})`;
 }
 
-/** Title-case a provider slug ("codex" -> "Codex") for display. */
-function providerLabel(provider: string): string {
+/**
+ * Human display names for runtime provider slugs. The daemon bakes these into
+ * `name` for the no-alias case ("Trae (host)"), so we mirror them here to keep
+ * the aliased label consistent — e.g. `traecli` must read "Trae", and mixed-case
+ * families like CodeBuddy / OpenCode / OpenClaw must not be flattened by naive
+ * title-casing (#5260). Kept in sync with the ProviderLogo switch in
+ * packages/views/runtimes/components/provider-logo.tsx.
+ */
+const PROVIDER_DISPLAY_NAMES: Record<string, string> = {
+  claude: "Claude",
+  codebuddy: "CodeBuddy",
+  codex: "Codex",
+  opencode: "OpenCode",
+  openclaw: "OpenClaw",
+  hermes: "Hermes",
+  pi: "Pi",
+  copilot: "Copilot",
+  cursor: "Cursor",
+  kimi: "Kimi",
+  kiro: "Kiro",
+  qoder: "Qoder",
+  antigravity: "Antigravity",
+  traecli: "Trae",
+};
+
+/**
+ * Map a provider slug to its display name, falling back to a title-cased slug
+ * for providers not in the table.
+ */
+export function providerDisplayName(provider: string): string {
+  const known = PROVIDER_DISPLAY_NAMES[provider];
+  if (known) return known;
   return provider.charAt(0).toUpperCase() + provider.slice(1);
 }
