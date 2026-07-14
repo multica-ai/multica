@@ -83,6 +83,62 @@ func TestTriggerRestart_BrewLinuxCellarDeleted(t *testing.T) {
 	}
 }
 
+func TestTriggerRestart_UsesResolvedFallback(t *testing.T) {
+	originalResolveSelfExecutable := resolveSelfExecutable
+	originalIsBrewInstall := isBrewInstall
+	t.Cleanup(func() {
+		resolveSelfExecutable = originalResolveSelfExecutable
+		isBrewInstall = originalIsBrewInstall
+	})
+
+	want := filepath.Join(t.TempDir(), "multica")
+	if err := os.WriteFile(want, []byte("test executable"), 0o755); err != nil {
+		t.Fatalf("write executable fixture: %v", err)
+	}
+	wantResolved, err := filepath.EvalSymlinks(want)
+	if err != nil {
+		t.Fatalf("resolve executable fixture: %v", err)
+	}
+	resolveSelfExecutable = func() (string, error) { return want, nil }
+	isBrewInstall = func() bool { return false }
+
+	canceled := false
+	d := &Daemon{
+		logger:     slog.New(slog.NewTextHandler(io.Discard, nil)),
+		cancelFunc: func() { canceled = true },
+	}
+	d.triggerRestart()
+
+	if got := d.RestartBinary(); got != wantResolved {
+		t.Fatalf("restart binary = %q, want resolved fallback executable %q", got, wantResolved)
+	}
+	if !canceled {
+		t.Fatal("triggerRestart did not initiate graceful shutdown")
+	}
+}
+
+func TestTriggerRestart_ResolveFailureLeavesDaemonRunning(t *testing.T) {
+	originalResolveSelfExecutable := resolveSelfExecutable
+	t.Cleanup(func() { resolveSelfExecutable = originalResolveSelfExecutable })
+	resolveSelfExecutable = func() (string, error) {
+		return "", errors.New("cannot resolve executable")
+	}
+
+	canceled := false
+	d := &Daemon{
+		logger:     slog.New(slog.NewTextHandler(io.Discard, nil)),
+		cancelFunc: func() { canceled = true },
+	}
+	d.triggerRestart()
+
+	if got := d.RestartBinary(); got != "" {
+		t.Fatalf("restart binary = %q, want empty", got)
+	}
+	if canceled {
+		t.Fatal("triggerRestart initiated shutdown without a restart binary")
+	}
+}
+
 func TestIsBlockedEnvKey(t *testing.T) {
 	t.Parallel()
 
@@ -173,16 +229,25 @@ func TestTriggerRestart_BrewPrefixUnavailable_FallsBackToKnownPrefix(t *testing.
 	originalIsBrewInstall := isBrewInstall
 	originalGetBrewPrefix := getBrewPrefix
 	originalMatchKnownBrewPrefix := matchKnownBrewPrefix
+	originalResolveSelfExecutable := resolveSelfExecutable
 	t.Cleanup(func() {
 		isBrewInstall = originalIsBrewInstall
 		getBrewPrefix = originalGetBrewPrefix
 		matchKnownBrewPrefix = originalMatchKnownBrewPrefix
+		resolveSelfExecutable = originalResolveSelfExecutable
 	})
 
 	const knownPrefix = "/home/linuxbrew/.linuxbrew"
+	cellarPath := filepath.Join(knownPrefix, "Cellar", "multica", "0.2.9", "bin", "multica")
 	isBrewInstall = func() bool { return true }
 	getBrewPrefix = func() string { return "" }
-	matchKnownBrewPrefix = func(string) string { return knownPrefix }
+	resolveSelfExecutable = func() (string, error) { return cellarPath, nil }
+	matchKnownBrewPrefix = func(path string) string {
+		if path != cellarPath {
+			t.Fatalf("MatchKnownBrewPrefix path = %q, want resolver result %q", path, cellarPath)
+		}
+		return knownPrefix
+	}
 
 	d := &Daemon{
 		logger: slog.New(slog.NewTextHandler(io.Discard, nil)),

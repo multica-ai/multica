@@ -23,6 +23,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/cli"
 	"github.com/multica-ai/multica/server/internal/daemon/execenv"
 	"github.com/multica-ai/multica/server/internal/daemon/repocache"
+	"github.com/multica-ai/multica/server/internal/selfexec"
 	"github.com/multica-ai/multica/server/pkg/agent"
 	"github.com/multica-ai/multica/server/pkg/skillbundle"
 	"github.com/multica-ai/multica/server/pkg/taskfailure"
@@ -82,9 +83,10 @@ func (f taskRunnerFunc) run(ctx context.Context, task Task, provider string, slo
 }
 
 var (
-	isBrewInstall        = cli.IsBrewInstall
-	getBrewPrefix        = cli.GetBrewPrefix
-	matchKnownBrewPrefix = cli.MatchKnownBrewPrefix
+	isBrewInstall         = cli.IsBrewInstall
+	getBrewPrefix         = cli.GetBrewPrefix
+	matchKnownBrewPrefix  = cli.MatchKnownBrewPrefix
+	resolveSelfExecutable = selfexec.Resolve
 
 	// detectAgentVersion / checkAgentMinVersion are indirections over the
 	// real agent helpers so tests can run the registration path without
@@ -2682,7 +2684,7 @@ func (d *Daemon) releaseClaimBarrier() {
 // For non-brew installs, it resolves to the absolute path of the replaced binary.
 // The caller (cmd_daemon.go) checks RestartBinary() and launches the new process.
 func (d *Daemon) triggerRestart() {
-	newBin, err := os.Executable()
+	newBin, err := resolveSelfExecutable()
 	if err != nil {
 		d.logger.Error("could not resolve executable path for restart", "error", err)
 		return
@@ -4008,7 +4010,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// Some runtimes (e.g. Codex) run in an isolated sandbox that may not
 	// inherit the daemon's PATH. Prepend the directory of the running
 	// multica binary so that `multica` commands in the agent always resolve.
-	if selfBin, err := os.Executable(); err == nil {
+	if selfBin, err := resolveSelfExecutable(); err == nil {
 		binDir := filepath.Dir(selfBin)
 		agentEnv["PATH"] = binDir + string(os.PathListSeparator) + os.Getenv("PATH")
 	}
