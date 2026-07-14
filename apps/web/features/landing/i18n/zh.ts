@@ -303,7 +303,6 @@ export function createZhDict(allowSignup: boolean): LandingDict {
           "桌面端现在可以按你的偏好自动更新到新版本。",
         ],
         improvements: [
-          "收件箱、列表、看板和泳道在内容很多时也能快速切换和滚动。",
           "智能体列表现在一打开就能立刻显示。",
           "工作区的改动现在会更快同步到你的机器上。",
           "自托管邮件现在可以用你设置的发件人地址发送。",

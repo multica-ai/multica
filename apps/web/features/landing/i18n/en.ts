@@ -303,7 +303,6 @@ export function createEnDict(allowSignup: boolean): LandingDict {
           "The desktop app can now update itself to new versions automatically, when you turn it on.",
         ],
         improvements: [
-          "Inbox, list, board, and swimlane views now switch and scroll fast even with lots of items.",
           "The agents list now appears instantly when you open it.",
           "Workspace changes now sync to your machine faster.",
           "Self-hosted email can now send from an address you set.",
