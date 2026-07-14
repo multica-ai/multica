@@ -13,6 +13,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/multica-ai/multica/server/internal/analytics"
+	"github.com/multica-ai/multica/server/internal/authority"
 	"github.com/multica-ai/multica/server/internal/daemonws"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/handler"
@@ -351,6 +352,11 @@ func main() {
 	// alongside the sweeper, and Stop is called explicitly during graceful
 	// shutdown so any pending bumps are flushed before we exit.
 	heartbeatScheduler := handler.NewBatchedHeartbeatScheduler(queries, handler.DefaultHeartbeatBatchInterval)
+	authoritySigner, err := authority.LoadSignerFromEnv(os.Getenv)
+	if err != nil {
+		slog.Error("authority attestation configuration invalid", "error", err)
+		os.Exit(1)
+	}
 
 	r, h := NewRouterWithOptions(pool, hub, bus, analyticsClient, storeRedis, RouterOptions{
 		HTTPMetrics:        httpMetrics,
@@ -359,6 +365,8 @@ func main() {
 		DaemonWakeup:       daemonWakeup,
 		FeatureFlags:       flags,
 		HeartbeatScheduler: heartbeatScheduler,
+		AuthoritySigner:    authoritySigner,
+		ServerCommit:       commit,
 	})
 
 	srv := &http.Server{

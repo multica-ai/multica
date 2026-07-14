@@ -1,0 +1,226 @@
+package authority
+
+import (
+	"crypto/ed25519"
+	"crypto/rand"
+	"encoding/base64"
+	"strings"
+	"testing"
+	"time"
+)
+
+func testStatement(t *testing.T) (Statement, ed25519.PublicKey, ed25519.PrivateKey) {
+	t.Helper()
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("generate key: %v", err)
+	}
+	return Statement{
+		Protocol:    ProtocolVersion,
+		Nonce:       base64.RawURLEncoding.EncodeToString(make([]byte, 32)),
+		AuthorityID: "local-dev-authority",
+		DBIdentity: DBIdentity{
+			SystemIdentifier: "7420934553282556881",
+			DatabaseOID:      16384,
+			DatabaseName:     "multica_test",
+		},
+		IssuedAt:     time.Date(2026, 7, 13, 12, 0, 0, 123, time.UTC),
+		ServerCommit: "37b0a6e72e45b0336d7d444485f6fd39165cc9a9",
+	}, pub, priv
+}
+
+func TestSignVerifyRoundTrip(t *testing.T) {
+	stmt, pub, priv := testStatement(t)
+	att, err := Sign(priv, stmt)
+	if err != nil {
+		t.Fatalf("Sign: %v", err)
+	}
+
+	pin := Pin{
+		ServerURL:   "https://api.multica.test",
+		PublicKey:   EncodePublicKey(pub),
+		AuthorityID: stmt.AuthorityID,
+		DBIdentity:  stmt.DBIdentity,
+	}
+	if err := Verify(att, pin, "https://api.multica.test/", stmt.IssuedAt.Add(30*time.Second), 2*time.Minute, 30*time.Second); err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+}
+
+func TestVerifyRejectsTamperedSignedFields(t *testing.T) {
+	stmt, pub, priv := testStatement(t)
+	att, err := Sign(priv, stmt)
+	if err != nil {
+		t.Fatalf("Sign: %v", err)
+	}
+	pin := Pin{
+		ServerURL:   "https://api.multica.test",
+		PublicKey:   EncodePublicKey(pub),
+		AuthorityID: stmt.AuthorityID,
+		DBIdentity:  stmt.DBIdentity,
+	}
+	now := stmt.IssuedAt.Add(30 * time.Second)
+
+	cases := map[string]func(Attestation) Attestation{
+		"protocol": func(a Attestation) Attestation {
+			a.Protocol = "multica-authority-attestation-v2"
+			return a
+		},
+		"nonce": func(a Attestation) Attestation {
+			a.Nonce = base64.RawURLEncoding.EncodeToString([]byte("12345678901234567890123456789012"))
+			return a
+		},
+		"authority_id": func(a Attestation) Attestation {
+			a.AuthorityID = "other-authority"
+			return a
+		},
+		"db_identity": func(a Attestation) Attestation {
+			a.DBIdentity.DatabaseName = "copied_backend"
+			return a
+		},
+		"issued_at": func(a Attestation) Attestation {
+			a.IssuedAt = stmt.IssuedAt.Add(time.Second).Format(time.RFC3339Nano)
+			return a
+		},
+		"server_commit": func(a Attestation) Attestation {
+			a.ServerCommit = "ffffffffffffffffffffffffffffffffffffffff"
+			return a
+		},
+	}
+	for name, mutate := range cases {
+		t.Run(name, func(t *testing.T) {
+			if err := Verify(mutate(att), pin, pin.ServerURL, now, 2*time.Minute, 30*time.Second); err == nil {
+				t.Fatal("Verify succeeded for tampered attestation")
+			}
+		})
+	}
+}
+
+func TestVerifyRejectsWrongPinsAndFreshness(t *testing.T) {
+	stmt, pub, priv := testStatement(t)
+	att, err := Sign(priv, stmt)
+	if err != nil {
+		t.Fatalf("Sign: %v", err)
+	}
+	pin := Pin{
+		ServerURL:   "https://api.multica.test",
+		PublicKey:   EncodePublicKey(pub),
+		AuthorityID: stmt.AuthorityID,
+		DBIdentity:  stmt.DBIdentity,
+	}
+
+	_, wrongPriv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("generate wrong key: %v", err)
+	}
+	wrongPub := wrongPriv.Public().(ed25519.PublicKey)
+
+	cases := map[string]Pin{
+		"wrong_public_key": func() Pin {
+			p := pin
+			p.PublicKey = EncodePublicKey(wrongPub)
+			return p
+		}(),
+		"wrong_authority": func() Pin {
+			p := pin
+			p.AuthorityID = "wrong-authority"
+			return p
+		}(),
+		"wrong_db": func() Pin {
+			p := pin
+			p.DBIdentity.DatabaseOID = 16385
+			return p
+		}(),
+		"wrong_server_url": func() Pin {
+			p := pin
+			p.ServerURL = "https://other.multica.test"
+			return p
+		}(),
+	}
+	for name, badPin := range cases {
+		t.Run(name, func(t *testing.T) {
+			if err := Verify(att, badPin, "https://api.multica.test", stmt.IssuedAt.Add(10*time.Second), 2*time.Minute, 30*time.Second); err == nil {
+				t.Fatal("Verify succeeded with wrong pin")
+			}
+		})
+	}
+
+	if err := Verify(att, pin, pin.ServerURL, stmt.IssuedAt.Add(3*time.Minute), 2*time.Minute, 30*time.Second); err == nil {
+		t.Fatal("Verify succeeded for stale attestation")
+	}
+	if err := Verify(att, pin, pin.ServerURL, stmt.IssuedAt.Add(-31*time.Second), 2*time.Minute, 30*time.Second); err == nil {
+		t.Fatal("Verify succeeded for future attestation")
+	}
+}
+
+func TestVerifyRejectsNonCanonicalIssuedAtWireText(t *testing.T) {
+	stmt, pub, priv := testStatement(t)
+	att, err := Sign(priv, stmt)
+	if err != nil {
+		t.Fatalf("Sign: %v", err)
+	}
+	pin := Pin{ServerURL: "https://api.multica.test", PublicKey: EncodePublicKey(pub), AuthorityID: stmt.AuthorityID, DBIdentity: stmt.DBIdentity}
+	now := stmt.IssuedAt.Add(30 * time.Second)
+
+	for name, issuedAt := range map[string]string{
+		"equivalent_offset":  stmt.IssuedAt.In(time.FixedZone("offset", 60*60)).Format(time.RFC3339Nano),
+		"numeric_utc_offset": strings.TrimSuffix(att.IssuedAt, "Z") + "+00:00",
+	} {
+		t.Run(name, func(t *testing.T) {
+			mutated := att
+			mutated.IssuedAt = issuedAt
+			if err := Verify(mutated, pin, pin.ServerURL, now, 2*time.Minute, 30*time.Second); err == nil {
+				t.Fatalf("Verify accepted non-canonical issued_at %q", issuedAt)
+			}
+		})
+	}
+}
+
+func TestVerifyRejectsNonCanonicalSignatureBase64URL(t *testing.T) {
+	stmt, pub, priv := testStatement(t)
+	att, err := Sign(priv, stmt)
+	if err != nil {
+		t.Fatalf("Sign: %v", err)
+	}
+	pin := Pin{ServerURL: "https://api.multica.test", PublicKey: EncodePublicKey(pub), AuthorityID: stmt.AuthorityID, DBIdentity: stmt.DBIdentity}
+	now := stmt.IssuedAt.Add(30 * time.Second)
+
+	alphabet := "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
+	last := strings.IndexByte(alphabet, att.Signature[len(att.Signature)-1])
+	if last < 0 || last&3 != 0 {
+		t.Fatalf("unexpected canonical signature suffix %q", att.Signature[len(att.Signature)-1:])
+	}
+	trailingBits := att.Signature[:len(att.Signature)-1] + string(alphabet[last|1])
+
+	for name, signature := range map[string]string{
+		"ignored_crlf":  att.Signature + "\r\n",
+		"trailing_bits": trailingBits,
+	} {
+		t.Run(name, func(t *testing.T) {
+			mutated := att
+			mutated.Signature = signature
+			if err := Verify(mutated, pin, pin.ServerURL, now, 2*time.Minute, 30*time.Second); err == nil {
+				t.Fatalf("Verify accepted non-canonical signature %q", signature)
+			}
+		})
+	}
+}
+
+func TestValidateNonceRequiresStrictCanonicalBase64URL32Bytes(t *testing.T) {
+	valid := base64.RawURLEncoding.EncodeToString(make([]byte, 32))
+	if _, err := ValidateNonce(valid); err != nil {
+		t.Fatalf("ValidateNonce(valid): %v", err)
+	}
+
+	for _, nonce := range []string{
+		valid + "=",
+		"+/" + valid[2:],
+		base64.RawURLEncoding.EncodeToString(make([]byte, 31)),
+		base64.RawURLEncoding.EncodeToString(make([]byte, 33)),
+		"not base64url",
+	} {
+		if _, err := ValidateNonce(nonce); err == nil {
+			t.Fatalf("ValidateNonce(%q) succeeded", nonce)
+		}
+	}
+}

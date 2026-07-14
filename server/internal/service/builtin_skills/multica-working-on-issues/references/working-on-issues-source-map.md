@@ -159,6 +159,16 @@ wakes the parent assignee. Promoting the next stage's `backlog` sub-issues to
 `--value` is JSON-parsed by default (bool/number sniff); `--type` forces
 `string`/`number`/`bool`.
 
+## External identity upsert
+
+| Behavior | File:line |
+|---|---|
+| `multica issue upsert-external` command and flags | `server/cmd/multica/cmd_issue.go` (`issueUpsertExternalCmd`, `registerIssueUpsertExternalFlags`) |
+| CLI authority verification before write client | `server/cmd/multica/cmd_issue.go` (`runIssueUpsertExternal`) and `server/cmd/multica/cmd_authority.go` (`verifyAuthorityForCommand`) |
+| Protected route before `/{id}` | `server/cmd/server/router.go` (`/api/issues/upsert-external`) |
+| Transactional service algorithm | `server/internal/service/issue_external_identity.go` |
+| DB identity table | `server/migrations/162_issue_external_identity.up.sql` |
+
 ## Verification command
 
 Re-derive any line above before depending on it:

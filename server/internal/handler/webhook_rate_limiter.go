@@ -41,6 +41,10 @@ func DefaultWebhookAbsoluteIPRateLimit() WebhookRateLimit {
 	return WebhookRateLimit{Limit: 600, Window: time.Minute}
 }
 
+func DefaultAuthorityRateLimit() WebhookRateLimit {
+	return WebhookRateLimit{Limit: 30, Window: time.Minute}
+}
+
 // WebhookRateLimiter is the contract implemented by both the in-memory and
 // Redis-backed limiters.
 //
@@ -155,6 +159,7 @@ const (
 	webhookLimiterKeyPrefix           = "mul:webhook:rate:"
 	webhookIPLimiterKeyPrefix         = "mul:webhook:ip:"
 	webhookAbsoluteIPLimiterKeyPrefix = "mul:webhook:absolute-ip:"
+	authorityLimiterKeyPrefix         = "mul:authority:ip:"
 )
 
 // webhookLimiterAllowSrc runs the slide-window check atomically on Redis:
@@ -211,9 +216,10 @@ var webhookLimiterCheckScript = redis.NewScript(webhookLimiterCheckSrc)
 func webhookLimiterAllowSource() string { return webhookLimiterAllowSrc }
 
 type redisWebhookRateLimiter struct {
-	cfg       WebhookRateLimit
-	rdb       *redis.Client
-	keyPrefix string
+	cfg        WebhookRateLimit
+	rdb        *redis.Client
+	keyPrefix  string
+	failClosed bool
 }
 
 func NewRedisWebhookRateLimiter(rdb *redis.Client, cfg WebhookRateLimit) WebhookRateLimiter {
@@ -241,9 +247,20 @@ func NewMemoryWebhookAbsoluteIPRateLimiter(cfg WebhookRateLimit) WebhookRateLimi
 	return NewMemoryWebhookRateLimiter(cfg)
 }
 
+func NewMemoryAuthorityRateLimiter(cfg WebhookRateLimit) WebhookRateLimiter {
+	return NewMemoryWebhookRateLimiter(cfg)
+}
+
+func NewRedisAuthorityRateLimiter(rdb *redis.Client, cfg WebhookRateLimit) WebhookRateLimiter {
+	return &redisWebhookRateLimiter{cfg: cfg, rdb: rdb, keyPrefix: authorityLimiterKeyPrefix, failClosed: true}
+}
+
 func (l *redisWebhookRateLimiter) Allow(ctx context.Context, key string) bool {
-	if l.cfg.Limit <= 0 || l.rdb == nil {
+	if l.cfg.Limit <= 0 {
 		return true
+	}
+	if l.rdb == nil {
+		return !l.failClosed
 	}
 	now := time.Now().UnixNano()
 	cutoff := time.Now().Add(-l.cfg.Window).UnixNano()
@@ -266,10 +283,9 @@ func (l *redisWebhookRateLimiter) Allow(ctx context.Context, key string) bool {
 		now, cutoff, l.cfg.Limit, ttlSeconds, member,
 	).Int()
 	if err != nil {
-		// Fail open on Redis errors — webhook ingress should keep working
-		// when the cache hiccups, since the rate limit is a safety net,
-		// not a correctness requirement.
-		return true
+		// Webhook ingress remains fail-open for availability. Authority
+		// attestation is a security gate and must fail closed instead.
+		return !l.failClosed
 	}
 	return res == 1
 }
