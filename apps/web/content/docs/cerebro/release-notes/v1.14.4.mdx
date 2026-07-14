@@ -1,0 +1,53 @@
+---
+title: "Multica v1.14.4"
+description: "32 release bullets: 5 new, 14 fixed, 3 improved, plus 10 more."
+date: 2026-07-14
+---
+
+**Release summary:** 32 release bullets: 5 new, 14 fixed, 3 improved, plus 10 more.
+
+Changes since [v1.14.3](https://github.com/firtal-group/firtal-cerebro/compare/v1.14.3...v1.14.4) — bump: **patch**
+
+## New
+
+- Add session execution modes (FIR-3111)
+- Add scheduled DM and channel messages (FIR-2873)
+- Match Runs approved mockups (FIR-2996)
+- Complete mini apps workflow demo
+- Simplify workflow and retry failed jobs (FIR-3179)
+
+## Fixed
+
+- Include local attachment module (FIR-3263) [#2332](https://github.com/firtal-group/firtal-cerebro/pull/2332)
+- Satisfy backend CI
+- Keep weekly-only usage out of 5h list column (FIR-3118) [#2334](https://github.com/firtal-group/firtal-cerebro/pull/2334)
+- Link catalog to permission details (FIR-3199)
+- Clear usage windows the plan does not report (FIR-3118)\n\nA weekly-only Codex plan reports no 5h window. The usage report omitted the\nabsent window instead of clearing it, so a stale usage_5h_pct survived forever\nand the Accounts page rendered a 'Next 5h' number that does not exist on the\nplan. Send absent windows as explicit null so the server clears the column.\n\nReference issue: FIR-3118. [#2327](https://github.com/firtal-group/firtal-cerebro/pull/2327)
+- Mirror the weekly window into the legacy usage column (FIR-3118) [#2323](https://github.com/firtal-group/firtal-cerebro/pull/2323)
+- Keep legacy progress messages out of final output [#2319](https://github.com/firtal-group/firtal-cerebro/pull/2319)
+- Classify Codex usage windows by duration [#2317](https://github.com/firtal-group/firtal-cerebro/pull/2317)
+- Mark secure browser handler patch (FIR-3006)
+- Classify secure browser fill route (FIR-3006)
+- Align app capability routes
+- Renumber progress guard migration
+- Ignore pull request churn as progress (FIR-3098)
+- Require objective progress between loops (FIR-3098)
+
+## Improved
+
+- Fix stale tighten-only / FIR-1512 references [#2303](https://github.com/firtal-group/firtal-cerebro/pull/2303)
+- Fix stale permission-doc references and close CI guard gaps [#2315](https://github.com/firtal-group/firtal-cerebro/pull/2315)
+- Add v1.14.3 release notes
+
+## Other changes
+
+- FIR-2816: add Strategy and Rocks operating system foundation [#2318](https://github.com/firtal-group/firtal-cerebro/pull/2318)
+- FIR-2048: correct glossary terms after transcription [#2310](https://github.com/firtal-group/firtal-cerebro/pull/2310)
+- FIR-3172: fix generated catalog and permission inventory
+- FIR-3172: add proof fixtures and default-off server gate
+- FIR-3172: add app workflow execution contract
+- FIR-3172: add app workflows views and catalog UI
+- FIR-3172: add isolated app runtime and SDK
+- FIR-3172: add app-bound personal token broker
+- FIR-3172: add mini apps catalog foundation
+- FIR-3006 add secure browser fill from Agent Vault
