@@ -78,6 +78,7 @@
     "run_blocked_runtime_offline": "実行されませんでした — 担当のランタイムがオフラインです",
     "run_blocked_target_unavailable": "実行されませんでした — 担当が利用できません",
     "run_blocked_attribution": "実行されませんでした — 実行を責任者に帰属できませんでした",
+    "run_blocked_already_active": "実行されませんでした — 直近の実行が本件をカバーしています",
     "run_blocked_generic": "実行されませんでした — 受付ポリシーによりブロックされました",
     "section_properties": "プロパティ",
     "section_triggers": "トリガー",

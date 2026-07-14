@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/attribution"
+	"github.com/multica-ai/multica/server/internal/dispatch"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/issueguard"
 	"github.com/multica-ai/multica/server/internal/issueposition"
@@ -117,8 +118,10 @@ func (s *AutopilotService) DispatchAutopilot(
 	payload []byte,
 ) (*db.AutopilotRun, error) {
 	// No member actor on this entry point (schedule / webhook / api, or a manual
-	// trigger without a resolved member): attribution resolves rule_owner.
-	return s.dispatchAutopilot(ctx, autopilot, triggerID, source, payload, pgtype.Timestamptz{}, pgtype.UUID{})
+	// trigger without a resolved member): attribution resolves rule_owner. These
+	// callers don't surface a per-run reason code to a human, so it is dropped.
+	run, _, err := s.dispatchAutopilot(ctx, autopilot, triggerID, source, payload, pgtype.Timestamptz{}, pgtype.UUID{})
+	return run, err
 }
 
 // DispatchAutopilotManual is the "run now" entry point for a member manually
@@ -133,7 +136,9 @@ func (s *AutopilotService) DispatchAutopilotManual(
 	triggerID pgtype.UUID,
 	payload []byte,
 	actorUserID pgtype.UUID,
-) (*db.AutopilotRun, error) {
+) (*db.AutopilotRun, dispatch.ReasonCode, error) {
+	// The manual path is the one surface that shows a per-run outcome to a
+	// human, so it returns the typed reason code decided at the admission source.
 	return s.dispatchAutopilot(ctx, autopilot, triggerID, "manual", payload, pgtype.Timestamptz{}, actorUserID)
 }
 
@@ -218,8 +223,10 @@ func (s *AutopilotService) DispatchAutopilotForPlan(
 		return nil, fmt.Errorf("dispatch for plan: lookup existing run: %w", err)
 	}
 
-	// Scheduled dispatch has no member actor → rule_owner attribution.
-	return s.dispatchAutopilot(ctx, autopilot, triggerID, source, payload, plannedTS, pgtype.UUID{})
+	// Scheduled dispatch has no member actor → rule_owner attribution, and no
+	// human surface for a per-run reason code, so it is dropped.
+	run, _, err := s.dispatchAutopilot(ctx, autopilot, triggerID, source, payload, plannedTS, pgtype.UUID{})
+	return run, err
 }
 
 // isAutopilotRunComplete decides whether an existing autopilot_run row
@@ -269,9 +276,10 @@ func (s *AutopilotService) dispatchAutopilot(
 	payload []byte,
 	plannedAt pgtype.Timestamptz,
 	actorUserID pgtype.UUID,
-) (*db.AutopilotRun, error) {
-	if reason, skip := s.shouldSkipDispatch(ctx, autopilot, actorUserID); skip {
-		return s.recordSkippedRun(ctx, autopilot, triggerID, source, payload, plannedAt, reason)
+) (*db.AutopilotRun, dispatch.ReasonCode, error) {
+	if reason, code, skip := s.shouldSkipDispatch(ctx, autopilot, actorUserID); skip {
+		run, err := s.recordSkippedRun(ctx, autopilot, triggerID, source, payload, plannedAt, reason)
+		return run, code, err
 	}
 
 	// Determine initial status based on execution mode.
@@ -290,7 +298,7 @@ func (s *AutopilotService) dispatchAutopilot(
 		PlannedAt:      plannedAt,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("create run: %w", err)
+		return nil, dispatch.ReasonInternalError, fmt.Errorf("create run: %w", err)
 	}
 	s.captureAutopilotRunStarted(autopilot, run, source)
 
@@ -298,26 +306,26 @@ func (s *AutopilotService) dispatchAutopilot(
 	case "create_issue":
 		triggerTimezone := s.resolveAutopilotTriggerTimezone(ctx, triggerID)
 		if err := s.dispatchCreateIssue(ctx, autopilot, &run, triggerTimezone, actorUserID); err != nil {
-			if skipped := s.handleDispatchSkip(ctx, autopilot, &run, err); skipped != nil {
-				return skipped, nil
+			if skipped, code := s.handleDispatchSkip(ctx, autopilot, &run, err); skipped != nil {
+				return skipped, code, nil
 			}
 			s.failRun(ctx, run.ID, err.Error())
 			s.captureAutopilotRunFailed(autopilot, run, source, err.Error())
-			return &run, fmt.Errorf("dispatch create_issue: %w", err)
+			return &run, dispatchFailReasonCode(err), fmt.Errorf("dispatch create_issue: %w", err)
 		}
 	case "run_only":
 		if err := s.dispatchRunOnly(ctx, autopilot, &run, actorUserID); err != nil {
-			if skipped := s.handleDispatchSkip(ctx, autopilot, &run, err); skipped != nil {
-				return skipped, nil
+			if skipped, code := s.handleDispatchSkip(ctx, autopilot, &run, err); skipped != nil {
+				return skipped, code, nil
 			}
 			s.failRun(ctx, run.ID, err.Error())
 			s.captureAutopilotRunFailed(autopilot, run, source, err.Error())
-			return &run, fmt.Errorf("dispatch run_only: %w", err)
+			return &run, dispatchFailReasonCode(err), fmt.Errorf("dispatch run_only: %w", err)
 		}
 	default:
 		s.failRun(ctx, run.ID, "unknown execution_mode: "+autopilot.ExecutionMode)
 		s.captureAutopilotRunFailed(autopilot, run, source, "unknown execution_mode: "+autopilot.ExecutionMode)
-		return &run, fmt.Errorf("unknown execution_mode: %s", autopilot.ExecutionMode)
+		return &run, dispatch.ReasonInternalError, fmt.Errorf("unknown execution_mode: %s", autopilot.ExecutionMode)
 	}
 
 	// Update last_run_at on the autopilot.
@@ -336,7 +344,18 @@ func (s *AutopilotService) dispatchAutopilot(
 		},
 	})
 
-	return &run, nil
+	return &run, "", nil
+}
+
+// dispatchFailReasonCode types a dispatch error that fell through to failRun.
+// It inspects the error with typed checks (never substring matching): a
+// fail-closed attribution refusal is attribution_blocked; everything else is an
+// unclassified internal error.
+func dispatchFailReasonCode(err error) dispatch.ReasonCode {
+	if errors.Is(err, ErrAttributionFailClosed) {
+		return dispatch.ReasonAttributionBlocked
+	}
+	return dispatch.ReasonInternalError
 }
 
 // dispatchCreateIssue creates an issue and enqueues a task for the agent.
@@ -372,7 +391,7 @@ func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopi
 	); err != nil {
 		return fmt.Errorf("recent duplicate guard: %w", err)
 	} else if found {
-		return &errDispatchSkipped{reason: "recent duplicate autopilot issue: " + util.UUIDToString(duplicate.ID)}
+		return &errDispatchSkipped{reason: "recent duplicate autopilot issue: " + util.UUIDToString(duplicate.ID), code: dispatch.ReasonAlreadyActive}
 	}
 
 	issueNumber, err := qtx.IncrementIssueCounter(ctx, ap.WorkspaceID)
@@ -610,6 +629,10 @@ func (s *AutopilotService) notifyAutopilotSubscribersOnCreate(
 // monitor would auto-pause autopilots whose only crime was a flaky runtime).
 type errDispatchSkipped struct {
 	reason string
+	// code is the stable, typed admission reason decided at THIS branch and
+	// carried through to the response (MUL-4525) — never reverse-engineered from
+	// the human-readable reason string above.
+	code dispatch.ReasonCode
 }
 
 func (e *errDispatchSkipped) Error() string { return e.reason }
@@ -629,7 +652,7 @@ func (s *AutopilotService) dispatchRunOnly(ctx context.Context, ap db.Autopilot,
 		// if the row disappeared or the squad was archived between
 		// admission and dispatch, that is a skip, not a failure.
 		if errors.Is(err, pgx.ErrNoRows) || errors.Is(err, errSquadArchived) {
-			return &errDispatchSkipped{reason: formatAdmissionReason(ap, "assignee no longer resolvable")}
+			return &errDispatchSkipped{reason: formatAdmissionReason(ap, "assignee no longer resolvable"), code: dispatch.ReasonTargetUnavailable}
 		}
 		return fmt.Errorf("resolve leader: %w", err)
 	}
@@ -638,13 +661,13 @@ func (s *AutopilotService) dispatchRunOnly(ctx context.Context, ap db.Autopilot,
 		return fmt.Errorf("check agent readiness: %w", err)
 	}
 	if !ready {
-		return &errDispatchSkipped{reason: formatAdmissionReason(ap, reason)}
+		return &errDispatchSkipped{reason: formatAdmissionReason(ap, reason), code: agentReadinessReasonCode(agent)}
 	}
 
 	// Fail-closed invocation gate for squad autopilots (admission principal =
 	// manual clicker, else creator — see autopilotAdmitInvoke).
 	if ap.AssigneeType == "squad" && !s.autopilotAdmitInvoke(ctx, ap, agent, actorUserID) {
-		return &errDispatchSkipped{reason: formatAdmissionReason(ap, "not allowed to invoke private squad leader")}
+		return &errDispatchSkipped{reason: formatAdmissionReason(ap, "not allowed to invoke private squad leader"), code: dispatch.ReasonInvocationNotAllowed}
 	}
 
 	// Attribution splits on the trigger. A MANUAL trigger is a direct human action:
@@ -668,7 +691,7 @@ func (s *AutopilotService) dispatchRunOnly(ctx context.Context, ap db.Autopilot,
 	// workspace is fail-closed (MUL-4302 §3.5).
 	autopilotAttr, err = s.TaskSvc.applyAttributionFallback(ctx, autopilotAttr, agent)
 	if err != nil {
-		return &errDispatchSkipped{reason: formatAdmissionReason(ap, "workspace fail-closed: no accountable human for autopilot run")}
+		return &errDispatchSkipped{reason: formatAdmissionReason(ap, "workspace fail-closed: no accountable human for autopilot run"), code: dispatch.ReasonAttributionBlocked}
 	}
 	apSource, _, apEvidenceKind, apEvidenceRef := attributionCreateParams(autopilotAttr)
 	task, err := s.Queries.CreateAutopilotTask(ctx, db.CreateAutopilotTaskParams{
@@ -892,10 +915,10 @@ func taskFailureReasonForAutopilotRun(task db.AgentTaskQueue) string {
 // DispatchAutopilot up the stack and the failure-vs-skip distinction is
 // owned by the dispatcher entry point. Keeps dispatchRunOnly free of
 // state-mutation helpers.
-func (s *AutopilotService) handleDispatchSkip(ctx context.Context, ap db.Autopilot, run *db.AutopilotRun, err error) *db.AutopilotRun {
+func (s *AutopilotService) handleDispatchSkip(ctx context.Context, ap db.Autopilot, run *db.AutopilotRun, err error) (*db.AutopilotRun, dispatch.ReasonCode) {
 	var skipErr *errDispatchSkipped
 	if !errors.As(err, &skipErr) {
-		return nil
+		return nil, ""
 	}
 	updated, uerr := s.Queries.UpdateAutopilotRunSkipped(ctx, db.UpdateAutopilotRunSkippedParams{
 		ID:            run.ID,
@@ -907,7 +930,7 @@ func (s *AutopilotService) handleDispatchSkip(ctx context.Context, ap db.Autopil
 		// Leave the run in its current (running/issue_created) state if
 		// the update failed; the failure monitor will eventually fail it
 		// out, but at least we didn't pretend it succeeded.
-		return nil
+		return nil, ""
 	}
 	*run = updated
 	slog.Info("autopilot dispatch skipped post-admission",
@@ -921,7 +944,7 @@ func (s *AutopilotService) handleDispatchSkip(ctx context.Context, ap db.Autopil
 	// caught a late readiness regression.
 	s.Queries.UpdateAutopilotLastRunAt(ctx, ap.ID)
 	s.publishRunDone(util.UUIDToString(ap.WorkspaceID), updated, "skipped")
-	return run
+	return run, skipErr.code
 }
 
 func (s *AutopilotService) failRun(ctx context.Context, runID pgtype.UUID, reason string) {
@@ -948,9 +971,9 @@ func (s *AutopilotService) failRun(ctx context.Context, runID pgtype.UUID, reaso
 //     scheduled run. Migration 096 removed the agent FK on autopilot, so an
 //     agent assignee being missing is now a real condition the gate must
 //     handle (previously cascade-deleted).
-func (s *AutopilotService) shouldSkipDispatch(ctx context.Context, ap db.Autopilot, actorUserID pgtype.UUID) (string, bool) {
+func (s *AutopilotService) shouldSkipDispatch(ctx context.Context, ap db.Autopilot, actorUserID pgtype.UUID) (string, dispatch.ReasonCode, bool) {
 	if !ap.AssigneeID.Valid {
-		return "autopilot has no assignee", true
+		return "autopilot has no assignee", dispatch.ReasonTargetUnavailable, true
 	}
 	agent, squadResolved, err := s.resolveAutopilotLeader(ctx, ap)
 	if err != nil {
@@ -973,18 +996,18 @@ func (s *AutopilotService) shouldSkipDispatch(ctx context.Context, ap db.Autopil
 			// should have rewritten this autopilot's assignee to the leader
 			// already; surfacing the case explicitly keeps the failure
 			// reason useful when something slipped past the transfer.
-			return "assignee squad is archived", true
+			return "assignee squad is archived", dispatch.ReasonTargetUnavailable, true
 		case missing && squadResolved:
-			return "assignee squad cannot be resolved", true
+			return "assignee squad cannot be resolved", dispatch.ReasonTargetUnavailable, true
 		case missing && !squadResolved:
 			// Agent row gone. With migration 096 the FK is gone too, so
 			// this is the new "agent was hard-deleted under us" case. Skip
 			// rather than fail-open: we know retrying will not help.
-			return "assignee agent no longer exists", true
+			return "assignee agent no longer exists", dispatch.ReasonTargetUnavailable, true
 		}
 		// Transient DB error — fail-open so the next scheduler tick gets a
 		// chance to succeed.
-		return "", false
+		return "", "", false
 	}
 	ready, reason, err := AgentReadiness(ctx, s.Queries, agent)
 	if err != nil {
@@ -993,7 +1016,7 @@ func (s *AutopilotService) shouldSkipDispatch(ctx context.Context, ap db.Autopil
 			"runtime_id", util.UUIDToString(agent.RuntimeID),
 			"error", err,
 		)
-		return "", false
+		return "", "", false
 	}
 	if !ready {
 		if ap.ExecutionMode == "create_issue" && strings.HasPrefix(reason, "agent runtime is ") {
@@ -1003,7 +1026,7 @@ func (s *AutopilotService) shouldSkipDispatch(ctx context.Context, ap db.Autopil
 				"reason", reason,
 			)
 		} else {
-			return formatAdmissionReason(ap, reason), true
+			return formatAdmissionReason(ap, reason), agentReadinessReasonCode(agent), true
 		}
 	}
 	// Invocation gate at the autopilot layer (MUL-3963 / MUL-4525). The
@@ -1017,11 +1040,22 @@ func (s *AutopilotService) shouldSkipDispatch(ctx context.Context, ap db.Autopil
 	// autopilots the gate runs against the resolved leader.
 	if !s.autopilotAdmitInvoke(ctx, ap, agent, actorUserID) {
 		if actorUserID.Valid {
-			return "you are not allowed to trigger this autopilot's assignee agent", true
+			return "you are not allowed to trigger this autopilot's assignee agent", dispatch.ReasonInvocationNotAllowed, true
 		}
-		return "autopilot creator lacks access to private assignee agent", true
+		return "autopilot creator lacks access to private assignee agent", dispatch.ReasonInvocationNotAllowed, true
 	}
-	return "", false
+	return "", "", false
+}
+
+// agentReadinessReasonCode types the reason an AgentReadiness check failed from
+// the agent's own state rather than the human-readable reason string (MUL-4525).
+// An archived agent cannot run at all; anything else (no runtime bound, or a
+// bound runtime that is not online) is a runtime-availability problem.
+func agentReadinessReasonCode(agent db.Agent) dispatch.ReasonCode {
+	if agent.ArchivedAt.Valid {
+		return dispatch.ReasonTargetUnavailable
+	}
+	return dispatch.ReasonRuntimeOffline
 }
 
 // formatAdmissionReason rewrites the generic AgentReadiness reason into the

@@ -275,59 +275,24 @@ func runToResponse(r db.AutopilotRun) AutopilotRunResponse {
 		json.Unmarshal(r.Result, &result)
 	}
 	return AutopilotRunResponse{
-		ID:             uuidToString(r.ID),
-		AutopilotID:    uuidToString(r.AutopilotID),
-		TriggerID:      uuidToPtr(r.TriggerID),
-		Source:         r.Source,
-		Status:         r.Status,
-		IssueID:        uuidToPtr(r.IssueID),
-		TaskID:         uuidToPtr(r.TaskID),
-		TriggeredAt:    timestampToString(r.TriggeredAt),
-		CompletedAt:    timestampToPtr(r.CompletedAt),
-		FailureReason:  textToPtr(r.FailureReason),
-		ReasonCode:     autopilotRunReasonCode(r.Status, textToPtr(r.FailureReason)),
+		ID:            uuidToString(r.ID),
+		AutopilotID:   uuidToString(r.AutopilotID),
+		TriggerID:     uuidToPtr(r.TriggerID),
+		Source:        r.Source,
+		Status:        r.Status,
+		IssueID:       uuidToPtr(r.IssueID),
+		TaskID:        uuidToPtr(r.TaskID),
+		TriggeredAt:   timestampToString(r.TriggeredAt),
+		CompletedAt:   timestampToPtr(r.CompletedAt),
+		FailureReason: textToPtr(r.FailureReason),
+		// ReasonCode is left unset here: it is a decision-time value the manual
+		// "run now" handler injects from the typed dispatch outcome (MUL-4525).
+		// Persisted rows (list/history) surface the human failure_reason instead
+		// of a code reverse-engineered from that text.
 		TriggerPayload: payload,
 		Result:         result,
 		CreatedAt:      timestampToString(r.CreatedAt),
 	}
-}
-
-// autopilotRunReasonCode maps a non-success autopilot run to a stable, wire-safe
-// DispatchReasonCode the UI can localize (MUL-4525), so the "run now" affordance
-// can warn without echoing the raw English failure_reason — which may name a
-// private assignee agent and is not enumeration-safe. Returns nil for
-// success-path runs. Classification is substring-based over the fixed set of
-// reasons shouldSkipDispatch / formatAdmissionReason / failRun produce; an
-// unmatched reason falls back to internal_error rather than leaking the text.
-func autopilotRunReasonCode(status string, failureReason *string) *string {
-	if status != "skipped" && status != "failed" {
-		return nil
-	}
-	reason := ""
-	if failureReason != nil {
-		reason = strings.ToLower(*failureReason)
-	}
-	var code DispatchReasonCode
-	switch {
-	case strings.Contains(reason, "not allowed to trigger"),
-		strings.Contains(reason, "not allowed to invoke"),
-		strings.Contains(reason, "lacks access"),
-		strings.Contains(reason, "cannot access private"):
-		code = ReasonInvocationNotAllowed
-	case strings.Contains(reason, "runtime is "):
-		// AgentReadiness phrasings: "... runtime is offline/starting/... at
-		// dispatch time" — the target exists and is permitted but not ready.
-		code = ReasonRuntimeOffline
-	case strings.Contains(reason, "no assignee"),
-		strings.Contains(reason, "archived"),
-		strings.Contains(reason, "no longer exists"),
-		strings.Contains(reason, "cannot be resolved"):
-		code = ReasonTargetUnavailable
-	default:
-		code = ReasonInternalError
-	}
-	s := string(code)
-	return &s
 }
 
 // runToResponseSlim mirrors runToResponse but omits TriggerPayload, intended
@@ -2053,11 +2018,19 @@ func (h *Handler) TriggerAutopilot(w http.ResponseWriter, r *http.Request) {
 	}
 	actorType, actorID := h.resolveActor(r, userID, workspaceID)
 
-	run, err := h.AutopilotService.DispatchAutopilotManual(r.Context(), autopilot, pgtype.UUID{}, nil, memberActorUserID(actorType, actorID))
+	run, reasonCode, err := h.AutopilotService.DispatchAutopilotManual(r.Context(), autopilot, pgtype.UUID{}, nil, memberActorUserID(actorType, actorID))
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to trigger autopilot: "+err.Error())
 		return
 	}
 
-	writeJSON(w, http.StatusOK, runToResponse(*run))
+	// Carry the typed admission reason (decided at its source, MUL-4525) straight
+	// into the response — no reverse-engineering from failure_reason text. The
+	// UI branches on run status + this code for the "run now" toast.
+	resp := runToResponse(*run)
+	if reasonCode != "" {
+		c := string(reasonCode)
+		resp.ReasonCode = &c
+	}
+	writeJSON(w, http.StatusOK, resp)
 }

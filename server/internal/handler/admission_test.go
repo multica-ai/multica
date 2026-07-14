@@ -1,50 +1,31 @@
 package handler
 
-import "testing"
+import (
+	"testing"
 
-// TestAutopilotRunReasonCode pins the mapping from a run's status/failure_reason
-// to the stable, enumeration-safe DispatchReasonCode the "run now" UI localizes
-// (MUL-4525). The raw English reason must never reach the wire; every skip/fail
-// phrasing the dispatch layer produces must classify to a known code, and an
-// unrecognized reason must fall back to internal_error rather than leak text.
-func TestAutopilotRunReasonCode(t *testing.T) {
-	ptr := func(s string) *string { return &s }
-	cases := []struct {
-		name    string
-		status  string
-		reason  *string
-		wantNil bool
-		want    DispatchReasonCode
-	}{
-		{"success has no code", "completed", nil, true, ""},
-		{"issue_created has no code", "issue_created", nil, true, ""},
-		{"running has no code", "running", nil, true, ""},
-		{"creator lacks access", "skipped", ptr("autopilot creator lacks access to private assignee agent"), false, ReasonInvocationNotAllowed},
-		{"clicker not allowed to trigger", "skipped", ptr("you are not allowed to trigger this autopilot's assignee agent"), false, ReasonInvocationNotAllowed},
-		{"squad leader not allowed to invoke", "failed", ptr("not allowed to invoke private squad leader"), false, ReasonInvocationNotAllowed},
-		{"runtime offline", "skipped", ptr("assignee agent runtime is offline at dispatch time"), false, ReasonRuntimeOffline},
-		{"no assignee", "skipped", ptr("autopilot has no assignee"), false, ReasonTargetUnavailable},
-		{"squad archived", "skipped", ptr("assignee squad is archived"), false, ReasonTargetUnavailable},
-		{"agent gone", "skipped", ptr("assignee agent no longer exists"), false, ReasonTargetUnavailable},
-		{"unknown reason falls back", "failed", ptr("dispatch create_issue: boom"), false, ReasonInternalError},
-		{"failed with nil reason", "failed", nil, false, ReasonInternalError},
+	"github.com/jackc/pgx/v5/pgtype"
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
+)
+
+// TestRunToResponseDoesNotReverseEngineerReasonCode pins Elon must-fix 2: the
+// serializer must NOT derive reason_code from a persisted run's English
+// failure_reason. The typed code is a decision-time value the manual "run now"
+// handler injects from the dispatch outcome; a run read back from the DB (list /
+// history) carries the human failure_reason but no guessed code.
+func TestRunToResponseDoesNotReverseEngineerReasonCode(t *testing.T) {
+	run := db.AutopilotRun{
+		Status: "skipped",
+		FailureReason: pgtype.Text{
+			String: "assignee agent lacks access to private assignee agent",
+			Valid:  true,
+		},
 	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			got := autopilotRunReasonCode(tc.status, tc.reason)
-			if tc.wantNil {
-				if got != nil {
-					t.Fatalf("want nil, got %q", *got)
-				}
-				return
-			}
-			if got == nil {
-				t.Fatalf("want %q, got nil", tc.want)
-			}
-			if *got != string(tc.want) {
-				t.Errorf("got %q, want %q", *got, tc.want)
-			}
-		})
+	resp := runToResponse(run)
+	if resp.ReasonCode != nil {
+		t.Fatalf("runToResponse should not synthesize a reason_code from failure_reason, got %q", *resp.ReasonCode)
+	}
+	if resp.FailureReason == nil || *resp.FailureReason == "" {
+		t.Errorf("failure_reason should still be surfaced for history rows")
 	}
 }
 

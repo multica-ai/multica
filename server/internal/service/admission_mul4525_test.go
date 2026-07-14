@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/dispatch"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -127,17 +128,21 @@ func TestAutopilotDispatchAdmitsClickerNotCreator(t *testing.T) {
 	svc := &AutopilotService{Queries: q}
 
 	// Manual dispatch by the agent owner (the clicker) is admitted.
-	if reason, skip := svc.shouldSkipDispatch(ctx, ap, util.MustParseUUID(ownerID)); skip {
+	if reason, _, skip := svc.shouldSkipDispatch(ctx, ap, util.MustParseUUID(ownerID)); skip {
 		t.Fatalf("manual dispatch by the agent owner should be admitted, got skip: %q", reason)
 	}
 
 	// Automation (no human actor) falls back to the creator gate, which denies
-	// the admin-but-non-owner creator on a private agent.
-	reason, skip := svc.shouldSkipDispatch(ctx, ap, pgtype.UUID{})
+	// the admin-but-non-owner creator on a private agent — and the typed reason
+	// code is decided at that branch, not guessed from text.
+	reason, code, skip := svc.shouldSkipDispatch(ctx, ap, pgtype.UUID{})
 	if !skip {
 		t.Fatalf("automation dispatch should be blocked by the creator gate")
 	}
 	if !strings.Contains(strings.ToLower(reason), "creator") {
 		t.Errorf("automation skip reason = %q, want creator-gate phrasing", reason)
+	}
+	if code != dispatch.ReasonInvocationNotAllowed {
+		t.Errorf("skip reason_code = %q, want invocation_not_allowed", code)
 	}
 }

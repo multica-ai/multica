@@ -78,6 +78,7 @@
     "run_blocked_runtime_offline": "未触发——执行对象的运行时已离线",
     "run_blocked_target_unavailable": "未触发——执行对象不可用",
     "run_blocked_attribution": "未触发——无法将本次运行归因到某个负责成员",
+    "run_blocked_already_active": "未触发——已有最近的运行覆盖了本次",
     "run_blocked_generic": "未触发——被准入策略拦截",
     "section_properties": "属性",
     "section_triggers": "触发器",

@@ -1,6 +1,10 @@
 package handler
 
-import "net/http"
+import (
+	"net/http"
+
+	"github.com/multica-ai/multica/server/internal/dispatch"
+)
 
 // Unified execution-admission contract (MUL-4525).
 //
@@ -37,37 +41,24 @@ const (
 	DispatchBlocked DispatchStatus = "blocked"
 )
 
-// DispatchReasonCode is a stable, client-localizable, enumeration-safe reason.
-// New codes may be added; clients must treat an unknown code as a generic
-// failure (they switch with a default branch). A code NEVER encodes the
+// DispatchReasonCode is the wire-facing admission reason. It aliases the
+// canonical, cross-layer enum in the dispatch package so the service (which
+// decides the reason at its source) and the handler (which serializes it) can
+// never drift. New codes may be added; clients must treat an unknown code as a
+// generic failure (they switch with a default branch). A code NEVER encodes the
 // existence, name, or owner of a target the caller is not allowed to see.
-type DispatchReasonCode string
+type DispatchReasonCode = dispatch.ReasonCode
 
 const (
-	// ReasonQueued / ReasonCoalesced / ReasonDeferred are the success-path
-	// codes paired with the matching DispatchStatus.
-	ReasonQueued    DispatchReasonCode = "queued"
-	ReasonCoalesced DispatchReasonCode = "coalesced"
-	ReasonDeferred  DispatchReasonCode = "deferred"
-
-	// ReasonInvocationNotAllowed: the acting user is not permitted to trigger
-	// this target under the invocation-permission model. Deliberately generic:
-	// it does not distinguish "target is private" from "target does not exist".
-	ReasonInvocationNotAllowed DispatchReasonCode = "invocation_not_allowed"
-	// ReasonTargetUnavailable: the target cannot run (archived agent, deleted /
-	// archived squad, unresolvable leader, no assignee).
-	ReasonTargetUnavailable DispatchReasonCode = "target_unavailable"
-	// ReasonRuntimeOffline: the target exists and is permitted, but its runtime
-	// is offline at dispatch time.
-	ReasonRuntimeOffline DispatchReasonCode = "runtime_offline"
-	// ReasonAttributionBlocked: a fail-closed workspace could not resolve a
-	// responsible human for the run, so it was refused.
-	ReasonAttributionBlocked DispatchReasonCode = "attribution_blocked"
-	// ReasonAlreadyActive: a run is already active/pending for this target and
-	// this trigger did not coalesce.
-	ReasonAlreadyActive DispatchReasonCode = "already_active"
-	// ReasonInternalError: an unexpected server error prevented a decision.
-	ReasonInternalError DispatchReasonCode = "internal_error"
+	ReasonQueued               = dispatch.ReasonQueued
+	ReasonCoalesced            = dispatch.ReasonCoalesced
+	ReasonDeferred             = dispatch.ReasonDeferred
+	ReasonInvocationNotAllowed = dispatch.ReasonInvocationNotAllowed
+	ReasonTargetUnavailable    = dispatch.ReasonTargetUnavailable
+	ReasonRuntimeOffline       = dispatch.ReasonRuntimeOffline
+	ReasonAttributionBlocked   = dispatch.ReasonAttributionBlocked
+	ReasonAlreadyActive        = dispatch.ReasonAlreadyActive
+	ReasonInternalError        = dispatch.ReasonInternalError
 )
 
 // DispatchTarget is the caller-visible reference to an execution target. Name
