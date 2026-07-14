@@ -119,8 +119,8 @@ func TestProjectClaudeLevels_PerModelSubset(t *testing.T) {
 //
 // Elon's PR1 review found that `codex debug models --output json` is
 // rejected by codex-cli 0.131.0 — there is no `--output` flag on the
-// subcommand. The fix was to drop the flag and add `--bundled` (which
-// just skips network refresh). These two tests pin the contract:
+// subcommand. The active catalog command stays unflagged; its bundled fallback
+// adds only `--bundled`. These two tests pin the contract:
 //
 //   - TestCodexDebugModelsArgs_Pinned asserts the literal argv we pass
 //     so a future "let's add a flag" refactor breaks loudly instead of
@@ -131,13 +131,22 @@ func TestProjectClaudeLevels_PerModelSubset(t *testing.T) {
 
 func TestCodexDebugModelsArgs_Pinned(t *testing.T) {
 	t.Parallel()
-	want := []string{"debug", "models", "--bundled"}
-	if !reflect.DeepEqual(codexDebugModelsArgs, want) {
-		t.Fatalf("codexDebugModelsArgs drifted: got %v, want %v", codexDebugModelsArgs, want)
+	cases := []struct {
+		name string
+		got  []string
+		want []string
+	}{
+		{name: "live", got: codexDebugModelsLiveArgs, want: []string{"debug", "models"}},
+		{name: "bundled", got: codexDebugModelsBundledArgs, want: []string{"debug", "models", "--bundled"}},
 	}
-	for _, arg := range codexDebugModelsArgs {
-		if arg == "--output" || arg == "-o" {
-			t.Errorf("--output / -o leaked back into argv (codex CLI does not accept it): %v", codexDebugModelsArgs)
+	for _, tc := range cases {
+		if !reflect.DeepEqual(tc.got, tc.want) {
+			t.Errorf("%s Codex argv drifted: got %v, want %v", tc.name, tc.got, tc.want)
+		}
+		for _, arg := range tc.got {
+			if arg == "--output" || arg == "-o" {
+				t.Errorf("--output / -o leaked back into %s argv: %v", tc.name, tc.got)
+			}
 		}
 	}
 }
@@ -166,19 +175,26 @@ func TestRunCodexDebugModels_ArgvSeenByBinary(t *testing.T) {
 	// Linux ETXTBSY when we exec the file (Go #22315).
 	writeTestExecutable(t, fake, []byte(script))
 
-	raw, err := runCodexDebugModels(context.Background(), fake)
-	if err != nil {
-		t.Fatalf("runCodexDebugModels: %v (output=%q)", err, raw)
-	}
+	for _, tc := range []struct {
+		name string
+		args []string
+	}{
+		{name: "live", args: codexDebugModelsLiveArgs},
+		{name: "bundled", args: codexDebugModelsBundledArgs},
+	} {
+		raw, err := runCodexDebugModels(context.Background(), fake, tc.args)
+		if err != nil {
+			t.Fatalf("runCodexDebugModels(%s): %v (output=%q)", tc.name, err, raw)
+		}
 
-	data, err := os.ReadFile(argvFile)
-	if err != nil {
-		t.Fatalf("read argv file: %v", err)
-	}
-	got := splitNonEmptyLines(string(data))
-	want := []string{"debug", "models", "--bundled"}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("fake codex received argv %v, want %v", got, want)
+		data, err := os.ReadFile(argvFile)
+		if err != nil {
+			t.Fatalf("read argv file: %v", err)
+		}
+		got := splitNonEmptyLines(string(data))
+		if !reflect.DeepEqual(got, tc.args) {
+			t.Fatalf("fake codex received %s argv %v, want %v", tc.name, got, tc.args)
+		}
 	}
 }
 
@@ -273,12 +289,79 @@ func TestParseCodexModelCatalogMalformed(t *testing.T) {
 	}
 }
 
+func TestDiscoverCodexCatalogPrefersActiveCatalog(t *testing.T) {
+	t.Parallel()
+	var calls [][]string
+	run := func(_ context.Context, _ string, args []string) ([]byte, error) {
+		calls = append(calls, append([]string(nil), args...))
+		if reflect.DeepEqual(args, codexDebugModelsLiveArgs) {
+			return []byte(`{"models":[{"slug":"gpt-5.6-terra","display_name":"GPT-5.6-Terra","visibility":"list"}]}`), nil
+		}
+		return []byte(`{"models":[{"slug":"gpt-5.5","display_name":"GPT-5.5","visibility":"list"}]}`), nil
+	}
+
+	got := discoverCodexCatalog(context.Background(), "codex", run)
+	if len(got) != 1 || got[0].ID != "gpt-5.6-terra" {
+		t.Fatalf("expected active Terra catalog, got %+v", got)
+	}
+	if len(calls) != 1 || !reflect.DeepEqual(calls[0], codexDebugModelsLiveArgs) {
+		t.Fatalf("expected only the active catalog command, got calls=%v", calls)
+	}
+}
+
+func TestDiscoverCodexCatalogFallsBackInOrder(t *testing.T) {
+	t.Parallel()
+
+	t.Run("active failure uses bundled catalog", func(t *testing.T) {
+		var calls [][]string
+		run := func(_ context.Context, _ string, args []string) ([]byte, error) {
+			calls = append(calls, append([]string(nil), args...))
+			if reflect.DeepEqual(args, codexDebugModelsLiveArgs) {
+				return nil, context.DeadlineExceeded
+			}
+			return []byte(`{"models":[{"slug":"gpt-5.5","display_name":"GPT-5.5","visibility":"list"}]}`), nil
+		}
+
+		got := discoverCodexCatalog(context.Background(), "codex", run)
+		if len(got) != 1 || got[0].ID != "gpt-5.5" {
+			t.Fatalf("expected bundled catalog, got %+v", got)
+		}
+		wantCalls := [][]string{codexDebugModelsLiveArgs, codexDebugModelsBundledArgs}
+		if !reflect.DeepEqual(calls, wantCalls) {
+			t.Fatalf("catalog calls = %v, want %v", calls, wantCalls)
+		}
+	})
+
+	t.Run("invalid active and bundled catalogs use static fallback", func(t *testing.T) {
+		run := func(_ context.Context, _ string, _ []string) ([]byte, error) {
+			return []byte(`{"models":[]}`), nil
+		}
+
+		got := discoverCodexCatalog(context.Background(), "codex", run)
+		if len(got) == 0 || got[0].ID != "gpt-5.6-sol" {
+			t.Fatalf("expected static fallback, got %+v", got)
+		}
+		if !containsModel(got, "gpt-5.6-terra") {
+			t.Fatalf("static fallback must retain Terra, got %+v", got)
+		}
+	})
+}
+
+func containsModel(models []Model, id string) bool {
+	for _, model := range models {
+		if model.ID == id {
+			return true
+		}
+	}
+	return false
+}
+
 func TestDiscoverCodexModelsVersionGateAndFallback(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("shell-script fake binary requires a POSIX shell")
 	}
 
-	t.Run("supported version uses bundled catalog", func(t *testing.T) {
+	t.Run("supported version uses active catalog", func(t *testing.T) {
 		dir := t.TempDir()
 		fake := filepath.Join(dir, "codex")
 		script := `#!/bin/sh

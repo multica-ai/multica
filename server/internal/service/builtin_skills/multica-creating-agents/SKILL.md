@@ -100,10 +100,12 @@ update`, mirroring `--model`: the flag is a thin pass-through to the top-level
 clears it back to the runtime default. The CLI deliberately does not enumerate
 the valid levels — they are runtime/model-specific (Claude currently uses
 `low|medium|high|xhigh|max`; Codex values are discovered from the runtime's
-model catalog). It forwards the token, the server applies the provider's
-fixed-enum or safe-token gate, and the daemon performs the exact model/level
-check. A runtime whose provider has no thinking concept rejects any non-empty
-value with a 400.
+model catalog). Codex discovery prefers the CLI's active cached/account catalog,
+then falls back to its bundled catalog and finally Multica's static snapshot,
+so account-visible models stay selectable without sacrificing offline behavior.
+It forwards the token, the server applies the provider's fixed-enum or safe-token
+gate, and the daemon performs the exact model/level check. A runtime whose
+provider has no thinking concept rejects any non-empty value with a 400.
 
 ### model vs custom_args
 

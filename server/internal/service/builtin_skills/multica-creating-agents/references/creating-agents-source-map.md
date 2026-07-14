@@ -72,10 +72,10 @@ only.
 |---|---|---|
 | Codex model-list entry point | `models.go` 94–103 | `ListModels("codex")` uses cached daemon-local discovery instead of returning the fallback catalog unconditionally |
 | Codex fallback catalog | `models.go` 301–354 | Used for Codex <0.122.0 and failed/malformed discovery; includes current verified visible models plus legacy `gpt-5.3-codex`, with a separate `Thinking` catalog on every model |
-| Codex discovery version gate | `thinking.go` 280, 306–337 | `codex debug models --bundled` is used only for parseable versions ≥0.122.0; unsupported versions and command/parse/empty failures return the static model + thinking fallback |
-| Codex catalog projection | `thinking.go` 355–409 | Hidden models are excluded; visible `slug`/`display_name` rows and each row's `supported_reasoning_levels`/`default_reasoning_level` are preserved |
-| Per-model thinking validation | `thinking.go` 547–640 | `ValidateThinkingLevel` accepts only values in the explicit model's `Thinking.SupportedLevels`; an empty Codex model fails closed because its effective `config.toml` model is unknown |
-| Dynamic Codex token gate | `thinking.go` 642–710 | Server persistence accepts syntactically safe Codex tokens so new catalog values do not require a Multica release; exact support remains a daemon-local per-model check |
+| Codex discovery version gate | `thinking.go` 285, 312–363 | Parseable versions ≥0.122.0 try `codex debug models` against the active cached/account catalog, then `--bundled`, then the static model + thinking fallback; one 15s context bounds both catalog commands |
+| Codex catalog projection | `thinking.go` 372–426 | Hidden models are excluded; visible `slug`/`display_name` rows and each row's `supported_reasoning_levels`/`default_reasoning_level` are preserved |
+| Per-model thinking validation | `thinking.go` 594–657 | `ValidateThinkingLevel` accepts only values in the explicit model's `Thinking.SupportedLevels`; an empty Codex model fails closed because its effective `config.toml` model is unknown |
+| Dynamic Codex token gate | `thinking.go` 688–728 | Server persistence accepts syntactically safe Codex tokens so new catalog values do not require a Multica release; exact support remains a daemon-local per-model check |
 | Daemon invalid-combination handling | `internal/daemon/daemon.go` 3860–3892 | Before execution, invalid `(provider, model, thinking_level)` combinations log a warning and omit the override rather than failing the task |
 
 ## Env endpoint — `server/internal/handler/agent_env.go`

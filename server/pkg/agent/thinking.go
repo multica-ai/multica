@@ -240,9 +240,9 @@ func projectClaudeLevels(superset []string, allow map[string]bool) []ThinkingLev
 
 // ── Codex ────────────────────────────────────────────────────────────
 //
-// `codex debug models --bundled` is the structured discovery hook for both
-// the visible model catalog and each model's reasoning catalog. OpenAI added
-// the command and `--bundled` flag together in Codex 0.122.0 (openai/codex
+// `codex debug models` is the structured discovery hook for both the visible
+// model catalog and each model's reasoning catalog. OpenAI added the command
+// and `--bundled` fallback flag together in Codex 0.122.0 (openai/codex
 // #18625). Older versions, failed invocations, and malformed/empty payloads
 // use codexStaticModels so the picker remains usable.
 //
@@ -251,14 +251,13 @@ func projectClaudeLevels(superset []string, allow map[string]bool) []ThinkingLev
 //   2. The schema is structured and has been stable since its 0.122.0 debut.
 //   3. It doesn't pollute stderr with an intentional misconfiguration.
 //
-// The subcommand emits JSON on stdout by default — there is no
-// `--output json` flag (a prior version of this code passed one and
-// silently failed on 0.131.0). We add `--bundled` to skip the network
-// refresh: discovery runs on every daemon poll and a network hop here
-// would block the picker behind whatever the user's connection allows.
-// The bundled catalog is what determines which `model_reasoning_effort`
-// tokens the local binary actually accepts, which is the only thing we
-// need for validation.
+// The subcommand emits JSON on stdout by default — there is no `--output json`
+// flag (a prior version of this code passed one and silently failed on
+// 0.131.0). The unflagged command reads Codex's active cached/account catalog
+// and refreshes online only when uncached. If that attempt fails, is malformed,
+// or is empty, `--bundled` supplies the binary's offline catalog before we fall
+// back to Multica's static snapshot. A single timeout bounds both CLI calls so
+// an unavailable network cannot hold the picker open indefinitely.
 //
 // The static fallback deliberately mirrors a recently verified bundled
 // catalog, including thinking metadata, rather than guessing model IDs.
@@ -278,10 +277,11 @@ var codexEffortLabel = map[string]string{
 }
 
 const minCodexDebugModelsVersion = "0.122.0"
+const codexModelDiscoveryTimeout = 15 * time.Second
 
 // codexDebugModelsResponse mirrors the JSON shape emitted by
-// `codex debug models --bundled` (Codex 0.122.0+). Only the fields we
-// consume are typed; unknown keys are ignored.
+// `codex debug models` and its `--bundled` fallback (Codex 0.122.0+). Only the
+// fields we consume are typed; unknown keys are ignored.
 type codexDebugModelsResponse struct {
 	Models []codexDebugModel `json:"models"`
 }
@@ -312,15 +312,9 @@ func discoverCodexModels(ctx context.Context, executablePath string) []Model {
 		return codexStaticModels()
 	}
 
-	raw, err := runCodexDebugModels(ctx, executablePath)
-	if err != nil {
-		return codexStaticModels()
-	}
-	models, err := parseCodexModelCatalog(raw)
-	if err != nil || len(models) == 0 {
-		return codexStaticModels()
-	}
-	return models
+	discoveryCtx, cancel := context.WithTimeout(ctx, codexModelDiscoveryTimeout)
+	defer cancel()
+	return discoverCodexCatalog(discoveryCtx, executablePath, runCodexDebugModels)
 }
 
 func codexSupportsDebugModels(version string) bool {
@@ -335,23 +329,40 @@ func codexSupportsDebugModels(version string) bool {
 	return !parsed.lessThan(minimum)
 }
 
-// codexDebugModelsArgs is the argv we pass to discover the local Codex
-// catalog. Kept as a package-level var (not a literal at the call site)
-// so tests can assert the exact form a real `codex` invocation receives,
-// not just the parser behavior on a fixture string. The argv shape is
-// the contract that broke under PR1 review; the test that pins it sits
-// in thinking_test.go.
-var codexDebugModelsArgs = []string{"debug", "models", "--bundled"}
+type codexModelCatalogRunner func(context.Context, string, []string) ([]byte, error)
 
-func runCodexDebugModels(ctx context.Context, executablePath string) ([]byte, error) {
-	cmd := exec.CommandContext(ctx, executablePath, codexDebugModelsArgs...)
+// These argv values are package variables so tests can pin what a real Codex
+// process receives. The live command must remain unflagged: `--bundled` skips
+// the active cache/account catalog and caused multica#5362.
+var (
+	codexDebugModelsLiveArgs    = []string{"debug", "models"}
+	codexDebugModelsBundledArgs = []string{"debug", "models", "--bundled"}
+)
+
+func discoverCodexCatalog(ctx context.Context, executablePath string, run codexModelCatalogRunner) []Model {
+	for _, args := range [][]string{codexDebugModelsLiveArgs, codexDebugModelsBundledArgs} {
+		raw, err := run(ctx, executablePath, args)
+		if err != nil {
+			continue
+		}
+		models, err := parseCodexModelCatalog(raw)
+		if err == nil && len(models) > 0 {
+			return models
+		}
+	}
+	return codexStaticModels()
+}
+
+func runCodexDebugModels(ctx context.Context, executablePath string, args []string) ([]byte, error) {
+	cmd := exec.CommandContext(ctx, executablePath, args...)
 	hideAgentWindow(cmd)
+	cmd.WaitDelay = 2 * time.Second
 	return cmd.Output()
 }
 
 // parseCodexModelCatalog projects the CLI's raw catalog into the daemon wire
 // model. Hidden entries are intentionally excluded to match Codex's own model
-// picker; the first visible entry is the bundled catalog's preferred default.
+// picker; the first visible entry is the selected catalog's preferred default.
 func parseCodexModelCatalog(raw []byte) ([]Model, error) {
 	var resp codexDebugModelsResponse
 	if err := json.Unmarshal(raw, &resp); err != nil {
