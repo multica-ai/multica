@@ -9,6 +9,11 @@ import (
 	"testing"
 )
 
+const (
+	currentRecoverySession = "11111111-1111-1111-1111-111111111111"
+	priorRecoverySession   = "22222222-2222-2222-2222-222222222222"
+)
+
 type recoverOrphanFixture struct {
 	runtimeID string
 	agentID   string
@@ -21,11 +26,15 @@ func createRecoverOrphanFixture(t *testing.T, ctx context.Context, name string) 
 
 	runtimeID := createClaimReclaimRuntime(t, ctx, name+" runtime")
 	agentID, issueID := createClaimReclaimAgentAndIssue(t, ctx, runtimeID, name+" agent")
-	if _, err := testPool.Exec(ctx, `UPDATE agent_runtime SET last_seen_at = now() - interval '10 minutes' WHERE id = $1`, runtimeID); err != nil {
+	if _, err := testPool.Exec(ctx, `
+		UPDATE agent_runtime
+		SET last_seen_at = now() - interval '10 minutes', daemon_session_id = $2
+		WHERE id = $1
+	`, runtimeID, currentRecoverySession); err != nil {
 		t.Fatalf("age runtime: %v", err)
 	}
 	t.Cleanup(func() {
-		testPool.Exec(context.Background(), `UPDATE agent_runtime SET last_seen_at = now() WHERE id = $1`, runtimeID)
+		testPool.Exec(context.Background(), `UPDATE agent_runtime SET last_seen_at = now(), daemon_session_id = NULL WHERE id = $1`, runtimeID)
 	})
 	if _, err := testPool.Exec(ctx, `UPDATE agent SET status = 'working' WHERE id = $1`, agentID); err != nil {
 		t.Fatalf("seed agent status: %v", err)
@@ -34,11 +43,11 @@ func createRecoverOrphanFixture(t *testing.T, ctx context.Context, name string) 
 	var taskID string
 	if err := testPool.QueryRow(ctx, `
 		INSERT INTO agent_task_queue (
-			agent_id, runtime_id, issue_id, status, priority, dispatched_at, started_at, max_attempts
+			agent_id, runtime_id, issue_id, status, priority, dispatched_at, started_at, max_attempts, daemon_session_id
 		)
-		VALUES ($1, $2, $3, 'running', 0, now() - interval '3 hours', now() - interval '3 hours', 2)
+		VALUES ($1, $2, $3, 'running', 0, now() - interval '3 hours', now() - interval '3 hours', 2, $4)
 		RETURNING id
-	`, agentID, runtimeID, issueID).Scan(&taskID); err != nil {
+	`, agentID, runtimeID, issueID, priorRecoverySession).Scan(&taskID); err != nil {
 		t.Fatalf("seed running task: %v", err)
 	}
 	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE id = $1`, taskID) })
@@ -140,6 +149,7 @@ func TestRecoverOrphanedTasks_RequeuesDeadSession(t *testing.T) {
 
 	w := httptest.NewRecorder()
 	req := newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+fixture.runtimeID+"/recover-orphans", nil, testWorkspaceID, "recover-orphans-test")
+	req.Header.Set("X-Multica-Daemon-Session", currentRecoverySession)
 	req = withURLParams(req, "runtimeId", fixture.runtimeID)
 	testHandler.RecoverOrphanedTasks(w, req)
 	if w.Code != http.StatusOK {
@@ -160,7 +170,7 @@ func TestRecoverOrphanedTasks_RequeuesDeadSession(t *testing.T) {
 	assertRecoverOrphanedTaskState(t, ctx, fixture.agentID, fixture.issueID, fixture.taskID)
 }
 
-func TestRecoverOrphanedTasks_AllowsWorkspaceOwner(t *testing.T) {
+func TestRecoverOrphanedTasks_RejectsWorkspaceOwner(t *testing.T) {
 	if testHandler == nil || testPool == nil {
 		t.Skip("database not available")
 	}
@@ -172,22 +182,17 @@ func TestRecoverOrphanedTasks_AllowsWorkspaceOwner(t *testing.T) {
 	req := newRequestAs(testUserID, "POST", "/api/daemon/runtimes/"+fixture.runtimeID+"/recover-orphans", nil)
 	req = withURLParams(req, "runtimeId", fixture.runtimeID)
 	testHandler.RecoverOrphanedTasks(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("RecoverOrphanedTasks owner: expected 200, got %d: %s", w.Code, w.Body.String())
+	if w.Code != http.StatusConflict {
+		t.Fatalf("RecoverOrphanedTasks owner: expected 409, got %d: %s", w.Code, w.Body.String())
 	}
 
-	var resp struct {
-		Orphaned int `json:"orphaned"`
-		Retried  int `json:"retried"`
+	var taskStatus, failureReason string
+	if err := testPool.QueryRow(ctx, `SELECT status, COALESCE(failure_reason, '') FROM agent_task_queue WHERE id = $1`, fixture.taskID).Scan(&taskStatus, &failureReason); err != nil {
+		t.Fatalf("read task after owner rejection: %v", err)
 	}
-	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("decode recover response: %v", err)
+	if taskStatus != "running" || failureReason != "" {
+		t.Fatalf("task changed after owner rejection: status=%s failure=%s", taskStatus, failureReason)
 	}
-	if resp.Orphaned != 1 || resp.Retried != 1 {
-		t.Fatalf("recover response = %+v, want one recovered and one retry", resp)
-	}
-
-	assertRecoverOrphanedTaskState(t, ctx, fixture.agentID, fixture.issueID, fixture.taskID)
 }
 
 func TestRecoverOrphanedTasks_RejectsPlainMember(t *testing.T) {
@@ -240,6 +245,7 @@ func TestRecoverOrphanedTasks_ConcurrentRequestsStayAtMostOnce(t *testing.T) {
 			<-start
 			w := httptest.NewRecorder()
 			req := newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+fixture.runtimeID+"/recover-orphans", nil, testWorkspaceID, "recover-orphans-concurrent")
+			req.Header.Set("X-Multica-Daemon-Session", currentRecoverySession)
 			req = withURLParams(req, "runtimeId", fixture.runtimeID)
 			testHandler.RecoverOrphanedTasks(w, req)
 			var resp struct {
@@ -303,6 +309,49 @@ func TestRecoverOrphanedTasks_ConcurrentRequestsStayAtMostOnce(t *testing.T) {
 
 	if failedCount != 1 || queuedCount != 1 || activeCount != 0 {
 		t.Fatalf("post-recovery counts = failed:%d queued:%d active:%d, want 1/1/0", failedCount, queuedCount, activeCount)
+	}
+}
+
+// A current-session caller cannot turn healthy in-flight work into a retry.
+// The recovery SQL must require an older task generation, not merely a caller
+// with access to the runtime.
+func TestRecoverOrphanedTasks_LeavesCurrentSessionTaskUntouched(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+	fixture := createRecoverOrphanFixture(t, ctx, "Recover current session")
+	if _, err := testPool.Exec(ctx, `UPDATE agent_task_queue SET daemon_session_id = $2 WHERE id = $1`, fixture.taskID, currentRecoverySession); err != nil {
+		t.Fatalf("set current task session: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	req := newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+fixture.runtimeID+"/recover-orphans", nil, testWorkspaceID, "recover-current-session")
+	req.Header.Set("X-Multica-Daemon-Session", currentRecoverySession)
+	req = withURLParams(req, "runtimeId", fixture.runtimeID)
+	testHandler.RecoverOrphanedTasks(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("RecoverOrphanedTasks current session: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp struct {
+		Orphaned int `json:"orphaned"`
+		Retried  int `json:"retried"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode recover response: %v", err)
+	}
+	if resp.Orphaned != 0 || resp.Retried != 0 {
+		t.Fatalf("recover current session = %+v, want no mutation", resp)
+	}
+
+	var taskStatus string
+	if err := testPool.QueryRow(ctx, `SELECT status FROM agent_task_queue WHERE id = $1`, fixture.taskID).Scan(&taskStatus); err != nil {
+		t.Fatalf("read task after current-session recovery: %v", err)
+	}
+	if taskStatus != "running" {
+		t.Fatalf("current-session task status = %s, want running", taskStatus)
 	}
 }
 

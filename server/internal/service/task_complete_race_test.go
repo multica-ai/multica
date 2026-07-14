@@ -175,6 +175,7 @@ func TestTaskFailureClassifiers(t *testing.T) {
 		wantRetry    bool
 	}{
 		{reason: "timeout", wantType: "timeout", wantResumeOK: true, wantRetry: true},
+		{reason: "task_liveness_lost", wantType: "timeout", wantResumeOK: true, wantRetry: false},
 		{reason: "codex_semantic_inactivity", wantType: "timeout", wantResumeOK: false, wantRetry: true},
 		{reason: "runtime_recovery", wantType: "runtime", wantResumeOK: true, wantRetry: true},
 		{reason: "iteration_limit", wantType: "agent_output", wantResumeOK: false, wantRetry: false},

@@ -864,7 +864,7 @@ func taskErrorType(reason string) string {
 	switch reason {
 	case "runtime_offline", "runtime_recovery":
 		return "runtime"
-	case "timeout", "codex_semantic_inactivity":
+	case "timeout", "task_liveness_lost", "codex_semantic_inactivity":
 		return "timeout"
 	case "iteration_limit", "agent_fallback_message":
 		return "agent_output"
@@ -2462,9 +2462,9 @@ func (s *TaskService) StartTask(ctx context.Context, taskID pgtype.UUID) (*db.Ag
 	return &task, nil
 }
 
-// HeartbeatTaskExecution records that the daemon worker assigned to this task
-// is still alive. This is deliberately task-scoped: a runtime heartbeat can
-// stay fresh while one of several concurrent task workers is wedged.
+// HeartbeatTaskExecution records observed backend activity for this task. This
+// is deliberately task-scoped: a runtime heartbeat can stay fresh while one
+// of several concurrent task workers is wedged.
 func (s *TaskService) HeartbeatTaskExecution(ctx context.Context, taskID pgtype.UUID) (*db.AgentTaskQueue, error) {
 	task, err := s.Queries.TouchAgentTaskExecutionHeartbeat(ctx, taskID)
 	if err != nil {

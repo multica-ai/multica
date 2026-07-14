@@ -23,6 +23,7 @@ func TestReasonStringWireValues(t *testing.T) {
 		{ReasonRuntimeOffline, "runtime_offline"},
 		{ReasonRuntimeRecovery, "runtime_recovery"},
 		{ReasonTimeout, "timeout"},
+		{ReasonTaskLivenessLost, "task_liveness_lost"},
 		{ReasonIterationLimit, "iteration_limit"},
 		{ReasonAgentBlocked, "agent_blocked"},
 		{ReasonAPIInvalidRequest, "api_invalid_request"},
@@ -43,7 +44,7 @@ func TestReasonStringWireValues(t *testing.T) {
 		{ReasonAgentUnknown, "agent_error.unknown"},
 	}
 
-	if got, want := len(cases), 21; got != want {
+	if got, want := len(cases), 22; got != want {
 		t.Fatalf("constant count = %d, want %d (canonical taxonomy size)", got, want)
 	}
 
@@ -67,6 +68,7 @@ func TestIsAgentError(t *testing.T) {
 		ReasonRuntimeOffline,
 		ReasonRuntimeRecovery,
 		ReasonTimeout,
+		ReasonTaskLivenessLost,
 		ReasonIterationLimit,
 		ReasonAgentBlocked,
 		ReasonAPIInvalidRequest,
@@ -110,8 +112,8 @@ func TestAllReasonsContents(t *testing.T) {
 	t.Parallel()
 
 	got := AllReasons()
-	if len(got) != 21 {
-		t.Fatalf("AllReasons() returned %d entries, want 21", len(got))
+	if len(got) != 22 {
+		t.Fatalf("AllReasons() returned %d entries, want 22", len(got))
 	}
 
 	seen := make(map[Reason]bool, len(got))
@@ -128,8 +130,8 @@ func TestAllReasonsContents(t *testing.T) {
 		}
 	}
 
-	if platformCount != 7 {
-		t.Errorf("AllReasons(): platform-side count = %d, want 7", platformCount)
+	if platformCount != 8 {
+		t.Errorf("AllReasons(): platform-side count = %d, want 8", platformCount)
 	}
 	if agentCount != 14 {
 		t.Errorf("AllReasons(): agent-side count = %d, want 14", agentCount)
@@ -141,7 +143,7 @@ func TestAllReasonsContents(t *testing.T) {
 	// allReasons slice.
 	required := []Reason{
 		ReasonQueuedExpired, ReasonRuntimeOffline, ReasonRuntimeRecovery,
-		ReasonTimeout, ReasonIterationLimit, ReasonAgentBlocked,
+		ReasonTimeout, ReasonTaskLivenessLost, ReasonIterationLimit, ReasonAgentBlocked,
 		ReasonAPIInvalidRequest,
 		ReasonAgentProviderAuthOrAccess, ReasonAgentProviderQuotaLimit,
 		ReasonAgentProviderCapacityOrRateLimit, ReasonAgentProviderServerError,

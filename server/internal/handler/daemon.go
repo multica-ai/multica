@@ -92,7 +92,25 @@ func (h *Handler) requireDaemonRuntimeAccess(w http.ResponseWriter, r *http.Requ
 	if !h.requireDaemonWorkspaceAccess(w, r, uuidToString(rt.WorkspaceID)) {
 		return db.AgentRuntime{}, false
 	}
+	if !requireCurrentDaemonSession(w, r, rt) {
+		return db.AgentRuntime{}, false
+	}
 	return rt, true
+}
+
+// requireCurrentDaemonSession fences a daemon process after a replacement has
+// registered for the same persistent daemon ID. The generation is optional so
+// older daemons can keep operating during a rolling upgrade; once a runtime
+// carries one, a request without the matching process header cannot mutate it.
+func requireCurrentDaemonSession(w http.ResponseWriter, r *http.Request, runtime db.AgentRuntime) bool {
+	if !runtime.DaemonSessionID.Valid {
+		return true
+	}
+	if strings.TrimSpace(r.Header.Get("X-Multica-Daemon-Session")) == uuidToString(runtime.DaemonSessionID) {
+		return true
+	}
+	writeError(w, http.StatusConflict, "daemon session has been replaced; restart the daemon")
+	return false
 }
 
 // requireDaemonTaskAccess looks up a task and verifies the caller owns its workspace.
@@ -136,6 +154,23 @@ func (h *Handler) requireDaemonTaskAccessWithWorkspace(w http.ResponseWriter, r 
 	if !h.requireDaemonWorkspaceAccess(w, r, wsID) {
 		return db.AgentTaskQueue{}, "", false
 	}
+	// A task route carries only task_id, so resolve its runtime to apply the
+	// same process-generation fence as runtime-scoped daemon routes. This
+	// makes a replaced daemon stop reporting progress or terminal callbacks
+	// while its cancellation watcher shuts down the local worker.
+	runtime, err := h.Queries.GetAgentRuntime(r.Context(), task.RuntimeID)
+	if err != nil {
+		if isNotFound(err) {
+			writeError(w, http.StatusNotFound, "task not found")
+			return db.AgentTaskQueue{}, "", false
+		}
+		slog.Warn("get task runtime failed", "task_id", taskID, "runtime_id", uuidToString(task.RuntimeID), "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to load task runtime")
+		return db.AgentTaskQueue{}, "", false
+	}
+	if !requireCurrentDaemonSession(w, r, runtime) {
+		return db.AgentTaskQueue{}, "", false
+	}
 	return task, wsID, true
 }
 
@@ -170,6 +205,10 @@ func (h *Handler) verifyDaemonWorkspaceAccess(r *http.Request, workspaceID strin
 type DaemonRegisterRequest struct {
 	WorkspaceID string `json:"workspace_id"`
 	DaemonID    string `json:"daemon_id"`
+	// DaemonSessionID is freshly minted for every daemon process start. It
+	// lets the server prove an in-flight task belongs to a prior incarnation
+	// before startup recovery may fail and retry it.
+	DaemonSessionID string `json:"daemon_session_id"`
 	// LegacyDaemonIDs lists prior hostname-derived daemon_ids this machine
 	// may have registered under before switching to a persistent UUID. The
 	// handler merges any matching runtime rows into the new row so agents
@@ -342,6 +381,7 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 
 	req.WorkspaceID = strings.TrimSpace(req.WorkspaceID)
 	req.DaemonID = strings.TrimSpace(req.DaemonID)
+	req.DaemonSessionID = strings.TrimSpace(req.DaemonSessionID)
 	req.DeviceName = strings.TrimSpace(req.DeviceName)
 
 	if req.DaemonID == "" {
@@ -361,6 +401,14 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	req.WorkspaceID = uuidToString(wsUUID)
+	var daemonSessionID pgtype.UUID
+	if req.DaemonSessionID != "" {
+		var sessionOK bool
+		daemonSessionID, sessionOK = parseUUIDOrBadRequest(w, req.DaemonSessionID, "daemon_session_id")
+		if !sessionOK {
+			return
+		}
+	}
 
 	// Verify workspace access and resolve owner.
 	// Daemon tokens (mdt_) prove workspace access directly; OwnerID will be zero
@@ -443,16 +491,17 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 			provider = profile.ProtocolFamily
 
 			prow, err := h.Queries.UpsertAgentRuntimeWithProfile(r.Context(), db.UpsertAgentRuntimeWithProfileParams{
-				WorkspaceID: wsUUID,
-				DaemonID:    strToText(req.DaemonID),
-				Name:        name,
-				RuntimeMode: "local",
-				Provider:    provider,
-				Status:      status,
-				DeviceInfo:  deviceInfo,
-				Metadata:    metadata,
-				OwnerID:     ownerID,
-				ProfileID:   profileUUID,
+				WorkspaceID:     wsUUID,
+				DaemonID:        strToText(req.DaemonID),
+				Name:            name,
+				RuntimeMode:     "local",
+				Provider:        provider,
+				Status:          status,
+				DeviceInfo:      deviceInfo,
+				Metadata:        metadata,
+				OwnerID:         ownerID,
+				ProfileID:       profileUUID,
+				DaemonSessionID: daemonSessionID,
 			})
 			if err != nil {
 				obsmetrics.RecordEvent(h.Analytics, h.Metrics, analytics.RuntimeFailed(
@@ -489,15 +538,16 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 			}
 		} else {
 			row, err := h.Queries.UpsertAgentRuntime(r.Context(), db.UpsertAgentRuntimeParams{
-				WorkspaceID: wsUUID,
-				DaemonID:    strToText(req.DaemonID),
-				Name:        name,
-				RuntimeMode: "local",
-				Provider:    provider,
-				Status:      status,
-				DeviceInfo:  deviceInfo,
-				Metadata:    metadata,
-				OwnerID:     ownerID,
+				WorkspaceID:     wsUUID,
+				DaemonID:        strToText(req.DaemonID),
+				Name:            name,
+				RuntimeMode:     "local",
+				Provider:        provider,
+				Status:          status,
+				DeviceInfo:      deviceInfo,
+				Metadata:        metadata,
+				OwnerID:         ownerID,
+				DaemonSessionID: daemonSessionID,
 			})
 			if err != nil {
 				obsmetrics.RecordEvent(h.Analytics, h.Metrics, analytics.RuntimeFailed(
@@ -618,16 +668,17 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 			"command_name":                       commandName,
 		})
 		prow, err := h.Queries.UpsertAgentRuntimeWithProfile(r.Context(), db.UpsertAgentRuntimeWithProfileParams{
-			WorkspaceID: wsUUID,
-			DaemonID:    strToText(req.DaemonID),
-			Name:        name,
-			RuntimeMode: "local",
-			Provider:    profile.ProtocolFamily,
-			Status:      "offline",
-			DeviceInfo:  deviceInfo,
-			Metadata:    metadata,
-			OwnerID:     ownerID,
-			ProfileID:   profileUUID,
+			WorkspaceID:     wsUUID,
+			DaemonID:        strToText(req.DaemonID),
+			Name:            name,
+			RuntimeMode:     "local",
+			Provider:        profile.ProtocolFamily,
+			Status:          "offline",
+			DeviceInfo:      deviceInfo,
+			Metadata:        metadata,
+			OwnerID:         ownerID,
+			ProfileID:       profileUUID,
+			DaemonSessionID: daemonSessionID,
 		})
 		if err != nil {
 			slog.Warn("failed to record runtime profile registration failure",

@@ -56,6 +56,18 @@ func isTaskNotFoundError(err error) bool {
 	return strings.Contains(strings.ToLower(reqErr.Body), "task not found")
 }
 
+// isDaemonSessionReplacedError identifies the fencing response sent after a
+// newer daemon process registers for the same persistent daemon ID. Unlike a
+// transient control-plane failure, this means the local worker must stop: it
+// no longer owns the task it is trying to report.
+func isDaemonSessionReplacedError(err error) bool {
+	var reqErr *requestError
+	if !errors.As(err, &reqErr) {
+		return false
+	}
+	return reqErr.StatusCode == http.StatusConflict && strings.Contains(strings.ToLower(reqErr.Body), "daemon session has been replaced")
+}
+
 // isUnauthorizedError returns true if the error is a 401 from the server.
 // Used by the token-renewal loop to surface a clear "re-login required"
 // message instead of a generic transport-level retry.
@@ -105,6 +117,10 @@ type Client struct {
 	platform string
 	version  string
 	os       string
+	// sessionID is a process-lifetime generation. It fences a replaced daemon
+	// from claiming, starting, or mutating work after a newer process has
+	// registered for the same machine identity.
+	sessionID string
 
 	workspaceMu                    sync.Mutex
 	workspaceETag                  string
@@ -162,6 +178,13 @@ func (c *Client) SetVersion(v string) {
 	c.version = v
 }
 
+// SetSessionID records the daemon process generation sent with every daemon
+// request. It is intentionally distinct from the persistent daemon ID: a
+// restart keeps the machine identity but gets a fresh session generation.
+func (c *Client) SetSessionID(sessionID string) {
+	c.sessionID = sessionID
+}
+
 // setIdentityHeaders attaches X-Client-Platform/Version/OS to req when set.
 func (c *Client) setIdentityHeaders(req *http.Request) {
 	if c.platform != "" {
@@ -172,6 +195,9 @@ func (c *Client) setIdentityHeaders(req *http.Request) {
 	}
 	if c.os != "" {
 		req.Header.Set("X-Client-OS", c.os)
+	}
+	if c.sessionID != "" {
+		req.Header.Set("X-Multica-Daemon-Session", c.sessionID)
 	}
 	req.Header.Set("X-Client-Capabilities", daemonClientCapabilities())
 }
@@ -421,9 +447,9 @@ func (c *Client) PinTaskSession(ctx context.Context, taskID, sessionID, workDir 
 	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/tasks/%s/session", taskID), body, nil)
 }
 
-// HeartbeatTaskExecution proves that the daemon worker responsible for one
-// running task is still active. It is intentionally independent of the
-// runtime-wide heartbeat because other workers can keep that runtime alive.
+// HeartbeatTaskExecution records observed backend activity for one running
+// task. It is intentionally independent of the runtime-wide heartbeat because
+// other workers can keep that runtime alive.
 func (c *Client) HeartbeatTaskExecution(ctx context.Context, taskID string) error {
 	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/tasks/%s/heartbeat", taskID), map[string]any{}, nil)
 }

@@ -2,10 +2,6 @@ package main
 
 import (
 	"bytes"
-	"encoding/json"
-	"io"
-	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -363,82 +359,5 @@ func writeDiskUsageFile(t *testing.T, path string) {
 	}
 	if err := os.WriteFile(path, []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
-	}
-}
-
-func newDaemonRecoverOrphansTestCmd() *cobra.Command {
-	cmd := &cobra.Command{Use: "recover-orphans"}
-	cmd.Flags().String("server-url", "", "")
-	cmd.Flags().String("workspace-id", "", "")
-	cmd.Flags().String("profile", "", "")
-	cmd.Flags().String("token", "", "")
-	cmd.Flags().String("output", "table", "")
-	return cmd
-}
-
-func TestDaemonRecoverOrphansRegistered(t *testing.T) {
-	cmd, _, err := daemonCmd.Find([]string{"recover-orphans"})
-	if err != nil {
-		t.Fatalf("find recover-orphans: %v", err)
-	}
-	if cmd == nil || cmd.Name() != "recover-orphans" {
-		t.Fatalf("recover-orphans not registered under daemon: %#v", cmd)
-	}
-}
-
-func TestRunDaemonRecoverOrphans(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
-	t.Setenv("MULTICA_SERVER_URL", "")
-	t.Setenv("MULTICA_WORKSPACE_ID", "")
-	t.Setenv("MULTICA_TOKEN", "")
-
-	prev, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("get cwd: %v", err)
-	}
-	workingDir := t.TempDir()
-	if err := os.Chdir(workingDir); err != nil {
-		t.Fatalf("chdir to temp dir: %v", err)
-	}
-	t.Cleanup(func() {
-		if err := os.Chdir(prev); err != nil {
-			t.Fatalf("restore cwd: %v", err)
-		}
-	})
-
-	var gotMethod, gotPath, gotBody string
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotMethod = r.Method
-		gotPath = r.URL.Path
-		body, _ := io.ReadAll(r.Body)
-		gotBody = string(body)
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{"orphaned": 1, "retried": 1})
-	}))
-	t.Cleanup(srv.Close)
-
-	cmd := newDaemonRecoverOrphansTestCmd()
-	_ = cmd.Flags().Set("server-url", srv.URL)
-	_ = cmd.Flags().Set("workspace-id", "ws-123")
-	_ = cmd.Flags().Set("token", "test-token")
-
-	out, err := captureStdout(t, func() error {
-		return runDaemonRecoverOrphans(cmd, []string{"rt-123"})
-	})
-	if err != nil {
-		t.Fatalf("runDaemonRecoverOrphans: %v", err)
-	}
-
-	if gotMethod != http.MethodPost {
-		t.Fatalf("method = %s, want POST", gotMethod)
-	}
-	if gotPath != "/api/daemon/runtimes/rt-123/recover-orphans" {
-		t.Fatalf("path = %q, want /api/daemon/runtimes/rt-123/recover-orphans", gotPath)
-	}
-	if strings.TrimSpace(gotBody) != "{}" {
-		t.Fatalf("body = %q, want {}", gotBody)
-	}
-	if !strings.Contains(out, "Recovered orphaned tasks for runtime rt-123: orphaned=1 retried=1") {
-		t.Fatalf("stdout = %q, want recovery summary", out)
 	}
 }

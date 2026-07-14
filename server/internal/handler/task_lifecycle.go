@@ -9,34 +9,24 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
-	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
 // RecoverOrphanedTasks is called by the daemon at startup for each runtime
-// it owns. It atomically fails any dispatched/running tasks the server still
-// believes belong to that runtime — those are the tasks the previous daemon
-// process was running when it died — and triggers MaybeRetryFailedTask for
-// each so the user sees a fresh attempt instead of a permanently stuck row.
+// it owns. It atomically fails only active tasks that carry an older daemon
+// session generation than the runtime's current registered process, then
+// triggers MaybeRetryFailedTask for each proven orphan.
 //
 // This is the targeted fix for "issue stuck at in_progress when daemon
-// restarts mid-task": the runtime heartbeat sweeper takes up to 75s + the
-// in-process task timeout (2.5h) to notice such tasks; the daemon itself
-// knows the moment it comes back up, so we let it report orphan recovery.
+// restarts mid-task": a new daemon process proves the handoff by registering
+// a fresh generation before it requests recovery. Legacy rows remain with the
+// stale-runtime sweeper during rolling upgrades.
 func (h *Handler) RecoverOrphanedTasks(w http.ResponseWriter, r *http.Request) {
 	runtimeID := chi.URLParam(r, "runtimeId")
-	rt, ok := h.requireDaemonRuntimeAccess(w, r, runtimeID)
+	_, ok := h.requireDaemonRuntimeAccess(w, r, runtimeID)
 	if !ok {
 		return
-	}
-	if middleware.DaemonWorkspaceIDFromContext(r.Context()) == "" {
-		// Human callers can still use the recovery command, but only if they
-		// own the workspace. Plain members must not be able to force a healthy
-		// runtime to fail its active work.
-		if _, ok := h.requireWorkspaceRole(w, r, uuidToString(rt.WorkspaceID), "not found", "owner"); !ok {
-			return
-		}
 	}
 
 	rows, err := h.Queries.RecoverOrphanedTasksForRuntime(r.Context(), parseUUID(runtimeID))
@@ -107,9 +97,9 @@ func (h *Handler) PinTaskSession(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// HeartbeatTaskExecution records liveness for the daemon worker running one
-// task. It is separate from the runtime heartbeat because a healthy daemon can
-// execute several tasks and lose only one worker.
+// HeartbeatTaskExecution records observed agent-backend activity for one task.
+// It is separate from the runtime heartbeat because a healthy daemon can run
+// several tasks while one worker stops producing messages.
 func (h *Handler) HeartbeatTaskExecution(w http.ResponseWriter, r *http.Request) {
 	taskID := chi.URLParam(r, "taskId")
 	if _, ok := h.requireDaemonTaskAccess(w, r, taskID); !ok {

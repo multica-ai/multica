@@ -36,11 +36,10 @@ const (
 	// The dispatched→running transition should be near-instant, so 5 minutes
 	// means something went wrong (e.g. StartTask API call failed silently).
 	dispatchTimeoutSeconds = 300.0
-	// runningTimeoutSeconds is the grace before task-level heartbeat recovery
-	// begins. A modern daemon renews a per-task heartbeat while its worker is
-	// active, so healthy multi-hour work survives; a wedged worker is recovered
-	// promptly even if other tasks keep the runtime heartbeat fresh. Legacy
-	// daemon tasks leave that field NULL and retain the runtime-heartbeat
+	// runningTimeoutSeconds is the grace before task-level liveness recovery
+	// begins. A modern daemon records observed agent-backend activity; a stale
+	// signal makes the task visible without auto-retrying an uncertain worker.
+	// Legacy daemon tasks leave that field NULL and retain the runtime-heartbeat
 	// fallback until they finish or restart.
 	runningTimeoutSeconds = 300.0
 	// taskHeartbeatStaleSeconds permits three missed 30-second worker
@@ -258,10 +257,10 @@ func gcRuntimes(ctx context.Context, queries *db.Queries, bus *events.Bus) {
 // runs are preserved:
 //   - dispatched: excludes rows with an active prepare_lease (renewed by
 //     the daemon between claim and StartTask).
-//   - running: modern daemons renew a per-task execution heartbeat, so a
-//     healthy multi-hour task survives while a single wedged worker is
-//     recovered. Legacy tasks retain the runtime-heartbeat fallback until
-//     their daemon upgrades.
+//   - running: modern daemons record observed backend activity. A stale signal
+//     makes a single worker visible without automatically duplicating it;
+//     legacy tasks retain the runtime-heartbeat fallback until their daemon
+//     upgrades.
 //
 // The daemon-dead case is primarily handled upstream by sweepStaleRuntimes
 // in the same tick; this function is a defensive backstop for the residual

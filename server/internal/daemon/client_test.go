@@ -29,6 +29,9 @@ func TestClient_IdentityHeaders_PostJSON(t *testing.T) {
 		if got := r.Header.Get("Authorization"); got != "Bearer tok" {
 			t.Errorf("expected Authorization Bearer tok, got %q", got)
 		}
+		if got := r.Header.Get("X-Multica-Daemon-Session"); got != "11111111-1111-1111-1111-111111111111" {
+			t.Errorf("expected daemon session generation, got %q", got)
+		}
 		capabilities := make(map[string]bool)
 		for _, capability := range strings.Split(r.Header.Get("X-Client-Capabilities"), ",") {
 			capabilities[strings.TrimSpace(capability)] = true
@@ -49,6 +52,7 @@ func TestClient_IdentityHeaders_PostJSON(t *testing.T) {
 	c := NewClient(srv.URL)
 	c.SetToken("tok")
 	c.SetVersion("9.9.9")
+	c.SetSessionID("11111111-1111-1111-1111-111111111111")
 
 	if err := c.postJSON(context.Background(), "/api/daemon/test", map[string]any{}, nil); err != nil {
 		t.Fatalf("postJSON: %v", err)
@@ -66,6 +70,9 @@ func TestClient_IdentityHeaders_GetJSON(t *testing.T) {
 		if got := r.Header.Get("X-Client-OS"); got == "" {
 			t.Errorf("expected X-Client-OS to be set")
 		}
+		if got := r.Header.Get("X-Multica-Daemon-Session"); got != "22222222-2222-2222-2222-222222222222" {
+			t.Errorf("expected daemon session generation, got %q", got)
+		}
 		w.Header().Set("Content-Type", "application/json")
 		w.Write([]byte(`{}`))
 	}))
@@ -74,6 +81,7 @@ func TestClient_IdentityHeaders_GetJSON(t *testing.T) {
 	c := NewClient(srv.URL)
 	c.SetToken("tok")
 	c.SetVersion("1.2.3")
+	c.SetSessionID("22222222-2222-2222-2222-222222222222")
 
 	var out map[string]any
 	if err := c.getJSON(context.Background(), "/api/daemon/test", &out); err != nil {

@@ -18,8 +18,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"golang.org/x/sync/singleflight"
-
+	"github.com/google/uuid"
 	"github.com/multica-ai/multica/server/internal/cli"
 	"github.com/multica-ai/multica/server/internal/daemon/execenv"
 	"github.com/multica-ai/multica/server/internal/daemon/repocache"
@@ -27,6 +26,7 @@ import (
 	"github.com/multica-ai/multica/server/pkg/agent"
 	"github.com/multica-ai/multica/server/pkg/skillbundle"
 	"github.com/multica-ai/multica/server/pkg/taskfailure"
+	"golang.org/x/sync/singleflight"
 )
 
 // ErrRepoNotConfigured is returned by ensureRepoReady when the requested repo
@@ -53,10 +53,10 @@ const (
 )
 
 var (
-	taskPrepareLeaseRefresh       = 15 * time.Second
-	taskPrepareLeaseTimeout       = 10 * time.Second
-	taskExecutionHeartbeatRefresh = 30 * time.Second
-	taskExecutionHeartbeatTimeout = 10 * time.Second
+	taskPrepareLeaseRefresh           = 15 * time.Second
+	taskPrepareLeaseTimeout           = 10 * time.Second
+	taskExecutionHeartbeatMinInterval = 30 * time.Second
+	taskExecutionHeartbeatTimeout     = 10 * time.Second
 )
 
 func taskScopedAuthToken(task Task) (string, error) {
@@ -159,6 +159,7 @@ type repoCacheBackend interface {
 type Daemon struct {
 	cfg        Config
 	client     *Client
+	sessionID  string // fresh process-generation; never persisted across restarts
 	repoCache  repoCacheBackend
 	skillCache *SkillBundleCache
 	logger     *slog.Logger
@@ -295,12 +296,15 @@ func New(cfg Config, logger *slog.Logger) *Daemon {
 	cacheRoot := filepath.Join(cfg.WorkspacesRoot, ".repos")
 	skillCacheRoot := filepath.Join(cfg.WorkspacesRoot, ".skill-cache", "v1")
 	client := NewClient(cfg.ServerBaseURL)
+	sessionID := uuid.NewString()
 	// Tag every daemon HTTP request with the daemon's CLI version so the
 	// server can split logs/metrics by client version (parallel to the CLI).
 	client.SetVersion(cfg.CLIVersion)
+	client.SetSessionID(sessionID)
 	d := &Daemon{
 		cfg:                       cfg,
 		client:                    client,
+		sessionID:                 sessionID,
 		repoCache:                 repocache.New(cacheRoot, logger),
 		skillCache:                NewSkillBundleCache(skillCacheRoot),
 		logger:                    logger,
@@ -1179,6 +1183,7 @@ func (d *Daemon) registerRuntimesForWorkspace(ctx context.Context, workspaceID s
 	req := map[string]any{
 		"workspace_id":      workspaceID,
 		"daemon_id":         d.cfg.DaemonID,
+		"daemon_session_id": d.sessionID,
 		"legacy_daemon_ids": d.cfg.LegacyDaemonIDs,
 		"device_name":       d.cfg.DeviceName,
 		"cli_version":       d.cfg.CLIVersion,
@@ -2994,13 +2999,16 @@ func newTaskSlotSemaphore(maxConcurrentTasks int) chan int {
 //  2. err is a 404 with "task not found" — the task row was deleted while
 //     the agent was running. Without this we'd let the local agent keep
 //     emitting tool calls against a dead task for its full timeout window.
+//  3. the server reports that this daemon session was replaced. That is a
+//     fencing event, not a transient API failure: a new process owns the
+//     runtime and will safely recover only the prior generation's task.
 //
 // All other errors (transient network, 5xx, ...) intentionally do NOT
 // trigger cancellation — the next tick will retry and we don't want a
 // flaky link to kill an in-flight agent.
 func shouldInterruptAgent(status string, err error) bool {
 	if err != nil {
-		return isTaskNotFoundError(err)
+		return isTaskNotFoundError(err) || isDaemonSessionReplacedError(err)
 	}
 	return isAgentTaskTerminal(status)
 }
@@ -3692,46 +3700,38 @@ func (d *Daemon) startTaskPrepareLeaseExtender(ctx context.Context, task Task, t
 	}
 }
 
-// startTaskExecutionHeartbeat keeps the server's task-level liveness signal
-// fresh for as long as this runTask invocation remains active. Unlike the
-// daemon runtime heartbeat, this stops when this specific worker returns, so
-// the stale-task sweeper can recover a wedged worker without penalizing other
-// healthy tasks on the same daemon.
-func (d *Daemon) startTaskExecutionHeartbeat(taskID string, taskLog *slog.Logger) func() {
-	heartbeatCtx, cancel := context.WithCancel(context.Background())
-	done := make(chan struct{})
-	heartbeat := func() {
-		reqCtx, reqCancel := context.WithTimeout(heartbeatCtx, taskExecutionHeartbeatTimeout)
-		err := d.client.HeartbeatTaskExecution(reqCtx, taskID)
-		reqCancel()
-		if err != nil {
-			taskLog.Debug("task execution heartbeat failed", "error", err)
-		}
-	}
+// taskProgressHeartbeat records task liveness only after the controlled agent
+// backend emits a message. A daemon-local ticker would merely prove that a
+// goroutine survived; it cannot distinguish a productive worker from one
+// blocked in a subprocess wait, I/O, or an internal deadlock.
+//
+// Calls are rate-limited but never scheduled independently: without another
+// observed backend message, the task heartbeat becomes stale and the existing
+// watchdog/sweeper can make the failure visible. A failed control-plane write
+// still consumes this interval so an outage cannot turn a busy agent stream
+// into an unbounded request storm.
+func (d *Daemon) taskProgressHeartbeat(taskID string, taskLog *slog.Logger) func() {
+	var lastAttempt atomic.Int64
 
-	// Mark support immediately. A newly-upgraded daemon can then be watched by
-	// the task-level sweeper without waiting a full refresh interval.
-	heartbeat()
-	go func() {
-		defer close(done)
-		ticker := time.NewTicker(taskExecutionHeartbeatRefresh)
-		defer ticker.Stop()
+	return func() {
+		now := time.Now().UnixNano()
 		for {
-			select {
-			case <-heartbeatCtx.Done():
+			previous := lastAttempt.Load()
+			if previous != 0 && now-previous < taskExecutionHeartbeatMinInterval.Nanoseconds() {
 				return
-			case <-ticker.C:
-				heartbeat()
+			}
+			if lastAttempt.CompareAndSwap(previous, now) {
+				break
 			}
 		}
-	}()
 
-	var once sync.Once
-	return func() {
-		once.Do(func() {
-			cancel()
-			<-done
-		})
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), taskExecutionHeartbeatTimeout)
+			defer cancel()
+			if err := d.client.HeartbeatTaskExecution(ctx, taskID); err != nil {
+				taskLog.Debug("task progress heartbeat failed", "error", err)
+			}
+		}()
 	}
 }
 
@@ -4064,8 +4064,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		return TaskResult{}, fmt.Errorf("start task failed: %w", err)
 	}
 	stopPrepareLease()
-	stopTaskHeartbeat := d.startTaskExecutionHeartbeat(task.ID, taskLog)
-	defer stopTaskHeartbeat()
+	recordTaskProgress := d.taskProgressHeartbeat(task.ID, taskLog)
 	_ = d.client.ReportProgress(ctx, task.ID, fmt.Sprintf("Launching %s", provider), 1, 2)
 
 	reused := gateResumeToReusedWorkdir(&task, &taskCtx, env.WorkDir, taskLog)
@@ -4354,7 +4353,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// Shared across the resume-retry below so the retry's transcript rows
 	// keep ascending seq values for the same task.
 	var msgSeq atomic.Int32
-	result, tools, err := d.executeAndDrain(ctx, backend, prompt, execOpts, taskLog, task.ID, &msgSeq)
+	result, tools, err := d.executeAndDrain(ctx, backend, prompt, execOpts, taskLog, task.ID, &msgSeq, recordTaskProgress)
 	if err != nil {
 		return TaskResult{}, err
 	}
@@ -4366,7 +4365,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		firstUsage := result.Usage
 		taskLog.Warn("session resume failed, retrying with fresh session", "error", result.Error)
 		execOpts.ResumeSessionID = ""
-		retryResult, retryTools, retryErr := d.executeAndDrain(ctx, backend, prompt, execOpts, taskLog, task.ID, &msgSeq)
+		retryResult, retryTools, retryErr := d.executeAndDrain(ctx, backend, prompt, execOpts, taskLog, task.ID, &msgSeq, recordTaskProgress)
 		if retryErr != nil {
 			taskLog.Error("fresh session also failed to start", "error", retryErr)
 		} else {
@@ -4562,7 +4561,11 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 // messages and is owned by the caller so a same-task retry continues the
 // sequence instead of restarting at 1 — the server orders the transcript by
 // seq alone, and duplicate seqs would interleave the two attempts' rows.
-func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, prompt string, opts agent.ExecOptions, taskLog *slog.Logger, taskID string, msgSeq *atomic.Int32) (agent.Result, int32, error) {
+func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, prompt string, opts agent.ExecOptions, taskLog *slog.Logger, taskID string, msgSeq *atomic.Int32, activityCallbacks ...func()) (agent.Result, int32, error) {
+	var recordActivity func()
+	if len(activityCallbacks) > 0 {
+		recordActivity = activityCallbacks[0]
+	}
 	// Wrap the caller's ctx so the idle watchdog (below) can interrupt both
 	// the agent subprocess (via the ctx passed to backend.Execute) AND the
 	// drain loop with a single cancel. Without this layer the backend would
@@ -4698,6 +4701,9 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 				// slow downstream call (mu.Lock contention, batch resize)
 				// can't be misattributed to backend silence.
 				lastActivityAt.Store(time.Now().UnixNano())
+				if recordActivity != nil {
+					recordActivity()
+				}
 				switch msg.Type {
 				case agent.MessageStatus:
 					// Persist the session/work_dir as soon as the backend

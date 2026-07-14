@@ -914,6 +914,10 @@ func TestShouldInterruptAgent(t *testing.T) {
 		StatusCode: http.StatusBadGateway,
 		Body:       `<html>...</html>`,
 	}
+	replacedSession := &requestError{
+		StatusCode: http.StatusConflict,
+		Body:       `{"error":"daemon session has been replaced; restart the daemon"}`,
+	}
 
 	cases := []struct {
 		name   string
@@ -925,6 +929,7 @@ func TestShouldInterruptAgent(t *testing.T) {
 		{name: "status failed (offline sweeper)", status: "failed", err: nil, want: true},
 		{name: "status completed (finished elsewhere)", status: "completed", err: nil, want: true},
 		{name: "task deleted (404)", status: "", err: notFound, want: true},
+		{name: "daemon session replaced (409)", status: "", err: replacedSession, want: true},
 		{name: "running normally", status: "running", err: nil, want: false},
 		{name: "waiting_local_directory keeps running", status: "waiting_local_directory", err: nil, want: false},
 		{name: "dispatched keeps running", status: "dispatched", err: nil, want: false},
@@ -1769,6 +1774,83 @@ func TestExecuteAndDrain_IdleWatchdog_FiresWhenNoMessageEverArrives(t *testing.T
 	}
 	if result.Status != "idle_watchdog" {
 		t.Fatalf("expected status=idle_watchdog when backend never emits, got %q (err=%q)", result.Status, result.Error)
+	}
+}
+
+// TestExecuteAndDrain_ProgressHeartbeatRequiresBackendMessage guards the
+// liveness contract for SNDBX-448: a daemon must not keep a task fresh just
+// because a local ticker can still run. This backend blocks forever; with no
+// observed message there must be no task heartbeat at all.
+func TestExecuteAndDrain_ProgressHeartbeatRequiresBackendMessage(t *testing.T) {
+	var heartbeats atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/daemon/tasks/t-progress/heartbeat" {
+			heartbeats.Add(1)
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	t.Cleanup(srv.Close)
+
+	d := &Daemon{client: NewClient(srv.URL), logger: slog.Default()}
+	d.cfg.AgentIdleWatchdog = 50 * time.Millisecond
+
+	result, _, err := d.executeAndDrain(
+		context.Background(),
+		idleWatchdogBackend{emitOne: false},
+		"p",
+		agent.ExecOptions{},
+		slog.Default(),
+		"t-progress",
+		new(atomic.Int32),
+		d.taskProgressHeartbeat("t-progress", slog.Default()),
+	)
+	if err != nil {
+		t.Fatalf("executeAndDrain: %v", err)
+	}
+	if result.Status != "idle_watchdog" {
+		t.Fatalf("expected idle watchdog for blocked backend, got %q (err=%q)", result.Status, result.Error)
+	}
+	if got := heartbeats.Load(); got != 0 {
+		t.Fatalf("blocked backend emitted %d task heartbeats without a backend message, want 0", got)
+	}
+}
+
+func TestExecuteAndDrain_ProgressHeartbeatStopsWhenBackendGoesSilent(t *testing.T) {
+	var heartbeats atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/daemon/tasks/t-progress/heartbeat" {
+			heartbeats.Add(1)
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	t.Cleanup(srv.Close)
+
+	d := &Daemon{client: NewClient(srv.URL), logger: slog.Default()}
+	d.cfg.AgentIdleWatchdog = 50 * time.Millisecond
+
+	result, _, err := d.executeAndDrain(
+		context.Background(),
+		idleWatchdogBackend{emitOne: true},
+		"p",
+		agent.ExecOptions{},
+		slog.Default(),
+		"t-progress",
+		new(atomic.Int32),
+		d.taskProgressHeartbeat("t-progress", slog.Default()),
+	)
+	if err != nil {
+		t.Fatalf("executeAndDrain: %v", err)
+	}
+	if result.Status != "idle_watchdog" {
+		t.Fatalf("expected idle watchdog for blocked backend, got %q (err=%q)", result.Status, result.Error)
+	}
+
+	deadline := time.Now().Add(time.Second)
+	for heartbeats.Load() == 0 && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if got := heartbeats.Load(); got != 1 {
+		t.Fatalf("blocked backend emitted %d task heartbeats after one message, want 1", got)
 	}
 }
 

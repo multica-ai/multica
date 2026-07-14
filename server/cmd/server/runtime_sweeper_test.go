@@ -453,6 +453,9 @@ func TestSweepRunningTaskWithStaleExecutionHeartbeatFails(t *testing.T) {
 	}
 	for _, task := range failedTasks {
 		if task.ID.Bytes == parseUUIDBytes(taskID) {
+			if !task.FailureReason.Valid || task.FailureReason.String != "task_liveness_lost" {
+				t.Fatalf("stale execution heartbeat reason = %q, want task_liveness_lost", task.FailureReason.String)
+			}
 			return
 		}
 	}

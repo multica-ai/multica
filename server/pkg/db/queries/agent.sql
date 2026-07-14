@@ -441,7 +441,14 @@ WHERE atq.id = $1 AND a.workspace_id = $2;
 UPDATE agent_task_queue
 SET status = 'dispatched',
     dispatched_at = now(),
-    prepare_lease_expires_at = now() + make_interval(secs => @prepare_lease_secs::double precision)
+    prepare_lease_expires_at = now() + make_interval(secs => @prepare_lease_secs::double precision),
+    -- Snapshot the runtime process that claimed this row. Recover-orphans
+    -- can then distinguish a prior daemon session from a live claimant.
+    daemon_session_id = (
+        SELECT daemon_session_id
+        FROM agent_runtime
+        WHERE id = agent_task_queue.runtime_id
+    )
 WHERE id = (
     SELECT atq.id FROM agent_task_queue atq
     WHERE atq.agent_id = $1 AND atq.status = 'queued'
@@ -519,7 +526,12 @@ RETURNING *;
 -- recovered delivery attempt.
 UPDATE agent_task_queue
 SET dispatched_at = now(),
-    prepare_lease_expires_at = now() + make_interval(secs => @prepare_lease_secs::double precision)
+    prepare_lease_expires_at = now() + make_interval(secs => @prepare_lease_secs::double precision),
+    daemon_session_id = (
+        SELECT daemon_session_id
+        FROM agent_runtime
+        WHERE id = agent_task_queue.runtime_id
+    )
 WHERE id = (
     SELECT atq.id FROM agent_task_queue atq
     WHERE atq.runtime_id = $1
@@ -577,12 +589,24 @@ RETURNING *;
 -- the lock was acquired the daemon flips here). wait_reason is cleared on
 -- the transition so a future read can't conflate "currently waiting" with
 -- "previously waited".
-UPDATE agent_task_queue
+UPDATE agent_task_queue AS task
 SET status = 'running',
     started_at = now(),
     wait_reason = NULL,
     prepare_lease_expires_at = NULL
-WHERE id = $1 AND status IN ('dispatched', 'waiting_local_directory')
+WHERE task.id = $1
+  AND task.status IN ('dispatched', 'waiting_local_directory')
+  -- Legacy rows (pre-session-generation) remain startable during a rolling
+  -- upgrade. Once a task has a generation, only that runtime incarnation may
+  -- cross the dispatched → running boundary.
+  AND (
+    task.daemon_session_id IS NULL
+    OR task.daemon_session_id = (
+      SELECT runtime.daemon_session_id
+      FROM agent_runtime AS runtime
+      WHERE runtime.id = task.runtime_id
+    )
+  )
 RETURNING *;
 
 -- name: MarkAgentTaskWaitingLocalDirectory :one
@@ -709,12 +733,16 @@ WHERE id = $1 AND status = 'running'
 RETURNING *;
 
 -- name: RecoverOrphanedTasksForRuntime :many
--- Called by the daemon at startup. Atomically fails any dispatched/running/
--- waiting_local_directory task that the prior incarnation of this runtime
--- owned but did not finalize. Returns the failed rows so callers can hand
--- them to the auto-retry path. waiting_local_directory rows are included
--- because the daemon holding the path lock is the same process that just
--- died — without us, the row would sit waiting forever.
+-- Called by the daemon at startup. Atomically fails only active tasks that
+-- carry a *different, non-NULL* daemon session generation than the currently
+-- registered runtime. This makes recovery an objective handoff rather than a
+-- privileged caller's claim that every active task is orphaned. Legacy rows
+-- without a generation stay untouched and are handled by the stale-runtime
+-- sweeper during a rolling upgrade.
+--
+-- waiting_local_directory rows are included because the daemon holding the
+-- path lock is the same process that just died — without us, the row would
+-- sit waiting forever.
 UPDATE agent_task_queue
 SET status = 'failed',
     completed_at = now(),
@@ -722,7 +750,16 @@ SET status = 'failed',
     failure_reason = 'runtime_recovery',
     wait_reason = NULL,
     prepare_lease_expires_at = NULL
-WHERE runtime_id = $1 AND status IN ('dispatched', 'running', 'waiting_local_directory')
+WHERE runtime_id = $1
+  AND status IN ('dispatched', 'running', 'waiting_local_directory')
+  AND daemon_session_id IS NOT NULL
+  AND EXISTS (
+      SELECT 1
+      FROM agent_runtime runtime
+      WHERE runtime.id = $1
+        AND runtime.daemon_session_id IS NOT NULL
+        AND runtime.daemon_session_id <> agent_task_queue.daemon_session_id
+  )
 RETURNING *;
 
 -- name: FailStaleTasks :many
@@ -736,11 +773,12 @@ RETURNING *;
 --     daemon between claim and StartTask (see startTaskPrepareLeaseExtender).
 --     A live lease excludes the row.
 --
---   * Running: daemon workers that support task execution heartbeats renew
---     `last_heartbeat_at` while their runTask is active. A stale execution
---     heartbeat therefore identifies a wedged worker even when the daemon is
---     still serving other tasks. Legacy daemon tasks have NULL here and retain
---     the previous runtime-heartbeat fallback during rolling upgrades.
+--   * Running: modern daemons write `last_heartbeat_at` only after observing
+--     an agent-backend message. A stale value makes that worker's liveness
+--     uncertain even when the daemon still serves other tasks. This branch is
+--     deliberately not auto-retried because the subprocess may still exist.
+--     Legacy daemon tasks have NULL here and retain the prior runtime-heartbeat
+--     fallback during rolling upgrades.
 --
 -- The daemon-dead case is the primary responsibility of `sweepStaleRuntimes`
 -- (which mixes DB `last_seen_at` with the Redis LivenessStore and calls
@@ -759,7 +797,17 @@ RETURNING *;
 -- those rows at restart.
 UPDATE agent_task_queue
 SET status = 'failed', completed_at = now(), error = 'task timed out',
-    failure_reason = 'timeout',
+    failure_reason = CASE
+      -- A task-level heartbeat is written only after an observed backend
+      -- message. Losing it therefore makes this worker's liveness uncertain,
+      -- but does not prove its subprocess is dead. Never auto-retry this
+      -- branch: retrying could run the task concurrently with that worker.
+      WHEN status = 'running'
+        AND last_heartbeat_at IS NOT NULL
+        AND last_heartbeat_at < now() - make_interval(secs => @task_heartbeat_stale_secs::double precision)
+      THEN 'task_liveness_lost'
+      ELSE 'timeout'
+    END,
     prepare_lease_expires_at = NULL
 WHERE (
     status = 'dispatched'
