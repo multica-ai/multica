@@ -1,6 +1,7 @@
 package execenv
 
 import (
+	"encoding/hex"
 	"fmt"
 	"io"
 	"log/slog"
@@ -210,17 +211,25 @@ func codexSessionStoreDir(sharedHome, key string) string {
 	return filepath.Join(sharedHome, codexSessionStoreRoot, key)
 }
 
-// codexSessionStoreNamespace isolates one profile-daemon's session stores from
-// another's when several run on the same machine sharing one ~/.codex (profiles
-// get separate daemon state but the same Codex home). Each daemon writes under,
-// and only ever reclaims, its own namespace, so a staging daemon's GC can never
-// delete a production task's live store and vice versa. Empty profile ->
-// "default". See CodexSessionStorePath / PruneCodexSessionStores (MUL-4424).
+// codexSessionStoreNamespace maps a daemon's profile to the directory segment
+// that isolates its session stores from another profile-daemon's when several
+// run on the same machine sharing one ~/.codex (profiles get separate daemon
+// state but the same Codex home). Each daemon writes under, and only ever
+// reclaims, its own namespace, so a staging daemon's GC can never delete a
+// production task's live store and vice versa.
+//
+// The map MUST be injective: distinct profiles are distinct daemons and must
+// never share a namespace. A lossy "drop unsafe characters" scheme is not — the
+// CLI treats "" and "default" as separate daemons, and would sanitize
+// "staging.prod" and "stagingprod" to the same segment. So the empty (default)
+// profile gets a reserved bare literal, and every named profile is hex-encoded
+// (bijective, filesystem-safe) under a "p_" prefix a bare literal can never
+// collide with (MUL-4424).
 func codexSessionStoreNamespace(profile string) string {
-	if ns := sanitizeCodexPathSegment(profile); ns != "" {
-		return ns
+	if profile == "" {
+		return "default"
 	}
-	return "default"
+	return "p_" + hex.EncodeToString([]byte(profile))
 }
 
 // codexSessionStoreKey builds the per-(profile, agent, issue) key for a task's

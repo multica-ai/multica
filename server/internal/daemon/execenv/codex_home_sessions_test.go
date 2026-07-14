@@ -596,6 +596,61 @@ func TestPruneCodexSessionStores_IsolatesProfiles(t *testing.T) {
 	assertAbsent(t, stagingStore)
 }
 
+// TestCodexSessionStoreNamespaceInjective guards the profile->namespace map
+// against the collisions Elon flagged: the CLI treats these profile pairs as
+// distinct daemons, so they must never share a store namespace (a lossy
+// character-dropping scheme merged them). MUL-4424.
+func TestCodexSessionStoreNamespaceInjective(t *testing.T) {
+	t.Parallel()
+	pairs := [][2]string{
+		{"", "default"},                 // empty (default) vs a profile literally named "default"
+		{"staging.prod", "stagingprod"}, // punctuation must not be dropped into a collision
+		{"a-b", "a_b"},
+		{"prod", "Prod"},
+		{"p_default", "default"}, // an encoded-looking name must not alias another
+	}
+	for _, p := range pairs {
+		if a, b := codexSessionStoreNamespace(p[0]), codexSessionStoreNamespace(p[1]); a == b {
+			t.Errorf("profiles %q and %q collide in namespace %q", p[0], p[1], a)
+		}
+	}
+	// Deterministic for a fixed profile.
+	if codexSessionStoreNamespace("staging") != codexSessionStoreNamespace("staging") {
+		t.Error("namespace must be deterministic for a fixed profile")
+	}
+}
+
+// TestPruneCodexSessionStores_NoCrossProfileCollision proves the injective
+// namespace holds end-to-end: profiles the CLI treats as distinct never reclaim
+// each other's stores, including the "" vs "default" and punctuation cases that
+// a lossy sanitizer collapsed (Elon's round-7 repro). MUL-4424.
+func TestPruneCodexSessionStores_NoCrossProfileCollision(t *testing.T) {
+	for _, pair := range [][2]string{{"", "default"}, {"staging.prod", "stagingprod"}} {
+		home := t.TempDir()
+		t.Setenv("CODEX_HOME", home)
+		a, b := pair[0], pair[1]
+		storeA := codexSessionStoreDir(home, codexSessionStoreKey(a, "agent", "issue"))
+		storeB := codexSessionStoreDir(home, codexSessionStoreKey(b, "agent", "issue"))
+		seedRolloutAt(t, filepath.Join(storeA, "2026", "06", "01", "rollout-2026-06-01T00-00-00-a.jsonl"), 16)
+		seedRolloutAt(t, filepath.Join(storeB, "2026", "06", "01", "rollout-2026-06-01T00-00-00-b.jsonl"), 16)
+		chtimesTree(t, storeA, time.Now().Add(-30*24*time.Hour))
+		chtimesTree(t, storeB, time.Now().Add(-30*24*time.Hour))
+
+		// Pruning profile a reclaims a's store only — b's must survive.
+		if removed, _ := PruneCodexSessionStores(a, 14*24*time.Hour, time.Now(), nil, testLogger()); removed != 1 {
+			t.Fatalf("prune %q removed=%d, want 1", a, removed)
+		}
+		assertAbsent(t, storeA)
+		assertPresent(t, storeB)
+
+		// Then pruning profile b reclaims b's store.
+		if removed, _ := PruneCodexSessionStores(b, 14*24*time.Hour, time.Now(), nil, testLogger()); removed != 1 {
+			t.Fatalf("prune %q removed=%d, want 1", b, removed)
+		}
+		assertAbsent(t, storeB)
+	}
+}
+
 // TestPruneCodexSessionStores_RemovesEmptyAgentDir confirms an agent directory
 // is cleaned up once its last issue store ages out, so the tree doesn't leave
 // empty <agent>/ shells behind.
