@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { configStore } from "@multica/core/config";
+import enLayout from "../locales/en/layout.json";
 import { HelpLauncher } from "./help-launcher";
 
 // react-i18next isn't initialised in the views test env, so resolve the
@@ -9,19 +10,10 @@ import { HelpLauncher } from "./help-launcher";
 vi.mock("../i18n", () => ({
   useT: () => ({
     t: (
-      sel: (r: { help: Record<string, string> }) => string,
+      sel: (r: typeof enLayout) => string,
       vars?: Record<string, string>,
     ) => {
-      const template = sel({
-        help: {
-          trigger: "Help",
-          docs: "Docs",
-          changelog: "Change log",
-          discord: "Discord",
-          feedback: "Feedback",
-          server_version: "Server version {{version}}",
-        },
-      });
+      const template = sel(enLayout);
       return vars
         ? template.replace(/\{\{(\w+)\}\}/g, (_, key) => String(vars[key] ?? ""))
         : template;
