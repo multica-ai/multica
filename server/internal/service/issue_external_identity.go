@@ -29,6 +29,10 @@ var (
 	externalIdentityMetadataKeyRE = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_.-]{0,63}$`)
 )
 
+func IsValidExternalIdentityNamespace(namespace string) bool {
+	return externalIdentityNamespaceRE.MatchString(namespace)
+}
+
 type ExternalIdentityAlias struct {
 	Namespace  string
 	ExternalID string
@@ -139,6 +143,15 @@ func (s *IssueService) UpsertExternalIdentity(ctx context.Context, p IssueExtern
 			IssueID:     effective.ID,
 		}); err != nil {
 			return IssueExternalIdentityUpsertResult{}, fmt.Errorf("insert external identity: %w", err)
+		}
+		actual, err := qtx.GetIssueExternalIdentityForUpdate(ctx, db.GetIssueExternalIdentityForUpdateParams{
+			WorkspaceID: p.WorkspaceID, Namespace: alias.Namespace, ExternalID: alias.ExternalID,
+		})
+		if err != nil {
+			return IssueExternalIdentityUpsertResult{}, fmt.Errorf("verify external identity: %w", err)
+		}
+		if actual.IssueID != effective.ID {
+			return IssueExternalIdentityUpsertResult{}, ErrExternalIdentityConflict
 		}
 	}
 

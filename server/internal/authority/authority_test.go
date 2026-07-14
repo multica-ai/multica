@@ -3,11 +3,80 @@ package authority
 import (
 	"crypto/ed25519"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
 )
+
+func TestWriteReceiptSignVerifyBindsWrite(t *testing.T) {
+	stmt, pub, priv := testStatement(t)
+	digest := sha256.Sum256([]byte(`{"nonce":"request-nonce"}`))
+	receiptStmt := WriteReceiptStatement{
+		Protocol:      WriteReceiptProtocolVersion,
+		Operation:     "issue.upsert-external",
+		RequestSHA256: fmt.Sprintf("%x", digest),
+		ResourceID:    "11111111-1111-1111-1111-111111111111",
+		Nonce:         stmt.Nonce,
+		AuthorityID:   stmt.AuthorityID,
+		DBIdentity:    stmt.DBIdentity,
+		IssuedAt:      stmt.IssuedAt,
+		ServerCommit:  stmt.ServerCommit,
+	}
+	receipt, err := SignWriteReceipt(priv, receiptStmt)
+	if err != nil {
+		t.Fatalf("SignWriteReceipt: %v", err)
+	}
+	pin := Pin{ServerURL: "https://api.multica.test", PublicKey: EncodePublicKey(pub), AuthorityID: stmt.AuthorityID, DBIdentity: stmt.DBIdentity}
+	if err := VerifyWriteReceipt(receipt, pin, pin.ServerURL, stmt.IssuedAt.Add(time.Second), 2*time.Minute, 30*time.Second); err != nil {
+		t.Fatalf("VerifyWriteReceipt: %v", err)
+	}
+	expected := WriteReceiptExpectation{Operation: receipt.Operation, RequestSHA256: receipt.RequestSHA256, ResourceID: receipt.ResourceID, Nonce: receipt.Nonce}
+	if err := VerifyBoundWriteReceipt(receipt, expected, pin, pin.ServerURL, stmt.IssuedAt.Add(time.Second), 2*time.Minute, 30*time.Second); err != nil {
+		t.Fatalf("VerifyBoundWriteReceipt: %v", err)
+	}
+	for name, mismatch := range map[string]WriteReceiptExpectation{
+		"operation": {Operation: "other", RequestSHA256: expected.RequestSHA256, ResourceID: expected.ResourceID, Nonce: expected.Nonce},
+		"digest":    {Operation: expected.Operation, RequestSHA256: strings.Repeat("0", 64), ResourceID: expected.ResourceID, Nonce: expected.Nonce},
+		"resource":  {Operation: expected.Operation, RequestSHA256: expected.RequestSHA256, ResourceID: "22222222-2222-2222-2222-222222222222", Nonce: expected.Nonce},
+		"nonce":     {Operation: expected.Operation, RequestSHA256: expected.RequestSHA256, ResourceID: expected.ResourceID, Nonce: base64.RawURLEncoding.EncodeToString([]byte("12345678901234567890123456789012"))},
+	} {
+		t.Run("expected_"+name, func(t *testing.T) {
+			if VerifyBoundWriteReceipt(receipt, mismatch, pin, pin.ServerURL, stmt.IssuedAt.Add(time.Second), 2*time.Minute, 30*time.Second) == nil {
+				t.Fatal("accepted mismatched write expectation")
+			}
+		})
+	}
+
+	mutations := map[string]func(WriteReceipt) WriteReceipt{
+		"operation": func(r WriteReceipt) WriteReceipt { r.Operation = "issue.delete"; return r },
+		"digest":    func(r WriteReceipt) WriteReceipt { r.RequestSHA256 = strings.Repeat("0", 64); return r },
+		"resource":  func(r WriteReceipt) WriteReceipt { r.ResourceID = "22222222-2222-2222-2222-222222222222"; return r },
+		"nonce": func(r WriteReceipt) WriteReceipt {
+			r.Nonce = base64.RawURLEncoding.EncodeToString([]byte("12345678901234567890123456789012"))
+			return r
+		},
+	}
+	for name, mutate := range mutations {
+		t.Run(name, func(t *testing.T) {
+			if err := VerifyWriteReceipt(mutate(receipt), pin, pin.ServerURL, stmt.IssuedAt.Add(time.Second), 2*time.Minute, 30*time.Second); err == nil {
+				t.Fatal("VerifyWriteReceipt accepted tampering")
+			}
+		})
+	}
+}
+
+func TestAuthorityRejectsUnknownOrBlankServerCommit(t *testing.T) {
+	stmt, _, priv := testStatement(t)
+	for _, commit := range []string{"", "   ", "unknown"} {
+		stmt.ServerCommit = commit
+		if _, err := Sign(priv, stmt); err == nil {
+			t.Fatalf("Sign accepted server commit %q", commit)
+		}
+	}
+}
 
 func testStatement(t *testing.T) (Statement, ed25519.PublicKey, ed25519.PrivateKey) {
 	t.Helper()

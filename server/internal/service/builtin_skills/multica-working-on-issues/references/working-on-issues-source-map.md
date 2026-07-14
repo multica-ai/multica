@@ -164,10 +164,11 @@ wakes the parent assignee. Promoting the next stage's `backlog` sub-issues to
 | Behavior | File:line |
 |---|---|
 | `multica issue upsert-external` command and flags | `server/cmd/multica/cmd_issue.go` (`issueUpsertExternalCmd`, `registerIssueUpsertExternalFlags`) |
-| CLI authority verification before write client | `server/cmd/multica/cmd_issue.go` (`runIssueUpsertExternal`) and `server/cmd/multica/cmd_authority.go` (`verifyAuthorityForCommand`) |
+| CLI exact-write receipt verification | `server/cmd/multica/cmd_issue.go` (`runIssueUpsertExternal`) and `server/internal/authority/authority.go` (`VerifyWriteReceipt`) |
+| Principal and namespace authorization boundary | `server/internal/handler/issue_external_identity.go` (`externalUpsertAuthorizationError`) |
 | Protected route before `/{id}` | `server/cmd/server/router.go` (`/api/issues/upsert-external`) |
 | Transactional service algorithm | `server/internal/service/issue_external_identity.go` |
-| DB identity table | `server/migrations/162_issue_external_identity.up.sql` |
+| DB identity table and same-workspace enforcement | `server/migrations/180_issue_external_identity.up.sql` |
 
 ## Verification command
 

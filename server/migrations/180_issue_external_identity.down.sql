@@ -1,4 +1,3 @@
+DROP TRIGGER IF EXISTS issue_external_identity_workspace_180 ON issue_external_identity;
 DROP TABLE IF EXISTS issue_external_identity;
-
-ALTER TABLE issue
-    DROP CONSTRAINT IF EXISTS uq_issue_workspace_id;
+DROP FUNCTION IF EXISTS issue_external_identity_enforce_workspace_180();
