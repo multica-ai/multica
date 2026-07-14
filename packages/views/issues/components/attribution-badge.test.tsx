@@ -35,7 +35,7 @@ describe("AttributionBadge", () => {
     expect(screen.getByTitle("Direct member action")).toBeInTheDocument();
   });
 
-  it("marks degraded (non-precise) attribution with a warning tone", () => {
+  it("marks a fallback guess (owner_fallback) with a warning tone", () => {
     const attribution: TaskAttribution = {
       source: "owner_fallback",
       precise: false,
@@ -49,6 +49,40 @@ describe("AttributionBadge", () => {
     expect(container.querySelector(".text-warning")).not.toBeNull();
     expect(screen.getByTitle("No precise owner — attributed to the agent owner"))
       .toBeInTheDocument();
+  });
+
+  it("shows a backfilled attribution in the normal tone, not a warning (MUL-4768)", () => {
+    // Backfill is non-precise for the coverage metric, but it names a human the
+    // same waterfall resolved — just after the fact — so it must read like any
+    // other confident attribution rather than a yellow warning.
+    const attribution: TaskAttribution = {
+      source: "backfill",
+      precise: false,
+      initiator: { id: "u5", name: "Bohan" },
+    };
+    const { container } = renderWithI18n(
+      <AttributionBadge attribution={attribution} />,
+    );
+
+    expect(screen.getByText("on behalf of Bohan")).toBeInTheDocument();
+    // No warning tone — the confusing yellow that flagged backfilled runs is gone.
+    expect(container.querySelector(".text-warning")).toBeNull();
+    expect(container.querySelector(".text-muted-foreground")).not.toBeNull();
+    // The "backfilled" nuance still lives in the tooltip for anyone who looks.
+    expect(screen.getByTitle("Backfilled attribution")).toBeInTheDocument();
+  });
+
+  it("avatar variant shows no warning ring for a backfilled attribution (MUL-4768)", () => {
+    const attribution: TaskAttribution = {
+      source: "backfill",
+      precise: false,
+      initiator: { id: "u5", name: "Bohan" },
+    };
+    const { container } = renderWithI18n(
+      <AttributionBadge attribution={attribution} variant="avatar" />,
+    );
+
+    expect(container.querySelector(".ring-warning\\/60")).toBeNull();
   });
 
   it("falls back to a generic name when the initiator has no display name", () => {
