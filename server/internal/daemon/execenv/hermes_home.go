@@ -110,24 +110,61 @@ func platformDefaultHermesHomeFor(goos, localAppData, userHome string) string {
 }
 
 // hermesProfileNameRe mirrors Hermes' hermes_cli.profiles._PROFILE_ID_RE — the
-// only names Hermes accepts for a profile. An input that doesn't match is
-// treated as "no profile" (base home), exactly as Hermes' own parser does.
+// shape a profile identifier must have on disk and in argv.
 var hermesProfileNameRe = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,63}$`)
 
-// ResolveHermesSourceHome resolves the shared Hermes home the overlay is built
-// from, and reports whether a named (non-default) profile was applied.
+// hermesReservedProfileNames mirrors hermes_cli.profiles._RESERVED_NAMES: names
+// Hermes' validate_profile_name rejects (they would collide with the install
+// itself or a common system binary). "default" is in Hermes' set too but is a
+// special pass-through there — it names the root home — so it is handled before
+// this check, not listed here.
+var hermesReservedProfileNames = map[string]struct{}{
+	"hermes": {}, "test": {}, "tmp": {}, "root": {}, "sudo": {},
+}
+
+// HermesProfileResolution is the single authoritative result of resolving a
+// Hermes profile selection: the source home to seed the overlay from (and to
+// expand ${HERMES_HOME} against), whether that home must already exist, and a
+// non-nil Err when the selection is one Hermes would refuse to start under.
+type HermesProfileResolution struct {
+	// SourceHome is the resolved HERMES_HOME the overlay is built from. It is
+	// also the value ${HERMES_HOME} in a profile's skills.external_dirs expands
+	// to, matching native Hermes applying the profile override before it loads
+	// config.yaml.
+	SourceHome string
+	// MustExist fails the overlay closed when SourceHome is absent — set for a
+	// named/profile-scoped source so a typo doesn't silently seed from an empty
+	// dir and drop the user's auth/config, matching Hermes' own FileNotFoundError
+	// sys.exit on a missing profile.
+	MustExist bool
+	// Err is set when the selection names a reserved or otherwise invalid
+	// profile (including the empty inline `--profile=` value). Hermes sys.exit(1)s
+	// in these cases, so the daemon must fail the task closed rather than start
+	// it under the default profile.
+	Err error
+}
+
+// ResolveHermesProfile is the one resolver contract for Hermes profile
+// selection. Given the agent's custom_env HERMES_HOME and the profile selection
+// already parsed from custom_args (agent.ParseHermesProfileArgs), it reproduces
+// hermes_cli.main._apply_profile_override + hermes_cli.profiles semantics:
 //
-// customEnvHome is the agent's custom_env HERMES_HOME (may be empty); profileName
-// is the selection from -p/--profile (may be empty). The base is an explicit
-// custom_env HERMES_HOME, else the daemon process HERMES_HOME, else the
-// platform-native default. Matching Hermes' hermes_cli.profiles semantics:
-//   - an empty, "default", or invalid profile name resolves to the base home
-//     (the "default" profile IS ~/.hermes) and reports named=false;
-//   - a valid named profile resolves to <base>/profiles/<name> and reports
-//     named=true — the daemon then requires that home to exist (a typo'd profile
-//     fails closed rather than silently seeding from an empty dir), just as
-//     Hermes itself sys.exit(1)s on a missing profile.
-func ResolveHermesSourceHome(customEnvHome, profileName string) (home string, named bool) {
+//   - The Hermes root is derived exactly like get_default_hermes_root: an
+//     explicit custom_env HERMES_HOME, else the process HERMES_HOME, else the
+//     platform default; if that home is itself <root>/profiles/<name>, the root
+//     is <root> (profiles are always resolved against the root, never nested).
+//   - An explicit -p/--profile wins. Otherwise an already-profile-scoped
+//     HERMES_HOME is trusted as-is (step 1.5), and only failing that is the
+//     sticky <root>/active_profile consulted (step 2).
+//   - The chosen name is normalized + validated like normalize_profile_name /
+//     validate_profile_name: "default" (case-insensitively) means the root home;
+//     an empty, malformed, or reserved name is a hard error (Err set).
+//   - A valid named profile resolves to <root>/profiles/<name> and MustExist.
+//
+// found/inline come from the parsed selection: found means an explicit flag with
+// a value matched; inline distinguishes the `--profile=<value>` form, whose empty
+// value must hard-fail rather than fall back to the default.
+func ResolveHermesProfile(customEnvHome, name string, found, inline bool) HermesProfileResolution {
 	base := strings.TrimSpace(customEnvHome)
 	if base == "" {
 		base = strings.TrimSpace(os.Getenv("HERMES_HOME"))
@@ -138,11 +175,104 @@ func ResolveHermesSourceHome(customEnvHome, profileName string) (home string, na
 	if abs, err := filepath.Abs(base); err == nil {
 		base = abs
 	}
-	p := strings.ToLower(strings.TrimSpace(profileName))
-	if p == "" || p == "default" || !hermesProfileNameRe.MatchString(p) {
-		return base, false
+	root := hermesRootFromHome(base)
+
+	profile := name
+	if !found {
+		// Step 1.5: trust an already-profile-scoped HERMES_HOME (immediate parent
+		// dir named "profiles") without consulting active_profile.
+		if base != "" && filepath.Base(filepath.Dir(base)) == "profiles" {
+			return HermesProfileResolution{SourceHome: base, MustExist: true}
+		}
+		// Step 2: honor the sticky <root>/active_profile. (The container-only
+		// HERMES_S6_SUPERVISED_CHILD exception in Hermes does not apply to a
+		// daemon task spawn.) When no sticky applies, the base home (the
+		// root/default) is the source.
+		profile = readHermesActiveProfile(root)
+		if profile == "" {
+			return HermesProfileResolution{SourceHome: base}
+		}
 	}
-	return filepath.Join(base, "profiles", p), true
+
+	// An explicit selection (found) is always validated — an empty inline value
+	// (`--profile=`) is a hard error, not a fall-back to the default — as is a
+	// sticky name, matching Hermes calling resolve_profile_env on both.
+	home, mustExist, err := hermesProfileDir(root, profile)
+	if err != nil {
+		return HermesProfileResolution{Err: err}
+	}
+	return HermesProfileResolution{SourceHome: home, MustExist: mustExist}
+}
+
+// hermesRootFromHome reproduces hermes_constants.get_default_hermes_root: the
+// root for profile-level operations. If base is the platform default or lives
+// under it (normal or profile mode) the root is the platform default; otherwise
+// (Docker/custom home) a <...>/profiles/<name> layout roots at the grandparent,
+// and any other path is its own root. Symlinks are not resolved (Hermes uses
+// Path.resolve()); the daemon's homes are real dirs, so this matches in practice.
+func hermesRootFromHome(base string) string {
+	native := platformDefaultHermesHome()
+	if base == "" {
+		return native
+	}
+	if isPathUnder(native, base) {
+		return native
+	}
+	if filepath.Base(filepath.Dir(base)) == "profiles" {
+		return filepath.Dir(filepath.Dir(base))
+	}
+	return base
+}
+
+// isPathUnder reports whether child is parent or nested under it.
+func isPathUnder(parent, child string) bool {
+	rel, err := filepath.Rel(parent, child)
+	if err != nil {
+		return false
+	}
+	return rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)))
+}
+
+// readHermesActiveProfile returns the sticky profile name from
+// <root>/active_profile, or "" when absent, unreadable, empty, or "default"
+// (matching _apply_profile_override step 2, which ignores a "default" sticky).
+func readHermesActiveProfile(root string) string {
+	data, err := os.ReadFile(filepath.Join(root, "active_profile"))
+	if err != nil {
+		return ""
+	}
+	name := strings.TrimSpace(string(data))
+	if name == "default" {
+		return ""
+	}
+	return name
+}
+
+// hermesProfileDir resolves a profile name against root, reproducing
+// normalize_profile_name + validate_profile_name + get_profile_dir. It returns
+// the home dir, whether that home must already exist (true for a named profile),
+// or an error for an empty/malformed/reserved name (which Hermes sys.exit(1)s on).
+func hermesProfileDir(root, name string) (home string, mustExist bool, err error) {
+	stripped := strings.TrimSpace(name)
+	if stripped == "" {
+		return "", false, fmt.Errorf("hermes profile name cannot be empty")
+	}
+	var canon string
+	if strings.EqualFold(stripped, "default") {
+		canon = "default"
+	} else {
+		canon = strings.ToLower(stripped)
+	}
+	if canon == "default" {
+		return root, false, nil // the default profile IS the root home
+	}
+	if !hermesProfileNameRe.MatchString(canon) {
+		return "", false, fmt.Errorf("invalid hermes profile name %q", canon)
+	}
+	if _, reserved := hermesReservedProfileNames[canon]; reserved {
+		return "", false, fmt.Errorf("hermes profile name %q is reserved", canon)
+	}
+	return filepath.Join(root, "profiles", canon), true, nil
 }
 
 // prepareHermesHome builds the per-task HERMES_HOME compatibility overlay
@@ -156,7 +286,7 @@ func ResolveHermesSourceHome(customEnvHome, profileName string) (home string, na
 // unusable, so the error propagates and the caller must not start Hermes against
 // a half-built home.
 // sourceHome is the shared home to seed from (resolved by the daemon via
-// ResolveHermesSourceHome, honoring the agent's HERMES_HOME/profile); empty
+// ResolveHermesProfile, honoring the agent's HERMES_HOME/profile); empty
 // falls back to the platform default. sourceMustExist fails closed when the
 // source home is absent — set for an explicitly named profile so a typo doesn't
 // silently seed from an empty dir and drop the user's auth/config. env is the

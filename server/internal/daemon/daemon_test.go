@@ -2998,11 +2998,10 @@ func TestHermesLaunchArgsAndEnvByScenario(t *testing.T) {
 	t.Parallel()
 	customArgs := []string{"-p", "research", "--yolo"}
 	customEnv := map[string]string{"HERMES_HOME": "/home/u/.hermes"}
-	logger := slog.Default()
 
 	// No overlay (skill-less): profile flag passes through, and the user's
 	// HERMES_HOME passes through — behavior unchanged.
-	noOverlayArgs := hermesLaunchArgs(customArgs, false, logger)
+	noOverlayArgs := hermesLaunchArgs(customArgs, false)
 	if len(noOverlayArgs) != 3 || noOverlayArgs[0] != "-p" || noOverlayArgs[1] != "research" {
 		t.Errorf("skill-less task must keep its profile flags, got %v", noOverlayArgs)
 	}
@@ -3013,7 +3012,7 @@ func TestHermesLaunchArgsAndEnvByScenario(t *testing.T) {
 	}
 
 	// Overlay active: profile flag is stripped, and HERMES_HOME is the overlay.
-	overlayArgs := hermesLaunchArgs(customArgs, true, logger)
+	overlayArgs := hermesLaunchArgs(customArgs, true)
 	if len(overlayArgs) != 1 || overlayArgs[0] != "--yolo" {
 		t.Errorf("overlay task must strip profile flags, got %v", overlayArgs)
 	}

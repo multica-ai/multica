@@ -3616,17 +3616,33 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		agentEnvOverrides = task.Agent.CustomEnv
 		agentCustomArgs = task.Agent.CustomArgs
 	}
-	// Hermes: resolve the overlay source home (honoring the agent's custom_env
-	// HERMES_HOME and any -p/--profile in custom_args — the profile flag is
-	// stripped from the acp argv so it can't re-point HERMES_HOME past the
-	// overlay) and the sanitized effective env for external_dirs expansion.
+	// Hermes: resolve the overlay source home through one resolver contract —
+	// the selection parsed from custom_args (agent.ParseHermesProfileArgs) plus
+	// the agent's custom_env HERMES_HOME feed execenv.ResolveHermesProfile, which
+	// reproduces Hermes' own profile semantics (root derivation, explicit vs.
+	// sticky selection, reserved/invalid failure). A reserved/invalid selection
+	// fails the task closed, matching Hermes' sys.exit(1). The selected source
+	// home is exported to hermesEnv["HERMES_HOME"] so ${HERMES_HOME} in a
+	// profile's skills.external_dirs expands against the selected profile home,
+	// as native Hermes does before loading config.yaml. The parsed occurrence is
+	// stripped from the acp argv at launch (only when the overlay is built) so
+	// the flag can't re-point HERMES_HOME past the overlay.
 	var hermesSourceHome string
 	var hermesSourceMustExist bool
 	var hermesEnv map[string]string
 	if provider == "hermes" {
-		profile := agent.HermesProfileFromArgs(agentCustomArgs)
-		hermesSourceHome, hermesSourceMustExist = execenv.ResolveHermesSourceHome(agentEnvOverrides["HERMES_HOME"], profile)
+		sel := agent.ParseHermesProfileArgs(agentCustomArgs)
+		res := execenv.ResolveHermesProfile(agentEnvOverrides["HERMES_HOME"], sel.Name, sel.Found, sel.Inline)
+		if res.Err != nil {
+			return TaskResult{}, fmt.Errorf("resolve hermes profile: %w", res.Err)
+		}
+		hermesSourceHome = res.SourceHome
+		hermesSourceMustExist = res.MustExist
 		hermesEnv = sanitizeAgentEnv(agentEnvOverrides)
+		if hermesEnv == nil {
+			hermesEnv = map[string]string{}
+		}
+		hermesEnv["HERMES_HOME"] = res.SourceHome
 	}
 	if task.PriorWorkDir != "" && localAssignment == nil && !task.IsLeaderTask {
 		env = execenv.Reuse(execenv.ReuseParams{
@@ -3871,7 +3887,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		mcpConfig = effectiveMcpConfig
 	}
 	if provider == "hermes" {
-		customArgs = hermesLaunchArgs(customArgs, env != nil && env.HermesHome != "", d.logger)
+		customArgs = hermesLaunchArgs(customArgs, env != nil && env.HermesHome != "")
 	}
 	// Two-tier model resolution: an explicit agent.model wins,
 	// then the daemon-wide MULTICA_<PROVIDER>_MODEL env var. If
@@ -4822,11 +4838,15 @@ func sanitizeAgentEnv(customEnv map[string]string) map[string]string {
 // from that profile's home and exports its own HERMES_HOME, so the flag must not
 // re-resolve the profile past it); with no overlay, the flags pass through so a
 // skill-less task's profile behavior is unchanged.
-func hermesLaunchArgs(customArgs []string, overlayActive bool, logger *slog.Logger) []string {
+func hermesLaunchArgs(customArgs []string, overlayActive bool) []string {
 	if !overlayActive {
 		return customArgs
 	}
-	return agent.FilterHermesProfileArgs(customArgs, logger)
+	// Strip exactly the occurrence the resolver acted on. This re-parses with the
+	// same authoritative parser used to resolve the source home, so parsing and
+	// stripping never diverge.
+	sel := agent.ParseHermesProfileArgs(customArgs)
+	return agent.StripHermesProfileArgs(customArgs, sel)
 }
 
 func layerCustomEnvAndHermesHome(agentEnv, customEnv map[string]string, overlayHome string, logger *slog.Logger) {

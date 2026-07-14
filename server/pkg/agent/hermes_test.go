@@ -2264,42 +2264,66 @@ func TestHermesKeepsRemoteMcpWhenCapabilityAdvertised(t *testing.T) {
 	}
 }
 
-func TestHermesProfileFromArgs(t *testing.T) {
+// TestParseHermesProfileArgs covers the parser's fidelity to Hermes'
+// _apply_profile_override step 1/1b: first occurrence, both spellings, the inline
+// empty value, the space-form profile-id guard, value-flag skipping, and the
+// `--` / `mcp add --args` boundaries.
+func TestParseHermesProfileArgs(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
-		name string
-		args []string
-		want string
+		name     string
+		args     []string
+		wantName string
+		found    bool
+		inline   bool
+		from     int
+		length   int
 	}{
-		{"none", []string{"--yolo"}, ""},
-		{"short flag", []string{"-p", "research"}, "research"},
-		{"long flag", []string{"--profile", "research"}, "research"},
-		{"inline", []string{"--profile=research"}, "research"},
-		{"trailing short flag with no value", []string{"--yolo", "-p"}, ""},
-		{"amid other args", []string{"--yolo", "--profile", "coder", "-x"}, "coder"},
+		{"none", []string{"--yolo"}, "", false, false, -1, 0},
+		{"short flag", []string{"-p", "research"}, "research", true, false, 0, 2},
+		{"long flag", []string{"--profile", "research"}, "research", true, false, 0, 2},
+		{"inline", []string{"--profile=research"}, "research", true, true, 0, 1},
+		{"inline empty value", []string{"--profile="}, "", true, true, 0, 1},
+		{"trailing short flag with no value", []string{"--yolo", "-p"}, "", false, false, -1, 0},
+		{"amid other args", []string{"--yolo", "--profile", "coder", "-x"}, "coder", true, false, 1, 2},
+		{"space-form invalid value ignored", []string{"-p", "no:xdist"}, "", false, false, -1, 0},
+		{"value-flag hides a following -p", []string{"-m", "-p", "research"}, "", false, false, -1, 0},
+		{"double-dash sentinel stops scan", []string{"--", "-p", "research"}, "", false, false, -1, 0},
+		{"mcp add --args passthrough stops scan", []string{"mcp", "add", "srv", "--args", "-p", "research"}, "", false, false, -1, 0},
+		{"only the first occurrence is selected", []string{"-p", "research", "--profile", "coder"}, "research", true, false, 0, 2},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			if got := HermesProfileFromArgs(tc.args); got != tc.want {
-				t.Errorf("HermesProfileFromArgs(%v) = %q, want %q", tc.args, got, tc.want)
+			sel := ParseHermesProfileArgs(tc.args)
+			if sel.Name != tc.wantName || sel.Found != tc.found || sel.Inline != tc.inline ||
+				sel.ArgFrom != tc.from || sel.ArgLen != tc.length {
+				t.Errorf("ParseHermesProfileArgs(%v) = %+v, want name=%q found=%v inline=%v from=%d len=%d",
+					tc.args, sel, tc.wantName, tc.found, tc.inline, tc.from, tc.length)
 			}
 		})
 	}
 }
 
-// TestFilterHermesProfileArgs asserts the profile flags are stripped (all three
-// spellings) when the daemon builds the overlay, while other args survive — and
-// that the base blocked set does NOT strip them, so a skill-less task's profile
-// passes through unchanged.
-func TestFilterHermesProfileArgs(t *testing.T) {
+// TestStripHermesProfileArgs asserts only the parsed occurrence is removed (not
+// every -p/--profile spelling), and that the base blocked set does NOT strip the
+// profile flags, so a skill-less task's profile passes through unchanged.
+func TestStripHermesProfileArgs(t *testing.T) {
 	t.Parallel()
-	got := FilterHermesProfileArgs(
-		[]string{"-p", "research", "--yolo", "--profile=coder", "--profile", "x"},
-		slog.Default(),
-	)
-	if len(got) != 1 || got[0] != "--yolo" {
-		t.Fatalf("profile flags should be stripped, leaving [--yolo], got %v", got)
+	args := []string{"-p", "research", "--yolo", "--profile", "coder"}
+	sel := ParseHermesProfileArgs(args)
+	got := StripHermesProfileArgs(args, sel)
+	want := []string{"--yolo", "--profile", "coder"}
+	if len(got) != len(want) {
+		t.Fatalf("StripHermesProfileArgs = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("StripHermesProfileArgs = %v, want %v", got, want)
+		}
+	}
+	if none := StripHermesProfileArgs([]string{"--yolo"}, ParseHermesProfileArgs([]string{"--yolo"})); len(none) != 1 || none[0] != "--yolo" {
+		t.Fatalf("no selection should leave args unchanged, got %v", none)
 	}
 	if _, ok := hermesBlockedArgs["-p"]; ok {
 		t.Error("hermesBlockedArgs must not unconditionally strip -p")

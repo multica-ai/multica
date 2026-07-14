@@ -65,8 +65,8 @@ type PrepareParams struct {
 	// (MUL-2663). When set, the envRoot/workdir directory is not created.
 	LocalWorkDir string
 	// HermesSourceHome is the shared Hermes home the per-task overlay is seeded
-	// from — resolved by the daemon via execenv.ResolveHermesSourceHome so it
-	// honors the agent's custom_env HERMES_HOME and any -p/--profile selection.
+	// from — resolved by the daemon via execenv.ResolveHermesProfile so it honors
+	// the agent's custom_env HERMES_HOME and any -p/--profile or sticky selection.
 	// Only used for the hermes provider; empty falls back to the platform default.
 	HermesSourceHome string
 	// HermesSourceMustExist fails the overlay build closed when HermesSourceHome

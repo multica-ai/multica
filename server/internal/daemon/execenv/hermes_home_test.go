@@ -316,30 +316,142 @@ func TestPrepareHermesHomeFailsClosed(t *testing.T) {
 	}
 }
 
-// TestResolveHermesSourceHome covers the profile-aware source-home resolution
-// the daemon uses before building the overlay, matching Hermes' profile rules:
-// default/invalid → base (named=false), valid named → <base>/profiles/<name>
-// (named=true).
-func TestResolveHermesSourceHome(t *testing.T) {
+// TestResolveHermesProfile exercises the one resolver contract against the
+// behaviors the review requires it to match Hermes on: sticky selection, an
+// already-profile-scoped home, `-p default`/`-p <sibling>` re-rooting, and native
+// failure on reserved/invalid/empty names. Temp dirs stand in for custom Hermes
+// roots (they are never under the host's platform-default home, so root
+// derivation takes the deterministic custom/profile branch).
+func TestResolveHermesProfile(t *testing.T) {
 	t.Parallel()
-	base := filepath.Join(string(filepath.Separator)+"home", "u", ".hermes")
 
-	if got, named := ResolveHermesSourceHome(base, ""); got != base || named {
-		t.Errorf("no profile: got (%q,%v), want (%q,false)", got, named, base)
+	t.Run("no profile resolves to the base home", func(t *testing.T) {
+		t.Parallel()
+		base := t.TempDir()
+		res := ResolveHermesProfile(base, "", false, false)
+		if res.Err != nil || res.SourceHome != base || res.MustExist {
+			t.Fatalf("got %+v, want SourceHome=%q MustExist=false Err=nil", res, base)
+		}
+	})
+
+	// The review's blocker 1: a sticky active_profile must be SELECTED as the
+	// overlay source, not merely blocked from bypassing.
+	t.Run("root + sticky named profile selects the profile as source", func(t *testing.T) {
+		t.Parallel()
+		root := t.TempDir()
+		mustWrite(t, filepath.Join(root, "active_profile"), "coder\n")
+		res := ResolveHermesProfile(root, "", false, false)
+		want := filepath.Join(root, "profiles", "coder")
+		if res.Err != nil || res.SourceHome != want || !res.MustExist {
+			t.Fatalf("sticky: got %+v, want SourceHome=%q MustExist=true", res, want)
+		}
+	})
+
+	t.Run("sticky default is ignored", func(t *testing.T) {
+		t.Parallel()
+		root := t.TempDir()
+		mustWrite(t, filepath.Join(root, "active_profile"), "default\n")
+		res := ResolveHermesProfile(root, "", false, false)
+		if res.Err != nil || res.SourceHome != root || res.MustExist {
+			t.Fatalf("sticky default: got %+v, want SourceHome=%q MustExist=false", res, root)
+		}
+	})
+
+	t.Run("already-profile-scoped home with no flag is trusted", func(t *testing.T) {
+		t.Parallel()
+		root := t.TempDir()
+		scoped := filepath.Join(root, "profiles", "coder")
+		// A sticky at the root must NOT override an explicit profile-scoped home.
+		mustWrite(t, filepath.Join(root, "active_profile"), "research\n")
+		res := ResolveHermesProfile(scoped, "", false, false)
+		if res.Err != nil || res.SourceHome != scoped || !res.MustExist {
+			t.Fatalf("profile-scoped: got %+v, want SourceHome=%q MustExist=true", res, scoped)
+		}
+	})
+
+	t.Run("-p default from a profile-scoped home re-roots to the root", func(t *testing.T) {
+		t.Parallel()
+		root := t.TempDir()
+		scoped := filepath.Join(root, "profiles", "coder")
+		res := ResolveHermesProfile(scoped, "default", true, false)
+		if res.Err != nil || res.SourceHome != root || res.MustExist {
+			t.Fatalf("-p default: got %+v, want SourceHome=%q MustExist=false", res, root)
+		}
+	})
+
+	t.Run("-p sibling from a profile-scoped home is a sibling, not nested", func(t *testing.T) {
+		t.Parallel()
+		root := t.TempDir()
+		scoped := filepath.Join(root, "profiles", "coder")
+		res := ResolveHermesProfile(scoped, "research", true, false)
+		want := filepath.Join(root, "profiles", "research")
+		if res.Err != nil || res.SourceHome != want || !res.MustExist {
+			t.Fatalf("-p sibling: got %+v, want SourceHome=%q MustExist=true", res, want)
+		}
+	})
+
+	t.Run("explicit named profile resolves under the root", func(t *testing.T) {
+		t.Parallel()
+		root := t.TempDir()
+		res := ResolveHermesProfile(root, "research", true, false)
+		want := filepath.Join(root, "profiles", "research")
+		if res.Err != nil || res.SourceHome != want || !res.MustExist {
+			t.Fatalf("named: got %+v, want SourceHome=%q MustExist=true", res, want)
+		}
+	})
+
+	t.Run("reserved names fail closed", func(t *testing.T) {
+		t.Parallel()
+		root := t.TempDir()
+		for _, name := range []string{"hermes", "test", "tmp", "root", "sudo"} {
+			if res := ResolveHermesProfile(root, name, true, false); res.Err == nil {
+				t.Errorf("reserved %q: expected Err, got SourceHome=%q", name, res.SourceHome)
+			}
+		}
+	})
+
+	t.Run("empty inline value fails closed", func(t *testing.T) {
+		t.Parallel()
+		root := t.TempDir()
+		if res := ResolveHermesProfile(root, "", true, true); res.Err == nil {
+			t.Error("empty inline --profile= must fail closed, not fall back to default")
+		}
+	})
+
+	t.Run("empty inputs resolve to a platform default", func(t *testing.T) {
+		t.Parallel()
+		if res := ResolveHermesProfile("", "", false, false); res.SourceHome == "" {
+			t.Error("empty inputs should resolve to a platform default, not empty")
+		}
+	})
+}
+
+// TestHermesExternalDirsExpandsAgainstSelectedProfileHome is the review's blocker
+// 3: a ${HERMES_HOME} in a selected profile's skills.external_dirs must expand
+// against the SELECTED profile home (what native Hermes sees after applying the
+// profile override before loading config.yaml), not the pre-resolution/root home
+// or the task overlay. The daemon sets the effective env's HERMES_HOME to the
+// resolved source home for exactly this reason.
+func TestHermesExternalDirsExpandsAgainstSelectedProfileHome(t *testing.T) {
+	t.Parallel()
+	profileHome := t.TempDir() // stands in for <root>/profiles/coder
+	mustWrite(t, filepath.Join(profileHome, "config.yaml"),
+		"skills:\n  external_dirs:\n    - ${HERMES_HOME}/profile-skills\n")
+
+	hermesHome := filepath.Join(t.TempDir(), "hermes-home")
+	env := map[string]string{"HERMES_HOME": profileHome} // as the daemon sets it
+	skills := []SkillContextForEnv{{Name: "Review Helper", Content: "x"}}
+	if err := prepareHermesHome(hermesHome, profileHome, true, skills, env, testLogger()); err != nil {
+		t.Fatalf("prepareHermesHome failed: %v", err)
 	}
-	// "default" is ~/.hermes itself, not profiles/default.
-	if got, named := ResolveHermesSourceHome(base, "default"); got != base || named {
-		t.Errorf("default profile: got (%q,%v), want (%q,false)", got, named, base)
+
+	got := hermesExternalDirs(t, filepath.Join(hermesHome, "config.yaml"))
+	want := []string{
+		filepath.Join(profileHome, "profile-skills"),
+		filepath.Join(profileHome, "skills"),
 	}
-	// An invalid name (Hermes regex) is ignored → base, not failed.
-	if got, named := ResolveHermesSourceHome(base, "Bad Name!"); got != base || named {
-		t.Errorf("invalid profile: got (%q,%v), want (%q,false)", got, named, base)
-	}
-	if got, named := ResolveHermesSourceHome(base, "research"); got != filepath.Join(base, "profiles", "research") || !named {
-		t.Errorf("named profile: got (%q,%v), want (%q,true)", got, named, filepath.Join(base, "profiles", "research"))
-	}
-	if got, _ := ResolveHermesSourceHome("", ""); got == "" {
-		t.Error("empty inputs should resolve to a platform default, not empty")
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Errorf("external_dirs =\n%v\nwant\n%v", got, want)
 	}
 }
 
