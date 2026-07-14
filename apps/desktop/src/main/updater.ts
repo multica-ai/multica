@@ -90,6 +90,8 @@ export function setupAutoUpdater(getMainWindow: () => BrowserWindow | null): voi
   let automaticUpdatesEnabled =
     DEFAULT_UPDATER_PREFERENCES.automaticUpdates;
   let startupCheckElapsed = false;
+  let startupTimer: ReturnType<typeof setTimeout> | null = null;
+  let periodicTimer: ReturnType<typeof setInterval> | null = null;
   const preferencesReady = loadUpdaterPreferences(preferencesFilePath).then(
     (preferences) => {
       automaticUpdatesEnabled = preferences.automaticUpdates;
@@ -106,6 +108,41 @@ export function setupAutoUpdater(getMainWindow: () => BrowserWindow | null): voi
       .catch((err) => {
         console.error(errorMessage, err);
       });
+  };
+
+  // Arm the startup + periodic background checks. Idempotent: an already-armed
+  // timer is left in place so re-enabling never stacks duplicate schedules.
+  const scheduleBackgroundChecks = (): void => {
+    if (startupTimer === null && !startupCheckElapsed) {
+      // Initial check shortly after startup so we don't block boot.
+      startupTimer = setTimeout(() => {
+        startupTimer = null;
+        startupCheckElapsed = true;
+        runAutomaticCheck("Failed to check for updates:");
+      }, STARTUP_CHECK_DELAY_MS);
+    }
+    if (periodicTimer === null) {
+      // Background poll so long-running sessions still pick up new releases
+      // without requiring the user to restart the app.
+      periodicTimer = setInterval(() => {
+        runAutomaticCheck("Periodic update check failed:");
+      }, PERIODIC_CHECK_INTERVAL_MS);
+    }
+  };
+
+  // Tear down the scheduled checks outright when automatic updates are turned
+  // off. Relying only on an in-callback preference guard leaves the timers
+  // running and lets a tick that races the preference flip still fire a check;
+  // clearing them makes "disabled" mean no future background work, full stop.
+  const cancelBackgroundChecks = (): void => {
+    if (startupTimer !== null) {
+      clearTimeout(startupTimer);
+      startupTimer = null;
+    }
+    if (periodicTimer !== null) {
+      clearInterval(periodicTimer);
+      periodicTimer = null;
+    }
   };
 
   autoUpdater.on("update-available", (info) => {
@@ -165,10 +202,15 @@ export function setupAutoUpdater(getMainWindow: () => BrowserWindow | null): voi
       await saveUpdaterPreferences(preferencesFilePath, preferences);
       automaticUpdatesEnabled = enabled;
 
-      // If the startup check has already passed while the preference was off,
-      // enabling it should take effect now instead of waiting up to one hour.
-      if (enabled && !wasEnabled && startupCheckElapsed) {
-        runAutomaticCheck("Failed to check for updates:");
+      if (!enabled) {
+        cancelBackgroundChecks();
+      } else if (!wasEnabled) {
+        // If the startup check has already passed while the preference was off,
+        // enabling it should take effect now instead of waiting up to one hour.
+        if (startupCheckElapsed) {
+          runAutomaticCheck("Failed to check for updates:");
+        }
+        scheduleBackgroundChecks();
       }
 
       return preferences;
@@ -201,15 +243,8 @@ export function setupAutoUpdater(getMainWindow: () => BrowserWindow | null): voi
     }
   });
 
-  // Initial check shortly after startup so we don't block boot.
-  setTimeout(() => {
-    startupCheckElapsed = true;
-    runAutomaticCheck("Failed to check for updates:");
-  }, STARTUP_CHECK_DELAY_MS);
-
-  // Background poll so long-running sessions still pick up new releases
-  // without requiring the user to restart the app.
-  setInterval(() => {
-    runAutomaticCheck("Periodic update check failed:");
-  }, PERIODIC_CHECK_INTERVAL_MS);
+  // Initial check shortly after startup so we don't block boot, plus a
+  // background poll for long-running sessions. Both are torn down when the
+  // user disables automatic updates and re-armed when they turn them back on.
+  scheduleBackgroundChecks();
 }
