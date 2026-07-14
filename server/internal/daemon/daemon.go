@@ -256,6 +256,9 @@ type Daemon struct {
 	activeEnvRootsMu sync.Mutex
 	activeEnvRoots   map[string]int // env root path -> reference count (handles reuse paths marked twice)
 
+	activeCodexStoresMu sync.Mutex
+	activeCodexStores   map[string]int // per-issue Codex session store path -> refcount; guards the store from GC mid-task (MUL-4424)
+
 	// localPathLocks serialises agent tasks whose project resource is a
 	// local_directory pinned to this daemon. Two tasks targeting the same
 	// on-disk path run sequentially; the second blocks on the lock and is
@@ -305,6 +308,7 @@ func New(cfg Config, logger *slog.Logger) *Daemon {
 		resolvedPaths:             make(map[string]healedAgent),
 		wsHBLastAck:               make(map[string]time.Time),
 		activeEnvRoots:            make(map[string]int),
+		activeCodexStores:         make(map[string]int),
 		localPathLocks:            NewLocalPathLocker(),
 		runtimeGoneInflight:       make(map[string]struct{}),
 		reregisterNextAttempt:     make(map[string]time.Time),
@@ -3912,6 +3916,16 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		}
 		hermesEnv["HERMES_HOME"] = res.SourceHome
 	}
+	// Guard this task's per-issue Codex session store from the GC for the whole
+	// task, starting before Prepare/Reuse mounts it — so a prune that samples the
+	// store's stale (pre-remount) mtime cannot reclaim it out from under a resume
+	// of a long-idle issue (MUL-4424). No-op for non-Codex tasks / no stable key.
+	if provider == "codex" {
+		if store := execenv.CodexSessionStorePath(task.AgentID, task.IssueID); store != "" {
+			d.markActiveCodexStore(store)
+			defer d.unmarkActiveCodexStore(store)
+		}
+	}
 	if task.PriorWorkDir != "" && localAssignment == nil && !task.IsLeaderTask {
 		env = execenv.Reuse(execenv.ReuseParams{
 			WorkspacesRoot:        d.cfg.WorkspacesRoot,
@@ -4967,6 +4981,38 @@ func (d *Daemon) isActiveEnvRoot(envRoot string) bool {
 	d.activeEnvRootsMu.Lock()
 	defer d.activeEnvRootsMu.Unlock()
 	return d.activeEnvRoots[envRoot] > 0
+}
+
+// markActiveCodexStore records that a task is currently using the given per-issue
+// Codex session store, so the GC loop's PruneCodexSessionStores never reclaims it
+// mid-task — the store lives outside the env root, so isActiveEnvRoot does not
+// cover it (MUL-4424). Reference-counted like the env-root guard.
+func (d *Daemon) markActiveCodexStore(store string) {
+	if store == "" {
+		return
+	}
+	d.activeCodexStoresMu.Lock()
+	defer d.activeCodexStoresMu.Unlock()
+	d.activeCodexStores[store]++
+}
+
+func (d *Daemon) unmarkActiveCodexStore(store string) {
+	if store == "" {
+		return
+	}
+	d.activeCodexStoresMu.Lock()
+	defer d.activeCodexStoresMu.Unlock()
+	if d.activeCodexStores[store] <= 1 {
+		delete(d.activeCodexStores, store)
+		return
+	}
+	d.activeCodexStores[store]--
+}
+
+func (d *Daemon) isActiveCodexStore(store string) bool {
+	d.activeCodexStoresMu.Lock()
+	defer d.activeCodexStoresMu.Unlock()
+	return d.activeCodexStores[store] > 0
 }
 
 // shortID returns the first 8 characters of an ID for readable logs.

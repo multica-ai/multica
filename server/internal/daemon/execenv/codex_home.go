@@ -254,7 +254,12 @@ func sanitizeCodexPathSegment(s string) string {
 // advances, so an active or recently-resumed task keeps its store fresh and is
 // never reclaimed; a store idle past retention is removed, giving deleted issues
 // an eventual-reclamation guarantee. retention <= 0 disables pruning entirely.
-func PruneCodexSessionStores(retention time.Duration, now time.Time, logger *slog.Logger) (removed int, bytesFreed int64) {
+//
+// isActive (may be nil) reports whether a store is currently mounted by a live
+// task. It runs in the same process as task preparation, so a store a task is
+// mounting right now — whose mtime the mount has not refreshed yet — is skipped,
+// closing the stat->remove race the mtime refresh alone leaves open.
+func PruneCodexSessionStores(retention time.Duration, now time.Time, isActive func(storeDir string) bool, logger *slog.Logger) (removed int, bytesFreed int64) {
 	if retention <= 0 {
 		return 0, 0
 	}
@@ -280,6 +285,12 @@ func PruneCodexSessionStores(retention time.Duration, now time.Time, logger *slo
 			storeDir := filepath.Join(agentDir, is.Name())
 			newest, size := codexStoreStat(storeDir)
 			if newest.IsZero() || now.Sub(newest) <= retention {
+				kept++
+				continue
+			}
+			// A task is mounting/using this store right now (its remount refreshes
+			// activity only once the link is in place). Never reclaim it mid-use.
+			if isActive != nil && isActive(storeDir) {
 				kept++
 				continue
 			}
@@ -433,7 +444,41 @@ func linkCodexSessionsToStore(dst, storeDir, sharedSessions, resumeID string, lo
 				"session_id", resumeID, "error", err)
 		}
 	}
-	return ensureCodexSessionsLink(dst, storeDir)
+	if err := ensureCodexSessionsLink(dst, storeDir); err != nil {
+		return err
+	}
+	// Stamp the store as just-used. Mounting it (MkdirAll, rollout lookup, link)
+	// does not touch its mtime, so without this the GC's idle check would still
+	// see a >TTL-old store and could reclaim it before the resumed turn writes its
+	// first rollout — reopening a long-idle issue must not lose context. This is
+	// the activity refresh; the daemon's in-process active-store guard closes the
+	// remaining stat→remove race (MUL-4424).
+	touchCodexSessionStore(storeDir, logger)
+	return nil
+}
+
+// touchCodexSessionStore refreshes storeDir's modification time to now — the
+// signal codexStoreStat reads as the store's last activity. Best-effort: a
+// failed touch only risks an over-eager prune, which the active-store guard
+// still prevents.
+func touchCodexSessionStore(storeDir string, logger *slog.Logger) {
+	now := time.Now()
+	if err := os.Chtimes(storeDir, now, now); err != nil {
+		logger.Warn("execenv: refresh codex session store activity failed", "store", storeDir, "error", err)
+	}
+}
+
+// CodexSessionStorePath returns the per-issue Codex session store directory for
+// (agentID, issueID) on the shared home, or "" when there is no stable key. The
+// daemon marks this path in-use for the duration of a task so PruneCodexSession-
+// Stores never reclaims a store mid-mount, closing the stat→remove race the
+// mtime refresh alone cannot (MUL-4424).
+func CodexSessionStorePath(agentID, issueID string) string {
+	key := codexSessionStoreKey(agentID, issueID)
+	if key == "" {
+		return ""
+	}
+	return codexSessionStoreDir(resolveSharedCodexHome(), key)
 }
 
 // sameCodexPath reports whether two filesystem paths refer to the same location,

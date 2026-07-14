@@ -480,7 +480,7 @@ func TestPruneCodexSessionStores(t *testing.T) {
 	// Age only the stale store's whole tree well past retention.
 	chtimesTree(t, staleStore, now.Add(-30*24*time.Hour))
 
-	removed, bytes := PruneCodexSessionStores(retention, now, testLogger())
+	removed, bytes := PruneCodexSessionStores(retention, now, nil, testLogger())
 	if removed != 1 {
 		t.Fatalf("removed = %d, want 1 (only the store idle past retention)", removed)
 	}
@@ -496,10 +496,71 @@ func TestPruneCodexSessionStores(t *testing.T) {
 
 	// retention <= 0 disables pruning even for an aged store.
 	chtimesTree(t, freshStore, now.Add(-30*24*time.Hour))
-	if removed, _ := PruneCodexSessionStores(0, now, testLogger()); removed != 0 {
+	if removed, _ := PruneCodexSessionStores(0, now, nil, testLogger()); removed != 0 {
 		t.Errorf("retention<=0 must disable pruning, removed=%d", removed)
 	}
 	assertPresent(t, freshStore)
+}
+
+// TestPruneCodexSessionStores_ReopenedStoreNotReclaimed is Elon's blocker repro:
+// a store idle past the TTL that a user reopens must NOT be reclaimed by a GC
+// cycle that fires before the resumed turn writes its first rollout — mounting
+// the store refreshes its activity (MUL-4424).
+func TestPruneCodexSessionStores_ReopenedStoreNotReclaimed(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("CODEX_HOME", home)
+	key := filepath.Join("agent-1", "issue-old")
+	storeDir := codexSessionStoreDir(home, key)
+	sessionID := "019f59d9-a6aa-7a53-b173-1eccc4b4c873"
+	// A long-idle (30-day) store that still holds a resumable rollout.
+	seedRolloutAt(t, filepath.Join(storeDir, "2026", "06", "01", "rollout-2026-06-01T00-00-00-"+sessionID+".jsonl"), 16)
+	chtimesTree(t, storeDir, time.Now().Add(-30*24*time.Hour))
+
+	// The user reopens the issue: a fresh task home remounts the store to resume.
+	codexHome := filepath.Join(home, "task", "codex-home")
+	if err := os.MkdirAll(codexHome, 0o755); err != nil {
+		t.Fatalf("mkdir codex-home: %v", err)
+	}
+	if err := linkCodexSessionsToStore(filepath.Join(codexHome, "sessions"), storeDir, filepath.Join(home, "sessions"), sessionID, testLogger()); err != nil {
+		t.Fatalf("linkCodexSessionsToStore: %v", err)
+	}
+	if !CodexResumeRolloutPresent(codexHome, sessionID) {
+		t.Fatal("resume rollout must be visible after remount")
+	}
+
+	// A GC cycle now — before the resumed turn writes anything — must keep it.
+	if removed, _ := PruneCodexSessionStores(14*24*time.Hour, time.Now(), nil, testLogger()); removed != 0 {
+		t.Fatalf("removed = %d, want 0 (a just-reopened store must survive GC)", removed)
+	}
+	assertPresent(t, storeDir)
+	if !CodexResumeRolloutPresent(codexHome, sessionID) {
+		t.Error("resume rollout must still be present after GC")
+	}
+}
+
+// TestPruneCodexSessionStores_ActiveStoreNotReclaimed proves the in-process
+// active-store guard closes the stat->remove race: a store idle on disk but
+// marked in-use by a live task is skipped, then reclaimed once inactive.
+func TestPruneCodexSessionStores_ActiveStoreNotReclaimed(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("CODEX_HOME", home)
+	key := filepath.Join("agent-1", "issue-active")
+	storeDir := codexSessionStoreDir(home, key)
+	seedRolloutAt(t, filepath.Join(storeDir, "2026", "06", "01", "rollout-2026-06-01T00-00-00-x.jsonl"), 16)
+	// Idle past retention on disk (no remount refresh), but currently in use.
+	chtimesTree(t, storeDir, time.Now().Add(-30*24*time.Hour))
+
+	active := func(p string) bool { return sameCodexPath(p, storeDir) }
+	if removed, _ := PruneCodexSessionStores(14*24*time.Hour, time.Now(), active, testLogger()); removed != 0 {
+		t.Fatalf("removed = %d, want 0 (an in-use store must never be reclaimed)", removed)
+	}
+	assertPresent(t, storeDir)
+
+	// Once no longer active, the same idle store is reclaimed.
+	if removed, _ := PruneCodexSessionStores(14*24*time.Hour, time.Now(), nil, testLogger()); removed != 1 {
+		t.Fatalf("removed = %d, want 1 (idle store reclaimed when not active)", removed)
+	}
+	assertAbsent(t, storeDir)
 }
 
 // TestPruneCodexSessionStores_RemovesEmptyAgentDir confirms an agent directory
@@ -514,7 +575,7 @@ func TestPruneCodexSessionStores_RemovesEmptyAgentDir(t *testing.T) {
 
 	now := time.Now()
 	chtimesTree(t, onlyStore, now.Add(-30*24*time.Hour))
-	if removed, _ := PruneCodexSessionStores(14*24*time.Hour, now, testLogger()); removed != 1 {
+	if removed, _ := PruneCodexSessionStores(14*24*time.Hour, now, nil, testLogger()); removed != 1 {
 		t.Fatalf("removed = %d, want 1", removed)
 	}
 	assertAbsent(t, filepath.Join(storeRoot, "agent-lonely"))
