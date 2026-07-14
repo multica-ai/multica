@@ -1300,9 +1300,13 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   // the swap is visually seamless. The click that used to place a caret now
   // calls `activate`; useLazyEditor mounts the editor hidden, swaps it in on
   // `onReady`, and lands the caret at the clicked coordinates.
-  const descLazy = useLazyEditor({ editorRef: descEditorRef });
+  // resetKey: the web issue route reuses this component across issues, so a
+  // subject switch must fold both regions back to their stand-ins during the
+  // id-change render itself — an effect would let the new issue's keyed
+  // editor mount visibly once before being discarded.
+  const descLazy = useLazyEditor({ editorRef: descEditorRef, resetKey: id });
   const titleEditorRef = useRef<TitleEditorRef>(null);
-  const titleLazy = useLazyEditor({ editorRef: titleEditorRef });
+  const titleLazy = useLazyEditor({ editorRef: titleEditorRef, resetKey: id });
   const { isDragOver: descDragOver, dropZoneProps: descDropZoneProps } = useFileDropZone({
     onDrop: descLazy.uploadOrQueue,
   });
@@ -1310,11 +1314,23 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     const target = e.target as HTMLElement;
     // Links, copy buttons, attachment cards etc. inside the readonly render
     // keep their own behavior — only a click on plain content enters editing.
-    if (target.closest("a, button, input, textarea, [role='button']")) return;
+    // The wrapper itself carries role="button" (keyboard path below), so the
+    // closest() hit must be an INNER element to count as interactive.
+    const interactive = target.closest("a, button, input, textarea, [role='button']");
+    if (interactive && interactive !== e.currentTarget) return;
     // A drag-selection (copying text) must not summon the editor.
     const sel = window.getSelection();
     if (sel && !sel.isCollapsed) return;
     descLazy.activate({ x: e.clientX, y: e.clientY });
+  };
+  const handleDescReadonlyKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (e.key !== "Enter" && e.key !== " ") return;
+    // Enter/Space on a focusable element INSIDE the readonly render (link,
+    // copy button, checkbox) keeps its own behavior — only activate when the
+    // wrapper itself holds focus.
+    if (e.target !== e.currentTarget) return;
+    e.preventDefault();
+    descLazy.activate();
   };
   // Pending uploads in the description editor. We don't pass `issueId` on
   // upload (to avoid orphaning attachments when the user deletes the file
@@ -1341,16 +1357,10 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     [uploadWithToast],
   );
 
-  const resetDescLazy = descLazy.reset;
-  const resetTitleLazy = titleLazy.reset;
   useEffect(() => {
     descPendingAttachmentsRef.current = [];
     setDescPendingAttachments([]);
-    // Back to readonly-first on issue switch (the web route reuses this
-    // component instead of remounting it).
-    resetDescLazy();
-    resetTitleLazy();
-  }, [id, resetDescLazy, resetTitleLazy]);
+  }, [id]);
 
   // Shared issue actions (mutations, pin, copy-link, modal dispatch, etc.).
   // Called before the `if (!issue)` early return so hook order stays stable.
@@ -2112,13 +2122,22 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                 the editor, so the swap is visually seamless. */}
             {!descLazy.ready &&
               (issue.description?.trim() ? (
-                <div className="cursor-text text-sm" onClick={handleDescReadonlyClick}>
+                <div
+                  role="button"
+                  tabIndex={0}
+                  className="cursor-text text-sm"
+                  onClick={handleDescReadonlyClick}
+                  onKeyDown={handleDescReadonlyKeyDown}
+                >
                   <ReadonlyContent content={issue.description} attachments={issueAttachments} />
                 </div>
               ) : (
                 <div
+                  role="button"
+                  tabIndex={0}
                   className="cursor-text rich-text-editor text-sm"
                   onClick={handleDescReadonlyClick}
+                  onKeyDown={handleDescReadonlyKeyDown}
                 >
                   {/* <p> under rich-text-editor: same type metrics as the
                       editor's empty paragraph — no height jump on swap. */}

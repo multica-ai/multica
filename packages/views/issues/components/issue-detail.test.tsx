@@ -11,6 +11,11 @@ const TEST_RESOURCES = { en: { common: enCommon, issues: enIssues } };
 
 const mockViewport = vi.hoisted(() => ({ isMobile: false }));
 
+// Counts MockContentEditor mounts. Lets tests assert an editor was never
+// instantiated for a path (e.g. issue switch) even when a buggy mount would
+// already be unmounted again by the time the DOM is inspected.
+const contentEditorMounts = vi.hoisted(() => ({ count: 0 }));
+
 vi.mock("@multica/ui/hooks/use-mobile", () => ({
   useIsMobile: () => mockViewport.isMobile,
 }));
@@ -140,6 +145,7 @@ vi.mock("../../editor", async () => ({
     const valueRef = useRef(defaultValue || "");
     const [value, setValue] = useState(defaultValue || "");
     useEffect(() => {
+      contentEditorMounts.count += 1;
       onReady?.();
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
@@ -597,6 +603,64 @@ describe("IssueDetail (shared)", () => {
 
     const description = await screen.findByDisplayValue("Add JWT auth to the backend");
     expect(description).toHaveAttribute("data-flush-on-unmount", "true");
+  });
+
+  it("activates the description stand-in from the keyboard (Enter)", async () => {
+    renderIssueDetail();
+
+    const readonly = await screen.findByText("Add JWT auth to the backend");
+    const standIn = readonly.closest("[role='button']");
+    expect(standIn).not.toBeNull();
+
+    fireEvent.keyDown(standIn!, { key: "Enter" });
+
+    expect(await screen.findByDisplayValue("Add JWT auth to the backend")).toBeInTheDocument();
+  });
+
+  it("folds an activated description back to the stand-in on issue switch without mounting an editor", async () => {
+    // The web issue route reuses IssueDetail across issues (no remount), so
+    // the reset must happen during the id-change render. An effect-based
+    // reset is one commit late: the new issue's keyed editor would mount,
+    // assemble, and be discarded — invisible in the final DOM, so this test
+    // counts editor MOUNTS instead of inspecting what remains.
+    const queryClient = createTestQueryClient();
+    const issue2 = {
+      ...mockIssue,
+      id: "issue-2",
+      title: "Second issue",
+      description: "Second description",
+    };
+    // The cache seed marks the data stale, so the query refetches in the
+    // background — getIssue must answer per-id or the refetch would clobber
+    // issue-2 with issue-1's payload.
+    mockApiObj.getIssue.mockImplementation((issueId: string) =>
+      Promise.resolve(issueId === "issue-2" ? issue2 : mockIssue),
+    );
+    // Pre-seed issue-2 so its first render skips the loading skeleton — the
+    // path where a stale active/ready would visibly mount a wasted editor.
+    queryClient.setQueryData(["issues", "ws-1", "detail", "issue-2"], issue2);
+    const ui = (issueId: string) => (
+      <I18nProvider locale="en" resources={TEST_RESOURCES}>
+        <QueryClientProvider client={queryClient}>
+          <IssueDetail issueId={issueId} />
+        </QueryClientProvider>
+      </I18nProvider>
+    );
+    const { rerender } = render(ui("issue-1"));
+
+    // Activate the description editor on issue-1.
+    fireEvent.click(await screen.findByText("Add JWT auth to the backend"));
+    await screen.findByDisplayValue("Add JWT auth to the backend");
+    const mountsAfterActivation = contentEditorMounts.count;
+
+    rerender(ui("issue-2"));
+
+    // issue-2 renders its static stand-in; no editor was ever instantiated.
+    await waitFor(() => {
+      expect(screen.getByText("Second description")).toBeInTheDocument();
+    });
+    expect(screen.queryByPlaceholderText("Add description...")).not.toBeInTheDocument();
+    expect(contentEditorMounts.count).toBe(mountsAfterActivation);
   });
 
   it("renders the issue title leaf as a link to the issue detail page", async () => {

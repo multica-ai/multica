@@ -22,6 +22,17 @@ export interface UseLazyEditorOptions {
   initialActive?: boolean;
   /** The host's own editor ref — used for post-swap focus and queued uploads. */
   editorRef: RefObject<LazyEditorHandle | null>;
+  /**
+   * When this value changes, the hook returns to the static stand-in DURING
+   * that same render (setState-during-render, React's derived-state pattern)
+   * — not in an effect. An effect-based reset is one commit too late: the
+   * render that carries the new key would still see `active/ready === true`,
+   * visibly mount a keyed editor for the NEW subject, assemble a full Tiptap
+   * instance, and only then throw it away — re-paying the exact main-thread
+   * cost this hook exists to avoid, and blanking the region for a beat.
+   * Hosts that remount per subject (via `key`) don't need this.
+   */
+  resetKey?: unknown;
 }
 
 /**
@@ -44,16 +55,31 @@ export interface UseLazyEditorOptions {
  *     <Editor ref={editorRef} onReady={lazy.onReady} ... /></div>}
  *   {!lazy.ready && <StaticStandIn onClick={e => lazy.activate({x: e.clientX, y: e.clientY})} />}
  *
- * Hosts that outlive an issue switch without remounting (the web issue route)
- * must call `reset()` when their subject changes; keyed hosts get this for
- * free by remounting.
+ * Hosts that outlive a subject switch without remounting (the web issue
+ * route) must pass `resetKey`; keyed hosts get the reset for free by
+ * remounting.
  */
-export function useLazyEditor({ initialActive = false, editorRef }: UseLazyEditorOptions) {
+export function useLazyEditor({
+  initialActive = false,
+  editorRef,
+  resetKey,
+}: UseLazyEditorOptions) {
   const [active, setActive] = useState(initialActive);
   const [ready, setReady] = useState(false);
   const focusCoordsRef = useRef<{ x: number; y: number } | null>(null);
   const focusPendingRef = useRef(false);
   const pendingFilesRef = useRef<File[]>([]);
+
+  // Render-phase reset on subject change — see the `resetKey` option doc.
+  const [prevResetKey, setPrevResetKey] = useState(resetKey);
+  if (resetKey !== prevResetKey) {
+    setPrevResetKey(resetKey);
+    setActive(initialActive);
+    setReady(false);
+    focusCoordsRef.current = null;
+    focusPendingRef.current = false;
+    pendingFilesRef.current = [];
+  }
 
   const activate = useCallback(
     (coords?: { x: number; y: number }) => {
@@ -104,14 +130,5 @@ export function useLazyEditor({ initialActive = false, editorRef }: UseLazyEdito
     [ready, editorRef],
   );
 
-  /** Back to the static stand-in. For non-keyed hosts on subject switch. */
-  const reset = useCallback(() => {
-    setActive(false);
-    setReady(false);
-    focusCoordsRef.current = null;
-    focusPendingRef.current = false;
-    pendingFilesRef.current = [];
-  }, []);
-
-  return { active, ready, activate, onReady, uploadOrQueue, reset };
+  return { active, ready, activate, onReady, uploadOrQueue };
 }
