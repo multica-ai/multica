@@ -30,12 +30,17 @@ CREATE UNIQUE INDEX idx_issue_property_ws_name ON issue_property (workspace_id, 
 CREATE INDEX idx_issue_property_workspace ON issue_property (workspace_id);
 
 ALTER TABLE issue ADD COLUMN properties JSONB NOT NULL DEFAULT '{}'::jsonb;
+-- NOT VALID + VALIDATE keeps the ACCESS EXCLUSIVE lock instantaneous; the
+-- validation pass then runs under SHARE UPDATE EXCLUSIVE without blocking
+-- writes (zero-downtime deploys, review round 3).
 ALTER TABLE issue ADD CONSTRAINT issue_properties_is_object
-    CHECK (jsonb_typeof(properties) = 'object');
+    CHECK (jsonb_typeof(properties) = 'object') NOT VALID;
+ALTER TABLE issue VALIDATE CONSTRAINT issue_properties_is_object;
 -- Larger than metadata's 8KB: multi_select arrays and text values are bigger
 -- than metadata primitives, but the bag is still bounded by the definition cap.
 ALTER TABLE issue ADD CONSTRAINT issue_properties_size_limit
-    CHECK (pg_column_size(properties) <= 16384);
+    CHECK (pg_column_size(properties) <= 16384) NOT VALID;
+ALTER TABLE issue VALIDATE CONSTRAINT issue_properties_size_limit;
 -- The GIN index on issue.properties lives in the follow-up migration
 -- (180_issue_properties_gin_index): CREATE INDEX CONCURRENTLY cannot share a
 -- migration with other statements, and a plain CREATE INDEX would lock writes

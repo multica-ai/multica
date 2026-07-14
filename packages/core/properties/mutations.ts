@@ -3,7 +3,7 @@ import { api } from "../api";
 import { propertyKeys } from "./queries";
 import { useWorkspaceId } from "../hooks";
 import { issueKeys } from "../issues/queries";
-import { onIssuePropertiesChanged } from "../issues/ws-updaters";
+import { invalidatePropertyWindowQueries, onIssuePropertiesChanged } from "../issues/ws-updaters";
 import { findIssueLocation } from "../issues/cache-helpers";
 import type {
   CreatePropertyRequest,
@@ -145,4 +145,9 @@ function settleIssuePropertyCaches(qc: ReturnType<typeof useQueryClient>, wsId: 
   if (qc.isMutating({ mutationKey: ["issue-properties", wsId] }) > 1) return;
   qc.invalidateQueries({ queryKey: issueKeys.detail(wsId, issueId) });
   qc.invalidateQueries({ queryKey: propertyKeys.all(wsId) });
+  // Server-filtered/-sorted windows must refetch: the write may have moved
+  // this issue across pages or reordered it (onIssuePropertiesChanged
+  // already fires this for the WS path; local mutations need it on settle
+  // because the self-emitted WS event may be suppressed or raced).
+  invalidatePropertyWindowQueries(qc, wsId);
 }

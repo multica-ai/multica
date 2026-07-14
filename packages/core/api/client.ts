@@ -2111,7 +2111,20 @@ export class ApiClient {
   // Custom issue properties
   async listProperties(includeArchived = false): Promise<ListPropertiesResponse> {
     const suffix = includeArchived ? "?include_archived=true" : "";
-    const raw = await this.fetch<unknown>(`/api/properties${suffix}`);
+    let raw: unknown;
+    try {
+      raw = await this.fetch<unknown>(`/api/properties${suffix}`);
+    } catch (error) {
+      // A backend predating custom properties 404s here (e.g. after a
+      // server-only rollback). Treat it as an empty catalog: the property
+      // UI sections disappear and the active-catalog reconciliation strips
+      // persisted property sorts/filters, so no property params ever reach
+      // the old server. Other errors keep normal query-error semantics.
+      if (error instanceof Error && "status" in error && (error as { status?: number }).status === 404) {
+        return EMPTY_LIST_PROPERTIES_RESPONSE;
+      }
+      throw error;
+    }
     return parseWithFallback(raw, ListPropertiesResponseSchema, EMPTY_LIST_PROPERTIES_RESPONSE, {
       endpoint: "GET /api/properties",
     });

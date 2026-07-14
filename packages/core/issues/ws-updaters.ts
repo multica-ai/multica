@@ -224,6 +224,34 @@ export function onIssuePropertiesChanged(
     old ? { ...old, properties } : old,
   );
   qc.invalidateQueries({ queryKey: issueKeys.myAll(wsId) });
+  invalidatePropertyWindowQueries(qc, wsId);
+}
+
+/**
+ * Refetch every issue window whose SERVER-side shape depends on property
+ * values: queries filtered by `properties` or sorted by `property:<id>`.
+ * In-place patching keeps them stale under staleTime:Infinity — a value
+ * edit can change an issue's page membership and ordering, and grouped
+ * caches never self-heal (review round 3). Windows without property params
+ * keep the cheap in-place patch above.
+ */
+export function invalidatePropertyWindowQueries(qc: QueryClient, wsId: string) {
+  qc.invalidateQueries({
+    queryKey: issueKeys.all(wsId),
+    predicate: (query) =>
+      query.queryKey.some((part) => {
+        if (!part || typeof part !== "object" || Array.isArray(part)) return false;
+        const rec = part as Record<string, unknown>;
+        if (
+          rec.properties &&
+          typeof rec.properties === "object" &&
+          Object.keys(rec.properties as Record<string, unknown>).length > 0
+        ) {
+          return true;
+        }
+        return typeof rec.sort_by === "string" && rec.sort_by.startsWith("property:");
+      }),
+  });
 }
 
 export function onIssueDeleted(

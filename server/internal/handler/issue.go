@@ -1005,7 +1005,7 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 		where = append(where, fmt.Sprintf("i.metadata @> %s::jsonb", addArg(string(metadataFilter))))
 	}
 	if propertiesFilter != nil {
-		where = append(where, propertiesFilterPredicate(addArg(string(propertiesFilter))))
+		where = append(where, propertiesFilterPredicate(propertiesFilter, addArg))
 	}
 	where = appendIssueDateFilter(where, addArg, dateFilter)
 	if involvesUserFilter.Valid {
@@ -1381,7 +1381,7 @@ func (h *Handler) ListGroupedIssues(w http.ResponseWriter, r *http.Request) {
 	if filter, ok := parsePropertiesFilterParam(w, r.URL.Query().Get("properties")); !ok {
 		return
 	} else if filter != nil {
-		where = append(where, propertiesFilterPredicate(addArg(string(filter))))
+		where = append(where, propertiesFilterPredicate(filter, addArg))
 	}
 	// Mirror the involves_user_id 4-branch UNION from sqlc's ListIssues /
 	// ListOpenIssues / CountIssues. ListGroupedIssues is a hand-written dynamic

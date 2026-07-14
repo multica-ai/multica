@@ -542,6 +542,14 @@ export function BoardView({
           )
         )}
 
+        {groupingProperty && (
+          <PropertyBoardPoolLoader
+            statuses={visibleStatuses}
+            myIssuesOpts={myIssuesOpts}
+            sort={sort}
+          />
+        )}
+
         {grouping === "status" && hiddenStatuses.length > 0 && (
           <BoardHiddenColumnsPanel
             hiddenStatuses={hiddenStatuses}
@@ -680,6 +688,46 @@ const PaginatedBoardColumn = memo(function PaginatedBoardColumn({
  * free of `useLoadMoreByStatus` / `myIssuesOpts` coupling — the swimlane
  * uses an in-memory total instead.
  */
+/**
+ * The property-grouped board derives its columns from the status-bucketed
+ * pool, which pages per status. Property columns have no per-column
+ * pagination yet (tracked in MUL-4493), so this strip keeps every issue
+ * REACHABLE: one sentinel per status that still has server rows loads the
+ * pool further and the property columns re-derive. Without it, rows beyond
+ * a status's loaded page silently never join any column (review round 3).
+ */
+function PropertyBoardPoolLoader({
+  statuses,
+  myIssuesOpts,
+  sort,
+}: {
+  statuses: IssueStatus[];
+  myIssuesOpts?: { scope: string; filter: MyIssuesFilter };
+  sort?: IssueSortParam;
+}) {
+  return (
+    <div className="col-span-full flex justify-center py-1">
+      {statuses.map((status) => (
+        <PropertyBoardPoolSentinel key={status} status={status} myIssuesOpts={myIssuesOpts} sort={sort} />
+      ))}
+    </div>
+  );
+}
+
+function PropertyBoardPoolSentinel({
+  status,
+  myIssuesOpts,
+  sort,
+}: {
+  status: IssueStatus;
+  myIssuesOpts?: { scope: string; filter: MyIssuesFilter };
+  sort?: IssueSortParam;
+}) {
+  const { loadMore, hasMore, isLoading } = useLoadMoreByStatus(status, myIssuesOpts, sort);
+  if (!hasMore) return null;
+  return <InfiniteScrollSentinel onVisible={loadMore} loading={isLoading} />;
+}
+
 function BoardHiddenColumnRow({
   status,
   myIssuesOpts,

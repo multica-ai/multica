@@ -786,10 +786,8 @@ const (
 )
 
 // parsePropertiesFilterParam reads the `properties` query parameter — a JSON
-// object of {<definitionId>: [<value>, ...]} — and compiles it into the
-// alternatives form consumed by propertiesFilterPredicate: a JSON array of
-// OR-groups, each group an array of containment objects. OR within a
-// definition, AND across definitions.
+// object of {<definitionId>: [<value>, ...]} — and compiles it into OR-groups
+// of containment objects: OR within a definition, AND across definitions.
 //
 // Values are option ids for select/multi_select and "true"/"false" for
 // checkbox. The stored value shape differs per type (string, array element,
@@ -797,7 +795,7 @@ const (
 // forms that can't match are simply never satisfied.
 //
 // Returns (nil, true) when the parameter is empty.
-func parsePropertiesFilterParam(w http.ResponseWriter, raw string) ([]byte, bool) {
+func parsePropertiesFilterParam(w http.ResponseWriter, raw string) ([][]json.RawMessage, bool) {
 	if raw == "" {
 		return nil, true
 	}
@@ -810,7 +808,8 @@ func parsePropertiesFilterParam(w http.ResponseWriter, raw string) ([]byte, bool
 		writeError(w, http.StatusBadRequest, fmt.Sprintf("properties filter cannot cover more than %d definitions", maxPropertiesFilterDefinitions))
 		return nil, false
 	}
-	groups := make([][]map[string]any, 0, len(parsed))
+	groups := make([][]json.RawMessage, 0, len(parsed))
+	totalAlternatives := 0
 	for definitionID, values := range parsed {
 		if _, err := uuid.Parse(definitionID); err != nil {
 			writeError(w, http.StatusBadRequest, fmt.Sprintf("properties filter key %q is not a definition id", definitionID))
@@ -823,47 +822,60 @@ func parsePropertiesFilterParam(w http.ResponseWriter, raw string) ([]byte, bool
 			writeError(w, http.StatusBadRequest, fmt.Sprintf("properties filter for %s cannot list more than %d values", definitionID, maxPropertiesFilterValues))
 			return nil, false
 		}
-		alternatives := make([]map[string]any, 0, len(values)*3)
+		alternatives := make([]json.RawMessage, 0, len(values)*3)
+		appendAlt := func(v any) bool {
+			buf, err := json.Marshal(map[string]any{definitionID: v})
+			if err != nil {
+				writeError(w, http.StatusBadRequest, "properties filter is invalid")
+				return false
+			}
+			alternatives = append(alternatives, buf)
+			return true
+		}
 		for _, value := range values {
 			if value == "" {
 				writeError(w, http.StatusBadRequest, "properties filter values cannot be empty")
 				return nil, false
 			}
-			alternatives = append(alternatives,
-				map[string]any{definitionID: value},           // select: string value
-				map[string]any{definitionID: []string{value}}, // multi_select: array element
-			)
+			if !appendAlt(value) || !appendAlt([]string{value}) { // select string / multi_select element
+				return nil, false
+			}
 			if value == "true" || value == "false" {
-				alternatives = append(alternatives, map[string]any{definitionID: value == "true"}) // checkbox
+				if !appendAlt(value == "true") { // checkbox boolean
+					return nil, false
+				}
 			}
 		}
+		totalAlternatives += len(alternatives)
 		groups = append(groups, alternatives)
 	}
 	if len(groups) == 0 {
 		return nil, true
 	}
-	buf, err := json.Marshal(groups)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "properties filter is invalid")
+	// Bound the OR fan-out: each alternative becomes one bind parameter in
+	// the SQL below, and a runaway filter would bloat the statement.
+	if totalAlternatives > 256 {
+		writeError(w, http.StatusBadRequest, "properties filter is too large")
 		return nil, false
 	}
-	return buf, true
+	return groups, true
 }
 
 // propertiesFilterPredicate renders the AND-of-ORs containment check for a
-// compiled filter (see parsePropertiesFilterParam). One parameter feeds both
-// hand-written list queries. The double NOT EXISTS realizes "every OR-group
-// has at least one matching containment". Containments inside the lateral
-// scan don't use the GIN index; acceptable at the row counts these endpoints
-// page through (the outer WHERE has already narrowed by workspace/status).
-func propertiesFilterPredicate(argRef string) string {
-	return fmt.Sprintf(`NOT EXISTS (
-    SELECT 1 FROM jsonb_array_elements(%s::jsonb) AS grp(alts)
-    WHERE NOT EXISTS (
-        SELECT 1 FROM jsonb_array_elements(grp.alts) AS alt(obj)
-        WHERE i.properties @> alt.obj
-    )
-)`, argRef)
+// compiled filter as plain `i.properties @> $n` disjunctions with one bind
+// parameter per alternative. Constant containment operands are what lets the
+// planner drive the jsonb_path_ops GIN index (a correlated
+// jsonb_array_elements form defeats it — verified via EXPLAIN in review).
+func propertiesFilterPredicate(groups [][]json.RawMessage, addArg func(any) string) string {
+	groupSQL := make([]string, 0, len(groups))
+	for _, alternatives := range groups {
+		ors := make([]string, 0, len(alternatives))
+		for _, alt := range alternatives {
+			ors = append(ors, fmt.Sprintf("i.properties @> %s::jsonb", addArg(string(alt))))
+		}
+		groupSQL = append(groupSQL, "("+strings.Join(ors, " OR ")+")")
+	}
+	return "(" + strings.Join(groupSQL, " AND ") + ")"
 }
 
 // propertySortExpr resolves a `property:<definitionId>` sort value into a SQL

@@ -426,12 +426,22 @@ func TestListIssuesPropertyFilterAndSort(t *testing.T) {
 	box := createTestProperty(t, map[string]any{"name": "FB" + uuid.NewString()[:8], "type": "checkbox"})
 	num := createTestProperty(t, map[string]any{"name": "FN" + uuid.NewString()[:8], "type": "number"})
 
-	// 54 padding issues in front, then the matching issue at position 55 —
-	// beyond the default 50-row first page a client-side filter would see.
+	// 54 padding issues at explicit ascending positions, then the matching
+	// issue at the highest position — genuinely beyond the 50-row first page
+	// (review round 3: without explicit positions everything ties at 0 and
+	// the created_at DESC tie-breaker put the target on page one).
+	setPosition := func(issueID string, position float64) {
+		t.Helper()
+		if _, err := testPool.Exec(context.Background(),
+			`UPDATE issue SET position = $1 WHERE id = $2`, position, issueID); err != nil {
+			t.Fatalf("set position: %v", err)
+		}
+	}
 	for i := 0; i < 54; i++ {
-		createPropertyTestIssue(t, fmt.Sprintf("filter pad %02d", i))
+		setPosition(createPropertyTestIssue(t, fmt.Sprintf("filter pad %02d", i)), float64(i))
 	}
 	target := createPropertyTestIssue(t, "filter target beyond page one")
+	setPosition(target, 1000)
 	if w := setIssuePropertyRaw(t, target, sel.ID, hitID); w.Code != http.StatusOK {
 		t.Fatalf("seed select: %d %s", w.Code, w.Body.String())
 	}
@@ -474,6 +484,12 @@ func TestListIssuesPropertyFilterAndSort(t *testing.T) {
 	filterQuery := func(defID string, values ...string) string {
 		buf, _ := json.Marshal(map[string][]string{defID: values})
 		return "?limit=50&properties=" + url.QueryEscape(string(buf))
+	}
+
+	// Preconditions: the UNFILTERED first page must not contain the target
+	// (otherwise the assertions below prove nothing about windowing).
+	if _, present := ids(listIssues("?limit=50&sort=position&status=todo"))[target]; present {
+		t.Fatalf("windowing precondition broken: target already on the unfiltered first page")
 	}
 
 	// Select filter finds the issue past the 50-row window.
