@@ -118,14 +118,18 @@ func (q *Queries) DeletePendingGitHubInstallation(ctx context.Context, installat
 const drainPendingCheckSuitesForPR = `-- name: DrainPendingCheckSuitesForPR :many
 DELETE FROM github_pending_check_suite
 WHERE workspace_id = $1
-  AND repo_owner   = $2
-  AND repo_name    = $3
-  AND pr_number    = $4
+  AND provider     = $2
+  AND base_host    = $3
+  AND repo_owner   = $4
+  AND repo_name    = $5
+  AND pr_number    = $6
 RETURNING suite_id, head_sha, app_id, conclusion, status, suite_updated_at
 `
 
 type DrainPendingCheckSuitesForPRParams struct {
 	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	Provider    string      `json:"provider"`
+	BaseHost    string      `json:"base_host"`
 	RepoOwner   string      `json:"repo_owner"`
 	RepoName    string      `json:"repo_name"`
 	PrNumber    int32       `json:"pr_number"`
@@ -147,6 +151,8 @@ type DrainPendingCheckSuitesForPRRow struct {
 func (q *Queries) DrainPendingCheckSuitesForPR(ctx context.Context, arg DrainPendingCheckSuitesForPRParams) ([]DrainPendingCheckSuitesForPRRow, error) {
 	rows, err := q.db.Query(ctx, drainPendingCheckSuitesForPR,
 		arg.WorkspaceID,
+		arg.Provider,
+		arg.BaseHost,
 		arg.RepoOwner,
 		arg.RepoName,
 		arg.PrNumber,
@@ -199,12 +205,15 @@ func (q *Queries) GetGitHubInstallationByID(ctx context.Context, id pgtype.UUID)
 }
 
 const getGitHubPullRequest = `-- name: GetGitHubPullRequest :one
-SELECT id, workspace_id, installation_id, repo_owner, repo_name, pr_number, title, state, html_url, branch, author_login, author_avatar_url, merged_at, closed_at, pr_created_at, pr_updated_at, created_at, updated_at, head_sha, mergeable_state, additions, deletions, changed_files FROM github_pull_request
-WHERE workspace_id = $1 AND repo_owner = $2 AND repo_name = $3 AND pr_number = $4
+SELECT id, workspace_id, installation_id, repo_owner, repo_name, pr_number, title, state, html_url, branch, author_login, author_avatar_url, merged_at, closed_at, pr_created_at, pr_updated_at, created_at, updated_at, head_sha, mergeable_state, additions, deletions, changed_files, provider, base_host FROM github_pull_request
+WHERE workspace_id = $1 AND provider = $2 AND base_host = $3
+  AND repo_owner = $4 AND repo_name = $5 AND pr_number = $6
 `
 
 type GetGitHubPullRequestParams struct {
 	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	Provider    string      `json:"provider"`
+	BaseHost    string      `json:"base_host"`
 	RepoOwner   string      `json:"repo_owner"`
 	RepoName    string      `json:"repo_name"`
 	PrNumber    int32       `json:"pr_number"`
@@ -213,6 +222,8 @@ type GetGitHubPullRequestParams struct {
 func (q *Queries) GetGitHubPullRequest(ctx context.Context, arg GetGitHubPullRequestParams) (GithubPullRequest, error) {
 	row := q.db.QueryRow(ctx, getGitHubPullRequest,
 		arg.WorkspaceID,
+		arg.Provider,
+		arg.BaseHost,
 		arg.RepoOwner,
 		arg.RepoName,
 		arg.PrNumber,
@@ -242,6 +253,8 @@ func (q *Queries) GetGitHubPullRequest(ctx context.Context, arg GetGitHubPullReq
 		&i.Additions,
 		&i.Deletions,
 		&i.ChangedFiles,
+		&i.Provider,
+		&i.BaseHost,
 	)
 	return i, err
 }
@@ -693,19 +706,19 @@ func (q *Queries) UpdateGitHubInstallationAccountByInstallationID(ctx context.Co
 const upsertGitHubPullRequest = `-- name: UpsertGitHubPullRequest :one
 
 INSERT INTO github_pull_request (
-    workspace_id, installation_id, repo_owner, repo_name, pr_number,
+    workspace_id, provider, base_host, installation_id, repo_owner, repo_name, pr_number,
     title, state, html_url, branch, author_login, author_avatar_url,
     merged_at, closed_at, pr_created_at, pr_updated_at,
     head_sha, mergeable_state,
     additions, deletions, changed_files
 ) VALUES (
-    $1, $2, $3, $4, $5,
-    $6, $7, $8, $15, $16, $17,
-    $18, $19, $9, $10,
-    $11, $20,
-    $12, $13, $14
+    $1, $2, $3, $4, $5, $6, $7,
+    $8, $9, $10, $17, $18, $19,
+    $20, $21, $11, $12,
+    $13, $22,
+    $14, $15, $16
 )
-ON CONFLICT (workspace_id, repo_owner, repo_name, pr_number) DO UPDATE SET
+ON CONFLICT (workspace_id, provider, base_host, repo_owner, repo_name, pr_number) DO UPDATE SET
     installation_id = EXCLUDED.installation_id,
     title = EXCLUDED.title,
     state = EXCLUDED.state,
@@ -718,7 +731,7 @@ ON CONFLICT (workspace_id, repo_owner, repo_name, pr_number) DO UPDATE SET
     pr_updated_at = EXCLUDED.pr_updated_at,
     head_sha = EXCLUDED.head_sha,
     mergeable_state = CASE
-        WHEN COALESCE($21::boolean, FALSE) THEN NULL
+        WHEN COALESCE($23::boolean, FALSE) THEN NULL
         WHEN EXCLUDED.mergeable_state IS NOT NULL THEN EXCLUDED.mergeable_state
         ELSE github_pull_request.mergeable_state
     END,
@@ -726,11 +739,13 @@ ON CONFLICT (workspace_id, repo_owner, repo_name, pr_number) DO UPDATE SET
     deletions     = EXCLUDED.deletions,
     changed_files = EXCLUDED.changed_files,
     updated_at = now()
-RETURNING id, workspace_id, installation_id, repo_owner, repo_name, pr_number, title, state, html_url, branch, author_login, author_avatar_url, merged_at, closed_at, pr_created_at, pr_updated_at, created_at, updated_at, head_sha, mergeable_state, additions, deletions, changed_files
+RETURNING id, workspace_id, installation_id, repo_owner, repo_name, pr_number, title, state, html_url, branch, author_login, author_avatar_url, merged_at, closed_at, pr_created_at, pr_updated_at, created_at, updated_at, head_sha, mergeable_state, additions, deletions, changed_files, provider, base_host
 `
 
 type UpsertGitHubPullRequestParams struct {
 	WorkspaceID         pgtype.UUID        `json:"workspace_id"`
+	Provider            string             `json:"provider"`
+	BaseHost            string             `json:"base_host"`
 	InstallationID      int64              `json:"installation_id"`
 	RepoOwner           string             `json:"repo_owner"`
 	RepoName            string             `json:"repo_name"`
@@ -769,6 +784,8 @@ type UpsertGitHubPullRequestParams struct {
 func (q *Queries) UpsertGitHubPullRequest(ctx context.Context, arg UpsertGitHubPullRequestParams) (GithubPullRequest, error) {
 	row := q.db.QueryRow(ctx, upsertGitHubPullRequest,
 		arg.WorkspaceID,
+		arg.Provider,
+		arg.BaseHost,
 		arg.InstallationID,
 		arg.RepoOwner,
 		arg.RepoName,
@@ -815,6 +832,8 @@ func (q *Queries) UpsertGitHubPullRequest(ctx context.Context, arg UpsertGitHubP
 		&i.Additions,
 		&i.Deletions,
 		&i.ChangedFiles,
+		&i.Provider,
+		&i.BaseHost,
 	)
 	return i, err
 }
@@ -822,13 +841,13 @@ func (q *Queries) UpsertGitHubPullRequest(ctx context.Context, arg UpsertGitHubP
 const upsertPendingCheckSuite = `-- name: UpsertPendingCheckSuite :exec
 
 INSERT INTO github_pending_check_suite (
-    workspace_id, installation_id, repo_owner, repo_name, pr_number,
+    workspace_id, provider, base_host, installation_id, repo_owner, repo_name, pr_number,
     suite_id, head_sha, app_id, conclusion, status, suite_updated_at
 ) VALUES (
-    $1, $2, $3, $4, $5,
-    $6, $7, $8, $11, $9, $10
+    $1, $2, $3, $4, $5, $6, $7,
+    $8, $9, $10, $13, $11, $12
 )
-ON CONFLICT (workspace_id, repo_owner, repo_name, pr_number, suite_id) DO UPDATE SET
+ON CONFLICT (workspace_id, provider, base_host, repo_owner, repo_name, pr_number, suite_id) DO UPDATE SET
     installation_id  = EXCLUDED.installation_id,
     head_sha         = EXCLUDED.head_sha,
     app_id           = EXCLUDED.app_id,
@@ -841,6 +860,8 @@ WHERE EXCLUDED.suite_updated_at >= github_pending_check_suite.suite_updated_at
 
 type UpsertPendingCheckSuiteParams struct {
 	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
+	Provider       string             `json:"provider"`
+	BaseHost       string             `json:"base_host"`
 	InstallationID int64              `json:"installation_id"`
 	RepoOwner      string             `json:"repo_owner"`
 	RepoName       string             `json:"repo_name"`
@@ -866,6 +887,8 @@ type UpsertPendingCheckSuiteParams struct {
 func (q *Queries) UpsertPendingCheckSuite(ctx context.Context, arg UpsertPendingCheckSuiteParams) error {
 	_, err := q.db.Exec(ctx, upsertPendingCheckSuite,
 		arg.WorkspaceID,
+		arg.Provider,
+		arg.BaseHost,
 		arg.InstallationID,
 		arg.RepoOwner,
 		arg.RepoName,

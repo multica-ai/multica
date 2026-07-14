@@ -90,19 +90,19 @@ SELECT * FROM github_pending_installation WHERE installation_id = $1
 --      information that GitHub only re-computes lazily.
 -- INSERT path always writes the incoming value (NULL acceptable for a new row).
 INSERT INTO github_pull_request (
-    workspace_id, installation_id, repo_owner, repo_name, pr_number,
+    workspace_id, provider, base_host, installation_id, repo_owner, repo_name, pr_number,
     title, state, html_url, branch, author_login, author_avatar_url,
     merged_at, closed_at, pr_created_at, pr_updated_at,
     head_sha, mergeable_state,
     additions, deletions, changed_files
 ) VALUES (
-    $1, $2, $3, $4, $5,
-    $6, $7, $8, sqlc.narg('branch'), sqlc.narg('author_login'), sqlc.narg('author_avatar_url'),
-    sqlc.narg('merged_at'), sqlc.narg('closed_at'), $9, $10,
-    $11, sqlc.narg('mergeable_state'),
-    $12, $13, $14
+    $1, $2, $3, $4, $5, $6, $7,
+    $8, $9, $10, sqlc.narg('branch'), sqlc.narg('author_login'), sqlc.narg('author_avatar_url'),
+    sqlc.narg('merged_at'), sqlc.narg('closed_at'), $11, $12,
+    $13, sqlc.narg('mergeable_state'),
+    $14, $15, $16
 )
-ON CONFLICT (workspace_id, repo_owner, repo_name, pr_number) DO UPDATE SET
+ON CONFLICT (workspace_id, provider, base_host, repo_owner, repo_name, pr_number) DO UPDATE SET
     installation_id = EXCLUDED.installation_id,
     title = EXCLUDED.title,
     state = EXCLUDED.state,
@@ -127,7 +127,8 @@ RETURNING *;
 
 -- name: GetGitHubPullRequest :one
 SELECT * FROM github_pull_request
-WHERE workspace_id = $1 AND repo_owner = $2 AND repo_name = $3 AND pr_number = $4;
+WHERE workspace_id = $1 AND provider = $2 AND base_host = $3
+  AND repo_owner = $4 AND repo_name = $5 AND pr_number = $6;
 
 -- name: ListPullRequestsByIssue :many
 -- Returns the issue's linked PRs with the aggregated check-suite counts for
@@ -268,13 +269,13 @@ WHERE EXCLUDED.updated_at >= github_pull_request_check_suite.updated_at;
 -- suite_updated_at guard mirrors UpsertPullRequestCheckSuite so an older
 -- event arriving after a newer one cannot overwrite the newer payload.
 INSERT INTO github_pending_check_suite (
-    workspace_id, installation_id, repo_owner, repo_name, pr_number,
+    workspace_id, provider, base_host, installation_id, repo_owner, repo_name, pr_number,
     suite_id, head_sha, app_id, conclusion, status, suite_updated_at
 ) VALUES (
-    $1, $2, $3, $4, $5,
-    $6, $7, $8, sqlc.narg('conclusion'), $9, $10
+    $1, $2, $3, $4, $5, $6, $7,
+    $8, $9, $10, sqlc.narg('conclusion'), $11, $12
 )
-ON CONFLICT (workspace_id, repo_owner, repo_name, pr_number, suite_id) DO UPDATE SET
+ON CONFLICT (workspace_id, provider, base_host, repo_owner, repo_name, pr_number, suite_id) DO UPDATE SET
     installation_id  = EXCLUDED.installation_id,
     head_sha         = EXCLUDED.head_sha,
     app_id           = EXCLUDED.app_id,
@@ -291,9 +292,11 @@ WHERE EXCLUDED.suite_updated_at >= github_pending_check_suite.suite_updated_at;
 -- handlers racing on the same PR can't double-apply the same row.
 DELETE FROM github_pending_check_suite
 WHERE workspace_id = $1
-  AND repo_owner   = $2
-  AND repo_name    = $3
-  AND pr_number    = $4
+  AND provider     = $2
+  AND base_host    = $3
+  AND repo_owner   = $4
+  AND repo_name    = $5
+  AND pr_number    = $6
 RETURNING suite_id, head_sha, app_id, conclusion, status, suite_updated_at;
 
 -- =====================

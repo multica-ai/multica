@@ -445,6 +445,8 @@ type GithubPendingCheckSuite struct {
 	Status         string             `json:"status"`
 	SuiteUpdatedAt pgtype.Timestamptz `json:"suite_updated_at"`
 	ReceivedAt     pgtype.Timestamptz `json:"received_at"`
+	Provider       string             `json:"provider"`
+	BaseHost       string             `json:"base_host"`
 }
 
 type GithubPendingInstallation struct {
@@ -480,6 +482,8 @@ type GithubPullRequest struct {
 	Additions       int32              `json:"additions"`
 	Deletions       int32              `json:"deletions"`
 	ChangedFiles    int32              `json:"changed_files"`
+	Provider        string             `json:"provider"`
+	BaseHost        string             `json:"base_host"`
 }
 
 type GithubPullRequestCheckSuite struct {

@@ -312,6 +312,8 @@ func TestWebhook_MergedPR_AdvancesLinkedIssueToDone(t *testing.T) {
 	// Verify PR row + link + issue status.
 	pr, err := testHandler.Queries.GetGitHubPullRequest(ctx, db.GetGitHubPullRequestParams{
 		WorkspaceID: parseUUID(testWorkspaceID),
+		Provider:    "github",
+		BaseHost:    "github.com",
 		RepoOwner:   "acme",
 		RepoName:    "widget",
 		PrNumber:    1234,
@@ -2911,12 +2913,12 @@ func TestWebhook_PullRequest_FansOutToBoundWorkspaces(t *testing.T) {
 
 	// The PR must be mirrored in BOTH bound workspaces.
 	if _, err := testHandler.Queries.GetGitHubPullRequest(ctx, db.GetGitHubPullRequestParams{
-		WorkspaceID: parseUUID(testWorkspaceID), RepoOwner: "acme", RepoName: repo, PrNumber: prNumber,
+		WorkspaceID: parseUUID(testWorkspaceID), Provider: "github", BaseHost: "github.com", RepoOwner: "acme", RepoName: repo, PrNumber: prNumber,
 	}); err != nil {
 		t.Fatalf("expected PR mirrored in workspace B: %v", err)
 	}
 	prA, err := testHandler.Queries.GetGitHubPullRequest(ctx, db.GetGitHubPullRequestParams{
-		WorkspaceID: wsA.ID, RepoOwner: "acme", RepoName: repo, PrNumber: prNumber,
+		WorkspaceID: wsA.ID, Provider: "github", BaseHost: "github.com", RepoOwner: "acme", RepoName: repo, PrNumber: prNumber,
 	})
 	if err != nil {
 		t.Fatalf("expected PR fanned out to workspace A: %v", err)
@@ -3007,13 +3009,13 @@ func TestWebhook_CheckSuite_FansOutToBoundWorkspaces(t *testing.T) {
 	}
 
 	prA, err := testHandler.Queries.GetGitHubPullRequest(ctx, db.GetGitHubPullRequestParams{
-		WorkspaceID: wsA.ID, RepoOwner: "acme", RepoName: repo, PrNumber: prNumber,
+		WorkspaceID: wsA.ID, Provider: "github", BaseHost: "github.com", RepoOwner: "acme", RepoName: repo, PrNumber: prNumber,
 	})
 	if err != nil {
 		t.Fatalf("workspace A: expected PR mirrored: %v", err)
 	}
 	prB, err := testHandler.Queries.GetGitHubPullRequest(ctx, db.GetGitHubPullRequestParams{
-		WorkspaceID: wsB.ID, RepoOwner: "acme", RepoName: repo, PrNumber: prNumber,
+		WorkspaceID: wsB.ID, Provider: "github", BaseHost: "github.com", RepoOwner: "acme", RepoName: repo, PrNumber: prNumber,
 	})
 	if err != nil {
 		t.Fatalf("workspace B: expected PR mirrored: %v", err)
@@ -3111,13 +3113,13 @@ func TestWebhook_CheckSuite_OutOfOrderFansOutToBoundWorkspaces(t *testing.T) {
 	firePullRequestWebhookWithHead(t, secret, "OOX-1", installationID, repo, prNumber, "opened", head, "")
 
 	prA, err := testHandler.Queries.GetGitHubPullRequest(ctx, db.GetGitHubPullRequestParams{
-		WorkspaceID: wsA.ID, RepoOwner: "acme", RepoName: repo, PrNumber: prNumber,
+		WorkspaceID: wsA.ID, Provider: "github", BaseHost: "github.com", RepoOwner: "acme", RepoName: repo, PrNumber: prNumber,
 	})
 	if err != nil {
 		t.Fatalf("workspace A: expected PR mirrored: %v", err)
 	}
 	prB, err := testHandler.Queries.GetGitHubPullRequest(ctx, db.GetGitHubPullRequestParams{
-		WorkspaceID: wsB.ID, RepoOwner: "acme", RepoName: repo, PrNumber: prNumber,
+		WorkspaceID: wsB.ID, Provider: "github", BaseHost: "github.com", RepoOwner: "acme", RepoName: repo, PrNumber: prNumber,
 	})
 	if err != nil {
 		t.Fatalf("workspace B: expected PR mirrored: %v", err)
