@@ -535,9 +535,10 @@ func (h *Handler) HandleAutopilotWebhook(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// 11. The durable admission point: store the exact response before sending
-	//     it, then wake the worker. If the process exits after this write, the
-	//     queue sweeper still owns the delivery on the next boot.
+	// 11. The queued INSERT above is the durable admission point. Best-effort
+	//     persist the exact acknowledgement for operator correlation, then wake
+	//     the worker. An acknowledgement metadata write failure must not turn an
+	//     already-durable delivery into an HTTP failure.
 	respBody := map[string]any{
 		"status":       "queued",
 		"delivery_id":  uuidToString(delivery.ID),
@@ -550,9 +551,10 @@ func (h *Handler) HandleAutopilotWebhook(w http.ResponseWriter, r *http.Request)
 		ResponseStatus: pgtype.Int4{Int32: http.StatusAccepted, Valid: true},
 		ResponseBody:   pgtype.Text{String: string(bodyJSON), Valid: true},
 	}); err != nil {
-		slog.Error("webhook: persist acknowledgement failed", "delivery_id", uuidToString(delivery.ID), "error", err)
-		writeError(w, http.StatusInternalServerError, "internal error")
-		return
+		slog.Warn("webhook: persist acknowledgement metadata failed",
+			"delivery_id", uuidToString(delivery.ID),
+			"error", err,
+		)
 	}
 	if h.WebhookDeliveryWorker != nil {
 		h.WebhookDeliveryWorker.Notify()

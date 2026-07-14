@@ -48,6 +48,38 @@ func signBody(secret string, body []byte) string {
 	return "sha256=" + hex.EncodeToString(mac.Sum(nil))
 }
 
+func installWebhookAcknowledgementFailure(t *testing.T) {
+	t.Helper()
+	ctx := context.Background()
+	suffix := time.Now().UnixNano()
+	functionName := fmt.Sprintf("webhook_ack_fail_fn_%d", suffix)
+	triggerName := fmt.Sprintf("webhook_ack_fail_%d", suffix)
+	t.Cleanup(func() {
+		testPool.Exec(ctx, fmt.Sprintf(`DROP TRIGGER IF EXISTS %s ON webhook_delivery`, triggerName))
+		testPool.Exec(ctx, fmt.Sprintf(`DROP FUNCTION IF EXISTS %s()`, functionName))
+	})
+
+	if _, err := testPool.Exec(ctx, fmt.Sprintf(`
+CREATE FUNCTION %s() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+	IF NEW.event = 'test.ack_failure' AND NEW.response_status = 202 THEN
+		RAISE EXCEPTION 'forced webhook acknowledgement metadata failure';
+	END IF;
+	RETURN NEW;
+END;
+$$;
+`, functionName)); err != nil {
+		t.Fatalf("install acknowledgement failure function: %v", err)
+	}
+	if _, err := testPool.Exec(ctx, fmt.Sprintf(`
+CREATE TRIGGER %s
+BEFORE UPDATE ON webhook_delivery
+FOR EACH ROW EXECUTE FUNCTION %s();
+`, triggerName, functionName)); err != nil {
+		t.Fatalf("install acknowledgement failure trigger: %v", err)
+	}
+}
+
 // listDeliveries calls ListAutopilotDeliveries and decodes the body.
 func listDeliveries(t *testing.T, apID string) []map[string]any {
 	t.Helper()
@@ -96,6 +128,30 @@ func TestWebhookHandler_PersistsDeliveryOnAccept(t *testing.T) {
 	}
 	if d["signature_status"] != "not_required" {
 		t.Fatalf("expected signature_status=not_required, got %v", d["signature_status"])
+	}
+}
+
+func TestWebhookHandler_AcknowledgementMetadataFailureStillReturns202(t *testing.T) {
+	agentID := createWebhookTestAgent(t, "AckMetadataFailure Agent")
+	apID := createWebhookTestAutopilot(t, agentID, "active", "run_only")
+	trig := createWebhookTriggerViaHandler(t, apID)
+	installWebhookAcknowledgementFailure(t)
+
+	w := postWebhook(t, *trig.WebhookToken, map[string]any{"event": "test.ack_failure"}, map[string]string{
+		"Idempotency-Key": "ack-metadata-failure",
+	})
+	deliveryID := requireQueuedWebhookResponse(t, w)
+	delivery, err := testHandler.Queries.GetWebhookDelivery(context.Background(), parseUUID(deliveryID))
+	if err != nil {
+		t.Fatalf("load durably queued delivery: %v", err)
+	}
+	if delivery.ResponseStatus.Valid || delivery.ResponseBody.Valid {
+		t.Fatalf("forced acknowledgement metadata write unexpectedly succeeded: %#v", delivery)
+	}
+
+	completed := processQueuedWebhookDelivery(t, deliveryID)
+	if completed.Status != deliveryStatusDispatched || !completed.AutopilotRunID.Valid {
+		t.Fatalf("durable delivery did not dispatch after metadata failure: status=%s run=%v", completed.Status, completed.AutopilotRunID.Valid)
 	}
 }
 
@@ -655,6 +711,58 @@ func TestWebhookDeliveryWorker_RecoversExpiredLeaseAndReusesRun(t *testing.T) {
 	}
 	if runCount != 1 || taskCount != 1 {
 		t.Fatalf("recovery duplicated side effects: runs=%d tasks=%d", runCount, taskCount)
+	}
+}
+
+func TestWebhookDeliveryWorker_LeaseOwnershipChangeIsBenign(t *testing.T) {
+	agentID := createWebhookTestAgent(t, "WorkerLeaseChange Agent")
+	apID := createWebhookTestAutopilot(t, agentID, "active", "run_only")
+	trig := createWebhookTriggerViaHandler(t, apID)
+
+	post := postWebhook(t, *trig.WebhookToken, map[string]any{"event": "lease-change"}, map[string]string{
+		"Idempotency-Key": "worker-lease-change",
+	})
+	deliveryID := requireQueuedWebhookResponse(t, post)
+	if _, err := testPool.Exec(context.Background(), `
+		UPDATE webhook_delivery
+		SET lease_token = gen_random_uuid(), lease_expires_at = now() + interval '2 minutes'
+		WHERE id = $1
+	`, deliveryID); err != nil {
+		t.Fatalf("seed first lease: %v", err)
+	}
+	staleClaim, err := testHandler.Queries.GetWebhookDelivery(context.Background(), parseUUID(deliveryID))
+	if err != nil {
+		t.Fatalf("load first lease: %v", err)
+	}
+	if _, err := testPool.Exec(context.Background(), `
+		UPDATE webhook_delivery SET lease_token = gen_random_uuid() WHERE id = $1
+	`, deliveryID); err != nil {
+		t.Fatalf("replace lease owner: %v", err)
+	}
+
+	worker := NewWebhookDeliveryWorker(testHandler)
+	if err := worker.complete(context.Background(), staleClaim, deliveryStatusDispatched, pgtype.UUID{}, ""); err != nil {
+		t.Fatalf("stale complete should be benign: %v", err)
+	}
+	if err := worker.retryOrFail(context.Background(), staleClaim, fmt.Errorf("forced transient failure")); err != nil {
+		t.Fatalf("stale retry should be benign: %v", err)
+	}
+	current, err := testHandler.Queries.GetWebhookDelivery(context.Background(), parseUUID(deliveryID))
+	if err != nil {
+		t.Fatalf("load current owner: %v", err)
+	}
+	if current.Status != deliveryStatusQueued || current.LeaseToken == staleClaim.LeaseToken {
+		t.Fatalf("stale worker mutated the new owner's delivery: %#v", current)
+	}
+}
+
+func TestWebhookDeliveryWorker_RunStopsBoundedPool(t *testing.T) {
+	worker := NewWebhookDeliveryWorker(testHandler)
+	ctx, cancel := context.WithCancel(context.Background())
+	go worker.Run(ctx)
+	cancel()
+	if !worker.WaitWithTimeout(time.Second) {
+		t.Fatal("bounded worker pool did not stop after cancellation")
 	}
 }
 

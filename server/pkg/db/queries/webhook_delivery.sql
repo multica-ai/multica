@@ -52,9 +52,9 @@ WHERE id = $1
 RETURNING *;
 
 -- name: AcknowledgeWebhookDelivery :one
--- Captures the HTTP acknowledgement separately from worker completion. Once
--- this write succeeds, the provider can receive 202 without waiting for the
--- downstream autopilot dispatch.
+-- Best-effort operator metadata for the HTTP acknowledgement. Admission is
+-- already durable once the initial queued row exists, so callers still return
+-- 202 if this metadata-only update fails.
 UPDATE webhook_delivery
 SET response_status = $2,
     response_body = $3,
@@ -65,6 +65,9 @@ RETURNING *;
 -- name: ClaimQueuedWebhookDelivery :one
 -- Claims one due delivery. SKIP LOCKED spreads work across replicas; the
 -- expiring token makes a crashed claim visible to a later sweeper pass.
+-- The lease is a scheduling optimization, not the exactly-once guard: if a
+-- slow dispatch outlives it, uq_autopilot_run_webhook_delivery remains the
+-- final protection against duplicate downstream runs.
 WITH candidate AS (
     SELECT id
     FROM webhook_delivery

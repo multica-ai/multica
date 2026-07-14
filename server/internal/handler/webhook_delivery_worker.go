@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -17,6 +18,7 @@ import (
 const (
 	webhookWorkerPollInterval = time.Second
 	webhookWorkerMaxAttempts  = 5
+	webhookWorkerConcurrency  = 4
 )
 
 // WebhookDeliveryWorker owns queued webhook delivery dispatch. Its queue and
@@ -29,7 +31,11 @@ type WebhookDeliveryWorker struct {
 }
 
 func NewWebhookDeliveryWorker(h *Handler) *WebhookDeliveryWorker {
-	return &WebhookDeliveryWorker{h: h, notify: make(chan struct{}, 1), done: make(chan struct{})}
+	return &WebhookDeliveryWorker{
+		h:      h,
+		notify: make(chan struct{}, webhookWorkerConcurrency),
+		done:   make(chan struct{}),
+	}
 }
 
 func (w *WebhookDeliveryWorker) Notify() {
@@ -42,14 +48,34 @@ func (w *WebhookDeliveryWorker) Notify() {
 	}
 }
 
-// Run polls as a recovery sweeper and also wakes immediately after local
-// ingress. ProcessNext is public to the package so handler tests can drive the
-// durable queue synchronously without starting a goroutine.
+// Run owns a bounded per-process worker pool. SKIP LOCKED distributes queued
+// deliveries across both these workers and other server replicas. ProcessNext
+// is public to the package so handler tests can drive the durable queue
+// synchronously without starting a goroutine.
 func (w *WebhookDeliveryWorker) Run(ctx context.Context) {
-	if w == nil || w.h == nil || w.h.Queries == nil {
+	if w == nil {
 		return
 	}
 	defer close(w.done)
+	if w.h == nil || w.h.Queries == nil {
+		return
+	}
+
+	var workers sync.WaitGroup
+	workers.Add(webhookWorkerConcurrency)
+	for range webhookWorkerConcurrency {
+		go func() {
+			defer workers.Done()
+			w.runLoop(ctx)
+		}()
+	}
+	workers.Wait()
+}
+
+// runLoop polls as a recovery sweeper and also wakes immediately after local
+// ingress. Each loop has its own ticker so an idle pool can fan back out even
+// when burst notifications coalesce.
+func (w *WebhookDeliveryWorker) runLoop(ctx context.Context) {
 	ticker := time.NewTicker(webhookWorkerPollInterval)
 	defer ticker.Stop()
 	for {
@@ -105,6 +131,7 @@ func (w *WebhookDeliveryWorker) ProcessNext(ctx context.Context) (bool, error) {
 				LeaseToken:  delivery.LeaseToken,
 				AvailableAt: pgtype.Timestamptz{Time: time.Now().Add(retryAfter), Valid: true},
 			})
+			_, err = handleWebhookLeaseMutation("defer", delivery, err)
 			return true, err
 		}
 	}
@@ -196,8 +223,13 @@ func (w *WebhookDeliveryWorker) complete(
 	if reason != "" {
 		params.Error = pgtype.Text{String: reason, Valid: true}
 	}
-	if _, err := w.h.Queries.CompleteClaimedWebhookDelivery(ctx, params); err != nil {
-		return fmt.Errorf("complete claimed delivery: %w", err)
+	_, err := w.h.Queries.CompleteClaimedWebhookDelivery(ctx, params)
+	lost, err := handleWebhookLeaseMutation("complete", delivery, err)
+	if err != nil {
+		return err
+	}
+	if lost {
+		return nil
 	}
 	w.h.Metrics.RecordWebhookDelivery(delivery.Provider, status)
 	return nil
@@ -214,8 +246,12 @@ func (w *WebhookDeliveryWorker) retryOrFail(ctx context.Context, delivery db.Web
 		AvailableAt: pgtype.Timestamptz{Time: time.Now().Add(backoff), Valid: true},
 		Error:       pgtype.Text{String: cause.Error(), Valid: true},
 	})
-	if err != nil {
-		return fmt.Errorf("retry claimed delivery after %v: %w", cause, err)
+	lost, mutationErr := handleWebhookLeaseMutation("retry", delivery, err)
+	if mutationErr != nil {
+		return fmt.Errorf("retry claimed delivery after %v: %w", cause, mutationErr)
+	}
+	if lost {
+		return nil
 	}
 	slog.Warn("webhook worker: delivery deferred",
 		"delivery_id", uuidToString(delivery.ID),
@@ -224,4 +260,22 @@ func (w *WebhookDeliveryWorker) retryOrFail(ctx context.Context, delivery db.Web
 		"error", cause,
 	)
 	return nil
+}
+
+// handleWebhookLeaseMutation normalizes the expected race where a slow worker
+// outlives its lease and a new owner has already claimed or completed the row.
+// The new owner is responsible for the terminal transition, so the stale
+// worker must neither emit an error nor record completion metrics.
+func handleWebhookLeaseMutation(operation string, delivery db.WebhookDelivery, err error) (bool, error) {
+	if err == nil {
+		return false, nil
+	}
+	if errors.Is(err, pgx.ErrNoRows) {
+		slog.Debug("webhook worker: lease ownership changed",
+			"operation", operation,
+			"delivery_id", uuidToString(delivery.ID),
+		)
+		return true, nil
+	}
+	return false, fmt.Errorf("%s claimed delivery: %w", operation, err)
 }
