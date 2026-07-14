@@ -598,6 +598,14 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 			trySend(msgCh, msg)
 			trySendString(semanticActivityCh, describeCodexSemanticActivity(msg))
 		},
+		// CEREBRO-PATCH(codex-final-output-only): legacy resolves its final answer at
+		// task_complete, so it replaces the accumulated text rather than appending to it.
+		onFinalOutput: func(text string) {
+			outputMu.Lock()
+			output.Reset()
+			output.WriteString(text)
+			outputMu.Unlock()
+		},
 		onSemanticActivity: func(description string) {
 			b.cfg.Logger.Debug("codex semantic activity observed", "activity", description)
 			trySendString(semanticActivityCh, description)
@@ -1143,10 +1151,17 @@ type codexClient struct {
 	onMessage          func(Message)
 	onSemanticActivity func(description string)
 	onTurnDone         func(aborted bool)
+	// CEREBRO-PATCH(codex-final-output-only): legacy codex/event has no per-message
+	// "final" marker, so the final answer is only known at task_complete. Execute
+	// wires this to replace Result.Output instead of accumulating every message.
+	onFinalOutput func(text string)
 
 	notificationProtocol string // "unknown", "legacy", "raw"
 	turnStarted          bool
 	completedTurnIDs     map[string]bool
+	// CEREBRO-PATCH(codex-final-output-only): last legacy agent_message text, used as
+	// the final-answer fallback when task_complete omits last_agent_message.
+	lastAgentMessage string
 
 	usageMu sync.Mutex
 	usage   TokenUsage // accumulated from turn events
@@ -1401,8 +1416,14 @@ func (c *codexClient) handleEvent(msg map[string]any) {
 		}
 	case "agent_message":
 		text, _ := msg["message"].(string)
-		if text != "" && c.onMessage != nil {
-			c.onMessage(Message{Type: MessageText, Content: text, Final: true})
+		if text != "" {
+			// CEREBRO-PATCH(codex-final-output-only): legacy emits one agent_message per
+			// assistant message, progress preambles included. Stream them for live
+			// activity but never treat them as final — task_complete decides that.
+			c.lastAgentMessage = text
+			if c.onMessage != nil {
+				c.onMessage(Message{Type: MessageText, Content: text, Final: false})
+			}
 		}
 	case "exec_command_begin":
 		callID, _ := msg["call_id"].(string)
@@ -1447,6 +1468,18 @@ func (c *codexClient) handleEvent(msg map[string]any) {
 	case "task_complete":
 		// Extract usage from legacy task_complete if present.
 		c.extractUsageFromMap(msg)
+		// CEREBRO-PATCH(codex-final-output-only): task_complete carries the authoritative
+		// final answer. Fall back to the last agent_message when the field is absent, so
+		// an older codex build still yields output instead of an empty comment.
+		if c.onFinalOutput != nil {
+			final, _ := msg["last_agent_message"].(string)
+			if final == "" {
+				final = c.lastAgentMessage
+			}
+			if final != "" {
+				c.onFinalOutput(final)
+			}
+		}
 		if c.onTurnDone != nil {
 			c.onTurnDone(false)
 		}

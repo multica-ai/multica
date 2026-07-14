@@ -327,6 +327,65 @@ func TestCodexLegacyEventAgentMessage(t *testing.T) {
 	}
 }
 
+// CEREBRO-PATCH(codex-final-output-only): legacy agent_message still streams as live
+// activity but must never be marked final — only task_complete knows the final answer.
+func TestCodexLegacyEventAgentMessageIsNotFinal(t *testing.T) {
+	t.Parallel()
+
+	c, _, _ := newTestCodexClient(t)
+	var got Message
+	c.onMessage = func(msg Message) {
+		if msg.Type == MessageText {
+			got = msg
+		}
+	}
+
+	c.handleLine(`{"jsonrpc":"2.0","method":"codex/event","params":{"msg":{"type":"agent_message","message":"still working"}}}`)
+
+	if got.Content != "still working" {
+		t.Fatalf("expected progress text to stream, got %q", got.Content)
+	}
+	if got.Final {
+		t.Fatal("legacy progress text must not be marked final")
+	}
+}
+
+// CEREBRO-PATCH(codex-final-output-only): task_complete carries the authoritative final
+// answer; it wins over the preceding progress messages.
+func TestCodexLegacyEventTaskCompleteUsesLastAgentMessage(t *testing.T) {
+	t.Parallel()
+
+	c, _, _ := newTestCodexClient(t)
+	var final string
+	c.onFinalOutput = func(text string) { final = text }
+
+	c.handleLine(`{"jsonrpc":"2.0","method":"codex/event","params":{"msg":{"type":"agent_message","message":"still working"}}}`)
+	c.handleLine(`{"jsonrpc":"2.0","method":"codex/event","params":{"msg":{"type":"task_complete","last_agent_message":"Done!"}}}`)
+
+	if final != "Done!" {
+		t.Fatalf("expected final output 'Done!', got %q", final)
+	}
+}
+
+// CEREBRO-PATCH(codex-final-output-only): an older codex build may omit
+// last_agent_message. Falling back to the last agent_message keeps the agent's answer
+// instead of silently completing the task with an empty comment.
+func TestCodexLegacyEventTaskCompleteFallsBackToLastAgentMessage(t *testing.T) {
+	t.Parallel()
+
+	c, _, _ := newTestCodexClient(t)
+	var final string
+	c.onFinalOutput = func(text string) { final = text }
+
+	c.handleLine(`{"jsonrpc":"2.0","method":"codex/event","params":{"msg":{"type":"agent_message","message":"first"}}}`)
+	c.handleLine(`{"jsonrpc":"2.0","method":"codex/event","params":{"msg":{"type":"agent_message","message":"last answer"}}}`)
+	c.handleLine(`{"jsonrpc":"2.0","method":"codex/event","params":{"msg":{"type":"task_complete"}}}`)
+
+	if final != "last answer" {
+		t.Fatalf("expected fallback to last agent_message, got %q", final)
+	}
+}
+
 func TestCodexLegacyEventExecCommand(t *testing.T) {
 	t.Parallel()
 
@@ -1349,6 +1408,124 @@ func TestCodexExecuteLegacyFirstTurnMessageSatisfiesProgress(t *testing.T) {
 	}
 	if result.Output != "legacy alive" {
 		t.Fatalf("expected legacy output, got %q", result.Output)
+	}
+}
+
+// CEREBRO-PATCH(codex-final-output-only): FIR-2930 regression for the issue-run path.
+// Reproduces FIR-2838: a turn whose progress preambles were concatenated into
+// Result.Output and posted as a runtime fallback issue comment. Only the
+// final_answer may reach Result.Output.
+func TestCodexExecuteRawProgressIsNotPostedAsFinalOutput(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+
+	fakePath := writeFakeCodexAppServer(t, ""+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
+		`read line`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thr-fir2930"}}}'`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":3,"result":{}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"thr-fir2930","turn":{"id":"turn-fir2930"}}}'`+"\n"+
+		`sleep 0.05`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"thr-fir2930","item":{"type":"agentMessage","id":"msg-1","text":"I check the issue context first."}}}'`+"\n"+
+		`sleep 0.05`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"thr-fir2930","item":{"type":"agentMessage","id":"msg-2","text":"There is still no reply in the thread."}}}'`+"\n"+
+		`sleep 0.05`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"thr-fir2930","item":{"type":"agentMessage","id":"msg-3","text":"@Jesper Deploy verified.","phase":"final_answer"}}}'`+"\n"+
+		`sleep 0.05`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thr-fir2930","turn":{"id":"turn-fir2930","status":"completed"}}}'`+"\n")
+
+	result := executeFakeCodex(t, fakePath, ExecOptions{
+		Timeout:                   5 * time.Second,
+		SemanticInactivityTimeout: 500 * time.Millisecond,
+	})
+	if result.Status != "completed" {
+		t.Fatalf("expected completed, got status=%q error=%q", result.Status, result.Error)
+	}
+	// The whole point of FIR-2838: neither progress message may survive into the
+	// text the daemon turns into an issue comment.
+	if result.Output != "@Jesper Deploy verified." {
+		t.Fatalf("expected only the final answer in output, got %q", result.Output)
+	}
+}
+
+// CEREBRO-PATCH(codex-final-output-only): FIR-2930 — the legacy codex/event protocol
+// (still spoken by the shipped codex binary) reproduced the same FIR-2838 bug: every
+// agent_message was treated as final and concatenated. task_complete decides the
+// final answer instead.
+func TestCodexExecuteLegacyProgressIsNotPostedAsFinalOutput(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+
+	fakePath := writeFakeCodexAppServer(t, ""+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
+		`read line`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thr-legacy-2930"}}}'`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":3,"result":{}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"codex/event","params":{"msg":{"type":"task_started"}}}'`+"\n"+
+		`sleep 0.05`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"codex/event","params":{"msg":{"type":"agent_message","message":"I check the issue context first."}}}'`+"\n"+
+		`sleep 0.05`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"codex/event","params":{"msg":{"type":"agent_message","message":"There is still no reply in the thread."}}}'`+"\n"+
+		`sleep 0.05`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"codex/event","params":{"msg":{"type":"task_complete","last_agent_message":"@Jesper Deploy verified."}}}'`+"\n")
+
+	result := executeFakeCodex(t, fakePath, ExecOptions{
+		Timeout:                   5 * time.Second,
+		SemanticInactivityTimeout: 500 * time.Millisecond,
+	})
+	if result.Status != "completed" {
+		t.Fatalf("expected completed, got status=%q error=%q", result.Status, result.Error)
+	}
+	if result.Output != "@Jesper Deploy verified." {
+		t.Fatalf("expected only the final answer in output, got %q", result.Output)
+	}
+}
+
+// CEREBRO-PATCH(codex-final-output-only): FIR-2930 — the FIR-2838 comment arrived as one
+// run-on paragraph because separate messages were concatenated. Now that only the single
+// final_answer reaches Result.Output, its own line breaks must survive verbatim into the
+// comment the daemon posts.
+func TestCodexExecuteRawFinalAnswerPreservesLineBreaks(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+
+	fakePath := writeFakeCodexAppServer(t, ""+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
+		`read line`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thr-breaks"}}}'`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":3,"result":{}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"thr-breaks","turn":{"id":"turn-breaks"}}}'`+"\n"+
+		`sleep 0.05`+"\n"+
+		// printf %s (not echo) so the \n stays a literal JSON escape: dash's echo would
+		// expand it into a real newline and split the notification across two lines.
+		`printf '%s\n' '{"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"thr-breaks","item":{"type":"agentMessage","id":"msg-1","text":"@Jesper First line.\n\nSecond line.","phase":"final_answer"}}}'`+"\n"+
+		`sleep 0.05`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thr-breaks","turn":{"id":"turn-breaks","status":"completed"}}}'`+"\n")
+
+	result := executeFakeCodex(t, fakePath, ExecOptions{
+		Timeout:                   5 * time.Second,
+		SemanticInactivityTimeout: 500 * time.Millisecond,
+	})
+	if result.Status != "completed" {
+		t.Fatalf("expected completed, got status=%q error=%q", result.Status, result.Error)
+	}
+	if result.Output != "@Jesper First line.\n\nSecond line." {
+		t.Fatalf("expected line breaks preserved verbatim, got %q", result.Output)
 	}
 }
 
