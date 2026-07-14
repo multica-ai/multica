@@ -461,6 +461,7 @@ function useEditAttachmentState(
     isDragOver,
     dropZoneProps,
     triggerPreview,
+    content,
     suppressedAgentIds,
     toggleSuppressedAgent,
     draftKey,
@@ -656,6 +657,7 @@ function CommentRow({
               <CommentTriggerChips
                 agents={edit.triggerPreview.agents}
                 blocked={edit.triggerPreview.blocked}
+                draftContent={edit.content}
                 suppressedAgentIds={edit.suppressedAgentIds}
                 onToggle={edit.toggleSuppressedAgent}
               />
@@ -947,6 +949,7 @@ function CommentCardImpl({
                     <CommentTriggerChips
                       agents={edit.triggerPreview.agents}
                       blocked={edit.triggerPreview.blocked}
+                      draftContent={edit.content}
                       suppressedAgentIds={edit.suppressedAgentIds}
                       onToggle={edit.toggleSuppressedAgent}
                     />

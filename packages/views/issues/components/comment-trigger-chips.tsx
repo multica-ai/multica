@@ -1,9 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { TriangleAlert } from "lucide-react";
 import type { CommentTriggerPreviewAgent, CommentTriggerOutcome } from "@multica/core/types";
 import { useAgentPresenceDetail } from "@multica/core/agents";
+import { mentionLabelsByTarget } from "@multica/core/issues/comment-trigger-outcomes";
 import { useCurrentWorkspace } from "@multica/core/paths";
 import { ActorAvatar as ActorAvatarBase } from "@multica/ui/components/common/actor-avatar";
 import { AVATAR_SIZE_PX } from "@multica/ui/lib/avatar-size";
@@ -16,6 +17,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@multica/ui/components/
 import { cn } from "@multica/ui/lib/utils";
 import { AgentStatusDot } from "../../common/actor-avatar";
 import { useT } from "../../i18n";
+import { blockedReasonLabel, blockedShortReasonLabel } from "../blocked-trigger-copy";
 
 // One agent renders in full ("Walt will start working", avatar + presence
 // dot, click toggles). Several agents collapse to an overlapping avatar
@@ -33,27 +35,18 @@ const MAX_STACK_HEADS = 4;
 interface CommentTriggerChipsProps {
   agents: CommentTriggerPreviewAgent[];
   // Explicit @agent / @squad mentions that will NOT trigger if posted as-is
-  // (MUL-4525 §2). Shown as a warning chip so the user is not surprised by a
-  // silent no-op after sending.
+  // (MUL-4525 §2). Each renders as a named warning chip so the user sees WHICH
+  // target won't run and why, not a silent no-op after sending.
   blocked?: CommentTriggerOutcome[];
+  // The draft markdown, used only to label each blocked target with the name the
+  // user typed in its mention markup. The server omits blocked target names
+  // (enumeration-safety); this is the user's own text, so it discloses nothing new.
+  draftContent?: string;
   suppressedAgentIds: Set<string>;
   onToggle: (agentId: string) => void;
 }
 
 type IssuesT = ReturnType<typeof useT<"issues">>["t"];
-
-function blockedReasonLabel(reasonCode: string, t: IssuesT): string {
-  switch (reasonCode) {
-    case "invocation_not_allowed":
-      return t(($) => $.comment.trigger_blocked_invocation_not_allowed);
-    case "target_unavailable":
-      return t(($) => $.comment.trigger_blocked_target_unavailable);
-    case "runtime_offline":
-      return t(($) => $.comment.trigger_blocked_runtime_offline);
-    default:
-      return t(($) => $.comment.trigger_blocked_generic);
-  }
-}
 
 function sourceLabel(source: string, t: IssuesT): string {
   switch (source) {
@@ -133,10 +126,14 @@ function TriggerAgentTooltipBody({
 export function CommentTriggerChips({
   agents,
   blocked = [],
+  draftContent = "",
   suppressedAgentIds,
   onToggle,
 }: CommentTriggerChipsProps) {
   const { t } = useT("issues");
+  // Blocked outcomes carry no name (enumeration-safety); recover the label the
+  // user typed from their own draft so each chip can say which target it is.
+  const blockedLabels = useMemo(() => mentionLabelsByTarget(draftContent), [draftContent]);
 
   // Loading and errors render nothing: the preview is an enhancement, and
   // any interim chrome here reads as composer noise.
@@ -164,41 +161,58 @@ export function CommentTriggerChips({
   return (
     <div className="flex flex-wrap items-center gap-1.5">
       {allowed}
-      <BlockedTriggerChip blocked={blocked} t={t} />
+      {blocked.map((outcome) => (
+        <BlockedTriggerChip
+          key={`${outcome.target_type}:${outcome.target_id}`}
+          outcome={outcome}
+          label={blockedLabels.get(`${outcome.target_type}:${outcome.target_id}`)}
+          t={t}
+        />
+      ))}
     </div>
   );
 }
 
+// One blocked mention: named like an allowed chip ("Go"), but with an error
+// indicator and a short reason ("No permission") instead of "will start", so a
+// refused @mention reads as a clear, specific error rather than a vague count.
 function BlockedTriggerChip({
-  blocked,
+  outcome,
+  label,
   t,
 }: {
-  blocked: CommentTriggerOutcome[];
+  outcome: CommentTriggerOutcome;
+  label?: string;
   t: IssuesT;
 }) {
+  const shortReason = blockedShortReasonLabel(outcome.reason_code, t);
   return (
     <Tooltip>
       <TooltipTrigger
         render={
           <span
-            className="inline-flex h-6 min-w-0 max-w-full animate-in fade-in items-center gap-1 rounded-md px-1.5 text-[11px] font-medium text-destructive"
-            aria-label={t(($) => $.comment.trigger_blocked_count, { count: blocked.length })}
+            className="inline-flex h-6 min-w-0 max-w-full animate-in fade-in items-center gap-1.5 rounded-md px-1.5 text-[11px] font-medium text-destructive"
+            aria-label={
+              label
+                ? t(($) => $.comment.trigger_blocked_chip_aria, { name: label, reason: shortReason })
+                : shortReason
+            }
           >
             <TriangleAlert className="size-3 shrink-0" />
-            <span className="truncate">
-              {t(($) => $.comment.trigger_blocked_count, { count: blocked.length })}
-            </span>
+            {label ? (
+              <span className="inline-flex min-w-0 items-center gap-1">
+                <span className="truncate">{label}</span>
+                <span className="shrink-0">·</span>
+                <span className="shrink-0">{shortReason}</span>
+              </span>
+            ) : (
+              <span className="truncate">{shortReason}</span>
+            )}
           </span>
         }
       />
       <TooltipContent side="top" className="max-w-72 text-xs">
-        <div className="space-y-0.5">
-          {blocked.map((outcome) => (
-            <div key={`${outcome.target_type}:${outcome.target_id}`}>
-              {blockedReasonLabel(outcome.reason_code, t)}
-            </div>
-          ))}
-        </div>
+        {blockedReasonLabel(outcome.reason_code, t)}
       </TooltipContent>
     </Tooltip>
   );

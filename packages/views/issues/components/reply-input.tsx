@@ -204,6 +204,7 @@ function ReplyInput({
           <CommentTriggerChips
             agents={triggerPreview.agents}
             blocked={triggerPreview.blocked}
+            draftContent={content}
             suppressedAgentIds={suppressedAgentIds}
             onToggle={toggleSuppressedAgent}
           />

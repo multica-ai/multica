@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   parseCommentTriggerOutcomes,
   unhandledCommentTriggerOutcomes,
+  mentionLabelsByTarget,
+  blockedTriggerLabel,
 } from "./comment-trigger-outcomes";
 
 // MUL-4525 §2: the create/edit comment response's trigger_outcomes drive the
@@ -45,5 +47,33 @@ describe("comment trigger outcomes", () => {
     ];
     const unhandled = unhandledCommentTriggerOutcomes(raw);
     expect(unhandled.map((o) => o.target_id).sort()).toEqual(["empty", "future"]);
+  });
+});
+
+// A blocked outcome carries no name (enumeration-safety), so the composer/toast
+// recover it from the user's own mention markup. `@` prefix is stripped and the
+// map is keyed by `${type}:${id}` to correlate with an outcome's target.
+describe("mentionLabelsByTarget", () => {
+  it("maps each mention target to the label the user typed (strips @)", () => {
+    const content =
+      "[@Go](mention://agent/deadbeef-0001) and [Design Squad](mention://squad/cafef00d-0002) hi";
+    const labels = mentionLabelsByTarget(content);
+    expect(labels.get("agent:deadbeef-0001")).toBe("Go");
+    expect(labels.get("squad:cafef00d-0002")).toBe("Design Squad");
+  });
+
+  it("correlates a blocked outcome to its label, undefined when absent", () => {
+    const labels = mentionLabelsByTarget("[@Go](mention://agent/deadbeef-0001)");
+    expect(
+      blockedTriggerLabel({ target_type: "agent", target_id: "deadbeef-0001" }, labels),
+    ).toBe("Go");
+    expect(
+      blockedTriggerLabel({ target_type: "agent", target_id: "beefdead-9999" }, labels),
+    ).toBeUndefined();
+  });
+
+  it("returns an empty map for content with no mentions", () => {
+    expect(mentionLabelsByTarget("just text").size).toBe(0);
+    expect(mentionLabelsByTarget("").size).toBe(0);
   });
 });
