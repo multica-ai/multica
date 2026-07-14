@@ -207,3 +207,6 @@ jobs:
 
       - name: Validate Agent Office managed region # CEREBRO-PATCH(agent-office-region-ci): FIR-1775 §10 write-gate
         run: bash scripts/validate-agent-office-region.sh
+
+      - name: Validate cloud runtime local Go modules
+        run: bash scripts/cerebro/test-runtime-dockerfile-local-modules.sh

@@ -14,10 +14,11 @@ FROM golang:1.26-alpine AS builder
 RUN apk add --no-cache git
 
 WORKDIR /src
-# server/go.mod has a `replace` directive pointing at ../packages/cerebro-pdf-text,
-# so that module tree must be present before `go mod download` runs.
+# server/go.mod has local `replace` directives, so every referenced module tree
+# must be present before `go mod download` runs.
 COPY server/go.mod server/go.sum ./server/
 COPY packages/cerebro-pdf-text/ ./packages/cerebro-pdf-text/
+COPY packages/cerebro-attachment-text/ ./packages/cerebro-attachment-text/
 RUN cd server && go mod download
 COPY server/ ./server/
 
