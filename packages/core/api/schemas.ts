@@ -290,6 +290,10 @@ const CommentTriggerPreviewAgentSchema = z.object({
   avatar_url: z.string().optional(),
   source: z.string().default(""),
   reason: z.string().default(""),
+  already_pending: z.boolean().default(false),
+  pending_task_id: z.string().optional(),
+  pending_task_status: z.string().optional(),
+  pending_task_age_seconds: z.number().int().nonnegative().optional(),
 }).loose();
 
 export const CommentTriggerPreviewSchema = z.object({

@@ -53,8 +53,10 @@ const (
 )
 
 var (
-	taskPrepareLeaseRefresh = 15 * time.Second
-	taskPrepareLeaseTimeout = 10 * time.Second
+	taskPrepareLeaseRefresh       = 15 * time.Second
+	taskPrepareLeaseTimeout       = 10 * time.Second
+	taskExecutionHeartbeatRefresh = 30 * time.Second
+	taskExecutionHeartbeatTimeout = 10 * time.Second
 )
 
 func taskScopedAuthToken(task Task) (string, error) {
@@ -3642,6 +3644,49 @@ func (d *Daemon) startTaskPrepareLeaseExtender(ctx context.Context, task Task, t
 	}
 }
 
+// startTaskExecutionHeartbeat keeps the server's task-level liveness signal
+// fresh for as long as this runTask invocation remains active. Unlike the
+// daemon runtime heartbeat, this stops when this specific worker returns, so
+// the stale-task sweeper can recover a wedged worker without penalizing other
+// healthy tasks on the same daemon.
+func (d *Daemon) startTaskExecutionHeartbeat(taskID string, taskLog *slog.Logger) func() {
+	heartbeatCtx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	heartbeat := func() {
+		reqCtx, reqCancel := context.WithTimeout(heartbeatCtx, taskExecutionHeartbeatTimeout)
+		err := d.client.HeartbeatTaskExecution(reqCtx, taskID)
+		reqCancel()
+		if err != nil {
+			taskLog.Debug("task execution heartbeat failed", "error", err)
+		}
+	}
+
+	// Mark support immediately. A newly-upgraded daemon can then be watched by
+	// the task-level sweeper without waiting a full refresh interval.
+	heartbeat()
+	go func() {
+		defer close(done)
+		ticker := time.NewTicker(taskExecutionHeartbeatRefresh)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-heartbeatCtx.Done():
+				return
+			case <-ticker.C:
+				heartbeat()
+			}
+		}
+	}()
+
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			cancel()
+			<-done
+		})
+	}
+}
+
 func skillRefKey(source, id string) string {
 	return source + "\x00" + id
 }
@@ -3958,6 +4003,8 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		return TaskResult{}, fmt.Errorf("start task failed: %w", err)
 	}
 	stopPrepareLease()
+	stopTaskHeartbeat := d.startTaskExecutionHeartbeat(task.ID, taskLog)
+	defer stopTaskHeartbeat()
 	_ = d.client.ReportProgress(ctx, task.ID, fmt.Sprintf("Launching %s", provider), 1, 2)
 
 	reused := gateResumeToReusedWorkdir(&task, &taskCtx, env.WorkDir, taskLog)

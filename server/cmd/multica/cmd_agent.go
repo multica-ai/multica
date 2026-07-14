@@ -773,7 +773,7 @@ func runAgentTasks(cmd *cobra.Command, args []string) error {
 		return cli.PrintJSON(os.Stdout, tasks)
 	}
 
-	headers := []string{"ID", "ISSUE_ID", "STATUS", "CREATED_AT"}
+	headers := []string{"ID", "ISSUE_ID", "STATUS", "CREATED_AT", "HEARTBEAT"}
 	rows := make([][]string, 0, len(tasks))
 	for _, t := range tasks {
 		rows = append(rows, []string{
@@ -781,6 +781,7 @@ func runAgentTasks(cmd *cobra.Command, args []string) error {
 			strVal(t, "issue_id"),
 			strVal(t, "status"),
 			strVal(t, "created_at"),
+			strVal(t, "last_heartbeat_at"),
 		})
 	}
 	cli.PrintTable(os.Stdout, headers, rows)

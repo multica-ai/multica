@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"sort"
@@ -989,11 +990,15 @@ type CommentTriggerPreviewResponse struct {
 }
 
 type CommentTriggerAgentResponse struct {
-	ID        string  `json:"id"`
-	Name      string  `json:"name"`
-	AvatarURL *string `json:"avatar_url,omitempty"`
-	Source    string  `json:"source"`
-	Reason    string  `json:"reason"`
+	ID                    string  `json:"id"`
+	Name                  string  `json:"name"`
+	AvatarURL             *string `json:"avatar_url,omitempty"`
+	Source                string  `json:"source"`
+	Reason                string  `json:"reason"`
+	AlreadyPending        bool    `json:"already_pending,omitempty"`
+	PendingTaskID         *string `json:"pending_task_id,omitempty"`
+	PendingTaskStatus     *string `json:"pending_task_status,omitempty"`
+	PendingTaskAgeSeconds *int64  `json:"pending_task_age_seconds,omitempty"`
 }
 
 type commentAgentTriggerSource string
@@ -1067,14 +1072,43 @@ func commentAgentTriggerReason(trigger commentAgentTrigger) string {
 	}
 }
 
-func commentAgentTriggerToResponse(trigger commentAgentTrigger) CommentTriggerAgentResponse {
-	return CommentTriggerAgentResponse{
+func (h *Handler) commentAgentTriggerToResponse(ctx context.Context, issueID pgtype.UUID, trigger commentAgentTrigger) CommentTriggerAgentResponse {
+	resp := CommentTriggerAgentResponse{
 		ID:        uuidToString(trigger.Agent.ID),
 		Name:      trigger.Agent.Name,
 		AvatarURL: textToPtr(trigger.Agent.AvatarUrl),
 		Source:    string(trigger.Source),
 		Reason:    commentAgentTriggerReason(trigger),
 	}
+	if !trigger.AlreadyPending {
+		return resp
+	}
+
+	pending, err := h.Queries.GetPendingTaskForIssueAndAgent(ctx, db.GetPendingTaskForIssueAndAgentParams{
+		IssueID: issueID,
+		AgentID: trigger.Agent.ID,
+	})
+	if err != nil {
+		// The preview must not block a comment because a task was claimed or
+		// completed immediately after trigger computation. Return the normal
+		// trigger rather than exposing stale suppression information.
+		return resp
+	}
+	age := int64(0)
+	if pending.CreatedAt.Valid {
+		age = int64(time.Since(pending.CreatedAt.Time).Seconds())
+		if age < 0 {
+			age = 0
+		}
+	}
+	pendingID := uuidToString(pending.ID)
+	pendingStatus := pending.Status
+	resp.AlreadyPending = true
+	resp.PendingTaskID = &pendingID
+	resp.PendingTaskStatus = &pendingStatus
+	resp.PendingTaskAgeSeconds = &age
+	resp.Reason = fmt.Sprintf("Task %s is already %s (%s old); this comment will join that work.", pendingID, pendingStatus, time.Duration(age)*time.Second)
+	return resp
 }
 
 func (h *Handler) PreviewCommentTriggers(w http.ResponseWriter, r *http.Request) {
@@ -1156,7 +1190,7 @@ func (h *Handler) PreviewCommentTriggers(w http.ResponseWriter, r *http.Request)
 	triggers := h.computeCommentAgentTriggers(r.Context(), issue, content, parentComment, actorType, actorID, opts)
 	resp := CommentTriggerPreviewResponse{Agents: make([]CommentTriggerAgentResponse, 0, len(triggers))}
 	for _, trigger := range triggers {
-		resp.Agents = append(resp.Agents, commentAgentTriggerToResponse(trigger))
+		resp.Agents = append(resp.Agents, h.commentAgentTriggerToResponse(r.Context(), issue.ID, trigger))
 	}
 	writeJSON(w, http.StatusOK, resp)
 }

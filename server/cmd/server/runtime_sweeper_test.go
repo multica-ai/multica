@@ -423,6 +423,76 @@ func TestSweepRunningTaskSkippedWhenRuntimeFresh(t *testing.T) {
 	}
 }
 
+// TestSweepRunningTaskWithStaleExecutionHeartbeatFails proves the scheduler
+// distinguishes one dead worker from a daemon that remains healthy enough to
+// run other tasks. Before task-level heartbeats this row would remain running
+// forever while agent_runtime.last_seen_at stayed fresh.
+func TestSweepRunningTaskWithStaleExecutionHeartbeatFails(t *testing.T) {
+	if testPool == nil {
+		t.Skip("no database connection")
+	}
+
+	issueID, agentID, taskID := setupSweeperTestFixture(t, "running")
+	t.Cleanup(func() { cleanupSweeperFixture(t, issueID, agentID) })
+	if _, err := testPool.Exec(context.Background(), `
+		UPDATE agent_task_queue
+		SET last_heartbeat_at = now() - interval '10 minutes'
+		WHERE id = $1
+	`, taskID); err != nil {
+		t.Fatalf("seed stale task execution heartbeat: %v", err)
+	}
+
+	failedTasks, err := db.New(testPool).FailStaleTasks(context.Background(), db.FailStaleTasksParams{
+		DispatchTimeoutSecs:    300.0,
+		RunningTimeoutSecs:     1.0,
+		TaskHeartbeatStaleSecs: 1.0,
+		RuntimeStaleSecs:       staleThresholdSeconds,
+	})
+	if err != nil {
+		t.Fatalf("FailStaleTasks: %v", err)
+	}
+	for _, task := range failedTasks {
+		if task.ID.Bytes == parseUUIDBytes(taskID) {
+			return
+		}
+	}
+	t.Fatalf("stale execution heartbeat on healthy runtime did not recover task %s", taskID)
+}
+
+// TestSweepRunningTaskWithFreshExecutionHeartbeatSurvives protects valid
+// multi-hour runs. The running timeout is deliberately short in this test; a
+// current task heartbeat is the liveness proof that keeps the row running.
+func TestSweepRunningTaskWithFreshExecutionHeartbeatSurvives(t *testing.T) {
+	if testPool == nil {
+		t.Skip("no database connection")
+	}
+
+	issueID, agentID, taskID := setupSweeperTestFixture(t, "running")
+	t.Cleanup(func() { cleanupSweeperFixture(t, issueID, agentID) })
+	if _, err := testPool.Exec(context.Background(), `
+		UPDATE agent_task_queue
+		SET last_heartbeat_at = now()
+		WHERE id = $1
+	`, taskID); err != nil {
+		t.Fatalf("seed fresh task execution heartbeat: %v", err)
+	}
+
+	failedTasks, err := db.New(testPool).FailStaleTasks(context.Background(), db.FailStaleTasksParams{
+		DispatchTimeoutSecs:    300.0,
+		RunningTimeoutSecs:     1.0,
+		TaskHeartbeatStaleSecs: 60.0,
+		RuntimeStaleSecs:       staleThresholdSeconds,
+	})
+	if err != nil {
+		t.Fatalf("FailStaleTasks: %v", err)
+	}
+	for _, task := range failedTasks {
+		if task.ID.Bytes == parseUUIDBytes(taskID) {
+			t.Fatalf("fresh execution heartbeat must preserve task %s", taskID)
+		}
+	}
+}
+
 // TestSweepRunningTaskKilledWhenRuntimeStale is the companion coverage: with
 // the same wall-clock deadline elapsed, a running task IS killed when its
 // runtime's DB heartbeat is stale (simulates the "runtime lingers online

@@ -412,6 +412,13 @@ func (c *Client) PinTaskSession(ctx context.Context, taskID, sessionID, workDir 
 	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/tasks/%s/session", taskID), body, nil)
 }
 
+// HeartbeatTaskExecution proves that the daemon worker responsible for one
+// running task is still active. It is intentionally independent of the
+// runtime-wide heartbeat because other workers can keep that runtime alive.
+func (c *Client) HeartbeatTaskExecution(ctx context.Context, taskID string) error {
+	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/tasks/%s/heartbeat", taskID), map[string]any{}, nil)
+}
+
 // RecoverOrphans tells the server to fail any dispatched/running tasks the
 // previous daemon process for this runtime left behind. The server will
 // auto-retry eligible tasks.

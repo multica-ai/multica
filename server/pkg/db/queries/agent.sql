@@ -659,6 +659,16 @@ SET session_id = COALESCE(sqlc.narg('session_id'), session_id),
     work_dir  = COALESCE(sqlc.narg('work_dir'), work_dir)
 WHERE id = $1 AND status IN ('dispatched', 'running');
 
+-- name: TouchAgentTaskExecutionHeartbeat :one
+-- A runtime-wide heartbeat only proves its daemon process is alive. The daemon
+-- worker that owns this task renews this timestamp while runTask is still
+-- active, letting the server recover a wedged worker without terminating a
+-- healthy long-running task on that same runtime.
+UPDATE agent_task_queue
+SET last_heartbeat_at = now()
+WHERE id = $1 AND status = 'running'
+RETURNING *;
+
 -- name: RecoverOrphanedTasksForRuntime :many
 -- Called by the daemon at startup. Atomically fails any dispatched/running/
 -- waiting_local_directory task that the prior incarnation of this runtime
@@ -687,23 +697,17 @@ RETURNING *;
 --     daemon between claim and StartTask (see startTaskPrepareLeaseExtender).
 --     A live lease excludes the row.
 --
---   * Running: no per-task lease is renewed once StartTask fires, so we key
---     off the daemon-wide heartbeat instead — `agent_runtime.last_seen_at`,
---     which the daemon bumps every ~15s while it is up. A running task whose
---     runtime is `online` AND whose `last_seen_at` is within
---     @runtime_stale_secs is treated as alive and is NOT killed by this
---     wall-clock backstop, even after `started_at` exceeds the running
---     timeout. This is what lets healthy multi-hour research / training runs
---     survive on self-hosted deployments (MUL-4107): the daemon side is
---     bounded only by inactivity watchdogs (idle / per-tool), so the
---     server-side wall clock must not shadow that with a coarser cap.
+--   * Running: daemon workers that support task execution heartbeats renew
+--     `last_heartbeat_at` while their runTask is active. A stale execution
+--     heartbeat therefore identifies a wedged worker even when the daemon is
+--     still serving other tasks. Legacy daemon tasks have NULL here and retain
+--     the previous runtime-heartbeat fallback during rolling upgrades.
 --
 -- The daemon-dead case is the primary responsibility of `sweepStaleRuntimes`
 -- (which mixes DB `last_seen_at` with the Redis LivenessStore and calls
--- `FailTasksForOfflineRuntimes` in the same tick). The wall-clock branch
--- here is a defensive backstop for pathological cases where a runtime row
--- somehow retains status='online' with a stale DB heartbeat for longer than
--- the wall clock allows.
+-- `FailTasksForOfflineRuntimes` in the same tick). The legacy fallback below
+-- is a defensive backstop for a runtime row that somehow remains online with a
+-- stale DB heartbeat.
 --
 -- runtime_id IS NULL: a running row with no runtime is by definition not
 -- proving liveness, so the wall clock is allowed to fire — same shape as
@@ -726,11 +730,20 @@ WHERE (
    OR (
     status = 'running'
     AND started_at < now() - make_interval(secs => @running_timeout_secs::double precision)
-    AND NOT EXISTS (
-      SELECT 1 FROM agent_runtime r
-      WHERE r.id = agent_task_queue.runtime_id
-        AND r.status = 'online'
-        AND r.last_seen_at >= now() - make_interval(secs => @runtime_stale_secs::double precision)
+    AND (
+      (
+        last_heartbeat_at IS NOT NULL
+        AND last_heartbeat_at < now() - make_interval(secs => @task_heartbeat_stale_secs::double precision)
+      )
+      OR (
+        last_heartbeat_at IS NULL
+        AND NOT EXISTS (
+          SELECT 1 FROM agent_runtime r
+          WHERE r.id = agent_task_queue.runtime_id
+            AND r.status = 'online'
+            AND r.last_seen_at >= now() - make_interval(secs => @runtime_stale_secs::double precision)
+        )
+      )
     )
   )
 RETURNING *;
@@ -824,6 +837,17 @@ WHERE issue_id = $1 AND agent_id = $2 AND status IN ('queued', 'dispatched')
     COALESCE(sqlc.narg('head_sha')::text, '') = ''
     OR context->>'head_sha' = sqlc.narg('head_sha')::text
   );
+
+-- name: GetPendingTaskForIssueAndAgent :one
+-- Returns the concrete task that suppresses a duplicate mention. The comment
+-- composer surfaces its ID, status, and age instead of promising a new run
+-- when the queue already owns that slot.
+SELECT * FROM agent_task_queue
+WHERE issue_id = $1
+  AND agent_id = $2
+  AND status IN ('queued', 'dispatched')
+ORDER BY created_at DESC
+LIMIT 1;
 
 -- name: HasPendingTaskForIssueAndAgentExcludingTriggerComment :one
 -- Same as HasPendingTaskForIssueAndAgent, but ignores tasks triggered by the
