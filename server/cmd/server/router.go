@@ -604,6 +604,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// Wire WS heartbeat after stores are finalized so the WS path uses the
 	// same (possibly Redis-backed) stores as the HTTP path.
 	daemonHub.SetHeartbeatHandler(h.HandleDaemonWSHeartbeat)
+	// WS-first claim (MUL-4257): route daemon:rpc_request frames (e.g.
+	// tasks.claim) through the same handlers as the HTTP endpoints.
+	daemonHub.SetRPCHandler(h.DaemonRPCHandler)
 	health := newServerHealth(pool)
 
 	r := chi.NewRouter()
@@ -734,6 +737,11 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		r.Get("/workspaces/{workspaceId}/runtime-profiles", h.DaemonListRuntimeProfiles)
 
 		r.Post("/runtimes/{runtimeId}/tasks/claim", h.ClaimTaskByRuntime)
+		// Canonical machine-level batch claim (MUL-4257). `/claim` is a
+		// transitional alias; the daemon coordinator targets the canonical
+		// path.
+		r.Post("/tasks/claim", h.ClaimTasksByRuntime)
+		r.Post("/claim", h.ClaimTasksByRuntime)
 		r.Post("/runtimes/{runtimeId}/tasks/{taskId}/prepare-lease", h.ExtendTaskPrepareLease)
 		r.Post("/runtimes/{runtimeId}/tasks/{taskId}/skill-bundles/resolve", h.ResolveTaskSkillBundles)
 		r.Get("/runtimes/{runtimeId}/tasks/pending", h.ListPendingTasksByRuntime)

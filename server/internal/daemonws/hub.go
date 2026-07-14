@@ -30,6 +30,9 @@ type ClientIdentity struct {
 	WorkspaceIDs  []string
 	RuntimeIDs    []string
 	ClientVersion string
+	// Capabilities is the raw X-Client-Capabilities header captured at connect,
+	// so RPC handlers can honor the same capability gating as the HTTP path.
+	Capabilities string
 }
 
 // AuthorizedWorkspaceIDs returns the connection's workspace scope in stable
@@ -89,9 +92,41 @@ type client struct {
 	identity ClientIdentity
 	runtimes map[string]struct{}
 
+	// ctx is cancelled when the connection tears down, so async RPC handlers
+	// stop instead of running against a dead socket. cancel is invoked from
+	// readPump's defer.
+	ctx    context.Context
+	cancel context.CancelFunc
+
+	// sendMu guards sendClosed so a late async send (e.g. an RPC response
+	// goroutine) can never write to the closed send channel. teardown flips
+	// sendClosed under sendMu before closing send.
+	sendMu     sync.Mutex
+	sendClosed bool
+
 	dedupMu  sync.Mutex
 	seenIDs  map[string]struct{}
 	seenList []string
+
+	// rpcSem bounds concurrent RPC handlers for this connection.
+	rpcSem chan struct{}
+}
+
+// trySend delivers frame to the write pump without blocking and without ever
+// writing to a closed channel (safe against concurrent teardown). Returns false
+// when the buffer is full or the connection is closing.
+func (c *client) trySend(frame []byte) bool {
+	c.sendMu.Lock()
+	defer c.sendMu.Unlock()
+	if c.sendClosed {
+		return false
+	}
+	select {
+	case c.send <- frame:
+		return true
+	default:
+		return false
+	}
 }
 
 const eventDedupCapacity = 128
@@ -126,6 +161,18 @@ func (c *client) markSeen(eventID string) bool {
 // the ack and is logged at debug level.
 type HeartbeatHandler func(ctx context.Context, identity ClientIdentity, runtimeID string, supportsBatchImport bool) (*protocol.DaemonHeartbeatAckPayload, error)
 
+// RPCHandler processes a generic daemon:rpc_request (MUL-4257). It dispatches
+// on method (e.g. "tasks.claim"), scoping work to identity (DaemonID +
+// authenticated RuntimeIDs), and returns an HTTP-style status plus a response
+// body OR an error. A returned error is surfaced to the daemon as a non-2xx
+// RPC response so it can fall back to HTTP. The handler runs in its own
+// goroutine, so it must not assume it owns the read pump.
+type RPCHandler func(ctx context.Context, identity ClientIdentity, method string, body json.RawMessage) (status int, respBody json.RawMessage, err error)
+
+// maxInFlightRPCPerClient bounds concurrent RPC handlers per connection so a
+// single daemon cannot fan out unbounded goroutines / DB work over one socket.
+const maxInFlightRPCPerClient = 8
+
 // MessageKindRecorder is the optional metric hook called once per inbound
 // daemon WebSocket frame. kind is the protocol message type with the
 // "daemon:" prefix stripped (e.g. "heartbeat") or the literal "unknown" for
@@ -147,6 +194,9 @@ type Hub struct {
 
 	hbMu        sync.RWMutex
 	onHeartbeat HeartbeatHandler
+
+	rpcMu sync.RWMutex
+	onRPC RPCHandler
 
 	kindMu       sync.RWMutex
 	kindRecorder MessageKindRecorder
@@ -187,6 +237,24 @@ func (h *Hub) heartbeatHandler() HeartbeatHandler {
 	h.hbMu.RLock()
 	defer h.hbMu.RUnlock()
 	return h.onHeartbeat
+}
+
+// SetRPCHandler installs the callback used for daemon:rpc_request frames
+// (MUL-4257). Like SetHeartbeatHandler it is wired after handler construction.
+// A nil handler disables WS RPC — daemons fall back to the HTTP claim endpoint.
+func (h *Hub) SetRPCHandler(fn RPCHandler) {
+	if h == nil {
+		return
+	}
+	h.rpcMu.Lock()
+	h.onRPC = fn
+	h.rpcMu.Unlock()
+}
+
+func (h *Hub) rpcHandler() RPCHandler {
+	h.rpcMu.RLock()
+	defer h.rpcMu.RUnlock()
+	return h.onRPC
 }
 
 // SetMessageKindRecorder installs an optional callback fired exactly once per
@@ -234,7 +302,9 @@ func (h *Hub) HandleWebSocket(w http.ResponseWriter, r *http.Request, identity C
 		send:     make(chan []byte, 16),
 		identity: identity,
 		runtimes: runtimes,
+		rpcSem:   make(chan struct{}, maxInFlightRPCPerClient),
 	}
+	c.ctx, c.cancel = context.WithCancel(context.Background())
 	h.register(c)
 
 	go c.writePump()
@@ -560,7 +630,10 @@ func (h *Hub) unregister(c *client) {
 			}
 		}
 	}
+	c.sendMu.Lock()
+	c.sendClosed = true
 	close(c.send)
+	c.sendMu.Unlock()
 	total := len(h.clients)
 	h.mu.Unlock()
 
@@ -578,11 +651,16 @@ func (h *Hub) unregister(c *client) {
 
 func (c *client) readPump() {
 	defer func() {
+		// Cancel first so async RPC handlers stop before we close the send
+		// channel, then unregister (which marks send closed).
+		c.cancel()
 		c.hub.unregister(c)
 		c.conn.Close()
 	}()
 
-	c.conn.SetReadLimit(4096)
+	// Read limit sized for daemon:rpc_request frames carrying a machine's full
+	// runtime_id set (MUL-4257), well above the tiny heartbeat/wakeup frames.
+	c.conn.SetReadLimit(64 * 1024)
 	c.conn.SetReadDeadline(time.Now().Add(pongWait))
 	c.conn.SetPongHandler(func(string) error {
 		c.conn.SetReadDeadline(time.Now().Add(pongWait))
@@ -620,9 +698,87 @@ func (c *client) handleFrame(raw []byte) {
 	switch msg.Type {
 	case protocol.EventDaemonHeartbeat:
 		c.handleHeartbeatFrame(msg.Payload)
+	case protocol.EventDaemonRPCRequest:
+		c.handleRPCFrame(msg.Payload)
 	default:
 		// Unknown app messages are intentionally ignored for forward
 		// compatibility with future daemon → server message types.
+	}
+}
+
+// handleRPCFrame processes a generic daemon:rpc_request (MUL-4257): it runs the
+// registered RPC handler in its own goroutine (so a DB-bound claim does not
+// stall the read pump or the next heartbeat) and writes back a
+// daemon:rpc_response echoing the request id. A missing handler or a full
+// in-flight slot yields a non-2xx response so the daemon falls back to HTTP.
+func (c *client) handleRPCFrame(raw json.RawMessage) {
+	var req protocol.RPCRequestPayload
+	if err := json.Unmarshal(raw, &req); err != nil {
+		slog.Debug("daemon websocket rpc invalid payload", "error", err, "daemon_id", c.identity.DaemonID)
+		return
+	}
+	if req.RequestID == "" {
+		slog.Debug("daemon websocket rpc missing request_id", "daemon_id", c.identity.DaemonID)
+		return
+	}
+	handler := c.hub.rpcHandler()
+	if handler == nil {
+		c.sendRPCResponse(req.RequestID, http.StatusServiceUnavailable, nil, "rpc handler unavailable")
+		return
+	}
+	// Bound concurrent handlers; if saturated, tell the daemon to fall back
+	// rather than queueing unbounded work on one socket.
+	select {
+	case c.rpcSem <- struct{}{}:
+	default:
+		c.sendRPCResponse(req.RequestID, http.StatusTooManyRequests, nil, "too many in-flight rpc requests")
+		return
+	}
+	go func() {
+		defer func() { <-c.rpcSem }()
+		// Bound server-side execution by the caller's requested budget (in
+		// addition to the connection ctx), so a slow RPC is cancelled — and its
+		// work rolled back — rather than committing after the daemon has already
+		// timed out and fallen back to HTTP (MUL-4257). The daemon waits a grace
+		// period beyond this budget, so a claim that DID commit before the
+		// deadline still reports back in time.
+		hctx := c.ctx
+		if req.TimeoutMs > 0 {
+			var cancel context.CancelFunc
+			hctx, cancel = context.WithTimeout(c.ctx, time.Duration(req.TimeoutMs)*time.Millisecond)
+			defer cancel()
+		}
+		status, body, err := handler(hctx, c.identity, req.Method, req.Body)
+		if err != nil {
+			if status < 400 {
+				status = http.StatusInternalServerError
+			}
+			c.sendRPCResponse(req.RequestID, status, nil, err.Error())
+			return
+		}
+		c.sendRPCResponse(req.RequestID, status, body, "")
+	}()
+}
+
+func (c *client) sendRPCResponse(requestID string, status int, body json.RawMessage, errMsg string) {
+	frame, err := json.Marshal(protocol.Message{
+		Type: protocol.EventDaemonRPCResponse,
+		Payload: mustMarshalRaw(protocol.RPCResponsePayload{
+			RequestID: requestID,
+			Status:    status,
+			Body:      body,
+			Error:     errMsg,
+		}),
+	})
+	if err != nil {
+		slog.Debug("daemon websocket rpc response marshal failed", "error", err)
+		return
+	}
+	if !c.trySend(frame) {
+		// Send buffer full or connection closing — drop the response; the
+		// daemon's per-request timeout fires and it falls back to HTTP.
+		slog.Debug("daemon websocket rpc response dropped",
+			"daemon_id", c.identity.DaemonID, "request_id", requestID)
 	}
 }
 
@@ -680,12 +836,9 @@ func (c *client) handleHeartbeatFrame(raw json.RawMessage) {
 		slog.Debug("daemon websocket heartbeat ack marshal failed", "error", err)
 		return
 	}
-	select {
-	case c.send <- frame:
-	default:
-		// Send buffer is full — slow client. Don't block the read pump; the
-		// next writePump tick or notifyFrame eviction will clean up.
-		slog.Debug("daemon websocket heartbeat ack dropped: send buffer full",
+	if !c.trySend(frame) {
+		// Send buffer full or connection closing — drop; HTTP heartbeat resumes.
+		slog.Debug("daemon websocket heartbeat ack dropped",
 			"daemon_id", c.identity.DaemonID,
 			"runtime_id", payload.RuntimeID)
 	}

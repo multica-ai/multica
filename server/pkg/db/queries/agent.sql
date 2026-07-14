@@ -494,6 +494,30 @@ WHERE id = (
 )
 RETURNING *;
 
+-- name: ReclaimStaleDispatchedTasksForRuntimes :many
+-- Batch variant of ReclaimStaleDispatchedTaskForRuntime (MUL-4257): re-delivers
+-- up to @max_tasks tasks across the whole runtime set in one round trip, so a
+-- machine-level batch claim recovers lost-response dispatches for every runtime
+-- it hosts without one query per runtime. Same eligibility as the singular
+-- query (dispatched, never started, past the recovery window, expired/absent
+-- prepare lease) and the same dispatched_at refresh; only the runtime filter
+-- (= ANY) and the LIMIT (max_tasks instead of 1) differ.
+UPDATE agent_task_queue
+SET dispatched_at = now(),
+    prepare_lease_expires_at = now() + make_interval(secs => @prepare_lease_secs::double precision)
+WHERE id IN (
+    SELECT atq.id FROM agent_task_queue atq
+    WHERE atq.runtime_id = ANY(@runtime_ids::uuid[])
+      AND atq.status = 'dispatched'
+      AND atq.started_at IS NULL
+      AND atq.dispatched_at < now() - make_interval(secs => @claim_recovery_secs::double precision)
+      AND (atq.prepare_lease_expires_at IS NULL OR atq.prepare_lease_expires_at < now())
+    ORDER BY atq.priority DESC, atq.dispatched_at ASC
+    LIMIT @max_tasks::int
+    FOR UPDATE SKIP LOCKED
+)
+RETURNING *;
+
 -- name: ExtendAgentTaskPrepareLease :one
 -- Keeps a dispatched task protected while the daemon resolves/cache/materializes
 -- startup inputs before StartTask. Once the daemon stops extending this short
@@ -927,6 +951,31 @@ ORDER BY priority DESC, created_at ASC;
 UPDATE agent_task_queue
 SET status = 'queued'
 WHERE runtime_id = @runtime_id
+  AND status = 'deferred'
+  AND fire_at <= now()
+RETURNING *;
+
+-- name: ListQueuedClaimCandidatesByRuntimes :many
+-- Batch variant of ListQueuedClaimCandidatesByRuntime (MUL-4257): returns
+-- queued claim candidates across every runtime_id in the input set in ONE round
+-- trip, so a daemon can list candidates for all of its runtimes with a single
+-- query instead of one per runtime. Ordering matches the singular query
+-- (priority, then FIFO) so the batch claim loop keeps the same fairness. The
+-- runtime_id filter is served by the partial index
+-- idx_agent_task_queue_claim_candidates; the cross-runtime ORDER BY still needs
+-- a sort step (each runtime's slice is index-ordered, but merging several
+-- runtimes' rows into one priority/FIFO order is not). The per-machine
+-- candidate set is small, so this is cheap in practice.
+SELECT * FROM agent_task_queue
+WHERE runtime_id = ANY(@runtime_ids::uuid[]) AND status = 'queued'
+ORDER BY priority DESC, created_at ASC;
+
+-- name: PromoteDueDeferredTasksForRuntimes :many
+-- Batch variant of PromoteDueDeferredTasksForRuntime (MUL-4257): promotes all
+-- due deferred tasks across the runtime set in one UPDATE.
+UPDATE agent_task_queue
+SET status = 'queued'
+WHERE runtime_id = ANY(@runtime_ids::uuid[])
   AND status = 'deferred'
   AND fire_at <= now()
 RETURNING *;

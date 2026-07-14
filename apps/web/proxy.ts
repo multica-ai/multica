@@ -4,6 +4,7 @@ import {
   MULTICA_LOCALE_HEADER,
   resolveLocaleFromSignals,
 } from "./lib/locale-routing";
+import { isOfficialMarketingHost } from "./lib/public-host";
 
 // Old workspace-scoped route segments that existed before the URL refactor
 // (pre-#1131). Any URL with these as the FIRST segment is a legacy URL that
@@ -75,7 +76,16 @@ export function proxy(req: NextRequest) {
   }
 
   // --- Root path: redirect logged-in users to their last workspace ---
-  if (pathname === "/" && hasSession && lastSlug) {
+  // The official cloud host also serves the public marketing site. Visiting
+  // https://multica.ai/ must remain a public-site navigation even when a local
+  // desktop/runtime session has fresh auth cookies; explicit app routes such
+  // as /acme/issues and legacy /issues still route to the workspace app.
+  if (
+    pathname === "/" &&
+    hasSession &&
+    lastSlug &&
+    !isOfficialMarketingHost(req.nextUrl.hostname)
+  ) {
     const url = req.nextUrl.clone();
     url.pathname = `/${lastSlug}/issues`;
     return NextResponse.redirect(url);

@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -102,6 +103,9 @@ func (d *Daemon) runTaskWakeupConnection(ctx context.Context, runtimeIDs []strin
 	if d.client.os != "" {
 		headers.Set("X-Client-OS", d.client.os)
 	}
+	// Advertise the same capabilities as the HTTP path so a claim built over
+	// this WS connection gets identical capability gating (MUL-4257).
+	headers.Set("X-Client-Capabilities", daemonClientCapabilities())
 
 	dialer := websocket.Dialer{HandshakeTimeout: 10 * time.Second}
 	conn, _, err := dialer.DialContext(ctx, wsURL, headers)
@@ -140,9 +144,33 @@ func (d *Daemon) runTaskWakeupConnection(ctx context.Context, runtimeIDs []strin
 	if 2*len(runtimeIDs) > writeBufSize {
 		writeBufSize = 2 * len(runtimeIDs)
 	}
-	writes := make(chan []byte, writeBufSize)
+	writes := make(chan *wsOutbound, writeBufSize)
 	writerDone := make(chan struct{})
 	go d.runWSWriter(conn, writes, writerDone)
+
+	// Attach the generic WS RPC sender (MUL-4257) to this connection's write
+	// channel. Guarded so a Call racing teardown never sends on the closed
+	// `writes` channel: teardown flips sendClosed under sendMu before
+	// close(writes), and the sender holds sendMu across its non-blocking send.
+	var sendMu sync.Mutex
+	sendClosed := false
+	d.wsRPC.attach(func(frame []byte) (*wsOutbound, error) {
+		sendMu.Lock()
+		defer sendMu.Unlock()
+		if sendClosed {
+			return nil, errWSRPCUnavailable
+		}
+		item := &wsOutbound{data: frame}
+		select {
+		case writes <- item:
+			return item, nil
+		default:
+			return nil, errWSRPCWriteBufferFull
+		}
+	})
+	// A (re)connect may be a freshly-upgraded server: re-probe the batch claim
+	// route rather than staying on the legacy fallback forever (MUL-4257).
+	d.batchClaimUnsupported.Store(false)
 
 	heartbeatCtx, cancelHeartbeat := context.WithCancel(ctx)
 	hbDone := make(chan struct{})
@@ -167,6 +195,22 @@ func (d *Daemon) runTaskWakeupConnection(ctx context.Context, runtimeIDs []strin
 	// LIFO defer order would close writes before the sender stops, so the
 	// teardown is folded into a single deferred function instead.
 	defer func() {
+		// Close the socket FIRST, before failing pending RPCs. Otherwise a
+		// queued tasks.claim frame would still be flushed to the (on a normal
+		// runtimeSetCh reconnect) still-alive socket AFTER attach(nil) has made
+		// the RPC fall over to HTTP — the server would then commit that WS
+		// claim on top of the HTTP fallback, double-claiming the same free
+		// slots (MUL-4257, Sol-Boy review). With the conn closed here,
+		// runWSWriter's next write errors and it DISCARDS the queue instead of
+		// delivering it.
+		conn.Close()
+		// Detach RPC (fails pending → HTTP fallback, now safe since the queued
+		// frame will be dropped), and flip the send-closed flag under sendMu so
+		// any in-flight guarded send finishes before we close writes.
+		d.wsRPC.attach(nil)
+		sendMu.Lock()
+		sendClosed = true
+		sendMu.Unlock()
 		cancelHeartbeat()
 		<-hbDone
 		close(writes)
@@ -186,11 +230,17 @@ func (d *Daemon) runTaskWakeupConnection(ctx context.Context, runtimeIDs []strin
 // runWSWriter funnels writes from the heartbeat sender (and any future
 // daemon-initiated message) into a single goroutine. gorilla/websocket
 // requires that all WriteMessage calls happen from the same goroutine.
-func (d *Daemon) runWSWriter(conn *websocket.Conn, writes <-chan []byte, done chan<- struct{}) {
+func (d *Daemon) runWSWriter(conn *websocket.Conn, writes <-chan *wsOutbound, done chan<- struct{}) {
 	defer close(done)
-	for frame := range writes {
+	for item := range writes {
+		// Skip frames whose RPC caller already gave up: delivering them after a
+		// fallback would double-claim (MUL-4257). beginWrite also marks the
+		// frame sent so a racing cancel() can no longer reclaim it.
+		if !item.beginWrite() {
+			continue
+		}
 		conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
-		if err := conn.WriteMessage(websocket.TextMessage, frame); err != nil {
+		if err := conn.WriteMessage(websocket.TextMessage, item.data); err != nil {
 			d.logger.Debug("task wakeup websocket write failed", "error", err)
 			conn.Close()
 			// Drain remaining frames so the producers don't block forever
@@ -208,7 +258,7 @@ func (d *Daemon) runWSWriter(conn *websocket.Conn, writes <-chan []byte, done ch
 // to the writer; if the queue is full the heartbeat is dropped (the
 // freshness window is short enough that one missed beat just means HTTP will
 // pick it up next tick).
-func (d *Daemon) runWSHeartbeatSender(ctx context.Context, runtimeIDs []string, writes chan<- []byte) {
+func (d *Daemon) runWSHeartbeatSender(ctx context.Context, runtimeIDs []string, writes chan<- *wsOutbound) {
 	d.sendWSHeartbeats(ctx, runtimeIDs, writes)
 	interval := d.cfg.HeartbeatInterval
 	if interval <= 0 {
@@ -226,7 +276,7 @@ func (d *Daemon) runWSHeartbeatSender(ctx context.Context, runtimeIDs []string, 
 	}
 }
 
-func (d *Daemon) sendWSHeartbeats(ctx context.Context, runtimeIDs []string, writes chan<- []byte) {
+func (d *Daemon) sendWSHeartbeats(ctx context.Context, runtimeIDs []string, writes chan<- *wsOutbound) {
 	for _, rid := range runtimeIDs {
 		if ctx.Err() != nil {
 			return
@@ -240,7 +290,7 @@ func (d *Daemon) sendWSHeartbeats(ctx context.Context, runtimeIDs []string, writ
 			continue
 		}
 		select {
-		case writes <- frame:
+		case writes <- &wsOutbound{data: frame}:
 		case <-ctx.Done():
 			return
 		default:
@@ -333,6 +383,13 @@ func (d *Daemon) readTaskWakeupMessages(conn *websocket.Conn, taskWakeups chan<-
 				continue
 			}
 			d.handleWSHeartbeatAck(context.Background(), &ack)
+		case protocol.EventDaemonRPCResponse:
+			var resp protocol.RPCResponsePayload
+			if err := json.Unmarshal(msg.Payload, &resp); err != nil {
+				d.logger.Debug("ws rpc response invalid payload", "error", err)
+				continue
+			}
+			d.wsRPC.deliver(resp)
 		}
 	}
 }
