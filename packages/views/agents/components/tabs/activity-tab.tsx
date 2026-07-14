@@ -641,13 +641,20 @@ function TaskRow({
             </>
           )}
           {/* Accountable member (MUL-4302 §9): whose behalf this run is on.
-              Avatar-only keeps the meta line tight; renders nothing when the
-              run has no resolved responsible member. */}
-          <AttributionBadge
-            attribution={task.attribution}
-            variant="avatar"
-            className="ml-0.5"
-          />
+              A leading separator keeps the avatar on the same middot rhythm as
+              the rest of the meta line instead of glued to the duration. The
+              guard mirrors the badge's own render condition (avatar-only needs
+              an initiator) so no dangling separator is left for an
+              unattributed run. */}
+          {task.attribution?.initiator && (
+            <>
+              <Sep />
+              <AttributionBadge
+                attribution={task.attribution}
+                variant="avatar"
+              />
+            </>
+          )}
         </div>
       </div>
 
