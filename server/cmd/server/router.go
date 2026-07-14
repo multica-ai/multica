@@ -514,6 +514,22 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		slog.Info("slack integration disabled (MULTICA_SLACK_SECRET_KEY not set)")
 	}
 
+	// Gitea integration (TES-7). MULTICA_GITEA_SECRET_KEY encrypts the stored
+	// PAT at rest; without it the Gitea connection handlers return 503 rather
+	// than persist a plaintext token. Only the at-rest box is needed here — the
+	// connection flow is a direct PAT paste, not a hosted OAuth credential.
+	if giteaKey, err := secretbox.LoadKey("MULTICA_GITEA_SECRET_KEY"); err == nil {
+		box, berr := secretbox.New(giteaKey)
+		if berr != nil {
+			slog.Error("gitea: secretbox.New failed; gitea integration disabled", "error", berr)
+		} else {
+			h.GiteaSecretBox = box
+			slog.Info("gitea integration enabled")
+		}
+	} else {
+		slog.Info("gitea integration disabled (MULTICA_GITEA_SECRET_KEY not set)")
+	}
+
 	// Composio integration (MUL-3720). Gated by COMPOSIO_API_KEY plus the
 	// composio_mcp_apps feature flag. The env var is the project-scoped key the
 	// standalone SDK authenticates Composio with (sent as x-api-key; the project
@@ -829,6 +845,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					// the handler strips the management handle and adds a
 					// can_manage hint so the UI can gate connect/disconnect.
 					r.Get("/github/installations", h.ListGitHubInstallations)
+					// Listing Gitea connections is member-visible for the same
+					// reason as GitHub above; connect/disconnect are admin-only
+					// in the admin group below.
+					r.Get("/gitea/connections", h.ListGiteaConnections)
 					// Custom runtime profiles — listing/reading is member-visible
 					// (the Runtime page renders for everyone; create/edit/delete
 					// are admin-gated below).
@@ -862,6 +882,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Use(middleware.RequireWorkspaceRoleFromURL(queries, "id", "owner", "admin"))
 					r.Get("/github/connect", h.GitHubConnect)
 					r.Delete("/github/installations/{installationId}", h.DeleteGitHubInstallation)
+					// Gitea connect/disconnect (PAT model — no OAuth redirect).
+					r.Post("/gitea/connections", h.GiteaConnect)
+					r.Delete("/gitea/connections/{connectionId}", h.DeleteGiteaConnection)
 				})
 
 				// Lark integration. Every endpoint here only requires

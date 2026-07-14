@@ -130,9 +130,15 @@ const (
 	// GitHub integration events
 	EventGitHubInstallationCreated = "github_installation:created"
 	EventGitHubInstallationDeleted = "github_installation:deleted"
-	EventPullRequestLinked         = "pull_request:linked"
-	EventPullRequestUpdated        = "pull_request:updated"
-	EventPullRequestUnlinked       = "pull_request:unlinked"
+	// Gitea integration events. `created` covers both first connect and
+	// re-connect of the same instance (the UNIQUE on (workspace_id, base_url)
+	// upserts in place); front-ends invalidate the connections query on either.
+	EventGiteaConnectionCreated = "gitea_connection:created"
+	EventGiteaConnectionDeleted = "gitea_connection:deleted"
+
+	EventPullRequestLinked   = "pull_request:linked"
+	EventPullRequestUpdated  = "pull_request:updated"
+	EventPullRequestUnlinked = "pull_request:unlinked"
 
 	// Lark integration events. `created` covers both first-install
 	// (UNIQUE on (workspace_id, agent_id) means at most one row per
