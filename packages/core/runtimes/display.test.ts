@@ -62,7 +62,7 @@ describe("runtimeDisplayLabel", () => {
     ).toBe("evam2");
   });
 
-  it("uses the provider display name, not the raw slug", () => {
+  it("uses the daemon's provider display name for overridden slugs", () => {
     // Trae's slug is `traecli`; the label must read "Trae", matching the
     // no-alias daemon name, not the title-cased slug "Traecli".
     expect(
@@ -72,23 +72,25 @@ describe("runtimeDisplayLabel", () => {
         provider: "traecli",
       }),
     ).toBe("box (Trae)");
-    // Mixed-case families keep their canonical casing.
+  });
+
+  it("first-letter-capitalizes non-overridden slugs, matching the daemon", () => {
+    // The daemon only overrides `traecli`; every other provider is a
+    // first-letter capitalization on both the alias and no-alias paths, so the
+    // label must match to avoid drift (e.g. no-alias name is "Openclaw (host)").
     expect(
       runtimeDisplayLabel({
-        name: "OpenClaw (host)",
+        name: "Openclaw (host)",
         custom_name: "box",
         provider: "openclaw",
       }),
-    ).toBe("box (OpenClaw)");
-  });
-
-  it("title-cases unknown provider slugs as a fallback", () => {
+    ).toBe("box (Openclaw)");
     expect(
       runtimeDisplayLabel({
-        name: "Whatever (host)",
+        name: "Codex (host)",
         custom_name: "box",
-        provider: "somenewcli",
+        provider: "codex",
       }),
-    ).toBe("box (Somenewcli)");
+    ).toBe("box (Codex)");
   });
 });

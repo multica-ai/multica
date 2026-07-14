@@ -32,33 +32,22 @@ export function runtimeDisplayLabel(
 }
 
 /**
- * Human display names for runtime provider slugs. The daemon bakes these into
- * `name` for the no-alias case ("Trae (host)"), so we mirror them here to keep
- * the aliased label consistent — e.g. `traecli` must read "Trae", and mixed-case
- * families like CodeBuddy / OpenCode / OpenClaw must not be flattened by naive
- * title-casing (#5260). Kept in sync with the ProviderLogo switch in
- * packages/views/runtimes/components/provider-logo.tsx.
+ * Provider slugs whose human display name isn't just a capitalization of the
+ * slug. This MUST mirror the daemon's `runtimeDisplayNameOverrides`
+ * (server/internal/daemon/daemon.go): the daemon bakes that display name into
+ * `name` for the no-alias case ("Trae (host)"), so the aliased label has to use
+ * the exact same names or the two paths drift apart (#5260). Only `traecli`
+ * needs an override today — every other provider is a first-letter
+ * capitalization of its slug on both sides. Keep in sync with the daemon map.
  */
 const PROVIDER_DISPLAY_NAMES: Record<string, string> = {
-  claude: "Claude",
-  codebuddy: "CodeBuddy",
-  codex: "Codex",
-  opencode: "OpenCode",
-  openclaw: "OpenClaw",
-  hermes: "Hermes",
-  pi: "Pi",
-  copilot: "Copilot",
-  cursor: "Cursor",
-  kimi: "Kimi",
-  kiro: "Kiro",
-  qoder: "Qoder",
-  antigravity: "Antigravity",
   traecli: "Trae",
 };
 
 /**
- * Map a provider slug to its display name, falling back to a title-cased slug
- * for providers not in the table.
+ * Map a provider slug to its display name, matching the daemon's
+ * providerDisplayName: an explicit override when listed, otherwise the slug
+ * with its first letter capitalized.
  */
 export function providerDisplayName(provider: string): string {
   const known = PROVIDER_DISPLAY_NAMES[provider];
