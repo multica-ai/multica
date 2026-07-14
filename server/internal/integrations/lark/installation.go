@@ -20,6 +20,9 @@ import (
 type InstallationParams struct {
 	WorkspaceID     pgtype.UUID
 	AgentID         pgtype.UUID
+	RuntimeID       pgtype.UUID
+	MemberUserID    pgtype.UUID
+	Kind            InstallationKind
 	AppID           string
 	AppSecret       string // plaintext; encrypted at the service boundary
 	TenantKey       string // optional, "" treated as NULL
@@ -27,6 +30,14 @@ type InstallationParams struct {
 	InstallerUserID pgtype.UUID
 	Region          Region // which cloud (feishu/lark); empty defaults to feishu
 }
+
+type InstallationKind string
+
+const (
+	InstallationKindAgent        InstallationKind = "agent"
+	InstallationKindNotification InstallationKind = "notification"
+	InstallationKindMember       InstallationKind = "member"
+)
 
 // InstallationService creates, refreshes and revokes per-agent Lark
 // installations. It owns the at-rest encryption of `app_secret` so
@@ -64,9 +75,33 @@ func (s *InstallationService) Upsert(ctx context.Context, p InstallationParams) 
 	if err != nil {
 		return db.LarkInstallation{}, fmt.Errorf("encrypt app_secret: %w", err)
 	}
+	if InstallationKindOrDefault(p.Kind) == InstallationKindNotification {
+		return s.queries.UpsertLarkNotificationInstallation(ctx, db.UpsertLarkNotificationInstallationParams{
+			WorkspaceID:        p.WorkspaceID,
+			AppID:              p.AppID,
+			AppSecretEncrypted: sealed,
+			TenantKey:          textOrNull(p.TenantKey),
+			BotOpenID:          p.BotOpenID,
+			InstallerUserID:    p.InstallerUserID,
+			Region:             string(RegionOrDefault(string(p.Region))),
+		})
+	}
+	if InstallationKindOrDefault(p.Kind) == InstallationKindMember {
+		return s.queries.UpsertLarkMemberInstallation(ctx, db.UpsertLarkMemberInstallationParams{
+			WorkspaceID:        p.WorkspaceID,
+			AppID:              p.AppID,
+			AppSecretEncrypted: sealed,
+			TenantKey:          textOrNull(p.TenantKey),
+			BotOpenID:          p.BotOpenID,
+			InstallerUserID:    p.InstallerUserID,
+			Region:             string(RegionOrDefault(string(p.Region))),
+			MemberUserID:       p.MemberUserID,
+		})
+	}
 	return s.queries.UpsertLarkInstallation(ctx, db.UpsertLarkInstallationParams{
 		WorkspaceID:        p.WorkspaceID,
 		AgentID:            p.AgentID,
+		RuntimeID:          p.RuntimeID,
 		AppID:              p.AppID,
 		AppSecretEncrypted: sealed,
 		TenantKey:          textOrNull(p.TenantKey),
@@ -137,8 +172,10 @@ func validateInstallationParams(p InstallationParams) error {
 	switch {
 	case !p.WorkspaceID.Valid:
 		return errors.New("workspace_id is required")
-	case !p.AgentID.Valid:
+	case InstallationKindOrDefault(p.Kind) == InstallationKindAgent && !p.AgentID.Valid:
 		return errors.New("agent_id is required")
+	case InstallationKindOrDefault(p.Kind) == InstallationKindMember && !p.MemberUserID.Valid:
+		return errors.New("member_user_id is required")
 	case !p.InstallerUserID.Valid:
 		return errors.New("installer_user_id is required")
 	case p.AppID == "":
@@ -149,6 +186,15 @@ func validateInstallationParams(p InstallationParams) error {
 		return errors.New("bot_open_id is required")
 	}
 	return nil
+}
+
+func InstallationKindOrDefault(kind InstallationKind) InstallationKind {
+	switch kind {
+	case InstallationKindNotification, InstallationKindMember:
+		return kind
+	default:
+		return InstallationKindAgent
+	}
 }
 
 func textOrNull(s string) pgtype.Text {

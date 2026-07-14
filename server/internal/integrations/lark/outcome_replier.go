@@ -46,7 +46,7 @@ type noopReplier struct {
 
 func (n *noopReplier) Reply(ctx context.Context, inst db.LarkInstallation, msg InboundMessage, res DispatchResult) {
 	switch res.Outcome {
-	case OutcomeNeedsBinding, OutcomeAgentOffline, OutcomeAgentArchived:
+	case OutcomeNeedsBinding, OutcomeAgentOffline, OutcomeAgentArchived, OutcomeIssueCommented:
 		n.log.Warn("lark outcome replier: outbound reply skipped (replier not wired)",
 			"outcome", string(res.Outcome),
 			"installation_id", uuidString(inst.ID),
@@ -193,6 +193,15 @@ func (r *LarkOutcomeReplier) Reply(ctx context.Context, inst db.LarkInstallation
 		}
 	case OutcomeDropped:
 		// OutcomeDropped is informational; no user-visible reply.
+	case OutcomeIssueCommented:
+		if err := r.sendIssueCommented(ctx, inst, msg, res); err != nil {
+			r.log.Warn("lark outcome replier: issue-commented confirmation failed",
+				"installation_id", uuidString(inst.ID),
+				"chat_id", string(msg.ChatID),
+				"issue_id", uuidString(res.IssueID),
+				"err", err.Error(),
+			)
+		}
 	}
 }
 
@@ -262,6 +271,43 @@ func issueCreatedText(res DispatchResult, publicURL string) string {
 		line = fmt.Sprintf("Created %s", identifier)
 	} else {
 		line = fmt.Sprintf("Created %s — %s", identifier, title)
+	}
+	if publicURL == "" {
+		return line
+	}
+	return line + "\n" + strings.TrimRight(publicURL, "/") + "/issues/" + identifier
+}
+
+func (r *LarkOutcomeReplier) sendIssueCommented(ctx context.Context, inst db.LarkInstallation, msg InboundMessage, res DispatchResult) error {
+	if msg.ChatID == "" {
+		return errors.New("missing chat_id")
+	}
+	creds, err := r.installationCredentials(inst)
+	if err != nil {
+		return err
+	}
+	text := issueCommentedText(res, r.publicURL)
+	if _, err := r.client.SendTextMessage(ctx, SendTextParams{
+		InstallationID: creds,
+		ChatID:         msg.ChatID,
+		Text:           text,
+	}); err != nil {
+		return fmt.Errorf("send issue-commented text: %w", err)
+	}
+	return nil
+}
+
+func issueCommentedText(res DispatchResult, publicURL string) string {
+	identifier := res.IssueIdentifier
+	if identifier == "" {
+		identifier = fmt.Sprintf("#%d", res.IssueNumber)
+	}
+	title := strings.TrimSpace(res.IssueTitle)
+	var line string
+	if title == "" {
+		line = fmt.Sprintf("Commented on %s", identifier)
+	} else {
+		line = fmt.Sprintf("Commented on %s — %s", identifier, title)
 	}
 	if publicURL == "" {
 		return line

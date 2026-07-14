@@ -3,11 +3,14 @@ package handler
 import (
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/integrations/lark"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -20,14 +23,18 @@ import (
 // InstallationService.DecryptAppSecret server-side). Likewise, the WS
 // lease columns are omitted; they are runtime state, not API surface.
 type LarkInstallationResponse struct {
-	ID              string  `json:"id"`
-	WorkspaceID     string  `json:"workspace_id"`
-	AgentID         string  `json:"agent_id"`
-	AppID           string  `json:"app_id"`
-	TenantKey       *string `json:"tenant_key,omitempty"`
-	BotOpenID       string  `json:"bot_open_id"`
-	InstallerUserID string  `json:"installer_user_id"`
-	Status          string  `json:"status"`
+	ID                     string   `json:"id"`
+	WorkspaceID            string   `json:"workspace_id"`
+	AgentID                *string  `json:"agent_id,omitempty"`
+	RuntimeID              *string  `json:"runtime_id,omitempty"`
+	MemberUserID           *string  `json:"member_user_id,omitempty"`
+	AppID                  string   `json:"app_id"`
+	TenantKey              *string  `json:"tenant_key,omitempty"`
+	BotOpenID              string   `json:"bot_open_id"`
+	InstallerUserID        string   `json:"installer_user_id"`
+	Status                 string   `json:"status"`
+	InstallationKind       string   `json:"installation_kind"`
+	NotificationEventTypes []string `json:"notification_event_types"`
 	// Region is the Lark cloud this installation lives on: "feishu"
 	// (mainland) or "lark" (international). The UI uses it to render a
 	// badge and to build the correct "Manage in Lark" dev-console host.
@@ -39,23 +46,92 @@ type LarkInstallationResponse struct {
 
 func larkInstallationToResponse(row db.LarkInstallation) LarkInstallationResponse {
 	resp := LarkInstallationResponse{
-		ID:              uuidToString(row.ID),
-		WorkspaceID:     uuidToString(row.WorkspaceID),
-		AgentID:         uuidToString(row.AgentID),
-		AppID:           row.AppID,
-		BotOpenID:       row.BotOpenID,
-		InstallerUserID: uuidToString(row.InstallerUserID),
-		Status:          row.Status,
-		Region:          row.Region,
-		InstalledAt:     row.InstalledAt.Time.UTC().Format(time.RFC3339),
-		CreatedAt:       row.CreatedAt.Time.UTC().Format(time.RFC3339),
-		UpdatedAt:       row.UpdatedAt.Time.UTC().Format(time.RFC3339),
+		ID:                     uuidToString(row.ID),
+		WorkspaceID:            uuidToString(row.WorkspaceID),
+		AppID:                  row.AppID,
+		BotOpenID:              row.BotOpenID,
+		InstallerUserID:        uuidToString(row.InstallerUserID),
+		Status:                 row.Status,
+		InstallationKind:       row.InstallationKind,
+		NotificationEventTypes: row.NotificationEventTypes,
+		Region:                 row.Region,
+		InstalledAt:            row.InstalledAt.Time.UTC().Format(time.RFC3339),
+		CreatedAt:              row.CreatedAt.Time.UTC().Format(time.RFC3339),
+		UpdatedAt:              row.UpdatedAt.Time.UTC().Format(time.RFC3339),
 	}
 	if row.TenantKey.Valid {
 		tk := row.TenantKey.String
 		resp.TenantKey = &tk
 	}
+	if row.AgentID.Valid {
+		id := uuidToString(row.AgentID)
+		resp.AgentID = &id
+	}
+	if row.RuntimeID.Valid {
+		id := uuidToString(row.RuntimeID)
+		resp.RuntimeID = &id
+	}
+	if row.MemberUserID.Valid {
+		id := uuidToString(row.MemberUserID)
+		resp.MemberUserID = &id
+	}
 	return resp
+}
+
+// UpdateLarkNotificationEventsRequest carries the selected notification events.
+type UpdateLarkNotificationEventsRequest struct {
+	EventTypes *[]string `json:"event_types"`
+}
+
+type LarkWorkspaceNotificationPolicyResponse struct {
+	WorkspaceID string   `json:"workspace_id"`
+	EventTypes  []string `json:"event_types"`
+	UpdatedAt   string   `json:"updated_at"`
+}
+
+// UpdateLarkNotificationEvents updates the workspace-wide event policy. It is
+// intentionally independent of any individual member Bot installation.
+func (h *Handler) UpdateLarkNotificationEvents(w http.ResponseWriter, r *http.Request) {
+	wsUUID, ok := parseUUIDOrBadRequest(w, chi.URLParam(r, "id"), "workspace id")
+	if !ok {
+		return
+	}
+
+	var req UpdateLarkNotificationEventsRequest
+	decoder := json.NewDecoder(r.Body)
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if req.EventTypes == nil {
+		writeError(w, http.StatusBadRequest, "event_types is required")
+		return
+	}
+	eventTypes, err := lark.ValidateNotificationEventTypes(*req.EventTypes)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	row, err := h.Queries.UpsertLarkWorkspaceNotificationPolicy(r.Context(), db.UpsertLarkWorkspaceNotificationPolicyParams{
+		WorkspaceID: wsUUID,
+		EventTypes:  eventTypes,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to update lark notification events")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, LarkWorkspaceNotificationPolicyResponse{
+		WorkspaceID: uuidToString(row.WorkspaceID),
+		EventTypes:  row.EventTypes,
+		UpdatedAt:   row.UpdatedAt.Time.UTC().Format(time.RFC3339),
+	})
 }
 
 // ListLarkInstallations (GET /api/workspaces/{id}/lark/installations)
@@ -90,6 +166,10 @@ func (h *Handler) ListLarkInstallations(w http.ResponseWriter, r *http.Request) 
 	if !ok {
 		return
 	}
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
 	rows, err := h.LarkInstallations.ListByWorkspace(r.Context(), wsUUID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list lark installations")
@@ -97,10 +177,24 @@ func (h *Handler) ListLarkInstallations(w http.ResponseWriter, r *http.Request) 
 	}
 	out := make([]LarkInstallationResponse, 0, len(rows))
 	for _, row := range rows {
+		// A member Bot is private to its owner. Agent and legacy workspace
+		// notification Bots remain visible as integration status, but another
+		// member's representative must never appear in this list.
+		if row.InstallationKind == string(lark.InstallationKindMember) && uuidToString(row.MemberUserID) != userID {
+			continue
+		}
 		out = append(out, larkInstallationToResponse(row))
+	}
+	eventTypes := lark.DefaultNotificationEvents()
+	if policy, err := h.Queries.GetLarkWorkspaceNotificationPolicy(r.Context(), wsUUID); err == nil {
+		eventTypes = policy.EventTypes
+	} else if !errors.Is(err, pgx.ErrNoRows) {
+		writeError(w, http.StatusInternalServerError, "failed to load lark notification policy")
+		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"installations":     out,
+		"notification_event_types": eventTypes,
 		"configured":        true,
 		"install_supported": h.LarkRegistration != nil && h.LarkAPIClient != nil && h.LarkAPIClient.IsConfigured(),
 	})
@@ -236,9 +330,11 @@ type BeginLarkInstallResponse struct {
 
 // BeginLarkInstall (POST /api/workspaces/{id}/lark/install/begin)
 // opens a new device-flow registration session against Lark. Admin-only
-// at the router. The agent_id query param picks which Multica Agent
-// the new Bot will be bound to; the agent must belong to this
-// workspace (RegistrationService re-checks that defense-in-depth).
+// at the router. The legacy agent_id query param binds a Bot to an
+// existing Multica Agent. The runtime_id query param is the preferred
+// workspace-settings flow: it picks a local runtime owned by the
+// installer, and RegistrationService creates/reuses the backing Agent
+// during finalization.
 //
 // Returns 503 when the integration is not wired (no at-rest key, no
 // HTTP client, no RegistrationService); the UI hides the bind button
@@ -257,14 +353,17 @@ func (h *Handler) BeginLarkInstall(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	agentIDStr := strings.TrimSpace(r.URL.Query().Get("agent_id"))
-	if agentIDStr == "" {
-		writeError(w, http.StatusBadRequest, "agent_id is required")
+	runtimeIDStr := strings.TrimSpace(r.URL.Query().Get("runtime_id"))
+	if agentIDStr == "" && runtimeIDStr == "" {
+		writeError(w, http.StatusBadRequest, "agent_id or runtime_id is required")
 		return
 	}
-	agentUUID, ok := parseUUIDOrBadRequest(w, agentIDStr, "agent_id")
-	if !ok {
+	if agentIDStr != "" && runtimeIDStr != "" {
+		writeError(w, http.StatusBadRequest, "agent_id and runtime_id are mutually exclusive")
 		return
 	}
+	var agentUUID pgtype.UUID
+	var runtimeUUID pgtype.UUID
 	// region is the cloud the user explicitly chose to bind against —
 	// "feishu" (mainland, accounts.feishu.cn) or "lark" (international,
 	// accounts.larksuite.com). The frontend now exposes two CTAs ("Bind
@@ -285,26 +384,139 @@ func (h *Handler) BeginLarkInstall(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "region must be 'feishu' or 'lark'")
 		return
 	}
-	// Ownership pre-check at the HTTP boundary so a malformed
-	// agent_id surfaces 404 here (not an opaque service error from
-	// inside the service's own re-check).
-	if _, err := h.Queries.GetAgentInWorkspace(r.Context(), db.GetAgentInWorkspaceParams{
-		ID:          agentUUID,
+	initiatorUUID, ok := parseUUIDOrBadRequest(w, userID, "user id")
+	if !ok {
+		return
+	}
+	if agentIDStr != "" {
+		var parsed bool
+		agentUUID, parsed = parseUUIDOrBadRequest(w, agentIDStr, "agent_id")
+		if !parsed {
+			return
+		}
+		// Ownership pre-check at the HTTP boundary so a malformed
+		// agent_id surfaces 404 here (not an opaque service error from
+		// inside the service's own re-check).
+		if _, err := h.Queries.GetAgentInWorkspace(r.Context(), db.GetAgentInWorkspaceParams{
+			ID:          agentUUID,
+			WorkspaceID: wsUUID,
+		}); err != nil {
+			writeError(w, http.StatusNotFound, "agent not found in this workspace")
+			return
+		}
+	} else {
+		var parsed bool
+		runtimeUUID, parsed = parseUUIDOrBadRequest(w, runtimeIDStr, "runtime_id")
+		if !parsed {
+			return
+		}
+		runtime, err := h.Queries.GetAgentRuntimeForWorkspace(r.Context(), db.GetAgentRuntimeForWorkspaceParams{
+			ID:          runtimeUUID,
+			WorkspaceID: wsUUID,
+		})
+		if err != nil || runtime.RuntimeMode != "local" || !runtime.OwnerID.Valid || uuidToString(runtime.OwnerID) != userID {
+			writeError(w, http.StatusNotFound, "runtime not found in this workspace")
+			return
+		}
+	}
+
+	res, err := h.LarkRegistration.BeginInstall(r.Context(), lark.BeginInstallParams{
 		WorkspaceID: wsUUID,
-	}); err != nil {
-		writeError(w, http.StatusNotFound, "agent not found in this workspace")
+		AgentID:     agentUUID,
+		RuntimeID:   runtimeUUID,
+		InitiatorID: initiatorUUID,
+		Region:      lark.Region(regionParam),
+	})
+	if err != nil {
+		writeError(w, http.StatusBadGateway, "failed to start install: "+err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, BeginLarkInstallResponse{
+		SessionID:           res.SessionID,
+		QRCodeURL:           res.QRCodeURL,
+		ExpiresInSeconds:    res.ExpiresInSeconds,
+		PollIntervalSeconds: res.PollIntervalSeconds,
+	})
+}
+
+// BeginLarkNotificationInstall starts the workspace-level notification Bot
+// install flow. Unlike agent Bot installs, it has no agent_id; it exists only
+// to deliver inbox DMs and route quote-replies back to issues.
+func (h *Handler) BeginLarkNotificationInstall(w http.ResponseWriter, r *http.Request) {
+	if h.LarkRegistration == nil {
+		writeError(w, http.StatusServiceUnavailable, "lark install not configured")
+		return
+	}
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+	wsUUID, ok := parseUUIDOrBadRequest(w, chi.URLParam(r, "id"), "workspace id")
+	if !ok {
+		return
+	}
+	regionParam := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("region")))
+	switch regionParam {
+	case "", "feishu", "lark":
+	default:
+		writeError(w, http.StatusBadRequest, "region must be 'feishu' or 'lark'")
 		return
 	}
 	initiatorUUID, ok := parseUUIDOrBadRequest(w, userID, "user id")
 	if !ok {
 		return
 	}
-
 	res, err := h.LarkRegistration.BeginInstall(r.Context(), lark.BeginInstallParams{
 		WorkspaceID: wsUUID,
-		AgentID:     agentUUID,
 		InitiatorID: initiatorUUID,
+		Kind:        lark.InstallationKindNotification,
 		Region:      lark.Region(regionParam),
+	})
+	if err != nil {
+		writeError(w, http.StatusBadGateway, "failed to start install: "+err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, BeginLarkInstallResponse{
+		SessionID:           res.SessionID,
+		QRCodeURL:           res.QRCodeURL,
+		ExpiresInSeconds:    res.ExpiresInSeconds,
+		PollIntervalSeconds: res.PollIntervalSeconds,
+	})
+}
+
+// BeginLarkMemberInstall starts a personal Bot installation for the current
+// workspace member. The device-flow account and the Multica actor are bound
+// atomically at completion, so inbound messages always act as this member.
+func (h *Handler) BeginLarkMemberInstall(w http.ResponseWriter, r *http.Request) {
+	if h.LarkRegistration == nil {
+		writeError(w, http.StatusServiceUnavailable, "lark install not configured")
+		return
+	}
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+	wsUUID, ok := parseUUIDOrBadRequest(w, chi.URLParam(r, "id"), "workspace id")
+	if !ok {
+		return
+	}
+	regionParam := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("region")))
+	switch regionParam {
+	case "", "feishu", "lark":
+	default:
+		writeError(w, http.StatusBadRequest, "region must be 'feishu' or 'lark'")
+		return
+	}
+	memberUUID, ok := parseUUIDOrBadRequest(w, userID, "user id")
+	if !ok {
+		return
+	}
+	res, err := h.LarkRegistration.BeginInstall(r.Context(), lark.BeginInstallParams{
+		WorkspaceID:  wsUUID,
+		InitiatorID:  memberUUID,
+		MemberUserID: memberUUID,
+		Kind:         lark.InstallationKindMember,
+		Region:       lark.Region(regionParam),
 	})
 	if err != nil {
 		writeError(w, http.StatusBadGateway, "failed to start install: "+err.Error())

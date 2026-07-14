@@ -145,6 +145,22 @@ vi.mock("react-qr-code", () => {
   return { QRCode: QrStub, default: QrStub };
 });
 
+vi.mock("./lark-notification-events", () => ({
+  LarkNotificationEvents: ({
+    installation,
+    canManage,
+  }: {
+    installation: { id: string };
+    canManage: boolean;
+  }) => (
+    <div
+      data-testid="lark-notification-events"
+      data-installation-id={installation.id}
+      data-can-manage={String(canManage)}
+    />
+  ),
+}));
+
 import { LarkAgentBindButton, LarkTab } from "./lark-tab";
 import { toast } from "sonner";
 
@@ -744,5 +760,94 @@ describe("LarkTab connected bots list (agent identity rendering)", () => {
     expect(screen.getByText(/Unknown Agent/)).toBeTruthy();
     // Disconnect stays reachable so the orphan row can be cleaned up.
     expect(screen.getByRole("button", { name: /Disconnect/i })).toBeTruthy();
+  });
+});
+
+describe("LarkTab Runtime Bot visibility", () => {
+  beforeEach(resetFixtures);
+
+  it("hides the temporary Runtime Bot settings entry", () => {
+    render(<LarkTab />, { wrapper: I18nWrapper });
+
+    expect(screen.queryByText("Runtime Bot")).toBeNull();
+    expect(screen.queryByRole("combobox", { name: "Select local runtime" })).toBeNull();
+  });
+});
+
+describe("LarkTab notification event settings", () => {
+  beforeEach(resetFixtures);
+
+  it("renders event settings for an active Notification Bot", () => {
+    installationsRef.current.installations = [
+      {
+        id: "notification-installation-1",
+        workspace_id: "workspace-1",
+        app_id: "cli_notification",
+        bot_open_id: "ou_notification",
+        installer_user_id: "user-1",
+        status: "active",
+        installation_kind: "notification",
+        installed_at: "2026-07-13T00:00:00Z",
+        created_at: "2026-07-13T00:00:00Z",
+        updated_at: "2026-07-13T00:00:00Z",
+      },
+    ];
+
+    render(<LarkTab />, { wrapper: I18nWrapper });
+
+    expect(screen.getByTestId("lark-notification-events")).toHaveAttribute(
+      "data-installation-id",
+      "notification-installation-1",
+    );
+    expect(screen.getByTestId("lark-notification-events")).toHaveAttribute(
+      "data-can-manage",
+      "true",
+    );
+  });
+
+  it("passes canManage=false for a regular workspace member", () => {
+    membersRef.current = [{ user_id: "user-1", role: "member" }];
+    installationsRef.current.installations = [
+      {
+        id: "notification-installation-1",
+        workspace_id: "workspace-1",
+        app_id: "cli_notification",
+        bot_open_id: "ou_notification",
+        installer_user_id: "user-1",
+        status: "active",
+        installation_kind: "notification",
+        installed_at: "2026-07-13T00:00:00Z",
+        created_at: "2026-07-13T00:00:00Z",
+        updated_at: "2026-07-13T00:00:00Z",
+      },
+    ];
+
+    render(<LarkTab />, { wrapper: I18nWrapper });
+
+    expect(screen.getByTestId("lark-notification-events")).toHaveAttribute(
+      "data-can-manage",
+      "false",
+    );
+  });
+
+  it("does not render event settings without an active Notification Bot", () => {
+    installationsRef.current.installations = [
+      {
+        id: "notification-installation-revoked",
+        workspace_id: "workspace-1",
+        app_id: "cli_notification",
+        bot_open_id: "ou_notification",
+        installer_user_id: "user-1",
+        status: "revoked",
+        installation_kind: "notification",
+        installed_at: "2026-07-13T00:00:00Z",
+        created_at: "2026-07-13T00:00:00Z",
+        updated_at: "2026-07-13T00:00:00Z",
+      },
+    ];
+
+    render(<LarkTab />, { wrapper: I18nWrapper });
+
+    expect(screen.queryByTestId("lark-notification-events")).toBeNull();
   });
 });

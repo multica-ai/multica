@@ -54,6 +54,10 @@ func (s *stubAPIClientWithRecorder) SendTextMessage(ctx context.Context, p SendT
 	return "lark-text-msg-id", nil
 }
 
+func (s *stubAPIClientWithRecorder) SendDirectTextMessage(ctx context.Context, p SendDirectTextParams) (string, error) {
+	return "", nil
+}
+
 func (s *stubAPIClientWithRecorder) SendMarkdownCard(ctx context.Context, p SendMarkdownCardParams) (string, error) {
 	return "lark-md-msg-id", nil
 }

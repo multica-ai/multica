@@ -36,9 +36,11 @@ RETURNING *;
 -- lifecycle.
 INSERT INTO lark_installation (
     workspace_id, agent_id, app_id, app_secret_encrypted,
-    tenant_key, bot_open_id, bot_union_id, installer_user_id, region
+    tenant_key, bot_open_id, bot_union_id, installer_user_id, region,
+    installation_kind, runtime_id
 ) VALUES (
-    $1, $2, $3, $4, sqlc.narg('tenant_key'), $5, sqlc.narg('bot_union_id'), $6, sqlc.arg('region')
+    $1, $2, $3, $4, sqlc.narg('tenant_key'), $5, sqlc.narg('bot_union_id'), $6, sqlc.arg('region'),
+    'agent', sqlc.narg('runtime_id')
 )
 ON CONFLICT (workspace_id, agent_id) DO UPDATE SET
     app_id               = EXCLUDED.app_id,
@@ -51,6 +53,78 @@ ON CONFLICT (workspace_id, agent_id) DO UPDATE SET
     status               = 'active',
     installed_at         = now(),
     updated_at           = now()
+RETURNING *;
+
+-- name: UpsertLarkNotificationInstallation :one
+-- Workspace-scoped notification Bot. It is stored in lark_installation so
+-- the existing WS hub, lease, binding token, and inbound dispatcher
+-- infrastructure can receive replies from this app too.
+INSERT INTO lark_installation (
+    workspace_id, agent_id, app_id, app_secret_encrypted,
+    tenant_key, bot_open_id, bot_union_id, installer_user_id, region,
+    installation_kind
+) VALUES (
+    $1, NULL, $2, $3, sqlc.narg('tenant_key'), $4, sqlc.narg('bot_union_id'), $5, sqlc.arg('region'),
+    'notification'
+)
+ON CONFLICT (workspace_id) WHERE installation_kind = 'notification' DO UPDATE SET
+    app_id               = EXCLUDED.app_id,
+    app_secret_encrypted = EXCLUDED.app_secret_encrypted,
+    tenant_key           = EXCLUDED.tenant_key,
+    bot_open_id          = EXCLUDED.bot_open_id,
+    bot_union_id         = EXCLUDED.bot_union_id,
+    installer_user_id    = EXCLUDED.installer_user_id,
+    region               = EXCLUDED.region,
+    runtime_id           = EXCLUDED.runtime_id,
+    status               = 'active',
+    installed_at         = now(),
+    updated_at           = now()
+RETURNING *;
+
+-- name: UpsertLarkMemberInstallation :one
+-- Each member owns one personal Bot per workspace. Its app credentials are
+-- refreshed on re-install, while the (workspace_id, member_user_id) partial
+-- unique index prevents one Bot record from being shared by two members.
+INSERT INTO lark_installation (
+    workspace_id, agent_id, app_id, app_secret_encrypted,
+    tenant_key, bot_open_id, bot_union_id, installer_user_id, region,
+    installation_kind, member_user_id
+) VALUES (
+    $1, NULL, $2, $3, sqlc.narg('tenant_key'), $4, sqlc.narg('bot_union_id'), $5, sqlc.arg('region'),
+    'member', $6
+)
+ON CONFLICT (workspace_id, member_user_id) WHERE installation_kind = 'member' DO UPDATE SET
+    app_id               = EXCLUDED.app_id,
+    app_secret_encrypted = EXCLUDED.app_secret_encrypted,
+    tenant_key           = EXCLUDED.tenant_key,
+    bot_open_id          = EXCLUDED.bot_open_id,
+    bot_union_id         = EXCLUDED.bot_union_id,
+    installer_user_id    = EXCLUDED.installer_user_id,
+    region               = EXCLUDED.region,
+    status               = 'active',
+    installed_at         = now(),
+    updated_at           = now()
+RETURNING *;
+
+-- name: UpdateLarkNotificationEventTypes :one
+UPDATE lark_installation
+SET notification_event_types = sqlc.arg('notification_event_types'),
+    updated_at = now()
+WHERE workspace_id = sqlc.arg('workspace_id')
+  AND installation_kind = 'notification'
+  AND status = 'active'
+RETURNING *;
+
+-- name: GetLarkWorkspaceNotificationPolicy :one
+SELECT * FROM lark_workspace_notification_policy
+WHERE workspace_id = $1;
+
+-- name: UpsertLarkWorkspaceNotificationPolicy :one
+INSERT INTO lark_workspace_notification_policy (workspace_id, event_types)
+VALUES ($1, $2)
+ON CONFLICT (workspace_id) DO UPDATE SET
+    event_types = EXCLUDED.event_types,
+    updated_at = now()
 RETURNING *;
 
 -- name: BackfillLarkInstallationRegionToLark :execrows
@@ -191,6 +265,19 @@ WHERE installation_id = $1 AND lark_open_id = $2;
 SELECT * FROM lark_user_binding
 WHERE installation_id = $1
 ORDER BY bound_at DESC;
+
+-- name: GetActiveLarkMemberBindingForWorkspaceUser :one
+-- Picks the active personal member Bot installation where this Multica member
+-- has already bound their Lark identity. Because open_id is
+-- installation-scoped, callers MUST send through this installation.
+SELECT b.* FROM lark_user_binding b
+JOIN lark_installation i ON i.id = b.installation_id
+WHERE b.workspace_id = $1
+  AND b.multica_user_id = $2
+  AND i.status = 'active'
+  AND i.installation_kind = 'member'
+ORDER BY b.bound_at DESC
+LIMIT 1;
 
 -- name: DeleteLarkUserBinding :exec
 DELETE FROM lark_user_binding WHERE id = $1;
@@ -405,3 +492,31 @@ RETURNING *;
 -- handles dedup can sweep these too.
 DELETE FROM lark_binding_token
 WHERE expires_at < $1;
+
+-- =====================
+-- lark_inbox_notification
+-- =====================
+
+-- name: CreateLarkInboxNotification :one
+INSERT INTO lark_inbox_notification (
+    workspace_id, installation_id, inbox_item_id, issue_id,
+    recipient_user_id, lark_open_id, lark_message_id
+) VALUES (
+    $1, $2, $3, $4, $5, $6, $7
+)
+ON CONFLICT (inbox_item_id) DO UPDATE SET
+    installation_id = EXCLUDED.installation_id,
+    lark_open_id = EXCLUDED.lark_open_id,
+    lark_message_id = EXCLUDED.lark_message_id,
+    delivered_at = now()
+RETURNING *;
+
+-- name: GetLarkInboxNotificationByMessage :one
+SELECT * FROM lark_inbox_notification
+WHERE installation_id = $1 AND lark_message_id = $2;
+
+-- name: MarkLarkInboxNotificationReplied :exec
+UPDATE lark_inbox_notification
+SET replied_comment_id = $2,
+    replied_at = now()
+WHERE id = $1;

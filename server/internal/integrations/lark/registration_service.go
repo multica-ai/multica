@@ -129,6 +129,9 @@ type RegistrationService struct {
 // *db.Queries + Postgres fixture.
 type authQueriesAdapter interface {
 	GetAgentInWorkspace(ctx context.Context, params db.GetAgentInWorkspaceParams) (db.Agent, error)
+	GetAgentRuntimeForWorkspace(ctx context.Context, params db.GetAgentRuntimeForWorkspaceParams) (db.AgentRuntime, error)
+	ListAgents(ctx context.Context, workspaceID pgtype.UUID) ([]db.Agent, error)
+	CreateAgent(ctx context.Context, params db.CreateAgentParams) (db.Agent, error)
 }
 
 // NewRegistrationService wires the device-flow client, the APIClient
@@ -212,7 +215,10 @@ type registrationSession struct {
 	id          string
 	workspaceID pgtype.UUID
 	agentID     pgtype.UUID
+	runtimeID   pgtype.UUID
 	initiatorID pgtype.UUID
+	memberUserID pgtype.UUID
+	kind        InstallationKind
 
 	deviceCode string
 	domain     string
@@ -287,7 +293,13 @@ type RegistrationSessionState struct {
 type BeginInstallParams struct {
 	WorkspaceID pgtype.UUID
 	AgentID     pgtype.UUID
+	RuntimeID   pgtype.UUID
 	InitiatorID pgtype.UUID
+	// MemberUserID is required for a member-owned personal Bot. The
+	// handler sets it to InitiatorID, so a member can only install their
+	// own representative rather than choosing another member.
+	MemberUserID pgtype.UUID
+	Kind        InstallationKind
 	// Region picks which cloud's accounts host the device-flow begins
 	// against — Feishu (mainland, accounts.feishu.cn) or Lark
 	// (international, accounts.larksuite.com). The user picks this
@@ -320,8 +332,12 @@ type BeginInstallResult struct {
 // the device_code is server-side only (Lark would honor a poll from
 // anywhere if the device_code leaked, so we never echo it).
 func (s *RegistrationService) BeginInstall(ctx context.Context, p BeginInstallParams) (BeginInstallResult, error) {
-	if !p.WorkspaceID.Valid || !p.AgentID.Valid || !p.InitiatorID.Valid {
-		return BeginInstallResult{}, errors.New("lark registration: workspace, agent, and initiator are required")
+	kind := InstallationKindOrDefault(p.Kind)
+	if !p.WorkspaceID.Valid || !p.InitiatorID.Valid || (kind == InstallationKindAgent && !p.AgentID.Valid && !p.RuntimeID.Valid) || (kind == InstallationKindMember && !p.MemberUserID.Valid) {
+		return BeginInstallResult{}, errors.New("lark registration: workspace, initiator, and agent or runtime for agent installs are required")
+	}
+	if kind == InstallationKindMember && !uuidEqual(p.MemberUserID, p.InitiatorID) {
+		return BeginInstallResult{}, errors.New("lark registration: member install must belong to its initiator")
 	}
 	// Agent ownership pre-check — without this, a workspace admin
 	// could open an install session against another workspace's agent
@@ -332,12 +348,27 @@ func (s *RegistrationService) BeginInstall(ctx context.Context, p BeginInstallPa
 	// We keep the agent: its name pre-fills the bot name on Lark's
 	// PersonalAgent creation form (see botNamePreset) so the installed
 	// bot reads "<agent> - Multica" instead of "{用户姓名}的智能助手".
-	agent, err := s.authQueries.GetAgentInWorkspace(ctx, db.GetAgentInWorkspaceParams{
-		ID:          p.AgentID,
-		WorkspaceID: p.WorkspaceID,
-	})
-	if err != nil {
-		return BeginInstallResult{}, fmt.Errorf("lark registration: agent not in workspace: %w", err)
+	botName := "Multica Notifications"
+	if kind == InstallationKindAgent {
+		if p.AgentID.Valid {
+			agent, err := s.authQueries.GetAgentInWorkspace(ctx, db.GetAgentInWorkspaceParams{
+				ID:          p.AgentID,
+				WorkspaceID: p.WorkspaceID,
+			})
+			if err != nil {
+				return BeginInstallResult{}, fmt.Errorf("lark registration: agent not in workspace: %w", err)
+			}
+			botName = botNamePreset(agent.Name)
+		} else {
+			runtime, err := s.authQueries.GetAgentRuntimeForWorkspace(ctx, db.GetAgentRuntimeForWorkspaceParams{
+				ID:          p.RuntimeID,
+				WorkspaceID: p.WorkspaceID,
+			})
+			if err != nil {
+				return BeginInstallResult{}, fmt.Errorf("lark registration: runtime not in workspace: %w", err)
+			}
+			botName = botNamePreset(larkRuntimeAgentName(runtime))
+		}
 	}
 
 	// Normalize the requested region: empty / unknown → Feishu, the same
@@ -347,7 +378,7 @@ func (s *RegistrationService) BeginInstall(ctx context.Context, p BeginInstallPa
 	// field) keeps getting the historical mainland-first behaviour.
 	region := RegionOrDefault(string(p.Region))
 
-	begin, err := s.client.Begin(ctx, botNamePreset(agent.Name), region)
+	begin, err := s.client.Begin(ctx, botName, region)
 	if err != nil {
 		return BeginInstallResult{}, fmt.Errorf("lark registration: begin: %w", err)
 	}
@@ -361,7 +392,10 @@ func (s *RegistrationService) BeginInstall(ctx context.Context, p BeginInstallPa
 		id:          sessionID,
 		workspaceID: p.WorkspaceID,
 		agentID:     p.AgentID,
+		runtimeID:   p.RuntimeID,
 		initiatorID: p.InitiatorID,
+		memberUserID: p.MemberUserID,
+		kind:        kind,
 		deviceCode:  begin.DeviceCode,
 		domain:      begin.Domain,
 		qrCodeURL:   begin.QRCodeURL,
@@ -563,16 +597,53 @@ func (s *RegistrationService) finishSuccess(ctx context.Context, sess *registrat
 	defer tx.Rollback(ctx)
 	qtx := s.queries.WithTx(tx)
 
-	inst, err := qtx.UpsertLarkInstallation(ctx, db.UpsertLarkInstallationParams{
-		WorkspaceID:        sess.workspaceID,
-		AgentID:            sess.agentID,
-		AppID:              res.ClientID,
-		AppSecretEncrypted: sealed,
-		BotOpenID:          string(info.OpenID),
-		BotUnionID:         textOrNull(info.UnionID),
-		InstallerUserID:    sess.initiatorID,
-		Region:             string(region),
-	})
+	agentID := sess.agentID
+	if sess.kind == InstallationKindAgent && !agentID.Valid && sess.runtimeID.Valid {
+		agent, err := s.findOrCreateRuntimeAgent(ctx, qtx, sess.workspaceID, sess.runtimeID, sess.initiatorID)
+		if err != nil {
+			s.cfg.Logger.Warn("lark registration: resolve runtime agent",
+				"session_id", sess.id, "err", err)
+			sess.markError(RegistrationReasonInternalError, err.Error(), s.gcDeadline())
+			return
+		}
+		agentID = agent.ID
+	}
+
+	var inst db.LarkInstallation
+	if sess.kind == InstallationKindNotification {
+		inst, err = qtx.UpsertLarkNotificationInstallation(ctx, db.UpsertLarkNotificationInstallationParams{
+			WorkspaceID:        sess.workspaceID,
+			AppID:              res.ClientID,
+			AppSecretEncrypted: sealed,
+			BotOpenID:          string(info.OpenID),
+			BotUnionID:         textOrNull(info.UnionID),
+			InstallerUserID:    sess.initiatorID,
+			Region:             string(region),
+		})
+	} else if sess.kind == InstallationKindMember {
+		inst, err = qtx.UpsertLarkMemberInstallation(ctx, db.UpsertLarkMemberInstallationParams{
+			WorkspaceID:        sess.workspaceID,
+			AppID:              res.ClientID,
+			AppSecretEncrypted: sealed,
+			BotOpenID:          string(info.OpenID),
+			BotUnionID:         textOrNull(info.UnionID),
+			InstallerUserID:    sess.initiatorID,
+			Region:             string(region),
+			MemberUserID:       sess.memberUserID,
+		})
+	} else {
+		inst, err = qtx.UpsertLarkInstallation(ctx, db.UpsertLarkInstallationParams{
+			WorkspaceID:        sess.workspaceID,
+			AgentID:            agentID,
+			RuntimeID:          sess.runtimeID,
+			AppID:              res.ClientID,
+			AppSecretEncrypted: sealed,
+			BotOpenID:          string(info.OpenID),
+			BotUnionID:         textOrNull(info.UnionID),
+			InstallerUserID:    sess.initiatorID,
+			Region:             string(region),
+		})
+	}
 	if err != nil {
 		s.cfg.Logger.Warn("lark registration: upsert installation",
 			"session_id", sess.id, "err", err)
@@ -580,10 +651,14 @@ func (s *RegistrationService) finishSuccess(ctx context.Context, sess *registrat
 		return
 	}
 
+	bindingUserID := sess.initiatorID
+	if sess.kind == InstallationKindMember {
+		bindingUserID = sess.memberUserID
+	}
 	if err := s.binder.BindInstallerTx(ctx, qtx, InstallerBindParams{
 		WorkspaceID:    sess.workspaceID,
 		InstallationID: inst.ID,
-		MulticaUserID:  sess.initiatorID,
+		MulticaUserID:  bindingUserID,
 		LarkOpenID:     res.OpenID,
 	}); err != nil {
 		s.cfg.Logger.Warn("lark registration: bind installer",
@@ -606,8 +681,67 @@ func (s *RegistrationService) finishSuccess(ctx context.Context, sess *registrat
 	s.cfg.Logger.Info("lark registration: install complete",
 		"session_id", sess.id,
 		"workspace_id", uuidString(sess.workspaceID),
-		"agent_id", uuidString(sess.agentID),
+		"agent_id", uuidString(agentID),
+		"runtime_id", uuidString(sess.runtimeID),
+		"kind", string(sess.kind),
 		"installation_id", uuidString(inst.ID))
+}
+
+func (s *RegistrationService) findOrCreateRuntimeAgent(ctx context.Context, q *db.Queries, workspaceID, runtimeID, ownerID pgtype.UUID) (db.Agent, error) {
+	runtime, err := q.GetAgentRuntimeForWorkspace(ctx, db.GetAgentRuntimeForWorkspaceParams{
+		ID:          runtimeID,
+		WorkspaceID: workspaceID,
+	})
+	if err != nil {
+		return db.Agent{}, fmt.Errorf("runtime not in workspace: %w", err)
+	}
+	name := larkRuntimeAgentName(runtime)
+	agents, err := q.ListAgents(ctx, workspaceID)
+	if err != nil {
+		return db.Agent{}, fmt.Errorf("list agents: %w", err)
+	}
+	for _, agent := range agents {
+		if agent.Name == name && agent.RuntimeProvider == runtime.Provider && uuidEqualNullable(agent.RuntimeProfileID, runtime.ProfileID) {
+			return agent, nil
+		}
+	}
+	return q.CreateAgent(ctx, db.CreateAgentParams{
+		WorkspaceID:        workspaceID,
+		Name:               name,
+		Description:        "Default agent for Lark runtime messages.",
+		Instructions:       "You are the default Multica agent that handles messages from the workspace Lark bot.",
+		RuntimeMode:        runtime.RuntimeMode,
+		RuntimeConfig:      []byte("{}"),
+		RuntimeProvider:    runtime.Provider,
+		RuntimeProfileID:   runtime.ProfileID,
+		Visibility:         "workspace",
+		MaxConcurrentTasks: 6,
+		OwnerID:            ownerID,
+		CustomEnv:          []byte("{}"),
+		CustomArgs:         []byte("[]"),
+	})
+}
+
+func larkRuntimeAgentName(runtime db.AgentRuntime) string {
+	name := strings.TrimSpace(runtime.Name)
+	if name == "" {
+		name = runtime.Provider
+	}
+	if name == "" {
+		name = "Runtime"
+	}
+	id := uuidString(runtime.ID)
+	if len(id) > 8 {
+		id = id[:8]
+	}
+	return "Lark Bot - " + name + " (" + id + ")"
+}
+
+func uuidEqualNullable(a, b pgtype.UUID) bool {
+	if !a.Valid && !b.Valid {
+		return true
+	}
+	return uuidEqual(a, b)
 }
 
 func (s *RegistrationService) gcDeadline() time.Time {

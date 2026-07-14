@@ -1,14 +1,20 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/multica-ai/multica/server/internal/integrations/lark"
+	"github.com/multica-ai/multica/server/internal/middleware"
+	"github.com/multica-ai/multica/server/internal/util/secretbox"
 )
 
 // Lark-handler unit tests focus on the no-config short-circuits —
@@ -159,4 +165,228 @@ func TestListLarkInstallations_NotConfigured_HardCodedInstallSupportedFalse(t *t
 	if resp.InstallSupported {
 		t.Fatalf("install_supported must be false in the early-return branch even with a non-nil APIClient")
 	}
+}
+
+func TestListLarkInstallations_NotificationEventTypesField(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("handler test fixture not initialized (no DB?)")
+	}
+	ctx := context.Background()
+	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
+	var workspaceID, userID string
+	if err := testPool.QueryRow(ctx, `
+INSERT INTO workspace (name, slug, description, issue_prefix)
+VALUES ($1, $2, $3, $4) RETURNING id
+`, "Lark List Events", "lark-list-events-"+suffix, "handler list test", "LLE").Scan(&workspaceID); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if err := testPool.QueryRow(ctx, `
+INSERT INTO "user" (name, email) VALUES ($1, $2) RETURNING id
+`, "Lark List User", "lark-list-"+suffix+"@multica.ai").Scan(&userID); err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	if _, err := testPool.Exec(ctx, `
+INSERT INTO lark_installation (
+    workspace_id, app_id, app_secret_encrypted, bot_open_id,
+    installer_user_id, installation_kind, notification_event_types
+) VALUES ($1, $2, $3, $4, $5, 'notification', $6)
+`, workspaceID, "cli_list_"+suffix, []byte("encrypted"), "ou_list_"+suffix, userID, []string{"mentioned", "task_failed"}); err != nil {
+		t.Fatalf("create notification installation: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM workspace WHERE id = $1`, workspaceID)
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM "user" WHERE id = $1`, userID)
+	})
+
+	box, err := secretbox.New(make([]byte, secretbox.KeySize))
+	if err != nil {
+		t.Fatalf("create secret box: %v", err)
+	}
+	installationService, err := lark.NewInstallationService(testHandler.Queries, box)
+	if err != nil {
+		t.Fatalf("create installation service: %v", err)
+	}
+	h := &Handler{LarkInstallations: installationService}
+	router := chi.NewRouter()
+	router.Get("/api/workspaces/{id}/lark/installations", h.ListLarkInstallations)
+	req := httptest.NewRequest(http.MethodGet, "/api/workspaces/"+workspaceID+"/lark/installations", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	var body struct {
+		Installations []LarkInstallationResponse `json:"installations"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(body.Installations) != 1 {
+		t.Fatalf("installations length = %d, want 1", len(body.Installations))
+	}
+	want := []string{"mentioned", "task_failed"}
+	if fmt.Sprint(body.Installations[0].NotificationEventTypes) != fmt.Sprint(want) {
+		t.Fatalf("notification_event_types = %v, want %v", body.Installations[0].NotificationEventTypes, want)
+	}
+}
+
+func TestUpdateLarkNotificationEvents(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("handler test fixture not initialized (no DB?)")
+	}
+	ctx := context.Background()
+	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
+
+	var workspaceID string
+	if err := testPool.QueryRow(ctx, `
+INSERT INTO workspace (name, slug, description, issue_prefix)
+VALUES ($1, $2, $3, $4)
+RETURNING id
+`, "Lark Notification Events", "lark-notification-events-"+suffix, "handler tests", "LNE").Scan(&workspaceID); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+
+	users := make(map[string]string)
+	for _, role := range []string{"owner", "admin", "member"} {
+		var userID string
+		if err := testPool.QueryRow(ctx, `
+INSERT INTO "user" (name, email) VALUES ($1, $2) RETURNING id
+`, "Lark "+role, fmt.Sprintf("lark-%s-%s@multica.ai", role, suffix)).Scan(&userID); err != nil {
+			t.Fatalf("create %s user: %v", role, err)
+		}
+		users[role] = userID
+		if _, err := testPool.Exec(ctx, `
+INSERT INTO member (workspace_id, user_id, role) VALUES ($1, $2, $3)
+`, workspaceID, userID, role); err != nil {
+			t.Fatalf("create %s membership: %v", role, err)
+		}
+	}
+
+	var installationID string
+	if err := testPool.QueryRow(ctx, `
+INSERT INTO lark_installation (
+    workspace_id, app_id, app_secret_encrypted, bot_open_id,
+    installer_user_id, installation_kind, notification_event_types
+) VALUES ($1, $2, $3, $4, $5, 'notification', $6)
+RETURNING id
+`, workspaceID, "cli_"+suffix, []byte("encrypted"), "ou_"+suffix, users["owner"], []string{"mentioned"}).Scan(&installationID); err != nil {
+		t.Fatalf("create notification installation: %v", err)
+	}
+
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM workspace WHERE id = $1`, workspaceID)
+		for _, userID := range users {
+			_, _ = testPool.Exec(context.Background(), `DELETE FROM "user" WHERE id = $1`, userID)
+		}
+	})
+
+	router := chi.NewRouter()
+	router.Route("/api/workspaces/{id}", func(r chi.Router) {
+		r.Group(func(r chi.Router) {
+			r.Use(middleware.RequireWorkspaceRoleFromURL(testHandler.Queries, "id", "owner", "admin"))
+			r.Put("/lark/notification-events", testHandler.UpdateLarkNotificationEvents)
+		})
+	})
+
+	exercise := func(t *testing.T, role, body string) *httptest.ResponseRecorder {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodPut, "/api/workspaces/"+workspaceID+"/lark/notification-events", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("X-User-ID", users[role])
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		return rec
+	}
+	loadPersisted := func(t *testing.T) []string {
+		t.Helper()
+		var eventTypes []string
+		if err := testPool.QueryRow(ctx, `
+SELECT notification_event_types FROM lark_installation WHERE id = $1
+`, installationID).Scan(&eventTypes); err != nil {
+			t.Fatalf("load persisted notification event types: %v", err)
+		}
+		return eventTypes
+	}
+
+	for _, role := range []string{"owner", "admin"} {
+		t.Run(role+" success", func(t *testing.T) {
+			rec := exercise(t, role, `{"event_types":["task_failed","mentioned","mentioned"]}`)
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+			}
+			var got LarkInstallationResponse
+			if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+				t.Fatalf("decode response: %v", err)
+			}
+			want := []string{"mentioned", "task_failed"}
+			if fmt.Sprint(got.NotificationEventTypes) != fmt.Sprint(want) {
+				t.Fatalf("notification_event_types = %v, want %v", got.NotificationEventTypes, want)
+			}
+			if persisted := loadPersisted(t); fmt.Sprint(persisted) != fmt.Sprint(want) {
+				t.Fatalf("persisted notification_event_types = %v, want %v", persisted, want)
+			}
+		})
+	}
+
+	t.Run("member forbidden", func(t *testing.T) {
+		before := loadPersisted(t)
+		if rec := exercise(t, "member", `{"event_types":["mentioned"]}`); rec.Code != http.StatusForbidden {
+			t.Fatalf("status = %d, want 403; body=%s", rec.Code, rec.Body.String())
+		}
+		if after := loadPersisted(t); fmt.Sprint(after) != fmt.Sprint(before) {
+			t.Fatalf("member request changed persisted events: before=%v after=%v", before, after)
+		}
+	})
+
+	for _, tc := range []struct {
+		name string
+		body string
+	}{
+		{name: "missing event_types", body: `{}`},
+		{name: "null event_types", body: `{"event_types":null}`},
+		{name: "unknown field", body: `{"event_types":["mentioned"],"extra":true}`},
+		{name: "trailing JSON value", body: `{"event_types":["mentioned"]}{"event_types":[]}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			before := loadPersisted(t)
+			if rec := exercise(t, "admin", tc.body); rec.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want 400; body=%s", rec.Code, rec.Body.String())
+			}
+			if after := loadPersisted(t); fmt.Sprint(after) != fmt.Sprint(before) {
+				t.Fatalf("invalid request changed persisted events: before=%v after=%v", before, after)
+			}
+		})
+	}
+
+	t.Run("unknown event rejected", func(t *testing.T) {
+		if rec := exercise(t, "admin", `{"event_types":["unknown_event"]}`); rec.Code != http.StatusBadRequest {
+			t.Fatalf("status = %d, want 400; body=%s", rec.Code, rec.Body.String())
+		}
+	})
+
+	t.Run("empty list succeeds", func(t *testing.T) {
+		rec := exercise(t, "admin", `{"event_types":[]}`)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+		}
+		var got LarkInstallationResponse
+		if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+			t.Fatalf("decode response: %v", err)
+		}
+		if got.NotificationEventTypes == nil || len(got.NotificationEventTypes) != 0 {
+			t.Fatalf("notification_event_types = %#v, want non-nil empty", got.NotificationEventTypes)
+		}
+		if persisted := loadPersisted(t); persisted == nil || len(persisted) != 0 {
+			t.Fatalf("persisted notification_event_types = %#v, want non-nil empty", persisted)
+		}
+	})
+
+	t.Run("no active notification bot", func(t *testing.T) {
+		if _, err := testPool.Exec(ctx, `UPDATE lark_installation SET status = 'revoked' WHERE id = $1`, installationID); err != nil {
+			t.Fatalf("revoke notification installation: %v", err)
+		}
+		if rec := exercise(t, "owner", `{"event_types":["mentioned"]}`); rec.Code != http.StatusNotFound {
+			t.Fatalf("status = %d, want 404; body=%s", rec.Code, rec.Body.String())
+		}
+	})
 }

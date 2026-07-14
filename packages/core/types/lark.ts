@@ -1,3 +1,28 @@
+export type LarkNotificationEventType =
+  | "issue_assigned"
+  | "unassigned"
+  | "assignee_changed"
+  | "mentioned"
+  | "new_comment"
+  | "reaction_added"
+  | "status_changed"
+  | "priority_changed"
+  | "start_date_changed"
+  | "due_date_changed"
+  | "task_failed"
+  | "quick_create_failed"
+  | "quick_create_done"
+  | "autopilot_paused"
+  | "issue_subscribed";
+
+export const DEFAULT_LARK_NOTIFICATION_EVENTS = Object.freeze([
+  "issue_assigned",
+  "mentioned",
+  "task_failed",
+  "quick_create_failed",
+  "autopilot_paused",
+] as const satisfies readonly LarkNotificationEventType[]);
+
 /** A Lark Bot installation bound to a single Multica agent.
  *
  * Wire shape mirrors `LarkInstallationResponse` in
@@ -7,12 +32,17 @@
 export interface LarkInstallation {
   id: string;
   workspace_id: string;
-  agent_id: string;
+  agent_id?: string | null;
+  runtime_id?: string | null;
   app_id: string;
   tenant_key?: string | null;
   bot_open_id: string;
   installer_user_id: string;
   status: "active" | "revoked" | string;
+  installation_kind?: "agent" | "notification" | "member" | string;
+  /** Present only for a private member-owned Bot. */
+  member_user_id?: string | null;
+  notification_event_types?: LarkNotificationEventType[];
   /** Which Lark cloud the bot lives on: "feishu" (mainland) or "lark"
    * (international). Auto-detected at install time. Optional so an older
    * desktop build parsing a newer server — or a newer build hitting a
@@ -26,6 +56,8 @@ export interface LarkInstallation {
 
 export interface ListLarkInstallationsResponse {
   installations: LarkInstallation[];
+	/** Workspace-admin controlled event policy, independent of member Bots. */
+	notification_event_types?: LarkNotificationEventType[];
   /** Whether the deployment has the at-rest secret key configured. When
    * false the Bind button must be disabled and the panel renders an
    * empty / "ask the operator to enable Lark" state. */
@@ -38,6 +70,12 @@ export interface ListLarkInstallationsResponse {
    * builds receiving a server that does not yet emit the field
    * default to `undefined`, treated as not supported. */
   install_supported?: boolean;
+}
+
+export interface LarkWorkspaceNotificationPolicy {
+  workspace_id: string;
+  event_types: LarkNotificationEventType[];
+  updated_at: string;
 }
 
 /** First half of the device-flow install: the server has opened a

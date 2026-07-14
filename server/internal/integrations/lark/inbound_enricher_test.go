@@ -78,6 +78,9 @@ func (f *enricherFakeClient) PatchInteractiveCard(context.Context, PatchCardPara
 func (f *enricherFakeClient) SendTextMessage(context.Context, SendTextParams) (string, error) {
 	return "", nil
 }
+func (f *enricherFakeClient) SendDirectTextMessage(context.Context, SendDirectTextParams) (string, error) {
+	return "", nil
+}
 func (f *enricherFakeClient) SendMarkdownCard(context.Context, SendMarkdownCardParams) (string, error) {
 	return "", nil
 }

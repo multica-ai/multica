@@ -410,6 +410,55 @@ func TestHTTPClient_SendTextMessage_HappyPath(t *testing.T) {
 	}
 }
 
+func TestHTTPClient_SendDirectTextMessage_HappyPath(t *testing.T) {
+	fake := newLarkFake(t)
+	fake.stubToken("tok_direct", 7200)
+	fake.stubSend(
+		map[string]any{
+			"code": 0,
+			"msg":  "ok",
+			"data": map[string]string{"message_id": "om_direct_1"},
+		},
+		func(r *http.Request, body map[string]string) {
+			if r.URL.Path != "/open-apis/im/v1/messages" {
+				t.Errorf("path: got %q want /open-apis/im/v1/messages", r.URL.Path)
+			}
+			if got := r.URL.Query().Get("receive_id_type"); got != "open_id" {
+				t.Errorf("receive_id_type: got %q want open_id", got)
+			}
+			if body["receive_id"] != "ou_user_42" {
+				t.Errorf("receive_id: got %q want ou_user_42", body["receive_id"])
+			}
+			if body["msg_type"] != "text" {
+				t.Errorf("msg_type: got %q want text", body["msg_type"])
+			}
+			var inner map[string]string
+			if err := json.Unmarshal([]byte(body["content"]), &inner); err != nil {
+				t.Fatalf("content is not valid inner JSON: %v (raw=%q)", err, body["content"])
+			}
+			if inner["text"] != "Inbox update" {
+				t.Errorf("inner content.text: got %q want Inbox update", inner["text"])
+			}
+		},
+	)
+
+	c := newTestClient(fake, time.Now)
+	msgID, err := c.SendDirectTextMessage(context.Background(), SendDirectTextParams{
+		InstallationID: testCreds(),
+		OpenID:         OpenID("ou_user_42"),
+		Text:           "Inbox update",
+	})
+	if err != nil {
+		t.Fatalf("send: %v", err)
+	}
+	if msgID != "om_direct_1" {
+		t.Errorf("message id: got %q want om_direct_1", msgID)
+	}
+	if got := fake.lastAuth(); got != "Bearer tok_direct" {
+		t.Errorf("Authorization header: got %q want Bearer tok_direct", got)
+	}
+}
+
 // TestHTTPClient_SendMarkdownCard_HappyPath pins the wire shape of the
 // schema-2.0 card we send for markdown chat replies. The MUST-haves:
 // msg_type=interactive (not text), content is a JSON-encoded card

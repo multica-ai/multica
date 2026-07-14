@@ -5,12 +5,15 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
 // InboundMessage is the normalized shape the WebSocket adapter hands
@@ -104,6 +107,12 @@ const (
 	// unarchive or rebind"). Kept separate from OutcomeAgentOffline
 	// because the user-facing remediation differs.
 	OutcomeAgentArchived Outcome = "agent_archived"
+
+	// OutcomeIssueCommented — the message was a reply to a Multica inbox
+	// notification sent by this Bot and has been written as an issue
+	// comment. It bypasses chat_session so the reply targets the issue
+	// timeline, not the agent chat.
+	OutcomeIssueCommented Outcome = "issue_commented"
 )
 
 // DispatchResult is the typed return from Dispatcher.Handle. Callers
@@ -133,6 +142,7 @@ type DispatchResult struct {
 	// in the confirmation message so the chat history reads naturally
 	// even when the Multica deep link is not reachable.
 	IssueTitle string
+	CommentID  pgtype.UUID
 }
 
 // IssueCreator is the narrow subset of service.IssueService the
@@ -148,6 +158,12 @@ type IssueCreator interface {
 // TaskService struct is gratuitous.
 type ChatTaskEnqueuer interface {
 	EnqueueChatTask(ctx context.Context, session db.ChatSession, initiatorUserID pgtype.UUID) (db.AgentTaskQueue, error)
+}
+
+// ExternalMemberCommentTriggerer applies the same agent-triggering rules used
+// by comments created through the HTTP API.
+type ExternalMemberCommentTriggerer interface {
+	TriggerTasksForExternalMemberComment(ctx context.Context, issue db.Issue, comment db.Comment, memberID pgtype.UUID)
 }
 
 // DispatcherQueries is the narrow subset of *db.Queries the Dispatcher
@@ -187,6 +203,10 @@ type DispatcherQueries interface {
 	// emitting just the issue number — so callers handle the error
 	// inline rather than aborting the whole dispatch.
 	GetWorkspace(ctx context.Context, id pgtype.UUID) (db.Workspace, error)
+	GetIssue(ctx context.Context, id pgtype.UUID) (db.Issue, error)
+	GetLarkInboxNotificationByMessage(ctx context.Context, arg db.GetLarkInboxNotificationByMessageParams) (db.LarkInboxNotification, error)
+	MarkLarkInboxNotificationReplied(ctx context.Context, arg db.MarkLarkInboxNotificationRepliedParams) error
+	CreateComment(ctx context.Context, arg db.CreateCommentParams) (db.Comment, error)
 }
 
 // Dispatcher is the single per-message entry point on the inbound
@@ -196,11 +216,13 @@ type DispatcherQueries interface {
 // design's §4.3 safety property ("unbound users never reach
 // chat_session") true at runtime.
 type Dispatcher struct {
-	Queries      DispatcherQueries
-	Chat         ChatSessionService
-	Audit        AuditLogger
-	IssueService IssueCreator
-	TaskService  ChatTaskEnqueuer
+	Queries          DispatcherQueries
+	Chat             ChatSessionService
+	Audit            AuditLogger
+	IssueService     IssueCreator
+	TaskService      ChatTaskEnqueuer
+	CommentTriggerer ExternalMemberCommentTriggerer
+	Bus              *events.Bus
 
 	// FlushReply emits the offline/archived notice that EnqueueChatTask
 	// now produces only at debounce-flush time. Before MUL-2968 those
@@ -437,6 +459,19 @@ func (d *Dispatcher) processClaimed(ctx context.Context, msg InboundMessage, ins
 		return DispatchResult{}, finalizeRelease, fmt.Errorf("load user binding: %w", err)
 	}
 
+	if msg.ParentID != "" {
+		res, handled, err := d.tryHandleInboxNotificationReply(ctx, msg, inst, binding)
+		if err != nil {
+			return DispatchResult{}, finalizeRelease, err
+		}
+		if handled {
+			return res, finalizeMark, nil
+		}
+	}
+	if inst.InstallationKind == string(InstallationKindNotification) {
+		return d.drop(ctx, msg, inst.ID, DropReasonInvalidEvent), finalizeMark, nil
+	}
+
 	// 5. Resolve the chat_session. For group chats, the session
 	//    creator is the INSTALLER (stable workspace identity that
 	//    won't cascade-delete when individual group members churn);
@@ -554,6 +589,124 @@ func (d *Dispatcher) processClaimed(ctx context.Context, msg InboundMessage, ins
 	// "latest message in a window wins" rule above. See MUL-2645.
 	d.scheduleRun(inst, msg, sessionID, binding.MulticaUserID)
 	return res, postAppendFinalize, nil
+}
+
+func (d *Dispatcher) tryHandleInboxNotificationReply(
+	ctx context.Context,
+	msg InboundMessage,
+	inst db.LarkInstallation,
+	binding db.LarkUserBinding,
+) (DispatchResult, bool, error) {
+	notification, err := d.Queries.GetLarkInboxNotificationByMessage(ctx, db.GetLarkInboxNotificationByMessageParams{
+		InstallationID: inst.ID,
+		LarkMessageID:  msg.ParentID,
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return DispatchResult{}, false, nil
+		}
+		return DispatchResult{}, true, fmt.Errorf("load lark inbox notification: %w", err)
+	}
+	if notification.RecipientUserID != binding.MulticaUserID {
+		_ = d.Audit.RecordDrop(ctx, AuditDropParams{
+			InstallationID: inst.ID,
+			ChatID:         msg.ChatID,
+			EventType:      msg.EventType,
+			LarkEventID:    msg.EventID,
+			LarkMessageID:  msg.MessageID,
+			Reason:         DropReasonInvalidEvent,
+		})
+		return DispatchResult{
+			Outcome:        OutcomeDropped,
+			DropReason:     DropReasonInvalidEvent,
+			InstallationID: inst.ID,
+			SenderOpenID:   msg.SenderOpenID,
+		}, true, nil
+	}
+	content := strings.TrimSpace(msg.CommandBody)
+	if content == "" {
+		content = strings.TrimSpace(msg.Body)
+	}
+	if content == "" {
+		_ = d.Audit.RecordDrop(ctx, AuditDropParams{
+			InstallationID: inst.ID,
+			ChatID:         msg.ChatID,
+			EventType:      msg.EventType,
+			LarkEventID:    msg.EventID,
+			LarkMessageID:  msg.MessageID,
+			Reason:         DropReasonInvalidEvent,
+		})
+		return DispatchResult{
+			Outcome:        OutcomeDropped,
+			DropReason:     DropReasonInvalidEvent,
+			InstallationID: inst.ID,
+			SenderOpenID:   msg.SenderOpenID,
+		}, true, nil
+	}
+	issue, err := d.Queries.GetIssue(ctx, notification.IssueID)
+	if err != nil {
+		return DispatchResult{}, true, fmt.Errorf("load issue for lark inbox reply: %w", err)
+	}
+	comment, err := d.Queries.CreateComment(ctx, db.CreateCommentParams{
+		IssueID:     issue.ID,
+		WorkspaceID: issue.WorkspaceID,
+		AuthorType:  "member",
+		AuthorID:    binding.MulticaUserID,
+		Content:     content,
+		Type:        "comment",
+	})
+	if err != nil {
+		return DispatchResult{}, true, fmt.Errorf("create comment from lark inbox reply: %w", err)
+	}
+	if err := d.Queries.MarkLarkInboxNotificationReplied(ctx, db.MarkLarkInboxNotificationRepliedParams{
+		ID:               notification.ID,
+		RepliedCommentID: comment.ID,
+	}); err != nil {
+		return DispatchResult{}, true, fmt.Errorf("mark lark inbox notification replied: %w", err)
+	}
+	identifier := fmt.Sprintf("#%d", issue.Number)
+	if ws, werr := d.Queries.GetWorkspace(ctx, issue.WorkspaceID); werr == nil && ws.IssuePrefix != "" {
+		identifier = fmt.Sprintf("%s-%d", ws.IssuePrefix, issue.Number)
+	}
+	d.publishIssueCommentCreated(issue, comment)
+	if d.CommentTriggerer != nil {
+		d.CommentTriggerer.TriggerTasksForExternalMemberComment(ctx, issue, comment, binding.MulticaUserID)
+	}
+	return DispatchResult{
+		Outcome:         OutcomeIssueCommented,
+		InstallationID:  inst.ID,
+		SenderOpenID:    msg.SenderOpenID,
+		IssueID:         issue.ID,
+		IssueNumber:     issue.Number,
+		IssueIdentifier: identifier,
+		IssueTitle:      issue.Title,
+		CommentID:       comment.ID,
+	}, true, nil
+}
+
+func (d *Dispatcher) publishIssueCommentCreated(issue db.Issue, comment db.Comment) {
+	if d.Bus == nil {
+		return
+	}
+	d.Bus.Publish(events.Event{
+		Type:        protocol.EventCommentCreated,
+		WorkspaceID: uuidString(issue.WorkspaceID),
+		ActorType:   comment.AuthorType,
+		ActorID:     uuidString(comment.AuthorID),
+		Payload: map[string]any{
+			"comment": map[string]any{
+				"id":          uuidString(comment.ID),
+				"issue_id":    uuidString(comment.IssueID),
+				"author_type": comment.AuthorType,
+				"author_id":   uuidString(comment.AuthorID),
+				"content":     comment.Content,
+				"type":        comment.Type,
+				"created_at":  comment.CreatedAt.Time.UTC().Format(time.RFC3339),
+			},
+			"issue_title":  issue.Title,
+			"issue_status": issue.Status,
+		},
+	})
 }
 
 // scheduleRun hands the per-session run trigger to the debouncer (or fires

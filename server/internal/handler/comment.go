@@ -1096,6 +1096,12 @@ func (h *Handler) triggerTasksForComment(ctx context.Context, issue db.Issue, co
 	h.enqueueCommentAgentTriggers(ctx, issue, comment.ID, triggers, actorType, actorID, requestUserID)
 }
 
+// TriggerTasksForExternalMemberComment applies the standard comment-trigger
+// rules to a member comment created by an integration outside the HTTP handler.
+func (h *Handler) TriggerTasksForExternalMemberComment(ctx context.Context, issue db.Issue, comment db.Comment, memberID pgtype.UUID) {
+	h.triggerTasksForComment(ctx, issue, comment, nil, "member", uuidToString(memberID), memberID, nil)
+}
+
 func filterSuppressedCommentAgentTriggers(triggers []commentAgentTrigger, suppressAgentIDs []pgtype.UUID) []commentAgentTrigger {
 	if len(triggers) == 0 || len(suppressAgentIDs) == 0 {
 		return triggers

@@ -43,21 +43,50 @@ type fakeQueries struct {
 	userBindingErr    error
 	// userBindingByOpenID, when set, overrides userBinding per Lark open ID so a
 	// test can simulate distinct senders in one chat (MUL-2645 latest-sender-wins).
-	userBindingByOpenID map[string]db.LarkUserBinding
-	chatSession         db.ChatSession
-	chatSessionErr      error
-	workspace           db.Workspace
-	workspaceErr        error
-	dedup               map[string]*fakeDedupRow
-	dedupClaimErr       error
-	dedupReclaim        bool // when true, in-flight rows are re-claimable (simulates staleness)
-	nextTokenByte       byte // monotonically incremented; ensures each minted token is distinct
-	calledUserBinding   int
-	calledChatSession   int
-	calledInstallation  int
-	calledClaim         int
-	calledMark          int
-	calledRelease       int
+	userBindingByOpenID  map[string]db.LarkUserBinding
+	chatSession          db.ChatSession
+	chatSessionErr       error
+	workspace            db.Workspace
+	workspaceErr         error
+	issue                db.Issue
+	issueErr             error
+	inboxNotification    db.LarkInboxNotification
+	inboxNotificationErr error
+	comment              db.Comment
+	commentErr           error
+	markInboxReplyErr    error
+	dedup                map[string]*fakeDedupRow
+	dedupClaimErr        error
+	dedupReclaim         bool // when true, in-flight rows are re-claimable (simulates staleness)
+	nextTokenByte        byte // monotonically incremented; ensures each minted token is distinct
+	calledUserBinding    int
+	calledChatSession    int
+	calledInstallation   int
+	calledClaim          int
+	calledMark           int
+	calledRelease        int
+	calledGetInboxReply  int
+	calledCreateComment  int
+	calledMarkInboxReply int
+}
+
+type fakeCommentTriggerer struct {
+	called   int
+	issue    db.Issue
+	comment  db.Comment
+	memberID pgtype.UUID
+}
+
+func (f *fakeCommentTriggerer) TriggerTasksForExternalMemberComment(
+	ctx context.Context,
+	issue db.Issue,
+	comment db.Comment,
+	memberID pgtype.UUID,
+) {
+	f.called++
+	f.issue = issue
+	f.comment = comment
+	f.memberID = memberID
 }
 
 // mintToken produces a deterministic, distinct token per call so
@@ -176,6 +205,45 @@ func (f *fakeQueries) MarkLarkInboundDedupProcessed(ctx context.Context, arg db.
 // while it is still in-flight.
 func (f *fakeQueries) GetWorkspace(ctx context.Context, id pgtype.UUID) (db.Workspace, error) {
 	return f.workspace, f.workspaceErr
+}
+
+func (f *fakeQueries) GetIssue(ctx context.Context, id pgtype.UUID) (db.Issue, error) {
+	return f.issue, f.issueErr
+}
+
+func (f *fakeQueries) GetLarkInboxNotificationByMessage(ctx context.Context, arg db.GetLarkInboxNotificationByMessageParams) (db.LarkInboxNotification, error) {
+	f.calledGetInboxReply++
+	if f.inboxNotificationErr != nil {
+		return db.LarkInboxNotification{}, f.inboxNotificationErr
+	}
+	if f.inboxNotification.ID.Valid {
+		return f.inboxNotification, nil
+	}
+	return db.LarkInboxNotification{}, pgx.ErrNoRows
+}
+
+func (f *fakeQueries) MarkLarkInboxNotificationReplied(ctx context.Context, arg db.MarkLarkInboxNotificationRepliedParams) error {
+	f.calledMarkInboxReply++
+	return f.markInboxReplyErr
+}
+
+func (f *fakeQueries) CreateComment(ctx context.Context, arg db.CreateCommentParams) (db.Comment, error) {
+	f.calledCreateComment++
+	if f.commentErr != nil {
+		return db.Comment{}, f.commentErr
+	}
+	if f.comment.ID.Valid {
+		return f.comment, nil
+	}
+	return db.Comment{
+		ID:          validUUID(0xC1),
+		IssueID:     arg.IssueID,
+		WorkspaceID: arg.WorkspaceID,
+		AuthorType:  arg.AuthorType,
+		AuthorID:    arg.AuthorID,
+		Content:     arg.Content,
+		Type:        arg.Type,
+	}, nil
 }
 
 func (f *fakeQueries) ReleaseLarkInboundDedup(ctx context.Context, arg db.ReleaseLarkInboundDedupParams) (int64, error) {
@@ -335,6 +403,82 @@ func boundUser() db.LarkUserBinding {
 		MulticaUserID:  validUUID(0x55),
 		InstallationID: validUUID(0x11),
 		LarkOpenID:     "ou_user_a",
+	}
+}
+
+func TestDispatcher_InboxNotificationReplyCreatesIssueComment(t *testing.T) {
+	inst := activeInstallation()
+	inst.InstallationKind = string(InstallationKindNotification)
+	queries := &fakeQueries{
+		installationByApp: inst,
+		userBinding:       boundUser(),
+		inboxNotification: db.LarkInboxNotification{
+			ID:              validUUID(0xA1),
+			WorkspaceID:     validUUID(0x22),
+			InstallationID:  validUUID(0x11),
+			InboxItemID:     validUUID(0xA2),
+			IssueID:         validUUID(0x66),
+			RecipientUserID: validUUID(0x55),
+			LarkOpenID:      "ou_user_a",
+			LarkMessageID:   "om_notice_1",
+		},
+		issue: db.Issue{
+			ID:          validUUID(0x66),
+			WorkspaceID: validUUID(0x22),
+			Title:       "Fix deploy",
+			Status:      "todo",
+			Number:      42,
+		},
+		workspace: db.Workspace{
+			ID:          validUUID(0x22),
+			IssuePrefix: "MUL",
+		},
+	}
+	chat := &fakeChat{ensureID: validUUID(0x77), queries: queries}
+	audit := &fakeAudit{}
+	triggerer := &fakeCommentTriggerer{}
+	d := &Dispatcher{
+		Queries:          queries,
+		Chat:             chat,
+		Audit:            audit,
+		CommentTriggerer: triggerer,
+	}
+
+	res, err := d.Handle(context.Background(), InboundMessage{
+		AppID:        "cli_x",
+		EventType:    "im.message.receive_v1",
+		EventID:      "evt_1",
+		MessageID:    "om_reply_1",
+		ParentID:     "om_notice_1",
+		ChatID:       "oc_p2p",
+		ChatType:     ChatTypeP2P,
+		SenderOpenID: "ou_user_a",
+		Body:         "<quoted_message>...</quoted_message>\nLooks good",
+		CommandBody:  "Looks good",
+	})
+	if err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+	if res.Outcome != OutcomeIssueCommented {
+		t.Fatalf("expected issue-commented, got %+v", res)
+	}
+	if res.IssueIdentifier != "MUL-42" || res.IssueTitle != "Fix deploy" {
+		t.Fatalf("unexpected issue metadata: %+v", res)
+	}
+	if chat.calledEnsure != 0 || chat.calledAppend != 0 {
+		t.Fatalf("notification reply must not enter chat_session: ensure=%d append=%d", chat.calledEnsure, chat.calledAppend)
+	}
+	if queries.calledCreateComment != 1 || queries.calledMarkInboxReply != 1 {
+		t.Fatalf("expected comment create + reply mark, got create=%d mark=%d", queries.calledCreateComment, queries.calledMarkInboxReply)
+	}
+	if triggerer.called != 1 {
+		t.Fatalf("expected comment trigger once, got %d", triggerer.called)
+	}
+	if triggerer.issue.ID != queries.issue.ID || triggerer.comment.Content != "Looks good" || triggerer.memberID != queries.userBinding.MulticaUserID {
+		t.Fatalf("unexpected comment trigger input: %+v", triggerer)
+	}
+	if len(audit.drops) != 0 {
+		t.Fatalf("unexpected audit drops: %+v", audit.drops)
 	}
 }
 

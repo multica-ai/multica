@@ -752,7 +752,7 @@ INSERT INTO agent (
     runtime_config, runtime_id, runtime_provider, runtime_profile_id,
     visibility, max_concurrent_tasks, owner_id, instructions, custom_env,
     custom_args, mcp_config, model, thinking_level
-) VALUES ($1, $2, $3, $4, $5, $6, $17, $7, $18, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+) VALUES ($1, $2, $3, $4, $5, $6, $17::uuid, $7, $18::uuid, $8, $9, $10, $11, $12, $13, $14, $15, $16)
 RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, runtime_provider, runtime_profile_id
 `
 

@@ -31,6 +31,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/util"
 	"github.com/multica-ai/multica/server/internal/util/secretbox"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
 var defaultOrigins = []string{
@@ -226,6 +227,19 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				h.LarkAPIClient = larkClient
 				patcher := lark.NewPatcher(queries, installSvc, larkClient, lark.PatcherConfig{})
 				patcher.Register(bus)
+				inboxNotifier := &lark.InboxNotifier{
+					Queries:     queries,
+					Credentials: installSvc,
+					Client:      larkClient,
+					Logger:      slog.Default(),
+				}
+				bus.Subscribe(protocol.EventInboxNew, func(e events.Event) {
+					go func() {
+						ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+						defer cancel()
+						inboxNotifier.Handle(ctx, e.Payload)
+					}()
+				})
 
 				// Typing indicator: shows a "processing" reaction on the user's
 				// message while the agent is working, then removes it before the
@@ -244,12 +258,14 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				auditLogger := lark.NewAuditLogger(queries)
 				chatSvc := lark.NewChatSessionService(queries, pool)
 				dispatcher := &lark.Dispatcher{
-					Queries:      queries,
-					Chat:         chatSvc,
-					Audit:        auditLogger,
-					IssueService: h.IssueService,
-					TaskService:  h.TaskService,
-					Logger:       slog.Default(),
+					Queries:          queries,
+					Chat:             chatSvc,
+					Audit:            auditLogger,
+					IssueService:     h.IssueService,
+					TaskService:      h.TaskService,
+					CommentTriggerer: h,
+					Bus:              bus,
+					Logger:           slog.Default(),
 				}
 				// Debounce the per-session run trigger so a burst of
 				// messages (e.g. "forward a transcript, then type a note")
@@ -625,17 +641,20 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Group(func(r chi.Router) {
 					r.Use(middleware.RequireWorkspaceMemberFromURL(queries, "id"))
 					r.Get("/lark/installations", h.ListLarkInstallations)
+					r.Post("/lark/member-install/begin", h.BeginLarkMemberInstall)
+					r.Get("/lark/install/{sessionId}/status", h.GetLarkInstallStatus)
 				})
 				r.Group(func(r chi.Router) {
 					r.Use(middleware.RequireWorkspaceRoleFromURL(queries, "id", "owner", "admin"))
 					r.Delete("/lark/installations/{installationId}", h.RevokeLarkInstallation)
+					r.Put("/lark/notification-events", h.UpdateLarkNotificationEvents)
 					// Device-flow scan-to-install. Begin opens a new
 					// registration session against Lark and returns
 					// the QR-code URL; the frontend dialog then polls
 					// /install/{sessionId}/status until success or
 					// terminal failure.
 					r.Post("/lark/install/begin", h.BeginLarkInstall)
-					r.Get("/lark/install/{sessionId}/status", h.GetLarkInstallStatus)
+					r.Post("/lark/notification-install/begin", h.BeginLarkNotificationInstall)
 				})
 			})
 		})

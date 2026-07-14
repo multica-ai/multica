@@ -126,6 +126,7 @@ import type {
   CreateBillingPortalSessionResponse,
 } from "../types";
 import type { OnboardingCompletionPath } from "../onboarding/types";
+import type { LarkNotificationEventType, LarkWorkspaceNotificationPolicy } from "../types/lark";
 import type {
   CloudRuntimeNode,
   CreateCloudRuntimeNodeRequest,
@@ -135,6 +136,12 @@ import { type Logger, noopLogger } from "../logger";
 import { createRequestId } from "../utils";
 import { getCurrentSlug } from "../platform/workspace-storage";
 import { parseWithFallback } from "./schema";
+import {
+	createEmptyLarkWorkspaceNotificationPolicy,
+  createEmptyListLarkInstallationsResponse,
+	LarkWorkspaceNotificationPolicySchema,
+  ListLarkInstallationsResponseSchema,
+} from "../lark/schema";
 import { z } from "zod";
 import {
   AgentListSchema,
@@ -2321,7 +2328,33 @@ export class ApiClient {
 
   // Lark integration
   async listLarkInstallations(workspaceId: string): Promise<ListLarkInstallationsResponse> {
-    return this.fetch(`/api/workspaces/${workspaceId}/lark/installations`);
+    const raw = await this.fetch<unknown>(`/api/workspaces/${workspaceId}/lark/installations`);
+    return parseWithFallback(
+      raw,
+      ListLarkInstallationsResponseSchema,
+      createEmptyListLarkInstallationsResponse(),
+      { endpoint: "GET /api/workspaces/:workspaceId/lark/installations" },
+    );
+  }
+
+  async updateLarkNotificationEvents(
+    workspaceId: string,
+    eventTypes: LarkNotificationEventType[],
+  ): Promise<LarkWorkspaceNotificationPolicy> {
+    const raw = await this.fetch<unknown>(
+      `/api/workspaces/${workspaceId}/lark/notification-events`,
+      {
+        method: "PUT",
+        body: JSON.stringify({ event_types: eventTypes }),
+      },
+    );
+    const policy = parseWithFallback(raw, LarkWorkspaceNotificationPolicySchema, createEmptyLarkWorkspaceNotificationPolicy(), {
+      endpoint: "PUT /api/workspaces/:workspaceId/lark/notification-events",
+    });
+    if (!policy.workspace_id) {
+		throw new Error("Invalid Lark notification events response: missing workspace id");
+    }
+	return policy;
   }
 
   async beginLarkInstall(
@@ -2339,6 +2372,37 @@ export class ApiClient {
     // choice rather than silently defaulting to mainland.
     const search = new URLSearchParams({ agent_id: agentId, region });
     return this.fetch(`/api/workspaces/${workspaceId}/lark/install/begin?${search.toString()}`, {
+      method: "POST",
+    });
+  }
+
+  async beginLarkRuntimeInstall(
+    workspaceId: string,
+    runtimeId: string,
+    region: "feishu" | "lark",
+  ): Promise<BeginLarkInstallResponse> {
+    const search = new URLSearchParams({ runtime_id: runtimeId, region });
+    return this.fetch(`/api/workspaces/${workspaceId}/lark/install/begin?${search.toString()}`, {
+      method: "POST",
+    });
+  }
+
+  async beginLarkNotificationInstall(
+    workspaceId: string,
+    region: "feishu" | "lark",
+  ): Promise<BeginLarkInstallResponse> {
+    const search = new URLSearchParams({ region });
+    return this.fetch(`/api/workspaces/${workspaceId}/lark/notification-install/begin?${search.toString()}`, {
+      method: "POST",
+    });
+  }
+
+  async beginLarkMemberInstall(
+    workspaceId: string,
+    region: "feishu" | "lark",
+  ): Promise<BeginLarkInstallResponse> {
+    const search = new URLSearchParams({ region });
+    return this.fetch(`/api/workspaces/${workspaceId}/lark/member-install/begin?${search.toString()}`, {
       method: "POST",
     });
   }

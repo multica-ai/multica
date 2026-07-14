@@ -49,7 +49,10 @@ export function IntegrationsTab({ agent }: { agent: Agent }) {
     currentMember?.role === "owner" || currentMember?.role === "admin";
   const hasActiveInstall =
     listing?.installations.some(
-      (inst) => inst.agent_id === agent.id && inst.status === "active",
+      (inst) =>
+        (inst.installation_kind ?? "agent") === "agent" &&
+        inst.agent_id === agent.id &&
+        inst.status === "active",
     ) ?? false;
 
   return (

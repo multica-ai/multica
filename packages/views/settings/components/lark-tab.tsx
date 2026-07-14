@@ -15,6 +15,7 @@ import { QRCode } from "react-qr-code";
 import { cn } from "@multica/ui/lib/utils";
 import { Button } from "@multica/ui/components/ui/button";
 import { Card, CardContent } from "@multica/ui/components/ui/card";
+import { NativeSelect, NativeSelectOption } from "@multica/ui/components/ui/native-select";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -38,10 +39,12 @@ import { useWorkspaceId } from "@multica/core/hooks";
 import { memberListOptions } from "@multica/core/workspace/queries";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { larkInstallationsOptions, larkKeys } from "@multica/core/lark";
+import { runtimeListOptions } from "@multica/core/runtimes/queries";
 import { api, ApiError } from "@multica/core/api";
-import type { LarkInstallation, LarkInstallStatusResponse } from "@multica/core/types";
+import type { AgentRuntime, LarkInstallation, LarkInstallStatusResponse } from "@multica/core/types";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { useT } from "../../i18n";
+import { LarkNotificationEvents } from "./lark-notification-events";
 
 // MUL-3083: the Lark (international, open.larksuite.com) "connect a Bot"
 // entry is temporarily hidden while its install → inbound pipeline is
@@ -51,6 +54,11 @@ import { useT } from "../../i18n";
 // installations (either cloud) stay fully manageable. Flip this back to
 // `true` to restore the "Bind to Lark" CTA; nothing else needs to change.
 const LARK_INTL_CONNECT_ENABLED: boolean = false;
+
+// Runtime Bot is kept behind a local product flag while the workspace
+// Notification Bot remains the only settings-level Feishu entry. The
+// backend and existing installations stay intact for a later rollout.
+const RUNTIME_BOT_CONNECT_ENABLED: boolean = false;
 
 // LarkTab is the workspace settings panel for Lark Bot installations.
 // Listing is member-visible; the disconnect action is admin-only (the
@@ -77,7 +85,20 @@ export function LarkTab() {
     ...larkInstallationsOptions(wsId),
     enabled: !!wsId,
   });
+  const { data: runtimes = [], isLoading: runtimesLoading } = useQuery({
+    ...runtimeListOptions(wsId),
+    enabled: RUNTIME_BOT_CONNECT_ENABLED && !!wsId,
+  });
   const installations = data?.installations ?? [];
+  const agentInstallations = installations.filter(
+    (inst) => (inst.installation_kind ?? "agent") === "agent",
+  );
+  const memberBot = installations.find(
+    (inst) => inst.installation_kind === "member" && inst.status === "active",
+  );
+  const notificationBot = installations.find(
+    (inst) => inst.installation_kind === "notification" && inst.status === "active",
+  );
   const configured = data?.configured === true;
   // install_supported tracks whether the device-flow install path is
   // wired end-to-end on the server. When false, scan-to-bind would
@@ -89,6 +110,26 @@ export function LarkTab() {
 
   const [disconnectTarget, setDisconnectTarget] = useState<string | null>(null);
   const [disconnecting, setDisconnecting] = useState(false);
+  const [notificationDialogOpen, setNotificationDialogOpen] = useState(false);
+  const [runtimeDialog, setRuntimeDialog] = useState<null | {
+    runtimeId: string;
+    runtimeName: string;
+  }>(null);
+  const [selectedRuntimeId, setSelectedRuntimeId] = useState("");
+  const selectedRuntime =
+    runtimes.find((runtime) => runtime.id === selectedRuntimeId) ?? runtimes[0] ?? null;
+  const selectedRuntimeInstallation = selectedRuntime
+    ? agentInstallations.find(
+        (inst) =>
+          inst.runtime_id === selectedRuntime.id && inst.status === "active",
+      ) ?? null
+    : null;
+
+  useEffect(() => {
+    if (selectedRuntimeId || runtimes.length === 0) return;
+    const preferred = runtimes.find((runtime) => runtime.status === "online") ?? runtimes[0];
+    setSelectedRuntimeId(preferred?.id ?? "");
+  }, [runtimes, selectedRuntimeId]);
 
   async function handleDisconnect() {
     if (!disconnectTarget || disconnecting) return;
@@ -113,6 +154,143 @@ export function LarkTab() {
         </p>
       </section>
 
+      <section className="space-y-3">
+        <div>
+          <h2 className="text-sm font-semibold">{t(($) => $.notifications.lark.title)}</h2>
+          <p className="text-sm text-muted-foreground mt-1">
+            {t(($) => $.notifications.lark.description)}
+          </p>
+        </div>
+
+        <Card>
+          <CardContent>
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="space-y-0.5">
+                <p className="text-sm font-medium">
+                  {memberBot
+                    ? t(($) => $.notifications.lark.connected_label)
+                    : t(($) => $.notifications.lark.disconnected_label)}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  {memberBot
+                    ? t(($) => $.notifications.lark.connected_hint)
+                    : configured && installSupported
+                      ? t(($) => $.notifications.lark.disconnected_hint)
+                      : t(($) => $.notifications.lark.unavailable_hint)}
+                </p>
+              </div>
+              {memberBot ? (
+                <span className="inline-flex items-center gap-2 text-xs text-muted-foreground">
+                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                  {t(($) => $.notifications.lark.feishu_badge)}
+                </span>
+              ) : (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={!configured || !installSupported}
+                  onClick={() => setNotificationDialogOpen(true)}
+                >
+                  <ExternalLink className="h-3 w-3" />
+                  {t(($) => $.notifications.lark.connect_feishu)}
+                </Button>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+        {(memberBot || notificationBot) && (
+          <LarkNotificationEvents
+            workspaceId={wsId}
+            installation={memberBot ?? notificationBot}
+            eventTypes={data?.notification_event_types}
+            canManage={canManage}
+          />
+        )}
+      </section>
+
+      {RUNTIME_BOT_CONNECT_ENABLED && <section className="space-y-3">
+        <div>
+          <h2 className="text-sm font-semibold">{t(($) => $.lark.runtime_bot_title)}</h2>
+          <p className="text-sm text-muted-foreground mt-1">
+            {t(($) => $.lark.runtime_bot_description)}
+          </p>
+        </div>
+
+        <Card>
+          <CardContent>
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+              <div className="space-y-2">
+                <p className="text-sm font-medium">
+                  {selectedRuntimeInstallation
+                    ? t(($) => $.lark.runtime_bot_connected_label)
+                    : t(($) => $.lark.runtime_bot_disconnected_label)}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  {!canManage
+                    ? t(($) => $.lark.runtime_bot_admin_required)
+                    : !configured || !installSupported
+                    ? t(($) => $.lark.runtime_bot_unavailable)
+                    : runtimes.length === 0
+                    ? t(($) => $.lark.runtime_bot_no_runtime)
+                    : selectedRuntimeInstallation
+                    ? t(($) => $.lark.runtime_bot_connected_hint)
+                    : t(($) => $.lark.runtime_bot_disconnected_hint)}
+                </p>
+              </div>
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                <NativeSelect
+                  size="sm"
+                  className="w-full sm:w-56"
+                  value={selectedRuntimeId}
+                  disabled={!canManage || runtimesLoading || runtimes.length === 0}
+                  onChange={(e) => setSelectedRuntimeId(e.target.value)}
+                  aria-label={t(($) => $.lark.runtime_bot_select_label)}
+                >
+                  {runtimes.length === 0 ? (
+                    <NativeSelectOption value="">
+                      {t(($) => $.lark.runtime_bot_select_empty)}
+                    </NativeSelectOption>
+                  ) : (
+                    runtimes.map((runtime) => (
+                      <NativeSelectOption key={runtime.id} value={runtime.id}>
+                        {runtimeLabel(runtime)}
+                      </NativeSelectOption>
+                    ))
+                  )}
+                </NativeSelect>
+                {selectedRuntimeInstallation ? (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={!canManage}
+                    onClick={() => setDisconnectTarget(selectedRuntimeInstallation.id)}
+                  >
+                    <Trash2 className="h-3 w-3" />
+                    {t(($) => $.lark.disconnect)}
+                  </Button>
+                ) : (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={!canManage || !configured || !installSupported || !selectedRuntime}
+                    onClick={() => {
+                      if (!selectedRuntime) return;
+                      setRuntimeDialog({
+                        runtimeId: selectedRuntime.id,
+                        runtimeName: runtimeLabel(selectedRuntime),
+                      });
+                    }}
+                  >
+                    <ExternalLink className="h-3 w-3" />
+                    {t(($) => $.lark.runtime_bot_connect_feishu)}
+                  </Button>
+                )}
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      </section>}
+
       {!configured ? (
         <Card>
           <CardContent className="space-y-2">
@@ -127,7 +305,7 @@ export function LarkTab() {
             </p>
           </CardContent>
         </Card>
-      ) : !installSupported && installations.length === 0 ? (
+      ) : !installSupported && agentInstallations.length === 0 ? (
         // Device-flow install path is not wired (HTTP client is the stub
         // or RegistrationService didn't initialize). We deliberately do
         // NOT direct users to the agent-detail "Bind" button because the
@@ -151,21 +329,19 @@ export function LarkTab() {
                 <p className="text-sm text-muted-foreground">{t(($) => $.lark.loading)}</p>
               </CardContent>
             </Card>
-          ) : installations.length === 0 ? (
+          ) : agentInstallations.length === 0 ? (
             <Card>
               <CardContent className="space-y-2">
                 <p className="text-sm font-medium">{t(($) => $.lark.empty_title)}</p>
                 <p className="text-xs text-muted-foreground">
-                  {t(($) => $.lark.empty_description_prefix)}{" "}
-                  <strong>{t(($) => $.lark.empty_description_cta)}</strong>{" "}
-                  {t(($) => $.lark.empty_description_suffix)}
+                  {t(($) => $.lark.empty_description_runtime)}
                 </p>
               </CardContent>
             </Card>
           ) : (
             <Card>
               <CardContent className="divide-y">
-                {installations.map((inst) => (
+                {agentInstallations.map((inst) => (
                   <InstallationRow
                     key={inst.id}
                     installation={inst}
@@ -206,7 +382,184 @@ export function LarkTab() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {notificationDialogOpen && (
+        <LarkNotificationInstallDialog
+          wsId={wsId}
+          onClose={() => setNotificationDialogOpen(false)}
+          onInstalled={() => {
+            void qc.invalidateQueries({ queryKey: larkKeys.installations(wsId) });
+          }}
+        />
+      )}
+      {RUNTIME_BOT_CONNECT_ENABLED && runtimeDialog && (
+        <LarkInstallDialog
+          wsId={wsId}
+          runtimeId={runtimeDialog.runtimeId}
+          runtimeName={runtimeDialog.runtimeName}
+          region="feishu"
+          onClose={() => setRuntimeDialog(null)}
+        />
+      )}
     </div>
+  );
+}
+
+function runtimeLabel(runtime: AgentRuntime): string {
+  const name = runtime.name?.trim() || runtime.provider || "Runtime";
+  const status = runtime.status === "online" ? "online" : runtime.status || "offline";
+  return `${name} · ${status}`;
+}
+
+function LarkNotificationInstallDialog({
+  wsId,
+  onClose,
+  onInstalled,
+}: {
+  wsId: string;
+  onClose: () => void;
+  onInstalled: () => void;
+}) {
+  const { t } = useT("settings");
+  const [session, setSession] = useState<null | {
+    sessionId: string;
+    qrCodeURL: string;
+    expiresInSeconds: number;
+    pollIntervalSeconds: number;
+  }>(null);
+  const [status, setStatus] = useState<LarkInstallStatusResponse["status"]>("pending");
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [beginning, setBeginning] = useState(false);
+  const closedRef = useRef(false);
+
+  async function beginSession() {
+    setBeginning(true);
+    setStatus("pending");
+    setErrorMessage(null);
+    setSession(null);
+    try {
+      const res = await api.beginLarkMemberInstall(wsId, "feishu");
+      if (closedRef.current) return;
+      setSession({
+        sessionId: res.session_id,
+        qrCodeURL: res.qr_code_url,
+        expiresInSeconds: res.expires_in_seconds,
+        pollIntervalSeconds: res.poll_interval_seconds,
+      });
+    } catch (e) {
+      if (closedRef.current) return;
+      setStatus("error");
+      setErrorMessage(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBeginning(false);
+    }
+  }
+
+  useEffect(() => {
+    closedRef.current = false;
+    void beginSession();
+    return () => {
+      closedRef.current = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    if (!session || status !== "pending") return;
+    let cancelled = false;
+    let timeout: ReturnType<typeof setTimeout> | null = null;
+    const startedAt = Date.now();
+
+    async function poll() {
+      if (cancelled || !session) return;
+      if (Date.now() - startedAt > session.expiresInSeconds * 1000) {
+        setStatus("error");
+        setErrorMessage(t(($) => $.notifications.lark.install_expired));
+        return;
+      }
+      try {
+        const res = await api.getLarkInstallStatus(wsId, session.sessionId);
+        if (cancelled) return;
+        if (res.status === "success") {
+          setStatus("success");
+          toast.success(t(($) => $.notifications.lark.toast_connected));
+          onInstalled();
+          onClose();
+          return;
+        }
+        if (res.status === "error") {
+          setStatus("error");
+          setErrorMessage(res.error_message || res.error_reason || t(($) => $.notifications.lark.install_failed));
+          return;
+        }
+      } catch (e) {
+        if (cancelled) return;
+        setStatus("error");
+        setErrorMessage(e instanceof Error ? e.message : t(($) => $.notifications.lark.install_failed));
+        return;
+      }
+      timeout = setTimeout(poll, Math.max(1, session.pollIntervalSeconds) * 1000);
+    }
+
+    timeout = setTimeout(poll, Math.max(1, session.pollIntervalSeconds) * 1000);
+    return () => {
+      cancelled = true;
+      if (timeout) clearTimeout(timeout);
+    };
+  }, [session, status, wsId, t, onClose, onInstalled]);
+
+  return (
+    <Dialog open onOpenChange={(open) => !open && onClose()}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>{t(($) => $.notifications.lark.install_title)}</DialogTitle>
+          <DialogDescription>
+            {t(($) => $.notifications.lark.install_description)}
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="flex min-h-56 flex-col items-center justify-center gap-4">
+          {beginning && (
+            <p className="text-sm text-muted-foreground">
+              {t(($) => $.notifications.lark.install_starting)}
+            </p>
+          )}
+          {!beginning && session && status === "pending" && (
+            <>
+              <div className="rounded-md border bg-white p-3">
+                <QRCode value={session.qrCodeURL} size={184} />
+              </div>
+              <a
+                href={session.qrCodeURL}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+              >
+                <ExternalLink className="h-3 w-3" />
+                {t(($) => $.notifications.lark.open_qr_link)}
+              </a>
+            </>
+          )}
+          {status === "error" && (
+            <div className="space-y-3 text-center">
+              <p className="text-sm text-destructive">
+                {errorMessage || t(($) => $.notifications.lark.install_failed)}
+              </p>
+              <Button variant="outline" size="sm" onClick={() => void beginSession()}>
+                <RefreshCw className="h-3 w-3" />
+                {t(($) => $.notifications.lark.retry)}
+              </Button>
+            </div>
+          )}
+        </div>
+
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>
+            {t(($) => $.notifications.lark.cancel)}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -228,6 +581,9 @@ function InstallationRow({
   // affordance below is the recovery path for that orphan row.
   const { getAgentName } = useActorName();
   const isActive = installation.status === "active";
+  if (!installation.agent_id) {
+    return null;
+  }
   const agentName = getAgentName(installation.agent_id);
   return (
     <div className="flex items-start justify-between gap-4 py-3 first:pt-0 last:pb-0">
@@ -348,7 +704,10 @@ export function LarkAgentBindButton({
   // close the install entry point and link to the Bot's Lark app page where
   // scopes / display name / additional permissions are actually managed.
   const existing = listing?.installations.find(
-    (inst) => inst.agent_id === agentId && inst.status === "active",
+    (inst) =>
+      (inst.installation_kind ?? "agent") === "agent" &&
+      inst.agent_id === agentId &&
+      inst.status === "active",
   );
   if (existing) {
     return onShowConnectedDetails ? (
@@ -647,12 +1006,16 @@ function LarkInstallDialog({
   wsId,
   agentId,
   agentName,
+  runtimeId,
+  runtimeName,
   region,
   onClose,
 }: {
   wsId: string;
-  agentId: string;
+  agentId?: string;
   agentName?: string;
+  runtimeId?: string;
+  runtimeName?: string;
   region: "feishu" | "lark";
   onClose: () => void;
 }) {
@@ -687,7 +1050,9 @@ function LarkInstallDialog({
     setErrorMessage(null);
     setSession(null);
     try {
-      const res = await api.beginLarkInstall(wsId, agentId, region);
+      const res = runtimeId
+        ? await api.beginLarkRuntimeInstall(wsId, runtimeId, region)
+        : await api.beginLarkInstall(wsId, agentId ?? "", region);
       if (closedRef.current) return;
       setSession({
         sessionId: res.session_id,
@@ -826,10 +1191,14 @@ function LarkInstallDialog({
           </DialogTitle>
           <DialogDescription>
             {region === "lark"
-              ? agentName
+              ? runtimeName
+                ? t(($) => $.lark.install_dialog_description_for_runtime_lark, { runtime: runtimeName })
+                : agentName
                 ? t(($) => $.lark.install_dialog_description_for_agent_lark, { agent: agentName })
                 : t(($) => $.lark.install_dialog_description_lark)
-              : agentName
+              : runtimeName
+                ? t(($) => $.lark.install_dialog_description_for_runtime_feishu, { runtime: runtimeName })
+                : agentName
                 ? t(($) => $.lark.install_dialog_description_for_agent_feishu, { agent: agentName })
                 : t(($) => $.lark.install_dialog_description_feishu)}
           </DialogDescription>
