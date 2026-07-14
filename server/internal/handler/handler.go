@@ -113,6 +113,10 @@ type Config struct {
 	// Surfaced through /api/config so self-hosted operators can confirm which
 	// server build is deployed. Empty in dev builds.
 	ServerVersion string
+	// External identity aliases are immutable claims. The endpoint fails closed
+	// unless both an exact authenticated user UUID and namespace allowlist are configured.
+	ExternalUpsertPrincipalID string
+	ExternalUpsertNamespaces  []string
 }
 
 type cloudRuntimeProxy interface {

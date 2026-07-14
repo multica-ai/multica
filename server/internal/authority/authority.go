@@ -3,8 +3,10 @@ package authority
 import (
 	"crypto/ed25519"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/binary"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -14,6 +16,8 @@ import (
 )
 
 const ProtocolVersion = "multica-authority-attestation-v1"
+const WriteReceiptProtocolVersion = "multica-authority-write-receipt-v1"
+const OperationIssueUpsertExternal = "issue.upsert-external"
 
 type DBIdentity struct {
 	SystemIdentifier string `json:"system_identifier"`
@@ -38,6 +42,38 @@ type Attestation struct {
 	IssuedAt     string     `json:"issued_at"`
 	ServerCommit string     `json:"server_commit"`
 	Signature    string     `json:"signature"`
+}
+
+type WriteReceiptStatement struct {
+	Protocol      string
+	Operation     string
+	RequestSHA256 string
+	ResourceID    string
+	Nonce         string
+	AuthorityID   string
+	DBIdentity    DBIdentity
+	IssuedAt      time.Time
+	ServerCommit  string
+}
+
+type WriteReceipt struct {
+	Protocol      string     `json:"protocol"`
+	Operation     string     `json:"operation"`
+	RequestSHA256 string     `json:"request_sha256"`
+	ResourceID    string     `json:"resource_id"`
+	Nonce         string     `json:"nonce"`
+	AuthorityID   string     `json:"authority_id"`
+	DBIdentity    DBIdentity `json:"db_identity"`
+	IssuedAt      string     `json:"issued_at"`
+	ServerCommit  string     `json:"server_commit"`
+	Signature     string     `json:"signature"`
+}
+
+type WriteReceiptExpectation struct {
+	Operation     string
+	RequestSHA256 string
+	ResourceID    string
+	Nonce         string
 }
 
 type Pin struct {
@@ -109,6 +145,22 @@ func Sign(priv ed25519.PrivateKey, stmt Statement) (Attestation, error) {
 		IssuedAt:     stmt.IssuedAt.UTC().Format(time.RFC3339Nano),
 		ServerCommit: stmt.ServerCommit,
 		Signature:    base64.RawURLEncoding.EncodeToString(ed25519.Sign(priv, payload)),
+	}, nil
+}
+
+func SignWriteReceipt(priv ed25519.PrivateKey, stmt WriteReceiptStatement) (WriteReceipt, error) {
+	if len(priv) != ed25519.PrivateKeySize {
+		return WriteReceipt{}, errors.New("private key must be Ed25519")
+	}
+	payload, err := CanonicalWriteReceiptPayload(stmt)
+	if err != nil {
+		return WriteReceipt{}, err
+	}
+	return WriteReceipt{
+		Protocol: stmt.Protocol, Operation: stmt.Operation, RequestSHA256: stmt.RequestSHA256,
+		ResourceID: stmt.ResourceID, Nonce: stmt.Nonce, AuthorityID: stmt.AuthorityID,
+		DBIdentity: stmt.DBIdentity, IssuedAt: stmt.IssuedAt.UTC().Format(time.RFC3339Nano),
+		ServerCommit: stmt.ServerCommit, Signature: base64.RawURLEncoding.EncodeToString(ed25519.Sign(priv, payload)),
 	}, nil
 }
 
@@ -188,6 +240,84 @@ func Verify(att Attestation, pin Pin, serverURL string, now time.Time, maxAge, f
 	return nil
 }
 
+func VerifyWriteReceipt(receipt WriteReceipt, pin Pin, serverURL string, now time.Time, maxAge, futureSkew time.Duration) error {
+	if receipt.Protocol != WriteReceiptProtocolVersion {
+		return errors.New("unexpected write receipt protocol")
+	}
+	if _, err := ValidateNonce(receipt.Nonce); err != nil {
+		return fmt.Errorf("invalid nonce: %w", err)
+	}
+	if pin.AuthorityID == "" || receipt.AuthorityID != pin.AuthorityID {
+		return errors.New("authority id does not match pin")
+	}
+	if receipt.DBIdentity != pin.DBIdentity {
+		return errors.New("database identity does not match pin")
+	}
+	normalizedPin, err := NormalizeServerURL(pin.ServerURL)
+	if err != nil {
+		return fmt.Errorf("invalid pinned server url: %w", err)
+	}
+	normalizedServer, err := NormalizeServerURL(serverURL)
+	if err != nil {
+		return fmt.Errorf("invalid server url: %w", err)
+	}
+	if normalizedPin != normalizedServer {
+		return errors.New("server url does not match authority pin")
+	}
+	issuedAt, err := time.Parse(time.RFC3339Nano, receipt.IssuedAt)
+	if err != nil || issuedAt.UTC().Format(time.RFC3339Nano) != receipt.IssuedAt {
+		return errors.New("issued_at must use canonical UTC RFC3339Nano encoding")
+	}
+	if now.IsZero() {
+		now = time.Now()
+	}
+	if futureSkew < 0 || maxAge <= 0 {
+		return errors.New("invalid freshness bounds")
+	}
+	if issuedAt.After(now.Add(futureSkew)) {
+		return errors.New("write receipt issued_at is in the future")
+	}
+	if now.Sub(issuedAt) > maxAge {
+		return errors.New("write receipt is stale")
+	}
+	pub, err := DecodePublicKey(pin.PublicKey)
+	if err != nil {
+		return err
+	}
+	sig, err := base64.RawURLEncoding.Strict().DecodeString(receipt.Signature)
+	if err != nil || len(sig) != ed25519.SignatureSize || base64.RawURLEncoding.EncodeToString(sig) != receipt.Signature {
+		return errors.New("invalid write receipt signature encoding")
+	}
+	payload, err := CanonicalWriteReceiptPayload(WriteReceiptStatement{
+		Protocol: receipt.Protocol, Operation: receipt.Operation, RequestSHA256: receipt.RequestSHA256,
+		ResourceID: receipt.ResourceID, Nonce: receipt.Nonce, AuthorityID: receipt.AuthorityID,
+		DBIdentity: receipt.DBIdentity, IssuedAt: issuedAt, ServerCommit: receipt.ServerCommit,
+	})
+	if err != nil {
+		return err
+	}
+	if !ed25519.Verify(pub, payload, sig) {
+		return errors.New("signature verification failed")
+	}
+	return nil
+}
+
+func VerifyBoundWriteReceipt(receipt WriteReceipt, expected WriteReceiptExpectation, pin Pin, serverURL string, now time.Time, maxAge, futureSkew time.Duration) error {
+	if receipt.Operation != expected.Operation {
+		return errors.New("write receipt operation mismatch")
+	}
+	if receipt.RequestSHA256 != expected.RequestSHA256 {
+		return errors.New("write receipt request digest mismatch")
+	}
+	if receipt.ResourceID != expected.ResourceID || expected.ResourceID == "" {
+		return errors.New("write receipt resource mismatch")
+	}
+	if receipt.Nonce != expected.Nonce {
+		return errors.New("write receipt nonce mismatch")
+	}
+	return VerifyWriteReceipt(receipt, pin, serverURL, now, maxAge, futureSkew)
+}
+
 func CanonicalPayload(stmt Statement) ([]byte, error) {
 	if stmt.Protocol != ProtocolVersion {
 		return nil, errors.New("unsupported protocol")
@@ -204,8 +334,8 @@ func CanonicalPayload(stmt Statement) ([]byte, error) {
 	if stmt.IssuedAt.IsZero() {
 		return nil, errors.New("issued_at is required")
 	}
-	if strings.TrimSpace(stmt.ServerCommit) == "" {
-		return nil, errors.New("server commit is required")
+	if err := ValidateServerCommit(stmt.ServerCommit); err != nil {
+		return nil, err
 	}
 
 	var b []byte
@@ -229,6 +359,66 @@ func CanonicalPayload(stmt Statement) ([]byte, error) {
 	appendField("issued_at", stmt.IssuedAt.UTC().Format(time.RFC3339Nano))
 	appendField("server_commit", stmt.ServerCommit)
 	return b, nil
+}
+
+func CanonicalWriteReceiptPayload(stmt WriteReceiptStatement) ([]byte, error) {
+	if stmt.Protocol != WriteReceiptProtocolVersion {
+		return nil, errors.New("unsupported write receipt protocol")
+	}
+	if stmt.Operation == "" || len(stmt.Operation) > 128 {
+		return nil, errors.New("operation is required")
+	}
+	if raw, err := hex.DecodeString(stmt.RequestSHA256); err != nil || len(raw) != sha256.Size || hex.EncodeToString(raw) != stmt.RequestSHA256 {
+		return nil, errors.New("request_sha256 must be canonical lowercase SHA-256 hex")
+	}
+	if strings.TrimSpace(stmt.ResourceID) == "" {
+		return nil, errors.New("resource id is required")
+	}
+	if _, err := ValidateNonce(stmt.Nonce); err != nil {
+		return nil, err
+	}
+	if err := validateAuthorityID(stmt.AuthorityID); err != nil {
+		return nil, err
+	}
+	if err := validateDBIdentity(stmt.DBIdentity); err != nil {
+		return nil, err
+	}
+	if stmt.IssuedAt.IsZero() {
+		return nil, errors.New("issued_at is required")
+	}
+	if err := ValidateServerCommit(stmt.ServerCommit); err != nil {
+		return nil, err
+	}
+	fields := [][2]string{
+		{"protocol", stmt.Protocol}, {"operation", stmt.Operation}, {"request_sha256", stmt.RequestSHA256},
+		{"resource_id", stmt.ResourceID}, {"nonce", stmt.Nonce}, {"authority_id", stmt.AuthorityID},
+		{"db_system_identifier", stmt.DBIdentity.SystemIdentifier}, {"db_oid", fmt.Sprintf("%d", stmt.DBIdentity.DatabaseOID)},
+		{"db_name", stmt.DBIdentity.DatabaseName}, {"issued_at", stmt.IssuedAt.UTC().Format(time.RFC3339Nano)}, {"server_commit", stmt.ServerCommit},
+	}
+	var b []byte
+	b = append(b, []byte("multica-authority-write-receipt-signed-payload")...)
+	b = append(b, 0)
+	for _, field := range fields {
+		var lenbuf [4]byte
+		binary.BigEndian.PutUint32(lenbuf[:], uint32(len(field[0])))
+		b = append(b, lenbuf[:]...)
+		b = append(b, field[0]...)
+		binary.BigEndian.PutUint32(lenbuf[:], uint32(len(field[1])))
+		b = append(b, lenbuf[:]...)
+		b = append(b, field[1]...)
+	}
+	return b, nil
+}
+
+func ValidateServerCommit(commit string) error {
+	commit = strings.TrimSpace(commit)
+	if commit == "" {
+		return errors.New("server commit is required")
+	}
+	if strings.EqualFold(commit, "unknown") {
+		return errors.New("server commit must be known")
+	}
+	return nil
 }
 
 func NormalizeServerURL(raw string) (string, error) {

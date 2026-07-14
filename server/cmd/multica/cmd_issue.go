@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -18,6 +20,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/multica-ai/multica/server/internal/authority"
 	"github.com/multica-ai/multica/server/internal/cli"
 	"github.com/multica-ai/multica/server/internal/util"
 )
@@ -1253,8 +1256,22 @@ func runIssueUpsertExternal(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
-	if _, err := verifyAuthorityForCommand(cmd); err != nil {
-		return fmt.Errorf("authority verification failed: %w", err)
+	nonce, err := authority.GenerateNonce(nil)
+	if err != nil {
+		return fmt.Errorf("generate write nonce: %w", err)
+	}
+	body["nonce"] = nonce
+	rawRequest, err := json.Marshal(body)
+	if err != nil {
+		return fmt.Errorf("encode external upsert request: %w", err)
+	}
+	requestDigest := sha256.Sum256(rawRequest)
+	cfg, err := cli.LoadCLIConfigForProfile(resolveProfile(cmd))
+	if err != nil {
+		return err
+	}
+	if cfg.AuthorityPin == nil {
+		return fmt.Errorf("authority pin is not configured; run multica authority pin with operator-provided values")
 	}
 	client, err := newAPIClient(cmd)
 	if err != nil {
@@ -1263,9 +1280,21 @@ func runIssueUpsertExternal(cmd *cobra.Command, _ []string) error {
 	ctx, cancel := cli.APIContext(context.Background())
 	defer cancel()
 
-	var result map[string]any
-	if err := client.PostJSON(ctx, "/api/issues/upsert-external", body, &result); err != nil {
+	var envelope struct {
+		Issue   json.RawMessage        `json:"issue"`
+		Receipt authority.WriteReceipt `json:"receipt"`
+	}
+	if err := client.PostRawJSONStrict(ctx, "/api/issues/upsert-external", rawRequest, &envelope, 256*1024); err != nil {
 		return fmt.Errorf("upsert external issue: %w", err)
+	}
+	result, err := decodeExternalUpsertIssueStrict(envelope.Issue)
+	if err != nil {
+		return fmt.Errorf("decode external upsert issue: %w", err)
+	}
+	issueID := strVal(result, "id")
+	expected := authority.WriteReceiptExpectation{Operation: authority.OperationIssueUpsertExternal, RequestSHA256: fmt.Sprintf("%x", requestDigest), ResourceID: issueID, Nonce: nonce}
+	if err := authority.VerifyBoundWriteReceipt(envelope.Receipt, expected, *cfg.AuthorityPin, client.BaseURL, time.Now(), 2*time.Minute, 30*time.Second); err != nil {
+		return fmt.Errorf("verify write receipt: %w", err)
 	}
 	output, _ := cmd.Flags().GetString("output")
 	if output == "table" {
@@ -1280,6 +1309,36 @@ func runIssueUpsertExternal(cmd *cobra.Command, _ []string) error {
 		return nil
 	}
 	return cli.PrintJSON(os.Stdout, result)
+}
+
+func decodeExternalUpsertIssueStrict(raw json.RawMessage) (map[string]any, error) {
+	allowed := map[string]struct{}{}
+	for _, key := range []string{
+		"id", "workspace_id", "number", "identifier", "title", "description", "status", "priority",
+		"assignee_type", "assignee_id", "creator_type", "creator_id", "parent_issue_id", "project_id",
+		"position", "stage", "start_date", "due_date", "created_at", "updated_at", "metadata",
+		"reactions", "attachments", "labels",
+	} {
+		allowed[key] = struct{}{}
+	}
+	var fields map[string]json.RawMessage
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	if err := dec.Decode(&fields); err != nil || fields == nil {
+		return nil, fmt.Errorf("issue must be a JSON object")
+	}
+	if err := dec.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		return nil, fmt.Errorf("issue contains trailing JSON")
+	}
+	for key := range fields {
+		if _, ok := allowed[key]; !ok {
+			return nil, fmt.Errorf("unknown issue field %q", key)
+		}
+	}
+	var issue map[string]any
+	if err := json.Unmarshal(raw, &issue); err != nil {
+		return nil, err
+	}
+	return issue, nil
 }
 
 func buildIssueUpsertExternalBody(cmd *cobra.Command) (map[string]any, error) {

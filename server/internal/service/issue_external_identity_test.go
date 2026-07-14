@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"strings"
 	"sync"
 	"testing"
@@ -257,6 +258,90 @@ func TestIssueExternalIdentityUpsertConflictDoesNotMutate(t *testing.T) {
 	}
 }
 
+func TestIssueExternalIdentityUpsertVerifiesMappingAfterDoNothing(t *testing.T) {
+	ctx := context.Background()
+	pool := newExternalIdentityPool(t)
+	fixture := createExternalIdentityFixture(t, ctx, pool)
+	svc := NewIssueService(db.New(pool), pool, events.New(), nil, nil)
+	target, err := svc.Create(ctx, externalCreateParams(fixture, "Competing mapped issue"), IssueCreateOpts{})
+	if err != nil {
+		t.Fatalf("create competing issue: %v", err)
+	}
+	const lockKey int64 = 360181
+	if _, err := pool.Exec(ctx, `
+		CREATE OR REPLACE FUNCTION equ36_block_external_issue_create() RETURNS trigger AS $$
+		BEGIN
+			IF NEW.title = 'External mapping verify probe' THEN PERFORM pg_advisory_xact_lock(360181); END IF;
+			RETURN NEW;
+		END;
+		$$ LANGUAGE plpgsql;
+		DROP TRIGGER IF EXISTS equ36_block_external_issue_create ON issue;
+		CREATE TRIGGER equ36_block_external_issue_create AFTER INSERT ON issue
+		FOR EACH ROW EXECUTE FUNCTION equ36_block_external_issue_create();
+	`); err != nil {
+		t.Fatalf("install mapping verification trigger: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DROP TRIGGER IF EXISTS equ36_block_external_issue_create ON issue`)
+		_, _ = pool.Exec(context.Background(), `DROP FUNCTION IF EXISTS equ36_block_external_issue_create()`)
+	})
+	blocker, err := pool.Acquire(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer blocker.Release()
+	if _, err := blocker.Exec(ctx, `SELECT pg_advisory_lock($1)`, lockKey); err != nil {
+		t.Fatal(err)
+	}
+	defer blocker.Exec(context.Background(), `SELECT pg_advisory_unlock($1)`, lockKey)
+
+	errCh := make(chan error, 1)
+	go func() {
+		_, upsertErr := svc.UpsertExternalIdentity(ctx, IssueExternalIdentityUpsertParams{
+			WorkspaceID: fixture.workspaceID, Aliases: []ExternalIdentityAlias{{Namespace: "github-node", ExternalID: "do-nothing-conflict"}},
+			Create: externalCreateParams(fixture, "External mapping verify probe"), CreatorType: "member", CreatorID: fixture.userID,
+		})
+		errCh <- upsertErr
+	}()
+	deadline := time.Now().Add(10 * time.Second)
+	waiting := false
+	for time.Now().Before(deadline) {
+		if err := pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM pg_locks WHERE locktype='advisory' AND objid::bigint=$1 AND NOT granted)`, lockKey).Scan(&waiting); err != nil {
+			t.Fatal(err)
+		}
+		if waiting {
+			break
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	if !waiting {
+		t.Fatal("upsert did not reach post-create insertion window")
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO issue_external_identity(workspace_id, namespace, external_id, issue_id) VALUES($1,'github-node','do-nothing-conflict',$2)`, fixture.workspaceID, target.Issue.ID); err != nil {
+		t.Fatalf("insert competing mapping: %v", err)
+	}
+	if _, err := blocker.Exec(ctx, `SELECT pg_advisory_unlock($1)`, lockKey); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-errCh; !errors.Is(err, ErrExternalIdentityConflict) {
+		t.Fatalf("upsert error = %v, want ErrExternalIdentityConflict", err)
+	}
+	var mapped pgtype.UUID
+	if err := pool.QueryRow(ctx, `SELECT issue_id FROM issue_external_identity WHERE workspace_id=$1 AND namespace='github-node' AND external_id='do-nothing-conflict'`, fixture.workspaceID).Scan(&mapped); err != nil {
+		t.Fatal(err)
+	}
+	if mapped != target.Issue.ID {
+		t.Fatalf("mapping changed to %s", util.UUIDToString(mapped))
+	}
+	var createdCount int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM issue WHERE workspace_id=$1 AND title='External mapping verify probe'`, fixture.workspaceID).Scan(&createdCount); err != nil {
+		t.Fatal(err)
+	}
+	if createdCount != 0 {
+		t.Fatalf("conflicting upsert left %d created issues", createdCount)
+	}
+}
+
 func TestIssueExternalIdentityUpsertExplicitTargetAndPreserveFields(t *testing.T) {
 	ctx := context.Background()
 	pool := newExternalIdentityPool(t)
@@ -464,6 +549,130 @@ func TestIssueExternalIdentityUpsertRollbackLeavesNoIssueOrIdentityOrphan(t *tes
 	}
 	if issueCount != 0 || identityCount != 0 {
 		t.Fatalf("rollback left orphans: issues=%d identities=%d", issueCount, identityCount)
+	}
+}
+
+func TestIssueExternalIdentityUpsertProcessInterruptionRollsBackAllEffects(t *testing.T) {
+	if os.Getenv("MULTICA_EXTERNAL_UPSERT_INTERRUPT_HELPER") == "1" {
+		dsn := os.Getenv("MULTICA_EXTERNAL_UPSERT_INTERRUPT_DSN")
+		cfg, err := pgxpool.ParseConfig(dsn)
+		if err != nil {
+			t.Fatalf("parse helper dsn: %v", err)
+		}
+		if cfg.ConnConfig.RuntimeParams == nil {
+			cfg.ConnConfig.RuntimeParams = make(map[string]string)
+		}
+		cfg.ConnConfig.RuntimeParams["application_name"] = os.Getenv("MULTICA_EXTERNAL_UPSERT_INTERRUPT_APP")
+		pool, err := pgxpool.NewWithConfig(context.Background(), cfg)
+		if err != nil {
+			t.Fatalf("helper pool: %v", err)
+		}
+		defer pool.Close()
+		fixture := externalIdentityFixture{
+			workspaceID: util.MustParseUUID(os.Getenv("MULTICA_EXTERNAL_UPSERT_INTERRUPT_WORKSPACE")),
+			userID:      util.MustParseUUID(os.Getenv("MULTICA_EXTERNAL_UPSERT_INTERRUPT_USER")),
+		}
+		svc := NewIssueService(db.New(pool), pool, events.New(), nil, nil)
+		_, err = svc.UpsertExternalIdentity(context.Background(), IssueExternalIdentityUpsertParams{
+			WorkspaceID:   fixture.workspaceID,
+			Aliases:       []ExternalIdentityAlias{{Namespace: "github-node", ExternalID: os.Getenv("MULTICA_EXTERNAL_UPSERT_INTERRUPT_EXTERNAL_ID")}},
+			Create:        externalCreateParams(fixture, os.Getenv("MULTICA_EXTERNAL_UPSERT_INTERRUPT_TITLE")),
+			MetadataPatch: []byte(`{"interrupt_probe":true}`), CreatorType: "member", CreatorID: fixture.userID,
+		})
+		if err != nil {
+			t.Fatalf("helper upsert: %v", err)
+		}
+		return
+	}
+
+	ctx := context.Background()
+	pool := newExternalIdentityPool(t)
+	fixture := createExternalIdentityFixture(t, ctx, pool)
+	token := fmt.Sprintf("interrupt-%d", time.Now().UnixNano())
+	title := "Interrupt rollback " + token
+	const lockKey int64 = 360180
+	if _, err := pool.Exec(ctx, `
+		CREATE OR REPLACE FUNCTION equ36_block_external_upsert_interrupt() RETURNS trigger AS $$
+		BEGIN
+			IF NEW.metadata ? 'interrupt_probe' THEN
+				PERFORM pg_advisory_xact_lock(360180);
+			END IF;
+			RETURN NEW;
+		END;
+		$$ LANGUAGE plpgsql;
+		DROP TRIGGER IF EXISTS equ36_block_external_upsert_interrupt ON issue;
+		CREATE TRIGGER equ36_block_external_upsert_interrupt
+		AFTER UPDATE OF metadata ON issue
+		FOR EACH ROW EXECUTE FUNCTION equ36_block_external_upsert_interrupt();
+	`); err != nil {
+		t.Fatalf("install interruption trigger: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DROP TRIGGER IF EXISTS equ36_block_external_upsert_interrupt ON issue`)
+		_, _ = pool.Exec(context.Background(), `DROP FUNCTION IF EXISTS equ36_block_external_upsert_interrupt()`)
+	})
+
+	blocker, err := pool.Acquire(ctx)
+	if err != nil {
+		t.Fatalf("acquire blocker: %v", err)
+	}
+	defer blocker.Release()
+	if _, err := blocker.Exec(ctx, `SELECT pg_advisory_lock($1)`, lockKey); err != nil {
+		t.Fatalf("lock blocker: %v", err)
+	}
+	defer blocker.Exec(context.Background(), `SELECT pg_advisory_unlock($1)`, lockKey)
+
+	appName := "equ36-interrupt-" + token
+	dsn := pool.Config().ConnString()
+	cmd := exec.Command(os.Args[0], "-test.run=^TestIssueExternalIdentityUpsertProcessInterruptionRollsBackAllEffects$", "-test.count=1")
+	cmd.Env = append(os.Environ(),
+		"MULTICA_EXTERNAL_UPSERT_INTERRUPT_HELPER=1",
+		"MULTICA_EXTERNAL_UPSERT_INTERRUPT_DSN="+dsn,
+		"MULTICA_EXTERNAL_UPSERT_INTERRUPT_APP="+appName,
+		"MULTICA_EXTERNAL_UPSERT_INTERRUPT_WORKSPACE="+util.UUIDToString(fixture.workspaceID),
+		"MULTICA_EXTERNAL_UPSERT_INTERRUPT_USER="+util.UUIDToString(fixture.userID),
+		"MULTICA_EXTERNAL_UPSERT_INTERRUPT_EXTERNAL_ID="+token,
+		"MULTICA_EXTERNAL_UPSERT_INTERRUPT_TITLE="+title,
+	)
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start helper: %v", err)
+	}
+	deadline := time.Now().Add(15 * time.Second)
+	blocked := false
+	for time.Now().Before(deadline) {
+		if err := pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE application_name=$1 AND wait_event_type='Lock')`, appName).Scan(&blocked); err != nil {
+			t.Fatalf("observe helper: %v", err)
+		}
+		if blocked {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if !blocked {
+		_ = cmd.Process.Kill()
+		_, _ = cmd.Process.Wait()
+		t.Fatal("helper did not block after alias mutation")
+	}
+	if err := cmd.Process.Kill(); err != nil {
+		t.Fatalf("terminate helper: %v", err)
+	}
+	_, _ = cmd.Process.Wait()
+	if _, err := blocker.Exec(ctx, `SELECT pg_advisory_unlock($1)`, lockKey); err != nil {
+		t.Fatalf("unlock blocker: %v", err)
+	}
+
+	var issueCount, aliasCount, metadataCount int
+	for deadline = time.Now().Add(5 * time.Second); time.Now().Before(deadline); {
+		_ = pool.QueryRow(ctx, `SELECT count(*) FROM issue WHERE workspace_id=$1 AND title=$2`, fixture.workspaceID, title).Scan(&issueCount)
+		_ = pool.QueryRow(ctx, `SELECT count(*) FROM issue_external_identity WHERE workspace_id=$1 AND namespace='github-node' AND external_id=$2`, fixture.workspaceID, token).Scan(&aliasCount)
+		_ = pool.QueryRow(ctx, `SELECT count(*) FROM issue WHERE workspace_id=$1 AND metadata @> '{"interrupt_probe":true}'::jsonb`, fixture.workspaceID).Scan(&metadataCount)
+		if issueCount == 0 && aliasCount == 0 && metadataCount == 0 {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if issueCount != 0 || aliasCount != 0 || metadataCount != 0 {
+		t.Fatalf("interrupted process left effects: issues=%d aliases=%d metadata=%d", issueCount, aliasCount, metadataCount)
 	}
 }
 

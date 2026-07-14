@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"net/http"
 	"os"
@@ -31,6 +32,21 @@ var (
 	version = "dev"
 	commit  = "unknown"
 )
+
+func validateExternalUpsertStartupConfig(getenv func(string) string, signer *authority.Signer) error {
+	principalConfigured := strings.TrimSpace(getenv("MULTICA_EXTERNAL_UPSERT_PRINCIPAL_ID")) != ""
+	namespacesConfigured := strings.TrimSpace(getenv("MULTICA_EXTERNAL_UPSERT_NAMESPACES")) != ""
+	if !principalConfigured && !namespacesConfigured {
+		return nil
+	}
+	if !principalConfigured || !namespacesConfigured {
+		return errors.New("MULTICA_EXTERNAL_UPSERT_PRINCIPAL_ID and MULTICA_EXTERNAL_UPSERT_NAMESPACES must both be configured")
+	}
+	if signer == nil {
+		return errors.New("external upsert requires the authority signer to be configured")
+	}
+	return nil
+}
 
 func newNamedRedisClient(base *redis.Options, suffix string) *redis.Client {
 	opts := *base
@@ -356,6 +372,16 @@ func main() {
 	if err != nil {
 		slog.Error("authority attestation configuration invalid", "error", err)
 		os.Exit(1)
+	}
+	if err := validateExternalUpsertStartupConfig(os.Getenv, authoritySigner); err != nil {
+		slog.Error("external upsert configuration invalid", "error", err)
+		os.Exit(1)
+	}
+	if authoritySigner != nil {
+		if err := authority.ValidateServerCommit(commit); err != nil {
+			slog.Error("authority write receipt requires a known server commit", "error", err)
+			os.Exit(1)
+		}
 	}
 
 	r, h := NewRouterWithOptions(pool, hub, bus, analyticsClient, storeRedis, RouterOptions{

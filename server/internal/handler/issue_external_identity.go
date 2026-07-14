@@ -1,13 +1,19 @@
 package handler
 
 import (
+	"bytes"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
+	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/authority"
 	"github.com/multica-ai/multica/server/internal/logger"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/service"
@@ -21,6 +27,7 @@ type externalIdentityAliasRequest struct {
 }
 
 type upsertIssueExternalIdentityRequest struct {
+	Nonce         string                         `json:"nonce"`
 	Aliases       []externalIdentityAliasRequest `json:"aliases"`
 	TargetIssueID *string                        `json:"target_issue_id"`
 	Create        *CreateIssueRequest            `json:"create"`
@@ -28,8 +35,13 @@ type upsertIssueExternalIdentityRequest struct {
 }
 
 func (h *Handler) UpsertIssueExternalIdentity(w http.ResponseWriter, r *http.Request) {
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 64*1024))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
 	var req upsertIssueExternalIdentityRequest
-	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64*1024))
+	dec := json.NewDecoder(bytes.NewReader(body))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -41,6 +53,24 @@ func (h *Handler) UpsertIssueExternalIdentity(w http.ResponseWriter, r *http.Req
 	}
 	if len(req.Aliases) == 0 {
 		writeError(w, http.StatusBadRequest, "at least one alias is required")
+		return
+	}
+	for _, alias := range req.Aliases {
+		if !service.IsValidExternalIdentityNamespace(strings.TrimSpace(alias.Namespace)) || alias.ExternalID == "" {
+			writeError(w, http.StatusBadRequest, "invalid alias")
+			return
+		}
+	}
+	if _, err := authority.ValidateNonce(req.Nonce); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid nonce")
+		return
+	}
+	if status, message := h.externalUpsertAuthorizationError(r, req.Aliases); status != 0 {
+		writeError(w, status, message)
+		return
+	}
+	if h.AuthoritySigner == nil || authority.ValidateServerCommit(h.ServerCommit) != nil {
+		writeError(w, http.StatusServiceUnavailable, "external identity write receipts are not configured")
 		return
 	}
 
@@ -130,7 +160,64 @@ func (h *Handler) UpsertIssueExternalIdentity(w http.ResponseWriter, r *http.Req
 	if res.Created {
 		status = http.StatusCreated
 	}
-	writeJSON(w, status, issueToResponse(res.Issue, prefix))
+	issue := issueToResponse(res.Issue, prefix)
+	var dbIdentity authority.DBIdentity
+	if h.DB == nil {
+		writeError(w, http.StatusInternalServerError, "failed to create external identity write receipt")
+		return
+	}
+	if err := h.DB.QueryRow(r.Context(), `
+		SELECT (pg_control_system()).system_identifier::text, d.oid::int8, current_database()::text
+		FROM pg_catalog.pg_database d WHERE d.datname = current_database()
+	`).Scan(&dbIdentity.SystemIdentifier, &dbIdentity.DatabaseOID, &dbIdentity.DatabaseName); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to create external identity write receipt")
+		return
+	}
+	digest := sha256.Sum256(body)
+	receipt, err := h.AuthoritySigner.SignWriteReceipt(authority.WriteReceiptStatement{
+		Protocol: authority.WriteReceiptProtocolVersion, Operation: authority.OperationIssueUpsertExternal,
+		RequestSHA256: fmt.Sprintf("%x", digest), ResourceID: issue.ID, Nonce: req.Nonce,
+		DBIdentity: dbIdentity, IssuedAt: time.Now().UTC(), ServerCommit: h.ServerCommit,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to create external identity write receipt")
+		return
+	}
+	writeJSON(w, status, map[string]any{"issue": issue, "receipt": receipt})
+}
+
+func (h *Handler) externalUpsertAuthorizationError(r *http.Request, aliases []externalIdentityAliasRequest) (int, string) {
+	if r.Header.Get("X-Actor-Source") == "task_token" {
+		return http.StatusForbidden, "task-token actors cannot claim external identities"
+	}
+	configuredPrincipal, err := util.ParseUUID(strings.TrimSpace(h.cfg.ExternalUpsertPrincipalID))
+	if err != nil || !configuredPrincipal.Valid {
+		return http.StatusForbidden, "external identity upsert is not authorized"
+	}
+	authenticatedPrincipal, err := util.ParseUUID(strings.TrimSpace(requestUserID(r)))
+	if err != nil || authenticatedPrincipal != configuredPrincipal {
+		return http.StatusForbidden, "external identity upsert is not authorized"
+	}
+	allowed := make(map[string]struct{}, len(h.cfg.ExternalUpsertNamespaces))
+	for _, namespace := range h.cfg.ExternalUpsertNamespaces {
+		namespace = strings.ToLower(strings.TrimSpace(namespace))
+		if service.IsValidExternalIdentityNamespace(namespace) {
+			allowed[namespace] = struct{}{}
+		}
+	}
+	if len(allowed) == 0 {
+		return http.StatusForbidden, "external identity upsert is not authorized"
+	}
+	for _, alias := range aliases {
+		namespace := strings.TrimSpace(alias.Namespace)
+		if namespace != strings.ToLower(namespace) {
+			return http.StatusForbidden, "external identity namespace is not authorized"
+		}
+		if _, ok := allowed[namespace]; !ok {
+			return http.StatusForbidden, "external identity namespace is not authorized"
+		}
+	}
+	return 0, ""
 }
 
 func (h *Handler) issueCreateParamsFromExternalRequest(w http.ResponseWriter, r *http.Request, req CreateIssueRequest, workspaceID pgtype.UUID, creatorType string, creatorID pgtype.UUID) (service.IssueCreateParams, bool) {

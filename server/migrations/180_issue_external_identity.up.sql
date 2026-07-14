@@ -1,18 +1,4 @@
-DO $$
-BEGIN
-    IF NOT EXISTS (
-        SELECT 1
-        FROM pg_constraint
-        WHERE conname = 'uq_issue_workspace_id'
-          AND conrelid = 'issue'::regclass
-    ) THEN
-        ALTER TABLE issue
-            ADD CONSTRAINT uq_issue_workspace_id UNIQUE (workspace_id, id);
-    END IF;
-END
-$$;
-
-CREATE TABLE IF NOT EXISTS issue_external_identity (
+CREATE TABLE issue_external_identity (
     workspace_id UUID NOT NULL,
     namespace TEXT NOT NULL,
     external_id TEXT NOT NULL,
@@ -24,10 +10,31 @@ CREATE TABLE IF NOT EXISTS issue_external_identity (
     CONSTRAINT issue_external_identity_external_id_check
         CHECK (length(external_id) BETWEEN 1 AND 512 AND octet_length(external_id) <= 1024),
     CONSTRAINT issue_external_identity_issue_fk
-        FOREIGN KEY (workspace_id, issue_id)
-        REFERENCES issue(workspace_id, id)
+        FOREIGN KEY (issue_id)
+        REFERENCES issue(id)
         ON DELETE CASCADE
 );
 
-CREATE INDEX IF NOT EXISTS idx_issue_external_identity_workspace_issue
+CREATE INDEX idx_issue_external_identity_workspace_issue
     ON issue_external_identity(workspace_id, issue_id);
+
+CREATE FUNCTION issue_external_identity_enforce_workspace_180()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM issue
+        WHERE id = NEW.issue_id AND workspace_id = NEW.workspace_id
+        FOR KEY SHARE
+    ) THEN
+        RAISE EXCEPTION 'external identity issue must belong to workspace'
+            USING ERRCODE = '23503';
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER issue_external_identity_workspace_180
+BEFORE INSERT OR UPDATE OF workspace_id, issue_id ON issue_external_identity
+FOR EACH ROW EXECUTE FUNCTION issue_external_identity_enforce_workspace_180();

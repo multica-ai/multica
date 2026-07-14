@@ -352,6 +352,16 @@ func (c *APIClient) PostJSONStrict(ctx context.Context, path string, body any, o
 	if err != nil {
 		return err
 	}
+	return c.PostRawJSONStrict(ctx, path, data, out, maxResponseBytes)
+}
+
+// PostRawJSONStrict posts caller-supplied exact JSON bytes and strictly decodes
+// one bounded response value. It is used when a signed receipt binds the wire
+// bytes, so remarshal-after-hashing would break the security boundary.
+func (c *APIClient) PostRawJSONStrict(ctx context.Context, path string, data []byte, out any, maxResponseBytes int64) error {
+	if maxResponseBytes <= 0 {
+		return fmt.Errorf("max response bytes must be positive")
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+path, bytes.NewReader(data))
 	if err != nil {
 		return err

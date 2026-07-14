@@ -161,3 +161,13 @@ func (s *Signer) Sign(stmt Statement) (Attestation, error) {
 	}
 	return Sign(s.PrivateKey, stmt)
 }
+
+func (s *Signer) SignWriteReceipt(stmt WriteReceiptStatement) (WriteReceipt, error) {
+	if s == nil {
+		return WriteReceipt{}, errors.New("authority signer is not configured")
+	}
+	if stmt.AuthorityID == "" {
+		stmt.AuthorityID = s.AuthorityID
+	}
+	return SignWriteReceipt(s.PrivateKey, stmt)
+}
