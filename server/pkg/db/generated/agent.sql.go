@@ -1914,7 +1914,8 @@ const failStaleTasks = `-- name: FailStaleTasks :many
 UPDATE agent_task_queue
 SET status = 'failed', completed_at = now(), error = 'task timed out',
     failure_reason = 'timeout',
-    prepare_lease_expires_at = NULL
+    prepare_lease_expires_at = NULL,
+    wait_reason = NULL
 WHERE (
     status = 'dispatched'
     AND dispatched_at < now() - make_interval(secs => $1::double precision)
@@ -1930,13 +1931,18 @@ WHERE (
         AND r.last_seen_at >= now() - make_interval(secs => $3::double precision)
     )
   )
+   OR (
+    status = 'waiting_local_directory'
+    AND dispatched_at < now() - make_interval(secs => $4::double precision)
+  )
 RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id
 `
 
 type FailStaleTasksParams struct {
-	DispatchTimeoutSecs float64 `json:"dispatch_timeout_secs"`
-	RunningTimeoutSecs  float64 `json:"running_timeout_secs"`
-	RuntimeStaleSecs    float64 `json:"runtime_stale_secs"`
+	DispatchTimeoutSecs             float64 `json:"dispatch_timeout_secs"`
+	RunningTimeoutSecs              float64 `json:"running_timeout_secs"`
+	RuntimeStaleSecs                float64 `json:"runtime_stale_secs"`
+	WaitingLocalDirectoryTimeoutSecs float64 `json:"waiting_local_directory_timeout_secs"`
 }
 
 // Fails tasks stuck in dispatched/running beyond the given thresholds.
@@ -1971,13 +1977,13 @@ type FailStaleTasksParams struct {
 // proving liveness, so the wall clock is allowed to fire — same shape as
 // the legacy pure-wall-clock behavior for that (rare / historical) case.
 //
-// waiting_local_directory rows are intentionally excluded: the daemon owns
-// the wait (with its own ctx-driven timeout) and a legitimate queue ahead
-// of this task can exceed the dispatch / running timeouts without being
-// "stuck". If the daemon dies, RecoverOrphanedTasksForRuntime reclaims
-// those rows at restart.
+// waiting_local_directory rows require a separate branch with an independent
+// wall-clock timeout (waiting_local_directory_timeout_secs) so that tasks
+// stuck behind a hung lock-holder are eventually recovered even when the
+// runtime stays online. The daemon-dead case is already covered by
+// FailTasksForOfflineRuntimes in the same tick.
 func (q *Queries) FailStaleTasks(ctx context.Context, arg FailStaleTasksParams) ([]AgentTaskQueue, error) {
-	rows, err := q.db.Query(ctx, failStaleTasks, arg.DispatchTimeoutSecs, arg.RunningTimeoutSecs, arg.RuntimeStaleSecs)
+	rows, err := q.db.Query(ctx, failStaleTasks, arg.DispatchTimeoutSecs, arg.RunningTimeoutSecs, arg.RuntimeStaleSecs, arg.WaitingLocalDirectoryTimeoutSecs)
 	if err != nil {
 		return nil, err
 	}
