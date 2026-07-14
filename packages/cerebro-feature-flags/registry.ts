@@ -411,7 +411,10 @@ export type CerebroFlagKey =
   // FIR-2698: Settings tab for the single-source model registry (prices,
   // context windows, display labels) with propose → review → approve
   // versioning. Default OFF until the tab has been QA'd on staging.
-  | "cerebro_model_registry";
+  | "cerebro_model_registry"
+  // FIR-3172: full apps, workflows, and interactive chat views. The complete
+  // product stays dormant until local + CI verification is complete.
+  | "cerebro_mini_apps";
 
 /**
  * Default value for each flag. Applied at read time when no override exists.
@@ -813,6 +816,8 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   cerebro_agent_page_redesign: false,
   // FIR-2698: default OFF until QA'd on staging.
   cerebro_model_registry: false,
+  // FIR-3172: default OFF. Enabling is a separate release decision.
+  cerebro_mini_apps: false,
 };
 
 /**
@@ -897,6 +902,13 @@ export interface CerebroFlagDefinition {
  * the user within each group (see CEREBRO_FLAG_GROUPS for group order).
  */
 export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
+  {
+    key: "cerebro_mini_apps",
+    label: "Apps and workflow builder",
+    group: "workspace",
+    description:
+      "Add the Apps catalog, app builder, visual workflow builder, and interactive in-chat app views. Off hides every user-facing entry while keeping stored apps and runs intact.",
+  },
   {
     key: "cerebro_agent_page_redesign",
     label: "Agent page redesign (preview)",

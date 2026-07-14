@@ -1509,3 +1509,9 @@ comment for SQL/CSS/SBPL/JSON-with-_comment-field).
 - Location: `server/internal/service/builtin_skills/multica-working-on-issues/`
 - Reason: Keep the source-traced built-in agent workflow contract aligned with the new CLI and MCP surface.
 - Approver: Jesper Hvejsel, FIR-2937 comment “byg det”, 2026-07-11.
+
+# cerebro-mini-app-detail-route
+
+- Location: `server/cmd/server/router.go`
+- Reason: Expose the Cerebro-zone app detail handler so the FIR-3172 app screen can read one app, its published versions, and its workflows.
+- Approver: Jesper Hvejsel, FIR-3172 comment “byg”, 2026-07-13.

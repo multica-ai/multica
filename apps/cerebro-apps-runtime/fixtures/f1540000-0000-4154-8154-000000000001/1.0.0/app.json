@@ -1,0 +1,15 @@
+{
+  "manifest": {
+    "schema_version": "1",
+    "name": "Allergen Formatter",
+    "version": "1.0.0",
+    "scopes": [
+      { "resource_type": "integration", "resource_id": "ai_gateway", "access": "write" }
+    ],
+    "frontend": { "entry": "frontend/index.html" },
+    "backend": { "entry": "backend/index.mjs" },
+    "views": [
+      { "id": "formatter", "type": "form", "title": "Format allergens" }
+    ]
+  }
+}

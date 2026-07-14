@@ -1,6 +1,58 @@
 {
   "http": [
     {
+      "id": "POST /api/cerebro/app-workflows/",
+      "gate": "cerebro_capability:build_apps"
+    },
+    {
+      "id": "POST /api/cerebro/app-workflows/{workflowId}/test",
+      "gate": "cerebro_capability:use_apps"
+    },
+    {
+      "id": "POST /api/cerebro/app-workflows/{workflowId}/{state:enable|disable}",
+      "gate": "cerebro_capability:build_apps"
+    },
+    {
+      "id": "POST /api/cerebro/apps/",
+      "gate": "cerebro_capability:build_apps"
+    },
+    {
+      "id": "POST /api/cerebro/apps/{id}/preview",
+      "gate": "cerebro_capability:build_apps"
+    },
+    {
+      "id": "POST /api/cerebro/apps/{id}/publish",
+      "gate": "cerebro_capability:build_apps"
+    },
+    {
+      "id": "POST /api/cerebro/apps/{id}/rollback",
+      "gate": "cerebro_capability:build_apps"
+    },
+    {
+      "id": "POST /api/cerebro/apps/{id}/token",
+      "gate": "cerebro_capability:use_apps"
+    },
+    {
+      "id": "POST /api/cerebro/apps/{id}/approve-scopes",
+      "gate": "cerebro_capability:approve_app_scopes"
+    },
+    {
+      "id": "PUT /api/cerebro/apps/{id}/storage/{key}",
+      "gate": "cerebro_capability:use_apps"
+    },
+    {
+      "id": "DELETE /api/cerebro/apps/{id}/storage/{key}",
+      "gate": "cerebro_capability:use_apps"
+    },
+    {
+      "id": "POST /api/cerebro/apps/{id}/views/{viewId}/submissions",
+      "gate": "cerebro_capability:use_apps"
+    },
+    {
+      "id": "POST /api/cerebro/apps/workflow-runs/{runId}/token",
+      "gate": "cerebro_capability:use_apps"
+    },
+    {
       "id": "DELETE /api/analytics/visuals/{visualId}",
       "gate": "workspace_member"
     },
@@ -2239,6 +2291,46 @@
     {
       "id": "analytics query",
       "exempt": "read-only — wraps POST /api/analytics/query, which only resolves workspace-scoped aggregates"
+    },
+    {
+      "id": "app create",
+      "gate": "via:POST /api/cerebro/apps/"
+    },
+    {
+      "id": "app list",
+      "exempt": "read-only — wraps GET /api/cerebro/apps/"
+    },
+    {
+      "id": "app preview",
+      "gate": "via:POST /api/cerebro/apps/{id}/preview"
+    },
+    {
+      "id": "app publish",
+      "gate": "via:POST /api/cerebro/apps/{id}/publish"
+    },
+    {
+      "id": "app rollback",
+      "gate": "via:POST /api/cerebro/apps/{id}/rollback"
+    },
+    {
+      "id": "app workflow create",
+      "gate": "via:POST /api/cerebro/app-workflows/"
+    },
+    {
+      "id": "app workflow disable",
+      "gate": "via:POST /api/cerebro/app-workflows/{workflowId}/{state:enable|disable}"
+    },
+    {
+      "id": "app workflow enable",
+      "gate": "via:POST /api/cerebro/app-workflows/{workflowId}/{state:enable|disable}"
+    },
+    {
+      "id": "app workflow runs",
+      "exempt": "read-only — wraps GET /api/cerebro/app-workflows/{workflowId}/runs"
+    },
+    {
+      "id": "app workflow test",
+      "gate": "via:POST /api/cerebro/app-workflows/{workflowId}/test"
     },
     {
       "id": "agent archive",

@@ -73,6 +73,7 @@ const (
 	CategoryCredentials = "Credentials"
 	CategoryConnections = "Connections"
 	CategoryWorkflows   = "Workflows"
+	CategoryApps        = "Apps"
 	CategoryChannels    = "Channels"
 	CategoryReadAccess  = "Read access"
 )
@@ -122,6 +123,45 @@ type Capability struct {
 // catalog is the full ordered list. Order is category-major for readability; the
 // table re-sorts, so order here is not load-bearing.
 var catalog = []Capability{
+	// --- Apps -----------------------------------------------------------------
+	{
+		Key:           "use_apps",
+		Title:         "Use apps",
+		Category:      CategoryApps,
+		Description:   "Open and use published workspace apps and interactive app views.",
+		DescriptionZh: "打开并使用已发布的工作区应用和交互式应用视图。",
+		Ops: []string{
+			"POST /api/cerebro/apps/{id}/token",
+			"POST /api/cerebro/apps/workflow-runs/{runId}/token",
+			"PUT /api/cerebro/apps/{id}/storage/{key}",
+			"DELETE /api/cerebro/apps/{id}/storage/{key}",
+			"POST /api/cerebro/apps/{id}/views/{viewId}/submissions",
+			"POST /api/cerebro/app-workflows/{workflowId}/test",
+		},
+	},
+	{
+		Key:           "build_apps",
+		Title:         "Build apps",
+		Category:      CategoryApps,
+		Description:   "Create, preview, publish, and roll back workspace apps.",
+		DescriptionZh: "创建、预览、发布和回滚工作区应用。",
+		Ops: []string{
+			"POST /api/cerebro/apps/",
+			"POST /api/cerebro/apps/{id}/preview",
+			"POST /api/cerebro/apps/{id}/publish",
+			"POST /api/cerebro/apps/{id}/rollback",
+			"POST /api/cerebro/app-workflows/",
+			"POST /api/cerebro/app-workflows/{workflowId}/{state:enable|disable}",
+		},
+	},
+	{
+		Key:           "approve_app_scopes",
+		Title:         "Approve app scopes",
+		Category:      CategoryApps,
+		Description:   "Approve the registry data access ceiling requested by an app version.",
+		DescriptionZh: "批准应用版本请求的 registry 数据访问上限。",
+		Ops:           []string{"POST /api/cerebro/apps/{id}/approve-scopes"},
+	},
 	// --- Issues ---------------------------------------------------------------
 	{
 		Key:           "create_issue",

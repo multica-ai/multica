@@ -1,0 +1,58 @@
+:root {
+  --multica-app-bg: #ffffff;
+  --multica-app-fg: #15171a;
+  --multica-app-muted: #69707a;
+  --multica-app-border: #e5e7eb;
+  --multica-app-accent: #18181b;
+  --multica-app-radius: 12px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --multica-app-bg: #161719;
+    --multica-app-fg: #f5f5f5;
+    --multica-app-muted: #a6abb3;
+    --multica-app-border: #303237;
+    --multica-app-accent: #f5f5f5;
+  }
+}
+
+.multica-app-card {
+  color: var(--multica-app-fg);
+  background: var(--multica-app-bg);
+  border: 1px solid var(--multica-app-border);
+  border-radius: var(--multica-app-radius);
+  padding: clamp(1rem, 3vw, 1.5rem);
+  max-width: 52rem;
+}
+
+.multica-app-card h2 { font-size: 1.125rem; margin: 0; }
+.multica-app-card header p, .multica-app-field small { color: var(--multica-app-muted); }
+.multica-app-card header p { margin: .35rem 0 0; }
+.multica-app-card-content { display: grid; gap: 1rem; margin-top: 1.25rem; }
+.multica-app-field { display: grid; gap: .4rem; font-size: .875rem; font-weight: 550; }
+.multica-app-field input, .multica-app-field select {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 2.75rem;
+  color: var(--multica-app-fg);
+  background: var(--multica-app-bg);
+  border: 1px solid var(--multica-app-border);
+  border-radius: 8px;
+  padding: .65rem .75rem;
+  font: inherit;
+}
+.multica-app-field input:focus-visible, .multica-app-field select:focus-visible, .multica-app-button:focus-visible { outline: 3px solid color-mix(in srgb, var(--multica-app-accent) 30%, transparent); outline-offset: 2px; }
+.multica-app-button { min-height: 2.75rem; border: 0; border-radius: 8px; padding: .65rem 1rem; color: var(--multica-app-bg); background: var(--multica-app-accent); font: inherit; font-weight: 650; cursor: pointer; }
+.multica-app-button:disabled { cursor: not-allowed; opacity: .55; }
+.multica-app-table-wrap { width: 100%; overflow-x: auto; }
+.multica-app-table { width: 100%; border-collapse: collapse; font-size: .875rem; }
+.multica-app-table th, .multica-app-table td { border-bottom: 1px solid var(--multica-app-border); padding: .75rem; text-align: left; }
+
+@media (max-width: 40rem) {
+  .multica-app-table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); }
+  .multica-app-table, .multica-app-table tbody, .multica-app-table tr, .multica-app-table td { display: block; width: 100%; box-sizing: border-box; }
+  .multica-app-table tr { border-bottom: 1px solid var(--multica-app-border); padding: .5rem 0; }
+  .multica-app-table td { display: grid; grid-template-columns: minmax(7rem, 35%) 1fr; gap: .75rem; border: 0; }
+  .multica-app-table td::before { content: attr(data-label); color: var(--multica-app-muted); font-weight: 600; }
+}
