@@ -90,6 +90,7 @@ func TestClaimTasksWSFirst_NoDoubleClaimOnDetach(t *testing.T) {
 	defer srv.Close()
 
 	d := New(Config{ServerBaseURL: srv.URL, MaxConcurrentTasks: 4}, slog.New(slog.NewTextHandler(noopWriter{}, nil)))
+	d.wsRPCSupported.Store(true)
 	// Sender enqueues the frame and hands back its cancelable handle; we then
 	// mark it written to simulate the writer having put it on the wire, so the
 	// disconnect leaves a genuinely uncertain outcome (the server may commit).
@@ -129,5 +130,40 @@ func TestClaimTasksWSFirst_NoDoubleClaimOnDetach(t *testing.T) {
 	}
 	if httpClaims.Load() != 0 {
 		t.Fatalf("HTTP fallback claimed %d times after an uncertain WS claim; must be 0 to avoid double-claim", httpClaims.Load())
+	}
+}
+
+// TestClaimTasksWSFirst_OldServerSkipsWSRPC pins compatibility with servers
+// predating rpc-v1. They ignore unknown WS frames, so the daemon must not send
+// tasks.claim until a heartbeat ack explicitly advertises server support.
+func TestClaimTasksWSFirst_OldServerSkipsWSRPC(t *testing.T) {
+	var httpClaims, wsClaims atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "/claim") {
+			httpClaims.Add(1)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"tasks":[{"id":"http-t","runtime_id":"rt1","agent":{"name":"a"}}]}`))
+	}))
+	defer srv.Close()
+
+	d := New(Config{ServerBaseURL: srv.URL, MaxConcurrentTasks: 4}, slog.New(slog.NewTextHandler(noopWriter{}, nil)))
+	d.wsRPC.attach(func(frame []byte) (*wsOutbound, error) {
+		wsClaims.Add(1)
+		return &wsOutbound{data: frame}, nil
+	})
+
+	tasks, err := d.ClaimTasksWSFirst(context.Background(), "daemon-x", []string{"rt1"}, 1)
+	if err != nil {
+		t.Fatalf("ClaimTasksWSFirst: %v", err)
+	}
+	if len(tasks) != 1 || tasks[0].ID != "http-t" {
+		t.Fatalf("tasks = %#v, want HTTP task", tasks)
+	}
+	if wsClaims.Load() != 0 {
+		t.Fatalf("WS claims = %d without rpc-v1 advertisement, want 0", wsClaims.Load())
+	}
+	if httpClaims.Load() != 1 {
+		t.Fatalf("HTTP claims = %d, want 1", httpClaims.Load())
 	}
 }

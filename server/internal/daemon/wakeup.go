@@ -171,6 +171,9 @@ func (d *Daemon) runTaskWakeupConnection(ctx context.Context, runtimeIDs []strin
 	// A (re)connect may be a freshly-upgraded server: re-probe the batch claim
 	// route rather than staying on the legacy fallback forever (MUL-4257).
 	d.batchClaimUnsupported.Store(false)
+	// Capabilities belong to this specific connection. Require a fresh
+	// heartbeat acknowledgement before sending RPCs after every reconnect.
+	d.wsRPCSupported.Store(false)
 
 	heartbeatCtx, cancelHeartbeat := context.WithCancel(ctx)
 	hbDone := make(chan struct{})
@@ -328,6 +331,12 @@ func (d *Daemon) handleWSHeartbeatAck(ctx context.Context, ack *HeartbeatRespons
 	if ack.RuntimeGone {
 		go d.handleRuntimeGone(ack.RuntimeID)
 		return
+	}
+	for _, capability := range ack.ServerCapabilities {
+		if capability == protocol.DaemonCapabilityRPCV1 {
+			d.wsRPCSupported.Store(true)
+			break
+		}
 	}
 	d.recordWSHeartbeatAck(ack.RuntimeID)
 	d.handleHeartbeatActions(ctx, ack.RuntimeID, ack)

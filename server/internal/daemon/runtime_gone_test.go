@@ -313,11 +313,15 @@ func TestHandleWSHeartbeatAck_NormalAckRecordsFreshness(t *testing.T) {
 
 	d := freshDaemon("")
 	d.handleWSHeartbeatAck(context.Background(), &HeartbeatResponse{
-		RuntimeID: "rt-1",
-		Status:    "ok",
+		RuntimeID:          "rt-1",
+		Status:             "ok",
+		ServerCapabilities: []string{"rpc-v1"},
 	})
 	if !d.wsHeartbeatRecentlyAcked("rt-1") {
 		t.Fatalf("normal ack should record WS freshness for rt-1")
+	}
+	if !d.wsRPCSupported.Load() {
+		t.Fatal("rpc-v1 heartbeat acknowledgement should enable WS RPC")
 	}
 }
 

@@ -266,7 +266,7 @@ func (d *Daemon) ClaimTasksWSFirst(ctx context.Context, daemonID string, runtime
 	if d.batchClaimUnsupported.Load() {
 		return d.client.claimTasksLegacy(ctx, runtimeIDs, maxTasks)
 	}
-	if d.wsRPC.connected() {
+	if d.wsRPCSupported.Load() && d.wsRPC.connected() {
 		var resp struct {
 			Tasks []*Task `json:"tasks"`
 		}
