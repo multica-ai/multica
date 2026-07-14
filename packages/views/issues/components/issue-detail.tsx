@@ -30,7 +30,7 @@ import { Button } from "@multica/ui/components/ui/button";
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@multica/ui/components/ui/resizable";
 import { Sheet, SheetContent } from "@multica/ui/components/ui/sheet";
 import { useIsMobile } from "@multica/ui/hooks/use-mobile";
-import { ContentEditor, type ContentEditorRef, ReadonlyContent, TitleEditor, type TitleEditorRef, useFileDropZone, FileDropOverlay, useLazyEditor } from "../../editor";
+import { ContentEditor, type ContentEditorRef, ReadonlyContent, TitleEditor, type TitleEditorRef, useFileDropZone, FileDropOverlay, useLazyEditor, anchorFromPoint } from "../../editor";
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
 import {
   Tooltip,
@@ -1299,7 +1299,8 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   // ReadonlyContent shares the editor's `rich-text-editor` stylesheet, so
   // the swap is visually seamless. The click that used to place a caret now
   // calls `activate`; useLazyEditor mounts the editor hidden, swaps it in on
-  // `onReady`, and lands the caret at the clicked coordinates.
+  // `onReady`, and lands the caret at the clicked text anchor (coordinates
+  // only as fallback — see text-anchor.ts for why pixels drift).
   // resetKey: the web issue route reuses this component across issues, so a
   // subject switch must fold both regions back to their stand-ins during the
   // id-change render itself — an effect would let the new issue's keyed
@@ -1321,7 +1322,17 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     // A drag-selection (copying text) must not summon the editor.
     const sel = window.getSelection();
     if (sel && !sel.isCollapsed) return;
-    descLazy.activate({ x: e.clientX, y: e.clientY });
+    // Prefer a text anchor ("block N, character M") over raw coordinates:
+    // the readonly render and the editor render are never pixel-identical
+    // on long documents, so posAtCoords drifts; a logical anchor doesn't.
+    // The `.readonly` qualifier skips nested `pre.rich-text-editor` blocks;
+    // the empty-placeholder stand-in has no readonly root and falls back to
+    // coordinates, which is fine for an empty document.
+    const readonlyRoot = e.currentTarget.querySelector<HTMLElement>(".rich-text-editor.readonly");
+    const anchor = readonlyRoot
+      ? anchorFromPoint(e.clientX, e.clientY, readonlyRoot)
+      : null;
+    descLazy.activate({ x: e.clientX, y: e.clientY, anchor: anchor ?? undefined });
   };
   const handleDescReadonlyKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
     if (e.key !== "Enter" && e.key !== " ") return;

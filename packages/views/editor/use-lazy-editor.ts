@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
+import type { TextAnchor } from "./text-anchor";
 
 /**
  * Minimal imperative surface useLazyEditor needs from the wrapped editor.
@@ -9,7 +10,20 @@ import { useCallback, useEffect, useRef, useState, type RefObject } from "react"
 export interface LazyEditorHandle {
   focus: () => void;
   focusAtCoords?: (coords: { x: number; y: number }) => void;
+  focusAtAnchor?: (anchor: TextAnchor) => void;
   uploadFile?: (file: File) => void;
+}
+
+/**
+ * Where the caret should land after the swap. `anchor` (logical "block N,
+ * character M", layout-independent) wins over the raw click coordinates;
+ * coordinates remain as the fallback for clicks that yield no text anchor
+ * (image, table chrome, margin) and for single-line hosts like the title.
+ */
+export interface LazyFocusTarget {
+  x: number;
+  y: number;
+  anchor?: TextAnchor;
 }
 
 export interface UseLazyEditorOptions {
@@ -47,8 +61,9 @@ export interface UseLazyEditorOptions {
  *      the content never blanks while Tiptap assembles.
  *   3. The editor's `onReady` flips `ready`; the host swaps visibility in
  *      that commit, and the effect below (running after that commit, so the
- *      editor is laid out) lands the caret at the activating click's
- *      coordinates and flushes any uploads queued against the stand-in.
+ *      editor is laid out) lands the caret at the activating click's focus
+ *      target — text anchor first, raw coordinates as fallback — and
+ *      flushes any uploads queued against the stand-in.
  *
  * Host render contract:
  *   {lazy.active && <div className={lazy.ready ? undefined : "hidden"}>
@@ -66,7 +81,7 @@ export function useLazyEditor({
 }: UseLazyEditorOptions) {
   const [active, setActive] = useState(initialActive);
   const [ready, setReady] = useState(false);
-  const focusCoordsRef = useRef<{ x: number; y: number } | null>(null);
+  const focusTargetRef = useRef<LazyFocusTarget | null>(null);
   const focusPendingRef = useRef(false);
   const pendingFilesRef = useRef<File[]>([]);
 
@@ -76,46 +91,56 @@ export function useLazyEditor({
     setPrevResetKey(resetKey);
     setActive(initialActive);
     setReady(false);
-    focusCoordsRef.current = null;
+    focusTargetRef.current = null;
     focusPendingRef.current = false;
     pendingFilesRef.current = [];
   }
 
+  const focusAtTarget = useCallback(
+    (target: LazyFocusTarget | null) => {
+      const handle = editorRef.current;
+      if (!handle) return;
+      if (target?.anchor && handle.focusAtAnchor) handle.focusAtAnchor(target.anchor);
+      else if (target && handle.focusAtCoords) handle.focusAtCoords(target);
+      else handle.focus();
+    },
+    [editorRef],
+  );
+
   const activate = useCallback(
-    (coords?: { x: number; y: number }) => {
-      focusCoordsRef.current = coords ?? null;
+    (target?: LazyFocusTarget) => {
+      focusTargetRef.current = target ?? null;
       focusPendingRef.current = true;
       setActive(true);
       // Already swapped in (e.g. keyboard re-activation after a blur):
       // focus straight away, there is no ready-effect coming.
       if (ready) {
         focusPendingRef.current = false;
-        const target = focusCoordsRef.current;
-        focusCoordsRef.current = null;
-        if (target && editorRef.current?.focusAtCoords) editorRef.current.focusAtCoords(target);
-        else editorRef.current?.focus();
+        const latched = focusTargetRef.current;
+        focusTargetRef.current = null;
+        focusAtTarget(latched);
       }
     },
-    [ready, editorRef],
+    [ready, focusAtTarget],
   );
 
   const onReady = useCallback(() => setReady(true), []);
 
   // Post-swap work — runs after the commit that revealed the ready editor,
-  // so focusAtCoords can resolve layout and uploads insert into a live doc.
+  // so focus targets can resolve against a laid-out, live doc and uploads
+  // insert into it.
   useEffect(() => {
     if (!ready) return;
     if (focusPendingRef.current) {
       focusPendingRef.current = false;
-      const coords = focusCoordsRef.current;
-      focusCoordsRef.current = null;
-      if (coords && editorRef.current?.focusAtCoords) editorRef.current.focusAtCoords(coords);
-      else editorRef.current?.focus();
+      const target = focusTargetRef.current;
+      focusTargetRef.current = null;
+      focusAtTarget(target);
     }
     const pending = pendingFilesRef.current;
     pendingFilesRef.current = [];
     for (const file of pending) editorRef.current?.uploadFile?.(file);
-  }, [ready, editorRef]);
+  }, [ready, editorRef, focusAtTarget]);
 
   /** Upload now when the editor is live; otherwise queue and summon it. */
   const uploadOrQueue = useCallback(

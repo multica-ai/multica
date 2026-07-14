@@ -61,6 +61,7 @@ import { preprocessMarkdown } from "./utils/preprocess";
 import { repairEmptyListItems } from "./utils/repair-list-items";
 import { openLink, isMentionHref } from "./utils/link-handler";
 import { EditorBubbleMenu } from "./bubble-menu";
+import { posFromAnchor, type TextAnchor } from "./text-anchor";
 import { useLinkHover, LinkHoverCard } from "./link-hover-card";
 import { AttachmentDownloadProvider } from "./attachment-download-context";
 import "katex/dist/katex.min.css";
@@ -187,6 +188,15 @@ interface ContentEditorRef {
    * while the editor element is laid out (not display: none).
    */
   focusAtCoords: (coords: { x: number; y: number }) => void;
+  /**
+   * Focus and place the caret at the document position a text anchor
+   * resolves to. Preferred over `focusAtCoords` for readonly-first hosts:
+   * the anchor is a logical position ("block N, character M"), so it is
+   * immune to layout differences between the readonly render and the
+   * editor render — which is exactly where pixel coordinates drift on
+   * long documents.
+   */
+  focusAtAnchor: (anchor: TextAnchor) => void;
   /** Drop focus from the editor — used by chat after send so the caret
    *  stops competing with the StatusPill / streaming reply for the user's
    *  attention. */
@@ -600,6 +610,14 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
         const pos = editor.view.posAtCoords({ left: coords.x, top: coords.y });
         if (pos) editor.commands.focus(pos.pos);
         else editor.commands.focus("end");
+      },
+      focusAtAnchor: (anchor: TextAnchor) => {
+        if (!editor) {
+          // Editor not mounted yet — degrade to the latched plain focus.
+          focusOnReadyRef.current = true;
+          return;
+        }
+        editor.commands.focus(posFromAnchor(editor.state.doc, anchor));
       },
       blur: () => {
         editor?.commands.blur();
