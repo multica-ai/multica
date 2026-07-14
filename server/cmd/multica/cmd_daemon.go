@@ -243,6 +243,46 @@ func runDaemonStart(cmd *cobra.Command, _ []string) error {
 	return runDaemonBackground(cmd)
 }
 
+func resolveSelfExecutable() (string, error) {
+	return resolveSelfExecutableWith(os.Executable, os.Args)
+}
+
+// resolveSelfExecutableWith prefers the OS-reported executable path. Some
+// launch environments can omit that metadata, so fall back to argv[0] using
+// normal executable lookup semantics instead of treating a bare command name
+// as relative to the current directory.
+func resolveSelfExecutableWith(osExecutable func() (string, error), args []string) (string, error) {
+	exePath, err := osExecutable()
+	if err == nil {
+		return exePath, nil
+	}
+	osExecutableErr := fmt.Errorf("os.Executable: %w", err)
+
+	if len(args) == 0 || args[0] == "" {
+		return "", errors.Join(osExecutableErr, errors.New("argv[0] is empty"))
+	}
+
+	candidate, fallbackErr := exec.LookPath(args[0])
+	if fallbackErr == nil {
+		candidate, fallbackErr = filepath.Abs(candidate)
+	}
+	if fallbackErr == nil {
+		var info os.FileInfo
+		info, fallbackErr = os.Stat(candidate)
+		if fallbackErr == nil && !info.Mode().IsRegular() {
+			fallbackErr = fmt.Errorf("%s is not a regular file", candidate)
+		}
+	}
+	if fallbackErr != nil {
+		return "", errors.Join(
+			osExecutableErr,
+			fmt.Errorf("resolve argv[0] %q: %w", args[0], fallbackErr),
+		)
+	}
+
+	return candidate, nil
+}
+
 func runDaemonBackground(cmd *cobra.Command) error {
 	profile := resolveProfile(cmd)
 	healthPort := healthPortForProfile(profile)
@@ -260,8 +300,8 @@ func runDaemonBackground(cmd *cobra.Command) error {
 		return fmt.Errorf("%s is already running (pid %v). Use 'daemon restart' to restart it", label, int(pid))
 	}
 
-	// Resolve current executable.
-	exePath, err := os.Executable()
+	// Resolve current executable so the foreground child reuses this binary.
+	exePath, err := resolveSelfExecutable()
 	if err != nil {
 		return fmt.Errorf("resolve executable path: %w", err)
 	}
