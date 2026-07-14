@@ -357,7 +357,9 @@ export function AgentOverviewPane({
 
         {secondaryTabs.length > 0 && activeSecondaryTab && (
           <div className="flex min-h-full flex-col md:h-full md:flex-row">
-            <aside className="shrink-0 overflow-x-auto border-b border-surface-border bg-app-shell/70 p-2 md:w-52 md:overflow-y-auto md:border-b-0 md:border-r md:p-4">
+            {/* Content-surface color, no shell tint — same rule as the settings
+                nav: in-card panels must not break the desktop tab merge (MUL-4439). */}
+            <aside className="shrink-0 overflow-x-auto border-b border-surface-border p-2 md:w-52 md:overflow-y-auto md:border-b-0 md:border-r md:p-4">
               <div
                 className="flex w-max min-w-full items-center gap-1 md:w-full md:flex-col md:items-stretch"
                 role="tablist"

@@ -20,7 +20,7 @@ import (
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
-func TestRequestHasDaemonCapability(t *testing.T) {
+func TestRequestHasClientCapability(t *testing.T) {
 	tests := []struct {
 		name   string
 		header string
@@ -39,8 +39,8 @@ func TestRequestHasDaemonCapability(t *testing.T) {
 			if tc.header != "" {
 				req.Header.Set("X-Client-Capabilities", tc.header)
 			}
-			if got := requestHasDaemonCapability(req, protocol.DaemonCapabilityCoalescedCommentsV1); got != tc.want {
-				t.Fatalf("requestHasDaemonCapability(%q) = %v, want %v", tc.header, got, tc.want)
+			if got := requestHasClientCapability(req, protocol.DaemonCapabilityCoalescedCommentsV1); got != tc.want {
+				t.Fatalf("requestHasClientCapability(%q) = %v, want %v", tc.header, got, tc.want)
 			}
 		})
 	}

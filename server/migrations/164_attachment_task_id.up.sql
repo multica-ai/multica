@@ -16,8 +16,14 @@
 --     ON DELETE action here would never fire in practice; adding an FK on the
 --     hot attachment table would only add write overhead and a cascade
 --     dependency the app does not rely on.
+-- IF NOT EXISTS makes this self-heal on databases that applied it under its
+-- pre-#5307 number (161). The renumber to 164 changed the schema_migrations
+-- key, so the runner re-applies the renamed file on those DBs; without the
+-- guard the bare ADD COLUMN aborts with 42701 ("column already exists") and
+-- blocks every later migration (GH #5307's note; the dev deploy that hit it).
+-- Sibling 165 already uses CREATE INDEX ... IF NOT EXISTS for the same reason.
 ALTER TABLE attachment
-  ADD COLUMN task_id UUID;
+  ADD COLUMN IF NOT EXISTS task_id UUID;
 
 -- The task_id lookup index is built CONCURRENTLY in the next migration.
 -- CREATE INDEX CONCURRENTLY cannot share a transaction or multi-command

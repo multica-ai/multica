@@ -2,13 +2,16 @@ package handler
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/multica-ai/multica/server/internal/featureflags"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -50,6 +53,10 @@ type CreateAgentBuilderSessionResponse struct {
 // chat/task pipeline is intentionally agent-backed; it never appears in normal
 // agent lists and cannot be selected as an assignee.
 func (h *Handler) CreateAgentBuilderSession(w http.ResponseWriter, r *http.Request) {
+	if !featureflags.AgentBuilderEnabled(r.Context(), h.FeatureFlags) {
+		writeError(w, http.StatusNotFound, "agent builder is not enabled")
+		return
+	}
 	workspaceID := h.resolveWorkspaceID(r)
 	userID, ok := requireUserID(w, r)
 	if !ok {
@@ -106,6 +113,18 @@ func (h *Handler) CreateAgentBuilderSession(w http.ResponseWriter, r *http.Reque
 	}
 	defer tx.Rollback(r.Context())
 	qtx := h.Queries.WithTx(tx)
+
+	// FOR KEY SHARE on the workspace row before creating the builder's chat_session
+	// — the creator half of the #5219 delete/create protocol, so a session cannot
+	// be created into a workspace mid-delete (see LockWorkspaceForChatSessionCreate).
+	if _, err := qtx.LockWorkspaceForChatSessionCreate(r.Context(), workspaceUUID); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			writeError(w, http.StatusNotFound, "workspace not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "failed to lock workspace")
+		return
+	}
 
 	builder, err := qtx.CreateAgentBuilder(r.Context(), db.CreateAgentBuilderParams{
 		WorkspaceID:  workspaceUUID,

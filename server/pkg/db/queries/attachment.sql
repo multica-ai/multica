@@ -140,3 +140,8 @@ WHERE workspace_id = $2
 
 -- name: DeleteAttachment :exec
 DELETE FROM attachment WHERE id = $1 AND workspace_id = $2;
+
+-- name: ListAttachmentsByIDs :many
+SELECT * FROM attachment
+WHERE id = ANY(sqlc.arg(attachment_ids)::uuid[]) AND workspace_id = sqlc.arg(workspace_id)
+ORDER BY created_at ASC;

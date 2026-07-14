@@ -42,6 +42,12 @@ func TestTaskWakeupURL(t *testing.T) {
 			runtimeIDs: []string{"runtime-1"},
 			want:       "wss://api.example.com/multica/api/daemon/ws?runtime_ids=runtime-1",
 		},
+		{
+			name:       "account-only connection",
+			baseURL:    "https://api.example.com",
+			runtimeIDs: nil,
+			want:       "wss://api.example.com/api/daemon/ws",
+		},
 	}
 
 	for _, tt := range tests {

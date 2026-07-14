@@ -96,3 +96,34 @@ func (b *reconcileBroadcaster) broadcast() bool {
 	b.ch = make(chan struct{})
 	return true
 }
+
+// workspaceChangeSignal is a single-consumer dirty flag for workspace-set
+// changes. The one-slot buffer preserves an event that arrives before the sync
+// loop starts or while an API read is in flight, while coalescing any larger
+// burst into one trailing reconciliation of the latest server state.
+type workspaceChangeSignal struct {
+	ch chan struct{}
+}
+
+func newWorkspaceChangeSignal() *workspaceChangeSignal {
+	return &workspaceChangeSignal{ch: make(chan struct{}, 1)}
+}
+
+func (s *workspaceChangeSignal) notify() <-chan struct{} {
+	if s == nil {
+		return nil
+	}
+	return s.ch
+}
+
+func (s *workspaceChangeSignal) broadcast() bool {
+	if s == nil {
+		return false
+	}
+	select {
+	case s.ch <- struct{}{}:
+		return true
+	default:
+		return false
+	}
+}

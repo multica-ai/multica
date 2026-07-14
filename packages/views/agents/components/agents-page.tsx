@@ -44,7 +44,7 @@ import {
   memberListOptions,
   workspaceKeys,
 } from "@multica/core/workspace/queries";
-import { runtimeListOptions } from "@multica/core/runtimes";
+import { runtimeDisplayLabel, runtimeListOptions } from "@multica/core/runtimes";
 import { Button } from "@multica/ui/components/ui/button";
 import { Checkbox } from "@multica/ui/components/ui/checkbox";
 import {
@@ -428,7 +428,7 @@ function RuntimeCell({ row }: { row: AgentListRow }) {
     <ListGridCell className="hidden @2xl:flex">
       {runtime ? (
         <span className="min-w-0 truncate text-xs text-muted-foreground">
-          {runtime.name}
+          {runtimeDisplayLabel(runtime)}
         </span>
       ) : (
         <span className="text-xs text-muted-foreground/40">—</span>
@@ -803,9 +803,13 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
     runtimeListOptions(wsId),
   );
   const { data: members = [] } = useQuery(memberListOptions(wsId));
-  const { data: runCountsRaw = [] } = useQuery(agentRunCounts30dOptions(wsId));
-  const { byAgent: presenceMap } = useWorkspacePresenceMap(wsId);
-  const { byAgent: activityMap } = useWorkspaceActivityMap(wsId);
+  const { data: runCountsRaw = [], isPending: runCountsPending } = useQuery(
+    agentRunCounts30dOptions(wsId),
+  );
+  const { byAgent: presenceMap, loading: presenceLoading } =
+    useWorkspacePresenceMap(wsId);
+  const { byAgent: activityMap, loading: activityLoading } =
+    useWorkspaceActivityMap(wsId);
 
   const [selectedIds, setSelectedIds] = useState<ReadonlySet<string>>(
     new Set(),
@@ -1049,6 +1053,27 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
   const totalCount = agents.filter((a) => !a.archived_at).length;
   const showEmpty = !isLoading && agents.length === 0;
 
+  // The active sort field / availability filter reads columns that arrive in
+  // separate queries from the main agent list (activity → lastActiveDays,
+  // run-counts → runCount, presence → availability). Rendering real rows
+  // before those land would sort on placeholder values (lastActiveDays
+  // null→Infinity, runCount 0) and visibly re-order the list once each query
+  // resolves. Gate the first real paint on exactly the auxiliary queries the
+  // current sort / filter depends on — nothing for name/created, run-counts
+  // for runs, activity + run-counts (its tiebreaker) for the default
+  // lastActive, plus presence whenever an availability filter is active. The
+  // queries still run in parallel, so this defers the first paint by at most
+  // one extra round-trip (shown as skeleton) and never serialises them. An
+  // empty workspace (showEmpty) skips the gate so the empty state is never
+  // blocked on the auxiliary queries.
+  const needsRunCounts = sortField === "lastActive" || sortField === "runs";
+  const needsActivity = sortField === "lastActive";
+  const needsPresence = filters.availability.length > 0;
+  const listReady =
+    (!needsActivity || !activityLoading) &&
+    (!needsRunCounts || !runCountsPending) &&
+    (!needsPresence || !presenceLoading);
+
   return (
     // relative: positioning anchor for the batch toolbar (page-centered,
     // not viewport-centered).
@@ -1058,7 +1083,7 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
         onCreate={() => navigation.push(paths.newAgent())}
       />
 
-      {isLoading ? (
+      {isLoading || (!showEmpty && !listReady) ? (
         <div className="flex-1 overflow-y-auto @container">
           <LoadingSkeleton />
         </div>

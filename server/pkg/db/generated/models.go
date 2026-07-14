@@ -127,10 +127,11 @@ type AgentTaskQueue struct {
 	// Top-of-chain human originator for this run. For human-triggered tasks (comment by a member, chat, quick-create) equals that member. For agent-fanout tasks inherited from the parent task's originator_user_id via comment.source_task_id. NULL when no human is in the chain (autopilot, system-driven). Used by canInvokeAgent to judge A2A by the originator; the Composio overlay now follows invocation permission and uses the agent owner's connection, so this is audit/attribution + A2A gating, NOT a Composio owner==originator gate (MUL-3963).
 	OriginatorUserID pgtype.UUID `json:"originator_user_id"`
 	// Non-secret per-task connected app metadata corresponding to runtime_mcp_overlay, used by the daemon brief to tell agents which app capabilities are mounted. Cleared with runtime_mcp_overlay after task completion.
-	RuntimeConnectedApps []byte        `json:"runtime_connected_apps"`
-	CoalescedCommentIds  []pgtype.UUID `json:"coalesced_comment_ids"`
-	DeliveredCommentIds  []pgtype.UUID `json:"delivered_comment_ids"`
-	ChatInputTaskID      pgtype.UUID   `json:"chat_input_task_id"`
+	RuntimeConnectedApps   []byte             `json:"runtime_connected_apps"`
+	CoalescedCommentIds    []pgtype.UUID      `json:"coalesced_comment_ids"`
+	DeliveredCommentIds    []pgtype.UUID      `json:"delivered_comment_ids"`
+	ChatInputTaskID        pgtype.UUID        `json:"chat_input_task_id"`
+	ChatFinalizeDeferredAt pgtype.Timestamptz `json:"chat_finalize_deferred_at"`
 	// Waterfall level that resolved originator_user_id for this run: direct_human | delegation | comment_source | rule_owner | owner_fallback | backfill | unattributed. Audit/visibility metadata only — never consulted for authorization. TEXT with no CHECK so new trigger paths can add a source without a migration (MUL-4302 §7). NULL on pre-migration rows.
 	OriginatorSource pgtype.Text `json:"originator_source"`
 	// For originator_source=delegation: the parent task whose accountable human was copied onto this run. Value is copied, not chained, so delegation cycles are harmless (MUL-4302 §3.2). No FK; app-layer integrity only.
@@ -210,21 +211,22 @@ type AutopilotRuleVersion struct {
 }
 
 type AutopilotRun struct {
-	ID             pgtype.UUID        `json:"id"`
-	AutopilotID    pgtype.UUID        `json:"autopilot_id"`
-	TriggerID      pgtype.UUID        `json:"trigger_id"`
-	Source         string             `json:"source"`
-	Status         string             `json:"status"`
-	IssueID        pgtype.UUID        `json:"issue_id"`
-	TaskID         pgtype.UUID        `json:"task_id"`
-	TriggeredAt    pgtype.Timestamptz `json:"triggered_at"`
-	CompletedAt    pgtype.Timestamptz `json:"completed_at"`
-	FailureReason  pgtype.Text        `json:"failure_reason"`
-	TriggerPayload []byte             `json:"trigger_payload"`
-	Result         []byte             `json:"result"`
-	CreatedAt      pgtype.Timestamptz `json:"created_at"`
-	SquadID        pgtype.UUID        `json:"squad_id"`
-	PlannedAt      pgtype.Timestamptz `json:"planned_at"`
+	ID                pgtype.UUID        `json:"id"`
+	AutopilotID       pgtype.UUID        `json:"autopilot_id"`
+	TriggerID         pgtype.UUID        `json:"trigger_id"`
+	Source            string             `json:"source"`
+	Status            string             `json:"status"`
+	IssueID           pgtype.UUID        `json:"issue_id"`
+	TaskID            pgtype.UUID        `json:"task_id"`
+	TriggeredAt       pgtype.Timestamptz `json:"triggered_at"`
+	CompletedAt       pgtype.Timestamptz `json:"completed_at"`
+	FailureReason     pgtype.Text        `json:"failure_reason"`
+	TriggerPayload    []byte             `json:"trigger_payload"`
+	Result            []byte             `json:"result"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	SquadID           pgtype.UUID        `json:"squad_id"`
+	PlannedAt         pgtype.Timestamptz `json:"planned_at"`
+	WebhookDeliveryID pgtype.UUID        `json:"webhook_delivery_id"`
 }
 
 type AutopilotSubscriber struct {
@@ -336,6 +338,15 @@ type ChannelUserBinding struct {
 	ChannelUserID  string             `json:"channel_user_id"`
 	Config         []byte             `json:"config"`
 	BoundAt        pgtype.Timestamptz `json:"bound_at"`
+}
+
+type ChatDraftRestore struct {
+	ID            pgtype.UUID        `json:"id"`
+	ChatSessionID pgtype.UUID        `json:"chat_session_id"`
+	TaskID        pgtype.UUID        `json:"task_id"`
+	Content       string             `json:"content"`
+	AttachmentIds []pgtype.UUID      `json:"attachment_ids"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
 }
 
 type ChatMessage struct {
@@ -994,6 +1005,10 @@ type WebhookDelivery struct {
 	ReceivedAt             pgtype.Timestamptz `json:"received_at"`
 	LastAttemptAt          pgtype.Timestamptz `json:"last_attempt_at"`
 	CreatedAt              pgtype.Timestamptz `json:"created_at"`
+	AvailableAt            pgtype.Timestamptz `json:"available_at"`
+	LeaseToken             pgtype.UUID        `json:"lease_token"`
+	LeaseExpiresAt         pgtype.Timestamptz `json:"lease_expires_at"`
+	DispatchAttempts       int32              `json:"dispatch_attempts"`
 }
 
 type Workspace struct {

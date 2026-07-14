@@ -140,8 +140,11 @@ export function SettingsPage({ extraAccountTabs }: SettingsPageProps = {}) {
       orientation={isMobile ? "horizontal" : "vertical"}
       className="flex flex-1 min-h-0 flex-col gap-0 overflow-y-auto md:flex-row md:overflow-hidden"
     >
-      {/* Structural navigation; bounded setting groups remain in the content surface. */}
-      <div className="shrink-0 overflow-x-auto border-b border-surface-border bg-app-shell/70 p-2 md:w-56 md:overflow-y-auto md:border-b-0 md:border-r md:p-4">
+      {/* Structural navigation; bounded setting groups remain in the content surface.
+          Stays on the content surface color (no shell tint): the desktop's active
+          tab merges into the card top, and a tinted panel under the first tabs
+          breaks that seam (MUL-4439). Zoning comes from the divider instead. */}
+      <div className="shrink-0 overflow-x-auto border-b border-surface-border p-2 md:w-56 md:overflow-y-auto md:border-b-0 md:border-r md:p-4">
         <h1 className="sr-only text-sm font-semibold md:not-sr-only md:mb-4 md:px-2">{t(($) => $.page.title)}</h1>
         <TabsList
           variant="line"

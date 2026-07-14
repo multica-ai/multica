@@ -205,6 +205,14 @@ function renderInput(props: Partial<React.ComponentProps<typeof ChatInput>> = {}
   return { onSend, onUploadFile };
 }
 
+function element(props: Partial<React.ComponentProps<typeof ChatInput>>) {
+  return (
+    <I18nProvider locale="en" resources={TEST_RESOURCES}>
+      <ChatInput onSend={vi.fn()} onUploadFile={vi.fn()} agentName="Multica" {...props} />
+    </I18nProvider>
+  );
+}
+
 describe("ChatInput focusRequest", () => {
   it("focuses the editor when focusRequest becomes a non-zero value (new chat)", () => {
     const { rerender } = render(
@@ -413,13 +421,13 @@ describe("ChatInput attachment wiring", () => {
 
 describe("ChatInput async send", () => {
   it("restores a cancelled empty run draft into the editor", async () => {
-    const onRestoreDraftConsumed = vi.fn();
+    const onRestoreDraftApplied = vi.fn();
     renderInput({
       restoreDraftRequest: {
         id: "msg-restored",
         content: "bring this back",
       },
-      onRestoreDraftConsumed,
+      onRestoreDraftApplied,
     });
 
     await waitFor(() => {
@@ -428,29 +436,81 @@ describe("ChatInput async send", () => {
         "bring this back",
       );
       expect(editorProps.last?.defaultValue).toBe("bring this back");
-      expect(onRestoreDraftConsumed).toHaveBeenCalledTimes(1);
+      // The single terminal transition — the owner may now delete the server row.
+      expect(onRestoreDraftApplied).toHaveBeenCalledTimes(1);
     });
   });
 
-  it("consumes a restore request even when an existing draft blocks restore", async () => {
+  // A restore the composer cannot apply yet must NOT be reported as done: the
+  // owner keeps it pending (and the durable row un-consumed) and this composer
+  // stays willing to take it. Marking it terminal here was the bug — the restore
+  // was never re-offered for the rest of the component\'s life.
+  it("waits — does not report — while an existing draft blocks the restore", async () => {
     const state = useChatStore.getState() as unknown as {
       inputDrafts: Record<string, string>;
       setInputDraft: ReturnType<typeof vi.fn>;
     };
     state.inputDrafts["__draft_new__:agent-1"] = "already typing";
-    const onRestoreDraftConsumed = vi.fn();
+    const onRestoreDraftApplied = vi.fn();
+
+    const { rerender } = render(
+      element({
+        restoreDraftRequest: { id: "msg-restored", content: "bring this back" },
+        onRestoreDraftApplied,
+      }),
+    );
+
+    await waitFor(() => {
+      expect(editorProps.last?.defaultValue).toBe("already typing");
+    });
+    expect(onRestoreDraftApplied).not.toHaveBeenCalled();
+    expect(state.setInputDraft).not.toHaveBeenCalledWith(
+      "__draft_new__:agent-1",
+      "bring this back",
+    );
+
+    // The user sends/clears what they were typing: the same restore, still
+    // pending, now lands.
+    state.inputDrafts["__draft_new__:agent-1"] = "";
+    rerender(
+      element({
+        restoreDraftRequest: { id: "msg-restored", content: "bring this back" },
+        onRestoreDraftApplied,
+      }),
+    );
+
+    await waitFor(() => {
+      expect(state.setInputDraft).toHaveBeenCalledWith(
+        "__draft_new__:agent-1",
+        "bring this back",
+      );
+      expect(onRestoreDraftApplied).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it("holds the restore when the draft has staged attachments but no text", async () => {
+    const state = useChatStore.getState() as unknown as {
+      inputDraftAttachments: Record<string, { id: string }[]>;
+      setInputDraft: ReturnType<typeof vi.fn>;
+      setInputDraftAttachments: ReturnType<typeof vi.fn>;
+    };
+    state.inputDraftAttachments["__draft_new__:agent-1"] = [{ id: "att-staged" }];
+    const onRestoreDraftApplied = vi.fn();
 
     renderInput({
       restoreDraftRequest: {
         id: "msg-restored",
         content: "bring this back",
       },
-      onRestoreDraftConsumed,
+      onRestoreDraftApplied,
     });
 
     await waitFor(() => {
-      expect(onRestoreDraftConsumed).toHaveBeenCalledTimes(1);
+      expect(editorProps.last).toBeTruthy();
     });
+    expect(onRestoreDraftApplied).not.toHaveBeenCalled();
+    // The staged attachment list must never be replaced by the restore.
+    expect(state.setInputDraftAttachments).not.toHaveBeenCalled();
     expect(state.setInputDraft).not.toHaveBeenCalledWith(
       "__draft_new__:agent-1",
       "bring this back",
@@ -562,15 +622,78 @@ describe("ChatInput async send", () => {
 
 // A failed fire-and-forget send must restore into the session it was sent
 // FROM, never into whatever session the user navigated to in the meantime.
-describe("ChatInput session-aware restore", () => {
-  function element(props: Partial<React.ComponentProps<typeof ChatInput>>) {
-    return (
-      <I18nProvider locale="en" resources={TEST_RESOURCES}>
-        <ChatInput onSend={vi.fn()} onUploadFile={vi.fn()} agentName="Multica" {...props} />
-      </I18nProvider>
-    );
+// The send affordance must not hang off `isEmpty` alone. ChatInput does not
+// remount on a session switch and ContentEditor's defaultValue-sync uses
+// emitUpdate:false, so a draft that arrives from the store — a restore parked
+// by useChatDraftRestore, or any draft typed in another session — never moves
+// `isEmpty`. Pinning the button to it left the user staring at their own text
+// with Send greyed out.
+describe("ChatInput send affordance", () => {
+  function sendButton() {
+    const buttons = screen.getAllByRole("button");
+    return buttons[buttons.length - 1]!;
   }
 
+  it("enables Send for a draft that arrived from the store, not from typing", async () => {
+    const state = useChatStore.getState() as unknown as {
+      activeSessionId: string | null;
+      inputDrafts: Record<string, string>;
+    };
+    // Mount on an EMPTY session: isEmpty initializes to true. The bug needs this
+    // instance to survive the session switch — ChatInput is never remounted for
+    // one, so isEmpty keeps the value it took here.
+    state.activeSessionId = "session-a";
+    state.inputDrafts = { "session-b": "the text that failed to send" };
+
+    const { rerender } = render(element({}));
+    expect(sendButton()).toBeDisabled();
+
+    // Switch to the session holding the parked draft. The editor adopts it via
+    // the defaultValue sync (emitUpdate:false → no onUpdate → isEmpty untouched).
+    state.activeSessionId = "session-b";
+    rerender(element({}));
+
+    await waitFor(() => expect(sendButton()).not.toBeDisabled());
+  });
+
+  it("stays disabled when neither the editor nor the draft slot has content", async () => {
+    const state = useChatStore.getState() as unknown as {
+      activeSessionId: string | null;
+      inputDrafts: Record<string, string>;
+    };
+    state.activeSessionId = "session-b";
+    state.inputDrafts = {};
+
+    renderInput();
+
+    await waitFor(() => expect(sendButton()).toBeDisabled());
+  });
+
+  // The neighbouring path a naive "reset isEmpty on draftKey change" fix would
+  // have broken: the first upload in a brand-new chat lazily creates the session,
+  // flipping draftKey from the per-agent slot to the session id mid-compose. The
+  // editor keeps the typed text; the new draft slot is empty. Send must stay live.
+  it("keeps Send enabled when a lazy session create flips the draft key under a typed editor", async () => {
+    const state = useChatStore.getState() as unknown as {
+      activeSessionId: string | null;
+      inputDrafts: Record<string, string>;
+    };
+    state.activeSessionId = null;
+    state.inputDrafts = {};
+
+    const { rerender } = render(element({}));
+    fireEvent.change(screen.getByTestId("editor"), { target: { value: "typed before the session existed" } });
+    await waitFor(() => expect(sendButton()).not.toBeDisabled());
+
+    // ensureSession lands: draftKey flips to a slot the draft was never written to.
+    state.activeSessionId = "session-new";
+    rerender(element({}));
+
+    expect(sendButton()).not.toBeDisabled();
+  });
+});
+
+describe("ChatInput session-aware restore", () => {
   it("holds a session-scoped restore until the user returns to the source session", async () => {
     const state = useChatStore.getState() as unknown as {
       activeSessionId: string | null;
@@ -578,15 +701,15 @@ describe("ChatInput session-aware restore", () => {
     };
     // User is viewing session-b; the failed send belongs to session-a.
     state.activeSessionId = "session-b";
-    const onRestoreDraftConsumed = vi.fn();
+    const onRestoreDraftApplied = vi.fn();
     const props = {
       restoreDraftRequest: { id: "r1", content: "from A", sessionId: "session-a" },
-      onRestoreDraftConsumed,
+      onRestoreDraftApplied,
     };
     const { rerender } = render(element(props));
 
     // Pending — must NOT dump A's content into session-b.
-    expect(onRestoreDraftConsumed).not.toHaveBeenCalled();
+    expect(onRestoreDraftApplied).not.toHaveBeenCalled();
     expect(state.setInputDraft).not.toHaveBeenCalledWith("session-b", "from A");
 
     // User navigates back to the source session → the pending restore fires.
@@ -595,7 +718,7 @@ describe("ChatInput session-aware restore", () => {
 
     await waitFor(() => {
       expect(state.setInputDraft).toHaveBeenCalledWith("session-a", "from A");
-      expect(onRestoreDraftConsumed).toHaveBeenCalledTimes(1);
+      expect(onRestoreDraftApplied).toHaveBeenCalledTimes(1);
     });
   });
 
@@ -605,17 +728,17 @@ describe("ChatInput session-aware restore", () => {
       setInputDraft: ReturnType<typeof vi.fn>;
     };
     state.activeSessionId = "session-a";
-    const onRestoreDraftConsumed = vi.fn();
+    const onRestoreDraftApplied = vi.fn();
     render(
       element({
         restoreDraftRequest: { id: "r2", content: "hi A", sessionId: "session-a" },
-        onRestoreDraftConsumed,
+        onRestoreDraftApplied,
       }),
     );
 
     await waitFor(() => {
       expect(state.setInputDraft).toHaveBeenCalledWith("session-a", "hi A");
-      expect(onRestoreDraftConsumed).toHaveBeenCalledTimes(1);
+      expect(onRestoreDraftApplied).toHaveBeenCalledTimes(1);
     });
   });
 });

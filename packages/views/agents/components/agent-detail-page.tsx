@@ -34,7 +34,7 @@ import {
   memberListOptions,
   workspaceKeys,
 } from "@multica/core/workspace/queries";
-import { runtimeListOptions } from "@multica/core/runtimes";
+import { runtimeDisplayLabel, runtimeListOptions } from "@multica/core/runtimes";
 import { useAgentPermissions } from "@multica/core/permissions";
 import { Button } from "@multica/ui/components/ui/button";
 import { CapabilityBanner } from "@multica/ui/components/common/capability-banner";
@@ -449,7 +449,9 @@ function DetailHeader({
                 <span className="inline-flex min-w-0 items-center gap-1.5">
                   <Server className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
                   <span className="truncate">
-                    {runtime?.name ?? t(($) => $.pickers.runtime_none)}
+                    {runtime
+                      ? runtimeDisplayLabel(runtime)
+                      : t(($) => $.pickers.runtime_none)}
                   </span>
                 </span>
                 <VisibilityBadge value={agent.visibility} />

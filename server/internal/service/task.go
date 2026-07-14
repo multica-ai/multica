@@ -1568,11 +1568,16 @@ func (s *TaskService) SendDirectChatMessage(ctx context.Context, session db.Chat
 // affected agent's status, and broadcasts task:cancelled events so frontends
 // clear their live cards.
 //
-// Before #1587 this path was "cancel rows and return" — issue-status flips
-// (e.g. user marks the issue `done` or `cancelled` while a task is still
-// running) left the agent stuck at status="working" indefinitely, requiring a
-// manual `multica agent update <id> --status idle` to unwedge. Matches the
-// pattern already used by CancelTask and RerunIssue.
+// Callers are explicit issue-lifecycle cleanup paths only — DeleteIssue and
+// BatchDeleteIssues, where the owning issue row is going away so its tasks
+// must not be left orphaned. A plain status flip, `cancelled` included, no
+// longer routes here (MUL-4465): cancelling an issue is not an implicit "stop
+// all runs" switch. Do not re-add a status-driven caller.
+//
+// Before #1587 this path was "cancel rows and return", which left each affected
+// agent stuck at status="working" indefinitely, requiring a manual
+// `multica agent update <id> --status idle` to unwedge. It now reconciles agent
+// status and broadcasts task:cancelled, matching CancelTask and RerunIssue.
 func (s *TaskService) CancelTasksForIssue(ctx context.Context, issueID pgtype.UUID) error {
 	cancelled, err := s.Queries.CancelAgentTasksByIssue(ctx, issueID)
 	if err != nil {
@@ -1583,6 +1588,7 @@ func (s *TaskService) CancelTasksForIssue(ctx context.Context, issueID pgtype.UU
 		s.ReconcileAgentStatus(ctx, t.AgentID)
 		s.broadcastTaskEvent(ctx, protocol.EventTaskCancelled, t)
 	}
+	s.notifyTasksFinished(cancelled)
 	return nil
 }
 
@@ -1605,6 +1611,7 @@ func (s *TaskService) CancelTasksForAgent(ctx context.Context, agentID pgtype.UU
 	// working→available based on remaining task counts, no need to call
 	// per row (the rows we just cancelled all belong to the same agent).
 	s.ReconcileAgentStatus(ctx, agentID)
+	s.notifyTasksFinished(cancelled)
 	return cancelled, nil
 }
 
@@ -1622,6 +1629,7 @@ func (s *TaskService) CancelTasksByTriggerComment(ctx context.Context, commentID
 		s.ReconcileAgentStatus(ctx, t.AgentID)
 		s.broadcastTaskEvent(ctx, protocol.EventTaskCancelled, t)
 	}
+	s.notifyTasksFinished(cancelled)
 	return cancelled, nil
 }
 
@@ -1635,6 +1643,7 @@ func (s *TaskService) BroadcastCancelledTasks(ctx context.Context, cancelled []d
 		s.ReconcileAgentStatus(ctx, t.AgentID)
 		s.broadcastTaskEvent(ctx, protocol.EventTaskCancelled, t)
 	}
+	s.notifyTasksFinished(cancelled)
 }
 
 func (s *TaskService) CaptureCancelledTasks(ctx context.Context, cancelled []db.AgentTaskQueue) {
@@ -1659,10 +1668,27 @@ type CancelTaskResult struct {
 	CancelledChatMessage *CancelledChatMessageResult
 }
 
+// CancelTaskOptions carries what the caller knows about the client that asked
+// for the cancellation.
+type CancelTaskOptions struct {
+	// ClientSupportsDraftRestore is true when the caller can recover a prompt
+	// through the durable draft-restore path (#5219). Only such a client may be
+	// handed a deferred outcome; for anyone else the empty-transcript judgment
+	// stays synchronous, because the cancel response is their only chance to get
+	// the prompt back. See protocol.AppCapabilityChatDraftRestoreV1.
+	ClientSupportsDraftRestore bool
+}
+
 // CancelTask cancels a single task by ID. It broadcasts a task:cancelled event
 // so frontends can update immediately.
 func (s *TaskService) CancelTask(ctx context.Context, taskID pgtype.UUID) (*db.AgentTaskQueue, error) {
-	result, err := s.CancelTaskWithResult(ctx, taskID)
+	// Every caller of this wrapper cancels a non-chat task — issue/autopilot
+	// tasks through the issue-scoped endpoint, plus the daemon and sweeper paths
+	// — so finalizeCancelledChatMessage returns before the gate is even read.
+	// Should a chat task ever reach here, there is no client waiting on a
+	// synchronous restore anyway, and the durable path is the only one that can
+	// hand the prompt back at all.
+	result, err := s.CancelTaskWithResult(ctx, taskID, CancelTaskOptions{ClientSupportsDraftRestore: true})
 	if err != nil {
 		return nil, err
 	}
@@ -1671,7 +1697,7 @@ func (s *TaskService) CancelTask(ctx context.Context, taskID pgtype.UUID) (*db.A
 
 // CancelTaskWithResult cancels a single task and returns any chat-specific
 // cleanup result needed by user-facing callers.
-func (s *TaskService) CancelTaskWithResult(ctx context.Context, taskID pgtype.UUID) (*CancelTaskResult, error) {
+func (s *TaskService) CancelTaskWithResult(ctx context.Context, taskID pgtype.UUID, opts CancelTaskOptions) (*CancelTaskResult, error) {
 	task, err := s.Queries.CancelAgentTask(ctx, taskID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		existing, err := s.Queries.GetAgentTask(ctx, taskID)
@@ -1686,13 +1712,14 @@ func (s *TaskService) CancelTaskWithResult(ctx context.Context, taskID pgtype.UU
 
 	slog.Info("task cancelled", "task_id", util.UUIDToString(task.ID), "issue_id", util.UUIDToString(task.IssueID))
 	s.captureTaskCancelled(ctx, task)
-	cancelledChatMessage := s.finalizeCancelledChatMessage(ctx, task)
+	cancelledChatMessage := s.finalizeCancelledChatMessage(ctx, task, opts)
 
 	// Reconcile agent status
 	s.ReconcileAgentStatus(ctx, task.AgentID)
 
 	// Broadcast cancellation as a task:failed event so frontends clear the live card
 	s.broadcastTaskEvent(ctx, protocol.EventTaskCancelled, task)
+	s.NotifyTaskFinished(task)
 
 	return &CancelTaskResult{
 		Task:                 task,
@@ -1700,7 +1727,7 @@ func (s *TaskService) CancelTaskWithResult(ctx context.Context, taskID pgtype.UU
 	}, nil
 }
 
-func (s *TaskService) finalizeCancelledChatMessage(ctx context.Context, task db.AgentTaskQueue) *CancelledChatMessageResult {
+func (s *TaskService) finalizeCancelledChatMessage(ctx context.Context, task db.AgentTaskQueue, opts CancelTaskOptions) *CancelledChatMessageResult {
 	if !task.ChatSessionID.Valid {
 		return nil
 	}
@@ -1709,6 +1736,26 @@ func (s *TaskService) finalizeCancelledChatMessage(ctx context.Context, task db.
 		messages, err := qtx.ListTaskMessages(ctx, task.ID)
 		if err != nil {
 			return fmt.Errorf("list cancelled chat task messages: %w", err)
+		}
+		if len(messages) == 0 && task.StartedAt.Valid && opts.ClientSupportsDraftRestore {
+			// A started task's daemon learns of the cancellation by polling
+			// and may still be flushing its transcript tail, so "empty" is
+			// not trustworthy yet. Defer the judgment until the daemon acks
+			// its flush (cancel-ack) or the sweeper grace period expires
+			// (#5219). "Non-empty" needs no deferral: late rows only append.
+			//
+			// Deferring is gated on the client: clients and server do not
+			// upgrade together, and a client that cannot read the durable
+			// restore would take an empty cancel response as "nothing to put
+			// back" and lose the prompt. Such a client falls through to the
+			// legacy synchronous branch below — it keeps the pre-#5219 race
+			// (an in-flight transcript tail can still be misjudged as empty),
+			// which is exactly the behaviour it has against an old server, and
+			// strictly better than dropping the input.
+			if _, err := qtx.MarkChatFinalizeDeferred(ctx, task.ID); err != nil {
+				return fmt.Errorf("mark chat finalize deferred: %w", err)
+			}
+			return nil
 		}
 		if len(messages) == 0 {
 			// Detach attachments BEFORE deleting the user message — the
@@ -1753,6 +1800,155 @@ func (s *TaskService) finalizeCancelledChatMessage(ctx context.Context, task db.
 		return nil
 	}
 	return cancelled
+}
+
+// FinalizeDeferredCancelledChat settles the empty/non-empty judgment that
+// finalizeCancelledChatMessage deferred for a started-but-empty cancelled
+// chat task (#5219). Called from the daemon's cancel-ack (transcript flush
+// complete) and from the sweeper grace-period fallback; the marker claim is
+// atomic, so concurrent callers cannot finalize the same task twice and a
+// call with no pending marker is a no-op. The settled outcome is broadcast
+// as chat:cancel_finalized since the cancel HTTP response has long returned.
+func (s *TaskService) FinalizeDeferredCancelledChat(ctx context.Context, taskID pgtype.UUID) {
+	var (
+		task    db.AgentTaskQueue
+		payload protocol.ChatCancelFinalizedPayload
+		settled bool
+	)
+	if err := s.runInTx(ctx, func(qtx *db.Queries) error {
+		// Lock the task's chat_session first. chat_draft_restore has no FK
+		// (MUL-3515), so the insert below takes no lock of its own on the
+		// session — without this, a workspace/agent/session delete that swept
+		// the table just before we commit would leave our restore row (holding
+		// the user's prompt) orphaned forever. The deleters take the same lock
+		// before their sweep, so one of us blocks: either they wait and their
+		// sweep sees our row, or we wait and find no session left to restore
+		// into. Locking the session BEFORE the task claim also fixes the global
+		// lock order (chat_session -> agent_task_queue) that keeps this from
+		// deadlocking against the deleters' cascade.
+		_, err := qtx.LockChatSessionForTask(ctx, taskID)
+		sessionGone := errors.Is(err, pgx.ErrNoRows)
+		if err != nil && !sessionGone {
+			return fmt.Errorf("lock chat session for deferred finalize: %w", err)
+		}
+
+		// Claim the marker inside the settlement tx: a failed settlement then
+		// rolls the claim back so the sweeper can retry, instead of leaving the
+		// task with a cleared marker and no finalized outcome. The row lock
+		// still serializes the daemon ack and the sweeper — the loser's UPDATE
+		// blocks until the winner commits, then matches no row (ErrNoRows) — so
+		// the same task is never finalized twice.
+		claimed, err := qtx.ClaimChatFinalizeDeferred(ctx, taskID)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("claim deferred chat finalize: %w", err)
+		}
+		task = claimed
+		if sessionGone {
+			// The session cascaded away (its FK NULLs the column below anyway):
+			// there is no transcript to settle and nowhere to put a restore. The
+			// claim above still cleared the marker, so the sweeper stops retrying.
+			return nil
+		}
+		if !claimed.ChatSessionID.Valid {
+			return nil
+		}
+		settled = true
+		payload.ChatSessionID = util.UUIDToString(claimed.ChatSessionID)
+		payload.TaskID = util.UUIDToString(claimed.ID)
+		payload.InitiatorUserID = util.UUIDToString(claimed.InitiatorUserID)
+
+		messages, err := qtx.ListTaskMessages(ctx, claimed.ID)
+		if err != nil {
+			return fmt.Errorf("list cancelled chat task messages: %w", err)
+		}
+		if len(messages) == 0 {
+			// The transcript stayed empty through the daemon flush: same
+			// outcome as the synchronous empty branch, but the cancel HTTP
+			// response is long gone and the broadcast is best-effort. The
+			// restore is persisted in this same tx and served by the
+			// creator-authorized draft-restores endpoint, so a client that
+			// misses the event recovers it on the next session open; the
+			// event itself carries no content and is only an invalidation
+			// hint.
+			detached, err := qtx.DetachAttachmentsFromUserChatMessageByTask(ctx, claimed.ID)
+			if err != nil {
+				return fmt.Errorf("detach cancelled chat message attachments: %w", err)
+			}
+			deleted, err := qtx.DeleteUserChatMessageByTask(ctx, claimed.ID)
+			if errors.Is(err, pgx.ErrNoRows) {
+				payload.Outcome = ""
+				return nil
+			}
+			if err != nil {
+				return fmt.Errorf("delete empty cancelled chat user message: %w", err)
+			}
+			attachmentIDs := make([]pgtype.UUID, 0, len(detached))
+			for _, a := range detached {
+				attachmentIDs = append(attachmentIDs, a.ID)
+			}
+			if _, err := qtx.CreateChatDraftRestore(ctx, db.CreateChatDraftRestoreParams{
+				ID:            deleted.ID,
+				ChatSessionID: claimed.ChatSessionID,
+				TaskID:        claimed.ID,
+				Content:       deleted.Content,
+				AttachmentIds: attachmentIDs,
+			}); err != nil {
+				return fmt.Errorf("create chat draft restore: %w", err)
+			}
+			payload.Outcome = protocol.ChatCancelOutcomeRestored
+			payload.MessageID = util.UUIDToString(deleted.ID)
+			return nil
+		}
+		row, err := qtx.CreateChatMessage(ctx, db.CreateChatMessageParams{
+			ChatSessionID: claimed.ChatSessionID,
+			Role:          "assistant",
+			Content:       "Stopped.",
+			TaskID:        claimed.ID,
+			ElapsedMs:     computeChatElapsedMs(claimed),
+		})
+		if err != nil {
+			return fmt.Errorf("create cancelled chat message: %w", err)
+		}
+		payload.Outcome = protocol.ChatCancelOutcomeStopped
+		payload.MessageID = util.UUIDToString(row.ID)
+		payload.Content = row.Content
+		payload.MessageKind = row.MessageKind
+		if row.CreatedAt.Valid {
+			payload.CreatedAt = row.CreatedAt.Time.UTC().Format(time.RFC3339Nano)
+		}
+		if row.ElapsedMs.Valid {
+			payload.ElapsedMs = row.ElapsedMs.Int64
+		}
+		return nil
+	}); err != nil {
+		slog.Error("failed to finalize deferred cancelled chat",
+			"task_id", util.UUIDToString(taskID),
+			"error", err,
+		)
+		return
+	}
+	if !settled || payload.Outcome == "" {
+		return
+	}
+	s.broadcastChatCancelFinalized(ctx, task, payload)
+}
+
+func (s *TaskService) broadcastChatCancelFinalized(ctx context.Context, task db.AgentTaskQueue, payload protocol.ChatCancelFinalizedPayload) {
+	workspaceID := s.ResolveTaskWorkspaceID(ctx, task)
+	if workspaceID == "" {
+		return
+	}
+	s.Bus.Publish(events.Event{
+		Type:          protocol.EventChatCancelFinalized,
+		WorkspaceID:   workspaceID,
+		ActorType:     "system",
+		ActorID:       "",
+		ChatSessionID: util.UUIDToString(task.ChatSessionID),
+		Payload:       payload,
+	})
 }
 
 // ClaimTask atomically claims the next queued task for an agent,
@@ -2020,6 +2216,190 @@ func (s *TaskService) RequeueTaskAfterClaimFailure(ctx context.Context, task db.
 		"runtime_id", util.UUIDToString(requeued.RuntimeID),
 	)
 	return &requeued, nil
+}
+
+// ClaimTasksForRuntimes is the machine-level (MUL-4257) batch counterpart of
+// ClaimTaskForRuntime: it claims up to maxTasks tasks across every runtime in
+// runtimeIDs in a single call, so a daemon can poll for all of its runtimes
+// with one HTTP request and a constant number of DB queries instead of one
+// request (and one promote/reclaim/list cycle) per runtime.
+//
+// It preserves the exact per-runtime semantics, just set-ified:
+//  1. promote due deferred tasks across the set (one UPDATE);
+//  2. reclaim up to maxTasks stale-dispatched tasks across the set (one UPDATE)
+//     — done before the empty-cache check because a lost claim response moves
+//     the task out of `queued`, which the empty-queued cache cannot represent;
+//  3. short-circuit runtimes whose empty-claim verdict is cached, sampling the
+//     invalidation version for the rest BEFORE the candidate SELECT;
+//  4. list queued candidates across the non-empty set (one SELECT);
+//  5. mark still-empty runtimes so their next idle poll skips Postgres;
+//  6. claim per distinct agent via ClaimTask (unchanged — preserves the
+//     per-(issue, agent) serialization, the agent concurrency cap, and every
+//     dispatch side effect) until maxTasks is reached.
+//
+// The returned slice contains both reclaimed and freshly-claimed tasks, each
+// already carrying its runtime_id so the daemon routes it to the matching
+// runtime locally.
+func (s *TaskService) ClaimTasksForRuntimes(ctx context.Context, runtimeIDs []pgtype.UUID, maxTasks int) ([]db.AgentTaskQueue, error) {
+	if len(runtimeIDs) == 0 || maxTasks <= 0 {
+		return nil, nil
+	}
+
+	// De-dup runtime IDs defensively so MarkEmpty/version bookkeeping stays
+	// unambiguous even if a daemon ever sends a duplicate.
+	seen := make(map[string]struct{}, len(runtimeIDs))
+	uniqueIDs := make([]pgtype.UUID, 0, len(runtimeIDs))
+	runtimeInSet := make(map[string]struct{}, len(runtimeIDs))
+	for _, rid := range runtimeIDs {
+		key := util.UUIDToString(rid)
+		runtimeInSet[key] = struct{}{}
+		if _, dup := seen[key]; dup {
+			continue
+		}
+		seen[key] = struct{}{}
+		uniqueIDs = append(uniqueIDs, rid)
+	}
+
+	claimed := make([]db.AgentTaskQueue, 0, maxTasks)
+
+	// 1. Promote due deferred tasks across the whole set (promote-first, like
+	// the singular path). Replay the per-row side effects the singular service
+	// method PromoteDueDeferredTasksForRuntime performs — crucially
+	// EmptyClaim.Bump (via NotifyTaskEnqueued → notifyTaskAvailable) so a
+	// just-promoted deferred task invalidates its runtime's cached empty
+	// verdict BEFORE the empty-cache filter in step 3; otherwise a stale
+	// MarkEmpty from a prior idle poll would short-circuit the runtime and the
+	// promoted task would sit unclaimed until the empty key's TTL. Also emits
+	// the deferred→queued UI event and the enqueue analytics sample.
+	promoted, err := s.Queries.PromoteDueDeferredTasksForRuntimes(ctx, uniqueIDs)
+	if err != nil {
+		return nil, fmt.Errorf("promote deferred tasks: %w", err)
+	}
+	for _, task := range promoted {
+		slog.Info("deferred fallback task promoted (batch)",
+			"task_id", util.UUIDToString(task.ID),
+			"runtime_id", util.UUIDToString(task.RuntimeID),
+			"agent_id", util.UUIDToString(task.AgentID),
+		)
+		s.broadcastTaskEvent(ctx, protocol.EventTaskQueued, task)
+		s.NotifyTaskEnqueued(ctx, task)
+	}
+
+	// 2. Reclaim lost-response dispatched tasks across the set, up to maxTasks.
+	reclaimed, err := s.Queries.ReclaimStaleDispatchedTasksForRuntimes(ctx, db.ReclaimStaleDispatchedTasksForRuntimesParams{
+		RuntimeIds:        uniqueIDs,
+		ClaimRecoverySecs: claimResponseRecoveryWindow.Seconds(),
+		PrepareLeaseSecs:  prepareLeaseDuration.Seconds(),
+		MaxTasks:          int32(maxTasks),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("reclaim stale dispatched tasks: %w", err)
+	}
+	for i := range reclaimed {
+		claimed = append(claimed, reclaimed[i])
+		slog.Info("stale dispatched task reclaimed (batch)",
+			"task_id", util.UUIDToString(reclaimed[i].ID),
+			"runtime_id", util.UUIDToString(reclaimed[i].RuntimeID),
+			"agent_id", util.UUIDToString(reclaimed[i].AgentID),
+		)
+	}
+	if len(claimed) >= maxTasks {
+		return claimed[:maxTasks], nil
+	}
+
+	// 3. Empty-cache short-circuit + version sampling for the remaining runtimes.
+	nonEmpty := make([]pgtype.UUID, 0, len(uniqueIDs))
+	versions := make(map[string]int64, len(uniqueIDs))
+	for _, rid := range uniqueIDs {
+		key := util.UUIDToString(rid)
+		if s.EmptyClaim.IsEmpty(ctx, key) {
+			continue
+		}
+		versions[key] = s.EmptyClaim.CurrentVersion(ctx, key)
+		nonEmpty = append(nonEmpty, rid)
+	}
+	if len(nonEmpty) == 0 {
+		return claimed, nil
+	}
+
+	// 4. One candidate SELECT across the non-empty set.
+	candidates, err := s.Queries.ListQueuedClaimCandidatesByRuntimes(ctx, nonEmpty)
+	if err != nil {
+		// Steps 2/6 commit reclaimed/claimed tasks in their own transactions,
+		// so `claimed` may already hold tasks dispatched server-side. Dropping
+		// them with a 500 makes the daemon HTTP-fall-back and claim a SECOND
+		// batch into the same free slots (the first batch then waits for stale
+		// reclaim) — the same double-claim this PR set out to remove
+		// (MUL-4257). Prefer partial success: hand back what committed so the
+		// handler finalizes and returns it; the errored candidates stay queued
+		// for the next poll.
+		if len(claimed) > 0 {
+			slog.Error("batch claim: candidate query failed after partial success; returning claimed tasks to avoid loss",
+				"error", err, "claimed", len(claimed))
+			return claimed, nil
+		}
+		return nil, fmt.Errorf("list queued claim candidates: %w", err)
+	}
+
+	// 5. Mark runtimes with zero candidates empty so their next idle poll skips
+	// Postgres. Runtimes that had at least one candidate are intentionally not
+	// marked (positive results always re-check the DB, matching the singular
+	// path).
+	withCandidates := make(map[string]struct{}, len(candidates))
+	for i := range candidates {
+		withCandidates[util.UUIDToString(candidates[i].RuntimeID)] = struct{}{}
+	}
+	for _, rid := range nonEmpty {
+		key := util.UUIDToString(rid)
+		if _, ok := withCandidates[key]; !ok {
+			s.EmptyClaim.MarkEmpty(ctx, key, versions[key])
+		}
+	}
+
+	// 6. Claim per distinct agent (unchanged path → same per-(issue, agent)
+	// serialization, capacity cap, and dispatch side effects) until maxTasks is
+	// reached.
+	triedAgents := make(map[string]struct{}, len(candidates))
+	for i := range candidates {
+		if len(claimed) >= maxTasks {
+			break
+		}
+		agentKey := util.UUIDToString(candidates[i].AgentID)
+		if _, tried := triedAgents[agentKey]; tried {
+			continue
+		}
+		triedAgents[agentKey] = struct{}{}
+
+		task, err := s.ClaimTask(ctx, candidates[i].AgentID)
+		if err != nil {
+			// Each ClaimTask commits in its own transaction, so earlier
+			// iterations (and step-2 reclaims) are already dispatched
+			// server-side. Returning nil here would drop them and force the
+			// daemon to double-claim via HTTP fallback (MUL-4257). Return the
+			// partial batch instead; the failed agent's task stays queued.
+			if len(claimed) > 0 {
+				slog.Error("batch claim: claim task failed after partial success; returning claimed tasks to avoid loss",
+					"error", err, "claimed", len(claimed))
+				return claimed, nil
+			}
+			return nil, fmt.Errorf("claim task: %w", err)
+		}
+		if task == nil {
+			continue
+		}
+		// ClaimAgentTask selects by agent only; guard that the claimed task
+		// belongs to a runtime this daemon hosts. An agent with a
+		// higher-priority queued task on ANOTHER daemon's runtime could
+		// otherwise be dispatched here and dropped — matching the singular
+		// path's runtime_id guard. Such a stray dispatch is recovered by the
+		// reclaim path on the owning daemon's next poll.
+		if _, ok := runtimeInSet[util.UUIDToString(task.RuntimeID)]; !ok {
+			continue
+		}
+		claimed = append(claimed, *task)
+	}
+
+	return claimed, nil
 }
 
 func (s *TaskService) PromoteDueDeferredTasksForRuntime(ctx context.Context, runtimeID pgtype.UUID) error {
@@ -3068,6 +3448,7 @@ func (s *TaskService) HandleFailedTasks(ctx context.Context, tasks []db.AgentTas
 	for _, agentID := range affectedAgents {
 		s.ReconcileAgentStatus(ctx, agentID)
 	}
+	s.notifyTasksFinished(tasks)
 	return retried
 }
 
@@ -3315,6 +3696,33 @@ func (s *TaskService) NotifyTaskEnqueued(ctx context.Context, task db.AgentTaskQ
 	s.notifyTaskAvailable(task)
 }
 
+// NotifyTaskFinished invalidates a runtime's empty-claim verdict and emits a
+// best-effort daemon wakeup after a task reaches a terminal state. The task ID
+// is deliberately omitted from the wakeup payload: the completed task itself
+// is not available; the hint only means that a queued successor may have
+// become claimable because an agent-capacity or serialization barrier cleared.
+func (s *TaskService) NotifyTaskFinished(task db.AgentTaskQueue) {
+	s.notifyRuntimeMayHaveWork(task.RuntimeID, "")
+}
+
+// notifyTasksFinished is the batch form used by bulk terminal transitions.
+// Coalesce by runtime so cancelling many tasks on one machine produces one
+// cache bump and one websocket hint rather than a burst of identical work.
+func (s *TaskService) notifyTasksFinished(tasks []db.AgentTaskQueue) {
+	seen := make(map[string]struct{}, len(tasks))
+	for _, task := range tasks {
+		if !task.RuntimeID.Valid {
+			continue
+		}
+		runtimeKey := util.UUIDToString(task.RuntimeID)
+		if _, ok := seen[runtimeKey]; ok {
+			continue
+		}
+		seen[runtimeKey] = struct{}{}
+		s.notifyRuntimeMayHaveWork(task.RuntimeID, "")
+	}
+}
+
 // notifyTaskAvailable runs after a task has been inserted: bumps the
 // runtime's invalidation version so any in-flight claim that is about
 // to write an "empty" verdict will have it rejected on read, then
@@ -3323,10 +3731,16 @@ func (s *TaskService) NotifyTaskEnqueued(ctx context.Context, task db.AgentTaskQ
 // otherwise the wakeup-driven claim could read the still-current
 // empty verdict and return null.
 func (s *TaskService) notifyTaskAvailable(task db.AgentTaskQueue) {
-	if !task.RuntimeID.Valid {
+	s.notifyRuntimeMayHaveWork(task.RuntimeID, util.UUIDToString(task.ID))
+}
+
+// notifyRuntimeMayHaveWork is the shared bump-before-wakeup primitive for both
+// fresh enqueues and terminal transitions that can unblock queued work.
+func (s *TaskService) notifyRuntimeMayHaveWork(runtimeID pgtype.UUID, taskID string) {
+	if !runtimeID.Valid {
 		return
 	}
-	runtimeKey := util.UUIDToString(task.RuntimeID)
+	runtimeKey := util.UUIDToString(runtimeID)
 	// Use a background context: the cache bump / wakeup must outlive
 	// the request that created the task, otherwise an early client
 	// disconnect could leave the empty verdict in place and stall the
@@ -3337,7 +3751,7 @@ func (s *TaskService) notifyTaskAvailable(task db.AgentTaskQueue) {
 	if s.Wakeup == nil {
 		return
 	}
-	s.Wakeup.NotifyTaskAvailable(runtimeKey, util.UUIDToString(task.ID))
+	s.Wakeup.NotifyTaskAvailable(runtimeKey, taskID)
 }
 
 func (s *TaskService) broadcastTaskDispatch(ctx context.Context, task db.AgentTaskQueue) {

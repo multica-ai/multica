@@ -69,11 +69,17 @@ const (
 	EventSkillDeleted = "skill:deleted"
 
 	// Chat events
-	EventChatMessage        = "chat:message"
-	EventChatDone           = "chat:done"
-	EventChatSessionRead    = "chat:session_read"
-	EventChatSessionDeleted = "chat:session_deleted"
-	EventChatSessionUpdated = "chat:session_updated"
+	EventChatMessage = "chat:message"
+	EventChatDone    = "chat:done"
+	// EventChatCancelFinalized carries the deferred outcome of a cancelled
+	// chat task once the daemon has flushed its transcript (or the sweeper
+	// grace period expired): either a late "Stopped." assistant message or a
+	// draft restore (#5219). Channel outbounds (Slack/Lark) deliberately do
+	// not subscribe to it — cancellation stays silent on external channels.
+	EventChatCancelFinalized = "chat:cancel_finalized"
+	EventChatSessionRead     = "chat:session_read"
+	EventChatSessionDeleted  = "chat:session_deleted"
+	EventChatSessionUpdated  = "chat:session_updated"
 
 	// Project events
 	EventProjectCreated         = "project:created"
@@ -118,6 +124,14 @@ const (
 	EventDaemonRegister               = "daemon:register"
 	EventDaemonTaskAvailable          = "daemon:task_available"
 	EventDaemonRuntimeProfilesChanged = "daemon:runtime_profiles_changed"
+	EventDaemonWorkspacesChanged      = "daemon:workspaces_changed"
+	// Generic daemon→server request/response over the WebSocket control
+	// connection (MUL-4257). The daemon sends EventDaemonRPCRequest with a
+	// correlation id + method + body; the server replies EventDaemonRPCResponse
+	// with the same request id. This is the transport for WS-first claim (with
+	// HTTP fallback) and any future daemon→server RPC.
+	EventDaemonRPCRequest  = "daemon:rpc_request"
+	EventDaemonRPCResponse = "daemon:rpc_response"
 
 	// GitHub integration events
 	EventGitHubInstallationCreated = "github_installation:created"

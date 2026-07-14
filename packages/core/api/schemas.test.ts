@@ -8,8 +8,10 @@ import {
   DashboardAgentRunTimeListSchema,
   DashboardUsageByAgentListSchema,
   DashboardUsageDailyListSchema,
+  ChatDraftRestoresResponseSchema,
   CreateFeedbackResponseSchema,
   DuplicateIssueErrorBodySchema,
+  EMPTY_CHAT_DRAFT_RESTORES,
   EMPTY_CREATE_FEEDBACK_RESPONSE,
   EMPTY_INBOX_UNREAD_SUMMARY,
   EMPTY_SEARCH_PROJECTS_RESPONSE,
@@ -259,6 +261,53 @@ describe("AgentTaskListSchema", () => {
       "comment-2",
       "comment-3",
     ]);
+  });
+});
+
+describe("ChatDraftRestoresResponseSchema", () => {
+  it("parses a well-formed response with attachments", () => {
+    const parsed = parseWithFallback(
+      {
+        restores: [
+          {
+            id: "msg-1",
+            chat_session_id: "s-1",
+            task_id: "t-1",
+            content: "run the thing",
+            attachments: [{ id: "att-1", filename: "notes.txt" }],
+            created_at: "2026-07-01T00:00:00Z",
+          },
+        ],
+      },
+      ChatDraftRestoresResponseSchema,
+      EMPTY_CHAT_DRAFT_RESTORES,
+      { endpoint: "test" },
+    );
+    expect(parsed.restores).toHaveLength(1);
+    expect(parsed.restores[0]?.content).toBe("run the thing");
+    expect(parsed.restores[0]?.attachments?.[0]?.id).toBe("att-1");
+  });
+
+  it("defaults a missing restores array instead of crashing the composer", () => {
+    const parsed = parseWithFallback(
+      {},
+      ChatDraftRestoresResponseSchema,
+      EMPTY_CHAT_DRAFT_RESTORES,
+      { endpoint: "test" },
+    );
+    expect(parsed.restores).toEqual([]);
+  });
+
+  it("falls back to the empty response on a malformed row", () => {
+    // A row without the consume key (id) is unusable — the whole response
+    // falls back and the durable rows simply stay pending server-side.
+    const parsed = parseWithFallback(
+      { restores: [{ chat_session_id: "s-1", content: 42 }] },
+      ChatDraftRestoresResponseSchema,
+      EMPTY_CHAT_DRAFT_RESTORES,
+      { endpoint: "test" },
+    );
+    expect(parsed).toEqual(EMPTY_CHAT_DRAFT_RESTORES);
   });
 });
 
@@ -541,6 +590,11 @@ describe("AppConfigSchema cdn_signed drift", () => {
   it("defaults malformed feature_flags to an empty object", () => {
     const parsed = AppConfigSchema.parse({ feature_flags: ["not", "an", "object"] });
     expect(parsed.feature_flags).toEqual({});
+  });
+
+  it("parses server_version and leaves it undefined when the server omits it", () => {
+    expect(AppConfigSchema.parse({ server_version: "1.2.3" }).server_version).toBe("1.2.3");
+    expect(AppConfigSchema.parse({}).server_version).toBeUndefined();
   });
 });
 

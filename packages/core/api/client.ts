@@ -71,6 +71,7 @@ import type {
   ChatPinnedAgent,
   ChatMessage,
   ChatMessagesPage,
+  ChatDraftRestoresResponse,
   ChatPendingTask,
   PendingChatTasksResponse,
   HasPendingChatTasksResponse,
@@ -155,6 +156,7 @@ import {
   AgentTemplateSummaryListSchema,
   AttachmentResponseSchema,
   CancelTaskResponseSchema,
+  ChatDraftRestoresResponseSchema,
   ChildIssuesResponseSchema,
   CommentsListSchema,
   CommentTriggerPreviewSchema,
@@ -225,6 +227,7 @@ import {
   EMPTY_BILLING_CHECKOUT_SESSION_STATUS,
   EMPTY_CREATE_BILLING_PORTAL_SESSION_RESPONSE,
   EMPTY_CANCEL_TASK_RESPONSE,
+  EMPTY_CHAT_DRAFT_RESTORES,
   CreateFeedbackResponseSchema,
   EMPTY_CREATE_FEEDBACK_RESPONSE,
   InboxUnreadSummarySchema,
@@ -313,6 +316,13 @@ export class PreviewUnsupportedError extends Error {
     this.name = "PreviewUnsupportedError";
   }
 }
+
+/**
+ * Advertised in X-Client-Capabilities so the server knows this client can
+ * recover a cancelled prompt from the durable draft-restore row (#5219).
+ * Must stay in sync with protocol.AppCapabilityChatDraftRestoreV1.
+ */
+export const CHAT_DRAFT_RESTORE_CAPABILITY = "chat-draft-restore-v1";
 
 export class ApiClient {
   private baseUrl: string;
@@ -1931,6 +1941,33 @@ export class ApiClient {
     return this.fetch(`/api/chat/sessions/${sessionId}/pending-task`);
   }
 
+  /**
+   * Pending deferred-cancellation draft restores for a session (#5219).
+   * A 404 means the backend predates the endpoint — treat as "nothing
+   * pending" so older servers never error the composer.
+   */
+  async listChatDraftRestores(sessionId: string): Promise<ChatDraftRestoresResponse> {
+    let raw: unknown;
+    try {
+      raw = await this.fetch<unknown>(`/api/chat/sessions/${sessionId}/draft-restores`);
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 404) {
+        return { restores: [] };
+      }
+      throw err;
+    }
+    return parseWithFallback(raw, ChatDraftRestoresResponseSchema, EMPTY_CHAT_DRAFT_RESTORES, {
+      endpoint: "GET /api/chat/sessions/{id}/draft-restores",
+    });
+  }
+
+  /** Idempotent consume — deleting an already-consumed restore is a 204 no-op. */
+  async consumeChatDraftRestore(sessionId: string, restoreId: string): Promise<void> {
+    await this.fetch(`/api/chat/sessions/${sessionId}/draft-restores/${restoreId}`, {
+      method: "DELETE",
+    });
+  }
+
   async listPendingChatTasks(): Promise<PendingChatTasksResponse> {
     return this.fetch(`/api/chat/pending-tasks`);
   }
@@ -1943,8 +1980,15 @@ export class ApiClient {
     await this.fetch(`/api/chat/sessions/${sessionId}/read`, { method: "POST" });
   }
 
+  // Advertises the durable draft-restore capability (#5219). The server only
+  // defers the empty-transcript judgment — and therefore only withholds the
+  // synchronous restore from the response — for clients that send this; without
+  // it we would be treated as a pre-#5219 client and get the legacy behaviour.
   async cancelTaskById(taskId: string): Promise<CancelTaskResponse> {
-    const raw = await this.fetch<unknown>(`/api/tasks/${taskId}/cancel`, { method: "POST" });
+    const raw = await this.fetch<unknown>(`/api/tasks/${taskId}/cancel`, {
+      method: "POST",
+      headers: { "X-Client-Capabilities": CHAT_DRAFT_RESTORE_CAPABILITY },
+    });
     return parseWithFallback(raw, CancelTaskResponseSchema, EMPTY_CANCEL_TASK_RESPONSE, {
       endpoint: "POST /api/tasks/{taskId}/cancel",
     });

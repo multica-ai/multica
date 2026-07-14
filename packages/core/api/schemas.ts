@@ -13,6 +13,7 @@ import type {
   BillingTopupsPage,
   BillingTransactionsPage,
   CancelTaskResponse,
+  ChatDraftRestoresResponse,
   CreateAgentFromTemplateResponse,
   CreateBillingCheckoutSessionResponse,
   CreateBillingPortalSessionResponse,
@@ -94,6 +95,7 @@ export interface AppConfigResponse {
   daemon_app_url?: string;
   workspace_creation_disabled?: boolean;
   feature_flags?: Record<string, boolean>;
+  server_version?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -243,6 +245,7 @@ export const AppConfigSchema = z.object({
   daemon_app_url: OptionalStringSchema,
   workspace_creation_disabled: BooleanWithDefaultSchema(false).optional(),
   feature_flags: FeatureFlagsSchema,
+  server_version: OptionalStringSchema,
 }).loose();
 
 export const EMPTY_APP_CONFIG: AppConfigResponse = {
@@ -693,6 +696,29 @@ export const CancelTaskResponseSchema = AgentTaskSchema.extend({
     .transform((value) => value ?? undefined),
 }).loose();
 
+// Deferred-cancellation draft restores
+// (`GET /api/chat/sessions/{id}/draft-restores`, #5219) feed the composer
+// directly: `content` becomes the draft text, `attachments` re-bind on
+// re-send, and `id` is the consume key. A malformed response falls back to
+// an empty list — the durable row stays pending server-side, so nothing is
+// lost by skipping a fetch.
+const ChatDraftRestoreSchema = z.object({
+  id: z.string(),
+  chat_session_id: z.string(),
+  task_id: z.string().optional(),
+  content: z.string().default(""),
+  attachments: z.array(AttachmentSchema).optional(),
+  created_at: z.string().optional(),
+}).loose();
+
+export const ChatDraftRestoresResponseSchema = z.object({
+  restores: z.array(ChatDraftRestoreSchema).default([]),
+}).loose();
+
+export const EMPTY_CHAT_DRAFT_RESTORES: ChatDraftRestoresResponse = {
+  restores: [],
+};
+
 export const EMPTY_CANCEL_TASK_RESPONSE: CancelTaskResponse = {
   id: "",
   agent_id: "",
@@ -971,6 +997,10 @@ const WebhookDeliverySchema = z.object({
   signature_status: z.string(),
   status: z.string(),
   attempt_count: z.number().default(0),
+  // Older servers predate the durable dispatch queue. Defaults preserve
+  // compatibility while the UI rolls out alongside the new worker.
+  dispatch_attempts: z.number().default(0),
+  available_at: z.string().default(""),
   content_type: z.string().nullable(),
   response_status: z.number().nullable(),
   autopilot_run_id: z.string().nullable(),
@@ -1094,6 +1124,8 @@ export const EMPTY_WEBHOOK_DELIVERY: WebhookDelivery = {
   signature_status: "not_required",
   status: "queued",
   attempt_count: 0,
+  dispatch_attempts: 0,
+  available_at: "",
   content_type: null,
   response_status: null,
   autopilot_run_id: null,

@@ -120,6 +120,58 @@ func newDaemonTokenRequest(method, path string, body any, workspaceID, daemonID 
 	return req.WithContext(ctx)
 }
 
+func TestListDaemonWorkspaces_UserScopedAndConditional(t *testing.T) {
+	w := httptest.NewRecorder()
+	req := newRequest(http.MethodGet, "/api/daemon/workspaces", nil)
+	testHandler.ListDaemonWorkspaces(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("ListDaemonWorkspaces: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var workspaces []DaemonWorkspaceResponse
+	if err := json.NewDecoder(w.Body).Decode(&workspaces); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(workspaces) == 0 {
+		t.Fatal("expected at least one daemon workspace")
+	}
+	if workspaces[0].ID == "" || workspaces[0].Name == "" {
+		t.Fatalf("expected minimal id/name projection, got %+v", workspaces[0])
+	}
+	etag := w.Header().Get("ETag")
+	if etag == "" {
+		t.Fatal("expected ETag")
+	}
+
+	w = httptest.NewRecorder()
+	req = newRequest(http.MethodGet, "/api/daemon/workspaces", nil)
+	req.Header.Set("If-None-Match", etag)
+	testHandler.ListDaemonWorkspaces(w, req)
+	if w.Code != http.StatusNotModified {
+		t.Fatalf("conditional ListDaemonWorkspaces: expected 304, got %d: %s", w.Code, w.Body.String())
+	}
+	if w.Body.Len() != 0 {
+		t.Fatalf("expected empty 304 body, got %q", w.Body.String())
+	}
+}
+
+func TestListDaemonWorkspaces_DaemonTokenIsWorkspaceScoped(t *testing.T) {
+	w := httptest.NewRecorder()
+	req := newDaemonTokenRequest(http.MethodGet, "/api/daemon/workspaces", nil, testWorkspaceID, "daemon-test")
+	testHandler.ListDaemonWorkspaces(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("ListDaemonWorkspaces: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var workspaces []DaemonWorkspaceResponse
+	if err := json.NewDecoder(w.Body).Decode(&workspaces); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(workspaces) != 1 || workspaces[0].ID != testWorkspaceID {
+		t.Fatalf("daemon-token workspaces = %+v, want only %s", workspaces, testWorkspaceID)
+	}
+}
+
 func createClaimReclaimRuntime(t *testing.T, ctx context.Context, name string) string {
 	t.Helper()
 
@@ -4531,5 +4583,123 @@ func TestClaimTaskByRuntime_CommentResumeDefaultOn(t *testing.T) {
 	resp := claimCommentTask(t, runtimeID, "comment-resume-default")
 	if resp.Task.PriorSessionID != priorSession {
 		t.Errorf("prior_session_id = %q, want %q (comment resume is default-on)", resp.Task.PriorSessionID, priorSession)
+	}
+}
+
+// TestAckTaskCancelled verifies the cancel-ack endpoint settles a deferred
+// chat finalization (marker claimed, Stopped. row written for a transcript
+// that filled in late) and keeps the anti-enumeration shape of
+// requireDaemonTaskAccess for cross-workspace tokens.
+func TestAckTaskCancelled(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+
+	var agentID, runtimeID string
+	if err := testPool.QueryRow(ctx, `
+		SELECT a.id, a.runtime_id FROM agent a WHERE a.workspace_id = $1 LIMIT 1
+	`, testWorkspaceID).Scan(&agentID, &runtimeID); err != nil {
+		t.Fatalf("setup: get agent: %v", err)
+	}
+
+	var chatSessionID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO chat_session (workspace_id, agent_id, creator_id, title)
+		VALUES ($1, $2, $3, 'cancel ack test')
+		RETURNING id
+	`, testWorkspaceID, agentID, testUserID).Scan(&chatSessionID); err != nil {
+		t.Fatalf("setup: create chat session: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM chat_session WHERE id = $1`, chatSessionID) })
+
+	// Cancelled chat task with a pending deferred-finalize marker, plus a
+	// transcript row that landed after the cancel (the daemon's late flush).
+	var taskID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (
+			agent_id, runtime_id, issue_id, chat_session_id, status, priority,
+			started_at, completed_at, chat_finalize_deferred_at
+		)
+		VALUES ($1, $2, NULL, $3, 'cancelled', 0, now(), now(), now())
+		RETURNING id
+	`, agentID, runtimeID, chatSessionID).Scan(&taskID); err != nil {
+		t.Fatalf("setup: create task: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM task_message WHERE task_id = $1`, taskID)
+		testPool.Exec(ctx, `DELETE FROM chat_message WHERE task_id = $1`, taskID)
+		testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE id = $1`, taskID)
+	})
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO task_message (task_id, seq, type, content)
+		VALUES ($1, 1, 'text', 'late flush')
+	`, taskID); err != nil {
+		t.Fatalf("setup: insert task message: %v", err)
+	}
+
+	// Cross-workspace daemon token must still 404 and leave the marker armed.
+	w := httptest.NewRecorder()
+	req := newDaemonTokenRequest("POST", "/api/daemon/tasks/"+taskID+"/cancel-ack", nil,
+		"00000000-0000-0000-0000-000000000000", "attacker-daemon")
+	req = withURLParam(req, "taskId", taskID)
+	testHandler.AckTaskCancelled(w, req)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("AckTaskCancelled with cross-workspace token: expected 404, got %d: %s", w.Code, w.Body.String())
+	}
+	var deferredAt *time.Time
+	if err := testPool.QueryRow(ctx, `
+		SELECT chat_finalize_deferred_at FROM agent_task_queue WHERE id = $1
+	`, taskID).Scan(&deferredAt); err != nil {
+		t.Fatalf("read marker: %v", err)
+	}
+	if deferredAt == nil {
+		t.Fatal("cross-workspace ack must not claim the marker")
+	}
+
+	// Same-workspace token settles the deferred finalize.
+	w = httptest.NewRecorder()
+	req = newDaemonTokenRequest("POST", "/api/daemon/tasks/"+taskID+"/cancel-ack", nil,
+		testWorkspaceID, "legit-daemon")
+	req = withURLParam(req, "taskId", taskID)
+	testHandler.AckTaskCancelled(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("AckTaskCancelled same-workspace: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if err := testPool.QueryRow(ctx, `
+		SELECT chat_finalize_deferred_at FROM agent_task_queue WHERE id = $1
+	`, taskID).Scan(&deferredAt); err != nil {
+		t.Fatalf("read marker: %v", err)
+	}
+	if deferredAt != nil {
+		t.Errorf("marker should be claimed, got %v", deferredAt)
+	}
+	var stopped int
+	if err := testPool.QueryRow(ctx, `
+		SELECT count(*) FROM chat_message WHERE task_id = $1 AND role = 'assistant' AND content = 'Stopped.'
+	`, taskID).Scan(&stopped); err != nil {
+		t.Fatalf("count stopped rows: %v", err)
+	}
+	if stopped != 1 {
+		t.Errorf("Stopped. rows = %d, want 1", stopped)
+	}
+
+	// Idempotent: a second ack is a no-op (no duplicate Stopped.).
+	w = httptest.NewRecorder()
+	req = newDaemonTokenRequest("POST", "/api/daemon/tasks/"+taskID+"/cancel-ack", nil,
+		testWorkspaceID, "legit-daemon")
+	req = withURLParam(req, "taskId", taskID)
+	testHandler.AckTaskCancelled(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("second AckTaskCancelled: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if err := testPool.QueryRow(ctx, `
+		SELECT count(*) FROM chat_message WHERE task_id = $1 AND role = 'assistant' AND content = 'Stopped.'
+	`, taskID).Scan(&stopped); err != nil {
+		t.Fatalf("count stopped rows: %v", err)
+	}
+	if stopped != 1 {
+		t.Errorf("Stopped. rows after second ack = %d, want 1", stopped)
 	}
 }
