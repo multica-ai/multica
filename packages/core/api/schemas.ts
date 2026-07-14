@@ -303,7 +303,19 @@ export const CommentTriggerOutcomeSchema = z.object({
 
 export const CommentTriggerPreviewSchema = z.object({
   agents: z.array(CommentTriggerPreviewAgentSchema).default([]),
-  blocked: z.array(CommentTriggerOutcomeSchema).catch([]).default([]),
+  // Drop malformed blocked entries INDIVIDUALLY (MUL-4525): a single bad item
+  // must not discard the whole set of valid blocked mentions. A non-array
+  // degrades to []; each valid entry is kept, each malformed one dropped.
+  blocked: z
+    .array(z.unknown())
+    .catch([])
+    .default([])
+    .transform((items) =>
+      items.flatMap((item) => {
+        const parsed = CommentTriggerOutcomeSchema.safeParse(item);
+        return parsed.success ? [parsed.data] : [];
+      }),
+    ),
 }).loose();
 
 const IssueTriggerPreviewItemSchema = z.object({

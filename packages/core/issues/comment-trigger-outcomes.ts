@@ -17,9 +17,16 @@ export function parseCommentTriggerOutcomes(raw: unknown): CommentTriggerOutcome
   return out;
 }
 
-// The explicit @agent / @squad mentions that did NOT trigger. Coalesced /
-// deferred / queued are all success-shaped (the mention was handled), so only
-// `blocked` counts toward the "posted, but N not triggered" warning.
-export function blockedCommentTriggerOutcomes(raw: unknown): CommentTriggerOutcome[] {
-  return parseCommentTriggerOutcomes(raw).filter((o) => o.status === "blocked");
+// The only success-shaped outcome statuses: the mention WAS handled (a run was
+// queued, coalesced into an existing run, or intentionally deferred). Success is
+// a WHITELIST, not "anything that isn't blocked", so an unknown/future status —
+// or the empty status the schema defaults for a malformed entry — never passes
+// as success (MUL-4525; mirrors the Run now whitelist).
+const HANDLED_TRIGGER_STATUSES = new Set(["queued", "coalesced", "deferred"]);
+
+// The explicit @agent / @squad mentions that did NOT clearly trigger, so the
+// "posted, but N not triggered" warning must cover them: `blocked` plus any
+// unknown/future/empty status. Never assume an unrecognized status succeeded.
+export function unhandledCommentTriggerOutcomes(raw: unknown): CommentTriggerOutcome[] {
+  return parseCommentTriggerOutcomes(raw).filter((o) => !HANDLED_TRIGGER_STATUSES.has(o.status));
 }

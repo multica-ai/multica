@@ -127,3 +127,53 @@ func TestCreateComment_BlockedMentionReasonDoesNotEnumeratePrivateAgent(t *testi
 		}
 	}
 }
+
+// TestCreateComment_AgentAndSameLeaderSquadYieldsOneTaskTwoOutcomes is Elon's
+// round-2 must-fix 1 acceptance test: when a comment names BOTH @Agent A and
+// @Squad S whose leader is A, the run is correctly coalesced to ONE task, but
+// each explicitly-named target still gets its own outcome — execution dedup must
+// not drop a named target's result (MUL-4525 §2).
+func TestCreateComment_AgentAndSameLeaderSquadYieldsOneTaskTwoOutcomes(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+
+	agentID := createHandlerTestAgent(t, "Shared Leader Agent", nil)
+	// Squad whose leader is the very same agent.
+	squadID := createCommentTriggerPreviewSquad(t, "Shared Leader Squad", agentID)
+	issueID := createCommentTriggerPreviewIssue(t, "agent and same-leader squad outcomes", "", "")
+
+	content := fmt.Sprintf(
+		"[@A](mention://agent/%s) [@S](mention://squad/%s) please take a look",
+		agentID, squadID,
+	)
+
+	w := httptest.NewRecorder()
+	r := withURLParam(newRequest(http.MethodPost, "/api/issues/"+issueID+"/comments", map[string]any{"content": content}), "id", issueID)
+	testHandler.CreateComment(w, r)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateComment: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp CommentResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode comment: %v", err)
+	}
+
+	// One coalesced execution: exactly one queued task for the shared leader.
+	if got := countQueuedCommentTriggerTasks(t, issueID, agentID); got != 1 {
+		t.Fatalf("shared-leader queued tasks = %d, want 1 (coalesced execution)", got)
+	}
+
+	// Two outcomes — one per explicitly-named target — both success-shaped.
+	if len(resp.TriggerOutcomes) != 2 {
+		t.Fatalf("trigger_outcomes = %+v, want 2 (agent + squad)", resp.TriggerOutcomes)
+	}
+	agentOutcome := findCommentOutcome(t, resp.TriggerOutcomes, agentID)
+	if agentOutcome.TargetType != "agent" || agentOutcome.Status != DispatchQueued {
+		t.Errorf("agent outcome = %+v, want agent/queued", agentOutcome)
+	}
+	squadOutcome := findCommentOutcome(t, resp.TriggerOutcomes, squadID)
+	if squadOutcome.TargetType != "squad" || squadOutcome.Status != DispatchQueued {
+		t.Errorf("squad outcome = %+v, want squad/queued", squadOutcome)
+	}
+}

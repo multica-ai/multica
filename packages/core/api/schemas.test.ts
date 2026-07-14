@@ -706,4 +706,16 @@ describe("CommentTriggerPreviewSchema.blocked", () => {
     expect(parsed.agents).toHaveLength(1);
     expect(parsed.blocked).toEqual([]);
   });
+
+  it("drops a single malformed blocked entry without discarding the valid ones", () => {
+    const parsed = CommentTriggerPreviewSchema.parse({
+      agents: [],
+      blocked: [
+        { target_type: "squad", target_id: "s1", status: "blocked", reason_code: "invocation_not_allowed" },
+        { status: "blocked" }, // missing target_id → dropped individually
+        { target_type: "agent", target_id: "a1", status: "blocked", reason_code: "runtime_offline" },
+      ],
+    });
+    expect(parsed.blocked.map((b) => b.target_id)).toEqual(["s1", "a1"]);
+  });
 });

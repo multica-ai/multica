@@ -1172,10 +1172,10 @@ func (h *Handler) PreviewCommentTriggers(w http.ResponseWriter, r *http.Request)
 
 	actorType, actorID := h.resolveActor(r, userID, uuidToString(issue.WorkspaceID))
 	opts.OriginatorUserID = h.invokeOriginatorFromRequest(r, actorType, actorID)
-	triggers, blocked := h.computeCommentAgentTriggers(r.Context(), issue, content, parentComment, actorType, actorID, opts)
+	triggers, targets := h.computeCommentAgentTriggers(r.Context(), issue, content, parentComment, actorType, actorID, opts)
 	resp := CommentTriggerPreviewResponse{
 		Agents:  make([]CommentTriggerAgentResponse, 0, len(triggers)),
-		Blocked: blocked,
+		Blocked: commentBlockedTargetOutcomes(targets),
 	}
 	for _, trigger := range triggers {
 		resp.Agents = append(resp.Agents, commentAgentTriggerToResponse(trigger))
@@ -1419,16 +1419,13 @@ func (h *Handler) triggerTasksForComment(ctx context.Context, issue db.Issue, co
 	if isNoteComment(comment.Content) {
 		return nil
 	}
-	triggers, blocked := h.computeCommentAgentTriggers(ctx, issue, comment.Content, parentComment, actorType, actorID, commentTriggerComputeOptions{
+	triggers, targets := h.computeCommentAgentTriggers(ctx, issue, comment.Content, parentComment, actorType, actorID, commentTriggerComputeOptions{
 		ExcludeTriggerCommentID: comment.ID,
 		OriginatorUserID:        originatorUserID,
 	})
 	triggers = filterSuppressedCommentAgentTriggers(triggers, suppressAgentIDs)
 	enqueued := h.enqueueCommentAgentTriggers(ctx, issue, comment.ID, triggers)
-	if len(blocked) == 0 {
-		return enqueued
-	}
-	return append(blocked, enqueued...)
+	return commentTriggerOutcomes(targets, enqueued)
 }
 
 func filterSuppressedCommentAgentTriggers(triggers []commentAgentTrigger, suppressAgentIDs []pgtype.UUID) []commentAgentTrigger {
@@ -1454,13 +1451,19 @@ func filterSuppressedCommentAgentTriggers(triggers []commentAgentTrigger, suppre
 	return filtered
 }
 
-// enqueueCommentAgentTriggers enqueues each resolved trigger and returns the
-// per-target outcome for the EXPLICIT @agent / @squad mention triggers only
-// (MUL-4525 §2) — implicit routing (assignee / thread-parent / conversation) is
-// not surfaced because the user did not name those targets. queued / coalesced /
-// deferred are all success-shaped (the mention was handled, no duplicate task);
-// only a real enqueue failure is blocked.
-func (h *Handler) enqueueCommentAgentTriggers(ctx context.Context, issue db.Issue, triggerCommentID pgtype.UUID, triggers []commentAgentTrigger) []CommentTriggerOutcome {
+// commentEnqueueResult is the domain outcome of enqueuing ONE executing agent.
+type commentEnqueueResult struct {
+	status DispatchStatus
+	reason DispatchReasonCode
+}
+
+// enqueueCommentAgentTriggers enqueues each resolved trigger (already deduped by
+// executing agent) and returns the result keyed by executing agent id
+// (MUL-4525 §2). Outcomes are later fanned from these to every explicit mention
+// target that resolved to the agent, so coalescing a run never drops a named
+// target's outcome. queued / coalesced / deferred are success-shaped (the run
+// was handled, no duplicate task); only a real enqueue failure is blocked.
+func (h *Handler) enqueueCommentAgentTriggers(ctx context.Context, issue db.Issue, triggerCommentID pgtype.UUID, triggers []commentAgentTrigger) map[string]commentEnqueueResult {
 	var escalationDelay time.Duration
 	escalationDelayLoaded := false
 	getEscalationDelay := func() time.Duration {
@@ -1470,12 +1473,9 @@ func (h *Handler) enqueueCommentAgentTriggers(ctx context.Context, issue db.Issu
 		}
 		return escalationDelay
 	}
-	var outcomes []CommentTriggerOutcome
+	results := make(map[string]commentEnqueueResult, len(triggers))
 	record := func(trigger commentAgentTrigger, status DispatchStatus, reason DispatchReasonCode) {
-		outcome, ok := commentMentionOutcome(trigger, status, reason)
-		if ok {
-			outcomes = append(outcomes, outcome)
-		}
+		results[uuidToString(trigger.Agent.ID)] = commentEnqueueResult{status: status, reason: reason}
 	}
 	for _, trigger := range triggers {
 		if trigger.AlreadyPending {
@@ -1510,25 +1510,47 @@ func (h *Handler) enqueueCommentAgentTriggers(ctx context.Context, issue db.Issu
 		}
 		record(trigger, DispatchQueued, ReasonQueued)
 	}
+	return results
+}
+
+// commentTriggerOutcomes maps each explicit mention target to its final outcome
+// (MUL-4525 §2): a target that resolved to an executing agent takes that agent's
+// enqueue status, so several mentions coalescing into one run each still get
+// their own outcome; a terminal target (blocked / self-suppressed) carries its
+// own status. A target whose executing agent has no enqueue result — because the
+// composer suppressed (unchecked) it — yields no outcome, since the user opted
+// out deliberately.
+func commentTriggerOutcomes(targets []commentMentionTarget, enqueued map[string]commentEnqueueResult) []CommentTriggerOutcome {
+	if len(targets) == 0 {
+		return nil
+	}
+	outcomes := make([]CommentTriggerOutcome, 0, len(targets))
+	for _, t := range targets {
+		if t.ExecAgentID != "" {
+			res, ok := enqueued[t.ExecAgentID]
+			if !ok {
+				continue
+			}
+			outcomes = append(outcomes, CommentTriggerOutcome{TargetType: t.TargetType, TargetID: t.TargetID, Status: res.status, ReasonCode: res.reason})
+			continue
+		}
+		outcomes = append(outcomes, CommentTriggerOutcome{TargetType: t.TargetType, TargetID: t.TargetID, Status: t.Status, ReasonCode: t.ReasonCode})
+	}
 	return outcomes
 }
 
-// commentMentionOutcome builds a CommentTriggerOutcome for an EXPLICIT mention
-// trigger, keyed on the target the user actually named (the squad id for a
-// squad-leader trigger, else the agent id). Returns ok=false for implicit
-// routing sources, which carry no user-facing outcome.
-func commentMentionOutcome(trigger commentAgentTrigger, status DispatchStatus, reason DispatchReasonCode) (CommentTriggerOutcome, bool) {
-	switch trigger.Source {
-	case commentTriggerSourceMentionSquadLeader:
-		if trigger.Squad == nil {
-			return CommentTriggerOutcome{}, false
+// commentBlockedTargetOutcomes is the composer-preview projection: the explicit
+// mentions that will NOT trigger if the comment is posted as-is (MUL-4525 §2). A
+// resolvable/executing target instead appears in the preview `agents` list, so
+// only terminal blocked targets surface here.
+func commentBlockedTargetOutcomes(targets []commentMentionTarget) []CommentTriggerOutcome {
+	var blocked []CommentTriggerOutcome
+	for _, t := range targets {
+		if t.Status == DispatchBlocked {
+			blocked = append(blocked, CommentTriggerOutcome{TargetType: t.TargetType, TargetID: t.TargetID, Status: t.Status, ReasonCode: t.ReasonCode})
 		}
-		return CommentTriggerOutcome{TargetType: "squad", TargetID: uuidToString(trigger.Squad.ID), Status: status, ReasonCode: reason}, true
-	case commentTriggerSourceMentionAgent:
-		return CommentTriggerOutcome{TargetType: "agent", TargetID: uuidToString(trigger.Agent.ID), Status: status, ReasonCode: reason}, true
-	default:
-		return CommentTriggerOutcome{}, false
 	}
+	return blocked
 }
 
 // commentEnqueueFailureReason types an enqueue error that reached the response
@@ -1730,12 +1752,12 @@ func (h *Handler) enqueueSingleCommentTrigger(ctx context.Context, issue db.Issu
 	return nil
 }
 
-// computeCommentAgentTriggers resolves which agents a comment triggers, plus the
-// per-target BLOCKED outcomes for explicit @agent / @squad mentions that will
-// not fire (MUL-4525 §2). Blocked outcomes come only from the explicit-mention
-// path — the implicit routing fallbacks (assignee, thread parent, conversation)
-// were never named by the user, so a no-route there is not a silent no-op.
-func (h *Handler) computeCommentAgentTriggers(ctx context.Context, issue db.Issue, content string, parentComment *db.Comment, actorType, actorID string, opts commentTriggerComputeOptions) ([]commentAgentTrigger, []CommentTriggerOutcome) {
+// computeCommentAgentTriggers resolves which agents a comment triggers (deduped
+// by executing agent), plus the per-target list for every EXPLICIT @agent /
+// @squad mention (MUL-4525 §2). Targets come only from the explicit-mention path
+// — the implicit routing fallbacks (assignee, thread parent, conversation) were
+// never named by the user, so a no-route there is not a silent no-op.
+func (h *Handler) computeCommentAgentTriggers(ctx context.Context, issue db.Issue, content string, parentComment *db.Comment, actorType, actorID string, opts commentTriggerComputeOptions) ([]commentAgentTrigger, []commentMentionTarget) {
 	if isNoteComment(content) {
 		return nil, nil
 	}
@@ -2054,9 +2076,29 @@ func (h *Handler) hasPendingTaskForIssueAndAgent(ctx context.Context, issueID, a
 // dedupe and the natural queued/dispatched coalescing of the task queue.
 // Note: no issue status gate here — @mention is an explicit action and should
 // work even on done/cancelled issues (the agent can reopen the issue if needed).
-func (h *Handler) resolveMentionedAgentCommentTriggers(ctx context.Context, issue db.Issue, mentions []util.Mention, authorType, authorID string, opts commentTriggerComputeOptions) ([]commentAgentTrigger, []CommentTriggerOutcome) {
+// commentMentionTarget is one EXPLICIT @agent / @squad mention and how it
+// resolved (MUL-4525 §2). This is tracked separately from the execution
+// triggers: several mentions can resolve to the same executing agent (e.g.
+// @Agent A and @Squad S whose leader is A), and each still needs its own
+// outcome even though the run is coalesced. Exactly one of the resolution
+// fields is set:
+//   - ExecAgentID non-empty → the mention runs via that executing agent; its
+//     outcome mirrors the agent's enqueue status (queued/coalesced/deferred).
+//   - Status set (with ReasonCode) → a terminal, non-executing outcome
+//     (blocked, or an A2A self-suppressed squad leader that is deferred).
+type commentMentionTarget struct {
+	TargetType  string // "agent" | "squad"
+	TargetID    string
+	ExecAgentID string
+	Status      DispatchStatus
+	ReasonCode  DispatchReasonCode
+}
+
+func (h *Handler) resolveMentionedAgentCommentTriggers(ctx context.Context, issue db.Issue, mentions []util.Mention, authorType, authorID string, opts commentTriggerComputeOptions) ([]commentAgentTrigger, []commentMentionTarget) {
 	wsID := uuidToString(issue.WorkspaceID)
 	triggers := make([]commentAgentTrigger, 0, len(mentions))
+	// seen dedups EXECUTION by resolved agent id: two mentions resolving to the
+	// same agent still enqueue only one task.
 	seen := make(map[string]struct{}, len(mentions))
 	add := func(trigger commentAgentTrigger) {
 		id := uuidToString(trigger.Agent.ID)
@@ -2066,25 +2108,26 @@ func (h *Handler) resolveMentionedAgentCommentTriggers(ctx context.Context, issu
 		seen[id] = struct{}{}
 		triggers = append(triggers, trigger)
 	}
-	// Blocked mentions are collected instead of silently dropped (MUL-4525 §2).
-	// The invoke gate is evaluated BEFORE any archived/runtime state is read, so
-	// a caller who cannot invoke a private target learns only the generic
-	// invocation_not_allowed and can never enumerate the target's existence or
-	// state from the reason code.
-	var blocked []CommentTriggerOutcome
-	blockedSeen := make(map[string]struct{}, len(mentions))
-	addBlocked := func(targetType, targetID string, reason DispatchReasonCode) {
-		key := targetType + ":" + targetID
-		if _, ok := blockedSeen[key]; ok {
+	// targets record one outcome per EXPLICIT mention — deduped by the target
+	// the user named (type:id), NOT by executing agent — so no explicitly-named
+	// target is silently dropped even when its run coalesces with another's.
+	var targets []commentMentionTarget
+	targetSeen := make(map[string]struct{}, len(mentions))
+	addTarget := func(t commentMentionTarget) {
+		key := t.TargetType + ":" + t.TargetID
+		if _, ok := targetSeen[key]; ok {
 			return
 		}
-		blockedSeen[key] = struct{}{}
-		blocked = append(blocked, CommentTriggerOutcome{
-			TargetType: targetType,
-			TargetID:   targetID,
-			Status:     DispatchBlocked,
-			ReasonCode: reason,
-		})
+		targetSeen[key] = struct{}{}
+		targets = append(targets, t)
+	}
+	// blockTarget records a mention that will not fire. The invoke gate is
+	// evaluated BEFORE any archived/runtime state is read, so a caller who
+	// cannot invoke a private target learns only the generic
+	// invocation_not_allowed and can never enumerate the target's existence or
+	// state from the reason code.
+	blockTarget := func(targetType, targetID string, reason DispatchReasonCode) {
+		addTarget(commentMentionTarget{TargetType: targetType, TargetID: targetID, Status: DispatchBlocked, ReasonCode: reason})
 	}
 	for _, m := range mentions {
 		if m.Type == "squad" {
@@ -2095,15 +2138,17 @@ func (h *Handler) resolveMentionedAgentCommentTriggers(ctx context.Context, issu
 				WorkspaceID: issue.WorkspaceID,
 			})
 			if err != nil {
-				addBlocked("squad", m.ID, ReasonTargetUnavailable)
+				blockTarget("squad", m.ID, ReasonTargetUnavailable)
 				continue
 			}
 			leaderID := squad.LeaderID
-			// Prevent self-trigger unless the agent's last activity on this
-			// issue was a worker task for this same squad. This is A2A dedup,
-			// not a user-facing block, so it produces no outcome.
+			// A2A self-suppression: the author IS this squad's leader and its
+			// last activity here was a worker task for this squad, so we do not
+			// re-fire the leader. This is recognized-and-handled, not a block —
+			// it reports a definite `deferred` outcome (leader already active).
 			if authorType == "agent" && authorID == uuidToString(leaderID) &&
 				h.shouldSuppressSquadLeaderSelfTrigger(ctx, issue.ID, leaderID, squad.ID) {
+				addTarget(commentMentionTarget{TargetType: "squad", TargetID: m.ID, Status: DispatchDeferred, ReasonCode: ReasonAlreadyActive})
 				continue
 			}
 			agent, err := h.Queries.GetAgentInWorkspace(ctx, db.GetAgentInWorkspaceParams{
@@ -2111,29 +2156,30 @@ func (h *Handler) resolveMentionedAgentCommentTriggers(ctx context.Context, issu
 				WorkspaceID: issue.WorkspaceID,
 			})
 			if err != nil {
-				addBlocked("squad", m.ID, ReasonTargetUnavailable)
+				blockTarget("squad", m.ID, ReasonTargetUnavailable)
 				continue
 			}
 			// Private-leader gate first (enumeration-safe: a caller who cannot
 			// invoke the leader never learns its archived/runtime state).
 			if !h.canInvokeAgent(ctx, agent, authorType, authorID, opts.OriginatorUserID, wsID) {
-				addBlocked("squad", m.ID, ReasonInvocationNotAllowed)
+				blockTarget("squad", m.ID, ReasonInvocationNotAllowed)
 				continue
 			}
 			if agent.ArchivedAt.Valid {
-				addBlocked("squad", m.ID, ReasonTargetUnavailable)
+				blockTarget("squad", m.ID, ReasonTargetUnavailable)
 				continue
 			}
 			if !agent.RuntimeID.Valid {
-				addBlocked("squad", m.ID, ReasonRuntimeOffline)
+				blockTarget("squad", m.ID, ReasonRuntimeOffline)
 				continue
 			}
 			hasPending, err := h.hasPendingTaskForIssueAndAgent(ctx, issue.ID, leaderID, opts)
 			if err != nil {
-				addBlocked("squad", m.ID, ReasonInternalError)
+				blockTarget("squad", m.ID, ReasonInternalError)
 				continue
 			}
 			add(commentAgentTrigger{Agent: agent, Source: commentTriggerSourceMentionSquadLeader, Squad: &squad, AlreadyPending: hasPending})
+			addTarget(commentMentionTarget{TargetType: "squad", TargetID: m.ID, ExecAgentID: uuidToString(leaderID)})
 			continue
 		}
 		if m.Type != "agent" {
@@ -2153,30 +2199,31 @@ func (h *Handler) resolveMentionedAgentCommentTriggers(ctx context.Context, issu
 		if err != nil {
 			// Do not reveal whether the id exists (it may be a private agent in
 			// another workspace): the generic invocation_not_allowed is returned.
-			addBlocked("agent", m.ID, ReasonInvocationNotAllowed)
+			blockTarget("agent", m.ID, ReasonInvocationNotAllowed)
 			continue
 		}
 		// Private-agent gate first, before any archived/runtime state is read.
 		if !h.canInvokeAgent(ctx, agent, authorType, authorID, opts.OriginatorUserID, wsID) {
-			addBlocked("agent", m.ID, ReasonInvocationNotAllowed)
+			blockTarget("agent", m.ID, ReasonInvocationNotAllowed)
 			continue
 		}
 		if agent.ArchivedAt.Valid {
-			addBlocked("agent", m.ID, ReasonTargetUnavailable)
+			blockTarget("agent", m.ID, ReasonTargetUnavailable)
 			continue
 		}
 		if !agent.RuntimeID.Valid {
-			addBlocked("agent", m.ID, ReasonRuntimeOffline)
+			blockTarget("agent", m.ID, ReasonRuntimeOffline)
 			continue
 		}
 		hasPending, err := h.hasPendingTaskForIssueAndAgent(ctx, issue.ID, agentUUID, opts)
 		if err != nil {
-			addBlocked("agent", m.ID, ReasonInternalError)
+			blockTarget("agent", m.ID, ReasonInternalError)
 			continue
 		}
 		add(commentAgentTrigger{Agent: agent, Source: commentTriggerSourceMentionAgent, AlreadyPending: hasPending})
+		addTarget(commentMentionTarget{TargetType: "agent", TargetID: m.ID, ExecAgentID: uuidToString(agentUUID)})
 	}
-	return triggers, blocked
+	return triggers, targets
 }
 
 func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
