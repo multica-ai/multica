@@ -35,6 +35,13 @@ The act of copying a skill from a runtime into a workspace. Imports can be singl
 
 ---
 
+## Agent Access
+
+### AccessScope
+The three-state model describing who can invoke (trigger) an agent: **workspace** (any workspace member, plus internal agents and system triggers), **specific-people** (only named members or teams designated as invocation targets), or **owner-only** (only the agent's owner). Derived from two backend fields — `permission_mode` ("private" or "public_to") and `invocation_targets` (workspace/member/team targets) — but is the operator-facing conceptual model displayed in the agents list UI. The legacy `visibility` field is a lossy two-state projection of this model (maps both "specific-people" and "owner-only" to "private"), so UI surfaces should use the three-state AccessScope, not the derived `visibility`, to avoid misleading operators.
+
+---
+
 ## Relationships
 
 - A **Runtime** exposes many **Skills**, each with a **Root** classification.

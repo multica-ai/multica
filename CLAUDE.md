@@ -30,6 +30,8 @@ Multica is an AI-native task management platform for small teams, with agents as
 - `packages/ui/`: atomic UI components only.
 - `packages/views/`: shared business pages/components for web and desktop.
 - `packages/tsconfig/`: shared TypeScript config.
+- `docs/solutions/`: documented solutions to past problems (bugs, best practices, workflow patterns), organized by category with YAML frontmatter (`module`, `tags`, `problem_type`). Relevant when implementing or debugging in documented areas.
+- `CONCEPTS.md`: shared domain vocabulary (entities, named processes, status concepts). Relevant when orienting to the codebase or discussing domain concepts.
 
 Shared packages export raw `.ts` / `.tsx` and are compiled by consuming apps. Dependency direction is `views -> core + ui`; `core` and `ui` must stay independent.
 
