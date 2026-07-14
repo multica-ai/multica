@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -34,6 +35,12 @@ var configSetSupportedKeys = []string{
 	"runtime_name",
 	"max_concurrent_tasks",
 	"poll_interval",
+	"heartbeat_interval",
+	"agent_timeout",
+	"codex_semantic_inactivity_timeout",
+	"codex_handshake_timeout",
+	"disable_auto_update",
+	"auto_update_check_interval",
 }
 
 var configSetCmd = &cobra.Command{
@@ -41,14 +48,24 @@ var configSetCmd = &cobra.Command{
 	Short: "Set a CLI configuration value",
 	Long: "Supported keys: " +
 		"server_url, app_url, workspace_id, " +
-		"device_name, runtime_name, max_concurrent_tasks, poll_interval.\n\n" +
-		"The four daemon keys (device_name, runtime_name, max_concurrent_tasks, " +
-		"poll_interval) mirror their --flag / env counterparts and are read by " +
-		"`daemon start` when neither the flag nor the env var is set. " +
+		"device_name, runtime_name, max_concurrent_tasks, poll_interval, " +
+		"heartbeat_interval, agent_timeout, " +
+		"codex_semantic_inactivity_timeout, codex_handshake_timeout, " +
+		"disable_auto_update, auto_update_check_interval.\n\n" +
+		"The daemon keys (device_name, runtime_name, max_concurrent_tasks, " +
+		"poll_interval, heartbeat_interval, agent_timeout, " +
+		"codex_semantic_inactivity_timeout, codex_handshake_timeout, " +
+		"disable_auto_update, auto_update_check_interval) mirror their " +
+		"--flag / env counterparts and are read by `daemon start` when " +
+		"neither the flag nor the env var is set. " +
 		"Precedence: --flag > MULTICA_… env > config.json > built-in default. " +
-		"poll_interval takes a positive Go duration (e.g. '10s', '500ms', '1m30s'); " +
-		"'0s' and negative values are rejected. Pass an empty string to clear " +
-		"a persisted value (e.g. `config set poll_interval \"\"`).",
+		"Duration keys take a positive Go duration (e.g. '10s', '500ms', '1m30s'); " +
+		"'0s' and negative values are rejected — except agent_timeout, where " +
+		"'0s' is meaningful and explicitly disables the wall-clock cap. " +
+		"disable_auto_update takes 'true' or 'false' (single-direction: setting " +
+		"it to 'true' turns auto-update off, 'false' clears the override so " +
+		"env/default decides). Pass an empty string to clear a persisted " +
+		"value (e.g. `config set poll_interval \"\"`).",
 	Args: exactArgs(2),
 	RunE: runConfigSet,
 }
@@ -70,13 +87,19 @@ func runConfigShow(cmd *cobra.Command, _ []string) error {
 	if profile != "" {
 		fmt.Fprintf(os.Stdout, "Profile:      %s\n", profile)
 	}
-	fmt.Fprintf(os.Stdout, "%-22s %s\n", "server_url:", valueOrDefault(cfg.ServerURL, "(not set)"))
-	fmt.Fprintf(os.Stdout, "%-22s %s\n", "app_url:", valueOrDefault(cfg.AppURL, "(not set)"))
-	fmt.Fprintf(os.Stdout, "%-22s %s\n", "workspace_id:", valueOrDefault(cfg.WorkspaceID, "(not set)"))
-	fmt.Fprintf(os.Stdout, "%-22s %s\n", "device_name:", valueOrDefault(cfg.DeviceName, "(not set)"))
-	fmt.Fprintf(os.Stdout, "%-22s %s\n", "runtime_name:", valueOrDefault(cfg.RuntimeName, "(not set)"))
-	fmt.Fprintf(os.Stdout, "%-22s %s\n", "max_concurrent_tasks:", intOrDefault(cfg.MaxConcurrentTasks, "(not set)"))
-	fmt.Fprintf(os.Stdout, "%-22s %s\n", "poll_interval:", valueOrDefault(cfg.PollInterval, "(not set)"))
+	fmt.Fprintf(os.Stdout, "%-34s %s\n", "server_url:", valueOrDefault(cfg.ServerURL, "(not set)"))
+	fmt.Fprintf(os.Stdout, "%-34s %s\n", "app_url:", valueOrDefault(cfg.AppURL, "(not set)"))
+	fmt.Fprintf(os.Stdout, "%-34s %s\n", "workspace_id:", valueOrDefault(cfg.WorkspaceID, "(not set)"))
+	fmt.Fprintf(os.Stdout, "%-34s %s\n", "device_name:", valueOrDefault(cfg.DeviceName, "(not set)"))
+	fmt.Fprintf(os.Stdout, "%-34s %s\n", "runtime_name:", valueOrDefault(cfg.RuntimeName, "(not set)"))
+	fmt.Fprintf(os.Stdout, "%-34s %s\n", "max_concurrent_tasks:", intOrDefault(cfg.MaxConcurrentTasks, "(not set)"))
+	fmt.Fprintf(os.Stdout, "%-34s %s\n", "poll_interval:", valueOrDefault(cfg.PollInterval, "(not set)"))
+	fmt.Fprintf(os.Stdout, "%-34s %s\n", "heartbeat_interval:", valueOrDefault(cfg.HeartbeatInterval, "(not set)"))
+	fmt.Fprintf(os.Stdout, "%-34s %s\n", "agent_timeout:", agentTimeoutDisplay(cfg.AgentTimeout))
+	fmt.Fprintf(os.Stdout, "%-34s %s\n", "codex_semantic_inactivity_timeout:", valueOrDefault(cfg.CodexSemanticInactivityTimeout, "(not set)"))
+	fmt.Fprintf(os.Stdout, "%-34s %s\n", "codex_handshake_timeout:", valueOrDefault(cfg.CodexHandshakeTimeout, "(not set)"))
+	fmt.Fprintf(os.Stdout, "%-34s %t\n", "disable_auto_update:", cfg.DisableAutoUpdate)
+	fmt.Fprintf(os.Stdout, "%-34s %s\n", "auto_update_check_interval:", valueOrDefault(cfg.AutoUpdateCheckInterval, "(not set)"))
 	return nil
 }
 
@@ -155,10 +178,92 @@ func applyConfigSet(cfg *cli.CLIConfig, key, value string) error {
 			return fmt.Errorf("poll_interval must be positive (got %s); use `config set poll_interval \"\"` to clear it", d)
 		}
 		cfg.PollInterval = value
+	case "heartbeat_interval":
+		if err := assignPositiveDuration(&cfg.HeartbeatInterval, key, value); err != nil {
+			return err
+		}
+	case "agent_timeout":
+		// agent_timeout is the one duration knob where "0s" is a
+		// meaningful persisted value (it explicitly disables the
+		// wall-clock cap; see cli.CLIConfig.AgentTimeout). Store the raw
+		// string via a pointer so we can distinguish "not set" (nil)
+		// from "disabled" (non-nil, "0s") and any positive value.
+		if value == "" {
+			cfg.AgentTimeout = nil
+			return nil
+		}
+		d, err := time.ParseDuration(value)
+		if err != nil {
+			return fmt.Errorf("agent_timeout must be a Go duration (e.g. 10m, 0s to disable): %w", err)
+		}
+		if d < 0 {
+			return fmt.Errorf("agent_timeout must be >= 0 (got %s); use 0s to disable the cap or \"\" to clear the persisted value", d)
+		}
+		s := value
+		cfg.AgentTimeout = &s
+	case "codex_semantic_inactivity_timeout":
+		if err := assignPositiveDuration(&cfg.CodexSemanticInactivityTimeout, key, value); err != nil {
+			return err
+		}
+	case "codex_handshake_timeout":
+		if err := assignPositiveDuration(&cfg.CodexHandshakeTimeout, key, value); err != nil {
+			return err
+		}
+	case "disable_auto_update":
+		if value == "" {
+			cfg.DisableAutoUpdate = false
+			return nil
+		}
+		b, err := strconv.ParseBool(value)
+		if err != nil {
+			return fmt.Errorf("disable_auto_update must be 'true' or 'false' (got %q)", value)
+		}
+		cfg.DisableAutoUpdate = b
+	case "auto_update_check_interval":
+		if err := assignPositiveDuration(&cfg.AutoUpdateCheckInterval, key, value); err != nil {
+			return err
+		}
 	default:
 		return fmt.Errorf("unknown config key %q (supported: %s)", key, joinKeys(configSetSupportedKeys))
 	}
 	return nil
+}
+
+// assignPositiveDuration parses value as a strictly-positive Go duration
+// and writes the raw string into dst. Shared by every persisted daemon
+// duration knob except agent_timeout, whose zero value is meaningful.
+// Empty string clears the field.
+func assignPositiveDuration(dst *string, key, value string) error {
+	if value == "" {
+		*dst = ""
+		return nil
+	}
+	d, err := time.ParseDuration(strings.TrimSpace(value))
+	if err != nil {
+		return fmt.Errorf("%s must be a Go duration (e.g. 10s, 500ms): %w", key, err)
+	}
+	if d <= 0 {
+		return fmt.Errorf("%s must be positive (got %s); use `config set %s \"\"` to clear it", key, d, key)
+	}
+	*dst = value
+	return nil
+}
+
+// agentTimeoutDisplay renders the tri-state agent_timeout value for
+// `config show`. nil = not persisted (fall through to env/default);
+// non-nil "0s" = explicitly disabled; any other non-nil = the persisted
+// duration string.
+func agentTimeoutDisplay(v *string) string {
+	if v == nil {
+		return "(not set)"
+	}
+	if *v == "" {
+		return "(not set)"
+	}
+	if d, err := time.ParseDuration(*v); err == nil && d == 0 {
+		return *v + " (disabled)"
+	}
+	return *v
 }
 
 func valueOrDefault(v, fallback string) string {

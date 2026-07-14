@@ -64,10 +64,22 @@ func TestRunConfigShowIncludesProfileAndDefaults(t *testing.T) {
 		"runtime_name:",
 		"max_concurrent_tasks:",
 		"poll_interval:",
+		"heartbeat_interval:",
+		"agent_timeout:",
+		"codex_semantic_inactivity_timeout:",
+		"codex_handshake_timeout:",
+		"disable_auto_update:",
+		"auto_update_check_interval:",
 	} {
-		if !strings.Contains(out, key) || !strings.Contains(out, "(not set)") {
-			t.Fatalf("runConfigShow output missing %q or defaults:\n%s", key, out)
+		if !strings.Contains(out, key) {
+			t.Fatalf("runConfigShow output missing %q:\n%s", key, out)
 		}
+	}
+	if !strings.Contains(out, "(not set)") {
+		t.Fatalf("runConfigShow output missing (not set) placeholder:\n%s", out)
+	}
+	if !strings.Contains(out, "disable_auto_update:") || !strings.Contains(out, "false") {
+		t.Fatalf("runConfigShow disable_auto_update default should print false:\n%s", out)
 	}
 	if !strings.Contains(out, "Profile:      empty") {
 		t.Fatalf("runConfigShow missing profile header:\n%s", out)
@@ -84,10 +96,12 @@ func TestRunConfigSetRejectsUnknownKey(t *testing.T) {
 	}
 }
 
-// TestApplyConfigSetSupportsDaemonKeys locks in the four new keys added
+// TestApplyConfigSetSupportsDaemonKeys locks in the daemon keys added
 // for issue #3824 (device_name, runtime_name, max_concurrent_tasks,
-// poll_interval). applyConfigSet is the split-out validator so tests
-// don't have to touch disk on every case.
+// poll_interval) plus the follow-up knobs that use the same shape
+// (heartbeat_interval, codex_*, disable_auto_update,
+// auto_update_check_interval). applyConfigSet is the split-out validator
+// so tests don't have to touch disk on every case.
 func TestApplyConfigSetSupportsDaemonKeys(t *testing.T) {
 	t.Parallel()
 
@@ -97,6 +111,11 @@ func TestApplyConfigSetSupportsDaemonKeys(t *testing.T) {
 		{"runtime_name", "worker-a"},
 		{"max_concurrent_tasks", "4"},
 		{"poll_interval", "10s"},
+		{"heartbeat_interval", "5s"},
+		{"codex_semantic_inactivity_timeout", "15m"},
+		{"codex_handshake_timeout", "45s"},
+		{"disable_auto_update", "true"},
+		{"auto_update_check_interval", "12h"},
 	}
 	for _, p := range pairs {
 		if err := applyConfigSet(&cfg, p.key, p.val); err != nil {
@@ -106,16 +125,52 @@ func TestApplyConfigSetSupportsDaemonKeys(t *testing.T) {
 	if cfg.DeviceName != "vm-1-custom-name" ||
 		cfg.RuntimeName != "worker-a" ||
 		cfg.MaxConcurrentTasks != 4 ||
-		cfg.PollInterval != "10s" {
+		cfg.PollInterval != "10s" ||
+		cfg.HeartbeatInterval != "5s" ||
+		cfg.CodexSemanticInactivityTimeout != "15m" ||
+		cfg.CodexHandshakeTimeout != "45s" ||
+		cfg.DisableAutoUpdate != true ||
+		cfg.AutoUpdateCheckInterval != "12h" {
 		t.Fatalf("cfg after set = %+v", cfg)
 	}
 }
 
-// TestApplyConfigSetRejectsBadValues covers the two typed keys —
-// max_concurrent_tasks (int, non-negative) and poll_interval (Go
-// duration, strictly positive). Catching bad values at write time
-// keeps the error next to the user's typo instead of surfacing later
-// at daemon start.
+// TestApplyConfigSetAgentTimeoutTriState pins the agent_timeout
+// pointer-based semantics: "" clears, "0s" persists as an explicit
+// "disabled" sentinel, positive durations persist as-is. Negative
+// values are rejected up front so the daemon doesn't fall back to the
+// default and quietly lose the operator's intent.
+func TestApplyConfigSetAgentTimeoutTriState(t *testing.T) {
+	t.Parallel()
+
+	cfg := cli.CLIConfig{}
+	if err := applyConfigSet(&cfg, "agent_timeout", "30m"); err != nil {
+		t.Fatalf("set 30m: %v", err)
+	}
+	if cfg.AgentTimeout == nil || *cfg.AgentTimeout != "30m" {
+		t.Fatalf("AgentTimeout = %v, want &\"30m\"", cfg.AgentTimeout)
+	}
+	if err := applyConfigSet(&cfg, "agent_timeout", "0s"); err != nil {
+		t.Fatalf("set 0s: %v", err)
+	}
+	if cfg.AgentTimeout == nil || *cfg.AgentTimeout != "0s" {
+		t.Fatalf("AgentTimeout = %v, want explicit &\"0s\"", cfg.AgentTimeout)
+	}
+	if err := applyConfigSet(&cfg, "agent_timeout", ""); err != nil {
+		t.Fatalf("clear: %v", err)
+	}
+	if cfg.AgentTimeout != nil {
+		t.Fatalf("AgentTimeout = %v, want nil after clear", cfg.AgentTimeout)
+	}
+	if err := applyConfigSet(&cfg, "agent_timeout", "-1s"); err == nil {
+		t.Fatalf("expected error for negative agent_timeout")
+	}
+}
+
+// TestApplyConfigSetRejectsBadValues covers the typed keys — ints must
+// be non-negative, most durations must be strictly positive, booleans
+// must parse. Catching bad values at write time keeps the error next to
+// the user's typo instead of surfacing later at daemon start.
 //
 // The "poll zero" case is the regression from #3824's review: `config
 // set poll_interval 0s` used to be accepted and persisted, then
@@ -136,6 +191,14 @@ func TestApplyConfigSetRejectsBadValues(t *testing.T) {
 		{"poll bad duration", "poll_interval", "10", "duration"},
 		{"poll zero", "poll_interval", "0s", "positive"},
 		{"poll negative", "poll_interval", "-5s", "positive"},
+		{"heartbeat bad duration", "heartbeat_interval", "abc", "duration"},
+		{"heartbeat zero", "heartbeat_interval", "0s", "positive"},
+		{"codex semantic zero", "codex_semantic_inactivity_timeout", "0s", "positive"},
+		{"codex handshake bad", "codex_handshake_timeout", "10", "duration"},
+		{"agent_timeout bad duration", "agent_timeout", "abc", "duration"},
+		{"agent_timeout negative", "agent_timeout", "-1s", ">= 0"},
+		{"disable_auto_update bad bool", "disable_auto_update", "maybe", "true"},
+		{"auto_update_check_interval zero", "auto_update_check_interval", "0s", "positive"},
 	}
 	for _, tc := range cases {
 		tc := tc

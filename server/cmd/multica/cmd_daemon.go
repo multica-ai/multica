@@ -497,30 +497,61 @@ func runDaemonForeground(cmd *cobra.Command) error {
 	if pollOverride > 0 {
 		overrides.PollInterval = pollOverride
 	}
-	if d, _ := cmd.Flags().GetDuration("heartbeat-interval"); d > 0 {
-		overrides.HeartbeatInterval = d
+	heartbeatFlag, _ := cmd.Flags().GetDuration("heartbeat-interval")
+	heartbeatOverride, err := resolveDaemonDurationOverride(heartbeatFlag, "MULTICA_DAEMON_HEARTBEAT_INTERVAL", fileCfg.HeartbeatInterval)
+	if err != nil {
+		return err
+	}
+	if heartbeatOverride > 0 {
+		overrides.HeartbeatInterval = heartbeatOverride
 	}
 	// Distinguish "flag not passed" from an explicit `--agent-timeout 0` so a
-	// user can turn off an env-configured cap from the CLI.
-	if cmd.Flags().Changed("agent-timeout") {
-		d, _ := cmd.Flags().GetDuration("agent-timeout")
-		overrides.AgentTimeout = &d
+	// user can turn off an env-configured cap from the CLI. The persisted
+	// config.json value uses the same tri-state (see cli.CLIConfig.AgentTimeout)
+	// so `config set agent_timeout 0s` can survive daemon restarts.
+	agentTimeoutOverride, err := resolveDaemonAgentTimeoutOverride(cmd, "MULTICA_AGENT_TIMEOUT", fileCfg.AgentTimeout)
+	if err != nil {
+		return err
 	}
-	if d, _ := cmd.Flags().GetDuration("codex-semantic-inactivity-timeout"); d > 0 {
-		overrides.CodexSemanticInactivityTimeout = d
+	if agentTimeoutOverride != nil {
+		overrides.AgentTimeout = agentTimeoutOverride
 	}
-	if d, _ := cmd.Flags().GetDuration("codex-handshake-timeout"); d > 0 {
-		overrides.CodexHandshakeTimeout = d
+	semanticFlag, _ := cmd.Flags().GetDuration("codex-semantic-inactivity-timeout")
+	semanticOverride, err := resolveDaemonDurationOverride(semanticFlag, "MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT", fileCfg.CodexSemanticInactivityTimeout)
+	if err != nil {
+		return err
+	}
+	if semanticOverride > 0 {
+		overrides.CodexSemanticInactivityTimeout = semanticOverride
+	}
+	handshakeFlag, _ := cmd.Flags().GetDuration("codex-handshake-timeout")
+	handshakeOverride, err := resolveDaemonDurationOverride(handshakeFlag, "MULTICA_CODEX_HANDSHAKE_TIMEOUT", fileCfg.CodexHandshakeTimeout)
+	if err != nil {
+		return err
+	}
+	if handshakeOverride > 0 {
+		overrides.CodexHandshakeTimeout = handshakeOverride
 	}
 	maxFlag, _ := cmd.Flags().GetInt("max-concurrent-tasks")
 	if n := resolveDaemonIntOverride(maxFlag, "MULTICA_DAEMON_MAX_CONCURRENT_TASKS", fileCfg.MaxConcurrentTasks); n > 0 {
 		overrides.MaxConcurrentTasks = n
 	}
-	if b, _ := cmd.Flags().GetBool("no-auto-update"); b {
+	// --no-auto-update / MULTICA_DAEMON_AUTO_UPDATE=false / config.json
+	// disable_auto_update are all single-direction: none of them can force
+	// auto-update *on*, they can only turn it off. Env "true" is not
+	// treated as an override signal here — LoadConfig honors the raw env
+	// itself for the affirmative case.
+	noAutoUpdateFlag, _ := cmd.Flags().GetBool("no-auto-update")
+	if resolveDaemonDisableAutoUpdate(noAutoUpdateFlag, "MULTICA_DAEMON_AUTO_UPDATE", fileCfg.DisableAutoUpdate) {
 		overrides.DisableAutoUpdate = true
 	}
-	if d, _ := cmd.Flags().GetDuration("auto-update-interval"); d > 0 {
-		overrides.AutoUpdateCheckInterval = d
+	autoUpdateFlag, _ := cmd.Flags().GetDuration("auto-update-interval")
+	autoUpdateOverride, err := resolveDaemonDurationOverride(autoUpdateFlag, "MULTICA_DAEMON_AUTO_UPDATE_INTERVAL", fileCfg.AutoUpdateCheckInterval)
+	if err != nil {
+		return err
+	}
+	if autoUpdateOverride > 0 {
+		overrides.AutoUpdateCheckInterval = autoUpdateOverride
 	}
 
 	cfg, err := daemon.LoadConfig(overrides)
@@ -930,6 +961,67 @@ func resolveDaemonIntOverride(flagValue int, envName string, cfgValue int) int {
 		return cfgValue
 	}
 	return 0
+}
+
+// resolveDaemonAgentTimeoutOverride resolves --agent-timeout across the
+// same three-tier precedence used by the other daemon knobs, but preserves
+// the tri-state agent_timeout semantics: nil result = "not overridden",
+// non-nil = "use this exact value" (which may legitimately be zero to
+// disable the wall-clock cap).
+//
+//  1. --agent-timeout was explicitly passed (even as `--agent-timeout 0`)
+//     -> use that value; daemon.LoadConfig then bypasses env/default.
+//  2. MULTICA_AGENT_TIMEOUT is set -> return nil so LoadConfig reads the
+//     env itself (matches the other duration helpers).
+//  3. cfgValue non-nil -> parse the persisted string and use it. "0s" is
+//     valid here (it's the "disabled" sentinel).
+//  4. Otherwise -> nil, LoadConfig applies DefaultAgentTimeout.
+func resolveDaemonAgentTimeoutOverride(cmd *cobra.Command, envName string, cfgValue *string) (*time.Duration, error) {
+	if cmd.Flags().Changed("agent-timeout") {
+		d, _ := cmd.Flags().GetDuration("agent-timeout")
+		return &d, nil
+	}
+	if !envUnset(envName) {
+		return nil, nil
+	}
+	if cfgValue == nil || *cfgValue == "" {
+		return nil, nil
+	}
+	parsed, err := time.ParseDuration(strings.TrimSpace(*cfgValue))
+	if err != nil {
+		return nil, fmt.Errorf("config value %q for %s is not a valid duration: %w", *cfgValue, envName, err)
+	}
+	if parsed < 0 {
+		return nil, fmt.Errorf("config value %q for %s must be >= 0", *cfgValue, envName)
+	}
+	return &parsed, nil
+}
+
+// resolveDaemonDisableAutoUpdate resolves the single-direction disable
+// signal for auto-update. Precedence:
+//
+//  1. --no-auto-update flag passed -> disable.
+//  2. MULTICA_DAEMON_AUTO_UPDATE explicitly set to a falsy value ->
+//     disable. Env values other than false/0/no/off are handled inside
+//     daemon.LoadConfig (they may enable auto-update on self-host, which
+//     is not something we can express via CLI overrides today).
+//  3. config.json disable_auto_update=true (only when both flag and env
+//     are silent) -> disable.
+//  4. Otherwise -> leave the override off; LoadConfig picks the default.
+func resolveDaemonDisableAutoUpdate(flagValue bool, envName string, cfgValue bool) bool {
+	if flagValue {
+		return true
+	}
+	if v := strings.TrimSpace(os.Getenv(envName)); v != "" {
+		switch strings.ToLower(v) {
+		case "false", "0", "no", "off":
+			return true
+		}
+		// Env is set to something other than a falsy value — leave the
+		// override off and let LoadConfig read the raw env itself.
+		return false
+	}
+	return cfgValue
 }
 
 // --- daemon disk-usage ---
