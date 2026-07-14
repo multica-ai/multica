@@ -2,6 +2,8 @@
 
 Probe and capture notes for adapting a **Cline-based internal coding CLI** to Multica via **`--json` NDJSON** (not ACP / JSON-RPC).
 
+**Agreed adapter design (source of truth for implementation):** [`docs/cline-ndjson-multica-adapter-plan.md`](./cline-ndjson-multica-adapter-plan.md)
+
 **Confirmed shape:** Format **B** (Cline 3.x envelope), not the older Overview `say`/`ask` message form.
 
 Related Multica control plane:
