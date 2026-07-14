@@ -9,7 +9,7 @@ afterEach(cleanup);
 
 const status = (handled = false): RoundStatus => ({
   round: { id: "round-1", workspace_id: "ws", owner_id: "owner", name: "Daily", created_at: "", updated_at: "" },
-  members: ["ready", "running", "wakeup", "handled"].map((issue_id) => ({
+  members: ["ready", "running", "wakeup", "handled", "orphan"].map((issue_id) => ({
     round_id: "round-1", issue_id, added_by_type: "member", added_by_id: "owner", created_at: "",
   })),
   active_cycle: {
@@ -24,22 +24,23 @@ const status = (handled = false): RoundStatus => ({
 });
 
 const props = {
-  issueTitles: { ready: "Ready message", running: "Running message", wakeup: "Wakeup message", handled: "Handled message" },
+  issueTitles: { ready: "Ready message", running: "Running message", wakeup: "Wakeup message", handled: "Handled message", orphan: "Orphan issue" },
+  messageIssueIds: ["handled", "ready", "running", "wakeup"],
   issueRunStates: new Map([["running", "running"]]),
   wakeupIssueIds: new Set(["wakeup"]),
   onStart: vi.fn(),
   onSelectIssue: vi.fn(),
-  renderIssue: (issueId: string) => <div data-testid={`row-${issueId}`}>{issueId}</div>,
+  renderIssue: (issueId: string) => issueId === "orphan" ? null : <div data-testid={`row-${issueId}`}>{issueId}</div>,
 };
 
 describe("RoundsBlock", () => {
-  it("defaults to Ready and reuses the All messages row while hiding active run/wakeup issues", () => {
+  it("defaults to Ready and hides active runs without hiding scheduled unread messages", () => {
     render(<RoundsBlock statuses={[status(true)]} {...props} />);
     fireEvent.click(screen.getByRole("button", { name: "Expand Daily" }));
     expect(screen.getByRole("button", { name: "Ready" })).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByTestId("row-ready")).toBeInTheDocument();
     expect(screen.queryByTestId("row-running")).not.toBeInTheDocument();
-    expect(screen.queryByTestId("row-wakeup")).not.toBeInTheDocument();
+    expect(screen.getByTestId("row-wakeup")).toBeInTheDocument();
     expect(screen.queryByTestId("row-handled")).not.toBeInTheDocument();
   });
 
@@ -56,6 +57,8 @@ describe("RoundsBlock", () => {
     expect(screen.getByTestId("row-handled")).toBeInTheDocument();
     expect(screen.getByTestId("row-running")).toBeInTheDocument();
     expect(screen.getByTestId("row-wakeup")).toBeInTheDocument();
+    expect(screen.getAllByTestId(/^row-/).map((row) => row.textContent)).toEqual(["handled", "ready", "running", "wakeup"]);
+    expect(screen.queryByRole("button", { name: "Orphan issue" })).not.toBeInTheDocument();
   });
 
   it("searches the selected flat view and Play starts a fresh snapshot", () => {

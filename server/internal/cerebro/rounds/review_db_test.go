@@ -101,10 +101,14 @@ func TestStartSnapshotsEligibleMessages(t *testing.T) {
 	ready := f.newIssue(t, "ready")
 	running := f.newIssue(t, "running")
 	waking := f.newIssue(t, "waking")
+	read := f.newIssue(t, "read")
 	if _, err := f.pool.Exec(ctx, `INSERT INTO agent_task_queue (agent_id,issue_id,runtime_id,status) VALUES ($1,$2,$3,'running')`, f.agentID, running, f.runtimeID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := f.pool.Exec(ctx, `INSERT INTO cerebro_agent_wakeup (workspace_id,agent_id,issue_id,prompt,trigger_type,fire_at,state) VALUES ($1,$2,$3,'later','time',now()+interval '1 hour','pending')`, f.wsID, f.agentID, waking); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.pool.Exec(ctx, `UPDATE inbox_item SET read=true WHERE workspace_id=$1 AND recipient_id=$2 AND issue_id=$3`, f.wsID, f.ownerID, read); err != nil {
 		t.Fatal(err)
 	}
 
@@ -112,8 +116,8 @@ func TestStartSnapshotsEligibleMessages(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !cycleHas(t, cycle, ready) || cycleHas(t, cycle, running) || cycleHas(t, cycle, waking) {
-		t.Fatalf("cycle items = %+v, want only ready issue", cycle.Items)
+	if !cycleHas(t, cycle, ready) || !cycleHas(t, cycle, waking) || cycleHas(t, cycle, running) || cycleHas(t, cycle, read) {
+		t.Fatalf("cycle items = %+v, want unread issues without active runs", cycle.Items)
 	}
 }
 

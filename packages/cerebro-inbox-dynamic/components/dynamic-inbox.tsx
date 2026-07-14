@@ -190,6 +190,16 @@ export function DynamicInbox() {
   const { data: roundStatuses = [] } = useRoundStatuses(wsId);
   const startRound = useStartRound(wsId);
   const roundIssueIds = useMemo(() => [...new Set(roundStatuses.flatMap((status) => status.members.map((member) => member.issue_id)))], [roundStatuses]);
+  const roundMessageIssueIds = useMemo(
+    () => [
+      ...new Set(
+        entries.flatMap((entry) =>
+          entry.kind === "notif" && entry.item.issue_id ? [entry.item.issue_id] : [],
+        ),
+      ),
+    ],
+    [entries],
+  );
   const roundIssueQueries = useQueries({ queries: roundIssueIds.map((issueId) => issueDetailOptions(wsId, issueId)) });
   const roundIssueTitles = useMemo(() => Object.fromEntries(roundIssueQueries.flatMap((query, index) => {
     const issue = query.data;
@@ -1182,13 +1192,13 @@ export function DynamicInbox() {
                         <RoundsBlock
                           statuses={roundStatuses}
                           issueTitles={roundIssueTitles}
+                          messageIssueIds={roundMessageIssueIds}
                           settings={<ConnectedRoundManager statuses={roundStatuses} issueTitles={roundIssueTitles} />}
                           dragHandle={handle}
                           defaultCollapsed={section.defaultCollapsed}
                           onRemove={() => removeSection(section.id)}
                           onStart={(roundId) => startRound.mutate(roundId)}
                           issueRunStates={filterContext.action.issueRunStates}
-                          wakeupIssueIds={filterContext.action.wakeupIssueIds}
                           onSelectIssue={(issueId) => {
                             const entry = entries.find((candidate) => candidate.kind === "notif" && candidate.item.issue_id === issueId);
                             if (entry) onSelect(entry);

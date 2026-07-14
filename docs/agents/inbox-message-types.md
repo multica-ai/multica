@@ -67,19 +67,21 @@ layout; it is never injected outside the user's saved section order. It uses the
 same sortable, removable, collapsible block contract as other Inbox sections.
 Collapsed Rounds shows no count. Expanded Rounds provides in-block search and
 renders each selected list through the shared Inbox row renderer. When an Inbox
-row is temporarily unavailable, the issue title remains as a small openable
-fallback.
+row is unavailable, the Round renders no separate issue-title fallback; this
+keeps the message list identical to the normal Inbox list.
 
 A Round is grouping plus an answer snapshot; it does not own execution. Round
 membership never suppresses a normal inbox row, unread badge, push notification,
 in-app banner, or agent trigger. It adds no schedule, retry, pause, Live/Batch,
 held-reply, or gateway-batch behavior.
 
-Pressing Play replaces the active snapshot with member issues that have an open
-inbox message and no active task or wakeup. The expanded Round defaults to
+Pressing Play replaces the active snapshot with member issues that have an
+unread inbox message and no active task. A pending wakeup is not an active run
+and does not hide an unread message. The expanded Round defaults to
 **Ready**, which shows the unhandled snapshot items. **Handled this round**
-shows snapshot items answered after Play, and **All messages** always shows the
-full member list. Search filters whichever of those three flat views is active.
+shows snapshot items answered after Play, and **All messages** shows current
+Inbox messages for Round members with the same rows and ordering as the normal
+Inbox. Search filters whichever of those three flat views is active.
 An owner reply marks the matching active snapshot item handled while continuing
 through the ordinary comment-trigger path. A later agent reply remains a normal
 inbox message and appears in the next snapshot when Play is pressed again.

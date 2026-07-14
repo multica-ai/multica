@@ -1,7 +1,7 @@
 "use client";
 
 import { ChevronDown, ChevronRight, Pencil, Play, Plus, Search, Settings, Trash2, X } from "lucide-react";
-import { useState, type ReactNode } from "react";
+import { Fragment, useState, type ReactNode } from "react";
 import { Button } from "@multica/ui/components/ui/button";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@multica/ui/components/ui/dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@multica/ui/components/ui/dropdown-menu";
@@ -16,11 +16,23 @@ import type { RoundInput } from "./api";
 
 type RoundView = "ready" | "handled" | "all";
 
-export function RoundsBlock({ statuses, issueTitles, issueRunStates = new Map(), wakeupIssueIds = new Set(), onStart, onSelectIssue, settings, renderIssue, dragHandle, defaultCollapsed, onRemove }: {
+export function RoundsBlock({
+  statuses,
+  issueTitles,
+  messageIssueIds,
+  issueRunStates = new Map(),
+  onStart,
+  onSelectIssue,
+  settings,
+  renderIssue,
+  dragHandle,
+  defaultCollapsed,
+  onRemove,
+}: {
   statuses: RoundStatus[];
   issueTitles: Record<string, string>;
+  messageIssueIds?: readonly string[];
   issueRunStates?: ReadonlyMap<string, unknown>;
-  wakeupIssueIds?: ReadonlySet<string>;
   onStart: (id: string) => void;
   onSelectIssue: (id: string) => void;
   settings?: ReactNode;
@@ -35,21 +47,32 @@ export function RoundsBlock({ statuses, issueTitles, issueRunStates = new Map(),
   const [views, setViews] = useState<Record<string, RoundView>>({});
   const needle = query.trim().toLocaleLowerCase();
 
-  const renderMember = (issueId: string) => <div key={issueId}>
-    {renderIssue?.(issueId) ?? <button type="button" aria-label={issueTitles[issueId] ?? issueId} onClick={() => onSelectIssue(issueId)} className="flex w-full min-w-0 items-center px-4 py-2.5 text-left text-xs hover:bg-muted">
-      <span className="min-w-0 flex-1 truncate">{issueTitles[issueId] ?? issueId}</span>
-    </button>}
-  </div>;
+  const renderMember = (issueId: string) => {
+    if (renderIssue) return <Fragment key={issueId}>{renderIssue(issueId)}</Fragment>;
+    return <button key={issueId} type="button" aria-label={issueTitles[issueId] ?? issueId} onClick={() => onSelectIssue(issueId)} className="flex w-full min-w-0 items-center px-4 py-2.5 text-left text-xs hover:bg-muted">
+        <span className="min-w-0 flex-1 truncate">{issueTitles[issueId] ?? issueId}</span>
+      </button>;
+  };
 
   const renderRound = (s: RoundStatus) => {
     const open = expandedIds.has(s.round.id);
     const view = views[s.round.id] ?? "ready";
     const allIds = s.members.map((member) => member.issue_id);
-    const readyIds = (s.active_cycle?.items ?? [])
-      .filter((item) => item.handled_at == null && !issueRunStates.has(item.issue_id) && !wakeupIssueIds.has(item.issue_id))
-      .map((item) => item.issue_id);
-    const handledIds = (s.active_cycle?.items ?? []).filter((item) => item.handled_at != null).map((item) => item.issue_id);
-    const ids = (view === "ready" ? readyIds : view === "handled" ? handledIds : allIds)
+    const memberIds = new Set(allIds);
+    const orderedIds = (messageIssueIds ?? allIds).filter((issueId) => memberIds.has(issueId));
+    const readySet = new Set(
+      (s.active_cycle?.items ?? [])
+        .filter((item) => item.handled_at == null && !issueRunStates.has(item.issue_id))
+        .map((item) => item.issue_id),
+    );
+    const handledSet = new Set(
+      (s.active_cycle?.items ?? [])
+        .filter((item) => item.handled_at != null)
+        .map((item) => item.issue_id),
+    );
+    const readyIds = orderedIds.filter((issueId) => readySet.has(issueId));
+    const handledIds = orderedIds.filter((issueId) => handledSet.has(issueId));
+    const ids = (view === "ready" ? readyIds : view === "handled" ? handledIds : orderedIds)
       .filter((issueId) => !needle || (issueTitles[issueId] ?? issueId).toLocaleLowerCase().includes(needle));
     const summary = s.active_cycle ? `${readyIds.length} ready` : "Ready to start";
     return <div key={s.round.id}>

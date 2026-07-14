@@ -208,15 +208,11 @@ func (s *Service) Start(ctx context.Context, workspaceID, ownerID, roundID pgtyp
 		AND EXISTS (
 			SELECT 1 FROM inbox_item i
 			WHERE i.workspace_id=$3 AND i.recipient_type='member' AND i.recipient_id=$4
-			AND i.issue_id=m.issue_id AND i.route='inbox' AND i.archived=false
+			AND i.issue_id=m.issue_id AND i.route='inbox' AND i.archived=false AND i.read=false
 		)
 		AND NOT EXISTS (
 			SELECT 1 FROM agent_task_queue q
 			WHERE q.issue_id=m.issue_id AND q.status IN ('queued','dispatched','running')
-		)
-		AND NOT EXISTS (
-			SELECT 1 FROM cerebro_agent_wakeup w
-			WHERE w.issue_id=m.issue_id AND w.state IN ('pending','claimed','dispatched')
 		)
 		GROUP BY m.issue_id`, cycleID, roundID, workspaceID, ownerID)
 	if err != nil {
