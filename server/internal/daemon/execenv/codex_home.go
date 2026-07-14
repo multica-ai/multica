@@ -255,11 +255,15 @@ func sanitizeCodexPathSegment(s string) string {
 // never reclaimed; a store idle past retention is removed, giving deleted issues
 // an eventual-reclamation guarantee. retention <= 0 disables pruning entirely.
 //
-// isActive (may be nil) reports whether a store is currently mounted by a live
-// task. It runs in the same process as task preparation, so a store a task is
-// mounting right now — whose mtime the mount has not refreshed yet — is skipped,
-// closing the stat->remove race the mtime refresh alone leaves open.
-func PruneCodexSessionStores(retention time.Duration, now time.Time, isActive func(storeDir string) bool, logger *slog.Logger) (removed int, bytesFreed int64) {
+// reserve (may be nil) atomically claims a store for deletion: it returns
+// ok=false when a live task holds the store — leaving it — and otherwise returns
+// a commit to run once removal finishes. Because the caller's reservation and a
+// task's mark-active go through one lock in the same process, a store a task is
+// about to mount is never removed out from under it — the confirm-inactive and
+// the remove are effectively atomic, closing the stat->remove race a plain
+// point-in-time active check leaves open (MUL-4424). nil disables the guard
+// (tests): every idle store is removed.
+func PruneCodexSessionStores(retention time.Duration, now time.Time, reserve func(storeDir string) (commit func(), ok bool), logger *slog.Logger) (removed int, bytesFreed int64) {
 	if retention <= 0 {
 		return 0, 0
 	}
@@ -288,13 +292,23 @@ func PruneCodexSessionStores(retention time.Duration, now time.Time, isActive fu
 				kept++
 				continue
 			}
-			// A task is mounting/using this store right now (its remount refreshes
-			// activity only once the link is in place). Never reclaim it mid-use.
-			if isActive != nil && isActive(storeDir) {
-				kept++
-				continue
+			// Atomically reserve the store before removing it. A live task holds
+			// it (or is mounting it right now) → skip; otherwise the reservation
+			// blocks any task from claiming it until the removal + commit finish.
+			var commit func()
+			if reserve != nil {
+				c, ok := reserve(storeDir)
+				if !ok {
+					kept++
+					continue
+				}
+				commit = c
 			}
-			if err := os.RemoveAll(storeDir); err != nil {
+			err := os.RemoveAll(storeDir)
+			if commit != nil {
+				commit()
+			}
+			if err != nil {
 				logger.Warn("execenv: prune codex session store failed", "store", storeDir, "error", err)
 				kept++
 				continue

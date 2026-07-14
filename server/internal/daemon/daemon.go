@@ -256,8 +256,10 @@ type Daemon struct {
 	activeEnvRootsMu sync.Mutex
 	activeEnvRoots   map[string]int // env root path -> reference count (handles reuse paths marked twice)
 
-	activeCodexStoresMu sync.Mutex
-	activeCodexStores   map[string]int // per-issue Codex session store path -> refcount; guards the store from GC mid-task (MUL-4424)
+	activeCodexStoresMu   sync.Mutex
+	activeCodexStoresCond *sync.Cond      // signalled when an in-flight store deletion finishes, so a blocked markActive can proceed
+	activeCodexStores     map[string]int  // per-issue Codex session store path -> live-task refcount; guards the store from GC mid-task (MUL-4424)
+	deletingCodexStores   map[string]bool // store paths a GC delete has reserved; markActive waits these out so a task never mounts a store mid-removal
 
 	// localPathLocks serialises agent tasks whose project resource is a
 	// local_directory pinned to this daemon. Two tasks targeting the same
@@ -309,6 +311,7 @@ func New(cfg Config, logger *slog.Logger) *Daemon {
 		wsHBLastAck:               make(map[string]time.Time),
 		activeEnvRoots:            make(map[string]int),
 		activeCodexStores:         make(map[string]int),
+		deletingCodexStores:       make(map[string]bool),
 		localPathLocks:            NewLocalPathLocker(),
 		runtimeGoneInflight:       make(map[string]struct{}),
 		reregisterNextAttempt:     make(map[string]time.Time),
@@ -318,6 +321,7 @@ func New(cfg Config, logger *slog.Logger) *Daemon {
 		workspaceChanges:          newWorkspaceChangeSignal(),
 		wsRPC:                     newWSRPCClient(wsRPCResponseGrace),
 	}
+	d.activeCodexStoresCond = sync.NewCond(&d.activeCodexStoresMu)
 	d.runner = taskRunnerFunc(d.runTask)
 	d.runUpdateFn = d.runUpdate
 	return d
@@ -4983,16 +4987,21 @@ func (d *Daemon) isActiveEnvRoot(envRoot string) bool {
 	return d.activeEnvRoots[envRoot] > 0
 }
 
-// markActiveCodexStore records that a task is currently using the given per-issue
-// Codex session store, so the GC loop's PruneCodexSessionStores never reclaims it
-// mid-task — the store lives outside the env root, so isActiveEnvRoot does not
-// cover it (MUL-4424). Reference-counted like the env-root guard.
+// markActiveCodexStore records that a task is about to use the given per-issue
+// Codex session store, so the GC never reclaims it mid-task — the store lives
+// outside the env root, so isActiveEnvRoot does not cover it (MUL-4424). If a GC
+// delete has already reserved this store, we wait for that removal to finish
+// before claiming it, so a task never mounts a store mid-removal; the store is
+// then recreated fresh by Prepare. Reference-counted like the env-root guard.
 func (d *Daemon) markActiveCodexStore(store string) {
 	if store == "" {
 		return
 	}
 	d.activeCodexStoresMu.Lock()
 	defer d.activeCodexStoresMu.Unlock()
+	for d.deletingCodexStores[store] {
+		d.activeCodexStoresCond.Wait()
+	}
 	d.activeCodexStores[store]++
 }
 
@@ -5009,10 +5018,26 @@ func (d *Daemon) unmarkActiveCodexStore(store string) {
 	d.activeCodexStores[store]--
 }
 
-func (d *Daemon) isActiveCodexStore(store string) bool {
+// reserveCodexStoreForDeletion atomically checks that no live task holds store
+// and, if so, marks it reserved so no task can claim it until the caller runs
+// the returned commit (after the actual removal). ok=false means a task holds it
+// — do not delete. This is the exclusive protocol PruneCodexSessionStores needs:
+// the "confirm inactive" and the mark happen under one lock acquisition, so a
+// markActiveCodexStore either loses the check (store stays) or blocks on the
+// reservation, closing the stat->remove race (MUL-4424).
+func (d *Daemon) reserveCodexStoreForDeletion(store string) (commit func(), ok bool) {
 	d.activeCodexStoresMu.Lock()
 	defer d.activeCodexStoresMu.Unlock()
-	return d.activeCodexStores[store] > 0
+	if d.activeCodexStores[store] > 0 || d.deletingCodexStores[store] {
+		return nil, false
+	}
+	d.deletingCodexStores[store] = true
+	return func() {
+		d.activeCodexStoresMu.Lock()
+		delete(d.deletingCodexStores, store)
+		d.activeCodexStoresCond.Broadcast()
+		d.activeCodexStoresMu.Unlock()
+	}, true
 }
 
 // shortID returns the first 8 characters of an ID for readable logs.

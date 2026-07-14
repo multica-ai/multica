@@ -538,9 +538,10 @@ func TestPruneCodexSessionStores_ReopenedStoreNotReclaimed(t *testing.T) {
 	}
 }
 
-// TestPruneCodexSessionStores_ActiveStoreNotReclaimed proves the in-process
-// active-store guard closes the stat->remove race: a store idle on disk but
-// marked in-use by a live task is skipped, then reclaimed once inactive.
+// TestPruneCodexSessionStores_ActiveStoreNotReclaimed proves the reservation
+// guard closes the stat->remove race: a store idle on disk that reserve refuses
+// (a live task holds it) is skipped, then reclaimed once reservable. The
+// daemon's atomic reserve-vs-mark protocol is unit-tested separately.
 func TestPruneCodexSessionStores_ActiveStoreNotReclaimed(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("CODEX_HOME", home)
@@ -550,15 +551,21 @@ func TestPruneCodexSessionStores_ActiveStoreNotReclaimed(t *testing.T) {
 	// Idle past retention on disk (no remount refresh), but currently in use.
 	chtimesTree(t, storeDir, time.Now().Add(-30*24*time.Hour))
 
-	active := func(p string) bool { return sameCodexPath(p, storeDir) }
-	if removed, _ := PruneCodexSessionStores(14*24*time.Hour, time.Now(), active, testLogger()); removed != 0 {
-		t.Fatalf("removed = %d, want 0 (an in-use store must never be reclaimed)", removed)
+	// reserve refuses the in-use store (ok=false) and allows anything else.
+	held := func(p string) (func(), bool) {
+		if sameCodexPath(p, storeDir) {
+			return nil, false
+		}
+		return func() {}, true
+	}
+	if removed, _ := PruneCodexSessionStores(14*24*time.Hour, time.Now(), held, testLogger()); removed != 0 {
+		t.Fatalf("removed = %d, want 0 (a reserved/in-use store must never be reclaimed)", removed)
 	}
 	assertPresent(t, storeDir)
 
-	// Once no longer active, the same idle store is reclaimed.
+	// Once reservable, the same idle store is reclaimed.
 	if removed, _ := PruneCodexSessionStores(14*24*time.Hour, time.Now(), nil, testLogger()); removed != 1 {
-		t.Fatalf("removed = %d, want 1 (idle store reclaimed when not active)", removed)
+		t.Fatalf("removed = %d, want 1 (idle store reclaimed when reservable)", removed)
 	}
 	assertAbsent(t, storeDir)
 }

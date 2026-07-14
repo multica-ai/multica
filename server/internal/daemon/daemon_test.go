@@ -1236,6 +1236,98 @@ func TestGateResumeToReusedWorkdir(t *testing.T) {
 	}
 }
 
+// newCodexStoreGuardDaemon builds a Daemon with only the per-issue Codex session
+// store guard initialised — enough to exercise the reserve-vs-mark protocol.
+func newCodexStoreGuardDaemon() *Daemon {
+	d := &Daemon{
+		activeCodexStores:   map[string]int{},
+		deletingCodexStores: map[string]bool{},
+	}
+	d.activeCodexStoresCond = sync.NewCond(&d.activeCodexStoresMu)
+	return d
+}
+
+// A task that marks a store active before the GC reserves it must block the
+// deletion — this is exactly Elon's mark-then-delete interleaving, which the old
+// point-in-time active check allowed.
+func TestCodexStoreGuard_MarkBeforeReserveBlocksDeletion(t *testing.T) {
+	t.Parallel()
+	d := newCodexStoreGuardDaemon()
+	const store = "/stores/agent/issue"
+
+	d.markActiveCodexStore(store)
+	if _, ok := d.reserveCodexStoreForDeletion(store); ok {
+		t.Fatal("reserve must refuse a store a live task already holds")
+	}
+	d.unmarkActiveCodexStore(store)
+
+	commit, ok := d.reserveCodexStoreForDeletion(store)
+	if !ok {
+		t.Fatal("reserve should succeed once the store is inactive")
+	}
+	commit()
+}
+
+// The reverse interleaving: once the GC has reserved a store, a task's
+// markActive must block until the removal commits (so it never mounts a store
+// mid-removal), then proceed.
+func TestCodexStoreGuard_ReserveBlocksMarkUntilCommit(t *testing.T) {
+	t.Parallel()
+	d := newCodexStoreGuardDaemon()
+	const store = "/stores/agent/issue"
+
+	commit, ok := d.reserveCodexStoreForDeletion(store)
+	if !ok {
+		t.Fatal("reserve should succeed on an inactive store")
+	}
+
+	marked := make(chan struct{})
+	go func() {
+		d.markActiveCodexStore(store)
+		close(marked)
+	}()
+
+	select {
+	case <-marked:
+		t.Fatal("markActiveCodexStore must block while the store is reserved for deletion")
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	commit()
+
+	select {
+	case <-marked:
+	case <-time.After(2 * time.Second):
+		t.Fatal("markActiveCodexStore must proceed after the reservation is committed")
+	}
+	// The store is now active, so a fresh reserve must be refused.
+	if _, ok := d.reserveCodexStoreForDeletion(store); ok {
+		t.Fatal("store must be active after the blocked mark proceeds")
+	}
+}
+
+// Two GC passes cannot both reserve the same store; the second is refused until
+// the first commits.
+func TestCodexStoreGuard_SecondReserveRefusedWhileDeleting(t *testing.T) {
+	t.Parallel()
+	d := newCodexStoreGuardDaemon()
+	const store = "/stores/agent/issue"
+
+	commit, ok := d.reserveCodexStoreForDeletion(store)
+	if !ok {
+		t.Fatal("first reserve should succeed")
+	}
+	if _, ok := d.reserveCodexStoreForDeletion(store); ok {
+		t.Fatal("a second reserve must be refused while a removal is in flight")
+	}
+	commit()
+	commit2, ok := d.reserveCodexStoreForDeletion(store)
+	if !ok {
+		t.Fatal("reserve should succeed again after the prior removal committed")
+	}
+	commit2()
+}
+
 func TestExecuteAndDrain_ResumeFailureFallback(t *testing.T) {
 	t.Parallel()
 
