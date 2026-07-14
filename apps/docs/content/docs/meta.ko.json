@@ -32,6 +32,7 @@
     "---연동---",
     "channels",
     "github-integration",
+    "gitea-integration",
     "lark-bot-integration",
     "slack-bot-integration",
     "---자체 호스팅 & 운영---",

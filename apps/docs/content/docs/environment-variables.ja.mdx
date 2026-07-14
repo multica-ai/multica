@@ -230,6 +230,22 @@ S3 の前段に CloudFront を置く場合、3 つの変数が適用されます
 
 **注:** `GITHUB_WEBHOOK_SECRET` はインストールフローの state token の署名キーとして再利用されるため、運用者は secret を 1 つだけ管理すればよいです。これは GitHub App の *Client* secret では**ありません** — Client secret は OAuth 関連であり、この連携では使われません。完全な手順は [GitHub 連携 → セルフホストのセットアップ](/github-integration#self-host-setup)を参照してください。
 
+## Gitea 連携
+
+[Gitea PR ↔ イシュー連携](/gitea-integration) には変数が 2 つ必要です——1 つは連携管理を有効化し、もう 1 つは webhook を受け入れます。
+
+| 変数 | デフォルト | 説明 |
+|---|---|---|
+| `MULTICA_GITEA_SECRET_KEY` | 空 | 各連携の個人アクセストークンを保存時に暗号化する、base64 エンコードされた 32 バイトの鍵（`openssl rand -base64 32`）。連携機能全体のスイッチで、未設定だと Gitea インスタンスの連携は `503` を返し、**Connect Gitea** エントリは非表示のままになります |
+| `MULTICA_GITEA_WEBHOOK_SECRET` | 空 | Gitea webhook 署名用の共有 HMAC-SHA256 シークレット（`X-Gitea-Signature`、raw hex——`sha256=` プレフィックスなし）。`/api/webhooks/gitea` を指す各リポジトリ webhook の **Secret** と同じ値を設定します |
+
+**いずれかが未設定のときの挙動:**
+
+- `MULTICA_GITEA_SECRET_KEY` がないと、Gitea 連携管理はサーバー側で無効化されます（`503 gitea integration is not configured`）。
+- `MULTICA_GITEA_WEBHOOK_SECRET` がないと、`/api/webhooks/gitea` は **`503 gitea webhooks not configured`** を返します——Multica はシークレットなしでイベントを処理することを拒み、すべての署名を有効として扱うことはしません。
+
+GitHub と異なり、App slug や秘密鍵はありません。Gitea は自ホスト型なので、各連携は UI で入力する base URL + PAT です。完全な手順は [Gitea 連携 → 自ホストのセットアップ](/gitea-integration#自ホストのセットアップ) を参照してください。
+
 ## 使用量分析
 
 デフォルトでは、サーバーは Multica の公式 PostHog インスタンスにレポートします。オプトアウトするには `ANALYTICS_DISABLED=true` を設定してください。

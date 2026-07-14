@@ -235,6 +235,22 @@ API 返回的 `download_url` 在未配置 CloudFront 签名时会指向 `GET /ap
 
 **注意：** `GITHUB_WEBHOOK_SECRET` 同时被复用为 install 流程里 state token 的签名密钥，所以运维只需要维护一个 secret。它**不是** GitHub App 的 *Client* secret——Client secret 是 OAuth 用的，和本集成无关。完整配置流程见 [GitHub 集成 → Self-Host 配置](/github-integration#self-host-配置)。
 
+## Gitea 集成
+
+[Gitea PR ↔ issue 集成](/gitea-integration) 需要两个变量——一个启用连接管理，一个接受 webhook。
+
+| 变量 | 默认 | 说明 |
+|---|---|---|
+| `MULTICA_GITEA_SECRET_KEY` | 空 | 一个 base64 编码的 32 字节密钥（`openssl rand -base64 32`），对每个连接的个人访问令牌落库加密。它是整个连接功能的开关：未设时，连接 Gitea 实例返回 `503`，**Connect Gitea** 入口保持隐藏 |
+| `MULTICA_GITEA_WEBHOOK_SECRET` | 空 | Gitea webhook 签名用的共享 HMAC-SHA256 密钥（`X-Gitea-Signature`，raw hex——无 `sha256=` 前缀）。和每个指向 `/api/webhooks/gitea` 的仓库 webhook 的 **Secret** 填同一个值 |
+
+**任一未设时的行为：**
+
+- 没有 `MULTICA_GITEA_SECRET_KEY`，Gitea 连接管理在服务端被禁用（`503 gitea integration is not configured`）。
+- 没有 `MULTICA_GITEA_WEBHOOK_SECRET`，`/api/webhooks/gitea` 返回 **`503 gitea webhooks not configured`**——Multica 拒绝在无密钥时处理事件，而不是把所有签名都当作有效。
+
+和 GitHub 不同，这里没有 App slug 或私钥：Gitea 是自建的，所以每个连接是在 UI 里填入的 base URL + PAT。完整流程见 [Gitea 集成 → 自建部署配置](/gitea-integration#自建部署配置)。
+
 ## 用量统计
 
 默认上报到 Multica 官方 PostHog 实例。不想上报就把 `ANALYTICS_DISABLED=true`。

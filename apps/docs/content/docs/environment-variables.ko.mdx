@@ -230,6 +230,22 @@ S3 앞에 CloudFront를 두는 경우 세 가지 변수가 적용됩니다: `CLO
 
 **참고:** `GITHUB_WEBHOOK_SECRET`은 설치 흐름 state token의 서명 키로 재사용되므로, 운영자는 secret 하나만 관리하면 됩니다. 이것은 GitHub App의 *Client* secret이 **아닙니다** — Client secret은 OAuth 관련이며 이 연동에서는 사용되지 않습니다. 전체 안내는 [GitHub 연동 → 자체 호스팅 설정](/github-integration#self-host-setup)을 참고하세요.
 
+## Gitea 연동
+
+[Gitea PR ↔ 이슈 연동](/gitea-integration)에는 변수가 두 개 필요합니다 — 하나는 연결 관리를 활성화하고, 하나는 webhook을 수신합니다.
+
+| 변수 | 기본값 | 설명 |
+|---|---|---|
+| `MULTICA_GITEA_SECRET_KEY` | 비어 있음 | 각 연결의 개인 액세스 토큰을 저장 시 암호화하는 base64 인코딩 32바이트 키(`openssl rand -base64 32`). 연결 기능 전체의 스위치로, 설정하지 않으면 Gitea 인스턴스 연결이 `503`을 반환하고 **Connect Gitea** 진입점이 숨겨진 채로 유지됩니다 |
+| `MULTICA_GITEA_WEBHOOK_SECRET` | 비어 있음 | Gitea webhook 서명용 공유 HMAC-SHA256 시크릿(`X-Gitea-Signature`, raw hex — `sha256=` 접두사 없음). `/api/webhooks/gitea`를 가리키는 모든 저장소 webhook의 **Secret**과 동일한 값을 설정합니다 |
+
+**둘 중 하나가 설정되지 않았을 때의 동작:**
+
+- `MULTICA_GITEA_SECRET_KEY`가 없으면 Gitea 연결 관리가 서버 측에서 비활성화됩니다(`503 gitea integration is not configured`).
+- `MULTICA_GITEA_WEBHOOK_SECRET`가 없으면 `/api/webhooks/gitea`가 **`503 gitea webhooks not configured`**를 반환합니다 — Multica는 시크릿 없이 이벤트를 처리하기를 거부하며, 모든 서명을 유효한 것으로 취급하지 않습니다.
+
+GitHub과 달리 App slug나 개인 키가 없습니다. Gitea는 자체 호스팅이므로 각 연결은 UI에서 입력하는 base URL + PAT입니다. 전체 안내는 [Gitea 연동 → 자체 호스팅 설정](/gitea-integration#자체-호스팅-설정)을 참조하세요.
+
 ## 사용량 분석
 
 기본적으로 서버는 Multica의 공식 PostHog 인스턴스로 보고합니다. 옵트아웃하려면 `ANALYTICS_DISABLED=true`로 설정하세요.

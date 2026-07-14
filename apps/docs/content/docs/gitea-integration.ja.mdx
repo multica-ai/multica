@@ -1,0 +1,160 @@
+---
+title: Gitea 連携
+description: 自ホスト型 Gitea インスタンスを個人アクセストークンで連携し、各リポジトリの webhook を Multica に向けます。ブランチ・タイトル・本文にイシュー識別子を含む PR が該当イシューに自動で紐づき、PR をマージするとイシューが Done に移動します。
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+**設定 → 連携** で 1 つ以上の自ホスト型 **Gitea** インスタンスを連携します。連携は「インスタンスの base URL + 個人アクセストークン（PAT）」で構成されます。リポジトリの webhook を Multica に向けると、ブランチ名・タイトル・本文にイシュー識別子（例: `MUL-123`）を含むあらゆる pull request が該当する[イシュー](/issues)に**自動で紐づき**、イシューサイドバーの **Pull requests** に表示され、PR がマージされるとイシューが **Done** に移動します。
+
+Gitea は自ホスト型なので、GitHub App のインストールフローはありません。モデルは **base URL + PAT + リポジトリごとの webhook** で、webhook から先——識別子マッチング、PR サイドバー、merge → Done——はすべて GitHub と同じ共有パイプラインを通ります。
+
+## 連携が行うこと
+
+| 画面 | 挙動 |
+|---|---|
+| **設定 → 連携** | ワークスペース admin が base URL と PAT を入力して Gitea インスタンスを連携します。1 ワークスペースで**複数**のインスタンスを連携できます。PAT はインスタンスに対して検証され、保存時に暗号化され、API から返されることはありません。 |
+| **イシューサイドバー → Pull requests** | このイシューに自動で紐づいた各 PR を、タイトル・リポジトリ・状態（`Open` / `Draft` / `Merged` / `Closed`）・作者とともに表示します。行をクリックすると Gitea インスタンス上の PR に移動します。 |
+| **Webhook（バックグラウンド）** | 各 `pull_request` イベントで、Multica は PR 行を upsert し、PR からイシュー識別子を抽出し、紐づけ行を再構築します。冪等——配信の再送は no-op です。 |
+| **マージ時の自動ステータス** | PR が `merged` に遷移すると、まだ `Done` / `Cancelled` でない紐づけ済みイシューはすべて **Done** に移動します。 |
+
+ミラーされるのは PR 本体のみです。コミット、オープン PR のないブランチ参照、CI チェック状態は**モデル化されません**——[GitHub 連携](/github-integration) と同じく意図的に狭い範囲です。
+
+## Gitea インスタンスを連携する
+
+**設定 → 連携** で、owner または admin が次を入力します。
+
+| フィールド | 値 |
+|---|---|
+| **Base URL** | インスタンスの web アドレス。例: `https://gitea.example.com`。末尾のスラッシュや query / fragment は正規化されるため、`https://gitea.example.com/` と `https://gitea.example.com` は同一の連携になります。 |
+| **個人アクセストークン** | 連携が使うアカウントの Gitea PAT。**Gitea → Settings → Applications → Generate New Token** で作成します。リポジトリの読み取り専用スコープで十分です——Multica は書き込みを行いません。 |
+
+連携時、Multica はそのトークンでインスタンスの `GET /api/v1/user` を呼びます。この 1 回の呼び出しで base URL が到達可能でトークンが有効であることの両方を確認し、連携カードに表示するアカウント名を取得します。失敗は対処可能なエラーとして提示されます。
+
+- **base URL に到達不可** → `could not reach the Gitea instance at that base URL`。
+- **トークンが拒否された** → `the personal access token was rejected by the Gitea instance`。
+- **URL が Gitea API でない** → `the base URL did not respond with a Gitea API payload`。
+
+トークン自体はサーバーの Gitea 暗号鍵で封印され、書き込み専用で保存されます——リストやリアルタイム応答が持つのは base URL・アカウント名・アバターだけで、PAT は決して含まれません。
+
+- **複数インスタンス。** 1 ワークスペースで複数のインスタンスを連携できます（連携は `(ワークスペース, base URL)` ごとに一意）。同じ base URL で再連携すると、重複行を作らずに**その場でトークンを更新**します。
+- **権限。** 連携と解除はワークスペースの **owner または admin** が必要です。既存の連携のリスト表示は任意のメンバーに見えます（隠すべき秘密がないため）。
+
+## リポジトリ webhook を設定する
+
+インスタンスを連携すると Multica はそれを**読める**ようになります。PR イベントを送り込むのが **webhook** です。ミラーしたい各 Gitea リポジトリに webhook を追加します（**Repo → Settings → Webhooks → Add Webhook → Gitea**）。
+
+| フィールド | 値 |
+|---|---|
+| **Target URL** | `https://<api-host>/api/webhooks/gitea` |
+| **HTTP Method** | `POST` |
+| **Content Type** | `application/json` |
+| **Secret** | `MULTICA_GITEA_WEBHOOK_SECRET` の共有シークレット——すべてのリポジトリ webhook で**同じ値**を使います。 |
+| **Trigger On** | Custom events → **Pull Request** にチェック。 |
+
+Multica は `X-Gitea-Signature` ヘッダー——本文の raw-hex HMAC-SHA256（注: GitHub と異なり `sha256=` プレフィックスなし）——を検証します。署名が不正または欠落した配信は `401 invalid signature` で拒否されます。サーバー側でシークレット未設定の場合、エンドポイントは `503 gitea webhooks not configured` を返します。
+
+<Callout type="info">
+配信はインスタンスの base URL でワークスペースに帰属します——Multica は payload のリポジトリ `html_url` から `scheme://host` を導き、そのインスタンスに連携済みのすべてのワークスペースに PR をミラーします。Multica 内にリポジトリ単位の選択はありません。リポジトリに webhook を追加すること自体が購読です。
+</Callout>
+
+## 識別子のマッチングと merge → Done
+
+webhook から先、Gitea の PR は GitHub と**同じ**マッチャーおよび自動ステータス規則を通ります——完全な詳細は [GitHub 連携 → 識別子のマッチング](/github-integration#識別子のマッチング方法) を参照してください。要約すると:
+
+- 識別子は PR の **head ブランチ**・**タイトル**・**本文** から大文字小文字を区別せずに抽出され、`v1.2-3` のようなバージョン文字列に誤マッチしないよう境界が設けられています。
+- マッチするのはワークスペース自身の[イシュー接頭辞](/workspaces)だけ。1 つの PR 内の重複は 1 回だけ紐づき、1 つの PR で複数のイシューを参照できます。
+- PR の `merged` が `true` になると、まだ `Done` / `Cancelled` でない紐づけ済みイシューは **Done** に移動します。マージ**せず** PR を閉じただけの場合はカード状態が `Closed` になるだけで、紐づいたイシューはそのままです。
+
+## 複数インスタンスと複数ワークスペース
+
+Gitea のデプロイは `github.com` のような単一のグローバルホストではないため、ミラーされる PR 行は owner / リポジトリ / 番号に加えてインスタンスのホストでキー付けされます。実際上の帰結:
+
+- 2 つの異なる Gitea インスタンス上の**同じ** `owner/repo#42` は 2 つの別々の PR のままで、衝突しません。
+- 1 つのインスタンスが**複数**のワークスペースに連携されている場合、各リポジトリの PR イベントは連携済みの各ワークスペースに独立して配信され、それぞれ自分のイシュー接頭辞でマッチして自分のイシューにミラーします。
+- あるワークスペースからインスタンスを解除しても、**そのワークスペース**がイベントを受け取らなくなるだけです。
+
+## clone 側 vs ミラー側
+
+混同しやすい 2 つの独立した認証経路があります。
+
+- **ミラー側（このページ）。** PAT + webhook シークレットは、Multica が Gitea の PR 状態を*読み*、イベントを送り込むためのものです。読み取り専用で、ここでは何も clone しません。
+- **clone 側（エージェントの作業）。** エージェントが実際にプライベート Gitea リポジトリを checkout して作業するとき、その clone は **daemon** の git 環境で実行され、daemon ホスト自身の git 認証情報を使います——まったく別の設定です。daemon 上でプライベートリポジトリの git 認証を設定する方法は [Daemon と runtime](/daemon-runtimes) およびデプロイの自ホスト向けノートを参照してください。
+
+PR ミラーには連携と webhook だけで十分です。clone 側の認証情報が必要なのは、エージェントがその Gitea リポジトリを編集する場合だけです。
+
+## 自ホストのセットアップ
+
+Multica Cloud で運用している場合、Gitea 連携管理と webhook エンドポイントはすでに利用可能です——[Gitea インスタンスを連携する](#gitea-インスタンスを連携する) へ進んでください。
+
+自ホストでは、環境変数を 2 つ設定し、migration を実行し、UI から連携します。
+
+### 1. 環境変数を設定する
+
+API サーバーで:
+
+```dotenv
+# Gitea 連携管理を有効化します。各連携の PAT を保存時に暗号化する、
+# base64 エンコードされた 32 バイトの鍵。生成: openssl rand -base64 32
+MULTICA_GITEA_SECRET_KEY=<base64 32 バイト鍵>
+
+# Gitea webhook 署名用の共有 HMAC-SHA256 シークレット。/api/webhooks/gitea を
+# 指す各リポジトリ webhook の "Secret" と同じ値を使います。
+MULTICA_GITEA_WEBHOOK_SECRET=<十分に長いランダム文字列>
+```
+
+- **`MULTICA_GITEA_SECRET_KEY` は連携機能のスイッチです。** 設定するまで、Gitea インスタンスの連携は `503 gitea integration is not configured` を返し、設定内の **Connect Gitea** エントリは非表示のままです。
+- **`MULTICA_GITEA_WEBHOOK_SECRET` は webhook のスイッチです。** 空の場合 `/api/webhooks/gitea` は `503 gitea webhooks not configured` を返し、Multica は「未設定のデプロイ」を「すべての署名が有効」として扱うことは決してありません。
+
+設定後は API を再起動してください。
+
+### 2. migration を実行する
+
+```bash
+make migrate-up
+```
+
+これにより `gitea_connection`（migration `180_gitea_connection`）が作成され、共有の PR ミラーテーブルに `provider` / `base_host` 列が追加され（migration `179_git_provider_pr_columns`）、GitHub と Gitea の PR が共存できるようになります。連携テーブルはワークスペースとともにカスケード削除されます。
+
+### 3. 連携して webhook を接続する
+
+1. owner または admin として **設定 → 連携** を開き、インスタンスを連携します（base URL + PAT）。
+2. 各 Gitea リポジトリに [リポジトリ webhook を設定する](#リポジトリ-webhook-を設定する) で説明した webhook を追加します。
+3. ブランチ / タイトル / 本文にイシュー識別子を含む PR を開きます——数秒でそのイシューに **Pull requests** ブロックが表示されます。
+
+### 4. curl プローブで検証する
+
+Gitea の webhook 配信ページが `401 invalid signature` を報告する場合、両側のシークレットが異なります。Gitea を迂回してどちら側が間違っているか特定します。
+
+```bash
+SECRET="<MULTICA_GITEA_WEBHOOK_SECRET に入れた値>"
+BODY='{"zen":"test"}'
+SIG=$(printf '%s' "$BODY" | openssl dgst -sha256 -hmac "$SECRET" -hex | awk '{print $NF}')
+curl -i -X POST https://<api-host>/api/webhooks/gitea \
+  -H "X-Gitea-Signature: $SIG" \
+  -H "X-Gitea-Event: ping" \
+  -H "Content-Type: application/json" \
+  -d "$BODY"
+```
+
+| HTTP ステータス | 意味 | 対処 |
+|---|---|---|
+| `200` `{"ok":"pong"}` | サーバーが読み込んだシークレットが `$SECRET` と一致。不一致は Gitea 側。 | リポジトリ webhook → **Secret** → 同じ値を貼り付け → **Update Webhook**、その後再配信。 |
+| `401 invalid signature` | サーバーが読み込んだシークレットが**思っているものと違う**。 | 環境変数が実行中プロセスに反映されたか確認し、再デプロイ。 |
+| `503 gitea webhooks not configured` | プロセス内で `MULTICA_GITEA_WEBHOOK_SECRET` が空。 | 環境変数を設定し、API を再起動。 |
+
+ヘッダーは `X-Gitea-Signature`、ダイジェストは **raw hex**——`sha256=` プレフィックスなし——であることに注意してください。
+
+## モデル化されないもの
+
+- **コミットメッセージの識別子**——GitHub と同じく、ブランチ / タイトル / 本文のみをスキャンします。
+- **CI / チェック状態、レビュアー、レビューコメント**——ミラーされるのは PR 本体のみです。
+- **手動の PR ↔ イシュー紐づけ**——まだ UI はありません。識別子を PR のブランチ・タイトル・本文に入れてください。
+- **サブパスの Gitea インストール**——帰属はインスタンスホスト（`scheme://host`）でキー付けされます。URL パスセグメント配下で提供される Gitea は現在マッチしません。
+
+## 次に
+
+- [GitHub 連携](/github-integration)——同じ PR ミラーパイプライン、および識別子マッチングと merge → Done の完全な詳細
+- [イシュー](/issues)——PR から参照されるイシュー識別子（`MUL-123`）
+- [ワークスペース](/workspaces)——ワークスペース固有のイシュー接頭辞を設定する場所
+- [環境変数](/environment-variables)——上記の Gitea 変数を含む完全な環境変数リファレンス

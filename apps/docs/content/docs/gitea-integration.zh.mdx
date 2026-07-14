@@ -1,0 +1,160 @@
+---
+title: Gitea 集成
+description: 用个人访问令牌连接自建 Gitea 实例，并把每个仓库的 webhook 指向 Multica——PR 的分支名、标题或正文里写了 issue 编号就会自动挂到那个 issue 上，PR 合并时 issue 自动转 Done。
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+在 **Settings → Integrations** 里连接一个或多个自建 **Gitea** 实例。一个连接由「实例 base URL + 个人访问令牌（PAT）」组成。仓库的 webhook 指向 Multica 之后，任何 PR 只要分支名、标题或正文里出现 issue 编号（例如 `MUL-123`），就会**自动关联**到那个 [issue](/issues)，出现在 issue 详情页右侧的 **Pull requests** 区块里——PR 合并时，issue 自动转 **Done**。
+
+Gitea 是自建的，所以没有 GitHub App 的安装流程。它的模型是 **base URL + PAT + 每仓库一个 webhook**，而 webhook 之后的一切——编号匹配、PR 侧栏、merge → Done——都走 GitHub 用的那套共享流水线。
+
+## 集成做了什么
+
+| 界面 | 行为 |
+|---|---|
+| **Settings → Integrations** | 工作区管理员填入实例 base URL 和一个 PAT 来连接 Gitea。一个工作区可以连**多个**实例。PAT 会先向实例校验，落库时加密，API 永不返回。 |
+| **Issue 侧栏 → Pull requests** | 自动关联到该 issue 的每个 PR，带标题、仓库、状态（`Open` / `Draft` / `Merged` / `Closed`）和作者。点击某一行跳到 Gitea 实例上的 PR。 |
+| **Webhook（后台）** | 每个 `pull_request` 事件到达时，Multica upsert PR 行、扫描 PR 里的 issue 编号、重建关联行。幂等——重放一次投递是 no-op。 |
+| **合并自动转状态** | PR 变为 `merged` 时，每个已关联、且不是 `Done` / `Cancelled` 的 issue 都转为 **Done**。 |
+
+只镜像 PR 本身。提交、没有开 PR 的分支引用、CI 检查状态都**不**建模——和 [GitHub 集成](/github-integration) 一样，是刻意收窄的范围。
+
+## 连接一个 Gitea 实例
+
+在 **Settings → Integrations** 里，owner 或 admin 填入：
+
+| 字段 | 值 |
+|---|---|
+| **Base URL** | 实例的 web 地址，例如 `https://gitea.example.com`。结尾斜杠、query 和 fragment 会被规整掉，所以 `https://gitea.example.com/` 和 `https://gitea.example.com` 是同一个连接。 |
+| **个人访问令牌** | 连接所用账号的 Gitea PAT。在 **Gitea → Settings → Applications → Generate New Token** 里创建。仓库只读权限就够——Multica 从不写回。 |
+
+连接时，Multica 用该令牌调用实例的 `GET /api/v1/user`。这一个调用同时证明 base URL 可达、令牌有效，并返回连接卡片上显示的账号名。失败会给出可操作的错误：
+
+- **base URL 不可达** → `could not reach the Gitea instance at that base URL`。
+- **令牌被拒** → `the personal access token was rejected by the Gitea instance`。
+- **URL 不是 Gitea API** → `the base URL did not respond with a Gitea API payload`。
+
+令牌本身用服务端的 Gitea 加密密钥封存、只写存储——列表和实时响应只带 base URL、账号名和头像，绝不带 PAT。
+
+- **多实例。** 一个工作区可以连多个实例（连接按 `(工作区, base URL)` 唯一）。用同一个 base URL 重新连接会**就地刷新令牌**，而不是新建重复行。
+- **权限。** 连接和断开需要工作区 **owner 或 admin**。列出已有连接对任何成员可见（没有秘密要藏）。
+
+## 配置仓库 webhook
+
+连接实例让 Multica 能**读**它；**webhook** 才是把 PR 事件推进来的东西。给每个要镜像的 Gitea 仓库加一个 webhook（**Repo → Settings → Webhooks → Add Webhook → Gitea**）：
+
+| 字段 | 值 |
+|---|---|
+| **Target URL** | `https://<api-host>/api/webhooks/gitea` |
+| **HTTP Method** | `POST` |
+| **Content Type** | `application/json` |
+| **Secret** | 来自 `MULTICA_GITEA_WEBHOOK_SECRET` 的共享密钥——每个仓库 webhook 都填**同一个值**。 |
+| **Trigger On** | Custom events → 勾选 **Pull Request**。 |
+
+Multica 校验 `X-Gitea-Signature` 头——正文的 raw-hex HMAC-SHA256（注意：没有 `sha256=` 前缀，和 GitHub 不同）。签名错误或缺失的投递被拒 `401 invalid signature`；若服务端未设密钥，端点返回 `503 gitea webhooks not configured`。
+
+<Callout type="info">
+投递按实例 base URL 归属到工作区——Multica 从 payload 的仓库 `html_url` 推出 `scheme://host`，把 PR 镜像进每个连了该实例的工作区。Multica 内部没有 per-repository 选择：给仓库加 webhook 本身就是订阅。
+</Callout>
+
+## 编号如何匹配，以及 merge → Done
+
+webhook 之后，Gitea PR 走的是和 GitHub **同一套**匹配和自动转状态规则——完整细节见 [GitHub 集成 → 编号如何匹配](/github-integration#编号是怎么匹配的)。简言之：
+
+- 编号从 PR 的 **head 分支**、**标题**、**正文** 里提取，大小写不敏感，有边界约束，`v1.2-3` 这类版本串不会误匹配。
+- 只匹配工作区自己的 [issue 前缀](/workspaces)；一个 PR 里的重复编号只关联一次；一个 PR 可以引用多个 issue。
+- PR 的 `merged` 翻为 `true` 时，每个已关联、且不是 `Done` / `Cancelled` 的 issue 转为 **Done**。**不合并**只关闭 PR 只把卡片状态更新为 `Closed`——已关联的 issue 原地不动。
+
+## 多实例与多工作区
+
+Gitea 部署不像 `github.com` 那样是单一全局 host，所以镜像的 PR 行除了 owner / 仓库 / 编号，还额外按实例 host 建键。实际后果：
+
+- 两个不同 Gitea 实例上**同样的** `owner/repo#42` 保持为两个不同的 PR——不冲突。
+- 一个实例连在**多个**工作区里时，每个仓库的 PR 事件独立投递给每个连接的工作区；各自按自己的 issue 前缀匹配、镜像进自己的 issue。
+- 从一个工作区断开某实例，只让**那个**工作区停止接收它的事件。
+
+## clone 侧 vs 镜像侧
+
+两条独立的凭证链路容易混：
+
+- **镜像侧（本页）。** PAT + webhook 密钥让 Multica *读* Gitea 的 PR 状态、把事件推进来。只读；这里不 clone 任何东西。
+- **clone 侧（agent 干活）。** agent 真正 checkout 一个私有 Gitea 仓库去改动时，那次 clone 跑在 **daemon** 的 git 环境里、用 daemon 主机自己的 git 凭证——是完全独立的配置。在 daemon 上配私有仓库 git 鉴权见 [Daemon 与 runtime](/daemon-runtimes) 和你部署的自建说明。
+
+只做 PR 镜像的话，一个连接加 webhook 就够；只有当 agent 要改动那个 Gitea 仓库时，才需要 clone 侧凭证。
+
+## 自建部署配置
+
+如果你跑在 Multica Cloud 上，Gitea 连接管理和 webhook 端点已经可用——直接跳到 [连接一个 Gitea 实例](#连接一个-gitea-实例)。
+
+自建时，设两个环境变量、跑 migration，再从 UI 连接。
+
+### 1. 设置环境变量
+
+在 API 服务器上：
+
+```dotenv
+# 启用 Gitea 连接管理。一个 base64 编码的 32 字节密钥，对每个连接的 PAT
+# 落库加密。生成：openssl rand -base64 32
+MULTICA_GITEA_SECRET_KEY=<base64 32 字节密钥>
+
+# Gitea webhook 签名用的共享 HMAC-SHA256 密钥。和每个指向 /api/webhooks/gitea
+# 的仓库 webhook 的 "Secret" 填同一个值。
+MULTICA_GITEA_WEBHOOK_SECRET=<一个足够长的随机串>
+```
+
+- **`MULTICA_GITEA_SECRET_KEY` 是连接功能的开关。** 未设时，连接 Gitea 实例返回 `503 gitea integration is not configured`，Settings 里的 **Connect Gitea** 入口也保持隐藏。
+- **`MULTICA_GITEA_WEBHOOK_SECRET` 是 webhook 的开关。** 为空时 `/api/webhooks/gitea` 返回 `503 gitea webhooks not configured`，Multica 绝不把「未配置的部署」当作「所有签名都有效」。
+
+设好后重启 API。
+
+### 2. 跑 migration
+
+```bash
+make migrate-up
+```
+
+这会创建 `gitea_connection`（migration `180_gitea_connection`），并给共享的 PR 镜像表加上 `provider` / `base_host` 列（migration `179_git_provider_pr_columns`），让 GitHub 和 Gitea 的 PR 共存。连接表随工作区级联删除。
+
+### 3. 连接并接上 webhook
+
+1. 以 owner 或 admin 打开 **Settings → Integrations**，连接实例（base URL + PAT）。
+2. 给每个 Gitea 仓库加上 [配置仓库 webhook](#配置仓库-webhook) 里描述的 webhook。
+3. 开一个分支 / 标题 / 正文里带 issue 编号的 PR——几秒内该 issue 上就会出现 **Pull requests** 区块。
+
+### 4. 用 curl 探针验证
+
+如果 Gitea 的 webhook 投递页报 `401 invalid signature`，说明两边密钥不一致。绕开 Gitea 判断是哪边错：
+
+```bash
+SECRET="<你填进 MULTICA_GITEA_WEBHOOK_SECRET 的值>"
+BODY='{"zen":"test"}'
+SIG=$(printf '%s' "$BODY" | openssl dgst -sha256 -hmac "$SECRET" -hex | awk '{print $NF}')
+curl -i -X POST https://<api-host>/api/webhooks/gitea \
+  -H "X-Gitea-Signature: $SIG" \
+  -H "X-Gitea-Event: ping" \
+  -H "Content-Type: application/json" \
+  -d "$BODY"
+```
+
+| HTTP 状态 | 含义 | 修 |
+|---|---|---|
+| `200` `{"ok":"pong"}` | 服务端加载的密钥和你的 `$SECRET` 一致。错在 Gitea 那边。 | 编辑仓库 webhook → **Secret** → 粘同一个值 → **Update Webhook**，然后重投。 |
+| `401 invalid signature` | 服务端加载的密钥**不是**你以为的那个。 | 确认环境变量确实进了运行进程，然后重新部署。 |
+| `503 gitea webhooks not configured` | 进程里 `MULTICA_GITEA_WEBHOOK_SECRET` 为空。 | 设好环境变量并重启 API。 |
+
+注意头是 `X-Gitea-Signature`，摘要是 **raw hex**——没有 `sha256=` 前缀。
+
+## 哪些不建模
+
+- **提交信息里的编号**——只扫分支 / 标题 / 正文，和 GitHub 一样。
+- **CI / 检查状态、审阅人、审阅评论**——只镜像 PR 本身。
+- **手动 PR ↔ issue 关联**——暂无 UI；把编号写进 PR 分支、标题或正文。
+- **子路径 Gitea 安装**——归属按实例 host（`scheme://host`）建键。挂在 URL 路径段下的 Gitea 目前不匹配。
+
+## 下一步
+
+- [GitHub 集成](/github-integration)——同一套 PR 镜像流水线，以及编号匹配和 merge → Done 的完整细节
+- [Issues](/issues)——PR 里引用的 issue 编号（`MUL-123`）
+- [工作区](/workspaces)——工作区专属 issue 前缀在哪里设
+- [环境变量](/environment-variables)——完整环境变量参考，含上面的 Gitea 变量

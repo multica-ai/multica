@@ -1,0 +1,160 @@
+---
+title: Gitea 연동
+description: 자체 호스팅 Gitea 인스턴스를 개인 액세스 토큰으로 연결하고 각 저장소의 webhook을 Multica로 향하게 하면, 브랜치·제목·본문에 이슈 식별자가 들어간 PR이 해당 이슈에 자동으로 연결되고 PR을 머지하면 이슈가 완료로 이동합니다.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+**설정 → Integrations**에서 하나 이상의 자체 호스팅 **Gitea** 인스턴스를 연결하세요. 연결은 "인스턴스 base URL + 개인 액세스 토큰(PAT)"으로 구성됩니다. 저장소의 webhook을 Multica로 향하게 하면, 브랜치 이름·제목·본문에 이슈 식별자(예: `MUL-123`)가 들어 있는 모든 pull request가 해당 [이슈](/issues)에 **자동으로 연결**되고, 이슈 사이드바의 **Pull requests** 아래에 표시되며, PR이 머지되면 이슈가 **완료**로 이동합니다.
+
+Gitea는 자체 호스팅이므로 GitHub App 설치 흐름이 없습니다. 모델은 **base URL + PAT + 저장소별 webhook**이며, webhook 이후의 모든 것 — 식별자 매칭, PR 사이드바, 머지 → 완료 — 은 GitHub이 사용하는 것과 동일한 공유 파이프라인을 거칩니다.
+
+## 연동이 하는 일
+
+| 화면 | 동작 |
+|---|---|
+| **설정 → Integrations** | 워크스페이스 admin이 base URL과 PAT를 입력해 Gitea 인스턴스를 연결합니다. 한 워크스페이스에서 **여러** 인스턴스를 연결할 수 있습니다. PAT는 인스턴스에 대해 검증되고, 저장 시 암호화되며, API가 반환하지 않습니다. |
+| **이슈 사이드바 → Pull requests** | 이 이슈에 자동 연결된 모든 PR이 제목, 저장소, 상태(`Open` / `Draft` / `Merged` / `Closed`), 작성자와 함께 표시됩니다. 행을 클릭하면 Gitea 인스턴스의 해당 PR로 이동합니다. |
+| **Webhook(백그라운드)** | 각 `pull_request` 이벤트마다 Multica는 PR 행을 upsert하고, PR에서 이슈 식별자를 스캔하며, 연결 행을 재구성합니다. 멱등적입니다 — 배달을 재전송해도 no-op입니다. |
+| **머지 시 상태 자동 변경** | PR이 `merged`로 전환되면, 아직 `Done`이나 `Cancelled`가 아닌 모든 연결된 이슈가 **완료**로 이동합니다. |
+
+미러링되는 것은 PR 자체뿐입니다. 커밋, 오픈 PR이 없는 브랜치 참조, CI 체크 상태는 **모델링되지 않습니다** — [GitHub 연동](/github-integration)과 마찬가지로 의도적으로 좁은 범위입니다.
+
+## Gitea 인스턴스 연결하기
+
+**설정 → Integrations**에서 owner 또는 admin이 다음을 입력합니다.
+
+| 필드 | 값 |
+|---|---|
+| **Base URL** | 인스턴스 웹 주소. 예: `https://gitea.example.com`. 끝의 슬래시와 query / fragment는 정규화되므로 `https://gitea.example.com/`과 `https://gitea.example.com`은 동일한 연결입니다. |
+| **개인 액세스 토큰** | 연결이 사용하는 계정의 Gitea PAT. **Gitea → Settings → Applications → Generate New Token**에서 생성합니다. 저장소 읽기 전용 스코프면 충분합니다 — Multica는 되쓰지 않습니다. |
+
+연결 시 Multica는 그 토큰으로 인스턴스의 `GET /api/v1/user`를 호출합니다. 이 한 번의 호출로 base URL 도달 가능 여부와 토큰 유효성을 모두 확인하고, 연결 카드에 표시할 계정 로그인을 가져옵니다. 실패는 조치 가능한 오류로 표시됩니다.
+
+- **base URL 도달 불가** → `could not reach the Gitea instance at that base URL`.
+- **토큰 거부됨** → `the personal access token was rejected by the Gitea instance`.
+- **Gitea API가 아닌 URL** → `the base URL did not respond with a Gitea API payload`.
+
+토큰 자체는 서버의 Gitea 암호화 키로 봉인되어 쓰기 전용으로 저장됩니다 — 목록과 실시간 응답은 base URL, 계정 로그인, 아바타만 담고 PAT는 절대 포함하지 않습니다.
+
+- **여러 인스턴스.** 한 워크스페이스에서 여러 인스턴스를 연결할 수 있습니다(연결은 `(워크스페이스, base URL)`별로 고유). 같은 base URL로 다시 연결하면 중복 행을 만들지 않고 **토큰을 그 자리에서 갱신**합니다.
+- **권한.** 연결과 해제는 워크스페이스 **owner 또는 admin**이 필요합니다. 기존 연결 목록 조회는 모든 멤버에게 보입니다(숨길 비밀이 없기 때문).
+
+## 저장소 webhook 설정하기
+
+인스턴스를 연결하면 Multica가 그것을 **읽을** 수 있게 됩니다. PR 이벤트를 밀어 넣는 것은 **webhook**입니다. 미러링하려는 각 Gitea 저장소에 webhook을 추가하세요(**Repo → Settings → Webhooks → Add Webhook → Gitea**).
+
+| 필드 | 값 |
+|---|---|
+| **Target URL** | `https://<api-host>/api/webhooks/gitea` |
+| **HTTP Method** | `POST` |
+| **Content Type** | `application/json` |
+| **Secret** | `MULTICA_GITEA_WEBHOOK_SECRET`의 공유 시크릿 — 모든 저장소 webhook에 **동일한 값**. |
+| **Trigger On** | Custom events → **Pull Request** 체크. |
+
+Multica는 `X-Gitea-Signature` 헤더 — 본문의 raw-hex HMAC-SHA256(주의: GitHub과 달리 `sha256=` 접두사 없음) — 를 검증합니다. 서명이 잘못되었거나 누락된 배달은 `401 invalid signature`로 거부됩니다. 서버 측에서 시크릿이 설정되지 않았으면 엔드포인트는 `503 gitea webhooks not configured`를 반환합니다.
+
+<Callout type="info">
+배달은 인스턴스의 base URL로 워크스페이스에 귀속됩니다 — Multica는 payload의 저장소 `html_url`에서 `scheme://host`를 도출해, 그 인스턴스에 연결된 모든 워크스페이스로 PR을 미러링합니다. Multica 내부에 저장소별 선택은 없습니다. 저장소에 webhook을 추가하는 것 자체가 구독입니다.
+</Callout>
+
+## 식별자 매칭과 머지 → 완료
+
+webhook 이후, Gitea PR은 GitHub과 **동일한** 매처 및 자동 상태 규칙을 거칩니다 — 전체 상세는 [GitHub 연동 → 식별자 매칭 방식](/github-integration#식별자-매칭-방식)을 참조하세요. 요약하면:
+
+- 식별자는 PR의 **head 브랜치**, **제목**, **본문**에서 대소문자 구분 없이 추출되며, `v1.2-3` 같은 버전 문자열에 잘못 매칭되지 않도록 경계가 있습니다.
+- 워크스페이스 고유의 [이슈 prefix](/workspaces)에만 매칭됩니다. 한 PR 내 중복은 이슈를 한 번만 연결하고, 하나의 PR이 여러 이슈를 참조할 수 있습니다.
+- PR의 `merged`가 `true`로 바뀌면, 아직 `Done`이나 `Cancelled`가 아닌 모든 연결된 이슈가 **완료**로 이동합니다. 머지 **없이** PR을 닫으면 카드 상태만 `Closed`로 바뀌고 — 연결된 이슈는 그대로 유지됩니다.
+
+## 여러 인스턴스와 여러 워크스페이스
+
+Gitea 배포는 `github.com`처럼 단일 글로벌 호스트가 아니므로, 미러링된 PR 행은 owner / 저장소 / 번호에 더해 인스턴스 호스트로 키가 지정됩니다. 실질적인 결과:
+
+- 서로 다른 두 Gitea 인스턴스의 **동일한** `owner/repo#42`는 두 개의 별개 PR로 유지되며 — 충돌하지 않습니다.
+- 한 인스턴스가 **여러** 워크스페이스에 연결되어 있으면, 각 저장소의 PR 이벤트가 연결된 각 워크스페이스로 독립적으로 배달되고, 각자 자신의 이슈 prefix로 매칭해 자신의 이슈로 미러링합니다.
+- 한 워크스페이스에서 인스턴스를 해제해도 **그 워크스페이스**만 이벤트 수신을 멈춥니다.
+
+## clone 측 vs 미러 측
+
+혼동하기 쉬운 두 개의 독립적인 자격 증명 경로가 있습니다.
+
+- **미러 측(이 페이지).** PAT + webhook 시크릿은 Multica가 Gitea의 PR 상태를 *읽고* 이벤트를 밀어 넣게 합니다. 읽기 전용이며, 여기서는 아무것도 clone하지 않습니다.
+- **clone 측(에이전트 작업).** 에이전트가 실제로 비공개 Gitea 저장소를 checkout해 작업할 때, 그 clone은 **daemon**의 git 환경에서 실행되며 daemon 호스트 자체의 git 자격 증명을 사용합니다 — 완전히 별개의 설정입니다. daemon에서 비공개 저장소 git 인증을 구성하는 방법은 [Daemon과 runtime](/daemon-runtimes) 및 배포의 자체 호스팅 노트를 참조하세요.
+
+PR 미러링에는 연결과 webhook만으로 충분합니다. clone 측 자격 증명은 에이전트가 그 Gitea 저장소를 편집할 때에만 필요합니다.
+
+## 자체 호스팅 설정
+
+Multica Cloud에서 운영 중이라면 Gitea 연결 관리와 webhook 엔드포인트가 이미 사용 가능합니다 — [Gitea 인스턴스 연결하기](#gitea-인스턴스-연결하기)로 건너뛰세요.
+
+자체 호스팅에서는 환경 변수 두 개를 설정하고, migration을 실행한 뒤, UI에서 연결합니다.
+
+### 1. 환경 변수 설정
+
+API 서버에서:
+
+```dotenv
+# Gitea 연결 관리를 활성화합니다. 각 연결의 PAT를 저장 시 암호화하는
+# base64 인코딩된 32바이트 키. 생성: openssl rand -base64 32
+MULTICA_GITEA_SECRET_KEY=<base64 32바이트 키>
+
+# Gitea webhook 서명용 공유 HMAC-SHA256 시크릿. /api/webhooks/gitea를 가리키는
+# 각 저장소 webhook의 "Secret"과 동일한 값을 사용합니다.
+MULTICA_GITEA_WEBHOOK_SECRET=<충분히 긴 랜덤 문자열>
+```
+
+- **`MULTICA_GITEA_SECRET_KEY`는 연결 기능의 스위치입니다.** 설정하기 전까지 Gitea 인스턴스 연결은 `503 gitea integration is not configured`를 반환하고, 설정의 **Connect Gitea** 진입점은 숨겨진 채로 유지됩니다.
+- **`MULTICA_GITEA_WEBHOOK_SECRET`는 webhook의 스위치입니다.** 비어 있으면 `/api/webhooks/gitea`가 `503 gitea webhooks not configured`를 반환하며, Multica는 "설정되지 않은 배포"를 "모든 서명이 유효함"으로 취급하지 않습니다.
+
+설정 후 API를 재시작하세요.
+
+### 2. migration 실행
+
+```bash
+make migrate-up
+```
+
+이것은 `gitea_connection`(migration `180_gitea_connection`)을 생성하고, 공유 PR 미러 테이블에 `provider` / `base_host` 열을 추가해(migration `179_git_provider_pr_columns`) GitHub과 Gitea의 PR이 공존하게 합니다. 연결 테이블은 워크스페이스와 함께 cascade 삭제됩니다.
+
+### 3. 연결하고 webhook 연결하기
+
+1. owner 또는 admin으로 **설정 → Integrations**를 열고 인스턴스를 연결합니다(base URL + PAT).
+2. 각 Gitea 저장소에 [저장소 webhook 설정하기](#저장소-webhook-설정하기)에서 설명한 webhook을 추가합니다.
+3. 브랜치 / 제목 / 본문에 이슈 식별자가 들어간 PR을 엽니다 — 몇 초 안에 그 이슈에 **Pull requests** 블록이 나타납니다.
+
+### 4. curl 프로브로 검증
+
+Gitea의 webhook 배달 페이지가 `401 invalid signature`를 보고하면 양측 시크릿이 다릅니다. Gitea를 우회해 어느 쪽이 틀렸는지 확인하세요.
+
+```bash
+SECRET="<MULTICA_GITEA_WEBHOOK_SECRET에 넣은 값>"
+BODY='{"zen":"test"}'
+SIG=$(printf '%s' "$BODY" | openssl dgst -sha256 -hmac "$SECRET" -hex | awk '{print $NF}')
+curl -i -X POST https://<api-host>/api/webhooks/gitea \
+  -H "X-Gitea-Signature: $SIG" \
+  -H "X-Gitea-Event: ping" \
+  -H "Content-Type: application/json" \
+  -d "$BODY"
+```
+
+| HTTP 상태 | 의미 | 해결 |
+|---|---|---|
+| `200` `{"ok":"pong"}` | 서버가 로드한 시크릿이 `$SECRET`과 일치. 불일치는 Gitea 측. | 저장소 webhook → **Secret** → 같은 값 붙여넣기 → **Update Webhook**, 그 후 재배달. |
+| `401 invalid signature` | 서버가 로드한 시크릿이 **생각과 다름**. | 환경 변수가 실행 중 프로세스에 반영됐는지 확인 후 재배포. |
+| `503 gitea webhooks not configured` | 프로세스에서 `MULTICA_GITEA_WEBHOOK_SECRET`이 비어 있음. | 환경 변수를 설정하고 API를 재시작. |
+
+헤더는 `X-Gitea-Signature`이고 다이제스트는 **raw hex** — `sha256=` 접두사 없음 — 임에 유의하세요.
+
+## 모델링되지 않는 것
+
+- **커밋 메시지의 식별자** — GitHub과 마찬가지로 브랜치 / 제목 / 본문만 스캔합니다.
+- **CI / 체크 상태, 리뷰어, 리뷰 코멘트** — PR 자체만 미러링됩니다.
+- **수동 PR ↔ 이슈 연결** — 아직 UI가 없습니다. 식별자를 PR 브랜치, 제목 또는 본문에 넣으세요.
+- **서브패스 Gitea 설치** — 귀속은 인스턴스 호스트(`scheme://host`)로 키가 지정됩니다. URL 경로 세그먼트 아래에서 제공되는 Gitea는 현재 매칭되지 않습니다.
+
+## 다음
+
+- [GitHub 연동](/github-integration) — 동일한 PR 미러 파이프라인, 그리고 식별자 매칭과 머지 → 완료의 전체 상세
+- [이슈](/issues) — PR에서 참조되는 이슈 식별자(`MUL-123`)
+- [워크스페이스](/workspaces) — 워크스페이스별 이슈 prefix를 설정하는 곳
+- [환경 변수](/environment-variables) — 위의 Gitea 변수를 포함한 전체 환경 변수 레퍼런스
