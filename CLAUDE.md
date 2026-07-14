@@ -354,7 +354,7 @@ When using browser automation (blueprint, claude-in-chrome, etc.) to verify UI f
 
 1. Read the current URL via `browser_status` / `browser_tabs list` / a screenshot.
 2. If it points at a tunnel, production host, or any non-`localhost` origin, you are testing **someone else's deployment**, not your branch. Examples that LOOK local but aren't:
-   - `Sara.firtal.com` → Firtal **staging** (sara.local mac mini, runs `origin/main`)
+   - `cerebro.firtal.com` → Firtal **staging** (Sliplane containers, runs `origin/main`)
    - `Multica.firtal.com` → Firtal **production** (Sliplane containers, runs `origin/production`)
    - `sara.tailbde0.ts.net/...` → also Firtal staging (tailscale alias for the same mac mini)
    - any tailscale `.ts.net` host → another machine
@@ -472,14 +472,14 @@ pnpm exec playwright test   # E2E only (requires backend + frontend running)
 
 | Branch | Environment | URL | Platform |
 |---|---|---|---|
-| `main` | Staging | `https://Sara.firtal.com` | Mac mini (sara.local, launchd) |
+| `main` | Staging | `https://cerebro.firtal.com` | Sliplane (Docker containers) |
 | `production` | Production | `https://Multica.firtal.com` | Sliplane (Docker containers) |
 
-**Staging** runs on a self-hosted Mac mini at `/Users/sara/code/firtal-cerebro`. Backend, frontend, and daemon each run as a launchd job (`com.multica.backend`, `com.multica.frontend`, `com.multica.daemon`). It tracks `origin/main` and updates automatically on each push.
+**Staging** runs on Sliplane as Docker containers (`multica-staging-web`, `multica-staging-backend`, plus its own Postgres and a Cloudflare tunnel), built from `Dockerfile.web` and `Dockerfile`. It tracks `origin/main` and rebuilds on each push.
 
 **Production** runs on Sliplane as Docker containers built from `Dockerfile.web` (frontend) and `Dockerfile` (backend). It tracks `origin/production` and rebuilds on each push to that branch.
 
-**Gate rules for merge → live: see the `deploy` skill, section "Gate rules".** Summary: `main` (staging, `Sara.firtal.com`) merges itself when CI is green AND the change is reversible; only irreversible changes (destructive DB migrations, infra-mutations, prod-data) need approval before merge. `production` (prod, `Multica.firtal.com`) is a separate gated promotion — see the deploy-review flow below. This CLAUDE.md does not restate the rule so the two versions can't drift; the deploy skill is the single source of truth.
+**Gate rules for merge → live: see the `deploy` skill, section "Gate rules".** Summary: `main` (staging, `cerebro.firtal.com`) merges itself when CI is green AND the change is reversible; only irreversible changes (destructive DB migrations, infra-mutations, prod-data) need approval before merge. `production` (prod, `Multica.firtal.com`) is a separate gated promotion — see the deploy-review flow below. This CLAUDE.md does not restate the rule so the two versions can't drift; the deploy skill is the single source of truth.
 
 End-to-end:
 
@@ -500,7 +500,7 @@ bash ~/code/firtal-cerebro/.deploy/deploy.sh
 
 Logs land in `.deploy/logs/deploy-latest.log` on the runner.
 
-**Verifying a deploy from outside the runner.** Check `https://Multica.firtal.com` for production (Sliplane containers) or `https://Sara.firtal.com` for staging (mac mini). The server exposes a `/version` endpoint (commit SHA) for programmatic verification.
+**Verifying a deploy from outside the runner.** Check `https://Multica.firtal.com` for production (Sliplane containers) or `https://cerebro.firtal.com` for staging (Sliplane). The server exposes a `/version` endpoint (commit SHA) for programmatic verification.
 
 **Important — CLI release is NOT a prod deploy.** Cutting a `v0.x.y` tag only publishes binaries to GitHub Releases + Homebrew. It does NOT push code to `Multica.firtal.com`. Prod always runs `origin/production`, regardless of the latest CLI tag. The two pipelines are fully independent.
 

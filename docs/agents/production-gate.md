@@ -11,7 +11,7 @@ the PR:
 - **`prod-ready`** — this change is ready to be promoted to production
   (`Multica.firtal.com`). The deploy scanner in `firtal-data-registry` will
   raise (or extend) a `deploy_review` wave when the commit lands on `main`.
-- **`staging-only`** — this change is for staging only (`Sara.firtal.com`).
+- **`staging-only`** — this change is for staging only (`cerebro.firtal.com`).
   Common reasons: work-in-progress, an experiment, a one-off probe, anything
   you do NOT want a reviewer to consider promoting today. No `deploy_review`
   is raised.
@@ -48,7 +48,7 @@ set the label.
 
 ## Why this exists
 
-`main` is staging (`Sara.firtal.com`). Anything that lands there goes live
+`main` is staging (`cerebro.firtal.com`). Anything that lands there goes live
 in staging immediately — that is the design and the reason agents are free to
 merge to `main` without prior human approval. `production` (`Multica.firtal.com`)
 is a separate gated promotion, behind a human-reviewed `deploy_review`.

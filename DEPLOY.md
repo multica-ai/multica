@@ -4,11 +4,11 @@
 
 | Miljø | URL | Gren | Platform |
 |---|---|---|---|
-| Staging | `https://Sara.firtal.com` | `main` | Mac mini (sara.local, launchd) |
+| Staging | `https://cerebro.firtal.com` | `main` | Sliplane (Docker-containers) |
 | Produktion | `https://Multica.firtal.com` | `production` | Sliplane (Docker-containers) |
 | Lokal dev | `http://localhost:3000` | din branch | — |
 
-- **`main`** deployer løbende til staging (`Sara.firtal.com`) via webhook på sara-serveren.
+- **`main`** deployer løbende til staging (`cerebro.firtal.com`) via Sliplane — bygger automatisk ved push.
 - **`production`** deployer til produktion (`Multica.firtal.com`) via Sliplane — kræver godkendt release-issue.
 
 ## Hvad der trigger et deploy
@@ -21,7 +21,7 @@ Det automatiske flow (`auto-deploy-trigger` autopilot) opretter release-issuet f
 
 ## Deploy-flowet — trin for trin
 
-1. PR flettes til `main` (sker løbende, hele dagen). Staging (`Sara.firtal.com`) opdateres automatisk.
+1. PR flettes til `main` (sker løbende, hele dagen). Staging (`cerebro.firtal.com`) opdateres automatisk.
 2. `auto-deploy-trigger`-autopiloten fyrer (GitHub-webhook ind i Multica, med en planlagt fallback der hver X. minut sammenligner `main` mod `production`). Den slår appen op i `registry.firtal.com`, kører `release-review`-tjeklisten på diffen `main..production`, og opretter ÉT release-issue i Deployments-projektet (`ecb4fb83-0995-48a5-97d2-3adce73aa800`) pr. ventende udgivelses-vindue. Næste push på samme vindue opdaterer SAMME issue (idempotent på repo + main-head-sha) — 5 PR'er på 10 min = 1 godkendelse, ikke 5.
 3. App-ejeren (eller Jesper) kommenterer `approve` + tagger agenten på release-issuet. Agenten fletter den stående `main → production`-PR via GitHub-API'en.
 4. Push til `origin/production` trigger Sliplane til at bygge nye Docker-containers og deploye til `Multica.firtal.com`.
@@ -52,9 +52,9 @@ Hver PR til `main` skal have ÉT af to labels: `staging-only` eller `prod-ready`
 
 ## Verificering efter deploy
 
-**Staging (`main` → `Sara.firtal.com`):**
-1. Åbn `https://Sara.firtal.com` og tjek at appen loader
-2. Tjek `.deploy/logs/deploy-latest.log` på sara-serveren for fejl
+**Staging (`main` → `cerebro.firtal.com`):**
+1. Åbn `https://cerebro.firtal.com` og tjek at appen loader
+2. Tjek Sliplane's deploy-log for fejl (projektet "Multica Staging")
 
 **Produktion (`production` → `Multica.firtal.com`):**
 1. Åbn `https://Multica.firtal.com` og tjek at appen loader
@@ -69,30 +69,21 @@ Brug denne rækkefølge, hvis en ændring fejler efter deploy:
 3. Revert ellers ændringen på `production`-grenen og lad Sliplane deploye den tidligere version igen.
 4. Hvis den nye container ikke starter, vælg den seneste fungerende deployment i Sliplane-dashboardet, og verificér derefter `https://Multica.firtal.com` samt Sliplane-loggen.
 
-## Launchd-jobs (staging — på sara-serveren)
+## Staging-services (Sliplane — projektet "Multica Staging")
 
-Disse jobs kører staging-miljøet (`Sara.firtal.com`) fra `main`-grenen:
+Disse containere kører staging-miljøet (`cerebro.firtal.com`) fra `main`-grenen:
 
-- `com.multica.frontend` — Next.js web-app
-- `com.multica.backend` — Go API-server
-- `com.multica.daemon` — Multica daemon
-- `com.multica.webhook` — GitHub webhook-receiver (lytter på push til `main`)
+- `multica-staging-web` — Next.js web-app (`Dockerfile.web`)
+- `multica-staging-backend` — Go API-server (`Dockerfile`)
+- `multica-staging-postgres` — staging-database
+- `multica-staging-cloudflared` — Cloudflare-tunnel
 
-Manuel genstart:
-```bash
-launchctl kickstart -k gui/$(id -u)/com.multica.frontend
-```
+Web og backend har autoDeploy på `main`: et push bygger og udruller automatisk.
 
 ## Manuel fallback (staging)
 
-Hvis webhook-listeneren ikke fyrer eller serveren har været offline:
-
-```bash
-ssh sara@<runner-host>
-bash ~/code/firtal-cerebro/.deploy/deploy.sh
-```
-
-Det henter `origin/main` (staging) og kører hele deploy-flowet manuelt.
+Hvis en automatisk bygning ikke fyrer, trigges et nyt deploy fra Sliplane-dashboardet
+på den pågældende service (projektet "Multica Staging").
 
 ## Changelog
 

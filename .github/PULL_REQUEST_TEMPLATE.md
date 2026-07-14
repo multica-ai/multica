@@ -17,7 +17,7 @@ Closes #
   See docs/agents/production-gate.md for the full rule.
 
   - `prod-ready`   → ready to be promoted to Multica.firtal.com (raises a deploy_review)
-  - `staging-only` → for Sara.firtal.com only (WIP / experiment / probe; no deploy_review)
+  - `staging-only` → for cerebro.firtal.com only (WIP / experiment / probe; no deploy_review)
 
   If neither label is set the scanner defaults to skip — same effect as
   `staging-only`, but the intent is unclear. Tick the box that matches the
@@ -25,7 +25,7 @@ Closes #
 -->
 
 - [ ] `prod-ready` — promote to `Multica.firtal.com`
-- [ ] `staging-only` — `Sara.firtal.com` only (no production review)
+- [ ] `staging-only` — `cerebro.firtal.com` only (no production review)
 
 ## Type of Change
 
