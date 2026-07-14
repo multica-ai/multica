@@ -1,4 +1,3 @@
-DROP INDEX IF EXISTS idx_issue_properties_gin;
 ALTER TABLE issue DROP CONSTRAINT IF EXISTS issue_properties_size_limit;
 ALTER TABLE issue DROP CONSTRAINT IF EXISTS issue_properties_is_object;
 ALTER TABLE issue DROP COLUMN IF EXISTS properties;

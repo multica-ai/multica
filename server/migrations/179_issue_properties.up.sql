@@ -36,4 +36,7 @@ ALTER TABLE issue ADD CONSTRAINT issue_properties_is_object
 -- than metadata primitives, but the bag is still bounded by the definition cap.
 ALTER TABLE issue ADD CONSTRAINT issue_properties_size_limit
     CHECK (pg_column_size(properties) <= 16384);
-CREATE INDEX idx_issue_properties_gin ON issue USING GIN (properties jsonb_path_ops);
+-- The GIN index on issue.properties lives in the follow-up migration
+-- (180_issue_properties_gin_index): CREATE INDEX CONCURRENTLY cannot share a
+-- migration with other statements, and a plain CREATE INDEX would lock writes
+-- on the hot issue table for the duration of the build.
