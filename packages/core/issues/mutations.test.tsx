@@ -140,6 +140,7 @@ describe("useLoadMoreByStatus", () => {
     });
 
     expect(listIssues).toHaveBeenCalledWith({
+      workspace_id: WS_ID,
       status: "todo",
       limit: 50,
       offset: 1,
@@ -225,6 +226,7 @@ describe("useLoadMoreByStatus", () => {
     });
 
     expect(listIssues).toHaveBeenCalledWith({
+      workspace_id: WS_ID,
       status: "in_progress",
       limit: 50,
       offset: 1,
@@ -369,6 +371,7 @@ describe("useLoadMoreByAssigneeGroup", () => {
     });
 
     expect(listGroupedIssues).toHaveBeenCalledWith({
+      workspace_id: WS_ID,
       group_by: "assignee",
       limit: 50,
       offset: 1,

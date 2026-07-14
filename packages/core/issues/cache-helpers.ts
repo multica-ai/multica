@@ -44,7 +44,7 @@ export function addIssueToBuckets(
   const bucket = getBucket(resp, issue.status);
   if (bucket.issues.some((i) => i.id === issue.id)) return resp;
   return setBucket(resp, issue.status, {
-    issues: [...bucket.issues, issue],
+    issues: insertByPosition(bucket.issues, issue),
     total: bucket.total + 1,
   });
 }
