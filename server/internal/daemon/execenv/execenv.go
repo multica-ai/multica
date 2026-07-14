@@ -64,7 +64,20 @@ type PrepareParams struct {
 	// substituted. Used by the local_directory project_resource flow
 	// (MUL-2663). When set, the envRoot/workdir directory is not created.
 	LocalWorkDir string
-	Task         TaskContextForEnv // context data for writing files
+	// HermesSourceHome is the shared Hermes home the per-task overlay is seeded
+	// from — resolved by the daemon via execenv.ResolveHermesProfile so it honors
+	// the agent's custom_env HERMES_HOME and any -p/--profile or sticky selection.
+	// Only used for the hermes provider; empty falls back to the platform default.
+	HermesSourceHome string
+	// HermesSourceMustExist fails the overlay build closed when HermesSourceHome
+	// is absent — set when an explicit named profile was requested so a typo
+	// doesn't silently seed from an empty home and drop the user's auth/config.
+	HermesSourceMustExist bool
+	// HermesEnv is the sanitized effective env (agent custom_env minus the daemon
+	// blocklisted keys) used to expand ${VAR} in Hermes external_dirs so it
+	// matches what the Hermes child process actually sees. Only used for hermes.
+	HermesEnv map[string]string
+	Task      TaskContextForEnv // context data for writing files
 }
 
 // TaskContextForEnv is the subset of task context used for writing context files.
@@ -179,6 +192,16 @@ type Environment struct {
 	// exports this as CURSOR_DATA_DIR so project-level MCP approvals are
 	// isolated from the user's persistent ~/.cursor/projects state.
 	CursorDataDir string
+	// HermesHome is the path to the per-task HERMES_HOME overlay (set only for
+	// the hermes provider, and only when the agent has skills bound — empty
+	// otherwise, leaving the user's real home in place). It mirrors ~/.hermes/
+	// via symlink, derives a config.yaml that references the user's real skills
+	// as an external root, and holds the bound skills in its skills/ subdir. The
+	// daemon exports it as HERMES_HOME so the hermes CLI discovers those skills
+	// natively — Hermes has no workspace-relative discovery, so the previous
+	// .agent_context/skills/ fallback was never read (issue #5242). See
+	// hermes_home.go.
+	HermesHome string
 
 	logger *slog.Logger // for cleanup logging
 }
@@ -274,6 +297,20 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 		env.CodexHome = codexHome
 	}
 
+	// For Hermes, redirect HERMES_HOME to a per-task compatibility overlay ONLY
+	// when the agent has skills bound. A skill-less Hermes task keeps the user's
+	// real home and its original behavior untouched. The overlay makes the bound
+	// skills visible — Hermes discovers skills only from its home, so the old
+	// .agent_context/skills/ fallback was never read (issue #5242). See
+	// hermes_home.go.
+	if params.Provider == "hermes" && len(params.Task.AgentSkills) > 0 {
+		hermesHome := filepath.Join(envRoot, "hermes-home")
+		if err := prepareHermesHome(hermesHome, params.HermesSourceHome, params.HermesSourceMustExist, params.Task.AgentSkills, params.HermesEnv, logger); err != nil {
+			return nil, fmt.Errorf("execenv: prepare hermes-home: %w", err)
+		}
+		env.HermesHome = hermesHome
+	}
+
 	// For Cursor, materialize managed MCP into project-local config and use
 	// an isolated CURSOR_DATA_DIR for the per-workdir approval sidecar. Cursor
 	// still reads ~/.cursor/mcp.json, but only servers with approval entries in
@@ -343,7 +380,13 @@ type ReuseParams struct {
 	// loop) keep the "never delete the user's directory" invariant on
 	// reuse paths.
 	LocalDirectory bool
-	Task           TaskContextForEnv // refreshed context files / skills
+	// HermesSourceHome and HermesEnv mirror PrepareParams on reuse so the Hermes
+	// overlay re-derives against the agent's current source home / profile and
+	// external_dirs vars.
+	HermesSourceHome      string
+	HermesSourceMustExist bool
+	HermesEnv             map[string]string
+	Task                  TaskContextForEnv // refreshed context files / skills
 }
 
 // Reuse wraps an existing workdir into an Environment and refreshes context files.
@@ -444,6 +487,32 @@ func Reuse(params ReuseParams, logger *slog.Logger) *Environment {
 			env.CodexHome = codexHome
 			if err := hydrateCodexSkills(codexHome, params.Task.AgentSkills, logger); err != nil {
 				logger.Warn("execenv: refresh codex skills failed", "error", err)
+			}
+		}
+	}
+
+	// Refresh (or tear down) the per-task HERMES_HOME on reuse. With skills
+	// bound, rebuild the overlay so an added/removed/edited skill and the
+	// mirrored home/config track the user's current ~/.hermes/ before the next
+	// hermes process starts. With no skills bound, drop the redirect entirely so
+	// the task reverts to the user's real home — matching a fresh Prepare for a
+	// skill-less agent.
+	if params.Provider == "hermes" && env.RootDir != "" {
+		hermesHome := filepath.Join(env.RootDir, "hermes-home")
+		if len(params.Task.AgentSkills) > 0 {
+			if err := prepareHermesHome(hermesHome, params.HermesSourceHome, params.HermesSourceMustExist, params.Task.AgentSkills, params.HermesEnv, logger); err != nil {
+				// Fail closed: a half-built overlay must not run. Returning nil
+				// makes the daemon fall back to a fresh Prepare, whose error
+				// then blocks dispatch rather than silently dropping the bound
+				// skill.
+				logger.Warn("execenv: refresh hermes-home failed; forcing fresh prepare", "error", err)
+				return nil
+			}
+			env.HermesHome = hermesHome
+		} else {
+			env.HermesHome = ""
+			if err := os.RemoveAll(hermesHome); err != nil {
+				logger.Warn("execenv: remove stale hermes-home failed", "error", err)
 			}
 		}
 	}

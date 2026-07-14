@@ -1,30 +1,17 @@
 "use client";
 
-import { useState } from "react";
 import { CalendarDays } from "lucide-react";
 import type { UpdateIssueRequest } from "@multica/core/types";
-import {
-  toDateOnly,
-  dateOnlyToLocalDate,
-  formatDateOnly,
-  isPastDateOnly,
-} from "@multica/core/issues/date";
-import { Calendar } from "@multica/ui/components/ui/calendar";
-import {
-  Popover,
-  PopoverTrigger,
-  PopoverContent,
-} from "@multica/ui/components/ui/popover";
-import { Button } from "@multica/ui/components/ui/button";
+import { DateOnlyPicker } from "../../../common/date-only-picker";
 import { useT } from "../../../i18n";
 
 export function DueDatePicker({
   dueDate,
   onUpdate,
-  trigger: customTrigger,
+  trigger,
   triggerRender,
-  open: controlledOpen,
-  onOpenChange: controlledOnOpenChange,
+  open,
+  onOpenChange,
   align = "start",
   defaultOpen = false,
 }: {
@@ -40,56 +27,20 @@ export function DueDatePicker({
   defaultOpen?: boolean;
 }) {
   const { t } = useT("issues");
-  const [internalOpen, setInternalOpen] = useState(defaultOpen);
-  const open = controlledOpen ?? internalOpen;
-  const setOpen = controlledOnOpenChange ?? setInternalOpen;
-  const date = dateOnlyToLocalDate(dueDate);
-  const isOverdue = isPastDateOnly(dueDate);
-
   return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger
-        className={triggerRender ? undefined : "flex items-center gap-1.5 cursor-pointer rounded px-1 -mx-1 hover:bg-accent/30 transition-colors"}
-        render={triggerRender}
-      >
-        {customTrigger ?? (
-          <>
-            <CalendarDays className="h-3.5 w-3.5 text-muted-foreground" />
-            {date ? (
-              <span className={isOverdue ? "text-destructive" : ""}>
-                {formatDateOnly(dueDate, { month: "short", day: "numeric" }, "en-US")}
-              </span>
-            ) : (
-              <span className="text-muted-foreground">{t(($) => $.pickers.due_date.trigger_label)}</span>
-            )}
-          </>
-        )}
-      </PopoverTrigger>
-      <PopoverContent className="w-auto p-0" align={align}>
-        <Calendar
-          mode="single"
-          selected={date}
-          onSelect={(d: Date | undefined) => {
-            onUpdate({ due_date: d ? toDateOnly(d) : null });
-            setOpen(false);
-          }}
-        />
-        {date && (
-          <div className="border-t px-3 py-2">
-            <Button
-              variant="ghost"
-              size="xs"
-              onClick={() => {
-                onUpdate({ due_date: null });
-                setOpen(false);
-              }}
-              className="text-muted-foreground hover:text-foreground"
-            >
-              {t(($) => $.pickers.due_date.clear_action)}
-            </Button>
-          </div>
-        )}
-      </PopoverContent>
-    </Popover>
+    <DateOnlyPicker
+      value={dueDate}
+      onChange={(v) => onUpdate({ due_date: v })}
+      icon={<CalendarDays className="h-3.5 w-3.5 text-muted-foreground" />}
+      placeholder={t(($) => $.pickers.due_date.trigger_label)}
+      clearLabel={t(($) => $.pickers.due_date.clear_action)}
+      highlightOverdue
+      trigger={trigger}
+      triggerRender={triggerRender}
+      open={open}
+      onOpenChange={onOpenChange}
+      align={align}
+      defaultOpen={defaultOpen}
+    />
   );
 }

@@ -11,10 +11,13 @@ import (
 )
 
 type HTTPMetrics struct {
-	requests *prometheus.CounterVec
-	duration *prometheus.HistogramVec
-	inFlight prometheus.Gauge
+	requests                    *prometheus.CounterVec
+	duration                    *prometheus.HistogramVec
+	daemonWorkspaceResponseSize *prometheus.HistogramVec
+	inFlight                    prometheus.Gauge
 }
+
+const daemonWorkspaceRoutePattern = "/api/daemon/workspaces"
 
 func NewHTTPMetrics() *HTTPMetrics {
 	return &HTTPMetrics{
@@ -31,6 +34,13 @@ func NewHTTPMetrics() *HTTPMetrics {
 			Help:      "HTTP request duration observed by the API server.",
 			Buckets:   []float64{0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10},
 		}, []string{"method", "route", "status"}),
+		daemonWorkspaceResponseSize: prometheus.NewHistogramVec(prometheus.HistogramOpts{
+			Namespace: "multica",
+			Subsystem: "http",
+			Name:      "daemon_workspace_response_size_bytes",
+			Help:      "Response bytes written by the daemon workspace-set endpoint.",
+			Buckets:   prometheus.ExponentialBuckets(128, 4, 9),
+		}, []string{"status"}),
 		inFlight: prometheus.NewGauge(prometheus.GaugeOpts{
 			Namespace: "multica",
 			Subsystem: "http",
@@ -41,7 +51,7 @@ func NewHTTPMetrics() *HTTPMetrics {
 }
 
 func (m *HTTPMetrics) Collectors() []prometheus.Collector {
-	return []prometheus.Collector{m.requests, m.duration, m.inFlight}
+	return []prometheus.Collector{m.requests, m.duration, m.daemonWorkspaceResponseSize, m.inFlight}
 }
 
 func (m *HTTPMetrics) Middleware(next http.Handler) http.Handler {
@@ -65,13 +75,18 @@ func (m *HTTPMetrics) Middleware(next http.Handler) http.Handler {
 		if status == 0 {
 			status = http.StatusOK
 		}
+		route := routePattern(r)
+		statusLabel := strconv.Itoa(status)
 		labels := prometheus.Labels{
 			"method": r.Method,
-			"route":  routePattern(r),
-			"status": strconv.Itoa(status),
+			"route":  route,
+			"status": statusLabel,
 		}
 		m.requests.With(labels).Inc()
 		m.duration.With(labels).Observe(time.Since(start).Seconds())
+		if route == daemonWorkspaceRoutePattern {
+			m.daemonWorkspaceResponseSize.WithLabelValues(statusLabel).Observe(float64(ww.BytesWritten()))
+		}
 	})
 }
 

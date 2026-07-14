@@ -15,8 +15,9 @@ func (h *Handler) DaemonWebSocket(w http.ResponseWriter, r *http.Request) {
 	}
 
 	runtimeIDs := parseRuntimeIDs(r)
-	if len(runtimeIDs) == 0 {
-		writeError(w, http.StatusBadRequest, "runtime_ids required")
+	userID := requestUserID(r)
+	if len(runtimeIDs) == 0 && userID == "" {
+		writeError(w, http.StatusBadRequest, "runtime_ids or user identity required")
 		return
 	}
 
@@ -47,11 +48,12 @@ func (h *Handler) DaemonWebSocket(w http.ResponseWriter, r *http.Request) {
 
 	h.DaemonHub.HandleWebSocket(w, r, daemonws.ClientIdentity{
 		DaemonID:      middleware.DaemonIDFromContext(r.Context()),
-		UserID:        requestUserID(r),
+		UserID:        userID,
 		WorkspaceID:   primaryWorkspaceID,
 		WorkspaceIDs:  workspaceIDs,
 		RuntimeIDs:    runtimeIDs,
 		ClientVersion: r.Header.Get("X-Client-Version"),
+		Capabilities:  r.Header.Get("X-Client-Capabilities"),
 	})
 }
 

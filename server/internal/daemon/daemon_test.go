@@ -83,6 +83,62 @@ func TestTriggerRestart_BrewLinuxCellarDeleted(t *testing.T) {
 	}
 }
 
+func TestTriggerRestart_UsesResolvedFallback(t *testing.T) {
+	originalResolveSelfExecutable := resolveSelfExecutable
+	originalIsBrewInstall := isBrewInstall
+	t.Cleanup(func() {
+		resolveSelfExecutable = originalResolveSelfExecutable
+		isBrewInstall = originalIsBrewInstall
+	})
+
+	want := filepath.Join(t.TempDir(), "multica")
+	if err := os.WriteFile(want, []byte("test executable"), 0o755); err != nil {
+		t.Fatalf("write executable fixture: %v", err)
+	}
+	wantResolved, err := filepath.EvalSymlinks(want)
+	if err != nil {
+		t.Fatalf("resolve executable fixture: %v", err)
+	}
+	resolveSelfExecutable = func() (string, error) { return want, nil }
+	isBrewInstall = func() bool { return false }
+
+	canceled := false
+	d := &Daemon{
+		logger:     slog.New(slog.NewTextHandler(io.Discard, nil)),
+		cancelFunc: func() { canceled = true },
+	}
+	d.triggerRestart()
+
+	if got := d.RestartBinary(); got != wantResolved {
+		t.Fatalf("restart binary = %q, want resolved fallback executable %q", got, wantResolved)
+	}
+	if !canceled {
+		t.Fatal("triggerRestart did not initiate graceful shutdown")
+	}
+}
+
+func TestTriggerRestart_ResolveFailureLeavesDaemonRunning(t *testing.T) {
+	originalResolveSelfExecutable := resolveSelfExecutable
+	t.Cleanup(func() { resolveSelfExecutable = originalResolveSelfExecutable })
+	resolveSelfExecutable = func() (string, error) {
+		return "", errors.New("cannot resolve executable")
+	}
+
+	canceled := false
+	d := &Daemon{
+		logger:     slog.New(slog.NewTextHandler(io.Discard, nil)),
+		cancelFunc: func() { canceled = true },
+	}
+	d.triggerRestart()
+
+	if got := d.RestartBinary(); got != "" {
+		t.Fatalf("restart binary = %q, want empty", got)
+	}
+	if canceled {
+		t.Fatal("triggerRestart initiated shutdown without a restart binary")
+	}
+}
+
 func TestIsBlockedEnvKey(t *testing.T) {
 	t.Parallel()
 
@@ -105,6 +161,11 @@ func TestIsBlockedEnvKey(t *testing.T) {
 		{key: "OPENCLAW_INCLUDE_ROOTS", want: true},
 		{key: "ANTHROPIC_API_KEY", want: false},
 		{key: "CURSOR_AGENT", want: false},
+		// HERMES_HOME is intentionally NOT blocked: a skill-less Hermes task
+		// must be able to honor a user-set profile/home, and when skills are
+		// bound the per-task overlay overrides it after custom_env is layered.
+		{key: "HERMES_HOME", want: false},
+		{key: "hermes_home", want: false},
 	}
 
 	for _, tt := range tests {
@@ -112,6 +173,68 @@ func TestIsBlockedEnvKey(t *testing.T) {
 			t.Parallel()
 			if got := isBlockedEnvKey(tt.key); got != tt.want {
 				t.Fatalf("isBlockedEnvKey(%q) = %v, want %v", tt.key, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestLayerCustomEnvAndHermesHome exercises the daemon-assembled child env for
+// HERMES_HOME: no overlay passes the user's value through, an overlay overrides
+// it, and blocklisted keys are still dropped.
+func TestLayerCustomEnvAndHermesHome(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name        string
+		customEnv   map[string]string
+		overlayHome string
+		wantHermes  string // "" means the key must be absent
+		wantAbsent  []string
+	}{
+		{
+			name:        "no skills: user HERMES_HOME passes through",
+			customEnv:   map[string]string{"HERMES_HOME": "/home/u/.hermes-research"},
+			overlayHome: "",
+			wantHermes:  "/home/u/.hermes-research",
+		},
+		{
+			name:        "skills bound: overlay overrides user HERMES_HOME",
+			customEnv:   map[string]string{"HERMES_HOME": "/home/u/.hermes-research"},
+			overlayHome: "/tmp/task/hermes-home",
+			wantHermes:  "/tmp/task/hermes-home",
+		},
+		{
+			name:        "no custom home, no overlay: key absent",
+			customEnv:   map[string]string{"ANTHROPIC_API_KEY": "sk"},
+			overlayHome: "",
+			wantHermes:  "",
+		},
+		{
+			name:        "blocklisted key dropped, overlay still applied",
+			customEnv:   map[string]string{"CODEX_HOME": "/evil", "MULTICA_TOKEN": "x"},
+			overlayHome: "/tmp/task/hermes-home",
+			wantHermes:  "/tmp/task/hermes-home",
+			wantAbsent:  []string{"CODEX_HOME", "MULTICA_TOKEN"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			agentEnv := map[string]string{}
+			layerCustomEnvAndHermesHome(agentEnv, tt.customEnv, tt.overlayHome, nil)
+
+			if got, ok := agentEnv["HERMES_HOME"]; tt.wantHermes == "" {
+				if ok {
+					t.Errorf("HERMES_HOME should be absent, got %q", got)
+				}
+			} else if got != tt.wantHermes {
+				t.Errorf("HERMES_HOME = %q, want %q", got, tt.wantHermes)
+			}
+			for _, k := range tt.wantAbsent {
+				if _, ok := agentEnv[k]; ok {
+					t.Errorf("blocklisted key %q should not be applied", k)
+				}
 			}
 		})
 	}
@@ -173,16 +296,25 @@ func TestTriggerRestart_BrewPrefixUnavailable_FallsBackToKnownPrefix(t *testing.
 	originalIsBrewInstall := isBrewInstall
 	originalGetBrewPrefix := getBrewPrefix
 	originalMatchKnownBrewPrefix := matchKnownBrewPrefix
+	originalResolveSelfExecutable := resolveSelfExecutable
 	t.Cleanup(func() {
 		isBrewInstall = originalIsBrewInstall
 		getBrewPrefix = originalGetBrewPrefix
 		matchKnownBrewPrefix = originalMatchKnownBrewPrefix
+		resolveSelfExecutable = originalResolveSelfExecutable
 	})
 
 	const knownPrefix = "/home/linuxbrew/.linuxbrew"
+	cellarPath := filepath.Join(knownPrefix, "Cellar", "multica", "0.2.9", "bin", "multica")
 	isBrewInstall = func() bool { return true }
 	getBrewPrefix = func() string { return "" }
-	matchKnownBrewPrefix = func(string) string { return knownPrefix }
+	resolveSelfExecutable = func() (string, error) { return cellarPath, nil }
+	matchKnownBrewPrefix = func(path string) string {
+		if path != cellarPath {
+			t.Fatalf("MatchKnownBrewPrefix path = %q, want resolver result %q", path, cellarPath)
+		}
+		return knownPrefix
+	}
 
 	d := &Daemon{
 		logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
@@ -2620,21 +2752,21 @@ func TestWatchTaskCancellation_ReconcileWithRunningTaskStaysAlive(t *testing.T) 
 }
 
 // TestWorkspaceSyncLoop_ReconcileBroadcastTriggersImmediateSync pins that the
-// 30s workspace sync ticker is also short-circuited by reconcile broadcasts.
-// Without this, runtime/repo changes the server made during a WS disconnect
-// stay invisible to the daemon for up to 30 seconds.
+// long-period workspace consistency timer is short-circuited by reconnect
+// broadcasts. Without this, changes made during a WS disconnect stay invisible
+// until the next fallback sync.
 func TestWorkspaceSyncLoop_ReconcileBroadcastTriggersImmediateSync(t *testing.T) {
 	t.Parallel()
 
 	var calls atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/workspaces" {
+		if r.URL.Path != "/api/daemon/workspaces" {
 			http.NotFound(w, r)
 			return
 		}
 		calls.Add(1)
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"workspaces":[]}`))
+		_, _ = w.Write([]byte(`[]`))
 	}))
 	t.Cleanup(srv.Close)
 
@@ -2687,6 +2819,132 @@ func TestWorkspaceSyncLoop_ReconcileBroadcastTriggersImmediateSync(t *testing.T)
 	}
 }
 
+func TestWorkspaceSyncLoop_WorkspaceChangeTriggersImmediateSync(t *testing.T) {
+	t.Parallel()
+
+	var calls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/daemon/workspaces" {
+			http.NotFound(w, r)
+			return
+		}
+		calls.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`[]`))
+	}))
+	t.Cleanup(srv.Close)
+
+	d := &Daemon{
+		client:           NewClient(srv.URL),
+		logger:           slog.Default(),
+		workspaces:       make(map[string]*workspaceState),
+		workspaceChanges: newWorkspaceChangeSignal(),
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	loopDone := make(chan struct{})
+	go func() {
+		defer close(loopDone)
+		d.workspaceSyncLoop(ctx)
+	}()
+
+	d.workspaceChanges.broadcast()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) && calls.Load() < 1 {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if calls.Load() < 1 {
+		cancel()
+		<-loopDone
+		t.Fatal("workspace change did not trigger an immediate sync")
+	}
+
+	cancel()
+	<-loopDone
+}
+
+// TestWorkspaceSyncLoop_DoesNotDropChangeAfterSuccessfulSync covers the
+// request-changes race from MUL-4480: a real membership hint arriving within
+// one second of a completed sync must trigger another sync, not be treated as
+// a duplicate of the earlier read and deferred to the 30-minute fallback.
+func TestWorkspaceSyncLoop_DoesNotDropChangeAfterSuccessfulSync(t *testing.T) {
+	t.Parallel()
+
+	var calls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/daemon/workspaces" {
+			http.NotFound(w, r)
+			return
+		}
+		calls.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`[]`))
+	}))
+	t.Cleanup(srv.Close)
+
+	d := &Daemon{
+		client:           NewClient(srv.URL),
+		logger:           slog.Default(),
+		workspaces:       make(map[string]*workspaceState),
+		workspaceChanges: newWorkspaceChangeSignal(),
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	loopDone := make(chan struct{})
+	go func() {
+		defer close(loopDone)
+		d.workspaceSyncLoop(ctx)
+	}()
+
+	waitForCalls := func(want int32) {
+		t.Helper()
+		deadline := time.Now().Add(2 * time.Second)
+		for time.Now().Before(deadline) && calls.Load() < want {
+			time.Sleep(10 * time.Millisecond)
+		}
+		if got := calls.Load(); got < want {
+			t.Fatalf("workspace sync calls = %d, want at least %d", got, want)
+		}
+	}
+
+	d.workspaceChanges.broadcast()
+	waitForCalls(1)
+	deadline := time.Now().Add(time.Second)
+	for !d.reloading.TryLock() {
+		if time.Now().After(deadline) {
+			t.Fatal("first workspace sync did not finish")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	d.reloading.Unlock()
+	// The second edge lands immediately after a successful API read. It
+	// represents a later commit and therefore cannot be coalesced backward.
+	d.workspaceChanges.broadcast()
+	waitForCalls(2)
+
+	cancel()
+	<-loopDone
+}
+
+func TestWorkspaceSyncBackoff(t *testing.T) {
+	tests := []struct {
+		failures int
+		want     time.Duration
+	}{
+		{failures: 0, want: 30 * time.Second},
+		{failures: 1, want: time.Minute},
+		{failures: 2, want: 2 * time.Minute},
+		{failures: 10, want: DefaultWorkspaceLegacySyncInterval},
+	}
+	for _, tt := range tests {
+		if got := workspaceSyncBackoff(30*time.Second, tt.failures); got != tt.want {
+			t.Fatalf("workspaceSyncBackoff(30s, %d) = %s, want %s", tt.failures, got, tt.want)
+		}
+	}
+}
+
 // TestWorkspaceSyncLoop_ReplaysBroadcastFromBeforeStart pins the daemon-
 // startup race fix: broadcast() that fired while no one was subscribed
 // MUST still wake the loop on its first subscription. Without the
@@ -2698,13 +2956,13 @@ func TestWorkspaceSyncLoop_ReplaysBroadcastFromBeforeStart(t *testing.T) {
 
 	var calls atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/workspaces" {
+		if r.URL.Path != "/api/daemon/workspaces" {
 			http.NotFound(w, r)
 			return
 		}
 		calls.Add(1)
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"workspaces":[]}`))
+		_, _ = w.Write([]byte(`[]`))
 	}))
 	t.Cleanup(srv.Close)
 
@@ -2889,5 +3147,69 @@ func TestWatchTaskCancellation_ReconcileRunningKeepsTickerAlive(t *testing.T) {
 	case <-cancelled:
 	case <-time.After(2 * time.Second):
 		t.Fatalf("ticker did not detect cancellation after broadcast-running path (calls=%d)", calls.Load())
+	}
+}
+
+// TestSanitizeAgentEnv asserts the effective env handed to the Hermes overlay
+// for ${VAR} expansion drops daemon-blocklisted keys (so a blocked HOME in
+// custom_env can't repoint external_dirs away from what the child sees) while
+// keeping ordinary vars.
+func TestSanitizeAgentEnv(t *testing.T) {
+	t.Parallel()
+	in := map[string]string{
+		"HOME":        "/evil",
+		"PATH":        "/evil/bin",
+		"MULTICA_X":   "1",
+		"TEAM_SKILLS": "/srv/team",
+		"HERMES_HOME": "/some/home",
+	}
+	got := sanitizeAgentEnv(in)
+	for _, blocked := range []string{"HOME", "PATH", "MULTICA_X"} {
+		if _, ok := got[blocked]; ok {
+			t.Errorf("blocklisted key %q must be dropped from the effective env", blocked)
+		}
+	}
+	if got["TEAM_SKILLS"] != "/srv/team" {
+		t.Errorf("ordinary var dropped: %v", got)
+	}
+	// HERMES_HOME is not blocklisted (it drives source-home resolution), so it
+	// survives here even though the child's value is the overlay.
+	if got["HERMES_HOME"] != "/some/home" {
+		t.Errorf("HERMES_HOME should survive sanitization, got %v", got)
+	}
+	if sanitizeAgentEnv(nil) != nil {
+		t.Error("nil in should yield nil out")
+	}
+}
+
+// TestHermesLaunchArgsAndEnvByScenario covers the profile chain end to end at
+// the decision level: the final launch args + the final HERMES_HOME the child
+// sees, for a skill-less vs. an overlay-active task that both set a profile.
+func TestHermesLaunchArgsAndEnvByScenario(t *testing.T) {
+	t.Parallel()
+	customArgs := []string{"-p", "research", "--yolo"}
+	customEnv := map[string]string{"HERMES_HOME": "/home/u/.hermes"}
+
+	// No overlay (skill-less): profile flag passes through, and the user's
+	// HERMES_HOME passes through — behavior unchanged.
+	noOverlayArgs := hermesLaunchArgs(customArgs, false)
+	if len(noOverlayArgs) != 3 || noOverlayArgs[0] != "-p" || noOverlayArgs[1] != "research" {
+		t.Errorf("skill-less task must keep its profile flags, got %v", noOverlayArgs)
+	}
+	noOverlayEnv := map[string]string{}
+	layerCustomEnvAndHermesHome(noOverlayEnv, customEnv, "", nil)
+	if noOverlayEnv["HERMES_HOME"] != "/home/u/.hermes" {
+		t.Errorf("skill-less task must keep the user HERMES_HOME, got %q", noOverlayEnv["HERMES_HOME"])
+	}
+
+	// Overlay active: profile flag is stripped, and HERMES_HOME is the overlay.
+	overlayArgs := hermesLaunchArgs(customArgs, true)
+	if len(overlayArgs) != 1 || overlayArgs[0] != "--yolo" {
+		t.Errorf("overlay task must strip profile flags, got %v", overlayArgs)
+	}
+	overlayEnv := map[string]string{}
+	layerCustomEnvAndHermesHome(overlayEnv, customEnv, "/task/hermes-home", nil)
+	if overlayEnv["HERMES_HOME"] != "/task/hermes-home" {
+		t.Errorf("overlay task must redirect HERMES_HOME to the overlay, got %q", overlayEnv["HERMES_HOME"])
 	}
 }

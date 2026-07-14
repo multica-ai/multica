@@ -4,6 +4,8 @@ import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Check, Search, Tag } from "lucide-react";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { useFeatureEnabled } from "@multica/core/config";
+import { RESOURCE_LABELS_FLAG } from "@multica/core/feature-flags";
 import {
   labelListOptions,
   resourceLabelsOptions,
@@ -31,11 +33,18 @@ export function ResourceLabelPicker({
 }) {
   const { t } = useT("labels");
   const wsId = useWorkspaceId();
+  const resourceLabelsEnabled = useFeatureEnabled(RESOURCE_LABELS_FLAG, false);
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
-  const { data: catalog = [] } = useQuery(labelListOptions(wsId, resourceType));
+  const { data: catalog = [] } = useQuery({
+    ...labelListOptions(wsId, resourceType),
+    enabled: resourceLabelsEnabled,
+  });
   const { data: selected = [] } = useQuery(
-    resourceLabelsOptions(wsId, resourceType, resourceId),
+    {
+      ...resourceLabelsOptions(wsId, resourceType, resourceId),
+      enabled: resourceLabelsEnabled,
+    },
   );
   const attach = useAttachResourceLabel(resourceType, resourceId);
   const detach = useDetachResourceLabel(resourceType, resourceId);
@@ -43,6 +52,8 @@ export function ResourceLabelPicker({
   const filtered = catalog.filter((label) =>
     label.name.toLowerCase().includes(query.trim().toLowerCase()),
   );
+
+  if (!resourceLabelsEnabled) return null;
 
   const content = selected.length > 0 ? (
     <div className="flex flex-wrap justify-start gap-1 sm:justify-end">

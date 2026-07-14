@@ -184,13 +184,63 @@ function patchLatestChatMessagePage(
   };
 }
 
+type ChatSessionUpdatedPayload = {
+  chat_session_id: string;
+  title?: string;
+  pinned?: boolean;
+  status?: "active" | "archived";
+  updated_at?: string;
+};
+
 /**
- * Apply a workspace:updated event to the cache. Always refreshes the
- * workspace list. If the incoming `issue_prefix` differs from what's
- * currently cached, also invalidates issueKeys.all for that workspace,
- * since every issue's rendered identifier (`MUL-123`) is recomputed from
- * the workspace prefix at read time. Without this, the UI keeps showing
- * the old `OLD-N` keys until the next hard refresh.
+ * Patch the cached sessions row for a `chat:session_updated` event (rename,
+ * pin/unpin, archive/unarchive from any tab/device) instead of refetching the
+ * whole list. `pinned` is present only on pin/unpin events and `status` only on
+ * archive/unarchive; a plain rename omits both, so absent fields leave existing
+ * state untouched. When either changes we re-sort so the row lands in the right
+ * place (pin → top; archive → the other list) like the server order.
+ *
+ * Archiving MUST also zero the row's unread here: the server payload carries
+ * only status/updated_at, and chatSessionsOptions is `staleTime: Infinity`, so a
+ * stale cache in another tab/device would otherwise keep an archived session's
+ * unread badge lit forever — the same MUL-4360 stuck-badge bug, one surface over.
+ * This mirrors the archive mutation's optimistic patch and the backend deriving
+ * unread_count=0 for archived rows. Unarchive does NOT fabricate a count — the
+ * true unread state comes back from the server refetch (last_read_at is
+ * untouched), so we leave the row's unread fields as-is for `active`.
+ */
+export function applyChatSessionUpdatedToCache(
+  qc: QueryClient,
+  wsId: string,
+  payload: ChatSessionUpdatedPayload,
+): void {
+  qc.setQueryData<ChatSession[]>(chatKeys.sessions(wsId), (old) => {
+    if (!old) return old;
+    const next = old.map((s) =>
+      s.id === payload.chat_session_id
+        ? {
+            ...s,
+            title: payload.title ?? s.title,
+            pinned: payload.pinned ?? s.pinned,
+            status: payload.status ?? s.status,
+            updated_at: payload.updated_at ?? s.updated_at,
+            ...(payload.status === "archived"
+              ? { unread_count: 0, has_unread: false }
+              : {}),
+          }
+        : s,
+    );
+    return payload.pinned === undefined && payload.status === undefined
+      ? next
+      : sortChatSessions(next);
+  });
+}
+
+/**
+ * Apply a workspace:updated event directly to the cached workspace list.
+ * If the incoming `issue_prefix` differs from what's currently cached, also
+ * invalidates issueKeys.all for that workspace, since every issue's rendered
+ * identifier (`MUL-123`) is recomputed from the workspace prefix at read time.
  *
  * If the workspace isn't in the cached list (first observation), we
  * conservatively invalidate — the prefix is effectively "new" relative to
@@ -203,13 +253,21 @@ export function applyWorkspaceUpdatedToCache(
 ): void {
   const next = payload.workspace;
   if (next?.id) {
-    const cached =
-      qc
-        .getQueryData<Workspace[]>(workspaceKeys.list())
-        ?.find((w) => w.id === next.id) ?? null;
-    if (!cached || cached.issue_prefix !== next.issue_prefix) {
+    const list = qc.getQueryData<Workspace[]>(workspaceKeys.list());
+    const cached = list?.find((w) => w.id === next.id) ?? null;
+    if (cached && cached.issue_prefix !== next.issue_prefix) {
       qc.invalidateQueries({ queryKey: issueKeys.all(next.id) });
     }
+    if (cached && list) {
+      qc.setQueryData<Workspace[]>(
+        workspaceKeys.list(),
+        list.map((workspace) => (workspace.id === next.id ? next : workspace)),
+      );
+      return;
+    }
+    // Do not seed an absent list with one workspace: staleTime is Infinity,
+    // so doing so would hide every other membership until a hard refresh.
+    qc.invalidateQueries({ queryKey: issueKeys.all(next.id) });
   }
   qc.invalidateQueries({ queryKey: workspaceKeys.list() });
 }
@@ -1123,42 +1181,16 @@ export function useRealtimeSync(
       invalidateSessionLists();
     });
 
-    // chat:session_updated fires after the creator renames a session in
-    // any tab/device. Patch the cached row inline so the dropdown reflects
-    // the new title without a full sessions-list refetch.
+    // chat:session_updated fires after the creator renames, pins, or archives
+    // a session in any tab/device. Patch the cached row inline so the dropdown
+    // and badges reflect the change without a full sessions-list refetch — see
+    // applyChatSessionUpdatedToCache for why archive must also zero unread.
     const unsubChatSessionUpdated = ws.on("chat:session_updated", (p) => {
-      const payload = p as {
-        chat_session_id: string;
-        title?: string;
-        pinned?: boolean;
-        status?: "active" | "archived";
-        updated_at?: string;
-      };
+      const payload = p as ChatSessionUpdatedPayload;
       chatWsLogger.info("chat:session_updated (global)", payload);
       const id = getCurrentWsId();
       if (!id) return;
-      // `pinned` is present only on pin/unpin events and `status` only on
-      // archive/unarchive; a plain rename omits both, so leave the existing
-      // state untouched then. When either changes we re-sort so the row lands
-      // in the right place (pin → top; archive → the other list) like the
-      // server order.
-      qc.setQueryData<ChatSession[]>(chatKeys.sessions(id), (old) => {
-        if (!old) return old;
-        const next = old.map((s) =>
-          s.id === payload.chat_session_id
-            ? {
-                ...s,
-                title: payload.title ?? s.title,
-                pinned: payload.pinned ?? s.pinned,
-                status: payload.status ?? s.status,
-                updated_at: payload.updated_at ?? s.updated_at,
-              }
-            : s,
-        );
-        return payload.pinned === undefined && payload.status === undefined
-          ? next
-          : sortChatSessions(next);
-      });
+      applyChatSessionUpdatedToCache(qc, id, payload);
     });
 
     // chat:session_deleted fires after a hard delete. The originating tab has

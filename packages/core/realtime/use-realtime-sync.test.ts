@@ -12,11 +12,13 @@ import type {
   ChatMessage,
   ChatPendingTask,
   ChatMessagesPage,
+  ChatSession,
   InboxItem,
   Workspace,
 } from "../types";
 import {
   applyChatDoneToCache,
+  applyChatSessionUpdatedToCache,
   applyWorkspaceUpdatedToCache,
   handleInboxNew,
   invalidateChatMessageQueries,
@@ -153,6 +155,87 @@ describe("applyChatDoneToCache", () => {
   });
 });
 
+describe("applyChatSessionUpdatedToCache", () => {
+  const WS_ID = "ws-1";
+
+  function makeSession(overrides: Partial<ChatSession> = {}): ChatSession {
+    return {
+      id: "s1",
+      workspace_id: WS_ID,
+      agent_id: "agent-1",
+      creator_id: "user-1",
+      title: "Session 1",
+      status: "active",
+      has_unread: true,
+      unread_count: 2,
+      created_at: "2026-07-10T00:00:00Z",
+      updated_at: "2026-07-10T00:00:00Z",
+      ...overrides,
+    };
+  }
+
+  // MUL-4360 cross-tab: chatSessionsOptions is staleTime: Infinity, so a stale
+  // cache in another tab never self-heals. When an archive event lands there,
+  // the row's unread must be forced to 0 to match the archive mutation and the
+  // backend, or the sidebar/header keep counting an archived session no one can
+  // open — the same stuck badge, one surface over.
+  it("zeroes unread when a session_updated event archives a cached unread row", () => {
+    const qc = createQueryClient();
+    qc.setQueryData<ChatSession[]>(chatKeys.sessions(WS_ID), [makeSession()]);
+
+    applyChatSessionUpdatedToCache(qc, WS_ID, {
+      chat_session_id: "s1",
+      status: "archived",
+      updated_at: "2026-07-10T01:00:00Z",
+    });
+
+    const row = qc.getQueryData<ChatSession[]>(chatKeys.sessions(WS_ID))![0]!;
+    expect(row.status).toBe("archived");
+    expect(row.unread_count).toBe(0);
+    expect(row.has_unread).toBe(false);
+  });
+
+  // Unarchive must NOT fabricate unread — the true state comes back from the
+  // server refetch (last_read_at is untouched). An `active` status event leaves
+  // the row's unread fields exactly as cached, so a previously-zeroed archived
+  // row stays at 0 rather than being resurrected out of thin air.
+  it("does not resurrect unread when a session_updated event reactivates a row", () => {
+    const qc = createQueryClient();
+    qc.setQueryData<ChatSession[]>(chatKeys.sessions(WS_ID), [
+      makeSession({ status: "archived", has_unread: false, unread_count: 0 }),
+    ]);
+
+    applyChatSessionUpdatedToCache(qc, WS_ID, {
+      chat_session_id: "s1",
+      status: "active",
+      updated_at: "2026-07-10T02:00:00Z",
+    });
+
+    const row = qc.getQueryData<ChatSession[]>(chatKeys.sessions(WS_ID))![0]!;
+    expect(row.status).toBe("active");
+    expect(row.unread_count).toBe(0);
+    expect(row.has_unread).toBe(false);
+  });
+
+  // A plain rename carries neither status nor pinned; it must not touch unread
+  // (a live active session keeps its real unread count) or re-sort.
+  it("leaves unread untouched on a rename-only event", () => {
+    const qc = createQueryClient();
+    qc.setQueryData<ChatSession[]>(chatKeys.sessions(WS_ID), [makeSession()]);
+
+    applyChatSessionUpdatedToCache(qc, WS_ID, {
+      chat_session_id: "s1",
+      title: "Renamed",
+    });
+
+    const row = qc.getQueryData<ChatSession[]>(chatKeys.sessions(WS_ID))![0]!;
+    expect(row.title).toBe("Renamed");
+    expect(row.status).toBe("active");
+    expect(row.unread_count).toBe(2);
+    expect(row.has_unread).toBe(true);
+  });
+});
+
 describe("invalidateChatMessageQueries", () => {
   it("invalidates both legacy and paged chat message caches", () => {
     const qc = createQueryClient();
@@ -241,9 +324,12 @@ describe("applyWorkspaceUpdatedToCache", () => {
     expect(invalidate).toHaveBeenCalledWith({
       queryKey: issueKeys.all(wsId),
     });
-    expect(invalidate).toHaveBeenCalledWith({
+    expect(invalidate).not.toHaveBeenCalledWith({
       queryKey: workspaceKeys.list(),
     });
+    expect(
+      qc.getQueryData<Workspace[]>(workspaceKeys.list())?.[0]?.issue_prefix,
+    ).toBe("NEW");
   });
 
   it("does not invalidate issue cache when only non-prefix fields change", () => {
@@ -260,9 +346,12 @@ describe("applyWorkspaceUpdatedToCache", () => {
     expect(invalidate).not.toHaveBeenCalledWith({
       queryKey: issueKeys.all(wsId),
     });
-    expect(invalidate).toHaveBeenCalledWith({
+    expect(invalidate).not.toHaveBeenCalledWith({
       queryKey: workspaceKeys.list(),
     });
+    expect(qc.getQueryData<Workspace[]>(workspaceKeys.list())?.[0]?.name).toBe(
+      "New name",
+    );
   });
 
   it("invalidates issue cache when the workspace isn't in the cached list yet", () => {
@@ -279,6 +368,9 @@ describe("applyWorkspaceUpdatedToCache", () => {
 
     expect(invalidate).toHaveBeenCalledWith({
       queryKey: issueKeys.all(wsId),
+    });
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: workspaceKeys.list(),
     });
   });
 });

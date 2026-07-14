@@ -210,11 +210,11 @@ func TestGetConfigOmitsCloudDaemonSetupWithoutPublicURL(t *testing.T) {
 	}
 }
 
-// TestGetConfigOmitsCloudDaemonSetupForAppSubdomain covers the app.multica.ai
-// frontend variant of the official cloud.
-func TestGetConfigOmitsCloudDaemonSetupForAppSubdomain(t *testing.T) {
+// TestGetConfigOmitsCloudDaemonSetupForConfiguredAppURL covers the official
+// cloud frontend when it is configured through MULTICA_APP_URL.
+func TestGetConfigOmitsCloudDaemonSetupForConfiguredAppURL(t *testing.T) {
 	t.Setenv("MULTICA_PUBLIC_URL", "")
-	t.Setenv("MULTICA_APP_URL", "https://app.multica.ai")
+	t.Setenv("MULTICA_APP_URL", "https://multica.ai")
 	t.Setenv("FRONTEND_ORIGIN", "")
 
 	req := httptest.NewRequest(http.MethodGet, "/api/config", nil)
@@ -301,6 +301,9 @@ func TestGetConfigExposesFrontendFeatureFlags(t *testing.T) {
 	}
 	if cfg.FeatureFlags["composio_mcp_apps"] {
 		t.Fatalf("composio_mcp_apps: want false by default, got true")
+	}
+	if !cfg.FeatureFlags["agents_skill_toggles"] {
+		t.Fatalf("agents_skill_toggles: want true for installed v0.4.0 clients, got false")
 	}
 
 	withComposioMCPAppsFlag(t, h, true)
