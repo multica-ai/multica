@@ -176,7 +176,7 @@ func (h *Handler) UpsertIssueExternalIdentity(w http.ResponseWriter, r *http.Req
 	digest := sha256.Sum256(body)
 	receipt, err := h.AuthoritySigner.SignWriteReceipt(authority.WriteReceiptStatement{
 		Protocol: authority.WriteReceiptProtocolVersion, Operation: authority.OperationIssueUpsertExternal,
-		RequestSHA256: fmt.Sprintf("%x", digest), ResourceID: issue.ID, Nonce: req.Nonce,
+		RequestSHA256: fmt.Sprintf("%x", digest), ResourceID: issue.ID, WorkspaceID: util.UUIDToString(res.Issue.WorkspaceID), Nonce: req.Nonce,
 		DBIdentity: dbIdentity, IssuedAt: time.Now().UTC(), ServerCommit: h.ServerCommit,
 	})
 	if err != nil {

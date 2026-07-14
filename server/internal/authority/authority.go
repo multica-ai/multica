@@ -16,7 +16,7 @@ import (
 )
 
 const ProtocolVersion = "multica-authority-attestation-v1"
-const WriteReceiptProtocolVersion = "multica-authority-write-receipt-v1"
+const WriteReceiptProtocolVersion = "multica-authority-write-receipt-v2"
 const OperationIssueUpsertExternal = "issue.upsert-external"
 
 type DBIdentity struct {
@@ -49,6 +49,7 @@ type WriteReceiptStatement struct {
 	Operation     string
 	RequestSHA256 string
 	ResourceID    string
+	WorkspaceID   string
 	Nonce         string
 	AuthorityID   string
 	DBIdentity    DBIdentity
@@ -61,6 +62,7 @@ type WriteReceipt struct {
 	Operation     string     `json:"operation"`
 	RequestSHA256 string     `json:"request_sha256"`
 	ResourceID    string     `json:"resource_id"`
+	WorkspaceID   string     `json:"workspace_id"`
 	Nonce         string     `json:"nonce"`
 	AuthorityID   string     `json:"authority_id"`
 	DBIdentity    DBIdentity `json:"db_identity"`
@@ -73,6 +75,7 @@ type WriteReceiptExpectation struct {
 	Operation     string
 	RequestSHA256 string
 	ResourceID    string
+	WorkspaceID   string
 	Nonce         string
 }
 
@@ -158,7 +161,7 @@ func SignWriteReceipt(priv ed25519.PrivateKey, stmt WriteReceiptStatement) (Writ
 	}
 	return WriteReceipt{
 		Protocol: stmt.Protocol, Operation: stmt.Operation, RequestSHA256: stmt.RequestSHA256,
-		ResourceID: stmt.ResourceID, Nonce: stmt.Nonce, AuthorityID: stmt.AuthorityID,
+		ResourceID: stmt.ResourceID, WorkspaceID: stmt.WorkspaceID, Nonce: stmt.Nonce, AuthorityID: stmt.AuthorityID,
 		DBIdentity: stmt.DBIdentity, IssuedAt: stmt.IssuedAt.UTC().Format(time.RFC3339Nano),
 		ServerCommit: stmt.ServerCommit, Signature: base64.RawURLEncoding.EncodeToString(ed25519.Sign(priv, payload)),
 	}, nil
@@ -290,7 +293,7 @@ func VerifyWriteReceipt(receipt WriteReceipt, pin Pin, serverURL string, now tim
 	}
 	payload, err := CanonicalWriteReceiptPayload(WriteReceiptStatement{
 		Protocol: receipt.Protocol, Operation: receipt.Operation, RequestSHA256: receipt.RequestSHA256,
-		ResourceID: receipt.ResourceID, Nonce: receipt.Nonce, AuthorityID: receipt.AuthorityID,
+		ResourceID: receipt.ResourceID, WorkspaceID: receipt.WorkspaceID, Nonce: receipt.Nonce, AuthorityID: receipt.AuthorityID,
 		DBIdentity: receipt.DBIdentity, IssuedAt: issuedAt, ServerCommit: receipt.ServerCommit,
 	})
 	if err != nil {
@@ -311,6 +314,9 @@ func VerifyBoundWriteReceipt(receipt WriteReceipt, expected WriteReceiptExpectat
 	}
 	if receipt.ResourceID != expected.ResourceID || expected.ResourceID == "" {
 		return errors.New("write receipt resource mismatch")
+	}
+	if receipt.WorkspaceID != expected.WorkspaceID || expected.WorkspaceID == "" {
+		return errors.New("write receipt workspace mismatch")
 	}
 	if receipt.Nonce != expected.Nonce {
 		return errors.New("write receipt nonce mismatch")
@@ -374,6 +380,9 @@ func CanonicalWriteReceiptPayload(stmt WriteReceiptStatement) ([]byte, error) {
 	if strings.TrimSpace(stmt.ResourceID) == "" {
 		return nil, errors.New("resource id is required")
 	}
+	if strings.TrimSpace(stmt.WorkspaceID) == "" {
+		return nil, errors.New("workspace id is required")
+	}
 	if _, err := ValidateNonce(stmt.Nonce); err != nil {
 		return nil, err
 	}
@@ -391,7 +400,7 @@ func CanonicalWriteReceiptPayload(stmt WriteReceiptStatement) ([]byte, error) {
 	}
 	fields := [][2]string{
 		{"protocol", stmt.Protocol}, {"operation", stmt.Operation}, {"request_sha256", stmt.RequestSHA256},
-		{"resource_id", stmt.ResourceID}, {"nonce", stmt.Nonce}, {"authority_id", stmt.AuthorityID},
+		{"resource_id", stmt.ResourceID}, {"workspace_id", stmt.WorkspaceID}, {"nonce", stmt.Nonce}, {"authority_id", stmt.AuthorityID},
 		{"db_system_identifier", stmt.DBIdentity.SystemIdentifier}, {"db_oid", fmt.Sprintf("%d", stmt.DBIdentity.DatabaseOID)},
 		{"db_name", stmt.DBIdentity.DatabaseName}, {"issued_at", stmt.IssuedAt.UTC().Format(time.RFC3339Nano)}, {"server_commit", stmt.ServerCommit},
 	}

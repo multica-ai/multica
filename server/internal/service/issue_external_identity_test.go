@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/multica-ai/multica/server/internal/events"
@@ -673,6 +674,45 @@ func TestIssueExternalIdentityUpsertProcessInterruptionRollsBackAllEffects(t *te
 	}
 	if issueCount != 0 || aliasCount != 0 || metadataCount != 0 {
 		t.Fatalf("interrupted process left effects: issues=%d aliases=%d metadata=%d", issueCount, aliasCount, metadataCount)
+	}
+}
+
+func TestIssueExternalIdentityRejectsIssueWorkspaceMoveAcrossAliasWorkspace(t *testing.T) {
+	ctx := context.Background()
+	pool := newExternalIdentityPool(t)
+	queries := db.New(pool)
+	first := createExternalIdentityFixture(t, ctx, pool)
+	second := createExternalIdentityFixture(t, ctx, pool)
+	svc := NewIssueService(queries, pool, events.New(), nil, nil)
+
+	res, err := svc.UpsertExternalIdentity(ctx, IssueExternalIdentityUpsertParams{
+		WorkspaceID: first.workspaceID,
+		Aliases:     []ExternalIdentityAlias{{Namespace: "github-node", ExternalID: "workspace-move-guard"}},
+		Create:      externalCreateParams(first, "Workspace move guard"),
+		CreatorType: "member",
+		CreatorID:   first.userID,
+	})
+	if err != nil {
+		t.Fatalf("seed external identity: %v", err)
+	}
+	_, err = pool.Exec(ctx, `UPDATE issue SET workspace_id=$1 WHERE id=$2`, second.workspaceID, res.Issue.ID)
+	if err == nil {
+		t.Fatal("issue workspace move succeeded while a same-workspace external identity exists")
+	}
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) || pgErr.Code != "23503" || !strings.Contains(pgErr.Message, "external identity issue workspace cannot change") {
+		t.Fatalf("workspace move error = %v, want migration 180 same-workspace guard", err)
+	}
+
+	var issueWorkspace, aliasWorkspace pgtype.UUID
+	if err := pool.QueryRow(ctx, `SELECT workspace_id FROM issue WHERE id=$1`, res.Issue.ID).Scan(&issueWorkspace); err != nil {
+		t.Fatalf("read issue workspace: %v", err)
+	}
+	if err := pool.QueryRow(ctx, `SELECT workspace_id FROM issue_external_identity WHERE issue_id=$1`, res.Issue.ID).Scan(&aliasWorkspace); err != nil {
+		t.Fatalf("read alias workspace: %v", err)
+	}
+	if issueWorkspace != first.workspaceID || aliasWorkspace != first.workspaceID {
+		t.Fatalf("workspace invariant changed: issue=%s alias=%s want=%s", util.UUIDToString(issueWorkspace), util.UUIDToString(aliasWorkspace), util.UUIDToString(first.workspaceID))
 	}
 }
 

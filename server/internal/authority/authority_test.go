@@ -19,6 +19,7 @@ func TestWriteReceiptSignVerifyBindsWrite(t *testing.T) {
 		Operation:     "issue.upsert-external",
 		RequestSHA256: fmt.Sprintf("%x", digest),
 		ResourceID:    "11111111-1111-1111-1111-111111111111",
+		WorkspaceID:   "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
 		Nonce:         stmt.Nonce,
 		AuthorityID:   stmt.AuthorityID,
 		DBIdentity:    stmt.DBIdentity,
@@ -33,15 +34,16 @@ func TestWriteReceiptSignVerifyBindsWrite(t *testing.T) {
 	if err := VerifyWriteReceipt(receipt, pin, pin.ServerURL, stmt.IssuedAt.Add(time.Second), 2*time.Minute, 30*time.Second); err != nil {
 		t.Fatalf("VerifyWriteReceipt: %v", err)
 	}
-	expected := WriteReceiptExpectation{Operation: receipt.Operation, RequestSHA256: receipt.RequestSHA256, ResourceID: receipt.ResourceID, Nonce: receipt.Nonce}
+	expected := WriteReceiptExpectation{Operation: receipt.Operation, RequestSHA256: receipt.RequestSHA256, ResourceID: receipt.ResourceID, WorkspaceID: receipt.WorkspaceID, Nonce: receipt.Nonce}
 	if err := VerifyBoundWriteReceipt(receipt, expected, pin, pin.ServerURL, stmt.IssuedAt.Add(time.Second), 2*time.Minute, 30*time.Second); err != nil {
 		t.Fatalf("VerifyBoundWriteReceipt: %v", err)
 	}
 	for name, mismatch := range map[string]WriteReceiptExpectation{
-		"operation": {Operation: "other", RequestSHA256: expected.RequestSHA256, ResourceID: expected.ResourceID, Nonce: expected.Nonce},
-		"digest":    {Operation: expected.Operation, RequestSHA256: strings.Repeat("0", 64), ResourceID: expected.ResourceID, Nonce: expected.Nonce},
-		"resource":  {Operation: expected.Operation, RequestSHA256: expected.RequestSHA256, ResourceID: "22222222-2222-2222-2222-222222222222", Nonce: expected.Nonce},
-		"nonce":     {Operation: expected.Operation, RequestSHA256: expected.RequestSHA256, ResourceID: expected.ResourceID, Nonce: base64.RawURLEncoding.EncodeToString([]byte("12345678901234567890123456789012"))},
+		"operation": {Operation: "other", RequestSHA256: expected.RequestSHA256, ResourceID: expected.ResourceID, WorkspaceID: expected.WorkspaceID, Nonce: expected.Nonce},
+		"digest":    {Operation: expected.Operation, RequestSHA256: strings.Repeat("0", 64), ResourceID: expected.ResourceID, WorkspaceID: expected.WorkspaceID, Nonce: expected.Nonce},
+		"resource":  {Operation: expected.Operation, RequestSHA256: expected.RequestSHA256, ResourceID: "22222222-2222-2222-2222-222222222222", WorkspaceID: expected.WorkspaceID, Nonce: expected.Nonce},
+		"workspace": {Operation: expected.Operation, RequestSHA256: expected.RequestSHA256, ResourceID: expected.ResourceID, WorkspaceID: "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb", Nonce: expected.Nonce},
+		"nonce":     {Operation: expected.Operation, RequestSHA256: expected.RequestSHA256, ResourceID: expected.ResourceID, WorkspaceID: expected.WorkspaceID, Nonce: base64.RawURLEncoding.EncodeToString([]byte("12345678901234567890123456789012"))},
 	} {
 		t.Run("expected_"+name, func(t *testing.T) {
 			if VerifyBoundWriteReceipt(receipt, mismatch, pin, pin.ServerURL, stmt.IssuedAt.Add(time.Second), 2*time.Minute, 30*time.Second) == nil {
@@ -54,6 +56,7 @@ func TestWriteReceiptSignVerifyBindsWrite(t *testing.T) {
 		"operation": func(r WriteReceipt) WriteReceipt { r.Operation = "issue.delete"; return r },
 		"digest":    func(r WriteReceipt) WriteReceipt { r.RequestSHA256 = strings.Repeat("0", 64); return r },
 		"resource":  func(r WriteReceipt) WriteReceipt { r.ResourceID = "22222222-2222-2222-2222-222222222222"; return r },
+		"workspace": func(r WriteReceipt) WriteReceipt { r.WorkspaceID = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"; return r },
 		"nonce": func(r WriteReceipt) WriteReceipt {
 			r.Nonce = base64.RawURLEncoding.EncodeToString([]byte("12345678901234567890123456789012"))
 			return r
