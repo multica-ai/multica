@@ -1236,6 +1236,7 @@ func (s *TaskService) CancelTasksForIssue(ctx context.Context, issueID pgtype.UU
 		s.ReconcileAgentStatus(ctx, t.AgentID)
 		s.broadcastTaskEvent(ctx, protocol.EventTaskCancelled, t)
 	}
+	s.notifyTasksFinished(cancelled)
 	return nil
 }
 
@@ -1258,6 +1259,7 @@ func (s *TaskService) CancelTasksForAgent(ctx context.Context, agentID pgtype.UU
 	// working→available based on remaining task counts, no need to call
 	// per row (the rows we just cancelled all belong to the same agent).
 	s.ReconcileAgentStatus(ctx, agentID)
+	s.notifyTasksFinished(cancelled)
 	return cancelled, nil
 }
 
@@ -1275,6 +1277,7 @@ func (s *TaskService) CancelTasksByTriggerComment(ctx context.Context, commentID
 		s.ReconcileAgentStatus(ctx, t.AgentID)
 		s.broadcastTaskEvent(ctx, protocol.EventTaskCancelled, t)
 	}
+	s.notifyTasksFinished(cancelled)
 	return cancelled, nil
 }
 
@@ -1288,6 +1291,7 @@ func (s *TaskService) BroadcastCancelledTasks(ctx context.Context, cancelled []d
 		s.ReconcileAgentStatus(ctx, t.AgentID)
 		s.broadcastTaskEvent(ctx, protocol.EventTaskCancelled, t)
 	}
+	s.notifyTasksFinished(cancelled)
 }
 
 func (s *TaskService) CaptureCancelledTasks(ctx context.Context, cancelled []db.AgentTaskQueue) {
@@ -1346,6 +1350,7 @@ func (s *TaskService) CancelTaskWithResult(ctx context.Context, taskID pgtype.UU
 
 	// Broadcast cancellation as a task:failed event so frontends clear the live card
 	s.broadcastTaskEvent(ctx, protocol.EventTaskCancelled, task)
+	s.NotifyTaskFinished(task)
 
 	return &CancelTaskResult{
 		Task:                 task,
@@ -2872,6 +2877,7 @@ func (s *TaskService) HandleFailedTasks(ctx context.Context, tasks []db.AgentTas
 	for _, agentID := range affectedAgents {
 		s.ReconcileAgentStatus(ctx, agentID)
 	}
+	s.notifyTasksFinished(tasks)
 	return retried
 }
 
@@ -3119,6 +3125,33 @@ func (s *TaskService) NotifyTaskEnqueued(ctx context.Context, task db.AgentTaskQ
 	s.notifyTaskAvailable(task)
 }
 
+// NotifyTaskFinished invalidates a runtime's empty-claim verdict and emits a
+// best-effort daemon wakeup after a task reaches a terminal state. The task ID
+// is deliberately omitted from the wakeup payload: the completed task itself
+// is not available; the hint only means that a queued successor may have
+// become claimable because an agent-capacity or serialization barrier cleared.
+func (s *TaskService) NotifyTaskFinished(task db.AgentTaskQueue) {
+	s.notifyRuntimeMayHaveWork(task.RuntimeID, "")
+}
+
+// notifyTasksFinished is the batch form used by bulk terminal transitions.
+// Coalesce by runtime so cancelling many tasks on one machine produces one
+// cache bump and one websocket hint rather than a burst of identical work.
+func (s *TaskService) notifyTasksFinished(tasks []db.AgentTaskQueue) {
+	seen := make(map[string]struct{}, len(tasks))
+	for _, task := range tasks {
+		if !task.RuntimeID.Valid {
+			continue
+		}
+		runtimeKey := util.UUIDToString(task.RuntimeID)
+		if _, ok := seen[runtimeKey]; ok {
+			continue
+		}
+		seen[runtimeKey] = struct{}{}
+		s.notifyRuntimeMayHaveWork(task.RuntimeID, "")
+	}
+}
+
 // notifyTaskAvailable runs after a task has been inserted: bumps the
 // runtime's invalidation version so any in-flight claim that is about
 // to write an "empty" verdict will have it rejected on read, then
@@ -3127,10 +3160,16 @@ func (s *TaskService) NotifyTaskEnqueued(ctx context.Context, task db.AgentTaskQ
 // otherwise the wakeup-driven claim could read the still-current
 // empty verdict and return null.
 func (s *TaskService) notifyTaskAvailable(task db.AgentTaskQueue) {
-	if !task.RuntimeID.Valid {
+	s.notifyRuntimeMayHaveWork(task.RuntimeID, util.UUIDToString(task.ID))
+}
+
+// notifyRuntimeMayHaveWork is the shared bump-before-wakeup primitive for both
+// fresh enqueues and terminal transitions that can unblock queued work.
+func (s *TaskService) notifyRuntimeMayHaveWork(runtimeID pgtype.UUID, taskID string) {
+	if !runtimeID.Valid {
 		return
 	}
-	runtimeKey := util.UUIDToString(task.RuntimeID)
+	runtimeKey := util.UUIDToString(runtimeID)
 	// Use a background context: the cache bump / wakeup must outlive
 	// the request that created the task, otherwise an early client
 	// disconnect could leave the empty verdict in place and stall the
@@ -3141,7 +3180,7 @@ func (s *TaskService) notifyTaskAvailable(task db.AgentTaskQueue) {
 	if s.Wakeup == nil {
 		return
 	}
-	s.Wakeup.NotifyTaskAvailable(runtimeKey, util.UUIDToString(task.ID))
+	s.Wakeup.NotifyTaskAvailable(runtimeKey, taskID)
 }
 
 func (s *TaskService) broadcastTaskDispatch(ctx context.Context, task db.AgentTaskQueue) {

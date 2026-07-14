@@ -2563,10 +2563,7 @@ func (d *Daemon) pollLoop(ctx context.Context, taskWakeups <-chan taskWakeup) er
 
 	wakeup := make(chan struct{}, 1)
 	nudge := func() {
-		select {
-		case wakeup <- struct{}{}:
-		default:
-		}
+		signalPollerWakeup(wakeup)
 	}
 
 	pollerCtx, pollerCancel := context.WithCancel(ctx)
@@ -2615,7 +2612,7 @@ func (d *Daemon) pollLoop(ctx context.Context, taskWakeups <-chan taskWakeup) er
 // pollerCtx is cancelled on shutdown. parentCtx is the daemon root ctx passed to
 // handleTask so an in-flight task is not killed just because the poll loop is
 // stopping mid-flight.
-func (d *Daemon) runBatchPoller(pollerCtx, parentCtx context.Context, sem chan int, wakeup <-chan struct{}, taskWG *sync.WaitGroup) {
+func (d *Daemon) runBatchPoller(pollerCtx, parentCtx context.Context, sem chan int, wakeup chan struct{}, taskWG *sync.WaitGroup) {
 	releaseSlots := func(slots []int) {
 		for _, sl := range slots {
 			sem <- sl
@@ -2695,7 +2692,15 @@ func (d *Daemon) runBatchPoller(pollerCtx, parentCtx context.Context, sem chan i
 			go func(t Task, slot int) {
 				defer taskWG.Done()
 				defer d.activeTasks.Add(-1)
-				defer func() { sem <- slot }()
+				defer func() {
+					// Release local capacity before waking the poller. The task's
+					// terminal callback and local cleanup have both finished at this
+					// point, so a successor that was previously blocked by agent
+					// capacity or per-(issue, agent) serialization can be claimed
+					// immediately instead of waiting for PollInterval.
+					sem <- slot
+					signalPollerWakeup(wakeup)
+				}()
 				d.handleTask(parentCtx, t, slot)
 			}(t, slot)
 			dispatched++
@@ -2713,6 +2718,13 @@ func (d *Daemon) runBatchPoller(pollerCtx, parentCtx context.Context, sem chan i
 		if err := sleepWithContextOrWakeup(pollerCtx, d.cfg.PollInterval, wakeup); err != nil {
 			return
 		}
+	}
+}
+
+func signalPollerWakeup(wakeup chan<- struct{}) {
+	select {
+	case wakeup <- struct{}{}:
+	default:
 	}
 }
 

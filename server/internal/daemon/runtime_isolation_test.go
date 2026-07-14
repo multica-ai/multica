@@ -199,6 +199,141 @@ func TestRunBatchPollerClaimsAcrossRuntimes(t *testing.T) {
 	taskWG.Wait()
 }
 
+// TestRunBatchPollerWakesAfterTaskExit guards the gap where a queued task is
+// temporarily unclaimable (for example, because the same agent/issue task is
+// still running), the batch claim returns empty, and the poller goes to sleep
+// for PollInterval. Finishing the active task must wake that sleep locally;
+// relying only on the enqueue-time websocket hint can leave the successor
+// queued for the full default 30 seconds.
+func TestRunBatchPollerWakesAfterTaskExit(t *testing.T) {
+	t.Parallel()
+	testRunBatchPollerTaskExitWakeup(t, 2, 50*time.Millisecond)
+}
+
+// The max-concurrency=1 shape takes a different sleep branch: after the
+// two-second slot wait expires, the poller parks on the five-second capacity
+// backoff. A returned semaphore slot alone does not wake that sleep, so the
+// explicit completion signal is required there too.
+func TestRunBatchPollerWakesFromCapacityBackoffAfterTaskExit(t *testing.T) {
+	t.Parallel()
+	testRunBatchPollerTaskExitWakeup(t, 1, taskSlotWaitTimeout+250*time.Millisecond)
+}
+
+func testRunBatchPollerTaskExitWakeup(t *testing.T, maxConcurrent int, releaseDelay time.Duration) {
+	t.Helper()
+
+	var firstCompleted atomic.Bool
+	var secondServed atomic.Bool
+	var claimCalls atomic.Int64
+	firstStarted := make(chan struct{})
+	releaseFirst := make(chan struct{})
+	secondStarted := make(chan struct{})
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/api/daemon/tasks/claim"):
+			claimCalls.Add(1)
+			switch {
+			case !firstCompleted.Load():
+				w.Write([]byte(`{"tasks":[{"id":"t1","runtime_id":"rt-1","issue_id":"i1","agent":{"name":"a"}}]}`))
+			case secondServed.CompareAndSwap(false, true):
+				w.Write([]byte(`{"tasks":[{"id":"t2","runtime_id":"rt-1","issue_id":"i1","agent":{"name":"a"}}]}`))
+			default:
+				w.Write([]byte(`{"tasks":[]}`))
+			}
+		case strings.HasSuffix(r.URL.Path, "/api/daemon/tasks/t1/complete"):
+			firstCompleted.Store(true)
+			w.Write([]byte(`{}`))
+		default:
+			w.Write([]byte(`{}`))
+		}
+	}))
+	defer srv.Close()
+
+	d := New(Config{
+		ServerBaseURL:      srv.URL,
+		HeartbeatInterval:  time.Hour,
+		PollInterval:       time.Hour,
+		MaxConcurrentTasks: maxConcurrent,
+	}, slog.New(slog.NewTextHandler(noopWriter{}, nil)))
+	d.workspaces["ws-1"] = &workspaceState{workspaceID: "ws-1", runtimeIDs: []string{"rt-1"}}
+	d.runtimeIndex["rt-1"] = Runtime{ID: "rt-1"}
+	d.cancelPollInterval = time.Hour
+	d.runner = taskRunnerFunc(func(ctx context.Context, task Task, provider string, slot int, log *slog.Logger) (TaskResult, error) {
+		switch task.ID {
+		case "t1":
+			close(firstStarted)
+			select {
+			case <-releaseFirst:
+			case <-ctx.Done():
+				return TaskResult{Status: "cancelled"}, ctx.Err()
+			}
+		case "t2":
+			close(secondStarted)
+		}
+		return TaskResult{Status: "completed"}, nil
+	})
+
+	sem := newTaskSlotSemaphore(d.cfg.MaxConcurrentTasks)
+	wakeup := make(chan struct{}, 1)
+	var taskWG sync.WaitGroup
+	ctx, cancel := context.WithCancel(context.Background())
+	pollDone := make(chan struct{})
+	go func() {
+		defer close(pollDone)
+		d.runBatchPoller(ctx, ctx, sem, wakeup, &taskWG)
+	}()
+
+	select {
+	case <-firstStarted:
+	case <-time.After(2 * time.Second):
+		cancel()
+		<-pollDone
+		t.Fatal("first task was not dispatched")
+	}
+
+	// Give the poller time to enter the sleep branch under test. No websocket
+	// wakeup is sent; only the task-exit signal may resume the poller.
+	time.Sleep(releaseDelay)
+	close(releaseFirst)
+
+	select {
+	case <-secondStarted:
+	case <-time.After(2 * time.Second):
+		cancel()
+		<-pollDone
+		t.Fatalf("successor was not dispatched after predecessor exit; claim calls=%d", claimCalls.Load())
+	}
+
+	cancel()
+	<-pollDone
+	taskWG.Wait()
+}
+
+func TestSignalPollerWakeupCoalescesAndIsNilSafe(t *testing.T) {
+	t.Parallel()
+	wakeup := make(chan struct{}, 1)
+	signalPollerWakeup(wakeup)
+	signalPollerWakeup(wakeup)
+	if got := len(wakeup); got != 1 {
+		t.Fatalf("coalesced wakeup count = %d, want 1", got)
+	}
+
+	// A nil channel models a poller that has no local wakeup transport. The
+	// non-blocking helper must return instead of hanging a finishing task.
+	done := make(chan struct{})
+	go func() {
+		signalPollerWakeup(nil)
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("nil poller wakeup blocked")
+	}
+}
+
 // TestRunBatchPollerSkipsClaimWhenAtCapacity pins slot-before-claim for the
 // batch poller: with no free execution slots it must NOT claim, so tasks never
 // pile up server-side `dispatched` and race the dispatch-timeout sweeper.
