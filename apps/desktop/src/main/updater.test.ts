@@ -1,10 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { BrowserWindow, WebContents } from "electron";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 type Handler = (...args: unknown[]) => void;
+type IpcHandler = (...args: unknown[]) => unknown;
 
 const ctx = vi.hoisted(() => ({
   handlers: new Map<string, Handler[]>(),
+  ipcHandlers: new Map<string, IpcHandler>(),
   ipcHandle: vi.fn(),
   checkForUpdates: vi.fn(async () => ({
     updateInfo: { version: "0.3.18" },
@@ -13,6 +18,7 @@ const ctx = vi.hoisted(() => ({
   downloadUpdate: vi.fn(),
   quitAndInstall: vi.fn(),
   getVersion: vi.fn(() => "0.3.17"),
+  userDataPath: "",
 }));
 
 vi.mock("electron-updater", () => {
@@ -36,6 +42,7 @@ vi.mock("electron-updater", () => {
 vi.mock("electron", () => ({
   app: {
     getVersion: ctx.getVersion,
+    getPath: vi.fn(() => ctx.userDataPath),
   },
   BrowserWindow: class BrowserWindow {},
   ipcMain: {
@@ -44,11 +51,18 @@ vi.mock("electron", () => ({
 }));
 
 import { setupAutoUpdater } from "./updater";
+import { updaterPreferencesPath } from "./updater-preferences";
 
 function emitUpdater(event: string, ...args: unknown[]) {
   for (const handler of ctx.handlers.get(event) ?? []) {
     handler(...args);
   }
+}
+
+async function invokeIpc(channel: string, ...args: unknown[]) {
+  const handler = ctx.ipcHandlers.get(channel);
+  if (!handler) throw new Error(`Missing IPC handler: ${channel}`);
+  return handler({}, ...args);
 }
 
 function makeWindow() {
@@ -109,8 +123,13 @@ function makeWindowWithThrowingSend(error: Error) {
 describe("setupAutoUpdater", () => {
   beforeEach(() => {
     vi.useFakeTimers();
+    ctx.userDataPath = mkdtempSync(join(tmpdir(), "multica-updater-test-"));
     ctx.handlers.clear();
+    ctx.ipcHandlers.clear();
     ctx.ipcHandle.mockClear();
+    ctx.ipcHandle.mockImplementation((channel: string, handler: IpcHandler) => {
+      ctx.ipcHandlers.set(channel, handler);
+    });
     ctx.checkForUpdates.mockClear();
     ctx.downloadUpdate.mockClear();
     ctx.quitAndInstall.mockClear();
@@ -120,6 +139,60 @@ describe("setupAutoUpdater", () => {
   afterEach(() => {
     vi.clearAllTimers();
     vi.useRealTimers();
+    rmSync(ctx.userDataPath, { recursive: true, force: true });
+  });
+
+  it("enables automatic background updates by default", async () => {
+    setupAutoUpdater(() => null);
+
+    await expect(invokeIpc("updater:get-preferences")).resolves.toEqual({
+      automaticUpdates: true,
+    });
+
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(ctx.checkForUpdates).toHaveBeenCalledTimes(1);
+  });
+
+  it("skips startup and periodic checks when automatic updates are disabled", async () => {
+    writeFileSync(
+      updaterPreferencesPath(ctx.userDataPath),
+      JSON.stringify({ automaticUpdates: false }),
+    );
+    setupAutoUpdater(() => null);
+
+    await vi.advanceTimersByTimeAsync(60 * 60 * 1000 + 5_000);
+
+    expect(ctx.checkForUpdates).not.toHaveBeenCalled();
+  });
+
+  it("persists the automatic update preference and stops future background checks", async () => {
+    setupAutoUpdater(() => null);
+
+    await expect(
+      invokeIpc("updater:set-automatic-updates", false),
+    ).resolves.toEqual({ automaticUpdates: false });
+    expect(
+      JSON.parse(
+        readFileSync(updaterPreferencesPath(ctx.userDataPath), "utf-8"),
+      ),
+    ).toEqual({ automaticUpdates: false });
+
+    await vi.advanceTimersByTimeAsync(60 * 60 * 1000 + 5_000);
+    expect(ctx.checkForUpdates).not.toHaveBeenCalled();
+  });
+
+  it("still allows an explicit manual check when automatic updates are disabled", async () => {
+    writeFileSync(
+      updaterPreferencesPath(ctx.userDataPath),
+      JSON.stringify({ automaticUpdates: false }),
+    );
+    setupAutoUpdater(() => null);
+
+    await expect(invokeIpc("updater:check")).resolves.toMatchObject({
+      ok: true,
+    });
+
+    expect(ctx.checkForUpdates).toHaveBeenCalledTimes(1);
   });
 
   it("forwards update progress to a live renderer", () => {

@@ -3,6 +3,10 @@ import type { RuntimeConfigResult } from "../shared/runtime-config";
 import type { NavigationGesture } from "../shared/navigation-gestures";
 import type { RendererRouteContextInput } from "../shared/renderer-route-context";
 import type { FreezeBreadcrumb } from "../shared/freeze-breadcrumb";
+import type {
+  ManualUpdateCheckResult,
+  UpdaterPreferences,
+} from "../shared/updater-types";
 
 interface DesktopAPI {
   /** App version + normalized OS, captured synchronously at preload time. */
@@ -147,10 +151,9 @@ interface UpdaterAPI {
   ) => () => void;
   downloadUpdate: () => Promise<void>;
   installUpdate: () => Promise<void>;
-  checkForUpdates: () => Promise<
-    | { ok: true; currentVersion: string; latestVersion: string; available: boolean }
-    | { ok: false; error: string }
-  >;
+  getPreferences: () => Promise<UpdaterPreferences>;
+  setAutomaticUpdates: (enabled: boolean) => Promise<UpdaterPreferences>;
+  checkForUpdates: () => Promise<ManualUpdateCheckResult>;
 }
 
 declare global {
