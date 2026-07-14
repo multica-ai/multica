@@ -170,6 +170,14 @@ multica issue property unset <issue-id> --name Environment
   filter by, and a definition exists, prefer the property. Metadata stays the
   free-form scratchpad for run state (`pr_url`, `waiting_on`, ...).
 
+## External identity imports
+
+Use `multica issue upsert-external` only when an integration or migration has
+a stable external identity namespace plus opaque external id. It verifies the
+pinned server authority before sending the token-bearing write request, then
+creates or claims exactly one issue by alias. Do not use title matching for
+import idempotency.
+
 ## Status changes have server side effects
 
 A status change is not cosmetic — the server enqueues or skips agent work based

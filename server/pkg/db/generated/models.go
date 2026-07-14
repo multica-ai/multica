@@ -173,6 +173,12 @@ type Attachment struct {
 	TaskID        pgtype.UUID        `json:"task_id"`
 }
 
+type AuthorityNonce struct {
+	NonceHash []byte             `json:"nonce_hash"`
+	ClaimedAt pgtype.Timestamptz `json:"claimed_at"`
+	ExpiresAt pgtype.Timestamptz `json:"expires_at"`
+}
+
 type Autopilot struct {
 	ID                 pgtype.UUID        `json:"id"`
 	WorkspaceID        pgtype.UUID        `json:"workspace_id"`
@@ -585,6 +591,14 @@ type IssueDependency struct {
 	IssueID          pgtype.UUID `json:"issue_id"`
 	DependsOnIssueID pgtype.UUID `json:"depends_on_issue_id"`
 	Type             string      `json:"type"`
+}
+
+type IssueExternalIdentity struct {
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	Namespace   string             `json:"namespace"`
+	ExternalID  string             `json:"external_id"`
+	IssueID     pgtype.UUID        `json:"issue_id"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
 type IssueLabel struct {

@@ -169,6 +169,16 @@ wakes the parent assignee. Promoting the next stage's `backlog` sub-issues to
 | Per-type value validation (self-correcting errors) | `server/internal/handler/property.go` (`validatePropertyValue`) |
 | API routes (`/api/properties`, PUT/DELETE `/api/issues/{id}/properties/{propertyId}`) | `server/cmd/server/router.go` |
 
+## External identity upsert
+
+| Behavior | File:line |
+|---|---|
+| `multica issue upsert-external` command and flags | `server/cmd/multica/cmd_issue.go` (`issueUpsertExternalCmd`, `registerIssueUpsertExternalFlags`) |
+| CLI authority verification before write client | `server/cmd/multica/cmd_issue.go` (`runIssueUpsertExternal`) and `server/cmd/multica/cmd_authority.go` (`verifyAuthorityForCommand`) |
+| Protected route before `/{id}` | `server/cmd/server/router.go` (`/api/issues/upsert-external`) |
+| Transactional service algorithm | `server/internal/service/issue_external_identity.go` |
+| DB identity table | `server/migrations/162_issue_external_identity.up.sql` |
+
 ## Verification command
 
 Re-derive any line above before depending on it:

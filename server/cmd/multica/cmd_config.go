@@ -49,6 +49,14 @@ func runConfigShow(cmd *cobra.Command, _ []string) error {
 	fmt.Fprintf(os.Stdout, "server_url:   %s\n", valueOrDefault(cfg.ServerURL, "(not set)"))
 	fmt.Fprintf(os.Stdout, "app_url:      %s\n", valueOrDefault(cfg.AppURL, "(not set)"))
 	fmt.Fprintf(os.Stdout, "workspace_id: %s\n", valueOrDefault(cfg.WorkspaceID, "(not set)"))
+	if cfg.AuthorityPin == nil {
+		fmt.Fprintf(os.Stdout, "authority:    %s\n", "(not set)")
+	} else {
+		fmt.Fprintf(os.Stdout, "authority.server_url:   %s\n", valueOrDefault(cfg.AuthorityPin.ServerURL, "(not set)"))
+		fmt.Fprintf(os.Stdout, "authority.id:           %s\n", valueOrDefault(cfg.AuthorityPin.AuthorityID, "(not set)"))
+		fmt.Fprintf(os.Stdout, "authority.public_key:   %s\n", valueOrDefault(cfg.AuthorityPin.PublicKey, "(not set)"))
+		fmt.Fprintf(os.Stdout, "authority.db_identity:  %s/%d/%s\n", cfg.AuthorityPin.DBIdentity.SystemIdentifier, cfg.AuthorityPin.DBIdentity.DatabaseOID, cfg.AuthorityPin.DBIdentity.DatabaseName)
+	}
 	return nil
 }
 
