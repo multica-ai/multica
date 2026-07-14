@@ -44,6 +44,11 @@ import type { IssueCreateDefaults } from "../surface/types";
 
 const EMPTY_PROGRESS_MAP = new Map<string, ChildProgress>();
 const EMPTY_IDS: string[] = [];
+// Passed to <Virtuoso components> when there is no Footer. Must be a STABLE
+// object, never `undefined`: react-virtuoso seeds `components` with an internal
+// `{}` default, and an explicit `undefined` prop overwrites that default, so
+// its startup destructure of `EmptyPlaceholder`/`Footer` throws (MUL-4474).
+const EMPTY_VIRTUOSO_COMPONENTS = {};
 
 function buildListGroups(visibleStatuses: IssueStatus[]): BoardColumnGroup[] {
   return visibleStatuses.map((status) => ({
@@ -439,7 +444,7 @@ function StatusAccordionItem({
     () =>
       hasMore
         ? { Footer: () => <InfiniteScrollSentinel onVisible={loadMore} loading={isLoading} /> }
-        : undefined,
+        : EMPTY_VIRTUOSO_COMPONENTS,
     [hasMore, loadMore, isLoading],
   );
 

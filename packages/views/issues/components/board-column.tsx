@@ -36,6 +36,12 @@ import type { IssueCreateDefaults } from "../surface/types";
 export const BOARD_COL_WIDTH = 280;
 export const BOARD_CARD_WIDTH = BOARD_COL_WIDTH - 16 - 8; // col(280) - col p-2(16) - droppable p-1(8)
 
+// Passed to <Virtuoso components> when the column has no footer. Must be a
+// STABLE object, never `undefined`: an explicit `undefined` prop overwrites
+// react-virtuoso's internal `{}` default and its startup destructure of
+// `EmptyPlaceholder`/`Footer` throws (MUL-4474).
+const EMPTY_VIRTUOSO_COMPONENTS = {};
+
 export interface BoardColumnGroup {
   id: string;
   title: string;
@@ -104,7 +110,7 @@ export const BoardColumn = memo(function BoardColumn({
   // real end of the virtualized list and its IntersectionObserver still fires
   // loadMore when scrolled to the bottom.
   const footerComponents = useMemo(
-    () => (footer ? { Footer: () => <>{footer}</> } : undefined),
+    () => (footer ? { Footer: () => <>{footer}</> } : EMPTY_VIRTUOSO_COMPONENTS),
     [footer],
   );
 
