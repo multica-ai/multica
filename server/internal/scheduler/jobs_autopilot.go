@@ -52,6 +52,18 @@ type AutopilotScheduleDispatcher interface {
 	) (*db.AutopilotRun, error)
 }
 
+type autopilotAttemptDispatcher interface {
+	DispatchAutopilotForPlanAttempt(
+		ctx context.Context,
+		autopilot db.Autopilot,
+		triggerID pgtype.UUID,
+		source string,
+		payload []byte,
+		plannedAt time.Time,
+		retryBudgetRemaining bool,
+	) (*db.AutopilotRun, error)
+}
+
 // AutopilotScheduleDispatchJob returns the JobSpec that drives
 // scheduled Autopilot dispatch through the existing scheduler +
 // sys_cron_executions lease infrastructure. Replaces the legacy
@@ -370,9 +382,17 @@ func autopilotHandler(
 			}}, nil
 		}
 
-		run, err := dispatcher.DispatchAutopilotForPlan(
-			ctx, autopilot, trigger.ID, "schedule", nil, in.PlanTime,
-		)
+		var run *db.AutopilotRun
+		if attemptDispatcher, ok := dispatcher.(autopilotAttemptDispatcher); ok {
+			run, err = attemptDispatcher.DispatchAutopilotForPlanAttempt(
+				ctx, autopilot, trigger.ID, "schedule", nil, in.PlanTime,
+				in.Attempt < in.Job.MaxAttempts,
+			)
+		} else {
+			run, err = dispatcher.DispatchAutopilotForPlan(
+				ctx, autopilot, trigger.ID, "schedule", nil, in.PlanTime,
+			)
+		}
 		if err != nil {
 			return HandlerResult{}, fmt.Errorf("dispatch for plan: %w", err)
 		}
