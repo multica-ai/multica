@@ -37,6 +37,45 @@ func TestPatternsFromEnv_DropsSeparatorBearingEntries(t *testing.T) {
 	}
 }
 
+func TestLoadConfig_SkillTraceDisabledByDefault(t *testing.T) {
+	stageFakeAgent(t)
+	root := t.TempDir()
+	cfg, err := LoadConfig(Overrides{
+		ServerURL:      "http://localhost:8080",
+		WorkspacesRoot: root,
+	})
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	if cfg.SkillTraceEnabled {
+		t.Fatal("SkillTraceEnabled = true by default, want false")
+	}
+	if cfg.SkillTracePath != filepath.Join(root, "skill-invocations.jsonl") {
+		t.Fatalf("SkillTracePath = %q, want default under workspaces root", cfg.SkillTracePath)
+	}
+}
+
+func TestLoadConfig_SkillTraceEnabledFromEnv(t *testing.T) {
+	stageFakeAgent(t)
+	path := filepath.Join(t.TempDir(), "events.jsonl")
+	t.Setenv("MULTICA_SKILL_TRACE_ENABLED", "true")
+	t.Setenv("MULTICA_SKILL_TRACE_PATH", path)
+
+	cfg, err := LoadConfig(Overrides{
+		ServerURL:      "http://localhost:8080",
+		WorkspacesRoot: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	if !cfg.SkillTraceEnabled {
+		t.Fatal("SkillTraceEnabled = false, want true from env")
+	}
+	if cfg.SkillTracePath != path {
+		t.Fatalf("SkillTracePath = %q, want env path %q", cfg.SkillTracePath, path)
+	}
+}
+
 func TestIsSafeAgentName(t *testing.T) {
 	for _, tc := range []struct {
 		in   string

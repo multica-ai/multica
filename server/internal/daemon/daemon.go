@@ -157,6 +157,7 @@ type Daemon struct {
 	client     *Client
 	repoCache  repoCacheBackend
 	skillCache *SkillBundleCache
+	skillTrace *SkillTraceRecorder
 	logger     *slog.Logger
 
 	mu           sync.Mutex
@@ -294,6 +295,7 @@ func New(cfg Config, logger *slog.Logger) *Daemon {
 		client:                    client,
 		repoCache:                 repocache.New(cacheRoot, logger),
 		skillCache:                NewSkillBundleCache(skillCacheRoot),
+		skillTrace:                NewSkillTraceRecorder(cfg),
 		logger:                    logger,
 		workspaces:                make(map[string]*workspaceState),
 		runtimeIndex:              make(map[string]Runtime),
@@ -1065,6 +1067,31 @@ func (d *Daemon) findRuntime(id string) *Runtime {
 		return &rt
 	}
 	return nil
+}
+
+func (d *Daemon) skillTraceMetaForTask(task Task, provider string) skillTraceMeta {
+	meta := skillTraceMeta{
+		Provider:      provider,
+		MachineID:     d.cfg.DaemonID,
+		DeviceName:    d.cfg.DeviceName,
+		DaemonProfile: d.cfg.Profile,
+	}
+	if rt := d.findRuntime(task.RuntimeID); rt != nil {
+		meta.RuntimeProfileID = rt.ProfileID
+	}
+	return meta
+}
+
+func (d *Daemon) recordSkillTrace(task Task, skills []SkillData, provider string, taskLog *slog.Logger) {
+	if d.skillTrace == nil || !d.skillTrace.Enabled() {
+		return
+	}
+	events := buildSkillTraceEvents(task, skills, d.skillTraceMetaForTask(task, provider))
+	if err := d.skillTrace.Record(events); err != nil {
+		if taskLog != nil {
+			taskLog.Warn("skill trace write failed (non-fatal)", "error", err)
+		}
+	}
 }
 
 // recordProfileLaunch remembers the absolute executable path and fixed launch
@@ -3916,6 +3943,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		return TaskResult{}, fmt.Errorf("start task failed: %w", err)
 	}
 	stopPrepareLease()
+	d.recordSkillTrace(task, skills, provider, taskLog)
 	_ = d.client.ReportProgress(ctx, task.ID, fmt.Sprintf("Launching %s", provider), 1, 2)
 
 	reused := gateResumeToReusedWorkdir(&task, &taskCtx, env.WorkDir, taskLog)

@@ -183,6 +183,8 @@ Daemon behavior is configured via flags or environment variables:
 | GC orphan TTL (no `.gc_meta.json`) | — | `MULTICA_GC_ORPHAN_TTL` | `72h` |
 | GC artifact TTL (open issues) | — | `MULTICA_GC_ARTIFACT_TTL` | `12h` (set `0` to disable) |
 | GC artifact patterns | — | `MULTICA_GC_ARTIFACT_PATTERNS` | `node_modules,.next,.turbo` |
+| Skill trace enabled | — | `MULTICA_SKILL_TRACE_ENABLED` | disabled (set `true`/`1`/`yes`/`on` to enable) |
+| Skill trace path | — | `MULTICA_SKILL_TRACE_PATH` | `<workspaces_root>/skill-invocations.jsonl` |
 
 #### Workspace garbage collection
 
@@ -193,6 +195,12 @@ The daemon periodically scans `MULTICA_WORKSPACES_ROOT` and reclaims disk space 
 - **Artifact-only cleanup** — when a task has been completed for at least `MULTICA_GC_ARTIFACT_TTL` but the issue is still open, regenerable build outputs whose directory basename matches `MULTICA_GC_ARTIFACT_PATTERNS` are removed; the rest of the workdir (source, `.git`, `output/`, `logs/`, `.gc_meta.json`) is preserved so the agent can resume the same workdir on the next task.
 
 Patterns are basename-only — entries containing `/` or `\` are silently dropped — and `.git` subtrees are never descended into. The default list (`node_modules`, `.next`, `.turbo`) is intentionally narrow; extend it per deployment if your repos consistently produce other regenerable directories (for example, `MULTICA_GC_ARTIFACT_PATTERNS=node_modules,.next,.turbo,target,__pycache__`). To disable artifact cleanup entirely, set `MULTICA_GC_ARTIFACT_TTL=0`.
+
+#### Skill behavior trace
+
+`MULTICA_SKILL_TRACE_ENABLED=true` turns on a daemon-local append-only JSONL stream for skill adoption analysis. It is disabled by default and is not shipped to PostHog. Each line includes task/workspace/agent/runtime/machine metadata plus the skill id/name/source/hash.
+
+The daemon emits `skill_loaded` when an agent's mounted skill is materialized for a task. It emits `skill_invoked` only for explicit chat slash-skill links (`slash://skill/<id>`) that match one of the mounted skills. Provider-internal model choices are not inferred, because agent CLIs do not expose a portable "model used this skill" event.
 
 Agent-specific overrides:
 
