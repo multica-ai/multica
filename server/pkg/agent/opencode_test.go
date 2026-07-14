@@ -779,15 +779,18 @@ func TestOpencodeProcessEventsMultiStepHappyPath(t *testing.T) {
 	b := &opencodeBackend{cfg: Config{Logger: slog.Default()}}
 	ch := make(chan Message, 256)
 
-	// Two fully bracketed steps (step_start … step_finish ×2) must stay
-	// "completed" — the terminal-signal guard only fires on an unclosed step.
+	// A full tool loop as it appears on the real wire (live-probed against
+	// opencode 1.17.16): the tool step closes with reason "tool-calls", the
+	// continuation step opens and closes with the final reason "stop". Must
+	// stay "completed" — "stop" is the run-level terminal signal.
 	lines := strings.Join([]string{
 		`{"type":"step_start","timestamp":1000,"sessionID":"ses_multi","part":{"type":"step-start"}}`,
 		`{"type":"text","timestamp":1001,"sessionID":"ses_multi","part":{"type":"text","text":"step one"}}`,
-		`{"type":"step_finish","timestamp":1002,"sessionID":"ses_multi","part":{"type":"step-finish"}}`,
-		`{"type":"step_start","timestamp":1003,"sessionID":"ses_multi","part":{"type":"step-start"}}`,
-		`{"type":"text","timestamp":1004,"sessionID":"ses_multi","part":{"type":"text","text":" step two"}}`,
-		`{"type":"step_finish","timestamp":1005,"sessionID":"ses_multi","part":{"type":"step-finish"}}`,
+		`{"type":"tool_use","timestamp":1002,"sessionID":"ses_multi","part":{"type":"tool","tool":"bash","callID":"call_1","state":{"status":"completed","input":{"command":"echo ok"},"output":"ok\n"}}}`,
+		`{"type":"step_finish","timestamp":1003,"sessionID":"ses_multi","part":{"type":"step-finish","reason":"tool-calls"}}`,
+		`{"type":"step_start","timestamp":1004,"sessionID":"ses_multi","part":{"type":"step-start"}}`,
+		`{"type":"text","timestamp":1005,"sessionID":"ses_multi","part":{"type":"text","text":" step two"}}`,
+		`{"type":"step_finish","timestamp":1006,"sessionID":"ses_multi","part":{"type":"step-finish","reason":"stop"}}`,
 	}, "\n")
 
 	result := b.processEvents(strings.NewReader(lines), ch)
@@ -797,6 +800,65 @@ func TestOpencodeProcessEventsMultiStepHappyPath(t *testing.T) {
 	}
 	if result.output != "step one step two" {
 		t.Errorf("output: got %q", result.output)
+	}
+	if result.errMsg != "" {
+		t.Errorf("errMsg: got %q, want empty", result.errMsg)
+	}
+
+	close(ch)
+}
+
+func TestOpencodeProcessEventsStreamEndsAfterToolCallsStepFinish(t *testing.T) {
+	t.Parallel()
+
+	b := &opencodeBackend{cfg: Config{Logger: slog.Default()}}
+	ch := make(chan Message, 256)
+
+	// A step_finish with reason "tool-calls" is not a run-level terminal
+	// signal: tool results still have to be fed back in a continuation step.
+	// If the stream dies in the gap between that finish and the next
+	// step_start, the run did not complete — even though no step is open.
+	lines := strings.Join([]string{
+		`{"type":"step_start","timestamp":1000,"sessionID":"ses_toolcalls","part":{"type":"step-start"}}`,
+		`{"type":"tool_use","timestamp":1001,"sessionID":"ses_toolcalls","part":{"type":"tool","tool":"bash","callID":"call_1","state":{"status":"completed","input":{"command":"go test ./..."},"output":"ok\n"}}}`,
+		`{"type":"step_finish","timestamp":1002,"sessionID":"ses_toolcalls","part":{"type":"step-finish","reason":"tool-calls"}}`,
+	}, "\n")
+
+	result := b.processEvents(strings.NewReader(lines), ch)
+
+	if result.status != "failed" {
+		t.Errorf("status: got %q, want %q", result.status, "failed")
+	}
+	if !strings.Contains(result.errMsg, "terminal signal") {
+		t.Errorf("errMsg: got %q, want it to mention the missing terminal signal", result.errMsg)
+	}
+	if !result.noTerminalSignal {
+		t.Error("noTerminalSignal: got false, want true")
+	}
+
+	close(ch)
+}
+
+func TestOpencodeProcessEventsStepFinishWithoutReasonBackcompat(t *testing.T) {
+	t.Parallel()
+
+	b := &opencodeBackend{cfg: Config{Logger: slog.Default()}}
+	ch := make(chan Message, 256)
+
+	// Older opencode versions emit step-finish parts without a reason field.
+	// A missing (or unknown) reason must be treated as terminal so healthy
+	// runs on old protocols are not mass-failed; only an explicit
+	// "tool-calls" keeps the run non-terminal.
+	lines := strings.Join([]string{
+		`{"type":"step_start","timestamp":1000,"sessionID":"ses_noreason","part":{"type":"step-start"}}`,
+		`{"type":"text","timestamp":1001,"sessionID":"ses_noreason","part":{"type":"text","text":"legacy run"}}`,
+		`{"type":"step_finish","timestamp":1002,"sessionID":"ses_noreason","part":{"type":"step-finish"}}`,
+	}, "\n")
+
+	result := b.processEvents(strings.NewReader(lines), ch)
+
+	if result.status != "completed" {
+		t.Errorf("status: got %q, want %q", result.status, "completed")
 	}
 	if result.errMsg != "" {
 		t.Errorf("errMsg: got %q, want empty", result.errMsg)

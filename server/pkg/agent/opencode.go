@@ -289,7 +289,17 @@ func (b *opencodeBackend) processEvents(r io.Reader, ch chan<- Message) eventRes
 	// error), so a dangling tool call implies an unclosed step — step bracketing
 	// is the positive terminal signal. Recovered tool errors (state.status ==
 	// "error") are normal in healthy runs and must not affect status.
-	openStep := false // between a step_start and its step_finish
+	//
+	// Step bracketing alone is not enough: step_finish carries a reason
+	// (FinishReason: "stop", "tool-calls", …), and a run that still has tool
+	// results to feed back closes its step with reason "tool-calls" before the
+	// next step_start. A stream that ends in that gap did not finish either, so
+	// a "tool-calls" finish keeps the run non-terminal until the next step
+	// opens. Any other reason — including absent, for older opencode versions
+	// whose step_finish parts predate the reason field — is treated as terminal
+	// so healthy runs on old protocols are not mass-failed.
+	openStep := false             // between a step_start and its step_finish
+	awaitingContinuation := false // last step_finish was reason "tool-calls"; next step never started
 
 	scanner := bufio.NewScanner(r)
 	scanner.Buffer(make([]byte, 0, 1024*1024), 10*1024*1024)
@@ -318,9 +328,11 @@ func (b *opencodeBackend) processEvents(r io.Reader, ch chan<- Message) eventRes
 			b.handleErrorEvent(event, ch, &finalStatus, &finalError)
 		case "step_start":
 			openStep = true
+			awaitingContinuation = false
 			trySend(ch, Message{Type: MessageStatus, Status: "running"})
 		case "step_finish":
 			openStep = false
+			awaitingContinuation = event.Part.Reason == "tool-calls"
 			// Accumulate token usage from step_finish events.
 			if t := event.Part.Tokens; t != nil {
 				usage.InputTokens += t.Input
@@ -342,14 +354,20 @@ func (b *opencodeBackend) processEvents(r io.Reader, ch chan<- Message) eventRes
 		}
 	}
 
-	// Require a positive terminal signal. A clean EOF while a step is still open
-	// means the run did not finish — its provider stream died and `opencode run`
-	// exited without emitting an error event. Fail closed on that structural
-	// evidence rather than reporting a false-green completion.
+	// Require a positive terminal signal. A clean EOF while a step is still
+	// open — or right after a step that finished with reason "tool-calls",
+	// whose continuation step never started — means the run did not finish:
+	// its provider stream died and `opencode run` exited without emitting an
+	// error event. Fail closed on that structural evidence rather than
+	// reporting a false-green completion.
 	noTerminalSignal := false
-	if finalStatus == "completed" && openStep {
+	if finalStatus == "completed" && (openStep || awaitingContinuation) {
 		finalStatus = "failed"
-		finalError = "opencode stream ended without a terminal signal (step still open at EOF)"
+		if openStep {
+			finalError = "opencode stream ended without a terminal signal (step still open at EOF)"
+		} else {
+			finalError = `opencode stream ended without a terminal signal (last step finished with reason "tool-calls" and its continuation never started)`
+		}
 		noTerminalSignal = true
 	}
 
@@ -522,6 +540,10 @@ type opencodeEventPart struct {
 
 	// step_finish token usage
 	Tokens *opencodeTokens `json:"tokens,omitempty"`
+
+	// step_finish reason (FinishReason: "stop", "tool-calls", …). Absent on
+	// older opencode versions whose step-finish parts predate the field.
+	Reason string `json:"reason,omitempty"`
 }
 
 // opencodeTokens represents token usage in a step_finish event.
