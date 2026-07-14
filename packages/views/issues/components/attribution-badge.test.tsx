@@ -52,9 +52,9 @@ describe("AttributionBadge", () => {
   });
 
   it("shows a backfilled attribution in the normal tone, not a warning (MUL-4768)", () => {
-    // Backfill is non-precise for the coverage metric, but it names a human the
-    // same waterfall resolved — just after the fact — so it must read like any
-    // other confident attribution rather than a yellow warning.
+    // Backfill is non-precise for the coverage metric — a historical, after-the-
+    // fact record — but that does not make the displayed name wrong, so it must
+    // read like any other resolved attribution rather than a yellow warning.
     const attribution: TaskAttribution = {
       source: "backfill",
       precise: false,

@@ -24,10 +24,12 @@ function initialsOf(name: string): string {
 /**
  * AttributionBadge renders who an agent run is accountable to (MUL-4302 §9):
  * the "on behalf of <member>" provenance, with the resolution source in a
- * tooltip and a cautionary tone ONLY when the named human is a fallback guess
- * (owner_fallback) rather than a confidently resolved one. A backfilled
- * attribution is confident (resolved after the fact by the same waterfall), so
- * it reads like any other attribution instead of a warning (MUL-4768).
+ * tooltip and a cautionary tone ONLY when the named human may not be the real
+ * responsible person — a fallback guess (owner_fallback). A backfilled
+ * attribution is a historical, after-the-fact record (non-realtime, not
+ * compliance-grade), but that does not make the displayed name wrong, so it
+ * earns no warning tone; its historical origin still shows in the tooltip and
+ * the raw `source` field (MUL-4768).
  *
  * Two shapes, both silent when no responsible member resolved (MUL-4765):
  *  - `variant="badge"` (default): the full "on behalf of <name>" chip. Renders
@@ -90,13 +92,14 @@ export function AttributionBadge({
   // ops metric, not a reader-facing signal. The only thing a viewer of "on
   // behalf of <name>" cares about is whether that named human might NOT actually
   // be who's responsible — true only for a fallback guess (owner_fallback:
-  // nothing resolved, so we defaulted to the agent owner). A backfilled
-  // attribution names a human the same waterfall resolved, just after the fact,
-  // so it is confident and must read like any other attribution, never as a
-  // warning (MUL-4768). The cautionary tone therefore fires for any non-precise
-  // source EXCEPT backfill; keeping the `precise === false` base means a future
-  // unknown degraded source still warns (fail-safe) instead of silently reading
-  // as confident.
+  // nothing resolved, so we defaulted to the agent owner). Backfill is a
+  // historical, after-the-fact record (non-realtime, not compliance-grade), but
+  // that does not make the displayed name wrong — so it warrants no warning tone;
+  // its historical origin stays visible in the tooltip and the raw `source` field
+  // (MUL-4768). The cautionary tone therefore fires for any non-precise source
+  // EXCEPT backfill; keeping the `precise === false` base means a future unknown
+  // degraded source still warns (fail-safe) instead of silently reading as
+  // confident.
   const uncertain =
     attribution.precise === false && attribution.source !== "backfill";
   const initiator = attribution.initiator;
