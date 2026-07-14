@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 )
@@ -617,6 +618,25 @@ func TestCodexSessionStoreNamespaceInjective(t *testing.T) {
 	// Deterministic for a fixed profile.
 	if codexSessionStoreNamespace("staging") != codexSessionStoreNamespace("staging") {
 		t.Error("namespace must be deterministic for a fixed profile")
+	}
+}
+
+// TestCodexSessionStoreNamespace_FitsDirectorySegment guards Elon's round-8
+// blocker: a profile the CLI can persist as its own config-dir segment (up to
+// the ~255-byte filesystem limit) must yield a namespace that also fits one
+// segment and is creatable — a length-expanding encoding (full hex) overflowed
+// at 127 bytes. MUL-4424.
+func TestCodexSessionStoreNamespace_FitsDirectorySegment(t *testing.T) {
+	t.Parallel()
+	base := t.TempDir()
+	for _, profile := range []string{"", "staging", strings.Repeat("a", 127), strings.Repeat("z", 255)} {
+		ns := codexSessionStoreNamespace(profile)
+		if len(ns) > 255 {
+			t.Errorf("profile (len %d) -> namespace (len %d) exceeds the 255-byte single-segment limit", len(profile), len(ns))
+		}
+		if err := os.MkdirAll(filepath.Join(base, ns), 0o755); err != nil {
+			t.Errorf("namespace for profile (len %d) could not be created: %v", len(profile), err)
+		}
 	}
 }
 

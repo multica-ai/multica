@@ -1,6 +1,7 @@
 package execenv
 
 import (
+	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
 	"io"
@@ -218,18 +219,22 @@ func codexSessionStoreDir(sharedHome, key string) string {
 // reclaims, its own namespace, so a staging daemon's GC can never delete a
 // production task's live store and vice versa.
 //
-// The map MUST be injective: distinct profiles are distinct daemons and must
-// never share a namespace. A lossy "drop unsafe characters" scheme is not — the
-// CLI treats "" and "default" as separate daemons, and would sanitize
-// "staging.prod" and "stagingprod" to the same segment. So the empty (default)
-// profile gets a reserved bare literal, and every named profile is hex-encoded
-// (bijective, filesystem-safe) under a "p_" prefix a bare literal can never
-// collide with (MUL-4424).
+// The map MUST be collision-free (distinct profiles are distinct daemons and
+// must never share a namespace) AND fixed-length (a profile can be as long as a
+// filesystem segment allows, ~255 bytes, so any length-expanding encoding would
+// overflow the 255-byte limit and fail to create the store dir). A lossy "drop
+// unsafe characters" scheme collides ("" vs "default", "staging.prod" vs
+// "stagingprod"); a full hex encoding doubles the length and overflows. So the
+// empty (default) profile gets a reserved bare literal, and every named profile
+// is the hex of its SHA-256 — a constant 64 hex chars, filesystem-safe and
+// collision-resistant — under a "p_" prefix the bare literal can never collide
+// with (MUL-4424).
 func codexSessionStoreNamespace(profile string) string {
 	if profile == "" {
 		return "default"
 	}
-	return "p_" + hex.EncodeToString([]byte(profile))
+	sum := sha256.Sum256([]byte(profile))
+	return "p_" + hex.EncodeToString(sum[:])
 }
 
 // codexSessionStoreKey builds the per-(profile, agent, issue) key for a task's
