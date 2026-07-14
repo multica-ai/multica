@@ -203,6 +203,8 @@
       "received_at": "受信",
       "last_attempt_at": "最終試行",
       "attempt_count": "試行回数",
+      "dispatch_attempts": "ディスパッチ試行回数",
+      "available_at": "次回ディスパッチ",
       "response_status": "レスポンス",
       "dedupe_key": "重複排除キー",
       "dedupe_source": "重複排除ソース",

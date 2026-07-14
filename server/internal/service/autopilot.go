@@ -71,7 +71,96 @@ func (s *AutopilotService) DispatchAutopilot(
 	source string,
 	payload []byte,
 ) (*db.AutopilotRun, error) {
-	return s.dispatchAutopilot(ctx, autopilot, triggerID, source, payload, pgtype.Timestamptz{})
+	return s.dispatchAutopilot(ctx, autopilot, triggerID, source, payload, pgtype.Timestamptz{}, pgtype.UUID{})
+}
+
+// DispatchAutopilotForWebhookDelivery is the durable webhook worker entry
+// point. webhook_delivery_id is persisted on the run and protected by a
+// partial unique index, so reclaiming a queued delivery after a process crash
+// reuses the original run instead of creating a second issue or task.
+func (s *AutopilotService) DispatchAutopilotForWebhookDelivery(
+	ctx context.Context,
+	autopilot db.Autopilot,
+	triggerID pgtype.UUID,
+	payload []byte,
+	deliveryID pgtype.UUID,
+) (*db.AutopilotRun, error) {
+	if !deliveryID.Valid {
+		return nil, fmt.Errorf("dispatch for webhook delivery: delivery_id is required")
+	}
+
+	existing, err := s.Queries.GetAutopilotRunByWebhookDelivery(ctx, deliveryID)
+	switch {
+	case err == nil && isAutopilotRunComplete(existing):
+		if autopilot.ExecutionMode == "create_issue" && existing.IssueID.Valid {
+			if repairErr := s.ensureWebhookCreateIssueTask(ctx, autopilot, existing); repairErr != nil {
+				return &existing, repairErr
+			}
+		}
+		return &existing, nil
+	case err == nil:
+		// A run_only task may have committed immediately before the process
+		// died while linking task_id back to the run. Repair that linkage and
+		// wake the daemon; otherwise continue the same partial run below.
+		if autopilot.ExecutionMode == "run_only" && !existing.TaskID.Valid {
+			task, taskErr := s.Queries.GetAutopilotTaskByRun(ctx, existing.ID)
+			switch {
+			case taskErr == nil:
+				updated, updateErr := s.Queries.UpdateAutopilotRunRunning(ctx, db.UpdateAutopilotRunRunningParams{
+					ID:     existing.ID,
+					TaskID: task.ID,
+				})
+				if updateErr != nil {
+					return &existing, fmt.Errorf("dispatch for webhook delivery: repair task linkage: %w", updateErr)
+				}
+				s.TaskSvc.NotifyTaskEnqueued(ctx, task)
+				return &updated, nil
+			case !errors.Is(taskErr, pgx.ErrNoRows):
+				return &existing, fmt.Errorf("dispatch for webhook delivery: lookup linked task: %w", taskErr)
+			}
+		}
+		return s.dispatchAutopilotRun(ctx, autopilot, triggerID, "webhook", &existing)
+	case !errors.Is(err, pgx.ErrNoRows):
+		return nil, fmt.Errorf("dispatch for webhook delivery: lookup existing run: %w", err)
+	}
+
+	return s.dispatchAutopilot(ctx, autopilot, triggerID, "webhook", payload, pgtype.Timestamptz{}, deliveryID)
+}
+
+// ensureWebhookCreateIssueTask repairs the create_issue crash window after the
+// issue/run transaction commits but before the ordinary task enqueue commits.
+// Any existing issue task is sufficient evidence that ownership has already
+// moved downstream; otherwise enqueue exactly the same assignee path used by
+// the original dispatch.
+func (s *AutopilotService) ensureWebhookCreateIssueTask(ctx context.Context, autopilot db.Autopilot, run db.AutopilotRun) error {
+	tasks, err := s.Queries.ListTasksByIssue(ctx, run.IssueID)
+	if err != nil {
+		return fmt.Errorf("dispatch for webhook delivery: inspect issue tasks: %w", err)
+	}
+	if len(tasks) > 0 {
+		return nil
+	}
+	issue, err := s.Queries.GetIssue(ctx, run.IssueID)
+	if err != nil {
+		return fmt.Errorf("dispatch for webhook delivery: load linked issue: %w", err)
+	}
+	if issue.Status != "todo" && issue.Status != "in_progress" {
+		return nil
+	}
+	if autopilot.AssigneeType == "squad" {
+		leader, _, err := s.resolveAutopilotLeader(ctx, autopilot)
+		if err != nil {
+			return fmt.Errorf("dispatch for webhook delivery: resolve squad leader: %w", err)
+		}
+		if _, err := s.TaskSvc.EnqueueTaskForSquadLeader(ctx, issue, leader.ID, autopilot.AssigneeID, pgtype.UUID{}); err != nil {
+			return fmt.Errorf("dispatch for webhook delivery: repair squad task: %w", err)
+		}
+		return nil
+	}
+	if _, err := s.TaskSvc.EnqueueTaskForIssue(ctx, issue); err != nil {
+		return fmt.Errorf("dispatch for webhook delivery: repair issue task: %w", err)
+	}
+	return nil
 }
 
 // DispatchAutopilotForPlan is the entry point for scheduled triggers that
@@ -155,7 +244,7 @@ func (s *AutopilotService) DispatchAutopilotForPlan(
 		return nil, fmt.Errorf("dispatch for plan: lookup existing run: %w", err)
 	}
 
-	return s.dispatchAutopilot(ctx, autopilot, triggerID, source, payload, plannedTS)
+	return s.dispatchAutopilot(ctx, autopilot, triggerID, source, payload, plannedTS, pgtype.UUID{})
 }
 
 // isAutopilotRunComplete decides whether an existing autopilot_run row
@@ -196,7 +285,8 @@ func isAutopilotRunComplete(run db.AutopilotRun) bool {
 // dispatchAutopilot is the shared core of the two public Dispatch entry
 // points. plannedAt is the canonical UTC plan_time for scheduled triggers;
 // for manual / webhook / api dispatch it is the zero pgtype.Timestamptz and
-// the resulting autopilot_run row has planned_at IS NULL.
+// the resulting autopilot_run row has planned_at IS NULL. webhookDeliveryID
+// is set only by the durable webhook worker.
 func (s *AutopilotService) dispatchAutopilot(
 	ctx context.Context,
 	autopilot db.Autopilot,
@@ -204,9 +294,10 @@ func (s *AutopilotService) dispatchAutopilot(
 	source string,
 	payload []byte,
 	plannedAt pgtype.Timestamptz,
+	webhookDeliveryID pgtype.UUID,
 ) (*db.AutopilotRun, error) {
 	if reason, skip := s.shouldSkipDispatch(ctx, autopilot); skip {
-		return s.recordSkippedRun(ctx, autopilot, triggerID, source, payload, plannedAt, reason)
+		return s.recordSkippedRun(ctx, autopilot, triggerID, source, payload, plannedAt, webhookDeliveryID, reason)
 	}
 
 	// Determine initial status based on execution mode.
@@ -216,43 +307,57 @@ func (s *AutopilotService) dispatchAutopilot(
 	}
 
 	run, err := s.Queries.CreateAutopilotRun(ctx, db.CreateAutopilotRunParams{
-		AutopilotID:    autopilot.ID,
-		TriggerID:      triggerID,
-		Source:         source,
-		Status:         initialStatus,
-		TriggerPayload: payload,
-		SquadID:        autopilotSquadAttribution(autopilot),
-		PlannedAt:      plannedAt,
+		AutopilotID:       autopilot.ID,
+		TriggerID:         triggerID,
+		Source:            source,
+		Status:            initialStatus,
+		TriggerPayload:    payload,
+		SquadID:           autopilotSquadAttribution(autopilot),
+		PlannedAt:         plannedAt,
+		WebhookDeliveryID: webhookDeliveryID,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("create run: %w", err)
 	}
 	s.captureAutopilotRunStarted(autopilot, run, source)
+	return s.dispatchAutopilotRun(ctx, autopilot, triggerID, source, &run)
+}
 
+// dispatchAutopilotRun performs the downstream side effect for an already
+// persisted run. Keeping creation separate lets the webhook worker resume the
+// same idempotency-anchored run after a crash between run creation and issue
+// or task creation.
+func (s *AutopilotService) dispatchAutopilotRun(
+	ctx context.Context,
+	autopilot db.Autopilot,
+	triggerID pgtype.UUID,
+	source string,
+	run *db.AutopilotRun,
+) (*db.AutopilotRun, error) {
 	switch autopilot.ExecutionMode {
 	case "create_issue":
 		triggerTimezone := s.resolveAutopilotTriggerTimezone(ctx, triggerID)
-		if err := s.dispatchCreateIssue(ctx, autopilot, &run, triggerTimezone); err != nil {
-			if skipped := s.handleDispatchSkip(ctx, autopilot, &run, err); skipped != nil {
+		if err := s.dispatchCreateIssue(ctx, autopilot, run, triggerTimezone); err != nil {
+			if skipped := s.handleDispatchSkip(ctx, autopilot, run, err); skipped != nil {
 				return skipped, nil
 			}
 			s.failRun(ctx, run.ID, err.Error())
-			s.captureAutopilotRunFailed(autopilot, run, source, err.Error())
-			return &run, fmt.Errorf("dispatch create_issue: %w", err)
+			s.captureAutopilotRunFailed(autopilot, *run, source, err.Error())
+			return run, fmt.Errorf("dispatch create_issue: %w", err)
 		}
 	case "run_only":
-		if err := s.dispatchRunOnly(ctx, autopilot, &run); err != nil {
-			if skipped := s.handleDispatchSkip(ctx, autopilot, &run, err); skipped != nil {
+		if err := s.dispatchRunOnly(ctx, autopilot, run); err != nil {
+			if skipped := s.handleDispatchSkip(ctx, autopilot, run, err); skipped != nil {
 				return skipped, nil
 			}
 			s.failRun(ctx, run.ID, err.Error())
-			s.captureAutopilotRunFailed(autopilot, run, source, err.Error())
-			return &run, fmt.Errorf("dispatch run_only: %w", err)
+			s.captureAutopilotRunFailed(autopilot, *run, source, err.Error())
+			return run, fmt.Errorf("dispatch run_only: %w", err)
 		}
 	default:
 		s.failRun(ctx, run.ID, "unknown execution_mode: "+autopilot.ExecutionMode)
-		s.captureAutopilotRunFailed(autopilot, run, source, "unknown execution_mode: "+autopilot.ExecutionMode)
-		return &run, fmt.Errorf("unknown execution_mode: %s", autopilot.ExecutionMode)
+		s.captureAutopilotRunFailed(autopilot, *run, source, "unknown execution_mode: "+autopilot.ExecutionMode)
+		return run, fmt.Errorf("unknown execution_mode: %s", autopilot.ExecutionMode)
 	}
 
 	// Update last_run_at on the autopilot.
@@ -271,7 +376,7 @@ func (s *AutopilotService) dispatchAutopilot(
 		},
 	})
 
-	return &run, nil
+	return run, nil
 }
 
 // dispatchCreateIssue creates an issue and enqueues a task for the agent.
@@ -1005,16 +1110,18 @@ func (s *AutopilotService) recordSkippedRun(
 	source string,
 	payload []byte,
 	plannedAt pgtype.Timestamptz,
+	webhookDeliveryID pgtype.UUID,
 	reason string,
 ) (*db.AutopilotRun, error) {
 	run, err := s.Queries.CreateAutopilotRun(ctx, db.CreateAutopilotRunParams{
-		AutopilotID:    autopilot.ID,
-		TriggerID:      triggerID,
-		Source:         source,
-		Status:         "skipped",
-		TriggerPayload: payload,
-		SquadID:        autopilotSquadAttribution(autopilot),
-		PlannedAt:      plannedAt,
+		AutopilotID:       autopilot.ID,
+		TriggerID:         triggerID,
+		Source:            source,
+		Status:            "skipped",
+		TriggerPayload:    payload,
+		SquadID:           autopilotSquadAttribution(autopilot),
+		PlannedAt:         plannedAt,
+		WebhookDeliveryID: webhookDeliveryID,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("create skipped run: %w", err)
