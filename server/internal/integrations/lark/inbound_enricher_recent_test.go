@@ -1,7 +1,9 @@
 package lark
 
 import (
+	"context"
 	"errors"
+	"strings"
 	"testing"
 )
 
@@ -21,6 +23,14 @@ func appMsg(id, text, createTime string) LarkMessage {
 // groupCfg enables the recent-context prefetch with the production window.
 func groupCfg() InboundEnricherConfig {
 	return InboundEnricherConfig{RecentContextSize: DefaultRecentContextSize}
+}
+
+func assertNoRecentContextFetchPlaceholder(t *testing.T, body string) {
+	t.Helper()
+	if strings.Contains(body, `<recent_context type="error">`) ||
+		strings.Contains(body, "[unable to fetch recent context]") {
+		t.Fatalf("recent context fetch placeholder leaked into body: %q", body)
+	}
 }
 
 // TestEnrichRecentContextGroupMention is the MUL-3084 core: a bare @-bot
@@ -74,6 +84,37 @@ func TestEnrichRecentContextGroupMention(t *testing.T) {
 	}
 	if got := fake.listParams[0].EndTime; got != 3 {
 		t.Errorf("end_time = %d, want 3 (3000ms -> 3s)", got)
+	}
+}
+
+// TestEnrichRecentContextRendersDeletedItems keeps deleted messages
+// user-readable when Lark returns them inside the recent window.
+func TestEnrichRecentContextRendersDeletedItems(t *testing.T) {
+	t.Parallel()
+	fake := newEnricherFake()
+	fake.byChat["oc_g"] = []LarkMessage{
+		textMsg("om_trigger", "ou_user", "总结一下", "3000"),
+		{MessageID: "om_deleted", MessageType: "text", Deleted: true, SenderID: "ou_alice", SenderType: "user", CreateTime: "1000"},
+	}
+	in := InboundMessage{
+		MessageType:    "text",
+		MessageID:      "om_trigger",
+		ChatID:         "oc_g",
+		ChatType:       ChatTypeGroup,
+		AddressedToBot: true,
+		Body:           "总结一下",
+		CreateTime:     "3000",
+	}
+
+	out := enrich(t, fake, in, groupCfg())
+
+	want := `<recent_context count="1">
+[User 1]: [deleted message]
+</recent_context>
+
+总结一下`
+	if out.Body != want {
+		t.Errorf("body\n got = %q\nwant = %q", out.Body, want)
 	}
 }
 
@@ -271,8 +312,9 @@ func TestEnrichForwardedResolvesNames(t *testing.T) {
 	}
 }
 
-// TestEnrichRecentContextFetchError degrades to a visible placeholder on
-// a list failure, without blocking ingestion or dropping the user's body.
+// TestEnrichRecentContextFetchError degrades to a plain, user-readable
+// note on a list failure without leaking the old internal XML placeholder
+// or dropping the user's body.
 func TestEnrichRecentContextFetchError(t *testing.T) {
 	t.Parallel()
 	fake := newEnricherFake()
@@ -288,11 +330,130 @@ func TestEnrichRecentContextFetchError(t *testing.T) {
 
 	out := enrich(t, fake, in, groupCfg())
 
-	want := `<recent_context type="error">[unable to fetch recent context]</recent_context>
+	want := `[Recent Lark context unavailable; continuing with the latest message.]
 
 在干嘛`
 	if out.Body != want {
 		t.Errorf("body\n got = %q\nwant = %q", out.Body, want)
+	}
+	assertNoRecentContextFetchPlaceholder(t, out.Body)
+	if len(fake.listCalls) != 1 {
+		t.Errorf("unknown error should not be retried; got calls %v", fake.listCalls)
+	}
+}
+
+// TestEnrichRecentContextRetriesTransientTimeout pins the bounded retry:
+// a transient timeout gets one retry, and a successful retry renders the
+// real recent_context block instead of degrading.
+func TestEnrichRecentContextRetriesTransientTimeout(t *testing.T) {
+	t.Parallel()
+	fake := newEnricherFake()
+	fake.errSeqChat["oc_g"] = []error{context.DeadlineExceeded, nil}
+	fake.byChat["oc_g"] = []LarkMessage{
+		textMsg("om_trigger", "ou_user", "总结一下", "3000"),
+		textMsg("om_a", "ou_alice", "我改完了登录页", "1000"),
+	}
+	in := InboundMessage{
+		MessageType:    "text",
+		MessageID:      "om_trigger",
+		ChatID:         "oc_g",
+		ChatType:       ChatTypeGroup,
+		AddressedToBot: true,
+		Body:           "总结一下",
+		CreateTime:     "3000",
+	}
+
+	out := enrich(t, fake, in, groupCfg())
+
+	want := `<recent_context count="1">
+[User 1]: 我改完了登录页
+</recent_context>
+
+总结一下`
+	if out.Body != want {
+		t.Errorf("body\n got = %q\nwant = %q", out.Body, want)
+	}
+	if len(fake.listCalls) != 2 {
+		t.Errorf("timeout should retry once; got calls %v", fake.listCalls)
+	}
+}
+
+func TestEnrichRecentContextPermissionDeniedDoesNotRetry(t *testing.T) {
+	t.Parallel()
+	fake := newEnricherFake()
+	fake.errByChat["oc_g"] = &APIError{Op: "list chat messages", Code: 99991002, Msg: "no permission"}
+	in := InboundMessage{
+		MessageType:    "text",
+		MessageID:      "om_trigger",
+		ChatID:         "oc_g",
+		ChatType:       ChatTypeGroup,
+		AddressedToBot: true,
+		Body:           "查一下上下文",
+	}
+
+	out := enrich(t, fake, in, groupCfg())
+
+	want := `[Recent Lark context unavailable: the bot cannot read this chat history. Continuing with the latest message.]
+
+查一下上下文`
+	if out.Body != want {
+		t.Errorf("body\n got = %q\nwant = %q", out.Body, want)
+	}
+	assertNoRecentContextFetchPlaceholder(t, out.Body)
+	if len(fake.listCalls) != 1 {
+		t.Errorf("permission denial should not retry; got calls %v", fake.listCalls)
+	}
+}
+
+func TestEnrichRecentContextDeletedOrInvisibleError(t *testing.T) {
+	t.Parallel()
+	fake := newEnricherFake()
+	fake.errByChat["oc_g"] = &APIError{Op: "list chat messages", Code: 230110, Msg: "message has been deleted"}
+	in := InboundMessage{
+		MessageType:    "text",
+		MessageID:      "om_trigger",
+		ChatID:         "oc_g",
+		ChatType:       ChatTypeGroup,
+		AddressedToBot: true,
+		Body:           "接着处理",
+	}
+
+	out := enrich(t, fake, in, groupCfg())
+
+	want := `[Recent Lark context unavailable: the referenced chat history is deleted or no longer visible. Continuing with the latest message.]
+
+接着处理`
+	if out.Body != want {
+		t.Errorf("body\n got = %q\nwant = %q", out.Body, want)
+	}
+	assertNoRecentContextFetchPlaceholder(t, out.Body)
+	if len(fake.listCalls) != 1 {
+		t.Errorf("deleted/invisible error should not retry; got calls %v", fake.listCalls)
+	}
+}
+
+func TestEnrichRecentContextMissingChatBinding(t *testing.T) {
+	t.Parallel()
+	fake := newEnricherFake()
+	in := InboundMessage{
+		MessageType:    "text",
+		MessageID:      "om_trigger",
+		ChatType:       ChatTypeGroup,
+		AddressedToBot: true,
+		Body:           "查一下上下文",
+	}
+
+	out := enrich(t, fake, in, groupCfg())
+
+	want := `[Recent Lark context unavailable: chat binding is missing. Continuing with the latest message.]
+
+查一下上下文`
+	if out.Body != want {
+		t.Errorf("body\n got = %q\nwant = %q", out.Body, want)
+	}
+	assertNoRecentContextFetchPlaceholder(t, out.Body)
+	if len(fake.listCalls) != 0 {
+		t.Errorf("missing chat binding should not call ListChatMessages; got %v", fake.listCalls)
 	}
 }
 
