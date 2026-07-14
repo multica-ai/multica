@@ -51,8 +51,11 @@ func (c *Client) ReportAccountUsage(ctx context.Context, accountID string, throt
 }
 
 // ReportAccountUsageWindows posts the exact rolling-window utilization
-// fetched from Claude's OAuth usage endpoint (FIR-3118). Only windows the
-// provider reported are included; the server leaves omitted columns alone.
+// fetched from Claude's OAuth usage endpoint (FIR-3118). The snapshot is the
+// full truth about the plan's windows, so a window the provider did NOT report
+// is sent as an explicit null to clear the column: omitting it would leave a
+// stale value (e.g. a weekly-only Codex plan keeping an old 5h percentage
+// forever and rendering it as "Next 5h").
 func (c *Client) ReportAccountUsageWindows(ctx context.Context, accountID string, snap cerebroaccount.OAuthUsageSnapshot) error {
 	if accountID == "" {
 		return fmt.Errorf("ReportAccountUsageWindows: accountID is empty")
@@ -60,13 +63,14 @@ func (c *Client) ReportAccountUsageWindows(ctx context.Context, accountID string
 	if !snap.HasSignal() {
 		return nil
 	}
-	body := map[string]any{}
+	body := map[string]any{
+		"usage_5h_pct":       nil,
+		"usage_5h_resets_at": nil,
+		"usage_7d_pct":       nil,
+		"usage_7d_resets_at": nil,
+	}
 	if snap.FiveHourPct != nil {
 		body["usage_5h_pct"] = *snap.FiveHourPct
-		// Mirror the 5h window into the legacy usage_window_pct column so
-		// consumers of the old field (coordinator agents, runtime cards)
-		// see the exact value instead of the log-scraped approximation.
-		body["usage_window_pct"] = *snap.FiveHourPct
 		if snap.FiveHourResetsAt != nil {
 			body["usage_5h_resets_at"] = snap.FiveHourResetsAt.UTC().Format(time.RFC3339)
 		}
@@ -76,12 +80,15 @@ func (c *Client) ReportAccountUsageWindows(ctx context.Context, accountID string
 		if snap.SevenDayResetsAt != nil {
 			body["usage_7d_resets_at"] = snap.SevenDayResetsAt.UTC().Format(time.RFC3339)
 		}
-		// Plans that only expose the weekly window (Codex Pro) would otherwise
-		// leave the legacy column empty, so mirror the week when there is no
-		// 5h window to mirror.
-		if snap.FiveHourPct == nil {
-			body["usage_window_pct"] = *snap.SevenDayPct
-		}
+	}
+	// Mirror the tightest window the plan actually has into the legacy
+	// usage_window_pct column so consumers of the old field (coordinator
+	// agents, runtime cards) see the exact value instead of the log-scraped
+	// approximation. Weekly-only plans (Codex Pro) mirror the week.
+	if snap.FiveHourPct != nil {
+		body["usage_window_pct"] = *snap.FiveHourPct
+	} else {
+		body["usage_window_pct"] = *snap.SevenDayPct
 	}
 	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/accounts/%s/usage", accountID), body, nil)
 }

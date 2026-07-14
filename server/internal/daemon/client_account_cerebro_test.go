@@ -25,9 +25,11 @@ func TestReportAccountUsageWindowsMirrorsTightestWindow(t *testing.T) {
 		want map[string]any
 	}{
 		{
-			name: "weekly only mirrors the week",
+			name: "weekly only mirrors the week and clears the 5h window",
 			snap: cerebroaccount.OAuthUsageSnapshot{SevenDayPct: pct(52), SevenDayResetsAt: &resets},
 			want: map[string]any{
+				"usage_5h_pct":       nil,
+				"usage_5h_resets_at": nil,
 				"usage_7d_pct":       float64(52),
 				"usage_7d_resets_at": resets.Format(time.RFC3339),
 				"usage_window_pct":   float64(52),
@@ -37,9 +39,22 @@ func TestReportAccountUsageWindowsMirrorsTightestWindow(t *testing.T) {
 			name: "both windows mirror the 5h window",
 			snap: cerebroaccount.OAuthUsageSnapshot{FiveHourPct: pct(7), SevenDayPct: pct(28)},
 			want: map[string]any{
-				"usage_5h_pct":     float64(7),
-				"usage_7d_pct":     float64(28),
-				"usage_window_pct": float64(7),
+				"usage_5h_pct":       float64(7),
+				"usage_5h_resets_at": nil,
+				"usage_7d_pct":       float64(28),
+				"usage_7d_resets_at": nil,
+				"usage_window_pct":   float64(7),
+			},
+		},
+		{
+			name: "5h only mirrors the 5h window and clears the week",
+			snap: cerebroaccount.OAuthUsageSnapshot{FiveHourPct: pct(11)},
+			want: map[string]any{
+				"usage_5h_pct":       float64(11),
+				"usage_5h_resets_at": nil,
+				"usage_7d_pct":       nil,
+				"usage_7d_resets_at": nil,
+				"usage_window_pct":   float64(11),
 			},
 		},
 	}
