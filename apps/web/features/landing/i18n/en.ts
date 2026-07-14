@@ -294,6 +294,33 @@ export function createEnDict(allowSignup: boolean): LandingDict {
     },
     entries: [
       {
+        version: "0.4.1",
+        date: "2026-07-14",
+        title: "DevEco Code agents, desktop auto-update, and reliability fixes",
+        changes: [],
+        features: [
+          "You can now build agents on DevEco Code, Huawei's HarmonyOS coding agent.",
+          "The desktop app can now update itself to new versions automatically, when you turn it on.",
+        ],
+        improvements: [
+          "The agents list now appears instantly when you open it.",
+          "Workspace changes now sync to your machine faster.",
+          "Self-hosted email can now send from an address you set.",
+        ],
+        fixes: [
+          "Hermes agents now pick up the skills you assign them, and can write files without being blocked.",
+          "After you upgrade a coding tool in place, the background service finds its new location on its own, so tasks no longer fail.",
+          "A queued task now starts as soon as the one before it finishes.",
+          "Chat unread badges are accurate now — replies that arrive while the app is backgrounded get marked, and archived chats no longer keep a stale unread.",
+          "Near the bottom of the screen, the @ and / menus now open upward instead of getting cut off.",
+          "Autopilot's schedule trigger now reads more complex timing rules correctly.",
+          "Autopilot webhook triggers are no longer lost.",
+          "Self-hosted sites now redirect correctly when you open the home address.",
+          "Runtime names and providers now show consistently across the agents list.",
+          "You can turn an agent's skills on and off at any time now.",
+        ],
+      },
+      {
         version: "0.4.0",
         date: "2026-07-13",
         title: "Custom shortcuts, conversational agent creation, and a fresh new look",
