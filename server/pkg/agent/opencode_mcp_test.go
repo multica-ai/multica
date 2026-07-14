@@ -19,7 +19,8 @@ import (
 func TestBuildOpenCodeMCPConfigContent_Empty(t *testing.T) {
 	t.Parallel()
 	for _, raw := range []json.RawMessage{nil, json.RawMessage(""), json.RawMessage("null")} {
-		got, err := buildOpenCodeMCPConfigContent(raw)
+		got, cleanup, err := buildOpenCodeMCPConfigContent(raw)
+		defer cleanup()
 		if err != nil {
 			t.Fatalf("err for %q: %v", string(raw), err)
 		}
@@ -43,7 +44,8 @@ func TestBuildOpenCodeMCPConfigContent_Remote(t *testing.T) {
 	    }
 	  }
 	}`)
-	content, err := buildOpenCodeMCPConfigContent(raw)
+	content, cleanup, err := buildOpenCodeMCPConfigContent(raw)
+	defer cleanup()
 	if err != nil {
 		t.Fatalf("build: %v", err)
 	}
@@ -70,7 +72,8 @@ func TestBuildOpenCodeMCPConfigContent_Remote(t *testing.T) {
 func TestBuildOpenCodeMCPConfigContent_Local(t *testing.T) {
 	t.Parallel()
 	raw := json.RawMessage(`{"mcpServers":{"local":{"command":"node","args":["server.js"],"env":{"TOKEN":"x"}}}}`)
-	content, err := buildOpenCodeMCPConfigContent(raw)
+	content, cleanup, err := buildOpenCodeMCPConfigContent(raw)
+	defer cleanup()
 	if err != nil {
 		t.Fatalf("build: %v", err)
 	}
@@ -106,7 +109,8 @@ func TestBuildOpenCodeMCPConfigContent_Native(t *testing.T) {
 	    }
 	  }
 	}`)
-	content, err := buildOpenCodeMCPConfigContent(raw)
+	content, cleanup, err := buildOpenCodeMCPConfigContent(raw)
+	defer cleanup()
 	if err != nil {
 		t.Fatalf("build: %v", err)
 	}
@@ -137,7 +141,8 @@ func TestBuildOpenCodeMCPConfigContent_NativeAcceptsAllSchemaFields(t *testing.T
 			"enabled":true,
 			"timeout":30000
 		}}}`)
-		content, err := buildOpenCodeMCPConfigContent(raw)
+		content, cleanup, err := buildOpenCodeMCPConfigContent(raw)
+		defer cleanup()
 		if err != nil {
 			t.Fatalf("build: %v", err)
 		}
@@ -165,7 +170,8 @@ func TestBuildOpenCodeMCPConfigContent_NativeAcceptsAllSchemaFields(t *testing.T
 			"enabled":true,
 			"timeout":5000
 		}}}`)
-		content, err := buildOpenCodeMCPConfigContent(raw)
+		content, cleanup, err := buildOpenCodeMCPConfigContent(raw)
+		defer cleanup()
 		if err != nil {
 			t.Fatalf("build: %v", err)
 		}
@@ -179,7 +185,8 @@ func TestBuildOpenCodeMCPConfigContent_NativeAcceptsAllSchemaFields(t *testing.T
 	t.Run("remote with oauth false", func(t *testing.T) {
 		t.Parallel()
 		raw := json.RawMessage(`{"mcp":{"x":{"type":"remote","url":"https://e/","oauth":false}}}`)
-		content, err := buildOpenCodeMCPConfigContent(raw)
+		content, cleanup, err := buildOpenCodeMCPConfigContent(raw)
+		defer cleanup()
 		if err != nil {
 			t.Fatalf("build: %v", err)
 		}
@@ -199,7 +206,8 @@ func TestBuildOpenCodeMCPConfigContent_NativeAcceptsAllSchemaFields(t *testing.T
 		// global/project config without redefining it. Required field
 		// is `enabled`; no `type` field allowed.
 		raw := json.RawMessage(`{"mcp":{"inherited":{"enabled":false}}}`)
-		content, err := buildOpenCodeMCPConfigContent(raw)
+		content, cleanup, err := buildOpenCodeMCPConfigContent(raw)
+		defer cleanup()
 		if err != nil {
 			t.Fatalf("build: %v", err)
 		}
@@ -217,7 +225,8 @@ func TestBuildOpenCodeMCPConfigContent_NativeAcceptsAllSchemaFields(t *testing.T
 		// The override shape is also schema-strict: extra fields without
 		// type are rejected via the friendlier "missing type" message.
 		raw := json.RawMessage(`{"mcp":{"x":{"enabled":true,"foo":"bar"}}}`)
-		_, err := buildOpenCodeMCPConfigContent(raw)
+		_, cleanup, err := buildOpenCodeMCPConfigContent(raw)
+		defer cleanup()
 		if err == nil {
 			t.Fatal("expected validation failure for extra fields without type")
 		}
@@ -289,7 +298,8 @@ func TestBuildOpenCodeMCPConfigContent_RejectsMalformedNative(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			content, err := buildOpenCodeMCPConfigContent(json.RawMessage(tc.raw))
+			content, cleanup, err := buildOpenCodeMCPConfigContent(json.RawMessage(tc.raw))
+			defer cleanup()
 			if err == nil {
 				t.Fatalf("expected error containing %q, got nil (content=%q)", tc.want, content)
 			}
@@ -320,7 +330,8 @@ func TestBuildOpenCodeMCPConfigContent_ClaudeStyleOAuthRoundTrip(t *testing.T) {
 		"oauth":{"clientId":"cid","clientSecret":"sec","scope":"read write","callbackPort":3000,"redirectUri":"https://example/cb"},
 		"timeout":5000
 	}}}`)
-	content, err := buildOpenCodeMCPConfigContent(raw)
+	content, cleanup, err := buildOpenCodeMCPConfigContent(raw)
+	defer cleanup()
 	if err != nil {
 		t.Fatalf("build: %v", err)
 	}
@@ -380,7 +391,8 @@ func TestBuildOpenCodeMCPConfigContent_RejectsMalformedClaudeStyle(t *testing.T)
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			content, err := buildOpenCodeMCPConfigContent(json.RawMessage(tc.raw))
+			content, cleanup, err := buildOpenCodeMCPConfigContent(json.RawMessage(tc.raw))
+			defer cleanup()
 			if err == nil {
 				t.Fatalf("expected error containing %q, got nil (content=%q)", tc.want, content)
 			}
@@ -608,4 +620,123 @@ func parseJSONString(t *testing.T, s string) map[string]any {
 		t.Fatalf("parse content: %v\n%s", err, s)
 	}
 	return out
+}
+
+// TestOpencodeBackendHardensWindowsBrowserMcpConfig pins that a
+// chrome-devtools entry in agent.mcp_config gets the Windows phantom-window
+// hardening (--executablePath pinned to the discovered system Edge) before
+// it reaches OPENCODE_CONFIG_CONTENT.
+func TestOpencodeBackendHardensWindowsBrowserMcpConfig(t *testing.T) {
+	edgePath := `C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe`
+	withBrowserMcpTestHost(t, "windows", map[string]string{
+		"ProgramFiles(x86)": `C:\Program Files (x86)`,
+	}, map[string]bool{edgePath: true})
+
+	tempDir := t.TempDir()
+	fakePath := filepath.Join(tempDir, "opencode")
+	captureFile := filepath.Join(tempDir, "env-capture.txt")
+	writeTestExecutable(t, fakePath, []byte(fakeOpencodeScriptCapturingEnv()))
+
+	workDir := t.TempDir()
+	backend, err := New("opencode", Config{
+		ExecutablePath: fakePath,
+		Logger:         slog.Default(),
+		Env: map[string]string{
+			"OPENCODE_CAPTURE_FILE": captureFile,
+		},
+	})
+	if err != nil {
+		t.Fatalf("new backend: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{
+		Cwd:     workDir,
+		Timeout: 5 * time.Second,
+		McpConfig: json.RawMessage(`{"mcpServers":{
+			"chrome-devtools":{"command":"npx","args":["chrome-devtools-mcp@latest"]}
+		}}`),
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+	result := <-session.Result
+	if result.Status != "completed" {
+		t.Fatalf("status = %q, error = %q; want completed", result.Status, result.Error)
+	}
+
+	captured := readCapturedEnv(t, captureFile)
+	got := captured["OPENCODE_CONFIG_CONTENT"]
+	if !strings.Contains(got, "--executablePath=") {
+		t.Fatalf("OPENCODE_CONFIG_CONTENT missing hardened chrome-devtools --executablePath=:\n%s", got)
+	}
+}
+
+// TestOpencodeBackendHardensNativeMCPShape pins the fix for the PR #5178
+// review finding that hardenWindowsBrowserMcpConfig only recognises the
+// Claude-style `mcpServers` envelope — a valid, schema-supported native
+// OpenCode `mcp` payload (see translateMCPConfigForOpenCode) previously
+// received no hardening at all. Covers both a native chrome-devtools entry
+// (--executablePath pinning) and a native playwright entry (--config
+// sidecar), since hardenWindowsOpenCodeMCPServers runs after translation
+// and must handle both regardless of whether the input used the Claude or
+// native shape.
+func TestOpencodeBackendHardensNativeMCPShape(t *testing.T) {
+	edgePath := `C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe`
+	withBrowserMcpTestHost(t, "windows", map[string]string{
+		"ProgramFiles(x86)": `C:\Program Files (x86)`,
+	}, map[string]bool{edgePath: true})
+
+	tempDir := t.TempDir()
+	fakePath := filepath.Join(tempDir, "opencode")
+	captureFile := filepath.Join(tempDir, "env-capture.txt")
+	writeTestExecutable(t, fakePath, []byte(fakeOpencodeScriptCapturingEnv()))
+
+	workDir := t.TempDir()
+	backend, err := New("opencode", Config{
+		ExecutablePath: fakePath,
+		Logger:         slog.Default(),
+		Env: map[string]string{
+			"OPENCODE_CAPTURE_FILE": captureFile,
+		},
+	})
+	if err != nil {
+		t.Fatalf("new backend: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{
+		Cwd:     workDir,
+		Timeout: 5 * time.Second,
+		McpConfig: json.RawMessage(`{"mcp":{
+			"chrome-devtools":{"type":"local","command":["npx","chrome-devtools-mcp@latest"]},
+			"playwright":{"type":"local","command":["npx","@playwright/mcp@latest"]}
+		}}`),
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+	result := <-session.Result
+	if result.Status != "completed" {
+		t.Fatalf("status = %q, error = %q; want completed", result.Status, result.Error)
+	}
+
+	captured := readCapturedEnv(t, captureFile)
+	got := captured["OPENCODE_CONFIG_CONTENT"]
+	if !strings.Contains(got, "--executablePath=") {
+		t.Fatalf("native chrome-devtools entry missing hardened --executablePath=:\n%s", got)
+	}
+	if !strings.Contains(got, "--config") {
+		t.Fatalf("native playwright entry missing hardened --config sidecar:\n%s", got)
+	}
 }

@@ -46,17 +46,39 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		return nil, fmt.Errorf("hermes executable not found at %q: %w", execPath, err)
 	}
 
+	timeout := opts.Timeout
+	runCtx, cancel := runContext(ctx, timeout)
+
+	// hardenBrowserMcpConfigTemp's cleanup must not run until the child
+	// process has actually exited, not merely been cancelled — a bare
+	// context.AfterFunc(runCtx, cleanup) fires the instant runCtx.Done()
+	// closes, which on a timeout/cancellation can be before hermes (or the
+	// playwright/chrome-devtools MCP subprocess it launches) has actually
+	// finished exiting, deleting the sidecar out from under it. Instead:
+	// clean up directly on every pre-Start() failure path via the deferred
+	// closure below, and hand ownership to the completion goroutine once
+	// cmd.Start() succeeds, which runs it only after cmd.Wait() returns.
+	hardenedMcpConfig, mcpCleanup, err := hardenBrowserMcpConfigTemp(opts.McpConfig)
+	if err != nil {
+		cancel()
+		return nil, fmt.Errorf("hermes: harden mcp_config: %w", err)
+	}
+	ownedMcpCleanup := mcpCleanup
+	defer func() {
+		if ownedMcpCleanup != nil {
+			ownedMcpCleanup()
+		}
+	}()
+
 	// Translate the agent's mcp_config (Claude-style object of objects)
 	// into the array shape ACP `session/new` expects. Fail closed on
 	// malformed JSON so the launch surfaces the real error instead of
 	// silently dropping all MCP servers.
-	mcpServers, err := buildACPMcpServers(opts.McpConfig, b.cfg.Logger)
+	mcpServers, err := buildACPMcpServers(hardenedMcpConfig, b.cfg.Logger)
 	if err != nil {
+		cancel()
 		return nil, fmt.Errorf("hermes: invalid mcp_config: %w", err)
 	}
-
-	timeout := opts.Timeout
-	runCtx, cancel := runContext(ctx, timeout)
 
 	hermesArgs := append([]string{"acp"}, filterCustomArgs(opts.CustomArgs, hermesBlockedArgs, b.cfg.Logger)...)
 	cmd := exec.CommandContext(runCtx, execPath, hermesArgs...)
@@ -117,6 +139,9 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		cancel()
 		return nil, fmt.Errorf("start hermes: %w", err)
 	}
+	// cmd.Start() succeeded — transfer mcp cleanup ownership to the
+	// completion goroutine below, which runs it after cmd.Wait() returns.
+	ownedMcpCleanup = nil
 
 	stderrSink := io.MultiWriter(newLogWriter(b.cfg.Logger, "[hermes:stderr] "), providerErr)
 	stderrDone := make(chan struct{})
@@ -195,6 +220,7 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		defer func() {
 			stdin.Close()
 			_ = cmd.Wait()
+			mcpCleanup()
 		}()
 
 		startTime := time.Now()

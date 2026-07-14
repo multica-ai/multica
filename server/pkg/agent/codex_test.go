@@ -2787,3 +2787,62 @@ func TestHasManagedCodexMcpConfig(t *testing.T) {
 		})
 	}
 }
+
+// TestEnsureCodexMcpConfigWindowsHardensBrowserMcp pins that Codex's
+// managed mcp_servers block goes through the same Windows phantom-window
+// hardening as Claude/CodeBuddy: a playwright entry gets --config <path>
+// pointing at a --disable-gpu sidecar, and a chrome-devtools entry gets
+// --executablePath pinned to the discovered system Edge install.
+func TestEnsureCodexMcpConfigWindowsHardensBrowserMcp(t *testing.T) {
+	edgePath := `C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe`
+	withBrowserMcpTestHost(t, "windows", map[string]string{
+		"ProgramFiles(x86)": `C:\Program Files (x86)`,
+	}, map[string]bool{edgePath: true})
+
+	tmp := filepath.Join(t.TempDir(), "config.toml")
+	raw := json.RawMessage(`{"mcpServers":{
+		"playwright":{"command":"npx","args":["@playwright/mcp@latest","--headless","--isolated"]},
+		"chrome-devtools":{"command":"npx","args":["chrome-devtools-mcp@latest","--headless","--isolated"]}
+	}}`)
+
+	if err := ensureCodexMcpConfig(tmp, raw, slog.Default()); err != nil {
+		t.Fatalf("ensureCodexMcpConfig: %v", err)
+	}
+
+	got, err := os.ReadFile(tmp)
+	if err != nil {
+		t.Fatalf("read config.toml: %v", err)
+	}
+	body := string(got)
+
+	escapedEdgePath := strings.ReplaceAll(edgePath, `\`, `\\`)
+	if !strings.Contains(body, `--executablePath=`+escapedEdgePath) {
+		t.Fatalf("config.toml missing hardened chrome-devtools executablePath:\n%s", body)
+	}
+	if !strings.Contains(body, "--config") {
+		t.Fatalf("config.toml missing hardened playwright --config arg:\n%s", body)
+	}
+	// The --config value must be a real file under CODEX_HOME (filepath.Dir(tmp))
+	// containing the --disable-gpu launchOptions sidecar.
+	codexHome := filepath.Dir(tmp)
+	entries, err := os.ReadDir(codexHome)
+	if err != nil {
+		t.Fatalf("read CODEX_HOME: %v", err)
+	}
+	var sidecarFound bool
+	for _, e := range entries {
+		if e.Name() == "playwright-windows-browser.json" {
+			sidecarFound = true
+			data, err := os.ReadFile(filepath.Join(codexHome, e.Name()))
+			if err != nil {
+				t.Fatalf("read sidecar: %v", err)
+			}
+			if !strings.Contains(string(data), "--disable-gpu") {
+				t.Fatalf("sidecar missing --disable-gpu:\n%s", data)
+			}
+		}
+	}
+	if !sidecarFound {
+		t.Fatalf("expected playwright-windows-browser.json under CODEX_HOME, found: %v", entries)
+	}
+}

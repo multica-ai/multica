@@ -96,17 +96,34 @@ func (b *traecliBackend) Execute(ctx context.Context, prompt string, opts ExecOp
 		return nil, fmt.Errorf("traecli executable not found at %q: %w", execPath, err)
 	}
 
+	timeout := opts.Timeout
+	runCtx, cancel := runContext(ctx, timeout)
+
+	// hardenBrowserMcpConfigTemp's cleanup must not run until the child
+	// process has actually exited, not merely been cancelled — see the
+	// matching comment in hermes.go for why a bare
+	// context.AfterFunc(runCtx, cleanup) is unsafe here.
+	hardenedMcpConfig, mcpCleanup, err := hardenBrowserMcpConfigTemp(opts.McpConfig)
+	if err != nil {
+		cancel()
+		return nil, fmt.Errorf("traecli: harden mcp_config: %w", err)
+	}
+	ownedMcpCleanup := mcpCleanup
+	defer func() {
+		if ownedMcpCleanup != nil {
+			ownedMcpCleanup()
+		}
+	}()
+
 	// Translate the agent's mcp_config (Claude-style object of objects) into
 	// the array shape ACP session/new and session/load expect. Fail closed on
 	// malformed JSON so the launch surfaces the real error instead of silently
 	// dropping every MCP server.
-	mcpServers, err := buildACPMcpServers(opts.McpConfig, b.cfg.Logger)
+	mcpServers, err := buildACPMcpServers(hardenedMcpConfig, b.cfg.Logger)
 	if err != nil {
+		cancel()
 		return nil, fmt.Errorf("traecli: invalid mcp_config: %w", err)
 	}
-
-	timeout := opts.Timeout
-	runCtx, cancel := runContext(ctx, timeout)
 
 	traecliArgs := append(
 		[]string{"acp", "serve", "--yolo"},
@@ -145,6 +162,9 @@ func (b *traecliBackend) Execute(ctx context.Context, prompt string, opts ExecOp
 		cancel()
 		return nil, fmt.Errorf("start traecli: %w", err)
 	}
+	// cmd.Start() succeeded — transfer mcp cleanup ownership to the
+	// completion goroutine below, which runs it after cmd.Wait() returns.
+	ownedMcpCleanup = nil
 
 	stderrSink := io.MultiWriter(newLogWriter(b.cfg.Logger, "[traecli:stderr] "), providerErr)
 	stderrDone := make(chan struct{})
@@ -219,6 +239,7 @@ func (b *traecliBackend) Execute(ctx context.Context, prompt string, opts ExecOp
 		defer func() {
 			stdin.Close()
 			_ = cmd.Wait()
+			mcpCleanup()
 		}()
 
 		startTime := time.Now()

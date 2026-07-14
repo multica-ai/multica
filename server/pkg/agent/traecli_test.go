@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -344,5 +345,66 @@ func TestTraecliRealACPSmoke(t *testing.T) {
 		t.Logf("real traecli smoke OK: session=%s output=%q", result.SessionID, result.Output)
 	case <-time.After(90 * time.Second):
 		t.Fatal("timeout waiting for real traecli result")
+	}
+}
+
+// TestTraecliHardensWindowsBrowserMcpConfig mirrors
+// TestHermesHardensWindowsBrowserMcpConfig for the TraeCLI ACP backend,
+// capturing raw session/new request JSON via TRAECLI_REQUESTS_FILE since
+// traecli's fixture script doesn't echo params back like the shared
+// fakeACPRecordingScript does.
+func TestTraecliHardensWindowsBrowserMcpConfig(t *testing.T) {
+	edgePath := `C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe`
+	withBrowserMcpTestHost(t, "windows", map[string]string{
+		"ProgramFiles(x86)": `C:\Program Files (x86)`,
+	}, map[string]bool{edgePath: true})
+
+	tempDir := t.TempDir()
+	requestsFile := filepath.Join(tempDir, "requests.jsonl")
+	fakePath := filepath.Join(tempDir, "traecli")
+	writeTestExecutable(t, fakePath, []byte(fakeTraecliACPScript()))
+
+	backend, err := New("traecli", Config{
+		ExecutablePath: fakePath,
+		Logger:         slog.Default(),
+		Env:            map[string]string{"TRAECLI_REQUESTS_FILE": requestsFile},
+	})
+	if err != nil {
+		t.Fatalf("new traecli backend: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	session, err := backend.Execute(ctx, "say pong", ExecOptions{
+		Timeout: 5 * time.Second,
+		McpConfig: json.RawMessage(`{"mcpServers":{
+			"chrome-devtools":{"command":"npx","args":["chrome-devtools-mcp@latest"]}
+		}}`),
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+	<-session.Result
+
+	raw, err := os.ReadFile(requestsFile)
+	if err != nil {
+		t.Fatalf("read requests file: %v", err)
+	}
+	var sessionNew string
+	for _, line := range strings.Split(string(raw), "\n") {
+		if strings.Contains(line, `"method":"session/new"`) {
+			sessionNew = line
+			break
+		}
+	}
+	if sessionNew == "" {
+		t.Fatalf("no session/new request captured; requests log:\n%s", raw)
+	}
+	if !strings.Contains(sessionNew, "--executablePath=") {
+		t.Fatalf("expected hardened chrome-devtools --executablePath= in session/new payload:\n%s", sessionNew)
 	}
 }

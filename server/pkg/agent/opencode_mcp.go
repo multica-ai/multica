@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 )
 
@@ -87,26 +88,103 @@ type opencodeMCPOAuth struct {
 // the user happened to put in their project file — which matches the
 // semantics of agent.mcp_config being the authoritative daemon-managed
 // field.
-func buildOpenCodeMCPConfigContent(raw json.RawMessage) (string, error) {
+//
+// Hardening against the Windows browser-MCP phantom-window bug runs AFTER
+// translation, not before: OpenCode accepts two input shapes (Claude-style
+// mcpServers, translated to native form below, and OpenCode's own native
+// mcp shape, passed through as-is) and hardenWindowsBrowserMcpConfig only
+// recognises the Claude-style mcpServers envelope. Hardening the uniform
+// post-translation native shape instead covers both input shapes with one
+// pass — see hardenWindowsOpenCodeMCPServers.
+//
+// The returned cleanup func is always non-nil (a no-op when nothing was
+// allocated) and must not run until the child process this config was
+// handed to has exited — see hardenBrowserMcpConfigTemp's doc comment for
+// why.
+func buildOpenCodeMCPConfigContent(raw json.RawMessage) (string, func(), error) {
+	noop := func() {}
 	if len(raw) == 0 {
-		return "", nil
+		return "", noop, nil
 	}
 	servers, err := translateMCPConfigForOpenCode(raw)
 	if err != nil {
-		return "", err
+		return "", noop, err
 	}
 	// Empty result (no servers after translation) is observably the same as
 	// raw being nil — return "" so the caller skips the env entry, and a
 	// JSON null / empty object never clobbers what the user put in
 	// agent.custom_env.OPENCODE_CONFIG_CONTENT.
 	if len(servers) == 0 {
-		return "", nil
+		return "", noop, nil
 	}
-	data, err := json.Marshal(map[string]any{"mcp": servers})
+	hardenedServers, cleanup, err := hardenWindowsOpenCodeMCPServers(servers)
 	if err != nil {
-		return "", fmt.Errorf("opencode mcp_config: marshal: %w", err)
+		return "", noop, err
 	}
-	return string(data), nil
+	data, err := json.Marshal(map[string]any{"mcp": hardenedServers})
+	if err != nil {
+		cleanup()
+		return "", noop, fmt.Errorf("opencode mcp_config: marshal: %w", err)
+	}
+	return string(data), cleanup, nil
+}
+
+// hardenWindowsOpenCodeMCPServers applies the same Windows phantom-window
+// hardening as hardenWindowsBrowserMcpConfig (playwright --disable-gpu
+// sidecar, chrome-devtools --executablePath pinning), but to OpenCode's own
+// native per-server shape — command []string combining binary + args,
+// rather than Claude-style separate command/args fields.
+//
+// The helpers this reuses (hardenWindowsPlaywrightMcpArgs,
+// windowsChromiumFallbackExecutable, shouldPinChromeDevToolsExecutable,
+// argsContain) don't care whether index 0 of the slice they're given is a
+// binary name or the first arg — they only scan for flag/substring
+// matches — so OpenCode's combined command array can be passed through
+// them directly without a second copy of that logic.
+//
+// No-ops (returning servers unchanged with a no-op cleanup) when off
+// Windows or servers is empty, mirroring hardenBrowserMcpConfig's contract.
+func hardenWindowsOpenCodeMCPServers(servers map[string]any) (map[string]any, func(), error) {
+	noop := func() {}
+	if len(servers) == 0 || browserMcpGOOS != "windows" {
+		return servers, noop, nil
+	}
+
+	dir, err := browserMcpMkdirTemp("", "multica-mcp-harden-*")
+	if err != nil {
+		return nil, noop, fmt.Errorf("create mcp harden temp dir: %w", err)
+	}
+	cleanup := func() { _ = os.RemoveAll(dir) }
+
+	for name, raw := range servers {
+		entry, ok := raw.(map[string]any)
+		if !ok || entry["type"] != "local" {
+			continue
+		}
+		command, ok := stringSlice(entry["command"])
+		if !ok {
+			continue
+		}
+
+		lowerName := strings.ToLower(name)
+		switch {
+		case lowerName == "playwright" || argsContain(command, "@playwright/mcp") || argsContain(command, `@playwright\mcp`):
+			nextCommand, err := hardenWindowsPlaywrightMcpArgs(command, dir)
+			if err != nil {
+				cleanup()
+				return nil, noop, err
+			}
+			entry["command"] = nextCommand
+			servers[name] = entry
+		case lowerName == "chrome-devtools" || argsContain(command, "chrome-devtools-mcp"):
+			if path, ok := windowsChromiumFallbackExecutable(); ok && shouldPinChromeDevToolsExecutable(command) {
+				entry["command"] = append(command, "--executablePath="+path)
+				servers[name] = entry
+			}
+		}
+	}
+
+	return servers, cleanup, nil
 }
 
 // translateMCPConfigForOpenCode converts an agent.mcp_config payload into the

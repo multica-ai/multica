@@ -76,19 +76,36 @@ func (b *qoderBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 		return nil, fmt.Errorf("qoder executable not found at %q: %w", execPath, err)
 	}
 
+	timeout := opts.Timeout
+	runCtx, cancel := runContext(ctx, timeout)
+
+	// hardenBrowserMcpConfigTemp's cleanup must not run until the child
+	// process has actually exited, not merely been cancelled — see the
+	// matching comment in hermes.go for why a bare
+	// context.AfterFunc(runCtx, cleanup) is unsafe here.
+	hardenedMcpConfig, mcpCleanup, err := hardenBrowserMcpConfigTemp(opts.McpConfig)
+	if err != nil {
+		cancel()
+		return nil, fmt.Errorf("qoder: harden mcp_config: %w", err)
+	}
+	ownedMcpCleanup := mcpCleanup
+	defer func() {
+		if ownedMcpCleanup != nil {
+			ownedMcpCleanup()
+		}
+	}()
+
 	// Translate the agent's mcp_config (Claude-style object of objects) into
 	// the array shape ACP session/new and session/resume expect. Reuse the
 	// shared converter so remote MCP `headers` (e.g. Authorization) survive as
 	// [{name, value}] and output is deterministic. Fail closed on malformed
 	// JSON so the launch surfaces the real error instead of silently dropping
 	// every MCP server.
-	mcpServers, err := buildACPMcpServers(opts.McpConfig, b.cfg.Logger)
+	mcpServers, err := buildACPMcpServers(hardenedMcpConfig, b.cfg.Logger)
 	if err != nil {
+		cancel()
 		return nil, fmt.Errorf("qoder: invalid mcp_config: %w", err)
 	}
-
-	timeout := opts.Timeout
-	runCtx, cancel := runContext(ctx, timeout)
 
 	qoderArgs := append(
 		[]string{"--yolo", "--acp"},
@@ -128,6 +145,9 @@ func (b *qoderBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 		cancel()
 		return nil, fmt.Errorf("start qoder: %w", err)
 	}
+	// cmd.Start() succeeded — transfer mcp cleanup ownership to the
+	// completion goroutine below, which runs it after cmd.Wait() returns.
+	ownedMcpCleanup = nil
 
 	stderrSink := io.MultiWriter(newLogWriter(b.cfg.Logger, "[qoder:stderr] "), providerErr)
 	stderrDone := make(chan struct{})
@@ -202,6 +222,7 @@ func (b *qoderBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 		defer func() {
 			stdin.Close()
 			_ = cmd.Wait()
+			mcpCleanup()
 		}()
 
 		startTime := time.Now()
