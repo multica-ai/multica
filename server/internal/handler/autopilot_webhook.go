@@ -468,14 +468,31 @@ func (h *Handler) HandleAutopilotWebhook(w http.ResponseWriter, r *http.Request)
 	}
 	if dup {
 		// A previous delivery already covered this dedupe key. Return the
-		// original delivery_id + (possibly empty) run_id with 200 so the
-		// caller can correlate.
+		// original delivery_id + admitted run_id with 200 so the caller can
+		// correlate. The delivery row is not linked until worker completion,
+		// so retrying before then must fall back to the run's durable delivery
+		// anchor.
 		resp := map[string]any{
 			"status":      "duplicate",
 			"delivery_id": uuidToString(delivery.ID),
 		}
-		if delivery.AutopilotRunID.Valid {
-			resp["run_id"] = uuidToString(delivery.AutopilotRunID)
+		runID := delivery.AutopilotRunID
+		if !runID.Valid {
+			run, runErr := h.Queries.GetAutopilotRunByWebhookDelivery(r.Context(), delivery.ID)
+			switch {
+			case runErr == nil:
+				runID = run.ID
+			case !errors.Is(runErr, pgx.ErrNoRows):
+				slog.Error("webhook: resolve duplicate run failed",
+					"delivery_id", uuidToString(delivery.ID),
+					"error", runErr,
+				)
+				writeError(w, http.StatusInternalServerError, "internal error")
+				return
+			}
+		}
+		if runID.Valid {
+			resp["run_id"] = uuidToString(runID)
 		}
 		if delivery.Status == deliveryStatusQueued && h.WebhookDeliveryWorker != nil {
 			h.WebhookDeliveryWorker.Notify()

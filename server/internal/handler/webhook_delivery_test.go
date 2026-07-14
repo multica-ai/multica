@@ -165,10 +165,17 @@ func TestWebhookHandler_DedupeViaIdempotencyKey(t *testing.T) {
 
 	w1 := postWebhook(t, *trig.WebhookToken, body, headers)
 	firstDeliveryID := requireAcceptedWebhookResponse(t, w1)
-	firstDelivery := processQueuedWebhookDelivery(t, firstDeliveryID)
-	firstRunID := uuidToString(firstDelivery.AutopilotRunID)
+	var r1 map[string]any
+	if err := json.Unmarshal(w1.Body.Bytes(), &r1); err != nil {
+		t.Fatalf("decode first response: %v", err)
+	}
+	firstRunID, ok := r1["run_id"].(string)
+	if !ok || firstRunID == "" {
+		t.Fatalf("first response missing run_id: %s", w1.Body.String())
+	}
 
-	// Second identical delivery should be a duplicate.
+	// Retry before the worker processes the queued delivery. The admitted run
+	// must already be discoverable so the duplicate returns the same run_id.
 	w2 := postWebhook(t, *trig.WebhookToken, body, headers)
 	if w2.Code != http.StatusOK {
 		t.Fatalf("second: %d body=%s", w2.Code, w2.Body.String())
@@ -183,6 +190,10 @@ func TestWebhookHandler_DedupeViaIdempotencyKey(t *testing.T) {
 	}
 	if r2["run_id"] != firstRunID {
 		t.Fatalf("duplicate run_id mismatch: %v != %v", r2["run_id"], firstRunID)
+	}
+	firstDelivery := processQueuedWebhookDelivery(t, firstDeliveryID)
+	if got := uuidToString(firstDelivery.AutopilotRunID); got != firstRunID {
+		t.Fatalf("processed delivery run_id mismatch: %v != %v", got, firstRunID)
 	}
 
 	// Only one delivery should exist; attempt_count must be 2.
