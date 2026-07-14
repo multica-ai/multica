@@ -47,7 +47,7 @@ func TestDispatchBlockedFallbackMessageIsNonEnumerating(t *testing.T) {
 	}
 	// invocation_not_allowed must be deliberately vague: it cannot distinguish
 	// "target is private" from "target does not exist".
-	if got := dispatchBlockedFallbackMessage(ReasonInvocationNotAllowed); got != "you are not allowed to trigger this target" {
+	if got := dispatchBlockedFallbackMessage(ReasonInvocationNotAllowed); got != "you don't have permission to use this target" {
 		t.Errorf("invocation_not_allowed fallback = %q, changed to something more revealing?", got)
 	}
 }

@@ -109,16 +109,16 @@ func (h *Handler) writeDispatchBlocked(w http.ResponseWriter, status int, code D
 func dispatchBlockedFallbackMessage(code DispatchReasonCode) string {
 	switch code {
 	case ReasonInvocationNotAllowed:
-		return "you are not allowed to trigger this target"
+		return "you don't have permission to use this target"
 	case ReasonTargetUnavailable:
 		return "the target is unavailable"
 	case ReasonRuntimeOffline:
-		return "the target runtime is offline"
+		return "the target's runtime is offline"
 	case ReasonAttributionBlocked:
-		return "the run could not be attributed to a responsible member"
+		return "the run couldn't be attributed to a responsible member"
 	case ReasonAlreadyActive:
 		return "a run is already active for this target"
 	default:
-		return "the run could not be started"
+		return "the run was blocked"
 	}
 }
