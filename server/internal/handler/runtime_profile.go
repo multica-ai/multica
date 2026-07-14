@@ -467,6 +467,13 @@ func (h *Handler) DeleteRuntimeProfile(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "failed to clean up channel installations")
 			return
 		}
+		// agent_to_label has no agent_id FK; clear the runtime's agents' label
+		// links before the archived agents are hard-deleted so they don't leak
+		// as orphan rows once resource labels are enabled.
+		if err := qtx.DeleteAgentLabelAssignmentsByRuntime(r.Context(), rid); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to clean up agent label assignments")
+			return
+		}
 		if err := qtx.DeleteArchivedAgentsByRuntime(r.Context(), rid); err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to clean up archived agents")
 			return

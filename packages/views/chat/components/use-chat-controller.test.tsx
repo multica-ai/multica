@@ -18,6 +18,8 @@ const h = vi.hoisted(() => {
     store,
     archivedMutate: vi.fn(),
     markReadMutate: vi.fn(),
+    // Foreground gate for the auto mark-read effect; tests flip it.
+    appForeground: { value: true },
     // useQuery reads these so each test can vary the loaded data.
     sessions: [] as ChatSession[],
     agents: [] as Agent[],
@@ -48,6 +50,9 @@ vi.mock("@multica/core/chat/mutations", () => ({
   useCreateChatSession: () => ({ mutateAsync: vi.fn() }),
   useMarkChatSessionRead: () => ({ mutate: h.markReadMutate }),
   useSetChatSessionArchived: () => ({ mutate: h.archivedMutate }),
+}));
+vi.mock("../../common/use-app-foreground", () => ({
+  useAppForeground: () => h.appForeground.value,
 }));
 vi.mock("@multica/core/chat", () => ({
   useChatStore: Object.assign(
@@ -214,6 +219,7 @@ describe("useChatController auto mark-read", () => {
     h.store.activeSessionId = null;
     h.store.selectedAgentId = null;
     h.markReadMutate.mockClear();
+    h.appForeground.value = true;
     h.sessions = [unread];
     h.agents = [agentA];
   });
@@ -244,5 +250,58 @@ describe("useChatController auto mark-read", () => {
 
     act(() => vi.advanceTimersByTime(1));
     expect(h.markReadMutate).not.toHaveBeenCalled();
+  });
+});
+
+// Foreground gating (MUL-4485): a reply that lands while the app is backgrounded
+// must stay unread and clear once the user returns. This composes with the
+// MUL-4360 mount-race defer above — the read is scheduled a tick after the
+// effect runs — so each assertion advances fake timers to let it (or not) fire.
+describe("useChatController auto mark-read — foreground gating (MUL-4485)", () => {
+  const unreadActive = makeSession({ id: "sU", agent_id: "agent-a", has_unread: true });
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    h.markReadMutate.mockClear();
+    h.appForeground.value = true;
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  function renderController(activeSessionId: string | null, sessions: ChatSession[]) {
+    h.store.activeSessionId = activeSessionId;
+    h.store.selectedAgentId = null;
+    h.sessions = sessions;
+    h.agents = [agentA];
+    return renderHook(() => useChatController({ isActive: true }));
+  }
+
+  it("marks the active unread session read while the app is in the foreground", () => {
+    renderController("sU", [unreadActive]);
+    act(() => vi.advanceTimersByTime(1));
+    expect(h.markReadMutate).toHaveBeenCalledWith("sU");
+  });
+
+  it("does NOT mark read while the app is backgrounded, so the reply stays unread", () => {
+    h.appForeground.value = false;
+    renderController("sU", [unreadActive]);
+    act(() => vi.advanceTimersByTime(1));
+    expect(h.markReadMutate).not.toHaveBeenCalled();
+  });
+
+  it("marks read once the user returns to the foreground", () => {
+    h.appForeground.value = false;
+    const { rerender } = renderController("sU", [unreadActive]);
+    act(() => vi.advanceTimersByTime(1));
+    expect(h.markReadMutate).not.toHaveBeenCalled();
+
+    act(() => {
+      h.appForeground.value = true;
+      rerender();
+    });
+    act(() => vi.advanceTimersByTime(1));
+    expect(h.markReadMutate).toHaveBeenCalledWith("sU");
   });
 });

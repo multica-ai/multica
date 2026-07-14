@@ -134,6 +134,15 @@ export function toCronExpression(cfg: TriggerConfig): string {
   }
 }
 
+// Strict field matcher: cron fields also allow ranges, lists, and steps
+// ("9-21", "0,30", "*/5") that parseInt would silently truncate to their
+// first number, so only bare 1-2 digit integers count as a preset match.
+function parsePlainInt(s: string, max: number): number | null {
+  if (!/^\d{1,2}$/.test(s)) return null;
+  const n = parseInt(s, 10);
+  return n > max ? null : n;
+}
+
 export function parseCronExpression(cron: string, timezone: string): TriggerConfig {
   const base: TriggerConfig = {
     ...getDefaultTriggerConfig(),
@@ -148,21 +157,22 @@ export function parseCronExpression(cron: string, timezone: string): TriggerConf
   const mon = parts[3] ?? "";
   const dow = parts[4] ?? "";
   if (dom !== "*" || mon !== "*") return { ...base, frequency: "custom" };
-  const min = parseInt(minStr, 10);
-  if (Number.isNaN(min) || min < 0 || min > 59) return { ...base, frequency: "custom" };
+  const min = parsePlainInt(minStr, 59);
+  if (min === null) return { ...base, frequency: "custom" };
 
-  if (hourStr === "*" && dow === "*") {
+  if (hourStr === "*") {
+    if (dow !== "*") return { ...base, frequency: "custom" };
     const time = `00:${String(min).padStart(2, "0")}`;
     return { ...base, frequency: "hourly", time };
   }
-  const hour = parseInt(hourStr, 10);
-  if (Number.isNaN(hour) || hour < 0 || hour > 23) return { ...base, frequency: "custom" };
+  const hour = parsePlainInt(hourStr, 23);
+  if (hour === null) return { ...base, frequency: "custom" };
   const time = `${String(hour).padStart(2, "0")}:${String(min).padStart(2, "0")}`;
 
   if (dow === "*") return { ...base, frequency: "daily", time };
   if (dow === "1-5") return { ...base, frequency: "weekdays", time, daysOfWeek: [1, 2, 3, 4, 5] };
   if (/^[0-6](,[0-6])*$/.test(dow)) {
-    const days = dow.split(",").map((n) => parseInt(n, 10));
+    const days = sortedDays(dow.split(",").map((n) => parseInt(n, 10)));
     return { ...base, frequency: "weekly", time, daysOfWeek: days };
   }
   return { ...base, frequency: "custom" };

@@ -38,6 +38,7 @@ import type {
   ChatPendingTask,
 } from "@multica/core/types";
 import { useT } from "../../i18n";
+import { useAppForeground } from "../../common/use-app-foreground";
 
 const uiLogger = createLogger("chat.ui");
 const apiLogger = createLogger("chat.api");
@@ -307,7 +308,10 @@ export function useChatController(opts?: { isActive?: boolean }) {
 
   // Auto mark-as-read whenever the user is actively looking at a session with
   // unread state. `isActive` lets the caller say "my surface is on screen":
-  // the floating overlay passes `isOpen`, the tab passes `true`.
+  // the floating overlay passes `isOpen`, the tab passes `true`. `appForeground`
+  // additionally requires the window to be visible and focused: a reply landing
+  // while the app is backgrounded must stay unread so the sidebar badges it
+  // (MUL-4485); it clears the moment the user returns and this effect re-runs.
   //
   // The read is deferred by a tick and cancelled on cleanup, so a session that
   // is only *momentarily* active never gets marked read. This is the fix for
@@ -321,10 +325,11 @@ export function useChatController(opts?: { isActive?: boolean }) {
   // read via cleanup; the store re-check is a belt-and-suspenders guard. Only a
   // session that stays active past the tick — a real select, deep link, or
   // refresh — is read.
+  const appForeground = useAppForeground();
   const currentHasUnread =
     sessions.find((s) => s.id === activeSessionId)?.has_unread ?? false;
   useEffect(() => {
-    if (!isActive || !activeSessionId) return;
+    if (!isActive || !appForeground || !activeSessionId) return;
     if (!currentHasUnread) return;
     const sessionId = activeSessionId;
     const timer = setTimeout(() => {
@@ -334,7 +339,7 @@ export function useChatController(opts?: { isActive?: boolean }) {
     }, 0);
     return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- markRead ref stable
-  }, [isActive, activeSessionId, currentHasUnread]);
+  }, [isActive, appForeground, activeSessionId, currentHasUnread]);
 
   const { uploadWithToast } = useFileUpload(api);
 

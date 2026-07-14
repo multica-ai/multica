@@ -13,6 +13,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/featureflags"
 	"github.com/multica-ai/multica/server/internal/logger"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -148,6 +149,10 @@ func (h *Handler) ListLabels(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	if resourceType != defaultLabelResourceType && !featureflags.ResourceLabelsEnabled(r.Context(), h.FeatureFlags) {
+		writeError(w, http.StatusNotFound, "resource labels are not enabled")
+		return
+	}
 	labels, err := h.Queries.ListLabels(r.Context(), db.ListLabelsParams{
 		WorkspaceID: parseUUID(workspaceID), ResourceType: resourceType,
 	})
@@ -208,6 +213,10 @@ func (h *Handler) CreateLabel(w http.ResponseWriter, r *http.Request) {
 	resourceType, err := parseLabelResourceType(req.ResourceType)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if resourceType != defaultLabelResourceType && !featureflags.ResourceLabelsEnabled(r.Context(), h.FeatureFlags) {
+		writeError(w, http.StatusNotFound, "resource labels are not enabled")
 		return
 	}
 	workspaceID := h.resolveWorkspaceID(r)
@@ -321,9 +330,31 @@ func (h *Handler) DeleteLabel(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	tx, err := h.TxStarter.Begin(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to start transaction")
+		return
+	}
+	defer tx.Rollback(r.Context())
+	qtx := h.Queries.WithTx(tx)
+
+	// Keep every relationship cleanup and the catalog deletion atomic. The
+	// resource-label junctions intentionally use application-level cleanup
+	// rather than database cascades.
+	for _, cleanup := range []func() error{
+		func() error { return qtx.DeleteIssueLabelAssignmentsByLabel(r.Context(), idUUID) },
+		func() error { return qtx.DeleteAgentLabelAssignmentsByLabel(r.Context(), idUUID) },
+		func() error { return qtx.DeleteSkillLabelAssignmentsByLabel(r.Context(), idUUID) },
+	} {
+		if err := cleanup(); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to remove label assignments")
+			return
+		}
+	}
+
 	// DeleteLabel is :one RETURNING id — ErrNoRows means the label wasn't in
 	// this workspace (404). Any other error is a real 500.
-	if _, err := h.Queries.DeleteLabel(r.Context(), db.DeleteLabelParams{
+	if _, err := qtx.DeleteLabel(r.Context(), db.DeleteLabelParams{
 		ID: idUUID, WorkspaceID: wsUUID,
 	}); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -332,6 +363,10 @@ func (h *Handler) DeleteLabel(w http.ResponseWriter, r *http.Request) {
 		}
 		slog.Warn("DeleteLabel failed", append(logger.RequestAttrs(r), "error", err)...)
 		writeError(w, http.StatusInternalServerError, "failed to delete label")
+		return
+	}
+	if err := tx.Commit(r.Context()); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to commit label deletion")
 		return
 	}
 	h.publish(protocol.EventLabelDeleted, workspaceID, "member", userID, map[string]any{"label_id": uuidToString(idUUID)})
@@ -522,6 +557,10 @@ func (h *Handler) DetachLabel(w http.ResponseWriter, r *http.Request) {
 // ---------------------------------------------------------------------------
 
 func (h *Handler) ListLabelsForAgent(w http.ResponseWriter, r *http.Request) {
+	if !featureflags.ResourceLabelsEnabled(r.Context(), h.FeatureFlags) {
+		writeError(w, http.StatusNotFound, "resource labels are not enabled")
+		return
+	}
 	agent, ok := h.loadAgentForUser(w, r, chi.URLParam(r, "id"))
 	if !ok {
 		return
@@ -537,6 +576,10 @@ func (h *Handler) ListLabelsForAgent(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) AttachLabelToAgent(w http.ResponseWriter, r *http.Request) {
+	if !featureflags.ResourceLabelsEnabled(r.Context(), h.FeatureFlags) {
+		writeError(w, http.StatusNotFound, "resource labels are not enabled")
+		return
+	}
 	agent, ok := h.loadAgentForUser(w, r, chi.URLParam(r, "id"))
 	if !ok || !h.canManageAgent(w, r, agent) {
 		return
@@ -566,6 +609,10 @@ func (h *Handler) AttachLabelToAgent(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) DetachLabelFromAgent(w http.ResponseWriter, r *http.Request) {
+	if !featureflags.ResourceLabelsEnabled(r.Context(), h.FeatureFlags) {
+		writeError(w, http.StatusNotFound, "resource labels are not enabled")
+		return
+	}
 	agent, ok := h.loadAgentForUser(w, r, chi.URLParam(r, "id"))
 	if !ok || !h.canManageAgent(w, r, agent) {
 		return
@@ -585,6 +632,10 @@ func (h *Handler) DetachLabelFromAgent(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) ListLabelsForSkill(w http.ResponseWriter, r *http.Request) {
+	if !featureflags.ResourceLabelsEnabled(r.Context(), h.FeatureFlags) {
+		writeError(w, http.StatusNotFound, "resource labels are not enabled")
+		return
+	}
 	skill, ok := h.loadSkillForUser(w, r, chi.URLParam(r, "id"))
 	if !ok {
 		return
@@ -600,6 +651,10 @@ func (h *Handler) ListLabelsForSkill(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) AttachLabelToSkill(w http.ResponseWriter, r *http.Request) {
+	if !featureflags.ResourceLabelsEnabled(r.Context(), h.FeatureFlags) {
+		writeError(w, http.StatusNotFound, "resource labels are not enabled")
+		return
+	}
 	skill, ok := h.loadSkillForUser(w, r, chi.URLParam(r, "id"))
 	if !ok || !h.canManageSkill(w, r, skill) {
 		return
@@ -629,6 +684,10 @@ func (h *Handler) AttachLabelToSkill(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) DetachLabelFromSkill(w http.ResponseWriter, r *http.Request) {
+	if !featureflags.ResourceLabelsEnabled(r.Context(), h.FeatureFlags) {
+		writeError(w, http.StatusNotFound, "resource labels are not enabled")
+		return
+	}
 	skill, ok := h.loadSkillForUser(w, r, chi.URLParam(r, "id"))
 	if !ok || !h.canManageSkill(w, r, skill) {
 		return

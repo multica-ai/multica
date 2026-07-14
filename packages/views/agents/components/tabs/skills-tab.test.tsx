@@ -6,6 +6,8 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { Agent, AgentRuntime } from "@multica/core/types";
 import { I18nProvider } from "@multica/core/i18n/react";
+import { configStore } from "@multica/core/config";
+import { AGENT_SKILL_TOGGLES_FLAG } from "@multica/core/feature-flags";
 import enCommon from "../../../locales/en/common.json";
 import enAgents from "../../../locales/en/agents.json";
 
@@ -132,7 +134,8 @@ function renderSkillsTab(
 
 describe("SkillsTab", () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+	vi.clearAllMocks();
+	configStore.getState().setFeatureFlags({ [AGENT_SKILL_TOGGLES_FLAG]: true });
     mockListSkills.mockResolvedValue([]);
     mockSetAgentSkillEnabled.mockResolvedValue(undefined);
     mockRemoveAgentSkill.mockResolvedValue(undefined);

@@ -6,8 +6,10 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/multica-ai/multica/server/internal/daemon"
+	"github.com/spf13/cobra"
 )
 
 // TestDaemonAlive locks in the liveness predicate the lifecycle commands rely
@@ -57,6 +59,20 @@ func TestPrintDaemonStatusIncludesCLIVersion(t *testing.T) {
 	got := out.String()
 	if !strings.Contains(got, "Version:     v9.9.9\n") {
 		t.Fatalf("daemon status output = %q, want CLI version line", got)
+	}
+}
+
+func TestBuildDaemonStartArgsForwardsCodexHandshakeTimeout(t *testing.T) {
+	cmd := &cobra.Command{}
+	cmd.Flags().Duration("codex-handshake-timeout", 0, "")
+	if err := cmd.Flags().Set("codex-handshake-timeout", "42s"); err != nil {
+		t.Fatalf("set flag: %v", err)
+	}
+
+	args := buildDaemonStartArgs(cmd)
+	want := []string{"daemon", "start", "--foreground", "--codex-handshake-timeout", (42 * time.Second).String()}
+	if strings.Join(args, " ") != strings.Join(want, " ") {
+		t.Fatalf("buildDaemonStartArgs() = %q, want %q", args, want)
 	}
 }
 

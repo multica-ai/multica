@@ -3,7 +3,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "@multica/core/api";
 import { AppSidebar } from "./app-sidebar";
 
-const { chatSessions, chatStore, detail, deletePin, navigation, pins, summary, workspaces } = vi.hoisted(() => ({
+const { appForeground, chatSessions, chatStore, detail, deletePin, navigation, pins, summary, workspaces } = vi.hoisted(() => ({
+  appForeground: { current: true },
   chatSessions: { current: [] as { id?: string; unread_count?: number }[] },
   chatStore: { current: { activeSessionId: null as string | null, isOpen: false } },
   detail: { current: { isPending: false, isError: false, data: null as unknown, error: null as unknown } },
@@ -84,6 +85,9 @@ vi.mock("@multica/ui/components/ui/tooltip", () => ({
   Tooltip: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   TooltipContent: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   TooltipTrigger: ({ children }: { children: React.ReactNode }) => <button type="button">{children}</button>,
+}));
+vi.mock("../common/use-app-foreground", () => ({
+  useAppForeground: () => appForeground.current,
 }));
 vi.mock("./help-launcher", () => ({ HelpLauncher: () => null }));
 vi.mock("../auth", () => ({ useLogout: () => vi.fn() }));
@@ -296,6 +300,7 @@ describe("personal nav — Chat", () => {
     chatSessions.current = [];
     navigation.current = { pathname: "/acme/issues" };
     chatStore.current = { activeSessionId: null, isOpen: false };
+    appForeground.current = true;
   });
 
   // The mocked SidebarMenuButton exposes the AppLink target as `data-href`
@@ -347,6 +352,27 @@ describe("personal nav — Chat", () => {
     chatSessions.current = [{ id: "a", unread_count: 2 }, { id: "b", unread_count: 3 }];
     navigation.current = { pathname: "/acme/issues" };
     chatStore.current = { activeSessionId: "a", isOpen: false };
+    const { container } = render(<AppSidebar />);
+    expect(chatBadge(container)).toHaveAttribute("aria-label", "5");
+  });
+
+  it("counts the active session while the floating window is open but the app is backgrounded", () => {
+    // A reply landing while the app is not in the foreground is NOT auto
+    // marked-read (MUL-4485), so its unread must still badge — otherwise the
+    // notification is silently eaten while the user is away.
+    chatSessions.current = [{ id: "a", unread_count: 2 }, { id: "b", unread_count: 3 }];
+    navigation.current = { pathname: "/acme/issues" };
+    chatStore.current = { activeSessionId: "a", isOpen: true };
+    appForeground.current = false;
+    const { container } = render(<AppSidebar />);
+    expect(chatBadge(container)).toHaveAttribute("aria-label", "5");
+  });
+
+  it("counts the active session on the chat route while the app is backgrounded", () => {
+    chatSessions.current = [{ id: "a", unread_count: 2 }, { id: "b", unread_count: 3 }];
+    navigation.current = { pathname: "/acme/chat" };
+    chatStore.current = { activeSessionId: "a", isOpen: false };
+    appForeground.current = false;
     const { container } = render(<AppSidebar />);
     expect(chatBadge(container)).toHaveAttribute("aria-label", "5");
   });
