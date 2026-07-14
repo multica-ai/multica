@@ -286,23 +286,16 @@ vi.mock("sonner", () => ({
 }));
 
 // Mock dnd-kit
-vi.mock("@dnd-kit/core", () => {
-  // Real dnd-kit useDroppable returns a referentially stable setNodeRef
-  // (memoized internally). BoardColumn merges it with a state-setting
-  // callback ref for Virtuoso's customScrollParent, so a fresh function each
-  // render would loop the ref detach/reattach. Model the stable identity.
-  const stableSetNodeRef = () => {};
-  return {
-    DndContext: ({ children }: any) => children,
-    DragOverlay: () => null,
-    PointerSensor: class {},
-    useSensor: () => ({}),
-    useSensors: () => [],
-    useDroppable: () => ({ setNodeRef: stableSetNodeRef, isOver: false }),
-    pointerWithin: vi.fn(),
-    closestCenter: vi.fn(),
-  };
-});
+vi.mock("@dnd-kit/core", () => ({
+  DndContext: ({ children }: any) => children,
+  DragOverlay: () => null,
+  PointerSensor: class {},
+  useSensor: () => ({}),
+  useSensors: () => [],
+  useDroppable: () => ({ setNodeRef: vi.fn(), isOver: false }),
+  pointerWithin: vi.fn(),
+  closestCenter: vi.fn(),
+}));
 
 vi.mock("@dnd-kit/sortable", () => ({
   SortableContext: ({ children }: any) => children,
@@ -333,21 +326,6 @@ vi.mock("@base-ui/react/accordion", () => ({
       Trigger: ({ children }: any) => <button>{children}</button>,
       Panel: ({ children }: any) => <div>{children}</div>,
     },
-  ),
-}));
-
-// Mock react-virtuoso: jsdom has no layout, so the real Virtuoso computes a
-// 0-height viewport and renders nothing (and throws on its resize plumbing).
-// Render every item inline so the virtualized board columns expose their
-// cards to the DOM, matching the non-virtualized behavior these tests assert.
-vi.mock("react-virtuoso", () => ({
-  Virtuoso: ({ data, itemContent, components }: any) => (
-    <div data-testid="virtuoso-mock">
-      {(data ?? []).map((item: any, i: number) => (
-        <div key={i}>{itemContent(i, item)}</div>
-      ))}
-      {components?.Footer ? <components.Footer /> : null}
-    </div>
   ),
 }));
 
