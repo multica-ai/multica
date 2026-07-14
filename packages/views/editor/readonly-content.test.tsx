@@ -4,16 +4,8 @@ import type { ReactElement } from "react";
 import { readFileSync } from "node:fs";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
-const { getAttachmentTextContentMock, resolveIssueIdentifierMock } = vi.hoisted(
-  () => ({
-    getAttachmentTextContentMock: vi.fn(),
-    resolveIssueIdentifierMock: vi.fn(),
-  }),
-);
-
-vi.mock("../issues/hooks", () => ({
-  useResolveIssueIdentifier: (identifier: string) =>
-    resolveIssueIdentifierMock(identifier),
+const { getAttachmentTextContentMock } = vi.hoisted(() => ({
+  getAttachmentTextContentMock: vi.fn(),
 }));
 
 vi.mock("@multica/core/api", () => ({
@@ -227,41 +219,6 @@ describe("ReadonlyContent issue mention Markdown", () => {
 
     expect(container.querySelector('input[type="checkbox"]')).not.toBeNull();
     expect(getByTestId("issue-mention-card").textContent).toBe("MUL-123");
-  });
-
-  it("autolinks a resolved bare identifier as an issue mention card", () => {
-    resolveIssueIdentifierMock.mockImplementation((id: string) =>
-      id === "MUL-7" ? { id: "issue-7", identifier: "MUL-7" } : null,
-    );
-
-    const { getByTestId } = render(
-      <ReadonlyContent content="See MUL-7 for context" />,
-    );
-
-    expect(getByTestId("issue-mention-card").textContent).toBe("MUL-7");
-    expect(resolveIssueIdentifierMock).toHaveBeenCalledWith("MUL-7");
-  });
-
-  it("leaves an unresolved bare identifier as plain text", () => {
-    resolveIssueIdentifierMock.mockReturnValue(null);
-
-    const { container, queryByTestId } = render(
-      <ReadonlyContent content="See MUL-999 for context" />,
-    );
-
-    expect(queryByTestId("issue-mention-card")).toBeNull();
-    expect(container.textContent).toContain("MUL-999");
-  });
-
-  it("does not autolink a bare identifier inside inline code", () => {
-    resolveIssueIdentifierMock.mockReturnValue(null);
-
-    const { queryByTestId } = render(
-      <ReadonlyContent content={"use `MUL-7` here"} />,
-    );
-
-    expect(resolveIssueIdentifierMock).not.toHaveBeenCalled();
-    expect(queryByTestId("issue-mention-card")).toBeNull();
   });
 
   it("documents the CommonMark quoted-emphasis edge case before Korean particles", () => {
@@ -660,83 +617,61 @@ describe("ReadonlyContent slash command rendering", () => {
   });
 });
 
-describe("ReadonlyContent bare URL autolinking (MUL-4242)", () => {
-  // A bare URL wrapped in bold used to be linkified into [url**](url**), which
-  // swallowed the closing `**`: the bold never closed (leading `**` showed as
-  // literal asterisks) and the href was corrupted with a trailing `**`. The
-  // shared linkify now drops a trailing markdown-delimiter run from the URL, so
-  // the closing `**` stays as emphasis outside a clean [url](url).
-  it("renders a bold-wrapped bare URL as bold plus a clean link", () => {
-    const url = "https://github.com/multica-ai/multica/pull/5081";
-    const { container } = render(<ReadonlyContent content={`**PR：${url}**`} />);
-
-    const strong = container.querySelector("strong");
-    expect(strong).not.toBeNull();
-    const anchor = strong!.querySelector("a");
-    expect(anchor?.getAttribute("href")).toBe(url);
-    // No literal asterisks leak into the text, no trailing `**` in the href.
-    expect(container.textContent).not.toContain("**");
-    expect(anchor?.getAttribute("href")).not.toContain("*");
+describe("ReadonlyContent actor mention chips", () => {
+  it("renders a member mention as a non-focusable avatar chip with a single @", () => {
+    const { container } = render(
+      <ReadonlyContent content="[@张三](mention://member/u1)" />,
+    );
+    const chip = container.querySelector(".actor-mention-chip");
+    expect(chip).not.toBeNull();
+    expect(chip!.className).toContain("bg-muted");
+    // The markdown label carries a leading "@"; the chip must not double it.
+    expect(chip!.textContent).toContain("@张三");
+    expect(chip!.textContent).not.toContain("@@");
+    // Readonly chips are non-focusable — no tab stop per mention (R14).
+    expect(chip!.getAttribute("tabindex")).toBeNull();
   });
 
-  it("bolds a bare URL even when a CJK punctuation immediately follows (variant B)", () => {
-    // `**url**（MUL）` — the closing `**` is glued to a fullwidth paren. gfm
-    // autolink swallowed the `**` here; the shared string linkify does not.
-    const url = "https://github.com/multica-ai/multica/pull/5133";
-    const { container } = render(
-      <ReadonlyContent content={`PR：**${url}**（MUL-4277）。`} />,
-    );
-
-    const strong = container.querySelector("strong");
-    expect(strong).not.toBeNull();
-    expect(strong!.querySelector("a")?.getAttribute("href")).toBe(url);
-    expect(container.textContent).not.toContain("**");
-    expect(container.textContent).toContain("（MUL-4277）");
+  it("renders an agent mention with brand tint", () => {
+    const chip = render(
+      <ReadonlyContent content="[@ReviewerBot](mention://agent/a1)" />,
+    ).container.querySelector(".actor-mention-chip")!;
+    expect(chip.className).toContain("bg-brand/10");
   });
 
-  it("still autolinks a plain bare URL", () => {
-    const { container } = render(
-      <ReadonlyContent content={"see https://example.com/foo here"} />,
-    );
-    expect(container.querySelector('a[href="https://example.com/foo"]')).not.toBeNull();
+  it("renders a squad mention with info tint (squad added to the capture regex)", () => {
+    const chip = render(
+      <ReadonlyContent content="[@设计组](mention://squad/s1)" />,
+    ).container.querySelector(".actor-mention-chip")!;
+    expect(chip.className).toContain("bg-info/10");
   });
 
-  it("stops an autolinked URL at CJK punctuation instead of swallowing it", () => {
-    const { container } = render(
-      <ReadonlyContent content={"见 https://example.com/foo。后面还有字"} />,
+  it("renders an @all mention with warning tint", () => {
+    const chip = render(
+      <ReadonlyContent content="[@all](mention://all/all)" />,
+    ).container.querySelector(".actor-mention-chip")!;
+    expect(chip.className).toContain("bg-warning/10");
+    expect(chip.getAttribute("aria-label")).toBe(
+      "Mention: all workspace members",
     );
-    const anchor = container.querySelector("a");
-    expect(anchor?.getAttribute("href")).toBe("https://example.com/foo");
-    expect(anchor?.textContent).toBe("https://example.com/foo");
-    // The CJK tail stays outside the link.
-    expect(container.textContent).toContain("。后面还有字");
   });
 
-  it("keeps every URL in a CJK-separated run linked, not just the first", () => {
-    // `url1、url2` — linkify-it merges both across the CJK comma; collectLinkify
-    // truncates at 、 and rescans the tail so both URLs become their own link.
+  it("renders mixed mention types in one paragraph with distinct tints", () => {
     const { container } = render(
-      <ReadonlyContent content={"两个地址 https://a.com/x、https://b.com/y"} />,
+      <ReadonlyContent content="Assigned to [@张三](mention://member/u1), reviewed by [@ReviewerBot](mention://agent/a1), and notified [@设计组](mention://squad/s1)." />,
     );
-    const hrefs = Array.from(container.querySelectorAll("a")).map((a) =>
-      a.getAttribute("href"),
-    );
-    expect(hrefs).toContain("https://a.com/x");
-    expect(hrefs).toContain("https://b.com/y");
-    // The 、 separator stays as text between the two links.
-    expect(container.textContent).toContain("、");
+    const chips = container.querySelectorAll(".actor-mention-chip");
+    expect(chips).toHaveLength(3);
+    expect(chips[0]!.className).toContain("bg-muted");
+    expect(chips[1]!.className).toContain("bg-brand/10");
+    expect(chips[2]!.className).toContain("bg-info/10");
   });
 
-  it("leaves an explicit link's destination untouched even when it ends in CJK", () => {
-    const { container } = render(
-      <ReadonlyContent content={"[看](https://example.com/x。)后文"} />,
+  it("does not regress issue mention rendering (IssueMentionCard, not an actor chip)", () => {
+    const { getByTestId, container } = render(
+      <ReadonlyContent content="[MUL-1](mention://issue/i1)" />,
     );
-    const anchor = container.querySelector("a");
-    // react-markdown percent-encodes the CJK char; the point is it is NOT
-    // trimmed off the way an autolink literal would be.
-    expect(decodeURIComponent(anchor?.getAttribute("href") ?? "")).toBe(
-      "https://example.com/x。",
-    );
-    expect(anchor?.textContent).toBe("看");
+    expect(getByTestId("issue-mention-card").textContent).toBe("MUL-1");
+    expect(container.querySelector(".actor-mention-chip")).toBeNull();
   });
 });

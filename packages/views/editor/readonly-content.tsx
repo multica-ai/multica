@@ -40,6 +40,12 @@ import { useNavigation } from "../navigation";
 import { IssueMentionCard } from "../issues/components/issue-mention-card";
 import { useResolveIssueIdentifier } from "../issues/hooks";
 import { ProjectChip } from "../projects/components/project-chip";
+import { ActorMentionChip } from "@multica/ui/components/common/actor-mention-chip";
+import type { ActorMentionType } from "@multica/ui/components/common/actor-mention-chip";
+import { SkillMentionChip } from "@multica/ui/components/common/skill-mention-chip";
+import { isActorMentionType } from "@multica/core/mention";
+import type { MentionType } from "@multica/core/mention";
+import { MentionHoverCard } from "./mention-hover-card";
 import { useLinkHover, LinkHoverCard } from "./link-hover-card";
 import { openLink, isMentionHref } from "./utils/link-handler";
 import { isAllowedFileCardHref, isIssueIdentifier } from "@multica/ui/markdown";
@@ -258,31 +264,80 @@ function ReadonlyLink({
   }
 
   if (isMentionHref(href)) {
-    const match = href.match(/^mention:\/\/(member|agent|issue|project|all)\/(.+)$/);
-    if (match?.[1] === "issue" && match[2]) {
-      // A bare identifier (from the autolink preprocessor) is carried as the id
-      // segment; a real mention carries a UUID. Dispatch on the id shape.
-      if (isIssueIdentifier(match[2])) {
-        return <AutolinkedIssueMentionLink identifier={match[2]} />;
+    // Use a generic regex to capture any mention type; dispatch is
+    // registry-driven below, so new types are automatically handled without
+    // regex edits.
+    const match = href.match(/^mention:\/\/(\w+)\/(.+)$/);
+    const mentionType = match?.[1];
+    const mentionId = match?.[2];
+    if (mentionType && mentionId) {
+      if (mentionType === "issue") {
+        // A bare identifier (from the autolink preprocessor) is carried as the id
+        // segment; a real mention carries a UUID. Dispatch on the id shape.
+        if (isIssueIdentifier(mentionId)) {
+          return <AutolinkedIssueMentionLink identifier={mentionId} />;
+        }
+        const label =
+          typeof children === "string"
+            ? children
+            : Array.isArray(children)
+              ? children.join("")
+              : undefined;
+        return <IssueMentionLink issueId={mentionId} label={label} />;
       }
-      const label =
-        typeof children === "string"
-          ? children
-          : Array.isArray(children)
-            ? children.join("")
-            : undefined;
-      return <IssueMentionLink issueId={match[2]} label={label} />;
+      if (mentionType === "project") {
+        const label =
+          typeof children === "string"
+            ? children
+            : Array.isArray(children)
+              ? children.join("")
+              : undefined;
+        return <ProjectMentionLink projectId={mentionId} label={label} />;
+      }
+      // Actor types (member/agent/squad/all) render as avatar chips.
+      // Readonly chips are non-focusable (no tab stop per mention) — R14 — so
+      // the chip's aria-label conveys identity to screen readers and mouse hover
+      // still opens the MentionHoverCard.
+      if (isActorMentionType(mentionType as MentionType)) {
+        const rawLabel =
+          typeof children === "string"
+            ? children
+            : Array.isArray(children)
+              ? children.join("")
+              : (mentionId ?? "");
+        // The mention markdown serializes the label WITH a leading "@" (e.g.
+        // "[@张三](mention://...)"); the chip adds its own "@" prefix, so strip
+        // one leading "@" to avoid rendering "@@张三".
+        const label = rawLabel.startsWith("@") ? rawLabel.slice(1) : rawLabel;
+        const initials = label.charAt(0);
+        const actorType = mentionType as ActorMentionType;
+        return (
+          <MentionHoverCard type={mentionType} id={mentionId}>
+            <ActorMentionChip type={actorType} label={label} initials={initials} />
+          </MentionHoverCard>
+        );
+      }
+
+      // Skill mentions render as a skill chip with bound-agents hover card.
+      // Read-only renders are non-focusable; the chip's aria-label conveys
+      // identity to screen readers and mouse hover opens the hover card.
+      if (mentionType === "skill") {
+        const rawLabel =
+          typeof children === "string"
+            ? children
+            : Array.isArray(children)
+              ? children.join("")
+              : (mentionId ?? "");
+        // Strip one leading "@" — skill mentions carry the "@" prefix in the
+        // serialized label, and SkillMentionChip adds its own.
+        const label = rawLabel.startsWith("@") ? rawLabel.slice(1) : rawLabel;
+        return (
+          <MentionHoverCard type="skill" id={mentionId}>
+            <SkillMentionChip name={label} />
+          </MentionHoverCard>
+        );
+      }
     }
-    if (match?.[1] === "project" && match[2]) {
-      const label =
-        typeof children === "string"
-          ? children
-          : Array.isArray(children)
-            ? children.join("")
-            : undefined;
-      return <ProjectMentionLink projectId={match[2]} label={label} />;
-    }
-    // Member / agent / all mentions
     return <span className="mention">{children}</span>;
   }
 

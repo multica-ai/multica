@@ -14,18 +14,27 @@ import type { QueryClient } from "@tanstack/react-query";
 import { getCurrentWsId } from "@multica/core/platform";
 import { flattenIssueBuckets, issueKeys } from "@multica/core/issues/queries";
 import { workspaceKeys } from "@multica/core/workspace/queries";
+import {
+  agentListOptions,
+  memberListOptions,
+  skillListOptions,
+  squadListOptions,
+} from "@multica/core/workspace/queries";
 import { useAuthStore } from "@multica/core/auth";
 import { canAssignAgentToIssue } from "@multica/core/permissions";
 import { api } from "@multica/core/api";
 import { isImeComposing } from "@multica/core/utils";
+import type { MentionType } from "@multica/core/mention";
+import { getMentionGroupLabel } from "@multica/core/mention";
 import type {
   Issue,
   ListIssuesCache,
   MemberWithUser,
   Agent,
   Squad,
+  SkillSummary,
 } from "@multica/core/types";
-import { ListTodo } from "lucide-react";
+import { ListTodo, BookOpenText } from "lucide-react";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { StatusIcon } from "../../issues/components/status-icon";
 import { ProjectIcon } from "../../projects/components/project-icon";
@@ -51,7 +60,7 @@ import { createSuggestionPopupRender, isPickerAcceptKey } from "./suggestion-pop
 export interface MentionItem {
   id: string;
   label: string;
-  type: "member" | "agent" | "squad" | "issue" | "project" | "all";
+  type: "member" | "agent" | "squad" | "issue" | "project" | "all" | "skill";
   /** Optional grouping hint for injected context items. */
   group?: "current" | "recent" | "search";
   /** Secondary text shown beside the label (e.g. issue title) */
@@ -88,8 +97,9 @@ function groupItems(items: MentionItem[]): MentionGroup[] {
   const current: MentionItem[] = [];
   const recent: MentionItem[] = [];
   const search: MentionItem[] = [];
-  const users: MentionItem[] = [];
-  const issues: MentionItem[] = [];
+  // Registry-driven grouping for non-context items. Map preserves insertion
+  // order, so groups appear in the order the first item of each group arrives.
+  const typeGroups = new Map<string, MentionItem[]>();
 
   for (const item of items) {
     if (item.group === "current") {
@@ -98,10 +108,14 @@ function groupItems(items: MentionItem[]): MentionGroup[] {
       recent.push(item);
     } else if (item.group === "search") {
       search.push(item);
-    } else if (item.type === "issue" || item.type === "project") {
-      issues.push(item);
     } else {
-      users.push(item);
+      const label = getMentionGroupLabel(item.type as MentionType);
+      let group = typeGroups.get(label);
+      if (!group) {
+        group = [];
+        typeGroups.set(label, group);
+      }
+      group.push(item);
     }
   }
 
@@ -109,8 +123,9 @@ function groupItems(items: MentionItem[]): MentionGroup[] {
   if (current.length > 0) groups.push({ label: "Current", items: current });
   if (recent.length > 0) groups.push({ label: "Recent", items: recent });
   if (search.length > 0) groups.push({ label: "Search", items: search });
-  if (users.length > 0) groups.push({ label: "Users", items: users });
-  if (issues.length > 0) groups.push({ label: "Issues", items: issues });
+  for (const [label, typeItems] of typeGroups) {
+    groups.push({ label, items: typeItems });
+  }
   return groups;
 }
 
@@ -321,6 +336,7 @@ export const MentionList = forwardRef<MentionListRef, MentionListProps>(
       if (label === "Search") return t(($) => $.mention.group_search);
       if (label === "Users") return t(($) => $.mention.group_users);
       if (label === "Issues") return t(($) => $.mention.group_issues);
+      if (label === "Skills") return t(($) => $.mention.group_skills);
       return label;
     };
 
@@ -457,6 +473,31 @@ function MentionRow({
     );
   }
 
+  if (item.type === "skill") {
+    return (
+      <button
+        type="button"
+        ref={buttonRef}
+        className={`flex w-full items-center gap-2.5 px-3 py-2 text-left text-xs transition-colors ${
+          selected ? "bg-accent" : "hover:bg-accent/50"
+        }`}
+        onClick={onSelect}
+      >
+        <span className="flex h-7 w-7 shrink-0 items-center justify-center">
+          <BookOpenText className="h-3.5 w-3.5 text-violet-600 dark:text-violet-400" />
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="flex min-w-0 items-center gap-2">
+            <span className="shrink-0 font-medium text-violet-700 dark:text-violet-300">{item.label}</span>
+            {item.description && (
+              <span className="truncate text-muted-foreground">{item.description}</span>
+            )}
+          </span>
+        </span>
+      </button>
+    );
+  }
+
   return (
     <button
       type="button"
@@ -541,6 +582,24 @@ export function createMentionSuggestion(
   // shared popup controller when it dispatches exitSuggestion(view, pluginKey).
   const pluginKey = new PluginKey("mentionSuggestion");
 
+  // Ensure the mentionable-entity caches are warm before the user types `@`.
+  // Without this, buildSyncItems reads from `getQueryData` and produces an
+  // empty result for skill/agent/member/squad/issue until the user has
+  // visited a page that fires those queries — the comment composer is the
+  // first place @support lands for many users, so the empty-cache case is
+  // the common one. ensureQueryData is idempotent and cheap when warm.
+  const ensureCaches = () => {
+    const wsId = getCurrentWsId();
+    if (!wsId) return;
+    void qc.ensureQueryData(skillListOptions(wsId));
+    void qc.ensureQueryData(agentListOptions(wsId));
+    void qc.ensureQueryData(squadListOptions(wsId));
+    void qc.ensureQueryData(memberListOptions(wsId));
+  };
+  // Fire once on factory construction; subsequent mount of the composer
+  // hits a warm cache.
+  ensureCaches();
+
   function buildSyncItems(query: string): MentionItem[] {
     // Read workspace id imperatively because this runs in TipTap factory scope
     // (outside React render). getCurrentWsId() is the non-React singleton set
@@ -592,6 +651,11 @@ export function createMentionSuggestion(
       .filter((s) => !s.archived_at && (s.name.toLowerCase().includes(q) || matchesPinyin(s.name, q)))
       .map((s) => ({ id: s.id, label: s.name, type: "squad" as const }));
 
+    const skills: SkillSummary[] = qc.getQueryData(workspaceKeys.skills(wsId)) ?? [];
+    const skillItems: MentionItem[] = skills
+      .filter((s) => s.name.toLowerCase().includes(q) || s.description.toLowerCase().includes(q) || matchesPinyin(s.name, q))
+      .map((s) => ({ id: s.id, label: s.name, type: "skill" as const, description: s.description }));
+
     // Members and agents share a single ranked list — recently mentioned
     // targets come first regardless of type, with an alphabetical fallback
     // for everyone the user hasn't mentioned yet on this device.
@@ -611,7 +675,7 @@ export function createMentionSuggestion(
       )
       .map(issueToMention);
 
-    return [...allItem, ...userItems, ...issueItems];
+    return [...allItem, ...userItems, ...issueItems, ...skillItems];
   }
 
   return {

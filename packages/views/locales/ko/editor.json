@@ -56,12 +56,19 @@
   "mention": {
     "group_users": "사용자",
     "group_issues": "이슈",
+    "group_skills": "스킬",
     "all_members": "모든 멤버",
     "searching": "검색 중...",
     "no_results": "결과 없음",
     "group_current": "현재 페이지",
     "group_recent": "최근 본 항목",
-    "group_search": "검색 결과"
+    "group_search": "검색 결과",
+    "skill_no_agents": "할당된 에이전트 없음",
+    "skill_bound_to": "바인딩 대상",
+    "skill_bound_to_count": "바인딩 대상 ({{count}})",
+    "skill_show_details": "항목 {{count}}개 더 보기",
+    "skill_hide_details": "세부 정보 숨기기",
+    "skill_view_full": "전체 skill 보기 →"
   },
   "code_block": {
     "copy_code": "코드 복사",

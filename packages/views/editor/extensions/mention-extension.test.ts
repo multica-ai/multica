@@ -110,6 +110,27 @@ describe("mention tokenizer", () => {
     expect(token!.attributes.id).toBe("aaa-bbb");
   });
 
+  it("parses a skill mention with @ prefix", () => {
+    const token = tokenize("[@code-review](mention://skill/aaa-bbb)");
+    expect(token).toBeDefined();
+    expect(token!.attributes.label).toBe("code-review");
+    expect(token!.attributes.type).toBe("skill");
+    expect(token!.attributes.id).toBe("aaa-bbb");
+  });
+
+  it("round-trips a skill mention through renderMarkdown and tokenize", () => {
+    const md = renderMarkdown({
+      attrs: { id: "skill-uuid-123", label: "code-review", type: "skill" },
+    });
+    expect(md).toBe("[@code-review](mention://skill/skill-uuid-123)");
+
+    const token = tokenize(md);
+    expect(token).toBeDefined();
+    expect(token!.attributes.label).toBe("code-review");
+    expect(token!.attributes.type).toBe("skill");
+    expect(token!.attributes.id).toBe("skill-uuid-123");
+  });
+
   it("does not start at escaped Java stacktrace source markers before a real mention", () => {
     const prefix = JAVA_STACKTRACE_SOURCE_MARKER.repeat(3);
     const src = `${prefix}[@Alice](mention://member/aaa-bbb)`;

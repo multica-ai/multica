@@ -10,9 +10,13 @@ import {
 import { useConfigStore } from "@multica/core/config";
 import type { Attachment as AttachmentRecord } from "@multica/core/types";
 import { useWorkspacePaths } from "@multica/core/paths";
+import { MENTION_TYPE_REGISTRY, isActorMentionType, type MentionType } from "@multica/core/mention";
 import { IssueMentionCard } from "../issues/components/issue-mention-card";
 import { useResolveIssueIdentifier } from "../issues/hooks";
 import { ProjectChip } from "../projects/components/project-chip";
+import { ActorMentionChip } from "@multica/ui/components/common/actor-mention-chip";
+import { SkillMentionChip } from "@multica/ui/components/common/skill-mention-chip";
+import { MentionHoverCard } from "../editor/mention-hover-card";
 import { AppLink } from "../navigation";
 import {
   Attachment as AttachmentRenderer,
@@ -60,6 +64,16 @@ function AutolinkedIssueMention({ identifier }: { identifier: string }): React.R
   return <IssueMentionCard issueId={issue.id} fallbackLabel={identifier} />;
 }
 
+/**
+ * Default renderMention — registry-driven dispatch that resolves a mention
+ * to the same chip/hovers-card surface used in the editor and chat.
+ *
+ * Issue, project, member, agent, squad, all, and skill all route to
+ * their dedicated components here; any registered type we don't have a
+ * dedicated renderer for falls through to a generic styled `@id` span
+ * so the URL is still visible (the alternative — a null return — would
+ * silently drop the mention from chat history, skill output, etc.).
+ */
 function defaultRenderMention({
   type,
   id,
@@ -77,6 +91,36 @@ function defaultRenderMention({
   }
   if (type === "project") {
     return <ProjectMentionCard projectId={id} />;
+  }
+  if (type === "skill") {
+    return (
+      <MentionHoverCard type="skill" id={id}>
+        <SkillMentionChip name={id} />
+      </MentionHoverCard>
+    );
+  }
+  // Actor types (member/agent/squad/all) render as avatar chips with hover
+  // cards — same surface as `MentionHoverCard` in the editor surface, so
+  // chat history matches inline editor mentions. The id carries the
+  // display label for readonly-render contexts (the rendered chip
+  // fetches its own data via useQuery when the hover card opens).
+  if (isActorMentionType(type as MentionType)) {
+    const label = id;
+    const initials = label.charAt(0);
+    const actorType = type as Parameters<typeof ActorMentionChip>[0]["type"];
+    return (
+      <MentionHoverCard type={type} id={id}>
+        <ActorMentionChip type={actorType} label={label} initials={initials} />
+      </MentionHoverCard>
+    );
+  }
+  // Any other registered mention type — render as a generic styled span.
+  if (type in MENTION_TYPE_REGISTRY) {
+    return (
+      <span className="text-primary font-semibold mx-0.5">
+        @{id}
+      </span>
+    );
   }
   return null;
 }

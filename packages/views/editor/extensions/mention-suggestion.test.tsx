@@ -75,6 +75,16 @@ function fakeQc(data: {
     name: string;
     archived_at: string | null;
   }>;
+  skills?: Array<{
+    id: string;
+    name: string;
+    description: string;
+    workspace_id?: string;
+    config?: Record<string, unknown>;
+    created_by?: string | null;
+    created_at?: string;
+    updated_at?: string;
+  }>;
   issues?: Array<{ id: string; identifier: string; title: string; status: string }>;
 }): QueryClient {
   const map = new Map<string, unknown>();
@@ -96,6 +106,7 @@ function fakeQc(data: {
   }));
   map.set(JSON.stringify(workspaceKeys.agents("ws-1")), agentsWithPermissions);
   map.set(JSON.stringify(workspaceKeys.squads("ws-1")), data.squads ?? []);
+  map.set(JSON.stringify(workspaceKeys.skills("ws-1")), data.skills ?? []);
   const byStatus: ListIssuesCache["byStatus"] = {};
   for (const status of PAGINATED_STATUSES) {
     const bucket = (data.issues ?? []).filter((i) => i.status === status);
@@ -118,6 +129,11 @@ function fakeQc(data: {
       }
       return results;
     },
+    // ensureQueryData is called by createMentionSuggestion to warm the entity
+    // caches (skills/agents/squads/members) on factory construction. The
+    // fake stub treats it as a no-op since tests pre-populate the cache
+    // directly via getQueryData assertions.
+    ensureQueryData: () => Promise.resolve(),
   } as unknown as QueryClient;
 }
 
@@ -595,5 +611,114 @@ describe("createMentionSuggestion", () => {
 
     const items = result as MentionItem[];
     expect(items.some((i) => i.type === "agent" && i.label === "魏和尚")).toBe(true);
+  });
+
+  // --- Skills ---
+
+  it("includes workspace skills in the suggestion list", () => {
+    const qc = fakeQc({
+      members: [{ user_id: "u1", name: "Alice", role: "member" }],
+      skills: [
+        { id: "sk1", name: "code-review", description: "Review pull requests" },
+        { id: "sk2", name: "summarize", description: "Summarize documents" },
+      ],
+    });
+    searchIssuesMock.mockReturnValue(new Promise(() => {}));
+
+    const config = createMentionSuggestion(qc);
+    const result = config.items!(itemArgs("")) as MentionItem[];
+
+    expect(result.some((i) => i.type === "skill" && i.label === "code-review")).toBe(true);
+    expect(result.some((i) => i.type === "skill" && i.label === "summarize")).toBe(true);
+  });
+
+  it("groups skills under the Skills label", () => {
+    const qc = fakeQc({
+      members: [{ user_id: "u1", name: "Alice", role: "member" }],
+      skills: [
+        { id: "sk1", name: "code-review", description: "Review pull requests" },
+      ],
+    });
+    searchIssuesMock.mockReturnValue(new Promise(() => {}));
+
+    const config = createMentionSuggestion(qc);
+    const result = config.items!(itemArgs("")) as MentionItem[];
+
+    // Skills should be present and grouped distinctly from members.
+    expect(result.some((i) => i.type === "skill" && i.label === "code-review")).toBe(true);
+    expect(result.some((i) => i.type === "member" && i.label === "Alice")).toBe(true);
+  });
+
+  it("renders skill items with description in the mention list", () => {
+    render(
+      <I18nWrapper>
+        <MentionList
+          items={[
+            { id: "sk1", label: "code-review", type: "skill", description: "Review pull requests" },
+          ]}
+          query=""
+          command={vi.fn()}
+        />
+      </I18nWrapper>,
+    );
+
+    expect(screen.getByText("code-review")).toBeInTheDocument();
+    expect(screen.getByText("Review pull requests")).toBeInTheDocument();
+  });
+
+  it("renders skill items with empty description", () => {
+    render(
+      <I18nWrapper>
+        <MentionList
+          items={[
+            { id: "sk1", label: "deploy", type: "skill", description: "" },
+          ]}
+          query=""
+          command={vi.fn()}
+        />
+      </I18nWrapper>,
+    );
+
+    expect(screen.getByText("deploy")).toBeInTheDocument();
+  });
+
+  it("produces no Skills group when workspace has no skills", () => {
+    const qc = fakeQc({
+      members: [{ user_id: "u1", name: "Alice", role: "member" }],
+      // skills omitted → empty cache
+    });
+    searchIssuesMock.mockReturnValue(new Promise(() => {}));
+
+    const config = createMentionSuggestion(qc);
+    const result = config.items!(itemArgs("")) as MentionItem[];
+
+    expect(result.some((i) => i.type === "skill")).toBe(false);
+  });
+
+  it("selecting a skill calls the command with the correct item", () => {
+    const command = vi.fn<(item: MentionItem) => void>();
+    const ref = createRef<MentionListRef>();
+
+    render(
+      <I18nWrapper>
+        <MentionList
+          ref={ref}
+          items={[
+            { id: "sk1", label: "code-review", type: "skill", description: "Review PRs" },
+          ]}
+          query=""
+          command={command}
+        />
+      </I18nWrapper>,
+    );
+
+    act(() => {
+      ref.current?.onKeyDown({ event: new KeyboardEvent("keydown", { key: "Enter" }) });
+    });
+
+    expect(command).toHaveBeenCalledTimes(1);
+    expect(command.mock.calls[0]?.[0]?.type).toBe("skill");
+    expect(command.mock.calls[0]?.[0]?.id).toBe("sk1");
+    expect(command.mock.calls[0]?.[0]?.label).toBe("code-review");
   });
 });
