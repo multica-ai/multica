@@ -42,7 +42,7 @@ Move the mention hover card to the **views layer** where profile cards are acces
    - Uses `HoverCard` + `HoverCardTrigger` (non-focusable — chip owns focusability per R14).
    - `HoverCardContent` width `w-72`, `align="start"` — matches `ActorAvatarHoverCardShell` layout.
 
-2. Switch editor (`mention-view.tsx`) and readonly (`readonly-content.tsx`) to import the views-layer hover card instead of the `packages/ui` one.
+2. Switch editor (`packages/views/editor/extensions/mention-view.tsx`) and readonly (`readonly-content.tsx`) to import the views-layer hover card instead of the `packages/ui` one.
 
 3. The `packages/ui` `MentionHoverCard` becomes dead code (no importers) — delete it.
 
