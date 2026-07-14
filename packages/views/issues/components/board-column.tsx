@@ -26,6 +26,7 @@ import { DraggableBoardCard } from "./board-card";
 import type { ChildProgress } from "./list-row";
 import { useT } from "../../i18n";
 import { ActorAvatar } from "../../common/actor-avatar";
+import { VirtuosoSeed, VIRTUOSO_SEED_COUNT } from "../../common/virtuoso-seed";
 import type { IssueCreateDefaults } from "../surface/types";
 
 // Insertion-position prediction intentionally omitted. The server's
@@ -114,6 +115,23 @@ export const BoardColumn = memo(function BoardColumn({
     [footer],
   );
 
+  const computeItemKey = (_index: number, issue: Issue) => issue.id;
+  const itemContent = (index: number, issue: Issue) => (
+    // pt-2 on every card but the first reproduces the previous `space-y-2`
+    // gap; padding (not margin) is inside Virtuoso's measured item box so its
+    // height math stays correct.
+    <div className={index === 0 ? undefined : "pt-2"}>
+      <DraggableBoardCard
+        issue={issue}
+        childProgress={childProgressMap?.get(issue.id)}
+        project={
+          issue.project_id ? projectMap?.get(issue.project_id) : undefined
+        }
+        disableSorting={!!sortLabel}
+      />
+    </div>
+  );
+
   return (
     <div style={{ width: BOARD_COL_WIDTH }} className={`flex shrink-0 flex-col rounded-xl ${cfg?.columnBg ?? "bg-muted/40"} p-2`}>
       <div className="mb-2 flex items-center justify-between px-1.5">
@@ -183,28 +201,25 @@ export const BoardColumn = memo(function BoardColumn({
         >
           {resolvedIssues.length > 0 ? (
             <SortableContext items={issueIds} strategy={verticalListSortingStrategy}>
-              {scrollEl && (
+              {/* Seed a bounded slice of real cards while the merged scroll ref
+                  hasn't settled after a remount, so the column never paints
+                  blank; once it's set, mount the Virtuoso with a matching
+                  `initialItemCount` to survive the measurement frame (MUL-4750). */}
+              {scrollEl ? (
                 <Virtuoso
                   customScrollParent={scrollEl}
                   data={resolvedIssues}
-                  computeItemKey={(_index, issue) => issue.id}
+                  computeItemKey={computeItemKey}
+                  initialItemCount={Math.min(resolvedIssues.length, VIRTUOSO_SEED_COUNT)}
                   increaseViewportBy={{ top: 300, bottom: 300 }}
                   components={footerComponents}
-                  itemContent={(index, issue) => (
-                    // pt-2 on every card but the first reproduces the previous
-                    // `space-y-2` gap; padding (not margin) is inside Virtuoso's
-                    // measured item box so its height math stays correct.
-                    <div className={index === 0 ? undefined : "pt-2"}>
-                      <DraggableBoardCard
-                        issue={issue}
-                        childProgress={childProgressMap?.get(issue.id)}
-                        project={
-                          issue.project_id ? projectMap?.get(issue.project_id) : undefined
-                        }
-                        disableSorting={!!sortLabel}
-                      />
-                    </div>
-                  )}
+                  itemContent={itemContent}
+                />
+              ) : (
+                <VirtuosoSeed
+                  data={resolvedIssues}
+                  itemContent={itemContent}
+                  computeItemKey={computeItemKey}
                 />
               )}
             </SortableContext>

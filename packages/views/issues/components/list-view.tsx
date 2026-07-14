@@ -41,6 +41,7 @@ import {
 import type { BoardColumnGroup } from "./board-column";
 import { useIssueSurfaceSelection } from "../surface/selection-context";
 import type { IssueCreateDefaults } from "../surface/types";
+import { VirtuosoSeed, VIRTUOSO_SEED_COUNT } from "../../common/virtuoso-seed";
 
 const EMPTY_PROGRESS_MAP = new Map<string, ChildProgress>();
 const EMPTY_IDS: string[] = [];
@@ -448,40 +449,55 @@ function StatusAccordionItem({
     [hasMore, loadMore, isLoading],
   );
 
-  // Rows virtualize into the page's shared scroll parent. Only mount the
-  // Virtuoso when the section is expanded and that parent exists — a Virtuoso
-  // in a collapsed (0-height / hidden) panel has no viewport to measure. The
-  // droppable, SortableContext, sticky header, and collapse are unchanged;
-  // virtualization only decides whether an off-screen row is in the DOM.
-  const rows =
-    isExpanded && scrollParent && issues.length > 0 ? (
-      <Virtuoso
-        customScrollParent={scrollParent}
-        data={issues}
-        computeItemKey={(_index, issue) => issue.id}
-        increaseViewportBy={{ top: 400, bottom: 400 }}
-        components={listComponents}
-        itemContent={(_index, issue) =>
-          dragEnabled ? (
-            <DraggableListRow
-              issue={issue}
-              childProgress={childProgressMap.get(issue.id)}
-              project={
-                issue.project_id ? projectMap?.get(issue.project_id) : undefined
-              }
-              disableSorting={disableSorting}
-            />
-          ) : (
-            <ListRow
-              issue={issue}
-              childProgress={childProgressMap.get(issue.id)}
-              project={
-                issue.project_id ? projectMap?.get(issue.project_id) : undefined
-              }
-            />
-          )
+  const computeItemKey = (_index: number, issue: Issue) => issue.id;
+  const itemContent = (_index: number, issue: Issue) =>
+    dragEnabled ? (
+      <DraggableListRow
+        issue={issue}
+        childProgress={childProgressMap.get(issue.id)}
+        project={
+          issue.project_id ? projectMap?.get(issue.project_id) : undefined
+        }
+        disableSorting={disableSorting}
+      />
+    ) : (
+      <ListRow
+        issue={issue}
+        childProgress={childProgressMap.get(issue.id)}
+        project={
+          issue.project_id ? projectMap?.get(issue.project_id) : undefined
         }
       />
+    );
+
+  // Rows virtualize into the page's shared scroll parent. Only render when the
+  // section is expanded and non-empty — a Virtuoso in a collapsed (0-height /
+  // hidden) panel has no viewport to measure. While the shared scroll parent
+  // is still null (callback ref not settled after a route-return remount),
+  // seed a bounded slice of real rows so the first painted frame isn't blank;
+  // once it's set, mount the Virtuoso with a matching `initialItemCount` so the
+  // measurement frame keeps those rows instead of flashing empty (MUL-4750).
+  // The droppable, SortableContext, sticky header, and collapse are unchanged;
+  // virtualization only decides whether an off-screen row is in the DOM.
+  const rows =
+    isExpanded && issues.length > 0 ? (
+      scrollParent ? (
+        <Virtuoso
+          customScrollParent={scrollParent}
+          data={issues}
+          computeItemKey={computeItemKey}
+          initialItemCount={Math.min(issues.length, VIRTUOSO_SEED_COUNT)}
+          increaseViewportBy={{ top: 400, bottom: 400 }}
+          components={listComponents}
+          itemContent={itemContent}
+        />
+      ) : (
+        <VirtuosoSeed
+          data={issues}
+          itemContent={itemContent}
+          computeItemKey={computeItemKey}
+        />
+      )
     ) : null;
 
   return (

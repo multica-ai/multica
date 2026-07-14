@@ -5,6 +5,7 @@ import { Virtuoso } from "react-virtuoso";
 import { Inbox } from "lucide-react";
 import type { InboxItem } from "@multica/core/types";
 import { InboxListItem } from "./inbox-list-item";
+import { VirtuosoSeed, VIRTUOSO_SEED_COUNT } from "../../common/virtuoso-seed";
 import { useT } from "../../i18n";
 
 /**
@@ -56,23 +57,37 @@ export function InboxList({
     );
   }
 
+  const computeItemKey = (_index: number, item: InboxItem) => item.id;
+  const itemContent = (_index: number, item: InboxItem) => (
+    <InboxListItem
+      item={item}
+      isSelected={(item.issue_id ?? item.id) === selectedKey}
+      onClick={() => onSelect(item)}
+      onArchive={() => onArchive(item.id)}
+    />
+  );
+
+  // While the callback ref hasn't handed the scroll element over yet (the first
+  // render after a remount), seed a bounded slice of real rows so the list
+  // never paints blank; once it's set, mount the Virtuoso with a matching
+  // `initialItemCount` so the measurement frame keeps those rows (MUL-4750).
   return (
     <div ref={setScrollEl} className="flex-1 min-h-0 overflow-y-auto">
       <div className="px-2 py-1">
-        {scrollEl && (
+        {scrollEl ? (
           <Virtuoso
             customScrollParent={scrollEl}
             data={items}
-            computeItemKey={(_index, item) => item.id}
+            computeItemKey={computeItemKey}
+            initialItemCount={Math.min(items.length, VIRTUOSO_SEED_COUNT)}
             increaseViewportBy={{ top: 400, bottom: 400 }}
-            itemContent={(_index, item) => (
-              <InboxListItem
-                item={item}
-                isSelected={(item.issue_id ?? item.id) === selectedKey}
-                onClick={() => onSelect(item)}
-                onArchive={() => onArchive(item.id)}
-              />
-            )}
+            itemContent={itemContent}
+          />
+        ) : (
+          <VirtuosoSeed
+            data={items}
+            itemContent={itemContent}
+            computeItemKey={computeItemKey}
           />
         )}
       </div>

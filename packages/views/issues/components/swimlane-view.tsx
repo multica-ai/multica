@@ -54,6 +54,7 @@ import { InfiniteScrollSentinel } from "./infinite-scroll-sentinel";
 import { AppLink } from "../../navigation";
 import { ProjectIcon } from "../../projects/components/project-icon";
 import { ActorAvatar } from "../../common/actor-avatar";
+import { VirtuosoSeed, VIRTUOSO_SEED_COUNT } from "../../common/virtuoso-seed";
 import type { ChildProgress } from "./list-row";
 import { useT } from "../../i18n";
 import type { IssueActivityState } from "../surface/activity";
@@ -1166,6 +1167,27 @@ export function SwimLaneView({
     [sortedStatuses, gridStyle, myIssuesOpts, sort],
   );
 
+  const computeLaneKey = (_index: number, lane: LaneGroup) => lane.key;
+  const renderLane = (index: number, lane: LaneGroup) => (
+    <div className={index === 0 ? undefined : "pt-4"}>
+      <DraggableSwimLane
+        lane={lane}
+        grouping={swimlaneGrouping}
+        isCollapsed={collapsedLanes.has(lane.key)}
+        onToggleCollapse={() => toggleLane(lane.key)}
+        localCells={localCells}
+        sortedStatuses={sortedStatuses}
+        issueMap={issueMapRef.current}
+        childProgressMap={childProgressMap}
+        projectMap={projectMap}
+        gridStyle={gridStyle}
+        paths={paths}
+        projectId={projectId}
+        onCreateIssue={onCreateIssue}
+      />
+    </div>
+  );
+
   return (
     <DndContext
       sensors={sensors}
@@ -1226,32 +1248,25 @@ export function SwimLaneView({
           items={nonPinnedLaneIds}
           strategy={verticalListSortingStrategy}
         >
-          {scrollEl && (
+          {/* Seed a bounded slice of real lanes while the scroll ref hasn't
+              settled after a remount, so the lane area never paints blank; once
+              it's set, mount the Virtuoso with a matching `initialItemCount` to
+              survive the measurement frame (MUL-4750). */}
+          {scrollEl ? (
             <Virtuoso
               customScrollParent={scrollEl}
               data={orderedLanes}
-              computeItemKey={(_index, lane) => lane.key}
+              computeItemKey={computeLaneKey}
+              initialItemCount={Math.min(orderedLanes.length, VIRTUOSO_SEED_COUNT)}
               increaseViewportBy={{ top: 600, bottom: 600 }}
               components={laneComponents}
-              itemContent={(index, lane) => (
-                <div className={index === 0 ? undefined : "pt-4"}>
-                  <DraggableSwimLane
-                    lane={lane}
-                    grouping={swimlaneGrouping}
-                    isCollapsed={collapsedLanes.has(lane.key)}
-                    onToggleCollapse={() => toggleLane(lane.key)}
-                    localCells={localCells}
-                    sortedStatuses={sortedStatuses}
-                    issueMap={issueMapRef.current}
-                    childProgressMap={childProgressMap}
-                    projectMap={projectMap}
-                    gridStyle={gridStyle}
-                    paths={paths}
-                    projectId={projectId}
-                    onCreateIssue={onCreateIssue}
-                  />
-                </div>
-              )}
+              itemContent={renderLane}
+            />
+          ) : (
+            <VirtuosoSeed
+              data={orderedLanes}
+              itemContent={renderLane}
+              computeItemKey={computeLaneKey}
             />
           )}
         </SortableContext>
