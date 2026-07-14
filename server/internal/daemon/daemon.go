@@ -18,6 +18,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"golang.org/x/sync/singleflight"
+
 	"github.com/multica-ai/multica/server/internal/cli"
 	"github.com/multica-ai/multica/server/internal/daemon/execenv"
 	"github.com/multica-ai/multica/server/internal/daemon/repocache"
@@ -172,6 +174,23 @@ type Daemon struct {
 	versionsMu    sync.RWMutex      // guards agentVersions
 	agentVersions map[string]string // provider -> detected CLI version (set during registration)
 
+	// resolvedPathsMu guards resolvedPaths, the self-healed executable paths.
+	// The daemon pins each agent's absolute path at startup so a later PATH
+	// change can't redirect a task launch. When that pinned path later vanishes
+	// (a version manager did an in-place upgrade — Homebrew Cask, nvm/fnm),
+	// resolveAgentEntry re-resolves the original command once and records the
+	// result here so subsequent launches, model lists, and registrations reuse
+	// it without re-resolving. Path and detected version are stored together so
+	// any reader that observes the new path also observes the matching version
+	// (no "new binary under stale version policy" window). Keyed by provider.
+	// See MUL-4486.
+	resolvedPathsMu sync.RWMutex
+	resolvedPaths   map[string]healedAgent
+	// healGroup coalesces concurrent self-heal re-resolutions per provider so a
+	// just-upgraded agent seen by many queued tasks at once pays for a single
+	// login-shell probe + version detection instead of one per task (MUL-4486).
+	healGroup singleflight.Group
+
 	wsHBMu      sync.RWMutex         // guards wsHBLastAck
 	wsHBLastAck map[string]time.Time // runtime_id -> last successful WS heartbeat ack timestamp
 
@@ -281,6 +300,7 @@ func New(cfg Config, logger *slog.Logger) *Daemon {
 		profileLaunchSpecs:        make(map[string]profileLaunchSpec),
 		runtimeSet:                newRuntimeSetWatcher(),
 		agentVersions:             make(map[string]string),
+		resolvedPaths:             make(map[string]healedAgent),
 		wsHBLastAck:               make(map[string]time.Time),
 		activeEnvRoots:            make(map[string]int),
 		localPathLocks:            NewLocalPathLocker(),
@@ -311,6 +331,150 @@ func (d *Daemon) agentVersion(provider string) string {
 	d.versionsMu.RLock()
 	defer d.versionsMu.RUnlock()
 	return d.agentVersions[provider]
+}
+
+// healedAgent bundles a self-healed executable path with the CLI version
+// detected for it. The two are published together under resolvedPathsMu and
+// returned together from resolveAgentEntry, so a caller that observes the new
+// path necessarily observes the matching version — closing the window where a
+// just-upgraded binary would run under the daemon's previous version policy
+// (MUL-4486 review).
+type healedAgent struct {
+	path    string
+	version string
+}
+
+// resolveAgentEntry returns entry with a usable executable path plus the CLI
+// version that corresponds to that path, self-healing the pinned Path when it
+// has vanished from disk (MUL-4486).
+//
+// The daemon pins each agent's absolute, symlink-resolved path at startup so a
+// later PATH change cannot redirect a task launch. But a version manager
+// (Homebrew Cask, nvm/fnm) upgrading in place deletes the old versioned
+// directory that pinned path points into and repoints the stable command name
+// at the new version — leaving the daemon holding a path that no longer exists
+// until it restarts. Every consumer of entry.Path (task launch, model listing,
+// version detection at registration) then hard-fails with "executable not
+// found".
+//
+// The returned version always matches the returned path, so callers key
+// version-sensitive policy (e.g. the Codex sandbox) off it directly rather than
+// re-reading the shared version cache, which a concurrent heal could still be
+// updating.
+//
+// Behaviour:
+//   - A previous self-heal that is still live -> returned with its paired
+//     version. This is checked first so that once we've re-resolved to a new
+//     binary, a reappearing stale path (a downgrade / reinstall recreating the
+//     old versioned directory) cannot re-pair that old binary with the healed
+//     version — a mismatched {old path, new version} (MUL-4486 review).
+//   - Otherwise, pinned Path still present -> returned unchanged, paired with
+//     its registration-detected version. The anti-redirect guarantee holds for
+//     the normal (never-healed) case: a live pinned binary is never
+//     second-guessed even if PATH now points elsewhere.
+//   - Pinned Path gone and no live heal -> re-resolve entry.Command once
+//     (preserving the ~/.multica/hooks exclusion and the login-shell fallback).
+//     Before adopting the re-resolved binary it is version-detected and run
+//     through the same minimum-version gate registration applies. This
+//     reproduces exactly what a daemon restart would resolve, so it is no less
+//     safe than the documented restart workaround — only automatic.
+//   - Re-resolution fails, the candidate can't be version-detected, or it is
+//     below the minimum supported version -> entry is returned unchanged so the
+//     candidate is never launched and the downstream error still surfaces.
+func (d *Daemon) resolveAgentEntry(ctx context.Context, provider string, entry AgentEntry) (AgentEntry, string) {
+	// A prior self-heal wins over the original pinned path: it carries a
+	// {path, version} pair we already verified together, so it can never regress
+	// to the mismatched pairing a reappearing stale path would produce.
+	d.resolvedPathsMu.RLock()
+	healed, ok := d.resolvedPaths[provider]
+	d.resolvedPathsMu.RUnlock()
+	if ok && agentExecutablePresent(healed.path) {
+		entry.Path = healed.path
+		return entry, healed.version
+	}
+
+	if agentExecutablePresent(entry.Path) {
+		return entry, d.agentVersion(provider)
+	}
+
+	if entry.Command == "" {
+		return entry, d.agentVersion(provider)
+	}
+
+	// Coalesce concurrent heals for the same provider: the first task through
+	// pays for the re-resolve + version detection, the rest share its result
+	// instead of each spawning their own login shell and `--version` probe.
+	command := entry.Command
+	v, _, _ := d.healGroup.Do(provider, func() (any, error) {
+		return d.healAgentPath(ctx, provider, command), nil
+	})
+	healed, _ = v.(healedAgent)
+	if healed.path == "" {
+		return entry, d.agentVersion(provider)
+	}
+	entry.Path = healed.path
+	return entry, healed.version
+}
+
+// healAgentPath re-resolves command for provider and, if a usable binary is
+// found, records it and returns it. "Usable" means: it resolves, its version
+// can be detected, and that version meets the same minimum-version gate
+// registration enforces. Path and version are published together under
+// resolvedPathsMu so any observer of the path also sees the matching version;
+// the shared d.agentVersion cache is refreshed too, for registration hygiene.
+// It returns a zero healedAgent when nothing usable was found, so the caller
+// keeps the (stale) pinned entry and the candidate is never launched. Runs
+// under healGroup, one invocation at a time per provider.
+func (d *Daemon) healAgentPath(ctx context.Context, provider, command string) healedAgent {
+	// Re-check the cache: a predecessor under the same singleflight key may have
+	// already populated it, or a prior heal completed between the read above and
+	// entering here.
+	d.resolvedPathsMu.RLock()
+	cached, ok := d.resolvedPaths[provider]
+	d.resolvedPathsMu.RUnlock()
+	if ok && agentExecutablePresent(cached.path) {
+		return cached
+	}
+
+	newPath, found := reresolveAgentCommand(command)
+	if !found {
+		return healedAgent{}
+	}
+
+	// Verify before adopting. An in-place "upgrade" that actually repoints at an
+	// older or broken install must not be launched under the daemon's stale
+	// version policy, and must not slip past the minimum-version gate that the
+	// registration path applies (MUL-4486 review).
+	version, err := detectAgentVersion(ctx, newPath)
+	if err != nil {
+		d.logger.Warn("re-resolved agent executable failed version detection; keeping pinned path",
+			"provider", provider, "command", command, "new_path", newPath, "error", err)
+		return healedAgent{}
+	}
+	if err := checkAgentMinVersion(provider, version); err != nil {
+		d.logger.Warn("re-resolved agent executable is below the minimum supported version; not adopting it",
+			"provider", provider, "command", command, "new_path", newPath, "version", version, "error", err)
+		return healedAgent{}
+	}
+
+	adopted := healedAgent{path: newPath, version: version}
+	// Publish path + version atomically: any reader that sees the new path in
+	// resolveAgentEntry gets the matching version out of the same struct value.
+	d.resolvedPathsMu.Lock()
+	if d.resolvedPaths == nil {
+		d.resolvedPaths = make(map[string]healedAgent)
+	}
+	d.resolvedPaths[provider] = adopted
+	d.resolvedPathsMu.Unlock()
+	// Keep the registration version cache fresh too. The task path reads the
+	// version returned alongside the resolved path (above), not this map, so its
+	// staleness can never gate a launch — this is hygiene for the registration
+	// report and any future d.agentVersion reader.
+	d.setAgentVersion(provider, version)
+
+	d.logger.Info("re-resolved agent executable after pinned path vanished (in-place upgrade)",
+		"provider", provider, "command", command, "new_path", newPath, "version", version)
+	return adopted
 }
 
 func (d *Daemon) notifyRuntimeSetChanged() {
@@ -949,6 +1113,12 @@ func (d *Daemon) registerRuntimesForWorkspace(ctx context.Context, workspaceID s
 	var runtimes []map[string]string
 	var failedProfiles []map[string]string
 	for name, entry := range d.cfg.Agents {
+		// Self-heal a pinned executable path an in-place upgrade deleted
+		// (MUL-4486) so version detection — and thus staying registered/online
+		// — recovers without a daemon restart. resolveAgentEntry already
+		// version-gates the healed binary; the detect + min-version check below
+		// still runs to produce the version string this registration reports.
+		entry, _ = d.resolveAgentEntry(ctx, name, entry)
 		version, err := detectAgentVersion(ctx, entry.Path)
 		if err != nil {
 			d.logger.Warn("skip registering runtime", "name", name, "error", err)
@@ -2124,6 +2294,8 @@ func (d *Daemon) handleModelList(ctx context.Context, rt Runtime, requestID stri
 		})
 		return
 	}
+	// Self-heal a pinned executable path an in-place upgrade deleted (MUL-4486).
+	entry, _ = d.resolveAgentEntry(ctx, rt.Provider, entry)
 
 	models, err := agent.ListModels(ctx, rt.Provider, entry.Path)
 	if err != nil {
@@ -3515,6 +3687,10 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// agent of the same provider installed, so when the runtime is custom we
 	// synthesize an AgentEntry instead of hard-failing on the !ok lookup.
 	var profileFixedArgs []string
+	// resolvedVersion is the CLI version of the built-in binary entry.Path
+	// resolves to, paired with the path by resolveAgentEntry so a just-upgraded
+	// codex is never launched under the previous version's policy (MUL-4486).
+	var resolvedVersion string
 	if customSpec, isCustom := d.customProfileLaunchForRuntime(task.RuntimeID); isCustom {
 		entry.Path = customSpec.path
 		profileFixedArgs = customSpec.fixedArgs
@@ -3523,6 +3699,12 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			"task_id", task.ID, "runtime_id", task.RuntimeID,
 			"provider", provider, "command_path", customSpec.path,
 			"fixed_args", len(profileFixedArgs))
+	} else if ok {
+		// Built-in provider: self-heal a pinned executable path that an in-place
+		// upgrade deleted (MUL-4486). Only reached when no custom profile owns
+		// the launch, so a custom runtime's path is never second-guessed and a
+		// custom-only host pays no wasted re-resolution.
+		entry, resolvedVersion = d.resolveAgentEntry(ctx, provider, entry)
 	}
 	if !ok {
 		return TaskResult{}, fmt.Errorf("no agent configured for provider %q", provider)
@@ -3603,7 +3785,16 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 
 	// Try to reuse the workdir from a previous task on the same (agent, issue) pair.
 	var env *execenv.Environment
+	// For a built-in codex task, use the version paired with the resolved path
+	// so an in-place upgrade can't leave the sandbox policy on the old version
+	// (MUL-4486). A custom codex runtime skips the self-heal, so resolvedVersion
+	// is empty and it keeps the existing cached-version fallback — its binary is
+	// the profile's own command, which the daemon never pins or version-detects.
+	// Non-codex providers carry the value through without consuming it.
 	codexVersion := d.agentVersion("codex")
+	if provider == "codex" && resolvedVersion != "" {
+		codexVersion = resolvedVersion
+	}
 	openclawBin := ""
 	if provider == "openclaw" {
 		openclawBin = entry.Path
