@@ -140,6 +140,14 @@ func prepareCodexHomeWithOpts(codexHome string, opts CodexHomeOptions, logger *s
 		logger.Warn("execenv: codex-home ensure sandbox config failed", "error", err)
 	}
 
+	// Ensure shell tool subprocesses keep the daemon-provided MULTICA_* task
+	// context. Codex's default shell env policy drops names containing TOKEN,
+	// which otherwise strips MULTICA_TOKEN before the agent can run `multica`
+	// CLI commands inside a task.
+	if err := ensureCodexShellEnvPolicyConfig(filepath.Join(codexHome, "config.toml"), logger); err != nil {
+		logger.Warn("execenv: codex-home ensure shell env policy failed", "error", err)
+	}
+
 	// Disable Codex native multi-agent inside daemon-managed task sessions
 	// so the parent thread's `turn/completed` is not interpreted as task
 	// completion while spawned subagents are still running. See

@@ -2701,6 +2701,12 @@ func TestPrepareCodexHomeEnsuresNetworkAccess(t *testing.T) {
 	if !strings.Contains(s, `sandbox_mode = "workspace-write"`) {
 		t.Error("config.toml missing sandbox_mode")
 	}
+	if !strings.Contains(s, "shell_environment_policy.include_only") {
+		t.Error("config.toml missing shell_environment_policy include_only")
+	}
+	if !strings.Contains(s, `"MULTICA_*"`) {
+		t.Error("config.toml missing MULTICA_* shell env passthrough")
+	}
 }
 
 func TestReuseRestoresCodexHome(t *testing.T) {
