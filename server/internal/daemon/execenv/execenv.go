@@ -138,6 +138,10 @@ type SkillContextForEnv struct {
 	Description string
 	Content     string
 	Files       []SkillFileContextForEnv
+	// CacheDir points at the shared, materialized bundle directory when the
+	// daemon can expose the skill by reference instead of copying it into the
+	// task home. Providers that do not support shared delivery can ignore it.
+	CacheDir string
 }
 
 // SkillFileContextForEnv represents a supporting file within a skill.
@@ -493,7 +497,8 @@ func Reuse(params ReuseParams, logger *slog.Logger) *Environment {
 // hydrateCodexSkills populates the per-task CODEX_HOME/skills directory with
 // both user-installed skills (from the shared ~/.codex/skills/) and
 // workspace-assigned skills. Workspace skills win on name conflict — they are
-// written last and seedUserCodexSkills already pre-filters their names.
+// linked to their shared cache directories when possible, and
+// seedUserCodexSkills already pre-filters their names.
 //
 // The skills directory is wiped first so two stale-state classes that the
 // Reuse path would otherwise leak are gone:
@@ -521,11 +526,53 @@ func hydrateCodexSkills(codexHome string, workspaceSkills []SkillContextForEnv, 
 	if len(workspaceSkills) == 0 {
 		return nil
 	}
-	// Codex skills live under env.RootDir/codex-home, which the GC loop
-	// (cloud) or env teardown (local_directory) wipes wholesale — they
-	// don't sit inside the user's workdir and don't need sidecar manifest
-	// tracking.
-	return writeSkillFiles(skillsDir, workspaceSkills, nil)
+	if err := recordMkdirAll(skillsDir, 0o755, nil); err != nil {
+		return fmt.Errorf("create codex skills dir: %w", err)
+	}
+	for _, skill := range workspaceSkills {
+		if err := installCodexSkillBundle(skillsDir, skill); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func installCodexSkillBundle(skillsDir string, skill SkillContextForEnv) error {
+	baseSlug := sanitizeSkillName(skill.Name)
+	slug, dst, err := allocateCollisionFreeSkillDir(skillsDir, baseSlug)
+	if err != nil {
+		return fmt.Errorf("allocate skill dir for %q: %w", skill.Name, err)
+	}
+	if skill.CacheDir != "" {
+		if info, err := os.Stat(skill.CacheDir); err == nil && info.IsDir() {
+			if err := createDirLink(skill.CacheDir, dst); err == nil {
+				return nil
+			}
+		}
+	}
+	// Fall back to a materialized copy when the shared cache is unavailable or
+	// the host cannot create a directory link. This keeps the provider runnable
+	// while still taking the shared path on the common case.
+	if err := os.RemoveAll(dst); err != nil {
+		return fmt.Errorf("clear codex skill dir %q: %w", skill.Name, err)
+	}
+	if err := os.MkdirAll(dst, 0o755); err != nil {
+		return fmt.Errorf("create codex skill dir %q: %w", skill.Name, err)
+	}
+	body := ensureSkillFrontmatter(skill.Content, slug, skill.Description)
+	if err := os.WriteFile(filepath.Join(dst, "SKILL.md"), []byte(body), 0o644); err != nil {
+		return fmt.Errorf("write codex skill %q: %w", skill.Name, err)
+	}
+	for _, f := range skill.Files {
+		fpath := filepath.Join(dst, f.Path)
+		if err := os.MkdirAll(filepath.Dir(fpath), 0o755); err != nil {
+			return fmt.Errorf("create codex skill file dir %q: %w", skill.Name, err)
+		}
+		if err := os.WriteFile(fpath, []byte(f.Content), 0o644); err != nil {
+			return fmt.Errorf("write codex skill file %q: %w", skill.Name, err)
+		}
+	}
+	return nil
 }
 
 // GCMetaKind identifies which kind of parent record a task workdir belongs to.

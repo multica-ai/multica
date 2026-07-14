@@ -388,6 +388,30 @@ func TestScanDiskUsageRoots_SumsAcrossRoots(t *testing.T) {
 	}
 }
 
+func TestScanDiskUsageAccountsSharedSkillCache(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	cacheDir := filepath.Join(root, ".skill-cache", "v2", "ws-1", "workspace", "skill-1", "sha256-good")
+	if err := os.MkdirAll(filepath.Join(cacheDir, "docs"), 0o755); err != nil {
+		t.Fatalf("seed cache dir: %v", err)
+	}
+	writeFile(t, filepath.Join(cacheDir, ".skill-bundle.json"), 128)
+	writeFile(t, filepath.Join(cacheDir, "SKILL.md"), 512)
+	writeFile(t, filepath.Join(cacheDir, "docs", "guide.md"), 256)
+
+	report, err := ScanDiskUsage(root, []string{"node_modules"})
+	if err != nil {
+		t.Fatalf("ScanDiskUsage: %v", err)
+	}
+	if report.SharedSkillCacheCount != 1 {
+		t.Fatalf("SharedSkillCacheCount = %d, want 1", report.SharedSkillCacheCount)
+	}
+	if report.SharedSkillCacheBytes < 896 {
+		t.Fatalf("SharedSkillCacheBytes = %d, want at least 896", report.SharedSkillCacheBytes)
+	}
+}
+
 func mustWriteMeta(t *testing.T, taskDir string, meta execenv.GCMeta) {
 	t.Helper()
 	data, err := json.Marshal(meta)
