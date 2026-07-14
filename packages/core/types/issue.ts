@@ -52,6 +52,10 @@ export interface Issue {
   // parent assignee is notified/woken only when every sub-issue in a stage
   // finishes; see server/internal/handler/issue_child_done.go.
   stage: number | null;
+  // Per-parent toggle (default true) for the child-done -> parent notification
+  // + assignee wake. Only meaningful for agent/squad-assigned parents; a
+  // human-assigned parent is never woken regardless. See issue_child_done.go.
+  child_done_notify: boolean;
   // Calendar days as date-only "YYYY-MM-DD" (no time, no timezone). Use the
   // helpers in @multica/core/issues/date to format/compare — never `new Date()`
   // + local formatting, which shifts the day by the viewer's offset.

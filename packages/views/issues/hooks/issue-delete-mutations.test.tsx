@@ -62,6 +62,7 @@ const baseIssue: Issue = {
   project_id: null,
   position: 0,
   stage: null,
+  child_done_notify: true,
   start_date: null,
   due_date: null,
   metadata: {},

@@ -167,6 +167,8 @@
     "add_sub_issues": "添加子 issue",
     "add_sub_issue_tooltip": "添加子 issue",
     "add_sub_issue_aria": "添加子 issue",
+    "child_done_notify_label": "子 issue 完成时通知",
+    "child_done_notify_tooltip": "开启后，子 issue 完成时（分 stage 时每个 stage 完成触发一次）会通知并唤醒该 issue 的负责人继续处理；关闭后不再自动通知。",
     "section_properties": "属性",
     "section_parent_issue": "父 issue",
     "section_pull_requests": "Pull Request",

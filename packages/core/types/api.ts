@@ -33,6 +33,9 @@ export interface UpdateIssueRequest {
   project_id?: string | null;
   /** Ordered stage (>= 1); null clears it (unstaged). */
   stage?: number | null;
+  /** Per-parent toggle for the child-done -> parent notification + wake
+   *  (default true). Only meaningful for agent/squad-assigned parents. */
+  child_done_notify?: boolean;
   /** Attachment IDs to bind to this issue alongside the description update.
    *  Used by the description editor to register newly uploaded files so they
    *  surface in `issueAttachments` and keep their preview Eye on refresh. */

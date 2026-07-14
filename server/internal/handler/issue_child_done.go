@@ -104,6 +104,13 @@ func (h *Handler) notifyParentOfChildDone(ctx context.Context, prev, issue db.Is
 	if parent.AssigneeType.Valid && parent.AssigneeType.String == "member" {
 		return
 	}
+	// Per-parent opt-out: the child_done_notify toggle in the parent's
+	// Sub-issues header (default true). When off, a completing child neither
+	// posts the system comment nor wakes the parent assignee — the whole
+	// notification is skipped (MUL-3924).
+	if !parent.ChildDoneNotify {
+		return
+	}
 
 	// Stage barrier (MUL-3508 / discussion #4320). The notification + assignee
 	// wake fire only when this completion *closes a stage* — i.e. every sibling
