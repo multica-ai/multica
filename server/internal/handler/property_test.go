@@ -3,8 +3,10 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 
@@ -396,5 +398,133 @@ func TestPropertyOptionRemovalGuard(t *testing.T) {
 	w = patchConfig([]map[string]any{{"id": usedID, "name": "Used (renamed)", "color": "#ef4444"}})
 	if w.Code != http.StatusOK {
 		t.Fatalf("unused removal: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+// TestListIssuesPropertyFilterAndSort covers the server-side list support:
+// containment filtering (select / multi_select / checkbox) beyond the first
+// page window, and typed property sort expressions with missing-last
+// semantics. The shared workspace fixture may hold foreign issues, so
+// assertions check relative order / membership rather than exact lists.
+func TestListIssuesPropertyFilterAndSort(t *testing.T) {
+	sel := createTestProperty(t, map[string]any{
+		"name": "FS" + uuid.NewString()[:8], "type": "select",
+		"config": map[string]any{"options": []map[string]any{
+			{"name": "Hit", "color": "#ef4444"},
+			{"name": "Miss", "color": "#6b7280"},
+		}},
+	})
+	hitID := sel.Config.Options[0].ID
+	multi := createTestProperty(t, map[string]any{
+		"name": "FM" + uuid.NewString()[:8], "type": "multi_select",
+		"config": map[string]any{"options": []map[string]any{
+			{"name": "A", "color": "#3b82f6"},
+			{"name": "B", "color": "#22c55e"},
+		}},
+	})
+	multiB := multi.Config.Options[1].ID
+	box := createTestProperty(t, map[string]any{"name": "FB" + uuid.NewString()[:8], "type": "checkbox"})
+	num := createTestProperty(t, map[string]any{"name": "FN" + uuid.NewString()[:8], "type": "number"})
+
+	// 54 padding issues in front, then the matching issue at position 55 —
+	// beyond the default 50-row first page a client-side filter would see.
+	for i := 0; i < 54; i++ {
+		createPropertyTestIssue(t, fmt.Sprintf("filter pad %02d", i))
+	}
+	target := createPropertyTestIssue(t, "filter target beyond page one")
+	if w := setIssuePropertyRaw(t, target, sel.ID, hitID); w.Code != http.StatusOK {
+		t.Fatalf("seed select: %d %s", w.Code, w.Body.String())
+	}
+	if w := setIssuePropertyRaw(t, target, multi.ID, []string{multiB}); w.Code != http.StatusOK {
+		t.Fatalf("seed multi: %d %s", w.Code, w.Body.String())
+	}
+	if w := setIssuePropertyRaw(t, target, box.ID, true); w.Code != http.StatusOK {
+		t.Fatalf("seed checkbox: %d %s", w.Code, w.Body.String())
+	}
+
+	numLow := createPropertyTestIssue(t, "sort low")
+	numHigh := createPropertyTestIssue(t, "sort high")
+	if w := setIssuePropertyRaw(t, numLow, num.ID, 1); w.Code != http.StatusOK {
+		t.Fatalf("seed low: %d %s", w.Code, w.Body.String())
+	}
+	if w := setIssuePropertyRaw(t, numHigh, num.ID, 9.5); w.Code != http.StatusOK {
+		t.Fatalf("seed high: %d %s", w.Code, w.Body.String())
+	}
+
+	listIssues := func(query string) []IssueResponse {
+		t.Helper()
+		w := httptest.NewRecorder()
+		testHandler.ListIssues(w, newRequest("GET", "/api/issues"+query, nil))
+		if w.Code != http.StatusOK {
+			t.Fatalf("ListIssues%s: expected 200, got %d: %s", query, w.Code, w.Body.String())
+		}
+		var resp struct {
+			Issues []IssueResponse `json:"issues"`
+		}
+		json.NewDecoder(w.Body).Decode(&resp)
+		return resp.Issues
+	}
+	ids := func(list []IssueResponse) map[string]int {
+		out := make(map[string]int, len(list))
+		for i, issue := range list {
+			out[issue.ID] = i
+		}
+		return out
+	}
+	filterQuery := func(defID string, values ...string) string {
+		buf, _ := json.Marshal(map[string][]string{defID: values})
+		return "?limit=50&properties=" + url.QueryEscape(string(buf))
+	}
+
+	// Select filter finds the issue past the 50-row window.
+	got := listIssues(filterQuery(sel.ID, hitID))
+	if _, present := ids(got)[target]; !present {
+		t.Fatalf("select filter missed the issue beyond page one")
+	}
+	for _, issue := range got {
+		if issue.Properties[sel.ID] != hitID {
+			t.Fatalf("select filter returned non-matching issue %s", issue.ID)
+		}
+	}
+
+	// Multi and checkbox containment forms.
+	if _, present := ids(listIssues(filterQuery(multi.ID, multiB)))[target]; !present {
+		t.Fatalf("multi_select filter missed the issue")
+	}
+	if _, present := ids(listIssues(filterQuery(box.ID, "true")))[target]; !present {
+		t.Fatalf("checkbox filter missed the issue")
+	}
+	// AND across definitions: matching select + non-matching checkbox → empty of target.
+	buf, _ := json.Marshal(map[string][]string{sel.ID: {hitID}, box.ID: {"false"}})
+	if _, present := ids(listIssues("?limit=50&properties="+url.QueryEscape(string(buf))))[target]; present {
+		t.Fatalf("AND semantics failed: target matched with contradictory checkbox filter")
+	}
+
+	// Property sort: asc = low before high, valueless after both (missing last).
+	sorted := listIssues("?limit=200&sort=property:" + num.ID + "&direction=asc")
+	pos := ids(sorted)
+	lowIdx, lowOK := pos[numLow]
+	highIdx, highOK := pos[numHigh]
+	padIdx, padOK := pos[target]
+	if !lowOK || !highOK || !padOK {
+		t.Fatalf("sorted list missing seeded issues (low=%v high=%v pad=%v)", lowOK, highOK, padOK)
+	}
+	if !(lowIdx < highIdx && highIdx < padIdx) {
+		t.Fatalf("asc property sort order wrong: low=%d high=%d valueless=%d", lowIdx, highIdx, padIdx)
+	}
+	sorted = listIssues("?limit=200&sort=property:" + num.ID + "&direction=desc")
+	pos = ids(sorted)
+	if !(pos[numHigh] < pos[numLow] && pos[numLow] < pos[target]) {
+		t.Fatalf("desc property sort order wrong: high=%d low=%d valueless=%d", pos[numHigh], pos[numLow], pos[target])
+	}
+
+	// Malformed property sort id → 400; unknown definition → 200 position order.
+	w := httptest.NewRecorder()
+	testHandler.ListIssues(w, newRequest("GET", "/api/issues?sort=property:nope", nil))
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("malformed property sort: expected 400, got %d", w.Code)
+	}
+	if got := listIssues("?limit=5&sort=property:" + uuid.NewString()); len(got) == 0 {
+		t.Fatalf("unknown-definition sort should fall back to position order, got empty")
 	}
 }

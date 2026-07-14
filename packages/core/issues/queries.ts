@@ -16,6 +16,10 @@ export interface IssueSortParam {
   date_field?: ListIssuesParams["date_field"];
   date_start?: ListIssuesParams["date_start"];
   date_end?: ListIssuesParams["date_end"];
+  /** Server-side custom-property filter (definition id → accepted values).
+   *  Lives in the sort/window bag so every list surface, query key, and
+   *  load-more page carries it automatically. */
+  properties?: ListIssuesParams["properties"];
 }
 
 export const issueKeys = {

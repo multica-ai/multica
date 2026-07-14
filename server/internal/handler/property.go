@@ -18,6 +18,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/logger"
+	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
@@ -773,4 +774,138 @@ func (h *Handler) DeleteIssueProperty(w http.ResponseWriter, r *http.Request) {
 		"properties": properties,
 	})
 	writeJSON(w, http.StatusOK, map[string]any{"properties": properties})
+}
+
+// ---------------------------------------------------------------------------
+// List-endpoint support: properties filter + property sort expressions
+// ---------------------------------------------------------------------------
+
+const (
+	maxPropertiesFilterDefinitions = 20
+	maxPropertiesFilterValues      = 50
+)
+
+// parsePropertiesFilterParam reads the `properties` query parameter — a JSON
+// object of {<definitionId>: [<value>, ...]} — and compiles it into the
+// alternatives form consumed by propertiesFilterPredicate: a JSON array of
+// OR-groups, each group an array of containment objects. OR within a
+// definition, AND across definitions.
+//
+// Values are option ids for select/multi_select and "true"/"false" for
+// checkbox. The stored value shape differs per type (string, array element,
+// boolean), so each value expands to every containment form it could match;
+// forms that can't match are simply never satisfied.
+//
+// Returns (nil, true) when the parameter is empty.
+func parsePropertiesFilterParam(w http.ResponseWriter, raw string) ([]byte, bool) {
+	if raw == "" {
+		return nil, true
+	}
+	var parsed map[string][]string
+	if err := json.Unmarshal([]byte(raw), &parsed); err != nil {
+		writeError(w, http.StatusBadRequest, "properties filter must be a JSON object of {definitionId: [values]}")
+		return nil, false
+	}
+	if len(parsed) > maxPropertiesFilterDefinitions {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("properties filter cannot cover more than %d definitions", maxPropertiesFilterDefinitions))
+		return nil, false
+	}
+	groups := make([][]map[string]any, 0, len(parsed))
+	for definitionID, values := range parsed {
+		if _, err := uuid.Parse(definitionID); err != nil {
+			writeError(w, http.StatusBadRequest, fmt.Sprintf("properties filter key %q is not a definition id", definitionID))
+			return nil, false
+		}
+		if len(values) == 0 {
+			continue
+		}
+		if len(values) > maxPropertiesFilterValues {
+			writeError(w, http.StatusBadRequest, fmt.Sprintf("properties filter for %s cannot list more than %d values", definitionID, maxPropertiesFilterValues))
+			return nil, false
+		}
+		alternatives := make([]map[string]any, 0, len(values)*3)
+		for _, value := range values {
+			if value == "" {
+				writeError(w, http.StatusBadRequest, "properties filter values cannot be empty")
+				return nil, false
+			}
+			alternatives = append(alternatives,
+				map[string]any{definitionID: value},           // select: string value
+				map[string]any{definitionID: []string{value}}, // multi_select: array element
+			)
+			if value == "true" || value == "false" {
+				alternatives = append(alternatives, map[string]any{definitionID: value == "true"}) // checkbox
+			}
+		}
+		groups = append(groups, alternatives)
+	}
+	if len(groups) == 0 {
+		return nil, true
+	}
+	buf, err := json.Marshal(groups)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "properties filter is invalid")
+		return nil, false
+	}
+	return buf, true
+}
+
+// propertiesFilterPredicate renders the AND-of-ORs containment check for a
+// compiled filter (see parsePropertiesFilterParam). One parameter feeds both
+// hand-written list queries. The double NOT EXISTS realizes "every OR-group
+// has at least one matching containment". Containments inside the lateral
+// scan don't use the GIN index; acceptable at the row counts these endpoints
+// page through (the outer WHERE has already narrowed by workspace/status).
+func propertiesFilterPredicate(argRef string) string {
+	return fmt.Sprintf(`NOT EXISTS (
+    SELECT 1 FROM jsonb_array_elements(%s::jsonb) AS grp(alts)
+    WHERE NOT EXISTS (
+        SELECT 1 FROM jsonb_array_elements(grp.alts) AS alt(obj)
+        WHERE i.properties @> alt.obj
+    )
+)`, argRef)
+}
+
+// propertySortExpr resolves a `property:<definitionId>` sort value into a SQL
+// ORDER BY expression. Returns handled=false when sortValue is not
+// property-shaped (caller falls through to its static whitelist). A malformed
+// id writes a 400 (ok=false). An unknown/archived definition or a type that
+// has no meaningful order degrades to empty expr — callers keep position
+// order, mirroring the frontend's stale-persisted-sort fallback rather than
+// breaking installed clients with a 400.
+func (h *Handler) propertySortExpr(r *http.Request, workspaceID string, sortValue string) (expr string, handled bool, err error) {
+	const prefix = "property:"
+	if !strings.HasPrefix(sortValue, prefix) {
+		return "", false, nil
+	}
+	rawID := strings.TrimPrefix(sortValue, prefix)
+	parsedID, parseErr := uuid.Parse(rawID)
+	if parseErr != nil {
+		return "", true, errors.New("invalid sort value")
+	}
+	wsUUID, wsErr := util.ParseUUID(workspaceID)
+	if wsErr != nil {
+		return "", true, errors.New("invalid workspace id")
+	}
+	var defUUID pgtype.UUID
+	copy(defUUID.Bytes[:], parsedID[:])
+	defUUID.Valid = true
+	def, dbErr := h.Queries.GetIssueProperty(r.Context(), db.GetIssuePropertyParams{ID: defUUID, WorkspaceID: wsUUID})
+	if dbErr != nil {
+		if errors.Is(dbErr, pgx.ErrNoRows) {
+			return "", true, nil // stale sort → position order
+		}
+		return "", true, fmt.Errorf("resolve sort property: %w", dbErr)
+	}
+	// uuidToString re-serializes the parsed UUID: hex and dashes only, safe
+	// to embed in the ORDER BY string.
+	id := uuidToString(def.ID)
+	switch def.Type {
+	case "number":
+		return fmt.Sprintf("CASE WHEN jsonb_typeof(i.properties->'%s') = 'number' THEN (i.properties->>'%s')::numeric END", id, id), true, nil
+	case "date", "text", "url", "select":
+		return fmt.Sprintf("NULLIF(i.properties->>'%s', '')", id), true, nil
+	default: // multi_select, checkbox, future types: no meaningful order
+		return "", true, nil
+	}
 }

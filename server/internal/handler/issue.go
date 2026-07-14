@@ -825,6 +825,10 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	propertiesFilter, ok := parsePropertiesFilterParam(w, r.URL.Query().Get("properties"))
+	if !ok {
+		return
+	}
 	dateFilter, ok := parseIssueDateFilter(w, r.URL.Query())
 	if !ok {
 		return
@@ -916,15 +920,38 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 	// the user defines order through drag-and-drop, reversing it has no
 	// product meaning.
 	sortCol := "position"
+	sortIsExpr := false
+	sortIsProperty := false
 	if s := r.URL.Query().Get("sort"); s != "" {
 		switch s {
 		case "position", "title", "created_at", "start_date", "due_date":
 			sortCol = s
 		case "priority":
 			sortCol = "CASE i.priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 WHEN 'low' THEN 3 ELSE 4 END"
+			sortIsExpr = true
 		default:
-			writeError(w, http.StatusBadRequest, "invalid sort value")
-			return
+			// property:<definitionId> sorts by the custom-property value
+			// (typed expression); unknown/archived definitions degrade to
+			// position order instead of erroring stale clients.
+			expr, handled, sortErr := h.propertySortExpr(r, workspaceID, s)
+			if !handled {
+				writeError(w, http.StatusBadRequest, "invalid sort value")
+				return
+			}
+			if sortErr != nil {
+				if sortErr.Error() == "invalid sort value" || sortErr.Error() == "invalid workspace id" {
+					writeError(w, http.StatusBadRequest, sortErr.Error())
+					return
+				}
+				slog.Warn("propertySortExpr failed", append(logger.RequestAttrs(r), "error", sortErr)...)
+				writeError(w, http.StatusInternalServerError, "failed to resolve sort")
+				return
+			}
+			if expr != "" {
+				sortCol = expr
+				sortIsExpr = true
+				sortIsProperty = true
+			}
 		}
 	}
 	sortDir := "ASC"
@@ -977,6 +1004,9 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 	if metadataFilter != nil {
 		where = append(where, fmt.Sprintf("i.metadata @> %s::jsonb", addArg(string(metadataFilter))))
 	}
+	if propertiesFilter != nil {
+		where = append(where, propertiesFilterPredicate(addArg(string(propertiesFilter))))
+	}
 	where = appendIssueDateFilter(where, addArg, dateFilter)
 	if involvesUserFilter.Valid {
 		ref := addArg(involvesUserFilter)
@@ -1017,11 +1047,13 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 
 	// Build ORDER BY clause.
 	orderBy := sortCol
-	if !strings.HasPrefix(sortCol, "CASE") {
+	if !sortIsExpr {
 		orderBy = "i." + sortCol
 	}
 	orderBy += " " + sortDir
-	if sortCol == "start_date" || sortCol == "due_date" {
+	if sortCol == "start_date" || sortCol == "due_date" || sortIsProperty {
+		// Property values are sparse: issues without one sort last in both
+		// directions (mirrors the client comparator).
 		orderBy += " NULLS LAST"
 	}
 	orderBy += ", i.created_at DESC"
@@ -1346,6 +1378,11 @@ func (h *Handler) ListGroupedIssues(w http.ResponseWriter, r *http.Request) {
 	} else if filter != nil {
 		where = append(where, fmt.Sprintf("i.metadata @> %s::jsonb", addArg(string(filter))))
 	}
+	if filter, ok := parsePropertiesFilterParam(w, r.URL.Query().Get("properties")); !ok {
+		return
+	} else if filter != nil {
+		where = append(where, propertiesFilterPredicate(addArg(string(filter))))
+	}
 	// Mirror the involves_user_id 4-branch UNION from sqlc's ListIssues /
 	// ListOpenIssues / CountIssues. ListGroupedIssues is a hand-written dynamic
 	// SQL builder that does not share parameters with sqlc, so the fragment is
@@ -1486,15 +1523,38 @@ func (h *Handler) ListGroupedIssues(w http.ResponseWriter, r *http.Request) {
 	}
 
 	sortCol := "position"
+	sortIsExpr := false
+	sortIsProperty := false
 	if s := r.URL.Query().Get("sort"); s != "" {
 		switch s {
 		case "position", "title", "created_at", "start_date", "due_date":
 			sortCol = s
 		case "priority":
 			sortCol = "CASE i.priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 WHEN 'low' THEN 3 ELSE 4 END"
+			sortIsExpr = true
 		default:
-			writeError(w, http.StatusBadRequest, "invalid sort value")
-			return
+			// property:<definitionId> sorts by the custom-property value
+			// (typed expression); unknown/archived definitions degrade to
+			// position order instead of erroring stale clients.
+			expr, handled, sortErr := h.propertySortExpr(r, workspaceID, s)
+			if !handled {
+				writeError(w, http.StatusBadRequest, "invalid sort value")
+				return
+			}
+			if sortErr != nil {
+				if sortErr.Error() == "invalid sort value" || sortErr.Error() == "invalid workspace id" {
+					writeError(w, http.StatusBadRequest, sortErr.Error())
+					return
+				}
+				slog.Warn("propertySortExpr failed", append(logger.RequestAttrs(r), "error", sortErr)...)
+				writeError(w, http.StatusInternalServerError, "failed to resolve sort")
+				return
+			}
+			if expr != "" {
+				sortCol = expr
+				sortIsExpr = true
+				sortIsProperty = true
+			}
 		}
 	}
 	sortDir := "ASC"
@@ -1513,11 +1573,11 @@ func (h *Handler) ListGroupedIssues(w http.ResponseWriter, r *http.Request) {
 	}
 
 	intraGroupOrder := sortCol
-	if !strings.HasPrefix(sortCol, "CASE") {
+	if !sortIsExpr {
 		intraGroupOrder = "i." + sortCol
 	}
 	intraGroupOrder += " " + sortDir
-	if sortCol == "start_date" || sortCol == "due_date" {
+	if sortCol == "start_date" || sortCol == "due_date" || sortIsProperty {
 		intraGroupOrder += " NULLS LAST"
 	}
 	intraGroupOrder += ", i.created_at DESC"
