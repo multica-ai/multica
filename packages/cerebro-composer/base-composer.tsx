@@ -95,6 +95,8 @@ export interface BaseComposerProps {
   draft: ComposerDraftHandle;
 
   onSubmit: (content: string, attachmentIds?: string[]) => void | Promise<void>;
+  onSchedule?: (content: string, sendAt: Date, attachmentIds?: string[]) => void | Promise<void>;
+  scheduleControl?: (args: { disabled: boolean; canSchedule: boolean; schedule: (sendAt: Date) => Promise<void> }) => ReactNode;
   /** Track upload ids and forward only those still present in the sent text.
    *  Comments/channels need this; chat passes content only (false). */
   trackAttachmentIds?: boolean;
@@ -190,6 +192,8 @@ export const BaseComposer = forwardRef<ComposerHandle, BaseComposerProps>(functi
   editorKey,
   draft,
   onSubmit,
+  onSchedule,
+  scheduleControl,
   trackAttachmentIds = true,
   placeholder,
   autoFocus = false,
@@ -450,7 +454,7 @@ export const BaseComposer = forwardRef<ComposerHandle, BaseComposerProps>(functi
     };
   }, [isEmpty, markdown]);
 
-  const handleSubmit = async () => {
+  const getPayload = () => {
     const text =
       editorRef.current
         ?.getMarkdown()
@@ -469,10 +473,6 @@ export const BaseComposer = forwardRef<ComposerHandle, BaseComposerProps>(functi
       : text;
 
     // Block while an image is still uploading so it isn't dropped from the send.
-    if (imageTrayEnabled && tray.hasUploading) return;
-    if (!content || submitting || disabled || noAgent) return;
-    if (confirmBeforeSend && !(await confirmBeforeSend(content))) return;
-
     let activeIds: string[] | undefined;
     if (trackAttachmentIds) {
       const ids: string[] = [];
@@ -483,15 +483,27 @@ export const BaseComposer = forwardRef<ComposerHandle, BaseComposerProps>(functi
       activeIds = ids.length > 0 ? ids : undefined;
     }
 
+    return { content, activeIds };
+  };
+
+  const clearAfterSubmit = () => {
+    editorRef.current?.clearContent();
+    draft.clear();
+    setIsEmpty(true);
+    setMarkdown("");
+    uploadMapRef.current.clear();
+    if (imageTrayEnabled) tray.clear();
+  };
+
+  const handleSubmit = async () => {
+    const { content, activeIds } = getPayload();
+    if (imageTrayEnabled && tray.hasUploading) return;
+    if (!content || submitting || disabled || noAgent) return;
+    if (confirmBeforeSend && !(await confirmBeforeSend(content))) return;
     setSubmitting(true);
     try {
       await onSubmit(content, activeIds);
-      editorRef.current?.clearContent();
-      draft.clear();
-      setIsEmpty(true);
-      setMarkdown("");
-      uploadMapRef.current.clear();
-      if (imageTrayEnabled) tray.clear();
+      clearAfterSubmit();
       // Chat blurs after send so the caret doesn't blink under the streaming reply.
       if (blurOnSubmit) editorRef.current?.blur();
       if (isPinned) {
@@ -502,6 +514,21 @@ export const BaseComposer = forwardRef<ComposerHandle, BaseComposerProps>(functi
       }
     } catch {
       // The submit handler owns user-facing errors. Keep the editor and draft intact.
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleSchedule = async (sendAt: Date) => {
+    if (!onSchedule) return;
+    const { content, activeIds } = getPayload();
+    if (imageTrayEnabled && tray.hasUploading) return;
+    if (!content || submitting || disabled || noAgent || sendAt <= new Date()) return;
+    if (confirmBeforeSend && !(await confirmBeforeSend(content))) return;
+    setSubmitting(true);
+    try {
+      await onSchedule(content, sendAt, activeIds);
+      clearAfterSubmit();
     } finally {
       setSubmitting(false);
     }
@@ -620,6 +647,11 @@ export const BaseComposer = forwardRef<ComposerHandle, BaseComposerProps>(functi
         </Button>
       ) : null}
       {sendMenu}
+      {onSchedule && scheduleControl?.({
+        disabled: submitting || disabled || noAgent,
+        canSchedule: !isEmpty || (imageTrayEnabled && tray.hasCompleted),
+        schedule: handleSchedule,
+      })}
       <Button
         size="icon-sm"
         aria-label="Submit"

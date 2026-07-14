@@ -1516,3 +1516,8 @@ comment for SQL/CSS/SBPL/JSON-with-_comment-field).
 - Location: `server/cmd/server/router.go`
 - Reason: Expose the Cerebro-zone app detail handler so the FIR-3172 app screen can read one app, its published versions, and its workflows.
 - Approver: Jesper Hvejsel, FIR-3172 comment “byg”, 2026-07-13.
+
+## FIR-2873 — Scheduled messages
+
+- `packages/views/channels/components/channel-detail.tsx` and `thread-side-panel.tsx`: enable scheduling on the shared Channel/DM composer.
+- `server/cmd/server/router.go` and `main.go`: register the scheduled-message API and delivery sweeper.

@@ -411,6 +411,7 @@ func main() {
 	go cerebrowakeup.RunSweeper(sweepCtx, wakeupSvc, 30*time.Second)
 	// CEREBRO-PATCH(main-rounds): due schedules release held round replies.
 	go cerebrorounds.New(pool, queries, taskSvc).RunSweeper(sweepCtx, 30*time.Second)
+	go h.RunCerebroScheduledMessageSweeper(sweepCtx, 30*time.Second) // CEREBRO-PATCH(scheduled-messages): FIR-2873
 	// CEREBRO-PATCH(inbox-reminders-due): due reminders re-enter inbox live and can fire reminder-only mobile push.
 	go runReminderDueSweeper(sweepCtx, queries, bus)
 	// CEREBRO-PATCH(cerebro-reminder): FIR-394 — fire standalone reminders and re-surface the source conversation in the inbox.

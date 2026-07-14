@@ -1091,6 +1091,12 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			r.With(issueScope).Put("/api/issues/{id}", h.UpdateIssue)
 			r.With(issueScope).Get("/api/issues/{id}/comments", h.ListComments)
 			r.With(issueScope).Post("/api/issues/{id}/comments", h.CreateComment)
+			// CEREBRO-PATCH(scheduled-messages): FIR-2873 — Slack-style deferred Channel/DM delivery.
+			r.With(middleware.RequireUserScope).Get("/api/issues/{id}/scheduled-messages", h.ListScheduledMessages)
+			r.With(middleware.RequireUserScope).Post("/api/issues/{id}/scheduled-messages", h.CreateScheduledMessage)
+			r.With(middleware.RequireUserScope).Patch("/api/scheduled-messages/{scheduledMessageId}", h.UpdateScheduledMessage)
+			r.With(middleware.RequireUserScope).Delete("/api/scheduled-messages/{scheduledMessageId}", h.DeleteScheduledMessage)
+			r.With(middleware.RequireUserScope).Post("/api/scheduled-messages/{scheduledMessageId}/send", h.SendScheduledMessageNow)
 			// CEREBRO-PATCH(references-routes): JEH-837 issue-attached references.
 			r.With(issueScope).Get("/api/issues/{id}/references", cerebroReferencesHandler.ListByIssue)
 			r.With(issueScope).Post("/api/issues/{id}/references", cerebroReferencesHandler.Create)

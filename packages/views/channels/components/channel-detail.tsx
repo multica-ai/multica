@@ -445,7 +445,7 @@ export function ChannelDetail({ channelId, initialChannel, onArchive, initialCom
             {/* CEREBRO-PATCH(channel-typing): TECH-3664 — emit typing ping (throttled in the hook). */}
             {/* CEREBRO-PATCH(channel-composer-unify): FIR-1748 — shared message field (Channels/DMs/Chat), draft scoped per channel. */}
             {/* CEREBRO-PATCH(channel-mention-members-only): FIR-2680 — gate send + render the shared "add to channel?" dialog once here (it portals). */}
-            <MessageComposer conversationId={channelId} uploadIssueId={channelId} editorKey={channelId} draftKey={`new:${channelId}`} onSubmit={submitComment} autoFocus onTyping={notifyTyping} confirmBeforeSend={mentionGate.confirmBeforeSend} confirmDialog={mentionGate.confirmDialog} />
+            <MessageComposer conversationId={channelId} uploadIssueId={channelId} editorKey={channelId} draftKey={`new:${channelId}`} onSubmit={submitComment} allowScheduling autoFocus onTyping={notifyTyping} confirmBeforeSend={mentionGate.confirmBeforeSend} confirmDialog={mentionGate.confirmDialog} /> {/* CEREBRO-PATCH(scheduled-messages): FIR-2873 */}
           </div>
         </div>
 

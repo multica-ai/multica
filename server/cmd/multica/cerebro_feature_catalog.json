@@ -694,6 +694,13 @@
       "default": true
     },
     {
+      "key": "cerebro_scheduled_messages",
+      "label": "Scheduled messages",
+      "description": "Schedule Channel and DM messages for later, then edit, reschedule, send now, or delete them from the conversation queue. FIR-2873.",
+      "group": "dm_channel",
+      "default": true
+    },
+    {
       "key": "cerebro_note_types",
       "label": "Note types",
       "description": "Reusable note templates with recurrence, for business reviews. Create a note type with a fixed template plus a behaviour: one rolling document with the newest section prepended each period, or a fresh note per period in a folder. A daily sweeper materialises scheduled types (weekly/monthly/quarterly) and a 'run now' action covers off-cycle reviews. Off hides the Note types admin in Documents and skips the sweeper. TECH-3511.",

@@ -11,6 +11,7 @@
 
 import { forwardRef, type ReactNode } from "react";
 import { useCommentDraft } from "@multica/cerebro-comment-drafts";
+import { useFeatureFlag } from "@multica/cerebro-feature-flags";
 import { type CommentDraftKey } from "@multica/core/issues/stores";
 import {
   BaseComposer,
@@ -18,6 +19,8 @@ import {
   type ComposerHandle,
   type ComposerMentionItem,
 } from "./base-composer";
+import { createScheduledMessage } from "./scheduled-message";
+import { ScheduledMessageControl } from "./scheduled-message-control";
 
 export interface MessageComposerProps {
   /** Conversation identity (draft fallback key + editor remount). For chat this
@@ -29,6 +32,10 @@ export interface MessageComposerProps {
   onSubmit: (content: string, attachmentIds?: string[]) => void | Promise<void>;
   /** Forward attachment ids on send (channels/DMs). Chat passes content only. */
   trackAttachmentIds?: boolean;
+  /** Enable Slack-style scheduled delivery for Channels and DMs. */
+  allowScheduling?: boolean;
+  /** Parent comment when scheduling a thread reply. */
+  scheduleParentId?: string;
 
   /** Injected draft handle (chat). When absent a comment-draft is used. */
   draft?: ComposerDraftHandle;
@@ -71,6 +78,8 @@ export const MessageComposer = forwardRef<ComposerHandle, MessageComposerProps>(
   uploadIssueId,
   onSubmit,
   trackAttachmentIds = true,
+  allowScheduling = false,
+  scheduleParentId,
   draft,
   draftKey,
   editorKey,
@@ -98,6 +107,8 @@ export const MessageComposer = forwardRef<ComposerHandle, MessageComposerProps>(
   // caller owns the draft store (chat).
   const fallbackDraft = useCommentDraft(draftKey ?? `new:${conversationId}`);
   const effectiveDraft = draft ?? fallbackDraft;
+  const schedulingEnabled = useFeatureFlag("cerebro_scheduled_messages");
+  const canSchedule = allowScheduling && schedulingEnabled && !!uploadIssueId;
 
   return (
     <BaseComposer
@@ -106,6 +117,17 @@ export const MessageComposer = forwardRef<ComposerHandle, MessageComposerProps>(
       editorKey={editorKey}
       draft={effectiveDraft}
       onSubmit={onSubmit}
+      onSchedule={canSchedule ? async (content, sendAt, attachmentIds) => {
+        await createScheduledMessage(uploadIssueId, {
+          content,
+          send_at: sendAt.toISOString(),
+          parent_id: scheduleParentId,
+          attachment_ids: attachmentIds,
+        });
+      } : undefined}
+      scheduleControl={canSchedule ? ({ disabled: scheduleDisabled, canSchedule: hasMessage, schedule }) => (
+        <ScheduledMessageControl issueId={uploadIssueId} disabled={scheduleDisabled} canSchedule={hasMessage} onSchedule={schedule} />
+      ) : undefined}
       trackAttachmentIds={trackAttachmentIds}
       placeholder={placeholder}
       autoFocus={autoFocus}
