@@ -509,12 +509,11 @@ func runDaemonForeground(cmd *cobra.Command) error {
 	if d, _ := cmd.Flags().GetDuration("codex-semantic-inactivity-timeout"); d > 0 {
 		overrides.CodexSemanticInactivityTimeout = d
 	}
-	maxFlag, _ := cmd.Flags().GetInt("max-concurrent-tasks")
-	if n := resolveDaemonIntOverride(maxFlag, "MULTICA_DAEMON_MAX_CONCURRENT_TASKS", fileCfg.MaxConcurrentTasks); n > 0 {
 	if d, _ := cmd.Flags().GetDuration("codex-handshake-timeout"); d > 0 {
 		overrides.CodexHandshakeTimeout = d
 	}
-	if n, _ := cmd.Flags().GetInt("max-concurrent-tasks"); n > 0 {
+	maxFlag, _ := cmd.Flags().GetInt("max-concurrent-tasks")
+	if n := resolveDaemonIntOverride(maxFlag, "MULTICA_DAEMON_MAX_CONCURRENT_TASKS", fileCfg.MaxConcurrentTasks); n > 0 {
 		overrides.MaxConcurrentTasks = n
 	}
 	if b, _ := cmd.Flags().GetBool("no-auto-update"); b {
