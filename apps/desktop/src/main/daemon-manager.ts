@@ -1012,6 +1012,15 @@ export function getTargetApiBaseUrl(): string | null {
   return targetApiBaseUrl;
 }
 
+/** Return the desktop-owned member token for a trusted main-process request. */
+export async function getTargetApiToken(): Promise<string | null> {
+  if (!targetApiBaseUrl) return null;
+  const profile = activeProfile?.name ?? deriveProfileName(targetApiBaseUrl);
+  const cfg = await readProfileConfig(profile);
+  const value = typeof cfg.token === "string" ? cfg.token.trim() : "";
+  return value || null;
+}
+
 export function setupDaemonManager(
   windowGetter: () => BrowserWindow | null,
 ): void {

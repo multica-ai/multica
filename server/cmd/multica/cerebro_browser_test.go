@@ -98,3 +98,35 @@ func TestCerebroBrowserOpen_NoGrantEnv_Refuses(t *testing.T) {
 		t.Fatal("expected an error when the grant env is unset, got nil")
 	}
 }
+
+func TestCerebroBrowserSecureFill_SendsReferencesOnly(t *testing.T) {
+	const secret = "registry-password-must-not-leak"
+	var body map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/agent/secure-fill" {
+			t.Errorf("path = %q", r.URL.Path)
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		_, _ = w.Write([]byte(`{"ok":true,"audit":{"vault":"Shared/browser-login/registry","key":"PASSWORD"}}`))
+	}))
+	defer srv.Close()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv(personalBrowserGrantEnvCLI, "1")
+	t.Setenv("MULTICA_TOKEN", "agent-token")
+	writeTestSidecar(t, home, portIntOf(t, srv), "sidecar-token")
+	var out bytes.Buffer
+	cmd := &cobra.Command{}
+	cmd.SetOut(&out)
+	if err := callCerebroBrowser(cmd, "secure-fill", map[string]any{"ref": "@e7", "vault": "Shared/browser-login/registry", "key": "PASSWORD"}); err != nil {
+		t.Fatal(err)
+	}
+	encoded, _ := json.Marshal(body)
+	if bytes.Contains(encoded, []byte(secret)) || bytes.Contains(out.Bytes(), []byte(secret)) {
+		t.Fatal("secret leaked into the CLI request or output")
+	}
+	if _, exists := body["value"]; exists {
+		t.Fatal("secure-fill request must never accept a plaintext value")
+	}
+}

@@ -642,11 +642,12 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	h.ConnectionClaimResolver = claimConnectionResolver
 	// CEREBRO-PATCH(cerebro-web-fetch-policy-routes): TECH-3522 per-workspace web_fetch policy handler.
 	cerebroWebFetchPolicyHandler := cerebrowebfetchpolicy.NewHandler(cerebroQueries)
-	h.ConnectionToolDeny = cerebrotoolpolicy.NewStore(pool)   // CEREBRO-PATCH(cerebro-connection-tool-deny-wire): TECH-3156 resolve per-tool connection denies at claim.
-	h.CapabilityToolPolicy = cerebrotoolpolicy.NewStore(pool) // CEREBRO-PATCH(cerebro-capability-card-tools-wire): TECH-3642 capabilities card tool-policy table.
-	h.CapabilityConnections = cerebroConnectionsHandler.Store // CEREBRO-PATCH(cerebro-capability-card-conns-wire): TECH-3642 capabilities card connections list.
-	avMod := cerebroagentvault.NewModule(pool)                // CEREBRO-PATCH(cerebro-agentvault-broker-wire): TECH-3196 per-agent Agent Vault broker at claim.
-	h.AgentVaultBroker = avMod.Service                        // CEREBRO-PATCH(cerebro-agentvault-broker-service): TECH-3196 expose grant-reconciling service.
+	h.ConnectionToolDeny = cerebrotoolpolicy.NewStore(pool)                                                                 // CEREBRO-PATCH(cerebro-connection-tool-deny-wire): TECH-3156 resolve per-tool connection denies at claim.
+	h.CapabilityToolPolicy = cerebrotoolpolicy.NewStore(pool)                                                               // CEREBRO-PATCH(cerebro-capability-card-tools-wire): TECH-3642 capabilities card tool-policy table.
+	h.CapabilityConnections = cerebroConnectionsHandler.Store                                                               // CEREBRO-PATCH(cerebro-capability-card-conns-wire): TECH-3642 capabilities card connections list.
+	avMod := cerebroagentvault.NewModule(pool)                                                                              // CEREBRO-PATCH(cerebro-agentvault-broker-wire): TECH-3196 per-agent Agent Vault broker at claim.
+	h.AgentVaultBroker = avMod.Service                                                                                      // CEREBRO-PATCH(cerebro-agentvault-broker-service): TECH-3196 expose grant-reconciling service.
+	h.PersonalBrowserSecrets = cerebroagentvault.NewClient(cerebroagentvault.LoadConfig(), cerebroConnectionsHandler.Store) // CEREBRO-PATCH(personal-browser-secure-fill): FIR-3006 server-only value bridge.
 	// CEREBRO-PATCH(cerebro-agentvault-mirror-wire): FIR-1739 Part B project tool-policy credential grants onto the Agent Vault access table.
 	avMod.Service.SetGrantMirror(&chainCredentialGrantSource{policy: cerebrotoolpolicy.NewStore(pool), creds: cerebroQueries}, avMod.Store)
 	// CEREBRO-PATCH(cerebro-agentvault-access-routes): TECH-3196 per-agent access-table CRUD handler; FIR-2478 vault-listing resolves the "Agent Vault" connection.
@@ -2090,6 +2091,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			r.Post("/api/cerebro/issues/check-similar/event", h.DupCheckEvent)
 			// CEREBRO-PATCH(personal-browser-authorize-route): FIR-2037 per-action personal-browser gate (agent token; host-conditioned, Base=Deny).
 			r.Post("/api/cerebro/personal-browser/authorize", h.AuthorizePersonalBrowser)
+			r.Post("/api/cerebro/personal-browser/secure-fill", h.SecureFillPersonalBrowser) // CEREBRO-PATCH(personal-browser-secure-fill): FIR-3006
 			// CEREBRO-PATCH(cerebro-connection-tools-routes): FIR-2273 api-type connection tools for the Multica MCP server (agent token; default-deny per agent).
 			r.Get("/api/cerebro/connection-tools", cerebroConnectionToolsHandler.List)
 			r.Post("/api/cerebro/connection-tools/call", cerebroConnectionToolsHandler.Call)

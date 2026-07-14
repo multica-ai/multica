@@ -322,6 +322,17 @@ func init() {
 		},
 	}
 
+	secureFillCmd := &cobra.Command{
+		Use:   "secure-fill <ref> <vault> <key>",
+		Short: "Fill a field from an Agent Vault reference without exposing the value",
+		Args:  cobra.ExactArgs(3),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return callCerebroBrowser(cmd, "secure-fill", payloadWithSession(cmd, map[string]any{
+				"ref": args[0], "vault": args[1], "key": args[2],
+			}))
+		},
+	}
+
 	navigateCmd := &cobra.Command{
 		Use:   "navigate <url>",
 		Short: "Load a URL in the (optionally named) session",
@@ -358,5 +369,5 @@ func init() {
 		},
 	}
 
-	cerebroBrowserCmd.AddCommand(openCmd, snapshotCmd, clickCmd, fillCmd, navigateCmd, sessionsCmd, logoutCmd, clearCookiesCmd)
+	cerebroBrowserCmd.AddCommand(openCmd, snapshotCmd, clickCmd, fillCmd, secureFillCmd, navigateCmd, sessionsCmd, logoutCmd, clearCookiesCmd)
 }

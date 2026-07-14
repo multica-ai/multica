@@ -9,6 +9,14 @@ move a gate into the tool-policy chain, remove Persona), update this file in the
 
 Line numbers drift; this doc cites files + functions. Grep the function name if a line moved.
 
+> **Secure browser fill (FIR-3006):** this is a code-only compound gate, not a
+> new permission model. It requires `tools:personal-browser` for the target host
+> and an explicit exact-resource `credential.reveal` Allow authored on the
+> `browser-testers` group. The resource is one app-specific Agent Vault box,
+> `agentvault-vault:Shared/browser-login/<app>`; no capability-wide reveal is
+> accepted. Plaintext exists only between the backend Agent Vault client and the
+> desktop Chromium injection frame.
+
 ---
 
 ## 1. The mistake this doc exists to prevent

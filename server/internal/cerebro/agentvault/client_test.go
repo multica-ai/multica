@@ -4,6 +4,8 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -150,5 +152,53 @@ func TestListVaults_NonOKStatus(t *testing.T) {
 	c := NewClient(Config{InternalURL: srv.URL}, conns)
 	if _, err := c.ListVaults(context.Background(), pgtype.UUID{}); err == nil {
 		t.Fatal("ListVaults: expected error on 500, got nil")
+	}
+}
+
+func TestRevealCredential_ViaConnectionFetchesOnlyRequestedKey(t *testing.T) {
+	const secret = "registry-password-must-not-leak"
+	var sawAuth, sawQuery string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sawAuth = r.Header.Get("Authorization")
+		sawQuery = r.URL.RawQuery
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"keys":["PASSWORD"],"credentials":[{"key":"PASSWORD","type":"static","value":"` + secret + `"}]}`))
+	}))
+	defer srv.Close()
+
+	c := NewClient(Config{InternalURL: srv.URL}, fakeConns{list: []connections.Connection{agentVaultConn(srv.URL, "owner-token")}})
+	value, err := c.RevealCredential(context.Background(), pgtype.UUID{}, "Shared/browser-login/registry", "PASSWORD")
+	if err != nil {
+		t.Fatalf("RevealCredential: %v", err)
+	}
+	if value != secret {
+		t.Fatal("RevealCredential returned the wrong value")
+	}
+	if sawAuth != "Bearer owner-token" {
+		t.Errorf("Authorization = %q", sawAuth)
+	}
+	query, _ := url.ParseQuery(sawQuery)
+	if query.Get("vault") != "Shared/browser-login/registry" || query.Get("reveal") != "true" || query.Get("key") != "PASSWORD" {
+		t.Errorf("query = %q", sawQuery)
+	}
+}
+
+func TestRevealCredential_RejectsNonBrowserLoginVault(t *testing.T) {
+	c := NewClient(Config{}, nil)
+	if _, err := c.RevealCredential(context.Background(), pgtype.UUID{}, "shared-vault", "PASSWORD"); err == nil {
+		t.Fatal("expected a non browser-login vault to be rejected")
+	}
+}
+
+func TestRevealCredential_ErrorNeverIncludesResponseBody(t *testing.T) {
+	const secret = "registry-password-must-not-leak"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, secret, http.StatusBadGateway)
+	}))
+	defer srv.Close()
+	c := NewClient(Config{InternalURL: srv.URL}, fakeConns{list: []connections.Connection{agentVaultConn(srv.URL, "owner-token")}})
+	_, err := c.RevealCredential(context.Background(), pgtype.UUID{}, "Shared/browser-login/registry", "PASSWORD")
+	if err == nil || strings.Contains(err.Error(), secret) {
+		t.Fatalf("sensitive response body leaked through error: %v", err)
 	}
 }

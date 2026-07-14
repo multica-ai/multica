@@ -1280,7 +1280,8 @@ var excluded = map[string]string{
 	// this agent-only (mat_ token) route just runs the tool-policy chain internally
 	// with Base=Deny and the request host, so it is the enforcement point, not a
 	// separately-governable platform capability (FIR-2037).
-	"POST /api/cerebro/personal-browser/authorize": "resolve-seam — agent-only per-action gate for the tools:personal-browser tool; runs the tool-policy chain internally with Base=Deny + host condition (FIR-2037), the enforcement point itself, not a separately-governable platform action",
+	"POST /api/cerebro/personal-browser/authorize":   "resolve-seam — agent-only per-action gate for the tools:personal-browser tool; runs the tool-policy chain internally with Base=Deny + host condition (FIR-2037), the enforcement point itself, not a separately-governable platform action",
+	"POST /api/cerebro/personal-browser/secure-fill": "credential-bridge — signed-in desktop-only secret bridge; validates the embedded agent token and resolves credential.reveal for the exact Agent Vault box before returning a value to the desktop process (FIR-3006), not a separately-governable platform action",
 
 	// connection-tools — agent-only (mat_ token) dispatch of an api-type workspace
 	// connection as a server-side tool (FIR-2273). Per-endpoint authorization is

@@ -74,6 +74,9 @@ multica cerebro-browser snapshot
 multica cerebro-browser click @e12
 multica cerebro-browser fill @e7 "search text"
 
+# Fill from an app-specific Agent Vault without exposing the value.
+multica cerebro-browser secure-fill @e7 Shared/browser-login/registry PASSWORD
+
 # Load a page.
 multica cerebro-browser navigate https://app.example.com/dashboard
 ```
@@ -84,6 +87,12 @@ After any `click`/`fill`/`navigate` that changes the page, take a **fresh
 Each command prints a JSON result to stdout. `snapshot` returns
 `{ url, title, nodes: [{ ref, role, name, value? }] }`. The action commands
 return `{ ok: true }` on success.
+
+`secure-fill` accepts only a field ref, an app-specific vault name, and a
+credential key. It never accepts or returns plaintext. It requires both the
+personal-browser host grant and an explicit `credential.reveal` Allow for that
+exact vault on the `browser-testers` group. Vaults outside
+`Shared/browser-login/<app>` are rejected.
 
 ## Sessions — isolated logins
 
@@ -118,7 +127,8 @@ system browser and never another session.
 
 - **Never** assume a ref from an old snapshot is still valid — re-snapshot after
   every change.
-- **Never** type secrets you were not given. If a site needs a login the user
+- **Never** type secrets you were not given and never pass plaintext on the
+  command line. Use `secure-fill` only when the exact app vault is granted. If a site needs a login the user
   has not saved, run `multica cerebro-browser open <url>` to bring the browser up
   on that page and ask the user to log in there; do not attempt to enter
   credentials yourself.
