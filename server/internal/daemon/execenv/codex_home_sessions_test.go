@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"testing"
+	"time"
 )
 
 // seedFakeRollout writes a fake Codex rollout for sessionID under
@@ -455,6 +456,81 @@ func TestPrepareCodexSessionsDir_ReusedStoreLinkIsAuthoritative(t *testing.T) {
 	assertSessionsLinkedToStore(t, filepath.Join(codexHome, "sessions"), storeDir)
 	if !CodexResumeRolloutPresent(codexHome, sessionID) {
 		t.Error("existing store rollout must remain resumable after reuse")
+	}
+}
+
+// PruneCodexSessionStores must reclaim per-issue stores idle past retention,
+// keep recently-touched ones (active/resumable tasks), isolate issues from one
+// another, and be disable-able — the data lifecycle Elon's review required so
+// the persistent store can't grow forever (MUL-4424).
+func TestPruneCodexSessionStores(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("CODEX_HOME", home)
+	storeRoot := filepath.Join(home, codexSessionStoreRoot)
+
+	freshStore := filepath.Join(storeRoot, "agent-1", "issue-fresh")
+	staleStore := filepath.Join(storeRoot, "agent-1", "issue-stale")
+	otherStore := filepath.Join(storeRoot, "agent-2", "issue-x")
+	seedRolloutAt(t, filepath.Join(freshStore, "2026", "07", "14", "rollout-2026-07-14T00-00-00-a.jsonl"), 16)
+	seedRolloutAt(t, filepath.Join(staleStore, "2026", "06", "01", "rollout-2026-06-01T00-00-00-b.jsonl"), 16)
+	seedRolloutAt(t, filepath.Join(otherStore, "2026", "07", "14", "rollout-2026-07-14T00-00-00-c.jsonl"), 16)
+
+	now := time.Now()
+	retention := 14 * 24 * time.Hour
+	// Age only the stale store's whole tree well past retention.
+	chtimesTree(t, staleStore, now.Add(-30*24*time.Hour))
+
+	removed, bytes := PruneCodexSessionStores(retention, now, testLogger())
+	if removed != 1 {
+		t.Fatalf("removed = %d, want 1 (only the store idle past retention)", removed)
+	}
+	if bytes <= 0 {
+		t.Errorf("bytesFreed = %d, want > 0", bytes)
+	}
+	// The stale store is gone; the fresh one and the other agent's store survive
+	// (per-issue isolation), and agent-1 stays because issue-fresh remains.
+	assertAbsent(t, staleStore)
+	assertPresent(t, freshStore)
+	assertPresent(t, otherStore)
+	assertPresent(t, filepath.Join(storeRoot, "agent-1"))
+
+	// retention <= 0 disables pruning even for an aged store.
+	chtimesTree(t, freshStore, now.Add(-30*24*time.Hour))
+	if removed, _ := PruneCodexSessionStores(0, now, testLogger()); removed != 0 {
+		t.Errorf("retention<=0 must disable pruning, removed=%d", removed)
+	}
+	assertPresent(t, freshStore)
+}
+
+// TestPruneCodexSessionStores_RemovesEmptyAgentDir confirms an agent directory
+// is cleaned up once its last issue store ages out, so the tree doesn't leave
+// empty <agent>/ shells behind.
+func TestPruneCodexSessionStores_RemovesEmptyAgentDir(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("CODEX_HOME", home)
+	storeRoot := filepath.Join(home, codexSessionStoreRoot)
+	onlyStore := filepath.Join(storeRoot, "agent-lonely", "issue-1")
+	seedRolloutAt(t, filepath.Join(onlyStore, "2026", "06", "01", "rollout-2026-06-01T00-00-00-x.jsonl"), 16)
+
+	now := time.Now()
+	chtimesTree(t, onlyStore, now.Add(-30*24*time.Hour))
+	if removed, _ := PruneCodexSessionStores(14*24*time.Hour, now, testLogger()); removed != 1 {
+		t.Fatalf("removed = %d, want 1", removed)
+	}
+	assertAbsent(t, filepath.Join(storeRoot, "agent-lonely"))
+}
+
+// chtimesTree sets the atime/mtime of every entry under root to ts.
+func chtimesTree(t *testing.T, root string, ts time.Time) {
+	t.Helper()
+	err := filepath.WalkDir(root, func(path string, _ os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		return os.Chtimes(path, ts, ts)
+	})
+	if err != nil {
+		t.Fatalf("chtimes tree %s: %v", root, err)
 	}
 }
 

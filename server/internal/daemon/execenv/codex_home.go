@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/pelletier/go-toml/v2"
 )
@@ -238,6 +239,87 @@ func sanitizeCodexPathSegment(s string) string {
 		}
 	}
 	return b.String()
+}
+
+// PruneCodexSessionStores reclaims per-issue Codex session stores under the
+// shared home's multica-sessions root that have not been touched within
+// retention, bounding the lifetime of the conversation history each one holds.
+//
+// The stores deliberately live outside the task-scoped envRoot the task GC
+// reclaims (so resume survives across task IDs), which means without this they
+// would accumulate forever — a done or abandoned issue's prompts and full
+// rollouts (one reporter saw a single 1.5 GiB rollout) would never be freed, and
+// deleting the issue/agent/workspace would not remove them. A store's newest
+// mtime is its last activity: Codex writes/extends a rollout as the thread
+// advances, so an active or recently-resumed task keeps its store fresh and is
+// never reclaimed; a store idle past retention is removed, giving deleted issues
+// an eventual-reclamation guarantee. retention <= 0 disables pruning entirely.
+func PruneCodexSessionStores(retention time.Duration, now time.Time, logger *slog.Logger) (removed int, bytesFreed int64) {
+	if retention <= 0 {
+		return 0, 0
+	}
+	root := filepath.Join(resolveSharedCodexHome(), codexSessionStoreRoot)
+	agents, err := os.ReadDir(root)
+	if err != nil {
+		return 0, 0 // not created yet, or unreadable — nothing to prune
+	}
+	for _, a := range agents {
+		if !a.IsDir() {
+			continue
+		}
+		agentDir := filepath.Join(root, a.Name())
+		issues, err := os.ReadDir(agentDir)
+		if err != nil {
+			continue
+		}
+		kept := 0
+		for _, is := range issues {
+			if !is.IsDir() {
+				continue
+			}
+			storeDir := filepath.Join(agentDir, is.Name())
+			newest, size := codexStoreStat(storeDir)
+			if newest.IsZero() || now.Sub(newest) <= retention {
+				kept++
+				continue
+			}
+			if err := os.RemoveAll(storeDir); err != nil {
+				logger.Warn("execenv: prune codex session store failed", "store", storeDir, "error", err)
+				kept++
+				continue
+			}
+			removed++
+			bytesFreed += size
+		}
+		// Remove the agent dir once its last issue store is gone, so the tree
+		// does not leave empty <agent>/ shells behind.
+		if kept == 0 {
+			_ = os.Remove(agentDir)
+		}
+	}
+	return removed, bytesFreed
+}
+
+// codexStoreStat walks dir once, returning the newest modification time seen
+// (the store's last activity) and its total byte size (for GC accounting).
+func codexStoreStat(dir string) (newest time.Time, size int64) {
+	_ = filepath.WalkDir(dir, func(_ string, d os.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		info, ierr := d.Info()
+		if ierr != nil {
+			return nil
+		}
+		if info.ModTime().After(newest) {
+			newest = info.ModTime()
+		}
+		if !d.IsDir() {
+			size += info.Size()
+		}
+		return nil
+	})
+	return newest, size
 }
 
 // prepareCodexSessionsDir points codex-home/sessions at a sessions store that

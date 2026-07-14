@@ -1323,6 +1323,44 @@ func TestCodexStartOrResumeThreadFallsBackOnResumeError(t *testing.T) {
 	}
 }
 
+// codexTurnInput carries the user-visible disclosure when a resume was expected
+// but the backend landed on a fresh thread. Paired with
+// TestCodexStartOrResumeThreadFallsBackOnResumeError (which proves the live
+// thread/resume RPC returns resumed=false on a recoverable error), this proves
+// the real fallback surfaces the notice while a successful resume does not
+// (MUL-4424).
+func TestCodexTurnInput(t *testing.T) {
+	t.Parallel()
+
+	const prompt = "do the task"
+	text := func(input []map[string]any) string {
+		if len(input) != 1 {
+			t.Fatalf("expected a single input block, got %d", len(input))
+		}
+		s, _ := input[0]["text"].(string)
+		return s
+	}
+
+	// Resume expected but the backend fell back to a fresh thread → disclose,
+	// and the original prompt must still be delivered.
+	fallback := text(codexTurnInput(prompt, true, false))
+	if !strings.Contains(fallback, "previous conversation context could not be restored") {
+		t.Errorf("expected continuity notice on resume fallback, got:\n%s", fallback)
+	}
+	if !strings.HasSuffix(fallback, prompt) {
+		t.Errorf("prompt must survive alongside the notice, got:\n%s", fallback)
+	}
+
+	// Successful resume, or an ordinary fresh start with no resume expected →
+	// no notice, prompt delivered verbatim.
+	if got := text(codexTurnInput(prompt, true, true)); got != prompt {
+		t.Errorf("successful resume must not add a notice, got:\n%s", got)
+	}
+	if got := text(codexTurnInput(prompt, false, false)); got != prompt {
+		t.Errorf("fresh start must not add a notice, got:\n%s", got)
+	}
+}
+
 func TestCodexStartOrResumeThreadDoesNotFallBackAfterProcessExit(t *testing.T) {
 	t.Parallel()
 

@@ -36,10 +36,17 @@ type ExecOptions struct {
 	// protocol transport. It is currently consumed by Codex app-server;
 	// zero uses the provider default rather than disabling the bound.
 	HandshakeTimeout time.Duration
-	ResumeSessionID  string          // if non-empty, resume a previous agent session
-	ExtraArgs        []string        // daemon-wide default CLI arguments appended before CustomArgs; currently read by claude and codex backends only
-	CustomArgs       []string        // per-agent CLI arguments appended after ExtraArgs
-	McpConfig        json.RawMessage // if non-nil, MCP server config to pass via --mcp-config
+	ResumeSessionID  string // if non-empty, resume a previous agent session
+	// ResumeExpected records that this task intended to continue a prior
+	// conversation, independent of ResumeSessionID (which a fallback retry may
+	// clear). When it is true but the backend ends up on a fresh thread — the
+	// live resume RPC was rejected, or a transport failure forced a fresh retry —
+	// the backend surfaces a continuity notice to the user instead of silently
+	// restarting. Currently honoured by the codex backend (MUL-4424).
+	ResumeExpected bool
+	ExtraArgs      []string        // daemon-wide default CLI arguments appended before CustomArgs; currently read by claude and codex backends only
+	CustomArgs     []string        // per-agent CLI arguments appended after ExtraArgs
+	McpConfig      json.RawMessage // if non-nil, MCP server config to pass via --mcp-config
 	// ThinkingLevel is the runtime-native reasoning/effort value (e.g.
 	// Claude's "low|medium|high|xhigh|max", Codex's "none|minimal|low|
 	// medium|high|xhigh", OpenCode's model variant names). Empty means

@@ -873,12 +873,16 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 			b.cfg.Logger.Info("codex thread started", "thread_id", threadID)
 		}
 
-		// 3. Send turn and wait for completion
+		// 3. Send turn and wait for completion. When a resume was expected but we
+		// ended up on a fresh thread (the live thread/resume RPC was rejected — a
+		// corrupt/incompatible rollout, server-side thread GC, schema drift — or a
+		// transport failure forced a fresh retry), prepend a continuity notice so
+		// the agent tells the user the prior conversation could not be restored.
+		// The daemon's pre-flight gates only catch cases detectable before launch;
+		// this covers the ones only the live resume reveals (MUL-4424).
 		turnParams := map[string]any{
 			"threadId": threadID,
-			"input": []map[string]any{
-				{"type": "text", "text": prompt},
-			},
+			"input":    codexTurnInput(prompt, opts.ResumeExpected, resumed),
 		}
 		// Per-turn reasoning override. Mirrors the per-thread injection in
 		// startOrResumeThread; keeping both in sync is enforced by the
@@ -1086,6 +1090,27 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 	}()
 
 	return &Session{Messages: msgCh, Result: resCh}, nil
+}
+
+// codexResumeUnavailableNotice is prepended to the first turn's input when a
+// resume was expected but Codex ended up on a fresh thread. It mirrors the
+// daemon brief's Session Continuity Notice so the disclosure is identical
+// whether the loss is detected pre-launch (daemon gate) or only by the live
+// thread/resume RPC (MUL-4424).
+const codexResumeUnavailableNotice = "[System notice] You were expected to continue an earlier conversation, but restoring that session failed and this is a fresh thread with no memory of the previous turns. Rebuild context from the issue/thread, and when you reply, tell the user up front (one short sentence) that the previous conversation context could not be restored and this is a new session.\n\n"
+
+// codexTurnInput builds the input content for the first turn/start. When a
+// resume was expected (resumeExpected) but the backend landed on a fresh thread
+// (!resumed), it prepends codexResumeUnavailableNotice so the user learns the
+// prior context was lost instead of the run silently continuing as new. The
+// notice is folded into the same text block as the prompt to stay within the
+// single-text-block turn input Codex already accepts.
+func codexTurnInput(prompt string, resumeExpected, resumed bool) []map[string]any {
+	text := prompt
+	if resumeExpected && !resumed {
+		text = codexResumeUnavailableNotice + prompt
+	}
+	return []map[string]any{{"type": "text", "text": text}}
 }
 
 // startOrResumeThread picks between Codex's thread/resume and thread/start

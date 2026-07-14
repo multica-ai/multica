@@ -4223,11 +4223,17 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		SemanticInactivityTimeout: d.cfg.CodexSemanticInactivityTimeout,
 		HandshakeTimeout:          d.cfg.CodexHandshakeTimeout,
 		ResumeSessionID:           task.PriorSessionID,
-		ExtraArgs:                 extraArgs,
-		CustomArgs:                customArgs,
-		McpConfig:                 mcpConfig,
-		ThinkingLevel:             thinkingLevel,
-		OpenclawMode:              openclawMode,
+		// Post-gate intent: PriorSessionID here already reflects the pre-flight
+		// resume gates (a dropped resume is surfaced via the brief instead). If it
+		// survived to here, the backend must disclose to the user when the live
+		// resume still fails — even across the fresh-session retry below, which
+		// clears ResumeSessionID but not this (MUL-4424).
+		ResumeExpected: task.PriorSessionID != "",
+		ExtraArgs:      extraArgs,
+		CustomArgs:     customArgs,
+		McpConfig:      mcpConfig,
+		ThinkingLevel:  thinkingLevel,
+		OpenclawMode:   openclawMode,
 	}
 	// Some providers do not reliably load the per-task runtime config files we
 	// write into the task workdir:
