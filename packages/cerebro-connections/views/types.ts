@@ -21,6 +21,8 @@ export interface EndpointPermission {
   // One-line label captured from the API's OpenAPI spec at discovery time
   // (e.g. "Execute data source: Orders"). Optional; older rows have none.
   summary?: string;
+  // Present only for identity-aware OpenAPI documents.
+  granted?: boolean;
 }
 
 // Tool is one MCP tool discovered on a connection (mcp_http), persisted on the

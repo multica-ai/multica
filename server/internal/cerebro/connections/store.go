@@ -179,6 +179,10 @@ type EndpointPermission struct {
 	Path    string   `json:"path"`
 	Methods []string `json:"methods"`
 	Summary string   `json:"summary,omitempty"`
+	// Granted is present only when an identity-aware OpenAPI document declares
+	// x-registry-granted. Nil means the API is identity-blind (or does not use
+	// this extension), so consumers must preserve the endpoint.
+	Granted *bool `json:"granted,omitempty"`
 }
 
 // CreateParams are the fields required to create a connection.

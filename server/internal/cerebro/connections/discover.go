@@ -17,6 +17,7 @@ package connections
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -38,7 +39,10 @@ type discoveredEndpoint struct {
 	Path    string   `json:"path"`
 	Methods []string `json:"methods"`
 	Summary string   `json:"summary,omitempty"`
+	Granted *bool    `json:"granted,omitempty"`
 }
+
+var ErrAPISpecUnavailable = errors.New("connections: personalized API spec unavailable")
 
 // httpVerbs is the set of OpenAPI path-item keys that are real HTTP operations.
 // A path item can also carry non-operation keys (parameters, summary, $ref, …)
@@ -85,9 +89,13 @@ type specAuthRejection struct {
 // test — plus the first auth rejection (401/403) seen, so the caller can tell
 // the admin their credential was refused rather than pretend no spec exists.
 func discoverAPIEndpoints(ctx context.Context, client *http.Client, baseURL string, auth AuthConfig) ([]discoveredEndpoint, *specAuthRejection) {
+	return discoverAPIEndpointsForPrincipal(ctx, client, baseURL, auth, "")
+}
+
+func discoverAPIEndpointsForPrincipal(ctx context.Context, client *http.Client, baseURL string, auth AuthConfig, principal string) ([]discoveredEndpoint, *specAuthRejection) {
 	var rejection *specAuthRejection
 	for _, candidate := range specCandidates(baseURL) {
-		body, status, ok := fetchSpec(ctx, client, candidate, auth)
+		body, status, ok := fetchSpecForPrincipal(ctx, client, candidate, auth, principal)
 		if !ok {
 			if rejection == nil && (status == http.StatusUnauthorized || status == http.StatusForbidden) {
 				rejection = &specAuthRejection{URL: candidate, StatusCode: status}
@@ -99,6 +107,26 @@ func discoverAPIEndpoints(ctx context.Context, client *http.Client, baseURL stri
 		}
 	}
 	return nil, rejection
+}
+
+// DiscoverAPIEndpointsForPrincipal fetches the connection's OpenAPI document
+// as one delegated principal. It returns a stable public model for the runtime
+// resolver and fails closed when no usable personalized contract is available.
+func DiscoverAPIEndpointsForPrincipal(ctx context.Context, client *http.Client, baseURL string, auth AuthConfig, principal string) ([]EndpointPermission, error) {
+	eps, rejection := discoverAPIEndpointsForPrincipal(ctx, client, baseURL, auth, principal)
+	if len(eps) == 0 {
+		if rejection != nil {
+			return nil, fmt.Errorf("%w: HTTP %d", ErrAPISpecUnavailable, rejection.StatusCode)
+		}
+		return nil, ErrAPISpecUnavailable
+	}
+	out := make([]EndpointPermission, 0, len(eps))
+	for _, ep := range eps {
+		out = append(out, EndpointPermission{
+			Path: ep.Path, Methods: ep.Methods, Summary: ep.Summary, Granted: ep.Granted,
+		})
+	}
+	return out, nil
 }
 
 // resolveExplicitSpec resolves the endpoint catalogue from an explicitly
@@ -209,12 +237,19 @@ func specCandidates(baseURL string) []string {
 // the request never got a response). Auth + Cloudflare Access headers are
 // attached so specs behind auth are reachable.
 func fetchSpec(ctx context.Context, client *http.Client, specURL string, auth AuthConfig) ([]byte, int, bool) {
+	return fetchSpecForPrincipal(ctx, client, specURL, auth, "")
+}
+
+func fetchSpecForPrincipal(ctx context.Context, client *http.Client, specURL string, auth AuthConfig, principal string) ([]byte, int, bool) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, specURL, nil)
 	if err != nil {
 		return nil, 0, false
 	}
 	req.Header.Set("Accept", "application/json, application/yaml, text/yaml, */*")
 	addAuthHeaders(req, auth)
+	if principal = strings.TrimSpace(principal); principal != "" {
+		req.Header.Set("X-On-Behalf-Of", principal)
+	}
 
 	resp, err := client.Do(req)
 	if err != nil {
@@ -274,10 +309,42 @@ func parseSpec(body []byte) []discoveredEndpoint {
 			continue
 		}
 		sort.Strings(methods)
-		out = append(out, discoveredEndpoint{Path: path, Methods: methods, Summary: pathSummary(item)})
+		out = append(out, discoveredEndpoint{
+			Path: path, Methods: methods, Summary: pathSummary(item), Granted: pathGrant(item),
+		})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Path < out[j].Path })
 	return out
+}
+
+// pathGrant conservatively folds operation-level x-registry-granted markers
+// into the existing path-level endpoint model. Any explicit false wins, all
+// explicit true resolves true, and no marker stays nil for identity-blind APIs.
+func pathGrant(item map[string]any) *bool {
+	sawTrue := false
+	for key, raw := range item {
+		if _, isVerb := httpVerbs[strings.ToLower(key)]; !isVerb {
+			continue
+		}
+		op, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		granted, ok := op["x-registry-granted"].(bool)
+		if !ok {
+			continue
+		}
+		if !granted {
+			v := false
+			return &v
+		}
+		sawTrue = true
+	}
+	if sawTrue {
+		v := true
+		return &v
+	}
+	return nil
 }
 
 // pathSummary picks the human-readable label for a path item: the path item's

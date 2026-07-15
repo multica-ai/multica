@@ -256,6 +256,21 @@ configuration. Verified against the code.
 | 16 | **Who can use the "Test as user" lookup** (`tools:test-as-user`) | `server/internal/cerebro/toolpolicy/handler_test_as_user.go` (`TestAsUser`, `TestAsUserAccess`) → `toolpolicy.Store.ResolveOptIn` (→ `chain.ResolveOptIn`); routes `POST`/`GET /api/workspaces/{id}/cerebro/test-as-user[/access]` mounted member-level in `router.go` | **FIR-1771.** The Test as user feature (resolve another user+agent's effective tool verdict from the profile menu) is an **OFF-by-default (opt-in) capability** gated in-handler for the **caller**, with **NO admin bypass** — being a workspace admin does not by itself grant it. It uses `Store.ResolveOptIn`, **not** the tighten-only `Resolve`: granted by an explicit Allow at the **user or group** layer, revoked by an explicit user Deny, OFF otherwise. Everyone else gets 403 (`TestAsUser`) / `{"allowed": false}` (`TestAsUserAccess`). **Why a dedicated resolver and not `Resolve(Base: Deny)`:** the chain only ever tightens below its Base and refuses to loosen, so a Deny base can never be lifted by a grant — `Resolve(Base: Deny)` is always Deny no matter the rows, which was the original bug that hid the menu entry for everyone *including* the granted owner. Migration `9099_cerebro_test_as_user` seeds the capability per workspace and a single user-layer Allow hardcoded to one specific user UUID (today, Jesper's) — not a role-based grant, so it does not follow ownership if it ever changes hands. The lookup itself reuses `Store.Table` (which auto-resolves the *target* user's groups), so the in-app answer matches `tool-policy explain`. Read-only: it resolves and returns a verdict, mutating no state. (Other Base=Deny gates above — e.g. row 8 agent-browser — should be reviewed for the same opt-in mismatch; out of scope for FIR-1771.) |
 | 17 | **`report_loop_check` (loop delivery-gate check reporting)** | `server/internal/cerebro/runtime/firtal_gateway_loop.go` (`FirtalReportLoopCheckTool`); registered in `firtal_gateway_tools_extended.go` only when `ToolContext.LoopStore` is wired (`main.go`: `gatewayExecutor.SetLoopStore(cerebroloops.NewStore(pool))`) | FIR-2283. Not gated by the tool-policy chain — presence is wiring-only (nil store ⇒ tool absent for every agent). The tool itself grants no access beyond recording one exit code: the worker agent reports the exit code of a check the engine already dispatched to it (`(issue_id, gate, round, argv)`, matched server-side), and `loops.Store.Report` only updates a matching pending row — an agent cannot invent a new check, target another issue's gate, or influence the pass/fail decision itself, since the gate (`loops.Reconcile`, consulted via `workflows.GateEvaluator`, row 2 shape) decides from the reported exit code alone, never the agent's judgement. |
 
+### Identity-aware API connection discovery (FIR-3290)
+
+For an API connection with `auth_config.on_behalf_of.enabled`,
+`APIConnectionResolver.ListForAgent` fetches the OpenAPI contract as the
+authenticated agent (`X-On-Behalf-Of: agent:<uuid>`) before building the tool
+list. The personalized contract is intersected with the connection's stored
+endpoint catalogue, so remote discovery may remove or relabel an operation but
+can never add one beyond the admin-authored ceiling. An operation marked
+`x-registry-granted: false` is omitted. A missing extension keeps the operation,
+preserving identity-blind APIs. The result is cached for one minute per
+connection version and agent. A fetch/parse/auth error drops the whole
+identity-aware connection from that list (fail closed); there is no fallback to
+the shared static snapshot. The existing Allow/Ask/Deny resolver still runs
+after this filter, and the call-time gate remains authoritative.
+
 ---
 
 ## What is OFF by default (and only this)

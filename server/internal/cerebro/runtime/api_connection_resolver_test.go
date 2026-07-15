@@ -242,3 +242,95 @@ func TestResolverNilSafe(t *testing.T) {
 		t.Fatalf("identity without an agent id must return nil")
 	}
 }
+
+func TestResolverPersonalizedDiscoveryFiltersGrantsAndKeepsAsk(t *testing.T) {
+	conn := resolverTestConns()[0]
+	conn.ID = "11111111-1111-4111-8111-111111111111"
+	conn.AuthConfig.OnBehalfOf = &connections.OnBehalfOfConfig{Enabled: true}
+	conn.EndpointPermissions = append(conn.EndpointPermissions,
+		connections.EndpointPermission{Path: "/not-configured", Methods: []string{"GET"}},
+	)
+	r := NewAPIConnectionResolver(
+		fakeConnLister{conns: []connections.Connection{conn}},
+		fakeEndpointPolicy{verdicts: map[string]toolpolicy.Setting{
+			"c GET /allow": toolpolicy.SettingAllow,
+			"c GET /ask":   toolpolicy.SettingAsk,
+			"c GET /deny":  toolpolicy.SettingAllow,
+		}},
+		fakeFlag{on: true}, slog.Default(),
+	)
+	var principal string
+	r.discover = func(_ context.Context, _ *http.Client, _ connections.Connection, gotPrincipal string) ([]connections.EndpointPermission, error) {
+		principal = gotPrincipal
+		granted, denied := true, false
+		return []connections.EndpointPermission{
+			{Path: "/allow", Methods: []string{"GET"}, Summary: "Allowed source", Granted: &granted},
+			{Path: "/ask", Methods: []string{"GET"}, Summary: "Ask source"},
+			{Path: "/deny", Methods: []string{"GET"}, Summary: "Denied source", Granted: &denied},
+			{Path: "/dynamic-only", Methods: []string{"GET"}, Summary: "Not configured", Granted: &granted},
+		}, nil
+	}
+
+	got := r.ListForAgent(context.Background(), resolverIdent())
+	if principal != "agent:03030303-0303-0303-0303-030303030303" {
+		t.Fatalf("principal = %q", principal)
+	}
+	if len(got) != 2 {
+		t.Fatalf("expected granted + identity-blind configured endpoints, got %d: %+v", len(got), got)
+	}
+	byName := map[string]APIConnectionToolVerdict{}
+	for _, tool := range got {
+		byName[tool.Tool.Name()] = tool
+	}
+	if !strings.HasPrefix(byName["c__get_allow"].Tool.Description(), "Allowed source.") {
+		t.Fatalf("dynamic summary missing: %q", byName["c__get_allow"].Tool.Description())
+	}
+	if byName["c__get_ask"].Verdict != toolpolicy.SettingAsk {
+		t.Fatalf("Ask verdict was not preserved: %+v", byName["c__get_ask"])
+	}
+	if _, ok := byName["c__get_deny"]; ok {
+		t.Fatal("explicitly ungranted endpoint must be dropped")
+	}
+	if _, ok := byName["c__get_dynamic_only"]; ok {
+		t.Fatal("endpoint absent from the admin catalogue must not be introduced")
+	}
+}
+
+func TestResolverPersonalizedDiscoveryErrorFailsClosed(t *testing.T) {
+	conn := resolverTestConns()[0]
+	conn.AuthConfig.OnBehalfOf = &connections.OnBehalfOfConfig{Enabled: true}
+	r := NewAPIConnectionResolver(
+		fakeConnLister{conns: []connections.Connection{conn}},
+		fakeEndpointPolicy{verdicts: map[string]toolpolicy.Setting{"c GET /allow": toolpolicy.SettingAllow}},
+		fakeFlag{on: true}, slog.Default(),
+	)
+	r.discover = func(context.Context, *http.Client, connections.Connection, string) ([]connections.EndpointPermission, error) {
+		return nil, errors.New("spec unavailable")
+	}
+	if got := r.ListForAgent(context.Background(), resolverIdent()); got != nil {
+		t.Fatalf("personalized discovery error must fail closed, got %d tools", len(got))
+	}
+}
+
+func TestResolverPersonalizedDiscoveryUsesShortCache(t *testing.T) {
+	conn := resolverTestConns()[0]
+	conn.ID = "11111111-1111-4111-8111-111111111111"
+	conn.AuthConfig.OnBehalfOf = &connections.OnBehalfOfConfig{Enabled: true}
+	r := NewAPIConnectionResolver(
+		fakeConnLister{conns: []connections.Connection{conn}},
+		fakeEndpointPolicy{verdicts: map[string]toolpolicy.Setting{"c GET /allow": toolpolicy.SettingAllow}},
+		fakeFlag{on: true}, slog.Default(),
+	)
+	calls := 0
+	r.discover = func(context.Context, *http.Client, connections.Connection, string) ([]connections.EndpointPermission, error) {
+		calls++
+		granted := true
+		return []connections.EndpointPermission{{Path: "/allow", Methods: []string{"GET"}, Granted: &granted}}, nil
+	}
+
+	_ = r.ListForAgent(context.Background(), resolverIdent())
+	_ = r.ListForAgent(context.Background(), resolverIdent())
+	if calls != 1 {
+		t.Fatalf("expected one personalized spec fetch inside the short cache window, got %d", calls)
+	}
+}
