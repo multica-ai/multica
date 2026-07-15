@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import {
   createMemoryRouter,
+  // eslint-disable-next-line no-restricted-imports -- MUL-4741 Phase 2: index redirect moves to the Coordinator; remove with §8.1
   Navigate,
   Outlet,
   useMatches,

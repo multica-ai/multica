@@ -27,12 +27,14 @@ export function useTabHistory() {
   const goBack = useCallback(() => {
     if (!router || historyIndex <= 0) return;
     popDirectionHints.set(router, "back");
+    // eslint-disable-next-line no-restricted-syntax -- MUL-4741 Phase 2: shell back/forward moves to the Coordinator (invariant 1); remove with §8.1
     router.navigate(-1);
   }, [router, historyIndex]);
 
   const goForward = useCallback(() => {
     if (!router || historyIndex >= historyLength - 1) return;
     popDirectionHints.set(router, "forward");
+    // eslint-disable-next-line no-restricted-syntax -- MUL-4741 Phase 2: shell back/forward moves to the Coordinator (invariant 1); remove with §8.1
     router.navigate(1);
   }, [router, historyIndex, historyLength]);
 

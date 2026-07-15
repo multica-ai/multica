@@ -1,4 +1,5 @@
 import { useMemo } from "react";
+// eslint-disable-next-line no-restricted-imports -- MUL-4741 Phase 2: error recovery moves to the Coordinator; remove with §8.1
 import { useLocation, useNavigate, useRouteError } from "react-router-dom";
 import { AlertTriangle, RotateCw, Send, X } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";

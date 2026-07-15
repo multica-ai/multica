@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+// eslint-disable-next-line no-restricted-imports -- MUL-4741 Phase 2: workspace redirect + login bounce move to the Coordinator; remove with §8.1
 import { Outlet, useNavigate, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { WorkspaceSlugProvider, paths } from "@multica/core/paths";
