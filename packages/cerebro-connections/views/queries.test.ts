@@ -97,3 +97,24 @@ describe("TestResultSchema — endpoint summary", () => {
     expect(parsed.endpoints?.[0]?.summary).toBeUndefined();
   });
 });
+
+describe("TestResultSchema — scope suggestions", () => {
+  it("parses advisory scopes returned by MCP discovery", () => {
+    const parsed = TestResultSchema.parse({
+      reachable: true,
+      tools: [{ name: "query_run" }, { name: "data_sources_list" }],
+      scope_suggestions: [{
+        tool: "query_run",
+        arg: "data_source_id",
+        options_source_tool: "data_sources_list",
+        label: "Data source",
+      }],
+    });
+
+    expect(parsed.scope_suggestions).toEqual([expect.objectContaining({
+      tool: "query_run",
+      arg: "data_source_id",
+      options_source_tool: "data_sources_list",
+    })]);
+  });
+});

@@ -39,6 +39,7 @@ import {
   useTestConnection,
   type TestResult,
 } from "../queries";
+import { acceptScopeSuggestion, pendingScopeSuggestions } from "../scope-suggestions";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -159,6 +160,11 @@ function ConnectionFormBody({
     for (const t of testResult?.tools ?? []) if (t.name) names.add(t.name);
     return [...names].sort();
   }, [existingConn?.tools, testResult?.tools]);
+
+  const scopeSuggestions = useMemo(
+    () => pendingScopeSuggestions(scopableArgs, testResult?.scope_suggestions ?? []),
+    [scopableArgs, testResult?.scope_suggestions],
+  );
 
   const testConn = useTestConnection(wsId ?? "");
 
@@ -840,6 +846,36 @@ function ConnectionFormBody({
                   Add
                 </Button>
               </div>
+
+              {scopeSuggestions.length > 0 && (
+                <div className="space-y-2 rounded-md border border-primary/30 bg-primary/5 p-3">
+                  <p className="text-xs font-medium">Suggested scopes from discovery</p>
+                  <p className="text-xs text-muted-foreground">
+                    Review each suggestion before adding it. Discovery never grants or saves a scope automatically.
+                  </p>
+                  {scopeSuggestions.map((scope) => (
+                    <div
+                      key={`${scope.tool}:${scope.arg}`}
+                      className="flex items-center justify-between gap-3 rounded border bg-background p-2"
+                    >
+                      <span className="min-w-0 text-xs">
+                        <span className="font-mono">{scope.tool} · {scope.arg}</span>
+                        <span className="text-muted-foreground"> from </span>
+                        <span className="font-mono">{scope.options_source_tool}</span>
+                      </span>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="h-7 shrink-0"
+                        onClick={() => setScopableArgs((prev) => acceptScopeSuggestion(prev, scope))}
+                      >
+                        Add scope
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              )}
 
               {scopableArgs.length === 0 ? (
                 <p className="text-xs text-muted-foreground italic">

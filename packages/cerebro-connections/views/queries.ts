@@ -134,6 +134,7 @@ export const TestResultSchema = z
     reachable: z.boolean(),
     status_code: z.number().optional(),
     tools: z.array(ToolInfoSchema).optional(),
+    scope_suggestions: z.array(ScopableArgSchema).optional(),
     endpoints: z.array(DiscoveredEndpointSchema).optional(),
     error: z.string().optional(),
   })

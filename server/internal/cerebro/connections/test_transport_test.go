@@ -108,6 +108,41 @@ func TestMCP_StreamableHTTP_SSEResponse(t *testing.T) {
 	}
 }
 
+// TestMCP_DiscoverySuggestsScopableArguments verifies discovery turns a
+// high-confidence ID argument + matching list tool into an admin-reviewable
+// ScopableArg suggestion. Discovery must not persist or grant it automatically.
+func TestMCP_DiscoverySuggestsScopableArguments(t *testing.T) {
+	body := []byte(`{"jsonrpc":"2.0","id":2,"result":{"tools":[` +
+		`{"name":"query_run","description":"Run a query","inputSchema":{"type":"object","properties":{"data_source_id":{"type":"string"},"limit":{"type":"integer"}}}},` +
+		`{"name":"data_sources_list","description":"List data sources","inputSchema":{"type":"object","properties":{}}},` +
+		`{"name":"unrelated_list","description":"List unrelated records","inputSchema":{"type":"object","properties":{}}}` +
+		`]}}`)
+
+	result := parseToolsResponse(body, http.StatusOK)
+	if len(result.ScopeSuggestions) != 1 {
+		t.Fatalf("expected one scope suggestion, got %+v", result.ScopeSuggestions)
+	}
+	want := ScopableArg{
+		Tool: "query_run", Arg: "data_source_id", OptionsSourceTool: "data_sources_list",
+		GroupBy: "folder", TagField: "tags", Label: "Data source",
+	}
+	if got := result.ScopeSuggestions[0]; got != want {
+		t.Fatalf("unexpected scope suggestion: got %+v want %+v", got, want)
+	}
+}
+
+func TestMCP_DiscoveryDoesNotGuessAmbiguousScopes(t *testing.T) {
+	body := []byte(`{"jsonrpc":"2.0","id":2,"result":{"tools":[` +
+		`{"name":"query_run","inputSchema":{"type":"object","properties":{"data_source_id":{"type":"string"}}}},` +
+		`{"name":"data_sources_list"},{"name":"list_data_sources"}` +
+		`]}}`)
+
+	result := parseToolsResponse(body, http.StatusOK)
+	if len(result.ScopeSuggestions) != 0 {
+		t.Fatalf("ambiguous options sources must not be suggested: %+v", result.ScopeSuggestions)
+	}
+}
+
 // --- Legacy HTTP+SSE MCP transport --------------------------------------------
 
 // newLegacySSEServer builds an httptest server speaking the deprecated

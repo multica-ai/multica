@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	neturl "net/url"
+	"slices"
 	"strings"
 	"time"
 )
@@ -30,16 +31,29 @@ type testConnectionRequest struct {
 }
 
 type testConnectionResult struct {
-	Reachable  bool                 `json:"reachable"`
-	StatusCode int                  `json:"status_code,omitempty"`
-	Tools      []toolInfo           `json:"tools,omitempty"`
-	Endpoints  []discoveredEndpoint `json:"endpoints,omitempty"`
-	Error      string               `json:"error,omitempty"`
+	Reachable  bool       `json:"reachable"`
+	StatusCode int        `json:"status_code,omitempty"`
+	Tools      []toolInfo `json:"tools,omitempty"`
+	// ScopeSuggestions are high-confidence ScopableArg candidates derived from
+	// MCP input schemas. They are advisory only: the admin must accept and save.
+	ScopeSuggestions []ScopableArg        `json:"scope_suggestions,omitempty"`
+	Endpoints        []discoveredEndpoint `json:"endpoints,omitempty"`
+	Error            string               `json:"error,omitempty"`
 }
 
 type toolInfo struct {
 	Name        string `json:"name"`
 	Description string `json:"description,omitempty"`
+}
+
+type mcpDiscoveredTool struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	InputSchema struct {
+		Properties map[string]struct {
+			Type string `json:"type"`
+		} `json:"properties"`
+	} `json:"inputSchema"`
 }
 
 func doTestConnection(ctx context.Context, req testConnectionRequest) testConnectionResult {
@@ -419,10 +433,7 @@ func resolveSSEEndpoint(baseURL, endpoint string) (string, error) {
 func parseToolsResponse(body []byte, statusCode int) testConnectionResult {
 	var rpc struct {
 		Result *struct {
-			Tools []struct {
-				Name        string `json:"name"`
-				Description string `json:"description"`
-			} `json:"tools"`
+			Tools []mcpDiscoveredTool `json:"tools"`
 		} `json:"result"`
 		Error *struct {
 			Message string `json:"message"`
@@ -441,7 +452,76 @@ func parseToolsResponse(body []byte, statusCode int) testConnectionResult {
 	for _, t := range rpc.Result.Tools {
 		tools = append(tools, toolInfo{Name: t.Name, Description: t.Description})
 	}
-	return testConnectionResult{Reachable: true, StatusCode: statusCode, Tools: tools}
+	return testConnectionResult{
+		Reachable: true, StatusCode: statusCode, Tools: tools,
+		ScopeSuggestions: suggestScopableArgs(rpc.Result.Tools),
+	}
+}
+
+// suggestScopableArgs deliberately uses a narrow convention so discovery does
+// not invent unsafe scopes: a string argument ending in _id is suggested only
+// when exactly one discovered list/search tool names the same entity.
+func suggestScopableArgs(discovered []mcpDiscoveredTool) []ScopableArg {
+	var suggestions []ScopableArg
+	for _, target := range discovered {
+		args := make([]string, 0, len(target.InputSchema.Properties))
+		for arg, schema := range target.InputSchema.Properties {
+			if schema.Type == "string" && strings.HasSuffix(strings.ToLower(arg), "_id") {
+				args = append(args, arg)
+			}
+		}
+		slices.Sort(args)
+		for _, arg := range args {
+			entity := strings.TrimSuffix(strings.ToLower(arg), "_id")
+			var matches []string
+			for _, source := range discovered {
+				if source.Name != target.Name && scopeSourceEntity(source.Name) == entity {
+					matches = append(matches, source.Name)
+				}
+			}
+			if len(matches) != 1 {
+				continue
+			}
+			suggestions = append(suggestions, ScopableArg{
+				Tool: target.Name, Arg: arg, OptionsSourceTool: matches[0],
+				GroupBy: "folder", TagField: "tags", Label: scopeLabel(entity),
+			})
+		}
+	}
+	return suggestions
+}
+
+func scopeSourceEntity(tool string) string {
+	parts := strings.FieldsFunc(strings.ToLower(tool), func(r rune) bool {
+		return r == '_' || r == '-' || r == '.' || r == '/'
+	})
+	if len(parts) < 2 {
+		return ""
+	}
+	isVerb := func(s string) bool { return s == "list" || s == "search" || s == "browse" }
+	if isVerb(parts[0]) {
+		parts = parts[1:]
+	} else if isVerb(parts[len(parts)-1]) {
+		parts = parts[:len(parts)-1]
+	} else {
+		return ""
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	last := len(parts) - 1
+	parts[last] = strings.TrimSuffix(parts[last], "s")
+	return strings.Join(parts, "_")
+}
+
+func scopeLabel(entity string) string {
+	parts := strings.Split(entity, "_")
+	for i := range parts {
+		if i == 0 && parts[i] != "" {
+			parts[i] = strings.ToUpper(parts[i][:1]) + parts[i][1:]
+		}
+	}
+	return strings.Join(parts, " ")
 }
 
 func testAPIConnection(ctx context.Context, client *http.Client, url string, auth AuthConfig, specURL, specContent string) testConnectionResult {
