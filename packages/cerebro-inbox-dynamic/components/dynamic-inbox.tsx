@@ -107,7 +107,7 @@ import { SecretarySection, secretaryEntryKey } from "./secretary-section";
 import { NotesInboxBox, NoteInboxBox, NoteInboxDetail } from "@multica/cerebro-notes/views";
 import { SkillChangeInboxDetail } from "@multica/cerebro-skill-ownership/views";
 import { opensInDynamicInboxPane } from "../notification-routing";
-import { AddToRoundAction, ConnectedRoundManager, RoundsBlock, useRoundStatuses, useStartRound } from "@multica/cerebro-rounds";
+import { AddToRoundAction, ConnectedRoundManager, RoundsBlock, roundExcludedIssueIds, useRoundStatuses, useStartRound } from "@multica/cerebro-rounds";
 
 function replaceTab(layout: InboxLayout, tabId: string, fn: (t: InboxTabConfig) => InboxTabConfig): InboxLayout {
   return { ...layout, tabs: layout.tabs.map((t) => (t.id === tabId ? fn(t) : t)) };
@@ -189,11 +189,8 @@ export function DynamicInbox() {
   const roundsEnabled = useFeatureFlag("cerebro_inbox_rounds");
   const { data: roundStatuses = [] } = useRoundStatuses(wsId);
   const startRound = useStartRound(wsId);
-  const roundIssueIds = useMemo(() => [...new Set(roundStatuses.flatMap((status) => status.members.map((member) => member.issue_id)))], [roundStatuses]);
-  const activeRoundIssueIds = useMemo(
-    () => new Set(roundStatuses.flatMap((status) => status.active_cycle?.items.map((item) => item.issue_id) ?? [])),
-    [roundStatuses],
-  );
+  const roundExcludedIds = useMemo(() => roundExcludedIssueIds(roundStatuses), [roundStatuses]);
+  const roundIssueIds = useMemo(() => [...roundExcludedIds], [roundExcludedIds]);
   const roundMessageIssueIds = useMemo(
     () => [
       ...new Set(
@@ -1330,7 +1327,7 @@ export function DynamicInbox() {
                           classicControls={section.kind === "all" ? classicControls : undefined}
                           selectedKey={selectedKey}
                           query={query}
-                          excludedIssueIdsFromAll={activeRoundIssueIds}
+                          excludedIssueIdsFromAll={roundExcludedIds}
                           dragHandle={handle}
                           searchSlot={
                             section.id === inboxBlockId ? (

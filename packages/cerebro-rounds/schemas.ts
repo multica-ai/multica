@@ -48,3 +48,15 @@ export function roundMembershipLabel(statuses: RoundStatus[], issueId: string): 
   const status = statuses.find((candidate) => candidate.members.some((member) => member.issue_id === issueId));
   return status ? `In ${status.round.name}` : null;
 }
+
+/**
+ * Issues the "All messages" box hides because they live in a Round.
+ *
+ * Membership is the source of truth, NOT active_cycle: a message only enters
+ * the cycle snapshot when Play runs and it is unread and not already running,
+ * so filtering on the cycle left every other member showing in both places at
+ * once (FIR-3293).
+ */
+export function roundExcludedIssueIds(statuses: RoundStatus[]): Set<string> {
+  return new Set(statuses.flatMap((status) => status.members.map((member) => member.issue_id)));
+}
