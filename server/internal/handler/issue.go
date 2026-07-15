@@ -836,15 +836,27 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 
 	// open_only=true returns all non-done/cancelled issues (no limit).
 	if r.URL.Query().Get("open_only") == "true" {
+		// Serialize the parsed AND-of-ORs groups into the single jsonb param
+		// the static query unrolls (see properties_filter in ListOpenIssues).
+		var openPropertiesFilter []byte
+		if len(propertiesFilter) > 0 {
+			marshaled, marshalErr := json.Marshal(propertiesFilter)
+			if marshalErr != nil {
+				writeError(w, http.StatusInternalServerError, "failed to list issues")
+				return
+			}
+			openPropertiesFilter = marshaled
+		}
 		issues, err := h.Queries.ListOpenIssues(ctx, db.ListOpenIssuesParams{
-			WorkspaceID:    wsUUID,
-			Priority:       priorityFilter,
-			AssigneeID:     assigneeFilter,
-			AssigneeIds:    assigneeIdsFilter,
-			CreatorID:      creatorFilter,
-			ProjectID:      projectFilter,
-			InvolvesUserID: involvesUserFilter,
-			MetadataFilter: metadataFilter,
+			WorkspaceID:      wsUUID,
+			Priority:         priorityFilter,
+			AssigneeID:       assigneeFilter,
+			AssigneeIds:      assigneeIdsFilter,
+			CreatorID:        creatorFilter,
+			ProjectID:        projectFilter,
+			InvolvesUserID:   involvesUserFilter,
+			MetadataFilter:   metadataFilter,
+			PropertiesFilter: openPropertiesFilter,
 		})
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to list issues")

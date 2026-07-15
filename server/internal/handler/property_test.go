@@ -516,6 +516,23 @@ func TestListIssuesPropertyFilterAndSort(t *testing.T) {
 		t.Fatalf("AND semantics failed: target matched with contradictory checkbox filter")
 	}
 
+	// The open_only branch honors the same filter via the static
+	// properties_filter param in ListOpenIssues (clean-room review: it used
+	// to be parsed and then silently dropped on this path).
+	openGot := listIssues(filterQuery(sel.ID, hitID) + "&open_only=true")
+	if _, present := ids(openGot)[target]; !present {
+		t.Fatalf("open_only ignored the properties filter: target missing")
+	}
+	for _, issue := range openGot {
+		if issue.Properties[sel.ID] != hitID {
+			t.Fatalf("open_only properties filter returned non-matching issue %s", issue.ID)
+		}
+	}
+	openBuf, _ := json.Marshal(map[string][]string{sel.ID: {hitID}, box.ID: {"false"}})
+	if _, present := ids(listIssues("?open_only=true&properties=" + url.QueryEscape(string(openBuf))))[target]; present {
+		t.Fatalf("open_only AND semantics failed: target matched contradictory filter")
+	}
+
 	// Property sort: asc = low before high, valueless after both (missing last).
 	sorted := listIssues("?limit=200&sort=property:" + num.ID + "&direction=asc")
 	pos := ids(sorted)
