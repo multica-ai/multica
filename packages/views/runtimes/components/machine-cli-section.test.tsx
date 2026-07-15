@@ -10,7 +10,11 @@ const mockUpdateSection = vi.hoisted(() => vi.fn());
 vi.mock("./update-section", () => ({
   UpdateSection: (props: Record<string, unknown>) => {
     mockUpdateSection(props);
-    return <button type="button">Update</button>;
+    return props.runtimeId ? (
+      <button type="button">Update</button>
+    ) : (
+      <span>CLI status</span>
+    );
   },
 }));
 
@@ -38,6 +42,11 @@ function runtime(overrides: Partial<AgentRuntime> = {}): AgentRuntime {
 }
 
 function machine(runtimes: AgentRuntime[]): RuntimeMachine {
+  const launchedBy = runtimes
+    .filter((item) => item.status === "online")
+    .map((item) => item.metadata?.launched_by)
+    .find((value): value is string => typeof value === "string");
+
   return {
     id: "local:daemon-1",
     daemonId: "daemon-1",
@@ -45,6 +54,7 @@ function machine(runtimes: AgentRuntime[]): RuntimeMachine {
     subtitle: null,
     deviceInfo: "dev.local",
     cliVersion: "0.3.17",
+    launchedBy: launchedBy ?? null,
     mode: "local",
     section: "remote",
     isCurrent: false,
@@ -92,18 +102,31 @@ describe("MachineCliSection", () => {
     });
   });
 
-  it("shows read-only machine CLI version when the viewer owns no runtime", () => {
+  it("shows read-only machine CLI status when the viewer owns no runtime", () => {
     render(
       <MachineCliSection
-        machine={machine([runtime({ owner_id: "user-2" })])}
+        machine={machine([
+          runtime({
+            owner_id: "user-2",
+            metadata: {
+              cli_version: "0.3.17",
+              launched_by: "desktop",
+            },
+          }),
+        ])}
         currentUserId="user-1"
       />,
     );
 
-    expect(screen.getByText("CLI 0.3.17")).toBeInTheDocument();
+    expect(screen.getByText("CLI status")).toBeInTheDocument();
     expect(
       screen.queryByRole("button", { name: "Update" }),
     ).not.toBeInTheDocument();
-    expect(mockUpdateSection).not.toHaveBeenCalled();
+    expect(mockUpdateSection).toHaveBeenCalledWith({
+      runtimeId: null,
+      currentVersion: "0.3.17",
+      isOnline: false,
+      launchedBy: "desktop",
+    });
   });
 });

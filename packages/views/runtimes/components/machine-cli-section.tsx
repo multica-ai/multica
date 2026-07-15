@@ -2,11 +2,6 @@ import type { AgentRuntime } from "@multica/core/types";
 import type { RuntimeMachine } from "./runtime-machines";
 import { UpdateSection } from "./update-section";
 
-function launchedBy(runtime: AgentRuntime): string | null {
-  const value = runtime.metadata?.launched_by;
-  return typeof value === "string" && value ? value : null;
-}
-
 /**
  * Pick one viewer-owned runtime as the command channel for a machine-wide
  * daemon update. An online runtime wins so the daemon can receive the request
@@ -34,18 +29,30 @@ export function MachineCliSection({
 }) {
   const updateRuntime = machineUpdateRuntime(machine, currentUserId);
 
-  if (!updateRuntime) {
+  if (machine.mode !== "local") {
     return machine.cliVersion ? (
       <span className="font-mono">CLI {machine.cliVersion}</span>
     ) : null;
   }
 
+  // A viewer's ability to send an update command must not gate the
+  // machine-level version and manager information. The only local machine
+  // without anything to report is Desktop's synthesized stopped-daemon row.
+  if (
+    !updateRuntime &&
+    machine.runtimes.length === 0 &&
+    !machine.cliVersion &&
+    !machine.launchedBy
+  ) {
+    return null;
+  }
+
   return (
     <UpdateSection
-      runtimeId={updateRuntime.id}
+      runtimeId={updateRuntime?.id ?? null}
       currentVersion={machine.cliVersion}
-      isOnline={updateRuntime.status === "online"}
-      launchedBy={launchedBy(updateRuntime)}
+      isOnline={updateRuntime?.status === "online"}
+      launchedBy={machine.launchedBy}
     />
   );
 }

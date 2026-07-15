@@ -64,7 +64,8 @@ const statusConfig: Record<
 };
 
 interface UpdateSectionProps {
-  runtimeId: string;
+  /** Null for a read-only viewer who cannot use a runtime as the command channel. */
+  runtimeId: string | null;
   currentVersion: string | null;
   isOnline: boolean;
   /**
@@ -128,7 +129,7 @@ export function UpdateSection({
   }, [currentVersion, markCompleted, targetVersion, updating]);
 
   const handleUpdate = async () => {
-    if (!latestVersion) return;
+    if (!latestVersion || !runtimeId) return;
     cleanup();
     setUpdating(true);
     setTargetVersion(latestVersion);
@@ -212,7 +213,7 @@ export function UpdateSection({
               </>
             )}
 
-            {hasUpdate && isOnline && !status && (
+            {hasUpdate && runtimeId && isOnline && !status && (
               <Button
                 variant="outline"
                 size="xs"
