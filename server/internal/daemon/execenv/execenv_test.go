@@ -2037,15 +2037,11 @@ func TestPrepareCodexHomeSeedsFromShared(t *testing.T) {
 		t.Errorf("plugin cache skill content = %q", data)
 	}
 
-	// Marketplace checkouts are derived plugin state just like plugins/cache;
-	// sharing them avoids cloning every configured marketplace for every task.
-	marketplaceManifest := filepath.Join(codexHome, ".tmp", "marketplaces", "test-marketplace", "manifest.json")
-	data, err = os.ReadFile(marketplaceManifest)
-	if err != nil {
-		t.Fatalf("marketplace cache not exposed: %v", err)
-	}
-	if string(data) != `{"name":"test"}` {
-		t.Errorf("marketplace manifest content = %q", data)
+	// Marketplace checkouts contain executable plugin code and must not be
+	// linked into a task home where one task could mutate another task's state.
+	marketplacePath := filepath.Join(codexHome, ".tmp", "marketplaces")
+	if _, err := os.Lstat(marketplacePath); !os.IsNotExist(err) {
+		t.Fatalf("shared marketplace cache exposed in task home: %v", err)
 	}
 }
 
@@ -2177,11 +2173,8 @@ func TestPrepareCodexHomeSkipsMissingFiles(t *testing.T) {
 	if !entryNames["plugins"] {
 		t.Error("expected plugins directory for plugin cache exposure")
 	}
-	if !entryNames[".tmp"] {
-		t.Error("expected .tmp directory for marketplace cache exposure")
-	}
 	for name := range entryNames {
-		if name != "sessions" && name != "config.toml" && name != "plugins" && name != ".tmp" {
+		if name != "sessions" && name != "config.toml" && name != "plugins" {
 			t.Errorf("unexpected entry: %s", name)
 		}
 	}
@@ -2200,9 +2193,6 @@ func TestPrepareCodexHomeSkipsMissingFiles(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(codexHome, "plugins", "cache")); err != nil {
 		t.Fatalf("missing shared plugin cache exposure should still be tolerated and created: %v", err)
-	}
-	if _, err := os.Stat(filepath.Join(codexHome, ".tmp", "marketplaces")); err != nil {
-		t.Fatalf("missing shared marketplace cache exposure should still be tolerated and created: %v", err)
 	}
 }
 
@@ -2789,7 +2779,7 @@ func TestReuseRestoresCodexHome(t *testing.T) {
 	}
 }
 
-func TestReuseRestoresCodexStartupCaches(t *testing.T) {
+func TestReuseRestoresCodexPluginCache(t *testing.T) {
 	// Cannot use t.Parallel() with t.Setenv.
 
 	sharedHome := t.TempDir()
@@ -2799,13 +2789,6 @@ func TestReuseRestoresCodexStartupCaches(t *testing.T) {
 	}
 	if err := os.WriteFile(filepath.Join(sharedPluginCache, "superpowers", "SKILL.md"), []byte("Use superpowers."), 0o644); err != nil {
 		t.Fatalf("write shared plugin skill: %v", err)
-	}
-	sharedMarketplace := filepath.Join(sharedHome, ".tmp", "marketplaces", "test-marketplace")
-	if err := os.MkdirAll(sharedMarketplace, 0o755); err != nil {
-		t.Fatalf("create shared marketplace cache: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(sharedMarketplace, "manifest.json"), []byte(`{"name":"test"}`), 0o644); err != nil {
-		t.Fatalf("write shared marketplace manifest: %v", err)
 	}
 	t.Setenv("CODEX_HOME", sharedHome)
 
@@ -2826,9 +2809,6 @@ func TestReuseRestoresCodexStartupCaches(t *testing.T) {
 	if err := os.RemoveAll(filepath.Join(env.CodexHome, "plugins")); err != nil {
 		t.Fatalf("remove codex plugins dir: %v", err)
 	}
-	if err := os.RemoveAll(filepath.Join(env.CodexHome, ".tmp")); err != nil {
-		t.Fatalf("remove codex marketplace dir: %v", err)
-	}
 
 	reused := Reuse(ReuseParams{WorkDir: env.WorkDir, Provider: "codex", Task: TaskContextForEnv{IssueID: "reuse-plugin-test"}}, testLogger())
 	if reused == nil {
@@ -2842,12 +2822,92 @@ func TestReuseRestoresCodexStartupCaches(t *testing.T) {
 	if string(data) != "Use superpowers." {
 		t.Errorf("reused plugin cache skill content = %q", data)
 	}
-	data, err = os.ReadFile(filepath.Join(reused.CodexHome, ".tmp", "marketplaces", "test-marketplace", "manifest.json"))
+}
+
+func TestReusePreservesTaskLocalModelsCacheWhenSharedMissing(t *testing.T) {
+	// Cannot use t.Parallel() with t.Setenv.
+
+	sharedHome := t.TempDir()
+	t.Setenv("CODEX_HOME", sharedHome)
+
+	env, err := Prepare(PrepareParams{
+		WorkspacesRoot: t.TempDir(),
+		WorkspaceID:    "ws-codex-model-cache-missing",
+		TaskID:         "b5f6a7b8-c9d0-1234-efab-567890123456",
+		AgentName:      "Codex Agent",
+		Provider:       "codex",
+		Task:           TaskContextForEnv{IssueID: "reuse-model-cache-missing"},
+	}, testLogger())
 	if err != nil {
-		t.Fatalf("reused marketplace cache not restored: %v", err)
+		t.Fatalf("Prepare failed: %v", err)
 	}
-	if string(data) != `{"name":"test"}` {
-		t.Errorf("reused marketplace manifest content = %q", data)
+	defer env.Cleanup(true)
+
+	modelsCache := filepath.Join(env.CodexHome, "models_cache.json")
+	if err := os.WriteFile(modelsCache, []byte(`{"source":"task"}`), 0o644); err != nil {
+		t.Fatalf("write task-local models cache: %v", err)
+	}
+
+	reused := Reuse(ReuseParams{
+		WorkDir:  env.WorkDir,
+		Provider: "codex",
+		Task:     TaskContextForEnv{IssueID: "reuse-model-cache-missing"},
+	}, testLogger())
+	if reused == nil {
+		t.Fatal("Reuse returned nil")
+	}
+
+	data, err := os.ReadFile(filepath.Join(reused.CodexHome, "models_cache.json"))
+	if err != nil {
+		t.Fatalf("task-local models cache removed on reuse: %v", err)
+	}
+	if string(data) != `{"source":"task"}` {
+		t.Fatalf("task-local models cache = %q, want task-generated cache", data)
+	}
+}
+
+func TestReusePreservesTaskLocalModelsCacheOverStaleSharedSnapshot(t *testing.T) {
+	// Cannot use t.Parallel() with t.Setenv.
+
+	sharedHome := t.TempDir()
+	if err := os.WriteFile(filepath.Join(sharedHome, "models_cache.json"), []byte(`{"source":"shared"}`), 0o644); err != nil {
+		t.Fatalf("write shared models cache: %v", err)
+	}
+	t.Setenv("CODEX_HOME", sharedHome)
+
+	env, err := Prepare(PrepareParams{
+		WorkspacesRoot: t.TempDir(),
+		WorkspaceID:    "ws-codex-model-cache-stale",
+		TaskID:         "c5f6a7b8-c9d0-1234-efab-567890123456",
+		AgentName:      "Codex Agent",
+		Provider:       "codex",
+		Task:           TaskContextForEnv{IssueID: "reuse-model-cache-stale"},
+	}, testLogger())
+	if err != nil {
+		t.Fatalf("Prepare failed: %v", err)
+	}
+	defer env.Cleanup(true)
+
+	modelsCache := filepath.Join(env.CodexHome, "models_cache.json")
+	if err := os.WriteFile(modelsCache, []byte(`{"source":"task"}`), 0o644); err != nil {
+		t.Fatalf("refresh task-local models cache: %v", err)
+	}
+
+	reused := Reuse(ReuseParams{
+		WorkDir:  env.WorkDir,
+		Provider: "codex",
+		Task:     TaskContextForEnv{IssueID: "reuse-model-cache-stale"},
+	}, testLogger())
+	if reused == nil {
+		t.Fatal("Reuse returned nil")
+	}
+
+	data, err := os.ReadFile(filepath.Join(reused.CodexHome, "models_cache.json"))
+	if err != nil {
+		t.Fatalf("read reused task-local models cache: %v", err)
+	}
+	if string(data) != `{"source":"task"}` {
+		t.Fatalf("task-local models cache = %q, want refreshed task cache", data)
 	}
 }
 

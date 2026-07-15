@@ -27,6 +27,13 @@ var codexCopiedFiles = []string{
 	"config.json",
 	"config.toml",
 	"instructions.md",
+}
+
+// Files to seed once from the shared ~/.codex/ into the per-task CODEX_HOME.
+// Codex may refresh these task-local snapshots. Reuse must preserve that newer
+// state instead of replacing it with a stale shared copy or deleting it when
+// the shared source is absent.
+var codexSeededFiles = []string{
 	"models_cache.json",
 }
 
@@ -115,6 +122,13 @@ func prepareCodexHomeWithOpts(codexHome string, opts CodexHomeOptions, logger *s
 			logger.Warn("execenv: codex-home sync failed", "file", name, "error", err)
 		}
 	}
+	for _, name := range codexSeededFiles {
+		src := filepath.Join(sharedHome, name)
+		dst := filepath.Join(codexHome, name)
+		if err := seedCopiedFile(src, dst); err != nil {
+			logger.Warn("execenv: codex-home seed failed", "file", name, "error", err)
+		}
+	}
 
 	// Drop `[[skills.config]]` entries inherited from the user's
 	// ~/.codex/config.toml. Codex Desktop writes plugin-backed skills with a
@@ -132,9 +146,6 @@ func prepareCodexHomeWithOpts(codexHome string, opts CodexHomeOptions, logger *s
 
 	if err := exposeSharedCodexPluginCache(codexHome, sharedHome); err != nil {
 		logger.Warn("execenv: codex-home plugin cache exposure failed", "error", err)
-	}
-	if err := exposeSharedCodexMarketplaceCache(codexHome, sharedHome); err != nil {
-		logger.Warn("execenv: codex-home marketplace cache exposure failed", "error", err)
 	}
 
 	// Write a daemon-managed sandbox block into config.toml. On macOS we may
@@ -746,24 +757,13 @@ func resolveCodexConfigPath(configPath, sharedHome string) (string, error) {
 }
 
 func exposeSharedCodexPluginCache(codexHome, sharedHome string) error {
-	return exposeSharedCodexDir(codexHome, sharedHome, filepath.Join("plugins", "cache"), "plugin cache")
-}
-
-func exposeSharedCodexMarketplaceCache(codexHome, sharedHome string) error {
-	return exposeSharedCodexDir(codexHome, sharedHome, filepath.Join(".tmp", "marketplaces"), "marketplace cache")
-}
-
-// exposeSharedCodexDir links derived, user-scoped Codex state into an isolated
-// task home. Session and memory state stay task/issue-local; only regenerable
-// caches use this path so a fresh task does not repeat global initialization.
-func exposeSharedCodexDir(codexHome, sharedHome, relativePath, label string) error {
-	src := filepath.Join(sharedHome, relativePath)
-	dst := filepath.Join(codexHome, relativePath)
+	src := filepath.Join(sharedHome, "plugins", "cache")
+	dst := filepath.Join(codexHome, "plugins", "cache")
 	if err := os.MkdirAll(src, 0o755); err != nil {
-		return fmt.Errorf("create shared %s dir: %w", label, err)
+		return fmt.Errorf("create shared plugin cache dir: %w", err)
 	}
 	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
-		return fmt.Errorf("create codex %s parent: %w", label, err)
+		return fmt.Errorf("create codex plugin dir: %w", err)
 	}
 
 	if fi, err := os.Lstat(dst); err == nil {
@@ -773,17 +773,17 @@ func exposeSharedCodexDir(codexHome, sharedHome, relativePath, label string) err
 				return nil
 			}
 			if err := os.Remove(dst); err != nil {
-				return fmt.Errorf("remove stale %s link: %w", label, err)
+				return fmt.Errorf("remove stale plugin cache link: %w", err)
 			}
 		} else {
 			if err := os.RemoveAll(dst); err != nil {
-				return fmt.Errorf("remove stale %s path: %w", label, err)
+				return fmt.Errorf("remove stale plugin cache path: %w", err)
 			}
 		}
 	}
 
 	if err := createDirLink(src, dst); err != nil {
-		return fmt.Errorf("expose shared %s: %w", label, err)
+		return fmt.Errorf("expose shared plugin cache: %w", err)
 	}
 	return nil
 }
@@ -890,6 +890,31 @@ func syncCopiedFile(src, dst string) error {
 
 	if srcMissing {
 		return nil
+	}
+	return copyFile(src, dst)
+}
+
+// seedCopiedFile copies src only when dst has no task-local regular file.
+// Unlike syncCopiedFile, it never overwrites or removes a cache refreshed by a
+// prior run. Non-regular destinations are removed defensively so a reused task
+// cannot turn the cache path into a link outside its isolated CODEX_HOME.
+func seedCopiedFile(src, dst string) error {
+	if fi, err := os.Lstat(dst); err == nil {
+		if fi.Mode().IsRegular() {
+			return nil
+		}
+		if err := os.RemoveAll(dst); err != nil {
+			return fmt.Errorf("remove non-regular dst %s: %w", dst, err)
+		}
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("stat dst %s: %w", dst, err)
+	}
+
+	if _, err := os.Stat(src); err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("stat src %s: %w", src, err)
 	}
 	return copyFile(src, dst)
 }
