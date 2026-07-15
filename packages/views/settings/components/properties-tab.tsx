@@ -11,7 +11,6 @@ import {
   Plus,
   Search,
   SlidersHorizontal,
-  SmilePlus,
   X,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -30,7 +29,6 @@ import type {
 } from "@multica/core/types";
 import { ISSUE_PROPERTY_TYPES } from "@multica/core/types";
 import { Button } from "@multica/ui/components/ui/button";
-import { EmojiPicker } from "@multica/ui/components/common/emoji-picker";
 import { Badge } from "@multica/ui/components/ui/badge";
 import { Input } from "@multica/ui/components/ui/input";
 import { Textarea } from "@multica/ui/components/ui/textarea";
@@ -73,7 +71,11 @@ import {
   PopoverTrigger,
 } from "@multica/ui/components/ui/popover";
 import { ColorPicker, COLOR_PICKER_PRESETS } from "../../common/color-picker";
-import { PropertyIcon } from "../../common/property-icon";
+import {
+  PropertyIcon,
+  PropertyIconGlyph,
+  PropertyIconPicker,
+} from "../../common/property-icon";
 import { useT } from "../../i18n";
 import { SettingsTab } from "./settings-layout";
 
@@ -469,34 +471,28 @@ function PropertyEditorDialog({
                       className="w-full px-0 text-lg"
                       aria-label={t(($) => $.properties.editor.choose_icon)}
                     >
-                      {draft.icon || <SmilePlus className="size-4 text-muted-foreground" />}
+                      {draft.icon ? (
+                        <PropertyIconGlyph icon={draft.icon} />
+                      ) : (
+                        <SlidersHorizontal className="size-4 text-muted-foreground" />
+                      )}
                     </Button>
                   }
                 />
-                <PopoverContent align="start" className="w-auto p-0">
-                  <EmojiPicker
+                <PopoverContent align="start" className="w-auto p-2">
+                  <PropertyIconPicker
+                    value={draft.icon}
+                    label={t(($) => $.properties.editor.choose_icon)}
+                    removeLabel={t(($) => $.properties.editor.remove_icon)}
                     onSelect={(icon) => {
                       setDraft((current) => ({ ...current, icon }));
                       setIconPickerOpen(false);
                     }}
+                    onRemove={() => {
+                      setDraft((current) => ({ ...current, icon: "" }));
+                      setIconPickerOpen(false);
+                    }}
                   />
-                  {draft.icon && (
-                    <div className="border-t border-surface-border p-1">
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        className="w-full justify-start text-muted-foreground"
-                        onClick={() => {
-                          setDraft((current) => ({ ...current, icon: "" }));
-                          setIconPickerOpen(false);
-                        }}
-                      >
-                        <X className="size-4" />
-                        {t(($) => $.properties.editor.remove_icon)}
-                      </Button>
-                    </div>
-                  )}
                 </PopoverContent>
               </Popover>
             </div>

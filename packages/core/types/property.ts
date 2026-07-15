@@ -49,7 +49,7 @@ export interface IssueProperty {
   /** Lenient string: newer servers may ship types this client doesn't know. */
   type: string;
   description?: string;
-  /** Optional emoji icon; absent on backends predating icon support. */
+  /** Optional catalog icon key; absent on backends predating icon support. */
   icon?: string;
   config: IssuePropertyConfig;
   position: number;

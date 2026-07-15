@@ -153,7 +153,7 @@ describe("IssuePropertySchema (via ListPropertiesResponseSchema)", () => {
     name: "Severity",
     type: "select",
     description: "",
-    icon: "🚨",
+    icon: "flag",
     config: { options: [{ id: "opt-1", name: "Critical", color: "#ef4444" }] },
     position: 1,
     archived: false,
@@ -166,7 +166,7 @@ describe("IssuePropertySchema (via ListPropertiesResponseSchema)", () => {
   it("parses a full definition", () => {
     const parsed = ListPropertiesResponseSchema.parse({ properties: [baseProperty], total: 1 });
     expect(parsed.properties[0]?.config.options?.[0]?.name).toBe("Critical");
-    expect(parsed.properties[0]?.icon).toBe("🚨");
+    expect(parsed.properties[0]?.icon).toBe("flag");
   });
 
   it("survives a malformed response by defaulting the list", () => {

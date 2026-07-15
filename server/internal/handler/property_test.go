@@ -86,13 +86,13 @@ func TestPropertyDefinitionCRUD(t *testing.T) {
 		"name":        "Severity",
 		"type":        "select",
 		"description": "How bad it is",
-		"icon":        "🚨",
+		"icon":        "flag",
 		"config": map[string]any{"options": []map[string]any{
 			{"name": "Critical", "color": "EF4444"},
 			{"name": "Minor", "color": "#6b7280"},
 		}},
 	})
-	if created.Type != "select" || created.Icon != "🚨" || len(created.Config.Options) != 2 {
+	if created.Type != "select" || created.Icon != "flag" || len(created.Config.Options) != 2 {
 		t.Fatalf("unexpected created property: %+v", created)
 	}
 	// Server assigns option ids and normalizes colors to lowercase #rrggbb.
@@ -119,7 +119,7 @@ func TestPropertyDefinitionCRUD(t *testing.T) {
 	w = httptest.NewRecorder()
 	req = newRequest("PATCH", "/api/properties/"+created.ID, map[string]any{
 		"name": "Sev",
-		"icon": "⚠️",
+		"icon": "shield",
 		"config": map[string]any{"options": []map[string]any{
 			{"id": keepID, "name": "Blocker", "color": "#ef4444"},
 			{"name": "Trivial", "color": "#a1a1aa"},
@@ -132,7 +132,7 @@ func TestPropertyDefinitionCRUD(t *testing.T) {
 	}
 	var updated PropertyResponse
 	json.NewDecoder(w.Body).Decode(&updated)
-	if updated.Name != "Sev" || updated.Icon != "⚠️" || updated.Config.Options[0].ID != keepID || updated.Config.Options[0].Name != "Blocker" {
+	if updated.Name != "Sev" || updated.Icon != "shield" || updated.Config.Options[0].ID != keepID || updated.Config.Options[0].Name != "Blocker" {
 		t.Fatalf("option id not preserved on update: %+v", updated.Config.Options)
 	}
 
@@ -196,6 +196,8 @@ func TestPropertyDefinitionValidation(t *testing.T) {
 		{"invalid type", map[string]any{"name": "X" + uuid.NewString()[:8], "type": "formula"}, "invalid type"},
 		{"icon too long", map[string]any{"name": "X" + uuid.NewString()[:8], "type": "text", "icon": strings.Repeat("x", maxPropertyIconLen+1)}, "icon must be"},
 		{"icon control character", map[string]any{"name": "X" + uuid.NewString()[:8], "type": "text", "icon": "\t"}, "icon cannot contain"},
+		{"emoji icon", map[string]any{"name": "X" + uuid.NewString()[:8], "type": "text", "icon": "🚨"}, "supported icon key"},
+		{"unknown icon", map[string]any{"name": "X" + uuid.NewString()[:8], "type": "text", "icon": "not-an-icon"}, "supported icon key"},
 		{"options on text", map[string]any{"name": "X" + uuid.NewString()[:8], "type": "text",
 			"config": map[string]any{"options": []map[string]any{{"name": "a", "color": "#000000"}}}}, "does not accept options"},
 		{"select without options", map[string]any{"name": "X" + uuid.NewString()[:8], "type": "select"}, "at least one option"},

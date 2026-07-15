@@ -48,6 +48,20 @@ const (
 
 var validPropertyTypes = []string{"text", "number", "select", "multi_select", "date", "checkbox", "url"}
 
+// Property icons use stable catalog keys that the Web client maps to Lucide
+// glyphs. Keeping this allowlist at the API boundary prevents arbitrary text
+// (including emoji) from leaking into every issue surface that renders icons.
+var validPropertyIcons = map[string]struct{}{
+	"circle-dot": {}, "signal-high": {}, "user-round": {}, "folder-kanban": {},
+	"calendar-days": {}, "tag": {}, "milestone": {}, "flag": {}, "bookmark": {},
+	"star": {}, "target": {}, "shield": {}, "bug": {}, "zap": {}, "rocket": {},
+	"sparkles": {}, "lightbulb": {}, "globe-2": {}, "link": {}, "hash": {},
+	"list-checks": {}, "circle-check": {}, "clock-3": {}, "briefcase-business": {},
+	"layers-3": {}, "gauge": {}, "database": {}, "code-2": {}, "palette": {},
+	"megaphone": {}, "map-pin": {}, "package": {}, "wrench": {}, "heart": {},
+	"circle-alert": {}, "lock-keyhole": {},
+}
+
 // errClientRejected marks lock-closure failures already translated to an
 // HTTP status by the caller-side fail() capture.
 var errClientRejected = errors.New("client rejected")
@@ -194,6 +208,12 @@ func validatePropertyIcon(raw string) (string, error) {
 	icon := strings.TrimSpace(raw)
 	if utf8.RuneCountInString(icon) > maxPropertyIconLen {
 		return "", fmt.Errorf("icon must be %d characters or fewer", maxPropertyIconLen)
+	}
+	if icon == "" {
+		return "", nil
+	}
+	if _, ok := validPropertyIcons[icon]; !ok {
+		return "", errors.New("icon must be a supported icon key")
 	}
 	return icon, nil
 }
