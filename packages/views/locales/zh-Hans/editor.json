@@ -79,6 +79,10 @@
   "file_card": {
     "uploading": "正在上传 {{filename}}"
   },
+  "upload": {
+    "failed": "{{filename}} 上传失败：{{reason}}",
+    "in_progress": "上传中…"
+  },
   "title_editor": {
     "title_aria_label": "标题"
   },

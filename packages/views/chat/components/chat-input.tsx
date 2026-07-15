@@ -8,6 +8,7 @@ import {
   type ContentEditorRef,
   useFileDropZone,
   FileDropOverlay,
+  useUploadGate,
 } from "../../editor";
 import { SubmitButton } from "@multica/ui/components/common/submit-button";
 import { ChatAddMenu } from "./chat-add-menu";
@@ -124,6 +125,7 @@ export function ChatInput({
   editorKeyOverride,
 }: ChatInputProps) {
   const { t } = useT("chat");
+  const { t: tEditor } = useT("editor");
   const sendShortcut = useShortcut("send");
   const editorRef = useRef<ContentEditorRef>(null);
   const activeSessionId = useChatStore((s) => s.activeSessionId);
@@ -180,13 +182,13 @@ export function ChatInput({
   const hasNothingToSend = isEmpty && !inputDraft.trim();
   const appliedRestoreIdRef = useRef<string | null>(null);
   const editorKey = editorKeyOverride ?? selectedAgentId ?? "no-agent";
-  // Number of in-flight uploads. We track this explicitly (rather than
-  // peeking at the editor on every render) so the SubmitButton visibly
-  // disables the instant an upload starts and re-enables the instant it
-  // finishes. handleSend ALSO checks `hasActiveUploads()` for paths that
-  // bypass the button (Mod+Enter while paste is mid-stream, drag-drop
-  // racing the keyboard) — defense in depth.
-  const [pendingUploads, setPendingUploads] = useState(0);
+  // Submit gate. `uploading` disables the SubmitButton the instant an upload
+  // starts; `isBlocked()` is re-read inside handleSend for the paths that skip
+  // the button entirely (Mod+Enter mid-paste, drag-drop racing the keyboard).
+  // Both read the editor document, which is the actual upload queue — this
+  // used to be a local in-flight counter that a manual delete of the pending
+  // image would leave stuck (MUL-4808).
+  const uploadGate = useUploadGate(editorRef);
 
   // Maps "URL inserted into the editor" → "attachment row id" so that
   // on send we can ask the server to bind only the attachments still
@@ -256,18 +258,13 @@ export function ChatInput({
   const handleUpload = useCallback(
     async (file: File): Promise<UploadResult | null> => {
       if (!onUploadFile) return null;
-      setPendingUploads((n) => n + 1);
-      try {
-        const result = await onUploadFile(file);
-        if (result) {
-          const persistedURL = result.markdownLink || result.link;
-          uploadMapRef.current.set(persistedURL, result.id);
-          if (result.id) addInputDraftAttachment(draftKey, result);
-        }
-        return result;
-      } finally {
-        setPendingUploads((n) => Math.max(0, n - 1));
+      const result = await onUploadFile(file);
+      if (result) {
+        const persistedURL = result.markdownLink || result.link;
+        uploadMapRef.current.set(persistedURL, result.id);
+        if (result.id) addInputDraftAttachment(draftKey, result);
       }
+      return result;
     },
     [addInputDraftAttachment, draftKey, onUploadFile],
   );
@@ -298,7 +295,7 @@ export function ChatInput({
     // download <id>` the file. The SubmitButton is also disabled in this
     // state via `uploading`, but Mod+Enter bypasses the button so we
     // still gate here.
-    if (editorRef.current?.hasActiveUploads()) {
+    if (uploadGate.isBlocked()) {
       logger.debug("input.send skipped: uploads in flight");
       return;
     }
@@ -432,6 +429,7 @@ export function ChatInput({
             }}
             onSubmit={handleSend}
             onUploadFile={uploadEnabled ? handleUpload : undefined}
+            onUploadingChange={uploadGate.onUploadingChange}
             attachments={draftAttachments}
             debounceMs={100}
             mentionMode={contextItems ? "context" : "default"}
@@ -455,14 +453,19 @@ export function ChatInput({
         <div className="absolute bottom-1 right-1.5 flex items-center gap-1">
           <SubmitButton
             onClick={handleSend}
-            disabled={hasNothingToSend || isSubmitting || !!disabled || !!noAgent || pendingUploads > 0}
+            disabled={hasNothingToSend || isSubmitting || !!disabled || !!noAgent}
             loading={isSubmitting}
+            busy={uploadGate.uploading}
             running={isRunning}
             onStop={onStop}
-            tooltip={sendShortcut
-              ? `${t(($) => $.input.send_tooltip)} · ${formatShortcut(sendShortcut)}`
+            tooltip={uploadGate.uploading
+              ? tEditor(($) => $.upload.in_progress)
+              : sendShortcut
+                ? `${t(($) => $.input.send_tooltip)} · ${formatShortcut(sendShortcut)}`
+                : t(($) => $.input.send_tooltip)}
+            ariaLabel={uploadGate.uploading
+              ? tEditor(($) => $.upload.in_progress)
               : t(($) => $.input.send_tooltip)}
-            ariaLabel={t(($) => $.input.send_tooltip)}
             stopTooltip={t(($) => $.input.stop_tooltip)}
             stopAriaLabel={t(($) => $.input.stop_tooltip)}
           />

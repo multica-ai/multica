@@ -121,6 +121,15 @@ vi.mock("../../editor", async () => ({
   ...(await vi.importActual<typeof import("../../editor/use-lazy-editor")>(
     "../../editor/use-lazy-editor",
   )),
+  // Real submit gate (pure React) — see comment-composers.test.tsx.
+  ...(await vi.importActual<typeof import("../../editor/use-upload-gate")>(
+    "../../editor/use-upload-gate",
+  )),
+  useEditorUpload: () => ({
+    uploadWithToast: vi.fn(),
+    upload: vi.fn(),
+    uploading: false,
+  }),
   useFileDropZone: () => ({ isDragOver: false, dropZoneProps: {} }),
   FileDropOverlay: () => null,
   // No-op so comment-card's AttachmentList can render without hitting the

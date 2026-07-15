@@ -35,7 +35,7 @@ import {
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "@multica/ui/components/ui/tooltip";
 import { Button } from "@multica/ui/components/ui/button";
 import { Switch } from "@multica/ui/components/ui/switch";
-import { ContentEditor, type ContentEditorRef, TitleEditor, useFileDropZone, FileDropOverlay } from "../editor";
+import { ContentEditor, type ContentEditorRef, TitleEditor, useFileDropZone, FileDropOverlay, useUploadGate, useEditorUpload } from "../editor";
 import { StatusIcon, StatusPicker, PriorityPicker, StagePicker, AssigneePicker, StartDatePicker, DueDatePicker, LabelPicker } from "../issues/components";
 import { maxSiblingStage } from "../issues/components/pickers/stage-picker";
 import { ProjectPicker } from "../projects/components/project-picker";
@@ -49,9 +49,7 @@ import { useQuickCreateStore } from "@multica/core/issues/stores/quick-create-st
 import { issueDetailOptions, childIssuesOptions } from "@multica/core/issues/queries";
 import { useCreateIssue, useUpdateIssue } from "@multica/core/issues/mutations";
 import { useAttachLabelToIssue } from "@multica/core/labels";
-import { useFileUpload } from "@multica/core/hooks/use-file-upload";
 import {
-  api,
   ApiError,
   DuplicateIssueErrorBodySchema,
   type DuplicateIssueErrorBody,
@@ -190,6 +188,7 @@ export function ManualCreatePanel({
   setIsExpanded: (v: boolean) => void;
 }) {
   const { t } = useT("modals");
+  const { t: tEditor } = useT("editor");
   const router = useNavigation();
   const p = useWorkspacePaths();
   const workspaceName = useCurrentWorkspace()?.name;
@@ -283,7 +282,11 @@ export function ManualCreatePanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const { uploadWithToast } = useFileUpload(api);
+  const { uploadWithToast } = useEditorUpload();
+  // Gate every action that fixes this draft: Create, Enter on the title, and
+  // the switch to agent mode (which re-serializes the description into a
+  // prompt and would carry a stripped body across).
+  const uploadGate = useUploadGate(descEditorRef);
   const handleUpload = async (file: File) => {
     const result = await uploadWithToast(file);
     if (result) {
@@ -341,6 +344,8 @@ export function ManualCreatePanel({
 
   const handleSubmit = async () => {
     if (!title.trim() || submitting) return;
+    // Covers both the Create button and TitleEditor's Enter, which route here.
+    if (uploadGate.isBlocked()) return;
     setSubmitting(true);
     try {
       const description = descEditorRef.current?.getMarkdown()?.trim() || undefined;
@@ -527,6 +532,10 @@ export function ManualCreatePanel({
   // needs it so the new issue is still created as a sub-issue when the user
   // flips from "Add sub issue" → "Create with agent".
   const switchToAgent = () => {
+    // Serializing mid-upload packs a description that has already lost the
+    // pending image into the agent prompt, and the draft it came from is
+    // cleared below — the file would be unrecoverable.
+    if (uploadGate.isBlocked()) return;
     const desc = descEditorRef.current?.getMarkdown()?.trim() ?? "";
     const prompt = [title.trim(), desc].filter(Boolean).join("\n\n");
     // Title + description have been packed into the agent prompt — clear them
@@ -624,6 +633,7 @@ export function ManualCreatePanel({
                 placeholder={t(($) => $.create_issue.description_placeholder)}
                 onUpdate={(md) => setDraft({ description: md })}
                 onUploadFile={handleUpload}
+                onUploadingChange={uploadGate.onUploadingChange}
                 debounceMs={500}
                 attachments={draftAttachments}
               />
@@ -872,8 +882,11 @@ export function ManualCreatePanel({
                 <button
                   type="button"
                   onClick={switchToAgent}
+                  disabled={uploadGate.uploading}
+                  aria-disabled={uploadGate.uploading || undefined}
+                  aria-busy={uploadGate.uploading || undefined}
                   title={t(($) => $.create_issue.switch_to_agent_tooltip)}
-                  className="border-beam group flex shrink-0 items-center gap-1.5 text-xs px-2 py-1 rounded-sm text-muted-foreground bg-brand/5 hover:bg-brand/10 hover:text-foreground transition-colors cursor-pointer"
+                  className="border-beam group flex shrink-0 items-center gap-1.5 text-xs px-2 py-1 rounded-sm text-muted-foreground bg-brand/5 hover:bg-brand/10 hover:text-foreground transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   <ArrowLeftRight className="size-3.5 text-brand/80 transition-transform duration-300 group-hover:rotate-180" />
                   {t(($) => $.create_issue.switch_to_agent)}
@@ -894,8 +907,18 @@ export function ManualCreatePanel({
                     </Tooltip>
                   </TooltipProvider>
                 ) : (
-                  <Button size="sm" onClick={handleSubmit} disabled={submitting}>
-                    {submitting ? t(($) => $.create_issue.submitting) : t(($) => $.create_issue.submit)}
+                  <Button
+                    size="sm"
+                    onClick={handleSubmit}
+                    disabled={submitting || uploadGate.uploading}
+                    aria-disabled={uploadGate.uploading || undefined}
+                    aria-busy={uploadGate.uploading || undefined}
+                  >
+                    {submitting
+                      ? t(($) => $.create_issue.submitting)
+                      : uploadGate.uploading
+                        ? tEditor(($) => $.upload.in_progress)
+                        : t(($) => $.create_issue.submit)}
                   </Button>
                 )}
               </div>

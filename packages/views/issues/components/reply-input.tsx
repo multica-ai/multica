@@ -1,12 +1,10 @@
 "use client";
 
 import { useRef, useState, useCallback, useEffect } from "react";
-import { ContentEditor, type ContentEditorRef, useFileDropZone, FileDropOverlay, useLazyEditor } from "../../editor";
+import { ContentEditor, type ContentEditorRef, useFileDropZone, FileDropOverlay, useLazyEditor, useUploadGate, useEditorUpload } from "../../editor";
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
 import { SubmitButton } from "@multica/ui/components/common/submit-button";
 import { ActorAvatar } from "../../common/actor-avatar";
-import { useFileUpload } from "@multica/core/hooks/use-file-upload";
-import { api } from "@multica/core/api";
 import type { Attachment } from "@multica/core/types";
 import { contentReferencesAttachment } from "@multica/core/types";
 import { formatShortcut, useShortcut } from "@multica/core/shortcuts";
@@ -52,9 +50,12 @@ function ReplyInput({
   draftKey,
 }: ReplyInputProps) {
   const { t } = useT("issues");
+  const { t: tEditor } = useT("editor");
   const sendShortcut = useShortcut("send");
   const placeholderText = placeholder ?? t(($) => $.reply.placeholder);
   const editorRef = useRef<ContentEditorRef>(null);
+  // See CommentInput — replying mid-upload posts without the file.
+  const uploadGate = useUploadGate(editorRef);
   // If a draft key is provided, hydrate from store on mount (defaultValue is
   // the only injection point on ContentEditorRef) and flush on every onUpdate.
   const initialDraft = draftKey
@@ -70,7 +71,7 @@ function ReplyInput({
   // Attachments uploaded in this composer session — see CommentInput for the
   // rationale (drives both submit-time attachment_ids and editor previews).
   const [pendingAttachments, setPendingAttachments] = useState<Attachment[]>([]);
-  const { uploadWithToast } = useFileUpload(api);
+  const { uploadWithToast } = useEditorUpload();
   // Readonly-first: static shell until intent; an unsent draft mounts the
   // real editor immediately (see CommentInput). This is also what keeps the
   // reply box working across Virtuoso scroll-out — a typed draft rehydrates
@@ -132,6 +133,8 @@ function ReplyInput({
   const handleSubmit = async () => {
     const content = editorRef.current?.getMarkdown()?.replace(/(\n\s*)+$/, "").trim();
     if (!content || submitting) return;
+    // Submit-time re-read — the shortcut path never sees the disabled button.
+    if (uploadGate.isBlocked()) return;
     // Track every attachment whose stable download URL OR legacy
     // storage URL is referenced in the markdown body. Both shapes
     // can appear in the same comment during the MUL-3130 rollout.
@@ -205,6 +208,7 @@ function ReplyInput({
             }}
             onSubmit={handleSubmit}
             onUploadFile={handleUpload}
+            onUploadingChange={uploadGate.onUploadingChange}
             debounceMs={100}
             currentIssueId={issueId}
             attachments={pendingAttachments}
@@ -254,8 +258,14 @@ function ReplyInput({
             onClick={handleSubmit}
             disabled={isEmpty}
             loading={submitting}
-            tooltip={sendShortcut
-              ? `${t(($) => $.comment.send_tooltip)} · ${formatShortcut(sendShortcut)}`
+            busy={uploadGate.uploading}
+            tooltip={uploadGate.uploading
+              ? tEditor(($) => $.upload.in_progress)
+              : sendShortcut
+                ? `${t(($) => $.comment.send_tooltip)} · ${formatShortcut(sendShortcut)}`
+                : t(($) => $.comment.send_tooltip)}
+            ariaLabel={uploadGate.uploading
+              ? tEditor(($) => $.upload.in_progress)
               : t(($) => $.comment.send_tooltip)}
           />
         </div>
