@@ -138,18 +138,17 @@ export function AccessPicker({
     draftScope !== persistedScope ||
     (draftScope === "members" && !sameMembers);
   const hasMemberTarget = draftMembers.length > 0;
-  /** Ready once the user has explicitly selected a scope (hasInteracted)
-   *  AND the members-branch condition is satisfied. Does NOT require the
-   *  draft to differ from the persisted state — applying the default scope
-   *  to a bulk selection is a valid action. */
-  const ready = hasInteracted && (draftScope !== "members" || hasMemberTarget);
 
   useEffect(() => {
     onDirtyChange?.(dirty);
     return () => onDirtyChange?.(false);
   }, [dirty, onDirtyChange]);
 
-  const buildChange = (): AccessChange | null => {
+  /** The change the current draft would commit, or null when the draft is not
+   *  committable (specific-people with zero targets). Memoized by draft value:
+   *  a parent that stores this in state re-renders the picker with an identical
+   *  reference, so the notify effect below stays quiet. */
+  const draftChange = useMemo<AccessChange | null>(() => {
     if (draftScope === "private") {
       return { permission_mode: "private", invocation_targets: [] };
     }
@@ -167,12 +166,22 @@ export function AccessPicker({
       }
     }
     return { permission_mode: "public_to", invocation_targets: targets };
-  };
+  }, [draftScope, draftMembers, teamIds]);
 
+  /** Ready once the user has explicitly selected a scope (hasInteracted) AND
+   *  the draft is committable. Does NOT require the draft to differ from the
+   *  persisted state — applying the default scope to a bulk selection is a
+   *  valid action. */
+  const readyChange = hasInteracted ? draftChange : null;
+
+  // Notify on value change, never on render. `onReadyChange` must be stable in
+  // the caller; combined with the memoized `readyChange` that keeps a parent
+  // storing the change in state from re-triggering this effect. Deliberately no
+  // cleanup: clearing the parent whenever a dependency changes is what turned
+  // this into an update loop. The parent owns resetting its own state.
   useEffect(() => {
-    onReadyChange?.(ready, ready ? buildChange() ?? undefined : undefined);
-    return () => onReadyChange?.(false);
-  }, [ready, onReadyChange, buildChange]);
+    onReadyChange?.(readyChange !== null, readyChange ?? undefined);
+  }, [readyChange, onReadyChange]);
 
   const toggleMember = (userId: string, checked: boolean) => {
     setDraftMembers((current) => {
@@ -183,16 +192,11 @@ export function AccessPicker({
     });
   };
 
-  /** Build the current AccessChange from the draft state. Returns null if the
-   *  draft is not in a committable state (specific-people with zero targets). */
-
   const save = async () => {
-    if (!onChange || saving) return;
-    const change = buildChange();
-    if (!change) return;
+    if (!onChange || saving || !draftChange) return;
     setSaving(true);
     try {
-      await onChange(change);
+      await onChange(draftChange);
     } finally {
       setSaving(false);
     }

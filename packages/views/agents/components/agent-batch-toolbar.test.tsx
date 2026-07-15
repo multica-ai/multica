@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { I18nProvider } from "@multica/core/i18n/react";
 import enCommon from "../../locales/en/common.json";
@@ -9,7 +9,9 @@ import enAgents from "../../locales/en/agents.json";
 
 const TEST_RESOURCES = { en: { common: enCommon, agents: enAgents } };
 
-const updateAgentSpy = vi.hoisted(() => vi.fn(async () => ({})));
+const updateAgentSpy = vi.hoisted(() =>
+  vi.fn(async (_id: string, _patch: Record<string, unknown>) => ({})),
+);
 const archiveSpy = vi.hoisted(() => vi.fn(async () => ({})));
 const restoreSpy = vi.hoisted(() => vi.fn(async () => ({})));
 
@@ -132,10 +134,6 @@ describe("AgentBatchToolbar — bulk Set access scope", () => {
     ).toBeInTheDocument();
   });
 
-  // The interactive flow (pick Workspace → Apply enabled → updateAgent
-  // called per owned row) is covered by access-picker-bulk-commit.test.tsx
-  // (picker commit + onReadyChange) + the toolbar integration tests here.
-
   it("keeps Apply disabled until a scope is picked", async () => {
     renderToolbar([makeRow("a", "user-1")]);
 
@@ -146,5 +144,93 @@ describe("AgentBatchToolbar — bulk Set access scope", () => {
 
     // No radio clicked yet — Apply must be disabled
     expect(screen.getByRole("button", { name: "Apply" })).toBeDisabled();
+  });
+
+  // Regression: AgentBatchToolbar <-> AccessPicker used to notify each other on
+  // every render (unstable onReadyChange + a change object rebuilt per render,
+  // plus a cleanup that cleared the parent on each dependency change). Picking a
+  // scope never settled, so this whole flow could not complete.
+  it("settles after picking a scope: Apply enables and stays enabled", async () => {
+    renderToolbar([makeRow("a", "user-1")]);
+
+    fireEvent.click(screen.getByRole("button", { name: "Set access scope" }));
+    await screen.findByText(/Applies to 1 agents/);
+
+    fireEvent.click(screen.getByRole("radio", { name: /Entire workspace/ }));
+
+    const apply = screen.getByRole("button", { name: "Apply" });
+    await waitFor(() => expect(apply).toBeEnabled());
+
+    // Reaching a fixed point is the point: further flushes must not flip the
+    // button back to disabled or re-enter the notify effect.
+    for (let i = 0; i < 5; i++) {
+      await act(async () => {});
+      expect(apply).toBeEnabled();
+      expect(
+        screen.getByRole("radio", { name: /Entire workspace/ }),
+      ).toBeChecked();
+    }
+  });
+
+  it("applies Entire workspace to each owned agent exactly once", async () => {
+    renderToolbar([
+      makeRow("a", "user-1"),
+      makeRow("b", "user-1"),
+      makeRow("c", "user-2"), // not owned → must be skipped
+    ]);
+
+    fireEvent.click(screen.getByRole("button", { name: "Set access scope" }));
+    await screen.findByText(/Applies to 2 agents/);
+
+    fireEvent.click(screen.getByRole("radio", { name: /Entire workspace/ }));
+
+    const apply = screen.getByRole("button", { name: "Apply" });
+    await waitFor(() => expect(apply).toBeEnabled());
+
+    fireEvent.click(apply);
+
+    await waitFor(() => expect(updateAgentSpy).toHaveBeenCalledTimes(2));
+    expect(updateAgentSpy.mock.calls.map((call) => call[0]).sort()).toEqual([
+      "a",
+      "b",
+    ]);
+    for (const call of updateAgentSpy.mock.calls) {
+      expect(call[1]).toEqual({
+        permission_mode: "public_to",
+        invocation_targets: [{ target_type: "workspace" }],
+      });
+    }
+
+    // One click, one write per owned agent — the dialog is gone and nothing
+    // re-fires afterwards.
+    await act(async () => {});
+    expect(updateAgentSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not retain the previous selection after close and reopen", async () => {
+    renderToolbar([makeRow("a", "user-1")]);
+
+    fireEvent.click(screen.getByRole("button", { name: "Set access scope" }));
+    await screen.findByText(/Applies to 1 agents/);
+    fireEvent.click(screen.getByRole("radio", { name: /Entire workspace/ }));
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Apply" })).toBeEnabled(),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("button", { name: "Apply" }),
+      ).not.toBeInTheDocument(),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Set access scope" }));
+    await screen.findByText(/Applies to 1 agents/);
+
+    expect(screen.getByRole("button", { name: "Apply" })).toBeDisabled();
+    expect(
+      screen.getByRole("radio", { name: /Entire workspace/ }),
+    ).not.toBeChecked();
+    expect(updateAgentSpy).not.toHaveBeenCalled();
   });
 });

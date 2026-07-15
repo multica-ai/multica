@@ -67,4 +67,24 @@ describe("AccessPicker bulk mode (hideFooter)", () => {
     fireEvent.click(membersRadio);
     expect(readyFn).toHaveBeenCalledWith(false, undefined);
   });
+
+  // The loop this guards: a parent that stores the change in state re-renders
+  // the picker. If the picker re-notifies on that render (unstable change
+  // object / callback in the effect deps), the parent stores again and never
+  // settles. Fails fast here; in the real toolbar it hangs the flow instead.
+  it("does not re-notify the parent when re-rendered with a stable callback", () => {
+    const readyFn = vi.fn();
+    const { rerender } = render(<Harness onReadyChange={readyFn} />);
+    fireEvent.click(screen.getByRole("radio", { name: /Entire workspace/ }));
+
+    const callsAfterSelect = readyFn.mock.calls.length;
+    const changeAfterSelect = readyFn.mock.calls.at(-1)?.[1];
+
+    rerender(<Harness onReadyChange={readyFn} />);
+    rerender(<Harness onReadyChange={readyFn} />);
+
+    expect(readyFn.mock.calls.length).toBe(callsAfterSelect);
+    // And the committed value keeps its identity, so storing it is idempotent.
+    expect(readyFn.mock.calls.at(-1)?.[1]).toBe(changeAfterSelect);
+  });
 });

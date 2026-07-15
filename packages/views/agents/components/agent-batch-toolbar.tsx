@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import type { MemberWithUser } from "@multica/core/types";
@@ -20,9 +20,6 @@ import { Archive, ArchiveRestore, Loader2, X } from "lucide-react";
 import { useT } from "../../i18n";
 import { AccessPicker, type AccessChange } from "./inspector/access-picker";
 import type { AgentListRow } from "./agents-page";
-
-// Stable empty array — passing [] inline creates a new reference each render,
-// which resets AccessPicker's draft via its useEffect dependency cascade.
 
 /**
  * Floating batch-toolbar for the agents list page. Renders archive/restore
@@ -52,6 +49,23 @@ export function AgentBatchToolbar({
   const [confirmAccess, setConfirmAccess] = useState(false);
   const [accessChange, setAccessChange] = useState<AccessChange | null>(null);
   const [busy, setBusy] = useState(false);
+
+  // Must be stable: AccessPicker lists this in the effect that notifies us, so
+  // an inline callback would re-notify on every render we cause by storing the
+  // change — that is an update loop, not a re-render.
+  const handleAccessReadyChange = useCallback(
+    (ready: boolean, change?: AccessChange) => {
+      setAccessChange(ready && change ? change : null);
+    },
+    [],
+  );
+
+  // The picker owns the draft; we own `accessChange`. Reset it on every open and
+  // close so a previous selection can never leak into the next dialog session.
+  const setAccessDialogOpen = useCallback((open: boolean) => {
+    setAccessChange(null);
+    setConfirmAccess(open);
+  }, []);
 
   if (rows.length === 0) return null;
 
@@ -158,7 +172,7 @@ export function AgentBatchToolbar({
             variant="ghost"
             size="sm"
             disabled={!anyOwned || busy}
-            onClick={() => setConfirmAccess(true)}
+            onClick={() => setAccessDialogOpen(true)}
           >
             {t(($) => $.row_actions.set_access)}
           </Button>
@@ -216,12 +230,7 @@ export function AgentBatchToolbar({
       {/* Bulk access dialog — AccessPicker's internal Save is hidden (hideFooter)
           so this dialog's Confirm button is the sole apply trigger via onChange.
           a11y: focus trap + restore via Dialog; aria-live summary; accessible name. */}
-      <Dialog
-        open={confirmAccess}
-        onOpenChange={(open) => {
-          if (!open) setConfirmAccess(false);
-        }}
-      >
+      <Dialog open={confirmAccess} onOpenChange={setAccessDialogOpen}>
         <DialogContent
           className="sm:max-w-md"
           aria-describedby="bulk-access-summary"
@@ -249,7 +258,7 @@ export function AgentBatchToolbar({
             ownerId={currentUserId}
             canEdit
             hideFooter
-            onReadyChange={(ready, change) => { if (ready && change) setAccessChange(change); else if (!ready) setAccessChange(null); }}
+            onReadyChange={handleAccessReadyChange}
           />
           <DialogFooter>
             <Button
@@ -257,7 +266,7 @@ export function AgentBatchToolbar({
               variant="outline"
               size="sm"
               disabled={busy}
-              onClick={() => setConfirmAccess(false)}
+              onClick={() => setAccessDialogOpen(false)}
             >
               {t(($) => $.row_actions.archive_dialog_cancel)}
             </Button>
@@ -268,7 +277,7 @@ export function AgentBatchToolbar({
               onClick={async () => {
                 if (!accessChange) return;
                 const change = accessChange;
-                setConfirmAccess(false);
+                setAccessDialogOpen(false);
                 await applyAccessBulk(change);
               }}
             >
