@@ -1,17 +1,33 @@
 ---
 title: "Multica v1.15.0"
-description: "Runtimes og Desktop opdateres sikkert fra Firtals egen udgivelseskanal."
-date: 2026-07-12
+description: "12 release bullets: 2 new, 4 fixed, 1 improved, plus 5 more."
+date: 2026-07-15
 ---
 
-## Til alle
+**Release summary:** 12 release bullets: 2 new, 4 fixed, 1 improved, plus 5 more.
 
-### 🖥️ Runtimes
+Changes since [v1.14.4](https://github.com/firtal-group/firtal-cerebro/compare/v1.14.4...v1.15.0) — bump: **minor**
 
-**Runtimes** og Multica Desktop kan nu hente godkendte opdateringer fra Firtals egen udgivelseskanal. Når en ældre Runtime kommer online, opdaterer Multica den automatisk, så agenternes baggrundsprogrammer ikke bliver efterladt på gamle versioner. Opdateringen venter, hvis et job er i gang eller netop er kaldt, så arbejdet ikke bliver afbrudt midt i en opgave.
+## New
 
-[Åbn Runtimes](https://multica.firtal.com/firtal/runtimes) · [Hjælp](https://multica.firtal.com/firtal/documents/019f556d-f223-71e1-b788-65588dda55d9)
+- Install Pi in cloud image (FIR-3278) [#2347](https://github.com/firtal-group/firtal-cerebro/pull/2347)
+- Enforce create issue permissions (FIR-3266)
 
-## Til administratorer
+## Fixed
 
-Der er ingen nye administratorfunktioner i denne opdatering.
+- Pin woken runs to a model the runtime can actually run [#2358](https://github.com/firtal-group/firtal-cerebro/pull/2358)
+- Hide active round issues from all messages [#2352](https://github.com/firtal-group/firtal-cerebro/pull/2352)
+- Restore personal browser claim access (FIR-3006)
+- Align Round messages and Play eligibility (FIR-3179) [#2348](https://github.com/firtal-group/firtal-cerebro/pull/2348)
+
+## Improved
+
+- Staging is cerebro.firtal.com on Sliplane, not Sara.firtal.com [#2343](https://github.com/firtal-group/firtal-cerebro/pull/2343)
+
+## Other changes
+
+- FIR-3111: align session modes and thread lifecycle [#2354](https://github.com/firtal-group/firtal-cerebro/pull/2354)
+- FIR-2873: verify scheduled messages end to end [#2346](https://github.com/firtal-group/firtal-cerebro/pull/2346)
+- FIR-2996: match Dashboard to approved mockups [#2341](https://github.com/firtal-group/firtal-cerebro/pull/2341)
+- FIR-3172: complete isolated Multica mini apps [#2336](https://github.com/firtal-group/firtal-cerebro/pull/2336)
+- FIR-3179: simplify Rounds to answer snapshots [#2329](https://github.com/firtal-group/firtal-cerebro/pull/2329)
