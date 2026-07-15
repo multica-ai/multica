@@ -33,6 +33,22 @@ type ProjectResourceForEnv struct {
 	Label        string          // optional user-supplied label
 }
 
+// StructuredMentionForEnv is the brief-side mirror of daemon.StructuredMention.
+// The agent reads this to know what was mentioned without parsing raw text.
+type StructuredMentionForEnv struct {
+	Type        string                     `json:"type"`
+	ID          string                     `json:"id"`
+	WorkspaceID string                     `json:"workspace_id,omitempty"`
+	Snapshot    *MentionSnapshotForEnv     `json:"snapshot,omitempty"`
+}
+
+// MentionSnapshotForEnv is the brief-side mirror of daemon.MentionSnapshot.
+type MentionSnapshotForEnv struct {
+	ProjectTitle       string `json:"project_title,omitempty"`
+	ProjectDescription string `json:"project_description,omitempty"`
+	IssueCount         int    `json:"issue_count,omitempty"`
+}
+
 // PrepareParams holds all inputs needed to set up an execution environment.
 type PrepareParams struct {
 	WorkspacesRoot string // base path for all envs (e.g., ~/multica_workspaces)
@@ -93,6 +109,7 @@ type TaskContextForEnv struct {
 	ProjectTitle            string                  // human-readable project title
 	ProjectDescription      string                  // durable project-level context, rendered into the brief's Project Context section
 	ProjectResources        []ProjectResourceForEnv // resources attached to the project
+	StructuredMentions      []StructuredMentionForEnv // parsed @mention links from triggering content; agent reads this alongside raw text
 	ChatSessionID           string                  // non-empty for chat tasks
 	AutopilotRunID          string                  // non-empty for autopilot run_only tasks
 	AutopilotID             string

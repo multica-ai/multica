@@ -3531,6 +3531,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		ProjectTitle:                     task.ProjectTitle,
 		ProjectDescription:               task.ProjectDescription,
 		ProjectResources:                 convertProjectResourcesForEnv(task.ProjectResources),
+		StructuredMentions:               convertStructuredMentionsForEnv(task.StructuredMentions),
 		ChatSessionID:                    task.ChatSessionID,
 		AutopilotRunID:                   task.AutopilotRunID,
 		AutopilotID:                      task.AutopilotID,
@@ -4607,6 +4608,28 @@ func convertProjectResourcesForEnv(resources []ProjectResourceData) []execenv.Pr
 			ResourceType: r.ResourceType,
 			ResourceRef:  r.ResourceRef,
 			Label:        r.Label,
+		}
+	}
+	return result
+}
+
+func convertStructuredMentionsForEnv(mentions []StructuredMention) []execenv.StructuredMentionForEnv {
+	if len(mentions) == 0 {
+		return nil
+	}
+	result := make([]execenv.StructuredMentionForEnv, len(mentions))
+	for i, m := range mentions {
+		result[i] = execenv.StructuredMentionForEnv{
+			Type:        m.Type,
+			ID:          m.ID,
+			WorkspaceID: m.WorkspaceID,
+		}
+		if m.Snapshot != nil {
+			result[i].Snapshot = &execenv.MentionSnapshotForEnv{
+				ProjectTitle:       m.Snapshot.ProjectTitle,
+				ProjectDescription: m.Snapshot.ProjectDescription,
+				IssueCount:         m.Snapshot.IssueCount,
+			}
 		}
 	}
 	return result

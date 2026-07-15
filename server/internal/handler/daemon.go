@@ -1803,6 +1803,12 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 			resp.TriggerCommentContent = "The newest triggering comment is no longer available. Address every earlier comment included below."
 		}
 
+		// Parse @mention links from the triggering comment content for structured
+		// injection into the daemon's brief (KTD1). This populates
+		// resp.StructuredMentions so the agent knows what was mentioned without
+		// parsing raw text. R10 holds: this does not touch enqueue logic.
+		resp.StructuredMentions = parseStructuredMentions(resp.TriggerCommentContent)
+
 		// Look up the prior session for this (agent, issue) pair so the daemon
 		// can resume the Claude Code conversation context.
 		//
@@ -1952,6 +1958,12 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 			resp.ChatMessage = strings.Join(parts, "\n\n")
+
+			// Parse @mention links from the chat message for structured injection
+			// into the daemon's brief (KTD1). This covers the chat scene parity
+			// requirement — both comment and chat receive the same structured
+			// mention context.
+			resp.StructuredMentions = parseStructuredMentions(resp.ChatMessage)
 
 			// Fail closed: a task-owned direct task that resolves to no user text
 			// (and is not the agent's proactive intro) must never dispatch an
@@ -2332,6 +2344,29 @@ func (h *Handler) ResolveTaskSkillBundles(w http.ResponseWriter, r *http.Request
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{"bundles": resolved})
+}
+
+// parseStructuredMentions extracts typed mention links from the given content
+// and returns them as StructuredMention records. The workspace qualifier (?ws=)
+// is parsed but not resolved here — cross-workspace resolution happens server-side
+// at task-prep under the author's membership (KTD5). This function only parses
+// the text; it does not fetch, authorize, or snapshot anything.
+func parseStructuredMentions(content string) []StructuredMention {
+	if content == "" {
+		return nil
+	}
+	mentions := util.ParseMentions(content)
+	if len(mentions) == 0 {
+		return nil
+	}
+	result := make([]StructuredMention, 0, len(mentions))
+	for _, m := range mentions {
+		result = append(result, StructuredMention{
+			Type: m.Type,
+			ID:   m.ID,
+		})
+	}
+	return result
 }
 
 // trailingUserMessages returns the run of user messages after the last

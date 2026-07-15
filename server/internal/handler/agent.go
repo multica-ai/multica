@@ -258,6 +258,23 @@ type ProjectResourceData struct {
 	Label        string          `json:"label,omitempty"`
 }
 
+// StructuredMention mirrors daemon.StructuredMention — the wire format for
+// parsed @mention links delivered to the daemon in the claim response.
+type StructuredMention struct {
+	Type        string            `json:"type"`
+	ID          string            `json:"id"`
+	WorkspaceID string            `json:"workspace_id,omitempty"`
+	Snapshot    *MentionSnapshot  `json:"snapshot,omitempty"`
+}
+
+// MentionSnapshot carries server-resolved project context for a cross-workspace
+// project mention (KTD5).
+type MentionSnapshot struct {
+	ProjectTitle       string `json:"project_title,omitempty"`
+	ProjectDescription string `json:"project_description,omitempty"`
+	IssueCount         int    `json:"issue_count,omitempty"`
+}
+
 // ConnectedAppData keeps the daemon-claim wire field local to handler types
 // while sharing the canonical JSON shape with the runtime app metadata package.
 type ConnectedAppData = runtimeapps.ConnectedApp
@@ -294,6 +311,7 @@ type AgentTaskResponse struct {
 	ProjectTitle       string                `json:"project_title,omitempty"`       // for surfacing in agent context
 	ProjectDescription string                `json:"project_description,omitempty"` // durable project-level context injected into the brief
 	ProjectResources   []ProjectResourceData `json:"project_resources,omitempty"`   // resources attached to the project
+	StructuredMentions []StructuredMention `json:"structured_mentions,omitempty"` // parsed @mention links from triggering content; injected as structured context
 	CreatedAt          string                `json:"created_at"`
 	PriorSessionID     string                `json:"prior_session_id,omitempty"` // session ID from a previous task on same issue
 	PriorWorkDir       string                `json:"prior_work_dir,omitempty"`   // work_dir from a previous task on same issue

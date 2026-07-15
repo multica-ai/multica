@@ -459,6 +459,82 @@ func writeMentions(b *strings.Builder) {
 	b.WriteString("Escalating to a human owner not yet involved; delegating a concrete new sub-task to another agent for the first time; or when the user explicitly asks to loop someone in. Otherwise **don't mention**. Silence ends conversations.\n\n")
 }
 
+// writeStructuredMentions emits the Structured Mentions section when the task
+// carries parsed @mention links. This is additive context — it does not replace
+// the raw trigger comment or chat message, and it does not trigger enqueue.
+// All task kinds receive this section so the agent can act on typed mentions
+// in both comment-triggered and chat scenarios.
+func writeStructuredMentions(b *strings.Builder, ctx TaskContextForEnv) {
+	if len(ctx.StructuredMentions) == 0 {
+		return
+	}
+	b.WriteString("## Structured Mentions\n\n")
+	b.WriteString("The following typed mentions were detected in the content above. ")
+	b.WriteString("Each identifies an entity you can fetch on demand via the `multica` CLI:\n\n")
+	for _, m := range ctx.StructuredMentions {
+		switch m.Type {
+		case "project":
+			b.WriteString("- **@project** `")
+			b.WriteString(m.ID)
+			b.WriteString("`")
+			if m.WorkspaceID != "" {
+				fmt.Fprintf(b, " (workspace: `%s` — cross-workspace, server-resolved snapshot below)", m.WorkspaceID)
+			}
+			b.WriteString(": a project mention. ")
+			if m.Snapshot != nil {
+				b.WriteString("Server-resolved snapshot: ")
+				if m.Snapshot.ProjectTitle != "" {
+					fmt.Fprintf(b, "**%s**", m.Snapshot.ProjectTitle)
+					if m.Snapshot.ProjectDescription != "" {
+						b.WriteString(" — ")
+						b.WriteString(m.Snapshot.ProjectDescription)
+					}
+					b.WriteString(". ")
+				}
+				if m.Snapshot.IssueCount > 0 {
+					fmt.Fprintf(b, "%d issue(s). ", m.Snapshot.IssueCount)
+				}
+				b.WriteString("Do NOT issue your own cross-workspace CLI call — use this snapshot.")
+			} else {
+				b.WriteString("Bare mention: record as target and wait for instruction. Directed: `multica project get ")
+				b.WriteString(m.ID)
+				b.WriteString(" --output json` then act.")
+				if m.WorkspaceID != "" {
+					fmt.Fprintf(b, " Pass `--workspace-id %s`.", m.WorkspaceID)
+				}
+			}
+			b.WriteString("\n")
+		case "issue":
+			b.WriteString("- **@issue** `")
+			b.WriteString(m.ID)
+			b.WriteString("`: an issue mention. `multica issue get ")
+			b.WriteString(m.ID)
+			b.WriteString(" --output json` if needed.\n")
+		case "member":
+			b.WriteString("- **@member** `")
+			b.WriteString(m.ID)
+			b.WriteString("`: a member mention. Informational only — no action required.\n")
+		case "agent":
+			b.WriteString("- **@agent** `")
+			b.WriteString(m.ID)
+			b.WriteString("`: an agent mention. The backend handles enqueue; no action required.\n")
+		case "squad":
+			b.WriteString("- **@squad** `")
+			b.WriteString(m.ID)
+			b.WriteString("`: a squad mention. The backend handles enqueue; no action required.\n")
+		case "skill":
+			b.WriteString("- **@skill** `")
+			b.WriteString(m.ID)
+			b.WriteString("`: a skill mention. Informational only.\n")
+		case "all":
+			b.WriteString("- **@all**: broadcast mention. No specific action; do not re-mention the assignee.\n")
+		default:
+			fmt.Fprintf(b, "- **@%s** `%s`: unrecognised mention type.\n", m.Type, m.ID)
+		}
+	}
+	b.WriteString("\n")
+}
+
 // writeAttachments emits the Attachments pointer.
 func writeAttachments(b *strings.Builder) {
 	b.WriteString("## Attachments\n\n")
@@ -585,6 +661,7 @@ func buildMetaSkillContentSlim(provider string, ctx TaskContextForEnv) string {
 	}
 
 	writeAlwaysUseCLI(&b)
+	writeStructuredMentions(&b, ctx)
 	writeOutput(&b, kind, ctx)
 
 	return b.String()

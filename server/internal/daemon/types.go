@@ -6,6 +6,30 @@ import (
 	"github.com/multica-ai/multica/server/internal/runtimeapps"
 )
 
+// StructuredMention mirrors util.Mention extended with an optional workspace
+// qualifier. For same-workspace mentions, WorkspaceID is empty and the agent
+// fetches the entity on demand via the CLI. For cross-workspace mentions,
+// WorkspaceID is populated and the backend resolves a snapshot server-side
+// (KTD5) so the agent never crosses the workspace boundary.
+type StructuredMention struct {
+	Type        string `json:"type"`                  // mention type: member, agent, squad, issue, project, skill, all
+	ID          string `json:"id"`                    // entity UUID (or "all")
+	WorkspaceID string `json:"workspace_id,omitempty"` // non-empty for cross-workspace mentions
+	// Snapshot is populated by the backend at task-prep for cross-workspace
+	// project mentions. The agent acts on the Snapshot content rather than
+	// issuing its own CLI call (MUL-2600: the task token is workspace-bound).
+	Snapshot *MentionSnapshot `json:"snapshot,omitempty"`
+}
+
+// MentionSnapshot carries the server-resolved project context for a
+// cross-workspace project mention. The agent receives this as structured
+// context and does not issue its own cross-workspace CLI call.
+type MentionSnapshot struct {
+	ProjectTitle       string `json:"project_title,omitempty"`
+	ProjectDescription string `json:"project_description,omitempty"`
+	IssueCount         int    `json:"issue_count,omitempty"`
+}
+
 // AgentEntry describes a single available agent CLI.
 type AgentEntry struct {
 	Path  string // path to CLI binary
@@ -67,6 +91,7 @@ type Task struct {
 	ProjectTitle             string                `json:"project_title,omitempty"`               // human-readable project title for context injection
 	ProjectDescription       string                `json:"project_description,omitempty"`         // durable project-level context injected into the brief
 	ProjectResources         []ProjectResourceData `json:"project_resources,omitempty"`           // project-scoped resources to expose to the agent
+	StructuredMentions       []StructuredMention   `json:"structured_mentions,omitempty"`          // parsed @mention links from the triggering content; injected as structured context so the agent knows what was mentioned without parsing raw text
 	IsLeaderTask             bool                  `json:"is_leader_task,omitempty"`              // true when executing in the squad-leader coordinator role
 	PriorSessionID           string                `json:"prior_session_id,omitempty"`            // Claude session ID from a previous task on this issue
 	PriorWorkDir             string                `json:"prior_work_dir,omitempty"`              // work_dir from a previous task on this issue
