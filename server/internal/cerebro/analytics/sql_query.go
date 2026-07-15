@@ -170,5 +170,5 @@ func dimensionSQL(d Dimension, grain Grain, timezone string, args *[]any) (strin
 }
 
 var metricSQL = map[Metric]string{
-	MetricRuns: "COUNT(DISTINCT r.run_id)::bigint", MetricInputTokens: "SUM(r.input_tokens)::bigint", MetricOutputTokens: "SUM(r.output_tokens)::bigint", MetricCostCents: "SUM(r.cost_cents)::bigint", MetricMissingCostRuns: "COUNT(DISTINCT r.run_id) FILTER (WHERE r.cost_kind = 'missing')::bigint", MetricSavedCents: "SUM(s.saved_cents)::bigint", MetricDurationSeconds: "SUM(r.duration_seconds)::bigint", MetricQualityPassRate: "AVG(CASE WHEN q.verdict IN ('pass','success') THEN 1.0 ELSE 0.0 END)", MetricSkillInvocations: "SUM(sk.invocation_count)::bigint",
+	MetricRuns: "COUNT(DISTINCT r.run_id)::bigint", MetricInputTokens: "SUM(r.input_tokens)::bigint", MetricOutputTokens: "SUM(r.output_tokens)::bigint", MetricCostCents: "SUM(r.cost_cents)::bigint", MetricMissingCostRuns: "COUNT(DISTINCT r.run_id) FILTER (WHERE r.cost_kind = 'missing')::bigint", MetricSavedCents: "SUM(s.saved_cents)::bigint", MetricDurationSeconds: "SUM(r.duration_seconds)::bigint", MetricQualityPassRate: "AVG(CASE WHEN q.verdict IN ('pass','success') THEN 1.0 ELSE 0.0 END) FILTER (WHERE q.measurement_type <> 'satisfaction')", MetricSkillInvocations: "SUM(sk.invocation_count)::bigint",
 }

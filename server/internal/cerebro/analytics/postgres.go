@@ -118,20 +118,75 @@ func (s *postgresSourceDB) loadRun(ctx context.Context, runID string) (RunProjec
 		return RunProjection{}, err
 	}
 
-	qualityRows, err := s.pool.Query(ctx, `SELECT 'skill_observation', so.delta_type, so.outcome, so.confidence, so.skill_version, so.created_at FROM skill_observation so WHERE so.run_id=$1 ORDER BY so.created_at, so.id`, runID)
+	qualityRows, err := s.pool.Query(ctx, qualitySourcesSQL, runID)
 	if err != nil {
 		return RunProjection{}, err
 	}
 	defer qualityRows.Close()
 	for qualityRows.Next() {
 		var v QualityProjection
-		if err := qualityRows.Scan(&v.Type, &v.Category, &v.Verdict, &v.Confidence, &v.EvaluatorVersion, &v.MeasuredAt); err != nil {
+		if err := qualityRows.Scan(&v.Type, &v.Category, &v.Verdict, &v.Score, &v.Confidence, &v.EvaluatorVersion, &v.MeasuredAt); err != nil {
 			return RunProjection{}, err
 		}
 		r.Quality = append(r.Quality, v)
 	}
 	return r, qualityRows.Err()
 }
+
+// qualitySourcesSQL loads every quality and satisfaction measurement for one
+// run (FIR-3212). Judge verdicts and human approvals are recorded per
+// (issue, gate, round), not per run, so both use the same documented
+// attribution rule: a reported decision attributes to the newest build-phase
+// run on the same issue that completed at or before the decision was reported
+// — the run whose deliverable was scored. Reactions attribute to the run whose
+// agent authored the reacted-on comment while the run was active. Only member
+// signals count as satisfaction; verdicts stay raw (emoji, approved/rejected)
+// so interpretation happens at aggregation time.
+const qualitySourcesSQL = `SELECT source, category, verdict, score, confidence, evaluator_version, measured_at FROM (
+	SELECT 'skill_observation' AS source, so.delta_type AS category, so.outcome AS verdict,
+		NULL::float8 AS score, so.confidence, so.skill_version AS evaluator_version,
+		so.created_at AS measured_at, so.id::text AS tiebreak
+	FROM skill_observation so WHERE so.run_id=$1
+	UNION ALL
+	SELECT 'judge_gate', jr.gate || ':' || jr.check_id,
+		CASE WHEN jr.pass THEN 'pass' ELSE 'fail' END,
+		NULL::float8, NULL::float8, '', jr.updated_at, jr.id::text
+	FROM cerebro_loop_judge_run jr
+	JOIN agent_task_queue me ON me.id=$1
+	WHERE jr.issue_id=me.issue_id AND jr.ran=true
+		AND me.context->>'loop_phase'='build'
+		AND me.completed_at IS NOT NULL AND me.completed_at <= jr.updated_at
+		AND NOT EXISTS (
+			SELECT 1 FROM agent_task_queue newer
+			WHERE newer.issue_id=jr.issue_id AND newer.id<>me.id
+				AND newer.context->>'loop_phase'='build'
+				AND newer.completed_at IS NOT NULL AND newer.completed_at <= jr.updated_at
+				AND newer.completed_at > me.completed_at)
+	UNION ALL
+	SELECT 'satisfaction', 'human_approval:' || ha.gate || ':' || ha.check_id,
+		CASE WHEN ha.approved THEN 'approved' ELSE 'rejected' END,
+		NULL::float8, NULL::float8, '', ha.updated_at, ha.id::text
+	FROM cerebro_loop_human_approval ha
+	JOIN agent_task_queue me ON me.id=$1
+	WHERE ha.issue_id=me.issue_id AND ha.ran=true AND ha.approved_by_type='member'
+		AND me.context->>'loop_phase'='build'
+		AND me.completed_at IS NOT NULL AND me.completed_at <= ha.updated_at
+		AND NOT EXISTS (
+			SELECT 1 FROM agent_task_queue newer
+			WHERE newer.issue_id=ha.issue_id AND newer.id<>me.id
+				AND newer.context->>'loop_phase'='build'
+				AND newer.completed_at IS NOT NULL AND newer.completed_at <= ha.updated_at
+				AND newer.completed_at > me.completed_at)
+	UNION ALL
+	SELECT 'satisfaction', 'reaction:' || cr.emoji || ':' || cr.actor_id::text, cr.emoji,
+		NULL::float8, NULL::float8, '', cr.created_at, cr.id::text
+	FROM agent_task_queue me
+	JOIN comment c ON c.issue_id=me.issue_id AND c.author_type='agent' AND c.author_id=me.agent_id
+	JOIN comment_reaction cr ON cr.comment_id=c.id AND cr.actor_type='member'
+	WHERE me.id=$1
+		AND c.created_at >= COALESCE(me.started_at, me.created_at)
+		AND c.created_at <= COALESCE(me.completed_at, now())
+) q ORDER BY measured_at, tiebreak`
 
 func (s *postgresSourceDB) listRunIDs(ctx context.Context, workspaceID, afterCursor string, limit int) ([]string, error) {
 	rows, err := s.pool.Query(ctx, `SELECT atq.id::text FROM agent_task_queue atq JOIN agent a ON a.id=atq.agent_id LEFT JOIN issue i ON i.id=atq.issue_id LEFT JOIN chat_session cs ON cs.id=atq.chat_session_id WHERE COALESCE(i.workspace_id,cs.workspace_id,a.workspace_id)=$1 AND ($2='' OR atq.id>$2::uuid) ORDER BY atq.id LIMIT $3`, workspaceID, afterCursor, limit)

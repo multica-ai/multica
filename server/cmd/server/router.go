@@ -1758,6 +1758,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					// CEREBRO-PATCH(run-prompt-snapshot): FIR-3212 — per-run production prompt evidence (read-only).
 					r.Get("/prompt-snapshots", h.ListAgentPromptSnapshots)
 					r.Get("/prompt-snapshots/{taskId}", h.GetAgentPromptSnapshot)
+					// CEREBRO-PATCH(agent-quality): FIR-3212 — quality/satisfaction per config version (read-only).
+					r.Get("/quality", h.GetAgentQuality)
 					r.Get("/context/versions", cerebroAgentOfficeHandler.ListVersions)
 					r.Put("/context/ownership", cerebroAgentOfficeHandler.UpdateOwnership)
 					r.Get("/context/change-requests", cerebroAgentOfficeHandler.ListChangeRequests)
