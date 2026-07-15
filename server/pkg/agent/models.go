@@ -903,12 +903,12 @@ type acpDiscoveryProvider struct {
 	// acpArgs is the argv passed to the binary to start it in ACP
 	// server mode. Defaults to []string{"acp"} when nil/empty.
 	acpArgs []string
-	// authMethodID, when non-empty, inserts an ACP `authenticate` request
-	// (with the given methodId) between `initialize` and `session/new`.
-	// Agents that need no auth (kiro/qoder/trae) leave this empty and the
-	// handshake is unchanged. Grok Build requires it or session/new is
-	// rejected, degrading discovery to the static fallback catalog.
-	authMethodID string
+	// selectAuthMethod, when non-nil, chooses an ACP authentication method from
+	// the completed initialize result. Discovery waits for initialize and
+	// authenticate to succeed before creating a session so providers cannot be
+	// sent a disabled method or an eager session request. Providers that need no
+	// auth (kiro/qoder/trae) leave this nil.
+	selectAuthMethod func(json.RawMessage) (string, bool)
 }
 
 // discoverACPModels runs the ACP handshake for any agent CLI that
@@ -973,13 +973,73 @@ func discoverACPModels(ctx context.Context, executablePath string, p acpDiscover
 		return err
 	}
 
-	// Send initialize + session/new.
+	type discoveryResponse struct {
+		ID     json.Number     `json:"id"`
+		Result json.RawMessage `json:"result"`
+		Error  *struct {
+			Code    int             `json:"code"`
+			Message string          `json:"message"`
+			Data    json.RawMessage `json:"data"`
+		} `json:"error"`
+	}
+	responses := make(chan discoveryResponse, 8)
+	go func() {
+		defer close(responses)
+		scanner := bufio.NewScanner(stdout)
+		scanner.Buffer(make([]byte, 0, 1024*1024), 4*1024*1024)
+		for scanner.Scan() {
+			line := strings.TrimSpace(scanner.Text())
+			if line == "" {
+				continue
+			}
+			var response discoveryResponse
+			if err := json.Unmarshal([]byte(line), &response); err != nil || response.ID.String() == "" {
+				continue
+			}
+			select {
+			case responses <- response:
+			case <-runCtx.Done():
+				return
+			}
+		}
+	}()
+
+	waitForResponse := func(id int, method string) (json.RawMessage, error) {
+		wantID := strconv.Itoa(id)
+		for {
+			select {
+			case <-runCtx.Done():
+				return nil, fmt.Errorf("%s: %w", method, runCtx.Err())
+			case response, ok := <-responses:
+				if !ok {
+					return nil, fmt.Errorf("%s: ACP process exited before response", method)
+				}
+				if response.ID.String() != wantID {
+					continue
+				}
+				if response.Error != nil {
+					return nil, fmt.Errorf("%s: ACP error %d: %s", method, response.Error.Code, response.Error.Message)
+				}
+				if len(response.Result) == 0 {
+					return nil, fmt.Errorf("%s: ACP response missing result", method)
+				}
+				return response.Result, nil
+			}
+		}
+	}
+
+	// ACP authentication methods are policy- and version-dependent, so await
+	// initialize before choosing one instead of guessing from local env alone.
 	if err := writeACP(1, "initialize", map[string]any{
 		"protocolVersion":    1,
 		"clientInfo":         map[string]any{"name": p.clientName, "version": "0.1.0"},
 		"clientCapabilities": map[string]any{},
 	}); err != nil {
-		return []Model{}, nil
+		return []Model{}, err
+	}
+	initResult, err := waitForResponse(1, "initialize")
+	if err != nil {
+		return []Model{}, err
 	}
 
 	// session/new requires a valid cwd — use a temp directory we
@@ -991,66 +1051,41 @@ func discoverACPModels(ctx context.Context, executablePath string, p acpDiscover
 	}
 	defer os.RemoveAll(tmp)
 
-	// Agents that gate session ops behind an auth handshake (Grok Build)
-	// need `authenticate` before session/new; others leave authMethodID
-	// empty and this step is skipped, keeping their id sequence unchanged.
+	// Agents that gate session ops behind an auth handshake (Grok Build) need
+	// authenticate before session/new. The selector sees the actual advertised
+	// methods from initialize and may decline when the CLI requires no auth.
 	sessionNewID := 2
-	if p.authMethodID != "" {
-		if err := writeACP(2, "authenticate", map[string]any{
-			"methodId": p.authMethodID,
-			"_meta":    map[string]any{"headless": true},
-		}); err != nil {
-			return []Model{}, nil
+	if p.selectAuthMethod != nil {
+		methodID, ok := p.selectAuthMethod(initResult)
+		if ok {
+			if err := writeACP(2, "authenticate", map[string]any{
+				"methodId": methodID,
+				"_meta":    map[string]any{"headless": true},
+			}); err != nil {
+				return []Model{}, err
+			}
+			if _, err := waitForResponse(2, "authenticate"); err != nil {
+				return []Model{}, err
+			}
+			sessionNewID = 3
 		}
-		sessionNewID = 3
 	}
 
 	if err := writeACP(sessionNewID, "session/new", map[string]any{
 		"cwd":        tmp,
 		"mcpServers": []any{},
 	}); err != nil {
-		return []Model{}, nil
+		return []Model{}, err
 	}
-	wantID := strconv.Itoa(sessionNewID)
-
-	// Read responses until we see the one for session/new.
-	scanner := bufio.NewScanner(stdout)
-	scanner.Buffer(make([]byte, 0, 1024*1024), 4*1024*1024)
-	deadline := time.After(12 * time.Second)
-	done := make(chan []Model, 1)
-	go func() {
-		defer close(done)
-		for scanner.Scan() {
-			line := strings.TrimSpace(scanner.Text())
-			if line == "" {
-				continue
-			}
-			var env struct {
-				ID     json.Number     `json:"id"`
-				Result json.RawMessage `json:"result"`
-			}
-			if err := json.Unmarshal([]byte(line), &env); err != nil {
-				continue
-			}
-			if env.ID.String() != wantID || len(env.Result) == 0 {
-				continue
-			}
-			done <- parseACPSessionNewModels(env.Result)
-			return
-		}
-	}()
-
-	select {
-	case models := <-done:
-		if models == nil {
-			return []Model{}, nil
-		}
-		return models, nil
-	case <-deadline:
-		return []Model{}, nil
-	case <-runCtx.Done():
-		return []Model{}, nil
+	sessionResult, err := waitForResponse(sessionNewID, "session/new")
+	if err != nil {
+		return []Model{}, err
 	}
+	models := parseACPSessionNewModels(sessionResult)
+	if models == nil {
+		return []Model{}, fmt.Errorf("session/new: ACP response missing model catalog")
+	}
+	return models, nil
 }
 
 // parseACPSessionNewModels extracts the model catalog from an ACP
@@ -1195,16 +1230,18 @@ func discoverGrokModels(ctx context.Context, executablePath string) ([]Model, er
 	// handshake — prefer the API key when XAI_API_KEY is set, else the cached
 	// login token — so session/new returns the real catalog instead of being
 	// rejected (which silently falls back to grokStaticModels).
-	authMethod := grokAuthMethodCachedToken
-	if strings.TrimSpace(os.Getenv("XAI_API_KEY")) != "" {
-		authMethod = grokAuthMethodAPIKey
-	}
 	models, err := discoverACPModels(ctx, executablePath, acpDiscoveryProvider{
 		defaultBin:   "grok",
 		clientName:   "multica-model-discovery",
 		tmpdirPrefix: "multica-grok-discovery-",
 		acpArgs:      []string{"--no-auto-update", "agent", "--always-approve", "stdio"},
-		authMethodID: authMethod,
+		selectAuthMethod: func(initResult json.RawMessage) (string, bool) {
+			return selectGrokAuthMethod(
+				extractACPAuthMethods(initResult),
+				strings.TrimSpace(os.Getenv("XAI_API_KEY")) != "",
+				grokHasCachedLogin(os.Environ()),
+			)
+		},
 	})
 	if err != nil || len(models) == 0 {
 		return grokStaticModels(), nil
@@ -1229,21 +1266,19 @@ func grokStaticModels() []Model {
 	return models
 }
 
-// annotateGrokThinking attaches the fixed --effort vocabulary to
-// every discovered Grok model. Per-model capability is not exposed by
-// session/new, so the full canonical set is offered and the CLI rejects
-// unsupported levels at runtime if a model cannot reason. grok tops out at
-// `xhigh`; this list must stay in lockstep with the grok entry in
+// annotateGrokThinking attaches the conservative verified --effort vocabulary
+// to every discovered Grok model. session/new does not expose per-model
+// capabilities, while Grok 4.5 documents only low/medium/high and cannot
+// disable reasoning. Use that intersection rather than offering values that
+// can turn a valid agent configuration into a runtime error. This list must
+// stay in lockstep with the grok entry in
 // providerThinkingEnums (thinking.go) so a persisted level is never silently
 // dropped at execution by ValidateThinkingLevel.
 func annotateGrokThinking(models []Model) {
 	levels := []ThinkingLevel{
-		{Value: "none", Label: "None"},
-		{Value: "minimal", Label: "Minimal"},
 		{Value: "low", Label: "Low"},
 		{Value: "medium", Label: "Medium"},
 		{Value: "high", Label: "High"},
-		{Value: "xhigh", Label: "Extra high"},
 	}
 	for i := range models {
 		models[i].Thinking = &ModelThinking{

@@ -5,7 +5,9 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -276,7 +278,11 @@ func (b *grokBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 		// documented preference is the API key when XAI_API_KEY is set and
 		// offered, otherwise the cached login token.
 		// Ref: https://docs.x.ai/build/cli/headless-scripting
-		if methodID, ok := selectGrokAuthMethod(extractACPAuthMethods(initResult), envHasNonEmpty(childEnv, "XAI_API_KEY")); ok {
+		if methodID, ok := selectGrokAuthMethod(
+			extractACPAuthMethods(initResult),
+			envHasNonEmpty(childEnv, "XAI_API_KEY"),
+			grokHasCachedLogin(childEnv),
+		); ok {
 			if _, err := c.request(runCtx, "authenticate", map[string]any{
 				"methodId": methodID,
 				"_meta":    map[string]any{"headless": true},
@@ -479,22 +485,23 @@ func (b *grokBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 }
 
 // Grok's ACP `authenticate` method ids (from `initialize`.authMethods).
-// `xai.api_key` consumes XAI_API_KEY from the environment; `cached_token`
-// reuses the credentials written by `grok login`.
+// Current Grok Build releases advertise `grok.com` for cached interactive
+// login; older releases used `cached_token`. `xai.api_key` consumes either
+// XAI_API_KEY or a custom model's configured API key.
 const (
 	grokAuthMethodAPIKey      = "xai.api_key"
 	grokAuthMethodCachedToken = "cached_token"
+	grokAuthMethodGrokLogin   = "grok.com"
 )
 
 // selectGrokAuthMethod chooses which advertised ACP auth method to use,
-// following xAI's documented headless flow: prefer the API key when
-// XAI_API_KEY is present in the child env and the CLI offers it, otherwise
-// fall back to the cached login token. If the CLI advertises methods but
-// offers neither known id, we still return the first advertised one so a
-// future rename doesn't hard-break the handshake (the real CLI then surfaces
-// a clear error). Returns ("", false) when no methods are advertised, which
-// means the CLI needs no explicit authenticate step.
-func selectGrokAuthMethod(methods []string, haveAPIKey bool) (string, bool) {
+// following xAI's documented headless flow: prefer an explicit XAI_API_KEY,
+// then a cached interactive login, then xai.api_key for custom-model configs
+// that carry their own key. If the CLI advertises methods but offers none of
+// the known ids, return the first advertised one so a future rename surfaces a
+// provider error instead of silently skipping authentication. Returns
+// ("", false) when no methods are advertised.
+func selectGrokAuthMethod(methods []string, haveAPIKey, haveCachedLogin bool) (string, bool) {
 	if len(methods) == 0 {
 		return "", false
 	}
@@ -508,7 +515,31 @@ func selectGrokAuthMethod(methods []string, haveAPIKey bool) (string, bool) {
 	if offered[grokAuthMethodCachedToken] {
 		return grokAuthMethodCachedToken, true
 	}
+	if haveCachedLogin && offered[grokAuthMethodGrokLogin] {
+		return grokAuthMethodGrokLogin, true
+	}
+	if offered[grokAuthMethodAPIKey] {
+		return grokAuthMethodAPIKey, true
+	}
+	if offered[grokAuthMethodGrokLogin] {
+		return grokAuthMethodGrokLogin, true
+	}
 	return methods[0], true
+}
+
+func grokHasCachedLogin(env []string) bool {
+	home := ""
+	for i := len(env) - 1; i >= 0; i-- {
+		if strings.HasPrefix(env[i], "HOME=") {
+			home = strings.TrimSpace(strings.TrimPrefix(env[i], "HOME="))
+			break
+		}
+	}
+	if home == "" {
+		return false
+	}
+	info, err := os.Stat(filepath.Join(home, ".grok", "auth.json"))
+	return err == nil && !info.IsDir() && info.Size() > 0
 }
 
 // envHasNonEmpty reports whether an `os/exec`-style env slice

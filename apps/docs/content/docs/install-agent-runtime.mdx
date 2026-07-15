@@ -200,7 +200,7 @@ xAI's Grok Build CLI (`grok`). Multica drives it over ACP via `grok --no-auto-up
 |---|---|
 | Daemon looks for | `grok` |
 | Install | Install the Grok Build CLI and ensure `grok` is on `PATH` (often `~/.grok/bin`). |
-| Authentication | Run `grok login` (or complete the interactive login flow) so ACP sessions can authenticate. |
+| Authentication | Run `grok login`, set `XAI_API_KEY`, or configure a custom model with its own `api_key`; Multica selects an auth method advertised by the installed CLI. |
 | Notes | Override the binary with `MULTICA_GROK_PATH` and the default model with `MULTICA_GROK_MODEL` (e.g. `grok-4.5`). Minimum CLI version: `0.2.89`. |
 
 ## After installing

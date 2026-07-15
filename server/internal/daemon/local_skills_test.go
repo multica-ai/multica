@@ -202,8 +202,8 @@ func TestLocalSkills_DiscoversACPProviderRoots(t *testing.T) {
 		},
 		{
 			provider: "grok",
-			root:     filepath.Join(".grok", "skills"),
-			wantPath: "~/.grok/skills/review-helper",
+			root:     filepath.Join(".agents", "skills"),
+			wantPath: "~/.agents/skills/review-helper",
 			wantName: "Grok Review",
 		},
 	}

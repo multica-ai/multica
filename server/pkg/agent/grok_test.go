@@ -414,37 +414,94 @@ func TestGrokAuthFailureFailsTask(t *testing.T) {
 func TestGrokSelectAuthMethod(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
-		name    string
-		methods []string
-		haveKey bool
-		wantID  string
-		wantOK  bool
+		name      string
+		methods   []string
+		haveKey   bool
+		haveLogin bool
+		wantID    string
+		wantOK    bool
 	}{
-		{"none advertised", nil, false, "", false},
-		{"cached only", []string{"cached_token"}, false, "cached_token", true},
-		{"api key preferred when present", []string{"cached_token", "xai.api_key"}, true, "xai.api_key", true},
-		{"api key ignored without env", []string{"cached_token", "xai.api_key"}, false, "cached_token", true},
-		{"unknown falls back to first", []string{"future_method"}, true, "future_method", true},
+		{"none advertised", nil, false, false, "", false},
+		{"cached only", []string{"cached_token"}, false, false, "cached_token", true},
+		{"api key preferred when present", []string{"cached_token", "xai.api_key"}, true, false, "xai.api_key", true},
+		{"legacy cached method", []string{"cached_token", "xai.api_key"}, false, false, "cached_token", true},
+		{"current login preferred when cached", []string{"xai.api_key", "grok.com"}, false, true, "grok.com", true},
+		{"configured model api key fallback", []string{"xai.api_key", "grok.com"}, false, false, "xai.api_key", true},
+		{"unknown falls back to first", []string{"future_method"}, true, false, "future_method", true},
 	}
 	for _, tc := range cases {
-		got, ok := selectGrokAuthMethod(tc.methods, tc.haveKey)
+		got, ok := selectGrokAuthMethod(tc.methods, tc.haveKey, tc.haveLogin)
 		if got != tc.wantID || ok != tc.wantOK {
-			t.Errorf("%s: selectGrokAuthMethod(%v, %v) = (%q, %v), want (%q, %v)",
-				tc.name, tc.methods, tc.haveKey, got, ok, tc.wantID, tc.wantOK)
+			t.Errorf("%s: selectGrokAuthMethod(%v, %v, %v) = (%q, %v), want (%q, %v)",
+				tc.name, tc.methods, tc.haveKey, tc.haveLogin, got, ok, tc.wantID, tc.wantOK)
 		}
+	}
+}
+
+func TestDiscoverGrokModelsUsesAdvertisedAuthSequentially(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XAI_API_KEY", "")
+
+	fakePath := filepath.Join(t.TempDir(), "grok")
+	writeTestExecutable(t, fakePath, []byte(`#!/bin/sh
+authenticated=0
+while IFS= read -r line; do
+  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
+  case "$line" in
+    *'"method":"initialize"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":1,"authMethods":[{"id":"grok.com","name":"Grok login"}],"agentCapabilities":{"loadSession":true}}}\n' "$id"
+      ;;
+    *'"method":"authenticate"'*)
+      case "$line" in
+        *'"methodId":"grok.com"'*)
+          authenticated=1
+          printf '{"jsonrpc":"2.0","id":%s,"result":{}}\n' "$id"
+          ;;
+        *)
+          printf '{"jsonrpc":"2.0","id":%s,"error":{"code":-32602,"message":"method not advertised"}}\n' "$id"
+          ;;
+      esac
+      ;;
+    *'"method":"session/new"'*)
+      if [ "$authenticated" != 1 ]; then
+        printf '{"jsonrpc":"2.0","id":%s,"error":{"code":-32000,"message":"authenticate first"}}\n' "$id"
+        exit 0
+      fi
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"ses_discovery","models":{"currentModelId":"sub2api-grok","availableModels":[{"modelId":"sub2api-grok","name":"Grok 4.5 via Sub2API"}]}}}\n' "$id"
+      exit 0
+      ;;
+  esac
+done
+`))
+
+	models, err := discoverGrokModels(context.Background(), fakePath)
+	if err != nil {
+		t.Fatalf("discover grok models: %v", err)
+	}
+	if len(models) != 1 || models[0].ID != "sub2api-grok" || !models[0].Default {
+		t.Fatalf("expected authenticated dynamic catalog, got %+v", models)
+	}
+	if models[0].Thinking == nil {
+		t.Fatal("expected Grok thinking catalog")
+	}
+	var levels []string
+	for _, level := range models[0].Thinking.SupportedLevels {
+		levels = append(levels, level.Value)
+	}
+	if got, want := strings.Join(levels, ","), "low,medium,high"; got != want {
+		t.Fatalf("thinking levels = %q, want %q", got, want)
 	}
 }
 
 func TestGrokIsKnownThinkingValue(t *testing.T) {
 	t.Parallel()
-	for _, level := range []string{"", "none", "minimal", "low", "medium", "high", "xhigh"} {
+	for _, level := range []string{"", "low", "medium", "high"} {
 		if !IsKnownThinkingValue("grok", level) {
 			t.Errorf("IsKnownThinkingValue(grok, %q) = false", level)
 		}
 	}
-	// grok tops out at xhigh; "max" is not a grok --effort level, so it must
-	// not pass the persist gate (it would otherwise be dropped at execution).
-	for _, level := range []string{"bogus", "max"} {
+	for _, level := range []string{"none", "minimal", "xhigh", "max", "bogus"} {
 		if IsKnownThinkingValue("grok", level) {
 			t.Errorf("IsKnownThinkingValue(grok, %q) = true, want rejected", level)
 		}
