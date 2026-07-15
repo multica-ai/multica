@@ -79,6 +79,33 @@ func TestCheckMinCLIVersion(t *testing.T) {
 	}
 }
 
+func TestCheckMinServerVersion(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   string
+		wantErr error
+	}{
+		{"tagged release at minimum", "0.3.28", nil},
+		{"tagged release above minimum", "0.4.2", nil},
+		{"v-prefixed above minimum", "v0.4.2", nil},
+		{"below minimum (the VWO-364 skew)", "0.3.22", ErrServerVersionTooOld},
+		{"well below minimum", "v0.3.0", ErrServerVersionTooOld},
+		{"empty (server predates the field / no stamp)", "", ErrServerVersionUnknown},
+		{"unparsable", "not-a-version", ErrServerVersionUnknown},
+		{"git-describe dev build passes", "v0.4.2-5-gabc1234", nil},
+		{"git-describe dirty dev build passes", "v0.4.2-5-gabc1234-dirty", nil},
+	}
+	for _, tt := range tests {
+		err := CheckMinServerVersion(tt.input)
+		if tt.wantErr == nil && err != nil {
+			t.Errorf("%s: CheckMinServerVersion(%q) = %v, want nil", tt.name, tt.input, err)
+		}
+		if tt.wantErr != nil && !errors.Is(err, tt.wantErr) {
+			t.Errorf("%s: CheckMinServerVersion(%q) = %v, want %v", tt.name, tt.input, err, tt.wantErr)
+		}
+	}
+}
+
 func TestExtractVersionLine(t *testing.T) {
 	tests := []struct {
 		name string
