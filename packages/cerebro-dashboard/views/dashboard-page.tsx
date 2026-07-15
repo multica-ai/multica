@@ -62,7 +62,7 @@ export function DashboardPage() {
   const data = overview.data;
 
   return (
-    <div className="flex h-full flex-col">
+    <div data-testid="dashboard-content" className="flex h-full flex-col bg-[#fbfbfa] text-[#242228]">
       <PageHeader className="justify-between gap-3">
         <div className="flex shrink-0 items-center gap-3">
           <div className="flex min-w-0 flex-col">
@@ -226,12 +226,12 @@ export function DashboardPage() {
   );
 }
 
-function formatPeriodLabel(start: string, end: string): string {
+export function formatPeriodLabel(start: string, end: string): string {
   try {
     const s = new Date(start);
     const e = new Date(end);
     const fmt = (d: Date) =>
-      d.toLocaleDateString(undefined, { day: "2-digit", month: "short" });
+      d.toLocaleDateString("en-GB", { day: "2-digit", month: "short", timeZone: "UTC" });
     return `${fmt(s)} – ${fmt(e)}`;
   } catch {
     return "";

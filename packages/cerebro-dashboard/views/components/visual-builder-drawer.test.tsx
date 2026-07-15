@@ -20,6 +20,14 @@ describe("VisualBuilderDrawer", () => {
     render(<VisualBuilderDrawer catalog={catalog} onClose={onClose} onSave={onSave} />);
 
     expect(screen.getByRole("complementary", { name: "New visual" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Line chart" }).className).toContain("bg-[#f0efed]");
+    expect(screen.getByRole("button", { name: "Add visual to Dashboard" }).className).toContain("bg-[#6557d8]");
+    for (const label of ["Metric", "Dimension", "Breakdown", "Grain"]) {
+      const field = screen.getByLabelText(label);
+      expect(field.className).toContain("appearance-none");
+      expect(field.className).toContain("border-0");
+      expect(field.className).toContain("bg-transparent");
+    }
     fireEvent.click(screen.getByRole("button", { name: "Line chart" }));
     fireEvent.change(screen.getByLabelText("Metric"), { target: { value: "runs" } });
     fireEvent.change(screen.getByLabelText("Dimension"), { target: { value: "project" } });

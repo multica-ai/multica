@@ -23,7 +23,7 @@ export function DashboardTabBar() {
           className={cn(
             "flex items-center border-b-2 px-0 text-xs font-medium transition-colors",
             t.id === tab
-              ? "border-primary text-foreground"
+              ? "border-[#6557d8] text-foreground"
               : "border-transparent text-muted-foreground hover:text-foreground",
           )}
         >

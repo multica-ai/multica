@@ -54,7 +54,7 @@ export function RunsToolbar({
           <option value="7d">Last 7 days</option>
           <option value="30d">Last 30 days</option>
         </select>
-        <button type="button" aria-expanded={adding} onClick={() => setAdding((open) => !open)} className="flex h-8 items-center gap-1.5 rounded-md bg-primary px-3 text-xs font-semibold text-primary-foreground hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+        <button type="button" aria-expanded={adding} onClick={() => setAdding((open) => !open)} className="flex h-8 items-center gap-1.5 rounded-md bg-[#6557d8] px-3 text-xs font-semibold text-white hover:bg-[#5749c7] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#6557d8]">
           <Plus className="size-3.5" /> Add filter
         </button>
         <button type="button" onClick={onCustomize} className="h-8 rounded-md border bg-background px-3 text-xs font-medium hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">Customize layout</button>
@@ -65,7 +65,7 @@ export function RunsToolbar({
             type="button"
             aria-label={`${titleCase(chip.dimension)}: ${chip.value} ×`}
             onClick={() => onRemoveFilter(chip.dimension, chip.value, chip.operator)}
-            className={`h-8 rounded-md border px-2.5 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${chip.operator === "not_in" ? "border-amber-500/50 bg-amber-500/10 text-amber-700" : "border-primary/30 bg-primary/10 text-primary"}`}
+            className={`h-8 rounded-md border px-2.5 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#6557d8] ${chip.operator === "not_in" ? "border-amber-400 bg-amber-50 text-amber-800" : "border-[rgba(101,87,216,0.35)] bg-[rgba(101,87,216,0.10)] text-[#4e43ad]"}`}
           >
             {titleCase(chip.dimension)}: {chip.value} ×
           </button>
@@ -94,7 +94,7 @@ export function RunsToolbar({
             <option value="not_in">is not</option>
           </select>
           <input autoFocus aria-label="Filter value" value={value} onChange={(event) => setValue(event.target.value)} placeholder="Type a value" className="h-9 rounded-md border bg-background px-3 text-xs" />
-          <button type="submit" className="h-9 rounded-md bg-primary px-3 text-xs font-semibold text-primary-foreground">Apply filter</button>
+          <button type="submit" className="h-9 rounded-md bg-[#6557d8] px-3 text-xs font-semibold text-white">Apply filter</button>
         </form>
       )}
     </div>

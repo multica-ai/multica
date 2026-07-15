@@ -71,6 +71,7 @@ export function RunsControlRoom({ workspaceId, filters, onFiltersChange, onNewVi
   const [heatGrain, setHeatGrain] = useState<HeatGrain>("hour");
   const [search, setSearch] = useState("");
   const [runsCursors, setRunsCursors] = useState<string[]>([]);
+  const [panelCursors, setPanelCursors] = useState<Record<string, string[]>>({});
   const [selectedRun, setSelectedRun] = useState<RunRow | null>(null);
   const [compactLayout, setCompactLayout] = useState(false);
 
@@ -90,6 +91,10 @@ export function RunsControlRoom({ workspaceId, filters, onFiltersChange, onNewVi
   const baseFilters = useMemo(() => [...filters, sinceFilter], [filters, sinceFilter]);
 
   const runsCursor = runsCursors.at(-1);
+  const panelPage = (key: string, limit: number) => ({
+    limit,
+    ...(panelCursors[key]?.at(-1) ? { cursor: panelCursors[key]!.at(-1) } : {}),
+  });
   const build = (
     metrics: AnalyticsMetric[],
     dimensions: AnalyticsDimension[],
@@ -116,31 +121,31 @@ export function RunsControlRoom({ workspaceId, filters, onFiltersChange, onNewVi
       // 1 activity heatmap
       analyticsQueryOptions(workspaceId, build(["runs"], ["time"], {
         grain: heatGrain,
-        page: { limit: heatGrain === "hour" ? 168 : heatGrain === "day" ? 62 : 12 },
+        page: panelPage("activity", heatGrain === "hour" ? 168 : heatGrain === "day" ? 62 : 12),
         sort: [{ field: "time", direction: "asc" }],
       })),
       // 2 runs & savings over time
       analyticsQueryOptions(workspaceId, build(["runs", "saved_cents"], ["time"], {
         grain: "day",
-        page: { limit: 62 },
+        page: panelPage("time-series", 62),
         sort: [{ field: "time", direction: "asc" }],
       })),
       // 3 by model
-      analyticsQueryOptions(workspaceId, build(["runs"], ["model"], { page: { limit: 6 } })),
+      analyticsQueryOptions(workspaceId, build(["runs"], ["model"], { page: panelPage("model", 6) })),
       // 4 by outcome
-      analyticsQueryOptions(workspaceId, build(["runs"], ["status"], { page: { limit: 6 } })),
+      analyticsQueryOptions(workspaceId, build(["runs"], ["status"], { page: panelPage("outcome", 6) })),
       // 5 usage by source
-      analyticsQueryOptions(workspaceId, build(["runs"], ["source"], { page: { limit: 8 } })),
+      analyticsQueryOptions(workspaceId, build(["runs"], ["source"], { page: panelPage("sources", 8) })),
       // 6 people x source
-      analyticsQueryOptions(workspaceId, build(["runs"], ["person", "source"], { page: { limit: 60 } })),
-      // 7 runtime / provider / model / skill chips
-      analyticsQueryOptions(workspaceId, build(["runs", "skill_invocations"], ["runtime", "provider", "model", "skill"], { page: { limit: 12 } })),
+      analyticsQueryOptions(workspaceId, build(["runs"], ["person", "source"], { page: panelPage("people-source", 60) })),
+      // 7 provider / model / skill chips
+      analyticsQueryOptions(workspaceId, build(["runs", "skill_invocations"], ["provider", "model", "skill"], { page: panelPage("chips", 12) })),
       // 8 people x project
-      analyticsQueryOptions(workspaceId, build(["runs", "cost_cents", "quality_pass_rate"], ["person", "project"], { page: { limit: 200 } })),
+      analyticsQueryOptions(workspaceId, build(["runs", "cost_cents", "quality_pass_rate"], ["person", "project"], { page: panelPage("people-project", 200) })),
       // 9 quality observations by category
-      analyticsQueryOptions(workspaceId, build(["runs", "quality_pass_rate"], ["quality_category"], { page: { limit: 8 } })),
+      analyticsQueryOptions(workspaceId, build(["runs", "quality_pass_rate"], ["quality_category"], { page: panelPage("quality", 8) })),
       // 10 blocking categories by type
-      analyticsQueryOptions(workspaceId, build(["runs"], ["quality_type"], { page: { limit: 8 } })),
+      analyticsQueryOptions(workspaceId, build(["runs"], ["quality_type"], { page: panelPage("blocking", 8) })),
       // 11 matching runs
       analyticsQueryOptions(workspaceId, build(
         ["cost_cents", "skill_invocations", "input_tokens", "output_tokens", "saved_cents", "duration_seconds"],
@@ -158,10 +163,12 @@ export function RunsControlRoom({ workspaceId, filters, onFiltersChange, onNewVi
     if (!value) return;
     onFiltersChange((current) => toggleAnalyticsFilter(current, dimension, value, operator));
     setRunsCursors([]);
+    setPanelCursors({});
   };
   const onRemoveFilter = (dimension: AnalyticsDimension, value: string, operator: AnalyticsOperator) => {
     onFiltersChange((current) => removeAnalyticsFilterValue(current, dimension, value, operator));
     setRunsCursors([]);
+    setPanelCursors({});
   };
   const onTimeBucketFilter = (value: string) => {
     const start = new Date(value);
@@ -176,6 +183,21 @@ export function RunsControlRoom({ workspaceId, filters, onFiltersChange, onNewVi
       { dimension: "time", operator: "lte", values: [end.toISOString()] },
     ]);
     setRunsCursors([]);
+    setPanelCursors({});
+  };
+
+  const nextPanel = (key: string, result: Result) => {
+    if (!result?.next_cursor) return;
+    setPanelCursors((current) => ({
+      ...current,
+      [key]: [...(current[key] ?? []), result.next_cursor as string],
+    }));
+  };
+  const previousPanel = (key: string) => {
+    setPanelCursors((current) => ({
+      ...current,
+      [key]: (current[key] ?? []).slice(0, -1),
+    }));
   };
 
   const kpiRow = (kpi?.rows ?? [])[0] ?? {};
@@ -190,7 +212,7 @@ export function RunsControlRoom({ workspaceId, filters, onFiltersChange, onNewVi
           filters={filters}
           onAddFilter={onFilter}
           onRemoveFilter={onRemoveFilter}
-          onClear={() => onFiltersChange([])}
+          onClear={() => { onFiltersChange([]); setRunsCursors([]); setPanelCursors({}); }}
           onCustomize={() => setCompactLayout((compact) => !compact)}
           onNewVisual={() => {
             setSelectedRun(null);
@@ -210,27 +232,39 @@ export function RunsControlRoom({ workspaceId, filters, onFiltersChange, onNewVi
         {/* Activity grid */}
         <Panel
           title="Activity grid"
-          meta="Runs by time · click a cell to filter"
-          right={
-            <Segments
-              options={["hour", "day", "month"] as HeatGrain[]}
-              value={heatGrain}
-              onChange={(value) => setHeatGrain(value)}
-            />
-          }
+          meta="Runs by time · click cell to drill down"
+          right={<PanelPager label="Activity grid" page={(panelCursors.activity?.length ?? 0) + 1} canPrevious={(panelCursors.activity?.length ?? 0) > 0} canNext={Boolean(heat?.next_cursor)} onPrevious={() => previousPanel("activity")} onNext={() => nextPanel("activity", heat)} onConfigure={onNewVisual} />}
         >
+          <div className="flex flex-wrap items-center justify-between gap-2 px-4 pt-4">
+            <Segments options={["hour", "day", "month"] as HeatGrain[]} value={heatGrain} onChange={(value) => { setHeatGrain(value); setPanelCursors((current) => ({ ...current, activity: [] })); }} />
+            <div className="flex flex-wrap gap-1.5 text-[10px]">
+              <span className="rounded border bg-[#f3f2f0] px-2 py-1">Metric: Runs</span>
+              <span className="rounded border bg-[#f3f2f0] px-2 py-1">Breakdown: Person</span>
+              <span className="rounded border bg-[#f3f2f0] px-2 py-1">Color: Volume</span>
+            </div>
+          </div>
           <ActivityHeatmap result={heat} onFilter={onTimeBucketFilter} />
+          <PanelFooterPager
+            label="Activity grid"
+            page={(panelCursors.activity?.length ?? 0) + 1}
+            canPrevious={(panelCursors.activity?.length ?? 0) > 0}
+            canNext={Boolean(heat?.next_cursor)}
+            onPrevious={() => previousPanel("activity")}
+            onNext={() => nextPanel("activity", heat)}
+            summary={heatGrain === "hour" ? "Showing hours 00–23 across 30 days" : `Showing ${heatGrain} buckets across selected range`}
+          />
         </Panel>
 
         <div className="grid gap-3 xl:grid-cols-3">
           {/* Runs & cost over time */}
           <div className="xl:col-span-2">
-            <Panel title="Runs & cost over time" meta="Daily runs and measured savings">
+            <Panel title="Runs & cost over time" meta="Click any point to filter">
               <TimeSeries result={timeSeries} />
               <div className="grid grid-cols-2 gap-4 border-t p-4">
                 <BarList title="By model" result={byModel} dimension="model" metric="runs" onFilter={onFilter} />
                 <BarList title="By outcome" result={byOutcome} dimension="status" metric="runs" onFilter={onFilter} colorByStatus />
               </div>
+              <PanelFooterPager label="Runs and cost" page={(panelCursors["time-series"]?.length ?? 0) + 1} canPrevious={(panelCursors["time-series"]?.length ?? 0) > 0} canNext={Boolean(timeSeries?.next_cursor)} onPrevious={() => previousPanel("time-series")} onNext={() => nextPanel("time-series", timeSeries)} />
             </Panel>
           </div>
           {/* People & sources */}
@@ -251,7 +285,7 @@ export function RunsControlRoom({ workspaceId, filters, onFiltersChange, onNewVi
                 ))}
               </div>
               <PeopleSourceMatrix result={peopleSource} onFilter={onFilter} />
-              <Eyebrow>Runtime · provider · model · skill</Eyebrow>
+              <Eyebrow>Provider · model · skill</Eyebrow>
               <div className="flex flex-wrap gap-1.5">
                 {chipItems(chips).map((chip) => (
                   <button
@@ -265,15 +299,18 @@ export function RunsControlRoom({ workspaceId, filters, onFiltersChange, onNewVi
                 ))}
               </div>
             </div>
+            <PanelFooterPager label="People and sources" page={(panelCursors.sources?.length ?? 0) + 1} canPrevious={(panelCursors.sources?.length ?? 0) > 0} canNext={Boolean(bySource?.next_cursor)} onPrevious={() => previousPanel("sources")} onNext={() => nextPanel("sources", bySource)} />
           </Panel>
         </div>
 
         <div className="grid gap-3 lg:grid-cols-2">
-          <Panel title="People performance" meta="Click a person to filter">
+          <Panel title="People performance" meta="Click person or metric to filter">
             <PeopleTable result={peopleProject} onFilter={onFilter} />
+            <PanelFooterPager label="People performance" page={(panelCursors["people-project"]?.length ?? 0) + 1} canPrevious={(panelCursors["people-project"]?.length ?? 0) > 0} canNext={Boolean(peopleProject?.next_cursor)} onPrevious={() => previousPanel("people-project")} onNext={() => nextPanel("people-project", peopleProject)} />
           </Panel>
           <Panel title="Projects" meta="People, usage & quality">
             <ProjectTable result={peopleProject} onFilter={onFilter} />
+            <PanelFooterPager label="Projects" page={(panelCursors["people-project"]?.length ?? 0) + 1} canPrevious={(panelCursors["people-project"]?.length ?? 0) > 0} canNext={Boolean(peopleProject?.next_cursor)} onPrevious={() => previousPanel("people-project")} onNext={() => nextPanel("people-project", peopleProject)} />
           </Panel>
         </div>
 
@@ -288,7 +325,7 @@ export function RunsControlRoom({ workspaceId, filters, onFiltersChange, onNewVi
               </p>
             </div>
             <div className="p-4">
-              <Eyebrow>Skill-learning observations by category</Eyebrow>
+              <Eyebrow>Categorized skill-learning observations</Eyebrow>
               <div className="mt-2 space-y-2">
                 {(qualityObs?.rows ?? []).map((row, index) => {
                   const rate = num(row.quality_pass_rate);
@@ -328,6 +365,7 @@ export function RunsControlRoom({ workspaceId, filters, onFiltersChange, onNewVi
               </div>
             </div>
           </div>
+          <PanelFooterPager label="Quality" page={(panelCursors.quality?.length ?? 0) + 1} canPrevious={(panelCursors.quality?.length ?? 0) > 0} canNext={Boolean(qualityObs?.next_cursor)} onPrevious={() => previousPanel("quality")} onNext={() => nextPanel("quality", qualityObs)} />
         </Panel>
 
         {/* Matching runs */}
@@ -403,6 +441,26 @@ function Panel({
   );
 }
 
+export function PanelPager({ label = "Activity grid", page, canPrevious, canNext, onPrevious, onNext, onConfigure }: { label?: string; page: number; canPrevious: boolean; canNext: boolean; onPrevious: () => void; onNext: () => void; onConfigure?: () => void }) {
+  return (
+    <div className="flex items-center gap-1 text-[10px] text-muted-foreground">
+      {onConfigure && <button type="button" aria-label={`Configure ${label}`} onClick={onConfigure} className="mr-1 rounded border bg-[#f3f2f0] px-2 py-1 text-[#4b4852] hover:border-[#6557d8]">Configure</button>}
+      <button type="button" aria-label={`Previous ${label} page`} disabled={!canPrevious} onClick={onPrevious} className="rounded border p-1 disabled:opacity-40"><ChevronLeft className="size-3" /></button>
+      <span className="min-w-12 text-center">Page {page}</span>
+      <button type="button" aria-label={`Next ${label} page`} disabled={!canNext} onClick={onNext} className="rounded border p-1 disabled:opacity-40"><ChevronRight className="size-3" /></button>
+    </div>
+  );
+}
+
+export function PanelFooterPager({ summary, ...props }: Omit<React.ComponentProps<typeof PanelPager>, "onConfigure"> & { summary?: string }) {
+  return (
+    <footer className={`flex items-center border-t px-3 py-2 ${summary ? "justify-between" : "justify-end"}`}>
+      {summary && <span className="text-[10px] text-muted-foreground">{summary}</span>}
+      <PanelPager {...props} />
+    </footer>
+  );
+}
+
 function Kpi({ label, value, note, accent }: { label: string; value: string; note: string; accent?: string }) {
   return (
     <div className="p-4">
@@ -425,7 +483,7 @@ function Segments<T extends string>({ options, value, onChange }: { options: T[]
           key={option}
           type="button"
           onClick={() => onChange(option)}
-          className={`h-7 px-2.5 text-[11px] capitalize ${option === value ? "bg-primary/10 font-semibold text-primary" : "text-muted-foreground hover:text-foreground"}`}
+          className={`h-7 px-2.5 text-[11px] capitalize ${option === value ? "bg-[rgba(101,87,216,0.10)] font-semibold text-[#6557d8]" : "text-muted-foreground hover:text-foreground"}`}
         >
           {option}
         </button>
@@ -442,10 +500,10 @@ export function ActivityHeatmap({ result, onFilter }: { result: Result; onFilter
   const level = (value: number) => {
     if (max === 0 || value === 0) return "bg-muted";
     const ratio = value / max;
-    if (ratio > 0.75) return "bg-primary";
-    if (ratio > 0.5) return "bg-primary/70";
-    if (ratio > 0.25) return "bg-primary/45";
-    return "bg-primary/20";
+    if (ratio > 0.75) return "bg-[#6557d8]";
+    if (ratio > 0.5) return "bg-[#8e82df]";
+    if (ratio > 0.25) return "bg-[#bdb5ef]";
+    return "bg-[#ddd9fa]";
   };
   if (rows.length === 0) {
     return <p className="p-6 text-center text-xs text-muted-foreground">No activity in this range.</p>;
@@ -474,7 +532,7 @@ export function ActivityHeatmap({ result, onFilter }: { result: Result; onFilter
   );
 }
 
-function TimeSeries({ result }: { result: Result }) {
+export function TimeSeries({ result }: { result: Result }) {
   const series = (result?.rows ?? []).map((row) => ({
     t: shortDay(str(row.time)),
     Runs: num(row.runs),
@@ -484,16 +542,20 @@ function TimeSeries({ result }: { result: Result }) {
     return <div className="flex h-44 items-center justify-center text-xs text-muted-foreground">No runs in this range.</div>;
   }
   return (
-    <div className="h-44 p-3">
+    <div aria-label="Runs and savings trend" className="relative h-44 p-3 pt-8">
+      <div className="absolute right-4 top-3 flex gap-3 text-[10px] text-muted-foreground">
+        <span><i className="mr-1 inline-block size-2 rounded-full bg-[#8b7cf6]" />Runs</span>
+        <span><i className="mr-1 inline-block size-2 rounded-full bg-[#65c18c]" />Savings</span>
+      </div>
       <ResponsiveContainer width="100%" height="100%">
         <LineChart data={series} margin={{ top: 6, right: 8, bottom: 0, left: -12 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-          <XAxis dataKey="t" tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }} tickLine={false} axisLine={{ stroke: "hsl(var(--border))" }} minTickGap={24} />
-          <YAxis yAxisId="left" tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }} tickLine={false} axisLine={false} width={34} />
-          <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }} tickLine={false} axisLine={false} width={34} />
+          <XAxis dataKey="t" tick={false} tickLine={false} axisLine={false} />
+          <YAxis yAxisId="left" tick={false} tickLine={false} axisLine={false} width={0} />
+          <YAxis yAxisId="right" orientation="right" tick={false} tickLine={false} axisLine={false} width={0} />
           <Tooltip contentStyle={{ fontSize: 11 }} />
-          <Line yAxisId="left" type="monotone" dataKey="Runs" stroke="hsl(var(--primary))" strokeWidth={2} dot={false} />
-          <Line yAxisId="right" type="monotone" dataKey="Savings" stroke="hsl(var(--chart-2))" strokeWidth={2} dot={false} />
+          <Line yAxisId="left" type="monotone" dataKey="Runs" stroke="#8b7cf6" strokeWidth={2} dot={false} activeDot={{ r: 4 }} />
+          <Line yAxisId="right" type="monotone" dataKey="Savings" stroke="#65c18c" strokeWidth={2} dot={false} activeDot={{ r: 4 }} />
         </LineChart>
       </ResponsiveContainer>
     </div>
@@ -518,7 +580,7 @@ function BarList({
   const rows = result?.rows ?? [];
   const max = rows.reduce((acc, row) => Math.max(acc, num(row[metric])), 0) || 1;
   const color = (value: string) => {
-    if (!colorByStatus) return "bg-primary";
+    if (!colorByStatus) return "bg-[#6557d8]";
     const v = value.toLowerCase();
     if (v === "completed") return "bg-emerald-500";
     if (v === "failed" || v === "error") return "bg-rose-500";
@@ -638,7 +700,7 @@ function aggregatePeopleProject(result: Result) {
   return { people, projects };
 }
 
-function PeopleTable({ result, onFilter }: { result: Result; onFilter: (dimension: AnalyticsDimension, value: string) => void }) {
+export function PeopleTable({ result, onFilter }: { result: Result; onFilter: (dimension: AnalyticsDimension, value: string) => void }) {
   const { people } = aggregatePeopleProject(result);
   const rows = [...people.entries()].sort((a, b) => b[1].runs - a[1].runs).slice(0, 6);
   return (
@@ -651,7 +713,12 @@ function PeopleTable({ result, onFilter }: { result: Result; onFilter: (dimensio
           const rate = agg.passRuns ? agg.passSum / agg.passRuns : 0;
           return (
             <tr key={person} className="cursor-pointer border-t hover:bg-primary/5" onClick={() => onFilter("person", person)}>
-              <td className="px-4 py-2 font-medium">{person}</td>
+              <td className="px-4 py-2 font-medium">
+                <span className="mr-2 inline-grid size-[22px] place-items-center rounded-full bg-[rgba(101,87,216,0.10)] font-semibold text-[#6557d8]">
+                  {person.charAt(0).toUpperCase() || "?"}
+                </span>
+                {person}
+              </td>
               <td className="px-4 py-2 tabular-nums">{agg.projects.size}</td>
               <td className="px-4 py-2 font-mono">{compact(agg.runs)}</td>
               <td className="px-4 py-2 font-mono">{dollars(agg.cost)}</td>
@@ -788,13 +855,19 @@ function RunsTable({
   );
 }
 
-function Donut({ value }: { value: number }) {
+export function Donut({ value }: { value: number }) {
   const pctValue = Math.round(value * 100);
+  const reviseEnd = pctValue + Math.round((100 - pctValue) * 0.65);
   return (
     <div
+      aria-label={`Judge gate outcome ${pctValue}%`}
       className="relative mx-auto mt-2 size-28 rounded-full"
-      style={{ background: `conic-gradient(hsl(var(--chart-2)) 0 ${pctValue}%, hsl(var(--muted)) ${pctValue}% 100%)` }}
     >
+      <svg aria-hidden="true" viewBox="0 0 112 112" className="size-full -rotate-90">
+        <circle cx="56" cy="56" r="48" pathLength="100" fill="none" stroke="#ff3b68" strokeWidth="16" />
+        <circle cx="56" cy="56" r="48" pathLength="100" fill="none" stroke="#f0b429" strokeWidth="16" strokeDasharray={`${reviseEnd} ${100 - reviseEnd}`} />
+        <circle cx="56" cy="56" r="48" pathLength="100" fill="none" stroke="#00a56a" strokeWidth="16" strokeDasharray={`${pctValue} ${100 - pctValue}`} />
+      </svg>
       <div className="absolute inset-4 grid place-items-center rounded-full bg-card font-mono text-lg font-bold">{pctValue}%</div>
     </div>
   );
@@ -804,7 +877,7 @@ function Th({ children }: { children: React.ReactNode }) {
   return <th className="px-4 py-2 font-medium">{children}</th>;
 }
 function Badge({ children }: { children: React.ReactNode }) {
-  return <span className="rounded bg-primary/10 px-1.5 py-0.5 text-[10px] text-primary">{children}</span>;
+  return <span className="rounded bg-[#f1efff] px-1.5 py-0.5 text-[10px] text-[#5748ce]">{children}</span>;
 }
 function Cell({ children, onClick, badge }: { children: React.ReactNode; onClick: (event: React.MouseEvent) => void; badge?: boolean }) {
   return (

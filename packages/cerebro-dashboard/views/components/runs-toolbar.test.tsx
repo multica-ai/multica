@@ -43,4 +43,28 @@ describe("RunsToolbar", () => {
     fireEvent.click(screen.getByRole("button", { name: "Apply filter" }));
     expect(onAddFilter).toHaveBeenCalledWith("provider", "Anthropic", "not_in");
   });
+
+  it("uses the approved mockup accent colors for actions and filter chips", () => {
+    render(
+      <RunsToolbar
+        range="30d"
+        onRangeChange={vi.fn()}
+        filters={[
+          { dimension: "person", operator: "in", values: ["Lone"] },
+          { dimension: "status", operator: "not_in", values: ["Cancelled"] },
+        ]}
+        onAddFilter={vi.fn()}
+        onRemoveFilter={vi.fn()}
+        onClear={vi.fn()}
+        onCustomize={vi.fn()}
+        onNewVisual={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "Add filter" }).className).toContain("bg-[#6557d8]");
+    expect(screen.getByRole("button", { name: "Person: Lone ×" }).className).toContain("border-[rgba(101,87,216,0.35)]");
+    expect(screen.getByRole("button", { name: "Person: Lone ×" }).className).toContain("bg-[rgba(101,87,216,0.10)]");
+    expect(screen.getByRole("button", { name: "Person: Lone ×" }).className).not.toContain("bg-[#6557d8]");
+    expect(screen.getByRole("button", { name: "Status: Cancelled ×" }).className).toContain("border-amber-400");
+  });
 });

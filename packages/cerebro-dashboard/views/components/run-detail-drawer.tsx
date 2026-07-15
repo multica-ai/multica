@@ -64,6 +64,7 @@ export function RunDetailDrawer({
 
   const debugLink = str(run.debug_link);
   const trace = str(run.trace);
+  const traceHref = isUrl(trace) ? trace : debugLink;
   const reference = str(run.reference_label) ?? str(run.reference) ?? "Run";
   const status = str(run.status) ?? "unknown";
   const person = str(run.person) ?? "Unknown";
@@ -101,16 +102,10 @@ export function RunDetailDrawer({
 
         <Section title="Debug links">
           {debugLink ? (
-            <a
-              href={debugLink}
-              className="flex items-center justify-between rounded-md border bg-muted/30 px-3 py-2 hover:border-primary hover:text-primary"
-            >
-              <span className="min-w-0">
-                <span className="block truncate text-xs font-medium">{reference}</span>
-                <span className="block text-[10px] text-muted-foreground">Issue / thread context</span>
-              </span>
-              <span className="text-xs font-medium">Open →</span>
-            </a>
+            <div className="space-y-2">
+              <DebugLink href={debugLink} title={reference} description="Issue / thread context" action="Open →" />
+              <DebugLink href={debugLink} title="Triggering comment" description="Run source conversation" action="Open thread →" />
+            </div>
           ) : (
             <p className="text-xs text-muted-foreground">No linked issue or thread.</p>
           )}
@@ -118,9 +113,9 @@ export function RunDetailDrawer({
 
         <Section title="Execution">
           <Dl>
+            <Row label="Runtime" value={str(run.runtime) ?? "—"} />
             <Row label="Provider" value={str(run.provider) ?? "—"} />
             <Row label="Model" value={str(run.model) ?? "—"} />
-            <Row label="Runtime" value={str(run.runtime) ?? "—"} />
             <Row label="Duration" value={duration(run.duration_seconds)} />
           </Dl>
         </Section>
@@ -161,12 +156,12 @@ export function RunDetailDrawer({
           </ol>
         </Section>
 
-        {isUrl(trace) ? (
+        {traceHref ? (
           <a
-            href={trace}
-            className="flex h-9 items-center justify-center rounded-md bg-primary text-xs font-semibold text-primary-foreground hover:opacity-90"
+            href={traceHref}
+            className="flex h-9 items-center justify-center rounded-md bg-[#6557d8] text-xs font-semibold text-white hover:bg-[#5749c7]"
           >
-            Open full trace →
+            Open full Trace →
           </a>
         ) : trace ? (
           <div className="rounded-md border bg-muted/30 px-3 py-2 text-center font-mono text-[11px] text-muted-foreground">
@@ -177,6 +172,18 @@ export function RunDetailDrawer({
         )}
       </div>
     </aside>
+  );
+}
+
+function DebugLink({ href, title, description, action }: { href: string; title: string; description: string; action: string }) {
+  return (
+    <a href={href} className="flex items-center justify-between rounded-md border bg-muted/30 px-3 py-2 hover:border-[#6557d8] hover:text-[#6557d8]">
+      <span className="min-w-0">
+        <span className="block truncate text-xs font-medium">{title}</span>
+        <span className="block text-[10px] text-muted-foreground">{description}</span>
+      </span>
+      <span className="text-xs font-medium">{action}</span>
+    </a>
   );
 }
 

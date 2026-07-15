@@ -1,45 +1,45 @@
 ---
-title: Sådan bruger du oversigten
-description: Få et hurtigt overblik over dit arbejdsområde - uafsluttede opgaver, igangværende automatiseringer, og det vigtigste der er sket i dag.
+title: Dashboard
+description: Explore workspace activity, usage, cost, savings, quality, and individual runs from one shared view.
 ---
 
-Oversigten er den første side du ser når du åbner Multica. Den giver dig et hurtigt indtryk af hvad der er på vej, hvad der er i gang, og hvad der er sket. I stedet for at lede flere steder, ser du det hele samlet.
+The **Dashboard** brings workspace activity and AI usage into one place. Open it from **Dashboard** in the left navigation.
 
-Den er især brugbar om morgenen - eller når du har været væk et par timer og hurtigt vil vide om noget vigtigt er sket imens.
+## Dashboard sections
 
-## Det du ser på oversigten
+Use the tabs at the top to switch between:
 
-**Mine opgaver** - alle opgaver du selv ejer, som ikke er færdige endnu.
+- **Overview** for workspace activity and issue summaries.
+- **Runs** for usage, cost, savings, quality, and run-level debugging.
+- **Messages** for message activity and spend.
 
-**Tildelt af mig** - opgaver du har givet videre til kolleger eller agenter, og som stadig er åbne.
+## Filter the Runs view
 
-**Automatiseringer** - hvad dine automatiseringer har lavet i dag, og om noget er fejlet eller er på pause.
+Choose a period, then use **Add filter** to filter by person, project, runtime, source, provider, model, skill, status, cost kind, or quality signal. Active filters are shown as chips and apply to every panel. Select a chip to remove it, or use **Clear all**.
 
-**Seneste aktivitet** - de sidste ting der er sket i hele dit arbejdsområde, så du kan følge med på højt niveau.
+Charts, table cells, source cards, and activity cells are also interactive. Selecting one adds the corresponding filter to the whole view.
 
-[Skærmbillede: viser oversigten med de fire sektioner]
+## Explore activity and usage
 
-## Sådan åbner du den
+The Runs view includes:
 
-Tryk på **Oversigt** i menuen til venstre - eller brug logoet øverst i menuen.
+- total runs, tokens, gateway cost, measured savings, and missing cost data;
+- an **Activity grid** with **Hour**, **Day**, and **Month** views;
+- runs and savings over time;
+- breakdowns by model, outcome, person, source, runtime, provider, skill, and project;
+- quality gates and skill-learning signals;
+- a paginated **Matching runs** table.
 
-## Sådan tilpasser du den
+Use the previous and next controls on a panel to move through its data without changing the shared filters.
 
-Du kan skjule de sektioner du ikke bruger.
+## Debug a run
 
-1. Tryk på **tandhjulet** øverst i oversigten.
-2. Sæt flueben ved det du vil se, og fjern flueben ved det du ikke vil se.
-3. Træk i sektionerne for at flytte dem rundt.
+Select a row in **Matching runs** to open **Run & debug context**. The panel shows the source, person, outcome, linked issue or thread, runtime, provider, model, token usage, cost, measured savings, skills, and trace preview.
 
-[Skærmbillede: viser indstillingerne for oversigten]
+Use **Open full Trace** to open the complete trace when one is available.
 
-> Tip: Hvis du arbejder med mange projekter, kan du sætte oversigten op så den viser ét projekt ad gangen.
+## Create a visual
 
-## Sådan filtrerer du efter projekt
+Select **New visual** to choose a visualization, **Metric**, **Dimension**, **Breakdown**, and **Grain**. The new visual uses the current Dashboard filters and remains available after reload.
 
-Øverst på oversigten kan du vælge et projekt fra rullemenuen, og så ser du kun ting fra netop det projekt.
-
-1. Tryk på **Alle projekter** øverst.
-2. Vælg det projekt du vil fokusere på.
-
-For at gå tilbage til hele billedet: vælg **Alle projekter** igen.
+Use **Configure** on a visual to adjust its setup.

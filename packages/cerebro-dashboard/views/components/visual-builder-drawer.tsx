@@ -84,7 +84,7 @@ export function VisualBuilderDrawer({
                 type="button"
                 aria-pressed={presentation === option.id}
                 onClick={() => setPresentation(option.id)}
-                className={`flex min-h-9 w-full items-center rounded-md border px-3 text-left text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${presentation === option.id ? "border-primary bg-primary/10 text-primary" : "bg-muted/30 hover:border-primary/50"}`}
+                className={`flex min-h-9 w-full items-center rounded-md border px-3 text-left text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#6557d8] ${presentation === option.id ? "border-[#c9c7c3] bg-[#f0efed] text-[#242228]" : "bg-[#f7f7f6] hover:border-[#9e9b96]"}`}
               >
                 {option.label}
               </button>
@@ -110,7 +110,7 @@ export function VisualBuilderDrawer({
           </div>
         </BuilderSection>
 
-        <button type="submit" className="mt-4 min-h-9 rounded-md bg-primary px-4 text-xs font-semibold text-primary-foreground hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+        <button type="submit" className="mt-4 min-h-9 rounded-md bg-[#6557d8] px-4 text-xs font-semibold text-white hover:bg-[#5749c7] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#6557d8]">
           {initial ? "Save visual" : "Add visual to Dashboard"}
         </button>
       </form>
@@ -131,7 +131,7 @@ function BuilderSelect({ label: selectLabel, value, values, onChange }: { label:
   return (
     <label className="grid grid-cols-[90px_1fr] items-center gap-3 text-xs">
       <span className="text-muted-foreground">{selectLabel}</span>
-      <select aria-label={selectLabel} value={value} onChange={(event) => onChange(event.target.value)} className="min-h-9 rounded-md border bg-muted/30 px-2 font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+      <select aria-label={selectLabel} value={value} onChange={(event) => onChange(event.target.value)} className="min-h-7 appearance-none border-0 bg-transparent px-0 text-right font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#6557d8]">
         {values.map((valueOption) => <option key={valueOption} value={valueOption}>{titleCase(valueOption)}</option>)}
       </select>
     </label>
