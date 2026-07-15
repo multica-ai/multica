@@ -149,6 +149,23 @@ describe("section-filter", () => {
     expect(reminderBox.map((e) => e.id)).toEqual(["n-rem"]);
   });
 
+  it("FIR-3179 — active Round issues are hidden from All messages only", () => {
+    const roundIssue = notifEntry(2, { id: "n-round", issue_id: "round-issue" });
+    const normalIssue = notifEntry(1, { id: "n-normal", issue_id: "normal-issue" });
+    const entries = [roundIssue, normalIssue];
+    const excludedIssueIds = new Set(["round-issue"]);
+
+    const all = selectSectionEntries(entries, { id: "s", kind: "all" }, ctx, {
+      excludedIssueIdsFromAll: excludedIssueIds,
+    });
+    expect(all.map((entry) => entry.id)).toEqual(["n-normal"]);
+
+    const unread = selectSectionEntries(entries, { id: "s", kind: "unread" }, ctx, {
+      excludedIssueIdsFromAll: excludedIssueIds,
+    });
+    expect(unread.map((entry) => entry.id)).toEqual(["n-round", "n-normal"]);
+  });
+
   it("detects mentions on notif (type) and channel (context set)", () => {
     expect(entryIsMentioned(notifEntry(1, { type: "mentioned" }), ctx)).toBe(true);
     expect(entryIsMentioned(notifEntry(1, { type: "new_comment" }), ctx)).toBe(false);

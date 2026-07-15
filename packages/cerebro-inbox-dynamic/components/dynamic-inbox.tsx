@@ -190,6 +190,10 @@ export function DynamicInbox() {
   const { data: roundStatuses = [] } = useRoundStatuses(wsId);
   const startRound = useStartRound(wsId);
   const roundIssueIds = useMemo(() => [...new Set(roundStatuses.flatMap((status) => status.members.map((member) => member.issue_id)))], [roundStatuses]);
+  const activeRoundIssueIds = useMemo(
+    () => new Set(roundStatuses.flatMap((status) => status.active_cycle?.items.map((item) => item.issue_id) ?? [])),
+    [roundStatuses],
+  );
   const roundMessageIssueIds = useMemo(
     () => [
       ...new Set(
@@ -1326,6 +1330,7 @@ export function DynamicInbox() {
                           classicControls={section.kind === "all" ? classicControls : undefined}
                           selectedKey={selectedKey}
                           query={query}
+                          excludedIssueIdsFromAll={activeRoundIssueIds}
                           dragHandle={handle}
                           searchSlot={
                             section.id === inboxBlockId ? (

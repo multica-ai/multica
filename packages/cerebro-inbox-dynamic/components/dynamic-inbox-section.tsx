@@ -89,6 +89,8 @@ export interface DynamicInboxSectionProps {
   selectedKey: string | null;
   /** Free-text search from the inbox top bar (TECH-3413 #9). */
   query?: string;
+  /** Active Round issues are omitted from All messages to avoid duplicate rows. */
+  excludedIssueIdsFromAll?: ReadonlySet<string>;
   /** Drag-to-reorder handle injected by the sortable wrapper (TECH-3413 #1). */
   dragHandle?: React.ReactNode;
   /** TECH-3541 (Jesper) — the inbox search bar, rendered as part of the
@@ -189,8 +191,12 @@ export function DynamicInboxSection(props: DynamicInboxSectionProps) {
   const hideRemindersFromAll = useFeatureFlag("cerebro_inbox_hide_reminders");
 
   const selected = useMemo(
-    () => selectSectionEntries(entries, section, filterContext, { query, hideRemindersFromAll }),
-    [entries, section, filterContext, query, hideRemindersFromAll],
+    () => selectSectionEntries(entries, section, filterContext, {
+      query,
+      hideRemindersFromAll,
+      excludedIssueIdsFromAll: props.excludedIssueIdsFromAll,
+    }),
+    [entries, section, filterContext, query, hideRemindersFromAll, props.excludedIssueIdsFromAll],
   );
 
   // TECH-3579 — "All messages" box only: pull starred conversations out of the

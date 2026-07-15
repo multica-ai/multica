@@ -406,6 +406,8 @@ export interface SelectOptions {
    * other section kinds (notably the Reminders box itself) are never affected.
    */
   hideRemindersFromAll?: boolean;
+  /** Issue rows owned by an active Round are shown there, not twice in All messages. */
+  excludedIssueIdsFromAll?: ReadonlySet<string>;
 }
 
 /** Filter + sort + cap a section's rows. */
@@ -423,6 +425,7 @@ export function selectSectionEntries(
   // the "All messages" box; the dedicated Reminders box (kind "reminders") and
   // every other box keep showing them.
   const hideReminders = !!opts.hideRemindersFromAll && section.kind === "all";
+  const excludedIssueIds = section.kind === "all" ? opts.excludedIssueIdsFromAll : undefined;
   const filtered = entries.filter(
     (e) =>
       entryMatchesSection(e, section, ctx) &&
@@ -430,6 +433,7 @@ export function selectSectionEntries(
       (!section.viewFilter || matchesViewFilter(e, section.viewFilter, ctx)) &&
       (showsMuted || !entryIsMuted(e)) &&
       (!hideReminders || classifyInboxAction(e, ctx.action) !== "reminders") &&
+      !(e.kind === "notif" && e.item.issue_id && excludedIssueIds?.has(e.item.issue_id)) &&
       entryMatchesQuery(e, opts.query ?? ""),
   );
   const sorted = sortEntries(filtered, section, ctx.action.userId);
