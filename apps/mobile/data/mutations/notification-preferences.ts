@@ -31,6 +31,8 @@ import { notificationPreferenceKeys } from "@/data/queries/notification-preferen
 interface NotificationPreferenceMutationVariables {
   preferences: NotificationPreferences;
   patch: NotificationPreferences;
+  workspaceId: string | null;
+  workspaceSlug: string | null;
 }
 
 interface NotificationPreferenceMutationContext {
@@ -77,35 +79,50 @@ function mapMutationOptions(
 export function useUpdateNotificationPreferences() {
   const qc = useQueryClient();
   const wsId = useWorkspaceStore((s) => s.currentWorkspaceId);
+  const workspaceSlug = useWorkspaceStore((s) => s.currentWorkspaceSlug);
   const key = notificationPreferenceKeys.all(wsId);
   const renderedPreferences =
     qc.getQueryData<NotificationPreferenceResponse>(key)?.preferences ?? {};
   const renderedPreferencesRef = useRef(renderedPreferences);
   renderedPreferencesRef.current = renderedPreferences;
 
+  // Match Core's concurrency contract: serialize writes per workspace and
+  // capture the slug so queued work cannot follow a later workspace switch.
   const mutation = useMutation<
     NotificationPreferenceResponse,
     Error,
     NotificationPreferenceMutationVariables,
     NotificationPreferenceMutationContext
   >({
-    mutationFn: ({ patch }) => api.updateNotificationPreferences(patch),
-    onMutate: async ({ patch }) => {
-      await qc.cancelQueries({ queryKey: key });
-      const previous = qc.getQueryData<NotificationPreferenceResponse>(key);
-      qc.setQueryData<NotificationPreferenceResponse>(key, (old) => ({
-        ...(old ?? { workspace_id: wsId ?? "" }),
+    mutationKey: key,
+    scope: { id: `notification-preferences:${wsId ?? "unscoped"}` },
+    mutationFn: ({ patch, workspaceSlug: targetWorkspaceSlug }) => {
+      if (!targetWorkspaceSlug) {
+        throw new Error(
+          "Workspace context is required to update notifications",
+        );
+      }
+      return api.updateNotificationPreferences(patch, targetWorkspaceSlug);
+    },
+    onMutate: async ({ patch, workspaceId }) => {
+      const targetKey = notificationPreferenceKeys.all(workspaceId);
+      await qc.cancelQueries({ queryKey: targetKey });
+      const previous =
+        qc.getQueryData<NotificationPreferenceResponse>(targetKey);
+      qc.setQueryData<NotificationPreferenceResponse>(targetKey, (old) => ({
+        ...(old ?? { workspace_id: workspaceId ?? "" }),
         preferences: applyNotificationPreferencePatch(
           old?.preferences ?? {},
           patch,
         ),
       }));
-      return { previous, key };
+      return { previous, key: targetKey };
     },
-    onError: (_error, { patch }, context) => {
-      const targetKey = context?.key ?? key;
+    onError: (_error, { patch, workspaceId }, context) => {
+      const targetKey =
+        context?.key ?? notificationPreferenceKeys.all(workspaceId);
       qc.setQueryData<NotificationPreferenceResponse>(targetKey, (old) => ({
-        ...(old ?? { workspace_id: wsId ?? "" }),
+        ...(old ?? { workspace_id: workspaceId ?? "" }),
         preferences: rollbackNotificationPreferencePatch(
           old?.preferences ?? {},
           patch,
@@ -113,8 +130,12 @@ export function useUpdateNotificationPreferences() {
         ),
       }));
     },
-    onSettled: (_data, _error, _variables, context) => {
-      qc.invalidateQueries({ queryKey: context?.key ?? key });
+    onSettled: (_data, _error, { workspaceId }, context) => {
+      const mutationKey = notificationPreferenceKeys.all(workspaceId);
+      // The settling mutation is still counted; only the final queued write
+      // should trigger an authoritative refetch.
+      if (qc.isMutating({ mutationKey }) > 1) return;
+      qc.invalidateQueries({ queryKey: context?.key ?? mutationKey });
     },
   });
 
@@ -128,11 +149,11 @@ export function useUpdateNotificationPreferences() {
         preferences,
       );
       mutation.mutate(
-        { preferences, patch },
+        { preferences, patch, workspaceId: wsId, workspaceSlug },
         mapMutationOptions(preferences, options),
       );
     },
-    [mutation],
+    [mutation, workspaceSlug, wsId],
   );
 
   const mutateAsync = useCallback(
@@ -145,11 +166,11 @@ export function useUpdateNotificationPreferences() {
         preferences,
       );
       return mutation.mutateAsync(
-        { preferences, patch },
+        { preferences, patch, workspaceId: wsId, workspaceSlug },
         mapMutationOptions(preferences, options),
       );
     },
-    [mutation],
+    [mutation, workspaceSlug, wsId],
   );
 
   return {

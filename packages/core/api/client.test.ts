@@ -62,7 +62,10 @@ describe("ApiClient notification preferences", () => {
 
     const client = new ApiClient("https://api.example.test");
     await expect(
-      client.updateNotificationPreferences({ comments: "muted" }),
+      client.updateNotificationPreferences(
+        { comments: "muted" },
+        "workspace-one",
+      ),
     ).resolves.toEqual({
       workspace_id: "workspace-1",
       preferences: {
@@ -78,6 +81,9 @@ describe("ApiClient notification preferences", () => {
     expect(fetchMock.mock.calls[0]?.[1]).toEqual(
       expect.objectContaining({
         method: "PATCH",
+        headers: expect.objectContaining({
+          "X-Workspace-Slug": "workspace-one",
+        }),
         body: JSON.stringify({ preferences: { comments: "muted" } }),
       }),
     );

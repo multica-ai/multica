@@ -1629,9 +1629,15 @@ export class ApiClient {
     );
   }
 
-  async updateNotificationPreferences(preferences: NotificationPreferences): Promise<NotificationPreferenceResponse> {
+  async updateNotificationPreferences(
+    preferences: NotificationPreferences,
+    workspaceSlug?: string,
+  ): Promise<NotificationPreferenceResponse> {
     const raw = await this.fetch<unknown>("/api/notification-preferences", {
       method: "PATCH",
+      headers: workspaceSlug
+        ? { "X-Workspace-Slug": workspaceSlug }
+        : undefined,
       body: JSON.stringify({ preferences }),
     });
     return parseWithFallback(
