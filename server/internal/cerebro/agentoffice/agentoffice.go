@@ -234,6 +234,10 @@ func RenderSnapshot(s ContextSnapshot) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "model: %s\n", s.Model)
 	fmt.Fprintf(&b, "thinking_level: %s\n", s.ThinkingLevel)
+	// Lifted out of the runtime_config blob below: a knob that changes how the
+	// whole system prompt reaches the model must be legible to a reviewer, not
+	// buried as one key in a line of compacted JSON. FIR-3212.
+	fmt.Fprintf(&b, "system_prompt_mode: %s\n", SystemPromptModeOf(s))
 	fmt.Fprintf(&b, "persona_sandbox: %s\n", s.PersonaSandbox)
 	fmt.Fprintf(&b, "skills: %s\n", strings.Join(s.SkillIDs, ", "))
 	fmt.Fprintf(&b, "custom_env_keys: %s\n", strings.Join(s.CustomEnvKeys, ", "))

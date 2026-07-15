@@ -84,15 +84,19 @@ type CreateChangeRequestRequest struct {
 	ProposedSnapshot *ContextSnapshot `json:"proposed_snapshot"`
 	// Convenience overrides applied on top of the current snapshot when
 	// ProposedSnapshot is absent.
-	Instructions   *string          `json:"instructions"`
-	Model          *string          `json:"model"`
-	ThinkingLevel  *string          `json:"thinking_level"`
-	PersonaSandbox *string          `json:"persona_sandbox"`
-	SkillIDs       *[]string        `json:"skill_ids"`
-	McpConfig      *json.RawMessage `json:"mcp_config"`
-	CustomArgs     *json.RawMessage `json:"custom_args"`
-	RuntimeConfig  *json.RawMessage `json:"runtime_config"`
-	WorkSessionID  *string          `json:"work_session_id"`
+	Instructions   *string `json:"instructions"`
+	Model          *string `json:"model"`
+	ThinkingLevel  *string `json:"thinking_level"`
+	PersonaSandbox *string `json:"persona_sandbox"`
+	// SystemPromptMode sets how the prompt reaches the model (append|replace|
+	// prepend); empty restores the runtime default. FIR-3212. It is stored inside
+	// runtime_config, so this is a typed shortcut past hand-editing that blob.
+	SystemPromptMode *string          `json:"system_prompt_mode"`
+	SkillIDs         *[]string        `json:"skill_ids"`
+	McpConfig        *json.RawMessage `json:"mcp_config"`
+	CustomArgs       *json.RawMessage `json:"custom_args"`
+	RuntimeConfig    *json.RawMessage `json:"runtime_config"`
+	WorkSessionID    *string          `json:"work_session_id"`
 }
 
 // ReviewChangeRequestRequest approves or rejects a pending proposal.
@@ -445,6 +449,26 @@ func (h *Handler) CreateChangeRequest(w http.ResponseWriter, r *http.Request) {
 		if keyPresent("runtime_config") {
 			snap.RuntimeConfig = derefRawOrNil(req.RuntimeConfig)
 		}
+		// FIR-3212: applied after runtime_config so an explicit mode wins over
+		// one embedded in a wholesale blob replacement in the same request.
+		if req.SystemPromptMode != nil {
+			updated, err := WithSystemPromptMode(snap, *req.SystemPromptMode)
+			if err != nil {
+				writeError(w, http.StatusBadRequest, err.Error())
+				return
+			}
+			snap = updated
+		}
+	}
+
+	// Validate the mode carried by the snapshot itself. The proposed_snapshot
+	// path and a raw runtime_config override both reach here without passing
+	// through WithSystemPromptMode, so this is the only place that stops an
+	// unknown mode being stored, versioned, approved, and then silently dropped
+	// at run time — the failure FIR-3212 exists to remove.
+	if mode, ok := rawSystemPromptMode(snap); ok && !ValidSystemPromptMode(mode) {
+		writeError(w, http.StatusBadRequest, "unknown system_prompt_mode "+mode+": want one of append, replace, prepend, or empty for the runtime default")
+		return
 	}
 
 	var sessionUUID pgtype.UUID

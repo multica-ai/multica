@@ -3969,6 +3969,8 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		DisallowedMCPTools: task.DisallowedMCPTools,
 		ThinkingLevel:      thinkingLevel,
 		OpenclawMode:       openclawMode,
+		// CEREBRO-PATCH(agent-system-prompt-mode): FIR-3212 - source the delivery mode from agent runtime_config; see cerebro_system_prompt_mode.go.
+		SystemPromptMode: decodeSystemPromptMode(task.Agent.RuntimeConfig),
 	}
 	// Some providers do not reliably load the per-task runtime config files we
 	// write into the task workdir:
