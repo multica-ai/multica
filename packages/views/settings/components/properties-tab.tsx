@@ -384,6 +384,10 @@ function PropertyEditorDialog({
 
   const showOptions = typeHasOptions(draft.type);
   const validOptions = draft.options.filter((option) => option.name.trim());
+  const propertyTypeItems = ISSUE_PROPERTY_TYPES.map((type) => ({
+    value: type,
+    label: <PropertyTypeLabel type={type} />,
+  }));
   const canSubmit =
     draft.name.trim().length > 0 && (!showOptions || validOptions.length > 0);
 
@@ -475,6 +479,7 @@ function PropertyEditorDialog({
                 </div>
               ) : (
                 <Select
+                  items={propertyTypeItems}
                   value={draft.type}
                   onValueChange={(value) =>
                     value &&
@@ -492,9 +497,9 @@ function PropertyEditorDialog({
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {ISSUE_PROPERTY_TYPES.map((type) => (
-                      <SelectItem key={type} value={type}>
-                        <PropertyTypeLabel type={type} />
+                    {propertyTypeItems.map((item) => (
+                      <SelectItem key={item.value} value={item.value}>
+                        {item.label}
                       </SelectItem>
                     ))}
                   </SelectContent>

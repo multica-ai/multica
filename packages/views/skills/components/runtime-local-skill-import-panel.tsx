@@ -1162,6 +1162,10 @@ export function RuntimeLocalSkillImportPanel({
             {t(($) => $.runtime_import.runtime_label)}
           </label>
           <Select
+            items={localRuntimes.map((runtime) => ({
+              value: runtime.id,
+              label: runtimeLabel(runtime),
+            }))}
             value={selectedRuntimeId}
             onValueChange={(v) => v && setSelectedRuntimeId(v)}
           >

@@ -101,6 +101,7 @@ export function PreferencesTab() {
             size="select"
           >
             <Select
+              items={themeOptions}
               value={theme}
               onValueChange={(next) => {
                 if (!next || next === theme) return;
@@ -134,6 +135,7 @@ export function PreferencesTab() {
             size="select"
           >
             <Select
+              items={languageOptions}
               value={currentLocale}
               onValueChange={(next) => {
                 if (next) void handleLanguageChange(next as SupportedLocale);
@@ -243,6 +245,13 @@ function TimezoneRow() {
       size="select-wide"
     >
       <Select
+        items={[
+          { value: BROWSER_TZ_VALUE, label: formatTZLabel(BROWSER_TZ_VALUE) },
+          ...options.map((timezone) => ({
+            value: timezone,
+            label: formatTZLabel(timezone),
+          })),
+        ]}
         value={value}
         onValueChange={(next) => {
           if (next) void handleChange(next);

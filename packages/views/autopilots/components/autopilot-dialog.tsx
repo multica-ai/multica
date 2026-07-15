@@ -963,6 +963,14 @@ function ScheduleSection({
   const formatCountdown = useFormatCountdown();
   const now = useNowTicker();
   const next = useMemo(() => computeNextRun(config, now), [config, now]);
+  const frequencyItems = FREQUENCY_KEYS.map((value) => ({
+    value,
+    label: t(($) => $.dialog.frequency_long[value]),
+  }));
+  const dayItems = DAY_KEYS.map((dayKey, value) => ({
+    value: String(value),
+    label: t(($) => $.dialog.days[dayKey]),
+  }));
   const timezones = useMemo(() => {
     const local = getLocalTimezone();
     if (TIMEZONE_OPTIONS.includes(local)) return TIMEZONE_OPTIONS;
@@ -983,6 +991,7 @@ function ScheduleSection({
         {/* Row 1: Frequency + (Day when weekly) */}
         <div className="grid grid-cols-2 gap-2">
           <Select
+            items={frequencyItems}
             value={config.frequency}
             onValueChange={(v) =>
               v && onChange({ ...config, frequency: v as TriggerFrequency })
@@ -992,15 +1001,16 @@ function ScheduleSection({
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              {FREQUENCY_KEYS.map((freq) => (
-                <SelectItem key={freq} value={freq}>
-                  {t(($) => $.dialog.frequency_long[freq])}
+              {frequencyItems.map((item) => (
+                <SelectItem key={item.value} value={item.value}>
+                  {item.label}
                 </SelectItem>
               ))}
             </SelectContent>
           </Select>
           {config.frequency === "weekly" ? (
             <Select
+              items={dayItems}
               value={String(selectedDay)}
               onValueChange={(v) =>
                 v && onChange({ ...config, daysOfWeek: [parseInt(v, 10)] })
@@ -1010,9 +1020,9 @@ function ScheduleSection({
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {DAY_KEYS.map((dayKey, i) => (
-                  <SelectItem key={dayKey} value={String(i)}>
-                    {t(($) => $.dialog.days[dayKey])}
+                {dayItems.map((item) => (
+                  <SelectItem key={item.value} value={item.value}>
+                    {item.label}
                   </SelectItem>
                 ))}
               </SelectContent>
