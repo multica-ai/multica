@@ -36,6 +36,8 @@ const EndpointPermissionSchema = z
   .object({
     path: z.string(),
     methods: z.array(z.string()).default([]),
+    summary: z.string().optional(),
+    granted: z.boolean().optional(),
   })
   .loose();
 
@@ -123,6 +125,7 @@ const DiscoveredEndpointSchema = z
     path: z.string(),
     methods: z.array(z.string()).default([]),
     summary: z.string().optional(),
+    granted: z.boolean().optional(),
   })
   .loose();
 

@@ -30,6 +30,9 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"strings"
+	"sync"
+	"time"
 
 	guuid "github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -61,6 +64,15 @@ type endpointPolicyResolver interface {
 // apiConnectionFlagChecker reads the default-off cerebro_api_connection_tools flag.
 type apiConnectionFlagChecker interface {
 	GetCerebroFeatureFlag(ctx context.Context, params cerebrodb.GetCerebroFeatureFlagParams) (bool, error)
+}
+
+type apiEndpointDiscoverer func(context.Context, *http.Client, connections.Connection, string) ([]connections.EndpointPermission, error)
+
+const personalizedDiscoveryTTL = time.Minute
+
+type personalizedDiscoveryCacheEntry struct {
+	endpoints []connections.EndpointPermission
+	expiresAt time.Time
 }
 
 // APIConnectionIdentity is the resolved actor an endpoint is gated for. The owner
@@ -98,6 +110,12 @@ type APIConnectionResolver struct {
 	flags  apiConnectionFlagChecker
 	client *http.Client
 	logger *slog.Logger
+	// discover resolves an identity-aware OpenAPI view. It is a function seam so
+	// the resolver's fail-closed filtering is unit-testable without a network.
+	discover apiEndpointDiscoverer
+	cacheMu  sync.Mutex
+	cache    map[string]personalizedDiscoveryCacheEntry
+	now      func() time.Time
 	// exchanger enables per-person session-key exchange (FIR-2564 fase 2) on
 	// the tools this resolver builds. Wired when the flag checker is the
 	// cerebrodb query handle (which carries the person-key cache); nil
@@ -117,6 +135,11 @@ func NewAPIConnectionResolver(conns apiConnectionLister, policy endpointPolicyRe
 		flags:  flags,
 		client: &http.Client{Timeout: apiConnectionToolTimeout},
 		logger: logger,
+		discover: func(ctx context.Context, client *http.Client, conn connections.Connection, principal string) ([]connections.EndpointPermission, error) {
+			return connections.DiscoverAPIEndpointsForPrincipal(ctx, client, conn.URL, conn.AuthConfig, principal)
+		},
+		cache: make(map[string]personalizedDiscoveryCacheEntry),
+		now:   time.Now,
 	}
 	// The cerebrodb query handle doubles as the person-key cache store; when
 	// the flag checker is that handle, per-person session exchange is available.
@@ -154,6 +177,7 @@ func (r *APIConnectionResolver) ListForAgent(ctx context.Context, ident APIConne
 			"workspace_id", util.UUIDToString(ident.WorkspaceID), "error", err)
 		return nil
 	}
+	conns = r.connectionsForIdentity(ctx, conns, ident)
 	built := buildAPIConnectionTools(conns, r.client, r.exchanger)
 	if len(built) == 0 {
 		return nil
@@ -184,6 +208,97 @@ func (r *APIConnectionResolver) ListForAgent(ctx context.Context, ident APIConne
 	}
 	if len(out) == 0 {
 		return nil
+	}
+	return out
+}
+
+// connectionsForIdentity replaces the static endpoint catalogue on
+// identity-aware API connections with the intersection of that catalogue and
+// a fresh principal-specific OpenAPI view. The static catalogue remains the
+// admin-authored ceiling: discovery can remove or relabel an operation, never
+// introduce one. A discovery error drops that connection (fail closed).
+func (r *APIConnectionResolver) connectionsForIdentity(ctx context.Context, conns []connections.Connection, ident APIConnectionIdentity) []connections.Connection {
+	if r.discover == nil {
+		return conns
+	}
+	principal := "agent:" + util.UUIDToString(ident.AgentID)
+	out := make([]connections.Connection, 0, len(conns))
+	for _, conn := range conns {
+		if conn.Type != connections.TypeAPI || conn.AuthConfig.OnBehalfOf == nil || !conn.AuthConfig.OnBehalfOf.Enabled {
+			out = append(out, conn)
+			continue
+		}
+		discovered, err := r.discoverForIdentity(ctx, conn, principal)
+		if err != nil {
+			r.logger.Warn("api connection resolver: personalized discovery failed — dropping connection (fail closed)",
+				"workspace_id", util.UUIDToString(ident.WorkspaceID),
+				"agent_id", util.UUIDToString(ident.AgentID),
+				"connection", conn.Name, "error", err)
+			continue
+		}
+		conn.EndpointPermissions = intersectEndpointPermissions(conn.EndpointPermissions, discovered)
+		out = append(out, conn)
+	}
+	return out
+}
+
+func (r *APIConnectionResolver) discoverForIdentity(ctx context.Context, conn connections.Connection, principal string) ([]connections.EndpointPermission, error) {
+	key := strings.Join([]string{
+		conn.ID, conn.Name, conn.URL, conn.UpdatedAt.UTC().Format(time.RFC3339Nano), principal,
+	}, "|")
+	now := r.now()
+	r.cacheMu.Lock()
+	entry, ok := r.cache[key]
+	if ok && now.Before(entry.expiresAt) {
+		r.cacheMu.Unlock()
+		return entry.endpoints, nil
+	}
+	delete(r.cache, key)
+	r.cacheMu.Unlock()
+
+	endpoints, err := r.discover(ctx, r.client, conn, principal)
+	if err != nil {
+		return nil, err
+	}
+	r.cacheMu.Lock()
+	r.cache[key] = personalizedDiscoveryCacheEntry{
+		endpoints: endpoints,
+		expiresAt: now.Add(personalizedDiscoveryTTL),
+	}
+	r.cacheMu.Unlock()
+	return endpoints, nil
+}
+
+type endpointMethodKey struct {
+	path   string
+	method string
+}
+
+func intersectEndpointPermissions(configured, discovered []connections.EndpointPermission) []connections.EndpointPermission {
+	dynamic := make(map[endpointMethodKey]connections.EndpointPermission)
+	for _, ep := range discovered {
+		path := normalizeEndpointPath(ep.Path)
+		for _, method := range ep.Methods {
+			dynamic[endpointMethodKey{path: path, method: strings.ToUpper(strings.TrimSpace(method))}] = ep
+		}
+	}
+	var out []connections.EndpointPermission
+	for _, ep := range configured {
+		path := normalizeEndpointPath(ep.Path)
+		for _, methodRaw := range ep.Methods {
+			method := strings.ToUpper(strings.TrimSpace(methodRaw))
+			found, ok := dynamic[endpointMethodKey{path: path, method: method}]
+			if !ok || (found.Granted != nil && !*found.Granted) {
+				continue
+			}
+			summary := strings.TrimSpace(found.Summary)
+			if summary == "" {
+				summary = ep.Summary
+			}
+			out = append(out, connections.EndpointPermission{
+				Path: path, Methods: []string{method}, Summary: summary, Granted: found.Granted,
+			})
+		}
 	}
 	return out
 }

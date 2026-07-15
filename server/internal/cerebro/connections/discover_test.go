@@ -241,3 +241,57 @@ func TestParseSpec_PathItemSummaryWins(t *testing.T) {
 		t.Fatalf("expected empty summary for unlabeled path, got %q", eps[1].Summary)
 	}
 }
+
+func TestParseSpec_CapturesRegistryGrantWithoutInventingOne(t *testing.T) {
+	spec := `{
+  "openapi": "3.0.0",
+  "paths": {
+    "/granted": {"post": {"summary": "Granted", "x-registry-granted": true}},
+    "/denied": {"post": {"summary": "Denied", "x-registry-granted": false}},
+    "/ordinary": {"get": {"summary": "Ordinary"}}
+  }
+}`
+	eps := parseSpec([]byte(spec))
+	if len(eps) != 3 {
+		t.Fatalf("expected 3 endpoints, got %d: %+v", len(eps), eps)
+	}
+	byPath := make(map[string]discoveredEndpoint, len(eps))
+	for _, ep := range eps {
+		byPath[ep.Path] = ep
+	}
+	if byPath["/granted"].Granted == nil || !*byPath["/granted"].Granted {
+		t.Fatalf("expected /granted=true, got %+v", byPath["/granted"].Granted)
+	}
+	if byPath["/denied"].Granted == nil || *byPath["/denied"].Granted {
+		t.Fatalf("expected /denied=false, got %+v", byPath["/denied"].Granted)
+	}
+	if byPath["/ordinary"].Granted != nil {
+		t.Fatalf("identity-blind operation must remain unspecified, got %+v", byPath["/ordinary"].Granted)
+	}
+}
+
+func TestDiscoverAPIEndpointsForPrincipal_SendsIdentityAndReturnsPermissions(t *testing.T) {
+	var sawPrincipal string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/openapi.json" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		sawPrincipal = r.Header.Get("X-On-Behalf-Of")
+		_, _ = w.Write([]byte(`{"openapi":"3.0.0","paths":{"/allowed":{"get":{"summary":"Allowed","x-registry-granted":true}}}}`))
+	}))
+	defer srv.Close()
+
+	eps, err := DiscoverAPIEndpointsForPrincipal(
+		context.Background(), srv.Client(), srv.URL, AuthConfig{}, "agent:11111111-1111-4111-8111-111111111111",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sawPrincipal != "agent:11111111-1111-4111-8111-111111111111" {
+		t.Fatalf("principal header = %q", sawPrincipal)
+	}
+	if len(eps) != 1 || eps[0].Granted == nil || !*eps[0].Granted {
+		t.Fatalf("unexpected permissions: %+v", eps)
+	}
+}
