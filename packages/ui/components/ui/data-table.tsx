@@ -223,7 +223,8 @@ export function DataTable<TData>({
               // content scrolling beneath them and follow row hover state.
               className={cn(
                 "overflow-hidden px-4 py-2",
-                isPinned && "bg-background group-hover:bg-muted/50",
+                isPinned &&
+                  "bg-background group-hover:bg-[color-mix(in_oklab,var(--muted)_50%,var(--background))]",
               )}
               style={getCellStyle(cell.column, {
                 withBorder: true,
@@ -293,12 +294,14 @@ export function DataTable<TData>({
                       // exceeds column.size. Tooltip / dropdown /
                       // hover-card bodies are portaled, so they are
                       // unaffected.
-                      // Pinned header cell uses muted/30 so it blends
-                      // into the header strip rather than appearing as
-                      // a white block under sticky scroll.
+                      // Pinned cells must be opaque: translucent backgrounds
+                      // reveal horizontally scrolled columns underneath. Mix
+                      // muted with background to preserve the same visual tone
+                      // as muted/30 without introducing alpha.
                       className={cn(
                         "relative h-8 overflow-hidden px-4 py-2 text-xs uppercase tracking-wider text-muted-foreground",
-                        isPinned && "bg-muted/30 backdrop-blur",
+                        isPinned &&
+                          "bg-[color-mix(in_oklab,var(--muted)_30%,var(--background))]",
                       )}
                       style={getCellStyle(header.column, {
                         withBorder: true,
