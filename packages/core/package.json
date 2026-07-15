@@ -55,7 +55,6 @@
     "./runtimes": "./runtimes/index.ts",
     "./runtimes/queries": "./runtimes/queries.ts",
     "./runtimes/mutations": "./runtimes/mutations.ts",
-    "./runtimes/hooks": "./runtimes/hooks.ts",
     "./runtimes/custom-pricing-store": "./runtimes/custom-pricing-store.ts",
     "./dashboard": "./dashboard/index.ts",
     "./dashboard/queries": "./dashboard/queries.ts",
