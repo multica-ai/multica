@@ -648,7 +648,11 @@ export const BaseComposer = forwardRef<ComposerHandle, BaseComposerProps>(functi
       ) : null}
       {sendMenu}
       {onSchedule && scheduleControl?.({
-        disabled: submitting || disabled || noAgent,
+        disabled:
+          (imageTrayEnabled && tray.hasUploading) ||
+          submitting ||
+          disabled ||
+          noAgent,
         canSchedule: !isEmpty || (imageTrayEnabled && tray.hasCompleted),
         schedule: handleSchedule,
       })}

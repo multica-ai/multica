@@ -9,7 +9,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -224,15 +223,7 @@ func (h *Handler) RunCerebroScheduledMessageSweeper(ctx context.Context, interva
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			for i := 0; i < 50; i++ {
-				m, ok := h.claimScheduledMessage(ctx, "send_at <= now()")
-				if !ok {
-					break
-				}
-				if err := h.deliverScheduledMessage(ctx, m); err != nil {
-					slog.Error("scheduled message delivery failed", "scheduled_message_id", m.ID, "error", err)
-				}
-			}
+			h.sweepCerebroScheduledMessagesOnce(ctx, 50)
 		}
 	}
 }

@@ -172,6 +172,21 @@ export class TestApiClient {
     return channel;
   }
 
+  // FIR-2873 — create or reopen the caller's DM with one workspace member.
+  // DMs are issues too, so cleanup uses the same tracked issue ids as Channels.
+  async createDirectMessage(memberId: string) {
+    const res = await this.authedFetch("/api/channels", {
+      method: "POST",
+      body: JSON.stringify({ kind: "dm", member_ids: [memberId] }),
+    });
+    if (!res.ok) {
+      throw new Error(`createDirectMessage failed: ${res.status} ${await res.text()}`);
+    }
+    const directMessage = await res.json();
+    this.createdIssueIds.push(directMessage.id);
+    return directMessage;
+  }
+
   // FIR-2680 — flip a cerebro workspace feature flag on/off directly in the DB
   // (the flag defaults OFF; the guard + prompt only run when it is ON).
   async setWorkspaceFeatureFlag(flagKey: string, enabled: boolean) {

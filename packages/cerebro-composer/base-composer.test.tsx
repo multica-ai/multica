@@ -10,6 +10,20 @@ const toastMock = vi.hoisted(() => ({
   error: vi.fn(),
 }));
 
+const composerFeatureFlags = vi.hoisted(() => ({
+  imageTray: false,
+}));
+
+const imageTrayMock = vi.hoisted(() => ({
+  items: [] as unknown[],
+  addFiles: vi.fn(),
+  remove: vi.fn(),
+  takeForEmbed: vi.fn(),
+  clear: vi.fn(),
+  hasUploading: false,
+  hasCompleted: false,
+}));
+
 // The real ContentEditor is a heavy Tiptap mount; the composer's submit-enable
 // logic does not depend on it, so we stub it with a textarea that holds the
 // markdown (seeded from defaultValue) and forwards edits via onUpdate. This is
@@ -54,8 +68,15 @@ vi.mock("@multica/views/editor", async () => {
 });
 
 vi.mock("@multica/cerebro-feature-flags", () => ({
-  useFeatureFlag: () => false,
+  useFeatureFlag: (key: string) =>
+    key === "cerebro_composer_image_tray" && composerFeatureFlags.imageTray,
 }));
+
+vi.mock("./use-image-tray", () => ({
+  useImageTray: () => imageTrayMock,
+  serializeTrayImages: () => ({ markdown: "", attachmentIds: [] }),
+}));
+vi.mock("./composer-image-tray", () => ({ ComposerImageTray: () => null }));
 
 vi.mock("@multica/core/api", () => ({ api: apiMock }));
 vi.mock("sonner", () => ({ toast: toastMock }));
@@ -117,9 +138,31 @@ beforeEach(() => {
   apiMock.getMe.mockReset();
   apiMock.getMe.mockResolvedValue({});
   toastMock.error.mockClear();
+  composerFeatureFlags.imageTray = false;
+  imageTrayMock.hasUploading = false;
+  imageTrayMock.hasCompleted = false;
 });
 
 describe("BaseComposer draft parity", () => {
+  it("disables scheduling while an image is uploading", () => {
+    composerFeatureFlags.imageTray = true;
+    imageTrayMock.hasUploading = true;
+
+    render(
+      <BaseComposer
+        draft={makeDraft("message with upload")}
+        onSubmit={vi.fn()}
+        onSchedule={vi.fn()}
+        scheduleControl={({ disabled }) => (
+          <button aria-label="Schedule message" disabled={disabled} />
+        )}
+        editorKey="s1"
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "Schedule message" })).toBeDisabled();
+  });
+
   it("enables Submit on first render when a draft is restored, and sends it", async () => {
     const onSubmit = vi.fn();
     render(
