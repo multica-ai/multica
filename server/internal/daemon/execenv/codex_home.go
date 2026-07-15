@@ -21,11 +21,13 @@ var codexSymlinkedFiles = []string{
 }
 
 // Files to copy from the shared ~/.codex/ into the per-task CODEX_HOME.
-// Copies are isolated — changes don't affect the shared home.
+// Copies are isolated — task-local config and cache refreshes don't mutate
+// the shared home.
 var codexCopiedFiles = []string{
 	"config.json",
 	"config.toml",
 	"instructions.md",
+	"models_cache.json",
 }
 
 // CodexHomeOptions carries optional inputs for prepareCodexHomeWithOpts that
@@ -105,7 +107,7 @@ func prepareCodexHomeWithOpts(codexHome string, opts CodexHomeOptions, logger *s
 	// into a stale local copy.
 	logCodexAuthState(filepath.Join(codexHome, "auth.json"), logger)
 
-	// Sync config files from the shared source (isolated per task).
+	// Sync isolated files from the shared source.
 	for _, name := range codexCopiedFiles {
 		src := filepath.Join(sharedHome, name)
 		dst := filepath.Join(codexHome, name)
@@ -130,6 +132,9 @@ func prepareCodexHomeWithOpts(codexHome string, opts CodexHomeOptions, logger *s
 
 	if err := exposeSharedCodexPluginCache(codexHome, sharedHome); err != nil {
 		logger.Warn("execenv: codex-home plugin cache exposure failed", "error", err)
+	}
+	if err := exposeSharedCodexMarketplaceCache(codexHome, sharedHome); err != nil {
+		logger.Warn("execenv: codex-home marketplace cache exposure failed", "error", err)
 	}
 
 	// Write a daemon-managed sandbox block into config.toml. On macOS we may
@@ -741,13 +746,24 @@ func resolveCodexConfigPath(configPath, sharedHome string) (string, error) {
 }
 
 func exposeSharedCodexPluginCache(codexHome, sharedHome string) error {
-	src := filepath.Join(sharedHome, "plugins", "cache")
-	dst := filepath.Join(codexHome, "plugins", "cache")
+	return exposeSharedCodexDir(codexHome, sharedHome, filepath.Join("plugins", "cache"), "plugin cache")
+}
+
+func exposeSharedCodexMarketplaceCache(codexHome, sharedHome string) error {
+	return exposeSharedCodexDir(codexHome, sharedHome, filepath.Join(".tmp", "marketplaces"), "marketplace cache")
+}
+
+// exposeSharedCodexDir links derived, user-scoped Codex state into an isolated
+// task home. Session and memory state stay task/issue-local; only regenerable
+// caches use this path so a fresh task does not repeat global initialization.
+func exposeSharedCodexDir(codexHome, sharedHome, relativePath, label string) error {
+	src := filepath.Join(sharedHome, relativePath)
+	dst := filepath.Join(codexHome, relativePath)
 	if err := os.MkdirAll(src, 0o755); err != nil {
-		return fmt.Errorf("create shared plugin cache dir: %w", err)
+		return fmt.Errorf("create shared %s dir: %w", label, err)
 	}
 	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
-		return fmt.Errorf("create codex plugin dir: %w", err)
+		return fmt.Errorf("create codex %s parent: %w", label, err)
 	}
 
 	if fi, err := os.Lstat(dst); err == nil {
@@ -757,17 +773,17 @@ func exposeSharedCodexPluginCache(codexHome, sharedHome string) error {
 				return nil
 			}
 			if err := os.Remove(dst); err != nil {
-				return fmt.Errorf("remove stale plugin cache link: %w", err)
+				return fmt.Errorf("remove stale %s link: %w", label, err)
 			}
 		} else {
 			if err := os.RemoveAll(dst); err != nil {
-				return fmt.Errorf("remove stale plugin cache path: %w", err)
+				return fmt.Errorf("remove stale %s path: %w", label, err)
 			}
 		}
 	}
 
 	if err := createDirLink(src, dst); err != nil {
-		return fmt.Errorf("expose shared plugin cache: %w", err)
+		return fmt.Errorf("expose shared %s: %w", label, err)
 	}
 	return nil
 }

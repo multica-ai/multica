@@ -1922,12 +1922,20 @@ func TestPrepareCodexHomeSeedsFromShared(t *testing.T) {
 	os.WriteFile(filepath.Join(sharedHome, "config.json"), []byte(`{"model":"o3"}`), 0o644)
 	os.WriteFile(filepath.Join(sharedHome, "config.toml"), []byte(`model = "o3"`), 0o644)
 	os.WriteFile(filepath.Join(sharedHome, "instructions.md"), []byte("Be helpful."), 0o644)
+	os.WriteFile(filepath.Join(sharedHome, "models_cache.json"), []byte(`{"models":["gpt-test"]}`), 0o644)
 	sharedPluginCache := filepath.Join(sharedHome, "plugins", "cache")
 	if err := os.MkdirAll(filepath.Join(sharedPluginCache, "superpowers"), 0o755); err != nil {
 		t.Fatalf("create shared plugin cache: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(sharedPluginCache, "superpowers", "SKILL.md"), []byte("Use superpowers."), 0o644); err != nil {
 		t.Fatalf("write shared plugin skill: %v", err)
+	}
+	sharedMarketplace := filepath.Join(sharedHome, ".tmp", "marketplaces", "test-marketplace")
+	if err := os.MkdirAll(sharedMarketplace, 0o755); err != nil {
+		t.Fatalf("create shared marketplace cache: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(sharedMarketplace, "manifest.json"), []byte(`{"name":"test"}`), 0o644); err != nil {
+		t.Fatalf("write shared marketplace manifest: %v", err)
 	}
 
 	// Point CODEX_HOME to our fake shared home.
@@ -2004,6 +2012,21 @@ func TestPrepareCodexHomeSeedsFromShared(t *testing.T) {
 		t.Errorf("instructions.md content = %q", data)
 	}
 
+	// models_cache.json is a task-local snapshot so Codex can skip a cold model
+	// catalog refresh without letting a task mutate the user's shared cache.
+	modelsCachePath := filepath.Join(codexHome, "models_cache.json")
+	fi, err = os.Lstat(modelsCachePath)
+	if err != nil {
+		t.Fatalf("models_cache.json not found: %v", err)
+	}
+	if fi.Mode()&os.ModeSymlink != 0 {
+		t.Error("models_cache.json should be copied, not symlinked")
+	}
+	data, _ = os.ReadFile(modelsCachePath)
+	if string(data) != `{"models":["gpt-test"]}` {
+		t.Errorf("models_cache.json content = %q", data)
+	}
+
 	// plugin cache should be exposed at the same relative path in codex-home.
 	pluginSkillPath := filepath.Join(codexHome, "plugins", "cache", "superpowers", "SKILL.md")
 	data, err = os.ReadFile(pluginSkillPath)
@@ -2012,6 +2035,17 @@ func TestPrepareCodexHomeSeedsFromShared(t *testing.T) {
 	}
 	if string(data) != "Use superpowers." {
 		t.Errorf("plugin cache skill content = %q", data)
+	}
+
+	// Marketplace checkouts are derived plugin state just like plugins/cache;
+	// sharing them avoids cloning every configured marketplace for every task.
+	marketplaceManifest := filepath.Join(codexHome, ".tmp", "marketplaces", "test-marketplace", "manifest.json")
+	data, err = os.ReadFile(marketplaceManifest)
+	if err != nil {
+		t.Fatalf("marketplace cache not exposed: %v", err)
+	}
+	if string(data) != `{"name":"test"}` {
+		t.Errorf("marketplace manifest content = %q", data)
 	}
 }
 
@@ -2143,8 +2177,11 @@ func TestPrepareCodexHomeSkipsMissingFiles(t *testing.T) {
 	if !entryNames["plugins"] {
 		t.Error("expected plugins directory for plugin cache exposure")
 	}
+	if !entryNames[".tmp"] {
+		t.Error("expected .tmp directory for marketplace cache exposure")
+	}
 	for name := range entryNames {
-		if name != "sessions" && name != "config.toml" && name != "plugins" {
+		if name != "sessions" && name != "config.toml" && name != "plugins" && name != ".tmp" {
 			t.Errorf("unexpected entry: %s", name)
 		}
 	}
@@ -2163,6 +2200,9 @@ func TestPrepareCodexHomeSkipsMissingFiles(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(codexHome, "plugins", "cache")); err != nil {
 		t.Fatalf("missing shared plugin cache exposure should still be tolerated and created: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(codexHome, ".tmp", "marketplaces")); err != nil {
+		t.Fatalf("missing shared marketplace cache exposure should still be tolerated and created: %v", err)
 	}
 }
 
@@ -2749,7 +2789,7 @@ func TestReuseRestoresCodexHome(t *testing.T) {
 	}
 }
 
-func TestReuseRestoresCodexPluginCache(t *testing.T) {
+func TestReuseRestoresCodexStartupCaches(t *testing.T) {
 	// Cannot use t.Parallel() with t.Setenv.
 
 	sharedHome := t.TempDir()
@@ -2759,6 +2799,13 @@ func TestReuseRestoresCodexPluginCache(t *testing.T) {
 	}
 	if err := os.WriteFile(filepath.Join(sharedPluginCache, "superpowers", "SKILL.md"), []byte("Use superpowers."), 0o644); err != nil {
 		t.Fatalf("write shared plugin skill: %v", err)
+	}
+	sharedMarketplace := filepath.Join(sharedHome, ".tmp", "marketplaces", "test-marketplace")
+	if err := os.MkdirAll(sharedMarketplace, 0o755); err != nil {
+		t.Fatalf("create shared marketplace cache: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(sharedMarketplace, "manifest.json"), []byte(`{"name":"test"}`), 0o644); err != nil {
+		t.Fatalf("write shared marketplace manifest: %v", err)
 	}
 	t.Setenv("CODEX_HOME", sharedHome)
 
@@ -2779,6 +2826,9 @@ func TestReuseRestoresCodexPluginCache(t *testing.T) {
 	if err := os.RemoveAll(filepath.Join(env.CodexHome, "plugins")); err != nil {
 		t.Fatalf("remove codex plugins dir: %v", err)
 	}
+	if err := os.RemoveAll(filepath.Join(env.CodexHome, ".tmp")); err != nil {
+		t.Fatalf("remove codex marketplace dir: %v", err)
+	}
 
 	reused := Reuse(ReuseParams{WorkDir: env.WorkDir, Provider: "codex", Task: TaskContextForEnv{IssueID: "reuse-plugin-test"}}, testLogger())
 	if reused == nil {
@@ -2791,6 +2841,13 @@ func TestReuseRestoresCodexPluginCache(t *testing.T) {
 	}
 	if string(data) != "Use superpowers." {
 		t.Errorf("reused plugin cache skill content = %q", data)
+	}
+	data, err = os.ReadFile(filepath.Join(reused.CodexHome, ".tmp", "marketplaces", "test-marketplace", "manifest.json"))
+	if err != nil {
+		t.Fatalf("reused marketplace cache not restored: %v", err)
+	}
+	if string(data) != `{"name":"test"}` {
+		t.Errorf("reused marketplace manifest content = %q", data)
 	}
 }
 
