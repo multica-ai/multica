@@ -10,15 +10,10 @@ import (
 	"github.com/multica-ai/multica/server/internal/runtimeapps"
 )
 
-// Sub-issue Creation section — after MUL-2538 the platform posts the
-// child-done parent notification itself, so the brief no longer carries
-// any parent-notification rule (per Bohan's call on PR #3055: delete the
-// guidance entirely, do not replace it with a "do not post one" sentence
-// — the agent should not be thinking about parent comments at all). All
-// that remains is the `--status todo` vs `--status backlog` rule for
-// creating sub-issues, which is unrelated to the notification path.
+// Issue-bound agent runs use one visible issue for one objective. The brief
+// must make the no-child-card rule explicit and match the server-side guard.
 
-func TestSubIssueCreationSectionPresentForIssueRuns(t *testing.T) {
+func TestSingleIssueExecutionSectionPresentForIssueRuns(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
 		name string
@@ -42,22 +37,17 @@ func TestSubIssueCreationSectionPresentForIssueRuns(t *testing.T) {
 			t.Parallel()
 			out := buildMetaSkillContent("claude", tc.ctx)
 
-			if !strings.Contains(out, "## Sub-issue Creation") {
-				t.Fatalf("expected Sub-issue Creation section in %s brief", tc.name)
+			if !strings.Contains(out, "## Single-Issue Execution") {
+				t.Fatalf("expected Single-Issue Execution section in %s brief", tc.name)
+			}
+			if !strings.Contains(out, "## Knowledge Layers") || !strings.Contains(out, "memory files as non-authoritative hints") {
+				t.Fatalf("expected knowledge layer precedence in %s brief", tc.name)
 			}
 			for _, want := range []string{
-				"**Choosing `--status` when creating sub-issues.**",
-				"`--status todo` = **start now**",
-				"`--status backlog` = **wait**",
-				"`multica issue status <child-id> todo`",
-				"all `--status todo`",
-				"`--status backlog` from the start",
-				// Stage guidance must reach the always-on brief so agents
-				// reach for stages instead of only the manual backlog chain
-				// (MUL-3508 follow-up).
-				"**Ordering with stages.**",
-				"`--stage <N>`",
-				"`multica issue children <id>`",
+				"Complete the objective inside the assigned issue.",
+				"Do not create sub-issues, sibling issues, replacement issues, staged barriers, or coordination cards.",
+				"one issue for one objective",
+				"The server rejects issue creation and hierarchy changes from issue-bound agent runs.",
 			} {
 				if !strings.Contains(out, want) {
 					t.Errorf("[%s] section missing %q", tc.name, want)
@@ -309,7 +299,8 @@ func TestAssignmentTriggeredProtocolHonorsAgentIdentity(t *testing.T) {
 		"Complete the task within your Agent Identity boundaries.",
 		"Do not investigate, implement, create issues, update issues, or delegate if your Agent Identity forbids that action",
 		"When done, run `multica issue status " + issueID + " in_review` unless your Agent Identity forbids issue status changes; if it does, skip this step.",
-		"If blocked, run `multica issue status " + issueID + " blocked` unless your Agent Identity forbids issue status changes.",
+		"If work cannot continue, keep the issue `in_progress`",
+		"Agents must never set `blocked`, `done`, or `cancelled`; those states are human-controlled.",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("assignment-triggered brief missing identity-bound workflow text %q\n---\n%s", want, out)
@@ -444,17 +435,17 @@ func TestOutputForbidsMidRunProgressComments(t *testing.T) {
 // `parent_issue_id` of their own — that is where the `todo` vs `backlog`
 // decision matters most. The section must not gate on this issue being
 // a child, and must not even mention `parent_issue_id`.
-func TestSubIssueCreationSectionIsUnconditional(t *testing.T) {
+func TestSingleIssueExecutionSectionIsUnconditional(t *testing.T) {
 	t.Parallel()
 	ctx := TaskContextForEnv{
 		IssueID: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
 	}
 	out := buildMetaSkillContent("claude", ctx)
 
-	const header = "## Sub-issue Creation"
+	const header = "## Single-Issue Execution"
 	start := strings.Index(out, header)
 	if start == -1 {
-		t.Fatalf("sub-issue creation section missing")
+		t.Fatalf("single-issue execution section missing")
 	}
 	rest := out[start:]
 	end := strings.Index(rest[len(header):], "\n## ")
@@ -465,8 +456,8 @@ func TestSubIssueCreationSectionIsUnconditional(t *testing.T) {
 		section = rest[:len(header)+end]
 	}
 
-	if strings.Contains(section, "parent_issue_id") {
-		t.Errorf("Sub-issue Creation section must not reference `parent_issue_id` — it applies to any issue-bound run, including top-level parents:\n%s", section)
+	if !strings.Contains(section, "one issue for one objective") {
+		t.Errorf("Single-Issue Execution section missing owner-visible invariant:\n%s", section)
 	}
 }
 
@@ -641,8 +632,8 @@ func TestSubIssueCreationSectionSkippedForNonIssueModes(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			out := buildMetaSkillContent("claude", tc.ctx)
-			if strings.Contains(out, "## Sub-issue Creation") {
-				t.Errorf("%s mode must NOT emit the Sub-issue Creation section", tc.name)
+			if strings.Contains(out, "## Single-Issue Execution") {
+				t.Errorf("%s mode must NOT emit the Single-Issue Execution section", tc.name)
 			}
 		})
 	}

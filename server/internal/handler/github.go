@@ -961,7 +961,7 @@ func (h *Handler) mirrorPullRequestForWorkspace(ctx context.Context, wsID pgtype
 		// last in-flight sibling resolves. We re-evaluate every issue we
 		// just linked once both the PR row and the link row are persisted,
 		// so the aggregate query sees the freshest state. We advance the
-		// issue to done when:
+		// issue to in_review when:
 		//   1. the issue isn't already terminal (`done` / `cancelled`);
 		//   2. no linked PR is still `open` / `draft`;
 		//   3. at least one merged linked PR declared close_intent (a
@@ -982,7 +982,7 @@ func (h *Handler) mirrorPullRequestForWorkspace(ctx context.Context, wsID pgtype
 					continue
 				}
 				if counts.OpenCount == 0 && counts.MergedWithCloseIntentCount > 0 {
-					h.advanceIssueToDone(ctx, issue, workspaceID)
+					h.advanceIssueToReview(ctx, issue, workspaceID)
 				}
 			}
 		}
@@ -1360,24 +1360,16 @@ func (h *Handler) lookupIssueByIdentifier(ctx context.Context, workspaceID pgtyp
 	return issue, true
 }
 
-func (h *Handler) advanceIssueToDone(ctx context.Context, issue db.Issue, workspaceID string) {
+func (h *Handler) advanceIssueToReview(ctx context.Context, issue db.Issue, workspaceID string) {
 	updated, err := h.Queries.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{
 		ID:          issue.ID,
-		Status:      "done",
+		Status:      "in_review",
 		WorkspaceID: issue.WorkspaceID,
 	})
 	if err != nil {
-		slog.Warn("github: advance issue to done failed", "err", err)
+		slog.Warn("github: advance issue to in_review failed", "err", err)
 		return
 	}
-
-	// Fire the platform parent-notification path on the same transition the
-	// HTTP UpdateIssue / BatchUpdateIssues paths use. A merged PR is one of
-	// the most common ways a sub-issue actually reaches `done`, and skipping
-	// it here would leave the parent silent for the dominant completion path.
-	// notifyParentOfChildDone re-checks every guard (prev != done, parent
-	// exists, parent not terminal), so calling it unconditionally is safe.
-	h.notifyParentOfChildDone(ctx, issue, updated)
 
 	prefix := h.getIssuePrefix(ctx, issue.WorkspaceID)
 	resp := issueToResponse(updated, prefix)

@@ -141,23 +141,19 @@ func (s *IssueService) WillEnqueueRun(ctx context.Context, in IssueTriggerInput,
 		if err != nil {
 			return IssueRunTrigger{}, false
 		}
-		leader, err := s.Queries.GetAgent(ctx, squad.LeaderID)
-		if err != nil {
-			return IssueRunTrigger{}, false
-		}
-		ready, _, err := AgentReadiness(ctx, s.Queries, leader)
-		if err != nil || !ready {
+		leader, leaderID, ready := s.ResolveSquadLeader(ctx, squad)
+		if !ready {
 			return IssueRunTrigger{}, false
 		}
 		if !canAccess(leader) {
 			return IssueRunTrigger{}, false
 		}
-		if source == RunSourceStatus && s.hasPendingRun(ctx, issue.ID, squad.LeaderID) {
+		if source == RunSourceStatus && s.hasPendingRun(ctx, issue.ID, leaderID) {
 			return IssueRunTrigger{}, false
 		}
 		return IssueRunTrigger{
 			IssueID:      issue.ID,
-			AgentID:      squad.LeaderID,
+			AgentID:      leaderID,
 			AssigneeType: "squad",
 			Source:       source,
 		}, true

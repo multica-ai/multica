@@ -282,6 +282,11 @@ func writeProjectContext(b *strings.Builder, ctx TaskContextForEnv) {
 	}
 }
 
+func writeKnowledgeLayers(b *strings.Builder) {
+	b.WriteString("## Knowledge Layers\n\n")
+	b.WriteString("Use context in this precedence order: (1) the current issue, attachments, and active comment thread; (2) workspace, company, project, and linked resource context; (3) repository instructions, source, tests, documentation, history, and linked pull requests; (4) memory files as non-authoritative hints. Earlier layers override later ones. Verify memory against current issue and repository facts before acting, and surface material conflicts instead of silently choosing stale context.\n\n")
+}
+
 // writeIssueMetadata emits the Issue Metadata discipline section
 // (compressed). The dispatcher gates by kind.hasIssueContext(); this
 // helper does not re-check.
@@ -421,15 +426,14 @@ func writeWorkflowAssignment(b *strings.Builder, ctx TaskContextForEnv) {
 	}
 	b.WriteString("7. Before exiting: only if this run produced a fact that clears the high bar (important AND likely to be re-read by future runs on this same issue, e.g. a new PR URL or deploy URL), or you noticed a metadata key from entry that is now stale, pin or clear it via `multica issue metadata set`/`delete`. Most runs write nothing here — that is the expected outcome, not a gap. When in doubt, do not write. See the `## Issue Metadata` section above for the full bar.\n")
 	fmt.Fprintf(b, "8. When done, run `multica issue status %s in_review` unless your Agent Identity forbids issue status changes; if it does, skip this step.\n", ctx.IssueID)
-	fmt.Fprintf(b, "9. If blocked, run `multica issue status %s blocked` unless your Agent Identity forbids issue status changes. Post a comment explaining the blocker unless your Agent Identity forbids issue comments.\n\n", ctx.IssueID)
+	b.WriteString("9. If work cannot continue, keep the issue `in_progress` and post one concise comment that states what is waiting, why it matters, and the exact human action or resource needed. Agents must never set `blocked`, `done`, or `cancelled`; those states are human-controlled.\n\n")
 }
 
 // writeSubIssueCreation emits the Sub-issue Creation section (compressed
 // to two short paragraphs).
 func writeSubIssueCreation(b *strings.Builder) {
-	b.WriteString("## Sub-issue Creation\n\n")
-	b.WriteString("**Choosing `--status` when creating sub-issues.** `--status todo` = **start now** (default — agent assignees fire immediately). `--status backlog` = **wait**, then promote later with `multica issue status <child-id> todo`. Parallel children: all `--status todo`. Strict serial 1→2→3: only Step 1 `todo`, Steps 2/3 `--status backlog` from the start.\n\n")
-	b.WriteString("**Ordering with stages.** For phased plans, group children with `--stage <N>` (N ≥ 1) instead of hand-promoting the backlog chain — stage members run together, and the parent wakes once per stage. Use `--stage k --status backlog` for later stages, then `multica issue children <id>` to inspect groupings before promoting. Reach for stages whenever a plan has more than one step or a step must wait for a group.\n\n")
+	b.WriteString("## Single-Issue Execution\n\n")
+	b.WriteString("Complete the objective inside the assigned issue. Do not create sub-issues, sibling issues, replacement issues, staged barriers, or coordination cards. If specialist help is useful, use internal agent/tool delegation and summarize the result on this issue; the owner must continue to see one issue for one objective. The server rejects issue creation and hierarchy changes from issue-bound agent runs.\n\n")
 }
 
 // writeSkills emits the Skills section listing skill names + descriptions.
@@ -565,6 +569,7 @@ func buildMetaSkillContentSlim(provider string, ctx TaskContextForEnv) string {
 
 	if kind.hasIssueContext() {
 		writeProjectContext(&b, ctx)
+		writeKnowledgeLayers(&b)
 		writeIssueMetadata(&b)
 	}
 

@@ -1322,9 +1322,10 @@ func (s *AutopilotService) resolveAutopilotLeader(ctx context.Context, ap db.Aut
 		if squad.ArchivedAt.Valid {
 			return db.Agent{}, true, errSquadArchived
 		}
-		agent, err = s.Queries.GetAgent(ctx, squad.LeaderID)
-		if err != nil {
-			return db.Agent{}, true, fmt.Errorf("load squad leader: %w", err)
+		var ready bool
+		agent, _, ready = ResolveReadySquadLeader(ctx, s.Queries, squad)
+		if !ready {
+			return db.Agent{}, true, errors.New("squad has no ready leader")
 		}
 		return agent, true, nil
 	default:
