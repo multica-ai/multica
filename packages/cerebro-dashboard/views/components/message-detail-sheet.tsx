@@ -2,7 +2,7 @@
 
 import { Bot, ExternalLink, User } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
-import { useNavigation } from "@multica/views/navigation";
+import { AppLink } from "@multica/views/navigation";
 import {
   Sheet,
   SheetContent,
@@ -63,8 +63,6 @@ export function MessageDetailSheet({
   workspaceSlug: string;
   onClose: () => void;
 }) {
-  const { push } = useNavigation();
-
   const { data, isLoading } = useQuery(
     sessionMessagesOptions(wsId, message?.session_id ?? null),
   );
@@ -97,16 +95,16 @@ export function MessageDetailSheet({
             <div className="shrink-0 grid grid-cols-3 gap-x-4 border-b bg-muted/20 px-5 py-3">
               <div className="flex items-center gap-1.5 text-xs">
                 <User className="size-3 shrink-0 text-muted-foreground" />
-                <span className="text-muted-foreground">Fra</span>
+                <span className="text-muted-foreground">From</span>
                 <span className="font-medium truncate">{message.sender_name ?? "—"}</span>
               </div>
               <div className="flex items-center gap-1.5 text-xs">
                 <Bot className="size-3 shrink-0 text-muted-foreground" />
-                <span className="text-muted-foreground">Til</span>
+                <span className="text-muted-foreground">To</span>
                 <span className="font-medium truncate">{message.agent_name}</span>
               </div>
               <div className="flex items-center justify-end gap-1.5 text-xs">
-                <span className="text-muted-foreground">Pris</span>
+                <span className="text-muted-foreground">Cost</span>
                 <span className="font-medium tabular-nums">
                   {isLoading ? "…" : formatCost(costCents)}
                 </span>
@@ -132,7 +130,7 @@ export function MessageDetailSheet({
               ) : (
                 <div className="flex flex-col gap-3 p-5">
                   <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-                    {sessionMessages.length} beskeder i denne session
+                    {sessionMessages.length} messages in this session
                   </p>
                   {sessionMessages.map((msg) => {
                     const isAgent = msg.role === "assistant";
@@ -170,14 +168,13 @@ export function MessageDetailSheet({
 
             {/* Footer */}
             <div className="shrink-0 border-t p-4">
-              <button
-                type="button"
-                onClick={() => push(`/${workspaceSlug}/inbox?chat=${message.session_id}`)}
+              <AppLink
+                href={`/${workspaceSlug}/inbox?chat=${message.session_id}`}
                 className="flex w-full items-center justify-center gap-2 rounded-md border px-3 py-2 text-xs text-muted-foreground transition-colors hover:text-foreground"
               >
                 <ExternalLink className="size-3.5" />
-                Åbn hele samtalen i indbakken
-              </button>
+                Open full conversation in Inbox
+              </AppLink>
             </div>
           </>
         )}

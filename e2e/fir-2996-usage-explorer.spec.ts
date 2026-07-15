@@ -106,10 +106,24 @@ test("Dashboard shares filters, drills into runs, and persists a new visual", as
     );
 
     const token = api.getToken()!;
+    const appOrigin = new URL(
+      process.env.PLAYWRIGHT_BASE_URL ?? process.env.FRONTEND_ORIGIN ?? "http://localhost:3000",
+    ).origin;
+    const appHost = new URL(appOrigin).hostname;
     await page.addInitScript((value) => localStorage.setItem("multica_token", value), token);
+    await page.context().addCookies([
+      { name: "multica_auth", value: token, domain: appHost, path: "/", httpOnly: true, sameSite: "Lax" },
+      { name: "multica_logged_in", value: "1", domain: appHost, path: "/", sameSite: "Lax" },
+      { name: "last_workspace_slug", value: workspace.slug, domain: appHost, path: "/", sameSite: "Lax" },
+    ]);
     await page.setViewportSize({ width: 1600, height: 1400 });
     await page.goto(`/${workspace.slug}/dashboard`);
 
+    await expect(page.getByRole("region", { name: "Workspace pulse" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Work throughput" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "People driving work" })).toBeVisible();
+    await expect(page.locator("section[aria-label='KPIs']")).toHaveCount(0);
+    await expect(page.locator("section[aria-label='Breakdown']")).toHaveCount(0);
     await expect(page.getByRole("heading", { name: "Activity", exact: true })).toBeVisible();
     await expect(page.getByRole("heading", { name: "People and projects" })).toBeVisible();
     await page.getByRole("button", { name: "Include provider openai" }).first().click();
@@ -155,11 +169,17 @@ test("Dashboard shares filters, drills into runs, and persists a new visual", as
     await page.locator("section[aria-label='Activity grid'] button[title*=' runs']").first().click();
     await expect(page).toHaveURL(/time\.gte=/);
     await page.getByRole("button", { name: "Overview", exact: true }).click();
-    const timeFilterChips = page.getByRole("button", { name: /time = .*×/ });
+    const timeFilterChips = page.getByRole("button", { name: /Time: .*×/ });
     await expect(timeFilterChips).toHaveCount(2);
     await timeFilterChips.first().click();
     await timeFilterChips.first().click();
     await expect(page).not.toHaveURL(/time\.(gte|lte)=/);
+
+    await page.getByRole("button", { name: "Messages", exact: true }).click();
+    await expect(page.getByRole("region", { name: "Message operations" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Conversation flow" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "All messages" })).toBeVisible();
+    await expect(page.getByRole("textbox", { name: "Search all messages" })).toBeVisible();
 
     await page.getByRole("button", { name: "Runs", exact: true }).click();
     await matchingRuns.getByRole("button", { name: "Open run context Usage run" }).click();

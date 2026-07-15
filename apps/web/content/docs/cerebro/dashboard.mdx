@@ -9,15 +9,21 @@ The **Dashboard** brings workspace activity and AI usage into one place. Open it
 
 Use the tabs at the top to switch between:
 
-- **Overview** for workspace activity and issue summaries.
+- **Overview** for workspace throughput, issue outcomes, active people, cost, and shared analytics visuals.
 - **Runs** for usage, cost, savings, quality, and run-level debugging.
-- **Messages** for message activity and spend.
+- **Messages** for message activity, spend, senders, recipients, conversation flow, search, and conversation details.
 
-## Filter the Runs view
+## Filter the complete Dashboard
 
-Choose a period, then use **Add filter** to filter by person, project, runtime, source, provider, model, skill, status, cost kind, or quality signal. Active filters are shown as chips and apply to every panel. Select a chip to remove it, or use **Clear all**.
+Choose a period, then use **Add filter** to filter by person, project, runtime, source, provider, model, skill, status, cost kind, or quality signal. Active filters are shown as chips and remain active when you switch between **Overview**, **Runs**, and **Messages**. Select a chip to remove it, or use **Clear all**.
 
-Charts, table cells, source cards, and activity cells are also interactive. Selecting one adds the corresponding filter to the whole view.
+Charts, people, status rows, message flows, table cells, source cards, and activity cells are interactive. Selecting one adds the corresponding filter to the complete Dashboard.
+
+## Read the workspace pulse
+
+**Overview** starts with **Workspace pulse**: issues opened and completed, completed and failed tasks, active agents and members, and measured gateway cost. Use **Work throughput** to select a day, **Issue outcomes** to select a status, or a person row to narrow the complete Dashboard.
+
+Saved and default analytics visuals use the same filters. Select **New visual** to add a visual without leaving **Overview**.
 
 ## Explore activity and usage
 
@@ -43,3 +49,9 @@ Use **Open full Trace** to open the complete trace when one is available.
 Select **New visual** to choose a visualization, **Metric**, **Dimension**, **Breakdown**, and **Grain**. The new visual uses the current Dashboard filters and remains available after reload.
 
 Use **Configure** on a visual to adjust its setup.
+
+## Inspect Messages
+
+**Messages** shows direct and channel message totals, measured cost, daily message activity, top senders and recipients, and **Conversation flow**. Select a day, sender, recipient, or flow to narrow every Messages panel.
+
+Use **Search all messages** to find content, people, agents, or issues within the current selection. Select a message row to open its conversation details, then use **Open full conversation in Inbox** to continue in the original thread.
