@@ -173,6 +173,13 @@ func allowlistedOpenclawSnapshot(owner map[string]any, workDir string) (map[stri
 		if !ok {
 			continue
 		}
+		if key == "providers" {
+			providers := projectOpenclawPublicProviders(value)
+			if len(providers) == 0 {
+				continue
+			}
+			value = providers
+		}
 		if err := rejectOwnerAbsolutePaths(value); err != nil {
 			return nil, fmt.Errorf("%s: %w", key, err)
 		}
@@ -215,6 +222,42 @@ func allowlistedOpenclawSnapshot(owner map[string]any, workDir string) (map[stri
 		snapshot["agents"] = agents
 	}
 	return snapshot, nil
+}
+
+func projectOpenclawPublicProviders(value any) map[string]any {
+	rawProviders, ok := value.(map[string]any)
+	if !ok {
+		return map[string]any{}
+	}
+
+	providers := make(map[string]any, len(rawProviders))
+	for name, value := range rawProviders {
+		rawProvider, ok := value.(map[string]any)
+		if !ok {
+			continue
+		}
+		projected := projectOpenclawPublicProvider(rawProvider)
+		if len(projected) > 0 {
+			providers[name] = projected
+		}
+	}
+	return providers
+}
+
+func projectOpenclawPublicProvider(provider map[string]any) map[string]any {
+	projected := make(map[string]any)
+	for _, key := range []string{
+		"baseUrl", "baseURL", "endpoint", "id", "name", "organization", "organizationId",
+		"project", "projectId", "region", "type",
+	} {
+		if value, ok := provider[key].(string); ok {
+			projected[key] = value
+		}
+	}
+	if value, ok := provider["enabled"].(bool); ok {
+		projected["enabled"] = value
+	}
+	return projected
 }
 
 func copyOpenclawAllowedFields(dst, src map[string]any, keys []string) {

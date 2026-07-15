@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
 	"testing"
@@ -129,8 +130,11 @@ func TestPrepareOpenclawConfigWritesAllowlistedSnapshot(t *testing.T) {
 			t.Fatalf("snapshot retained %q: %v", forbidden, snapshot)
 		}
 	}
-	if snapshot["models"] == nil || snapshot["providers"] == nil || snapshot["gateway"] == nil {
-		t.Fatalf("snapshot lost allowlisted provider data: %v", snapshot)
+	if snapshot["models"] == nil || snapshot["gateway"] == nil {
+		t.Fatalf("snapshot lost allowlisted model or gateway data: %v", snapshot)
+	}
+	if _, ok := snapshot["providers"]; ok {
+		t.Fatalf("credential-only provider data was retained: %v", snapshot)
 	}
 	agents := snapshot["agents"].(map[string]any)
 	if agents["defaults"].(map[string]any)["workspace"] != workDir {
@@ -154,6 +158,60 @@ func TestPrepareOpenclawConfigWritesAllowlistedSnapshot(t *testing.T) {
 	}
 }
 
+func TestPrepareOpenclawConfigProjectsPublicProviderMetadata(t *testing.T) {
+	writeOwnerOpenclawConfig(t, `{
+		"providers":{
+			"openai":{
+				"apiKey":"openai-secret",
+				"API_KEY":"uppercase-secret",
+				"x-api-key":"/Users/owner/provider-key",
+				"accessKey":"access-key-secret",
+				"accountMaterial":"novel-secret",
+				"baseUrl":"https://api.openai.example/v1",
+				"organization":"org-example",
+				"auth":{"access_token":"nested-access-secret","oauthToken":"oauth-secret","Authorization":"Bearer auth-secret","scheme":"Bearer"},
+				"fallbacks":[
+					{"region":"us-east-1","clientSecret":"array-client-secret"},
+					{"region":"eu-west-1","credential":{"type":"service-account","private-key":"array-private-secret","sharedSecret":"shared-secret"}}
+				]
+			},
+			"local":{"endpoint":"http://127.0.0.1:11434","enabled":true,"key":"local-key-secret"}
+		}
+	}`)
+	envRoot := t.TempDir()
+	result, err := prepareOpenclawConfig(envRoot, filepath.Join(envRoot, "workdir"), OpenclawConfigPrep{})
+	if err != nil {
+		t.Fatalf("prepareOpenclawConfig: %v", err)
+	}
+
+	combined := readOpenclawTaskFiles(t, result.ConfigPath, envRoot)
+	for _, secret := range []string{
+		"openai-secret", "uppercase-secret", "/Users/owner/provider-key", "access-key-secret",
+		"novel-secret", "nested-access-secret", "oauth-secret", "auth-secret",
+		"array-client-secret", "array-private-secret", "shared-secret", "local-key-secret",
+	} {
+		if bytes.Contains(combined, []byte(secret)) {
+			t.Errorf("provider credential %q leaked: %s", secret, combined)
+		}
+	}
+
+	snapshot := mustReadOpenclawJSON(t, filepath.Join(envRoot, openclawUserSnapshotFile))
+	providers := snapshot["providers"].(map[string]any)
+	want := map[string]any{
+		"openai": map[string]any{
+			"baseUrl":      "https://api.openai.example/v1",
+			"organization": "org-example",
+		},
+		"local": map[string]any{
+			"endpoint": "http://127.0.0.1:11434",
+			"enabled":  true,
+		},
+	}
+	if !reflect.DeepEqual(providers, want) {
+		t.Fatalf("providers = %#v, want public projection %#v", providers, want)
+	}
+}
+
 func TestPrepareOpenclawConfigManagedMCPIsTaskAuthoritative(t *testing.T) {
 	writeOwnerOpenclawConfig(t, `{"mcp":{"servers":{"owner":{"command":"owner-tool"}}}}`)
 	envRoot := t.TempDir()
@@ -174,7 +232,7 @@ func TestPrepareOpenclawConfigFailsClosedOnUnsupportedOwnerConfig(t *testing.T) 
 		"trailing comma":     `{"gateway":{"port":18789,}}`,
 		"include":            `{"$include":["base.json"]}`,
 		"env substitution":   `{"providers":{"openai":{"apiKey":"${OPENAI_API_KEY}"}}}`,
-		"absolute allowlist": `{"providers":{"local":{"socket":"/Users/owner/provider.sock"}}}`,
+		"absolute allowlist": `{"providers":{"local":{"baseUrl":"/Users/owner/provider.sock"}}}`,
 	}
 	for name, body := range cases {
 		t.Run(name, func(t *testing.T) {

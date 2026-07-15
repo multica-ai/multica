@@ -2,6 +2,7 @@ package execenv
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"os"
@@ -2113,6 +2114,166 @@ func TestPrepareCodexHomeSeedsFromShared(t *testing.T) {
 	marketplacePath := filepath.Join(codexHome, ".tmp", "marketplaces")
 	if _, err := os.Lstat(marketplacePath); !os.IsNotExist(err) {
 		t.Fatalf("shared marketplace cache exposed in task home: %v", err)
+	}
+}
+
+func TestPrepareCodexHomeIsolatesPluginCacheFromSharedHome(t *testing.T) {
+	// Cannot use t.Parallel() with t.Setenv.
+
+	sharedHome := t.TempDir()
+	sharedPluginFile := filepath.Join(sharedHome, "plugins", "cache", "superpowers", "SKILL.md")
+	if err := os.MkdirAll(filepath.Dir(sharedPluginFile), 0o755); err != nil {
+		t.Fatalf("create shared plugin cache: %v", err)
+	}
+	if err := os.WriteFile(sharedPluginFile, []byte("owner-v1"), 0o644); err != nil {
+		t.Fatalf("write shared plugin cache: %v", err)
+	}
+	t.Setenv("CODEX_HOME", sharedHome)
+
+	codexHome := filepath.Join(t.TempDir(), "codex-home")
+	if runtime.GOOS != "windows" {
+		legacyTaskPluginCache := filepath.Join(codexHome, "plugins", "cache")
+		if err := os.MkdirAll(filepath.Dir(legacyTaskPluginCache), 0o755); err != nil {
+			t.Fatalf("create legacy task plugin directory: %v", err)
+		}
+		if err := os.Symlink(filepath.Join(sharedHome, "plugins", "cache"), legacyTaskPluginCache); err != nil {
+			t.Fatalf("create legacy shared plugin cache link: %v", err)
+		}
+	}
+	if err := prepareCodexHome(codexHome, testLogger()); err != nil {
+		t.Fatalf("prepareCodexHome failed: %v", err)
+	}
+
+	taskPluginCache := filepath.Join(codexHome, "plugins", "cache")
+	info, err := os.Lstat(taskPluginCache)
+	if err != nil {
+		t.Fatalf("inspect task plugin cache: %v", err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		t.Errorf("task plugin cache is a symlink to mutable owner state")
+	}
+
+	taskPluginFile := filepath.Join(taskPluginCache, "superpowers", "SKILL.md")
+	if err := os.WriteFile(taskPluginFile, []byte("task-write"), 0o644); err != nil {
+		t.Fatalf("write task plugin cache: %v", err)
+	}
+	ownerData, err := os.ReadFile(sharedPluginFile)
+	if err != nil {
+		t.Fatalf("read shared plugin cache after task write: %v", err)
+	}
+	if string(ownerData) != "owner-v1" {
+		t.Errorf("task plugin cache write mutated owner cache: got %q, want %q", ownerData, "owner-v1")
+	}
+
+	if err := os.WriteFile(sharedPluginFile, []byte("owner-v2"), 0o644); err != nil {
+		t.Fatalf("update shared plugin cache: %v", err)
+	}
+	taskData, err := os.ReadFile(taskPluginFile)
+	if err != nil {
+		t.Fatalf("read task plugin cache after owner update: %v", err)
+	}
+	if string(taskData) != "task-write" {
+		t.Errorf("owner plugin cache mutation changed task cache: got %q, want %q", taskData, "task-write")
+	}
+}
+
+func TestSnapshotSharedCodexPluginCacheRejectsHardlinkedSourceFile(t *testing.T) {
+	sharedHome := t.TempDir()
+	sharedPluginFile := filepath.Join(sharedHome, "plugins", "cache", "plugin", "manifest.json")
+	if err := os.MkdirAll(filepath.Dir(sharedPluginFile), 0o755); err != nil {
+		t.Fatalf("create shared plugin cache: %v", err)
+	}
+	if err := os.WriteFile(sharedPluginFile, []byte("owner-plugin"), 0o644); err != nil {
+		t.Fatalf("write shared plugin file: %v", err)
+	}
+	ownerAlias := filepath.Join(sharedHome, "owner-alias.json")
+	if err := os.Link(sharedPluginFile, ownerAlias); err != nil {
+		t.Skipf("hard links unavailable: %v", err)
+	}
+
+	codexHome := filepath.Join(t.TempDir(), "codex-home")
+	taskMarker := filepath.Join(codexHome, "plugins", "cache", "existing.txt")
+	if err := os.MkdirAll(filepath.Dir(taskMarker), 0o700); err != nil {
+		t.Fatalf("create existing task plugin cache: %v", err)
+	}
+	if err := os.WriteFile(taskMarker, []byte("existing-snapshot"), 0o600); err != nil {
+		t.Fatalf("write existing task plugin cache: %v", err)
+	}
+
+	err := snapshotSharedCodexPluginCache(codexHome, sharedHome)
+	if err == nil {
+		t.Fatal("expected hardlinked plugin cache source to be rejected")
+	}
+	if !errors.Is(err, errUnsafeTaskCodexPluginCacheEntry) || !strings.Contains(err.Error(), "hard link") {
+		t.Fatalf("snapshot error = %v, want unsafe hard-link rejection", err)
+	}
+	data, readErr := os.ReadFile(taskMarker)
+	if readErr != nil {
+		t.Fatalf("existing task plugin cache was not preserved: %v", readErr)
+	}
+	if string(data) != "existing-snapshot" {
+		t.Fatalf("existing task plugin cache changed: %q", data)
+	}
+}
+
+func TestSnapshotSharedCodexPluginCacheRejectsSymlinkSwapDuringCopy(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink fixture requires elevated privileges on some Windows hosts")
+	}
+
+	sharedHome := t.TempDir()
+	sharedPluginFile := filepath.Join(sharedHome, "plugins", "cache", "plugin", "manifest.json")
+	if err := os.MkdirAll(filepath.Dir(sharedPluginFile), 0o755); err != nil {
+		t.Fatalf("create shared plugin cache: %v", err)
+	}
+	if err := os.WriteFile(sharedPluginFile, []byte("owner-plugin"), 0o644); err != nil {
+		t.Fatalf("write shared plugin file: %v", err)
+	}
+	outsideFile := filepath.Join(t.TempDir(), "outside.json")
+	if err := os.WriteFile(outsideFile, []byte("outside-owner-state"), 0o600); err != nil {
+		t.Fatalf("write outside owner file: %v", err)
+	}
+
+	codexHome := filepath.Join(t.TempDir(), "codex-home")
+	taskMarker := filepath.Join(codexHome, "plugins", "cache", "existing.txt")
+	if err := os.MkdirAll(filepath.Dir(taskMarker), 0o700); err != nil {
+		t.Fatalf("create existing task plugin cache: %v", err)
+	}
+	if err := os.WriteFile(taskMarker, []byte("existing-snapshot"), 0o600); err != nil {
+		t.Fatalf("write existing task plugin cache: %v", err)
+	}
+
+	swapped := false
+	err := snapshotSharedCodexPluginCacheWithAfterOpen(codexHome, sharedHome, func(path string) {
+		if swapped || path != sharedPluginFile {
+			return
+		}
+		swapped = true
+		if removeErr := os.Remove(path); removeErr != nil {
+			t.Fatalf("remove plugin file during swap: %v", removeErr)
+		}
+		if symlinkErr := os.Symlink(outsideFile, path); symlinkErr != nil {
+			t.Fatalf("replace plugin file with symlink: %v", symlinkErr)
+		}
+	})
+	if !swapped {
+		t.Fatal("test hook did not swap the plugin cache source")
+	}
+	if err == nil {
+		t.Fatal("expected plugin cache source identity change to be rejected")
+	}
+	if !errors.Is(err, errUnsafeTaskCodexPluginCacheEntry) || !strings.Contains(err.Error(), "identity changed") {
+		t.Fatalf("snapshot error = %v, want unsafe identity-change rejection", err)
+	}
+	data, readErr := os.ReadFile(taskMarker)
+	if readErr != nil {
+		t.Fatalf("existing task plugin cache was not preserved: %v", readErr)
+	}
+	if string(data) != "existing-snapshot" {
+		t.Fatalf("existing task plugin cache changed: %q", data)
+	}
+	if _, statErr := os.Stat(filepath.Join(codexHome, "plugins", "cache", "plugin", "manifest.json")); !os.IsNotExist(statErr) {
+		t.Fatalf("unsafe staging snapshot was published: stat error = %v", statErr)
 	}
 }
 

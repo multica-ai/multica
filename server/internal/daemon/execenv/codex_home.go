@@ -3,8 +3,10 @@ package execenv
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -12,6 +14,17 @@ import (
 	"time"
 
 	"github.com/pelletier/go-toml/v2"
+)
+
+const (
+	taskCodexPluginCacheMaxFiles     = 25_000
+	taskCodexPluginCacheMaxFileBytes = 16 << 20
+	taskCodexPluginCacheMaxBytes     = 512 << 20
+)
+
+var (
+	errUnsafeTaskCodexPluginCacheEntry = errors.New("unsafe Codex plugin cache entry")
+	errTaskCodexPluginCacheLimit       = errors.New("Codex plugin cache snapshot limit exceeded")
 )
 
 // Files to copy from the shared ~/.codex/ into the per-task CODEX_HOME.
@@ -156,8 +169,8 @@ func prepareCodexHomeWithOpts(codexHome string, opts CodexHomeOptions, logger *s
 		}
 	}
 
-	if err := exposeSharedCodexPluginCache(codexHome, sharedHome); err != nil {
-		logger.Warn("execenv: codex-home plugin cache exposure failed", "error", err)
+	if err := snapshotSharedCodexPluginCache(codexHome, sharedHome); err != nil {
+		logger.Warn("execenv: codex-home plugin cache snapshot failed", "error", err)
 	}
 
 	// Write a daemon-managed sandbox block into config.toml. On macOS we may
@@ -953,35 +966,135 @@ func resolveCodexConfigPath(configPath, sharedHome string) (string, error) {
 	return filepath.Join(sharedHome, filepath.Clean(configPath)), nil
 }
 
-func exposeSharedCodexPluginCache(codexHome, sharedHome string) error {
+func snapshotSharedCodexPluginCache(codexHome, sharedHome string) error {
+	return snapshotSharedCodexPluginCacheWithAfterOpen(codexHome, sharedHome, nil)
+}
+
+func snapshotSharedCodexPluginCacheWithAfterOpen(codexHome, sharedHome string, afterOpen func(string)) error {
 	src := filepath.Join(sharedHome, "plugins", "cache")
 	dst := filepath.Join(codexHome, "plugins", "cache")
-	if err := os.MkdirAll(src, 0o755); err != nil {
-		return fmt.Errorf("create shared plugin cache dir: %w", err)
-	}
-	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+	if err := ensurePrivateCodexDir(filepath.Dir(dst)); err != nil {
 		return fmt.Errorf("create codex plugin dir: %w", err)
 	}
-
-	if fi, err := os.Lstat(dst); err == nil {
-		isLink := fi.Mode()&os.ModeSymlink != 0
-		if isLink {
-			if target, readlinkErr := os.Readlink(dst); readlinkErr == nil && target == src {
-				return nil
-			}
-			if err := os.Remove(dst); err != nil {
-				return fmt.Errorf("remove stale plugin cache link: %w", err)
-			}
-		} else {
+	if info, err := os.Lstat(dst); err == nil {
+		if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
 			if err := os.RemoveAll(dst); err != nil {
-				return fmt.Errorf("remove stale plugin cache path: %w", err)
+				return fmt.Errorf("remove unsafe Codex plugin cache path: %w", err)
 			}
+		}
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("inspect Codex plugin cache destination: %w", err)
+	}
+
+	sourceExists := true
+	if info, err := os.Lstat(src); os.IsNotExist(err) {
+		sourceExists = false
+	} else if err != nil {
+		return fmt.Errorf("inspect shared plugin cache: %w", err)
+	} else if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+		return fmt.Errorf("%w: source is not a regular directory", errUnsafeTaskCodexPluginCacheEntry)
+	}
+
+	staging, err := os.MkdirTemp(filepath.Dir(dst), ".codex-plugin-cache-snapshot-")
+	if err != nil {
+		return fmt.Errorf("create Codex plugin cache staging directory: %w", err)
+	}
+	published := false
+	defer func() {
+		if !published {
+			_ = os.RemoveAll(staging)
+		}
+	}()
+
+	if sourceExists {
+		limits := taskCodexPluginCacheSnapshotLimits{}
+		if err := copyTaskCodexPluginCacheTree(src, staging, &limits, afterOpen); err != nil {
+			return err
 		}
 	}
 
-	if err := createDirLink(src, dst); err != nil {
-		return fmt.Errorf("expose shared plugin cache: %w", err)
+	if err := os.RemoveAll(dst); err != nil {
+		return fmt.Errorf("remove stale Codex plugin cache snapshot: %w", err)
 	}
+	if err := os.Rename(staging, dst); err != nil {
+		return fmt.Errorf("publish Codex plugin cache snapshot: %w", err)
+	}
+	published = true
+	return nil
+}
+
+type taskCodexPluginCacheSnapshotLimits struct {
+	files int
+	bytes int64
+}
+
+func copyTaskCodexPluginCacheTree(src, dst string, limits *taskCodexPluginCacheSnapshotLimits, afterOpen func(string)) error {
+	return filepath.WalkDir(src, func(path string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		relative, err := filepath.Rel(src, path)
+		if err != nil {
+			return fmt.Errorf("resolve Codex plugin cache entry: %w", err)
+		}
+		target := filepath.Join(dst, relative)
+		if entry.IsDir() {
+			if relative == "." {
+				return nil
+			}
+			if err := os.Mkdir(target, 0o755); err != nil {
+				return fmt.Errorf("create Codex plugin cache snapshot directory: %w", err)
+			}
+			return nil
+		}
+		if entry.Type()&os.ModeSymlink != 0 || !entry.Type().IsRegular() {
+			return fmt.Errorf("%w: %s", errUnsafeTaskCodexPluginCacheEntry, relative)
+		}
+
+		limits.files++
+		if limits.files > taskCodexPluginCacheMaxFiles {
+			return fmt.Errorf("%w: %s", errTaskCodexPluginCacheLimit, relative)
+		}
+
+		var fileAfterOpen func()
+		if afterOpen != nil {
+			fileAfterOpen = func() { afterOpen(path) }
+		}
+		data, err := readStableRegularFile(path, taskCodexPluginCacheMaxFileBytes, fileAfterOpen)
+		if err != nil {
+			return fmt.Errorf("%w: %s: %v", errUnsafeTaskCodexPluginCacheEntry, relative, err)
+		}
+		if limits.bytes > taskCodexPluginCacheMaxBytes-int64(len(data)) {
+			return fmt.Errorf("%w: %s", errTaskCodexPluginCacheLimit, relative)
+		}
+		limits.bytes += int64(len(data))
+		if err := writeTaskCodexPluginCacheFile(target, data); err != nil {
+			return err
+		}
+		return nil
+	})
+}
+
+func writeTaskCodexPluginCacheFile(dst string, data []byte) error {
+	out, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+	if err != nil {
+		return fmt.Errorf("create Codex plugin cache snapshot file: %w", err)
+	}
+	ok := false
+	defer func() {
+		_ = out.Close()
+		if !ok {
+			_ = os.Remove(dst)
+		}
+	}()
+
+	if _, err := out.Write(data); err != nil {
+		return fmt.Errorf("write Codex plugin cache snapshot file: %w", err)
+	}
+	if err := out.Close(); err != nil {
+		return fmt.Errorf("close Codex plugin cache snapshot file: %w", err)
+	}
+	ok = true
 	return nil
 }
 
