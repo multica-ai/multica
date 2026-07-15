@@ -2630,15 +2630,20 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 		// Transactional outbox (MUL-4332): emit task.completed atomically with
 		// the status flip. The status CAS above makes this exactly-once — a
 		// replayed callback finds the task already terminal and never re-emits.
-		if wsID := s.taskWorkspaceID(ctx, qtx, t.AgentID); wsID.Valid {
-			evt := domainevent.TaskCompleted(wsID, t.ID, domainevent.AgentActor(t.AgentID),
-				domainevent.TaskCompletedPayload{
-					IssueID: util.UUIDToString(t.IssueID),
-					AgentID: util.UUIDToString(t.AgentID),
-				})
-			if _, err := domainevent.Write(ctx, qtx, evt); err != nil {
-				return fmt.Errorf("write task.completed event: %w", err)
-			}
+		// Fail-closed on workspace resolution (review point 4): if the workspace
+		// is unresolvable we error out and roll the completion back rather than
+		// commit the fact without its event.
+		wsID := s.resolveTaskWorkspaceForEvent(ctx, qtx, t)
+		if !wsID.Valid {
+			return fmt.Errorf("task.completed event: unresolvable workspace for task %s", util.UUIDToString(t.ID))
+		}
+		evt := domainevent.TaskCompleted(wsID, t.ID, domainevent.AgentActor(t.AgentID),
+			domainevent.TaskCompletedPayload{
+				IssueID: util.UUIDToString(t.IssueID),
+				AgentID: util.UUIDToString(t.AgentID),
+			})
+		if _, err := domainevent.Write(ctx, qtx, evt); err != nil {
+			return fmt.Errorf("write task.completed event: %w", err)
 		}
 		return nil
 	}); err != nil {
@@ -2971,18 +2976,21 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 
 		// Transactional outbox (MUL-4332): emit task.failed atomically with the
 		// fail (and any retry child). retryable reflects whether this failure
-		// spawned an auto-retry; the status CAS makes it exactly-once.
-		if wsID := s.taskWorkspaceID(ctx, qtx, t.AgentID); wsID.Valid {
-			evt := domainevent.TaskFailed(wsID, t.ID, domainevent.AgentActor(t.AgentID),
-				domainevent.TaskFailedPayload{
-					IssueID:   util.UUIDToString(t.IssueID),
-					AgentID:   util.UUIDToString(t.AgentID),
-					Retryable: wantRetry,
-					ErrorCode: failureReason,
-				})
-			if _, err := domainevent.Write(ctx, qtx, evt); err != nil {
-				return fmt.Errorf("write task.failed event: %w", err)
-			}
+		// spawned an auto-retry; the status CAS makes it exactly-once. Fail-closed
+		// on workspace resolution (review point 4).
+		wsID := s.resolveTaskWorkspaceForEvent(ctx, qtx, t)
+		if !wsID.Valid {
+			return fmt.Errorf("task.failed event: unresolvable workspace for task %s", util.UUIDToString(t.ID))
+		}
+		evt := domainevent.TaskFailed(wsID, t.ID, domainevent.AgentActor(t.AgentID),
+			domainevent.TaskFailedPayload{
+				IssueID:   util.UUIDToString(t.IssueID),
+				AgentID:   util.UUIDToString(t.AgentID),
+				Retryable: wantRetry,
+				ErrorCode: failureReason,
+			})
+		if _, err := domainevent.Write(ctx, qtx, evt); err != nil {
+			return fmt.Errorf("write task.failed event: %w", err)
 		}
 		return nil
 	}); err != nil {
@@ -3466,6 +3474,15 @@ func (s *TaskService) HandleFailedTasks(ctx context.Context, tasks []db.AgentTas
 						// Transactional outbox (MUL-4332): the stuck-issue reset bypasses the
 						// HTTP UpdateIssue path, so emit issue.status_changed atomically here.
 						updateErr := domainevent.WriteInTx(ctx, s.TxStarter, s.Queries, func(qtx *db.Queries) ([]domainevent.Event, error) {
+							// Lock + read the true current status inside the tx so the event
+							// `from` is correct under concurrent transitions (review point 3).
+							before, bErr := qtx.LockIssueStatusForEvent(ctx, db.LockIssueStatusForEventParams{
+								ID:          t.IssueID,
+								WorkspaceID: issue.WorkspaceID,
+							})
+							if bErr != nil {
+								return nil, bErr
+							}
 							u, uErr := qtx.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{
 								ID:          t.IssueID,
 								Status:      "todo",
@@ -3475,8 +3492,11 @@ func (s *TaskService) HandleFailedTasks(ctx context.Context, tasks []db.AgentTas
 								return nil, uErr
 							}
 							updatedIssue = u
+							if before.Status == u.Status {
+								return nil, nil
+							}
 							return []domainevent.Event{domainevent.IssueStatusChanged(u.WorkspaceID, u.ID, domainevent.SystemActor(),
-								domainevent.IssueStatusChangedPayload{From: issue.Status, To: u.Status})}, nil
+								domainevent.IssueStatusChangedPayload{From: before.Status, To: u.Status})}, nil
 						})
 						if updateErr != nil {
 							slog.Warn("handle failed tasks: reset stuck issue failed",
@@ -3527,24 +3547,91 @@ func (s *TaskService) HandleFailedTasks(ctx context.Context, tasks []db.AgentTas
 // runInTx executes fn inside a single DB transaction. If TxStarter is nil
 // (e.g. some tests construct TaskService directly), fn runs against the
 // regular Queries handle without transactional guarantees.
-// taskWorkspaceID resolves the workspace of a task via its agent, to stamp the
-// workspace_id of a task domain event (agent_task_queue itself carries no
-// workspace column). It reads on the passed qtx so the lookup stays in the
-// caller's transaction. Best-effort: an unresolvable agent (already deleted)
-// returns an invalid UUID and the caller skips the event rather than wedging
-// the task's terminal callback — a missing agent means the workspace is
-// genuinely unknowable, and the lost event is bounded to that pathological case.
-func (s *TaskService) taskWorkspaceID(ctx context.Context, qtx *db.Queries, agentID pgtype.UUID) pgtype.UUID {
-	if !agentID.Valid {
-		return pgtype.UUID{}
+// resolveTaskWorkspaceForEvent resolves a task's workspace for stamping a task
+// domain event (agent_task_queue carries no workspace column). It reads on the
+// passed qtx so the lookup stays in the caller's transaction, and walks the
+// task's stable attribution — issue, chat session, autopilot run, quick-create
+// context — before finally falling back to the owning agent. This mirrors
+// ResolveTaskWorkspaceID's chain but tx-scoped and with the agent fallback that
+// resolver lacks. An invalid return means genuinely unresolvable; the caller
+// treats that as fail-closed (review point 4): it errors out and rolls the whole
+// terminal transition back rather than committing a fact with no event.
+func (s *TaskService) resolveTaskWorkspaceForEvent(ctx context.Context, qtx *db.Queries, task db.AgentTaskQueue) pgtype.UUID {
+	if task.IssueID.Valid {
+		if issue, err := qtx.GetIssue(ctx, task.IssueID); err == nil {
+			return issue.WorkspaceID
+		}
 	}
-	agent, err := qtx.GetAgent(ctx, agentID)
+	if task.ChatSessionID.Valid {
+		if cs, err := qtx.GetChatSession(ctx, task.ChatSessionID); err == nil {
+			return cs.WorkspaceID
+		}
+	}
+	if task.AutopilotRunID.Valid {
+		if run, err := qtx.GetAutopilotRun(ctx, task.AutopilotRunID); err == nil {
+			if ap, err := qtx.GetAutopilot(ctx, run.AutopilotID); err == nil {
+				return ap.WorkspaceID
+			}
+		}
+	}
+	if qc, ok := s.parseQuickCreateContext(task); ok {
+		if ws, err := util.ParseUUID(qc.WorkspaceID); err == nil && ws.Valid {
+			return ws
+		}
+	}
+	if task.AgentID.Valid {
+		if agent, err := qtx.GetAgent(ctx, task.AgentID); err == nil {
+			return agent.WorkspaceID
+		}
+	}
+	return pgtype.UUID{}
+}
+
+// FailTasksInTxWithEvents runs a bulk-fail query inside a transaction and emits
+// a task.failed domain event for each returned task atomically with the bulk
+// UPDATE (MUL-4332 review point 2). The runtime sweepers and daemon
+// orphan-recovery all funnel through this, so no bulk terminal path commits a
+// fail without its event. It is all-or-nothing per batch: an event-write or
+// workspace-resolution failure rolls the whole sweep back, and the next tick
+// retries idempotently (the bulk-fail queries only re-match tasks still in a
+// non-terminal status). Any auto-retry child is a separate downstream write, so
+// the emitted event is marked non-retryable.
+func (s *TaskService) FailTasksInTxWithEvents(ctx context.Context, bulk func(qtx *db.Queries) ([]db.AgentTaskQueue, error)) ([]db.AgentTaskQueue, error) {
+	tx, err := s.TxStarter.Begin(ctx)
 	if err != nil {
-		slog.Warn("domain event: could not resolve task workspace via agent",
-			"agent_id", util.UUIDToString(agentID), "error", err)
-		return pgtype.UUID{}
+		return nil, fmt.Errorf("begin tx: %w", err)
 	}
-	return agent.WorkspaceID
+	defer tx.Rollback(ctx)
+	qtx := s.Queries.WithTx(tx)
+
+	failed, err := bulk(qtx)
+	if err != nil {
+		return nil, err
+	}
+	for _, t := range failed {
+		wsID := s.resolveTaskWorkspaceForEvent(ctx, qtx, t)
+		if !wsID.Valid {
+			return nil, fmt.Errorf("task.failed event: unresolvable workspace for task %s", util.UUIDToString(t.ID))
+		}
+		reason := ""
+		if t.FailureReason.Valid {
+			reason = t.FailureReason.String
+		}
+		evt := domainevent.TaskFailed(wsID, t.ID, domainevent.AgentActor(t.AgentID),
+			domainevent.TaskFailedPayload{
+				IssueID:   util.UUIDToString(t.IssueID),
+				AgentID:   util.UUIDToString(t.AgentID),
+				Retryable: false,
+				ErrorCode: reason,
+			})
+		if _, err := domainevent.Write(ctx, qtx, evt); err != nil {
+			return nil, err
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("commit tx: %w", err)
+	}
+	return failed, nil
 }
 
 func (s *TaskService) runInTx(ctx context.Context, fn func(*db.Queries) error) error {
@@ -4022,17 +4109,32 @@ func (s *TaskService) createAgentComment(ctx context.Context, issueID, agentID p
 			rootComment = &root
 		}
 	}
-	comment, err := s.Queries.CreateComment(ctx, db.CreateCommentParams{
-		IssueID:      issueID,
-		WorkspaceID:  issue.WorkspaceID,
-		AuthorType:   "agent",
-		AuthorID:     agentID,
-		Content:      content,
-		Type:         commentType,
-		ParentID:     parentID,
-		SourceTaskID: sourceTaskID,
-	})
-	if err != nil {
+	// Transactional outbox (MUL-4332 review point 2): the agent runtime comment
+	// and its comment.created event commit in one transaction.
+	var comment db.Comment
+	if err := domainevent.WriteInTx(ctx, s.TxStarter, s.Queries, func(qtx *db.Queries) ([]domainevent.Event, error) {
+		created, cErr := qtx.CreateComment(ctx, db.CreateCommentParams{
+			IssueID:      issueID,
+			WorkspaceID:  issue.WorkspaceID,
+			AuthorType:   "agent",
+			AuthorID:     agentID,
+			Content:      content,
+			Type:         commentType,
+			ParentID:     parentID,
+			SourceTaskID: sourceTaskID,
+		})
+		if cErr != nil {
+			return nil, cErr
+		}
+		comment = created
+		return []domainevent.Event{domainevent.CommentCreated(created.WorkspaceID, created.ID, domainevent.AgentActor(agentID),
+			domainevent.CommentCreatedPayload{
+				IssueID:    util.UUIDToString(created.IssueID),
+				AuthorType: "agent",
+				AuthorID:   util.UUIDToString(agentID),
+				ParentID:   util.UUIDToString(parentID),
+			})}, nil
+	}); err != nil {
 		return
 	}
 	s.CancelDeferredEscalationsForIssueAgent(ctx, issueID, agentID)

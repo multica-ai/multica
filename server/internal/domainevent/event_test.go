@@ -77,6 +77,10 @@ func TestValidateRejectsBadEnvelopes(t *testing.T) {
 		"wrong schema ver":   mutate(func(e *Event) { e.SchemaVersion = 2 }),
 		"wrong subject type": mutate(func(e *Event) { e.SubjectType = SubjectTask }),
 		"bad actor type":     mutate(func(e *Event) { e.ActorType = "wizard" }),
+		"member without id":  mutate(func(e *Event) { e.ActorType = ActorMember; e.ActorID = pgtype.UUID{} }),
+		"agent without id":   mutate(func(e *Event) { e.ActorType = ActorAgent; e.ActorID = pgtype.UUID{} }),
+		"system with id":     mutate(func(e *Event) { e.ActorType = ActorSystem; e.ActorID = testUUID(t) }),
+		"unknown type w/ id": mutate(func(e *Event) { e.ActorType = "wizard"; e.ActorID = testUUID(t) }),
 		"missing workspace":  mutate(func(e *Event) { e.WorkspaceID = pgtype.UUID{} }),
 		"missing subject":    mutate(func(e *Event) { e.SubjectID = pgtype.UUID{} }),
 		"empty payload":      mutate(func(e *Event) { e.Payload = nil }),
@@ -90,22 +94,39 @@ func TestValidateRejectsBadEnvelopes(t *testing.T) {
 	}
 }
 
-// ActorFrom must never let an unknown or empty actor type mint a member/agent
-// identity — it degrades to system so a mislabelled caller can't fabricate
-// authorship (guards the accountable-actor split from MUL-4332 §8).
-func TestActorFromDegradesUnknownToSystem(t *testing.T) {
+// ActorFrom is fail-closed (MUL-4332 review point 6): a system actor is
+// normalised to carry no id, but an unknown/empty type is passed through
+// unchanged so validate rejects it — it must NOT be silently laundered into a
+// system actor, which would permanently mis-record authorship.
+func TestActorFromFailClosed(t *testing.T) {
 	id := testUUID(t)
+	ws, subj := testUUID(t), testUUID(t)
+	build := func(a Actor) error {
+		return IssueStatusChanged(ws, subj, a, IssueStatusChangedPayload{From: "a", To: "b"}).validate()
+	}
+
 	if a := ActorFrom("member", id); a.Type != ActorMember || a.ID != id {
 		t.Errorf("member: got %+v", a)
 	}
-	if a := ActorFrom("", id); a.Type != ActorSystem || a.ID.Valid {
-		t.Errorf("empty type should degrade to system with no id, got %+v", a)
-	}
-	if a := ActorFrom("wizard", id); a.Type != ActorSystem || a.ID.Valid {
-		t.Errorf("unknown type should degrade to system with no id, got %+v", a)
-	}
 	if a := ActorFrom("system", id); a.Type != ActorSystem || a.ID.Valid {
 		t.Errorf("system actor never carries an id, got %+v", a)
+	}
+	// Unknown / empty types survive into the envelope and are rejected there.
+	if a := ActorFrom("wizard", id); a.Type != "wizard" {
+		t.Errorf("unknown type must pass through, got %+v", a)
+	}
+	if err := build(ActorFrom("wizard", id)); err == nil {
+		t.Error("unknown actor type must fail validate, not degrade to system")
+	}
+	if err := build(ActorFrom("", id)); err == nil {
+		t.Error("empty actor type must fail validate")
+	}
+	// The valid shapes still pass.
+	if err := build(MemberActor(id)); err != nil {
+		t.Errorf("member actor should validate: %v", err)
+	}
+	if err := build(SystemActor()); err != nil {
+		t.Errorf("system actor should validate: %v", err)
 	}
 }
 

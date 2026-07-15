@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 
 	"github.com/multica-ai/multica/server/internal/domainevent"
@@ -127,5 +128,65 @@ func TestOutboxEmittedByIssueHandlers(t *testing.T) {
 	}
 	if !sawAssigned {
 		t.Errorf("expected an issue.assigned event, got %+v", all)
+	}
+}
+
+// Two concurrent status transitions on the same issue must each record the TRUE
+// edge, not both read the same pre-transition snapshot (MUL-4332 review point
+// 3). Because the event `from` is now read under a row lock inside the update
+// tx, the two updates serialize and their events chain (todo→A, A→B) instead of
+// both reporting from="todo".
+func TestOutboxStatusFromCorrectUnderConcurrency(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("no database connection")
+	}
+	issueID := createTestIssue(t, "outbox concurrency "+t.Name(), "todo", "none")
+	t.Cleanup(func() {
+		deleteTestIssue(t, issueID)
+		testPool.Exec(context.Background(), `DELETE FROM domain_event WHERE subject_id = $1`, issueID)
+	})
+
+	// Fire two different transitions concurrently. FOR UPDATE serializes them.
+	statuses := []string{"in_progress", "done"}
+	var wg sync.WaitGroup
+	for _, st := range statuses {
+		wg.Add(1)
+		go func(status string) {
+			defer wg.Done()
+			w := httptest.NewRecorder()
+			req := newRequest("PATCH", "/api/issues/"+issueID, map[string]any{"status": status})
+			req = withURLParam(req, "id", issueID)
+			testHandler.UpdateIssue(w, req)
+		}(st)
+	}
+	wg.Wait()
+
+	var changes []outboxRow
+	for _, e := range eventsForSubject(t, domainevent.SubjectIssue, issueID) {
+		if e.Type == domainevent.TypeIssueStatusChanged {
+			changes = append(changes, e)
+		}
+	}
+	if len(changes) != 2 {
+		t.Fatalf("expected 2 status_changed events, got %d: %+v", len(changes), changes)
+	}
+
+	// The froms must be distinct (the bug produced two from="todo"); one edge
+	// starts at "todo" and the other starts where the first landed (a valid
+	// chain), regardless of which transition won the lock first.
+	from0 := payloadField(t, changes[0].Payload, "from")
+	from1 := payloadField(t, changes[1].Payload, "from")
+	if from0 == from1 {
+		t.Fatalf("both events share from=%q — stale snapshot bug (review point 3): %+v", from0, changes)
+	}
+	// Identify the todo-rooted edge and assert the other edge chains off its `to`.
+	byFrom := map[string]outboxRow{from0: changes[0], from1: changes[1]}
+	todoEdge, ok := byFrom["todo"]
+	if !ok {
+		t.Fatalf("expected one edge to start at todo, got froms %q/%q", from0, from1)
+	}
+	firstTo := payloadField(t, todoEdge.Payload, "to")
+	if _, chained := byFrom[firstTo]; !chained {
+		t.Errorf("edges do not chain: todo→%s but no event starts from %s (%+v)", firstTo, firstTo, changes)
 	}
 }

@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/domainevent"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
@@ -300,16 +301,29 @@ func (h *Handler) postChildDoneComment(ctx context.Context, parent, completed db
 	// author_type='system', author_id=zero UUID. The zero UUID is a valid 16
 	// byte value and the column is NOT NULL; frontend code should branch on
 	// author_type === 'system' rather than on the UUID value.
-	comment, err := h.Queries.CreateComment(ctx, db.CreateCommentParams{
-		IssueID:     parent.ID,
-		WorkspaceID: parent.WorkspaceID,
-		AuthorType:  "system",
-		AuthorID:    pgtype.UUID{Valid: true},
-		Content:     content,
-		Type:        "system",
-		ParentID:    pgtype.UUID{Valid: false},
-	})
-	if err != nil {
+	// Transactional outbox (MUL-4332 review point 2): the system child-done
+	// comment and its comment.created event commit in one transaction.
+	var comment db.Comment
+	if err := domainevent.WriteInTx(ctx, h.TxStarter, h.Queries, func(qtx *db.Queries) ([]domainevent.Event, error) {
+		created, cErr := qtx.CreateComment(ctx, db.CreateCommentParams{
+			IssueID:     parent.ID,
+			WorkspaceID: parent.WorkspaceID,
+			AuthorType:  "system",
+			AuthorID:    pgtype.UUID{Valid: true},
+			Content:     content,
+			Type:        "system",
+			ParentID:    pgtype.UUID{Valid: false},
+		})
+		if cErr != nil {
+			return nil, cErr
+		}
+		comment = created
+		return []domainevent.Event{domainevent.CommentCreated(created.WorkspaceID, created.ID, domainevent.SystemActor(),
+			domainevent.CommentCreatedPayload{
+				IssueID:    uuidToString(created.IssueID),
+				AuthorType: "system",
+			})}, nil
+	}); err != nil {
 		slog.Warn("child done: create system comment failed",
 			"error", err,
 			"child_id", childID,

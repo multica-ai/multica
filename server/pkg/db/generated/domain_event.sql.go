@@ -116,34 +116,6 @@ func (q *Queries) CreateDomainEvent(ctx context.Context, arg CreateDomainEventPa
 	return i, err
 }
 
-const deleteDispatchedDomainEventsBefore = `-- name: DeleteDispatchedDomainEventsBefore :execrows
-DELETE FROM domain_event
-WHERE id IN (
-    SELECT de.id FROM domain_event de
-    WHERE de.dispatch_status = 'dispatched'
-      AND de.created_at < $1
-    ORDER BY de.seq
-    LIMIT $2
-)
-`
-
-type DeleteDispatchedDomainEventsBeforeParams struct {
-	CreatedAt pgtype.Timestamptz `json:"created_at"`
-	Limit     int32              `json:"limit"`
-}
-
-// DeleteDispatchedDomainEventsBefore is the retention sweep (MUL-4332 §4.1):
-// it only reclaims events already marked 'dispatched' and older than the TTL
-// cutoff, in bounded batches so a large backlog never monopolizes the DB. In
-// PR1 nothing dispatches events, so this is a no-op until the PR3 matcher runs.
-func (q *Queries) DeleteDispatchedDomainEventsBefore(ctx context.Context, arg DeleteDispatchedDomainEventsBeforeParams) (int64, error) {
-	result, err := q.db.Exec(ctx, deleteDispatchedDomainEventsBefore, arg.CreatedAt, arg.Limit)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
-}
-
 const getDomainEvent = `-- name: GetDomainEvent :one
 SELECT id, seq, workspace_id, type, schema_version, subject_type, subject_id, actor_type, actor_id, payload, correlation_id, causation_execution_id, causation_action_index, hop_count, dispatch_status, attempts, available_at, lease_token, lease_expires_at, dispatched_at, created_at FROM domain_event
 WHERE id = $1

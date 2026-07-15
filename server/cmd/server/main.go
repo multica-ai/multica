@@ -386,9 +386,9 @@ func main() {
 
 	// Start background sweeper to mark stale runtimes as offline.
 	go runRuntimeSweeper(sweepCtx, queries, liveness, taskSvc, bus)
-	// Reclaim dispatched-and-expired domain events (MUL-4332). No-op until the
-	// PR3 matcher marks events dispatched.
-	go runDomainEventRetention(sweepCtx, queries)
+	// Domain event retention (MUL-4332) — explicit no-op in PR1, wired for
+	// visibility; the real sweep lands in PR3 with hook_execution.
+	go runDomainEventRetention(sweepCtx)
 	go heartbeatScheduler.Run(sweepCtx)
 	go runAutopilotFailureMonitor(autopilotCtx, queries, bus, envFailureMonitorConfig())
 	go runDBStatsLogger(sweepCtx, pool)

@@ -1368,6 +1368,15 @@ func (h *Handler) advanceIssueToDone(ctx context.Context, issue db.Issue, worksp
 	// already-done issue produces no event).
 	var updated db.Issue
 	if err := domainevent.WriteInTx(ctx, h.TxStarter, h.Queries, func(qtx *db.Queries) ([]domainevent.Event, error) {
+		// Lock + read the authoritative status so the event `from` is correct
+		// even if another writer moved the issue concurrently (review point 3).
+		before, err := qtx.LockIssueStatusForEvent(ctx, db.LockIssueStatusForEventParams{
+			ID:          issue.ID,
+			WorkspaceID: issue.WorkspaceID,
+		})
+		if err != nil {
+			return nil, err
+		}
 		u, err := qtx.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{
 			ID:          issue.ID,
 			Status:      "done",
@@ -1377,11 +1386,11 @@ func (h *Handler) advanceIssueToDone(ctx context.Context, issue db.Issue, worksp
 			return nil, err
 		}
 		updated = u
-		if issue.Status == u.Status {
+		if before.Status == u.Status {
 			return nil, nil
 		}
 		return []domainevent.Event{domainevent.IssueStatusChanged(u.WorkspaceID, u.ID, domainevent.SystemActor(),
-			domainevent.IssueStatusChangedPayload{From: issue.Status, To: u.Status})}, nil
+			domainevent.IssueStatusChangedPayload{From: before.Status, To: u.Status})}, nil
 	}); err != nil {
 		slog.Warn("github: advance issue to done failed", "err", err)
 		return

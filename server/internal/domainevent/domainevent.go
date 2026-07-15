@@ -105,14 +105,15 @@ func HookActor(id pgtype.UUID) Actor   { return Actor{Type: ActorHook, ID: id} }
 func SystemActor() Actor               { return Actor{Type: ActorSystem} }
 
 // ActorFrom builds an Actor from a raw (type, id) pair — for call sites that
-// carry an existing creator_type/creator_id or author_type/author_id. An empty
-// or unknown type degrades to a system actor so a mislabelled caller can never
-// fabricate a member/agent identity.
+// carry an existing creator_type/creator_id or author_type/author_id.
+//
+// It is fail-closed (MUL-4332 review point 6): a system actor is normalised to
+// carry no id, but an unknown type is NOT silently degraded to system — it is
+// passed through unchanged so Event.validate rejects it and the transaction
+// aborts, rather than permanently recording a mislabelled actor as system.
 func ActorFrom(actorType string, id pgtype.UUID) Actor {
-	if !validActorTypes[actorType] {
-		return SystemActor()
-	}
 	if actorType == ActorSystem {
+		// A system actor never carries an id; drop a stray one.
 		return SystemActor()
 	}
 	return Actor{Type: actorType, ID: id}

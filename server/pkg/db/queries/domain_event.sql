@@ -40,16 +40,9 @@ SELECT count(*) FROM domain_event
 WHERE subject_type = $1
   AND subject_id = $2;
 
--- DeleteDispatchedDomainEventsBefore is the retention sweep (MUL-4332 §4.1):
--- it only reclaims events already marked 'dispatched' and older than the TTL
--- cutoff, in bounded batches so a large backlog never monopolizes the DB. In
--- PR1 nothing dispatches events, so this is a no-op until the PR3 matcher runs.
--- name: DeleteDispatchedDomainEventsBefore :execrows
-DELETE FROM domain_event
-WHERE id IN (
-    SELECT de.id FROM domain_event de
-    WHERE de.dispatch_status = 'dispatched'
-      AND de.created_at < $1
-    ORDER BY de.seq
-    LIMIT $2
-);
+-- NOTE: the retention/TTL delete is intentionally NOT defined in PR1. The
+-- correct predicate is "dispatched AND older than TTL AND every related
+-- hook_execution is terminal" (MUL-4332 §4.1/§9), and hook_execution does not
+-- exist until PR3. Shipping a weaker "dispatched + TTL" delete now would risk
+-- reclaiming still-executing audit sources the moment PR3 enables dispatching
+-- (review point 5). The query lands in PR3 with the full terminal predicate.

@@ -1159,6 +1159,37 @@ func (q *Queries) LockIssueDuplicateKey(ctx context.Context, dollar_1 string) er
 	return err
 }
 
+const lockIssueStatusForEvent = `-- name: LockIssueStatusForEvent :one
+SELECT status, assignee_type, assignee_id
+FROM issue
+WHERE id = $1 AND workspace_id = $2
+FOR UPDATE
+`
+
+type LockIssueStatusForEventParams struct {
+	ID          pgtype.UUID `json:"id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+type LockIssueStatusForEventRow struct {
+	Status       string      `json:"status"`
+	AssigneeType pgtype.Text `json:"assignee_type"`
+	AssigneeID   pgtype.UUID `json:"assignee_id"`
+}
+
+// Row-locks an issue and returns its authoritative status + assignee for
+// domain-event emission (MUL-4332 review point 3). Callers read this INSIDE the
+// update transaction, immediately before UpdateIssue/UpdateIssueStatus, so the
+// event's `from` reflects the truly-current row rather than a snapshot read
+// outside the tx — two concurrent transitions then serialize on the lock and
+// each records the correct edge instead of both reporting the same stale `from`.
+func (q *Queries) LockIssueStatusForEvent(ctx context.Context, arg LockIssueStatusForEventParams) (LockIssueStatusForEventRow, error) {
+	row := q.db.QueryRow(ctx, lockIssueStatusForEvent, arg.ID, arg.WorkspaceID)
+	var i LockIssueStatusForEventRow
+	err := row.Scan(&i.Status, &i.AssigneeType, &i.AssigneeID)
+	return i, err
+}
+
 const markIssueFirstExecuted = `-- name: MarkIssueFirstExecuted :one
 UPDATE issue
 SET first_executed_at = now()

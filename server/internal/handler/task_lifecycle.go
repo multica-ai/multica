@@ -29,7 +29,12 @@ func (h *Handler) RecoverOrphanedTasks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	rows, err := h.Queries.RecoverOrphanedTasksForRuntime(r.Context(), parseUUID(runtimeID))
+	// Emit task.failed atomically with the bulk orphan-fail (MUL-4332 review
+	// point 2), so daemon-driven recovery converges onto the outbox like the
+	// runtime sweepers.
+	rows, err := h.TaskService.FailTasksInTxWithEvents(r.Context(), func(qtx *db.Queries) ([]db.AgentTaskQueue, error) {
+		return qtx.RecoverOrphanedTasksForRuntime(r.Context(), parseUUID(runtimeID))
+	})
 	if err != nil {
 		slog.Warn("recover-orphans failed", "runtime_id", runtimeID, "error", err)
 		writeError(w, http.StatusInternalServerError, "recover orphans failed")

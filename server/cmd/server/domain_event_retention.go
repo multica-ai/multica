@@ -3,72 +3,22 @@ package main
 import (
 	"context"
 	"log/slog"
-	"time"
-
-	"github.com/jackc/pgx/v5/pgtype"
-	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
-// Domain event retention (MUL-4332 §4.1 / §9). The transactional-outbox
-// domain_event table would grow without bound, so a periodic sweep reclaims
-// events that are BOTH already dispatched AND older than the TTL. In PR1 there
-// is no matcher, so nothing is ever marked 'dispatched' — this sweep is a
-// deliberate no-op until PR3, matching the "zero behavior change" contract
-// while ensuring retention lands with the table it governs.
-const (
-	// domainEventRetentionInterval is how often the sweep runs. Retention is
-	// coarse-grained, so an hourly tick is plenty.
-	domainEventRetentionInterval = 1 * time.Hour
-	// domainEventTTL is the retention window: dispatched events older than this
-	// are reclaimed (MUL-4332 §9 fixes this at 90 days).
-	domainEventTTL = 90 * 24 * time.Hour
-	// domainEventRetentionBatch bounds a single DELETE so a large backlog can
-	// never monopolize the DB; the sweep drains in batches until a short one.
-	domainEventRetentionBatch = 1000
-)
-
-// runDomainEventRetention runs the retention sweep on a ticker until ctx is
-// cancelled. Registered alongside the other sweepCtx-bound workers in main so
-// it stops cleanly on shutdown.
-func runDomainEventRetention(ctx context.Context, queries *db.Queries) {
-	ticker := time.NewTicker(domainEventRetentionInterval)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			sweepDomainEvents(ctx, queries)
-		}
-	}
-}
-
-// sweepDomainEvents deletes dispatched-and-expired events in bounded batches.
-func sweepDomainEvents(ctx context.Context, queries *db.Queries) {
-	cutoff := pgtype.Timestamptz{Time: time.Now().Add(-domainEventTTL), Valid: true}
-	var total int64
-	for {
-		deleted, err := queries.DeleteDispatchedDomainEventsBefore(ctx, db.DeleteDispatchedDomainEventsBeforeParams{
-			CreatedAt: cutoff,
-			Limit:     domainEventRetentionBatch,
-		})
-		if err != nil {
-			slog.Warn("domain event retention: delete failed", "error", err)
-			return
-		}
-		total += deleted
-		// A short batch means the backlog is drained.
-		if deleted < domainEventRetentionBatch {
-			break
-		}
-		// Bail out promptly on shutdown between batches.
-		select {
-		case <-ctx.Done():
-			return
-		default:
-		}
-	}
-	if total > 0 {
-		slog.Info("domain event retention: reclaimed dispatched events", "count", total)
-	}
+// Domain event retention (MUL-4332 §4.1 / §9) is DELIBERATELY an explicit no-op
+// in PR1. The correct retention predicate is "dispatched AND older than the TTL
+// AND every related hook_execution is terminal" — but hook_execution does not
+// exist until PR3, and PR1 has no dispatcher, so nothing is ever eligible for
+// deletion. Shipping a weaker "dispatched + TTL" sweep now would, the moment PR3
+// flips dispatching on, risk reclaiming events whose executions are still
+// running or retrying (review point 5). Retention therefore lands in PR3
+// alongside hook_execution, the full terminal predicate, and concurrent-sweeper
+// tests.
+//
+// The worker is kept wired (rather than silently omitted) so the intent is
+// visible at the call site: it logs once and then idles until shutdown, doing no
+// deletes.
+func runDomainEventRetention(ctx context.Context) {
+	slog.Info("domain event retention: explicit no-op in PR1, deferred to PR3 (needs hook_execution terminal predicate)")
+	<-ctx.Done()
 }

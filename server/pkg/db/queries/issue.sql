@@ -361,3 +361,15 @@ UPDATE issue
 SET first_executed_at = now()
 WHERE id = $1 AND first_executed_at IS NULL
 RETURNING id, workspace_id, creator_type, creator_id, first_executed_at;
+
+-- name: LockIssueStatusForEvent :one
+-- Row-locks an issue and returns its authoritative status + assignee for
+-- domain-event emission (MUL-4332 review point 3). Callers read this INSIDE the
+-- update transaction, immediately before UpdateIssue/UpdateIssueStatus, so the
+-- event's `from` reflects the truly-current row rather than a snapshot read
+-- outside the tx — two concurrent transitions then serialize on the lock and
+-- each records the correct edge instead of both reporting the same stale `from`.
+SELECT status, assignee_type, assignee_id
+FROM issue
+WHERE id = $1 AND workspace_id = $2
+FOR UPDATE;

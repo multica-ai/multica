@@ -78,6 +78,17 @@ func (e Event) validate() error {
 	if !validActorTypes[e.ActorType] {
 		return fmt.Errorf("domainevent: invalid actor_type %q", e.ActorType)
 	}
+	// Fail-closed actor identity (MUL-4332 review point 6): a system actor must
+	// carry NO id, and every other actor type must carry a valid one — so a
+	// dropped / unparsable id can never be silently recorded as a null or
+	// system actor. The caller's transaction aborts instead.
+	if e.ActorType == ActorSystem {
+		if e.ActorID.Valid {
+			return fmt.Errorf("domainevent: %s: system actor must not carry an actor_id", e.Type)
+		}
+	} else if !e.ActorID.Valid {
+		return fmt.Errorf("domainevent: %s: %s actor requires a valid actor_id", e.Type, e.ActorType)
+	}
 	if !e.WorkspaceID.Valid {
 		return fmt.Errorf("domainevent: %s missing workspace_id", e.Type)
 	}

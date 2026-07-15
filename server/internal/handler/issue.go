@@ -2696,10 +2696,18 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 
 	// Transactional outbox (MUL-4332): commit the issue update and any derived
 	// status_changed / assigned event in one transaction, so a crash can never
-	// separate the fact from its event. The events are computed by diffing
-	// prevIssue against the freshly-updated row.
+	// separate the fact from its event. The event `from` is read under a row
+	// lock INSIDE the tx (not from the pre-tx prevIssue snapshot), so concurrent
+	// transitions serialize and each records the true edge (review point 3).
 	var issue db.Issue
 	err = domainevent.WriteInTx(r.Context(), h.TxStarter, h.Queries, func(qtx *db.Queries) ([]domainevent.Event, error) {
+		before, err := qtx.LockIssueStatusForEvent(r.Context(), db.LockIssueStatusForEventParams{
+			ID:          prevIssue.ID,
+			WorkspaceID: prevIssue.WorkspaceID,
+		})
+		if err != nil {
+			return nil, err
+		}
 		updated, err := qtx.UpdateIssue(r.Context(), params)
 		if err != nil {
 			return nil, err
@@ -2707,16 +2715,19 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		issue = updated
 
 		var events []domainevent.Event
-		if req.Status != nil && prevIssue.Status != updated.Status {
+		if before.Status != updated.Status {
 			events = append(events, domainevent.IssueStatusChanged(updated.WorkspaceID, updated.ID, eventActor,
-				domainevent.IssueStatusChangedPayload{From: prevIssue.Status, To: updated.Status}))
+				domainevent.IssueStatusChangedPayload{From: before.Status, To: updated.Status}))
 		}
-		if (req.AssigneeType != nil || req.AssigneeID != nil) &&
-			(prevIssue.AssigneeType.String != updated.AssigneeType.String || uuidToString(prevIssue.AssigneeID) != uuidToString(updated.AssigneeID)) {
+		// Only emit assigned when the request actually targeted the assignee, so
+		// an unrelated field update never surfaces a spurious assignment; `from`
+		// still comes from the locked row.
+		if (touchedType || touchedID) &&
+			(before.AssigneeType.String != updated.AssigneeType.String || uuidToString(before.AssigneeID) != uuidToString(updated.AssigneeID)) {
 			events = append(events, domainevent.IssueAssigned(updated.WorkspaceID, updated.ID, eventActor,
 				domainevent.IssueAssignedPayload{
-					FromAssigneeType: prevIssue.AssigneeType.String,
-					FromAssigneeID:   uuidToString(prevIssue.AssigneeID),
+					FromAssigneeType: before.AssigneeType.String,
+					FromAssigneeID:   uuidToString(before.AssigneeID),
 					ToAssigneeType:   updated.AssigneeType.String,
 					ToAssigneeID:     uuidToString(updated.AssigneeID),
 				}))
@@ -3268,25 +3279,34 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 		batchEventActor := domainevent.ActorFrom(actorType, batchActorUUID)
 
 		// Transactional outbox (MUL-4332): each row's update and its derived
-		// status_changed / assigned events commit atomically, per issue.
+		// status_changed / assigned events commit atomically, per issue. `from`
+		// is read under a row lock inside the tx so concurrent transitions record
+		// the true edge (review point 3).
 		var issue db.Issue
 		if writeErr := domainevent.WriteInTx(r.Context(), h.TxStarter, h.Queries, func(qtx *db.Queries) ([]domainevent.Event, error) {
+			before, err := qtx.LockIssueStatusForEvent(r.Context(), db.LockIssueStatusForEventParams{
+				ID:          prevIssue.ID,
+				WorkspaceID: prevIssue.WorkspaceID,
+			})
+			if err != nil {
+				return nil, err
+			}
 			updatedIssue, err := qtx.UpdateIssue(r.Context(), params)
 			if err != nil {
 				return nil, err
 			}
 			issue = updatedIssue
 			var events []domainevent.Event
-			if req.Updates.Status != nil && prevIssue.Status != updatedIssue.Status {
+			if before.Status != updatedIssue.Status {
 				events = append(events, domainevent.IssueStatusChanged(updatedIssue.WorkspaceID, updatedIssue.ID, batchEventActor,
-					domainevent.IssueStatusChangedPayload{From: prevIssue.Status, To: updatedIssue.Status}))
+					domainevent.IssueStatusChangedPayload{From: before.Status, To: updatedIssue.Status}))
 			}
-			if (req.Updates.AssigneeType != nil || req.Updates.AssigneeID != nil) &&
-				(prevIssue.AssigneeType.String != updatedIssue.AssigneeType.String || uuidToString(prevIssue.AssigneeID) != uuidToString(updatedIssue.AssigneeID)) {
+			if (batchTouchedType || batchTouchedID) &&
+				(before.AssigneeType.String != updatedIssue.AssigneeType.String || uuidToString(before.AssigneeID) != uuidToString(updatedIssue.AssigneeID)) {
 				events = append(events, domainevent.IssueAssigned(updatedIssue.WorkspaceID, updatedIssue.ID, batchEventActor,
 					domainevent.IssueAssignedPayload{
-						FromAssigneeType: prevIssue.AssigneeType.String,
-						FromAssigneeID:   uuidToString(prevIssue.AssigneeID),
+						FromAssigneeType: before.AssigneeType.String,
+						FromAssigneeID:   uuidToString(before.AssigneeID),
 						ToAssigneeType:   updatedIssue.AssigneeType.String,
 						ToAssigneeID:     uuidToString(updatedIssue.AssigneeID),
 					}))
