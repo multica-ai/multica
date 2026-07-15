@@ -131,25 +131,15 @@ function urlTransform(url: string): string {
 // Custom react-markdown components
 // ---------------------------------------------------------------------------
 
+/**
+ * Issue mention chip. Navigation — plain click, modifier click, and the
+ * "open issue links in new tab" preference — is owned by the AppLink inside
+ * IssueMentionCard; the wrapper only shields surrounding click handlers
+ * (e.g. collapsed-comment expanders) from mention clicks.
+ */
 function IssueMentionLink({ issueId, label }: { issueId: string; label?: string }) {
-  const { push, openInNewTab } = useNavigation();
-  const p = useWorkspacePaths();
-  const path = p.issueDetail(issueId);
   return (
-    <span
-      className="inline align-middle"
-      onClick={(e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        if (e.metaKey || e.ctrlKey || e.shiftKey) {
-          if (openInNewTab) {
-            openInNewTab(path, label);
-          }
-          return;
-        }
-        push(path);
-      }}
-    >
+    <span className="inline align-middle" onClick={(e) => e.stopPropagation()}>
       <IssueMentionCard issueId={issueId} fallbackLabel={label} />
     </span>
   );

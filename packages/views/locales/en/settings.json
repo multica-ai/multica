@@ -30,6 +30,10 @@
     "sticky_comment_bar": {
       "title": "Sticky comment bar",
       "hint": "Keep the comment bar pinned to the bottom while scrolling an issue page."
+    },
+    "issue_link_new_tab": {
+      "title": "Open issue links in new tab",
+      "hint": "Issue links in descriptions, comments, and chat open in a new tab instead of navigating in place."
     }
   },
   "shortcuts": {

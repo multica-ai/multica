@@ -30,6 +30,10 @@
     "sticky_comment_bar": {
       "title": "固定评论栏",
       "hint": "滚动 issue 页面时，评论栏始终固定在底部。"
+    },
+    "issue_link_new_tab": {
+      "title": "在新标签页打开 issue 链接",
+      "hint": "点击描述、评论或聊天中的 issue 链接时，在新标签页中打开，而不是在当前页面跳转。"
     }
   },
   "shortcuts": {
