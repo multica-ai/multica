@@ -33,6 +33,21 @@ import {
   parseIssueWindowRequest,
   type IssueWindowContext,
 } from "../shared/issue-window";
+import {
+  AUTH_SESSION_STATE_CHANNEL,
+  parseAuthSessionUserId,
+} from "../shared/auth-session";
+import {
+  MAIN_RENDERER_CHANNEL_STATE_CHANNEL,
+  MainRendererMessageQueue,
+  parseMainRendererChannelState,
+  type MainRendererMessageChannel,
+} from "../shared/main-renderer-messages";
+import { AuthSessionCoordinator } from "./auth-session-coordinator";
+import {
+  NotificationGate,
+  parseNativeNotificationPayload,
+} from "./notification-gate";
 
 // Guards against registering the will-download handler more than once on the
 // same session. window.webContents.session is shared, and createWindow() can
@@ -100,6 +115,17 @@ function freezeBreadcrumbPath(): string {
 }
 
 let mainWindow: BrowserWindow | null = null;
+const issueWindows = new Set<BrowserWindow>();
+const authSessionCoordinator = new AuthSessionCoordinator<BrowserWindow>(
+  (window) => {
+    issueWindows.delete(window);
+    if (!window.isDestroyed()) window.close();
+  },
+);
+const notificationGate = new NotificationGate();
+const mainRendererMessages = new MainRendererMessageQueue();
+let desktopInitialized = false;
+let authSessionGeneration = 0;
 const rendererRouteContexts = new WeakMap<
   Electron.WebContents,
   RendererRouteContext
@@ -111,6 +137,36 @@ let runtimeConfigResult: RuntimeConfigResult = {
 
 // --- Deep link helpers ---------------------------------------------------
 
+function sendMainRendererMessage(
+  channel: MainRendererMessageChannel,
+  payload: unknown,
+): void {
+  const window = mainWindow;
+  if (!window || window.isDestroyed()) return;
+  window.webContents.send(channel, payload);
+}
+
+function focusMainWindow(window: BrowserWindow): void {
+  if (window.isMinimized()) window.restore();
+  window.show();
+  window.focus();
+}
+
+function ensureMainWindow(): BrowserWindow | null {
+  if (!desktopInitialized || !app.isReady()) return null;
+  if (!mainWindow || mainWindow.isDestroyed()) return createWindow();
+  return mainWindow;
+}
+
+function dispatchToMainRenderer(
+  channel: MainRendererMessageChannel,
+  payload: unknown,
+): void {
+  mainRendererMessages.enqueue(channel, payload, sendMainRendererMessage);
+  const window = ensureMainWindow();
+  if (window) focusMainWindow(window);
+}
+
 function handleDeepLink(url: string): void {
   try {
     const parsed = new URL(url);
@@ -119,9 +175,7 @@ function handleDeepLink(url: string): void {
     // multica://auth/callback?token=<jwt>
     if (parsed.hostname === "auth" && parsed.pathname === "/callback") {
       const token = parsed.searchParams.get("token");
-      if (token && mainWindow) {
-        mainWindow.webContents.send("auth:token", token);
-      }
+      if (token) dispatchToMainRenderer("auth:token", token);
       return;
     }
 
@@ -131,9 +185,7 @@ function handleDeepLink(url: string): void {
     // route persistence, so deep-linking the same invite twice stays safe.
     if (parsed.hostname === "invite") {
       const id = parsed.pathname.replace(/^\//, "");
-      if (id && mainWindow) {
-        mainWindow.webContents.send("invite:open", decodeURIComponent(id));
-      }
+      if (id) dispatchToMainRenderer("invite:open", decodeURIComponent(id));
       return;
     }
   } catch {
@@ -224,7 +276,7 @@ function installWindowShortcutHandler(window: BrowserWindow): void {
   });
 }
 
-function createWindow(): void {
+function createWindow(): BrowserWindow {
   // Pass the OS-preferred language to the renderer via additionalArguments
   // instead of a sync IPC call. process.argv is available to the preload
   // script before the first network request, so the renderer's i18next
@@ -232,6 +284,7 @@ function createWindow(): void {
   const systemLocale = getSystemLocale();
   lastKnownSystemLocale = systemLocale;
 
+  mainRendererMessages.resetReady();
   mainWindow = new BrowserWindow({
     width: 1280,
     height: 800,
@@ -256,6 +309,7 @@ function createWindow(): void {
   window.on("closed", () => {
     if (mainWindow === window) {
       mainWindow = null;
+      mainRendererMessages.resetReady();
     }
   });
 
@@ -343,6 +397,7 @@ function createWindow(): void {
       ? undefined
       : (payload) =>
           writeFreezeBreadcrumb(freezeBreadcrumbPath(), {
+            ownerId: `main:${window.id}`,
             kind: payload.kind,
             context: payload.context,
             ts: Date.now(),
@@ -350,13 +405,15 @@ function createWindow(): void {
           }),
     clearBreadcrumb: is.dev
       ? undefined
-      : () => clearFreezeBreadcrumb(freezeBreadcrumbPath()),
+      : () =>
+          clearFreezeBreadcrumb(freezeBreadcrumbPath(), `main:${window.id}`),
   });
 
   installContextMenu(window.webContents);
   installNavigationGestures(window);
 
   loadRenderer(window);
+  return window;
 }
 
 function createIssueWindow(context: IssueWindowContext): void {
@@ -379,6 +436,13 @@ function createIssueWindow(context: IssueWindowContext): void {
     webPreferences: createRendererWebPreferences(systemLocale, [
       encodeIssueWindowArgument(context),
     ]),
+  });
+
+  issueWindows.add(window);
+  authSessionCoordinator.registerIssueWindow(window);
+  window.on("closed", () => {
+    issueWindows.delete(window);
+    authSessionCoordinator.unregisterIssueWindow(window);
   });
 
   window.on("ready-to-show", () => window.show());
@@ -415,6 +479,7 @@ function createIssueWindow(context: IssueWindowContext): void {
       ? undefined
       : (payload) =>
           writeFreezeBreadcrumb(freezeBreadcrumbPath(), {
+            ownerId: `issue:${window.id}`,
             kind: payload.kind,
             context: payload.context,
             ts: Date.now(),
@@ -422,7 +487,8 @@ function createIssueWindow(context: IssueWindowContext): void {
           }),
     clearBreadcrumb: is.dev
       ? undefined
-      : () => clearFreezeBreadcrumb(freezeBreadcrumbPath()),
+      : () =>
+          clearFreezeBreadcrumb(freezeBreadcrumbPath(), `issue:${window.id}`),
   });
 
   installContextMenu(window.webContents);
@@ -476,17 +542,31 @@ const gotTheLock = app.requestSingleInstanceLock();
 if (!gotTheLock) {
   app.quit();
 } else {
+  // Register before `ready`: macOS can deliver a cold-start URL while runtime
+  // config is still loading. handleDeepLink queues the payload until both the
+  // main window and its matching React listener exist.
+  app.on("open-url", (event, url) => {
+    event.preventDefault();
+    handleDeepLink(url);
+  });
+
   // Windows/Linux: second instance passes deep link via argv
   app.on("second-instance", (_event, argv) => {
-    if (mainWindow) {
-      if (mainWindow.isMinimized()) mainWindow.restore();
-      mainWindow.focus();
-    }
+    const window = ensureMainWindow();
+    if (window) focusMainWindow(window);
 
     // On Windows the deep link URL is the last argv entry
     const deepLinkUrl = argv.find((arg) => arg.startsWith(`${PROTOCOL}://`));
     if (deepLinkUrl) handleDeepLink(deepLinkUrl);
   });
+
+  // Windows/Linux cold-start deep links are safe to parse now. Delivery is
+  // queued because desktopInitialized remains false until runtime config and
+  // IPC handlers are ready.
+  const coldStartDeepLink = process.argv.find((arg) =>
+    arg.startsWith(`${PROTOCOL}://`),
+  );
+  if (coldStartDeepLink) handleDeepLink(coldStartDeepLink);
 
   app.whenReady().then(async () => {
     const viteEnv = import.meta.env as ImportMetaEnv & {
@@ -591,6 +671,43 @@ if (!gotTheLock) {
       rendererRouteContexts.set(event.sender, sanitized);
     });
 
+    // Preload announces each listener only after it has been installed by the
+    // main renderer. Ignore issue-window senders so they can never drain a
+    // payload intended for the tabbed application window.
+    ipcMain.on(
+      MAIN_RENDERER_CHANNEL_STATE_CHANNEL,
+      (event, state: unknown) => {
+        if (!mainWindow || event.sender !== mainWindow.webContents) return;
+        const parsed = parseMainRendererChannelState(state);
+        if (!parsed) return;
+        mainRendererMessages.setReady(
+          parsed.channel,
+          parsed.ready,
+          sendMainRendererMessage,
+        );
+      },
+    );
+
+    // Account identity is the only cross-renderer auth signal. Main remains
+    // authoritative and closes issue windows instead of copying credentials.
+    ipcMain.on(AUTH_SESSION_STATE_CHANNEL, (event, value: unknown) => {
+      const sourceWindow = BrowserWindow.fromWebContents(event.sender);
+      const userId = parseAuthSessionUserId(value);
+      if (!sourceWindow || userId === undefined) return;
+
+      if (sourceWindow === mainWindow) {
+        const accountInvalidated = authSessionCoordinator.reportMain(userId);
+        if (accountInvalidated) {
+          authSessionGeneration += 1;
+          mainRendererMessages.clear("inbox:open");
+        }
+        return;
+      }
+      if (issueWindows.has(sourceWindow)) {
+        authSessionCoordinator.reportIssue(sourceWindow, userId);
+      }
+    });
+
     // IPC: toggle immersive mode — hides the macOS traffic lights so full-screen
     // modals (e.g. create-workspace) can place UI in the top-left corner
     // without fighting the native window controls' hit-test.
@@ -601,48 +718,49 @@ if (!gotTheLock) {
       );
     });
 
-    // IPC: show a native OS notification for a new inbox item. The renderer
-    // only fires this when the app is unfocused (it gates on
-    // `document.hasFocus()`), so we don't fight macOS foreground suppression
-    // here. Clicking the banner focuses the main window and routes to the
-    // inbox item via a renderer-side listener.
-    ipcMain.on(
-      "notification:show",
-      (
-        _event,
-        {
-          slug,
-          itemId,
-          issueKey,
-          title,
-          body,
-        }: {
-          slug: string;
-          itemId: string;
-          issueKey: string;
-          title: string;
-          body: string;
-        },
-      ) => {
-        if (!Notification.isSupported()) return;
-        const notification = new Notification({ title, body });
-        notification.on("click", () => {
-          if (!mainWindow) return;
-          if (mainWindow.isMinimized()) mainWindow.restore();
-          mainWindow.show();
-          mainWindow.focus();
-          // Ship the full context back — the renderer pins the route to the
-          // source workspace (slug), marks the row read (itemId), and uses
-          // issueKey as the ?issue=<…> selector.
-          mainWindow.webContents.send("inbox:open", {
-            slug,
-            itemId,
-            issueKey,
-          });
+    // Main owns foreground detection and item-level dedupe. Every renderer
+    // has its own WebSocket and `document.hasFocus()` only describes that one
+    // window, so renderer-only gating can emit N duplicate system banners.
+    ipcMain.on("notification:show", (event, value: unknown) => {
+      const sourceWindow = BrowserWindow.fromWebContents(event.sender);
+      if (!sourceWindow) return;
+      if (sourceWindow === mainWindow) {
+        if (!authSessionCoordinator.hasActiveMainSession()) return;
+      } else if (
+        !issueWindows.has(sourceWindow) ||
+        !authSessionCoordinator.isCurrentIssueSession(sourceWindow)
+      ) {
+        return;
+      }
+
+      const payload = parseNativeNotificationPayload(value);
+      if (!payload || !Notification.isSupported()) return;
+      const anyWindowFocused = BrowserWindow.getAllWindows().some(
+        (window) => !window.isDestroyed() && window.isFocused(),
+      );
+      if (!notificationGate.shouldShow(payload.itemId, anyWindowFocused)) {
+        return;
+      }
+
+      const notification = new Notification({
+        title: payload.title,
+        body: payload.body,
+      });
+      const notificationSessionGeneration = authSessionGeneration;
+      notification.on("click", () => {
+        // A banner emitted for user A must not navigate after the main window
+        // logs out or switches to user B.
+        if (notificationSessionGeneration !== authSessionGeneration) return;
+        // Recreate the main window when an issue-only window outlived it, then
+        // wait for the inbox listener before delivering the navigation.
+        dispatchToMainRenderer("inbox:open", {
+          slug: payload.slug,
+          itemId: payload.itemId,
+          issueKey: payload.issueKey,
         });
-        notification.show();
-      },
-    );
+      });
+      notification.show();
+    });
 
     // IPC: update the dock / taskbar unread badge. Values above 99 render as
     // "99+". macOS is the primary target (user-visible dock badge); Linux
@@ -659,33 +777,18 @@ if (!gotTheLock) {
       }
     });
 
+    desktopInitialized = true;
     createWindow();
 
     setupAutoUpdater(() => mainWindow);
     setupDaemonManager(() => mainWindow);
     setupLocalDirectory(() => mainWindow);
 
-    // macOS: deep link arrives via open-url event
-    app.on("open-url", (_event, url) => {
-      if (mainWindow) {
-        if (mainWindow.isMinimized()) mainWindow.restore();
-        mainWindow.focus();
-      }
-      handleDeepLink(url);
-    });
-
     app.on("activate", () => {
-      if (!mainWindow) createWindow();
+      const window = ensureMainWindow();
+      if (window) focusMainWindow(window);
     });
   });
-
-  // Check argv for deep link on cold start (Windows/Linux)
-  const deepLinkArg = process.argv.find((arg) =>
-    arg.startsWith(`${PROTOCOL}://`),
-  );
-  if (deepLinkArg) {
-    app.whenReady().then(() => handleDeepLink(deepLinkArg));
-  }
 }
 
 app.on("window-all-closed", () => {

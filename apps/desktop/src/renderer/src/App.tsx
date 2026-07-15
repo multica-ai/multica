@@ -87,6 +87,25 @@ function IssueWindowContent() {
   return user ? <IssueWindow context={context} /> : <DesktopLoginPage />;
 }
 
+/**
+ * Keep the main process informed of the resolved account identity without
+ * sharing credentials between renderer processes. Main uses this signal to
+ * close dedicated windows on logout/account switch.
+ */
+function DesktopAuthSessionBridge() {
+  const userId = useAuthStore((state) => state.user?.id ?? null);
+  const isLoading = useAuthStore((state) => state.isLoading);
+
+  useEffect(() => {
+    if (isLoading) return;
+    // Optional chaining keeps renderer HMR safe during the brief interval in
+    // which an old preload is still attached to the refreshed React tree.
+    window.desktopAPI.reportAuthSession?.(userId);
+  }, [isLoading, userId]);
+
+  return null;
+}
+
 function AppContent() {
   const user = useAuthStore((s) => s.user);
   const isLoading = useAuthStore((s) => s.isLoading);
@@ -323,6 +342,9 @@ function BlockingRuntimeConfigError({ message }: { message: string }) {
 // useLogout clears the storage key, but the live stores stay populated until
 // we explicitly reset them here.
 async function handleDaemonLogout() {
+  // Report synchronously before async daemon cleanup so a rapidly closed main
+  // window cannot leave authenticated issue renderers behind.
+  window.desktopAPI.reportAuthSession?.(null);
   useTabStore.getState().reset();
   useWindowOverlayStore.getState().close();
   // Drop any post-onboarding welcome signal so user B logging in next
@@ -421,12 +443,15 @@ export default function App() {
         <CoreProvider
           apiBaseUrl={runtimeConfigResult.config.apiUrl}
           wsUrl={runtimeConfigResult.config.wsUrl}
-          onLogout={handleDaemonLogout}
+          onLogout={
+            windowContext.kind === "main" ? handleDaemonLogout : undefined
+          }
           identity={identity}
           locale={locale}
           resources={resources}
           localeAdapter={localeAdapter}
         >
+          <DesktopAuthSessionBridge />
           {windowContext.kind === "issue" ? (
             <IssueWindowContent />
           ) : (

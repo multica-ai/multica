@@ -29,6 +29,8 @@ interface DesktopAPI {
   /** Read + clear any freeze/crash breadcrumb from a previous session, so the
    *  renderer can flush it to telemetry on boot. Null when nothing's pending. */
   getLastFreeze: () => FreezeBreadcrumb | null;
+  /** Report the resolved account identity so stale issue windows can close. */
+  reportAuthSession: (userId: string | null) => void;
   /** Listen for auth token delivered via deep link. Returns an unsubscribe function. */
   onAuthToken: (callback: (token: string) => void) => () => void;
   /** Listen for invitation IDs delivered via deep link. Returns an unsubscribe function. */
