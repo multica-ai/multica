@@ -419,7 +419,6 @@ func (s *Service) actionRunSkill(ctx context.Context, wf workflow, te TriggerEve
 	// visible downstream instead of the agent having to infer it from status.
 	phase := strings.TrimSpace(cfg.LoopPhase)
 	if cfg.PlanMode {
-		prompt = buildPlanModePrompt(prompt)
 		if phase == "" {
 			phase = "plan"
 		}
@@ -448,7 +447,7 @@ func (s *Service) actionRunSkill(ctx context.Context, wf workflow, te TriggerEve
 	}
 	if cfg.PlanMode {
 		taskContext["loop_phase"] = "plan"
-		taskContext["plan_mode"] = true
+		taskContext["session_mode"] = "plan"
 	}
 	contextJSON := mustJSON(taskContext)
 
@@ -537,7 +536,7 @@ func (s *Service) dispatchPhaseRunOnIssue(ctx context.Context, wf workflow, te T
 		"workflow_skill_input":     cfg.SkillInput,
 		"workflow_target_issue_id": te.IssueID,
 		"loop_phase":               phase,
-		"plan_mode":                cfg.PlanMode,
+		"session_mode":             phase,
 	}
 	// FIR-3052 step hook: a plan-phase run carries the statuses the loop must
 	// advance through when it completes, so LoopPhaseAdvancer can move the issue
@@ -649,24 +648,6 @@ func buildRunSkillPrompt(skillName string, input map[string]any) string {
 		return fmt.Sprintf("Run the skill %q.", skillName)
 	}
 	return fmt.Sprintf("Run the skill %q with the following input:\n%s", skillName, string(encoded))
-}
-
-// buildPlanModePrompt wraps a run_skill prompt with an explicit plan-mode
-// preamble so the planning-phase run understands it is planning and must not
-// write code (FIR-2283 followup point 3). "Plan mode" for an Issue workflow
-// means: produce the plan inside Multica (on the issue), touch no code, and
-// hand off to the build phase by advancing the issue's status — the engine
-// then dispatches the build step. The preamble is prepended, not replacing the
-// skill instruction, so the chosen plan skill still runs.
-func buildPlanModePrompt(inner string) string {
-	return "You are in PLAN MODE — this run is the planning phase of an Issue workflow.\n\n" +
-		"In plan mode you may ONLY produce a plan for this issue inside Multica " +
-		"(write it as a comment / plan on the issue). You must NOT write or edit " +
-		"code, must NOT run build, migration, or deploy commands, and must NOT open " +
-		"a pull request or otherwise change the repository. Planning only.\n\n" +
-		"When the plan is complete, move the issue forward to the build status so the " +
-		"build phase can start — do not start building yourself.\n\n" +
-		inner
 }
 
 func skillNameExists(skills []db.ListSkillSummariesByWorkspaceRow, name string) bool {

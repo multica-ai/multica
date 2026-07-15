@@ -33,7 +33,7 @@ export function useUpdateChatSession() {
       sessionId: string;
       title?: string;
       status?: "active" | "archived";
-      mode?: "auto" | "plan" | "build" | "research" | "review";
+      mode?: "plan" | "build" | "research" | "review";
     }) => {
       logger.info("updateChatSession.start", { sessionId, title, status });
       return api.updateChatSession(sessionId, { title, status, mode });

@@ -598,12 +598,14 @@ export function useCreateComment(issueId: string) {
       type,
       parentId,
       attachmentIds,
+      sessionMode,
     }: {
       content: string;
       type?: string;
       parentId?: string;
       attachmentIds?: string[];
-    }) => api.createComment(issueId, content, type, parentId, attachmentIds),
+      sessionMode?: string;
+    }) => api.createComment(issueId, content, type, parentId, attachmentIds, sessionMode), // CEREBRO-PATCH(new-thread-session-mode): FIR-3111 persist Mode before enqueue.
     onSuccess: (comment) => {
       const entry: TimelineEntry = {
         type: "comment",

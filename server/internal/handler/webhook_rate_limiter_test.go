@@ -84,6 +84,11 @@ func TestWebhookLimiterLuaScript_StructureGuard(t *testing.T) {
 	mustBefore("ZREMRANGEBYSCORE", "ZCARD")
 	mustBefore("ZCARD", "ZADD")
 	mustBefore("ZADD", "EXPIRE")
+	// CEREBRO-PATCH(webhook-redis-member-uniqueness): FIR-3111 regression guard for the CI-exposed Redis member collision.
+	if !strings.Contains(src, "local member = ARGV[5]") ||
+		!strings.Contains(src, "redis.call('ZADD', key, now, member)") {
+		t.Fatalf("script must use the caller's unique member instead of the rounded timestamp, src=%s", src)
+	}
 }
 
 func TestRedisWebhookRateLimiter_RejectsAboveLimit(t *testing.T) {

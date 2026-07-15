@@ -146,6 +146,8 @@ by whether the trigger comment has a parent.
 | MCP `resolve_comment` / `unresolve_comment` / `list_sessions` / `rename_session` / `handoff_session` | `server/internal/cerebro/clitools/mcp_tools.go` |
 | Resolve route (upstream) | `server/cmd/server/router.go:1541-1542` (`ResolveComment` / `UnresolveComment`) |
 | Sessions routes (list / start-fresh / rename) | `server/cmd/server/router.go:2019,2023,2024` → `server/internal/cerebro/sessions/handler.go` |
+<!-- CEREBRO-PATCH(new-thread-session-mode-source-map): FIR-3111 source trace. -->
+| New-thread `session_mode` write before enqueue | `server/internal/handler/comment.go` → `CommentSessionModeRecorder` → `server/internal/cerebro/sessions/handler.go:RecordCommentSessionMode` |
 
 `handoff` posts to `.../sessions/start-fresh` (resolves the thread + stores the
 brief); `rename` PATCHes `.../sessions/{rootCommentId}` (sessionId path param IS

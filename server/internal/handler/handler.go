@@ -162,7 +162,8 @@ type Handler struct {
 	MentionTriggerGate MentionTriggerGateInvoker
 	// CEREBRO-PATCH(handler-comment-target-guard): FIR-2674 reject agent comments with no target.
 	CommentTargetGuard CommentTargetGuardInvoker
-	RoundReplyObserver RoundReplyObserver // CEREBRO-PATCH(cerebro-rounds): observe handled snapshot items without blocking normal comment triggers.
+	CommentSessionMode CommentSessionModeRecorder // CEREBRO-PATCH(new-thread-session-mode): FIR-3111 persist selected Mode inside comment transaction.
+	RoundReplyObserver RoundReplyObserver         // CEREBRO-PATCH(cerebro-rounds): observe handled snapshot items without blocking normal comment triggers.
 	// CEREBRO-PATCH(handler-channel-create-guard): FIR-2660 restrict channel creation to owners/admins.
 	ChannelCreateGuard ChannelCreateGuardInvoker
 	// CEREBRO-PATCH(handler-channel-perms): TECH-3698 per-channel permission gate (rename/add-remove/leave).

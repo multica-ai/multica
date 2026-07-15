@@ -21,7 +21,7 @@ const session = (phase: string | null): Session => ({
   root_comment_id: "root-1",
   position: 1,
   name: "A session",
-  mode: "auto",
+  mode: "build",
   phase,
   handoff: null,
   created_at: "2026-06-21T00:00:00Z",
@@ -32,10 +32,9 @@ describe("SessionHeader mode select", () => {
   it("switches an ordinary session into Research mode via the mode select", async () => {
     render(<SessionHeader issueId="issue-1" session={session(null)} open onToggle={() => {}} />);
     const trigger = screen.getByRole("combobox", { name: "Session mode" });
-    expect(trigger).toHaveTextContent("Auto");
+    expect(trigger).toHaveTextContent("Build");
     await userEvent.click(trigger);
     expect((await screen.findAllByRole("option")).map((option) => option.textContent)).toEqual([
-      "Auto",
       "Plan",
       "Build",
       "Research",
@@ -45,7 +44,7 @@ describe("SessionHeader mode select", () => {
     expect(mutateAsync).toHaveBeenCalledWith({ sessionId: "root-1", input: { mode: "research" } });
   });
 
-  it("renders a legacy default session as Build and switches it to Auto", async () => {
+  it("renders a legacy default session as Build without offering a misleading Auto mode", async () => {
     render(
       <SessionHeader
         issueId="issue-1"
@@ -57,8 +56,33 @@ describe("SessionHeader mode select", () => {
     const trigger = screen.getByRole("combobox", { name: "Session mode" });
     expect(trigger).toHaveTextContent("Build");
     await userEvent.click(trigger);
-    await userEvent.click(await screen.findByRole("option", { name: "Auto" }));
-    expect(mutateAsync).toHaveBeenCalledWith({ sessionId: "root-1", input: { mode: "auto" } });
+    expect(screen.queryByRole("option", { name: "Auto" })).not.toBeInTheDocument();
+  });
+});
+
+describe("SessionHeader thread state", () => {
+  it("presents Handoff as the reason a thread is Resolved, not as a separate status", async () => {
+    const onToggleHandoff = vi.fn();
+    render(
+      <SessionHeader
+        issueId="issue-1"
+        session={{
+          ...session(null),
+          handoff: { summary: "Continue in the fresh thread", done: [], remaining: [] },
+        }}
+        open
+        resolved
+        hasHandoff
+        handoffOpen={false}
+        onToggle={() => {}}
+        onToggleHandoff={onToggleHandoff}
+      />,
+    );
+
+    expect(screen.queryByRole("button", { name: "Handoff" })).not.toBeInTheDocument();
+    const state = screen.getByRole("button", { name: "Resolved via Handoff" });
+    await userEvent.click(state);
+    expect(onToggleHandoff).toHaveBeenCalledOnce();
   });
 });
 

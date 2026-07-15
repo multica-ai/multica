@@ -17,6 +17,7 @@
     "@multica/cerebro-feature-flags": "workspace:*",
     "@multica/cerebro-pin-input": "workspace:*",
     "@multica/cerebro-preferences": "workspace:*",
+    "@multica/cerebro-sessions": "workspace:*",
     "@multica/cerebro-ui": "workspace:*",
     "@multica/core": "workspace:*",
     "@multica/ui": "workspace:*",

@@ -5,6 +5,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -102,6 +103,7 @@ const (
 //	ARGV[2] = cutoff (unix nanos as string)
 //	ARGV[3] = limit
 //	ARGV[4] = expiry seconds (TTL refresh, larger than window)
+//	ARGV[5] = globally unique request member
 //
 // Returns 1 when the request is admitted, 0 when it should be rejected.
 //
@@ -114,12 +116,13 @@ local now = tonumber(ARGV[1])
 local cutoff = tonumber(ARGV[2])
 local limit = tonumber(ARGV[3])
 local ttl = tonumber(ARGV[4])
+local member = ARGV[5]
 redis.call('ZREMRANGEBYSCORE', key, '-inf', cutoff)
 local count = redis.call('ZCARD', key)
 if count >= limit then
     return 0
 end
-redis.call('ZADD', key, now, tostring(now))
+redis.call('ZADD', key, now, member)
 redis.call('EXPIRE', key, ttl)
 return 1
 `
@@ -173,7 +176,8 @@ func (l *redisWebhookRateLimiter) Allow(ctx context.Context, key string) bool {
 		ctx,
 		l.rdb,
 		[]string{prefix + key},
-		now, cutoff, l.cfg.Limit, ttlSeconds,
+		// CEREBRO-PATCH(webhook-redis-member-uniqueness): FIR-3111 CI hardening — distinct members prevent nanosecond rounding from undercounting requests.
+		now, cutoff, l.cfg.Limit, ttlSeconds, uuid.NewString(),
 	).Int()
 	if err != nil {
 		// Fail open on Redis errors — webhook ingress should keep working

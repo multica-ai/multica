@@ -70,6 +70,29 @@ const cacheUpdates = vi.hoisted(() => ({
   last: null as unknown,
 }));
 
+const queryClientCalls = vi.hoisted(() => {
+  const invalidateQueries = vi.fn();
+  const getQueryData = vi.fn();
+  const cancelQueries = vi.fn();
+  const setQueryData = vi.fn((_key: unknown, updater: unknown) => {
+    cacheUpdates.last = typeof updater === "function"
+      ? (updater as (old: unknown) => unknown)(queryState.data)
+      : updater;
+  });
+  return {
+    invalidateQueries,
+    getQueryData,
+    cancelQueries,
+    setQueryData,
+    client: {
+      invalidateQueries,
+      setQueryData,
+      getQueryData,
+      cancelQueries,
+    },
+  };
+});
+
 vi.mock("@tanstack/react-query", async () => {
   const actual = await vi.importActual<typeof import("@tanstack/react-query")>(
     "@tanstack/react-query",
@@ -80,16 +103,7 @@ vi.mock("@tanstack/react-query", async () => {
       data: queryState.data,
       isLoading: queryState.isLoading,
     }),
-    useQueryClient: () => ({
-      invalidateQueries: vi.fn(),
-      setQueryData: vi.fn((_key: unknown, updater: unknown) => {
-        cacheUpdates.last = typeof updater === "function"
-          ? (updater as (old: unknown) => unknown)(queryState.data)
-          : updater;
-      }),
-      getQueryData: vi.fn(),
-      cancelQueries: vi.fn(),
-    }),
+    useQueryClient: () => queryClientCalls.client,
     useMutationState: () => [],
   };
 });
@@ -105,6 +119,12 @@ vi.mock("sonner", () => ({
   toast: { error: vi.fn(), success: vi.fn() },
 }));
 
+vi.mock("@multica/cerebro-sessions", () => ({
+  sessionKeys: {
+    detail: (issueId: string) => ["cerebro-sessions", issueId],
+  },
+}));
+
 import { useIssueTimeline } from "./use-issue-timeline";
 import { ApiError } from "@multica/core/api";
 import { toast } from "sonner";
@@ -115,6 +135,7 @@ describe("useIssueTimeline", () => {
     queryState.data = [];
     queryState.isLoading = false;
     cacheUpdates.last = null;
+    queryClientCalls.invalidateQueries.mockReset();
     stableHandles.createMutateAsync.mockReset();
     stableHandles.createMutateAsync.mockResolvedValue({});
     stableHandles.updateMutateAsync.mockReset();
@@ -171,6 +192,21 @@ describe("useIssueTimeline", () => {
     await expect(result.current.submitComment("half-written")).rejects.toThrow("network down");
 
     expect(toast.error).toHaveBeenCalledWith("network down");
+  });
+
+  it("passes the selected mode with a new top-level thread", async () => {
+    const { result } = renderHook(() => useIssueTimeline("issue-1", "user-1"));
+
+    await result.current.submitComment("Plan this first", ["attachment-1"], "plan");
+
+    expect(stableHandles.createMutateAsync).toHaveBeenCalledWith({
+      content: "Plan this first",
+      attachmentIds: ["attachment-1"],
+      sessionMode: "plan",
+    });
+    expect(queryClientCalls.invalidateQueries).toHaveBeenCalledWith({
+      queryKey: ["cerebro-sessions", "issue-1"],
+    });
   });
 
   it("shows a clear session-expired message and keeps submitReply rejected", async () => {

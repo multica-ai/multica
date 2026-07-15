@@ -15,7 +15,6 @@ func TestProfilesCoverEveryMode(t *testing.T) {
 		allowsWrite bool
 		promptPart  string
 	}{
-		{Auto, "", 0, 0, true, "choose the working style"},
 		{Plan, "medium", 30 * time.Minute, 20, false, "must NOT write or edit code"},
 		{Build, "high", 120 * time.Minute, 80, true, "implement the requested outcome"},
 		{Research, "high", 60 * time.Minute, 40, false, "read-only investigation"},
@@ -35,6 +34,9 @@ func TestProfilesCoverEveryMode(t *testing.T) {
 func TestNormalizeAcceptsLegacyDefaultAndRejectsUnknown(t *testing.T) {
 	if got, ok := Normalize("default"); !ok || got != Build {
 		t.Fatalf("legacy default = %q, %v; want build, true", got, ok)
+	}
+	if got, ok := Normalize("auto"); !ok || got != Build {
+		t.Fatalf("legacy auto = %q, %v; want build, true", got, ok)
 	}
 	if got, ok := Normalize(" REVIEW "); !ok || got != Review {
 		t.Fatalf("review = %q, %v; want review, true", got, ok)

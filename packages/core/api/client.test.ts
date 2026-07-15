@@ -6,6 +6,24 @@ afterEach(() => {
 });
 
 describe("ApiClient", () => {
+  it("sends the selected mode when creating a new issue thread", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ id: "comment-1" }), {
+        status: 201,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new ApiClient("https://api.example.test");
+
+    await client.createComment("issue-1", "Plan this", undefined, undefined, undefined, "plan");
+
+    expect(JSON.parse(fetchMock.mock.calls[0]![1].body)).toMatchObject({
+      content: "Plan this",
+      session_mode: "plan",
+    });
+  });
+
   it("preserves HTTP status on failed requests", async () => {
     vi.stubGlobal(
       "fetch",

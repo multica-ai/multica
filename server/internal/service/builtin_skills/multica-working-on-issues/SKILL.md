@@ -221,6 +221,12 @@ fresh agent session with no history; a reply (`--parent <root>`) resumes that
 session with its full conversation. The thread root's resolved state is the
 session's open/closed state.
 
+<!-- CEREBRO-PATCH(new-thread-session-mode-skill): FIR-3111 REST boundary for the UI-selected Mode. -->
+The issue UI chooses the new thread's execution Mode before posting it. At the
+REST boundary, `POST /api/issues/{id}/comments` accepts `session_mode` only for
+a top-level comment: `plan`, `build`, `research`, or `review`. The server stores
+it in the same transaction before it enqueues the comment-triggered run.
+
 ```bash
 # Start fresh / hand off work: post a NEW top-level comment (no --parent).
 multica issue comment add <issue> --content-stdin   # ... = fresh session

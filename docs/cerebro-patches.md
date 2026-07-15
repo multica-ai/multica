@@ -1491,6 +1491,13 @@ comment for SQL/CSS/SBPL/JSON-with-_comment-field).
 | `chat-run-stream` (`handler-chat-stream` field, `chat-run-stream-route` import+route, `chat-run-stream-wire`) | server/internal/handler/chat_stream_cerebro.go (new)<br>server/internal/cerebro/chatstream/ (new package)<br>server/internal/handler/handler.go (1 marked field)<br>server/cmd/server/router.go (marked import + wire + route lines) | 3 marked sites + new cerebro files | FIR-2835 Phase 1 — `GET /api/chat/sessions/{sessionId}/stream` streams a chat run as SSE in the Vercel AI SDK UI-message-stream (v1) protocol (`start` → `text-*` → `finish` with taskId/elapsedMs/usage metadata → `[DONE]`; failures as in-stream `error` chunks carrying the real failure text). Replaces the create→send→poll loop embedding apps (Finance AI CFO first) hand-roll today. `?task_id=` follows a specific run; without it the pending task is used and 204 signals "nothing active" (AI SDK resume contract). Runs finished before connect replay from the persisted assistant message, so the send→open-stream race is safe. |
 | `model-registry-cache-ttl` | packages/core/types/model-registry.ts | 1 marked field | FIR-2698 — exposes editable per-model cache lifetime metadata to the Cerebro model-registry UI while keeping the registry API type aligned with the backend snapshot. |
 
+## FIR-3111 — explicit session modes on new threads
+
+| Patch | Location | Reason |
+|---|---|---|
+| `new-thread-session-mode` / `new-thread-mode-validate` / `new-thread-mode-record` | `packages/core/api/client.ts`, `packages/core/issues/mutations.ts`, `packages/views/issues/hooks/use-issue-timeline.ts`, `server/internal/handler/comment.go`, `server/internal/handler/handler.go`, `server/cmd/server/router.go` | Carry Plan/Build/Research/Review from the new-thread composer into the root-comment transaction before the agent task is enqueued. The implementation and validation live in Cerebro-owned packages and `*_cerebro.go` siblings; these marked lines are the irreducible upstream seams. Approved by Jesper's FIR-3111 correction on 2026-07-15. |
+| `webhook-redis-member-uniqueness` | `server/internal/handler/webhook_rate_limiter.go`, `server/internal/handler/webhook_rate_limiter_test.go` | CI exposed that Lua's floating-point conversion could round rapid nanosecond timestamps to the same Redis ZSET member and undercount requests. Each admitted webhook now gets a UUID member while retaining its timestamp score; the structural regression test pins that contract. |
+
 # cerebro-operating-system-foundation
 
 | `operating-system-paths` | packages/core/paths/paths.ts (2 marked route builders) | 2 inline | FIR-2816 — shared workspace paths for the fork-owned Rocks and Strategy pages. |

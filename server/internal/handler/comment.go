@@ -1006,6 +1006,7 @@ type CreateCommentRequest struct {
 	ParentID         *string  `json:"parent_id"`
 	AttachmentIDs    []string `json:"attachment_ids"`
 	SuppressAgentIDs []string `json:"suppress_agent_ids"`
+	SessionMode      *string  `json:"session_mode"` // CEREBRO-PATCH(new-thread-session-mode): FIR-3111 optional only for top-level comments.
 }
 
 func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
@@ -1033,6 +1034,11 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	if req.Type == "" {
 		req.Type = "comment"
 	}
+	selectedMode, modeErr := normalizeNewThreadSessionMode(req.SessionMode, req.ParentID != nil) // CEREBRO-PATCH(new-thread-mode-validate): FIR-3111 validate before creating the comment.
+	if modeErr != nil {
+		writeError(w, http.StatusBadRequest, modeErr.Error())
+		return
+	} // CEREBRO-PATCH(new-thread-mode-validate): FIR-3111 root-only visible modes.
 
 	var parentID pgtype.UUID
 	var parentComment *db.Comment
@@ -1191,6 +1197,10 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to create comment: "+err.Error())
 		return
 	}
+	if err := h.recordCommentSessionMode(r.Context(), tx, uuidToString(issue.ID), uuidToString(comment.ID), selectedMode); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to set session mode")
+		return
+	} // CEREBRO-PATCH(new-thread-mode-record): FIR-3111 persist before commit/trigger.
 
 	if err := tx.Commit(r.Context()); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create comment")

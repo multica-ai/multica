@@ -4,9 +4,11 @@
 // chrome (pin, trigger-target bar, private-agent send confirm) lives here; the
 // shared editor/upload/draft/expand machinery is in BaseComposer.
 
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { useCommentDraft } from "@multica/cerebro-comment-drafts";
 import { usePrivateAgentSendConfirm } from "@multica/cerebro-access/views";
+import { useFeatureFlag } from "@multica/cerebro-feature-flags";
+import { SessionModeSelect, type SessionMode } from "@multica/cerebro-sessions";
 import {
   TriggerTargetBar,
   memberMentionMarkdown,
@@ -15,7 +17,7 @@ import { BaseComposer } from "./base-composer";
 
 export interface CommentComposerProps {
   issueId: string;
-  onSubmit: (content: string, attachmentIds?: string[]) => Promise<void>;
+  onSubmit: (content: string, attachmentIds?: string[], mode?: SessionMode) => Promise<void>;
   /** "new" = top-level comment composer; "reply" = threaded reply. */
   variant?: "new" | "reply";
   /** Enable the pin toggle (issue pages pass true on the new-comment field). */
@@ -52,6 +54,8 @@ export function CommentComposer({
   topBanner,
 }: CommentComposerProps) {
   const isReply = variant === "reply";
+  const modesEnabled = useFeatureFlag("cerebro_session_modes");
+  const [mode, setMode] = useState<SessionMode>("build");
   const draft = useCommentDraft(
     isReply ? `reply:${issueId}:${rootCommentId ?? ""}` : `new:${issueId}`,
   );
@@ -64,7 +68,7 @@ export function CommentComposer({
       uploadIssueId={issueId}
       editorKey={isReply ? rootCommentId : issueId}
       draft={draft}
-      onSubmit={onSubmit}
+      onSubmit={(content, attachmentIds) => onSubmit(content, attachmentIds, isReply ? undefined : mode)}
       trackAttachmentIds
       // FIR-1787 review: Jesper reverted FIR-1790 — the issue comment box keeps
       // its boxed card/border chrome (the bottom composer and replies are boxed,
@@ -74,7 +78,14 @@ export function CommentComposer({
       size={size}
       avatar={isReply ? avatar : null}
       pin={isReply ? "sticky-bottom" : pinnable ? "fixed" : "none"}
-      sendMenu={isReply ? undefined : sendMenu}
+      sendMenu={isReply ? undefined : (
+        <div className="flex items-center gap-2">
+          {modesEnabled ? (
+            <SessionModeSelect value={mode} onValueChange={setMode} ariaLabel="New thread mode" />
+          ) : null}
+          {sendMenu}
+        </div>
+      )}
       aboveField={isReply ? undefined : topBanner}
       suppressPlaceholder={!!triggerAgentId}
       hasTopOverlay={!!triggerAgentId}

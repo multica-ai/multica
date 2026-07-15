@@ -9,10 +9,9 @@ describe("ChatSessionModeSelect", () => {
     render(<ChatSessionModeSelect mode="auto" onChange={onChange} />);
 
     const trigger = screen.getByRole("combobox", { name: "Session mode" });
-    expect(trigger).toHaveTextContent("Auto");
+    expect(trigger).toHaveTextContent("Build");
     await userEvent.click(trigger);
     expect((await screen.findAllByRole("option")).map((option) => option.textContent)).toEqual([
-      "Auto",
       "Plan",
       "Build",
       "Research",

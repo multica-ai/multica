@@ -9,7 +9,6 @@ import (
 type Mode string
 
 const (
-	Auto     Mode = "auto"
 	Plan     Mode = "plan"
 	Build    Mode = "build"
 	Research Mode = "research"
@@ -26,10 +25,6 @@ type Profile struct {
 }
 
 var profiles = map[Mode]Profile{
-	Auto: {
-		Mode: Auto, AllowsWrite: true,
-		Instruction: "Choose the working style that best fits the request. Existing permissions and approvals remain the hard ceiling.",
-	},
 	Plan: {
 		Mode: Plan, ThinkingLevel: "medium", Timeout: 30 * time.Minute, MaxTurns: 20,
 		Instruction: "This session is planning-only. You may investigate and save a concrete plan, but you must NOT write or edit code, run migrations, deploy, open a pull request, or make external mutations. Finish with a saved plan and its acceptance criteria.",
@@ -50,7 +45,7 @@ var profiles = map[Mode]Profile{
 
 func Normalize(raw string) (Mode, bool) {
 	value := Mode(strings.ToLower(strings.TrimSpace(raw)))
-	if value == "default" {
+	if value == "default" || value == "auto" {
 		return Build, true
 	}
 	_, ok := profiles[value]
@@ -61,7 +56,7 @@ func ProfileFor(mode Mode) Profile {
 	if profile, ok := profiles[mode]; ok {
 		return profile
 	}
-	return profiles[Auto]
+	return profiles[Build]
 }
 
 // EffectiveTimeout preserves an operator's shorter runtime cap and otherwise

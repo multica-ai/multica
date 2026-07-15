@@ -38,6 +38,7 @@ import { sortTimelineEntriesAsc } from "@multica/core/issues/timeline-sort";
 import { useWSEvent, useWSReconnect } from "@multica/core/realtime";
 import { toast } from "sonner";
 import { useT } from "../../i18n";
+import { sessionKeys, type SessionMode } from "@multica/cerebro-sessions"; // CEREBRO-PATCH(new-thread-session-mode): FIR-3111 composer contract.
 
 type TLCache = TimelineEntry[];
 
@@ -268,16 +269,19 @@ export function useIssueTimeline(issueId: string, userId?: string) {
   // --- Mutation functions ---
 
   const submitComment = useCallback(
-    async (content: string, attachmentIds?: string[]) => {
+    async (content: string, attachmentIds?: string[], sessionMode?: SessionMode) => {
       if (!content.trim() || !userId) return;
       try {
-        await createComment({ content, attachmentIds });
+        await createComment({ content, attachmentIds, sessionMode });
+        if (sessionMode) {
+          await qc.invalidateQueries({ queryKey: sessionKeys.detail(issueId) });
+        }
       } catch (err) {
         toast.error(commentSubmitErrorMessage(err, t(($) => $.comment.send_failed)));
         throw err;
       }
     },
-    [userId, createComment, t],
+    [userId, createComment, qc, issueId, t],
   );
 
   const submitReply = useCallback(

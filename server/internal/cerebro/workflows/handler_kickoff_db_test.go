@@ -150,20 +150,20 @@ func TestActivateForIssue_StartsPlanPhaseWithPlanModePrompt(t *testing.T) {
 	if err := json.Unmarshal(fake.IssueTaskQueued.Context, &taskCtx); err != nil {
 		t.Fatalf("task context is not JSON: %v", err)
 	}
-	if taskCtx["plan_mode"] != true {
-		t.Fatalf("dispatched task is not in plan mode: plan_mode = %v", taskCtx["plan_mode"])
+	if taskCtx["session_mode"] != "plan" {
+		t.Fatalf("dispatched task session_mode = %v, want plan", taskCtx["session_mode"])
+	}
+	if _, legacy := taskCtx["plan_mode"]; legacy {
+		t.Fatalf("dispatched task still carries legacy plan_mode: %v", taskCtx["plan_mode"])
 	}
 	if taskCtx["loop_phase"] != "plan" {
 		t.Fatalf("dispatched task loop_phase = %v, want \"plan\"", taskCtx["loop_phase"])
 	}
-	// The plan-mode instruction now lives in the kickoff comment the agent is
-	// triggered on — that is what makes the plan phase visible on the issue.
+	// The canonical session profile supplies the planning-only instruction at
+	// runtime, so the visible kickoff comment only contains the selected skill.
 	prompt := fake.CreatedComment.Content
-	if !strings.Contains(prompt, "PLAN MODE") {
-		t.Fatalf("kickoff comment is not the plan-mode prompt: %q", prompt)
-	}
-	if !strings.Contains(prompt, "must NOT write or edit") {
-		t.Fatalf("plan-mode kickoff missing the no-code instruction: %q", prompt)
+	if strings.Contains(prompt, "PLAN MODE") || strings.Contains(prompt, "must NOT write or edit") {
+		t.Fatalf("kickoff comment duplicates the session profile instruction: %q", prompt)
 	}
 	if fake.CreatedComment.AuthorType != "agent" {
 		t.Fatalf("kickoff comment author_type = %q, want \"agent\"", fake.CreatedComment.AuthorType)

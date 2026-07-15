@@ -831,6 +831,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	cerebroRecurringIssueHandler := cerebrorecurringissue.NewHandler(cerebroQueries, pool, queries)
 	// CEREBRO-PATCH(cerebro-sessions-routes): FIR-1741 issue comment sessions handler instance.
 	cerebroSessionsHandler := cerebrosessions.NewHandler(pool, queries, h.TaskService, bus) // CEREBRO-PATCH(cerebro-sessions-routes): FIR-2021 inject TaskService+bus for one-command handoff start-new
+	h.CommentSessionMode = cerebroSessionsHandler                                           // CEREBRO-PATCH(new-thread-session-mode): FIR-3111 transactional Mode seam.
 	// CEREBRO-PATCH(cerebro-saved-filters-routes): FIR-1659 personal saved-filters handler instance
 	cerebroSavedFiltersHandler := cerebrosavedfilters.NewHandler(cerebroQueries)
 	// CEREBRO-PATCH(cerebro-note-types-routes): TECH-3511 note types handler instance

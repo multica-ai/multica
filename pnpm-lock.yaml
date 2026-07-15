@@ -2073,6 +2073,9 @@ importers:
       '@multica/cerebro-preferences':
         specifier: workspace:*
         version: link:../cerebro-preferences
+      '@multica/cerebro-sessions':
+        specifier: workspace:*
+        version: link:../cerebro-sessions
       '@multica/cerebro-ui':
         specifier: workspace:*
         version: link:../cerebro-ui

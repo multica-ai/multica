@@ -16,7 +16,7 @@ func TestUpdateChatSessionModePersistsAndReturnsCanonicalValue(t *testing.T) {
 	for _, tc := range []struct {
 		input string
 		want  string
-	}{{"auto", "auto"}, {"plan", "plan"}, {"build", "build"}, {"research", "research"}, {"review", "review"}, {"default", "build"}} {
+	}{{"auto", "build"}, {"plan", "plan"}, {"build", "build"}, {"research", "research"}, {"review", "review"}, {"default", "build"}} {
 		req := newRequest(http.MethodPatch, "/api/chat/sessions/"+sessionID, map[string]any{"mode": tc.input})
 		req = withURLParam(req, "sessionId", sessionID)
 		req = withChatTestWorkspaceCtx(t, req)

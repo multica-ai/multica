@@ -118,7 +118,7 @@ func (h *Handler) UpdateChatSession(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) chatSessionMode(ctx context.Context, id pgtype.UUID) string {
 	var mode string
 	if err := h.DB.QueryRow(ctx, `SELECT mode FROM chat_session WHERE id = $1`, id).Scan(&mode); err != nil || mode == "" {
-		return string(sessionmode.Auto)
+		return string(sessionmode.Build)
 	}
 	return mode
 }

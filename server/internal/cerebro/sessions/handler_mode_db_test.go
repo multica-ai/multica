@@ -32,7 +32,7 @@ func TestUpdateSessionModeRoundTripsAndPersistsWhenOmitted(t *testing.T) {
 	}
 }
 
-func TestUpdateSessionAcceptsAllCanonicalModesAndLegacyDefault(t *testing.T) {
+func TestUpdateSessionAcceptsCanonicalModesAndNormalizesLegacyValues(t *testing.T) {
 	issueID, workspaceID := seedIssue(t)
 	rootID := seedRootComment(t, issueID, workspaceID)
 	h := NewHandler(sessTestPool, db.New(sessTestPool), nil, nil)
@@ -41,7 +41,7 @@ func TestUpdateSessionAcceptsAllCanonicalModesAndLegacyDefault(t *testing.T) {
 		input string
 		want  string
 	}{
-		{"auto", "auto"},
+		{"auto", "build"},
 		{"plan", "plan"},
 		{"build", "build"},
 		{"research", "research"},

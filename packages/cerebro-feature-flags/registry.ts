@@ -224,7 +224,7 @@ export type CerebroFlagKey =
   | "cerebro_recurring_issues"
   // FIR-1704: comment sessions UI. OFF — phase 1 model was unsound (comments never linked to a session); rebuilding as threads=sessions (FIR-1741). Internal key kept as `cerebro_comment_chapters` so existing per-user overrides keep working; everything user-facing now says "session".
   | "cerebro_comment_chapters"
-  // FIR-3111: five session modes in issue and chat headers, plus runtime profiles.
+  // FIR-3111: four explicit session modes in issue and chat, plus runtime profiles.
   | "cerebro_session_modes"
   // FIR-1769 (P2): fold a session's activity events into one collapsed "Activity" section so comments stay prominent. Requires cerebro_comment_chapters.
   | "cerebro_session_activity_fold"
@@ -1493,7 +1493,7 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     label: "Session modes",
     group: "workspace",
     description:
-      "Add Auto, Plan, Build, Research, and Review to issue and chat session headers. The selected mode is persisted and applies a matching runtime profile to the next agent run. Workflow phases select their matching mode automatically. FIR-3111.",
+      "Add Plan, Build, Research, and Review to issue and chat sessions. Build is the honest default; the selected mode is persisted before the next agent run. Workflow phases use the same profiles. FIR-3111.",
   },
   {
     key: "cerebro_session_activity_fold",

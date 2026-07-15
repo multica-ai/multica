@@ -46,6 +46,25 @@ func NewHandler(pool *pgxpool.Pool, upstream *db.Queries, tasks *service.TaskSer
 	return &Handler{pool: pool, upstream: upstream, tasks: tasks, bus: bus}
 }
 
+// RecordCommentSessionMode runs inside the upstream comment transaction, so
+// the root comment and its selected execution profile become visible together.
+func (h *Handler) RecordCommentSessionMode(ctx context.Context, tx pgx.Tx, issueID, rootCommentID, mode string) error {
+	issueUUID, err := util.ParseUUID(issueID)
+	if err != nil {
+		return err
+	}
+	rootUUID, err := util.ParseUUID(rootCommentID)
+	if err != nil {
+		return err
+	}
+	_, err = tx.Exec(ctx, `
+		INSERT INTO cerebro_session (issue_id, root_comment_id, position, name, mode)
+		VALUES ($1, $2, 0, '', $3)
+		ON CONFLICT (root_comment_id) WHERE root_comment_id IS NOT NULL
+		DO UPDATE SET mode = EXCLUDED.mode, updated_at = now()`, issueUUID, rootUUID, mode)
+	return err
+}
+
 // handoffBrief is the agent-generated (or auto-summarised) carry-over a session
 // keeps when it is handed off. It is a single nullable JSONB blob on the row.
 type handoffBrief struct {
@@ -193,7 +212,7 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 	mode, valid := normalizeMode(req.Mode)
 	if !valid {
-		writeError(w, http.StatusBadRequest, "mode must be auto, plan, build, research, or review")
+		writeError(w, http.StatusBadRequest, "mode must be plan, build, research, or review")
 		return
 	}
 	session, err := upsertThreadSession(r.Context(), tx, issue.ID, rootID, name, mode, normalizePhase(req.Phase), normalizeHandoff(req.Handoff))

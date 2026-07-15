@@ -148,8 +148,8 @@ func (s *SessionPhaseStamper) StampSession(ctx context.Context, issueID, rootCom
 		return nil
 	}
 	mode, ok := sessionmode.Normalize(phase)
-	if !ok || mode == sessionmode.Auto {
-		mode = sessionmode.Auto
+	if !ok {
+		mode = sessionmode.Build
 	}
 	_, err := s.pool.Exec(ctx, `
 		INSERT INTO cerebro_session (issue_id, root_comment_id, position, name, phase, mode)

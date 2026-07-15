@@ -4,12 +4,15 @@ import { useCallback } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { getContextTimeline, getContextUsage, getUsageBreakdown, listSessions, startFresh, updateSession } from "./api";
 import type { HandoffActionInput } from "./types";
+import type { SessionMode } from "./modes";
 
-const key = (issueId: string) => ["cerebro-sessions", issueId] as const;
+export const sessionKeys = {
+  detail: (issueId: string) => ["cerebro-sessions", issueId] as const,
+};
 
 export function useSessions(issueId: string) {
   return useQuery({
-    queryKey: key(issueId),
+    queryKey: sessionKeys.detail(issueId),
     queryFn: () => listSessions(issueId),
   });
 }
@@ -50,7 +53,7 @@ export function useStartFresh(issueId: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (input: HandoffActionInput) => startFresh(issueId, input),
-    onSuccess: () => qc.invalidateQueries({ queryKey: key(issueId) }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: sessionKeys.detail(issueId) }),
   });
 }
 
@@ -64,15 +67,16 @@ export function useSubmitWithHandoff(
   issueId: string,
   armed: { rootCommentId: string } | null,
   onDone: () => void,
-  submit: (content: string, attachmentIds?: string[]) => Promise<void>,
+  submit: (content: string, attachmentIds?: string[], mode?: SessionMode) => Promise<void>,
 ) {
   const handoff = useStartFresh(issueId);
   return useCallback(
-    async (content: string, attachmentIds?: string[]) => {
+    async (content: string, attachmentIds?: string[], mode?: SessionMode) => {
       if (armed) {
         await handoff.mutateAsync({ root_comment_id: armed.rootCommentId });
       }
-      await submit(content, attachmentIds);
+      if (mode) await submit(content, attachmentIds, mode);
+      else await submit(content, attachmentIds);
       if (armed) onDone();
     },
     [issueId, armed, handoff, onDone, submit],
@@ -84,6 +88,6 @@ export function useUpdateSession(issueId: string) {
   return useMutation({
     mutationFn: ({ sessionId, input }: { sessionId: string; input: Parameters<typeof updateSession>[2] }) =>
       updateSession(issueId, sessionId, input),
-    onSuccess: () => qc.invalidateQueries({ queryKey: key(issueId) }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: sessionKeys.detail(issueId) }),
   });
 }

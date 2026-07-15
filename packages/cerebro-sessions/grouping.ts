@@ -21,7 +21,7 @@ export function defaultSession(issueId: string, name = "Session 1"): Session {
     root_comment_id: null,
     position: 0,
     name,
-    mode: "auto",
+    mode: "build",
     phase: null,
     handoff: null,
     created_at: "",
