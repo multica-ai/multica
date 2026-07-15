@@ -174,31 +174,32 @@ const createIssue = `-- name: CreateIssue :one
 INSERT INTO issue (
     workspace_id, title, description, status, priority,
     assignee_type, assignee_id, creator_type, creator_id,
-    parent_issue_id, position, start_date, due_date, number, project_id,
+    parent_issue_id, acceptance_criteria, position, start_date, due_date, number, project_id,
     stage
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
-    $16
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16,
+    $17
 ) RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage
 `
 
 type CreateIssueParams struct {
-	WorkspaceID   pgtype.UUID `json:"workspace_id"`
-	Title         string      `json:"title"`
-	Description   pgtype.Text `json:"description"`
-	Status        string      `json:"status"`
-	Priority      string      `json:"priority"`
-	AssigneeType  pgtype.Text `json:"assignee_type"`
-	AssigneeID    pgtype.UUID `json:"assignee_id"`
-	CreatorType   string      `json:"creator_type"`
-	CreatorID     pgtype.UUID `json:"creator_id"`
-	ParentIssueID pgtype.UUID `json:"parent_issue_id"`
-	Position      float64     `json:"position"`
-	StartDate     pgtype.Date `json:"start_date"`
-	DueDate       pgtype.Date `json:"due_date"`
-	Number        int32       `json:"number"`
-	ProjectID     pgtype.UUID `json:"project_id"`
-	Stage         pgtype.Int4 `json:"stage"`
+	WorkspaceID        pgtype.UUID `json:"workspace_id"`
+	Title              string      `json:"title"`
+	Description        pgtype.Text `json:"description"`
+	Status             string      `json:"status"`
+	Priority           string      `json:"priority"`
+	AssigneeType       pgtype.Text `json:"assignee_type"`
+	AssigneeID         pgtype.UUID `json:"assignee_id"`
+	CreatorType        string      `json:"creator_type"`
+	CreatorID          pgtype.UUID `json:"creator_id"`
+	ParentIssueID      pgtype.UUID `json:"parent_issue_id"`
+	AcceptanceCriteria []byte      `json:"acceptance_criteria"`
+	Position           float64     `json:"position"`
+	StartDate          pgtype.Date `json:"start_date"`
+	DueDate            pgtype.Date `json:"due_date"`
+	Number             int32       `json:"number"`
+	ProjectID          pgtype.UUID `json:"project_id"`
+	Stage              pgtype.Int4 `json:"stage"`
 }
 
 func (q *Queries) CreateIssue(ctx context.Context, arg CreateIssueParams) (Issue, error) {
@@ -213,6 +214,7 @@ func (q *Queries) CreateIssue(ctx context.Context, arg CreateIssueParams) (Issue
 		arg.CreatorType,
 		arg.CreatorID,
 		arg.ParentIssueID,
+		arg.AcceptanceCriteria,
 		arg.Position,
 		arg.StartDate,
 		arg.DueDate,
@@ -255,33 +257,34 @@ const createIssueWithOrigin = `-- name: CreateIssueWithOrigin :one
 INSERT INTO issue (
     workspace_id, title, description, status, priority,
     assignee_type, assignee_id, creator_type, creator_id,
-    parent_issue_id, position, start_date, due_date, number, project_id,
+    parent_issue_id, acceptance_criteria, position, start_date, due_date, number, project_id,
     origin_type, origin_id, stage
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
-    $16, $17, $18
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16,
+    $17, $18, $19
 ) RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage
 `
 
 type CreateIssueWithOriginParams struct {
-	WorkspaceID   pgtype.UUID `json:"workspace_id"`
-	Title         string      `json:"title"`
-	Description   pgtype.Text `json:"description"`
-	Status        string      `json:"status"`
-	Priority      string      `json:"priority"`
-	AssigneeType  pgtype.Text `json:"assignee_type"`
-	AssigneeID    pgtype.UUID `json:"assignee_id"`
-	CreatorType   string      `json:"creator_type"`
-	CreatorID     pgtype.UUID `json:"creator_id"`
-	ParentIssueID pgtype.UUID `json:"parent_issue_id"`
-	Position      float64     `json:"position"`
-	StartDate     pgtype.Date `json:"start_date"`
-	DueDate       pgtype.Date `json:"due_date"`
-	Number        int32       `json:"number"`
-	ProjectID     pgtype.UUID `json:"project_id"`
-	OriginType    pgtype.Text `json:"origin_type"`
-	OriginID      pgtype.UUID `json:"origin_id"`
-	Stage         pgtype.Int4 `json:"stage"`
+	WorkspaceID        pgtype.UUID `json:"workspace_id"`
+	Title              string      `json:"title"`
+	Description        pgtype.Text `json:"description"`
+	Status             string      `json:"status"`
+	Priority           string      `json:"priority"`
+	AssigneeType       pgtype.Text `json:"assignee_type"`
+	AssigneeID         pgtype.UUID `json:"assignee_id"`
+	CreatorType        string      `json:"creator_type"`
+	CreatorID          pgtype.UUID `json:"creator_id"`
+	ParentIssueID      pgtype.UUID `json:"parent_issue_id"`
+	AcceptanceCriteria []byte      `json:"acceptance_criteria"`
+	Position           float64     `json:"position"`
+	StartDate          pgtype.Date `json:"start_date"`
+	DueDate            pgtype.Date `json:"due_date"`
+	Number             int32       `json:"number"`
+	ProjectID          pgtype.UUID `json:"project_id"`
+	OriginType         pgtype.Text `json:"origin_type"`
+	OriginID           pgtype.UUID `json:"origin_id"`
+	Stage              pgtype.Int4 `json:"stage"`
 }
 
 func (q *Queries) CreateIssueWithOrigin(ctx context.Context, arg CreateIssueWithOriginParams) (Issue, error) {
@@ -296,6 +299,7 @@ func (q *Queries) CreateIssueWithOrigin(ctx context.Context, arg CreateIssueWith
 		arg.CreatorType,
 		arg.CreatorID,
 		arg.ParentIssueID,
+		arg.AcceptanceCriteria,
 		arg.Position,
 		arg.StartDate,
 		arg.DueDate,
@@ -1223,31 +1227,33 @@ UPDATE issue SET
     priority = COALESCE($5, priority),
     assignee_type = $6,
     assignee_id = $7,
-    position = COALESCE($8, position),
-    start_date = $9,
-    due_date = $10,
-    parent_issue_id = $11,
-    project_id = $12,
-    stage = $13,
+    acceptance_criteria = COALESCE($8::jsonb, acceptance_criteria),
+    position = COALESCE($9, position),
+    start_date = $10,
+    due_date = $11,
+    parent_issue_id = $12,
+    project_id = $13,
+    stage = $14,
     updated_at = now()
 WHERE id = $1
 RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage
 `
 
 type UpdateIssueParams struct {
-	ID            pgtype.UUID   `json:"id"`
-	Title         pgtype.Text   `json:"title"`
-	Description   pgtype.Text   `json:"description"`
-	Status        pgtype.Text   `json:"status"`
-	Priority      pgtype.Text   `json:"priority"`
-	AssigneeType  pgtype.Text   `json:"assignee_type"`
-	AssigneeID    pgtype.UUID   `json:"assignee_id"`
-	Position      pgtype.Float8 `json:"position"`
-	StartDate     pgtype.Date   `json:"start_date"`
-	DueDate       pgtype.Date   `json:"due_date"`
-	ParentIssueID pgtype.UUID   `json:"parent_issue_id"`
-	ProjectID     pgtype.UUID   `json:"project_id"`
-	Stage         pgtype.Int4   `json:"stage"`
+	ID                 pgtype.UUID   `json:"id"`
+	Title              pgtype.Text   `json:"title"`
+	Description        pgtype.Text   `json:"description"`
+	Status             pgtype.Text   `json:"status"`
+	Priority           pgtype.Text   `json:"priority"`
+	AssigneeType       pgtype.Text   `json:"assignee_type"`
+	AssigneeID         pgtype.UUID   `json:"assignee_id"`
+	AcceptanceCriteria []byte        `json:"acceptance_criteria"`
+	Position           pgtype.Float8 `json:"position"`
+	StartDate          pgtype.Date   `json:"start_date"`
+	DueDate            pgtype.Date   `json:"due_date"`
+	ParentIssueID      pgtype.UUID   `json:"parent_issue_id"`
+	ProjectID          pgtype.UUID   `json:"project_id"`
+	Stage              pgtype.Int4   `json:"stage"`
 }
 
 func (q *Queries) UpdateIssue(ctx context.Context, arg UpdateIssueParams) (Issue, error) {
@@ -1259,6 +1265,7 @@ func (q *Queries) UpdateIssue(ctx context.Context, arg UpdateIssueParams) (Issue
 		arg.Priority,
 		arg.AssigneeType,
 		arg.AssigneeID,
+		arg.AcceptanceCriteria,
 		arg.Position,
 		arg.StartDate,
 		arg.DueDate,

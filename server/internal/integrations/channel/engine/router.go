@@ -2,9 +2,12 @@ package engine
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
+	"regexp"
+	"strings"
 	"sync"
 	"time"
 
@@ -13,6 +16,8 @@ import (
 	"github.com/multica-ai/multica/server/internal/integrations/channel"
 	"github.com/multica-ai/multica/server/internal/service"
 )
+
+var closingLineRE = regexp.MustCompile(`(?im)^Closes when:\s*(.+)$`)
 
 // Router is the channel-agnostic inbound pipeline — the generalization of the
 // Feishu-only lark.Dispatcher (+ the Hub's handleEvent outbound seam). It is
@@ -453,20 +458,43 @@ func (r *Router) createIssue(ctx context.Context, inst ResolvedInstallation, ori
 	if cmd.Title == "" {
 		return service.IssueCreateResult{}, ErrEmptyIssueTitle
 	}
+	criteria := extractAcceptanceCriteriaJSON(cmd.Description)
 	params := service.IssueCreateParams{
-		WorkspaceID:  inst.WorkspaceID,
-		Title:        cmd.Title,
-		Description:  pgtype.Text{String: cmd.Description, Valid: cmd.Description != ""},
-		Status:       "todo",
-		Priority:     "none",
-		AssigneeType: pgtype.Text{String: "agent", Valid: true},
-		AssigneeID:   inst.AgentID,
-		CreatorType:  "member",
-		CreatorID:    creatorUserID,
-		OriginType:   pgtype.Text{String: originType, Valid: originType != ""},
-		OriginID:     sessionID,
+		WorkspaceID:        inst.WorkspaceID,
+		Title:              cmd.Title,
+		Description:        pgtype.Text{String: cmd.Description, Valid: cmd.Description != ""},
+		Status:             "todo",
+		Priority:           "none",
+		AssigneeType:       pgtype.Text{String: "agent", Valid: true},
+		AssigneeID:         inst.AgentID,
+		CreatorType:        "member",
+		CreatorID:          creatorUserID,
+		OriginType:         pgtype.Text{String: originType, Valid: originType != ""},
+		OriginID:           sessionID,
+		AcceptanceCriteria: criteria,
+		LabelIDs:           []pgtype.UUID{},
 	}
 	return r.issues.Create(ctx, params, service.IssueCreateOpts{})
+}
+
+func extractAcceptanceCriteriaJSON(description string) []byte {
+	lines := strings.Split(description, "\n")
+	criteria := make([]string, 0, len(lines))
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if !closingLineRE.MatchString(line) {
+			continue
+		}
+		criteria = append(criteria, line)
+	}
+	if len(criteria) == 0 {
+		return []byte("[]")
+	}
+	data, err := json.Marshal(criteria)
+	if err != nil {
+		return []byte("[]")
+	}
+	return data
 }
 
 // ErrEmptyIssueTitle is returned by createIssue when /issue has no title and

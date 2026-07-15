@@ -9,6 +9,7 @@ import { useWelcomeStore } from "@multica/core/onboarding";
 import { paths, useCurrentWorkspace } from "@multica/core/paths";
 import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
 import { issueKeys } from "@multica/core/issues/queries";
+import { extractAcceptanceCriteria } from "@multica/core/issues";
 import { workspaceKeys } from "@multica/core/workspace/queries";
 import type { Agent, CreateIssueRequest, Issue } from "@multica/core/types";
 import {
@@ -448,13 +449,19 @@ function RuntimeWelcome({
       const issues = await Promise.all(
         orderedIds.map((id) => {
           const card = HELPER_STARTER_PROMPTS[id];
+          const description = card.prompt[lang] + userContext;
+          const acceptanceCriteria = extractAcceptanceCriteria(description);
           return api.createIssue({
             title: card.title[lang],
-            description: card.prompt[lang] + userContext,
+            description,
             status: "todo",
             priority: "high",
             assignee_type: "agent",
             assignee_id: agent.id,
+            label_ids: [],
+            ...(acceptanceCriteria
+              ? { acceptance_criteria: acceptanceCriteria }
+              : {}),
           });
         }),
       );

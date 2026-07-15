@@ -30,6 +30,7 @@ import { DescriptionField } from "@/components/issue/description-field";
 import { MOBILE_PLACEHOLDER_COLOR } from "@/components/ui/input-tokens";
 import { useCreateIssue } from "@/data/mutations/issues";
 import { useNewIssueDraftStore } from "@/data/stores/new-issue-draft-store";
+import { extractAcceptanceCriteria } from "@multica/core/issues";
 import { useMentionInput } from "@/lib/use-mention-input";
 
 export default function NewIssueModal() {
@@ -63,17 +64,20 @@ export default function NewIssueModal() {
     const trimmedTitle = title.trim();
     if (trimmedTitle.length === 0) return;
     const finalDescription = description.serialize().trim();
+    const acceptanceCriteria = extractAcceptanceCriteria(finalDescription);
     try {
       await createIssue.mutateAsync({
         title: trimmedTitle,
         description: finalDescription || undefined,
         status,
         priority,
+        label_ids: [],
         ...(assignee
           ? { assignee_type: assignee.type, assignee_id: assignee.id }
           : {}),
         ...(dueDate ? { due_date: dueDate } : {}),
         ...(project ? { project_id: project.id } : {}),
+        ...(acceptanceCriteria ? { acceptance_criteria: acceptanceCriteria } : {}),
       });
       router.back();
     } catch (err) {

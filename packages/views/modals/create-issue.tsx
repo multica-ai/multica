@@ -43,12 +43,12 @@ import { useIssueTriggerPreview } from "../issues/hooks/use-issue-trigger-previe
 import { useActorName } from "@multica/core/workspace/hooks";
 import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { extractAcceptanceCriteria } from "@multica/core/issues";
 import { useIssueDraftStore } from "@multica/core/issues/stores/draft-store";
 import { useCreateModeStore } from "@multica/core/issues/stores/create-mode-store";
 import { useQuickCreateStore } from "@multica/core/issues/stores/quick-create-store";
 import { issueDetailOptions, childIssuesOptions } from "@multica/core/issues/queries";
 import { useCreateIssue, useUpdateIssue } from "@multica/core/issues/mutations";
-import { useAttachLabelToIssue } from "@multica/core/labels";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
 import {
   api,
@@ -311,7 +311,6 @@ export function ManualCreatePanel({
 
   const createIssueMutation = useCreateIssue();
   const updateIssueMutation = useUpdateIssue();
-  const attachLabelMutation = useAttachLabelToIssue();
   const resetForNextIssue = () => {
     setTitle("");
     setStatus("todo");
@@ -344,6 +343,7 @@ export function ManualCreatePanel({
     setSubmitting(true);
     try {
       const description = descEditorRef.current?.getMarkdown()?.trim() || undefined;
+      const acceptanceCriteria = extractAcceptanceCriteria(description);
       const activeAttachmentIds = draftAttachments
         .filter((a) => contentReferencesAttachment(description ?? "", a))
         .map((a) => a.id);
@@ -357,6 +357,8 @@ export function ManualCreatePanel({
         start_date: startDate || undefined,
         due_date: dueDate || undefined,
         attachment_ids: activeAttachmentIds.length > 0 ? activeAttachmentIds : undefined,
+        label_ids: labelIds,
+        ...(acceptanceCriteria ? { acceptance_criteria: acceptanceCriteria } : {}),
         parent_issue_id: parentIssueId,
         // Stage is only meaningful for a sub-issue (relative to its siblings).
         stage: parentIssueId && stage != null ? stage : undefined,
@@ -394,28 +396,6 @@ export function ManualCreatePanel({
                   total: childIssues.length,
                 }),
           );
-        }
-      }
-
-      // Attach the labels chosen in the dialog. Like the sub-issue links
-      // above, this is deferred to after create because the new issue's ID
-      // doesn't exist yet, and the create endpoint takes no labels. Partial
-      // failures don't roll back the committed issue.
-      if (labelIds.length > 0) {
-        const results = await Promise.allSettled(
-          labelIds.map((labelId) =>
-            attachLabelMutation.mutateAsync({ issueId: issue.id, labelId }),
-          ),
-        );
-        let labelsFailed = 0;
-        for (const result of results) {
-          if (result.status === "rejected") {
-            labelsFailed += 1;
-            console.error("[create-issue] label attach failed", result.reason);
-          }
-        }
-        if (labelsFailed > 0) {
-          toast.error(t(($) => $.create_issue.toast_link_labels_failed));
         }
       }
 

@@ -173,6 +173,103 @@ func (h *Handler) labelsByIssue(ctx context.Context, wsUUID pgtype.UUID, issueID
 	return out
 }
 
+func marshalAcceptanceCriteria(criteria []string) []byte {
+	if len(criteria) == 0 {
+		return []byte("[]")
+	}
+	data, err := json.Marshal(criteria)
+	if err != nil {
+		return []byte("[]")
+	}
+	return data
+}
+
+var errIssueLabelNotFound = errors.New("issue label not found")
+
+func (h *Handler) syncIssueLabels(ctx context.Context, issue db.Issue, desiredLabelIDs []pgtype.UUID) ([]db.IssueLabel, bool, error) {
+	current, err := h.Queries.ListLabelsByIssue(ctx, db.ListLabelsByIssueParams{
+		IssueID:     issue.ID,
+		WorkspaceID: issue.WorkspaceID,
+	})
+	if err != nil {
+		return nil, false, fmt.Errorf("list labels for issue: %w", err)
+	}
+
+	desiredByID := make(map[string]pgtype.UUID, len(desiredLabelIDs))
+	for _, labelID := range desiredLabelIDs {
+		if !labelID.Valid {
+			continue
+		}
+		desiredByID[uuidToString(labelID)] = labelID
+	}
+
+	currentByID := make(map[string]struct{}, len(current))
+	for _, label := range current {
+		currentByID[uuidToString(label.ID)] = struct{}{}
+	}
+
+	validatedDesired := make(map[string]pgtype.UUID, len(desiredByID))
+	for key, labelID := range desiredByID {
+		if _, alreadyAttached := currentByID[key]; alreadyAttached {
+			continue
+		}
+		label, err := h.Queries.GetLabel(ctx, db.GetLabelParams{
+			ID:          labelID,
+			WorkspaceID: issue.WorkspaceID,
+		})
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return nil, false, errIssueLabelNotFound
+			}
+			return nil, false, fmt.Errorf("get label for issue: %w", err)
+		}
+		if label.ResourceType != "issue" {
+			return nil, false, errIssueLabelNotFound
+		}
+		validatedDesired[key] = labelID
+	}
+
+	changed := false
+	for _, labelID := range validatedDesired {
+		if err := h.Queries.AttachLabelToIssue(ctx, db.AttachLabelToIssueParams{
+			IssueID:     issue.ID,
+			LabelID:     labelID,
+			WorkspaceID: issue.WorkspaceID,
+		}); err != nil {
+			return nil, false, fmt.Errorf("attach label to issue: %w", err)
+		}
+		changed = true
+	}
+
+	for _, label := range current {
+		key := uuidToString(label.ID)
+		if _, keep := desiredByID[key]; keep {
+			continue
+		}
+		if err := h.Queries.DetachLabelFromIssue(ctx, db.DetachLabelFromIssueParams{
+			IssueID:     issue.ID,
+			LabelID:     label.ID,
+			WorkspaceID: issue.WorkspaceID,
+		}); err != nil {
+			return nil, false, fmt.Errorf("detach label from issue: %w", err)
+		}
+		changed = true
+	}
+
+	if !changed {
+		return current, false, nil
+	}
+
+	updated, err := h.Queries.ListLabelsByIssue(ctx, db.ListLabelsByIssueParams{
+		IssueID:     issue.ID,
+		WorkspaceID: issue.WorkspaceID,
+	})
+	if err != nil {
+		return nil, false, fmt.Errorf("refresh labels for issue: %w", err)
+	}
+	return updated, true, nil
+}
+
 func openIssueRowToResponse(i db.ListOpenIssuesRow, issuePrefix string) IssueResponse {
 	identifier := issuePrefix + "-" + strconv.Itoa(int(i.Number))
 	return IssueResponse{
@@ -2093,18 +2190,20 @@ func readRuntimeCLIVersion(metadata []byte) string {
 }
 
 type CreateIssueRequest struct {
-	Title         string   `json:"title"`
-	Description   *string  `json:"description"`
-	Status        string   `json:"status"`
-	Priority      string   `json:"priority"`
-	AssigneeType  *string  `json:"assignee_type"`
-	AssigneeID    *string  `json:"assignee_id"`
-	ParentIssueID *string  `json:"parent_issue_id"`
-	ProjectID     *string  `json:"project_id"`
-	Stage         *int32   `json:"stage,omitempty"`
-	StartDate     *string  `json:"start_date"`
-	DueDate       *string  `json:"due_date"`
-	AttachmentIDs []string `json:"attachment_ids,omitempty"`
+	Title              string   `json:"title"`
+	Description        *string  `json:"description"`
+	Status             string   `json:"status"`
+	Priority           string   `json:"priority"`
+	AssigneeType       *string  `json:"assignee_type"`
+	AssigneeID         *string  `json:"assignee_id"`
+	ParentIssueID      *string  `json:"parent_issue_id"`
+	ProjectID          *string  `json:"project_id"`
+	LabelIDs           []string `json:"label_ids"`
+	AcceptanceCriteria []string `json:"acceptance_criteria"`
+	Stage              *int32   `json:"stage,omitempty"`
+	StartDate          *string  `json:"start_date"`
+	DueDate            *string  `json:"due_date"`
+	AttachmentIDs      []string `json:"attachment_ids,omitempty"`
 	// OriginType / OriginID stamp the new issue with its provenance so
 	// platform-internal flows can deterministically locate it later. Only
 	// trusted callers should set these — currently the daemon CLI passes
@@ -2203,6 +2302,10 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 	// without duplicating the lookup here.
 
 	attachmentIDs, ok := parseUUIDSliceOrBadRequest(w, req.AttachmentIDs, "attachment_ids")
+	if !ok {
+		return
+	}
+	labelIDs, ok := parseUUIDSliceOrBadRequest(w, req.LabelIDs, "label_ids")
 	if !ok {
 		return
 	}
@@ -2308,24 +2411,26 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 	}
 
 	res, err := h.IssueService.Create(r.Context(), service.IssueCreateParams{
-		WorkspaceID:    wsUUID,
-		Title:          req.Title,
-		Description:    ptrToText(req.Description),
-		Status:         status,
-		Priority:       priority,
-		AssigneeType:   assigneeType,
-		AssigneeID:     assigneeID,
-		CreatorType:    creatorType,
-		CreatorID:      parseUUID(actualCreatorID),
-		ParentIssueID:  parentIssueID,
-		ProjectID:      projectID,
-		StartDate:      startDate,
-		DueDate:        dueDate,
-		OriginType:     originType,
-		OriginID:       originID,
-		Stage:          ptrToInt4(req.Stage),
-		AttachmentIDs:  attachmentIDs,
-		AllowDuplicate: req.AllowDuplicate,
+		WorkspaceID:        wsUUID,
+		Title:              req.Title,
+		Description:        ptrToText(req.Description),
+		Status:             status,
+		Priority:           priority,
+		AssigneeType:       assigneeType,
+		AssigneeID:         assigneeID,
+		CreatorType:        creatorType,
+		CreatorID:          parseUUID(actualCreatorID),
+		ParentIssueID:      parentIssueID,
+		ProjectID:          projectID,
+		StartDate:          startDate,
+		DueDate:            dueDate,
+		OriginType:         originType,
+		OriginID:           originID,
+		Stage:              ptrToInt4(req.Stage),
+		AttachmentIDs:      attachmentIDs,
+		LabelIDs:           labelIDs,
+		AcceptanceCriteria: marshalAcceptanceCriteria(req.AcceptanceCriteria),
+		AllowDuplicate:     req.AllowDuplicate,
 	}, service.IssueCreateOpts{
 		ActorID:          actualCreatorID,
 		AnalyticsAgentID: analyticsAgentID,
@@ -2333,6 +2438,9 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 		BroadcastPayload: func(issue db.Issue, atts []db.Attachment) map[string]any {
 			payload := issueToResponse(issue, prefix)
 			payload.Attachments = buildAttachmentResponses(atts)
+			if labels := h.labelsByIssue(r.Context(), issue.WorkspaceID, []pgtype.UUID{issue.ID})[uuidToString(issue.ID)]; len(labels) > 0 {
+				payload.Labels = &labels
+			}
 			return map[string]any{"issue": payload}
 		},
 	})
@@ -2366,22 +2474,27 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 
 	resp := issueToResponse(issue, prefix)
 	resp.Attachments = buildAttachmentResponses(res.Attachments)
+	if labels := h.labelsByIssue(r.Context(), issue.WorkspaceID, []pgtype.UUID{issue.ID})[uuidToString(issue.ID)]; len(labels) > 0 {
+		resp.Labels = &labels
+	}
 	writeJSON(w, http.StatusCreated, resp)
 }
 
 type UpdateIssueRequest struct {
-	Title         *string  `json:"title"`
-	Description   *string  `json:"description"`
-	Status        *string  `json:"status"`
-	Priority      *string  `json:"priority"`
-	AssigneeType  *string  `json:"assignee_type"`
-	AssigneeID    *string  `json:"assignee_id"`
-	Position      *float64 `json:"position"`
-	StartDate     *string  `json:"start_date"`
-	DueDate       *string  `json:"due_date"`
-	ParentIssueID *string  `json:"parent_issue_id"`
-	ProjectID     *string  `json:"project_id"`
-	Stage         *int32   `json:"stage"`
+	Title              *string  `json:"title"`
+	Description        *string  `json:"description"`
+	Status             *string  `json:"status"`
+	Priority           *string  `json:"priority"`
+	AssigneeType       *string  `json:"assignee_type"`
+	AssigneeID         *string  `json:"assignee_id"`
+	Position           *float64 `json:"position"`
+	StartDate          *string  `json:"start_date"`
+	DueDate            *string  `json:"due_date"`
+	ParentIssueID      *string  `json:"parent_issue_id"`
+	ProjectID          *string  `json:"project_id"`
+	LabelIDs           []string `json:"label_ids"`
+	AcceptanceCriteria []string `json:"acceptance_criteria"`
+	Stage              *int32   `json:"stage"`
 	// AttachmentIDs lets the description editor bind newly uploaded files to
 	// this issue so they surface in `GET /api/issues/:id/attachments` and the
 	// editor's preview Eye keeps working past a refresh. Existing bindings
@@ -2564,6 +2677,19 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 			params.Stage = pgtype.Int4{Valid: false} // explicit null = unstage
 		}
 	}
+	if _, ok := rawFields["acceptance_criteria"]; ok {
+		params.AcceptanceCriteria = marshalAcceptanceCriteria(req.AcceptanceCriteria)
+	}
+
+	labelIDsTouched := false
+	var labelIDs []pgtype.UUID
+	if _, ok := rawFields["label_ids"]; ok {
+		labelIDsTouched = true
+		labelIDs, ok = parseUUIDSliceOrBadRequest(w, req.LabelIDs, "label_ids")
+		if !ok {
+			return
+		}
+	}
 
 	// Validate the resulting (assignee_type, assignee_id) pair when the caller
 	// touches either field. Existing data on the issue is left alone if the
@@ -2589,12 +2715,49 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	var syncedLabelResponses *[]LabelResponse
+	syncedLabelsChanged := false
+	if labelIDsTouched {
+		syncedLabels, changed, err := h.syncIssueLabels(r.Context(), issue, labelIDs)
+		if err != nil {
+			if errors.Is(err, errIssueLabelNotFound) {
+				writeError(w, http.StatusNotFound, "issue label not found")
+				return
+			}
+			slog.Warn("sync issue labels failed", append(logger.RequestAttrs(r), "error", err, "issue_id", id, "workspace_id", workspaceID)...)
+			writeError(w, http.StatusInternalServerError, "failed to update issue labels")
+			return
+		}
+		syncedLabelsChanged = changed
+		responses := make([]LabelResponse, len(syncedLabels))
+		for i, label := range syncedLabels {
+			responses[i] = LabelResponse{
+				ID:           uuidToString(label.ID),
+				WorkspaceID:  uuidToString(label.WorkspaceID),
+				ResourceType: label.ResourceType,
+				Name:         label.Name,
+				Description:  label.Description,
+				Color:        label.Color,
+				CreatedAt:    timestampToString(label.CreatedAt),
+				UpdatedAt:    timestampToString(label.UpdatedAt),
+			}
+		}
+		syncedLabelResponses = &responses
+	}
+
 	if len(attachmentIDs) > 0 {
 		h.linkAttachmentsByIssueIDs(r.Context(), issue.ID, issue.WorkspaceID, attachmentIDs)
 	}
 
 	prefix := h.getIssuePrefix(r.Context(), issue.WorkspaceID)
 	resp := issueToResponse(issue, prefix)
+	if syncedLabelResponses != nil {
+		resp.Labels = syncedLabelResponses
+	} else {
+		if labels := h.labelsByIssue(r.Context(), issue.WorkspaceID, []pgtype.UUID{issue.ID})[uuidToString(issue.ID)]; len(labels) > 0 {
+			resp.Labels = &labels
+		}
+	}
 	slog.Info("issue updated", append(logger.RequestAttrs(r), "issue_id", id, "workspace_id", workspaceID)...)
 
 	assigneeChanged := (req.AssigneeType != nil || req.AssigneeID != nil) &&
@@ -2639,6 +2802,12 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		"creator_type":        prevIssue.CreatorType,
 		"creator_id":          uuidToString(prevIssue.CreatorID),
 	})
+	if syncedLabelsChanged && syncedLabelResponses != nil {
+		h.publish(protocol.EventIssueLabelsChanged, workspaceID, actorType, actorID, map[string]any{
+			"issue_id": uuidToString(issue.ID),
+			"labels":   *syncedLabelResponses,
+		})
+	}
 
 	// Reconcile the task queue. Whether this write starts an agent run — and
 	// for whom (agent assignee or squad leader) — is decided by the single

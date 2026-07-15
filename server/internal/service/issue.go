@@ -50,23 +50,25 @@ func NewIssueService(q *db.Queries, tx TxStarter, bus *events.Bus, ac analytics.
 // to IssueService.Create. The handler owns the parsing step that turns its
 // request payload into this struct; the service stays transport-agnostic.
 type IssueCreateParams struct {
-	WorkspaceID    pgtype.UUID
-	Title          string
-	Description    pgtype.Text
-	Status         string
-	Priority       string
-	AssigneeType   pgtype.Text
-	AssigneeID     pgtype.UUID
-	CreatorType    string // "agent" or "member"
-	CreatorID      pgtype.UUID
-	ParentIssueID  pgtype.UUID
-	ProjectID      pgtype.UUID
-	StartDate      pgtype.Date
-	DueDate        pgtype.Date
-	OriginType     pgtype.Text
-	OriginID       pgtype.UUID
-	AttachmentIDs  []pgtype.UUID
-	AllowDuplicate bool
+	WorkspaceID        pgtype.UUID
+	Title              string
+	Description        pgtype.Text
+	Status             string
+	Priority           string
+	AssigneeType       pgtype.Text
+	AssigneeID         pgtype.UUID
+	CreatorType        string // "agent" or "member"
+	CreatorID          pgtype.UUID
+	ParentIssueID      pgtype.UUID
+	AcceptanceCriteria []byte
+	ProjectID          pgtype.UUID
+	StartDate          pgtype.Date
+	DueDate            pgtype.Date
+	OriginType         pgtype.Text
+	OriginID           pgtype.UUID
+	AttachmentIDs      []pgtype.UUID
+	LabelIDs           []pgtype.UUID
+	AllowDuplicate     bool
 	// Stage groups this issue into an ordered barrier group under its parent
 	// (NULL = unstaged). See issue_child_done.go for the staged-barrier wake.
 	Stage pgtype.Int4
@@ -225,47 +227,62 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 	var issue db.Issue
 	if p.OriginType.Valid {
 		issue, err = qtx.CreateIssueWithOrigin(ctx, db.CreateIssueWithOriginParams{
-			WorkspaceID:   p.WorkspaceID,
-			Title:         p.Title,
-			Description:   p.Description,
-			Status:        p.Status,
-			Priority:      p.Priority,
-			AssigneeType:  p.AssigneeType,
-			AssigneeID:    p.AssigneeID,
-			CreatorType:   p.CreatorType,
-			CreatorID:     p.CreatorID,
-			ParentIssueID: p.ParentIssueID,
-			Position:      newPosition,
-			StartDate:     p.StartDate,
-			DueDate:       p.DueDate,
-			Number:        issueNumber,
-			ProjectID:     projectID,
-			OriginType:    p.OriginType,
-			OriginID:      p.OriginID,
-			Stage:         p.Stage,
+			WorkspaceID:        p.WorkspaceID,
+			Title:              p.Title,
+			Description:        p.Description,
+			Status:             p.Status,
+			Priority:           p.Priority,
+			AssigneeType:       p.AssigneeType,
+			AssigneeID:         p.AssigneeID,
+			CreatorType:        p.CreatorType,
+			CreatorID:          p.CreatorID,
+			ParentIssueID:      p.ParentIssueID,
+			AcceptanceCriteria: p.AcceptanceCriteria,
+			Position:           newPosition,
+			StartDate:          p.StartDate,
+			DueDate:            p.DueDate,
+			Number:             issueNumber,
+			ProjectID:          projectID,
+			OriginType:         p.OriginType,
+			OriginID:           p.OriginID,
+			Stage:              p.Stage,
 		})
 	} else {
 		issue, err = qtx.CreateIssue(ctx, db.CreateIssueParams{
-			WorkspaceID:   p.WorkspaceID,
-			Title:         p.Title,
-			Description:   p.Description,
-			Status:        p.Status,
-			Priority:      p.Priority,
-			AssigneeType:  p.AssigneeType,
-			AssigneeID:    p.AssigneeID,
-			CreatorType:   p.CreatorType,
-			CreatorID:     p.CreatorID,
-			ParentIssueID: p.ParentIssueID,
-			Position:      newPosition,
-			StartDate:     p.StartDate,
-			DueDate:       p.DueDate,
-			Number:        issueNumber,
-			ProjectID:     projectID,
-			Stage:         p.Stage,
+			WorkspaceID:        p.WorkspaceID,
+			Title:              p.Title,
+			Description:        p.Description,
+			Status:             p.Status,
+			Priority:           p.Priority,
+			AssigneeType:       p.AssigneeType,
+			AssigneeID:         p.AssigneeID,
+			CreatorType:        p.CreatorType,
+			CreatorID:          p.CreatorID,
+			ParentIssueID:      p.ParentIssueID,
+			AcceptanceCriteria: p.AcceptanceCriteria,
+			Position:           newPosition,
+			StartDate:          p.StartDate,
+			DueDate:            p.DueDate,
+			Number:             issueNumber,
+			ProjectID:          projectID,
+			Stage:              p.Stage,
 		})
 	}
 	if err != nil {
 		return IssueCreateResult{}, fmt.Errorf("create issue: %w", err)
+	}
+
+	for _, labelID := range p.LabelIDs {
+		if !labelID.Valid {
+			continue
+		}
+		if err := qtx.AttachLabelToIssue(ctx, db.AttachLabelToIssueParams{
+			IssueID:     issue.ID,
+			LabelID:     labelID,
+			WorkspaceID: p.WorkspaceID,
+		}); err != nil {
+			return IssueCreateResult{}, fmt.Errorf("attach label: %w", err)
+		}
 	}
 
 	if err := tx.Commit(ctx); err != nil {

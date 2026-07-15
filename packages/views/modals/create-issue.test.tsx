@@ -449,6 +449,7 @@ describe("CreateIssueModal", () => {
         start_date: undefined,
         due_date: undefined,
         attachment_ids: undefined,
+        label_ids: [],
         parent_issue_id: undefined,
         project_id: undefined,
       });
@@ -496,6 +497,7 @@ describe("CreateIssueModal", () => {
         start_date: undefined,
         due_date: undefined,
         attachment_ids: undefined,
+        label_ids: [],
         parent_issue_id: undefined,
         project_id: undefined,
       });
@@ -516,6 +518,32 @@ describe("CreateIssueModal", () => {
       labelIds: [],
       attachments: [],
     });
+  });
+
+  it("forwards selected labels and extracted exit criteria through create payload", async () => {
+    const user = userEvent.setup();
+    const onClose = vi.fn();
+    mockDraftStore.draft.labelIds = ["label-1", "label-2"];
+
+    renderModal(<CreateIssueModal onClose={onClose} />);
+
+    await user.type(screen.getByPlaceholderText("Issue title"), "Carry intake fields");
+    await user.type(
+      screen.getByPlaceholderText("Add description..."),
+      "Build the compatibility slice.\nCloses when: the intake fields reach create callers.",
+    );
+    await user.click(screen.getByRole("button", { name: "Create Issue" }));
+
+    await waitFor(() => {
+        expect(mockCreateIssue).toHaveBeenCalledWith(
+          expect.objectContaining({
+            label_ids: ["label-1", "label-2"],
+            acceptance_criteria: [
+              "Closes when: the intake fields reach create callers.",
+            ],
+          }),
+        );
+      });
   });
 
   it("persists manual-mode uploads in the issue draft", async () => {

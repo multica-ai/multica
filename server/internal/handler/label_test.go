@@ -198,6 +198,84 @@ func TestIssueLabelAttachDetach(t *testing.T) {
 	}
 }
 
+func TestCreateIssueCarriesLabelIdsAndAcceptanceCriteria(t *testing.T) {
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/labels", map[string]any{
+		"name":  "intake-slice-" + uuid.NewString()[:8],
+		"color": "#3b82f6",
+	})
+	testHandler.CreateLabel(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateLabel: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var label LabelResponse
+	if err := json.NewDecoder(w.Body).Decode(&label); err != nil {
+		t.Fatalf("decode label: %v", err)
+	}
+	t.Cleanup(func() {
+		w := httptest.NewRecorder()
+		req := newRequest("DELETE", "/api/labels/"+label.ID, nil)
+		req = withURLParam(req, "id", label.ID)
+		testHandler.DeleteLabel(w, req)
+	})
+
+	w = httptest.NewRecorder()
+	req = newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title":               "Issue carries intake fields",
+		"status":              "todo",
+		"priority":            "medium",
+		"label_ids":           []string{label.ID},
+		"acceptance_criteria": []string{"the intake fields are stored"},
+	})
+	testHandler.CreateIssue(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateIssue: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var created IssueResponse
+	if err := json.NewDecoder(w.Body).Decode(&created); err != nil {
+		t.Fatalf("decode issue: %v", err)
+	}
+	if created.Labels == nil || len(*created.Labels) != 1 || (*created.Labels)[0].ID != label.ID {
+		t.Fatalf("expected created issue to return the attached label, got %+v", created.Labels)
+	}
+
+	issue, err := testHandler.Queries.GetIssue(context.Background(), parseUUID(created.ID))
+	if err != nil {
+		t.Fatalf("GetIssue: %v", err)
+	}
+	var criteria []string
+	if err := json.Unmarshal(issue.AcceptanceCriteria, &criteria); err != nil {
+		t.Fatalf("unmarshal acceptance_criteria: %v", err)
+	}
+	if len(criteria) != 1 || criteria[0] != "the intake fields are stored" {
+		t.Fatalf("unexpected acceptance_criteria: %#v", criteria)
+	}
+
+	w = httptest.NewRecorder()
+	req = newRequest("GET", "/api/issues/"+created.ID+"/labels", nil)
+	req = withURLParam(req, "id", created.ID)
+	testHandler.ListLabelsForIssue(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("ListLabelsForIssue: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var issueLabels struct {
+		Labels []LabelResponse `json:"labels"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&issueLabels); err != nil {
+		t.Fatalf("decode issue labels: %v", err)
+	}
+	if len(issueLabels.Labels) != 1 || issueLabels.Labels[0].ID != label.ID {
+		t.Fatalf("unexpected issue labels: %+v", issueLabels.Labels)
+	}
+
+	t.Cleanup(func() {
+		w := httptest.NewRecorder()
+		req := newRequest("DELETE", "/api/issues/"+created.ID, nil)
+		req = withURLParam(req, "id", created.ID)
+		testHandler.DeleteIssue(w, req)
+	})
+}
+
 func TestIssueLabelRejectsNonIssueScope(t *testing.T) {
 	w := httptest.NewRecorder()
 	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{

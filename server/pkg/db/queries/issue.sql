@@ -73,10 +73,10 @@ WHERE id = $1 AND workspace_id = $2;
 INSERT INTO issue (
     workspace_id, title, description, status, priority,
     assignee_type, assignee_id, creator_type, creator_id,
-    parent_issue_id, position, start_date, due_date, number, project_id,
+    parent_issue_id, acceptance_criteria, position, start_date, due_date, number, project_id,
     stage
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16,
     sqlc.narg('stage')
 ) RETURNING *;
 
@@ -92,6 +92,7 @@ UPDATE issue SET
     priority = COALESCE(sqlc.narg('priority'), priority),
     assignee_type = sqlc.narg('assignee_type'),
     assignee_id = sqlc.narg('assignee_id'),
+    acceptance_criteria = COALESCE(sqlc.narg('acceptance_criteria')::jsonb, acceptance_criteria),
     position = COALESCE(sqlc.narg('position'), position),
     start_date = sqlc.narg('start_date'),
     due_date = sqlc.narg('due_date'),
@@ -114,10 +115,10 @@ RETURNING *;
 INSERT INTO issue (
     workspace_id, title, description, status, priority,
     assignee_type, assignee_id, creator_type, creator_id,
-    parent_issue_id, position, start_date, due_date, number, project_id,
+    parent_issue_id, acceptance_criteria, position, start_date, due_date, number, project_id,
     origin_type, origin_id, stage
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16,
     sqlc.narg('origin_type'), sqlc.narg('origin_id'), sqlc.narg('stage')
 ) RETURNING *;
 
