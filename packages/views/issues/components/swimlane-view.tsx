@@ -55,12 +55,8 @@ import { ProjectIcon } from "../../projects/components/project-icon";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { VirtuosoSeed } from "../../common/virtuoso-seed";
 
-// A swimlane row (header + one row of card cells) is ~300px+ tall — a
-// viewport fits ~3. The generic VIRTUOSO_SEED_COUNT (30, sized for 36px list
-// rows) made every surface remount synchronously mount up to 30 full lanes
-// (each lane = statuses x cells x cards); 6 covers the viewport with margin.
-const SWIMLANE_LANE_SEED_COUNT = 6;
 import { DeferredPopup } from "../../common/deferred-popup";
+import { useRestoredScrollOffset, useRestoredScrollRef } from "../../platform";
 import { DeferredTooltip } from "../../common/deferred-tooltip";
 import type { ChildProgress } from "./list-row";
 import { useT } from "../../i18n";
@@ -69,6 +65,12 @@ import type { IssueCreateDefaults } from "../surface/types";
 
 const COLUMN_WIDTH = 280;
 const COLUMN_GAP = 16;
+
+// A swimlane row (header + one row of card cells) is ~300px+ tall — a
+// viewport fits ~3. The generic VIRTUOSO_SEED_COUNT (30, sized for 36px list
+// rows) made every surface remount synchronously mount up to 30 full lanes
+// (each lane = statuses x cells x cards); 6 covers the viewport with margin.
+const SWIMLANE_LANE_SEED_COUNT = 6;
 
 // Hoisted out of SwimLaneView so its reference is stable across renders —
 // useQueries' combine option uses it through replaceEqualDeep, but keeping
@@ -822,6 +824,18 @@ function SwimLaneViewImpl({
   const [activeIssue, setActiveIssue] = useState<Issue | null>(null);
   // The outer scroll box is the customScrollParent for the lane Virtuoso.
   const [scrollEl, setScrollEl] = useState<HTMLDivElement | null>(null);
+  // Pull-based scroll restoration (MUL-4741): same wiring as board/list/
+  // issue-detail — ref-attach assigns the saved offset pre-paint, and the
+  // lane Virtuoso is born at it via initialScrollTop.
+  const restoredScrollTop = useRestoredScrollOffset("swimlane");
+  const restoreScrollRef = useRestoredScrollRef("swimlane");
+  const attachScroller = useCallback(
+    (el: HTMLDivElement | null) => {
+      setScrollEl(el);
+      restoreScrollRef(el);
+    },
+    [restoreScrollRef],
+  );
   const isDraggingRef = useRef(false);
   // Settle lock: held from drop until the move mutation settles, so a cache
   // change that lands mid-flight (e.g. a membership refetch) does not rebuild
@@ -1203,7 +1217,7 @@ function SwimLaneViewImpl({
       onDragOver={handleDragOver}
       onDragEnd={handleDragEnd}
     >
-      <div ref={setScrollEl} className="flex flex-1 min-h-0 gap-4 overflow-auto p-4">
+      <div ref={attachScroller} data-tab-scroll-root="swimlane" className="flex flex-1 min-h-0 gap-4 overflow-auto p-4">
         <div className="flex shrink-0 flex-col" style={{ width: `${trackWidth}px` }}>
         {/* Sticky status header row — visually matches the top of a BoardColumn */}
         <div className="sticky top-0 z-10 mb-2 bg-background/95 pb-2 backdrop-blur supports-[backdrop-filter]:bg-background/75">
@@ -1283,6 +1297,7 @@ function SwimLaneViewImpl({
               customScrollParent={scrollEl}
               data={orderedLanes}
               computeItemKey={computeLaneKey}
+              initialScrollTop={restoredScrollTop}
               initialItemCount={Math.min(orderedLanes.length, SWIMLANE_LANE_SEED_COUNT)}
               increaseViewportBy={{ top: 600, bottom: 600 }}
               components={laneComponents}

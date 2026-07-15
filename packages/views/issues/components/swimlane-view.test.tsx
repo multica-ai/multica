@@ -3,6 +3,7 @@ import { render, screen, fireEvent, act, waitFor } from "@testing-library/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { SwimLaneView } from "./swimlane-view";
 import { IssueContextMenuProvider } from "../actions";
+import { ScrollRestorationProvider } from "../../platform";
 import type { Issue } from "@multica/core/types";
 import { I18nProvider } from "@multica/core/i18n/react";
 import enCommon from "../../locales/en/common.json";
@@ -1807,5 +1808,38 @@ describe("SwimLaneView", () => {
     // Give the merge effect a chance to run, then assert the sub-issue stays hidden.
     await act(async () => {});
     expect(screen.queryByText("Batch Sub-issue")).toBeNull();
+  });
+});
+
+describe("SwimLaneView tab-session scroll restoration (MUL-4741)", () => {
+  it("registers the outer scroller for memento capture and restores the saved offset at attach", () => {
+    const adapter = {
+      get: (key: string) =>
+        key === "swimlane" ? { top: 240, height: 2000 } : undefined,
+    };
+    const qc = new QueryClient({
+      defaultOptions: { queries: { retry: false, gcTime: 0 } },
+    });
+    const { container } = render(
+      <QueryClientProvider client={qc}>
+        <I18nProvider resources={TEST_RESOURCES} locale="en">
+          <IssueContextMenuProvider>
+            <ScrollRestorationProvider adapter={adapter}>
+              <SwimLaneView issues={mockIssues} onMoveIssue={vi.fn()} />
+            </ScrollRestorationProvider>
+          </IssueContextMenuProvider>
+        </I18nProvider>
+      </QueryClientProvider>,
+    );
+
+    const scroller = container.querySelector<HTMLElement>(
+      '[data-tab-scroll-root="swimlane"]',
+    );
+    // Capture side: the coordinator scans [data-tab-scroll-root] — without
+    // the marker, leaving the tab never saves the swimlane offset.
+    expect(scroller).not.toBeNull();
+    // Restore side: the ref-attach assignment applies the saved offset
+    // before first paint (jsdom has no layout, so no clamping applies).
+    expect(scroller!.scrollTop).toBe(240);
   });
 });
