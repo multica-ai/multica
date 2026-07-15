@@ -163,18 +163,24 @@ export function useIssueSurfaceController({
   // (archive/delete): filters keyed by a non-active definition are stripped
   // before they reach the predicates, and a sort on a non-active definition
   // degrades to manual order — matching what the header already shows.
-  const { data: workspaceProperties = [] } = useQuery(propertyListOptions(wsId));
+  const { data: workspaceProperties = [], isSuccess: catalogSettled } = useQuery(propertyListOptions(wsId));
   const activePropertyIds = useMemo(
     () => new Set(workspaceProperties.map((p) => p.id)),
     [workspaceProperties],
   );
   const effectivePropertyFilters = useMemo(() => {
+    // While the catalog is still loading (or errored), persisted filters are
+    // passed through UNCHANGED: treating a cold catalog as confirmed-empty
+    // would silently drop the user's filters on first paint (clean-room
+    // review F6). Old servers 404 into a SETTLED empty catalog, so the
+    // stripping below still protects that path.
+    if (!catalogSettled) return propertyFilters;
     const entries = Object.entries(propertyFilters).filter(
       ([propertyId, selected]) => selected.length > 0 && activePropertyIds.has(propertyId),
     );
     if (entries.length === Object.keys(propertyFilters).length) return propertyFilters;
     return Object.fromEntries(entries);
-  }, [activePropertyIds, propertyFilters]);
+  }, [activePropertyIds, catalogSettled, propertyFilters]);
 
   // Custom-property sorts and filters are served by the backend: the sort
   // param carries `property:<id>` (typed ORDER BY expression server-side)
@@ -183,7 +189,9 @@ export function useIssueSurfaceController({
   // non-active definition degrades to position order.
   const rawPropertySortId = propertyIdFromViewKey(sortBy);
   const propertySortId =
-    rawPropertySortId && activePropertyIds.has(rawPropertySortId) ? rawPropertySortId : null;
+    rawPropertySortId && (!catalogSettled || activePropertyIds.has(rawPropertySortId))
+      ? rawPropertySortId
+      : null;
   const sort = useMemo<IssueSortParam>(() => {
     const sortBy_: IssueSortParam["sort_by"] = propertySortId
       ? `property:${propertySortId}`

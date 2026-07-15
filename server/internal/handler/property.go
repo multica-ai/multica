@@ -47,6 +47,10 @@ const (
 
 var validPropertyTypes = []string{"text", "number", "select", "multi_select", "date", "checkbox", "url"}
 
+// errClientRejected marks lock-closure failures already translated to an
+// HTTP status by the caller-side fail() capture.
+var errClientRejected = errors.New("client rejected")
+
 // reservedPropertyNames blocks definitions that would collide with built-in
 // issue fields ("system properties"). Comparison happens on the normalized
 // form: lowercased, spaces collapsed to underscores — so "Due Date", "due
@@ -505,24 +509,30 @@ func (h *Handler) CreateProperty(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	active, err := h.Queries.CountActiveIssueProperties(r.Context(), wsUUID)
-	if err != nil {
-		slog.Warn("CountActiveIssueProperties failed", append(logger.RequestAttrs(r), "error", err)...)
-		writeError(w, http.StatusInternalServerError, "failed to create property")
-		return
-	}
-	if active >= maxActivePropertiesPerWorkspace {
-		writeError(w, http.StatusBadRequest, fmt.Sprintf("a workspace cannot have more than %d active properties; archive unused ones first", maxActivePropertiesPerWorkspace))
-		return
-	}
-
-	property, err := h.Queries.CreateIssueProperty(r.Context(), db.CreateIssuePropertyParams{
-		WorkspaceID: wsUUID,
-		Name:        name,
-		Type:        req.Type,
-		Description: sanitizeNullBytes(strings.TrimSpace(req.Description)),
-		Config:      configJSON,
+	var property db.IssueProperty
+	var capErr error
+	err = h.withPropertyLock(r, []string{"props:" + workspaceID}, func(q *db.Queries) error {
+		active, err := q.CountActiveIssueProperties(r.Context(), wsUUID)
+		if err != nil {
+			return err
+		}
+		if active >= maxActivePropertiesPerWorkspace {
+			capErr = fmt.Errorf("a workspace cannot have more than %d active properties; archive unused ones first", maxActivePropertiesPerWorkspace)
+			return capErr
+		}
+		property, err = q.CreateIssueProperty(r.Context(), db.CreateIssuePropertyParams{
+			WorkspaceID: wsUUID,
+			Name:        name,
+			Type:        req.Type,
+			Description: sanitizeNullBytes(strings.TrimSpace(req.Description)),
+			Config:      configJSON,
+		})
+		return err
 	})
+	if capErr != nil {
+		writeError(w, http.StatusBadRequest, capErr.Error())
+		return
+	}
 	if err != nil {
 		if isUniqueViolation(err) {
 			writeError(w, http.StatusConflict, "a property with that name already exists")
@@ -556,93 +566,95 @@ func (h *Handler) UpdateProperty(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Load the existing row first: config validation depends on the immutable
-	// type, and unarchive must re-check the active cap.
-	existing, err := h.Queries.GetIssueProperty(r.Context(), db.GetIssuePropertyParams{ID: idUUID, WorkspaceID: wsUUID})
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			writeError(w, http.StatusNotFound, "property not found")
-			return
-		}
-		slog.Warn("GetIssueProperty in UpdateProperty failed", append(logger.RequestAttrs(r), "error", err)...)
-		writeError(w, http.StatusInternalServerError, "failed to update property")
-		return
+	// The whole read → validate → census → write flow runs under advisory
+	// locks (workspace, then property): a concurrent value write on this
+	// property serializes behind the property lock, so the in-use census
+	// cannot race a value that would reference a removed option (TOCTOU,
+	// clean-room review F1); the workspace lock makes the unarchive cap
+	// check atomic against creates (F5).
+	var property db.IssueProperty
+	var httpStatus int
+	var httpMsg string
+	fail := func(status int, msg string) error {
+		httpStatus, httpMsg = status, msg
+		return errClientRejected
 	}
-
-	params := db.UpdateIssuePropertyParams{ID: idUUID, WorkspaceID: wsUUID}
-	if req.Name != nil {
-		name, err := validatePropertyName(*req.Name)
+	err := h.withPropertyLock(r, []string{"props:" + workspaceID, "prop:" + uuidToString(idUUID)}, func(q *db.Queries) error {
+		existing, err := q.GetIssueProperty(r.Context(), db.GetIssuePropertyParams{ID: idUUID, WorkspaceID: wsUUID})
 		if err != nil {
-			writeError(w, http.StatusBadRequest, err.Error())
-			return
-		}
-		params.Name = pgtype.Text{String: name, Valid: true}
-	}
-	if req.Description != nil {
-		if utf8.RuneCountInString(*req.Description) > maxPropertyDescriptionLen {
-			writeError(w, http.StatusBadRequest, fmt.Sprintf("description must be %d characters or fewer", maxPropertyDescriptionLen))
-			return
-		}
-		params.Description = pgtype.Text{String: sanitizeNullBytes(strings.TrimSpace(*req.Description)), Valid: true}
-	}
-	if req.Config != nil {
-		configJSON, err := validatePropertyConfig(existing.Type, req.Config)
-		if err != nil {
-			writeError(w, http.StatusBadRequest, err.Error())
-			return
-		}
-		// Removing an option that issues still reference would silently
-		// orphan those values (they render as unset and vanish from
-		// property-grouped boards). Reject with the usage census so the
-		// admin can migrate values first. Renames keep the option id and
-		// pass untouched.
-		if removed := removedOptionIDs(existing.Config, configJSON); len(removed) > 0 {
-			rows, err := h.Queries.CountIssuesUsingPropertyOptions(r.Context(), db.CountIssuesUsingPropertyOptionsParams{
-				OptionIds:   removed,
-				WorkspaceID: wsUUID,
-				PropertyKey: uuidToString(existing.ID),
-			})
-			if err != nil {
-				slog.Warn("CountIssuesUsingPropertyOptions failed", append(logger.RequestAttrs(r), "error", err)...)
-				writeError(w, http.StatusInternalServerError, "failed to update property")
-				return
+			if errors.Is(err, pgx.ErrNoRows) {
+				return fail(http.StatusNotFound, "property not found")
 			}
-			if len(rows) > 0 {
-				writeError(w, http.StatusConflict, describeOptionsInUse(existing.Config, rows))
-				return
-			}
+			return err
 		}
-		params.Config = configJSON
-	}
-	if req.Archived != nil {
-		params.ArchivedSet = true
-		if *req.Archived {
-			params.ArchivedAt = pgtype.Timestamptz{Time: time.Now().UTC(), Valid: true}
-		} else if existing.ArchivedAt.Valid {
-			active, err := h.Queries.CountActiveIssueProperties(r.Context(), wsUUID)
-			if err != nil {
-				slog.Warn("CountActiveIssueProperties failed", append(logger.RequestAttrs(r), "error", err)...)
-				writeError(w, http.StatusInternalServerError, "failed to update property")
-				return
-			}
-			if active >= maxActivePropertiesPerWorkspace {
-				writeError(w, http.StatusBadRequest, fmt.Sprintf("a workspace cannot have more than %d active properties; archive unused ones first", maxActivePropertiesPerWorkspace))
-				return
-			}
-		}
-	}
 
-	property, err := h.Queries.UpdateIssueProperty(r.Context(), params)
+		params := db.UpdateIssuePropertyParams{ID: idUUID, WorkspaceID: wsUUID}
+		if req.Name != nil {
+			name, err := validatePropertyName(*req.Name)
+			if err != nil {
+				return fail(http.StatusBadRequest, err.Error())
+			}
+			params.Name = pgtype.Text{String: name, Valid: true}
+		}
+		if req.Description != nil {
+			if utf8.RuneCountInString(*req.Description) > maxPropertyDescriptionLen {
+				return fail(http.StatusBadRequest, fmt.Sprintf("description must be %d characters or fewer", maxPropertyDescriptionLen))
+			}
+			params.Description = pgtype.Text{String: sanitizeNullBytes(strings.TrimSpace(*req.Description)), Valid: true}
+		}
+		if req.Config != nil {
+			configJSON, err := validatePropertyConfig(existing.Type, req.Config)
+			if err != nil {
+				return fail(http.StatusBadRequest, err.Error())
+			}
+			if removed := removedOptionIDs(existing.Config, configJSON); len(removed) > 0 {
+				rows, err := q.CountIssuesUsingPropertyOptions(r.Context(), db.CountIssuesUsingPropertyOptionsParams{
+					OptionIds:   removed,
+					WorkspaceID: wsUUID,
+					PropertyKey: uuidToString(existing.ID),
+				})
+				if err != nil {
+					return err
+				}
+				if len(rows) > 0 {
+					return fail(http.StatusConflict, describeOptionsInUse(existing.Config, rows))
+				}
+			}
+			params.Config = configJSON
+		}
+		if req.Archived != nil {
+			params.ArchivedSet = true
+			if *req.Archived {
+				params.ArchivedAt = pgtype.Timestamptz{Time: time.Now().UTC(), Valid: true}
+			} else if existing.ArchivedAt.Valid {
+				active, err := q.CountActiveIssueProperties(r.Context(), wsUUID)
+				if err != nil {
+					return err
+				}
+				if active >= maxActivePropertiesPerWorkspace {
+					return fail(http.StatusBadRequest, fmt.Sprintf("a workspace cannot have more than %d active properties; archive unused ones first", maxActivePropertiesPerWorkspace))
+				}
+			}
+		}
+
+		property, err = q.UpdateIssueProperty(r.Context(), params)
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return fail(http.StatusNotFound, "property not found")
+			}
+			if isUniqueViolation(err) {
+				return fail(http.StatusConflict, "a property with that name already exists")
+			}
+			return err
+		}
+		return nil
+	})
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			writeError(w, http.StatusNotFound, "property not found")
+		if errors.Is(err, errClientRejected) {
+			writeError(w, httpStatus, httpMsg)
 			return
 		}
-		if isUniqueViolation(err) {
-			writeError(w, http.StatusConflict, "a property with that name already exists")
-			return
-		}
-		slog.Warn("UpdateIssueProperty failed", append(logger.RequestAttrs(r), "error", err)...)
+		slog.Warn("UpdateProperty failed", append(logger.RequestAttrs(r), "error", err)...)
 		writeError(w, http.StatusInternalServerError, "failed to update property")
 		return
 	}
@@ -680,38 +692,52 @@ func (h *Handler) SetIssueProperty(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	def, err := h.Queries.GetIssueProperty(r.Context(), db.GetIssuePropertyParams{ID: propertyID, WorkspaceID: issue.WorkspaceID})
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			writeError(w, http.StatusNotFound, "property not found")
-			return
+	// Validation and write share the property advisory lock with definition
+	// updates: the value written is guaranteed to reference the definition
+	// state that a concurrent config edit's usage census will see (TOCTOU,
+	// clean-room review F1).
+	var updated db.Issue
+	var httpStatus int
+	var httpMsg string
+	fail := func(status int, msg string) error {
+		httpStatus, httpMsg = status, msg
+		return errClientRejected
+	}
+	err := h.withPropertyLock(r, []string{"prop:" + uuidToString(propertyID)}, func(q *db.Queries) error {
+		def, err := q.GetIssueProperty(r.Context(), db.GetIssuePropertyParams{ID: propertyID, WorkspaceID: issue.WorkspaceID})
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return fail(http.StatusNotFound, "property not found")
+			}
+			return err
 		}
-		slog.Warn("GetIssueProperty in SetIssueProperty failed", append(logger.RequestAttrs(r), "error", err)...)
-		writeError(w, http.StatusInternalServerError, "failed to set property")
-		return
-	}
-	if def.ArchivedAt.Valid {
-		writeError(w, http.StatusBadRequest, fmt.Sprintf("property %q is archived and cannot receive new values", def.Name))
-		return
-	}
-	value, err := validatePropertyValue(def, req.Value)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-
-	updated, err := h.Queries.SetIssuePropertyValue(r.Context(), db.SetIssuePropertyValueParams{
-		ID:          issue.ID,
-		WorkspaceID: issue.WorkspaceID,
-		Key:         uuidToString(def.ID),
-		Value:       value,
+		if def.ArchivedAt.Valid {
+			return fail(http.StatusBadRequest, fmt.Sprintf("property %q is archived and cannot receive new values", def.Name))
+		}
+		value, err := validatePropertyValue(def, req.Value)
+		if err != nil {
+			return fail(http.StatusBadRequest, err.Error())
+		}
+		updated, err = q.SetIssuePropertyValue(r.Context(), db.SetIssuePropertyValueParams{
+			ID:          issue.ID,
+			WorkspaceID: issue.WorkspaceID,
+			Key:         uuidToString(def.ID),
+			Value:       value,
+		})
+		if err != nil {
+			if isCheckViolation(err) {
+				return fail(http.StatusBadRequest, "issue properties exceed the 16KB size limit")
+			}
+			return err
+		}
+		return nil
 	})
 	if err != nil {
-		if isCheckViolation(err) {
-			writeError(w, http.StatusBadRequest, "issue properties exceed the 16KB size limit")
+		if errors.Is(err, errClientRejected) {
+			writeError(w, httpStatus, httpMsg)
 			return
 		}
-		slog.Warn("SetIssuePropertyValue failed", append(logger.RequestAttrs(r), "error", err, "issue_id", issueID)...)
+		slog.Warn("SetIssueProperty failed", append(logger.RequestAttrs(r), "error", err, "issue_id", issueID)...)
 		writeError(w, http.StatusInternalServerError, "failed to set property")
 		return
 	}
@@ -774,6 +800,31 @@ func (h *Handler) DeleteIssueProperty(w http.ResponseWriter, r *http.Request) {
 		"properties": properties,
 	})
 	writeJSON(w, http.StatusOK, map[string]any{"properties": properties})
+}
+
+// withPropertyLock runs fn inside a transaction holding the advisory lock
+// for the given key, serializing definition mutations against value writes
+// (TOCTOU: a config update's usage census and a concurrent value write could
+// otherwise interleave into a permanently orphaned option reference) and
+// definition creates/unarchives against each other (the 20-active cap and
+// MAX(position)+1 are read-then-write). Locks are transaction-scoped.
+func (h *Handler) withPropertyLock(r *http.Request, lockKeys []string, fn func(q *db.Queries) error) error {
+	tx, err := h.TxStarter.Begin(r.Context())
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(r.Context())
+	// Callers pass keys in a fixed global order (workspace before property)
+	// so overlapping lock sets cannot deadlock.
+	for _, key := range lockKeys {
+		if _, err := tx.Exec(r.Context(), "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", key); err != nil {
+			return err
+		}
+	}
+	if err := fn(h.Queries.WithTx(tx)); err != nil {
+		return err
+	}
+	return tx.Commit(r.Context())
 }
 
 // ---------------------------------------------------------------------------
@@ -908,6 +959,12 @@ func (h *Handler) propertySortExpr(r *http.Request, workspaceID string, sortValu
 			return "", true, nil // stale sort → position order
 		}
 		return "", true, fmt.Errorf("resolve sort property: %w", dbErr)
+	}
+	// Archived definitions degrade to position order like unknown ones —
+	// their values are hidden from the UI, so sorting by them would order
+	// the list by invisible data.
+	if def.ArchivedAt.Valid {
+		return "", true, nil
 	}
 	// uuidToString re-serializes the parsed UUID: hex and dashes only, safe
 	// to embed in the ORDER BY string.

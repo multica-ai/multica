@@ -224,6 +224,11 @@ export function onIssuePropertiesChanged(
     old ? { ...old, properties } : old,
   );
   qc.invalidateQueries({ queryKey: issueKeys.myAll(wsId) });
+  // Plain assignee-group caches are never patched in place (their bucket
+  // shape differs) and would otherwise hold stale chips forever under
+  // staleTime:Infinity (clean-room review F2).
+  qc.invalidateQueries({ queryKey: issueKeys.assigneeGroupsAll(wsId) });
+  qc.invalidateQueries({ queryKey: issueKeys.myAssigneeGroupsAll(wsId) });
   invalidatePropertyWindowQueries(qc, wsId);
 }
 

@@ -89,15 +89,19 @@ export function useSetIssueProperty() {
     scope: { id: `issue-properties:${wsId}` },
     mutationKey: ["issue-properties", wsId],
     onMutate: async ({ issueId, propertyId, value }) => {
-      await qc.cancelQueries({ queryKey: issueKeys.detail(wsId, issueId) });
+      // Cancel in-flight list refetches too: a response snapshotted before
+      // this write would land after the optimistic patch and revert it.
+      await Promise.all([
+        qc.cancelQueries({ queryKey: issueKeys.detail(wsId, issueId) }),
+        qc.cancelQueries({ queryKey: issueKeys.list(wsId) }),
+      ]);
       const prev = readIssueProperties(qc, wsId, issueId);
       onIssuePropertiesChanged(qc, wsId, issueId, { ...(prev ?? {}), [propertyId]: value });
-      return { prev, issueId };
+      return { prevValue: prev?.[propertyId], hadBag: prev !== undefined, issueId, propertyId };
     },
     onError: (_err, _vars, ctx) => {
       if (!ctx) return;
-      if (ctx.prev !== undefined) onIssuePropertiesChanged(qc, wsId, ctx.issueId, ctx.prev);
-      else qc.invalidateQueries({ queryKey: issueKeys.detail(wsId, ctx.issueId) });
+      rollbackSingleKey(qc, wsId, ctx);
     },
     onSuccess: (data, { issueId }) => {
       onIssuePropertiesChanged(qc, wsId, issueId, data.properties ?? {});
@@ -117,19 +121,21 @@ export function useUnsetIssueProperty() {
     scope: { id: `issue-properties:${wsId}` },
     mutationKey: ["issue-properties", wsId],
     onMutate: async ({ issueId, propertyId }) => {
-      await qc.cancelQueries({ queryKey: issueKeys.detail(wsId, issueId) });
+      await Promise.all([
+        qc.cancelQueries({ queryKey: issueKeys.detail(wsId, issueId) }),
+        qc.cancelQueries({ queryKey: issueKeys.list(wsId) }),
+      ]);
       const prev = readIssueProperties(qc, wsId, issueId);
       if (prev) {
         const next = { ...prev };
         delete next[propertyId];
         onIssuePropertiesChanged(qc, wsId, issueId, next);
       }
-      return { prev, issueId };
+      return { prevValue: prev?.[propertyId], hadBag: prev !== undefined, issueId, propertyId };
     },
     onError: (_err, _vars, ctx) => {
       if (!ctx) return;
-      if (ctx.prev !== undefined) onIssuePropertiesChanged(qc, wsId, ctx.issueId, ctx.prev);
-      else qc.invalidateQueries({ queryKey: issueKeys.detail(wsId, ctx.issueId) });
+      rollbackSingleKey(qc, wsId, ctx);
     },
     onSuccess: (data, { issueId }) => {
       onIssuePropertiesChanged(qc, wsId, issueId, data.properties ?? {});
@@ -138,6 +144,28 @@ export function useUnsetIssueProperty() {
       settleIssuePropertyCaches(qc, wsId, issueId);
     },
   });
+}
+
+/**
+ * Roll back exactly the key this mutation touched, against the CURRENT bag.
+ * Restoring the whole onMutate snapshot would erase concurrent remote writes
+ * to other keys that landed via WS while this request was in flight
+ * (clean-room review F2 interleave B).
+ */
+function rollbackSingleKey(
+  qc: ReturnType<typeof useQueryClient>,
+  wsId: string,
+  ctx: { prevValue: IssuePropertyValue | undefined; hadBag: boolean; issueId: string; propertyId: string },
+) {
+  if (!ctx.hadBag) {
+    qc.invalidateQueries({ queryKey: issueKeys.detail(wsId, ctx.issueId) });
+    return;
+  }
+  const current = readIssueProperties(qc, wsId, ctx.issueId) ?? {};
+  const next = { ...current };
+  if (ctx.prevValue === undefined) delete next[ctx.propertyId];
+  else next[ctx.propertyId] = ctx.prevValue;
+  onIssuePropertiesChanged(qc, wsId, ctx.issueId, next);
 }
 
 /** Authoritative reconcile once the LAST in-flight property write settles. */

@@ -512,7 +512,7 @@ func TestListIssuesPropertyFilterAndSort(t *testing.T) {
 	}
 	// AND across definitions: matching select + non-matching checkbox → empty of target.
 	buf, _ := json.Marshal(map[string][]string{sel.ID: {hitID}, box.ID: {"false"}})
-	if _, present := ids(listIssues("?limit=50&properties="+url.QueryEscape(string(buf))))[target]; present {
+	if _, present := ids(listIssues("?limit=50&properties=" + url.QueryEscape(string(buf))))[target]; present {
 		t.Fatalf("AND semantics failed: target matched with contradictory checkbox filter")
 	}
 
