@@ -294,6 +294,16 @@ identity-aware connection from that list (fail closed); there is no fallback to
 the shared static snapshot. The existing Allow/Ask/Deny resolver still runs
 after this filter, and the call-time gate remains authoritative.
 
+When at least one endpoint on that identity-aware connection survives policy,
+the resolver also adds one derived `<connection>__discover_access` tool. Its
+read-only payload comes from the same authenticated personalized contract and
+lists the full remote surface, each remote grant marker, whether the concrete
+endpoint tool is listed after Multica policy, and the access-request schema
+tool when the API advertises one. It makes ungranted resources discoverable
+without handing the model dead execution tools. The discovery tool anchors its
+call-time identity and verdict to an already-admitted endpoint; if policy
+admits nothing, it is absent and cannot become a bypass.
+
 ---
 
 ## What is OFF by default (and only this)

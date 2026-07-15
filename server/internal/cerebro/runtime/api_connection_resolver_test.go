@@ -249,13 +249,15 @@ func TestResolverPersonalizedDiscoveryFiltersGrantsAndKeepsAsk(t *testing.T) {
 	conn.AuthConfig.OnBehalfOf = &connections.OnBehalfOfConfig{Enabled: true}
 	conn.EndpointPermissions = append(conn.EndpointPermissions,
 		connections.EndpointPermission{Path: "/not-configured", Methods: []string{"GET"}},
+		connections.EndpointPermission{Path: "/specs/access-request", Methods: []string{"GET"}},
 	)
 	r := NewAPIConnectionResolver(
 		fakeConnLister{conns: []connections.Connection{conn}},
 		fakeEndpointPolicy{verdicts: map[string]toolpolicy.Setting{
-			"c GET /allow": toolpolicy.SettingAllow,
-			"c GET /ask":   toolpolicy.SettingAsk,
-			"c GET /deny":  toolpolicy.SettingAllow,
+			"c GET /allow":                toolpolicy.SettingAllow,
+			"c GET /ask":                  toolpolicy.SettingAsk,
+			"c GET /deny":                 toolpolicy.SettingAllow,
+			"c GET /specs/access-request": toolpolicy.SettingAllow,
 		}},
 		fakeFlag{on: true}, slog.Default(),
 	)
@@ -268,6 +270,7 @@ func TestResolverPersonalizedDiscoveryFiltersGrantsAndKeepsAsk(t *testing.T) {
 			{Path: "/ask", Methods: []string{"GET"}, Summary: "Ask source"},
 			{Path: "/deny", Methods: []string{"GET"}, Summary: "Denied source", Granted: &denied},
 			{Path: "/dynamic-only", Methods: []string{"GET"}, Summary: "Not configured", Granted: &granted},
+			{Path: "/specs/access-request", Methods: []string{"GET"}, Summary: "Access request schema"},
 		}, nil
 	}
 
@@ -275,8 +278,8 @@ func TestResolverPersonalizedDiscoveryFiltersGrantsAndKeepsAsk(t *testing.T) {
 	if principal != "agent:03030303-0303-0303-0303-030303030303" {
 		t.Fatalf("principal = %q", principal)
 	}
-	if len(got) != 2 {
-		t.Fatalf("expected granted + identity-blind configured endpoints, got %d: %+v", len(got), got)
+	if len(got) != 4 {
+		t.Fatalf("expected granted + identity-blind + access schema + discovery tools, got %d: %+v", len(got), got)
 	}
 	byName := map[string]APIConnectionToolVerdict{}
 	for _, tool := range got {
@@ -293,6 +296,19 @@ func TestResolverPersonalizedDiscoveryFiltersGrantsAndKeepsAsk(t *testing.T) {
 	}
 	if _, ok := byName["c__get_dynamic_only"]; ok {
 		t.Fatal("endpoint absent from the admin catalogue must not be introduced")
+	}
+	discovery, ok := byName["c__discover_access"]
+	if !ok {
+		t.Fatal("identity-aware connection must expose one access discovery tool")
+	}
+	payload, err := discovery.Tool.Call(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"Denied source", `"remote_granted":false`, `"listed":false`, "Read this schema to request access"} {
+		if !strings.Contains(payload, want) {
+			t.Fatalf("discovery payload missing %q: %s", want, payload)
+		}
 	}
 }
 
@@ -332,5 +348,23 @@ func TestResolverPersonalizedDiscoveryUsesShortCache(t *testing.T) {
 	_ = r.ListForAgent(context.Background(), resolverIdent())
 	if calls != 1 {
 		t.Fatalf("expected one personalized spec fetch inside the short cache window, got %d", calls)
+	}
+}
+
+func TestResolverDoesNotExposeDiscoveryWhenConnectionPolicyAdmitsNothing(t *testing.T) {
+	conn := resolverTestConns()[0]
+	conn.ID = "11111111-1111-4111-8111-111111111111"
+	conn.AuthConfig.OnBehalfOf = &connections.OnBehalfOfConfig{Enabled: true}
+	r := NewAPIConnectionResolver(
+		fakeConnLister{conns: []connections.Connection{conn}},
+		fakeEndpointPolicy{},
+		fakeFlag{on: true}, slog.Default(),
+	)
+	r.discover = func(context.Context, *http.Client, connections.Connection, string) ([]connections.EndpointPermission, error) {
+		granted := true
+		return []connections.EndpointPermission{{Path: "/allow", Methods: []string{"GET"}, Granted: &granted}}, nil
+	}
+	if got := r.ListForAgent(context.Background(), resolverIdent()); got != nil {
+		t.Fatalf("discovery must not bypass a connection policy that admits no endpoint, got %+v", got)
 	}
 }
