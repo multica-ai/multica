@@ -184,6 +184,16 @@ export function AutopilotTemplatesTab() {
             <div className="space-y-1.5">
               <Label>{t(($) => $.autopilot_templates.execution_mode)}</Label>
               <Select
+                items={[
+                  {
+                    value: "create_issue",
+                    label: t(($) => $.autopilot_templates.execution_mode_create_issue),
+                  },
+                  {
+                    value: "run_only",
+                    label: t(($) => $.autopilot_templates.execution_mode_run_only),
+                  },
+                ]}
                 value={draft.execution_mode}
                 onValueChange={(value) =>
                   value &&
@@ -209,6 +219,16 @@ export function AutopilotTemplatesTab() {
             <div className="space-y-1.5">
               <Label>{t(($) => $.autopilot_templates.trigger)}</Label>
               <Select
+                items={[
+                  {
+                    value: "schedule",
+                    label: t(($) => $.autopilot_templates.trigger_schedule),
+                  },
+                  {
+                    value: "webhook",
+                    label: t(($) => $.autopilot_templates.trigger_webhook),
+                  },
+                ]}
                 value={draft.trigger_kind}
                 onValueChange={(value) =>
                   value &&

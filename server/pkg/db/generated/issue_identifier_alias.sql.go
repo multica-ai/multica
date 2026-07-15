@@ -35,7 +35,7 @@ func (q *Queries) BackfillSpaceKeyAliases(ctx context.Context, arg BackfillSpace
 }
 
 const getIssueByIdentifierAlias = `-- name: GetIssueByIdentifierAlias :one
-SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority, i.assignee_type, i.assignee_id, i.creator_type, i.creator_id, i.parent_issue_id, i.acceptance_criteria, i.context_refs, i.position, i.due_date, i.created_at, i.updated_at, i.number, i.project_id, i.origin_type, i.origin_id, i.first_executed_at, i.start_date, i.metadata, i.stage, i.space_id, i.properties FROM issue_identifier_alias a
+SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority, i.assignee_type, i.assignee_id, i.creator_type, i.creator_id, i.parent_issue_id, i.acceptance_criteria, i.context_refs, i.position, i.due_date, i.created_at, i.updated_at, i.number, i.project_id, i.origin_type, i.origin_id, i.first_executed_at, i.start_date, i.metadata, i.stage, i.properties, i.space_id FROM issue_identifier_alias a
 JOIN issue i ON i.id = a.issue_id
 WHERE a.workspace_id = $1
   AND a.space_key_lower = $2
@@ -77,8 +77,8 @@ func (q *Queries) GetIssueByIdentifierAlias(ctx context.Context, arg GetIssueByI
 		&i.StartDate,
 		&i.Metadata,
 		&i.Stage,
-		&i.SpaceID,
 		&i.Properties,
+		&i.SpaceID,
 	)
 	return i, err
 }

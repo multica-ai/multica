@@ -104,7 +104,7 @@ func TestAutopilotDispatchHonorsAgentSelectedSpaceAvailability(t *testing.T) {
 	if !service.canCreatorInvokeAgent(ctx, selected, agent) {
 		t.Fatal("selected-space Autopilot should pass dispatch gate")
 	}
-	if reason, skip := service.shouldSkipDispatch(ctx, selected); skip {
+	if reason, _, skip := service.shouldSkipDispatch(ctx, selected, pgtype.UUID{}); skip {
 		t.Fatalf("selected-space dispatch unexpectedly skipped: %s", reason)
 	}
 
@@ -113,7 +113,7 @@ func TestAutopilotDispatchHonorsAgentSelectedSpaceAvailability(t *testing.T) {
 	if service.canCreatorInvokeAgent(ctx, unselected, agent) {
 		t.Fatal("unselected-space Autopilot must fail dispatch gate")
 	}
-	if reason, skip := service.shouldSkipDispatch(ctx, unselected); !skip || reason != "autopilot assignee is not available in target Space" {
+	if reason, _, skip := service.shouldSkipDispatch(ctx, unselected, pgtype.UUID{}); !skip || reason != "autopilot creator cannot invoke assignee agent in target Space" {
 		t.Fatalf("unselected dispatch = skip %v reason %q", skip, reason)
 	}
 

@@ -618,8 +618,8 @@ type Issue struct {
 	StartDate          pgtype.Date        `json:"start_date"`
 	Metadata           []byte             `json:"metadata"`
 	Stage              pgtype.Int4        `json:"stage"`
-	SpaceID            pgtype.UUID        `json:"space_id"`
 	Properties         []byte             `json:"properties"`
+	SpaceID            pgtype.UUID        `json:"space_id"`
 }
 
 type IssueDependency struct {

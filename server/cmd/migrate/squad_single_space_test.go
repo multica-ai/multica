@@ -154,7 +154,7 @@ func TestMigration173SplitsCrossSpaceSquadWithoutMovingWork(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolve migrations dir: %v", err)
 	}
-	if err := applyCutoverMigration(pool, schema, filepath.Join(dir, "179_squad_single_space.up.sql")); err != nil {
+	if err := applyCutoverMigration(pool, schema, filepath.Join(dir, "205_squad_single_space.up.sql")); err != nil {
 		t.Fatalf("apply migration 179: %v", err)
 	}
 

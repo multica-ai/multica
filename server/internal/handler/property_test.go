@@ -59,8 +59,8 @@ func createPropertyTestIssue(t *testing.T, title string) string {
 	t.Helper()
 	var issueID string
 	if err := testPool.QueryRow(context.Background(), `
-		INSERT INTO issue (workspace_id, title, status, priority, creator_type, creator_id, number)
-		VALUES ($1, $2, 'todo', 'none', 'member', $3,
+		INSERT INTO issue (workspace_id, space_id, title, status, priority, creator_type, creator_id, number)
+		VALUES ($1, (SELECT id FROM workspace_space WHERE workspace_id = $1 AND is_default LIMIT 1), $2, 'todo', 'none', 'member', $3,
 		        COALESCE((SELECT MAX(number) FROM issue WHERE workspace_id = $1), 0) + 1)
 		RETURNING id
 	`, testWorkspaceID, title, testUserID).Scan(&issueID); err != nil {
@@ -200,11 +200,13 @@ func TestPropertyDefinitionValidation(t *testing.T) {
 // actors are rejected outright (even though the fixture user is the workspace
 // owner), while value writes from the same agent context succeed.
 func TestPropertyAdminGate(t *testing.T) {
+	agentID := createHandlerTestAgent(t, "PropertyAdminGateAgent", []byte("[]"))
+
 	// Agent actor (task_token path is trusted directly by resolveActor).
 	w := httptest.NewRecorder()
 	req := newRequest("POST", "/api/properties", map[string]any{"name": "AgentMade", "type": "text"})
 	req.Header.Set("X-Actor-Source", "task_token")
-	req.Header.Set("X-Agent-ID", uuid.NewString())
+	req.Header.Set("X-Agent-ID", agentID)
 	testHandler.CreateProperty(w, req)
 	if w.Code != http.StatusForbidden {
 		t.Fatalf("agent CreateProperty: expected 403, got %d: %s", w.Code, w.Body.String())
@@ -212,11 +214,16 @@ func TestPropertyAdminGate(t *testing.T) {
 
 	property := createTestProperty(t, map[string]any{"name": "AgentWritable" + uuid.NewString()[:8], "type": "text"})
 	issueID := createPropertyTestIssue(t, "agent value write")
+	spaceID := defaultSpaceIDForTestWorkspace(t)
+	taskID := createHandlerTestTaskForAgentOnIssue(t, agentID, issueID)
 
 	w = httptest.NewRecorder()
 	req = newRequest("PUT", "/api/issues/"+issueID+"/properties/"+property.ID, map[string]any{"value": "set by agent"})
 	req.Header.Set("X-Actor-Source", "task_token")
-	req.Header.Set("X-Agent-ID", uuid.NewString())
+	req.Header.Set("X-Workspace-ID", testWorkspaceID)
+	req.Header.Set("X-Space-ID", spaceID)
+	req.Header.Set("X-Agent-ID", agentID)
+	req.Header.Set("X-Task-ID", taskID)
 	req = withIssuePropertyParams(req, issueID, property.ID)
 	testHandler.SetIssueProperty(w, req)
 	if w.Code != http.StatusOK {

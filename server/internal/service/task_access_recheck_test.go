@@ -236,9 +236,8 @@ func (f *taskAccessRecheckFixture) createDueDeferredTask(t *testing.T, issue db.
 	if err != nil {
 		t.Fatalf("enqueue deferred fallback: %v", err)
 	}
-	if task.OriginatorUserID.Valid {
-		t.Fatalf("deferred task unexpectedly stamped originator %s; test must exercise primary inheritance", util.UUIDToString(task.OriginatorUserID))
-	}
+	// Deferred tasks now carry their attribution snapshot from creation time;
+	// promotion revalidates that same principal against current Agent access.
 	return task
 }
 

@@ -39,6 +39,7 @@ func seedAttributionFixture(t *testing.T, pool *pgxpool.Pool) (workspaceID, user
 		workspaceID, userID); err != nil {
 		t.Fatalf("seed member: %v", err)
 	}
+	spaceID := createServiceTestSpace(t, pool, workspaceID, userID)
 
 	var runtimeID string
 	if err := pool.QueryRow(ctx, `
@@ -55,9 +56,9 @@ func seedAttributionFixture(t *testing.T, pool *pgxpool.Pool) (workspaceID, user
 		t.Fatalf("seed agent: %v", err)
 	}
 	if err := pool.QueryRow(ctx, `
-		INSERT INTO issue (workspace_id, title, creator_type, creator_id, assignee_type, assignee_id, priority)
-		VALUES ($1, 'attr issue', 'member', $2, 'agent', $3, 'medium')
-		RETURNING id`, workspaceID, userID, agentID).Scan(&issueID); err != nil {
+		INSERT INTO issue (workspace_id, space_id, title, creator_type, creator_id, assignee_type, assignee_id, priority)
+		VALUES ($1, $2, 'attr issue', 'member', $3, 'agent', $4, 'medium')
+		RETURNING id`, workspaceID, spaceID, userID, agentID).Scan(&issueID); err != nil {
 		t.Fatalf("seed issue: %v", err)
 	}
 	return workspaceID, userID, agentID, issueID
@@ -81,6 +82,7 @@ func TestEnqueueTaskForIssueStampsDirectHumanAttribution(t *testing.T) {
 		CreatorType:  "member",
 		CreatorID:    util.MustParseUUID(userID),
 		WorkspaceID:  util.MustParseUUID(workspaceID),
+		SpaceID:      serviceTestSpaceUUID(t, pool, workspaceID),
 		AssigneeType: pgtype.Text{String: "agent", Valid: true},
 	})
 	if err != nil {
@@ -149,6 +151,7 @@ func TestEnqueueTaskForIssueWithHandoffAttributesToActor(t *testing.T) {
 		CreatorType:  "member",
 		CreatorID:    util.MustParseUUID(creatorID),
 		WorkspaceID:  util.MustParseUUID(workspaceID),
+		SpaceID:      serviceTestSpaceUUID(t, pool, workspaceID),
 		AssigneeType: pgtype.Text{String: "agent", Valid: true},
 	}, "", util.MustParseUUID(actorID))
 	if err != nil {
@@ -400,8 +403,8 @@ func TestTriggerOwnerAttribution_ScheduleTriggerCreator(t *testing.T) {
 
 	var autopilotID string
 	if err := pool.QueryRow(ctx, `
-		INSERT INTO autopilot (workspace_id, title, assignee_id, execution_mode, created_by_type, created_by_id)
-		VALUES ($1, 'trigger-owner-ap', $2, 'run_only', 'member', $3) RETURNING id`,
+		INSERT INTO autopilot (workspace_id, space_id, title, assignee_id, execution_mode, created_by_type, created_by_id)
+		VALUES ($1, (SELECT id FROM workspace_space WHERE workspace_id = $1 LIMIT 1), 'trigger-owner-ap', $2, 'run_only', 'member', $3) RETURNING id`,
 		workspaceID, agentID, creatorID).Scan(&autopilotID); err != nil {
 		t.Fatalf("seed autopilot: %v", err)
 	}
@@ -442,8 +445,8 @@ func TestTriggerOwnerAttribution_LegacyTriggerFallsBackToRuleOwner(t *testing.T)
 
 	var autopilotID string
 	if err := pool.QueryRow(ctx, `
-		INSERT INTO autopilot (workspace_id, title, assignee_id, execution_mode, created_by_type, created_by_id)
-		VALUES ($1, 'legacy-trigger-ap', $2, 'run_only', 'member', $3) RETURNING id`,
+		INSERT INTO autopilot (workspace_id, space_id, title, assignee_id, execution_mode, created_by_type, created_by_id)
+		VALUES ($1, (SELECT id FROM workspace_space WHERE workspace_id = $1 LIMIT 1), 'legacy-trigger-ap', $2, 'run_only', 'member', $3) RETURNING id`,
 		workspaceID, agentID, publisherID).Scan(&autopilotID); err != nil {
 		t.Fatalf("seed autopilot: %v", err)
 	}
@@ -511,8 +514,8 @@ func TestTriggerOwnerAttribution_TransfersToSubstantiveEditor(t *testing.T) {
 
 	var autopilotID string
 	if err := pool.QueryRow(ctx, `
-		INSERT INTO autopilot (workspace_id, title, assignee_id, execution_mode, created_by_type, created_by_id)
-		VALUES ($1, 'transfer-ap', $2, 'run_only', 'member', $3) RETURNING id`,
+		INSERT INTO autopilot (workspace_id, space_id, title, assignee_id, execution_mode, created_by_type, created_by_id)
+		VALUES ($1, (SELECT id FROM workspace_space WHERE workspace_id = $1 LIMIT 1), 'transfer-ap', $2, 'run_only', 'member', $3) RETURNING id`,
 		workspaceID, agentID, creatorA).Scan(&autopilotID); err != nil {
 		t.Fatalf("seed autopilot: %v", err)
 	}
@@ -612,8 +615,8 @@ func TestEnqueueTaskForIssueAutopilotOriginStampsRuleOwner(t *testing.T) {
 
 	var issueID string
 	if err := pool.QueryRow(ctx, `
-		INSERT INTO issue (workspace_id, title, creator_type, creator_id, assignee_type, assignee_id, priority, number, origin_type, origin_id)
-		VALUES ($1, 'autopilot issue', 'agent', $2, 'agent', $2, 'medium', 9001, 'autopilot', $3) RETURNING id`,
+		INSERT INTO issue (workspace_id, space_id, title, creator_type, creator_id, assignee_type, assignee_id, priority, number, origin_type, origin_id)
+		VALUES ($1, (SELECT id FROM workspace_space WHERE workspace_id = $1 LIMIT 1), 'autopilot issue', 'agent', $2, 'agent', $2, 'medium', 9001, 'autopilot', $3) RETURNING id`,
 		workspaceID, agentID, autopilotID).Scan(&issueID); err != nil {
 		t.Fatalf("seed autopilot-origin issue: %v", err)
 	}
@@ -627,6 +630,7 @@ func TestEnqueueTaskForIssueAutopilotOriginStampsRuleOwner(t *testing.T) {
 		CreatorType:  "agent",
 		CreatorID:    util.MustParseUUID(agentID),
 		WorkspaceID:  util.MustParseUUID(workspaceID),
+		SpaceID:      serviceTestSpaceUUID(t, pool, workspaceID),
 		AssigneeType: pgtype.Text{String: "agent", Valid: true},
 		OriginType:   pgtype.Text{String: "autopilot", Valid: true},
 		OriginID:     util.MustParseUUID(autopilotID),
@@ -673,8 +677,8 @@ func TestEnqueueTaskForIssueAutopilotOriginWithoutVersionOwnerFallback(t *testin
 
 	var issueID, autopilotID string
 	if err := pool.QueryRow(ctx, `
-		INSERT INTO issue (workspace_id, title, creator_type, creator_id, assignee_type, assignee_id, priority, number, origin_type, origin_id)
-		VALUES ($1, 'autopilot issue', 'agent', $2, 'agent', $2, 'medium', 9002, 'autopilot', gen_random_uuid()) RETURNING id, origin_id`,
+		INSERT INTO issue (workspace_id, space_id, title, creator_type, creator_id, assignee_type, assignee_id, priority, number, origin_type, origin_id)
+		VALUES ($1, (SELECT id FROM workspace_space WHERE workspace_id = $1 LIMIT 1), 'autopilot issue', 'agent', $2, 'agent', $2, 'medium', 9002, 'autopilot', gen_random_uuid()) RETURNING id, origin_id`,
 		workspaceID, agentID).Scan(&issueID, &autopilotID); err != nil {
 		t.Fatalf("seed autopilot-origin issue: %v", err)
 	}
@@ -688,6 +692,7 @@ func TestEnqueueTaskForIssueAutopilotOriginWithoutVersionOwnerFallback(t *testin
 		CreatorType:  "agent",
 		CreatorID:    util.MustParseUUID(agentID),
 		WorkspaceID:  util.MustParseUUID(workspaceID),
+		SpaceID:      serviceTestSpaceUUID(t, pool, workspaceID),
 		AssigneeType: pgtype.Text{String: "agent", Valid: true},
 		OriginType:   pgtype.Text{String: "autopilot", Valid: true},
 		OriginID:     util.MustParseUUID(autopilotID),
@@ -729,8 +734,8 @@ func TestEnqueueTaskFailClosedRefusesUnattributed(t *testing.T) {
 
 	var issueID, autopilotID string
 	if err := pool.QueryRow(ctx, `
-		INSERT INTO issue (workspace_id, title, creator_type, creator_id, assignee_type, assignee_id, priority, number, origin_type, origin_id)
-		VALUES ($1, 'autopilot issue', 'agent', $2, 'agent', $2, 'medium', 9003, 'autopilot', gen_random_uuid()) RETURNING id, origin_id`,
+		INSERT INTO issue (workspace_id, space_id, title, creator_type, creator_id, assignee_type, assignee_id, priority, number, origin_type, origin_id)
+		VALUES ($1, (SELECT id FROM workspace_space WHERE workspace_id = $1 LIMIT 1), 'autopilot issue', 'agent', $2, 'agent', $2, 'medium', 9003, 'autopilot', gen_random_uuid()) RETURNING id, origin_id`,
 		workspaceID, agentID).Scan(&issueID, &autopilotID); err != nil {
 		t.Fatalf("seed autopilot-origin issue: %v", err)
 	}
@@ -744,6 +749,7 @@ func TestEnqueueTaskFailClosedRefusesUnattributed(t *testing.T) {
 		CreatorType:  "agent",
 		CreatorID:    util.MustParseUUID(agentID),
 		WorkspaceID:  util.MustParseUUID(workspaceID),
+		SpaceID:      serviceTestSpaceUUID(t, pool, workspaceID),
 		AssigneeType: pgtype.Text{String: "agent", Valid: true},
 		OriginType:   pgtype.Text{String: "autopilot", Valid: true},
 		OriginID:     util.MustParseUUID(autopilotID),
@@ -768,8 +774,8 @@ func seedRunOnlyAutopilot(t *testing.T, pool *pgxpool.Pool, workspaceID, agentID
 	t.Helper()
 	ctx := context.Background()
 	if err := pool.QueryRow(ctx, `
-		INSERT INTO autopilot (workspace_id, title, assignee_type, assignee_id, status, execution_mode, created_by_type, created_by_id)
-		VALUES ($1, 'run-only ap', 'agent', $2, 'active', 'run_only', 'member', $3) RETURNING id`,
+		INSERT INTO autopilot (workspace_id, space_id, title, assignee_type, assignee_id, status, execution_mode, created_by_type, created_by_id)
+		VALUES ($1, (SELECT id FROM workspace_space WHERE workspace_id = $1 LIMIT 1), 'run-only ap', 'agent', $2, 'active', 'run_only', 'member', $3) RETURNING id`,
 		workspaceID, agentID, creatorID).Scan(&autopilotID); err != nil {
 		t.Fatalf("seed autopilot: %v", err)
 	}
@@ -863,6 +869,15 @@ func TestDispatchRunOnlyManualStampsDirectHuman(t *testing.T) {
 		workspaceID, actorID); err != nil {
 		t.Fatalf("seed actor member: %v", err)
 	}
+	if _, err := pool.Exec(ctx, `UPDATE agent SET permission_mode = 'public_to' WHERE id = $1`, agentID); err != nil {
+		t.Fatalf("make agent invokable by selected members: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO agent_invocation_target (agent_id, target_type, target_id, created_by)
+		VALUES ($1, 'member', $2, $2)
+	`, agentID, actorID); err != nil {
+		t.Fatalf("grant actor invocation permission: %v", err)
+	}
 
 	svc := &AutopilotService{Queries: q, TxStarter: pool, Bus: events.New(), TaskSvc: &TaskService{Queries: q, TxStarter: pool, Bus: events.New()}}
 	ap, err := q.GetAutopilot(ctx, util.MustParseUUID(autopilotID))
@@ -915,8 +930,8 @@ func TestDispatchRunOnlyScheduleTransfersToEditor(t *testing.T) {
 
 	var autopilotID string
 	if err := pool.QueryRow(ctx, `
-		INSERT INTO autopilot (workspace_id, title, assignee_type, assignee_id, status, execution_mode, created_by_type, created_by_id)
-		VALUES ($1, 'dispatch-transfer-ap', 'agent', $2, 'active', 'run_only', 'member', $3) RETURNING id`,
+		INSERT INTO autopilot (workspace_id, space_id, title, assignee_type, assignee_id, status, execution_mode, created_by_type, created_by_id)
+		VALUES ($1, (SELECT id FROM workspace_space WHERE workspace_id = $1 LIMIT 1), 'dispatch-transfer-ap', 'agent', $2, 'active', 'run_only', 'member', $3) RETURNING id`,
 		workspaceID, agentID, creatorA).Scan(&autopilotID); err != nil {
 		t.Fatalf("seed autopilot: %v", err)
 	}
@@ -999,8 +1014,8 @@ func TestEnqueueTaskForIssueAutopilotManualStampsDirectHuman(t *testing.T) {
 	}
 	var issueID string
 	if err := pool.QueryRow(ctx, `
-		INSERT INTO issue (workspace_id, title, creator_type, creator_id, assignee_type, assignee_id, priority, number, origin_type, origin_id)
-		VALUES ($1, 'autopilot issue', 'agent', $2, 'agent', $2, 'medium', 9101, 'autopilot', $3) RETURNING id`,
+		INSERT INTO issue (workspace_id, space_id, title, creator_type, creator_id, assignee_type, assignee_id, priority, number, origin_type, origin_id)
+		VALUES ($1, (SELECT id FROM workspace_space WHERE workspace_id = $1 LIMIT 1), 'autopilot issue', 'agent', $2, 'agent', $2, 'medium', 9101, 'autopilot', $3) RETURNING id`,
 		workspaceID, agentID, autopilotID).Scan(&issueID); err != nil {
 		t.Fatalf("seed autopilot-origin issue: %v", err)
 	}
@@ -1023,6 +1038,7 @@ func TestEnqueueTaskForIssueAutopilotManualStampsDirectHuman(t *testing.T) {
 		CreatorType:  "agent",
 		CreatorID:    util.MustParseUUID(agentID),
 		WorkspaceID:  util.MustParseUUID(workspaceID),
+		SpaceID:      serviceTestSpaceUUID(t, pool, workspaceID),
 		AssigneeType: pgtype.Text{String: "agent", Valid: true},
 		OriginType:   pgtype.Text{String: "autopilot", Valid: true},
 		OriginID:     util.MustParseUUID(autopilotID),
@@ -1193,6 +1209,7 @@ func TestRerunIssueAttributesToRerunningMember(t *testing.T) {
 		CreatorType:  "member",
 		CreatorID:    util.MustParseUUID(creatorID),
 		WorkspaceID:  util.MustParseUUID(workspaceID),
+		SpaceID:      serviceTestSpaceUUID(t, pool, workspaceID),
 		AssigneeType: pgtype.Text{String: "agent", Valid: true},
 	}
 	svc := &TaskService{Queries: q, TxStarter: pool, Bus: events.New()}
@@ -1250,8 +1267,9 @@ func TestEnqueueChatTaskStampsChatEvidence(t *testing.T) {
 
 	svc := &TaskService{Queries: q, TxStarter: pool, Bus: events.New()}
 	task, err := svc.EnqueueChatTask(ctx, db.ChatSession{
-		ID:      util.MustParseUUID(chatSessionID),
-		AgentID: util.MustParseUUID(agentID),
+		ID:          util.MustParseUUID(chatSessionID),
+		WorkspaceID: util.MustParseUUID(workspaceID),
+		AgentID:     util.MustParseUUID(agentID),
 	}, util.MustParseUUID(userID), false)
 	if err != nil {
 		t.Fatalf("EnqueueChatTask: %v", err)

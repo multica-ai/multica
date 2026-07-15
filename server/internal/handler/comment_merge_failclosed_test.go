@@ -25,8 +25,8 @@ func TestMergeCommentIntoPendingTask_FailClosedKeepsOriginalSnapshot(t *testing.
 
 	var issueID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO issue (workspace_id, title, creator_type, creator_id, assignee_type, assignee_id, priority)
-		VALUES ($1, 'merge fail-closed', 'member', $2, 'agent', $3, 'medium') RETURNING id`,
+		INSERT INTO issue (workspace_id, space_id, title, creator_type, creator_id, assignee_type, assignee_id, priority)
+		VALUES ($1, (SELECT id FROM workspace_space WHERE workspace_id = $1 AND is_default LIMIT 1), 'merge fail-closed', 'member', $2, 'agent', $3, 'medium') RETURNING id`,
 		testWorkspaceID, testUserID, agentID).Scan(&issueID); err != nil {
 		t.Fatalf("seed issue: %v", err)
 	}

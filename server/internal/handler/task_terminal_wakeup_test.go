@@ -49,8 +49,8 @@ func TestTerminalTransitionsNotifyRuntime(t *testing.T) {
 
 	var issueID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type, number, position, assignee_type, assignee_id)
-		VALUES ($1, 'terminal wakeup fixture', 'in_progress', 'none', $2, 'member', 999099, 0, 'agent', $3)
+		INSERT INTO issue (workspace_id, space_id, title, status, priority, creator_id, creator_type, number, position, assignee_type, assignee_id)
+		VALUES ($1, (SELECT id FROM workspace_space WHERE workspace_id = $1 AND is_default LIMIT 1), 'terminal wakeup fixture', 'in_progress', 'none', $2, 'member', 999099, 0, 'agent', $3)
 		RETURNING id
 	`, testWorkspaceID, testUserID, agentID).Scan(&issueID); err != nil {
 		t.Fatalf("setup: create issue: %v", err)

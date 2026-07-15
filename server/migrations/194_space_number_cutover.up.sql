@@ -93,7 +93,7 @@ WHERE wt.workspace_id = p.workspace_id
 -- 2. Sync counters upward. GREATEST of the current counter, the max number
 --    actually minted into the Space, and (for the workspace's earliest Space
 --    only — there is no is_default flag, but that Space is always the one
---    migration 167 backfilled from the legacy workspace counter, since no
+--    migration 193 backfilled from the legacy workspace counter, since no
 --    other Space could have existed before that migration ran) the legacy
 --    workspace counter old writers incremented. Deliberately not filtered to
 --    archived_at IS NULL: this identifies which Space historically inherited

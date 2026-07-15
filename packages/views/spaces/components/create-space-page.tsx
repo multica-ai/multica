@@ -201,6 +201,10 @@ export function CreateSpacePage() {
                     </p>
                   </div>
                   <Select
+                    items={[
+                      { value: "open", label: t(($) => $.form.visibility_open) },
+                      { value: "private", label: t(($) => $.form.visibility_private) },
+                    ]}
                     value={visibility}
                     onValueChange={(value) => {
                       if (value === "open" || value === "private") setVisibility(value);

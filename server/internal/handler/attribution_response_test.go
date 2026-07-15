@@ -122,8 +122,8 @@ func TestListTasksByIssueHydratesAttribution(t *testing.T) {
 
 	var issueID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type, number, position)
-		VALUES ($1, 'attribution-list-issue', 'todo', 'medium', $2, 'member', 92777, 0)
+		INSERT INTO issue (workspace_id, space_id, title, status, priority, creator_id, creator_type, number, position)
+		VALUES ($1, (SELECT id FROM workspace_space WHERE workspace_id = $1 AND is_default LIMIT 1), 'attribution-list-issue', 'todo', 'medium', $2, 'member', 92777, 0)
 		RETURNING id
 	`, testWorkspaceID, testUserID).Scan(&issueID); err != nil {
 		t.Fatalf("create issue: %v", err)

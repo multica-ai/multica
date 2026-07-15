@@ -463,6 +463,10 @@ function Identity({ space }: { space: Space }) {
           {t(($) => $.form.visibility)}
         </Label>
         <Select
+          items={[
+            { value: "open", label: t(($) => $.form.visibility_open) },
+            { value: "private", label: t(($) => $.form.visibility_private) },
+          ]}
           value={space.visibility}
           disabled={!canManage}
           onValueChange={(value) => {
@@ -704,6 +708,12 @@ function MembersSection({ space, isLastActiveSpace }: { space: Space; isLastActi
                 </span>
                 {membership && canManage && selected.includes(member.user_id) && (
                   <Select
+                    items={[
+                      { value: "lead", label: "lead" },
+                      { value: "admin", label: "admin" },
+                      { value: "member", label: "member" },
+                      { value: "guest", label: "guest" },
+                    ]}
                     value={membership.role}
                     disabled={updateMemberRole.isPending}
                     onValueChange={(value) => {

@@ -109,6 +109,12 @@ func TestClaimTasksByRuntime_SkipsCrossWorkspaceRuntime(t *testing.T) {
 	if _, err := testPool.Exec(ctx, `INSERT INTO member (workspace_id, user_id, role) VALUES ($1,$2,'owner')`, foreignWS, foreignUser); err != nil {
 		t.Fatalf("foreign member: %v", err)
 	}
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO workspace_space (workspace_id, name, key, is_default, created_by)
+		VALUES ($1, 'Foreign Space', 'FGN', true, $2)
+	`, foreignWS, foreignUser); err != nil {
+		t.Fatalf("foreign Space: %v", err)
+	}
 	var foreignRT, foreignAgent, foreignIssue string
 	if err := testPool.QueryRow(ctx, `
 		INSERT INTO agent_runtime (workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, visibility, owner_id)
@@ -123,8 +129,8 @@ func TestClaimTasksByRuntime_SkipsCrossWorkspaceRuntime(t *testing.T) {
 		t.Fatalf("foreign agent: %v", err)
 	}
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type, number, position)
-		VALUES ($1, 'foreign issue', 'in_progress', 'none', $2, 'member', 1, 0)
+		INSERT INTO issue (workspace_id, space_id, title, status, priority, creator_id, creator_type, number, position)
+		VALUES ($1, (SELECT id FROM workspace_space WHERE workspace_id = $1 AND is_default LIMIT 1), 'foreign issue', 'in_progress', 'none', $2, 'member', 1, 0)
 		RETURNING id`, foreignWS, foreignUser).Scan(&foreignIssue); err != nil {
 		t.Fatalf("foreign issue: %v", err)
 	}

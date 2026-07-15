@@ -324,7 +324,14 @@ export function SettingsPage({ extraDeviceTabs }: SettingsPageProps = {}) {
   return (
     <div className="flex min-h-0 flex-1 flex-col md:flex-row md:overflow-hidden">
       <div className="border-b border-surface-border bg-app-shell/70 p-3 md:hidden">
-        <Select value={activePath} onValueChange={selectDestination}>
+        <Select
+          items={destinations.map((destination) => ({
+            value: `${destination.scope}/${destination.key}`,
+            label: destination.label,
+          }))}
+          value={activePath}
+          onValueChange={selectDestination}
+        >
           <SelectTrigger className="w-full" aria-label={t(($) => $.page.title)}>
             <SelectValue>
               {active?.label ?? t(($) => $.page.loading)}

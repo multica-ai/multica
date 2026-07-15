@@ -7,7 +7,7 @@ ALTER TABLE workspace_space_member
     ADD COLUMN sort_order DOUBLE PRECISION NOT NULL DEFAULT 0;
 
 -- Backfill: stable per-user sequence by join time (default space first since
--- it was backfilled earliest in migration 167).
+-- it was backfilled earliest in migration 193).
 WITH ranked AS (
     SELECT space_id, user_id,
            row_number() OVER (

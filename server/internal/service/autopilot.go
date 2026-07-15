@@ -1210,7 +1210,7 @@ func (s *AutopilotService) shouldSkipDispatch(ctx context.Context, ap db.Autopil
 		if actorUserID.Valid {
 			return "you are not allowed to trigger this autopilot's assignee agent", dispatch.ReasonInvocationNotAllowed, true
 		}
-		return "autopilot creator lacks access to private assignee agent", dispatch.ReasonInvocationNotAllowed, true
+		return "autopilot creator cannot invoke assignee agent in target Space", dispatch.ReasonInvocationNotAllowed, true
 	}
 	return "", "", false
 }

@@ -15,7 +15,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/migrations"
 )
 
-// Migration B (168_space_number_cutover) end-to-end invariant test.
+// Migration B (194_space_number_cutover) end-to-end invariant test.
 //
 // The full migration chain cannot be replayed locally (084/101 need pg15+
 // UNIQUE NULLS NOT DISTINCT and the dev box only has pg14), and Docker is
@@ -168,8 +168,8 @@ func cutoverFilePaths(t *testing.T) (up167, up168 string) {
 	if err != nil {
 		t.Fatalf("resolve migrations dir: %v", err)
 	}
-	up167 = filepath.Join(dir, "167_workspace_space.up.sql")
-	up168 = filepath.Join(dir, "168_space_number_cutover.up.sql")
+	up167 = filepath.Join(dir, "193_workspace_space.up.sql")
+	up168 = filepath.Join(dir, "194_space_number_cutover.up.sql")
 	for _, p := range []string{up167, up168} {
 		if _, err := os.Stat(p); err != nil {
 			t.Fatalf("migration file missing: %s: %v", p, err)

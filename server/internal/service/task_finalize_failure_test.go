@@ -90,6 +90,7 @@ func dispatchedCommentTaskFixture(t *testing.T, ctx context.Context, pool *pgxpo
 	if _, err := pool.Exec(ctx, `INSERT INTO member (workspace_id, user_id, role) VALUES ($1,$2,'owner')`, workspaceID, userID); err != nil {
 		t.Fatalf("create member: %v", err)
 	}
+	spaceID := createServiceTestSpace(t, pool, workspaceID, userID)
 	var runtimeID string
 	if err := pool.QueryRow(ctx, `
 		INSERT INTO agent_runtime (workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, visibility, owner_id)
@@ -106,9 +107,9 @@ func dispatchedCommentTaskFixture(t *testing.T, ctx context.Context, pool *pgxpo
 	}
 	var issueID string
 	if err := pool.QueryRow(ctx, `
-		INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type, number, position)
-		VALUES ($1, 'ff issue', 'in_progress', 'none', $2, 'member', 600001, 0)
-		RETURNING id`, workspaceID, userID).Scan(&issueID); err != nil {
+		INSERT INTO issue (workspace_id, space_id, title, status, priority, creator_id, creator_type, number, position)
+		VALUES ($1, $2, 'ff issue', 'in_progress', 'none', $3, 'member', 600001, 0)
+		RETURNING id`, workspaceID, spaceID, userID).Scan(&issueID); err != nil {
 		t.Fatalf("create issue: %v", err)
 	}
 	var commentID string
