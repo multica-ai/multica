@@ -9,20 +9,19 @@ package main
 // CEREBRO-PATCH markers; the single upstream touch is its registration line in
 // main.go.
 //
-// Three gates protect the user's logged-in browser (see
+// Two gates protect the user's logged-in browser (see
 // daemon_personal_browser_cerebro.go and cerebro-browser-control-server.ts):
-//   1. Capability (authoritative): the daemon only sets MULTICA_PERSONAL_BROWSER
-//      for agents whose `tools:personal-browser` resolves allow/ask. This CLI
-//      refuses to run without it — so an ungranted agent cannot act even if it
-//      finds the loopback sidecar.
+//   1. Capability (authoritative): the desktop control server authorizes every
+//      action for the calling agent and target host against the Multica server.
 //   2. Loopback + token: the desktop control server binds 127.0.0.1 and requires
 //      the bearer token from the 0600 sidecar file.
-//   3. Audit: the desktop side logs every action against the real session.
+// Audit runs on both the desktop and server sides for every action.
 
 import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -44,11 +43,6 @@ const (
 	desktopAppName     = "Multica"
 )
 
-// personalBrowserGrantEnvCLI mirrors handler.personalBrowserGrantEnv — the grant
-// signal the daemon injects only for allowed agents. Duplicated as a const here
-// because the CLI must not import the server handler package.
-const personalBrowserGrantEnvCLI = "MULTICA_PERSONAL_BROWSER"
-
 const cerebroBrowserClientTimeout = 60 * time.Second
 
 // cerebroBrowserSidecar is the rendezvous file the desktop control server writes
@@ -59,6 +53,13 @@ type cerebroBrowserSidecar struct {
 	Token string `json:"token"`
 	PID   int    `json:"pid"`
 }
+
+type cerebroBrowserTransportError struct {
+	err error
+}
+
+func (e *cerebroBrowserTransportError) Error() string { return e.err.Error() }
+func (e *cerebroBrowserTransportError) Unwrap() error { return e.err }
 
 func cerebroBrowserSidecarPath() (string, error) {
 	home, err := os.UserHomeDir()
@@ -71,17 +72,10 @@ func cerebroBrowserSidecarPath() (string, error) {
 // callCerebroBrowser POSTs one action to the desktop control server and prints
 // the JSON response to stdout (the agent reads it as the tool result).
 func callCerebroBrowser(cmd *cobra.Command, action string, payload map[string]any) error {
-	if os.Getenv(personalBrowserGrantEnvCLI) == "" {
-		return fmt.Errorf(
-			"personal browser is not enabled for this workspace — ask an admin to turn on the Browser feature, then allow the 'tools:personal-browser' capability for you in Settings → Permissions",
-		)
-	}
-
 	// Forward the agent's own token so the desktop control server can ask the
 	// Multica server, AS THIS AGENT, whether the action is allowed on the target
 	// host. This is the authoritative per-action gate — without a valid agent
-	// token the action is denied server-side, so the env check above is only a
-	// fast local fail, never the security boundary.
+	// token the action is denied server-side.
 	if payload == nil {
 		payload = map[string]any{}
 	}
@@ -126,7 +120,7 @@ func callCerebroBrowser(cmd *cobra.Command, action string, payload map[string]an
 
 	resp, err := (&http.Client{Timeout: cerebroBrowserClientTimeout}).Do(req)
 	if err != nil {
-		return fmt.Errorf("reaching the personal browser: %w", err)
+		return &cerebroBrowserTransportError{err: fmt.Errorf("reaching the personal browser: %w", err)}
 	}
 	defer resp.Body.Close()
 
@@ -191,14 +185,18 @@ func launchDesktopApp() error {
 	switch runtime.GOOS {
 	case "darwin":
 		// Prefer launch-by-bundle-id (robust to where the .app lives); fall back
-		// to launch-by-name. `open` returns immediately, so the app is detached.
+		// to launch-by-name. `open` returns after handing the app to LaunchServices,
+		// so Run captures a missing-app error without waiting for Electron to exit.
 		if _, err := exec.LookPath("open"); err != nil {
 			return fmt.Errorf("cannot launch the Multica desktop app: `open` not found")
 		}
-		if err := exec.Command("open", "-b", desktopAppBundleID).Start(); err == nil {
+		if err := exec.Command("open", "-b", desktopAppBundleID).Run(); err == nil {
 			return nil
 		}
-		cmd = exec.Command("open", "-a", desktopAppName)
+		if err := exec.Command("open", "-a", desktopAppName).Run(); err != nil {
+			return fmt.Errorf("the Multica desktop app is not installed or could not be launched: %w", err)
+		}
+		return nil
 	case "windows":
 		// Best-effort: ask the shell to start the app by its product name.
 		cmd = exec.Command("cmd", "/c", "start", "", desktopAppName)
@@ -223,29 +221,35 @@ func launchDesktopApp() error {
 	return nil
 }
 
+var cerebroBrowserLaunchDesktopApp = launchDesktopApp
+
 // runCerebroBrowserOpen launches the desktop app if needed and asks it to open
 // & focus the Browser tab for the human (optionally pre-navigated to url).
 func runCerebroBrowserOpen(cmd *cobra.Command, url string) error {
-	// Same hard gate as every other action: an ungranted agent must not even
-	// launch the app.
-	if os.Getenv(personalBrowserGrantEnvCLI) == "" {
-		return fmt.Errorf(
-			"personal browser is not enabled for this workspace — ask an admin to turn on the Browser feature, then allow the 'tools:personal-browser' capability for you in Settings → Permissions",
-		)
-	}
-
 	payload := map[string]any{}
 	if url != "" {
 		payload["url"] = url
 	}
 
-	// Already running → just open the tab.
+	// Already running → just open the tab. A complete but unreachable sidecar is
+	// stale (for example after a desktop crash); discard it and relaunch instead
+	// of returning a misleading transport failure.
 	if sidecarReady() {
-		return callCerebroBrowser(cmd, "open-tab", payload)
+		err := callCerebroBrowser(cmd, "open-tab", payload)
+		if err == nil {
+			return nil
+		}
+		var transportErr *cerebroBrowserTransportError
+		if !errors.As(err, &transportErr) {
+			return err
+		}
+		if path, pathErr := cerebroBrowserSidecarPath(); pathErr == nil {
+			_ = os.Remove(path)
+		}
 	}
 
 	// Not running → launch and wait for the control server to come up.
-	if err := launchDesktopApp(); err != nil {
+	if err := cerebroBrowserLaunchDesktopApp(); err != nil {
 		return err
 	}
 

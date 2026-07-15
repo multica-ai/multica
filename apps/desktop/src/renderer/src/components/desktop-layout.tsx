@@ -160,7 +160,8 @@ function DesktopInboxBridge() {
 
 function DesktopCerebroBrowserBridge() {
   // Cerebro personal-browser bridge (FIR-2037): ensure the agent-control server
-  // is up at startup (flag-on) and open the Browser tab when an agent asks.
+  // is up at startup for precise diagnostics, and open the Browser tab when an
+  // authorized agent asks while the feature is on.
   // Mounted only after a workspace resolves because the feature flag hook is
   // workspace-scoped.
   useCerebroBrowserBridge();

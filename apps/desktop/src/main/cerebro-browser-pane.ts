@@ -406,10 +406,9 @@ export function setupCerebroBrowserPane(
   const pane = new CerebroBrowserPane(getWindow);
   paneSingleton = pane;
 
-  // Bring up the capability-gated agent transport at app startup (flag-on),
-  // before the human ever opens the Browser tab — otherwise the sidecar the
-  // CLI reads would only exist after a manual tab open, and an agent could not
-  // open the tab for the human in the first place.
+  // The renderer brings up this capability-gated transport at desktop-shell
+  // startup, even while the feature is off, so the CLI can receive the precise
+  // feature-disabled verdict. This handler is the renderer-to-main seam.
   ipcMain.handle("cerebro-browser:ensure-control-server", () =>
     ensureCerebroBrowserControlServer(),
   );

@@ -6,9 +6,10 @@ package handler
 // The personal browser is a Multica-owned Chromium pane that lives inside the
 // desktop app (apps/desktop/src/main/cerebro-browser-pane.ts). A runtime agent
 // drives it through the `multica cerebro-browser` CLI, which reaches the
-// desktop app's loopback control server. At claim time the daemon injects
+// desktop app's loopback control server. At claim time the server attaches
 // MULTICA_PERSONAL_BROWSER=1 when the feature is switched ON for the workspace
-// (the kill switch); the CLI fast-fails without it.
+// (the kill switch). This is an optional compatibility hint; the CLI does not
+// trust it because local daemons reserve and strip MULTICA_* custom env keys.
 //
 // The AUTHORITATIVE, per-agent, per-host decision is NOT here — it is per action
 // in AuthorizePersonalBrowser (personal_browser_authorize_cerebro.go), which
@@ -38,10 +39,9 @@ import (
 // gate (AuthorizePersonalBrowser) resolves the chain on this key.
 const personalBrowserToolKey = "tools:personal-browser"
 
-// personalBrowserGrantEnv is the env var the daemon injects into a spawned
-// agent when the feature is enabled for its workspace. The `multica
-// cerebro-browser` CLI fast-fails without it; the real authorization is the
-// per-action server gate.
+// personalBrowserGrantEnv is the optional claim hint attached when the feature
+// is enabled for the workspace. The CLI does not trust or require it; the real
+// authorization is the per-action server gate.
 const personalBrowserGrantEnv = "MULTICA_PERSONAL_BROWSER"
 
 // personalBrowserFeatureFlag is the workspace kill switch for the whole personal
@@ -90,10 +90,10 @@ func (h *Handler) personalBrowserFeatureEnabled(ctx context.Context, wsID, owner
 
 // withPersonalBrowserEnv returns the agent's custom-env map with the personal
 // browser grant merged in when, and only when, the feature flag is ON for the
-// workspace. The env is a "feature reachable, use the per-action gate" signal the
-// CLI fast-fails on when absent — it is NOT the authorization decision (that is
-// per action, per host, Base=Deny, in AuthorizePersonalBrowser). A nil input map
-// is allocated lazily only when the grant is added, so the off path keeps nil nil.
+// workspace. The env is only a compatibility hint and is NOT the authorization
+// decision (that is per action, per host, opt-in, in AuthorizePersonalBrowser).
+// A nil input map is allocated lazily only when the hint is added, so the off path
+// keeps nil nil.
 func (h *Handler) withPersonalBrowserEnv(ctx context.Context, env map[string]string, wsID, ownerID pgtype.UUID) map[string]string {
 	if !h.personalBrowserFeatureEnabled(ctx, wsID, ownerID) {
 		return env

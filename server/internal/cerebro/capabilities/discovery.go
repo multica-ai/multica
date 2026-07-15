@@ -136,10 +136,9 @@ var providerRegistry = map[string]Set{
 			// into, via the `multica cerebro-browser` CLI over a loopback control
 			// channel. Like agent-browser it is a Bash-invoked local CLI, not a
 			// native Claude tool, so it surfaces as the capability
-			// "tools:personal-browser" in the Tools tab and its real enforcement
-			// is the claim-time gate (resolvePersonalBrowserAllowed), not the
-			// PreToolUse hook. Default stays Deny: the agent never receives the
-			// MULTICA_PERSONAL_BROWSER grant until the policy resolves allow/ask.
+			// "tools:personal-browser" in the Tools tab. Its real enforcement is
+			// the server-side per-action, per-host authorization called by the
+			// desktop control server. Default stays Deny.
 			"personal-browser",
 		},
 		MCPServers:      []string{},

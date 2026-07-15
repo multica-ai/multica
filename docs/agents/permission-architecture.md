@@ -129,6 +129,7 @@ The unified tool-policy chain is the model we want **everything** to converge on
 | Gate | Where | Live? |
 |---|---|---|
 | agent-browser unix-socket (`tools:agent-browser`, **Base=Deny**) | `daemon_tool_policy_cerebro.go:281` | live |
+| personal browser per-action host gate (`tools:personal-browser`, agent opt-in + feature kill switch) | `personal_browser_authorize_cerebro.go` `AuthorizePersonalBrowser` | live |
 | agent-browser Agent Vault login provisioning (`credential.reveal`, exact `Shared/browser-login/<app>` box + `browser-testers`) | `handler/agent_browser_auth_cerebro.go` | live |
 | repo checkout (`repo.checkout`, Base=Allow) | `handler/repo_approval_cerebro.go:42` `CheckDaemonRepoCapability` | live |
 | `create_local_runtime` | `group_permissions_cerebro.go:186` | live |

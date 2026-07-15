@@ -1,12 +1,11 @@
 // FIR-2037: renderer↔main bridge for the personal browser (cerebro).
 //
-// Two startup responsibilities, both flag-guarded so a flag-off build is inert:
+// Two startup responsibilities with separate gates:
 //
 //   1. Ensure the loopback agent-control server (and its `~/.multica` sidecar)
-//      is up the moment the app is in a workspace with the `cerebro_browser`
-//      flag on — NOT only after the human opens the Browser tab. Without this
-//      an agent could never open the tab in the first place, because the
-//      sidecar the CLI reads would not yet exist.
+//      is up whenever the signed-in desktop shell mounts. It stays available
+//      while the feature is off so the server can return the precise
+//      "Browser feature is disabled" verdict instead of a transport timeout.
 //
 //   2. Listen for the main process asking us to open & focus the Browser tab
 //      (fired when an agent runs `multica cerebro-browser open`). We navigate
@@ -45,11 +44,12 @@ export function useCerebroBrowserBridge(): void {
     slugRef.current = slug;
   }, [slug]);
 
-  // (1) Bring up the control server once, when the flag is on and the bridge
-  // (window.cerebroBrowser) exists (desktop only).
+  // (1) Bring up the diagnostic/control transport once when the desktop bridge
+  // exists. Feature and permission authorization still happen server-side for
+  // every action; starting this loopback server grants no browser access.
   const ensuredRef = useRef(false);
   useEffect(() => {
-    if (!enabled || ensuredRef.current) return;
+    if (ensuredRef.current) return;
     const api = typeof window !== "undefined" ? window.cerebroBrowser : undefined;
     if (!api) return;
     ensuredRef.current = true;
@@ -59,7 +59,7 @@ export function useCerebroBrowserBridge(): void {
       // surfaces a clear error in that case.
       ensuredRef.current = false;
     });
-  }, [enabled]);
+  }, []);
 
   // (2) Register the open-tab listener while the flag is on.
   useEffect(() => {

@@ -5,6 +5,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -56,7 +57,6 @@ func TestCerebroBrowserOpen_SidecarPresent_PostsOpenTab(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home) // windows home resolution
-	t.Setenv(personalBrowserGrantEnvCLI, "1")
 	t.Setenv("MULTICA_TOKEN", "agent-token-xyz")
 	writeTestSidecar(t, home, portIntOf(t, srv), token)
 
@@ -84,18 +84,109 @@ func TestCerebroBrowserOpen_SidecarPresent_PostsOpenTab(t *testing.T) {
 	}
 }
 
-func TestCerebroBrowserOpen_NoGrantEnv_Refuses(t *testing.T) {
+func TestCerebroBrowserOpen_NoGrantEnv_PostsOpenTab(t *testing.T) {
+	var gotPath string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer srv.Close()
+
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
-	t.Setenv(personalBrowserGrantEnvCLI, "")
+	t.Setenv("MULTICA_TOKEN", "agent-token")
+	writeTestSidecar(t, home, portIntOf(t, srv), "sidecar-token")
 
 	cmd := &cobra.Command{}
 	cmd.SetOut(&bytes.Buffer{})
 	cmd.SetErr(&bytes.Buffer{})
 
-	if err := runCerebroBrowserOpen(cmd, ""); err == nil {
-		t.Fatal("expected an error when the grant env is unset, got nil")
+	if err := runCerebroBrowserOpen(cmd, ""); err != nil {
+		t.Fatalf("runCerebroBrowserOpen: %v", err)
+	}
+	if gotPath != "/agent/open-tab" {
+		t.Errorf("posted to %q, want /agent/open-tab", gotPath)
+	}
+}
+
+func TestCerebroBrowserOpen_AuthorizationDenied_ReturnsDistinctError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte(`{"error":"not granted for finance.firtal.com"}`))
+	}))
+	defer srv.Close()
+
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("MULTICA_TOKEN", "agent-token")
+	writeTestSidecar(t, home, portIntOf(t, srv), "sidecar-token")
+
+	cmd := &cobra.Command{}
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+
+	err := runCerebroBrowserOpen(cmd, "https://finance.firtal.com")
+	if err == nil || err.Error() != "personal browser: not granted for finance.firtal.com" {
+		t.Fatalf("error = %v, want distinct authorization error", err)
+	}
+}
+
+func TestCerebroBrowserOpen_StaleSidecar_RelaunchesDesktop(t *testing.T) {
+	stale := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	stalePort := portIntOf(t, stale)
+	stale.Close()
+
+	var gotPath string
+	live := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer live.Close()
+
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("MULTICA_TOKEN", "agent-token")
+	writeTestSidecar(t, home, stalePort, "stale-token")
+
+	previousLauncher := cerebroBrowserLaunchDesktopApp
+	cerebroBrowserLaunchDesktopApp = func() error {
+		writeTestSidecar(t, home, portIntOf(t, live), "live-token")
+		return nil
+	}
+	t.Cleanup(func() { cerebroBrowserLaunchDesktopApp = previousLauncher })
+
+	cmd := &cobra.Command{}
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+	if err := runCerebroBrowserOpen(cmd, ""); err != nil {
+		t.Fatalf("runCerebroBrowserOpen: %v", err)
+	}
+	if gotPath != "/agent/open-tab" {
+		t.Errorf("posted to %q, want /agent/open-tab after relaunch", gotPath)
+	}
+}
+
+func TestCerebroBrowserOpen_DesktopLaunchFailure_ReturnsDistinctError(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+
+	previousLauncher := cerebroBrowserLaunchDesktopApp
+	cerebroBrowserLaunchDesktopApp = func() error { return errors.New("Multica desktop app is not installed") }
+	t.Cleanup(func() { cerebroBrowserLaunchDesktopApp = previousLauncher })
+
+	cmd := &cobra.Command{}
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+	err := runCerebroBrowserOpen(cmd, "")
+	if err == nil || err.Error() != "Multica desktop app is not installed" {
+		t.Fatalf("error = %v, want distinct desktop launch error", err)
 	}
 }
 
@@ -113,7 +204,6 @@ func TestCerebroBrowserSecureFill_SendsReferencesOnly(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
-	t.Setenv(personalBrowserGrantEnvCLI, "1")
 	t.Setenv("MULTICA_TOKEN", "agent-token")
 	writeTestSidecar(t, home, portIntOf(t, srv), "sidecar-token")
 	var out bytes.Buffer

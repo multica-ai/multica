@@ -11,9 +11,9 @@
 // asks the Multica server "may THIS agent drive the personal browser on THIS
 // host, right now?" — POST /api/cerebro/personal-browser/authorize, authenticated
 // with the agent's own token (which the CLI forwards). The server resolves the
-// full tool-policy chain (workspace → runtime → agent → group → user) with
-// Base=Deny and the target host in context, so a host-allowlist condition ("only
-// these domains") bites. This makes the gate:
+// full tool-policy chain (workspace → runtime → agent → group → user) as an
+// explicit agent opt-in, with the target host in context so a host-allowlist
+// condition ("only these domains") bites. This makes the gate:
 //   - all-layer (the chain), conditional / site-limited (the host), and
 //   - a HARD boundary, not advisory: an ungranted agent presenting its own token
 //     is denied even if it read the loopback sidecar token, closing the

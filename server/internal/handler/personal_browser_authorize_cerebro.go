@@ -7,10 +7,10 @@ package handler
 // is too early to honour conditions: at claim time we do not know which site the
 // agent will open. This endpoint moves the real decision to PER ACTION — every
 // time the agent opens or acts on a site, the desktop control server calls here
-// with the target HOST, and we resolve the full tool-policy chain
-// (workspace → runtime → agent → group → user) with Base=Deny AND the host in the
-// request context, so a host-allowlist condition ("only these domains") actually
-// bites (FIR-1609 conditions). This is what makes the personal browser:
+// with the target HOST, and we resolve an agent opt-in through the full
+// tool-policy chain (workspace → runtime → agent → group → user), with the host
+// in the request context so a host-allowlist condition ("only these domains")
+// actually bites (FIR-1609 conditions). This is what makes the personal browser:
 //   - settable on ALL layers (the chain already does this),
 //   - conditional / site-limited (RequestContext.Host below), and
 //   - authoritative: the caller is the AGENT (mat_ token), resolved server-side
@@ -150,10 +150,11 @@ type personalBrowserAuthorizeRequest struct {
 // Body:     { "host": "app.example.com", "action": "navigate" }
 // Response: { "allowed": bool, "decision": "allow|ask|deny", "reason": string }
 //
-// The chain is resolved with Base=Deny: an unconfigured workspace keeps the
-// browser sealed. Only an explicit allow opens it; ask (human approval) and deny
-// both return allowed=false here — the personal-browser surface acts inside the
-// user's real, logged-in session, so it never proceeds on an unresolved ask.
+// The chain is resolved as an agent opt-in: an unconfigured agent keeps the
+// browser sealed. Only an explicit Agent Allow opens it; ask (human approval)
+// and deny both return allowed=false here — the personal-browser surface acts
+// inside the user's real, logged-in session, so it never proceeds on an
+// unresolved ask.
 func (h *Handler) AuthorizePersonalBrowser(w http.ResponseWriter, r *http.Request) {
 	// Authoritative identity: the auth middleware validated the mat_ token and
 	// SERVER-SET these headers from the token row (overriding anything the client
@@ -209,9 +210,16 @@ func (h *Handler) AuthorizePersonalBrowser(w http.ResponseWriter, r *http.Reques
 		})
 		return
 	}
+	if !h.personalBrowserFeatureEnabled(r.Context(), wsID, ownerID) {
+		h.auditPersonalBrowser(wsID, agentID, host, req.Action, "deny", "Browser feature is disabled")
+		writeJSON(w, http.StatusOK, map[string]any{
+			"allowed": false, "decision": "deny", "reason": "Browser feature is disabled",
+		})
+		return
+	}
 
 	store := toolpolicy.NewStoreFromQueries(h.CerebroQueries)
-	eff, err := store.Resolve(r.Context(), toolpolicy.Query{
+	query := toolpolicy.Query{
 		WorkspaceID: wsID,
 		ToolKey:     personalBrowserToolKey,
 		RuntimeID:   runtimeID,
@@ -221,8 +229,8 @@ func (h *Handler) AuthorizePersonalBrowser(w http.ResponseWriter, r *http.Reques
 		// bites when the call's host is on the list (FIR-1609). Rows without a
 		// condition (a plain Allow/Deny) ignore the host and resolve as before.
 		RequestContext: toolpolicy.RequestContext{Host: host},
-		Base:           toolpolicy.SettingDeny,
-	})
+	}
+	allowed, err := store.ResolveActorOptIn(r.Context(), query, true)
 	if err != nil {
 		slog.Error("personal-browser authorize: resolve failed",
 			"workspace_id", util.UUIDToString(wsID), "agent_id", util.UUIDToString(agentID), "host", host, "error", err)
@@ -232,24 +240,39 @@ func (h *Handler) AuthorizePersonalBrowser(w http.ResponseWriter, r *http.Reques
 	}
 
 	decision := "deny"
-	allowed := false
-	switch eff.Setting {
-	case toolpolicy.SettingAllow:
-		decision, allowed = "allow", true
-	case toolpolicy.SettingAsk:
-		// Ask means a human must approve. There is no inbox round-trip on this
-		// surface yet, so an unresolved ask does NOT proceed — it acts inside the
-		// user's real session. Surfaced distinctly so the desktop can say why.
-		decision = "ask"
-	default:
-		decision = "deny"
+	reason := "tools:personal-browser is not granted for this agent"
+	if allowed {
+		decision = "allow"
+		reason = "Allowed by agent"
+	} else {
+		// Resolve the authored ceilings against an Allow baseline only to preserve
+		// the distinct Ask/Deny explanation. It does not grant access: the opt-in
+		// verdict above remains authoritative, so no stored row still stays denied.
+		eff, resolveErr := store.Resolve(r.Context(), query)
+		if resolveErr != nil {
+			slog.Error("personal-browser authorize: explanation resolve failed",
+				"workspace_id", util.UUIDToString(wsID), "agent_id", util.UUIDToString(agentID), "host", host, "error", resolveErr)
+			h.auditPersonalBrowser(wsID, agentID, host, req.Action, "deny", "resolve failed")
+			writeError(w, http.StatusInternalServerError, "permission check failed")
+			return
+		}
+		switch eff.Setting {
+		case toolpolicy.SettingAsk:
+			// Ask means a human must approve. There is no inbox round-trip on this
+			// surface yet, so an unresolved ask does NOT proceed — it acts inside the
+			// user's real session. Surfaced distinctly so the desktop can say why.
+			decision = "ask"
+			reason = eff.Reason
+		case toolpolicy.SettingDeny, toolpolicy.SettingDisable:
+			reason = eff.Reason
+		}
 	}
 
-	h.auditPersonalBrowser(wsID, agentID, host, req.Action, decision, eff.Reason)
+	h.auditPersonalBrowser(wsID, agentID, host, req.Action, decision, reason)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"allowed":  allowed,
 		"decision": decision,
-		"reason":   eff.Reason,
+		"reason":   reason,
 	})
 }
 

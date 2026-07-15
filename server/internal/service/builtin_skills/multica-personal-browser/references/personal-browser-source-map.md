@@ -14,21 +14,23 @@ at the bottom before relying on an exact line.
 | Desktop app identity for launch (`appId` / `productName`) | `server/cmd/multica/cerebro_browser.go` (`desktopAppBundleID`, `desktopAppName`) ↔ `apps/desktop/electron-builder.yml` |
 | `--session` persistent flag | `server/cmd/multica/cerebro_browser.go` (`PersistentFlags().String("session", …)`) |
 | Registered on the root command | `server/cmd/multica/main.go` (`rootCmd.AddCommand(cerebroBrowserCmd)`, marked `CEREBRO-PATCH(cerebro-browser-cli)`) |
-| Refuses without the grant env `MULTICA_PERSONAL_BROWSER` | `server/cmd/multica/cerebro_browser.go` (`callCerebroBrowser`) |
+| Does not trust the optional claim-time `MULTICA_PERSONAL_BROWSER` hint; authorization happens per action | `server/cmd/multica/cerebro_browser.go` (`callCerebroBrowser`) |
 | Reads sidecar `~/.multica/cerebro-browser-control.json` for port + token | `server/cmd/multica/cerebro_browser.go` (`cerebroBrowserSidecarPath`) |
 | POSTs `http://127.0.0.1:<port>/agent/<action>` with `Authorization: Bearer <token>` | `server/cmd/multica/cerebro_browser.go` (`callCerebroBrowser`) |
 
 ## Capability gate — `tools:personal-browser`
 
-The decision is split: a claim-time FEATURE gate (is the browser reachable at
-all) and the authoritative PER-ACTION gate (may this agent drive this host now).
+The claim response carries a best-effort feature hint, while the authoritative
+PER-ACTION gate decides whether this agent may drive this host now. The CLI does
+not trust the hint because local daemons reserve and strip `MULTICA_*` custom env
+keys.
 
 | Behavior | File:line |
 |---|---|
 | Capability declared in the Claude tool set (mirrors to `tools:personal-browser`) | `server/internal/cerebro/capabilities/discovery.go` (`providerRegistry["claude"].Tools`, `"personal-browser"`) |
 | Capability key constant | `server/internal/handler/daemon_personal_browser_cerebro.go` (`personalBrowserToolKey`) |
-| Grant env constant `MULTICA_PERSONAL_BROWSER` | `server/internal/handler/daemon_personal_browser_cerebro.go` (`personalBrowserGrantEnv`) |
-| Claim-time env tracks the **feature flag** `cerebro_browser` (not the capability — a host-conditioned grant can't be evaluated with no host) | `server/internal/handler/daemon_personal_browser_cerebro.go` (`personalBrowserFeatureEnabled`, `withPersonalBrowserEnv`) |
+| Optional claim hint `MULTICA_PERSONAL_BROWSER` | `server/internal/handler/daemon_personal_browser_cerebro.go` (`personalBrowserGrantEnv`) |
+| Claim hint tracks the **feature flag** `cerebro_browser`, never authorization | `server/internal/handler/daemon_personal_browser_cerebro.go` (`personalBrowserFeatureEnabled`, `withPersonalBrowserEnv`) |
 | Claim-time call site | `server/internal/handler/daemon.go` (`ClaimTaskByRuntime`, marked `CEREBRO-PATCH(personal-browser-gate)`) |
 
 ### Per-action authoritative gate (all-layer + conditions + site-limits)
@@ -36,7 +38,7 @@ all) and the authoritative PER-ACTION gate (may this agent drive this host now).
 | Behavior | File:line |
 |---|---|
 | Endpoint `POST /api/cerebro/personal-browser/authorize` (agent `mat_` token) | `server/cmd/server/router.go` (marked `CEREBRO-PATCH(personal-browser-authorize-route)`) |
-| Resolves the full chain with **Base = Deny + `RequestContext{Host}`** so a host-allowlist condition bites (FIR-1609) | `server/internal/handler/personal_browser_authorize_cerebro.go` (`AuthorizePersonalBrowser`) |
+| Resolves an explicit Agent opt-in with `ResolveActorOptIn` + `RequestContext{Host}` so no grant stays denied and a host-allowlist condition bites | `server/internal/handler/personal_browser_authorize_cerebro.go` (`AuthorizePersonalBrowser`) |
 | Agent identity from server-set `X-Agent-ID` / `X-Workspace-ID` (auth middleware, `X-Actor-Source: task_token`) | `server/internal/middleware/auth.go`; `personal_browser_authorize_cerebro.go` |
 | Central audit (which agent, which host, decision) | `server/internal/handler/personal_browser_authorize_cerebro.go` (`auditPersonalBrowser`) |
 | Desktop control server authorizes every action against the endpoint (fails closed) | `apps/desktop/src/main/cerebro-browser-control-server.ts` (`authorize`, `Route.hostFor`) |
@@ -50,7 +52,7 @@ all) and the authoritative PER-ACTION gate (may this agent drive this host now).
 | Loopback control server (127.0.0.1, bearer token, audit) | `apps/desktop/src/main/cerebro-browser-control-server.ts` |
 | Writes the 0600 sidecar `cerebro-browser-control.json` | `apps/desktop/src/main/cerebro-browser-control-server.ts` (`ensureCerebroBrowserControlServer`) |
 | `/agent/open-tab` route (background-loads url, then asks the renderer to show the tab) | `apps/desktop/src/main/cerebro-browser-control-server.ts` (`buildRoutes`) |
-| Control server started at app startup (flag-on), not only on manual tab open | `apps/desktop/src/main/cerebro-browser-pane.ts` (`cerebro-browser:ensure-control-server`) ← `apps/desktop/src/renderer/src/cerebro/use-cerebro-browser-bridge.ts` |
+| Control server started at desktop-shell startup even when the feature is off, so `open` receives the precise feature-disabled verdict | `apps/desktop/src/main/cerebro-browser-pane.ts` (`cerebro-browser:ensure-control-server`) ← `apps/desktop/src/renderer/src/cerebro/use-cerebro-browser-bridge.ts` |
 | Pane focuses the window + asks renderer to open the Browser tab | `apps/desktop/src/main/cerebro-browser-pane.ts` (`requestOpenTab`) |
 | Renderer opens the Browser route when the agent asks | `apps/desktop/src/renderer/src/cerebro/use-cerebro-browser-bridge.ts` (`onOpenTab`) |
 | Audit log `~/.multica/logs/cerebro-browser-audit.log` (never logs typed values) | `apps/desktop/src/main/cerebro-browser-control-server.ts` (`audit`, `/agent/fill` handler) |
