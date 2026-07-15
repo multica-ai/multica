@@ -2011,39 +2011,46 @@ func TestPrepareCodexHomeSeedsFromShared(t *testing.T) {
 	}
 
 	// sessions should be a real, task-local directory — NOT a symlink into the
-	// shared home (MUL-4424). A fresh home gets an empty local dir.
+	// shared home (MUL-4424). A fresh home gets an empty private local dir.
 	sessionsPath := filepath.Join(codexHome, "sessions")
 	fi, err := os.Lstat(sessionsPath)
 	if err != nil {
 		t.Fatalf("sessions not found: %v", err)
 	}
-	if fi.Mode()&os.ModeSymlink != 0 {
-		t.Error("sessions should be a task-local directory, not a symlink into the shared home")
+	if fi.Mode()&os.ModeSymlink != 0 || !fi.IsDir() {
+		t.Fatalf("sessions mode = %v, want task-private directory", fi.Mode())
 	}
-	if !fi.IsDir() {
-		t.Error("sessions should be a directory")
+	if fi.Mode().Perm() != 0o700 {
+		t.Errorf("sessions mode = %#o, want 0700", fi.Mode().Perm())
 	}
 
-	// auth.json should be a symlink.
+	// auth.json must be a private, permission-restricted snapshot.
 	authPath := filepath.Join(codexHome, "auth.json")
 	fi, err = os.Lstat(authPath)
 	if err != nil {
 		t.Fatalf("auth.json not found: %v", err)
 	}
-	authIsLink := fi.Mode()&os.ModeSymlink != 0
-	if !authIsLink && runtime.GOOS != "windows" {
-		t.Error("auth.json should be a symlink")
+	if fi.Mode()&os.ModeSymlink != 0 || !fi.Mode().IsRegular() {
+		t.Fatalf("auth.json mode = %v, want task-private regular file", fi.Mode())
 	}
-	if authIsLink {
-		target, _ := os.Readlink(authPath)
-		if target != filepath.Join(sharedHome, "auth.json") {
-			t.Errorf("auth.json symlink target = %q, want %q", target, filepath.Join(sharedHome, "auth.json"))
-		}
+	if fi.Mode().Perm() != 0o600 {
+		t.Errorf("auth.json mode = %#o, want 0600", fi.Mode().Perm())
 	}
-	// Verify content is accessible through symlink.
+	// Verify content was captured, then prove later owner mutation cannot alter
+	// the credentials visible to the running task.
 	data, _ := os.ReadFile(authPath)
 	if string(data) != `{"token":"secret"}` {
 		t.Errorf("auth.json content = %q", data)
+	}
+	if err := os.WriteFile(filepath.Join(sharedHome, "auth.json"), []byte(`{"token":"rotated"}`), 0o600); err != nil {
+		t.Fatalf("rotate shared auth: %v", err)
+	}
+	data, err = os.ReadFile(authPath)
+	if err != nil {
+		t.Fatalf("read auth snapshot after owner mutation: %v", err)
+	}
+	if string(data) != `{"token":"secret"}` {
+		t.Errorf("auth snapshot changed with owner file: %q", data)
 	}
 
 	// config.json should be a copy (not symlink).
@@ -2219,8 +2226,8 @@ func TestPrepareCodexHomeSkipsMissingFiles(t *testing.T) {
 		t.Fatalf("prepareCodexHome failed: %v", err)
 	}
 
-	// Directory should contain task-local sessions, the model-cache config
-	// binding, and auto-generated config.toml.
+	// Directory should contain private task-local sessions, the model-cache
+	// config binding, and auto-generated config.toml.
 	entries, err := os.ReadDir(codexHome)
 	if err != nil {
 		t.Fatalf("failed to read codex-home: %v", err)
@@ -2230,7 +2237,7 @@ func TestPrepareCodexHomeSkipsMissingFiles(t *testing.T) {
 		entryNames[e.Name()] = true
 	}
 	if !entryNames["sessions"] {
-		t.Error("expected sessions directory")
+		t.Error("expected private sessions directory")
 	}
 	if !entryNames["config.toml"] {
 		t.Error("expected config.toml (auto-generated for network access)")
@@ -2247,20 +2254,40 @@ func TestPrepareCodexHomeSkipsMissingFiles(t *testing.T) {
 		}
 	}
 	// sessions should be a real, task-local directory — not a symlink into the
-	// shared home (MUL-4424).
+	// shared home, even when the shared home is empty (MUL-4424).
 	sessionsPath := filepath.Join(codexHome, "sessions")
 	fi, err := os.Lstat(sessionsPath)
 	if err != nil {
 		t.Fatalf("sessions not found: %v", err)
 	}
-	if fi.Mode()&os.ModeSymlink != 0 {
-		t.Error("sessions should be a task-local directory, not a symlink")
+	if fi.Mode()&os.ModeSymlink != 0 || !fi.IsDir() {
+		t.Fatalf("sessions mode = %v, want private directory", fi.Mode())
 	}
-	if !fi.IsDir() {
-		t.Error("sessions should be a directory")
+	if fi.Mode().Perm() != 0o700 {
+		t.Errorf("sessions mode = %#o, want 0700", fi.Mode().Perm())
 	}
 	if _, err := os.Stat(filepath.Join(codexHome, "plugins", "cache")); err != nil {
 		t.Fatalf("missing shared plugin cache exposure should still be tolerated and created: %v", err)
+	}
+}
+
+func TestPrepareCodexHomeRejectsUnsafeAuthSource(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink fixture requires elevated privileges on some Windows hosts")
+	}
+	sharedHome := t.TempDir()
+	ownerAuth := filepath.Join(t.TempDir(), "owner-auth.json")
+	if err := os.WriteFile(ownerAuth, []byte(`{"token":"owner"}`), 0o600); err != nil {
+		t.Fatalf("write owner auth: %v", err)
+	}
+	if err := os.Symlink(ownerAuth, filepath.Join(sharedHome, "auth.json")); err != nil {
+		t.Fatalf("symlink shared auth: %v", err)
+	}
+	t.Setenv("CODEX_HOME", sharedHome)
+
+	err := prepareCodexHome(filepath.Join(t.TempDir(), "codex-home"), testLogger())
+	if err == nil || !strings.Contains(err.Error(), "symlink") {
+		t.Fatalf("prepareCodexHome error = %v, want fail-closed symlink rejection", err)
 	}
 }
 

@@ -127,6 +127,7 @@ func TestRunTask_StartTaskCalledAfterWorkdirOnDisk(t *testing.T) {
 		workspaces:     make(map[string]*workspaceState),
 		runtimeIndex:   map[string]Runtime{"rt-1": {ID: "rt-1", Provider: "claude"}},
 		activeEnvRoots: make(map[string]int),
+		taskLauncher:   directTaskLauncherFactory,
 		cfg: Config{
 			WorkspacesRoot: workspacesRoot,
 			Agents: map[string]AgentEntry{
@@ -199,9 +200,10 @@ printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"session_id
 		workspaces:     make(map[string]*workspaceState),
 		runtimeIndex:   map[string]Runtime{"rt-1": {ID: "rt-1", Provider: "claude"}},
 		activeEnvRoots: make(map[string]int),
+		taskLauncher:   directTaskLauncherFactory,
 		cfg: Config{
 			WorkspacesRoot: workspacesRoot,
-			AgentTimeout:   5 * time.Second,
+			AgentTimeout:   15 * time.Second,
 			ServerBaseURL:  srv.URL,
 			Agents: map[string]AgentEntry{
 				"claude": {Path: fakeBin, Model: ""},
@@ -319,6 +321,7 @@ func TestRunTask_ExtendsPrepareLeaseDuringStartTask(t *testing.T) {
 		workspaces:     make(map[string]*workspaceState),
 		runtimeIndex:   map[string]Runtime{"rt-1": {ID: "rt-1", Provider: "claude"}},
 		activeEnvRoots: make(map[string]int),
+		taskLauncher:   directTaskLauncherFactory,
 		cfg: Config{
 			WorkspacesRoot: workspacesRoot,
 			Agents: map[string]AgentEntry{

@@ -206,16 +206,14 @@ func (b *copilotBackend) Execute(ctx context.Context, prompt string, opts ExecOp
 	runCtx, cancel := runContext(ctx, timeout)
 
 	args := buildCopilotArgs(prompt, opts, b.cfg.Logger)
-	argv0, cmdArgs := chooseCopilotInvocation(execName, lookedUp, args, b.cfg.Logger)
+	argv0, cmdArgs := chooseCopilotInvocation(lookedUp, lookedUp, args, b.cfg.Logger)
 
-	cmd := exec.CommandContext(runCtx, argv0, cmdArgs...)
-	hideAgentWindow(cmd)
-	b.cfg.Logger.Info("agent command", "exec", argv0, "args", cmdArgs)
-	cmd.WaitDelay = 10 * time.Second
-	if opts.Cwd != "" {
-		cmd.Dir = opts.Cwd
+	cmd, err := b.cfg.command(runCtx, argv0, cmdArgs, opts.Cwd, 10*time.Second)
+	if err != nil {
+		cancel()
+		return nil, fmt.Errorf("create copilot command: %w", err)
 	}
-	cmd.Env = buildEnv(b.cfg.Env)
+	b.cfg.Logger.Info("agent command", "exec", argv0, "args", cmdArgs)
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {

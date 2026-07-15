@@ -4,6 +4,7 @@ package repocache
 
 import (
 	"context"
+	"crypto/sha256"
 	"fmt"
 	"log/slog"
 	"net/url"
@@ -11,44 +12,36 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
-	"strconv"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
 )
 
-// gitEnv returns an environment for git subprocesses that contact remotes.
-// It passes the full daemon environment so credential helpers (e.g. gh) can
-// locate their config, and disables TTY prompting so auth failures produce
-// clear errors instead of blocking on a non-existent terminal.
-//
-// safe.directory=* is set via GIT_CONFIG_* env vars so git trusts all
-// directories regardless of ownership. The daemon manages its own bare
-// caches and worktrees, so the ownership check adds no security value
-// and breaks CI environments where the runner UID differs from the
-// directory owner.
+// gitEnv is deliberately independent of the daemon owner's environment.
+// Repository broker commands must not inherit credentials, helpers, config,
+// hooks, filters, URL rewrites, remote helpers, or interactive prompt state.
 func gitEnv() []string {
-	base := os.Environ()
-
-	// Find the existing GIT_CONFIG_COUNT so we append at the next index
-	// rather than overwriting any env-scoped git config (auth, URL
-	// rewrites, extra headers, etc.).
-	existing := 0
-	for _, e := range base {
-		if strings.HasPrefix(e, "GIT_CONFIG_COUNT=") {
-			if n, err := strconv.Atoi(strings.TrimPrefix(e, "GIT_CONFIG_COUNT=")); err == nil {
-				existing = n
-			}
-		}
+	nullDevice := "/dev/null"
+	if runtime.GOOS == "windows" {
+		nullDevice = "NUL"
 	}
-
-	idx := strconv.Itoa(existing)
-	return append(base,
+	return []string{
 		"GIT_TERMINAL_PROMPT=0",
-		"GIT_CONFIG_COUNT="+strconv.Itoa(existing+1),
-		"GIT_CONFIG_KEY_"+idx+"=safe.directory",
-		"GIT_CONFIG_VALUE_"+idx+"=*",
-	)
+		"GIT_CONFIG_NOSYSTEM=1",
+		"GIT_CONFIG_SYSTEM=" + nullDevice,
+		"GIT_CONFIG_GLOBAL=" + nullDevice,
+		"GIT_ALLOW_PROTOCOL=file:http:https:git",
+		"GIT_CONFIG_COUNT=3",
+		"GIT_CONFIG_KEY_0=credential.helper",
+		"GIT_CONFIG_VALUE_0=",
+		"GIT_CONFIG_KEY_1=core.hooksPath",
+		"GIT_CONFIG_VALUE_1=" + nullDevice,
+		"GIT_CONFIG_KEY_2=protocol.ext.allow",
+		"GIT_CONFIG_VALUE_2=never",
+		"LC_ALL=C",
+		"LANG=C",
+	}
 }
 
 var agentGitExcludePatterns = []string{
@@ -64,11 +57,108 @@ var agentGitExcludePatterns = []string{
 
 const repoCacheGitTimeout = 10 * time.Minute
 
-func newGitCommand(ctx context.Context, args ...string) *exec.Cmd {
-	cmd := exec.CommandContext(ctx, "git", args...)
-	cmd.Env = gitEnv()
+// GitBrokerOptions configures the only executable and environment permitted
+// for repository-cache Git operations.
+type GitBrokerOptions struct {
+	Executable string
+	Timeout    time.Duration
+}
+
+type gitBroker struct {
+	executable string
+	env        []string
+	timeout    time.Duration
+}
+
+func newGitBroker(options GitBrokerOptions) (*gitBroker, error) {
+	if !filepath.IsAbs(options.Executable) {
+		return nil, fmt.Errorf("git executable must be absolute: %q", options.Executable)
+	}
+	resolved, err := filepath.EvalSymlinks(options.Executable)
+	if err != nil {
+		return nil, fmt.Errorf("resolve git executable: %w", err)
+	}
+	info, err := os.Stat(resolved)
+	if err != nil {
+		return nil, fmt.Errorf("stat git executable: %w", err)
+	}
+	if !info.Mode().IsRegular() || info.Mode()&0o111 == 0 {
+		return nil, fmt.Errorf("git executable is not an executable regular file: %s", resolved)
+	}
+	if info.Mode().Perm()&0o022 != 0 {
+		return nil, fmt.Errorf("git executable is group/world writable: %s", resolved)
+	}
+	timeout := options.Timeout
+	if timeout <= 0 {
+		timeout = repoCacheGitTimeout
+	}
+	return &gitBroker{executable: resolved, env: gitEnv(), timeout: timeout}, nil
+}
+
+func defaultGitBroker() (*gitBroker, error) {
+	candidates := []string{"/usr/bin/git", "/bin/git"}
+	if runtime.GOOS == "windows" {
+		candidates = []string{`C:\\Program Files\\Git\\cmd\\git.exe`}
+	}
+	for _, candidate := range candidates {
+		broker, err := newGitBroker(GitBrokerOptions{Executable: candidate})
+		if err == nil {
+			return broker, nil
+		}
+	}
+	return nil, fmt.Errorf("no trusted absolute Git executable found")
+}
+
+func (g *gitBroker) command(ctx context.Context, args ...string) *exec.Cmd {
+	cmd := exec.CommandContext(ctx, g.executable, args...)
+	cmd.Env = append([]string(nil), g.env...)
 	cmd.WaitDelay = 5 * time.Second
 	return cmd
+}
+
+func (g *gitBroker) withTimeout(parent context.Context, timeout time.Duration) (context.Context, context.CancelFunc) {
+	if timeout <= 0 {
+		timeout = g.timeout
+	}
+	return context.WithTimeout(parent, timeout)
+}
+
+func (g *gitBroker) combinedOutput(ctx context.Context, timeout time.Duration, args ...string) ([]byte, error) {
+	ctx, cancel := g.withTimeout(ctx, timeout)
+	defer cancel()
+	out, err := g.command(ctx, args...).CombinedOutput()
+	if ctx.Err() != nil {
+		return out, ctx.Err()
+	}
+	return out, err
+}
+
+func (g *gitBroker) output(ctx context.Context, timeout time.Duration, args ...string) ([]byte, error) {
+	ctx, cancel := g.withTimeout(ctx, timeout)
+	defer cancel()
+	out, err := g.command(ctx, args...).Output()
+	if ctx.Err() != nil {
+		return out, ctx.Err()
+	}
+	return out, err
+}
+
+func (g *gitBroker) run(ctx context.Context, timeout time.Duration, args ...string) error {
+	ctx, cancel := g.withTimeout(ctx, timeout)
+	defer cancel()
+	err := g.command(ctx, args...).Run()
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	return err
+}
+
+func legacyGitBroker() *gitBroker {
+	broker, err := defaultGitBroker()
+	if err != nil {
+		return &gitBroker{executable: filepath.Join(string(filepath.Separator), "trusted-git-unavailable"), env: gitEnv(), timeout: repoCacheGitTimeout}
+	}
+	return broker
 }
 
 func runGitCombinedOutput(args ...string) ([]byte, error) {
@@ -76,15 +166,7 @@ func runGitCombinedOutput(args ...string) ([]byte, error) {
 }
 
 func runGitCombinedOutputWithTimeout(timeout time.Duration, args ...string) ([]byte, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
-	defer cancel()
-
-	cmd := newGitCommand(ctx, args...)
-	out, err := cmd.CombinedOutput()
-	if ctx.Err() == context.DeadlineExceeded {
-		return out, fmt.Errorf("git command timed out after %s: %w", timeout, ctx.Err())
-	}
-	return out, err
+	return legacyGitBroker().combinedOutput(context.Background(), timeout, args...)
 }
 
 func runGitOutput(args ...string) ([]byte, error) {
@@ -92,15 +174,7 @@ func runGitOutput(args ...string) ([]byte, error) {
 }
 
 func runGitOutputWithTimeout(timeout time.Duration, args ...string) ([]byte, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
-	defer cancel()
-
-	cmd := newGitCommand(ctx, args...)
-	out, err := cmd.Output()
-	if ctx.Err() == context.DeadlineExceeded {
-		return out, fmt.Errorf("git command timed out after %s: %w", timeout, ctx.Err())
-	}
-	return out, err
+	return legacyGitBroker().output(context.Background(), timeout, args...)
 }
 
 func runGit(args ...string) error {
@@ -108,15 +182,7 @@ func runGit(args ...string) error {
 }
 
 func runGitWithTimeout(timeout time.Duration, args ...string) error {
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
-	defer cancel()
-
-	cmd := newGitCommand(ctx, args...)
-	err := cmd.Run()
-	if ctx.Err() == context.DeadlineExceeded {
-		return fmt.Errorf("git command timed out after %s: %w", timeout, ctx.Err())
-	}
-	return err
+	return legacyGitBroker().run(context.Background(), timeout, args...)
 }
 
 // RepoInfo describes a repository to cache.
@@ -130,10 +196,19 @@ type CachedRepo struct {
 	LocalPath string // absolute path to the bare clone
 }
 
+// ResolvedRepo binds an assigned repository URL to the exact canonical bare
+// cache path whose origin still matches that assignment.
+type ResolvedRepo struct {
+	URL      string
+	BarePath string
+}
+
 // Cache manages bare git clones for workspace repositories.
 type Cache struct {
 	root   string // base directory for all caches (e.g. ~/multica_workspaces/.repos)
 	logger *slog.Logger
+	git    *gitBroker
+	gitErr error
 	// repoLocks maps bare repo path → dedicated mutex. Any mutating operation
 	// on a given bare repo (clone, fetch, worktree add, ref update) must
 	// hold its lock — git's own lockfiles (packed-refs.lock, config.lock,
@@ -144,7 +219,28 @@ type Cache struct {
 
 // New creates a new repo cache rooted at the given directory.
 func New(root string, logger *slog.Logger) *Cache {
-	return &Cache{root: root, logger: logger}
+	broker, err := defaultGitBroker()
+	return &Cache{root: root, logger: logger, git: broker, gitErr: err}
+}
+
+// NewWithGitBroker creates a cache bound to a caller-selected absolute Git
+// executable. It fails closed instead of consulting PATH.
+func NewWithGitBroker(root string, logger *slog.Logger, options GitBrokerOptions) (*Cache, error) {
+	broker, err := newGitBroker(options)
+	if err != nil {
+		return nil, err
+	}
+	return &Cache{root: root, logger: logger, git: broker}, nil
+}
+
+func (c *Cache) requireGit() error {
+	if c.gitErr != nil {
+		return c.gitErr
+	}
+	if c.git == nil {
+		return fmt.Errorf("repository Git broker is not configured")
+	}
+	return nil
 }
 
 // lockForRepo returns the mutex dedicated to the given bare repo path. See
@@ -167,33 +263,56 @@ func (c *Cache) lockForRepo(barePath string) *sync.Mutex {
 // but concurrent Sync calls (different workspaces, or the same workspace
 // re-synced while checkouts are running) do not block each other.
 func (c *Cache) Sync(workspaceID string, repos []RepoInfo) error {
-	wsDir := filepath.Join(c.root, workspaceID)
-	if err := os.MkdirAll(wsDir, 0o755); err != nil {
-		return fmt.Errorf("create workspace cache dir: %w", err)
+	return c.SyncContext(context.Background(), workspaceID, repos)
+}
+
+// SyncContext is the task-safe Sync entry point. Every Git subprocess derives
+// cancellation and deadlines from ctx and executes through the cache broker.
+func (c *Cache) SyncContext(ctx context.Context, workspaceID string, repos []RepoInfo) error {
+	if err := c.requireGit(); err != nil {
+		return err
+	}
+	wsDir, err := c.workspaceCacheDir(workspaceID, true)
+	if err != nil {
+		return err
 	}
 
 	var firstErr error
 	for _, repo := range repos {
-		if repo.URL == "" {
+		barePath, pathErr := cacheTargetPath(wsDir, repo.URL)
+		if pathErr != nil {
+			if firstErr == nil {
+				firstErr = pathErr
+			}
 			continue
 		}
-		barePath := filepath.Join(wsDir, bareDirName(repo.URL))
 
 		repoLock := c.lockForRepo(barePath)
 		repoLock.Lock()
-		if isBareRepo(barePath) {
+		if c.isBareRepo(ctx, barePath) {
 			// Already cached — fetch latest.
 			c.logger.Info("repo cache: fetching", "url", repo.URL, "path", barePath)
-			if err := gitFetch(barePath); err != nil {
+			if err := c.gitFetch(ctx, barePath); err != nil {
 				c.logger.Warn("repo cache: fetch failed", "url", repo.URL, "error", err)
 				if firstErr == nil {
 					firstErr = err
 				}
 			}
+		} else if _, err := os.Lstat(barePath); err == nil {
+			err := fmt.Errorf("repo cache target already exists and is not a bare git repository: %s", barePath)
+			c.logger.Error("repo cache: unsafe existing target", "url", repo.URL, "path", barePath, "error", err)
+			if firstErr == nil {
+				firstErr = err
+			}
+		} else if !os.IsNotExist(err) {
+			wrapped := fmt.Errorf("stat repo cache target %s: %w", barePath, err)
+			if firstErr == nil {
+				firstErr = wrapped
+			}
 		} else {
 			// Not cached — bare clone.
 			c.logger.Info("repo cache: cloning", "url", repo.URL, "path", barePath)
-			if err := gitCloneBare(repo.URL, barePath); err != nil {
+			if err := c.gitCloneBare(ctx, repo.URL, barePath); err != nil {
 				c.logger.Error("repo cache: clone failed", "url", repo.URL, "error", err)
 				if firstErr == nil {
 					firstErr = err
@@ -208,11 +327,75 @@ func (c *Cache) Sync(workspaceID string, repos []RepoInfo) error {
 // Lookup returns the local bare clone path for a repo URL within a workspace.
 // Returns "" if not cached.
 func (c *Cache) Lookup(workspaceID, url string) string {
-	barePath := filepath.Join(c.root, workspaceID, bareDirName(url))
-	if isBareRepo(barePath) {
+	return c.LookupContext(context.Background(), workspaceID, url)
+}
+
+// LookupContext verifies a cached repository through the broker using ctx.
+func (c *Cache) LookupContext(ctx context.Context, workspaceID, url string) string {
+	if c.requireGit() != nil {
+		return ""
+	}
+	barePath, err := c.lookupPath(ctx, workspaceID, url)
+	if err != nil {
+		return ""
+	}
+	if c.isBareRepo(ctx, barePath) {
 		return barePath
 	}
 	return ""
+}
+
+// Resolve returns a stable repository identity suitable for freezing into a
+// task isolation policy. It rejects a cache whose on-disk origin has drifted
+// from the URL that selected the cache path.
+func (c *Cache) Resolve(workspaceID, rawURL string) (ResolvedRepo, error) {
+	return c.ResolveContext(context.Background(), workspaceID, rawURL)
+}
+
+// ResolveContext resolves and verifies repository identity through the broker.
+func (c *Cache) ResolveContext(ctx context.Context, workspaceID, rawURL string) (ResolvedRepo, error) {
+	if err := c.requireGit(); err != nil {
+		return ResolvedRepo{}, err
+	}
+	assignedURL := strings.TrimSpace(rawURL)
+	barePath, err := c.lookupPath(ctx, workspaceID, assignedURL)
+	if err != nil {
+		return ResolvedRepo{}, err
+	}
+	canonical, err := filepath.EvalSymlinks(barePath)
+	if err != nil {
+		return ResolvedRepo{}, fmt.Errorf("resolve cached repo path %q: %w", barePath, err)
+	}
+	canonical, err = filepath.Abs(canonical)
+	if err != nil {
+		return ResolvedRepo{}, fmt.Errorf("make cached repo path absolute: %w", err)
+	}
+	if canonical != barePath {
+		return ResolvedRepo{}, fmt.Errorf("cached repo path %q resolves through symlink to %q", barePath, canonical)
+	}
+	origin, err := c.git.output(ctx, 0, "-C", canonical, "remote", "get-url", "origin")
+	if err != nil {
+		return ResolvedRepo{}, fmt.Errorf("read cached repo origin for %q: %w", assignedURL, err)
+	}
+	if got := strings.TrimSpace(string(origin)); got != assignedURL {
+		return ResolvedRepo{}, fmt.Errorf("cached repo origin mismatch: got %q, want %q", got, assignedURL)
+	}
+	return ResolvedRepo{URL: assignedURL, BarePath: canonical}, nil
+}
+
+func (c *Cache) lookupPath(ctx context.Context, workspaceID, rawURL string) (string, error) {
+	wsDir, err := c.workspaceCacheDir(workspaceID, false)
+	if err != nil {
+		return "", fmt.Errorf("repo not found in cache: %s (workspace: %s): %w", rawURL, workspaceID, err)
+	}
+	barePath, err := cacheTargetPath(wsDir, rawURL)
+	if err != nil {
+		return "", err
+	}
+	if !c.isBareRepo(ctx, barePath) {
+		return "", fmt.Errorf("repo not found in cache: %s (workspace: %s)", rawURL, workspaceID)
+	}
+	return barePath, nil
 }
 
 // WithRepoLock serializes caller-supplied mutations on a bare repo against all
@@ -227,9 +410,129 @@ func (c *Cache) WithRepoLock(barePath string, fn func() error) error {
 
 // Fetch runs `git fetch origin` on a cached bare clone to get latest refs.
 func (c *Cache) Fetch(barePath string) error {
+	return c.FetchContext(context.Background(), barePath)
+}
+
+// FetchContext fetches a cache through the broker using caller cancellation.
+func (c *Cache) FetchContext(ctx context.Context, barePath string) error {
+	if err := c.requireGit(); err != nil {
+		return err
+	}
 	return c.WithRepoLock(barePath, func() error {
-		return gitFetch(barePath)
+		return c.gitFetch(ctx, barePath)
 	})
+}
+
+func (c *Cache) workspaceCacheDir(workspaceID string, create bool) (string, error) {
+	workspaceID = strings.TrimSpace(workspaceID)
+	if !isSafePathComponent(workspaceID) {
+		return "", fmt.Errorf("unsafe workspace ID %q", workspaceID)
+	}
+
+	root, err := canonicalExistingDir(c.root)
+	if err != nil {
+		if !create || !os.IsNotExist(err) {
+			return "", fmt.Errorf("resolve repo cache root: %w", err)
+		}
+		if err := os.MkdirAll(c.root, 0o755); err != nil {
+			return "", fmt.Errorf("create repo cache root: %w", err)
+		}
+		root, err = canonicalExistingDir(c.root)
+		if err != nil {
+			return "", fmt.Errorf("resolve repo cache root: %w", err)
+		}
+	}
+
+	wsDir := filepath.Join(root, workspaceID)
+	info, statErr := os.Lstat(wsDir)
+	if statErr != nil {
+		if !os.IsNotExist(statErr) {
+			return "", fmt.Errorf("stat workspace cache dir: %w", statErr)
+		}
+		if !create {
+			return "", fmt.Errorf("workspace cache not found: %s", workspaceID)
+		}
+		if err := os.Mkdir(wsDir, 0o755); err != nil {
+			return "", fmt.Errorf("create workspace cache dir: %w", err)
+		}
+		info, statErr = os.Lstat(wsDir)
+	}
+	if statErr != nil {
+		return "", fmt.Errorf("stat workspace cache dir: %w", statErr)
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return "", fmt.Errorf("workspace cache dir must not be a symlink: %s", wsDir)
+	}
+	if !info.IsDir() {
+		return "", fmt.Errorf("workspace cache path is not a directory: %s", wsDir)
+	}
+
+	canonical, err := filepath.EvalSymlinks(wsDir)
+	if err != nil {
+		return "", fmt.Errorf("resolve workspace cache dir: %w", err)
+	}
+	canonical, err = filepath.Abs(canonical)
+	if err != nil {
+		return "", fmt.Errorf("make workspace cache dir absolute: %w", err)
+	}
+	if !pathWithin(root, canonical) {
+		return "", fmt.Errorf("workspace cache dir escapes repo cache root: %s", canonical)
+	}
+	return filepath.Clean(canonical), nil
+}
+
+func cacheTargetPath(wsDir, rawURL string) (string, error) {
+	name, err := bareDirNameSafe(rawURL)
+	if err != nil {
+		return "", err
+	}
+	target := filepath.Join(wsDir, name)
+	if !pathWithin(wsDir, target) {
+		return "", fmt.Errorf("repo cache target escapes workspace cache: %s", target)
+	}
+	return target, nil
+}
+
+func canonicalExistingDir(path string) (string, error) {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return "", err
+	}
+	info, err := os.Stat(abs)
+	if err != nil {
+		return "", err
+	}
+	if !info.IsDir() {
+		return "", fmt.Errorf("not a directory: %s", abs)
+	}
+	canonical, err := filepath.EvalSymlinks(abs)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Clean(canonical), nil
+}
+
+func pathWithin(parent, target string) bool {
+	parentAbs, err := filepath.Abs(parent)
+	if err != nil {
+		return false
+	}
+	targetAbs, err := filepath.Abs(target)
+	if err != nil {
+		return false
+	}
+	rel, err := filepath.Rel(filepath.Clean(parentAbs), filepath.Clean(targetAbs))
+	if err != nil {
+		return false
+	}
+	return rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)))
+}
+
+func isSafePathComponent(name string) bool {
+	if name == "" || name == "." || name == ".." || filepath.IsAbs(name) {
+		return false
+	}
+	return !strings.ContainsAny(name, `/\\`)
 }
 
 // bareDirName returns a filesystem-safe, collision-free directory name for
@@ -250,6 +553,17 @@ func (c *Cache) Fetch(barePath string) error {
 //	git@gitlab.example.com-22:org/repo.git       -> gitlab.example.com-22+org+repo.git
 //	my-repo                                      -> my-repo.git (bare name fallback)
 func bareDirName(rawURL string) string {
+	name, err := bareDirNameSafe(rawURL)
+	if err != nil {
+		return ""
+	}
+	return name
+}
+
+func bareDirNameSafe(rawURL string) (string, error) {
+	if err := validateRepoURL(rawURL); err != nil {
+		return "", err
+	}
 	rawURL = strings.TrimRight(rawURL, "/")
 
 	host, path := splitHostAndPath(rawURL)
@@ -277,9 +591,12 @@ func bareDirName(rawURL string) string {
 		name += ".git"
 	}
 	if name == "" || name == ".git" {
-		name = "repo.git"
+		return "", fmt.Errorf("unsafe repo URL %q: empty repository name", rawURL)
 	}
-	return name
+	if !isSafePathComponent(name) {
+		return "", fmt.Errorf("unsafe repo URL %q: invalid cache directory name", rawURL)
+	}
+	return name, nil
 }
 
 // splitHostAndPath extracts the host and path-with-namespace from the
@@ -305,11 +622,91 @@ func splitHostAndPath(rawURL string) (host, path string) {
 	return "", s
 }
 
+func validateRepoURL(rawURL string) error {
+	trimmed := strings.TrimSpace(rawURL)
+	if trimmed == "" || trimmed == "." || trimmed == ".." {
+		return fmt.Errorf("unsafe repo URL %q: empty or reserved repository name", rawURL)
+	}
+	if strings.ContainsAny(trimmed, "\x00\r\n\t") {
+		return fmt.Errorf("unsafe repo URL %q: control characters are not allowed", rawURL)
+	}
+	if strings.Contains(trimmed, `\`) {
+		return fmt.Errorf("unsafe repo URL %q: backslashes are not allowed", rawURL)
+	}
+	if parsed, err := url.Parse(trimmed); err == nil && parsed.Scheme != "" {
+		if parsed.RawQuery != "" || parsed.Fragment != "" {
+			return fmt.Errorf("unsafe repo URL %q: query and fragment are not allowed", rawURL)
+		}
+	}
+
+	_, repoPath := splitHostAndPath(strings.TrimRight(trimmed, "/"))
+	if repoPath == "" {
+		return fmt.Errorf("unsafe repo URL %q: empty repository path", rawURL)
+	}
+	for _, segment := range strings.Split(repoPath, "/") {
+		if segment == "" {
+			continue
+		}
+		decoded, err := url.PathUnescape(segment)
+		if err != nil {
+			return fmt.Errorf("unsafe repo URL %q: invalid path escape", rawURL)
+		}
+		if decoded == "." || decoded == ".." || strings.ContainsAny(decoded, `/\\`) {
+			return fmt.Errorf("unsafe repo URL %q: path traversal is not allowed", rawURL)
+		}
+	}
+
+	name := repoPath
+	if i := strings.LastIndex(name, "/"); i >= 0 {
+		name = name[i+1:]
+	}
+	name = strings.TrimSuffix(name, ".git")
+	decodedName, err := url.PathUnescape(name)
+	if err != nil {
+		return fmt.Errorf("unsafe repo URL %q: invalid repository name escape", rawURL)
+	}
+	if !isSafeRepoName(decodedName) {
+		return fmt.Errorf("unsafe repo URL %q: invalid repository name %q", rawURL, decodedName)
+	}
+	return nil
+}
+
+func isSafeRepoName(name string) bool {
+	if name == "" || name == "." || name == ".." {
+		return false
+	}
+	for _, r := range name {
+		switch {
+		case r >= 'a' && r <= 'z':
+		case r >= 'A' && r <= 'Z':
+		case r >= '0' && r <= '9':
+		case r == '-', r == '_', r == '.':
+		default:
+			return false
+		}
+	}
+	return true
+}
+
 // isBareRepo checks if a path looks like a bare git repository.
 func isBareRepo(path string) bool {
-	// A bare repo has a HEAD file at the root.
-	_, err := os.Stat(filepath.Join(path, "HEAD"))
-	return err == nil
+	return legacyGitBroker().isBareRepo(context.Background(), path)
+}
+
+func (c *Cache) isBareRepo(ctx context.Context, path string) bool {
+	if c.git == nil {
+		return false
+	}
+	return c.git.isBareRepo(ctx, path)
+}
+
+func (g *gitBroker) isBareRepo(ctx context.Context, path string) bool {
+	info, err := os.Lstat(path)
+	if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+		return false
+	}
+	out, err := g.output(ctx, 0, "-C", path, "rev-parse", "--is-bare-repository")
+	return err == nil && strings.TrimSpace(string(out)) == "true"
 }
 
 // modernFetchRefspec is the remote-tracking refspec that keeps fetched heads
@@ -320,7 +717,11 @@ func isBareRepo(path string) bool {
 const modernFetchRefspec = "+refs/heads/*:refs/remotes/origin/*"
 
 func gitCloneBare(url, dest string) error {
-	if out, err := runGitCombinedOutput("clone", "--bare", url, dest); err != nil {
+	return legacyCache().gitCloneBare(context.Background(), url, dest)
+}
+
+func (c *Cache) gitCloneBare(ctx context.Context, url, dest string) error {
+	if out, err := c.git.combinedOutput(ctx, 0, "clone", "--bare", url, dest); err != nil {
 		// Clean up partial clone.
 		os.RemoveAll(dest)
 		return fmt.Errorf("git clone --bare: %s: %w", strings.TrimSpace(string(out)), err)
@@ -329,7 +730,7 @@ func gitCloneBare(url, dest string) error {
 	// a mirror-style fetch refspec. Convert the bare repo to the standard
 	// remote-tracking layout immediately so subsequent fetches write to
 	// refs/remotes/origin/* and can't conflict with worktree-locked heads.
-	if err := ensureRemoteTrackingLayout(dest); err != nil {
+	if err := c.ensureRemoteTrackingLayout(ctx, dest); err != nil {
 		os.RemoveAll(dest)
 		return fmt.Errorf("configure fetch refspec: %w", err)
 	}
@@ -346,10 +747,14 @@ func gitCloneBare(url, dest string) error {
 // would keep basing new worktrees on the original default branch forever
 // after the remote flipped.
 func gitFetch(barePath string) error {
-	if err := ensureRemoteTrackingLayout(barePath); err != nil {
+	return legacyCache().gitFetch(context.Background(), barePath)
+}
+
+func (c *Cache) gitFetch(ctx context.Context, barePath string) error {
+	if err := c.ensureRemoteTrackingLayout(ctx, barePath); err != nil {
 		return fmt.Errorf("ensure refspec: %w", err)
 	}
-	if err := runGitFetch(barePath); err != nil {
+	if err := c.runGitFetch(ctx, barePath); err != nil {
 		return err
 	}
 	// Refresh refs/remotes/origin/HEAD after every successful fetch.
@@ -358,14 +763,18 @@ func gitFetch(barePath string) error {
 	// getRemoteDefaultBranch, but the modern-cache default-branch-change
 	// path (the only path that can't be recovered any other way) relies
 	// on this call.
-	_ = runGit("-C", barePath, "remote", "set-head", "origin", "--auto")
+	_ = c.git.run(ctx, 0, "-C", barePath, "remote", "set-head", "origin", "--auto")
 	return nil
 }
 
 // runGitFetch is the raw `git fetch origin` wrapper. Callers should go through
 // gitFetch, which migrates legacy caches first.
 func runGitFetch(barePath string) error {
-	if out, err := runGitCombinedOutput("-C", barePath, "fetch", "origin"); err != nil {
+	return legacyCache().runGitFetch(context.Background(), barePath)
+}
+
+func (c *Cache) runGitFetch(ctx context.Context, barePath string) error {
+	if out, err := c.git.combinedOutput(ctx, 0, "-C", barePath, "fetch", "origin"); err != nil {
 		return fmt.Errorf("git fetch: %s: %w", strings.TrimSpace(string(out)), err)
 	}
 	return nil
@@ -379,25 +788,29 @@ func runGitFetch(barePath string) error {
 // and runs `git remote set-head origin --auto` so getRemoteDefaultBranch can
 // resolve the remote's default branch.
 func ensureRemoteTrackingLayout(barePath string) error {
-	cur, err := readFetchRefspec(barePath)
+	return legacyCache().ensureRemoteTrackingLayout(context.Background(), barePath)
+}
+
+func (c *Cache) ensureRemoteTrackingLayout(ctx context.Context, barePath string) error {
+	cur, err := c.readFetchRefspec(ctx, barePath)
 	if err != nil {
 		return err
 	}
 	if cur == modernFetchRefspec || cur == strings.TrimPrefix(modernFetchRefspec, "+") {
 		return nil // already modern
 	}
-	if err := setFetchRefspec(barePath, modernFetchRefspec); err != nil {
+	if err := c.setFetchRefspec(ctx, barePath, modernFetchRefspec); err != nil {
 		return err
 	}
 	// Backfill refs/remotes/origin/* by fetching with the new refspec. This
 	// writes to the origin/* namespace, so even worktree-locked refs/heads/*
 	// branches can't collide.
-	if err := runGitFetch(barePath); err != nil {
+	if err := c.runGitFetch(ctx, barePath); err != nil {
 		return fmt.Errorf("backfill fetch after refspec migration: %w", err)
 	}
 	// Set refs/remotes/origin/HEAD so getRemoteDefaultBranch can read it.
 	// Non-fatal: if this fails we fall back to origin/main, origin/master.
-	_ = runGit("-C", barePath, "remote", "set-head", "origin", "--auto")
+	_ = c.git.run(ctx, 0, "-C", barePath, "remote", "set-head", "origin", "--auto")
 	return nil
 }
 
@@ -405,7 +818,11 @@ func ensureRemoteTrackingLayout(barePath string) error {
 // the empty string if it's not set. Distinguishes "missing" (exit 1) from
 // real git errors.
 func readFetchRefspec(barePath string) (string, error) {
-	out, err := runGitOutput("-C", barePath, "config", "--get", "remote.origin.fetch")
+	return legacyCache().readFetchRefspec(context.Background(), barePath)
+}
+
+func (c *Cache) readFetchRefspec(ctx context.Context, barePath string) (string, error) {
+	out, err := c.git.output(ctx, 0, "-C", barePath, "config", "--get", "remote.origin.fetch")
 	if err != nil {
 		if ee, ok := err.(*exec.ExitError); ok && ee.ExitCode() == 1 {
 			return "", nil // key missing, not an error
@@ -416,11 +833,20 @@ func readFetchRefspec(barePath string) (string, error) {
 }
 
 func setFetchRefspec(barePath, refspec string) error {
-	out, err := runGitCombinedOutput("-C", barePath, "config", "remote.origin.fetch", refspec)
+	return legacyCache().setFetchRefspec(context.Background(), barePath, refspec)
+}
+
+func (c *Cache) setFetchRefspec(ctx context.Context, barePath, refspec string) error {
+	out, err := c.git.combinedOutput(ctx, 0, "-C", barePath, "config", "remote.origin.fetch", refspec)
 	if err != nil {
 		return fmt.Errorf("set remote.origin.fetch: %s: %w", strings.TrimSpace(string(out)), err)
 	}
 	return nil
+}
+
+func legacyCache() *Cache {
+	broker := legacyGitBroker()
+	return &Cache{git: broker, logger: slog.Default()}
 }
 
 // WorktreeParams holds inputs for creating a worktree from a cached bare clone.
@@ -432,6 +858,7 @@ type WorktreeParams struct {
 	AgentName           string // for branch naming
 	TaskID              string // for branch naming uniqueness
 	CoAuthoredByEnabled bool   // install prepare-commit-msg hook for Co-authored-by trailer
+	LocalDirectory      bool   // reject checkout when the task runs in a user-owned local directory
 }
 
 // WorktreeResult describes a successfully created worktree.
@@ -445,9 +872,29 @@ type WorktreeResult struct {
 // at the target path (reused environment), it updates the existing worktree to
 // the latest remote default branch instead of failing.
 func (c *Cache) CreateWorktree(params WorktreeParams) (*WorktreeResult, error) {
-	barePath := c.Lookup(params.WorkspaceID, params.RepoURL)
-	if barePath == "" {
-		return nil, fmt.Errorf("repo not found in cache: %s (workspace: %s)", params.RepoURL, params.WorkspaceID)
+	return c.CreateWorktreeContext(context.Background(), params)
+}
+
+// CreateWorktreeContext is the task-safe checkout entry point. All Git
+// subprocesses use ctx and the cache's immutable broker configuration.
+func (c *Cache) CreateWorktreeContext(ctx context.Context, params WorktreeParams) (*WorktreeResult, error) {
+	if err := c.requireGit(); err != nil {
+		return nil, err
+	}
+	if params.LocalDirectory || c.isGitCheckoutRoot(ctx, params.WorkDir) {
+		return nil, fmt.Errorf("local_directory mode forbids creating an additional repo checkout")
+	}
+	dirName, err := worktreeDirName(params.RepoURL)
+	if err != nil {
+		return nil, err
+	}
+	worktreePath, err := canonicalWorktreeTarget(params.WorkDir, dirName)
+	if err != nil {
+		return nil, err
+	}
+	barePath, err := c.lookupPath(ctx, params.WorkspaceID, params.RepoURL)
+	if err != nil {
+		return nil, err
 	}
 
 	// Serialize concurrent CreateWorktree calls on the same bare repo. Git's
@@ -461,7 +908,7 @@ func (c *Cache) CreateWorktree(params WorktreeParams) (*WorktreeResult, error) {
 	// to the modern remote-tracking layout on first run, so subsequent fetches
 	// never collide with the refs/heads/agent/* branches that worktree creation
 	// locks in this same bare repo.
-	if err := gitFetch(barePath); err != nil {
+	if err := c.gitFetch(ctx, barePath); err != nil {
 		// Non-fatal: preserve cached state and continue, but make the warning
 		// loud enough that it's findable in the daemon log. The agent will
 		// receive an older snapshot than the remote head.
@@ -478,7 +925,7 @@ func (c *Cache) CreateWorktree(params WorktreeParams) (*WorktreeResult, error) {
 	// Callers may request a specific branch, tag, or commit so review/QA agents
 	// can inspect the exact revision without trying to mutate the daemon-owned
 	// worktree metadata themselves.
-	baseRef, err := resolveBaseRef(barePath, params.Ref)
+	baseRef, err := c.resolveBaseRef(ctx, barePath, params.Ref)
 	if err != nil {
 		return nil, err
 	}
@@ -496,20 +943,19 @@ func (c *Cache) CreateWorktree(params WorktreeParams) (*WorktreeResult, error) {
 	// Build branch name: agent/{sanitized-name}/{short-task-id}
 	branchName := fmt.Sprintf("agent/%s/%s", sanitizeName(params.AgentName), shortID(params.TaskID))
 
-	// Derive directory name from repo URL.
-	dirName := repoNameFromURL(params.RepoURL)
-	worktreePath := filepath.Join(params.WorkDir, dirName)
-
 	// If worktree already exists (reused environment from a prior task),
 	// update it to the latest remote code instead of creating a new one.
 	if isGitWorktree(worktreePath) {
-		actualBranch, err := updateExistingWorktree(worktreePath, branchName, baseRef)
+		if err := c.verifyWorktreeOwner(ctx, worktreePath, barePath); err != nil {
+			return nil, err
+		}
+		actualBranch, err := c.updateExistingWorktree(ctx, worktreePath, branchName, baseRef)
 		if err != nil {
 			return nil, fmt.Errorf("update existing worktree: %w", err)
 		}
 
 		for _, pattern := range agentGitExcludePatterns {
-			_ = excludeFromGit(worktreePath, pattern)
+			_ = c.excludeFromGit(ctx, worktreePath, pattern)
 		}
 
 		// Install or remove the Co-authored-by hook based on the workspace
@@ -518,11 +964,11 @@ func (c *Cache) CreateWorktree(params WorktreeParams) (*WorktreeResult, error) {
 		// installed hook keeps appending the trailer to every commit even
 		// after the user toggles the setting off.
 		if params.CoAuthoredByEnabled {
-			if err := installCoAuthoredByHook(worktreePath); err != nil {
+			if err := c.installCoAuthoredByHook(ctx, worktreePath); err != nil {
 				c.logger.Warn("repo checkout: install co-authored-by hook failed (non-fatal)", "error", err)
 			}
 		} else {
-			if err := removeCoAuthoredByHook(worktreePath); err != nil {
+			if err := c.removeCoAuthoredByHook(ctx, worktreePath); err != nil {
 				c.logger.Warn("repo checkout: remove co-authored-by hook failed (non-fatal)", "error", err)
 			}
 		}
@@ -542,25 +988,25 @@ func (c *Cache) CreateWorktree(params WorktreeParams) (*WorktreeResult, error) {
 
 	// Create a new worktree. createWorktree may rename the branch to avoid
 	// collisions with stale per-task refs left over from previous runs.
-	actualBranch, err := createWorktree(barePath, worktreePath, branchName, baseRef)
+	actualBranch, err := c.createWorktree(ctx, barePath, worktreePath, branchName, baseRef)
 	if err != nil {
 		return nil, fmt.Errorf("create worktree: %w", err)
 	}
 
 	// Exclude agent context files from git tracking.
 	for _, pattern := range agentGitExcludePatterns {
-		_ = excludeFromGit(worktreePath, pattern)
+		_ = c.excludeFromGit(ctx, worktreePath, pattern)
 	}
 
 	// Install or remove the Co-authored-by hook based on the workspace
 	// setting. See the existing-worktree branch above for why removal is
 	// required when the setting is disabled.
 	if params.CoAuthoredByEnabled {
-		if err := installCoAuthoredByHook(worktreePath); err != nil {
+		if err := c.installCoAuthoredByHook(ctx, worktreePath); err != nil {
 			c.logger.Warn("repo checkout: install co-authored-by hook failed (non-fatal)", "error", err)
 		}
 	} else {
-		if err := removeCoAuthoredByHook(worktreePath); err != nil {
+		if err := c.removeCoAuthoredByHook(ctx, worktreePath); err != nil {
 			c.logger.Warn("repo checkout: remove co-authored-by hook failed (non-fatal)", "error", err)
 		}
 	}
@@ -579,9 +1025,13 @@ func (c *Cache) CreateWorktree(params WorktreeParams) (*WorktreeResult, error) {
 }
 
 func resolveBaseRef(barePath, requestedRef string) (string, error) {
+	return legacyCache().resolveBaseRef(context.Background(), barePath, requestedRef)
+}
+
+func (c *Cache) resolveBaseRef(ctx context.Context, barePath, requestedRef string) (string, error) {
 	ref := strings.TrimSpace(requestedRef)
 	if ref == "" {
-		return getRemoteDefaultBranch(barePath), nil
+		return c.getRemoteDefaultBranch(ctx, barePath), nil
 	}
 
 	// Prefer remote-tracking branches for human branch names. Then allow full
@@ -592,7 +1042,7 @@ func resolveBaseRef(barePath, requestedRef string) (string, error) {
 		ref,
 	}
 	for _, candidate := range candidates {
-		if gitRefExists(barePath, candidate+"^{commit}") {
+		if c.gitRefExists(ctx, barePath, candidate+"^{commit}") {
 			return candidate, nil
 		}
 	}
@@ -600,13 +1050,21 @@ func resolveBaseRef(barePath, requestedRef string) (string, error) {
 }
 
 func gitRefExists(repoPath, ref string) bool {
-	return runGit("-C", repoPath, "rev-parse", "--verify", "--quiet", ref) == nil
+	return legacyCache().gitRefExists(context.Background(), repoPath, ref)
+}
+
+func (c *Cache) gitRefExists(ctx context.Context, repoPath, ref string) bool {
+	return c.git.run(ctx, 0, "-C", repoPath, "rev-parse", "--verify", "--quiet", ref) == nil
 }
 
 // createWorktree creates a git worktree at the given path with a new branch.
 // Returns the actual branch name used — which may differ from the requested
 // branchName if a collision was resolved by appending a timestamp suffix.
 func createWorktree(gitRoot, worktreePath, branchName, baseRef string) (string, error) {
+	return legacyCache().createWorktree(context.Background(), gitRoot, worktreePath, branchName, baseRef)
+}
+
+func (c *Cache) createWorktree(ctx context.Context, gitRoot, worktreePath, branchName, baseRef string) (string, error) {
 	// Pre-check: if the worktree path already exists we would get a confusing
 	// "already exists" error from `git worktree add` — which used to be
 	// misclassified as a branch collision, causing the retry to leak branches
@@ -616,11 +1074,11 @@ func createWorktree(gitRoot, worktreePath, branchName, baseRef string) (string, 
 		return "", fmt.Errorf("worktree path already exists and is not a valid git worktree: %s", worktreePath)
 	}
 
-	err := runWorktreeAdd(gitRoot, worktreePath, branchName, baseRef)
+	err := c.runWorktreeAdd(ctx, gitRoot, worktreePath, branchName, baseRef)
 	if err != nil && isBranchCollisionError(err) {
 		// Branch name collision: append timestamp and retry once.
 		branchName = fmt.Sprintf("%s-%d", branchName, time.Now().Unix())
-		err = runWorktreeAdd(gitRoot, worktreePath, branchName, baseRef)
+		err = c.runWorktreeAdd(ctx, gitRoot, worktreePath, branchName, baseRef)
 	}
 	if err != nil {
 		return "", err
@@ -629,7 +1087,11 @@ func createWorktree(gitRoot, worktreePath, branchName, baseRef string) (string, 
 }
 
 func runWorktreeAdd(gitRoot, worktreePath, branchName, baseRef string) error {
-	if out, err := runGitCombinedOutput("-C", gitRoot, "worktree", "add", "-b", branchName, worktreePath, baseRef); err != nil {
+	return legacyCache().runWorktreeAdd(context.Background(), gitRoot, worktreePath, branchName, baseRef)
+}
+
+func (c *Cache) runWorktreeAdd(ctx context.Context, gitRoot, worktreePath, branchName, baseRef string) error {
+	if out, err := c.git.combinedOutput(ctx, 0, "-C", gitRoot, "worktree", "add", "-b", branchName, worktreePath, baseRef); err != nil {
 		return fmt.Errorf("git worktree add: %s: %w", strings.TrimSpace(string(out)), err)
 	}
 	return nil
@@ -656,18 +1118,119 @@ func isGitWorktree(path string) bool {
 	return err == nil && !info.IsDir()
 }
 
+func isGitCheckoutRoot(path string) bool {
+	return legacyCache().isGitCheckoutRoot(context.Background(), path)
+}
+
+func (c *Cache) isGitCheckoutRoot(ctx context.Context, path string) bool {
+	if strings.TrimSpace(path) == "" {
+		return false
+	}
+	out, err := c.git.output(ctx, 0, "-C", path, "rev-parse", "--show-toplevel")
+	if err != nil {
+		return false
+	}
+	root, err := canonicalExistingDir(strings.TrimSpace(string(out)))
+	if err != nil {
+		return false
+	}
+	want, err := canonicalExistingDir(path)
+	return err == nil && samePath(root, want)
+}
+
+func verifyWorktreeOwner(worktreePath, expectedBarePath string) error {
+	return legacyCache().verifyWorktreeOwner(context.Background(), worktreePath, expectedBarePath)
+}
+
+func (c *Cache) verifyWorktreeOwner(ctx context.Context, worktreePath, expectedBarePath string) error {
+	out, err := c.git.output(ctx, 0, "-C", worktreePath, "rev-parse", "--git-common-dir")
+	if err != nil {
+		return fmt.Errorf("prove existing worktree ownership: %w", err)
+	}
+	commonDir := strings.TrimSpace(string(out))
+	if !filepath.IsAbs(commonDir) {
+		commonDir = filepath.Join(worktreePath, commonDir)
+	}
+	commonDir, err = canonicalExistingDir(commonDir)
+	if err != nil {
+		return fmt.Errorf("prove existing worktree ownership: resolve common dir: %w", err)
+	}
+	expectedBarePath, err = canonicalExistingDir(expectedBarePath)
+	if err != nil {
+		return fmt.Errorf("prove existing worktree ownership: resolve expected bare cache: %w", err)
+	}
+	if !samePath(commonDir, expectedBarePath) {
+		return fmt.Errorf("existing worktree belongs to a different bare cache: got %s, want %s", commonDir, expectedBarePath)
+	}
+	return nil
+}
+
+func canonicalWorktreeTarget(workDir, dirName string) (string, error) {
+	if strings.TrimSpace(workDir) == "" {
+		return "", fmt.Errorf("workdir is empty")
+	}
+	if !isSafePathComponent(dirName) {
+		return "", fmt.Errorf("unsafe repo directory name %q", dirName)
+	}
+	canonicalWorkDir, err := canonicalExistingDir(workDir)
+	if err != nil {
+		return "", fmt.Errorf("resolve workdir: %w", err)
+	}
+	target := filepath.Join(canonicalWorkDir, dirName)
+	if !pathWithin(canonicalWorkDir, target) {
+		return "", fmt.Errorf("worktree target escapes workdir: %s", target)
+	}
+
+	info, err := os.Lstat(target)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return target, nil
+		}
+		return "", fmt.Errorf("stat worktree target: %w", err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		resolved, resolveErr := filepath.EvalSymlinks(target)
+		if resolveErr != nil {
+			return "", fmt.Errorf("worktree target is a symlink: %s", target)
+		}
+		if !pathWithin(canonicalWorkDir, resolved) {
+			return "", fmt.Errorf("worktree target symlink escapes workdir: %s -> %s", target, resolved)
+		}
+		return "", fmt.Errorf("worktree target must not be a symlink: %s", target)
+	}
+	canonicalTarget, err := filepath.EvalSymlinks(target)
+	if err != nil {
+		return "", fmt.Errorf("resolve worktree target: %w", err)
+	}
+	if !pathWithin(canonicalWorkDir, canonicalTarget) {
+		return "", fmt.Errorf("canonical worktree target escapes workdir: %s", canonicalTarget)
+	}
+	return filepath.Clean(canonicalTarget), nil
+}
+
+func samePath(a, b string) bool {
+	if runtime.GOOS == "windows" {
+		return strings.EqualFold(filepath.Clean(a), filepath.Clean(b))
+	}
+	return filepath.Clean(a) == filepath.Clean(b)
+}
+
 // updateExistingWorktree resets the worktree to a clean state and checks out a
 // new branch from the default branch. The caller is responsible for fetching
 // the bare cache beforehand (worktrees share the same object store).
 // Returns the actual branch name used (may differ from input on collision).
 func updateExistingWorktree(worktreePath, branchName, baseRef string) (string, error) {
+	return legacyCache().updateExistingWorktree(context.Background(), worktreePath, branchName, baseRef)
+}
+
+func (c *Cache) updateExistingWorktree(ctx context.Context, worktreePath, branchName, baseRef string) (string, error) {
 	// Discard any leftover uncommitted changes from the previous task.
-	if out, err := runGitCombinedOutput("-C", worktreePath, "reset", "--hard"); err != nil {
+	if out, err := c.git.combinedOutput(ctx, 0, "-C", worktreePath, "reset", "--hard"); err != nil {
 		return "", fmt.Errorf("git reset --hard: %s: %w", strings.TrimSpace(string(out)), err)
 	}
 
 	// Clean untracked files (e.g. build artifacts from previous task).
-	if out, err := runGitCombinedOutput("-C", worktreePath, "clean", "-fd"); err != nil {
+	if out, err := c.git.combinedOutput(ctx, 0, "-C", worktreePath, "clean", "-fd"); err != nil {
 		return "", fmt.Errorf("git clean -fd: %s: %w", strings.TrimSpace(string(out)), err)
 	}
 
@@ -676,7 +1239,7 @@ func updateExistingWorktree(worktreePath, branchName, baseRef string) (string, e
 	// "refs/remotes/origin/<branch>" but may be "refs/heads/<branch>" on a
 	// legacy/migration-pending cache. Either form is valid as a checkout
 	// startpoint.
-	out, err := runGitCombinedOutput("-C", worktreePath, "checkout", "-b", branchName, baseRef)
+	out, err := c.git.combinedOutput(ctx, 0, "-C", worktreePath, "checkout", "-b", branchName, baseRef)
 	if err == nil {
 		return branchName, nil
 	}
@@ -686,7 +1249,7 @@ func updateExistingWorktree(worktreePath, branchName, baseRef string) (string, e
 	}
 	// Branch name collision: append timestamp and retry once.
 	branchName = fmt.Sprintf("%s-%d", branchName, time.Now().Unix())
-	if out2, err2 := runGitCombinedOutput("-C", worktreePath, "checkout", "-b", branchName, baseRef); err2 != nil {
+	if out2, err2 := c.git.combinedOutput(ctx, 0, "-C", worktreePath, "checkout", "-b", branchName, baseRef); err2 != nil {
 		return "", fmt.Errorf("git checkout -b (retry): %s: %w", strings.TrimSpace(string(out2)), err2)
 	}
 	return branchName, nil
@@ -718,23 +1281,27 @@ func updateExistingWorktree(worktreePath, branchName, baseRef string) (string, e
 // Returns "" only when none of the above resolve — which the caller treats
 // as a hard error with a clear "cache has no usable refs" message.
 func getRemoteDefaultBranch(barePath string) string {
+	return legacyCache().getRemoteDefaultBranch(context.Background(), barePath)
+}
+
+func (c *Cache) getRemoteDefaultBranch(ctx context.Context, barePath string) string {
 	// 1) Primary: refs/remotes/origin/HEAD set by `git remote set-head
 	//    origin --auto` during ensureRemoteTrackingLayout. Verify the
 	//    target actually exists — a partial set-head or a manually-broken
 	//    repo can leave a symref pointing at a deleted ref, and returning
 	//    it here would later fail in `git worktree add` with a confusing
 	//    "invalid reference" error.
-	if out, err := runGitOutput("-C", barePath, "symbolic-ref", "refs/remotes/origin/HEAD"); err == nil {
+	if out, err := c.git.output(ctx, 0, "-C", barePath, "symbolic-ref", "refs/remotes/origin/HEAD"); err == nil {
 		ref := strings.TrimSpace(string(out))
 		if ref != "" {
-			if err := runGit("-C", barePath, "rev-parse", "--verify", ref); err == nil {
+			if err := c.git.run(ctx, 0, "-C", barePath, "rev-parse", "--verify", ref); err == nil {
 				return ref
 			}
 		}
 	}
 	// 2) Common default branch names under the origin namespace.
 	for _, candidate := range []string{"refs/remotes/origin/main", "refs/remotes/origin/master"} {
-		if err := runGit("-C", barePath, "rev-parse", "--verify", candidate); err == nil {
+		if err := c.git.run(ctx, 0, "-C", barePath, "rev-parse", "--verify", candidate); err == nil {
 			return candidate
 		}
 	}
@@ -744,10 +1311,10 @@ func getRemoteDefaultBranch(barePath string) string {
 	//    didn't populate refs/remotes/origin/HEAD. We only return when the
 	//    matching origin/<name> exists, so we still pick up up-to-date code
 	//    rather than a stale local head.
-	bareRef := bareHeadBranch(barePath)
+	bareRef := c.bareHeadBranch(ctx, barePath)
 	if bareRef != "" {
 		originRef := "refs/remotes/origin/" + strings.TrimPrefix(bareRef, "refs/heads/")
-		if err := runGit("-C", barePath, "rev-parse", "--verify", originRef); err == nil {
+		if err := c.git.run(ctx, 0, "-C", barePath, "rev-parse", "--verify", originRef); err == nil {
 			return originRef
 		}
 	}
@@ -759,7 +1326,7 @@ func getRemoteDefaultBranch(barePath string) string {
 	//    "legacy empty" apart from "ambiguous".
 	originCount := 0
 	var singleton string
-	if out, err := runGitOutput("-C", barePath, "for-each-ref", "--format=%(refname)", "refs/remotes/origin/"); err == nil {
+	if out, err := c.git.output(ctx, 0, "-C", barePath, "for-each-ref", "--format=%(refname)", "refs/remotes/origin/"); err == nil {
 		for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
 			line = strings.TrimSpace(line)
 			if line == "" || line == "refs/remotes/origin/HEAD" {
@@ -795,7 +1362,11 @@ func getRemoteDefaultBranch(barePath string) string {
 // modern caches should never reach this path because origin/* resolution
 // succeeds first.
 func bareHeadBranch(barePath string) string {
-	out, err := runGitOutput("-C", barePath, "symbolic-ref", "HEAD")
+	return legacyCache().bareHeadBranch(context.Background(), barePath)
+}
+
+func (c *Cache) bareHeadBranch(ctx context.Context, barePath string) string {
+	out, err := c.git.output(ctx, 0, "-C", barePath, "symbolic-ref", "HEAD")
 	if err != nil {
 		return ""
 	}
@@ -803,7 +1374,7 @@ func bareHeadBranch(barePath string) string {
 	if ref == "" {
 		return ""
 	}
-	if err := runGit("-C", barePath, "rev-parse", "--verify", ref); err != nil {
+	if err := c.git.run(ctx, 0, "-C", barePath, "rev-parse", "--verify", ref); err != nil {
 		return ""
 	}
 	return ref
@@ -859,7 +1430,11 @@ git interpret-trailers --in-place --trailer "$TRAILER" "$COMMIT_MSG_FILE"
 // git common directory (the bare repo for worktrees) so it applies to all
 // worktrees created from this cache.
 func installCoAuthoredByHook(worktreePath string) error {
-	out, err := runGitOutput("-C", worktreePath, "rev-parse", "--git-common-dir")
+	return legacyCache().installCoAuthoredByHook(context.Background(), worktreePath)
+}
+
+func (c *Cache) installCoAuthoredByHook(ctx context.Context, worktreePath string) error {
+	out, err := c.git.output(ctx, 0, "-C", worktreePath, "rev-parse", "--git-common-dir")
 	if err != nil {
 		return fmt.Errorf("resolve git common dir: %w", err)
 	}
@@ -901,7 +1476,11 @@ func isDaemonInstalledHook(contents []byte) bool {
 // Returns nil when no hook is present or when an unrelated hook occupies
 // the path.
 func removeCoAuthoredByHook(worktreePath string) error {
-	out, err := runGitOutput("-C", worktreePath, "rev-parse", "--git-common-dir")
+	return legacyCache().removeCoAuthoredByHook(context.Background(), worktreePath)
+}
+
+func (c *Cache) removeCoAuthoredByHook(ctx context.Context, worktreePath string) error {
+	out, err := c.git.output(ctx, 0, "-C", worktreePath, "rev-parse", "--git-common-dir")
 	if err != nil {
 		return fmt.Errorf("resolve git common dir: %w", err)
 	}
@@ -930,7 +1509,11 @@ func removeCoAuthoredByHook(worktreePath string) error {
 
 // excludeFromGit adds a pattern to the worktree's .git/info/exclude file.
 func excludeFromGit(worktreePath, pattern string) error {
-	out, err := runGitOutput("-C", worktreePath, "rev-parse", "--git-dir")
+	return legacyCache().excludeFromGit(context.Background(), worktreePath, pattern)
+}
+
+func (c *Cache) excludeFromGit(ctx context.Context, worktreePath, pattern string) error {
+	out, err := c.git.output(ctx, 0, "-C", worktreePath, "rev-parse", "--git-dir")
 	if err != nil {
 		return fmt.Errorf("resolve git dir: %w", err)
 	}
@@ -963,25 +1546,30 @@ func excludeFromGit(worktreePath, pattern string) error {
 	return nil
 }
 
-// repoNameFromURL extracts a short directory name from a git remote URL.
-// e.g. "https://github.com/org/my-repo.git" → "my-repo"
-func repoNameFromURL(url string) string {
-	url = strings.TrimRight(url, "/")
-	url = strings.TrimSuffix(url, ".git")
-
-	if i := strings.LastIndex(url, "/"); i >= 0 {
-		url = url[i+1:]
+func worktreeDirName(rawURL string) (string, error) {
+	if err := validateRepoURL(rawURL); err != nil {
+		return "", err
 	}
-	if i := strings.LastIndex(url, ":"); i >= 0 {
-		url = url[i+1:]
-		if j := strings.LastIndex(url, "/"); j >= 0 {
-			url = url[j+1:]
-		}
+	_, repoPath := splitHostAndPath(strings.TrimRight(strings.TrimSpace(rawURL), "/"))
+	base := repoPath
+	if i := strings.LastIndex(base, "/"); i >= 0 {
+		base = base[i+1:]
 	}
+	base = strings.TrimSuffix(base, ".git")
+	base, err := url.PathUnescape(base)
+	if err != nil || !isSafeRepoName(base) {
+		return "", fmt.Errorf("unsafe repo URL %q: invalid repository name", rawURL)
+	}
+	digest := sha256.Sum256([]byte(strings.TrimSpace(rawURL)))
+	return fmt.Sprintf("%s-%x", base, digest[:6]), nil
+}
 
-	name := strings.TrimSpace(url)
-	if name == "" {
-		return "repo"
+// repoNameFromURL is retained for internal tests and legacy callers. New
+// checkout paths use worktreeDirName so equal basenames cannot collide.
+func repoNameFromURL(rawURL string) string {
+	name, err := worktreeDirName(rawURL)
+	if err != nil {
+		return ""
 	}
 	return name
 }

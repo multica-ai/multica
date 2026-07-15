@@ -17,6 +17,33 @@ import (
 	"time"
 )
 
+type codexTestIsolation struct{}
+
+func (*codexTestIsolation) Wrap(_ TaskIsolationPolicy, executable string, args []string) (string, []string, error) {
+	return executable, args, nil
+}
+
+func codexTestConfig(t *testing.T, executable, cwd string, env map[string]string) Config {
+	t.Helper()
+	taskEnv := make(map[string]string, len(env)+1)
+	for key, value := range env {
+		taskEnv[key] = value
+	}
+	if taskEnv["PATH"] == "" {
+		taskEnv["PATH"] = os.Getenv("PATH")
+	}
+	return Config{
+		ExecutablePath: executable,
+		Logger:         slog.Default(),
+		Env:            taskEnv,
+		Launcher:       newCommandLauncher(&codexTestIsolation{}),
+		Isolation: &TaskIsolationPolicy{
+			WritableRoots: []string{filepath.Dir(executable), cwd},
+			Network:       NetworkAccessPublicAndLoopback,
+		},
+	}
+}
+
 func newTestCodexClient(t *testing.T) (*codexClient, *fakeStdin, []Message) {
 	t.Helper()
 	fs := &fakeStdin{}
@@ -1559,14 +1586,15 @@ func TestCodexExecuteSurfacesStderrWhenChildExitsEarly(t *testing.T) {
 		"exit 2\n"
 	writeTestExecutable(t, fakePath, []byte(script))
 
-	backend, err := New("codex", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	workDir := t.TempDir()
+	backend, err := New("codex", codexTestConfig(t, fakePath, workDir, nil))
 	if err != nil {
 		t.Fatalf("new codex backend: %v", err)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{Timeout: 5 * time.Second})
+	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{Cwd: workDir, Timeout: 5 * time.Second})
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
@@ -2392,7 +2420,10 @@ func writeFakeCodexAppServer(t *testing.T, body string) string {
 
 func executeFakeCodex(t *testing.T, fakePath string, opts ExecOptions) Result {
 	t.Helper()
-	backend, err := New("codex", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	if opts.Cwd == "" {
+		opts.Cwd = t.TempDir()
+	}
+	backend, err := New("codex", codexTestConfig(t, fakePath, opts.Cwd, nil))
 	if err != nil {
 		t.Fatalf("new codex backend: %v", err)
 	}

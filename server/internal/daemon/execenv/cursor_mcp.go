@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -108,10 +107,7 @@ func seedCursorMcpAuthFile(projectDataDir, source string) error {
 		return err
 	}
 	target := filepath.Join(projectDataDir, cursorMcpAuthFile)
-	if err := os.Symlink(sourcePath, target); err == nil {
-		return nil
-	}
-	if err := copyCursorMcpAuthFile(target, sourcePath); err != nil {
+	if err := snapshotRegularFile(sourcePath, target, cursorAuthSnapshotMaxBytes); err != nil {
 		return fmt.Errorf("seed cursor mcp auth file: %w", err)
 	}
 	return nil
@@ -145,48 +141,24 @@ func resolveCursorMcpAuthSource(source string) (string, error) {
 		return "", fmt.Errorf("%s must be an absolute path to %s or its containing Cursor project directory", CursorMcpAuthSourceEnv, cursorMcpAuthFile)
 	}
 	source = filepath.Clean(source)
-	info, err := os.Stat(source)
+	info, err := os.Lstat(source)
 	if err != nil {
 		return "", fmt.Errorf("stat %s: %w", CursorMcpAuthSourceEnv, err)
 	}
 	if info.IsDir() {
 		source = filepath.Join(source, cursorMcpAuthFile)
-		info, err = os.Stat(source)
+		info, err = os.Lstat(source)
 		if err != nil {
 			return "", fmt.Errorf("stat %s %s: %w", CursorMcpAuthSourceEnv, cursorMcpAuthFile, err)
 		}
 	}
-	if info.IsDir() {
-		return "", fmt.Errorf("%s must resolve to a file, got directory %s", CursorMcpAuthSourceEnv, source)
+	if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+		return "", fmt.Errorf("%s must resolve to a regular, non-symlink file", CursorMcpAuthSourceEnv)
 	}
 	if filepath.Base(source) != cursorMcpAuthFile {
 		return "", fmt.Errorf("%s must point at %s, got %s", CursorMcpAuthSourceEnv, cursorMcpAuthFile, filepath.Base(source))
 	}
 	return source, nil
-}
-
-func copyCursorMcpAuthFile(target, source string) error {
-	in, err := os.Open(source)
-	if err != nil {
-		return err
-	}
-	defer in.Close()
-
-	out, err := os.OpenFile(target, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
-	if err != nil {
-		return err
-	}
-	_, copyErr := io.Copy(out, in)
-	closeErr := out.Close()
-	if copyErr != nil {
-		_ = os.Remove(target)
-		return copyErr
-	}
-	if closeErr != nil {
-		_ = os.Remove(target)
-		return closeErr
-	}
-	return nil
 }
 
 func hasManagedCursorMcpConfig(raw json.RawMessage) bool {

@@ -2,8 +2,13 @@ package main
 
 import (
 	"bytes"
+	"net"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -11,6 +16,126 @@ import (
 	"github.com/multica-ai/multica/server/internal/daemon"
 	"github.com/spf13/cobra"
 )
+
+func TestRequestDaemonShutdownSendsOperatorCredential(t *testing.T) {
+	t.Parallel()
+
+	const credential = "operator-shutdown-credential"
+	requests := make(chan *http.Request, 1)
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests <- r.Clone(r.Context())
+		w.WriteHeader(http.StatusOK)
+	}))
+	server.Listener = listener
+	server.Start()
+	defer server.Close()
+
+	port, err := strconv.Atoi(strings.TrimPrefix(server.URL, "http://127.0.0.1:"))
+	if err != nil {
+		t.Fatalf("parse test server port: %v", err)
+	}
+	if err := requestDaemonShutdown(port, credential); err != nil {
+		t.Fatalf("request shutdown: %v", err)
+	}
+
+	request := <-requests
+	if request.Method != http.MethodPost {
+		t.Fatalf("method = %q, want POST", request.Method)
+	}
+	if got := request.Header.Get(daemon.ShutdownCredentialHeader); got != credential {
+		t.Fatalf("shutdown credential header = %q, want %q", got, credential)
+	}
+}
+
+func TestRequestDaemonShutdownDoesNotForwardCredentialAcrossRedirect(t *testing.T) {
+	t.Parallel()
+
+	const credential = "operator-shutdown-credential"
+	redirected := make(chan string, 1)
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		redirected <- r.Header.Get(daemon.ShutdownCredentialHeader)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer target.Close()
+
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, target.URL, http.StatusTemporaryRedirect)
+	}))
+	server.Listener = listener
+	server.Start()
+	defer server.Close()
+
+	port, err := strconv.Atoi(strings.TrimPrefix(server.URL, "http://127.0.0.1:"))
+	if err != nil {
+		t.Fatalf("parse test server port: %v", err)
+	}
+	if err := requestDaemonShutdown(port, credential); err == nil {
+		t.Fatal("redirected shutdown request unexpectedly succeeded")
+	}
+	select {
+	case got := <-redirected:
+		t.Fatalf("shutdown redirect reached target with credential %q", got)
+	default:
+	}
+}
+
+func TestRequestDaemonShutdownRejectsMissingCredential(t *testing.T) {
+	t.Parallel()
+
+	if err := requestDaemonShutdown(1, " \n\t"); err == nil {
+		t.Fatal("shutdown request without a credential unexpectedly succeeded")
+	}
+}
+
+func TestReadDaemonShutdownCredentialValidatesOperatorFile(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	const profile = "test-profile"
+	const credential = "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY"
+	path := daemonShutdownCredentialPathForProfile(profile)
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatalf("create profile directory: %v", err)
+	}
+	if err := os.WriteFile(path, []byte(credential+"\n"), 0o600); err != nil {
+		t.Fatalf("write shutdown credential: %v", err)
+	}
+
+	got, err := readDaemonShutdownCredential(profile)
+	if err != nil {
+		t.Fatalf("read shutdown credential: %v", err)
+	}
+	if got != credential {
+		t.Fatalf("credential = %q, want %q", got, credential)
+	}
+
+	if err := os.WriteFile(path, []byte("not-base64\n"), 0o600); err != nil {
+		t.Fatalf("replace shutdown credential: %v", err)
+	}
+	if _, err := readDaemonShutdownCredential(profile); err == nil {
+		t.Fatal("malformed shutdown credential unexpectedly accepted")
+	}
+
+	if runtime.GOOS != "windows" {
+		if err := os.WriteFile(path, []byte(credential+"\n"), 0o644); err != nil {
+			t.Fatalf("replace shutdown credential with broad permissions: %v", err)
+		}
+		if err := os.Chmod(path, 0o644); err != nil {
+			t.Fatalf("broaden shutdown credential permissions: %v", err)
+		}
+		if _, err := readDaemonShutdownCredential(profile); err == nil {
+			t.Fatal("non-operator-only shutdown credential unexpectedly accepted")
+		}
+	}
+}
 
 // TestDaemonAlive locks in the liveness predicate the lifecycle commands rely
 // on: both a ready ("running") and a still-booting ("starting") daemon count as

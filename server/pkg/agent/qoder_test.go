@@ -3,7 +3,6 @@ package agent
 import (
 	"context"
 	"encoding/json"
-	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -213,7 +212,7 @@ func TestQoderBackendSetModelFailureFailsTask(t *testing.T) {
 	fakePath := filepath.Join(t.TempDir(), "qodercli")
 	writeTestExecutable(t, fakePath, []byte(fakeQoderACPScript()))
 
-	backend, err := New("qoder", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	backend, err := New("qoder", acpProviderTestConfig(t, fakePath, nil))
 	if err != nil {
 		t.Fatalf("new qoder backend: %v", err)
 	}
@@ -263,11 +262,7 @@ func TestQoderBackendInvokesACPFlagAndFiltersBlockedArgs(t *testing.T) {
 	fakePath := filepath.Join(tempDir, "qodercli")
 	writeTestExecutable(t, fakePath, []byte(fakeQoderACPScript()))
 
-	backend, err := New("qoder", Config{
-		ExecutablePath: fakePath,
-		Logger:         slog.Default(),
-		Env:            map[string]string{"QODER_ARGS_FILE": argsFile},
-	})
+	backend, err := New("qoder", acpProviderTestConfig(t, fakePath, map[string]string{"QODER_ARGS_FILE": argsFile}))
 	if err != nil {
 		t.Fatalf("new qoder backend: %v", err)
 	}
@@ -328,7 +323,7 @@ func TestQoderBackendHappyPath(t *testing.T) {
 	fakePath := filepath.Join(t.TempDir(), "qodercli")
 	writeTestExecutable(t, fakePath, []byte(fakeQoderACPScript()))
 
-	backend, err := New("qoder", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	backend, err := New("qoder", acpProviderTestConfig(t, fakePath, nil))
 	if err != nil {
 		t.Fatalf("new qoder backend: %v", err)
 	}
@@ -366,7 +361,7 @@ func TestQoderBackendNonPositiveTimeoutDoesNotImposeDeadline(t *testing.T) {
 	fakePath := filepath.Join(t.TempDir(), "qodercli")
 	writeTestExecutable(t, fakePath, []byte(fakeQoderACPScript()))
 
-	backend, err := New("qoder", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	backend, err := New("qoder", acpProviderTestConfig(t, fakePath, nil))
 	if err != nil {
 		t.Fatalf("new qoder backend: %v", err)
 	}
@@ -401,7 +396,7 @@ func TestQoderBackendDoesNotWaitForeverForReaderAfterPromptDone(t *testing.T) {
 	fakePath := filepath.Join(t.TempDir(), "qodercli")
 	writeTestExecutable(t, fakePath, []byte(fakeQoderACPScriptWithLeakedStdout()))
 
-	backend, err := New("qoder", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	backend, err := New("qoder", acpProviderTestConfig(t, fakePath, nil))
 	if err != nil {
 		t.Fatalf("new qoder backend: %v", err)
 	}
@@ -455,7 +450,7 @@ func TestQoderBackendIgnoresLateReaderOutputAfterGrace(t *testing.T) {
 	fakePath := filepath.Join(t.TempDir(), "qodercli")
 	writeTestExecutable(t, fakePath, []byte(fakeQoderACPScriptWithLateStdoutAfterResult()))
 
-	backend, err := New("qoder", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	backend, err := New("qoder", acpProviderTestConfig(t, fakePath, nil))
 	if err != nil {
 		t.Fatalf("new qoder backend: %v", err)
 	}
@@ -500,14 +495,10 @@ func TestQoderForwardsMcpAuthHeaderToSessionNew(t *testing.T) {
 	fakePath := filepath.Join(tempDir, "qodercli")
 	writeTestExecutable(t, fakePath, []byte(fakeQoderACPScriptCapturingRPC()))
 
-	backend, err := New("qoder", Config{
-		ExecutablePath: fakePath,
-		Logger:         slog.Default(),
-		Env: map[string]string{
-			"QODER_RPC_FILE":     rpcFile,
-			"QODER_INIT_MCP_SSE": "1",
-		},
-	})
+	backend, err := New("qoder", acpProviderTestConfig(t, fakePath, map[string]string{
+		"QODER_RPC_FILE":     rpcFile,
+		"QODER_INIT_MCP_SSE": "1",
+	}))
 	if err != nil {
 		t.Fatalf("new qoder backend: %v", err)
 	}
@@ -561,11 +552,7 @@ func TestQoderFiltersRemoteMcpWhenInitializeDoesNotAdvertiseCapability(t *testin
 	fakePath := filepath.Join(tempDir, "qodercli")
 	writeTestExecutable(t, fakePath, []byte(fakeQoderACPScriptCapturingRPC()))
 
-	backend, err := New("qoder", Config{
-		ExecutablePath: fakePath,
-		Logger:         slog.Default(),
-		Env:            map[string]string{"QODER_RPC_FILE": rpcFile},
-	})
+	backend, err := New("qoder", acpProviderTestConfig(t, fakePath, map[string]string{"QODER_RPC_FILE": rpcFile}))
 	if err != nil {
 		t.Fatalf("new qoder backend: %v", err)
 	}
@@ -620,7 +607,7 @@ func TestQoderPromotesTerminalProviderErrorWithOutput(t *testing.T) {
 	fakePath := filepath.Join(t.TempDir(), "qodercli")
 	writeTestExecutable(t, fakePath, []byte(fakeQoderACPScriptTerminalProviderError()))
 
-	backend, err := New("qoder", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	backend, err := New("qoder", acpProviderTestConfig(t, fakePath, nil))
 	if err != nil {
 		t.Fatalf("new qoder backend: %v", err)
 	}
@@ -659,7 +646,7 @@ func TestQoderBackendAttributesUsageToACPDefaultModel(t *testing.T) {
 	fakePath := filepath.Join(t.TempDir(), "qodercli")
 	writeTestExecutable(t, fakePath, []byte(fakeQoderACPUsageWithDefaultModelScript()))
 
-	backend, err := New("qoder", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	backend, err := New("qoder", acpProviderTestConfig(t, fakePath, nil))
 	if err != nil {
 		t.Fatalf("new qoder backend: %v", err)
 	}
@@ -707,7 +694,7 @@ func TestQoderBackendClearsSessionIDWhenResumedSessionNotFoundAtPrompt(t *testin
 	fakePath := filepath.Join(t.TempDir(), "qodercli")
 	writeTestExecutable(t, fakePath, []byte(fakeQoderACPStaleResumeScript()))
 
-	backend, err := New("qoder", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	backend, err := New("qoder", acpProviderTestConfig(t, fakePath, nil))
 	if err != nil {
 		t.Fatalf("new qoder backend: %v", err)
 	}
@@ -752,7 +739,7 @@ func TestQoderBackendClearsSessionIDWhenResumedSessionNotFoundAtSetModel(t *test
 	fakePath := filepath.Join(t.TempDir(), "qodercli")
 	writeTestExecutable(t, fakePath, []byte(fakeQoderACPStaleResumeSetModelScript()))
 
-	backend, err := New("qoder", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	backend, err := New("qoder", acpProviderTestConfig(t, fakePath, nil))
 	if err != nil {
 		t.Fatalf("new qoder backend: %v", err)
 	}

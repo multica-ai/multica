@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"runtime"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -22,11 +23,45 @@ var (
 var debugFlag bool
 
 var rootCmd = &cobra.Command{
-	Use:           "multica",
-	Short:         "Multica CLI — local agent runtime and management tool",
-	Long:          "Work seamlessly with Multica from the command line.",
-	SilenceUsage:  true,
-	SilenceErrors: true,
+	Use:               "multica",
+	Short:             "Multica CLI — local agent runtime and management tool",
+	Long:              "Work seamlessly with Multica from the command line.",
+	SilenceUsage:      true,
+	SilenceErrors:     true,
+	PersistentPreRunE: enforceTaskScopedCLI,
+}
+
+var taskScopedCLICommands = map[string]struct{}{
+	"multica issue get":          {},
+	"multica issue comment list": {},
+	"multica issue comment add":  {},
+	"multica issue status":       {},
+	"multica issue rerun":        {},
+	"multica issue runs":         {},
+	"multica issue run-messages": {},
+	"multica repo checkout":      {},
+}
+
+func enforceTaskScopedCLI(cmd *cobra.Command, _ []string) error {
+	if !inTaskScopedCLIContext() {
+		return nil
+	}
+
+	for _, flagName := range []string{"profile", "server-url", "workspace-id"} {
+		flag := cmd.Root().PersistentFlags().Lookup(flagName)
+		if flag != nil && flag.Changed {
+			return fmt.Errorf("task-scoped CLI context prohibits --%s overrides", flagName)
+		}
+	}
+
+	if _, allowed := taskScopedCLICommands[cmd.CommandPath()]; !allowed {
+		return fmt.Errorf("task-scoped CLI context permits only bounded issue commands; %q is prohibited", cmd.CommandPath())
+	}
+	return nil
+}
+
+func inTaskScopedCLIContext() bool {
+	return strings.HasPrefix(os.Getenv("MULTICA_TOKEN"), "mat_") || inDaemonManagedExecutionContext()
 }
 
 func init() {

@@ -46,7 +46,8 @@ func (b *antigravityBackend) Execute(ctx context.Context, prompt string, opts Ex
 	if execPath == "" {
 		execPath = "agy"
 	}
-	if _, err := exec.LookPath(execPath); err != nil {
+	lookedUp, err := exec.LookPath(execPath)
+	if err != nil {
 		return nil, fmt.Errorf("agy executable not found at %q: %w", execPath, err)
 	}
 
@@ -61,7 +62,7 @@ func (b *antigravityBackend) Execute(ctx context.Context, prompt string, opts Ex
 	// resolve the value itself rather than blocking the run on a discovery
 	// hiccup (see antigravityModelError).
 	if opts.Model != "" {
-		catalog, _ := ListModels(ctx, "antigravity", execPath)
+		catalog, _ := b.discoverModels(ctx, lookedUp, opts.Cwd)
 		if err := antigravityModelError(opts.Model, catalog); err != nil {
 			return nil, err
 		}
@@ -70,7 +71,11 @@ func (b *antigravityBackend) Execute(ctx context.Context, prompt string, opts Ex
 	timeout := opts.Timeout
 	runCtx, cancel := runContext(ctx, timeout)
 
-	logFile, err := os.CreateTemp("", "multica-agy-log-*.log")
+	if b.cfg.TaskTempDir == "" {
+		cancel()
+		return nil, fmt.Errorf("task temp dir is required for agy log file")
+	}
+	logFile, err := os.CreateTemp(b.cfg.TaskTempDir, "multica-agy-log-*.log")
 	if err != nil {
 		cancel()
 		return nil, fmt.Errorf("create agy log file: %w", err)
@@ -80,14 +85,13 @@ func (b *antigravityBackend) Execute(ctx context.Context, prompt string, opts Ex
 
 	args := buildAntigravityArgs(prompt, logPath, timeout, opts, b.cfg.Logger)
 
-	cmd := exec.CommandContext(runCtx, execPath, args...)
-	hideAgentWindow(cmd)
-	b.cfg.Logger.Info("agent command", "exec", execPath, "args", args)
-	cmd.WaitDelay = 10 * time.Second
-	if opts.Cwd != "" {
-		cmd.Dir = opts.Cwd
+	cmd, err := b.cfg.command(runCtx, lookedUp, args, opts.Cwd, 10*time.Second)
+	if err != nil {
+		cancel()
+		_ = os.Remove(logPath)
+		return nil, fmt.Errorf("create agy command: %w", err)
 	}
-	cmd.Env = buildEnv(b.cfg.Env)
+	b.cfg.Logger.Info("agent command", "exec", lookedUp, "args", args)
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -213,6 +217,24 @@ func (b *antigravityBackend) Execute(ctx context.Context, prompt string, opts Ex
 	}()
 
 	return &Session{Messages: msgCh, Result: resCh}, nil
+}
+
+// discoverModels runs the task-local `agy models` probe through the same
+// launcher and isolation policy as the main provider process. Discovery is
+// fail-open: callers ignore errors and let agy resolve the requested model.
+func (b *antigravityBackend) discoverModels(ctx context.Context, execPath, cwd string) ([]Model, error) {
+	runCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+
+	cmd, err := b.cfg.command(runCtx, execPath, []string{"models"}, cwd, 0)
+	if err != nil {
+		return nil, err
+	}
+	out, err := cmd.Output()
+	if err != nil && len(out) == 0 {
+		return nil, err
+	}
+	return parseAntigravityModels(string(out)), nil
 }
 
 // antigravityConversationIDRe matches the glog line printmode.go writes when

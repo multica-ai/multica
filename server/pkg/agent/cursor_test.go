@@ -3,9 +3,33 @@ package agent
 import (
 	"encoding/json"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
+
+func providerCommandTestConfig(t *testing.T, executable string, logger *slog.Logger) (Config, string) {
+	t.Helper()
+
+	root := filepath.Dir(executable)
+	taskTempDir := filepath.Join(root, "task-tmp")
+	if err := os.MkdirAll(taskTempDir, 0o700); err != nil {
+		t.Fatalf("create task temp dir: %v", err)
+	}
+	return Config{
+		ExecutablePath: executable,
+		Env:            map[string]string{"PATH": os.Getenv("PATH")},
+		Logger:         logger,
+		Launcher:       newCommandLauncher(&recordingIsolation{}),
+		Isolation: &TaskIsolationPolicy{
+			WritableRoots: []string{root},
+			SystemRoots:   existingSystemRootsForTest(t),
+			Network:       NetworkAccessPublicAndLoopback,
+		},
+		TaskTempDir: taskTempDir,
+	}, root
+}
 
 func TestNewReturnsCursorBackend(t *testing.T) {
 	t.Parallel()
@@ -255,10 +279,10 @@ func TestCursorUsageModelFallback(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name             string
-		evtModel         string
-		configuredModel  string
-		want             string
+		name            string
+		evtModel        string
+		configuredModel string
+		want            string
 	}{
 		{"event model wins", "gpt-5.3-codex", "composer-2.5", "gpt-5.3-codex"},
 		{"configured model fallback", "", "composer-2.5", "composer-2.5"},

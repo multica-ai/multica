@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -141,6 +143,10 @@ func daemonDirForProfile(profile string) string {
 
 func daemonPIDPathForProfile(profile string) string {
 	return filepath.Join(daemonDirForProfile(profile), "daemon.pid")
+}
+
+func daemonShutdownCredentialPathForProfile(profile string) string {
+	return filepath.Join(daemonDirForProfile(profile), daemon.ShutdownCredentialFileName)
 }
 
 func daemonLogPathForProfile(profile string) string {
@@ -602,10 +608,12 @@ func runDaemonRestart(cmd *cobra.Command, args []string) error {
 		pid, _ := health["pid"].(float64)
 		if pid > 0 {
 			fmt.Fprintf(os.Stderr, "Stopping daemon (pid %d)...\n", int(pid))
-			if err := requestDaemonShutdown(healthPort); err != nil {
-				if p, perr := os.FindProcess(int(pid)); perr == nil {
-					_ = p.Kill()
-				}
+			credential, err := readDaemonShutdownCredential(profile)
+			if err != nil {
+				return fmt.Errorf("load daemon shutdown credential: %w", err)
+			}
+			if err := requestDaemonShutdown(healthPort, credential); err != nil {
+				return fmt.Errorf("request daemon shutdown: %w", err)
 			}
 			// Wait until the port is fully released (not merely past "running"),
 			// otherwise the fresh start below races the old daemon's listener.
@@ -649,22 +657,18 @@ func runDaemonStop(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("could not determine daemon PID from health endpoint")
 	}
 
-	process, err := os.FindProcess(int(pid))
-	if err != nil {
-		return fmt.Errorf("find process %d: %w", int(pid), err)
-	}
-
 	// Request graceful shutdown via the daemon's HTTP /shutdown endpoint
 	// rather than an OS signal. On Windows the daemon is spawned with
 	// DETACHED_PROCESS so it shares no console with us, which means
 	// GenerateConsoleCtrlEvent can't reach it; HTTP works on both
 	// platforms and triggers the same context-cancel path the daemon
 	// already uses for self-restart.
-	if err := requestDaemonShutdown(healthPort); err != nil {
-		fmt.Fprintf(os.Stderr, "Graceful shutdown request failed: %v — falling back to forced kill.\n", err)
-		if kerr := process.Kill(); kerr != nil {
-			return fmt.Errorf("kill daemon (pid %d): %w", int(pid), kerr)
-		}
+	credential, err := readDaemonShutdownCredential(profile)
+	if err != nil {
+		return fmt.Errorf("load daemon shutdown credential: %w", err)
+	}
+	if err := requestDaemonShutdown(healthPort, credential); err != nil {
+		return fmt.Errorf("request daemon shutdown: %w", err)
 	}
 
 	fmt.Fprintf(os.Stderr, "Stopping daemon (pid %d)...\n", int(pid))
@@ -689,13 +693,22 @@ func runDaemonStop(cmd *cobra.Command, _ []string) error {
 // requestDaemonShutdown POSTs to the daemon's /shutdown endpoint to ask it
 // to exit gracefully. Returns an error if the request could not be delivered
 // (network error, non-2xx status, or the endpoint predates this change).
-func requestDaemonShutdown(healthPort int) error {
+func requestDaemonShutdown(healthPort int, credential string) error {
+	if strings.TrimSpace(credential) == "" {
+		return errors.New("shutdown credential is required")
+	}
 	url := fmt.Sprintf("http://127.0.0.1:%d/shutdown", healthPort)
 	req, err := http.NewRequest(http.MethodPost, url, nil)
 	if err != nil {
 		return err
 	}
-	client := &http.Client{Timeout: 2 * time.Second}
+	req.Header.Set(daemon.ShutdownCredentialHeader, credential)
+	client := &http.Client{
+		Timeout: 2 * time.Second,
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
 	resp, err := client.Do(req)
 	if err != nil {
 		return err
@@ -705,6 +718,54 @@ func requestDaemonShutdown(healthPort int) error {
 		return fmt.Errorf("unexpected status %d", resp.StatusCode)
 	}
 	return nil
+}
+
+func readDaemonShutdownCredential(profile string) (string, error) {
+	path := daemonShutdownCredentialPathForProfile(profile)
+	pathInfo, err := os.Lstat(path)
+	if err != nil {
+		return "", fmt.Errorf("inspect %s: %w", path, err)
+	}
+	if !pathInfo.Mode().IsRegular() || pathInfo.Mode()&os.ModeSymlink != 0 {
+		return "", fmt.Errorf("%s is not a regular credential file", path)
+	}
+	if runtime.GOOS != "windows" && pathInfo.Mode().Perm()&0o077 != 0 {
+		return "", fmt.Errorf("%s permissions are not operator-only", path)
+	}
+	if pathInfo.Size() <= 0 || pathInfo.Size() > 256 {
+		return "", fmt.Errorf("%s has invalid size", path)
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		return "", fmt.Errorf("open %s: %w", path, err)
+	}
+	defer file.Close()
+	openedInfo, err := file.Stat()
+	if err != nil {
+		return "", fmt.Errorf("inspect opened %s: %w", path, err)
+	}
+	if !openedInfo.Mode().IsRegular() || !os.SameFile(pathInfo, openedInfo) {
+		return "", fmt.Errorf("%s identity changed while opening", path)
+	}
+	if runtime.GOOS != "windows" && openedInfo.Mode().Perm()&0o077 != 0 {
+		return "", fmt.Errorf("%s permissions are not operator-only", path)
+	}
+	if openedInfo.Size() <= 0 || openedInfo.Size() > 256 {
+		return "", fmt.Errorf("%s has invalid size", path)
+	}
+	data, err := io.ReadAll(io.LimitReader(file, 257))
+	if err != nil {
+		return "", fmt.Errorf("read %s: %w", path, err)
+	}
+	if len(data) > 256 {
+		return "", fmt.Errorf("%s has invalid size", path)
+	}
+	credential := strings.TrimSpace(string(data))
+	raw, err := base64.RawURLEncoding.DecodeString(credential)
+	if err != nil || len(raw) != 32 {
+		return "", fmt.Errorf("%s contains an invalid credential", path)
+	}
+	return credential, nil
 }
 
 // --- daemon status ---

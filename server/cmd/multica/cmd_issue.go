@@ -503,6 +503,7 @@ func init() {
 	// issue assign
 	issueAssignCmd.Flags().String("to", "", "Assignee name (member, agent, or squad; fuzzy match)")
 	issueAssignCmd.Flags().String("to-id", "", "Assignee UUID — member, agent, or squad (mutually exclusive with --to)")
+	issueAssignCmd.Flags().String("to-type", "", "Assignee type for --to-id: member, agent, or squad (required in task-scoped execution)")
 	issueAssignCmd.Flags().Bool("unassign", false, "Remove current assignee")
 	issueAssignCmd.Flags().String("output", "json", "Output format: table or json")
 
@@ -809,8 +810,7 @@ func runIssueGet(cmd *cobra.Command, args []string) error {
 
 	output, _ := cmd.Flags().GetString("output")
 	if output == "table" {
-		actors := loadActorDisplayLookup(ctx, client)
-		assignee := formatAssignee(issue, actors)
+		assignee := taskSafeAssigneeDisplay(ctx, client, issue)
 		startDate := strVal(issue, "start_date")
 		if startDate != "" && len(startDate) >= 10 {
 			startDate = startDate[:10]
@@ -1350,15 +1350,34 @@ func runIssueUpdate(cmd *cobra.Command, args []string) error {
 
 func runIssueAssign(cmd *cobra.Command, args []string) error {
 	toName, _ := cmd.Flags().GetString("to")
+	toID, _ := cmd.Flags().GetString("to-id")
+	toType, _ := cmd.Flags().GetString("to-type")
 	unassign, _ := cmd.Flags().GetBool("unassign")
 	toNameSet := cmd.Flags().Changed("to")
 	toIDSet := cmd.Flags().Changed("to-id")
+	toTypeSet := cmd.Flags().Changed("to-type")
 
 	if !toNameSet && !toIDSet && !unassign {
 		return fmt.Errorf("provide --to <name>, --to-id <uuid>, or --unassign")
 	}
-	if (toNameSet || toIDSet) && unassign {
-		return fmt.Errorf("--to/--to-id and --unassign are mutually exclusive")
+	if (toNameSet || toIDSet || toTypeSet) && unassign {
+		return fmt.Errorf("--to/--to-id/--to-type and --unassign are mutually exclusive")
+	}
+	if toNameSet && toTypeSet {
+		return fmt.Errorf("--to and --to-type are mutually exclusive")
+	}
+	if inTaskScopedCLIContext() && !unassign {
+		if toNameSet || !toIDSet || !toTypeSet {
+			return fmt.Errorf("task-scoped issue assign requires --to-id <canonical-uuid> and --to-type member|agent|squad")
+		}
+		toID = strings.ToLower(strings.TrimSpace(toID))
+		toType = strings.ToLower(strings.TrimSpace(toType))
+		if !uuidRegexp.MatchString(toID) {
+			return fmt.Errorf("task-scoped --to-id must be a canonical UUID")
+		}
+		if !isTaskScopedAssigneeType(toType) {
+			return fmt.Errorf("task-scoped --to-type must be member, agent, or squad")
+		}
 	}
 
 	client, err := newAPIClient(cmd)
@@ -1379,6 +1398,25 @@ func runIssueAssign(cmd *cobra.Command, args []string) error {
 	if unassign {
 		body["assignee_type"] = nil
 		body["assignee_id"] = nil
+	} else if inTaskScopedCLIContext() {
+		body["assignee_type"] = toType
+		body["assignee_id"] = toID
+		displayTarget = toType + ":" + toID
+	} else if toTypeSet {
+		if !toIDSet {
+			return fmt.Errorf("--to-type requires --to-id")
+		}
+		toID = strings.ToLower(strings.TrimSpace(toID))
+		toType = strings.ToLower(strings.TrimSpace(toType))
+		if !uuidRegexp.MatchString(toID) {
+			return fmt.Errorf("--to-id must be a canonical UUID")
+		}
+		if !isTaskScopedAssigneeType(toType) {
+			return fmt.Errorf("--to-type must be member, agent, or squad")
+		}
+		body["assignee_type"] = toType
+		body["assignee_id"] = toID
+		displayTarget = toType + ":" + toID
 	} else {
 		aType, aID, _, resolveErr := pickAssigneeFromFlags(ctx, client, cmd, "to", "to-id", issueAssigneeKinds)
 		if resolveErr != nil {
@@ -1876,7 +1914,10 @@ func runIssueCommentList(cmd *cobra.Command, args []string) error {
 		return cli.PrintJSON(os.Stdout, comments)
 	}
 
-	actors := loadActorDisplayLookup(ctx, client)
+	var actors actorDisplayLookup
+	if !inTaskScopedCLIContext() {
+		actors = loadActorDisplayLookup(ctx, client)
+	}
 	headers := []string{"ID", "PARENT", "AUTHOR", "TYPE", "CONTENT", "CREATED"}
 	rows := make([][]string, 0, len(comments))
 	for _, c := range comments {
@@ -1893,10 +1934,16 @@ func runIssueCommentList(cmd *cobra.Command, args []string) error {
 		if parentID == "" {
 			parentID = "—"
 		}
+		authorType := strVal(c, "author_type")
+		authorID := strVal(c, "author_id")
+		author := authorType + ":" + authorID
+		if !inTaskScopedCLIContext() {
+			author = actors.actor(authorType, authorID)
+		}
 		rows = append(rows, []string{
 			strVal(c, "id"),
 			parentID,
-			actors.actor(strVal(c, "author_type"), strVal(c, "author_id")),
+			author,
 			strVal(c, "type"),
 			content,
 			created,
@@ -1907,6 +1954,12 @@ func runIssueCommentList(cmd *cobra.Command, args []string) error {
 }
 
 func runIssueCommentAdd(cmd *cobra.Command, args []string) error {
+	attachments, _ := cmd.Flags().GetStringSlice("attachment")
+	allowExternal, _ := cmd.Flags().GetBool("allow-external-file")
+	if inTaskScopedCLIContext() && (len(attachments) > 0 || allowExternal) {
+		return fmt.Errorf("task-scoped issue comment add prohibits attachment upload and --allow-external-file")
+	}
+
 	content, hasContent, err := resolveTextFlag(cmd, "content")
 	if err != nil {
 		return err
@@ -1922,7 +1975,6 @@ func runIssueCommentAdd(cmd *cobra.Command, args []string) error {
 
 	// Use a longer timeout when attachments are present (file uploads can be slow).
 	timeout := cli.APITimeout()
-	attachments, _ := cmd.Flags().GetStringSlice("attachment")
 	if len(attachments) > 0 {
 		timeout = cli.AtLeastAPITimeout(60 * time.Second)
 	}
@@ -2059,7 +2111,10 @@ func runIssueRuns(cmd *cobra.Command, args []string) error {
 		return cli.PrintJSON(os.Stdout, runs)
 	}
 
-	actors := loadActorDisplayLookup(ctx, client)
+	var actors actorDisplayLookup
+	if !inTaskScopedCLIContext() {
+		actors = loadActorDisplayLookup(ctx, client)
+	}
 	fullID, _ := cmd.Flags().GetBool("full-id")
 	headers := []string{"ID", "AGENT", "STATUS", "STARTED", "COMPLETED", "ERROR"}
 	rows := make([][]string, 0, len(runs))
@@ -2077,9 +2132,14 @@ func runIssueRuns(cmd *cobra.Command, args []string) error {
 			runes := []rune(errMsg)
 			errMsg = string(runes[:47]) + "..."
 		}
+		agentID := strVal(r, "agent_id")
+		agent := agentID
+		if !inTaskScopedCLIContext() {
+			agent = actors.agent(agentID)
+		}
 		rows = append(rows, []string{
 			displayID(strVal(r, "id"), fullID),
-			actors.agent(strVal(r, "agent_id")),
+			agent,
 			strVal(r, "status"),
 			started,
 			completed,
@@ -2218,7 +2278,10 @@ func runIssueRerun(cmd *cobra.Command, args []string) error {
 	if output == "json" {
 		return cli.PrintJSON(os.Stdout, task)
 	}
-	agent := loadActorDisplayLookup(ctx, client).agent(strVal(task, "agent_id"))
+	agent := strVal(task, "agent_id")
+	if !inTaskScopedCLIContext() {
+		agent = loadActorDisplayLookup(ctx, client).agent(agent)
+	}
 	fmt.Fprintf(os.Stdout, "Re-enqueued task %s on agent %s\n", strVal(task, "id"), agent)
 	return nil
 }
@@ -2758,6 +2821,27 @@ func formatAssignee(issue map[string]any, actors actorDisplayLookup) string {
 		return ""
 	}
 	return actors.actor(aType, aID)
+}
+
+func taskSafeAssigneeDisplay(ctx context.Context, client *cli.APIClient, issue map[string]any) string {
+	aType := strVal(issue, "assignee_type")
+	aID := strVal(issue, "assignee_id")
+	if aType == "" || aID == "" {
+		return ""
+	}
+	if inTaskScopedCLIContext() {
+		return aType + ":" + aID
+	}
+	return formatAssignee(issue, loadActorDisplayLookup(ctx, client))
+}
+
+func isTaskScopedAssigneeType(value string) bool {
+	switch value {
+	case "member", "agent", "squad":
+		return true
+	default:
+		return false
+	}
 }
 
 func truncateID(id string) string {

@@ -374,7 +374,8 @@ func TestAntigravityBackendPrintTimeoutSurfacesAsTimeout(t *testing.T) {
 	fakePath := filepath.Join(t.TempDir(), "agy")
 	writeTestExecutable(t, fakePath, []byte(fakeAgyPrintTimeoutScript()))
 
-	backend, err := New("antigravity", Config{ExecutablePath: fakePath, Logger: quietAntigravityLogger()})
+	cfg, cwd := providerCommandTestConfig(t, fakePath, quietAntigravityLogger())
+	backend, err := New("antigravity", cfg)
 	if err != nil {
 		t.Fatalf("new antigravity backend: %v", err)
 	}
@@ -384,7 +385,7 @@ func TestAntigravityBackendPrintTimeoutSurfacesAsTimeout(t *testing.T) {
 
 	// Timeout: 0 ("no cap") so runContext never trips — the only signal that the
 	// turn died is agy's own print-timeout marker in the log.
-	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{})
+	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{Cwd: cwd})
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
@@ -421,7 +422,8 @@ func TestAntigravityBackendProviderErrorSurfacesAsFailed(t *testing.T) {
 	fakePath := filepath.Join(t.TempDir(), "agy")
 	writeTestExecutable(t, fakePath, []byte(fakeAgyProviderErrorScript()))
 
-	backend, err := New("antigravity", Config{ExecutablePath: fakePath, Logger: quietAntigravityLogger()})
+	cfg, cwd := providerCommandTestConfig(t, fakePath, quietAntigravityLogger())
+	backend, err := New("antigravity", cfg)
 	if err != nil {
 		t.Fatalf("new antigravity backend: %v", err)
 	}
@@ -429,7 +431,7 @@ func TestAntigravityBackendProviderErrorSurfacesAsFailed(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{})
+	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{Cwd: cwd})
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
@@ -509,6 +511,75 @@ func TestAntigravityModelError(t *testing.T) {
 	}
 	if err := antigravityModelError("Claude Opus 4.6", catalog); err == nil {
 		t.Error("near-miss model (dropped suffix) should be rejected")
+	}
+}
+
+func TestAntigravityDiscoverModelsUsesTaskLauncher(t *testing.T) {
+	t.Parallel()
+
+	fakePath := filepath.Join(t.TempDir(), "agy")
+	writeTestExecutable(t, fakePath, []byte("#!/bin/sh\nprintf '%s\\n' 'Gemini 3.5 Flash (Medium)' 'Claude Opus 4.6 (Thinking)'\n"))
+	cfg, cwd := providerCommandTestConfig(t, fakePath, quietAntigravityLogger())
+	launcher, ok := cfg.Launcher.(*CommandLauncher)
+	if !ok {
+		t.Fatalf("launcher = %T, want *CommandLauncher", cfg.Launcher)
+	}
+	isolation := launcher.isolation.(*recordingIsolation)
+
+	backend := &antigravityBackend{cfg: cfg}
+	models, err := backend.discoverModels(t.Context(), fakePath, cwd)
+	if err != nil {
+		t.Fatalf("discover models: %v", err)
+	}
+	if len(models) != 2 || models[0].ID != "Gemini 3.5 Flash (Medium)" || models[1].ID != "Claude Opus 4.6 (Thinking)" {
+		t.Fatalf("models = %#v", models)
+	}
+	if isolation.executable != fakePath || !slices.Equal(isolation.args, []string{"models"}) {
+		t.Fatalf("launcher received (%q, %#v), want (%q, %#v)", isolation.executable, isolation.args, fakePath, []string{"models"})
+	}
+}
+
+func TestAntigravityBackendUsesTaskTempDirForLog(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	fakePath := filepath.Join(root, "agy")
+	markerPath := filepath.Join(root, "log-path")
+	script := `#!/bin/sh
+log=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --log-file) log="$2"; shift 2 ;;
+    *) shift ;;
+  esac
+done
+printf '%s' "$log" > "` + markerPath + `"
+printf '%s\n' 'done'
+`
+	writeTestExecutable(t, fakePath, []byte(script))
+	cfg, cwd := providerCommandTestConfig(t, fakePath, quietAntigravityLogger())
+
+	backend, err := New("antigravity", cfg)
+	if err != nil {
+		t.Fatalf("new antigravity backend: %v", err)
+	}
+	session, err := backend.Execute(t.Context(), "prompt-ignored", ExecOptions{Cwd: cwd, Timeout: 5 * time.Second})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	for range session.Messages {
+	}
+	result := <-session.Result
+	if result.Status != "completed" {
+		t.Fatalf("status = %q, error = %q", result.Status, result.Error)
+	}
+	logPath, err := os.ReadFile(markerPath)
+	if err != nil {
+		t.Fatalf("read captured log path: %v", err)
+	}
+	wantPrefix := cfg.TaskTempDir + string(filepath.Separator)
+	if !strings.HasPrefix(string(logPath), wantPrefix) {
+		t.Fatalf("log path = %q, want prefix %q", logPath, wantPrefix)
 	}
 }
 
@@ -661,7 +732,8 @@ func TestAntigravityBackendRecoversEmptyStdoutFromTranscript(t *testing.T) {
 	fakePath := filepath.Join(t.TempDir(), "agy")
 	writeTestExecutable(t, fakePath, []byte(fakeAgyEmptyStdoutScript(appDataDir, cid)))
 
-	backend, err := New("antigravity", Config{ExecutablePath: fakePath, Logger: quietAntigravityLogger()})
+	cfg, cwd := providerCommandTestConfig(t, fakePath, quietAntigravityLogger())
+	backend, err := New("antigravity", cfg)
 	if err != nil {
 		t.Fatalf("new antigravity backend: %v", err)
 	}
@@ -669,7 +741,7 @@ func TestAntigravityBackendRecoversEmptyStdoutFromTranscript(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{})
+	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{Cwd: cwd})
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}

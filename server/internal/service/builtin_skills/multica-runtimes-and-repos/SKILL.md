@@ -47,7 +47,7 @@ multica repo checkout <url> --ref <branch-or-sha>
 
 `runtime update` and `runtime delete` are writes. Starting a runtime update is limited to its owner or a workspace owner/admin; the original initiator may keep polling that specific in-flight request if their admin role changes. `runtime delete` removes a runtime registration; if active agents are still bound, it refuses unless the user explicitly passes `--cascade`, which archives those agents and cancels their queued/running tasks before deleting the runtime. `repo checkout` creates a git worktree in the task working directory.
 
-`repo checkout` requires `MULTICA_DAEMON_PORT`; it is intended to run inside a daemon task. If absent, you are not in the normal agent checkout path. When a project `github_repo` resource has `resource_ref.ref`, `repo checkout <url>` uses that ref by default for the current task; an explicit `repo checkout <url> --ref <branch-or-sha>` overrides it.
+`repo checkout` requires both `MULTICA_DAEMON_PORT` and a daemon-issued, task-scoped checkout capability. It is intended to run inside a daemon task. The daemon binds the capability to the task's workspace, workdir, agent identity, exact repo URLs, and refs; the CLI cannot select or override those identities. When a project `github_repo` resource has `resource_ref.ref`, `repo checkout <url>` uses that ref. An explicit `--ref` is accepted only when it exactly matches the ref assigned to the task.
 
 ## Debugging an agent that did not run
 

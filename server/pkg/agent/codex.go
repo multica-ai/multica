@@ -649,9 +649,11 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 	if execPath == "" {
 		execPath = "codex"
 	}
-	if _, err := exec.LookPath(execPath); err != nil {
+	resolved, err := exec.LookPath(execPath)
+	if err != nil {
 		return nil, fmt.Errorf("codex executable not found at %q: %w", execPath, err)
 	}
+	execPath = resolved
 
 	timeout := opts.Timeout
 	semanticInactivityTimeout := opts.SemanticInactivityTimeout
@@ -694,37 +696,30 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 	}
 
 	codexArgs := buildCodexArgs(opts, b.cfg.Logger)
-	cmd := exec.CommandContext(runCtx, execPath, codexArgs...)
-	hideAgentWindow(cmd)
-	// Run codex in its own process group so a cancel-on-stuck cleanup
-	// reaches the whole tree — the codex Node wrapper plus the native
-	// Rust app-server it spawns — not just the direct child. Without
-	// this, killing the leader leaves grandchildren as orphans that
-	// keep consuming memory until the OS reaps them; see #4520, where a
-	// scanner overflow during thread/resume otherwise leaked Codex
-	// processes indefinitely. configureProcessGroup is a no-op on
-	// Windows.
-	configureProcessGroup(cmd)
+	cmd, err := b.cfg.command(runCtx, execPath, codexArgs, opts.Cwd, 10*time.Second)
+	if err != nil {
+		cancel()
+		return nil, fmt.Errorf("prepare codex command: %w", err)
+	}
+	// cfg.command runs codex in its own process group so a cancel-on-stuck
+	// cleanup reaches the whole tree — the codex Node wrapper plus the native
+	// Rust app-server it spawns — not just the direct child. Without this,
+	// killing the leader leaves grandchildren as orphans that keep consuming
+	// memory until the OS reaps them; see #4520, where a scanner overflow during
+	// thread/resume otherwise leaked Codex processes indefinitely.
 	// Override the default exec.CommandContext cancel behaviour. The
 	// default sends SIGKILL only to cmd.Process (the leader); we instead
 	// signal the whole process group so descendants die too. Returning
-	// nil keeps exec from logging a spurious error; cmd.WaitDelay below
-	// still backstops cmd.Wait() if the kill leaves an open pipe.
+	// nil keeps exec from logging a spurious error; the WaitDelay supplied
+	// through cfg.command still backstops cmd.Wait() if the kill leaves an
+	// open pipe.
 	cmd.Cancel = func() error {
 		if cmd.Process != nil {
 			signalProcessGroup(cmd.Process, syscall.SIGKILL)
 		}
 		return nil
 	}
-	// Bound the wait after the context is cancelled so a stuck child (or an
-	// open pipe held by a grandchild) can't hang cmd.Wait() forever. Matches
-	// the other long-lived backends (claude, copilot, cursor, …).
-	cmd.WaitDelay = 10 * time.Second
 	b.cfg.Logger.Info("agent command", "exec", execPath, "args", codexArgs)
-	if opts.Cwd != "" {
-		cmd.Dir = opts.Cwd
-	}
-	cmd.Env = buildEnv(b.cfg.Env)
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -1180,7 +1175,7 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 			finalError = withAgentStderr(processExitErr.Error(), "codex", sanitizeCodexDiagnostic(stderrBuf.Tail()))
 		}
 		if timeoutDiagnostic.Kind != codexTimeoutNone {
-			timeoutDiagnostic.CodexVersion = detectCodexVersionForDiagnostics(context.Background(), execPath, cmd.Env, b.cfg.Logger)
+			timeoutDiagnostic.CodexVersion = detectCodexVersionForDiagnostics(context.Background(), b.cfg, execPath, opts.Cwd, b.cfg.Logger)
 			finalError = buildCodexTimeoutDiagnosticError(timeoutDiagnostic, sanitizeCodexDiagnostic(stderrBuf.Tail()))
 		}
 
@@ -1461,12 +1456,23 @@ func appendCodexKnownStderrHint(msg, stderrTail string) string {
 	return msg
 }
 
-func detectCodexVersionForDiagnostics(ctx context.Context, execPath string, env []string, logger *slog.Logger) string {
+func detectCodexVersionForDiagnostics(ctx context.Context, cfg Config, execPath, cwd string, logger *slog.Logger) string {
 	versionCtx, cancel := context.WithTimeout(ctx, codexVersionDiagnosticTimeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(versionCtx, execPath, "--version")
-	cmd.Env = env
+	cmd, err := cfg.command(versionCtx, execPath, []string{"--version"}, cwd, 2*time.Second)
+	if err != nil {
+		if logger != nil {
+			logger.Debug("codex version diagnostic command failed", "error", err)
+		}
+		return "unknown"
+	}
+	cmd.Cancel = func() error {
+		if cmd.Process != nil {
+			signalProcessGroup(cmd.Process, syscall.SIGKILL)
+		}
+		return nil
+	}
 	data, err := cmd.Output()
 	if err != nil {
 		if logger != nil {

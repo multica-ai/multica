@@ -131,6 +131,15 @@ var claudeStaticEffortFullSuperset = []string{"low", "medium", "high", "xhigh", 
 // picker for that model.
 func annotateClaudeThinking(ctx context.Context, models []Model, executablePath string) {
 	mapping := loadClaudeThinkingByModel(ctx, executablePath)
+	annotateThinkingMapping(models, mapping)
+}
+
+func annotateClaudeThinkingWithRunner(ctx context.Context, models []Model, executablePath string, runner modelDiscoveryRunner) {
+	mapping := loadClaudeThinkingByModelWithRunner(ctx, executablePath, runner, false)
+	annotateThinkingMapping(models, mapping)
+}
+
+func annotateThinkingMapping(models []Model, mapping map[string]*ModelThinking) {
 	for i := range models {
 		if t, ok := mapping[models[i].ID]; ok && t != nil {
 			models[i].Thinking = t
@@ -139,16 +148,22 @@ func annotateClaudeThinking(ctx context.Context, models []Model, executablePath 
 }
 
 func loadClaudeThinkingByModel(ctx context.Context, executablePath string) map[string]*ModelThinking {
+	return loadClaudeThinkingByModelWithRunner(ctx, executablePath, operatorModelDiscoveryRunner(), true)
+}
+
+func loadClaudeThinkingByModelWithRunner(ctx context.Context, executablePath string, runner modelDiscoveryRunner, useCache bool) map[string]*ModelThinking {
 	if executablePath == "" {
 		executablePath = "claude"
 	}
-	version, _ := DetectVersion(ctx, executablePath)
+	version, _ := detectCLIVersionWithRunner(ctx, executablePath, runner)
 	key := thinkingCacheKey{provider: "claude", executablePath: executablePath, cliVersion: version}
-	if cached, ok := thinkingCacheGet(key); ok {
-		return cached
+	if useCache {
+		if cached, ok := thinkingCacheGet(key); ok {
+			return cached
+		}
 	}
 
-	superset := claudeEffortSuperset(ctx, executablePath)
+	superset := claudeEffortSupersetWithRunner(ctx, executablePath, runner)
 	result := map[string]*ModelThinking{}
 	for _, m := range claudeStaticModels() {
 		allow := claudeModelEffortAllow[m.ID]
@@ -156,12 +171,11 @@ func loadClaudeThinkingByModel(ctx context.Context, executablePath string) map[s
 		if len(levels) == 0 {
 			continue
 		}
-		result[m.ID] = &ModelThinking{
-			SupportedLevels: levels,
-			DefaultLevel:    "medium",
-		}
+		result[m.ID] = &ModelThinking{SupportedLevels: levels, DefaultLevel: "medium"}
 	}
-	thinkingCachePut(key, result)
+	if useCache {
+		thinkingCachePut(key, result)
+	}
 	return result
 }
 
@@ -170,8 +184,14 @@ func loadClaudeThinkingByModel(ctx context.Context, executablePath string) map[s
 // fallback rather than nothing so callers can still render a usable
 // picker.
 func claudeEffortSuperset(ctx context.Context, executablePath string) []string {
-	cmd := exec.CommandContext(ctx, executablePath, "--help")
-	hideAgentWindow(cmd)
+	return claudeEffortSupersetWithRunner(ctx, executablePath, operatorModelDiscoveryRunner())
+}
+
+func claudeEffortSupersetWithRunner(ctx context.Context, executablePath string, runner modelDiscoveryRunner) []string {
+	cmd, err := runner.command(ctx, executablePath, []string{"--help"}, 0)
+	if err != nil {
+		return append([]string(nil), claudeStaticEffortFallback...)
+	}
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return append([]string(nil), claudeStaticEffortFallback...)
@@ -304,15 +324,19 @@ type codexDebugReasoningLevel struct {
 // debug command so old binaries do not log a predictable "unknown command"
 // failure on every cache refresh.
 func discoverCodexModels(ctx context.Context, executablePath string) []Model {
+	return discoverCodexModelsWithRunner(ctx, executablePath, operatorModelDiscoveryRunner())
+}
+
+func discoverCodexModelsWithRunner(ctx context.Context, executablePath string, runner modelDiscoveryRunner) []Model {
 	if executablePath == "" {
 		executablePath = "codex"
 	}
-	version, err := DetectVersion(ctx, executablePath)
+	version, err := detectCLIVersionWithRunner(ctx, executablePath, runner)
 	if err != nil || !codexSupportsDebugModels(version) {
 		return codexStaticModels()
 	}
 
-	raw, err := runCodexDebugModels(ctx, executablePath)
+	raw, err := runCodexDebugModelsWithRunner(ctx, executablePath, runner)
 	if err != nil {
 		return codexStaticModels()
 	}
@@ -344,8 +368,14 @@ func codexSupportsDebugModels(version string) bool {
 var codexDebugModelsArgs = []string{"debug", "models", "--bundled"}
 
 func runCodexDebugModels(ctx context.Context, executablePath string) ([]byte, error) {
-	cmd := exec.CommandContext(ctx, executablePath, codexDebugModelsArgs...)
-	hideAgentWindow(cmd)
+	return runCodexDebugModelsWithRunner(ctx, executablePath, operatorModelDiscoveryRunner())
+}
+
+func runCodexDebugModelsWithRunner(ctx context.Context, executablePath string, runner modelDiscoveryRunner) ([]byte, error) {
+	cmd, err := runner.command(ctx, executablePath, codexDebugModelsArgs, 0)
+	if err != nil {
+		return nil, err
+	}
 	return cmd.Output()
 }
 
@@ -470,6 +500,38 @@ func codebuddyHelpOutput(ctx context.Context, executablePath string) string {
 	return result
 }
 
+func codebuddyHelpOutputWithRunner(ctx context.Context, executablePath string, runner modelDiscoveryRunner) string {
+	if executablePath == "" {
+		executablePath = "codebuddy"
+	}
+	runCtx, cancel := context.WithTimeout(ctx, 35*time.Second)
+	defer cancel()
+	cmd, err := runner.command(runCtx, executablePath, []string{"--help"}, 0)
+	if err != nil {
+		return ""
+	}
+	out, _ := cmd.CombinedOutput()
+	return string(out)
+}
+
+func annotateCodebuddyThinkingFromHelp(models []Model, helpOutput string) {
+	levels := parseCodebuddyEffortHelp(helpOutput)
+	if len(levels) == 0 {
+		levels = append([]string(nil), codebuddyStaticEffortFallback...)
+	}
+	thinkingLevels := make([]ThinkingLevel, 0, len(levels))
+	for _, value := range levels {
+		label, ok := codebuddyEffortLabel[value]
+		if !ok {
+			label = strings.Title(value) //nolint:staticcheck
+		}
+		thinkingLevels = append(thinkingLevels, ThinkingLevel{Value: value, Label: label})
+	}
+	for i := range models {
+		models[i].Thinking = &ModelThinking{SupportedLevels: append([]ThinkingLevel(nil), thinkingLevels...), DefaultLevel: "medium"}
+	}
+}
+
 func annotateCodebuddyThinking(ctx context.Context, models []Model, executablePath string) {
 	if executablePath == "" {
 		executablePath = "codebuddy"
@@ -544,85 +606,56 @@ func parseCodebuddyEffortHelp(helpText string) []string {
 
 // ── Shared validation ────────────────────────────────────────────────
 
-// ValidateThinkingLevel reports whether `value` is in the supported
-// catalog for the given (provider, model) pair. Empty value is always
-// valid — it means "use the runtime default".
-//
-// Empty model means "follow the runtime's own default", resolved at task
-// time. How safely we can validate an effort against that depends on the
-// provider:
-//
-//   - codex: the effective model comes from the user's local config.toml
-//     and can be ANY installed model, not necessarily the catalog's flagged
-//     Default. Borrowing the Default entry (gpt-5.6-sol, the only one
-//     advertising `ultra`) would green-light levels the actually-configured
-//     model may not support — Luna tops out at `max`, gpt-5.5/5.4 at `xhigh`
-//     — and Codex does not reject the mismatch itself. We can't know the
-//     effective model without parsing config.toml in the task cwd (see this
-//     file's Codex header for why that's avoided), so an empty codex model
-//     fails closed: the daemon drops the level rather than injecting one that
-//     may not fit. Users who need a specific effort must pick an explicit
-//     model. (MUL-4347 review.)
-//   - other providers: empty model resolves to the catalog's Default entry
-//     so a default-model task with a valid thinking_level isn't misjudged as
-//     "unknown model → reject" (the misjudgement flagged in an earlier
-//     review). opencode has no single default, so it accepts a level any
-//     advertised model supports.
-//
-// The lookup goes through ListModels so it sees the *current* CLI
-// catalog (including dynamic discovery for codex), not just a static
-// map. The function is intentionally pure of HTTP concerns so the
-// daemon's pre-execution guard and the server's UpdateAgent gate can
-// share the same source of truth.
+// ValidateThinkingLevel is the compatibility entry point for callers that do
+// not provide task-scoped discovery authority. Non-empty values fail closed
+// without executing a provider binary. Task callers must use
+// ValidateThinkingLevelForTask.
 func ValidateThinkingLevel(ctx context.Context, providerType, executablePath, model, value string) (bool, error) {
 	if value == "" {
 		return true, nil
 	}
-	// Codex empty-model fail-closed (see doc comment). Checked before
-	// ListModels so the outcome is deterministic even when discovery would
-	// error — an errored lookup makes the daemon pass the level through, which
-	// is exactly what we must NOT do for an unresolved codex model.
+	return false, nil
+}
+
+func ValidateThinkingLevelForTask(ctx context.Context, providerType, executablePath, model, value string, discovery TaskModelDiscovery) (bool, error) {
+	if value == "" {
+		return true, nil
+	}
 	if model == "" && providerType == "codex" {
 		return false, nil
 	}
-	models, err := ListModels(ctx, providerType, executablePath)
+	models, err := ListModelsForTask(ctx, providerType, executablePath, discovery)
 	if err != nil {
 		return false, err
 	}
+	return validateThinkingLevelFromModels(providerType, model, value, models), nil
+}
+
+func validateThinkingLevelFromModels(providerType, model, value string, models []Model) bool {
 	target := model
 	if target == "" {
-		// Default model = the entry the catalog marks as Default. If no
-		// entry is flagged, fall through to the no-match return; that
-		// matches the existing semantics where an unknown model fails
-		// closed rather than guessing.
 		for _, m := range models {
 			if m.Default {
 				target = m.ID
 				break
 			}
 		}
-		if target == "" {
-			if providerType == "opencode" {
-				return anyModelSupportsThinkingValue(models, value), nil
-			}
-			return false, nil
+		if target == "" && providerType == "opencode" {
+			return anyModelSupportsThinkingValue(models, value)
 		}
 	}
 	for _, m := range models {
-		if m.ID != target {
+		if m.ID != target || m.Thinking == nil {
 			continue
 		}
-		if m.Thinking == nil {
-			return false, nil
-		}
-		for _, lvl := range m.Thinking.SupportedLevels {
-			if lvl.Value == value {
-				return true, nil
+		for _, level := range m.Thinking.SupportedLevels {
+			if level.Value == value {
+				return true
 			}
 		}
-		return false, nil
+		return false
 	}
-	return false, nil
+	return false
 }
 
 func anyModelSupportsThinkingValue(models []Model, value string) bool {

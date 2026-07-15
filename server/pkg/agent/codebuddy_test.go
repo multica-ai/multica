@@ -158,12 +158,21 @@ func TestCodebuddyExecute_Success(t *testing.T) {
 		`printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"session_id":"sess-cb-001","result":"Hello from codebuddy","modelUsage":{"claude-sonnet-4-20250514":{"inputTokens":100,"outputTokens":50,"cacheReadInputTokens":10,"cacheCreationInputTokens":5}}}'` + "\n"
 	writeTestExecutable(t, fakePath, []byte(script))
 
-	b := &codebuddyBackend{cfg: Config{ExecutablePath: fakePath, Logger: slog.Default()}}
+	isolation := &recordingIsolation{}
+	b := &codebuddyBackend{cfg: Config{
+		ExecutablePath: fakePath,
+		Logger:         slog.Default(),
+		Launcher:       newCommandLauncher(isolation),
+		Isolation: &TaskIsolationPolicy{
+			WritableRoots: []string{filepath.Dir(fakePath)},
+			SystemRoots:   existingSystemRootsForTest(t),
+		},
+	}}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	session, err := b.Execute(ctx, "say hello", ExecOptions{Timeout: 5 * time.Second})
+	session, err := b.Execute(ctx, "say hello", ExecOptions{Cwd: filepath.Dir(fakePath), Timeout: 5 * time.Second})
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
@@ -177,6 +186,9 @@ func TestCodebuddyExecute_Success(t *testing.T) {
 	}
 	if !gotText {
 		t.Fatal("expected text message 'Hello from codebuddy'")
+	}
+	if isolation.executable != fakePath {
+		t.Fatalf("launcher executable = %q, want %q", isolation.executable, fakePath)
 	}
 
 	select {
@@ -233,12 +245,20 @@ func TestCodebuddyExecuteSurfacesStderr(t *testing.T) {
 		"exit 1\n"
 	writeTestExecutable(t, fakePath, []byte(script))
 
-	b := &codebuddyBackend{cfg: Config{ExecutablePath: fakePath, Logger: slog.Default()}}
+	b := &codebuddyBackend{cfg: Config{
+		ExecutablePath: fakePath,
+		Logger:         slog.Default(),
+		Launcher:       newCommandLauncher(&recordingIsolation{}),
+		Isolation: &TaskIsolationPolicy{
+			WritableRoots: []string{filepath.Dir(fakePath)},
+			SystemRoots:   existingSystemRootsForTest(t),
+		},
+	}}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	session, err := b.Execute(ctx, "prompt-ignored", ExecOptions{Timeout: 5 * time.Second})
+	session, err := b.Execute(ctx, "prompt-ignored", ExecOptions{Cwd: filepath.Dir(fakePath), Timeout: 5 * time.Second})
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}

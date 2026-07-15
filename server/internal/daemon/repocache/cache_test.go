@@ -3,51 +3,100 @@ package repocache
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
+
+func trustedGitForTest(t *testing.T) string {
+	t.Helper()
+	path, err := exec.LookPath("git")
+	if err != nil {
+		t.Skipf("git not available: %v", err)
+	}
+	path, err = filepath.Abs(path)
+	if err != nil {
+		t.Fatalf("make git path absolute: %v", err)
+	}
+	path, err = filepath.EvalSymlinks(path)
+	if err != nil {
+		t.Fatalf("resolve git path: %v", err)
+	}
+	return path
+}
+
+func TestWorktreeDirNameRejectsUnsafeRepoNames(t *testing.T) {
+	t.Parallel()
+
+	tests := []string{
+		"",
+		".",
+		"..",
+		"../escape",
+		"org/../escape",
+		"https://example.com/org/../escape.git",
+		"https://example.com/org/%2e%2e/escape.git",
+		"https://example.com/org/bad name.git",
+		"https://example.com/org/bad\\name.git",
+		"https://example.com/org/repo?.git",
+	}
+	for _, rawURL := range tests {
+		rawURL := rawURL
+		t.Run(rawURL, func(t *testing.T) {
+			t.Parallel()
+			if _, err := worktreeDirName(rawURL); err == nil {
+				t.Fatalf("worktreeDirName(%q) succeeded, want unsafe repo name error", rawURL)
+			}
+		})
+	}
+}
+
+func TestWorktreeDirNameDisambiguatesSameBasenameDeterministically(t *testing.T) {
+	t.Parallel()
+
+	urlA := "https://git.example.com/team-a/app.git"
+	urlB := "https://git.example.com/team-b/app.git"
+	nameA, err := worktreeDirName(urlA)
+	if err != nil {
+		t.Fatalf("worktreeDirName(%q): %v", urlA, err)
+	}
+	nameB, err := worktreeDirName(urlB)
+	if err != nil {
+		t.Fatalf("worktreeDirName(%q): %v", urlB, err)
+	}
+	if nameA == nameB {
+		t.Fatalf("same-basename URLs share worktree dir %q", nameA)
+	}
+	if !strings.HasPrefix(nameA, "app-") || !strings.HasPrefix(nameB, "app-") {
+		t.Fatalf("worktree dirs should retain the safe basename: A=%q B=%q", nameA, nameB)
+	}
+	again, err := worktreeDirName(urlA)
+	if err != nil {
+		t.Fatalf("second worktreeDirName(%q): %v", urlA, err)
+	}
+	if again != nameA {
+		t.Fatalf("worktree dir is not deterministic: first=%q second=%q", nameA, again)
+	}
+}
 
 func testLogger() *slog.Logger {
 	return slog.Default()
 }
 
 func TestGitEnv(t *testing.T) {
-	t.Parallel()
+	t.Setenv("HOME", "/owner/home/must-not-leak")
+	t.Setenv("GH_TOKEN", "owner-token-must-not-leak")
+	t.Setenv("GIT_ASKPASS", "/owner/bin/askpass")
+	t.Setenv("SSH_AUTH_SOCK", "/owner/ssh-agent.sock")
 	env := gitEnv()
 
-	// Must contain GIT_TERMINAL_PROMPT=0.
-	found := false
-	for _, entry := range env {
-		if entry == "GIT_TERMINAL_PROMPT=0" {
-			found = true
-			break
-		}
-	}
-	if !found {
-		t.Error("gitEnv() must include GIT_TERMINAL_PROMPT=0")
-	}
-
-	// Must contain HOME from the current environment.
-	home := os.Getenv("HOME")
-	if home == "" {
-		t.Skip("HOME not set in test environment")
-	}
-	foundHome := false
-	for _, entry := range env {
-		if entry == "HOME="+home {
-			foundHome = true
-			break
-		}
-	}
-	if !foundHome {
-		t.Error("gitEnv() must include HOME from os.Environ()")
-	}
-
-	// Must set safe.directory=* via GIT_CONFIG env vars.
 	envHas := func(env []string, want string) bool {
 		for _, e := range env {
 			if e == want {
@@ -56,15 +105,27 @@ func TestGitEnv(t *testing.T) {
 		}
 		return false
 	}
-	if !envHas(env, "GIT_CONFIG_KEY_0=safe.directory") {
-		t.Error("gitEnv() must include GIT_CONFIG_KEY_0=safe.directory (no pre-existing config)")
+	for _, want := range []string{
+		"GIT_TERMINAL_PROMPT=0",
+		"GIT_CONFIG_NOSYSTEM=1",
+	} {
+		if !envHas(env, want) {
+			t.Errorf("gitEnv() missing required broker setting %q", want)
+		}
 	}
-	if !envHas(env, "GIT_CONFIG_VALUE_0=*") {
-		t.Error("gitEnv() must include GIT_CONFIG_VALUE_0=*")
+	for _, forbidden := range []string{
+		"HOME=/owner/home/must-not-leak",
+		"GH_TOKEN=owner-token-must-not-leak",
+		"GIT_ASKPASS=/owner/bin/askpass",
+		"SSH_AUTH_SOCK=/owner/ssh-agent.sock",
+	} {
+		if envHas(env, forbidden) {
+			t.Errorf("gitEnv() inherited owner setting %q", forbidden)
+		}
 	}
 }
 
-func TestGitEnvPreservesExistingConfig(t *testing.T) {
+func TestGitEnvRejectsExistingOwnerConfig(t *testing.T) {
 	// GIT_CONFIG_COUNT env vars are process-wide; cannot use t.Setenv in
 	// parallel tests, so run sequentially.
 	t.Setenv("GIT_CONFIG_COUNT", "2")
@@ -84,36 +145,138 @@ func TestGitEnvPreservesExistingConfig(t *testing.T) {
 		return false
 	}
 
-	// safe.directory must be appended at index 2 (next available).
-	if !envHas("GIT_CONFIG_COUNT=3") {
-		t.Error("expected GIT_CONFIG_COUNT=3")
-	}
-	if !envHas("GIT_CONFIG_KEY_2=safe.directory") {
-		t.Error("expected GIT_CONFIG_KEY_2=safe.directory")
-	}
-	if !envHas("GIT_CONFIG_VALUE_2=*") {
-		t.Error("expected GIT_CONFIG_VALUE_2=*")
-	}
-
-	// Original entries must still be present.
-	if !envHas("GIT_CONFIG_KEY_0=url.https://github.com/.insteadOf") {
-		t.Error("existing GIT_CONFIG_KEY_0 was lost")
-	}
-	if !envHas("GIT_CONFIG_VALUE_0=gh:") {
-		t.Error("existing GIT_CONFIG_VALUE_0 was lost")
-	}
-	if !envHas("GIT_CONFIG_KEY_1=http.extraHeader") {
-		t.Error("existing GIT_CONFIG_KEY_1 was lost")
+	for _, forbidden := range []string{
+		"GIT_CONFIG_COUNT=2",
+		"GIT_CONFIG_KEY_0=url.https://github.com/.insteadOf",
+		"GIT_CONFIG_VALUE_0=gh:",
+		"GIT_CONFIG_KEY_1=http.extraHeader",
+		"GIT_CONFIG_VALUE_1=Authorization: Bearer tok",
+	} {
+		if envHas(forbidden) {
+			t.Errorf("gitEnv() inherited owner Git config %q", forbidden)
+		}
 	}
 }
 
-func TestRunGitOutputTimesOut(t *testing.T) {
-	_, err := runGitOutputWithTimeout(0, "--version")
-	if !errors.Is(err, context.DeadlineExceeded) {
-		t.Fatalf("runGitOutputWithTimeout error = %v, want deadline exceeded", err)
+func TestNewWithGitBrokerRejectsRelativeExecutable(t *testing.T) {
+	_, err := NewWithGitBroker(t.TempDir(), testLogger(), GitBrokerOptions{
+		Executable: "git",
+	})
+	if err == nil || !strings.Contains(err.Error(), "absolute") {
+		t.Fatalf("NewWithGitBroker error = %v, want absolute executable rejection", err)
 	}
-	if !strings.Contains(err.Error(), "timed out after 0s") {
-		t.Fatalf("runGitOutputWithTimeout error = %v, want timeout context", err)
+}
+
+func TestGitBrokerUsesCallerContextAndAbsoluteExecutable(t *testing.T) {
+	cache, err := NewWithGitBroker(t.TempDir(), testLogger(), GitBrokerOptions{
+		Executable: trustedGitForTest(t),
+	})
+	if err != nil {
+		t.Fatalf("NewWithGitBroker: %v", err)
+	}
+	if !filepath.IsAbs(cache.git.executable) {
+		t.Fatalf("broker executable is not absolute: %q", cache.git.executable)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	err = cache.git.command(ctx, "--version").Run()
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("canceled broker command error = %v, want context.Canceled", err)
+	}
+}
+
+func TestTaskGitIgnoresOwnerConfigHooksFiltersAndURLRewrite(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("test uses POSIX hook and filter fixtures")
+	}
+
+	sourceA := createTestRepo(t)
+	sourceB := createTestRepo(t)
+	if err := os.WriteFile(filepath.Join(sourceA, ".gitattributes"), []byte("payload.txt filter=owner-filter\n"), 0o644); err != nil {
+		t.Fatalf("write attributes: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(sourceA, "payload.txt"), []byte("assigned-source\n"), 0o644); err != nil {
+		t.Fatalf("write source A payload: %v", err)
+	}
+	runGitAuthored(t, sourceA, "add", ".")
+	runGitAuthored(t, sourceA, "commit", "-m", "assigned payload")
+	if err := os.WriteFile(filepath.Join(sourceB, "payload.txt"), []byte("rewritten-source\n"), 0o644); err != nil {
+		t.Fatalf("write source B payload: %v", err)
+	}
+	runGitAuthored(t, sourceB, "add", ".")
+	runGitAuthored(t, sourceB, "commit", "-m", "rewrite payload")
+
+	ownerRoot := t.TempDir()
+	marker := filepath.Join(ownerRoot, "owner-command-ran")
+	hooksDir := filepath.Join(ownerRoot, "hooks")
+	if err := os.MkdirAll(hooksDir, 0o755); err != nil {
+		t.Fatalf("mkdir hooks: %v", err)
+	}
+	hook := "#!/bin/sh\nprintf hook >" + strconv.Quote(marker) + "\n"
+	if err := os.WriteFile(filepath.Join(hooksDir, "post-checkout"), []byte(hook), 0o755); err != nil {
+		t.Fatalf("write owner hook: %v", err)
+	}
+	filter := "sh -c 'printf filter >" + marker + "; cat'"
+	ownerConfig := filepath.Join(ownerRoot, "gitconfig")
+	config := fmt.Sprintf("[url %q]\n\tinsteadOf = %s\n[core]\n\thooksPath = %s\n[filter \"owner-filter\"]\n\tsmudge = %s\n\tclean = %s\n[credential]\n\thelper = !sh -c 'printf credential >%s'\n",
+		sourceB, sourceA, hooksDir, filter, filter, marker)
+	if err := os.WriteFile(ownerConfig, []byte(config), 0o600); err != nil {
+		t.Fatalf("write owner Git config: %v", err)
+	}
+	t.Setenv("HOME", ownerRoot)
+	t.Setenv("GIT_CONFIG_GLOBAL", ownerConfig)
+	t.Setenv("GIT_ASKPASS", filepath.Join(ownerRoot, "askpass"))
+	t.Setenv("GIT_CONFIG_COUNT", "1")
+	t.Setenv("GIT_CONFIG_KEY_0", "http.extraHeader")
+	t.Setenv("GIT_CONFIG_VALUE_0", "Authorization: Bearer owner-token")
+
+	cache, err := NewWithGitBroker(t.TempDir(), testLogger(), GitBrokerOptions{
+		Executable: trustedGitForTest(t),
+	})
+	if err != nil {
+		t.Fatalf("NewWithGitBroker: %v", err)
+	}
+	ctx := context.Background()
+	if err := cache.SyncContext(ctx, "ws-1", []RepoInfo{{URL: sourceA}}); err != nil {
+		t.Fatalf("SyncContext: %v", err)
+	}
+	result, err := cache.CreateWorktreeContext(ctx, WorktreeParams{
+		WorkspaceID: "ws-1",
+		RepoURL:     sourceA,
+		WorkDir:     t.TempDir(),
+		AgentName:   "isolated",
+		TaskID:      "owner-config-isolation",
+	})
+	if err != nil {
+		t.Fatalf("CreateWorktreeContext: %v", err)
+	}
+	payload, err := os.ReadFile(filepath.Join(result.Path, "payload.txt"))
+	if err != nil {
+		t.Fatalf("read checked-out payload: %v", err)
+	}
+	if got := string(payload); got != "assigned-source\n" {
+		t.Fatalf("checked-out payload = %q, want assigned repository content", got)
+	}
+	if _, err := os.Stat(marker); !os.IsNotExist(err) {
+		t.Fatalf("owner hook/filter/helper executed, marker stat error = %v", err)
+	}
+}
+
+func TestGitBrokerZeroTimeoutUsesConfiguredDefault(t *testing.T) {
+	const configuredTimeout = 37 * time.Second
+	broker := &gitBroker{timeout: configuredTimeout}
+
+	started := time.Now()
+	ctx, cancel := broker.withTimeout(context.Background(), 0)
+	defer cancel()
+
+	deadline, ok := ctx.Deadline()
+	if !ok {
+		t.Fatal("broker context has no deadline")
+	}
+	if got := deadline.Sub(started); got <= configuredTimeout-time.Second || got >= configuredTimeout+time.Second {
+		t.Fatalf("broker default timeout = %v, want approximately %v", got, configuredTimeout)
 	}
 }
 
@@ -133,12 +296,14 @@ func TestBareDirName(t *testing.T) {
 		{"ssh://git@gitlab.example.com:22/relisty/app.git", "gitlab.example.com%3A22+relisty+app.git"},
 		{"ssh://git@gitlab.example.com:22/listbridge/app.git", "gitlab.example.com%3A22+listbridge+app.git"},
 		{"my-repo", "my-repo.git"},
-		{"", "repo.git"},
 	}
 	for _, tt := range tests {
 		if got := bareDirName(tt.input); got != tt.want {
 			t.Errorf("bareDirName(%q) = %q, want %q", tt.input, got, tt.want)
 		}
+	}
+	if _, err := bareDirNameSafe(""); err == nil {
+		t.Error("bareDirNameSafe(\"\") succeeded, want unsafe repo URL error")
 	}
 }
 
@@ -206,9 +371,12 @@ func TestBareDirNameDistinctsHostPortFromDashedHostname(t *testing.T) {
 func TestIsBareRepo(t *testing.T) {
 	t.Parallel()
 
-	// A directory with a HEAD file should be detected as bare.
+	// A real bare repository should be detected as bare.
 	dir := t.TempDir()
-	os.WriteFile(filepath.Join(dir, "HEAD"), []byte("ref: refs/heads/main\n"), 0o644)
+	cmd := exec.Command("git", "init", "--bare", dir)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git init --bare: %v\n%s", err, output)
+	}
 	if !isBareRepo(dir) {
 		t.Error("expected bare repo to be detected")
 	}
@@ -279,6 +447,55 @@ func TestSyncAndLookup(t *testing.T) {
 	// Lookup for unknown workspace should return empty.
 	if got := cache.Lookup("ws-999", sourceRepo); got != "" {
 		t.Fatalf("expected empty for unknown workspace, got %q", got)
+	}
+}
+
+func TestResolveReturnsCanonicalBareRepoIdentity(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	sourceRepo := createTestRepo(t)
+	cache := New(filepath.Join(root, "cache"), slog.Default())
+	if err := cache.Sync("ws-1", []RepoInfo{{URL: sourceRepo}}); err != nil {
+		t.Fatalf("Sync: %v", err)
+	}
+
+	resolved, err := cache.Resolve("ws-1", sourceRepo)
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	wantPath, err := filepath.EvalSymlinks(cache.Lookup("ws-1", sourceRepo))
+	if err != nil {
+		t.Fatalf("EvalSymlinks: %v", err)
+	}
+	if resolved.URL != sourceRepo {
+		t.Fatalf("resolved URL = %q, want %q", resolved.URL, sourceRepo)
+	}
+	if resolved.BarePath != wantPath {
+		t.Fatalf("resolved bare path = %q, want %q", resolved.BarePath, wantPath)
+	}
+	if !filepath.IsAbs(resolved.BarePath) {
+		t.Fatalf("resolved bare path must be absolute: %q", resolved.BarePath)
+	}
+}
+
+func TestResolveRejectsBareRepoWhoseOriginDoesNotMatchAssignment(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	sourceA := createTestRepo(t)
+	sourceB := createTestRepo(t)
+	cache := New(filepath.Join(root, "cache"), slog.Default())
+	if err := cache.Sync("ws-1", []RepoInfo{{URL: sourceA}}); err != nil {
+		t.Fatalf("Sync: %v", err)
+	}
+	barePath := cache.Lookup("ws-1", sourceA)
+	if out, err := exec.Command("git", "-C", barePath, "remote", "set-url", "origin", sourceB).CombinedOutput(); err != nil {
+		t.Fatalf("replace origin: %s: %v", strings.TrimSpace(string(out)), err)
+	}
+
+	if _, err := cache.Resolve("ws-1", sourceA); err == nil || !strings.Contains(err.Error(), "origin") {
+		t.Fatalf("Resolve error = %v, want origin identity mismatch", err)
 	}
 }
 
@@ -511,6 +728,259 @@ func TestCreateWorktree(t *testing.T) {
 	}
 	if got := strings.TrimSpace(string(out)); got != result.BranchName {
 		t.Errorf("expected branch %q, got %q", result.BranchName, got)
+	}
+}
+
+func TestSyncRejectsUnsafeWorkspaceIDWithoutModifyingEscapeTarget(t *testing.T) {
+	t.Parallel()
+
+	sourceRepo := createTestRepo(t)
+	parent := t.TempDir()
+	cacheRoot := filepath.Join(parent, "cache")
+	escapeTarget := filepath.Join(parent, "escape")
+	if err := os.MkdirAll(escapeTarget, 0o755); err != nil {
+		t.Fatalf("mkdir escape target: %v", err)
+	}
+	sentinel := filepath.Join(escapeTarget, "sentinel.txt")
+	if err := os.WriteFile(sentinel, []byte("keep\n"), 0o644); err != nil {
+		t.Fatalf("write sentinel: %v", err)
+	}
+
+	cache := New(cacheRoot, testLogger())
+	err := cache.Sync("../escape", []RepoInfo{{URL: sourceRepo}})
+	if err == nil {
+		t.Fatal("Sync succeeded with traversal workspace ID")
+	}
+	if got, readErr := os.ReadFile(sentinel); readErr != nil || string(got) != "keep\n" {
+		t.Fatalf("escape target modified: contents=%q err=%v", got, readErr)
+	}
+	entries, readErr := os.ReadDir(escapeTarget)
+	if readErr != nil {
+		t.Fatalf("read escape target: %v", readErr)
+	}
+	if len(entries) != 1 || entries[0].Name() != "sentinel.txt" {
+		t.Fatalf("Sync wrote outside cache root: entries=%v", entries)
+	}
+}
+
+func TestSyncRejectsSymlinkEscapeWithoutModifyingTarget(t *testing.T) {
+	t.Parallel()
+
+	sourceRepo := createTestRepo(t)
+	cacheRoot := t.TempDir()
+	outside := t.TempDir()
+	if err := os.Symlink(outside, filepath.Join(cacheRoot, "ws-1")); err != nil {
+		t.Skipf("symlink unsupported: %v", err)
+	}
+	sentinel := filepath.Join(outside, "sentinel.txt")
+	if err := os.WriteFile(sentinel, []byte("keep\n"), 0o644); err != nil {
+		t.Fatalf("write sentinel: %v", err)
+	}
+
+	cache := New(cacheRoot, testLogger())
+	if err := cache.Sync("ws-1", []RepoInfo{{URL: sourceRepo}}); err == nil {
+		t.Fatal("Sync succeeded through workspace symlink escape")
+	}
+	entries, err := os.ReadDir(outside)
+	if err != nil {
+		t.Fatalf("read outside target: %v", err)
+	}
+	if len(entries) != 1 || entries[0].Name() != "sentinel.txt" {
+		t.Fatalf("Sync modified symlink target: entries=%v", entries)
+	}
+}
+
+func TestSyncPreservesExistingNonGitCacheTarget(t *testing.T) {
+	t.Parallel()
+
+	sourceRepo := createTestRepo(t)
+	cacheRoot := t.TempDir()
+	cache := New(cacheRoot, testLogger())
+	wsDir := filepath.Join(cacheRoot, "ws-1")
+	if err := os.MkdirAll(wsDir, 0o755); err != nil {
+		t.Fatalf("mkdir workspace cache: %v", err)
+	}
+	target := filepath.Join(wsDir, bareDirName(sourceRepo))
+	if err := os.MkdirAll(target, 0o755); err != nil {
+		t.Fatalf("mkdir cache target: %v", err)
+	}
+	sentinel := filepath.Join(target, "sentinel.txt")
+	if err := os.WriteFile(sentinel, []byte("keep\n"), 0o644); err != nil {
+		t.Fatalf("write sentinel: %v", err)
+	}
+
+	err := cache.Sync("ws-1", []RepoInfo{{URL: sourceRepo}})
+	if err == nil {
+		t.Fatal("Sync succeeded with pre-existing non-git cache target")
+	}
+	if got, readErr := os.ReadFile(sentinel); readErr != nil || string(got) != "keep\n" {
+		t.Fatalf("pre-existing cache target modified: contents=%q err=%v", got, readErr)
+	}
+}
+
+func TestCreateWorktreeRejectsUnsafeRepoURLBeforeLookup(t *testing.T) {
+	t.Parallel()
+
+	cacheRoot := t.TempDir()
+	cache := New(cacheRoot, testLogger())
+	workDir := t.TempDir()
+	outside := filepath.Join(filepath.Dir(workDir), "escape")
+	if err := os.MkdirAll(outside, 0o755); err != nil {
+		t.Fatalf("mkdir outside target: %v", err)
+	}
+	sentinel := filepath.Join(outside, "sentinel.txt")
+	if err := os.WriteFile(sentinel, []byte("keep\n"), 0o644); err != nil {
+		t.Fatalf("write sentinel: %v", err)
+	}
+
+	_, err := cache.CreateWorktree(WorktreeParams{
+		WorkspaceID: "ws-1",
+		RepoURL:     "../escape",
+		WorkDir:     workDir,
+		AgentName:   "agent",
+		TaskID:      "unsafe-repo-name",
+	})
+	if err == nil || !strings.Contains(err.Error(), "unsafe repo") {
+		t.Fatalf("CreateWorktree error = %v, want unsafe repo error", err)
+	}
+	if got, readErr := os.ReadFile(sentinel); readErr != nil || string(got) != "keep\n" {
+		t.Fatalf("outside target modified: contents=%q err=%v", got, readErr)
+	}
+}
+
+func TestCreateWorktreeRejectsLocalDirectoryBeforeCacheAccess(t *testing.T) {
+	t.Parallel()
+
+	cacheRoot := t.TempDir()
+	cache := New(cacheRoot, testLogger())
+	localDir := createTestRepo(t)
+	headBefore := gitHead(t, localDir)
+
+	_, err := cache.CreateWorktree(WorktreeParams{
+		WorkspaceID:    "ws-1",
+		RepoURL:        "https://example.com/org/repo.git",
+		WorkDir:        localDir,
+		AgentName:      "agent",
+		TaskID:         "local-directory",
+		LocalDirectory: true,
+	})
+	if err == nil || !strings.Contains(err.Error(), "local_directory") {
+		t.Fatalf("CreateWorktree error = %v, want local_directory prohibition", err)
+	}
+	if got := gitHead(t, localDir); got != headBefore {
+		t.Fatalf("local directory HEAD changed: got %s want %s", got, headBefore)
+	}
+	entries, readErr := os.ReadDir(cacheRoot)
+	if readErr != nil {
+		t.Fatalf("read cache root: %v", readErr)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("local_directory rejection touched cache: entries=%v", entries)
+	}
+}
+
+func TestCreateWorktreeRejectsWorkDirThatIsExistingCheckout(t *testing.T) {
+	t.Parallel()
+
+	sourceRepo := createTestRepo(t)
+	cache := New(t.TempDir(), testLogger())
+	if err := cache.Sync("ws-1", []RepoInfo{{URL: sourceRepo}}); err != nil {
+		t.Fatalf("sync failed: %v", err)
+	}
+	localDir := createTestRepo(t)
+	headBefore := gitHead(t, localDir)
+
+	_, err := cache.CreateWorktree(WorktreeParams{
+		WorkspaceID: "ws-1",
+		RepoURL:     sourceRepo,
+		WorkDir:     localDir,
+		AgentName:   "agent",
+		TaskID:      "implicit-local-directory",
+	})
+	if err == nil || !strings.Contains(err.Error(), "local_directory") {
+		t.Fatalf("CreateWorktree error = %v, want local_directory prohibition", err)
+	}
+	if got := gitHead(t, localDir); got != headBefore {
+		t.Fatalf("existing checkout HEAD changed: got %s want %s", got, headBefore)
+	}
+}
+
+func TestCreateWorktreeRejectsSymlinkEscapeTarget(t *testing.T) {
+	t.Parallel()
+
+	sourceRepo := createTestRepo(t)
+	cache := New(t.TempDir(), testLogger())
+	if err := cache.Sync("ws-1", []RepoInfo{{URL: sourceRepo}}); err != nil {
+		t.Fatalf("sync failed: %v", err)
+	}
+	workDir := t.TempDir()
+	dirName, err := worktreeDirName(sourceRepo)
+	if err != nil {
+		t.Fatalf("worktreeDirName: %v", err)
+	}
+	outside := t.TempDir()
+	if err := os.Symlink(outside, filepath.Join(workDir, dirName)); err != nil {
+		t.Skipf("symlink unsupported: %v", err)
+	}
+	sentinel := filepath.Join(outside, "sentinel.txt")
+	if err := os.WriteFile(sentinel, []byte("keep\n"), 0o644); err != nil {
+		t.Fatalf("write sentinel: %v", err)
+	}
+
+	_, err = cache.CreateWorktree(WorktreeParams{
+		WorkspaceID: "ws-1",
+		RepoURL:     sourceRepo,
+		WorkDir:     workDir,
+		AgentName:   "agent",
+		TaskID:      "symlink-escape",
+	})
+	if err == nil || !strings.Contains(err.Error(), "symlink") {
+		t.Fatalf("CreateWorktree error = %v, want symlink escape error", err)
+	}
+	if got, readErr := os.ReadFile(sentinel); readErr != nil || string(got) != "keep\n" {
+		t.Fatalf("symlink target modified: contents=%q err=%v", got, readErr)
+	}
+}
+
+func TestCreateWorktreeRejectsExistingWorktreeFromDifferentBareCache(t *testing.T) {
+	t.Parallel()
+
+	sourceA := createTestRepo(t)
+	sourceB := createTestRepo(t)
+	cache := New(t.TempDir(), testLogger())
+	if err := cache.Sync("ws-1", []RepoInfo{{URL: sourceA}, {URL: sourceB}}); err != nil {
+		t.Fatalf("sync failed: %v", err)
+	}
+	bareB := cache.Lookup("ws-1", sourceB)
+	workDir := t.TempDir()
+	dirName, err := worktreeDirName(sourceA)
+	if err != nil {
+		t.Fatalf("worktreeDirName: %v", err)
+	}
+	foreignPath := filepath.Join(workDir, dirName)
+	if out, err := exec.Command("git", "-C", bareB, "worktree", "add", "-b", "foreign-worktree", foreignPath, "HEAD").CombinedOutput(); err != nil {
+		t.Fatalf("create foreign worktree: %s: %v", out, err)
+	}
+	foreignHead := gitHead(t, foreignPath)
+	if err := os.WriteFile(filepath.Join(foreignPath, "untracked.txt"), []byte("keep\n"), 0o644); err != nil {
+		t.Fatalf("write foreign untracked file: %v", err)
+	}
+
+	_, err = cache.CreateWorktree(WorktreeParams{
+		WorkspaceID: "ws-1",
+		RepoURL:     sourceA,
+		WorkDir:     workDir,
+		AgentName:   "agent",
+		TaskID:      "foreign-worktree",
+	})
+	if err == nil || !strings.Contains(err.Error(), "different bare cache") {
+		t.Fatalf("CreateWorktree error = %v, want ownership error", err)
+	}
+	if got := gitHead(t, foreignPath); got != foreignHead {
+		t.Fatalf("foreign worktree HEAD changed: got %s want %s", got, foreignHead)
+	}
+	if got, readErr := os.ReadFile(filepath.Join(foreignPath, "untracked.txt")); readErr != nil || string(got) != "keep\n" {
+		t.Fatalf("foreign worktree modified before ownership proof: contents=%q err=%v", got, readErr)
 	}
 }
 

@@ -34,16 +34,14 @@ func (b *cursorBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	runCtx, cancel := runContext(ctx, timeout)
 
 	args := buildCursorArgs(prompt, opts, b.cfg.Logger)
-	argv0, cmdArgs := chooseCursorInvocation(execName, lookedUp, args, b.cfg.Logger)
+	argv0, cmdArgs := chooseCursorInvocation(lookedUp, lookedUp, args, b.cfg.Logger)
 
-	cmd := exec.CommandContext(runCtx, argv0, cmdArgs...)
-	hideAgentWindow(cmd)
-	b.cfg.Logger.Info("agent command", "exec", argv0, "args", cmdArgs)
-	cmd.WaitDelay = 500 * time.Millisecond
-	if opts.Cwd != "" {
-		cmd.Dir = opts.Cwd
+	cmd, err := b.cfg.command(runCtx, argv0, cmdArgs, opts.Cwd, 500*time.Millisecond)
+	if err != nil {
+		cancel()
+		return nil, fmt.Errorf("create cursor-agent command: %w", err)
 	}
-	cmd.Env = buildEnv(b.cfg.Env)
+	b.cfg.Logger.Info("agent command", "exec", argv0, "args", cmdArgs)
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {

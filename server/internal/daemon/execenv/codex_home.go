@@ -14,12 +14,6 @@ import (
 	"github.com/pelletier/go-toml/v2"
 )
 
-// Files to symlink from the shared ~/.codex/ into the per-task CODEX_HOME.
-// Symlinks share state (e.g. auth tokens) so changes propagate automatically.
-var codexSymlinkedFiles = []string{
-	"auth.json",
-}
-
 // Files to copy from the shared ~/.codex/ into the per-task CODEX_HOME.
 // Copies are isolated — task-local config and cache refreshes don't mutate
 // the shared home.
@@ -94,8 +88,9 @@ func prepareCodexHome(codexHome string, logger *slog.Logger) error {
 }
 
 // prepareCodexHomeWithOpts creates a per-task CODEX_HOME directory and seeds
-// it with config from the shared ~/.codex/ home. Auth is symlinked (shared),
-// config files are copied (isolated). The per-task config.toml gets a
+// it with config from the shared ~/.codex/ home. Auth is captured as a private
+// snapshot, session history stays task-local, and config files are copied. The
+// per-task config.toml gets a
 // daemon-managed sandbox block picked by codexSandboxPolicyFor.
 func prepareCodexHomeWithOpts(codexHome string, opts CodexHomeOptions, logger *slog.Logger) error {
 	sharedHome := resolveSharedCodexHome()
@@ -104,7 +99,7 @@ func prepareCodexHomeWithOpts(codexHome string, opts CodexHomeOptions, logger *s
 		freshHome = true
 	}
 
-	if err := os.MkdirAll(codexHome, 0o755); err != nil {
+	if err := ensurePrivateCodexDir(codexHome); err != nil {
 		return fmt.Errorf("create codex-home dir: %w", err)
 	}
 
@@ -115,13 +110,10 @@ func prepareCodexHomeWithOpts(codexHome string, opts CodexHomeOptions, logger *s
 		logger.Warn("execenv: codex-home sessions dir prepare failed", "error", err)
 	}
 
-	// Symlink shared files (auth).
-	for _, name := range codexSymlinkedFiles {
-		src := filepath.Join(sharedHome, name)
-		dst := filepath.Join(codexHome, name)
-		if err := ensureSymlink(src, dst); err != nil {
-			logger.Warn("execenv: codex-home symlink failed", "file", name, "error", err)
-		}
+	authSource := filepath.Join(sharedHome, "auth.json")
+	authTarget := filepath.Join(codexHome, "auth.json")
+	if err := syncCodexAuthSnapshot(authSource, authTarget); err != nil {
+		return fmt.Errorf("prepare codex auth snapshot: %w", err)
 	}
 
 	// Surface the resulting auth.json state (file kind only, never contents)
@@ -194,6 +186,34 @@ func prepareCodexHomeWithOpts(codexHome string, opts CodexHomeOptions, logger *s
 	}
 
 	return nil
+}
+
+func ensurePrivateCodexDir(path string) error {
+	if info, err := os.Lstat(path); err == nil {
+		if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+			if err := os.RemoveAll(path); err != nil {
+				return fmt.Errorf("remove unsafe path: %w", err)
+			}
+		}
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("inspect path: %w", err)
+	}
+	if err := os.MkdirAll(path, 0o700); err != nil {
+		return err
+	}
+	return os.Chmod(path, 0o700)
+}
+
+func syncCodexAuthSnapshot(source, target string) error {
+	if _, err := os.Lstat(source); os.IsNotExist(err) {
+		if removeErr := os.Remove(target); removeErr != nil && !os.IsNotExist(removeErr) {
+			return fmt.Errorf("remove stale auth snapshot: %w", removeErr)
+		}
+		return nil
+	} else if err != nil {
+		return fmt.Errorf("inspect shared auth: %w", err)
+	}
+	return snapshotRegularFile(source, target, codexAuthSnapshotMaxBytes)
 }
 
 // resolveSharedCodexHome returns the path to the user's shared Codex home.
@@ -454,7 +474,7 @@ func prepareCodexSessionsDir(codexHome, sharedHome string, opts CodexHomeOptions
 		if storeDir == "" {
 			// No stable per-issue key (e.g. a non-issue task). Fall back to an
 			// empty local dir rather than re-exposing the whole shared history.
-			return os.MkdirAll(dst, 0o755)
+			return ensurePrivateCodexDir(dst)
 		}
 		return linkCodexSessionsToStore(dst, storeDir, sharedSessions, opts.ResumeSessionID, logger)
 	}
@@ -462,15 +482,15 @@ func prepareCodexSessionsDir(codexHome, sharedHome string, opts CodexHomeOptions
 	fi, err := os.Lstat(dst)
 	switch {
 	case os.IsNotExist(err):
-		return os.MkdirAll(dst, 0o755) // fresh managed task — empty local dir
+		return ensurePrivateCodexDir(dst) // fresh managed task — empty local dir
 	case err != nil:
 		return fmt.Errorf("stat sessions dir %s: %w", dst, err)
 	}
 
 	if fi.Mode()&os.ModeSymlink == 0 {
 		// Already a real directory (task-local, authoritative). Ensure it
-		// exists (no-op) and leave its contents alone.
-		return os.MkdirAll(dst, 0o755)
+		// remains private and leave its contents alone.
+		return ensurePrivateCodexDir(dst)
 	}
 
 	// A symlink/junction. If it already points at this issue's store (a home
@@ -501,7 +521,7 @@ func prepareCodexSessionsDir(codexHome, sharedHome string, opts CodexHomeOptions
 	}
 	logger.Info("execenv: migrated codex-home sessions from shared symlink to task-local dir",
 		"codex_home", codexHome, "resume_session", false)
-	return os.MkdirAll(dst, 0o755)
+	return ensurePrivateCodexDir(dst)
 }
 
 // linkCodexSessionsToStore points codex-home/sessions (dst) at the per-issue

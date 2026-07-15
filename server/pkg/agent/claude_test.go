@@ -656,8 +656,28 @@ func TestBuildEnvNilExtras(t *testing.T) {
 	t.Parallel()
 
 	env := buildEnv(nil)
-	if len(env) == 0 {
-		t.Fatal("expected at least system env vars")
+	if len(env) != 0 {
+		t.Fatalf("expected no inherited environment, got %v", env)
+	}
+}
+
+func TestBuildEnvAppendsTaskHomeAfterInheritedHome(t *testing.T) {
+	t.Parallel()
+
+	const privateHome = "/task/private/home"
+	env := mergeEnv([]string{"HOME=/human/home", "PATH=/usr/bin"}, map[string]string{"HOME": privateHome})
+
+	var homes []string
+	for _, entry := range env {
+		if strings.HasPrefix(entry, "HOME=") {
+			homes = append(homes, strings.TrimPrefix(entry, "HOME="))
+		}
+	}
+	if len(homes) != 2 {
+		t.Fatalf("HOME entries = %v, want inherited and task-private values", homes)
+	}
+	if got := homes[len(homes)-1]; got != privateHome {
+		t.Fatalf("last HOME = %q, want task-private HOME %q", got, privateHome)
 	}
 }
 
@@ -770,9 +790,13 @@ func TestWriteMcpConfigToTemp(t *testing.T) {
 	t.Parallel()
 
 	raw := json.RawMessage(`{"mcpServers":{"test":{"command":"echo","args":["hello"]}}}`)
-	path, err := writeMcpConfigToTemp(raw)
+	taskTempDir := t.TempDir()
+	path, err := writeMcpConfigToTemp(taskTempDir, raw)
 	if err != nil {
 		t.Fatalf("writeMcpConfigToTemp: %v", err)
+	}
+	if !pathWithin(path, taskTempDir) {
+		t.Fatalf("mcp config path %q must be beneath task temp dir %q", path, taskTempDir)
 	}
 
 	// File should exist and contain exactly the raw JSON.
@@ -788,6 +812,62 @@ func TestWriteMcpConfigToTemp(t *testing.T) {
 	cleanupMcpConfigTemp(path)
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
 		t.Fatalf("expected temp file to be removed, but it still exists")
+	}
+}
+
+func TestClaudeExecuteUsesTaskLauncherAndCleansManagedMcpTemp(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+
+	root := t.TempDir()
+	fakePath := filepath.Join(root, "claude")
+	script := "#!/bin/sh\n" +
+		"IFS= read -r _\n" +
+		`printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"session_id":"sess-mcp","result":"done"}'` + "\n"
+	writeTestExecutable(t, fakePath, []byte(script))
+
+	isolation := &recordingIsolation{}
+	backend := &claudeBackend{cfg: Config{
+		ExecutablePath: fakePath,
+		Env:            map[string]string{"IS_SANDBOX": "1"},
+		Logger:         slog.Default(),
+		Launcher:       newCommandLauncher(isolation),
+		Isolation: &TaskIsolationPolicy{
+			WritableRoots: []string{root},
+			SystemRoots:   existingSystemRootsForTest(t),
+		},
+		TaskTempDir: root,
+	}}
+
+	session, err := backend.Execute(context.Background(), "prompt", ExecOptions{
+		Cwd:       root,
+		Timeout:   5 * time.Second,
+		McpConfig: json.RawMessage(`{"mcpServers":{}}`),
+	})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	for range session.Messages {
+	}
+	result := <-session.Result
+	if result.Status != "completed" {
+		t.Fatalf("result status = %q, error = %q", result.Status, result.Error)
+	}
+	if isolation.executable != fakePath {
+		t.Fatalf("launcher executable = %q, want %q", isolation.executable, fakePath)
+	}
+	mcpArg := slices.Index(isolation.args, "--mcp-config")
+	if mcpArg == -1 || mcpArg+1 >= len(isolation.args) {
+		t.Fatalf("launcher args missing managed MCP path: %v", isolation.args)
+	}
+	mcpPath := isolation.args[mcpArg+1]
+	if !pathWithin(mcpPath, root) {
+		t.Fatalf("managed MCP path %q must be beneath task temp dir %q", mcpPath, root)
+	}
+	if _, err := os.Stat(mcpPath); !os.IsNotExist(err) {
+		t.Fatalf("managed MCP temp was not cleaned up: stat error = %v", err)
 	}
 }
 
@@ -896,6 +976,11 @@ func TestClaudeExecuteSurfacesStderrWhenChildExitsEarly(t *testing.T) {
 		ExecutablePath: fakePath,
 		Env:            map[string]string{"IS_SANDBOX": "1"},
 		Logger:         slog.Default(),
+		Launcher:       newCommandLauncher(&recordingIsolation{}),
+		Isolation: &TaskIsolationPolicy{
+			WritableRoots: []string{filepath.Dir(fakePath)},
+			SystemRoots:   existingSystemRootsForTest(t),
+		},
 	})
 	if err != nil {
 		t.Fatalf("new claude backend: %v", err)
@@ -903,7 +988,7 @@ func TestClaudeExecuteSurfacesStderrWhenChildExitsEarly(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{Timeout: 5 * time.Second})
+	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{Cwd: filepath.Dir(fakePath), Timeout: 5 * time.Second})
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
@@ -952,6 +1037,11 @@ func TestClaudeExecuteRecordsResultModelUsage(t *testing.T) {
 		ExecutablePath: fakePath,
 		Env:            map[string]string{"IS_SANDBOX": "1"},
 		Logger:         slog.Default(),
+		Launcher:       newCommandLauncher(&recordingIsolation{}),
+		Isolation: &TaskIsolationPolicy{
+			WritableRoots: []string{filepath.Dir(fakePath)},
+			SystemRoots:   existingSystemRootsForTest(t),
+		},
 	})
 	if err != nil {
 		t.Fatalf("new claude backend: %v", err)
@@ -959,7 +1049,7 @@ func TestClaudeExecuteRecordsResultModelUsage(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{Timeout: 5 * time.Second})
+	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{Cwd: filepath.Dir(fakePath), Timeout: 5 * time.Second})
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}

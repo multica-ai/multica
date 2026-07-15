@@ -45,7 +45,7 @@ type PrepareParams struct {
 	Profile      string
 	Provider     string // agent provider (determines runtime config and skill injection paths)
 	CodexVersion string // detected Codex CLI version (only used when Provider == "codex")
-	OpenclawBin  string // resolved openclaw CLI path (only used when Provider == "openclaw"); empty = look up on PATH
+	OpenclawBin  string // runtime OpenClaw path; never executed during task preparation
 	// McpConfig is the agent's saved `mcp_config` JSON, forwarded to the
 	// provider-specific config preparer when that provider materialises MCP
 	// via a per-task config file. Cursor and OpenClaw consume it here; other
@@ -175,6 +175,12 @@ type SkillFileContextForEnv struct {
 type Environment struct {
 	// RootDir is the top-level env directory ({workspacesRoot}/{task_id_short}/).
 	RootDir string
+	// HomeDir is the task-private user home exposed to the agent process. It
+	// deliberately starts without the daemon owner's ~/.multica credentials so
+	// clearing MULTICA_* cannot fall back to a human PAT/JWT.
+	HomeDir string
+	// ConfigDir is the task-private XDG configuration root under HomeDir.
+	ConfigDir string
 	// WorkDir is the directory to pass as Cwd to the agent. Normally
 	// ({RootDir}/workdir/); when the task is bound to a local_directory
 	// project_resource, it is the user's path instead. See LocalDirectory.
@@ -199,14 +205,6 @@ type Environment struct {
 	// OPENCLAW_CONFIG_PATH on the openclaw subprocess so its native skill
 	// scanner pins workspaceDir to WorkDir.
 	OpenclawConfigPath string
-	// OpenclawIncludeRoot is the directory of the user's active OpenClaw
-	// config (set only for openclaw provider with an on-disk user config).
-	// The daemon must prepend it to OPENCLAW_INCLUDE_ROOTS so OpenClaw is
-	// allowed to follow the wrapper's `$include` link out of envRoot into
-	// the user's config — by default OpenClaw confines `$include` to the
-	// directory holding the wrapper file. Empty when no $include is
-	// emitted (fresh install).
-	OpenclawIncludeRoot string
 	// CursorDataDir is the per-task Cursor data directory (set only for
 	// cursor provider when the agent has managed mcp_config). The daemon
 	// exports this as CURSOR_DATA_DIR so project-level MCP approvals are
@@ -285,9 +283,15 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 			return nil, fmt.Errorf("execenv: create directory %s: %w", dir, err)
 		}
 	}
+	homeDir, configDir, err := preparePrivateTaskHome(envRoot)
+	if err != nil {
+		return nil, fmt.Errorf("execenv: prepare private task home: %w", err)
+	}
 
 	env := &Environment{
 		RootDir:        envRoot,
+		HomeDir:        homeDir,
+		ConfigDir:      configDir,
 		WorkDir:        workDir,
 		LocalDirectory: params.LocalWorkDir != "",
 		logger:         logger,
@@ -359,9 +363,8 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 	// For OpenClaw, synthesize a per-task config that pins workspace to
 	// workDir. The skill scanner then reads {workDir}/skills/ (written by
 	// writeContextFiles above). Fail closed on errors: a malformed user
-	// config that the openclaw CLI can't read is a real problem and
-	// silently degrading to a minimal config would mask it by booting
-	// OpenClaw without the agents / providers / API keys it expects.
+	// config that cannot be projected safely is a real problem. Preparation
+	// never executes the task-selected OpenClaw binary.
 	if params.Provider == "openclaw" {
 		result, err := prepareOpenclawConfig(envRoot, workDir, OpenclawConfigPrep{
 			OpenclawBin: params.OpenclawBin,
@@ -372,7 +375,6 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 			return nil, fmt.Errorf("execenv: prepare openclaw config: %w", err)
 		}
 		env.OpenclawConfigPath = result.ConfigPath
-		env.OpenclawIncludeRoot = result.IncludeRoot
 	}
 
 	logger.Info("execenv: prepared env", "root", envRoot, "repos_available", len(params.Task.Repos))
@@ -398,7 +400,7 @@ type ReuseParams struct {
 	// exposed into the new task-local sessions dir so thread/resume still finds
 	// it. Empty means a fresh thread. See prepareCodexSessionsDir (MUL-4424).
 	ResumeSessionID string
-	OpenclawBin     string // only used when Provider == "openclaw"; empty = PATH lookup
+	OpenclawBin     string // runtime OpenClaw path; ignored by task preparation
 	// McpConfig is the agent's saved `mcp_config` JSON. Reused on reuse so a
 	// freshly-saved managed set re-materialises into the wrapper before the
 	// task starts — without this a stale wrapper from a prior run would keep
@@ -465,6 +467,16 @@ func Reuse(params ReuseParams, logger *slog.Logger) *Environment {
 		LocalDirectory: params.LocalDirectory,
 		logger:         logger,
 	}
+	if env.RootDir == "" {
+		return nil
+	}
+	homeDir, configDir, err := preparePrivateTaskHome(env.RootDir)
+	if err != nil {
+		logger.Warn("execenv: reset private task home failed", "error", err)
+		return nil
+	}
+	env.HomeDir = homeDir
+	env.ConfigDir = configDir
 
 	// Roll back the previous dispatch's sidecar writes before refreshing.
 	// On reuse the workdir still holds the prior run's issue_context.md and
@@ -583,11 +595,8 @@ func Reuse(params ReuseParams, logger *slog.Logger) *Environment {
 	}
 
 	// Refresh the per-task OpenClaw config on reuse — the user may have
-	// added/removed agents or rotated providers since the prior task ran,
+	// changed allowlisted model/provider settings since the prior task ran,
 	// and the workspace override always re-targets the current workDir.
-	// Fail closed: a user config that can no longer be parsed should block
-	// reuse rather than degrade to a minimal config that boots OpenClaw
-	// without the registered agents.
 	if params.Provider == "openclaw" {
 		result, err := prepareOpenclawConfig(env.RootDir, params.WorkDir, OpenclawConfigPrep{
 			OpenclawBin: params.OpenclawBin,
@@ -599,11 +608,49 @@ func Reuse(params ReuseParams, logger *slog.Logger) *Environment {
 			return nil
 		}
 		env.OpenclawConfigPath = result.ConfigPath
-		env.OpenclawIncludeRoot = result.IncludeRoot
 	}
 
 	logger.Info("execenv: reusing env", "workdir", params.WorkDir)
 	return env
+}
+
+// preparePrivateTaskHome creates the home/config roots inherited by an agent
+// subprocess and removes any Multica user configuration left by a prior run.
+// The explicit chmod calls are intentional: MkdirAll honors an existing
+// directory's mode, so reuse must tighten directories an earlier process made
+// more permissive.
+func preparePrivateTaskHome(rootDir string) (string, string, error) {
+	if rootDir == "" {
+		return "", "", fmt.Errorf("environment root is required")
+	}
+
+	homeDir := filepath.Join(rootDir, "home")
+	configDir := filepath.Join(homeDir, ".config")
+	for _, dir := range []string{homeDir, configDir} {
+		info, err := os.Lstat(dir)
+		switch {
+		case err == nil && (!info.IsDir() || info.Mode()&os.ModeSymlink != 0):
+			if err := os.RemoveAll(dir); err != nil {
+				return "", "", fmt.Errorf("replace non-directory %s: %w", dir, err)
+			}
+		case err != nil && !os.IsNotExist(err):
+			return "", "", fmt.Errorf("inspect directory %s: %w", dir, err)
+		}
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			return "", "", fmt.Errorf("create directory %s: %w", dir, err)
+		}
+		if err := os.Chmod(dir, 0o700); err != nil {
+			return "", "", fmt.Errorf("secure directory %s: %w", dir, err)
+		}
+	}
+
+	// A task may invoke the Multica CLI and write a config into its private
+	// home. Never carry that credential into a later dispatch/reuse.
+	if err := os.RemoveAll(filepath.Join(homeDir, ".multica")); err != nil {
+		return "", "", fmt.Errorf("clear private Multica config: %w", err)
+	}
+
+	return homeDir, configDir, nil
 }
 
 // hydrateCodexSkills populates the per-task CODEX_HOME/skills directory with

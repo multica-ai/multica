@@ -3,7 +3,6 @@ package agent
 import (
 	"context"
 	"encoding/json"
-	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -120,7 +119,7 @@ func TestKiroBackendSetModelFailureFailsTask(t *testing.T) {
 	fakePath := filepath.Join(t.TempDir(), "kiro-cli")
 	writeTestExecutable(t, fakePath, []byte(fakeKiroACPScript()))
 
-	backend, err := New("kiro", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	backend, err := New("kiro", acpProviderTestConfig(t, fakePath, nil))
 	if err != nil {
 		t.Fatalf("new kiro backend: %v", err)
 	}
@@ -168,7 +167,7 @@ func TestKiroBackendAttributesUsageToCurrentModel(t *testing.T) {
 	fakePath := filepath.Join(t.TempDir(), "kiro-cli")
 	writeTestExecutable(t, fakePath, []byte(fakeKiroACPScript()))
 
-	backend, err := New("kiro", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	backend, err := New("kiro", acpProviderTestConfig(t, fakePath, nil))
 	if err != nil {
 		t.Fatalf("new kiro backend: %v", err)
 	}
@@ -231,7 +230,7 @@ func TestKiroBackendTreatsGoalCompleteCloseErrorAsCompleted(t *testing.T) {
 	fakePath := filepath.Join(t.TempDir(), "kiro-cli")
 	writeTestExecutable(t, fakePath, []byte(fakeKiroACPGoalCompleteCloseErrorScript("completed")))
 
-	backend, err := New("kiro", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	backend, err := New("kiro", acpProviderTestConfig(t, fakePath, nil))
 	if err != nil {
 		t.Fatalf("new kiro backend: %v", err)
 	}
@@ -275,7 +274,7 @@ func TestKiroBackendDoesNotCompleteAfterFailedGoalComplete(t *testing.T) {
 	fakePath := filepath.Join(t.TempDir(), "kiro-cli")
 	writeTestExecutable(t, fakePath, []byte(fakeKiroACPGoalCompleteCloseErrorScript("failed")))
 
-	backend, err := New("kiro", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	backend, err := New("kiro", acpProviderTestConfig(t, fakePath, nil))
 	if err != nil {
 		t.Fatalf("new kiro backend: %v", err)
 	}
@@ -341,7 +340,7 @@ func TestKiroBackendTreatsCommentAddCloseErrorAsCompleted(t *testing.T) {
 	fakePath := filepath.Join(t.TempDir(), "kiro-cli")
 	writeTestExecutable(t, fakePath, []byte(fakeKiroACPIssueCommentCloseErrorScript()))
 
-	backend, err := New("kiro", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	backend, err := New("kiro", acpProviderTestConfig(t, fakePath, nil))
 	if err != nil {
 		t.Fatalf("new kiro backend: %v", err)
 	}
@@ -788,7 +787,7 @@ func TestKiroBackendClearsSessionIDWhenSetModelSessionNotFound(t *testing.T) {
 	fakePath := filepath.Join(t.TempDir(), "kiro-cli")
 	writeTestExecutable(t, fakePath, []byte(fakeKiroACPStaleLoadSetModelScript()))
 
-	backend, err := New("kiro", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	backend, err := New("kiro", acpProviderTestConfig(t, fakePath, nil))
 	if err != nil {
 		t.Fatalf("new kiro backend: %v", err)
 	}
@@ -910,11 +909,7 @@ func TestKiroBackendInvokesACPWithTrustAllTools(t *testing.T) {
 	fakePath := filepath.Join(tempDir, "kiro-cli")
 	writeTestExecutable(t, fakePath, []byte(fakeKiroACPScript()))
 
-	backend, err := New("kiro", Config{
-		ExecutablePath: fakePath,
-		Logger:         slog.Default(),
-		Env:            map[string]string{"KIRO_ARGS_FILE": argsFile},
-	})
+	backend, err := New("kiro", acpProviderTestConfig(t, fakePath, map[string]string{"KIRO_ARGS_FILE": argsFile}))
 	if err != nil {
 		t.Fatalf("new kiro backend: %v", err)
 	}
@@ -970,11 +965,7 @@ func TestKiroBackendUsesSessionLoadForResume(t *testing.T) {
 	fakePath := filepath.Join(tempDir, "kiro-cli")
 	writeTestExecutable(t, fakePath, []byte(fakeKiroACPScript()))
 
-	backend, err := New("kiro", Config{
-		ExecutablePath: fakePath,
-		Logger:         slog.Default(),
-		Env:            map[string]string{"KIRO_REQUESTS_FILE": requestsFile},
-	})
+	backend, err := New("kiro", acpProviderTestConfig(t, fakePath, map[string]string{"KIRO_REQUESTS_FILE": requestsFile}))
 	if err != nil {
 		t.Fatalf("new kiro backend: %v", err)
 	}
@@ -1068,7 +1059,7 @@ func TestKiroLoadIncludesMcpServersFromConfig(t *testing.T) {
 	fakePath := filepath.Join(t.TempDir(), "kiro-cli")
 	writeTestExecutable(t, fakePath, []byte(fakeACPRecordingScript(recordPath, "ses_load", `{}`)))
 
-	backend, err := New("kiro", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	backend, err := New("kiro", acpProviderTestConfig(t, fakePath, nil))
 	if err != nil {
 		t.Fatalf("new kiro backend: %v", err)
 	}

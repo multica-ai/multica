@@ -2,13 +2,76 @@ package main
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 
 	"github.com/spf13/cobra"
 )
+
+func TestRunRepoCheckoutUsesOnlyTaskCapabilityAndRepoBinding(t *testing.T) {
+	const capability = "task-bound-checkout-capability"
+	const repoURL = "https://github.com/org/repo.git"
+
+	var gotHeader http.Header
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotHeader = r.Header.Clone()
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Fatalf("decode checkout body: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"path":"/tmp/work/repo","branch_name":"agent/test"}`)
+	}))
+	defer srv.Close()
+
+	parsed, err := url.Parse(srv.URL)
+	if err != nil {
+		t.Fatalf("parse test server URL: %v", err)
+	}
+	_, port, ok := strings.Cut(parsed.Host, ":")
+	if !ok {
+		t.Fatalf("test server address has no port: %s", parsed.Host)
+	}
+	t.Setenv("MULTICA_DAEMON_PORT", port)
+	t.Setenv("MULTICA_REPO_CHECKOUT_TOKEN", capability)
+
+	previousRef := repoCheckoutRef
+	repoCheckoutRef = "release/v2"
+	t.Cleanup(func() { repoCheckoutRef = previousRef })
+
+	if err := runRepoCheckout(nil, []string{repoURL}); err != nil {
+		t.Fatalf("runRepoCheckout: %v", err)
+	}
+	if got := gotHeader.Get(repoCheckoutCapabilityHeader); got != capability {
+		t.Fatalf("checkout capability header = %q, want %q", got, capability)
+	}
+	if got := gotHeader.Get("Content-Type"); got != "application/json" {
+		t.Fatalf("Content-Type = %q, want application/json", got)
+	}
+	wantBody := map[string]any{"url": repoURL, "ref": "release/v2"}
+	if len(gotBody) != len(wantBody) || gotBody["url"] != wantBody["url"] || gotBody["ref"] != wantBody["ref"] {
+		t.Fatalf("checkout body = %#v, want only %#v", gotBody, wantBody)
+	}
+	for _, forbidden := range []string{"workspace_id", "task_id", "agent_id", "workdir"} {
+		if _, ok := gotBody[forbidden]; ok {
+			t.Fatalf("checkout body contains caller-controlled %q: %#v", forbidden, gotBody)
+		}
+	}
+}
+
+func TestRunRepoCheckoutRequiresTaskCapabilityBeforeNetwork(t *testing.T) {
+	t.Setenv("MULTICA_DAEMON_PORT", "1")
+	t.Setenv("MULTICA_REPO_CHECKOUT_TOKEN", "")
+
+	err := runRepoCheckout(nil, []string{"https://github.com/org/repo.git"})
+	if err == nil || !strings.Contains(err.Error(), "MULTICA_REPO_CHECKOUT_TOKEN not set") {
+		t.Fatalf("runRepoCheckout error = %v, want missing capability failure", err)
+	}
+}
 
 func newRepoRegistryTestCmd(serverURL string) *cobra.Command {
 	cmd := &cobra.Command{Use: "repo-test"}

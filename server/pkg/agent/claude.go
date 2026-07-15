@@ -26,7 +26,8 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	if execPath == "" {
 		execPath = "claude"
 	}
-	if _, err := exec.LookPath(execPath); err != nil {
+	resolvedExecPath, err := exec.LookPath(execPath)
+	if err != nil {
 		return nil, fmt.Errorf("claude executable not found at %q: %w", execPath, err)
 	}
 
@@ -41,7 +42,7 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	var mcpConfigPath string
 	var mcpFileCleanup func() // non-nil while this function owns the temp file
 	if hasManagedMcpConfig(opts.McpConfig) {
-		path, err := writeMcpConfigToTemp(opts.McpConfig)
+		path, err := writeMcpConfigToTemp(b.cfg.TaskTempDir, opts.McpConfig)
 		if err != nil {
 			cancel()
 			return nil, err
@@ -57,14 +58,12 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		}
 	}()
 
-	cmd := exec.CommandContext(runCtx, execPath, args...)
-	hideAgentWindow(cmd)
-	b.cfg.Logger.Info("agent command", "exec", execPath, "args", args)
-	cmd.WaitDelay = 10 * time.Second
-	if opts.Cwd != "" {
-		cmd.Dir = opts.Cwd
+	cmd, err := b.cfg.command(runCtx, resolvedExecPath, args, opts.Cwd, 10*time.Second)
+	if err != nil {
+		cancel()
+		return nil, fmt.Errorf("build claude command: %w", err)
 	}
-	cmd.Env = buildEnv(b.cfg.Env)
+	b.cfg.Logger.Info("agent command", "exec", execPath, "args", args)
 	if err := claudeRootSudoPreflight(args, cmd.Env); err != nil {
 		cancel()
 		return nil, err
@@ -704,7 +703,7 @@ func claudeNoConversationFound(stderrTail ...string) bool {
 }
 
 func buildEnv(extra map[string]string) []string {
-	return mergeEnv(os.Environ(), extra)
+	return mergeEnv(nil, extra)
 }
 
 func claudeRootSudoPreflight(args, env []string) error {
@@ -885,10 +884,13 @@ func stripSurroundingQuotes(s string) (string, bool) {
 	return s, false
 }
 
-// writeMcpConfigToTemp writes MCP config JSON to a temporary file and returns
-// its path. The caller is responsible for removing it via cleanupMcpConfigTemp.
-func writeMcpConfigToTemp(raw json.RawMessage) (string, error) {
-	dir, err := os.MkdirTemp("", "multica-mcp-*")
+// writeMcpConfigToTemp writes MCP config JSON beneath the task temp directory
+// and returns its path. The caller removes it via cleanupMcpConfigTemp.
+func writeMcpConfigToTemp(taskTempDir string, raw json.RawMessage) (string, error) {
+	if taskTempDir == "" {
+		return "", fmt.Errorf("task temp dir is required for mcp config")
+	}
+	dir, err := os.MkdirTemp(taskTempDir, "multica-mcp-*")
 	if err != nil {
 		return "", fmt.Errorf("create mcp config temp dir: %w", err)
 	}
@@ -930,17 +932,22 @@ func cleanupMcpConfigTemp(path string) {
 var detectVersionTimeout = 10 * time.Second
 
 func detectCLIVersion(ctx context.Context, execPath string) (string, error) {
+	return detectCLIVersionWithRunner(ctx, execPath, operatorModelDiscoveryRunner())
+}
+
+func detectCLIVersionWithRunner(ctx context.Context, execPath string, runner modelDiscoveryRunner) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, detectVersionTimeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, execPath, "--version")
-	hideAgentWindow(cmd)
+	cmd, err := runner.command(ctx, execPath, []string{"--version"}, 2*time.Second)
+	if err != nil {
+		return "", fmt.Errorf("build version command for %s: %w", execPath, err)
+	}
 	// exec.CommandContext only kills the direct child on timeout. A broken CLI
 	// (node/bun shim) can leave grandchildren that inherited and still hold our
 	// stdout pipe open, and cmd.Output() blocks in Wait() until that pipe
 	// closes — defeating the timeout above. WaitDelay forces the pipes shut and
 	// reaps shortly after the context fires so this call always returns.
-	cmd.WaitDelay = 2 * time.Second
 	data, err := cmd.Output()
 	if err != nil {
 		return "", fmt.Errorf("detect version for %s: %w", execPath, err)

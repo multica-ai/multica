@@ -13,6 +13,53 @@ import (
 	"time"
 )
 
+type acpProviderTestIsolation struct{}
+
+func (*acpProviderTestIsolation) Wrap(_ TaskIsolationPolicy, executable string, args []string) (string, []string, error) {
+	return executable, args, nil
+}
+
+func acpProviderTestConfig(t *testing.T, executable string, env map[string]string) Config {
+	t.Helper()
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("get provider test working directory: %v", err)
+	}
+	return acpProviderTestConfigForCwd(t, executable, cwd, env)
+}
+
+func acpProviderTestConfigForCwd(t *testing.T, executable, cwd string, env map[string]string) Config {
+	t.Helper()
+	taskEnv := make(map[string]string, len(env)+1)
+	for key, value := range env {
+		taskEnv[key] = value
+	}
+	if taskEnv["PATH"] == "" {
+		taskEnv["PATH"] = os.Getenv("PATH")
+	}
+	return Config{
+		ExecutablePath: executable,
+		Logger:         slog.Default(),
+		Env:            taskEnv,
+		Launcher:       newCommandLauncher(&acpProviderTestIsolation{}),
+		Isolation: &TaskIsolationPolicy{
+			WritableRoots: []string{filepath.Dir(executable), cwd},
+			Network:       NetworkAccessPublicAndLoopback,
+		},
+	}
+}
+
+func inheritedEnvironmentForTest() map[string]string {
+	env := make(map[string]string)
+	for _, entry := range os.Environ() {
+		key, value, ok := strings.Cut(entry, "=")
+		if ok {
+			env[key] = value
+		}
+	}
+	return env
+}
+
 func TestNewReturnsHermesBackend(t *testing.T) {
 	t.Parallel()
 	b, err := New("hermes", Config{ExecutablePath: "/nonexistent/hermes"})
@@ -1470,7 +1517,7 @@ func TestHermesBackendAttributesUsageToACPDefaultModel(t *testing.T) {
 	fakePath := filepath.Join(t.TempDir(), "hermes")
 	writeTestExecutable(t, fakePath, []byte(fakeHermesACPUsageWithDefaultModelScript()))
 
-	backend, err := New("hermes", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	backend, err := New("hermes", acpProviderTestConfig(t, fakePath, nil))
 	if err != nil {
 		t.Fatalf("new hermes backend: %v", err)
 	}
@@ -1614,7 +1661,7 @@ func TestHermesBackendPromotesProviderErrorWithNonEmptyOutput(t *testing.T) {
 	fakePath := filepath.Join(t.TempDir(), "hermes")
 	writeTestExecutable(t, fakePath, []byte(fakeHermesACPRateLimitScript()))
 
-	backend, err := New("hermes", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	backend, err := New("hermes", acpProviderTestConfig(t, fakePath, nil))
 	if err != nil {
 		t.Fatalf("new hermes backend: %v", err)
 	}
@@ -1760,7 +1807,7 @@ func TestHermesBackendClearsSessionIDWhenResumedSessionNotFound(t *testing.T) {
 	fakePath := filepath.Join(t.TempDir(), "hermes")
 	writeTestExecutable(t, fakePath, []byte(fakeHermesACPStaleResumeScript()))
 
-	backend, err := New("hermes", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	backend, err := New("hermes", acpProviderTestConfig(t, fakePath, nil))
 	if err != nil {
 		t.Fatalf("new hermes backend: %v", err)
 	}
@@ -1837,7 +1884,7 @@ func TestHermesBackendClearsSessionIDWhenSetModelSessionNotFound(t *testing.T) {
 	fakePath := filepath.Join(t.TempDir(), "hermes")
 	writeTestExecutable(t, fakePath, []byte(fakeHermesACPStaleResumeSetModelScript()))
 
-	backend, err := New("hermes", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	backend, err := New("hermes", acpProviderTestConfig(t, fakePath, nil))
 	if err != nil {
 		t.Fatalf("new hermes backend: %v", err)
 	}
@@ -1921,7 +1968,7 @@ func TestHermesBackendDoesNotPromoteOnTransientRetry(t *testing.T) {
 	fakePath := filepath.Join(t.TempDir(), "hermes")
 	writeTestExecutable(t, fakePath, []byte(fakeHermesACPTransientRetryScript()))
 
-	backend, err := New("hermes", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	backend, err := New("hermes", acpProviderTestConfig(t, fakePath, nil))
 	if err != nil {
 		t.Fatalf("new hermes backend: %v", err)
 	}
@@ -2094,7 +2141,7 @@ func TestHermesExecuteFailsClosedOnMalformedMcpConfig(t *testing.T) {
 	fakePath := filepath.Join(t.TempDir(), "hermes")
 	writeTestExecutable(t, fakePath, []byte("#!/bin/sh\nexit 0\n"))
 
-	backend, err := New("hermes", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	backend, err := New("hermes", acpProviderTestConfig(t, fakePath, nil))
 	if err != nil {
 		t.Fatalf("new hermes backend: %v", err)
 	}
@@ -2182,7 +2229,7 @@ func TestHermesSetModelPreservesCustomModelIDWithColon(t *testing.T) {
 	fakePath := filepath.Join(t.TempDir(), "hermes")
 	writeTestExecutable(t, fakePath, []byte(fakeACPRecordingScript(recordPath, "ses_new", `{}`)))
 
-	backend, err := New("hermes", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	backend, err := New("hermes", acpProviderTestConfig(t, fakePath, nil))
 	if err != nil {
 		t.Fatalf("new hermes backend: %v", err)
 	}
@@ -2233,7 +2280,7 @@ func TestHermesResumeIncludesMcpServers(t *testing.T) {
 	fakePath := filepath.Join(t.TempDir(), "hermes")
 	writeTestExecutable(t, fakePath, []byte(fakeACPRecordingScript(recordPath, "ses_resume", `{}`)))
 
-	backend, err := New("hermes", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	backend, err := New("hermes", acpProviderTestConfig(t, fakePath, nil))
 	if err != nil {
 		t.Fatalf("new hermes backend: %v", err)
 	}
@@ -2288,7 +2335,7 @@ func TestHermesDropsRemoteMcpWhenCapabilityNotAdvertised(t *testing.T) {
 	// agentCapabilities = {} → neither http nor sse advertised.
 	writeTestExecutable(t, fakePath, []byte(fakeACPRecordingScript(recordPath, "ses_new", `{}`)))
 
-	backend, err := New("hermes", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	backend, err := New("hermes", acpProviderTestConfig(t, fakePath, nil))
 	if err != nil {
 		t.Fatalf("new hermes backend: %v", err)
 	}
@@ -2340,7 +2387,7 @@ func TestHermesKeepsRemoteMcpWhenCapabilityAdvertised(t *testing.T) {
 	fakePath := filepath.Join(t.TempDir(), "hermes")
 	writeTestExecutable(t, fakePath, []byte(fakeACPRecordingScript(recordPath, "ses_new", `{"mcpCapabilities":{"http":true,"sse":true}}`)))
 
-	backend, err := New("hermes", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	backend, err := New("hermes", acpProviderTestConfig(t, fakePath, nil))
 	if err != nil {
 		t.Fatalf("new hermes backend: %v", err)
 	}

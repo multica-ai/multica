@@ -57,11 +57,12 @@ func (b *openclawBackend) Execute(ctx context.Context, prompt string, opts ExecO
 	if execPath == "" {
 		execPath = "openclaw"
 	}
-	if _, err := exec.LookPath(execPath); err != nil {
+	lookedUp, err := exec.LookPath(execPath)
+	if err != nil {
 		return nil, fmt.Errorf("openclaw executable not found at %q: %w", execPath, err)
 	}
 
-	if err := checkOpenclawVersion(ctx, execPath); err != nil {
+	if err := checkOpenclawVersion(ctx, b.cfg, lookedUp, opts.Cwd); err != nil {
 		return nil, err
 	}
 
@@ -74,14 +75,12 @@ func (b *openclawBackend) Execute(ctx context.Context, prompt string, opts ExecO
 	}
 	args := buildOpenclawArgs(prompt, sessionID, opts, b.cfg.Logger)
 
-	cmd := exec.CommandContext(runCtx, execPath, args...)
-	hideAgentWindow(cmd)
-	b.cfg.Logger.Info("agent command", "exec", execPath, "args", args)
-	cmd.WaitDelay = 10 * time.Second
-	if opts.Cwd != "" {
-		cmd.Dir = opts.Cwd
+	cmd, err := b.cfg.command(runCtx, lookedUp, args, opts.Cwd, 10*time.Second)
+	if err != nil {
+		cancel()
+		return nil, fmt.Errorf("create openclaw command: %w", err)
 	}
-	cmd.Env = buildEnv(b.cfg.Env)
+	b.cfg.Logger.Info("agent command", "exec", lookedUp, "args", args)
 
 	// openclaw writes its --json output to stdout. Stderr carries log
 	// overflow (security warnings, tool errors, etc.) — capture it via a
@@ -231,9 +230,11 @@ func customArgsContains(args []string, flag string) bool {
 // minOpenclawVersion. The returned error becomes the task's failure
 // comment, so the message intentionally names the detected version
 // and the upgrade command.
-func checkOpenclawVersion(ctx context.Context, execPath string) error {
-	cmd := exec.CommandContext(ctx, execPath, "--version")
-	hideAgentWindow(cmd)
+func checkOpenclawVersion(ctx context.Context, cfg Config, execPath, cwd string) error {
+	cmd, err := cfg.command(ctx, execPath, []string{"--version"}, cwd, 0)
+	if err != nil {
+		return fmt.Errorf("create openclaw --version command: %w", err)
+	}
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("openclaw --version failed: %w", err)

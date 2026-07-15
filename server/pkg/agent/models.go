@@ -65,6 +65,100 @@ type ThinkingLevel struct {
 	Description string `json:"description,omitempty"`
 }
 
+// ModelDiscoveryExecution is the complete process authority for task-time
+// model discovery. Unlike operator discovery, task discovery must not inherit
+// the daemon cwd or environment and must use the task's isolation policy.
+type ModelDiscoveryExecution struct {
+	Launcher  CommandBuilder
+	Cwd       string
+	Env       map[string]string
+	Isolation *TaskIsolationPolicy
+}
+
+// ModelCatalogSnapshot is a trusted, registration-time catalog bound to one
+// provider and executable identity. The caller is responsible for obtaining
+// it outside Issue-task authority; task validation verifies the binding before
+// consuming it and returns a defensive copy.
+type ModelCatalogSnapshot struct {
+	ProviderType   string
+	ExecutablePath string
+	Models         []Model
+}
+
+// TaskModelDiscovery supplies exactly one source of task-time model truth.
+// Execution performs discovery through the task launcher. Snapshot avoids
+// launching a runtime and is preferred when the daemon has a trusted catalog.
+type TaskModelDiscovery struct {
+	Execution *ModelDiscoveryExecution
+	Snapshot  *ModelCatalogSnapshot
+}
+
+type modelDiscoveryRunner struct {
+	execution *ModelDiscoveryExecution
+}
+
+func operatorModelDiscoveryRunner() modelDiscoveryRunner {
+	return modelDiscoveryRunner{}
+}
+
+func taskModelDiscoveryRunner(execution *ModelDiscoveryExecution) (modelDiscoveryRunner, error) {
+	if execution == nil {
+		return modelDiscoveryRunner{}, fmt.Errorf("task model discovery execution is required")
+	}
+	if execution.Launcher == nil {
+		return modelDiscoveryRunner{}, fmt.Errorf("task model discovery launcher is required")
+	}
+	if execution.Cwd == "" {
+		return modelDiscoveryRunner{}, fmt.Errorf("task model discovery cwd is required")
+	}
+	if execution.Env == nil {
+		return modelDiscoveryRunner{}, fmt.Errorf("task model discovery environment is required")
+	}
+	if execution.Isolation == nil {
+		return modelDiscoveryRunner{}, fmt.Errorf("task model discovery isolation policy is required")
+	}
+	return modelDiscoveryRunner{execution: execution}, nil
+}
+
+func (r modelDiscoveryRunner) command(ctx context.Context, executable string, args []string, waitDelay time.Duration) (*exec.Cmd, error) {
+	if r.execution == nil {
+		cmd := exec.CommandContext(ctx, executable, args...)
+		hideAgentWindow(cmd)
+		cmd.WaitDelay = waitDelay
+		return cmd, nil
+	}
+	return r.execution.Launcher.Command(ctx, CommandRequest{
+		Executable: executable,
+		Args:       append([]string(nil), args...),
+		Cwd:        r.execution.Cwd,
+		Env:        cloneModelDiscoveryEnv(r.execution.Env),
+		Isolation:  r.execution.Isolation,
+		WaitDelay:  waitDelay,
+	})
+}
+
+func cloneModelDiscoveryEnv(env map[string]string) map[string]string {
+	cloned := make(map[string]string, len(env))
+	for key, value := range env {
+		cloned[key] = value
+	}
+	return cloned
+}
+
+func cloneModels(models []Model) []Model {
+	cloned := make([]Model, len(models))
+	for i, model := range models {
+		cloned[i] = model
+		if model.Thinking == nil {
+			continue
+		}
+		thinking := *model.Thinking
+		thinking.SupportedLevels = append([]ThinkingLevel(nil), model.Thinking.SupportedLevels...)
+		cloned[i].Thinking = &thinking
+	}
+	return cloned
+}
+
 // modelCache memoizes dynamic discovery calls so repeated UI loads
 // don't re-shell the agent CLI. Entries expire after cacheTTL.
 type modelCacheEntry struct {
@@ -174,6 +268,50 @@ func ListModels(ctx context.Context, providerType, executablePath string) ([]Mod
 		})
 	default:
 		return nil, fmt.Errorf("unknown agent type: %q", providerType)
+	}
+}
+
+// ListModelsForTask discovers a catalog without granting Issue-task code the
+// daemon's process authority. Exactly one trusted snapshot or explicit task
+// execution context is required. Task discovery is intentionally uncached so
+// an operator-discovery cache entry cannot cross the authority boundary.
+func ListModelsForTask(ctx context.Context, providerType, executablePath string, discovery TaskModelDiscovery) ([]Model, error) {
+	if discovery.Snapshot != nil {
+		if discovery.Execution != nil {
+			return nil, fmt.Errorf("task model discovery must use either a snapshot or execution, not both")
+		}
+		if discovery.Snapshot.ProviderType != providerType {
+			return nil, fmt.Errorf("task model snapshot provider %q does not match %q", discovery.Snapshot.ProviderType, providerType)
+		}
+		if discovery.Snapshot.ExecutablePath != executablePath {
+			return nil, fmt.Errorf("task model snapshot executable %q does not match %q", discovery.Snapshot.ExecutablePath, executablePath)
+		}
+		return cloneModels(discovery.Snapshot.Models), nil
+	}
+
+	runner, err := taskModelDiscoveryRunner(discovery.Execution)
+	if err != nil {
+		return nil, err
+	}
+	switch providerType {
+	case "claude":
+		models := claudeStaticModels()
+		annotateClaudeThinkingWithRunner(ctx, models, executablePath, runner)
+		return models, nil
+	case "codex":
+		return discoverCodexModelsWithRunner(ctx, executablePath, runner), nil
+	case "codebuddy":
+		helpOutput := codebuddyHelpOutputWithRunner(ctx, executablePath, runner)
+		models := parseCodebuddyModels(helpOutput)
+		if len(models) == 0 {
+			models = codebuddyStaticModels()
+		}
+		annotateCodebuddyThinkingFromHelp(models, helpOutput)
+		return models, nil
+	case "opencode":
+		return discoverOpenCodeModelsWithRunner(ctx, executablePath, runner)
+	default:
+		return nil, fmt.Errorf("task model discovery is unsupported for agent type %q", providerType)
 	}
 }
 
@@ -480,14 +618,23 @@ func discoverOpenCodeModels(ctx context.Context, executablePath string) ([]Model
 	if _, err := exec.LookPath(executablePath); err != nil {
 		return []Model{}, nil
 	}
+	return discoverOpenCodeModelsWithRunner(ctx, executablePath, operatorModelDiscoveryRunner())
+}
+
+func discoverOpenCodeModelsWithRunner(ctx context.Context, executablePath string, runner modelDiscoveryRunner) ([]Model, error) {
+	if executablePath == "" {
+		executablePath = "opencode"
+	}
 	// Newer opencode (1.15+) syncs its hosted free-model catalog over the
 	// network on `opencode models`, which can take ~6s; the previous 5s cap
 	// timed out and returned an empty list, so the runtime showed online but
 	// the model picker was empty. See multica-ai/multica#3627.
 	runCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(runCtx, executablePath, "models", "--verbose")
-	hideAgentWindow(cmd)
+	cmd, err := runner.command(runCtx, executablePath, []string{"models", "--verbose"}, 0)
+	if err != nil {
+		return nil, fmt.Errorf("build opencode verbose model discovery: %w", err)
+	}
 	// Parse whatever the verbose command printed, even on a non-zero exit — a
 	// stale config entry can make `opencode models` exit non-zero while still
 	// listing the resolvable catalog (mirrors the pi path; see #3729/#3627).
@@ -497,8 +644,10 @@ func discoverOpenCodeModels(ctx context.Context, executablePath string) ([]Model
 		// Verbose yielded nothing usable (unsupported flag, error text, or an
 		// empty list). Retry the plain command, which omits the per-model JSON
 		// but still prints the IDs.
-		cmd = exec.CommandContext(runCtx, executablePath, "models")
-		hideAgentWindow(cmd)
+		cmd, err = runner.command(runCtx, executablePath, []string{"models"}, 0)
+		if err != nil {
+			return nil, fmt.Errorf("build opencode model discovery: %w", err)
+		}
 		out, _ = cmd.Output()
 		models = parseOpenCodeModels(string(out))
 	}

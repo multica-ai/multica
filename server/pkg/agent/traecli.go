@@ -5,7 +5,9 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -92,8 +94,13 @@ func (b *traecliBackend) Execute(ctx context.Context, prompt string, opts ExecOp
 	if execPath == "" {
 		execPath = "traecli"
 	}
-	if _, err := exec.LookPath(execPath); err != nil {
+	resolvedExecPath, err := exec.LookPath(execPath)
+	if err != nil {
 		return nil, fmt.Errorf("traecli executable not found at %q: %w", execPath, err)
+	}
+	resolvedExecPath, err = filepath.Abs(resolvedExecPath)
+	if err != nil {
+		return nil, fmt.Errorf("resolve traecli executable %q: %w", resolvedExecPath, err)
 	}
 
 	// Translate the agent's mcp_config (Claude-style object of objects) into
@@ -112,13 +119,20 @@ func (b *traecliBackend) Execute(ctx context.Context, prompt string, opts ExecOp
 		[]string{"acp", "serve", "--yolo"},
 		filterCustomArgs(opts.CustomArgs, traecliBlockedArgs, b.cfg.Logger)...,
 	)
-	cmd := exec.CommandContext(runCtx, execPath, traecliArgs...)
-	hideAgentWindow(cmd)
-	b.cfg.Logger.Info("agent command", "exec", execPath, "args", traecliArgs)
-	if opts.Cwd != "" {
-		cmd.Dir = opts.Cwd
+	cwd := opts.Cwd
+	if cwd == "" {
+		cwd, err = os.Getwd()
+		if err != nil {
+			cancel()
+			return nil, fmt.Errorf("resolve traecli working directory: %w", err)
+		}
 	}
-	cmd.Env = buildEnv(b.cfg.Env)
+	cmd, err := b.cfg.command(runCtx, resolvedExecPath, traecliArgs, cwd, 10*time.Second)
+	if err != nil {
+		cancel()
+		return nil, fmt.Errorf("build traecli command: %w", err)
+	}
+	b.cfg.Logger.Info("agent command", "exec", resolvedExecPath, "args", traecliArgs)
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {

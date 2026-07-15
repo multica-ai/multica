@@ -3,7 +3,6 @@ package agent
 import (
 	"context"
 	"encoding/json"
-	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -66,7 +65,7 @@ func fakeKimiACPScript() string {
 #
 # Writes the full argv (one arg per line) to $KIMI_ARGS_FILE if that env
 # var is set, so tests can assert that the daemon invokes us with the
-# right flags (`+"`--yolo acp`"+`, not bare `+"`acp`"+`).
+# right flags (` + "`--yolo acp`" + `, not bare ` + "`acp`" + `).
 #
 # Then reads one JSON-RPC request per line from stdin, matches on the
 # method name, and writes back a canned response. Exits after set_model
@@ -106,7 +105,7 @@ func TestKimiBackendSetModelFailureFailsTask(t *testing.T) {
 	fakePath := filepath.Join(t.TempDir(), "kimi")
 	writeTestExecutable(t, fakePath, []byte(fakeKimiACPScript()))
 
-	backend, err := New("kimi", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	backend, err := New("kimi", acpProviderTestConfig(t, fakePath, nil))
 	if err != nil {
 		t.Fatalf("new kimi backend: %v", err)
 	}
@@ -188,7 +187,7 @@ func TestKimiBackendClearsSessionIDWhenSetModelSessionNotFound(t *testing.T) {
 	fakePath := filepath.Join(t.TempDir(), "kimi")
 	writeTestExecutable(t, fakePath, []byte(fakeKimiACPStaleResumeSetModelScript()))
 
-	backend, err := New("kimi", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	backend, err := New("kimi", acpProviderTestConfig(t, fakePath, nil))
 	if err != nil {
 		t.Fatalf("new kimi backend: %v", err)
 	}
@@ -244,11 +243,7 @@ func TestKimiBackendInvokesACPSubcommand(t *testing.T) {
 	fakePath := filepath.Join(tempDir, "kimi")
 	writeTestExecutable(t, fakePath, []byte(fakeKimiACPScript()))
 
-	backend, err := New("kimi", Config{
-		ExecutablePath: fakePath,
-		Logger:         slog.Default(),
-		Env:            map[string]string{"KIMI_ARGS_FILE": argsFile},
-	})
+	backend, err := New("kimi", acpProviderTestConfig(t, fakePath, map[string]string{"KIMI_ARGS_FILE": argsFile}))
 	if err != nil {
 		t.Fatalf("new kimi backend: %v", err)
 	}
@@ -300,7 +295,7 @@ func TestKimiResumeIncludesMcpServers(t *testing.T) {
 	fakePath := filepath.Join(t.TempDir(), "kimi")
 	writeTestExecutable(t, fakePath, []byte(fakeACPRecordingScript(recordPath, "ses_resume", `{}`)))
 
-	backend, err := New("kimi", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	backend, err := New("kimi", acpProviderTestConfig(t, fakePath, nil))
 	if err != nil {
 		t.Fatalf("new kimi backend: %v", err)
 	}

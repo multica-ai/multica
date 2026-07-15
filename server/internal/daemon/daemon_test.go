@@ -149,6 +149,12 @@ func TestIsBlockedEnvKey(t *testing.T) {
 		{key: "MULTICA_TOKEN", want: true},
 		{key: "multica_runtime_id", want: true},
 		{key: "HOME", want: true},
+		{key: "XDG_CONFIG_HOME", want: true},
+		{key: "USERPROFILE", want: true},
+		{key: "APPDATA", want: true},
+		{key: "LOCALAPPDATA", want: true},
+		{key: "HOMEDRIVE", want: true},
+		{key: "HOMEPATH", want: true},
 		{key: "PATH", want: true},
 		{key: "TMPDIR", want: true},
 		{key: "tmp", want: true},
@@ -237,6 +243,359 @@ func TestLayerCustomEnvAndHermesHome(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestRunTaskInjectsPrivateHomeAndBlocksCustomOverrides(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script agent fixture is POSIX-only")
+	}
+
+	realHome := t.TempDir()
+	realConfig := filepath.Join(realHome, ".multica", "config.json")
+	if err := os.MkdirAll(filepath.Dir(realConfig), 0o700); err != nil {
+		t.Fatalf("mkdir real config dir: %v", err)
+	}
+	const humanPAT = "human-pat-must-not-leak"
+	if err := os.WriteFile(realConfig, []byte(`{"token":"`+humanPAT+`"}`), 0o600); err != nil {
+		t.Fatalf("write real config: %v", err)
+	}
+	t.Setenv("HOME", realHome)
+
+	captureFile := filepath.Join(t.TempDir(), "agent-home.txt")
+	fakeBin := filepath.Join(t.TempDir(), "claude")
+	script := `#!/bin/sh
+unset MULTICA_TOKEN MULTICA_SERVER_URL MULTICA_DAEMON_PORT MULTICA_WORKSPACE_ID MULTICA_AGENT_NAME MULTICA_AGENT_ID MULTICA_TASK_ID MULTICA_TASK_SLOT
+default_config="$HOME/.multica/config.json"
+if [ -f "$default_config" ]; then
+  config_exists=yes
+  config_content=$(cat "$default_config")
+else
+  config_exists=no
+  config_content=
+fi
+printf 'HOME=%s\nXDG_CONFIG_HOME=%s\nUSERPROFILE=%s\nAPPDATA=%s\nLOCALAPPDATA=%s\nHOMEDRIVE=%s\nHOMEPATH=%s\nDEFAULT_CONFIG=%s\nDEFAULT_CONFIG_EXISTS=%s\nDEFAULT_CONFIG_CONTENT=%s\n' \
+  "$HOME" "$XDG_CONFIG_HOME" "$USERPROFILE" "$APPDATA" "$LOCALAPPDATA" "$HOMEDRIVE" "$HOMEPATH" \
+  "$default_config" "$config_exists" "$config_content" > "$CAPTURE_FILE"
+IFS= read -r _
+printf '%s\n' '{"type":"system","session_id":"sess-private-home"}'
+printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"session_id":"sess-private-home","result":"done"}'
+`
+	if err := os.WriteFile(fakeBin, []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake agent: %v", err)
+	}
+
+	client := NewClient("http://multica.test")
+	client.client.Transport = taskHomeRoundTripper(func(*http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     make(http.Header),
+			Body:       io.NopCloser(strings.NewReader("{}")),
+		}, nil
+	})
+
+	workspacesRoot := t.TempDir()
+	d := &Daemon{
+		client:         client,
+		logger:         slog.New(slog.NewTextHandler(io.Discard, nil)),
+		workspaces:     make(map[string]*workspaceState),
+		runtimeIndex:   map[string]Runtime{"rt-private-home": {ID: "rt-private-home", Provider: "claude"}},
+		activeEnvRoots: make(map[string]int),
+		taskLauncher:   directTaskLauncherFactory,
+		cfg: Config{
+			WorkspacesRoot: workspacesRoot,
+			AgentTimeout:   15 * time.Second,
+			ServerBaseURL:  "http://multica.test",
+			Agents: map[string]AgentEntry{
+				"claude": {Path: fakeBin},
+			},
+		},
+	}
+
+	overrideRoot := filepath.Join(t.TempDir(), "custom-env-home")
+	task := Task{
+		ID:          "task-private-home",
+		WorkspaceID: "ws-private-home",
+		RuntimeID:   "rt-private-home",
+		IssueID:     "issue-private-home",
+		AuthToken:   "mat_private_home",
+		Agent: &AgentData{
+			ID:   "agent-private-home",
+			Name: "private-home-agent",
+			CustomEnv: map[string]string{
+				"CAPTURE_FILE":    captureFile,
+				"HOME":            overrideRoot,
+				"XDG_CONFIG_HOME": filepath.Join(overrideRoot, "xdg"),
+				"USERPROFILE":     overrideRoot,
+				"APPDATA":         filepath.Join(overrideRoot, "appdata"),
+				"LOCALAPPDATA":    filepath.Join(overrideRoot, "localappdata"),
+				"HOMEDRIVE":       "Z:",
+				"HOMEPATH":        `\override`,
+			},
+		},
+	}
+
+	result, err := d.runTask(context.Background(), task, "claude", 0, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatalf("runTask(): %v", err)
+	}
+	if result.Status != "completed" {
+		t.Fatalf("runTask status = %q, want completed (comment=%q)", result.Status, result.Comment)
+	}
+
+	raw, err := os.ReadFile(captureFile)
+	if err != nil {
+		t.Fatalf("read captured env: %v", err)
+	}
+	got := make(map[string]string)
+	for _, line := range strings.Split(strings.TrimSpace(string(raw)), "\n") {
+		key, value, ok := strings.Cut(line, "=")
+		if !ok {
+			t.Fatalf("malformed captured env line %q", line)
+		}
+		got[key] = value
+	}
+
+	wantRoot := execenv.PredictRootDir(workspacesRoot, task.WorkspaceID, task.ID)
+	wantHome := filepath.Join(wantRoot, "home")
+	wantConfig := filepath.Join(wantHome, ".config")
+	if got["HOME"] != wantHome {
+		t.Fatalf("child HOME = %q, want private home %q", got["HOME"], wantHome)
+	}
+	if got["XDG_CONFIG_HOME"] != wantConfig {
+		t.Fatalf("child XDG_CONFIG_HOME = %q, want %q", got["XDG_CONFIG_HOME"], wantConfig)
+	}
+	for _, key := range []string{"USERPROFILE", "APPDATA", "LOCALAPPDATA"} {
+		if got[key] == "" || !strings.HasPrefix(got[key], wantHome) {
+			t.Fatalf("child %s = %q, want path under %q", key, got[key], wantHome)
+		}
+	}
+	if got["HOMEDRIVE"] == "Z:" || got["HOMEPATH"] == `\override` {
+		t.Fatalf("custom_env overrode Windows home locators: HOMEDRIVE=%q HOMEPATH=%q", got["HOMEDRIVE"], got["HOMEPATH"])
+	}
+	if got["DEFAULT_CONFIG"] == realConfig || strings.Contains(got["DEFAULT_CONFIG_CONTENT"], humanPAT) {
+		t.Fatalf("child default config leaked real human PAT: path=%q content=%q", got["DEFAULT_CONFIG"], got["DEFAULT_CONFIG_CONTENT"])
+	}
+	if got["DEFAULT_CONFIG_EXISTS"] != "no" {
+		t.Fatalf("child default config exists at %q; private HOME must start without .multica/config.json", got["DEFAULT_CONFIG"])
+	}
+	for _, path := range []string{wantHome, wantConfig} {
+		info, err := os.Stat(path)
+		if err != nil {
+			t.Fatalf("stat private path %q: %v", path, err)
+		}
+		if mode := info.Mode().Perm(); mode != 0o700 {
+			t.Fatalf("mode(%q) = %#o, want 0700", path, mode)
+		}
+	}
+}
+
+type taskHomeRoundTripper func(*http.Request) (*http.Response, error)
+
+func (f taskHomeRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
+}
+
+type directTaskCommandLauncher struct{}
+
+func (directTaskCommandLauncher) Command(ctx context.Context, req agent.CommandRequest) (*exec.Cmd, error) {
+	cmd := exec.CommandContext(ctx, req.Executable, req.Args...)
+	cmd.Dir = req.Cwd
+	keys := make([]string, 0, len(req.Env))
+	for key := range req.Env {
+		keys = append(keys, key)
+	}
+	slices.Sort(keys)
+	for _, key := range keys {
+		cmd.Env = append(cmd.Env, key+"="+req.Env[key])
+	}
+	cmd.WaitDelay = req.WaitDelay
+	return cmd, nil
+}
+
+func directTaskLauncherFactory() agent.CommandBuilder {
+	return directTaskCommandLauncher{}
+}
+
+type runTaskRepoCache struct {
+	syncErr     error
+	path        string
+	syncStarted chan struct{}
+}
+
+func (c *runTaskRepoCache) LookupContext(context.Context, string, string) string { return c.path }
+func (c *runTaskRepoCache) ResolveContext(_ context.Context, _ string, url string) (repocache.ResolvedRepo, error) {
+	if c.path == "" {
+		return repocache.ResolvedRepo{}, errors.New("repo unavailable")
+	}
+	return repocache.ResolvedRepo{URL: url, BarePath: c.path}, nil
+}
+func (c *runTaskRepoCache) SyncContext(ctx context.Context, _ string, _ []repocache.RepoInfo) error {
+	if c.syncStarted != nil {
+		close(c.syncStarted)
+		<-ctx.Done()
+		return ctx.Err()
+	}
+	return c.syncErr
+}
+func (c *runTaskRepoCache) WithRepoLock(_ string, fn func() error) error { return fn() }
+func (c *runTaskRepoCache) CreateWorktreeContext(context.Context, repocache.WorktreeParams) (*repocache.WorktreeResult, error) {
+	return nil, errors.New("unexpected CreateWorktree call")
+}
+
+func TestRunTaskInjectsAndRevokesRepoCheckoutCapability(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script agent fixture is POSIX-only")
+	}
+
+	captureFile := filepath.Join(t.TempDir(), "checkout-token.txt")
+	fakeBin := filepath.Join(t.TempDir(), "claude")
+	script := `#!/bin/sh
+printf '%s' "$MULTICA_REPO_CHECKOUT_TOKEN" > "$CAPTURE_FILE"
+IFS= read -r _
+printf '%s\n' '{"type":"system","session_id":"sess-capability"}'
+printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"session_id":"sess-capability","result":"done"}'
+`
+	if err := os.WriteFile(fakeBin, []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake agent: %v", err)
+	}
+
+	client := NewClient("http://multica.test")
+	client.client.Transport = taskHomeRoundTripper(func(*http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     make(http.Header),
+			Body:       io.NopCloser(strings.NewReader("{}")),
+		}, nil
+	})
+	repoPath := filepath.Join(t.TempDir(), "repo.git")
+	if err := os.MkdirAll(repoPath, 0o700); err != nil {
+		t.Fatalf("create repo cache fixture: %v", err)
+	}
+	d := &Daemon{
+		client:                   client,
+		repoCache:                &runTaskRepoCache{path: repoPath},
+		logger:                   slog.New(slog.NewTextHandler(io.Discard, nil)),
+		workspaces:               make(map[string]*workspaceState),
+		runtimeIndex:             map[string]Runtime{"rt-capability": {ID: "rt-capability", Provider: "claude"}},
+		activeEnvRoots:           make(map[string]int),
+		repoCheckoutCapabilities: make(map[string]*repoCheckoutCapability),
+		taskLauncher:             directTaskLauncherFactory,
+		cfg: Config{
+			WorkspacesRoot: t.TempDir(),
+			AgentTimeout:   15 * time.Second,
+			ServerBaseURL:  "http://multica.test",
+			Agents: map[string]AgentEntry{
+				"claude": {Path: fakeBin},
+			},
+		},
+	}
+	task := Task{
+		ID:          "task-capability",
+		WorkspaceID: "ws-capability",
+		RuntimeID:   "rt-capability",
+		IssueID:     "issue-capability",
+		AuthToken:   "mat_capability",
+		Repos:       []RepoData{{URL: "https://example.com/repo.git", Ref: "refs/heads/main"}},
+		Agent: &AgentData{
+			ID:   "agent-capability",
+			Name: "capability-agent",
+			CustomEnv: map[string]string{
+				"CAPTURE_FILE":                captureFile,
+				"MULTICA_REPO_CHECKOUT_TOKEN": "attacker-controlled-token",
+			},
+		},
+	}
+
+	result, err := d.runTask(context.Background(), task, "claude", 0, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatalf("runTask(): %v", err)
+	}
+	if result.Status != "completed" {
+		t.Fatalf("runTask status = %q, want completed", result.Status)
+	}
+	raw, err := os.ReadFile(captureFile)
+	if err != nil {
+		t.Fatalf("read captured checkout token: %v", err)
+	}
+	token := strings.TrimSpace(string(raw))
+	if token == "" || token == "attacker-controlled-token" {
+		t.Fatalf("child checkout token = %q, want non-empty daemon-issued token", token)
+	}
+	if _, release, ok := d.acquireRepoCheckoutCapability(token); ok {
+		release()
+		t.Fatal("checkout capability remained valid after runTask returned")
+	}
+	if len(d.repoCheckoutCapabilities) != 0 {
+		t.Fatalf("capability registry contains %d entries after task completion", len(d.repoCheckoutCapabilities))
+	}
+}
+
+func TestRunTaskRepoCacheFailureDoesNotStartBackend(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script agent fixture is POSIX-only")
+	}
+
+	startedFile := filepath.Join(t.TempDir(), "backend-started")
+	fakeBin := filepath.Join(t.TempDir(), "claude")
+	script := `#!/bin/sh
+: > "$STARTED_FILE"
+exit 1
+`
+	if err := os.WriteFile(fakeBin, []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake agent: %v", err)
+	}
+	client := NewClient("http://multica.test")
+	client.client.Transport = taskHomeRoundTripper(func(*http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     make(http.Header),
+			Body:       io.NopCloser(strings.NewReader("{}")),
+		}, nil
+	})
+	d := &Daemon{
+		client:                   client,
+		repoCache:                &runTaskRepoCache{syncErr: errors.New("cache unavailable")},
+		logger:                   slog.New(slog.NewTextHandler(io.Discard, nil)),
+		workspaces:               make(map[string]*workspaceState),
+		runtimeIndex:             map[string]Runtime{"rt-cache-fail": {ID: "rt-cache-fail", Provider: "claude"}},
+		activeEnvRoots:           make(map[string]int),
+		repoCheckoutCapabilities: make(map[string]*repoCheckoutCapability),
+		taskLauncher:             directTaskLauncherFactory,
+		cfg: Config{
+			WorkspacesRoot: t.TempDir(),
+			AgentTimeout:   5 * time.Second,
+			ServerBaseURL:  "http://multica.test",
+			Agents: map[string]AgentEntry{
+				"claude": {Path: fakeBin},
+			},
+		},
+	}
+	task := Task{
+		ID:          "task-cache-fail",
+		WorkspaceID: "ws-cache-fail",
+		RuntimeID:   "rt-cache-fail",
+		IssueID:     "issue-cache-fail",
+		AuthToken:   "mat_cache_fail",
+		Repos:       []RepoData{{URL: "https://example.com/repo.git"}},
+		Agent: &AgentData{
+			ID:   "agent-cache-fail",
+			Name: "cache-fail-agent",
+			CustomEnv: map[string]string{
+				"STARTED_FILE": startedFile,
+			},
+		},
+	}
+
+	_, err := d.runTask(context.Background(), task, "claude", 0, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err == nil || !strings.Contains(err.Error(), "cache unavailable") {
+		t.Fatalf("runTask error = %v, want cache failure", err)
+	}
+	if _, statErr := os.Stat(startedFile); !os.IsNotExist(statErr) {
+		t.Fatalf("backend started despite cache failure: stat error = %v", statErr)
+	}
+	if len(d.repoCheckoutCapabilities) != 0 {
+		t.Fatalf("cache failure registered %d checkout capabilities", len(d.repoCheckoutCapabilities))
 	}
 }
 
@@ -419,80 +778,6 @@ func TestProviderNeedsInlineSystemPrompt(t *testing.T) {
 			t.Parallel()
 			if got := providerNeedsInlineSystemPrompt(tc.provider); got != tc.want {
 				t.Fatalf("providerNeedsInlineSystemPrompt(%q) = %v, want %v", tc.provider, got, tc.want)
-			}
-		})
-	}
-}
-
-// TestComposeOpenclawIncludeRoots — the Elon must-fix regression: the
-// daemon must grant OpenClaw permission to follow the wrapper's $include
-// link from envRoot into the user's active config dir, while preserving
-// any roots the user already configured in their shell env so their own
-// cross-directory layouts keep working.
-func TestComposeOpenclawIncludeRoots(t *testing.T) {
-	t.Parallel()
-
-	sep := string(os.PathListSeparator)
-	cases := []struct {
-		name    string
-		add     string
-		user    string
-		want    string
-		wantSet bool
-	}{
-		{
-			// Fresh install — preparer emits no $include, so daemon
-			// shouldn't touch OPENCLAW_INCLUDE_ROOTS at all.
-			name:    "fresh_install_no_root_to_grant",
-			add:     "",
-			user:    "/some/user/dir",
-			wantSet: false,
-		},
-		{
-			// User has no existing value — output is just the granted dir.
-			name:    "no_user_value",
-			add:     "/home/alice/.openclaw",
-			user:    "",
-			want:    "/home/alice/.openclaw",
-			wantSet: true,
-		},
-		{
-			// User has their own include roots — daemon must prepend
-			// granted dir AND preserve user's entries verbatim.
-			name:    "preserves_user_value",
-			add:     "/home/alice/.openclaw",
-			user:    "/etc/openclaw" + sep + "/opt/openclaw/shared",
-			want:    "/home/alice/.openclaw" + sep + "/etc/openclaw" + sep + "/opt/openclaw/shared",
-			wantSet: true,
-		},
-		{
-			// User's value already contains the granted dir — daemon
-			// must dedupe rather than emit a redundant entry that would
-			// trip OpenClaw confused-deputy heuristics.
-			name:    "dedupes_when_user_already_grants_same_dir",
-			add:     "/home/alice/.openclaw",
-			user:    "/home/alice/.openclaw" + sep + "/etc/openclaw",
-			want:    "/home/alice/.openclaw" + sep + "/etc/openclaw",
-			wantSet: true,
-		},
-		{
-			// Stray empty segments from a malformed user env are skipped.
-			name:    "skips_empty_segments_in_user_value",
-			add:     "/home/alice/.openclaw",
-			user:    "" + sep + "/etc/openclaw" + sep + "",
-			want:    "/home/alice/.openclaw" + sep + "/etc/openclaw",
-			wantSet: true,
-		},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			got, ok := composeOpenclawIncludeRoots(tc.add, tc.user)
-			if ok != tc.wantSet {
-				t.Fatalf("ok = %v, want %v (got = %q)", ok, tc.wantSet, got)
-			}
-			if got != tc.want {
-				t.Errorf("got = %q, want %q", got, tc.want)
 			}
 		})
 	}
@@ -1107,11 +1392,6 @@ func newRepoReadyTestDaemon(t *testing.T, handler http.HandlerFunc) *Daemon {
 		workspaces:   make(map[string]*workspaceState),
 		runtimeIndex: make(map[string]Runtime),
 	}
-	// Drain background syncs (started by registerTaskRepos) before the
-	// t.TempDir cache root is cleaned up, otherwise an in-flight clone/fetch
-	// races against the deletion and the test fails with a misleading
-	// "directory not empty" cleanup error.
-	t.Cleanup(d.waitBackgroundSyncs)
 	return d
 }
 
@@ -1601,7 +1881,7 @@ func TestExecuteAndDrain_CodexInactivityReportsToolResultTranscript(t *testing.T
 		`echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"thr-drain","turn":{"id":"turn-drain"}}}'` + "\n" +
 		`echo '{"jsonrpc":"2.0","method":"item/started","params":{"threadId":"thr-drain","item":{"type":"commandExecution","id":"cmd-1","command":"git status"}}}'` + "\n" +
 		`echo '{"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"thr-drain","item":{"type":"commandExecution","id":"cmd-1","aggregatedOutput":"clean"}}}'` + "\n" +
-		`sleep 5` + "\n"
+		`sleep 15` + "\n"
 	if err := os.WriteFile(fakePath, []byte(script), 0o755); err != nil {
 		t.Fatalf("write fake codex: %v", err)
 	}
@@ -1631,13 +1911,21 @@ func TestExecuteAndDrain_CodexInactivityReportsToolResultTranscript(t *testing.T
 	}))
 	t.Cleanup(srv.Close)
 
-	backend, err := agent.New("codex", agent.Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	backend, err := agent.New("codex", agent.Config{
+		ExecutablePath: fakePath,
+		Logger:         slog.Default(),
+		Launcher:       directTaskCommandLauncher{},
+		Isolation: &agent.TaskIsolationPolicy{
+			WritableRoots: []string{filepath.Dir(fakePath)},
+			Network:       agent.NetworkAccessPublicAndLoopback,
+		},
+	})
 	if err != nil {
 		t.Fatalf("new codex backend: %v", err)
 	}
 	d := &Daemon{client: NewClient(srv.URL), logger: slog.Default()}
 	result, tools, err := d.executeAndDrain(context.Background(), backend, "prompt", agent.ExecOptions{
-		Timeout:                   5 * time.Second,
+		Timeout:                   15 * time.Second,
 		SemanticInactivityTimeout: 100 * time.Millisecond,
 	}, slog.Default(), "task-stale", new(atomic.Int32))
 	if err != nil {
@@ -2104,7 +2392,7 @@ func TestEnsureRepoReadyCachedRepoStillRefreshesSettings(t *testing.T) {
 			Settings:     json.RawMessage(`{"github_enabled":false,"co_authored_by_enabled":true}`),
 		})
 	})
-	if err := d.repoCache.Sync("ws-1", []repocache.RepoInfo{{URL: sourceRepo}}); err != nil {
+	if err := d.repoCache.SyncContext(context.Background(), "ws-1", []repocache.RepoInfo{{URL: sourceRepo}}); err != nil {
 		t.Fatalf("seed repo cache: %v", err)
 	}
 	// Workspace starts with the master switch ON. The server above will return
@@ -2149,7 +2437,7 @@ func TestEnsureRepoReadyTrimsURL(t *testing.T) {
 			ReposVersion: "v2",
 		})
 	})
-	if err := d.repoCache.Sync("ws-1", []repocache.RepoInfo{{URL: sourceRepo}}); err != nil {
+	if err := d.repoCache.SyncContext(context.Background(), "ws-1", []repocache.RepoInfo{{URL: sourceRepo}}); err != nil {
 		t.Fatalf("seed repo cache: %v", err)
 	}
 	d.workspaces["ws-1"] = newWorkspaceState("ws-1", nil, "v1", []RepoData{{URL: sourceRepo}}, nil)
@@ -2189,128 +2477,338 @@ func TestEnsureRepoReadyRefreshesOnMiss(t *testing.T) {
 	if got := refreshCalls.Load(); got != 1 {
 		t.Fatalf("expected 1 refresh call, got %d", got)
 	}
-	if d.repoCache.Lookup("ws-1", sourceRepo) == "" {
+	if d.repoCache.LookupContext(context.Background(), "ws-1", sourceRepo) == "" {
 		t.Fatal("expected repo to be cached after refresh")
 	}
 }
 
-// A project github_repo URL that the workspace itself does not bind must still
-// be allowed for `multica repo checkout` after registerTaskRepos runs. Without
-// this, the new project-repos-override-workspace-repos behavior would surface
-// repos in the meta-skill that the agent then can't actually clone.
-func TestRegisterTaskReposAllowsProjectOnlyURL(t *testing.T) {
-	t.Parallel()
-
-	sourceRepo := createDaemonTestRepo(t)
-	var refreshCalls atomic.Int32
-	d := newRepoReadyTestDaemon(t, func(w http.ResponseWriter, r *http.Request) {
-		refreshCalls.Add(1)
-		// If the workspace endpoint is hit it returns an empty list — the
-		// project-only URL must NOT depend on this for allowlist membership.
-		json.NewEncoder(w).Encode(WorkspaceReposResponse{
-			WorkspaceID:  "ws-1",
-			Repos:        []RepoData{},
-			ReposVersion: "v1",
-		})
-	})
-	// Workspace has zero workspace-bound repos; the project resource gives us
-	// the only repo URL the agent should be able to check out.
-	d.workspaces["ws-1"] = newWorkspaceState("ws-1", nil, "", nil, nil)
-
-	d.registerTaskRepos("ws-1", "task-project-only", []RepoData{{URL: sourceRepo}})
-
-	// The async clone goroutine in registerTaskRepos may not have finished;
-	// poll briefly until the cache is populated so the test isn't racy.
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		if d.repoCache.Lookup("ws-1", sourceRepo) != "" {
-			break
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-	if d.repoCache.Lookup("ws-1", sourceRepo) == "" {
-		t.Fatalf("expected repo to be cached after registerTaskRepos, but Lookup returned empty")
-	}
-
-	if !d.workspaceRepoAllowed("ws-1", sourceRepo) {
-		t.Fatal("expected project repo to pass workspaceRepoAllowed")
-	}
-
-	if err := d.ensureRepoReady(context.Background(), "ws-1", sourceRepo); err != nil {
-		t.Fatalf("ensureRepoReady: %v", err)
-	}
-	// ensureRepoReady refreshes settings on every call (RFC MUL-2414 §4.8; PR
-	// #2847 review by Emacs) so a freshly-flipped GitHub toggle takes effect
-	// without waiting for the 30s sync tick. We expect exactly one refresh —
-	// the project-only URL still skips re-cloning because the cache is warm.
-	if got := refreshCalls.Load(); got != 1 {
-		t.Fatalf("expected 1 workspace-repos refresh (settings live-refresh on checkout), got %d", got)
-	}
-}
-
-// Confirms that a workspace refresh wiping allowedRepoURLs does not also wipe
-// task-scoped URLs (project repos). Without the separate taskRepoURLs map a
-// concurrent refresh would silently revoke project-only URLs and the next
-// checkout would fail.
-func TestRegisterTaskReposSurvivesWorkspaceRefresh(t *testing.T) {
+// A project github_repo URL that the workspace itself does not bind is cached
+// before task launch without becoming workspace-level authorization.
+func TestPrepareTaskRepoCacheCachesProjectOnlyURLWithoutWideningWorkspace(t *testing.T) {
 	t.Parallel()
 
 	sourceRepo := createDaemonTestRepo(t)
 	d := newRepoReadyTestDaemon(t, func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode(WorkspaceReposResponse{
-			WorkspaceID:  "ws-1",
-			Repos:        []RepoData{},
-			ReposVersion: "v2",
-		})
+		t.Fatal("prepareTaskRepoCache must not read workspace management state")
 	})
 	d.workspaces["ws-1"] = newWorkspaceState("ws-1", nil, "", nil, nil)
-	d.registerTaskRepos("ws-1", "task-refresh", []RepoData{{URL: sourceRepo}})
 
-	// Wait for the registration to populate the cache.
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) && d.repoCache.Lookup("ws-1", sourceRepo) == "" {
-		time.Sleep(20 * time.Millisecond)
+	resolved, err := d.prepareTaskRepoCache(context.Background(), "ws-1", []RepoData{{URL: sourceRepo, Ref: "main"}})
+	if err != nil {
+		t.Fatalf("prepareTaskRepoCache: %v", err)
 	}
-
-	if _, err := d.refreshWorkspaceRepos(context.Background(), "ws-1"); err != nil {
-		t.Fatalf("refreshWorkspaceRepos: %v", err)
+	if len(resolved) != 1 {
+		t.Fatalf("resolved repos = %#v, want one", resolved)
 	}
-
-	if !d.workspaceRepoAllowed("ws-1", sourceRepo) {
-		t.Fatal("project repo URL was wiped by workspace refresh")
+	if resolved[0].URL != sourceRepo || resolved[0].Ref != "main" {
+		t.Fatalf("resolved repo identity = %#v", resolved[0])
+	}
+	if resolved[0].BarePath != d.repoCache.LookupContext(context.Background(), "ws-1", sourceRepo) {
+		t.Fatalf("resolved bare path = %q, want exact cache path", resolved[0].BarePath)
+	}
+	if d.repoCache.LookupContext(context.Background(), "ws-1", sourceRepo) == "" {
+		t.Fatal("expected project repo to be cached before task launch")
+	}
+	if d.workspaceRepoAllowed("ws-1", sourceRepo) {
+		t.Fatal("task repo widened workspace authorization")
 	}
 }
 
-func TestTaskRepoDefaultRefScopedByTask(t *testing.T) {
+func TestPrepareTaskRepoCacheRejectsConflictingRefs(t *testing.T) {
 	t.Parallel()
 
-	const repoURL = "https://github.com/example/shared"
-	d := &Daemon{
-		workspaces: map[string]*workspaceState{
-			"ws-1": newWorkspaceState("ws-1", nil, "", nil, nil),
-		},
-	}
-
-	d.registerTaskRepos("ws-1", "task-a", []RepoData{
+	const repoURL = "https://github.com/example/shared.git"
+	d := &Daemon{repoCache: &recordingRepoCache{lookupPath: "/cache/shared.git"}}
+	_, err := d.prepareTaskRepoCache(context.Background(), "ws-1", []RepoData{
 		{URL: repoURL, Ref: "release/a"},
-		{URL: repoURL, Ref: "late-duplicate"},
+		{URL: repoURL, Ref: "release/b"},
 	})
-	d.registerTaskRepos("ws-1", "task-b", []RepoData{{URL: repoURL, Ref: "release/b"}})
-
-	if got := d.taskRepoDefaultRef("ws-1", "task-a", repoURL); got != "release/a" {
-		t.Fatalf("task-a default ref = %q, want release/a", got)
+	if err == nil || !strings.Contains(err.Error(), "conflicting refs") {
+		t.Fatalf("prepareTaskRepoCache error = %v, want conflicting refs", err)
 	}
-	if got := d.taskRepoDefaultRef("ws-1", "task-b", repoURL); got != "release/b" {
-		t.Fatalf("task-b default ref = %q, want release/b", got)
+}
+
+func TestPrepareTaskRepoCachePropagatesTaskCancellation(t *testing.T) {
+	t.Parallel()
+
+	cache := &runTaskRepoCache{syncStarted: make(chan struct{})}
+	d := &Daemon{repoCache: cache}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		_, err := d.prepareTaskRepoCache(ctx, "ws-1", []RepoData{{URL: "https://github.com/example/repo.git"}})
+		done <- err
+	}()
+
+	select {
+	case <-cache.syncStarted:
+	case <-time.After(time.Second):
+		t.Fatal("repo cache sync did not start")
+	}
+	cancel()
+
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("prepareTaskRepoCache error = %v, want context.Canceled", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("prepareTaskRepoCache ignored task cancellation")
+	}
+}
+
+func TestBuildTaskIsolationPolicyUsesExactTaskAuthority(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	envRoot := filepath.Join(root, "env")
+	workDir := filepath.Join(root, "external-worktree")
+	taskTempDir := filepath.Join(envRoot, "tmp")
+	bareRepo := filepath.Join(root, "cache", "repo.git")
+	providerRoot := filepath.Join(root, "runtime", "node_modules", "@vendor", "agent")
+	providerBin := filepath.Join(providerRoot, "bin", "agent.js")
+	nodeBin := filepath.Join(root, "runtime", "bin", "node")
+	selfExecutable := filepath.Join(root, "bin", "multica")
+	for _, dir := range []string{envRoot, workDir, taskTempDir, bareRepo, filepath.Dir(providerBin), filepath.Dir(nodeBin), filepath.Dir(selfExecutable)} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("mkdir %q: %v", dir, err)
+		}
+	}
+	if err := os.WriteFile(providerBin, []byte("#!/usr/bin/env node\n"), 0o755); err != nil {
+		t.Fatalf("write provider: %v", err)
+	}
+	if err := os.WriteFile(nodeBin, []byte("runtime"), 0o755); err != nil {
+		t.Fatalf("write node: %v", err)
+	}
+	if err := os.WriteFile(selfExecutable, []byte("multica"), 0o755); err != nil {
+		t.Fatalf("write self executable: %v", err)
 	}
 
-	d.clearTaskRepoRefs("ws-1", "task-a")
-
-	if got := d.taskRepoDefaultRef("ws-1", "task-a", repoURL); got != "" {
-		t.Fatalf("task-a default ref after cleanup = %q, want empty", got)
+	ownerHome := filepath.Join(root, "owner")
+	for _, rel := range []string{".multica", ".codex", ".config/opencode"} {
+		if err := os.MkdirAll(filepath.Join(ownerHome, rel), 0o700); err != nil {
+			t.Fatalf("mkdir owner config: %v", err)
+		}
 	}
-	if got := d.taskRepoDefaultRef("ws-1", "task-b", repoURL); got != "release/b" {
-		t.Fatalf("task-b default ref after task-a cleanup = %q, want release/b", got)
+
+	policy, taskPath, err := buildTaskIsolationPolicy(taskIsolationParams{
+		Environment: &execenv.Environment{
+			RootDir:        envRoot,
+			WorkDir:        workDir,
+			LocalDirectory: true,
+		},
+		TaskTempDir:    taskTempDir,
+		Repos:          []resolvedTaskRepo{{URL: "https://example.com/repo.git", BarePath: bareRepo}},
+		Executable:     providerBin,
+		OwnerHome:      ownerHome,
+		SelfExecutable: selfExecutable,
+		LookupPath: func(name string) (string, error) {
+			if name != "node" {
+				return "", exec.ErrNotFound
+			}
+			return nodeBin, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("buildTaskIsolationPolicy: %v", err)
+	}
+	envRoot = resolvedTestPath(t, envRoot)
+	workDir = resolvedTestPath(t, workDir)
+	taskTempDir = resolvedTestPath(t, taskTempDir)
+	bareRepo = resolvedTestPath(t, bareRepo)
+	providerRoot = resolvedTestPath(t, providerRoot)
+	providerBin = resolvedTestPath(t, providerBin)
+	nodeBin = resolvedTestPath(t, nodeBin)
+	ownerHome = resolvedTestPath(t, ownerHome)
+	for _, want := range []string{envRoot, workDir, taskTempDir} {
+		if !slices.Contains(policy.WritableRoots, want) {
+			t.Errorf("writable roots %v missing %q", policy.WritableRoots, want)
+		}
+	}
+	if !slices.Contains(policy.ReadOnlyRoots, bareRepo) {
+		t.Errorf("read-only roots %v missing exact repo %q", policy.ReadOnlyRoots, bareRepo)
+	}
+	if slices.Contains(policy.WritableRoots, filepath.Dir(bareRepo)) || slices.Contains(policy.ReadOnlyRoots, filepath.Dir(bareRepo)) {
+		t.Fatalf("policy exposed repo cache parent %q", filepath.Dir(bareRepo))
+	}
+	if !slices.Contains(policy.ReadOnlyRoots, providerRoot) {
+		t.Errorf("read-only roots %v missing provider package %q", policy.ReadOnlyRoots, providerRoot)
+	}
+	if !slices.Contains(policy.ReadOnlyRoots, filepath.Dir(nodeBin)) {
+		t.Errorf("read-only roots %v missing interpreter directory %q", policy.ReadOnlyRoots, filepath.Dir(nodeBin))
+	}
+	for _, rel := range []string{".multica", ".codex", ".config/opencode"} {
+		want := filepath.Join(ownerHome, rel)
+		if !slices.Contains(policy.ForbiddenRoots, want) {
+			t.Errorf("forbidden roots %v missing %q", policy.ForbiddenRoots, want)
+		}
+	}
+	if policy.Network != agent.NetworkAccessPublicAndLoopback {
+		t.Fatalf("network = %v, want public and loopback", policy.Network)
+	}
+	pathParts := filepath.SplitList(taskPath)
+	for _, want := range []string{filepath.Dir(nodeBin), filepath.Dir(providerBin)} {
+		if !slices.Contains(pathParts, want) {
+			t.Errorf("task PATH %v missing %q", pathParts, want)
+		}
+	}
+	if strings.Contains(taskPath, os.Getenv("PATH")) {
+		t.Fatalf("task PATH inherited daemon PATH verbatim: %q", taskPath)
+	}
+}
+
+func resolvedTestPath(t *testing.T, path string) string {
+	t.Helper()
+	resolved, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		t.Fatalf("resolve test path %q: %v", path, err)
+	}
+	return resolved
+}
+
+func TestBuildTaskIsolationPolicyRejectsOwnerConfigOverlap(t *testing.T) {
+	t.Parallel()
+
+	ownerHome := t.TempDir()
+	envRoot := filepath.Join(ownerHome, ".codex", "task")
+	if err := os.MkdirAll(envRoot, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	executable := filepath.Join(t.TempDir(), "agent")
+	if err := os.WriteFile(executable, []byte("binary"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	_, _, err := buildTaskIsolationPolicy(taskIsolationParams{
+		Environment:    &execenv.Environment{RootDir: envRoot, WorkDir: envRoot},
+		TaskTempDir:    envRoot,
+		Executable:     executable,
+		OwnerHome:      ownerHome,
+		SelfExecutable: executable,
+	})
+	if err == nil || !strings.Contains(err.Error(), "forbidden") {
+		t.Fatalf("buildTaskIsolationPolicy error = %v, want forbidden overlap", err)
+	}
+}
+
+func TestBuildTaskIsolationPolicySupportsAbsoluteShebang(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	interpreter := filepath.Join(root, "runtime", "shell")
+	provider := filepath.Join(root, "provider", "agent")
+	self := filepath.Join(root, "bin", "multica")
+	envRoot := filepath.Join(root, "env")
+	for _, dir := range []string{filepath.Dir(interpreter), filepath.Dir(provider), filepath.Dir(self), envRoot} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for path, body := range map[string]string{
+		interpreter: "runtime",
+		provider:    "#!" + interpreter + "\n",
+		self:        "multica",
+	} {
+		if err := os.WriteFile(path, []byte(body), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	policy, taskPath, err := buildTaskIsolationPolicy(taskIsolationParams{
+		Environment:    &execenv.Environment{RootDir: envRoot, WorkDir: envRoot},
+		TaskTempDir:    envRoot,
+		Executable:     provider,
+		OwnerHome:      filepath.Join(root, "owner"),
+		SelfExecutable: self,
+	})
+	if err != nil {
+		t.Fatalf("buildTaskIsolationPolicy: %v", err)
+	}
+	interpreterDir := filepath.Dir(resolvedTestPath(t, interpreter))
+	if !slices.Contains(policy.ReadOnlyRoots, interpreterDir) {
+		t.Fatalf("read-only roots %v missing direct interpreter %q", policy.ReadOnlyRoots, interpreterDir)
+	}
+	if !slices.Contains(filepath.SplitList(taskPath), interpreterDir) {
+		t.Fatalf("task PATH %q missing direct interpreter directory %q", taskPath, interpreterDir)
+	}
+}
+
+func TestBuildTaskIsolationPolicyRejectsMissingShebangRuntime(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	provider := filepath.Join(root, "provider")
+	self := filepath.Join(root, "multica")
+	envRoot := filepath.Join(root, "env")
+	if err := os.MkdirAll(envRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for path, body := range map[string]string{
+		provider: "#!/usr/bin/env missing-runtime\n",
+		self:     "multica",
+	} {
+		if err := os.WriteFile(path, []byte(body), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	_, _, err := buildTaskIsolationPolicy(taskIsolationParams{
+		Environment:    &execenv.Environment{RootDir: envRoot, WorkDir: envRoot},
+		TaskTempDir:    envRoot,
+		Executable:     provider,
+		OwnerHome:      filepath.Join(root, "owner"),
+		SelfExecutable: self,
+		LookupPath: func(string) (string, error) {
+			return "", exec.ErrNotFound
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "resolve shebang runtime") {
+		t.Fatalf("buildTaskIsolationPolicy error = %v, want missing runtime failure", err)
+	}
+}
+
+func TestExistingTaskExecutableResolvesSymlinkIdentity(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	target := filepath.Join(root, "runtime", "agent")
+	link := filepath.Join(root, "bin", "agent")
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(link), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(target, []byte("agent"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := existingTaskExecutable("provider executable", link)
+	if err != nil {
+		t.Fatalf("existingTaskExecutable: %v", err)
+	}
+	want := resolvedTestPath(t, target)
+	if got != want {
+		t.Fatalf("resolved executable = %q, want %q", got, want)
+	}
+}
+
+func TestNewTaskCommandBuilderFailsClosed(t *testing.T) {
+	t.Parallel()
+
+	for name, daemon := range map[string]*Daemon{
+		"missing factory": {},
+		"nil launcher": {taskLauncher: func() agent.CommandBuilder {
+			return nil
+		}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if launcher, err := daemon.newTaskCommandBuilder(); err == nil || launcher != nil {
+				t.Fatalf("newTaskCommandBuilder = (%T, %v), want nil error result", launcher, err)
+			}
+		})
 	}
 }
 

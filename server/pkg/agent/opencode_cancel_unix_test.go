@@ -4,7 +4,6 @@ package agent
 
 import (
 	"context"
-	"log/slog"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -68,11 +67,7 @@ func runOpencodeCancellationTest(t *testing.T, script string) {
 	fakePath := filepath.Join(tempDir, "opencode")
 	writeTestExecutable(t, fakePath, []byte(script))
 
-	backend, err := New("opencode", Config{
-		ExecutablePath: fakePath,
-		Logger:         slog.Default(),
-		Env:            map[string]string{"OPENCODE_PID_FILE": pidFile},
-	})
+	backend, err := New("opencode", opencodeTestConfig(t, fakePath, tempDir, map[string]string{"OPENCODE_PID_FILE": pidFile}))
 	if err != nil {
 		t.Fatalf("new opencode backend: %v", err)
 	}

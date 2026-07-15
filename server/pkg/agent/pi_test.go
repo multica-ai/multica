@@ -90,14 +90,19 @@ func TestPiExecuteAttachesStdinPipe(t *testing.T) {
 		"exit 1\n"
 	writeTestExecutable(t, fakePath, []byte(script))
 
-	backend, err := New("pi", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	cfg, cwd := providerCommandTestConfig(t, fakePath, slog.Default())
+	backend, err := New("pi", cfg)
 	if err != nil {
 		t.Fatalf("new pi backend: %v", err)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{Timeout: 5 * time.Second})
+	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{
+		Cwd:             cwd,
+		Timeout:         5 * time.Second,
+		ResumeSessionID: filepath.Join(cwd, "session.jsonl"),
+	})
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
@@ -156,14 +161,19 @@ func TestPiExecuteRetainsOnlyLastTurnOutput(t *testing.T) {
 	fakePath := filepath.Join(t.TempDir(), "pi")
 	writeTestExecutable(t, fakePath, []byte(piEventStreamScript(events)))
 
-	backend, err := New("pi", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	cfg, cwd := providerCommandTestConfig(t, fakePath, slog.Default())
+	backend, err := New("pi", cfg)
 	if err != nil {
 		t.Fatalf("new pi backend: %v", err)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{Timeout: 5 * time.Second})
+	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{
+		Cwd:             cwd,
+		Timeout:         5 * time.Second,
+		ResumeSessionID: filepath.Join(cwd, "session.jsonl"),
+	})
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}

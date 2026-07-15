@@ -152,12 +152,15 @@ type Result struct {
 type Config struct {
 	ExecutablePath string            // path to CLI binary (claude, codebuddy, codex, copilot, opencode, openclaw, hermes, pi, cursor, kimi, kiro-cli, agy, qodercli, traecli, grok)
 	CLIVersion     string            // detected version paired with ExecutablePath; observation only, never used to choose behavior
-	Env            map[string]string // extra environment variables
+	Env            map[string]string // complete task environment; the daemon environment is not inherited
 	Logger         *slog.Logger
 	TaskID         string
 	RuntimeID      string
 	DaemonVersion  string
 	CodexVersion   string
+	Launcher       CommandBuilder
+	Isolation      *TaskIsolationPolicy
+	TaskTempDir    string
 }
 
 // New creates a Backend for the given agent type.
@@ -210,7 +213,6 @@ func New(agentType string, cfg Config) (Backend, error) {
 	if cfg.Logger == nil {
 		cfg.Logger = slog.Default()
 	}
-
 	switch agentType {
 	case "claude":
 		return &claudeBackend{cfg: cfg}, nil

@@ -119,21 +119,15 @@ var (
 // workspaceState tracks registered runtimes for a single workspace.
 //
 // allowedRepoURLs covers the workspace-level repo bindings; it gets rebuilt on
-// every refresh from the server. taskRepoURLs covers repos that the server
-// surfaced through a per-task claim (project github_repo resources today,
-// possibly other typed sources later) — those don't show up in
-// GetWorkspaceRepos, so they would be wiped on refresh if we shared one map.
-// taskRepoRefs tracks optional checkout refs for the specific task that
-// surfaced each project repo so two projects using the same URL don't leak refs
-// into each other.
+// every refresh from the server. Task-assigned repos are deliberately excluded:
+// their authority is frozen into a daemon-issued checkout capability instead
+// of widening mutable workspace configuration.
 type workspaceState struct {
 	workspaceID     string
 	runtimeIDs      []string
 	reposVersion    string // stored for future use: skip refresh when version unchanged
 	allowedRepoURLs map[string]struct{}
-	taskRepoURLs    map[string]struct{}
-	taskRepoRefs    map[string]map[string]string // taskID -> repo URL -> checkout ref
-	settings        json.RawMessage              // workspace settings (JSONB)
+	settings        json.RawMessage // workspace settings (JSONB)
 	lastRepoSyncErr string
 	repoRefreshMu   sync.Mutex
 	// profileSetSig is a content hash of the workspace's custom runtime
@@ -147,10 +141,27 @@ type workspaceState struct {
 }
 
 type repoCacheBackend interface {
-	Lookup(workspaceID, url string) string
-	Sync(workspaceID string, repos []repocache.RepoInfo) error
+	LookupContext(ctx context.Context, workspaceID, url string) string
+	ResolveContext(ctx context.Context, workspaceID, url string) (repocache.ResolvedRepo, error)
+	SyncContext(ctx context.Context, workspaceID string, repos []repocache.RepoInfo) error
 	WithRepoLock(barePath string, fn func() error) error
-	CreateWorktree(params repocache.WorktreeParams) (*repocache.WorktreeResult, error)
+	CreateWorktreeContext(ctx context.Context, params repocache.WorktreeParams) (*repocache.WorktreeResult, error)
+}
+
+type resolvedTaskRepo struct {
+	URL      string
+	Ref      string
+	BarePath string
+}
+
+type taskIsolationParams struct {
+	Environment    *execenv.Environment
+	TaskTempDir    string
+	Repos          []resolvedTaskRepo
+	Executable     string
+	OwnerHome      string
+	SelfExecutable string
+	LookupPath     func(string) (string, error)
 }
 
 // Daemon is the local agent runtime that polls for and executes tasks.
@@ -160,6 +171,9 @@ type Daemon struct {
 	repoCache  repoCacheBackend
 	skillCache *SkillBundleCache
 	logger     *slog.Logger
+	// taskLauncher is initialized by New. Tests that construct Daemon directly
+	// must opt into an explicit launcher; a missing factory fails closed.
+	taskLauncher func() agent.CommandBuilder
 
 	mu           sync.Mutex
 	workspaces   map[string]*workspaceState
@@ -268,12 +282,11 @@ type Daemon struct {
 	// waits. See MUL-2663.
 	localPathLocks *LocalPathLocker
 
-	// bgSyncs tracks background goroutines started by registerTaskRepos so
-	// callers (notably tests using t.TempDir-backed cache roots) can wait for
-	// them to drain before tearing the daemon down. Without this the bg
-	// goroutine can race against t.TempDir cleanup, leaving a partially
-	// deleted bare clone and an unrelated `not empty` cleanup failure.
-	bgSyncs sync.WaitGroup
+	// repoCheckoutCapabilities are daemon-issued, task-bound permissions for
+	// the local checkout endpoint. The child receives only the opaque token;
+	// workspace, task, workdir, agent, repo, and ref stay daemon-controlled.
+	repoCheckoutCapabilityMu sync.RWMutex
+	repoCheckoutCapabilities map[string]*repoCheckoutCapability
 
 	runner             taskRunner    // executes agent tasks; set to d.runTask by New(), overridable in tests
 	cancelPollInterval time.Duration // how often handleTask polls for server-side cancellation; overridable in tests
@@ -317,10 +330,14 @@ func New(cfg Config, logger *slog.Logger) *Daemon {
 		runtimeGoneInflight:       make(map[string]struct{}),
 		reregisterNextAttempt:     make(map[string]time.Time),
 		reregisterLastCompletedAt: make(map[string]time.Time),
+		repoCheckoutCapabilities:  make(map[string]*repoCheckoutCapability),
 		cancelPollInterval:        5 * time.Second,
 		reconcile:                 newReconcileBroadcaster(),
 		workspaceChanges:          newWorkspaceChangeSignal(),
 		wsRPC:                     newWSRPCClient(wsRPCResponseGrace),
+		taskLauncher: func() agent.CommandBuilder {
+			return agent.NewCommandLauncher()
+		},
 	}
 	d.activeCodexStoresCond = sync.NewCond(&d.activeCodexStoresMu)
 	d.runner = taskRunnerFunc(d.runTask)
@@ -1404,9 +1421,6 @@ func (d *Daemon) workspaceRepoAllowed(workspaceID, repoURL string) bool {
 	if _, allowed := ws.allowedRepoURLs[repoURL]; allowed {
 		return true
 	}
-	if _, allowed := ws.taskRepoURLs[repoURL]; allowed {
-		return true
-	}
 	return false
 }
 
@@ -1451,124 +1465,57 @@ func (d *Daemon) workspaceCoAuthoredByEnabled(workspaceID string) bool {
 	return *s.CoAuthoredByEnabled
 }
 
-// registerTaskRepos merges task-scoped repos (e.g. project github_repo
-// resources lifted into resp.Repos by the claim handler) into the workspace's
-// allowlist and kicks off a cache sync for any URLs that aren't yet cached.
-//
-// It's safe to call with the workspace's own repos — duplicates are
-// idempotent. Called from runTask before the agent spawns so
-// `multica repo checkout` accepts project-only URLs without an extra round
-// trip back to GetWorkspaceRepos (which doesn't carry project resources).
-func (d *Daemon) registerTaskRepos(workspaceID, taskID string, repos []RepoData) {
+// prepareTaskRepoCache synchronously materializes the immutable repo snapshot
+// assigned to a task. It never changes workspace authorization and never reads
+// live workspace/project/repo management state.
+func (d *Daemon) prepareTaskRepoCache(ctx context.Context, workspaceID string, repos []RepoData) ([]resolvedTaskRepo, error) {
+	workspaceID = strings.TrimSpace(workspaceID)
+	if workspaceID == "" {
+		return nil, fmt.Errorf("prepare task repo cache: workspace id is required")
+	}
 	if len(repos) == 0 {
-		return
+		return nil, nil
+	}
+	if d.repoCache == nil {
+		return nil, fmt.Errorf("prepare task repo cache: repo cache not initialized")
 	}
 
-	type repoCandidate struct {
-		url     string
-		tracked bool
-	}
-
-	d.mu.Lock()
-	ws, ok := d.workspaces[workspaceID]
-	if !ok {
-		d.mu.Unlock()
-		return
-	}
-	if ws.taskRepoURLs == nil {
-		ws.taskRepoURLs = make(map[string]struct{}, len(repos))
-	}
-	if taskID != "" && ws.taskRepoRefs == nil {
-		ws.taskRepoRefs = make(map[string]map[string]string)
-	}
-	candidates := make([]repoCandidate, 0, len(repos))
+	seen := make(map[string]string, len(repos))
+	normalized := make([]RepoData, 0, len(repos))
 	for _, repo := range repos {
 		url := strings.TrimSpace(repo.URL)
+		ref := strings.TrimSpace(repo.Ref)
 		if url == "" {
+			return nil, fmt.Errorf("prepare task repo cache: empty repo URL")
+		}
+		if existing, ok := seen[url]; ok {
+			if existing != ref {
+				return nil, fmt.Errorf("prepare task repo cache: conflicting refs for %s", url)
+			}
 			continue
 		}
-		// Don't re-sync if the URL is already tracked (workspace or task-scoped)
-		// AND the cache already has it.
-		_, inWorkspace := ws.allowedRepoURLs[url]
-		_, inTask := ws.taskRepoURLs[url]
-		ws.taskRepoURLs[url] = struct{}{}
-		if taskID != "" {
-			if ws.taskRepoRefs[taskID] == nil {
-				ws.taskRepoRefs[taskID] = make(map[string]string, len(repos))
-			}
-			if _, exists := ws.taskRepoRefs[taskID][url]; !exists {
-				ws.taskRepoRefs[taskID][url] = strings.TrimSpace(repo.Ref)
-			}
+		seen[url] = ref
+		normalized = append(normalized, RepoData{URL: url, Ref: ref})
+	}
+	if err := d.repoCache.SyncContext(ctx, workspaceID, repoDataToInfo(normalized)); err != nil {
+		return nil, fmt.Errorf("prepare task repo cache: %w", err)
+	}
+	resolved := make([]resolvedTaskRepo, 0, len(normalized))
+	for _, repo := range normalized {
+		identity, err := d.repoCache.ResolveContext(ctx, workspaceID, repo.URL)
+		if err != nil {
+			return nil, fmt.Errorf("prepare task repo cache: resolve %s: %w", repo.URL, err)
 		}
-		candidates = append(candidates, repoCandidate{
-			url:     url,
-			tracked: inWorkspace || inTask,
-		})
+		resolved = append(resolved, resolvedTaskRepo{URL: identity.URL, Ref: repo.Ref, BarePath: identity.BarePath})
 	}
-	d.mu.Unlock()
-
-	toSync := make([]RepoData, 0, len(candidates))
-	for _, candidate := range candidates {
-		if candidate.tracked && d.repoCache != nil && d.repoCache.Lookup(workspaceID, candidate.url) != "" {
-			continue
-		}
-		toSync = append(toSync, RepoData{URL: candidate.url})
-	}
-
-	if d.repoCache != nil && len(toSync) > 0 {
-		// Sync in the background — same shape used at workspace registration.
-		// `ensureRepoReady` reports a meaningful error if the cache isn't ready
-		// yet, so the agent's first checkout will surface a sync failure
-		// without silently treating it as a config bug.
-		d.bgSyncs.Add(1)
-		go func() {
-			defer d.bgSyncs.Done()
-			d.syncWorkspaceRepos(workspaceID, toSync)
-		}()
-	}
+	return resolved, nil
 }
 
-func (d *Daemon) taskRepoDefaultRef(workspaceID, taskID, repoURL string) string {
-	taskID = strings.TrimSpace(taskID)
-	repoURL = strings.TrimSpace(repoURL)
-	if taskID == "" || repoURL == "" {
-		return ""
-	}
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	ws, ok := d.workspaces[workspaceID]
-	if !ok || ws.taskRepoRefs == nil {
-		return ""
-	}
-	return strings.TrimSpace(ws.taskRepoRefs[taskID][repoURL])
-}
-
-func (d *Daemon) clearTaskRepoRefs(workspaceID, taskID string) {
-	taskID = strings.TrimSpace(taskID)
-	if taskID == "" {
-		return
-	}
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	if ws, ok := d.workspaces[workspaceID]; ok && ws.taskRepoRefs != nil {
-		delete(ws.taskRepoRefs, taskID)
-	}
-}
-
-// waitBackgroundSyncs blocks until every background sync started by
-// registerTaskRepos has finished. Intended for test teardown: tests that
-// hand the daemon a t.TempDir-backed repo cache must call this before
-// returning, otherwise an in-flight clone/fetch can race against TempDir
-// cleanup and surface as an unrelated "directory not empty" failure.
-func (d *Daemon) waitBackgroundSyncs() {
-	d.bgSyncs.Wait()
-}
-
-func (d *Daemon) syncWorkspaceRepos(workspaceID string, repos []RepoData) {
+func (d *Daemon) syncWorkspaceRepos(ctx context.Context, workspaceID string, repos []RepoData) {
 	if d.repoCache == nil {
 		return
 	}
-	if err := d.repoCache.Sync(workspaceID, repoDataToInfo(repos)); err != nil {
+	if err := d.repoCache.SyncContext(ctx, workspaceID, repoDataToInfo(repos)); err != nil {
 		d.setWorkspaceRepoSyncError(workspaceID, err.Error())
 		d.logger.Warn("repo cache sync failed", "workspace_id", workspaceID, "error", err)
 		return
@@ -1782,12 +1729,12 @@ func (d *Daemon) ensureRepoReady(ctx context.Context, workspaceID, repoURL strin
 	//     a sibling goroutine on a concurrent cold-miss already refreshed
 	//     and populated the cache. We can skip the duplicate refresh — the
 	//     sibling's refresh is fresh enough for our gate read.
-	cacheHitOnEntry := d.workspaceRepoAllowed(workspaceID, repoURL) && d.repoCache.Lookup(workspaceID, repoURL) != ""
+	cacheHitOnEntry := d.workspaceRepoAllowed(workspaceID, repoURL) && d.repoCache.LookupContext(ctx, workspaceID, repoURL) != ""
 
 	ws.repoRefreshMu.Lock()
 	defer ws.repoRefreshMu.Unlock()
 
-	if !cacheHitOnEntry && d.workspaceRepoAllowed(workspaceID, repoURL) && d.repoCache.Lookup(workspaceID, repoURL) != "" {
+	if !cacheHitOnEntry && d.workspaceRepoAllowed(workspaceID, repoURL) && d.repoCache.LookupContext(ctx, workspaceID, repoURL) != "" {
 		return nil
 	}
 
@@ -1800,13 +1747,13 @@ func (d *Daemon) ensureRepoReady(ctx context.Context, workspaceID, repoURL strin
 		return ErrRepoNotConfigured
 	}
 
-	if d.repoCache.Lookup(workspaceID, repoURL) != "" {
+	if d.repoCache.LookupContext(ctx, workspaceID, repoURL) != "" {
 		return nil
 	}
 
-	d.syncWorkspaceRepos(workspaceID, resp.Repos)
+	d.syncWorkspaceRepos(ctx, workspaceID, resp.Repos)
 
-	if d.repoCache.Lookup(workspaceID, repoURL) != "" {
+	if d.repoCache.LookupContext(ctx, workspaceID, repoURL) != "" {
 		return nil
 	}
 
@@ -2069,7 +2016,7 @@ func (d *Daemon) syncWorkspacesFromAPI(ctx context.Context, reconcileProfiles bo
 		d.mu.Unlock()
 
 		if d.repoCache != nil && len(resp.Repos) > 0 {
-			go d.syncWorkspaceRepos(id, resp.Repos)
+			go d.syncWorkspaceRepos(ctx, id, resp.Repos)
 		}
 
 		// Tell the server about any tasks the previous daemon process was
@@ -3734,15 +3681,6 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		return TaskResult{}, fmt.Errorf("refusing to spawn agent: task has no workspace_id (task_id=%s)", task.ID)
 	}
 
-	// task.Repos is the authoritative repo list for this task — when the
-	// claimed task belongs to a project with github_repo resources the server
-	// has already narrowed it to project repos only. Make sure those URLs are
-	// in the per-workspace allowlist and the local cache, otherwise
-	// `multica repo checkout` would reject project-only URLs that aren't also
-	// bound at the workspace level.
-	d.registerTaskRepos(task.WorkspaceID, task.ID, task.Repos)
-	defer d.clearTaskRepoRefs(task.WorkspaceID, task.ID)
-
 	entry, ok := d.cfg.Agents[provider]
 	// A custom runtime profile (MUL-3284) overrides the executable path: the
 	// runtime's protocol_family is the provider (so agent.New still selects
@@ -4086,6 +4024,29 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		taskLog.Error("task auth token invalid; refusing to start agent", "error", err)
 		return TaskResult{}, err
 	}
+	var resolvedTaskRepos []resolvedTaskRepo
+	repoCheckoutToken := ""
+	if len(task.Repos) > 0 {
+		if localAssignment != nil {
+			return TaskResult{}, fmt.Errorf("local_directory tasks cannot request additional repo checkout")
+		}
+		resolvedTaskRepos, err = d.prepareTaskRepoCache(ctx, task.WorkspaceID, task.Repos)
+		if err != nil {
+			return TaskResult{}, err
+		}
+		repoCheckoutToken, err = d.registerRepoCheckoutCapability(repoCheckoutCapabilityParams{
+			WorkspaceID:         task.WorkspaceID,
+			TaskID:              task.ID,
+			WorkDir:             env.WorkDir,
+			AgentName:           agentName,
+			Repos:               task.Repos,
+			CoAuthoredByEnabled: d.workspaceCoAuthoredByEnabled(task.WorkspaceID),
+		})
+		if err != nil {
+			return TaskResult{}, fmt.Errorf("register repo checkout capability: %w", err)
+		}
+		defer d.revokeRepoCheckoutCapability(repoCheckoutToken)
+	}
 	agentEnv := map[string]string{
 		"MULTICA_TOKEN":        agentToken,
 		"MULTICA_SERVER_URL":   d.cfg.ServerBaseURL,
@@ -4098,6 +4059,51 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		"TMPDIR":               taskTempDir,
 		"TMP":                  taskTempDir,
 		"TEMP":                 taskTempDir,
+		// Isolate user-level CLI configuration from the daemon owner's home.
+		// In particular, clearing MULTICA_* must not make the child discover
+		// the owner's ~/.multica/config.json and regain human PAT/JWT authority.
+		"HOME":            env.HomeDir,
+		"XDG_CONFIG_HOME": env.ConfigDir,
+		"USERPROFILE":     env.HomeDir,
+		"APPDATA":         filepath.Join(env.HomeDir, "AppData", "Roaming"),
+		"LOCALAPPDATA":    filepath.Join(env.HomeDir, "AppData", "Local"),
+	}
+	ownerHome, err := os.UserHomeDir()
+	if err != nil {
+		return TaskResult{}, fmt.Errorf("resolve daemon owner home: %w", err)
+	}
+	selfExecutable, err := os.Executable()
+	if err != nil {
+		return TaskResult{}, fmt.Errorf("resolve multica executable: %w", err)
+	}
+	isolationPolicy, taskPath, err := buildTaskIsolationPolicy(taskIsolationParams{
+		Environment:    env,
+		TaskTempDir:    taskTempDir,
+		Repos:          resolvedTaskRepos,
+		Executable:     entry.Path,
+		OwnerHome:      ownerHome,
+		SelfExecutable: selfExecutable,
+		LookupPath:     exec.LookPath,
+	})
+	if err != nil {
+		return TaskResult{}, fmt.Errorf("build task isolation policy: %w", err)
+	}
+	taskExecutable, err := existingTaskExecutable("provider executable", entry.Path)
+	if err != nil {
+		return TaskResult{}, err
+	}
+	agentEnv["PATH"] = taskPath
+	if repoCheckoutToken != "" {
+		agentEnv["MULTICA_REPO_CHECKOUT_TOKEN"] = repoCheckoutToken
+	}
+	if volume := filepath.VolumeName(env.HomeDir); volume != "" {
+		agentEnv["HOMEDRIVE"] = volume
+		agentEnv["HOMEPATH"] = strings.TrimPrefix(env.HomeDir, volume)
+	} else {
+		// Override any inherited Windows locators even on compatibility layers
+		// where filepath.VolumeName cannot derive a native drive.
+		agentEnv["HOMEDRIVE"] = ""
+		agentEnv["HOMEPATH"] = env.HomeDir
 	}
 	if task.AutopilotRunID != "" {
 		agentEnv["MULTICA_AUTOPILOT_RUN_ID"] = task.AutopilotRunID
@@ -4118,14 +4124,6 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 				taskLog.Warn("quick-create attachment ids: marshal failed; skipping env injection", "error", err)
 			}
 		}
-	}
-	// Ensure the multica CLI is on PATH inside the agent's environment.
-	// Some runtimes (e.g. Codex) run in an isolated sandbox that may not
-	// inherit the daemon's PATH. Prepend the directory of the running
-	// multica binary so that `multica` commands in the agent always resolve.
-	if selfBin, err := resolveSelfExecutable(); err == nil {
-		binDir := filepath.Dir(selfBin)
-		agentEnv["PATH"] = binDir + string(os.PathListSeparator) + os.Getenv("PATH")
 	}
 	// Point Codex to the per-task CODEX_HOME so it discovers skills natively
 	// without polluting the system ~/.codex/skills/.
@@ -4162,14 +4160,6 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	if env.OpenclawConfigPath != "" {
 		agentEnv["OPENCLAW_CONFIG_PATH"] = env.OpenclawConfigPath
 	}
-	// Grant the wrapper config permission to $include the user's active
-	// config across directories. OpenClaw's $include defaults to confining
-	// resolution to the wrapper's own directory; without this, the
-	// wrapper-out-of-envRoot $include into ~/.openclaw/openclaw.json is
-	// rejected and the run boots with no user-registered agents.
-	if rootsValue, ok := composeOpenclawIncludeRoots(env.OpenclawIncludeRoot, os.Getenv("OPENCLAW_INCLUDE_ROOTS")); ok {
-		agentEnv["OPENCLAW_INCLUDE_ROOTS"] = rootsValue
-	}
 	// Inject user-configured custom environment variables (e.g. ANTHROPIC_API_KEY,
 	// ANTHROPIC_BASE_URL for router/proxy mode, or CLAUDE_CODE_USE_BEDROCK for
 	// Bedrock). These are set per-agent via the agent settings UI.
@@ -4180,8 +4170,12 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		agentCustomEnv = task.Agent.CustomEnv
 	}
 	layerCustomEnvAndHermesHome(agentEnv, agentCustomEnv, env.HermesHome, d.logger)
+	launcher, err := d.newTaskCommandBuilder()
+	if err != nil {
+		return TaskResult{}, err
+	}
 	backend, err := agent.New(provider, agent.Config{
-		ExecutablePath: entry.Path,
+		ExecutablePath: taskExecutable,
 		CLIVersion:     resolvedVersion,
 		Env:            agentEnv,
 		Logger:         d.logger,
@@ -4189,6 +4183,9 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		RuntimeID:      task.RuntimeID,
 		DaemonVersion:  d.cfg.CLIVersion,
 		CodexVersion:   codexVersion,
+		Launcher:       launcher,
+		Isolation:      &isolationPolicy,
+		TaskTempDir:    taskTempDir,
 	})
 	if err != nil {
 		return TaskResult{}, fmt.Errorf("create agent backend: %w", err)
@@ -4239,26 +4236,32 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	if task.Agent != nil {
 		thinkingLevel = task.Agent.ThinkingLevel
 	}
-	// Per-model guard: the server validates the literal token against the
-	// provider's enum, but per-model gaps (Claude's `xhigh` on a non-Opus
-	// model, Codex's per-model `supported_reasoning_levels`) only resolve
-	// here, against the daemon's local CLI catalog. Invalid combinations
-	// log a warning and drop the level rather than failing the task, so a
-	// stale persisted value never blocks execution. An empty model is
-	// resolved by ValidateThinkingLevel to the provider's default model so
-	// default-model tasks aren't misjudged — except for codex, whose empty
-	// model follows config.toml (any model) and so fails closed, dropping the
-	// level here. Discovery errors fail open for resolved models: if we can't
-	// list models, we keep the persisted level and let the CLI object.
+	// Per-model gaps are resolved through the same executable, launcher,
+	// task environment, cwd, and isolation policy used for execution. Any
+	// discovery failure drops the persisted level: task code must never gain
+	// daemon process authority through model discovery.
 	if thinkingLevel != "" {
-		ok, err := agent.ValidateThinkingLevel(ctx, provider, entry.Path, model, thinkingLevel)
+		ok, err := agent.ValidateThinkingLevelForTask(
+			ctx,
+			provider,
+			taskExecutable,
+			model,
+			thinkingLevel,
+			agent.TaskModelDiscovery{Execution: &agent.ModelDiscoveryExecution{
+				Launcher:  launcher,
+				Cwd:       env.WorkDir,
+				Env:       agentEnv,
+				Isolation: &isolationPolicy,
+			}},
+		)
 		if err != nil {
-			taskLog.Warn("thinking_level: catalog lookup failed; passing through",
+			taskLog.Warn("thinking_level: task-scoped catalog lookup failed; skipping injection",
 				"provider", provider,
 				"model", model,
 				"thinking_level", thinkingLevel,
 				"error", err,
 			)
+			thinkingLevel = ""
 		} else if !ok {
 			taskLog.Warn("thinking_level: not valid for this (provider, model); skipping injection",
 				"provider", provider,
@@ -4535,6 +4538,17 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			FailureReason: failureReason,
 		}, nil
 	}
+}
+
+func (d *Daemon) newTaskCommandBuilder() (agent.CommandBuilder, error) {
+	if d.taskLauncher == nil {
+		return nil, fmt.Errorf("task command launcher factory is unavailable")
+	}
+	launcher := d.taskLauncher()
+	if launcher == nil {
+		return nil, fmt.Errorf("task command launcher factory returned nil")
+	}
+	return launcher, nil
 }
 
 // executeAndDrain runs a backend, drains its message stream (forwarding to the
@@ -5127,40 +5141,6 @@ func convertSkillsForEnv(skills []SkillData) []execenv.SkillContextForEnv {
 	return result
 }
 
-// composeOpenclawIncludeRoots returns the value the daemon should set for
-// OPENCLAW_INCLUDE_ROOTS on the child openclaw process so its `$include`
-// loader will follow the wrapper's reference out of envRoot into the
-// user's active config directory.
-//
-// addRoot is the directory we must grant (typically dirname of the user's
-// active openclaw.json). userValue is whatever the daemon's own
-// environment already has under OPENCLAW_INCLUDE_ROOTS — the user's own
-// cross-directory layout. We prepend addRoot, dedupe by string equality,
-// drop empty path segments, and return ok=false when there's nothing to
-// grant (addRoot is empty — fresh install case), so callers can leave the
-// env var alone in that case.
-//
-// Path separator is the OS-native list separator (`:` on Unix, `;` on
-// Windows) to match how OpenClaw splits the env var.
-func composeOpenclawIncludeRoots(addRoot, userValue string) (string, bool) {
-	if addRoot == "" {
-		return "", false
-	}
-	parts := []string{addRoot}
-	seen := map[string]struct{}{addRoot: {}}
-	for _, p := range strings.Split(userValue, string(os.PathListSeparator)) {
-		if p == "" {
-			continue
-		}
-		if _, dup := seen[p]; dup {
-			continue
-		}
-		seen[p] = struct{}{}
-		parts = append(parts, p)
-	}
-	return strings.Join(parts, string(os.PathListSeparator)), true
-}
-
 func ensureTaskTempDir(envRoot string, workspaceID string, taskID string) (string, error) {
 	envRoot = strings.TrimSpace(envRoot)
 	if envRoot == "" {
@@ -5202,7 +5182,7 @@ func isBlockedEnvKey(key string) bool {
 		return true
 	}
 	switch upper {
-	case "HOME", "PATH", "USER", "SHELL", "TERM", "TMPDIR", "TMP", "TEMP", "CODEX_HOME", "CURSOR_DATA_DIR", execenv.CursorMcpAuthSourceEnv, "OPENCLAW_CONFIG_PATH", "OPENCLAW_INCLUDE_ROOTS":
+	case "HOME", "XDG_CONFIG_HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA", "HOMEDRIVE", "HOMEPATH", "PATH", "USER", "SHELL", "TERM", "TMPDIR", "TMP", "TEMP", "CODEX_HOME", "CURSOR_DATA_DIR", execenv.CursorMcpAuthSourceEnv, "OPENCLAW_CONFIG_PATH", "OPENCLAW_INCLUDE_ROOTS":
 		return true
 	}
 	return false
