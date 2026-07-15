@@ -145,8 +145,15 @@ export type LandingDict = {
       macIntel: {
         title: string;
         sub: string;
-        disabledCta: string;
-        intelHint: string;
+        primary: string;
+        altZip: string;
+      };
+      macUnknown: {
+        title: string;
+        sub: string;
+        armPrimary: string;
+        intelPrimary: string;
+        hint: string;
       };
       winX64: { title: string; sub: string; primary: string };
       winArm64: { title: string; sub: string; primary: string };
@@ -157,12 +164,12 @@ export type LandingDict = {
         altFormats: string;
       };
       unknown: { title: string; sub: string };
-      safariMacHint: string;
       archFallbackHint: string;
     };
     allPlatforms: {
       title: string;
-      macLabel: string;
+      macArm64Label: string;
+      macX64Label: string;
       winX64Label: string;
       winArm64Label: string;
       linuxX64Label: string;
@@ -173,7 +180,7 @@ export type LandingDict = {
       formatAppImage: string;
       formatDeb: string;
       formatRpm: string;
-      intelNote: string;
+      macMinimumVersionNote: string;
       unavailable: string;
     };
     cli: {

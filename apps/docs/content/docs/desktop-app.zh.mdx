@@ -40,10 +40,10 @@ Desktop 启动时会去 GitHub Releases 检查新版本。检查到新版本：
 整个过程**不中断你正在做的事**。
 
 <Callout type="warning">
-**Windows 的 ARM64 和 x64 是独立的更新通道**——装错架构会识别不到更新。安装时下载对应你机器架构的那个 `.exe`（带 `arm64` 后缀的是 ARM 版）。
+**macOS 和 Windows 的不同 CPU 架构使用独立更新通道**——请安装与你的电脑匹配的版本，之后的自动更新会保持同一架构。M 系列 Mac 使用 Apple Silicon（`arm64`），旧款 Intel Mac 使用 `x64`。
 </Callout>
 
-macOS 版本已经签名 + 公证，第一次打开不会有"未知开发者"的警告。Linux 版是 `.AppImage`——自动更新机制依赖 electron-updater，在某些发行版可能不稳定，**不工作时手动下载新版本覆盖**。
+macOS 版本最低需要 macOS 12 Monterey，并且已经签名 + 公证，第一次打开不会有"未知开发者"的警告。Linux 版是 `.AppImage`——自动更新机制依赖 electron-updater，在某些发行版可能不稳定，**不工作时手动下载新版本覆盖**。
 
 ## 还要单独装 CLI 和守护进程吗
 
@@ -59,7 +59,8 @@ macOS 版本已经签名 + 公证，第一次打开不会有"未知开发者"的
 
 | 平台 | 文件 |
 |---|---|
-| macOS（Intel 或 Apple Silicon）| `.dmg` |
+| macOS Apple Silicon（M 系列）| `.dmg`（带 `arm64` 后缀）|
+| macOS Intel | `.dmg`（带 `x64` 后缀）|
 | Windows x64 | `.exe`（常规）|
 | Windows ARM64 | `.exe`（带 `arm64` 后缀）|
 | Linux | `.AppImage` |

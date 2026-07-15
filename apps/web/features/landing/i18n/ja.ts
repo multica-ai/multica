@@ -1730,16 +1730,22 @@ export function createJaDict(allowSignup: boolean): LandingDict {
       hero: {
         macArm64: {
           title: "macOS 版 Multica",
-          sub: "Apple Silicon · デーモン同梱、設定不要",
+          sub: "Apple Silicon · macOS 12 以降 · デーモン同梱、設定不要",
           primary: "ダウンロード(.dmg)",
           altZip: "または .zip をダウンロード",
         },
         macIntel: {
           title: "macOS 版 Multica",
-          sub: "Apple Silicon が必要です。Intel Mac はまだ対応していません。",
-          disabledCta: "Apple Silicon が必要",
-          intelHint:
-            "Intel Mac をお使いですか? 下の CLI をご利用ください。同じデーモンが動きます。",
+          sub: "Intel · macOS 12 以降 · デーモン同梱、設定不要",
+          primary: "ダウンロード(.dmg)",
+          altZip: "または .zip をダウンロード",
+        },
+        macUnknown: {
+          title: "Mac のビルドを選択",
+          sub: "M シリーズ Mac は Apple Silicon、旧型の Intel Mac は x64 を選択してください。",
+          armPrimary: "Apple Silicon 版をダウンロード",
+          intelPrimary: "Intel 版をダウンロード",
+          hint: "どちらも macOS 12 Monterey 以降が必要です。",
         },
         winX64: {
           title: "Windows 版 Multica",
@@ -1761,12 +1767,12 @@ export function createJaDict(allowSignup: boolean): LandingDict {
           title: "プラットフォームを選択",
           sub: "すべてのインストーラーは下にまとまっています。",
         },
-        safariMacHint: "Intel Mac をお使いですか? 下の CLI をご利用ください。",
         archFallbackHint: "アーキテクチャが合いませんか? 下ですべての形式を確認してください。",
       },
       allPlatforms: {
         title: "すべてのプラットフォーム",
-        macLabel: "macOS · Apple Silicon",
+        macArm64Label: "macOS · Apple Silicon",
+        macX64Label: "macOS · Intel",
         winX64Label: "Windows · x64",
         winArm64Label: "Windows · ARM64",
         linuxX64Label: "Linux · x64",
@@ -1777,8 +1783,8 @@ export function createJaDict(allowSignup: boolean): LandingDict {
         formatAppImage: ".AppImage",
         formatDeb: ".deb",
         formatRpm: ".rpm",
-        intelNote:
-          "Apple Silicon のみ対応です。このリリースでは Intel Mac には対応していません。",
+        macMinimumVersionNote:
+          "どちらの Mac ビルドも macOS 12 Monterey 以降が必要です。",
         unavailable: "利用できません",
       },
       cli: {

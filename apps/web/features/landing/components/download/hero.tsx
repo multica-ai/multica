@@ -82,7 +82,7 @@ export function DownloadHero({
 // Content resolver — maps (detect, assets) → CTA props
 // ------------------------------------------------------------
 
-interface HeroContent {
+export interface HeroContent {
   title: string;
   sub: string;
   primary?: {
@@ -94,9 +94,9 @@ interface HeroContent {
   hint?: string;
 }
 
-type HeroDict = ReturnType<typeof useLocale>["t"]["download"]["hero"];
+export type HeroDict = ReturnType<typeof useLocale>["t"]["download"]["hero"];
 
-function resolveContent(
+export function resolveContent(
   detected: DetectResult | null,
   assets: DownloadAssets,
   versionUnavailable: boolean,
@@ -109,42 +109,57 @@ function resolveContent(
   }
 
   if (detected.os === "mac") {
-    // Only Chromium high-entropy returns arch confidently. Safari
-    // always reports Intel even on Apple Silicon, so we treat
-    // "non-confident" as arm64 + add a small Intel disclaimer.
-    if (detected.arch === "x64" && detected.archConfident) {
+    // Safari cannot distinguish Apple Silicon from Intel. When architecture
+    // detection is not trustworthy, present both DMGs instead of silently
+    // handing an Intel user the Apple Silicon build (or vice versa).
+    if (!detected.archConfident) {
+      const armDmg = assets.macArm64Dmg;
+      const intelDmg = assets.macX64Dmg;
       return {
-        title: d.macIntel.title,
-        sub: d.macIntel.sub,
-        primary: {
-          href: "#cli",
-          label: d.macIntel.disabledCta,
-          disabled: true,
-        },
-        hint: d.macIntel.intelHint,
+        title: d.macUnknown.title,
+        sub: d.macUnknown.sub,
+        primary: armDmg
+          ? {
+              href: armDmg,
+              label: d.macUnknown.armPrimary,
+              disabled: false,
+            }
+          : versionUnavailable
+            ? {
+                href: "#",
+                label: d.macUnknown.armPrimary,
+                disabled: true,
+              }
+            : undefined,
+        alt: intelDmg
+          ? { href: intelDmg, label: d.macUnknown.intelPrimary }
+          : undefined,
+        hint: d.macUnknown.hint,
       };
     }
-    const dmg = assets.macArm64Dmg;
-    const zip = assets.macArm64Zip;
+
+    const isIntel = detected.arch === "x64";
+    const copy = isIntel ? d.macIntel : d.macArm64;
+    const dmg = isIntel ? assets.macX64Dmg : assets.macArm64Dmg;
+    const zip = isIntel ? assets.macX64Zip : assets.macArm64Zip;
     return {
-      title: d.macArm64.title,
-      sub: d.macArm64.sub,
+      title: copy.title,
+      sub: copy.sub,
       primary: dmg
         ? {
             href: dmg,
-            label: d.macArm64.primary,
+            label: copy.primary,
             disabled: false,
           }
         : versionUnavailable
-          ? { href: "#", label: d.macArm64.primary, disabled: true }
+          ? { href: "#", label: copy.primary, disabled: true }
           : undefined,
       alt: zip
         ? {
             href: zip,
-            label: d.macArm64.altZip,
+            label: copy.altZip,
           }
         : undefined,
-      hint: detected.archConfident ? undefined : d.safariMacHint,
     };
   }
 

@@ -26,6 +26,7 @@ vi.mock("electron-updater", () => {
     autoDownload: false,
     autoInstallOnAppQuit: false,
     channel: undefined as string | undefined,
+    allowDowngrade: false,
     on: vi.fn((event: string, handler: Handler) => {
       const handlers = ctx.handlers.get(event) ?? [];
       handlers.push(handler);
@@ -50,8 +51,35 @@ vi.mock("electron", () => ({
   },
 }));
 
-import { setupAutoUpdater } from "./updater";
+import {
+  configureArchitectureUpdateChannel,
+  setupAutoUpdater,
+  updateChannelForArchitecture,
+} from "./updater";
 import { updaterPreferencesPath } from "./updater-preferences";
+
+describe("architecture update channels", () => {
+  it("keeps established default feeds and isolates additional architectures", () => {
+    expect(updateChannelForArchitecture("darwin", "arm64")).toBeNull();
+    expect(updateChannelForArchitecture("darwin", "x64")).toBe("latest-x64");
+    expect(updateChannelForArchitecture("win32", "x64")).toBeNull();
+    expect(updateChannelForArchitecture("win32", "arm64")).toBe(
+      "latest-arm64",
+    );
+    expect(updateChannelForArchitecture("linux", "arm64")).toBeNull();
+  });
+
+  it("does not enable downgrades when selecting an architecture feed", () => {
+    const updater = { channel: null, allowDowngrade: true };
+
+    configureArchitectureUpdateChannel(updater, "darwin", "x64");
+
+    expect(updater).toEqual({
+      channel: "latest-x64",
+      allowDowngrade: false,
+    });
+  });
+});
 
 function emitUpdater(event: string, ...args: unknown[]) {
   for (const handler of ctx.handlers.get(event) ?? []) {

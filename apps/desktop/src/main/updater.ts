@@ -17,15 +17,39 @@ import {
 autoUpdater.autoDownload = true;
 autoUpdater.autoInstallOnAppQuit = true;
 
-// Windows arm64 ships its own update metadata channel because
-// electron-builder's `latest.yml` is not arch-suffixed on Windows — both
-// arches would otherwise collide on the same file in the GitHub Release.
-// See scripts/package.mjs (builderArgsForTarget) for the publish-side half
-// of this pact. Pin the channel here so arm64 clients fetch
-// `latest-arm64.yml` instead of the x64 metadata.
-if (process.platform === "win32" && process.arch === "arm64") {
-  autoUpdater.channel = "latest-arm64";
+interface ChannelConfigurableUpdater {
+  channel: string | null;
+  allowDowngrade: boolean;
 }
+
+export function updateChannelForArchitecture(
+  platform: NodeJS.Platform,
+  arch: string,
+): string | null {
+  if (platform === "win32" && arch === "arm64") return "latest-arm64";
+  if (platform === "darwin" && arch === "x64") return "latest-x64";
+  return null;
+}
+
+export function configureArchitectureUpdateChannel(
+  updater: ChannelConfigurableUpdater,
+  platform: NodeJS.Platform = process.platform,
+  arch: string = process.arch,
+): void {
+  const channel = updateChannelForArchitecture(platform, arch);
+  if (channel === null) return;
+
+  // AppUpdater.channel enables allowDowngrade as a side effect. These channel
+  // names isolate CPU architectures, not release trains, so preserve normal
+  // monotonic version behavior after selecting the architecture feed.
+  updater.channel = channel;
+  updater.allowDowngrade = false;
+}
+
+// electron-builder does not architecture-suffix Windows or macOS update
+// metadata. package.mjs publishes Windows arm64 as `latest-arm64.yml` and
+// macOS x64 as `latest-x64-mac.yml`; all established feeds remain unchanged.
+configureArchitectureUpdateChannel(autoUpdater);
 
 const STARTUP_CHECK_DELAY_MS = 5_000;
 const PERIODIC_CHECK_INTERVAL_MS = 60 * 60 * 1000; // 1 hour
