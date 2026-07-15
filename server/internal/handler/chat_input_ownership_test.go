@@ -138,6 +138,58 @@ func TestDirectChat_RunningTaskDoesNotAbsorbNewMessage(t *testing.T) {
 	}
 }
 
+// TestChannelChat_QueuedSuccessorKeepsMessageAcrossPredecessorReply reproduces
+// the Feishu race where U2 is persisted and T2 queued while T1 runs, then T1
+// writes an assistant row before T2 is claimed. Channel enqueue must seal U2
+// onto T2 before that reply changes the legacy trailing-message cursor.
+func TestChannelChat_QueuedSuccessorKeepsMessageAcrossPredecessorReply(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	_, sessionID, runtimeID, daemonID := setupDirectChatSession(t, ctx, "channel ownership chat")
+	session, err := testHandler.Queries.GetChatSession(ctx, parseUUID(sessionID))
+	if err != nil {
+		t.Fatalf("load chat session: %v", err)
+	}
+	appendUser := func(content string) {
+		t.Helper()
+		if _, err := testHandler.Queries.CreateChatMessage(ctx, db.CreateChatMessageParams{
+			ChatSessionID: session.ID,
+			Role:          "user",
+			Content:       content,
+		}); err != nil {
+			t.Fatalf("append channel user message: %v", err)
+		}
+	}
+
+	appendUser("今天北京天气如何?")
+	first, err := testHandler.TaskService.EnqueueChannelChatTask(ctx, session, parseUUID(testUserID), false)
+	if err != nil {
+		t.Fatalf("enqueue first channel task: %v", err)
+	}
+	claimed := claimTaskForRuntimeGuard(t, runtimeID, daemonID)
+	if claimed.ChatMessage != "今天北京天气如何?" {
+		t.Fatalf("first claim input = %q", claimed.ChatMessage)
+	}
+	markTaskRunning(t, ctx, uuidToString(first.ID))
+
+	appendUser("今天上海天气怎么样")
+	second, err := testHandler.TaskService.EnqueueChannelChatTask(ctx, session, parseUUID(testUserID), false)
+	if err != nil {
+		t.Fatalf("enqueue second channel task: %v", err)
+	}
+	if _, err := testHandler.TaskService.CompleteTask(ctx, first.ID, completeResult(t, "北京天气回复"), "", ""); err != nil {
+		t.Fatalf("complete first channel task: %v", err)
+	}
+
+	claimed2 := claimTaskForRuntimeGuard(t, runtimeID, daemonID)
+	if claimed2.ChatMessage != "今天上海天气怎么样" {
+		t.Fatalf("second claim lost its owned input; got %q", claimed2.ChatMessage)
+	}
+	assertTaskInputOwner(t, ctx, uuidToString(second.ID), uuidToString(second.ID))
+}
+
 // TestCompleteTask_ChatEmptyOutputWritesNoResponse: an empty final output is a
 // visible, terminal no_response outcome — exactly one assistant row with
 // message_kind='no_response' and a non-empty fallback body, task completed, and

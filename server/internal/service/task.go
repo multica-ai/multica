@@ -1449,6 +1449,78 @@ func (s *TaskService) EnqueueChatTask(ctx context.Context, chatSession db.ChatSe
 	return task, nil
 }
 
+// EnqueueChannelChatTask creates a channel task and atomically seals the
+// currently pending channel messages as its immutable input batch. Unlike the
+// legacy claim-time trailing-message scan, this ownership survives a predecessor
+// writing its assistant reply before the queued successor is claimed.
+func (s *TaskService) EnqueueChannelChatTask(ctx context.Context, chatSession db.ChatSession, initiatorUserID pgtype.UUID, forceFreshSession bool) (db.AgentTaskQueue, error) {
+	agent, err := s.Queries.GetAgent(ctx, chatSession.AgentID)
+	if err != nil {
+		return db.AgentTaskQueue{}, fmt.Errorf("load agent: %w", err)
+	}
+	if agent.ArchivedAt.Valid {
+		return db.AgentTaskQueue{}, ErrChatTaskAgentArchived
+	}
+	if !agent.RuntimeID.Valid {
+		return db.AgentTaskQueue{}, ErrChatTaskAgentNoRuntime
+	}
+
+	overlay := s.buildRuntimeMCPOverlay(ctx, initiatorUserID, agent)
+	attr := attribution.DirectHumanRun(initiatorUserID, attribution.EvidenceChat, chatSession.ID)
+	attr, err = s.applyAttributionFallback(ctx, attr, agent)
+	if err != nil {
+		return db.AgentTaskQueue{}, err
+	}
+	attrSource, _, attrEvidenceKind, attrEvidenceRef := attributionCreateParams(attr)
+
+	var task db.AgentTaskQueue
+	if err := s.runInTx(ctx, func(qtx *db.Queries) error {
+		task, err = qtx.CreateChatTask(ctx, db.CreateChatTaskParams{
+			AgentID:              chatSession.AgentID,
+			RuntimeID:            agent.RuntimeID,
+			Priority:             2,
+			ChatSessionID:        chatSession.ID,
+			InitiatorUserID:      initiatorUserID,
+			OriginatorUserID:     initiatorUserID,
+			AccountableUserID:    attr.AccountableUserID,
+			ForceFreshSession:    pgtype.Bool{Bool: forceFreshSession, Valid: true},
+			RuntimeMcpOverlay:    overlay.Overlay,
+			RuntimeConnectedApps: overlay.ConnectedApps,
+			OriginatorSource:     attrSource,
+			TriggerEvidenceKind:  attrEvidenceKind,
+			TriggerEvidenceRefID: attrEvidenceRef,
+		})
+		if err != nil {
+			return fmt.Errorf("create channel chat task: %w", err)
+		}
+		task, err = qtx.SetChatTaskInputOwnerSelf(ctx, task.ID)
+		if err != nil {
+			return fmt.Errorf("stamp channel chat input owner: %w", err)
+		}
+		claimed, err := qtx.ClaimChannelChatInputMessages(ctx, db.ClaimChannelChatInputMessagesParams{
+			ChatSessionID: chatSession.ID,
+			TaskID:        task.ID,
+		})
+		if err != nil {
+			return fmt.Errorf("claim channel chat input: %w", err)
+		}
+		if len(claimed) == 0 {
+			return errors.New("claim channel chat input: no pending user messages")
+		}
+		return nil
+	}); err != nil {
+		return db.AgentTaskQueue{}, err
+	}
+
+	slog.Info("channel chat task enqueued",
+		"task_id", util.UUIDToString(task.ID),
+		"chat_session_id", util.UUIDToString(chatSession.ID),
+		"agent_id", util.UUIDToString(chatSession.AgentID))
+	s.broadcastTaskEvent(ctx, protocol.EventTaskQueued, task)
+	s.NotifyTaskEnqueued(ctx, task)
+	return task, nil
+}
+
 // DirectChatSendResult carries the rows a transactional direct-chat send
 // persisted, so the handler can broadcast the user message and shape its
 // response without re-reading them.
