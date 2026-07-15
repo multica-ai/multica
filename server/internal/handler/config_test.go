@@ -325,39 +325,47 @@ func TestGetConfigExposesServerVersion(t *testing.T) {
 	}
 }
 
-// TestGetConfigOmitsServerVersionOnOfficialCloud verifies the build version is
-// suppressed on the managed cloud (frontend host multica.ai) even when the
-// binary is stamped, while a self-hosted frontend origin still reports it. The
-// managed cloud is continuously deployed, so its users don't need the row.
-func TestGetConfigOmitsServerVersionOnOfficialCloud(t *testing.T) {
+// TestGetConfigOmitsServerVersionOnManagedCloud verifies the build version is
+// suppressed on Multica's managed cloud even when the binary is stamped, while a
+// self-hosted frontend origin still reports it. The managed cloud is
+// continuously deployed, so its users can't act on the row.
+//
+// MUL-4819: suppression must cover EVERY managed host, not just prod
+// multica.ai — the row was leaking to managed users on staging /
+// multica-app.copilothub.ai, which is exactly what this guards.
+func TestGetConfigOmitsServerVersionOnManagedCloud(t *testing.T) {
 	origCfg := testHandler.cfg
 	defer func() { testHandler.cfg = origCfg }()
 	testHandler.cfg.ServerVersion = "1.2.3"
 
 	req := httptest.NewRequest(http.MethodGet, "/api/config", nil)
 
-	// Official cloud: frontend host multica.ai -> version omitted.
-	t.Setenv("MULTICA_APP_URL", "https://multica.ai")
-	t.Setenv("FRONTEND_ORIGIN", "")
-	w := httptest.NewRecorder()
-	testHandler.GetConfig(w, req)
-	var cfg AppConfig
-	if err := json.Unmarshal(w.Body.Bytes(), &cfg); err != nil {
-		t.Fatalf("decode config: %v", err)
+	tests := []struct {
+		name    string
+		appURL  string
+		wantVer string
+	}{
+		{"prod apex", "https://multica.ai", ""},
+		{"prod app subdomain", "https://app.multica.ai", ""},
+		{"staging subdomain", "https://staging.multica.ai", ""},
+		{"managed copilothub app host", "https://multica-app.copilothub.ai", ""},
+		{"copilothub apex", "https://copilothub.ai", ""},
+		{"self-hosted own domain", "https://multica.self-hosted.example", "1.2.3"},
 	}
-	if cfg.ServerVersion != "" {
-		t.Fatalf("server_version: want omitted on official cloud, got %q", cfg.ServerVersion)
-	}
-
-	// Self-hosted: operator's own frontend origin -> version reported.
-	t.Setenv("MULTICA_APP_URL", "https://multica.self-hosted.example")
-	w = httptest.NewRecorder()
-	testHandler.GetConfig(w, req)
-	if err := json.Unmarshal(w.Body.Bytes(), &cfg); err != nil {
-		t.Fatalf("decode config: %v", err)
-	}
-	if cfg.ServerVersion != "1.2.3" {
-		t.Fatalf("server_version: want 1.2.3 on self-hosted, got %q", cfg.ServerVersion)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("MULTICA_APP_URL", tt.appURL)
+			t.Setenv("FRONTEND_ORIGIN", "")
+			w := httptest.NewRecorder()
+			testHandler.GetConfig(w, req)
+			var cfg AppConfig
+			if err := json.Unmarshal(w.Body.Bytes(), &cfg); err != nil {
+				t.Fatalf("decode config: %v", err)
+			}
+			if cfg.ServerVersion != tt.wantVer {
+				t.Fatalf("server_version for %s: want %q, got %q", tt.appURL, tt.wantVer, cfg.ServerVersion)
+			}
+		})
 	}
 }
 
