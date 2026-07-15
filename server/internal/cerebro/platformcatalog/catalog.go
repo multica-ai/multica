@@ -1292,6 +1292,7 @@ var excluded = map[string]string{
 	// separately-governable platform capability (FIR-2037).
 	"POST /api/cerebro/personal-browser/authorize":   "resolve-seam — agent-only per-action gate for the tools:personal-browser tool; runs the tool-policy chain internally with Base=Deny + host condition (FIR-2037), the enforcement point itself, not a separately-governable platform action",
 	"POST /api/cerebro/personal-browser/secure-fill": "credential-bridge — signed-in desktop-only secret bridge; validates the embedded agent token and resolves credential.reveal for the exact Agent Vault box before returning a value to the desktop process (FIR-3006), not a separately-governable platform action",
+	"POST /api/cerebro/agent-browser/provision-auth": "credential-bridge — task-token-only Agent Vault bridge for the local multica agent-browser provision-auth command; resolves browser-testers plus exact-box credential.reveal before the CLI writes the password to agent-browser over stdin (FIR-3006), not a separately-governable platform action",
 
 	// connection-tools — agent-only (mat_ token) dispatch of an api-type workspace
 	// connection as a server-side tool (FIR-2273). Per-endpoint authorization is
@@ -1300,15 +1301,15 @@ var excluded = map[string]string{
 	// the route is the enforcement point itself, not a separately-governable
 	// platform capability (the connection:<id> tools are surfaced and set
 	// Allow/Ask/Deny per layer in the tool-policy table, like other runtime tools).
-	"POST /api/cerebro/connection-tools/call": "resolve-seam — agent-only per-action dispatch of an api-type connection tool; runs the tool-policy chain internally with Base=Deny on connection:<id> behind the cerebro_api_connection_tools flag (FIR-2273), the enforcement point itself, not a separately-governable platform action",
-	"POST /api/cerebro/connections/{id}/call": "resolve-seam — published mini-app dispatch gated by its approved integration scope plus the viewing human's connection endpoint policy (FIR-3172)",
-	"POST /api/cerebro/apps/{id}/token": "member app-use action — constrained by the published app grant and viewing human",
-	"POST /api/cerebro/apps/workflow-runs/{runId}/token": "worker app-use action — constrained by the durable run identity envelope",
-	"PUT /api/cerebro/apps/{id}/storage/{key}": "member app-use action — app-owned storage only",
-	"DELETE /api/cerebro/apps/{id}/storage/{key}": "member app-use action — app-owned storage only",
+	"POST /api/cerebro/connection-tools/call":                "resolve-seam — agent-only per-action dispatch of an api-type connection tool; runs the tool-policy chain internally with Base=Deny on connection:<id> behind the cerebro_api_connection_tools flag (FIR-2273), the enforcement point itself, not a separately-governable platform action",
+	"POST /api/cerebro/connections/{id}/call":                "resolve-seam — published mini-app dispatch gated by its approved integration scope plus the viewing human's connection endpoint policy (FIR-3172)",
+	"POST /api/cerebro/apps/{id}/token":                      "member app-use action — constrained by the published app grant and viewing human",
+	"POST /api/cerebro/apps/workflow-runs/{runId}/token":     "worker app-use action — constrained by the durable run identity envelope",
+	"PUT /api/cerebro/apps/{id}/storage/{key}":               "member app-use action — app-owned storage only",
+	"DELETE /api/cerebro/apps/{id}/storage/{key}":            "member app-use action — app-owned storage only",
 	"POST /api/cerebro/apps/{id}/views/{viewId}/submissions": "member app-use action — request-bound submission records the viewing human",
-	"POST /api/cerebro/app-workflows/{workflowId}/test": "member app-use action — published app scopes remain the ceiling",
-	"POST /api/cerebro/app-workflows/{workflowId}/chat": "member app-use action — published app scopes remain the ceiling",
+	"POST /api/cerebro/app-workflows/{workflowId}/test":      "member app-use action — published app scopes remain the ceiling",
+	"POST /api/cerebro/app-workflows/{workflowId}/chat":      "member app-use action — published app scopes remain the ceiling",
 
 	// pre-auth — establishes or clears identity, or a signed external webhook;
 	// there is no authenticated actor yet to gate on.
