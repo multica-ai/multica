@@ -173,6 +173,54 @@ func TestSearchChatSessions_Match(t *testing.T) {
 	}
 }
 
+func TestEmbeddedChat_HiddenFromInboxButSearchable(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	agentID := createHandlerTestAgent(t, "Embedded Search Agent", []byte(`null`))
+	sessionID := seedChatSession(t, testUserID, agentID, "Finance API chat",
+		[]string{"embedded-report-keyword"})
+	// The shared developer test DB can predate a branch's newest migration.
+	// CI applies migrations; this idempotent fixture keeps the focused test local.
+	if _, err := testPool.Exec(context.Background(), `
+		CREATE TABLE IF NOT EXISTS cerebro_chat_session_context (
+			chat_session_id uuid PRIMARY KEY REFERENCES chat_session(id) ON DELETE CASCADE,
+			kind text NOT NULL CHECK (kind IN ('api')),
+			source text NOT NULL,
+			created_at timestamptz NOT NULL DEFAULT now()
+		)
+	`); err != nil {
+		t.Fatalf("ensure embedded context fixture: %v", err)
+	}
+	if _, err := testPool.Exec(context.Background(), `
+		INSERT INTO cerebro_chat_session_context (chat_session_id, kind, source)
+		VALUES ($1, 'api', 'finance')
+	`, sessionID); err != nil {
+		t.Fatalf("classify embedded session: %v", err)
+	}
+
+	listW := httptest.NewRecorder()
+	testHandler.ListChatSessions(listW,
+		newChatRequest(http.MethodGet, "/api/chat/sessions", testUserID, nil))
+	if listW.Code != http.StatusOK {
+		t.Fatalf("list status: %d body=%s", listW.Code, listW.Body.String())
+	}
+	if strings.Contains(listW.Body.String(), sessionID) {
+		t.Fatalf("embedded API session leaked into Inbox list: %s", listW.Body.String())
+	}
+
+	searchW := httptest.NewRecorder()
+	testHandler.SearchChatSessions(searchW, newChatRequest(http.MethodGet,
+		"/api/chat/sessions/search?q=embedded-report-keyword", testUserID, nil))
+	if searchW.Code != http.StatusOK {
+		t.Fatalf("search status: %d body=%s", searchW.Code, searchW.Body.String())
+	}
+	if !strings.Contains(searchW.Body.String(), sessionID) {
+		t.Fatalf("embedded API session was not searchable: %s", searchW.Body.String())
+	}
+}
+
 func TestSearchChatSessions_NewestMatchWins(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")

@@ -403,6 +403,7 @@ SELECT cs.id, cs.workspace_id, cs.agent_id, cs.creator_id, cs.title, cs.session_
        (cs.unread_since IS NOT NULL)::bool AS has_unread
 FROM chat_session cs
 WHERE cs.workspace_id = $1 AND cs.creator_id = $2
+  AND NOT EXISTS (SELECT 1 FROM cerebro_chat_session_context ec WHERE ec.chat_session_id = cs.id AND ec.kind = 'api')
 ORDER BY cs.updated_at DESC
 `
 
@@ -531,6 +532,7 @@ SELECT cs.id, cs.workspace_id, cs.agent_id, cs.creator_id, cs.title, cs.session_
        (cs.unread_since IS NOT NULL)::bool AS has_unread
 FROM chat_session cs
 WHERE cs.workspace_id = $1 AND cs.creator_id = $2 AND cs.status = 'archived'
+  AND NOT EXISTS (SELECT 1 FROM cerebro_chat_session_context ec WHERE ec.chat_session_id = cs.id AND ec.kind = 'api')
 ORDER BY cs.updated_at DESC
 `
 
@@ -687,6 +689,7 @@ SELECT cs.id, cs.workspace_id, cs.agent_id, cs.creator_id, cs.title, cs.session_
        (cs.unread_since IS NOT NULL)::bool AS has_unread
 FROM chat_session cs
 WHERE cs.workspace_id = $1 AND cs.creator_id = $2 AND cs.status = 'active'
+  AND NOT EXISTS (SELECT 1 FROM cerebro_chat_session_context ec WHERE ec.chat_session_id = cs.id AND ec.kind = 'api')
 ORDER BY cs.updated_at DESC
 `
 

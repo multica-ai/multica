@@ -969,6 +969,14 @@
       "gate": "workspace_member"
     },
     {
+      "id": "POST /api/cerebro/embedded-chat/sessions",
+      "gate": "workspace_member"
+    },
+    {
+      "id": "POST /api/cerebro/embedded-chat/sessions/{sessionId}/messages",
+      "gate": "workspace_member"
+    },
+    {
       "id": "POST /api/cli-token",
       "gate": "self_only"
     },

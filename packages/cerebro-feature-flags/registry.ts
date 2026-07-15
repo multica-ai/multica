@@ -421,7 +421,9 @@ export type CerebroFlagKey =
   | "cerebro_model_registry"
   // FIR-3172: full apps, workflows, and interactive chat views. The complete
   // product stays dormant until local + CI verification is complete.
-  | "cerebro_mini_apps";
+  | "cerebro_mini_apps"
+  // FIR-2835: verified on-behalf-of chat sessions created by external apps.
+  | "cerebro_embedded_chat";
 
 /**
  * Default value for each flag. Applied at read time when no override exists.
@@ -832,6 +834,7 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   cerebro_model_registry: false,
   // FIR-3172: default OFF. Enabling is a separate release decision.
   cerebro_mini_apps: false,
+  cerebro_embedded_chat: false,
 };
 
 /**
@@ -916,6 +919,13 @@ export interface CerebroFlagDefinition {
  * the user within each group (see CEREBRO_FLAG_GROUPS for group order).
  */
 export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
+  {
+    key: "cerebro_embedded_chat",
+    label: "Embedded Chat API",
+    group: "workspace",
+    description:
+      "Allow configured applications to create API conversations on behalf of a verified workspace member. API conversations stay out of Inbox by default but remain searchable.",
+  },
   {
     key: "cerebro_mini_apps",
     label: "Apps and workflow builder",

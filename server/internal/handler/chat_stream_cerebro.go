@@ -111,7 +111,7 @@ func (h *Handler) StreamChatSessionRun(w http.ResponseWriter, r *http.Request) {
 	}
 	switch task.Status {
 	case "completed":
-		h.replayCompletedChatTask(r.Context(), sw, task)
+		h.replayCompletedChatTask(r, sw, task)
 		return
 	case "failed", "cancelled":
 		sw.WriteError(h.chatTaskFailureText(r.Context(), task))
@@ -135,7 +135,8 @@ func (h *Handler) StreamChatSessionRun(w http.ResponseWriter, r *http.Request) {
 			}
 			switch ev.Type {
 			case chatstream.EventDone:
-				sw.WriteAssistantMessage(ev.MessageID, ev.Content, h.chatStreamFinishMetadata(r.Context(), task.ID, ev.MessageID, ev.ElapsedMs))
+				parts := h.chatStreamArtifactParts(r, ev.Content, workspaceID)
+				sw.WriteAssistantMessageWithParts(ev.MessageID, ev.Content, parts, h.chatStreamFinishMetadata(r.Context(), task.ID, ev.MessageID, ev.ElapsedMs))
 			case chatstream.EventFailed, chatstream.EventCancelled:
 				if t, err := h.Queries.GetAgentTask(r.Context(), task.ID); err == nil {
 					task = t
@@ -160,7 +161,8 @@ func (h *Handler) StreamChatSessionRun(w http.ResponseWriter, r *http.Request) {
 
 // replayCompletedChatTask re-emits a finished run from the persisted
 // assistant message, covering clients that connect after completion.
-func (h *Handler) replayCompletedChatTask(ctx context.Context, sw *chatstream.Writer, task db.AgentTaskQueue) {
+func (h *Handler) replayCompletedChatTask(r *http.Request, sw *chatstream.Writer, task db.AgentTaskQueue) {
+	ctx := r.Context()
 	msg, err := h.Queries.GetAssistantChatMessageByTaskID(ctx, task.ID)
 	if err != nil {
 		sw.WriteError("assistant reply not found for completed task")
@@ -175,7 +177,8 @@ func (h *Handler) replayCompletedChatTask(ctx context.Context, sw *chatstream.Wr
 		elapsedMs = msg.ElapsedMs.Int64
 	}
 	messageID := uuidToString(msg.ID)
-	sw.WriteAssistantMessage(messageID, msg.Content, h.chatStreamFinishMetadata(ctx, task.ID, messageID, elapsedMs))
+	parts := h.chatStreamArtifactParts(r, msg.Content, ctxWorkspaceID(ctx))
+	sw.WriteAssistantMessageWithParts(messageID, msg.Content, parts, h.chatStreamFinishMetadata(ctx, task.ID, messageID, elapsedMs))
 }
 
 // chatTaskFailureText resolves the most useful failure text for a terminal

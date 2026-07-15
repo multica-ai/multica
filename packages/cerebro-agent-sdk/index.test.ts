@@ -75,4 +75,30 @@ describe("MulticaAgentClient", () => {
     });
     await expect(client.resumeRun("session-1")).resolves.toBeNull();
   });
+
+  it("uses the verified Embedded Chat boundary without exposing tool selection", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(JSON.stringify({ id: "session-1" }), { status: 201 }),
+    );
+    const client = new MulticaAgentClient({
+      baseUrl: "https://multica.example",
+      token: "app-token",
+      workspaceId: "workspace-1",
+      agentId: "rune-1",
+      embedded: { userAssertion: "supabase-user-token" },
+      fetcher,
+    });
+
+    await client.createSession("Finance");
+    expect(fetcher).toHaveBeenCalledWith(
+      "https://multica.example/api/cerebro/embedded-chat/sessions",
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          "X-Multica-User-Assertion": "supabase-user-token",
+        }),
+        body: JSON.stringify({ agent_id: "rune-1", title: "Finance" }),
+      }),
+    );
+    expect(client).not.toHaveProperty("tools");
+  });
 });

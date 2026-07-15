@@ -43,6 +43,13 @@
   ],
   "flags": [
     {
+      "key": "cerebro_embedded_chat",
+      "label": "Embedded Chat API",
+      "description": "Allow configured applications to create API conversations on behalf of a verified workspace member. API conversations stay out of Inbox by default but remain searchable.",
+      "group": "workspace",
+      "default": false
+    },
+    {
       "key": "cerebro_mini_apps",
       "label": "Apps and workflow builder",
       "description": "Add the Apps catalog, app builder, visual workflow builder, and interactive in-chat app views. Off hides every user-facing entry while keeping stored apps and runs intact.",

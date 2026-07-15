@@ -125,6 +125,25 @@ func TestWriteAssistantMessage(t *testing.T) {
 	}
 }
 
+func TestWriteAssistantMessageWithPartsEmitsArtifactBeforeFinish(t *testing.T) {
+	rec := httptest.NewRecorder()
+	sw, _ := NewWriter(rec)
+	artifact := DataChunk{Type: "data-artifact", ID: "artifact-1", Data: map[string]any{
+		"id": "artifact-1", "title": "Board report", "kind": "report",
+	}}
+	if err := sw.WriteAssistantMessageWithParts("msg-1", "See report", []any{artifact}, FinishMetadata{TaskID: "task-1"}); err != nil {
+		t.Fatal(err)
+	}
+	frames := parseFrames(t, rec.Body.String())
+	want := []string{"start", "text-start", "text-delta", "text-end", "data-artifact", "finish"}
+	for i, typ := range want {
+		var chunk map[string]any
+		if err := json.Unmarshal([]byte(frames[i]), &chunk); err != nil || chunk["type"] != typ {
+			t.Fatalf("frame %d = %v, want %s", i, chunk, typ)
+		}
+	}
+}
+
 func TestWriteError(t *testing.T) {
 	rec := httptest.NewRecorder()
 	sw, _ := NewWriter(rec)

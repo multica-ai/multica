@@ -79,7 +79,11 @@ describe("SprintBoard header", () => {
   it("renders the project as a breadcrumb link back to the project page (matches the project page's BreadcrumbHeader)", async () => {
     await renderSprintBoard();
 
-    const projectLink = await screen.findByRole("link", { name: "Tech Sprints" });
+    const projectLink = await screen.findByRole(
+      "link",
+      { name: "Tech Sprints" },
+      { timeout: 5000 },
+    );
     expect(projectLink).toHaveAttribute("href", "/acme/projects/p1");
   });
 

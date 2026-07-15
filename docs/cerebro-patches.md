@@ -1556,6 +1556,14 @@ Approved by FIR-3266 and implementation plan artifact `019f60d7-a728-7663-82d3-7
 - `packages/views/channels/components/channel-detail.tsx` and `thread-side-panel.tsx`: enable scheduling on the shared Channel/DM composer.
 - `server/cmd/server/router.go` and `main.go`: register the scheduled-message API and delivery sweeper.
 
+## FIR-2835 — Verified Embedded Chat
+
+- `embedded-chat` in `server/cmd/server/router.go`: one marked mount line exposes the Cerebro-owned `/api/cerebro/embedded-chat/*` handler.
+- `embedded-chat-config` in `.env.example`: documents the fail-closed server-owned user-info endpoint, publishable-key environment reference, and required Google provider map.
+- `embedded-chat` in `server/pkg/db/queries/chat.sql` and generated query output: three marked predicates exclude API-classified sessions from default chat lists while leaving search unchanged.
+- All identity verification, session classification, report-part streaming, feature flag behavior, and tests live in Cerebro-owned packages/sibling files.
+- Approved direction: Finance's Google login identifies the required Multica member; conversations use `kind = api`, stay out of **Inbox** by default, remain searchable, and run with that member's `original_user_id` permissions.
+
 ## FIR-3101 — Workflow hooks
 
 - `workflow-hooks-wire`, `workflow-hooks-routes`, and `workflow-hooks-completion-wire` in `server/cmd/server/router.go` mount and delegate to the fork-owned Workflow hook feature.

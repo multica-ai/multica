@@ -222,14 +222,21 @@ func (s *Writer) WritePing() error {
 // assistant turn — start → text-start → text-delta → text-end → finish →
 // [DONE] — with the whole reply as a single delta (message-granular source).
 func (s *Writer) WriteAssistantMessage(messageID, content string, meta FinishMetadata) error {
+	return s.WriteAssistantMessageWithParts(messageID, content, nil, meta)
+}
+
+// WriteAssistantMessageWithParts adds validated application data immediately
+// after the text part and before finish, preserving the AI SDK message order.
+func (s *Writer) WriteAssistantMessageWithParts(messageID, content string, parts []any, meta FinishMetadata) error {
 	const textPartID = "text-0"
 	chunks := []any{
 		StartChunk{Type: ChunkTypeStart, MessageID: messageID},
 		TextStartChunk{Type: ChunkTypeTextStart, ID: textPartID},
 		TextDeltaChunk{Type: ChunkTypeTextDelta, ID: textPartID, Delta: content},
 		TextEndChunk{Type: ChunkTypeTextEnd, ID: textPartID},
-		FinishChunk{Type: ChunkTypeFinish, MessageMetadata: meta},
 	}
+	chunks = append(chunks, parts...)
+	chunks = append(chunks, FinishChunk{Type: ChunkTypeFinish, MessageMetadata: meta})
 	for _, c := range chunks {
 		if err := s.WriteChunk(c); err != nil {
 			return err

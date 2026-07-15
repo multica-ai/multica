@@ -473,3 +473,8 @@ change genuinely does not affect documented behavior (a comment, a test, a
 rename), add the label `permission-doc-not-needed` to the PR or put
 `[skip-permission-doc]` in the PR description — a conscious skip, not a silent
 one. This is why the doc stays true to the code instead of rotting.
+# Embedded Chat on-behalf-of identity (FIR-2835)
+
+Embedded applications authenticate two principals. The Bearer PAT authenticates the application; `X-Multica-User-Assertion` authenticates the person. The server sends the assertion to the configured identity provider's authoritative user endpoint, which verifies signature and expiry, then requires the configured upstream provider, maps the verified email to a workspace member, and replaces the request identity only after that mapping succeeds. This avoids copying a provider's JWT signing secret into Multica when asymmetric JWKS keys are unavailable.
+
+Embedded requests cannot submit a Multica user ID, tool list, connection ID, or permission override. Chat tasks therefore inherit the verified member as `original_user_id` and continue through the normal five-layer tool-policy, runtime-grant, protocol, and credential checks. Invalid identities, missing membership, disabled `cerebro_embedded_chat`, and non-API sessions fail closed.

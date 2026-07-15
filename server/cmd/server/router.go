@@ -2016,6 +2016,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/stream", h.StreamChatSessionRun)
 				})
 			})
+			h.MountEmbeddedChatRoutes(r) // CEREBRO-PATCH(embedded-chat): FIR-2835 verified API chat boundary.
 			r.Get("/api/chat/messages/{messageId}/attachments", h.ListChatMessageAttachments)
 			r.Get("/api/chat/pending-tasks", h.ListPendingChatTasks)
 
