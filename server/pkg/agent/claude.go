@@ -639,9 +639,8 @@ func buildClaudeArgs(opts ExecOptions, logger *slog.Logger) []string {
 	if opts.MaxTurns > 0 {
 		args = append(args, "--max-turns", fmt.Sprintf("%d", opts.MaxTurns))
 	}
-	if opts.SystemPrompt != "" {
-		args = append(args, "--append-system-prompt", opts.SystemPrompt)
-	}
+	// CEREBRO-PATCH(agent-system-prompt-mode): FIR-3212 - honour the configured mode instead of always appending.
+	args = append(args, ClaudeSystemPromptArgs(opts.SystemPromptMode, opts.SystemPrompt)...)
 	if opts.ResumeSessionID != "" {
 		args = append(args, "--resume", opts.ResumeSessionID)
 	}

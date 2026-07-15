@@ -52,6 +52,8 @@ type ExecOptions struct {
 	// field rather than fail (so MUL-2339 can grow runtime support
 	// incrementally without breaking unrelated agents).
 	ThinkingLevel string
+	// CEREBRO-PATCH(agent-system-prompt-mode): FIR-3212 - how SystemPrompt reaches the model; see cerebro_prompt_mode.go. Empty preserves each backend's prior behaviour.
+	SystemPromptMode SystemPromptMode
 }
 
 // runContext derives the execution context for an agent subprocess from the
