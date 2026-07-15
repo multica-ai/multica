@@ -839,6 +839,92 @@ func TestOpencodeProcessEventsStreamEndsAfterToolCallsStepFinish(t *testing.T) {
 	close(ch)
 }
 
+func TestOpencodeProcessEventsStreamEndsAfterToolWithStopFinish(t *testing.T) {
+	t.Parallel()
+
+	b := &opencodeBackend{cfg: Config{Logger: slog.Default()}}
+	ch := make(chan Message, 256)
+
+	// Some providers return reason "stop" even when the assistant step contains
+	// tool calls. OpenCode still continues the run so it can feed the tool result
+	// back to the model. EOF before that continuation step is therefore not a
+	// successful run-level terminal signal.
+	lines := strings.Join([]string{
+		`{"type":"step_start","timestamp":1000,"sessionID":"ses_stop_tool","part":{"type":"step-start"}}`,
+		`{"type":"tool_use","timestamp":1001,"sessionID":"ses_stop_tool","part":{"type":"tool","tool":"bash","callID":"call_1","state":{"status":"completed","input":{"command":"go test ./..."},"output":"ok\n"}}}`,
+		`{"type":"step_finish","timestamp":1002,"sessionID":"ses_stop_tool","part":{"type":"step-finish","reason":"stop"}}`,
+	}, "\n")
+
+	result := b.processEvents(strings.NewReader(lines), ch)
+
+	if result.status != "failed" {
+		t.Errorf("status: got %q, want %q", result.status, "failed")
+	}
+	if !strings.Contains(result.errMsg, "terminal signal") {
+		t.Errorf("errMsg: got %q, want it to mention the missing terminal signal", result.errMsg)
+	}
+	if !result.noTerminalSignal {
+		t.Error("noTerminalSignal: got false, want true")
+	}
+
+	close(ch)
+}
+
+func TestOpencodeProcessEventsToolWithStopFinishThenContinuation(t *testing.T) {
+	t.Parallel()
+
+	b := &opencodeBackend{cfg: Config{Logger: slog.Default()}}
+	ch := make(chan Message, 256)
+
+	// The provider-specific "stop" quirk must not false-fail a healthy run once
+	// OpenCode starts the continuation step and reaches a real terminal finish.
+	lines := strings.Join([]string{
+		`{"type":"step_start","timestamp":1000,"sessionID":"ses_stop_continue","part":{"type":"step-start"}}`,
+		`{"type":"tool_use","timestamp":1001,"sessionID":"ses_stop_continue","part":{"type":"tool","tool":"bash","callID":"call_1","state":{"status":"completed","input":{"command":"echo ok"},"output":"ok\n"}}}`,
+		`{"type":"step_finish","timestamp":1002,"sessionID":"ses_stop_continue","part":{"type":"step-finish","reason":"stop"}}`,
+		`{"type":"step_start","timestamp":1003,"sessionID":"ses_stop_continue","part":{"type":"step-start"}}`,
+		`{"type":"text","timestamp":1004,"sessionID":"ses_stop_continue","part":{"type":"text","text":"done"}}`,
+		`{"type":"step_finish","timestamp":1005,"sessionID":"ses_stop_continue","part":{"type":"step-finish","reason":"stop"}}`,
+	}, "\n")
+
+	result := b.processEvents(strings.NewReader(lines), ch)
+
+	if result.status != "completed" {
+		t.Errorf("status: got %q, want %q", result.status, "completed")
+	}
+	if result.errMsg != "" {
+		t.Errorf("errMsg: got %q, want empty", result.errMsg)
+	}
+
+	close(ch)
+}
+
+func TestOpencodeProcessEventsProviderExecutedToolWithStopFinish(t *testing.T) {
+	t.Parallel()
+
+	b := &opencodeBackend{cfg: Config{Logger: slog.Default()}}
+	ch := make(chan Message, 256)
+
+	// Provider-executed tools do not require OpenCode to feed a local tool
+	// result back to the model, so a "stop" finish remains terminal.
+	lines := strings.Join([]string{
+		`{"type":"step_start","timestamp":1000,"sessionID":"ses_provider_tool","part":{"type":"step-start"}}`,
+		`{"type":"tool_use","timestamp":1001,"sessionID":"ses_provider_tool","part":{"type":"tool","tool":"web_search","callID":"call_1","metadata":{"providerExecuted":true},"state":{"status":"completed","input":{"query":"weather"},"output":"sunny"}}}`,
+		`{"type":"step_finish","timestamp":1002,"sessionID":"ses_provider_tool","part":{"type":"step-finish","reason":"stop"}}`,
+	}, "\n")
+
+	result := b.processEvents(strings.NewReader(lines), ch)
+
+	if result.status != "completed" {
+		t.Errorf("status: got %q, want %q", result.status, "completed")
+	}
+	if result.errMsg != "" {
+		t.Errorf("errMsg: got %q, want empty", result.errMsg)
+	}
+
+	close(ch)
+}
+
 func TestOpencodeProcessEventsStepFinishWithoutReasonBackcompat(t *testing.T) {
 	t.Parallel()
 

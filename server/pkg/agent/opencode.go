@@ -270,7 +270,7 @@ type eventResult struct {
 	output           string
 	sessionID        string
 	usage            TokenUsage // accumulated token usage across all steps
-	noTerminalSignal bool       // guard fired: stream reached EOF with a step still open
+	noTerminalSignal bool       // guard fired: stream reached EOF before a step or required continuation completed
 }
 
 // processEvents reads JSON lines from r, dispatches events to ch, and returns
@@ -292,14 +292,15 @@ func (b *opencodeBackend) processEvents(r io.Reader, ch chan<- Message) eventRes
 	//
 	// Step bracketing alone is not enough: step_finish carries a reason
 	// (FinishReason: "stop", "tool-calls", …), and a run that still has tool
-	// results to feed back closes its step with reason "tool-calls" before the
-	// next step_start. A stream that ends in that gap did not finish either, so
-	// a "tool-calls" finish keeps the run non-terminal until the next step
-	// opens. Any other reason — including absent, for older opencode versions
-	// whose step_finish parts predate the reason field — is treated as terminal
-	// so healthy runs on old protocols are not mass-failed.
-	openStep := false             // between a step_start and its step_finish
-	awaitingContinuation := false // last step_finish was reason "tool-calls"; next step never started
+	// results to feed back normally closes its step with reason "tool-calls"
+	// before the next step_start. Some providers return "stop" despite emitting
+	// tool calls, though, and OpenCode deliberately continues those runs when a
+	// non-provider-executed tool result must be fed back to the model. Track both
+	// signals so EOF in either continuation gap fails closed. A missing reason
+	// retains the older step-bracketing behavior for protocol compatibility.
+	openStep := false                // between a step_start and its step_finish
+	stepHasContinuationTool := false // current step has a local tool result OpenCode must feed back
+	awaitingContinuation := false    // the last step_finish still required another step
 
 	scanner := bufio.NewScanner(r)
 	scanner.Buffer(make([]byte, 0, 1024*1024), 10*1024*1024)
@@ -324,15 +325,21 @@ func (b *opencodeBackend) processEvents(r io.Reader, ch chan<- Message) eventRes
 			b.handleTextEvent(event, ch, &output)
 		case "tool_use":
 			b.handleToolUseEvent(event, ch)
+			if event.Part.Metadata == nil || !event.Part.Metadata.ProviderExecuted {
+				stepHasContinuationTool = true
+			}
 		case "error":
 			b.handleErrorEvent(event, ch, &finalStatus, &finalError)
 		case "step_start":
 			openStep = true
+			stepHasContinuationTool = false
 			awaitingContinuation = false
 			trySend(ch, Message{Type: MessageStatus, Status: "running"})
 		case "step_finish":
 			openStep = false
-			awaitingContinuation = event.Part.Reason == "tool-calls"
+			awaitingContinuation = event.Part.Reason == "tool-calls" ||
+				(event.Part.Reason != "" && stepHasContinuationTool)
+			stepHasContinuationTool = false
 			// Accumulate token usage from step_finish events.
 			if t := event.Part.Tokens; t != nil {
 				usage.InputTokens += t.Input
@@ -366,7 +373,7 @@ func (b *opencodeBackend) processEvents(r io.Reader, ch chan<- Message) eventRes
 		if openStep {
 			finalError = "opencode stream ended without a terminal signal (step still open at EOF)"
 		} else {
-			finalError = `opencode stream ended without a terminal signal (last step finished with reason "tool-calls" and its continuation never started)`
+			finalError = "opencode stream ended without a terminal signal (last step required a continuation that never started)"
 		}
 		noTerminalSignal = true
 	}
@@ -537,6 +544,9 @@ type opencodeEventPart struct {
 	Tool   string             `json:"tool,omitempty"`
 	CallID string             `json:"callID,omitempty"`
 	State  *opencodeToolState `json:"state,omitempty"`
+	// OpenCode excludes provider-executed tools when deciding whether a tool
+	// result requires another model step.
+	Metadata *opencodePartMetadata `json:"metadata,omitempty"`
 
 	// step_finish token usage
 	Tokens *opencodeTokens `json:"tokens,omitempty"`
@@ -544,6 +554,10 @@ type opencodeEventPart struct {
 	// step_finish reason (FinishReason: "stop", "tool-calls", …). Absent on
 	// older opencode versions whose step-finish parts predate the field.
 	Reason string `json:"reason,omitempty"`
+}
+
+type opencodePartMetadata struct {
+	ProviderExecuted bool `json:"providerExecuted,omitempty"`
 }
 
 // opencodeTokens represents token usage in a step_finish event.
