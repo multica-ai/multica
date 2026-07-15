@@ -173,11 +173,13 @@ describe("BaseComposer draft parity", () => {
     // extra keypress — Submit enabled at first render, not disabled.
     expect(submit()).toBeEnabled();
 
-    fireEvent.click(submit());
+    await act(async () => {
+      fireEvent.click(submit());
+    });
     expect(onSubmit).toHaveBeenCalledWith("hello", undefined);
   });
 
-  it("keeps Submit disabled for an empty draft until the user types", () => {
+  it("keeps Submit disabled for an empty draft until the user types", async () => {
     const onSubmit = vi.fn();
     render(
       <BaseComposer draft={makeDraft("")} onSubmit={onSubmit} editorKey="s1" />,
@@ -187,13 +189,20 @@ describe("BaseComposer draft parity", () => {
 
     fireEvent.change(screen.getByTestId("editor"), { target: { value: "hi" } });
     expect(submit()).toBeEnabled();
-    fireEvent.click(submit());
+    await act(async () => {
+      fireEvent.click(submit());
+    });
     expect(onSubmit).toHaveBeenCalledWith("hi", undefined);
   });
 
   it("keeps the draft when submit rejects", async () => {
     const draft = makeDraft("unsent comment");
-    const onSubmit = vi.fn().mockRejectedValue(new Error("Session expired"));
+    let rejectSubmit!: (error: Error) => void;
+    const onSubmit = vi.fn().mockReturnValue(
+      new Promise<void>((_resolve, reject) => {
+        rejectSubmit = reject;
+      }),
+    );
     render(
       <BaseComposer draft={draft} onSubmit={onSubmit} editorKey="s1" />,
     );
@@ -201,8 +210,14 @@ describe("BaseComposer draft parity", () => {
     fireEvent.click(submit());
 
     await waitFor(() => expect(onSubmit).toHaveBeenCalledWith("unsent comment", undefined));
+    expect(submit()).toBeDisabled();
+
+    await act(async () => {
+      rejectSubmit(new Error("Session expired"));
+    });
+
     expect(draft.clear).not.toHaveBeenCalled();
-    expect(submit()).toBeEnabled();
+    await waitFor(() => expect(submit()).toBeEnabled());
   });
 
   it("warns early when a saved draft exists but the connection check fails", async () => {

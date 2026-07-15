@@ -90,7 +90,7 @@ export default function IssuesPage() {
     issueListOptions(wsId),
   );
 
-  const allIssues = data ?? [];
+  const allIssues = useMemo(() => data ?? [], [data]);
 
   // Scope pre-filter — mirrors web `issues-page.tsx:90-94`. Applied before
   // status/priority filtering so chip filters operate on the visible slice.
