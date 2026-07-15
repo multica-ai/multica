@@ -209,7 +209,7 @@ function createComponents(
     a: ({ href, children }) => {
       // Mention links: mention://member/id, mention://agent/id, mention://issue/id, mention://project/id, mention://all/all
       if (href?.startsWith('mention://')) {
-        const mentionMatch = href.match(/^mention:\/\/(member|agent|squad|issue|project|all)\/(.+)$/)
+        const mentionMatch = href.match(/^mention:\/\/(member|agent|squad|issue|project|skill|all)\/(.+)$/)
         if (mentionMatch?.[1] && mentionMatch[2]) {
           const type = mentionMatch[1]
           const id = mentionMatch[2]
