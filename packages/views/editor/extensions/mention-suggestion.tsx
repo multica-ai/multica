@@ -13,13 +13,14 @@ import {
 import type { QueryClient } from "@tanstack/react-query";
 import { getCurrentWsId } from "@multica/core/platform";
 import { flattenIssueBuckets, issueKeys } from "@multica/core/issues/queries";
-import { workspaceKeys } from "@multica/core/workspace/queries";
 import {
+  workspaceKeys,
   agentListOptions,
   memberListOptions,
   skillListOptions,
   squadListOptions,
 } from "@multica/core/workspace/queries";
+import { projectKeys, projectListOptions } from "@multica/core/projects/queries";
 import { useAuthStore } from "@multica/core/auth";
 import { canAssignAgentToIssue } from "@multica/core/permissions";
 import { api } from "@multica/core/api";
@@ -595,6 +596,7 @@ export function createMentionSuggestion(
     void qc.ensureQueryData(agentListOptions(wsId));
     void qc.ensureQueryData(squadListOptions(wsId));
     void qc.ensureQueryData(memberListOptions(wsId));
+    void qc.ensureQueryData(projectListOptions(wsId));
   };
   // Fire once on factory construction; subsequent mount of the composer
   // hits a warm cache.
@@ -656,6 +658,13 @@ export function createMentionSuggestion(
       .filter((s) => s.name.toLowerCase().includes(q) || s.description.toLowerCase().includes(q) || matchesPinyin(s.name, q))
       .map((s) => ({ id: s.id, label: s.name, type: "skill" as const, description: s.description }));
 
+    // Project items from the warm project-list cache — same pattern as skillItems.
+    const projects: { id: string; title: string; description?: string | null; icon?: string | null; status?: ProjectStatus }[] =
+      qc.getQueryData(projectKeys.list(wsId)) ?? [];
+    const projectItems: MentionItem[] = projects
+      .filter((p) => p.title.toLowerCase().includes(q) || matchesPinyin(p.title, q))
+      .map((p) => ({ id: p.id, label: p.title, type: "project" as const, description: p.description ?? undefined, icon: p.icon ?? null, projectStatus: p.status }));
+
     // Members and agents share a single ranked list — recently mentioned
     // targets come first regardless of type, with an alphabetical fallback
     // for everyone the user hasn't mentioned yet on this device.
@@ -675,7 +684,7 @@ export function createMentionSuggestion(
       )
       .map(issueToMention);
 
-    return [...allItem, ...userItems, ...issueItems, ...skillItems];
+    return [...allItem, ...userItems, ...issueItems, ...skillItems, ...projectItems];
   }
 
   return {
