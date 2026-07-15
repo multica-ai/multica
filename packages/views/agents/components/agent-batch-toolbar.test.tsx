@@ -109,6 +109,24 @@ beforeEach(() => {
   updateAgentSpy.mockResolvedValue({});
 });
 
+describe("AgentBatchToolbar — action order", () => {
+  it("renders Archive last, after the other batch actions", () => {
+    // One archived + one active owned row surfaces all three actions at once.
+    renderToolbar([
+      makeRow("a", "user-1", { archived_at: "2026-01-01T00:00:00Z" }),
+      makeRow("b", "user-1"),
+    ]);
+
+    // Labelled buttons in DOM order; the clear-selection button is icon-only.
+    const actions = screen
+      .getAllByRole("button")
+      .map((b) => b.textContent?.trim())
+      .filter((text): text is string => !!text);
+
+    expect(actions).toEqual(["Restore", "Set access scope", "Archive"]);
+  });
+});
+
 describe("AgentBatchToolbar — bulk Set access scope", () => {
   it("shows the Set access scope button for active owned agents", () => {
     renderToolbar([makeRow("a", "user-1")]);

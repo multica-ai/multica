@@ -140,17 +140,6 @@ export function AgentBatchToolbar({
           </button>
         </div>
 
-        {anyActive && (
-          <Button
-            variant="ghost"
-            size="sm"
-            disabled={!allManageable || busy}
-            onClick={() => setConfirmArchive(true)}
-          >
-            <Archive className="mr-1 size-3.5" />
-            {t(($) => $.row_actions.archive)}
-          </Button>
-        )}
         {anyArchived && (
           <Button
             variant="ghost"
@@ -175,6 +164,19 @@ export function AgentBatchToolbar({
             onClick={() => setAccessDialogOpen(true)}
           >
             {t(($) => $.row_actions.set_access)}
+          </Button>
+        )}
+        {/* Archive sits last: it is the destructive action, kept furthest from
+            the other batch actions. */}
+        {anyActive && (
+          <Button
+            variant="ghost"
+            size="sm"
+            disabled={!allManageable || busy}
+            onClick={() => setConfirmArchive(true)}
+          >
+            <Archive className="mr-1 size-3.5" />
+            {t(($) => $.row_actions.archive)}
           </Button>
         )}
       </div>
