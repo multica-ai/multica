@@ -178,7 +178,7 @@ wakes the parent assignee. Promoting the next stage's `backlog` sub-issues to
 | Principal and namespace authorization boundary | `server/internal/handler/issue_external_identity.go` (`externalUpsertAuthorizationError`) |
 | Protected route before `/{id}` | `server/cmd/server/router.go` (`/api/issues/upsert-external`) |
 | Transactional service algorithm | `server/internal/service/issue_external_identity.go` |
-| DB identity table and same-workspace enforcement | `server/migrations/180_issue_external_identity.up.sql` |
+| DB identity table and same-workspace enforcement | `server/migrations/194_issue_external_identity.up.sql` and `195_issue_external_identity_workspace_guard.up.sql` |
 
 ## Verification command
 

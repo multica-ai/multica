@@ -27,11 +27,12 @@ type externalIdentityAliasRequest struct {
 }
 
 type upsertIssueExternalIdentityRequest struct {
-	Nonce         string                         `json:"nonce"`
-	Aliases       []externalIdentityAliasRequest `json:"aliases"`
-	TargetIssueID *string                        `json:"target_issue_id"`
-	Create        *CreateIssueRequest            `json:"create"`
-	Metadata      json.RawMessage                `json:"metadata"`
+	Nonce                string                         `json:"nonce"`
+	WriteReceiptProtocol string                         `json:"write_receipt_protocol,omitempty"`
+	Aliases              []externalIdentityAliasRequest `json:"aliases"`
+	TargetIssueID        *string                        `json:"target_issue_id"`
+	Create               *CreateIssueRequest            `json:"create"`
+	Metadata             json.RawMessage                `json:"metadata"`
 }
 
 func (h *Handler) UpsertIssueExternalIdentity(w http.ResponseWriter, r *http.Request) {
@@ -49,6 +50,14 @@ func (h *Handler) UpsertIssueExternalIdentity(w http.ResponseWriter, r *http.Req
 	}
 	if err := dec.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
 		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	receiptProtocol := req.WriteReceiptProtocol
+	if receiptProtocol == "" {
+		receiptProtocol = authority.WriteReceiptProtocolV1
+	}
+	if receiptProtocol != authority.WriteReceiptProtocolV1 && receiptProtocol != authority.WriteReceiptProtocolV2 {
+		writeError(w, http.StatusBadRequest, "unsupported write receipt protocol")
 		return
 	}
 	if len(req.Aliases) == 0 {
@@ -174,9 +183,13 @@ func (h *Handler) UpsertIssueExternalIdentity(w http.ResponseWriter, r *http.Req
 		return
 	}
 	digest := sha256.Sum256(body)
+	receiptWorkspaceID := ""
+	if receiptProtocol == authority.WriteReceiptProtocolV2 {
+		receiptWorkspaceID = util.UUIDToString(res.Issue.WorkspaceID)
+	}
 	receipt, err := h.AuthoritySigner.SignWriteReceipt(authority.WriteReceiptStatement{
-		Protocol: authority.WriteReceiptProtocolVersion, Operation: authority.OperationIssueUpsertExternal,
-		RequestSHA256: fmt.Sprintf("%x", digest), ResourceID: issue.ID, WorkspaceID: util.UUIDToString(res.Issue.WorkspaceID), Nonce: req.Nonce,
+		Protocol: receiptProtocol, Operation: authority.OperationIssueUpsertExternal,
+		RequestSHA256: fmt.Sprintf("%x", digest), ResourceID: issue.ID, WorkspaceID: receiptWorkspaceID, Nonce: req.Nonce,
 		DBIdentity: dbIdentity, IssuedAt: time.Now().UTC(), ServerCommit: h.ServerCommit,
 	})
 	if err != nil {

@@ -181,3 +181,48 @@ func TestIssueUpsertExternalRejectsUnboundOrMalformedReceipt(t *testing.T) {
 		})
 	}
 }
+
+func TestIssueUpsertExternalNewClientOldServerRejectsBeforeMutation(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	pub, _, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seedAuthorityPinnedConfig(t, "http://multica.test", pub)
+	var mutations int
+	oldTransport := http.DefaultTransport
+	http.DefaultTransport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		raw, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		// Model the old server's strict pre-mutation request decoder.
+		var oldRequest struct {
+			Nonce   string `json:"nonce"`
+			Aliases []struct {
+				Namespace  string `json:"namespace"`
+				ExternalID string `json:"external_id"`
+			} `json:"aliases"`
+			TargetIssueID *string         `json:"target_issue_id"`
+			Create        map[string]any  `json:"create"`
+			Metadata      json.RawMessage `json:"metadata"`
+		}
+		dec := json.NewDecoder(strings.NewReader(string(raw)))
+		dec.DisallowUnknownFields()
+		if err := dec.Decode(&oldRequest); err != nil {
+			return &http.Response{StatusCode: http.StatusBadRequest, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"error":"invalid request body"}`))}, nil
+		}
+		mutations++
+		return &http.Response{StatusCode: http.StatusInternalServerError, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"error":"old server mutated"}`))}, nil
+	})
+	t.Cleanup(func() { http.DefaultTransport = oldTransport })
+	cmd := newIssueUpsertExternalTestCmd()
+	_ = cmd.Flags().Set("alias", "github=123")
+	_ = cmd.Flags().Set("title", "Imported")
+	if _, err := captureStdout(t, func() error { return runIssueUpsertExternal(cmd, nil) }); err == nil {
+		t.Fatal("new client unexpectedly succeeded against old server")
+	}
+	if mutations != 0 {
+		t.Fatalf("old server mutations=%d, want 0 (capability must be rejected before mutation)", mutations)
+	}
+}

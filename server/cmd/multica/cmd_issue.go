@@ -1261,6 +1261,7 @@ func runIssueUpsertExternal(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("generate write nonce: %w", err)
 	}
 	body["nonce"] = nonce
+	body["write_receipt_protocol"] = authority.WriteReceiptProtocolV2
 	rawRequest, err := json.Marshal(body)
 	if err != nil {
 		return fmt.Errorf("encode external upsert request: %w", err)
@@ -1295,7 +1296,7 @@ func runIssueUpsertExternal(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 	issueID := strVal(result, "id")
-	expected := authority.WriteReceiptExpectation{Operation: authority.OperationIssueUpsertExternal, RequestSHA256: fmt.Sprintf("%x", requestDigest), ResourceID: issueID, WorkspaceID: client.WorkspaceID, Nonce: nonce}
+	expected := authority.WriteReceiptExpectation{Protocol: authority.WriteReceiptProtocolV2, Operation: authority.OperationIssueUpsertExternal, RequestSHA256: fmt.Sprintf("%x", requestDigest), ResourceID: issueID, WorkspaceID: client.WorkspaceID, Nonce: nonce}
 	if err := authority.VerifyBoundWriteReceipt(envelope.Receipt, expected, *cfg.AuthorityPin, client.BaseURL, time.Now(), 2*time.Minute, 30*time.Second); err != nil {
 		return fmt.Errorf("verify write receipt: %w", err)
 	}

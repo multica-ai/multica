@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
@@ -294,5 +295,46 @@ func TestValidateNonceRequiresStrictCanonicalBase64URL32Bytes(t *testing.T) {
 		if _, err := ValidateNonce(nonce); err == nil {
 			t.Fatalf("ValidateNonce(%q) succeeded", nonce)
 		}
+	}
+}
+
+func TestWriteReceiptV1RoundTripPreservesLegacyJSONShape(t *testing.T) {
+	stmt, pub, priv := testStatement(t)
+	digest := sha256.Sum256([]byte(`{"nonce":"legacy"}`))
+	receipt, err := SignWriteReceipt(priv, WriteReceiptStatement{
+		Protocol:      WriteReceiptProtocolV1,
+		Operation:     OperationIssueUpsertExternal,
+		RequestSHA256: fmt.Sprintf("%x", digest),
+		ResourceID:    "11111111-1111-1111-1111-111111111111",
+		Nonce:         stmt.Nonce,
+		AuthorityID:   stmt.AuthorityID,
+		DBIdentity:    stmt.DBIdentity,
+		IssuedAt:      stmt.IssuedAt,
+		ServerCommit:  stmt.ServerCommit,
+	})
+	if err != nil {
+		t.Fatalf("SignWriteReceipt(v1): %v", err)
+	}
+	raw, err := json.Marshal(receipt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "workspace_id") {
+		t.Fatalf("v1 receipt added a field unknown to strict legacy clients: %s", raw)
+	}
+	pin := Pin{ServerURL: "https://api.multica.test", PublicKey: EncodePublicKey(pub), AuthorityID: stmt.AuthorityID, DBIdentity: stmt.DBIdentity}
+	expected := WriteReceiptExpectation{
+		Protocol:      WriteReceiptProtocolV1,
+		Operation:     receipt.Operation,
+		RequestSHA256: receipt.RequestSHA256,
+		ResourceID:    receipt.ResourceID,
+		Nonce:         receipt.Nonce,
+	}
+	if err := VerifyBoundWriteReceipt(receipt, expected, pin, pin.ServerURL, stmt.IssuedAt.Add(time.Second), 2*time.Minute, 30*time.Second); err != nil {
+		t.Fatalf("VerifyBoundWriteReceipt(v1): %v", err)
+	}
+	expected.Protocol = WriteReceiptProtocolV2
+	if err := VerifyBoundWriteReceipt(receipt, expected, pin, pin.ServerURL, stmt.IssuedAt.Add(time.Second), 2*time.Minute, 30*time.Second); err == nil {
+		t.Fatal("v2 expectation accepted downgraded v1 receipt")
 	}
 }

@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"bytes"
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/json"
@@ -83,7 +84,7 @@ func TestUpsertIssueExternalIdentityConcurrentIndependentRequestsConverge(t *tes
 			<-start
 			nonce, _ := authority.GenerateNonce(nil)
 			req := newRequest(http.MethodPost, "/api/issues/upsert-external", map[string]any{
-				"nonce": nonce, "aliases": []map[string]any{{"namespace": "github-node", "external_id": externalID}}, "create": map[string]any{"title": title},
+				"nonce": nonce, "write_receipt_protocol": authority.WriteReceiptProtocolV2, "aliases": []map[string]any{{"namespace": "github-node", "external_id": externalID}}, "create": map[string]any{"title": title},
 			})
 			w := httptest.NewRecorder()
 			testHandler.UpsertIssueExternalIdentity(w, req)
@@ -157,5 +158,82 @@ func TestExternalUpsertAuthorizationRejectsNamespaceOutsideAllowlist(t *testing.
 	status, _ := h.externalUpsertAuthorizationError(r, []externalIdentityAliasRequest{{Namespace: "github", ExternalID: "123"}})
 	if status != http.StatusForbidden {
 		t.Fatalf("status = %d, want 403", status)
+	}
+}
+
+func TestUpsertIssueExternalIdentityOldClientGetsStrictV1Receipt(t *testing.T) {
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldCfg, oldSigner, oldCommit := testHandler.cfg, testHandler.AuthoritySigner, testHandler.ServerCommit
+	testHandler.cfg.ExternalUpsertPrincipalID = testUserID
+	testHandler.cfg.ExternalUpsertNamespaces = []string{"github-node"}
+	testHandler.AuthoritySigner = &authority.Signer{AuthorityID: "test-authority", PrivateKey: priv, PublicKey: pub}
+	testHandler.ServerCommit = "test-commit"
+	t.Cleanup(func() {
+		testHandler.cfg = oldCfg
+		testHandler.AuthoritySigner = oldSigner
+		testHandler.ServerCommit = oldCommit
+	})
+
+	externalID := "old-client-v1-" + strings.ReplaceAll(t.Name(), "/", "-")
+	title := "Old client new server rollout"
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(t.Context(), `DELETE FROM issue WHERE workspace_id=$1 AND title=$2`, testWorkspaceID, title)
+	})
+	nonce, err := authority.GenerateNonce(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := newRequest(http.MethodPost, "/api/issues/upsert-external", map[string]any{
+		"nonce":   nonce,
+		"aliases": []map[string]any{{"namespace": "github-node", "external_id": externalID}},
+		"create":  map[string]any{"title": title},
+	})
+	w := httptest.NewRecorder()
+	testHandler.UpsertIssueExternalIdentity(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("status=%d body=%s, want 201", w.Code, w.Body.String())
+	}
+
+	// Model the old client's strict response shape: workspace_id is unknown in v1.
+	var oldEnvelope struct {
+		Issue   json.RawMessage `json:"issue"`
+		Receipt struct {
+			Protocol      string               `json:"protocol"`
+			Operation     string               `json:"operation"`
+			RequestSHA256 string               `json:"request_sha256"`
+			ResourceID    string               `json:"resource_id"`
+			Nonce         string               `json:"nonce"`
+			AuthorityID   string               `json:"authority_id"`
+			DBIdentity    authority.DBIdentity `json:"db_identity"`
+			IssuedAt      string               `json:"issued_at"`
+			ServerCommit  string               `json:"server_commit"`
+			Signature     string               `json:"signature"`
+		} `json:"receipt"`
+	}
+	dec := json.NewDecoder(bytes.NewReader(w.Body.Bytes()))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&oldEnvelope); err != nil {
+		t.Fatalf("old strict client rejected new-server v1 response after commit: %v; body=%s", err, w.Body.String())
+	}
+	if oldEnvelope.Receipt.Protocol != "multica-authority-write-receipt-v1" {
+		t.Fatalf("protocol=%q, want v1", oldEnvelope.Receipt.Protocol)
+	}
+}
+
+func TestUpsertIssueExternalIdentityRejectsUnsupportedReceiptProtocolBeforeDB(t *testing.T) {
+	nonce, err := authority.GenerateNonce(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/issues/upsert-external", strings.NewReader(
+		`{"nonce":"`+nonce+`","write_receipt_protocol":"multica-authority-write-receipt-v999","aliases":[{"namespace":"github-node","external_id":"123"}],"create":{"title":"Imported"}}`,
+	))
+	w := httptest.NewRecorder()
+	(&Handler{}).UpsertIssueExternalIdentity(w, req)
+	if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), "unsupported write receipt protocol") {
+		t.Fatalf("status=%d body=%s, want pre-DB 400 unsupported protocol", w.Code, w.Body.String())
 	}
 }

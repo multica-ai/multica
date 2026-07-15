@@ -1,4 +1,4 @@
--- Forward-repair migration 180 for databases that applied an earlier
+-- Forward-repair migration 194 for databases that applied an earlier
 -- workspace-composite foreign key. Keep issue(id) as the sole referenced
 -- key and enforce workspace agreement with migration-owned triggers.
 LOCK TABLE issue, issue_external_identity IN SHARE ROW EXCLUSIVE MODE;

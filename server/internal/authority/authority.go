@@ -16,7 +16,11 @@ import (
 )
 
 const ProtocolVersion = "multica-authority-attestation-v1"
-const WriteReceiptProtocolVersion = "multica-authority-write-receipt-v2"
+const WriteReceiptProtocolV1 = "multica-authority-write-receipt-v1"
+const WriteReceiptProtocolV2 = "multica-authority-write-receipt-v2"
+
+// WriteReceiptProtocolVersion is the newest protocol emitted by current clients.
+const WriteReceiptProtocolVersion = WriteReceiptProtocolV2
 const OperationIssueUpsertExternal = "issue.upsert-external"
 
 type DBIdentity struct {
@@ -62,7 +66,7 @@ type WriteReceipt struct {
 	Operation     string     `json:"operation"`
 	RequestSHA256 string     `json:"request_sha256"`
 	ResourceID    string     `json:"resource_id"`
-	WorkspaceID   string     `json:"workspace_id"`
+	WorkspaceID   string     `json:"workspace_id,omitempty"`
 	Nonce         string     `json:"nonce"`
 	AuthorityID   string     `json:"authority_id"`
 	DBIdentity    DBIdentity `json:"db_identity"`
@@ -72,6 +76,7 @@ type WriteReceipt struct {
 }
 
 type WriteReceiptExpectation struct {
+	Protocol      string
 	Operation     string
 	RequestSHA256 string
 	ResourceID    string
@@ -244,7 +249,7 @@ func Verify(att Attestation, pin Pin, serverURL string, now time.Time, maxAge, f
 }
 
 func VerifyWriteReceipt(receipt WriteReceipt, pin Pin, serverURL string, now time.Time, maxAge, futureSkew time.Duration) error {
-	if receipt.Protocol != WriteReceiptProtocolVersion {
+	if receipt.Protocol != WriteReceiptProtocolV1 && receipt.Protocol != WriteReceiptProtocolV2 {
 		return errors.New("unexpected write receipt protocol")
 	}
 	if _, err := ValidateNonce(receipt.Nonce); err != nil {
@@ -306,6 +311,9 @@ func VerifyWriteReceipt(receipt WriteReceipt, pin Pin, serverURL string, now tim
 }
 
 func VerifyBoundWriteReceipt(receipt WriteReceipt, expected WriteReceiptExpectation, pin Pin, serverURL string, now time.Time, maxAge, futureSkew time.Duration) error {
+	if expected.Protocol != "" && receipt.Protocol != expected.Protocol {
+		return errors.New("write receipt protocol mismatch")
+	}
 	if receipt.Operation != expected.Operation {
 		return errors.New("write receipt operation mismatch")
 	}
@@ -315,7 +323,7 @@ func VerifyBoundWriteReceipt(receipt WriteReceipt, expected WriteReceiptExpectat
 	if receipt.ResourceID != expected.ResourceID || expected.ResourceID == "" {
 		return errors.New("write receipt resource mismatch")
 	}
-	if receipt.WorkspaceID != expected.WorkspaceID || expected.WorkspaceID == "" {
+	if receipt.Protocol == WriteReceiptProtocolV2 && (receipt.WorkspaceID != expected.WorkspaceID || expected.WorkspaceID == "") {
 		return errors.New("write receipt workspace mismatch")
 	}
 	if receipt.Nonce != expected.Nonce {
@@ -368,7 +376,7 @@ func CanonicalPayload(stmt Statement) ([]byte, error) {
 }
 
 func CanonicalWriteReceiptPayload(stmt WriteReceiptStatement) ([]byte, error) {
-	if stmt.Protocol != WriteReceiptProtocolVersion {
+	if stmt.Protocol != WriteReceiptProtocolV1 && stmt.Protocol != WriteReceiptProtocolV2 {
 		return nil, errors.New("unsupported write receipt protocol")
 	}
 	if stmt.Operation == "" || len(stmt.Operation) > 128 {
@@ -380,8 +388,11 @@ func CanonicalWriteReceiptPayload(stmt WriteReceiptStatement) ([]byte, error) {
 	if strings.TrimSpace(stmt.ResourceID) == "" {
 		return nil, errors.New("resource id is required")
 	}
-	if strings.TrimSpace(stmt.WorkspaceID) == "" {
+	if stmt.Protocol == WriteReceiptProtocolV2 && strings.TrimSpace(stmt.WorkspaceID) == "" {
 		return nil, errors.New("workspace id is required")
+	}
+	if stmt.Protocol == WriteReceiptProtocolV1 && stmt.WorkspaceID != "" {
+		return nil, errors.New("workspace id is not supported by write receipt v1")
 	}
 	if _, err := ValidateNonce(stmt.Nonce); err != nil {
 		return nil, err
@@ -400,10 +411,16 @@ func CanonicalWriteReceiptPayload(stmt WriteReceiptStatement) ([]byte, error) {
 	}
 	fields := [][2]string{
 		{"protocol", stmt.Protocol}, {"operation", stmt.Operation}, {"request_sha256", stmt.RequestSHA256},
-		{"resource_id", stmt.ResourceID}, {"workspace_id", stmt.WorkspaceID}, {"nonce", stmt.Nonce}, {"authority_id", stmt.AuthorityID},
-		{"db_system_identifier", stmt.DBIdentity.SystemIdentifier}, {"db_oid", fmt.Sprintf("%d", stmt.DBIdentity.DatabaseOID)},
-		{"db_name", stmt.DBIdentity.DatabaseName}, {"issued_at", stmt.IssuedAt.UTC().Format(time.RFC3339Nano)}, {"server_commit", stmt.ServerCommit},
+		{"resource_id", stmt.ResourceID},
 	}
+	if stmt.Protocol == WriteReceiptProtocolV2 {
+		fields = append(fields, [2]string{"workspace_id", stmt.WorkspaceID})
+	}
+	fields = append(fields,
+		[2]string{"nonce", stmt.Nonce}, [2]string{"authority_id", stmt.AuthorityID},
+		[2]string{"db_system_identifier", stmt.DBIdentity.SystemIdentifier}, [2]string{"db_oid", fmt.Sprintf("%d", stmt.DBIdentity.DatabaseOID)},
+		[2]string{"db_name", stmt.DBIdentity.DatabaseName}, [2]string{"issued_at", stmt.IssuedAt.UTC().Format(time.RFC3339Nano)}, [2]string{"server_commit", stmt.ServerCommit},
+	)
 	var b []byte
 	b = append(b, []byte("multica-authority-write-receipt-signed-payload")...)
 	b = append(b, 0)

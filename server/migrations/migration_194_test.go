@@ -13,24 +13,24 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
-func TestMigration180OwnsOnlyItsObjectsAndDoesNotMutateIssueConstraints(t *testing.T) {
-	upBytes, err := os.ReadFile("180_issue_external_identity.up.sql")
+func TestMigration194OwnsOnlyItsObjectsAndDoesNotMutateIssueConstraints(t *testing.T) {
+	upBytes, err := os.ReadFile("194_issue_external_identity.up.sql")
 	if err != nil {
 		t.Fatal(err)
 	}
-	downBytes, err := os.ReadFile("180_issue_external_identity.down.sql")
+	downBytes, err := os.ReadFile("194_issue_external_identity.down.sql")
 	if err != nil {
 		t.Fatal(err)
 	}
 	up, down := strings.ToLower(string(upBytes)), strings.ToLower(string(downBytes))
 	for _, forbidden := range []string{"uq_issue_workspace_id", "alter table issue", "unique (workspace_id, id)"} {
 		if strings.Contains(up, forbidden) || strings.Contains(down, forbidden) {
-			t.Fatalf("migration 180 contains destructive/pre-existing issue constraint operation %q", forbidden)
+			t.Fatalf("migration 194 contains destructive/pre-existing issue constraint operation %q", forbidden)
 		}
 	}
 	for _, required := range []string{"references issue(id)", "issue_external_identity_workspace_180", "issue_external_identity_issue_workspace_180", "for share"} {
 		if !strings.Contains(up, required) {
-			t.Fatalf("migration 180 missing owned invariant component %q", required)
+			t.Fatalf("migration 194 missing owned invariant component %q", required)
 		}
 	}
 	for _, required := range []string{
@@ -46,7 +46,7 @@ func TestMigration180OwnsOnlyItsObjectsAndDoesNotMutateIssueConstraints(t *testi
 	}
 }
 
-func TestMigration180RejectsMovingAnIssueAwayFromItsAliasWorkspace(t *testing.T) {
+func TestMigration194RejectsMovingAnIssueAwayFromItsAliasWorkspace(t *testing.T) {
 	dbURL := os.Getenv("DATABASE_URL")
 	if dbURL == "" {
 		t.Skip("DATABASE_URL is required for the DB-backed migration test")
@@ -63,7 +63,7 @@ func TestMigration180RejectsMovingAnIssueAwayFromItsAliasWorkspace(t *testing.T)
 	}
 	defer tx.Rollback(ctx)
 
-	schemaName := fmt.Sprintf("migration_180_%d", time.Now().UnixNano())
+	schemaName := fmt.Sprintf("migration_194_%d", time.Now().UnixNano())
 	schema := pgx.Identifier{schemaName}.Sanitize()
 	if _, err := tx.Exec(ctx, "CREATE SCHEMA "+schema); err != nil {
 		t.Fatalf("create schema: %v", err)
@@ -74,12 +74,12 @@ func TestMigration180RejectsMovingAnIssueAwayFromItsAliasWorkspace(t *testing.T)
 	if _, err := tx.Exec(ctx, `CREATE TABLE issue (id UUID PRIMARY KEY, workspace_id UUID NOT NULL)`); err != nil {
 		t.Fatalf("create minimal issue table: %v", err)
 	}
-	up, err := os.ReadFile("180_issue_external_identity.up.sql")
+	up, err := os.ReadFile("194_issue_external_identity.up.sql")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := tx.Exec(ctx, string(up)); err != nil {
-		t.Fatalf("apply migration 180 up: %v", err)
+		t.Fatalf("apply migration 194 up: %v", err)
 	}
 
 	const issueID = "11111111-1111-1111-1111-111111111111"
@@ -97,7 +97,7 @@ func TestMigration180RejectsMovingAnIssueAwayFromItsAliasWorkspace(t *testing.T)
 	_, moveErr := tx.Exec(ctx, `UPDATE issue SET workspace_id=$1 WHERE id=$2`, otherWorkspace, issueID)
 	var pgErr *pgconn.PgError
 	if !errors.As(moveErr, &pgErr) || pgErr.Code != "23503" || !strings.Contains(pgErr.Message, "external identity issue workspace cannot change") {
-		t.Fatalf("workspace move error = %v, want migration 180 same-workspace guard", moveErr)
+		t.Fatalf("workspace move error = %v, want migration 194 same-workspace guard", moveErr)
 	}
 	if _, err := tx.Exec(ctx, "ROLLBACK TO SAVEPOINT workspace_move"); err != nil {
 		t.Fatalf("rollback expected error: %v", err)
@@ -110,12 +110,12 @@ func TestMigration180RejectsMovingAnIssueAwayFromItsAliasWorkspace(t *testing.T)
 		t.Fatalf("workspace invariant changed: issue=%s alias=%s", issueWorkspace, aliasWorkspace)
 	}
 
-	down, err := os.ReadFile("180_issue_external_identity.down.sql")
+	down, err := os.ReadFile("194_issue_external_identity.down.sql")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := tx.Exec(ctx, string(down)); err != nil {
-		t.Fatalf("apply migration 180 down: %v", err)
+		t.Fatalf("apply migration 194 down: %v", err)
 	}
 	var aliasTable *string
 	if err := tx.QueryRow(ctx, `SELECT to_regclass($1)::text`, schemaName+".issue_external_identity").Scan(&aliasTable); err != nil {
@@ -133,7 +133,7 @@ func TestMigration180RejectsMovingAnIssueAwayFromItsAliasWorkspace(t *testing.T)
 	}
 }
 
-func TestMigration180SerializesAliasInsertWithIssueWorkspaceMove(t *testing.T) {
+func TestMigration194SerializesAliasInsertWithIssueWorkspaceMove(t *testing.T) {
 	dbURL := os.Getenv("DATABASE_URL")
 	if dbURL == "" {
 		t.Skip("DATABASE_URL is required for the DB-backed migration test")
@@ -150,7 +150,7 @@ func TestMigration180SerializesAliasInsertWithIssueWorkspaceMove(t *testing.T) {
 	}
 	defer moveConn.Close(ctx)
 
-	schema := pgx.Identifier{fmt.Sprintf("migration_180_race_%d", time.Now().UnixNano())}.Sanitize()
+	schema := pgx.Identifier{fmt.Sprintf("migration_194_race_%d", time.Now().UnixNano())}.Sanitize()
 	if _, err := aliasConn.Exec(ctx, "CREATE SCHEMA "+schema); err != nil {
 		t.Fatalf("create schema: %v", err)
 	}
@@ -164,12 +164,12 @@ func TestMigration180SerializesAliasInsertWithIssueWorkspaceMove(t *testing.T) {
 	if _, err := aliasConn.Exec(ctx, `CREATE TABLE issue (id UUID PRIMARY KEY, workspace_id UUID NOT NULL)`); err != nil {
 		t.Fatalf("create minimal issue table: %v", err)
 	}
-	up, err := os.ReadFile("180_issue_external_identity.up.sql")
+	up, err := os.ReadFile("194_issue_external_identity.up.sql")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := aliasConn.Exec(ctx, string(up)); err != nil {
-		t.Fatalf("apply migration 180 up: %v", err)
+		t.Fatalf("apply migration 194 up: %v", err)
 	}
 
 	const issueID = "22222222-2222-2222-2222-222222222222"
@@ -223,7 +223,7 @@ func TestMigration180SerializesAliasInsertWithIssueWorkspaceMove(t *testing.T) {
 	moveErr := <-moveDone
 	var pgErr *pgconn.PgError
 	if !errors.As(moveErr, &pgErr) || pgErr.Code != "23503" || !strings.Contains(pgErr.Message, "external identity issue workspace cannot change") {
-		t.Fatalf("concurrent workspace move error = %v, want migration 180 same-workspace guard", moveErr)
+		t.Fatalf("concurrent workspace move error = %v, want migration 194 same-workspace guard", moveErr)
 	}
 
 	var issueWorkspace, aliasWorkspace string

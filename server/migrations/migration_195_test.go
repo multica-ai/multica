@@ -13,7 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
-func TestMigration181RepairsLegacyCompositeWorkspaceConstraint(t *testing.T) {
+func TestMigration195RepairsLegacyCompositeWorkspaceConstraint(t *testing.T) {
 	dbURL := os.Getenv("DATABASE_URL")
 	if dbURL == "" {
 		t.Skip("DATABASE_URL is required for the DB-backed migration test")
@@ -30,7 +30,7 @@ func TestMigration181RepairsLegacyCompositeWorkspaceConstraint(t *testing.T) {
 	}
 	defer tx.Rollback(ctx)
 
-	schema := pgx.Identifier{fmt.Sprintf("migration_181_%d", time.Now().UnixNano())}.Sanitize()
+	schema := pgx.Identifier{fmt.Sprintf("migration_195_%d", time.Now().UnixNano())}.Sanitize()
 	if _, err := tx.Exec(ctx, "CREATE SCHEMA "+schema); err != nil {
 		t.Fatalf("create schema: %v", err)
 	}
@@ -55,7 +55,7 @@ func TestMigration181RepairsLegacyCompositeWorkspaceConstraint(t *testing.T) {
 				REFERENCES issue(workspace_id, id) ON DELETE CASCADE
 		);
 	`); err != nil {
-		t.Fatalf("create legacy migration 180 shape: %v", err)
+		t.Fatalf("create legacy migration 194 shape: %v", err)
 	}
 
 	const issueID = "33333333-3333-3333-3333-333333333333"
@@ -68,12 +68,12 @@ func TestMigration181RepairsLegacyCompositeWorkspaceConstraint(t *testing.T) {
 		t.Fatalf("insert legacy alias: %v", err)
 	}
 
-	up, err := os.ReadFile("181_issue_external_identity_workspace_guard.up.sql")
+	up, err := os.ReadFile("195_issue_external_identity_workspace_guard.up.sql")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := tx.Exec(ctx, string(up)); err != nil {
-		t.Fatalf("apply migration 181 up: %v", err)
+		t.Fatalf("apply migration 195 up: %v", err)
 	}
 
 	var fkDefinition string
@@ -93,7 +93,7 @@ func TestMigration181RepairsLegacyCompositeWorkspaceConstraint(t *testing.T) {
 		t.Fatalf("inspect broad issue constraint: %v", err)
 	}
 	if broadConstraintCount != 0 {
-		t.Fatalf("migration 181 left %d broad issue constraints", broadConstraintCount)
+		t.Fatalf("migration 195 left %d broad issue constraints", broadConstraintCount)
 	}
 	var aliasCount int
 	if err := tx.QueryRow(ctx, `SELECT count(*) FROM issue_external_identity WHERE issue_id=$1`, issueID).Scan(&aliasCount); err != nil {
@@ -116,16 +116,16 @@ func TestMigration181RepairsLegacyCompositeWorkspaceConstraint(t *testing.T) {
 	}
 
 	// Reapplying the repair is safe for preview/staging databases whose schema
-	// history may include either supported shape of migration 180.
+	// history may include either supported shape of migration 194.
 	if _, err := tx.Exec(ctx, string(up)); err != nil {
-		t.Fatalf("reapply migration 181 up: %v", err)
+		t.Fatalf("reapply migration 195 up: %v", err)
 	}
-	down, err := os.ReadFile("181_issue_external_identity_workspace_guard.down.sql")
+	down, err := os.ReadFile("195_issue_external_identity_workspace_guard.down.sql")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := tx.Exec(ctx, string(down)); err != nil {
-		t.Fatalf("apply migration 181 down: %v", err)
+		t.Fatalf("apply migration 195 down: %v", err)
 	}
 	_, moveErr = tx.Exec(ctx, `UPDATE issue SET workspace_id=$1 WHERE id=$2`, otherWorkspace, issueID)
 	if !errors.As(moveErr, &pgErr) || pgErr.Code != "23503" || !strings.Contains(pgErr.Message, "external identity issue workspace cannot change") {
@@ -133,7 +133,7 @@ func TestMigration181RepairsLegacyCompositeWorkspaceConstraint(t *testing.T) {
 	}
 }
 
-func TestMigration181RefusesExistingWorkspaceMismatch(t *testing.T) {
+func TestMigration195RefusesExistingWorkspaceMismatch(t *testing.T) {
 	dbURL := os.Getenv("DATABASE_URL")
 	if dbURL == "" {
 		t.Skip("DATABASE_URL is required for the DB-backed migration test")
@@ -150,7 +150,7 @@ func TestMigration181RefusesExistingWorkspaceMismatch(t *testing.T) {
 	}
 	defer tx.Rollback(ctx)
 
-	schema := pgx.Identifier{fmt.Sprintf("migration_181_mismatch_%d", time.Now().UnixNano())}.Sanitize()
+	schema := pgx.Identifier{fmt.Sprintf("migration_195_mismatch_%d", time.Now().UnixNano())}.Sanitize()
 	if _, err := tx.Exec(ctx, "CREATE SCHEMA "+schema); err != nil {
 		t.Fatalf("create schema: %v", err)
 	}
@@ -171,7 +171,7 @@ func TestMigration181RefusesExistingWorkspaceMismatch(t *testing.T) {
 	`); err != nil {
 		t.Fatalf("seed mismatched legacy data: %v", err)
 	}
-	up, err := os.ReadFile("181_issue_external_identity_workspace_guard.up.sql")
+	up, err := os.ReadFile("195_issue_external_identity_workspace_guard.up.sql")
 	if err != nil {
 		t.Fatal(err)
 	}
