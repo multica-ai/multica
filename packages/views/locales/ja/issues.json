@@ -8,6 +8,8 @@
   },
   "saved_views": {
     "default": "デフォルト",
+    "custom_views": "カスタムビュー",
+    "no_custom_views": "カスタムビューはまだありません",
     "save_view": "ビューを保存",
     "save": "保存",
     "save_as": "名前を付けて保存",

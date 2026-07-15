@@ -8,6 +8,8 @@
   },
   "saved_views": {
     "default": "기본",
+    "custom_views": "사용자 지정 뷰",
+    "no_custom_views": "아직 사용자 지정 뷰가 없습니다",
     "save_view": "뷰 저장",
     "save": "저장",
     "save_as": "다른 이름으로 저장",

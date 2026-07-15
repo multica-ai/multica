@@ -1,5 +1,6 @@
 "use client";
 
+import type { ReactNode } from "react";
 import { ListTodo } from "lucide-react";
 import type { Issue } from "@multica/core/types";
 import { useIssuesScopeStore } from "@multica/core/issues/stores/issues-scope-store";
@@ -12,9 +13,15 @@ import { IssuesHeader } from "./issues-header";
 function IssuesSurfaceHeader({
   issues,
   isRefreshing,
+  savedViewsControl,
+  isSavedViewActive,
+  onSelectBuiltInView,
 }: {
   issues: Issue[];
   isRefreshing: boolean;
+  savedViewsControl: ReactNode;
+  isSavedViewActive: boolean;
+  onSelectBuiltInView: () => void;
 }) {
   const dateFilter = useViewStore((s) => s.dateFilter);
   const setDateFilter = useViewStore((s) => s.setDateFilter);
@@ -25,6 +32,9 @@ function IssuesSurfaceHeader({
       dateFilter={dateFilter}
       onDateFilterChange={setDateFilter}
       isRefreshing={isRefreshing}
+      savedViewsControl={savedViewsControl}
+      isSavedViewActive={isSavedViewActive}
+      onSelectBuiltInView={onSelectBuiltInView}
     />
   );
 }
@@ -49,10 +59,18 @@ export function IssuesPage() {
         }
         modes={["board", "list", "swimlane"]}
         batchToolbar="list"
-        renderHeader={({ controller }) => (
+        renderHeader={({
+          controller,
+          savedViewsControl,
+          isSavedViewActive,
+          selectBuiltInView,
+        }) => (
           <IssuesSurfaceHeader
             issues={controller.surfaceIssues}
             isRefreshing={controller.isRefreshing}
+            savedViewsControl={savedViewsControl}
+            isSavedViewActive={isSavedViewActive}
+            onSelectBuiltInView={selectBuiltInView}
           />
         )}
         renderEmpty={() => (

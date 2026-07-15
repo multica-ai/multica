@@ -2,7 +2,7 @@
  * @vitest-environment jsdom
  */
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { render, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import {
   getIssueSurfaceViewStore,
   pruneIssueSurfaceViewStates,
@@ -180,6 +180,65 @@ beforeEach(() => {
 });
 
 describe("SavedViewsBar", () => {
+  it("exposes a compact custom-view control and restores the draft for built-in views", async () => {
+    const surfaceKey = "workspace:saved-view-control-test";
+    const store = getIssueSurfaceViewStore(surfaceKey);
+    store.getState().setViewMode("list");
+    store.getState().togglePriorityFilter("high");
+    const onContextChange = vi.fn();
+
+    render(
+      <ViewStoreProvider store={store}>
+        <SavedViewsBar
+          scope={{ type: "workspace", actorKind: "all" }}
+          surfaceKey={surfaceKey}
+          onContextChange={onContextChange}
+        >
+          {({
+            savedViewsControl,
+            isSavedViewActive,
+            selectBuiltInView,
+          }) => (
+            <div>
+              {savedViewsControl}
+              <span data-testid="saved-view-active">
+                {String(isSavedViewActive)}
+              </span>
+              <button type="button" onClick={selectBuiltInView}>
+                All built-in
+              </button>
+            </div>
+          )}
+        </SavedViewsBar>
+      </ViewStoreProvider>,
+    );
+
+    await waitFor(() => expect(store.getState().viewMode).toBe("board"));
+    expect(screen.getByText("Launch focus")).toBeInTheDocument();
+    expect(screen.getByTestId("saved-view-active")).toHaveTextContent("true");
+
+    fireEvent.click(screen.getByText("Launch focus"));
+    await waitFor(() =>
+      expect(screen.getAllByText("Launch focus")).toHaveLength(2),
+    );
+    fireEvent.keyDown(document, { key: "Escape" });
+
+    navigation.replace.mockImplementation((path: string) => {
+      navigation.searchParams = new URL(
+        path,
+        "https://multica.test",
+      ).searchParams;
+    });
+    fireEvent.click(screen.getByRole("button", { name: "All built-in" }));
+
+    expect(navigation.replace).toHaveBeenCalledWith("/acme/issues");
+    expect(store.getState().viewMode).toBe("list");
+    expect(store.getState().priorityFilters).toEqual(["high"]);
+    expect(onContextChange).toHaveBeenLastCalledWith({
+      workspaceActorKind: "all",
+    });
+  });
+
   it("opens the per-surface default when no explicit view is in the URL", async () => {
     navigation.searchParams = new URLSearchParams();
     viewList.current = { views: [savedView()], default_view_id: "view-1" };

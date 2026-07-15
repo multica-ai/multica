@@ -43,12 +43,20 @@ export function MyIssuesPage() {
           }}
           modes={["board", "list", "swimlane"]}
           batchToolbar="list"
-          renderHeader={({ controller }) => (
+          renderHeader={({
+            controller,
+            savedViewsControl,
+            isSavedViewActive,
+            selectBuiltInView,
+          }) => (
             <MyIssuesHeader
               allIssues={controller.surfaceIssues}
               scope={scope}
               onScopeChange={setScope}
               isRefreshing={controller.isRefreshing}
+              savedViewsControl={savedViewsControl}
+              isSavedViewActive={isSavedViewActive}
+              onSelectBuiltInView={selectBuiltInView}
             />
           )}
           renderEmpty={() => (

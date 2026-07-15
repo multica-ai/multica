@@ -8,6 +8,8 @@
   },
   "saved_views": {
     "default": "默认",
+    "custom_views": "自定义视图",
+    "no_custom_views": "还没有自定义视图",
     "save_view": "保存视图",
     "save": "保存",
     "save_as": "另存为",

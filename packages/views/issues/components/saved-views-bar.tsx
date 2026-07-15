@@ -6,11 +6,13 @@ import {
   useMemo,
   useRef,
   useState,
+  type ReactNode,
 } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   BookmarkPlus,
   Check,
+  ChevronDown,
   Copy,
   CopyPlus,
   Ellipsis,
@@ -52,7 +54,9 @@ import {
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuItem,
+  DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@multica/ui/components/ui/dropdown-menu";
@@ -326,12 +330,20 @@ export interface SavedViewsBarProps {
   scope: IssueScope;
   surfaceKey: string;
   onContextChange?: (context: IssueViewDefinitionContext) => void;
+  children?: (context: SavedViewsRenderContext) => ReactNode;
+}
+
+export interface SavedViewsRenderContext {
+  savedViewsControl: ReactNode;
+  isSavedViewActive: boolean;
+  selectBuiltInView: () => void;
 }
 
 export function SavedViewsBar({
   scope,
   surfaceKey,
   onContextChange,
+  children,
 }: SavedViewsBarProps) {
   const { t } = useT("issues");
   const wsId = useWorkspaceId();
@@ -481,9 +493,6 @@ export function SavedViewsBar({
     urlViewId,
   ]);
 
-  if (!apiScope) return null;
-  if (query.error instanceof ApiError && query.error.status === 404) return null;
-
   const dirty = !!activeView && !issueViewDefinitionsEqual(
     currentDefinition,
     activeView.definition,
@@ -587,179 +596,230 @@ export function SavedViewsBar({
     });
   };
 
-  return (
-    <>
-      <div className="flex h-10 shrink-0 items-center gap-1 border-b border-border/70 bg-muted/20 px-2">
-        <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+  const savedViewsAvailable =
+    !!apiScope &&
+    !(query.error instanceof ApiError && query.error.status === 404);
+  const isSavedViewActive = savedViewsAvailable && !!urlViewId;
+
+  const savedViewsControl = savedViewsAvailable ? (
+    <div className="flex shrink-0 items-center gap-1">
+      <DropdownMenu>
+        <DropdownMenuTrigger
+          render={
+            <Button
+              variant="outline"
+              size="sm"
+              className={
+                isSavedViewActive
+                  ? "max-w-52 shrink-0 gap-1.5 bg-accent text-accent-foreground hover:bg-accent/80"
+                  : "max-w-52 shrink-0 gap-1.5 text-muted-foreground"
+              }
+            />
+          }
+        >
+          {activeView?.visibility === "private" ? (
+            <LockKeyhole className="size-3.5 text-muted-foreground" />
+          ) : activeView ? (
+            <Users className="size-3.5 text-muted-foreground" />
+          ) : (
+            <LayoutTemplate className="size-3.5 text-muted-foreground" />
+          )}
+          <span className="truncate">
+            {activeView?.name ?? t(($) => $.saved_views.custom_views)}
+          </span>
+          {dirty && <span className="size-1.5 rounded-full bg-amber-500" />}
+          <ChevronDown className="size-3 text-muted-foreground" />
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="start" className="w-64">
+          <DropdownMenuGroup>
+            <DropdownMenuLabel>
+              {t(($) => $.saved_views.custom_views)}
+            </DropdownMenuLabel>
+            {views.length === 0 ? (
+              <DropdownMenuItem disabled>
+                <span className="text-muted-foreground">
+                  {t(($) => $.saved_views.no_custom_views)}
+                </span>
+              </DropdownMenuItem>
+            ) : (
+              views.map((view) => {
+                const selected = view.id === activeView?.id;
+                return (
+                  <DropdownMenuItem
+                    key={view.id}
+                    onClick={() => {
+                      suppressDefaultRef.current = true;
+                      navigateToView(view.id);
+                    }}
+                  >
+                    {view.visibility === "private" ? (
+                      <LockKeyhole className="text-muted-foreground" />
+                    ) : (
+                      <Users className="text-muted-foreground" />
+                    )}
+                    <span className="min-w-0 flex-1 truncate">{view.name}</span>
+                    {query.data?.default_view_id === view.id && (
+                      <Star className="size-3 fill-current text-amber-500" />
+                    )}
+                    {selected && <Check className="size-3.5" />}
+                  </DropdownMenuItem>
+                );
+              })
+            )}
+          </DropdownMenuGroup>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem
+            onClick={() =>
+              openSaveAs(
+                activeView
+                  ? t(($) => $.saved_views.copy_name, { name: activeView.name })
+                  : "",
+              )
+            }
+          >
+            <BookmarkPlus />
+            {activeView
+              ? t(($) => $.saved_views.save_as)
+              : t(($) => $.saved_views.save_view)}
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+
+      {activeView && dirty && (
+        <>
           <Button
             size="xs"
-            variant={!urlViewId ? "secondary" : "ghost"}
-            className="shrink-0"
-            onClick={restoreDefault}
+            variant="ghost"
+            className="shrink-0 text-muted-foreground"
+            onClick={resetActiveView}
           >
-            {t(($) => $.saved_views.default)}
+            <RotateCcw className="size-3" />
+            {t(($) => $.saved_views.reset)}
           </Button>
-          {query.isPending && (
-            <div className="h-6 w-20 animate-pulse rounded-md bg-muted" />
-          )}
-          {views.map((view) => {
-            const selected = view.id === activeView?.id;
-            return (
-              <Button
-                key={view.id}
-                size="xs"
-                variant={selected ? "secondary" : "ghost"}
-                className="max-w-44 shrink-0 gap-1.5"
-                onClick={() => {
-                  suppressDefaultRef.current = true;
-                  navigateToView(view.id);
-                }}
-              >
-                {view.visibility === "private" ? (
-                  <LockKeyhole className="size-3 text-muted-foreground" />
-                ) : (
-                  <Users className="size-3 text-muted-foreground" />
-                )}
-                <span className="truncate">{view.name}</span>
-                {query.data?.default_view_id === view.id && (
-                  <Star className="size-3 fill-current text-amber-500" />
-                )}
-                {selected && dirty && (
-                  <span className="size-1.5 rounded-full bg-amber-500" />
-                )}
-              </Button>
-            );
-          })}
-        </div>
-
-        {activeView && dirty && (
-          <>
+          {activeView.can_edit && (
             <Button
               size="xs"
-              variant="ghost"
-              className="shrink-0 text-muted-foreground"
-              onClick={resetActiveView}
+              className="shrink-0"
+              disabled={updateView.isPending}
+              onClick={saveActiveView}
             >
-              <RotateCcw className="size-3" />
-              {t(($) => $.saved_views.reset)}
+              <Save className="size-3" />
+              {t(($) => $.saved_views.save)}
             </Button>
-            {activeView.can_edit && (
+          )}
+        </>
+      )}
+
+      {activeView && (
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            render={
               <Button
-                size="xs"
-                className="shrink-0"
-                disabled={updateView.isPending}
-                onClick={saveActiveView}
-              >
-                <Save className="size-3" />
-                {t(($) => $.saved_views.save)}
-              </Button>
+                size="icon-xs"
+                variant="ghost"
+                aria-label={t(($) => $.saved_views.more)}
+              />
+            }
+          >
+            <Ellipsis />
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-52">
+            {activeView.can_edit && (
+              <DropdownMenuItem onClick={() => setRenameView(activeView)}>
+                <Pencil />
+                {t(($) => $.saved_views.rename)}
+              </DropdownMenuItem>
             )}
-          </>
-        )}
-
-        <Button
-          size="xs"
-          variant="ghost"
-          className="shrink-0 text-muted-foreground"
-          onClick={() => openSaveAs(activeView ? t(($) => $.saved_views.copy_name, { name: activeView.name }) : "")}
-        >
-          <BookmarkPlus className="size-3.5" />
-          {activeView ? t(($) => $.saved_views.save_as) : t(($) => $.saved_views.save_view)}
-        </Button>
-
-        {activeView && (
-          <DropdownMenu>
-            <DropdownMenuTrigger
-              render={
-                <Button
-                  size="icon-xs"
-                  variant="ghost"
-                  aria-label={t(($) => $.saved_views.more)}
-                />
-              }
-            >
-              <Ellipsis />
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-52">
-              {activeView.can_edit && (
-                <DropdownMenuItem onClick={() => setRenameView(activeView)}>
-                  <Pencil />
-                  {t(($) => $.saved_views.rename)}
-                </DropdownMenuItem>
-              )}
-              <DropdownMenuItem onClick={duplicateActiveView}>
-                <CopyPlus />
-                {t(($) => $.saved_views.duplicate)}
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                onClick={() => {
-                  void copyText(
-                    navigation.getShareableUrl(
-                      pathWithView(
-                        navigation.pathname,
-                        navigation.searchParams,
-                        activeView.id,
-                      ),
+            <DropdownMenuItem onClick={duplicateActiveView}>
+              <CopyPlus />
+              {t(($) => $.saved_views.duplicate)}
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onClick={() => {
+                void copyText(
+                  navigation.getShareableUrl(
+                    pathWithView(
+                      navigation.pathname,
+                      navigation.searchParams,
+                      activeView.id,
                     ),
-                  ).then((ok) => {
-                    if (ok) toast.success(t(($) => $.saved_views.link_copied));
-                  });
-                }}
-              >
-                <Copy />
-                {t(($) => $.saved_views.copy_link)}
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem
-                onClick={() =>
-                  setDefault.mutate(
-                    defaultIssueViewRequest(apiScope, isDefault ? null : activeView.id),
-                    {
-                      onSuccess: () => toast.success(
+                  ),
+                ).then((ok) => {
+                  if (ok) toast.success(t(($) => $.saved_views.link_copied));
+                });
+              }}
+            >
+              <Copy />
+              {t(($) => $.saved_views.copy_link)}
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              onClick={() => {
+                if (!apiScope) return;
+                setDefault.mutate(
+                  defaultIssueViewRequest(
+                    apiScope,
+                    isDefault ? null : activeView.id,
+                  ),
+                  {
+                    onSuccess: () =>
+                      toast.success(
                         isDefault
                           ? t(($) => $.saved_views.default_cleared)
                           : t(($) => $.saved_views.default_set),
-                      ),
-                    },
-                  )
+                    ),
+                  },
+                );
+              }}
+            >
+              {isDefault ? <StarOff /> : <Star />}
+              {isDefault
+                ? t(($) => $.saved_views.clear_default)
+                : t(($) => $.saved_views.set_default)}
+              {isDefault && <Check className="ml-auto" />}
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onClick={() => {
+                if (isPinned) {
+                  deletePin.mutate({ itemType: "view", itemId: activeView.id });
+                } else {
+                  createPin.mutate({
+                    item_type: "view",
+                    item_id: activeView.id,
+                  });
                 }
-              >
-                {isDefault ? <StarOff /> : <Star />}
-                {isDefault
-                  ? t(($) => $.saved_views.clear_default)
-                  : t(($) => $.saved_views.set_default)}
-                {isDefault && <Check className="ml-auto" />}
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                onClick={() => {
-                  if (isPinned) {
-                    deletePin.mutate({ itemType: "view", itemId: activeView.id });
-                  } else {
-                    createPin.mutate({ item_type: "view", item_id: activeView.id });
-                  }
-                }}
-              >
-                {isPinned ? <PinOff /> : <Pin />}
-                {isPinned
-                  ? t(($) => $.saved_views.unpin)
-                  : t(($) => $.saved_views.pin)}
-              </DropdownMenuItem>
-              {activeView.can_edit && (
-                <>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem
-                    variant="destructive"
-                    onClick={() => setDeleteDialogOpen(true)}
-                  >
-                    <Trash2 />
-                    {t(($) => $.saved_views.delete)}
-                  </DropdownMenuItem>
-                </>
-              )}
-            </DropdownMenuContent>
-          </DropdownMenu>
-        )}
-      </div>
+              }}
+            >
+              {isPinned ? <PinOff /> : <Pin />}
+              {isPinned
+                ? t(($) => $.saved_views.unpin)
+                : t(($) => $.saved_views.pin)}
+            </DropdownMenuItem>
+            {activeView.can_edit && (
+              <>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  variant="destructive"
+                  onClick={() => setDeleteDialogOpen(true)}
+                >
+                  <Trash2 />
+                  {t(($) => $.saved_views.delete)}
+                </DropdownMenuItem>
+              </>
+            )}
+          </DropdownMenuContent>
+        </DropdownMenu>
+      )}
+    </div>
+  ) : null;
+
+  return (
+    <>
+      {children?.({
+        savedViewsControl,
+        isSavedViewActive,
+        selectBuiltInView: restoreDefault,
+      })}
 
       <SaveViewDialog
         open={saveDialogOpen}

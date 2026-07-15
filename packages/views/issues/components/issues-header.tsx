@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import {
   ArrowDown,
   ArrowUp,
@@ -750,12 +750,18 @@ export function IssuesHeader({
   dateFilter = null,
   onDateFilterChange,
   isRefreshing = false,
+  savedViewsControl,
+  isSavedViewActive = false,
+  onSelectBuiltInView,
 }: {
   scopedIssues: Issue[];
   allowGantt?: boolean;
   dateFilter?: IssueDateFilter | null;
   onDateFilterChange?: (filter: IssueDateFilter | null) => void;
   isRefreshing?: boolean;
+  savedViewsControl?: ReactNode;
+  isSavedViewActive?: boolean;
+  onSelectBuiltInView?: () => void;
 }) {
   const { t } = useT("issues");
   const scope = useIssuesScopeStore((s) => s.scope);
@@ -788,58 +794,69 @@ export function IssuesHeader({
   };
 
   const scopeLabel = t(($) => $.scope[SCOPE_LABEL_KEY[scope]]);
+  const selectScope = (nextScope: IssuesScope) => {
+    if (isSavedViewActive) onSelectBuiltInView?.();
+    setScope(nextScope);
+  };
 
   return (
     <div className="h-12 shrink-0 overflow-x-auto px-4 [-webkit-overflow-scrolling:touch]">
       <div className="flex h-full w-max min-w-full items-center justify-between gap-2">
-        {/* Left: scope buttons */}
-        <div className="hidden shrink-0 items-center gap-1 md:flex">
-          {SCOPE_VALUES.map((s) => (
-            <Tooltip key={s}>
-              <TooltipTrigger
-                render={
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className={
-                      scope === s
-                        ? "bg-accent text-accent-foreground hover:bg-accent/80"
-                        : "text-muted-foreground"
-                    }
-                    onClick={() => setScope(s)}
-                  >
-                    {t(($) => $.scope[SCOPE_LABEL_KEY[s]])}
-                  </Button>
-                }
-              />
-              <TooltipContent side="bottom">{t(($) => $.scope[SCOPE_DESC_KEY[s]])}</TooltipContent>
-            </Tooltip>
-          ))}
-        </div>
+        <div className="flex min-w-0 shrink-0 items-center gap-1">
+          {/* Built-in views stay visible; custom views use the adjacent picker. */}
+          <div className="hidden shrink-0 items-center gap-1 md:flex">
+            {SCOPE_VALUES.map((s) => (
+              <Tooltip key={s}>
+                <TooltipTrigger
+                  render={
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className={
+                        !isSavedViewActive && scope === s
+                          ? "bg-accent text-accent-foreground hover:bg-accent/80"
+                          : "text-muted-foreground"
+                      }
+                      onClick={() => selectScope(s)}
+                    >
+                      {t(($) => $.scope[SCOPE_LABEL_KEY[s]])}
+                    </Button>
+                  }
+                />
+                <TooltipContent side="bottom">{t(($) => $.scope[SCOPE_DESC_KEY[s]])}</TooltipContent>
+              </Tooltip>
+            ))}
+          </div>
 
-        <DropdownMenu>
-          <DropdownMenuTrigger
-            render={
-              <Button
-                variant="outline"
-                size="sm"
-                className="shrink-0 gap-1 text-muted-foreground md:hidden"
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              render={
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="shrink-0 gap-1 text-muted-foreground md:hidden"
+                >
+                  <span className="truncate">{scopeLabel}</span>
+                  <ChevronDown className="size-3 text-muted-foreground" />
+                </Button>
+              }
+            />
+            <DropdownMenuContent align="start" className="w-auto">
+              <DropdownMenuRadioGroup
+                value={isSavedViewActive ? "" : scope}
+                onValueChange={(value) => selectScope(value as IssuesScope)}
               >
-                <span className="truncate">{scopeLabel}</span>
-                <ChevronDown className="size-3 text-muted-foreground" />
-              </Button>
-            }
-          />
-          <DropdownMenuContent align="start" className="w-auto">
-            <DropdownMenuRadioGroup value={scope} onValueChange={(value) => setScope(value as IssuesScope)}>
-              {SCOPE_VALUES.map((s) => (
-                <DropdownMenuRadioItem key={s} value={s}>
-                  {t(($) => $.scope[SCOPE_LABEL_KEY[s]])}
-                </DropdownMenuRadioItem>
-              ))}
-            </DropdownMenuRadioGroup>
-          </DropdownMenuContent>
-        </DropdownMenu>
+                {SCOPE_VALUES.map((s) => (
+                  <DropdownMenuRadioItem key={s} value={s}>
+                    {t(($) => $.scope[SCOPE_LABEL_KEY[s]])}
+                  </DropdownMenuRadioItem>
+                ))}
+              </DropdownMenuRadioGroup>
+            </DropdownMenuContent>
+          </DropdownMenu>
+
+          {savedViewsControl}
+        </div>
 
         <div className="flex shrink-0 items-center gap-1">
           {agentRunningFilter && (

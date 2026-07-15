@@ -15,7 +15,10 @@ import { BoardView } from "../components/board-view";
 import { BatchActionToolbar } from "../components/batch-action-toolbar";
 import { GanttView } from "../components/gantt-view";
 import { IssuesHeader } from "../components/issues-header";
-import { SavedViewsBar } from "../components/saved-views-bar";
+import {
+  SavedViewsBar,
+  type SavedViewsRenderContext,
+} from "../components/saved-views-bar";
 import { ListView } from "../components/list-view";
 import { SwimLaneView } from "../components/swimlane-view";
 import { useT } from "../../i18n";
@@ -28,7 +31,7 @@ import {
   type IssueSurfaceController,
 } from "./use-issue-surface-controller";
 
-export interface IssueSurfaceRenderContext {
+export interface IssueSurfaceRenderContext extends SavedViewsRenderContext {
   controller: IssueSurfaceController;
   issues: Issue[];
 }
@@ -84,31 +87,31 @@ export function IssueSurface({
         scope={scope}
         surfaceKey={resolvedSurfaceKey}
         onContextChange={onSavedViewContextChange}
-      />
-      {/* Remount on data-window change: the list queries keep the previous
-          key's data as a placeholder (keepPreviousData) so sort/filter
-          changes within ONE surface never flash a skeleton — but reusing the
-          mounted observer across windows made project A's cards impersonate
-          project B (with isLoading=false, so no skeleton either) until B's
-          fetch landed. A window-keyed remount gives the new window a fresh
-          observer: cold window → skeleton, warm window → instant cache hit.
-          The window identity is wsId + scope — wsId is required because the
-          workspace layout does not remount on workspace switch and two
-          workspaces share the same scope key (e.g. "workspace:all"). Keyed
-          by data identity, not surfaceKey (view-preference identity). */}
-      <IssueSurfaceContent
-        key={contentKey}
-        scope={scope}
-        modes={modes}
-        createDefaults={createDefaults}
-        renderHeader={renderHeader}
-        renderEmpty={renderEmpty}
-        renderLoading={renderLoading}
-        clientFilter={clientFilter}
-        showClientEmpty={showClientEmpty}
-        batchToolbar={batchToolbar}
-        contentClassName={contentClassName}
-      />
+      >
+        {(savedViews) => (
+          /* Remount on data-window change: the list queries keep the previous
+             key's data as a placeholder (keepPreviousData) so sort/filter
+             changes within ONE surface never flash a skeleton — but reusing
+             the mounted observer across windows made project A's cards
+             impersonate project B until B's fetch landed. SavedViewsBar stays
+             outside this keyed subtree so a scope switch cannot discard its
+             active overlay before it restores the saved context. */
+          <IssueSurfaceContent
+            key={contentKey}
+            scope={scope}
+            modes={modes}
+            createDefaults={createDefaults}
+            renderHeader={renderHeader}
+            renderEmpty={renderEmpty}
+            renderLoading={renderLoading}
+            clientFilter={clientFilter}
+            showClientEmpty={showClientEmpty}
+            batchToolbar={batchToolbar}
+            contentClassName={contentClassName}
+            savedViews={savedViews}
+          />
+        )}
+      </SavedViewsBar>
     </ViewStoreProvider>
   );
 }
@@ -124,10 +127,13 @@ function IssueSurfaceContent({
   showClientEmpty,
   batchToolbar,
   contentClassName,
+  savedViews,
 }: Omit<
   IssueSurfaceComponentProps,
   "surfaceKey" | "onSavedViewContextChange"
->) {
+> & {
+  savedViews: SavedViewsRenderContext;
+}) {
   const { t } = useT("projects");
   const controller = useIssueSurfaceController({
     scope,
@@ -149,8 +155,8 @@ function IssueSurfaceContent({
     [clientFilter, controller.swimlaneIssues],
   );
   const renderContext = useMemo(
-    () => ({ controller, issues }),
-    [controller, issues],
+    () => ({ controller, issues, ...savedViews }),
+    [controller, issues, savedViews],
   );
   const openCreateIssue = useCallback(
     (defaults?: IssueCreateDefaults) => {
@@ -190,6 +196,9 @@ function IssueSurfaceContent({
             scopedIssues={controller.surfaceIssues}
             allowGantt={controller.allowGantt}
             isRefreshing={controller.isRefreshing}
+            savedViewsControl={savedViews.savedViewsControl}
+            isSavedViewActive={savedViews.isSavedViewActive}
+            onSelectBuiltInView={savedViews.selectBuiltInView}
           />
         )}
         {controller.isLoading ? (

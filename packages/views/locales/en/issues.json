@@ -8,6 +8,8 @@
   },
   "saved_views": {
     "default": "Default",
+    "custom_views": "Custom views",
+    "no_custom_views": "No custom views yet",
     "save_view": "Save view",
     "save": "Save",
     "save_as": "Save as",
