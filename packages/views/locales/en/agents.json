@@ -71,7 +71,8 @@
     "last_active": "Last active",
     "model": "Model",
     "created": "Created",
-    "owner": "Owner"
+    "owner": "Owner",
+    "access": "Access"
   },
   "row": {
     "you": "You",
@@ -98,6 +99,12 @@
     "duplicate": "Duplicate",
     "restore": "Restore",
     "archive": "Archive",
+    "set_access": "Set access scope",
+    "set_access_dialog_title": "Set access scope",
+    "set_access_applies_to": "Applies to {{count}} agents.",
+    "set_access_skipped": "{{count}} skipped (not owned by you).",
+    "set_access_dialog_confirm": "Apply",
+    "set_access_bulk_partial": "Applied to {{succeeded}}; {{failed}} failed (kept in current state).",
     "agent_archived_toast": "Agent archived",
     "archive_failed_toast": "Failed to archive agent",
     "agent_restored_toast": "Agent restored",
@@ -275,9 +282,18 @@
     "step_configure": "Review and configure",
     "step_ai": "Build through conversation",
     "modes": {
-      "blank": { "title": "Start blank", "description": "Configure every field yourself. Best when you already know exactly how this agent should work." },
-      "template": { "title": "Use a template", "description": "Start from curated instructions and skills, then adapt every detail to your workspace." },
-      "ai": { "title": "Build with AI", "description": "Describe the outcome you want. An Agent Builder will ask focused questions and prepare a live draft." }
+      "blank": {
+        "title": "Start blank",
+        "description": "Configure every field yourself. Best when you already know exactly how this agent should work."
+      },
+      "template": {
+        "title": "Use a template",
+        "description": "Start from curated instructions and skills, then adapt every detail to your workspace."
+      },
+      "ai": {
+        "title": "Build with AI",
+        "description": "Describe the outcome you want. An Agent Builder will ask focused questions and prepare a live draft."
+      }
     },
     "templates": {
       "search": "Search templates…",
@@ -299,9 +315,19 @@
       "access_hint": "Control who can start runs with this agent. You can change this later."
     },
     "access": {
-      "private": { "title": "Only me", "description": "Only you can run this agent." },
-      "workspace": { "title": "Entire workspace", "description": "Every workspace member can run it." },
-      "members": { "title": "Specific people", "description": "Only selected members can run it.", "required": "Select at least one member." }
+      "private": {
+        "title": "Only me",
+        "description": "Only you can run this agent."
+      },
+      "workspace": {
+        "title": "Entire workspace",
+        "description": "Every workspace member can run it."
+      },
+      "members": {
+        "title": "Specific people",
+        "description": "Only selected members can run it.",
+        "required": "Select at least one member."
+      }
     },
     "builder": {
       "setup_title": "Choose a runtime for Agent Builder",
@@ -678,6 +704,11 @@
     "tooltip": "Access · who may run this agent",
     "trigger_private": "Only me",
     "trigger_workspace": "Workspace",
+    "scope_labels": {
+      "workspace": "Workspace",
+      "specific_people": "Specific people",
+      "owner_only": "Owner only"
+    },
     "trigger_members_count": "{{count}} people",
     "trigger_members_empty": "Specific people",
     "trigger_team": "Team",
@@ -761,6 +792,7 @@
     "filter_active_count_other": "{{count}} filters",
     "clear_filters": "Clear filters",
     "section_availability": "Availability",
+    "section_access": "Access",
     "section_runtime": "Runtime",
     "display": "Display",
     "sort_by": "Sort by",

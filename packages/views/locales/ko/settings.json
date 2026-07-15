@@ -30,6 +30,10 @@
     "sticky_comment_bar": {
       "title": "댓글 입력창 고정",
       "hint": "이슈 페이지를 스크롤할 때 댓글 입력창을 항상 하단에 고정합니다."
+    },
+    "issue_link_new_tab": {
+      "title": "이슈 링크를 새 탭에서 열기",
+      "hint": "설명, 댓글, 채팅의 이슈 링크를 현재 페이지에서 이동하지 않고 새 탭에서 엽니다."
     }
   },
   "shortcuts": {
@@ -109,7 +113,70 @@
       "integrations": "연동",
       "labs": "실험실",
       "members": "멤버",
-      "labels": "레이블"
+      "labels": "레이블",
+      "properties": "속성"
+    }
+  },
+  "properties": {
+    "title": "속성",
+    "description": "이 워크스페이스의 Issue에 타입이 있는 사용자 지정 속성을 정의합니다. 값은 각 Issue에 설정되며 에이전트가 읽고 쓸 수 있습니다.",
+    "search_placeholder": "이름으로 필터...",
+    "new_property": "새 속성",
+    "show_archived": "보관된 항목 표시",
+    "columns": {
+      "name": "이름",
+      "type": "유형",
+      "options": "옵션",
+      "usage": "사용",
+      "updated": "업데이트"
+    },
+    "usage_count_other": "{{count}}개 Issue",
+    "loading": "속성을 불러오는 중...",
+    "empty": "아직 속성이 없습니다",
+    "empty_hint": "Severity, Environment 같은 타입 필드를 만들어 보세요. 에이전트가 검증과 함께 읽고 씁니다.",
+    "no_results": "일치하는 속성이 없습니다",
+    "save_failed": "속성을 저장하지 못했습니다",
+    "limit_hint": "활성 속성 {{count}}/{{max}}",
+    "archived_badge": "보관됨",
+    "types": {
+      "text": "텍스트",
+      "number": "숫자",
+      "select": "선택",
+      "multi_select": "다중 선택",
+      "date": "날짜",
+      "checkbox": "체크박스",
+      "url": "URL"
+    },
+    "actions": {
+      "open": "{{name}} 작업",
+      "edit": "편집",
+      "archive": "보관",
+      "unarchive": "복원"
+    },
+    "editor": {
+      "create_title": "새 속성",
+      "edit_title": "속성 편집",
+      "admin_hint": "워크스페이스 소유자와 관리자만 속성 정의를 관리할 수 있습니다.",
+      "name": "이름",
+      "name_placeholder": "예: Severity",
+      "type": "유형",
+      "type_locked_hint": "생성 후에는 유형을 변경할 수 없습니다.",
+      "description": "설명",
+      "description_placeholder": "이 속성의 의미와 설정 시점",
+      "options": "옵션",
+      "option_name_placeholder": "옵션 이름",
+      "add_option": "옵션 추가",
+      "remove_option": "옵션 제거",
+      "cancel": "취소",
+      "save": "속성 저장",
+      "saving": "저장 중..."
+    },
+    "archive_dialog": {
+      "title": "속성을 보관할까요?",
+      "description": "\"{{name}}\"이(가) 선택기와 필터에서 숨겨집니다. Issue의 기존 값은 유지되며 나중에 복원할 수 있습니다.",
+      "cancel": "취소",
+      "confirm": "속성 보관",
+      "failed": "속성을 보관하지 못했습니다"
     }
   },
   "labels": {
@@ -143,7 +210,6 @@
       "description": "설명",
       "description_placeholder": "이 레이블을 사용할 때를 설명하세요",
       "color": "색상",
-      "custom_color": "사용자 지정 색상 선택",
       "cancel": "취소",
       "save": "레이블 저장",
       "saving": "저장 중..."

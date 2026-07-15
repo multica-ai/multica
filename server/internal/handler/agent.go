@@ -17,10 +17,12 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/analytics"
+	"github.com/multica-ai/multica/server/internal/attribution"
 	"github.com/multica-ai/multica/server/internal/logger"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/runtimeapps"
 	"github.com/multica-ai/multica/server/internal/service"
+	"github.com/multica-ai/multica/server/internal/util"
 	"github.com/multica-ai/multica/server/pkg/agent"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -365,6 +367,12 @@ type AgentTaskResponse struct {
 	InitiatorName  string `json:"initiator_name,omitempty"`  // display name of the initiator
 	InitiatorEmail string `json:"initiator_email,omitempty"` // member email; empty for agent initiators
 	Kind           string `json:"kind"`                      // discriminator: "comment" | "autopilot" | "chat" | "quick_create" | "direct" — used by the activity row to label tasks that have no linked issue
+	// Attribution is the resolved accountable-human provenance for this run
+	// (MUL-4302 §9): the source label + precise flag, the initiator (accountable)
+	// and originator refs, the evidence pointer, and lineage. Always present (the
+	// pure taskToResponse builds the labels + raw ids); initiator/originator names
+	// are hydrated from the global user table only on user-facing surfaces.
+	Attribution *TaskAttribution `json:"attribution,omitempty"`
 	// AuthToken is the task-scoped `mat_` token the daemon must inject as
 	// MULTICA_TOKEN in the agent process environment. The server binds it to
 	// this (agent_id, task_id) pair at claim time and treats any request
@@ -374,6 +382,142 @@ type AgentTaskResponse struct {
 	// owning user; the daemon must not fall back to its own credential. See
 	// MUL-3292.
 	AuthToken string `json:"auth_token,omitempty"`
+}
+
+// TaskAttribution is the wire shape of a run's accountable-human provenance
+// (MUL-4302 §9). Source/Precise/Evidence/lineage come straight from the row (pure);
+// Initiator/Originator carry the raw user id always and the display name/email/avatar
+// only after hydration on a user-facing surface.
+type TaskAttribution struct {
+	// Source is the waterfall level that resolved the accountable human:
+	// direct_human | delegation | comment_source | rule_owner | owner_fallback |
+	// backfill | unattributed. Never blank (a pre-migration NULL renders "unattributed").
+	Source string `json:"source"`
+	// Precise is false for degraded sources (owner_fallback / backfill / unattributed);
+	// the UI marks these distinctly and they count against the coverage metric.
+	Precise bool `json:"precise"`
+	// Initiator is the accountable human (accountable_user_id). Nil when unattributed.
+	Initiator *AttributionUser `json:"initiator,omitempty"`
+	// Originator is the authorization human (originator_user_id); nil for autopilot
+	// (rule_owner / owner_fallback), where no human authorized the run.
+	Originator *AttributionUser `json:"originator,omitempty"`
+	// Evidence points at the direct cause of the run so the UI can jump to it.
+	Evidence            *TaskEvidence `json:"evidence,omitempty"`
+	RuleVersionID       string        `json:"rule_version_id,omitempty"`
+	DelegatedFromTaskID string        `json:"delegated_from_task_id,omitempty"`
+	RetryOfTaskID       string        `json:"retry_of_task_id,omitempty"`
+	RerunOfTaskID       string        `json:"rerun_of_task_id,omitempty"`
+}
+
+// AttributionUser is a departed-member-safe user ref, resolved from the global user
+// table. Name/Email/AvatarURL are empty until hydrated.
+type AttributionUser struct {
+	ID        string `json:"id"`
+	Name      string `json:"name,omitempty"`
+	Email     string `json:"email,omitempty"`
+	AvatarURL string `json:"avatar_url,omitempty"`
+}
+
+// TaskEvidence is the kind-tagged handle to a run's direct cause (a comment,
+// autopilot run, rule version, source task, ...).
+type TaskEvidence struct {
+	Kind  string `json:"kind"`
+	RefID string `json:"ref_id"`
+}
+
+// taskAttributionBase builds the pure (no-DB) part of a run's attribution from the
+// row: the source label + precise flag, evidence, lineage, and the raw initiator /
+// originator user ids. Names are filled later by hydrateTaskAttributions.
+func taskAttributionBase(t db.AgentTaskQueue) *TaskAttribution {
+	src := attribution.Source(t.OriginatorSource.String)
+	attr := &TaskAttribution{
+		Source:              src.String(), // empty (pre-migration) → "unattributed"
+		Precise:             src.Precise(),
+		RuleVersionID:       uuidToString(t.RuleVersionID),
+		DelegatedFromTaskID: uuidToString(t.DelegatedFromTaskID),
+		RetryOfTaskID:       uuidToString(t.RetryOfTaskID),
+		RerunOfTaskID:       uuidToString(t.RerunOfTaskID),
+	}
+	if t.AccountableUserID.Valid {
+		attr.Initiator = &AttributionUser{ID: uuidToString(t.AccountableUserID)}
+	}
+	if t.OriginatorUserID.Valid {
+		attr.Originator = &AttributionUser{ID: uuidToString(t.OriginatorUserID)}
+	}
+	if t.TriggerEvidenceKind.Valid && t.TriggerEvidenceKind.String != "" {
+		attr.Evidence = &TaskEvidence{Kind: t.TriggerEvidenceKind.String, RefID: uuidToString(t.TriggerEvidenceRefID)}
+	}
+	return attr
+}
+
+// hydrateTaskAttributions fills the display name / email / avatar on the initiator
+// and originator refs of the given attributions, resolving from the GLOBAL user
+// table in one batch (departed-safe, N+1-free). Best-effort: on a lookup failure the
+// raw user ids already present are left as-is — names are display sugar, not gating.
+func (h *Handler) hydrateTaskAttributions(ctx context.Context, attrs []*TaskAttribution) {
+	seen := make(map[string]struct{})
+	var ids []pgtype.UUID
+	add := func(ref *AttributionUser) {
+		if ref == nil || ref.ID == "" {
+			return
+		}
+		if _, ok := seen[ref.ID]; ok {
+			return
+		}
+		if u, err := util.ParseUUID(ref.ID); err == nil {
+			seen[ref.ID] = struct{}{}
+			ids = append(ids, u)
+		}
+	}
+	for _, a := range attrs {
+		if a == nil {
+			continue
+		}
+		add(a.Initiator)
+		add(a.Originator)
+	}
+	if len(ids) == 0 {
+		return
+	}
+	users, err := h.Queries.GetUsersByIDs(ctx, ids)
+	if err != nil {
+		return
+	}
+	byID := make(map[string]db.GetUsersByIDsRow, len(users))
+	for _, u := range users {
+		byID[uuidToString(u.ID)] = u
+	}
+	fill := func(ref *AttributionUser) {
+		if ref == nil {
+			return
+		}
+		if u, ok := byID[ref.ID]; ok {
+			ref.Name = u.Name
+			ref.Email = u.Email
+			if u.AvatarUrl.Valid {
+				ref.AvatarURL = u.AvatarUrl.String
+			}
+		}
+	}
+	for _, a := range attrs {
+		if a == nil {
+			continue
+		}
+		fill(a.Initiator)
+		fill(a.Originator)
+	}
+}
+
+// attributionsOf collects the (non-nil) TaskAttribution pointers from a slice of
+// task responses so a list endpoint can hydrate them all in one batch.
+func attributionsOf(resps []AgentTaskResponse) []*TaskAttribution {
+	out := make([]*TaskAttribution, 0, len(resps))
+	for i := range resps {
+		if resps[i].Attribution != nil {
+			out = append(out, resps[i].Attribution)
+		}
+	}
+	return out
 }
 
 // ChatAttachmentMeta is the structured attachment metadata embedded in
@@ -483,6 +627,9 @@ func taskToResponse(t db.AgentTaskQueue, workspaceID string) AgentTaskResponse {
 		ChatSessionID:  uuidToString(t.ChatSessionID),
 		AutopilotRunID: uuidToString(t.AutopilotRunID),
 		Kind:           computeTaskKind(t),
+		// Attribution labels + evidence + lineage + raw user ids (pure). Names are
+		// hydrated separately on user-facing surfaces (MUL-4302 §9).
+		Attribution: taskAttributionBase(t),
 	}
 }
 
@@ -1075,7 +1222,22 @@ func (h *Handler) sendAgentWelcomeChat(ctx context.Context, agent db.Agent, crea
 	if !agent.RuntimeID.Valid {
 		return // no runtime → the agent can't run; skip the welcome
 	}
-	session, err := h.Queries.CreateChatSession(ctx, db.CreateChatSessionParams{
+	// Create inside a tx that first takes FOR KEY SHARE on the workspace row — the
+	// creator half of the #5219 delete/create protocol, so the intro session cannot
+	// be created into a workspace mid-delete (see LockWorkspaceForChatSessionCreate).
+	tx, err := h.TxStarter.Begin(ctx)
+	if err != nil {
+		slog.Warn("agent welcome: begin tx failed", "agent_id", uuidToString(agent.ID), "error", err)
+		return
+	}
+	defer tx.Rollback(ctx)
+	qtx := h.Queries.WithTx(tx)
+
+	if _, err := qtx.LockWorkspaceForChatSessionCreate(ctx, parseUUID(workspaceID)); err != nil {
+		slog.Warn("agent welcome: lock workspace failed", "agent_id", uuidToString(agent.ID), "error", err)
+		return
+	}
+	session, err := qtx.CreateChatSession(ctx, db.CreateChatSessionParams{
 		WorkspaceID:  parseUUID(workspaceID),
 		AgentID:      agent.ID,
 		CreatorID:    parseUUID(creatorID),
@@ -1084,6 +1246,10 @@ func (h *Handler) sendAgentWelcomeChat(ctx context.Context, agent db.Agent, crea
 	})
 	if err != nil {
 		slog.Warn("agent welcome: create session failed", "agent_id", uuidToString(agent.ID), "error", err)
+		return
+	}
+	if err := tx.Commit(ctx); err != nil {
+		slog.Warn("agent welcome: commit session failed", "agent_id", uuidToString(agent.ID), "error", err)
 		return
 	}
 
@@ -1840,6 +2006,7 @@ func (h *Handler) ListAgentTasks(w http.ResponseWriter, r *http.Request) {
 	for i, t := range tasks {
 		resp[i] = taskToResponse(t, workspaceID)
 	}
+	h.hydrateTaskAttributions(r.Context(), attributionsOf(resp))
 
 	writeJSON(w, http.StatusOK, resp)
 }
@@ -1977,6 +2144,7 @@ func (h *Handler) ListWorkspaceAgentTaskSnapshot(w http.ResponseWriter, r *http.
 		}
 		resp = append(resp, taskToResponse(t, workspaceID))
 	}
+	h.hydrateTaskAttributions(r.Context(), attributionsOf(resp))
 
 	writeJSON(w, http.StatusOK, resp)
 }

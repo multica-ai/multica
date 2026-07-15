@@ -193,7 +193,8 @@ ORDER BY created_at DESC;
 INSERT INTO agent_task_queue (
     agent_id, runtime_id, issue_id, status, priority, trigger_comment_id,
     coalesced_comment_ids, trigger_summary, force_fresh_session, is_leader_task, handoff_note,
-    squad_id, context, originator_user_id, runtime_mcp_overlay, runtime_connected_apps
+    squad_id, context, originator_user_id, accountable_user_id, runtime_mcp_overlay, runtime_connected_apps,
+    originator_source, delegated_from_task_id, rule_version_id, rerun_of_task_id, trigger_evidence_kind, trigger_evidence_ref_id
 )
 VALUES (
     $1, $2, $3, 'queued', $4, sqlc.narg(trigger_comment_id),
@@ -209,8 +210,15 @@ VALUES (
         ELSE NULL
     END,
     sqlc.narg(originator_user_id),
+    sqlc.narg(accountable_user_id),
     sqlc.narg(runtime_mcp_overlay),
-    sqlc.narg(runtime_connected_apps)
+    sqlc.narg(runtime_connected_apps),
+    sqlc.narg(originator_source),
+    sqlc.narg(delegated_from_task_id),
+    sqlc.narg(rule_version_id),
+    sqlc.narg(rerun_of_task_id),
+    sqlc.narg(trigger_evidence_kind),
+    sqlc.narg(trigger_evidence_ref_id)
 )
 RETURNING *;
 
@@ -218,15 +226,23 @@ RETURNING *;
 -- Quick-create tasks have no issue / chat / autopilot link; the entire job
 -- description (prompt, requester, workspace) lives in context JSONB. The
 -- daemon detects this variant via context.type == "quick_create".
+-- The requester who opened the quick-create modal is a direct_human originator
+-- and accountable; attribution provenance is stamped so this path is not a
+-- NULL-source enqueue bypass (MUL-4302 §2).
 INSERT INTO agent_task_queue (
     agent_id, runtime_id, issue_id, status, priority, context, originator_user_id,
-    runtime_mcp_overlay, runtime_connected_apps
+    accountable_user_id, runtime_mcp_overlay, runtime_connected_apps,
+    originator_source, trigger_evidence_kind, trigger_evidence_ref_id
 )
 VALUES (
     $1, $2, NULL, 'queued', $3, $4,
     sqlc.narg(originator_user_id),
+    sqlc.narg(accountable_user_id),
     sqlc.narg(runtime_mcp_overlay),
-    sqlc.narg(runtime_connected_apps)
+    sqlc.narg(runtime_connected_apps),
+    sqlc.narg(originator_source),
+    sqlc.narg(trigger_evidence_kind),
+    sqlc.narg(trigger_evidence_ref_id)
 )
 RETURNING *;
 
@@ -234,9 +250,15 @@ RETURNING *;
 -- Deferred tasks are inert until PromoteDueDeferredTasksForRuntime flips them
 -- to queued. Used for comment-routing escalation: a thread-owner primary task
 -- gets a delayed assignee fallback without waking both agents at t=0.
+-- Attribution is resolved and stamped at creation (not at promotion), from the
+-- same trigger comment as the primary task, so the fallback assignee's run
+-- carries a non-NULL source and evidence rather than bypassing attribution
+-- (MUL-4302 §2).
 INSERT INTO agent_task_queue (
     agent_id, runtime_id, issue_id, status, priority, trigger_comment_id,
-    trigger_summary, is_leader_task, squad_id, escalation_for_task_id, fire_at
+    trigger_summary, is_leader_task, squad_id, escalation_for_task_id, fire_at,
+    originator_user_id, accountable_user_id, originator_source,
+    delegated_from_task_id, trigger_evidence_kind, trigger_evidence_ref_id
 )
 VALUES (
     @agent_id, @runtime_id, @issue_id, 'deferred', @priority,
@@ -245,7 +267,13 @@ VALUES (
     COALESCE(sqlc.narg('is_leader_task')::boolean, FALSE),
     sqlc.narg(squad_id),
     @escalation_for_task_id,
-    @fire_at
+    @fire_at,
+    sqlc.narg(originator_user_id),
+    sqlc.narg(accountable_user_id),
+    sqlc.narg(originator_source),
+    sqlc.narg(delegated_from_task_id),
+    sqlc.narg(trigger_evidence_kind),
+    sqlc.narg(trigger_evidence_ref_id)
 )
 RETURNING *;
 
@@ -277,6 +305,12 @@ WHERE id = $1 AND issue_id IS NULL;
 -- run has not changed. The Composio overlay follows the agent's invocation
 -- permission and uses the agent owner's connection (MUL-3963); originator is
 -- carried for A2A/audit, not as an originator == agent.owner_id gate.
+-- A system retry is NOT a new attribution event (MUL-4302 §5): it inherits the
+-- parent's accountable human, source label, delegation lineage, rule version,
+-- and trigger evidence UNCHANGED, and records retry_of_task_id = p.id so retry
+-- and manual rerun stay separable in reporting. parent_task_id keeps its
+-- existing meaning for the retry/resume machinery; retry_of_task_id is the
+-- attribution-facing lineage column.
 --
 -- chat_input_task_id is inherited straight from the parent so the whole retry
 -- chain keeps consuming the ORIGINAL root input batch (MUL-4351): the root
@@ -297,7 +331,9 @@ INSERT INTO agent_task_queue (
     status, priority, trigger_comment_id, coalesced_comment_ids, trigger_summary, context,
     session_id, work_dir,
     attempt, max_attempts, parent_task_id, force_fresh_session, is_leader_task,
-    squad_id, originator_user_id, runtime_mcp_overlay, runtime_connected_apps,
+    squad_id, originator_user_id, accountable_user_id, runtime_mcp_overlay, runtime_connected_apps,
+    originator_source, delegated_from_task_id, rule_version_id,
+    trigger_evidence_kind, trigger_evidence_ref_id, retry_of_task_id,
     chat_input_task_id
 )
 SELECT
@@ -312,8 +348,11 @@ SELECT
     p.is_leader_task,
     p.squad_id,
     p.originator_user_id,
+    p.accountable_user_id,
     sqlc.narg(runtime_mcp_overlay),
     sqlc.narg(runtime_connected_apps),
+    p.originator_source, p.delegated_from_task_id, p.rule_version_id,
+    p.trigger_evidence_kind, p.trigger_evidence_ref_id, p.id,
     p.chat_input_task_id
 FROM agent_task_queue p
 WHERE p.id = $1
@@ -784,6 +823,32 @@ SET status = 'cancelled', completed_at = now(), prepare_lease_expires_at = NULL
 WHERE id = $1 AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory', 'deferred')
 RETURNING *;
 
+-- name: MarkChatFinalizeDeferred :one
+-- Arms the deferred chat-finalize marker for a cancelled chat task whose
+-- empty-transcript judgment must wait for the daemon's flush ack (#5219).
+UPDATE agent_task_queue
+SET chat_finalize_deferred_at = now()
+WHERE id = $1
+RETURNING *;
+
+-- name: ClaimChatFinalizeDeferred :one
+-- Atomically claims the deferred marker so the daemon ack and the sweeper
+-- cannot both finalize the same task (double-"Stopped." guard).
+UPDATE agent_task_queue
+SET chat_finalize_deferred_at = NULL
+WHERE id = $1 AND chat_finalize_deferred_at IS NOT NULL
+RETURNING *;
+
+-- name: ListChatFinalizeDeferredExpired :many
+-- Deferred chat finalizations whose grace period elapsed without a daemon
+-- ack (dead or partitioned daemon). Batch-capped like the other sweeper
+-- queries so one tick can't monopolise the DB.
+SELECT * FROM agent_task_queue
+WHERE chat_finalize_deferred_at IS NOT NULL
+  AND chat_finalize_deferred_at < now() - make_interval(secs => @grace_secs::double precision)
+ORDER BY chat_finalize_deferred_at
+LIMIT @max_per_tick::int;
+
 -- name: CountRunningTasks :one
 SELECT count(*) FROM agent_task_queue
 WHERE agent_id = $1 AND status IN ('dispatched', 'running', 'waiting_local_directory');
@@ -892,7 +957,20 @@ SET coalesced_comment_ids = (
     ),
     trigger_comment_id = @new_trigger_comment_id::uuid,
     trigger_summary = COALESCE(sqlc.narg('new_trigger_summary'), trigger_summary),
+    -- Re-attribution is ATOMIC (MUL-4302): folding a newly-arrived comment moves the
+    -- WHOLE attribution snapshot to that comment's human — person columns, source
+    -- label, delegation lineage, rule version, and evidence — computed by the caller
+    -- as one attribution.Result. Re-stamping only the person columns would leave a
+    -- run showing B accountable while still pointing at A's stale source / evidence /
+    -- level. accountable comes from the resolved Result (finalizeAttribution already
+    -- guaranteed originator ⟹ accountable == originator; the cross-column CHECK backs it).
     originator_user_id = sqlc.narg('new_originator_user_id')::uuid,
+    accountable_user_id = sqlc.narg('new_accountable_user_id')::uuid,
+    originator_source = sqlc.narg('new_originator_source'),
+    delegated_from_task_id = sqlc.narg('new_delegated_from_task_id')::uuid,
+    rule_version_id = sqlc.narg('new_rule_version_id')::uuid,
+    trigger_evidence_kind = sqlc.narg('new_trigger_evidence_kind'),
+    trigger_evidence_ref_id = sqlc.narg('new_trigger_evidence_ref_id')::uuid,
     runtime_mcp_overlay = sqlc.narg('new_runtime_mcp_overlay'),
     runtime_connected_apps = sqlc.narg('new_runtime_connected_apps')
 WHERE id = (

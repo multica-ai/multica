@@ -42,7 +42,6 @@ import { AppLink, useNavigation } from "../../navigation";
 import { availabilityConfig, workloadConfig } from "../../agents/presence";
 import { HealthBadge } from "./shared";
 import { ProviderLogo } from "./provider-logo";
-import { UpdateSection } from "./update-section";
 import { UsageSection } from "./usage-section";
 import { DeleteRuntimeDialog } from "./delete-runtime-dialog";
 import { DeleteRuntimeProfileDialog } from "./delete-runtime-profile-dialog";
@@ -55,17 +54,6 @@ function getCliVersion(metadata: Record<string, unknown>): string | null {
     metadata.cli_version
   ) {
     return metadata.cli_version;
-  }
-  return null;
-}
-
-function getLaunchedBy(metadata: Record<string, unknown>): string | null {
-  if (
-    metadata &&
-    typeof metadata.launched_by === "string" &&
-    metadata.launched_by
-  ) {
-    return metadata.launched_by;
   }
   return null;
 }
@@ -105,9 +93,6 @@ export function RuntimeDetail({
   const timeAgo = useTimeAgo();
   const cliVersion =
     runtime.runtime_mode === "local" ? getCliVersion(runtime.metadata) : null;
-  const launchedBy =
-    runtime.runtime_mode === "local" ? getLaunchedBy(runtime.metadata) : null;
-
   const user = useAuthStore((s) => s.user);
   const wsId = useWorkspaceId();
   const paths = useWorkspacePaths();
@@ -215,8 +200,6 @@ export function RuntimeDetail({
             />
             <DiagnosticsCard
               runtime={runtime}
-              cliVersion={cliVersion}
-              launchedBy={launchedBy}
               canEdit={!!canEditRuntime}
               canDelete={!!canDelete}
               onDelete={() => setDeleteOpen(true)}
@@ -484,21 +467,16 @@ function ServingAgentsCard({
 
 function DiagnosticsCard({
   runtime,
-  cliVersion,
-  launchedBy,
   canEdit,
   canDelete,
   onDelete,
 }: {
   runtime: AgentRuntime;
-  cliVersion: string | null;
-  launchedBy: string | null;
   canEdit: boolean;
   canDelete: boolean;
   onDelete: () => void;
 }) {
   const { t } = useT("runtimes");
-  const isLocal = runtime.runtime_mode === "local";
   return (
     <div className="rounded-lg border">
       <div className="border-b px-4 py-2.5">
@@ -515,19 +493,6 @@ function DiagnosticsCard({
             <VisibilityReadout runtime={runtime} />
           )}
         </div>
-        {isLocal && (
-          <div className="border-t pt-3">
-            <div className="mb-1.5 text-[11px] uppercase tracking-wide text-muted-foreground">
-              {t(($) => $.detail.diagnostics_cli)}
-            </div>
-            <UpdateSection
-              runtimeId={runtime.id}
-              currentVersion={cliVersion}
-              isOnline={runtime.status === "online"}
-              launchedBy={launchedBy}
-            />
-          </div>
-        )}
         {canDelete && (
           // The button stays clickable even when the runtime is a live
           // local daemon (self-healing). The owner explicitly asked for

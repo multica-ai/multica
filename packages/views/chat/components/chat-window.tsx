@@ -47,6 +47,8 @@ import {
   useUpdateChatSession,
 } from "@multica/core/chat/mutations";
 import { useChatStore } from "@multica/core/chat";
+import { removeChatMessageFromCaches } from "@multica/core/realtime";
+import { useChatDraftRestore } from "./use-chat-draft-restore";
 import { ChatMessageList, ChatMessageSkeleton } from "./chat-message-list";
 import { ChatInput } from "./chat-input";
 import { ChatResizeHandles } from "./chat-resize-handles";
@@ -91,38 +93,6 @@ function appendChatMessageToLatestPageCache(
       };
     },
   );
-}
-
-function removeChatMessageFromPageCache(
-  qc: ReturnType<typeof useQueryClient>,
-  sessionId: string,
-  messageId: string,
-) {
-  qc.setQueryData<InfiniteData<ChatMessagesPage> | undefined>(
-    chatKeys.messagesPage(sessionId),
-    (old) => {
-      if (!old) return old;
-      return {
-        ...old,
-        pages: old.pages.map((page) => ({
-          ...page,
-          messages: page.messages.filter((m) => m.id !== messageId),
-        })),
-      };
-    },
-  );
-}
-
-function removeChatMessageFromCaches(
-  qc: ReturnType<typeof useQueryClient>,
-  sessionId: string,
-  messageId: string,
-) {
-  qc.setQueryData<ChatMessage[]>(
-    chatKeys.messages(sessionId),
-    (old) => old?.filter((m) => m.id !== messageId) ?? old,
-  );
-  removeChatMessageFromPageCache(qc, sessionId, messageId);
 }
 
 function replaceOptimisticChatMessageId(
@@ -212,15 +182,20 @@ export function ChatWindow() {
   );
   const pendingTaskId = pendingTask?.task_id ?? null;
   const stopRequestedBeforeTaskRef = useRef(false);
-  const [restoreDraftRequest, setRestoreDraftRequest] = useState<{
-    id: string;
-    content: string;
-    attachments?: Attachment[];
-    sessionId?: string;
-  } | null>(null);
-  const handleRestoreDraftConsumed = useCallback(() => {
-    setRestoreDraftRequest(null);
-  }, []);
+  // Durable deferred-cancellation draft restores (#5219). Same hook as the chat
+  // page controller — the skip/apply/consume/reconcile state machine must not
+  // diverge between the two composers.
+  //
+  // Gated on isOpen AND app foreground: this window stays MOUNTED when closed
+  // (it is only hidden, see isVisible below), and isOpen alone is also true for a
+  // backgrounded browser tab. Its ChatInput would otherwise adopt and consume a
+  // restore with nobody looking at it — stealing the prompt from the composer the
+  // user is actually waiting on, possibly on another device. Only a composer the
+  // user can actually see claims; a re-foregrounded window recovers on its next
+  // fetch. (appForeground also gates auto mark-read below.)
+  const appForeground = useAppForeground();
+  const { restoreDraftRequest, enqueueLocalRestore, handleRestoreDraftApplied } =
+    useChatDraftRestore(activeSessionId, isOpen && appForeground);
   // Nonce handed to ChatInput to pull focus into the compose box when a new
   // chat starts (⊕ or switching agent). 0 is inert so opening the window on an
   // existing session never steals focus.
@@ -333,7 +308,6 @@ export function ChatWindow() {
   // assumption: a reply landing while the window is open but the app is
   // backgrounded must stay unread so the sidebar badges it (MUL-4485), then
   // clears when the user refocuses and this effect re-runs.
-  const appForeground = useAppForeground();
   const currentHasUnread =
     sessions.find((s) => s.id === activeSessionId)?.has_unread ?? false;
   useEffect(() => {
@@ -436,7 +410,7 @@ export function ChatWindow() {
         if (restored?.restore_to_input) {
           removeChatMessageFromCaches(qc, restored.chat_session_id, restored.message_id);
           if (options.restoreDraftToInput && restored.chat_session_id === sessionId) {
-            setRestoreDraftRequest({
+            enqueueLocalRestore({
               id: restored.message_id,
               content: restored.content,
               attachments: restored.attachments,
@@ -463,7 +437,7 @@ export function ChatWindow() {
         return null;
       }
     },
-    [qc],
+    [qc, enqueueLocalRestore],
   );
 
   const handleSend = useCallback(
@@ -575,13 +549,14 @@ export function ChatWindow() {
         stopRequestedBeforeTaskRef.current = false;
         removeChatMessageFromCaches(qc, sessionId, optimistic.id);
         qc.setQueryData(chatKeys.pendingTask(sessionId), {});
-        setRestoreDraftRequest({
+        enqueueLocalRestore({
           id: `send-failed-${optimistic.id}`,
           content: finalContent,
           attachments: draftAttachments,
-          // Restore into the session this was sent from. If the user
-          // navigated away (fire-and-forget) the request waits until they
-          // return rather than dumping content into another session.
+          // Restore into the session this was sent from. If the user navigated
+          // away (fire-and-forget) the request waits in that session's persisted
+          // queue until they return, rather than dumping content into another
+          // session or dying with this component.
           sessionId,
         });
         toast.error(t(($) => $.input.send_failed_toast));
@@ -638,6 +613,7 @@ export function ChatWindow() {
       cancelChatTask,
       qc,
       setActiveSession,
+      enqueueLocalRestore,
       t,
     ],
   );
@@ -862,7 +838,7 @@ export function ChatWindow() {
       <ChatInput
         onSend={handleSend}
         restoreDraftRequest={restoreDraftRequest}
-        onRestoreDraftConsumed={handleRestoreDraftConsumed}
+        onRestoreDraftApplied={handleRestoreDraftApplied}
         onUploadFile={handleUploadFile}
         onStop={handleStop}
         isRunning={!!pendingTaskId}

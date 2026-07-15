@@ -256,6 +256,11 @@ type Daemon struct {
 	activeEnvRootsMu sync.Mutex
 	activeEnvRoots   map[string]int // env root path -> reference count (handles reuse paths marked twice)
 
+	activeCodexStoresMu   sync.Mutex
+	activeCodexStoresCond *sync.Cond      // signalled when an in-flight store deletion finishes, so a blocked markActive can proceed
+	activeCodexStores     map[string]int  // per-issue Codex session store path -> live-task refcount; guards the store from GC mid-task (MUL-4424)
+	deletingCodexStores   map[string]bool // store paths a GC delete has reserved; markActive waits these out so a task never mounts a store mid-removal
+
 	// localPathLocks serialises agent tasks whose project resource is a
 	// local_directory pinned to this daemon. Two tasks targeting the same
 	// on-disk path run sequentially; the second blocks on the lock and is
@@ -305,6 +310,8 @@ func New(cfg Config, logger *slog.Logger) *Daemon {
 		resolvedPaths:             make(map[string]healedAgent),
 		wsHBLastAck:               make(map[string]time.Time),
 		activeEnvRoots:            make(map[string]int),
+		activeCodexStores:         make(map[string]int),
+		deletingCodexStores:       make(map[string]bool),
 		localPathLocks:            NewLocalPathLocker(),
 		runtimeGoneInflight:       make(map[string]struct{}),
 		reregisterNextAttempt:     make(map[string]time.Time),
@@ -314,6 +321,7 @@ func New(cfg Config, logger *slog.Logger) *Daemon {
 		workspaceChanges:          newWorkspaceChangeSignal(),
 		wsRPC:                     newWSRPCClient(wsRPCResponseGrace),
 	}
+	d.activeCodexStoresCond = sync.NewCond(&d.activeCodexStoresMu)
 	d.runner = taskRunnerFunc(d.runTask)
 	d.runUpdateFn = d.runUpdate
 	return d
@@ -3158,6 +3166,12 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 	select {
 	case <-cancelledByPoll:
 		taskLog.Info("task cancelled during execution, discarding result")
+		// runner.run has returned, so the transcript flush is complete —
+		// tell the server it can settle its deferred chat finalization
+		// (#5219). Best-effort: the sweeper grace period covers a lost ack.
+		if ackErr := d.client.AckTaskCancelled(ctx, task.ID); ackErr != nil {
+			taskLog.Warn("cancel ack failed; server sweeper will finalize", "error", ackErr)
+		}
 		return
 	default:
 	}
@@ -3185,6 +3199,11 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 	// signals as the in-flight watcher.
 	if status, err := d.client.GetTaskStatus(ctx, task.ID); shouldInterruptAgent(status, err) {
 		taskLog.Info("task cancelled during execution, discarding result", "status", status, "error", err)
+		// Same contract as the poll-cancelled path above: the transcript is
+		// flushed, so let the server settle its deferred chat finalization.
+		if ackErr := d.client.AckTaskCancelled(ctx, task.ID); ackErr != nil {
+			taskLog.Warn("cancel ack failed; server sweeper will finalize", "error", ackErr)
+		}
 		return
 	}
 
@@ -3448,6 +3467,7 @@ func gcMetaForTask(task Task) (execenv.GCMeta, bool) {
 // here fall back to capitalizing the key (claude → "Claude", codex → "Codex").
 var runtimeDisplayNameOverrides = map[string]string{
 	"traecli": "Trae",
+	"grok":    "Grok",
 }
 
 // providerDisplayName returns the human-facing runtime name for a provider key.
@@ -3490,8 +3510,36 @@ func gateResumeToReusedWorkdir(task *Task, taskCtx *execenv.TaskContextForEnv, e
 		)
 		task.PriorSessionID = ""
 		taskCtx.PriorSessionResumed = false
+		// The user expected this run to continue the prior conversation; surface
+		// the loss in the brief instead of silently restarting (MUL-4424).
+		taskCtx.PriorSessionResumeUnavailable = true
 	}
 	return reused
+}
+
+// gateCodexResumeToRolloutPresence drops the prior Codex session when its
+// rollout is not actually present in the task's CODEX_HOME sessions. A reused
+// workdir keeps PriorSessionID (gateResumeToReusedWorkdir), but Codex session
+// isolation (MUL-4424) means the rollout may be missing: a migrated legacy home
+// that could not locate it, or a local_directory task whose shared history was
+// pruned. Codex would then silently thread/start from scratch, so we clear the
+// resume claim from both the backend (PriorSessionID) and the brief
+// (PriorSessionResumed) instead of pretending the conversation continues.
+// No-op for non-Codex providers or when there is nothing to resume.
+func gateCodexResumeToRolloutPresence(task *Task, taskCtx *execenv.TaskContextForEnv, provider, codexHome string, taskLog *slog.Logger) {
+	if provider != "codex" || task.PriorSessionID == "" || codexHome == "" {
+		return
+	}
+	if execenv.CodexResumeRolloutPresent(codexHome, task.PriorSessionID) {
+		return
+	}
+	taskLog.Warn("dropping prior codex session: rollout not present in task CODEX_HOME; starting a fresh thread",
+		"session_id", task.PriorSessionID, "codex_home", codexHome)
+	task.PriorSessionID = ""
+	taskCtx.PriorSessionResumed = false
+	// The user expected this run to continue the prior conversation; surface the
+	// loss in the brief instead of silently restarting (MUL-4424).
+	taskCtx.PriorSessionResumeUnavailable = true
 }
 
 func (d *Daemon) ensureTaskSkillBundles(ctx context.Context, task *Task) error {
@@ -3884,12 +3932,24 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		}
 		hermesEnv["HERMES_HOME"] = res.SourceHome
 	}
+	// Guard this task's per-issue Codex session store from the GC for the whole
+	// task, starting before Prepare/Reuse mounts it — so a prune that samples the
+	// store's stale (pre-remount) mtime cannot reclaim it out from under a resume
+	// of a long-idle issue (MUL-4424). No-op for non-Codex tasks / no stable key.
+	if provider == "codex" {
+		if store := execenv.CodexSessionStorePath(d.cfg.Profile, task.AgentID, task.IssueID); store != "" {
+			d.markActiveCodexStore(store)
+			defer d.unmarkActiveCodexStore(store)
+		}
+	}
 	if task.PriorWorkDir != "" && localAssignment == nil && !task.IsLeaderTask {
 		env = execenv.Reuse(execenv.ReuseParams{
 			WorkspacesRoot:        d.cfg.WorkspacesRoot,
+			Profile:               d.cfg.Profile,
 			WorkDir:               task.PriorWorkDir,
 			Provider:              provider,
 			CodexVersion:          codexVersion,
+			ResumeSessionID:       task.PriorSessionID,
 			OpenclawBin:           openclawBin,
 			McpConfig:             effectiveMcpConfig,
 			CursorMcpAuthSource:   cursorMcpAuthSource,
@@ -3904,6 +3964,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		var err error
 		prepParams := execenv.PrepareParams{
 			WorkspacesRoot:        d.cfg.WorkspacesRoot,
+			Profile:               d.cfg.Profile,
 			WorkspaceID:           task.WorkspaceID,
 			TaskID:                task.ID,
 			AgentName:             agentName,
@@ -3961,6 +4022,14 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	_ = d.client.ReportProgress(ctx, task.ID, fmt.Sprintf("Launching %s", provider), 1, 2)
 
 	reused := gateResumeToReusedWorkdir(&task, &taskCtx, env.WorkDir, taskLog)
+	// A reused workdir is necessary but not sufficient for a Codex resume: the
+	// prior thread's rollout must actually be present in this task's CODEX_HOME
+	// sessions (MUL-4424 isolates them). Drop the resume before the brief is
+	// generated below if it isn't, so we never tell the agent it is continuing a
+	// conversation Codex will silently restart from scratch.
+	if reused {
+		gateCodexResumeToRolloutPresence(&task, &taskCtx, provider, env.CodexHome, taskLog)
+	}
 
 	// Inject runtime-specific config (meta skill) so the agent discovers .agent_context/.
 	runtimeBrief, err := execenv.InjectRuntimeConfig(env.WorkDir, provider, taskCtx)
@@ -4186,11 +4255,17 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		SemanticInactivityTimeout: d.cfg.CodexSemanticInactivityTimeout,
 		HandshakeTimeout:          d.cfg.CodexHandshakeTimeout,
 		ResumeSessionID:           task.PriorSessionID,
-		ExtraArgs:                 extraArgs,
-		CustomArgs:                customArgs,
-		McpConfig:                 mcpConfig,
-		ThinkingLevel:             thinkingLevel,
-		OpenclawMode:              openclawMode,
+		// Post-gate intent: PriorSessionID here already reflects the pre-flight
+		// resume gates (a dropped resume is surfaced via the brief instead). If it
+		// survived to here, the backend must disclose to the user when the live
+		// resume still fails — even across the fresh-session retry below, which
+		// clears ResumeSessionID but not this (MUL-4424).
+		ResumeExpected: task.PriorSessionID != "",
+		ExtraArgs:      extraArgs,
+		CustomArgs:     customArgs,
+		McpConfig:      mcpConfig,
+		ThinkingLevel:  thinkingLevel,
+		OpenclawMode:   openclawMode,
 	}
 	// Some providers do not reliably load the per-task runtime config files we
 	// write into the task workdir:
@@ -4924,6 +4999,59 @@ func (d *Daemon) isActiveEnvRoot(envRoot string) bool {
 	d.activeEnvRootsMu.Lock()
 	defer d.activeEnvRootsMu.Unlock()
 	return d.activeEnvRoots[envRoot] > 0
+}
+
+// markActiveCodexStore records that a task is about to use the given per-issue
+// Codex session store, so the GC never reclaims it mid-task — the store lives
+// outside the env root, so isActiveEnvRoot does not cover it (MUL-4424). If a GC
+// delete has already reserved this store, we wait for that removal to finish
+// before claiming it, so a task never mounts a store mid-removal; the store is
+// then recreated fresh by Prepare. Reference-counted like the env-root guard.
+func (d *Daemon) markActiveCodexStore(store string) {
+	if store == "" {
+		return
+	}
+	d.activeCodexStoresMu.Lock()
+	defer d.activeCodexStoresMu.Unlock()
+	for d.deletingCodexStores[store] {
+		d.activeCodexStoresCond.Wait()
+	}
+	d.activeCodexStores[store]++
+}
+
+func (d *Daemon) unmarkActiveCodexStore(store string) {
+	if store == "" {
+		return
+	}
+	d.activeCodexStoresMu.Lock()
+	defer d.activeCodexStoresMu.Unlock()
+	if d.activeCodexStores[store] <= 1 {
+		delete(d.activeCodexStores, store)
+		return
+	}
+	d.activeCodexStores[store]--
+}
+
+// reserveCodexStoreForDeletion atomically checks that no live task holds store
+// and, if so, marks it reserved so no task can claim it until the caller runs
+// the returned commit (after the actual removal). ok=false means a task holds it
+// — do not delete. This is the exclusive protocol PruneCodexSessionStores needs:
+// the "confirm inactive" and the mark happen under one lock acquisition, so a
+// markActiveCodexStore either loses the check (store stays) or blocks on the
+// reservation, closing the stat->remove race (MUL-4424).
+func (d *Daemon) reserveCodexStoreForDeletion(store string) (commit func(), ok bool) {
+	d.activeCodexStoresMu.Lock()
+	defer d.activeCodexStoresMu.Unlock()
+	if d.activeCodexStores[store] > 0 || d.deletingCodexStores[store] {
+		return nil, false
+	}
+	d.deletingCodexStores[store] = true
+	return func() {
+		d.activeCodexStoresMu.Lock()
+		delete(d.deletingCodexStores, store)
+		d.activeCodexStoresCond.Broadcast()
+		d.activeCodexStoresMu.Unlock()
+	}, true
 }
 
 // shortID returns the first 8 characters of an ID for readable logs.

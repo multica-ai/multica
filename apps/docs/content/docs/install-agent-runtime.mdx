@@ -1,11 +1,11 @@
 ---
 title: Install an agent runtime
-description: Multica drives whichever AI coding tools you have on your machine. This page shows you how to install each of the 15 supported tools so the daemon can detect them.
+description: Multica drives whichever AI coding tools you have on your machine. This page shows you how to install each of the 16 supported tools so the daemon can detect them.
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
 
-A **runtime** in Multica is the daemon on your machine paired with one AI coding tool the daemon found on your `PATH`. If the onboarding "Connect a runtime" step shows **No supported tools detected**, it means the daemon scanned `PATH` and didn't find any of the 15 tools it knows how to drive. Install one (or several) of the tools below, then come back to the step and re-scan — the runtime will show up within a few seconds.
+A **runtime** in Multica is the daemon on your machine paired with one AI coding tool the daemon found on your `PATH`. If the onboarding "Connect a runtime" step shows **No supported tools detected**, it means the daemon scanned `PATH` and didn't find any of the 16 tools it knows how to drive. Install one (or several) of the tools below, then come back to the step and re-scan — the runtime will show up within a few seconds.
 
 This page is the install-side companion to:
 
@@ -31,9 +31,9 @@ multica daemon restart
 
 Or, in the desktop app, just relaunch the app. The daemon re-scans `PATH` on every start.
 
-## The 15 supported tools
+## The 16 supported tools
 
-Listed roughly from most to least common. Pick whichever ones you already have credentials for — you don't need all 15.
+Listed roughly from most to least common. Pick whichever ones you already have credentials for — you don't need all 16.
 
 ### Claude Code (Anthropic)
 
@@ -191,6 +191,17 @@ Google's Antigravity CLI (`agy`). Pairs with Google's Antigravity service and ru
 | Install | Follow the official guide at [antigravity.google/docs/cli-overview](https://antigravity.google/docs/cli-overview). The CLI ships pre-built — run `agy install` once to wire up PATH and shell aliases. |
 | Authentication | Run `agy` once interactively and complete the Google account login, or sign in via the Antigravity desktop app — the CLI reuses the keyring entry the GUI writes. |
 | Notes | The CLI emits plain assistant text on stdout, not a structured event stream; intermediate "I will run X" lines and the final reply are both relayed to Multica as text, and per-tool telemetry is not available today. |
+
+### Grok (xAI)
+
+xAI's Grok Build CLI (`grok`). Multica drives it over ACP via `grok --no-auto-update agent --always-approve stdio`, sharing the transport with Hermes, Kimi, Kiro CLI, Qoder, and Trae. It selects an auth method advertised by `initialize` and completes the headless `authenticate` handshake before any session operation. Session resumption works through ACP `session/load`. Models are discovered from `session/new`. MCP config is passed through ACP `mcpServers`. Skills are copied into `.grok/skills/`; user skills are discovered from `$GROK_HOME/skills/` (default `~/.grok/skills/`) and `~/.agents/skills/`.
+
+| | |
+|---|---|
+| Daemon looks for | `grok` |
+| Install | Install the Grok Build CLI and ensure `grok` is on `PATH` (often `~/.grok/bin`). |
+| Authentication | Run `grok login` for cached-token auth, or set `XAI_API_KEY`. The CLI must advertise the corresponding ACP method. |
+| Notes | Override the binary with `MULTICA_GROK_PATH` and the default model with `MULTICA_GROK_MODEL` (e.g. `grok-4.5`). Minimum CLI version: `0.2.89`. |
 
 ## After installing
 

@@ -79,6 +79,34 @@ UPDATE autopilot SET last_run_at = now(), updated_at = now()
 WHERE id = $1;
 
 -- =====================
+-- Autopilot Rule Version (rule_owner attribution, MUL-4302 §3.4)
+-- =====================
+
+-- name: CreateAutopilotRuleVersion :one
+-- Append one immutable rule-version snapshot on a substantive publish (create /
+-- enable / resume / target / execution-mode change). published_by_* is the acting
+-- member (or 'system' with NULL id for the failure monitor); config_summary is the
+-- effective config at publish time. Dispatch reads the latest row for the autopilot
+-- as the run's rule_owner accountable human.
+INSERT INTO autopilot_rule_version (
+    autopilot_id, workspace_id, published_by_type, published_by_id, config_summary
+)
+VALUES (
+    @autopilot_id, @workspace_id, @published_by_type, sqlc.narg(published_by_id),
+    COALESCE(sqlc.narg(config_summary), '{}'::jsonb)
+)
+RETURNING *;
+
+-- name: GetActiveAutopilotRuleVersion :one
+-- The active version is the newest published row for the autopilot. Scoped by
+-- workspace_id per the workspace query rule; autopilot_id is globally unique so the
+-- workspace filter is a guard, not the selector.
+SELECT * FROM autopilot_rule_version
+WHERE workspace_id = $1 AND autopilot_id = $2
+ORDER BY created_at DESC
+LIMIT 1;
+
+-- =====================
 -- Autopilot Trigger CRUD
 -- =====================
 
@@ -94,13 +122,33 @@ WHERE id = $1;
 -- name: CreateAutopilotTrigger :one
 INSERT INTO autopilot_trigger (
     autopilot_id, kind, enabled, cron_expression, timezone,
-    next_run_at, webhook_token, label, provider, event_filters
+    next_run_at, webhook_token, label, provider, event_filters,
+    published_by_type, published_by_id
 ) VALUES (
     $1, $2, $3, sqlc.narg('cron_expression'), sqlc.narg('timezone'),
     sqlc.narg('next_run_at'), sqlc.narg('webhook_token'), sqlc.narg('label'),
     COALESCE(sqlc.narg('provider')::text, 'generic'),
-    sqlc.narg('event_filters')
+    sqlc.narg('event_filters'),
+    sqlc.narg('published_by_type'), sqlc.narg('published_by_id')
 ) RETURNING *;
+
+-- name: SetAutopilotTriggerPublisher :exec
+-- Re-stamp a single trigger's responsible publisher after a substantive edit of
+-- THAT trigger (cron / filter / enabled / webhook security). Future runs it fires
+-- become accountable to this member (MUL-4302 trigger_owner transfer).
+UPDATE autopilot_trigger
+SET published_by_type = $2, published_by_id = $3, updated_at = now()
+WHERE id = $1;
+
+-- name: SetAutopilotTriggerPublishersByAutopilot :exec
+-- Re-stamp ALL of an autopilot's triggers' responsible publisher after a substantive
+-- AUTOPILOT-level edit (target / instructions / assignee / execution-mode / enable).
+-- Such a change governs every trigger's future runs, so responsibility transfers to
+-- the editing member for all of them; a per-trigger edit uses the single-trigger
+-- variant so it never reassigns another trigger (MUL-4302).
+UPDATE autopilot_trigger
+SET published_by_type = $2, published_by_id = $3, updated_at = now()
+WHERE autopilot_id = $1;
 
 -- name: UpdateAutopilotTrigger :one
 UPDATE autopilot_trigger SET
@@ -339,8 +387,31 @@ ORDER BY t.id;
 -- =====================
 
 -- name: CreateAutopilotTask :one
-INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, autopilot_run_id, trigger_summary)
-VALUES ($1, $2, NULL, 'queued', $3, $4, sqlc.narg(trigger_summary))
+-- run_only autopilot dispatch. Attribution depends on the trigger:
+--   * schedule / webhook / api: no human authorized the run, so originator_user_id
+--     stays NULL and accountable_user_id is the rule_owner (the publisher of the
+--     autopilot's active rule version), with rule_version_id recording the snapshot
+--     (MUL-4302 §3.4) — the accountable-diverges-from-originator case.
+--   * manual: a member clicked "run now", a direct human action, so originator and
+--     accountable are BOTH that member (originator_source='direct_human'); no rule
+--     version is involved (MUL-4302 §4).
+-- When no version/publisher resolves on the non-manual path, the caller passes NULL
+-- accountable + originator_source='unattributed' so the row is still not a
+-- NULL-source bypass (MUL-4302 §2).
+INSERT INTO agent_task_queue (
+    agent_id, runtime_id, issue_id, status, priority, autopilot_run_id, trigger_summary,
+    originator_user_id, accountable_user_id, rule_version_id,
+    originator_source, trigger_evidence_kind, trigger_evidence_ref_id
+)
+VALUES (
+    $1, $2, NULL, 'queued', $3, $4, sqlc.narg(trigger_summary),
+    sqlc.narg(originator_user_id),
+    sqlc.narg(accountable_user_id),
+    sqlc.narg(rule_version_id),
+    sqlc.narg(originator_source),
+    sqlc.narg(trigger_evidence_kind),
+    sqlc.narg(trigger_evidence_ref_id)
+)
 RETURNING *;
 
 -- name: GetAutopilotTaskByRun :one

@@ -77,6 +77,58 @@ func createWebhookTriggerViaHandler(t *testing.T, autopilotID string) AutopilotT
 	return resp
 }
 
+// TestCreateTrigger_RepublishesRuleVersionAtomically verifies Elon's final Phase 1
+// must-fix: creating a trigger (a substantive change to what fires, MUL-4302 §3.4)
+// republishes the autopilot's rule version with the acting member as publisher,
+// written atomically in the same tx as the trigger INSERT — for BOTH the webhook
+// create path (mint-with-retry, whole attempt wrapped in a tx) and the schedule path.
+func TestCreateTrigger_RepublishesRuleVersionAtomically(t *testing.T) {
+	agentID := createWebhookTestAgent(t, "TriggerVersion Agent")
+	apID := createWebhookTestAutopilot(t, agentID, "active", "run_only")
+	ctx := context.Background()
+	verParams := db.GetActiveAutopilotRuleVersionParams{
+		WorkspaceID: parseUUID(testWorkspaceID),
+		AutopilotID: parseUUID(apID),
+	}
+
+	// The test autopilot is inserted directly (no v1), so no rule version exists yet.
+	if _, err := testHandler.Queries.GetActiveAutopilotRuleVersion(ctx, verParams); err == nil {
+		t.Fatal("expected no rule version before any trigger is created")
+	}
+
+	// Webhook create (mint-with-retry) republishes atomically.
+	createWebhookTriggerViaHandler(t, apID)
+	ver, err := testHandler.Queries.GetActiveAutopilotRuleVersion(ctx, verParams)
+	if err != nil {
+		t.Fatalf("webhook trigger create must republish a rule version: %v", err)
+	}
+	if ver.PublishedByType != "member" || uuidToString(ver.PublishedByID) != testUserID {
+		t.Errorf("webhook version published_by = %s/%s, want member/%s", ver.PublishedByType, uuidToString(ver.PublishedByID), testUserID)
+	}
+
+	// Schedule create appends a fresh version, also published by the acting member.
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/autopilots/"+apID+"/triggers", map[string]any{
+		"kind":            "schedule",
+		"cron_expression": "0 0 * * *",
+	})
+	req = withURLParam(req, "id", apID)
+	testHandler.CreateAutopilotTrigger(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("schedule CreateAutopilotTrigger: got %d body=%s", w.Code, w.Body.String())
+	}
+	ver2, err := testHandler.Queries.GetActiveAutopilotRuleVersion(ctx, verParams)
+	if err != nil {
+		t.Fatalf("schedule trigger create must republish a rule version: %v", err)
+	}
+	if ver2.ID.Bytes == ver.ID.Bytes {
+		t.Error("schedule create must append a NEW rule version, not reuse the webhook one")
+	}
+	if ver2.PublishedByType != "member" || uuidToString(ver2.PublishedByID) != testUserID {
+		t.Errorf("schedule version published_by = %s/%s, want member/%s", ver2.PublishedByType, uuidToString(ver2.PublishedByID), testUserID)
+	}
+}
+
 // createWebhookTriggerWithFilters builds the request body with a real JSON
 // array — the same shape the frontend sends. Earlier revisions of this
 // helper marshaled the filters separately and assigned the resulting

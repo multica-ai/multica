@@ -32,7 +32,7 @@ import { useTimeAgo } from "../../i18n";
 import { ContentEditor, type ContentEditorRef, ReadonlyContent, useFileDropZone, FileDropOverlay, Attachment as AttachmentRenderer, AttachmentDownloadProvider } from "../../editor";
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
-import { api } from "@multica/core/api";
+import { api, dispatchReasonCode } from "@multica/core/api";
 import { ReplyInput } from "./reply-input";
 import { CommentTriggerChips } from "./comment-trigger-chips";
 import { useCommentTriggerPreview } from "../hooks/use-comment-trigger-preview";
@@ -277,7 +277,15 @@ function TaskCommentRetryButton({
     try {
       await api.rerunIssue(issueId, taskId);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : t(($) => $.execution_log.retry_failed));
+      // Rerun re-checks the operator's invoke permission (MUL-4525); a
+      // structured 403 is a permission block, not a transient failure.
+      toast.error(
+        dispatchReasonCode(e) === "invocation_not_allowed"
+          ? t(($) => $.execution_log.retry_blocked)
+          : e instanceof Error
+            ? e.message
+            : t(($) => $.execution_log.retry_failed),
+      );
     } finally {
       setRetrying(false);
     }
@@ -452,6 +460,7 @@ function useEditAttachmentState(
     isDragOver,
     dropZoneProps,
     triggerPreview,
+    content,
     suppressedAgentIds,
     toggleSuppressedAgent,
     draftKey,
@@ -646,6 +655,8 @@ function CommentRow({
             <div className="min-w-0 flex-1">
               <CommentTriggerChips
                 agents={edit.triggerPreview.agents}
+                blocked={edit.triggerPreview.blocked}
+                draftContent={edit.content}
                 suppressedAgentIds={edit.suppressedAgentIds}
                 onToggle={edit.toggleSuppressedAgent}
               />
@@ -945,6 +956,8 @@ function CommentCardImpl({
                       )}
                     <CommentTriggerChips
                       agents={edit.triggerPreview.agents}
+                      blocked={edit.triggerPreview.blocked}
+                      draftContent={edit.content}
                       suppressedAgentIds={edit.suppressedAgentIds}
                       onToggle={edit.toggleSuppressedAgent}
                     />

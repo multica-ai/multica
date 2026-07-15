@@ -693,6 +693,7 @@ export const EMPTY_ISSUE_FALLBACK: import("@multica/core/types").Issue = {
   start_date: null,
   due_date: null,
   metadata: {},
+  properties: {},
   created_at: "",
   updated_at: "",
 };

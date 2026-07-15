@@ -6,6 +6,7 @@ import {
   encodeBuilderInput,
   mergeBuilderDraft,
   parseBuilderDraft,
+  pickBuilderRestore,
   stripBuilderDraft,
   type AgentDraft,
 } from "./agent-creation-studio";
@@ -73,6 +74,39 @@ Return findings."}</agent_draft>`;
     expect(decodeBuilderInput("ordinary chat message")).toBe(
       "ordinary chat message",
     );
+  });
+
+  // The builder chat is a real chat_session, so cancelling a started-but-empty
+  // run defers the empty/non-empty judgment (#5219): the cancel response carries
+  // no restore_to_input and the prompt arrives later as a durable draft-restore
+  // row holding the ENCODED message. Handing that to the composer raw would show
+  // the user a wall of JSON instead of the sentence they typed.
+  it("decodes a durable draft restore before the builder composer adopts it", () => {
+    const encoded = encodeBuilderInput(
+      "Create a release manager",
+      draft(),
+      [],
+      [],
+      { id: "runtime-1", name: "Codex", provider: "codex" },
+      [],
+    );
+
+    expect(pickBuilderRestore(null, { id: "msg-1", content: encoded })).toEqual({
+      id: "msg-1",
+      content: "Create a release manager",
+    });
+    expect(pickBuilderRestore(null, null)).toBeNull();
+  });
+
+  // The synchronous answer (task never started) is already decoded and already
+  // in hand; it must not be displaced by a durable row for the same cancel.
+  it("prefers the synchronous cancel answer over a durable restore", () => {
+    expect(
+      pickBuilderRestore(
+        { id: "msg-1", content: "Create a release manager" },
+        { id: "msg-1", content: "should not win" },
+      ),
+    ).toEqual({ id: "msg-1", content: "Create a release manager" });
   });
 
   it("merges safe fields and rejects unknown workspace references", () => {

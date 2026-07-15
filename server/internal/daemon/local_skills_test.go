@@ -200,12 +200,21 @@ func TestLocalSkills_DiscoversACPProviderRoots(t *testing.T) {
 			wantPath: "~/.qoder/skills/review-helper",
 			wantName: "Qoder Review",
 		},
+		{
+			provider: "grok",
+			root:     filepath.Join(".grok", "skills"),
+			wantPath: "~/.grok/skills/review-helper",
+			wantName: "Grok Review",
+		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.provider, func(t *testing.T) {
 			home := t.TempDir()
 			t.Setenv("HOME", home)
+			if tc.provider == "grok" {
+				t.Setenv("GROK_HOME", "")
+			}
 
 			writeTestLocalSkill(t, filepath.Join(home, tc.root), "review-helper", map[string]string{
 				"SKILL.md": "---\nname: " + tc.wantName + "\ndescription: Review code\n---\n# Review\n",
@@ -252,6 +261,41 @@ func TestLocalSkills_DiscoversACPProviderRoots(t *testing.T) {
 				t.Fatalf("expected 1 supporting file, got %d", len(bundle.Files))
 			}
 		})
+	}
+}
+
+func TestListRuntimeLocalSkills_GrokUsesGROKHOME(t *testing.T) {
+	home := t.TempDir()
+	grokHome := filepath.Join(t.TempDir(), "custom-grok-home")
+	t.Setenv("HOME", home)
+	t.Setenv("GROK_HOME", grokHome)
+	writeTestLocalSkill(t, filepath.Join(grokHome, "skills"), "review-helper", map[string]string{
+		"SKILL.md": "---\nname: Grok Home Review\ndescription: Review code\n---\n# Review\n",
+	})
+	writeTestLocalSkill(t, filepath.Join(home, ".grok", "skills"), "wrong-home", map[string]string{
+		"SKILL.md": "---\nname: Wrong Home\n---\n# Wrong\n",
+	})
+
+	skills, supported, err := listRuntimeLocalSkills("grok")
+	if err != nil {
+		t.Fatalf("listRuntimeLocalSkills: %v", err)
+	}
+	if !supported {
+		t.Fatal("grok should be supported")
+	}
+	if len(skills) != 1 || skills[0].Key != "review-helper" {
+		t.Fatalf("expected only GROK_HOME skill, got %+v", skills)
+	}
+	if skills[0].SourcePath != filepath.ToSlash(filepath.Join(grokHome, "skills", "review-helper")) {
+		t.Fatalf("source_path = %q, want custom GROK_HOME path", skills[0].SourcePath)
+	}
+
+	bundle, supported, err := loadRuntimeLocalSkillBundle("grok", "review-helper")
+	if err != nil {
+		t.Fatalf("loadRuntimeLocalSkillBundle: %v", err)
+	}
+	if !supported || bundle == nil || bundle.Name != "Grok Home Review" {
+		t.Fatalf("unexpected bundle: supported=%v bundle=%+v", supported, bundle)
 	}
 }
 

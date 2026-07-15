@@ -154,6 +154,7 @@
     "add_issue_tooltip": "イシューを追加",
     "empty_column": "イシューなし",
     "empty_grouping": "一致するイシューがありません",
+    "no_value": "値なし",
     "ordered_by": "{{field}} 順に並べたボード"
   },
   "detail": {
@@ -285,6 +286,17 @@
     "edit_action": "編集",
     "update_failed": "コメントを更新できませんでした",
     "send_failed": "コメントを送信できませんでした",
+    "posted_partial_trigger_other": "コメントを投稿しましたが、{{count}} 件のメンションはトリガーされませんでした",
+    "posted_partial_trigger_named": "コメントを投稿しましたが、{{name}} はトリガーされませんでした（{{reason}}）",
+    "trigger_blocked_chip_aria": "{{name}} はトリガーされません — {{reason}}",
+    "trigger_blocked_invocation_not_allowed": "この対象を使用する権限がありません",
+    "trigger_blocked_target_unavailable": "この対象は利用できません",
+    "trigger_blocked_runtime_offline": "この対象のランタイムがオフラインです",
+    "trigger_blocked_generic": "この対象はトリガーされません",
+    "trigger_blocked_short_invocation_not_allowed": "権限がありません",
+    "trigger_blocked_short_target_unavailable": "利用不可",
+    "trigger_blocked_short_runtime_offline": "ランタイム オフライン",
+    "trigger_blocked_short_generic": "トリガーされません",
     "send_reply_failed": "返信を送信できませんでした",
     "delete_failed": "コメントを削除できませんでした",
     "reply_count_other": "返信 {{count}} 件",
@@ -356,6 +368,7 @@
     "retry_task_tooltip": "タスクを再試行",
     "retry_task_aria": "タスクを再試行",
     "retry_failed": "タスクを再試行できませんでした",
+    "retry_blocked": "再試行されませんでした — このエージェントを使用する権限がありません",
     "transcript_tooltip": "トランスクリプトを表示",
     "cancel_failed": "タスクをキャンセルできませんでした",
     "trigger_retry": "再試行",
@@ -373,7 +386,19 @@
     "status_running": "作業中",
     "status_completed": "完了",
     "status_failed": "失敗",
-    "status_cancelled": "キャンセル済み"
+    "status_cancelled": "キャンセル済み",
+    "attribution": {
+      "on_behalf_of": "{{name}} の代理として",
+      "someone": "あるメンバー",
+      "source_direct_human": "メンバーの直接操作",
+      "source_delegation": "別の実行から委任",
+      "source_comment_source": "コメントスレッドから",
+      "source_trigger_owner": "オートパイロットのトリガー作成者",
+      "source_rule_owner": "オートパイロットのルール公開者",
+      "source_owner_fallback": "正確な責任者なし — エージェント所有者に帰属",
+      "source_backfill": "バックフィルされた帰属",
+      "source_unattributed": "責任メンバーを解決できません"
+    }
   },
   "terminate_dialog": {
     "title": "このタスクを停止しますか？",
@@ -429,6 +454,17 @@
     "delete_issue": "イシューを削除"
   },
   "pickers": {
+    "custom_property": {
+      "empty": "空",
+      "clear_action": "クリア",
+      "true_label": "はい",
+      "false_label": "いいえ",
+      "value_placeholder": "値を入力…",
+      "url_placeholder": "https://…",
+      "number_placeholder": "0",
+      "open_link": "リンクを開く",
+      "archived_hint": "アーカイブ済みプロパティ — 値は読み取り専用です"
+    },
     "filter_options_aria": "フィルターオプション",
     "no_results": "結果なし",
     "assignee": {

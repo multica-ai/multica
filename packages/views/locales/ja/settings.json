@@ -30,6 +30,10 @@
     "sticky_comment_bar": {
       "title": "コメントバーを固定",
       "hint": "イシューのページをスクロールしても、コメントバーを常に下部に固定します。"
+    },
+    "issue_link_new_tab": {
+      "title": "イシューリンクを新しいタブで開く",
+      "hint": "説明・コメント・チャット内のイシューリンクを、その場で移動せず新しいタブで開きます。"
     }
   },
   "shortcuts": {
@@ -109,7 +113,70 @@
       "integrations": "連携",
       "labs": "ラボ",
       "members": "メンバー",
-      "labels": "ラベル"
+      "labels": "ラベル",
+      "properties": "プロパティ"
+    }
+  },
+  "properties": {
+    "title": "プロパティ",
+    "description": "このワークスペースの Issue に型付きカスタムプロパティを定義します。値は各 Issue に設定され、エージェントが読み書きできます。",
+    "search_placeholder": "名前で絞り込み...",
+    "new_property": "新規プロパティ",
+    "show_archived": "アーカイブ済みを表示",
+    "columns": {
+      "name": "名前",
+      "type": "タイプ",
+      "options": "オプション",
+      "usage": "使用数",
+      "updated": "更新日時"
+    },
+    "usage_count_other": "{{count}} 件の Issue",
+    "loading": "プロパティを読み込み中...",
+    "empty": "プロパティはまだありません",
+    "empty_hint": "Severity や Environment のような型付きフィールドを作成できます。エージェントはバリデーション付きで読み書きします。",
+    "no_results": "一致するプロパティがありません",
+    "save_failed": "プロパティを保存できませんでした",
+    "limit_hint": "{{count}}/{{max}} 個の有効なプロパティ",
+    "archived_badge": "アーカイブ済み",
+    "types": {
+      "text": "テキスト",
+      "number": "数値",
+      "select": "選択",
+      "multi_select": "複数選択",
+      "date": "日付",
+      "checkbox": "チェックボックス",
+      "url": "URL"
+    },
+    "actions": {
+      "open": "{{name}} の操作",
+      "edit": "編集",
+      "archive": "アーカイブ",
+      "unarchive": "復元"
+    },
+    "editor": {
+      "create_title": "新規プロパティ",
+      "edit_title": "プロパティを編集",
+      "admin_hint": "プロパティ定義を管理できるのはワークスペースのオーナーと管理者のみです。",
+      "name": "名前",
+      "name_placeholder": "例: Severity",
+      "type": "タイプ",
+      "type_locked_hint": "作成後にタイプは変更できません。",
+      "description": "説明",
+      "description_placeholder": "このプロパティの意味と設定するタイミング",
+      "options": "オプション",
+      "option_name_placeholder": "オプション名",
+      "add_option": "オプションを追加",
+      "remove_option": "オプションを削除",
+      "cancel": "キャンセル",
+      "save": "プロパティを保存",
+      "saving": "保存中..."
+    },
+    "archive_dialog": {
+      "title": "プロパティをアーカイブしますか？",
+      "description": "「{{name}}」はピッカーとフィルターから非表示になります。Issue 上の既存の値は保持され、後で復元できます。",
+      "cancel": "キャンセル",
+      "confirm": "プロパティをアーカイブ",
+      "failed": "プロパティをアーカイブできませんでした"
     }
   },
   "labels": {
@@ -143,7 +210,6 @@
       "description": "説明",
       "description_placeholder": "このラベルを使用する条件を説明",
       "color": "色",
-      "custom_color": "カスタム色を選択",
       "cancel": "キャンセル",
       "save": "ラベルを保存",
       "saving": "保存中..."

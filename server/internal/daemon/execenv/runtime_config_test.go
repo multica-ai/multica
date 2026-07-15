@@ -264,6 +264,32 @@ func TestCommentTriggeredBriefResumedNoDeltaSkipsDefaultThreadRead(t *testing.T)
 	}
 }
 
+// When the daemon could not honor an expected resume, the brief must make the
+// context loss user-visible by instructing the agent to disclose it — not leave
+// it as a silent restart (MUL-4424).
+func TestBriefSurfacesResumeUnavailable(t *testing.T) {
+	t.Parallel()
+	const issueID = "11111111-2222-3333-4444-555555555555"
+	base := TaskContextForEnv{IssueID: issueID, TriggerCommentID: "trigger-1", TriggerThreadID: "thread-1"}
+
+	lost := base
+	lost.PriorSessionResumeUnavailable = true
+	out := buildMetaSkillContent("codex", lost)
+	for _, want := range []string{
+		"## Session Continuity Notice",
+		"could NOT be restored",
+		"tell the user up front",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("resume-unavailable brief missing %q\n---\n%s", want, out)
+		}
+	}
+
+	if strings.Contains(buildMetaSkillContent("codex", base), "Session Continuity Notice") {
+		t.Error("brief must not show the continuity notice when no resume was lost")
+	}
+}
+
 // Assignment-triggered briefs are the high-risk path for role conflicts:
 // non-executor agents still need issue context, but the runtime workflow must
 // not turn status changes, investigation, implementation, or delegation into

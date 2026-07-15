@@ -715,6 +715,61 @@ func TestParseCodexSessionFileSubtractsCachedInput(t *testing.T) {
 	}
 }
 
+// The per-task CODEX_HOME must win over the ambient env / global home so usage
+// is read from the same task-local sessions Codex actually wrote to (MUL-4424).
+func TestCodexSessionRootPrefersExplicitTaskHome(t *testing.T) {
+	// Cannot use t.Parallel() with t.Setenv.
+	envHome := t.TempDir()
+	taskHome := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(envHome, "sessions"), 0o755); err != nil {
+		t.Fatalf("mkdir env sessions: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(taskHome, "sessions"), 0o755); err != nil {
+		t.Fatalf("mkdir task sessions: %v", err)
+	}
+	t.Setenv("CODEX_HOME", envHome)
+
+	if got, want := codexSessionRoot(taskHome), filepath.Join(taskHome, "sessions"); got != want {
+		t.Errorf("explicit task home ignored: got %q, want %q", got, want)
+	}
+	if got, want := codexSessionRoot(""), filepath.Join(envHome, "sessions"); got != want {
+		t.Errorf("empty task home should fall back to ambient CODEX_HOME: got %q, want %q", got, want)
+	}
+}
+
+func TestScanCodexSessionUsageReadsPerTaskHome(t *testing.T) {
+	t.Parallel()
+	taskHome := t.TempDir()
+	startTime := time.Now().Add(-time.Minute)
+	dateDir := filepath.Join(taskHome, "sessions",
+		fmt.Sprintf("%04d", startTime.Year()),
+		fmt.Sprintf("%02d", int(startTime.Month())),
+		fmt.Sprintf("%02d", startTime.Day()),
+	)
+	if err := os.MkdirAll(dateDir, 0o755); err != nil {
+		t.Fatalf("mkdir date dir: %v", err)
+	}
+	content := strings.Join([]string{
+		`{"timestamp":"2026-07-13T00:00:00.000Z","type":"turn_context","payload":{"model":"gpt-5.6-sol"}}`,
+		`{"timestamp":"2026-07-13T00:00:01.000Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":500,"output_tokens":20},"model":"gpt-5.6-sol"}}}`,
+		"",
+	}, "\n")
+	if err := os.WriteFile(filepath.Join(dateDir, "rollout.jsonl"), []byte(content), 0o644); err != nil {
+		t.Fatalf("write session file: %v", err)
+	}
+
+	got := scanCodexSessionUsage(startTime, taskHome)
+	if got == nil {
+		t.Fatal("expected usage scanned from the per-task home")
+	}
+	if got.usage.InputTokens != 500 || got.usage.OutputTokens != 20 {
+		t.Errorf("usage = %+v, want input=500 output=20", got.usage)
+	}
+	if got.model != "gpt-5.6-sol" {
+		t.Errorf("model = %q, want gpt-5.6-sol", got.model)
+	}
+}
+
 func TestCodexRawItemCommandExecution(t *testing.T) {
 	t.Parallel()
 
@@ -1265,6 +1320,44 @@ func TestCodexStartOrResumeThreadFallsBackOnResumeError(t *testing.T) {
 	}
 	if resumed {
 		t.Error("expected resumed=false after falling back to thread/start")
+	}
+}
+
+// codexTurnInput carries the user-visible disclosure when a resume was expected
+// but the backend landed on a fresh thread. Paired with
+// TestCodexStartOrResumeThreadFallsBackOnResumeError (which proves the live
+// thread/resume RPC returns resumed=false on a recoverable error), this proves
+// the real fallback surfaces the notice while a successful resume does not
+// (MUL-4424).
+func TestCodexTurnInput(t *testing.T) {
+	t.Parallel()
+
+	const prompt = "do the task"
+	text := func(input []map[string]any) string {
+		if len(input) != 1 {
+			t.Fatalf("expected a single input block, got %d", len(input))
+		}
+		s, _ := input[0]["text"].(string)
+		return s
+	}
+
+	// Resume expected but the backend fell back to a fresh thread → disclose,
+	// and the original prompt must still be delivered.
+	fallback := text(codexTurnInput(prompt, true, false))
+	if !strings.Contains(fallback, "previous conversation context could not be restored") {
+		t.Errorf("expected continuity notice on resume fallback, got:\n%s", fallback)
+	}
+	if !strings.HasSuffix(fallback, prompt) {
+		t.Errorf("prompt must survive alongside the notice, got:\n%s", fallback)
+	}
+
+	// Successful resume, or an ordinary fresh start with no resume expected →
+	// no notice, prompt delivered verbatim.
+	if got := text(codexTurnInput(prompt, true, true)); got != prompt {
+		t.Errorf("successful resume must not add a notice, got:\n%s", got)
+	}
+	if got := text(codexTurnInput(prompt, false, false)); got != prompt {
+		t.Errorf("fresh start must not add a notice, got:\n%s", got)
 	}
 }
 

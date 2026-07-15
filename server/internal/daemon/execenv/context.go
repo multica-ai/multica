@@ -393,6 +393,11 @@ func skillsDirPath(workDir, provider string) string {
 		// workspace skill layout; see https://antigravity.google/docs/gcli-migration
 		// under "Workspace skills".
 		return filepath.Join(workDir, ".agents", "skills")
+	case "grok":
+		// Grok Build CLI discovers project-level skills from .grok/skills/
+		// (and also scans .agents/skills/). Prefer the native .grok tree.
+		// See Grok user-guide skills.md.
+		return filepath.Join(workDir, ".grok", "skills")
 	default:
 		// Fallback: write to .agent_context/skills/ (referenced by meta config).
 		return filepath.Join(workDir, ".agent_context", "skills")

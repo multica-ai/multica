@@ -30,6 +30,10 @@
     "sticky_comment_bar": {
       "title": "Sticky comment bar",
       "hint": "Keep the comment bar pinned to the bottom while scrolling an issue page."
+    },
+    "issue_link_new_tab": {
+      "title": "Open issue links in new tab",
+      "hint": "Issue links in descriptions, comments, and chat open in a new tab instead of navigating in place."
     }
   },
   "shortcuts": {
@@ -112,7 +116,71 @@
       "integrations": "Integrations",
       "labs": "Labs",
       "members": "Members",
-      "labels": "Labels"
+      "labels": "Labels",
+      "properties": "Properties"
+    }
+  },
+  "properties": {
+    "title": "Properties",
+    "description": "Define typed custom properties for issues in this workspace. Values are set on each issue and are readable and writable by agents.",
+    "search_placeholder": "Filter by name...",
+    "new_property": "New property",
+    "show_archived": "Show archived",
+    "columns": {
+      "name": "Name",
+      "type": "Type",
+      "options": "Options",
+      "usage": "Used by",
+      "updated": "Updated"
+    },
+    "usage_count_one": "{{count}} issue",
+    "usage_count_other": "{{count}} issues",
+    "loading": "Loading properties...",
+    "empty": "No properties yet",
+    "empty_hint": "Create typed fields like Severity or Environment — agents can read and write them with validation.",
+    "no_results": "No matching properties",
+    "save_failed": "Couldn't save property",
+    "limit_hint": "{{count}}/{{max}} active properties",
+    "archived_badge": "Archived",
+    "types": {
+      "text": "Text",
+      "number": "Number",
+      "select": "Select",
+      "multi_select": "Multi-select",
+      "date": "Date",
+      "checkbox": "Checkbox",
+      "url": "URL"
+    },
+    "actions": {
+      "open": "Actions for {{name}}",
+      "edit": "Edit",
+      "archive": "Archive",
+      "unarchive": "Restore"
+    },
+    "editor": {
+      "create_title": "New property",
+      "edit_title": "Edit property",
+      "admin_hint": "Only workspace owners and admins can manage property definitions.",
+      "name": "Name",
+      "name_placeholder": "e.g. Severity",
+      "type": "Type",
+      "type_locked_hint": "Type can't be changed after creation.",
+      "description": "Description",
+      "description_placeholder": "What this property means and when to set it",
+      "options": "Options",
+      "option_name_placeholder": "Option name",
+      "add_option": "Add option",
+      "remove_option": "Remove option",
+      "cancel": "Cancel",
+      "save": "Save property",
+      "saving": "Saving..."
+    },
+    "archive_dialog": {
+      "title": "Archive property?",
+      "description": "\"{{name}}\" will be hidden from pickers and filters. Existing values on issues are preserved. You can restore it later.",
+      "cancel": "Cancel",
+      "confirm": "Archive property",
+      "failed": "Couldn't archive property"
     }
   },
   "labels": {
@@ -150,7 +218,6 @@
       "description": "Description",
       "description_placeholder": "Describe when this label should be used",
       "color": "Color",
-      "custom_color": "Choose a custom color",
       "cancel": "Cancel",
       "save": "Save label",
       "saving": "Saving..."

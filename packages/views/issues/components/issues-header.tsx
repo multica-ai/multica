@@ -56,6 +56,9 @@ import { useWorkspaceId } from "@multica/core/hooks";
 import { memberListOptions, agentListOptions, squadListOptions } from "@multica/core/workspace/queries";
 import { projectListOptions } from "@multica/core/projects/queries";
 import { labelListOptions } from "@multica/core/labels/queries";
+import { propertyListOptions } from "@multica/core/properties";
+import { propertyIdFromViewKey } from "@multica/core/issues/stores/view-store";
+import type { IssueProperty } from "@multica/core/types";
 import { ProjectIcon } from "../../projects/components/project-icon";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { LabelChip } from "../../labels/label-chip";
@@ -103,6 +106,7 @@ function getActiveFilterCount(state: {
   projectFilters: string[];
   includeNoProject: boolean;
   labelFilters: string[];
+  propertyFilters?: Record<string, string[]>;
   dateFilter?: IssueDateFilter | null;
 }) {
   let count = 0;
@@ -112,6 +116,9 @@ function getActiveFilterCount(state: {
   if (state.creatorFilters.length > 0) count++;
   if (state.projectFilters.length > 0 || state.includeNoProject) count++;
   if (state.labelFilters.length > 0) count++;
+  for (const selected of Object.values(state.propertyFilters ?? {})) {
+    if (selected.length > 0) count++;
+  }
   if (state.dateFilter) count++;
   return count;
 }
@@ -137,6 +144,9 @@ function useIssueCounts(allIssues: Issue[]) {
     const creator = new Map<string, number>();
     const project = new Map<string, number>();
     const label = new Map<string, number>();
+    // property definition id → option key → count. Checkbox values count
+    // under the "true"/"false" pseudo-option keys the filter store uses.
+    const property = new Map<string, Map<string, number>>();
     let noAssignee = 0;
     let noProject = 0;
 
@@ -165,9 +175,29 @@ function useIssueCounts(allIssues: Issue[]) {
           label.set(l.id, (label.get(l.id) ?? 0) + 1);
         }
       }
+
+      for (const [propertyId, value] of Object.entries(issue.properties ?? {})) {
+        const optionKeys =
+          typeof value === "string"
+            ? [value]
+            : Array.isArray(value)
+              ? value
+              : typeof value === "boolean"
+                ? [String(value)]
+                : [];
+        if (optionKeys.length === 0) continue;
+        let perOption = property.get(propertyId);
+        if (!perOption) {
+          perOption = new Map<string, number>();
+          property.set(propertyId, perOption);
+        }
+        for (const key of optionKeys) {
+          perOption.set(key, (perOption.get(key) ?? 0) + 1);
+        }
+      }
     }
 
-    return { status, priority, assignee, creator, noAssignee, project, noProject, label };
+    return { status, priority, assignee, creator, noAssignee, project, noProject, label, property };
   }, [allIssues]);
 }
 
@@ -505,6 +535,67 @@ function LabelSubContent({
   );
 }
 
+/**
+ * Option checkboxes for one custom property inside the Filter dropdown.
+ * Select/multi_select list the definition's options (dot + name); checkbox
+ * definitions expose the "true"/"false" pseudo-options with Yes/No labels.
+ */
+function PropertyFilterOptions({
+  property,
+  counts,
+  selected,
+  onToggle,
+}: {
+  property: IssueProperty;
+  counts: Map<string, number> | undefined;
+  selected: string[];
+  onToggle: (optionId: string) => void;
+}) {
+  const { t } = useT("issues");
+  const options =
+    property.type === "checkbox"
+      ? [
+          { id: "true", name: t(($) => $.pickers.custom_property.true_label), color: undefined },
+          { id: "false", name: t(($) => $.pickers.custom_property.false_label), color: undefined },
+        ]
+      : (property.config.options ?? []).map((option) => ({
+          id: option.id,
+          name: option.name,
+          color: option.color as string | undefined,
+        }));
+
+  return (
+    <>
+      {options.map((option) => {
+        const checked = selected.includes(option.id);
+        const count = counts?.get(option.id) ?? 0;
+        return (
+          <DropdownMenuCheckboxItem
+            key={option.id}
+            checked={checked}
+            onCheckedChange={() => onToggle(option.id)}
+            className={FILTER_ITEM_CLASS}
+          >
+            <HoverCheck checked={checked} />
+            {option.color && (
+              <span
+                className="size-2.5 shrink-0 rounded-full"
+                style={{ backgroundColor: option.color }}
+              />
+            )}
+            <span className="truncate">{option.name}</span>
+            {count > 0 && (
+              <span className="ml-auto text-xs text-muted-foreground">
+                {count}
+              </span>
+            )}
+          </DropdownMenuCheckboxItem>
+        );
+      })}
+    </>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Date sub-menu content
 // ---------------------------------------------------------------------------
@@ -796,6 +887,8 @@ export function IssueDisplayControls({
   const projectFilters = useViewStore((s) => s.projectFilters);
   const includeNoProject = useViewStore((s) => s.includeNoProject);
   const labelFilters = useViewStore((s) => s.labelFilters);
+  const propertyFilters = useViewStore((s) => s.propertyFilters);
+  const cardPropertyIds = useViewStore((s) => s.cardPropertyIds);
   const sortBy = useViewStore((s) => s.sortBy);
   const sortDirection = useViewStore((s) => s.sortDirection);
   const grouping = useViewStore((s) => s.grouping);
@@ -803,13 +896,47 @@ export function IssueDisplayControls({
   const cardProperties = useViewStore((s) => s.cardProperties);
   const showSubIssues = useViewStore((s) => s.showSubIssues);
   const act = useViewStoreApi().getState();
+  const headerWsId = useWorkspaceId();
+  // Active custom-property catalog: drives the filter sections, dynamic
+  // sort/grouping options, and the card-property toggles below.
+  const { data: workspaceProperties = [] } = useQuery(propertyListOptions(headerWsId));
+  const propertyById = useMemo(
+    () => new Map(workspaceProperties.map((p) => [p.id, p])),
+    [workspaceProperties],
+  );
+  const filterableProperties = useMemo(
+    () =>
+      workspaceProperties.filter((p) =>
+        p.type === "select" || p.type === "multi_select" || p.type === "checkbox",
+      ),
+    [workspaceProperties],
+  );
+  const sortableProperties = useMemo(
+    () => workspaceProperties.filter((p) => p.type === "number" || p.type === "date"),
+    [workspaceProperties],
+  );
+  const groupableProperties = useMemo(
+    () => workspaceProperties.filter((p) => p.type === "select"),
+    [workspaceProperties],
+  );
 
   const counts = useIssueCounts(scopedIssues);
   const showDateFilter = !!onDateFilterChange;
 
+  // Only count filters whose definition is still active — a filter pinned to
+  // an archived definition is stripped by the surface controller and must
+  // not light the badge for an effect that no longer exists.
+  const effectivePropertyFilters = useMemo(() => {
+    const activeIds = new Set(filterableProperties.map((p) => p.id));
+    return Object.fromEntries(
+      Object.entries(propertyFilters).filter(([id, selected]) => selected.length > 0 && activeIds.has(id)),
+    );
+  }, [filterableProperties, propertyFilters]);
+
   const activeFilterCount = getActiveFilterCount({
     statusFilters,
     priorityFilters,
+    propertyFilters: effectivePropertyFilters,
     assigneeFilters,
     includeNoAssignee,
     creatorFilters,
@@ -854,8 +981,17 @@ export function IssueDisplayControls({
           : `${shortDateLabel(dateFilter.from)} - ${shortDateLabel(dateFilter.to)}`
       }`
     : null;
-  const sortLabel = t(($) => $.display[SORT_LABEL_KEY[sortBy]]);
-  const groupingLabel = t(($) => $.display[GROUPING_LABEL_KEY[grouping]]);
+  const sortPropertyId = propertyIdFromViewKey(sortBy);
+  const groupingPropertyId = propertyIdFromViewKey(grouping);
+  // Property-backed sort/grouping label straight from the definition name;
+  // a stale persisted id (archived/deleted definition) falls back to the
+  // manual/status default label.
+  const sortLabel = sortPropertyId
+    ? propertyById.get(sortPropertyId)?.name ?? t(($) => $.display.sort_manual)
+    : t(($) => $.display[SORT_LABEL_KEY[sortBy as keyof typeof SORT_LABEL_KEY]]);
+  const groupingLabel = groupingPropertyId
+    ? propertyById.get(groupingPropertyId)?.name ?? t(($) => $.display.group_status)
+    : t(($) => $.display[GROUPING_LABEL_KEY[grouping as keyof typeof GROUPING_LABEL_KEY]]);
   const swimlaneGroupingLabel = t(($) => $.display[SWIMLANE_GROUPING_LABEL_KEY[swimlaneGrouping]]);
   const controlButtonClass = "h-8 w-8 gap-1 px-0 text-muted-foreground md:h-7 md:w-auto md:px-2.5";
 
@@ -1090,6 +1226,33 @@ export function IssueDisplayControls({
               </DropdownMenuSubContent>
             </DropdownMenuSub>
 
+            {/* Custom properties — one sub per filterable definition */}
+            {filterableProperties.length > 0 && <DropdownMenuSeparator />}
+            {filterableProperties.map((property) => {
+              const selected = propertyFilters[property.id] ?? [];
+              return (
+                <DropdownMenuSub key={property.id}>
+                  <DropdownMenuSubTrigger>
+                    <SlidersHorizontal className="size-3.5" />
+                    <span className="flex-1 truncate">{property.name}</span>
+                    {selected.length > 0 && (
+                      <span className="text-xs text-primary font-medium">
+                        {selected.length}
+                      </span>
+                    )}
+                  </DropdownMenuSubTrigger>
+                  <DropdownMenuSubContent className="w-auto min-w-44 p-1">
+                    <PropertyFilterOptions
+                      property={property}
+                      counts={counts.property.get(property.id)}
+                      selected={selected}
+                      onToggle={(optionId) => act.togglePropertyFilter(property.id, optionId)}
+                    />
+                  </DropdownMenuSubContent>
+                </DropdownMenuSub>
+              );
+            })}
+
             {/* Reset */}
             {hasActiveFilters && (
               <>
@@ -1157,6 +1320,11 @@ export function IssueDisplayControls({
                             {t(($) => $.display[GROUPING_LABEL_KEY[opt.value]])}
                           </DropdownMenuRadioItem>
                         ))}
+                        {groupableProperties.map((property) => (
+                          <DropdownMenuRadioItem key={property.id} value={`property:${property.id}`}>
+                            {property.name}
+                          </DropdownMenuRadioItem>
+                        ))}
                       </DropdownMenuRadioGroup>
                     </DropdownMenuContent>
                   </DropdownMenu>
@@ -1221,7 +1389,12 @@ export function IssueDisplayControls({
                     <DropdownMenuRadioGroup value={sortBy} onValueChange={(v) => act.setSortBy(v as SortField)}>
                       {SORT_OPTIONS.map((opt) => (
                         <DropdownMenuRadioItem key={opt.value} value={opt.value}>
-                          {t(($) => $.display[SORT_LABEL_KEY[opt.value]])}
+                          {t(($) => $.display[SORT_LABEL_KEY[opt.value as keyof typeof SORT_LABEL_KEY]])}
+                        </DropdownMenuRadioItem>
+                      ))}
+                      {sortableProperties.map((property) => (
+                        <DropdownMenuRadioItem key={property.id} value={`property:${property.id}`}>
+                          {property.name}
                         </DropdownMenuRadioItem>
                       ))}
                     </DropdownMenuRadioGroup>
@@ -1270,6 +1443,19 @@ export function IssueDisplayControls({
                       size="sm"
                       checked={cardProperties[opt.key]}
                       onCheckedChange={() => act.toggleCardProperty(opt.key)}
+                    />
+                  </label>
+                ))}
+                {workspaceProperties.map((property) => (
+                  <label
+                    key={property.id}
+                    className="flex cursor-pointer items-center justify-between"
+                  >
+                    <span className="truncate text-sm">{property.name}</span>
+                    <Switch
+                      size="sm"
+                      checked={cardPropertyIds.includes(property.id)}
+                      onCheckedChange={() => act.toggleCardPropertyId(property.id)}
                     />
                   </label>
                 ))}

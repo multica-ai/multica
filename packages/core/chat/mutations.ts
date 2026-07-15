@@ -3,9 +3,46 @@ import { api } from "../api";
 import { useWorkspaceId } from "../hooks";
 import { chatKeys, sortChatSessions } from "./queries";
 import { createLogger } from "../logger";
-import type { ChatSession, ChatPinnedAgent } from "../types";
+import type { ChatSession, ChatPinnedAgent, ChatDraftRestoresResponse } from "../types";
 
 const logger = createLogger("chat.mut");
+
+/**
+ * Consume a deferred-cancellation draft restore (#5219) after the composer has
+ * applied it. The endpoint is idempotent, so consuming twice — or consuming a
+ * row a previous attempt already deleted — is safe, which is what lets this
+ * retry at all (mutations are `retry: false` app-wide).
+ *
+ * A lost consume must never re-restore a prompt the user has since sent, so the
+ * "applied" decision is not carried by this request: the caller records it in
+ * the persisted ledger (`markDraftRestoreApplied`) before firing, and reconciles
+ * any row that outlives its ledger entry by consuming it again. This mutation
+ * only has to make that reconciliation converge quickly.
+ */
+export function useConsumeChatDraftRestore() {
+  const qc = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ sessionId, restoreId }: { sessionId: string; restoreId: string }) =>
+      api.consumeChatDraftRestore(sessionId, restoreId),
+    retry: 3,
+    retryDelay: (attempt) => Math.min(1000 * 2 ** attempt, 8000),
+    onMutate: ({ sessionId, restoreId }) => {
+      qc.setQueryData<ChatDraftRestoresResponse>(
+        chatKeys.draftRestores(sessionId),
+        (old) =>
+          old
+            ? { ...old, restores: old.restores.filter((r) => r.id !== restoreId) }
+            : old,
+      );
+    },
+    onError: (err, { sessionId, restoreId }) => {
+      // Exhausted the retries. The draft is safe (it is in the composer) and the
+      // ledger keeps the row from being re-offered; the next mount reconciles it.
+      logger.warn("consumeChatDraftRestore.error", { sessionId, restoreId, err });
+    },
+  });
+}
 
 /** Pin an agent to the quick-agent bar (optimistic append). */
 export function usePinChatAgent() {

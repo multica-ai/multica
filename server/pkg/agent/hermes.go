@@ -586,6 +586,10 @@ type hermesClient struct {
 	sessionID    string
 	onMessage    func(Message)
 	onPromptDone func(hermesPromptResult)
+	// onActivity observes accepted ACP session updates. Grok uses it to
+	// retain a short post-response drain window; other ACP backends leave it
+	// nil and keep their existing lifecycle behavior.
+	onActivity func()
 	// acceptNotification can drop ACP session updates before dispatching to
 	// handlers that mutate client state such as usage or pending tool calls.
 	acceptNotification func(updateType string) bool
@@ -1034,6 +1038,9 @@ func (c *hermesClient) handleNotification(raw map[string]json.RawMessage) {
 	updateType, updateData := normalizeACPUpdate(params.Update)
 	if c.acceptNotification != nil && !c.acceptNotification(updateType) {
 		return
+	}
+	if c.onActivity != nil {
+		c.onActivity()
 	}
 
 	switch updateType {
@@ -1532,6 +1539,32 @@ func extractACPSessionID(result json.RawMessage) string {
 		return ""
 	}
 	return r.SessionID
+}
+
+// extractACPAuthMethods returns the `authMethods` ids advertised in an ACP
+// `initialize` response, in the order the agent listed them. Agents that
+// require authentication (e.g. xAI's Grok Build) enumerate the accepted
+// methods here; per the ACP flow the client MUST send `authenticate` with one
+// of these ids before `session/new` / `session/load`. Agents that need no
+// explicit auth omit the field, so an empty slice means "skip authenticate".
+// A malformed response degrades to an empty slice (fail open on parsing so we
+// don't wedge agents that never needed the step).
+func extractACPAuthMethods(result json.RawMessage) []string {
+	var r struct {
+		AuthMethods []struct {
+			ID string `json:"id"`
+		} `json:"authMethods"`
+	}
+	if err := json.Unmarshal(result, &r); err != nil {
+		return nil
+	}
+	ids := make([]string, 0, len(r.AuthMethods))
+	for _, m := range r.AuthMethods {
+		if id := strings.TrimSpace(m.ID); id != "" {
+			ids = append(ids, id)
+		}
+	}
+	return ids
 }
 
 // extractACPCurrentModelID pulls the model selected by the ACP runtime out of

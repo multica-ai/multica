@@ -104,6 +104,7 @@ const (
 //   - Qoder: ~/.qoder/skills mirrors Qoder CLI's project-level .qoder/skills layout
 //   - Antigravity: ~/.gemini/antigravity-cli/skills user-level skill root
 //     (https://antigravity.google/docs/gcli-migration "Global skills")
+//   - Grok: $GROK_HOME/skills, defaulting to ~/.grok/skills
 //
 // The universal ~/.agents/skills root is documented as a cross-tool skill
 // location by Codex (https://developers.openai.com/codex/skills) and Gemini
@@ -156,6 +157,14 @@ func localSkillRootsForProvider(provider string) ([]localSkillRoot, bool, error)
 		// agy inherits Gemini CLI's global skill root; see
 		// https://antigravity.google/docs/gcli-migration ("Global skills").
 		providerRoot = filepath.Join(home, ".gemini", "antigravity-cli", "skills")
+	case "grok":
+		// GROK_HOME replaces the default ~/.grok home for settings, sessions,
+		// and user-level skills.
+		grokHome := strings.TrimSpace(os.Getenv("GROK_HOME"))
+		if grokHome == "" {
+			grokHome = filepath.Join(home, ".grok")
+		}
+		providerRoot = filepath.Join(grokHome, "skills")
 	default:
 		return nil, false, nil
 	}

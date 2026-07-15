@@ -100,6 +100,9 @@ export interface ListIssuesParams {
   involves_user_id?: string;
   /** JSONB containment filter on `issue.metadata`. AND across keys. */
   metadata?: IssueMetadata;
+  /** Custom-property filter: definition id → accepted values (option ids or
+   *  "true"/"false" for checkbox). OR within a definition, AND across. */
+  properties?: Record<string, string[]>;
   open_only?: boolean;
   /**
    * Restrict the result to issues with at least one of `start_date` /
@@ -111,7 +114,7 @@ export interface ListIssuesParams {
   date_field?: "created_at" | "updated_at";
   date_start?: string;
   date_end?: string;
-  sort_by?: "position" | "priority" | "title" | "created_at" | "start_date" | "due_date";
+  sort_by?: "position" | "priority" | "title" | "created_at" | "start_date" | "due_date" | `property:${string}`;
   sort_direction?: "asc" | "desc";
 }
 
@@ -136,6 +139,9 @@ export interface ListGroupedIssuesParams {
   involves_user_id?: string;
   /** JSONB containment filter on `issue.metadata`. AND across keys. */
   metadata?: IssueMetadata;
+  /** Custom-property filter: definition id → accepted values (option ids or
+   *  "true"/"false" for checkbox). OR within a definition, AND across. */
+  properties?: Record<string, string[]>;
   assignee_filters?: IssueActorRef[];
   include_no_assignee?: boolean;
   creator_filters?: IssueActorRef[];
@@ -147,7 +153,7 @@ export interface ListGroupedIssuesParams {
   date_field?: "created_at" | "updated_at";
   date_start?: string;
   date_end?: string;
-  sort_by?: "position" | "priority" | "title" | "created_at" | "start_date" | "due_date";
+  sort_by?: "position" | "priority" | "title" | "created_at" | "start_date" | "due_date" | `property:${string}`;
   sort_direction?: "asc" | "desc";
 }
 

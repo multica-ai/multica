@@ -350,6 +350,10 @@ export function TriggerConfigSection({
                     {t(($) => $.trigger_config.timezone_label)}
                   </label>
                   <Select
+                    items={timezones.map((value) => ({
+                      value,
+                      label: getTimezoneLabel(value),
+                    }))}
                     value={config.timezone}
                     onValueChange={(v) => v && onChange({ ...config, timezone: v })}
                   >

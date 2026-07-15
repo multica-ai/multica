@@ -68,6 +68,14 @@ const (
 	// ticks and 500 rows/tick we drain 60k rows/hour worst case — plenty
 	// of headroom for the documented backlog without monopolising DB CPU.
 	queuedExpireBatchSize = 500
+	// chatFinalizeGraceSeconds is how long a cancelled chat task's deferred
+	// empty/non-empty judgment (#5219) waits for the daemon's cancel-ack
+	// before the sweeper settles it. Covers the daemon's 5s cancellation
+	// poll plus the bounded 10s+12s transcript drain wait (#5210) plus
+	// network slack; past this the daemon is presumed dead or partitioned.
+	chatFinalizeGraceSeconds = 60.0
+	// chatFinalizeBatchSize caps deferred finalizations per tick.
+	chatFinalizeBatchSize = 100
 )
 
 // runRuntimeSweeper periodically marks runtimes as offline if their
@@ -93,6 +101,7 @@ func runRuntimeSweeper(ctx context.Context, queries *db.Queries, liveness handle
 			sweepStaleRuntimes(ctx, queries, liveness, taskSvc, bus)
 			sweepStaleTasks(ctx, queries, taskSvc, bus)
 			sweepExpiredQueuedTasks(ctx, queries, taskSvc)
+			sweepDeferredChatFinalizations(ctx, queries, taskSvc)
 			gcRuntimes(ctx, queries, bus)
 		}
 	}
@@ -302,6 +311,29 @@ func sweepExpiredQueuedTasks(ctx context.Context, queries *db.Queries, taskSvc *
 	slog.Info("task sweeper: expired stale queued tasks", "count", len(failedTasks))
 	taskSvc.CaptureQueuedExpiredTasks(ctx, failedTasks)
 	taskSvc.HandleFailedTasks(ctx, failedTasks)
+}
+
+// sweepDeferredChatFinalizations settles cancelled chat tasks whose deferred
+// empty/non-empty judgment (#5219) never received a daemon cancel-ack within
+// the grace period — the daemon died, was partitioned, or its ack was lost.
+// FinalizeDeferredCancelledChat claims the marker atomically, so racing a
+// late ack is harmless.
+func sweepDeferredChatFinalizations(ctx context.Context, queries *db.Queries, taskSvc *service.TaskService) {
+	rows, err := queries.ListChatFinalizeDeferredExpired(ctx, db.ListChatFinalizeDeferredExpiredParams{
+		GraceSecs:  chatFinalizeGraceSeconds,
+		MaxPerTick: chatFinalizeBatchSize,
+	})
+	if err != nil {
+		slog.Warn("chat finalize sweeper: list deferred failed", "error", err)
+		return
+	}
+	if len(rows) == 0 {
+		return
+	}
+	for _, t := range rows {
+		taskSvc.FinalizeDeferredCancelledChat(ctx, t.ID)
+	}
+	slog.Info("chat finalize sweeper: settled deferred cancellations", "count", len(rows))
 }
 
 // broadcastFailedTasks is preserved as a thin shim for the integration tests

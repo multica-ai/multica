@@ -21,6 +21,9 @@ export const chatKeys = {
   messagesPage: (sessionId: string) => [...chatKeys.messagesPageAll(), sessionId] as const,
   pendingTaskAll: () => ["chat", "pending-task"] as const,
   pendingTask: (sessionId: string) => [...chatKeys.pendingTaskAll(), sessionId] as const,
+  draftRestoresAll: () => ["chat", "draft-restores"] as const,
+  /** Durable deferred-cancellation draft restores for a session (#5219). */
+  draftRestores: (sessionId: string) => [...chatKeys.draftRestoresAll(), sessionId] as const,
   /** Aggregate of in-flight chat tasks for the current user — FAB reads this. */
   pendingTasks: (wsId: string) => [...chatKeys.all(wsId), "pending-tasks"] as const,
   /** Per-user pinned agents for the quick-agent bar. */
@@ -137,6 +140,26 @@ export function pendingChatTaskOptions(sessionId: string) {
     queryFn: () => api.getPendingChatTask(sessionId),
     enabled: !!sessionId,
     staleTime: Infinity,
+  });
+}
+
+/**
+ * Durable deferred-cancellation draft restores for a session (#5219).
+ * staleTime 0 deliberately overrides the app-wide Infinity default: this is
+ * the recovery path for a client that MISSED the chat:cancel_finalized
+ * broadcast, so it must actually refetch on every composer mount (an
+ * Infinity-fresh cache would pin the first result forever). WS reconnects
+ * additionally invalidate chatKeys.draftRestoresAll() in useRealtimeSync,
+ * and the initiator's realtime handler invalidates this key when the event
+ * does arrive. The response is tiny (usually empty), so the extra fetches
+ * are negligible.
+ */
+export function chatDraftRestoresOptions(sessionId: string) {
+  return queryOptions({
+    queryKey: chatKeys.draftRestores(sessionId),
+    queryFn: () => api.listChatDraftRestores(sessionId),
+    enabled: !!sessionId,
+    staleTime: 0,
   });
 }
 

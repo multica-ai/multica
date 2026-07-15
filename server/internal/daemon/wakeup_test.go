@@ -257,6 +257,163 @@ func TestReadTaskWakeupMessagesExtendsDeadlineOnApplicationMessage(t *testing.T)
 	}
 }
 
+// A WS tasks.claim response carries the full claimed Task payload. Agent
+// instructions, project context, comments, and skill references can make one
+// valid response much larger than the old 64 KiB control-socket ceiling. The
+// reader must deliver that response to the pending RPC and remain connected
+// for the next task-available hint.
+func TestReadTaskWakeupMessagesAcceptsLargeRPCResponse(t *testing.T) {
+	overrideTaskWakeupTimings(t, time.Second, 100*time.Millisecond, taskWakeupBackoffResetAfter)
+
+	requestIDs := make(chan string, 1)
+	clientReceived := make(chan struct{})
+	largeInstructions := strings.Repeat("x", 128*1024)
+	body, err := json.Marshal(map[string]any{
+		"tasks": []any{map[string]any{
+			"id": "task-large",
+			"agent": map[string]any{
+				"id":           "agent-1",
+				"name":         "Large Context Agent",
+				"instructions": largeInstructions,
+			},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("marshal claim response body: %v", err)
+	}
+
+	upgrader := websocket.Upgrader{WriteBufferSize: 1024}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+
+		requestID := <-requestIDs
+		claimFrame := mustProtocolFrame(t, protocol.Message{
+			Type: protocol.EventDaemonRPCResponse,
+			Payload: marshalRaw(protocol.RPCResponsePayload{
+				RequestID: requestID,
+				Status:    http.StatusOK,
+				Body:      body,
+			}),
+		})
+		if len(claimFrame) <= 64*1024 {
+			t.Errorf("claim frame size = %d, want larger than old 64 KiB limit", len(claimFrame))
+			return
+		}
+
+		// A small write buffer forces gorilla/websocket to fragment this one
+		// logical message. ReadLimit applies to the assembled message, so this
+		// reproduces both single- and multi-frame delivery behavior.
+		conn.SetWriteDeadline(time.Now().Add(time.Second))
+		writer, err := conn.NextWriter(websocket.TextMessage)
+		if err != nil {
+			t.Errorf("open fragmented websocket writer: %v", err)
+			return
+		}
+		split := len(claimFrame) / 2
+		if _, err := writer.Write(claimFrame[:split]); err != nil {
+			t.Errorf("write first claim fragment: %v", err)
+			return
+		}
+		if _, err := writer.Write(claimFrame[split:]); err != nil {
+			t.Errorf("write second claim fragment: %v", err)
+			return
+		}
+		if err := writer.Close(); err != nil {
+			t.Errorf("close fragmented websocket writer: %v", err)
+			return
+		}
+
+		taskFrame := mustProtocolFrame(t, protocol.Message{
+			Type: protocol.EventDaemonTaskAvailable,
+			Payload: marshalRaw(protocol.TaskAvailablePayload{
+				RuntimeID: "runtime-1",
+				TaskID:    "task-next",
+			}),
+		})
+		if !writeWSMessage(t, conn, websocket.TextMessage, taskFrame) {
+			return
+		}
+		waitForClientWakeup(t, clientReceived)
+	}))
+	defer srv.Close()
+
+	conn, _, err := websocket.DefaultDialer.Dial(taskWakeupTestWSURL(srv.URL), nil)
+	if err != nil {
+		t.Fatalf("dial websocket: %v", err)
+	}
+	defer conn.Close()
+
+	d := New(Config{}, slog.Default())
+	d.wsRPC = newWSRPCClient(100 * time.Millisecond)
+	d.wsRPC.attach(func(frame []byte) (*wsOutbound, error) {
+		var msg protocol.Message
+		if err := json.Unmarshal(frame, &msg); err != nil {
+			return nil, err
+		}
+		var req protocol.RPCRequestPayload
+		if err := json.Unmarshal(msg.Payload, &req); err != nil {
+			return nil, err
+		}
+		requestIDs <- req.RequestID
+		item := &wsOutbound{data: frame}
+		item.beginWrite()
+		return item, nil
+	})
+
+	taskWakeups := make(chan taskWakeup, 1)
+	readerErrors := make(chan error, 1)
+	go func() {
+		readerErrors <- d.readTaskWakeupMessages(conn, taskWakeups)
+	}()
+
+	type callResult struct {
+		status int
+		err    error
+		tasks  []*Task
+	}
+	callDone := make(chan callResult, 1)
+	go func() {
+		var resp struct {
+			Tasks []*Task `json:"tasks"`
+		}
+		status, err := d.wsRPC.Call(context.Background(), "tasks.claim", 200*time.Millisecond, nil, &resp)
+		callDone <- callResult{status: status, err: err, tasks: resp.Tasks}
+	}()
+
+	select {
+	case result := <-callDone:
+		if result.err != nil || result.status != http.StatusOK {
+			t.Fatalf("claim RPC: status=%d err=%v", result.status, result.err)
+		}
+		if len(result.tasks) != 1 || result.tasks[0].ID != "task-large" {
+			t.Fatalf("claim tasks = %+v, want task-large", result.tasks)
+		}
+		if got := len(result.tasks[0].Agent.Instructions); got != len(largeInstructions) {
+			t.Fatalf("decoded instructions length = %d, want %d", got, len(largeInstructions))
+		}
+	case err := <-readerErrors:
+		t.Fatalf("reader closed before claim response: %v", err)
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for parsed claim response")
+	}
+
+	select {
+	case wakeup := <-taskWakeups:
+		if wakeup.runtimeID != "runtime-1" {
+			t.Fatalf("wakeup runtimeID = %q, want runtime-1", wakeup.runtimeID)
+		}
+		close(clientReceived)
+	case err := <-readerErrors:
+		t.Fatalf("reader closed before follow-up task frame: %v", err)
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for follow-up task wakeup")
+	}
+}
+
 func TestReadTaskWakeupMessagesExtendsDeadlineOnPong(t *testing.T) {
 	overrideTaskWakeupTimings(t, 120*time.Millisecond, 50*time.Millisecond, taskWakeupBackoffResetAfter)
 

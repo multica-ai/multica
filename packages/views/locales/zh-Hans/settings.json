@@ -30,6 +30,10 @@
     "sticky_comment_bar": {
       "title": "固定评论栏",
       "hint": "滚动 issue 页面时，评论栏始终固定在底部。"
+    },
+    "issue_link_new_tab": {
+      "title": "在新标签页打开 issue 链接",
+      "hint": "点击描述、评论或聊天中的 issue 链接时，在新标签页中打开，而不是在当前页面跳转。"
     }
   },
   "shortcuts": {
@@ -112,7 +116,70 @@
       "integrations": "集成",
       "labs": "实验室",
       "members": "成员",
-      "labels": "标签"
+      "labels": "标签",
+      "properties": "属性"
+    }
+  },
+  "properties": {
+    "title": "属性",
+    "description": "为该工作区的 Issue 定义类型化的自定义属性。属性值设置在每个 Issue 上，agent 可读写。",
+    "search_placeholder": "按名称筛选...",
+    "new_property": "新建属性",
+    "show_archived": "显示已归档",
+    "columns": {
+      "name": "名称",
+      "type": "类型",
+      "options": "选项",
+      "usage": "使用",
+      "updated": "更新时间"
+    },
+    "usage_count_other": "{{count}} 个 Issue",
+    "loading": "正在加载属性...",
+    "empty": "还没有属性",
+    "empty_hint": "创建 Severity、Environment 这类类型化字段——agent 可带校验地读写它们。",
+    "no_results": "没有匹配的属性",
+    "save_failed": "保存属性失败",
+    "limit_hint": "{{count}}/{{max}} 个启用中属性",
+    "archived_badge": "已归档",
+    "types": {
+      "text": "文本",
+      "number": "数字",
+      "select": "单选",
+      "multi_select": "多选",
+      "date": "日期",
+      "checkbox": "勾选",
+      "url": "链接"
+    },
+    "actions": {
+      "open": "{{name}} 的操作",
+      "edit": "编辑",
+      "archive": "归档",
+      "unarchive": "恢复"
+    },
+    "editor": {
+      "create_title": "新建属性",
+      "edit_title": "编辑属性",
+      "admin_hint": "仅工作区 Owner 和 Admin 可以管理属性定义。",
+      "name": "名称",
+      "name_placeholder": "例如 Severity",
+      "type": "类型",
+      "type_locked_hint": "创建后类型不可修改。",
+      "description": "描述",
+      "description_placeholder": "这个属性的含义以及何时设置",
+      "options": "选项",
+      "option_name_placeholder": "选项名称",
+      "add_option": "添加选项",
+      "remove_option": "移除选项",
+      "cancel": "取消",
+      "save": "保存属性",
+      "saving": "保存中..."
+    },
+    "archive_dialog": {
+      "title": "归档属性？",
+      "description": "“{{name}}”将从选择器和筛选中隐藏，Issue 上已有的值会保留。之后可以恢复。",
+      "cancel": "取消",
+      "confirm": "归档属性",
+      "failed": "归档属性失败"
     }
   },
   "labels": {
@@ -150,7 +217,6 @@
       "description": "描述",
       "description_placeholder": "说明什么时候应使用这个标签",
       "color": "颜色",
-      "custom_color": "选择自定义颜色",
       "cancel": "取消",
       "save": "保存标签",
       "saving": "保存中..."

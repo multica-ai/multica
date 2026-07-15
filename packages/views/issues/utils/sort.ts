@@ -1,6 +1,7 @@
 import type { Issue } from "@multica/core/types";
 import { PRIORITY_ORDER } from "@multica/core/issues/config";
 import type { SortField, SortDirection } from "@multica/core/issues/stores/view-store";
+import { propertyIdFromViewKey } from "@multica/core/issues/stores/view-store";
 
 const PRIORITY_RANK: Record<string, number> = Object.fromEntries(
   PRIORITY_ORDER.map((p, i) => [p, i])
@@ -11,6 +12,27 @@ export function sortIssues(
   field: SortField,
   direction: SortDirection
 ): Issue[] {
+  // `property:<id>` sorts by the custom-property value. Number values sort
+  // numerically; date values are date-only "YYYY-MM-DD" strings, which sort
+  // correctly lexically. Direction applies to the VALUE comparison only —
+  // issues without a value sort last in both directions (a whole-array
+  // reverse would flip them to the front on desc).
+  const propertyId = propertyIdFromViewKey(field);
+  if (propertyId) {
+    const dir = direction === "desc" ? -1 : 1;
+    return issues.toSorted((a, b) => {
+      const av = a.properties?.[propertyId];
+      const bv = b.properties?.[propertyId];
+      const aMissing = av === undefined || Array.isArray(av);
+      const bMissing = bv === undefined || Array.isArray(bv);
+      if (aMissing && bMissing) return 0;
+      if (aMissing) return 1;
+      if (bMissing) return -1;
+      if (typeof av === "number" && typeof bv === "number") return dir * (av - bv);
+      return dir * String(av).localeCompare(String(bv));
+    });
+  }
+
   const sorted = issues.toSorted((a, b) => {
     switch (field) {
       case "priority":
