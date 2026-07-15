@@ -324,6 +324,10 @@ type Daemon struct {
 	activeEnvRootsCond *sync.Cond      // signalled when an in-flight env-root GC mutation finishes
 	activeEnvRoots     map[string]int  // env root path -> reference count (handles reuse paths marked twice)
 	deletingEnvRoots   map[string]bool // env roots reserved by GC; new tasks wait until the mutation finishes
+	// Test hooks for deterministic GC failure/race coverage. Nil in production.
+	activeEnvRootWaitHook func(string)
+	renameEnvRootHook     func(string, string) error
+	removeEnvRootHook     func(string) error
 
 	activeCodexStoresMu   sync.Mutex
 	activeCodexStoresCond *sync.Cond      // signalled when an in-flight store deletion finishes, so a blocked markActive can proceed
@@ -5468,6 +5472,9 @@ func (d *Daemon) markActiveEnvRoot(envRoot string) {
 	defer d.activeEnvRootsMu.Unlock()
 	d.ensureActiveEnvRootStateLocked()
 	for d.deletingEnvRoots[envRoot] {
+		if d.activeEnvRootWaitHook != nil {
+			d.activeEnvRootWaitHook(envRoot)
+		}
 		d.activeEnvRootsCond.Wait()
 	}
 	d.activeEnvRoots[envRoot]++
