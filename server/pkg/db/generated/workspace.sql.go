@@ -110,16 +110,20 @@ cleared_binding_tokens AS (
 cleared_installations AS (
     DELETE FROM channel_installation WHERE workspace_id = $1
 ),
+cleared_issue_properties AS (
+    DELETE FROM issue_property WHERE workspace_id = $1
+),
 deleted_pending_check_suites AS (
     DELETE FROM github_pending_check_suite WHERE workspace_id = $1
 )
 DELETE FROM workspace WHERE workspace.id = $1
 `
 
-// The channel_* tables (MUL-3515 §4) and resource-label junctions carry NO FK to
-// workspace, so — unlike the CASCADE-backed tables the DELETE below sweeps —
-// they are not cleaned up implicitly. Remove their workspace-owned rows here so
-// they commit or roll back atomically with the workspace row.
+// The channel_* tables (MUL-3515 §4), resource-label junctions, and custom issue
+// property definitions carry NO FK to workspace, so — unlike the CASCADE-backed
+// tables the DELETE below sweeps — they are not cleaned up implicitly. Remove
+// their workspace-owned rows here so they commit or roll back atomically with
+// the workspace row.
 func (q *Queries) DeleteWorkspace(ctx context.Context, id pgtype.UUID) error {
 	_, err := q.db.Exec(ctx, deleteWorkspace, id)
 	return err
