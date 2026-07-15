@@ -1804,10 +1804,15 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// Parse @mention links from the triggering comment content for structured
-		// injection into the daemon's brief (KTD1). This populates
-		// resp.StructuredMentions so the agent knows what was mentioned without
-		// parsing raw text. R10 holds: this does not touch enqueue logic.
-		resp.StructuredMentions = parseStructuredMentions(resp.TriggerCommentContent)
+		// injection into the daemon's brief (KTD1). Cross-workspace project mentions
+		// are resolved server-side here (KTD5): the author's membership is re-checked
+		// and a snapshot (title + description + issue count) is fetched under the author's
+		// authority. R10 holds: this does not touch enqueue logic.
+			mentions := parseStructuredMentions(resp.TriggerCommentContent)
+			initiatorID, _ := util.ParseUUID(resp.InitiatorID)
+			resp.StructuredMentions = h.resolveStructuredMentionSnapshots(
+				r.Context(), mentions, initiatorID, uuidToString(runtime.WorkspaceID),
+			)
 
 		// Look up the prior session for this (agent, issue) pair so the daemon
 		// can resume the Claude Code conversation context.
@@ -2346,11 +2351,59 @@ func (h *Handler) ResolveTaskSkillBundles(w http.ResponseWriter, r *http.Request
 	writeJSON(w, http.StatusOK, map[string]any{"bundles": resolved})
 }
 
+// resolveStructuredMentionSnapshots resolves cross-workspace project mentions by
+// checking the author's membership in the target workspace and fetching a snapshot
+// (title + description + issue count) server-side. For same-workspace mentions
+// and non-project types, returns the mention unchanged. The author is resolved from
+// the task's initiator (comment author or chat session creator).
+func (h *Handler) resolveStructuredMentionSnapshots(
+	ctx context.Context,
+	mentions []StructuredMention,
+	authorUserID pgtype.UUID,
+	runtimeWorkspaceID string,
+) []StructuredMention {
+	if len(mentions) == 0 {
+		return mentions
+	}
+	result := make([]StructuredMention, len(mentions))
+	copy(result, mentions)
+	for i := range result {
+		m := &result[i]
+		// Only snapshot project mentions with a workspace qualifier.
+		if m.Type != "project" || m.WorkspaceID == "" {
+			continue
+		}
+		wsUUID, err := util.ParseUUID(m.WorkspaceID)
+		if err != nil {
+			continue // malformed UUID → leave mention without snapshot
+		}
+		// Author must be a member of the target workspace.
+		if _, err := h.Queries.GetMemberByUserAndWorkspace(ctx, db.GetMemberByUserAndWorkspaceParams{
+			WorkspaceID: wsUUID,
+			UserID:     authorUserID,
+		}); err != nil {
+			continue // not a member → drop the qualifier; mention stays but no snapshot
+		}
+		// Fetch the project snapshot. GetProject is scoped by workspace_id in its query.
+		proj, err := h.Queries.GetProject(ctx, wsUUID)
+		if err != nil || proj.ID != wsUUID {
+			continue
+		}
+		// Count all issues in the target project (open and closed).
+		issueCount, _ := h.Queries.CountIssuesByProject(ctx, wsUUID)
+		result[i].Snapshot = &MentionSnapshot{
+			ProjectTitle:       proj.Title,
+			ProjectDescription: proj.Description.String,
+			IssueCount:         int(issueCount),
+		}
+	}
+	return result
+}
+
 // parseStructuredMentions extracts typed mention links from the given content
 // and returns them as StructuredMention records. The workspace qualifier (?ws=)
-// is parsed but not resolved here — cross-workspace resolution happens server-side
-// at task-prep under the author's membership (KTD5). This function only parses
-// the text; it does not fetch, authorize, or snapshot anything.
+// is parsed but not resolved here — cross-workspace resolution happens in
+// resolveStructuredMentionSnapshots at the call site.
 func parseStructuredMentions(content string) []StructuredMention {
 	if content == "" {
 		return nil
@@ -2362,8 +2415,9 @@ func parseStructuredMentions(content string) []StructuredMention {
 	result := make([]StructuredMention, 0, len(mentions))
 	for _, m := range mentions {
 		result = append(result, StructuredMention{
-			Type: m.Type,
-			ID:   m.ID,
+			Type:        m.Type,
+			ID:          m.ID,
+			WorkspaceID: m.WorkspaceID,
 		})
 	}
 	return result
