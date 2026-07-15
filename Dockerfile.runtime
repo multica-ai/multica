@@ -47,8 +47,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       git ripgrep curl jq ca-certificates tini \
     && rm -rf /var/lib/apt/lists/*
 
-# Claude Code CLI — the agent backend the daemon shells out to (`claude`).
+# Agent CLIs that the daemon shells out to. Pi is pinned so an upstream CLI
+# release cannot change the runtime protocol without a reviewed image update.
 RUN npm install -g @anthropic-ai/claude-code && claude --version
+RUN npm install -g --ignore-scripts @earendil-works/pi-coding-agent@0.80.7 \
+    && pi --version
 
 COPY --from=builder /src/server/bin/multica /usr/local/bin/multica
 COPY docker/runtime-entrypoint.sh /usr/local/bin/runtime-entrypoint.sh
@@ -62,7 +65,9 @@ WORKDIR /home/multica
 
 ENV HOME=/home/multica \
     MULTICA_WORKSPACES_ROOT=/home/multica/workspaces \
-    MULTICA_CLAUDE_PATH=/usr/local/bin/claude
+    MULTICA_CLAUDE_PATH=/usr/local/bin/claude \
+    MULTICA_PI_PATH=/usr/local/bin/pi \
+    PI_CODING_AGENT_DIR=/home/multica/.multica/pi
 
 # No EXPOSE — the runtime makes only outbound connections.
 ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/runtime-entrypoint.sh"]

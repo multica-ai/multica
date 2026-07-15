@@ -15,8 +15,8 @@ Multica backend, so it needs no inbound port, DNS, domain, or tunnel.
 
 - the cerebro `multica` binary (from `server/`, so it carries our patches — not
   the upstream GitHub release),
-- the **Claude Code CLI** (`@anthropic-ai/claude-code`) that the daemon shells
-  out to,
+- the **Claude Code CLI** (`@anthropic-ai/claude-code`) and **Pi Coding Agent**
+  (`@earendil-works/pi-coding-agent`) that the daemon shells out to,
 - `git` (per-task repo checkouts), `ripgrep`, `curl`, `jq`,
 - a non-root `multica` user.
 
@@ -52,6 +52,11 @@ sourced from Infisical; do not bake them into the image or this repo.
 | `/home/multica/.multica` | Config + daemon token. Persist it so restarts skip re-provisioning. |
 | `/home/multica/workspaces` | Per-task git worktrees. Persist to reuse checkouts and resume sessions; safe to treat as ephemeral cache otherwise. |
 
+Pi stores its settings and OAuth refresh credentials under
+`/home/multica/.multica/pi` through `PI_CODING_AGENT_DIR`. This keeps the
+credentials on the existing config volume across image rebuilds. Never print,
+copy into git, or attach the contents of `auth.json` to an issue.
+
 ## Deploy on Sliplane (outline)
 
 1. Point Sliplane at this repo, Dockerfile path `Dockerfile.runtime`.
@@ -61,7 +66,21 @@ sourced from Infisical; do not bake them into the image or this repo.
 4. Attach the two persistent volumes.
 5. Deploy. Confirm it comes online in the workspace's **Runtimes** list and that
    `multica daemon status` (via Sliplane shell) shows `running` with `claude`
-   detected.
+   and `pi` detected.
+
+## One-time Pi subscription login
+
+Pi's `openai-codex` provider uses a ChatGPT Plus or Pro subscription. After the
+first image deployment, open a shell for the private runtime service and run
+`pi`. Enter `/login`, select **OpenAI Codex**, and complete the URL/code flow in
+the account owner's browser. The resulting refresh credentials are written to
+the persistent Pi config directory above and refresh automatically.
+
+Do not replace this flow with `OPENAI_API_KEY`: that is a separate API-billing
+identity and does not use the requested ChatGPT subscription. After login, run
+`pi --list-models openai-codex` in the service shell, confirm that Multica lists
+the Pi runtime, and complete a real Pi-assigned issue before declaring the
+runtime ready.
 
 ## Honest note on Claude auth
 
