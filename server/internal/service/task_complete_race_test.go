@@ -275,6 +275,7 @@ func TestTaskFailureClassifiers(t *testing.T) {
 		// Missing terminal result errors classify to agent_error.unknown. Keep
 		// that deterministic upstream failure outside the auto-retry allowlist.
 		{reason: "agent_error.unknown", wantType: "agent_error", wantResumeOK: true, wantRetry: false},
+		{reason: "session_limit", wantType: "session_limit", wantResumeOK: true, wantRetry: true},
 	}
 
 	for _, tc := range cases {
