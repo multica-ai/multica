@@ -137,6 +137,7 @@
   "run": {
     "issue_linked": "已关联 issue",
     "view_log": "查看执行日志",
+    "no_output": "无输出",
     "skipped_group": {
       "label": "已跳过",
       "summary": "{{count}} 条跳过的运行"

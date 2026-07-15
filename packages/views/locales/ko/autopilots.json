@@ -137,6 +137,7 @@
   "run": {
     "issue_linked": "이슈 연결됨",
     "view_log": "실행 로그 보기",
+    "no_output": "출력 없음",
     "skipped_group": {
       "label": "건너뜀",
       "summary": "건너뛴 실행 {{count}}개"

@@ -137,6 +137,7 @@
   "run": {
     "issue_linked": "イシューをリンク済み",
     "view_log": "実行ログを表示",
+    "no_output": "出力なし",
     "skipped_group": {
       "label": "スキップ済み",
       "summary": "スキップされた実行 {{count}} 件"

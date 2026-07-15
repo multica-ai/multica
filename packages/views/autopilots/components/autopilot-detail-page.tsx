@@ -77,6 +77,27 @@ function formatDate(date: string): string {
   });
 }
 
+export function formatRunResult(result: unknown): string | null {
+  if (typeof result === "string") {
+    return result.trim() || null;
+  }
+  if (result && typeof result === "object" && !Array.isArray(result)) {
+    const output = (result as Record<string, unknown>).output;
+    if (typeof output === "string") {
+      return output.trim() || null;
+    }
+  }
+  if (result == null) {
+    return null;
+  }
+  try {
+    const serialized = JSON.stringify(result);
+    return serialized === "{}" || serialized === "[]" ? null : serialized;
+  } catch {
+    return null;
+  }
+}
+
 type RunStatus = "issue_created" | "running" | "skipped" | "completed" | "failed";
 
 const RUN_VISUAL: Record<RunStatus, { color: string; icon: typeof CheckCircle2; spin?: boolean }> = {
@@ -114,6 +135,7 @@ function RunRow({ run, agentId, agentName }: { run: AutopilotRun; agentId: strin
   const status = (RUN_VISUAL[run.status as RunStatus] ? (run.status as RunStatus) : "issue_created");
   const visual = RUN_VISUAL[status];
   const StatusIcon = visual.icon;
+  const result = formatRunResult(run.result);
 
   // For runs with a task_id (run_only mode), build a minimal AgentTask so
   // TranscriptButton can lazy-load the execution transcript.
@@ -147,11 +169,18 @@ function RunRow({ run, agentId, agentName }: { run: AutopilotRun; agentId: strin
       <span className="w-20 shrink-0 text-xs text-muted-foreground">
         {t(($) => $.run_source[run.source as "schedule" | "manual" | "webhook" | "api"]) ?? run.source}
       </span>
-      <span className="flex-1 min-w-0 text-xs text-muted-foreground truncate">
+      <span
+        className="flex-1 min-w-0 text-xs text-muted-foreground truncate"
+        title={result ?? undefined}
+      >
         {run.issue_id ? (
           t(($) => $.run.issue_linked)
         ) : run.failure_reason ? (
           <span className="text-destructive">{run.failure_reason}</span>
+        ) : result ? (
+          result
+        ) : run.status === "completed" ? (
+          <span className="italic">{t(($) => $.run.no_output)}</span>
         ) : null}
       </span>
       <span className="w-32 shrink-0 text-right text-xs text-muted-foreground tabular-nums">
