@@ -1,0 +1,16 @@
+{
+  "name": "@multica/cerebro-pi-harness",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --experimental-strip-types --test multica-harness.test.mjs",
+    "typecheck": "tsc --noEmit",
+    "lint": "tsc --noEmit",
+    "build": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "0.80.7",
+    "@types/node": "catalog:",
+    "typescript": "catalog:"
+  }
+}

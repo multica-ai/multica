@@ -3883,6 +3883,11 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		customArgs = task.Agent.CustomArgs
 		mcpConfig = task.Agent.McpConfig
 	}
+	// CEREBRO-PATCH(daemon-pi-harness): FIR-3272 lock Pi to the Firtal Connections + policy extension.
+	customArgs, err = preparePiHarness(task.PiHarnessEnabled, provider, env.WorkDir, task.LocalToolPolicyStage, customArgs, mcpConfig, agentEnv)
+	if err != nil {
+		return TaskResult{}, fmt.Errorf("prepare Pi harness: %w", err)
+	}
 	// CEREBRO-PATCH(daemon-tool-policy-ipc): TECH-2563 — pass the tool-policy
 	// PreToolUse hook to Claude Code via --settings on customArgs (the args the
 	// CLI actually consumes). No-op unless prepareToolPolicySpawn wired a settings file.

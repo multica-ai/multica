@@ -1,0 +1,16 @@
+[
+  {"id":"D0","delivery":"Evaluation engine","checks":[{"name":"scoring contract","dir":"packages/cerebro-pi-harness-eval","command":["go","test","./..."]}]},
+  {"id":"D1","delivery":"Multica Connections","checks":[{"name":"REST API and MCP HTTP projection","dir":"packages/cerebro-pi-harness","command":["node","--experimental-strip-types","--test","--test-name-pattern=D1","multica-harness.test.mjs"]}]},
+  {"id":"D2","delivery":"Allow Ask Deny policy","checks":[{"name":"Allow Ask Deny and enforce fail-closed","dir":"packages/cerebro-pi-harness","command":["node","--experimental-strip-types","--test","--test-name-pattern=D2","multica-harness.test.mjs"]}]},
+  {"id":"D3","delivery":"Durable Pi sessions","checks":[{"name":"session pinned at agent_start","dir":"server","command":["go","test","./pkg/agent","-run","TestPiPinsSessionIDAtAgentStart","-count=1"]}]},
+  {"id":"D4","delivery":"Mutation retry safety","checks":[{"name":"ambiguous mutation is not retried","dir":"packages/cerebro-pi-harness","command":["node","--experimental-strip-types","--test","--test-name-pattern=D4","multica-harness.test.mjs"]}]},
+  {"id":"D5","delivery":"Usage and audit telemetry","checks":[{"name":"tool audit and token usage preserved","dir":"server","command":["go","test","./pkg/agent","-run","TestPiStreamsToolAuditAndUsage","-count=1"]}]},
+  {"id":"D6","delivery":"Integrated local runtime","checks":[
+    {"name":"harness Go suite","dir":"packages/cerebro-pi-harness","command":["go","test","./..."]},
+    {"name":"harness protocol suite","dir":"packages/cerebro-pi-harness","command":["node","--experimental-strip-types","--test","multica-harness.test.mjs"]},
+    {"name":"daemon wiring","dir":"server","command":["go","test","./internal/daemon","-run","TestPreparePiHarness","-count=1"]},
+    {"name":"handler compiles","dir":"server","command":["go","test","./internal/handler","-run","^$","-count=1"]},
+    {"name":"feature kill switch","dir":".","command":["pnpm","--filter","@multica/cerebro-feature-flags","test","--","--run","registry.test.ts"]},
+    {"name":"runtime image pins Pi","dir":".","command":["bash","scripts/cerebro/test-runtime-dockerfile-pi.sh"]}
+  ]}
+]

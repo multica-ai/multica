@@ -110,6 +110,7 @@ type Task struct {
 	RuntimeSandboxPolicy             json.RawMessage      `json:"runtime_sandbox_policy,omitempty"`
 	RuntimePersonaSandbox            string               `json:"runtime_persona_sandbox,omitempty"`
 	RuntimeToolsConfig               json.RawMessage      `json:"runtime_tools_config,omitempty"`
+	PiHarnessEnabled                 bool                 `json:"pi_harness_enabled,omitempty"`   // CEREBRO-PATCH(daemon-task-pi-harness-flag): FIR-3272 workspace kill switch.
 	DisallowedMCPTools               []string             `json:"disallowed_mcp_tools,omitempty"` // CEREBRO-PATCH(daemon-task-disallowed-mcp-tools): TECH-3156 per-tool connection denies.
 	EffectiveTools                   []TaskToolBriefEntry `json:"effective_tools,omitempty"`      // CEREBRO-PATCH(daemon-task-effective-tools): FIR-2312 non-CLI tools (MCP + connections) the agent may use, rendered into the brief.
 	PersonaSpawnUserID               string               `json:"persona_spawn_user_id,omitempty"`

@@ -282,7 +282,8 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 
 			switch evt.Type {
 			case "agent_start":
-				trySend(msgCh, Message{Type: MessageStatus, Status: "running"})
+				// CEREBRO-PATCH(agent-pi-early-session): FIR-3272 pin resume state before any tool can mutate external systems.
+				trySend(msgCh, Message{Type: MessageStatus, Status: "running", SessionID: sessionPath})
 
 			case "message_update":
 				if evt.AssistantMessageEvent == nil {
