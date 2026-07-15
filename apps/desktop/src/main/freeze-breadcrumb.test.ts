@@ -50,6 +50,17 @@ describe("freeze breadcrumb round-trip", () => {
     clearFreezeBreadcrumb(file);
     expect(readAndClearFreezeBreadcrumb(file)).toBeNull();
   });
+
+  it("only lets the window that wrote a breadcrumb clear it", () => {
+    const file = tempFile();
+    writeFreezeBreadcrumb(file, { ...sample, ownerId: "issue:2" });
+
+    clearFreezeBreadcrumb(file, "main:1");
+    expect(existsSync(file)).toBe(true);
+
+    clearFreezeBreadcrumb(file, "issue:2");
+    expect(readAndClearFreezeBreadcrumb(file)).toBeNull();
+  });
 });
 
 // The breadcrumb crosses a process boundary (main writes, renderer flushes via

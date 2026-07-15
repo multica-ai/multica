@@ -15,6 +15,15 @@ import {
   NAVIGATION_GESTURE_CHANNEL,
   type NavigationGesture,
 } from "../shared/navigation-gestures";
+import {
+  readDesktopWindowContext,
+  type IssueWindowRequest,
+} from "../shared/issue-window";
+import { AUTH_SESSION_STATE_CHANNEL } from "../shared/auth-session";
+import {
+  MAIN_RENDERER_CHANNEL_STATE_CHANNEL,
+  type MainRendererMessageChannel,
+} from "../shared/main-renderer-messages";
 
 // Synchronously fetch app metadata from main at preload time so the renderer
 // can pass it into CoreProvider during the initial render — the alternative
@@ -53,6 +62,7 @@ function fetchRuntimeConfig(): RuntimeConfigResult {
 
 const appInfo = fetchAppInfo();
 const runtimeConfig = fetchRuntimeConfig();
+const windowContext = readDesktopWindowContext(process.argv);
 
 // Read the OS-preferred locale that main injected via additionalArguments.
 // Zero IPC, zero blocking — process.argv is populated before preload runs.
@@ -62,6 +72,26 @@ function fetchSystemLocale(): string {
 }
 
 const systemLocale = fetchSystemLocale();
+
+function subscribeToMainRendererChannel<T>(
+  channel: MainRendererMessageChannel,
+  callback: (payload: T) => void,
+): () => void {
+  const handler = (_event: Electron.IpcRendererEvent, payload: T) =>
+    callback(payload);
+  ipcRenderer.on(channel, handler);
+  ipcRenderer.send(MAIN_RENDERER_CHANNEL_STATE_CHANNEL, {
+    channel,
+    ready: true,
+  });
+  return () => {
+    ipcRenderer.removeListener(channel, handler);
+    ipcRenderer.send(MAIN_RENDERER_CHANNEL_STATE_CHANNEL, {
+      channel,
+      ready: false,
+    });
+  };
+}
 
 const desktopAPI = {
   /** App version + normalized OS. Read once at preload time so the renderer
@@ -83,6 +113,9 @@ const desktopAPI = {
   },
   /** Validated runtime endpoint config, or a blocking config error. */
   runtimeConfig,
+  /** Identifies whether this renderer owns the main tabbed window or a
+   *  dedicated issue window, parsed from validated launch arguments. */
+  windowContext,
   /** Read + clear any freeze/crash breadcrumb left by a previous session, so
    *  the renderer can flush it to telemetry on boot. Returns null when there's
    *  nothing pending (the normal case). */
@@ -93,24 +126,16 @@ const desktopAPI = {
       return null;
     }
   },
+  /** Report only the resolved user id (never a token) so main can close
+   *  dedicated issue windows that belong to an old account. */
+  reportAuthSession: (userId: string | null) =>
+    ipcRenderer.send(AUTH_SESSION_STATE_CHANNEL, userId),
   /** Listen for auth token delivered via deep link */
-  onAuthToken: (callback: (token: string) => void) => {
-    const handler = (_event: Electron.IpcRendererEvent, token: string) =>
-      callback(token);
-    ipcRenderer.on("auth:token", handler);
-    return () => {
-      ipcRenderer.removeListener("auth:token", handler);
-    };
-  },
+  onAuthToken: (callback: (token: string) => void) =>
+    subscribeToMainRendererChannel("auth:token", callback),
   /** Listen for invitation IDs delivered via deep link */
-  onInviteOpen: (callback: (invitationId: string) => void) => {
-    const handler = (_event: Electron.IpcRendererEvent, invitationId: string) =>
-      callback(invitationId);
-    ipcRenderer.on("invite:open", handler);
-    return () => {
-      ipcRenderer.removeListener("invite:open", handler);
-    };
-  },
+  onInviteOpen: (callback: (invitationId: string) => void) =>
+    subscribeToMainRendererChannel("invite:open", callback),
   /** Open a URL in the default browser */
   openExternal: (url: string) => ipcRenderer.invoke("shell:openExternal", url),
   /** Download a file by URL through Electron's native download system.
@@ -155,16 +180,7 @@ const desktopAPI = {
       itemId: string;
       issueKey: string;
     }) => void,
-  ) => {
-    const handler = (
-      _event: Electron.IpcRendererEvent,
-      payload: { slug: string; itemId: string; issueKey: string },
-    ) => callback(payload);
-    ipcRenderer.on("inbox:open", handler);
-    return () => {
-      ipcRenderer.removeListener("inbox:open", handler);
-    };
-  },
+  ) => subscribeToMainRendererChannel("inbox:open", callback),
   /** Listen for native macOS back/forward swipe gestures. */
   onNavigationGesture: (callback: (gesture: NavigationGesture) => void) => {
     const handler = (_event: Electron.IpcRendererEvent, gesture: unknown) => {
@@ -196,6 +212,9 @@ const desktopAPI = {
   },
   /** Ask the main process to close the window (used after closing the last tab). */
   closeWindow: () => ipcRenderer.send("window:close"),
+  /** Open a validated issue-detail route in a dedicated native window. */
+  openIssueWindow: (request: IssueWindowRequest) =>
+    ipcRenderer.invoke("window:open-issue", request),
 };
 
 interface DaemonStatus {

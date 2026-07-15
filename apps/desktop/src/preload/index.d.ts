@@ -4,6 +4,10 @@ import type { NavigationGesture } from "../shared/navigation-gestures";
 import type { RendererRouteContextInput } from "../shared/renderer-route-context";
 import type { FreezeBreadcrumb } from "../shared/freeze-breadcrumb";
 import type {
+  DesktopWindowContext,
+  IssueWindowRequest,
+} from "../shared/issue-window";
+import type {
   ManualUpdateCheckResult,
   UpdaterPreferences,
 } from "../shared/updater-types";
@@ -20,9 +24,13 @@ interface DesktopAPI {
   onSystemLocaleChanged: (callback: (locale: string) => void) => () => void;
   /** Validated runtime endpoint config, or a blocking config error. */
   runtimeConfig: RuntimeConfigResult;
+  /** Main tabbed window or a dedicated issue-only window. */
+  windowContext: DesktopWindowContext;
   /** Read + clear any freeze/crash breadcrumb from a previous session, so the
    *  renderer can flush it to telemetry on boot. Null when nothing's pending. */
   getLastFreeze: () => FreezeBreadcrumb | null;
+  /** Report the resolved account identity so stale issue windows can close. */
+  reportAuthSession: (userId: string | null) => void;
   /** Listen for auth token delivered via deep link. Returns an unsubscribe function. */
   onAuthToken: (callback: (token: string) => void) => () => void;
   /** Listen for invitation IDs delivered via deep link. Returns an unsubscribe function. */
@@ -87,6 +95,10 @@ interface DesktopAPI {
   onCloseActiveTab: (callback: () => void) => () => void;
   /** Ask the main process to close the window. */
   closeWindow: () => void;
+  /** Open an issue-detail tab in a dedicated native window. */
+  openIssueWindow: (
+    request: IssueWindowRequest,
+  ) => Promise<{ ok: true } | { ok: false; reason: "invalid_request" }>;
 }
 
 interface DaemonStatus {
