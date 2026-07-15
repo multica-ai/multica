@@ -1329,7 +1329,7 @@ func decodeExternalUpsertIssueStrict(raw json.RawMessage) (map[string]any, error
 	for _, key := range []string{
 		"id", "workspace_id", "number", "identifier", "title", "description", "status", "priority",
 		"assignee_type", "assignee_id", "creator_type", "creator_id", "parent_issue_id", "project_id",
-		"position", "stage", "start_date", "due_date", "created_at", "updated_at", "metadata",
+		"position", "stage", "start_date", "due_date", "created_at", "updated_at", "metadata", "properties",
 		"reactions", "attachments", "labels",
 	} {
 		allowed[key] = struct{}{}

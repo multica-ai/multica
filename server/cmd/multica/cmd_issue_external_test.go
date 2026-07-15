@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -16,7 +17,64 @@ import (
 
 	"github.com/multica-ai/multica/server/internal/authority"
 	"github.com/multica-ai/multica/server/internal/cli"
+	"github.com/multica-ai/multica/server/internal/handler"
 )
+
+const completeCurrentIssueResponseJSON = `{
+	"id":"11111111-1111-1111-1111-111111111111",
+	"workspace_id":"ws-123",
+	"number":1,
+	"identifier":"EXT-1",
+	"title":"Imported",
+	"description":"deployed-compatible fixture",
+	"status":"todo",
+	"priority":"none",
+	"assignee_type":null,
+	"assignee_id":null,
+	"creator_type":"member",
+	"creator_id":"22222222-2222-2222-2222-222222222222",
+	"parent_issue_id":null,
+	"project_id":null,
+	"position":0,
+	"stage":null,
+	"start_date":null,
+	"due_date":null,
+	"created_at":"2026-07-15T00:00:00Z",
+	"updated_at":"2026-07-15T00:00:00Z",
+	"metadata":{"source":"regression"},
+	"properties":{"33333333-3333-3333-3333-333333333333":"current-value"},
+	"reactions":[],
+	"attachments":[],
+	"labels":[]
+}`
+
+func completeCurrentIssueResponse(t *testing.T) map[string]any {
+	t.Helper()
+	var issue map[string]any
+	if err := json.Unmarshal([]byte(completeCurrentIssueResponseJSON), &issue); err != nil {
+		t.Fatalf("decode complete current issue fixture: %v", err)
+	}
+	return issue
+}
+
+func TestExternalUpsertIssueDecoderAcceptsEveryIssueResponseField(t *testing.T) {
+	typeOfIssue := reflect.TypeOf(handler.IssueResponse{})
+	for i := 0; i < typeOfIssue.NumField(); i++ {
+		jsonName := strings.Split(typeOfIssue.Field(i).Tag.Get("json"), ",")[0]
+		if jsonName == "" || jsonName == "-" {
+			continue
+		}
+		t.Run(jsonName, func(t *testing.T) {
+			raw, err := json.Marshal(map[string]any{jsonName: nil})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := decodeExternalUpsertIssueStrict(raw); err != nil {
+				t.Fatalf("accepted IssueResponse field %q causes post-mutation client failure: %v", jsonName, err)
+			}
+		})
+	}
+}
 
 type roundTripFunc func(*http.Request) (*http.Response, error)
 
@@ -81,15 +139,7 @@ func TestIssueUpsertExternalVerifiesReceiptBoundToExactWrite(t *testing.T) {
 			if _, err := authority.ValidateNonce(request.Nonce); err != nil {
 				t.Fatalf("request nonce: %v", err)
 			}
-			issue := map[string]any{
-				"id":           "11111111-1111-1111-1111-111111111111",
-				"workspace_id": "ws-123",
-				"title":        "Imported",
-				"status":       "todo",
-				"priority":     "none",
-				"identifier":   "EXT-1",
-				"metadata":     map[string]any{},
-			}
+			issue := completeCurrentIssueResponse(t)
 			digest := sha256.Sum256(raw)
 			receipt, err := authority.SignWriteReceipt(priv, authority.WriteReceiptStatement{
 				Protocol: authority.WriteReceiptProtocolVersion, Operation: "issue.upsert-external",
