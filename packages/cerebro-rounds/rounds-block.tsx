@@ -146,10 +146,16 @@ function ResponsiveRoundPanel({ open, onOpenChange, title, showTrigger = false, 
           URL bar is showing (FIR-3107). dvh tracks what is actually visible. */}
       <DrawerContent className="data-[vaul-drawer-direction=bottom]:max-h-[85dvh]">
         <DrawerHeader><DrawerTitle>{title}</DrawerTitle></DrawerHeader>
-        <div className="min-h-0 overflow-y-auto px-4 pb-6">{children}</div>
+        <div className="min-h-0 min-w-0 overflow-y-auto px-4 pb-6">{children}</div>
       </DrawerContent>
     </Drawer> : <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-lg">
+      {/* grid-cols-[minmax(0,1fr)]: DialogContent is a grid, and its default
+          auto track sizes to the content's min-content. An issue title is
+          white-space:nowrap (truncate), so its min-content is the whole string
+          — the panel grew wider than the dialog and pushed Delete and the
+          per-issue remove buttons outside it instead of truncating (FIR-3293).
+          A minmax(0,…) track may shrink below min-content, so truncate wins. */}
+      <DialogContent className="grid-cols-[minmax(0,1fr)] sm:max-w-lg">
         <DialogHeader><DialogTitle>{title}</DialogTitle></DialogHeader>
         {children}
       </DialogContent>
@@ -167,6 +173,7 @@ export function RoundManager({ statuses, issueTitles, onCreate, onUpdate, onDele
   const [editing, setEditing] = useState<RoundStatus | null>(null);
   const [creating, setCreating] = useState(false);
   const [name, setName] = useState("");
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
   const beginCreate = () => { setEditing(null); setName(""); setCreating(true); };
   const beginEdit = (s: RoundStatus) => { setEditing(s); setName(s.round.name); setCreating(true); };
   const save = () => {
@@ -175,24 +182,56 @@ export function RoundManager({ statuses, issueTitles, onCreate, onUpdate, onDele
     if (editing) onUpdate(editing.round.id, input); else onCreate(input);
     setCreating(false);
   };
+
+  const renderRound = (s: RoundStatus) => {
+    const expanded = expandedIds.has(s.round.id);
+    const count = s.members.length;
+    return <div key={s.round.id} className="min-w-0 rounded-lg border">
+      <div className="flex min-w-0 items-center gap-1 p-2">
+        {/* The issue list is collapsed behind a count. Expanding every round's
+            full membership made the panel an unbounded wall of titles that ran
+            off the bottom on desktop and filled the drawer on mobile
+            (FIR-3293). */}
+        <button type="button" className="flex min-w-0 flex-1 items-center gap-1.5 rounded px-1 py-1.5 text-left hover:bg-muted" aria-expanded={expanded} aria-label={`${expanded ? "Collapse" : "Expand"} ${s.round.name}`} onClick={() => setExpandedIds((prev) => {
+          const next = new Set(prev);
+          if (expanded) next.delete(s.round.id); else next.add(s.round.id);
+          return next;
+        })}>
+          {expanded ? <ChevronDown className="size-3.5 shrink-0 text-muted-foreground" /> : <ChevronRight className="size-3.5 shrink-0 text-muted-foreground" />}
+          <span className="min-w-0 flex-1 truncate text-sm font-medium">{s.round.name}</span>
+          <span className="shrink-0 text-xs text-muted-foreground">{count === 1 ? "1 issue" : `${count} issues`}</span>
+        </button>
+        <Button variant="ghost" size="icon" className="shrink-0" aria-label={`Edit ${s.round.name}`} onClick={() => beginEdit(s)}><Pencil className="size-3.5" /></Button>
+        <Button variant="ghost" size="icon" className="shrink-0" aria-label={`Delete ${s.round.name}`} onClick={() => onDelete(s.round.id)}><Trash2 className="size-3.5" /></Button>
+      </div>
+      {expanded && <div className="min-w-0 border-t">
+        {s.members.map((m) => <div key={m.issue_id} className="flex min-w-0 items-center gap-1 border-b px-2 py-1 last:border-b-0">
+          <span className="min-w-0 flex-1 truncate text-xs">{issueTitles[m.issue_id] ?? m.issue_id}</span>
+          <Button variant="ghost" size="icon" className="shrink-0" aria-label={`Remove ${issueTitles[m.issue_id] ?? m.issue_id}`} onClick={() => onRemoveMember(s.round.id, m.issue_id)}><X className="size-3.5" /></Button>
+        </div>)}
+        {count === 0 && <p className="px-2 py-3 text-xs text-muted-foreground">No issues in this round yet.</p>}
+      </div>}
+    </div>;
+  };
+
   return <ResponsiveRoundPanel open={open} onOpenChange={setOpen} title="Manage rounds" showTrigger>
-      {creating ? <div className="grid gap-4">
+      {creating ? <div className="flex min-w-0 flex-col gap-4">
         {/* No autoFocus on mobile: it opens the keyboard over the lower half
             of the form before the user has seen it (FIR-3107). */}
-        <div className="grid gap-1.5"><Label htmlFor="round-name">Round name</Label><Input id="round-name" value={name} onChange={(e) => setName(e.target.value)} autoFocus={!isMobile} /></div>
+        <div className="grid min-w-0 gap-1.5"><Label htmlFor="round-name">Round name</Label><Input id="round-name" value={name} onChange={(e) => setName(e.target.value)} autoFocus={!isMobile} /></div>
         {/* Sticky: Save/Cancel stay on screen while the form above scrolls or
             the mobile keyboard pushes content out of view (FIR-3107). The
             opaque background keeps scrolled-under fields from showing through. */}
         <DialogFooter className="sticky bottom-0 bg-popover"><Button variant="ghost" onClick={() => setCreating(false)}>Cancel</Button><Button onClick={save} disabled={!name.trim()} aria-label="Save round">Save</Button></DialogFooter>
-      </div> : <div className="grid gap-3">
+      </div> : <div className="flex min-w-0 flex-col gap-3">
         <Button variant="outline" onClick={beginCreate} aria-label="Create round"><Plus className="size-4" />Create round</Button>
-        {statuses.map((s) => <div key={s.round.id} className="rounded-lg border p-3">
-          <div className="flex items-center gap-2"><div className="min-w-0 flex-1"><p className="truncate font-medium">{s.round.name}</p></div>
-            <Button variant="ghost" size="icon-sm" aria-label={`Edit ${s.round.name}`} onClick={() => beginEdit(s)}><Pencil className="size-3.5" /></Button>
-            <Button variant="ghost" size="icon-sm" aria-label={`Delete ${s.round.name}`} onClick={() => onDelete(s.round.id)}><Trash2 className="size-3.5" /></Button>
-          </div>
-          {s.members.map((m) => <div key={m.issue_id} className="mt-2 flex items-center gap-2 text-xs"><span className="min-w-0 flex-1 truncate">{issueTitles[m.issue_id] ?? m.issue_id}</span><Button variant="ghost" size="icon-sm" aria-label={`Remove ${issueTitles[m.issue_id] ?? m.issue_id}`} onClick={() => onRemoveMember(s.round.id, m.issue_id)}><X className="size-3.5" /></Button></div>)}
-        </div>)}
+        {/* flex-col, not grid: a grid's auto track is sized by its content's
+            min-content, which a nowrap title makes as wide as the whole string
+            (FIR-3293). */}
+        <div className="flex min-w-0 flex-col gap-2">
+          {statuses.map(renderRound)}
+          {statuses.length === 0 && <p className="py-4 text-center text-sm text-muted-foreground">No rounds yet.</p>}
+        </div>
       </div>}
   </ResponsiveRoundPanel>;
 }

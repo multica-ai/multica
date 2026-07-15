@@ -224,6 +224,7 @@ export function useCommentLongPress(
     userId,
     wsSlug,
     remindersEnabled,
+    getName,
     toggleReaction,
     deleteComment,
     resolveComment,

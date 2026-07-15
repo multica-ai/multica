@@ -68,8 +68,11 @@ func (b *opencodeBackend) Execute(ctx context.Context, prompt string, opts ExecO
 	if opts.ThinkingLevel != "" {
 		args = append(args, "--variant", opts.ThinkingLevel)
 	}
+	// CEREBRO-PATCH(daemon-opencode-inline-brief): JEH-1370/FIR-3212 — OpenCode has no
+	// --prompt flag and rejects unknown flags with exit 1, so the brief never arrived and
+	// every run died. Prepend it to the message instead, as openclaw/kiro/kimi already do.
 	if opts.SystemPrompt != "" {
-		args = append(args, "--prompt", opts.SystemPrompt)
+		prompt = opts.SystemPrompt + "\n\n---\n\n" + prompt
 	}
 	if opts.MaxTurns > 0 {
 		b.cfg.Logger.Warn("opencode does not support --max-turns; ignoring", "maxTurns", opts.MaxTurns)

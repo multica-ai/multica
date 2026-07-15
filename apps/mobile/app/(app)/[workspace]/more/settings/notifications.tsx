@@ -20,11 +20,11 @@ import { useWorkspaceStore } from "@/data/workspace-store";
 import { notificationPreferenceOptions } from "@/data/queries/notification-preferences";
 import { useUpdateNotificationPreferences } from "@/data/mutations/notification-preferences";
 
-const INBOX_GROUPS: Array<{
+const INBOX_GROUPS: {
   key: Exclude<NotificationGroupKey, "system_notifications">;
   label: string;
   description: string;
-}> = [
+}[] = [
   {
     key: "assignments",
     label: "Assignments",

@@ -418,7 +418,10 @@ function CommentBody({
 
   // Reactions live on TimelineEntry.reactions (mirrored from Comment).
   // Pass through to the bar; toggle finds existing match by emoji + actor.
-  const reactions: Reaction[] = (entry.reactions ?? []) as Reaction[];
+  const reactions = useMemo(
+    () => (entry.reactions ?? []) as Reaction[],
+    [entry.reactions],
+  );
 
   const onToggleReaction = useCallback(
     (emoji: string) => {

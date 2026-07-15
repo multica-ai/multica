@@ -1,155 +1,178 @@
 /**
- * Mobile regression for the Rounds "Manage rounds" panel (FIR-3107).
+ * Regression for the Rounds "Manage rounds" panel (FIR-3107, FIR-3293).
  *
- * On a phone-sized viewport the panel renders as a bottom drawer. The
- * create/edit form (name, type, schedule, time, timezone, footer) must fit
- * within the visible viewport or be scrollable to it — the Save button has
- * to be reachable.
+ * FIR-3293: the panel is laid out inside containers whose track is sized by
+ * their content's min-content. An issue title is white-space:nowrap
+ * (truncate), so its min-content is the entire string — the panel grew wider
+ * than the dialog/drawer and pushed Delete and the per-issue remove buttons
+ * outside it, instead of truncating. The guard is therefore: the panel must
+ * never scroll horizontally, and every action must sit inside it.
+ *
+ * The previous version of this spec waited on a "Timezone" field that stopped
+ * existing when rounds were simplified to name-only (FIR-3179), so it timed
+ * out instead of guarding anything. Keep these assertions tied to controls the
+ * panel actually renders.
  */
-import { test, expect } from "@playwright/test";
-import pg from "pg";
-import { createTestApi } from "./helpers";
+import { test, expect, type Page } from "@playwright/test";
+import { createTestApi, loginAsDefault } from "./helpers";
 import type { TestApiClient } from "./fixtures";
 
 let api: TestApiClient;
-let roundIds: string[] = [];
+let slug = "";
+let roundId = "";
 
-test.beforeEach(async () => {
+// A title long enough that its min-content is wider than the panel.
+const LONG_TITLE =
+  "Agent Office — versioneringssystem for al agent-kontekst (scope + review)";
+const ROUND = "Overflow Guard";
+
+/** Rounds outlive api.cleanup(), so clear them or stale members leak in. */
+async function deleteAllRounds(client: TestApiClient) {
+  const res = await (client as any).authedFetch("/api/cerebro/rounds");
+  if (!res.ok) return;
+  const { rounds = [] } = await res.json();
+  for (const r of rounds) {
+    await (client as any).authedFetch(`/api/cerebro/rounds/${r.id}`, { method: "DELETE" }).catch(() => {});
+  }
+}
+
+test.beforeEach(async ({ page }) => {
   api = await createTestApi();
   await api.setWorkspaceFeatureFlag("cerebro_inbox_rounds", true);
-  // Enough rounds that the manage list view is taller than the drawer.
-  roundIds = [];
-  for (let i = 1; i <= 6; i++) {
-    const res = await (api as any).authedFetch("/api/cerebro/rounds", {
+  slug = await loginAsDefault(page);
+  await deleteAllRounds(api);
+
+  const res = await (api as any).authedFetch("/api/cerebro/rounds", {
+    method: "POST",
+    body: JSON.stringify({ name: ROUND }),
+  });
+  if (!res.ok) throw new Error(`create round failed: ${res.status} ${await res.text()}`);
+  roundId = (await res.json()).id;
+  // Every member is long-titled, so any of them must truncate.
+  // allow_duplicate: the same titles are re-seeded on every run, and the API
+  // rejects an active duplicate title — without this the issue never gets
+  // created and the round silently renders with no members.
+  for (let i = 0; i < 6; i++) {
+    const issue = await api.createIssue(`${LONG_TITLE} ${i}`, { allow_duplicate: true });
+    if (!issue?.id) throw new Error(`create issue failed: ${JSON.stringify(issue)}`);
+    const add = await (api as any).authedFetch(`/api/cerebro/rounds/${roundId}/members`, {
       method: "POST",
-      body: JSON.stringify({ name: `Round ${i}`, mode: "batch", schedule_cron: null, timezone: "UTC" }),
+      body: JSON.stringify({ issue_id: issue.id }),
     });
-    if (res.ok) roundIds.push((await res.json()).id);
+    if (!add.ok) throw new Error(`add member failed: ${add.status} ${await add.text()}`);
   }
 });
 
 test.afterEach(async () => {
-  for (const id of roundIds) {
-    await (api as any).authedFetch(`/api/cerebro/rounds/${id}`, { method: "DELETE" }).catch(() => {});
-  }
+  // beforeEach can fail before api exists; don't mask that error with a TypeError.
+  if (!api) return;
+  await deleteAllRounds(api);
   await api.cleanup();
 });
 
 // iPhone 13/14 *visible* viewport: 390x844 screen minus Safari chrome
-// (status bar + URL bar + bottom toolbar ≈ 180px). Layout bugs hide in the
+// (status bar + URL bar + bottom toolbar ~= 180px). Layout bugs hide in the
 // difference between the full screen and what the browser actually shows.
 test.use({ viewport: { width: 390, height: 664 } });
 
-async function loginInBrowser(page: import("@playwright/test").Page, email: string) {
-  const dbUrl = process.env.DATABASE_URL ?? "";
-  const client = new pg.Client(dbUrl);
-  await client.connect();
-  let token = "";
-  try {
-    await client.query("DELETE FROM verification_code WHERE email = $1", [email]);
-    await page.goto("/login", { waitUntil: "domcontentloaded" });
-    const sent = await page.evaluate(async (e) => {
-      const r = await fetch("/auth/send-code", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: e }),
-      });
-      return r.ok;
-    }, email);
-    if (!sent) throw new Error("send-code failed");
-    const codeRes = await client.query(
-      "SELECT code FROM verification_code WHERE email = $1 AND used = FALSE ORDER BY created_at DESC LIMIT 1",
-      [email],
-    );
-    const code = codeRes.rows[0].code;
-    const verifyOut = await page.evaluate(async (args) => {
-      const r = await fetch("/auth/verify-code", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: args.email, code: args.code }),
-      });
-      const json = r.ok ? await r.json() : null;
-      return { ok: r.ok, token: json?.token ?? "" };
-    }, { email, code });
-    if (!verifyOut.ok) throw new Error("verify-code failed");
-    token = verifyOut.token;
-    await client.query("DELETE FROM verification_code WHERE email = $1", [email]);
-  } finally {
-    await client.end();
-  }
-  await page.evaluate((t) => localStorage.setItem("multica_token", t), token);
-}
-
-test("Manage rounds create form is fully reachable on mobile", async ({ page }) => {
-  const slug = (api as any).workspaceSlug as string;
-  await loginInBrowser(page, "e2e@multica.ai");
-
+async function openManageRounds(page: Page) {
   await page.goto(`/${slug}/inbox`, { waitUntil: "networkidle" });
-
-  // Add the Rounds section via the inbox ⋯ menu (the layout persists across
-  // runs, so only add it when no Rounds block is present yet).
-  const manageButton = page.getByRole("button", { name: "Manage rounds" }).first();
-  if (!(await manageButton.isVisible().catch(() => false))) {
+  const manage = page.getByRole("button", { name: "Manage rounds" }).first();
+  if (!(await manage.isVisible().catch(() => false))) {
     await page.locator('button[title="Inbox menu"]').click();
     await page.getByRole("menuitem", { name: "Rounds", exact: true }).click();
   }
-
-  // Open the Manage rounds panel from the Rounds block header.
-  await manageButton.click();
+  await manage.click();
   await expect(page.getByRole("button", { name: "Create round" })).toBeVisible();
+  // Let the open animation settle before measuring.
+  await page.waitForTimeout(500);
+}
+
+/** The panel must never need horizontal scrolling to reach its controls. */
+async function expectNoHorizontalOverflow(page: Page, selector: string) {
+  const overflow = await page
+    .locator(selector)
+    .evaluate((el) => el.scrollWidth - (el as HTMLElement).clientWidth);
+  expect(overflow, `${selector} scrolls horizontally by ${overflow}px`).toBeLessThanOrEqual(1);
+}
+
+/** Every control must render inside the panel's own box. */
+async function expectInsidePanel(
+  page: Page,
+  panel: string,
+  buttonName: string | RegExp,
+  label = String(buttonName),
+) {
+  const panelBox = (await page.locator(panel).boundingBox())!;
+  const btn = page.getByRole("button", { name: buttonName }).first();
+  await expect(btn).toBeVisible();
+  const box = (await btn.boundingBox())!;
+  expect(
+    box.x + box.width,
+    `"${label}" right edge is outside the panel`,
+  ).toBeLessThanOrEqual(panelBox.x + panelBox.width + 1);
+  expect(box.x, `"${label}" left edge is outside the panel`).toBeGreaterThanOrEqual(panelBox.x - 1);
+}
+
+// Member rows are labelled "Remove <identifier> · <title>", so match the verb.
+const REMOVE_MEMBER = /^Remove .+/;
+
+test("Manage rounds panel keeps every action reachable on mobile", async ({ page }) => {
+  await openManageRounds(page);
+  const drawer = '[data-slot="drawer-content"]';
+
+  await expectNoHorizontalOverflow(page, drawer);
+  await expectInsidePanel(page, drawer, `Edit ${ROUND}`);
+  await expectInsidePanel(page, drawer, `Delete ${ROUND}`);
+
+  // The drawer must stay within the visible viewport.
+  const box = (await page.locator(drawer).boundingBox())!;
+  expect(box.y + box.height).toBeLessThanOrEqual(664 + 1);
   await page.screenshot({ path: "screenshots/rounds-manage-mobile.png" });
 
-  const viewport = page.viewportSize()!;
+  // Expanding a round must not make the panel overflow sideways: long titles
+  // truncate instead (FIR-3293).
+  await page.getByRole("button", { name: `Expand ${ROUND}` }).click();
+  await page.waitForTimeout(300);
+  await expectNoHorizontalOverflow(page, drawer);
+  const title = page.locator(`${drawer} span.truncate`).last();
+  const truncated = await title.evaluate((el) => el.scrollWidth > (el as HTMLElement).offsetWidth);
+  expect(truncated, "long issue title should be truncated, not overflowing").toBe(true);
+  await expectInsidePanel(page, drawer, REMOVE_MEMBER, "Remove issue");
+  await page.screenshot({ path: "screenshots/rounds-manage-mobile-expanded.png" });
 
-  // The manage list view must keep every round reachable: the last round's
-  // Edit button must be scrollable into the viewport.
-  const lastEdit = page.getByRole("button", { name: "Edit Round 6" });
-  await lastEdit.scrollIntoViewIfNeeded();
-  await expect(lastEdit).toBeVisible();
-  const lastEditBox = await lastEdit.boundingBox();
-  expect(lastEditBox).not.toBeNull();
-  expect(lastEditBox!.y + lastEditBox!.height).toBeLessThanOrEqual(viewport.height + 1);
-  await page.screenshot({ path: "screenshots/rounds-manage-mobile-bottom.png" });
-
-  // Switch to the create form (the tall state).
-  await page.getByRole("button", { name: "Create round" }).scrollIntoViewIfNeeded();
-  await page.getByRole("button", { name: "Create round" }).click();
-  await expect(page.getByLabel("Round name")).toBeVisible();
-  await page.screenshot({ path: "screenshots/rounds-create-mobile.png" });
-  // Every form control must be reachable: scroll it into view and assert it
-  // lands fully inside the viewport.
-  for (const label of ["Round name", "Timezone"]) {
-    const el = page.getByLabel(label);
-    await el.scrollIntoViewIfNeeded();
-    await expect(el).toBeVisible();
-    const box = await el.boundingBox();
-    expect(box).not.toBeNull();
-    expect(box!.y).toBeGreaterThanOrEqual(0);
-    expect(box!.y + box!.height).toBeLessThanOrEqual(viewport.height + 1);
-  }
   // Save must be on screen WITHOUT scrolling (sticky footer) — on a phone the
   // keyboard hides anything below the fold, so a Save that has to be scrolled
   // to is effectively unreachable while typing.
+  await page.getByRole("button", { name: "Create round" }).click();
+  await expect(page.getByLabel("Round name")).toBeVisible();
   const save = page.getByRole("button", { name: "Save round" });
   await expect(save).toBeVisible();
-  const saveBox = await save.boundingBox();
-  expect(saveBox).not.toBeNull();
-  expect(saveBox!.y).toBeGreaterThanOrEqual(0);
-  expect(saveBox!.y + saveBox!.height).toBeLessThanOrEqual(viewport.height + 1);
-  await page.screenshot({ path: "screenshots/rounds-create-mobile-bottom.png" });
+  const saveBox = (await save.boundingBox())!;
+  expect(saveBox.y).toBeGreaterThanOrEqual(0);
+  expect(saveBox.y + saveBox.height).toBeLessThanOrEqual(664 + 1);
+  await page.screenshot({ path: "screenshots/rounds-create-mobile.png" });
+});
 
-  // Shrink to roughly the visible area left when the iOS keyboard is open.
-  // The form must stay usable: Save still on screen without scrolling, and
-  // every field still reachable by scrolling.
-  await page.setViewportSize({ width: 390, height: 400 });
-  await expect(save).toBeVisible();
-  const smallSave = await save.boundingBox();
-  expect(smallSave).not.toBeNull();
-  expect(smallSave!.y + smallSave!.height).toBeLessThanOrEqual(401);
-  for (const label of ["Round name", "Timezone"]) {
-    const el = page.getByLabel(label);
-    await el.scrollIntoViewIfNeeded();
-    await expect(el).toBeVisible();
-  }
-  await page.screenshot({ path: "screenshots/rounds-create-mobile-keyboard.png" });
+test("Manage rounds panel keeps every action reachable on desktop", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await openManageRounds(page);
+  const dialog = '[data-slot="dialog-content"]';
+
+  await expectNoHorizontalOverflow(page, dialog);
+  await expectInsidePanel(page, dialog, `Edit ${ROUND}`);
+  await expectInsidePanel(page, dialog, `Delete ${ROUND}`);
+
+  // Collapsed by default: the panel must not run off the bottom of the screen
+  // just because a round has many members (FIR-3293).
+  const box = (await page.locator(dialog).boundingBox())!;
+  expect(box.y).toBeGreaterThanOrEqual(0);
+  expect(box.y + box.height).toBeLessThanOrEqual(900 + 1);
+  await page.screenshot({ path: "screenshots/rounds-manage-desktop.png" });
+
+  await page.getByRole("button", { name: `Expand ${ROUND}` }).click();
+  await page.waitForTimeout(300);
+  await expectNoHorizontalOverflow(page, dialog);
+  await expectInsidePanel(page, dialog, REMOVE_MEMBER, "Remove issue");
+  await page.screenshot({ path: "screenshots/rounds-manage-desktop-expanded.png" });
 });
