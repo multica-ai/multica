@@ -74,6 +74,12 @@
     "running": "Running...",
     "toast_triggered": "Autopilot triggered",
     "toast_trigger_failed": "Failed to trigger autopilot",
+    "run_blocked_invocation_not_allowed": "Not triggered — you don't have permission to use this autopilot's agent",
+    "run_blocked_runtime_offline": "Not triggered — the agent's runtime is offline",
+    "run_blocked_target_unavailable": "Not triggered — the agent is unavailable",
+    "run_blocked_attribution": "Not triggered — the run couldn't be attributed to a responsible member",
+    "run_blocked_already_active": "Not triggered — a recent run already covers this",
+    "run_blocked_generic": "Not triggered — the run was blocked",
     "section_properties": "Properties",
     "section_triggers": "Triggers",
     "section_run_history": "Run History",
@@ -100,6 +106,20 @@
       "confirm": "Delete",
       "deleting": "Deleting..."
     }
+  },
+  "access": {
+    "title": "Manage access",
+    "description": "Members you add can edit, run, and manage this autopilot's triggers and webhooks.",
+    "current_label": "With access",
+    "add": "Add member",
+    "search_placeholder": "Search members…",
+    "no_results": "No members found",
+    "remove_tooltip": "Remove access",
+    "empty": "No one has been granted access yet.",
+    "toast_granted": "Access granted",
+    "toast_revoked": "Access removed",
+    "toast_failed": "Couldn't update access",
+    "owner_note": "The creator and workspace admins always have access."
   },
   "run_status": {
     "issue_created": "Issue Created",
@@ -189,6 +209,8 @@
       "received_at": "Received",
       "last_attempt_at": "Last attempt",
       "attempt_count": "Attempts",
+      "dispatch_attempts": "Dispatch attempts",
+      "available_at": "Next dispatch",
       "response_status": "Response",
       "dedupe_key": "Dedupe key",
       "dedupe_source": "Dedupe source",

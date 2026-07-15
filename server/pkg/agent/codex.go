@@ -2,7 +2,6 @@ package agent
 
 import (
 	"bufio"
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -40,6 +39,7 @@ const (
 	codexStderrTailBytes                   = 2048
 	defaultCodexSemanticInactivityTimeout  = 10 * time.Minute
 	defaultCodexFirstTurnNoProgressTimeout = 30 * time.Second
+	defaultCodexHandshakeTimeout           = 30 * time.Second
 	codexVersionDiagnosticTimeout          = 2 * time.Second
 	// codexGracefulShutdownTimeout bounds how long the lifecycle goroutine
 	// waits for codex to exit on its own after stdin is closed, before forcing
@@ -73,6 +73,10 @@ const CodexSemanticInactivityMarker = "codex semantic inactivity timeout"
 // CodexFirstTurnNoProgressMarker identifies the app-server failure mode where
 // Codex accepts a turn and then never emits any item, completion, or error.
 const CodexFirstTurnNoProgressMarker = "codex app-server no progress timeout"
+
+// CodexHandshakeTimeoutMarker identifies a Codex app-server startup RPC that
+// did not answer within the bounded handshake window.
+const CodexHandshakeTimeoutMarker = "codex app-server handshake timeout"
 
 const codexModelCatalogRefreshTimeoutSignal = "failed to refresh available models: timeout waiting for child process to exit"
 
@@ -128,14 +132,7 @@ func buildCodexArgs(opts ExecOptions, logger *slog.Logger) []string {
 // managed set — strict mode, no global fallback); only SQL NULL or the
 // literal JSON `null` count as absent (CLI default).
 func hasManagedCodexMcpConfig(raw json.RawMessage) bool {
-	trimmed := bytes.TrimSpace(raw)
-	if len(trimmed) == 0 {
-		return false
-	}
-	if bytes.Equal(trimmed, []byte("null")) {
-		return false
-	}
-	return true
+	return hasManagedMcpConfig(raw)
 }
 
 // codexManagedMcpConfigKeyRe matches the daemon-managed config namespace
@@ -312,9 +309,10 @@ func ensureCodexMcpConfig(configPath string, mcpConfig json.RawMessage, logger *
 // servers to render (empty/null mcp_config) and the caller should only
 // strip the prior managed block.
 //
-// Claude-style camelCase keys (`args`, `env`, `command`, `url`) pass
-// through verbatim — Codex's config schema happens to use the same
-// names today. If they ever diverge, rename here rather than in the UI.
+// Stdio server keys (`args`, `env`, `command`) pass through verbatim —
+// Codex's config schema happens to use the same names today. Remote HTTP
+// servers use Codex-specific keys, so they are normalised here rather than
+// leaking provider details into the UI/dispatch layer.
 func renderCodexMcpServersBlock(raw json.RawMessage) (string, bool, error) {
 	if len(raw) == 0 {
 		return "", false, nil
@@ -349,6 +347,7 @@ func renderCodexMcpServersBlock(raw json.RawMessage) (string, bool, error) {
 		if serverVal == nil {
 			return "", false, fmt.Errorf("mcp_servers.%s must be a JSON object", name)
 		}
+		serverVal = normalizeCodexMcpServerConfig(serverVal)
 		if i > 0 {
 			sb.WriteString("\n")
 		}
@@ -374,6 +373,55 @@ func renderCodexMcpServersBlock(raw json.RawMessage) (string, bool, error) {
 	sb.WriteString(multicaCodexMcpEndMarker)
 	sb.WriteString("\n")
 	return sb.String(), true, nil
+}
+
+func normalizeCodexMcpServerConfig(server map[string]any) map[string]any {
+	if !isCodexRemoteMcpServer(server) {
+		normalized := make(map[string]any, len(server))
+		for k, v := range server {
+			if isMulticaMcpSelectorKey(k) {
+				continue
+			}
+			normalized[k] = v
+		}
+		return normalized
+	}
+
+	normalized := make(map[string]any, len(server)+1)
+	for k, v := range server {
+		switch {
+		case isMulticaMcpSelectorKey(k):
+			continue
+		case k == "type":
+			continue
+		case k == "headers":
+			if _, ok := server["http_headers"]; !ok {
+				normalized["http_headers"] = v
+			}
+		default:
+			normalized[k] = v
+		}
+	}
+	normalized["experimental_use_rmcp_client"] = true
+	return normalized
+}
+
+func isMulticaMcpSelectorKey(k string) bool {
+	switch k {
+	case "tools", "prompts", "resources":
+		return true
+	default:
+		return false
+	}
+}
+
+func isCodexRemoteMcpServer(server map[string]any) bool {
+	if typ, ok := server["type"].(string); ok && strings.EqualFold(typ, "http") {
+		return true
+	}
+	_, hasURL := server["url"]
+	_, hasCommand := server["command"]
+	return hasURL && !hasCommand
 }
 
 // stripCodexUserMcpServerTables removes every `[mcp_servers.*]` table
@@ -531,6 +579,10 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 	if semanticInactivityTimeout == 0 {
 		semanticInactivityTimeout = defaultCodexSemanticInactivityTimeout
 	}
+	handshakeTimeout := opts.HandshakeTimeout
+	if handshakeTimeout <= 0 {
+		handshakeTimeout = defaultCodexHandshakeTimeout
+	}
 	runCtx, cancel := runContext(ctx, timeout)
 
 	// Materialise the agent's MCP config into the per-task
@@ -631,6 +683,7 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 		stdin:                stdin,
 		pending:              make(map[int]*pendingRPC),
 		processDone:          make(chan struct{}),
+		handshakeTimeout:     handshakeTimeout,
 		notificationProtocol: "unknown",
 		onMessage: func(msg Message) {
 			logCodexAgentMessage(b.cfg.Logger, msg)
@@ -820,12 +873,16 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 			b.cfg.Logger.Info("codex thread started", "thread_id", threadID)
 		}
 
-		// 3. Send turn and wait for completion
+		// 3. Send turn and wait for completion. When a resume was expected but we
+		// ended up on a fresh thread (the live thread/resume RPC was rejected — a
+		// corrupt/incompatible rollout, server-side thread GC, schema drift — or a
+		// transport failure forced a fresh retry), prepend a continuity notice so
+		// the agent tells the user the prior conversation could not be restored.
+		// The daemon's pre-flight gates only catch cases detectable before launch;
+		// this covers the ones only the live resume reveals (MUL-4424).
 		turnParams := map[string]any{
 			"threadId": threadID,
-			"input": []map[string]any{
-				{"type": "text", "text": prompt},
-			},
+			"input":    codexTurnInput(prompt, opts.ResumeExpected, resumed),
 		}
 		// Per-turn reasoning override. Mirrors the per-thread injection in
 		// startOrResumeThread; keeping both in sync is enforced by the
@@ -833,13 +890,38 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 		// MUL-2339 — Trump's constraint that the three injection points
 		// must not drift independently).
 		applyCodexReasoningEffort(turnParams, opts.ThinkingLevel)
+		waitingForTurn := true
+		var timeoutDiagnostic codexTimeoutDiagnostic
+		var processExitErr error
+		finishTurn := func(aborted bool) {
+			waitingForTurn = false
+			switch {
+			case aborted:
+				finalStatus = "aborted"
+				if errMsg := c.getTurnError(); errMsg != "" {
+					finalError = errMsg
+				} else {
+					finalError = "turn was aborted"
+				}
+			default:
+				if errMsg := c.getTurnError(); errMsg != "" {
+					finalStatus = "failed"
+					finalError = errMsg
+				}
+			}
+		}
 		_, err = c.request(runCtx, "turn/start", turnParams)
 		if err != nil {
-			drainAndWait() // flush os/exec stderr goroutine before sampling Tail
-			finalStatus = "failed"
-			finalError = withAgentStderr(fmt.Sprintf("codex turn/start failed: %v", err), "codex", stderrBuf.Tail())
-			resCh <- Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds()}
-			return
+			select {
+			case aborted := <-turnDone:
+				finishTurn(aborted)
+			default:
+				drainAndWait() // flush os/exec stderr goroutine before sampling Tail
+				finalStatus = "failed"
+				finalError = withAgentStderr(fmt.Sprintf("codex turn/start failed: %v", err), "codex", stderrBuf.Tail())
+				resCh <- Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds()}
+				return
+			}
 		}
 
 		lastSemanticActivity := time.Now()
@@ -861,26 +943,6 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 		}
 		defer stopFirstTurnNoProgressTimer()
 
-		waitingForTurn := true
-		var timeoutDiagnostic codexTimeoutDiagnostic
-		var processExitErr error
-		finishTurn := func(aborted bool) {
-			waitingForTurn = false
-			switch {
-			case aborted:
-				finalStatus = "aborted"
-				if errMsg := c.getTurnError(); errMsg != "" {
-					finalError = errMsg
-				} else {
-					finalError = "turn was aborted"
-				}
-			default:
-				if errMsg := c.getTurnError(); errMsg != "" {
-					finalStatus = "failed"
-					finalError = errMsg
-				}
-			}
-		}
 		finishRunContextDone := func() {
 			waitingForTurn = false
 			if runCtx.Err() == context.DeadlineExceeded {
@@ -996,9 +1058,12 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 		c.usageMu.Unlock()
 
 		// Fallback: if no usage from JSON-RPC, scan Codex session JSONL logs.
-		// Codex writes token_count events to ~/.codex/sessions/YYYY/MM/DD/*.jsonl.
+		// Codex writes token_count events to $CODEX_HOME/sessions/YYYY/MM/DD/*.jsonl;
+		// scan this backend's per-task CODEX_HOME, since sessions are isolated
+		// there rather than in the shared ~/.codex/sessions (MUL-4424).
 		if u.InputTokens == 0 && u.OutputTokens == 0 {
-			if scanned := scanCodexSessionUsage(startTime); scanned != nil {
+			taskCodexHome := strings.TrimSpace(b.cfg.Env["CODEX_HOME"])
+			if scanned := scanCodexSessionUsage(startTime, taskCodexHome); scanned != nil {
 				u = scanned.usage
 				if scanned.model != "" && opts.Model == "" {
 					opts.Model = scanned.model
@@ -1025,6 +1090,27 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 	}()
 
 	return &Session{Messages: msgCh, Result: resCh}, nil
+}
+
+// codexResumeUnavailableNotice is prepended to the first turn's input when a
+// resume was expected but Codex ended up on a fresh thread. It mirrors the
+// daemon brief's Session Continuity Notice so the disclosure is identical
+// whether the loss is detected pre-launch (daemon gate) or only by the live
+// thread/resume RPC (MUL-4424).
+const codexResumeUnavailableNotice = "[System notice] You were expected to continue an earlier conversation, but restoring that session failed and this is a fresh thread with no memory of the previous turns. Rebuild context from the issue/thread, and when you reply, tell the user up front (one short sentence) that the previous conversation context could not be restored and this is a new session.\n\n"
+
+// codexTurnInput builds the input content for the first turn/start. When a
+// resume was expected (resumeExpected) but the backend landed on a fresh thread
+// (!resumed), it prepends codexResumeUnavailableNotice so the user learns the
+// prior context was lost instead of the run silently continuing as new. The
+// notice is folded into the same text block as the prompt to stay within the
+// single-text-block turn input Codex already accepts.
+func codexTurnInput(prompt string, resumeExpected, resumed bool) []map[string]any {
+	text := prompt
+	if resumeExpected && !resumed {
+		text = codexResumeUnavailableNotice + prompt
+	}
+	return []map[string]any{{"type": "text", "text": text}}
 }
 
 // startOrResumeThread picks between Codex's thread/resume and thread/start
@@ -1305,6 +1391,7 @@ type codexClient struct {
 	pending            map[int]*pendingRPC
 	processDone        chan struct{}
 	processErr         error
+	handshakeTimeout   time.Duration
 	threadID           string
 	turnID             string
 	onMessage          func(Message)
@@ -1349,10 +1436,48 @@ type rpcResult struct {
 	err    error
 }
 
+type codexHandshakeTimeoutError struct {
+	Method  string
+	Timeout time.Duration
+}
+
+func (e *codexHandshakeTimeoutError) Error() string {
+	return fmt.Sprintf("%s: %s did not respond after %s", CodexHandshakeTimeoutMarker, e.Method, e.Timeout)
+}
+
+func (e *codexHandshakeTimeoutError) Unwrap() error {
+	return context.DeadlineExceeded
+}
+
+func isCodexHandshakeRPC(method string) bool {
+	switch method {
+	case "initialize", "thread/start", "thread/resume", "thread/name/set", "turn/start":
+		return true
+	default:
+		return false
+	}
+}
+
+func codexRequestContextError(ctx context.Context) error {
+	var handshakeErr *codexHandshakeTimeoutError
+	if errors.As(context.Cause(ctx), &handshakeErr) {
+		return handshakeErr
+	}
+	return ctx.Err()
+}
+
 func (c *codexClient) request(ctx context.Context, method string, params any) (json.RawMessage, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	requestCtx := ctx
+	cancelRequest := func() {}
+	if c.handshakeTimeout > 0 && isCodexHandshakeRPC(method) {
+		timeoutErr := &codexHandshakeTimeoutError{Method: method, Timeout: c.handshakeTimeout}
+		requestCtx, cancelRequest = context.WithTimeoutCause(ctx, c.handshakeTimeout, timeoutErr)
+	}
+	defer cancelRequest()
+
 	c.mu.Lock()
 	if c.processErr != nil {
 		err := c.processErr
@@ -1401,22 +1526,27 @@ func (c *codexClient) request(ctx context.Context, method string, params any) (j
 	case res := <-pr.ch:
 		return res.result, res.err
 	case <-processDone:
+		select {
+		case res := <-pr.ch:
+			return res.result, res.err
+		default:
+		}
 		c.mu.Lock()
 		delete(c.pending, id)
 		err := c.processErr
 		c.mu.Unlock()
-		if ctxErr := ctx.Err(); ctxErr != nil {
-			return nil, ctxErr
+		if requestCtx.Err() != nil {
+			return nil, codexRequestContextError(requestCtx)
 		}
 		if err == nil {
 			err = errCodexProcessExited
 		}
 		return nil, err
-	case <-ctx.Done():
+	case <-requestCtx.Done():
 		c.mu.Lock()
 		delete(c.pending, id)
 		c.mu.Unlock()
-		return nil, ctx.Err()
+		return nil, codexRequestContextError(requestCtx)
 	}
 }
 
@@ -1493,6 +1623,10 @@ func isCodexTransportError(err error) bool {
 		return false
 	}
 	if errors.Is(err, errCodexProcessExited) {
+		return true
+	}
+	var handshakeErr *codexHandshakeTimeoutError
+	if errors.As(err, &handshakeErr) {
 		return true
 	}
 	return strings.HasPrefix(err.Error(), "write ")
@@ -1973,9 +2107,11 @@ type codexSessionUsage struct {
 
 // scanCodexSessionUsage scans Codex session JSONL files written after startTime
 // to extract token usage. Codex writes token_count events to
-// ~/.codex/sessions/YYYY/MM/DD/*.jsonl.
-func scanCodexSessionUsage(startTime time.Time) *codexSessionUsage {
-	root := codexSessionRoot()
+// $CODEX_HOME/sessions/YYYY/MM/DD/*.jsonl. codexHome is the backend's per-task
+// CODEX_HOME; sessions are isolated there rather than in the shared
+// ~/.codex/sessions (MUL-4424), so usage must be read from it.
+func scanCodexSessionUsage(startTime time.Time, codexHome string) *codexSessionUsage {
+	root := codexSessionRoot(codexHome)
 	if root == "" {
 		return nil
 	}
@@ -2011,9 +2147,15 @@ func scanCodexSessionUsage(startTime time.Time) *codexSessionUsage {
 	return &result
 }
 
-// codexSessionRoot returns the Codex sessions directory.
-func codexSessionRoot() string {
-	if codexHome := os.Getenv("CODEX_HOME"); codexHome != "" {
+// codexSessionRoot returns the Codex sessions directory. It prefers the
+// explicit per-task codexHome the backend is running with (so usage is read
+// from the same task-local sessions Codex actually wrote to), then the ambient
+// CODEX_HOME, then ~/.codex.
+func codexSessionRoot(codexHome string) string {
+	if codexHome = strings.TrimSpace(codexHome); codexHome == "" {
+		codexHome = os.Getenv("CODEX_HOME")
+	}
+	if codexHome != "" {
 		dir := filepath.Join(codexHome, "sessions")
 		if info, err := os.Stat(dir); err == nil && info.IsDir() {
 			return dir

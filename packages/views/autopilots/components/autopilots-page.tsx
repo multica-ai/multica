@@ -46,7 +46,11 @@ import {
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { useRowLink } from "../../navigation";
 import { ActorAvatar } from "../../common/actor-avatar";
-import { PageHeader } from "../../layout/page-header";
+import {
+  CollectionPageHeader,
+  CollectionPageHeaderAction,
+  CollectionPageState,
+} from "../../layout/collection-page";
 import { AutopilotDialog } from "./autopilot-dialog";
 import { AutopilotListToolbar, actorFilterValue } from "./autopilot-list-toolbar";
 import {
@@ -267,7 +271,7 @@ function AssigneeCell({ autopilot }: { autopilot: Autopilot }) {
       <ActorAvatar
         actorType={autopilot.assignee_type}
         actorId={autopilot.assignee_id}
-        size={18}
+        size="sm"
         enableHoverCard={autopilot.assignee_type === "agent"}
         showStatusDot={autopilot.assignee_type === "agent"}
       />
@@ -408,7 +412,7 @@ function CreatorCell({ autopilot }: { autopilot: Autopilot }) {
       <ActorAvatar
         actorType={autopilot.created_by_type}
         actorId={autopilot.created_by_id}
-        size={18}
+        size="sm"
       />
       <span className="min-w-0 truncate text-xs text-muted-foreground">
         {getActorName(autopilot.created_by_type, autopilot.created_by_id)}
@@ -763,47 +767,38 @@ export function AutopilotsPage() {
     // not viewport-centered).
     <div className="relative flex flex-1 min-h-0 flex-col">
       {/* Header */}
-      <PageHeader className="justify-between px-5">
-        <div className="flex items-center gap-2">
-          <Zap className="h-4 w-4 text-muted-foreground" />
-          <h1 className="text-sm font-medium">{t(($) => $.page.title)}</h1>
-          {totalCount > 0 && (
-            <span className="font-mono text-xs tabular-nums text-muted-foreground/70">
-              {totalCount}
-            </span>
-          )}
-        </div>
-        {/* Quiet chrome button (outline, icon-only below md) — primary is
-            reserved for the empty state's CTAs. */}
-        <Button
-          size="sm"
-          variant="outline"
-          className="h-8 w-8 gap-1 px-0 md:w-auto md:px-2.5"
-          aria-label={t(($) => $.page.new_autopilot)}
-          onClick={() => openCreate()}
-        >
-          <Plus className="h-3.5 w-3.5" />
-          <span className="hidden md:inline">
-            {t(($) => $.page.new_autopilot)}
-          </span>
-        </Button>
-      </PageHeader>
+      <CollectionPageHeader
+        icon={Zap}
+        title={t(($) => $.page.title)}
+        count={totalCount}
+        actions={
+          <CollectionPageHeaderAction
+            icon={Plus}
+            label={t(($) => $.page.new_autopilot)}
+            onClick={() => openCreate()}
+          />
+        }
+      />
 
       {listError ? (
-        <div className="flex flex-1 flex-col items-center justify-center gap-3 px-6 py-16 text-center">
-          <AlertCircle className="h-8 w-8 text-destructive" />
-          <p className="text-sm text-muted-foreground">
-            {listError instanceof Error ? listError.message : String(listError)}
-          </p>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={() => refetchList()}
-          >
-            {t(($) => $.page.retry)}
-          </Button>
-        </div>
+        <CollectionPageState
+          role="alert"
+          tone="destructive"
+          icon={AlertCircle}
+          title={
+            listError instanceof Error ? listError.message : String(listError)
+          }
+          actions={
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => refetchList()}
+            >
+              {t(($) => $.page.retry)}
+            </Button>
+          }
+        />
       ) : isLoading ? (
         <div className="flex-1 overflow-y-auto @container">
           <LoadingSkeleton />

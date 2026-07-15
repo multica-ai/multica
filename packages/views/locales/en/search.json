@@ -26,6 +26,8 @@
     "new_project": "New Project",
     "copy_issue_link": "Copy Issue Link",
     "copy_identifier": "Copy Identifier ({{identifier}})",
+    "fold_all_comments": "Fold All Comments",
+    "unfold_all_comments": "Unfold All Comments",
     "switch_to_light": "Switch to Light Theme",
     "switch_to_dark": "Switch to Dark Theme",
     "use_system_theme": "Use System Theme"

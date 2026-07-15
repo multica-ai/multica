@@ -359,31 +359,48 @@ func (h *Handler) DeleteRuntimeProfile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Confirm the profile exists in this workspace before mutating anything.
-	if _, err := h.Queries.GetRuntimeProfileForWorkspace(r.Context(), db.GetRuntimeProfileForWorkspaceParams{
+	// Confirm the profile exists in this workspace. If the profile row is
+	// already gone but runtime rows still carry this workspace/profile pair,
+	// treat them as orphaned instances and clean them up below.
+	_, profileErr := h.Queries.GetRuntimeProfileForWorkspace(r.Context(), db.GetRuntimeProfileForWorkspaceParams{
 		ID:          profileUUID,
 		WorkspaceID: wsUUID,
-	}); err != nil {
+	})
+	profileMissing := errors.Is(profileErr, pgx.ErrNoRows)
+	if profileErr != nil && !profileMissing {
+		writeError(w, http.StatusInternalServerError, "failed to load runtime profile")
+		return
+	}
+
+	// Enumerate the runtime instance rows registered against this profile in
+	// this workspace. The workspace predicate is important because profile_id has
+	// no FK and should never let a malformed row in another workspace be cleaned
+	// up from this workspace's profile endpoint.
+	runtimeIDs, err := h.Queries.ListAgentRuntimeIDsByProfile(r.Context(), db.ListAgentRuntimeIDsByProfileParams{
+		ProfileID:   profileUUID,
+		WorkspaceID: wsUUID,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to enumerate profile runtimes")
+		return
+	}
+	if profileMissing && len(runtimeIDs) == 0 {
 		writeError(w, http.StatusNotFound, "runtime profile not found")
 		return
 	}
 
-	// Enumerate the runtime instance rows registered against this profile.
 	// The profile-delete cascade must run the SAME teardown the runtime-delete
 	// path uses for each one: agent.runtime_id is ON DELETE RESTRICT, so an
 	// archived agent still pointing at one of these rows would turn a bare
 	// delete into a 500. We refuse active agents (409) and clean archived
 	// agents / their archived squad+autopilot references before deleting.
-	runtimeIDs, err := h.Queries.ListAgentRuntimeIDsByProfile(r.Context(), profileUUID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to enumerate profile runtimes")
-		return
-	}
-
 	// Guard 1: refuse while any active (non-archived) agent is bound to one of
 	// the profile's runtimes. Keep this a 409 — deleting would orphan live
 	// agents.
-	agentCount, err := h.Queries.CountAgentsByProfile(r.Context(), profileUUID)
+	agentCount, err := h.Queries.CountAgentsByProfile(r.Context(), db.CountAgentsByProfileParams{
+		ProfileID:   profileUUID,
+		WorkspaceID: wsUUID,
+	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to check profile usage")
 		return
@@ -437,6 +454,33 @@ func (h *Handler) DeleteRuntimeProfile(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "failed to clean up squads referencing archived agents")
 			return
 		}
+		if err := qtx.DeleteAgentInvocationTargetsByArchivedRuntimeAgents(r.Context(), rid); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to clean up agent invocation targets")
+			return
+		}
+		// Same app-layer cleanup for channel installations: channel_* has no
+		// workspace/agent FK (MUL-3515 §4), so an archived agent's bot
+		// installations would otherwise survive the hard-delete as orphans and
+		// keep occupying their (channel_type, app_id) routing slots, making those
+		// bots un-rebindable (#4810).
+		if err := qtx.DeleteChannelInstallationsByArchivedRuntimeAgents(r.Context(), rid); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to clean up channel installations")
+			return
+		}
+		// agent_to_label has no agent_id FK; clear the runtime's agents' label
+		// links before the archived agents are hard-deleted so they don't leak
+		// as orphan rows once resource labels are enabled.
+		if err := qtx.DeleteAgentLabelAssignmentsByRuntime(r.Context(), rid); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to clean up agent label assignments")
+			return
+		}
+		// chat_session cascades from agent, and chat_draft_restore has no FK to
+		// follow it (#5219). This path deletes only archived agents, so the prune
+		// is scoped to them too — system agents keep their sessions here.
+		if err := pruneRuntimeAgentChatDraftRestores(r.Context(), qtx, rid, false); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to clean up chat draft restores")
+			return
+		}
 		if err := qtx.DeleteArchivedAgentsByRuntime(r.Context(), rid); err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to clean up archived agents")
 			return
@@ -445,18 +489,23 @@ func (h *Handler) DeleteRuntimeProfile(w http.ResponseWriter, r *http.Request) {
 
 	// Now the runtime rows have no agent references; remove them, then the
 	// profile itself.
-	if _, err := qtx.DeleteAgentRuntimesByProfile(r.Context(), profileUUID); err != nil {
+	if _, err := qtx.DeleteAgentRuntimesByProfile(r.Context(), db.DeleteAgentRuntimesByProfileParams{
+		ProfileID:   profileUUID,
+		WorkspaceID: wsUUID,
+	}); err != nil {
 		slog.Error("DeleteAgentRuntimesByProfile failed", "error", err, "profile_id", uuidToString(profileUUID))
 		writeError(w, http.StatusInternalServerError, "failed to clean up runtime instances")
 		return
 	}
-	if err := qtx.DeleteRuntimeProfile(r.Context(), db.DeleteRuntimeProfileParams{
-		ID:          profileUUID,
-		WorkspaceID: wsUUID,
-	}); err != nil {
-		slog.Error("DeleteRuntimeProfile failed", "error", err, "profile_id", uuidToString(profileUUID))
-		writeError(w, http.StatusInternalServerError, "failed to delete runtime profile")
-		return
+	if !profileMissing {
+		if err := qtx.DeleteRuntimeProfile(r.Context(), db.DeleteRuntimeProfileParams{
+			ID:          profileUUID,
+			WorkspaceID: wsUUID,
+		}); err != nil {
+			slog.Error("DeleteRuntimeProfile failed", "error", err, "profile_id", uuidToString(profileUUID))
+			writeError(w, http.StatusInternalServerError, "failed to delete runtime profile")
+			return
+		}
 	}
 	if err := tx.Commit(r.Context()); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to commit transaction")

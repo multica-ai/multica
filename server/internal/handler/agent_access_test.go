@@ -12,18 +12,19 @@ import (
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
-// TestMemberAllowedForPrivateAgent_Pure exercises the pure predicate that
-// drives the private-agent gate. The gate must allow:
+// TestMemberAllowedToViewAgent_Pure exercises the pure predicate that drives
+// the private-agent VIEW gate. For a private agent it must allow:
 //   - workspace owner / admin (regardless of agent ownership)
 //   - the agent owner (regardless of role)
 //
 // And deny everyone else. This test runs without a database.
-func TestMemberAllowedForPrivateAgent_Pure(t *testing.T) {
+func TestMemberAllowedToViewAgent_Pure(t *testing.T) {
 	ownerUserID := "11111111-1111-1111-1111-111111111111"
 	otherUserID := "22222222-2222-2222-2222-222222222222"
 
 	agent := db.Agent{
-		OwnerID: util.MustParseUUID(ownerUserID),
+		OwnerID:        util.MustParseUUID(ownerUserID),
+		PermissionMode: "private",
 	}
 
 	cases := []struct {
@@ -41,9 +42,9 @@ func TestMemberAllowedForPrivateAgent_Pure(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := memberAllowedForPrivateAgent(agent, tc.userID, tc.role)
+			got := memberAllowedToViewAgent(agent, nil, tc.userID, tc.role)
 			if got != tc.want {
-				t.Fatalf("memberAllowedForPrivateAgent(userID=%s, role=%s) = %v; want %v",
+				t.Fatalf("memberAllowedToViewAgent(userID=%s, role=%s) = %v; want %v",
 					tc.userID, tc.role, got, tc.want)
 			}
 		})
@@ -246,11 +247,13 @@ func TestCreateIssue_AssignToPrivateAgentForbidsPlainMember(t *testing.T) {
 		}
 	}
 
-	// Workspace owner (testUserID): allowed.
+	// Workspace owner (testUserID) who is NOT the agent owner: DENIED under
+	// the invocation-permission model (MUL-3963) — admin/owner status no
+	// longer grants the ability to invoke someone else's private agent.
 	w := httptest.NewRecorder()
 	testHandler.CreateIssue(w, newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, body(testUserID)))
-	if w.Code != http.StatusCreated {
-		t.Fatalf("CreateIssue as workspace owner: expected 201, got %d: %s", w.Code, w.Body.String())
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("CreateIssue as workspace owner (not agent owner): expected 403, got %d: %s", w.Code, w.Body.String())
 	}
 
 	// Agent owner (plain member who happens to own the agent): allowed.
@@ -567,24 +570,24 @@ func TestShouldEnqueueOnComment_PrivateAgentGate(t *testing.T) {
 			reason:    "agent owner is always in the allowed_principals set",
 		},
 		{
-			name:      "workspace owner — allowed",
+			name:      "workspace owner — denied (not agent owner)",
 			actorType: "member",
 			actorID:   testUserID,
-			want:      true,
-			reason:    "workspace owners/admins are in the allowed_principals set",
+			want:      false,
+			reason:    "MUL-3963: workspace owners/admins no longer bypass a private agent's invocation gate",
 		},
 		{
-			name:      "agent-to-agent — allowed",
+			name:      "agent-to-agent — denied without allowed originator",
 			actorType: "agent",
 			actorID:   agentID,
-			want:      true,
-			reason:    "A2A traffic bypasses the visibility gate by design",
+			want:      false,
+			reason:    "MUL-3963: A2A is judged by the top-of-chain originator; a private agent denies an agent actor with no owner/allow-listed originator",
 		},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := testHandler.shouldEnqueueOnComment(ctx, issue, tc.actorType, tc.actorID, commentTriggerComputeOptions{})
+				got := testHandler.shouldEnqueueAssigneeFallback(ctx, issue, tc.actorType, tc.actorID, commentTriggerComputeOptions{})
 			if got != tc.want {
 				t.Fatalf("%s\n  actor=%s/%s got=%v want=%v",
 					tc.reason, tc.actorType, tc.actorID, got, tc.want)

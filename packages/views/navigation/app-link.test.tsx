@@ -86,8 +86,76 @@ describe("AppLink", () => {
 
     renderLink(adapter);
     fireEvent.click(screen.getByText("go"), { metaKey: true });
-    expect(openInNewTab).toHaveBeenCalledWith("/issues");
+    expect(openInNewTab).toHaveBeenCalledWith("/issues", undefined);
     expect(push).not.toHaveBeenCalled();
+  });
+
+  it("modifier-click passes newTabTitle through as the tab label", () => {
+    const openInNewTab = vi.fn();
+    const adapter = makeAdapter({ openInNewTab });
+
+    renderLink(adapter, { href: "/issues", newTabTitle: "MUL-7" });
+    fireEvent.click(screen.getByText("go"), { metaKey: true });
+    expect(openInNewTab).toHaveBeenCalledWith("/issues", "MUL-7");
+  });
+
+  describe("target=_blank (open-in-new-tab links)", () => {
+    it("plain click opens a foreground new tab via the adapter (desktop) and does NOT push", () => {
+      const push = vi.fn();
+      const openInNewTab = vi.fn();
+      const adapter = makeAdapter({ push, openInNewTab });
+
+      renderLink(adapter, {
+        href: "/issues",
+        target: "_blank",
+        newTabTitle: "MUL-7",
+      });
+      fireEvent.click(screen.getByText("go"));
+      expect(openInNewTab).toHaveBeenCalledWith("/issues", "MUL-7", {
+        activate: true,
+      });
+      expect(push).not.toHaveBeenCalled();
+    });
+
+    it("plain click without an adapter (web) neither pushes nor prevents default, so the browser's native target=_blank handling runs", () => {
+      const push = vi.fn();
+      const adapter = makeAdapter({ push });
+
+      renderLink(adapter, { href: "/issues", target: "_blank" });
+      // fireEvent returns false when preventDefault was called.
+      const defaultNotPrevented = fireEvent.click(screen.getByText("go"));
+      expect(defaultNotPrevented).toBe(true);
+      expect(push).not.toHaveBeenCalled();
+    });
+
+    it("caller onClick still runs before the new-tab open", () => {
+      const order: string[] = [];
+      const adapter = makeAdapter({
+        openInNewTab: vi.fn(() => order.push("openInNewTab")),
+      });
+
+      renderLink(adapter, {
+        href: "/issues",
+        target: "_blank",
+        onClick: () => order.push("onClick"),
+      });
+      fireEvent.click(screen.getByText("go"));
+      expect(order).toEqual(["onClick", "openInNewTab"]);
+    });
+
+    it("renders the target and a rel guard on the anchor", () => {
+      renderLink(makeAdapter(), { href: "/issues", target: "_blank" });
+      const anchor = screen.getByText("go");
+      expect(anchor).toHaveAttribute("target", "_blank");
+      expect(anchor).toHaveAttribute("rel", "noopener noreferrer");
+    });
+
+    it("renders no target or rel when target is not set", () => {
+      renderLink(makeAdapter());
+      const anchor = screen.getByText("go");
+      expect(anchor).not.toHaveAttribute("target");
+      expect(anchor).not.toHaveAttribute("rel");
+    });
   });
 
   it("a caller-supplied onClick passed via spread cannot silently override the navigation handler", () => {

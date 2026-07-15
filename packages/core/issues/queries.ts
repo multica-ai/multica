@@ -8,7 +8,7 @@ import type {
   ListIssuesParams,
   ListIssuesCache,
 } from "../types";
-import { BOARD_STATUSES } from "./config";
+import { ALL_STATUSES } from "./config";
 
 export interface IssueSortParam {
   sort_by?: ListIssuesParams["sort_by"];
@@ -16,6 +16,10 @@ export interface IssueSortParam {
   date_field?: ListIssuesParams["date_field"];
   date_start?: ListIssuesParams["date_start"];
   date_end?: ListIssuesParams["date_end"];
+  /** Server-side custom-property filter (definition id → accepted values).
+   *  Lives in the sort/window bag so every list surface, query key, and
+   *  load-more page carries it automatically. */
+  properties?: ListIssuesParams["properties"];
 }
 
 export const issueKeys = {
@@ -57,6 +61,9 @@ export const issueKeys = {
     [...issueKeys.projectGanttAll(wsId), projectId] as const,
   detail: (wsId: string, id: string) =>
     [...issueKeys.all(wsId), "detail", id] as const,
+  /** Resolve a bare issue identifier (e.g. "MUL-123") to an issue. */
+  identifier: (wsId: string, identifier: string) =>
+    [...issueKeys.all(wsId), "identifier", identifier] as const,
   children: (wsId: string, id: string) =>
     [...issueKeys.all(wsId), "children", id] as const,
   /** Prefix for invalidating all batched-children queries in a workspace. */
@@ -115,7 +122,12 @@ export const issueKeys = {
 
 export type MyIssuesFilter = Pick<
   ListIssuesParams,
-  "assignee_id" | "assignee_ids" | "creator_id" | "project_id" | "involves_user_id"
+  | "assignee_id"
+  | "assignee_ids"
+  | "assignee_types"
+  | "creator_id"
+  | "project_id"
+  | "involves_user_id"
 >;
 
 export type AssigneeGroupedIssuesFilter = Omit<
@@ -126,8 +138,14 @@ export type AssigneeGroupedIssuesFilter = Omit<
 /** Page size per status column. */
 export const ISSUE_PAGE_SIZE = 50;
 
-/** Statuses the issues/my-issues pages paginate. Cancelled is intentionally excluded — it has never been surfaced in the list/board views. */
-export const PAGINATED_STATUSES: readonly IssueStatus[] = BOARD_STATUSES;
+/**
+ * Statuses fetched and paginated into the list/board cache — every lifecycle
+ * status, `cancelled` included. `cancelled` is a first-class default status
+ * (MUL-4290), so it lives in the cache and renders like any other column;
+ * there is no separate "visible board" subset. This constant governs
+ * fetch/cache membership.
+ */
+export const PAGINATED_STATUSES: readonly IssueStatus[] = ALL_STATUSES;
 
 /** Flatten a bucketed response to a single Issue[] for consumers that want the whole list. */
 export function flattenIssueBuckets(data: ListIssuesCache) {
@@ -172,6 +190,57 @@ async function fetchFirstPages(filter: MyIssuesFilter = {}, sort?: IssueSortPara
  * total — pagination on the "All" scope is out of scope; the first
  * 50-per-status × 3 widening (deduped) is what the page renders.
  */
+const MERGE_PRIORITY_RANK: Record<string, number> = { urgent: 0, high: 1, medium: 2, low: 3, none: 4 };
+
+/**
+ * Comparator mirroring the server's ORDER BY semantics (including
+ * `property:<id>` sorts and missing-values-last). The merged "All" scope
+ * concatenates three independently-ordered queries, so without a re-sort the
+ * relation order (assigned → created → involves) would override the sort the
+ * user picked — e.g. assigned=9 rendering before created=1 (review round 3).
+ */
+function compareIssuesForSort(a: Issue, b: Issue, sort?: IssueSortParam): number {
+  const by = sort?.sort_by ?? "position";
+  const dir = by !== "position" && sort?.sort_direction === "desc" ? -1 : 1;
+  const tieBreak = () =>
+    new Date(b.created_at).getTime() - new Date(a.created_at).getTime(); // created_at DESC, server parity
+
+  const missingAware = (av: string | null, bv: string | null): number => {
+    if (!av && !bv) return tieBreak();
+    if (!av) return 1;
+    if (!bv) return -1;
+    return dir * av.localeCompare(bv) || tieBreak();
+  };
+
+  if (by.startsWith("property:")) {
+    const propertyId = by.slice("property:".length);
+    const av = a.properties?.[propertyId];
+    const bv = b.properties?.[propertyId];
+    const aMissing = av === undefined || Array.isArray(av) || typeof av === "boolean";
+    const bMissing = bv === undefined || Array.isArray(bv) || typeof bv === "boolean";
+    if (aMissing && bMissing) return tieBreak();
+    if (aMissing) return 1;
+    if (bMissing) return -1;
+    if (typeof av === "number" && typeof bv === "number") return dir * (av - bv) || tieBreak();
+    return dir * String(av).localeCompare(String(bv)) || tieBreak();
+  }
+  switch (by) {
+    case "priority":
+      return dir * ((MERGE_PRIORITY_RANK[a.priority] ?? 9) - (MERGE_PRIORITY_RANK[b.priority] ?? 9)) || tieBreak();
+    case "title":
+      return dir * a.title.localeCompare(b.title) || tieBreak();
+    case "created_at":
+      return dir * (new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+    case "start_date":
+      return missingAware(a.start_date, b.start_date);
+    case "due_date":
+      return missingAware(a.due_date, b.due_date);
+    case "position":
+    default:
+      return a.position - b.position || tieBreak();
+  }
+}
+
 async function fetchAllMyFirstPages(userId: string, sort?: IssueSortParam): Promise<ListIssuesCache> {
   const [byAssignee, byCreator, byInvolves] = await Promise.all([
     fetchFirstPages({ assignee_id: userId }, sort),
@@ -191,6 +260,7 @@ async function fetchAllMyFirstPages(userId: string, sort?: IssueSortParam): Prom
         merged.push(issue);
       }
     }
+    merged.sort((a, b) => compareIssuesForSort(a, b, sort));
     byStatus[status] = { issues: merged, total: merged.length };
   }
   return { byStatus };
@@ -248,7 +318,11 @@ async function fetchAllMyAssigneeGroups(
       existing.total = existing.issues.length;
     }
   }
-  return { groups: [...merged.values()] };
+  const groups = [...merged.values()];
+  for (const group of groups) {
+    group.issues.sort((a, b) => compareIssuesForSort(a, b, sort));
+  }
+  return { groups };
 }
 
 /**
@@ -396,6 +470,37 @@ export function issueDetailOptions(wsId: string, id: string) {
   return queryOptions({
     queryKey: issueKeys.detail(wsId, id),
     queryFn: () => api.getIssue(id),
+  });
+}
+
+/**
+ * Resolve a bare issue identifier ("MUL-123") to its issue, or `null`.
+ *
+ * Backs the Linear-style autolink: the backend `q` search matches an
+ * identifier on issue NUMBER only (prefix-agnostic — `MUL-123` and `TES-123`
+ * both hit number 123), so the exact `identifier === value` filter here is
+ * what enforces the workspace prefix. A non-existent or wrong-prefix
+ * identifier resolves to `null` and renders as plain text.
+ *
+ * Server state → TanStack Query; the key includes `wsId` and the identifier,
+ * so identical identifiers across the app share one request. Caller gates
+ * `enabled` (identifier shape + workspace prefix).
+ */
+export function issueIdentifierOptions(wsId: string, identifier: string) {
+  return queryOptions({
+    queryKey: issueKeys.identifier(wsId, identifier),
+    queryFn: async ({ signal }) => {
+      const res = await api.searchIssues({
+        q: identifier,
+        limit: 10,
+        include_closed: true,
+        signal,
+      });
+      return res.issues.find((i) => i.identifier === identifier) ?? null;
+    },
+    // Identifier→issue mapping is effectively immutable; avoid refetch churn
+    // when the same key renders across many comments/messages.
+    staleTime: 5 * 60_000,
   });
 }
 

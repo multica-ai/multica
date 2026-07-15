@@ -210,11 +210,11 @@ func TestGetConfigOmitsCloudDaemonSetupWithoutPublicURL(t *testing.T) {
 	}
 }
 
-// TestGetConfigOmitsCloudDaemonSetupForAppSubdomain covers the app.multica.ai
-// frontend variant of the official cloud.
-func TestGetConfigOmitsCloudDaemonSetupForAppSubdomain(t *testing.T) {
+// TestGetConfigOmitsCloudDaemonSetupForConfiguredAppURL covers the official
+// cloud frontend when it is configured through MULTICA_APP_URL.
+func TestGetConfigOmitsCloudDaemonSetupForConfiguredAppURL(t *testing.T) {
 	t.Setenv("MULTICA_PUBLIC_URL", "")
-	t.Setenv("MULTICA_APP_URL", "https://app.multica.ai")
+	t.Setenv("MULTICA_APP_URL", "https://multica.ai")
 	t.Setenv("FRONTEND_ORIGIN", "")
 
 	req := httptest.NewRequest(http.MethodGet, "/api/config", nil)
@@ -284,5 +284,112 @@ func TestGetConfigExposesWorkspaceCreationDisabled(t *testing.T) {
 	}
 	if !cfg.WorkspaceCreationDisabled {
 		t.Fatalf("workspace_creation_disabled: want true with env on, got false (body=%s)", w.Body.String())
+	}
+}
+
+// TestGetConfigExposesServerVersion verifies /api/config reports the build
+// version main.go stamps into handler.Config via -X main.version on a
+// self-hosted deployment, so operators can confirm what's deployed from the
+// Help popover.
+func TestGetConfigExposesServerVersion(t *testing.T) {
+	origCfg := testHandler.cfg
+	defer func() { testHandler.cfg = origCfg }()
+
+	// Self-hosted frontend origin: the version row is meant for these deployments.
+	t.Setenv("MULTICA_APP_URL", "https://multica.self-hosted.example")
+	t.Setenv("FRONTEND_ORIGIN", "")
+
+	testHandler.cfg.ServerVersion = ""
+	req := httptest.NewRequest(http.MethodGet, "/api/config", nil)
+	w := httptest.NewRecorder()
+	testHandler.GetConfig(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("GetConfig: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var cfg AppConfig
+	if err := json.Unmarshal(w.Body.Bytes(), &cfg); err != nil {
+		t.Fatalf("decode config: %v", err)
+	}
+	if cfg.ServerVersion != "" {
+		t.Fatalf("server_version: want empty for dev build, got %q", cfg.ServerVersion)
+	}
+
+	testHandler.cfg.ServerVersion = "1.2.3"
+	w = httptest.NewRecorder()
+	testHandler.GetConfig(w, req)
+	if err := json.Unmarshal(w.Body.Bytes(), &cfg); err != nil {
+		t.Fatalf("decode config: %v", err)
+	}
+	if cfg.ServerVersion != "1.2.3" {
+		t.Fatalf("server_version: want 1.2.3, got %q", cfg.ServerVersion)
+	}
+}
+
+// TestGetConfigOmitsServerVersionOnOfficialCloud verifies the build version is
+// suppressed on the managed cloud (frontend host multica.ai) even when the
+// binary is stamped, while a self-hosted frontend origin still reports it. The
+// managed cloud is continuously deployed, so its users don't need the row.
+func TestGetConfigOmitsServerVersionOnOfficialCloud(t *testing.T) {
+	origCfg := testHandler.cfg
+	defer func() { testHandler.cfg = origCfg }()
+	testHandler.cfg.ServerVersion = "1.2.3"
+
+	req := httptest.NewRequest(http.MethodGet, "/api/config", nil)
+
+	// Official cloud: frontend host multica.ai -> version omitted.
+	t.Setenv("MULTICA_APP_URL", "https://multica.ai")
+	t.Setenv("FRONTEND_ORIGIN", "")
+	w := httptest.NewRecorder()
+	testHandler.GetConfig(w, req)
+	var cfg AppConfig
+	if err := json.Unmarshal(w.Body.Bytes(), &cfg); err != nil {
+		t.Fatalf("decode config: %v", err)
+	}
+	if cfg.ServerVersion != "" {
+		t.Fatalf("server_version: want omitted on official cloud, got %q", cfg.ServerVersion)
+	}
+
+	// Self-hosted: operator's own frontend origin -> version reported.
+	t.Setenv("MULTICA_APP_URL", "https://multica.self-hosted.example")
+	w = httptest.NewRecorder()
+	testHandler.GetConfig(w, req)
+	if err := json.Unmarshal(w.Body.Bytes(), &cfg); err != nil {
+		t.Fatalf("decode config: %v", err)
+	}
+	if cfg.ServerVersion != "1.2.3" {
+		t.Fatalf("server_version: want 1.2.3 on self-hosted, got %q", cfg.ServerVersion)
+	}
+}
+
+func TestGetConfigExposesFrontendFeatureFlags(t *testing.T) {
+	h := &Handler{}
+	req := httptest.NewRequest(http.MethodGet, "/api/config", nil)
+	w := httptest.NewRecorder()
+	h.GetConfig(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("GetConfig default flags: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var cfg AppConfig
+	if err := json.Unmarshal(w.Body.Bytes(), &cfg); err != nil {
+		t.Fatalf("decode default config: %v", err)
+	}
+	if cfg.FeatureFlags["composio_mcp_apps"] {
+		t.Fatalf("composio_mcp_apps: want false by default, got true")
+	}
+	if !cfg.FeatureFlags["agents_skill_toggles"] {
+		t.Fatalf("agents_skill_toggles: want true for installed v0.4.0 clients, got false")
+	}
+
+	withComposioMCPAppsFlag(t, h, true)
+	w = httptest.NewRecorder()
+	h.GetConfig(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("GetConfig enabled flags: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &cfg); err != nil {
+		t.Fatalf("decode enabled config: %v", err)
+	}
+	if !cfg.FeatureFlags["composio_mcp_apps"] {
+		t.Fatalf("composio_mcp_apps: want true with flag enabled, got false")
 	}
 }

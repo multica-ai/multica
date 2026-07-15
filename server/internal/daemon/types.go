@@ -1,11 +1,23 @@
 package daemon
 
-import "encoding/json"
+import (
+	"encoding/json"
+
+	"github.com/multica-ai/multica/server/internal/runtimeapps"
+)
 
 // AgentEntry describes a single available agent CLI.
 type AgentEntry struct {
-	Path  string // path to CLI binary
-	Model string // model override (optional)
+	Path string // path to CLI binary (pinned at startup; symlink-resolved to a concrete, possibly versioned, path)
+	// Command is the bare command name or MULTICA_*_PATH value that Path was
+	// resolved from at startup. It is kept so the daemon can re-resolve Path
+	// if the pinned executable later vanishes — e.g. a version manager
+	// (Homebrew Cask, nvm/fnm) does an in-place upgrade that deletes the old
+	// versioned directory Path points into. Empty for synthesized entries
+	// (custom runtime profiles) that carry an absolute path directly. See
+	// Daemon.resolveAgentEntry and MUL-4486.
+	Command string
+	Model   string // model override (optional)
 }
 
 // Runtime represents a registered daemon runtime.
@@ -38,6 +50,10 @@ type ProjectResourceData struct {
 	Label        string          `json:"label,omitempty"`
 }
 
+// ConnectedAppData keeps the claim-response field local to daemon types while
+// sharing the canonical JSON shape with the runtime app metadata package.
+type ConnectedAppData = runtimeapps.ConnectedApp
+
 // Task represents a claimed task from the server.
 // Agent data (name, skills) is populated by the claim endpoint.
 type Task struct {
@@ -53,14 +69,18 @@ type Task struct {
 	WorkspaceContext         string                `json:"workspace_context,omitempty"`
 	ThreadName               string                `json:"thread_name,omitempty"` // semantic title for provider-native session/thread history
 	Agent                    *AgentData            `json:"agent,omitempty"`
+	ConnectedApps            []ConnectedAppData    `json:"connected_apps,omitempty"` // per-run app capabilities mounted through runtime MCP overlays
 	Repos                    []RepoData            `json:"repos,omitempty"`
 	ProjectID                string                `json:"project_id,omitempty"`                  // issue's project, when present
 	ProjectTitle             string                `json:"project_title,omitempty"`               // human-readable project title for context injection
 	ProjectDescription       string                `json:"project_description,omitempty"`         // durable project-level context injected into the brief
 	ProjectResources         []ProjectResourceData `json:"project_resources,omitempty"`           // project-scoped resources to expose to the agent
+	IsLeaderTask             bool                  `json:"is_leader_task,omitempty"`              // true when executing in the squad-leader coordinator role
 	PriorSessionID           string                `json:"prior_session_id,omitempty"`            // Claude session ID from a previous task on this issue
 	PriorWorkDir             string                `json:"prior_work_dir,omitempty"`              // work_dir from a previous task on this issue
 	TriggerCommentID         string                `json:"trigger_comment_id,omitempty"`          // comment that triggered this task
+	CoalescedCommentIDs      []string              `json:"coalesced_comment_ids,omitempty"`       // MUL-4195: earlier comments folded into this run while it was still queued; the agent must address these in addition to the (newest) triggering comment. Empty for old servers / non-merged runs
+	CoalescedComments        []CoalescedCommentData `json:"coalesced_comments,omitempty"`         // MUL-4195: full detail of the folded comments (thread_id/author/created_at/content) so the prompt can address each without assuming a shared thread. Empty for old servers / non-merged runs
 	TriggerThreadID          string                `json:"trigger_thread_id,omitempty"`           // root comment ID for the triggering thread; falls back to trigger_comment_id on old servers
 	TriggerCommentContent    string                `json:"trigger_comment_content,omitempty"`     // content of the triggering comment
 	TriggerAuthorType        string                `json:"trigger_author_type,omitempty"`         // "agent" or "member" — author kind for the triggering comment
@@ -68,8 +88,11 @@ type Task struct {
 	NewCommentCount          int                   `json:"new_comment_count,omitempty"`           // issue-wide comments since this agent's last run (excludes its own and the injected trigger); 0/omitted for old daemons or cold start
 	NewCommentsSince         string                `json:"new_comments_since,omitempty"`          // RFC3339 anchor (last run's started_at) the count is measured from; empty on cold start
 	ChatSessionID            string                `json:"chat_session_id,omitempty"`             // non-empty for chat tasks
+	ChatChannelType          string                `json:"chat_channel_type,omitempty"`           // "slack" when the chat session is backed by an IM channel; empty for a web-only chat. Drives the channel-awareness block in the prompt
+	ChatInThread             bool                  `json:"chat_in_thread,omitempty"`              // true when the latest @mention was a thread reply; selects which read command the prompt tells the agent to start with
 	ChatMessage              string                `json:"chat_message,omitempty"`                // user message content for chat tasks
 	ChatMessageAttachments   []ChatAttachmentMeta  `json:"chat_message_attachments,omitempty"`    // attachments linked to the chat message; agent uses these to `multica attachment download <id>`
+	ChatIntro                bool                  `json:"chat_intro,omitempty"`                  // true for the agent's proactive self-introduction chat (no user message); selects the self-introduction prompt in buildChatPrompt
 	AutopilotRunID           string                `json:"autopilot_run_id,omitempty"`            // non-empty for autopilot run_only tasks
 	AutopilotID              string                `json:"autopilot_id,omitempty"`                // autopilot that spawned this run
 	AutopilotTitle           string                `json:"autopilot_title,omitempty"`             // autopilot title used as task context
@@ -124,6 +147,19 @@ type ChatAttachmentMeta struct {
 	ID          string `json:"id"`
 	Filename    string `json:"filename"`
 	ContentType string `json:"content_type,omitempty"`
+}
+
+// CoalescedCommentData mirrors the server-side struct (handler.CoalescedCommentData):
+// the full detail of a comment folded into this run while it was still queued
+// (MUL-4195). The prompt embeds each one directly so the agent addresses every
+// folded comment without assuming they all live in the triggering thread.
+type CoalescedCommentData struct {
+	ID         string `json:"id"`
+	ThreadID   string `json:"thread_id,omitempty"`
+	AuthorType string `json:"author_type,omitempty"`
+	AuthorName string `json:"author_name,omitempty"`
+	Content    string `json:"content"`
+	CreatedAt  string `json:"created_at,omitempty"`
 }
 
 // AgentData holds agent details returned by the claim endpoint.

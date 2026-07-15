@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/multica-ai/multica/server/internal/runtimeapps"
 )
 
 // Sub-issue Creation section — after MUL-2538 the platform posts the
@@ -262,6 +264,32 @@ func TestCommentTriggeredBriefResumedNoDeltaSkipsDefaultThreadRead(t *testing.T)
 	}
 }
 
+// When the daemon could not honor an expected resume, the brief must make the
+// context loss user-visible by instructing the agent to disclose it — not leave
+// it as a silent restart (MUL-4424).
+func TestBriefSurfacesResumeUnavailable(t *testing.T) {
+	t.Parallel()
+	const issueID = "11111111-2222-3333-4444-555555555555"
+	base := TaskContextForEnv{IssueID: issueID, TriggerCommentID: "trigger-1", TriggerThreadID: "thread-1"}
+
+	lost := base
+	lost.PriorSessionResumeUnavailable = true
+	out := buildMetaSkillContent("codex", lost)
+	for _, want := range []string{
+		"## Session Continuity Notice",
+		"could NOT be restored",
+		"tell the user up front",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("resume-unavailable brief missing %q\n---\n%s", want, out)
+		}
+	}
+
+	if strings.Contains(buildMetaSkillContent("codex", base), "Session Continuity Notice") {
+		t.Error("brief must not show the continuity notice when no resume was lost")
+	}
+}
+
 // Assignment-triggered briefs are the high-risk path for role conflicts:
 // non-executor agents still need issue context, but the runtime workflow must
 // not turn status changes, investigation, implementation, or delegation into
@@ -407,12 +435,9 @@ func TestOutputForbidsMidRunProgressComments(t *testing.T) {
 		}
 	}
 
-	// Not parallel: the slim subtest toggles a process-wide feature flag.
-	t.Run("legacy", func(t *testing.T) { run(t, "legacy") })
-	t.Run("slim", func(t *testing.T) {
-		withSlimBrief(t)
-		run(t, "slim")
-	})
+	// The `runtime_brief_slim` flag was retired (MUL-4297); there is now a
+	// single brief.
+	run(t, "brief")
 }
 
 // The sub-issue creation rule must reach top-level parents that have no
@@ -547,6 +572,48 @@ func TestWorkspaceContextHeadingSkippedWhenEmpty(t *testing.T) {
 				t.Errorf("[%s] empty workspace context must NOT emit the heading", tc.name)
 			}
 		})
+	}
+}
+
+func TestConnectedAppsRenderedAcrossBriefModes(t *testing.T) {
+	ctx := TaskContextForEnv{
+		IssueID:          "11111111-2222-3333-4444-555555555555",
+		WorkspaceContext: "Prefer source-of-truth systems.",
+		ConnectedApps: []runtimeapps.ConnectedApp{{
+			Provider:    "composio",
+			ServerName:  "composio",
+			ToolkitSlug: "notion",
+			ToolkitName: "Notion",
+		}},
+	}
+
+	run := func(t *testing.T, label string) {
+		out := buildMetaSkillContent("claude", ctx)
+		for _, want := range []string{
+			"## Connected Apps",
+			"- Notion (`notion`) via MCP server `composio`",
+			"Use the listed MCP server when the task asks to read or act in one of these apps.",
+		} {
+			if !strings.Contains(out, want) {
+				t.Fatalf("%s brief missing connected app text %q\n---\n%s", label, want, out)
+			}
+		}
+		wsIdx := strings.Index(out, "## Workspace Context")
+		appIdx := strings.Index(out, "## Connected Apps")
+		cmdIdx := strings.Index(out, "## Available Commands")
+		if wsIdx == -1 || appIdx == -1 || cmdIdx == -1 || !(wsIdx < appIdx && appIdx < cmdIdx) {
+			t.Fatalf("%s connected apps should sit between workspace context and available commands (ws=%d app=%d cmd=%d)", label, wsIdx, appIdx, cmdIdx)
+		}
+	}
+
+	run(t, "brief")
+}
+
+func TestConnectedAppsHeadingSkippedWhenEmpty(t *testing.T) {
+	t.Parallel()
+	out := buildMetaSkillContent("claude", TaskContextForEnv{IssueID: "11111111-2222-3333-4444-555555555555"})
+	if strings.Contains(out, "## Connected Apps") {
+		t.Fatalf("empty connected apps must not emit the heading")
 	}
 }
 
@@ -735,6 +802,7 @@ func TestInjectRuntimeConfigPreservesUserContent(t *testing.T) {
 		filename string
 	}{
 		{"claude", "CLAUDE.md"},
+		{"codebuddy", "CODEBUDDY.md"},
 		{"codex", "AGENTS.md"},
 		{"copilot", "AGENTS.md"},
 		{"opencode", "AGENTS.md"},
@@ -782,12 +850,36 @@ func TestInjectRuntimeConfigPreservesUserContent(t *testing.T) {
 	}
 }
 
+// CodeBuddy is a Claude Code fork but ships its own native config
+// directory (~/.codebuddy, .codebuddy/) rather than reusing Claude's
+// ~/.claude / CLAUDE.md paths (see
+// https://www.codebuddy.ai/docs/cli/codebuddy-dir). This pins the two
+// providers to different target filenames so a future edit can't
+// silently re-merge them.
+func TestRuntimeConfigPathDistinguishesCodebuddyFromClaude(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+
+	claudePath := runtimeConfigPath(dir, "claude")
+	codebuddyPath := runtimeConfigPath(dir, "codebuddy")
+
+	if claudePath != filepath.Join(dir, "CLAUDE.md") {
+		t.Errorf("claude runtime config path = %q, want CLAUDE.md", claudePath)
+	}
+	if codebuddyPath != filepath.Join(dir, "CODEBUDDY.md") {
+		t.Errorf("codebuddy runtime config path = %q, want CODEBUDDY.md", codebuddyPath)
+	}
+	if claudePath == codebuddyPath {
+		t.Fatal("claude and codebuddy must not share a runtime config path")
+	}
+}
+
 func TestInjectRuntimeConfigUnknownProviderSkipsWrite(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	// Seed all three candidate filenames so we can verify none of them get
+	// Seed all candidate filenames so we can verify none of them get
 	// written when the provider is unknown.
-	for _, name := range []string{"CLAUDE.md", "AGENTS.md"} {
+	for _, name := range []string{"CLAUDE.md", "CODEBUDDY.md", "AGENTS.md"} {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte("untouched\n"), 0o644); err != nil {
 			t.Fatalf("seed %s: %v", name, err)
 		}
@@ -798,7 +890,7 @@ func TestInjectRuntimeConfigUnknownProviderSkipsWrite(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("InjectRuntimeConfig: %v", err)
 	}
-	for _, name := range []string{"CLAUDE.md", "AGENTS.md"} {
+	for _, name := range []string{"CLAUDE.md", "CODEBUDDY.md", "AGENTS.md"} {
 		got, err := os.ReadFile(filepath.Join(dir, name))
 		if err != nil {
 			t.Fatalf("read %s: %v", name, err)
@@ -1020,7 +1112,7 @@ func TestCleanupRuntimeConfigNoOpCases(t *testing.T) {
 		t.Parallel()
 		dir := t.TempDir()
 		// Seed every candidate filename to verify none of them get touched.
-		for _, name := range []string{"CLAUDE.md", "AGENTS.md"} {
+		for _, name := range []string{"CLAUDE.md", "CODEBUDDY.md", "AGENTS.md"} {
 			if err := os.WriteFile(filepath.Join(dir, name), []byte("untouched\n"), 0o644); err != nil {
 				t.Fatalf("seed %s: %v", name, err)
 			}
@@ -1028,7 +1120,7 @@ func TestCleanupRuntimeConfigNoOpCases(t *testing.T) {
 		if err := CleanupRuntimeConfig(dir, "totally-unknown-provider"); err != nil {
 			t.Errorf("unknown provider must be no-op, got: %v", err)
 		}
-		for _, name := range []string{"CLAUDE.md", "AGENTS.md"} {
+		for _, name := range []string{"CLAUDE.md", "CODEBUDDY.md", "AGENTS.md"} {
 			got, err := os.ReadFile(filepath.Join(dir, name))
 			if err != nil {
 				t.Fatalf("read %s: %v", name, err)
@@ -1083,6 +1175,7 @@ func TestCleanupRuntimeConfigByProvider(t *testing.T) {
 		filename string
 	}{
 		{"claude", "CLAUDE.md"},
+		{"codebuddy", "CODEBUDDY.md"},
 		{"codex", "AGENTS.md"},
 		{"copilot", "AGENTS.md"},
 		{"opencode", "AGENTS.md"},
@@ -1366,5 +1459,55 @@ func TestWriteRuntimeConfigFileAlwaysInsertsFixedManagedSeparator(t *testing.T) 
 				t.Errorf("expected begin marker after managed separator, got %q", got)
 			}
 		})
+	}
+}
+
+// TestCommentTriggeredBriefFansOutAcrossThreads pins the second reply-instruction
+// source (the persistent workflow brief) in sync with the per-turn prompt
+// (MUL-4348). When a coalesced run spans >=2 root threads, the workflow's reply
+// step must emit the per-thread fan-out plan — not the single --parent=trigger
+// cookbook — so a cross-thread run never gets one surface saying "one comment"
+// and the other "one per thread".
+func TestCommentTriggeredBriefFansOutAcrossThreads(t *testing.T) {
+	t.Parallel()
+	ctx := TaskContextForEnv{
+		IssueID:          "55555555-6666-7777-8888-999999999999",
+		TriggerCommentID: "c3",
+		TriggerThreadID:  "c3",
+		CommentReplyTargets: []ThreadReplyTarget{
+			{ThreadID: "c1", ParentID: "c1"},
+			{ThreadID: "c2", ParentID: "c2"},
+			{ThreadID: "c3", ParentID: "c3"},
+		},
+	}
+	out := buildMetaSkillContent("claude", ctx)
+
+	for _, want := range []string{"3 DISTINCT threads", "Post ONE reply per thread", "--parent c1", "--parent c2", "--parent c3"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("cross-thread brief must contain %q, got:\n%s", want, out)
+		}
+	}
+}
+
+// TestCommentTriggeredBriefSingleThreadKeepsSingleReply pins the hard
+// requirement on the brief surface too: a run with no multi-thread targets
+// (ordinary comment, or same-thread follow-ups that collapsed upstream) keeps
+// the single --parent=trigger cookbook and never emits the fan-out block.
+func TestCommentTriggeredBriefSingleThreadKeepsSingleReply(t *testing.T) {
+	t.Parallel()
+	ctx := TaskContextForEnv{
+		IssueID:          "55555555-6666-7777-8888-999999999999",
+		TriggerCommentID: "c3",
+		TriggerThreadID:  "thread-A",
+		// CommentReplyTargets deliberately empty: same-thread follow-ups collapse
+		// to a single group upstream, so no fan-out targets reach the brief.
+	}
+	out := buildMetaSkillContent("claude", ctx)
+
+	if strings.Contains(out, "DISTINCT threads") {
+		t.Errorf("single/same-thread brief must not emit the multi-thread fan-out block, got:\n%s", out)
+	}
+	if !strings.Contains(out, "--parent c3 --content-file ./reply.md") {
+		t.Errorf("single/same-thread brief must keep the single --parent=trigger cookbook, got:\n%s", out)
 	}
 }

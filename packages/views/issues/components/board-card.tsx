@@ -5,18 +5,18 @@ import { AppLink } from "../../navigation";
 import { useSortable, defaultAnimateLayoutChanges } from "@dnd-kit/sortable";
 import type { AnimateLayoutChanges } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { toast } from "sonner";
-import type { Issue, UpdateIssueRequest } from "@multica/core/types";
+import type { Issue, IssueProperty, Project, UpdateIssueRequest } from "@multica/core/types";
+import { useQuery } from "@tanstack/react-query";
+import { useWorkspaceId } from "@multica/core/hooks";
+import { propertyListOptions } from "@multica/core/properties";
+import { CustomPropertyValueDisplay } from "./pickers/custom-property-picker";
 import { formatDateOnly, isPastDateOnly } from "@multica/core/issues/date";
 import { CalendarClock, CalendarDays } from "lucide-react";
-import { useQuery } from "@tanstack/react-query";
 import { ActorAvatar } from "../../common/actor-avatar";
-import { useUpdateIssue } from "@multica/core/issues/mutations";
+import { PropertyIcon } from "../../common/property-icon";
 import { useWorkspacePaths } from "@multica/core/paths";
-import { useWorkspaceId } from "@multica/core/hooks";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { useTimeAgo } from "../../i18n";
-import { projectListOptions } from "@multica/core/projects/queries";
 import { ProjectIcon } from "../../projects/components/project-icon";
 import { PriorityIcon } from "./priority-icon";
 import { PriorityPicker, AssigneePicker, StartDatePicker, DueDatePicker } from "./pickers";
@@ -26,6 +26,7 @@ import type { ChildProgress } from "./list-row";
 import { IssueActionsContextMenu } from "../actions";
 import { LabelChip } from "../../labels/label-chip";
 import { IssueAgentActivityIndicator } from "./issue-agent-activity-indicator";
+import { useIssueSurfaceActionsOptional } from "../surface/actions-context";
 import { useT } from "../../i18n";
 
 function formatDate(date: string): string {
@@ -60,39 +61,36 @@ export const BoardCardContent = memo(function BoardCardContent({
   issue,
   editable = false,
   childProgress,
+  project,
 }: {
   issue: Issue;
   editable?: boolean;
   childProgress?: ChildProgress;
+  project?: Project;
 }) {
   const { t } = useT("issues");
   const timeAgo = useTimeAgo();
   const storeProperties = useViewStore((s) => s.cardProperties);
-  const wsId = useWorkspaceId();
-  const { data: projects = [] } = useQuery({
-    ...projectListOptions(wsId),
-    enabled: storeProperties.project && !!issue.project_id,
-  });
-  const project = issue.project_id ? projects.find((p) => p.id === issue.project_id) : undefined;
+  const cardPropertyIds = useViewStore((s) => s.cardPropertyIds);
+  const cardWsId = useWorkspaceId();
+  const { data: workspaceProperties = [] } = useQuery(propertyListOptions(cardWsId));
+  // Custom properties toggled on in Display options, in toggle order, only
+  // when this issue actually carries a value.
+  const cardCustomProperties = cardPropertyIds
+    .map((id) => workspaceProperties.find((p) => p.id === id))
+    .filter((p): p is IssueProperty => !!p && issue.properties?.[p.id] !== undefined);
   const labels = issue.labels ?? [];
 
-  const updateIssueMutation = useUpdateIssue();
+  const surfaceActions = useIssueSurfaceActionsOptional();
   const handleUpdate = useCallback(
     (updates: Partial<UpdateIssueRequest>) => {
-      updateIssueMutation.mutate(
-        { id: issue.id, ...updates },
-        {
-          onError: (err) =>
-            toast.error(
-              err instanceof Error && err.message
-                ? err.message
-                : t(($) => $.card.update_failed),
-            ),
-        },
-      );
+      surfaceActions?.updateIssue(issue.id, updates, {
+        errorMessage: t(($) => $.card.update_failed),
+      });
     },
-    [issue.id, updateIssueMutation, t],
+    [issue.id, surfaceActions, t],
   );
+  const canEdit = editable && !!surfaceActions;
 
   const showPriority = storeProperties.priority;
   const showDescription = storeProperties.description && issue.description;
@@ -114,7 +112,7 @@ export const BoardCardContent = memo(function BoardCardContent({
 
   const priorityLabel = t(($) => $.priority[issue.priority]);
   const priorityIconNode = showPriority ? (
-    editable ? (
+    canEdit ? (
       <PickerWrapper>
         <PriorityPicker
           priority={issue.priority}
@@ -148,7 +146,7 @@ export const BoardCardContent = memo(function BoardCardContent({
       <ActorAvatar
         actorType={issue.assignee_type!}
         actorId={issue.assignee_id!}
-        size={20}
+        size="sm"
         enableHoverCard
         className="shrink-0"
       />
@@ -161,7 +159,7 @@ export const BoardCardContent = memo(function BoardCardContent({
   );
 
   const assigneeNode = showAssigneeSection ? (
-    editable ? (
+    canEdit ? (
       <PickerWrapper className={assigneeContainerClass}>
         <AssigneePicker
           assigneeType={issue.assignee_type}
@@ -179,7 +177,7 @@ export const BoardCardContent = memo(function BoardCardContent({
   const showRightMeta = !!showStartDate || !!showDueDate || !!showChildProgress || showUpdatedHint;
 
   return (
-    <div className="rounded-lg border-[0.5px] border-border bg-card py-3 px-2.5 shadow-[0_3px_6px_-2px_rgba(0,0,0,0.02),0_1px_1px_0_rgba(0,0,0,0.04)] transition-colors group-hover/card:border-accent group-hover/card:bg-accent group-data-[popup-open]/card:border-accent group-data-[popup-open]/card:bg-accent">
+    <div className="rounded-lg border-[0.5px] border-surface-border bg-surface py-3 px-2.5 shadow-[var(--surface-shadow)] transition-colors group-hover/card:border-foreground/15 group-hover/card:bg-surface-hover group-data-[popup-open]/card:border-foreground/15 group-data-[popup-open]/card:bg-surface-hover">
       {/* Row 1: priority + identifier (left), agent activity + assignee (right) */}
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-1.5 min-w-0">
@@ -204,8 +202,8 @@ export const BoardCardContent = memo(function BoardCardContent({
         );
       })()}
 
-      {/* Chip row: project + labels */}
-      {(showProject || showLabels) && (
+      {/* Chip row: project + labels + custom property values */}
+      {(showProject || showLabels || cardCustomProperties.length > 0) && (
         <div className="mt-1.5 flex items-center gap-1.5 flex-wrap">
           {showProject && (
             <span className="inline-flex items-center gap-1 rounded-full bg-muted/60 px-1.5 py-0.5 text-[11px] text-muted-foreground max-w-[160px]">
@@ -215,6 +213,15 @@ export const BoardCardContent = memo(function BoardCardContent({
           )}
           {showLabels && labels.map((label) => (
             <LabelChip key={label.id} label={label} />
+          ))}
+          {cardCustomProperties.map((property) => (
+            <span
+              key={property.id}
+              className="inline-flex max-w-[160px] items-center gap-1 rounded-full bg-muted/60 px-1.5 py-0.5 text-[11px] text-muted-foreground"
+            >
+              <PropertyIcon property={property} className="size-3 text-[11px]" />
+              <CustomPropertyValueDisplay property={property} value={issue.properties?.[property.id]} />
+            </span>
           ))}
         </div>
       )}
@@ -230,7 +237,7 @@ export const BoardCardContent = memo(function BoardCardContent({
           {showRightMeta && (
             <div className="ml-auto flex shrink-0 items-center gap-2">
               {showStartDate && (
-                editable ? (
+                canEdit ? (
                   <PickerWrapper className="shrink-0">
                     <StartDatePicker
                       startDate={issue.start_date}
@@ -251,7 +258,7 @@ export const BoardCardContent = memo(function BoardCardContent({
                 )
               )}
               {showDueDate && (
-                editable ? (
+                canEdit ? (
                   <PickerWrapper className="shrink-0">
                     <DueDatePicker
                       dueDate={issue.due_date}
@@ -310,7 +317,17 @@ const animateLayoutChanges: AnimateLayoutChanges = (args) => {
   return defaultAnimateLayoutChanges(args);
 };
 
-export const DraggableBoardCard = memo(function DraggableBoardCard({ issue, childProgress, disableSorting }: { issue: Issue; childProgress?: ChildProgress; disableSorting?: boolean }) {
+export const DraggableBoardCard = memo(function DraggableBoardCard({
+  issue,
+  childProgress,
+  project,
+  disableSorting,
+}: {
+  issue: Issue;
+  childProgress?: ChildProgress;
+  project?: Project;
+  disableSorting?: boolean;
+}) {
   const p = useWorkspacePaths();
   const {
     attributes,
@@ -344,7 +361,12 @@ export const DraggableBoardCard = memo(function DraggableBoardCard({ issue, chil
           href={p.issueDetail(issue.id)}
           className={`group block transition-colors ${isDragging ? "pointer-events-none" : ""}`}
         >
-          <BoardCardContent issue={issue} editable childProgress={childProgress} />
+          <BoardCardContent
+            issue={issue}
+            editable
+            childProgress={childProgress}
+            project={project}
+          />
         </AppLink>
       </div>
     </IssueActionsContextMenu>

@@ -13,7 +13,6 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/multica-ai/multica/server/internal/analytics"
-	"github.com/multica-ai/multica/server/internal/daemon/execenv"
 	"github.com/multica-ai/multica/server/internal/daemonws"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/handler"
@@ -34,7 +33,11 @@ var (
 
 func newNamedRedisClient(base *redis.Options, suffix string) *redis.Client {
 	opts := *base
-	opts.ClientName = redisClientName(opts.ClientName, suffix)
+	if envBool("REDIS_DISABLE_CLIENT_NAME", false) {
+		opts.ClientName = ""
+	} else {
+		opts.ClientName = redisClientName(opts.ClientName, suffix)
+	}
 	return redis.NewClient(&opts)
 }
 
@@ -63,6 +66,7 @@ func shardedRelayConfigFromEnv() realtime.ShardedStreamRelayConfig {
 	cfg.StreamMaxLen = envPositiveInt64("REALTIME_RELAY_STREAM_MAXLEN", cfg.StreamMaxLen)
 	cfg.ReadCount = envPositiveInt64("REALTIME_RELAY_XREAD_COUNT", cfg.ReadCount)
 	cfg.ReadBlock = envDuration("REALTIME_RELAY_XREAD_BLOCK", cfg.ReadBlock)
+	cfg.ReplayGrace = envDuration("REALTIME_RELAY_REPLAY_GRACE", cfg.ReplayGrace)
 	return cfg
 }
 
@@ -120,6 +124,19 @@ func envDuration(name string, def time.Duration) time.Duration {
 	return v
 }
 
+func envBool(name string, def bool) bool {
+	raw := os.Getenv(name)
+	if raw == "" {
+		return def
+	}
+	v, err := strconv.ParseBool(raw)
+	if err != nil {
+		slog.Warn("invalid env var, using default", "name", name, "value", raw, "default", def, "error", err)
+		return def
+	}
+	return v
+}
+
 func main() {
 	logger.Init()
 
@@ -158,11 +175,7 @@ func main() {
 		slog.Error("feature flag configuration failed to load", "error", err)
 		os.Exit(1)
 	}
-	// MUL-3560: execenv consults `runtime_brief_slim` to decide between
-	// the legacy and slim runtime brief. Default-off everywhere; staging
-	// YAML opts in, prod stays on legacy until staging burns in.
-	execenv.SetFeatureFlags(flags)
-	_ = flags // remaining call sites adopt flags as needed; see docs/feature-flags.md
+	_ = flags // adopted by the router (opts.FeatureFlags) and server-side toggle points; see docs/feature-flags.md
 
 	dbURL := os.Getenv("DATABASE_URL")
 	if dbURL == "" {
@@ -224,6 +237,9 @@ func main() {
 		if err != nil {
 			slog.Error("invalid REDIS_URL — falling back to in-memory hub", "error", err)
 		} else {
+			if envBool("REDIS_DISABLE_CLIENT_NAME", false) {
+				slog.Info("redis: CLIENT SETNAME disabled (REDIS_DISABLE_CLIENT_NAME=true) for managed Redis compatibility")
+			}
 			storeRedis = newNamedRedisClient(opts, "store")
 			relayWriteRedis = newNamedRedisClient(opts, "realtime-write")
 
@@ -373,6 +389,9 @@ func main() {
 	go heartbeatScheduler.Run(sweepCtx)
 	go runAutopilotFailureMonitor(autopilotCtx, queries, bus, envFailureMonitorConfig())
 	go runDBStatsLogger(sweepCtx, pool)
+	if h.WebhookDeliveryWorker != nil {
+		go h.WebhookDeliveryWorker.Run(sweepCtx)
+	}
 
 	// Channel inbound supervisor (MUL-3620): holds the §4.4 WS lease per
 	// installation and drives each channel.Channel. It is built
@@ -456,6 +475,9 @@ func main() {
 	// final batch of queued heartbeat bumps.
 	sweepCancel()
 	heartbeatScheduler.Stop()
+	if h.WebhookDeliveryWorker != nil && !h.WebhookDeliveryWorker.WaitWithTimeout(5*time.Second) {
+		slog.Warn("webhook delivery worker did not exit within shutdown timeout")
+	}
 
 	// Join the channel supervisor's per-installation goroutines so the
 	// lease renewer can issue a final release before process exit;

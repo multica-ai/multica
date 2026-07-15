@@ -16,6 +16,18 @@
     color-scheme: light;
 }
 .landing-light {
+    --app-shell: oklch(0.964435 0.001327 286.375);
+    --page-canvas: oklch(0.988087 0 0);
+    --surface: oklch(1 0 0);
+    --surface-foreground: oklch(0.141 0.005 285.823);
+    --surface-raised: oklch(1 0 0);
+    --surface-hover: oklch(0.967 0.001 286.375);
+    --surface-selected: oklch(0.95 0.002 286.375);
+    --surface-selected-foreground: oklch(0.141 0.005 285.823);
+    --surface-border: oklch(0.92 0.004 286.32);
+    --surface-shadow: 0 1px 2px rgb(15 23 42 / 0.04), 0 1px 1px rgb(15 23 42 / 0.03);
+    --floating-shadow: 0 16px 40px rgb(15 23 42 / 0.14), 0 3px 10px rgb(15 23 42 / 0.08);
+    --menu-shadow: 0 8px 24px rgb(15 23 42 / 0.08), 0 2px 6px rgb(15 23 42 / 0.05);
     --background: oklch(1 0 0);
     --foreground: oklch(0.141 0.005 285.823);
     --card: oklch(1 0 0);

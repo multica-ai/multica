@@ -31,13 +31,15 @@ Shared packages export raw `.ts` / `.tsx` and are compiled by consuming apps. De
 Keep server state and client state separate.
 
 - TanStack Query owns server state: issues, users, workspaces, inbox, agents, members, and anything fetched from the API.
-- Zustand owns client state: selected workspace, filters, drafts, modals, tab layout, and navigation history.
+- Zustand owns client/view state: filters, drafts, modals, tab layout, and navigation history. Current workspace identity is route-driven; platform stores/singletons may mirror slug/id only for headers, persistence namespaces, and reconnects.
 - Shared Zustand stores live in `packages/core/`, never in `packages/views/` or app directories.
 - React Context is for platform plumbing only, such as `WorkspaceIdProvider` and `NavigationProvider`.
 - Only auth/workspace stores may call `api.*` directly. Other server interaction belongs in queries/mutations.
 - Workspace-scoped query keys must include `wsId`.
-- Mutations should be optimistic by default: patch locally, send request, roll back on failure, invalidate on settle.
-- WebSocket events invalidate or patch Query cache; they never write directly to Zustand stores.
+- Optimistic updates only when ALL hold: outcome locally predictable, user stays on the same screen (no navigation), failure is rare, rollback is trivial. Canonical: status/assignee/toggle field patches — patch determinate caches, roll back on failure, invalidate uncertain projections on settle.
+- Flows that navigate or confirm (create, delete, leave) must await the server before navigating or cleaning up; never optimistically remove an entity from cache.
+- Chat/message send uses the pending-message pattern: render immediately with a visible pending state and retry on failure, not silent optimism.
+- WebSocket events invalidate or patch Query cache for server data. They must never mirror server payload data into Zustand; clearing client-owned pointers (active session, selection, current workspace) is allowed only with a single responder and a self-initiated guard when this client can cause the event.
 - Persist durable preferences/drafts/layout. Do not persist server data or ephemeral UI state.
 - Zustand selectors must return stable references. Do not return freshly allocated objects/arrays from selectors without shallow comparison.
 - Hooks that need workspace context should accept `wsId`; do not call `useWorkspaceId()` internally unless the hook is guaranteed to run under the provider.
@@ -93,6 +95,13 @@ pnpm ui:add badge     # shadcn/Base UI component into packages/ui
 Worktrees share one PostgreSQL container and get isolated DB names/ports via `.env.worktree`. `make dev` auto-detects this. For manual setup use `make worktree-env`, `make setup-worktree`, and `make start-worktree`. `pnpm dev:desktop` additionally self-isolates per worktree (its own renderer port + app name) automatically, independent of `.env.worktree`.
 
 CI runs Node 22, Go 1.26.1, and a `pgvector/pgvector:pg17` PostgreSQL service.
+
+## Database and Migration Rules
+
+These are hard requirements for every new or modified database design and production migration:
+
+- Do not add database foreign keys (`FOREIGN KEY` / `REFERENCES`), cascading deletes, or cascading updates. Resolve relationships, validation, and dependent cleanup explicitly in application code. Use an application transaction when cleanup and the parent operation must commit or roll back atomically.
+- Every index created by a migration must use `CREATE INDEX CONCURRENTLY` or `CREATE UNIQUE INDEX CONCURRENTLY`, including indexes on newly created tables. PostgreSQL rejects concurrent index creation inside a transaction or a multi-command string, so keep each concurrent index build in its own single-statement migration file. The repository migration runner executes migration files outside an explicit transaction to support this.
 
 ## Coding Rules
 
@@ -153,9 +162,9 @@ Desktop routing has three categories:
 More desktop constraints:
 
 - New pre-workspace desktop flows register a `WindowOverlay` type in `stores/window-overlay-store.ts`; do not add them to `routes.tsx`.
-- `setCurrentWorkspace(slug, uuid)` from `@multica/core/platform` is the active workspace source of truth.
+- `setCurrentWorkspace(slug, uuid)` from `@multica/core/platform` mirrors the active route for headers, storage namespaces, and reconnects; workspace route layouts own setting it.
 - Code that leaves workspace context must call `setCurrentWorkspace(null, null)` explicitly.
-- Leave/delete workspace flow order: read cached destination, clear current workspace, navigate, then run the mutation.
+- Workspace delete must await the server before navigation/cleanup. Workspace leave currently clears/navigates before mutation only to avoid the `member:removed` realtime race; treat that as known debt, not a reusable pattern.
 - Cross-workspace navigation must go through the navigation adapter so it can call `switchWorkspace(slug, targetPath)`.
 - Full-window desktop views outside the dashboard shell must mount `<DragStrip />` from `@multica/views/platform` as the first flex child. Interactive controls in the top 48px need `WebkitAppRegion: "no-drag"`.
 

@@ -106,7 +106,10 @@ vi.mock("../../../common/actor-avatar", () => ({
 
 // Import after mocks.
 import { IssueActionsDropdown } from "../issue-actions-dropdown";
-import { IssueActionsContextMenu } from "../issue-actions-context-menu";
+import {
+  IssueActionsContextMenu,
+  IssueContextMenuProvider,
+} from "../issue-actions-context-menu";
 
 const mockIssue: Issue = {
   id: "issue-1",
@@ -163,9 +166,9 @@ describe("IssueActionsDropdown", () => {
     expect(screen.getByText("Assignee")).toBeInTheDocument();
     expect(screen.getByText("Due date")).toBeInTheDocument();
     expect(screen.getByText("Copy link")).toBeInTheDocument();
-    expect(screen.getByText("More")).toBeInTheDocument();
+    expect(screen.getByText("Relations")).toBeInTheDocument();
     expect(screen.getByText("Delete issue")).toBeInTheDocument();
-    // Relationship actions are hidden inside the "More" submenu by default.
+    // Relationship actions are hidden inside the "Relations" submenu by default.
     expect(screen.queryByText("Create sub-issue")).not.toBeInTheDocument();
     expect(screen.queryByText("Set parent issue...")).not.toBeInTheDocument();
     expect(screen.queryByText("Add sub-issue...")).not.toBeInTheDocument();
@@ -194,7 +197,7 @@ describe("IssueActionsDropdown", () => {
     expect(await screen.findByText("Test User")).toBeInTheDocument();
   });
 
-  it("shows 'Remove parent issue' in the More submenu only when the issue has a parent", async () => {
+  it("shows 'Remove parent issue' in the Relations submenu only when the issue has a parent", async () => {
     const childIssue = { ...mockIssue, parent_issue_id: "parent-1" } as Issue;
     render(
       wrap(
@@ -206,7 +209,7 @@ describe("IssueActionsDropdown", () => {
     );
 
     fireEvent.click(screen.getByTestId("trigger"));
-    fireEvent.click(await screen.findByText("More"));
+    fireEvent.click(await screen.findByText("Relations"));
 
     expect(await screen.findByText("Remove parent issue")).toBeInTheDocument();
   });
@@ -222,7 +225,7 @@ describe("IssueActionsDropdown", () => {
     );
 
     fireEvent.click(screen.getByTestId("trigger"));
-    fireEvent.click(await screen.findByText("More"));
+    fireEvent.click(await screen.findByText("Relations"));
 
     // The sibling "Set parent issue..." proves the submenu opened.
     expect(await screen.findByText("Set parent issue...")).toBeInTheDocument();
@@ -256,9 +259,11 @@ describe("IssueActionsContextMenu", () => {
   it("renders the menu when the wrapped element receives a contextmenu event", async () => {
     render(
       wrap(
-        <IssueActionsContextMenu issue={mockIssue}>
-          <div data-testid="row">Row</div>
-        </IssueActionsContextMenu>,
+        <IssueContextMenuProvider>
+          <IssueActionsContextMenu issue={mockIssue}>
+            <div data-testid="row">Row</div>
+          </IssueActionsContextMenu>
+        </IssueContextMenuProvider>,
       ),
     );
 

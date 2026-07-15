@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -307,7 +308,7 @@ func TestTrySendDropsWhenFull(t *testing.T) {
 	}
 }
 
-func TestBuildClaudeArgsIncludesStrictMCPConfig(t *testing.T) {
+func TestBuildClaudeArgsInheritsMCPByDefault(t *testing.T) {
 	t.Parallel()
 
 	args := buildClaudeArgs(ExecOptions{}, slog.Default())
@@ -316,7 +317,6 @@ func TestBuildClaudeArgsIncludesStrictMCPConfig(t *testing.T) {
 		"--output-format", "stream-json",
 		"--input-format", "stream-json",
 		"--verbose",
-		"--strict-mcp-config",
 		"--permission-mode", "bypassPermissions",
 		"--disallowedTools", "AskUserQuestion",
 	}
@@ -328,6 +328,57 @@ func TestBuildClaudeArgsIncludesStrictMCPConfig(t *testing.T) {
 		if args[i] != want {
 			t.Fatalf("expected args[%d] = %q, got %q", i, want, args[i])
 		}
+	}
+}
+
+func TestBuildClaudeArgsUsesStrictMCPForManagedConfig(t *testing.T) {
+	t.Parallel()
+
+	args := buildClaudeArgs(ExecOptions{McpConfig: json.RawMessage(`{}`)}, slog.Default())
+	if !slices.Contains(args, "--strict-mcp-config") {
+		t.Fatalf("managed MCP config must enable strict mode, got %v", args)
+	}
+}
+
+func TestArgsRequestBypassPermissions(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name string
+		args []string
+		want bool
+	}{
+		{
+			name: "permission mode bypass",
+			args: []string{"--permission-mode", "bypassPermissions"},
+			want: true,
+		},
+		{
+			name: "dangerous skip permissions",
+			args: []string{"--dangerously-skip-permissions"},
+			want: true,
+		},
+		{
+			name: "neither",
+			args: []string{"--model", "sonnet"},
+			want: false,
+		},
+		{
+			name: "permission mode default",
+			args: []string{"--permission-mode", "default"},
+			want: false,
+		},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			if got := argsRequestBypassPermissions(tc.args); got != tc.want {
+				t.Fatalf("argsRequestBypassPermissions(%v) = %v, want %v", tc.args, got, tc.want)
+			}
+		})
 	}
 }
 
@@ -604,6 +655,82 @@ func TestBuildEnvNilExtras(t *testing.T) {
 	}
 }
 
+func TestEnvHasSandbox(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name string
+		env  []string
+		want bool
+	}{
+		{name: "one", env: []string{"IS_SANDBOX=1"}, want: true},
+		{name: "true", env: []string{"IS_SANDBOX=true"}, want: true},
+		{name: "yes", env: []string{"IS_SANDBOX=yes"}, want: true},
+		{name: "on", env: []string{"IS_SANDBOX=on"}, want: true},
+		{name: "zero", env: []string{"IS_SANDBOX=0"}, want: false},
+		{name: "false", env: []string{"IS_SANDBOX=false"}, want: false},
+		{name: "empty", env: []string{"IS_SANDBOX="}, want: false},
+		{name: "absent", env: []string{"PATH=/usr/bin"}, want: false},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			if got := envHasSandbox(tc.env); got != tc.want {
+				t.Fatalf("envHasSandbox(%v) = %v, want %v", tc.env, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestClaudeRootSudoPreflight(t *testing.T) {
+	t.Parallel()
+
+	t.Run("sandbox bypass allowed", func(t *testing.T) {
+		t.Parallel()
+
+		err := claudeRootSudoPreflight(
+			[]string{"--permission-mode", "bypassPermissions"},
+			[]string{"IS_SANDBOX=1"},
+		)
+		if err != nil {
+			t.Fatalf("expected sandboxed bypass to pass preflight, got %v", err)
+		}
+	})
+
+	t.Run("non bypass allowed", func(t *testing.T) {
+		t.Parallel()
+
+		err := claudeRootSudoPreflight(
+			[]string{"--permission-mode", "default"},
+			nil,
+		)
+		if err != nil {
+			t.Fatalf("expected non-bypass args to pass preflight, got %v", err)
+		}
+	})
+
+	t.Run("root bypass without sandbox errors", func(t *testing.T) {
+		t.Parallel()
+		if os.Geteuid() != 0 {
+			t.Skip("root-only preflight assertion")
+		}
+
+		err := claudeRootSudoPreflight(
+			[]string{"--permission-mode", "bypassPermissions"},
+			nil,
+		)
+		if err == nil {
+			t.Fatal("expected root bypass without sandbox to fail preflight")
+		}
+		if !strings.Contains(err.Error(), "IS_SANDBOX") || !strings.Contains(err.Error(), "non-root") {
+			t.Fatalf("expected actionable root guidance, got %q", err.Error())
+		}
+	})
+}
+
 func TestBuildClaudeArgsBlocksMcpConfig(t *testing.T) {
 	t.Parallel()
 
@@ -651,10 +778,8 @@ func TestWriteMcpConfigToTemp(t *testing.T) {
 		t.Fatalf("expected %s, got %s", raw, data)
 	}
 
-	// Cleanup should remove the file.
-	if err := os.Remove(path); err != nil {
-		t.Fatalf("remove temp file: %v", err)
-	}
+	// Cleanup should remove the temp directory and every related sidecar file.
+	cleanupMcpConfigTemp(path)
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
 		t.Fatalf("expected temp file to be removed, but it still exists")
 	}
@@ -668,6 +793,7 @@ func TestResolveSessionID(t *testing.T) {
 		requested string
 		emitted   string
 		failed    bool
+		stderr    string
 		want      string
 	}{
 		{
@@ -675,6 +801,7 @@ func TestResolveSessionID(t *testing.T) {
 			requested: "",
 			emitted:   "fresh-abc",
 			failed:    false,
+			stderr:    "",
 			want:      "fresh-abc",
 		},
 		{
@@ -682,6 +809,7 @@ func TestResolveSessionID(t *testing.T) {
 			requested: "sess-old",
 			emitted:   "sess-old",
 			failed:    false,
+			stderr:    "",
 			want:      "sess-old",
 		},
 		{
@@ -689,6 +817,7 @@ func TestResolveSessionID(t *testing.T) {
 			requested: "sess-old",
 			emitted:   "sess-old",
 			failed:    true,
+			stderr:    "",
 			want:      "sess-old",
 		},
 		{
@@ -696,6 +825,15 @@ func TestResolveSessionID(t *testing.T) {
 			requested: "sess-dead",
 			emitted:   "fresh-new",
 			failed:    true,
+			stderr:    "",
+			want:      "",
+		},
+		{
+			name:      "resume not found stderr clears matching id so daemon fallback fires",
+			requested: "sess-dead",
+			emitted:   "sess-dead",
+			failed:    true,
+			stderr:    "No conversation found with session ID: sess-dead",
 			want:      "",
 		},
 		{
@@ -703,6 +841,7 @@ func TestResolveSessionID(t *testing.T) {
 			requested: "sess-dead",
 			emitted:   "fresh-new",
 			failed:    false,
+			stderr:    "No conversation found with session ID: sess-dead",
 			want:      "fresh-new",
 		},
 		{
@@ -710,6 +849,7 @@ func TestResolveSessionID(t *testing.T) {
 			requested: "sess-old",
 			emitted:   "",
 			failed:    true,
+			stderr:    "",
 			want:      "",
 		},
 	}
@@ -718,10 +858,10 @@ func TestResolveSessionID(t *testing.T) {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			got := resolveSessionID(tc.requested, tc.emitted, tc.failed)
+			got := resolveSessionID(tc.requested, tc.emitted, tc.failed, tc.stderr)
 			if got != tc.want {
-				t.Fatalf("resolveSessionID(%q, %q, %v) = %q, want %q",
-					tc.requested, tc.emitted, tc.failed, got, tc.want)
+				t.Fatalf("resolveSessionID(%q, %q, %v, %q) = %q, want %q",
+					tc.requested, tc.emitted, tc.failed, tc.stderr, got, tc.want)
 			}
 		})
 	}
@@ -746,7 +886,11 @@ func TestClaudeExecuteSurfacesStderrWhenChildExitsEarly(t *testing.T) {
 		"exit 3\n"
 	writeTestExecutable(t, fakePath, []byte(script))
 
-	backend, err := New("claude", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	backend, err := New("claude", Config{
+		ExecutablePath: fakePath,
+		Env:            map[string]string{"IS_SANDBOX": "1"},
+		Logger:         slog.Default(),
+	})
 	if err != nil {
 		t.Fatalf("new claude backend: %v", err)
 	}
@@ -798,7 +942,11 @@ func TestClaudeExecuteRecordsResultModelUsage(t *testing.T) {
 		"printf '%s\\n' '{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"session_id\":\"sess-result-usage\",\"result\":\"done\",\"modelUsage\":{\"zhipu/coding-plan\":{\"inputTokens\":123,\"outputTokens\":45,\"cacheReadInputTokens\":7,\"cacheCreationInputTokens\":11,\"costUSD\":0.01}}}'\n"
 	writeTestExecutable(t, fakePath, []byte(script))
 
-	backend, err := New("claude", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	backend, err := New("claude", Config{
+		ExecutablePath: fakePath,
+		Env:            map[string]string{"IS_SANDBOX": "1"},
+		Logger:         slog.Default(),
+	})
 	if err != nil {
 		t.Fatalf("new claude backend: %v", err)
 	}

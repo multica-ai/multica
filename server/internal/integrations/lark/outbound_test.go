@@ -517,6 +517,65 @@ func TestPatcherRepliesInThreadWhenTriggerWasInThread(t *testing.T) {
 	}
 }
 
+// TestPatcherTopicSessionSendsToRealChatID pins the composite-key outbound
+// contract: a per-topic session stores "chat:thread" as channel_chat_id (the
+// isolation key), so the send target MUST come from the binding config's real
+// chat id — the raw key is not a valid Lark chat id.
+func TestPatcherTopicSessionSendsToRealChatID(t *testing.T) {
+	p, q, api := newTestPatcher(t)
+	q.binding.ChannelChatID = "oc_test_chat:omt_topic1"
+	q.binding.Config = []byte(`{"chat_id":"oc_test_chat"}`)
+	q.binding.ChatType = "group"
+	q.binding.LastMessageID = pgtype.Text{String: "om_trigger", Valid: true}
+	q.binding.LastThreadID = pgtype.Text{String: "omt_topic1", Valid: true}
+	taskID := uuidFromString(t, "eeaaaaaa-eeaa-eeaa-eeaa-eeeeeeeeeeee")
+
+	p.handleEvent(events.Event{
+		Type:          protocol.EventChatDone,
+		TaskID:        uuidString(taskID),
+		ChatSessionID: uuidString(q.binding.ChatSessionID),
+		Payload:       protocol.ChatDonePayload{Content: "topic reply"},
+	})
+
+	api.mu.Lock()
+	defer api.mu.Unlock()
+	if len(api.textSent) != 1 {
+		t.Fatalf("expected one text send; got %d", len(api.textSent))
+	}
+	got := api.textSent[0]
+	if got.ChatID != "oc_test_chat" {
+		t.Errorf("chat_id = %q, want the real chat id from binding config", got.ChatID)
+	}
+	if got.ReplyTarget.MessageID != "om_trigger" || !got.ReplyTarget.InThread {
+		t.Errorf("expected thread reply target {om_trigger, InThread:true}; got %+v", got.ReplyTarget)
+	}
+}
+
+// TestPatcherLegacyBindingFallsBackToKey pins backward compatibility: rows
+// created before topic isolation have the raw chat id as the key and "{}" as
+// config — the send target must stay the key itself.
+func TestPatcherLegacyBindingFallsBackToKey(t *testing.T) {
+	p, q, api := newTestPatcher(t)
+	q.binding.Config = []byte(`{}`)
+	taskID := uuidFromString(t, "eebbbbbb-eebb-eebb-eebb-eeeeeeeeeeee")
+
+	p.handleEvent(events.Event{
+		Type:          protocol.EventChatDone,
+		TaskID:        uuidString(taskID),
+		ChatSessionID: uuidString(q.binding.ChatSessionID),
+		Payload:       protocol.ChatDonePayload{Content: "legacy reply"},
+	})
+
+	api.mu.Lock()
+	defer api.mu.Unlock()
+	if len(api.textSent) != 1 {
+		t.Fatalf("expected one text send; got %d", len(api.textSent))
+	}
+	if got := api.textSent[0].ChatID; got != "oc_test_chat" {
+		t.Errorf("chat_id = %q, want the raw binding key for legacy rows", got)
+	}
+}
+
 // TestPatcherSendsToChatWhenNoThread verifies that a non-thread trigger
 // (no last_lark_thread_id on the binding) keeps the historical
 // chat-level send: ReplyTarget stays empty so SendTextMessage targets

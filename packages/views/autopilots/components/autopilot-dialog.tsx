@@ -15,6 +15,7 @@ import {
   Minimize2,
   Play,
   Rocket,
+  Users,
   Webhook,
   X as XIcon,
   Zap,
@@ -27,6 +28,14 @@ import {
   DialogTitle,
 } from "@multica/ui/components/ui/dialog";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
+import {
+  Popover,
+  PopoverTrigger,
+  PopoverContent,
+  PopoverHeader,
+  PopoverTitle,
+  PopoverDescription,
+} from "@multica/ui/components/ui/popover";
 import { Button } from "@multica/ui/components/ui/button";
 import {
   Select,
@@ -51,6 +60,7 @@ import { buildAutopilotWebhookUrl } from "@multica/core/autopilots";
 import { api } from "@multica/core/api";
 import type {
   AutopilotAssigneeType,
+  AutopilotCollaborator,
   AutopilotExecutionMode,
   AutopilotTrigger,
 } from "@multica/core/types";
@@ -60,6 +70,7 @@ import { ProjectPicker } from "../../projects/components/project-picker";
 import { ProjectIcon } from "../../projects/components/project-icon";
 import { AgentPicker, type AssigneeSelection } from "./pickers/agent-picker";
 import { SubscriberMultiSelect } from "./subscriber-multi-select";
+import { AutopilotAccessManager } from "./autopilot-access-manager";
 import {
   getDefaultTriggerConfig,
   getLocalTimezone,
@@ -102,6 +113,8 @@ export type AutopilotDialogProps =
       autopilotId: string;
       initial: AutopilotInitial;
       triggers: AutopilotTrigger[];
+      collaborators: AutopilotCollaborator[];
+      canManageAccess: boolean;
     };
 
 // ---------------------------------------------------------------------------
@@ -555,6 +568,29 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
             )}
           </div>
           <div className="flex items-center gap-1">
+            {!isCreate && props.canManageAccess && (
+              <>
+                <Popover>
+                  <PopoverTrigger className="flex items-center gap-1.5 rounded-sm px-2 py-1 text-xs text-muted-foreground opacity-90 transition-all hover:bg-accent/60 hover:text-foreground hover:opacity-100 cursor-pointer">
+                    <Users className="size-3.5" />
+                    <span>{t(($) => $.access.title)}</span>
+                  </PopoverTrigger>
+                  <PopoverContent align="end" sideOffset={6} keepMounted className="w-80">
+                    <PopoverHeader>
+                      <PopoverTitle>{t(($) => $.access.title)}</PopoverTitle>
+                      <PopoverDescription className="text-xs">
+                        {t(($) => $.access.description)}
+                      </PopoverDescription>
+                    </PopoverHeader>
+                    <AutopilotAccessManager
+                      autopilotId={props.autopilotId}
+                      collaborators={props.collaborators}
+                    />
+                  </PopoverContent>
+                </Popover>
+                <span className="mx-0.5 h-4 w-px bg-border" />
+              </>
+            )}
             <Tooltip>
               <TooltipTrigger
                 render={
@@ -764,7 +800,7 @@ function AgentSection({
               <ActorAvatar
                 actorType={selectedType}
                 actorId={selectedId}
-                size={28}
+                size="md"
                 showStatusDot={selectedType === "agent"}
               />
             ) : (
@@ -927,6 +963,14 @@ function ScheduleSection({
   const formatCountdown = useFormatCountdown();
   const now = useNowTicker();
   const next = useMemo(() => computeNextRun(config, now), [config, now]);
+  const frequencyItems = FREQUENCY_KEYS.map((value) => ({
+    value,
+    label: t(($) => $.dialog.frequency_long[value]),
+  }));
+  const dayItems = DAY_KEYS.map((dayKey, value) => ({
+    value: String(value),
+    label: t(($) => $.dialog.days[dayKey]),
+  }));
   const timezones = useMemo(() => {
     const local = getLocalTimezone();
     if (TIMEZONE_OPTIONS.includes(local)) return TIMEZONE_OPTIONS;
@@ -947,6 +991,7 @@ function ScheduleSection({
         {/* Row 1: Frequency + (Day when weekly) */}
         <div className="grid grid-cols-2 gap-2">
           <Select
+            items={frequencyItems}
             value={config.frequency}
             onValueChange={(v) =>
               v && onChange({ ...config, frequency: v as TriggerFrequency })
@@ -956,15 +1001,16 @@ function ScheduleSection({
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              {FREQUENCY_KEYS.map((freq) => (
-                <SelectItem key={freq} value={freq}>
-                  {t(($) => $.dialog.frequency_long[freq])}
+              {frequencyItems.map((item) => (
+                <SelectItem key={item.value} value={item.value}>
+                  {item.label}
                 </SelectItem>
               ))}
             </SelectContent>
           </Select>
           {config.frequency === "weekly" ? (
             <Select
+              items={dayItems}
               value={String(selectedDay)}
               onValueChange={(v) =>
                 v && onChange({ ...config, daysOfWeek: [parseInt(v, 10)] })
@@ -974,9 +1020,9 @@ function ScheduleSection({
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {DAY_KEYS.map((dayKey, i) => (
-                  <SelectItem key={dayKey} value={String(i)}>
-                    {t(($) => $.dialog.days[dayKey])}
+                {dayItems.map((item) => (
+                  <SelectItem key={item.value} value={item.value}>
+                    {item.label}
                   </SelectItem>
                 ))}
               </SelectContent>

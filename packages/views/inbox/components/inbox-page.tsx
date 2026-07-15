@@ -42,6 +42,7 @@ import {
   ResizableHandle,
 } from "@multica/ui/components/ui/resizable";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
+import { NumberFlow } from "@multica/ui/components/ui/number-flow";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -51,7 +52,8 @@ import {
 } from "@multica/ui/components/ui/dropdown-menu";
 import { useIsMobile } from "@multica/ui/hooks/use-mobile";
 import { PageHeader } from "../../layout/page-header";
-import { InboxListItem, useTimeAgo } from "./inbox-list-item";
+import { useTimeAgo } from "./inbox-list-item";
+import { InboxList } from "./inbox-list";
 import { useTypeLabels } from "./inbox-detail-label";
 import { getInboxDisplayTitle } from "./inbox-display";
 import { useT } from "../../i18n";
@@ -227,9 +229,13 @@ export function InboxPage() {
       <div className="flex items-center gap-2">
         <h1 className="text-sm font-semibold">{t(($) => $.page.title)}</h1>
         {unreadCount > 0 && (
-          <span className="text-xs text-muted-foreground">
-            {unreadCount}
-          </span>
+          <NumberFlow
+            value={unreadCount}
+            animated={false}
+            format={{ maximumFractionDigits: 0 }}
+            aria-label={String(unreadCount)}
+            className="text-xs text-muted-foreground"
+          />
         )}
       </div>
       <DropdownMenu>
@@ -267,23 +273,13 @@ export function InboxPage() {
     </PageHeader>
   );
 
-  const listBody = items.length === 0 ? (
-    <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
-      <Inbox className="mb-3 h-8 w-8 text-muted-foreground/50" />
-      <p className="text-sm">{t(($) => $.list.empty)}</p>
-    </div>
-  ) : (
-    <div>
-      {items.map((item) => (
-        <InboxListItem
-          key={item.id}
-          item={item}
-          isSelected={(item.issue_id ?? item.id) === selectedKey}
-          onClick={() => handleSelect(item)}
-          onArchive={() => handleArchive(item.id)}
-        />
-      ))}
-    </div>
+  const list = (
+    <InboxList
+      items={items}
+      selectedKey={selectedKey}
+      onSelect={handleSelect}
+      onArchive={handleArchive}
+    />
   );
 
   const detailContent = selected?.issue_id ? (
@@ -375,7 +371,7 @@ export function InboxPage() {
           </div>
           <div className="flex-1 min-h-0 overflow-y-auto space-y-1 p-2">
             {Array.from({ length: 5 }).map((_, i) => (
-              <div key={i} className="flex items-center gap-3 px-4 py-2.5">
+              <div key={i} className="flex items-center gap-3 px-2 py-2.5">
                 <Skeleton className="h-7 w-7 shrink-0 rounded-full" />
                 <div className="flex-1 space-y-2">
                   <Skeleton className="h-4 w-3/4" />
@@ -414,9 +410,7 @@ export function InboxPage() {
     return (
       <div className="flex flex-1 flex-col min-h-0">
         {listHeader}
-        <div className="flex-1 min-h-0 overflow-y-auto">
-          {listBody}
-        </div>
+        {list}
       </div>
     );
   }
@@ -433,7 +427,7 @@ export function InboxPage() {
             </div>
             <div className="flex-1 min-h-0 overflow-y-auto space-y-1 p-2">
               {Array.from({ length: 5 }).map((_, i) => (
-                <div key={i} className="flex items-center gap-3 px-4 py-2.5">
+                <div key={i} className="flex items-center gap-3 px-2 py-2.5">
                   <Skeleton className="h-7 w-7 shrink-0 rounded-full" />
                   <div className="flex-1 space-y-2">
                     <Skeleton className="h-4 w-3/4" />
@@ -460,9 +454,7 @@ export function InboxPage() {
       <ResizablePanel id="list" defaultSize={320} minSize={240} maxSize={480} groupResizeBehavior="preserve-pixel-size">
       <div className="flex flex-col border-r h-full">
         {listHeader}
-        <div className="flex-1 min-h-0 overflow-y-auto">
-          {listBody}
-        </div>
+        {list}
       </div>
       </ResizablePanel>
       <ResizableHandle />

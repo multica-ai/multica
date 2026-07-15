@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/exec"
@@ -16,11 +17,12 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	lumberjack "gopkg.in/natefinch/lumberjack.v2"
 
 	"github.com/multica-ai/multica/server/internal/cli"
 	"github.com/multica-ai/multica/server/internal/daemon"
-	"github.com/multica-ai/multica/server/internal/daemon/execenv"
 	logger_pkg "github.com/multica-ai/multica/server/internal/logger"
+	"github.com/multica-ai/multica/server/internal/selfexec"
 	"github.com/multica-ai/multica/server/internal/util"
 )
 
@@ -86,6 +88,7 @@ func init() {
 	f.Duration("heartbeat-interval", 0, "Heartbeat interval (env: MULTICA_DAEMON_HEARTBEAT_INTERVAL)")
 	f.Duration("agent-timeout", 0, "Absolute per-task wall-clock cap; 0 = no cap, rely on the watchdogs (env: MULTICA_AGENT_TIMEOUT)")
 	f.Duration("codex-semantic-inactivity-timeout", 0, "Codex semantic inactivity timeout (env: MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT)")
+	f.Duration("codex-handshake-timeout", 0, "Codex app-server startup RPC timeout (env: MULTICA_CODEX_HANDSHAKE_TIMEOUT)")
 	f.Int("max-concurrent-tasks", 0, "Max tasks running in parallel (env: MULTICA_DAEMON_MAX_CONCURRENT_TASKS)")
 	f.Bool("no-auto-update", false, "Disable periodic CLI self-update (env: MULTICA_DAEMON_AUTO_UPDATE=false)")
 	f.Duration("auto-update-interval", 0, "How often to poll GitHub for a newer release (env: MULTICA_DAEMON_AUTO_UPDATE_INTERVAL)")
@@ -105,6 +108,7 @@ func init() {
 	rf.Duration("heartbeat-interval", 0, "Heartbeat interval (env: MULTICA_DAEMON_HEARTBEAT_INTERVAL)")
 	rf.Duration("agent-timeout", 0, "Absolute per-task wall-clock cap; 0 = no cap, rely on the watchdogs (env: MULTICA_AGENT_TIMEOUT)")
 	rf.Duration("codex-semantic-inactivity-timeout", 0, "Codex semantic inactivity timeout (env: MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT)")
+	rf.Duration("codex-handshake-timeout", 0, "Codex app-server startup RPC timeout (env: MULTICA_CODEX_HANDSHAKE_TIMEOUT)")
 	rf.Int("max-concurrent-tasks", 0, "Max tasks running in parallel (env: MULTICA_DAEMON_MAX_CONCURRENT_TASKS)")
 	rf.Bool("no-auto-update", false, "Disable periodic CLI self-update (env: MULTICA_DAEMON_AUTO_UPDATE=false)")
 	rf.Duration("auto-update-interval", 0, "How often to poll GitHub for a newer release (env: MULTICA_DAEMON_AUTO_UPDATE_INTERVAL)")
@@ -141,6 +145,78 @@ func daemonPIDPathForProfile(profile string) string {
 
 func daemonLogPathForProfile(profile string) string {
 	return filepath.Join(daemonDirForProfile(profile), "daemon.log")
+}
+
+// daemonStderrLogPathForProfile is the sink for the foreground daemon's raw
+// stdout/stderr — Go runtime panics, fatal aborts, and any pre-logger output.
+// It is deliberately separate from daemon.log: the foreground daemon owns
+// daemon.log through a rotating writer (newDaemonLogRotator), and letting the
+// child also hold daemon.log open via inherited fds would block rotation's
+// rename on Windows. Because every structured log line already flows through
+// slog into the rotating daemon.log, this file only receives rare crash output
+// and stays near-empty for a healthy daemon.
+func daemonStderrLogPathForProfile(profile string) string {
+	return filepath.Join(daemonDirForProfile(profile), "daemon.err.log")
+}
+
+// Daemon log rotation policy. Defaults keep the active daemon.log small enough
+// to open in an editor while retaining recent history; each is overridable via
+// env so operators can tune retention without a rebuild. Whichever of backups
+// / age is hit first prunes a rotated file.
+const (
+	defaultDaemonLogMaxSizeMB  = 20 // rotate the active daemon.log once it reaches this size
+	defaultDaemonLogMaxBackups = 5  // how many rotated files to keep
+	defaultDaemonLogMaxAgeDays = 30 // drop rotated files older than this
+	// errLogMaxBytes bounds daemon.err.log (raw crash/panic sink). It is
+	// enforced by rolling the file to a single ".1" backup at open time, so a
+	// crash loop that repeatedly appends panic output can't reintroduce the
+	// unbounded-growth problem on a different file.
+	errLogMaxBytes = 5 * 1024 * 1024
+)
+
+// newDaemonLogRotator builds the size-based rotating writer backing daemon.log.
+// Rotated files are gzip-compressed to keep the on-disk footprint small. The
+// bulk of daemon.log volume is the daemon's own slog output plus agent
+// subprocess stderr (all forwarded through slog), so bounding this writer
+// bounds essentially all growth.
+func newDaemonLogRotator(logPath string) *lumberjack.Logger {
+	return &lumberjack.Logger{
+		Filename:   logPath,
+		MaxSize:    envPositiveIntOrDefault("MULTICA_DAEMON_LOG_MAX_SIZE_MB", defaultDaemonLogMaxSizeMB),
+		MaxBackups: envPositiveIntOrDefault("MULTICA_DAEMON_LOG_MAX_BACKUPS", defaultDaemonLogMaxBackups),
+		MaxAge:     envPositiveIntOrDefault("MULTICA_DAEMON_LOG_MAX_AGE_DAYS", defaultDaemonLogMaxAgeDays),
+		Compress:   true,
+	}
+}
+
+// envPositiveIntOrDefault reads a strictly positive integer env var, falling
+// back to def when unset, blank, malformed, zero, or negative. Zero is treated
+// as "use default" on purpose: lumberjack reads MaxSize=0 as 100MB and
+// MaxBackups=0 / MaxAge=0 as "keep everything", so honoring a literal 0 would
+// silently disable retention and reintroduce unbounded growth.
+func envPositiveIntOrDefault(key string, def int) int {
+	v := strings.TrimSpace(os.Getenv(key))
+	if v == "" {
+		return def
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n <= 0 {
+		return def
+	}
+	return n
+}
+
+// openBoundedErrLog rolls daemon.err.log to a single ".1" backup when it has
+// grown past errLogMaxBytes, then opens it for appending. This keeps the raw
+// crash sink bounded across restarts (see errLogMaxBytes) without pulling in a
+// second rotating writer — the file is only ever written by inherited fds.
+func openBoundedErrLog(path string) (*os.File, error) {
+	if fi, err := os.Stat(path); err == nil && fi.Size() >= errLogMaxBytes {
+		// Best-effort roll; ignore errors and fall through to append so a
+		// rename failure never blocks daemon startup.
+		_ = os.Rename(path, path+".1")
+	}
+	return os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 }
 
 // healthPortForProfile returns the health check port for the given profile.
@@ -185,8 +261,8 @@ func runDaemonBackground(cmd *cobra.Command) error {
 		return fmt.Errorf("%s is already running (pid %v). Use 'daemon restart' to restart it", label, int(pid))
 	}
 
-	// Resolve current executable.
-	exePath, err := os.Executable()
+	// Resolve current executable so the foreground child reuses this binary.
+	exePath, err := selfexec.Resolve()
 	if err != nil {
 		return fmt.Errorf("resolve executable path: %w", err)
 	}
@@ -200,11 +276,18 @@ func runDaemonBackground(cmd *cobra.Command) error {
 		return fmt.Errorf("create daemon directory: %w", err)
 	}
 
-	logPath := daemonLogPathForProfile(profile)
-	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	// The child (foreground daemon) writes daemon.log itself through a
+	// rotating writer; its inherited stdout/stderr only need to catch raw
+	// crash output, which goes to a separate, non-rotated sink so it never
+	// holds daemon.log open (see daemonStderrLogPathForProfile).
+	errLogPath := daemonStderrLogPathForProfile(profile)
+	logFile, err := openBoundedErrLog(errLogPath)
 	if err != nil {
-		return fmt.Errorf("open log file %s: %w", logPath, err)
+		return fmt.Errorf("open log file %s: %w", errLogPath, err)
 	}
+	// Where the daemon's structured logs actually land (rotated), for the
+	// user-facing hints below.
+	logPath := daemonLogPathForProfile(profile)
 
 	child := exec.Command(exePath, args...)
 	child.Stdout = logFile
@@ -270,7 +353,7 @@ func runDaemonBackground(cmd *cobra.Command) error {
 		if lastStatus == "starting" {
 			fmt.Fprintf(os.Stderr, "Daemon is still starting after %s (agent detection / workspace sync is taking longer than expected). Check logs:\n  %s\n", startupTimeout, logPath)
 		} else {
-			fmt.Fprintf(os.Stderr, "Daemon may not have started successfully. Check logs:\n  %s\n", logPath)
+			fmt.Fprintf(os.Stderr, "Daemon may not have started successfully. Check logs:\n  %s\n  %s (crash output)\n", logPath, errLogPath)
 		}
 		return nil
 	}
@@ -312,6 +395,9 @@ func buildDaemonStartArgs(cmd *cobra.Command) []string {
 	if d, _ := cmd.Flags().GetDuration("codex-semantic-inactivity-timeout"); d > 0 {
 		args = append(args, "--codex-semantic-inactivity-timeout", d.String())
 	}
+	if d, _ := cmd.Flags().GetDuration("codex-handshake-timeout"); d > 0 {
+		args = append(args, "--codex-handshake-timeout", d.String())
+	}
 	if n, _ := cmd.Flags().GetInt("max-concurrent-tasks"); n > 0 {
 		args = append(args, "--max-concurrent-tasks", strconv.Itoa(n))
 	}
@@ -337,6 +423,34 @@ func runDaemonForeground(cmd *cobra.Command) error {
 	util.EnsureHiddenConsole()
 
 	profile := resolveProfile(cmd)
+
+	// Pick the log sink. A user who runs `daemon start --foreground` in a shell
+	// keeps live, colored logging on their terminal (a documented debugging
+	// path — see docs troubleshooting). A detached/background child, whose
+	// stderr the launcher redirected to a file, instead routes structured logs
+	// into the size-bounded, rotating daemon.log so the file can't grow without
+	// limit. We distinguish the two by whether stderr is a terminal.
+	var (
+		logger     *slog.Logger
+		logRotator *lumberjack.Logger
+	)
+	if logger_pkg.StderrIsTerminal() {
+		logger = logger_pkg.NewLogger("daemon")
+	} else {
+		// An older self-update launcher may have handed this process daemon.log
+		// itself as stdout/stderr. On Windows that inherited handle lacks
+		// FILE_SHARE_DELETE and would block the rotator's rename, so re-point
+		// our standard handles at the bounded crash sink first, leaving
+		// daemon.log solely owned by the rotator. No-op on Unix, where an open
+		// fd never blocks rename.
+		repointStdioToErrLog(daemonStderrLogPathForProfile(profile))
+		logRotator = newDaemonLogRotator(daemonLogPathForProfile(profile))
+		defer logRotator.Close()
+		// Route both this process's structured logger and the package-global
+		// slog default through the rotator, so every log line — including
+		// LoadConfig's slog.Warn below — is captured and rotated.
+		logger = logger_pkg.NewWriterLoggerDefault("daemon", logRotator)
+	}
 
 	serverURL := cli.FlagOrEnv(cmd, "server-url", "MULTICA_SERVER_URL", "")
 	if serverURL == "" {
@@ -367,6 +481,9 @@ func runDaemonForeground(cmd *cobra.Command) error {
 	if d, _ := cmd.Flags().GetDuration("codex-semantic-inactivity-timeout"); d > 0 {
 		overrides.CodexSemanticInactivityTimeout = d
 	}
+	if d, _ := cmd.Flags().GetDuration("codex-handshake-timeout"); d > 0 {
+		overrides.CodexHandshakeTimeout = d
+	}
 	if n, _ := cmd.Flags().GetInt("max-concurrent-tasks"); n > 0 {
 		overrides.MaxConcurrentTasks = n
 	}
@@ -389,16 +506,6 @@ func runDaemonForeground(cmd *cobra.Command) error {
 	ctx, stop := notifyShutdownContext(context.Background())
 	defer stop()
 
-	logger := logger_pkg.NewLogger("daemon")
-	serverSnapshotProvider, flags, err := execenv.NewDaemonFeatureFlagServiceFromEnv(logger)
-	if err != nil {
-		return err
-	}
-	execenv.SetServerSnapshotProvider(serverSnapshotProvider)
-	execenv.SetFeatureFlags(flags)
-	defer execenv.SetServerSnapshotProvider(nil)
-	defer execenv.SetFeatureFlags(nil)
-
 	d := daemon.New(cfg, logger)
 
 	// Write PID file so "daemon stop" can find us.
@@ -416,17 +523,31 @@ func runDaemonForeground(cmd *cobra.Command) error {
 	if restartBin := d.RestartBinary(); restartBin != "" {
 		logger.Info("restarting daemon with updated binary", "path", restartBin)
 
+		// The successor will open daemon.log through its own rotating writer,
+		// and lumberjack does not support two writers managing one file. Stop
+		// writing to our rotator before the successor starts: close it and move
+		// this process's remaining handoff logs to the crash sink (stderr),
+		// including the package-global slog default (which would otherwise
+		// reopen daemon.log on its next write).
+		if logRotator != nil {
+			logger = logger_pkg.NewWriterLoggerDefault("daemon", os.Stderr)
+			_ = logRotator.Close()
+		}
+
 		args := buildDaemonStartArgs(cmd)
 		child := exec.Command(restartBin, args...)
 
-		logPath := daemonLogPathForProfile(profile)
-		logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+		// The successor is a fresh foreground daemon that will open daemon.log
+		// through its own rotating writer; hand it the raw-stderr sink so its
+		// inherited fds don't hold daemon.log open (see runDaemonBackground).
+		errLogPath := daemonStderrLogPathForProfile(profile)
+		logFile, err := openBoundedErrLog(errLogPath)
 		if err != nil {
 			logger.Error("failed to open log file for restart", "error", err)
 			// Runtimes were already deregistered by triggerRestart() before handoff.
 			// The supervisor-spawned successor re-registers on startup; do not
 			// duplicate cleanup here.
-			return fmt.Errorf("failed to open daemon log file %s for restart: %w", logPath, err)
+			return fmt.Errorf("failed to open daemon log file %s for restart: %w", errLogPath, err)
 		}
 		child.Stdout = logFile
 		child.Stderr = logFile

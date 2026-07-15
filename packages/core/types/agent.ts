@@ -4,6 +4,47 @@ export type AgentRuntimeMode = "local" | "cloud";
 
 export type AgentVisibility = "workspace" | "private";
 
+// ---------------------------------------------------------------------------
+// Agent invocation permissions (MUL-3963)
+//
+// `permission_mode` + `invocation_targets` are the AUTHORITATIVE gate for who
+// may TRIGGER / assign / @mention / chat an agent. The legacy `visibility`
+// field REMAINS but is now DERIVED on the backend from these two: a
+// `public_to` agent WITH a workspace target maps to `visibility: "workspace"`;
+// everything else (private, or public_to scoped only to member/team targets)
+// maps to `visibility: "private"`.
+//
+// Invocation semantics:
+//   - owner: always
+//   - permission_mode "private": ONLY the owner (workspace admins no longer
+//     bypass — the key behavior change vs the old visibility model)
+//   - permission_mode "public_to" + workspace target: any workspace member
+//   - permission_mode "public_to" + member target: only the matching user
+//   - team target: reserved, INERT in v1 (never grants)
+// ---------------------------------------------------------------------------
+
+export type AgentPermissionMode = "private" | "public_to";
+
+/**
+ * A single invocation grant on an agent. `target_id` is `null` for the
+ * workspace target (the grant covers every workspace member); it carries the
+ * member / team id for the scoped grants.
+ */
+export interface AgentInvocationTarget {
+  target_type: "workspace" | "member" | "team";
+  target_id: string | null;
+}
+
+/**
+ * Wire shape for invocation targets on CREATE / UPDATE requests. For a
+ * workspace target the client may omit `target_id` (the backend fills the
+ * workspace id); member / team targets REQUIRE it.
+ */
+export interface AgentInvocationTargetInput {
+  target_type: "workspace" | "member" | "team";
+  target_id?: string;
+}
+
 // Runtime visibility is a separate axis from agent visibility — different
 // vocabulary because it gates a different action. "private" (default) means
 // only the runtime owner and workspace admins can bind agents to it;
@@ -17,6 +58,13 @@ export interface RuntimeDevice {
   workspace_id: string;
   daemon_id: string | null;
   name: string;
+  /**
+   * Optional user-set display name override (MUL-4217). Overrides `name` for
+   * display; the daemon never writes it, so it survives heartbeats. Older
+   * backends omit the field — consumers must treat missing / empty as "use
+   * name" (see runtimeDisplayName).
+   */
+  custom_name?: string | null;
   runtime_mode: AgentRuntimeMode;
   provider: string;
   launch_header: string;
@@ -61,6 +109,7 @@ export const RUNTIME_PROFILE_PROTOCOL_FAMILIES = [
   "codex",
   "copilot",
   "opencode",
+  "deveco",
   "openclaw",
   "hermes",
   "pi",
@@ -68,6 +117,9 @@ export const RUNTIME_PROFILE_PROTOCOL_FAMILIES = [
   "kimi",
   "kiro",
   "antigravity",
+  "qoder",
+  "traecli",
+  "grok",
 ] as const;
 
 export type RuntimeProtocolFamily =
@@ -145,6 +197,50 @@ export interface AgentRunCount {
   run_count: number;
 }
 
+/**
+ * A departed-member-safe user ref resolved from the global user table. `name` /
+ * `email` / `avatar_url` are absent until the server hydrates them (present on
+ * user-facing task surfaces). Render defensively — fall back to a generic label
+ * when only `id` is available. See MUL-4302 §9.
+ */
+export interface AttributionUser {
+  id: string;
+  name?: string;
+  email?: string;
+  avatar_url?: string;
+}
+
+/** The kind-tagged handle to a run's direct cause (comment, autopilot run, ...). */
+export interface TaskEvidence {
+  kind: string;
+  ref_id: string;
+}
+
+/**
+ * The resolved accountable-human provenance of an agent run (MUL-4302 §9). Free-text
+ * `source` (server may add new levels), so switch on it with a default branch.
+ */
+export interface TaskAttribution {
+  /**
+   * Waterfall level that resolved the accountable human:
+   * `direct_human` | `delegation` | `comment_source` | `rule_owner` |
+   * `owner_fallback` | `backfill` | `unattributed`. Never blank.
+   */
+  source: string;
+  /** False for degraded sources (owner_fallback / backfill / unattributed). */
+  precise: boolean;
+  /** The accountable human ("on behalf of"). Absent when unattributed. */
+  initiator?: AttributionUser;
+  /** The authorization human; absent for autopilot runs (rule_owner / owner_fallback). */
+  originator?: AttributionUser;
+  /** The direct cause of the run, for a jump-to-evidence affordance. */
+  evidence?: TaskEvidence;
+  rule_version_id?: string;
+  delegated_from_task_id?: string;
+  retry_of_task_id?: string;
+  rerun_of_task_id?: string;
+}
+
 export interface AgentTask {
   id: string;
   agent_id: string;
@@ -187,6 +283,21 @@ export interface AgentTask {
   /** Set when an issue comment triggered this task (@mention or assignee comment). */
   trigger_comment_id?: string;
   /**
+   * Earlier comment IDs folded into this run before it was claimed. This does
+   * not include `trigger_comment_id`, which remains the run's newest trigger.
+   * Their unique union is the queued coverage plan; claimed-task consumers
+   * should prefer `delivered_comment_ids` when that receipt is present. Omitted
+   * by older backends and for runs that were not merged.
+   */
+  coalesced_comment_ids?: string[];
+  /**
+   * Comment IDs actually embedded in the task's latest claim response. Once a
+   * task has left queued state this is the authoritative coverage receipt.
+   * Omitted by older backends, where consumers may fall back to the planned
+   * trigger/coalesced union; an explicitly empty array is still authoritative.
+   */
+  delivered_comment_ids?: string[];
+  /**
    * Canonical short description of what triggered this task — snapshot
    * taken at creation time. For comment-triggered tasks it's the
    * comment text (truncated to ~200 chars); for autopilot it's the
@@ -228,6 +339,12 @@ export interface AgentTask {
    * shares and screenshots also stay safe).
    */
   relative_work_dir?: string;
+  /**
+   * Resolved accountable-human provenance of this run (MUL-4302 §9): who it ran
+   * "on behalf of", how that was resolved, and the evidence/lineage. Present on
+   * user-facing task surfaces; older backends omit it — render conditionally.
+   */
+  attribution?: TaskAttribution;
 }
 
 export interface Agent {
@@ -281,14 +398,43 @@ export interface Agent {
    * Older backends omit this field; treat `undefined` as false.
    */
   mcp_config_redacted?: boolean;
+  /**
+   * The subset of Composio toolkit slugs this agent is allowed to mount as
+   * MCP servers at task dispatch — but only when the run originator is the
+   * agent owner (MUL-3869 / MUL-3721). `null`/`[]`/omitted all mean "no
+   * overlay regardless of who triggers". Owner-only data: the server hands
+   * it through verbatim to the owner and redacts it to `undefined` +
+   * `composio_toolkit_allowlist_redacted=true` for everyone else (same
+   * contract as `mcp_config`). Treat `undefined` as "unknown — assume none".
+   */
+  composio_toolkit_allowlist?: string[];
+  /**
+   * True when the server stripped `composio_toolkit_allowlist` from this
+   * response because the caller is not the agent owner. The MCP tab is
+   * creator-only so a redacted value should never reach the editor, but the
+   * UI renders a "hidden" fallback defensively. Older backends omit this
+   * field; treat `undefined` as false.
+   */
+  composio_toolkit_allowlist_redacted?: boolean;
   visibility: AgentVisibility;
+  /**
+   * Authoritative invocation permission mode (MUL-3963). The `visibility`
+   * field above is DERIVED from this on the backend. The current backend
+   * always returns this field.
+   */
+  permission_mode: AgentPermissionMode;
+  /**
+   * Invocation grants backing `permission_mode === "public_to"` (empty for a
+   * private agent). See `AgentInvocationTarget`.
+   */
+  invocation_targets: AgentInvocationTarget[];
   status: AgentStatus;
   max_concurrent_tasks: number;
   model: string;
   /**
    * Runtime-native reasoning/effort token (e.g. Claude's
    * `low|medium|high|xhigh|max`, Codex's
-   * `none|minimal|low|medium|high|xhigh`). Empty string means "no
+   * `none|minimal|low|medium|high|xhigh|max|ultra`). Empty string means "no
    * override": the backend omits the effort flag and the upstream CLI
    * config / built-in default decides at run time. The picker is
    * per-runtime per-model — the API never normalises across providers.
@@ -315,6 +461,8 @@ export interface AgentSkillSummary {
   id: string;
   name: string;
   description: string;
+	/** Older servers omit this field; consumers must treat that as enabled. */
+	enabled?: boolean;
 }
 
 export interface CreateAgentRequest {
@@ -327,6 +475,16 @@ export interface CreateAgentRequest {
   custom_env?: Record<string, string>;
   custom_args?: string[];
   visibility?: AgentVisibility;
+  /**
+   * Invocation permission mode (MUL-3963). When present it is authoritative;
+   * when absent the backend maps the legacy `visibility` field
+   * (private -> private, workspace -> public_to + workspace target). On
+   * UPDATE, permission changes are OWNER-ONLY (the backend silently ignores
+   * these fields from non-owner admins).
+   */
+  permission_mode?: AgentPermissionMode;
+  /** Invocation grants — see `AgentInvocationTargetInput`. */
+  invocation_targets?: AgentInvocationTargetInput[];
   max_concurrent_tasks?: number;
   model?: string;
   /** Optional runtime-native reasoning/effort token. See `Agent.thinking_level`. */
@@ -334,6 +492,14 @@ export interface CreateAgentRequest {
   /** Optional template slug used by the onboarding agent picker. Surfaced
    *  as the `template` property on the `agent_created` PostHog event. */
   template?: string;
+  /** Workspace skill IDs attached atomically with the agent row. */
+  skill_ids?: string[];
+}
+
+export interface AgentBuilderSession {
+  session_id: string;
+  builder_agent_id: string;
+  runtime_id: string;
 }
 
 /** Agent template summary — fields needed by the picker grid. Does NOT
@@ -377,6 +543,16 @@ export interface CreateAgentFromTemplateRequest {
   runtime_id: string;
   model?: string;
   visibility?: AgentVisibility;
+  /**
+   * Invocation permission mode (MUL-3963). When present it is authoritative;
+   * when absent the backend maps the legacy `visibility` field
+   * (private -> private, workspace -> public_to + workspace target). On
+   * UPDATE, permission changes are OWNER-ONLY (the backend silently ignores
+   * these fields from non-owner admins).
+   */
+  permission_mode?: AgentPermissionMode;
+  /** Invocation grants — see `AgentInvocationTargetInput`. */
+  invocation_targets?: AgentInvocationTargetInput[];
   max_concurrent_tasks?: number;
   /** Optional overrides applied to the template before creation. nil/omit
    *  uses the template's own value. */
@@ -432,7 +608,29 @@ export interface UpdateAgentRequest {
    *     validate / translate it according to their own MCP integration
    */
   mcp_config?: unknown | null;
+  /**
+   * Composio toolkit allowlist. Tri-state semantics, mirroring the backend
+   * gate (MUL-3869):
+   *   - field omitted → no change
+   *   - `null` → clear the column (no MCP overlay for anyone)
+   *   - string[] → wholesale replace; the server lowercases / trims / dedupes
+   *     the slugs before persisting
+   * Writes are silently dropped server-side unless the caller is the agent
+   * owner, so the UI only ever exposes this field through the creator-only
+   * MCP tab.
+   */
+  composio_toolkit_allowlist?: string[] | null;
   visibility?: AgentVisibility;
+  /**
+   * Invocation permission mode (MUL-3963). When present it is authoritative;
+   * when absent the backend maps the legacy `visibility` field
+   * (private -> private, workspace -> public_to + workspace target). On
+   * UPDATE, permission changes are OWNER-ONLY (the backend silently ignores
+   * these fields from non-owner admins).
+   */
+  permission_mode?: AgentPermissionMode;
+  /** Invocation grants — see `AgentInvocationTargetInput`. */
+  invocation_targets?: AgentInvocationTargetInput[];
   status?: AgentStatus;
   max_concurrent_tasks?: number;
   model?: string;
@@ -488,6 +686,8 @@ export interface SkillSummary {
   created_by: string | null;
   created_at: string;
   updated_at: string;
+	/** Present only when returned from an agent-scoped assignment endpoint. */
+	enabled?: boolean;
 }
 
 export interface Skill extends SkillSummary {
@@ -738,8 +938,17 @@ export interface RuntimeLocalSkillSummary {
    * discovery omit the field; treat `undefined` as unknown rather than
    * asserting either origin.
    */
-  root?: "provider" | "universal";
+  root?: "provider" | "universal" | "plugin";
+  /** Enabled runtime plugin that contributed this skill, when applicable. */
+  plugin?: string;
   file_count: number;
+}
+
+export interface RuntimeLocalMcpServerSummary {
+	name: string;
+	transport?: "stdio" | "http" | "sse" | "unknown";
+	source?: string;
+	enabled: boolean;
 }
 
 export interface RuntimeLocalSkillListRequest {
@@ -748,6 +957,8 @@ export interface RuntimeLocalSkillListRequest {
   status: RuntimeLocalSkillStatus;
   skills?: RuntimeLocalSkillSummary[];
   supported: boolean;
+	mcp_servers?: RuntimeLocalMcpServerSummary[];
+	mcp_supported?: boolean;
   error?: string;
   created_at: string;
   updated_at: string;
@@ -782,6 +993,8 @@ export interface RuntimeLocalSkillImportRequest {
 export interface RuntimeLocalSkillsResult {
   skills: RuntimeLocalSkillSummary[];
   supported: boolean;
+	mcpServers: RuntimeLocalMcpServerSummary[];
+	mcpSupported: boolean;
 }
 
 export interface RuntimeLocalSkillImportResult {

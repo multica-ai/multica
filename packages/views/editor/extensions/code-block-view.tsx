@@ -65,7 +65,7 @@ function CodeBlockView({ node }: NodeViewProps) {
     setView((v) => (v === "preview" ? "source" : "preview"));
 
   return (
-    <NodeViewWrapper className="code-block-wrapper group/code relative my-2">
+    <NodeViewWrapper className="code-block-wrapper group/code relative my-3">
       {isMermaid && debouncedChart.trim() && (
         <div
           contentEditable={false}
@@ -88,7 +88,7 @@ function CodeBlockView({ node }: NodeViewProps) {
       )}
       <div
         contentEditable={false}
-        className="code-block-header absolute top-0 right-0 z-10 flex items-center gap-1.5 px-2 py-1.5 opacity-0 transition-opacity group-hover/code:opacity-100"
+        className="code-block-header absolute top-0 right-0 z-10 flex items-center gap-1.5 px-2 py-1.5 opacity-0 transition-opacity group-hover/code:opacity-100 focus-within:opacity-100"
       >
         {language && (
           <span className="text-xs text-muted-foreground select-none">
@@ -123,6 +123,7 @@ function CodeBlockView({ node }: NodeViewProps) {
           onClick={handleCopy}
           className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
           title={t(($) => $.code_block.copy_code)}
+          aria-label={t(($) => $.code_block.copy_code)}
         >
           {copied ? (
             <Check className="h-3.5 w-3.5" />

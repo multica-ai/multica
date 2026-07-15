@@ -1,4 +1,32 @@
 {
+  "avatar_upload": {
+    "change": "Change avatar",
+    "remove": "Remove",
+    "select_image": "Please choose an image file.",
+    "updated": "Avatar updated",
+    "failed": "Failed to upload avatar"
+  },
+  "avatar_crop": {
+    "title": "Edit avatar",
+    "zoom": "Zoom",
+    "zoom_in": "Zoom in",
+    "zoom_out": "Zoom out",
+    "rotate": "Rotate",
+    "reset": "Reset",
+    "cancel": "Cancel",
+    "apply": "Save",
+    "uploading": "Uploading…",
+    "loading": "Loading…",
+    "load_failed": "Couldn't load image"
+  },
+  "color_picker": {
+    "saturation": "Saturation and brightness",
+    "hue": "Hue",
+    "hex": "Hex color",
+    "eyedropper": "Pick a color from the screen",
+    "presets": "Presets",
+    "random": "Random"
+  },
   "save": "Save",
   "cancel": "Cancel",
   "delete": "Delete",

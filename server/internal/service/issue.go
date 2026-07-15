@@ -372,7 +372,10 @@ func classifyOrigin(issue db.Issue, opts IssueCreateOpts) (source, taskID, autop
 	}
 	originID := util.UUIDToString(issue.OriginID)
 	switch issue.OriginType.String {
-	case "quick_create":
+	case "quick_create", "agent_create":
+		// Both link the issue back to the agent_task_queue row that created it
+		// (agent_create is the ordinary agent `issue create` path, MUL-4305);
+		// surface that task id and keep the manual source label.
 		return analytics.SourceManual, originID, ""
 	case "autopilot":
 		return analytics.SourceAutopilot, "", originID
@@ -464,6 +467,8 @@ func (s *IssueService) enqueueSquadLeaderTask(ctx context.Context, issue db.Issu
 	hasPending, err := s.Queries.HasPendingTaskForIssueAndAgent(ctx, db.HasPendingTaskForIssueAndAgentParams{
 		IssueID: issue.ID,
 		AgentID: squad.LeaderID,
+		// Key dedup on the reviewed head (TEN-356).
+		HeadSha: headShaText(s.TaskService.ResolveIssueReviewSHA(ctx, issue.ID)),
 	})
 	if err != nil || hasPending {
 		return

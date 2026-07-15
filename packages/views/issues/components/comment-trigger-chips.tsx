@@ -1,10 +1,13 @@
 "use client";
 
-import { useState } from "react";
-import type { CommentTriggerPreviewAgent } from "@multica/core/types";
+import { useMemo, useState } from "react";
+import { TriangleAlert } from "lucide-react";
+import type { CommentTriggerPreviewAgent, CommentTriggerOutcome } from "@multica/core/types";
 import { useAgentPresenceDetail } from "@multica/core/agents";
+import { mentionLabelsByTarget } from "@multica/core/issues/comment-trigger-outcomes";
 import { useCurrentWorkspace } from "@multica/core/paths";
 import { ActorAvatar as ActorAvatarBase } from "@multica/ui/components/common/actor-avatar";
+import { AVATAR_SIZE_PX } from "@multica/ui/lib/avatar-size";
 import {
   Popover,
   PopoverContent,
@@ -14,6 +17,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@multica/ui/components/
 import { cn } from "@multica/ui/lib/utils";
 import { AgentStatusDot } from "../../common/actor-avatar";
 import { useT } from "../../i18n";
+import { blockedReasonLabel, blockedShortReasonLabel } from "../blocked-trigger-copy";
 
 // One agent renders in full ("Walt will start working", avatar + presence
 // dot, click toggles). Several agents collapse to an overlapping avatar
@@ -22,11 +26,22 @@ import { useT } from "../../i18n";
 // a click-opened Popover so the layer survives consecutive clicks.
 // Suppression is communicated by brightness alone: lit = will trigger,
 // dimmed = skipped.
-const AVATAR_SIZE = 16;
+// The single-agent avatar renders at the `xs` tier; the `+N` overflow chip
+// and stack overlap below reuse that tier's pixel diameter so the collapsed
+// stack lines up exactly with the avatars.
+const AVATAR_SIZE = AVATAR_SIZE_PX.xs;
 const MAX_STACK_HEADS = 4;
 
 interface CommentTriggerChipsProps {
   agents: CommentTriggerPreviewAgent[];
+  // Explicit @agent / @squad mentions that will NOT trigger if posted as-is
+  // (MUL-4525 §2). Each renders as a named warning chip so the user sees WHICH
+  // target won't run and why, not a silent no-op after sending.
+  blocked?: CommentTriggerOutcome[];
+  // The draft markdown, used only to label each blocked target with the name the
+  // user typed in its mention markup. The server omits blocked target names
+  // (enumeration-safety); this is the user's own text, so it discloses nothing new.
+  draftContent?: string;
   suppressedAgentIds: Set<string>;
   onToggle: (agentId: string) => void;
 }
@@ -110,34 +125,96 @@ function TriggerAgentTooltipBody({
 
 export function CommentTriggerChips({
   agents,
+  blocked = [],
+  draftContent = "",
   suppressedAgentIds,
   onToggle,
 }: CommentTriggerChipsProps) {
   const { t } = useT("issues");
+  // Blocked outcomes carry no name (enumeration-safety); recover the label the
+  // user typed from their own draft so each chip can say which target it is.
+  const blockedLabels = useMemo(() => mentionLabelsByTarget(draftContent), [draftContent]);
 
   // Loading and errors render nothing: the preview is an enhancement, and
   // any interim chrome here reads as composer noise.
-  if (agents.length === 0) return null;
+  if (agents.length === 0 && blocked.length === 0) return null;
 
-  if (agents.length === 1) {
-    const agent = agents[0]!;
-    return (
+  const allowed =
+    agents.length === 1 ? (
       <SingleTriggerChip
-        agent={agent}
-        suppressed={suppressedAgentIds.has(agent.id)}
+        agent={agents[0]!}
+        suppressed={suppressedAgentIds.has(agents[0]!.id)}
         onToggle={onToggle}
         t={t}
       />
-    );
-  }
+    ) : agents.length > 1 ? (
+      <MultiTriggerChip
+        agents={agents}
+        suppressedAgentIds={suppressedAgentIds}
+        onToggle={onToggle}
+        t={t}
+      />
+    ) : null;
+
+  if (blocked.length === 0) return allowed;
 
   return (
-    <MultiTriggerChip
-      agents={agents}
-      suppressedAgentIds={suppressedAgentIds}
-      onToggle={onToggle}
-      t={t}
-    />
+    <div className="flex flex-wrap items-center gap-1.5">
+      {allowed}
+      {blocked.map((outcome) => (
+        <BlockedTriggerChip
+          key={`${outcome.target_type}:${outcome.target_id}`}
+          outcome={outcome}
+          label={blockedLabels.get(`${outcome.target_type}:${outcome.target_id}`)}
+          t={t}
+        />
+      ))}
+    </div>
+  );
+}
+
+// One blocked mention: named like an allowed chip ("Go"), but with an error
+// indicator and a short reason ("No permission") instead of "will start", so a
+// refused @mention reads as a clear, specific error rather than a vague count.
+function BlockedTriggerChip({
+  outcome,
+  label,
+  t,
+}: {
+  outcome: CommentTriggerOutcome;
+  label?: string;
+  t: IssuesT;
+}) {
+  const shortReason = blockedShortReasonLabel(outcome.reason_code, t);
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <span
+            className="inline-flex h-6 min-w-0 max-w-full animate-in fade-in items-center gap-1.5 rounded-md px-1.5 text-[11px] font-medium text-destructive"
+            aria-label={
+              label
+                ? t(($) => $.comment.trigger_blocked_chip_aria, { name: label, reason: shortReason })
+                : shortReason
+            }
+          >
+            <TriangleAlert className="size-3 shrink-0" />
+            {label ? (
+              <span className="inline-flex min-w-0 items-center gap-1">
+                <span className="truncate">{label}</span>
+                <span className="shrink-0">·</span>
+                <span className="shrink-0">{shortReason}</span>
+              </span>
+            ) : (
+              <span className="truncate">{shortReason}</span>
+            )}
+          </span>
+        }
+      />
+      <TooltipContent side="top" className="max-w-72 text-xs">
+        {blockedReasonLabel(outcome.reason_code, t)}
+      </TooltipContent>
+    </Tooltip>
   );
 }
 
@@ -340,9 +417,9 @@ function TriggerAgentAvatar({
         initials=""
         avatarUrl={agent.avatar_url}
         isAgent
-        size={AVATAR_SIZE}
+        size="xs"
       />
-      {showDot && !suppressed && <AgentStatusDot agentId={agent.id} size={AVATAR_SIZE} />}
+      {showDot && !suppressed && <AgentStatusDot agentId={agent.id} size="xs" />}
     </span>
   );
 }

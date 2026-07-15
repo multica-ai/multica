@@ -20,16 +20,6 @@ export const ALL_STATUSES: IssueStatus[] = [
   "cancelled",
 ];
 
-/** Statuses shown as board columns (excludes cancelled). */
-export const BOARD_STATUSES: IssueStatus[] = [
-  "backlog",
-  "todo",
-  "in_progress",
-  "in_review",
-  "done",
-  "blocked",
-];
-
 export const STATUS_CONFIG: Record<
   IssueStatus,
   {

@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { ActorAvatar as ActorAvatarBase } from "@multica/ui/components/common/actor-avatar";
+import { AVATAR_SIZE_PX, type AvatarSize } from "@multica/ui/lib/avatar-size";
 import {
   HoverCard,
   HoverCardTrigger,
@@ -34,7 +35,7 @@ export type AgentHoverCardVariant = "profile" | "live";
 interface ActorAvatarProps {
   actorType: string;
   actorId: string;
-  size?: number;
+  size?: AvatarSize;
   className?: string;
   /**
    * Wrap the avatar in a hover-card preview on dwell. Use for "who is this?"
@@ -195,13 +196,14 @@ function ActorAvatarProfileLink({
 // smaller avatars use a 6 px dot so the indicator doesn't overwhelm them.
 // Exported for surfaces that render the base avatar directly (e.g. comment
 // trigger chips) but still want the standard presence dot.
-export function AgentStatusDot({ agentId, size }: { agentId: string; size?: number }) {
+export function AgentStatusDot({ agentId, size }: { agentId: string; size?: AvatarSize }) {
   const ws = useCurrentWorkspace();
   const detail = useAgentPresenceDetail(ws?.id, agentId);
   if (detail === "loading") return null;
 
   const { dotClass, label } = availabilityConfig[detail.availability];
-  const dotSize = (size ?? 24) >= 24 ? "h-1.5 w-1.5" : "h-1 w-1";
+  const px = size ? AVATAR_SIZE_PX[size] : 24;
+  const dotSize = px >= 24 ? "h-1.5 w-1.5" : "h-1 w-1";
 
   return (
     <span
@@ -268,9 +270,22 @@ function SquadAvatarHoverCard({
   );
 }
 
+// Matches Base UI PreviewCard's OPEN_DELAY, so the emulated first-dwell open
+// below feels identical to the native hover-open.
+const HOVER_CARD_OPEN_DELAY = 600;
+
 // Common chrome shared between agent and member hover cards. Keeps focus
 // behaviour and width consistent so the two surfaces feel structurally
 // parallel — content varies, frame doesn't.
+//
+// The HoverCard (Base UI PreviewCard root + trigger) mounts lazily on first
+// pointerenter/focus: dense surfaces render hundreds of these avatars and the
+// per-instance popup machinery was a measurable slice of surface remount cost.
+// Cold phase renders the same span with identical classes, so the swap is
+// invisible. Because the pointer is already inside the trigger when the real
+// HoverCard mounts, Base UI's own hover-open never fires for that first dwell
+// — a manual timer with the same delay emulates it; afterwards Base UI drives
+// the controlled `open` via `onOpenChange`.
 function ActorAvatarHoverCardShell({
   content,
   children,
@@ -280,6 +295,10 @@ function ActorAvatarHoverCardShell({
 }) {
   const triggerRef = useRef<HTMLSpanElement>(null);
   const [standalone, setStandalone] = useState(false);
+  const [warm, setWarm] = useState(false);
+  const [open, setOpen] = useState(false);
+  const openTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const restoreFocusRef = useRef(false);
 
   useEffect(() => {
     const el = triggerRef.current;
@@ -288,16 +307,59 @@ function ActorAvatarHoverCardShell({
     setStandalone(!ancestor);
   }, []);
 
+  // A focus-triggered swap unmounts the focused cold span; give focus back to
+  // the real trigger so Escape/blur keep working.
+  useEffect(() => {
+    if (warm && restoreFocusRef.current) {
+      restoreFocusRef.current = false;
+      triggerRef.current?.focus();
+    }
+  }, [warm]);
+
+  const clearOpenTimer = () => {
+    if (openTimerRef.current !== null) {
+      clearTimeout(openTimerRef.current);
+      openTimerRef.current = null;
+    }
+  };
+  useEffect(() => clearOpenTimer, []);
+
+  const tabIndex = standalone ? 0 : -1;
+  const className = standalone
+    ? "inline-flex cursor-pointer rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+    : "inline-flex cursor-pointer";
+
+  if (!warm) {
+    return (
+      <span
+        ref={triggerRef}
+        tabIndex={tabIndex}
+        className={className}
+        onPointerEnter={() => {
+          setWarm(true);
+          openTimerRef.current = setTimeout(
+            () => setOpen(true),
+            HOVER_CARD_OPEN_DELAY,
+          );
+        }}
+        onFocus={() => {
+          restoreFocusRef.current = true;
+          setWarm(true);
+          setOpen(true);
+        }}
+      >
+        {children}
+      </span>
+    );
+  }
+
   return (
-    <HoverCard>
+    <HoverCard open={open} onOpenChange={setOpen}>
       <HoverCardTrigger
         render={<span ref={triggerRef} />}
-        tabIndex={standalone ? 0 : -1}
-        className={
-          standalone
-            ? "inline-flex cursor-pointer rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            : "inline-flex cursor-pointer"
-        }
+        tabIndex={tabIndex}
+        className={className}
+        onPointerLeave={clearOpenTimer}
       >
         {children}
       </HoverCardTrigger>

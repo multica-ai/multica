@@ -26,7 +26,7 @@
  * 3. PREPROCESSING is minimal: only legacy mention shortcode migration and
  *    URL linkification (preprocessMarkdown). No HTML conversion.
  *
- * Tech: Tiptap v3.22.1 (ProseMirror wrapper), @tiptap/markdown for
+ * Tech: Tiptap v3 (ProseMirror wrapper), @tiptap/markdown for
  * bidirectional Markdown ↔ ProseMirror JSON conversion.
  */
 
@@ -44,6 +44,9 @@ import { cn } from "@multica/ui/lib/utils";
 import type { UploadResult } from "@multica/core/hooks/use-file-upload";
 import { useWorkspaceSlug } from "@multica/core/paths";
 import { useQueryClient } from "@tanstack/react-query";
+import { issueIdentifierOptions } from "@multica/core/issues/queries";
+import { workspaceListOptions } from "@multica/core/workspace/queries";
+import { isIssueIdentifier } from "@multica/ui/markdown";
 import type { Attachment } from "@multica/core/types";
 import {
   parseMarkdownChunked,
@@ -51,11 +54,14 @@ import {
   type MarkdownManagerLike,
 } from "./utils/parse-markdown-chunked";
 import type { MentionItem } from "./extensions/mention-suggestion";
+import type { IssueIdentifierResolver } from "./extensions/issue-identifier-autolink";
 import { createEditorExtensions } from "./extensions";
 import { uploadAndInsertFile } from "./extensions/file-upload";
 import { preprocessMarkdown } from "./utils/preprocess";
+import { repairEmptyListItems } from "./utils/repair-list-items";
 import { openLink, isMentionHref } from "./utils/link-handler";
 import { EditorBubbleMenu } from "./bubble-menu";
+import { posFromAnchor, type TextAnchor } from "./text-anchor";
 import { useLinkHover, LinkHoverCard } from "./link-hover-card";
 import { AttachmentDownloadProvider } from "./attachment-download-context";
 import "katex/dist/katex.min.css";
@@ -115,8 +121,6 @@ interface ContentEditorProps {
   onUploadFile?: (file: File) => Promise<UploadResult | null>;
   /** Show the floating formatting toolbar on text selection. Defaults true. */
   showBubbleMenu?: boolean;
-  /** When true, bare Enter submits (chat-style). Mod-Enter always submits. */
-  submitOnEnter?: boolean;
   /**
    * ID of the issue this editor belongs to. When set, the bubble menu exposes
    * a "Create sub-issue from selection" action that parents the new issue
@@ -162,12 +166,37 @@ interface ContentEditorProps {
    * before the modal closes.
    */
   flushPendingOnUnmount?: boolean;
+  /**
+   * Called once when the Tiptap instance exists and its initial content is
+   * set (creation is deferred past first paint by `immediatelyRender: false`).
+   * Readonly-first hosts such as comment and reply composers use this as the
+   * signal to swap their static shell for the live editor.
+   */
+  onReady?: () => void;
 }
 
 interface ContentEditorRef {
   getMarkdown: () => string;
   clearContent: () => void;
   focus: () => void;
+  /**
+   * Focus and place the caret at the document position under the given
+   * viewport coordinates. Used by readonly-first hosts so the click that
+   * summoned the editor lands the caret where the user clicked, matching
+   * the always-mounted editor's behavior. Falls back to focusing the end
+   * when no position resolves (click below the last line). Must be called
+   * while the editor element is laid out (not display: none).
+   */
+  focusAtCoords: (coords: { x: number; y: number }) => void;
+  /**
+   * Focus and place the caret at the document position a text anchor
+   * resolves to. Preferred over `focusAtCoords` for readonly-first hosts:
+   * the anchor is a logical position ("block N, character M"), so it is
+   * immune to layout differences between the readonly render and the
+   * editor render — which is exactly where pixel coordinates drift on
+   * long documents.
+   */
+  focusAtAnchor: (anchor: TextAnchor) => void;
   /** Drop focus from the editor — used by chat after send so the caret
    *  stops competing with the StatusPill / streaming reply for the user's
    *  attention. */
@@ -193,7 +222,6 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
       onBlur,
       onUploadFile,
       showBubbleMenu = true,
-      submitOnEnter = false,
       currentIssueId,
       disableMentions = false,
       mentionMode = "default",
@@ -202,6 +230,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
       slashCommandMode = "skill",
       attachments,
       flushPendingOnUnmount = false,
+      onReady,
     },
     ref,
   ) {
@@ -214,11 +243,23 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
     const onUpdateRef = useRef(onUpdate);
     const onSubmitRef = useRef(onSubmit);
     const onBlurRef = useRef(onBlur);
+    const onReadyRef = useRef(onReady);
     const onUploadFileRef = useRef<
       ((file: File) => Promise<UploadResult | null>) | undefined
     >(undefined);
     const mentionContextItemsRef = useRef<MentionItem[]>(mentionContextItems ?? []);
     const lastEmittedRef = useRef<string | null>(null);
+    // `content` already consumes the initial defaultValue when Tiptap mounts.
+    // Track the prop separately so the external-sync effect only handles real
+    // changes after mount, not Markdown serializer canonicalization from that
+    // first parse.
+    const lastDefaultValueRef = useRef(defaultValue);
+    // Live placeholder text. Passed into the Placeholder extension as a getter
+    // (not a static string) so the plugin re-reads it on every decoration pass —
+    // the sync effect below updates this ref and nudges a repaint. Tiptap
+    // snapshots a *string* placeholder at mount, so a getter is what lets it
+    // change without remounting the editor.
+    const placeholderRef = useRef(placeholderText);
 
     // In-session record of attachments freshly uploaded through this editor.
     // Surfaces (like the quick-create modal) that don't have a server-supplied
@@ -291,20 +332,54 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
     onUpdateRef.current = onUpdate;
     onSubmitRef.current = onSubmit;
     onBlurRef.current = onBlur;
+    onReadyRef.current = onReady;
     onUploadFileRef.current = wrappedOnUploadFile;
     mentionContextItemsRef.current = mentionContextItems ?? [];
     flushPendingOnUnmountRef.current = flushPendingOnUnmount;
 
     const queryClient = useQueryClient();
 
+    // Linear-style bare identifier autolink resolver. Fully lazy — it runs only
+    // on user input, never on render, so it adds no query hook to this widely
+    // used component. It reads the current workspace from the query cache (via
+    // the slug ref) and returns null outside a workspace, for non-identifier
+    // tokens, or when the prefix can't match this workspace, so no network call
+    // happens for those; the exact-match filter enforces correctness.
+    const resolveIssueIdentifierRef = useRef<IssueIdentifierResolver | undefined>(
+      undefined,
+    );
+    resolveIssueIdentifierRef.current = async (identifier) => {
+      if (!isIssueIdentifier(identifier)) return null;
+      const slug = workspaceSlugRef.current;
+      if (!slug) return null;
+      const workspaces = await queryClient.fetchQuery(workspaceListOptions());
+      const ws = workspaces.find((w) => w.slug === slug);
+      if (!ws) return null;
+      const prefix = ws.issue_prefix;
+      if (
+        prefix &&
+        !identifier.toUpperCase().startsWith(`${prefix.toUpperCase()}-`)
+      ) {
+        return null;
+      }
+      const issue = await queryClient.fetchQuery(
+        issueIdentifierOptions(ws.id, identifier),
+      );
+      return issue ? { id: issue.id, identifier: issue.identifier } : null;
+    };
+
     const initialContent = defaultValue ? preprocessMarkdown(defaultValue) : "";
+    // With `immediatelyRender: false` the Tiptap instance is created after
+    // mount, so an imperative `focus()` fired on the same tick (e.g. chat
+    // auto-focusing a brand-new conversation) would hit a null editor and no-op.
+    // Latch the intent here and honor it in `onCreate` once the editor exists.
+    const focusOnReadyRef = useRef(false);
     // Large markdown is parsed in chunks to dodge marked's O(n²) tokenizer (see
     // parseMarkdownChunked). Small docs stay on the single-parse fast path.
     const mountChunked = initialContent.length > MARKDOWN_CHUNK_THRESHOLD;
 
     const editor = useEditor({
       immediatelyRender: false,
-      // Note: in v3.22.1 the default is already false/undefined (same behavior).
       // Explicit for clarity — the real perf win is useEditorState in BubbleMenu.
       shouldRerenderOnTransaction: false,
       onCreate: ({ editor: ed }) => {
@@ -326,7 +401,15 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
             });
           }
         }
+        // A markdown draft ending in an empty list item (e.g. `"1. \n\n"` left
+        // after typing `1.`) parses into a caretless, schema-invalid item;
+        // repair it so the mounted editor has a real cursor in the list.
+        repairEmptyListItems(ed);
         lastEmittedRef.current = normalizeEditorMarkdown(ed);
+        if (focusOnReadyRef.current) {
+          focusOnReadyRef.current = false;
+          ed.commands.focus("end");
+        }
       },
       content: mountChunked ? "" : initialContent,
       contentType: mountChunked
@@ -335,16 +418,16 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
           ? "markdown"
           : undefined,
       extensions: createEditorExtensions({
-        placeholder: placeholderText,
+        placeholder: () => placeholderRef.current,
         queryClient,
         onSubmitRef,
         onUploadFileRef,
-        submitOnEnter,
         disableMentions,
         mentionMode,
         getMentionContextItems: () => mentionContextItemsRef.current,
         enableSlashCommands,
         slashCommandMode,
+        resolveIssueIdentifierRef,
       }),
       onUpdate: ({ editor: ed }) => {
         if (!onUpdateRef.current) return;
@@ -386,6 +469,16 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
       },
     });
 
+    // Signal hosts that the deferred editor instance now exists. Fired from a
+    // passive effect (not `onCreate`) so it runs after the commit in which
+    // <EditorContent> attached the editor DOM — callers can measure/focus it.
+    const readyFiredRef = useRef(false);
+    useEffect(() => {
+      if (!editor || readyFiredRef.current) return;
+      readyFiredRef.current = true;
+      onReadyRef.current?.();
+    }, [editor]);
+
     // Cleanup on unmount. A pending debounced update is DROPPED by default,
     // not flushed — see the `flushPendingOnUnmount` prop doc for why. When the
     // owner opted in, emit the markdown cached at `onUpdate` time so a long
@@ -410,6 +503,16 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
     // showing stale content until the issue is closed and reopened.
     useEffect(() => {
       if (!editor || editor.isDestroyed) return;
+
+      const previousDefaultValue = lastDefaultValueRef.current;
+      lastDefaultValueRef.current = defaultValue;
+
+      // The initial defaultValue was already parsed through useEditor's
+      // `content` option (or in onCreate for the chunked path). Comparing that
+      // source Markdown to Tiptap's canonical serialization can differ even
+      // when they represent the same document, and used to cause an immediate
+      // second full parse. Only later prop changes belong to this sync effect.
+      if (defaultValue === previousDefaultValue) return;
 
       // Guard 0: never clobber an in-flight upload. An external `defaultValue`
       // change can arrive mid-upload — e.g. chat lazy-creates a session on the
@@ -468,16 +571,38 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
         });
       }
 
-      // Clamp prior selection to the new doc size so the caret doesn't snap
-      // to position 0 after ProseMirror replaces the document.
-      const docSize = editor.state.doc.content.size;
-      editor.commands.setTextSelection({
-        from: Math.min(from, docSize),
-        to: Math.min(to, docSize),
-      });
+      // An empty list item in the incoming markdown parses into a caretless,
+      // schema-invalid node; repair it and let it own the caret. Otherwise clamp
+      // the prior selection to the new doc size so the caret doesn't snap to
+      // position 0 after ProseMirror replaces the document.
+      if (!repairEmptyListItems(editor, { from, to })) {
+        const docSize = editor.state.doc.content.size;
+        editor.commands.setTextSelection({
+          from: Math.min(from, docSize),
+          to: Math.min(to, docSize),
+        });
+      }
 
       lastEmittedRef.current = normalizeEditorMarkdown(editor);
     }, [defaultValue, editor]);
+
+    // Sync external `placeholder` changes into the mounted editor.
+    // The Placeholder extension is configured with a getter over `placeholderRef`
+    // (see createEditorExtensions above), which the plugin re-invokes every time
+    // it recomputes its decorations. Update the ref, then dispatch an empty
+    // transaction to force that recompute — the placeholder refreshes without a
+    // remount. Without this, it stays frozen at its mount value: switching
+    // between an archived and an active chat session under the same agent (no
+    // editor remount) leaves the input stuck on "This session is archived" even
+    // though it is usable.
+    useEffect(() => {
+      if (placeholderRef.current === placeholderText) return;
+      placeholderRef.current = placeholderText;
+      if (!editor || editor.isDestroyed) return;
+      // `docChanged` is false on an empty transaction, so onUpdate never fires
+      // and no self-write loop is triggered.
+      editor.view.dispatch(editor.state.tr);
+    }, [editor, placeholderText]);
 
     useImperativeHandle(ref, () => ({
       // Intentionally NOT routed through `normalizeMarkdown` — this refactor
@@ -487,7 +612,27 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
         editor?.commands.clearContent();
       },
       focus: () => {
-        editor?.commands.focus();
+        if (editor) editor.commands.focus();
+        // Editor not mounted yet — defer the focus to `onCreate`.
+        else focusOnReadyRef.current = true;
+      },
+      focusAtCoords: (coords: { x: number; y: number }) => {
+        if (!editor) {
+          // Editor not mounted yet — degrade to the latched plain focus.
+          focusOnReadyRef.current = true;
+          return;
+        }
+        const pos = editor.view.posAtCoords({ left: coords.x, top: coords.y });
+        if (pos) editor.commands.focus(pos.pos);
+        else editor.commands.focus("end");
+      },
+      focusAtAnchor: (anchor: TextAnchor) => {
+        if (!editor) {
+          // Editor not mounted yet — degrade to the latched plain focus.
+          focusOnReadyRef.current = true;
+          return;
+        }
+        editor.commands.focus(posFromAnchor(editor.state.doc, anchor));
       },
       blur: () => {
         editor?.commands.blur();

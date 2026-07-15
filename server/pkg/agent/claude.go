@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -39,14 +40,14 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	// instead of inheriting from the outer Claude Code session.
 	var mcpConfigPath string
 	var mcpFileCleanup func() // non-nil while this function owns the temp file
-	if len(opts.McpConfig) > 0 {
+	if hasManagedMcpConfig(opts.McpConfig) {
 		path, err := writeMcpConfigToTemp(opts.McpConfig)
 		if err != nil {
 			cancel()
 			return nil, err
 		}
 		mcpConfigPath = path
-		mcpFileCleanup = func() { os.Remove(mcpConfigPath) }
+		mcpFileCleanup = func() { cleanupMcpConfigTemp(mcpConfigPath) }
 		args = append(args, "--mcp-config", mcpConfigPath)
 	}
 	// Clean up the temp file if we return before the goroutine takes ownership.
@@ -64,6 +65,10 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		cmd.Dir = opts.Cwd
 	}
 	cmd.Env = buildEnv(b.cfg.Env)
+	if err := claudeRootSudoPreflight(args, cmd.Env); err != nil {
+		cancel()
+		return nil, err
+	}
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -127,7 +132,7 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		defer close(msgCh)
 		defer close(resCh)
 		if mcpConfigPath != "" {
-			defer os.Remove(mcpConfigPath)
+			defer cleanupMcpConfigTemp(mcpConfigPath)
 		}
 
 		startTime := time.Now()
@@ -235,13 +240,14 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		// stderrBuf.Tail() is safe to sample now. Attach the tail to any
 		// non-empty failure message; callers upstream surface this as the
 		// task's error field, which is the only place users see it.
+		stderrTail := stderrBuf.Tail()
 		if finalError != "" {
-			finalError = withAgentStderr(finalError, "claude", stderrBuf.Tail())
+			finalError = withAgentStderr(finalError, "claude", stderrTail)
 		}
 
 		b.cfg.Logger.Info("claude finished", "pid", cmd.Process.Pid, "status", finalStatus, "duration", duration.Round(time.Millisecond).String())
 
-		reportedSessionID := resolveSessionID(opts.ResumeSessionID, sessionID, finalStatus == "failed")
+		reportedSessionID := resolveSessionID(opts.ResumeSessionID, sessionID, finalStatus == "failed", stderrTail)
 		if reportedSessionID != sessionID {
 			b.cfg.Logger.Info("claude resume did not land; clearing fresh session id for daemon fallback",
 				"requested_resume", opts.ResumeSessionID,
@@ -565,7 +571,6 @@ func buildClaudeArgs(opts ExecOptions, logger *slog.Logger) []string {
 		"--output-format", "stream-json",
 		"--input-format", "stream-json",
 		"--verbose",
-		"--strict-mcp-config",
 		"--permission-mode", "bypassPermissions",
 		// AskUserQuestion is Claude Code's built-in interactive question tool.
 		// The daemon runs Claude in non-interactive stream-json mode and has
@@ -574,6 +579,12 @@ func buildClaudeArgs(opts ExecOptions, logger *slog.Logger) []string {
 		// never sees the question (see GitHub #2588). User-facing
 		// clarification belongs in an issue comment instead.
 		"--disallowedTools", "AskUserQuestion",
+	}
+	if hasManagedMcpConfig(opts.McpConfig) {
+		// A saved agent-level config is authoritative, including an explicitly
+		// empty object. With no managed config, omit strict mode so Claude can
+		// inherit the user's local runtime MCP servers.
+		args = append(args, "--strict-mcp-config")
 	}
 	if opts.Model != "" {
 		args = append(args, "--model", opts.Model)
@@ -632,20 +643,69 @@ func buildClaudeInput(prompt string) ([]byte, error) {
 
 // resolveSessionID decides which session id to report on the Result. When the
 // caller requested --resume but claude emitted a fresh, different session id
-// AND the run failed, the resume did not land (claude prints
-// "No conversation found with session ID: ..." to stderr, generates a fresh
-// session, and exits). Returning "" in that case keeps the daemon's
-// retry-with-fresh-session fallback able to trigger, instead of silently
-// persisting a brand-new id as if resume had succeeded.
-func resolveSessionID(requestedResume, emitted string, failed bool) string {
+// AND the run failed, the resume did not land. Claude can also report the
+// requested id while printing "No conversation found with session ID: ..." to
+// stderr. Returning "" in those cases keeps the daemon's retry-with-fresh-
+// session fallback able to trigger instead of persisting the dead resume id.
+func resolveSessionID(requestedResume, emitted string, failed bool, stderrTail ...string) string {
+	if failed && requestedResume != "" && claudeNoConversationFound(stderrTail...) {
+		return ""
+	}
 	if failed && requestedResume != "" && emitted != "" && emitted != requestedResume {
 		return ""
 	}
 	return emitted
 }
 
+func claudeNoConversationFound(stderrTail ...string) bool {
+	for _, tail := range stderrTail {
+		if strings.Contains(strings.ToLower(tail), "no conversation found") {
+			return true
+		}
+	}
+	return false
+}
+
 func buildEnv(extra map[string]string) []string {
 	return mergeEnv(os.Environ(), extra)
+}
+
+func claudeRootSudoPreflight(args, env []string) error {
+	if !argsRequestBypassPermissions(args) || os.Geteuid() != 0 || envHasSandbox(env) {
+		return nil
+	}
+	return fmt.Errorf("Claude Code refuses bypassPermissions under root/sudo privileges. Run the Multica daemon as a non-root user, or set IS_SANDBOX=1 if running in a genuine container/sandbox")
+}
+
+func argsRequestBypassPermissions(args []string) bool {
+	for i, arg := range args {
+		if arg == "--dangerously-skip-permissions" {
+			return true
+		}
+		if arg == "--permission-mode" && i+1 < len(args) && args[i+1] == "bypassPermissions" {
+			return true
+		}
+	}
+	return false
+}
+
+func envHasSandbox(env []string) bool {
+	for i := len(env) - 1; i >= 0; i-- {
+		key, value, ok := strings.Cut(env[i], "=")
+		if key != "IS_SANDBOX" {
+			continue
+		}
+		if !ok {
+			return false
+		}
+		switch strings.ToLower(value) {
+		case "1", "true", "yes", "on":
+			return true
+		default:
+			return false
+		}
+	}
+	return false
 }
 
 func mergeEnv(base []string, extra map[string]string) []string {
@@ -699,8 +759,9 @@ func isFilteredChildEnvKey(key string) bool {
 type blockedArgMode int
 
 const (
-	blockedWithValue  blockedArgMode = iota // flag takes a value (next arg or =value)
-	blockedStandalone                       // flag is boolean, no value
+	blockedWithValue     blockedArgMode = iota // flag takes a value (next arg or =value)
+	blockedStandalone                          // flag is boolean, no value
+	blockedOptionalValue                       // flag may take the next non-flag arg or =value
 )
 
 // filterCustomArgs removes protocol-critical flags from user-configured custom
@@ -720,12 +781,8 @@ func filterCustomArgs(args []string, blocked map[string]blockedArgMode, logger *
 		return args
 	}
 	filtered := make([]string, 0, len(args))
-	skip := false
-	for _, raw := range args {
-		if skip {
-			skip = false
-			continue
-		}
+	for i := 0; i < len(args); i++ {
+		raw := args[i]
 		arg := unshellQuoteArg(raw)
 		flag := arg
 		hasInlineValue := false
@@ -738,7 +795,13 @@ func filterCustomArgs(args []string, blocked map[string]blockedArgMode, logger *
 			logger.Warn("custom_args: blocked protocol-critical flag, skipping", "flag", flag)
 			if mode == blockedWithValue && !hasInlineValue {
 				// The next arg is the value for this flag — skip it too.
-				skip = true
+				i++
+			} else if mode == blockedOptionalValue && !hasInlineValue && i+1 < len(args) &&
+				!strings.HasPrefix(unshellQuoteArg(args[i+1]), "-") {
+				// Optional values are consumed only when the next token is not
+				// another flag, so a boolean form cannot swallow an unrelated
+				// option.
+				i++
 			}
 			continue
 		}
@@ -785,23 +848,36 @@ func stripSurroundingQuotes(s string) (string, bool) {
 	return s, false
 }
 
-// writeMcpConfigToTemp writes raw MCP config JSON to a temporary file and returns
-// its path. The caller is responsible for removing the file when done.
+// writeMcpConfigToTemp writes MCP config JSON to a temporary file and returns
+// its path. The caller is responsible for removing it via cleanupMcpConfigTemp.
 func writeMcpConfigToTemp(raw json.RawMessage) (string, error) {
-	f, err := os.CreateTemp("", "multica-mcp-*.json")
+	dir, err := os.MkdirTemp("", "multica-mcp-*")
 	if err != nil {
-		return "", fmt.Errorf("create mcp config temp file: %w", err)
+		return "", fmt.Errorf("create mcp config temp dir: %w", err)
 	}
-	if _, err := f.Write(raw); err != nil {
-		f.Close()
-		os.Remove(f.Name())
+	data, err := hardenBrowserMcpConfig(raw, dir)
+	if err != nil {
+		cleanupMcpConfigTemp(filepath.Join(dir, "mcp-config.json"))
+		return "", err
+	}
+	path := filepath.Join(dir, "mcp-config.json")
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		cleanupMcpConfigTemp(path)
 		return "", fmt.Errorf("write mcp config temp file: %w", err)
 	}
-	if err := f.Close(); err != nil {
-		os.Remove(f.Name())
-		return "", fmt.Errorf("close mcp config temp file: %w", err)
+	return path, nil
+}
+
+func cleanupMcpConfigTemp(path string) {
+	if path == "" {
+		return
 	}
-	return f.Name(), nil
+	dir := filepath.Dir(path)
+	if strings.HasPrefix(filepath.Base(dir), "multica-mcp-") {
+		_ = os.RemoveAll(dir)
+		return
+	}
+	_ = os.Remove(path)
 }
 
 // detectVersionTimeout bounds a single `<cli> --version` probe. Version

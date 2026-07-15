@@ -3,6 +3,13 @@ import { AlertCircle, Info, LogIn } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
 import { Switch } from "@multica/ui/components/ui/switch";
 import { cn } from "@multica/ui/lib/utils";
+import { toast } from "sonner";
+import {
+  SettingsCard,
+  SettingsRow,
+  SettingsSection,
+  SettingsTab,
+} from "@multica/views/settings";
 import { reauthenticateDaemon } from "../platform/daemon-reauth";
 import type { DaemonPrefs, DaemonStatus } from "../../../shared/daemon-types";
 import {
@@ -10,26 +17,6 @@ import {
   DAEMON_STATE_LABELS,
   formatUptime,
 } from "../../../shared/daemon-types";
-
-function SettingRow({
-  label,
-  description,
-  children,
-}: {
-  label: string;
-  description: string;
-  children: ReactNode;
-}) {
-  return (
-    <div className="flex items-center justify-between gap-6 py-4">
-      <div className="min-w-0">
-        <p className="text-sm font-medium">{label}</p>
-        <p className="text-sm text-muted-foreground mt-0.5">{description}</p>
-      </div>
-      <div className="shrink-0">{children}</div>
-    </div>
-  );
-}
 
 // One row inside the diagnostics block. Values that are likely to be
 // long IDs / URLs render as monospaced + truncated with a tooltip.
@@ -81,9 +68,17 @@ export function DaemonSettingsTab() {
   const updatePref = useCallback(
     async (key: keyof DaemonPrefs, value: boolean) => {
       setSaving(true);
-      const updated = await window.daemonAPI.setPrefs({ [key]: value });
-      setPrefs(updated);
-      setSaving(false);
+      try {
+        const updated = await window.daemonAPI.setPrefs({ [key]: value });
+        setPrefs(updated);
+        toast.success("Daemon settings saved", { id: "settings-auto-save" });
+      } catch (error) {
+        toast.error(
+          error instanceof Error ? error.message : "Failed to save daemon settings",
+        );
+      } finally {
+        setSaving(false);
+      }
     },
     [],
   );
@@ -95,11 +90,10 @@ export function DaemonSettingsTab() {
   const externallyManaged = status.externallyManaged === true;
 
   return (
-    <div>
-      <h2 className="text-lg font-semibold">Daemon</h2>
-      <p className="text-sm text-muted-foreground mt-1">
-        Configure how the local agent daemon behaves with the desktop app.
-      </p>
+    <SettingsTab
+      title="Daemon"
+      description="Configure how the local agent daemon behaves with the desktop app."
+    >
 
       {status.state === "auth_expired" && (
         <div className="mt-4 flex items-start gap-3 rounded-lg border border-destructive/40 bg-destructive/5 px-4 py-3">
@@ -138,8 +132,8 @@ export function DaemonSettingsTab() {
         </div>
       )}
 
-      <div className="mt-6 divide-y">
-        <SettingRow
+      <SettingsCard>
+        <SettingsRow
           label="Auto-start on launch"
           description="Automatically start the daemon when the app opens and you are logged in."
         >
@@ -148,9 +142,9 @@ export function DaemonSettingsTab() {
             onCheckedChange={(checked) => updatePref("autoStart", checked)}
             disabled={saving || externallyManaged}
           />
-        </SettingRow>
+        </SettingsRow>
 
-        <SettingRow
+        <SettingsRow
           label="Auto-stop on quit"
           description="Stop the daemon when the desktop app is closed. Disable this to keep the daemon running in the background."
         >
@@ -159,22 +153,22 @@ export function DaemonSettingsTab() {
             onCheckedChange={(checked) => updatePref("autoStop", checked)}
             disabled={saving || externallyManaged}
           />
-        </SettingRow>
+        </SettingsRow>
 
-        <div className="py-4">
-          <p className="text-sm font-medium">CLI Status</p>
-          <p className="text-sm text-muted-foreground mt-1">
-            {cliInstalled === null
+        <SettingsRow
+          label="CLI Status"
+          description={
+            cliInstalled === null
               ? "Checking…"
               : cliInstalled
                 ? "multica CLI is installed and available in PATH."
-                : "multica CLI not found. Install it to enable daemon management."}
-          </p>
+                : "multica CLI not found. Install it to enable daemon management."
+          }
+        >
           {cliInstalled === false && (
             <Button
               variant="outline"
               size="sm"
-              className="mt-2"
               onClick={() =>
                 window.desktopAPI.openExternal(
                   "https://github.com/multica-ai/multica#cli-installation",
@@ -184,19 +178,19 @@ export function DaemonSettingsTab() {
               Installation Guide
             </Button>
           )}
-        </div>
-      </div>
+          {cliInstalled !== false && <span />}
+        </SettingsRow>
+      </SettingsCard>
 
       {/* Diagnostics — moved out of the logs panel so the panel can focus
           on logs. These fields matter for support tickets and bug reports,
           not for everyday use. */}
-      <div className="mt-8">
-        <h3 className="text-sm font-semibold">Diagnostics</h3>
-        <p className="text-xs text-muted-foreground mt-1">
-          Identification and connection details. Useful when filing a bug
-          report or investigating why a runtime isn&apos;t showing up.
-        </p>
-        <div className="mt-3 rounded-lg border bg-muted/20 px-4 py-2">
+      <SettingsSection
+        title="Diagnostics"
+        description="Identification and connection details. Useful when filing a bug report or investigating why a runtime isn't showing up."
+      >
+        <SettingsCard>
+          <div className="px-4 py-2">
           <DiagnosticsRow
             label="State"
             value={
@@ -246,8 +240,9 @@ export function DaemonSettingsTab() {
                 : "—"
             }
           />
-        </div>
-      </div>
-    </div>
+          </div>
+        </SettingsCard>
+      </SettingsSection>
+    </SettingsTab>
   );
 }

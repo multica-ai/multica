@@ -348,9 +348,15 @@ func (r *Router) flushChatRun(set ResolverSet, inst ResolvedInstallation, msg ch
 	if err != nil {
 		r.logger.Error("channel router: flush reload chat session failed",
 			"chat_session_id", uuidString(sessionID), "err", err.Error())
+		r.clearTyping(ctx, set, sessionID)
 		return
 	}
 	if _, err := r.tasks.EnqueueChatTask(ctx, session, initiatorUserID, forceFresh); err != nil {
+		// No task was enqueued, so no task lifecycle event will ever publish and
+		// the platform's bus-driven typing clear can never fire. Clear the
+		// indicator here (before any notice) so the "processing" reaction does
+		// not stick on the user's message.
+		r.clearTyping(ctx, set, sessionID)
 		switch {
 		case errors.Is(err, service.ErrChatTaskAgentNoRuntime):
 			r.emitFlushReply(ctx, set, inst, msg, sessionID, OutcomeAgentOffline)
@@ -360,6 +366,15 @@ func (r *Router) flushChatRun(set ResolverSet, inst ResolvedInstallation, msg ch
 			r.logger.Error("channel router: flush enqueue chat task failed",
 				"chat_session_id", uuidString(sessionID), "err", err.Error())
 		}
+	}
+}
+
+// clearTyping asks the platform to drop the "processing" indicator for a session
+// whose flush produced no task run. A nil TypingNotifier (platform without the
+// feature) is a no-op.
+func (r *Router) clearTyping(ctx context.Context, set ResolverSet, sessionID pgtype.UUID) {
+	if set.Typing != nil {
+		set.Typing.OnSettled(ctx, sessionID)
 	}
 }
 
