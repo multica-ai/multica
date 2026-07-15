@@ -429,7 +429,7 @@ func TestLarkJSONFrameDecoderMessageContentEmptyOnInvalidContentJSON(t *testing.
 	}
 }
 
-func TestLarkJSONFrameDecoderNonTextMessageHasEmptyBody(t *testing.T) {
+func TestLarkJSONFrameDecoderImageMessageHasPlaceholderBody(t *testing.T) {
 	t.Parallel()
 	raw := []byte(`{
 		"type":"event_callback",
@@ -443,8 +443,8 @@ func TestLarkJSONFrameDecoderNonTextMessageHasEmptyBody(t *testing.T) {
 	if err != nil || !ok {
 		t.Fatalf("ok=%v err=%v", ok, err)
 	}
-	if msg.Body != "" {
-		t.Errorf("Body = %q; non-text messages should have empty body in MVP", msg.Body)
+	if msg.Body != "[Image]" {
+		t.Errorf("Body = %q; want [Image]", msg.Body)
 	}
 	if msg.MessageID == "" {
 		t.Error("MessageID should still be populated for non-text events")

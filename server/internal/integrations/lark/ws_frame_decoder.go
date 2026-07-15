@@ -91,16 +91,20 @@ func (d *LarkJSONFrameDecoder) Decode(payload []byte, inst Installation) (Inboun
 		botUnionID = inst.BotUnionID.String
 	}
 
-	// text + post are flattened synchronously here (no external calls —
-	// the decoder must stay fast and dependency-free). merge_forward
-	// leaves Body empty: it needs an HTTP round-trip to expand and is
-	// handled downstream by the enricher, which keys off MessageType.
-	// Other types (image, file, …) also leave Body empty in this MVP;
-	// attachment ingestion is a separate issue.
+	// All directly renderable types are flattened synchronously here (no
+	// external calls — the decoder must stay fast and dependency-free).
+	// Media messages become stable placeholders such as [Image], so an
+	// image-only event never lands in chat history as an empty message.
+	// merge_forward alone leaves Body empty: it needs an HTTP round-trip to
+	// expand and is handled downstream by the enricher.
 	switch evt.Message.MessageType {
 	case "text", "post":
 		msg.Body = resolveMentions(flattenContent(evt.Message.MessageType, evt.Message.Content),
 			evt.Message.Mentions, inst.BotOpenID, botUnionID)
+	case "merge_forward":
+		// Expanded by InboundEnricher.
+	default:
+		msg.Body = flattenContent(evt.Message.MessageType, evt.Message.Content)
 	}
 
 	// Snapshot the user's own text as the command source BEFORE any

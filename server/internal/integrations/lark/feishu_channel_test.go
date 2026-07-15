@@ -189,6 +189,23 @@ func TestChannelMessageFromLark_NormalizesAndStashesRaw(t *testing.T) {
 	}
 }
 
+func TestChannelMessageFromLark_ImageKeepsPlaceholder(t *testing.T) {
+	cm := channelMessageFromLark(InboundMessage{
+		MessageID:   "om_image",
+		ChatID:      "oc",
+		ChatType:    ChatTypeP2P,
+		Body:        "[Image]",
+		MessageType: "image",
+	})
+
+	if cm.Type != channel.MsgTypeImage {
+		t.Fatalf("image must normalize to image, got %q", cm.Type)
+	}
+	if cm.Text != "[Image]" {
+		t.Fatalf("image placeholder lost during normalization: %q", cm.Text)
+	}
+}
+
 func TestChannelMsgType(t *testing.T) {
 	cases := map[string]channel.MsgType{
 		"":              channel.MsgTypeText,
