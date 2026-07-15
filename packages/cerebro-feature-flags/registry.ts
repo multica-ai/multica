@@ -168,6 +168,7 @@ export type CerebroFlagKey =
   | "cerebro_tasks"
   | "cerebro_pin_input"
   | "cerebro_workflows"
+  | "cerebro_evals"
   | "cerebro_workflow_hooks"
   | "cerebro_workflow_step_model_override"
   | "cerebro_skill_mention"
@@ -539,6 +540,7 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   cerebro_browser: false,
   cerebro_pin_input: true,
   cerebro_workflows: false,
+  cerebro_evals: false,
   cerebro_workflow_hooks: false,
   cerebro_workflow_step_model_override: true,
   cerebro_skill_mention: true,
@@ -1255,6 +1257,13 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     group: "workspace",
     description:
       "Enable the cerebro workflow engine and the /:workspace/workflows page (data-driven status/trigger rules, builder UI, run log). Server-side execution is additionally gated by the CEREBRO_WORKFLOWS_ENABLED env var.",
+  },
+  {
+    key: "cerebro_evals",
+    label: "Eval catalog",
+    group: "workspace",
+    description:
+      "Enable the first-class Evals catalog under Workflows, including versioned contracts, run history, and blocking workflow-gate bindings.",
   },
   {
     key: "cerebro_workflow_hooks",

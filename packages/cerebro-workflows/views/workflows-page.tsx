@@ -30,6 +30,7 @@ import type { CerebroWorkflow } from "../core/types";
 // the server unless CEREBRO_WORKFLOWS_ENABLED is set there.
 export function WorkflowsPage() {
   const enabled = useFeatureFlag("cerebro_workflows");
+  const evalsEnabled = useFeatureFlag("cerebro_evals");
   const hooksEnabled = useFeatureFlag("cerebro_workflow_hooks");
   const workspace = useCurrentWorkspace();
   const navigation = useNavigation();
@@ -74,6 +75,15 @@ export function WorkflowsPage() {
           </p>
         </div>
         <div className="flex items-center gap-2">
+          {evalsEnabled && (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => navigation.push(`/${workspace.slug}/workflows/evals`)}
+            >
+              Eval catalog
+            </Button>
+          )}
           {hooksEnabled && <Button
             size="sm"
             variant="outline"

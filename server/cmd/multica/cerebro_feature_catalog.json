@@ -379,6 +379,13 @@
       "default": false
     },
     {
+      "key": "cerebro_evals",
+      "label": "Eval catalog",
+      "description": "Enable the first-class Evals catalog under Workflows, including versioned contracts, run history, and blocking workflow-gate bindings.",
+      "group": "workspace",
+      "default": false
+    },
+    {
       "key": "cerebro_workflow_hooks",
       "label": "Workflow hooks",
       "description": "Enable reusable trigger, scope, filter, decision, and action hooks inside the Workflow engine. Server-side enforcement additionally requires CEREBRO_WORKFLOW_HOOKS_ENABLED.",

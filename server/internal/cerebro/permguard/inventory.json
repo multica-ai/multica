@@ -325,6 +325,14 @@
       "gate": "via:POST /api/cerebro/sprints/{sprintID}/complete"
     },
     {
+      "id": "DELETE /api/cerebro/evals/bindings/{bindingId}",
+      "gate": "workspace_member"
+    },
+    {
+      "id": "DELETE /api/cerebro/evals/{id}",
+      "gate": "workspace_member"
+    },
+    {
       "id": "DELETE /api/cerebro/status-models/default",
       "gate": "workspace_admin"
     },
@@ -871,6 +879,18 @@
     {
       "id": "POST /api/cerebro/session-modes/{mode}/restore",
       "gate": "workspace_admin + human_only"
+    },
+    {
+      "id": "POST /api/cerebro/evals/",
+      "gate": "workspace_member"
+    },
+    {
+      "id": "POST /api/cerebro/evals/bindings",
+      "gate": "workspace_member"
+    },
+    {
+      "id": "POST /api/cerebro/evals/{id}/runs",
+      "gate": "workspace_member"
     },
     {
       "id": "POST /api/cerebro/workflows/",
@@ -1737,6 +1757,10 @@
       "gate": "workspace_admin"
     },
     {
+      "id": "PUT /api/cerebro/evals/{id}",
+      "gate": "workspace_member"
+    },
+    {
       "id": "PUT /api/cerebro/strategy-items/{id}",
       "gate": "workspace_member"
     },
@@ -2059,6 +2083,10 @@
       "gate": "via:PUT /api/work-sessions/{id}/complete"
     },
     {
+      "id": "bind_eval",
+      "gate": "via:POST /api/cerebro/evals/bindings"
+    },
+    {
       "id": "create_artifact",
       "gate": "via:POST /api/artifacts/"
     },
@@ -2069,6 +2097,10 @@
     {
       "id": "create_connection",
       "gate": "via:POST /api/workspaces/{id}/connections"
+    },
+    {
+      "id": "create_eval",
+      "gate": "via:POST /api/cerebro/evals/"
     },
     {
       "id": "create_workflow",
@@ -2087,12 +2119,20 @@
       "gate": "via:DELETE /api/workspaces/{id}/connections/{connId}"
     },
     {
+      "id": "delete_eval",
+      "gate": "via:DELETE /api/cerebro/evals/{id}"
+    },
+    {
       "id": "delete_workflow",
       "gate": "via:DELETE /api/cerebro/workflows/{id}"
     },
     {
       "id": "get_connection",
       "exempt": "read-only — wraps GET /api/workspaces/{id}/connections/{connId}"
+    },
+    {
+      "id": "get_eval",
+      "exempt": "read-only — wraps GET /api/cerebro/evals/{id}"
     },
     {
       "id": "get_active_workflow",
@@ -2115,6 +2155,18 @@
       "exempt": "read-only — wraps GET /api/workspaces/{id}/connections"
     },
     {
+      "id": "list_eval_bindings",
+      "exempt": "read-only — wraps GET /api/cerebro/evals/bindings"
+    },
+    {
+      "id": "list_eval_runs",
+      "exempt": "read-only — wraps GET /api/cerebro/evals/{id}/runs"
+    },
+    {
+      "id": "list_evals",
+      "exempt": "read-only — wraps GET /api/cerebro/evals"
+    },
+    {
       "id": "list_workflows",
       "exempt": "read-only — wraps GET /api/cerebro/workflows"
     },
@@ -2129,6 +2181,10 @@
     {
       "id": "publish_workflow_hook",
       "gate": "via:POST /api/cerebro/workflow-hooks/{id}/publish"
+    },
+    {
+      "id": "record_eval_run",
+      "gate": "via:POST /api/cerebro/evals/{id}/runs"
     },
     {
       "id": "test_workflow_hook",
@@ -2147,12 +2203,20 @@
       "gate": "via:PUT /api/workspaces/{id}/connections/{connId}"
     },
     {
+      "id": "update_eval",
+      "gate": "via:PUT /api/cerebro/evals/{id}"
+    },
+    {
       "id": "update_workflow",
       "gate": "via:PUT /api/cerebro/workflows/{id}"
     },
     {
       "id": "update_workflow_hook",
       "gate": "via:PUT /api/cerebro/workflow-hooks/{id}"
+    },
+    {
+      "id": "unbind_eval",
+      "gate": "via:DELETE /api/cerebro/evals/bindings/{bindingId}"
     },
     {
       "id": "create_issue",
@@ -3443,6 +3507,46 @@
     {
       "id": "workflow list",
       "exempt": "read-only — wraps GET /api/cerebro/workflows"
+    },
+    {
+      "id": "workflow eval list",
+      "exempt": "read-only — wraps GET /api/cerebro/evals"
+    },
+    {
+      "id": "workflow eval get",
+      "exempt": "read-only — wraps GET /api/cerebro/evals/{id}"
+    },
+    {
+      "id": "workflow eval create",
+      "gate": "via:POST /api/cerebro/evals/"
+    },
+    {
+      "id": "workflow eval update",
+      "gate": "via:PUT /api/cerebro/evals/{id}"
+    },
+    {
+      "id": "workflow eval delete",
+      "gate": "via:DELETE /api/cerebro/evals/{id}"
+    },
+    {
+      "id": "workflow eval runs",
+      "exempt": "read-only — wraps GET /api/cerebro/evals/{id}/runs"
+    },
+    {
+      "id": "workflow eval record-run",
+      "gate": "via:POST /api/cerebro/evals/{id}/runs"
+    },
+    {
+      "id": "workflow eval bindings",
+      "exempt": "read-only — wraps GET /api/cerebro/evals/bindings"
+    },
+    {
+      "id": "workflow eval bind",
+      "gate": "via:POST /api/cerebro/evals/bindings"
+    },
+    {
+      "id": "workflow eval unbind",
+      "gate": "via:DELETE /api/cerebro/evals/bindings/{bindingId}"
     },
     {
       "id": "workflow hook list",

@@ -11,6 +11,7 @@ import (
 
 func registerWorkflowTools(srv *mcp.Server, client *cli.APIClient) {
 	registerWorkflowHookTools(srv, client)
+	registerEvalTools(srv, client)
 	objectSchema := map[string]any{"type": "object", "description": "Complete workflow document accepted by /api/cerebro/workflows. For an Issue workflow set workflow_type=issue_loop and provide loop_spec."}
 	idProps := map[string]any{"workflow_id": map[string]any{"type": "string", "description": "Workflow UUID"}}
 
