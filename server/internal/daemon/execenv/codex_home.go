@@ -80,9 +80,6 @@ func prepareCodexHome(codexHome string, logger *slog.Logger) error {
 // daemon-managed sandbox block picked by codexSandboxPolicyFor.
 func prepareCodexHomeWithOpts(codexHome string, opts CodexHomeOptions, logger *slog.Logger) error {
 	sharedHome := resolveSharedCodexHome()
-	if inherited := inheritedManagedCodexHomeWithoutAuth(); inherited && !isReadableRegularFile(filepath.Join(sharedHome, "auth.json")) && codexFileAuthRequired(sharedHome) {
-		return errors.New("codex file authentication requires readable auth.json")
-	}
 
 	if err := os.MkdirAll(codexHome, 0o755); err != nil {
 		return fmt.Errorf("create codex-home dir: %w", err)
@@ -100,7 +97,7 @@ func prepareCodexHomeWithOpts(codexHome string, opts CodexHomeOptions, logger *s
 		src := filepath.Join(sharedHome, name)
 		dst := filepath.Join(codexHome, name)
 		if err := ensureSymlink(src, dst); err != nil {
-			logger.Warn("execenv: codex-home symlink failed", "file", name, "error", err)
+			return errors.New("provision codex auth file failed")
 		}
 	}
 
@@ -109,6 +106,9 @@ func prepareCodexHomeWithOpts(codexHome string, opts CodexHomeOptions, logger *s
 	// per-task home is tracking the shared ~/.codex/auth.json or has drifted
 	// into a stale local copy.
 	logCodexAuthState(filepath.Join(codexHome, "auth.json"), logger)
+	if err := validateCodexAuthDestination(sharedHome, filepath.Join(codexHome, "auth.json")); err != nil {
+		return err
+	}
 
 	// Sync config files from the shared source (isolated per task).
 	for _, name := range codexCopiedFiles {
@@ -170,7 +170,7 @@ func resolveSharedCodexHome() string {
 	if v := os.Getenv("CODEX_HOME"); v != "" {
 		abs, err := filepath.Abs(v)
 		if err == nil {
-			if isManagedCodexHome(abs) && !isReadableRegularFile(filepath.Join(abs, "auth.json")) {
+			if isManagedCodexHome(abs) {
 				return defaultCodexHome()
 			}
 			return abs
@@ -216,15 +216,6 @@ func isReadableRegularFile(path string) bool {
 	return f.Close() == nil
 }
 
-func inheritedManagedCodexHomeWithoutAuth() bool {
-	v := os.Getenv("CODEX_HOME")
-	if v == "" {
-		return false
-	}
-	abs, err := filepath.Abs(v)
-	return err == nil && isManagedCodexHome(abs) && !isReadableRegularFile(filepath.Join(abs, "auth.json"))
-}
-
 func codexFileAuthRequired(sharedHome string) bool {
 	if strings.TrimSpace(os.Getenv("OPENAI_API_KEY")) != "" {
 		return false
@@ -244,6 +235,13 @@ func codexFileAuthRequired(sharedHome string) bool {
 	}
 	provider, ok := cfg.ModelProviders[cfg.ModelProvider]
 	return !ok || provider.EnvKey == "" || strings.TrimSpace(os.Getenv(provider.EnvKey)) == ""
+}
+
+func validateCodexAuthDestination(sharedHome, destination string) error {
+	if codexFileAuthRequired(sharedHome) && !isReadableRegularFile(destination) {
+		return errors.New("codex file authentication requires readable provisioned auth.json")
+	}
+	return nil
 }
 
 // codexSessionStateGlobs are the session-derived SQLite state Codex builds

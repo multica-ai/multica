@@ -40,6 +40,42 @@ func TestPrepareCodexHomeFallsBackFromDeletedManagedHome(t *testing.T) {
 	}
 }
 
+func TestPrepareCodexHomeNeverAnchorsToLiveManagedHome(t *testing.T) {
+	root := t.TempDir()
+	if err := EnsureWorkspacesRootMarker(root); err != nil {
+		t.Fatal(err)
+	}
+	managed := filepath.Join(root, "ws", "task-a", "codex-home")
+	if err := os.MkdirAll(managed, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(managed, "auth.json"), []byte("managed"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	home := t.TempDir()
+	stable := filepath.Join(home, ".codex")
+	if err := os.MkdirAll(stable, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(stable, "auth.json"), []byte("stable"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", home)
+	t.Setenv("CODEX_HOME", managed)
+	t.Setenv("OPENAI_API_KEY", "")
+	dst := filepath.Join(root, "ws", "task-b", "codex-home")
+	if err := prepareCodexHome(dst, testLogger()); err != nil {
+		t.Fatalf("prepare: %v", err)
+	}
+	if err := os.RemoveAll(filepath.Dir(managed)); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(dst, "auth.json"))
+	if err != nil || string(data) != "stable" {
+		t.Fatalf("destination after cleanup: data=%q err=%v", data, err)
+	}
+}
+
 func TestPrepareCodexHomeFailsClosedWithoutFileAuth(t *testing.T) {
 	root := t.TempDir()
 	if err := EnsureWorkspacesRootMarker(root); err != nil {
@@ -49,8 +85,64 @@ func TestPrepareCodexHomeFailsClosedWithoutFileAuth(t *testing.T) {
 	t.Setenv("CODEX_HOME", filepath.Join(root, "ws", "task", "codex-home"))
 	t.Setenv("OPENAI_API_KEY", "")
 	err := prepareCodexHome(filepath.Join(t.TempDir(), "codex-home"), testLogger())
-	if err == nil || !strings.Contains(err.Error(), "readable auth.json") {
+	if err == nil || !strings.Contains(err.Error(), "readable provisioned auth.json") {
 		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestPrepareCodexHomeFailsClosedForDefaultAndCustomHomes(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		custom bool
+	}{{"default", false}, {"custom", true}} {
+		t.Run(tc.name, func(t *testing.T) {
+			home := t.TempDir()
+			t.Setenv("HOME", home)
+			t.Setenv("OPENAI_API_KEY", "")
+			if tc.custom {
+				t.Setenv("CODEX_HOME", filepath.Join(home, "stable-custom"))
+			} else {
+				t.Setenv("CODEX_HOME", "")
+			}
+			err := prepareCodexHome(filepath.Join(t.TempDir(), "codex-home"), testLogger())
+			if err == nil || !strings.Contains(err.Error(), "readable provisioned auth.json") {
+				t.Fatalf("error = %v", err)
+			}
+		})
+	}
+}
+
+func TestPrepareCodexHomeFailsWhenDestinationCannotBeProvisioned(t *testing.T) {
+	shared := t.TempDir()
+	if err := os.WriteFile(filepath.Join(shared, "auth.json"), []byte("auth"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CODEX_HOME", shared)
+	t.Setenv("OPENAI_API_KEY", "")
+	dst := filepath.Join(t.TempDir(), "codex-home")
+	if err := os.MkdirAll(filepath.Join(dst, "auth.json"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dst, "auth.json", "blocker"), []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	err := prepareCodexHome(dst, testLogger())
+	if err == nil || !strings.Contains(err.Error(), "provision codex auth file") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestReuseReturnsNilWhenCodexAuthPreparationFails(t *testing.T) {
+	shared := t.TempDir()
+	t.Setenv("CODEX_HOME", shared)
+	t.Setenv("OPENAI_API_KEY", "")
+	root := t.TempDir()
+	workDir := filepath.Join(root, "workdir")
+	if err := os.MkdirAll(workDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if got := Reuse(ReuseParams{WorkDir: workDir, Provider: "codex"}, testLogger()); got != nil {
+		t.Fatalf("Reuse = %#v, want nil", got)
 	}
 }
 
@@ -95,5 +187,30 @@ func TestResolveSharedCodexHomeKeepsStableCustomHome(t *testing.T) {
 	t.Setenv("CODEX_HOME", custom)
 	if got := resolveSharedCodexHome(); got != custom {
 		t.Fatalf("got %q want %q", got, custom)
+	}
+}
+
+func TestManagedCodexHomeDetectionUsesDaemonMarker(t *testing.T) {
+	root := t.TempDir()
+	if err := EnsureWorkspacesRootMarker(root); err != nil {
+		t.Fatal(err)
+	}
+	if !isManagedCodexHome(filepath.Join(root, "ws", "task", "codex-home")) {
+		t.Fatal("marked task home not detected")
+	}
+	if isManagedCodexHome(filepath.Join(t.TempDir(), "codex-home")) {
+		t.Fatal("unmarked custom home detected as managed")
+	}
+}
+
+func TestValidateCodexAuthDestinationAcceptsWindowsCopyFallback(t *testing.T) {
+	shared := t.TempDir()
+	dst := filepath.Join(t.TempDir(), "auth.json")
+	if err := os.WriteFile(dst, []byte("copied-auth"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("OPENAI_API_KEY", "")
+	if err := validateCodexAuthDestination(shared, dst); err != nil {
+		t.Fatalf("regular-file fallback rejected: %v", err)
 	}
 }
