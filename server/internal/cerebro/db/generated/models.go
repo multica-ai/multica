@@ -909,6 +909,48 @@ type CerebroEntityFolderItem struct {
 	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
 }
 
+type CerebroEval struct {
+	ID            pgtype.UUID        `json:"id"`
+	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
+	EvalKey       string             `json:"eval_key"`
+	Version       string             `json:"version"`
+	Title         string             `json:"title"`
+	Description   string             `json:"description"`
+	Status        string             `json:"status"`
+	Owner         []byte             `json:"owner"`
+	Objective     string             `json:"objective"`
+	Target        []byte             `json:"target"`
+	Datasets      []byte             `json:"datasets"`
+	Graders       []byte             `json:"graders"`
+	Thresholds    []byte             `json:"thresholds"`
+	Runner        []byte             `json:"runner"`
+	Source        []byte             `json:"source"`
+	CreatedByID   pgtype.UUID        `json:"created_by_id"`
+	CreatedByType string             `json:"created_by_type"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
+}
+
+type CerebroEvalRun struct {
+	ID                 pgtype.UUID        `json:"id"`
+	WorkspaceID        pgtype.UUID        `json:"workspace_id"`
+	EvalID             pgtype.UUID        `json:"eval_id"`
+	EvalVersion        string             `json:"eval_version"`
+	TargetVersion      string             `json:"target_version"`
+	WorkflowID         pgtype.UUID        `json:"workflow_id"`
+	IssueID            pgtype.UUID        `json:"issue_id"`
+	Status             string             `json:"status"`
+	Results            []byte             `json:"results"`
+	EvidenceArtifactID pgtype.UUID        `json:"evidence_artifact_id"`
+	CostCents          int64              `json:"cost_cents"`
+	LatencyMs          int64              `json:"latency_ms"`
+	CreatedByID        pgtype.UUID        `json:"created_by_id"`
+	CreatedByType      string             `json:"created_by_type"`
+	StartedAt          pgtype.Timestamptz `json:"started_at"`
+	CompletedAt        pgtype.Timestamptz `json:"completed_at"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+}
+
 type CerebroExchangeRate struct {
 	BaseCurrency   string             `json:"base_currency"`
 	TargetCurrency string             `json:"target_currency"`
@@ -1701,6 +1743,17 @@ type CerebroWorkflowCronState struct {
 	WorkflowID  pgtype.UUID        `json:"workflow_id"`
 	LastFiredAt pgtype.Timestamptz `json:"last_fired_at"`
 	NextFireAt  pgtype.Timestamptz `json:"next_fire_at"`
+}
+
+type CerebroWorkflowEvalBinding struct {
+	ID          pgtype.UUID        `json:"id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	WorkflowID  pgtype.UUID        `json:"workflow_id"`
+	EvalID      pgtype.UUID        `json:"eval_id"`
+	Phase       string             `json:"phase"`
+	Blocking    bool               `json:"blocking"`
+	CreatedByID pgtype.UUID        `json:"created_by_id"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
 type CerebroWorkflowHookActionRun struct {
