@@ -16,6 +16,19 @@ WHERE id = $1;
 SELECT * FROM agent
 WHERE id = $1 AND workspace_id = $2;
 
+-- GetAgentProvider returns the provider of the runtime this agent is pinned to.
+--
+-- FIR-3212: an agent's provider IS deterministic at config time. agent.runtime_id
+-- is NOT NULL with an FK to agent_runtime (migration 004), agent_runtime.provider
+-- is NOT NULL, and agent_task_queue.runtime_id is copied from agent.runtime_id —
+-- so every task for an agent runs on that one runtime's provider. This is what
+-- lets Agent Office reject a setting the agent's own runtime cannot honour,
+-- instead of storing it, versioning it, approving it and dropping it at run time.
+-- name: GetAgentProvider :one
+SELECT ar.provider FROM agent a
+JOIN agent_runtime ar ON ar.id = a.runtime_id
+WHERE a.id = $1;
+
 -- ListAgentSkillIDsForContext returns the skill ids currently bound to the
 -- agent, in a stable order so two snapshots of the same binding set compare
 -- equal byte-for-byte.

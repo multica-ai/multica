@@ -1,6 +1,7 @@
 package agentoffice
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 
@@ -15,6 +16,9 @@ import (
 var (
 	errStaleProposal = versioning.ErrStaleProposal
 	errNotPending    = versioning.ErrNotPending
+	// errIncompatibleSystemPromptMode (FIR-3212) is a caller error, not a
+	// conflict: the proposal asks for a mode the agent's runtime cannot honour.
+	errIncompatibleSystemPromptMode = errors.New("incompatible system_prompt_mode")
 )
 
 // approveAndMerge applies a pending change request in one transaction: lock the
@@ -51,6 +55,21 @@ func (h *Handler) approveAndMerge(r *http.Request, agent cerebrodb.Agent, cr cer
 	}
 
 	snap := DecodeSnapshot(locked.ProposedSnapshot)
+	// FIR-3212: re-check the mode against the agent's CURRENT runtime, inside the
+	// tx. The create path already checked it, but an agent can be moved to another
+	// runtime between proposing and approving — so a combination that was valid at
+	// propose time can be impossible by the time it is rolled out. Without this,
+	// approval is exactly the path that ships a setting the runtime silently drops.
+	if mode, present := rawSystemPromptMode(snap); present {
+		provider, perr := qtx.GetAgentProvider(ctx, agent.ID)
+		if perr != nil {
+			// Unresolvable runtime is "no authoritative answer", never a rejection.
+			provider = ""
+		}
+		if verr := ValidateSystemPromptModeForProvider(provider, mode); verr != nil {
+			return cerebrodb.AgentChangeRequest{}, fmt.Errorf("%w: %s", errIncompatibleSystemPromptMode, verr)
+		}
+	}
 	if _, err := h.Svc.ApplySnapshotTx(ctx, qtx, agent.ID, snap, locked.ProposedVersion); err != nil {
 		return cerebrodb.AgentChangeRequest{}, err
 	}
@@ -80,5 +99,10 @@ func (h *Handler) approveAndMerge(r *http.Request, agent cerebrodb.Agent, cr cer
 
 // statusForMergeError maps a merge error to an HTTP status.
 func statusForMergeError(err error) int {
+	// FIR-3212: an incompatible mode is the caller's input being wrong, so it is
+	// a 400 — not the 409 the versioning sentinels mean, nor a 500.
+	if errors.Is(err, errIncompatibleSystemPromptMode) {
+		return http.StatusBadRequest
+	}
 	return versioning.StatusForMergeError(err)
 }

@@ -133,6 +133,20 @@ jobs:
           go-version: "1.26.1"
           cache-dependency-path: server/go.sum
 
+      # FIR-3212: no job ran sqlc, and `sqlc generate` is all-or-nothing across
+      # both packages — so three unparsable queries silently stopped ALL
+      # regeneration from 2026-06-29 until they were found by hand. Every query
+      # merged in between drifted from its generated code, and three query files
+      # ended up with no generated code at all. `sqlc diff` fails on both halves
+      # of that failure: a query sqlc cannot parse, and generated code that no
+      # longer matches its .sql source. Keep the version pinned to the one
+      # developers run via `make sqlc`.
+      - name: sqlc generated code is up to date
+        run: |
+          curl -fsSL https://downloads.sqlc.dev/sqlc_1.31.1_linux_amd64.tar.gz \
+            | sudo tar -xz -C /usr/local/bin sqlc
+          cd server && sqlc diff
+
       - name: Build
         run: cd server && go build ./...
 

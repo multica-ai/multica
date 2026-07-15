@@ -84,7 +84,8 @@ RETURNING id, workspace_id, project_id, name, enabled,
           created_by_id, created_by_type,
           created_at, updated_at,
           editor_mode, editor_layout,
-          inbound_webhook_token, inbound_signing_secret, outbound_webhook_secret
+          inbound_webhook_token, inbound_signing_secret, outbound_webhook_secret,
+          workflow_type, loop_spec, generated_from_workflow_id, generated_for_issue_id
 `
 
 type CreateCerebroWorkflowParams struct {
@@ -140,6 +141,10 @@ func (q *Queries) CreateCerebroWorkflow(ctx context.Context, arg CreateCerebroWo
 		&i.InboundWebhookToken,
 		&i.InboundSigningSecret,
 		&i.OutboundWebhookSecret,
+		&i.WorkflowType,
+		&i.LoopSpec,
+		&i.GeneratedFromWorkflowID,
+		&i.GeneratedForIssueID,
 	)
 	return i, err
 }
@@ -239,7 +244,8 @@ SELECT id, workspace_id, project_id, name, enabled,
        created_by_id, created_by_type,
        created_at, updated_at,
        editor_mode, editor_layout,
-       inbound_webhook_token, inbound_signing_secret, outbound_webhook_secret
+       inbound_webhook_token, inbound_signing_secret, outbound_webhook_secret,
+       workflow_type, loop_spec, generated_from_workflow_id, generated_for_issue_id
 FROM cerebro_workflow
 WHERE id = $1
 `
@@ -267,6 +273,10 @@ func (q *Queries) GetCerebroWorkflow(ctx context.Context, id pgtype.UUID) (Cereb
 		&i.InboundWebhookToken,
 		&i.InboundSigningSecret,
 		&i.OutboundWebhookSecret,
+		&i.WorkflowType,
+		&i.LoopSpec,
+		&i.GeneratedFromWorkflowID,
+		&i.GeneratedForIssueID,
 	)
 	return i, err
 }
@@ -278,7 +288,8 @@ SELECT id, workspace_id, project_id, name, enabled,
        created_by_id, created_by_type,
        created_at, updated_at,
        editor_mode, editor_layout,
-       inbound_webhook_token, inbound_signing_secret, outbound_webhook_secret
+       inbound_webhook_token, inbound_signing_secret, outbound_webhook_secret,
+       workflow_type, loop_spec, generated_from_workflow_id, generated_for_issue_id
 FROM cerebro_workflow
 WHERE inbound_webhook_token = $1
 LIMIT 1
@@ -310,6 +321,10 @@ func (q *Queries) GetCerebroWorkflowByInboundToken(ctx context.Context, inboundW
 		&i.InboundWebhookToken,
 		&i.InboundSigningSecret,
 		&i.OutboundWebhookSecret,
+		&i.WorkflowType,
+		&i.LoopSpec,
+		&i.GeneratedFromWorkflowID,
+		&i.GeneratedForIssueID,
 	)
 	return i, err
 }
@@ -406,7 +421,8 @@ SELECT id, workspace_id, project_id, name, enabled,
        created_by_id, created_by_type,
        created_at, updated_at,
        editor_mode, editor_layout,
-       inbound_webhook_token, inbound_signing_secret, outbound_webhook_secret
+       inbound_webhook_token, inbound_signing_secret, outbound_webhook_secret,
+       workflow_type, loop_spec, generated_from_workflow_id, generated_for_issue_id
 FROM cerebro_workflow
 WHERE workspace_id = $1
 ORDER BY created_at DESC
@@ -441,6 +457,10 @@ func (q *Queries) ListCerebroWorkflows(ctx context.Context, workspaceID pgtype.U
 			&i.InboundWebhookToken,
 			&i.InboundSigningSecret,
 			&i.OutboundWebhookSecret,
+			&i.WorkflowType,
+			&i.LoopSpec,
+			&i.GeneratedFromWorkflowID,
+			&i.GeneratedForIssueID,
 		); err != nil {
 			return nil, err
 		}
@@ -459,7 +479,8 @@ SELECT id, workspace_id, project_id, name, enabled,
        created_by_id, created_by_type,
        created_at, updated_at,
        editor_mode, editor_layout,
-       inbound_webhook_token, inbound_signing_secret, outbound_webhook_secret
+       inbound_webhook_token, inbound_signing_secret, outbound_webhook_secret,
+       workflow_type, loop_spec, generated_from_workflow_id, generated_for_issue_id
 FROM cerebro_workflow
 WHERE workspace_id = $1
   AND trigger_type = $2
@@ -504,6 +525,10 @@ func (q *Queries) ListCerebroWorkflowsForTrigger(ctx context.Context, arg ListCe
 			&i.InboundWebhookToken,
 			&i.InboundSigningSecret,
 			&i.OutboundWebhookSecret,
+			&i.WorkflowType,
+			&i.LoopSpec,
+			&i.GeneratedFromWorkflowID,
+			&i.GeneratedForIssueID,
 		); err != nil {
 			return nil, err
 		}
@@ -584,7 +609,8 @@ SELECT id, workspace_id, project_id, name, enabled,
        created_by_id, created_by_type,
        created_at, updated_at,
        editor_mode, editor_layout,
-       inbound_webhook_token, inbound_signing_secret, outbound_webhook_secret
+       inbound_webhook_token, inbound_signing_secret, outbound_webhook_secret,
+       workflow_type, loop_spec, generated_from_workflow_id, generated_for_issue_id
 FROM cerebro_workflow
 WHERE trigger_type = 'cron'
   AND enabled = TRUE
@@ -622,6 +648,10 @@ func (q *Queries) ListEnabledCronWorkflowsAcrossWorkspaces(ctx context.Context) 
 			&i.InboundWebhookToken,
 			&i.InboundSigningSecret,
 			&i.OutboundWebhookSecret,
+			&i.WorkflowType,
+			&i.LoopSpec,
+			&i.GeneratedFromWorkflowID,
+			&i.GeneratedForIssueID,
 		); err != nil {
 			return nil, err
 		}
@@ -823,7 +853,8 @@ RETURNING id, workspace_id, project_id, name, enabled,
           created_by_id, created_by_type,
           created_at, updated_at,
           editor_mode, editor_layout,
-          inbound_webhook_token, inbound_signing_secret, outbound_webhook_secret
+          inbound_webhook_token, inbound_signing_secret, outbound_webhook_secret,
+          workflow_type, loop_spec, generated_from_workflow_id, generated_for_issue_id
 `
 
 type UpdateCerebroWorkflowParams struct {
@@ -880,6 +911,10 @@ func (q *Queries) UpdateCerebroWorkflow(ctx context.Context, arg UpdateCerebroWo
 		&i.InboundWebhookToken,
 		&i.InboundSigningSecret,
 		&i.OutboundWebhookSecret,
+		&i.WorkflowType,
+		&i.LoopSpec,
+		&i.GeneratedFromWorkflowID,
+		&i.GeneratedForIssueID,
 	)
 	return i, err
 }

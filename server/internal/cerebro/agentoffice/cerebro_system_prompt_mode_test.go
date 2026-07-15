@@ -153,3 +153,66 @@ func TestDiffSnapshotsCatchesSystemPromptModeChange(t *testing.T) {
 		t.Errorf("a prompt-mode flip must appear in the review diff, got:\n%s", diff)
 	}
 }
+
+// FIR-3212 review finding 2: the vocabulary check alone let Agent Office store,
+// version, approve and roll out a mode the agent's own runtime cannot honour —
+// "append" to Codex (whose channel always replaces), or any mode at all to
+// Hermes (which discards a system prompt outright). The setting then vanished
+// silently at run time, which is the exact dishonesty this issue exists to
+// remove. An agent's provider IS knowable here: agent.runtime_id is NOT NULL and
+// agent_runtime.provider is NOT NULL, so every task for the agent runs on that
+// one provider.
+func TestSystemPromptModeForProviderRejectsUnsupportedCombinations(t *testing.T) {
+	for _, tc := range []struct{ provider, mode string }{
+		{"codex", "append"},   // codex replaces; it cannot append
+		{"codex", "prepend"},  // no prepend channel
+		{"claude", "prepend"}, // claude is native append/replace only
+		{"hermes", "append"},  // hermes discards the system prompt entirely
+		{"hermes", "replace"},
+		{"hermes", "prepend"},
+		{"kiro", "replace"}, // prepend-only runtime
+		{"kiro", "append"},
+	} {
+		if err := ValidateSystemPromptModeForProvider(tc.provider, tc.mode); err == nil {
+			t.Errorf("%s/%s: expected rejection, got nil", tc.provider, tc.mode)
+		}
+	}
+}
+
+func TestSystemPromptModeForProviderAllowsSupportedCombinations(t *testing.T) {
+	for _, tc := range []struct{ provider, mode string }{
+		{"claude", "append"},
+		{"claude", "replace"},
+		{"codex", "replace"},
+		{"kiro", "prepend"},
+		// The default means "do what you already do" — never a change, so it is
+		// valid even on a runtime that ignores system prompts.
+		{"hermes", ""},
+		{"codex", ""},
+	} {
+		if err := ValidateSystemPromptModeForProvider(tc.provider, tc.mode); err != nil {
+			t.Errorf("%s/%s: expected accept, got %v", tc.provider, tc.mode, err)
+		}
+	}
+}
+
+// The support table's own contract: ok=false means "no authoritative answer",
+// never "supports nothing". Rejecting here would block configuring an agent on a
+// runtime we simply have not catalogued yet.
+func TestSystemPromptModeForUnknownProviderIsNotRejected(t *testing.T) {
+	if err := ValidateSystemPromptModeForProvider("some-runtime-we-have-never-seen", "replace"); err != nil {
+		t.Errorf("unknown provider must not be rejected, got %v", err)
+	}
+	// An empty provider (runtime not resolvable) must not block configuration.
+	if err := ValidateSystemPromptModeForProvider("", "replace"); err != nil {
+		t.Errorf("empty provider must not be rejected, got %v", err)
+	}
+}
+
+// An unknown mode is still rejected regardless of provider — the vocabulary
+// check must not be lost when the provider check is added.
+func TestSystemPromptModeForProviderStillRejectsUnknownVocabulary(t *testing.T) {
+	if err := ValidateSystemPromptModeForProvider("claude", "replace-all"); err == nil {
+		t.Error("unknown mode must be rejected even on a supported provider")
+	}
+}

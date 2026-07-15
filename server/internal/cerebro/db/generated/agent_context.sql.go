@@ -449,6 +449,27 @@ func (q *Queries) GetAgentContextVersion(ctx context.Context, arg GetAgentContex
 	return i, err
 }
 
+const getAgentProvider = `-- name: GetAgentProvider :one
+SELECT ar.provider FROM agent a
+JOIN agent_runtime ar ON ar.id = a.runtime_id
+WHERE a.id = $1
+`
+
+// GetAgentProvider returns the provider of the runtime this agent is pinned to.
+//
+// FIR-3212: an agent's provider IS deterministic at config time. agent.runtime_id
+// is NOT NULL with an FK to agent_runtime (migration 004), agent_runtime.provider
+// is NOT NULL, and agent_task_queue.runtime_id is copied from agent.runtime_id —
+// so every task for an agent runs on that one runtime's provider. This is what
+// lets Agent Office reject a setting the agent's own runtime cannot honour,
+// instead of storing it, versioning it, approving it and dropping it at run time.
+func (q *Queries) GetAgentProvider(ctx context.Context, id pgtype.UUID) (string, error) {
+	row := q.db.QueryRow(ctx, getAgentProvider, id)
+	var provider string
+	err := row.Scan(&provider)
+	return provider, err
+}
+
 const getLatestAgentContextVersion = `-- name: GetLatestAgentContextVersion :one
 SELECT id, agent_id, version, snapshot, description, created_by, created_at FROM agent_context_version
 WHERE agent_id = $1

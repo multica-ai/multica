@@ -53,7 +53,7 @@ func (q *Queries) CreateChatMessage(ctx context.Context, arg CreateChatMessagePa
 const createChatSession = `-- name: CreateChatSession :one
 INSERT INTO chat_session (workspace_id, agent_id, creator_id, title, runtime_id)
 VALUES ($1, $2, $3, $4, (SELECT runtime_id FROM agent WHERE id = $2))
-RETURNING id, workspace_id, agent_id, creator_id, title, session_id, work_dir, status, created_at, updated_at, unread_since, runtime_id, muted_until
+RETURNING id, workspace_id, agent_id, creator_id, title, session_id, work_dir, status, created_at, updated_at, unread_since, runtime_id, muted_until, mode
 `
 
 type CreateChatSessionParams struct {
@@ -86,6 +86,7 @@ func (q *Queries) CreateChatSession(ctx context.Context, arg CreateChatSessionPa
 		&i.UnreadSince,
 		&i.RuntimeID,
 		&i.MutedUntil,
+		&i.Mode,
 	)
 	return i, err
 }
@@ -238,7 +239,7 @@ func (q *Queries) GetChatMessage(ctx context.Context, id pgtype.UUID) (ChatMessa
 }
 
 const getChatSession = `-- name: GetChatSession :one
-SELECT id, workspace_id, agent_id, creator_id, title, session_id, work_dir, status, created_at, updated_at, unread_since, runtime_id, muted_until FROM chat_session
+SELECT id, workspace_id, agent_id, creator_id, title, session_id, work_dir, status, created_at, updated_at, unread_since, runtime_id, muted_until, mode FROM chat_session
 WHERE id = $1
 `
 
@@ -259,12 +260,13 @@ func (q *Queries) GetChatSession(ctx context.Context, id pgtype.UUID) (ChatSessi
 		&i.UnreadSince,
 		&i.RuntimeID,
 		&i.MutedUntil,
+		&i.Mode,
 	)
 	return i, err
 }
 
 const getChatSessionInWorkspace = `-- name: GetChatSessionInWorkspace :one
-SELECT id, workspace_id, agent_id, creator_id, title, session_id, work_dir, status, created_at, updated_at, unread_since, runtime_id, muted_until FROM chat_session
+SELECT id, workspace_id, agent_id, creator_id, title, session_id, work_dir, status, created_at, updated_at, unread_since, runtime_id, muted_until, mode FROM chat_session
 WHERE id = $1 AND workspace_id = $2
 `
 
@@ -290,6 +292,7 @@ func (q *Queries) GetChatSessionInWorkspace(ctx context.Context, arg GetChatSess
 		&i.UnreadSince,
 		&i.RuntimeID,
 		&i.MutedUntil,
+		&i.Mode,
 	)
 	return i, err
 }
@@ -399,11 +402,11 @@ func (q *Queries) GetPendingChatTask(ctx context.Context, chatSessionID pgtype.U
 }
 
 const listAllChatSessionsByCreator = `-- name: ListAllChatSessionsByCreator :many
-SELECT cs.id, cs.workspace_id, cs.agent_id, cs.creator_id, cs.title, cs.session_id, cs.work_dir, cs.status, cs.created_at, cs.updated_at, cs.unread_since, cs.runtime_id, cs.muted_until,
+SELECT cs.id, cs.workspace_id, cs.agent_id, cs.creator_id, cs.title, cs.session_id, cs.work_dir, cs.status, cs.created_at, cs.updated_at, cs.unread_since, cs.runtime_id, cs.muted_until, cs.mode,
        (cs.unread_since IS NOT NULL)::bool AS has_unread
 FROM chat_session cs
 WHERE cs.workspace_id = $1 AND cs.creator_id = $2
-  AND NOT EXISTS (SELECT 1 FROM cerebro_chat_session_context ec WHERE ec.chat_session_id = cs.id AND ec.kind = 'api')
+  AND NOT EXISTS (SELECT 1 FROM cerebro_chat_session_context ec WHERE ec.chat_session_id = cs.id AND ec.kind = 'api') -- CEREBRO-PATCH(embedded-chat): API chats stay searchable but out of Inbox.
 ORDER BY cs.updated_at DESC
 `
 
@@ -426,6 +429,7 @@ type ListAllChatSessionsByCreatorRow struct {
 	UnreadSince pgtype.Timestamptz `json:"unread_since"`
 	RuntimeID   pgtype.UUID        `json:"runtime_id"`
 	MutedUntil  pgtype.Timestamptz `json:"muted_until"`
+	Mode        string             `json:"mode"`
 	HasUnread   bool               `json:"has_unread"`
 }
 
@@ -452,6 +456,7 @@ func (q *Queries) ListAllChatSessionsByCreator(ctx context.Context, arg ListAllC
 			&i.UnreadSince,
 			&i.RuntimeID,
 			&i.MutedUntil,
+			&i.Mode,
 			&i.HasUnread,
 		); err != nil {
 			return nil, err
@@ -465,7 +470,7 @@ func (q *Queries) ListAllChatSessionsByCreator(ctx context.Context, arg ListAllC
 }
 
 const listAllChatSessionsInWorkspace = `-- name: ListAllChatSessionsInWorkspace :many
-SELECT cs.id, cs.workspace_id, cs.agent_id, cs.creator_id, cs.title, cs.session_id, cs.work_dir, cs.status, cs.created_at, cs.updated_at, cs.unread_since, cs.runtime_id, cs.muted_until,
+SELECT cs.id, cs.workspace_id, cs.agent_id, cs.creator_id, cs.title, cs.session_id, cs.work_dir, cs.status, cs.created_at, cs.updated_at, cs.unread_since, cs.runtime_id, cs.muted_until, cs.mode,
        (cs.unread_since IS NOT NULL)::bool AS has_unread
 FROM chat_session cs
 WHERE cs.workspace_id = $1
@@ -486,6 +491,7 @@ type ListAllChatSessionsInWorkspaceRow struct {
 	UnreadSince pgtype.Timestamptz `json:"unread_since"`
 	RuntimeID   pgtype.UUID        `json:"runtime_id"`
 	MutedUntil  pgtype.Timestamptz `json:"muted_until"`
+	Mode        string             `json:"mode"`
 	HasUnread   bool               `json:"has_unread"`
 }
 
@@ -515,6 +521,7 @@ func (q *Queries) ListAllChatSessionsInWorkspace(ctx context.Context, workspaceI
 			&i.UnreadSince,
 			&i.RuntimeID,
 			&i.MutedUntil,
+			&i.Mode,
 			&i.HasUnread,
 		); err != nil {
 			return nil, err
@@ -528,11 +535,11 @@ func (q *Queries) ListAllChatSessionsInWorkspace(ctx context.Context, workspaceI
 }
 
 const listArchivedChatSessionsByCreator = `-- name: ListArchivedChatSessionsByCreator :many
-SELECT cs.id, cs.workspace_id, cs.agent_id, cs.creator_id, cs.title, cs.session_id, cs.work_dir, cs.status, cs.created_at, cs.updated_at, cs.unread_since, cs.runtime_id, cs.muted_until,
+SELECT cs.id, cs.workspace_id, cs.agent_id, cs.creator_id, cs.title, cs.session_id, cs.work_dir, cs.status, cs.created_at, cs.updated_at, cs.unread_since, cs.runtime_id, cs.muted_until, cs.mode,
        (cs.unread_since IS NOT NULL)::bool AS has_unread
 FROM chat_session cs
 WHERE cs.workspace_id = $1 AND cs.creator_id = $2 AND cs.status = 'archived'
-  AND NOT EXISTS (SELECT 1 FROM cerebro_chat_session_context ec WHERE ec.chat_session_id = cs.id AND ec.kind = 'api')
+  AND NOT EXISTS (SELECT 1 FROM cerebro_chat_session_context ec WHERE ec.chat_session_id = cs.id AND ec.kind = 'api') -- CEREBRO-PATCH(embedded-chat): API chats stay searchable but out of Inbox.
 ORDER BY cs.updated_at DESC
 `
 
@@ -555,6 +562,7 @@ type ListArchivedChatSessionsByCreatorRow struct {
 	UnreadSince pgtype.Timestamptz `json:"unread_since"`
 	RuntimeID   pgtype.UUID        `json:"runtime_id"`
 	MutedUntil  pgtype.Timestamptz `json:"muted_until"`
+	Mode        string             `json:"mode"`
 	HasUnread   bool               `json:"has_unread"`
 }
 
@@ -583,6 +591,7 @@ func (q *Queries) ListArchivedChatSessionsByCreator(ctx context.Context, arg Lis
 			&i.UnreadSince,
 			&i.RuntimeID,
 			&i.MutedUntil,
+			&i.Mode,
 			&i.HasUnread,
 		); err != nil {
 			return nil, err
@@ -685,11 +694,11 @@ func (q *Queries) ListChatMessagesPage(ctx context.Context, arg ListChatMessages
 }
 
 const listChatSessionsByCreator = `-- name: ListChatSessionsByCreator :many
-SELECT cs.id, cs.workspace_id, cs.agent_id, cs.creator_id, cs.title, cs.session_id, cs.work_dir, cs.status, cs.created_at, cs.updated_at, cs.unread_since, cs.runtime_id, cs.muted_until,
+SELECT cs.id, cs.workspace_id, cs.agent_id, cs.creator_id, cs.title, cs.session_id, cs.work_dir, cs.status, cs.created_at, cs.updated_at, cs.unread_since, cs.runtime_id, cs.muted_until, cs.mode,
        (cs.unread_since IS NOT NULL)::bool AS has_unread
 FROM chat_session cs
 WHERE cs.workspace_id = $1 AND cs.creator_id = $2 AND cs.status = 'active'
-  AND NOT EXISTS (SELECT 1 FROM cerebro_chat_session_context ec WHERE ec.chat_session_id = cs.id AND ec.kind = 'api')
+  AND NOT EXISTS (SELECT 1 FROM cerebro_chat_session_context ec WHERE ec.chat_session_id = cs.id AND ec.kind = 'api') -- CEREBRO-PATCH(embedded-chat): API chats stay searchable but out of Inbox.
 ORDER BY cs.updated_at DESC
 `
 
@@ -712,6 +721,7 @@ type ListChatSessionsByCreatorRow struct {
 	UnreadSince pgtype.Timestamptz `json:"unread_since"`
 	RuntimeID   pgtype.UUID        `json:"runtime_id"`
 	MutedUntil  pgtype.Timestamptz `json:"muted_until"`
+	Mode        string             `json:"mode"`
 	HasUnread   bool               `json:"has_unread"`
 }
 
@@ -741,6 +751,7 @@ func (q *Queries) ListChatSessionsByCreator(ctx context.Context, arg ListChatSes
 			&i.UnreadSince,
 			&i.RuntimeID,
 			&i.MutedUntil,
+			&i.Mode,
 			&i.HasUnread,
 		); err != nil {
 			return nil, err
@@ -1041,7 +1052,7 @@ func (q *Queries) UpdateChatSessionSession(ctx context.Context, arg UpdateChatSe
 const updateChatSessionStatus = `-- name: UpdateChatSessionStatus :one
 UPDATE chat_session SET status = $2, updated_at = now()
 WHERE id = $1
-RETURNING id, workspace_id, agent_id, creator_id, title, session_id, work_dir, status, created_at, updated_at, unread_since, runtime_id, muted_until
+RETURNING id, workspace_id, agent_id, creator_id, title, session_id, work_dir, status, created_at, updated_at, unread_since, runtime_id, muted_until, mode
 `
 
 type UpdateChatSessionStatusParams struct {
@@ -1069,6 +1080,7 @@ func (q *Queries) UpdateChatSessionStatus(ctx context.Context, arg UpdateChatSes
 		&i.UnreadSince,
 		&i.RuntimeID,
 		&i.MutedUntil,
+		&i.Mode,
 	)
 	return i, err
 }
@@ -1076,7 +1088,7 @@ func (q *Queries) UpdateChatSessionStatus(ctx context.Context, arg UpdateChatSes
 const updateChatSessionTitle = `-- name: UpdateChatSessionTitle :one
 UPDATE chat_session SET title = $2, updated_at = now()
 WHERE id = $1
-RETURNING id, workspace_id, agent_id, creator_id, title, session_id, work_dir, status, created_at, updated_at, unread_since, runtime_id, muted_until
+RETURNING id, workspace_id, agent_id, creator_id, title, session_id, work_dir, status, created_at, updated_at, unread_since, runtime_id, muted_until, mode
 `
 
 type UpdateChatSessionTitleParams struct {
@@ -1101,6 +1113,7 @@ func (q *Queries) UpdateChatSessionTitle(ctx context.Context, arg UpdateChatSess
 		&i.UnreadSince,
 		&i.RuntimeID,
 		&i.MutedUntil,
+		&i.Mode,
 	)
 	return i, err
 }

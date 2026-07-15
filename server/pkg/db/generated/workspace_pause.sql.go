@@ -80,7 +80,7 @@ func (q *Queries) CancelAllActiveTasksByWorkspace(ctx context.Context, workspace
 			&i.PrepareLeaseExpiresAt,
 			&i.Title,
 			&i.ModelOverride,
-		&i.ThinkingOverride,
+			&i.ThinkingOverride,
 		); err != nil {
 			return nil, err
 		}

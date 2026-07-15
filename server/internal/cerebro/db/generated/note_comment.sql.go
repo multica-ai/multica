@@ -340,6 +340,52 @@ func (q *Queries) MarkNoteCommentsSent(ctx context.Context, arg MarkNoteComments
 	return items, nil
 }
 
+const setNoteCommentIssue = `-- name: SetNoteCommentIssue :one
+UPDATE cerebro_note_comment
+SET issue_id   = $1,
+    updated_at = now()
+WHERE id = $2
+RETURNING id, note_id, thread_root_id, kind, body, anchor_quote, anchor_prefix, anchor_suffix, anchor_start, anchor_end, suggestion_text, suggestion_state, resolved, resolved_by, resolved_at, author_type, author_id, created_at, updated_at, sent_to_agent_at, issue_id
+`
+
+type SetNoteCommentIssueParams struct {
+	IssueID pgtype.UUID `json:"issue_id"`
+	ID      pgtype.UUID `json:"id"`
+}
+
+// FIR-3102 — attach (or detach with NULL) a comment's OWN issue. The "Create
+// issue from this comment" flow points the comment at the issue it spawned, so
+// the note UI can show "opened <issue>" on that exact comment. NULL detaches,
+// letting the comment fall back to the note's overarching issue.
+func (q *Queries) SetNoteCommentIssue(ctx context.Context, arg SetNoteCommentIssueParams) (CerebroNoteComment, error) {
+	row := q.db.QueryRow(ctx, setNoteCommentIssue, arg.IssueID, arg.ID)
+	var i CerebroNoteComment
+	err := row.Scan(
+		&i.ID,
+		&i.NoteID,
+		&i.ThreadRootID,
+		&i.Kind,
+		&i.Body,
+		&i.AnchorQuote,
+		&i.AnchorPrefix,
+		&i.AnchorSuffix,
+		&i.AnchorStart,
+		&i.AnchorEnd,
+		&i.SuggestionText,
+		&i.SuggestionState,
+		&i.Resolved,
+		&i.ResolvedBy,
+		&i.ResolvedAt,
+		&i.AuthorType,
+		&i.AuthorID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.SentToAgentAt,
+		&i.IssueID,
+	)
+	return i, err
+}
+
 const setNoteCommentResolved = `-- name: SetNoteCommentResolved :one
 UPDATE cerebro_note_comment
 SET resolved    = $2,
@@ -450,48 +496,6 @@ type UpdateNoteCommentBodyParams struct {
 // Edit a comment's own text. Author-only (enforced in the handler).
 func (q *Queries) UpdateNoteCommentBody(ctx context.Context, arg UpdateNoteCommentBodyParams) (CerebroNoteComment, error) {
 	row := q.db.QueryRow(ctx, updateNoteCommentBody, arg.ID, arg.Body)
-	var i CerebroNoteComment
-	err := row.Scan(
-		&i.ID,
-		&i.NoteID,
-		&i.ThreadRootID,
-		&i.Kind,
-		&i.Body,
-		&i.AnchorQuote,
-		&i.AnchorPrefix,
-		&i.AnchorSuffix,
-		&i.AnchorStart,
-		&i.AnchorEnd,
-		&i.SuggestionText,
-		&i.SuggestionState,
-		&i.Resolved,
-		&i.ResolvedBy,
-		&i.ResolvedAt,
-		&i.AuthorType,
-		&i.AuthorID,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-		&i.SentToAgentAt,
-		&i.IssueID,
-	)
-	return i, err
-}
-
-const setNoteCommentIssue = `-- name: SetNoteCommentIssue :one
-UPDATE cerebro_note_comment
-SET issue_id   = $2,
-    updated_at = now()
-WHERE id = $1
-RETURNING id, note_id, thread_root_id, kind, body, anchor_quote, anchor_prefix, anchor_suffix, anchor_start, anchor_end, suggestion_text, suggestion_state, resolved, resolved_by, resolved_at, author_type, author_id, created_at, updated_at, sent_to_agent_at, issue_id
-`
-
-type SetNoteCommentIssueParams struct {
-	ID      pgtype.UUID `json:"id"`
-	IssueID pgtype.UUID `json:"issue_id"`
-}
-
-func (q *Queries) SetNoteCommentIssue(ctx context.Context, arg SetNoteCommentIssueParams) (CerebroNoteComment, error) {
-	row := q.db.QueryRow(ctx, setNoteCommentIssue, arg.ID, arg.IssueID)
 	var i CerebroNoteComment
 	err := row.Scan(
 		&i.ID,

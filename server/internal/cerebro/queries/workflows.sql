@@ -9,7 +9,8 @@ SELECT id, workspace_id, project_id, name, enabled,
        created_by_id, created_by_type,
        created_at, updated_at,
        editor_mode, editor_layout,
-       inbound_webhook_token, inbound_signing_secret, outbound_webhook_secret
+       inbound_webhook_token, inbound_signing_secret, outbound_webhook_secret,
+       workflow_type, loop_spec, generated_from_workflow_id, generated_for_issue_id
 FROM cerebro_workflow
 WHERE workspace_id = $1
   AND trigger_type = $2
@@ -22,7 +23,8 @@ SELECT id, workspace_id, project_id, name, enabled,
        created_by_id, created_by_type,
        created_at, updated_at,
        editor_mode, editor_layout,
-       inbound_webhook_token, inbound_signing_secret, outbound_webhook_secret
+       inbound_webhook_token, inbound_signing_secret, outbound_webhook_secret,
+       workflow_type, loop_spec, generated_from_workflow_id, generated_for_issue_id
 FROM cerebro_workflow
 WHERE workspace_id = $1
 ORDER BY created_at DESC;
@@ -34,7 +36,8 @@ SELECT id, workspace_id, project_id, name, enabled,
        created_by_id, created_by_type,
        created_at, updated_at,
        editor_mode, editor_layout,
-       inbound_webhook_token, inbound_signing_secret, outbound_webhook_secret
+       inbound_webhook_token, inbound_signing_secret, outbound_webhook_secret,
+       workflow_type, loop_spec, generated_from_workflow_id, generated_for_issue_id
 FROM cerebro_workflow
 WHERE id = $1;
 
@@ -53,7 +56,8 @@ RETURNING id, workspace_id, project_id, name, enabled,
           created_by_id, created_by_type,
           created_at, updated_at,
           editor_mode, editor_layout,
-          inbound_webhook_token, inbound_signing_secret, outbound_webhook_secret;
+          inbound_webhook_token, inbound_signing_secret, outbound_webhook_secret,
+          workflow_type, loop_spec, generated_from_workflow_id, generated_for_issue_id;
 
 -- name: UpdateCerebroWorkflow :one
 -- Phase-3 note (JEH-1108): inbound_webhook_token / inbound_signing_secret /
@@ -80,7 +84,8 @@ RETURNING id, workspace_id, project_id, name, enabled,
           created_by_id, created_by_type,
           created_at, updated_at,
           editor_mode, editor_layout,
-          inbound_webhook_token, inbound_signing_secret, outbound_webhook_secret;
+          inbound_webhook_token, inbound_signing_secret, outbound_webhook_secret,
+          workflow_type, loop_spec, generated_from_workflow_id, generated_for_issue_id;
 
 -- name: SetCerebroWorkflowEnabled :exec
 UPDATE cerebro_workflow
@@ -217,7 +222,8 @@ SELECT id, workspace_id, project_id, name, enabled,
        created_by_id, created_by_type,
        created_at, updated_at,
        editor_mode, editor_layout,
-       inbound_webhook_token, inbound_signing_secret, outbound_webhook_secret
+       inbound_webhook_token, inbound_signing_secret, outbound_webhook_secret,
+       workflow_type, loop_spec, generated_from_workflow_id, generated_for_issue_id
 FROM cerebro_workflow
 WHERE inbound_webhook_token = $1
 LIMIT 1;
@@ -253,7 +259,8 @@ SELECT id, workspace_id, project_id, name, enabled,
        created_by_id, created_by_type,
        created_at, updated_at,
        editor_mode, editor_layout,
-       inbound_webhook_token, inbound_signing_secret, outbound_webhook_secret
+       inbound_webhook_token, inbound_signing_secret, outbound_webhook_secret,
+       workflow_type, loop_spec, generated_from_workflow_id, generated_for_issue_id
 FROM cerebro_workflow
 WHERE trigger_type = 'cron'
   AND enabled = TRUE;

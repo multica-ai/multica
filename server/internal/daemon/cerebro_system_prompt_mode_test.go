@@ -39,6 +39,25 @@ func TestDecodeSystemPromptModeDefaultsForUnconfiguredAgents(t *testing.T) {
 	}
 }
 
+// A task can reach runTask with no agent data at all: the claim path in
+// handler/daemon.go only sets resp.Agent when GetAgent succeeds, so a transient
+// database error hands the daemon a task whose Agent is nil. Every other
+// agent-derived ExecOptions field guards for that; the mode must too, or one
+// failed lookup panics the whole daemon process instead of the single task.
+func TestSystemPromptModeForTaskWithoutAgentData(t *testing.T) {
+	if got := systemPromptModeForTask(Task{}); got != agent.SystemPromptModeDefault {
+		t.Errorf("got %q, want the default", got)
+	}
+}
+
+func TestSystemPromptModeForTaskReadsAgentRuntimeConfig(t *testing.T) {
+	task := Task{Agent: &AgentData{RuntimeConfig: json.RawMessage(`{"system_prompt_mode":"replace"}`)}}
+
+	if got := systemPromptModeForTask(task); got != agent.SystemPromptModeReplace {
+		t.Errorf("got %q, want replace", got)
+	}
+}
+
 // runtime_config is shared with openclaw's own knob. Reading ours must not
 // depend on being the only key present.
 func TestDecodeSystemPromptModeCoexistsWithOpenclawMode(t *testing.T) {

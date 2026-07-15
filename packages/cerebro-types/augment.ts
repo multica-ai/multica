@@ -19,10 +19,34 @@ export interface SkillMetadata {
   auto_learn: boolean;
 }
 
+/**
+ * FIR-3212: how an agent's prompt reaches the model. Mirrors `SystemPromptMode`
+ * in `server/pkg/agent/cerebro_prompt_mode.go` — keep the two in step.
+ *
+ * - `""` — leave it to the backend (every agent's behaviour before FIR-3212).
+ * - `"append"` — add ours to the runtime's own system prompt.
+ * - `"replace"` — substitute the runtime's own system prompt.
+ * - `"prepend"` — splice into the user message. The honest label for runtimes
+ *   with no system-prompt channel: the text arrives, but carries no
+ *   system-prompt semantics.
+ */
+export type SystemPromptMode = "" | "append" | "replace" | "prepend";
+
 declare module "@multica/core/types/agent" {
   interface SkillSummary {
     // TECH-3077: included when the server returns metadata (cerebro skill-metadata feature).
     metadata?: SkillMetadata | null;
+  }
+  interface CreateAgentContextChangeRequestRequest {
+    /**
+     * FIR-3212: typed shortcut for the mode stored in `runtime_config`. `""`
+     * restores the runtime's own default. Applied after a `runtime_config`
+     * override in the same request, so an explicit mode wins. The server
+     * rejects a mode no backend understands — and one the agent's own runtime
+     * cannot honour — with 400, rather than storing it, versioning it,
+     * approving it and dropping it silently at run time.
+     */
+    system_prompt_mode?: SystemPromptMode;
   }
   interface Agent {
     // TECH-3670: per-surface discovery visibility. Orthogonal to `visibility`

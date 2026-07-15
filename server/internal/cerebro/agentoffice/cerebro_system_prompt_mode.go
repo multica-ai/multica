@@ -3,6 +3,7 @@ package agentoffice
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	// Aliased because `agent` is the name of the live DB row throughout this
 	// package. The mode vocabulary must come from the same place the backends
@@ -50,10 +51,9 @@ const SystemPromptModeKey = "system_prompt_mode"
 // recognises would be stored, versioned, shown in review and then silently
 // dropped at run time, which is the exact dishonesty FIR-3212 exists to remove.
 //
-// This validates the vocabulary, NOT whether a given runtime honours the mode:
-// an agent can be claimed by runtimes on different providers, so that question
-// has no answer at config time. capabilities.ExecOptionsFor answers it per
-// provider (slice 2).
+// This validates the VOCABULARY only. Whether the agent's own runtime honours
+// the mode is a separate question, answered by ValidateSystemPromptModeForProvider
+// below — callers that know the agent must use that one instead.
 func ValidSystemPromptMode(mode string) bool {
 	switch agentpkg.SystemPromptMode(mode) {
 	case agentpkg.SystemPromptModeDefault,
@@ -63,6 +63,51 @@ func ValidSystemPromptMode(mode string) bool {
 		return true
 	}
 	return false
+}
+
+// ValidateSystemPromptModeForProvider reports whether mode is one that provider
+// can actually honour, on top of the vocabulary check.
+//
+// An earlier revision of this file argued the question "has no answer at config
+// time" because an agent could be claimed by runtimes on different providers.
+// The schema says otherwise: agent.runtime_id is NOT NULL with an FK to
+// agent_runtime (migration 004), agent_runtime.provider is NOT NULL, and
+// agent_task_queue.runtime_id is copied from agent.runtime_id — so every task
+// for an agent runs on exactly one provider, known here. Without this check
+// Agent Office happily stored, versioned, diffed, approved and rolled out a
+// setting the runtime matrix itself says cannot work ("append" to Codex, whose
+// channel always replaces; any mode to Hermes, which discards the prompt), and
+// the run then silently dropped it.
+//
+// Two deliberate non-rejections:
+//   - The default mode is always valid. It means "do what you already do", so it
+//     is never a change, even on a runtime that ignores system prompts entirely.
+//   - An unknown or empty provider is never rejected. SystemPromptSupportFor's
+//     contract is that ok=false means "no authoritative entry", NOT "supports
+//     nothing"; rejecting would block configuring an agent on a runtime we have
+//     not catalogued yet, which is a worse failure than allowing it.
+func ValidateSystemPromptModeForProvider(provider, mode string) error {
+	if !ValidSystemPromptMode(mode) {
+		return fmt.Errorf("unknown system_prompt_mode %q: want one of append, replace, prepend, or empty for the runtime default", mode)
+	}
+	if agentpkg.SystemPromptMode(mode) == agentpkg.SystemPromptModeDefault {
+		return nil
+	}
+	support, ok := agentpkg.SystemPromptSupportFor(provider)
+	if !ok {
+		return nil
+	}
+	if support.Supports(agentpkg.SystemPromptMode(mode)) {
+		return nil
+	}
+	if len(support.Modes) == 0 {
+		return fmt.Errorf("runtime %q ignores the system prompt entirely, so system_prompt_mode %q would be stored but never applied: leave it empty for the runtime default", provider, mode)
+	}
+	accepted := make([]string, 0, len(support.Modes))
+	for _, m := range support.Modes {
+		accepted = append(accepted, string(m))
+	}
+	return fmt.Errorf("runtime %q does not support system_prompt_mode %q: it accepts %s", provider, mode, strings.Join(accepted, ", "))
 }
 
 // SystemPromptModeOf reads the mode out of a snapshot's runtime_config.

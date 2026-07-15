@@ -376,10 +376,13 @@ FROM cerebro_note n
 JOIN artifact a ON a.id = n.artifact_id
 LEFT JOIN cerebro_note_reference ref
   ON ref.note_id = n.artifact_id
- AND ref.object = $2
- AND ref.ref_id = $3
-WHERE a.workspace_id = $1
-  AND (ref.id IS NOT NULL OR ($2 = 'issue' AND a.issue_id::text = $3))
+ AND ref.object = $1
+ AND ref.ref_id = $2
+WHERE a.workspace_id = $3
+  AND (
+    ref.id IS NOT NULL
+    OR ($1 = 'issue' AND a.issue_id::text = $2)
+  )
   AND (
     (
       (
@@ -398,9 +401,9 @@ ORDER BY a.updated_at DESC
 `
 
 type ListNotesReferencingObjectParams struct {
-	WorkspaceID pgtype.UUID `json:"workspace_id"`
 	Object      string      `json:"object"`
 	RefID       string      `json:"ref_id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
 	ViewerID    pgtype.UUID `json:"viewer_id"`
 }
 
@@ -418,17 +421,17 @@ type ListNotesReferencingObjectRow struct {
 	PinnedAt    pgtype.Timestamptz `json:"pinned_at"`
 }
 
-// FIR-1621 — reverse lookup for the note↔object coupling. Returns every note the
-// viewer may see that carries a reference pointing at the given (object, ref_id)
-// — e.g. all notes coupled to one issue. This is the read behind "coupled notes
-// show up in the issue's document list" (the two-way view). Same visibility rule
+// FIR-1621 / FIR-3102 — reverse lookup for note↔object coupling. Issue lookup
+// uses the canonical artifact.issue_id while legacy references remain readable
+// during migration. This is the read behind "coupled notes show up in the
+// issue's document list" (the two-way view). Same visibility rule
 // as ListNotesForUser (owner / workspace / shared) AND folder-chain visibility,
 // so a private note coupled to an issue is still only visible to its owner.
 func (q *Queries) ListNotesReferencingObject(ctx context.Context, arg ListNotesReferencingObjectParams) ([]ListNotesReferencingObjectRow, error) {
 	rows, err := q.db.Query(ctx, listNotesReferencingObject,
-		arg.WorkspaceID,
 		arg.Object,
 		arg.RefID,
+		arg.WorkspaceID,
 		arg.ViewerID,
 	)
 	if err != nil {

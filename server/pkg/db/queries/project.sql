@@ -53,6 +53,25 @@ RETURNING *;
 -- a cerebro_project_grant (direct or inherited via project_nesting) also see the
 -- project. The old model (project.access / project_member) stays additive; both
 -- models coexist during the rollout of the cerebro_collections flag.
+-- CEREBRO-PATCH(list-projects-grant-access-sqlc): FIR-3212 hoist the grant-ancestry
+-- WITH RECURSIVE out of the EXISTS subquery. sqlc cannot parse a recursive CTE
+-- nested inside EXISTS ("relation \"ancestors\" does not exist"), which broke
+-- `sqlc generate` repo-wide since 2026-06-29 — the generator is all-or-nothing, so
+-- this one query stopped BOTH packages regenerating. The seed is widened from the
+-- correlated p.id to every project in the workspace and the per-project lineage is
+-- carried in ancestors.project_id, so the EXISTS below stays correlated on p.id and
+-- the depth<3 guard still counts from each project. Result set is unchanged;
+-- verified row-identical against the previous query on Postgres 16.
+WITH RECURSIVE ancestors AS (
+    SELECT anc_p.id AS project_id, anc_p.id AS anc_id, 0 AS depth
+    FROM project anc_p
+    WHERE anc_p.workspace_id = $1
+  UNION ALL
+    SELECT a.project_id, pn.parent_project_id, a.depth + 1
+    FROM project_nesting pn
+    JOIN ancestors a ON pn.project_id = a.anc_id
+    WHERE pn.parent_project_id IS NOT NULL AND a.depth < 3
+)
 SELECT p.* FROM project p
 WHERE p.workspace_id = $1
   AND (
@@ -64,17 +83,10 @@ WHERE p.workspace_id = $1
     )
     OR EXISTS (SELECT 1 FROM cerebro_project_group_member pgm JOIN cerebro_group_member gm ON gm.group_id = pgm.group_id WHERE pgm.project_id = p.id AND gm.user_id = sqlc.arg('user_id')::uuid)
     OR EXISTS (
-      WITH RECURSIVE ancestors AS (
-        SELECT p.id AS anc_id, 0 AS depth
-        UNION ALL
-        SELECT pn.parent_project_id, a.depth + 1
-        FROM project_nesting pn
-        JOIN ancestors a ON pn.project_id = a.anc_id
-        WHERE pn.parent_project_id IS NOT NULL AND a.depth < 3
-      )
       SELECT 1 FROM ancestors anc
       JOIN cerebro_project_grant g ON g.project_id = anc.anc_id AND g.workspace_id = $1
-      WHERE g.grantee_type = 'workspace'
+      WHERE anc.project_id = p.id
+        AND (g.grantee_type = 'workspace'
          OR (g.grantee_type = 'member' AND g.grantee_id = sqlc.arg('user_id')::uuid)
          OR EXISTS (
            SELECT 1 FROM cerebro_group_member cgm
@@ -82,6 +94,7 @@ WHERE p.workspace_id = $1
              AND cgm.group_id = g.grantee_id
              AND g.grantee_type = 'group'
          )
+        )
     )
   )
   AND (sqlc.narg('status')::text IS NULL OR p.status = sqlc.narg('status'))

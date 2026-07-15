@@ -232,6 +232,39 @@ func changeRequestToResponse(c cerebrodb.AgentChangeRequest) AgentChangeRequestR
 	}
 }
 
+// agentProvider resolves the provider of the runtime the agent is pinned to.
+//
+// FIR-3212: returns "" when the runtime cannot be resolved, which
+// ValidateSystemPromptModeForProvider treats as "no authoritative answer" and
+// therefore never rejects. A lookup failure must not block configuring an agent.
+func (h *Handler) agentProvider(r *http.Request, agentID pgtype.UUID) string {
+	provider, err := h.Svc.Cerebro.GetAgentProvider(r.Context(), agentID)
+	if err != nil {
+		return ""
+	}
+	return provider
+}
+
+// validateSnapshotSystemPromptMode rejects a snapshot whose mode the agent's own
+// runtime cannot honour.
+//
+// Both the create and the approve path run this: an agent can be moved to a
+// different runtime between proposing and approving, so a combination that was
+// valid at propose time can be impossible by the time it is rolled out. Checking
+// only at create would let exactly the setting FIR-3212 exists to eliminate — one
+// that is stored, versioned, approved and then silently dropped — reach a run.
+func (h *Handler) validateSnapshotSystemPromptMode(w http.ResponseWriter, r *http.Request, agentID pgtype.UUID, snap ContextSnapshot) bool {
+	mode, ok := rawSystemPromptMode(snap)
+	if !ok {
+		return true
+	}
+	if err := ValidateSystemPromptModeForProvider(h.agentProvider(r, agentID), mode); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return false
+	}
+	return true
+}
+
 // currentSnapshot composes the live snapshot of an agent (row + bound skills).
 func (h *Handler) currentSnapshot(r *http.Request, agent cerebrodb.Agent) (ContextSnapshot, error) {
 	skillIDs, err := h.Svc.Cerebro.ListAgentSkillIDsForContext(r.Context(), agent.ID)
@@ -464,10 +497,10 @@ func (h *Handler) CreateChangeRequest(w http.ResponseWriter, r *http.Request) {
 	// Validate the mode carried by the snapshot itself. The proposed_snapshot
 	// path and a raw runtime_config override both reach here without passing
 	// through WithSystemPromptMode, so this is the only place that stops an
-	// unknown mode being stored, versioned, approved, and then silently dropped
-	// at run time — the failure FIR-3212 exists to remove.
-	if mode, ok := rawSystemPromptMode(snap); ok && !ValidSystemPromptMode(mode) {
-		writeError(w, http.StatusBadRequest, "unknown system_prompt_mode "+mode+": want one of append, replace, prepend, or empty for the runtime default")
+	// unknown mode — or one this agent's runtime cannot honour — being stored,
+	// versioned, approved, and then silently dropped at run time: the failure
+	// FIR-3212 exists to remove.
+	if !h.validateSnapshotSystemPromptMode(w, r, agent.ID, snap) {
 		return
 	}
 

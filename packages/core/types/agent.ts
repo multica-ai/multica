@@ -656,20 +656,6 @@ export type AgentContextChangeRequestStatus =
   | "rejected"
   | "merged";
 
-// CEREBRO-PATCH(agent-system-prompt-mode): FIR-3212 — the system-prompt delivery vocabulary.
-/**
- * How an agent's prompt reaches the model. Mirrors `SystemPromptMode` in
- * `server/pkg/agent/cerebro_prompt_mode.go` — keep the two in step.
- *
- * - `""` — leave it to the backend (every agent's behaviour before FIR-3212).
- * - `"append"` — add ours to the runtime's own system prompt.
- * - `"replace"` — substitute the runtime's own system prompt.
- * - `"prepend"` — splice into the user message. The honest label for runtimes
- *   with no system-prompt channel: the text arrives, but carries no
- *   system-prompt semantics.
- */
-export type SystemPromptMode = "" | "append" | "replace" | "prepend";
-
 export interface AgentContextSnapshot {
   instructions: string;
   description: string;
@@ -727,18 +713,6 @@ export interface CreateAgentContextChangeRequestRequest {
   mcp_config?: unknown;
   custom_args?: unknown;
   runtime_config?: unknown;
-  // CEREBRO-PATCH(agent-system-prompt-mode): FIR-3212 — typed shortcut for the mode stored in runtime_config.
-  /**
-   * How the agent's prompt reaches the model. `""` restores the runtime's own
-   * default. Stored inside `runtime_config`; applied after a `runtime_config`
-   * override in the same request, so an explicit mode wins. The server rejects
-   * any other value with 400 — a mode no backend understands must never be
-   * stored and then silently dropped at run time.
-   *
-   * Whether the agent's runtime actually honours the chosen mode is a separate
-   * question: ask the ExecOptions capability matrix per provider.
-   */
-  system_prompt_mode?: SystemPromptMode;
 }
 
 export interface ReviewAgentContextChangeRequestRequest {

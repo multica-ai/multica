@@ -26,3 +26,16 @@ func decodeSystemPromptMode(raw json.RawMessage) agent.SystemPromptMode {
 		agentoffice.SystemPromptModeOf(agentoffice.ContextSnapshot{RuntimeConfig: raw}),
 	)
 }
+
+// systemPromptModeForTask reads the mode for a task that may carry no agent data.
+//
+// The claim path only attaches Agent when GetAgent succeeds (handler/daemon.go),
+// so a transient lookup failure dispatches the task with Agent nil. runTask
+// guards every other agent-derived field the same way; without this the mode
+// read would panic the daemon process rather than fail the one task.
+func systemPromptModeForTask(task Task) agent.SystemPromptMode {
+	if task.Agent == nil {
+		return agent.SystemPromptModeDefault
+	}
+	return decodeSystemPromptMode(task.Agent.RuntimeConfig)
+}

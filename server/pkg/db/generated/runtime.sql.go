@@ -84,7 +84,7 @@ func (q *Queries) CancelAgentTasksByRuntimeOrAgent(ctx context.Context, arg Canc
 			&i.PrepareLeaseExpiresAt,
 			&i.Title,
 			&i.ModelOverride,
-		&i.ThinkingOverride,
+			&i.ThinkingOverride,
 		); err != nil {
 			return nil, err
 		}
@@ -222,7 +222,7 @@ func (q *Queries) FailTasksForOfflineRuntimes(ctx context.Context) ([]AgentTaskQ
 			&i.PrepareLeaseExpiresAt,
 			&i.Title,
 			&i.ModelOverride,
-		&i.ThinkingOverride,
+			&i.ThinkingOverride,
 		); err != nil {
 			return nil, err
 		}

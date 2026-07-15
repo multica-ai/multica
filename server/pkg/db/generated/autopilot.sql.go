@@ -1264,6 +1264,7 @@ type SetAgentTaskThinkingOverrideParams struct {
 	ID               pgtype.UUID `json:"id"`
 }
 
+// CEREBRO-PATCH(sqlc-task-thinking-override): per-task thinking override for issue workflow roles.
 func (q *Queries) SetAgentTaskThinkingOverride(ctx context.Context, arg SetAgentTaskThinkingOverrideParams) error {
 	_, err := q.db.Exec(ctx, setAgentTaskThinkingOverride, arg.ThinkingOverride, arg.ID)
 	return err

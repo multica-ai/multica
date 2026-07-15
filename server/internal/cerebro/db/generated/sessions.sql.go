@@ -27,7 +27,7 @@ INSERT INTO cerebro_session (
     $5,
     COALESCE($6, now())
 )
-RETURNING id, issue_id, position, name, handoff, created_at, updated_at, root_comment_id
+RETURNING id, issue_id, position, name, handoff, created_at, updated_at, root_comment_id, phase, mode
 `
 
 type CreateCerebroSessionParams struct {
@@ -58,12 +58,14 @@ func (q *Queries) CreateCerebroSession(ctx context.Context, arg CreateCerebroSes
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.RootCommentID,
+		&i.Phase,
+		&i.Mode,
 	)
 	return i, err
 }
 
 const getCerebroSessionByRootComment = `-- name: GetCerebroSessionByRootComment :one
-SELECT id, issue_id, position, name, handoff, created_at, updated_at, root_comment_id FROM cerebro_session
+SELECT id, issue_id, position, name, handoff, created_at, updated_at, root_comment_id, phase, mode FROM cerebro_session
 WHERE issue_id = $1 AND root_comment_id = $2
 `
 
@@ -84,12 +86,14 @@ func (q *Queries) GetCerebroSessionByRootComment(ctx context.Context, arg GetCer
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.RootCommentID,
+		&i.Phase,
+		&i.Mode,
 	)
 	return i, err
 }
 
 const getCerebroSessionForIssue = `-- name: GetCerebroSessionForIssue :one
-SELECT id, issue_id, position, name, handoff, created_at, updated_at, root_comment_id FROM cerebro_session
+SELECT id, issue_id, position, name, handoff, created_at, updated_at, root_comment_id, phase, mode FROM cerebro_session
 WHERE id = $1 AND issue_id = $2
 `
 
@@ -110,13 +114,15 @@ func (q *Queries) GetCerebroSessionForIssue(ctx context.Context, arg GetCerebroS
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.RootCommentID,
+		&i.Phase,
+		&i.Mode,
 	)
 	return i, err
 }
 
 const listCerebroSessionsForIssue = `-- name: ListCerebroSessionsForIssue :many
 
-SELECT id, issue_id, position, name, handoff, created_at, updated_at, root_comment_id FROM cerebro_session
+SELECT id, issue_id, position, name, handoff, created_at, updated_at, root_comment_id, phase, mode FROM cerebro_session
 WHERE issue_id = $1
 ORDER BY created_at ASC, id ASC
 `
@@ -143,6 +149,8 @@ func (q *Queries) ListCerebroSessionsForIssue(ctx context.Context, issueID pgtyp
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.RootCommentID,
+			&i.Phase,
+			&i.Mode,
 		); err != nil {
 			return nil, err
 		}
@@ -158,7 +166,7 @@ const updateCerebroSessionHandoff = `-- name: UpdateCerebroSessionHandoff :one
 UPDATE cerebro_session
 SET handoff = $1, updated_at = now()
 WHERE id = $2 AND issue_id = $3
-RETURNING id, issue_id, position, name, handoff, created_at, updated_at, root_comment_id
+RETURNING id, issue_id, position, name, handoff, created_at, updated_at, root_comment_id, phase, mode
 `
 
 type UpdateCerebroSessionHandoffParams struct {
@@ -179,6 +187,8 @@ func (q *Queries) UpdateCerebroSessionHandoff(ctx context.Context, arg UpdateCer
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.RootCommentID,
+		&i.Phase,
+		&i.Mode,
 	)
 	return i, err
 }
@@ -187,7 +197,7 @@ const updateCerebroSessionName = `-- name: UpdateCerebroSessionName :one
 UPDATE cerebro_session
 SET name = $1, updated_at = now()
 WHERE id = $2 AND issue_id = $3
-RETURNING id, issue_id, position, name, handoff, created_at, updated_at, root_comment_id
+RETURNING id, issue_id, position, name, handoff, created_at, updated_at, root_comment_id, phase, mode
 `
 
 type UpdateCerebroSessionNameParams struct {
@@ -208,6 +218,8 @@ func (q *Queries) UpdateCerebroSessionName(ctx context.Context, arg UpdateCerebr
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.RootCommentID,
+		&i.Phase,
+		&i.Mode,
 	)
 	return i, err
 }
