@@ -156,13 +156,27 @@ func (c *wsRPCClient) supportsRPCV1() bool {
 	return c.sendFrame != nil && c.rpcV1Supported
 }
 
-// Call issues an RPC and blocks until the response, the per-request timeout, or
-// ctx cancellation. reqBody is marshaled into the request envelope; on a 2xx
+// Call issues an RPC on any attached connection. Transport-level tests and
+// callers that have their own negotiation contract use this directly.
+func (c *wsRPCClient) Call(ctx context.Context, method string, serverTimeout time.Duration, reqBody, respBody any) (int, error) {
+	return c.call(ctx, method, serverTimeout, reqBody, respBody, false)
+}
+
+// CallIfRPCV1Supported issues an RPC only when the currently attached
+// connection explicitly negotiated rpc-v1. The capability check and sender
+// capture happen under the same mutex, so a reconnect cannot redirect a call
+// authorized by the previous connection onto its replacement.
+func (c *wsRPCClient) CallIfRPCV1Supported(ctx context.Context, method string, serverTimeout time.Duration, reqBody, respBody any) (int, error) {
+	return c.call(ctx, method, serverTimeout, reqBody, respBody, true)
+}
+
+// call blocks until the response, the per-request timeout, or ctx
+// cancellation. reqBody is marshaled into the request envelope; on a 2xx
 // response respBody (if non-nil) is unmarshaled from the response body. It
 // returns the response status (0 when the call never reached the server) so the
-// caller can distinguish transport failure (→ HTTP fallback) from a server-side
-// error.
-func (c *wsRPCClient) Call(ctx context.Context, method string, serverTimeout time.Duration, reqBody, respBody any) (int, error) {
+// caller can distinguish transport failure (→ HTTP fallback) from a
+// server-side error.
+func (c *wsRPCClient) call(ctx context.Context, method string, serverTimeout time.Duration, reqBody, respBody any, requireRPCV1 bool) (int, error) {
 	if c == nil {
 		return 0, errWSRPCUnavailable
 	}
@@ -190,7 +204,7 @@ func (c *wsRPCClient) Call(ctx context.Context, method string, serverTimeout tim
 
 	ch := make(chan protocol.RPCResponsePayload, 1)
 	c.mu.Lock()
-	if c.sendFrame == nil || !c.rpcV1Supported {
+	if c.sendFrame == nil || (requireRPCV1 && !c.rpcV1Supported) {
 		c.mu.Unlock()
 		return 0, errWSRPCUnavailable
 	}
@@ -307,7 +321,7 @@ func (d *Daemon) ClaimTasksWSFirst(ctx context.Context, daemonID string, runtime
 		}
 		// batchClaimRequestTimeout is the server-side execution budget; the
 		// daemon waits that plus the client's grace margin for the response.
-		_, err := d.wsRPC.Call(ctx, "tasks.claim", batchClaimRequestTimeout, map[string]any{
+		_, err := d.wsRPC.CallIfRPCV1Supported(ctx, "tasks.claim", batchClaimRequestTimeout, map[string]any{
 			"daemon_id":   daemonID,
 			"runtime_ids": runtimeIDs,
 			"max_tasks":   maxTasks,
