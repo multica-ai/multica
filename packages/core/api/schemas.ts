@@ -91,6 +91,7 @@ export const IssuePropertySchema = z.object({
   name: z.string(),
   type: z.string(),
   description: z.string().optional().default(""),
+  icon: z.string().optional().default(""),
   config: z.object({
     options: z.array(z.object({
       id: z.string(),
@@ -112,6 +113,7 @@ export const EMPTY_ISSUE_PROPERTY: IssueProperty = {
   name: "",
   type: "text",
   description: "",
+  icon: "",
   config: {},
   position: 0,
   archived: false,

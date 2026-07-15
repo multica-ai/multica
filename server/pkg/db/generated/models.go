@@ -609,6 +609,7 @@ type IssueProperty struct {
 	ArchivedAt  pgtype.Timestamptz `json:"archived_at"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+	Icon        string             `json:"icon"`
 }
 
 type IssuePullRequest struct {

@@ -40,6 +40,7 @@ const (
 	maxActivePropertiesPerWorkspace = 20
 	maxPropertySelectOptions        = 50
 	maxPropertyNameLen              = 32
+	maxPropertyIconLen              = 32
 	maxPropertyDescriptionLen       = 500
 	maxPropertyTextValueLen         = 2000
 	maxPropertyURLValueLen          = 2048
@@ -82,6 +83,7 @@ type PropertyResponse struct {
 	Name        string         `json:"name"`
 	Type        string         `json:"type"`
 	Description string         `json:"description"`
+	Icon        string         `json:"icon"`
 	Config      PropertyConfig `json:"config"`
 	Position    float64        `json:"position"`
 	Archived    bool           `json:"archived"`
@@ -109,6 +111,7 @@ func propertyToResponse(p db.IssueProperty, usageCount int64) PropertyResponse {
 		Name:        p.Name,
 		Type:        p.Type,
 		Description: p.Description,
+		Icon:        p.Icon,
 		Config:      parsePropertyConfig(p.Config),
 		Position:    p.Position,
 		Archived:    p.ArchivedAt.Valid,
@@ -130,6 +133,7 @@ func propertyListRowToResponse(row db.ListIssuePropertiesRow) PropertyResponse {
 		Name:        row.Name,
 		Type:        row.Type,
 		Description: row.Description,
+		Icon:        row.Icon,
 		Config:      row.Config,
 		Position:    row.Position,
 		ArchivedAt:  row.ArchivedAt,
@@ -142,12 +146,14 @@ type CreatePropertyRequest struct {
 	Name        string          `json:"name"`
 	Type        string          `json:"type"`
 	Description string          `json:"description"`
+	Icon        string          `json:"icon"`
 	Config      *PropertyConfig `json:"config"`
 }
 
 type UpdatePropertyRequest struct {
 	Name        *string         `json:"name"`
 	Description *string         `json:"description"`
+	Icon        *string         `json:"icon"`
 	Config      *PropertyConfig `json:"config"`
 	Archived    *bool           `json:"archived"`
 }
@@ -177,6 +183,19 @@ func validatePropertyName(raw string) (string, error) {
 		return "", fmt.Errorf("%q is reserved for a built-in issue field", name)
 	}
 	return name, nil
+}
+
+func validatePropertyIcon(raw string) (string, error) {
+	for _, r := range raw {
+		if unicode.IsControl(r) {
+			return "", errors.New("icon cannot contain tabs, newlines, or control characters")
+		}
+	}
+	icon := strings.TrimSpace(raw)
+	if utf8.RuneCountInString(icon) > maxPropertyIconLen {
+		return "", fmt.Errorf("icon must be %d characters or fewer", maxPropertyIconLen)
+	}
+	return icon, nil
 }
 
 func validatePropertyType(t string) error {
@@ -499,6 +518,11 @@ func (h *Handler) CreateProperty(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, fmt.Sprintf("description must be %d characters or fewer", maxPropertyDescriptionLen))
 		return
 	}
+	icon, err := validatePropertyIcon(req.Icon)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	configJSON, err := validatePropertyConfig(req.Type, req.Config)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
@@ -525,6 +549,7 @@ func (h *Handler) CreateProperty(w http.ResponseWriter, r *http.Request) {
 			Name:        name,
 			Type:        req.Type,
 			Description: sanitizeNullBytes(strings.TrimSpace(req.Description)),
+			Icon:        icon,
 			Config:      configJSON,
 		})
 		return err
@@ -601,6 +626,13 @@ func (h *Handler) UpdateProperty(w http.ResponseWriter, r *http.Request) {
 				return fail(http.StatusBadRequest, fmt.Sprintf("description must be %d characters or fewer", maxPropertyDescriptionLen))
 			}
 			params.Description = pgtype.Text{String: sanitizeNullBytes(strings.TrimSpace(*req.Description)), Valid: true}
+		}
+		if req.Icon != nil {
+			icon, err := validatePropertyIcon(*req.Icon)
+			if err != nil {
+				return fail(http.StatusBadRequest, err.Error())
+			}
+			params.Icon = pgtype.Text{String: icon, Valid: true}
 		}
 		if req.Config != nil {
 			configJSON, err := validatePropertyConfig(existing.Type, req.Config)
