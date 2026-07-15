@@ -11,6 +11,7 @@ import { useScrollFade } from "@multica/ui/hooks/use-scroll-fade";
 type MockTab = {
   id: string;
   path: string;
+  url?: string;
   title: string;
   icon: string;
   pinned: boolean;
@@ -33,6 +34,7 @@ const state = vi.hoisted(() => ({
   setActiveTab: vi.fn<(tabId: string) => void>(),
   moveTab: vi.fn<(from: number, to: number) => void>(),
   addTab: vi.fn<(path: string, title: string, icon: string) => string>(),
+  openIssueWindow: vi.fn(),
 }));
 
 vi.mock("@/stores/tab-store", () => {
@@ -90,6 +92,7 @@ function reset() {
   state.setActiveTab.mockReset();
   state.moveTab.mockReset();
   state.addTab.mockReset();
+  state.openIssueWindow.mockReset();
 }
 
 beforeEach(() => {
@@ -112,6 +115,9 @@ beforeEach(() => {
       disconnect() {}
     },
   );
+  vi.stubGlobal("desktopAPI", {
+    openIssueWindow: state.openIssueWindow,
+  });
 });
 
 afterAll(() => vi.unstubAllGlobals());
@@ -397,6 +403,47 @@ describe("TabBar overflow", () => {
 });
 
 describe("TabBar context menu", () => {
+  it("opens an issue-detail tab as a dedicated window", async () => {
+    state.byWorkspace.acme.tabs = [
+      {
+        id: "tA",
+        path: "/acme/issues/issue-1",
+        url: "/acme/issues/issue-1?comment=comment-1",
+        title: "MUL-1: Fix tabs",
+        icon: "ListTodo",
+        pinned: false,
+      },
+    ];
+
+    const { findByText, getByLabelText } = render(<TabBar />);
+    fireEvent.contextMenu(getByLabelText("MUL-1: Fix tabs"));
+    fireEvent.click(await findByText("Open as new window"));
+
+    expect(state.openIssueWindow).toHaveBeenCalledWith({
+      path: "/acme/issues/issue-1?comment=comment-1",
+      title: "MUL-1: Fix tabs",
+    });
+  });
+
+  it("does not offer a dedicated window for non-issue tabs", async () => {
+    state.byWorkspace.acme.tabs = [
+      {
+        id: "tA",
+        path: "/acme/issues",
+        url: "/acme/issues",
+        title: "Issues",
+        icon: "ListTodo",
+        pinned: false,
+      },
+    ];
+
+    const { findByText, getByLabelText, queryByText } = render(<TabBar />);
+    fireEvent.contextMenu(getByLabelText("Issues"));
+    await findByText("Pin tab");
+
+    expect(queryByText("Open as new window")).toBeNull();
+  });
+
   it("closes other tabs from the context menu", async () => {
     state.byWorkspace.acme.tabs = [
       { id: "tA", path: "/acme/issues", title: "Issues", icon: "ListTodo", pinned: true },

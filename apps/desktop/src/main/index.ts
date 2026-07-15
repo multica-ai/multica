@@ -28,6 +28,11 @@ import {
   readAndClearFreezeBreadcrumb,
   clearFreezeBreadcrumb,
 } from "./freeze-breadcrumb";
+import {
+  encodeIssueWindowArgument,
+  parseIssueWindowRequest,
+  type IssueWindowContext,
+} from "../shared/issue-window";
 
 // Guards against registering the will-download handler more than once on the
 // same session. window.webContents.session is shared, and createWindow() can
@@ -95,7 +100,10 @@ function freezeBreadcrumbPath(): string {
 }
 
 let mainWindow: BrowserWindow | null = null;
-let latestRendererRouteContext: RendererRouteContext | null = null;
+const rendererRouteContexts = new WeakMap<
+  Electron.WebContents,
+  RendererRouteContext
+>();
 let runtimeConfigResult: RuntimeConfigResult = {
   ok: false,
   error: { message: "Runtime config has not loaded yet" },
@@ -146,6 +154,76 @@ function getSystemLocale(): string {
   return app.getPreferredSystemLanguages()[0] ?? "en";
 }
 
+function createRendererWebPreferences(
+  systemLocale: string,
+  additionalArguments: string[] = [],
+): Electron.WebPreferences {
+  return {
+    preload: join(__dirname, "../preload/index.js"),
+    sandbox: false,
+    webSecurity: false,
+    // Required for the Chromium PDF viewer (PDFium) to activate inside
+    // iframes — used by the attachment preview modal for application/pdf
+    // files. Default is false in Electron; without it <iframe src=*.pdf>
+    // renders blank.
+    //
+    // Security trade-off, accepted intentionally:
+    //   1. These windows already run with `webSecurity: false` +
+    //      `sandbox: false`, so `plugins: true` does not meaningfully widen
+    //      the renderer's attack surface beyond what is already accepted.
+    //   2. The only PDFs that reach an iframe here are signed CloudFront URLs
+    //      we ourselves issued (see useDownloadAttachment); user-supplied URLs
+    //      are routed through `setWindowOpenHandler` → `openExternalSafely` and
+    //      cannot land in this renderer.
+    //   3. Chromium's PDFium plugin is itself sandboxed inside its own process
+    //      and only handles the `application/pdf` MIME.
+    //
+    // If we ever tighten `webSecurity` / `sandbox`, revisit this by hosting
+    // the PDF viewer in a dedicated BrowserView with `plugins: true` scoped
+    // to that view, keeping the main renderer plugin-free.
+    plugins: true,
+    additionalArguments: [
+      `--multica-locale=${systemLocale}`,
+      ...additionalArguments,
+    ],
+  };
+}
+
+function loadRenderer(window: BrowserWindow): void {
+  if (is.dev && process.env["ELECTRON_RENDERER_URL"]) {
+    void window.loadURL(process.env["ELECTRON_RENDERER_URL"]);
+  } else {
+    void window.loadFile(join(__dirname, "../renderer/index.html"));
+  }
+}
+
+function installLocaleRefresh(window: BrowserWindow): void {
+  // Electron has no dedicated OS-language event. Check whenever any Multica
+  // window regains focus, then broadcast so all open windows remain aligned.
+  window.on("focus", () => {
+    const current = getSystemLocale();
+    if (current === lastKnownSystemLocale) return;
+    lastKnownSystemLocale = current;
+    for (const target of BrowserWindow.getAllWindows()) {
+      if (!target.isDestroyed()) {
+        target.webContents.send("locale:system-changed", current);
+      }
+    }
+  });
+}
+
+function installWindowShortcutHandler(window: BrowserWindow): void {
+  window.webContents.on("before-input-event", (event, input) => {
+    const result = handleAppShortcut(input, window.webContents);
+    if (result === "close-tab") {
+      event.preventDefault();
+      window.webContents.send("tab:close-active");
+    } else if (result) {
+      event.preventDefault();
+    }
+  });
+}
+
 function createWindow(): void {
   // Pass the OS-preferred language to the renderer via additionalArguments
   // instead of a sync IPC call. process.argv is available to the preload
@@ -171,41 +249,13 @@ function createWindow(): void {
     ...(is.dev || process.platform === "linux"
       ? { icon: BUNDLED_ICON_PATH }
       : {}),
-    webPreferences: {
-      preload: join(__dirname, "../preload/index.js"),
-      sandbox: false,
-      webSecurity: false,
-      // Required for the Chromium PDF viewer (PDFium) to activate inside
-      // iframes — used by the attachment preview modal for application/pdf
-      // files. Default is false in Electron; without it <iframe src=*.pdf>
-      // renders blank.
-      //
-      // Security trade-off, accepted intentionally:
-      //   1. This window already runs with `webSecurity: false` + `sandbox: false`,
-      //      so `plugins: true` does NOT meaningfully widen the renderer's
-      //      attack surface beyond what is already accepted.
-      //   2. The only PDFs that reach an iframe here are signed CloudFront URLs
-      //      we ourselves issued (see useDownloadAttachment); user-supplied URLs
-      //      are routed through `setWindowOpenHandler` → `openExternalSafely` and
-      //      cannot land in this renderer.
-      //   3. Chromium's PDFium plugin is itself sandboxed inside its own process
-      //      and only handles the `application/pdf` MIME — it does not expose
-      //      Flash, Java, or other historical plugin surfaces.
-      //
-      // If we ever tighten `webSecurity` / `sandbox`, revisit this by hosting
-      // the PDF viewer in a dedicated BrowserView with `plugins: true` scoped
-      // to that view, keeping the main renderer plugin-free.
-      plugins: true,
-      additionalArguments: [`--multica-locale=${systemLocale}`],
-    },
+    webPreferences: createRendererWebPreferences(systemLocale),
   });
   const window = mainWindow;
-  latestRendererRouteContext = null;
 
   window.on("closed", () => {
     if (mainWindow === window) {
       mainWindow = null;
-      latestRendererRouteContext = null;
     }
   });
 
@@ -223,17 +273,7 @@ function createWindow(): void {
     window.show();
   });
 
-  // Detect OS language changes while the app is running. Electron has no
-  // dedicated event for this on any platform, so we poll on focus regain —
-  // catches the common case where users switch System Settings → Language
-  // and bring the app back. The renderer decides whether to act (it ignores
-  // the signal when the user has an explicit Settings choice).
-  window.on("focus", () => {
-    const current = getSystemLocale();
-    if (current === lastKnownSystemLocale) return;
-    lastKnownSystemLocale = current;
-    window.webContents.send("locale:system-changed", current);
-  });
+  installLocaleRefresh(window);
 
   installDownloadSaveDialogHandler(window);
 
@@ -242,19 +282,9 @@ function createWindow(): void {
     return { action: "deny" };
   });
 
-  // Window-level keyboard shortcuts. Calling preventDefault here prevents
-  // both the renderer keydown AND the application menu accelerator, so
-  // anything we own here (reload-block, zoom, tab-close) is the sole handler
-  // for that combination — no double-fire with the macOS default View menu.
-  window.webContents.on("before-input-event", (event, input) => {
-    const result = handleAppShortcut(input, window.webContents);
-    if (result === "close-tab") {
-      event.preventDefault();
-      window.webContents.send("tab:close-active");
-    } else if (result) {
-      event.preventDefault();
-    }
-  });
+  // Calling preventDefault in the shared shortcut handler prevents both the
+  // renderer keydown and the application-menu accelerator from double-firing.
+  installWindowShortcutHandler(window);
 
   // Dev-mode renderer diagnostics. When the renderer crashes hard enough
   // that DevTools can't be opened (white screen with no clickable surface),
@@ -299,12 +329,13 @@ function createWindow(): void {
     showReloadPrompt: createElectronReloadPrompt((options) =>
       dialog.showMessageBox(window, options),
     ),
-    getDiagnosticContext: () => ({
-      windowUrl: window.webContents.getURL(),
-      ...(latestRendererRouteContext
-        ? { desktopRoute: latestRendererRouteContext }
-        : {}),
-    }),
+    getDiagnosticContext: () => {
+      const routeContext = rendererRouteContexts.get(window.webContents);
+      return {
+        windowUrl: window.webContents.getURL(),
+        ...(routeContext ? { desktopRoute: routeContext } : {}),
+      };
+    },
     // Only persist in production: a true hang/crash can't report itself, so we
     // write a breadcrumb and the next renderer boot flushes it to PostHog. Dev
     // is excluded to keep field telemetry clean.
@@ -325,11 +356,77 @@ function createWindow(): void {
   installContextMenu(window.webContents);
   installNavigationGestures(window);
 
-  if (is.dev && process.env["ELECTRON_RENDERER_URL"]) {
-    window.loadURL(process.env["ELECTRON_RENDERER_URL"]);
-  } else {
-    window.loadFile(join(__dirname, "../renderer/index.html"));
+  loadRenderer(window);
+}
+
+function createIssueWindow(context: IssueWindowContext): void {
+  const systemLocale = getSystemLocale();
+  lastKnownSystemLocale = systemLocale;
+
+  const window = new BrowserWindow({
+    width: 960,
+    height: 760,
+    minWidth: 720,
+    minHeight: 520,
+    title: context.title,
+    titleBarStyle: "hiddenInset",
+    trafficLightPosition: { x: 16, y: 17 },
+    show: false,
+    autoHideMenuBar: true,
+    ...(is.dev || process.platform === "linux"
+      ? { icon: BUNDLED_ICON_PATH }
+      : {}),
+    webPreferences: createRendererWebPreferences(systemLocale, [
+      encodeIssueWindowArgument(context),
+    ]),
+  });
+
+  window.on("ready-to-show", () => window.show());
+  installLocaleRefresh(window);
+  installDownloadSaveDialogHandler(window);
+
+  window.webContents.setWindowOpenHandler((details) => {
+    void openExternalSafely(details.url);
+    return { action: "deny" };
+  });
+  installWindowShortcutHandler(window);
+
+  const initialRouteContext = sanitizeRendererRouteContext({
+    surface: "tab",
+    path: context.path,
+    workspaceSlug: context.workspaceSlug,
+  });
+  if (initialRouteContext) {
+    rendererRouteContexts.set(window.webContents, initialRouteContext);
   }
+  installRendererRecoveryHandlers(window as unknown as RendererRecoveryWindow, {
+    isDev: is.dev,
+    showReloadPrompt: createElectronReloadPrompt((options) =>
+      dialog.showMessageBox(window, options),
+    ),
+    getDiagnosticContext: () => {
+      const routeContext = rendererRouteContexts.get(window.webContents);
+      return {
+        windowUrl: window.webContents.getURL(),
+        ...(routeContext ? { desktopRoute: routeContext } : {}),
+      };
+    },
+    persistBreadcrumb: is.dev
+      ? undefined
+      : (payload) =>
+          writeFreezeBreadcrumb(freezeBreadcrumbPath(), {
+            kind: payload.kind,
+            context: payload.context,
+            ts: Date.now(),
+            version: getAppVersion(),
+          }),
+    clearBreadcrumb: is.dev
+      ? undefined
+      : () => clearFreezeBreadcrumb(freezeBreadcrumbPath()),
+  });
+
+  installContextMenu(window.webContents);
+  loadRenderer(window);
 }
 
 // --- Dev / production isolation -------------------------------------------
@@ -435,17 +532,31 @@ if (!gotTheLock) {
       return openExternalSafely(url);
     });
 
-    // Renderer requests window close (e.g. Cmd+W on last tab).
-    ipcMain.on("window:close", () => {
-      mainWindow?.close();
+    // Renderer requests its own window close (e.g. Cmd+W on the last main
+    // tab, or Cmd+W anywhere in a dedicated issue window).
+    ipcMain.on("window:close", (event) => {
+      BrowserWindow.fromWebContents(event.sender)?.close();
     });
 
-    ipcMain.handle("file:download-url", (_event, url: string) => {
-      if (!mainWindow) {
-        console.warn("[download] ignored file:download-url — mainWindow torn down");
+    ipcMain.handle("window:open-issue", (event, request: unknown) => {
+      if (!BrowserWindow.fromWebContents(event.sender)) {
+        return { ok: false, reason: "invalid_request" } as const;
+      }
+      const context = parseIssueWindowRequest(request);
+      if (!context) {
+        return { ok: false, reason: "invalid_request" } as const;
+      }
+      createIssueWindow(context);
+      return { ok: true } as const;
+    });
+
+    ipcMain.handle("file:download-url", (event, url: string) => {
+      const sourceWindow = BrowserWindow.fromWebContents(event.sender);
+      if (!sourceWindow) {
+        console.warn("[download] ignored file:download-url — source window torn down");
         return;
       }
-      downloadURLSafely(mainWindow, url);
+      downloadURLSafely(sourceWindow, url);
     });
 
     // Sync IPC: app version + normalized OS for preload. Sync (not invoke) so
@@ -474,18 +585,20 @@ if (!gotTheLock) {
     });
 
     ipcMain.on(RENDERER_ROUTE_CONTEXT_CHANNEL, (event, context: unknown) => {
-      if (!mainWindow || event.sender !== mainWindow.webContents) return;
+      if (!BrowserWindow.fromWebContents(event.sender)) return;
       const sanitized = sanitizeRendererRouteContext(context);
       if (!sanitized) return;
-      latestRendererRouteContext = sanitized;
+      rendererRouteContexts.set(event.sender, sanitized);
     });
 
     // IPC: toggle immersive mode — hides the macOS traffic lights so full-screen
     // modals (e.g. create-workspace) can place UI in the top-left corner
     // without fighting the native window controls' hit-test.
-    ipcMain.handle("window:setImmersive", (_event, immersive: boolean) => {
+    ipcMain.handle("window:setImmersive", (event, immersive: boolean) => {
       if (process.platform !== "darwin") return;
-      mainWindow?.setWindowButtonVisibility(!immersive);
+      BrowserWindow.fromWebContents(event.sender)?.setWindowButtonVisibility(
+        !immersive,
+      );
     });
 
     // IPC: show a native OS notification for a new inbox item. The renderer
@@ -562,7 +675,7 @@ if (!gotTheLock) {
     });
 
     app.on("activate", () => {
-      if (BrowserWindow.getAllWindows().length === 0) createWindow();
+      if (!mainWindow) createWindow();
     });
   });
 

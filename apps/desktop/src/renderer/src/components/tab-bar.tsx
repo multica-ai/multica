@@ -20,6 +20,7 @@ import {
   Pin,
   PinOff,
   ListX,
+  AppWindow,
   type LucideIcon,
 } from "lucide-react";
 import {
@@ -56,6 +57,7 @@ import {
   type Tab,
 } from "@/stores/tab-store";
 import { paths } from "@multica/core/paths";
+import { parseIssueWindowPath } from "../../../shared/issue-window";
 
 const TAB_ICONS: Record<string, LucideIcon> = {
   Inbox,
@@ -190,6 +192,7 @@ function SortableTabItem({
   const closeTab = useTabStore((s) => s.closeTab);
   const closeOtherTabs = useTabStore((s) => s.closeOtherTabs);
   const togglePin = useTabStore((s) => s.togglePin);
+  const issueWindowPath = parseIssueWindowPath(tab.url);
 
   const {
     attributes,
@@ -230,6 +233,14 @@ function SortableTabItem({
 
   const stopDragOnAction = (e: React.PointerEvent) => {
     e.stopPropagation();
+  };
+
+  const handleOpenAsWindow = () => {
+    if (!issueWindowPath) return;
+    void window.desktopAPI.openIssueWindow({
+      path: issueWindowPath.path,
+      title: tab.title,
+    });
   };
 
   // Pinned tabs keep their full title (RFC §3 D1v-ii FINAL). The only visual
@@ -353,6 +364,15 @@ function SortableTabItem({
         <ContextMenu>
           <ContextMenuTrigger render={tabButton} />
           <ContextMenuContent>
+            {issueWindowPath && (
+              <>
+                <ContextMenuItem onClick={handleOpenAsWindow}>
+                  <AppWindow />
+                  Open as new window
+                </ContextMenuItem>
+                <ContextMenuSeparator />
+              </>
+            )}
             <ContextMenuItem onClick={() => togglePin(tab.id)}>
               {tab.pinned ? (
                 <>

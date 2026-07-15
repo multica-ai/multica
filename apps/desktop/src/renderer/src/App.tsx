@@ -14,6 +14,7 @@ import { Toaster } from "@multica/ui/components/ui/sonner";
 import { DesktopLoginPage } from "./pages/login";
 import { DesktopShell } from "./components/desktop-layout";
 import { UpdateNotification } from "./components/update-notification";
+import { IssueWindow } from "./components/issue-window";
 import { useTabStore } from "./stores/tab-store";
 import { useWindowOverlayStore } from "./stores/window-overlay-store";
 import { useDaemonIPCBridge } from "./platform/daemon-ipc-bridge";
@@ -46,6 +47,10 @@ const HTML_LANG: Record<SupportedLocale, string> = {
 function useCmdWCloseTab() {
   useEffect(() => {
     return window.desktopAPI.onCloseActiveTab(() => {
+      if (window.desktopAPI.windowContext?.kind === "issue") {
+        window.desktopAPI.closeWindow();
+        return;
+      }
       const store = useTabStore.getState();
       const { activeWorkspaceSlug, byWorkspace } = store;
       if (!activeWorkspaceSlug) {
@@ -63,6 +68,23 @@ function useCmdWCloseTab() {
       store.closeActiveTab();
     });
   }, []);
+}
+
+function IssueWindowContent() {
+  const user = useAuthStore((state) => state.user);
+  const isLoading = useAuthStore((state) => state.isLoading);
+  const context = window.desktopAPI.windowContext ?? { kind: "main" as const };
+
+  if (context.kind !== "issue") return null;
+  if (isLoading) {
+    return (
+      <div className="flex h-screen items-center justify-center">
+        <MulticaIcon className="size-6 animate-pulse" />
+      </div>
+    );
+  }
+
+  return user ? <IssueWindow context={context} /> : <DesktopLoginPage />;
 }
 
 function AppContent() {
@@ -322,6 +344,10 @@ export default function App() {
   const { version, os } = window.desktopAPI.appInfo;
   const systemLocale = window.desktopAPI.systemLocale;
   const runtimeConfigResult = window.desktopAPI.runtimeConfig;
+  // The fallback keeps renderer HMR safe while a main/preload rebuild is
+  // restarting Electron; packaged builds always expose windowContext.
+  const windowContext =
+    window.desktopAPI.windowContext ?? { kind: "main" as const };
   useCmdWCloseTab();
 
   // Flush a freeze/crash breadcrumb the main process parked from a previous
@@ -401,13 +427,17 @@ export default function App() {
           resources={resources}
           localeAdapter={localeAdapter}
         >
-          <AppContent />
+          {windowContext.kind === "issue" ? (
+            <IssueWindowContent />
+          ) : (
+            <AppContent />
+          )}
         </CoreProvider>
       ) : (
         <BlockingRuntimeConfigError message={runtimeConfigResult.error.message} />
       )}
       <Toaster />
-      <UpdateNotification />
+      {windowContext.kind === "main" && <UpdateNotification />}
     </ThemeProvider>
   );
 }

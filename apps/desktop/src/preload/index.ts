@@ -15,6 +15,10 @@ import {
   NAVIGATION_GESTURE_CHANNEL,
   type NavigationGesture,
 } from "../shared/navigation-gestures";
+import {
+  readDesktopWindowContext,
+  type IssueWindowRequest,
+} from "../shared/issue-window";
 
 // Synchronously fetch app metadata from main at preload time so the renderer
 // can pass it into CoreProvider during the initial render — the alternative
@@ -53,6 +57,7 @@ function fetchRuntimeConfig(): RuntimeConfigResult {
 
 const appInfo = fetchAppInfo();
 const runtimeConfig = fetchRuntimeConfig();
+const windowContext = readDesktopWindowContext(process.argv);
 
 // Read the OS-preferred locale that main injected via additionalArguments.
 // Zero IPC, zero blocking — process.argv is populated before preload runs.
@@ -83,6 +88,9 @@ const desktopAPI = {
   },
   /** Validated runtime endpoint config, or a blocking config error. */
   runtimeConfig,
+  /** Identifies whether this renderer owns the main tabbed window or a
+   *  dedicated issue window, parsed from validated launch arguments. */
+  windowContext,
   /** Read + clear any freeze/crash breadcrumb left by a previous session, so
    *  the renderer can flush it to telemetry on boot. Returns null when there's
    *  nothing pending (the normal case). */
@@ -196,6 +204,9 @@ const desktopAPI = {
   },
   /** Ask the main process to close the window (used after closing the last tab). */
   closeWindow: () => ipcRenderer.send("window:close"),
+  /** Open a validated issue-detail route in a dedicated native window. */
+  openIssueWindow: (request: IssueWindowRequest) =>
+    ipcRenderer.invoke("window:open-issue", request),
 };
 
 interface DaemonStatus {
