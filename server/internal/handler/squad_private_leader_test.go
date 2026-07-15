@@ -388,7 +388,7 @@ func TestChildDone_SquadPrivateLeader_AgentActorWakesLeader(t *testing.T) {
 		testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE id = $1`, workerTaskID)
 	})
 
-	// Worker agent moves the child to done (agent actor via X-Agent-ID/X-Task-ID).
+	// Worker agents cannot move a child to a human-controlled terminal state.
 	w = httptest.NewRecorder()
 	r = newRequest("PATCH", "/api/issues/"+child.ID, map[string]any{
 		"status": "done",
@@ -397,11 +397,11 @@ func TestChildDone_SquadPrivateLeader_AgentActorWakesLeader(t *testing.T) {
 	r.Header.Set("X-Task-ID", workerTaskID)
 	r = withURLParam(r, "id", child.ID)
 	testHandler.UpdateIssue(w, r)
-	if w.Code != http.StatusOK {
-		t.Fatalf("UpdateIssue (child done): expected 200, got %d: %s", w.Code, w.Body.String())
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("UpdateIssue (child done): expected 403, got %d: %s", w.Code, w.Body.String())
 	}
 
-	// The private leader MUST have a queued task on the parent.
+	// No parent completion wake occurs because the child remains nonterminal.
 	var count int
 	if err := testPool.QueryRow(ctx,
 		`SELECT count(*) FROM agent_task_queue WHERE issue_id = $1 AND agent_id = $2 AND status = 'queued'`,
@@ -409,8 +409,8 @@ func TestChildDone_SquadPrivateLeader_AgentActorWakesLeader(t *testing.T) {
 	).Scan(&count); err != nil {
 		t.Fatalf("count tasks: %v", err)
 	}
-	if count == 0 {
-		t.Fatalf("private leader got 0 queued tasks from agent child-done; want >=1 (MUL-4063)")
+	if count != 0 {
+		t.Fatalf("private leader got %d queued tasks from a rejected agent completion; want 0", count)
 	}
 }
 
