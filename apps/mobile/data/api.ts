@@ -416,7 +416,7 @@ class ApiClient {
       "/api/notification-preferences",
       NotificationPreferenceResponseSchema,
       EMPTY_NOTIFICATION_PREFERENCES,
-      { method: "PUT", body: JSON.stringify({ preferences }) },
+      { method: "PATCH", body: JSON.stringify({ preferences }) },
       { endpoint: "updateNotificationPreferences" },
     );
   }
