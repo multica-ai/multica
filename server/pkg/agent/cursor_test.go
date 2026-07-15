@@ -27,7 +27,8 @@ func providerCommandTestConfig(t *testing.T, executable string, logger *slog.Log
 			SystemRoots:   existingSystemRootsForTest(t),
 			Network:       NetworkAccessPublicAndLoopback,
 		},
-		TaskTempDir: taskTempDir,
+		TaskTempDir:  taskTempDir,
+		TaskStateDir: root,
 	}, root
 }
 

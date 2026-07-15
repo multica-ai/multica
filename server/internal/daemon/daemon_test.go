@@ -1445,6 +1445,58 @@ func TestGateCodexResumeToRolloutPresence(t *testing.T) {
 	}
 }
 
+func TestGatePiResumeToTaskState(t *testing.T) {
+	t.Parallel()
+
+	stateDir := t.TempDir()
+	sessionID := "0123456789abcdef0123456789abcdef"
+	sessionDir := filepath.Join(stateDir, "pi-sessions")
+	if err := os.MkdirAll(sessionDir, 0o700); err != nil {
+		t.Fatalf("mkdir sessions: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(sessionDir, sessionID+".jsonl"), []byte("{}"), 0o600); err != nil {
+		t.Fatalf("write session: %v", err)
+	}
+
+	symlinkID := "abcdef0123456789abcdef0123456789"
+	if err := os.Symlink(filepath.Join(sessionDir, sessionID+".jsonl"), filepath.Join(sessionDir, symlinkID+".jsonl")); err != nil {
+		t.Fatalf("create session symlink: %v", err)
+	}
+
+	tests := []struct {
+		name        string
+		provider    string
+		sessionID   string
+		wantSession string
+	}{
+		{name: "task-private session present keeps resume", provider: "pi", sessionID: sessionID, wantSession: sessionID},
+		{name: "legacy absolute path drops resume", provider: "pi", sessionID: filepath.Join(stateDir, "legacy.jsonl"), wantSession: ""},
+		{name: "missing session drops resume", provider: "pi", sessionID: "11111111111111111111111111111111", wantSession: ""},
+		{name: "symlink session drops resume", provider: "pi", sessionID: symlinkID, wantSession: ""},
+		{name: "non-pi provider is a no-op", provider: "codex", sessionID: "legacy-session", wantSession: "legacy-session"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			task := Task{PriorSessionID: tt.sessionID}
+			taskCtx := execenv.TaskContextForEnv{PriorSessionResumed: tt.sessionID != ""}
+
+			gatePiResumeToTaskState(&task, &taskCtx, tt.provider, stateDir, slog.Default())
+
+			if task.PriorSessionID != tt.wantSession {
+				t.Fatalf("PriorSessionID = %q, want %q", task.PriorSessionID, tt.wantSession)
+			}
+			if taskCtx.PriorSessionResumed != (tt.wantSession != "") {
+				t.Fatalf("PriorSessionResumed = %v, want %v", taskCtx.PriorSessionResumed, tt.wantSession != "")
+			}
+			wantUnavailable := tt.sessionID != "" && tt.wantSession == ""
+			if taskCtx.PriorSessionResumeUnavailable != wantUnavailable {
+				t.Fatalf("PriorSessionResumeUnavailable = %v, want %v", taskCtx.PriorSessionResumeUnavailable, wantUnavailable)
+			}
+		})
+	}
+}
+
 func TestGateResumeToReusedWorkdir(t *testing.T) {
 	t.Parallel()
 
@@ -2684,6 +2736,65 @@ func TestBuildTaskIsolationPolicyRejectsOwnerConfigOverlap(t *testing.T) {
 		Executable:     executable,
 		OwnerHome:      ownerHome,
 		SelfExecutable: executable,
+	})
+	if err == nil || !strings.Contains(err.Error(), "forbidden") {
+		t.Fatalf("buildTaskIsolationPolicy error = %v, want forbidden overlap", err)
+	}
+}
+
+func TestBuildTaskIsolationPolicyForbidsCustomHermesSourceHome(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	envRoot := filepath.Join(root, "env")
+	hermesSource := filepath.Join(root, "custom-hermes")
+	executable := filepath.Join(root, "bin", "agent")
+	for _, dir := range []string{envRoot, hermesSource, filepath.Dir(executable)} {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(executable, []byte("binary"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	policy, _, err := buildTaskIsolationPolicy(taskIsolationParams{
+		Environment:      &execenv.Environment{RootDir: envRoot, WorkDir: envRoot},
+		TaskTempDir:      envRoot,
+		Executable:       executable,
+		OwnerHome:        filepath.Join(root, "owner"),
+		HermesSourceHome: hermesSource,
+		SelfExecutable:   executable,
+	})
+	if err != nil {
+		t.Fatalf("buildTaskIsolationPolicy: %v", err)
+	}
+	want := resolvedTestPath(t, hermesSource)
+	if !slices.Contains(policy.ForbiddenRoots, want) {
+		t.Fatalf("forbidden roots %v missing custom Hermes source %q", policy.ForbiddenRoots, want)
+	}
+}
+
+func TestBuildTaskIsolationPolicyRejectsHermesSourceOverlap(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	envRoot := filepath.Join(root, "env")
+	executable := filepath.Join(root, "agent")
+	if err := os.MkdirAll(envRoot, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(executable, []byte("binary"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	_, _, err := buildTaskIsolationPolicy(taskIsolationParams{
+		Environment:      &execenv.Environment{RootDir: envRoot, WorkDir: envRoot},
+		TaskTempDir:      envRoot,
+		Executable:       executable,
+		OwnerHome:        filepath.Join(root, "owner"),
+		HermesSourceHome: envRoot,
+		SelfExecutable:   executable,
 	})
 	if err == nil || !strings.Contains(err.Error(), "forbidden") {
 		t.Fatalf("buildTaskIsolationPolicy error = %v, want forbidden overlap", err)

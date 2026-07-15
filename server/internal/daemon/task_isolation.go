@@ -81,11 +81,22 @@ func buildTaskIsolationPolicy(params taskIsolationParams) (agent.TaskIsolationPo
 	if err != nil {
 		return agent.TaskIsolationPolicy{}, "", err
 	}
+	if params.HermesSourceHome != "" {
+		if _, statErr := os.Lstat(params.HermesSourceHome); statErr == nil {
+			hermesSource, sourceErr := existingTaskDirectory("Hermes source home", params.HermesSourceHome)
+			if sourceErr != nil {
+				return agent.TaskIsolationPolicy{}, "", sourceErr
+			}
+			forbidden = append(forbidden, hermesSource)
+		} else if !os.IsNotExist(statErr) {
+			return agent.TaskIsolationPolicy{}, "", fmt.Errorf("inspect Hermes source home %q: %w", params.HermesSourceHome, statErr)
+		}
+	}
 	policy := agent.TaskIsolationPolicy{
 		WritableRoots:  uniqueTaskPaths(writable),
 		ReadOnlyRoots:  uniqueTaskPaths(readOnly),
 		SystemRoots:    existingTaskSystemRoots(),
-		ForbiddenRoots: forbidden,
+		ForbiddenRoots: uniqueTaskPaths(forbidden),
 		Network:        agent.NetworkAccessPublicAndLoopback,
 	}
 	validated, err := policy.Validated()

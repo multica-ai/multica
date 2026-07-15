@@ -3,6 +3,7 @@ package agent
 import (
 	"bufio"
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -23,6 +24,7 @@ type piBackend struct {
 
 var (
 	piControlTokenRE = regexp.MustCompile(`<\|[A-Za-z0-9_-]+>[A-Za-z0-9_-]*|<[A-Za-z0-9_-]+\|>`)
+	piSessionIDRE    = regexp.MustCompile(`^[a-f0-9]{32}$`)
 )
 
 func stripPiToolCallMarkup(s string) string {
@@ -185,24 +187,18 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 
 	timeout := opts.Timeout
 
-	// Pi's --session flag expects a file path where events are appended.
-	// The path doubles as our opaque session identifier: we return it as
-	// SessionID and expect it back as ResumeSessionID on the next turn.
-	sessionPath := opts.ResumeSessionID
-	if sessionPath == "" {
-		p, err := newPiSessionPath()
-		if err != nil {
-			return nil, fmt.Errorf("pi session path: %w", err)
-		}
-		sessionPath = p
-	}
-	if err := ensurePiSessionFile(sessionPath); err != nil {
+	// Pi expects a filesystem path, but task/session APIs expose only an opaque
+	// identifier. Resolve that identifier beneath the daemon-issued task temp
+	// root before constructing the isolated child process.
+	sessionID, sessionFile, err := preparePiSession(b.cfg.TaskStateDir, opts.ResumeSessionID)
+	if err != nil {
 		return nil, fmt.Errorf("pi session file: %w", err)
 	}
+	defer sessionFile.Close()
 
 	runCtx, cancel := runContext(ctx, timeout)
 
-	args := buildPiArgs(prompt, sessionPath, opts, b.cfg.Logger)
+	args := buildPiArgs(prompt, sessionFile.childPath(), opts, b.cfg.Logger)
 	argv0, cmdArgs := choosePiInvocation(lookedUp, lookedUp, args, b.cfg.Logger)
 
 	cmd, err := b.cfg.command(runCtx, argv0, cmdArgs, opts.Cwd, 10*time.Second)
@@ -210,6 +206,7 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 		cancel()
 		return nil, fmt.Errorf("create pi command: %w", err)
 	}
+	cmd.ExtraFiles = append(cmd.ExtraFiles, sessionFile.file)
 	b.cfg.Logger.Info("agent command", "exec", argv0, "args", cmdArgs)
 
 	stdout, err := cmd.StdoutPipe()
@@ -381,7 +378,7 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 			Output:     output.String(),
 			Error:      finalError,
 			DurationMs: duration.Milliseconds(),
-			SessionID:  sessionPath,
+			SessionID:  sessionID,
 			Usage:      usage,
 		}
 	}()
@@ -533,43 +530,57 @@ func splitPiModel(s string) (provider, model string) {
 	return "", s
 }
 
-// ── Session path ──
+// ── Task-private sessions ──
 
-// piSessionDir returns the directory where Pi session JSONL files live.
-// Exported via a helper so the usage scanner (package usage) can point at
-// the same location without duplicating the path construction.
-func piSessionDir() (string, error) {
-	home, err := os.UserHomeDir()
+func preparePiSession(taskTempDir, resumeID string) (string, *piSessionFile, error) {
+	root, err := validateAbsolutePath("pi task state directory", taskTempDir)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
-	return filepath.Join(home, ".multica", "pi-sessions"), nil
+
+	sessionID := strings.TrimSpace(resumeID)
+	if sessionID == "" {
+		sessionID, err = newPiSessionID()
+		if err != nil {
+			return "", nil, err
+		}
+	}
+	if !piSessionIDRE.MatchString(sessionID) {
+		return "", nil, fmt.Errorf("session id %q must be a 32-character lowercase hexadecimal identifier", resumeID)
+	}
+
+	sessionFile, err := createPiSessionFile(root, sessionID)
+	if err != nil {
+		return "", nil, err
+	}
+	return sessionID, sessionFile, nil
 }
 
-func newPiSessionPath() (string, error) {
-	dir, err := piSessionDir()
-	if err != nil {
-		return "", err
-	}
-	name := fmt.Sprintf("%s.jsonl", time.Now().UTC().Format("20060102T150405.000000000"))
-	return filepath.Join(dir, name), nil
+// IsPiSessionID reports whether id is a daemon-issued path-free Pi session
+// identifier. It lets the daemon discard legacy path-valued resume pointers
+// without handing those paths back to the provider backend.
+func IsPiSessionID(id string) bool {
+	return piSessionIDRE.MatchString(strings.TrimSpace(id))
 }
 
-// ensurePiSessionFile creates an empty session file if one does not yet
-// exist at path. Pi refuses to start when --session points at a missing
-// file; paths that already exist (a resumed session) are left untouched.
-func ensurePiSessionFile(path string) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
+// PiSessionPresent reports whether an existing resume target is a regular,
+// non-symlink file in the task-private state root. createPiSessionFile repeats
+// the identity checks at open time, so this preflight is only for deciding
+// whether the daemon should advertise a resume or start fresh.
+func PiSessionPresent(taskStateDir, id string) bool {
+	root, err := validateAbsolutePath("pi task state directory", taskStateDir)
+	if err != nil || !IsPiSessionID(id) {
+		return false
 	}
-	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE, 0o644)
-	if err != nil {
-		return err
-	}
-	return f.Close()
+	path := filepath.Join(root, "pi-sessions", strings.TrimSpace(id)+".jsonl")
+	info, err := os.Lstat(path)
+	return err == nil && info.Mode().IsRegular() && info.Mode()&os.ModeSymlink == 0
 }
 
-// PiSessionDir exposes piSessionDir to other packages in this module.
-func PiSessionDir() (string, error) {
-	return piSessionDir()
+func newPiSessionID() (string, error) {
+	var raw [16]byte
+	if _, err := rand.Read(raw[:]); err != nil {
+		return "", fmt.Errorf("generate session id: %w", err)
+	}
+	return fmt.Sprintf("%x", raw[:]), nil
 }

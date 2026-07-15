@@ -1,9 +1,12 @@
 package execenv
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
+	"syscall"
 	"testing"
 
 	"gopkg.in/yaml.v3"
@@ -49,19 +52,19 @@ func hermesMemoryProvider(t *testing.T, configPath string) (string, bool) {
 	return *parsed.Memory.Provider, true
 }
 
-// TestPrepareHermesHomeOverlay verifies the compatibility overlay: shared state
-// is mirrored via symlink, the derived config references the user's real skills
-// as an external root, and only the bound skill lands in the task-local skills/
-// dir (the user's global skills are referenced, not copied).
+// TestPrepareHermesHomeOverlay verifies the issue-task projection: only the
+// explicitly supported runtime snapshots enter the task home, no task entry
+// points back at owner state, and only bound skills are discoverable.
 func TestPrepareHermesHomeOverlay(t *testing.T) {
 	t.Parallel()
 	sharedHome := t.TempDir()
 	mustWrite(t, filepath.Join(sharedHome, "auth.json"), `{"token":"secret"}`)
-	mustWrite(t, filepath.Join(sharedHome, ".env"), "API_KEY=abc")
+	mustWrite(t, filepath.Join(sharedHome, ".env"), "ANTHROPIC_API_KEY=abc\nOWNER_NOTE=private")
 	mustWrite(t, filepath.Join(sharedHome, "config.yaml"), "model: hermes-4\n")
 	mustWrite(t, filepath.Join(sharedHome, "plugins", "custom-provider", "plugin.py"), "# provider plugin")
 	mustWrite(t, filepath.Join(sharedHome, "oauth_state.json"), `{"nous":"tok"}`)
 	mustWrite(t, filepath.Join(sharedHome, "skills", "personal-notes", "SKILL.md"), "My personal notes skill.")
+	mustWrite(t, filepath.Join(sharedHome, "owner-private.txt"), "must not enter task home")
 
 	hermesHome := filepath.Join(t.TempDir(), "hermes-home")
 	skills := []SkillContextForEnv{{Name: "Review Helper", Content: "Help review code."}}
@@ -72,24 +75,44 @@ func TestPrepareHermesHomeOverlay(t *testing.T) {
 	for _, name := range []string{"auth.json", "plugins", "oauth_state.json"} {
 		fi, err := os.Lstat(filepath.Join(hermesHome, name))
 		if err != nil {
-			t.Fatalf("%s not mirrored into overlay: %v", name, err)
+			t.Fatalf("%s not projected into overlay: %v", name, err)
 		}
-		if fi.Mode()&os.ModeSymlink == 0 {
-			t.Errorf("%s should be a symlink into the shared home", name)
+		if fi.Mode()&os.ModeSymlink != 0 {
+			t.Errorf("%s must be task-private, not a symlink into owner state", name)
 		}
 	}
+	if _, err := os.Lstat(filepath.Join(hermesHome, "owner-private.txt")); !os.IsNotExist(err) {
+		t.Fatalf("unknown owner entry entered task home: %v", err)
+	}
 
-	// .env is overlay-owned/derived (not symlinked): it preserves the source's
-	// credentials but pins HERMES_HOME to the overlay so Hermes' override=True
-	// dotenv load can't relocate the home past it.
+	// Owner mutation after preparation must not change the task snapshot, and
+	// task mutation must not propagate back to the owner home.
+	mustWrite(t, filepath.Join(sharedHome, "auth.json"), `{"token":"rotated"}`)
+	if data, err := os.ReadFile(filepath.Join(hermesHome, "auth.json")); err != nil || string(data) != `{"token":"secret"}` {
+		t.Fatalf("task auth snapshot tracked owner mutation: bytes=%q err=%v", data, err)
+	}
+	mustWrite(t, filepath.Join(hermesHome, "oauth_state.json"), `{"nous":"task-local"}`)
+	if data, err := os.ReadFile(filepath.Join(sharedHome, "oauth_state.json")); err != nil || string(data) != `{"nous":"tok"}` {
+		t.Fatalf("task OAuth mutation reached owner state: bytes=%q err=%v", data, err)
+	}
+	mustWrite(t, filepath.Join(sharedHome, "plugins", "custom-provider", "plugin.py"), "# owner update")
+	if data, err := os.ReadFile(filepath.Join(hermesHome, "plugins", "custom-provider", "plugin.py")); err != nil || string(data) != "# provider plugin" {
+		t.Fatalf("task plugin snapshot tracked owner mutation: bytes=%q err=%v", data, err)
+	}
+
+	// .env is overlay-owned/derived (not symlinked): it keeps only explicitly
+	// allowed Hermes runtime settings and pins HERMES_HOME to the overlay so
+	// Hermes' override=True dotenv load can't relocate the home past it.
 	envPath := filepath.Join(hermesHome, ".env")
 	if fi, err := os.Lstat(envPath); err != nil {
 		t.Fatalf(".env missing from overlay: %v", err)
 	} else if fi.Mode()&os.ModeSymlink != 0 {
 		t.Error(".env should be a derived copy, not a symlink into the shared home")
 	}
-	if data, _ := os.ReadFile(envPath); !strings.Contains(string(data), "API_KEY=abc") {
-		t.Error("derived .env dropped the source credentials")
+	if data, _ := os.ReadFile(envPath); !strings.Contains(string(data), "ANTHROPIC_API_KEY=abc") {
+		t.Error("derived .env dropped an allowed source credential")
+	} else if strings.Contains(string(data), "OWNER_NOTE") {
+		t.Error("derived .env projected an unrelated owner variable")
 	} else if !strings.Contains(string(data), "HERMES_HOME='"+hermesHome+"'") {
 		t.Errorf("derived .env must pin HERMES_HOME to the overlay, got:\n%s", data)
 	}
@@ -103,9 +126,8 @@ func TestPrepareHermesHomeOverlay(t *testing.T) {
 	if data, _ := os.ReadFile(cfgPath); !strings.Contains(string(data), "hermes-4") {
 		t.Error("derived config dropped the user's model setting")
 	}
-	wantExternal := filepath.Join(sharedHome, "skills")
-	if got := hermesExternalDirs(t, cfgPath); len(got) != 1 || got[0] != wantExternal {
-		t.Errorf("external_dirs = %v, want [%s]", got, wantExternal)
+	if got := hermesExternalDirs(t, cfgPath); len(got) != 0 {
+		t.Errorf("external_dirs = %v, want no owner paths", got)
 	}
 
 	if body, err := os.ReadFile(filepath.Join(hermesHome, "skills", "review-helper", "SKILL.md")); err != nil {
@@ -114,7 +136,209 @@ func TestPrepareHermesHomeOverlay(t *testing.T) {
 		t.Error("bound SKILL.md missing content")
 	}
 	if _, err := os.Stat(filepath.Join(hermesHome, "skills", "personal-notes")); !os.IsNotExist(err) {
-		t.Error("user global skill should be referenced via external_dirs, not copied into the task-local skills/")
+		t.Error("owner global skill must not enter the task-local skills directory")
+	}
+}
+
+func TestHermesOverlayRejectsUnsafeOwnerSnapshotEntries(t *testing.T) {
+	t.Parallel()
+	for _, name := range []string{"auth.json", "oauth_state.json", "plugins"} {
+		t.Run(name, func(t *testing.T) {
+			sharedHome := t.TempDir()
+			target := filepath.Join(t.TempDir(), "owner-secret")
+			mustWrite(t, target, "secret")
+			if err := os.Symlink(target, filepath.Join(sharedHome, name)); err != nil {
+				t.Fatalf("symlink %s: %v", name, err)
+			}
+			hermesHome := filepath.Join(t.TempDir(), "hermes-home")
+			err := prepareHermesHome(hermesHome, sharedHome, false,
+				[]SkillContextForEnv{{Name: "Review Helper", Content: "x"}}, nil, testLogger())
+			if err == nil {
+				t.Fatalf("unsafe owner %s symlink was accepted", name)
+			}
+		})
+	}
+}
+
+// TestHermesOverlayProjectsOnlyAllowlistedOwnerCredentials is the P1 regression:
+// an issue task must not inherit arbitrary owner dotenv state. Only explicit
+// Hermes provider authentication/public settings may enter the task overlay.
+func TestHermesOverlayProjectsOnlyAllowlistedOwnerCredentials(t *testing.T) {
+	t.Parallel()
+	sharedHome := t.TempDir()
+	mustWrite(t, filepath.Join(sharedHome, ".env"), strings.Join([]string{
+		"ANTHROPIC_API_KEY=sk-anthropic",
+		"ANTHROPIC_BASE_URL=https://anthropic.example.test",
+		"ANTHROPIC_TOKEN=anthropic-token",
+		"DEEPSEEK_API_KEY=sk-deepseek",
+		"GEMINI_BASE_URL=https://gemini.example.test",
+		"OPENAI_API_KEY=sk-openai",
+		"OPENAI_BASE_URL=https://openai.example.test/v1",
+		"OPENROUTER_API_KEY=sk-openrouter",
+		"GOOGLE_API_KEY=google-key",
+		"HERMES_YOLO_MODE=0",
+		"OWNER_NOTE=do-not-project",
+		"DATABASE_URL=postgres://owner-secret",
+		"AWS_SECRET_ACCESS_KEY=owner-aws-secret",
+		"UNLISTED_API_KEY=owner-unlisted-secret",
+		"HERMES_HOME=/owner/home",
+	}, "\n"))
+
+	hermesHome := filepath.Join(t.TempDir(), "hermes-home")
+	skills := []SkillContextForEnv{{Name: "Review Helper", Content: "x"}}
+	if err := prepareHermesHome(hermesHome, sharedHome, false, skills, nil, testLogger()); err != nil {
+		t.Fatalf("prepareHermesHome failed: %v", err)
+	}
+
+	got := applyDotenvOverride(t, filepath.Join(hermesHome, ".env"))
+	want := map[string]string{
+		"ANTHROPIC_API_KEY":  "sk-anthropic",
+		"ANTHROPIC_BASE_URL": "https://anthropic.example.test",
+		"ANTHROPIC_TOKEN":    "anthropic-token",
+		"DEEPSEEK_API_KEY":   "sk-deepseek",
+		"GEMINI_BASE_URL":    "https://gemini.example.test",
+		"OPENAI_API_KEY":     "sk-openai",
+		"OPENAI_BASE_URL":    "https://openai.example.test/v1",
+		"OPENROUTER_API_KEY": "sk-openrouter",
+		"GOOGLE_API_KEY":     "google-key",
+		"HERMES_HOME":        hermesHome,
+	}
+	if len(got) != len(want) {
+		t.Fatalf("overlay dotenv keys = %v, want only %v", got, want)
+	}
+	for key, value := range want {
+		if got[key] != value {
+			t.Errorf("%s = %q, want %q", key, got[key], value)
+		}
+	}
+}
+
+// TestHermesOverlayConfigProjectsOnlyAllowlistedFields is the config half of
+// the P1 regression: owner credentials and unknown config must not cross into an
+// issue task, while the model/provider and external skill roots Hermes needs do.
+func TestHermesOverlayConfigProjectsOnlyAllowlistedFields(t *testing.T) {
+	t.Parallel()
+	sharedHome := t.TempDir()
+	mustWrite(t, filepath.Join(sharedHome, "config.yaml"), strings.Join([]string{
+		"model:",
+		"  default: anthropic/claude-sonnet",
+		"  model: claude-sonnet",
+		"  provider: anthropic",
+		"  base_url: https://anthropic.example.test",
+		"  api_mode: messages",
+		"  openai_runtime: false",
+		"  auth_mode: api-key",
+		"  api_key: sk-model-owner-secret",
+		"  owner_private: do-not-project",
+		"  entra:",
+		"    scope: https://cognitiveservices.azure.com/.default",
+		"    client_secret: entra-owner-secret",
+		"provider: legacy-anthropic",
+		"api_key: sk-inline-owner-secret",
+		"base_url: https://inline-owner.example.test",
+		"unknown_top_level: owner-private",
+		"skills:",
+		"  external_dirs:",
+		"    - team-skills",
+		"  owner_private: do-not-project",
+		"memory:",
+		"  provider: supermemory",
+		"  api_key: memory-owner-secret",
+		"  memory_enabled: true",
+	}, "\n"))
+
+	hermesHome := filepath.Join(t.TempDir(), "hermes-home")
+	skills := []SkillContextForEnv{{Name: "Review Helper", Content: "x"}}
+	if err := prepareHermesHome(hermesHome, sharedHome, false, skills, nil, testLogger()); err != nil {
+		t.Fatalf("prepareHermesHome failed: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(hermesHome, "config.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]any
+	if err := yaml.Unmarshal(data, &got); err != nil {
+		t.Fatalf("parse derived config: %v\n%s", err, data)
+	}
+	if len(got) != 4 {
+		t.Fatalf("derived config keys = %v, want model/provider/skills/memory only", got)
+	}
+	if got["provider"] != "legacy-anthropic" {
+		t.Errorf("allowed legacy provider was not preserved: %v", got)
+	}
+	modelConfig, ok := got["model"].(map[string]any)
+	if !ok {
+		t.Fatalf("model config = %#v, want projected mapping", got["model"])
+	}
+	wantModel := map[string]any{
+		"default":        "anthropic/claude-sonnet",
+		"model":          "claude-sonnet",
+		"provider":       "anthropic",
+		"base_url":       "https://anthropic.example.test",
+		"api_mode":       "messages",
+		"openai_runtime": false,
+		"auth_mode":      "api-key",
+	}
+	for key, value := range wantModel {
+		if modelConfig[key] != value {
+			t.Errorf("model.%s = %#v, want %#v", key, modelConfig[key], value)
+		}
+	}
+	for _, forbidden := range []string{"api_key", "owner_private"} {
+		if _, ok := modelConfig[forbidden]; ok {
+			t.Errorf("forbidden model field %q entered overlay: %v", forbidden, modelConfig)
+		}
+	}
+	entraConfig, ok := modelConfig["entra"].(map[string]any)
+	if !ok || len(entraConfig) != 1 || entraConfig["scope"] != "https://cognitiveservices.azure.com/.default" {
+		t.Errorf("model.entra = %#v, want only public scope", modelConfig["entra"])
+	}
+	for _, forbidden := range []string{"api_key", "base_url", "unknown_top_level"} {
+		if _, ok := got[forbidden]; ok {
+			t.Errorf("forbidden config field %q entered overlay: %v", forbidden, got)
+		}
+	}
+	skillsConfig, ok := got["skills"].(map[string]any)
+	if !ok || len(skillsConfig) != 1 {
+		t.Fatalf("skills config = %#v, want only external_dirs", got["skills"])
+	}
+	memoryConfig, ok := got["memory"].(map[string]any)
+	if !ok || len(memoryConfig) != 1 || memoryConfig["provider"] != "" {
+		t.Fatalf("memory config = %#v, want only disabled provider", got["memory"])
+	}
+	if dirs := hermesExternalDirs(t, filepath.Join(hermesHome, "config.yaml")); len(dirs) != 0 {
+		t.Errorf("external_dirs = %v, want no owner paths", dirs)
+	}
+}
+
+// TestHermesOverlayConfigParseFailureDoesNotCopyOwnerBytes ensures malformed
+// owner config never falls back to a verbatim task-local copy containing secrets.
+func TestHermesOverlayConfigParseFailureDoesNotCopyOwnerBytes(t *testing.T) {
+	t.Parallel()
+	sharedHome := t.TempDir()
+	mustWrite(t, filepath.Join(sharedHome, "config.yaml"),
+		"api_key: sk-owner-secret\nunknown: [unterminated\n")
+
+	hermesHome := filepath.Join(t.TempDir(), "hermes-home")
+	skills := []SkillContextForEnv{{Name: "Review Helper", Content: "x"}}
+	if err := prepareHermesHome(hermesHome, sharedHome, false, skills, nil, testLogger()); err != nil {
+		t.Fatalf("prepareHermesHome failed: %v", err)
+	}
+
+	configPath := filepath.Join(hermesHome, "config.yaml")
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "sk-owner-secret") || strings.Contains(string(data), "unterminated") {
+		t.Fatalf("malformed owner config bytes entered overlay:\n%s", data)
+	}
+	if provider, ok := hermesMemoryProvider(t, configPath); !ok || provider != "" {
+		t.Fatalf("memory.provider = %q, present=%v; want explicit disabled provider", provider, ok)
+	}
+	if dirs := hermesExternalDirs(t, configPath); len(dirs) != 0 {
+		t.Errorf("external_dirs = %v, want no owner paths", dirs)
 	}
 }
 
@@ -140,16 +364,25 @@ func TestHermesDisablesExternalMemoryProvider(t *testing.T) {
 	if got != "" {
 		t.Errorf("memory.provider = %q, want \"\" (external backend disabled)", got)
 	}
-	if data, _ := os.ReadFile(filepath.Join(hermesHome, "config.yaml")); !strings.Contains(string(data), "memory_enabled: true") {
-		t.Error("built-in memory settings should be preserved")
+	data, err := os.ReadFile(filepath.Join(hermesHome, "config.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var config map[string]any
+	if err := yaml.Unmarshal(data, &config); err != nil {
+		t.Fatalf("parse derived config: %v", err)
+	}
+	memoryConfig, ok := config["memory"].(map[string]any)
+	if !ok || len(memoryConfig) != 1 {
+		t.Errorf("memory config = %#v, want only disabled provider", config["memory"])
+	} else if _, exists := memoryConfig["memory_enabled"]; exists {
+		t.Error("unknown memory_enabled field should not enter the task overlay")
 	}
 }
 
-// TestHermesDerivedConfigRebasesRelativeExternalDirs is the regression for the
-// silent-repoint bug: relative external_dirs must be rewritten to absolute paths
-// anchored at the shared home, absolute entries left intact, and the real skills
-// dir appended.
-func TestHermesDerivedConfigRebasesRelativeExternalDirs(t *testing.T) {
+// TestHermesDerivedConfigDropsOwnerExternalDirs ensures owner-configured paths
+// cannot expose arbitrary daemon-owner files to an issue-derived task.
+func TestHermesDerivedConfigDropsOwnerExternalDirs(t *testing.T) {
 	t.Parallel()
 	sharedHome := t.TempDir()
 	mustWrite(t, filepath.Join(sharedHome, "config.yaml"),
@@ -161,22 +394,14 @@ func TestHermesDerivedConfigRebasesRelativeExternalDirs(t *testing.T) {
 		t.Fatalf("prepareHermesHome failed: %v", err)
 	}
 
-	got := hermesExternalDirs(t, filepath.Join(hermesHome, "config.yaml"))
-	want := []string{
-		filepath.Join(sharedHome, "team-skills"),
-		"/opt/shared/skills",
-		filepath.Join(sharedHome, "skills"),
-	}
-	if strings.Join(got, "\n") != strings.Join(want, "\n") {
-		t.Errorf("external_dirs =\n%v\nwant\n%v", got, want)
+	if got := hermesExternalDirs(t, filepath.Join(hermesHome, "config.yaml")); len(got) != 0 {
+		t.Errorf("owner external_dirs entered task config: %v", got)
 	}
 }
 
-// TestHermesExternalDirsExpandsSanitizedEnv verifies a ${VAR} present in the
-// sanitized effective env expands, while an UNKNOWN var is preserved verbatim
-// (Hermes/Python expandvars semantics) instead of collapsing to empty and being
-// silently rewritten to an absolute path.
-func TestHermesExternalDirsExpandsSanitizedEnv(t *testing.T) {
+// TestHermesExternalDirsDoNotExpandIntoOwnerPaths verifies custom environment
+// expansion cannot smuggle owner-controlled directories into task config.
+func TestHermesExternalDirsDoNotExpandIntoOwnerPaths(t *testing.T) {
 	t.Parallel()
 	sharedHome := t.TempDir()
 	mustWrite(t, filepath.Join(sharedHome, "config.yaml"),
@@ -189,14 +414,8 @@ func TestHermesExternalDirsExpandsSanitizedEnv(t *testing.T) {
 		t.Fatalf("prepareHermesHome failed: %v", err)
 	}
 
-	got := hermesExternalDirs(t, filepath.Join(hermesHome, "config.yaml"))
-	want := []string{
-		"/srv/team/reviews", // known var expanded
-		"${MYSTERY_VAR}/x",  // unknown var preserved verbatim, NOT absolutized
-		filepath.Join(sharedHome, "skills"),
-	}
-	if strings.Join(got, "\n") != strings.Join(want, "\n") {
-		t.Errorf("external_dirs =\n%v\nwant\n%v", got, want)
+	if got := hermesExternalDirs(t, filepath.Join(hermesHome, "config.yaml")); len(got) != 0 {
+		t.Errorf("expanded owner external_dirs entered task config: %v", got)
 	}
 }
 
@@ -265,7 +484,7 @@ func TestHermesOverlayIsolatesMemories(t *testing.T) {
 }
 
 // TestHermesOverlayPermissions asserts the task home is 0700 and the derived
-// config (which can hold inline api_key secrets) is 0600.
+// config containing projected owner runtime settings is 0600.
 func TestHermesOverlayPermissions(t *testing.T) {
 	t.Parallel()
 	sharedHome := t.TempDir()
@@ -289,9 +508,9 @@ func TestHermesOverlayPermissions(t *testing.T) {
 	}
 }
 
-// TestHermesOverlayReconcilesDeletedSharedEntry asserts a top-level entry
-// removed from the shared home is dropped from the overlay on rebuild.
-func TestHermesOverlayReconcilesDeletedSharedEntry(t *testing.T) {
+// TestHermesPluginSnapshotRemovedWithSource asserts an allowlisted snapshot is
+// removed on rebuild when its source disappears.
+func TestHermesPluginSnapshotRemovedWithSource(t *testing.T) {
 	t.Parallel()
 	sharedHome := t.TempDir()
 	mustWrite(t, filepath.Join(sharedHome, "config.yaml"), "model: hermes-4\n")
@@ -303,7 +522,7 @@ func TestHermesOverlayReconcilesDeletedSharedEntry(t *testing.T) {
 		t.Fatalf("prepareHermesHome failed: %v", err)
 	}
 	if _, err := os.Lstat(filepath.Join(hermesHome, "plugins")); err != nil {
-		t.Fatalf("plugins not mirrored: %v", err)
+		t.Fatalf("plugins not snapshotted: %v", err)
 	}
 	if err := os.RemoveAll(filepath.Join(sharedHome, "plugins")); err != nil {
 		t.Fatalf("remove shared plugins: %v", err)
@@ -312,7 +531,129 @@ func TestHermesOverlayReconcilesDeletedSharedEntry(t *testing.T) {
 		t.Fatalf("prepareHermesHome (rebuild) failed: %v", err)
 	}
 	if _, err := os.Lstat(filepath.Join(hermesHome, "plugins")); !os.IsNotExist(err) {
-		t.Error("stale mirrored plugins should be reconciled away after deletion in the shared home")
+		t.Error("stale plugin snapshot should be removed after source deletion")
+	}
+}
+
+func TestHermesOptionalSnapshotRemovedWithSource(t *testing.T) {
+	t.Parallel()
+	sharedHome := t.TempDir()
+	hermesHome := filepath.Join(t.TempDir(), "hermes-home")
+	mustWrite(t, filepath.Join(sharedHome, "auth.json"), `{"token":"owner"}`)
+	mustWrite(t, filepath.Join(sharedHome, "oauth_state.json"), `{"state":"owner"}`)
+
+	if err := prepareHermesHome(hermesHome, sharedHome, false, nil, nil, testLogger()); err != nil {
+		t.Fatalf("prepareHermesHome failed: %v", err)
+	}
+	for _, name := range []string{"auth.json", "oauth_state.json"} {
+		if err := os.Remove(filepath.Join(sharedHome, name)); err != nil {
+			t.Fatalf("remove source %s: %v", name, err)
+		}
+	}
+	if err := prepareHermesHome(hermesHome, sharedHome, false, nil, nil, testLogger()); err != nil {
+		t.Fatalf("prepareHermesHome (rebuild) failed: %v", err)
+	}
+	for _, name := range []string{"auth.json", "oauth_state.json"} {
+		if _, err := os.Lstat(filepath.Join(hermesHome, name)); !os.IsNotExist(err) {
+			t.Errorf("stale %s snapshot survived source deletion: %v", name, err)
+		}
+	}
+}
+
+func TestHermesOptionalSnapshotsRejectHardLinks(t *testing.T) {
+	t.Parallel()
+	for _, name := range []string{"auth.json", "oauth_state.json"} {
+		name := name
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			sharedHome := t.TempDir()
+			source := filepath.Join(sharedHome, name)
+			mustWrite(t, source, "owner credential")
+			if err := os.Link(source, filepath.Join(sharedHome, name+".link")); err != nil {
+				t.Skipf("hard links unavailable: %v", err)
+			}
+
+			err := prepareHermesHome(filepath.Join(t.TempDir(), "hermes-home"), sharedHome, false, nil, nil, testLogger())
+			if err == nil || !strings.Contains(err.Error(), "hard link") {
+				t.Fatalf("hard-linked %s error = %v, want fail-closed rejection", name, err)
+			}
+		})
+	}
+}
+
+func TestHermesPluginSnapshotRejectsHardLinks(t *testing.T) {
+	t.Parallel()
+	sharedHome := t.TempDir()
+	source := filepath.Join(sharedHome, "plugins", "provider", "plugin.py")
+	mustWrite(t, source, "original plugin")
+	if err := os.Link(source, filepath.Join(sharedHome, "plugins", "provider", "plugin-copy.py")); err != nil {
+		t.Skipf("hard links unavailable: %v", err)
+	}
+
+	err := snapshotHermesPlugins(sharedHome, t.TempDir(), nil)
+	if err == nil || !errors.Is(err, errUnsafeHermesPluginEntry) || !strings.Contains(err.Error(), "hard link") {
+		t.Fatalf("plugin hard-link error = %v, want unsafe hard-link rejection", err)
+	}
+}
+
+func TestHermesPluginSnapshotRejectsSpecialEntries(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("FIFO fixture is POSIX-only")
+	}
+	sharedHome := t.TempDir()
+	pluginDir := filepath.Join(sharedHome, "plugins", "provider")
+	if err := os.MkdirAll(pluginDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	fifo := filepath.Join(pluginDir, "control.pipe")
+	if err := syscall.Mkfifo(fifo, 0o600); err != nil {
+		t.Skipf("FIFO unavailable: %v", err)
+	}
+
+	err := snapshotHermesPlugins(sharedHome, t.TempDir(), nil)
+	if err == nil || !errors.Is(err, errUnsafeHermesPluginEntry) {
+		t.Fatalf("plugin FIFO error = %v, want unsafe-entry rejection", err)
+	}
+}
+
+func TestHermesPluginSnapshotRejectsPathReplacementAfterOpen(t *testing.T) {
+	t.Parallel()
+	sharedHome := t.TempDir()
+	source := filepath.Join(sharedHome, "plugins", "provider", "plugin.py")
+	mustWrite(t, source, "original plugin")
+	replacement := filepath.Join(sharedHome, "replacement.py")
+	mustWrite(t, replacement, "replacement plugin")
+
+	err := snapshotHermesPlugins(sharedHome, t.TempDir(), func(opened string) {
+		if opened != source {
+			return
+		}
+		if renameErr := os.Rename(replacement, source); renameErr != nil {
+			t.Fatalf("replace opened plugin path: %v", renameErr)
+		}
+	})
+	if err == nil || !errors.Is(err, errUnsafeHermesPluginEntry) || !strings.Contains(err.Error(), "identity changed") {
+		t.Fatalf("plugin replacement error = %v, want identity-change rejection", err)
+	}
+}
+
+func TestHermesTaskHomeRemovesUnknownEntriesOnReuse(t *testing.T) {
+	t.Parallel()
+	sharedHome := t.TempDir()
+	hermesHome := filepath.Join(t.TempDir(), "hermes-home")
+	if err := prepareHermesHome(hermesHome, sharedHome, false, nil, nil, testLogger()); err != nil {
+		t.Fatalf("prepareHermesHome failed: %v", err)
+	}
+	mustWrite(t, filepath.Join(hermesHome, "daemon-owner-secret.txt"), "must be removed")
+	mustWrite(t, filepath.Join(hermesHome, "unknown", "nested.txt"), "must be removed")
+
+	if err := prepareHermesHome(hermesHome, sharedHome, false, nil, nil, testLogger()); err != nil {
+		t.Fatalf("prepareHermesHome (reuse) failed: %v", err)
+	}
+	for _, name := range []string{"daemon-owner-secret.txt", "unknown"} {
+		if _, err := os.Lstat(filepath.Join(hermesHome, name)); !os.IsNotExist(err) {
+			t.Errorf("unknown task-home entry %s survived reuse: %v", name, err)
+		}
 	}
 }
 
@@ -441,13 +782,9 @@ func TestResolveHermesProfile(t *testing.T) {
 	})
 }
 
-// TestHermesExternalDirsExpandsAgainstSelectedProfileHome is the review's blocker
-// 3: a ${HERMES_HOME} in a selected profile's skills.external_dirs must expand
-// against the SELECTED profile home (what native Hermes sees after applying the
-// profile override before loading config.yaml), not the pre-resolution/root home
-// or the task overlay. The daemon sets the effective env's HERMES_HOME to the
-// resolved source home for exactly this reason.
-func TestHermesExternalDirsExpandsAgainstSelectedProfileHome(t *testing.T) {
+// TestHermesExternalDirsDoNotExposeSelectedProfileHome ensures a selected
+// profile cannot reintroduce its owner path through skills.external_dirs.
+func TestHermesExternalDirsDoNotExposeSelectedProfileHome(t *testing.T) {
 	t.Parallel()
 	profileHome := t.TempDir() // stands in for <root>/profiles/coder
 	mustWrite(t, filepath.Join(profileHome, "config.yaml"),
@@ -460,13 +797,8 @@ func TestHermesExternalDirsExpandsAgainstSelectedProfileHome(t *testing.T) {
 		t.Fatalf("prepareHermesHome failed: %v", err)
 	}
 
-	got := hermesExternalDirs(t, filepath.Join(hermesHome, "config.yaml"))
-	want := []string{
-		filepath.Join(profileHome, "profile-skills"),
-		filepath.Join(profileHome, "skills"),
-	}
-	if strings.Join(got, "\n") != strings.Join(want, "\n") {
-		t.Errorf("external_dirs =\n%v\nwant\n%v", got, want)
+	if got := hermesExternalDirs(t, filepath.Join(hermesHome, "config.yaml")); len(got) != 0 {
+		t.Errorf("selected profile paths entered task config: %v", got)
 	}
 }
 
@@ -648,10 +980,9 @@ func TestPrepareHermesHomeFailsOnMissingNamedProfile(t *testing.T) {
 	}
 }
 
-// TestPrepareHermesNoSkillsLeavesHomeUnset is the regression for the review's
-// top blocker: a Hermes task with no bound skills must NOT get a redirected
-// HERMES_HOME.
-func TestPrepareHermesNoSkillsLeavesHomeUnset(t *testing.T) {
+// TestPrepareHermesNoSkillsUsesPrivateHome proves a skill-less Issue task does
+// not fall through to daemon-owner Hermes state.
+func TestPrepareHermesNoSkillsUsesPrivateHome(t *testing.T) {
 	t.Parallel()
 	env, err := Prepare(PrepareParams{
 		WorkspacesRoot: t.TempDir(),
@@ -665,11 +996,11 @@ func TestPrepareHermesNoSkillsLeavesHomeUnset(t *testing.T) {
 	}
 	defer env.Cleanup(true)
 
-	if env.HermesHome != "" {
-		t.Errorf("skill-less Hermes task must not redirect HERMES_HOME, got %q", env.HermesHome)
+	if env.HermesHome == "" {
+		t.Fatal("skill-less Hermes task must use a private HERMES_HOME")
 	}
-	if _, err := os.Stat(filepath.Join(env.RootDir, "hermes-home")); !os.IsNotExist(err) {
-		t.Error("no hermes-home overlay should be created for a skill-less task")
+	if info, err := os.Stat(filepath.Join(env.RootDir, "hermes-home")); err != nil || !info.IsDir() {
+		t.Fatalf("private hermes-home missing: %v", err)
 	}
 }
 
@@ -703,22 +1034,22 @@ func TestReuseHermesTearsDownWhenSkillsRemoved(t *testing.T) {
 	}
 	overlayDir := filepath.Join(env.RootDir, "hermes-home")
 
-	if reused := Reuse(ReuseParams{WorkDir: env.WorkDir, Provider: "hermes", HermesSourceHome: sharedHome, Task: withSkill}, testLogger()); reused == nil {
+	if reused := Reuse(ReuseParams{RootDir: env.RootDir, WorkDir: env.WorkDir, Provider: "hermes", HermesSourceHome: sharedHome, Task: withSkill}, testLogger()); reused == nil {
 		t.Fatal("Reuse with skill returned nil")
 	} else if reused.HermesHome == "" {
 		t.Error("resume with a bound skill should keep the redirect")
 	}
 
 	noSkill := TaskContextForEnv{IssueID: "hermes-resume"}
-	reused := Reuse(ReuseParams{WorkDir: env.WorkDir, Provider: "hermes", HermesSourceHome: sharedHome, Task: noSkill}, testLogger())
+	reused := Reuse(ReuseParams{RootDir: env.RootDir, WorkDir: env.WorkDir, Provider: "hermes", HermesSourceHome: sharedHome, Task: noSkill}, testLogger())
 	if reused == nil {
 		t.Fatal("Reuse without skill returned nil")
 	}
-	if reused.HermesHome != "" {
-		t.Errorf("removing the last skill should clear HERMES_HOME, got %q", reused.HermesHome)
+	if reused.HermesHome == "" {
+		t.Fatal("removing the last skill must retain the private HERMES_HOME")
 	}
-	if _, err := os.Stat(overlayDir); !os.IsNotExist(err) {
-		t.Error("stale hermes-home overlay should be removed on teardown")
+	if entries, err := os.ReadDir(filepath.Join(overlayDir, "skills")); err != nil || len(entries) != 0 {
+		t.Fatalf("skill-less reused home must contain an empty task skills dir: entries=%v err=%v", entries, err)
 	}
 }
 

@@ -161,6 +161,7 @@ type Config struct {
 	Launcher       CommandBuilder
 	Isolation      *TaskIsolationPolicy
 	TaskTempDir    string
+	TaskStateDir   string // daemon-issued persistent root reused with the task workdir
 }
 
 // New creates a Backend for the given agent type.

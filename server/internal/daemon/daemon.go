@@ -155,13 +155,14 @@ type resolvedTaskRepo struct {
 }
 
 type taskIsolationParams struct {
-	Environment    *execenv.Environment
-	TaskTempDir    string
-	Repos          []resolvedTaskRepo
-	Executable     string
-	OwnerHome      string
-	SelfExecutable string
-	LookupPath     func(string) (string, error)
+	Environment      *execenv.Environment
+	TaskTempDir      string
+	Repos            []resolvedTaskRepo
+	Executable       string
+	OwnerHome        string
+	HermesSourceHome string
+	SelfExecutable   string
+	LookupPath       func(string) (string, error)
 }
 
 // Daemon is the local agent runtime that polls for and executes tasks.
@@ -3069,12 +3070,6 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 		d.markActiveEnvRoot(predictedEnvRoot)
 		defer d.unmarkActiveEnvRoot(predictedEnvRoot)
 	}
-	if task.PriorWorkDir != "" {
-		if priorRoot := filepath.Dir(task.PriorWorkDir); priorRoot != "" && priorRoot != predictedEnvRoot {
-			d.markActiveEnvRoot(priorRoot)
-			defer d.unmarkActiveEnvRoot(priorRoot)
-		}
-	}
 
 	// Create a cancellable context so we can interrupt the running agent
 	// when the server signals the task should stop — either the task reached
@@ -3492,6 +3487,23 @@ func gateCodexResumeToRolloutPresence(task *Task, taskCtx *execenv.TaskContextFo
 	taskCtx.PriorSessionResumeUnavailable = true
 }
 
+// gatePiResumeToTaskState rejects legacy path-valued Pi session pointers and
+// missing or replaced task-private files. Pi sessions are persisted beside the
+// reused workdir; no resume value may select a filesystem location.
+func gatePiResumeToTaskState(task *Task, taskCtx *execenv.TaskContextForEnv, provider, taskStateDir string, taskLog *slog.Logger) {
+	if provider != "pi" || task.PriorSessionID == "" {
+		return
+	}
+	if agent.PiSessionPresent(taskStateDir, task.PriorSessionID) {
+		return
+	}
+	taskLog.Warn("dropping prior pi session: task-private session is unavailable; starting fresh",
+		"session_id", task.PriorSessionID, "task_state_dir", taskStateDir)
+	task.PriorSessionID = ""
+	taskCtx.PriorSessionResumed = false
+	taskCtx.PriorSessionResumeUnavailable = true
+}
+
 func (d *Daemon) ensureTaskSkillBundles(ctx context.Context, task *Task) error {
 	if task == nil || task.Agent == nil || len(task.Agent.SkillRefs) == 0 {
 		return nil
@@ -3779,13 +3791,6 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	predictedRoot := execenv.PredictRootDir(d.cfg.WorkspacesRoot, task.WorkspaceID, task.ID)
 	d.markActiveEnvRoot(predictedRoot)
 	defer d.unmarkActiveEnvRoot(predictedRoot)
-	if task.PriorWorkDir != "" {
-		priorRoot := filepath.Dir(task.PriorWorkDir)
-		if priorRoot != predictedRoot {
-			d.markActiveEnvRoot(priorRoot)
-			defer d.unmarkActiveEnvRoot(priorRoot)
-		}
-	}
 
 	// Try to reuse the workdir from a previous task on the same (agent, issue) pair.
 	var env *execenv.Environment
@@ -3887,6 +3892,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	if task.PriorWorkDir != "" && localAssignment == nil && !task.IsLeaderTask {
 		env = execenv.Reuse(execenv.ReuseParams{
 			WorkspacesRoot:        d.cfg.WorkspacesRoot,
+			RootDir:               predictedRoot,
 			Profile:               d.cfg.Profile,
 			WorkDir:               task.PriorWorkDir,
 			Provider:              provider,
@@ -3971,6 +3977,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// conversation Codex will silently restart from scratch.
 	if reused {
 		gateCodexResumeToRolloutPresence(&task, &taskCtx, provider, env.CodexHome, taskLog)
+		gatePiResumeToTaskState(&task, &taskCtx, provider, env.RootDir, taskLog)
 	}
 
 	// Inject runtime-specific config (meta skill) so the agent discovers .agent_context/.
@@ -4077,13 +4084,14 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		return TaskResult{}, fmt.Errorf("resolve multica executable: %w", err)
 	}
 	isolationPolicy, taskPath, err := buildTaskIsolationPolicy(taskIsolationParams{
-		Environment:    env,
-		TaskTempDir:    taskTempDir,
-		Repos:          resolvedTaskRepos,
-		Executable:     entry.Path,
-		OwnerHome:      ownerHome,
-		SelfExecutable: selfExecutable,
-		LookupPath:     exec.LookPath,
+		Environment:      env,
+		TaskTempDir:      taskTempDir,
+		Repos:            resolvedTaskRepos,
+		Executable:       entry.Path,
+		OwnerHome:        ownerHome,
+		HermesSourceHome: hermesSourceHome,
+		SelfExecutable:   selfExecutable,
+		LookupPath:       exec.LookPath,
 	})
 	if err != nil {
 		return TaskResult{}, fmt.Errorf("build task isolation policy: %w", err)
@@ -4186,6 +4194,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		Launcher:       launcher,
 		Isolation:      &isolationPolicy,
 		TaskTempDir:    taskTempDir,
+		TaskStateDir:   env.RootDir,
 	})
 	if err != nil {
 		return TaskResult{}, fmt.Errorf("create agent backend: %w", err)

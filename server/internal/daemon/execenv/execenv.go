@@ -210,15 +210,12 @@ type Environment struct {
 	// exports this as CURSOR_DATA_DIR so project-level MCP approvals are
 	// isolated from the user's persistent ~/.cursor/projects state.
 	CursorDataDir string
-	// HermesHome is the path to the per-task HERMES_HOME overlay (set only for
+	// HermesHome is the path to the per-task HERMES_HOME projection (set only for
 	// the hermes provider, and only when the agent has skills bound — empty
-	// otherwise, leaving the user's real home in place). It mirrors ~/.hermes/
-	// via symlink, derives a config.yaml that references the user's real skills
-	// as an external root, and holds the bound skills in its skills/ subdir. The
-	// daemon exports it as HERMES_HOME so the hermes CLI discovers those skills
-	// natively — Hermes has no workspace-relative discovery, so the previous
-	// .agent_context/skills/ fallback was never read (issue #5242). See
-	// hermes_home.go.
+	// otherwise). It contains bounded private snapshots of allowlisted runtime
+	// state, a minimal derived config with no owner paths, and only the bound
+	// skills. The daemon exports it as HERMES_HOME because Hermes has no
+	// workspace-relative skill discovery (issue #5242). See hermes_home.go.
 	HermesHome string
 
 	logger *slog.Logger // for cleanup logging
@@ -329,13 +326,10 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 		env.CodexHome = codexHome
 	}
 
-	// For Hermes, redirect HERMES_HOME to a per-task compatibility overlay ONLY
-	// when the agent has skills bound. A skill-less Hermes task keeps the user's
-	// real home and its original behavior untouched. The overlay makes the bound
-	// skills visible — Hermes discovers skills only from its home, so the old
-	// .agent_context/skills/ fallback was never read (issue #5242). See
-	// hermes_home.go.
-	if params.Provider == "hermes" && len(params.Task.AgentSkills) > 0 {
+	// Hermes always runs from a task-private HERMES_HOME. This prevents an Issue
+	// task without bound skills from inheriting owner credentials, plugins,
+	// memories, profiles, or future owner-home state.
+	if params.Provider == "hermes" {
 		hermesHome := filepath.Join(envRoot, "hermes-home")
 		if err := prepareHermesHome(hermesHome, params.HermesSourceHome, params.HermesSourceMustExist, params.Task.AgentSkills, params.HermesEnv, logger); err != nil {
 			return nil, fmt.Errorf("execenv: prepare hermes-home: %w", err)
@@ -390,9 +384,12 @@ type ReuseParams struct {
 	// too — a marker removed while the daemon runs is restored before a reused
 	// task spawns, not only on the fresh-Prepare path.
 	WorkspacesRoot string
-	WorkDir        string
-	Provider       string
-	CodexVersion   string // only used when Provider == "codex"
+	// RootDir is the daemon-derived, task-specific environment root. Reuse never
+	// derives authority from the persisted WorkDir path.
+	RootDir      string
+	WorkDir      string
+	Provider     string
+	CodexVersion string // only used when Provider == "codex"
 	// ResumeSessionID is the prior Codex thread/session ID this reused task
 	// intends to resume, when any. Only consulted when Provider == "codex" and
 	// only used while migrating a legacy per-task home whose sessions/ still
@@ -422,8 +419,7 @@ type ReuseParams struct {
 	// reuse paths.
 	LocalDirectory bool
 	// HermesSourceHome and HermesEnv mirror PrepareParams on reuse so the Hermes
-	// overlay re-derives against the agent's current source home / profile and
-	// external_dirs vars.
+	// projection re-derives against the agent's current source home/profile.
 	HermesSourceHome      string
 	HermesSourceMustExist bool
 	HermesEnv             map[string]string
@@ -433,7 +429,11 @@ type ReuseParams struct {
 // Reuse wraps an existing workdir into an Environment and refreshes context files.
 // Returns nil if the workdir does not exist (caller should fall back to Prepare).
 func Reuse(params ReuseParams, logger *slog.Logger) *Environment {
-	if _, err := os.Stat(params.WorkDir); err != nil {
+	rootDir, workDir, err := validateReusePaths(params.RootDir, params.WorkDir)
+	if err != nil {
+		if logger != nil {
+			logger.Warn("execenv: reject unsafe reused environment", "error", err)
+		}
 		return nil
 	}
 
@@ -448,7 +448,6 @@ func Reuse(params ReuseParams, logger *slog.Logger) *Environment {
 		}
 	}
 
-	rootDir := filepath.Dir(params.WorkDir)
 	if params.LocalDirectory {
 		// For local_directory tasks the user's WorkDir is unrelated to
 		// envRoot (envRoot still lives under workspacesRoot/{wsID}/...),
@@ -463,12 +462,9 @@ func Reuse(params ReuseParams, logger *slog.Logger) *Environment {
 	}
 	env := &Environment{
 		RootDir:        rootDir,
-		WorkDir:        params.WorkDir,
+		WorkDir:        workDir,
 		LocalDirectory: params.LocalDirectory,
 		logger:         logger,
-	}
-	if env.RootDir == "" {
-		return nil
 	}
 	homeDir, configDir, err := preparePrivateTaskHome(env.RootDir)
 	if err != nil {
@@ -550,30 +546,15 @@ func Reuse(params ReuseParams, logger *slog.Logger) *Environment {
 		}
 	}
 
-	// Refresh (or tear down) the per-task HERMES_HOME on reuse. With skills
-	// bound, rebuild the overlay so an added/removed/edited skill and the
-	// mirrored home/config track the user's current ~/.hermes/ before the next
-	// hermes process starts. With no skills bound, drop the redirect entirely so
-	// the task reverts to the user's real home — matching a fresh Prepare for a
-	// skill-less agent.
+	// Refresh the per-task HERMES_HOME on reuse so runtime snapshots and bound
+	// skills track current task authority.
 	if params.Provider == "hermes" && env.RootDir != "" {
 		hermesHome := filepath.Join(env.RootDir, "hermes-home")
-		if len(params.Task.AgentSkills) > 0 {
-			if err := prepareHermesHome(hermesHome, params.HermesSourceHome, params.HermesSourceMustExist, params.Task.AgentSkills, params.HermesEnv, logger); err != nil {
-				// Fail closed: a half-built overlay must not run. Returning nil
-				// makes the daemon fall back to a fresh Prepare, whose error
-				// then blocks dispatch rather than silently dropping the bound
-				// skill.
-				logger.Warn("execenv: refresh hermes-home failed; forcing fresh prepare", "error", err)
-				return nil
-			}
-			env.HermesHome = hermesHome
-		} else {
-			env.HermesHome = ""
-			if err := os.RemoveAll(hermesHome); err != nil {
-				logger.Warn("execenv: remove stale hermes-home failed", "error", err)
-			}
+		if err := prepareHermesHome(hermesHome, params.HermesSourceHome, params.HermesSourceMustExist, params.Task.AgentSkills, params.HermesEnv, logger); err != nil {
+			logger.Warn("execenv: refresh hermes-home failed; forcing fresh prepare", "error", err)
+			return nil
 		}
+		env.HermesHome = hermesHome
 	}
 
 	// Refresh Cursor's managed MCP sidecars on reuse. A newly saved agent
@@ -612,6 +593,39 @@ func Reuse(params ReuseParams, logger *slog.Logger) *Environment {
 
 	logger.Info("execenv: reusing env", "workdir", params.WorkDir)
 	return env
+}
+
+func validateReusePaths(rootDir, workDir string) (string, string, error) {
+	if rootDir == "" || workDir == "" || !filepath.IsAbs(rootDir) || !filepath.IsAbs(workDir) ||
+		filepath.Clean(rootDir) != rootDir || filepath.Clean(workDir) != workDir {
+		return "", "", fmt.Errorf("reuse root and workdir must be absolute canonical paths")
+	}
+	if workDir != filepath.Join(rootDir, "workdir") {
+		return "", "", fmt.Errorf("reuse workdir %q is not the expected child of root %q", workDir, rootDir)
+	}
+	resolvedRoot, err := filepath.EvalSymlinks(rootDir)
+	if err != nil {
+		return "", "", fmt.Errorf("resolve reuse root: %w", err)
+	}
+	resolvedWorkDir, err := filepath.EvalSymlinks(workDir)
+	if err != nil {
+		return "", "", fmt.Errorf("resolve reuse workdir: %w", err)
+	}
+	if resolvedWorkDir != filepath.Join(resolvedRoot, "workdir") {
+		return "", "", fmt.Errorf("resolved reuse workdir is not the expected child of the resolved root")
+	}
+	rootInfo, err := os.Lstat(rootDir)
+	if err != nil || !rootInfo.IsDir() || rootInfo.Mode()&os.ModeSymlink != 0 {
+		return "", "", fmt.Errorf("reuse root is not a real directory")
+	}
+	workInfo, err := os.Lstat(workDir)
+	if err != nil || !workInfo.IsDir() || workInfo.Mode()&os.ModeSymlink != 0 {
+		return "", "", fmt.Errorf("reuse workdir is not a real directory")
+	}
+	// Preserve the daemon-issued lexical identity after validating its resolved
+	// filesystem relationship. On macOS, /var commonly resolves to /private/var;
+	// replacing the issued paths would split active-root and persisted identity.
+	return rootDir, workDir, nil
 }
 
 // preparePrivateTaskHome creates the home/config roots inherited by an agent

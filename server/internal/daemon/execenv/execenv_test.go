@@ -638,6 +638,7 @@ func TestReuseRefreshesSkillsWithoutDuplicating(t *testing.T) {
 	// Re-dispatch twice on the same persistent workdir.
 	for i := 0; i < 2; i++ {
 		if reused := Reuse(ReuseParams{
+			RootDir:  env.RootDir,
 			WorkDir:  env.WorkDir,
 			Provider: "claude",
 			Task:     task,
@@ -708,6 +709,7 @@ func TestReuseReclaimsManagedSkillDirWithStrayAgentFile(t *testing.T) {
 	}
 
 	if reused := Reuse(ReuseParams{
+		RootDir:  env.RootDir,
 		WorkDir:  env.WorkDir,
 		Provider: "claude",
 		Task:     task,
@@ -735,6 +737,122 @@ func TestReuseReclaimsManagedSkillDirWithStrayAgentFile(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(skillsDir, "issue-review", "SKILL.md")); err != nil {
 		t.Errorf("expected a refreshed SKILL.md at the canonical slug: %v", err)
 	}
+}
+
+func TestReuseRejectsUntrustedPathsBeforeWriting(t *testing.T) {
+	t.Parallel()
+
+	makeRoot := func(t *testing.T) (string, string) {
+		t.Helper()
+		root := filepath.Join(t.TempDir(), "task-root")
+		workdir := filepath.Join(root, "workdir")
+		if err := os.MkdirAll(workdir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		return root, workdir
+	}
+	assertUntouched := func(t *testing.T, root, sentinel string) {
+		t.Helper()
+		data, err := os.ReadFile(sentinel)
+		if err != nil || string(data) != "owner-data" {
+			t.Fatalf("sentinel changed: data=%q err=%v", data, err)
+		}
+		for _, name := range []string{"home", "codex-home", "hermes-home", ".agent_context"} {
+			if _, err := os.Lstat(filepath.Join(root, name)); !os.IsNotExist(err) {
+				t.Fatalf("rejected reuse wrote %s: %v", name, err)
+			}
+		}
+	}
+
+	tests := []struct {
+		name   string
+		params func(*testing.T) (ReuseParams, string, string)
+	}{
+		{
+			name: "missing trusted root",
+			params: func(t *testing.T) (ReuseParams, string, string) {
+				root, workdir := makeRoot(t)
+				return ReuseParams{WorkDir: workdir, Provider: "claude"}, root, workdir
+			},
+		},
+		{
+			name: "foreign workdir",
+			params: func(t *testing.T) (ReuseParams, string, string) {
+				trustedRoot, _ := makeRoot(t)
+				foreignRoot, foreignWorkdir := makeRoot(t)
+				return ReuseParams{RootDir: trustedRoot, WorkDir: foreignWorkdir, Provider: "claude"}, foreignRoot, foreignWorkdir
+			},
+		},
+		{
+			name: "wrong child name",
+			params: func(t *testing.T) (ReuseParams, string, string) {
+				root, _ := makeRoot(t)
+				foreign := filepath.Join(root, "foreign")
+				if err := os.Mkdir(foreign, 0o700); err != nil {
+					t.Fatal(err)
+				}
+				return ReuseParams{RootDir: root, WorkDir: foreign, Provider: "claude"}, root, foreign
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			params, observedRoot, sentinelDir := tt.params(t)
+			sentinel := filepath.Join(sentinelDir, "sentinel")
+			if err := os.WriteFile(sentinel, []byte("owner-data"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if reused := Reuse(params, testLogger()); reused != nil {
+				t.Fatal("Reuse accepted an untrusted path")
+			}
+			assertUntouched(t, observedRoot, sentinel)
+		})
+	}
+
+	t.Run("symlinked root", func(t *testing.T) {
+		realRoot, realWorkdir := makeRoot(t)
+		linkRoot := filepath.Join(t.TempDir(), "task-root-link")
+		if err := os.Symlink(realRoot, linkRoot); err != nil {
+			t.Skipf("symlink unavailable: %v", err)
+		}
+		sentinel := filepath.Join(realWorkdir, "sentinel")
+		if err := os.WriteFile(sentinel, []byte("owner-data"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if reused := Reuse(ReuseParams{RootDir: linkRoot, WorkDir: filepath.Join(linkRoot, "workdir"), Provider: "claude"}, testLogger()); reused != nil {
+			t.Fatal("Reuse accepted a symlinked root")
+		}
+		assertUntouched(t, realRoot, sentinel)
+	})
+
+	t.Run("symlinked workdir", func(t *testing.T) {
+		root := filepath.Join(t.TempDir(), "task-root")
+		if err := os.Mkdir(root, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		foreignRoot, foreignWorkdir := makeRoot(t)
+		if err := os.Symlink(foreignWorkdir, filepath.Join(root, "workdir")); err != nil {
+			t.Skipf("symlink unavailable: %v", err)
+		}
+		sentinel := filepath.Join(foreignWorkdir, "sentinel")
+		if err := os.WriteFile(sentinel, []byte("owner-data"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if reused := Reuse(ReuseParams{RootDir: root, WorkDir: filepath.Join(root, "workdir"), Provider: "claude"}, testLogger()); reused != nil {
+			t.Fatal("Reuse accepted a symlinked workdir")
+		}
+		assertUntouched(t, foreignRoot, sentinel)
+	})
+
+	t.Run("valid expected paths", func(t *testing.T) {
+		root, workdir := makeRoot(t)
+		reused := Reuse(ReuseParams{RootDir: root, WorkDir: workdir, Provider: "claude"}, testLogger())
+		if reused == nil || reused.RootDir != root || reused.WorkDir != workdir {
+			t.Fatalf("Reuse valid identity = %#v", reused)
+		}
+	})
 }
 
 // TestReuseSkillRefreshIsCanonicalAcrossProviders exercises the reuse skill
@@ -3016,7 +3134,7 @@ func TestReuseRestoresCodexHome(t *testing.T) {
 	}
 
 	// Reuse should restore CodexHome.
-	reused := Reuse(ReuseParams{WorkDir: env.WorkDir, Provider: "codex", Task: TaskContextForEnv{IssueID: "reuse-test"}}, testLogger())
+	reused := Reuse(ReuseParams{RootDir: env.RootDir, WorkDir: env.WorkDir, Provider: "codex", Task: TaskContextForEnv{IssueID: "reuse-test"}}, testLogger())
 	if reused == nil {
 		t.Fatal("Reuse returned nil")
 	}
@@ -3066,7 +3184,7 @@ func TestReuseRestoresCodexPluginCache(t *testing.T) {
 		t.Fatalf("remove codex plugins dir: %v", err)
 	}
 
-	reused := Reuse(ReuseParams{WorkDir: env.WorkDir, Provider: "codex", Task: TaskContextForEnv{IssueID: "reuse-plugin-test"}}, testLogger())
+	reused := Reuse(ReuseParams{RootDir: env.RootDir, WorkDir: env.WorkDir, Provider: "codex", Task: TaskContextForEnv{IssueID: "reuse-plugin-test"}}, testLogger())
 	if reused == nil {
 		t.Fatal("Reuse returned nil")
 	}
@@ -3389,7 +3507,7 @@ func TestReuseWritesMissingCodexWorkspaceSkills(t *testing.T) {
 		t.Fatalf("remove codex skills dir: %v", err)
 	}
 
-	reused := Reuse(ReuseParams{WorkDir: env.WorkDir, Provider: "codex", Task: TaskContextForEnv{
+	reused := Reuse(ReuseParams{RootDir: env.RootDir, WorkDir: env.WorkDir, Provider: "codex", Task: TaskContextForEnv{
 		IssueID: "reuse-skill-test",
 		AgentSkills: []SkillContextForEnv{
 			{
@@ -3448,7 +3566,7 @@ func TestReuseUpdatesCodexWorkspaceSkills(t *testing.T) {
 	}
 	defer env.Cleanup(true)
 
-	reused := Reuse(ReuseParams{WorkDir: env.WorkDir, Provider: "codex", Task: TaskContextForEnv{
+	reused := Reuse(ReuseParams{RootDir: env.RootDir, WorkDir: env.WorkDir, Provider: "codex", Task: TaskContextForEnv{
 		IssueID: "reuse-skill-update-test",
 		AgentSkills: []SkillContextForEnv{
 			{
@@ -3715,7 +3833,7 @@ func TestReuseSeedsUserSkillUpdates(t *testing.T) {
 		t.Fatalf("update user SKILL.md: %v", err)
 	}
 
-	reused := Reuse(ReuseParams{WorkDir: env.WorkDir, Provider: "codex", Task: TaskContextForEnv{
+	reused := Reuse(ReuseParams{RootDir: env.RootDir, WorkDir: env.WorkDir, Provider: "codex", Task: TaskContextForEnv{
 		IssueID: "user-skill-reuse-test",
 	}}, testLogger())
 	if reused == nil {
@@ -3770,7 +3888,7 @@ func TestReuseClearsUserSkillResidueOnWorkspaceConflict(t *testing.T) {
 		t.Fatalf("user support file should be seeded in round 1: %v", err)
 	}
 
-	reused := Reuse(ReuseParams{WorkDir: env.WorkDir, Provider: "codex", Task: TaskContextForEnv{
+	reused := Reuse(ReuseParams{RootDir: env.RootDir, WorkDir: env.WorkDir, Provider: "codex", Task: TaskContextForEnv{
 		IssueID: "reuse-conflict-test",
 		AgentSkills: []SkillContextForEnv{
 			{Name: "Writing", Content: "workspace writing"},
@@ -3832,7 +3950,7 @@ func TestReuseClearsRemovedUserSkill(t *testing.T) {
 		t.Fatalf("remove user skill: %v", err)
 	}
 
-	reused := Reuse(ReuseParams{WorkDir: env.WorkDir, Provider: "codex", Task: TaskContextForEnv{
+	reused := Reuse(ReuseParams{RootDir: env.RootDir, WorkDir: env.WorkDir, Provider: "codex", Task: TaskContextForEnv{
 		IssueID: "reuse-remove-test",
 	}}, testLogger())
 	if reused == nil {
