@@ -27,9 +27,11 @@ package runtime
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -206,10 +208,95 @@ func (r *APIConnectionResolver) ListForAgent(ctx context.Context, ident APIConne
 		}
 		out = append(out, APIConnectionToolVerdict{Tool: api, Verdict: setting})
 	}
+	out = appendAccessDiscoveryTools(conns, out)
 	if len(out) == 0 {
 		return nil
 	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Tool.Name() < out[j].Tool.Name() })
 	return out
+}
+
+type accessDiscoveryEndpoint struct {
+	Tool          string `json:"tool"`
+	Method        string `json:"method"`
+	Path          string `json:"path"`
+	Summary       string `json:"summary,omitempty"`
+	RemoteGranted *bool  `json:"remote_granted,omitempty"`
+	Listed        bool   `json:"listed"`
+}
+
+type accessRequestDiscovery struct {
+	SchemaTool string `json:"schema_tool"`
+	Guidance   string `json:"guidance"`
+}
+
+type accessDiscoveryPayload struct {
+	Connection    string                    `json:"connection"`
+	Endpoints     []accessDiscoveryEndpoint `json:"endpoints"`
+	AccessRequest *accessRequestDiscovery   `json:"access_request,omitempty"`
+}
+
+// appendAccessDiscoveryTools gives each admitted identity-aware connection one
+// read-only lookup covering the full remote surface, current remote grants,
+// which endpoint tools survived Multica policy, and the access-request route.
+// Its call-time policy identity is copied from an already-admitted endpoint, so
+// discovery can never bypass a connection policy that admitted nothing.
+func appendAccessDiscoveryTools(conns []connections.Connection, admitted []APIConnectionToolVerdict) []APIConnectionToolVerdict {
+	byConnection := make(map[string][]APIConnectionToolVerdict)
+	listed := make(map[string]bool)
+	for _, verdict := range admitted {
+		name := verdict.Tool.ConnectionName()
+		byConnection[name] = append(byConnection[name], verdict)
+		listed[verdict.Tool.Name()] = true
+	}
+	for _, conn := range conns {
+		if len(conn.DiscoveredEndpointPermissions) == 0 || len(byConnection[conn.Name]) == 0 {
+			continue
+		}
+		anchor := byConnection[conn.Name][0]
+		for _, candidate := range byConnection[conn.Name] {
+			if candidate.Verdict == toolpolicy.SettingAllow {
+				anchor = candidate
+				break
+			}
+		}
+		payload := accessDiscoveryPayload{Connection: conn.Name}
+		for _, ep := range conn.DiscoveredEndpointPermissions {
+			for _, methodRaw := range ep.Methods {
+				method := strings.ToUpper(strings.TrimSpace(methodRaw))
+				path := normalizeEndpointPath(ep.Path)
+				toolName := apiToolName(conn.Name, method, path)
+				payload.Endpoints = append(payload.Endpoints, accessDiscoveryEndpoint{
+					Tool: toolName, Method: method, Path: path, Summary: ep.Summary,
+					RemoteGranted: ep.Granted, Listed: listed[toolName],
+				})
+				if payload.AccessRequest == nil && method == http.MethodGet && strings.Contains(path, "access-request") {
+					payload.AccessRequest = &accessRequestDiscovery{
+						SchemaTool: toolName,
+						Guidance:   "Read this schema to request access to an ungranted resource.",
+					}
+				}
+			}
+		}
+		raw, err := json.Marshal(payload)
+		if err != nil {
+			continue
+		}
+		discovery := &APIConnectionTool{
+			toolName: conn.Name + "__discover_access",
+			description: "Discover what this connection exposes, which endpoint tools are currently available, " +
+				"and how to request access to the rest.",
+			schema: map[string]any{
+				"type": "object", "properties": map[string]any{}, "additionalProperties": false,
+			},
+			connName:       conn.Name,
+			method:         anchor.Tool.Method(),
+			path:           anchor.Tool.Path(),
+			staticResponse: string(raw),
+		}
+		admitted = append(admitted, APIConnectionToolVerdict{Tool: discovery, Verdict: anchor.Verdict})
+	}
+	return admitted
 }
 
 // connectionsForIdentity replaces the static endpoint catalogue on
@@ -237,6 +324,7 @@ func (r *APIConnectionResolver) connectionsForIdentity(ctx context.Context, conn
 			continue
 		}
 		conn.EndpointPermissions = intersectEndpointPermissions(conn.EndpointPermissions, discovered)
+		conn.DiscoveredEndpointPermissions = discovered
 		out = append(out, conn)
 	}
 	return out

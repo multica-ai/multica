@@ -37,6 +37,10 @@ type Connection struct {
 	Internal            bool                 `json:"internal"`
 	AuthConfig          AuthConfig           `json:"auth_config"`
 	EndpointPermissions []EndpointPermission `json:"endpoint_permissions"`
+	// DiscoveredEndpointPermissions is a transient principal-specific OpenAPI
+	// view used to build the access-discovery tool. It is never persisted or
+	// returned from the connection admin API.
+	DiscoveredEndpointPermissions []EndpointPermission `json:"-"`
 	// Tools is the tool list discovered the last time the connection was tested
 	// (mcp_http only). Persisted so the permissions UI can render one row per
 	// underlying tool without re-probing the server. Empty for API connections.

@@ -128,6 +128,9 @@ type APIConnectionTool struct {
 	exchanger   *ConnectionSessionExchanger
 
 	client *http.Client
+	// staticResponse turns this into a read-only derived tool. The response was
+	// produced by authenticated discovery, so no second remote call is needed.
+	staticResponse string
 
 	// trace + logger are attached per task (attachTrace) so a dispatched call can
 	// emit a structured gateway-trace line tying the outgoing request to the run
@@ -365,6 +368,9 @@ func methodHasBody(method string) bool {
 // token) is applied from the connection's auth_config — it never reaches the
 // agent.
 func (t *APIConnectionTool) Call(ctx context.Context, args map[string]any) (string, error) {
+	if t.staticResponse != "" {
+		return t.staticResponse, nil
+	}
 	if t.baseURL == "" {
 		return "", fmt.Errorf("api connection %q has no URL configured", t.connName)
 	}
