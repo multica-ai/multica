@@ -11,6 +11,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/cerebro/permissions"
 	"github.com/multica-ai/multica/server/internal/cerebro/toolpolicy"
 	"github.com/multica-ai/multica/server/internal/events"
+	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -24,7 +25,12 @@ type Request struct {
 	Resource     string
 	Surface      string
 	Context      map[string]any
+	ApprovalID   pgtype.UUID
 	IsSystem     bool
+}
+
+type approvalConsumer interface {
+	ConsumeApproved(context.Context, approvals.ConsumeParams) (cerebrodb.CerebroApprovalRequest, error)
 }
 
 // Gate is the server-owned permission floor shared by platform mutation surfaces.
@@ -32,6 +38,7 @@ type Gate struct {
 	Policy    *toolpolicy.Store
 	Queries   *db.Queries
 	Approvals *permgate.Gate
+	Consumer  approvalConsumer
 }
 
 func New(policy *toolpolicy.Store, queries *db.Queries, approvalGate *permgate.Gate) *Gate {
@@ -39,7 +46,8 @@ func New(policy *toolpolicy.Store, queries *db.Queries, approvalGate *permgate.G
 }
 
 func NewDefault(policy *toolpolicy.Store, queries *db.Queries, cerebro *cerebrodb.Queries, tx approvals.TxStarter, bus *events.Bus) *Gate {
-	return New(policy, queries, &permgate.Gate{Approvals: approvals.New(cerebro, tx, bus)})
+	svc := approvals.New(cerebro, tx, bus)
+	return &Gate{Policy: policy, Queries: queries, Approvals: &permgate.Gate{Approvals: svc}, Consumer: svc}
 }
 
 func (g *Gate) Authorize(ctx context.Context, in Request) (permgate.Result, error) {
@@ -61,6 +69,7 @@ func (g *Gate) Authorize(ctx context.Context, in Request) (permgate.Result, erro
 			isSystem = true
 			systemID = task.AutopilotRunID
 		}
+		in.Context = authoritativeTaskContext(ctx, g.Queries, in.Context, task)
 	}
 
 	effective, err := g.Policy.ResolveGeneral(ctx, toolpolicy.Query{
@@ -79,11 +88,30 @@ func (g *Gate) Authorize(ctx context.Context, in Request) (permgate.Result, erro
 	})
 
 	decision := decisionFor(effective)
-	if decision.Kind == permissions.DecisionAllow {
-		return permgate.Result{Outcome: permgate.OutcomeAllowed, Decision: decision, Reason: decision.Reason}, nil
-	}
 	if decision.Kind == permissions.DecisionDeny {
 		return permgate.Result{Outcome: permgate.OutcomeDenied, Decision: decision, Reason: decision.Reason}, nil
+	}
+	if in.ApprovalID.Valid {
+		if isSystem {
+			return denied("system actions cannot consume approval"), nil
+		}
+		if g.Consumer == nil {
+			return denied("approval consumer not configured"), errors.New("platformaction: approval consumer not configured")
+		}
+		row, consumeErr := g.Consumer.ConsumeApproved(ctx, approvals.ConsumeParams{
+			ID: in.ApprovalID, WorkspaceID: in.WorkspaceID, Agent: in.AgentID,
+			Capability: in.Capability, Resource: in.Resource,
+		})
+		if consumeErr != nil {
+			if errors.Is(consumeErr, approvals.ErrNotConsumable) {
+				return denied("approval is rejected, expired, mismatched, or already consumed"), nil
+			}
+			return denied("approval consumption failed"), consumeErr
+		}
+		return permgate.Result{Outcome: permgate.OutcomeApproved, Decision: decision, ApprovalID: row.ID, Reason: row.Reason}, nil
+	}
+	if decision.Kind == permissions.DecisionAllow {
+		return permgate.Result{Outcome: permgate.OutcomeAllowed, Decision: decision, Reason: decision.Reason}, nil
 	}
 	if isSystem {
 		return denied("system actions cannot await approval"), nil
@@ -95,6 +123,57 @@ func (g *Gate) Authorize(ctx context.Context, in Request) (permgate.Result, erro
 		Permission:    permissions.Request{WorkspaceID: in.WorkspaceID, Actor: permissions.Actor{Type: "agent", ID: in.AgentID}, Agent: in.AgentID, Capability: in.Capability, Resource: in.Resource},
 		RequesterType: approvals.RequesterAgent, RequesterID: in.AgentID, Surface: in.Surface, Context: in.Context,
 	}, decision)
+}
+
+// AuthorizeAndWait keeps an in-process tool call suspended until its exact
+// approval is decided, then consumes that approval before the mutation runs.
+func (g *Gate) AuthorizeAndWait(ctx context.Context, in Request) (permgate.Result, error) {
+	result, err := g.Authorize(ctx, in)
+	if err != nil || result.Outcome != permgate.OutcomePending {
+		return result, err
+	}
+	outcome, waitErr := g.Approvals.Await(ctx, in.WorkspaceID, result.ApprovalID)
+	if waitErr != nil || outcome != permgate.OutcomeApproved {
+		result.Outcome = outcome
+		return result, waitErr
+	}
+	in.ApprovalID = result.ApprovalID
+	return g.Authorize(ctx, in)
+}
+
+func authoritativeTaskContext(ctx context.Context, queries *db.Queries, supplied map[string]any, task db.AgentTaskQueue) map[string]any {
+	out := make(map[string]any, len(supplied)+5)
+	for key, value := range supplied {
+		out[key] = value
+	}
+	delete(out, "issue_id")
+	delete(out, "chat_session_id")
+	delete(out, "trigger_comment_id")
+	out["task_id"] = uuidString(task.ID)
+	surface := "issue"
+	if task.ChatSessionID.Valid {
+		out["chat_session_id"] = uuidString(task.ChatSessionID)
+		surface = "chat"
+	} else if task.IssueID.Valid {
+		out["issue_id"] = uuidString(task.IssueID)
+		if issue, err := queries.GetIssue(ctx, task.IssueID); err == nil {
+			switch issue.Kind {
+			case "channel", "dm":
+				surface = issue.Kind
+			}
+		}
+	} else if task.AutopilotRunID.Valid {
+		surface = "autopilot"
+	}
+	if task.TriggerCommentID.Valid {
+		out["trigger_comment_id"] = uuidString(task.TriggerCommentID)
+	}
+	out["surface"] = surface
+	return out
+}
+
+func uuidString(id pgtype.UUID) string {
+	return util.UUIDToString(id)
 }
 
 func decisionFor(effective toolpolicy.Effective) permissions.Decision {

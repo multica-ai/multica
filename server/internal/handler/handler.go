@@ -219,6 +219,7 @@ type Handler struct {
 	// inbox (CheckDaemonRepoCapability creates the ask, the daemon long-polls it).
 	ApprovalGate       *permgate.Gate
 	PlatformActionGate *platformaction.Gate // CEREBRO-PATCH(handler-platform-action-gate): FIR-3266 server-owned agent mutation floor.
+	ApprovalRequester  ApprovalRequester    // CEREBRO-PATCH(handler-request-approval): FIR-3266 shared agent approval intake.
 	// CEREBRO-PATCH(handler-semantic-search): FIR-2604 hybrid (FTS+vector) seam.
 	SemanticSearch SemanticSearchInvoker
 

@@ -1747,6 +1747,7 @@ func NewDefaultRegistry(pool interface {
 // registerBuiltinTools registers all built-in tools with the given registry.
 // Called at executor startup with the per-task ToolContext.
 func registerBuiltinTools(r *Registry, queries *db.Queries, cerebroQueries *cerebrodb.Queries, tctx ToolContext) {
+	r.Register(&FirtalRequestApprovalTool{tctx: tctx})
 	r.Register(&FirtalGetIssueTool{queries: queries, tctx: tctx})
 	r.Register(&FirtalListIssuesTool{queries: queries, tctx: tctx})
 	r.Register(&FirtalCreateIssueTool{queries: queries, tctx: tctx})

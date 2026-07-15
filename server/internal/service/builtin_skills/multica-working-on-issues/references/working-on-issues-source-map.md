@@ -11,10 +11,11 @@ at the bottom before relying on an exact line.
 
 | Behavior | Source |
 |---|---|
-| Shared Allow/Ask/Deny decision and approval reuse | `server/internal/cerebro/platformaction/gate.go` |
-| REST/CLI enforcement before `IssueService.Create` | `server/internal/handler/issue.go`, `platform_action_guard_cerebro.go` |
-| Workspace MCP enforcement before mutation | `server/internal/handler/workspace_mcp_cerebro.go` |
-| Gateway enforcement independent of runtime gate mode | `server/internal/cerebro/runtime/approval_gate.go` |
+| <!-- CEREBRO-PATCH(create-issue-permission-source-map): FIR-3324 source-map the exact one-shot create_issue approval resume. --> Shared Allow/Ask/Deny decision, authoritative origin, wait, and exact consumption | `server/internal/cerebro/platformaction/gate.go` |
+| Atomic one-shot/period consumption | `server/internal/cerebro/approvals/approvals.go`, `server/internal/cerebro/queries/approvals.sql` |
+| REST/CLI enforcement and exact approved retry before `IssueService.Create` | `server/internal/handler/issue.go`, `platform_action_guard_cerebro.go`, `server/cmd/multica/cmd_issue.go` |
+| Workspace MCP wait and resume before mutation | `server/internal/handler/workspace_mcp_cerebro.go` |
+| Gateway wait and resume independent of runtime gate mode | `server/internal/cerebro/runtime/approval_gate.go` |
 
 ## `multica issue pull-requests` — read PR links from Multica
 

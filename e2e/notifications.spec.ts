@@ -4,7 +4,7 @@ import { loginAsDefault, createTestApi } from "./helpers";
 
 /**
  * E2E coverage for the notifications routing feature:
- *  - Sidebar NOTIFICATIONS link with count + Clear
+ *  - User-menu Notifications link with sidebar avatar count + Clear
  *  - Notifications page rendering, filter bar, mark-read, dismiss, clear-all
  *  - Settings notifications tab — routing choice persists
  *
@@ -63,7 +63,7 @@ async function gotoNotificationsPage(page: Page, slug: string) {
   await page.waitForLoadState("networkidle", { timeout: 15000 });
 }
 
-test.describe("Sidebar — NOTIFICATIONS link", () => {
+test.describe("Sidebar — Notifications user menu", () => {
   test("shows count when items exist and navigates to the page on click", async ({ page }) => {
     const slug = await loginAsDefault(page);
     await seedThreeNotifications(api);
@@ -71,10 +71,11 @@ test.describe("Sidebar — NOTIFICATIONS link", () => {
     // Trigger a refetch to surface the count.
     await page.reload();
 
-    const link = page.getByTestId("sidebar-notifications-link");
-    await expect(link).toBeVisible();
     await expect(page.getByTestId("sidebar-notifications-count")).toHaveText("3");
 
+    await page.locator('[data-sidebar="footer"] [data-slot="popover-trigger"]').click();
+    const link = page.getByTestId("sidebar-notifications-link");
+    await expect(link).toBeVisible();
     await link.click();
     await page.waitForURL(`**/${slug}/notifications`);
     await expect(page.getByTestId("notifications-count")).toHaveText("3");
@@ -87,6 +88,7 @@ test.describe("Sidebar — NOTIFICATIONS link", () => {
     await page.reload();
     await expect(page.getByTestId("sidebar-notifications-count")).toHaveText("3");
 
+    await page.locator('[data-sidebar="footer"] [data-slot="popover-trigger"]').click();
     // The Clear button is hover-revealed — force-click since we don't need
     // visual hover for the action to fire.
     const clearBtn = page.getByTestId("sidebar-notifications-clear");

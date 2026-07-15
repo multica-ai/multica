@@ -50,6 +50,8 @@ import { ImageGalleryProvider } from "@multica/cerebro-attachments/views";
 import { useCommentReminder } from "@multica/cerebro-inbox";
 // CEREBRO-PATCH(issue-comment-cost-badge-import): FIR-39 per-comment cost badge.
 import { CommentCostBadge } from "@multica/cerebro-channels";
+// CEREBRO-PATCH(inline-agent-approvals): FIR-3266 — decision cards follow their triggering comment.
+import { InlineApprovalCards } from "@multica/cerebro-approvals/views";
 import type { Attachment, TimelineEntry } from "@multica/core/types";
 import { useCommentCollapseStore, useCommentDraftStore } from "@multica/core/issues/stores";
 import { useT } from "../../i18n";
@@ -99,6 +101,8 @@ export function isWakeupComment(entry: Pick<TimelineEntry, "type" | "comment_typ
 
 interface CommentCardProps {
   issueId: string;
+  approvalWorkspaceId?: string;
+  approvalSurface?: "issue" | "channel" | "dm";
   entry: TimelineEntry;
   /**
    * Flat list of every nested reply under this thread root, in render order.
@@ -601,6 +605,8 @@ function CommentRow({
 
 function CommentCardImpl({
   issueId,
+  approvalWorkspaceId,
+  approvalSurface = "issue",
   entry,
   replies,
   currentUserId,
@@ -979,6 +985,15 @@ function CommentCardImpl({
               </>
             )}
           </div>
+          {approvalWorkspaceId && (
+            <div className="px-3 pb-3 sm:px-4">
+              <InlineApprovalCards
+                wsId={approvalWorkspaceId}
+                origin={{ issue_id: issueId, surface: approvalSurface }}
+                match={{ trigger_comment_id: entry.id }}
+              />
+            </div>
+          )}
 
           {/* Replies */}
           {allNestedReplies.map((reply) => (
@@ -997,6 +1012,15 @@ function CommentCardImpl({
                 canStartNewThread={canStartNewThread}
                 onStartNewThread={startNewThread}
               />
+              {approvalWorkspaceId && (
+                <div className="pb-3 pl-2 sm:pl-10">
+                  <InlineApprovalCards
+                    wsId={approvalWorkspaceId}
+                    origin={{ issue_id: issueId, surface: approvalSurface }}
+                    match={{ trigger_comment_id: reply.id }}
+                  />
+                </div>
+              )}
             </div>
           ))}
 

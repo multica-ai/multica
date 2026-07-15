@@ -13,7 +13,7 @@ test.describe("Navigation", () => {
     await expect(page).toHaveURL(/\/inbox/);
 
     // Click Agents
-    await page.getByRole("link", { name: "Agents" }).click();
+    await page.getByRole("link", { name: "Agents", exact: true }).click();
     await page.waitForURL("**/agents");
     await expect(page).toHaveURL(/\/agents/);
 
@@ -35,7 +35,7 @@ test.describe("Navigation", () => {
   });
 
   test("agents page shows agent list", async ({ page }) => {
-    await page.getByRole("link", { name: "Agents" }).click();
+    await page.getByRole("link", { name: "Agents", exact: true }).click();
     await page.waitForURL("**/agents");
 
     // Should show "Agents" heading

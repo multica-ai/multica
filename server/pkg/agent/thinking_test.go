@@ -283,10 +283,10 @@ func TestIsKnownThinkingValue(t *testing.T) {
 // explicit model set would have its thinking_level dropped silently.
 
 func TestValidateThinkingLevel_EmptyModelResolvesToDefault(t *testing.T) {
+	// CEREBRO-PATCH(agent-thinking-cache-test-stability): Global cache tests must not run concurrently.
 	if runtime.GOOS == "windows" {
 		t.Skip("shell-script fake binary requires a POSIX shell")
 	}
-	t.Parallel()
 
 	// We need a `claude` whose --help advertises the full superset
 	// (low/medium/high/xhigh/max) so per-model projection actually has
@@ -338,10 +338,10 @@ func TestValidateThinkingLevel_EmptyModelResolvesToDefault(t *testing.T) {
 }
 
 func TestValidateThinkingLevel_ExplicitModel(t *testing.T) {
+	// CEREBRO-PATCH(agent-thinking-cache-test-stability): Global cache tests must not run concurrently.
 	if runtime.GOOS == "windows" {
 		t.Skip("shell-script fake binary requires a POSIX shell")
 	}
-	t.Parallel()
 	fakeClaude := writeFakeClaudeHelpBinary(t)
 	resetThinkingCacheForTests()
 	defer resetThinkingCacheForTests()
@@ -454,7 +454,7 @@ func writeFakeClaudeHelpBinary(t *testing.T) string {
 // ── Cache key invalidation ───────────────────────────────────────────
 
 func TestThinkingCacheKeyDistinct(t *testing.T) {
-	t.Parallel()
+	// CEREBRO-PATCH(agent-thinking-cache-test-stability): Global cache tests must not run concurrently.
 	resetThinkingCacheForTests()
 	defer resetThinkingCacheForTests()
 

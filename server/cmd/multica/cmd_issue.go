@@ -811,7 +811,8 @@ func runIssueCreate(cmd *cobra.Command, _ []string) error {
 			switch strVal(approval, "status") {
 			case "approved":
 				result = map[string]any{}
-				retryStatus, err := client.PostJSONStatus(approvalCtx, "/api/issues", body, &result)
+				// CEREBRO-PATCH(create-issue-approval-cli): FIR-3324 resume the exact approved create_issue request once.
+				retryStatus, err := client.PostJSONStatusWithHeaders(approvalCtx, "/api/issues", body, &result, http.Header{"X-Platform-Approval-ID": []string{approvalID}})
 				if err != nil {
 					return fmt.Errorf("resume approved issue create: %w", err)
 				}

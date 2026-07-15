@@ -493,6 +493,7 @@ var multicaMCPToolMatrix = []ToolMeta{
 	{Name: "read_note", Description: "Read a note/document by ID — its title, full body, owner, visibility, and scope.", Status: ToolStatusExcluded},
 	{Name: "record_eval_run", Description: "Record an immutable eval result. CLI-runtime MCP tool over POST /api/cerebro/evals/{id}/runs.", Status: ToolStatusExcluded},
 	{Name: "publish_workflow_hook", Description: "Publish a tested Workflow hook after server-side authorisation. CLI-runtime MCP tool over POST /api/cerebro/workflow-hooks/{id}/publish.", Status: ToolStatusExcluded},
+	{Name: "request_approval", Description: "Request a human decision for an action from the agent's current surface.", Status: ToolStatusNewlyImplemented},
 	{Name: "remove_group_agent", Description: "Remove an agent from a group allowlist.", Status: ToolStatusExcluded},
 	{Name: "remove_group_capability", Description: "Revoke a capability from a group.", Status: ToolStatusExcluded},
 	{Name: "remove_group_member", Description: "Remove a member from a group.", Status: ToolStatusExcluded},

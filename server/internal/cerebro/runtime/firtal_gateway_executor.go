@@ -13,6 +13,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/cerebro/approvals"
 	"github.com/multica-ai/multica/server/internal/cerebro/connections"
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
 	cerebroloops "github.com/multica-ai/multica/server/internal/cerebro/loops"
@@ -76,6 +77,7 @@ type FirtalGatewayExecutor struct {
 	// (see MaybeEnableApprovalGate), keeping production on the prior behaviour.
 	toolPolicy         *toolpolicy.Store
 	platformActionGate *platformaction.Gate
+	approvalRequester  approvals.IntakeRequester
 
 	// connDeny enforces per-tool workspace-connection Deny rows on the
 	// firtal-gateway path (TECH-3174). Unlike toolPolicy it is ALWAYS set and
@@ -110,6 +112,13 @@ type FirtalGatewayExecutor struct {
 func (e *FirtalGatewayExecutor) SetPlatformActionGate(g *platformaction.Gate) {
 	if e != nil {
 		e.platformActionGate = g
+	}
+}
+
+// SetApprovalRequester wires the always-available human approval intake tool.
+func (e *FirtalGatewayExecutor) SetApprovalRequester(requester approvals.IntakeRequester) {
+	if e != nil {
+		e.approvalRequester = requester
 	}
 }
 
@@ -959,7 +968,7 @@ func (e *FirtalGatewayExecutor) agentHasCallableTools(ctx context.Context, agent
 	if e.registry == nil {
 		return false
 	}
-	tctx := ToolContext{AgentID: agentID, WorkspaceID: workspaceID, Storage: e.attachmentStorage}
+	tctx := ToolContext{AgentID: agentID, WorkspaceID: workspaceID, Storage: e.attachmentStorage, ApprovalRequester: e.approvalRequester}
 	taskRegistry := NewDefaultRegistry(nil, e.queries, tctx, e.cerebro) // CEREBRO-PATCH(firtal-gateway-cerebro-tools): wire concrete Cerebro-family handlers into per-task registries.
 	taskRegistry.db = e.registry.db
 	if tools, handled := e.policyEnabledTools(ctx, taskRegistry, agentID, workspaceID); handled {
@@ -995,7 +1004,16 @@ func (e *FirtalGatewayExecutor) runToolLoop(ctx context.Context, cfg FirtalGatew
 	// FIR-2668: carry the calling agent to API-connection dispatch so
 	// on_behalf_of-enabled connections stamp the agent's delegated identity.
 	ctx = WithConnectionAgent(ctx, meta.AgentID)
-	tctx := ToolContext{AgentID: agentID, WorkspaceID: workspaceID, Storage: e.attachmentStorage, LoopStore: e.loopStore} // CEREBRO-PATCH(executor-loopstore): FIR-2283 thread loop store into tctx so report_loop_check is available.
+	tctx := ToolContext{AgentID: agentID, WorkspaceID: workspaceID, Storage: e.attachmentStorage, LoopStore: e.loopStore, Surface: meta.Surface, ApprovalRequester: e.approvalRequester} // CEREBRO-PATCH(executor-loopstore): FIR-2283 thread loop store into tctx so report_loop_check is available.
+	if taskID, err := util.ParseUUID(meta.TaskID); err == nil {
+		tctx.TaskID = taskID
+		if e.queries != nil {
+			if task, taskErr := e.queries.GetAgentTask(ctx, taskID); taskErr == nil {
+				tctx.ChatSessionID = task.ChatSessionID
+				tctx.TriggerCommentID = task.TriggerCommentID
+			}
+		}
+	}
 	// Pin the default file-attachment target (create_file) to the surface this
 	// task runs on, so an agent never has to know the chat-message UUID.
 	if meta.IssueID != "" {

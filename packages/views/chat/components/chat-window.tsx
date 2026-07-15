@@ -524,11 +524,16 @@ export function ChatWindow() {
       {showSkeleton ? (
         <ChatMessageSkeleton />
       ) : hasMessages ? (
-        <ChatMessageList
-          messages={messages}
-          pendingTask={pendingTask}
-          availability={availability}
-        />
+        <>
+          {/* CEREBRO-PATCH(inline-agent-approvals): FIR-3266 — authoritative origin for task-linked cards. */}
+          <ChatMessageList
+            messages={messages}
+            workspaceId={wsId}
+            chatSessionId={currentSession?.id}
+            pendingTask={pendingTask}
+            availability={availability}
+          />
+        </>
       ) : (
         <EmptyState
           hasSessions={sessions.length > 0}

@@ -1539,11 +1539,11 @@ comment for SQL/CSS/SBPL/JSON-with-_comment-field).
 | Patch | Location | Reason |
 |---|---|---|
 | `handler-platform-action-gate` | `server/internal/handler/handler.go` | Expose the Cerebro-owned platform-action seam to upstream handlers. |
-| `create-issue-platform-action` | `server/internal/handler/issue.go` | Enforce `create_issue` after authoritative actor resolution and before mutation. |
+| `create-issue-platform-action` | `server/internal/handler/issue.go` | Enforce `create_issue` after authoritative actor resolution and before mutation; REST exposes non-blocking pending/resume semantics. |
 | `router-platform-action-gate` | `server/cmd/server/router.go` | Wire the always-on REST and Workspace MCP gate. |
 | `main-platform-action-gate` | `server/cmd/server/main.go` | Wire the same always-on floor into the Firtal Gateway runtime. |
-| `create-issue-approval-cli` | `server/cmd/multica/cmd_issue.go` | Preserve Ask as a pending approval and resume the same request after approval. |
-| `cli-post-json-status` | `server/internal/cli/client.go` | Return successful HTTP status codes so the CLI can distinguish 202 from 201. |
+| `create-issue-approval-cli` | `server/cmd/multica/cmd_issue.go` | Preserve Ask as a pending approval and resume the byte-identical request with its exact approval ID after approval. |
+| `cli-post-json-status` | `server/internal/cli/client.go` | Return successful HTTP status codes and support request-scoped resume headers so the CLI can distinguish 202 from 201 and consume the exact approval. |
 | `create-issue-runtime-brief` | `server/internal/daemon/execenv/runtime_config.go` | Point every runtime at the canonical create-issue permission guidance. |
 | `cli-post-json-status-test` | `server/internal/cli/client_test.go` | Lock the structured 202 response exposed to the CLI. |
 | `create-issue-runtime-brief-test` | `server/internal/daemon/execenv/runtime_config_test.go` | Keep the permission contract in every injected runtime brief. |
@@ -1552,6 +1552,25 @@ comment for SQL/CSS/SBPL/JSON-with-_comment-field).
 | `create-issue-permission-source-map` | `server/internal/service/builtin_skills/multica-working-on-issues/references/working-on-issues-source-map.md` | Link skill guidance to enforcement sources. |
 
 Approved by FIR-3266 and implementation plan artifact `019f60d7-a728-7663-82d3-7ad6198f15bf`.
+
+## FIR-3266 inline approval request
+
+| Patch | Location | Reason |
+|---|---|---|
+| `handler-request-approval` | `server/internal/handler/handler.go` | Expose the Cerebro-owned approval intake seam to Workspace MCP without moving approval logic upstream. |
+| `router-request-approval` | `server/cmd/server/router.go` | Wire the existing approval service into the Workspace MCP seam. |
+| `main-request-approval` | `server/cmd/server/main.go` | Wire the same approval service into each managed Firtal Gateway executor. |
+| `cerebro-approvals-configure` | `packages/views/layout/app-sidebar.tsx` | Keep `Approvals` beside `Agent passes` under `Configure`; the approval navigation implementation remains in `@multica/cerebro-approvals`. |
+| `inline-agent-approvals` | `packages/views/chat/components/chat-message-list.tsx`; `packages/views/chat/components/chat-window.tsx`; `packages/views/issues/components/issue-detail.tsx`; `packages/views/issues/components/comment-card.tsx` | Mount the fork-owned shared approval card below the matching Chat task or Issue/Channel/DM comment. The upstream files only pass authoritative workspace/timeline identifiers; fetching, matching and decisions remain in `@multica/cerebro-approvals`. |
+
+The intake contract, validation and Gateway tool remain fork-owned in `server/internal/cerebro/approvals` and `server/internal/cerebro/runtime`. Approved by FIR-3266 plan artifact `019f64b0-837e-7831-9e6e-8516d65bccf9`.
+
+## FIR-3266 agent test stability
+
+| Patch | Location | Reason |
+|---|---|---|
+| `agent-test-exec-stability` | `server/pkg/agent/exec_fixture_test.go`; `exec_fixture_unix_test.go`; `exec_fixture_windows_test.go` | Bound concurrent fake CLI processes so short test deadlines measure behavior rather than scheduler saturation. |
+| `agent-thinking-cache-test-stability` | `server/pkg/agent/thinking_test.go` | Keep tests that reset the shared thinking cache serial and deterministic. |
 
 ## FIR-2873 — Scheduled messages
 

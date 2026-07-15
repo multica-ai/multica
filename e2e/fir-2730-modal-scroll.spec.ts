@@ -67,7 +67,10 @@ test("a tall modal stays fully on-screen and scrolls instead of clipping", async
     .first();
   await row.waitFor({ state: "visible", timeout: 15000 });
   await row.hover();
-  await row.getByRole("button", { name: "Remind me" }).click();
+  // CEREBRO-PATCH(inbox-row-actions-e2e): TECH-3352 moved Remind me into the
+  // shared desktop overflow menu.
+  await row.getByRole("button", { name: "More actions" }).click();
+  await page.getByRole("menuitem", { name: "Remind me" }).click();
 
   // The shared modal shell — Dialog and Sheet both mark their panel with a
   // data-slot, so this targets whichever one the picker renders.

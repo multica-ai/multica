@@ -85,10 +85,10 @@ test.describe("Project access", () => {
 
     await page.goto(`/${slug}/projects`);
 
-    // The row containing the restricted project must show the dot.
-    const row = page.getByTestId(`project-row-${project.id}`);
-    await expect(row).toBeVisible();
-    await expect(row.getByTestId("restricted-lock")).toBeVisible();
+    // The restricted marker is rendered inline inside the project's link.
+    const projectLink = page.getByRole("link", { name: title });
+    await expect(projectLink).toBeVisible();
+    await expect(projectLink.getByTestId("restricted-lock")).toBeVisible();
   });
 
   test("workspace-access projects do NOT show the dot", async ({ page }) => {
@@ -97,9 +97,9 @@ test.describe("Project access", () => {
 
     await page.goto(`/${slug}/projects`);
 
-    const row = page.getByTestId(`project-row-${project.id}`);
-    await expect(row).toBeVisible();
-    await expect(row.getByTestId("restricted-lock")).toHaveCount(0);
+    const projectLink = page.getByRole("link", { name: title });
+    await expect(projectLink).toBeVisible();
+    await expect(projectLink.getByTestId("restricted-lock")).toHaveCount(0);
   });
 
   test("toggling back to workspace hides the members panel", async ({ page }) => {

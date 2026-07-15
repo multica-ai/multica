@@ -49,6 +49,10 @@ export const approvalSchema = z
     // Optional: an older backend that omits them degrades cleanly.
     triggered_by_id: z.string().nullable().default(null),
     triggered_by_name: z.string().nullable().default(null),
+    task_id: z.string().nullable().default(null),
+    chat_session_id: z.string().nullable().default(null),
+    trigger_comment_id: z.string().nullable().default(null),
+    surface: z.string().nullable().default(null),
   })
   .loose();
 
@@ -98,6 +102,15 @@ export interface ApprovalsFilter {
   status: string | null;
   limit: number;
   offset: number;
+  origin?: ApprovalOriginFilter;
+}
+
+export interface ApprovalOriginFilter {
+  task_id?: string;
+  issue_id?: string;
+  chat_session_id?: string;
+  trigger_comment_id?: string;
+  surface?: string;
 }
 
 export interface DelegateRequest {

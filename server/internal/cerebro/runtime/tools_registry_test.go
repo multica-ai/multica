@@ -84,6 +84,19 @@ func TestInfisicalGetSecretToolIsNotRegistered(t *testing.T) {
 	}
 }
 
+func TestRequestApprovalToolIsRegistered(t *testing.T) {
+	reg := NewDefaultRegistry(nil, nil, ToolContext{})
+	if _, ok := reg.tools["request_approval"]; !ok {
+		t.Fatal("request_approval must be registered for Firtal Gateway agents")
+	}
+	for _, item := range AllBuiltinToolMeta() {
+		if item.Name == "request_approval" && item.Status != ToolStatusExcluded {
+			return
+		}
+	}
+	t.Fatal("request_approval must be callable in the tool metadata")
+}
+
 // CEREBRO-PATCH(firtal-gateway-anthropic-tool-schema): guard Anthropic schema compatibility for built-in runtime tools.
 func TestAnthropicToolSchemasDefineArrayItems(t *testing.T) {
 	reg := NewDefaultRegistry(nil, nil, ToolContext{})

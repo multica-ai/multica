@@ -89,11 +89,8 @@ test("agent page edits identity and instructions and starts a message", async ({
     await expect(page.getByRole("textbox", { name: "Instructions" })).toBeVisible();
 
     await page.getByRole("button", { name: "Message", exact: true }).click();
-    await expect(page).toHaveURL(
-      new RegExp(`/inbox\\?chat=new-chat&agent=${agentId}$`),
-    );
-    await expect(page.getByRole("heading", { name: "Edited FIR-2670 Agent" })).toBeVisible();
     await expect(page.getByText("Start a conversation with Edited FIR-2670 Agent")).toBeVisible();
+    await expect(page).toHaveURL(new RegExp(`/${slug}/inbox$`));
   } finally {
     await api.setWorkspaceFeatureFlag("cerebro_agent_page_redesign", false);
     await database.query(`DELETE FROM agent WHERE id = $1`, [agentId]);

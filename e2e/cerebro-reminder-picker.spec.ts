@@ -33,15 +33,16 @@ test("desktop reminder picker renders calendar + time columns", async ({
 
   await page.goto(`/${workspace.slug}/inbox`, { waitUntil: "domcontentloaded" });
 
-  // Hover the row so its action icons (display:none until :group-hover) show,
-  // then click the bell ("Remind me") scoped inside the row container.
+  // CEREBRO-PATCH(inbox-row-actions-e2e): TECH-3352 consolidated the desktop
+  // actions under one hover menu; exercise the same path users now follow.
   const row = page
     .locator('div[role="button"]')
     .filter({ hasText: "Open the reminder picker on this row" })
     .first();
   await row.waitFor({ state: "visible", timeout: 15000 });
   await row.hover();
-  await row.getByRole("button", { name: "Remind me" }).click();
+  await row.getByRole("button", { name: "More actions" }).click();
+  await page.getByRole("menuitem", { name: "Remind me" }).click();
 
   // The custom picker is always visible in the desktop dialog body: a
   // calendar plus scrollable hour (0–23) and minute (5-min step) columns.

@@ -141,6 +141,46 @@ func seedPending(t *testing.T, svc *Service, expires pgtype.Timestamptz) cerebro
 	return row
 }
 
+func TestListFiltersApprovalOriginContext(t *testing.T) {
+	svc := newService()
+	issueID := randomUUID(t)
+	otherIssueID := randomUUID(t)
+	for _, id := range []pgtype.UUID{issueID, otherIssueID} {
+		if _, err := svc.Intake(context.Background(), IntakeParams{
+			WorkspaceID: testWorkspace, RequesterType: RequesterAgent,
+			RequesterID: testRequester, Capability: "publish_campaign",
+			Resource: "campaign:summer", Reason: "owner review",
+			Context: map[string]any{"issue_id": uuidStr(t, id), "surface": "issue"},
+		}); err != nil {
+			t.Fatalf("intake: %v", err)
+		}
+	}
+
+	rows, err := svc.List(context.Background(), testWorkspace, ListFilter{
+		Status: "pending", IssueID: uuidStr(t, issueID), Surface: "issue",
+	})
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(rows) != 1 || string(rows[0].Context) == "" {
+		t.Fatalf("filtered rows = %#v, want one matching approval", rows)
+	}
+}
+
+func TestRequestToResponseExposesOptionalOriginFields(t *testing.T) {
+	taskID := randomUUID(t)
+	chatID := randomUUID(t)
+	commentID := randomUUID(t)
+	row := cerebrodb.CerebroApprovalRequest{Context: []byte(fmt.Sprintf(
+		`{"task_id":%q,"chat_session_id":%q,"trigger_comment_id":%q,"surface":"chat"}`,
+		uuidStr(t, taskID), uuidStr(t, chatID), uuidStr(t, commentID),
+	))}
+	got := requestToResponse(row)
+	if got.TaskID == nil || *got.TaskID != uuidStr(t, taskID) || got.Surface == nil || *got.Surface != "chat" {
+		t.Fatalf("origin response = %#v", got)
+	}
+}
+
 // TestConcurrentApprove_OnlyOneWins fires N approvers at the same pending ask.
 // Exactly one must succeed; the rest must get ErrAlreadyDecided. This proves
 // the conditional UPDATE (WHERE status='pending') serialises decisions.
@@ -218,6 +258,81 @@ func TestApproveThenReject_SecondConflicts(t *testing.T) {
 	_, err := svc.Reject(context.Background(), ask.ID, testWorkspace, testApprover, "changed mind", SurfaceUI)
 	if !errors.Is(err, ErrAlreadyDecided) {
 		t.Fatalf("expected ErrAlreadyDecided on re-decide, got %v", err)
+	}
+}
+
+func TestConsumeApprovedSingleUseMatchesExactlyAndRejectsReplay(t *testing.T) {
+	svc := newService()
+	agent := randomUUID(t)
+	ask, err := svc.Intake(context.Background(), IntakeParams{
+		WorkspaceID: testWorkspace, RequesterType: RequesterAgent, RequesterID: testRequester,
+		Agent: agent, Capability: "create_issue", Resource: "request:abc", Reason: "approval required",
+	})
+	if err != nil {
+		t.Fatalf("intake: %v", err)
+	}
+	if _, err := svc.ApproveOnce(context.Background(), ask.ID, testWorkspace, testApprover, "", SurfaceUI, futureExpiry()); err != nil {
+		t.Fatalf("approve once: %v", err)
+	}
+
+	if _, err := svc.ConsumeApproved(context.Background(), ConsumeParams{
+		ID: ask.ID, WorkspaceID: testWorkspace, Agent: agent, Capability: "create_issue", Resource: "request:wrong",
+	}); !errors.Is(err, ErrNotConsumable) {
+		t.Fatalf("mismatched consume error=%v, want ErrNotConsumable", err)
+	}
+	first, err := svc.ConsumeApproved(context.Background(), ConsumeParams{
+		ID: ask.ID, WorkspaceID: testWorkspace, Agent: agent, Capability: "create_issue", Resource: "request:abc",
+	})
+	if err != nil || !first.ConsumedAt.Valid {
+		t.Fatalf("first consume row=%+v err=%v", first, err)
+	}
+	if _, err := svc.ConsumeApproved(context.Background(), ConsumeParams{
+		ID: ask.ID, WorkspaceID: testWorkspace, Agent: agent, Capability: "create_issue", Resource: "request:abc",
+	}); !errors.Is(err, ErrNotConsumable) {
+		t.Fatalf("replay consume error=%v, want ErrNotConsumable", err)
+	}
+}
+
+func TestConsumeApprovedPeriodGrantRemainsReusable(t *testing.T) {
+	svc := newService()
+	agent := randomUUID(t)
+	ask, err := svc.Intake(context.Background(), IntakeParams{
+		WorkspaceID: testWorkspace, RequesterType: RequesterAgent, RequesterID: testRequester,
+		Agent: agent, Capability: "create_issue", Resource: "request:period", Reason: "approval required",
+	})
+	if err != nil {
+		t.Fatalf("intake: %v", err)
+	}
+	if _, err := svc.Approve(context.Background(), ask.ID, testWorkspace, testApprover, "", SurfaceUI, futureExpiry()); err != nil {
+		t.Fatalf("approve period: %v", err)
+	}
+	params := ConsumeParams{ID: ask.ID, WorkspaceID: testWorkspace, Agent: agent, Capability: "create_issue", Resource: "request:period"}
+	for i := 0; i < 2; i++ {
+		row, err := svc.ConsumeApproved(context.Background(), params)
+		if err != nil || row.ConsumedAt.Valid || row.SingleUse {
+			t.Fatalf("period consume %d row=%+v err=%v", i+1, row, err)
+		}
+	}
+}
+
+func TestConsumeApprovedExpiredSingleUseIsRejected(t *testing.T) {
+	svc := newService()
+	agent := randomUUID(t)
+	ask, err := svc.Intake(context.Background(), IntakeParams{
+		WorkspaceID: testWorkspace, RequesterType: RequesterAgent, RequesterID: testRequester,
+		Agent: agent, Capability: "create_issue", Resource: "request:expired", Reason: "approval required",
+	})
+	if err != nil {
+		t.Fatalf("intake: %v", err)
+	}
+	if _, err := svc.ApproveOnce(context.Background(), ask.ID, testWorkspace, testApprover, "", SurfaceUI,
+		pgtype.Timestamptz{Time: time.Now().Add(-time.Minute), Valid: true}); err != nil {
+		t.Fatalf("approve expired once: %v", err)
+	}
+	if _, err := svc.ConsumeApproved(context.Background(), ConsumeParams{
+		ID: ask.ID, WorkspaceID: testWorkspace, Agent: agent, Capability: "create_issue", Resource: "request:expired",
+	}); !errors.Is(err, ErrNotConsumable) {
+		t.Fatalf("expired consume error=%v, want ErrNotConsumable", err)
 	}
 }
 

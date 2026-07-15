@@ -22,7 +22,7 @@ type platformActionAnswer struct {
 	Reason     string
 }
 
-func (h *Handler) authorizeCreateIssue(ctx context.Context, r *http.Request, workspaceID pgtype.UUID, creatorType, creatorID, surface string, actionContext map[string]any, resourcePayload any) platformActionAnswer {
+func (h *Handler) authorizeCreateIssue(ctx context.Context, r *http.Request, workspaceID pgtype.UUID, creatorType, creatorID, surface string, actionContext map[string]any, resourcePayload any, wait bool) platformActionAnswer {
 	if creatorType != "agent" {
 		return platformActionAnswer{Allowed: true}
 	}
@@ -34,12 +34,28 @@ func (h *Handler) authorizeCreateIssue(ctx context.Context, r *http.Request, wor
 	if raw := r.Header.Get("X-Task-ID"); raw != "" {
 		taskID, _ = util.ParseUUID(raw)
 	}
-	result, err := h.PlatformActionGate.Authorize(ctx, platformaction.Request{
+	var approvalID pgtype.UUID
+	if raw := r.Header.Get("X-Platform-Approval-ID"); raw != "" {
+		approvalID, err = util.ParseUUID(raw)
+		if err != nil {
+			return platformActionAnswer{Reason: "invalid platform approval id"}
+		}
+	}
+	request := platformaction.Request{
 		WorkspaceID: workspaceID, AgentID: agentID, TaskID: taskID,
 		Capability: createIssuePlatformAction, Resource: platformActionResource(resourcePayload),
-		Surface: surface, Context: actionContext,
-	})
+		Surface: surface, Context: actionContext, ApprovalID: approvalID,
+	}
+	var result permgate.Result
+	if wait {
+		result, err = h.PlatformActionGate.AuthorizeAndWait(ctx, request)
+	} else {
+		result, err = h.PlatformActionGate.Authorize(ctx, request)
+	}
 	if err != nil {
+		if result.ApprovalID.Valid && result.Outcome == permgate.OutcomeTimedOut {
+			return platformActionAnswer{Pending: true, ApprovalID: result.ApprovalID, Reason: result.Reason}
+		}
 		return platformActionAnswer{Reason: err.Error()}
 	}
 	switch result.Outcome {

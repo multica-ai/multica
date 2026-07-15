@@ -16,6 +16,7 @@ import (
 // TestKimiBackendInvokesACPSubcommand: fork/exec ... text file busy).
 func writeTestExecutable(tb testing.TB, path string, content []byte) {
 	tb.Helper()
+	acquireTestExecutableSlot(tb) // CEREBRO-PATCH(agent-test-exec-stability): Bound fake CLI process concurrency.
 	syscall.ForkLock.RLock()
 	defer syscall.ForkLock.RUnlock()
 	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o755)

@@ -327,6 +327,13 @@ func TestRunIssueCreatePermissionPendingApprovedRetriesIdenticalBodyOnce(t *test
 		switch {
 		case r.Method == http.MethodPost && r.URL.Path == "/api/issues":
 			posts++
+			// CEREBRO-PATCH(create-issue-approval-cli): FIR-3324 approved CLI retry must carry the server approval id.
+			if posts == 1 && r.Header.Get("X-Platform-Approval-ID") != "" {
+				t.Fatalf("initial request unexpectedly carried an approval ID")
+			}
+			if posts == 2 && r.Header.Get("X-Platform-Approval-ID") != "approval-1" {
+				t.Fatalf("approved retry approval ID = %q, want approval-1", r.Header.Get("X-Platform-Approval-ID"))
+			}
 			body, err := io.ReadAll(r.Body)
 			if err != nil {
 				t.Fatalf("read request body: %v", err)

@@ -18,7 +18,7 @@ RETURNING
     status,
     decided_by_id, decided_at, decision_note,
     delegated_to_type, delegated_to_id,
-    expires_at, created_at, updated_at;
+    expires_at, created_at, updated_at, single_use, consumed_at;
 
 -- name: GetCerebroApprovalRequest :one
 SELECT
@@ -28,7 +28,7 @@ SELECT
     status,
     decided_by_id, decided_at, decision_note,
     delegated_to_type, delegated_to_id,
-    expires_at, created_at, updated_at
+    expires_at, created_at, updated_at, single_use, consumed_at
 FROM cerebro_approval_request
 WHERE id = $1 AND workspace_id = $2;
 
@@ -51,13 +51,13 @@ SELECT
     status,
     decided_by_id, decided_at, decision_note,
     delegated_to_type, delegated_to_id,
-    expires_at, created_at, updated_at
+    expires_at, created_at, updated_at, single_use, consumed_at
 FROM cerebro_approval_request
 WHERE workspace_id = $1
   AND agent_id IS NOT DISTINCT FROM $2
   AND capability = $3
   AND resource = $4
-  AND status IN ('pending', 'approved')
+  AND (status = 'pending' OR (status = 'approved' AND single_use = FALSE))
   AND (expires_at IS NULL OR expires_at > now())
 ORDER BY
     (status = 'approved') DESC,
@@ -72,17 +72,22 @@ SELECT
     status,
     decided_by_id, decided_at, decision_note,
     delegated_to_type, delegated_to_id,
-    expires_at, created_at, updated_at,
+    expires_at, created_at, updated_at, single_use, consumed_at,
     count(*) OVER()::int AS total
 FROM cerebro_approval_request
-WHERE workspace_id = $1
+WHERE workspace_id = sqlc.arg(workspace_id)
   -- Treat an omitted status as "any status".
-  AND (NULLIF($2::text, '') IS NULL OR status = $2)
+  AND (NULLIF(sqlc.arg(status)::text, '') IS NULL OR status = sqlc.arg(status))
+  AND (NULLIF(sqlc.arg(task_id)::text, '') IS NULL OR context->>'task_id' = sqlc.arg(task_id))
+  AND (NULLIF(sqlc.arg(issue_id)::text, '') IS NULL OR context->>'issue_id' = sqlc.arg(issue_id))
+  AND (NULLIF(sqlc.arg(chat_session_id)::text, '') IS NULL OR context->>'chat_session_id' = sqlc.arg(chat_session_id))
+  AND (NULLIF(sqlc.arg(trigger_comment_id)::text, '') IS NULL OR context->>'trigger_comment_id' = sqlc.arg(trigger_comment_id))
+  AND (NULLIF(sqlc.arg(surface)::text, '') IS NULL OR context->>'surface' = sqlc.arg(surface))
 ORDER BY
     -- Pending asks float to the top; otherwise newest first.
     (status = 'pending') DESC,
     created_at DESC
-LIMIT $3 OFFSET $4;
+LIMIT sqlc.arg(page_limit) OFFSET sqlc.arg(page_offset);
 
 -- name: CountPendingCerebroApprovals :one
 SELECT count(*)::int AS pending
@@ -95,8 +100,9 @@ WHERE workspace_id = $1 AND status = 'pending';
 -- and the query returns pgx.ErrNoRows, which the service maps to
 -- ErrAlreadyDecided. $3 is the new status ('approved' | 'rejected'). $6 sets
 -- expires_at so an approver can time-box a grant: NULL = never, now() = a
--- one-shot approve (not reusable for a future call), now()+duration = a period
--- grant that FindReusable honours until it lapses (TECH-3498).
+-- one-shot or period-grant expiry. $7 is the authoritative reuse mode:
+-- single-use approvals must be consumed exactly once; period grants are the
+-- only approved rows FindReusable may return (TECH-3498, FIR-3324).
 UPDATE cerebro_approval_request
 SET
     status        = $3,
@@ -104,6 +110,8 @@ SET
     decided_at    = now(),
     decision_note = $5,
     expires_at    = $6,
+    single_use    = $7,
+    consumed_at   = NULL,
     updated_at    = now()
 WHERE id = $1 AND workspace_id = $2 AND status = 'pending'
 RETURNING
@@ -113,7 +121,31 @@ RETURNING
     status,
     decided_by_id, decided_at, decision_note,
     delegated_to_type, delegated_to_id,
-    expires_at, created_at, updated_at;
+    expires_at, created_at, updated_at, single_use, consumed_at;
+
+-- name: ConsumeApprovedCerebroApprovalRequest :one
+-- Atomically consume an exact approved request. The id is only a reference:
+-- workspace, agent, capability and resource must all match the original call.
+UPDATE cerebro_approval_request
+SET
+    consumed_at = CASE WHEN single_use THEN now() ELSE consumed_at END,
+    updated_at = now()
+WHERE id = $1
+  AND workspace_id = $2
+  AND agent_id IS NOT DISTINCT FROM $3
+  AND capability = $4
+  AND resource = $5
+  AND status = 'approved'
+  AND (expires_at IS NULL OR expires_at > now())
+  AND (single_use = FALSE OR consumed_at IS NULL)
+RETURNING
+    id, workspace_id,
+    requester_type, requester_id, agent_id,
+    capability, resource, reason, matched_grant_ids, context,
+    status,
+    decided_by_id, decided_at, decision_note,
+    delegated_to_type, delegated_to_id,
+    expires_at, created_at, updated_at, single_use, consumed_at;
 
 -- name: DelegateCerebroApprovalRequest :one
 -- Delegation keeps the ask actionable: it stays effectively open but is
@@ -135,7 +167,7 @@ RETURNING
     status,
     decided_by_id, decided_at, decision_note,
     delegated_to_type, delegated_to_id,
-    expires_at, created_at, updated_at;
+    expires_at, created_at, updated_at, single_use, consumed_at;
 
 -- name: ExpireDueCerebroApprovalRequests :many
 -- Sweep pending asks past their deadline to 'expired'. Returns the affected

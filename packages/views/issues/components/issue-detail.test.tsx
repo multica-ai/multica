@@ -414,6 +414,26 @@ vi.mock("sonner", () => ({
   toast: { error: vi.fn(), success: vi.fn() },
 }));
 
+vi.mock("@multica/cerebro-approvals/views", () => ({
+  ApprovalRealtime: ({ wsId }: { wsId: string }) => (
+    <div data-testid="approval-realtime" data-workspace={wsId} />
+  ),
+  InlineApprovalCards: ({
+    origin,
+    match,
+  }: {
+    origin: { issue_id?: string; surface?: string };
+    match?: { trigger_comment_id?: string };
+  }) => (
+    <div
+      data-testid="inline-approval-cards"
+      data-issue={origin.issue_id}
+      data-surface={origin.surface}
+      data-comment={match?.trigger_comment_id ?? "issue"}
+    />
+  ),
+}));
+
 // Mock react-resizable-panels (used by @multica/ui/components/ui/resizable)
 vi.mock("react-resizable-panels", () => ({
   Group: ({ children, ...props }: any) => <div data-testid="panel-group" {...props}>{children}</div>,
@@ -855,6 +875,25 @@ describe("IssueDetail (shared)", () => {
     expect(screen.getByText("I can help with this")).toBeInTheDocument();
   });
 
+  it("places issue and comment-linked approvals in the issue timeline", async () => {
+    renderIssueDetail();
+
+    await waitFor(() => {
+      expect(screen.getByText("Started working on this")).toBeInTheDocument();
+    });
+
+    const cards = screen.getAllByTestId("inline-approval-cards");
+    expect(screen.getAllByTestId("approval-realtime")).toHaveLength(1);
+    expect(screen.getByTestId("approval-realtime")).toHaveAttribute(
+      "data-workspace",
+      "ws-1",
+    );
+    expect(cards.some((card) => card.dataset.comment === "issue")).toBe(true);
+    expect(cards.some((card) => card.dataset.comment === "comment-1")).toBe(true);
+    expect(cards.every((card) => card.dataset.issue === "issue-1")).toBe(true);
+    expect(cards.every((card) => card.dataset.surface === "issue")).toBe(true);
+  });
+
   it("renders scheduled wakeup activity with a timezone label", async () => {
     // CEREBRO-PATCH(wakeup-scheduled-activity): cover scheduled wakeup rendering in the fork UI.
     mockApiObj.listTimeline.mockResolvedValue([
@@ -1225,6 +1264,21 @@ describe("IssueDetail (channel/DM)", () => {
       { user_id: "user-1", name: "Test User", email: "test@test.com", role: "admin" },
     ]);
     mockApiObj.listAgents.mockResolvedValue([]);
+  });
+
+  it.each([
+    [mockChannelIssue, "channel"],
+    [mockDMIssue, "dm"],
+  ] as const)("scopes inline approvals to the %s surface", async (chatIssue, surface) => {
+    mockApiObj.getIssue.mockResolvedValue(chatIssue);
+    renderIssueDetail(chatIssue.id);
+
+    await waitFor(() => {
+      expect(screen.getByText("Messages")).toBeInTheDocument();
+    });
+
+    const cards = screen.getAllByTestId("inline-approval-cards");
+    expect(cards.some((card) => card.dataset.surface === surface)).toBe(true);
   });
 
   it("hides task chrome and shows Participants for a channel", async () => {

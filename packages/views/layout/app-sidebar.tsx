@@ -867,10 +867,6 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                     </React.Fragment>
                   );
                 })}
-                {/* CEREBRO-PATCH(cerebro-approvals-sidebar): FIR-2131 cerebro approval inbox entry in workspace group */}
-                <ApprovalsNavItem workspaceSlug={workspace?.slug ?? ""} onClick={handleNavClick} />
-                {/* CEREBRO-PATCH(cerebro-agent-passes-sidebar): JEH-1731 cerebro agent-passes entry in workspace group */}
-                <AgentPassesNavItem workspaceSlug={workspace?.slug ?? ""} onClick={handleNavClick} />
                 {/* CEREBRO-PATCH(cerebro-notes-sidebar): TECH-3421 Notes entry in workspace group */}
                 <NotesNavItem workspaceSlug={workspace?.slug ?? ""} onClick={handleNavClick} />
                 {/* CEREBRO-PATCH(cerebro-reminders-sidebar): FIR-394 Reminders entry in workspace group */}
@@ -954,6 +950,9 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                     </React.Fragment>
                   );
                 })}
+                {/* CEREBRO-PATCH(cerebro-approvals-configure): FIR-3266 keep approval administration beside agent passes. */}
+                <ApprovalsNavItem workspaceSlug={workspace?.slug ?? ""} onClick={handleNavClick} />
+                <AgentPassesNavItem workspaceSlug={workspace?.slug ?? ""} onClick={handleNavClick} />
               </SidebarMenu>
             </SidebarGroupContent>
           </SidebarGroup>

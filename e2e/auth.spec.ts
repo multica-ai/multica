@@ -3,6 +3,13 @@ import { loginAsDefault, openWorkspaceMenu } from "./helpers";
 
 test.describe("Authentication", () => {
   test("login page renders correctly", async ({ page }) => {
+    // CEREBRO-PATCH(auth-e2e-isolation): this assertion is specifically for
+    // the anonymous login UI. Clear both supported session mechanisms before
+    // the first document script can restore an authenticated destination.
+    await page.context().clearCookies();
+    await page.addInitScript(() => {
+      localStorage.removeItem("multica_token");
+    });
     await page.goto("/login");
 
     await expect(page.getByText("Sign in to Multica")).toBeVisible();

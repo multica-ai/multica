@@ -170,8 +170,11 @@ Creating every serial step as `todo` enqueues the whole chain at once.
 `multica issue create` and the same command with `--parent` use the single
 `create_issue` permission. The server may allow the create, deny it with
 `platform_action_denied`, or return `platform_action_pending` while an Approval
-inbox request is open. Do not bypass a deny or create a second issue on retry;
-pending retries must reuse the approval id.
+<!-- CEREBRO-PATCH(create-issue-permission-skill): FIR-3324 document exact one-shot create_issue approval resume. -->
+inbox request is open. The CLI waits for the decision and retries the identical
+request with the returned approval id; Workspace MCP and Gateway wait in place.
+Do not bypass a deny, change the request, or start a second create. Approval is
+single-use: rejection, expiry, mismatch, or replay creates no issue.
 
 <!-- CEREBRO-PATCH(create-issue-workflow-skill): FIR-2283 followup — document starting a new issue on an Issue workflow from the CLI/API. -->
 

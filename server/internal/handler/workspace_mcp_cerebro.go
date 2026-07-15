@@ -11,11 +11,17 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/cerebro/approvals"
+	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
 	"github.com/multica-ai/multica/server/internal/mcp"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
+
+type ApprovalRequester interface {
+	Intake(context.Context, approvals.IntakeParams) (cerebrodb.CerebroApprovalRequest, error)
+}
 
 // WorkspaceMCP exposes a small workspace-scoped MCP surface over HTTP. It is
 // mounted behind RequireWorkspaceMemberFromURL, so a connection can target a
@@ -40,6 +46,13 @@ func (h *Handler) WorkspaceMCP(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) registerWorkspaceMCPTools(srv *mcp.Server, r *http.Request, workspaceID string, wsUUID pgtype.UUID, userID string) {
 	srv.RegisterTool(mcp.Tool{
+		Name:        "request_approval",
+		Description: "Request a human decision for an action that needs approval.",
+		InputSchema: requestApprovalInputSchema(),
+	}, func(ctx context.Context, args map[string]any) (mcp.CallToolResult, error) {
+		return h.requestApprovalFromWorkspaceMCP(ctx, r, workspaceID, wsUUID, userID, args)
+	})
+	srv.RegisterTool(mcp.Tool{
 		Name:        "create_issue",
 		Description: "Create a new issue in this workspace.",
 		InputSchema: map[string]any{
@@ -60,6 +73,74 @@ func (h *Handler) registerWorkspaceMCPTools(srv *mcp.Server, r *http.Request, wo
 	}, func(ctx context.Context, args map[string]any) (mcp.CallToolResult, error) {
 		return h.createIssueFromWorkspaceMCP(ctx, r, workspaceID, wsUUID, userID, args)
 	})
+}
+
+func (h *Handler) requestApprovalFromWorkspaceMCP(ctx context.Context, r *http.Request, workspaceID string, wsUUID pgtype.UUID, userID string, args map[string]any) (mcp.CallToolResult, error) {
+	actorType, actorID := h.resolveActor(r, userID, workspaceID)
+	if actorType != approvals.RequesterAgent {
+		return mcp.ErrorResult(approvals.ErrAgentRequired.Error()), nil
+	}
+	agentID, err := util.ParseUUID(actorID)
+	if err != nil {
+		return mcp.ErrorResult(approvals.ErrAgentRequired.Error()), nil
+	}
+	origin := approvals.AgentRequest{
+		WorkspaceID:  wsUUID,
+		AgentID:      agentID,
+		Capability:   stringArg(args, "capability"),
+		Resource:     stringArg(args, "resource"),
+		Reason:       stringArg(args, "reason"),
+		Surface:      "issue",
+		AuditSurface: approvals.SurfaceMCP,
+	}
+	if taskID, parseErr := util.ParseUUID(strings.TrimSpace(r.Header.Get("X-Task-ID"))); parseErr == nil {
+		origin.TaskID = taskID
+		if task, taskErr := h.Queries.GetAgentTask(ctx, taskID); taskErr == nil && util.UUIDToString(task.AgentID) == actorID {
+			origin.IssueID = task.IssueID
+			origin.ChatSessionID = task.ChatSessionID
+			origin.TriggerCommentID = task.TriggerCommentID
+			if task.ChatSessionID.Valid {
+				origin.Surface = "chat"
+			} else if task.IssueID.Valid {
+				if issue, issueErr := h.Queries.GetIssue(ctx, task.IssueID); issueErr == nil {
+					origin.Surface = approvalIssueSurface(issue.Kind)
+				}
+			}
+		}
+	}
+	row, err := approvals.RequestFromAgent(ctx, h.ApprovalRequester, origin)
+	if err != nil {
+		return mcp.ErrorResult(err.Error()), nil
+	}
+	raw, err := json.Marshal(map[string]any{
+		"id": util.UUIDToString(row.ID), "status": row.Status,
+		"capability": origin.Capability, "resource": origin.Resource, "context": origin,
+	})
+	if err != nil {
+		return mcp.ErrorResult("request_approval: marshal result failed"), nil
+	}
+	return mcp.CallToolResult{Content: []mcp.Content{{Type: "text", Text: string(raw)}}, StructuredContent: raw}, nil
+}
+
+func requestApprovalInputSchema() map[string]any {
+	return map[string]any{
+		"type":     "object",
+		"required": []string{"capability", "reason"},
+		"properties": map[string]any{
+			"capability": map[string]any{"type": "string", "description": "The action that needs a human decision."},
+			"resource":   map[string]any{"type": "string", "description": "Optional resource the action targets."},
+			"reason":     map[string]any{"type": "string", "description": "Why the approval is needed."},
+		},
+	}
+}
+
+func approvalIssueSurface(kind string) string {
+	switch kind {
+	case "channel", "dm":
+		return kind
+	default:
+		return "issue"
+	}
 }
 
 func (h *Handler) createIssueFromWorkspaceMCP(ctx context.Context, r *http.Request, workspaceID string, wsUUID pgtype.UUID, userID string, args map[string]any) (mcp.CallToolResult, error) {
@@ -113,7 +194,7 @@ func (h *Handler) createIssueFromWorkspaceMCP(ctx context.Context, r *http.Reque
 	}
 
 	creatorType, actualCreatorID := h.resolveActor(r, userID, workspaceID)
-	if answer := h.authorizeCreateIssue(ctx, r, wsUUID, creatorType, actualCreatorID, "workspace_mcp", args, args); !answer.Allowed {
+	if answer := h.authorizeCreateIssue(ctx, r, wsUUID, creatorType, actualCreatorID, "workspace_mcp", args, args, true); !answer.Allowed {
 		code := "platform_action_denied"
 		if answer.Pending {
 			code = "platform_action_pending: approval_id=" + uuidToString(answer.ApprovalID)

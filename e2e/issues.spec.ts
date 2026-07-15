@@ -88,7 +88,14 @@ test.describe("Issues", () => {
 
     await page.getByRole("button", { name: /filter/i }).click();
     await page.getByRole("menuitem", { name: /^Date\b/ }).hover();
-    await page.getByRole("menuitem", { name: "Today" }).click();
+    await page.getByRole("button", { name: "Add filter", exact: true }).click();
+    await page
+      .locator('select:has(option[value="due_date"])')
+      .selectOption("created_at");
+    await page.getByRole("button", { name: "This week", exact: true }).click();
+    await page.getByRole("option", { name: "Today", exact: true }).click();
+    await page.keyboard.press("Escape");
+    await page.keyboard.press("Escape");
 
     await expect(page.getByRole("button", { name: /1 filter/i })).toBeVisible();
     await expect(page.getByText(todayTitle)).toBeVisible();
@@ -96,12 +103,10 @@ test.describe("Issues", () => {
     await expect(page.getByText(updatedTodayTitle)).toBeHidden({ timeout: 10000 });
 
     await page.getByRole("button", { name: /1 filter/i }).click();
-    const dateFilterItem = page.getByRole("menuitem", { name: /^Date\b/ });
-    await dateFilterItem.focus();
-    await page.keyboard.press("ArrowRight");
-    const updatedDateField = page.getByRole("menuitemradio", { name: "Updated" });
-    await expect(updatedDateField).toBeVisible();
-    await updatedDateField.press("Enter");
+    await page.getByRole("menuitem", { name: /^Date\b/ }).hover();
+    await page
+      .locator('select:has(option[value="updated_at"])')
+      .selectOption("updated_at");
     await expect(page.getByText(todayTitle)).toBeVisible();
     await expect(page.getByText(updatedTodayTitle)).toBeVisible();
     await expect(page.getByText(oldTitle)).toBeHidden({ timeout: 10000 });
@@ -123,12 +128,14 @@ test.describe("Issues", () => {
 
     await page.getByRole("button", { name: /filter/i }).click();
     await page.getByRole("menuitem", { name: /^Date\b/ }).hover();
-    const customDateButton = page.getByRole("button", { name: "Custom date or range" });
-    await expect(customDateButton).toBeVisible();
-    await customDateButton.click();
+    await page.getByRole("button", { name: "Add filter", exact: true }).click();
+    await page
+      .locator('select:has(option[value="due_date"])')
+      .selectOption("created_at");
+    await page.getByRole("button", { name: "This week", exact: true }).click();
+    await page.getByRole("option", { name: "On date", exact: true }).click();
     const todayDataDay = await page.evaluate(() => new Date().toLocaleDateString());
     await page.locator(`[data-day="${todayDataDay}"]`).click();
-    await page.getByRole("button", { name: "Apply" }).click();
     await expect(page.getByText(todayTitle)).toBeVisible();
     await expect(page.getByText(oldTitle)).toBeHidden({ timeout: 10000 });
   });

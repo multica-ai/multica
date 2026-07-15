@@ -1,11 +1,11 @@
 /**
- * E2E (UI): chat-message attachments render on the bubble with open + download.
+ * E2E (UI): chat-message attachments open in the viewer and can be downloaded.
  *
  * TECH-3183 — the backend already stores + serves files attached to a chat
  * message; this proves the chat window now SHOWS them. Seeds a session with one
  * user message (file attached via the real upload + send API) and one assistant
  * message (file attached the way an agent does mid-turn), opens the chat, and
- * asserts the attachment card + "Open in viewer" + "Download" controls render.
+ * asserts the attachment card opens the viewer, where Download is available.
  * Captures a screenshot as the visual proof for the issue.
  */
 import "./env";
@@ -36,7 +36,7 @@ async function uploadMarkdown(token: string, slug: string, sessionId: string, na
   return (await res.json()) as { id: string; url: string; download_url: string };
 }
 
-test("chat message attachments render with open + download", async ({ page }) => {
+test("chat message attachments open in viewer with download", async ({ page }) => {
   const slug = await loginAsDefault(page);
 
   const api = new TestApiClient();
@@ -103,14 +103,22 @@ test("chat message attachments render with open + download", async ({ page }) =>
       asstFile.id,
     ]);
 
-    // 3. Open the chat and verify both bubbles show their attachment + controls.
+    // 3. Open the chat and verify both bubbles show their attachments.
     await page.goto(`/${slug}/inbox?chat=${sessionId}`, { waitUntil: "domcontentloaded" });
 
     await expect(page.getByText("Her er rapporten")).toBeVisible({ timeout: 20000 });
     await expect(page.getByText("rapport.md")).toBeVisible({ timeout: 20000 });
     await expect(page.getByText("resultat.md")).toBeVisible({ timeout: 20000 });
-    await expect(page.getByRole("button", { name: "Download" }).first()).toBeVisible();
-    await expect(page.getByRole("button", { name: "Open in viewer" }).first()).toBeVisible();
+    // CEREBRO-PATCH(attachment-chips-e2e): FIR-2034 made the whole card the
+    // viewer trigger; Download now lives in the viewer rather than the bubble.
+    const openInViewer = page.getByRole("button", { name: "Open in viewer" }).first();
+    await expect(openInViewer).toBeVisible();
+    const viewerPromise = page.waitForEvent("popup");
+    await openInViewer.click();
+    const viewer = await viewerPromise;
+    await expect(viewer.getByRole("button", { name: "Download" })).toBeVisible({
+      timeout: 10000,
+    });
 
     await page.screenshot({ path: "e2e/.artifacts/tech-3183-chat-attachments.png", fullPage: true });
   } finally {

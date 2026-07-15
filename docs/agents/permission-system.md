@@ -41,12 +41,29 @@ Keep these apart. This doc answers question 2 honestly.
 
 `create_issue` is enforced before mutation for authoritative agent/task actors
 by `server/internal/cerebro/platformaction` on REST/CLI, workspace HTTP MCP, and
-the Firtal Gateway runtime. `Allow` creates normally, `Deny` returns
-`platform_action_denied`, and `Ask` returns/reuses one
-`platform_action_pending` approval without creating an issue. Root issues and
-sub-issues use the same capability. Member-created issues and internal system
-materialisation are not agent platform actions and remain unchanged. This floor
-does not depend on `CEREBRO_APPROVAL_GATE_MODE` or the runtime rollout flags.
+the Firtal Gateway runtime. `Allow` creates normally and `Deny` returns
+`platform_action_denied`. `Ask` creates one approval without mutating, then
+resumes the exact request after approval: REST/CLI retries with the approval ID,
+while Workspace MCP and Gateway wait in-process. The server atomically consumes
+a one-shot approval only when workspace, agent, capability, resource, and ID all
+match, so replay, rejection, mismatch, and expiry create nothing. Root issues
+and sub-issues use the same capability and contract. Member-created issues and
+internal system materialisation are not agent platform actions and remain
+unchanged. This floor does not depend on `CEREBRO_APPROVAL_GATE_MODE`, the
+runtime rollout flags, or the `cerebro_approvals` UI flag.
+
+Agents can also explicitly raise a pending human decision with the
+`request_approval` tool. Workspace MCP and the managed Firtal Gateway use the
+same approval service and store the server-owned task, issue, chat session and
+trigger-comment origin in the request context. The tool only accepts an
+authoritative agent/task identity; it does not turn member calls into agent
+requests or bypass the permission decision for the action being proposed.
+Approvals with that origin context are displayed inline below the matching Chat
+turn or Issue/Channel/DM comment. Requests without a triggering comment appear
+at the top of the matching issue timeline; the Approvals page remains the full
+workspace inbox and audit surface. The `cerebro_approvals` flag gates both the
+inline query and approval realtime subscriptions; it never disables the server
+permission floor.
 
 > **FIR-2175 / FIR-3062 (flag `cerebro_member_override`, default ON):** when this general
 > gate IS deciding a call (question 1), a workspace uses the

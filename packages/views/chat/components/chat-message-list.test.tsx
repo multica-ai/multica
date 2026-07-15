@@ -31,6 +31,26 @@ vi.mock("@multica/cerebro-chat/views", async (importOriginal) => {
   };
 });
 
+vi.mock("@multica/cerebro-approvals/views", () => ({
+  ApprovalRealtime: ({ wsId }: { wsId: string }) => (
+    <div data-testid="approval-realtime" data-workspace={wsId} />
+  ),
+  InlineApprovalCards: ({
+    origin,
+    match,
+  }: {
+    origin: { chat_session_id?: string; surface?: string };
+    match?: { task_id?: string };
+  }) => (
+    <div
+      data-testid="inline-approval-cards"
+      data-session={origin.chat_session_id}
+      data-surface={origin.surface}
+      data-task={match?.task_id}
+    />
+  ),
+}));
+
 import { ChatMessageList } from "./chat-message-list";
 import { ChatStatusLine } from "@multica/cerebro-chat/views";
 
@@ -125,6 +145,42 @@ describe("ChatMessageList", () => {
     // Outer fold is closed → neither early nor late tool visible.
     expect(screen.queryByText("EarlyTool")).not.toBeInTheDocument();
     expect(screen.queryByText("LateTool")).not.toBeInTheDocument();
+  });
+
+  it("places task-linked approvals directly after the matching assistant turn", () => {
+    const qc = createTestQueryClient();
+    const messages: ChatMessage[] = [
+      {
+        id: "m1",
+        chat_session_id: "session-1",
+        role: "assistant",
+        content: "Done",
+        task_id: COMPLETED_TASK_ID,
+        created_at: "2026-05-02T00:00:00Z",
+        responded_at: null,
+      },
+    ];
+
+    withQuery(
+      <ChatMessageList
+        messages={messages}
+        pendingTask={null}
+        availability={undefined}
+        workspaceId="workspace-1"
+        chatSessionId="session-1"
+      />,
+      qc,
+    );
+
+    const cards = screen.getByTestId("inline-approval-cards");
+    expect(screen.getAllByTestId("approval-realtime")).toHaveLength(1);
+    expect(screen.getByTestId("approval-realtime")).toHaveAttribute(
+      "data-workspace",
+      "workspace-1",
+    );
+    expect(cards).toHaveAttribute("data-session", "session-1");
+    expect(cards).toHaveAttribute("data-surface", "chat");
+    expect(cards).toHaveAttribute("data-task", COMPLETED_TASK_ID);
   });
 });
 

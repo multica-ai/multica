@@ -87,6 +87,8 @@ import { TitleEditor } from "../../editor/title-editor";
 import { useFileDropZone } from "../../editor/use-file-drop-zone";
 // CEREBRO-PATCH(attachments-tab): FIR-2034 — issue attachments render in a dedicated tab as rows.
 import { IssueAttachmentsSlot, AttachmentsTab, AttachmentsTabLabel } from "@multica/cerebro-attachments/views";
+// CEREBRO-PATCH(inline-agent-approvals): FIR-3266 — issue-level decisions live in the activity timeline.
+import { ApprovalRealtime, InlineApprovalCards } from "@multica/cerebro-approvals/views";
 // CEREBRO-PATCH(description-image-gallery): FIR-2710 — one image gallery for the description (inline + attachments).
 import { ImageGalleryProvider } from "@multica/cerebro-attachments/views";
 import { ArtifactList } from "@multica/cerebro-artifacts/views/components";
@@ -1297,6 +1299,7 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
   const isChannel = channelsEnabled && issueKind === "channel";
   const isDM = channelsEnabled && issueKind === "dm";
   const isChat = isChannel || isDM;
+  const approvalSurface = isDM ? "dm" : isChannel ? "channel" : "issue";
   const dmTitle = useMemo(() => {
     if (!isDM) return null;
     const others = subscribers.filter(
@@ -2762,6 +2765,14 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
             ) : (
             <>
             {/* CEREBRO-PATCH(thread-session-fir1874): top StartFresh removed — handoff lives on the composer Send button now. */}
+            {issue && <ApprovalRealtime wsId={issue.workspace_id} />}
+            {issue && (
+              <InlineApprovalCards
+                wsId={issue.workspace_id}
+                origin={{ issue_id: id, surface: approvalSurface }}
+                match={{ trigger_comment_id: null }}
+              />
+            )}
             <div className="mt-4 flex flex-col gap-3">
               {(() => {
                 // CEREBRO-PATCH(comment-sessions-ui): FIR-1741 render one timeline
@@ -2801,6 +2812,8 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
                       <div key={entry.id} id={`comment-${entry.id}`}>
                         <CommentCard
                           issueId={id}
+                          approvalWorkspaceId={issue?.workspace_id}
+                          approvalSurface={approvalSurface}
                           entry={entry}
                           bare={bare}
                           replies={timelineView.threadReplies.get(entry.id) ?? EMPTY_REPLIES}

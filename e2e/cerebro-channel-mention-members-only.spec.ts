@@ -24,13 +24,14 @@ test.describe("Channel mentions respect membership (FIR-2680)", () => {
   let channelId: string;
   let outsiderId: string;
   let outsiderName: string;
+  let workspaceSlug: string;
 
   test.beforeEach(async ({ page }) => {
     api = await createTestApi();
     await api.setWorkspaceFeatureFlag(FLAG, true);
 
     // An outsider: a workspace member who is NOT a participant of the channel.
-    outsiderName = `Outsider ${Date.now()}`;
+    outsiderName = `Outsider${Date.now()}`;
     const outsider = await api.loginSecondaryUser(
       `fir2680-outsider-${Date.now()}@multica.ai`,
       outsiderName,
@@ -40,7 +41,7 @@ test.describe("Channel mentions respect membership (FIR-2680)", () => {
     const channel = await api.createChannel(`FIR-2680 ${Date.now()}`);
     channelId = channel.id;
 
-    await loginAsDefault(page);
+    workspaceSlug = await loginAsDefault(page);
   });
 
   test.afterEach(async () => {
@@ -51,9 +52,11 @@ test.describe("Channel mentions respect membership (FIR-2680)", () => {
   // Types "@<name>" into the channel composer and picks the outsider from the
   // mention menu, then returns focus to the composer.
   async function mentionOutsider(page: import("@playwright/test").Page) {
-    await page.goto(`/channels/${channelId}`);
+    await page.goto(`/${workspaceSlug}/channels/${channelId}`);
     const composer = page.locator('[contenteditable="true"]').last();
     await composer.click();
+    // CEREBRO-PATCH: Use the full unique token so stale E2E members cannot fill
+    // the mention menu's result limit before this test's outsider appears.
     await page.keyboard.type(`@${outsiderName}`);
     // The mention menu renders each candidate as a <button> labelled by name.
     await page.getByRole("button", { name: outsiderName }).first().click();
@@ -61,7 +64,7 @@ test.describe("Channel mentions respect membership (FIR-2680)", () => {
 
   test("'Send without' posts but does not notify the non-participant", async ({ page }) => {
     await mentionOutsider(page);
-    await page.keyboard.press("Enter"); // submit
+    await page.getByRole("button", { name: "Submit" }).click();
 
     await expect(page.getByText("Add to this channel?")).toBeVisible();
     await page.getByRole("button", { name: "Send without" }).click();
@@ -74,7 +77,7 @@ test.describe("Channel mentions respect membership (FIR-2680)", () => {
 
   test("'Add & send' adds the participant and then delivers the mention", async ({ page }) => {
     await mentionOutsider(page);
-    await page.keyboard.press("Enter"); // submit
+    await page.getByRole("button", { name: "Submit" }).click();
 
     await expect(page.getByText("Add to this channel?")).toBeVisible();
     await page.getByRole("button", { name: "Add & send" }).click();

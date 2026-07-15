@@ -26,7 +26,10 @@ async function authedGoto(page: Page, path: string) {
   return ws.slug;
 }
 
-test.describe("Open-in-app banner (mobile PWA fallback)", () => {
+// CEREBRO-PATCH(pwa-install-e2e): FIR-2042 replaced the old deep-link banner
+// with platform-specific installation guidance; keep the browser contract in
+// sync with the mounted CerebroInstallPwaBanner.
+test.describe("Install PWA banner (mobile)", () => {
   test.use({
     viewport: IPHONE.viewport,
     userAgent: IPHONE.userAgent,
@@ -35,29 +38,31 @@ test.describe("Open-in-app banner (mobile PWA fallback)", () => {
     hasTouch: IPHONE.hasTouch,
   });
 
-  test("renders inside a workspace on iPhone Safari with a same-scope link", async ({ page }) => {
-    const slug = await authedGoto(page, "/issues");
-    const banner = page.getByTestId("open-in-app-banner");
+  test("renders iOS installation guidance inside a workspace", async ({ page }) => {
+    await authedGoto(page, "/issues");
+    const banner = page.getByTestId("install-pwa-banner");
     await expect(banner).toBeVisible({ timeout: 10000 });
-    await expect(page.getByRole("region", { name: "Open in app" })).toBeVisible();
-    const open = page.getByTestId("open-in-app-banner-open");
-    // Default link target is the current pathname — must remain in scope so
-    // Android Chrome's handle_links can capture it.
-    await expect(open).toHaveAttribute("href", new RegExp(`/${slug}/issues`));
+    await expect(
+      page.getByRole("region", { name: "Install Multica" }),
+    ).toBeVisible();
+    await page.getByTestId("install-pwa-banner-how").click();
+    await expect(page.getByTestId("install-pwa-banner-guide")).toContainText(
+      "Add to Home Screen",
+    );
   });
 
   test("dismiss hides the banner and persists across navigation", async ({ page }) => {
     test.setTimeout(90000);
     const slug = await authedGoto(page, "/issues");
-    const banner = page.getByTestId("open-in-app-banner");
+    const banner = page.getByTestId("install-pwa-banner");
     await expect(banner).toBeVisible({ timeout: 10000 });
-    await page.getByTestId("open-in-app-banner-dismiss").click();
+    await page.getByTestId("install-pwa-banner-dismiss").click();
     await expect(banner).toHaveCount(0);
 
     // First hit on /agents in dev mode triggers a slow Turbopack compile.
     await page.goto(`/${slug}/agents`, { waitUntil: "domcontentloaded", timeout: 60000 });
     // Banner stays dismissed because we share one localStorage key per origin.
-    await expect(page.getByTestId("open-in-app-banner")).toHaveCount(0);
+    await expect(page.getByTestId("install-pwa-banner")).toHaveCount(0);
   });
 
   test("does not render when the page reports it is running as a standalone PWA", async ({ page }) => {
@@ -84,13 +89,13 @@ test.describe("Open-in-app banner (mobile PWA fallback)", () => {
       };
     });
     await authedGoto(page, "/issues");
-    await expect(page.getByTestId("open-in-app-banner")).toHaveCount(0);
+    await expect(page.getByTestId("install-pwa-banner")).toHaveCount(0);
   });
 });
 
-test.describe("Open-in-app banner (desktop)", () => {
+test.describe("Install PWA banner (desktop)", () => {
   test("does not render on desktop Chrome", async ({ page }) => {
     await authedGoto(page, "/issues");
-    await expect(page.getByTestId("open-in-app-banner")).toHaveCount(0);
+    await expect(page.getByTestId("install-pwa-banner")).toHaveCount(0);
   });
 });

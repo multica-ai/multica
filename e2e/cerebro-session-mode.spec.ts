@@ -4,6 +4,8 @@ import { createTestApi, loginAsDefault } from "./helpers";
 import type { TestApiClient } from "./fixtures";
 
 const databaseURL = process.env.DATABASE_URL!;
+const githubLatestReleaseURL =
+  "https://api.github.com/repos/multica-ai/multica/releases/latest";
 
 function captureBrowserFailures(page: import("@playwright/test").Page) {
   const consoleErrors: string[] = [];
@@ -27,6 +29,16 @@ test.describe("Cerebro session mode", () => {
   let issueId: string;
 
   test.beforeEach(async ({ page }) => {
+    // CEREBRO-PATCH(session-mode-e2e-github): the shared app chrome checks the
+    // latest CLI version. Keep this feature test independent of GitHub's
+    // unauthenticated rate limit without hiding any other failed response.
+    await page.route(githubLatestReleaseURL, (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ tag_name: "v0.0.0-e2e" }),
+      }),
+    );
     api = await createTestApi();
     await api.setWorkspaceFeatureFlag("cerebro_comment_chapters", true);
     await api.setWorkspaceFeatureFlag("cerebro_session_modes", true);
@@ -106,7 +118,7 @@ test.describe("Cerebro session mode", () => {
     expectBrowserClean();
   });
 
-  test("changes the Chat session Mode and keeps it after reload", async ({ page }) => {
+  test("changes the Chat session Mode and keeps it when reopened", async ({ page }) => {
     const expectBrowserClean = captureBrowserFailures(page);
     const workspaceId = api.getWorkspaceId();
     const userId = api.getUserId();
@@ -144,10 +156,20 @@ test.describe("Cerebro session mode", () => {
       await expect(mode).toBeVisible({ timeout: 15000 });
       await expect(mode).toHaveText(/Build/);
       await mode.click();
+      const modeUpdate = page.waitForResponse(
+        (response) =>
+          response.url().includes(`/api/chat/sessions/${sessionId}`) &&
+          response.request().method() === "PATCH",
+      );
       await page.getByRole("option", { name: "Research" }).click();
       await expect(mode).toHaveText(/Research/);
+      expect((await modeUpdate).ok()).toBe(true);
 
-      await page.reload({ waitUntil: "domcontentloaded" });
+      // CEREBRO-PATCH: Dynamic Inbox consumes the chat query as a one-shot intent,
+      // so reopen the same chat explicitly when checking persisted session state.
+      await page.goto(`/${slug}/inbox?chat=${sessionId}`, {
+        waitUntil: "domcontentloaded",
+      });
       await expect(page.getByRole("combobox", { name: "Session mode" })).toHaveText(/Research/);
       expectBrowserClean();
     } finally {

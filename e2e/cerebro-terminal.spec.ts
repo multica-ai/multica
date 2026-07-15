@@ -111,40 +111,20 @@ interface AttachState {
 
 async function attach(
   token: string,
-  workspaceSlug: string,
   attachPath: string,
 ): Promise<AttachState> {
-  // Node's native WebSocket constructor (v22+) doesn't yet support the
-  // 4-arg form with custom headers. Wrap the bearer in a Sec-WebSocket-
-  // Protocol value the backend can parse as auth, or fall back to a query
-  // param. Server middleware accepts Authorization: Bearer header on the
-  // upgrade request through Sec-WebSocket-Protocol's auth-ish parameter
-  // pattern… too fragile. Easier: rely on the cookie set by login. We
-  // verified the bearer token works via authedFetch; let's pass it through
-  // a query string the server can read.
-  //
-  // In this codebase the WS endpoint sits under the same auth subtree as
-  // the REST routes, which look for the bearer in the Authorization
-  // header. Node's WebSocket does accept headers via the
-  // `WebSocket(url, [], { headers })` non-standard option in undici. Use
-  // it directly.
-  const ws = new WebSocket(wsUrlFor(attachPath), {
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "X-Workspace-Slug": workspaceSlug,
-    },
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  } as unknown as string[]);
+  const ws = new WebSocket(wsUrlFor(attachPath));
 
   const state: AttachState = { ws, stdout: "", exitCode: null };
-
-  await new Promise<void>((resolve, reject) => {
-    ws.addEventListener("open", () => resolve(), { once: true });
-    ws.addEventListener("error", (ev) => reject(new Error(`ws error: ${ev}`)), {
-      once: true,
-    });
+  let resolveAuthenticated!: () => void;
+  let rejectAuthenticated!: (error: Error) => void;
+  const authenticated = new Promise<void>((resolve, reject) => {
+    resolveAuthenticated = resolve;
+    rejectAuthenticated = reject;
   });
 
+  // CEREBRO-PATCH(terminal-e2e-auth): mirror the browser's first-message PAT
+  // handshake and register the collector before the backend can replay output.
   ws.addEventListener("message", (ev) => {
     let frame: { type: string; data?: string; code?: number; error?: string };
     try {
@@ -152,12 +132,33 @@ async function attach(
     } catch {
       return;
     }
-    if (frame.type === "stdout" && frame.data) {
+    if (frame.type === "auth_ack") {
+      resolveAuthenticated();
+    } else if (frame.type === "auth_error") {
+      rejectAuthenticated(new Error(frame.error ?? "terminal auth failed"));
+    } else if (frame.type === "stdout" && frame.data) {
       state.stdout += Buffer.from(frame.data, "base64").toString("utf8");
     } else if (frame.type === "exit") {
       state.exitCode = frame.code ?? 0;
     }
   });
+
+  ws.addEventListener(
+    "error",
+    (ev) => rejectAuthenticated(new Error(`ws error: ${ev}`)),
+    { once: true },
+  );
+  ws.addEventListener(
+    "open",
+    () => {
+      ws.send(JSON.stringify({ type: "auth", payload: { token } }));
+    },
+    {
+      once: true,
+    },
+  );
+
+  await authenticated;
 
   return state;
 }
@@ -206,7 +207,7 @@ test.describe("cerebro interactive terminal", () => {
     );
 
     // 2. Attach the WebSocket; collect stdout.
-    const state = await attach(token, workspaceSlug, session.attach_path);
+    const state = await attach(token, session.attach_path);
 
     // 3. Wait for the initial 'hello-from-server' to appear.
     await waitFor(

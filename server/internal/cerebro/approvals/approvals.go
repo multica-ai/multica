@@ -81,6 +81,8 @@ var (
 	ErrAlreadyDecided = errors.New("approval request already decided")
 	// ErrInvalidDecision — a Decide call with a non-terminal status.
 	ErrInvalidDecision = errors.New("invalid decision status")
+	// ErrNotConsumable — the approval is not an exact, live, unconsumed match.
+	ErrNotConsumable = errors.New("approval request is not consumable")
 )
 
 // Service centralises approval reads/writes, audit logging and bus events.
@@ -173,9 +175,14 @@ func (s *Service) Intake(ctx context.Context, p IntakeParams) (cerebrodb.Cerebro
 
 // ListFilter carries the optional list filters.
 type ListFilter struct {
-	Status string
-	Limit  int32
-	Offset int32
+	Status           string
+	TaskID           string
+	IssueID          string
+	ChatSessionID    string
+	TriggerCommentID string
+	Surface          string
+	Limit            int32
+	Offset           int32
 }
 
 // List returns asks for a workspace, pending first. A zero Limit defaults to 50.
@@ -185,10 +192,15 @@ func (s *Service) List(ctx context.Context, workspaceID pgtype.UUID, f ListFilte
 		limit = 50
 	}
 	return s.Cerebro.ListCerebroApprovalRequests(ctx, cerebrodb.ListCerebroApprovalRequestsParams{
-		WorkspaceID: workspaceID,
-		Column2:     f.Status,
-		Limit:       limit,
-		Offset:      f.Offset,
+		WorkspaceID:      workspaceID,
+		Status:           f.Status,
+		TaskID:           f.TaskID,
+		IssueID:          f.IssueID,
+		ChatSessionID:    f.ChatSessionID,
+		TriggerCommentID: f.TriggerCommentID,
+		Surface:          f.Surface,
+		PageLimit:        limit,
+		PageOffset:       f.Offset,
 	})
 }
 
@@ -242,22 +254,53 @@ func (s *Service) FindReusable(ctx context.Context, q ReusableQuery) (cerebrodb.
 	return row, true, nil
 }
 
+// ConsumeParams identifies the exact platform-action request an approval may
+// resume. The approval id alone never grants access.
+type ConsumeParams struct {
+	ID          pgtype.UUID
+	WorkspaceID pgtype.UUID
+	Agent       pgtype.UUID
+	Capability  string
+	Resource    string
+}
+
+// ConsumeApproved atomically consumes one matching single-use approval. Period
+// grants remain reusable until their expiry but still require an exact match.
+func (s *Service) ConsumeApproved(ctx context.Context, p ConsumeParams) (cerebrodb.CerebroApprovalRequest, error) {
+	row, err := s.Cerebro.ConsumeApprovedCerebroApprovalRequest(ctx, cerebrodb.ConsumeApprovedCerebroApprovalRequestParams{
+		ID: p.ID, WorkspaceID: p.WorkspaceID, AgentID: p.Agent,
+		Capability: p.Capability, Resource: p.Resource,
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return cerebrodb.CerebroApprovalRequest{}, ErrNotConsumable
+	}
+	if err != nil {
+		return cerebrodb.CerebroApprovalRequest{}, fmt.Errorf("consume approved request: %w", err)
+	}
+	return row, nil
+}
+
 // Approve marks a pending ask approved. Race-safe: ErrAlreadyDecided if the ask
 // is no longer pending, ErrNotFound if it does not exist. expiresAt time-boxes
-// the grant for FindReusable (TECH-3498): the caller computes it — now() for a
-// one-shot approve (not reusable for a future call), now()+duration for a period
-// grant, or an invalid value for never-expires. An invalid value writes NULL.
+// the period grant for FindReusable (TECH-3498): the caller computes the expiry;
+// an invalid value means never expires. One-shot callers use ApproveOnce.
 func (s *Service) Approve(ctx context.Context, id, workspaceID, actorID pgtype.UUID, note, surface string, expiresAt pgtype.Timestamptz) (cerebrodb.CerebroApprovalRequest, error) {
-	return s.decide(ctx, id, workspaceID, actorID, StatusApproved, note, surface, expiresAt)
+	return s.decide(ctx, id, workspaceID, actorID, StatusApproved, note, surface, expiresAt, false)
+}
+
+// ApproveOnce grants one exact resumable request and keeps it consumable for a
+// bounded window. Replays fail after the atomic consume.
+func (s *Service) ApproveOnce(ctx context.Context, id, workspaceID, actorID pgtype.UUID, note, surface string, expiresAt pgtype.Timestamptz) (cerebrodb.CerebroApprovalRequest, error) {
+	return s.decide(ctx, id, workspaceID, actorID, StatusApproved, note, surface, expiresAt, true)
 }
 
 // Reject marks a pending ask rejected. A rejected ask is never reusable, so it
 // passes a zero (NULL) expiry.
 func (s *Service) Reject(ctx context.Context, id, workspaceID, actorID pgtype.UUID, note, surface string) (cerebrodb.CerebroApprovalRequest, error) {
-	return s.decide(ctx, id, workspaceID, actorID, StatusRejected, note, surface, pgtype.Timestamptz{})
+	return s.decide(ctx, id, workspaceID, actorID, StatusRejected, note, surface, pgtype.Timestamptz{}, true)
 }
 
-func (s *Service) decide(ctx context.Context, id, workspaceID, actorID pgtype.UUID, status, note, surface string, expiresAt pgtype.Timestamptz) (cerebrodb.CerebroApprovalRequest, error) {
+func (s *Service) decide(ctx context.Context, id, workspaceID, actorID pgtype.UUID, status, note, surface string, expiresAt pgtype.Timestamptz, singleUse bool) (cerebrodb.CerebroApprovalRequest, error) {
 	if status != StatusApproved && status != StatusRejected {
 		return cerebrodb.CerebroApprovalRequest{}, ErrInvalidDecision
 	}
@@ -277,6 +320,7 @@ func (s *Service) decide(ctx context.Context, id, workspaceID, actorID pgtype.UU
 		DecidedByID:  actorID,
 		DecisionNote: pgtype.Text{String: note, Valid: note != ""},
 		ExpiresAt:    expiresAt,
+		SingleUse:    singleUse,
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return cerebrodb.CerebroApprovalRequest{}, s.classifyMissing(ctx, qtx, id, workspaceID)

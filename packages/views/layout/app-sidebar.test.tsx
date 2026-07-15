@@ -48,7 +48,7 @@ vi.mock("@multica/ui/components/ui/sidebar", () => ({
   Sidebar: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   SidebarContent: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   SidebarFooter: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-  SidebarGroup: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  SidebarGroup: ({ children }: { children: React.ReactNode }) => <section>{children}</section>,
   SidebarGroupContent: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   SidebarGroupLabel: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   SidebarHeader: ({ children }: { children: React.ReactNode }) => <>{children}</>,
@@ -158,6 +158,15 @@ vi.mock("../navigation", () => ({
 vi.mock("../projects/components/project-icon", () => ({ ProjectIcon: () => <span /> }));
 vi.mock("../workspace/workspace-avatar", () => ({ WorkspaceAvatar: () => <span /> }));
 vi.mock("@multica/ui/components/common/actor-avatar", () => ({ ActorAvatar: () => <span /> }));
+vi.mock("@multica/cerebro-approvals/views/approvals-nav-item", () => ({
+  ApprovalsNavItem: () => <span>Approvals</span>,
+}));
+vi.mock("@multica/cerebro-agent-passes/views/agent-passes-nav-item", () => ({
+  AgentPassesNavItem: () => <span>Agent passes</span>,
+}));
+vi.mock("@multica/cerebro-notes/views/notes-nav-item", () => ({
+  NotesNavItem: () => <span>Notes</span>,
+}));
 
 vi.mock("@multica/core/auth", () => ({
   useAuthStore: (selector: (state: { user: { id: string } }) => unknown) => selector({ user: { id: "user-1" } }),
@@ -311,5 +320,17 @@ describe("PinRow", () => {
     expect(screen.getByRole("link", { name: "Projects" })).toBeInTheDocument();
     expect(screen.queryByText("New Project")).not.toBeInTheDocument();
     expect(screen.queryByText("Sidebar Project")).not.toBeInTheDocument();
+  });
+
+  it("groups Approvals with Agent passes under Configure", () => {
+    featureFlags.current = true;
+    render(<AppSidebar />);
+
+    const approvalsSection = screen.getByText("Approvals").closest("section");
+    const passesSection = screen.getByText("Agent passes").closest("section");
+
+    expect(approvalsSection).not.toBeNull();
+    expect(approvalsSection).toBe(passesSection);
+    expect(approvalsSection).not.toContainElement(screen.getByText("Notes"));
   });
 });

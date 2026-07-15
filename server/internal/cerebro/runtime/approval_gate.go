@@ -380,7 +380,7 @@ func (e *FirtalGatewayExecutor) guardPlatformAction(ctx context.Context, agentID
 		if meta.TaskID != "" {
 			taskID, _ = util.ParseUUID(meta.TaskID)
 		}
-		result, err := e.platformActionGate.Authorize(ctx, platformaction.Request{
+		result, err := e.platformActionGate.AuthorizeAndWait(ctx, platformaction.Request{
 			WorkspaceID: workspaceID, AgentID: agentID, TaskID: taskID,
 			Capability: toolName, Resource: gatewayPlatformActionResource(args), Surface: "firtal_gateway",
 			Context: args, IsSystem: meta.TriggerUserID == "",

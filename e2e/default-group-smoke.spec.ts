@@ -9,7 +9,7 @@ test.describe("Default group (FIR-2732)", () => {
     if (api) await api.cleanup?.();
   });
 
-  test("Auth & Permissions tab renders with standard-gruppe picker", async ({
+  test("Auth & Permissions tab renders with default group picker", async ({
     page,
   }) => {
     const slug = await loginAsDefault(page);
@@ -23,7 +23,7 @@ test.describe("Default group (FIR-2732)", () => {
       timeout: 30000,
     });
     await expect(
-      page.getByText("Standard-gruppe for nye brugere"),
+      page.getByText("Default group for new users"),
     ).toBeVisible();
   });
 
@@ -54,7 +54,7 @@ test.describe("Default group (FIR-2732)", () => {
 
     const tab = page.getByTestId("auth-permissions-tab");
     const trigger = tab
-      .locator('section', { hasText: "Standard-gruppe for nye brugere" })
+      .locator('section', { hasText: "Default group for new users" })
       .locator('[data-slot="select-value"]');
     await expect(trigger).toHaveText(groupName);
     await expect(trigger).not.toHaveText(group.id);

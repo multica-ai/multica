@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/cerebro/approvals"
 	cerebroloops "github.com/multica-ai/multica/server/internal/cerebro/loops"
 	"github.com/multica-ai/multica/server/internal/mcp"
 	"github.com/multica-ai/multica/server/internal/storage"
@@ -25,8 +26,13 @@ const firtalGatewayToolListCommentsLimit = firtalGatewayIssueCommentCap
 // the task's calling agent + workspace. Cross-workspace access is impossible
 // because every DB query filters by WorkspaceID from this context.
 type ToolContext struct {
-	AgentID     pgtype.UUID
-	WorkspaceID pgtype.UUID
+	AgentID           pgtype.UUID
+	WorkspaceID       pgtype.UUID
+	TaskID            pgtype.UUID
+	ChatSessionID     pgtype.UUID
+	TriggerCommentID  pgtype.UUID
+	Surface           string
+	ApprovalRequester approvals.IntakeRequester
 	// CEREBRO-PATCH(toolctx-userid): TECH-3226 — originating user for human-invoke
 	// paths. When set, authorship tools (add_comment, create_issue, create_project)
 	// use "member" identity. Zero value = agent-only context (task token path).

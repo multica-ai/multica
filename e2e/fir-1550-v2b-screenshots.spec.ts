@@ -154,7 +154,7 @@ test("FIR-1550 v2b — full picker + modal + board flow", async ({ page }) => {
     waitUntil: "domcontentloaded",
   });
   await page.waitForLoadState("networkidle").catch(() => {});
-  await expect(page.getByRole("heading", { name: "Statusmodeller" })).toBeVisible({
+  await expect(page.getByRole("heading", { name: "Status models" })).toBeVisible({
     timeout: 10_000,
   });
   await page.screenshot({
@@ -182,7 +182,7 @@ test("FIR-1550 v2b — full picker + modal + board flow", async ({ page }) => {
   });
 
   // Confirm to assign.
-  await page.getByRole("button", { name: /Anvend statusmodel/i }).click();
+  await page.getByRole("button", { name: /Apply status model/i }).click();
   await page.waitForTimeout(1500);
 
   // ---- 3) Project board uses the model's columns (Plan / Review / Klar til

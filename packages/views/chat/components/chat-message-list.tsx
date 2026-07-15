@@ -2,7 +2,7 @@
 
 // CEREBRO-PATCH(chat-message-list-cerebro): cerebro modification of upstream file
 
-import { useState, useRef } from "react";
+import { Fragment, useState, useRef } from "react";
 import { toast } from "sonner";
 import { useQuery } from "@tanstack/react-query";
 import { cn } from "@multica/ui/lib/utils";
@@ -30,6 +30,8 @@ import type { ChatMessage, ChatPendingTask, TaskFailureReason } from "@multica/c
 import type { ChatTimelineItem } from "@multica/core/chat";
 // CEREBRO-PATCH(chat-message-list-cerebro): import from cerebro-chat after Phase 6 relocation
 import { getToolSummary, MessageCostBadge, ChatAttachmentList, CerebroChatMessageReminderAction } from "@multica/cerebro-chat/views";
+// CEREBRO-PATCH(inline-agent-approvals): FIR-3266 — task-linked decision card below the assistant turn.
+import { ApprovalRealtime, InlineApprovalCards } from "@multica/cerebro-approvals/views";
 // CEREBRO-PATCH(chat-image-gallery): FIR-2710 — one image gallery per chat message.
 import { ImageGalleryProvider } from "@multica/cerebro-attachments/views";
 import { failureReasonLabel } from "../../agents/components/tabs/task-failure";
@@ -43,6 +45,8 @@ import { useT } from "../../i18n";
 
 interface ChatMessageListProps {
   messages: ChatMessage[];
+  workspaceId?: string;
+  chatSessionId?: string;
   /**
    * Server-authoritative pending-task snapshot. `null` / undefined means
    * no in-flight task — list renders without StatusPill.
@@ -54,6 +58,8 @@ interface ChatMessageListProps {
 
 export function ChatMessageList({
   messages,
+  workspaceId,
+  chatSessionId,
   pendingTask,
   availability,
 }: ChatMessageListProps) {
@@ -104,17 +110,26 @@ export function ChatMessageList({
       style={fadeStyle}
       className="flex-1 overflow-y-auto"
     >
+      {workspaceId && <ApprovalRealtime wsId={workspaceId} />}
       {/* Inner container matches issue / project detail width convention
        *  (max-w-4xl + mx-auto) so switching between chat and content
        *  views doesn't jolt the reading width. px-5 is a touch tighter
        *  than issue-detail's px-8 because the chat window can be narrow. */}
       <div className="mx-auto w-full max-w-4xl px-5 py-4 space-y-4">
         {messages.map((msg) => (
-          <MessageBubble
-            key={msg.id}
-            message={msg}
-            isPending={!!pendingTaskId && msg.task_id === pendingTaskId}
-          />
+          <Fragment key={msg.id}>
+            <MessageBubble
+              message={msg}
+              isPending={!!pendingTaskId && msg.task_id === pendingTaskId}
+            />
+            {workspaceId && chatSessionId && msg.role === "assistant" && msg.task_id && (
+              <InlineApprovalCards
+                wsId={workspaceId}
+                origin={{ chat_session_id: chatSessionId, surface: "chat" }}
+                match={{ task_id: msg.task_id }}
+              />
+            )}
+          </Fragment>
         ))}
         {hasLive && (
           <div className="w-full space-y-1.5">

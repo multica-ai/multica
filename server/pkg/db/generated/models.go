@@ -672,6 +672,8 @@ type CerebroApprovalRequest struct {
 	ExpiresAt       pgtype.Timestamptz `json:"expires_at"`
 	CreatedAt       pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+	SingleUse       bool               `json:"single_use"`
+	ConsumedAt      pgtype.Timestamptz `json:"consumed_at"`
 }
 
 type CerebroArtifactFolderShare struct {

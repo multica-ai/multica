@@ -39,8 +39,15 @@ concurrent approvers can't both win — the loser gets HTTP 409.
 
 ## Platform-action asks
 
-The `create_issue` server floor is always active for agents. An Ask is created
-through `EvaluateDecisionReusing`: retries for the same agent, capability, and
-resource reuse the pending or approved row instead of duplicating Approval
-inbox entries. REST returns HTTP 202 and MCP returns
-`platform_action_pending`; no issue is written before approval.
+The `create_issue` server floor is always active for agents. An Ask creates or
+rejoins one pending row without writing an issue. REST returns HTTP 202; the CLI
+polls and retries the identical body with `X-Platform-Approval-ID`. Workspace
+MCP and Firtal Gateway wait in-process. On approval, the server atomically
+consumes the exact workspace + agent + capability + resource + approval ID
+match before allowing one mutation. Rejected, expired, mismatched, and replayed
+one-shot approvals remain non-mutating. A time-boxed period grant is explicitly
+marked reusable and remains valid only until its expiry.
+
+Inline cards and approval realtime subscriptions are inert when
+`cerebro_approvals` is off. This is presentation-only; the server floor remains
+active regardless of the flag.

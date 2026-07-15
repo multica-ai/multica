@@ -86,8 +86,12 @@ type approvalResponse struct {
 	// TriggeredBy names the human (member) whose message/task started the agent
 	// run that hit this approval, so the inbox can show "requested by <member>".
 	// Best-effort: empty/nil when no trigger context is available.
-	TriggeredByID   *string `json:"triggered_by_id,omitempty"`
-	TriggeredByName *string `json:"triggered_by_name,omitempty"`
+	TriggeredByID    *string `json:"triggered_by_id,omitempty"`
+	TriggeredByName  *string `json:"triggered_by_name,omitempty"`
+	TaskID           *string `json:"task_id"`
+	ChatSessionID    *string `json:"chat_session_id"`
+	TriggerCommentID *string `json:"trigger_comment_id"`
+	Surface          *string `json:"surface"`
 }
 
 type approvalAuditResponse struct {
@@ -146,6 +150,27 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	}
 
 	f := ListFilter{Status: r.URL.Query().Get("status")}
+	for key, dst := range map[string]*string{
+		"task_id": &f.TaskID, "issue_id": &f.IssueID,
+		"chat_session_id": &f.ChatSessionID, "trigger_comment_id": &f.TriggerCommentID,
+	} {
+		if raw := strings.TrimSpace(r.URL.Query().Get(key)); raw != "" {
+			if _, err := util.ParseUUID(raw); err != nil {
+				writeError(w, http.StatusBadRequest, "invalid "+key)
+				return
+			}
+			*dst = raw
+		}
+	}
+	if surface := strings.TrimSpace(r.URL.Query().Get("surface")); surface != "" {
+		switch surface {
+		case "chat", "issue", "channel", "dm", "autopilot":
+			f.Surface = surface
+		default:
+			writeError(w, http.StatusBadRequest, "invalid surface")
+			return
+		}
+	}
 	if raw := r.URL.Query().Get("limit"); raw != "" {
 		n, err := strconv.Atoi(raw)
 		if err != nil || n < 1 || n > 200 {
@@ -295,16 +320,19 @@ func (h *Handler) Approve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Caller computes the expiry: a period grant (grant_for_seconds > 0) is
-	// reusable until it lapses; a one-shot approve expires immediately (now()) so
-	// only the in-flight blocked call proceeds, not a future one.
+	// A one-shot approval stays available briefly for the original caller to
+	// resume, then is consumed atomically. Period grants remain reusable until
+	// their selected expiry.
 	now := time.Now()
-	expiresAt := pgtype.Timestamptz{Time: now, Valid: true}
+	expiresAt := pgtype.Timestamptz{Time: now.Add(15 * time.Minute), Valid: true}
+	var row cerebrodb.CerebroApprovalRequest
+	var err error
 	if req.GrantForSeconds > 0 {
 		expiresAt = pgtype.Timestamptz{Time: now.Add(time.Duration(req.GrantForSeconds) * time.Second), Valid: true}
+		row, err = h.Svc.Approve(r.Context(), id, workspaceID, member.UserID, req.Note, surfaceFromHeader(r.Header.Get("X-Cerebro-Surface")), expiresAt)
+	} else {
+		row, err = h.Svc.ApproveOnce(r.Context(), id, workspaceID, member.UserID, req.Note, surfaceFromHeader(r.Header.Get("X-Cerebro-Surface")), expiresAt)
 	}
-
-	row, err := h.Svc.Approve(r.Context(), id, workspaceID, member.UserID, req.Note, surfaceFromHeader(r.Header.Get("X-Cerebro-Surface")), expiresAt)
 	if err != nil {
 		h.writeDecisionError(w, r, "decide approval", err)
 		return
@@ -935,27 +963,44 @@ func writeError(w http.ResponseWriter, status int, msg string) {
 }
 
 func requestToResponse(a cerebrodb.CerebroApprovalRequest) approvalResponse {
+	contextValue := decodeJSON(a.Context)
 	return approvalResponse{
-		ID:              util.UUIDToString(a.ID),
-		WorkspaceID:     util.UUIDToString(a.WorkspaceID),
-		RequesterType:   a.RequesterType,
-		RequesterID:     util.UUIDToString(a.RequesterID),
-		AgentID:         util.UUIDToPtr(a.AgentID),
-		Capability:      a.Capability,
-		Resource:        a.Resource,
-		Reason:          a.Reason,
-		MatchedGrantIDs: decodeGrantIDs(a.MatchedGrantIds),
-		Context:         decodeJSON(a.Context),
-		Status:          a.Status,
-		DecidedByID:     util.UUIDToPtr(a.DecidedByID),
-		DecidedAt:       timestampPtr(a.DecidedAt),
-		DecisionNote:    util.TextToPtr(a.DecisionNote),
-		DelegatedToType: util.TextToPtr(a.DelegatedToType),
-		DelegatedToID:   util.UUIDToPtr(a.DelegatedToID),
-		ExpiresAt:       timestampPtr(a.ExpiresAt),
-		CreatedAt:       util.TimestampToString(a.CreatedAt),
-		UpdatedAt:       util.TimestampToString(a.UpdatedAt),
+		ID:               util.UUIDToString(a.ID),
+		WorkspaceID:      util.UUIDToString(a.WorkspaceID),
+		RequesterType:    a.RequesterType,
+		RequesterID:      util.UUIDToString(a.RequesterID),
+		AgentID:          util.UUIDToPtr(a.AgentID),
+		Capability:       a.Capability,
+		Resource:         a.Resource,
+		Reason:           a.Reason,
+		MatchedGrantIDs:  decodeGrantIDs(a.MatchedGrantIds),
+		Context:          contextValue,
+		Status:           a.Status,
+		DecidedByID:      util.UUIDToPtr(a.DecidedByID),
+		DecidedAt:        timestampPtr(a.DecidedAt),
+		DecisionNote:     util.TextToPtr(a.DecisionNote),
+		DelegatedToType:  util.TextToPtr(a.DelegatedToType),
+		DelegatedToID:    util.UUIDToPtr(a.DelegatedToID),
+		ExpiresAt:        timestampPtr(a.ExpiresAt),
+		CreatedAt:        util.TimestampToString(a.CreatedAt),
+		UpdatedAt:        util.TimestampToString(a.UpdatedAt),
+		TaskID:           contextString(contextValue, "task_id"),
+		ChatSessionID:    contextString(contextValue, "chat_session_id"),
+		TriggerCommentID: contextString(contextValue, "trigger_comment_id"),
+		Surface:          contextString(contextValue, "surface"),
 	}
+}
+
+func contextString(raw any, key string) *string {
+	values, ok := raw.(map[string]any)
+	if !ok {
+		return nil
+	}
+	value, ok := values[key].(string)
+	if !ok || strings.TrimSpace(value) == "" {
+		return nil
+	}
+	return &value
 }
 
 // listRowToRequest projects a list row back into the canonical row struct so the

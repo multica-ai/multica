@@ -11,7 +11,7 @@ vi.mock("@multica/core/api", async () => {
   };
 });
 
-import { approveApproval, fetchApproval, fetchApprovals } from "./api";
+import { approveApproval, fetchAllApprovals, fetchApproval, fetchApprovals } from "./api";
 
 beforeEach(() => {
   mockCerebroRequest.mockReset();
@@ -46,6 +46,10 @@ describe("approvals api compatibility", () => {
     expect(row.issue_title).toBeNull();
     expect(row.triggered_by_name).toBeNull();
     expect(row.triggered_by_id).toBeNull();
+    expect(row.task_id).toBeNull();
+    expect(row.chat_session_id).toBeNull();
+    expect(row.trigger_comment_id).toBeNull();
+    expect(row.surface).toBeNull();
   });
 
   it("surfaces the enrichment fields (names + issue) when present", async () => {
@@ -80,6 +84,54 @@ describe("approvals api compatibility", () => {
     mockCerebroRequest.mockResolvedValueOnce(null);
     const res = await fetchApproval("ws", "missing");
     expect(res).toBeNull();
+  });
+
+  it("sends server-side origin filters for inline approval reads", async () => {
+    mockCerebroRequest.mockResolvedValueOnce({ approvals: [], total: 0, pending: 0 });
+    await fetchApprovals("ws", {
+      status: "pending",
+      limit: 50,
+      offset: 0,
+      origin: {
+        task_id: "task-1",
+        issue_id: "issue-1",
+        chat_session_id: "chat-1",
+        trigger_comment_id: "comment-1",
+        surface: "chat",
+      },
+    });
+    expect(mockCerebroRequest).toHaveBeenCalledWith(
+      "/api/workspaces/ws/approvals?status=pending&limit=50&offset=0&task_id=task-1&issue_id=issue-1&chat_session_id=chat-1&trigger_comment_id=comment-1&surface=chat",
+    );
+  });
+
+  it("loads every page for a busy inline approval origin", async () => {
+    const firstPage = Array.from({ length: 200 }, (_, index) => ({
+      id: `approval-${index}`,
+      status: "pending",
+    }));
+    mockCerebroRequest
+      .mockResolvedValueOnce({ approvals: firstPage, total: 201, pending: 201 })
+      .mockResolvedValueOnce({
+        approvals: [{ id: "approval-200", status: "pending" }],
+        total: 201,
+        pending: 201,
+      });
+
+    const res = await fetchAllApprovals("ws", {
+      status: null,
+      origin: { issue_id: "issue-1", surface: "issue" },
+    });
+
+    expect(res.approvals).toHaveLength(201);
+    expect(mockCerebroRequest).toHaveBeenNthCalledWith(
+      1,
+      "/api/workspaces/ws/approvals?limit=200&offset=0&issue_id=issue-1&surface=issue",
+    );
+    expect(mockCerebroRequest).toHaveBeenNthCalledWith(
+      2,
+      "/api/workspaces/ws/approvals?limit=200&offset=200&issue_id=issue-1&surface=issue",
+    );
   });
 
   it("tolerates a partial response from approve()", async () => {

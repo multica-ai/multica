@@ -1995,6 +1995,10 @@
       "exempt": "read-only — wraps GET /api/notes/{id}"
     },
     {
+      "id": "request_approval",
+      "gate": "via:POST /api/workspaces/{id}/mcp"
+    },
+    {
       "id": "search_notes",
       "exempt": "read-only — wraps GET /api/notes/search"
     },

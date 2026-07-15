@@ -20,6 +20,14 @@ set +a
 
 # shellcheck disable=SC1091
 . scripts/local-env.sh
+# shellcheck disable=SC1091
+. scripts/check-e2e-env.sh
+# CEREBRO-PATCH(check-frontend-readiness): wait for the route E2E actually uses.
+# shellcheck disable=SC1091
+. scripts/frontend-readiness.sh
+
+bash scripts/check-e2e-env.test.sh
+bash scripts/frontend-readiness.test.sh
 
 BACKEND_PID=""
 FRONTEND_PID=""
@@ -67,6 +75,23 @@ wait_for_port() {
     fi
   done
   echo "    $name ready (${elapsed}s)"
+}
+
+wait_for_frontend_login() {
+  local max_wait=${1:-120}
+  local elapsed=0
+  local frontend_origin="http://localhost:${FRONTEND_PORT}"
+  echo "    Waiting for Frontend login route on :$FRONTEND_PORT..."
+  while ! frontend_login_ready "$frontend_origin"; do
+    sleep 1
+    elapsed=$((elapsed + 1))
+    if [ "$elapsed" -ge "$max_wait" ]; then
+      echo "    ERROR: Frontend /login did not render the expected sign-in page within ${max_wait}s"
+      EXIT_CODE=1
+      exit 1
+    fi
+  done
+  echo "    Frontend login route ready (${elapsed}s)"
 }
 
 # --------------------------------------------------------------------------
@@ -122,8 +147,8 @@ else
   pnpm dev:web > /tmp/multica-check-frontend.log 2>&1 &
   FRONTEND_PID=$!
   STARTED_FRONTEND=true
-  wait_for_port "$FRONTEND_PORT" "Frontend" 120 "/"
 fi
+wait_for_frontend_login 120
 
 # --------------------------------------------------------------------------
 # Step 5: E2E tests (Playwright)

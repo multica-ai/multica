@@ -11,6 +11,74 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const consumeApprovedCerebroApprovalRequest = `-- name: ConsumeApprovedCerebroApprovalRequest :one
+UPDATE cerebro_approval_request
+SET
+    consumed_at = CASE WHEN single_use THEN now() ELSE consumed_at END,
+    updated_at = now()
+WHERE id = $1
+  AND workspace_id = $2
+  AND agent_id IS NOT DISTINCT FROM $3
+  AND capability = $4
+  AND resource = $5
+  AND status = 'approved'
+  AND (expires_at IS NULL OR expires_at > now())
+  AND (single_use = FALSE OR consumed_at IS NULL)
+RETURNING
+    id, workspace_id,
+    requester_type, requester_id, agent_id,
+    capability, resource, reason, matched_grant_ids, context,
+    status,
+    decided_by_id, decided_at, decision_note,
+    delegated_to_type, delegated_to_id,
+    expires_at, created_at, updated_at, single_use, consumed_at
+`
+
+type ConsumeApprovedCerebroApprovalRequestParams struct {
+	ID          pgtype.UUID `json:"id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	AgentID     pgtype.UUID `json:"agent_id"`
+	Capability  string      `json:"capability"`
+	Resource    string      `json:"resource"`
+}
+
+// Atomically consume an exact approved request. The id is only a reference:
+// workspace, agent, capability and resource must all match the original call.
+func (q *Queries) ConsumeApprovedCerebroApprovalRequest(ctx context.Context, arg ConsumeApprovedCerebroApprovalRequestParams) (CerebroApprovalRequest, error) {
+	row := q.db.QueryRow(ctx, consumeApprovedCerebroApprovalRequest,
+		arg.ID,
+		arg.WorkspaceID,
+		arg.AgentID,
+		arg.Capability,
+		arg.Resource,
+	)
+	var i CerebroApprovalRequest
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.RequesterType,
+		&i.RequesterID,
+		&i.AgentID,
+		&i.Capability,
+		&i.Resource,
+		&i.Reason,
+		&i.MatchedGrantIds,
+		&i.Context,
+		&i.Status,
+		&i.DecidedByID,
+		&i.DecidedAt,
+		&i.DecisionNote,
+		&i.DelegatedToType,
+		&i.DelegatedToID,
+		&i.ExpiresAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.SingleUse,
+		&i.ConsumedAt,
+	)
+	return i, err
+}
+
 const countPendingCerebroApprovals = `-- name: CountPendingCerebroApprovals :one
 SELECT count(*)::int AS pending
 FROM cerebro_approval_request
@@ -43,7 +111,7 @@ RETURNING
     status,
     decided_by_id, decided_at, decision_note,
     delegated_to_type, delegated_to_id,
-    expires_at, created_at, updated_at
+    expires_at, created_at, updated_at, single_use, consumed_at
 `
 
 type CreateCerebroApprovalRequestParams struct {
@@ -94,6 +162,8 @@ func (q *Queries) CreateCerebroApprovalRequest(ctx context.Context, arg CreateCe
 		&i.ExpiresAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.SingleUse,
+		&i.ConsumedAt,
 	)
 	return i, err
 }
@@ -106,6 +176,8 @@ SET
     decided_at    = now(),
     decision_note = $5,
     expires_at    = $6,
+    single_use    = $7,
+    consumed_at   = NULL,
     updated_at    = now()
 WHERE id = $1 AND workspace_id = $2 AND status = 'pending'
 RETURNING
@@ -115,7 +187,7 @@ RETURNING
     status,
     decided_by_id, decided_at, decision_note,
     delegated_to_type, delegated_to_id,
-    expires_at, created_at, updated_at
+    expires_at, created_at, updated_at, single_use, consumed_at
 `
 
 type DecideCerebroApprovalRequestParams struct {
@@ -125,6 +197,7 @@ type DecideCerebroApprovalRequestParams struct {
 	DecidedByID  pgtype.UUID        `json:"decided_by_id"`
 	DecisionNote pgtype.Text        `json:"decision_note"`
 	ExpiresAt    pgtype.Timestamptz `json:"expires_at"`
+	SingleUse    bool               `json:"single_use"`
 }
 
 // Race-safe terminal decision: only a still-pending row transitions. Two
@@ -132,8 +205,9 @@ type DecideCerebroApprovalRequestParams struct {
 // and the query returns pgx.ErrNoRows, which the service maps to
 // ErrAlreadyDecided. $3 is the new status ('approved' | 'rejected'). $6 sets
 // expires_at so an approver can time-box a grant: NULL = never, now() = a
-// one-shot approve (not reusable for a future call), now()+duration = a period
-// grant that FindReusable honours until it lapses (TECH-3498).
+// one-shot or period-grant expiry. $7 is the authoritative reuse mode:
+// single-use approvals must be consumed exactly once; period grants are the
+// only approved rows FindReusable may return (TECH-3498, FIR-3324).
 func (q *Queries) DecideCerebroApprovalRequest(ctx context.Context, arg DecideCerebroApprovalRequestParams) (CerebroApprovalRequest, error) {
 	row := q.db.QueryRow(ctx, decideCerebroApprovalRequest,
 		arg.ID,
@@ -142,6 +216,7 @@ func (q *Queries) DecideCerebroApprovalRequest(ctx context.Context, arg DecideCe
 		arg.DecidedByID,
 		arg.DecisionNote,
 		arg.ExpiresAt,
+		arg.SingleUse,
 	)
 	var i CerebroApprovalRequest
 	err := row.Scan(
@@ -164,6 +239,8 @@ func (q *Queries) DecideCerebroApprovalRequest(ctx context.Context, arg DecideCe
 		&i.ExpiresAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.SingleUse,
+		&i.ConsumedAt,
 	)
 	return i, err
 }
@@ -186,7 +263,7 @@ RETURNING
     status,
     decided_by_id, decided_at, decision_note,
     delegated_to_type, delegated_to_id,
-    expires_at, created_at, updated_at
+    expires_at, created_at, updated_at, single_use, consumed_at
 `
 
 type DelegateCerebroApprovalRequestParams struct {
@@ -230,6 +307,8 @@ func (q *Queries) DelegateCerebroApprovalRequest(ctx context.Context, arg Delega
 		&i.ExpiresAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.SingleUse,
+		&i.ConsumedAt,
 	)
 	return i, err
 }
@@ -278,13 +357,13 @@ SELECT
     status,
     decided_by_id, decided_at, decision_note,
     delegated_to_type, delegated_to_id,
-    expires_at, created_at, updated_at
+    expires_at, created_at, updated_at, single_use, consumed_at
 FROM cerebro_approval_request
 WHERE workspace_id = $1
   AND agent_id IS NOT DISTINCT FROM $2
   AND capability = $3
   AND resource = $4
-  AND status IN ('pending', 'approved')
+  AND (status = 'pending' OR (status = 'approved' AND single_use = FALSE))
   AND (expires_at IS NULL OR expires_at > now())
 ORDER BY
     (status = 'approved') DESC,
@@ -338,6 +417,8 @@ func (q *Queries) FindReusableCerebroApprovalRequest(ctx context.Context, arg Fi
 		&i.ExpiresAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.SingleUse,
+		&i.ConsumedAt,
 	)
 	return i, err
 }
@@ -350,7 +431,7 @@ SELECT
     status,
     decided_by_id, decided_at, decision_note,
     delegated_to_type, delegated_to_id,
-    expires_at, created_at, updated_at
+    expires_at, created_at, updated_at, single_use, consumed_at
 FROM cerebro_approval_request
 WHERE id = $1 AND workspace_id = $2
 `
@@ -383,6 +464,8 @@ func (q *Queries) GetCerebroApprovalRequest(ctx context.Context, arg GetCerebroA
 		&i.ExpiresAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.SingleUse,
+		&i.ConsumedAt,
 	)
 	return i, err
 }
@@ -502,24 +585,34 @@ SELECT
     status,
     decided_by_id, decided_at, decision_note,
     delegated_to_type, delegated_to_id,
-    expires_at, created_at, updated_at,
+    expires_at, created_at, updated_at, single_use, consumed_at,
     count(*) OVER()::int AS total
 FROM cerebro_approval_request
 WHERE workspace_id = $1
   -- Treat an omitted status as "any status".
   AND (NULLIF($2::text, '') IS NULL OR status = $2)
+  AND (NULLIF($3::text, '') IS NULL OR context->>'task_id' = $3)
+  AND (NULLIF($4::text, '') IS NULL OR context->>'issue_id' = $4)
+  AND (NULLIF($5::text, '') IS NULL OR context->>'chat_session_id' = $5)
+  AND (NULLIF($6::text, '') IS NULL OR context->>'trigger_comment_id' = $6)
+  AND (NULLIF($7::text, '') IS NULL OR context->>'surface' = $7)
 ORDER BY
     -- Pending asks float to the top; otherwise newest first.
     (status = 'pending') DESC,
     created_at DESC
-LIMIT $3 OFFSET $4
+LIMIT $9 OFFSET $8
 `
 
 type ListCerebroApprovalRequestsParams struct {
-	WorkspaceID pgtype.UUID `json:"workspace_id"`
-	Column2     string      `json:"column_2"`
-	Limit       int32       `json:"limit"`
-	Offset      int32       `json:"offset"`
+	WorkspaceID      pgtype.UUID `json:"workspace_id"`
+	Status           string      `json:"status"`
+	TaskID           string      `json:"task_id"`
+	IssueID          string      `json:"issue_id"`
+	ChatSessionID    string      `json:"chat_session_id"`
+	TriggerCommentID string      `json:"trigger_comment_id"`
+	Surface          string      `json:"surface"`
+	PageOffset       int32       `json:"page_offset"`
+	PageLimit        int32       `json:"page_limit"`
 }
 
 type ListCerebroApprovalRequestsRow struct {
@@ -542,15 +635,22 @@ type ListCerebroApprovalRequestsRow struct {
 	ExpiresAt       pgtype.Timestamptz `json:"expires_at"`
 	CreatedAt       pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+	SingleUse       bool               `json:"single_use"`
+	ConsumedAt      pgtype.Timestamptz `json:"consumed_at"`
 	Total           int32              `json:"total"`
 }
 
 func (q *Queries) ListCerebroApprovalRequests(ctx context.Context, arg ListCerebroApprovalRequestsParams) ([]ListCerebroApprovalRequestsRow, error) {
 	rows, err := q.db.Query(ctx, listCerebroApprovalRequests,
 		arg.WorkspaceID,
-		arg.Column2,
-		arg.Limit,
-		arg.Offset,
+		arg.Status,
+		arg.TaskID,
+		arg.IssueID,
+		arg.ChatSessionID,
+		arg.TriggerCommentID,
+		arg.Surface,
+		arg.PageOffset,
+		arg.PageLimit,
 	)
 	if err != nil {
 		return nil, err
@@ -579,6 +679,8 @@ func (q *Queries) ListCerebroApprovalRequests(ctx context.Context, arg ListCereb
 			&i.ExpiresAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.SingleUse,
+			&i.ConsumedAt,
 			&i.Total,
 		); err != nil {
 			return nil, err

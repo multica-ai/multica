@@ -123,6 +123,8 @@ func RegisterTools(srv *mcp.Server, client *cli.APIClient, session *SessionState
 	registerWakeupTools(srv, client)
 	// CEREBRO-PATCH(mcp-note-tools): FIR-2022 read + search notes/documents + comments.
 	registerNoteTools(srv, client)
+	// CEREBRO-PATCH(mcp-request-approval-tools): FIR-3266 agent-callable approval intake.
+	registerApprovalTools(srv, client)
 	// CEREBRO-PATCH(mcp-connection-tools): FIR-2273 api-type workspace connection endpoints
 	// (feature-flagged + default-deny per agent), dispatched server-side via Multica.
 	registerConnectionTools(srv, client)

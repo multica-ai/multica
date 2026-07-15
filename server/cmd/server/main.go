@@ -17,6 +17,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/analytics"
 	// CEREBRO-PATCH(main-agent-pass-gate): JEH-1327 cerebro agent-pass gate import
 	cerebroagentpass "github.com/multica-ai/multica/server/internal/cerebro/agentpass"
+	cerebroapprovals "github.com/multica-ai/multica/server/internal/cerebro/approvals" // CEREBRO-PATCH(main-request-approval): FIR-3266 agent-callable approval intake.
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
 	cerebroevals "github.com/multica-ai/multica/server/internal/cerebro/evals"                   // CEREBRO-PATCH(main-eval-gate): FIR-3308 blocking workflow evals.
 	cerebroplatformaction "github.com/multica-ai/multica/server/internal/cerebro/platformaction" // CEREBRO-PATCH(main-platform-action-gate): FIR-3266 gateway mutation floor.
@@ -450,6 +451,7 @@ func main() {
 		os.Exit(1)
 	} else if gatewayCfg.Enabled {
 		gatewayExecutor := cerebroruntime.NewFirtalGatewayExecutor(gatewayCfg, queries, cerebrodb.New(pool), taskSvc, bus, nil, nil, cerebroruntime.NewRegistry(pool)) // CEREBRO-PATCH(main-firtal-gateway-tool-registry): give server runtime DB-backed tool grants.
+		gatewayExecutor.SetApprovalRequester(cerebroapprovals.New(cerebrodb.New(pool), pool, bus))                                                                     // CEREBRO-PATCH(main-request-approval): FIR-3266 wire human approval intake.
 		gatewayExecutor.SetPlatformActionGate(cerebroplatformaction.NewDefault(cerebrotoolpolicy.NewStore(pool), queries, cerebrodb.New(pool), pool, bus))             // CEREBRO-PATCH(main-platform-action-gate): FIR-3266 always-on gateway mutation floor.
 		gatewayExecutor.SetAttachmentStorage(cerebroruntime.FirtalGatewayAttachmentStorage())                                                                          // CEREBRO-PATCH(main-firtal-gateway-attachment-storage): wire server-side attachment storage into the gateway runtime.
 		cerebroruntime.MaybeEnableApprovalGate(gatewayExecutor, cerebrodb.New(pool), pool, bus)                                                                        // CEREBRO-PATCH(main-firtal-gateway-approval-gate): FIR-2193 default-off approval enforcement gate, controlled rollout via env.

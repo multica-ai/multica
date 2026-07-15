@@ -18,6 +18,7 @@ import (
 // (Codex) with attribution.
 func writeTestExecutable(tb testing.TB, path string, content []byte) {
 	tb.Helper()
+	acquireTestExecutableSlot(tb) // CEREBRO-PATCH(agent-test-exec-stability): Bound fake CLI process concurrency.
 	if err := os.WriteFile(path, content, 0o755); err != nil {
 		tb.Fatalf("write test executable %s: %v", path, err)
 	}

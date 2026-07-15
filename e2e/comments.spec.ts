@@ -30,14 +30,14 @@ test.describe("Comments", () => {
 
     // Type a comment
     const commentText = "E2E comment " + Date.now();
-    const commentBox = page.getByTestId("comment-input");
+    const commentBox = page.getByTestId("composer-input").last();
     const commentInput = commentBox.locator('[contenteditable="true"]');
     await expect(commentInput).toBeVisible();
     await commentInput.click();
     await page.keyboard.type(commentText);
 
     // Submit the comment
-    const submitComment = commentBox.getByRole("button", { name: "Submit comment" });
+    const submitComment = commentBox.getByRole("button", { name: "Submit" });
     await expect(submitComment).toBeEnabled();
     await submitComment.evaluate((button: HTMLButtonElement) => button.click());
 
@@ -56,10 +56,10 @@ test.describe("Comments", () => {
     await expect(page.locator("text=Properties")).toBeVisible();
 
     // Submit button should be disabled when input is empty
-    const commentBox = page.getByTestId("comment-input");
+    const commentBox = page.getByTestId("composer-input").last();
     const commentInput = commentBox.locator('[contenteditable="true"]');
     await expect(commentInput).toBeVisible();
-    const submitBtn = commentBox.getByRole("button", { name: "Submit comment" });
+    const submitBtn = commentBox.getByRole("button", { name: "Submit" });
     await expect(submitBtn).toBeDisabled();
   });
 });

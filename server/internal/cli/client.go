@@ -282,6 +282,13 @@ func (c *APIClient) PostJSON(ctx context.Context, path string, body any, out any
 // PostJSONStatus is PostJSON plus the successful HTTP status code. Callers
 // with a structured 202 contract use it without changing every POST call.
 func (c *APIClient) PostJSONStatus(ctx context.Context, path string, body any, out any) (int, error) {
+	return c.PostJSONStatusWithHeaders(ctx, path, body, out, nil)
+}
+
+// CEREBRO-PATCH(cli-post-json-status): FIR-3324 carry a one-shot platform approval id on an exact retry.
+// PostJSONStatusWithHeaders preserves the normal client identity headers and
+// adds request-scoped headers used to resume an exact platform approval.
+func (c *APIClient) PostJSONStatusWithHeaders(ctx context.Context, path string, body any, out any, headers http.Header) (int, error) {
 	data, err := json.Marshal(body)
 	if err != nil {
 		return 0, err
@@ -293,6 +300,11 @@ func (c *APIClient) PostJSONStatus(ctx context.Context, path string, body any, o
 	}
 	req.Header.Set("Content-Type", "application/json")
 	c.setHeaders(req)
+	for key, values := range headers {
+		for _, value := range values {
+			req.Header.Add(key, value)
+		}
+	}
 
 	resp, err := c.HTTPClient.Do(req)
 	if err != nil {
