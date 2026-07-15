@@ -246,6 +246,9 @@ importers:
       '@multica/cerebro-runtime':
         specifier: workspace:*
         version: link:../../packages/cerebro-runtime
+      '@multica/cerebro-sessions':
+        specifier: workspace:*
+        version: link:../../packages/cerebro-sessions
       '@multica/cerebro-skill-ownership':
         specifier: workspace:*
         version: link:../../packages/cerebro-skill-ownership
@@ -686,6 +689,9 @@ importers:
       '@multica/cerebro-runtime':
         specifier: workspace:*
         version: link:../../packages/cerebro-runtime
+      '@multica/cerebro-sessions':
+        specifier: workspace:*
+        version: link:../../packages/cerebro-sessions
       '@multica/cerebro-skill-ownership':
         specifier: workspace:*
         version: link:../../packages/cerebro-skill-ownership

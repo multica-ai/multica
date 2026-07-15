@@ -52,6 +52,7 @@
     "@multica/cerebro-operating-system": "workspace:*",
     "@multica/cerebro-rounds": "workspace:*",
     "@multica/cerebro-runtime": "workspace:*",
+    "@multica/cerebro-sessions": "workspace:*",
     "@multica/cerebro-skill-ownership": "workspace:*",
     "@multica/cerebro-tasks": "workspace:*",
     "@multica/cerebro-tool-policy": "workspace:*",

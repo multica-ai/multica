@@ -374,6 +374,7 @@ function DesktopRowActions({ menuItems, strings }: DesktopProps) {
       {/* Right-click menu: phantom 1×1 anchor at the click point. */}
       <DropdownMenu open={contextMenuOpen} onOpenChange={setContextMenuOpen}>
         <DropdownMenuTrigger
+          nativeButton={false}
           render={(props) => (
             <span
               {...props}

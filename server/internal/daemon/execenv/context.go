@@ -426,7 +426,38 @@ func renderIssueContext(provider string, ctx TaskContextForEnv) string {
 	}
 	if validMode { // CEREBRO-PATCH(session-modes): FIR-3111 enforce the selected profile in the agent brief.
 		profile := sessionmode.ProfileFor(mode)
-		fmt.Fprintf(&b, "## %s MODE\n\n%s\n\n", strings.ToUpper(string(mode)), profile.Instruction)
+		instruction := profile.Instruction
+		if strings.TrimSpace(ctx.SessionModeInstruction) != "" {
+			instruction = ctx.SessionModeInstruction
+		}
+		heading := fmt.Sprintf("%s MODE", strings.ToUpper(string(mode)))
+		if ctx.SessionModeVersion != "" {
+			heading += " · v" + ctx.SessionModeVersion
+		}
+		fmt.Fprintf(&b, "## %s\n\n%s\n\n", heading, instruction)
+		if ctx.SessionModeAllowsWrite { // CEREBRO-PATCH(session-mode-config-brief): FIR-3111 renders Settings-managed policy.
+			b.WriteString("Writes are enabled, subject to workspace permissions and approvals.\n\n")
+		} else {
+			b.WriteString("Writes are disabled. Do not edit code or data and do not make external mutations.\n\n")
+		}
+		if len(ctx.SessionModeAllowedTools) > 0 {
+			fmt.Fprintf(&b, "Allowed tools: %s. Do not use tools outside this list.\n\n", strings.Join(ctx.SessionModeAllowedTools, ", "))
+		}
+		if len(ctx.SessionModeDataSources) > 0 {
+			fmt.Fprintf(&b, "Approved data sources: %s.\n\n", strings.Join(ctx.SessionModeDataSources, ", "))
+		}
+		switch ctx.SessionModeApprovalPolicy {
+		case "require":
+			b.WriteString("Approval is required before any mutation.\n\n")
+		case "deny_external":
+			b.WriteString("External mutations are denied.\n\n")
+		}
+		if ctx.SessionModeWorkflowID != "" {
+			fmt.Fprintf(&b, "Workflow: `%s`. Follow the existing Workflow infrastructure for this run.\n\n", ctx.SessionModeWorkflowID)
+		}
+		if len(ctx.SessionModeEvalSkillIDs) > 0 {
+			fmt.Fprintf(&b, "Required evaluations: %s. Run each evaluation before claiming completion.\n\n", strings.Join(ctx.SessionModeEvalSkillIDs, ", "))
+		}
 	}
 
 	if ctx.TriggerCommentID != "" {

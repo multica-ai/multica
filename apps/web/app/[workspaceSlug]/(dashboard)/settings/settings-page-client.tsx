@@ -23,6 +23,7 @@ import { useCerebroWebFetchPolicySettingsTabs } from "@multica/cerebro-web-fetch
 // FIR-1590 → Collections: the Settings → Collections tab, present only when the
 // cerebro_collections flag is on.
 import { useCerebroCollectionsSettingsTabs } from "@multica/cerebro-collections/views";
+import { useCerebroModeSettingsTabs } from "@multica/cerebro-sessions";
 
 // Assembled here, inside the client boundary, so the lucide icon components
 // carried in each tab's `icon` field are never serialized from a Server
@@ -68,6 +69,7 @@ export function SettingsPageClient({
   // FIR-1590 → Collections: the Collections tab, present only when the
   // cerebro_collections flag is on.
   const collectionsTabs = useCerebroCollectionsSettingsTabs();
+  const modeTabs = useCerebroModeSettingsTabs();
   const accountTabs = useMemo(
     () => [
       ...extraAccountTabs,
@@ -78,6 +80,7 @@ export function SettingsPageClient({
       ...workspaceCopyTabs,
       ...webFetchPolicyTabs,
       ...collectionsTabs,
+      ...modeTabs,
     ],
     [
       toolPolicyTabs,
@@ -87,6 +90,7 @@ export function SettingsPageClient({
       workspaceCopyTabs,
       webFetchPolicyTabs,
       collectionsTabs,
+      modeTabs,
     ],
   );
 

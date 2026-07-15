@@ -849,6 +849,14 @@
       "gate": "workspace_member"
     },
     {
+      "id": "POST /api/cerebro/session-modes/{mode}/publish",
+      "gate": "workspace_admin + human_only"
+    },
+    {
+      "id": "POST /api/cerebro/session-modes/{mode}/restore",
+      "gate": "workspace_admin + human_only"
+    },
+    {
       "id": "POST /api/cerebro/workflows/",
       "gate": "workspace_member"
     },
@@ -1719,6 +1727,10 @@
     {
       "id": "PUT /api/cerebro/terminal/runtimes/{runtimeId}/presentation-mode",
       "gate": "workspace_member"
+    },
+    {
+      "id": "PUT /api/cerebro/session-modes/{mode}/draft",
+      "gate": "workspace_admin + human_only"
     },
     {
       "id": "PUT /api/cerebro/workflows/{id}",

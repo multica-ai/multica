@@ -24,7 +24,11 @@ import { ActorAvatar } from "../../common/actor-avatar";
 // CEREBRO-PATCH(chat-composer-unify): FIR-1748 — Chat uses the shared ChatComposer preset.
 import { ChatComposer } from "@multica/cerebro-composer";
 // CEREBRO-PATCH(chat-recent-list): FIR-recent-chats — recent sessions + resume
-import { ChatStatusLine, SessionCostChip, RecentChatsList } from "@multica/cerebro-chat/views";
+import {
+  ChatSessionHeader,
+  ChatStatusLine,
+  RecentChatsList,
+} from "@multica/cerebro-chat/views";
 import type { Agent, ChatMessage, ChatPendingTask } from "@multica/core/types";
 import { Bot, ChevronDown, Check, MessageSquare } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@multica/ui/components/ui/avatar";
@@ -87,7 +91,7 @@ export function InboxChatPanel({
   );
 
   const currentSession = sessionId
-    ? allSessions.find((s) => s.id === sessionId)
+    ? allSessions.find((s) => s.id === sessionId) ?? null
     : null;
   const isSessionArchived = currentSession?.status === "archived";
 
@@ -206,14 +210,10 @@ export function InboxChatPanel({
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
-      {/* CEREBRO-PATCH(chat-cost-session-total): FIR-31 — accumulated session
-          cost at the top of the inbox chat (the inbox panel has no header of
-          its own). empty:hidden keeps the strip out of the layout for new /
-          zero-cost sessions, so it only appears once spend exists. Per-reply
-          badges in the footer sum to this total. */}
-      <div className="flex shrink-0 items-center justify-end px-3 py-1 empty:hidden">
-        <SessionCostChip sessionId={sessionId} />
-      </div>
+      {/* CEREBRO-PATCH(inbox-chat-session-header): existing Inbox chats use
+          the shared session header so title/actions, cost and Mode remain
+          consistent with the full Chat surface. */}
+      <ChatSessionHeader session={currentSession} />
       {/* Messages — scrollable */}
       <div className="flex flex-col flex-1 min-h-0">
         {showSkeleton ? (

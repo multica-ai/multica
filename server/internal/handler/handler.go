@@ -25,6 +25,7 @@ import (
 	cerebroinfisical "github.com/multica-ai/multica/server/internal/cerebro/infisical"
 	"github.com/multica-ai/multica/server/internal/cerebro/permgate"       // CEREBRO-PATCH(handler-approval-gate): FIR-2586 shared approval seam.
 	"github.com/multica-ai/multica/server/internal/cerebro/platformaction" // CEREBRO-PATCH(handler-platform-action-gate): FIR-3266 server-owned agent mutation floor.
+	"github.com/multica-ai/multica/server/internal/cerebro/sessionmode"
 	"github.com/multica-ai/multica/server/internal/cloudruntime"
 	"github.com/multica-ai/multica/server/internal/daemonws"
 	"github.com/multica-ai/multica/server/internal/events"
@@ -161,9 +162,12 @@ type Handler struct {
 	// CEREBRO-PATCH(handler-mention-trigger-gate): cerebro @mention trigger gate.
 	MentionTriggerGate MentionTriggerGateInvoker
 	// CEREBRO-PATCH(handler-comment-target-guard): FIR-2674 reject agent comments with no target.
-	CommentTargetGuard CommentTargetGuardInvoker
-	CommentSessionMode CommentSessionModeRecorder // CEREBRO-PATCH(new-thread-session-mode): FIR-3111 persist selected Mode inside comment transaction.
-	RoundReplyObserver RoundReplyObserver         // CEREBRO-PATCH(cerebro-rounds): observe handled snapshot items without blocking normal comment triggers.
+	CommentTargetGuard  CommentTargetGuardInvoker
+	CommentSessionMode  CommentSessionModeRecorder // CEREBRO-PATCH(new-thread-session-mode): FIR-3111 persist selected Mode inside comment transaction.
+	SessionModeProfiles interface {
+		Active(context.Context, pgtype.UUID, sessionmode.Mode) (sessionmode.Config, error)
+	} // CEREBRO-PATCH(session-mode-config): claim-time published snapshot resolver.
+	RoundReplyObserver RoundReplyObserver // CEREBRO-PATCH(cerebro-rounds): observe handled snapshot items without blocking normal comment triggers.
 	// CEREBRO-PATCH(handler-channel-create-guard): FIR-2660 restrict channel creation to owners/admins.
 	ChannelCreateGuard ChannelCreateGuardInvoker
 	// CEREBRO-PATCH(handler-channel-perms): TECH-3698 per-channel permission gate (rename/add-remove/leave).

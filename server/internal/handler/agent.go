@@ -19,6 +19,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/analytics"
+	"github.com/multica-ai/multica/server/internal/cerebro/sessionmode"
 	"github.com/multica-ai/multica/server/internal/logger"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/service"
@@ -226,9 +227,10 @@ type AgentTaskResponse struct {
 	RelativeWorkDir  string  `json:"relative_work_dir,omitempty"`
 	TriggerCommentID *string `json:"trigger_comment_id,omitempty"` // comment that triggered this task
 
-	TriggerThreadID string `json:"trigger_thread_id,omitempty"` // root comment ID for the triggering thread
-	PlanMode        bool   `json:"plan_mode,omitempty"`         // CEREBRO-PATCH(session-plan-mode): claim-time session mode.
-	SessionMode     string `json:"session_mode,omitempty"`      // CEREBRO-PATCH(session-modes): FIR-3111 fixed execution profile.
+	TriggerThreadID   string              `json:"trigger_thread_id,omitempty"`   // root comment ID for the triggering thread
+	PlanMode          bool                `json:"plan_mode,omitempty"`           // CEREBRO-PATCH(session-plan-mode): claim-time session mode.
+	SessionMode       string              `json:"session_mode,omitempty"`        // CEREBRO-PATCH(session-modes): FIR-3111 fixed execution profile.
+	SessionModeConfig *sessionmode.Config `json:"session_mode_config,omitempty"` // CEREBRO-PATCH(session-mode-config): published version pinned for this run.
 
 	TriggerCommentContent   string  `json:"trigger_comment_content,omitempty"`    // content of the triggering comment
 	TriggerCommentCreatedAt string  `json:"trigger_comment_created_at,omitempty"` // RFC3339 timestamp for the triggering comment

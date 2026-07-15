@@ -5,6 +5,8 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 const mockCreateSession = vi.hoisted(() => vi.fn());
 const mockRecentChatsList = vi.hoisted(() => vi.fn());
+const mockChatSessionHeader = vi.hoisted(() => vi.fn());
+const mockSessions = vi.hoisted(() => [] as Array<Record<string, unknown>>);
 
 const chatState = vi.hoisted(() => ({
   selectedAgentId: "agent-lando",
@@ -42,7 +44,10 @@ vi.mock("@multica/core/workspace/queries", () => ({
 }));
 
 vi.mock("@multica/core/chat/queries", () => ({
-  allChatSessionsOptions: () => ({ queryKey: ["sessions", "all"], queryFn: async () => [] }),
+  allChatSessionsOptions: () => ({
+    queryKey: ["sessions", "all"],
+    queryFn: async () => mockSessions,
+  }),
   chatMessagesOptions: (id: string) => ({ queryKey: ["messages", id], queryFn: async () => [] }),
   pendingChatTaskOptions: (id: string) => ({ queryKey: ["pending-task", id], queryFn: async () => null }),
   chatKeys: {
@@ -105,6 +110,10 @@ vi.mock("../../common/actor-avatar", () => ({
 vi.mock("@multica/cerebro-chat/views", () => ({
   ChatStatusLine: () => null,
   SessionCostChip: () => null,
+  ChatSessionHeader: (props: { session: Record<string, unknown> | null }) => {
+    mockChatSessionHeader(props);
+    return props.session ? <div data-testid="chat-session-header" /> : null;
+  },
   RecentChatsList: (props: { agentId: string | null }) => {
     mockRecentChatsList(props);
     return <div data-testid="recent-chats-list" />;
@@ -143,17 +152,17 @@ vi.mock("@multica/ui/components/ui/dropdown-menu", () => ({
 
 import { InboxChatPanel } from "./inbox-chat-panel";
 
-function renderPanel(initialAgentId: string | null) {
+function renderPanel(initialAgentId: string | null, sessionId: string | null = null) {
   const qc = new QueryClient({
     defaultOptions: { queries: { retry: false, gcTime: 0 } },
   });
   qc.setQueryData(["agents"], mockAgents);
   qc.setQueryData(["members"], mockMembers);
-  qc.setQueryData(["sessions", "all"], []);
+  qc.setQueryData(["sessions", "all"], mockSessions);
 
   return render(
     <QueryClientProvider client={qc}>
-      <InboxChatPanel sessionId={null} initialAgentId={initialAgentId} />
+      <InboxChatPanel sessionId={sessionId} initialAgentId={initialAgentId} />
     </QueryClientProvider>,
   );
 }
@@ -167,6 +176,8 @@ describe("InboxChatPanel", () => {
     mockCreateSession.mockReset();
     mockCreateSession.mockResolvedValue({ id: "session-sara" });
     mockRecentChatsList.mockClear();
+    mockChatSessionHeader.mockClear();
+    mockSessions.splice(0);
   });
 
   it("uses the sidebar-selected URL agent instead of the persisted fallback agent", async () => {
@@ -218,5 +229,22 @@ describe("InboxChatPanel", () => {
     expect(mockRecentChatsList).toHaveBeenLastCalledWith(
       expect.objectContaining({ agentId: "agent-sara" }),
     );
+  });
+
+  it("renders the shared session header for an existing Inbox chat", () => {
+    mockSessions.push({
+      id: "session-lando",
+      agent_id: "agent-lando",
+      title: "Mode verification",
+      status: "active",
+      mode: "build",
+    });
+
+    renderPanel(null, "session-lando");
+
+    expect(screen.getByTestId("chat-session-header")).toBeInTheDocument();
+    expect(mockChatSessionHeader).toHaveBeenCalledWith({
+      session: expect.objectContaining({ id: "session-lando", mode: "build" }),
+    });
   });
 });

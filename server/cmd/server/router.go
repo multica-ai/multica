@@ -69,6 +69,8 @@ import (
 	cerebrowakeup "github.com/multica-ai/multica/server/internal/cerebro/wakeup"
 	// CEREBRO-PATCH(cerebro-rounds-routes): FIR-2736 controlled inbox rounds.
 	cerebrorounds "github.com/multica-ai/multica/server/internal/cerebro/rounds"
+	// CEREBRO-PATCH(session-mode-config): FIR-3111 versioned Settings-managed Mode profiles.
+	cerebrosessionmode "github.com/multica-ai/multica/server/internal/cerebro/sessionmode"
 	// CEREBRO-PATCH(cerebro-sandbox-profile-routes): FIR-2230 sandbox isolation profile catalog handler import
 	cerebrosandboxprofile "github.com/multica-ai/multica/server/internal/cerebro/sandboxprofile"
 	// CEREBRO-PATCH(cerebro-roles-routes): FIR-2130 role subject CRUD + assignment handler import
@@ -832,6 +834,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// CEREBRO-PATCH(cerebro-sessions-routes): FIR-1741 issue comment sessions handler instance.
 	cerebroSessionsHandler := cerebrosessions.NewHandler(pool, queries, h.TaskService, bus) // CEREBRO-PATCH(cerebro-sessions-routes): FIR-2021 inject TaskService+bus for one-command handoff start-new
 	h.CommentSessionMode = cerebroSessionsHandler                                           // CEREBRO-PATCH(new-thread-session-mode): FIR-3111 transactional Mode seam.
+	cerebroSessionModeStore := cerebrosessionmode.NewStore(pool)
+	cerebroSessionModeHandler := cerebrosessionmode.NewHandler(cerebroSessionModeStore) // CEREBRO-PATCH(session-mode-config): FIR-3111 Settings-managed version registry.
+	h.SessionModeProfiles = cerebroSessionModeStore
 	// CEREBRO-PATCH(cerebro-saved-filters-routes): FIR-1659 personal saved-filters handler instance
 	cerebroSavedFiltersHandler := cerebrosavedfilters.NewHandler(cerebroQueries)
 	// CEREBRO-PATCH(cerebro-note-types-routes): TECH-3511 note types handler instance
@@ -2172,6 +2177,13 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				// CEREBRO-PATCH(cerebro-workflows-issue-loop-runs-route): FIR-2283 v2 point 7 — list the issues that have run through a recipe's loop.
 				r.Get("/{id}/loop-runs", cerebroWorkflowsHandler.LoopRuns)
 				r.Post("/_test/cron-sweep", cerebroWorkflowsHandler.TestSweepCron)
+			})
+			// CEREBRO-PATCH(session-mode-config-routes): FIR-3111 versioned Mode configuration.
+			r.Route("/api/cerebro/session-modes", func(r chi.Router) {
+				r.Get("/", cerebroSessionModeHandler.List)
+				r.Put("/{mode}/draft", cerebroSessionModeHandler.UpdateDraft)
+				r.Post("/{mode}/publish", cerebroSessionModeHandler.Publish)
+				r.Post("/{mode}/restore", cerebroSessionModeHandler.Restore)
 			})
 			// CEREBRO-PATCH(cerebro-mini-apps-routes): FIR-3172 app catalog lifecycle.
 			r.Route("/api/cerebro/apps", func(r chi.Router) {

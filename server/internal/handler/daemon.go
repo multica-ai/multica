@@ -1820,6 +1820,32 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Resolve the published workspace profile once per claim. The response is
+	// an immutable snapshot, so a later Settings publish cannot change a run
+	// that is already in progress.
+	if h.SessionModeProfiles != nil && resp.WorkspaceID != "" {
+		if mode, valid := sessionmode.Normalize(resp.SessionMode); valid {
+			config, err := h.SessionModeProfiles.Active(r.Context(), parseUUID(resp.WorkspaceID), mode)
+			if err != nil {
+				slog.Warn("session mode profile resolution failed; using daemon defaults",
+					"workspace_id", resp.WorkspaceID, "mode", mode, "error", err)
+			} else {
+				resp.SessionModeConfig = &config
+				if resp.Agent != nil && h.TaskService != nil && len(config.EvalSkillIDs) > 0 {
+					existing := make(map[string]struct{}, len(resp.Agent.Skills))
+					for _, skill := range resp.Agent.Skills {
+						existing[skill.ID] = struct{}{}
+					}
+					for _, skill := range h.TaskService.LoadWorkspaceSkillsByID(r.Context(), parseUUID(resp.WorkspaceID), config.EvalSkillIDs) {
+						if _, ok := existing[skill.ID]; !ok {
+							resp.Agent.Skills = append(resp.Agent.Skills, skill)
+						}
+					}
+				}
+			}
+		}
+	}
+
 	// Autopilot run_only task: resolve workspace from autopilot_run →
 	// autopilot, and include the autopilot instructions because there is no
 	// issue for the agent to fetch.
@@ -2128,7 +2154,20 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	resp.EffectiveTools = h.cerebroEffectiveToolsForBrief(r.Context(), runtime, resp.Agent, resp.InitiatorType, resp.InitiatorID) // CEREBRO-PATCH(agent-task-effective-tools-callsite): FIR-2312 resolve per-permission non-CLI tools for the brief
-	h.applyMemoryAutoRecall(r.Context(), &resp, *task)                                                                            // CEREBRO-PATCH(daemon-memory-autorecall-callsite): FIR-1794 layer 3 — auto-recall memories into the claim when cerebro_memory is on
+	if resp.SessionModeConfig != nil && len(resp.SessionModeConfig.AllowedTools) > 0 {
+		allowed := make(map[string]struct{}, len(resp.SessionModeConfig.AllowedTools))
+		for _, name := range resp.SessionModeConfig.AllowedTools {
+			allowed[strings.ToLower(strings.TrimSpace(name))] = struct{}{}
+		}
+		filtered := resp.EffectiveTools[:0]
+		for _, tool := range resp.EffectiveTools {
+			if _, ok := allowed[strings.ToLower(strings.TrimSpace(tool.Name))]; ok {
+				filtered = append(filtered, tool)
+			}
+		}
+		resp.EffectiveTools = filtered
+	}
+	h.applyMemoryAutoRecall(r.Context(), &resp, *task) // CEREBRO-PATCH(daemon-memory-autorecall-callsite): FIR-1794 layer 3 — auto-recall memories into the claim when cerebro_memory is on
 
 	payloadBytes, _ = writeMeasuredJSON(w, http.StatusOK, map[string]any{"task": resp})
 }

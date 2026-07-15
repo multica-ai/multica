@@ -3564,12 +3564,21 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// Prepare isolated execution environment.
 	// Repos are passed as metadata only — the agent checks them out on demand
 	// via `multica repo checkout <url>`.
+	modeProfile := effectiveSessionModeProfile(task)
 	taskCtx := execenv.TaskContextForEnv{
 		IssueID:                          task.IssueID,
 		TriggerCommentID:                 task.TriggerCommentID,
 		TriggerThreadID:                  task.TriggerThreadID,
 		PlanMode:                         task.PlanMode,    // CEREBRO-PATCH(session-plan-mode): carry the thread mode into runtime context.
 		SessionMode:                      task.SessionMode, // CEREBRO-PATCH(session-modes): FIR-3111 carry profile into runtime context.
+		SessionModeVersion:               modeProfile.Version,
+		SessionModeInstruction:           modeProfile.Instruction,
+		SessionModeAllowsWrite:           modeProfile.AllowsWrite,
+		SessionModeAllowedTools:          modeProfile.AllowedTools,
+		SessionModeDataSources:           modeProfile.DataSources,
+		SessionModeApprovalPolicy:        modeProfile.ApprovalPolicy,
+		SessionModeWorkflowID:            modeProfile.WorkflowID,
+		SessionModeEvalSkillIDs:          modeProfile.EvalSkillIDs,
 		NewCommentCount:                  task.NewCommentCount,
 		NewCommentsSince:                 task.NewCommentsSince,
 		PriorSessionResumed:              task.PriorSessionID != "",
@@ -3901,14 +3910,16 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	if task.ThinkingOverride != "" {
 		thinkingLevel = task.ThinkingOverride
 	}
-	mode, validMode := sessionmode.Normalize(task.SessionMode)
+	_, validMode := sessionmode.Normalize(task.SessionMode)
 	if task.SessionMode == "" && task.PlanMode {
-		mode, validMode = sessionmode.Plan, true
+		validMode = true
 	} // CEREBRO-PATCH(session-modes): old-server compatibility.
-	modeProfile := sessionmode.ProfileFor(mode)
 	if thinkingLevel == "" && validMode {
 		thinkingLevel = modeProfile.ThinkingLevel
 	} // CEREBRO-PATCH(session-modes): profile override precedes agent default.
+	if task.ModelOverride == "" && modeProfile.Model != "" {
+		model = modeProfile.Model
+	} // CEREBRO-PATCH(session-mode-config): published Mode model precedes the agent default.
 	if task.Agent != nil {
 		if thinkingLevel == "" {
 			thinkingLevel = task.Agent.ThinkingLevel

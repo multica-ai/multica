@@ -71,6 +71,7 @@ import { cerebroNotesSettingsTabs } from "@multica/cerebro-notes/settings-tabs";
 import { cerebroCostOptimizationTabs } from "@multica/cerebro-cost-optimization/views";
 import { useCerebroToolPolicySettingsTabs } from "@multica/cerebro-tool-policy/views";
 import { useCerebroCollectionsSettingsTabs } from "@multica/cerebro-collections/views";
+import { useCerebroModeSettingsTabs } from "@multica/cerebro-sessions";
 import { IssueListReferenceFilter } from "@multica/cerebro-references/views";
 import { ReferencesByObjectPage } from "@multica/cerebro-references/views/pages";
 
@@ -118,6 +119,7 @@ function SettingsRoute() {
   // FIR-1590 → Collections: the Collections tab, present only when the
   // cerebro_collections flag is on.
   const collectionsTabs = useCerebroCollectionsSettingsTabs();
+  const modeTabs = useCerebroModeSettingsTabs();
 
   return (
     <SettingsPage
@@ -145,6 +147,7 @@ function SettingsRoute() {
         ...cerebroFeatureFlagTabs,
         ...toolPolicyTabs,
         ...collectionsTabs,
+        ...modeTabs,
       ]}
       membersTabCerebroExtras={membersTabCerebroExtras}
     />

@@ -61,11 +61,19 @@ type PrepareParams struct {
 
 // TaskContextForEnv is the subset of task context used for writing context files.
 type TaskContextForEnv struct {
-	IssueID          string
-	TriggerCommentID string // comment that triggered this task (empty for on_assign)
-	TriggerThreadID  string // root comment ID for the triggering thread; falls back to TriggerCommentID when empty
-	PlanMode         bool   // CEREBRO-PATCH(session-plan-mode): true when this issue thread is restricted to planning.
-	SessionMode      string // CEREBRO-PATCH(session-modes): FIR-3111 fixed Issue/Chat execution profile.
+	IssueID                   string
+	TriggerCommentID          string // comment that triggered this task (empty for on_assign)
+	TriggerThreadID           string // root comment ID for the triggering thread; falls back to TriggerCommentID when empty
+	PlanMode                  bool   // CEREBRO-PATCH(session-plan-mode): true when this issue thread is restricted to planning.
+	SessionMode               string // CEREBRO-PATCH(session-modes): FIR-3111 fixed Issue/Chat execution profile.
+	SessionModeVersion        string // CEREBRO-PATCH(session-mode-config): pinned published version.
+	SessionModeInstruction    string // CEREBRO-PATCH(session-mode-config): workspace-authored runtime instruction.
+	SessionModeAllowsWrite    bool
+	SessionModeAllowedTools   []string
+	SessionModeDataSources    []string
+	SessionModeApprovalPolicy string
+	SessionModeWorkflowID     string
+	SessionModeEvalSkillIDs   []string
 	// CEREBRO-PATCH(wakeup-system-activity): wakeup tasks are platform activity, not synthetic comments.
 	WakeupPrompt            string // non-empty when the platform re-invoked the agent from a wakeup
 	WakeupTriggerType       string // time, issue_status, or github_ci for wakeup tasks

@@ -2551,6 +2551,35 @@ func (s *TaskService) LoadAgentSkills(ctx context.Context, agentID pgtype.UUID) 
 	return result
 }
 
+// CEREBRO-PATCH(session-mode-eval-skills): LoadWorkspaceSkillsByID resolves interface-selected evaluation skills into
+// the same complete bundles used by an agent's assigned skills.
+func (s *TaskService) LoadWorkspaceSkillsByID(ctx context.Context, workspaceID pgtype.UUID, ids []string) []AgentSkillData {
+	result := make([]AgentSkillData, 0, len(ids))
+	seen := make(map[string]struct{}, len(ids))
+	for _, rawID := range ids {
+		skillID, err := util.ParseUUID(rawID)
+		if err != nil {
+			continue
+		}
+		key := util.UUIDToString(skillID)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		sk, err := s.Queries.GetSkillInWorkspace(ctx, db.GetSkillInWorkspaceParams{ID: skillID, WorkspaceID: workspaceID})
+		if err != nil {
+			continue
+		}
+		data := AgentSkillData{ID: key, Name: sk.Name, Description: sk.Description, Content: sk.Content}
+		files, _ := s.Queries.ListSkillFiles(ctx, sk.ID)
+		for _, file := range files {
+			data.Files = append(data.Files, AgentSkillFileData{Path: file.Path, Content: file.Content})
+		}
+		seen[key] = struct{}{}
+		result = append(result, data)
+	}
+	return result
+}
+
 // AgentSkillData represents a skill for task execution responses.
 type AgentSkillData struct {
 	ID          string               `json:"id"`
