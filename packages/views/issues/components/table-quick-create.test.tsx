@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderWithI18n } from "../../test/i18n";
-import { QuickCreateFooter } from "./table-view";
+import { IssueTableGroupRow, QuickCreateFooter } from "./table-view";
 
 const { createIssue } = vi.hoisted(() => ({
   createIssue: vi.fn(),
@@ -38,6 +38,7 @@ describe("QuickCreateFooter", () => {
 
     const input = screen.getByPlaceholderText("Add an issue…");
     const submit = screen.getByRole("button", { name: "Add" });
+    expect(input.closest("form")).toHaveClass("sticky", "left-1.5");
     expect(submit).toBeDisabled();
 
     await user.type(input, "  Clickable quick create  ");
@@ -55,5 +56,33 @@ describe("QuickCreateFooter", () => {
         onError: expect.any(Function),
       }),
     );
+  });
+
+  it("keeps full-width row controls anchored during horizontal scrolling", async () => {
+    const user = userEvent.setup();
+    const onToggle = vi.fn();
+    renderWithI18n(
+      <table>
+        <tbody>
+          <IssueTableGroupRow
+            group={{
+              kind: "group",
+              key: "status:backlog",
+              label: "Backlog",
+              count: 13,
+              collapsed: false,
+            }}
+            colSpan={3}
+            onToggle={onToggle}
+          />
+        </tbody>
+      </table>,
+    );
+
+    const group = screen.getByRole("button", { name: /Backlog\s*13/ });
+    expect(group).toHaveClass("sticky", "left-4", "w-fit");
+
+    await user.click(group);
+    expect(onToggle).toHaveBeenCalledOnce();
   });
 });

@@ -572,7 +572,7 @@ export function QuickCreateFooter({
     <TableRow className="hover:bg-muted/30">
       <TableCell colSpan={colSpan} className="p-1.5">
         <form
-          className="flex max-w-2xl items-center gap-2"
+          className="sticky left-1.5 flex max-w-2xl items-center gap-2"
           onSubmit={(event) => {
             event.preventDefault();
             submit();
@@ -602,6 +602,42 @@ export function QuickCreateFooter({
           </Button>
           <div ref={sentinelRef} className="h-px w-px" aria-hidden />
         </form>
+      </TableCell>
+    </TableRow>
+  );
+}
+
+type IssueTableGroupRowProps = {
+  group: Extract<IssueTableDisplayRow, { kind: "group" }>;
+  colSpan: number;
+  onToggle: () => void;
+};
+
+export function IssueTableGroupRow({
+  group,
+  colSpan,
+  onToggle,
+}: IssueTableGroupRowProps) {
+  return (
+    <TableRow
+      className="bg-muted/40 hover:bg-muted/60"
+      onClick={onToggle}
+    >
+      <TableCell colSpan={colSpan} className="h-9 px-4 py-1.5">
+        <button
+          type="button"
+          className="sticky left-4 flex w-fit items-center gap-2 text-xs font-medium"
+        >
+          {group.collapsed ? (
+            <ChevronRight className="size-3.5" />
+          ) : (
+            <ChevronDown className="size-3.5" />
+          )}
+          {group.label}
+          <span className="font-normal tabular-nums text-muted-foreground">
+            {group.count}
+          </span>
+        </button>
       </TableCell>
     </TableRow>
   );
@@ -1115,7 +1151,10 @@ export function TableView({
             return (
               <TableCell
                 key={column.id}
-                className="overflow-hidden px-4 py-1.5 text-xs text-muted-foreground"
+                className={cn(
+                  "overflow-hidden px-4 py-1.5 text-xs text-muted-foreground",
+                  column.getIsPinned() && "bg-background",
+                )}
                 style={getCellStyle(column, { withBorder: true, hasExplicitSize: true })}
               >
                 {key === "title"
@@ -1286,30 +1325,11 @@ export function TableView({
             renderRow={(row) => {
               if (row.original.kind !== "group") return null;
               return (
-                <TableRow
-                  className="bg-muted/40 hover:bg-muted/60"
-                  onClick={() => toggleTableGroupCollapsed(row.original.key)}
-                >
-                  <TableCell
-                    colSpan={table.getVisibleLeafColumns().length}
-                    className="h-9 px-4 py-1.5"
-                  >
-                    <button
-                      type="button"
-                      className="flex items-center gap-2 text-xs font-medium"
-                    >
-                      {row.original.collapsed ? (
-                        <ChevronRight className="size-3.5" />
-                      ) : (
-                        <ChevronDown className="size-3.5" />
-                      )}
-                      {row.original.label}
-                      <span className="font-normal tabular-nums text-muted-foreground">
-                        {row.original.count}
-                      </span>
-                    </button>
-                  </TableCell>
-                </TableRow>
+                <IssueTableGroupRow
+                  group={row.original}
+                  colSpan={table.getVisibleLeafColumns().length}
+                  onToggle={() => toggleTableGroupCollapsed(row.original.key)}
+                />
               );
             }}
             className="min-h-0 flex-1"
