@@ -276,6 +276,55 @@ func TestCreateIssueCarriesLabelIdsAndAcceptanceCriteria(t *testing.T) {
 	})
 }
 
+func TestCreateIssueRejectsStaleLabelIDsWithoutMutation(t *testing.T) {
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/labels", map[string]any{
+		"name":  "stale-issue-label-" + uuid.NewString()[:8],
+		"color": "#3b82f6",
+	})
+	testHandler.CreateLabel(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateLabel: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var label LabelResponse
+	if err := json.NewDecoder(w.Body).Decode(&label); err != nil {
+		t.Fatalf("decode label: %v", err)
+	}
+
+	w = httptest.NewRecorder()
+	req = newRequest("DELETE", "/api/labels/"+label.ID, nil)
+	req = withURLParam(req, "id", label.ID)
+	testHandler.DeleteLabel(w, req)
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("DeleteLabel: expected 204, got %d: %s", w.Code, w.Body.String())
+	}
+
+	title := "Issue rejects stale label " + uuid.NewString()[:8]
+	w = httptest.NewRecorder()
+	req = newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title":     title,
+		"status":    "todo",
+		"priority":  "medium",
+		"label_ids": []string{label.ID},
+	})
+	testHandler.CreateIssue(w, req)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("CreateIssue: expected 404 for stale label, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var count int64
+	if err := testPool.QueryRow(context.Background(), `
+		SELECT COUNT(*)
+		FROM issue
+		WHERE workspace_id = $1 AND title = $2
+	`, testWorkspaceID, title).Scan(&count); err != nil {
+		t.Fatalf("count issue rows: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("expected no issue row to be created, found %d", count)
+	}
+}
+
 func TestIssueLabelRejectsNonIssueScope(t *testing.T) {
 	w := httptest.NewRecorder()
 	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{

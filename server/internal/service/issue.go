@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/events"
@@ -126,6 +127,10 @@ var ErrParentIssueNotFound = errors.New("parent issue not found in this workspac
 // having to remember it. Callers translate this into 400.
 var ErrProjectNotFound = errors.New("project not found in this workspace")
 
+// ErrIssueLabelNotFound signals that one of the requested issue labels does
+// not exist in the workspace or is not scoped for issues.
+var ErrIssueLabelNotFound = errors.New("issue label not found")
+
 // IssueCreateResult is the typed return from IssueService.Create.
 //
 //   - On the happy path: Issue is the new row, Attachments lists the
@@ -194,6 +199,10 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 		}); err != nil {
 			return IssueCreateResult{}, ErrProjectNotFound
 		}
+	}
+
+	if err := s.validateIssueLabels(ctx, qtx, p.WorkspaceID, p.LabelIDs); err != nil {
+		return IssueCreateResult{}, err
 	}
 
 	duplicate, found, err := issueguard.LockAndFindActiveDuplicate(ctx, qtx, p.WorkspaceID, projectID, p.ParentIssueID, p.Title, p.AllowDuplicate)
@@ -301,6 +310,33 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 	s.maybeEnqueueOnAssign(ctx, issue, p.CreatorType, actorID)
 
 	return IssueCreateResult{Issue: issue, Attachments: attachments}, nil
+}
+
+func (s *IssueService) validateIssueLabels(ctx context.Context, qtx *db.Queries, workspaceID pgtype.UUID, labelIDs []pgtype.UUID) error {
+	desiredByID := make(map[string]pgtype.UUID, len(labelIDs))
+	for _, labelID := range labelIDs {
+		if !labelID.Valid {
+			continue
+		}
+		desiredByID[util.UUIDToString(labelID)] = labelID
+	}
+
+	for _, labelID := range desiredByID {
+		label, err := qtx.GetLabel(ctx, db.GetLabelParams{
+			ID:          labelID,
+			WorkspaceID: workspaceID,
+		})
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return ErrIssueLabelNotFound
+			}
+			return fmt.Errorf("get label for issue: %w", err)
+		}
+		if label.ResourceType != "issue" {
+			return ErrIssueLabelNotFound
+		}
+	}
+	return nil
 }
 
 // linkAttachments links the given attachment IDs to the newly created

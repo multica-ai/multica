@@ -184,10 +184,35 @@ func marshalAcceptanceCriteria(criteria []string) []byte {
 	return data
 }
 
-var errIssueLabelNotFound = errors.New("issue label not found")
+func (h *Handler) validateIssueLabelIDs(ctx context.Context, q *db.Queries, workspaceID pgtype.UUID, labelIDs []pgtype.UUID) error {
+	desiredByID := make(map[string]pgtype.UUID, len(labelIDs))
+	for _, labelID := range labelIDs {
+		if !labelID.Valid {
+			continue
+		}
+		desiredByID[uuidToString(labelID)] = labelID
+	}
 
-func (h *Handler) syncIssueLabels(ctx context.Context, issue db.Issue, desiredLabelIDs []pgtype.UUID) ([]db.IssueLabel, bool, error) {
-	current, err := h.Queries.ListLabelsByIssue(ctx, db.ListLabelsByIssueParams{
+	for _, labelID := range desiredByID {
+		label, err := q.GetLabel(ctx, db.GetLabelParams{
+			ID:          labelID,
+			WorkspaceID: workspaceID,
+		})
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return service.ErrIssueLabelNotFound
+			}
+			return fmt.Errorf("get label for issue: %w", err)
+		}
+		if label.ResourceType != "issue" {
+			return service.ErrIssueLabelNotFound
+		}
+	}
+	return nil
+}
+
+func (h *Handler) syncIssueLabels(ctx context.Context, q *db.Queries, issue db.Issue, desiredLabelIDs []pgtype.UUID) ([]db.IssueLabel, bool, error) {
+	current, err := q.ListLabelsByIssue(ctx, db.ListLabelsByIssueParams{
 		IssueID:     issue.ID,
 		WorkspaceID: issue.WorkspaceID,
 	})
@@ -208,30 +233,12 @@ func (h *Handler) syncIssueLabels(ctx context.Context, issue db.Issue, desiredLa
 		currentByID[uuidToString(label.ID)] = struct{}{}
 	}
 
-	validatedDesired := make(map[string]pgtype.UUID, len(desiredByID))
-	for key, labelID := range desiredByID {
-		if _, alreadyAttached := currentByID[key]; alreadyAttached {
+	changed := false
+	for _, labelID := range desiredByID {
+		if _, alreadyAttached := currentByID[uuidToString(labelID)]; alreadyAttached {
 			continue
 		}
-		label, err := h.Queries.GetLabel(ctx, db.GetLabelParams{
-			ID:          labelID,
-			WorkspaceID: issue.WorkspaceID,
-		})
-		if err != nil {
-			if errors.Is(err, pgx.ErrNoRows) {
-				return nil, false, errIssueLabelNotFound
-			}
-			return nil, false, fmt.Errorf("get label for issue: %w", err)
-		}
-		if label.ResourceType != "issue" {
-			return nil, false, errIssueLabelNotFound
-		}
-		validatedDesired[key] = labelID
-	}
-
-	changed := false
-	for _, labelID := range validatedDesired {
-		if err := h.Queries.AttachLabelToIssue(ctx, db.AttachLabelToIssueParams{
+		if err := q.AttachLabelToIssue(ctx, db.AttachLabelToIssueParams{
 			IssueID:     issue.ID,
 			LabelID:     labelID,
 			WorkspaceID: issue.WorkspaceID,
@@ -246,7 +253,7 @@ func (h *Handler) syncIssueLabels(ctx context.Context, issue db.Issue, desiredLa
 		if _, keep := desiredByID[key]; keep {
 			continue
 		}
-		if err := h.Queries.DetachLabelFromIssue(ctx, db.DetachLabelFromIssueParams{
+		if err := q.DetachLabelFromIssue(ctx, db.DetachLabelFromIssueParams{
 			IssueID:     issue.ID,
 			LabelID:     label.ID,
 			WorkspaceID: issue.WorkspaceID,
@@ -260,7 +267,7 @@ func (h *Handler) syncIssueLabels(ctx context.Context, issue db.Issue, desiredLa
 		return current, false, nil
 	}
 
-	updated, err := h.Queries.ListLabelsByIssue(ctx, db.ListLabelsByIssueParams{
+	updated, err := q.ListLabelsByIssue(ctx, db.ListLabelsByIssueParams{
 		IssueID:     issue.ID,
 		WorkspaceID: issue.WorkspaceID,
 	})
@@ -2463,6 +2470,10 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "project not found in this workspace")
 		return
 	}
+	if errors.Is(err, service.ErrIssueLabelNotFound) {
+		writeError(w, http.StatusNotFound, "issue label not found")
+		return
+	}
 	if err != nil {
 		slog.Warn("create issue failed", append(logger.RequestAttrs(r), "error", err, "workspace_id", workspaceID)...)
 		writeError(w, http.StatusInternalServerError, "failed to create issue: "+err.Error())
@@ -2708,7 +2719,27 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	issue, err := h.Queries.UpdateIssue(r.Context(), params)
+	tx, err := h.TxStarter.Begin(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to start transaction")
+		return
+	}
+	defer tx.Rollback(r.Context())
+	qtx := h.Queries.WithTx(tx)
+
+	if labelIDsTouched {
+		if err := h.validateIssueLabelIDs(r.Context(), qtx, prevIssue.WorkspaceID, labelIDs); err != nil {
+			if errors.Is(err, service.ErrIssueLabelNotFound) {
+				writeError(w, http.StatusNotFound, "issue label not found")
+				return
+			}
+			slog.Warn("validate issue labels failed", append(logger.RequestAttrs(r), "error", err, "issue_id", id, "workspace_id", workspaceID)...)
+			writeError(w, http.StatusInternalServerError, "failed to update issue labels")
+			return
+		}
+	}
+
+	issue, err := qtx.UpdateIssue(r.Context(), params)
 	if err != nil {
 		slog.Warn("update issue failed", append(logger.RequestAttrs(r), "error", err, "issue_id", id, "workspace_id", workspaceID)...)
 		writeError(w, http.StatusInternalServerError, "failed to update issue: "+err.Error())
@@ -2718,9 +2749,9 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	var syncedLabelResponses *[]LabelResponse
 	syncedLabelsChanged := false
 	if labelIDsTouched {
-		syncedLabels, changed, err := h.syncIssueLabels(r.Context(), issue, labelIDs)
+		syncedLabels, changed, err := h.syncIssueLabels(r.Context(), qtx, issue, labelIDs)
 		if err != nil {
-			if errors.Is(err, errIssueLabelNotFound) {
+			if errors.Is(err, service.ErrIssueLabelNotFound) {
 				writeError(w, http.StatusNotFound, "issue label not found")
 				return
 			}
@@ -2743,6 +2774,12 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		syncedLabelResponses = &responses
+	}
+
+	if err := tx.Commit(r.Context()); err != nil {
+		slog.Warn("commit update issue tx failed", append(logger.RequestAttrs(r), "error", err, "issue_id", id, "workspace_id", workspaceID)...)
+		writeError(w, http.StatusInternalServerError, "failed to update issue")
+		return
 	}
 
 	if len(attachmentIDs) > 0 {
