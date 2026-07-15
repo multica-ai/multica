@@ -52,9 +52,9 @@ WHERE id = $1
 RETURNING *;
 
 -- name: AcknowledgeWebhookDelivery :one
--- Best-effort operator metadata for the HTTP acknowledgement. Admission is
--- already durable once the initial queued row exists, so callers still return
--- 202 if this metadata-only update fails.
+-- Best-effort operator metadata for the HTTP acknowledgement. The delivery and
+-- run are already durable, so callers still return their response if this
+-- metadata-only update fails.
 UPDATE webhook_delivery
 SET response_status = $2,
     response_body = $3,

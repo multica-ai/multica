@@ -287,6 +287,80 @@ func TestGetConfigExposesWorkspaceCreationDisabled(t *testing.T) {
 	}
 }
 
+// TestGetConfigExposesServerVersion verifies /api/config reports the build
+// version main.go stamps into handler.Config via -X main.version on a
+// self-hosted deployment, so operators can confirm what's deployed from the
+// Help popover.
+func TestGetConfigExposesServerVersion(t *testing.T) {
+	origCfg := testHandler.cfg
+	defer func() { testHandler.cfg = origCfg }()
+
+	// Self-hosted frontend origin: the version row is meant for these deployments.
+	t.Setenv("MULTICA_APP_URL", "https://multica.self-hosted.example")
+	t.Setenv("FRONTEND_ORIGIN", "")
+
+	testHandler.cfg.ServerVersion = ""
+	req := httptest.NewRequest(http.MethodGet, "/api/config", nil)
+	w := httptest.NewRecorder()
+	testHandler.GetConfig(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("GetConfig: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var cfg AppConfig
+	if err := json.Unmarshal(w.Body.Bytes(), &cfg); err != nil {
+		t.Fatalf("decode config: %v", err)
+	}
+	if cfg.ServerVersion != "" {
+		t.Fatalf("server_version: want empty for dev build, got %q", cfg.ServerVersion)
+	}
+
+	testHandler.cfg.ServerVersion = "1.2.3"
+	w = httptest.NewRecorder()
+	testHandler.GetConfig(w, req)
+	if err := json.Unmarshal(w.Body.Bytes(), &cfg); err != nil {
+		t.Fatalf("decode config: %v", err)
+	}
+	if cfg.ServerVersion != "1.2.3" {
+		t.Fatalf("server_version: want 1.2.3, got %q", cfg.ServerVersion)
+	}
+}
+
+// TestGetConfigOmitsServerVersionOnOfficialCloud verifies the build version is
+// suppressed on the managed cloud (frontend host multica.ai) even when the
+// binary is stamped, while a self-hosted frontend origin still reports it. The
+// managed cloud is continuously deployed, so its users don't need the row.
+func TestGetConfigOmitsServerVersionOnOfficialCloud(t *testing.T) {
+	origCfg := testHandler.cfg
+	defer func() { testHandler.cfg = origCfg }()
+	testHandler.cfg.ServerVersion = "1.2.3"
+
+	req := httptest.NewRequest(http.MethodGet, "/api/config", nil)
+
+	// Official cloud: frontend host multica.ai -> version omitted.
+	t.Setenv("MULTICA_APP_URL", "https://multica.ai")
+	t.Setenv("FRONTEND_ORIGIN", "")
+	w := httptest.NewRecorder()
+	testHandler.GetConfig(w, req)
+	var cfg AppConfig
+	if err := json.Unmarshal(w.Body.Bytes(), &cfg); err != nil {
+		t.Fatalf("decode config: %v", err)
+	}
+	if cfg.ServerVersion != "" {
+		t.Fatalf("server_version: want omitted on official cloud, got %q", cfg.ServerVersion)
+	}
+
+	// Self-hosted: operator's own frontend origin -> version reported.
+	t.Setenv("MULTICA_APP_URL", "https://multica.self-hosted.example")
+	w = httptest.NewRecorder()
+	testHandler.GetConfig(w, req)
+	if err := json.Unmarshal(w.Body.Bytes(), &cfg); err != nil {
+		t.Fatalf("decode config: %v", err)
+	}
+	if cfg.ServerVersion != "1.2.3" {
+		t.Fatalf("server_version: want 1.2.3 on self-hosted, got %q", cfg.ServerVersion)
+	}
+}
+
 func TestGetConfigExposesFrontendFeatureFlags(t *testing.T) {
 	h := &Handler{}
 	req := httptest.NewRequest(http.MethodGet, "/api/config", nil)

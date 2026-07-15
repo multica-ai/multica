@@ -203,6 +203,8 @@ function ReplyInput({
         <div className="absolute bottom-0 left-0 right-24 min-w-0">
           <CommentTriggerChips
             agents={triggerPreview.agents}
+            blocked={triggerPreview.blocked}
+            draftContent={content}
             suppressedAgentIds={suppressedAgentIds}
             onToggle={toggleSuppressedAgent}
           />

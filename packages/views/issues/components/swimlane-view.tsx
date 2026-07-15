@@ -17,7 +17,6 @@ import {
 } from "@dnd-kit/core";
 import { SortableContext, useSortable, verticalListSortingStrategy, arrayMove } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { Virtuoso } from "react-virtuoso";
 import { ChevronRight, EyeOff, GripVertical, MoreHorizontal, Pencil, Plus } from "lucide-react";
 import { useQuery, useQueries, useQueryClient } from "@tanstack/react-query";
 import type {
@@ -812,8 +811,6 @@ export function SwimLaneView({
   );
 
   const [activeIssue, setActiveIssue] = useState<Issue | null>(null);
-  // The outer scroll box is the customScrollParent for the lane Virtuoso.
-  const [scrollEl, setScrollEl] = useState<HTMLDivElement | null>(null);
   const isDraggingRef = useRef(false);
   // Settle lock: held from drop until the move mutation settles, so a cache
   // change that lands mid-flight (e.g. a membership refetch) does not rebuild
@@ -1130,42 +1127,6 @@ export function SwimLaneView({
     [sortedStatuses.length, trackWidth],
   );
 
-  // Lanes render in one Virtuoso so only on-screen lanes stay mounted. Pinned
-  // lanes keep their leading position; the SortableContext still wraps the
-  // whole set (its `items` are only the non-pinned lane ids, so reorder is
-  // unchanged), and per-cell droppables live on always-mounted lane cells.
-  const orderedLanes = useMemo(
-    () => [
-      ...laneGroups.filter((g) => g.isPinned),
-      ...laneGroups.filter((g) => !g.isPinned),
-    ],
-    [laneGroups],
-  );
-  const nonPinnedLaneIds = useMemo(
-    () =>
-      laneGroups
-        .filter((g) => !g.isPinned)
-        .map((g) => laneIdFor(swimlaneGrouping, g.rawId)),
-    [laneGroups, swimlaneGrouping],
-  );
-  // Per-status load-more sentinels ride Virtuoso's Footer so they sit at the
-  // true end of the lane list; pt-4 reproduces the previous gap-4.
-  const laneComponents = useMemo(
-    () => ({
-      Footer: () => (
-        <div className="pt-4">
-          <SwimLaneLoadMoreRow
-            sortedStatuses={sortedStatuses}
-            gridStyle={gridStyle}
-            myIssuesOpts={myIssuesOpts}
-            sort={sort}
-          />
-        </div>
-      ),
-    }),
-    [sortedStatuses, gridStyle, myIssuesOpts, sort],
-  );
-
   return (
     <DndContext
       sensors={sensors}
@@ -1174,7 +1135,7 @@ export function SwimLaneView({
       onDragOver={handleDragOver}
       onDragEnd={handleDragEnd}
     >
-      <div ref={setScrollEl} className="flex flex-1 min-h-0 gap-4 overflow-auto p-4">
+      <div className="flex flex-1 min-h-0 gap-4 overflow-auto p-4">
         <div className="flex shrink-0 flex-col" style={{ width: `${trackWidth}px` }}>
         {/* Sticky status header row — visually matches the top of a BoardColumn */}
         <div className="sticky top-0 z-10 mb-2 bg-background/95 pb-2 backdrop-blur supports-[backdrop-filter]:bg-background/75">
@@ -1217,44 +1178,67 @@ export function SwimLaneView({
           </div>
         </div>
 
-        {/* Lane rows, virtualized. Pinned lanes (the no-X bucket, and
-            parent-grouping's orphan fallback) keep their leading position and
-            stay non-draggable; the SortableContext still lets the rest reorder
-            by dragging the grip handle (its `items` are only the non-pinned
-            lane ids). Only on-screen lanes stay mounted. */}
-        <SortableContext
-          items={nonPinnedLaneIds}
-          strategy={verticalListSortingStrategy}
-        >
-          {scrollEl && (
-            <Virtuoso
-              customScrollParent={scrollEl}
-              data={orderedLanes}
-              computeItemKey={(_index, lane) => lane.key}
-              increaseViewportBy={{ top: 600, bottom: 600 }}
-              components={laneComponents}
-              itemContent={(index, lane) => (
-                <div className={index === 0 ? undefined : "pt-4"}>
-                  <DraggableSwimLane
-                    lane={lane}
-                    grouping={swimlaneGrouping}
-                    isCollapsed={collapsedLanes.has(lane.key)}
-                    onToggleCollapse={() => toggleLane(lane.key)}
-                    localCells={localCells}
-                    sortedStatuses={sortedStatuses}
-                    issueMap={issueMapRef.current}
-                    childProgressMap={childProgressMap}
-                    projectMap={projectMap}
-                    gridStyle={gridStyle}
-                    paths={paths}
-                    projectId={projectId}
-                    onCreateIssue={onCreateIssue}
-                  />
-                </div>
-              )}
-            />
-          )}
-        </SortableContext>
+        {/* Lane rows. Pinned lanes (the no-X bucket, and parent-grouping's
+            orphan fallback) sit at the top and are non-draggable; the rest
+            are wrapped in a SortableContext so users can reorder lanes by
+            dragging the grip handle. */}
+        <div className="flex flex-col gap-4">
+          {laneGroups
+            .filter((g) => g.isPinned)
+            .map((lane) => (
+              <DraggableSwimLane
+                key={lane.key}
+                lane={lane}
+                grouping={swimlaneGrouping}
+                isCollapsed={collapsedLanes.has(lane.key)}
+                onToggleCollapse={() => toggleLane(lane.key)}
+                localCells={localCells}
+                sortedStatuses={sortedStatuses}
+                issueMap={issueMapRef.current}
+                childProgressMap={childProgressMap}
+                projectMap={projectMap}
+                gridStyle={gridStyle}
+                paths={paths}
+                projectId={projectId}
+                onCreateIssue={onCreateIssue}
+              />
+            ))}
+          <SortableContext
+            items={laneGroups
+              .filter((g) => !g.isPinned)
+              .map((g) => laneIdFor(swimlaneGrouping, g.rawId))}
+            strategy={verticalListSortingStrategy}
+          >
+            {laneGroups
+              .filter((g) => !g.isPinned)
+              .map((lane) => (
+                <DraggableSwimLane
+                  key={lane.key}
+                  lane={lane}
+                  grouping={swimlaneGrouping}
+                  isCollapsed={collapsedLanes.has(lane.key)}
+                  onToggleCollapse={() => toggleLane(lane.key)}
+                  localCells={localCells}
+                  sortedStatuses={sortedStatuses}
+                  issueMap={issueMapRef.current}
+                  childProgressMap={childProgressMap}
+                  projectMap={projectMap}
+                  gridStyle={gridStyle}
+                  paths={paths}
+                  projectId={projectId}
+                  onCreateIssue={onCreateIssue}
+                />
+              ))}
+          </SortableContext>
+
+          {/* Per-status load-more sentinels — same bucketed cache as Board. */}
+          <SwimLaneLoadMoreRow
+            sortedStatuses={sortedStatuses}
+            gridStyle={gridStyle}
+            myIssuesOpts={myIssuesOpts}
+            sort={sort}
+          />
+        </div>
         </div>
 
         {hiddenStatuses.length > 0 && (

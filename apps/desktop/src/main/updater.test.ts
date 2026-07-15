@@ -160,6 +160,12 @@ describe("setupAutoUpdater", () => {
     );
     setupAutoUpdater(() => null);
 
+    // Let the async preference load settle before advancing timers; otherwise
+    // the in-flight readFile can resolve after afterEach() removes the temp
+    // dir, default back to enabled=true, and fire a background check into the
+    // next test's freshly-cleared mock (flake on slow CI).
+    await invokeIpc("updater:get-preferences");
+
     await vi.advanceTimersByTimeAsync(60 * 60 * 1000 + 5_000);
 
     expect(ctx.checkForUpdates).not.toHaveBeenCalled();

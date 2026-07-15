@@ -42,6 +42,6 @@ ALTER TABLE issue ADD CONSTRAINT issue_properties_size_limit
     CHECK (pg_column_size(properties) <= 16384) NOT VALID;
 ALTER TABLE issue VALIDATE CONSTRAINT issue_properties_size_limit;
 -- The GIN index on issue.properties lives in the follow-up migration
--- (180_issue_properties_gin_index): CREATE INDEX CONCURRENTLY cannot share a
+-- (192_issue_properties_gin_index): CREATE INDEX CONCURRENTLY cannot share a
 -- migration with other statements, and a plain CREATE INDEX would lock writes
 -- on the hot issue table for the duration of the build.

@@ -122,6 +122,11 @@ export interface AutopilotRun {
   triggered_at: string;
   completed_at: string | null;
   failure_reason: string | null;
+  // Stable, localizable, enumeration-safe classification of a non-success run
+  // (skipped/failed), derived server-side from failure_reason (MUL-4525). The
+  // "run now" UI localizes this instead of echoing the raw English reason.
+  // Older servers omit it.
+  reason_code?: string;
   trigger_payload: unknown;
   result: unknown;
   created_at: string;

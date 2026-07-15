@@ -17,6 +17,7 @@ import type {
   Workspace,
 } from "../types";
 import {
+  applyChatCancelFinalizedToCache,
   applyChatDoneToCache,
   applyChatSessionUpdatedToCache,
   applyWorkspaceUpdatedToCache,
@@ -245,6 +246,151 @@ describe("invalidateChatMessageQueries", () => {
 
     expect(invalidate).toHaveBeenCalledWith({ queryKey: chatKeys.messages(sessionId) });
     expect(invalidate).toHaveBeenCalledWith({ queryKey: chatKeys.messagesPage(sessionId) });
+  });
+});
+
+describe("applyChatCancelFinalizedToCache", () => {
+  function cancelledUserMessage(): ChatMessage {
+    return {
+      id: "msg-cancelled-user",
+      chat_session_id: sessionId,
+      role: "user",
+      content: "run the thing",
+      task_id: taskId,
+      created_at: "2026-05-13T05:00:00Z",
+    };
+  }
+
+  const draftRestoresKey = chatKeys.draftRestores(sessionId);
+
+  it("inserts the late Stopped. assistant row on a stopped outcome", () => {
+    const qc = createQueryClient();
+    qc.setQueryData<ChatMessage[]>(messagesKey, [cancelledUserMessage()]);
+
+    applyChatCancelFinalizedToCache(qc, {
+      outcome: "stopped",
+      chat_session_id: sessionId,
+      task_id: taskId,
+      message_id: "msg-stopped",
+      content: "Stopped.",
+      created_at: "2026-05-13T05:00:05Z",
+      elapsed_ms: 5000,
+    });
+
+    expect(qc.getQueryData<ChatMessage[]>(messagesKey)).toEqual([
+      cancelledUserMessage(),
+      {
+        id: "msg-stopped",
+        chat_session_id: sessionId,
+        role: "assistant",
+        content: "Stopped.",
+        task_id: taskId,
+        created_at: "2026-05-13T05:00:05Z",
+        elapsed_ms: 5000,
+        message_kind: "message",
+      },
+    ]);
+  });
+
+  it("removes the user message and clears the pending task on a restored outcome", () => {
+    const qc = createQueryClient();
+    qc.setQueryData<ChatMessage[]>(messagesKey, [cancelledUserMessage()]);
+    qc.setQueryData<ChatPendingTask>(pendingKey, {
+      task_id: taskId,
+      status: "running",
+    });
+
+    applyChatCancelFinalizedToCache(qc, {
+      outcome: "restored",
+      chat_session_id: sessionId,
+      task_id: taskId,
+      message_id: "msg-cancelled-user",
+    });
+
+    expect(qc.getQueryData<ChatMessage[]>(messagesKey)).toEqual([]);
+    expect(qc.getQueryData<ChatPendingTask>(pendingKey)).toEqual({});
+  });
+
+  it("invalidates the draft-restores query for the initiator", () => {
+    const qc = createQueryClient();
+    const invalidate = vi.spyOn(qc, "invalidateQueries");
+
+    applyChatCancelFinalizedToCache(
+      qc,
+      {
+        outcome: "restored",
+        chat_session_id: sessionId,
+        task_id: taskId,
+        message_id: "msg-cancelled-user",
+        initiator_user_id: "user-initiator",
+      },
+      "user-initiator",
+    );
+
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: draftRestoresKey });
+  });
+
+  it("does not fetch the restore for a non-initiator recipient of the broadcast", () => {
+    const qc = createQueryClient();
+    qc.setQueryData<ChatMessage[]>(messagesKey, [cancelledUserMessage()]);
+    const invalidate = vi.spyOn(qc, "invalidateQueries");
+
+    applyChatCancelFinalizedToCache(
+      qc,
+      {
+        outcome: "restored",
+        chat_session_id: sessionId,
+        task_id: taskId,
+        message_id: "msg-cancelled-user",
+        initiator_user_id: "user-initiator",
+      },
+      "user-someone-else",
+    );
+
+    // The bubble is still dropped for cache consistency, but the restore
+    // fetch (and thus the private prompt) stays with the initiator.
+    expect(qc.getQueryData<ChatMessage[]>(messagesKey)).toEqual([]);
+    expect(invalidate).not.toHaveBeenCalledWith({ queryKey: draftRestoresKey });
+  });
+
+  it("fails closed when the event omits initiator_user_id", () => {
+    const qc = createQueryClient();
+    const invalidate = vi.spyOn(qc, "invalidateQueries");
+
+    applyChatCancelFinalizedToCache(
+      qc,
+      {
+        outcome: "restored",
+        chat_session_id: sessionId,
+        task_id: taskId,
+        message_id: "msg-cancelled-user",
+      },
+      "user-initiator",
+    );
+
+    // Nothing is lost by skipping the eager fetch: the durable restore is
+    // still picked up on the next composer mount / reconnect refetch.
+    expect(invalidate).not.toHaveBeenCalledWith({ queryKey: draftRestoresKey });
+  });
+
+  it("still settles the caches when a restored outcome carries no message id", () => {
+    const qc = createQueryClient();
+    qc.setQueryData<ChatMessage[]>(messagesKey, [cancelledUserMessage()]);
+    qc.setQueryData<ChatPendingTask>(pendingKey, {
+      task_id: taskId,
+      status: "running",
+    });
+
+    applyChatCancelFinalizedToCache(qc, {
+      outcome: "restored",
+      chat_session_id: sessionId,
+      task_id: taskId,
+    });
+
+    // No id to surgically remove — the list is left to the invalidation
+    // refetch — but the pending indicator still clears.
+    expect(qc.getQueryData<ChatMessage[]>(messagesKey)).toEqual([cancelledUserMessage()]);
+    expect(qc.getQueryData<ChatPendingTask>(pendingKey)).toEqual({});
   });
 });
 

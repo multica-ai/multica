@@ -26,9 +26,9 @@ type AcknowledgeWebhookDeliveryParams struct {
 	ResponseBody   pgtype.Text `json:"response_body"`
 }
 
-// Best-effort operator metadata for the HTTP acknowledgement. Admission is
-// already durable once the initial queued row exists, so callers still return
-// 202 if this metadata-only update fails.
+// Best-effort operator metadata for the HTTP acknowledgement. The delivery and
+// run are already durable, so callers still return their response if this
+// metadata-only update fails.
 func (q *Queries) AcknowledgeWebhookDelivery(ctx context.Context, arg AcknowledgeWebhookDeliveryParams) (WebhookDelivery, error) {
 	row := q.db.QueryRow(ctx, acknowledgeWebhookDelivery, arg.ID, arg.ResponseStatus, arg.ResponseBody)
 	var i WebhookDelivery

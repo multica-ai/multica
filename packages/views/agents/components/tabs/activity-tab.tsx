@@ -37,6 +37,7 @@ import { useWorkspacePaths } from "@multica/core/paths";
 import { issueDetailOptions } from "@multica/core/issues/queries";
 import { AppLink } from "../../../navigation";
 import { TranscriptButton } from "../../../common/task-transcript";
+import { AttributionBadge } from "../../../issues/components/attribution-badge";
 import { taskStatusConfig } from "../../config";
 import { failureReasonLabel } from "./task-failure";
 import { Sparkline } from "../sparkline";
@@ -637,6 +638,21 @@ function TaskRow({
             <>
               <Sep />
               <span className="text-destructive">{failureLabel}</span>
+            </>
+          )}
+          {/* Accountable member (MUL-4302 §9): whose behalf this run is on.
+              A leading separator keeps the avatar on the same middot rhythm as
+              the rest of the meta line instead of glued to the duration. The
+              guard mirrors the badge's own render condition (avatar-only needs
+              an initiator) so no dangling separator is left for an
+              unattributed run. */}
+          {task.attribution?.initiator && (
+            <>
+              <Sep />
+              <AttributionBadge
+                attribution={task.attribution}
+                variant="avatar"
+              />
             </>
           )}
         </div>

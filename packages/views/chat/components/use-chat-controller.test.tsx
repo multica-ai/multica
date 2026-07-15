@@ -2,6 +2,13 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { act, renderHook } from "@testing-library/react";
 import type { Agent, ChatSession } from "@multica/core/types";
 
+interface QueuedRestore {
+  id: string;
+  content: string;
+  attachments?: unknown[];
+  sessionId: string;
+}
+
 // --- Shared mutable state (hoisted so vi.mock factories can reach it) --------
 const h = vi.hoisted(() => {
   const store = {
@@ -13,6 +20,34 @@ const h = vi.hoisted(() => {
     setSelectedAgentId: vi.fn((id: string | null) => {
       store.selectedAgentId = id;
     }),
+    appliedDraftRestoreIds: [] as string[],
+    markDraftRestoreApplied: vi.fn((id: string) => {
+      if (!store.appliedDraftRestoreIds.includes(id)) {
+        store.appliedDraftRestoreIds = [...store.appliedDraftRestoreIds, id];
+      }
+    }),
+    forgetDraftRestoreApplied: vi.fn((id: string) => {
+      store.appliedDraftRestoreIds = store.appliedDraftRestoreIds.filter((x) => x !== id);
+    }),
+    // Server-less restores (a failed send, a synchronous cancel) queue per session
+    // and are persisted; the shared slot never holds one for another session.
+    pendingSendRestores: {} as Record<string, QueuedRestore[]>,
+    enqueuePendingSendRestore: vi.fn((r: QueuedRestore) => {
+      const existing = store.pendingSendRestores[r.sessionId] ?? [];
+      if (existing.some((q) => q.id === r.id)) return;
+      store.pendingSendRestores = {
+        ...store.pendingSendRestores,
+        [r.sessionId]: [...existing, r],
+      };
+    }),
+    dequeuePendingSendRestore: vi.fn((sessionId: string, restoreId: string) => {
+      const existing = store.pendingSendRestores[sessionId] ?? [];
+      const remaining = existing.filter((q) => q.id !== restoreId);
+      const next = { ...store.pendingSendRestores };
+      if (remaining.length > 0) next[sessionId] = remaining;
+      else delete next[sessionId];
+      store.pendingSendRestores = next;
+    }),
   };
   return {
     store,
@@ -20,9 +55,14 @@ const h = vi.hoisted(() => {
     markReadMutate: vi.fn(),
     // Foreground gate for the auto mark-read effect; tests flip it.
     appForeground: { value: true },
+    consumeRestoreMutate: vi.fn(),
+    removeFromCaches: vi.fn(),
     // useQuery reads these so each test can vary the loaded data.
     sessions: [] as ChatSession[],
     agents: [] as Agent[],
+    draftRestores: null as
+      | { restores: { id: string; chat_session_id: string; content: string }[] }
+      | null,
   };
 });
 
@@ -50,6 +90,7 @@ vi.mock("@multica/core/chat/mutations", () => ({
   useCreateChatSession: () => ({ mutateAsync: vi.fn() }),
   useMarkChatSessionRead: () => ({ mutate: h.markReadMutate }),
   useSetChatSessionArchived: () => ({ mutate: h.archivedMutate }),
+  useConsumeChatDraftRestore: () => ({ mutate: h.consumeRestoreMutate }),
 }));
 vi.mock("../../common/use-app-foreground", () => ({
   useAppForeground: () => h.appForeground.value,
@@ -59,6 +100,9 @@ vi.mock("@multica/core/chat", () => ({
     (sel: (s: typeof h.store) => unknown) => sel(h.store),
     { getState: () => h.store },
   ),
+}));
+vi.mock("@multica/core/realtime", () => ({
+  removeChatMessageFromCaches: h.removeFromCaches,
 }));
 vi.mock("@multica/core/logger", () => ({
   createLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }),
@@ -77,6 +121,7 @@ vi.mock("@tanstack/react-query", async (importOriginal) => {
         return { data: [{ user_id: "user-1", role: "admin" }] };
       }
       if (key.includes("sessions")) return { data: h.sessions, isSuccess: true };
+      if (key.includes("draft-restores")) return { data: h.draftRestores };
       return { data: null };
     },
     useInfiniteQuery: () => ({
@@ -303,5 +348,121 @@ describe("useChatController auto mark-read — foreground gating (MUL-4485)", ()
     });
     act(() => vi.advanceTimersByTime(1));
     expect(h.markReadMutate).toHaveBeenCalledWith("sU");
+  });
+});
+
+describe("useChatController durable draft restores (#5219)", () => {
+  beforeEach(() => {
+    h.draftRestores = null;
+    h.consumeRestoreMutate.mockClear();
+    h.removeFromCaches.mockClear();
+    h.store.appliedDraftRestoreIds = [];
+    h.store.markDraftRestoreApplied.mockClear();
+    h.store.forgetDraftRestoreApplied.mockClear();
+    h.store.pendingSendRestores = {};
+    h.store.enqueuePendingSendRestore.mockClear();
+    h.store.dequeuePendingSendRestore.mockClear();
+    h.appForeground.value = true;
+  });
+
+  // The reconnect/offline recovery path: no chat:cancel_finalized event was
+  // seen — the restore arrives purely through the draft-restores query on
+  // composer mount, is handed to the composer, and is consumed server-side
+  // only after the composer reports the hand-off complete.
+  it("hands a fetched restore to the composer and consumes it after the hand-off", () => {
+    h.draftRestores = {
+      restores: [{ id: "msg-1", chat_session_id: "sA", content: "run the thing" }],
+    };
+    const result = setup("sA", [sA, sB, sC], [agentA, agentB]);
+
+    expect(result.current.restoreDraftRequest).toEqual({
+      id: "msg-1",
+      content: "run the thing",
+      attachments: undefined,
+      sessionId: "sA",
+      serverRestoreId: "msg-1",
+    });
+    // The deleted bubble may still be cached when the event was missed.
+    expect(h.removeFromCaches).toHaveBeenCalledWith(expect.anything(), "sA", "msg-1");
+    // Not yet consumed: the draft isn't persisted client-side until the
+    // composer takes it.
+    expect(h.consumeRestoreMutate).not.toHaveBeenCalled();
+
+    act(() => {
+      result.current.handleRestoreDraftApplied();
+    });
+
+    // The ledger entry is written BEFORE the request goes out: a consume that
+    // never lands must not let this restore be offered (and re-sent) again.
+    expect(h.store.markDraftRestoreApplied).toHaveBeenCalledWith("msg-1");
+    expect(h.consumeRestoreMutate).toHaveBeenCalledWith(
+      { sessionId: "sA", restoreId: "msg-1" },
+      expect.anything(),
+    );
+    expect(result.current.restoreDraftRequest).toBeNull();
+  });
+
+  // The lost-consume case (#5219 review): the DELETE never reached the server,
+  // so the row comes back on the next fetch — but it was already applied, and
+  // the user may have sent it. It must be reconciled (consumed again), never
+  // re-offered to the composer.
+  it("reconciles a row whose consume was lost instead of re-offering it", () => {
+    h.store.appliedDraftRestoreIds = ["msg-1"];
+    h.draftRestores = {
+      restores: [{ id: "msg-1", chat_session_id: "sA", content: "run the thing" }],
+    };
+    const result = setup("sA", [sA, sB, sC], [agentA, agentB]);
+
+    expect(result.current.restoreDraftRequest).toBeNull();
+    expect(h.consumeRestoreMutate).toHaveBeenCalledWith(
+      { sessionId: "sA", restoreId: "msg-1" },
+      expect.anything(),
+    );
+  });
+
+  it("leaves a restore belonging to another session pending", () => {
+    h.draftRestores = {
+      restores: [{ id: "msg-2", chat_session_id: "sB", content: "other session draft" }],
+    };
+    const result = setup("sA", [sA, sB, sC], [agentA, agentB]);
+
+    expect(result.current.restoreDraftRequest).toBeNull();
+    expect(h.consumeRestoreMutate).not.toHaveBeenCalled();
+  });
+
+  // A backgrounded browser tab still renders this controller. It must not claim a
+  // restore the user is waiting on in a foreground surface — the same silent-theft
+  // hazard the hidden chat window guards against, reached here through the app
+  // foreground gate rather than isOpen.
+  it("does NOT offer or consume a restore while the app is backgrounded", () => {
+    h.appForeground.value = false;
+    h.draftRestores = {
+      restores: [{ id: "msg-1", chat_session_id: "sA", content: "run the thing" }],
+    };
+    const result = setup("sA", [sA, sB, sC], [agentA, agentB]);
+
+    expect(result.current.restoreDraftRequest).toBeNull();
+    expect(h.consumeRestoreMutate).not.toHaveBeenCalled();
+  });
+
+  it("offers the restore once the surface returns to the foreground", () => {
+    h.appForeground.value = false;
+    h.draftRestores = {
+      restores: [{ id: "msg-1", chat_session_id: "sA", content: "run the thing" }],
+    };
+    h.store.activeSessionId = "sA";
+    h.store.selectedAgentId = null;
+    h.sessions = [sA, sB, sC];
+    h.agents = [agentA, agentB];
+    const { result, rerender } = renderHook(() => useChatController());
+
+    expect(result.current.restoreDraftRequest).toBeNull();
+
+    act(() => {
+      h.appForeground.value = true;
+      rerender();
+    });
+
+    expect(result.current.restoreDraftRequest?.serverRestoreId).toBe("msg-1");
   });
 });

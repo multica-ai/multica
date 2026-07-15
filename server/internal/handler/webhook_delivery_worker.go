@@ -165,15 +165,26 @@ func (w *WebhookDeliveryWorker) ProcessNext(ctx context.Context) (bool, error) {
 		return true, w.retryOrFail(ctx, delivery, fmt.Errorf("encode envelope: %w", err))
 	}
 
-	switch {
-	case !trigger.Enabled:
-		return true, w.complete(ctx, delivery, deliveryStatusIgnored, pgtype.UUID{}, "trigger_disabled")
-	case autopilot.Status == "archived":
-		return true, w.complete(ctx, delivery, deliveryStatusIgnored, pgtype.UUID{}, "autopilot_archived")
-	case autopilot.Status != "active":
-		return true, w.complete(ctx, delivery, deliveryStatusIgnored, pgtype.UUID{}, "autopilot_paused")
-	case !webhookEventAllowedByTriggerScope(trigger.EventFilters, envelope):
-		return true, w.complete(ctx, delivery, deliveryStatusIgnored, pgtype.UUID{}, "event_filtered")
+	// Once ingress has synchronously admitted a run and returned accepted or
+	// skipped, that decision is durable. Re-check mutable trigger/autopilot
+	// state only for deliveries recovered from the pre-admission crash window;
+	// otherwise a pause immediately after the response could strand the run.
+	_, admissionErr := w.h.Queries.GetAutopilotRunByWebhookDelivery(ctx, delivery.ID)
+	hasAdmittedRun := admissionErr == nil
+	if admissionErr != nil && !errors.Is(admissionErr, pgx.ErrNoRows) {
+		return true, w.retryOrFail(ctx, delivery, fmt.Errorf("load admitted run: %w", admissionErr))
+	}
+	if !hasAdmittedRun {
+		switch {
+		case !trigger.Enabled:
+			return true, w.complete(ctx, delivery, deliveryStatusIgnored, pgtype.UUID{}, "trigger_disabled")
+		case autopilot.Status == "archived":
+			return true, w.complete(ctx, delivery, deliveryStatusIgnored, pgtype.UUID{}, "autopilot_archived")
+		case autopilot.Status != "active":
+			return true, w.complete(ctx, delivery, deliveryStatusIgnored, pgtype.UUID{}, "autopilot_paused")
+		case !webhookEventAllowedByTriggerScope(trigger.EventFilters, envelope):
+			return true, w.complete(ctx, delivery, deliveryStatusIgnored, pgtype.UUID{}, "event_filtered")
+		}
 	}
 
 	run, dispatchErr := w.h.AutopilotService.DispatchAutopilotForWebhookDelivery(

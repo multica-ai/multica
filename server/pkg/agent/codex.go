@@ -873,12 +873,16 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 			b.cfg.Logger.Info("codex thread started", "thread_id", threadID)
 		}
 
-		// 3. Send turn and wait for completion
+		// 3. Send turn and wait for completion. When a resume was expected but we
+		// ended up on a fresh thread (the live thread/resume RPC was rejected — a
+		// corrupt/incompatible rollout, server-side thread GC, schema drift — or a
+		// transport failure forced a fresh retry), prepend a continuity notice so
+		// the agent tells the user the prior conversation could not be restored.
+		// The daemon's pre-flight gates only catch cases detectable before launch;
+		// this covers the ones only the live resume reveals (MUL-4424).
 		turnParams := map[string]any{
 			"threadId": threadID,
-			"input": []map[string]any{
-				{"type": "text", "text": prompt},
-			},
+			"input":    codexTurnInput(prompt, opts.ResumeExpected, resumed),
 		}
 		// Per-turn reasoning override. Mirrors the per-thread injection in
 		// startOrResumeThread; keeping both in sync is enforced by the
@@ -1054,9 +1058,12 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 		c.usageMu.Unlock()
 
 		// Fallback: if no usage from JSON-RPC, scan Codex session JSONL logs.
-		// Codex writes token_count events to ~/.codex/sessions/YYYY/MM/DD/*.jsonl.
+		// Codex writes token_count events to $CODEX_HOME/sessions/YYYY/MM/DD/*.jsonl;
+		// scan this backend's per-task CODEX_HOME, since sessions are isolated
+		// there rather than in the shared ~/.codex/sessions (MUL-4424).
 		if u.InputTokens == 0 && u.OutputTokens == 0 {
-			if scanned := scanCodexSessionUsage(startTime); scanned != nil {
+			taskCodexHome := strings.TrimSpace(b.cfg.Env["CODEX_HOME"])
+			if scanned := scanCodexSessionUsage(startTime, taskCodexHome); scanned != nil {
 				u = scanned.usage
 				if scanned.model != "" && opts.Model == "" {
 					opts.Model = scanned.model
@@ -1083,6 +1090,27 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 	}()
 
 	return &Session{Messages: msgCh, Result: resCh}, nil
+}
+
+// codexResumeUnavailableNotice is prepended to the first turn's input when a
+// resume was expected but Codex ended up on a fresh thread. It mirrors the
+// daemon brief's Session Continuity Notice so the disclosure is identical
+// whether the loss is detected pre-launch (daemon gate) or only by the live
+// thread/resume RPC (MUL-4424).
+const codexResumeUnavailableNotice = "[System notice] You were expected to continue an earlier conversation, but restoring that session failed and this is a fresh thread with no memory of the previous turns. Rebuild context from the issue/thread, and when you reply, tell the user up front (one short sentence) that the previous conversation context could not be restored and this is a new session.\n\n"
+
+// codexTurnInput builds the input content for the first turn/start. When a
+// resume was expected (resumeExpected) but the backend landed on a fresh thread
+// (!resumed), it prepends codexResumeUnavailableNotice so the user learns the
+// prior context was lost instead of the run silently continuing as new. The
+// notice is folded into the same text block as the prompt to stay within the
+// single-text-block turn input Codex already accepts.
+func codexTurnInput(prompt string, resumeExpected, resumed bool) []map[string]any {
+	text := prompt
+	if resumeExpected && !resumed {
+		text = codexResumeUnavailableNotice + prompt
+	}
+	return []map[string]any{{"type": "text", "text": text}}
 }
 
 // startOrResumeThread picks between Codex's thread/resume and thread/start
@@ -2079,9 +2107,11 @@ type codexSessionUsage struct {
 
 // scanCodexSessionUsage scans Codex session JSONL files written after startTime
 // to extract token usage. Codex writes token_count events to
-// ~/.codex/sessions/YYYY/MM/DD/*.jsonl.
-func scanCodexSessionUsage(startTime time.Time) *codexSessionUsage {
-	root := codexSessionRoot()
+// $CODEX_HOME/sessions/YYYY/MM/DD/*.jsonl. codexHome is the backend's per-task
+// CODEX_HOME; sessions are isolated there rather than in the shared
+// ~/.codex/sessions (MUL-4424), so usage must be read from it.
+func scanCodexSessionUsage(startTime time.Time, codexHome string) *codexSessionUsage {
+	root := codexSessionRoot(codexHome)
 	if root == "" {
 		return nil
 	}
@@ -2117,9 +2147,15 @@ func scanCodexSessionUsage(startTime time.Time) *codexSessionUsage {
 	return &result
 }
 
-// codexSessionRoot returns the Codex sessions directory.
-func codexSessionRoot() string {
-	if codexHome := os.Getenv("CODEX_HOME"); codexHome != "" {
+// codexSessionRoot returns the Codex sessions directory. It prefers the
+// explicit per-task codexHome the backend is running with (so usage is read
+// from the same task-local sessions Codex actually wrote to), then the ambient
+// CODEX_HOME, then ~/.codex.
+func codexSessionRoot(codexHome string) string {
+	if codexHome = strings.TrimSpace(codexHome); codexHome == "" {
+		codexHome = os.Getenv("CODEX_HOME")
+	}
+	if codexHome != "" {
 		dir := filepath.Join(codexHome, "sessions")
 		if info, err := os.Stat(dir); err == nil && info.IsDir() {
 			return dir

@@ -8,7 +8,7 @@ import type { ReactNode } from "react";
 
 import { setApiInstance } from "../api";
 import type { ApiClient } from "../api/client";
-import { useSetChatSessionArchived } from "./mutations";
+import { useConsumeChatDraftRestore, useSetChatSessionArchived } from "./mutations";
 import { chatKeys } from "./queries";
 import type { ChatSession } from "../types";
 
@@ -123,5 +123,71 @@ describe("useSetChatSessionArchived", () => {
     expect(row.status).toBe("active");
     expect(row.unread_count).toBe(2);
     expect(row.has_unread).toBe(true);
+  });
+});
+
+// The consume DELETE is the last step of a durable draft restore (#5219), and
+// mutations are `retry: false` app-wide — a single dropped request would leave
+// the row behind, to be re-offered later. The endpoint is idempotent, so this
+// one retries instead of giving up on the first failure.
+describe("useConsumeChatDraftRestore", () => {
+  let qc: QueryClient;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    qc = new QueryClient();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    qc.clear();
+    vi.restoreAllMocks();
+  });
+
+  it("retries a lost consume until the server acknowledges it", async () => {
+    const consumeChatDraftRestore = vi
+      .fn<(sessionId: string, restoreId: string) => Promise<void>>()
+      .mockRejectedValueOnce(new Error("network"))
+      .mockResolvedValueOnce(undefined);
+    setApiInstance({ consumeChatDraftRestore } as unknown as ApiClient);
+
+    const onSuccess = vi.fn();
+    const { result } = renderHook(() => useConsumeChatDraftRestore(), {
+      wrapper: createWrapper(qc),
+    });
+
+    act(() => {
+      result.current.mutate({ sessionId: "s1", restoreId: "r1" }, { onSuccess });
+    });
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10_000);
+    });
+
+    expect(consumeChatDraftRestore).toHaveBeenCalledTimes(2);
+    expect(onSuccess).toHaveBeenCalledTimes(1);
+  });
+
+  it("drops the row from the cache immediately so it is not re-offered", async () => {
+    const consumeChatDraftRestore = vi.fn().mockResolvedValue(undefined);
+    setApiInstance({ consumeChatDraftRestore } as unknown as ApiClient);
+    qc.setQueryData(chatKeys.draftRestores("s1"), {
+      restores: [
+        { id: "r1", chat_session_id: "s1", content: "keep me" },
+        { id: "r2", chat_session_id: "s1", content: "other" },
+      ],
+    });
+
+    const { result } = renderHook(() => useConsumeChatDraftRestore(), {
+      wrapper: createWrapper(qc),
+    });
+    act(() => {
+      result.current.mutate({ sessionId: "s1", restoreId: "r1" });
+    });
+
+    const cached = qc.getQueryData(chatKeys.draftRestores("s1")) as {
+      restores: { id: string }[];
+    };
+    expect(cached.restores.map((r) => r.id)).toEqual(["r2"]);
   });
 });

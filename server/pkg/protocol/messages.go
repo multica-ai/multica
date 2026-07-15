@@ -10,6 +10,15 @@ const (
 	// Gated so only daemons+servers that both support it route claim over WS;
 	// everyone else keeps using the HTTP claim endpoint.
 	DaemonCapabilityRPCV1 = "rpc-v1"
+
+	// AppCapabilityChatDraftRestoreV1 is advertised (X-Client-Capabilities) by
+	// app clients that understand the durable draft-restore recovery path:
+	// chat:cancel_finalized as an invalidation hint plus the draft-restores
+	// endpoint. Cancelling a started-but-empty chat task defers the
+	// empty/non-empty judgment (#5219), so its cancel response carries no
+	// synchronous restore — a client without this capability would silently
+	// drop the user's prompt, and keeps the legacy synchronous restore instead.
+	AppCapabilityChatDraftRestoreV1 = "chat-draft-restore-v1"
 )
 
 // RPCRequestPayload is the generic daemon→server request envelope carried in a
@@ -159,6 +168,45 @@ type ChatDonePayload struct {
 	ElapsedMs     int64  `json:"elapsed_ms,omitempty"`
 	CreatedAt     string `json:"created_at,omitempty"`
 	MessageKind   string `json:"message_kind,omitempty"`
+}
+
+// Outcome values carried by ChatCancelFinalizedPayload.
+const (
+	// ChatCancelOutcomeStopped: the transcript turned out non-empty, so a
+	// "Stopped." assistant message was persisted.
+	ChatCancelOutcomeStopped = "stopped"
+	// ChatCancelOutcomeRestored: the transcript stayed empty, so the
+	// triggering user message was deleted and its content should be
+	// restored into the composer as a draft.
+	ChatCancelOutcomeRestored = "restored"
+)
+
+// ChatCancelFinalizedPayload is broadcast when a cancelled chat task's
+// deferred finalization settles (#5219). The cancel HTTP response cannot
+// carry this outcome — it is only known after the daemon's transcript flush —
+// so clients react to this event instead: outcome "stopped" inserts the
+// assistant message (MessageID/Content/... describe the new row, shaped like
+// ChatDonePayload), outcome "restored" removes the deleted user message from
+// caches and prompts the initiator's client to fetch the durable draft
+// restore from the creator-authorized endpoint. The restored prompt's content
+// and attachments deliberately never ride this workspace-wide broadcast.
+type ChatCancelFinalizedPayload struct {
+	Outcome       string `json:"outcome"`
+	ChatSessionID string `json:"chat_session_id"`
+	TaskID        string `json:"task_id"`
+	// InitiatorUserID is the human who triggered the cancelled task. Only
+	// this user's client needs to fetch the draft restore (the endpoint is
+	// creator-authorized regardless); clients treat a missing value as
+	// "not me".
+	InitiatorUserID string `json:"initiator_user_id,omitempty"`
+	MessageID       string `json:"message_id,omitempty"`
+	// Content/MessageKind/CreatedAt/ElapsedMs describe the persisted
+	// "Stopped." assistant row and are set only for outcome "stopped" —
+	// the same exposure surface as chat:done.
+	Content     string `json:"content,omitempty"`
+	MessageKind string `json:"message_kind,omitempty"`
+	CreatedAt   string `json:"created_at,omitempty"`
+	ElapsedMs   int64  `json:"elapsed_ms,omitempty"`
 }
 
 // ChatSessionReadPayload is broadcast when the creator marks a session as read.

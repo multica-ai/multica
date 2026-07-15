@@ -77,8 +77,8 @@ func TestAgentCreateOriginator_E2E_CreateAssignSquad_PrivateWorkerTriggered(t *t
 	creatorAID := createHandlerTestAgent(t, "mul4305-e2e-creator-agent", nil)
 	var creatorTaskID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO agent_task_queue (agent_id, runtime_id, status, priority, originator_user_id)
-		VALUES ($1, (SELECT runtime_id FROM agent WHERE id = $1), 'running', 0, $2)
+		INSERT INTO agent_task_queue (agent_id, runtime_id, status, priority, originator_user_id, accountable_user_id)
+		VALUES ($1, (SELECT runtime_id FROM agent WHERE id = $1), 'running', 0, $2, $2)
 		RETURNING id
 	`, creatorAID, ownerH).Scan(&creatorTaskID); err != nil {
 		t.Fatalf("create A's acting task: %v", err)
@@ -197,8 +197,8 @@ func TestAgentCreateOriginator_E2E_UpdateAssignSquad_HandlerGateAdmitsPrivateLea
 	creatorAID := createHandlerTestAgent(t, "mul4305-e2e-update-creator", nil)
 	var creatorTaskID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO agent_task_queue (agent_id, runtime_id, status, priority, originator_user_id)
-		VALUES ($1, (SELECT runtime_id FROM agent WHERE id = $1), 'running', 0, $2)
+		INSERT INTO agent_task_queue (agent_id, runtime_id, status, priority, originator_user_id, accountable_user_id)
+		VALUES ($1, (SELECT runtime_id FROM agent WHERE id = $1), 'running', 0, $2, $2)
 		RETURNING id
 	`, creatorAID, ownerH).Scan(&creatorTaskID); err != nil {
 		t.Fatalf("create A's acting task: %v", err)

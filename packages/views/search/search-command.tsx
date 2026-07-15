@@ -13,6 +13,8 @@ import {
   SearchIcon,
   Inbox,
   CircleUser,
+  ListChevronsDownUp,
+  ListChevronsUpDown,
   ListTodo,
   FolderKanban,
   Bot,
@@ -24,7 +26,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { Command as CommandPrimitive } from "cmdk";
-import { useQueries, useQuery } from "@tanstack/react-query";
+import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import type {
   MemberWithUser,
@@ -35,9 +37,11 @@ import { api } from "@multica/core/api";
 import {
   openCreateIssueWithPreference,
   selectRecentIssues,
+  useCommentCollapseStore,
   useRecentIssuesStore,
+  useResolvedExpandStore,
 } from "@multica/core/issues/stores";
-import { issueDetailOptions } from "@multica/core/issues/queries";
+import { issueDetailOptions, issueTimelineOptions } from "@multica/core/issues/queries";
 import { useWorkspaceId } from "@multica/core";
 import { useWorkspacePaths } from "@multica/core/paths";
 import type { WorkspacePaths } from "@multica/core/paths";
@@ -46,6 +50,7 @@ import { createShortcutChord } from "@multica/core/shortcuts";
 import { memberListOptions } from "@multica/core/workspace/queries";
 import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
 import { StatusIcon } from "../issues/components";
+import { resolvedThreadRootIds, rootCommentIds } from "../issues/components/thread-utils";
 import { ProjectIcon } from "../projects/components/project-icon";
 import { PROJECT_STATUS_CONFIG } from "@multica/core/projects/config";
 import type { ProjectStatus } from "@multica/core/types";
@@ -201,6 +206,7 @@ export function SearchCommand() {
     ...issueDetailOptions(wsId, currentIssueId ?? ""),
     enabled: !!currentIssueId,
   });
+  const queryClient = useQueryClient();
 
   const commands = useMemo<CommandItem[]>(() => {
     const activeThemeCheck = (value: ThemeValue) =>
@@ -234,7 +240,7 @@ export function SearchCommand() {
       },
     ];
 
-    if (currentIssue) {
+    if (currentIssueId && currentIssue) {
       const identifier = currentIssue.identifier;
       items.push(
         {
@@ -258,6 +264,46 @@ export function SearchCommand() {
             void copyText(identifier).then((ok) => {
               if (ok) toast.success(t(($) => $.toast.copied_identifier, { identifier }));
             });
+            setOpen(false);
+          },
+        },
+        {
+          key: "fold-all-comments",
+          label: t(($) => $.commands.fold_all_comments),
+          icon: ListChevronsDownUp,
+          keywords: ["fold", "collapse", "comments", "收起", "折叠", "评论"],
+          onSelect: () => {
+            // The timeline is already cached whenever the issue page has
+            // rendered; ensureQueryData only fetches on a cold cache. If it
+            // still can't load, no comments are on screen — dropping the
+            // action matches the visible state.
+            void queryClient
+              .ensureQueryData(issueTimelineOptions(currentIssueId))
+              .then((entries) => {
+                useCommentCollapseStore
+                  .getState()
+                  .collapseAll(currentIssueId, rootCommentIds(entries));
+                useResolvedExpandStore.getState().collapseAll(currentIssueId);
+              })
+              .catch(() => {});
+            setOpen(false);
+          },
+        },
+        {
+          key: "unfold-all-comments",
+          label: t(($) => $.commands.unfold_all_comments),
+          icon: ListChevronsUpDown,
+          keywords: ["unfold", "expand", "comments", "展开", "评论"],
+          onSelect: () => {
+            void queryClient
+              .ensureQueryData(issueTimelineOptions(currentIssueId))
+              .then((entries) => {
+                useCommentCollapseStore.getState().expandAll(currentIssueId);
+                useResolvedExpandStore
+                  .getState()
+                  .expandAll(currentIssueId, resolvedThreadRootIds(entries));
+              })
+              .catch(() => {});
             setOpen(false);
           },
         },
@@ -301,7 +347,7 @@ export function SearchCommand() {
     );
 
     return items;
-  }, [currentIssue, getShareableUrl, pathname, setOpen, setTheme, theme, t]);
+  }, [currentIssue, currentIssueId, getShareableUrl, pathname, queryClient, setOpen, setTheme, theme, t]);
 
   const filteredCommands = useMemo(() => {
     const q = query.trim().toLowerCase();

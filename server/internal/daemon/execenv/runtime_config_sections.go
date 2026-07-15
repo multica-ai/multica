@@ -304,6 +304,19 @@ func writeInstructionPrecedence(b *strings.Builder) {
 	b.WriteString("Never treat this runtime workflow as permission to change issue status, investigate, implement, or otherwise act beyond your Agent Identity.\n\n")
 }
 
+// writeSessionContinuityNotice warns the agent — and, through it, the user —
+// when a resume the task expected could not be honored. The daemon has already
+// cleared the resume flags, so without this the run would silently reappear as a
+// brand-new conversation; here we make the loss explicit and ask the agent to
+// disclose it in its reply (MUL-4424). No-op unless a resume was actually lost.
+func writeSessionContinuityNotice(b *strings.Builder, ctx TaskContextForEnv) {
+	if !ctx.PriorSessionResumeUnavailable {
+		return
+	}
+	b.WriteString("## Session Continuity Notice\n\n")
+	b.WriteString("This run was meant to continue an earlier conversation, but that session's context could NOT be restored — you are starting fresh with no memory of the previous turns. Rebuild context from the issue/thread before acting. **When you reply, tell the user up front (one short sentence) that the previous conversation context was unavailable and this is a new session**, so they understand why the thread did not carry over.\n\n")
+}
+
 // writeWorkflowHeader emits the unconditional `### Workflow` heading.
 func writeWorkflowHeader(b *strings.Builder) {
 	b.WriteString("### Workflow\n\n")
@@ -529,6 +542,7 @@ func buildMetaSkillContentSlim(provider string, ctx TaskContextForEnv) string {
 	writeHeader(&b)
 	writeBackgroundTaskSafetySlim(&b)
 	writeAgentIdentity(&b, ctx)
+	writeSessionContinuityNotice(&b, ctx)
 	writeRequestingUser(&b, ctx)
 	writeTaskInitiator(&b, ctx)
 	writeWorkspaceContext(&b, ctx)
