@@ -46,7 +46,6 @@ import { sortIssues } from "../utils/sort";
 import { ALL_STATUSES, STATUS_CONFIG } from "@multica/core/issues/config";
 import { DraggableBoardCard, BoardCardContent } from "./board-card";
 import { StatusIcon } from "./status-icon";
-import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
 import { Button } from "@multica/ui/components/ui/button";
 import { StatusHeading } from "./status-heading";
 import { HiddenColumnsPanel, HiddenColumnRow } from "./hidden-columns-panel";
@@ -54,7 +53,15 @@ import { InfiniteScrollSentinel } from "./infinite-scroll-sentinel";
 import { AppLink } from "../../navigation";
 import { ProjectIcon } from "../../projects/components/project-icon";
 import { ActorAvatar } from "../../common/actor-avatar";
-import { VirtuosoSeed, VIRTUOSO_SEED_COUNT } from "../../common/virtuoso-seed";
+import { VirtuosoSeed } from "../../common/virtuoso-seed";
+
+// A swimlane row (header + one row of card cells) is ~300px+ tall — a
+// viewport fits ~3. The generic VIRTUOSO_SEED_COUNT (30, sized for 36px list
+// rows) made every surface remount synchronously mount up to 30 full lanes
+// (each lane = statuses x cells x cards); 6 covers the viewport with margin.
+const SWIMLANE_LANE_SEED_COUNT = 6;
+import { DeferredPopup } from "../../common/deferred-popup";
+import { DeferredTooltip } from "../../common/deferred-tooltip";
 import type { ChildProgress } from "./list-row";
 import { useT } from "../../i18n";
 import type { IssueActivityState } from "../surface/activity";
@@ -1210,29 +1217,48 @@ export function SwimLaneView({
                   className={`flex items-center justify-between rounded-xl ${cfg?.columnBg ?? "bg-muted/40"} px-3 py-2`}
                 >
                   <StatusHeading status={status} count={total} />
-                  <DropdownMenu>
-                    <DropdownMenuTrigger
-                      render={
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon-sm"
-                          aria-label={t(($) => $.board.hide_column)}
-                          className="rounded-full text-muted-foreground"
-                        >
-                          <MoreHorizontal className="size-3.5" />
-                        </Button>
-                      }
-                    />
-                    <DropdownMenuContent align="end">
-                      <DropdownMenuItem
-                        onClick={() => viewStoreApi.getState().hideStatus(status)}
+                  {/* Lazy-mounted like the board's column menu — see
+                      DeferredPopup. */}
+                  <DeferredPopup
+                    ariaHasPopup="menu"
+                    triggerRender={
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon-sm"
+                        aria-label={t(($) => $.board.hide_column)}
+                        className="rounded-full text-muted-foreground"
                       >
-                        <EyeOff className="size-3.5" />
-                        {t(($) => $.board.hide_column)}
-                      </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
+                        <MoreHorizontal className="size-3.5" />
+                      </Button>
+                    }
+                  >
+                    {(open, onOpenChange) => (
+                      <DropdownMenu open={open} onOpenChange={onOpenChange}>
+                        <DropdownMenuTrigger
+                          render={
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon-sm"
+                              aria-label={t(($) => $.board.hide_column)}
+                              className="rounded-full text-muted-foreground"
+                            >
+                              <MoreHorizontal className="size-3.5" />
+                            </Button>
+                          }
+                        />
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem
+                            onClick={() => viewStoreApi.getState().hideStatus(status)}
+                          >
+                            <EyeOff className="size-3.5" />
+                            {t(($) => $.board.hide_column)}
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    )}
+                  </DeferredPopup>
                 </div>
               );
             })}
@@ -1257,7 +1283,7 @@ export function SwimLaneView({
               customScrollParent={scrollEl}
               data={orderedLanes}
               computeItemKey={computeLaneKey}
-              initialItemCount={Math.min(orderedLanes.length, VIRTUOSO_SEED_COUNT)}
+              initialItemCount={Math.min(orderedLanes.length, SWIMLANE_LANE_SEED_COUNT)}
               increaseViewportBy={{ top: 600, bottom: 600 }}
               components={laneComponents}
               itemContent={renderLane}
@@ -1267,6 +1293,7 @@ export function SwimLaneView({
               data={orderedLanes}
               itemContent={renderLane}
               computeItemKey={computeLaneKey}
+              count={SWIMLANE_LANE_SEED_COUNT}
             />
           )}
         </SortableContext>
@@ -1406,20 +1433,18 @@ function DraggableSwimLane({
           </span>
         </button>
         {lane.parentIssue && (
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <AppLink
-                  href={paths.issueDetail(lane.parentIssue.id)}
-                  aria-label={t(($) => $.swimlane.open_parent)}
-                  className="inline-flex size-5 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
-                >
-                  <Pencil className="size-3" />
-                </AppLink>
-              }
-            />
-            <TooltipContent>{t(($) => $.swimlane.open_parent)}</TooltipContent>
-          </Tooltip>
+          <DeferredTooltip
+            content={t(($) => $.swimlane.open_parent)}
+            trigger={
+              <AppLink
+                href={paths.issueDetail(lane.parentIssue.id)}
+                aria-label={t(($) => $.swimlane.open_parent)}
+                className="inline-flex size-5 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
+              >
+                <Pencil className="size-3" />
+              </AppLink>
+            }
+          />
         )}
       </div>
       {/* Cells row — each cell mirrors a BoardColumn body */}
@@ -1533,24 +1558,25 @@ function SwimLaneCell({
           </p>
         )}
       </div>
+      {/* One of these per lane×status cell (~170 on a real swimlane) —
+          eagerly mounted tooltip roots here were the single largest slice
+          of swimlane mount cost. */}
       {!readOnly && onCreateIssue && (
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon-sm"
-                aria-label={t(($) => $.board.add_issue_tooltip)}
-                className="mt-1 w-full rounded-md text-muted-foreground hover:text-foreground"
-                onClick={handleAdd}
-              >
-                <Plus className="size-3.5" />
-              </Button>
-            }
-          />
-          <TooltipContent>{t(($) => $.board.add_issue_tooltip)}</TooltipContent>
-        </Tooltip>
+        <DeferredTooltip
+          content={t(($) => $.board.add_issue_tooltip)}
+          trigger={
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              aria-label={t(($) => $.board.add_issue_tooltip)}
+              className="mt-1 w-full rounded-md text-muted-foreground hover:text-foreground"
+              onClick={handleAdd}
+            >
+              <Plus className="size-3.5" />
+            </Button>
+          }
+        />
       )}
     </div>
   );

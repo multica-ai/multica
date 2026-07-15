@@ -3,7 +3,6 @@
 import { memo, useCallback, useMemo, useState, type ReactNode } from "react";
 import { Virtuoso } from "react-virtuoso";
 import { EyeOff, MoreHorizontal, Plus, UserMinus } from "lucide-react";
-import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
 import { useDroppable } from "@dnd-kit/core";
 import { SortableContext, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import type {
@@ -27,6 +26,8 @@ import type { ChildProgress } from "./list-row";
 import { useT } from "../../i18n";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { useRestoredScrollOffset, useRestoredScrollRef } from "../../platform";
+import { DeferredPopup } from "../../common/deferred-popup";
+import { DeferredTooltip } from "../../common/deferred-tooltip";
 import { VirtuosoSeed } from "../../common/virtuoso-seed";
 import type { IssueCreateDefaults } from "../surface/types";
 
@@ -173,45 +174,58 @@ export const BoardColumn = memo(function BoardColumn({
 
         {/* Right: add + menu */}
         <div className="flex items-center gap-1">
+          {/* Column-header popups mount lazily: a board/swimlane renders one
+              header per column and almost none of these menus/tooltips are
+              ever opened — eagerly mounting them dominated surface mount
+              cost (DeferredPopup / DeferredTooltip). */}
           {status && (
-            <DropdownMenu>
-              <DropdownMenuTrigger
-                render={
-                  <Button variant="ghost" size="icon-sm" className="rounded-full text-muted-foreground">
-                    <MoreHorizontal className="size-3.5" />
-                  </Button>
-                }
-              />
-              <DropdownMenuContent align="end">
-                <DropdownMenuItem onClick={() => viewStoreApi.getState().hideStatus(status)}>
-                  <EyeOff className="size-3.5" />
-                  {t(($) => $.board.hide_column)}
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
+            <DeferredPopup
+              ariaHasPopup="menu"
+              triggerRender={
+                <Button variant="ghost" size="icon-sm" className="rounded-full text-muted-foreground">
+                  <MoreHorizontal className="size-3.5" />
+                </Button>
+              }
+            >
+              {(open, onOpenChange) => (
+                <DropdownMenu open={open} onOpenChange={onOpenChange}>
+                  <DropdownMenuTrigger
+                    render={
+                      <Button variant="ghost" size="icon-sm" className="rounded-full text-muted-foreground">
+                        <MoreHorizontal className="size-3.5" />
+                      </Button>
+                    }
+                  />
+                  <DropdownMenuContent align="end">
+                    <DropdownMenuItem onClick={() => viewStoreApi.getState().hideStatus(status)}>
+                      <EyeOff className="size-3.5" />
+                      {t(($) => $.board.hide_column)}
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              )}
+            </DeferredPopup>
           )}
           {onCreateIssue && (
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <Button
-                    variant="ghost"
-                    size="icon-sm"
-                    className="rounded-full text-muted-foreground"
-                    onClick={() => {
-                      const data = {
-                        ...(group.createData ?? {}),
-                        ...(projectId ? { project_id: projectId } : {}),
-                      };
-                      onCreateIssue(data);
-                    }}
-                  >
-                    <Plus className="size-3.5" />
-                  </Button>
-                }
-              />
-              <TooltipContent>{t(($) => $.board.add_issue_tooltip)}</TooltipContent>
-            </Tooltip>
+            <DeferredTooltip
+              content={t(($) => $.board.add_issue_tooltip)}
+              trigger={
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  className="rounded-full text-muted-foreground"
+                  onClick={() => {
+                    const data = {
+                      ...(group.createData ?? {}),
+                      ...(projectId ? { project_id: projectId } : {}),
+                    };
+                    onCreateIssue(data);
+                  }}
+                >
+                  <Plus className="size-3.5" />
+                </Button>
+              }
+            />
           )}
         </div>
       </div>

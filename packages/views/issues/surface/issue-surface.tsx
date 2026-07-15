@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, type ReactNode } from "react";
 import { ListTodo, Plus } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
@@ -61,6 +61,19 @@ export function IssueSurface({
     [resolvedSurfaceKey],
   );
 
+  // Every change of this key tears down and remounts the ENTIRE surface
+  // (providers, DnD, all columns/cards) — by design for data-window changes,
+  // but expensive enough that unexpected flips are performance bugs. Dev-only
+  // breadcrumb so a Performance trace showing double mounts can be tied to
+  // the exact key transition.
+  const contentKey = `${wsId}:${issueScopeKey(scope)}`;
+  useEffect(() => {
+    if (process.env.NODE_ENV !== "production") {
+      // eslint-disable-next-line no-console
+      console.warn(`[issue-surface] mount ${contentKey}`);
+    }
+  }, [contentKey]);
+
   return (
     <ViewStoreProvider store={store}>
       {/* Remount on data-window change: the list queries keep the previous
@@ -75,7 +88,7 @@ export function IssueSurface({
           workspaces share the same scope key (e.g. "workspace:all"). Keyed
           by data identity, not surfaceKey (view-preference identity). */}
       <IssueSurfaceContent
-        key={`${wsId}:${issueScopeKey(scope)}`}
+        key={contentKey}
         scope={scope}
         modes={modes}
         createDefaults={createDefaults}

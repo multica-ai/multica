@@ -31,6 +31,7 @@ export function DeferredPopup({
   trigger,
   triggerRender,
   triggerClassName,
+  ariaHasPopup = "dialog",
   children,
 }: {
   /** Trigger content, matching what the host passes to its popup trigger. */
@@ -43,6 +44,9 @@ export function DeferredPopup({
    * invisible.
    */
   triggerClassName?: string;
+  /** ARIA popup kind of the real trigger ("dialog" for popovers, "menu" for
+   *  dropdown menus) so the cold trigger reads the same to assistive tech. */
+  ariaHasPopup?: "dialog" | "menu";
   /** Renders the real component once upgraded. */
   children: (open: boolean, onOpenChange: (v: boolean) => void) => ReactNode;
 }) {
@@ -70,7 +74,7 @@ export function DeferredPopup({
       mountOpen();
     },
     onKeyDown: handleKeyDown,
-    "aria-haspopup": "dialog" as const,
+    "aria-haspopup": ariaHasPopup,
   };
 
   if (triggerRender) {

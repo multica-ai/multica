@@ -35,6 +35,17 @@ const SIDEBAR_WIDTH_MAX = 360
 const SIDEBAR_WIDTH_STORAGE_KEY = "sidebar_width"
 const SIDEBAR_WIDTH_MOBILE = "18rem"
 const SIDEBAR_WIDTH_ICON = "3rem"
+const SIDEBAR_MOTION_TRANSITION = {
+  type: "spring",
+  stiffness: 420,
+  damping: 38,
+  mass: 0.8,
+} as const
+const SIDEBAR_INSTANT_TRANSITION = { duration: 0 } as const
+
+function clampSidebarWidth(width: number) {
+  return Math.max(SIDEBAR_WIDTH_MIN, Math.min(SIDEBAR_WIDTH_MAX, width))
+}
 
 type SidebarContextProps = {
   state: "expanded" | "collapsed"
@@ -44,13 +55,20 @@ type SidebarContextProps = {
   setOpenMobile: (open: boolean) => void
   isMobile: boolean
   toggleSidebar: () => void
+}
+
+type SidebarResizeContextProps = {
   width: number
   setWidth: (width: number) => void
+  persistWidth: (width: number) => void
   isResizing: boolean
   setIsResizing: (v: boolean) => void
 }
 
 const SidebarContext = React.createContext<SidebarContextProps | null>(null)
+// Drag width changes every animation frame. Keeping it in a separate context
+// prevents controls that only consume open/mobile state from rerendering.
+const SidebarResizeContext = React.createContext<SidebarResizeContextProps | null>(null)
 
 function useSidebar() {
   const context = React.use(SidebarContext)
@@ -63,6 +81,15 @@ function useSidebar() {
 
 function useSidebarSafe() {
   return React.use(SidebarContext)
+}
+
+function useSidebarResize() {
+  const context = React.use(SidebarResizeContext)
+  if (!context) {
+    throw new Error("useSidebarResize must be used within a SidebarProvider.")
+  }
+
+  return context
 }
 
 function SidebarProvider({
@@ -85,12 +112,18 @@ function SidebarProvider({
   const [isResizing, setIsResizing] = React.useState(false)
   React.useEffect(() => {
     const stored = localStorage.getItem(SIDEBAR_WIDTH_STORAGE_KEY)
-    if (stored) _setWidth(Number(stored))
+    if (stored) {
+      const storedWidth = Number(stored)
+      if (Number.isFinite(storedWidth)) {
+        _setWidth(clampSidebarWidth(storedWidth))
+      }
+    }
   }, [])
   const setWidth = React.useCallback((w: number) => {
-    const clamped = Math.max(SIDEBAR_WIDTH_MIN, Math.min(SIDEBAR_WIDTH_MAX, w))
-    _setWidth(clamped)
-    localStorage.setItem(SIDEBAR_WIDTH_STORAGE_KEY, String(clamped))
+    _setWidth(clampSidebarWidth(w))
+  }, [])
+  const persistWidth = React.useCallback((w: number) => {
+    localStorage.setItem(SIDEBAR_WIDTH_STORAGE_KEY, String(clampSidebarWidth(w)))
   }, [])
 
   // This is the internal state of the sidebar.
@@ -130,33 +163,42 @@ function SidebarProvider({
       openMobile,
       setOpenMobile,
       toggleSidebar,
+    }),
+    [state, open, setOpen, isMobile, openMobile, setOpenMobile, toggleSidebar]
+  )
+  const resizeContextValue = React.useMemo<SidebarResizeContextProps>(
+    () => ({
       width,
       setWidth,
+      persistWidth,
       isResizing,
       setIsResizing,
     }),
-    [state, open, setOpen, isMobile, openMobile, setOpenMobile, toggleSidebar, width, setWidth, isResizing, setIsResizing]
+    [width, setWidth, persistWidth, isResizing]
   )
 
   return (
     <SidebarContext.Provider value={contextValue}>
-      <div
-        data-slot="sidebar-wrapper"
-        style={
-          {
-            "--sidebar-width": `${width}px`,
-            "--sidebar-width-icon": SIDEBAR_WIDTH_ICON,
-            ...style,
-          } as React.CSSProperties
-        }
-        className={cn(
-          "group/sidebar-wrapper flex min-h-svh w-full has-data-[variant=inset]:bg-sidebar",
-          className
-        )}
-        {...props}
-      >
-        {children}
-      </div>
+      <SidebarResizeContext.Provider value={resizeContextValue}>
+        <div
+          data-slot="sidebar-wrapper"
+          data-sidebar-resizing={isResizing ? "true" : undefined}
+          style={
+            {
+              "--sidebar-width": `${width}px`,
+              "--sidebar-width-icon": SIDEBAR_WIDTH_ICON,
+              ...style,
+            } as React.CSSProperties
+          }
+          className={cn(
+            "group/sidebar-wrapper flex min-h-svh w-full has-data-[variant=inset]:bg-sidebar",
+            className
+          )}
+          {...props}
+        >
+          {children}
+        </div>
+      </SidebarResizeContext.Provider>
     </SidebarContext.Provider>
   )
 }
@@ -174,12 +216,13 @@ function Sidebar({
   variant?: "sidebar" | "floating" | "inset"
   collapsible?: "offcanvas" | "icon" | "none"
 }) {
-  const { isMobile, state, openMobile, setOpenMobile, isResizing, width } = useSidebar()
+  const { isMobile, state, openMobile, setOpenMobile } = useSidebar()
+  const { isResizing, width } = useSidebarResize()
   const reducedMotion = useReducedMotion()
   const animateOffcanvas = collapsible === "offcanvas"
-  const motionTransition = reducedMotion
-    ? { duration: 0 }
-    : { type: "spring" as const, stiffness: 420, damping: 38, mass: 0.8 }
+  const motionTransition = reducedMotion || isResizing
+    ? SIDEBAR_INSTANT_TRANSITION
+    : SIDEBAR_MOTION_TRANSITION
 
   if (collapsible === "none") {
     return (
@@ -316,11 +359,38 @@ function SidebarTrigger({
 }
 
 function SidebarRail({ className, ...props }: React.ComponentProps<"button">) {
-  const { toggleSidebar, setWidth, setIsResizing } = useSidebar()
+  const { toggleSidebar } = useSidebar()
+  const { persistWidth, setWidth, setIsResizing } = useSidebarResize()
   const { t } = useTranslation("ui")
   const toggleLabel = t(($) => $.toggle_sidebar)
   const didDragRef = React.useRef(false)
-  const dragRef = React.useRef<{ startX: number; startWidth: number } | null>(null)
+  const dragRef = React.useRef<{
+    startX: number
+    startWidth: number
+    latestWidth: number
+  } | null>(null)
+  const pendingWidthRef = React.useRef<number | null>(null)
+  const resizeFrameRef = React.useRef<number | null>(null)
+
+  // Native mousemove can fire several times between paints. Only commit the
+  // latest width once per frame so React and layout do no redundant work.
+  const scheduleWidth = React.useCallback((width: number) => {
+    pendingWidthRef.current = width
+    if (resizeFrameRef.current !== null) return
+
+    resizeFrameRef.current = requestAnimationFrame(() => {
+      resizeFrameRef.current = null
+      const pendingWidth = pendingWidthRef.current
+      pendingWidthRef.current = null
+      if (pendingWidth !== null) setWidth(pendingWidth)
+    })
+  }, [setWidth])
+
+  React.useEffect(() => () => {
+    if (resizeFrameRef.current !== null) {
+      cancelAnimationFrame(resizeFrameRef.current)
+    }
+  }, [])
 
   const onMouseDown = React.useCallback(
     (e: React.MouseEvent) => {
@@ -329,16 +399,30 @@ function SidebarRail({ className, ...props }: React.ComponentProps<"button">) {
       const sidebarEl = (e.target as HTMLElement).closest("[data-slot='sidebar']")
       const containerEl = sidebarEl?.querySelector("[data-slot='sidebar-container']")
       if (!containerEl) return
-      dragRef.current = { startX: e.clientX, startWidth: containerEl.getBoundingClientRect().width }
+      const startWidth = clampSidebarWidth(containerEl.getBoundingClientRect().width)
+      dragRef.current = { startX: e.clientX, startWidth, latestWidth: startWidth }
+      setWidth(startWidth)
       setIsResizing(true)
 
       const onMouseMove = (ev: MouseEvent) => {
         if (!dragRef.current) return
         didDragRef.current = true
         const delta = ev.clientX - dragRef.current.startX
-        setWidth(dragRef.current.startWidth + delta)
+        const nextWidth = clampSidebarWidth(dragRef.current.startWidth + delta)
+        dragRef.current.latestWidth = nextWidth
+        scheduleWidth(nextWidth)
       }
       const onMouseUp = () => {
+        const finalWidth = dragRef.current?.latestWidth
+        if (resizeFrameRef.current !== null) {
+          cancelAnimationFrame(resizeFrameRef.current)
+          resizeFrameRef.current = null
+        }
+        pendingWidthRef.current = null
+        if (didDragRef.current && finalWidth !== undefined) {
+          setWidth(finalWidth)
+          persistWidth(finalWidth)
+        }
         dragRef.current = null
         setIsResizing(false)
         document.removeEventListener("mousemove", onMouseMove)
@@ -351,7 +435,7 @@ function SidebarRail({ className, ...props }: React.ComponentProps<"button">) {
       document.body.style.cursor = "col-resize"
       document.body.style.userSelect = "none"
     },
-    [setWidth, setIsResizing]
+    [persistWidth, scheduleWidth, setWidth, setIsResizing]
   )
 
   const handleClick = React.useCallback(() => {
@@ -369,7 +453,7 @@ function SidebarRail({ className, ...props }: React.ComponentProps<"button">) {
       onMouseDown={onMouseDown}
       title={toggleLabel}
       className={cn(
-        "absolute inset-y-0 z-20 hidden w-4 transition-all ease-linear group-data-[side=left]:-right-4 group-data-[side=right]:left-0 after:absolute after:inset-y-0 after:start-1/2 after:w-[2px] hover:after:bg-sidebar-border sm:flex ltr:-translate-x-1/2 rtl:-translate-x-1/2",
+        "absolute inset-y-0 z-20 hidden w-4 transition-[transform,background-color] ease-linear group-data-[side=left]:-right-4 group-data-[side=right]:left-0 after:absolute after:inset-y-0 after:start-1/2 after:w-[2px] hover:after:bg-sidebar-border sm:flex ltr:-translate-x-1/2 rtl:-translate-x-1/2",
         "in-data-[side=left]:cursor-col-resize in-data-[side=right]:cursor-col-resize",
         "group-data-[collapsible=offcanvas]:translate-x-0 group-data-[collapsible=offcanvas]:after:left-full hover:group-data-[collapsible=offcanvas]:bg-sidebar",
         "[[data-side=left][data-collapsible=offcanvas]_&]:-right-2",

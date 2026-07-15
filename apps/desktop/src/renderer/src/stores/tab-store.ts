@@ -117,8 +117,18 @@ interface TabStore {
    *     (VSCode / Slack behavior — workspaces resume where you left off).
    */
   switchWorkspace: (slug: string, openPath?: string) => void;
-  /** Open-or-activate (dedupes by resourceKey) a tab in the active workspace. */
-  openTab: (path: string, title: string, icon: string) => string;
+  /**
+   * Open-or-activate (dedupes by resourceKey) a tab in the active workspace.
+   * `activate` focuses the opened/existing tab in the SAME store write — a
+   * separate setActiveTab call would give subscribers (and React) two full
+   * passes for one user action.
+   */
+  openTab: (
+    path: string,
+    title: string,
+    icon: string,
+    opts?: { activate?: boolean },
+  ) => string;
   /** Always creates a new tab (no dedupe) in the active workspace. */
   addTab: (path: string, title: string, icon: string) => string;
   /**
@@ -458,7 +468,7 @@ export const useTabStore = create<TabStore>()(
         set({ activeWorkspaceSlug: slug });
       },
 
-      openTab(path, title, icon) {
+      openTab(path, title, icon, opts) {
         const { activeWorkspaceSlug, byWorkspace } = get();
         const clean = sanitizeTabPath(path);
         if (!activeWorkspaceSlug || !clean) return "";
@@ -485,7 +495,7 @@ export const useTabStore = create<TabStore>()(
             ...byWorkspace,
             [activeWorkspaceSlug]: {
               tabs: [...group.tabs, tab],
-              activeTabId: group.activeTabId,
+              activeTabId: opts?.activate === true ? tab.id : group.activeTabId,
             },
           },
         });

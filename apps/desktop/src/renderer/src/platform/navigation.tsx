@@ -119,8 +119,7 @@ function tryRouteToPinnedNewTab(path: string): boolean {
   if (currentPathname === newPathname) return false;
 
   const icon = resolveRouteIcon(path);
-  const newId = store.openTab(path, path, icon);
-  if (newId) store.setActiveTab(newId);
+  store.openTab(path, path, icon, { activate: true });
   return true;
 }
 
@@ -193,10 +192,7 @@ export function DesktopNavigationProvider({
           return;
         }
         const icon = resolveRouteIcon(path);
-        const newId = store.openTab(path, title ?? path, icon);
-        if (opts?.activate && newId) {
-          store.setActiveTab(newId);
-        }
+        store.openTab(path, title ?? path, icon, { activate: opts?.activate });
       },
       getShareableUrl: (path: string) => `${appUrl}${path}`,
     }),

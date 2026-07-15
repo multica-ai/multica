@@ -16,7 +16,6 @@ import {
 } from "@dnd-kit/core";
 import { SortableContext, verticalListSortingStrategy, arrayMove } from "@dnd-kit/sortable";
 import { Virtuoso } from "react-virtuoso";
-import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
 import { Button } from "@multica/ui/components/ui/button";
 import type { Issue, IssueStatus, Project } from "@multica/core/types";
 import { useLoadMoreByStatus } from "@multica/core/issues/mutations";
@@ -42,6 +41,7 @@ import type { BoardColumnGroup } from "./board-column";
 import { useIssueSurfaceSelection } from "../surface/selection-context";
 import type { IssueCreateDefaults } from "../surface/types";
 import { VirtuosoSeed, VIRTUOSO_SEED_COUNT } from "../../common/virtuoso-seed";
+import { DeferredTooltip } from "../../common/deferred-tooltip";
 import { useRestoredScrollRef } from "../../platform";
 
 // List rows are a fixed 36px (h-9). Sharing the estimate between the seed's
@@ -553,27 +553,26 @@ function StatusAccordionItem({
         </Accordion.Trigger>
         {onCreateIssue && (
           <div className="pr-2">
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <Button
-                    variant="ghost"
-                    size="icon-sm"
-                    className="rounded-full text-muted-foreground opacity-0 group-hover/header:opacity-100 transition-opacity"
-                    onClick={() => {
-                      const defaults = {
-                        status,
-                        ...(projectId ? { project_id: projectId } : {}),
-                      };
-                      onCreateIssue(defaults);
-                    }}
-                  />
-                }
-              >
-                <Plus className="size-3.5" />
-              </TooltipTrigger>
-              <TooltipContent>{t(($) => $.list.add_issue_tooltip)}</TooltipContent>
-            </Tooltip>
+            {/* Lazy-mounted tooltip machinery — see DeferredTooltip. */}
+            <DeferredTooltip
+              content={t(($) => $.list.add_issue_tooltip)}
+              trigger={
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  className="rounded-full text-muted-foreground opacity-0 group-hover/header:opacity-100 transition-opacity"
+                  onClick={() => {
+                    const defaults = {
+                      status,
+                      ...(projectId ? { project_id: projectId } : {}),
+                    };
+                    onCreateIssue(defaults);
+                  }}
+                >
+                  <Plus className="size-3.5" />
+                </Button>
+              }
+            />
           </div>
         )}
       </Accordion.Header>
