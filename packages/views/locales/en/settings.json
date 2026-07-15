@@ -214,7 +214,6 @@
       "description": "Description",
       "description_placeholder": "Describe when this label should be used",
       "color": "Color",
-      "custom_color": "Choose a custom color",
       "cancel": "Cancel",
       "save": "Save label",
       "saving": "Saving..."

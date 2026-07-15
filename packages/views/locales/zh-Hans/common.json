@@ -19,6 +19,14 @@
     "loading": "加载中…",
     "load_failed": "图片加载失败"
   },
+  "color_picker": {
+    "saturation": "饱和度与明度",
+    "hue": "色相",
+    "hex": "十六进制颜色",
+    "eyedropper": "从屏幕取色",
+    "presets": "预设颜色",
+    "random": "随机"
+  },
   "save": "保存",
   "cancel": "取消",
   "delete": "删除",

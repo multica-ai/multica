@@ -213,7 +213,6 @@
       "description": "描述",
       "description_placeholder": "说明什么时候应使用这个标签",
       "color": "颜色",
-      "custom_color": "选择自定义颜色",
       "cancel": "取消",
       "save": "保存标签",
       "saving": "保存中..."
