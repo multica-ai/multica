@@ -521,7 +521,7 @@ function LazyLabelCell({ issue }: { issue: Issue }) {
   );
 }
 
-function QuickCreateFooter({
+export function QuickCreateFooter({
   colSpan,
   createDefaults,
   sentinelRef,
@@ -571,22 +571,37 @@ function QuickCreateFooter({
   return (
     <TableRow className="hover:bg-muted/30">
       <TableCell colSpan={colSpan} className="p-1.5">
-        <div className="flex items-center gap-2">
-          <Plus className="ml-2 size-3.5 text-muted-foreground" />
+        <form
+          className="flex max-w-2xl items-center gap-2"
+          onSubmit={(event) => {
+            event.preventDefault();
+            submit();
+          }}
+        >
           <Input
             value={title}
             onChange={(event) => setTitle(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter") submit();
-            }}
             placeholder={t(($) => $.table.quick_create_placeholder)}
             className="h-7 flex-1 border-0 bg-transparent shadow-none focus-visible:ring-0"
           />
-          {(createIssue.isPending || loadingMore) && (
-            <Loader2 className="mr-2 size-3.5 animate-spin text-muted-foreground" />
+          {loadingMore && !createIssue.isPending && (
+            <Loader2 className="size-3.5 animate-spin text-muted-foreground" />
           )}
+          <Button
+            type="submit"
+            size="sm"
+            className="h-7"
+            disabled={!title.trim() || createIssue.isPending}
+          >
+            {createIssue.isPending ? (
+              <Loader2 className="size-3.5 animate-spin" />
+            ) : (
+              <Plus className="size-3.5" />
+            )}
+            {t(($) => $.table.quick_create_submit)}
+          </Button>
           <div ref={sentinelRef} className="h-px w-px" aria-hidden />
-        </div>
+        </form>
       </TableCell>
     </TableRow>
   );
@@ -1134,6 +1149,8 @@ export function TableView({
           variant={tableHierarchy ? "secondary" : "ghost"}
           size="sm"
           className="h-7"
+          aria-pressed={tableHierarchy}
+          title={t(($) => $.table.hierarchy_description)}
           onClick={toggleTableHierarchy}
         >
           <ListTree className="size-3.5" />
@@ -1142,7 +1159,11 @@ export function TableView({
         <DropdownMenu>
           <DropdownMenuTrigger
             render={
-              <Button variant="ghost" size="sm" className="h-7">
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7"
+              >
                 <TableProperties className="size-3.5" />
                 {t(($) => $.table.group_label)}
               </Button>
@@ -1193,7 +1214,12 @@ export function TableView({
         <DropdownMenu>
           <DropdownMenuTrigger
             render={
-              <Button variant="ghost" size="sm" className="h-7">
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7"
+                title={t(($) => $.table.calculation.description)}
+              >
                 <Sigma className="size-3.5" />
                 {t(($) => $.table.calculation.label)}
               </Button>
@@ -1250,6 +1276,7 @@ export function TableView({
           <DataTable
             table={table}
             footer={footer}
+            virtualizeRows
             emptyMessage={t(($) => $.table.empty)}
             onRowClick={(row) => {
               if (row.original.kind === "issue") {
