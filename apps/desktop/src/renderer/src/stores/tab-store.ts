@@ -19,17 +19,23 @@ import { isReservedSlug } from "@multica/core/paths";
 
 export interface TabMemento {
   /**
-   * Scroll offsets keyed by the `data-tab-scroll-root` attribute value of
-   * each scroll container in the tab's subtree ("main" for the unnamed
-   * root). `height` is the container's scrollHeight at capture time so the
-   * restore path can pre-size collapsed (virtualized / not-yet-fetched)
-   * content and make the scrollTop assignment stick before first paint.
+   * Scroll offsets keyed `${routePathname}::${containerKey}` where the
+   * container key is the `data-tab-scroll-root` attribute value ("main"
+   * when bare). Scoping by route lets in-tab back/forward restore each
+   * route's own offsets and stops same-named containers on different routes
+   * from colliding (Linear keys its scroll memory the same way: route +
+   * tab). `height` is the container's scrollHeight at capture time, kept
+   * for diagnostics and future pre-sizing heuristics.
    */
   scroll: Record<string, { top: number; height: number }>;
 }
 
 export function emptyMemento(): TabMemento {
   return { scroll: {} };
+}
+
+export function scrollMementoKey(routeKey: string, containerKey: string): string {
+  return `${routeKey}::${containerKey}`;
 }
 
 export interface TabSession {
@@ -141,8 +147,18 @@ interface TabStore {
   /** Session-driven back/forward (there is no router history to pop). */
   goBack: () => void;
   goForward: () => void;
-  /** Persist a captured memento for a tab (Coordinator, on deactivate). */
-  updateTabMemento: (tabId: string, memento: TabMemento) => void;
+  /**
+   * Persist captured scroll offsets for one route of a tab (Coordinator, on
+   * deactivate / before in-tab navigation). REPLACE semantics per route: all
+   * of the route's previous entries are dropped and the given ones written —
+   * so a container scrolled back to 0 (captured as "no entry") clears its
+   * stale offset instead of resurrecting it on the next visit.
+   */
+  commitScrollMemento: (
+    tabId: string,
+    routeKey: string,
+    entries: Record<string, { top: number; height: number }>,
+  ) => void;
   /**
    * Force-remount the active tab at the same URL: bump mountGeneration.
    * Query invalidation for the current page's scope is handled by the
@@ -625,13 +641,38 @@ export const useTabStore = create<TabStore>()(
         stepHistory(get, set, +1);
       },
 
-      updateTabMemento(tabId, memento) {
+      commitScrollMemento(tabId, routeKey, entries) {
         const { byWorkspace } = get();
         const hit = findTabLocation(byWorkspace, tabId);
         if (!hit) return;
         const { slug, group, index } = hit;
+        const current = group.tabs[index];
+
+        const prefix = `${routeKey}::`;
+        const nextScroll: TabMemento["scroll"] = {};
+        for (const [key, value] of Object.entries(current.memento.scroll)) {
+          if (!key.startsWith(prefix)) nextScroll[key] = value;
+        }
+        for (const [containerKey, value] of Object.entries(entries)) {
+          nextScroll[scrollMementoKey(routeKey, containerKey)] = value;
+        }
+
+        // Skip the write when nothing changed (common: an unscrolled route
+        // captured as empty over an already-empty route scope) — avoids a
+        // re-entrant store tick from inside the Coordinator's subscription.
+        const prevKeys = Object.keys(current.memento.scroll);
+        const nextKeys = Object.keys(nextScroll);
+        const unchanged =
+          prevKeys.length === nextKeys.length &&
+          nextKeys.every((k) => {
+            const prev = current.memento.scroll[k];
+            const next = nextScroll[k];
+            return prev !== undefined && prev.top === next.top && prev.height === next.height;
+          });
+        if (unchanged) return;
+
         const nextTabs = [...group.tabs];
-        nextTabs[index] = { ...group.tabs[index], memento };
+        nextTabs[index] = { ...current, memento: { scroll: nextScroll } };
         set({
           byWorkspace: {
             ...byWorkspace,

@@ -26,6 +26,7 @@ import { DraggableBoardCard } from "./board-card";
 import type { ChildProgress } from "./list-row";
 import { useT } from "../../i18n";
 import { ActorAvatar } from "../../common/actor-avatar";
+import { useRestoredScrollOffset, useRestoredScrollRef } from "../../platform";
 import { VirtuosoSeed } from "../../common/virtuoso-seed";
 import type { IssueCreateDefaults } from "../surface/types";
 
@@ -125,12 +126,20 @@ export const BoardColumn = memo(function BoardColumn({
   // lets cross-column drops survive virtualization — only the cards inside
   // window in/out of the DOM.
   const [scrollEl, setScrollEl] = useState<HTMLDivElement | null>(null);
+  // Pull-based scroll restoration (MUL-4741): assign the saved offset at
+  // ref-attach (the seed + estimate spacer give the column a truthful height
+  // on its first commit, so the assignment sticks pre-paint) and feed the
+  // same offset into the Virtuoso as its initial position.
+  const scrollMementoKey = `board:${group.id}`;
+  const restoredScrollTop = useRestoredScrollOffset(scrollMementoKey);
+  const restoreScrollRef = useRestoredScrollRef(scrollMementoKey);
   const mergedRef = useCallback(
     (el: HTMLDivElement | null) => {
       setNodeRef(el);
       setScrollEl(el);
+      restoreScrollRef(el);
     },
-    [setNodeRef],
+    [setNodeRef, restoreScrollRef],
   );
   // Infinite-scroll sentinel rides Virtuoso's Footer slot so it sits at the
   // real end of the virtualized list and its IntersectionObserver still fires
@@ -219,7 +228,7 @@ export const BoardColumn = memo(function BoardColumn({
           // Per-column scroll registration for the tab session memento
           // (MUL-4741): the group id is the stable memento key, so every
           // column's offset survives tab switches/reloads independently.
-          data-tab-scroll-root={`board:${group.id}`}
+          data-tab-scroll-root={scrollMementoKey}
           className={`absolute inset-0 overflow-y-auto rounded-lg p-1 transition-colors ${
             isOver && sortLabel
               ? "ring-2 ring-brand/25 bg-accent/15"
@@ -252,6 +261,7 @@ export const BoardColumn = memo(function BoardColumn({
                   customScrollParent={scrollEl}
                   data={resolvedIssues}
                   computeItemKey={computeItemKey}
+                  initialScrollTop={restoredScrollTop}
                   initialItemCount={Math.min(resolvedIssues.length, BOARD_SEED_COUNT)}
                   defaultItemHeight={BOARD_CARD_ESTIMATED_HEIGHT}
                   increaseViewportBy={{ top: 300, bottom: 300 }}

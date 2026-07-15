@@ -212,7 +212,9 @@ describe("useTabStore actions", () => {
     const before = useTabStore.getState().byWorkspace.acme;
 
     store.updateTab(closedTabId, { title: "Ghost" });
-    store.updateTabMemento(closedTabId, { scroll: { main: { top: 10, height: 100 } } });
+    store.commitScrollMemento(closedTabId, "/acme/settings", {
+      main: { top: 10, height: 100 },
+    });
 
     expect(useTabStore.getState().byWorkspace.acme).toBe(before);
     expect(
@@ -412,19 +414,70 @@ describe("reloadActiveTab", () => {
   });
 });
 
-describe("updateTabMemento", () => {
-  it("stores the captured memento on the addressed tab", () => {
+describe("commitScrollMemento", () => {
+  it("stores route-scoped entries on the addressed tab", () => {
     const store = useTabStore.getState();
     store.switchWorkspace("acme");
     const tabId = useTabStore.getState().byWorkspace.acme.tabs[0].id;
 
-    store.updateTabMemento(tabId, {
-      scroll: { main: { top: 420, height: 8000 } },
+    store.commitScrollMemento(tabId, "/acme/issues", {
+      "board:status:todo": { top: 420, height: 8000 },
     });
 
     expect(useTabStore.getState().byWorkspace.acme.tabs[0].memento).toEqual({
-      scroll: { main: { top: 420, height: 8000 } },
+      scroll: { "/acme/issues::board:status:todo": { top: 420, height: 8000 } },
     });
+  });
+
+  it("REPLACES the route's entries — scrolling back to 0 clears the stale offset", () => {
+    const store = useTabStore.getState();
+    store.switchWorkspace("acme");
+    const tabId = useTabStore.getState().byWorkspace.acme.tabs[0].id;
+
+    store.commitScrollMemento(tabId, "/acme/issues", {
+      list: { top: 500, height: 8000 },
+    });
+    // User scrolled back to top before leaving: the capture has no entry
+    // for this container. The old 500 must not survive.
+    store.commitScrollMemento(tabId, "/acme/issues", {});
+
+    expect(useTabStore.getState().byWorkspace.acme.tabs[0].memento).toEqual({
+      scroll: {},
+    });
+  });
+
+  it("keeps other routes' entries when one route commits", () => {
+    const store = useTabStore.getState();
+    store.switchWorkspace("acme");
+    const tabId = useTabStore.getState().byWorkspace.acme.tabs[0].id;
+
+    store.commitScrollMemento(tabId, "/acme/issues", {
+      list: { top: 500, height: 8000 },
+    });
+    store.commitScrollMemento(tabId, "/acme/issues/bug-42", {
+      main: { top: 120, height: 3000 },
+    });
+
+    expect(useTabStore.getState().byWorkspace.acme.tabs[0].memento.scroll).toEqual({
+      "/acme/issues::list": { top: 500, height: 8000 },
+      "/acme/issues/bug-42::main": { top: 120, height: 3000 },
+    });
+  });
+
+  it("skips the store write when nothing changed", () => {
+    const store = useTabStore.getState();
+    store.switchWorkspace("acme");
+    const tabId = useTabStore.getState().byWorkspace.acme.tabs[0].id;
+    store.commitScrollMemento(tabId, "/acme/issues", {
+      list: { top: 500, height: 8000 },
+    });
+    const before = useTabStore.getState().byWorkspace.acme;
+
+    store.commitScrollMemento(tabId, "/acme/issues", {
+      list: { top: 500, height: 8000 },
+    });
+
+    expect(useTabStore.getState().byWorkspace.acme).toBe(before);
   });
 });
 

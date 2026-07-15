@@ -42,6 +42,14 @@ import type { BoardColumnGroup } from "./board-column";
 import { useIssueSurfaceSelection } from "../surface/selection-context";
 import type { IssueCreateDefaults } from "../surface/types";
 import { VirtuosoSeed, VIRTUOSO_SEED_COUNT } from "../../common/virtuoso-seed";
+import { useRestoredScrollRef } from "../../platform";
+
+// List rows are a fixed 36px (h-9). Sharing the estimate between the seed's
+// trailing spacer and Virtuoso's defaultItemHeight keeps the shared
+// scroller's height truthful from the first frame — which both stops the
+// scrollbar from re-drawing across the seed → Virtuoso handoff and lets the
+// restored scrollTop assignment stick at ref-attach (MUL-4741).
+const LIST_ROW_ESTIMATED_HEIGHT = 36;
 
 const EMPTY_PROGRESS_MAP = new Map<string, ChildProgress>();
 const EMPTY_IDS: string[] = [];
@@ -307,6 +315,17 @@ export function ListView({
   // the current sticky-header + cross-section scroll behavior; only the rows
   // inside each expanded panel virtualize.
   const [scrollEl, setScrollEl] = useState<HTMLDivElement | null>(null);
+  // Pull-based scroll restoration (MUL-4741): assign the saved offset when
+  // the shared scroller attaches — the per-status seeds plus their estimate
+  // spacers give it a truthful height on the first commit.
+  const restoreScrollRef = useRestoredScrollRef("list");
+  const attachScroller = useCallback(
+    (el: HTMLDivElement | null) => {
+      setScrollEl(el);
+      restoreScrollRef(el);
+    },
+    [restoreScrollRef],
+  );
 
   const content = (
     <Accordion.Root
@@ -350,7 +369,7 @@ export function ListView({
 
   if (!dragEnabled) {
     return (
-      <div ref={setScrollEl} data-tab-scroll-root="list" className="flex-1 min-h-0 overflow-y-auto p-2 pt-0">
+      <div ref={attachScroller} data-tab-scroll-root="list" className="flex-1 min-h-0 overflow-y-auto p-2 pt-0">
         {content}
       </div>
     );
@@ -364,7 +383,7 @@ export function ListView({
       onDragOver={handleDragOver}
       onDragEnd={handleDragEnd}
     >
-      <div ref={setScrollEl} data-tab-scroll-root="list" className="flex-1 min-h-0 overflow-y-auto p-2 pt-0">
+      <div ref={attachScroller} data-tab-scroll-root="list" className="flex-1 min-h-0 overflow-y-auto p-2 pt-0">
         {content}
       </div>
 
@@ -487,6 +506,7 @@ function StatusAccordionItem({
           data={issues}
           computeItemKey={computeItemKey}
           initialItemCount={Math.min(issues.length, VIRTUOSO_SEED_COUNT)}
+          defaultItemHeight={LIST_ROW_ESTIMATED_HEIGHT}
           increaseViewportBy={{ top: 400, bottom: 400 }}
           components={listComponents}
           itemContent={itemContent}
@@ -496,6 +516,7 @@ function StatusAccordionItem({
           data={issues}
           itemContent={itemContent}
           computeItemKey={computeItemKey}
+          estimatedItemHeight={LIST_ROW_ESTIMATED_HEIGHT}
         />
       )
     ) : null;

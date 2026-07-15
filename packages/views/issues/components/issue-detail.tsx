@@ -85,6 +85,7 @@ import { ReactionBar } from "@multica/ui/components/common/reaction-bar";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
 import { api } from "@multica/core/api";
 import { useTimeAgo } from "../../i18n";
+import { useRestoredScrollOffset, useRestoredScrollRef } from "../../platform";
 import { cn } from "@multica/ui/lib/utils";
 
 import { ProgressRing } from "./progress-ring";
@@ -774,6 +775,20 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   // Virtuoso prop would never receive the element. Callback ref + state fixes
   // that: setState triggers the re-render that hands Virtuoso the element.
   const [scrollContainerEl, setScrollContainerEl] = useState<HTMLDivElement | null>(null);
+  // Pull-based scroll restoration (MUL-4741): the platform serves the offset
+  // captured when this route was last left. The ref-attach assignment covers
+  // the flat render modes (real heights at commit); the virtualized browsing
+  // mode feeds the offset into Virtuoso's initialScrollTop below so the
+  // list's first render already materializes the rows around it.
+  const restoredScrollTop = useRestoredScrollOffset("main");
+  const restoreScrollRef = useRestoredScrollRef("main");
+  const attachScrollContainer = useCallback(
+    (el: HTMLDivElement | null) => {
+      setScrollContainerEl(el);
+      restoreScrollRef(el);
+    },
+    [restoreScrollRef],
+  );
   const [highlightedId, setHighlightedId] = useState<string | null>(null);
   // User preference: pin the bottom comment bar to the scroll viewport.
   const stickyComposer = useCommentComposerStore((s) => s.sticky);
@@ -1974,7 +1989,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
             the gutter restores symmetry; overlay-scrollbar platforms reserve
             nothing and render unchanged. */}
         <div
-          ref={setScrollContainerEl}
+          ref={attachScrollContainer}
           data-tab-scroll-root
           className="relative flex-1 overflow-y-auto [scrollbar-gutter:stable_both-edges]"
         >
@@ -2301,6 +2316,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                       ref={virtuosoRef}
                       customScrollParent={scrollContainerEl}
                       data={items}
+                      initialScrollTop={restoredScrollTop}
                       increaseViewportBy={{ top: 800, bottom: 800 }}
                       computeItemKey={(_i, item) => `${item.kind}:${item.id}`}
                       skipAnimationFrameInResizeObserver

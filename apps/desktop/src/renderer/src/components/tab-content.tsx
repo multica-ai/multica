@@ -1,14 +1,15 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { RouterProvider } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
+import { ScrollRestorationProvider } from "@multica/views/platform";
 import { useActiveGroup, useTabStore } from "@/stores/tab-store";
 import {
+  createScrollRestorationAdapter,
   getAppRouter,
   initTabCoordinator,
   registerActiveHostElement,
   registerCoordinatorQueryClient,
 } from "@/platform/tab-coordinator";
-import { useTabMementoRestore } from "@/hooks/use-tab-memento-restore";
 
 /**
  * Renders the active tab session through THE single app router
@@ -20,11 +21,12 @@ import { useTabMementoRestore } from "@/hooks/use-tab-memento-restore";
  * restorable view state lives in the session memento, captured by the
  * Coordinator on deactivation and restored here on mount:
  *
- *   - warm (query cache still populated): content commits at full height and
- *     the scroll restore is a single pre-paint assignment — no flash.
- *   - cold (inactive > gcTime): the correct shell + skeletons commit first,
- *     and scroll/anchor restore completes when the data lands. Cold is a
- *     deliberate skeleton pass, never a flash of another workspace's data.
+ *   - restore is PULL-based: views ask for their saved offset while they
+ *     mount (ScrollRestorationProvider) — virtualized lists feed it into
+ *     their initial render, plain containers assign it at ref-attach. The
+ *     first painted frame is already at the restored position; cold
+ *     restores show the correct shell + skeletons and settle when data
+ *     lands, never a flash of another workspace's data.
  */
 export function TabContent() {
   const group = useActiveGroup();
@@ -64,6 +66,10 @@ export function TabContent() {
 function ActiveTabHost({ tabId }: { tabId: string }) {
   const hostRef = useRef<HTMLDivElement>(null);
   const router = getAppRouter();
+  const scrollAdapter = useMemo(
+    () => createScrollRestorationAdapter(tabId),
+    [tabId],
+  );
 
   // The Coordinator captures the outgoing memento from this element while
   // the store notification is still synchronous (pre-unmount).
@@ -72,13 +78,13 @@ function ActiveTabHost({ tabId }: { tabId: string }) {
     return () => registerActiveHostElement(null);
   }, []);
 
-  useTabMementoRestore(tabId, hostRef);
-
   // `display: contents` keeps the wrapper transparent to the surrounding
   // flex layout.
   return (
     <div ref={hostRef} style={{ display: "contents" }}>
-      <RouterProvider router={router} />
+      <ScrollRestorationProvider adapter={scrollAdapter}>
+        <RouterProvider router={router} />
+      </ScrollRestorationProvider>
     </div>
   );
 }

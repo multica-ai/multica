@@ -1,11 +1,12 @@
 import type { DataRouter } from "react-router-dom";
 import type { QueryClient } from "@tanstack/react-query";
+import type { ScrollRestorationAdapter } from "@multica/views/platform";
 import { createAppRouter } from "@/routes";
 import {
   useTabStore,
   getActiveTab,
-  emptyMemento,
-  type TabMemento,
+  splitTabUrl,
+  scrollMementoKey,
 } from "@/stores/tab-store";
 
 /**
@@ -48,6 +49,8 @@ let queryClient: QueryClient | null = null;
 /** Identity of what the host currently shows: slug:tabId:generation. */
 let lastIdentity: string | null = null;
 let lastActiveTabId: string | null = null;
+/** The active session's url as last seen — the route the mounted DOM shows. */
+let lastActiveUrl: string | null = null;
 
 export function getAppRouter(): DataRouter {
   if (!router) router = createAppRouter();
@@ -60,6 +63,26 @@ export function registerActiveHostElement(el: HTMLElement | null): void {
 
 export function registerCoordinatorQueryClient(qc: QueryClient): void {
   queryClient = qc;
+}
+
+/**
+ * Serves saved scroll offsets back to mounting views (pull-based restore —
+ * see ScrollRestorationProvider in @multica/views/platform). Offsets are
+ * looked up live against the tab's memento, scoped to the route the view is
+ * mounting under, so in-tab back/forward pulls each route's own offsets.
+ */
+export function createScrollRestorationAdapter(
+  tabId: string,
+): ScrollRestorationAdapter {
+  return {
+    get(containerKey) {
+      const state = useTabStore.getState();
+      const active = getActiveTab(state);
+      if (!active || active.id !== tabId) return undefined;
+      const routeKey = splitTabUrl(active.url).pathname;
+      return active.memento.scroll[scrollMementoKey(routeKey, containerKey)];
+    },
+  };
 }
 
 function currentRouterUrl(r: DataRouter): string {
@@ -88,27 +111,28 @@ function reconcile(): void {
 }
 
 /**
- * Capture the outgoing tab's restorable view state. Runs inside the store
+ * Capture the mounted route's restorable view state. Runs inside the store
  * subscription, which zustand fires synchronously during `set()` — before
- * React re-renders — so the outgoing tab's DOM is still mounted.
+ * React re-renders — so the outgoing DOM (previous tab, or previous route
+ * of the same tab) is still mounted.
  *
  * Scroll containers self-mark with `data-tab-scroll-root` (the attribute
- * value is the memento key, "main" when bare). `scrollHeight` is saved next
- * to `scrollTop` so the restore path can pre-size not-yet-hydrated content
- * and make the first pre-paint scrollTop assignment stick.
+ * value is the container key, "main" when bare). Containers sitting at 0
+ * are simply absent from the result — the store's per-route REPLACE
+ * semantics turn that absence into "clear the stale offset".
  */
-function captureMemento(): TabMemento {
-  const memento = emptyMemento();
-  if (!activeHostElement) return memento;
+function captureScrollEntries(): Record<string, { top: number; height: number }> {
+  const entries: Record<string, { top: number; height: number }> = {};
+  if (!activeHostElement) return entries;
   const els = activeHostElement.querySelectorAll<HTMLElement>(
     "[data-tab-scroll-root]",
   );
   els.forEach((el) => {
     if (el.scrollTop <= 0) return;
     const key = el.getAttribute("data-tab-scroll-root") || "main";
-    memento.scroll[key] = { top: el.scrollTop, height: el.scrollHeight };
+    entries[key] = { top: el.scrollTop, height: el.scrollHeight };
   });
-  return memento;
+  return entries;
 }
 
 function handleStoreChange(): void {
@@ -117,24 +141,28 @@ function handleStoreChange(): void {
   const identity = active
     ? `${state.activeWorkspaceSlug}:${active.id}:${state.mountGeneration}`
     : null;
+  const activeUrl = active?.url ?? null;
 
-  if (identity !== lastIdentity) {
-    // Host is about to switch (tab switch / reload / workspace switch /
-    // close). Save the outgoing tab's memento while its DOM is still up.
+  // Capture whenever what the DOM currently shows is about to be replaced:
+  // a host switch (tab switch / reload / workspace switch / close) OR an
+  // in-tab navigation (url change on the same tab — back/forward included).
+  // The outgoing DOM belongs to `lastActiveUrl`'s route, so that pathname
+  // scopes the commit.
+  const hostSwitching = identity !== lastIdentity;
+  const inTabNavigation = !hostSwitching && activeUrl !== lastActiveUrl;
+  if (hostSwitching || inTabNavigation) {
     const outgoingTabId = lastActiveTabId;
-    const generationBumped =
-      outgoingTabId !== null && active !== null && outgoingTabId === active.id;
+    const outgoingUrl = lastActiveUrl;
     lastIdentity = identity;
     lastActiveTabId = active?.id ?? null;
-    // On reload (same tab, new generation) keep the memento too — a reload
-    // preserves scroll position like a browser reload does.
-    if (outgoingTabId && (outgoingTabId !== active?.id || generationBumped)) {
-      const memento = captureMemento();
-      // Only write when something was captured; avoids a store churn (and a
-      // re-entrant subscription tick) for tabs that never scrolled.
-      if (Object.keys(memento.scroll).length > 0) {
-        useTabStore.getState().updateTabMemento(outgoingTabId, memento);
-      }
+    lastActiveUrl = activeUrl;
+    if (outgoingTabId && outgoingUrl) {
+      const routeKey = splitTabUrl(outgoingUrl).pathname;
+      // Always commit — REPLACE semantics clear entries for containers that
+      // scrolled back to 0; the store skips the write when nothing changed.
+      useTabStore
+        .getState()
+        .commitScrollMemento(outgoingTabId, routeKey, captureScrollEntries());
     }
   }
 
@@ -207,6 +235,7 @@ export function initTabCoordinator(): void {
     ? `${state.activeWorkspaceSlug}:${active.id}:${state.mountGeneration}`
     : null;
   lastActiveTabId = active?.id ?? null;
+  lastActiveUrl = active?.url ?? null;
   reconcile();
 }
 
@@ -220,4 +249,5 @@ export function __resetTabCoordinatorForTests(): void {
   queryClient = null;
   lastIdentity = null;
   lastActiveTabId = null;
+  lastActiveUrl = null;
 }
