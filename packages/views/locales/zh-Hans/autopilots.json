@@ -303,7 +303,6 @@
     "event_filter_actions_placeholder": "completed, failed",
     "event_filter_hint": "只处理匹配这些事件的 webhook。留空则接受所有事件。",
     "schedule_disabled_reason": "该自动化有多个时间表——请到详情页编辑。",
-    "next_run_label": "下次运行：",
     "output_modes": {
       "create_issue": {
         "label": "创建 issue",
@@ -313,32 +312,20 @@
         "label": "仅运行",
         "description": "静默运行，不创建 issue"
       }
-    },
-    "frequency_long": {
-      "hourly": "每小时",
-      "daily": "每天",
-      "weekdays": "每个工作日",
-      "weekly": "每周",
-      "custom": "自定义 cron"
-    },
-    "days": {
-      "sunday": "周日",
-      "monday": "周一",
-      "tuesday": "周二",
-      "wednesday": "周三",
-      "thursday": "周四",
-      "friday": "周五",
-      "saturday": "周六"
     }
   },
-  "trigger_config": {
-    "frequencies": {
-      "hourly": "每小时",
-      "daily": "每天",
-      "weekdays": "工作日",
-      "weekly": "按天",
-      "custom": "自定义"
-    },
+  "schedule_editor": {
+    "time_label": "时间",
+    "time_at": "定点",
+    "time_every": "按间隔",
+    "every_prefix": "每",
+    "unit_hours": "小时",
+    "unit_minutes": "分钟",
+    "days_label": "日子",
+    "days_every": "每天",
+    "days_weekly": "按星期",
+    "days_monthly": "按日期",
+    "monthly_short_month_hint": "没有 {{day}} 日的月份将跳过。",
     "days_short": {
       "sun": "日",
       "mon": "一",
@@ -348,32 +335,69 @@
       "fri": "五",
       "sat": "六"
     },
-    "cron_label": "Cron 表达式",
-    "cron_hint": "标准 5 字段 cron（分 时 日 月 星期）",
-    "minute_label": "分钟",
-    "time_label": "时间",
     "timezone_label": "时区",
-    "days_label": "星期",
-    "summary": {
-      "hourly": "每小时 · :{{min}}",
-      "daily": "每天 {{time}}",
-      "weekdays": "工作日 {{time}}",
-      "weekly": "{{days}} {{time}}",
-      "custom": "自定义 cron",
-      "no_days": "—"
-    },
+    "cron_toggle": "Cron",
+    "cron_click_to_edit": "点击编辑",
+    "cron_hint": "标准 5 字段 cron（分 时 日 月 星期）",
+    "cron_invalid": "该 cron 表达式无效。",
+    "timezone_invalid": "服务端无法识别该时区。",
+    "advanced_hint": "该表达式包含可视化编辑器暂不支持的特性。可直接编辑 cron 文本，或简化表达式以恢复可视化编辑。",
+    "advanced_unverified": "暂时无法连接服务器校验该表达式，可视化控件保持停用。保存前请确认 cron 文本无误。",
+    "advanced_checking": "正在向服务器校验该表达式，结果返回前可视化控件保持停用。",
+    "next_runs_label": "接下来",
+    "next_in": "{{countdown}}后",
+    "preview_unavailable": "暂时无法获取下次运行时间。",
+    "no_upcoming_runs": "该表达式没有即将到来的运行。",
     "describe": {
-      "hourly": "每小时整点过 {{min}} 分运行",
-      "daily": "每天 {{time}} {{offset}} 运行",
-      "weekdays": "每个工作日 {{time}} {{offset}} 运行",
-      "weekly": "每 {{days}} 的 {{time}} {{offset}} 运行",
-      "custom": "自定义时间表：{{cron}}"
+      "days_every": "每天",
+      "days_monthly": "每月 {{day}} 日",
+      "days_long": {
+        "sun": "周日",
+        "mon": "周一",
+        "tue": "周二",
+        "wed": "周三",
+        "thu": "周四",
+        "fri": "周五",
+        "sat": "周六"
+      },
+      "days_range": "{{from}}至{{to}}",
+      "days_join": "、",
+      "time_at": "{{time}}",
+      "time_every_hour": "每小时的第 {{minute}} 分",
+      "time_every_hours": "每 {{interval}} 小时的第 {{minute}} 分",
+      "time_every_hour_window": "每小时",
+      "time_every_hours_window": "每 {{interval}} 小时",
+      "time_every_minute": "每分钟",
+      "time_every_minutes": "每 {{interval}} 分钟",
+      "window": "{{from}}–{{to}}"
     },
     "countdown": {
-      "days_hours": "{{days}} 天 {{hours}} 小时",
+      "days_hours": "{{days}} 天 {{hours}} 小时 {{minutes}} 分",
       "hours_minutes": "{{hours}} 小时 {{minutes}} 分",
       "minutes": "{{minutes}} 分",
       "less_than_minute": "不到 1 分"
+    },
+    "a11y": {
+      "fixed_hour": "小时",
+      "fixed_minute": "分钟",
+      "interval": "间隔",
+      "interval_unit": "间隔单位",
+      "window_start_hour": "时间窗口起始小时",
+      "window_start_minute": "时间窗口起始分钟",
+      "window_end_hour": "时间窗口结束小时",
+      "window_end_minute": "时间窗口结束分钟",
+      "day_pattern": "日期方式",
+      "day_of_month": "每月几号",
+      "timezone": "时区",
+      "days_full": {
+        "sun": "周日",
+        "mon": "周一",
+        "tue": "周二",
+        "wed": "周三",
+        "thu": "周四",
+        "fri": "周五",
+        "sat": "周六"
+      }
     }
   },
   "agent_picker": {
