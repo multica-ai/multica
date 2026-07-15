@@ -41,6 +41,26 @@ func newWorkspaceCreateTestCmd() *cobra.Command {
 	return cmd
 }
 
+// decodeWorkspaceCreateBody mirrors the real POST /api/workspaces contract:
+// it rejects a body missing name or slug with 400 (as CreateWorkspace does) so
+// a CLI regression that drops slug surfaces as a failing request instead of
+// being masked by a mock that fabricates the field.
+func decodeWorkspaceCreateBody(t *testing.T, w http.ResponseWriter, r *http.Request) (map[string]any, bool) {
+	t.Helper()
+	var body map[string]any
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		t.Fatalf("decode request body: %v", err)
+	}
+	name, _ := body["name"].(string)
+	slug, _ := body["slug"].(string)
+	if strings.TrimSpace(name) == "" || strings.TrimSpace(slug) == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]any{"error": "name and slug are required"})
+		return nil, false
+	}
+	return body, true
+}
+
 func TestRunWorkspaceCreatePostsWorkspaceAndDoesNotSwitchDefault(t *testing.T) {
 	var gotBody map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -51,9 +71,11 @@ func TestRunWorkspaceCreatePostsWorkspaceAndDoesNotSwitchDefault(t *testing.T) {
 		if r.Header.Get("X-Workspace-ID") != "" {
 			t.Fatalf("X-Workspace-ID = %q, want empty for workspace creation", r.Header.Get("X-Workspace-ID"))
 		}
-		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
-			t.Fatalf("decode request body: %v", err)
+		body, ok := decodeWorkspaceCreateBody(t, w, r)
+		if !ok {
+			return
 		}
+		gotBody = body
 		w.WriteHeader(http.StatusCreated)
 		json.NewEncoder(w).Encode(map[string]any{
 			"id":           "33333333-3333-3333-3333-333333333333",
@@ -138,10 +160,76 @@ func TestRunWorkspaceCreateRequiresName(t *testing.T) {
 	}
 }
 
+func TestRunWorkspaceCreateRequiresSlug(t *testing.T) {
+	cmd := newWorkspaceCreateTestCmd()
+	if err := cmd.Flags().Set("name", "Growth Team"); err != nil {
+		t.Fatalf("set --name: %v", err)
+	}
+	err := runWorkspaceCreate(cmd, nil)
+	if err == nil {
+		t.Fatal("expected missing --slug error")
+	}
+	if !strings.Contains(err.Error(), "--slug is required") {
+		t.Fatalf("error = %q, want --slug is required", err)
+	}
+}
+
+func TestRunWorkspaceCreateRejectsDualStdin(t *testing.T) {
+	cmd := newWorkspaceCreateTestCmd()
+	for name, value := range map[string]string{
+		"name":             "Growth Team",
+		"slug":             "growth-team",
+		"description-stdin": "true",
+		"context-stdin":     "true",
+	} {
+		if err := cmd.Flags().Set(name, value); err != nil {
+			t.Fatalf("set --%s: %v", name, err)
+		}
+	}
+	_, err := buildWorkspaceCreateBody(cmd)
+	if err == nil {
+		t.Fatal("expected mutually-exclusive stdin error")
+	}
+	if !strings.Contains(err.Error(), "cannot be combined") {
+		t.Fatalf("error = %q, want stdin combination rejection", err)
+	}
+}
+
+func TestRunWorkspaceCreateReadsDescriptionFromStdin(t *testing.T) {
+	cmd := newWorkspaceCreateTestCmd()
+	for name, value := range map[string]string{
+		"name":             "Growth Team",
+		"slug":             "growth-team",
+		"description-stdin": "true",
+	} {
+		if err := cmd.Flags().Set(name, value); err != nil {
+			t.Fatalf("set --%s: %v", name, err)
+		}
+	}
+
+	var got map[string]any
+	pipeStdin(t, "line1\nline2\n", func() {
+		b, err := buildWorkspaceCreateBody(cmd)
+		if err != nil {
+			t.Fatalf("unexpected err: %v", err)
+		}
+		got = b
+	})
+	if got["description"] != "line1\nline2" {
+		t.Errorf("description = %q, want stdin content", got["description"])
+	}
+	if got["slug"] != "growth-team" {
+		t.Errorf("slug = %v, want growth-team (must still be sent)", got["slug"])
+	}
+}
+
 func TestRunWorkspaceCreatePrintsTable(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost || r.URL.Path != "/api/workspaces" {
 			http.NotFound(w, r)
+			return
+		}
+		if _, ok := decodeWorkspaceCreateBody(t, w, r); !ok {
 			return
 		}
 		w.WriteHeader(http.StatusCreated)
@@ -161,6 +249,7 @@ func TestRunWorkspaceCreatePrintsTable(t *testing.T) {
 
 	cmd := newWorkspaceCreateTestCmd()
 	_ = cmd.Flags().Set("name", "Support Team")
+	_ = cmd.Flags().Set("slug", "support-team")
 	_ = cmd.Flags().Set("output", "table")
 
 	out, err := captureStdout(t, func() error {

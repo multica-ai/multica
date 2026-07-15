@@ -27,8 +27,15 @@ var workspaceListCmd = &cobra.Command{
 var workspaceCreateCmd = &cobra.Command{
 	Use:   "create",
 	Short: "Create a workspace",
-	Args:  cobra.NoArgs,
-	RunE:  runWorkspaceCreate,
+	Long: "Creates a new workspace and adds you as its owner. Both --name and " +
+		"--slug are required; the slug is permanent (lowercase letters, digits, " +
+		"and hyphens) and cannot be changed after creation.\n\n" +
+		"Creating a workspace does NOT change the current default workspace for " +
+		"this profile — run 'multica workspace switch <slug>' afterward if you " +
+		"want subsequent commands to target the new workspace.",
+	Example: "  multica workspace create --name \"Support Team\" --slug support-team --issue-prefix SUP",
+	Args:    cobra.NoArgs,
+	RunE:    runWorkspaceCreate,
 }
 
 var workspaceGetCmd = &cobra.Command{
@@ -200,11 +207,24 @@ func buildWorkspaceCreateBody(cmd *cobra.Command) (map[string]any, error) {
 		return nil, fmt.Errorf("--name is required")
 	}
 
-	body := map[string]any{"name": name}
-	if cmd.Flags().Changed("slug") {
-		v, _ := cmd.Flags().GetString("slug")
-		body["slug"] = v
+	// The server requires both name and slug (POST /api/workspaces returns 400
+	// without them) and the slug is immutable after creation, so it must be
+	// chosen explicitly here rather than silently omitted.
+	slug, _ := cmd.Flags().GetString("slug")
+	if strings.TrimSpace(slug) == "" {
+		return nil, fmt.Errorf("--slug is required")
 	}
+
+	// A single stdin stream cannot feed two fields: whichever field reads first
+	// drains it and the other gets EOF. Reject the ambiguous combination up
+	// front instead of surfacing a misleading "content is empty" error.
+	descStdin, _ := cmd.Flags().GetBool("description-stdin")
+	ctxStdin, _ := cmd.Flags().GetBool("context-stdin")
+	if descStdin && ctxStdin {
+		return nil, fmt.Errorf("--description-stdin and --context-stdin cannot be combined; a single stdin cannot feed both fields — pass one of them inline")
+	}
+
+	body := map[string]any{"name": name, "slug": slug}
 	if cmd.Flags().Changed("description") || cmd.Flags().Changed("description-stdin") {
 		desc, _, err := resolveTextFlag(cmd, "description")
 		if err != nil {
