@@ -166,8 +166,8 @@ type Config struct {
 // SupportedTypes is the canonical whitelist of agent types eligible to back a
 // custom runtime profile. It MUST stay in lockstep with the
 // runtime_profile.protocol_family CHECK constraint (migration 120, widened by
-// migration 134 to add qoder, migration 136 to add traecli, migration 167
-// to add droid, migration 175 to add deveco, and migration 179 to add grok): a custom)
+// migration 134 to add qoder, migration 136 to add traecli, migration 175
+// to add deveco, migration 179 to add grok, and migration 196 to add droid): a custom)
 // runtime profile may only be based on a backend Multica officially supports.
 // qoder is exposed here so Qoder CN (`qoderclicn`) users can point the Qoder
 // backend at a non-default binary instead of misrouting through Kiro/ACP with

@@ -1,6 +1,6 @@
 ALTER TABLE runtime_profile DROP CONSTRAINT IF EXISTS runtime_profile_protocol_family_check;
 
--- Restore the post-175 whitelist (qoder + traecli + deveco included, droid excluded).
+-- Restore the post-179 whitelist (qoder + traecli + deveco + grok included, droid excluded).
 ALTER TABLE runtime_profile ADD CONSTRAINT runtime_profile_protocol_family_check
     CHECK (protocol_family IN (
         'claude',
@@ -17,5 +17,6 @@ ALTER TABLE runtime_profile ADD CONSTRAINT runtime_profile_protocol_family_check
         'antigravity',
         'qoder',
         'traecli',
-        'deveco'
+        'deveco',
+        'grok'
     )) NOT VALID;
