@@ -215,6 +215,70 @@ func TestAcquireLocalDirectoryLockSkipsSquadLeaderTasks(t *testing.T) {
 	}
 }
 
+func TestAcquireLocalDirectoryLockRejectsHardlinkedTreeAndReleasesLock(t *testing.T) {
+	parent := t.TempDir()
+	root := filepath.Join(parent, "project")
+	if err := os.Mkdir(root, 0o755); err != nil {
+		t.Fatalf("mkdir project: %v", err)
+	}
+	ownerFile := filepath.Join(parent, "owner-secret")
+	if err := os.WriteFile(ownerFile, []byte("owner-only\n"), 0o600); err != nil {
+		t.Fatalf("write owner file: %v", err)
+	}
+	if err := os.Link(ownerFile, filepath.Join(root, "borrowed-secret")); err != nil {
+		t.Skipf("hardlinks unavailable on test filesystem: %v", err)
+	}
+	realRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		t.Fatalf("resolve project root: %v", err)
+	}
+
+	var failCalls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasSuffix(r.URL.Path, "/fail") {
+			t.Errorf("unexpected daemon call: %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		failCalls.Add(1)
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(srv.Close)
+
+	const daemonID = "d-test"
+	raw, err := json.Marshal(localDirectoryRef{LocalPath: root, DaemonID: daemonID})
+	if err != nil {
+		t.Fatalf("marshal resource: %v", err)
+	}
+	locker := NewLocalPathLocker()
+	d := &Daemon{
+		client:         NewClient(srv.URL),
+		cfg:            Config{DaemonID: daemonID},
+		localPathLocks: locker,
+		logger:         slog.Default(),
+	}
+	task := Task{
+		ID: "task-hardlink",
+		ProjectResources: []ProjectResourceData{
+			{ID: "r1", ResourceType: localDirectoryResourceType, ResourceRef: raw},
+		},
+	}
+
+	release, abort := d.acquireLocalDirectoryLockIfNeeded(context.Background(), task, slog.Default())
+	if !abort {
+		t.Fatal("hardlinked local_directory returned execution authority")
+	}
+	if release != nil {
+		t.Fatal("hardlinked local_directory returned a release callback")
+	}
+	if got := failCalls.Load(); got != 1 {
+		t.Fatalf("fail calls = %d, want 1", got)
+	}
+	if holder := locker.Holder(realRoot); holder != "" {
+		t.Fatalf("path lock retained after rejection by %q", holder)
+	}
+}
+
 func TestValidateLocalPath(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("blacklist constants are POSIX-only in this test")
@@ -368,6 +432,48 @@ func TestValidateLocalPath(t *testing.T) {
 		}
 	})
 
+}
+
+func TestValidateLocalDirectoryTree(t *testing.T) {
+	t.Run("accepts ordinary nested files", func(t *testing.T) {
+		root := t.TempDir()
+		nested := filepath.Join(root, "nested")
+		if err := os.Mkdir(nested, 0o755); err != nil {
+			t.Fatalf("mkdir nested: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(nested, "source.go"), []byte("package example\n"), 0o644); err != nil {
+			t.Fatalf("write nested file: %v", err)
+		}
+
+		if err := validateLocalDirectoryTree(root); err != nil {
+			t.Fatalf("ordinary local_directory tree rejected: %v", err)
+		}
+	})
+
+	t.Run("rejects nested hardlink to owner file", func(t *testing.T) {
+		parent := t.TempDir()
+		root := filepath.Join(parent, "project")
+		nested := filepath.Join(root, "nested")
+		if err := os.MkdirAll(nested, 0o755); err != nil {
+			t.Fatalf("mkdir nested: %v", err)
+		}
+		ownerFile := filepath.Join(parent, "owner-secret")
+		if err := os.WriteFile(ownerFile, []byte("owner-only\n"), 0o600); err != nil {
+			t.Fatalf("write owner file: %v", err)
+		}
+		linkedPath := filepath.Join(nested, "borrowed-secret")
+		if err := os.Link(ownerFile, linkedPath); err != nil {
+			t.Skipf("hardlinks unavailable on test filesystem: %v", err)
+		}
+
+		err := validateLocalDirectoryTree(root)
+		if err == nil {
+			t.Fatal("expected nested hardlink to be rejected")
+		}
+		if !strings.Contains(err.Error(), "hard link") {
+			t.Fatalf("error %q did not identify the hardlink violation", err)
+		}
+	})
 }
 
 // TestIsDriveRoot covers the Windows drive-root generalisation. Static

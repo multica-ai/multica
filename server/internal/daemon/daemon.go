@@ -3298,6 +3298,21 @@ func (d *Daemon) acquireLocalDirectoryLockIfNeeded(ctx context.Context, task Tas
 		}
 		return nil, true
 	}
+	// Revalidate only after this task owns the path mutex. A tree may have
+	// changed while the task was waiting, and granting the entire writable
+	// root would otherwise expose daemon-owner files through nested hardlinks.
+	validationErr := validateLocalPath(assignment.AbsPath)
+	if validationErr == nil {
+		validationErr = validateLocalDirectoryTree(assignment.AbsPath)
+	}
+	if validationErr != nil {
+		release()
+		taskLog.Error("local_directory: locked path validation failed", "error", validationErr)
+		if failErr := d.client.FailTask(ctx, task.ID, validationErr.Error(), "", "", "local_directory_error"); failErr != nil {
+			taskLog.Error("fail task after locked local_directory validation error", "error", failErr)
+		}
+		return nil, true
+	}
 	taskLog.Info("local_directory: lock acquired")
 	return release, false
 }
