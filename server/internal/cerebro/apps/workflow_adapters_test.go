@@ -66,3 +66,41 @@ func TestRegistryAdapterCallsRealV1RoutesWithRunTrace(t *testing.T) {
 		t.Fatalf("write request=%+v", requests[1])
 	}
 }
+
+func TestRegistryAdapterFollowsAdaptiveReadJob(t *testing.T) {
+	polls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer sk_real" || r.Header.Get("X-Trace-ID") != "run-123" {
+			t.Fatalf("headers not preserved: %v", r.Header)
+		}
+		switch r.URL.Path {
+		case "/api/registry/v1/data-sources/source/execute":
+			if r.Header.Get("X-Registry-Async") != "job-v1" {
+				t.Fatal("read did not opt into adaptive jobs")
+			}
+			w.Header().Set("X-Registry-Async", "job-v1")
+			w.Header().Set("Location", "/api/registry/v1/jobs/job-1")
+			w.Header().Set("Retry-After", "0")
+			w.WriteHeader(http.StatusAccepted)
+			_, _ = w.Write([]byte(`{"status":"running"}`))
+		case "/api/registry/v1/jobs/job-1":
+			polls++
+			_ = json.NewEncoder(w).Encode(map[string]any{"data": []any{map[string]any{"value": 1}}})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	adapter := newRegistryAdapter(server.URL, "run-123", server.Client())
+	output, err := adapter.Execute(context.Background(), "sk_real", workflowexec.RegistryCall{
+		Kind: "read", ResourceID: "source", Config: map[string]any{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, ok := output.(map[string]any)
+	if !ok || polls != 1 || result["data"] == nil {
+		t.Fatalf("polls=%d output=%#v", polls, output)
+	}
+}

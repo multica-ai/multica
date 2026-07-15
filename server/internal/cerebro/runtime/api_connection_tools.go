@@ -33,6 +33,7 @@ import (
 
 	"github.com/multica-ai/multica/server/internal/cerebro/connections"
 	"github.com/multica-ai/multica/server/internal/cerebro/connmeta"
+	"github.com/multica-ai/multica/server/internal/cerebro/registryjobs"
 )
 
 // apiConnectionResolver builds the shared APIConnectionResolver from the
@@ -447,15 +448,28 @@ func (t *APIConnectionTool) Call(ctx context.Context, args map[string]any) (stri
 		}
 	}
 	applyConnectionAuth(req, effectiveAuth)
+	adaptiveRegistry := registryjobs.IsV1BaseURL(t.baseURL)
+	if adaptiveRegistry {
+		registryjobs.Enable(req)
+	}
 	start := time.Now()
 	resp, err := client.Do(req)
-	dur := time.Since(start)
 	if err != nil {
+		dur := time.Since(start)
 		// Transport-level failure: no HTTP status. Trace it as a failed call so the
 		// gateway log records that the agent reached out and got nothing back.
 		t.logGatewayCall(req.URL.Host, filledPath, 0, false, dur, err)
 		return "", fmt.Errorf("api connection %q: call %s %s: %w", t.connName, t.method, filledPath, err)
 	}
+	if adaptiveRegistry {
+		resp, err = registryjobs.Follow(ctx, client, req, resp, t.baseURL)
+		if err != nil {
+			dur := time.Since(start)
+			t.logGatewayCall(req.URL.Host, filledPath, 0, false, dur, err)
+			return "", fmt.Errorf("api connection %q: follow Registry job: %w", t.connName, err)
+		}
+	}
+	dur := time.Since(start)
 	defer resp.Body.Close()
 	t.logGatewayCall(req.URL.Host, filledPath, resp.StatusCode, resp.StatusCode >= 200 && resp.StatusCode < 300, dur, nil)
 

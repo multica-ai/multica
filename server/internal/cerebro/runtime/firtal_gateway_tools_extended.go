@@ -14,6 +14,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
+	"github.com/multica-ai/multica/server/internal/cerebro/registryjobs"
 	"github.com/multica-ai/multica/server/internal/cerebro/toolpolicy"
 	"github.com/multica-ai/multica/server/internal/cerebro/webfetchpolicy"
 	"github.com/multica-ai/multica/server/internal/util"
@@ -500,8 +501,8 @@ func (t *FirtalRegistryTool) InputSchema() map[string]any {
 }
 
 const (
-	firtalRegistryListPath    = "/api/registry/data-sources"
-	firtalRegistryExecutePath = "/api/registry/execute"
+	firtalRegistryListPath    = "/api/registry/v1/data-sources"
+	firtalRegistryExecutePath = "/api/registry/v1/execute"
 	firtalRegistryAppsPath    = "/api/apps"
 	firtalRegistryDeployPath  = "/api/apps/deploy"
 )
@@ -838,6 +839,7 @@ func (t *FirtalRegistryTool) callExecute(ctx context.Context, baseURL, apiKey st
 		return "", fmt.Errorf("firtal_registry: build execute request: %w", err)
 	}
 	t.setRegistryHeaders(req, apiKey)
+	registryjobs.Enable(req)
 	respBody, err := doRegistryRequest(req)
 	if err != nil {
 		return "", err
@@ -925,6 +927,17 @@ func doRegistryRequest(req *http.Request) ([]byte, error) {
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("firtal_registry: HTTP request: %w", err)
+	}
+	if req.Header.Get(registryjobs.MarkerHeader) == registryjobs.MarkerValue {
+		approvedBase := (&url.URL{
+			Scheme: req.URL.Scheme,
+			Host:   req.URL.Host,
+			Path:   "/api/registry/v1",
+		}).String()
+		resp, err = registryjobs.Follow(req.Context(), client, req, resp, approvedBase)
+		if err != nil {
+			return nil, fmt.Errorf("firtal_registry: follow query job: %w", err)
+		}
 	}
 	defer resp.Body.Close()
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))

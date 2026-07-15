@@ -14,6 +14,7 @@ import (
 
 	"github.com/multica-ai/multica/server/internal/cerebro/apps/tokens"
 	"github.com/multica-ai/multica/server/internal/cerebro/apps/workflowexec"
+	"github.com/multica-ai/multica/server/internal/cerebro/registryjobs"
 )
 
 const registryResponseLimit = 8 << 20
@@ -90,9 +91,18 @@ func (a *registryAdapter) Execute(ctx context.Context, key string, call workflow
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("Accept", "application/json")
 	request.Header.Set("X-Trace-ID", a.traceID)
+	if call.Kind == "read" {
+		registryjobs.Enable(request)
+	}
 	response, err := a.client.Do(request)
 	if err != nil {
 		return nil, fmt.Errorf("Registry request failed: %w", err)
+	}
+	if call.Kind == "read" {
+		response, err = registryjobs.Follow(ctx, a.client, request, response, a.baseURL)
+		if err != nil {
+			return nil, fmt.Errorf("follow Registry query job: %w", err)
+		}
 	}
 	defer response.Body.Close()
 	responseBody, err := io.ReadAll(io.LimitReader(response.Body, registryResponseLimit))

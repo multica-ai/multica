@@ -25,7 +25,7 @@ func TestFirtalRegistrySnakeToCamel(t *testing.T) {
 }
 
 // TestFirtalRegistryCallExecuteSendsApiKeyAndCamelCaseBody verifies the outgoing
-// HTTP request matches the FDR contract — POST to /api/registry/execute, the
+// HTTP request matches the FDR contract — POST to /api/registry/v1/execute, the
 // x-api-key header carries the workspace key, and snake_case tool args are
 // remapped to camelCase keys (filter_group → filterGroup) on the wire.
 func TestFirtalRegistryCallExecuteSendsApiKeyAndCamelCaseBody(t *testing.T) {
@@ -82,8 +82,43 @@ func TestFirtalRegistryCallExecuteSendsApiKeyAndCamelCaseBody(t *testing.T) {
 	}
 }
 
+func TestFirtalRegistryCallExecuteFollowsAdaptiveJob(t *testing.T) {
+	polls := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("x-api-key") != "rk_test" {
+			t.Fatalf("api key not preserved: %v", r.Header)
+		}
+		switch r.URL.Path {
+		case "/api/registry/v1/execute":
+			if r.Header.Get("X-Registry-Async") != "job-v1" {
+				t.Fatal("execute did not opt into adaptive jobs")
+			}
+			w.Header().Set("X-Registry-Async", "job-v1")
+			w.Header().Set("Location", "/api/registry/v1/jobs/job-1")
+			w.Header().Set("Retry-After", "0")
+			w.WriteHeader(http.StatusAccepted)
+			_, _ = w.Write([]byte(`{"status":"running"}`))
+		case "/api/registry/v1/jobs/job-1":
+			polls++
+			_, _ = w.Write([]byte(`{"data":[{"value":1}]}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	tool := &FirtalRegistryTool{}
+	out, err := tool.callExecute(context.Background(), srv.URL, "rk_test", map[string]any{"dataSourceId": "ds-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if polls != 1 || !strings.Contains(out, `"value":1`) {
+		t.Fatalf("polls=%d output=%s", polls, out)
+	}
+}
+
 // TestFirtalRegistryCallListUsesGet verifies that listing data sources sends GET
-// to /api/registry/data-sources and passes the response through to the caller.
+// to /api/registry/v1/data-sources and passes the response through to the caller.
 // Filtering is now delegated entirely to the tool-policy chain (FIR-2208).
 func TestFirtalRegistryCallListUsesGet(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

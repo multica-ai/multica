@@ -261,7 +261,7 @@ func TestRegistryGate_FolderScopeAutoCovers(t *testing.T) {
 	// Stub registry list endpoint: each source carries its folder_id, exactly as the
 	// Phase 1 registry change now returns. The gate maps the called id → folder_id.
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/registry/data-sources" {
+		if r.URL.Path != "/api/registry/v1/data-sources" {
 			http.NotFound(w, r)
 			return
 		}

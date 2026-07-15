@@ -209,6 +209,45 @@ func TestAPIConnectionToolCall(t *testing.T) {
 	}
 }
 
+func TestAPIConnectionToolFollowsMarkedRegistryJob(t *testing.T) {
+	polls := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer tok" {
+			t.Fatalf("auth header was not preserved: %v", r.Header)
+		}
+		switch r.URL.Path {
+		case "/api/registry/v1/execute":
+			if r.Header.Get("X-Registry-Async") != "job-v1" {
+				t.Fatalf("initial execute did not opt into Registry jobs")
+			}
+			w.Header().Set("X-Registry-Async", "job-v1")
+			w.Header().Set("Location", "/api/registry/v1/jobs/job-1")
+			w.Header().Set("Retry-After", "0")
+			w.WriteHeader(http.StatusAccepted)
+			_, _ = io.WriteString(w, `{"status":"running"}`)
+		case "/api/registry/v1/jobs/job-1":
+			polls++
+			_, _ = io.WriteString(w, `{"data":[{"value":1}]}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	tool := &APIConnectionTool{
+		toolName: "registry__post_execute", connName: "registry", method: "POST", path: "/execute",
+		baseURL: srv.URL + "/api/registry/v1", auth: connections.AuthConfig{BearerToken: "tok"},
+		client: srv.Client(),
+	}
+	out, err := tool.Call(context.Background(), map[string]any{"body": map[string]any{"dataSourceId": "ds-1"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if polls != 1 || !strings.Contains(out, `"value":1`) {
+		t.Fatalf("polls=%d output=%s", polls, out)
+	}
+}
+
 // TestAPIConnectionToolCallNon2xx confirms a non-2xx response fails the call with
 // the status + body surfaced (so the agent sees the upstream error, not silence).
 func TestAPIConnectionToolCallNon2xx(t *testing.T) {
