@@ -6,6 +6,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const push = vi.fn();
 const listApps = vi.fn();
+const listAppAdminOverview = vi.fn();
 
 vi.mock("@multica/cerebro-feature-flags", () => ({ useFeatureFlag: () => true }));
 vi.mock("@multica/core/paths", () => ({ useCurrentWorkspace: () => ({ id: "ws-1", slug: "firtal" }) }));
@@ -15,7 +16,7 @@ vi.mock("@multica/views/navigation", () => ({
     <a href={href} onClick={(event) => { event.preventDefault(); push(href); }} {...props}>{children}</a>
   ),
 }));
-vi.mock("../core/api", () => ({ listApps: () => listApps() }));
+vi.mock("../core/api", () => ({ listApps: () => listApps(), listAppAdminOverview: () => listAppAdminOverview(), listAppFolders: vi.fn().mockResolvedValue([]), installAllergenFormatter: vi.fn(), createAppFolder: vi.fn(), updateAppFolder: vi.fn(), deleteAppFolder: vi.fn(), moveAppToFolder: vi.fn() }));
 
 import { AppsPage } from "./apps-page";
 
@@ -24,6 +25,7 @@ describe("AppsPage", () => {
     push.mockReset();
     listApps.mockReset();
     listApps.mockResolvedValue({ apps: [] });
+    listAppAdminOverview.mockResolvedValue([]);
   });
 
   it("opens the real app builder from Build app", async () => {

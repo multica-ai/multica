@@ -23,6 +23,8 @@ import {
 // CEREBRO-PATCH(chat-mermaid-html): FIR-2372 render fenced mermaid/html blocks as diagram/preview so chat matches comments.
 import { MermaidDiagram } from "../editor/mermaid-diagram";
 import { HtmlBlockPreview } from "../editor/html-block-preview";
+// CEREBRO-PATCH(cerebro-mini-app-complete-surface): FIR-3172 render interactive app cards in chat.
+import { AppViewRequestCard } from "./app-view-request-card";
 
 export type { RenderMode };
 
@@ -70,6 +72,9 @@ function defaultRenderMention({
   // CEREBRO-PATCH(artifact-mention-markdown): FIR-1800 artifact reference → compact white card.
   if (type === "artifact") {
     return <ArtifactMentionChip artifactId={id} />;
+  }
+  if (type === "app-view") {
+    return <AppViewRequestCard requestId={id} />;
   }
   if (type === "project") {
     return <ProjectMentionCard projectId={id} />;

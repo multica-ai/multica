@@ -13,6 +13,7 @@ import (
 const (
 	testMemberID = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
 	testAppID    = "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
+	testRunID    = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
 )
 
 func TestBrokerIssuesAppBoundPersonalKeyAndCachesIt(t *testing.T) {
@@ -31,13 +32,14 @@ func TestBrokerIssuesAppBoundPersonalKeyAndCachesIt(t *testing.T) {
 			ViaApp    struct {
 				ID      string  `json:"id"`
 				Version string  `json:"version"`
+				RunID   string  `json:"run_id"`
 				Scopes  []Scope `json:"scopes"`
 			} `json:"via_app"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			t.Fatal(err)
 		}
-		if body.Principal != "member:"+testMemberID || body.ViaApp.ID != testAppID || body.ViaApp.Version != "1.2.3" {
+		if body.Principal != "member:"+testMemberID || body.ViaApp.ID != testAppID || body.ViaApp.Version != "1.2.3" || body.ViaApp.RunID != testRunID {
 			t.Errorf("unexpected exchange body: %+v", body)
 		}
 		w.WriteHeader(http.StatusCreated)
@@ -53,7 +55,7 @@ func TestBrokerIssuesAppBoundPersonalKeyAndCachesIt(t *testing.T) {
 	b.now = func() time.Time { return now }
 	identity := Identity{
 		MemberID: testMemberID,
-		App:      AppGrant{ID: testAppID, Version: "1.2.3", Scopes: []Scope{{ResourceType: "data_source", ResourceID: "products", Access: "read"}}},
+		App:      AppGrant{ID: testAppID, Version: "1.2.3", RunID: testRunID, Scopes: []Scope{{ResourceType: "data_source", ResourceID: "products", Access: "read"}}},
 	}
 
 	first, err := b.PersonalKey(context.Background(), identity)
@@ -66,6 +68,9 @@ func TestBrokerIssuesAppBoundPersonalKeyAndCachesIt(t *testing.T) {
 	}
 	if first.Key != "sk_personal" || first.SessionID == "" || second.Key != first.Key {
 		t.Fatalf("unexpected tokens: first=%+v second=%+v", first, second)
+	}
+	if first.RunID != testRunID {
+		t.Fatalf("token must expose its audit run id; got %q", first.RunID)
 	}
 	// The app calls whichever gateway belongs to the registry the key came from,
 	// so it never has to hard code an environment of its own.
@@ -102,7 +107,7 @@ func TestBrokerRefreshesInsideExpirySkew(t *testing.T) {
 
 	b := NewBroker(Config{BaseURL: server.URL, SystemKey: "rk_system"}, server.Client())
 	b.now = func() time.Time { return now }
-	identity := Identity{MemberID: testMemberID, App: AppGrant{ID: testAppID, Version: "1.0.0", Scopes: []Scope{{ResourceType: "app", ResourceID: testAppID, Access: "read"}}}}
+	identity := Identity{MemberID: testMemberID, App: AppGrant{ID: testAppID, Version: "1.0.0", RunID: testRunID, Scopes: []Scope{{ResourceType: "app", ResourceID: testAppID, Access: "read"}}}}
 	if _, err := b.PersonalKey(context.Background(), identity); err != nil {
 		t.Fatal(err)
 	}
@@ -115,7 +120,7 @@ func TestBrokerRefreshesInsideExpirySkew(t *testing.T) {
 }
 
 func TestBrokerFailsClosedForMissingIdentityScopeOrConfig(t *testing.T) {
-	valid := Identity{MemberID: testMemberID, App: AppGrant{ID: testAppID, Version: "1.0.0", Scopes: []Scope{{ResourceType: "app", ResourceID: testAppID, Access: "read"}}}}
+	valid := Identity{MemberID: testMemberID, App: AppGrant{ID: testAppID, Version: "1.0.0", RunID: testRunID, Scopes: []Scope{{ResourceType: "app", ResourceID: testAppID, Access: "read"}}}}
 	tests := []struct {
 		name     string
 		config   Config
@@ -123,6 +128,7 @@ func TestBrokerFailsClosedForMissingIdentityScopeOrConfig(t *testing.T) {
 	}{
 		{name: "system key", config: Config{BaseURL: "https://registry.example"}, identity: valid},
 		{name: "member", config: Config{BaseURL: "https://registry.example", SystemKey: "rk"}, identity: Identity{App: valid.App}},
+		{name: "run", config: Config{BaseURL: "https://registry.example", SystemKey: "rk"}, identity: Identity{MemberID: testMemberID, App: AppGrant{ID: testAppID, Version: "1.0.0", Scopes: valid.App.Scopes}}},
 		{name: "scopes", config: Config{BaseURL: "https://registry.example", SystemKey: "rk"}, identity: Identity{MemberID: testMemberID, App: AppGrant{ID: testAppID, Version: "1.0.0"}}},
 	}
 	for _, tc := range tests {

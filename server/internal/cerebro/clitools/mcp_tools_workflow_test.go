@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/multica-ai/multica/server/internal/cli"
@@ -19,6 +20,23 @@ func TestRegisterWorkflowToolsRegistersManagementSurface(t *testing.T) {
 		if !hasTool(srv, name) {
 			t.Errorf("expected tool %q", name)
 		}
+	}
+}
+
+func TestRegisterMiniAppViewTool(t *testing.T) {
+	srv := mcp.NewServer("test", "0")
+	registerMiniAppTools(srv, cli.NewAPIClient("", "", ""))
+	if !hasTool(srv, "show_app_view") {
+		t.Fatal("show_app_view tool was not registered")
+	}
+	var description string
+	for _, tool := range srv.Tools() {
+		if tool.Name == "show_app_view" {
+			description = tool.Description
+		}
+	}
+	if !strings.Contains(description, "interactive") {
+		t.Fatalf("tool description does not explain the interactive card: %q", description)
 	}
 }
 

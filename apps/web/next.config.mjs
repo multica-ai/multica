@@ -22,6 +22,7 @@ const withSerwist = withSerwistInit({
 config({ path: resolve(currentDir, "../../.env") });
 
 const remoteApiUrl = process.env.REMOTE_API_URL || process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
+const cerebroAppsRuntimeUrl = (process.env.CEREBRO_APPS_RUNTIME_URL || "http://127.0.0.1:4310").replace(/\/$/, "");
 
 // Parse hostnames from CORS_ALLOWED_ORIGINS so that Next.js dev server
 // allows cross-origin HMR / webpack requests (e.g. from Tailscale IPs).
@@ -136,6 +137,10 @@ const nextConfig = {
       // the panel sits on "Waiting for agent…". Mirrors the working `/ws` rewrite.
       // (TECH-3388)
       beforeFiles: [
+        {
+          source: "/api/cerebro/apps-runtime/:path*",
+          destination: `${cerebroAppsRuntimeUrl}/:path*`,
+        },
         {
           source: "/api/cerebro/terminal/sessions/:sid/ws",
           destination: `${remoteApiUrl}/api/cerebro/terminal/sessions/:sid/ws`,

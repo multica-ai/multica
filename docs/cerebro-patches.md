@@ -1515,6 +1515,13 @@ comment for SQL/CSS/SBPL/JSON-with-_comment-field).
 - Reason: Expose the Cerebro-zone app detail handler so the FIR-3172 app screen can read one app, its published versions, and its workflows.
 - Approver: Jesper Hvejsel, FIR-3172 comment “byg”, 2026-07-13.
 
+# cerebro-mini-app-complete-surface
+
+- Locations: `server/cmd/server/router.go`; `packages/ui/markdown/Markdown.tsx`; `packages/views/common/markdown.tsx`; `packages/views/common/app-view-request-card.tsx`; `packages/views/editor/readonly-content.tsx`; `server/internal/cerebro/platformcatalog/catalog.go`; `server/internal/cerebro/platformcatalog/catalog_test.go`.
+- Reason: Mount FIR-3172's fork-owned mini-app services, render request-bound interactive app cards in chat and issue comments, and expose the approved namespaced lifecycle permissions `apps.create`, `apps.manage`, and `apps.delete`.
+- Scope: Inline upstream render changes stay at the mention-dispatch seam; interactive behavior lives in the named sibling. Backend behavior lives under `server/internal/cerebro/apps` and `packages/cerebro-apps`.
+- Approver: Jesper Hvejsel, FIR-3172 comments “byg” and “få hele planen i mål”, 2026-07-13; Sabine's approved handoff to build the complete plan in one run, 2026-07-14.
+
 # FIR-3266 create-issue platform action floor
 
 | Patch | Location | Reason |

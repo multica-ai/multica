@@ -18,6 +18,13 @@ export type CatalogApp = {
   status: "draft" | "published" | "disabled";
 };
 
+export type AppAdminSummary = {
+  id: string; name: string; owner: string; version: string; status: string;
+  approved_scopes: AppScope[]; spend_cents: number; runs: number; failed_runs: number;
+  health: "healthy" | "attention" | "disabled"; touched: string[];
+};
+export type AppFolder = { id: string; parent_id?: string | null; name: string };
+
 export type AppVersion = {
   version: string;
   release_notes: string;

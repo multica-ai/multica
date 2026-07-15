@@ -1,6 +1,22 @@
 {
   "http": [
     {
+      "id": "POST /api/cerebro/app-folders/",
+      "gate": "cerebro_capability:apps.manage"
+    },
+    {
+      "id": "PATCH /api/cerebro/app-folders/{folderId}",
+      "gate": "cerebro_capability:apps.manage"
+    },
+    {
+      "id": "DELETE /api/cerebro/app-folders/{folderId}",
+      "gate": "cerebro_capability:apps.manage"
+    },
+    {
+      "id": "PUT /api/cerebro/app-folders/{folderId}/apps/{appId}",
+      "gate": "cerebro_capability:apps.manage"
+    },
+    {
       "id": "DELETE /api/scheduled-messages/{scheduledMessageId}",
       "gate": "self_only"
     },
@@ -18,55 +34,87 @@
     },
     {
       "id": "POST /api/cerebro/app-workflows/",
-      "gate": "cerebro_capability:build_apps"
+      "gate": "cerebro_capability:apps.manage"
     },
     {
       "id": "POST /api/cerebro/app-workflows/{workflowId}/test",
-      "gate": "cerebro_capability:use_apps"
+      "gate": "workspace_member + published app scope ceiling"
+    },
+    {
+      "id": "POST /api/cerebro/app-workflows/{workflowId}/chat",
+      "gate": "workspace_member + published app scope ceiling"
+    },
+    {
+      "id": "POST /api/cerebro/app-workflow-webhooks/{workflowId}/{token}",
+      "exempt": "pre-auth webhook — the unguessable saved workflow token authorises the delivery"
+    },
+    {
+      "id": "POST /api/cerebro/app-workflow-triggers/data-event",
+      "exempt": "pre-auth service-to-service — CEREBRO_APP_DATA_EVENT_KEY authorises Registry events"
+    },
+    {
+      "id": "POST /api/cerebro/app-workflow-triggers/schedule",
+      "exempt": "pre-auth service-to-service — CEREBRO_APP_WORKFLOW_INGEST_KEY authorises the Hatchet schedule tick"
     },
     {
       "id": "POST /api/cerebro/app-workflows/{workflowId}/{state:enable|disable}",
-      "gate": "cerebro_capability:build_apps"
+      "gate": "cerebro_capability:apps.manage"
     },
     {
       "id": "POST /api/cerebro/apps/",
-      "gate": "cerebro_capability:build_apps"
+      "gate": "cerebro_capability:apps.create"
+    },
+    {
+      "id": "POST /api/cerebro/apps/builtins/allergen-formatter/install",
+      "gate": "cerebro_capability:apps.manage"
     },
     {
       "id": "POST /api/cerebro/apps/{id}/preview",
-      "gate": "cerebro_capability:build_apps"
+      "gate": "cerebro_capability:apps.manage"
     },
     {
       "id": "POST /api/cerebro/apps/{id}/publish",
-      "gate": "cerebro_capability:build_apps"
+      "gate": "cerebro_capability:apps.manage"
     },
     {
       "id": "POST /api/cerebro/apps/{id}/rollback",
-      "gate": "cerebro_capability:build_apps"
+      "gate": "cerebro_capability:apps.manage"
     },
     {
       "id": "POST /api/cerebro/apps/{id}/token",
-      "gate": "cerebro_capability:use_apps"
+      "gate": "workspace_member + published app scope ceiling"
+    },
+    {
+      "id": "POST /api/cerebro/connections/{id}/call",
+      "gate": "published app approved integration scope + connection endpoint policy for the viewing human"
     },
     {
       "id": "POST /api/cerebro/apps/{id}/approve-scopes",
-      "gate": "cerebro_capability:approve_app_scopes"
+      "gate": "cerebro_capability:apps.manage"
     },
     {
       "id": "PUT /api/cerebro/apps/{id}/storage/{key}",
-      "gate": "cerebro_capability:use_apps"
+      "gate": "workspace_member + app-owned storage"
     },
     {
       "id": "DELETE /api/cerebro/apps/{id}/storage/{key}",
-      "gate": "cerebro_capability:use_apps"
+      "gate": "workspace_member + app-owned storage"
+    },
+    {
+      "id": "DELETE /api/cerebro/apps/{id}",
+      "gate": "cerebro_capability:apps.delete"
     },
     {
       "id": "POST /api/cerebro/apps/{id}/views/{viewId}/submissions",
-      "gate": "cerebro_capability:use_apps"
+      "gate": "workspace_member + request-bound app view"
     },
     {
       "id": "POST /api/cerebro/apps/workflow-runs/{runId}/token",
-      "gate": "cerebro_capability:use_apps"
+      "gate": "service-key worker + durable run identity envelope"
+    },
+    {
+      "id": "POST /api/cerebro/apps/workflow-runs/{runId}/execute",
+      "exempt": "pre-auth service-to-service — CEREBRO_APP_WORKFLOW_INGEST_KEY authorises the Hatchet worker; identity is loaded from the run envelope"
     },
     {
       "id": "DELETE /api/analytics/visuals/{visualId}",
@@ -1885,6 +1933,10 @@
     {
       "id": "search_notes",
       "exempt": "read-only — wraps GET /api/notes/search"
+    },
+    {
+      "id": "show_app_view",
+      "gate": "via:POST /api/cerebro/app-workflows/{id}/chat"
     },
     {
       "id": "handoff_session",

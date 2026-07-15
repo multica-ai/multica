@@ -2,10 +2,15 @@ package runtime
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"log/slog"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 
+	guuid "github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/multica-ai/multica/server/internal/cerebro/connections"
@@ -26,8 +31,19 @@ func (f fakeConnLister) ListEnabled(ctx context.Context, workspaceID pgtype.UUID
 
 type fakeEndpointPolicy struct {
 	// verdicts is keyed "<conn> <METHOD> <path>"; a missing key resolves to Deny.
-	verdicts map[string]toolpolicy.Setting
-	err      error
+	verdicts     map[string]toolpolicy.Setting
+	toolVerdicts map[string]toolpolicy.Setting
+	err          error
+}
+
+func (f fakeEndpointPolicy) ConnectionToolEffective(_ context.Context, _, _, _, _ pgtype.UUID, toolName string) (toolpolicy.Setting, string, error) {
+	if f.err != nil {
+		return toolpolicy.SettingDeny, "", f.err
+	}
+	if setting, ok := f.toolVerdicts[toolName]; ok {
+		return setting, "c", nil
+	}
+	return toolpolicy.SettingDeny, "", nil
 }
 
 func (f fakeEndpointPolicy) ConnectionEndpointEffective(ctx context.Context, workspaceID, runtimeID, agentID, userID, onBehalfOfID pgtype.UUID, connName, method, path string) (toolpolicy.Setting, string, error) {
@@ -100,6 +116,67 @@ func TestResolverIncludesAllowAndAskDropsDeny(t *testing.T) {
 	}
 	if _, present := verdictByName["c__get_deny"]; present {
 		t.Errorf("c__get_deny must be dropped, but it was listed")
+	}
+}
+
+func TestAppConnectionCallAppliesConnectionAndHumanCeilings(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer upstream.Close()
+	connectionID := guuid.MustParse("11111111-1111-4111-8111-111111111111")
+	conn := resolverTestConns()[0]
+	conn.ID, conn.URL = connectionID.String(), upstream.URL
+	resolver := NewAPIConnectionResolver(
+		fakeConnLister{conns: []connections.Connection{conn}},
+		fakeEndpointPolicy{verdicts: map[string]toolpolicy.Setting{"c GET /allow": toolpolicy.SettingAllow}},
+		fakeFlag{on: true}, slog.Default(),
+	)
+	result, err := resolver.CallForApp(context.Background(), guuid.New(), guuid.New(), connectionID, "c__get_allow", map[string]any{})
+	if err != nil || result != `{"ok":true}` {
+		t.Fatalf("allowed app connection call = %q, %v", result, err)
+	}
+	if _, err := resolver.CallForApp(context.Background(), guuid.New(), guuid.New(), guuid.New(), "c__get_allow", map[string]any{}); !errors.Is(err, ErrAppConnectionDenied) {
+		t.Fatalf("different connection was not denied: %v", err)
+	}
+}
+
+func TestAppConnectionCallSupportsApprovedMCPToolAndHumanCeiling(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request struct {
+			Method string `json:"method"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatal(err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if request.Method == "initialize" {
+			w.Header().Set("Mcp-Session-Id", "session")
+			_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2024-11-05"}}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":2,"result":{"structuredContent":{"ok":true}}}`))
+	}))
+	defer upstream.Close()
+
+	connectionID := guuid.MustParse("22222222-2222-4222-8222-222222222222")
+	conn := connections.Connection{
+		ID: connectionID.String(), Name: "c", Type: connections.TypeMCPHTTP,
+		URL: upstream.URL, Enabled: true, Tools: []connections.Tool{{Name: "format"}},
+	}
+	resolver := NewAPIConnectionResolver(
+		fakeConnLister{conns: []connections.Connection{conn}},
+		fakeEndpointPolicy{toolVerdicts: map[string]toolpolicy.Setting{"format": toolpolicy.SettingAllow}},
+		fakeFlag{on: true}, slog.Default(),
+	)
+	result, err := resolver.CallForApp(context.Background(), guuid.New(), guuid.New(), connectionID, "format", map[string]any{"value": "x"})
+	if err != nil || !strings.Contains(result, `"ok":true`) {
+		t.Fatalf("allowed MCP app connection call = %q, %v", result, err)
+	}
+
+	resolver.policy = fakeEndpointPolicy{toolVerdicts: map[string]toolpolicy.Setting{"format": toolpolicy.SettingAsk}}
+	if _, err := resolver.CallForApp(context.Background(), guuid.New(), guuid.New(), connectionID, "format", map[string]any{}); !errors.Is(err, ErrAppConnectionDenied) {
+		t.Fatalf("MCP Ask must fail closed for an app call: %v", err)
 	}
 }
 

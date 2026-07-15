@@ -194,7 +194,8 @@ function createComponents(
       if (href?.startsWith('mention://')) {
         // CEREBRO-PATCH(comments-move-to-thread-ui): JEH-2488 add `comment` mention type for in-issue thread jumps.
         // CEREBRO-PATCH(artifact-mention-markdown): FIR-1800 add `artifact` mention type for artifact reference cards.
-        const mentionMatch = href.match(/^mention:\/\/(member|agent|issue|project|all|comment|artifact)\/(.+)$/)
+        // CEREBRO-PATCH(cerebro-app-view-mention): FIR-3172 interactive app cards in chat.
+        const mentionMatch = href.match(/^mention:\/\/(member|agent|issue|project|all|comment|artifact|app-view)\/(.+)$/)
         if (mentionMatch?.[1] && mentionMatch[2]) {
           const type = mentionMatch[1]
           const id = mentionMatch[2]

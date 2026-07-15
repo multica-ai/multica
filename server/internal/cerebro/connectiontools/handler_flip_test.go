@@ -50,6 +50,10 @@ type flipEndpointPolicy struct {
 	verdicts map[string]toolpolicy.Setting
 }
 
+func (f flipEndpointPolicy) ConnectionToolEffective(_ context.Context, _, _, _, _ pgtype.UUID, _ string) (toolpolicy.Setting, string, error) {
+	return toolpolicy.SettingDeny, "", nil
+}
+
 func (f flipEndpointPolicy) ConnectionEndpointEffective(ctx context.Context, workspaceID, runtimeID, agentID, userID, onBehalfOfID pgtype.UUID, connName, method, path string) (toolpolicy.Setting, string, error) {
 	if s, ok := f.verdicts[connName+" "+method+" "+path]; ok {
 		return s, connName, nil

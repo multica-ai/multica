@@ -7,7 +7,7 @@ import { Input } from "@multica/ui/components/ui/input";
 import { Label } from "@multica/ui/components/ui/label";
 import { NativeSelect } from "@multica/ui/components/ui/native-select";
 import { Textarea } from "@multica/ui/components/ui/textarea";
-import type { AppWorkflowDefinition, WorkflowNode, WorkflowStepType } from "../core";
+import type { AppWorkflowDefinition, WorkflowNode, WorkflowStepType, WorkflowTriggerType } from "../core";
 
 const triggerLabels = { schedule: "On a schedule", webhook: "When a webhook arrives", data_event: "When registry data changes", manual: "When started manually", chat: "When requested in chat" } as const;
 const stepLabels: Record<WorkflowStepType, string> = { "registry.read": "Read registry data", "registry.write": "Write registry data", filter: "Continue only if…", "view.show_and_wait": "Show a view and wait" };
@@ -25,6 +25,13 @@ export function WorkflowBuilder({ value, onChange, onTestStep }: { value: AppWor
     if (!selected) return;
     onChange({ ...value, steps: value.steps.map((step) => step.id === selected.id ? { ...step, ...patch } : step) });
   };
+  const updateTrigger = (type: WorkflowTriggerType) => {
+    const config = type === "webhook" ? { token: globalThis.crypto.randomUUID() } : {};
+    onChange({ ...value, trigger: { ...value.trigger, type, config } });
+  };
+  const updateTriggerConfig = (name: string, fieldValue: string) => {
+    onChange({ ...value, trigger: { ...value.trigger, config: { ...value.trigger.config, [name]: fieldValue } } });
+  };
   const addStep = () => {
     const id = `step-${value.steps.length + 1}`;
     onChange({ ...value, steps: [...value.steps, { id, type: "registry.read", config: {} }] });
@@ -32,6 +39,12 @@ export function WorkflowBuilder({ value, onChange, onTestStep }: { value: AppWor
   };
 
   return <div className="space-y-4" aria-label="Workflow steps">
+    <div className="grid gap-3 rounded-lg border bg-background p-4 sm:grid-cols-2">
+      <Label className="grid gap-2"><span>Start when</span><NativeSelect value={value.trigger.type} onChange={(event) => updateTrigger(event.target.value as WorkflowTriggerType)}>{Object.entries(triggerLabels).map(([type, label]) => <option key={type} value={type}>{label}</option>)}</NativeSelect></Label>
+      {value.trigger.type === "schedule" && <Label className="grid gap-2"><span>Schedule (UTC)</span><Input value={typeof value.trigger.config.cron === "string" ? value.trigger.config.cron : ""} onChange={(event) => updateTriggerConfig("cron", event.target.value)} placeholder="0 8 * * 1-5" /></Label>}
+      {value.trigger.type === "data_event" && <Label className="grid gap-2"><span>Registry resource ID</span><Input value={typeof value.trigger.config.resource_id === "string" ? value.trigger.config.resource_id : ""} onChange={(event) => updateTriggerConfig("resource_id", event.target.value)} placeholder="products" /></Label>}
+      {value.trigger.type === "webhook" && <Label className="grid gap-2"><span>Webhook token</span><Input readOnly value={typeof value.trigger.config.token === "string" ? value.trigger.config.token : ""} /></Label>}
+    </div>
     <div className="rounded-lg bg-muted/40 p-3">
       <NodeCard eyebrow="Trigger" index="01" title={triggerLabels[value.trigger.type]} description="The event that starts this workflow" />
       {value.steps.map((step, index) => <div key={step.id}>

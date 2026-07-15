@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "start": "node server.mjs",
-    "test": "node --test runtime.test.mjs",
-    "typecheck": "node --check runtime.mjs && node --check worker-runner.mjs && node --check server.mjs"
+    "test": "node --test runtime.test.mjs container-launcher.test.mjs container-integration.test.mjs egress-proxy.test.mjs",
+    "typecheck": "node --check runtime.mjs && node --check worker-runner.mjs && node --check server.mjs && node --check container-launcher.mjs && node --check egress-proxy.mjs"
   }
 }

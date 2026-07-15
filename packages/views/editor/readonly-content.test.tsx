@@ -17,7 +17,19 @@ vi.mock("@multica/cerebro-feature-flags", () => ({
 }));
 
 vi.mock("@multica/core/api", () => ({
-  api: { getAttachmentTextContent: getAttachmentTextContentMock },
+  api: {
+    getAttachmentTextContent: getAttachmentTextContentMock,
+    cerebroRequest: vi.fn().mockResolvedValue({
+      id: "11111111-1111-4111-8111-111111111111",
+      app_id: "app-1",
+      app_name: "Allergen Formatter",
+      app_version: "1.0.0",
+      view_id: "review",
+      input: {},
+      status: "waiting",
+      runtime_url: "/api/cerebro/apps-runtime/apps/app-1/1.0.0/",
+    }),
+  },
   PreviewTooLargeError: class extends Error {},
   PreviewUnsupportedError: class extends Error {},
 }));
@@ -336,6 +348,15 @@ describe("ReadonlyContent highlight Markdown", () => {
 });
 
 describe("ReadonlyContent issue mention Markdown", () => {
+  it("renders an interactive mini-app request card", () => {
+    const { getByTestId } = render(
+      <ReadonlyContent content="[Open app](mention://app-view/11111111-1111-4111-8111-111111111111)" />,
+    );
+    expect(
+      getByTestId("app-view-request-11111111-1111-4111-8111-111111111111"),
+    ).toBeInTheDocument();
+  });
+
   it("renders an issue mention inside a task list as an issue mention card", () => {
     const { container, getByTestId } = render(
       <ReadonlyContent content="- [ ] [MUL-123](mention://issue/issue-123)" />,

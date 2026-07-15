@@ -22,7 +22,7 @@ async function fixture() {
 
 test("serves an immutable app frontend version", async () => {
   const root = await fixture();
-  const runtime = createAppsRuntime({ bundleRoot: root, frameAncestors: "https://multica.example" });
+  const runtime = createAppsRuntime({ bundleRoot: root, frameAncestors: "https://multica.example", workerIsolation: "process" });
   const response = await runtime.fetch(
     new Request("http://runtime/apps/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/1.0.0/"),
   );
@@ -32,10 +32,20 @@ test("serves an immutable app frontend version", async () => {
   assert.match(response.headers.get("content-security-policy"), /frame-ancestors https:\/\/multica\.example/);
 });
 
+test("serves the mini-app SDK with a real connection call route", async () => {
+  const runtime = createAppsRuntime({ bundleRoot: await fixture(), workerIsolation: "process" });
+  const response = await runtime.fetch(new Request("http://runtime/sdk/multica.js"));
+  assert.equal(response.status, 200);
+  const source = await response.text();
+  assert.match(source, /connections\/\$\{encodeURIComponent\(connectionId\)\}\/call/);
+  assert.match(source, /storage:/);
+  assert.match(source, /views:/);
+});
+
 test("isolates backend execution and strips registry system credentials", async () => {
   const root = await fixture();
   process.env.FIRTAL_REGISTRY_KEY = "rk_must_not_cross_worker_boundary";
-  const runtime = createAppsRuntime({ bundleRoot: root, workerTimeoutMs: 2_000 });
+  const runtime = createAppsRuntime({ bundleRoot: root, workerTimeoutMs: 2_000, workerIsolation: "process" });
   const response = await runtime.fetch(
     new Request("http://runtime/workers/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/1.0.0/invoke", {
       method: "POST",
@@ -49,18 +59,19 @@ test("isolates backend execution and strips registry system credentials", async 
 
 test("one failed worker does not affect runtime health", async () => {
   const root = await fixture();
-  const runtime = createAppsRuntime({ bundleRoot: root });
+  const runtime = createAppsRuntime({ bundleRoot: root, workerIsolation: "process" });
   const missing = await runtime.fetch(
     new Request("http://runtime/workers/bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb/1.0.0/invoke", { method: "POST", body: "{}" }),
   );
   assert.equal(missing.status, 502);
+  assert.deepEqual(await missing.json(), { error: "App worker failed" });
   const health = await runtime.fetch(new Request("http://runtime/healthz"));
   assert.equal(health.status, 200);
   assert.deepEqual(await health.json(), { status: "ok" });
 });
 
 test("rejects path traversal before touching the filesystem", async () => {
-  const runtime = createAppsRuntime({ bundleRoot: await fixture() });
+  const runtime = createAppsRuntime({ bundleRoot: await fixture(), workerIsolation: "process" });
   const response = await runtime.fetch(new Request("http://runtime/apps/not-an-id/1.0.0/../../secret"));
   assert.equal(response.status, 404);
 });
@@ -76,7 +87,7 @@ test("allergen fixture makes one AI call on the personal key", async () => {
   await new Promise((resolve) => ai.listen(0, "127.0.0.1", resolve));
   const address = ai.address();
   const fixtureRoot = join(fileURLToPath(new URL(".", import.meta.url)), "fixtures");
-  const runtime = createAppsRuntime({ bundleRoot: fixtureRoot, workerTimeoutMs: 2_000 });
+  const runtime = createAppsRuntime({ bundleRoot: fixtureRoot, workerTimeoutMs: 2_000, workerIsolation: "process" });
   const response = await runtime.fetch(new Request("http://runtime/workers/f1540000-0000-4154-8154-000000000001/1.0.0/invoke", {
     method: "POST",
     body: JSON.stringify({ ingredients: "wheat flour, milk", registryKey: "sk_personal", aiBaseUrl: `http://127.0.0.1:${address.port}` }),
@@ -89,15 +100,15 @@ test("allergen fixture makes one AI call on the personal key", async () => {
 
 test("allergen fixture loads a CSP-safe client that obtains a personal token before invoking its worker", async () => {
   const fixtureRoot = join(fileURLToPath(new URL(".", import.meta.url)), "fixtures");
-  const runtime = createAppsRuntime({ bundleRoot: fixtureRoot });
+  const runtime = createAppsRuntime({ bundleRoot: fixtureRoot, workerIsolation: "process" });
   const page = await runtime.fetch(new Request("http://runtime/apps/f1540000-0000-4154-8154-000000000001/1.0.0/"));
   const html = await page.text();
-  assert.match(html, /<script src="\.\/app\.js"><\/script>/);
+  assert.match(html, /<script type="module" src="\.\/app\.js"><\/script>/);
   assert.doesNotMatch(html, /<script>[^<]/);
 
   const script = await runtime.fetch(new Request("http://runtime/apps/f1540000-0000-4154-8154-000000000001/1.0.0/app.js"));
   const source = await script.text();
-  assert.match(source, /api\/cerebro\/apps\/\$\{appId\}\/token/);
+  assert.match(source, /createMulticaApp/);
   assert.match(source, /registryKey:\s*token\.key/);
   assert.match(source, /aiBaseUrl:\s*token\.ai_base_url/);
   // An app must never pin itself to one environment: the gateway it may call is

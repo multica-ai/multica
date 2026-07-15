@@ -1,7 +1,6 @@
 package apps
 
 import (
-	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -111,28 +110,6 @@ func TestValidateScopesRejectsUnknownOrEmptyCeilings(t *testing.T) {
 	}
 }
 
-func TestWorkflowTestExecutorConsumesTheDefinitionAndReturnsVisibleStepLog(t *testing.T) {
-	definition := json.RawMessage(`{
-		"schema_version":"1",
-		"trigger":{"id":"trigger","type":"manual","config":{}},
-		"steps":[
-			{"id":"read","type":"registry.read","config":{"resource_id":"products"}},
-			{"id":"filter","type":"filter","config":{"field":"read.count","operator":"gt","value":0}},
-			{"id":"write","type":"registry.write","config":{"resource_id":"products"}}
-		]
-	}`)
-	result, err := runWorkflowTest(context.Background(), definition, map[string]any{"sku": "123"})
-	if err != nil {
-		t.Fatalf("run workflow test: %v", err)
-	}
-	if result.Status != "succeeded" || len(result.Steps) != 3 {
-		t.Fatalf("unexpected workflow result: %+v", result)
-	}
-	if result.Steps[0].Status != "succeeded" || result.Steps[2].Status != "succeeded" {
-		t.Fatalf("step log did not show completed work: %+v", result.Steps)
-	}
-}
-
 func TestMiniAppsRouterExposesAppDetail(t *testing.T) {
 	raw, err := os.ReadFile("../../../cmd/server/router.go")
 	if err != nil {
@@ -140,5 +117,49 @@ func TestMiniAppsRouterExposesAppDetail(t *testing.T) {
 	}
 	if !strings.Contains(string(raw), `r.Get("/{id}", cerebroAppsHandler.Get)`) {
 		t.Fatal("mini apps detail route is missing")
+	}
+}
+
+func TestMiniAppsRouterExposesInteractiveViewRequests(t *testing.T) {
+	raw, err := os.ReadFile("../../../cmd/server/router.go")
+	if err != nil {
+		t.Fatalf("read router: %v", err)
+	}
+	if !strings.Contains(string(raw), `r.Get("/view-requests/{requestId}", cerebroAppsHandler.GetViewRequest)`) {
+		t.Fatal("interactive view request route is missing")
+	}
+}
+
+func TestViewSubmissionCanResumeOneRequest(t *testing.T) {
+	req := viewSubmissionRequest{RequestID: "11111111-1111-4111-8111-111111111111", Version: "1.0.0", Value: json.RawMessage(`{"approved":true}`)}
+	if err := validateViewSubmission(req); err != nil {
+		t.Fatalf("valid request-bound submission rejected: %v", err)
+	}
+	req.RequestID = "not-a-uuid"
+	if err := validateViewSubmission(req); err == nil {
+		t.Fatal("invalid request id was accepted")
+	}
+}
+
+func TestConnectionCallRequiresAnApprovedIntegrationScope(t *testing.T) {
+	scopes := []tokens.Scope{{ResourceType: "integration", ResourceID: "connection-1", Access: "read_write"}}
+	if !approvedConnectionScope(scopes, "connection-1") {
+		t.Fatal("approved connection scope was rejected")
+	}
+	if approvedConnectionScope(scopes, "connection-2") {
+		t.Fatal("a different connection escaped the app scope ceiling")
+	}
+	if approvedConnectionScope([]tokens.Scope{{ResourceType: "data_source", ResourceID: "connection-1", Access: "read"}}, "connection-1") {
+		t.Fatal("a data source scope was treated as a connection grant")
+	}
+}
+
+func TestMiniAppsRouterExposesScopedConnectionCall(t *testing.T) {
+	raw, err := os.ReadFile("../../../cmd/server/router.go")
+	if err != nil {
+		t.Fatalf("read router: %v", err)
+	}
+	if !strings.Contains(string(raw), `r.Post("/api/cerebro/connections/{id}/call", cerebroAppsHandler.CallConnection)`) {
+		t.Fatal("scoped mini-app connection call route is missing")
 	}
 }

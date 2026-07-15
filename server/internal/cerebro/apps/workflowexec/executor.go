@@ -28,7 +28,7 @@ type Registry interface {
 	Execute(context.Context, string, RegistryCall) (any, error)
 }
 type ViewWaiter interface {
-	ShowAndWait(context.Context, string, any) (any, error)
+	ShowAndWait(context.Context, string, string, any) (any, error)
 }
 
 type StepLog struct {
@@ -111,7 +111,7 @@ func (e *Executor) Run(ctx context.Context, raw json.RawMessage, trigger any) (R
 				return result, nil
 			}
 		case "view.show_and_wait":
-			output, err = e.views.ShowAndWait(ctx, stringConfig(step.Config, "view_id"), last)
+			output, err = e.views.ShowAndWait(ctx, step.ID, stringConfig(step.Config, "view_id"), last)
 		default:
 			err = fmt.Errorf("unsupported workflow step %q", step.Type)
 		}

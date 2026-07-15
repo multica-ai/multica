@@ -492,6 +492,7 @@ var multicaMCPToolMatrix = []ToolMeta{
 	{Name: "search_artifacts", Description: "Search artifacts by query text.", Status: ToolStatusNewlyImplemented},
 	{Name: "search_issues", Description: "Search issues by text query.", Status: ToolStatusExcluded},
 	{Name: "search_notes", Description: "Full-text search across notes/documents — matches title, body, and comments.", Status: ToolStatusExcluded},
+	{Name: "show_app_view", Description: "Start a mini-app workflow and publish its interactive view card into a chat or issue.", Status: ToolStatusExcluded}, // CEREBRO-PATCH(cerebro-mini-app-agent-tool): FIR-3172 inventory parity.
 	{Name: "schedule_wakeup", Description: "Schedule an agent to wake up on an issue at a time or when a watched event happens.", Status: ToolStatusImplemented},
 	{Name: "set_artifact_folder", Description: "Set an artifact's folder.", Status: ToolStatusExcluded},
 	{Name: "suggest_artifact_folder", Description: "Propose an existing folder for an artifact; a person accepts before it moves.", Status: ToolStatusExcluded},

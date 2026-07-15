@@ -166,6 +166,13 @@ func callMCPTool(ctx context.Context, url string, auth AuthConfig, toolName stri
 	return rpc.Result, nil
 }
 
+// CallMCPTool invokes one already-discovered MCP tool while keeping the
+// connection credential server-side. Callers must enforce their own app and
+// human permission ceilings before calling this transport helper.
+func CallMCPTool(ctx context.Context, url string, auth AuthConfig, toolName string, args map[string]any) (json.RawMessage, error) {
+	return callMCPTool(ctx, strings.TrimRight(url, "/"), auth, toolName, args)
+}
+
 // parseOptions normalizes an MCP tools/call result into the picker's option
 // list. It tolerates the common MCP shapes: a result with structuredContent, or
 // a result with text content carrying the tool's JSON return value. The payload

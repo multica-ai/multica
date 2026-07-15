@@ -199,6 +199,16 @@ does not depend on `CEREBRO_APPROVAL_GATE_MODE` or the runtime rollout flags.
 
 ---
 
+### Mini-app Connection calls
+
+`connections.call` is always the intersection of two independent ceilings.
+`server/internal/cerebro/apps.CallConnection` first requires the published app
+version to have an approved `integration` scope for that exact Connection. The
+runtime resolver then re-checks the acting member: API endpoints use
+`ConnectionEndpointEffective`, while MCP tools use `ConnectionToolEffective`.
+Only `Allow` dispatches; `Ask`, `Deny`, lookup errors, undeclared MCP tools, and
+transport errors fail closed. Stored Connection credentials remain server-side.
+
 ## What is enforced LIVE today (no flag required)
 
 The personal browser's `secure-fill` action has an additional always-on floor:

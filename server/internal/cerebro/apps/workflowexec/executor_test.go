@@ -25,7 +25,7 @@ func (f *fakeRegistry) Execute(_ context.Context, key string, call RegistryCall)
 
 type fakeViews struct{ calls int }
 
-func (f *fakeViews) ShowAndWait(_ context.Context, viewID string, input any) (any, error) {
+func (f *fakeViews) ShowAndWait(_ context.Context, _ string, viewID string, input any) (any, error) {
 	f.calls++
 	return map[string]any{"approved": true, "view_id": viewID, "input": input}, nil
 }

@@ -1,4 +1,30 @@
 services:
+  cerebro-app-worker:
+    image: multica/cerebro-app-worker:latest
+    build:
+      context: ../..
+      dockerfile: apps/cerebro-apps-runtime/Dockerfile.worker
+    profiles: ["worker-image"]
+
+  cerebro-app-egress:
+    image: multica/cerebro-app-egress:latest
+    build:
+      context: ../..
+      dockerfile: apps/cerebro-apps-runtime/Dockerfile.egress
+    environment:
+      ALLOWED_HOSTS: registry.firtal.com,firtal-data-registry.sliplane.app
+    networks:
+      default:
+      multica-apps:
+        ipv4_address: 172.31.240.2
+    mem_limit: 64m
+    cpus: 0.25
+    read_only: true
+    tmpfs:
+      - /tmp:size=8m
+    security_opt:
+      - no-new-privileges:true
+
   cerebro-apps-runtime:
     build:
       context: ../..
@@ -8,8 +34,16 @@ services:
     environment:
       MULTICA_APP_TOKEN_ENDPOINT: http://host.docker.internal:8080/api/cerebro/apps
       MULTICA_FRAME_ANCESTORS: http://localhost:3000
+      APP_WORKER_IMAGE: multica/cerebro-app-worker:latest
+      APP_WORKER_NETWORK: multica-apps
     volumes:
       - ./fixtures:/var/lib/multica-apps:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks:
+      - default
+      - multica-apps
+    depends_on:
+      - cerebro-app-egress
     mem_limit: 256m
     cpus: 1.0
     read_only: true
@@ -20,3 +54,11 @@ services:
       interval: 10s
       timeout: 2s
       retries: 3
+
+networks:
+  multica-apps:
+    name: multica-apps
+    internal: true
+    ipam:
+      config:
+        - subnet: 172.31.240.0/24

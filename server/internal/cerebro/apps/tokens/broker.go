@@ -49,6 +49,7 @@ type Scope struct {
 type AppGrant struct {
 	ID      string  `json:"id"`
 	Version string  `json:"version"`
+	RunID   string  `json:"run_id"`
 	Scopes  []Scope `json:"scopes"`
 }
 
@@ -61,6 +62,7 @@ type Token struct {
 	Key       string    `json:"key"`
 	SessionID string    `json:"session_id"`
 	ExpiresAt time.Time `json:"expires_at"`
+	RunID     string    `json:"run_id"`
 	// AIBaseURL is the gateway the app must call with this key. Apps never hard
 	// code an environment: the broker hands out the base URL that belongs to the
 	// registry the key was exchanged against.
@@ -163,6 +165,9 @@ func (b *Broker) validate(identity Identity) error {
 	if !semverPattern.MatchString(identity.App.Version) {
 		return errors.New("app token identity requires a semantic app version")
 	}
+	if !uuidPattern.MatchString(strings.ToLower(identity.App.RunID)) {
+		return errors.New("app token identity requires a valid run id")
+	}
 	if len(identity.App.Scopes) == 0 {
 		return errors.New("app token identity requires approved scopes")
 	}
@@ -221,6 +226,7 @@ func (b *Broker) exchange(ctx context.Context, identity Identity) (Token, error)
 		Key:       response.Key,
 		SessionID: response.Session.ID,
 		ExpiresAt: expiresAt,
+		RunID:     identity.App.RunID,
 		AIBaseURL: strings.TrimRight(b.config.BaseURL, "/") + aiProxyPath,
 	}, nil
 }

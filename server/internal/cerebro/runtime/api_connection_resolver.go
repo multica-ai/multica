@@ -27,9 +27,11 @@ package runtime
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"net/http"
 
+	guuid "github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/multica-ai/multica/server/internal/cerebro/connections"
@@ -37,6 +39,8 @@ import (
 	"github.com/multica-ai/multica/server/internal/cerebro/toolpolicy"
 	"github.com/multica-ai/multica/server/internal/util"
 )
+
+var ErrAppConnectionDenied = errors.New("app connection call denied")
 
 // The three seams below are narrow interfaces the resolver depends on, so it is
 // unit-testable without a database. In production they are satisfied by the
@@ -51,6 +55,7 @@ type apiConnectionLister interface {
 // endpointPolicyResolver resolves the per-actor verdict for one endpoint.
 type endpointPolicyResolver interface {
 	ConnectionEndpointEffective(ctx context.Context, workspaceID, runtimeID, agentID, userID, onBehalfOfID pgtype.UUID, connName, method, path string) (toolpolicy.Setting, string, error)
+	ConnectionToolEffective(ctx context.Context, workspaceID, runtimeID, agentID, userID pgtype.UUID, toolName string) (toolpolicy.Setting, string, error)
 }
 
 // apiConnectionFlagChecker reads the default-off cerebro_api_connection_tools flag.
@@ -181,6 +186,60 @@ func (r *APIConnectionResolver) ListForAgent(ctx context.Context, ident APIConne
 		return nil
 	}
 	return out
+}
+
+// CallForApp dispatches one endpoint for a published mini app. The apps handler
+// has already enforced the app grant ceiling; this second gate applies the
+// configured connection policy for the viewing human and keeps credentials
+// server-side.
+func (r *APIConnectionResolver) CallForApp(ctx context.Context, workspaceID, memberID, connectionID guuid.UUID, toolName string, arguments map[string]any) (string, error) {
+	if r == nil || r.conns == nil || r.policy == nil {
+		return "", ErrAppConnectionDenied
+	}
+	ws := pgtype.UUID{Bytes: workspaceID, Valid: true}
+	member := pgtype.UUID{Bytes: memberID, Valid: true}
+	conns, err := r.conns.ListEnabled(ctx, ws)
+	if err != nil {
+		return "", ErrAppConnectionDenied
+	}
+	for _, conn := range conns {
+		if conn.ID != connectionID.String() {
+			continue
+		}
+		if conn.Type == connections.TypeMCPHTTP {
+			declared := false
+			for _, tool := range conn.Tools {
+				if tool.Name == toolName {
+					declared = true
+					break
+				}
+			}
+			if !declared {
+				return "", ErrAppConnectionDenied
+			}
+			setting, _, policyErr := r.policy.ConnectionToolEffective(ctx, ws, pgtype.UUID{}, pgtype.UUID{}, member, toolName)
+			if policyErr != nil || setting != toolpolicy.SettingAllow {
+				return "", ErrAppConnectionDenied
+			}
+			raw, callErr := connections.CallMCPTool(ctx, conn.URL, conn.AuthConfig, toolName, arguments)
+			if callErr != nil {
+				return "", ErrAppConnectionDenied
+			}
+			return string(raw), nil
+		}
+		for _, built := range buildAPIConnectionTools([]connections.Connection{conn}, r.client, r.exchanger) {
+			api, ok := built.(*APIConnectionTool)
+			if !ok || api.Name() != toolName {
+				continue
+			}
+			setting, _, policyErr := r.policy.ConnectionEndpointEffective(ctx, ws, pgtype.UUID{}, pgtype.UUID{}, member, member, api.ConnectionName(), api.Method(), api.Path())
+			if policyErr != nil || setting != toolpolicy.SettingAllow {
+				return "", ErrAppConnectionDenied
+			}
+			return api.Call(WithConnectionTriggerMember(ctx, memberID.String()), arguments)
+		}
+	}
+	return "", ErrAppConnectionDenied
 }
 
 // flagEnabled reports whether cerebro_api_connection_tools is on for the

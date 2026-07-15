@@ -7,10 +7,11 @@
 // jobs land here as additional NewStandaloneTask registrations.
 //
 // Deployment: see docs/cerebro-hatchet-worker.md. Required env:
-//   HATCHET_CLIENT_TOKEN          — Hatchet JWT (creds in Infisical /runs)
-//   CEREBRO_FX_INGEST_URL         — internal URL of multica-backend's
-//                                   POST /api/cerebro/exchange-rates endpoint
-//   CEREBRO_EXCHANGE_INGEST_KEY   — service key presented as a Bearer token
+//
+//	HATCHET_CLIENT_TOKEN          — Hatchet JWT (creds in Infisical /runs)
+//	CEREBRO_FX_INGEST_URL         — internal URL of multica-backend's
+//	                                POST /api/cerebro/exchange-rates endpoint
+//	CEREBRO_EXCHANGE_INGEST_KEY   — service key presented as a Bearer token
 //
 // The worker holds NO database credential: it fetches rates from Frankfurter
 // and POSTs them to the backend, which is the only writer of
@@ -31,6 +32,7 @@ import (
 
 	hatchet "github.com/hatchet-dev/hatchet/sdks/go"
 
+	cerebroapps "github.com/multica-ai/multica/server/internal/cerebro/apps"
 	"github.com/multica-ai/multica/server/internal/cerebro/exchangerates"
 	"github.com/multica-ai/multica/server/internal/logger"
 )
@@ -45,6 +47,19 @@ type fxOutput struct {
 	Base    string `json:"base"`
 	Date    string `json:"date"`
 	Written int    `json:"written"`
+}
+
+// CEREBRO-PATCH(cerebro-mini-app-hatchet): FIR-3172 generic app workflow and schedule tasks.
+type miniAppWorkflowInput struct {
+	RunID string `json:"run_id"`
+}
+
+type miniAppWorkflowOutput struct {
+	Status string `json:"status"`
+}
+
+type miniAppScheduleOutput struct {
+	Queued int `json:"queued"`
 }
 
 func main() {
@@ -66,6 +81,18 @@ func run() error {
 	ingestKey := strings.TrimSpace(os.Getenv("CEREBRO_EXCHANGE_INGEST_KEY"))
 	if ingestKey == "" {
 		return errors.New("CEREBRO_EXCHANGE_INGEST_KEY is required")
+	}
+	appWorkflowURL := strings.TrimSpace(os.Getenv("CEREBRO_APP_WORKFLOW_EXECUTE_URL"))
+	if appWorkflowURL == "" {
+		return errors.New("CEREBRO_APP_WORKFLOW_EXECUTE_URL is required")
+	}
+	appWorkflowKey := strings.TrimSpace(os.Getenv("CEREBRO_APP_WORKFLOW_INGEST_KEY"))
+	if appWorkflowKey == "" {
+		return errors.New("CEREBRO_APP_WORKFLOW_INGEST_KEY is required")
+	}
+	appWorkflowTriggerURL := strings.TrimSpace(os.Getenv("CEREBRO_APP_WORKFLOW_TRIGGER_URL"))
+	if appWorkflowTriggerURL == "" {
+		return errors.New("CEREBRO_APP_WORKFLOW_TRIGGER_URL is required")
 	}
 	base := envOr("CEREBRO_FX_BASE", "USD")
 	symbols := splitCSV(envOr("CEREBRO_FX_SYMBOLS", "DKK,EUR"))
@@ -100,8 +127,25 @@ func run() error {
 		hatchet.WithWorkflowCron(cronExpr),
 		hatchet.WithWorkflowDescription("FIR-43 — Daily USD→{DKK,EUR} reference-rate refresh (ECB via Frankfurter)."),
 	)
+	miniAppTask := client.NewStandaloneTask(
+		"cerebro-mini-app-workflow",
+		func(taskCtx hatchet.Context, input miniAppWorkflowInput) (miniAppWorkflowOutput, error) {
+			status, err := cerebroapps.SubmitWorkflowRun(taskCtx, httpClient, appWorkflowURL, appWorkflowKey, input.RunID)
+			return miniAppWorkflowOutput{Status: status}, err
+		},
+		hatchet.WithWorkflowDescription("FIR-3172 — execute one durable Cerebro mini-app workflow run."),
+	)
+	miniAppScheduleTask := client.NewStandaloneTask(
+		"cerebro-mini-app-schedule-sweep",
+		func(taskCtx hatchet.Context, _ fxInput) (miniAppScheduleOutput, error) {
+			queued, err := cerebroapps.SubmitWorkflowTrigger(taskCtx, httpClient, appWorkflowTriggerURL, appWorkflowKey, "schedule")
+			return miniAppScheduleOutput{Queued: queued}, err
+		},
+		hatchet.WithWorkflowCron("* * * * *"),
+		hatchet.WithWorkflowDescription("FIR-3172 — start due saved mini-app workflows once per minute."),
+	)
 
-	worker, err := client.NewWorker(workerName, hatchet.WithWorkflows(fxTask))
+	worker, err := client.NewWorker(workerName, hatchet.WithWorkflows(fxTask, miniAppTask, miniAppScheduleTask))
 	if err != nil {
 		return err
 	}

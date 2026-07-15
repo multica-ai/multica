@@ -27,7 +27,7 @@ export async function loginAsDefault(page: Page): Promise<string> {
   }, token);
   await page.goto(`/${workspace.slug}/issues`, { waitUntil: "domcontentloaded" });
   await page.waitForURL("**/issues", { timeout: 15000 });
-  await expect(page.getByRole("link", { name: "Inbox" })).toBeVisible({ timeout: 15000 });
+  await expect(page.getByRole("heading", { name: "Issues" })).toBeVisible({ timeout: 15000 });
   return workspace.slug;
 }
 

@@ -46,7 +46,7 @@ describe("AppDetailPage", () => {
     await screen.findByRole("heading", { name: "Allergen Formatter" });
     expect(screen.getByTitle("Allergen Formatter")).toHaveAttribute(
       "src",
-      "/api/cerebro/apps-runtime/apps/app-1/1.0.0/",
+      "/api/cerebro/apps-runtime/apps/app-1/1.0.0/index.html",
     );
 
     await userEvent.click(screen.getByRole("button", { name: "Test workflow" }));

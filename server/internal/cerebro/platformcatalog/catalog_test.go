@@ -28,8 +28,8 @@ func TestCatalogInvariants(t *testing.T) {
 		if strings.TrimSpace(c.Key) == "" {
 			t.Errorf("capability has blank key: %+v", c)
 		}
-		if c.Key != strings.ToLower(c.Key) || strings.ContainsAny(c.Key, " -.") {
-			t.Errorf("capability key %q must be lower snake_case (no spaces/dashes/dots)", c.Key)
+		if c.Key != strings.ToLower(c.Key) || strings.ContainsAny(c.Key, " -") || strings.Count(c.Key, ".") > 1 {
+			t.Errorf("capability key %q must be lower snake_case with at most one namespace dot", c.Key)
 		}
 		if seen[c.Key] {
 			t.Errorf("duplicate capability key %q", c.Key)

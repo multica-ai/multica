@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"regexp"
 	"strings"
@@ -26,16 +27,37 @@ var semverPattern = regexp.MustCompile(`^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1
 
 type tokenIssuer interface {
 	PersonalKey(rctx context.Context, identity tokens.Identity) (tokens.Token, error)
+	Forget(identity tokens.Identity) int
+}
+
+type connectionCaller interface {
+	CallForApp(ctx context.Context, workspaceID, memberID, connectionID uuid.UUID, tool string, arguments map[string]any) (string, error)
 }
 
 type Handler struct {
-	pool    *pgxpool.Pool
-	tokens  tokenIssuer
-	enabled bool
+	pool            *pgxpool.Pool
+	tokens          tokenIssuer
+	dispatcher      workflowDispatcher
+	workerIngestKey string
+	dataEventKey    string
+	enabled         bool
+	connections     connectionCaller
+}
+
+func (h *Handler) WithConnectionCaller(caller connectionCaller) *Handler {
+	h.connections = caller
+	return h
 }
 
 func NewHandler(pool *pgxpool.Pool) *Handler {
-	return &Handler{pool: pool, tokens: tokens.NewBroker(tokens.ConfigFromEnv(), nil), enabled: envFlagEnabled("CEREBRO_MINI_APPS_ENABLED")}
+	return &Handler{
+		pool:            pool,
+		tokens:          tokens.NewBroker(tokens.ConfigFromEnv(), nil),
+		dispatcher:      hatchetWorkflowDispatcher{},
+		workerIngestKey: strings.TrimSpace(os.Getenv("CEREBRO_APP_WORKFLOW_INGEST_KEY")),
+		dataEventKey:    strings.TrimSpace(os.Getenv("CEREBRO_APP_DATA_EVENT_KEY")),
+		enabled:         envFlagEnabled("CEREBRO_MINI_APPS_ENABLED"),
+	}
 }
 
 func envFlagEnabled(name string) bool {
@@ -91,8 +113,16 @@ type storageRequest struct {
 }
 
 type viewSubmissionRequest struct {
-	Version string          `json:"version"`
-	Value   json.RawMessage `json:"value"`
+	RequestID string          `json:"request_id"`
+	Version   string          `json:"version"`
+	Value     json.RawMessage `json:"value"`
+}
+
+type connectionCallRequest struct {
+	AppID     string         `json:"app_id"`
+	Version   string         `json:"version"`
+	Tool      string         `json:"tool"`
+	Arguments map[string]any `json:"arguments"`
 }
 
 type appResponse struct {
@@ -150,6 +180,28 @@ func validatePublishRequest(req publishRequest) error {
 		return errors.New("release_notes is required")
 	}
 	return validateSnapshot(req.Snapshot)
+}
+
+func validateViewSubmission(req viewSubmissionRequest) error {
+	if _, err := uuid.Parse(req.RequestID); err != nil {
+		return errors.New("request_id must be a UUID")
+	}
+	if !semverPattern.MatchString(req.Version) {
+		return errors.New("version must be semantic versioning")
+	}
+	if len(req.Value) == 0 || !json.Valid(req.Value) {
+		return errors.New("value must be valid JSON")
+	}
+	return nil
+}
+
+func approvedConnectionScope(scopes []tokens.Scope, connectionID string) bool {
+	for _, scope := range scopes {
+		if scope.ResourceType == "integration" && scope.ResourceID == connectionID && (scope.Access == "write" || scope.Access == "read_write") {
+			return true
+		}
+	}
+	return false
 }
 
 func validateSnapshot(raw json.RawMessage) error {
@@ -215,6 +267,9 @@ func validateWorkflowDefinition(raw json.RawMessage) error {
 	if definition.Trigger == nil || definition.Trigger.ID == "" || definition.Trigger.Type == "" {
 		return errors.New("one trigger is required")
 	}
+	if !supportedWorkflowTrigger(definition.Trigger.Type) {
+		return errors.New("trigger type is not supported")
+	}
 	seen := map[string]bool{definition.Trigger.ID: true}
 	for _, step := range definition.Steps {
 		if step.ID == "" || step.Type == "" {
@@ -228,15 +283,25 @@ func validateWorkflowDefinition(raw json.RawMessage) error {
 	return nil
 }
 
+func supportedWorkflowTrigger(value string) bool {
+	switch value {
+	case "schedule", "webhook", "data_event", "manual", "chat":
+		return true
+	default:
+		return false
+	}
+}
+
 func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	workspaceID, ok := requestWorkspaceID(w, r)
 	if !ok {
 		return
 	}
 	rows, err := h.pool.Query(r.Context(), `
-		SELECT id, workspace_id, slug, name, description, icon, folder, owner_id,
-		       current_version, status, created_at, updated_at
-		FROM cerebro_app WHERE workspace_id=$1 ORDER BY folder, name`, workspaceID)
+		SELECT a.id, a.workspace_id, a.slug, a.name, a.description, a.icon, COALESCE(f.name,a.folder), a.owner_id,
+		       a.current_version, a.status, a.created_at, a.updated_at
+		FROM cerebro_app a LEFT JOIN cerebro_app_folder f ON f.id=a.folder_id
+		WHERE a.workspace_id=$1 ORDER BY COALESCE(f.name,a.folder), a.name`, workspaceID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list apps")
 		return
@@ -547,21 +612,76 @@ func (h *Handler) SubmitView(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &req) {
 		return
 	}
+	if err := validateViewSubmission(req); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	if app.CurrentVersion == nil || req.Version != *app.CurrentVersion {
 		writeError(w, http.StatusConflict, "view submission must target the current published version")
 		return
 	}
-	if len(req.Value) == 0 || !json.Valid(req.Value) {
-		writeError(w, http.StatusBadRequest, "value must be valid JSON")
-		return
-	}
-	var submissionID uuid.UUID
-	err := h.pool.QueryRow(r.Context(), `INSERT INTO cerebro_app_view_submission (app_id,app_version,view_id,submitted_by,value) VALUES ($1,$2,$3,$4,$5) RETURNING id`, app.ID, req.Version, viewID, memberID, req.Value).Scan(&submissionID)
+	requestID, _ := uuid.Parse(req.RequestID)
+	tx, err := h.pool.Begin(r.Context())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to submit app view")
 		return
 	}
+	defer tx.Rollback(r.Context())
+	result, err := tx.Exec(r.Context(), `UPDATE cerebro_app_view_request SET output=$2,status='submitted',submitted_by=$3,submitted_at=now() WHERE id=$1 AND app_id=$4 AND app_version=$5 AND view_id=$6 AND status='waiting'`, requestID, req.Value, memberID, app.ID, req.Version, viewID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to submit app view")
+		return
+	}
+	if result.RowsAffected() != 1 {
+		writeError(w, http.StatusConflict, "app view is no longer waiting for a response")
+		return
+	}
+	var submissionID uuid.UUID
+	err = tx.QueryRow(r.Context(), `INSERT INTO cerebro_app_view_submission (app_id,app_version,view_id,submitted_by,value) VALUES ($1,$2,$3,$4,$5) RETURNING id`, app.ID, req.Version, viewID, memberID, req.Value).Scan(&submissionID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to submit app view")
+		return
+	}
+	if err := tx.Commit(r.Context()); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to submit app view")
+		return
+	}
 	writeJSON(w, http.StatusCreated, map[string]any{"id": submissionID, "status": "submitted"})
+}
+
+func (h *Handler) GetViewRequest(w http.ResponseWriter, r *http.Request) {
+	workspaceID, ok := requestWorkspaceID(w, r)
+	if !ok {
+		return
+	}
+	if _, ok := requestUserID(w, r); !ok {
+		return
+	}
+	requestID, err := uuid.Parse(chi.URLParam(r, "requestId"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid view request id")
+		return
+	}
+	var appID uuid.UUID
+	var appName, version, viewID, status string
+	var input json.RawMessage
+	err = h.pool.QueryRow(r.Context(), `
+		SELECT vr.app_id,a.name,vr.app_version,vr.view_id,vr.input,vr.status
+		FROM cerebro_app_view_request vr
+		JOIN cerebro_app_workflow_run wr ON wr.id=vr.workflow_run_id
+		JOIN cerebro_app_workflow_def wd ON wd.id=wr.workflow_id AND wd.workspace_id=$2
+		JOIN cerebro_app a ON a.id=vr.app_id AND a.workspace_id=$2
+		WHERE vr.id=$1`, requestID, workspaceID).Scan(&appID, &appName, &version, &viewID, &input, &status)
+	if errors.Is(err, pgx.ErrNoRows) {
+		writeError(w, http.StatusNotFound, "app view request not found")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load app view request")
+		return
+	}
+	runtimeURL := fmt.Sprintf("/api/cerebro/apps-runtime/apps/%s/%s/?view=%s&request=%s", appID, version, url.QueryEscape(viewID), requestID)
+	writeJSON(w, http.StatusOK, map[string]any{"id": requestID, "app_id": appID, "app_name": appName, "app_version": version, "view_id": viewID, "input": input, "status": status, "runtime_url": runtimeURL})
 }
 
 func storageKey(w http.ResponseWriter, r *http.Request) (string, bool) {
@@ -616,7 +736,7 @@ func (h *Handler) IssueToken(w http.ResponseWriter, r *http.Request) {
 	}
 	token, err := h.tokens.PersonalKey(r.Context(), tokens.Identity{
 		MemberID: memberID.String(),
-		App:      tokens.AppGrant{ID: app.ID, Version: version, Scopes: scopes},
+		App:      tokens.AppGrant{ID: app.ID, Version: version, RunID: uuid.NewString(), Scopes: scopes},
 	})
 	if err != nil {
 		writeError(w, http.StatusBadGateway, "failed to issue app token")
@@ -657,6 +777,7 @@ func (h *Handler) IssueWorkflowToken(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusConflict, "workflow identity envelope is invalid")
 		return
 	}
+	identity.App.RunID = runID.String()
 	token, err := h.tokens.PersonalKey(r.Context(), identity)
 	if err != nil {
 		writeError(w, http.StatusBadGateway, "failed to issue workflow token")
@@ -675,7 +796,7 @@ func (h *Handler) loadApp(w http.ResponseWriter, r *http.Request) (appResponse, 
 		writeError(w, 400, "invalid app id")
 		return appResponse{}, false
 	}
-	row := h.pool.QueryRow(r.Context(), `SELECT id, workspace_id, slug, name, description, icon, folder, owner_id, current_version, status, created_at, updated_at FROM cerebro_app WHERE id=$1 AND workspace_id=$2`, appID, workspaceID)
+	row := h.pool.QueryRow(r.Context(), `SELECT a.id, a.workspace_id, a.slug, a.name, a.description, a.icon, COALESCE(f.name,a.folder), a.owner_id, a.current_version, a.status, a.created_at, a.updated_at FROM cerebro_app a LEFT JOIN cerebro_app_folder f ON f.id=a.folder_id WHERE a.id=$1 AND a.workspace_id=$2`, appID, workspaceID)
 	app, err := scanApp(row)
 	if errors.Is(err, pgx.ErrNoRows) {
 		writeError(w, 404, "app not found")

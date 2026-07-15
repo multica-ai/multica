@@ -7,7 +7,7 @@ export function AppViewFrame({ title, src, onSubmit }: { title: string; src: str
   useEffect(() => {
     const allowedOrigin = new URL(src, window.location.href).origin;
     const receive = (event: MessageEvent) => {
-      if (event.source !== frame.current?.contentWindow || event.origin !== allowedOrigin) return;
+      if (event.source !== frame.current?.contentWindow || (event.origin !== allowedOrigin && event.origin !== "null")) return;
       if (event.data?.type === "multica.app-view.submit") onSubmit?.(event.data.value);
     };
     window.addEventListener("message", receive);

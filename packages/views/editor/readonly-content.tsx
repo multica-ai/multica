@@ -63,6 +63,8 @@ import { preprocessMarkdown } from "./utils/preprocess";
 import { highlightToHtml } from "./utils/highlight-markdown";
 import { MermaidDiagram } from "./mermaid-diagram";
 import { HtmlBlockPreview } from "./html-block-preview";
+// CEREBRO-PATCH(cerebro-mini-app-complete-surface): FIR-3172 render interactive app cards in comments.
+import { AppViewRequestCard } from "../common/app-view-request-card";
 import "katex/dist/katex.min.css";
 import "./styles/index.css";
 
@@ -237,7 +239,10 @@ function ReadonlyLink({
     // CEREBRO-PATCH(skill-mention-readonly-route): `skill` joins the mention regex
     // and routes to SkillMentionChip; member/agent/all keep their plain @-text render.
     // CEREBRO-PATCH(artifact-mention-readonly-route): `artifact` joins the regex and routes to ArtifactMentionChip (FIR-1800).
-    const match = href.match(/^mention:\/\/(member|agent|issue|project|all|skill|artifact)\/(.+)$/);
+    const match = href.match(/^mention:\/\/(member|agent|issue|project|all|skill|artifact|app-view)\/(.+)$/);
+    if (match?.[1] === "app-view" && match[2]) {
+      return <AppViewRequestCard requestId={match[2]} />;
+    }
     if (match?.[1] === "skill" && match[2]) {
       const label =
         typeof children === "string"
@@ -408,6 +413,34 @@ function isImageOnlyParagraph(node?: {
   return hasImage;
 }
 
+function isAppViewOnlyParagraph(node?: {
+  children?: Array<{
+    type?: string;
+    tagName?: string;
+    value?: unknown;
+    properties?: { href?: unknown };
+  }>;
+}): boolean {
+  const children = node?.children;
+  if (!Array.isArray(children) || children.length === 0) return false;
+  let hasAppView = false;
+  for (const child of children) {
+    if (
+      child.type === "element" &&
+      child.tagName === "a" &&
+      typeof child.properties?.href === "string" &&
+      child.properties.href.startsWith("mention://app-view/")
+    ) {
+      hasAppView = true;
+      continue;
+    }
+    if (child.type === "element" && child.tagName === "br") continue;
+    if (child.type === "text" && String(child.value ?? "").trim() === "") continue;
+    return false;
+  }
+  return hasAppView;
+}
+
 const components: Partial<Components> = {
   // Links — route mention:// to mention components, others show preview card
   a: ReadonlyLink,
@@ -420,11 +453,19 @@ const components: Partial<Components> = {
     ...props
   }: React.ComponentProps<"p"> & {
     node?: {
-      children?: Array<{ type?: string; tagName?: string; value?: unknown }>;
+      children?: Array<{
+        type?: string;
+        tagName?: string;
+        value?: unknown;
+        properties?: { href?: unknown };
+      }>;
     };
   }) {
     if (isImageOnlyParagraph(node)) {
       return <div className="rte-image-strip">{children}</div>;
+    }
+    if (isAppViewOnlyParagraph(node)) {
+      return <>{children}</>;
     }
     return <p {...props}>{children}</p>;
   },

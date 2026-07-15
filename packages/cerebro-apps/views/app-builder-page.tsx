@@ -29,7 +29,7 @@ export function AppBuilderPage() {
       <form className="mx-auto max-w-xl space-y-5 rounded-xl border bg-card p-5" onSubmit={async (event) => {
         event.preventDefault(); setError(""); setSaving(true);
         try {
-          const app = await createApp({ name: name.trim(), slug: slugify(name), description: description.trim(), folder: folder.trim() });
+          const app = await createApp({ name: name.trim(), slug: slugify(name), description: description.trim(), folder: folder.trim() }, workspace.slug);
           navigation.push(`/${workspace.slug}/apps/${app.id}`);
         } catch (cause) { setError(cause instanceof Error ? cause.message : "Could not create app"); }
         finally { setSaving(false); }
