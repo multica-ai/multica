@@ -451,10 +451,13 @@ func TestIsKnownThinkingValue(t *testing.T) {
 		{"hermes", "", true},
 		{"hermes", "low", false}, // hermes has no thinking concept
 		{"grok", "", true},
-		{"grok", "none", true},
 		{"grok", "low", true},
-		{"grok", "xhigh", true},
-		{"grok", "max", false}, // grok tops out at xhigh; max is not a grok level
+		{"grok", "medium", true},
+		{"grok", "high", true},
+		{"grok", "none", false},
+		{"grok", "minimal", false},
+		{"grok", "xhigh", false},
+		{"grok", "max", false},
 		{"grok", "bogus", false},
 	}
 	for _, tc := range tests {

@@ -194,13 +194,13 @@ Google's Antigravity CLI (`agy`). Pairs with Google's Antigravity service and ru
 
 ### Grok (xAI)
 
-xAI's Grok Build CLI (`grok`). Multica drives it over ACP via `grok --no-auto-update agent --always-approve stdio`, sharing the transport with Hermes, Kimi, Kiro CLI, Qoder, and Trae. It completes xAI's headless `authenticate` handshake after `initialize`, before any session operation. Session resumption works through ACP `session/load`. Models are discovered from `session/new`. MCP config is passed through ACP `mcpServers`. Skills are copied into `.grok/skills/`.
+xAI's Grok Build CLI (`grok`). Multica drives it over ACP via `grok --no-auto-update agent --always-approve stdio`, sharing the transport with Hermes, Kimi, Kiro CLI, Qoder, and Trae. It selects an auth method advertised by `initialize` and completes the headless `authenticate` handshake before any session operation. Session resumption works through ACP `session/load`. Models are discovered from `session/new`. MCP config is passed through ACP `mcpServers`. Skills are copied into `.grok/skills/`; user skills are discovered from `$GROK_HOME/skills/` (default `~/.grok/skills/`) and `~/.agents/skills/`.
 
 | | |
 |---|---|
 | Daemon looks for | `grok` |
 | Install | Install the Grok Build CLI and ensure `grok` is on `PATH` (often `~/.grok/bin`). |
-| Authentication | Run `grok login` (or complete the interactive login flow) so ACP sessions can authenticate. |
+| Authentication | Run `grok login` for cached-token auth, or set `XAI_API_KEY`. The CLI must advertise the corresponding ACP method. |
 | Notes | Override the binary with `MULTICA_GROK_PATH` and the default model with `MULTICA_GROK_MODEL` (e.g. `grok-4.5`). Minimum CLI version: `0.2.89`. |
 
 ## After installing

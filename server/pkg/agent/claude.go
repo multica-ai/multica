@@ -759,8 +759,9 @@ func isFilteredChildEnvKey(key string) bool {
 type blockedArgMode int
 
 const (
-	blockedWithValue  blockedArgMode = iota // flag takes a value (next arg or =value)
-	blockedStandalone                       // flag is boolean, no value
+	blockedWithValue     blockedArgMode = iota // flag takes a value (next arg or =value)
+	blockedStandalone                          // flag is boolean, no value
+	blockedOptionalValue                       // flag may take the next non-flag arg or =value
 )
 
 // filterCustomArgs removes protocol-critical flags from user-configured custom
@@ -780,12 +781,8 @@ func filterCustomArgs(args []string, blocked map[string]blockedArgMode, logger *
 		return args
 	}
 	filtered := make([]string, 0, len(args))
-	skip := false
-	for _, raw := range args {
-		if skip {
-			skip = false
-			continue
-		}
+	for i := 0; i < len(args); i++ {
+		raw := args[i]
 		arg := unshellQuoteArg(raw)
 		flag := arg
 		hasInlineValue := false
@@ -798,7 +795,13 @@ func filterCustomArgs(args []string, blocked map[string]blockedArgMode, logger *
 			logger.Warn("custom_args: blocked protocol-critical flag, skipping", "flag", flag)
 			if mode == blockedWithValue && !hasInlineValue {
 				// The next arg is the value for this flag — skip it too.
-				skip = true
+				i++
+			} else if mode == blockedOptionalValue && !hasInlineValue && i+1 < len(args) &&
+				!strings.HasPrefix(unshellQuoteArg(args[i+1]), "-") {
+				// Optional values are consumed only when the next token is not
+				// another flag, so a boolean form cannot swallow an unrelated
+				// option.
+				i++
 			}
 			continue
 		}

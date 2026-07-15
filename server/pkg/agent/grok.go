@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -44,6 +45,11 @@ var grokBlockedArgs = map[string]blockedArgMode{
 	"-s":                       blockedWithValue,
 	"--session-id":             blockedWithValue,
 	"--system-prompt-override": blockedWithValue,
+	"--cwd":                    blockedWithValue,
+	"-w":                       blockedOptionalValue,
+	"--worktree":               blockedOptionalValue,
+	"--ref":                    blockedWithValue,
+	"--fork-session":           blockedStandalone,
 }
 
 // grokBackend implements Backend by spawning
@@ -66,7 +72,10 @@ type grokBackend struct {
 	cfg Config
 }
 
-var grokReaderDrainGrace = 2 * time.Second
+var (
+	grokReaderDrainGrace      = 2 * time.Second
+	grokNotificationQuietTime = 250 * time.Millisecond
+)
 
 // grokMessageStream serializes sends and the final close so a late stdout
 // reader cannot send on a closed channel. Mirrors traecli/qoder.
@@ -132,8 +141,8 @@ func (b *grokBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 	if opts.ThinkingLevel != "" {
 		grokArgs = append(grokArgs, "--effort", opts.ThinkingLevel)
 	}
-	grokArgs = append(grokArgs, "stdio")
 	grokArgs = append(grokArgs, filterCustomArgs(opts.CustomArgs, grokBlockedArgs, b.cfg.Logger)...)
+	grokArgs = append(grokArgs, "stdio")
 
 	cmd := exec.CommandContext(runCtx, execPath, grokArgs...)
 	hideAgentWindow(cmd)
@@ -186,6 +195,7 @@ func (b *grokBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 	var streamingCurrentTurn atomic.Bool
 
 	promptDone := make(chan hermesPromptResult, 1)
+	activity := make(chan struct{}, 1)
 
 	c := &hermesClient{
 		cfg:          b.cfg,
@@ -194,6 +204,12 @@ func (b *grokBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 		pendingTools: make(map[string]*pendingToolCall),
 		acceptNotification: func(string) bool {
 			return streamingCurrentTurn.Load()
+		},
+		onActivity: func() {
+			select {
+			case activity <- struct{}{}:
+			default:
+			}
 		},
 		onMessage: func(msg Message) {
 			if !streamingCurrentTurn.Load() {
@@ -276,18 +292,23 @@ func (b *grokBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 		// documented preference is the API key when XAI_API_KEY is set and
 		// offered, otherwise the cached login token.
 		// Ref: https://docs.x.ai/build/cli/headless-scripting
-		if methodID, ok := selectGrokAuthMethod(extractACPAuthMethods(initResult), envHasNonEmpty(childEnv, "XAI_API_KEY")); ok {
-			if _, err := c.request(runCtx, "authenticate", map[string]any{
-				"methodId": methodID,
-				"_meta":    map[string]any{"headless": true},
-			}); err != nil {
-				finalStatus = "failed"
-				finalError = fmt.Sprintf("grok authenticate (%s) failed: %v", methodID, err)
-				resCh <- Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds()}
-				return
-			}
-			b.cfg.Logger.Info("grok authenticated", "method", methodID)
+		methodID, err := selectGrokAuthMethod(extractACPAuthMethods(initResult), envHasNonEmpty(childEnv, "XAI_API_KEY"))
+		if err != nil {
+			finalStatus = "failed"
+			finalError = fmt.Sprintf("grok authentication setup failed: %v", err)
+			resCh <- Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds()}
+			return
 		}
+		if _, err := c.request(runCtx, "authenticate", map[string]any{
+			"methodId": methodID,
+			"_meta":    map[string]any{"headless": true},
+		}); err != nil {
+			finalStatus = "failed"
+			finalError = fmt.Sprintf("grok authenticate (%s) failed: %v", methodID, err)
+			resCh <- Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds()}
+			return
+		}
+		b.cfg.Logger.Info("grok authenticated", "method", methodID)
 
 		// Drop MCP entries whose remote transport the runtime didn't advertise.
 		// See hermes.go for why sending an unsupported transport tanks session/new.
@@ -422,6 +443,7 @@ func (b *grokBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 				c.usageMu.Unlock()
 			default:
 			}
+			waitForGrokNotificationQuiescence(runCtx, activity, readerDone)
 		}
 
 		duration := time.Since(startTime)
@@ -489,26 +511,66 @@ const (
 // selectGrokAuthMethod chooses which advertised ACP auth method to use,
 // following xAI's documented headless flow: prefer the API key when
 // XAI_API_KEY is present in the child env and the CLI offers it, otherwise
-// fall back to the cached login token. If the CLI advertises methods but
-// offers neither known id, we still return the first advertised one so a
-// future rename doesn't hard-break the handshake (the real CLI then surfaces
-// a clear error). Returns ("", false) when no methods are advertised, which
-// means the CLI needs no explicit authenticate step.
-func selectGrokAuthMethod(methods []string, haveAPIKey bool) (string, bool) {
-	if len(methods) == 0 {
-		return "", false
-	}
+// fall back to the cached login token. Grok requires an explicit authenticate
+// step: an empty or unknown method list is a protocol/authentication failure,
+// not permission to continue directly to session/new.
+func selectGrokAuthMethod(methods []string, haveAPIKey bool) (string, error) {
 	offered := make(map[string]bool, len(methods))
 	for _, m := range methods {
-		offered[m] = true
+		if m = strings.TrimSpace(m); m != "" {
+			offered[m] = true
+		}
 	}
 	if haveAPIKey && offered[grokAuthMethodAPIKey] {
-		return grokAuthMethodAPIKey, true
+		return grokAuthMethodAPIKey, nil
 	}
 	if offered[grokAuthMethodCachedToken] {
-		return grokAuthMethodCachedToken, true
+		return grokAuthMethodCachedToken, nil
 	}
-	return methods[0], true
+	if offered[grokAuthMethodAPIKey] {
+		return "", fmt.Errorf("Grok advertised only API-key authentication, but XAI_API_KEY is not set")
+	}
+	advertised := make([]string, 0, len(offered))
+	for method := range offered {
+		advertised = append(advertised, method)
+	}
+	sort.Strings(advertised)
+	if len(advertised) == 0 {
+		return "", fmt.Errorf("Grok advertised no usable authentication methods; set XAI_API_KEY or run `grok login`")
+	}
+	return "", fmt.Errorf("Grok advertised unsupported authentication methods %q; update Multica or authenticate with XAI_API_KEY / `grok login`", advertised)
+}
+
+// waitForGrokNotificationQuiescence gives the ACP stdout reader a bounded
+// chance to consume notifications that Grok may emit just after the
+// session/prompt response. Without this window, cancelling the process at the
+// response boundary can truncate the final text or usage update.
+func waitForGrokNotificationQuiescence(ctx context.Context, activity <-chan struct{}, readerDone <-chan struct{}) {
+	quiet := time.NewTimer(grokNotificationQuietTime)
+	defer quiet.Stop()
+	hard := time.NewTimer(grokReaderDrainGrace)
+	defer hard.Stop()
+
+	for {
+		select {
+		case <-activity:
+			if !quiet.Stop() {
+				select {
+				case <-quiet.C:
+				default:
+				}
+			}
+			quiet.Reset(grokNotificationQuietTime)
+		case <-quiet.C:
+			return
+		case <-readerDone:
+			return
+		case <-hard.C:
+			return
+		case <-ctx.Done():
+			return
+		}
+	}
 }
 
 // envHasNonEmpty reports whether an `os/exec`-style env slice
