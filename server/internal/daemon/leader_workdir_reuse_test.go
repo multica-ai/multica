@@ -59,6 +59,22 @@ func TestRunTaskSquadLeaderDoesNotReuseExternalPriorWorkdir(t *testing.T) {
 	}
 }
 
+func TestShouldReusePriorWorkdirSquadLeaderRejectsNonManagedPathUnderRoot(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	userDir := filepath.Join(root, "ws-leader", "user-project")
+	if err := os.MkdirAll(userDir, 0o755); err != nil {
+		t.Fatalf("mkdir user dir: %v", err)
+	}
+
+	task := leaderReuseTestTask("task-contained-user-dir")
+	task.PriorWorkDir = userDir
+	if shouldReusePriorWorkdir(task, nil, root) {
+		t.Fatalf("leader reused non-managed path %q merely because it is under WorkspacesRoot", userDir)
+	}
+}
+
 func newLeaderReuseTestDaemon(t *testing.T) (*Daemon, func()) {
 	t.Helper()
 

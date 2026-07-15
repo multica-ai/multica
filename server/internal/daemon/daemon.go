@@ -3521,7 +3521,7 @@ func gateResumeToReusedWorkdir(task *Task, taskCtx *execenv.TaskContextForEnv, e
 // tasks already expose their current local-directory assignment, so their
 // existing reuse behavior remains unchanged. Leader tasks intentionally skip
 // that assignment and its lock; they may therefore reuse only workdirs that
-// resolve inside the daemon-owned workspaces root.
+// resolve to the exact daemon-managed {workspace}/{task}/workdir shape.
 func shouldReusePriorWorkdir(task Task, localAssignment *localDirectoryAssignment, workspacesRoot string) bool {
 	if task.PriorWorkDir == "" || localAssignment != nil {
 		return false
@@ -3539,7 +3539,11 @@ func shouldReusePriorWorkdir(task Task, localAssignment *localDirectoryAssignmen
 		return false
 	}
 	rel, err := filepath.Rel(root, workdir)
-	return err == nil && rel != "." && filepath.IsLocal(rel)
+	if err != nil || !filepath.IsLocal(rel) {
+		return false
+	}
+	parts := strings.Split(rel, string(filepath.Separator))
+	return len(parts) == 3 && parts[0] == task.WorkspaceID && parts[1] != "" && parts[2] == "workdir"
 }
 
 // gateCodexResumeToRolloutPresence drops the prior Codex session when its
