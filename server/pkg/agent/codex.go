@@ -19,6 +19,8 @@ import (
 	"sync/atomic"
 	"syscall"
 	"time"
+
+	"github.com/multica-ai/multica/server/pkg/redact"
 )
 
 // codexBlockedArgs are flags hardcoded by the daemon that must not be
@@ -78,7 +80,8 @@ func sanitizeCodexDiagnostic(value string) string {
 	}, value)
 	value = codexAuthorizationHeaderRe.ReplaceAllString(value, `$1[REDACTED]`)
 	value = codexJSONSecretRe.ReplaceAllString(value, `$1"[REDACTED]"`)
-	return codexDiagnosticSecretRe.ReplaceAllString(value, `$1$2[REDACTED]`)
+	value = codexDiagnosticSecretRe.ReplaceAllString(value, `$1$2[REDACTED]`)
+	return redact.Text(value)
 }
 
 func codexProcessExitStatus(state *os.ProcessState) any {
@@ -975,11 +978,13 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 			initializeLatency := time.Since(initializeStarted)
 			drainAndWait() // flush os/exec stderr goroutine before sampling Tail
 			finalStatus = "failed"
-			finalError = withAgentStderr(fmt.Sprintf("codex initialize failed: %v", err), "codex", stderrBuf.Tail())
+			finalError = withAgentStderr(fmt.Sprintf("codex initialize failed: %v", err), "codex", sanitizeCodexDiagnostic(stderrBuf.Tail()))
 			var handshakeErr *codexHandshakeTimeoutError
-			retrySafe := errors.As(err, &handshakeErr) && handshakeErr.Method == "initialize" && !semanticObserved.Load() && cleanupConfirmed
+			retrySafe := errors.As(err, &handshakeErr) && handshakeErr.Method == "initialize" && !semanticObserved.Load() && cleanupConfirmed && codexInitializeRetrySupported()
 			if errors.As(err, &handshakeErr) && handshakeErr.Method == "initialize" && !cleanupConfirmed {
 				finalError += "; retry suppressed: process cleanup/reap not confirmed"
+			} else if errors.As(err, &handshakeErr) && handshakeErr.Method == "initialize" && cleanupConfirmed && !codexInitializeRetrySupported() {
+				finalError += "; retry suppressed: process-tree cleanup cannot be confirmed on this platform"
 			}
 			b.cfg.Logger.Warn("codex lifecycle", "phase", "initialize_failure", "task_id", b.cfg.TaskID, "runtime_id", b.cfg.RuntimeID, "pid", cmd.Process.Pid, "attempt", attempt, "latency", initializeLatency.Round(time.Millisecond).String(), "semantic_activity", semanticObserved.Load(), "cleanup_confirmed", cleanupConfirmed, "retry_safe", retrySafe)
 			resCh <- Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds(), codexInitializeRetrySafe: retrySafe}
@@ -995,7 +1000,7 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 		if err != nil {
 			drainAndWait() // flush os/exec stderr goroutine before sampling Tail
 			finalStatus = "failed"
-			finalError = withAgentStderr(err.Error(), "codex", stderrBuf.Tail())
+			finalError = withAgentStderr(err.Error(), "codex", sanitizeCodexDiagnostic(stderrBuf.Tail()))
 			resCh <- Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds()}
 			return
 		}
@@ -1047,7 +1052,7 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 			default:
 				drainAndWait() // flush os/exec stderr goroutine before sampling Tail
 				finalStatus = "failed"
-				finalError = withAgentStderr(fmt.Sprintf("codex turn/start failed: %v", err), "codex", stderrBuf.Tail())
+				finalError = withAgentStderr(fmt.Sprintf("codex turn/start failed: %v", err), "codex", sanitizeCodexDiagnostic(stderrBuf.Tail()))
 				resCh <- Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds()}
 				return
 			}
@@ -1168,11 +1173,11 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 		drainAndWait()
 
 		if processExitErr != nil {
-			finalError = withAgentStderr(processExitErr.Error(), "codex", stderrBuf.Tail())
+			finalError = withAgentStderr(processExitErr.Error(), "codex", sanitizeCodexDiagnostic(stderrBuf.Tail()))
 		}
 		if timeoutDiagnostic.Kind != codexTimeoutNone {
 			timeoutDiagnostic.CodexVersion = detectCodexVersionForDiagnostics(context.Background(), execPath, cmd.Env, b.cfg.Logger)
-			finalError = buildCodexTimeoutDiagnosticError(timeoutDiagnostic, stderrBuf.Tail())
+			finalError = buildCodexTimeoutDiagnosticError(timeoutDiagnostic, sanitizeCodexDiagnostic(stderrBuf.Tail()))
 		}
 
 		outputMu.Lock()
@@ -1375,6 +1380,7 @@ func isCodexFirstTurnProgressActivity(activity string) bool {
 }
 
 func buildCodexTimeoutDiagnosticError(diag codexTimeoutDiagnostic, stderrTail string) string {
+	stderrTail = sanitizeCodexDiagnostic(stderrTail)
 	var msg string
 	switch diag.Kind {
 	case codexTimeoutFirstTurnNoProgress:

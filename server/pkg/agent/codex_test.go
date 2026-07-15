@@ -1739,6 +1739,43 @@ func TestSanitizeCodexDiagnosticRedactsSecrets(t *testing.T) {
 	}
 }
 
+func TestCodexExecuteRedactsStderrFromResultAndLogs(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+	const (
+		bearer     = "bearer-secret-value"
+		jsonToken  = "json-secret-value"
+		standalone = "sk-abcdefghijklmnopqrstuvwxyz123456"
+	)
+	fakePath := writeFakeCodexAppServer(t, ""+
+		`echo 'Authorization: Bearer `+bearer+`' >&2`+"\n"+
+		`echo '{"token":"`+jsonToken+`"}' >&2`+"\n"+
+		`echo '`+standalone+`' >&2`+"\n"+
+		`exit 2`+"\n")
+	var logs bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&logs, nil))
+	backend, err := New("codex", Config{ExecutablePath: fakePath, Logger: logger})
+	if err != nil {
+		t.Fatal(err)
+	}
+	session, err := backend.Execute(context.Background(), "prompt", ExecOptions{Timeout: 5 * time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+	result := <-session.Result
+	combined := result.Error + "\n" + logs.String()
+	for _, secret := range []string{bearer, jsonToken, standalone} {
+		if strings.Contains(combined, secret) {
+			t.Fatalf("stderr secret leaked: %q in %q", secret, combined)
+		}
+	}
+}
+
 func TestCodexExecuteDoesNotProbeVersionBeforeInitialize(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("shell-script fixture is POSIX-only")
