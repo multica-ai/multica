@@ -10,10 +10,12 @@ import { ViewStoreProvider } from "@multica/core/issues/stores/view-store-contex
 import { getIssueSurfaceViewStore } from "@multica/core/issues/stores/surface-view-store";
 import { issueScopeKey } from "@multica/core/issues/surface/scope";
 import type { Issue } from "@multica/core/types";
+import type { IssueViewDefinitionContext } from "@multica/core/issues/stores/view-store";
 import { BoardView } from "../components/board-view";
 import { BatchActionToolbar } from "../components/batch-action-toolbar";
 import { GanttView } from "../components/gantt-view";
 import { IssuesHeader } from "../components/issues-header";
+import { SavedViewsBar } from "../components/saved-views-bar";
 import { ListView } from "../components/list-view";
 import { SwimLaneView } from "../components/swimlane-view";
 import { useT } from "../../i18n";
@@ -39,6 +41,7 @@ interface IssueSurfaceComponentProps extends IssueSurfaceProps {
   showClientEmpty?: (context: IssueSurfaceRenderContext) => boolean;
   batchToolbar?: "always" | "list" | "never";
   contentClassName?: string;
+  onSavedViewContextChange?: (context: IssueViewDefinitionContext) => void;
 }
 
 export function IssueSurface({
@@ -53,6 +56,7 @@ export function IssueSurface({
   showClientEmpty,
   batchToolbar = "always",
   contentClassName,
+  onSavedViewContextChange,
 }: IssueSurfaceComponentProps) {
   const wsId = useWorkspaceId();
   const resolvedSurfaceKey = surfaceKey ?? issueScopeKey(scope);
@@ -76,6 +80,11 @@ export function IssueSurface({
 
   return (
     <ViewStoreProvider store={store}>
+      <SavedViewsBar
+        scope={scope}
+        surfaceKey={resolvedSurfaceKey}
+        onContextChange={onSavedViewContextChange}
+      />
       {/* Remount on data-window change: the list queries keep the previous
           key's data as a placeholder (keepPreviousData) so sort/filter
           changes within ONE surface never flash a skeleton — but reusing the
@@ -115,7 +124,10 @@ function IssueSurfaceContent({
   showClientEmpty,
   batchToolbar,
   contentClassName,
-}: Omit<IssueSurfaceComponentProps, "surfaceKey">) {
+}: Omit<
+  IssueSurfaceComponentProps,
+  "surfaceKey" | "onSavedViewContextChange"
+>) {
   const { t } = useT("projects");
   const controller = useIssueSurfaceController({
     scope,

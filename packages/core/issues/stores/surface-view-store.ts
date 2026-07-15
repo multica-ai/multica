@@ -5,7 +5,9 @@ import { createJSONStorage, persist } from "zustand/middleware";
 import { createWorkspaceAwareStorage, registerForWorkspaceRehydration } from "../../platform/workspace-storage";
 import { defaultStorage } from "../../platform/storage";
 import {
+  type IssueViewDefinition,
   type IssueViewState,
+  issueViewStateFromDefinition,
   mergeViewStatePersisted,
   viewStorePersistOptions,
   viewStoreSlice,
@@ -32,6 +34,10 @@ interface IssueSurfaceViewRegistryState {
 const basePersist = viewStorePersistOptions(ISSUE_SURFACE_VIEW_STORAGE_KEY);
 const surfaceStores = new Map<string, StoreApi<IssueViewState>>();
 const suppressSurfacePersist = new Set<string>();
+// A saved view is an overlay on top of the user's unsaved local draft. Edits
+// while that overlay is active make the saved view dirty, but must never erase
+// the draft that the Default tab restores.
+const activeSavedViewSurfaces = new Set<string>();
 
 function persistedIssueViewState(state: IssueViewState): PersistedIssueViewState {
   return basePersist.partialize(state);
@@ -117,14 +123,40 @@ export function getIssueSurfaceViewStore(
   const store = createStore<IssueViewState>()((set) => viewStoreSlice(set));
   resetStoreFromRegistry(surfaceKey, store);
   store.subscribe((state) => {
-    if (suppressSurfacePersist.has(surfaceKey)) return;
+    if (
+      suppressSurfacePersist.has(surfaceKey) ||
+      activeSavedViewSurfaces.has(surfaceKey)
+    ) return;
     issueSurfaceViewRegistryStore.getState().setSurfaceState(surfaceKey, state);
   });
   surfaceStores.set(surfaceKey, store);
   return store;
 }
 
+export function applyIssueSurfaceSavedView(
+  surfaceKey: string,
+  store: StoreApi<IssueViewState>,
+  definition: IssueViewDefinition,
+) {
+  activeSavedViewSurfaces.add(surfaceKey);
+  suppressSurfacePersist.add(surfaceKey);
+  try {
+    store.setState(issueViewStateFromDefinition(definition));
+  } finally {
+    suppressSurfacePersist.delete(surfaceKey);
+  }
+}
+
+export function restoreIssueSurfaceDraft(
+  surfaceKey: string,
+  store: StoreApi<IssueViewState>,
+) {
+  activeSavedViewSurfaces.delete(surfaceKey);
+  resetStoreFromRegistry(surfaceKey, store);
+}
+
 export function clearIssueSurfaceViewState(surfaceKey: string) {
+  activeSavedViewSurfaces.delete(surfaceKey);
   issueSurfaceViewRegistryStore.getState().clearSurfaceState(surfaceKey);
   const store = surfaceStores.get(surfaceKey);
   if (store) resetStoreFromRegistry(surfaceKey, store);

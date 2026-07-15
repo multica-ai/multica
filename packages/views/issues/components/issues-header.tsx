@@ -70,6 +70,7 @@ import {
   type ActorFilterValue,
   type IssueDateField,
   type IssueDateFilter,
+  type IssueDatePreset,
   type SortField,
   type IssueGrouping,
   type SwimlaneGrouping,
@@ -622,10 +623,13 @@ function DateSubContent({
   };
 
   const applyPreset = (days: 1 | 3 | 7) => {
+    const preset: IssueDatePreset =
+      days === 1 ? "today" : days === 3 ? "last_3_days" : "last_7_days";
     onChange({
       field,
       from: addDaysDateOnly(1 - days),
       to: todayDateOnly(),
+      preset,
     });
   };
 

@@ -152,6 +152,14 @@ cleared_binding_tokens AS (
 cleared_installations AS (
     DELETE FROM channel_installation WHERE workspace_id = $1
 ),
+cleared_issue_view_preferences AS (
+    -- Saved-view tables intentionally carry no FKs (MUL-3515), so a workspace
+    -- delete must sweep both user preferences and the views themselves.
+    DELETE FROM issue_view_preference WHERE workspace_id = $1
+),
+cleared_issue_views AS (
+    DELETE FROM issue_view WHERE workspace_id = $1
+),
 deleted_pending_check_suites AS (
     DELETE FROM github_pending_check_suite WHERE workspace_id = $1
 )

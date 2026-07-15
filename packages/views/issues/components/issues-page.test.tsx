@@ -50,7 +50,13 @@ vi.mock("../../navigation", () => ({
       {children}
     </a>
   ),
-  useNavigation: () => ({ push: vi.fn(), pathname: "/issues" }),
+  useNavigation: () => ({
+    push: vi.fn(),
+    replace: vi.fn(),
+    pathname: "/issues",
+    searchParams: new URLSearchParams(),
+    getShareableUrl: (path: string) => path,
+  }),
   NavigationProvider: ({ children }: { children: React.ReactNode }) => children,
 }));
 
@@ -114,6 +120,14 @@ const mockListSquads = vi.hoisted(() =>
   ]),
 );
 vi.mock("@multica/core/api", () => ({
+  ApiError: class ApiError extends Error {
+    constructor(
+      message: string,
+      public status: number,
+    ) {
+      super(message);
+    }
+  },
   api: {
     getBaseUrl: () => "http://127.0.0.1:8080",
     listIssues: (...args: any[]) => mockListIssues(...args),
@@ -122,6 +136,8 @@ vi.mock("@multica/core/api", () => ({
     listMembers: (...args: any[]) => mockListMembers(...args),
     listAgents: (...args: any[]) => mockListAgents(...args),
     listSquads: (...args: any[]) => mockListSquads(...args),
+    listIssueViews: vi.fn().mockResolvedValue({ views: [], default_view_id: null }),
+    listPins: vi.fn().mockResolvedValue([]),
   },
   getApi: () => ({
     listIssues: (...args: any[]) => mockListIssues(...args),
@@ -130,6 +146,8 @@ vi.mock("@multica/core/api", () => ({
     listMembers: (...args: any[]) => mockListMembers(...args),
     listAgents: (...args: any[]) => mockListAgents(...args),
     listSquads: (...args: any[]) => mockListSquads(...args),
+    listIssueViews: vi.fn().mockResolvedValue({ views: [], default_view_id: null }),
+    listPins: vi.fn().mockResolvedValue([]),
   }),
   setApiInstance: vi.fn(),
 }));
@@ -201,6 +219,10 @@ vi.mock("@multica/core/issues/stores/view-store", () => ({
   PROPERTY_VIEW_PREFIX: "property:",
   propertyIdFromViewKey: (key: string) =>
     key.startsWith("property:") ? key.slice("property:".length) : null,
+  issueViewDefinitionFromState: () => ({ version: 1 }),
+  issueViewDefinitionsEqual: (left: unknown, right: unknown) =>
+    JSON.stringify(left) === JSON.stringify(right),
+  issueViewStateFromDefinition: (value: Record<string, unknown>) => value,
   viewStorePersistOptions: () => ({ name: "test", storage: undefined, partialize: (s: any) => s }),
   mergeViewStatePersisted: (_p: unknown, c: any) => c,
   viewStoreSlice: vi.fn(),

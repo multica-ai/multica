@@ -1167,6 +1167,19 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Delete("/{itemType}/{itemId}", h.DeletePin)
 			})
 
+			// Saved issue views — named snapshots of issue surface state.
+			r.Route("/api/views", func(r chi.Router) {
+				r.Get("/", h.ListIssueViews)
+				r.Post("/", h.CreateIssueView)
+				r.Put("/default", h.SetDefaultIssueView)
+				r.Route("/{id}", func(r chi.Router) {
+					r.Get("/", h.GetIssueView)
+					r.Patch("/", h.UpdateIssueView)
+					r.Delete("/", h.DeleteIssueView)
+					r.Post("/duplicate", h.DuplicateIssueView)
+				})
+			})
+
 			// Attachments
 			r.Get("/api/attachments/{id}", h.GetAttachmentByID)
 			// /api/attachments/{id}/download is registered in the

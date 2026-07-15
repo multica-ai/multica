@@ -32,6 +32,7 @@ function IssuesSurfaceHeader({
 export function IssuesPage() {
   const { t } = useT("issues");
   const scope = useIssuesScopeStore((s) => s.scope);
+  const setScope = useIssuesScopeStore((s) => s.setScope);
 
   return (
     <div className="flex flex-1 min-h-0 flex-col">
@@ -42,6 +43,10 @@ export function IssuesPage() {
 
       <IssueSurface
         scope={{ type: "workspace", actorKind: scope }}
+        surfaceKey="workspace:issues"
+        onSavedViewContextChange={(context) =>
+          setScope(context.workspaceActorKind ?? "all")
+        }
         modes={["board", "list", "swimlane"]}
         batchToolbar="list"
         renderHeader={({ controller }) => (

@@ -102,6 +102,13 @@ import type {
   CreatePinRequest,
   PinnedItemType,
   ReorderPinsRequest,
+  IssueView,
+  IssueViewScopeInput,
+  ListIssueViewsResponse,
+  CreateIssueViewRequest,
+  UpdateIssueViewRequest,
+  DuplicateIssueViewRequest,
+  SetDefaultIssueViewRequest,
   Invitation,
   Autopilot,
   AutopilotTrigger,
@@ -250,6 +257,10 @@ import {
   EMPTY_LABEL,
   EMPTY_LIST_LABELS_RESPONSE,
   EMPTY_RESOURCE_LABELS_RESPONSE,
+  IssueViewSchema,
+  IssueViewListSchema,
+  EMPTY_ISSUE_VIEW,
+  EMPTY_ISSUE_VIEW_LIST,
 } from "./schemas";
 
 /** Identifies the calling client to the server.
@@ -335,6 +346,9 @@ export class PreviewUnsupportedError extends Error {
  * Must stay in sync with protocol.AppCapabilityChatDraftRestoreV1.
  */
 export const CHAT_DRAFT_RESTORE_CAPABILITY = "chat-draft-restore-v1";
+
+/** Must stay in sync with protocol.AppCapabilityIssueViewPinsV1. */
+export const ISSUE_VIEW_PIN_CAPABILITY = "issue-view-pins-v1";
 
 export class ApiClient {
   private baseUrl: string;
@@ -2294,7 +2308,9 @@ export class ApiClient {
 
   // Pins
   async listPins(): Promise<PinnedItem[]> {
-    return this.fetch("/api/pins");
+    return this.fetch("/api/pins", {
+      headers: { "X-Client-Capabilities": ISSUE_VIEW_PIN_CAPABILITY },
+    });
   }
 
   async createPin(data: CreatePinRequest): Promise<PinnedItem> {
@@ -2310,6 +2326,64 @@ export class ApiClient {
 
   async reorderPins(data: ReorderPinsRequest): Promise<void> {
     await this.fetch("/api/pins/reorder", {
+      method: "PUT",
+      body: JSON.stringify(data),
+    });
+  }
+
+  // Saved issue views
+  async listIssueViews(scope: IssueViewScopeInput): Promise<ListIssueViewsResponse> {
+    const search = new URLSearchParams({ scope_type: scope.scope_type });
+    if (scope.scope_id) search.set("scope_id", scope.scope_id);
+    const raw = await this.fetch<unknown>(`/api/views?${search}`);
+    return parseWithFallback(raw, IssueViewListSchema, EMPTY_ISSUE_VIEW_LIST, {
+      endpoint: "GET /api/views",
+    });
+  }
+
+  async getIssueView(id: string): Promise<IssueView> {
+    const raw = await this.fetch<unknown>(`/api/views/${id}`);
+    return parseWithFallback(raw, IssueViewSchema, EMPTY_ISSUE_VIEW, {
+      endpoint: "GET /api/views/:id",
+    });
+  }
+
+  async createIssueView(data: CreateIssueViewRequest): Promise<IssueView> {
+    const raw = await this.fetch<unknown>("/api/views", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+    return parseWithFallback(raw, IssueViewSchema, EMPTY_ISSUE_VIEW, {
+      endpoint: "POST /api/views",
+    });
+  }
+
+  async updateIssueView(id: string, data: UpdateIssueViewRequest): Promise<IssueView> {
+    const raw = await this.fetch<unknown>(`/api/views/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    });
+    return parseWithFallback(raw, IssueViewSchema, EMPTY_ISSUE_VIEW, {
+      endpoint: "PATCH /api/views/:id",
+    });
+  }
+
+  async deleteIssueView(id: string): Promise<void> {
+    await this.fetch(`/api/views/${id}`, { method: "DELETE" });
+  }
+
+  async duplicateIssueView(id: string, data: DuplicateIssueViewRequest): Promise<IssueView> {
+    const raw = await this.fetch<unknown>(`/api/views/${id}/duplicate`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+    return parseWithFallback(raw, IssueViewSchema, EMPTY_ISSUE_VIEW, {
+      endpoint: "POST /api/views/:id/duplicate",
+    });
+  }
+
+  async setDefaultIssueView(data: SetDefaultIssueViewRequest): Promise<void> {
+    await this.fetch("/api/views/default", {
       method: "PUT",
       body: JSON.stringify(data),
     });

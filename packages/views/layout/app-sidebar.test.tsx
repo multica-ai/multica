@@ -3,14 +3,27 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "@multica/core/api";
 import { AppSidebar } from "./app-sidebar";
 
-const { appForeground, chatSessions, chatStore, detail, deletePin, navigation, pins, summary, workspaces } = vi.hoisted(() => ({
+const { appForeground, chatSessions, chatStore, detail, deletePin, navigation, pins, summary, viewDetail, workspaces } = vi.hoisted(() => ({
   appForeground: { current: true },
   chatSessions: { current: [] as { id?: string; unread_count?: number }[] },
   chatStore: { current: { activeSessionId: null as string | null, isOpen: false } },
   detail: { current: { isPending: false, isError: false, data: null as unknown, error: null as unknown } },
   deletePin: vi.fn(),
-  navigation: { current: { pathname: "/acme/issues" } },
+  navigation: {
+    current: {
+      pathname: "/acme/issues",
+      searchParams: new URLSearchParams(),
+    } as { pathname: string; searchParams?: URLSearchParams },
+  },
   summary: { current: [] as { workspace_id: string; count: number }[] },
+  viewDetail: {
+    current: {
+      isPending: false,
+      isError: false,
+      data: null as unknown,
+      error: null as unknown,
+    },
+  },
   workspaces: {
     current: [] as { id: string; name: string; slug: string; avatar_url: string | null }[],
   },
@@ -20,7 +33,7 @@ const { appForeground, chatSessions, chatStore, detail, deletePin, navigation, p
         id: "pin-1",
         workspace_id: "ws-1",
         user_id: "user-1",
-        item_type: "issue" as const,
+        item_type: "issue" as "issue" | "project" | "view",
         item_id: "issue-1",
         position: 0,
         created_at: "2026-05-06T00:00:00Z",
@@ -94,7 +107,11 @@ vi.mock("../auth", () => ({ useLogout: () => vi.fn() }));
 vi.mock("../issues/components/status-icon", () => ({ StatusIcon: () => <span /> }));
 vi.mock("../navigation", () => ({
   AppLink: ({ children, href }: { children: React.ReactNode; href: string }) => <a href={href}>{children}</a>,
-  useNavigation: () => ({ pathname: navigation.current.pathname, push: vi.fn() }),
+  useNavigation: () => ({
+    pathname: navigation.current.pathname,
+    searchParams: navigation.current.searchParams ?? new URLSearchParams(),
+    push: vi.fn(),
+  }),
 }));
 vi.mock("../projects/components/project-icon", () => ({ ProjectIcon: () => <span /> }));
 vi.mock("../workspace/workspace-avatar", () => ({ WorkspaceAvatar: () => <span /> }));
@@ -152,6 +169,9 @@ vi.mock("@multica/core/inbox/queries", () => ({
   unreadWorkspaceIds: (entries: { workspace_id: string; count: number }[]) =>
     new Set(entries.filter((s) => s.count > 0).map((s) => s.workspace_id)),
 }));
+vi.mock("@multica/core/issue-views/queries", () => ({
+  issueViewDetailOptions: () => ({ queryKey: ["view"] }),
+}));
 vi.mock("@multica/core/issues/queries", () => ({ issueDetailOptions: () => ({ queryKey: ["issue"] }) }));
 vi.mock("@multica/core/issues/stores/create-mode-store", () => ({
   useCreateModeStore: { getState: () => ({ lastMode: "agent" }) },
@@ -173,6 +193,7 @@ vi.mock("@tanstack/react-query", async (importOriginal) => ({
   useQuery: ({ queryKey }: { queryKey: readonly unknown[] }) => {
     if (queryKey[0] === "pins") return { data: pins.current };
     if (queryKey[0] === "issue") return detail.current;
+    if (queryKey[0] === "view") return viewDetail.current;
     if (queryKey[0] === "inbox" && queryKey[1] === "unread-summary") return { data: summary.current };
     if (queryKey[0] === "workspaces") return { data: workspaces.current };
     if (queryKey[0] === "chat" && queryKey[2] === "sessions") return { data: chatSessions.current };
@@ -185,7 +206,18 @@ describe("PinRow", () => {
   beforeEach(() => {
     deletePin.mockReset();
     navigation.current.pathname = "/acme/issues";
+    navigation.current.searchParams = new URLSearchParams();
+    pins.current = [{
+      id: "pin-1",
+      workspace_id: "ws-1",
+      user_id: "user-1",
+      item_type: "issue",
+      item_id: "issue-1",
+      position: 0,
+      created_at: "2026-05-06T00:00:00Z",
+    }];
     detail.current = { isPending: false, isError: false, data: null, error: null };
+    viewDetail.current = { isPending: false, isError: false, data: null, error: null };
     summary.current = [];
     workspaces.current = [];
   });
@@ -203,7 +235,7 @@ describe("PinRow", () => {
   });
 
   it("renders loaded details", async () => {
-    detail.current = { isPending: false, isError: false, data: { identifier: "MUL-123", title: "Keep this pin", status: "todo" }, error: null };
+    detail.current = { isPending: false, isError: false, data: { id: "issue-1", identifier: "MUL-123", title: "Keep this pin", status: "todo" }, error: null };
     render(<AppSidebar />);
     expect(await screen.findByText("Keep this pin")).toBeInTheDocument();
     expect(screen.queryByText("MUL-123 Keep this pin")).not.toBeInTheDocument();
@@ -214,7 +246,7 @@ describe("PinRow", () => {
     detail.current = {
       isPending: false,
       isError: false,
-      data: { identifier: "MUL-123", title: "Keep this pin", status: "todo" },
+      data: { id: "issue-1", identifier: "MUL-123", title: "Keep this pin", status: "todo" },
       error: null,
     };
 
@@ -225,6 +257,41 @@ describe("PinRow", () => {
       "true",
     );
     expect(container.querySelector('button[data-href="/acme/issues"]')).not.toHaveAttribute("data-active");
+  });
+
+  it("renders and highlights a saved-view pin by its shareable route", async () => {
+    pins.current = [{
+      id: "pin-view",
+      workspace_id: "ws-1",
+      user_id: "user-1",
+      item_type: "view",
+      item_id: "view-1",
+      position: 0,
+      created_at: "2026-05-06T00:00:00Z",
+    }];
+    navigation.current.searchParams = new URLSearchParams("view=view-1");
+    viewDetail.current = {
+      isPending: false,
+      isError: false,
+      data: {
+        id: "view-1",
+        name: "Launch focus",
+        scope_type: "workspace",
+        scope_id: null,
+      },
+      error: null,
+    };
+
+    render(<AppSidebar />);
+
+    expect((await screen.findByText("Launch focus")).closest("button")).toHaveAttribute(
+      "data-active",
+      "true",
+    );
+    expect(screen.getByText("Launch focus").closest("button")).toHaveAttribute(
+      "data-href",
+      "/acme/issues?view=view-1",
+    );
   });
 });
 

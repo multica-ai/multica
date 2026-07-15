@@ -78,7 +78,30 @@ func (q *Queries) CreateProject(ctx context.Context, arg CreateProjectParams) (P
 }
 
 const deleteProject = `-- name: DeleteProject :exec
-DELETE FROM project WHERE id = $1 AND workspace_id = $2
+WITH project_views AS (
+    SELECT id FROM issue_view
+    WHERE workspace_id = $2 AND scope_type = 'project' AND scope_id = $1
+),
+cleared_view_preferences AS (
+    DELETE FROM issue_view_preference
+    WHERE workspace_id = $2
+      AND (
+        (scope_type = 'project' AND scope_id = $1)
+        OR default_view_id IN (SELECT id FROM project_views)
+      )
+),
+cleared_view_pins AS (
+    DELETE FROM pinned_item
+    WHERE workspace_id = $2
+      AND item_type = 'view'
+      AND item_id IN (SELECT id FROM project_views)
+),
+cleared_views AS (
+    DELETE FROM issue_view
+    WHERE workspace_id = $2 AND scope_type = 'project' AND scope_id = $1
+)
+DELETE FROM project
+WHERE project.id = $1 AND project.workspace_id = $2
 `
 
 type DeleteProjectParams struct {

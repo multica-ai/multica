@@ -586,10 +586,28 @@ func (h *Handler) DeleteProject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	userID := uuidToString(requester.UserID)
-	if err := h.Queries.DeleteProject(r.Context(), db.DeleteProjectParams{
+	tx, err := h.TxStarter.Begin(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to delete project")
+		return
+	}
+	defer tx.Rollback(r.Context())
+	qtx := h.Queries.WithTx(tx)
+	// Saved views intentionally have no project FK. Serialize this cleanup
+	// against view creation, which takes the same workspace row lock and
+	// revalidates project existence before inserting.
+	if _, err := qtx.LockWorkspaceForIssueViewCreate(r.Context(), project.WorkspaceID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to delete project")
+		return
+	}
+	if err := qtx.DeleteProject(r.Context(), db.DeleteProjectParams{
 		ID:          project.ID,
 		WorkspaceID: project.WorkspaceID,
 	}); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to delete project")
+		return
+	}
+	if err := tx.Commit(r.Context()); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to delete project")
 		return
 	}

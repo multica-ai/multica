@@ -370,6 +370,37 @@ describe("ApiClient schema fallback", () => {
     });
   });
 
+  describe("listIssueViews", () => {
+    it("fills safe visual defaults for a minimal versioned definition", async () => {
+      stubFetchJson({
+        views: [{
+          id: "view-1",
+          workspace_id: "ws-1",
+          creator_id: "user-1",
+          name: "Launch focus",
+          scope_type: "workspace",
+          visibility: "private",
+          definition: { version: 1, future_field: "preserved" },
+          created_at: "2026-07-15T00:00:00Z",
+          updated_at: "2026-07-15T00:00:00Z",
+        }],
+        default_view_id: "view-1",
+      });
+      const client = new ApiClient("https://api.example.test");
+
+      const result = await client.listIssueViews({ scope_type: "workspace" });
+
+      expect(result.views[0]?.definition.viewMode).toBe("board");
+      expect(result.views[0]?.definition.showSubIssues).toBe(true);
+      expect(result.views[0]?.icon).toBeNull();
+      expect(
+        (result.views[0]?.definition as unknown as Record<string, unknown>)
+          .future_field,
+      ).toBe("preserved");
+      expect(result.default_view_id).toBe("view-1");
+    });
+  });
+
   describe("createAgentFromTemplate", () => {
     it("falls back to an empty agent when the response is malformed", async () => {
       // The agent was created server-side even though the client can't

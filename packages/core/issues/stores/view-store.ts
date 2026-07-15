@@ -6,6 +6,7 @@ import { createStore, type StoreApi } from "zustand/vanilla";
 import { createJSONStorage, persist } from "zustand/middleware";
 import type { IssueStatus, IssuePriority } from "../../types";
 import { ALL_STATUSES } from "../config";
+import { addDaysDateOnly, todayDateOnly } from "../date";
 import { createWorkspaceAwareStorage, registerForWorkspaceRehydration } from "../../platform/workspace-storage";
 import { defaultStorage } from "../../platform/storage";
 
@@ -28,11 +29,26 @@ export type SwimlaneGrouping = "parent" | "project" | "assignee";
 export type SortField = "position" | "priority" | "start_date" | "due_date" | "created_at" | "title" | `property:${string}`;
 export type SortDirection = "asc" | "desc";
 export type IssueDateField = "created_at" | "updated_at";
+export type IssueDatePreset = "today" | "last_3_days" | "last_7_days";
 
 export interface IssueDateFilter {
   field: IssueDateField;
   from: string;
   to: string;
+  /** Relative presets are resolved when a saved view is opened. */
+  preset?: IssueDatePreset;
+}
+
+export function resolveIssueDateFilter(
+  filter: IssueDateFilter | null,
+): IssueDateFilter | null {
+  if (!filter?.preset) return filter ? { ...filter } : null;
+  const days = filter.preset === "today" ? 1 : filter.preset === "last_3_days" ? 3 : 7;
+  return {
+    ...filter,
+    from: addDaysDateOnly(1 - days),
+    to: todayDateOnly(),
+  };
 }
 
 export const SWIMLANE_GROUPINGS: SwimlaneGrouping[] = ["parent", "project", "assignee"];
@@ -162,6 +178,123 @@ export interface IssueViewState {
   setSwimlaneOrder: (order: string[]) => void;
   /** Toggle a lane key in the currently active swimlane grouping. */
   toggleSwimlaneCollapsed: (key: string) => void;
+}
+
+/**
+ * Durable, server-backed snapshot of an issue surface. The version is part of
+ * the payload (rather than the database row) so clients can evolve the shape
+ * without a table migration. Surface-specific selectors live alongside the
+ * visual state because switching a saved view must restore the same issue set,
+ * not merely the same board chrome.
+ */
+export interface IssueViewDefinition {
+  version: 1;
+  viewMode: ViewMode;
+  grouping: IssueGrouping;
+  statusFilters: IssueStatus[];
+  priorityFilters: IssuePriority[];
+  assigneeFilters: ActorFilterValue[];
+  includeNoAssignee: boolean;
+  creatorFilters: ActorFilterValue[];
+  projectFilters: string[];
+  includeNoProject: boolean;
+  labelFilters: string[];
+  propertyFilters: Record<string, string[]>;
+  dateFilter: IssueDateFilter | null;
+  agentRunningFilter: boolean;
+  sortBy: SortField;
+  sortDirection: SortDirection;
+  cardProperties: CardProperties;
+  cardPropertyIds: string[];
+  showSubIssues: boolean;
+  listCollapsedStatuses: IssueStatus[];
+  ganttZoom: GanttZoom;
+  ganttShowCompleted: boolean;
+  swimlaneGrouping: SwimlaneGrouping;
+  swimlaneOrders: Record<SwimlaneGrouping, string[]>;
+  collapsedSwimlanes: Record<SwimlaneGrouping, string[]>;
+  workspaceActorKind?: "all" | "members" | "agents";
+  myRelation?: "all" | "assigned" | "created" | "involved";
+}
+
+export type IssueViewDefinitionContext = Pick<
+  IssueViewDefinition,
+  "workspaceActorKind" | "myRelation"
+>;
+
+export function issueViewDefinitionFromState(
+  state: IssueViewState,
+  context: IssueViewDefinitionContext = {},
+): IssueViewDefinition {
+  return {
+    version: 1,
+    viewMode: state.viewMode,
+    grouping: state.grouping,
+    statusFilters: [...state.statusFilters],
+    priorityFilters: [...state.priorityFilters],
+    assigneeFilters: state.assigneeFilters.map((value) => ({ ...value })),
+    includeNoAssignee: state.includeNoAssignee,
+    creatorFilters: state.creatorFilters.map((value) => ({ ...value })),
+    projectFilters: [...state.projectFilters],
+    includeNoProject: state.includeNoProject,
+    labelFilters: [...state.labelFilters],
+    propertyFilters: Object.fromEntries(
+      Object.entries(state.propertyFilters).map(([key, values]) => [key, [...values]]),
+    ),
+    // These two values are intentionally excluded from local persistence, but
+    // an explicit saved view is expected to restore them.
+    dateFilter: state.dateFilter ? { ...state.dateFilter } : null,
+    agentRunningFilter: state.agentRunningFilter,
+    sortBy: state.sortBy,
+    sortDirection: state.sortDirection,
+    cardProperties: { ...state.cardProperties },
+    cardPropertyIds: [...state.cardPropertyIds],
+    showSubIssues: state.showSubIssues,
+    listCollapsedStatuses: [...state.listCollapsedStatuses],
+    ganttZoom: state.ganttZoom,
+    ganttShowCompleted: state.ganttShowCompleted,
+    swimlaneGrouping: state.swimlaneGrouping,
+    swimlaneOrders: {
+      parent: [...state.swimlaneOrders.parent],
+      project: [...state.swimlaneOrders.project],
+      assignee: [...state.swimlaneOrders.assignee],
+    },
+    collapsedSwimlanes: {
+      parent: [...state.collapsedSwimlanes.parent],
+      project: [...state.collapsedSwimlanes.project],
+      assignee: [...state.collapsedSwimlanes.assignee],
+    },
+    ...context,
+  };
+}
+
+/** Returns only data fields, preserving the store's action functions. */
+export function issueViewStateFromDefinition(
+  definition: IssueViewDefinition,
+): Omit<IssueViewDefinition, "version" | "workspaceActorKind" | "myRelation"> {
+  const {
+    version: _version,
+    workspaceActorKind: _workspaceActorKind,
+    myRelation: _myRelation,
+    ...state
+  } = definition;
+  return { ...state, dateFilter: resolveIssueDateFilter(state.dateFilter) };
+}
+
+export function issueViewDefinitionsEqual(
+  left: IssueViewDefinition,
+  right: IssueViewDefinition,
+): boolean {
+  const comparable = (definition: IssueViewDefinition): IssueViewDefinition => {
+    if (!definition.dateFilter?.preset) return definition;
+    return {
+      ...definition,
+      // Relative presets intentionally age. Their concrete bounds are a cache
+      // for older clients, not part of the durable meaning of the view.
+      dateFilter: { ...definition.dateFilter, from: "", to: "" },
+    };
+  };
+  return JSON.stringify(comparable(left)) === JSON.stringify(comparable(right));
 }
 
 export const viewStoreSlice = (set: StoreApi<IssueViewState>["setState"]): IssueViewState => ({

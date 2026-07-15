@@ -98,3 +98,45 @@ func TestRegisterListeners_TaskChatGoToWorkspace(t *testing.T) {
 		})
 	}
 }
+
+func TestRegisterListeners_IssueViewVisibilityRouting(t *testing.T) {
+	tests := []struct {
+		name          string
+		eventType     string
+		visibility    string
+		previous      string
+		wantWorkspace int
+		wantUser      int
+	}{
+		{"private view stays personal", protocol.EventIssueViewCreated, "private", "", 0, 1},
+		{"workspace view broadcasts", protocol.EventIssueViewUpdated, "workspace", "private", 1, 0},
+		{"workspace view made private broadcasts removal", protocol.EventIssueViewUpdated, "private", "workspace", 1, 0},
+		{"default change stays personal", protocol.EventIssueViewDefaultChanged, "", "", 0, 1},
+		{"pin change stays personal", protocol.EventPinCreated, "", "", 0, 1},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			bus := events.New()
+			fb := &fakeBroadcaster{}
+			registerListeners(bus, fb)
+			bus.Publish(events.Event{
+				Type: tc.eventType, WorkspaceID: "ws-1",
+				ActorType: "member", ActorID: "user-1",
+				Payload: map[string]any{
+					"view_id": "view-1", "visibility": tc.visibility,
+					"previous_visibility": tc.previous,
+					"recipient_id":        "user-1",
+				},
+			})
+			if len(fb.workspaceCalls) != tc.wantWorkspace {
+				t.Fatalf("workspace calls = %d, want %d", len(fb.workspaceCalls), tc.wantWorkspace)
+			}
+			if len(fb.userCalls) != tc.wantUser {
+				t.Fatalf("user calls = %d, want %d", len(fb.userCalls), tc.wantUser)
+			}
+			if tc.wantUser == 1 && fb.userCalls[0].userID != "user-1" {
+				t.Fatalf("recipient = %q, want user-1", fb.userCalls[0].userID)
+			}
+		})
+	}
+}

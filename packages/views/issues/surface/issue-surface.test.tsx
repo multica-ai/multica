@@ -62,7 +62,13 @@ vi.mock("../../navigation", () => ({
       {children}
     </a>
   ),
-  useNavigation: () => ({ push: vi.fn(), pathname: "/" }),
+  useNavigation: () => ({
+    push: vi.fn(),
+    replace: vi.fn(),
+    pathname: "/",
+    searchParams: new URLSearchParams(),
+    getShareableUrl: (path: string) => path,
+  }),
 }));
 
 vi.mock("@multica/core/paths", async () => {
@@ -140,6 +146,8 @@ describe("IssueSurface — scope switch loading semantics", () => {
       listProjects: vi.fn(() => never()),
       getAgentTaskSnapshot: vi.fn(() => never<AgentTask[]>()),
       getChildIssueProgress: vi.fn(() => never()),
+      listIssueViews: vi.fn(() => Promise.resolve({ views: [], default_view_id: null })),
+      listPins: vi.fn(() => Promise.resolve([])),
     } as unknown as ApiClient);
     pruneIssueSurfaceViewStates([]);
   });

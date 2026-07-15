@@ -36,6 +36,11 @@ export function MyIssuesPage() {
             userId: user.id,
             relation: relationFromScope(scope),
           }}
+          surfaceKey={`my:${user.id}`}
+          onSavedViewContextChange={(context) => {
+            const relation = context.myRelation ?? "assigned";
+            setScope(relation === "involved" ? "agents" : relation);
+          }}
           modes={["board", "list", "swimlane"]}
           batchToolbar="list"
           renderHeader={({ controller }) => (

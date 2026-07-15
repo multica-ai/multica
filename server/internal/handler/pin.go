@@ -67,6 +67,13 @@ func (h *Handler) ListPins(w http.ResponseWriter, r *http.Request) {
 
 	resp := make([]PinnedItemResponse, 0, len(pins))
 	for _, p := range pins {
+		// Mixed-version safety: old Desktop clients only understand issue and
+		// project pins. They interpret every other type as project, receive a
+		// 404, and optimistically unpin it. Hide view pins until the caller
+		// explicitly advertises support.
+		if p.ItemType == "view" && !requestHasClientCapability(r, protocol.AppCapabilityIssueViewPinsV1) {
+			continue
+		}
 		resp = append(resp, pinnedItemToResponse(p))
 	}
 	writeJSON(w, http.StatusOK, resp)
@@ -84,8 +91,8 @@ func (h *Handler) CreatePin(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-	if req.ItemType != "issue" && req.ItemType != "project" {
-		writeError(w, http.StatusBadRequest, "item_type must be 'issue' or 'project'")
+	if req.ItemType != "issue" && req.ItemType != "project" && req.ItemType != "view" {
+		writeError(w, http.StatusBadRequest, "item_type must be 'issue', 'project', or 'view'")
 		return
 	}
 	if req.ItemID == "" {
@@ -118,6 +125,13 @@ func (h *Handler) CreatePin(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusNotFound, "project not found")
 			return
 		}
+	case "view":
+		if _, err := h.Queries.GetIssueViewForUser(r.Context(), db.GetIssueViewForUserParams{
+			ID: itemUUID, WorkspaceID: wsUUID, UserID: parseUUID(userID),
+		}); err != nil {
+			writeError(w, http.StatusNotFound, "view not found")
+			return
+		}
 	}
 
 	// Get max position to append at end
@@ -147,7 +161,9 @@ func (h *Handler) CreatePin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resp := pinnedItemToResponse(pin)
-	h.publish(protocol.EventPinCreated, workspaceID, "member", userID, map[string]any{"pin": resp})
+	h.publish(protocol.EventPinCreated, workspaceID, "member", userID, map[string]any{
+		"pin": resp, "recipient_id": userID,
+	})
 	writeJSON(w, http.StatusCreated, resp)
 }
 
@@ -181,8 +197,9 @@ func (h *Handler) DeletePin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.publish(protocol.EventPinDeleted, workspaceID, "member", userID, map[string]any{
-		"item_type": itemType,
-		"item_id":   itemID,
+		"item_type":    itemType,
+		"item_id":      itemID,
+		"recipient_id": userID,
 	})
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -224,7 +241,9 @@ func (h *Handler) ReorderPins(w http.ResponseWriter, r *http.Request) {
 	// Fan out so other sessions (web/desktop, or a second tab) refetch
 	// the pin list and pick up the new order. Without this, reorder is
 	// only consistent on the originating client until a hard refresh.
-	h.publish(protocol.EventPinReordered, workspaceID, "member", userID, map[string]any{"items": req.Items})
+	h.publish(protocol.EventPinReordered, workspaceID, "member", userID, map[string]any{
+		"items": req.Items, "recipient_id": userID,
+	})
 
 	w.WriteHeader(http.StatusNoContent)
 }

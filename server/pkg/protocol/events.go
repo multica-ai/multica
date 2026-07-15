@@ -106,6 +106,12 @@ const (
 	EventPinDeleted   = "pin:deleted"
 	EventPinReordered = "pin:reordered"
 
+	// Saved issue view events
+	EventIssueViewCreated        = "view:created"
+	EventIssueViewUpdated        = "view:updated"
+	EventIssueViewDeleted        = "view:deleted"
+	EventIssueViewDefaultChanged = "view:default_changed"
+
 	// Invitation events
 	EventInvitationCreated  = "invitation:created"
 	EventInvitationAccepted = "invitation:accepted"

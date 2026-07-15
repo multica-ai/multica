@@ -19,6 +19,12 @@ const (
 	// synchronous restore — a client without this capability would silently
 	// drop the user's prompt, and keeps the legacy synchronous restore instead.
 	AppCapabilityChatDraftRestoreV1 = "chat-draft-restore-v1"
+
+	// AppCapabilityIssueViewPinsV1 is advertised by app clients that know the
+	// pinned_item "view" variant. ListPins hides view pins from older clients,
+	// which would otherwise treat every non-issue pin as a project and remove it
+	// after the resulting project 404.
+	AppCapabilityIssueViewPinsV1 = "issue-view-pins-v1"
 )
 
 // RPCRequestPayload is the generic daemon→server request envelope carried in a

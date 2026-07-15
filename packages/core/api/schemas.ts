@@ -23,6 +23,8 @@ import type {
   IssueProperty,
   ListPropertiesResponse,
   IssuePropertiesResponse,
+  IssueView,
+  ListIssueViewsResponse,
   ListIssuesResponse,
   ListLabelsResponse,
   ListWebhookDeliveriesResponse,
@@ -36,6 +38,159 @@ import type {
 } from "../types";
 import type { CloudRuntimeNode } from "../runtimes/cloud-runtime";
 import type { CreateFeedbackResponse } from "../feedback/types";
+
+const SavedViewActorFilterSchema = z.object({
+  type: z.enum(["member", "agent", "squad"]),
+  id: z.string(),
+}).loose();
+
+const SavedViewCardPropertiesSchema = z.object({
+  priority: z.boolean().default(true),
+  description: z.boolean().default(true),
+  assignee: z.boolean().default(true),
+  startDate: z.boolean().default(true),
+  dueDate: z.boolean().default(true),
+  project: z.boolean().default(true),
+  childProgress: z.boolean().default(true),
+  labels: z.boolean().default(true),
+}).loose();
+
+const SavedViewLaneStateSchema = z.object({
+  parent: z.array(z.string()).default([]),
+  project: z.array(z.string()).default([]),
+  assignee: z.array(z.string()).default([]),
+}).loose();
+
+/**
+ * Saved-view definitions are data supplied by another client. Keep the object
+ * extensible, while validating every value this client writes into Zustand.
+ */
+export const IssueViewDefinitionSchema = z.object({
+  version: z.number().int().positive(),
+  viewMode: z.enum(["board", "list", "gantt", "swimlane"]).default("board"),
+  grouping: z.string().default("status"),
+  statusFilters: z.array(z.string()).default([]),
+  priorityFilters: z.array(z.string()).default([]),
+  assigneeFilters: z.array(SavedViewActorFilterSchema).default([]),
+  includeNoAssignee: z.boolean().default(false),
+  creatorFilters: z.array(SavedViewActorFilterSchema).default([]),
+  projectFilters: z.array(z.string()).default([]),
+  includeNoProject: z.boolean().default(false),
+  labelFilters: z.array(z.string()).default([]),
+  propertyFilters: z.record(z.string(), z.array(z.string())).default({}),
+  dateFilter: z.object({
+    field: z.enum(["created_at", "updated_at"]),
+    from: z.string(),
+    to: z.string(),
+    preset: z.enum(["today", "last_3_days", "last_7_days"]).optional(),
+  }).nullable().default(null),
+  agentRunningFilter: z.boolean().default(false),
+  sortBy: z.string().default("position"),
+  sortDirection: z.enum(["asc", "desc"]).default("asc"),
+  cardProperties: SavedViewCardPropertiesSchema.default({
+    priority: true,
+    description: true,
+    assignee: true,
+    startDate: true,
+    dueDate: true,
+    project: true,
+    childProgress: true,
+    labels: true,
+  }),
+  cardPropertyIds: z.array(z.string()).default([]),
+  showSubIssues: z.boolean().default(true),
+  listCollapsedStatuses: z.array(z.string()).default([]),
+  ganttZoom: z.enum(["day", "week", "month"]).default("week"),
+  ganttShowCompleted: z.boolean().default(false),
+  swimlaneGrouping: z.enum(["parent", "project", "assignee"]).default("assignee"),
+  swimlaneOrders: SavedViewLaneStateSchema.default({
+    parent: [], project: [], assignee: [],
+  }),
+  collapsedSwimlanes: SavedViewLaneStateSchema.default({
+    parent: [], project: [], assignee: [],
+  }),
+  workspaceActorKind: z.enum(["all", "members", "agents"]).optional(),
+  myRelation: z.enum(["all", "assigned", "created", "involved"]).optional(),
+}).loose();
+
+export const IssueViewSchema = z.object({
+  id: z.string(),
+  workspace_id: z.string(),
+  creator_id: z.string(),
+  name: z.string(),
+  icon: z.string().nullable().default(null),
+  color: z.string().nullable().default(null),
+  scope_type: z.enum(["workspace", "project", "my"]),
+  scope_id: z.string().nullable().default(null),
+  visibility: z.enum(["private", "workspace"]),
+  definition: IssueViewDefinitionSchema,
+  position: z.number().default(0),
+  can_edit: z.boolean().default(false),
+  created_at: z.string(),
+  updated_at: z.string(),
+}).loose();
+
+export const IssueViewListSchema = z.object({
+  views: z.array(IssueViewSchema).default([]),
+  default_view_id: z.string().nullable().default(null),
+}).loose();
+
+export const EMPTY_ISSUE_VIEW: IssueView = {
+  id: "",
+  workspace_id: "",
+  creator_id: "",
+  name: "",
+  icon: null,
+  color: null,
+  scope_type: "workspace",
+  scope_id: null,
+  visibility: "private",
+  definition: {
+    version: 1,
+    viewMode: "board",
+    grouping: "status",
+    statusFilters: [],
+    priorityFilters: [],
+    assigneeFilters: [],
+    includeNoAssignee: false,
+    creatorFilters: [],
+    projectFilters: [],
+    includeNoProject: false,
+    labelFilters: [],
+    propertyFilters: {},
+    dateFilter: null,
+    agentRunningFilter: false,
+    sortBy: "position",
+    sortDirection: "asc",
+    cardProperties: {
+      priority: true,
+      description: true,
+      assignee: true,
+      startDate: true,
+      dueDate: true,
+      project: true,
+      childProgress: true,
+      labels: true,
+    },
+    cardPropertyIds: [],
+    showSubIssues: true,
+    listCollapsedStatuses: [],
+    ganttZoom: "week",
+    ganttShowCompleted: false,
+    swimlaneGrouping: "assignee",
+    swimlaneOrders: { parent: [], project: [], assignee: [] },
+    collapsedSwimlanes: { parent: [], project: [], assignee: [] },
+  },
+  position: 0,
+  can_edit: false,
+  created_at: "",
+  updated_at: "",
+};
+
+export const EMPTY_ISSUE_VIEW_LIST: ListIssueViewsResponse = {
+  views: [],
+  default_view_id: null,
+};
 
 // Label responses are consumed by settings tables and resource pickers. Keep
 // the resource type lenient so newer server scopes do not break older clients,

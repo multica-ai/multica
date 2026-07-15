@@ -3,12 +3,15 @@ import { beforeAll, beforeEach, afterEach, describe, expect, it } from "vitest";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { setCurrentWorkspace } from "../../platform/workspace-storage";
 import { ViewStoreProvider, useViewStore } from "./view-store-context";
+import { issueViewDefinitionFromState } from "./view-store";
 import {
   ISSUE_SURFACE_VIEW_STORAGE_KEY,
+  applyIssueSurfaceSavedView,
   clearIssueSurfaceViewState,
   getIssueSurfaceViewStateRegistrySnapshot,
   getIssueSurfaceViewStore,
   pruneIssueSurfaceViewStates,
+  restoreIssueSurfaceDraft,
 } from "./surface-view-store";
 
 const flush = async () => {
@@ -164,5 +167,30 @@ describe("issue surface view store registry", () => {
       fireEvent.click(screen.getByRole("button", { name: "board" }));
     });
     expect(screen.getByRole("button", { name: "list" })).toBeTruthy();
+  });
+
+  it("restores the local draft after editing a saved-view overlay", async () => {
+    setCurrentWorkspace("acme", "ws_a");
+    await flush();
+    const surfaceKey = "workspace:issues";
+    const store = getIssueSurfaceViewStore(surfaceKey);
+    store.getState().setViewMode("list");
+    store.getState().togglePriorityFilter("high");
+
+    const saved = issueViewDefinitionFromState(store.getState(), {
+      workspaceActorKind: "agents",
+    });
+    saved.viewMode = "board";
+    saved.priorityFilters = ["urgent"];
+    applyIssueSurfaceSavedView(surfaceKey, store, saved);
+    store.getState().togglePriorityFilter("medium");
+
+    expect(store.getState().viewMode).toBe("board");
+    expect(store.getState().priorityFilters).toEqual(["urgent", "medium"]);
+
+    restoreIssueSurfaceDraft(surfaceKey, store);
+
+    expect(store.getState().viewMode).toBe("list");
+    expect(store.getState().priorityFilters).toEqual(["high"]);
   });
 });

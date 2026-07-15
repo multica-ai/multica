@@ -36,6 +36,7 @@ import {
   X,
   Zap,
   Users,
+  PanelsTopLeft,
 } from "lucide-react";
 import { WorkspaceAvatar } from "../workspace/workspace-avatar";
 import { ActorAvatar } from "@multica/ui/components/common/actor-avatar";
@@ -83,6 +84,7 @@ import { pinListOptions } from "@multica/core/pins/queries";
 import { useDeletePin, useReorderPins } from "@multica/core/pins/mutations";
 import { issueDetailOptions } from "@multica/core/issues/queries";
 import { projectDetailOptions } from "@multica/core/projects/queries";
+import { issueViewDetailOptions } from "@multica/core/issue-views/queries";
 import type { PinnedItem } from "@multica/core/types";
 import { useLogout } from "../auth";
 import { ProjectIcon } from "../projects/components/project-icon";
@@ -173,21 +175,21 @@ function DraftDot() {
 
 /**
  * Presentational pin row. The `label` and `iconNode` are computed by the
- * parent `PinRow` from cached issue / project detail queries — keeping
+ * parent `PinRow` from cached issue / project / saved-view detail queries — keeping
  * this component dumb means the dnd-kit / navigation wiring lives in
  * one place and the data flow is explicit.
  */
 function SortablePinItem({
   pin,
   href,
-  pathname,
+  isActive,
   onUnpin,
   label,
   iconNode,
 }: {
   pin: PinnedItem;
   href: string;
-  pathname: string;
+  isActive: boolean;
   onUnpin: () => void;
   label: string;
   iconNode: React.ReactNode;
@@ -201,8 +203,6 @@ function SortablePinItem({
   }, [isDragging]);
 
   const style = { transform: CSS.Transform.toString(transform), transition };
-  const isActive = pathname === href;
-
   return (
     <SidebarMenuItem
       ref={setNodeRef}
@@ -256,7 +256,7 @@ function SortablePinItem({
 
 /**
  * Smart wrapper that resolves a pin's display data (label + status/icon)
- * from the issue / project detail query cache. Both queries are declared
+ * from the issue / project / saved-view detail query cache. All queries are declared
  * unconditionally with `enabled` gates so the hook order stays stable
  * regardless of `pin.item_type`.
  *
@@ -266,40 +266,52 @@ function SortablePinItem({
  */
 function PinRow({
   pin,
-  href,
   pathname,
+  currentViewId,
   onUnpin,
   wsId,
 }: {
   pin: PinnedItem;
-  href: string;
   pathname: string;
+  currentViewId: string | null;
   onUnpin: () => void;
   wsId: string;
 }) {
   const isIssue = pin.item_type === "issue";
+  const isProject = pin.item_type === "project";
+  const isView = pin.item_type === "view";
+  const p = useWorkspacePaths();
   const issueQuery = useQuery({
     ...issueDetailOptions(wsId, pin.item_id),
     enabled: isIssue,
   });
   const projectQuery = useQuery({
     ...projectDetailOptions(wsId, pin.item_id),
-    enabled: !isIssue,
+    enabled: isProject,
+  });
+  const viewQuery = useQuery({
+    ...issueViewDetailOptions(wsId, pin.item_id),
+    enabled: isView,
   });
 
   const triggeredRef = useRef(false);
   useEffect(() => {
-    const err = isIssue ? issueQuery.error : projectQuery.error;
+    const err = isIssue
+      ? issueQuery.error
+      : isProject
+        ? projectQuery.error
+        : viewQuery.error;
     if (err instanceof ApiError && err.status === 404 && !triggeredRef.current) {
       triggeredRef.current = true;
       onUnpin();
     }
-  }, [isIssue, issueQuery.error, onUnpin, projectQuery.error]);
+  }, [isIssue, isProject, issueQuery.error, onUnpin, projectQuery.error, viewQuery.error]);
 
   if (isIssue) {
     if (issueQuery.isPending) return <PinSkeleton />;
     if (issueQuery.isError || !issueQuery.data) return null;
     const issue = issueQuery.data;
+    const href = p.issueDetail(issue.id);
     const label = issue.title;
     const iconNode = (
       /* Override parent [&_svg]:size-4 — pinned items need smaller icons to match sm size */
@@ -309,10 +321,33 @@ function PinRow({
       <SortablePinItem
         pin={pin}
         href={href}
-        pathname={pathname}
+        isActive={pathname === href}
         onUnpin={onUnpin}
         label={label}
         iconNode={iconNode}
+      />
+    );
+  }
+
+  if (isView) {
+    if (viewQuery.isPending) return <PinSkeleton />;
+    if (viewQuery.isError || !viewQuery.data) return null;
+    const view = viewQuery.data;
+    const href = view.scope_type === "project" && view.scope_id
+      ? `${p.projectDetail(view.scope_id)}?view=${encodeURIComponent(view.id)}`
+      : view.scope_type === "my"
+        ? `${p.myIssues()}?view=${encodeURIComponent(view.id)}`
+        : `${p.issues()}?view=${encodeURIComponent(view.id)}`;
+    return (
+      <SortablePinItem
+        pin={pin}
+        href={href}
+        isActive={
+          currentViewId === view.id && pathname === href.split("?")[0]
+        }
+        onUnpin={onUnpin}
+        label={view.name}
+        iconNode={<PanelsTopLeft className="!size-3.5 shrink-0 text-muted-foreground" />}
       />
     );
   }
@@ -324,8 +359,8 @@ function PinRow({
   return (
     <SortablePinItem
       pin={pin}
-      href={href}
-      pathname={pathname}
+      href={p.projectDetail(project.id)}
+      isActive={pathname === p.projectDetail(project.id)}
       onUnpin={onUnpin}
       label={project.title}
       iconNode={iconNode}
@@ -357,7 +392,7 @@ interface AppSidebarProps {
 
 export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }: AppSidebarProps = {}) {
   const { t } = useT("layout");
-  const { pathname, push } = useNavigation();
+  const { pathname, searchParams, push } = useNavigation();
   const user = useAuthStore((s) => s.user);
   const userId = useAuthStore((s) => s.user?.id);
   const logout = useLogout();
@@ -450,7 +485,12 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
     setLocalPinnedWsId(wsId ?? null);
   }, [wsId]);
   const visiblePinned = localPinnedWsId === (wsId ?? null) ? localPinned : EMPTY_PINS;
-  const isActivePinnedRoute = visiblePinned.some((pin) => pathname === getPinHref(pin));
+  const currentViewId = searchParams.get("view");
+  const isActivePinnedRoute = visiblePinned.some((pin) =>
+    pin.item_type === "view"
+      ? pin.item_id === currentViewId
+      : pathname === getPinHref(pin),
+  );
 
   const handleDragStart = useCallback(() => {
     isDraggingRef.current = true;
@@ -720,8 +760,8 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                             <PinRow
                               key={pin.id}
                               pin={pin}
-                              href={getPinHref(pin)}
                               pathname={pathname}
+                              currentViewId={currentViewId}
                               onUnpin={() => deletePin.mutate({ itemType: pin.item_type, itemId: pin.item_id })}
                               wsId={wsId ?? ""}
                             />

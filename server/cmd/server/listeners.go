@@ -24,13 +24,20 @@ import (
 func registerListeners(bus *events.Bus, b realtime.Broadcaster) {
 	// Personal events should NOT be broadcast to the whole workspace.
 	personalEvents := map[string]bool{
-		protocol.EventInboxNew:           true,
-		protocol.EventInboxRead:          true,
-		protocol.EventInboxArchived:      true,
-		protocol.EventInboxBatchRead:     true,
-		protocol.EventInboxBatchArchived: true,
-		protocol.EventInvitationCreated:  true,
-		protocol.EventInvitationRevoked:  true,
+		protocol.EventInboxNew:                true,
+		protocol.EventInboxRead:               true,
+		protocol.EventInboxArchived:           true,
+		protocol.EventInboxBatchRead:          true,
+		protocol.EventInboxBatchArchived:      true,
+		protocol.EventInvitationCreated:       true,
+		protocol.EventInvitationRevoked:       true,
+		protocol.EventIssueViewCreated:        true,
+		protocol.EventIssueViewUpdated:        true,
+		protocol.EventIssueViewDeleted:        true,
+		protocol.EventIssueViewDefaultChanged: true,
+		protocol.EventPinCreated:              true,
+		protocol.EventPinDeleted:              true,
+		protocol.EventPinReordered:            true,
 	}
 
 	// Helper: marshal event and send to a specific user.
@@ -146,6 +153,66 @@ func registerListeners(bus *events.Bus, b realtime.Broadcaster) {
 		realtime.M.RecordEvent(e.Type)
 		b.SendToUser(userID, data, e.WorkspaceID)
 	})
+
+	// Saved views have mixed visibility. Private-view events and per-user
+	// default changes stay on the creator's user scope; workspace-visible view
+	// events are the only ones allowed onto the workspace room.
+	for _, eventType := range []string{
+		protocol.EventIssueViewCreated,
+		protocol.EventIssueViewUpdated,
+		protocol.EventIssueViewDeleted,
+		protocol.EventIssueViewDefaultChanged,
+	} {
+		bus.Subscribe(eventType, func(e events.Event) {
+			payload, ok := e.Payload.(map[string]any)
+			if !ok {
+				return
+			}
+			recipientID, _ := payload["recipient_id"].(string)
+			visibility, _ := payload["visibility"].(string)
+			previousVisibility, _ := payload["previous_visibility"].(string)
+			if e.Type == protocol.EventIssueViewDefaultChanged {
+				sendToRecipient(b, e, recipientID)
+				return
+			}
+			// A private view normally stays on user scope. The one exception is
+			// workspace → private: members that could previously see it need a
+			// redacted workspace event so their list drops the now-private view.
+			if visibility == "private" && previousVisibility != "workspace" {
+				sendToRecipient(b, e, recipientID)
+				return
+			}
+			if (visibility != "workspace" && previousVisibility != "workspace") || e.WorkspaceID == "" {
+				return
+			}
+			data, err := json.Marshal(map[string]any{
+				"type": e.Type, "payload": e.Payload,
+				"actor_id": e.ActorID, "actor_type": e.ActorType,
+			})
+			if err != nil {
+				return
+			}
+			realtime.M.RecordEvent(e.Type)
+			b.BroadcastToWorkspace(e.WorkspaceID, data)
+		})
+	}
+
+	// Pins are per-user preferences, including pins that point at private
+	// saved views. Only synchronize them across that user's sessions.
+	for _, eventType := range []string{
+		protocol.EventPinCreated,
+		protocol.EventPinDeleted,
+		protocol.EventPinReordered,
+	} {
+		bus.Subscribe(eventType, func(e events.Event) {
+			payload, ok := e.Payload.(map[string]any)
+			if !ok {
+				return
+			}
+			recipientID, _ := payload["recipient_id"].(string)
+			sendToRecipient(b, e, recipientID)
+		})
+	}
 
 	// SubscribeAll handles workspace-broadcast for non-personal events.
 	bus.SubscribeAll(func(e events.Event) {

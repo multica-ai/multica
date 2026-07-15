@@ -119,6 +119,17 @@ export type {
 } from "./project";
 export type { PinnedItem, PinnedItemType, CreatePinRequest, ReorderPinsRequest } from "./pin";
 export type {
+  IssueView,
+  IssueViewScopeType,
+  IssueViewVisibility,
+  ListIssueViewsResponse,
+  IssueViewScopeInput,
+  CreateIssueViewRequest,
+  UpdateIssueViewRequest,
+  DuplicateIssueViewRequest,
+  SetDefaultIssueViewRequest,
+} from "./issue-view";
+export type {
   GitHubInstallation,
   GitHubMergeableState,
   GitHubPullRequest,
