@@ -356,7 +356,14 @@ export function MembersTab() {
                     if (e.key === "Enter" && inviteEmail.trim()) handleInviteMember();
                   }}
                 />
-                <Select value={inviteRole} onValueChange={(value) => setInviteRole(value as MemberRole)}>
+                <Select
+                  items={(["member", "admin"] as const).map((value) => ({
+                    value,
+                    label: roleConfig[value].label,
+                  }))}
+                  value={inviteRole}
+                  onValueChange={(value) => setInviteRole(value as MemberRole)}
+                >
                   <SelectTrigger size="sm">
                     <SelectValue>{() => roleConfig[inviteRole].label}</SelectValue>
                   </SelectTrigger>

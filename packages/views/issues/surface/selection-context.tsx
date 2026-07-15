@@ -29,7 +29,10 @@ export function useCreateIssueSurfaceSelection(
   const [selectedIds, setSelectedIds] = useState(() => new Set<string>());
 
   useEffect(() => {
-    setSelectedIds(new Set());
+    // Functional bail: on mount (and on resetKey changes where nothing was
+    // selected) the selection is already empty — swapping in a NEW empty Set
+    // here re-rendered the entire surface once per mount for nothing.
+    setSelectedIds((current) => (current.size === 0 ? current : new Set()));
   }, [resetKey]);
 
   const toggle = useCallback((id: string) => {

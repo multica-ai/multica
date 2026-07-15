@@ -20,6 +20,7 @@ import {
   Pin,
   PinOff,
   Plus,
+  SlidersHorizontal,
   Tag,
   Unlink,
   Users,
@@ -30,7 +31,7 @@ import { Button } from "@multica/ui/components/ui/button";
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@multica/ui/components/ui/resizable";
 import { Sheet, SheetContent } from "@multica/ui/components/ui/sheet";
 import { useIsMobile } from "@multica/ui/hooks/use-mobile";
-import { ContentEditor, type ContentEditorRef, TitleEditor, useFileDropZone, FileDropOverlay } from "../../editor";
+import { ContentEditor, type ContentEditorRef, TitleEditor, type TitleEditorRef, useFileDropZone, FileDropOverlay, useLazyEditor } from "../../editor";
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
 import {
   Tooltip,
@@ -52,6 +53,7 @@ import { useUpdateIssue } from "@multica/core/issues/mutations";
 import { toast } from "sonner";
 import { StatusIcon, PriorityIcon, StatusPicker, PriorityPicker, StagePicker, StartDatePicker, DueDatePicker, AssigneePicker, LabelPicker } from ".";
 import { maxSiblingStage } from "./pickers/stage-picker";
+import { CustomPropertyValueEditor } from "./pickers/custom-property-picker";
 import { IssueActionsDropdown, useIssueActions } from "../actions";
 import { ProjectPicker } from "../../projects/components/project-picker";
 import { LocalDirectoryHint } from "../../projects/components/local-directory-hint";
@@ -74,8 +76,14 @@ import { issueListOptions, issueDetailOptions, childIssuesOptions, issueUsageOpt
 import { projectDetailOptions } from "@multica/core/projects/queries";
 import { ProjectIcon } from "../../projects/components/project-icon";
 import { issueLabelsOptions } from "@multica/core/labels";
+import { propertyListOptions } from "@multica/core/properties";
 import { memberListOptions, agentListOptions } from "@multica/core/workspace/queries";
-import { useCommentComposerStore, useRecentIssuesStore } from "@multica/core/issues/stores";
+import {
+  selectExpandedResolved,
+  useCommentComposerStore,
+  useRecentIssuesStore,
+  useResolvedExpandStore,
+} from "@multica/core/issues/stores";
 import { useIssueSelectionStore } from "@multica/core/issues/stores/selection-store";
 import { BatchActionToolbar } from "./batch-action-toolbar";
 import { useIssueTimeline } from "../hooks/use-issue-timeline";
@@ -85,6 +93,7 @@ import { ReactionBar } from "@multica/ui/components/common/reaction-bar";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
 import { api } from "@multica/core/api";
 import { useTimeAgo } from "../../i18n";
+import { useRestoredScrollOffset, useRestoredScrollRef } from "../../platform";
 import { cn } from "@multica/ui/lib/utils";
 
 import { ProgressRing } from "./progress-ring";
@@ -760,6 +769,10 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   const [visibleOptionalProps, setVisibleOptionalProps] = useState<Set<OptionalPropKey>>(
     () => new Set(),
   );
+  // Same progressive-disclosure machinery for custom properties, keyed by
+  // property definition id instead of a static key union.
+  const [visibleCustomProps, setVisibleCustomProps] = useState<Set<string>>(() => new Set());
+  const [autoOpenCustomProp, setAutoOpenCustomProp] = useState<string | null>(null);
   // Optional property to auto-open as soon as it's mounted (the user just
   // picked it from "+ Add property" and we want them dropped straight into
   // edit state). Consumed by the row that matches this key, cleared after.
@@ -774,20 +787,32 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   // Virtuoso prop would never receive the element. Callback ref + state fixes
   // that: setState triggers the re-render that hands Virtuoso the element.
   const [scrollContainerEl, setScrollContainerEl] = useState<HTMLDivElement | null>(null);
+  // Pull-based scroll restoration (MUL-4741): the platform serves the offset
+  // captured when this route was last left. The ref-attach assignment covers
+  // the flat render modes (real heights at commit); the virtualized browsing
+  // mode feeds the offset into Virtuoso's initialScrollTop below so the
+  // list's first render already materializes the rows around it.
+  const restoredScrollTop = useRestoredScrollOffset("main");
+  const restoreScrollRef = useRestoredScrollRef("main");
+  const attachScrollContainer = useCallback(
+    (el: HTMLDivElement | null) => {
+      setScrollContainerEl(el);
+      restoreScrollRef(el);
+    },
+    [restoreScrollRef],
+  );
   const [highlightedId, setHighlightedId] = useState<string | null>(null);
   // User preference: pin the bottom comment bar to the scroll viewport.
   const stickyComposer = useCommentComposerStore((s) => s.sticky);
 
   // Per-session: which resolved threads the user has temporarily expanded.
   // Not persisted (matches Linear) — reload collapses everything back to bars.
-  const [expandedResolved, setExpandedResolved] = useState<Set<string>>(() => new Set());
+  // Store-backed (not component state) so the command palette's fold/unfold
+  // all-comments commands can drive it from outside this page.
+  const expandedResolved = useResolvedExpandStore(selectExpandedResolved(id));
+  const setResolvedExpanded = useResolvedExpandStore((s) => s.setExpanded);
   const toggleResolvedExpand = useCallback((commentId: string, expand: boolean) => {
-    setExpandedResolved((prev) => {
-      const next = new Set(prev);
-      if (expand) next.add(commentId);
-      else next.delete(commentId);
-      return next;
-    });
+    setResolvedExpanded(id, commentId, expand);
     // On collapse the thread shrinks and the viewport would jump to whatever was
     // below; pull the just-folded thread back into view with the smallest
     // movement. rAF waits for the collapse to land before measuring.
@@ -796,15 +821,10 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
         document.getElementById(`comment-${commentId}`)?.scrollIntoView({ block: "nearest" }),
       );
     }
-  }, []);
+  }, [id, setResolvedExpanded]);
   const clearResolvedExpand = useCallback((commentId: string) => {
-    setExpandedResolved((prev) => {
-      if (!prev.has(commentId)) return prev;
-      const next = new Set(prev);
-      next.delete(commentId);
-      return next;
-    });
-  }, []);
+    setResolvedExpanded(id, commentId, false);
+  }, [id, setResolvedExpanded]);
 
   // Per-session activity-block expansion overrides. The default rule is
   // "only the trailing block is expanded" (computed from timelineView.groups
@@ -1292,8 +1312,15 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   }, [highlightCommentId, items, targetIdx, scrollContainerEl, replyToRoot, expandedResolved, timelineView, toggleResolvedExpand]);
 
   const descEditorRef = useRef<ContentEditorRef>(null);
+  // Keep the description editor mounted from the start. Unlike the empty
+  // composer shells, a long rendered description cannot swap between
+  // react-markdown and ProseMirror without small per-block height differences
+  // accumulating into a visible scroll/layout jump. The chunked Markdown path
+  // keeps this single eager editor affordable; title and composers stay lazy.
+  const titleEditorRef = useRef<TitleEditorRef>(null);
+  const titleLazy = useLazyEditor({ editorRef: titleEditorRef, resetKey: id });
   const { isDragOver: descDragOver, dropZoneProps: descDropZoneProps } = useFileDropZone({
-    onDrop: (files) => files.forEach((f) => descEditorRef.current?.uploadFile(f)),
+    onDrop: (files) => files.forEach((file) => descEditorRef.current?.uploadFile(file)),
   });
   // Pending uploads in the description editor. We don't pass `issueId` on
   // upload (to avoid orphaning attachments when the user deletes the file
@@ -1336,6 +1363,11 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   const { data: attachedLabels = [] } = useQuery(issueLabelsOptions(wsId, id));
   const attachedLabelsCount = attachedLabels.length;
 
+  // Custom property catalog. Includes archived definitions: an issue can
+  // still carry a value written before the archive, and that row must stay
+  // renderable (read-only) until someone clears it.
+  const { data: workspaceProperties = [] } = useQuery(propertyListOptions(wsId, true));
+
   // Seed the visible-optional-props set:
   //   - on issue switch, reset to whichever fields are currently set
   //   - on the SAME issue, additively pick up fields the user just set
@@ -1347,11 +1379,13 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     if (seededIssueIdRef.current !== issue.id) {
       seededIssueIdRef.current = issue.id;
       setAutoOpenProp(null);
+      setAutoOpenCustomProp(null);
       const seed = new Set<OptionalPropKey>();
       for (const k of OPTIONAL_PROP_KEYS) {
         if (isOptionalPropSet(issue, k, attachedLabelsCount)) seed.add(k);
       }
       setVisibleOptionalProps(seed);
+      setVisibleCustomProps(new Set(Object.keys(issue.properties ?? {})));
       return;
     }
     setVisibleOptionalProps((prev) => {
@@ -1360,6 +1394,16 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
         if (isOptionalPropSet(issue, k, attachedLabelsCount) && !next.has(k)) {
           if (next === prev) next = new Set(prev);
           next.add(k);
+        }
+      }
+      return next;
+    });
+    setVisibleCustomProps((prev) => {
+      let next = prev;
+      for (const propertyId of Object.keys(issue.properties ?? {})) {
+        if (!next.has(propertyId)) {
+          if (next === prev) next = new Set(prev);
+          next.add(propertyId);
         }
       }
       return next;
@@ -1382,6 +1426,17 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     [],
   );
 
+  const addCustomProp = useCallback((propertyId: string) => {
+    setVisibleCustomProps((prev) => {
+      if (prev.has(propertyId)) return prev;
+      const next = new Set(prev);
+      next.add(propertyId);
+      return next;
+    });
+    setAutoOpenCustomProp(propertyId);
+    setAddPropPopoverOpen(false);
+  }, []);
+
   // Clear the auto-open flag after the next render so pickers (which read
   // `defaultOpen` once via a useState initializer) keep the open state they
   // captured on mount, but later interactions don't re-trigger it.
@@ -1389,6 +1444,11 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     if (autoOpenProp === null) return;
     setAutoOpenProp(null);
   }, [autoOpenProp]);
+
+  useEffect(() => {
+    if (autoOpenCustomProp === null) return;
+    setAutoOpenCustomProp(null);
+  }, [autoOpenCustomProp]);
 
   const handleToggleSidebar = useCallback(() => {
     if (isMobile) {
@@ -1558,11 +1618,32 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
             </PropRow>
           )}
 
+          {/* Custom properties — same progressive disclosure as the
+              built-in optional props: a row renders when the issue has a
+              value OR the user added the property this session. Archived
+              definitions render read-only until their value is cleared. */}
+          {workspaceProperties
+            .filter(
+              (p) =>
+                issue.properties?.[p.id] !== undefined ||
+                (!p.archived && visibleCustomProps.has(p.id)),
+            )
+            .map((p) => (
+              <PropRow key={p.id} label={p.name}>
+                <CustomPropertyValueEditor
+                  issue={issue}
+                  property={p}
+                  defaultOpen={autoOpenCustomProp === p.id}
+                />
+              </PropRow>
+            ))}
+
           {/* "+ Add property" — opens a Popover listing optional fields
               not yet displayed. Hidden once every optional field is on
               screen. Sits inside the same grid as a full-row, with its
               own padding so the visual rhythm follows the rows above. */}
-          {OPTIONAL_PROP_KEYS.some((k) => !visibleOptionalProps.has(k) && (k !== "stage" || issue.parent_issue_id != null)) && (
+          {(OPTIONAL_PROP_KEYS.some((k) => !visibleOptionalProps.has(k) && (k !== "stage" || issue.parent_issue_id != null)) ||
+            workspaceProperties.some((p) => !p.archived && !visibleCustomProps.has(p.id) && issue.properties?.[p.id] === undefined)) && (
             <div className="col-span-2 mt-1">
               <Popover open={addPropPopoverOpen} onOpenChange={setAddPropPopoverOpen}>
                 <PopoverTrigger
@@ -1607,6 +1688,31 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                       </span>
                     </button>
                   ))}
+                  {(() => {
+                    const addable = workspaceProperties.filter(
+                      (p) =>
+                        !p.archived &&
+                        !visibleCustomProps.has(p.id) &&
+                        issue.properties?.[p.id] === undefined,
+                    );
+                    if (addable.length === 0) return null;
+                    return (
+                      <>
+                        <div className="my-1 h-px bg-border" />
+                        {addable.map((p) => (
+                          <button
+                            key={p.id}
+                            type="button"
+                            onClick={() => addCustomProp(p.id)}
+                            className="flex w-full items-center gap-2 rounded-md px-2 py-1 text-xs text-foreground/90 transition-colors hover:bg-accent focus-visible:bg-accent focus-visible:outline-none"
+                          >
+                            <SlidersHorizontal className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                            <span className="truncate">{p.name}</span>
+                          </button>
+                        ))}
+                      </>
+                    );
+                  })()}
                 </PopoverContent>
               </Popover>
             </div>
@@ -1967,21 +2073,48 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
             the gutter restores symmetry; overlay-scrollbar platforms reserve
             nothing and render unchanged. */}
         <div
-          ref={setScrollContainerEl}
+          ref={attachScrollContainer}
           data-tab-scroll-root
           className="relative flex-1 overflow-y-auto [scrollbar-gutter:stable_both-edges]"
         >
         <div className="mx-auto w-full max-w-4xl px-8 py-8">
-          <TitleEditor
-            key={`title-${id}`}
-            defaultValue={issue.title}
-            placeholder={t(($) => $.detail.title_placeholder)}
-            className="w-full text-2xl font-bold leading-snug tracking-tight"
-            onBlur={(value) => {
-              const trimmed = value.trim();
-              if (trimmed && trimmed !== issue.title) handleUpdateField({ title: trimmed });
-            }}
-          />
+          {titleLazy.active && (
+            <div className={titleLazy.ready ? undefined : "hidden"}>
+              <TitleEditor
+                key={`title-${id}`}
+                ref={titleEditorRef}
+                defaultValue={issue.title}
+                placeholder={t(($) => $.detail.title_placeholder)}
+                className="w-full text-2xl font-bold leading-snug tracking-tight"
+                onReady={titleLazy.onReady}
+                onBlur={(value) => {
+                  const trimmed = value.trim();
+                  if (trimmed && trimmed !== issue.title) handleUpdateField({ title: trimmed });
+                }}
+              />
+            </div>
+          )}
+          {!titleLazy.ready && (
+            <div
+              role="button"
+              tabIndex={0}
+              className="w-full cursor-text text-2xl font-bold leading-snug tracking-tight"
+              onClick={(e) => {
+                // A drag-selection (copying the title) must not summon the editor.
+                const sel = window.getSelection();
+                if (sel && !sel.isCollapsed) return;
+                titleLazy.activate({ x: e.clientX, y: e.clientY });
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  titleLazy.activate();
+                }
+              }}
+            >
+              {issue.title}
+            </div>
+          )}
 
           {parentIssue && (
             <AppLink
@@ -2267,6 +2400,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                       ref={virtuosoRef}
                       customScrollParent={scrollContainerEl}
                       data={items}
+                      initialScrollTop={restoredScrollTop}
                       increaseViewportBy={{ top: 800, bottom: 800 }}
                       computeItemKey={(_i, item) => `${item.kind}:${item.id}`}
                       skipAnimationFrameInResizeObserver

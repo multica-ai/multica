@@ -7,6 +7,15 @@ ORDER BY created_at ASC;
 SELECT * FROM agent_runtime
 WHERE id = $1;
 
+-- name: GetAgentRuntimes :many
+-- Batch variant of GetAgentRuntime (MUL-4257): loads every runtime in the
+-- input set in one round trip so the machine-level batch claim handler can
+-- resolve+authorize all of a daemon's runtimes without one point query per
+-- runtime. Rows are returned only for ids that exist; the caller matches them
+-- back by id and skips any that are missing.
+SELECT * FROM agent_runtime
+WHERE id = ANY(@ids::uuid[]);
+
 -- name: LockAgentRuntime :one
 -- Acquires a row-level exclusive lock on the runtime row. Used at the
 -- top of the cascade-delete transaction so that:

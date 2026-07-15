@@ -1,10 +1,5 @@
 import { useEffect } from "react";
-import {
-  createMemoryRouter,
-  Navigate,
-  Outlet,
-  useMatches,
-} from "react-router-dom";
+import { createMemoryRouter, Outlet, useMatches } from "react-router-dom";
 import type { RouteObject } from "react-router-dom";
 import { IssueDetailPage } from "./pages/issue-detail-page";
 import { ProjectDetailPage } from "./pages/project-detail-page";
@@ -121,7 +116,12 @@ export const appRoutes: RouteObject[] = [
         path: ":workspaceSlug",
         element: <WorkspaceRouteLayout />,
         children: [
-          { index: true, element: <Navigate to="issues" replace /> },
+          // A bare `/{slug}` URL is normalized to `/{slug}/issues` by
+          // sanitizeTabPath before it ever becomes a session, so the index
+          // route is unreachable in practice; null keeps it a harmless
+          // safety net instead of an in-router <Navigate> (MUL-4741
+          // invariant 1: the router never self-navigates).
+          { index: true, element: null },
           {
             path: "issues",
             element: <IssuesPage />,
@@ -219,9 +219,13 @@ export const appRoutes: RouteObject[] = [
   },
 ];
 
-/** Create an independent memory router for a tab. */
-export function createTabRouter(initialPath: string) {
+/**
+ * Create THE app router (MUL-4741 single-router session architecture).
+ * There is exactly one instance, owned by the tab Coordinator; it projects
+ * the active tab session's URL and is never navigated by anything else.
+ */
+export function createAppRouter() {
   return createMemoryRouter(appRoutes, {
-    initialEntries: [initialPath],
+    initialEntries: ["/"],
   });
 }

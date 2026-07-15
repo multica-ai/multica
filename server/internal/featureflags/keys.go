@@ -19,16 +19,16 @@ const (
 	// ResourceLabels controls the agent- and skill-scoped label namespaces.
 	// Issue labels remain available while this release flag is off.
 	ResourceLabels = "settings_resource_labels"
-	// AgentSkillToggles controls writes of agent_skill.enabled=false. Older
-	// servers do not filter that state when preparing an agent task.
-	AgentSkillToggles = "agents_skill_toggles"
+	// agentSkillTogglesCompat is no longer a release flag. Keep publishing the
+	// key as enabled so installed v0.4.0 desktop clients, which still gate the
+	// switch on this config decision, receive the permanently enabled behavior.
+	agentSkillTogglesCompat = "agents_skill_toggles"
 )
 
 var frontendPublicFlags = []string{
 	ComposioMCPApps,
 	AgentBuilder,
 	ResourceLabels,
-	AgentSkillToggles,
 }
 
 func ComposioMCPAppsEnabled(ctx context.Context, flags *featureflag.Service) bool {
@@ -43,14 +43,11 @@ func ResourceLabelsEnabled(ctx context.Context, flags *featureflag.Service) bool
 	return flags.IsEnabled(ctx, ResourceLabels, false)
 }
 
-func AgentSkillTogglesEnabled(ctx context.Context, flags *featureflag.Service) bool {
-	return flags.IsEnabled(ctx, AgentSkillToggles, false)
-}
-
 func EvaluateFrontendPublicFlags(ctx context.Context, flags *featureflag.Service) map[string]bool {
-	out := make(map[string]bool, len(frontendPublicFlags))
+	out := make(map[string]bool, len(frontendPublicFlags)+1)
 	for _, key := range frontendPublicFlags {
 		out[key] = flags.IsEnabled(ctx, key, false)
 	}
+	out[agentSkillTogglesCompat] = true
 	return out
 }

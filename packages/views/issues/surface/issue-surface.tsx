@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, type ReactNode } from "react";
 import { ListTodo, Plus } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
@@ -17,6 +17,7 @@ import { IssuesHeader } from "../components/issues-header";
 import { ListView } from "../components/list-view";
 import { SwimLaneView } from "../components/swimlane-view";
 import { useT } from "../../i18n";
+import { IssueContextMenuProvider } from "../actions";
 import { IssueSurfaceActionsProvider } from "./actions-context";
 import { IssueSurfaceSelectionProvider } from "./selection-context";
 import type { IssueCreateDefaults, IssueSurfaceProps } from "./types";
@@ -60,6 +61,19 @@ export function IssueSurface({
     [resolvedSurfaceKey],
   );
 
+  // Every change of this key tears down and remounts the ENTIRE surface
+  // (providers, DnD, all columns/cards) — by design for data-window changes,
+  // but expensive enough that unexpected flips are performance bugs. Dev-only
+  // breadcrumb so a Performance trace showing double mounts can be tied to
+  // the exact key transition.
+  const contentKey = `${wsId}:${issueScopeKey(scope)}`;
+  useEffect(() => {
+    if (process.env.NODE_ENV !== "production") {
+      // eslint-disable-next-line no-console
+      console.warn(`[issue-surface] mount ${contentKey}`);
+    }
+  }, [contentKey]);
+
   return (
     <ViewStoreProvider store={store}>
       {/* Remount on data-window change: the list queries keep the previous
@@ -74,7 +88,7 @@ export function IssueSurface({
           workspaces share the same scope key (e.g. "workspace:all"). Keyed
           by data identity, not surfaceKey (view-preference identity). */}
       <IssueSurfaceContent
-        key={`${wsId}:${issueScopeKey(scope)}`}
+        key={contentKey}
         scope={scope}
         modes={modes}
         createDefaults={createDefaults}
@@ -132,6 +146,15 @@ function IssueSurfaceContent({
     },
     [controller],
   );
+  // Stable reference for BoardView's issues: the inline flatMap allocated a
+  // fresh array every render, defeating BoardView's memo.
+  const boardIssues = useMemo(
+    () =>
+      controller.assigneeGroups
+        ? controller.assigneeGroups.flatMap((group) => group.issues)
+        : issues,
+    [controller.assigneeGroups, issues],
+  );
   const shouldShowClientEmpty =
     !!clientFilter &&
     issues.length === 0 &&
@@ -142,6 +165,11 @@ function IssueSurfaceContent({
 
   return (
     <IssueSurfaceActionsProvider actions={controller.actions}>
+      {/* One shared right-click menu for every card/row this surface renders
+          — see IssueContextMenuProvider. Inside the actions provider so the
+          singleton's useIssueActions routes updates through surface
+          actions. */}
+      <IssueContextMenuProvider>
       <IssueSurfaceSelectionProvider selection={controller.selection}>
         {renderHeader ? (
           renderHeader(renderContext)
@@ -181,11 +209,7 @@ function IssueSurfaceContent({
           <div className={cn("flex flex-col flex-1 min-h-0", contentClassName)}>
             {controller.viewMode === "board" && (
               <BoardView
-                issues={
-                  controller.assigneeGroups
-                    ? controller.assigneeGroups.flatMap((group) => group.issues)
-                    : issues
-                }
+                issues={boardIssues}
                 assigneeGroups={controller.assigneeGroups}
                 assigneeGroupQueryKey={controller.assigneeGroupQueryKey}
                 assigneeGroupFilter={controller.assigneeGroupFilter}
@@ -240,6 +264,7 @@ function IssueSurfaceContent({
         )}
         {shouldShowBatchToolbar && <BatchActionToolbar issues={issues} />}
       </IssueSurfaceSelectionProvider>
+      </IssueContextMenuProvider>
     </IssueSurfaceActionsProvider>
   );
 }

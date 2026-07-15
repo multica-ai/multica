@@ -22,7 +22,6 @@
 import type { RefObject } from "react";
 import StarterKit from "@tiptap/starter-kit";
 import CodeBlockLowlight from "@tiptap/extension-code-block-lowlight";
-import { common, createLowlight } from "lowlight";
 import Placeholder from "@tiptap/extension-placeholder";
 import Link from "@tiptap/extension-link";
 import Typography from "@tiptap/extension-typography";
@@ -57,8 +56,7 @@ import { ImageView } from "./image-view";
 import { BlockMathExtension, InlineMathExtension } from "./math";
 import { HighlightExtension } from "./highlight";
 import { AutolinkEmailRepairExtension } from "./autolink-email-repair";
-
-const lowlight = createLowlight(common);
+import { codeLowlight } from "../syntax-highlight";
 
 const LinkExtension = Link.extend({ inclusive: false }).configure({
   openOnClick: false,
@@ -192,7 +190,7 @@ export function createEditorExtensions(
       addNodeView() {
         return ReactNodeViewRenderer(CodeBlockView);
       },
-    }).configure({ lowlight }),
+    }).configure({ lowlight: codeLowlight }),
     // ⚠️ Link MUST appear before markdownPaste in this array.
     // linkOnPaste relies on Link's handlePaste plugin firing first;
     // markdownPaste's handlePaste is a catch-all that returns true.

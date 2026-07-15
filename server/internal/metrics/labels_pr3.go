@@ -120,6 +120,13 @@ var (
 		"other":      "other",
 	}
 
+	knownWebhookRateLimitGates = map[string]string{
+		"absolute_ip":       "absolute_ip",
+		"bad_credential_ip": "bad_credential_ip",
+		"worker_trigger":    "worker_trigger",
+		"other":             "other",
+	}
+
 	knownGithubEventKinds = map[string]string{
 		"pull_request":              "pull_request",
 		"pull_request_review":       "pull_request_review",
@@ -326,6 +333,10 @@ func NormalizeWebhookProvider(value string) string {
 
 func NormalizeWebhookDeliveryStatus(value string) string {
 	return normalizeFromAllowList(value, knownWebhookDeliveryStatuses, "other")
+}
+
+func NormalizeWebhookRateLimitGate(value string) string {
+	return normalizeFromAllowList(value, knownWebhookRateLimitGates, "other")
 }
 
 func NormalizeGithubEventKind(value string) string {

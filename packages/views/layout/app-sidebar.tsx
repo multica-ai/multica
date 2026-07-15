@@ -91,6 +91,7 @@ import {
   useShortcut,
 } from "@multica/core/shortcuts";
 import { ShortcutKeycaps } from "../common/shortcut-keycaps";
+import { useAppForeground } from "../common/use-app-foreground";
 
 // Top-level nav items stay active when the user is on a child route
 // (e.g. "Projects" stays lit on /:slug/projects/:id). Pinned items keep
@@ -386,15 +387,19 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
   // The session the user is reading right now must not count: the thread list
   // renders its row badge as 0 (auto mark-read is about to clear it), and a
   // reply landing in the open conversation would otherwise flash a sidebar
-  // count with no matching row. "Reading right now" = a session is active AND
-  // a chat surface is actually showing it (chat page route or the floating
-  // window). A remembered selection while both surfaces are closed still
-  // counts — auto mark-read won't fire there, so the badge must.
+  // count with no matching row. "Reading right now" = a session is active, a
+  // chat surface is actually showing it (chat page route or the floating
+  // window), AND the app is in the foreground. When the app is backgrounded,
+  // auto mark-read is suppressed (MUL-4485) so the reply stays unread — the
+  // badge must count it, or the notification is silently eaten while the user
+  // is away. A remembered selection while both surfaces are closed also still
+  // counts, for the same reason.
   const activeChatSessionId = useChatStore((s) => s.activeSessionId);
   const floatingChatOpen = useChatStore((s) => s.isOpen);
+  const appForeground = useAppForeground();
   const chatHref = p.chat();
   const viewedChatSessionId =
-    floatingChatOpen || isNavActive(pathname, chatHref)
+    appForeground && (floatingChatOpen || isNavActive(pathname, chatHref))
       ? activeChatSessionId
       : null;
   const chatUnreadCount = React.useMemo(

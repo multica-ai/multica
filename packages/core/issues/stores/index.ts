@@ -17,7 +17,12 @@ export {
 } from "./view-store-context";
 export { useIssuesScopeStore, type IssuesScope } from "./issues-scope-store";
 export { useCommentCollapseStore } from "./comment-collapse-store";
+export {
+  useResolvedExpandStore,
+  selectExpandedResolved,
+} from "./resolved-expand-store";
 export { useCommentComposerStore } from "./comment-composer-store";
+export { useIssueLinkStore } from "./issue-link-store";
 export { useCommentDraftStore, type CommentDraftKey } from "./comment-draft-store";
 export {
   myIssuesViewStore,

@@ -2,6 +2,10 @@ import { contextBridge, ipcRenderer } from "electron";
 import { electronAPI } from "@electron-toolkit/preload";
 import type { RuntimeConfigResult } from "../shared/runtime-config";
 import type { FreezeBreadcrumb } from "../shared/freeze-breadcrumb";
+import type {
+  ManualUpdateCheckResult,
+  UpdaterPreferences,
+} from "../shared/updater-types";
 import {
   RENDERER_ROUTE_CONTEXT_CHANNEL,
   type RendererRouteContextInput,
@@ -287,10 +291,12 @@ const updaterAPI = {
   },
   downloadUpdate: () => ipcRenderer.invoke("updater:download"),
   installUpdate: () => ipcRenderer.invoke("updater:install"),
-  checkForUpdates: (): Promise<
-    | { ok: true; currentVersion: string; latestVersion: string; available: boolean }
-    | { ok: false; error: string }
-  > => ipcRenderer.invoke("updater:check"),
+  getPreferences: (): Promise<UpdaterPreferences> =>
+    ipcRenderer.invoke("updater:get-preferences"),
+  setAutomaticUpdates: (enabled: boolean): Promise<UpdaterPreferences> =>
+    ipcRenderer.invoke("updater:set-automatic-updates", enabled),
+  checkForUpdates: (): Promise<ManualUpdateCheckResult> =>
+    ipcRenderer.invoke("updater:check"),
 };
 
 if (process.contextIsolated) {

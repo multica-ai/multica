@@ -11,6 +11,9 @@ export interface IssueFilters {
   projectFilters: string[];
   includeNoProject: boolean;
   labelFilters: string[];
+  /** Custom-property filters: definition id → selected option ids (OR within
+   *  a definition, AND across definitions; checkbox uses "true"/"false"). */
+  propertyFilters?: Record<string, string[]>;
   // When `agentRunningFilter` is true, only keep issues whose id is in
   // `runningIssueIds`. The set is derived by the caller from
   // `agentTaskSnapshot` (one pass over running tasks) so filter.ts stays
@@ -33,6 +36,7 @@ export interface IssueFilterState {
   projectFilters: string[];
   includeNoProject: boolean;
   labelFilters: string[];
+  propertyFilters?: Record<string, string[]>;
   workingOnly: boolean;
   /** See IssueFilters.showSubIssues — only an explicit `false` hides. */
   showSubIssues?: boolean;
@@ -41,6 +45,34 @@ export interface IssueFilterState {
 export interface IssueFilterContext {
   activityByIssueId?: ReadonlyMap<string, IssueActivityState>;
   runningIssueIds?: ReadonlySet<string>;
+}
+
+/**
+ * Match one issue against the property filters. Select values are single
+ * option-id strings, multi_select values are option-id arrays, checkbox
+ * values are booleans compared against the "true"/"false" pseudo-options.
+ * An issue with no value for a filtered definition never matches it.
+ */
+export function issueMatchesPropertyFilters(
+  issue: Issue,
+  propertyFilters: Record<string, string[]> | undefined,
+): boolean {
+  if (!propertyFilters) return true;
+  for (const [propertyId, selected] of Object.entries(propertyFilters)) {
+    if (selected.length === 0) continue;
+    const value = issue.properties?.[propertyId];
+    if (value === undefined) return false;
+    if (typeof value === "string") {
+      if (!selected.includes(value)) return false;
+    } else if (Array.isArray(value)) {
+      if (!value.some((id) => selected.includes(id))) return false;
+    } else if (typeof value === "boolean") {
+      if (!selected.includes(String(value))) return false;
+    } else {
+      return false;
+    }
+  }
+  return true;
 }
 
 function issueIsWorking(issueId: string, context: IssueFilterContext) {
@@ -128,6 +160,8 @@ export function applyIssueFilters(
       if (!issueLabels.some((l) => labelFilters.includes(l.id))) return false;
     }
 
+    if (!issueMatchesPropertyFilters(issue, filters.propertyFilters)) return false;
+
     return true;
   });
 }
@@ -144,6 +178,7 @@ export function filterIssues(issues: Issue[], filters: IssueFilters): Issue[] {
       projectFilters: filters.projectFilters,
       includeNoProject: filters.includeNoProject,
       labelFilters: filters.labelFilters,
+      propertyFilters: filters.propertyFilters,
       workingOnly: filters.agentRunningFilter === true,
       showSubIssues: filters.showSubIssues,
     },
@@ -165,11 +200,15 @@ export function filterAssigneeGroups(
     showSubIssues?: boolean;
     agentRunningFilter?: boolean;
     runningIssueIds?: ReadonlySet<string>;
+    propertyFilters?: Record<string, string[]>;
   },
 ): IssueAssigneeGroup[] | undefined {
   const applyRunning = filters.agentRunningFilter === true;
   const hideSubIssues = filters.showSubIssues === false;
-  if (!groups || (!applyRunning && !hideSubIssues)) return groups;
+  const hasPropertyFilters = Object.values(filters.propertyFilters ?? {}).some(
+    (selected) => selected.length > 0,
+  );
+  if (!groups || (!applyRunning && !hideSubIssues && !hasPropertyFilters)) return groups;
 
   const { runningIssueIds } = filters;
   return groups
@@ -178,6 +217,8 @@ export function filterAssigneeGroups(
         if (applyRunning && !(runningIssueIds?.has(issue.id) ?? false))
           return false;
         if (hideSubIssues && issue.parent_issue_id) return false;
+        if (hasPropertyFilters && !issueMatchesPropertyFilters(issue, filters.propertyFilters))
+          return false;
         return true;
       });
       return { ...group, issues, total: issues.length };

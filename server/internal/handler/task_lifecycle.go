@@ -2,12 +2,14 @@ package handler
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -143,11 +145,37 @@ func (h *Handler) RerunIssue(w http.ResponseWriter, r *http.Request) {
 		sourceTaskID = parsed
 	}
 
-	task, err := h.TaskService.RerunIssue(r.Context(), issue.ID, sourceTaskID, pgtype.UUID{})
+	// A manual rerun is a direct human action: attribute the new run to the
+	// rerunning member (MUL-4302 §5). Resolve the actor the same way assign/promote
+	// does; an agent A2A actor is not a human and threads an invalid actor.
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+	workspaceID := uuidToString(issue.WorkspaceID)
+	actorType, actorID := h.resolveActor(r, userID, workspaceID)
+	actorUserID := memberActorUserID(actorType, actorID)
+
+	// Re-validate the operator's invoke permission on the resolved target agent
+	// before cancelling / creating anything (MUL-4525). Issue visibility does not
+	// grant the right to trigger a private agent — a task_id rerun must gate the
+	// historical agent, not the (possibly reassigned) current assignee.
+	originatorUserID := h.invokeOriginatorFromRequest(r, actorType, actorID)
+	canInvoke := func(agent db.Agent) bool {
+		return h.canInvokeAgent(r.Context(), agent, actorType, actorID, originatorUserID, workspaceID)
+	}
+
+	task, err := h.TaskService.RerunIssue(r.Context(), issue.ID, sourceTaskID, pgtype.UUID{}, actorUserID, canInvoke)
+	if errors.Is(err, service.ErrRerunInvokeNotAllowed) {
+		h.writeDispatchBlocked(w, http.StatusForbidden, ReasonInvocationNotAllowed)
+		return
+	}
 	if err != nil {
 		slog.Warn("issue rerun failed", "issue_id", id, "error", err)
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusAccepted, taskToResponse(*task, uuidToString(issue.WorkspaceID)))
+	resp := taskToResponse(*task, uuidToString(issue.WorkspaceID))
+	h.hydrateTaskAttributions(r.Context(), []*TaskAttribution{resp.Attribution})
+	writeJSON(w, http.StatusAccepted, resp)
 }

@@ -62,6 +62,7 @@ import type { AgentTask } from "@multica/core/types/agent";
 import { ReadonlyContent } from "../../editor";
 import { TranscriptButton } from "../../common/task-transcript";
 import { AutopilotDialog } from "./autopilot-dialog";
+import { runNowToastKind, runNowBlockedKey } from "./run-now-toast";
 import { WebhookPayloadPreview } from "./webhook-payload-preview";
 import { WebhookDeliveriesSection } from "./webhook-deliveries-section";
 import { ProjectIcon } from "../../projects/components/project-icon";
@@ -697,8 +698,24 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
 
   const handleRunNow = async () => {
     try {
-      await triggerAutopilot.mutateAsync(autopilotId);
-      toast.success(t(($) => $.detail.toast_triggered));
+      const run = await triggerAutopilot.mutateAsync(autopilotId);
+      // Manual "run now" returns 200 even when admission blocks the run, so the
+      // toast is driven by the run's domain status, not the HTTP 2xx (MUL-4525).
+      // Success is a whitelist (issue_created/running) — a skipped run warns, a
+      // failed or unknown/future status errors — never a false "triggered".
+      const kind = runNowToastKind(run?.status);
+      if (kind === "success") {
+        toast.success(t(($) => $.detail.toast_triggered));
+        return;
+      }
+      // reason_code is the stable, typed cause the server decided at admission
+      // time; an unknown/absent code degrades to a generic "not triggered".
+      const message = t(($) => $.detail[runNowBlockedKey(run?.reason_code)]);
+      if (kind === "warning") {
+        toast.warning(message);
+      } else {
+        toast.error(message);
+      }
     } catch (e: any) {
       toast.error(e?.message || t(($) => $.detail.toast_trigger_failed));
     }

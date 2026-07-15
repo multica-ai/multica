@@ -464,8 +464,8 @@ export function CliCell({ runtime }: { runtime: AgentRuntime }) {
   // The separate `cli_version` is the shared multica daemon CLI, identical
   // for every runtime on one machine; surfacing it here made all agents
   // show the same number (#3838). The daemon CLI version and its update
-  // prompt belong to the machine — they live in the machine meta strip and
-  // the detail page's UpdateSection, not on a per-agent row.
+  // prompt belong to the machine — they live in the machine header, not on a
+  // per-agent row.
   const version =
     meta && typeof meta.version === "string" ? meta.version : null;
 
@@ -613,23 +613,14 @@ export function RuntimeRowMenu({
 
 export function RuntimeList({
   runtimes,
-  updatableIds,
   now,
   runtimeHref,
 }: {
   runtimes: AgentRuntime[];
-  // Kept on the API surface for callers, but unused here: the CLI column
-  // shows each agent's own tool version, while the multica daemon CLI
-  // update prompt lives at the machine/detail level (UpdateSection), so the
-  // table no longer derives per-row update state. Left to avoid scope creep
-  // on the page-level wrapper that still computes the set.
-  updatableIds?: Set<string>;
   now: number;
   /** Machine-detail pages keep runtime settings nested under the machine. */
   runtimeHref?: (runtimeId: string) => string;
 }) {
-  void updatableIds;
-
   const { t } = useT("runtimes");
   const wsId = useWorkspaceId();
   const wsPaths = useWorkspacePaths();

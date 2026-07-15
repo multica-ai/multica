@@ -2,7 +2,7 @@
 
 import { useRef, useState, useCallback, useEffect } from "react";
 import { cn } from "@multica/ui/lib/utils";
-import { ContentEditor, type ContentEditorRef, useFileDropZone, FileDropOverlay } from "../../editor";
+import { ContentEditor, type ContentEditorRef, useFileDropZone, FileDropOverlay, useLazyEditor } from "../../editor";
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
 import { SubmitButton } from "@multica/ui/components/common/submit-button";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
@@ -44,8 +44,16 @@ function CommentInput({ issueId, onSubmit }: CommentInputProps) {
   //    resolve text/code/markdown previews that require the attachment id.
   const [pendingAttachments, setPendingAttachments] = useState<Attachment[]>([]);
   const { uploadWithToast } = useFileUpload(api);
+  // Readonly-first: the composer renders as a same-looking static shell until
+  // the user shows intent (click / keyboard / file drop). An unsent draft is
+  // standing intent — mount the real editor immediately so the draft is
+  // visible and editable, exactly like the pre-lazy behavior.
+  const lazy = useLazyEditor({
+    initialActive: !!initialDraft?.trim(),
+    editorRef,
+  });
   const { isDragOver, dropZoneProps } = useFileDropZone({
-    onDrop: (files) => files.forEach((f) => editorRef.current?.uploadFile(f)),
+    onDrop: lazy.uploadOrQueue,
   });
   // Sticky preference (Settings → Preferences): issue-detail pins this
   // composer to the bottom of the scroll viewport when enabled.
@@ -147,6 +155,7 @@ function CommentInput({ issueId, onSubmit }: CommentInputProps) {
           toggle Tiptap's `editable` post-mount (see its docstring), so the
           documented way to make it non-interactive is a pointer-events-none +
           dimmed wrapper. */}
+      {lazy.active && (
       <div
         className={cn(
           "flex-1 min-h-0 overflow-y-auto px-3 py-2",
@@ -155,12 +164,14 @@ function CommentInput({ issueId, onSubmit }: CommentInputProps) {
           // area scrolls internally instead).
           sticky && "max-h-[40vh]",
           submitting && "pointer-events-none opacity-60",
+          !lazy.ready && "hidden",
         )}
         aria-busy={submitting || undefined}
       >
         <ContentEditor
           ref={editorRef}
           defaultValue={initialDraft}
+          onReady={lazy.onReady}
           placeholder={t(($) => $.comment.leave_comment_placeholder)}
           onUpdate={(md) => {
             setContent(md);
@@ -179,9 +190,38 @@ function CommentInput({ issueId, onSubmit }: CommentInputProps) {
           slashCommandMode="command"
         />
       </div>
+      )}
+      {/* Static shell — visually clones the empty single-line composer.
+          Real editor mounts (hidden) on first intent; shell stays visible
+          until it's ready so the card never blanks or shifts. */}
+      {!lazy.ready && (
+        <div
+          data-testid="comment-composer-shell"
+          role="button"
+          tabIndex={0}
+          aria-label={t(($) => $.comment.leave_comment_placeholder)}
+          className="flex-1 min-h-0 cursor-text px-3 py-2"
+          onClick={() => lazy.activate()}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              lazy.activate();
+            }
+          }}
+        >
+          {/* rich-text-editor + <p>: the shell line inherits the editor's
+              exact type metrics (line-height 1.625 from prose.css), so the
+              shell→editor swap doesn't shift layout. */}
+          <div className="rich-text-editor text-sm">
+            <p className="text-muted-foreground">{t(($) => $.comment.leave_comment_placeholder)}</p>
+          </div>
+        </div>
+      )}
       <div className="absolute bottom-1 left-2 right-28 min-w-0">
         <CommentTriggerChips
           agents={triggerPreview.agents}
+          blocked={triggerPreview.blocked}
+          draftContent={content}
           suppressedAgentIds={suppressedAgentIds}
           onToggle={toggleSuppressedAgent}
         />
@@ -190,7 +230,7 @@ function CommentInput({ issueId, onSubmit }: CommentInputProps) {
         <FileUploadButton
           size="sm"
           multiple
-          onSelect={(file) => editorRef.current?.uploadFile(file)}
+          onSelect={(file) => lazy.uploadOrQueue([file])}
         />
         <SubmitButton
           onClick={handleSubmit}

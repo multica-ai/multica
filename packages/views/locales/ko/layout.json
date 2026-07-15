@@ -18,7 +18,8 @@
     "docs": "문서",
     "changelog": "변경 로그",
     "discord": "Discord",
-    "feedback": "피드백"
+    "feedback": "피드백",
+    "server_version": "서버 버전 {{version}}"
   },
   "workspace_loader": {
     "loading_workspace": "워크스페이스 로딩 중...",

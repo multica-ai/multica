@@ -218,6 +218,26 @@
   color: var(--sidebar-accent-foreground);
 }
 
+/* Sidebar resizing follows the same cursor contract as
+ * react-resizable-panels: the resize cursor survives leaving the narrow rail
+ * and wins over descendants with their own cursor declarations. Live width is
+ * written directly to the two layout shells, so their toggle transitions must
+ * stay disabled until the gesture finishes. */
+html[data-sidebar-resizing="true"],
+html[data-sidebar-resizing="true"] * {
+  cursor: ew-resize !important;
+  user-select: none !important;
+}
+
+[data-sidebar-resizing="true"] [data-slot="sidebar-gap"],
+[data-sidebar-resizing="true"] [data-slot="sidebar-container"] {
+  transition: none !important;
+}
+
+[data-sidebar-resizing="true"] [data-sidebar="rail"]::after {
+  background-color: var(--sidebar-border);
+}
+
 /* Right detail sidebars use react-resizable-panels, which sizes panels by
  * updating the outer panel's flex-grow. Animate that property for button
  * toggles only; mount-time layout restoration and resize sync should snap

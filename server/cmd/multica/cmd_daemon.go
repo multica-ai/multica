@@ -22,6 +22,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/cli"
 	"github.com/multica-ai/multica/server/internal/daemon"
 	logger_pkg "github.com/multica-ai/multica/server/internal/logger"
+	"github.com/multica-ai/multica/server/internal/selfexec"
 	"github.com/multica-ai/multica/server/internal/util"
 )
 
@@ -260,8 +261,8 @@ func runDaemonBackground(cmd *cobra.Command) error {
 		return fmt.Errorf("%s is already running (pid %v). Use 'daemon restart' to restart it", label, int(pid))
 	}
 
-	// Resolve current executable.
-	exePath, err := os.Executable()
+	// Resolve current executable so the foreground child reuses this binary.
+	exePath, err := selfexec.Resolve()
 	if err != nil {
 		return fmt.Errorf("resolve executable path: %w", err)
 	}

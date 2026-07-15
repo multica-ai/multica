@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useCallback, useMemo, useEffect, useRef, memo } from "react";
+import { useQuery } from "@tanstack/react-query";
 import {
   DndContext,
   DragOverlay,
@@ -13,15 +14,20 @@ import {
 } from "@dnd-kit/core";
 import type { QueryKey } from "@tanstack/react-query";
 import { arrayMove } from "@dnd-kit/sortable";
+import { toast } from "sonner";
 import type {
   Issue,
   IssueAssigneeGroup,
   IssueStatus,
   Project,
+  IssueProperty,
 } from "@multica/core/types";
 import { useLoadMoreByAssigneeGroup, useLoadMoreByStatus } from "@multica/core/issues/mutations";
 import type { AssigneeGroupedIssuesFilter, IssueSortParam, MyIssuesFilter } from "@multica/core/issues/queries";
 import { useViewStore } from "@multica/core/issues/stores/view-store-context";
+import { propertyIdFromViewKey } from "@multica/core/issues/stores/view-store";
+import { propertyListOptions, useSetIssueProperty, useUnsetIssueProperty } from "@multica/core/properties";
+import { useWorkspaceId } from "@multica/core/hooks";
 import type { IssueGrouping } from "@multica/core/issues/stores/view-store";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { BoardColumn, BOARD_CARD_WIDTH, type BoardColumnGroup } from "./board-column";
@@ -43,6 +49,7 @@ import {
   insertIdByPosition,
   issueMatchesGroup,
   getMoveUpdates,
+  propertyGroupId,
 } from "../utils/drag-utils";
 
 function isStatusGroup(
@@ -57,6 +64,8 @@ function buildGroups(
   grouping: IssueGrouping,
   getActorName: (type: string, id: string) => string,
   noAssigneeLabel: string,
+  groupingProperty: IssueProperty | null,
+  noValueLabel: string,
 ): BoardColumnGroup[] {
   if (grouping === "status") {
     return visibleStatuses.map((status) => ({
@@ -65,6 +74,28 @@ function buildGroups(
       status,
       createData: { status },
     }));
+  }
+
+  // Select-property board: one column per option (definition order) plus a
+  // trailing "No value" column. Empty columns stay visible — they are drop
+  // targets for assigning the value.
+  if (groupingProperty) {
+    const columns: BoardColumnGroup[] = (groupingProperty.config.options ?? []).map(
+      (option) => ({
+        id: propertyGroupId(groupingProperty.id, option.id),
+        title: option.name,
+        propertyId: groupingProperty.id,
+        propertyOptionId: option.id,
+        propertyOptionColor: option.color,
+      }),
+    );
+    columns.push({
+      id: propertyGroupId(groupingProperty.id, null),
+      title: noValueLabel,
+      propertyId: groupingProperty.id,
+      propertyOptionId: null,
+    });
+    return columns;
   }
 
   const groups = new Map<string, BoardColumnGroup>();
@@ -116,7 +147,7 @@ function buildGroups(
 const EMPTY_PROGRESS_MAP = new Map<string, ChildProgress>();
 const EMPTY_IDS: string[] = [];
 
-export function BoardView({
+function BoardViewImpl({
   issues,
   assigneeGroups,
   assigneeGroupQueryKey,
@@ -151,11 +182,66 @@ export function BoardView({
   onCreateIssue?: (defaults: IssueCreateDefaults) => void;
 }) {
   const { t } = useT("issues");
-  const grouping = useViewStore((s) => s.grouping);
+  const storeGrouping = useViewStore((s) => s.grouping);
   const sortBy = useViewStore((s) => s.sortBy);
+  const boardWsId = useWorkspaceId();
+  const { data: workspaceProperties = [] } = useQuery(propertyListOptions(boardWsId));
+  const groupingPropertyId = propertyIdFromViewKey(storeGrouping);
+  const groupingProperty = groupingPropertyId
+    ? workspaceProperties.find((p) => p.id === groupingPropertyId && p.type === "select") ?? null
+    : null;
+  // A persisted `property:<id>` grouping whose definition is gone (archived,
+  // deleted, other workspace) falls back to status columns.
+  const grouping: IssueGrouping =
+    groupingPropertyId && !groupingProperty ? "status" : storeGrouping;
+  const groupingOptionIds = useMemo(
+    () =>
+      groupingProperty
+        ? new Set((groupingProperty.config.options ?? []).map((option) => option.id))
+        : undefined,
+    [groupingProperty],
+  );
+  const setIssuePropertyMutation = useSetIssueProperty();
+  const unsetIssuePropertyMutation = useUnsetIssueProperty();
+  const applyPropertyGroupValue = useCallback(
+    (group: BoardColumnGroup, issueId: string) => {
+      if (group.propertyId === undefined) return;
+      // Surface failures like status/assignee drags do (use-issue-surface-
+      // actions): the mutation rolls the card back, but without a toast the
+      // snap-back reads as a UI glitch instead of a rejected write.
+      const onError = (err: unknown) => {
+        toast.error(
+          err instanceof Error && err.message
+            ? err.message
+            : t(($) => $.page.move_failed),
+        );
+      };
+      if (group.propertyOptionId === null) {
+        unsetIssuePropertyMutation.mutate(
+          { issueId, propertyId: group.propertyId },
+          { onError },
+        );
+      } else if (group.propertyOptionId !== undefined) {
+        setIssuePropertyMutation.mutate(
+          {
+            issueId,
+            propertyId: group.propertyId,
+            value: group.propertyOptionId,
+          },
+          { onError },
+        );
+      }
+    },
+    [setIssuePropertyMutation, t, unsetIssuePropertyMutation],
+  );
   const sortFieldKey = sortBy === "created_at" ? "created" : sortBy;
+  const sortPropertyId = propertyIdFromViewKey(sortBy);
   const sortLabel = sortBy !== "position"
-    ? t(($) => $.board.ordered_by, { field: t(($) => $.display[`sort_${sortFieldKey}` as keyof typeof $.display]) })
+    ? t(($) => $.board.ordered_by, {
+        field: sortPropertyId
+          ? workspaceProperties.find((p) => p.id === sortPropertyId)?.name ?? ""
+          : t(($) => $.display[`sort_${sortFieldKey}` as keyof typeof $.display]),
+      })
     : null;
   const { getActorName } = useActorName();
   const myIssuesOpts = myIssuesScope
@@ -207,8 +293,10 @@ export function BoardView({
         grouping,
         getActorName,
         t(($) => $.filters.no_assignee),
+        groupingProperty,
+        t(($) => $.board.no_value),
       ),
-    [hydratedAssigneeGroups, issues, visibleStatuses, grouping, getActorName, t],
+    [hydratedAssigneeGroups, issues, visibleStatuses, grouping, getActorName, groupingProperty, t],
   );
   const groupIds = useMemo(
     () => new Set(groups.map((group) => group.id)),
@@ -239,13 +327,13 @@ export function BoardView({
     recentlyMovedRef,
     settleVersion,
     beginSettle,
-  } = useDragSettle(() => buildColumns(groupedIssues, groups, grouping));
+  } = useDragSettle(() => buildColumns(groupedIssues, groups, grouping, groupingOptionIds));
 
   useEffect(() => {
     if (!isDraggingRef.current && !isSettlingRef.current) {
-      setColumns(buildColumns(groupedIssues, groups, grouping));
+      setColumns(buildColumns(groupedIssues, groups, grouping, groupingOptionIds));
     }
-  }, [groupedIssues, groups, grouping, settleVersion, setColumns, isDraggingRef, isSettlingRef]);
+  }, [groupedIssues, groups, grouping, groupingOptionIds, settleVersion, setColumns, isDraggingRef, isSettlingRef]);
 
   // --- Issue map ---
   // Frozen during drag so BoardColumn/DraggableBoardCard props stay
@@ -310,7 +398,7 @@ export function BoardView({
       setActiveIssue(null);
 
       const resetColumns = () =>
-        setColumns(buildColumns(groupedIssues, groups, grouping));
+        setColumns(buildColumns(groupedIssues, groups, grouping, groupingOptionIds));
 
       if (!over) {
         resetColumns();
@@ -381,6 +469,7 @@ export function BoardView({
           return { ...prev, [activeCol]: fromIds, [overCol]: toIds };
         });
         onMoveIssue(activeId, getMoveUpdates(finalGroup, currentIssue.position), beginSettle());
+        applyPropertyGroupValue(finalGroup, activeId);
         return;
       }
 
@@ -402,8 +491,9 @@ export function BoardView({
       // on error (onError restored the snapshot). Without it a failed move would
       // strand the card at the drop target, since onSettled no longer refetches.
       onMoveIssue(activeId, getMoveUpdates(finalGroup, newPosition), beginSettle());
+      applyPropertyGroupValue(finalGroup, activeId);
     },
-    [groupedIssues, groups, grouping, onMoveIssue, groupIds, groupMap, sortBy, beginSettle, columnsRef, isDraggingRef, setColumns],
+    [groupedIssues, groups, grouping, groupingOptionIds, onMoveIssue, groupIds, groupMap, sortBy, beginSettle, columnsRef, isDraggingRef, setColumns, applyPropertyGroupValue],
   );
 
   return (
@@ -467,6 +557,14 @@ export function BoardView({
               )
             ),
           )
+        )}
+
+        {groupingProperty && (
+          <PropertyBoardPoolLoader
+            statuses={visibleStatuses}
+            myIssuesOpts={myIssuesOpts}
+            sort={sort}
+          />
         )}
 
         {grouping === "status" && hiddenStatuses.length > 0 && (
@@ -607,6 +705,46 @@ const PaginatedBoardColumn = memo(function PaginatedBoardColumn({
  * free of `useLoadMoreByStatus` / `myIssuesOpts` coupling — the swimlane
  * uses an in-memory total instead.
  */
+/**
+ * The property-grouped board derives its columns from the status-bucketed
+ * pool, which pages per status. Property columns have no per-column
+ * pagination yet (tracked in MUL-4493), so this strip keeps every issue
+ * REACHABLE: one sentinel per status that still has server rows loads the
+ * pool further and the property columns re-derive. Without it, rows beyond
+ * a status's loaded page silently never join any column (review round 3).
+ */
+function PropertyBoardPoolLoader({
+  statuses,
+  myIssuesOpts,
+  sort,
+}: {
+  statuses: IssueStatus[];
+  myIssuesOpts?: { scope: string; filter: MyIssuesFilter };
+  sort?: IssueSortParam;
+}) {
+  return (
+    <div className="col-span-full flex justify-center py-1">
+      {statuses.map((status) => (
+        <PropertyBoardPoolSentinel key={status} status={status} myIssuesOpts={myIssuesOpts} sort={sort} />
+      ))}
+    </div>
+  );
+}
+
+function PropertyBoardPoolSentinel({
+  status,
+  myIssuesOpts,
+  sort,
+}: {
+  status: IssueStatus;
+  myIssuesOpts?: { scope: string; filter: MyIssuesFilter };
+  sort?: IssueSortParam;
+}) {
+  const { loadMore, hasMore, isLoading } = useLoadMoreByStatus(status, myIssuesOpts, sort);
+  if (!hasMore) return null;
+  return <InfiniteScrollSentinel onVisible={loadMore} loading={isLoading} />;
+}
+
 function BoardHiddenColumnRow({
   status,
   myIssuesOpts,
@@ -643,3 +781,11 @@ function BoardHiddenColumnsPanel({
     />
   );
 }
+
+/**
+ * Memoized: the surface controller re-renders on loading-flag flips (e.g. a
+ * query enabling when the view changes) — without memo every such flip
+ * re-rendered this entire view tree (hundreds of ms). All props are
+ * referentially stable useMemo/useCallback outputs from the controller.
+ */
+export const BoardView = memo(BoardViewImpl);
