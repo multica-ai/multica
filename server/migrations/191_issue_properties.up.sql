@@ -14,7 +14,7 @@
 
 CREATE TABLE issue_property (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    workspace_id UUID NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,
+    workspace_id UUID NOT NULL,
     name TEXT NOT NULL,
     type TEXT NOT NULL CHECK (type IN ('text', 'number', 'select', 'multi_select', 'date', 'checkbox', 'url')),
     description TEXT NOT NULL DEFAULT '',
@@ -25,9 +25,6 @@ CREATE TABLE issue_property (
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
-
-CREATE UNIQUE INDEX idx_issue_property_ws_name ON issue_property (workspace_id, LOWER(name));
-CREATE INDEX idx_issue_property_workspace ON issue_property (workspace_id);
 
 ALTER TABLE issue ADD COLUMN properties JSONB NOT NULL DEFAULT '{}'::jsonb;
 -- NOT VALID + VALIDATE keeps the ACCESS EXCLUSIVE lock instantaneous; the
@@ -41,7 +38,6 @@ ALTER TABLE issue VALIDATE CONSTRAINT issue_properties_is_object;
 ALTER TABLE issue ADD CONSTRAINT issue_properties_size_limit
     CHECK (pg_column_size(properties) <= 16384) NOT VALID;
 ALTER TABLE issue VALIDATE CONSTRAINT issue_properties_size_limit;
--- The GIN index on issue.properties lives in the follow-up migration
--- (192_issue_properties_gin_index): CREATE INDEX CONCURRENTLY cannot share a
--- migration with other statements, and a plain CREATE INDEX would lock writes
--- on the hot issue table for the duration of the build.
+-- All indexes live in follow-up, single-statement migrations because CREATE
+-- INDEX CONCURRENTLY cannot share a migration with other statements. The GIN
+-- index is in 192; the issue_property indexes are in 194 and 195.

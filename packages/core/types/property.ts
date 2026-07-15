@@ -49,6 +49,8 @@ export interface IssueProperty {
   /** Lenient string: newer servers may ship types this client doesn't know. */
   type: string;
   description?: string;
+  /** Optional catalog icon key; absent on backends predating icon support. */
+  icon?: string;
   config: IssuePropertyConfig;
   position: number;
   archived: boolean;
@@ -65,12 +67,15 @@ export interface CreatePropertyRequest {
   name: string;
   type: IssuePropertyType;
   description?: string;
+  icon?: string;
   config?: IssuePropertyConfig;
 }
 
 export interface UpdatePropertyRequest {
   name?: string;
   description?: string;
+  /** Empty string clears the icon. */
+  icon?: string;
   config?: IssuePropertyConfig;
   archived?: boolean;
 }

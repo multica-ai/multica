@@ -683,12 +683,14 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                         {item.key === "inbox" && unreadCount > 0 && (
                           <CappedNumberFlow
                             value={unreadCount}
+                            animated={false}
                             className="ml-auto text-xs"
                           />
                         )}
                         {item.key === "chat" && chatUnreadCount > 0 && (
                           <CappedNumberFlow
                             value={chatUnreadCount}
+                            animated={false}
                             className="ml-auto text-xs"
                           />
                         )}

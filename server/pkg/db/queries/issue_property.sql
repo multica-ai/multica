@@ -23,11 +23,12 @@ WHERE workspace_id = $1 AND archived_at IS NULL;
 
 -- name: CreateIssueProperty :one
 -- New definitions append to the end of the catalog: position = max + 1.
-INSERT INTO issue_property (workspace_id, name, type, description, config, position)
+INSERT INTO issue_property (workspace_id, name, type, description, icon, config, position)
 SELECT sqlc.arg('workspace_id')::uuid,
        sqlc.arg('name')::text,
        sqlc.arg('type')::text,
        sqlc.arg('description')::text,
+       sqlc.arg('icon')::text,
        sqlc.arg('config')::jsonb,
        COALESCE((SELECT MAX(position) FROM issue_property WHERE workspace_id = sqlc.arg('workspace_id')::uuid), 0) + 1
 RETURNING *;
@@ -39,6 +40,7 @@ RETURNING *;
 UPDATE issue_property SET
     name = COALESCE(sqlc.narg('name'), name),
     description = COALESCE(sqlc.narg('description'), description),
+    icon = COALESCE(sqlc.narg('icon'), icon),
     config = COALESCE(sqlc.narg('config'), config),
     archived_at = CASE WHEN sqlc.arg('archived_set')::bool THEN sqlc.narg('archived_at') ELSE archived_at END,
     updated_at = now()

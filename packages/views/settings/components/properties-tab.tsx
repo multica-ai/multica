@@ -65,7 +65,17 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@multica/ui/components/ui/dropdown-menu";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@multica/ui/components/ui/popover";
 import { ColorPicker, COLOR_PICKER_PRESETS } from "../../common/color-picker";
+import {
+  PropertyIcon,
+  PropertyIconGlyph,
+  PropertyIconPicker,
+} from "../../common/property-icon";
 import { useT } from "../../i18n";
 import { SettingsTab } from "./settings-layout";
 
@@ -81,6 +91,7 @@ interface PropertyDraft {
   name: string;
   type: IssuePropertyType;
   description: string;
+  icon: string;
   options: OptionDraft[];
 }
 
@@ -88,6 +99,7 @@ const EMPTY_DRAFT: PropertyDraft = {
   name: "",
   type: "select",
   description: "",
+  icon: "",
   options: [{ name: "", color: COLOR_PICKER_PRESETS[6] }],
 };
 
@@ -206,6 +218,7 @@ export function PropertiesTab() {
                   className="grid gap-2 px-4 py-3 md:grid-cols-[minmax(10rem,1fr)_6rem_minmax(10rem,1.4fr)_6rem_7rem_2rem] md:items-center md:gap-4"
                 >
                   <div className="flex min-w-0 items-center gap-2">
+                    <PropertyIcon property={property} />
                     <span className="truncate text-sm font-medium">{property.name}</span>
                     {property.archived && (
                       <Badge variant="outline" className="shrink-0 text-[10px]">
@@ -352,15 +365,18 @@ function PropertyEditorDialog({
   const create = useCreateProperty();
   const update = useUpdateProperty();
   const [draft, setDraft] = useState<PropertyDraft>(EMPTY_DRAFT);
+  const [iconPickerOpen, setIconPickerOpen] = useState(false);
 
   useEffect(() => {
     if (!open) return;
+    setIconPickerOpen(false);
     setDraft(
       property
         ? {
             name: property.name,
             type: (property.type as IssuePropertyType) ?? "text",
             description: property.description ?? "",
+            icon: property.icon ?? "",
             options: (property.config.options ?? []).map((option: IssuePropertyOption) => ({
               id: option.id,
               name: option.name,
@@ -401,6 +417,7 @@ function PropertyEditorDialog({
           id: property.id,
           name: draft.name.trim(),
           description: draft.description.trim(),
+          icon: draft.icon,
           ...(config ? { config } : {}),
         },
         { onSuccess: () => onOpenChange(false), onError },
@@ -412,6 +429,7 @@ function PropertyEditorDialog({
         name: draft.name.trim(),
         type: draft.type,
         description: draft.description.trim(),
+        icon: draft.icon,
         ...(config ? { config } : {}),
       },
       { onSuccess: () => onOpenChange(false), onError },
@@ -441,7 +459,43 @@ function PropertyEditorDialog({
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-5 py-2">
-          <div className="grid grid-cols-[1fr_10rem] gap-3">
+          <div className="grid grid-cols-[4.25rem_minmax(0,1fr)_10rem] gap-3">
+            <div className="space-y-2">
+              <FieldLabel>{t(($) => $.properties.editor.icon)}</FieldLabel>
+              <Popover open={iconPickerOpen} onOpenChange={setIconPickerOpen}>
+                <PopoverTrigger
+                  render={
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="w-full px-0 text-lg"
+                      aria-label={t(($) => $.properties.editor.choose_icon)}
+                    >
+                      {draft.icon ? (
+                        <PropertyIconGlyph icon={draft.icon} />
+                      ) : (
+                        <SlidersHorizontal className="size-4 text-muted-foreground" />
+                      )}
+                    </Button>
+                  }
+                />
+                <PopoverContent align="start" className="w-auto p-2">
+                  <PropertyIconPicker
+                    value={draft.icon}
+                    label={t(($) => $.properties.editor.choose_icon)}
+                    removeLabel={t(($) => $.properties.editor.remove_icon)}
+                    onSelect={(icon) => {
+                      setDraft((current) => ({ ...current, icon }));
+                      setIconPickerOpen(false);
+                    }}
+                    onRemove={() => {
+                      setDraft((current) => ({ ...current, icon: "" }));
+                      setIconPickerOpen(false);
+                    }}
+                  />
+                </PopoverContent>
+              </Popover>
+            </div>
             <div className="space-y-2">
               <FieldLabel htmlFor="property-name">
                 {t(($) => $.properties.editor.name)}

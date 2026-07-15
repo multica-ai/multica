@@ -231,6 +231,7 @@ export function InboxPage() {
         {unreadCount > 0 && (
           <NumberFlow
             value={unreadCount}
+            animated={false}
             format={{ maximumFractionDigits: 0 }}
             aria-label={String(unreadCount)}
             className="text-xs text-muted-foreground"

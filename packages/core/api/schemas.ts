@@ -26,6 +26,7 @@ import type {
   ListIssuesResponse,
   ListLabelsResponse,
   ListWebhookDeliveriesResponse,
+  NotificationPreferenceResponse,
   ResourceLabelsResponse,
   SearchIssuesResponse,
   SearchProjectsResponse,
@@ -90,6 +91,7 @@ export const IssuePropertySchema = z.object({
   name: z.string(),
   type: z.string(),
   description: z.string().optional().default(""),
+  icon: z.string().optional().default(""),
   config: z.object({
     options: z.array(z.object({
       id: z.string(),
@@ -111,6 +113,7 @@ export const EMPTY_ISSUE_PROPERTY: IssueProperty = {
   name: "",
   type: "text",
   description: "",
+  icon: "",
   config: {},
   position: 0,
   archived: false,
@@ -337,6 +340,18 @@ export const EMPTY_APP_CONFIG: AppConfigResponse = {
   daemon_app_url: "",
   workspace_creation_disabled: false,
   feature_flags: {},
+};
+
+// Preference keys may grow over time, so keep both the key and value spaces
+// forward-compatible while still rejecting non-string persisted data.
+export const NotificationPreferenceResponseSchema = z.object({
+  workspace_id: z.string(),
+  preferences: z.record(z.string(), z.string()).default({}),
+}).loose();
+
+export const EMPTY_NOTIFICATION_PREFERENCE_RESPONSE: NotificationPreferenceResponse = {
+  workspace_id: "",
+  preferences: {},
 };
 
 export const CreateFeedbackResponseSchema = z.object({

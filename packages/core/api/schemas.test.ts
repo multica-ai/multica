@@ -153,6 +153,7 @@ describe("IssuePropertySchema (via ListPropertiesResponseSchema)", () => {
     name: "Severity",
     type: "select",
     description: "",
+    icon: "flag",
     config: { options: [{ id: "opt-1", name: "Critical", color: "#ef4444" }] },
     position: 1,
     archived: false,
@@ -165,6 +166,7 @@ describe("IssuePropertySchema (via ListPropertiesResponseSchema)", () => {
   it("parses a full definition", () => {
     const parsed = ListPropertiesResponseSchema.parse({ properties: [baseProperty], total: 1 });
     expect(parsed.properties[0]?.config.options?.[0]?.name).toBe("Critical");
+    expect(parsed.properties[0]?.icon).toBe("flag");
   });
 
   it("survives a malformed response by defaulting the list", () => {
@@ -185,6 +187,12 @@ describe("IssuePropertySchema (via ListPropertiesResponseSchema)", () => {
     const { config: _omit, ...withoutConfig } = baseProperty;
     const parsed = ListPropertiesResponseSchema.parse({ properties: [withoutConfig], total: 1 });
     expect(parsed.properties[0]?.config).toEqual({});
+  });
+
+  it("defaults icon for an older server response", () => {
+    const { icon: _omit, ...withoutIcon } = baseProperty;
+    const parsed = ListPropertiesResponseSchema.parse({ properties: [withoutIcon], total: 1 });
+    expect(parsed.properties[0]?.icon).toBe("");
   });
 });
 

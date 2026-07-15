@@ -13,6 +13,7 @@ import { CustomPropertyValueDisplay } from "./pickers/custom-property-picker";
 import { formatDateOnly, isPastDateOnly } from "@multica/core/issues/date";
 import { CalendarClock, CalendarDays } from "lucide-react";
 import { ActorAvatar } from "../../common/actor-avatar";
+import { PropertyIcon } from "../../common/property-icon";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { useTimeAgo } from "../../i18n";
@@ -216,8 +217,9 @@ export const BoardCardContent = memo(function BoardCardContent({
           {cardCustomProperties.map((property) => (
             <span
               key={property.id}
-              className="inline-flex max-w-[160px] items-center rounded-full bg-muted/60 px-1.5 py-0.5 text-[11px] text-muted-foreground"
+              className="inline-flex max-w-[160px] items-center gap-1 rounded-full bg-muted/60 px-1.5 py-0.5 text-[11px] text-muted-foreground"
             >
+              <PropertyIcon property={property} className="size-3 text-[11px]" />
               <CustomPropertyValueDisplay property={property} value={issue.properties?.[property.id]} />
             </span>
           ))}
