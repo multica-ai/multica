@@ -14,7 +14,7 @@
 // than through @multica/cerebro-groups, because that package depends on this
 // one — importing it back would close a package dependency cycle.
 
-import { useQuery } from "@tanstack/react-query";
+import { useQueries, useQuery } from "@tanstack/react-query";
 import { z } from "zod";
 import { api, parseWithFallback } from "@multica/core/api";
 import {
@@ -22,6 +22,13 @@ import {
   memberListOptions,
 } from "@multica/core/workspace/queries";
 import { runtimeListOptions } from "@multica/core/runtimes/queries";
+
+import type {
+  PermissionAuditAgent,
+  PermissionAuditGroup,
+  PermissionAuditMember,
+  PermissionAuditRuntime,
+} from "./permission-audit";
 
 const GroupListSchema = z
   .array(
@@ -31,11 +38,20 @@ const GroupListSchema = z
   )
   .default([]);
 
+const GroupMemberListSchema = z
+  .array(z.object({ user_id: z.string().default("") }).loose())
+  .default([]);
+
 type NamedSubject = { id: string; name: string };
+type GroupMember = { user_id: string };
 
 export interface HolderDirectory {
   labelFor: (layer: string, subjectId: string) => string;
   isLoading: boolean;
+  members: PermissionAuditMember[];
+  agents: PermissionAuditAgent[];
+  runtimes: PermissionAuditRuntime[];
+  groups: PermissionAuditGroup[];
 }
 
 export function useHolderDirectory(
@@ -71,6 +87,49 @@ export function useHolderDirectory(
     name: r.name,
   }));
   const groupList: NamedSubject[] = groups.data ?? [];
+  const groupMemberQueries = useQueries({
+    queries: groupList.map((group) => ({
+      queryKey: ["cerebro", "groups", wsId, group.id, "members"],
+      queryFn: async (): Promise<GroupMember[]> => {
+        const raw = await api.listCerebroGroupMembers<unknown>(group.id);
+        return parseWithFallback(raw, GroupMemberListSchema, [], {
+          endpoint: "listCerebroGroupMembers",
+        });
+      },
+      enabled: on,
+    })),
+  });
+
+  const auditMembers: PermissionAuditMember[] = (members.data ?? []).map(
+    (member) => ({
+      id: member.user_id,
+      name: member.name || member.email || member.user_id,
+      email: member.email,
+      role: member.role,
+    }),
+  );
+  const auditAgents: PermissionAuditAgent[] = (agents.data ?? []).map(
+    (agent) => ({
+      id: agent.id,
+      name: agent.name,
+      ownerId: agent.owner_id ?? null,
+      runtimeId: agent.runtime_id,
+    }),
+  );
+  const auditRuntimes: PermissionAuditRuntime[] = (runtimes.data ?? []).map(
+    (runtime) => ({
+      id: runtime.id,
+      name: runtime.name,
+      ownerId: runtime.owner_id ?? null,
+    }),
+  );
+  const auditGroups: PermissionAuditGroup[] = groupList.map((group, index) => ({
+    id: group.id,
+    name: group.name,
+    userIds: (groupMemberQueries[index]?.data ?? [])
+      .map((member) => member.user_id)
+      .filter(Boolean),
+  }));
 
   function shortId(id: string): string {
     return id ? id.slice(0, 8) : "";
@@ -111,10 +170,15 @@ export function useHolderDirectory(
 
   return {
     labelFor,
+    members: auditMembers,
+    agents: auditAgents,
+    runtimes: auditRuntimes,
+    groups: auditGroups,
     isLoading:
       agents.isLoading ||
       members.isLoading ||
       runtimes.isLoading ||
-      groups.isLoading,
+      groups.isLoading ||
+      groupMemberQueries.some((query) => query.isLoading),
   };
 }

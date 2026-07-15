@@ -1,17 +1,15 @@
 "use client";
 
-// FIR-3091 punkt 8 — per-permission detail page. For one tool it lists every
-// subject that has the permission set and which layer grants it (the "Who &
-// why" tab, fase 1b), every Set/Clear on its policy rows (the "Changes" tab,
-// fase 2), and every time a decision for it was applied at an enforcement
-// point (the "Usage" tab, fase 3) — the reverse of the per-subject tool-policy
-// table. The tab shell mirrors the credential detail page.
+// Per-permission detail page. For one tool it audits every workspace user
+// across Workspace, Runtimes, Agents, Groups, Direct and Effective layers,
+// alongside its policy Changes and enforcement Usage.
 //
 // Gated by cerebro_permission_detail (default OFF). Nothing links here while the
 // flag is off, so the page is dormant and the change is reversible.
 
-import { useQuery } from "@tanstack/react-query";
-import { ArrowLeft } from "lucide-react";
+import { useMemo, useState } from "react";
+import { useQueries, useQuery } from "@tanstack/react-query";
+import { ArrowLeft, ChevronDown, Search } from "lucide-react";
 
 import {
   Tabs,
@@ -20,6 +18,16 @@ import {
   TabsContent,
 } from "@multica/ui/components/ui/tabs";
 import { Button } from "@multica/ui/components/ui/button";
+import { Badge } from "@multica/ui/components/ui/badge";
+import { Input } from "@multica/ui/components/ui/input";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@multica/ui/components/ui/table";
 
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useFeatureFlag } from "@multica/cerebro-feature-flags";
@@ -30,6 +38,16 @@ import {
   getPermissionUsage,
 } from "../api";
 import type { PermissionChange, PermissionUsageRow } from "../api";
+import { fetchToolPolicyTable } from "../core";
+import {
+  buildPermissionAuditContexts,
+  buildPermissionAuditRows,
+} from "./permission-audit";
+import type {
+  PermissionAuditCell,
+  PermissionAuditEffectiveCell,
+  PermissionAuditRow,
+} from "./permission-audit";
 import { useHolderDirectory } from "./use-holder-directory";
 
 const LAYER_LABEL: Record<string, string> = {
@@ -117,6 +135,227 @@ function usageSubjectLabel(
   }
 }
 
+function permissionTitle(toolKey: string): string {
+  const plain = toolKey
+    .replace(/^[^:]+:/, "")
+    .replace(/[-_.:]+/g, " ")
+    .trim();
+  return plain ? `${plain[0]!.toUpperCase()}${plain.slice(1)}` : "Permission";
+}
+
+function DecisionBadge({ setting }: { setting: string | null }) {
+  const label = settingLabel(setting ?? "");
+  const value =
+    setting === "disable" ? "Deny" : label === "—" ? "Inherit" : label;
+  const variant =
+    value === "Deny"
+      ? "destructive"
+      : value === "Allow"
+        ? "default"
+        : value === "Ask"
+          ? "secondary"
+          : "outline";
+  return <Badge variant={variant}>{value}</Badge>;
+}
+
+function decisionValue(setting: string | null): string {
+  const label = settingLabel(setting ?? "");
+  return setting === "disable" ? "Deny" : label === "—" ? "Inherit" : label;
+}
+
+function AuditCellList({
+  cells,
+  showLabels = true,
+  limit,
+}: {
+  cells: PermissionAuditCell[];
+  showLabels?: boolean;
+  limit?: number;
+}) {
+  if (cells.length === 0) {
+    return <span className="text-muted-foreground">—</span>;
+  }
+  const visibleCells = typeof limit === "number" ? cells.slice(0, limit) : cells;
+  return (
+    <div className="space-y-2">
+      {visibleCells.map((cell) => (
+        <div key={cell.id} className="min-w-24">
+          {showLabels ? (
+            <div
+              className="mb-1 truncate text-xs text-foreground"
+              title={cell.label}
+            >
+              {cell.label}
+            </div>
+          ) : null}
+          <DecisionBadge setting={cell.setting} />
+        </div>
+      ))}
+      {typeof limit === "number" && cells.length > limit ? (
+        <span className="text-xs text-muted-foreground">
+          +{cells.length - limit} more
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
+function EffectiveCellList({
+  cells,
+  limit,
+}: {
+  cells: PermissionAuditEffectiveCell[];
+  limit?: number;
+}) {
+  if (cells.length === 0) {
+    return <span className="text-muted-foreground">—</span>;
+  }
+  return (
+    <div className="space-y-2">
+      {(typeof limit === "number" ? cells.slice(0, limit) : cells).map(
+        (cell, index) => (
+          <div key={`${cell.contextLabel}:${index}`}>
+            <div
+              className="mb-1 truncate text-xs text-foreground"
+              title={cell.contextLabel}
+            >
+              {cell.contextLabel}
+            </div>
+            <DecisionBadge setting={cell.setting} />
+            <div className="mt-1 text-[11px] text-muted-foreground">
+              {cell.source}
+            </div>
+          </div>
+        ),
+      )}
+      {typeof limit === "number" && cells.length > limit ? (
+        <span className="text-xs text-muted-foreground">
+          +{cells.length - limit} more
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
+const AUDIT_LAYERS = [
+  ["Workspace", "workspace"],
+  ["Runtimes", "runtimes"],
+  ["Agents", "agents"],
+  ["Groups", "groups"],
+  ["Direct", "direct"],
+] as const;
+
+function effectiveDecision(row: PermissionAuditRow): string {
+  const rank: Record<string, number> = { deny: 3, ask: 2, allow: 1 };
+  return (
+    [...row.effective].sort(
+      (a, b) => (rank[b.setting] ?? 0) - (rank[a.setting] ?? 0),
+    )[0]?.setting ?? ""
+  );
+}
+
+function PermissionAuditMatrix({ rows }: { rows: PermissionAuditRow[] }) {
+  return (
+    <>
+      <div className="hidden max-h-[calc(100vh-16rem)] overflow-auto md:block [&>[data-slot=table-container]]:overflow-visible">
+        <Table aria-label="Permission audit" className="table-fixed">
+          <TableHeader>
+            <TableRow>
+              <TableHead className="sticky left-0 top-0 z-20 w-40 bg-card">
+                User
+              </TableHead>
+              {[
+                "Workspace",
+                "Runtimes",
+                "Agents",
+                "Groups",
+                "Direct",
+                "Effective",
+              ].map((heading) => (
+                <TableHead key={heading} className="sticky top-0 z-10 bg-card">
+                  {heading}
+                </TableHead>
+              ))}
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {rows.map((row) => (
+              <TableRow key={row.user.id} className="align-top">
+                <TableCell className="sticky left-0 z-10 bg-card align-top whitespace-normal">
+                  <div className="font-medium">{row.user.name}</div>
+                  <div className="mt-1 text-xs capitalize text-muted-foreground">
+                    {row.user.role}
+                  </div>
+                </TableCell>
+                {AUDIT_LAYERS.map(([, key]) => (
+                  <TableCell key={key} className="align-top whitespace-normal">
+                    <AuditCellList
+                      cells={row[key]}
+                      showLabels={key !== "workspace" && key !== "direct"}
+                      limit={2}
+                    />
+                  </TableCell>
+                ))}
+                <TableCell className="align-top whitespace-normal">
+                  <EffectiveCellList cells={row.effective} limit={2} />
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </div>
+
+      <div className="space-y-3 md:hidden" data-testid="permission-audit-mobile">
+        {rows.map((row) => (
+          <details
+            key={row.user.id}
+            data-testid={`permission-audit-mobile-${row.user.id}`}
+            className="group overflow-hidden rounded-lg border bg-card"
+          >
+            <summary className="flex cursor-pointer list-none items-center gap-3 bg-muted/30 px-4 py-3">
+              <div className="min-w-0 flex-1">
+                <span className="block truncate font-medium">
+                  {row.user.name}
+                </span>
+                <span className="block text-xs capitalize text-muted-foreground">
+                  {row.user.role}
+                </span>
+              </div>
+              <span className="sr-only">
+                Effective {decisionValue(effectiveDecision(row))}
+              </span>
+              <DecisionBadge setting={effectiveDecision(row)} />
+              <ChevronDown className="size-4 text-muted-foreground transition-transform group-open:rotate-180" />
+            </summary>
+            <div className="divide-y">
+              {AUDIT_LAYERS.map(([label, key]) => (
+                <section
+                  key={key}
+                  className="grid grid-cols-[6rem_1fr] gap-3 px-4 py-3"
+                >
+                  <h4 className="text-xs font-medium text-muted-foreground">
+                    {label}
+                  </h4>
+                  <AuditCellList
+                    cells={row[key]}
+                    showLabels={key !== "workspace" && key !== "direct"}
+                  />
+                </section>
+              ))}
+              <section className="grid grid-cols-[6rem_1fr] gap-3 px-4 py-3">
+                <h4 className="text-xs font-medium text-muted-foreground">
+                  Effective
+                </h4>
+                <EffectiveCellList cells={row.effective} />
+              </section>
+            </div>
+          </details>
+        ))}
+      </div>
+    </>
+  );
+}
+
 export function PermissionDetailPage({
   toolKey,
   onBack,
@@ -146,6 +385,96 @@ export function PermissionDetailPage({
   });
 
   const directory = useHolderDirectory(wsId, enabled);
+  const [search, setSearch] = useState("");
+  const [decisionFilter, setDecisionFilter] = useState<
+    "all" | "deny" | "ask" | "allow"
+  >("all");
+  const contexts = useMemo(
+    () =>
+      buildPermissionAuditContexts({
+        members: directory.members,
+        agents: directory.agents,
+        runtimes: directory.runtimes,
+      }),
+    [directory.members, directory.agents, directory.runtimes],
+  );
+  const resolvedQueries = useQueries({
+    queries: contexts.map((context) => ({
+      queryKey: [
+        "cerebro",
+        "tool-policy",
+        "permission-audit",
+        wsId,
+        toolKey,
+        context.id,
+      ],
+      queryFn: async () => {
+        const rows = await fetchToolPolicyTable(wsId, {
+          userId: context.userId,
+          agentId: context.agentId,
+          runtimeId: context.runtimeId,
+        });
+        const row = rows.find((candidate) => candidate.tool_key === toolKey);
+        if (!row) return null;
+        return {
+          setting: row.effective.setting,
+          decidedBy: row.effective.decided_by,
+          cappedBy: row.effective.capped_by,
+        };
+      },
+      enabled: enabled && Boolean(wsId && toolKey),
+    })),
+  });
+  const resolvedByContext = useMemo(() => {
+    const result = new Map<
+      string,
+      { setting: string; decidedBy: string; cappedBy: string }
+    >();
+    contexts.forEach((context, index) => {
+      const resolved = resolvedQueries[index]?.data;
+      if (resolved) result.set(context.id, resolved);
+    });
+    return result;
+  }, [contexts, resolvedQueries]);
+  const auditRows = useMemo(
+    () =>
+      buildPermissionAuditRows({
+        members: directory.members,
+        agents: directory.agents,
+        runtimes: directory.runtimes,
+        groups: directory.groups,
+        holders: holdersQuery.data?.holders ?? [],
+        contexts,
+        resolvedByContext,
+      }),
+    [
+      directory.members,
+      directory.agents,
+      directory.runtimes,
+      directory.groups,
+      holdersQuery.data?.holders,
+      contexts,
+      resolvedByContext,
+    ],
+  );
+  const filteredAuditRows = useMemo(() => {
+    const needle = search.trim().toLocaleLowerCase();
+    return auditRows.filter(
+      (row) =>
+        `${row.user.name} ${row.user.email}`
+          .toLocaleLowerCase()
+          .includes(needle) &&
+        (decisionFilter === "all" ||
+          [
+            ...row.workspace,
+            ...row.runtimes,
+            ...row.agents,
+            ...row.groups,
+            ...row.direct,
+            ...row.effective,
+          ].some((cell) => cell.setting === decisionFilter)),
+    );
+  }, [auditRows, decisionFilter, search]);
 
   // Safety fallback: the route always registers, so guard the flag here. Nothing
   // links to the page while off, so this is only reached by a hand-typed URL.
@@ -163,66 +492,117 @@ export function PermissionDetailPage({
   }
 
   const data = holdersQuery.data;
-  const holders = data?.holders ?? [];
   // A tool whose policy is stored but not enforced at runtime yet is shown
   // greyed out with an explicit note, so no one mistakes it for a live control.
   const isEnforced = data?.enforced === true;
+  const auditLoading =
+    holdersQuery.isLoading ||
+    directory.isLoading ||
+    resolvedQueries.some((query) => query.isLoading);
 
   return (
-    <div className="mx-auto max-w-3xl p-6">
+    <main className="mx-auto w-full max-w-[1400px] p-4 sm:p-6">
       <Button variant="ghost" size="sm" onClick={onBack} className="mb-4">
         <ArrowLeft className="size-4" /> Back
       </Button>
 
-      <div className="mb-4">
-        <h1 className="text-lg font-semibold">Permission</h1>
-        <p className="font-mono text-sm text-muted-foreground">{toolKey}</p>
-      </div>
+      <header className="mb-5 flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <div className="flex items-center gap-2">
+            <h1 className="text-2xl font-semibold tracking-tight">
+              {permissionTitle(toolKey)}
+            </h1>
+            <Badge variant={isEnforced ? "outline" : "secondary"}>
+              {isEnforced ? "Enforced" : "Not enforced"}
+            </Badge>
+          </div>
+          <p className="font-mono text-sm text-muted-foreground">{toolKey}</p>
+        </div>
+      </header>
 
-      <Tabs defaultValue="holders">
-        <TabsList>
-          <TabsTrigger value="holders">Who &amp; why</TabsTrigger>
-          <TabsTrigger value="changes">Changes</TabsTrigger>
-          <TabsTrigger value="usage">Usage</TabsTrigger>
+      <Tabs defaultValue="audit">
+        <TabsList variant="line" className="mb-3">
+          <TabsTrigger value="audit">Permission audit</TabsTrigger>
+          <TabsTrigger value="changes">
+            Changes {(changesQuery.data?.changes ?? []).length}
+          </TabsTrigger>
+          <TabsTrigger value="usage">
+            Usage {(usageQuery.data?.usage ?? []).length}
+          </TabsTrigger>
         </TabsList>
 
-        <TabsContent value="holders" className="pt-4">
-          {!isEnforced ? (
-            <div className="mb-3 rounded border border-dashed p-3 text-sm text-muted-foreground">
-              Shown, but not enforced yet.
-            </div>
-          ) : null}
-
-          {holdersQuery.isLoading || directory.isLoading ? (
-            <p className="text-sm text-muted-foreground">Loading…</p>
-          ) : holders.length === 0 ? (
-            <p className="text-sm text-muted-foreground">
-              No one has this permission set.
-            </p>
-          ) : (
-            <ul
-              className={`space-y-2 text-sm ${!isEnforced ? "opacity-60" : ""}`}
-            >
-              {holders.map((h, i) => (
-                <li
-                  key={`${h.layer}:${h.subject_id}:${h.resource_pattern}:${i}`}
-                  className="flex items-center justify-between gap-3 rounded border p-2"
+        <TabsContent value="audit" className="pt-2">
+          <section
+            className="overflow-hidden rounded-xl border bg-card"
+            aria-labelledby="permission-audit-heading"
+          >
+            <div className="flex flex-col gap-3 border-b p-4 lg:flex-row lg:items-end lg:justify-between">
+              <div>
+                <h2 id="permission-audit-heading" className="font-semibold">
+                  Permission audit
+                </h2>
+                <p className="text-sm text-muted-foreground">
+                  See every permission that applies to each user.
+                </p>
+              </div>
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                <label className="relative block w-full sm:w-64">
+                  <span className="sr-only">Search users</span>
+                  <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+                  <Input
+                    type="search"
+                    aria-label="Search users"
+                    placeholder="Search users"
+                    value={search}
+                    onChange={(event) => setSearch(event.target.value)}
+                    className="pl-8"
+                  />
+                </label>
+                <div
+                  className="flex items-center gap-1 rounded-lg border p-1"
+                  aria-label="Filter by decision"
                 >
-                  <div className="min-w-0">
-                    <span className="font-medium">
-                      {directory.labelFor(h.layer, h.subject_id)}
-                    </span>
-                    <span className="ml-2 text-xs text-muted-foreground">
-                      {layerLabel(h.layer)} layer
-                    </span>
-                  </div>
-                  <span className="shrink-0 text-xs text-muted-foreground">
-                    {settingLabel(h.setting)}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          )}
+                  {(["all", "deny", "ask", "allow"] as const).map(
+                    (decision) => (
+                      <Button
+                        key={decision}
+                        type="button"
+                        size="sm"
+                        variant={
+                          decisionFilter === decision ? "secondary" : "ghost"
+                        }
+                        aria-pressed={decisionFilter === decision}
+                        onClick={() => setDecisionFilter(decision)}
+                      >
+                        {decision[0]!.toUpperCase() + decision.slice(1)}
+                      </Button>
+                    ),
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {!isEnforced ? (
+              <div className="border-b bg-muted/30 px-4 py-3 text-sm text-muted-foreground">
+                These settings are visible, but this permission is not enforced
+                yet.
+              </div>
+            ) : null}
+
+            {auditLoading ? (
+              <p className="p-6 text-sm text-muted-foreground">Loading…</p>
+            ) : filteredAuditRows.length === 0 ? (
+              <p className="p-6 text-sm text-muted-foreground">
+                {search || decisionFilter !== "all"
+                  ? "No users match your filters."
+                  : "No users found."}
+              </p>
+            ) : (
+              <div className={!isEnforced ? "opacity-60" : ""}>
+                <PermissionAuditMatrix rows={filteredAuditRows} />
+              </div>
+            )}
+          </section>
         </TabsContent>
 
         <TabsContent value="changes" className="pt-4">
@@ -301,6 +681,6 @@ export function PermissionDetailPage({
           )}
         </TabsContent>
       </Tabs>
-    </div>
+    </main>
   );
 }
