@@ -13,16 +13,16 @@ import { cloneElement, useState, type ReactElement, type ReactNode } from "react
  * that per-item mount cost to zero for untouched items (MUL-4474 follow-up:
  * the tab-switch remount froze the main thread for seconds mostly on these).
  *
- * Upgrade triggers:
- * - `pointerenter` / `pointerdown` warm-mount the real picker *closed*. Base
- *   UI popover triggers open on the `click` event (see floating-ui
- *   `useClick`), so by the time the click lands the real trigger exists and
- *   handles it natively. Mounting on pointerdown alone would race the
- *   browser's click retargeting (mousedown target unmounts mid-gesture), so
- *   pointerenter does the work for mice; pointerdown covers stray cases.
- * - `Enter`/`Space` mount *and* open in one step: swapping elements would
- *   drop focus and swallow the key's click, so the shell opens the popup
- *   itself and lets the popup take focus.
+ * Upgrade triggers — deliberately only events that END a gesture:
+ * - `click` mounts the real component and opens it in one step. Opening on
+ *   click matches Base UI's own trigger timing exactly, and because nothing
+ *   swaps the element mid-gesture (no pointerenter/pointerdown warming),
+ *   every event of the gesture lands on a node that is still attached —
+ *   both for real pointers and for synthetic sequences (tests, assistive
+ *   tech). The in-flight click is stopped from propagating so the popup's
+ *   just-mounted outside-press dismissal doesn't treat it as an outside
+ *   click and close the popover in the same breath.
+ * - `Enter`/`Space` do the same for keyboard.
  *
  * Only for uncontrolled usages: callers that pass `open`/`onOpenChange`/
  * `defaultOpen` need the real component from the start.
@@ -53,18 +53,22 @@ export function DeferredPopup({
     return <>{children(open, setOpen)}</>;
   }
 
-  const warm = () => setMounted(true);
+  const mountOpen = () => {
+    setMounted(true);
+    setOpen(true);
+  };
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" || e.key === " ") {
       e.preventDefault();
       e.stopPropagation();
-      setMounted(true);
-      setOpen(true);
+      mountOpen();
     }
   };
   const handlers = {
-    onPointerEnter: warm,
-    onPointerDown: warm,
+    onClick: (e: React.MouseEvent) => {
+      e.stopPropagation();
+      mountOpen();
+    },
     onKeyDown: handleKeyDown,
     "aria-haspopup": "dialog" as const,
   };

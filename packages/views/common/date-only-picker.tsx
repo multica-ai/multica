@@ -39,7 +39,7 @@ interface DateOnlyPickerProps {
   /** Fully custom trigger contents (replaces the icon + date/placeholder). */
   trigger?: React.ReactNode;
   /** Custom trigger element (e.g. a pill button). */
-  triggerRender?: React.ReactElement;
+  triggerRender?: React.ReactElement<Record<string, unknown>>;
   /** Controlled open state — lets a ⋯ overflow menu reveal + open the pill. */
   open?: boolean;
   onOpenChange?: (v: boolean) => void;

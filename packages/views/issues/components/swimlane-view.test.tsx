@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, act, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { SwimLaneView } from "./swimlane-view";
+import { IssueContextMenuProvider } from "../actions";
 import type { Issue } from "@multica/core/types";
 import { I18nProvider } from "@multica/core/i18n/react";
 import enCommon from "../../locales/en/common.json";
@@ -342,7 +343,9 @@ function renderWithI18n(ui: React.ReactNode) {
   return render(
     <QueryClientProvider client={qc}>
       <I18nProvider resources={TEST_RESOURCES} locale="en">
-        {ui}
+        {/* Cards delegate their right-click menu to this surface-level
+            provider; IssueSurface mounts it in production. */}
+        <IssueContextMenuProvider>{ui}</IssueContextMenuProvider>
       </I18nProvider>
     </QueryClientProvider>,
   );
