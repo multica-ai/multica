@@ -30,25 +30,42 @@ export const VIRTUOSO_SEED_COUNT = 30;
  * Reuses the caller's own `itemContent`/`computeItemKey`, so a seeded row is
  * byte-identical to its virtualized counterpart — there is no second render
  * path to drift.
+ *
+ * With `estimatedItemHeight` set, unseeded rows get a single trailing spacer
+ * sized `remaining × estimate`, so the scroll height (and thus the scrollbar
+ * thumb) approximates the full list from the first frame. Without it, the
+ * seed frame's scroll height is only the seeded rows, and the handoff to
+ * Virtuoso — which spaces out the full count — visibly re-draws the
+ * scrollbar. Pass the same estimate as the Virtuoso's `defaultItemHeight` so
+ * both phases agree until real measurements land.
  */
 export function VirtuosoSeed<T>({
   data,
   itemContent,
   computeItemKey,
   count = VIRTUOSO_SEED_COUNT,
+  estimatedItemHeight,
 }: {
   data: T[];
   itemContent: (index: number, item: T) => ReactNode;
   computeItemKey: (index: number, item: T) => Key;
   count?: number;
+  /** Estimated row height (px, including any per-row gap) used to reserve
+   *  scroll height for the rows beyond `count`. */
+  estimatedItemHeight?: number;
 }) {
+  const seeded = data.slice(0, count);
+  const remaining = data.length - seeded.length;
   return (
     <>
-      {data.slice(0, count).map((item, index) => (
+      {seeded.map((item, index) => (
         <Fragment key={computeItemKey(index, item)}>
           {itemContent(index, item)}
         </Fragment>
       ))}
+      {estimatedItemHeight !== undefined && remaining > 0 && (
+        <div aria-hidden style={{ height: remaining * estimatedItemHeight }} />
+      )}
     </>
   );
 }

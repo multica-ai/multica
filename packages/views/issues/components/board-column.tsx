@@ -26,7 +26,7 @@ import { DraggableBoardCard } from "./board-card";
 import type { ChildProgress } from "./list-row";
 import { useT } from "../../i18n";
 import { ActorAvatar } from "../../common/actor-avatar";
-import { VirtuosoSeed, VIRTUOSO_SEED_COUNT } from "../../common/virtuoso-seed";
+import { VirtuosoSeed } from "../../common/virtuoso-seed";
 import type { IssueCreateDefaults } from "../surface/types";
 
 // Insertion-position prediction intentionally omitted. The server's
@@ -36,6 +36,31 @@ import type { IssueCreateDefaults } from "../surface/types";
 
 export const BOARD_COL_WIDTH = 280;
 export const BOARD_CARD_WIDTH = BOARD_COL_WIDTH - 16 - 8; // col(280) - col p-2(16) - droppable p-1(8)
+
+// Board cards are ~90-140px tall, so ~10 fill a column viewport — unlike the
+// generic VIRTUOSO_SEED_COUNT (30, sized for 36px list rows). The seed mounts
+// synchronously per column on every surface remount, so oversizing it
+// multiplies straight into tab-switch cost (columns × seed × per-card mount).
+const BOARD_SEED_COUNT = 10;
+
+// Median card height (incl. the 8px pt-2 gap) for pre-measurement scroll
+// sizing only: the seed's trailing spacer and Virtuoso's defaultItemHeight
+// share it so total scroll height — and the scrollbar thumb — stays steady
+// across the seed → Virtuoso handoff instead of jumping when the unseeded
+// rows suddenly get spaced out. Real measurements refine it afterwards.
+const BOARD_CARD_ESTIMATED_HEIGHT = 110;
+
+// Columns at or below this render every card plainly — no Virtuoso, no seed
+// handoff, no estimated heights. Scroll height is then always browser-measured
+// truth, so the column's scrollbar can never jump on mount, route return, or
+// tab restore. Virtualization only pays for itself on large columns (Linear
+// does the same per-column split: `data-virtual-cluster="false"` for small
+// columns, padding-spacer virtualization for big ones). ~30 ≈ 3 viewports of
+// cards; a full plain mount at that size is cheap now that per-card popups
+// mount lazily. Known edge: a load-more append that crosses the threshold
+// swaps the column to the virtualized path, which may adjust the scrollbar
+// once — accepted, since it only happens mid-scroll at the column bottom.
+const BOARD_VIRTUALIZE_THRESHOLD = 30;
 
 // Passed to <Virtuoso components> when the column has no footer. Must be a
 // STABLE object, never `undefined`: an explicit `undefined` prop overwrites
@@ -201,25 +226,46 @@ export const BoardColumn = memo(function BoardColumn({
         >
           {resolvedIssues.length > 0 ? (
             <SortableContext items={issueIds} strategy={verticalListSortingStrategy}>
-              {/* Seed a bounded slice of real cards while the merged scroll ref
-                  hasn't settled after a remount, so the column never paints
-                  blank; once it's set, mount the Virtuoso with a matching
-                  `initialItemCount` to survive the measurement frame (MUL-4750). */}
-              {scrollEl ? (
+              {resolvedIssues.length <= BOARD_VIRTUALIZE_THRESHOLD ? (
+                /* Small column: plain full render (reusing the same
+                   itemContent, so it is byte-identical to the virtualized
+                   rows). No handoff, no estimates — see
+                   BOARD_VIRTUALIZE_THRESHOLD. The footer (infinite-scroll
+                   sentinel) renders at the real end of the flow, where its
+                   IntersectionObserver works the same as in Virtuoso's
+                   Footer slot. */
+                <>
+                  <VirtuosoSeed
+                    data={resolvedIssues}
+                    itemContent={itemContent}
+                    computeItemKey={computeItemKey}
+                    count={resolvedIssues.length}
+                  />
+                  {footer}
+                </>
+              ) : scrollEl ? (
                 <Virtuoso
                   customScrollParent={scrollEl}
                   data={resolvedIssues}
                   computeItemKey={computeItemKey}
-                  initialItemCount={Math.min(resolvedIssues.length, VIRTUOSO_SEED_COUNT)}
+                  initialItemCount={Math.min(resolvedIssues.length, BOARD_SEED_COUNT)}
+                  defaultItemHeight={BOARD_CARD_ESTIMATED_HEIGHT}
                   increaseViewportBy={{ top: 300, bottom: 300 }}
                   components={footerComponents}
                   itemContent={itemContent}
                 />
               ) : (
+                /* Large column, merged scroll ref not settled yet after a
+                   remount: seed a bounded slice of real cards so the column
+                   never paints blank; once the ref lands, mount the Virtuoso
+                   with a matching `initialItemCount` to survive the
+                   measurement frame (MUL-4750). */
                 <VirtuosoSeed
                   data={resolvedIssues}
                   itemContent={itemContent}
                   computeItemKey={computeItemKey}
+                  count={BOARD_SEED_COUNT}
+                  estimatedItemHeight={BOARD_CARD_ESTIMATED_HEIGHT}
                 />
               )}
             </SortableContext>
