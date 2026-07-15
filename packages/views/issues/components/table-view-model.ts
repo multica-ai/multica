@@ -1,0 +1,314 @@
+import { ALL_STATUSES } from "@multica/core/issues/config";
+import { propertyIdFromViewKey } from "@multica/core/issues/stores/view-store";
+import type {
+  TableCalculation,
+  TableColumnKey,
+  TableGrouping,
+} from "@multica/core/issues/stores/view-store";
+import type {
+  Issue,
+  IssueProperty,
+  IssuePropertyValue,
+} from "@multica/core/types";
+
+export type IssueTableDisplayRow =
+  | {
+      kind: "group";
+      key: string;
+      label: string;
+      count: number;
+      collapsed: boolean;
+    }
+  | {
+      kind: "issue";
+      key: string;
+      issue: Issue;
+      depth: number;
+      hasChildren: boolean;
+      collapsed: boolean;
+    };
+
+export interface BuildIssueTableRowsOptions {
+  grouping: TableGrouping;
+  properties: IssueProperty[];
+  collapsedGroups: ReadonlySet<string>;
+  collapsedParents: ReadonlySet<string>;
+  hierarchy: boolean;
+  getActorName: (type: string, id: string) => string;
+  getStatusLabel: (status: Issue["status"]) => string;
+  noValueLabel: string;
+  unassignedLabel: string;
+  trueLabel: string;
+  falseLabel: string;
+}
+
+function propertyValueLabel(
+  property: IssueProperty | undefined,
+  value: IssuePropertyValue | undefined,
+  labels: Pick<
+    BuildIssueTableRowsOptions,
+    "noValueLabel" | "trueLabel" | "falseLabel"
+  >,
+) {
+  if (!property || value === undefined) return labels.noValueLabel;
+  const propertyOptions = property.config.options ?? [];
+  if (property.type === "select") {
+    return (
+      propertyOptions.find((option) => option.id === value)?.name ??
+      labels.noValueLabel
+    );
+  }
+  if (property.type === "multi_select") {
+    const ids = Array.isArray(value) ? value : [];
+    const names = propertyOptions
+      .filter((option) => ids.includes(option.id))
+      .map((option) => option.name);
+    return names.length > 0 ? names.join(", ") : labels.noValueLabel;
+  }
+  if (property.type === "checkbox") {
+    return value === true ? labels.trueLabel : labels.falseLabel;
+  }
+  return String(value);
+}
+
+function groupDescriptor(
+  issue: Issue,
+  options: BuildIssueTableRowsOptions,
+) {
+  if (options.grouping === "status") {
+    return {
+      key: `status:${issue.status}`,
+      label: options.getStatusLabel(issue.status),
+    };
+  }
+  if (options.grouping === "assignee") {
+    if (!issue.assignee_type || !issue.assignee_id) {
+      return { key: "assignee:none", label: options.unassignedLabel };
+    }
+    return {
+      key: `assignee:${issue.assignee_type}:${issue.assignee_id}`,
+      label: options.getActorName(issue.assignee_type, issue.assignee_id),
+    };
+  }
+  const propertyId = propertyIdFromViewKey(options.grouping);
+  if (propertyId) {
+    const property = options.properties.find((item) => item.id === propertyId);
+    const value = issue.properties[propertyId];
+    const label = propertyValueLabel(
+      property,
+      value,
+      options,
+    );
+    const valueKey = Array.isArray(value)
+      ? [...value].sort().join(",")
+      : value === undefined
+        ? "none"
+        : String(value);
+    return { key: `property:${propertyId}:${valueKey}`, label };
+  }
+  return { key: "none", label: "" };
+}
+
+function hierarchyRows(
+  issues: Issue[],
+  collapsedParents: ReadonlySet<string>,
+  hierarchy: boolean,
+) {
+  if (!hierarchy) {
+    return issues.map<IssueTableDisplayRow>((issue) => ({
+      kind: "issue",
+      key: issue.id,
+      issue,
+      depth: 0,
+      hasChildren: false,
+      collapsed: false,
+    }));
+  }
+
+  const issueIds = new Set(issues.map((issue) => issue.id));
+  const children = new Map<string, Issue[]>();
+  for (const issue of issues) {
+    if (!issue.parent_issue_id || !issueIds.has(issue.parent_issue_id)) continue;
+    const siblings = children.get(issue.parent_issue_id) ?? [];
+    siblings.push(issue);
+    children.set(issue.parent_issue_id, siblings);
+  }
+  const roots = issues.filter(
+    (issue) => !issue.parent_issue_id || !issueIds.has(issue.parent_issue_id),
+  );
+  const rows: IssueTableDisplayRow[] = [];
+  const visited = new Set<string>();
+
+  const markHiddenDescendantsVisited = (issue: Issue) => {
+    for (const child of children.get(issue.id) ?? []) {
+      if (visited.has(child.id)) continue;
+      visited.add(child.id);
+      markHiddenDescendantsVisited(child);
+    }
+  };
+
+  const visit = (issue: Issue, depth: number) => {
+    if (visited.has(issue.id)) return;
+    visited.add(issue.id);
+    const issueChildren = children.get(issue.id) ?? [];
+    const collapsed = collapsedParents.has(issue.id);
+    rows.push({
+      kind: "issue",
+      key: issue.id,
+      issue,
+      depth,
+      hasChildren: issueChildren.length > 0,
+      collapsed,
+    });
+    if (collapsed) {
+      // The final orphan/cycle recovery pass below must not resurrect rows
+      // intentionally hidden under a collapsed parent.
+      markHiddenDescendantsVisited(issue);
+      return;
+    }
+    for (const child of issueChildren) visit(child, depth + 1);
+  };
+
+  for (const root of roots) visit(root, 0);
+  // Cycles and cross-page orphans degrade to top-level rows instead of
+  // disappearing from the table.
+  for (const issue of issues) visit(issue, 0);
+  return rows;
+}
+
+export function buildIssueTableRows(
+  issues: Issue[],
+  options: BuildIssueTableRowsOptions,
+): IssueTableDisplayRow[] {
+  if (options.grouping === "none") {
+    return hierarchyRows(
+      issues,
+      options.collapsedParents,
+      options.hierarchy,
+    );
+  }
+
+  const issueById = new Map(issues.map((issue) => [issue.id, issue]));
+  const groupSource = (issue: Issue) => {
+    if (!options.hierarchy) return issue;
+    let current = issue;
+    const seen = new Set<string>();
+    while (current.parent_issue_id && !seen.has(current.id)) {
+      seen.add(current.id);
+      const parent = issueById.get(current.parent_issue_id);
+      if (!parent) break;
+      current = parent;
+    }
+    return current;
+  };
+
+  const groups = new Map<string, { label: string; issues: Issue[] }>();
+  for (const issue of issues) {
+    const descriptor = groupDescriptor(groupSource(issue), options);
+    const group = groups.get(descriptor.key) ?? {
+      label: descriptor.label,
+      issues: [],
+    };
+    group.issues.push(issue);
+    groups.set(descriptor.key, group);
+  }
+
+  const entries = [...groups.entries()];
+  if (options.grouping === "status") {
+    const rank = new Map(
+      ALL_STATUSES.map((status, index) => [`status:${status}`, index]),
+    );
+    entries.sort(
+      ([a], [b]) => (rank.get(a) ?? Number.MAX_SAFE_INTEGER) - (rank.get(b) ?? Number.MAX_SAFE_INTEGER),
+    );
+  }
+
+  const rows: IssueTableDisplayRow[] = [];
+  for (const [key, group] of entries) {
+    const collapsed = options.collapsedGroups.has(key);
+    rows.push({
+      kind: "group",
+      key,
+      label: group.label,
+      count: group.issues.length,
+      collapsed,
+    });
+    if (!collapsed) {
+      rows.push(
+        ...hierarchyRows(
+          group.issues,
+          options.collapsedParents,
+          options.hierarchy,
+        ),
+      );
+    }
+  }
+  return rows;
+}
+
+function columnValue(
+  issue: Issue,
+  columnKey: TableColumnKey,
+): IssuePropertyValue | string | number | null | undefined {
+  const propertyId = propertyIdFromViewKey(columnKey);
+  if (propertyId) return issue.properties[propertyId];
+  switch (columnKey) {
+    case "identifier":
+      return issue.identifier;
+    case "title":
+      return issue.title;
+    case "status":
+      return issue.status;
+    case "priority":
+      return issue.priority;
+    case "assignee":
+      return issue.assignee_id;
+    case "labels":
+      return issue.labels?.map((label) => label.name).join(", ");
+    case "project":
+      return issue.project_id;
+    case "start_date":
+      return issue.start_date;
+    case "due_date":
+      return issue.due_date;
+    case "created_at":
+      return issue.created_at;
+    case "updated_at":
+      return issue.updated_at;
+    case "child_progress":
+      return undefined;
+    case "creator":
+      return issue.creator_id;
+  }
+  return undefined;
+}
+
+export function calculateIssueTableColumn(
+  issues: Issue[],
+  columnKey: TableColumnKey,
+  calculation: TableCalculation,
+) {
+  if (calculation === "none") return null;
+  const values = issues
+    .map((issue) => columnValue(issue, columnKey))
+    .filter((value) => value !== undefined && value !== null && value !== "");
+  if (calculation === "count") return values.length;
+  const numbers = values.filter((value): value is number => typeof value === "number");
+  if (numbers.length === 0) return null;
+  const sum = numbers.reduce((total, value) => total + value, 0);
+  return calculation === "sum" ? sum : sum / numbers.length;
+}
+
+function escapeCsvCell(value: unknown) {
+  const text = value == null ? "" : String(value);
+  return /[",\n\r]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
+}
+
+export function buildIssueTableCsv(
+  headers: string[],
+  rows: unknown[][],
+) {
+  return [headers, ...rows]
+    .map((row) => row.map(escapeCsvCell).join(","))
+    .join("\r\n");
+}

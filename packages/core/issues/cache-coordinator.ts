@@ -1,4 +1,9 @@
-import { hashKey, type QueryClient, type QueryKey } from "@tanstack/react-query";
+import {
+  hashKey,
+  type InfiniteData,
+  type QueryClient,
+  type QueryKey,
+} from "@tanstack/react-query";
 import { issueKeys, type MyIssuesFilter } from "./queries";
 import { inboxKeys } from "../inbox/queries";
 import { patchInboxIssueStatus } from "../inbox/ws-updaters";
@@ -15,7 +20,14 @@ import {
   listFilterDependsOn,
   type IssueChangedDims,
 } from "./surface/membership";
-import type { InboxItem, Issue, ListIssuesCache } from "../types";
+import type {
+  InboxItem,
+  Issue,
+  ListIssuesCache,
+  ListIssuesResponse,
+} from "../types";
+
+export type IssueFlatCache = InfiniteData<ListIssuesResponse, number>;
 
 /**
  * IssueCacheCoordinator — the one rules table for how a single issue change
@@ -64,6 +76,7 @@ export interface IssueCacheChangeResult {
   /** Pre-change snapshots of every cache this change touched — feed back to
    *  {@link rollbackIssueChange} from onError. */
   prevLists: [QueryKey, ListIssuesCache][];
+  prevFlatLists: [QueryKey, IssueFlatCache][];
   prevDetail: Issue | undefined;
   prevInboxList: InboxItem[] | undefined;
   /** Loaded list keys whose server result may have drifted (membership
@@ -103,6 +116,18 @@ function bucketedListEntries(
   );
 }
 
+function flatListEntries(
+  qc: QueryClient,
+  wsId: string,
+): [QueryKey, IssueFlatCache][] {
+  return qc
+    .getQueriesData<IssueFlatCache>({ queryKey: issueKeys.flatAll(wsId) })
+    .filter(
+      (entry): entry is [QueryKey, IssueFlatCache] =>
+        !!entry[1] && Array.isArray(entry[1].pages),
+    );
+}
+
 export function applyIssueChange(
   qc: QueryClient,
   wsId: string,
@@ -120,6 +145,7 @@ export function applyIssueChange(
 ): IssueCacheChangeResult {
   const { changed, baseIssue } = opts;
   const prevLists: [QueryKey, ListIssuesCache][] = [];
+  const prevFlatLists: [QueryKey, IssueFlatCache][] = [];
   const staleKeys: QueryKey[] = [];
   let prevIssue: Issue | undefined = baseIssue;
 
@@ -207,6 +233,28 @@ export function applyIssueChange(
     staleKeys.push(key);
   }
 
+  // Flat table windows have global ordering and may carry client-side facets.
+  // Patch a loaded row immediately for responsive inline editing, then mark
+  // the exact window stale so the server can reconcile ordering, membership,
+  // totals, and unloaded pages after the write commits.
+  for (const [key, data] of flatListEntries(qc, wsId)) {
+    let found: Issue | undefined;
+    const pages = data.pages.map((page) => ({
+      ...page,
+      issues: page.issues.map((issue) => {
+        if (issue.id !== id) return issue;
+        found = issue;
+        return { ...issue, ...patch };
+      }),
+    }));
+    if (found) {
+      if (!prevIssue) prevIssue = found;
+      prevFlatLists.push([key, data]);
+      qc.setQueryData<IssueFlatCache>(key, { ...data, pages });
+    }
+    staleKeys.push(key);
+  }
+
   const prevDetail = qc.getQueryData<Issue>(issueKeys.detail(wsId, id));
   if (prevDetail) {
     qc.setQueryData<Issue>(issueKeys.detail(wsId, id), {
@@ -224,7 +272,14 @@ export function applyIssueChange(
     if (prevInboxList) patchInboxIssueStatus(qc, wsId, id, patch.status);
   }
 
-  return { prevLists, prevDetail, prevInboxList, staleKeys, prevIssue };
+  return {
+    prevLists,
+    prevFlatLists,
+    prevDetail,
+    prevInboxList,
+    staleKeys,
+    prevIssue,
+  };
 }
 
 /** Restore every snapshot captured by {@link applyIssueChange} — the onError
@@ -235,10 +290,13 @@ export function rollbackIssueChange(
   id: string,
   result: Pick<
     IssueCacheChangeResult,
-    "prevLists" | "prevDetail" | "prevInboxList"
+    "prevLists" | "prevFlatLists" | "prevDetail" | "prevInboxList"
   >,
 ) {
   for (const [key, snapshot] of result.prevLists) {
+    qc.setQueryData(key, snapshot);
+  }
+  for (const [key, snapshot] of result.prevFlatLists) {
     qc.setQueryData(key, snapshot);
   }
   if (result.prevDetail !== undefined) {

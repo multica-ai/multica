@@ -1,4 +1,9 @@
-import { keepPreviousData, queryOptions, type QueryClient } from "@tanstack/react-query";
+import {
+  infiniteQueryOptions,
+  keepPreviousData,
+  queryOptions,
+  type QueryClient,
+} from "@tanstack/react-query";
 import { api } from "../api";
 import type {
   GroupedIssuesResponse,
@@ -29,6 +34,19 @@ export const issueKeys = {
   /** FULL KEY for queryOptions — includes sort. */
   listSorted: (wsId: string, sort?: IssueSortParam) =>
     [...issueKeys.list(wsId), sort ?? {}] as const,
+  flatAll: (wsId: string) => [...issueKeys.all(wsId), "flat"] as const,
+  flat: (
+    wsId: string,
+    scope: string,
+    filter: MyIssuesFilter,
+    sort?: IssueSortParam,
+  ) => [...issueKeys.flatAll(wsId), scope, filter, sort ?? {}] as const,
+  flatExport: (
+    wsId: string,
+    scope: string,
+    filter: MyIssuesFilter,
+    sort?: IssueSortParam,
+  ) => [...issueKeys.flatAll(wsId), "export", scope, filter, sort ?? {}] as const,
   assigneeGroupsAll: (wsId: string) =>
     [...issueKeys.all(wsId), "assignee-groups"] as const,
   assigneeGroups: (wsId: string, filter: AssigneeGroupedIssuesFilter) =>
@@ -137,6 +155,8 @@ export type AssigneeGroupedIssuesFilter = Omit<
 
 /** Page size per status column. */
 export const ISSUE_PAGE_SIZE = 50;
+export const ISSUE_FLAT_PAGE_SIZE = 100;
+export const ISSUE_FLAT_MAX_ISSUES = 10_000;
 
 /**
  * Statuses fetched and paginated into the list/board cache — every lifecycle
@@ -191,6 +211,15 @@ async function fetchFirstPages(filter: MyIssuesFilter = {}, sort?: IssueSortPara
  * 50-per-status × 3 widening (deduped) is what the page renders.
  */
 const MERGE_PRIORITY_RANK: Record<string, number> = { urgent: 0, high: 1, medium: 2, low: 3, none: 4 };
+const MERGE_STATUS_RANK: Record<string, number> = {
+  backlog: 0,
+  todo: 1,
+  in_progress: 2,
+  in_review: 3,
+  done: 4,
+  blocked: 5,
+  cancelled: 6,
+};
 
 /**
  * Comparator mirroring the server's ORDER BY semantics (including
@@ -199,7 +228,7 @@ const MERGE_PRIORITY_RANK: Record<string, number> = { urgent: 0, high: 1, medium
  * relation order (assigned → created → involves) would override the sort the
  * user picked — e.g. assigned=9 rendering before created=1 (review round 3).
  */
-function compareIssuesForSort(a: Issue, b: Issue, sort?: IssueSortParam): number {
+export function compareIssuesForSort(a: Issue, b: Issue, sort?: IssueSortParam): number {
   const by = sort?.sort_by ?? "position";
   const dir = by !== "position" && sort?.sort_direction === "desc" ? -1 : 1;
   const tieBreak = () =>
@@ -225,12 +254,16 @@ function compareIssuesForSort(a: Issue, b: Issue, sort?: IssueSortParam): number
     return dir * String(av).localeCompare(String(bv)) || tieBreak();
   }
   switch (by) {
+    case "status":
+      return dir * ((MERGE_STATUS_RANK[a.status] ?? 9) - (MERGE_STATUS_RANK[b.status] ?? 9)) || tieBreak();
     case "priority":
       return dir * ((MERGE_PRIORITY_RANK[a.priority] ?? 9) - (MERGE_PRIORITY_RANK[b.priority] ?? 9)) || tieBreak();
     case "title":
       return dir * a.title.localeCompare(b.title) || tieBreak();
     case "created_at":
       return dir * (new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+    case "updated_at":
+      return dir * (new Date(a.updated_at).getTime() - new Date(b.updated_at).getTime()) || tieBreak();
     case "start_date":
       return missingAware(a.start_date, b.start_date);
     case "due_date":
@@ -239,6 +272,92 @@ function compareIssuesForSort(a: Issue, b: Issue, sort?: IssueSortParam): number
     default:
       return a.position - b.position || tieBreak();
   }
+}
+
+async function fetchAllFlatPages(
+  filter: MyIssuesFilter,
+  sort?: IssueSortParam,
+): Promise<Issue[]> {
+  const issues: Issue[] = [];
+  let offset = 0;
+  while (offset < ISSUE_FLAT_MAX_ISSUES) {
+    const response = await api.listIssues({
+      ...filter,
+      ...sort,
+      limit: ISSUE_FLAT_PAGE_SIZE,
+      offset,
+    });
+    issues.push(...response.issues);
+    if (response.issues.length < ISSUE_FLAT_PAGE_SIZE) break;
+    if (issues.length >= response.total) break;
+    offset += ISSUE_FLAT_PAGE_SIZE;
+  }
+  return issues;
+}
+
+async function fetchAllMyFlatIssues(
+  userId: string,
+  sort?: IssueSortParam,
+): Promise<Issue[]> {
+  const relations = await Promise.all([
+    fetchAllFlatPages({ assignee_id: userId }, sort),
+    fetchAllFlatPages({ creator_id: userId }, sort),
+    fetchAllFlatPages({ involves_user_id: userId }, sort),
+  ]);
+  const byId = new Map<string, Issue>();
+  for (const issues of relations) {
+    for (const issue of issues) byId.set(issue.id, issue);
+  }
+  return [...byId.values()].sort((a, b) => compareIssuesForSort(a, b, sort));
+}
+
+export function issueFlatListOptions(
+  wsId: string,
+  scope: string,
+  filter: MyIssuesFilter,
+  userId?: string,
+  sort?: IssueSortParam,
+) {
+  const allMyIssues = scope === "all" && !!userId;
+  return infiniteQueryOptions({
+    queryKey: issueKeys.flat(wsId, scope, filter, sort),
+    initialPageParam: 0,
+    queryFn: async ({ pageParam }) => {
+      if (allMyIssues) {
+        const issues = await fetchAllMyFlatIssues(userId, sort);
+        return { issues, total: issues.length };
+      }
+      return api.listIssues({
+        ...filter,
+        ...sort,
+        limit: ISSUE_FLAT_PAGE_SIZE,
+        offset: pageParam,
+      });
+    },
+    getNextPageParam: (lastPage, allPages) => {
+      if (allMyIssues) return undefined;
+      const loaded = allPages.reduce((count, page) => count + page.issues.length, 0);
+      return loaded < lastPage.total ? loaded : undefined;
+    },
+    placeholderData: keepPreviousData,
+  });
+}
+
+export function issueFlatExportOptions(
+  wsId: string,
+  scope: string,
+  filter: MyIssuesFilter,
+  userId?: string,
+  sort?: IssueSortParam,
+) {
+  return queryOptions({
+    queryKey: issueKeys.flatExport(wsId, scope, filter, sort),
+    queryFn: () =>
+      scope === "all" && userId
+        ? fetchAllMyFlatIssues(userId, sort)
+        : fetchAllFlatPages(filter, sort),
+    staleTime: 0,
+  });
 }
 
 async function fetchAllMyFirstPages(userId: string, sort?: IssueSortParam): Promise<ListIssuesCache> {

@@ -936,8 +936,11 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 	sortIsProperty := false
 	if s := r.URL.Query().Get("sort"); s != "" {
 		switch s {
-		case "position", "title", "created_at", "start_date", "due_date":
+		case "position", "title", "created_at", "updated_at", "start_date", "due_date":
 			sortCol = s
+		case "status":
+			sortCol = "CASE i.status WHEN 'backlog' THEN 0 WHEN 'todo' THEN 1 WHEN 'in_progress' THEN 2 WHEN 'in_review' THEN 3 WHEN 'done' THEN 4 WHEN 'blocked' THEN 5 WHEN 'cancelled' THEN 6 ELSE 7 END"
+			sortIsExpr = true
 		case "priority":
 			sortCol = "CASE i.priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 WHEN 'low' THEN 3 ELSE 4 END"
 			sortIsExpr = true
@@ -1539,8 +1542,11 @@ func (h *Handler) ListGroupedIssues(w http.ResponseWriter, r *http.Request) {
 	sortIsProperty := false
 	if s := r.URL.Query().Get("sort"); s != "" {
 		switch s {
-		case "position", "title", "created_at", "start_date", "due_date":
+		case "position", "title", "created_at", "updated_at", "start_date", "due_date":
 			sortCol = s
+		case "status":
+			sortCol = "CASE i.status WHEN 'backlog' THEN 0 WHEN 'todo' THEN 1 WHEN 'in_progress' THEN 2 WHEN 'in_review' THEN 3 WHEN 'done' THEN 4 WHEN 'blocked' THEN 5 WHEN 'cancelled' THEN 6 ELSE 7 END"
+			sortIsExpr = true
 		case "priority":
 			sortCol = "CASE i.priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 WHEN 'low' THEN 3 ELSE 4 END"
 			sortIsExpr = true

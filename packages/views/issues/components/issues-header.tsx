@@ -17,6 +17,7 @@ import {
   SlidersHorizontal,
   X,
   Tag,
+  Table2,
   User,
   UserMinus,
   UserPen,
@@ -67,6 +68,7 @@ import {
   GROUPING_OPTIONS,
   SWIMLANE_GROUPINGS,
   CARD_PROPERTY_OPTIONS,
+  TABLE_SYSTEM_COLUMNS,
   type ActorFilterValue,
   type IssueDateField,
   type IssueDateFilter,
@@ -894,6 +896,7 @@ export function IssueDisplayControls({
   const grouping = useViewStore((s) => s.grouping);
   const swimlaneGrouping = useViewStore((s) => s.swimlaneGrouping);
   const cardProperties = useViewStore((s) => s.cardProperties);
+  const tableColumns = useViewStore((s) => s.tableColumns);
   const showSubIssues = useViewStore((s) => s.showSubIssues);
   const act = useViewStoreApi().getState();
   const headerWsId = useWorkspaceId();
@@ -918,6 +921,10 @@ export function IssueDisplayControls({
   const groupableProperties = useMemo(
     () => workspaceProperties.filter((p) => p.type === "select"),
     [workspaceProperties],
+  );
+  const visibleTableColumns = useMemo(
+    () => new Set(tableColumns.map((column) => column.key)),
+    [tableColumns],
   );
 
   const counts = useIssueCounts(scopedIssues);
@@ -947,12 +954,14 @@ export function IssueDisplayControls({
   });
   const hasActiveFilters = activeFilterCount > 0;
 
-  const SORT_LABEL_KEY: Record<typeof SORT_OPTIONS[number]["value"], "sort_manual" | "sort_priority" | "sort_start_date" | "sort_due_date" | "sort_created" | "sort_title"> = {
+  const SORT_LABEL_KEY: Record<typeof SORT_OPTIONS[number]["value"], "sort_manual" | "sort_status" | "sort_priority" | "sort_start_date" | "sort_due_date" | "sort_created" | "sort_updated" | "sort_title"> = {
     position: "sort_manual",
+    status: "sort_status",
     priority: "sort_priority",
     start_date: "sort_start_date",
     due_date: "sort_due_date",
     created_at: "sort_created",
+    updated_at: "sort_updated",
     title: "sort_title",
   };
   const GROUPING_LABEL_KEY: Record<typeof GROUPING_OPTIONS[number]["value"], "group_status" | "group_assignee"> = {
@@ -1428,39 +1437,101 @@ export function IssueDisplayControls({
               />
             </label>
 
-            <div className="px-3 py-2.5">
-              <span className="text-xs font-medium text-muted-foreground">
-                {t(($) => $.display.card_properties_section)}
-              </span>
-              <div className="mt-2 space-y-2">
-                {CARD_PROPERTY_OPTIONS.map((opt) => (
-                  <label
-                    key={opt.key}
-                    className="flex cursor-pointer items-center justify-between"
-                  >
-                    <span className="text-sm">{t(($) => $.display[CARD_PROPERTY_LABEL_KEY[opt.key]])}</span>
-                    <Switch
-                      size="sm"
-                      checked={cardProperties[opt.key]}
-                      onCheckedChange={() => act.toggleCardProperty(opt.key)}
-                    />
-                  </label>
-                ))}
-                {workspaceProperties.map((property) => (
-                  <label
-                    key={property.id}
-                    className="flex cursor-pointer items-center justify-between"
-                  >
-                    <span className="truncate text-sm">{property.name}</span>
-                    <Switch
-                      size="sm"
-                      checked={cardPropertyIds.includes(property.id)}
-                      onCheckedChange={() => act.toggleCardPropertyId(property.id)}
-                    />
-                  </label>
-                ))}
+            {viewMode === "table" ? (
+              <div className="max-h-80 overflow-y-auto px-3 py-2.5">
+                <span className="text-xs font-medium text-muted-foreground">
+                  {t(($) => $.table.columns.section)}
+                </span>
+                <p className="mt-2 text-xs text-muted-foreground">
+                  {t(($) => $.table.columns.system_section)}
+                </p>
+                <div className="mt-1.5 space-y-2">
+                  {TABLE_SYSTEM_COLUMNS.map((key) => (
+                    <label
+                      key={key}
+                      className={
+                        key === "title"
+                          ? "flex items-center justify-between"
+                          : "flex cursor-pointer items-center justify-between"
+                      }
+                    >
+                      <span className="text-sm">
+                        {t(($) => $.table.columns[key])}
+                      </span>
+                      <Switch
+                        size="sm"
+                        checked={visibleTableColumns.has(key)}
+                        disabled={key === "title"}
+                        onCheckedChange={() => act.toggleTableColumn(key)}
+                      />
+                    </label>
+                  ))}
+                </div>
+                {workspaceProperties.length > 0 && (
+                  <>
+                    <p className="mt-3 text-xs text-muted-foreground">
+                      {t(($) => $.table.columns.property_section)}
+                    </p>
+                    <div className="mt-1.5 space-y-2">
+                      {workspaceProperties.map((property) => {
+                        const key = `property:${property.id}` as const;
+                        return (
+                          <label
+                            key={property.id}
+                            className="flex cursor-pointer items-center justify-between gap-3"
+                          >
+                            <span className="truncate text-sm">
+                              {property.name}
+                            </span>
+                            <Switch
+                              size="sm"
+                              checked={visibleTableColumns.has(key)}
+                              onCheckedChange={() =>
+                                act.toggleTableColumn(key)
+                              }
+                            />
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </>
+                )}
               </div>
-            </div>
+            ) : (
+              <div className="px-3 py-2.5">
+                <span className="text-xs font-medium text-muted-foreground">
+                  {t(($) => $.display.card_properties_section)}
+                </span>
+                <div className="mt-2 space-y-2">
+                  {CARD_PROPERTY_OPTIONS.map((opt) => (
+                    <label
+                      key={opt.key}
+                      className="flex cursor-pointer items-center justify-between"
+                    >
+                      <span className="text-sm">{t(($) => $.display[CARD_PROPERTY_LABEL_KEY[opt.key]])}</span>
+                      <Switch
+                        size="sm"
+                        checked={cardProperties[opt.key]}
+                        onCheckedChange={() => act.toggleCardProperty(opt.key)}
+                      />
+                    </label>
+                  ))}
+                  {workspaceProperties.map((property) => (
+                    <label
+                      key={property.id}
+                      className="flex cursor-pointer items-center justify-between"
+                    >
+                      <span className="truncate text-sm">{property.name}</span>
+                      <Switch
+                        size="sm"
+                        checked={cardPropertyIds.includes(property.id)}
+                        onCheckedChange={() => act.toggleCardPropertyId(property.id)}
+                      />
+                    </label>
+                  ))}
+                </div>
+              </div>
+            )}
           </PopoverContent>
         </Popover>
 
@@ -1477,6 +1548,8 @@ export function IssueDisplayControls({
                       <Button variant="outline" size="sm" className={controlButtonClass}>
                         {viewMode === "board" ? (
                           <Columns3 className="size-3.5" />
+                        ) : viewMode === "table" ? (
+                          <Table2 className="size-3.5" />
                         ) : viewMode === "swimlane" ? (
                           <Waves className="size-3.5" />
                         ) : viewMode === "gantt" && allowGantt ? (
@@ -1487,6 +1560,8 @@ export function IssueDisplayControls({
                         <span className="hidden md:inline">
                           {viewMode === "board"
                             ? t(($) => $.view.board)
+                            : viewMode === "table"
+                            ? t(($) => $.view.table)
                             : viewMode === "swimlane"
                             ? t(($) => $.view.swimlane)
                             : viewMode === "gantt" && allowGantt
@@ -1501,6 +1576,8 @@ export function IssueDisplayControls({
               <TooltipContent side="bottom">
                 {viewMode === "board"
                   ? t(($) => $.view.tooltip_board)
+                  : viewMode === "table"
+                  ? t(($) => $.view.tooltip_table)
                   : viewMode === "swimlane"
                   ? t(($) => $.view.tooltip_swimlane)
                   : viewMode === "gantt" && allowGantt
@@ -1520,6 +1597,10 @@ export function IssueDisplayControls({
                 <DropdownMenuRadioItem value="list">
                   <List />
                   {t(($) => $.view.list)}
+                </DropdownMenuRadioItem>
+                <DropdownMenuRadioItem value="table">
+                  <Table2 />
+                  {t(($) => $.view.table)}
                 </DropdownMenuRadioItem>
                 <DropdownMenuRadioItem value="swimlane">
                   <Waves />

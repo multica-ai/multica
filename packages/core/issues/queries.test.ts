@@ -11,9 +11,12 @@ import type {
 } from "../types";
 import {
   CHILDREN_BY_PARENTS_CHUNK_SIZE,
+  ISSUE_FLAT_PAGE_SIZE,
   PROJECT_GANTT_MAX_ISSUES,
   PROJECT_GANTT_PAGE_LIMIT,
   childrenByParentsOptions,
+  issueFlatExportOptions,
+  issueFlatListOptions,
   issueIdentifierOptions,
   issueKeys,
   projectGanttIssuesOptions,
@@ -22,7 +25,7 @@ import {
 const WS_ID = "ws-1";
 const PROJECT_ID = "project-1";
 
-function makeIssue(idx: number): Issue {
+function makeIssue(idx: number, overrides: Partial<Issue> = {}): Issue {
   return {
     id: `issue-${idx}`,
     workspace_id: WS_ID,
@@ -47,6 +50,7 @@ function makeIssue(idx: number): Issue {
   properties: {},
     created_at: "2025-01-01T00:00:00Z",
     updated_at: "2025-01-01T00:00:00Z",
+    ...overrides,
   };
 }
 
@@ -154,6 +158,114 @@ describe("projectGanttIssuesOptions", () => {
   it("uses the project-scoped Gantt cache key", () => {
     const options = projectGanttIssuesOptions(WS_ID, PROJECT_ID);
     expect(options.queryKey).toEqual(issueKeys.projectGantt(WS_ID, PROJECT_ID));
+  });
+});
+
+describe("flat issue table queries", () => {
+  let qc: QueryClient;
+
+  beforeEach(() => {
+    qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  });
+
+  afterEach(() => {
+    qc.clear();
+    vi.restoreAllMocks();
+  });
+
+  it("loads one offset page for the interactive table window", async () => {
+    const listIssues = vi
+      .fn<(params?: ListIssuesParams) => Promise<ListIssuesResponse>>()
+      .mockResolvedValue({ issues: [makeIssue(1)], total: 1 });
+    installFakeApi(listIssues);
+
+    const data = await qc.fetchInfiniteQuery(
+      issueFlatListOptions(
+        WS_ID,
+        "project:project-1",
+        { project_id: PROJECT_ID },
+        undefined,
+        { sort_by: "updated_at", sort_direction: "desc" },
+      ),
+    );
+
+    expect(data.pages).toHaveLength(1);
+    expect(data.pages[0]?.issues.map((issue) => issue.id)).toEqual([
+      "issue-1",
+    ]);
+    expect(listIssues).toHaveBeenCalledWith({
+      project_id: PROJECT_ID,
+      sort_by: "updated_at",
+      sort_direction: "desc",
+      limit: ISSUE_FLAT_PAGE_SIZE,
+      offset: 0,
+    });
+  });
+
+  it("walks every page only for an explicit full CSV export", async () => {
+    const first = Array.from({ length: ISSUE_FLAT_PAGE_SIZE }, (_, index) =>
+      makeIssue(index + 1),
+    );
+    const second = [makeIssue(101), makeIssue(102), makeIssue(103)];
+    const listIssues = vi
+      .fn<(params?: ListIssuesParams) => Promise<ListIssuesResponse>>()
+      .mockImplementation(async (params) => ({
+        issues: (params?.offset ?? 0) === 0 ? first : second,
+        total: 103,
+      }));
+    installFakeApi(listIssues);
+
+    const issues = await qc.fetchQuery(
+      issueFlatExportOptions(
+        WS_ID,
+        "project:project-1",
+        { project_id: PROJECT_ID },
+        undefined,
+        { sort_by: "status", sort_direction: "asc" },
+      ),
+    );
+
+    expect(issues).toHaveLength(103);
+    expect(listIssues).toHaveBeenCalledTimes(2);
+    expect(listIssues.mock.calls.map(([params]) => params?.offset)).toEqual([
+      0,
+      ISSUE_FLAT_PAGE_SIZE,
+    ]);
+  });
+
+  it("deduplicates the three My Issues relations and restores global sort order", async () => {
+    const shared = makeIssue(1, { status: "done" });
+    const backlog = makeIssue(2, { status: "backlog" });
+    const todo = makeIssue(3, { status: "todo" });
+    const listIssues = vi
+      .fn<(params?: ListIssuesParams) => Promise<ListIssuesResponse>>()
+      .mockImplementation(async (params) => {
+        if (params?.assignee_id) {
+          return { issues: [shared], total: 1 };
+        }
+        if (params?.creator_id) {
+          return { issues: [backlog, shared], total: 2 };
+        }
+        return { issues: [todo], total: 1 };
+      });
+    installFakeApi(listIssues);
+
+    const issues = await qc.fetchQuery(
+      issueFlatExportOptions(
+        WS_ID,
+        "all",
+        {},
+        "user-1",
+        { sort_by: "status", sort_direction: "asc" },
+      ),
+    );
+
+    expect(issues.map((issue) => issue.id)).toEqual([
+      backlog.id,
+      todo.id,
+      shared.id,
+    ]);
+    expect(listIssues).toHaveBeenCalledTimes(3);
   });
 });
 

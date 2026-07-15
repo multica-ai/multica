@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useMemo } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useCallback, useEffect, useMemo } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type { QueryKey } from "@tanstack/react-query";
 import type {
   Issue,
@@ -21,6 +21,7 @@ import {
   type IssueSurfaceQueryPlan,
 } from "@multica/core/issues/surface/query-plan";
 import type { IssueScope } from "@multica/core/issues/surface/scope";
+import { issueSurfaceFlatExportOptions } from "@multica/core/issues/surface/repository";
 import type { IssueDateFilter, SortField } from "@multica/core/issues/stores/view-store";
 import { propertyListOptions } from "@multica/core/properties";
 import { propertyIdFromViewKey } from "@multica/core/issues/stores/view-store";
@@ -74,6 +75,11 @@ export interface IssueSurfaceController {
   selection: IssueSurfaceSelection;
   childProgressMap: Map<string, ChildProgress>;
   projectMap: Map<string, Project>;
+  fetchNextFlatPage: () => Promise<unknown>;
+  hasNextFlatPage: boolean;
+  isFetchingNextFlatPage: boolean;
+  flatTotal: number;
+  exportTableIssues: () => Promise<Issue[]>;
   isLoading: boolean;
   /** See IssueSurfaceData.isRefreshing — placeholder-backed revalidation. */
   isRefreshing: boolean;
@@ -111,6 +117,7 @@ export function useIssueSurfaceController({
   createDefaults,
 }: UseIssueSurfaceControllerInput): IssueSurfaceController {
   const wsId = useWorkspaceId();
+  const queryClient = useQueryClient();
   const queryPlan = useMemo<IssueSurfaceQueryPlan>(
     () => buildIssueSurfaceQueryPlan(scope),
     [scope],
@@ -137,6 +144,7 @@ export function useIssueSurfaceController({
   const showSubIssues = useViewStore((s) => s.showSubIssues);
   const cardProperties = useViewStore((s) => s.cardProperties);
   const swimlaneGrouping = useViewStore((s) => s.swimlaneGrouping);
+  const tableColumns = useViewStore((s) => s.tableColumns);
 
   const allowedModes = useMemo(() => new Set<IssueSurfaceMode>(modes), [modes]);
   const fallbackMode = modes[0] ?? "list";
@@ -216,6 +224,7 @@ export function useIssueSurfaceController({
   const usesAssigneeBoard =
     effectiveViewMode === "board" && grouping === "assignee";
   const usesGantt = effectiveViewMode === "gantt" && !!projectId;
+  const usesTable = effectiveViewMode === "table";
 
   const projectFilterState = useMemo(
     () => ({
@@ -233,6 +242,7 @@ export function useIssueSurfaceController({
     projectId,
     usesAssigneeBoard,
     usesGantt,
+    usesTable,
     sort,
     statusFilters,
     priorityFilters,
@@ -247,12 +257,22 @@ export function useIssueSurfaceController({
     showSubIssues,
     loadProjects:
       cardProperties.project ||
+      (usesTable && tableColumns.some((column) => column.key === "project")) ||
       (effectiveViewMode === "swimlane" && swimlaneGrouping === "project"),
   });
+
+  const exportTableIssues = useCallback(async () => {
+    const exportIssues = await queryClient.fetchQuery(
+      issueSurfaceFlatExportOptions(wsId, queryPlan, sort),
+    );
+    return data.filterIssuesForExport(exportIssues);
+  }, [data, queryClient, queryPlan, sort, wsId]);
 
   const { actions, openCreateIssue, moveIssue } = useIssueSurfaceActions({
     createDefaults: resolvedCreateDefaults,
   });
+
+  const { filterIssuesForExport: _filterIssuesForExport, ...surfaceData } = data;
 
   return {
     scopeKey,
@@ -260,11 +280,12 @@ export function useIssueSurfaceController({
     createDefaults: resolvedCreateDefaults,
     viewMode: effectiveViewMode,
     allowGantt: allowedModes.has("gantt") && !!projectId,
-    ...data,
+    ...surfaceData,
     sort,
     actions,
     selection,
     openCreateIssue,
     moveIssue,
+    exportTableIssues,
   };
 }

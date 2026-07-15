@@ -1,7 +1,11 @@
 "use client";
 
-import { useMemo } from "react";
-import { useQuery, type QueryKey } from "@tanstack/react-query";
+import { useCallback, useMemo } from "react";
+import {
+  useInfiniteQuery,
+  useQuery,
+  type QueryKey,
+} from "@tanstack/react-query";
 import type { Issue, IssueAssigneeGroup, Project } from "@multica/core/types";
 import { ALL_STATUSES } from "@multica/core/issues/config";
 import { projectListOptions } from "@multica/core/projects/queries";
@@ -13,6 +17,7 @@ import {
 } from "@multica/core/issues/queries";
 import {
   issueSurfaceAssigneeGroupsOptions,
+  issueSurfaceFlatOptions,
   issueSurfaceGanttOptions,
   issueSurfaceListOptions,
 } from "@multica/core/issues/surface/repository";
@@ -53,6 +58,11 @@ export interface IssueSurfaceData {
   activity: IssueSurfaceActivity;
   childProgressMap: Map<string, ChildProgress>;
   projectMap: Map<string, Project>;
+  fetchNextFlatPage: () => Promise<unknown>;
+  hasNextFlatPage: boolean;
+  isFetchingNextFlatPage: boolean;
+  flatTotal: number;
+  filterIssuesForExport: (issues: Issue[]) => Issue[];
   isLoading: boolean;
   /** The window's data is being revalidated while the previous snapshot is
    *  shown as a placeholder (sort/date change, or any grouped-board filter
@@ -68,6 +78,7 @@ export function useIssueSurfaceData({
   projectId,
   usesAssigneeBoard,
   usesGantt,
+  usesTable,
   sort,
   statusFilters,
   priorityFilters,
@@ -87,6 +98,7 @@ export function useIssueSurfaceData({
   projectId?: string;
   usesAssigneeBoard: boolean;
   usesGantt: boolean;
+  usesTable: boolean;
   sort: IssueSortParam;
   statusFilters: IssueStatus[];
   priorityFilters: IssueFilterState["priorityFilters"];
@@ -141,7 +153,7 @@ export function useIssueSurfaceData({
 
   const statusIssuesQuery = useQuery({
     ...issueSurfaceListOptions(wsId, queryPlan, sort),
-    enabled: !usesAssigneeBoard && !usesGantt,
+    enabled: !usesAssigneeBoard && !usesGantt && !usesTable,
   });
   const assigneeGroupsQuery = useQuery({
     ...activeAssigneeGroupsOptions,
@@ -151,6 +163,18 @@ export function useIssueSurfaceData({
     ...issueSurfaceGanttOptions(wsId, projectId ?? ""),
     enabled: usesGantt,
   });
+  const flatIssuesQuery = useInfiniteQuery({
+    ...issueSurfaceFlatOptions(wsId, queryPlan, sort),
+    enabled: usesTable,
+  });
+
+  const flatIssues = useMemo(
+    () =>
+      flatIssuesQuery.data?.pages.flatMap((page) => page.issues) ??
+      EMPTY_ISSUES,
+    [flatIssuesQuery.data?.pages],
+  );
+  const flatTotal = flatIssuesQuery.data?.pages[0]?.total ?? 0;
 
   const bucketedIssues = useMemo(() => {
     return usesAssigneeBoard
@@ -164,7 +188,11 @@ export function useIssueSurfaceData({
   // isEmpty check. The status filter narrows this set like any other status —
   // it no longer unlocks an otherwise-hidden bucket.
   const ganttIssues = ganttIssuesQuery.data ?? EMPTY_ISSUES;
-  const surfaceIssues = usesGantt ? ganttIssues : bucketedIssues;
+  const surfaceIssues = usesGantt
+    ? ganttIssues
+    : usesTable
+      ? flatIssues
+      : bucketedIssues;
 
   const baseFilterState = useMemo<IssueFilterState>(
     () => ({
@@ -198,6 +226,11 @@ export function useIssueSurfaceData({
   const issues = useMemo(
     () => applyIssueFilters(surfaceIssues, baseFilterState, filterContext),
     [baseFilterState, filterContext, surfaceIssues],
+  );
+  const filterIssuesForExport = useCallback(
+    (exportIssues: Issue[]) =>
+      applyIssueFilters(exportIssues, baseFilterState, filterContext),
+    [baseFilterState, filterContext],
   );
 
   const statuslessFilterState = useMemo<IssueFilterState>(
@@ -299,7 +332,9 @@ export function useIssueSurfaceData({
     ? assigneeGroupsQuery.isLoading
     : usesGantt
       ? ganttIssuesQuery.isLoading
-      : statusIssuesQuery.isLoading;
+      : usesTable
+        ? flatIssuesQuery.isLoading
+        : statusIssuesQuery.isLoading;
 
   // Placeholder-backed revalidation of the ACTIVE query only. First loads are
   // isLoading (no previous data to place-hold); gantt has no placeholder
@@ -308,7 +343,9 @@ export function useIssueSurfaceData({
     ? assigneeGroupsQuery.isPlaceholderData
     : usesGantt
       ? false
-      : statusIssuesQuery.isPlaceholderData;
+      : usesTable
+        ? flatIssuesQuery.isPlaceholderData
+        : statusIssuesQuery.isPlaceholderData;
 
   return {
     surfaceIssues,
@@ -331,6 +368,11 @@ export function useIssueSurfaceData({
     activity,
     childProgressMap,
     projectMap,
+    fetchNextFlatPage: flatIssuesQuery.fetchNextPage,
+    hasNextFlatPage: flatIssuesQuery.hasNextPage ?? false,
+    isFetchingNextFlatPage: flatIssuesQuery.isFetchingNextPage,
+    flatTotal,
+    filterIssuesForExport,
     isLoading,
     isRefreshing,
     // isEmpty asserts "this window has no issues". The board/list/swimlane
@@ -340,6 +382,9 @@ export function useIssueSurfaceData({
     // rule as surface membership). GanttView renders its own accurate
     // "no scheduled issues" empty state instead of the generic create-issue
     // one.
-    isEmpty: !isLoading && !usesGantt && surfaceIssues.length === 0,
+    isEmpty:
+      !isLoading &&
+      !usesGantt &&
+      (usesTable ? flatTotal === 0 : surfaceIssues.length === 0),
   };
 }

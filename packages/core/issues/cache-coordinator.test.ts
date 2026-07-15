@@ -3,6 +3,7 @@ import { QueryClient, hashKey } from "@tanstack/react-query";
 import {
   applyIssueChange,
   rollbackIssueChange,
+  type IssueFlatCache,
 } from "./cache-coordinator";
 import { issueChangedDims } from "./surface/membership";
 import { issueKeys, type IssueSortParam } from "./queries";
@@ -25,6 +26,7 @@ const membersKey = issueKeys.myListSorted(
   sort,
 );
 const inboxKey = inboxKeys.list(WS_ID);
+const flatKey = issueKeys.flat(WS_ID, "workspace:all", {}, sort);
 
 function makeIssue(idx: number, overrides: Partial<Issue> = {}): Issue {
   return {
@@ -111,6 +113,29 @@ describe("applyIssueChange", () => {
       "renamed",
     );
     expect(result.staleKeys).toEqual([]);
+  });
+
+  it("patches loaded flat table pages, marks their order stale, and rolls back", () => {
+    qc.setQueryData<IssueFlatCache>(flatKey, {
+      pages: [{ issues: [issue()], total: 1 }],
+      pageParams: [0],
+    });
+
+    const patch = { title: "renamed in table" };
+    const result = applyIssueChange(qc, WS_ID, "issue-1", patch, {
+      changed: issueChangedDims(patch, issue()),
+      baseIssue: issue(),
+    });
+
+    expect(
+      qc.getQueryData<IssueFlatCache>(flatKey)?.pages[0]?.issues[0]?.title,
+    ).toBe("renamed in table");
+    expect(result.staleKeys.map(hashKey)).toContain(hashKey(flatKey));
+
+    rollbackIssueChange(qc, WS_ID, "issue-1", result);
+    expect(
+      qc.getQueryData<IssueFlatCache>(flatKey)?.pages[0]?.issues[0]?.title,
+    ).toBe("Issue 1");
   });
 
   it("status change: rebuckets loaded cards, patches inbox, adjusts counts for absent-but-member lists", () => {

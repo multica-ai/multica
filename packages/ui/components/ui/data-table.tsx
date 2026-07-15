@@ -38,6 +38,11 @@ interface DataTableProps<TData> extends React.ComponentProps<"div"> {
   // a detail page on row click without nesting an <a> around <tr>,
   // which is invalid HTML.
   onRowClick?: (row: Row<TData>) => void;
+  // Optional escape hatch for semantic rows such as collapsible group
+  // headers. Return null/undefined to use the standard data row renderer.
+  renderRow?: (row: Row<TData>) => React.ReactNode;
+  // A caller-supplied <tfoot> (summary / quick-create rows, for example).
+  footer?: React.ReactNode;
 }
 
 // Headless data-table shell — adapted from Dice UI's data-table
@@ -62,6 +67,8 @@ export function DataTable<TData>({
   actionBar,
   emptyMessage = "No results.",
   onRowClick,
+  renderRow,
+  footer,
   className,
   ...props
 }: DataTableProps<TData>) {
@@ -247,57 +254,60 @@ export function DataTable<TData>({
           </TableHeader>
           <TableBody>
             {table.getRowModel().rows?.length ? (
-              table.getRowModel().rows.map((row) => (
-                <TableRow
-                  key={row.id}
-                  data-state={row.getIsSelected() && "selected"}
-                  onClick={
-                    onRowClick ? () => onRowClick(row) : undefined
-                  }
-                  // `group` lets pinned cells track row hover via
-                  // group-hover (their bg is in className, not on the
-                  // row, so they stay opaque enough to cover content
-                  // scrolling beneath them).
-                  className={cn(
-                    "group",
-                    onRowClick && "cursor-pointer",
-                  )}
-                >
-                  {row.getVisibleCells().map((cell) => {
-                    const isPinned = cell.column.getIsPinned();
-                    const columnHasExplicitSize = hasExplicitSize(
-                      cell.column.id,
-                    );
-                    return (
-                      <TableCell
-                        key={cell.id}
-                        // px-4 across the board so cell content
-                        // aligns with the surrounding toolbar's
-                        // px-4. Narrow trailing columns (chevron /
-                        // actions) declare a column.size large enough
-                        // to fit the icon plus 16+16 padding.
-                        // Pinned cells need an opaque bg + group-
-                        // hover so they cover content scrolling
-                        // beneath them and follow row hover state.
-                        className={cn(
-                          "overflow-hidden px-4 py-2",
-                          isPinned &&
-                            "bg-background group-hover:bg-muted/50",
-                        )}
-                        style={getCellStyle(cell.column, {
-                          withBorder: true,
-                          hasExplicitSize: columnHasExplicitSize,
-                        })}
-                      >
-                        {flexRender(
-                          cell.column.columnDef.cell,
-                          cell.getContext(),
-                        )}
-                      </TableCell>
-                    );
-                  })}
-                </TableRow>
-              ))
+              table.getRowModel().rows.map((row) => {
+                const customRow = renderRow?.(row);
+                if (customRow != null) {
+                  return (
+                    <React.Fragment key={row.id}>{customRow}</React.Fragment>
+                  );
+                }
+                return (
+                  <TableRow
+                    key={row.id}
+                    data-state={row.getIsSelected() && "selected"}
+                    onClick={onRowClick ? () => onRowClick(row) : undefined}
+                    // `group` lets pinned cells track row hover via
+                    // group-hover (their bg is in className, not on the
+                    // row, so they stay opaque enough to cover content
+                    // scrolling beneath them).
+                    className={cn("group", onRowClick && "cursor-pointer")}
+                  >
+                    {row.getVisibleCells().map((cell) => {
+                      const isPinned = cell.column.getIsPinned();
+                      const columnHasExplicitSize = hasExplicitSize(
+                        cell.column.id,
+                      );
+                      return (
+                        <TableCell
+                          key={cell.id}
+                          // px-4 across the board so cell content
+                          // aligns with the surrounding toolbar's
+                          // px-4. Narrow trailing columns (chevron /
+                          // actions) declare a column.size large enough
+                          // to fit the icon plus 16+16 padding.
+                          // Pinned cells need an opaque bg + group-
+                          // hover so they cover content scrolling
+                          // beneath them and follow row hover state.
+                          className={cn(
+                            "overflow-hidden px-4 py-2",
+                            isPinned &&
+                              "bg-background group-hover:bg-muted/50",
+                          )}
+                          style={getCellStyle(cell.column, {
+                            withBorder: true,
+                            hasExplicitSize: columnHasExplicitSize,
+                          })}
+                        >
+                          {flexRender(
+                            cell.column.columnDef.cell,
+                            cell.getContext(),
+                          )}
+                        </TableCell>
+                      );
+                    })}
+                  </TableRow>
+                );
+              })
             ) : (
               <TableRow>
                 <TableCell
@@ -309,6 +319,7 @@ export function DataTable<TData>({
               </TableRow>
             )}
           </TableBody>
+          {footer}
         </table>
       </div>
       {actionBar &&

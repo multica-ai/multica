@@ -16,6 +16,7 @@ import { GanttView } from "../components/gantt-view";
 import { IssuesHeader } from "../components/issues-header";
 import { ListView } from "../components/list-view";
 import { SwimLaneView } from "../components/swimlane-view";
+import { TableView } from "../components/table-view";
 import { useT } from "../../i18n";
 import { IssueContextMenuProvider } from "../actions";
 import { IssueSurfaceActionsProvider } from "./actions-context";
@@ -161,7 +162,9 @@ function IssueSurfaceContent({
     (showClientEmpty ? showClientEmpty(renderContext) : true);
   const shouldShowBatchToolbar =
     batchToolbar !== "never" &&
-    (batchToolbar === "always" || controller.viewMode === "list");
+    (batchToolbar === "always" ||
+      controller.viewMode === "list" ||
+      controller.viewMode === "table");
 
   return (
     <IssueSurfaceActionsProvider actions={controller.actions}>
@@ -239,6 +242,19 @@ function IssueSurfaceContent({
                 onCreateIssue={openCreateIssue}
               />
             )}
+            {controller.viewMode === "table" && (
+              <TableView
+                issues={issues}
+                childProgressMap={controller.childProgressMap}
+                projectMap={controller.projectMap}
+                createDefaults={controller.createDefaults}
+                fetchNextPage={controller.fetchNextFlatPage}
+                hasNextPage={controller.hasNextFlatPage}
+                isFetchingNextPage={controller.isFetchingNextFlatPage}
+                total={controller.flatTotal}
+                exportIssues={controller.exportTableIssues}
+              />
+            )}
             {controller.viewMode === "gantt" && (
               <GanttView issues={controller.filteredGanttIssues} />
             )}
@@ -270,11 +286,18 @@ function IssueSurfaceContent({
 }
 
 function IssueSurfaceSkeleton({ mode }: { mode: string }) {
-  if (mode === "list") {
+  if (mode === "list" || mode === "table") {
     return (
-      <div className="flex-1 min-h-0 overflow-y-auto p-2 space-y-1">
-        {Array.from({ length: 4 }).map((_, i) => (
-          <Skeleton key={i} className="h-10 w-full rounded-lg" />
+      <div className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto p-2">
+        {mode === "table" && <Skeleton className="mb-1 h-8 w-full" />}
+        {Array.from({ length: mode === "table" ? 8 : 4 }).map((_, i) => (
+          <Skeleton
+            key={i}
+            className={cn(
+              "w-full",
+              mode === "table" ? "h-9 rounded-sm" : "h-10 rounded-lg",
+            )}
+          />
         ))}
       </div>
     );
