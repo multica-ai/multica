@@ -47,7 +47,7 @@ export function MentionView({ node }: NodeViewProps) {
   if (type === "project") {
     return (
       <NodeViewWrapper as="span" className="inline">
-        <ProjectMention projectId={id} fallbackLabel={label} />
+        <ProjectMention projectId={id} fallbackLabel={label} ws={node.attrs.ws} />
       </NodeViewWrapper>
     );
   }
@@ -89,9 +89,12 @@ export function MentionView({ node }: NodeViewProps) {
 function ProjectMention({
   projectId,
   fallbackLabel,
+  ws,
 }: {
   projectId: string;
   fallbackLabel?: string;
+  /** Workspace UUID for cross-workspace mentions. */
+  ws?: string;
 }) {
   const p = useWorkspacePaths();
   const { push, openInNewTab } = useNavigation();
@@ -100,7 +103,9 @@ function ProjectMention({
   const handleClick = (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    if (e.metaKey || e.ctrlKey || e.shiftKey) {
+    // For cross-workspace mentions, open in a new tab to avoid disrupting the
+    // user's current workspace context. For same-workspace, respect the modifier key.
+    if (ws || e.metaKey || e.ctrlKey || e.shiftKey) {
       if (openInNewTab) openInNewTab(projectPath, fallbackLabel);
       return;
     }

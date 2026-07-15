@@ -762,7 +762,16 @@ func (h *Handler) SearchProjects(w http.ResponseWriter, r *http.Request) {
 
 	includeClosed := r.URL.Query().Get("include_closed") == "true"
 
-	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace_id")
+	// Per-call workspace override: when the client passes ?workspace_id=<uuid>, use it
+	// instead of the authenticated X-Workspace-ID header. Used by cross-workspace
+	// @project mention autocomplete (U4) so the current workspace's editor can search a
+	// foreign workspace's projects without re-authenticating.
+	resolvedWorkspaceID := workspaceID
+	if wsParam := r.URL.Query().Get("workspace_id"); wsParam != "" {
+		resolvedWorkspaceID = wsParam
+	}
+
+	wsUUID, ok := parseUUIDOrBadRequest(w, resolvedWorkspaceID, "workspace_id")
 	if !ok {
 		return
 	}

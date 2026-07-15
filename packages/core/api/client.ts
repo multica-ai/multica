@@ -600,11 +600,14 @@ export class ApiClient {
     });
   }
 
-  async searchProjects(params: { q: string; limit?: number; offset?: number; include_closed?: boolean; signal?: AbortSignal }): Promise<SearchProjectsResponse> {
+  async searchProjects(params: { q: string; limit?: number; offset?: number; include_closed?: boolean; signal?: AbortSignal; workspace_id?: string }): Promise<SearchProjectsResponse> {
     const search = new URLSearchParams({ q: params.q });
     if (params.limit !== undefined) search.set("limit", String(params.limit));
     if (params.offset !== undefined) search.set("offset", String(params.offset));
     if (params.include_closed) search.set("include_closed", "true");
+    // Per-call workspace override for cross-workspace @project mention autocomplete.
+    // When omitted the server resolves workspace from the authenticated X-Workspace-ID header.
+    if (params.workspace_id) search.set("workspace_id", params.workspace_id);
     const raw = await this.fetch<unknown>(
       `/api/projects/search?${search}`,
       params.signal ? { signal: params.signal } : undefined,

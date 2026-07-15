@@ -4,7 +4,7 @@ import { ReactNodeViewRenderer } from "@tiptap/react";
 import { MentionView } from "./mention-view";
 import { escapeMarkdownLabel } from "../utils/escape-markdown-label";
 import type { MentionType } from "@multica/core/mention";
-import { getMentionPrefix } from "@multica/core/mention";
+import { getMentionPrefix, buildMentionUrl } from "@multica/core/mention";
 
 const MENTION_LINK_MARKER = "](mention://";
 
@@ -59,6 +59,7 @@ export const BaseMentionExtension = Mention.extend({
         {
           "data-mention-type": node.attrs.type ?? "member",
           "data-mention-id": node.attrs.id,
+          "data-mention-ws": node.attrs.ws ?? "",
         },
       ),
       `${prefix}${node.attrs.label ?? node.attrs.id}`,
@@ -71,6 +72,13 @@ export const BaseMentionExtension = Mention.extend({
         default: "member",
         parseHTML: (el: HTMLElement) =>
           el.getAttribute("data-mention-type") ?? "member",
+        renderHTML: () => ({}),
+      },
+      // Optional workspace qualifier for cross-workspace mentions.
+      ws: {
+        default: undefined,
+        parseHTML: (el: HTMLElement) =>
+          el.getAttribute("data-mention-ws") ?? undefined,
         renderHTML: () => ({}),
       },
     };
@@ -97,10 +105,20 @@ export const BaseMentionExtension = Mention.extend({
       // renderMarkdown produced. Must mirror the escaped set exactly, or a
       // label containing "\" fails to round-trip through the linear tokenizer.
       const rawLabel = match[1]?.replace(/\\([[\]\\()])/g, "$1");
+      // match[2] = type, match[3] = id[?ws=<wsUuid>]
+      const fullId = match[3] ?? "";
+      const mentionType = match[2] ?? "member";
+      let mentionId = fullId;
+      let mentionWs: string | undefined;
+      const wsIdx = fullId.indexOf("?ws=");
+      if (wsIdx !== -1) {
+        mentionId = fullId.slice(0, wsIdx);
+        mentionWs = fullId.slice(wsIdx + "?ws=".length);
+      }
       return {
         type: "mention",
         raw: match[0],
-        attributes: { label: rawLabel, type: match[2] ?? "member", id: match[3] },
+        attributes: { label: rawLabel, type: mentionType, id: mentionId, ws: mentionWs },
       };
     },
   },
@@ -108,13 +126,10 @@ export const BaseMentionExtension = Mention.extend({
     return helpers.createNode("mention", token.attributes);
   },
   renderMarkdown: (node: any) => {
-    const { id, label, type = "member" } = node.attrs || {};
+    const { id, label, type = "member", ws } = node.attrs || {};
     const prefix = getMentionPrefix(type as MentionType) ? "@" : "";
-    // Escape [ ] \ ( ) in the label so the markdown link syntax is not broken
-    // and the label survives the linear tokenizer (which now treats "\" as an
-    // escape lead, not an ordinary char). Must stay in sync with the unescape
-    // in tokenize() above. Shared with file-card/slash via escapeMarkdownLabel.
     const safeLabel = escapeMarkdownLabel(label ?? id);
-    return `[${prefix}${safeLabel}](mention://${type}/${id})`;
+    const url = buildMentionUrl({ type, id, ws });
+    return `[${prefix}${safeLabel}](${url})`;
   },
 });
