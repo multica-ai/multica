@@ -97,8 +97,11 @@ func setupWkFixture(ctx context.Context, pool *pgxpool.Pool) error {
 		return fmt.Errorf("create member: %w", err)
 	}
 	if err := pool.QueryRow(ctx,
+		// 'claude' is the provider string the daemon actually registers and
+		// switches on (server/pkg/agent.ListModels, capabilities.providerRegistry).
+		// A made-up value would silently skip every provider-aware code path.
 		`INSERT INTO agent_runtime (workspace_id, name, runtime_mode, provider, status)
-		 VALUES ($1, $2, 'local', 'claude_code', 'online') RETURNING id`,
+		 VALUES ($1, $2, 'local', 'claude', 'online') RETURNING id`,
 		wkWorkspaceID, "Wakeup Origin Runtime").Scan(&wkRuntimeID); err != nil {
 		return fmt.Errorf("create runtime: %w", err)
 	}
@@ -485,7 +488,7 @@ func TestPostponeEmitsParkedActivityOnceAndResetsOnDispatch(t *testing.T) {
 	var offRuntime, offAgent pgtype.UUID
 	if err := wkPool.QueryRow(ctx,
 		`INSERT INTO agent_runtime (workspace_id, name, runtime_mode, provider, status)
-		 VALUES ($1, $2, 'local', 'claude_code', 'offline') RETURNING id`,
+		 VALUES ($1, $2, 'local', 'claude', 'offline') RETURNING id`,
 		wkWorkspaceID, "Parked Test Runtime").Scan(&offRuntime); err != nil {
 		t.Fatalf("create offline runtime: %v", err)
 	}

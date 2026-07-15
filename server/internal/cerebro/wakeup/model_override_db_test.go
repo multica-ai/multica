@@ -72,8 +72,122 @@ func TestCreateRejectsUnknownModel(t *testing.T) {
 		FireAt:        pgtype.Timestamptz{Time: time.Now().Add(time.Hour), Valid: true},
 		ModelOverride: "gpt-4",
 	})
-	if !errors.Is(err, autopilotmodel.ErrUnknownModel) {
-		t.Fatalf("create with unknown model: err = %v, want ErrUnknownModel", err)
+	// The fixture agent runs on a 'claude' runtime, so Create checks against the
+	// claude catalog and reports the sharper "not a claude model" — an unknown ID
+	// and a real-but-wrong-provider ID both land here (FIR-3287).
+	if !errors.Is(err, autopilotmodel.ErrModelNotOnProvider) {
+		t.Fatalf("create with unknown model: err = %v, want ErrModelNotOnProvider", err)
+	}
+}
+
+// FIR-3287: a wakeup pinned an Anthropic model on an agent whose runtime is
+// Codex. Create accepted it (the registry knew only Anthropic IDs and never
+// looked at the runtime), and the woken run then died on a 400 from the Codex
+// CLI — with the wakeup being the only thing that would have retried it.
+//
+// Create must now reject it against the runtime that would run it.
+func TestCreateRejectsModelFromAnotherProvider(t *testing.T) {
+	if wkPool == nil {
+		t.Skip("no test DB")
+	}
+	ctx := context.Background()
+	svc := wkService()
+
+	// Dedicated codex runtime + agent so the shared claude fixture is untouched.
+	var codexRuntime, codexAgent pgtype.UUID
+	if err := wkPool.QueryRow(ctx,
+		`INSERT INTO agent_runtime (workspace_id, name, runtime_mode, provider, status)
+		 VALUES ($1, 'Codex Runtime', 'local', 'codex', 'online') RETURNING id`,
+		wkWorkspaceID).Scan(&codexRuntime); err != nil {
+		t.Fatalf("create codex runtime: %v", err)
+	}
+	if err := wkPool.QueryRow(ctx,
+		`INSERT INTO agent (workspace_id, name, runtime_mode, runtime_id)
+		 VALUES ($1, 'Codex Agent', 'local', $2) RETURNING id`,
+		wkWorkspaceID, codexRuntime).Scan(&codexAgent); err != nil {
+		t.Fatalf("create codex agent: %v", err)
+	}
+	t.Cleanup(func() {
+		bg := context.Background()
+		wkPool.Exec(bg, `DELETE FROM cerebro_agent_wakeup WHERE agent_id = $1`, codexAgent)
+		wkPool.Exec(bg, `DELETE FROM agent WHERE id = $1`, codexAgent)
+		wkPool.Exec(bg, `DELETE FROM agent_runtime WHERE id = $1`, codexRuntime)
+	})
+
+	_, err := svc.Create(ctx, wkWorkspaceID, CreateRequest{
+		AgentID:       codexAgent,
+		IssueID:       wkIssueID,
+		Prompt:        "is CI green?",
+		TriggerType:   TriggerTime,
+		FireAt:        pgtype.Timestamptz{Time: time.Now().Add(time.Hour), Valid: true},
+		ModelOverride: autopilotmodel.ModelHaiku,
+	})
+	if !errors.Is(err, autopilotmodel.ErrModelNotOnProvider) {
+		t.Fatalf("create anthropic model on codex runtime: err = %v, want ErrModelNotOnProvider", err)
+	}
+}
+
+// FIR-3287 second half: Create validated against the runtime the agent had at
+// the time, but an agent can be re-pointed at another provider before the wakeup
+// fires. Dispatch must not stamp a model that runtime cannot run — the override
+// is only a cost optimisation, so the run proceeds on the agent's own model.
+func TestDispatchDropsModelOverrideForeignToRuntime(t *testing.T) {
+	if wkPool == nil {
+		t.Skip("no test DB")
+	}
+	ctx := context.Background()
+	svc := wkService()
+	if _, err := wkPool.Exec(ctx, `DELETE FROM cerebro_agent_wakeup WHERE issue_id = $1 AND agent_id = $2`, wkIssueID, wkAgentID); err != nil {
+		t.Fatalf("clear wakeups: %v", err)
+	}
+
+	// Created while the agent is on its claude runtime — a valid pin today.
+	row, err := svc.Create(ctx, wkWorkspaceID, CreateRequest{
+		AgentID:       wkAgentID,
+		IssueID:       wkIssueID,
+		Prompt:        "is CI green?",
+		TriggerType:   TriggerTime,
+		FireAt:        pgtype.Timestamptz{Time: time.Now().Add(time.Hour), Valid: true},
+		ModelOverride: autopilotmodel.ModelHaiku,
+	})
+	if err != nil {
+		t.Fatalf("create with model override: %v", err)
+	}
+
+	// The agent is moved to a Codex runtime before the wakeup fires.
+	var codexRuntime pgtype.UUID
+	if err := wkPool.QueryRow(ctx,
+		`INSERT INTO agent_runtime (workspace_id, name, runtime_mode, provider, status)
+		 VALUES ($1, 'Codex Runtime (repoint)', 'local', 'codex', 'online') RETURNING id`,
+		wkWorkspaceID).Scan(&codexRuntime); err != nil {
+		t.Fatalf("create codex runtime: %v", err)
+	}
+	if _, err := wkPool.Exec(ctx, `UPDATE agent SET runtime_id = $1 WHERE id = $2`, codexRuntime, wkAgentID); err != nil {
+		t.Fatalf("repoint agent at codex runtime: %v", err)
+	}
+	t.Cleanup(func() {
+		bg := context.Background()
+		wkPool.Exec(bg, `UPDATE agent SET runtime_id = $1 WHERE id = $2`, wkRuntimeID, wkAgentID)
+		wkPool.Exec(bg, `DELETE FROM agent_task_queue WHERE agent_id = $1`, wkAgentID)
+		wkPool.Exec(bg, `DELETE FROM agent_runtime WHERE id = $1`, codexRuntime)
+	})
+
+	if err := svc.dispatch(ctx, row); err != nil {
+		t.Fatalf("dispatch: %v", err)
+	}
+
+	var taskModel pgtype.Text
+	if err := wkPool.QueryRow(ctx, `
+		SELECT model_override
+		FROM agent_task_queue
+		WHERE agent_id = $1 AND issue_id = $2
+		ORDER BY created_at DESC
+		LIMIT 1
+	`, wkAgentID, wkIssueID).Scan(&taskModel); err != nil {
+		t.Fatalf("load task: %v", err)
+	}
+	if taskModel.Valid && taskModel.String != "" {
+		t.Fatalf("task model_override = %q, want empty (the codex runtime cannot run %q)", taskModel.String, autopilotmodel.ModelHaiku)
 	}
 }
 

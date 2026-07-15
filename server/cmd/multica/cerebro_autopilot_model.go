@@ -18,7 +18,12 @@ func init() {
 }
 
 func cerebroAddAutopilotModelFlag(cmd *cobra.Command, clearHint string) {
-	help := fmt.Sprintf("Override the assignee agent's default model for every run of this autopilot. Allowed: %s. Empty = agent default", strings.Join(autopilotmodel.Allowed(), ", "))
+	// Name a model per provider rather than listing the full catalog: it spans
+	// every provider (~27 IDs) and only the handful its own runtime accepts will
+	// work, so an exhaustive list is longer AND more misleading than an example.
+	// The server validates against the assignee agent's runtime and returns the
+	// accepted list for that provider on a bad value.
+	help := fmt.Sprintf("Override the assignee agent's default model for every run of this autopilot. Must be a model the agent's runtime provider accepts (Claude runtime: %s; Codex runtime: gpt-5.5). Empty = agent default", autopilotmodel.ModelHaiku)
 	if clearHint != "" {
 		help += fmt.Sprintf(" (use --model %s to clear an existing override)", clearHint)
 	}

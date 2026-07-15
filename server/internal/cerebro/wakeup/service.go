@@ -90,8 +90,9 @@ type CreateRequest struct {
 	OriginCommentID pgtype.UUID
 	// ModelOverride optionally pins the dispatched run to a cheaper model
 	// (FIR-2679 Spor 1b) so a pure verification wakeup like "is CI green?" never
-	// fires Opus. Empty = no override = the agent's own model. Validated against
-	// autopilotmodel.Allowed() in Create.
+	// fires Opus. Empty = no override = the agent's own model. Validated in
+	// Create against the catalog of the provider that would run it, and
+	// re-checked at dispatch (FIR-3287).
 	ModelOverride string
 }
 
@@ -106,12 +107,6 @@ func (s *Service) Create(ctx context.Context, workspaceID pgtype.UUID, req Creat
 	if req.Prompt == "" {
 		return cerebrodb.CerebroAgentWakeup{}, fmt.Errorf("prompt is required")
 	}
-	// FIR-2679 Spor 1b: reject an unknown model up front so the agent gets a
-	// clear 400 instead of a wakeup that later dispatches on a bad --model. Empty
-	// passes (no override).
-	if err := autopilotmodel.Validate(req.ModelOverride); err != nil {
-		return cerebrodb.CerebroAgentWakeup{}, err
-	}
 	if !req.AgentID.Valid {
 		return cerebrodb.CerebroAgentWakeup{}, fmt.Errorf("agent_id is required")
 	}
@@ -119,6 +114,22 @@ func (s *Service) Create(ctx context.Context, workspaceID pgtype.UUID, req Creat
 		return cerebrodb.CerebroAgentWakeup{}, fmt.Errorf("issue_id is required")
 	}
 	if err := s.validateIssueAndAgent(ctx, workspaceID, req.IssueID, req.AgentID); err != nil {
+		return cerebrodb.CerebroAgentWakeup{}, err
+	}
+	// FIR-2679 Spor 1b / FIR-3287: reject a model the woken run could not use, so
+	// the agent gets a clear 400 now instead of a wakeup that dies on dispatch.
+	//
+	// A model ID only means something to the provider that runs it, so check it
+	// against the target agent's runtime whenever we know it: a Codex runtime
+	// handed an Anthropic model fails the whole woken run, and the wakeup is the
+	// only thing that would have retried it. Without a runtime yet, the union is
+	// the best available check — it still catches a typo, and dispatch re-checks
+	// against the real provider once one is bound.
+	if provider, ok := s.agentRuntimeProvider(ctx, req.AgentID); ok {
+		if err := autopilotmodel.ValidateForProvider(provider, req.ModelOverride); err != nil {
+			return cerebrodb.CerebroAgentWakeup{}, err
+		}
+	} else if err := autopilotmodel.Validate(req.ModelOverride); err != nil {
 		return cerebrodb.CerebroAgentWakeup{}, err
 	}
 	switch req.TriggerType {
@@ -369,13 +380,22 @@ func (s *Service) dispatch(ctx context.Context, row cerebrodb.CerebroAgentWakeup
 	}
 	// FIR-2679 Spor 1b: pin the woken run to the wakeup's cheaper model when set,
 	// mirroring how the autopilot dispatcher stamps its own override after the
-	// upstream CreateAgentTask. The daemon's resolveTaskModel then runs it. Empty
-	// override is a no-op (SetOnTask returns early), so the agent's own model wins.
+	// upstream CreateAgentTask. The daemon's resolveTaskModel then runs it.
+	//
+	// FIR-3287: check against the runtime that will actually run it, not the one
+	// Create saw — an agent can be re-pointed at a different provider in between.
 	if row.ModelOverride != "" {
-		if err := autopilotmodel.SetOnTask(ctx, s.Queries, task.ID, row.ModelOverride); err != nil {
-			slog.Warn("cerebro wakeup: could not set model override on task",
+		if err := autopilotmodel.SetOnTaskForProvider(ctx, s.Queries, task.ID, rt.Provider, row.ModelOverride); err != nil {
+			// Leaving the override unset runs the task on the agent's own model,
+			// which is the right outcome for every error here: the override is
+			// only ever a cost optimisation, so a wakeup that fires on the
+			// expensive model still does its job, while one pinned to a model the
+			// runtime rejects fails the whole run — and the wakeup was the only
+			// thing that would have retried it.
+			slog.Warn("cerebro wakeup: running on the agent's own model, override not applied",
 				"wakeup_id", util.UUIDToString(row.ID),
 				"task_id", util.UUIDToString(task.ID),
+				"provider", rt.Provider,
 				"model", row.ModelOverride,
 				"error", err,
 			)
@@ -722,6 +742,24 @@ func (s *Service) sendPostponeNotification(ctx context.Context, row cerebrodb.Ce
 			"error", err,
 		)
 	}
+}
+
+// agentRuntimeProvider returns the runtime provider that would run agentID's
+// tasks (FIR-3287). ok=false means there is nothing to validate a model against:
+// the agent has no runtime bound yet, or the runtime row could not be read. Both
+// are normal — an agent can be created before its runtime is attached — so the
+// caller skips the provider check rather than failing. dispatch re-checks once
+// the runtime is known and online.
+func (s *Service) agentRuntimeProvider(ctx context.Context, agentID pgtype.UUID) (provider string, ok bool) {
+	row, err := s.Queries.GetAgent(ctx, agentID)
+	if err != nil || !row.RuntimeID.Valid {
+		return "", false
+	}
+	rt, err := s.Queries.GetAgentRuntime(ctx, row.RuntimeID)
+	if err != nil || rt.Provider == "" {
+		return "", false
+	}
+	return rt.Provider, true
 }
 
 func (s *Service) validateIssueAndAgent(ctx context.Context, workspaceID, issueID, agentID pgtype.UUID) error {
