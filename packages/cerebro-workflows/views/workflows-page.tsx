@@ -30,6 +30,7 @@ import type { CerebroWorkflow } from "../core/types";
 // the server unless CEREBRO_WORKFLOWS_ENABLED is set there.
 export function WorkflowsPage() {
   const enabled = useFeatureFlag("cerebro_workflows");
+  const hooksEnabled = useFeatureFlag("cerebro_workflow_hooks");
   const workspace = useCurrentWorkspace();
   const navigation = useNavigation();
   const queryClient = useQueryClient();
@@ -73,6 +74,13 @@ export function WorkflowsPage() {
           </p>
         </div>
         <div className="flex items-center gap-2">
+          {hooksEnabled && <Button
+            size="sm"
+            variant="outline"
+            onClick={() => navigation.push(`/${workspace.slug}/workflows/hooks`)}
+          >
+            Hook library
+          </Button>}
           <Button
             size="sm"
             onClick={() => navigation.push(`/${workspace.slug}/workflows/new`)}

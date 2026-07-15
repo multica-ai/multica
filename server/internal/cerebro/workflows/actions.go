@@ -72,29 +72,48 @@ type IssueActions interface {
 // runAction dispatches on the workflow's action_type. Any non-nil error
 // triggers the retry ladder in Service.Execute.
 func (s *Service) runAction(ctx context.Context, wf workflow, te TriggerEvent) error {
-	switch wf.actionType {
-	case ActionSetStatus:
-		return s.actionSetStatus(ctx, wf, te)
-	case ActionCreateSubIssue:
-		_, err := s.actionCreateSubIssue(ctx, wf, te)
-		return err
-	case ActionSendReminder:
-		return s.actionSendReminder(ctx, wf, te)
-	case ActionRunSkill:
-		return s.actionRunSkill(ctx, wf, te)
-	case ActionCommentOnIssue:
-		return s.actionCommentOnIssue(ctx, wf, te)
-	case ActionRouteByDomain:
-		return s.actionRouteByDomain(ctx, wf, te)
-	case ActionEscalateToOwner:
-		return s.actionEscalateToOwner(ctx, wf, te)
-	case ActionReassignIssue:
-		return s.actionReassignIssue(ctx, wf, te)
-	case ActionWebhookOutbound:
-		return s.actionWebhookOutbound(ctx, wf, te)
-	default:
+	_, err := s.workflowActionRegistry().Execute(ctx, wf.actionType, ActionInvocation{Workflow: &wf, Trigger: te})
+	if errors.Is(err, ErrActionNotConfigured) {
 		return fmt.Errorf("unknown action_type %q", wf.actionType)
 	}
+	return err
+}
+
+func (s *Service) workflowActionRegistry() *ActionRegistry {
+	if s.actionRegistry != nil {
+		return s.actionRegistry
+	}
+	r := NewActionRegistry()
+	r.Register(ActionSetStatus, func(ctx context.Context, in ActionInvocation) (map[string]any, error) {
+		return nil, s.actionSetStatus(ctx, *in.Workflow, in.Trigger)
+	})
+	r.Register(ActionCreateSubIssue, func(ctx context.Context, in ActionInvocation) (map[string]any, error) {
+		_, err := s.actionCreateSubIssue(ctx, *in.Workflow, in.Trigger)
+		return nil, err
+	})
+	r.Register(ActionSendReminder, func(ctx context.Context, in ActionInvocation) (map[string]any, error) {
+		return nil, s.actionSendReminder(ctx, *in.Workflow, in.Trigger)
+	})
+	r.Register(ActionRunSkill, func(ctx context.Context, in ActionInvocation) (map[string]any, error) {
+		return nil, s.actionRunSkill(ctx, *in.Workflow, in.Trigger)
+	})
+	r.Register(ActionCommentOnIssue, func(ctx context.Context, in ActionInvocation) (map[string]any, error) {
+		return nil, s.actionCommentOnIssue(ctx, *in.Workflow, in.Trigger)
+	})
+	r.Register(ActionRouteByDomain, func(ctx context.Context, in ActionInvocation) (map[string]any, error) {
+		return nil, s.actionRouteByDomain(ctx, *in.Workflow, in.Trigger)
+	})
+	r.Register(ActionEscalateToOwner, func(ctx context.Context, in ActionInvocation) (map[string]any, error) {
+		return nil, s.actionEscalateToOwner(ctx, *in.Workflow, in.Trigger)
+	})
+	r.Register(ActionReassignIssue, func(ctx context.Context, in ActionInvocation) (map[string]any, error) {
+		return nil, s.actionReassignIssue(ctx, *in.Workflow, in.Trigger)
+	})
+	r.Register(ActionWebhookOutbound, func(ctx context.Context, in ActionInvocation) (map[string]any, error) {
+		return nil, s.actionWebhookOutbound(ctx, *in.Workflow, in.Trigger)
+	})
+	s.actionRegistry = r
+	return r
 }
 
 // actionReassignIssue re-points the triggered issue's assignee to the

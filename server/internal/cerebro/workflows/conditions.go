@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"regexp"
+	"strconv"
 	"strings"
 
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -74,8 +76,43 @@ func match(c Condition, ctx map[string]any) bool {
 		return !ok || got == nil
 	case "is_not_null":
 		return ok && got != nil
+	case "starts_with":
+		return ok && strings.HasPrefix(fmt.Sprint(got), fmt.Sprint(c.Value))
+	case "exists":
+		return ok && got != nil
+	case "gte":
+		left, leftOK := numericValue(got)
+		right, rightOK := numericValue(c.Value)
+		return ok && leftOK && rightOK && left >= right
+	case "lt":
+		left, leftOK := numericValue(got)
+		right, rightOK := numericValue(c.Value)
+		return ok && leftOK && rightOK && left < right
 	default:
 		return false
+	}
+}
+
+func numericValue(value any) (float64, bool) {
+	switch v := value.(type) {
+	case int:
+		return float64(v), true
+	case int32:
+		return float64(v), true
+	case int64:
+		return float64(v), true
+	case float32:
+		return float64(v), true
+	case float64:
+		return v, !math.IsNaN(v)
+	case json.Number:
+		parsed, err := v.Float64()
+		return parsed, err == nil
+	case string:
+		parsed, err := strconv.ParseFloat(v, 64)
+		return parsed, err == nil
+	default:
+		return 0, false
 	}
 }
 

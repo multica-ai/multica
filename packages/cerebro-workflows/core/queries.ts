@@ -12,6 +12,7 @@ import {
   regenerateInboundToken,
   regenerateOutboundSecret,
 } from "./api";
+import { fetchWorkflowHook, fetchWorkflowHookRuns, fetchWorkflowHooks } from "./hook-api";
 
 export const cerebroWorkflowsKeys = {
   all: (wsId: string) => ["cerebro", "workflows", wsId] as const,
@@ -26,6 +27,25 @@ export const cerebroWorkflowsKeys = {
   loopRuns: (wsId: string, workflowId: string) =>
     [...cerebroWorkflowsKeys.all(wsId), "loop-runs", workflowId] as const,
 };
+
+export const workflowHookKeys = {
+	all: (wsId: string) => ["cerebro", "workflow-hooks", wsId] as const,
+	list: (wsId: string) => [...workflowHookKeys.all(wsId), "list"] as const,
+	detail: (wsId: string, id: string) => [...workflowHookKeys.all(wsId), "detail", id] as const,
+	runs: (wsId: string, id: string) => [...workflowHookKeys.all(wsId), "runs", id] as const,
+};
+
+export function workflowHooksListOptions(wsId: string) {
+	return queryOptions({ queryKey: workflowHookKeys.list(wsId), queryFn: fetchWorkflowHooks, enabled: !!wsId });
+}
+
+export function workflowHookDetailOptions(wsId: string, id: string) {
+	return queryOptions({ queryKey: workflowHookKeys.detail(wsId, id), queryFn: () => fetchWorkflowHook(id), enabled: !!wsId && !!id });
+}
+
+export function workflowHookRunsOptions(wsId: string, id: string) {
+	return queryOptions({ queryKey: workflowHookKeys.runs(wsId, id), queryFn: () => fetchWorkflowHookRuns(id), enabled: !!wsId && !!id });
+}
 
 export function cerebroWorkflowsListOptions(wsId: string) {
   return queryOptions({

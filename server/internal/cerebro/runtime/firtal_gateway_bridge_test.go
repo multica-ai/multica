@@ -192,6 +192,23 @@ func TestBridge_AttachmentReadToolsEndToEnd(t *testing.T) {
 	}
 }
 
+func TestBridge_WorkflowHookToolsAreAvailableToGatewayRegistry(t *testing.T) {
+	srv := mcp.NewServer("multica", "test")
+	client := InProcessAPIClient(http.NotFoundHandler(), "ws-1", "agent-1", "task-token", "task-1")
+	var session clitools.SessionState
+	clitools.RegisterTools(srv, client, &session, "ws-1", "", "")
+	reg := NewRegistry(nil)
+	RegisterBridgedMCPTools(reg, srv, DefaultInAppAdminDenylist(), true)
+	for _, name := range []string{
+		"list_workflow_hooks", "get_workflow_hook", "create_workflow_hook", "update_workflow_hook",
+		"test_workflow_hook", "publish_workflow_hook", "get_effective_workflow_hooks", "list_workflow_hook_runs",
+	} {
+		if !reg.hasTool(name) {
+			t.Errorf("%s was not bridged into the gateway registry", name)
+		}
+	}
+}
+
 // TestBridge_AdminDenylistShape guards the product boundary: read tools stay
 // allowed, write/admin tools stay denied.
 func TestBridge_AdminDenylistShape(t *testing.T) {

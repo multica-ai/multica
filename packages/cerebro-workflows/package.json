@@ -19,6 +19,10 @@
     "./views/workflow-runs-page": "./views/workflow-runs-page.tsx",
     "./views/workflows-nav-item": "./views/workflows-nav-item.tsx",
     "./views/workflow-picker": "./views/workflow-picker.tsx"
+    ,"./views/hooks-page": "./views/hooks/hooks-page.tsx"
+    ,"./views/hook-editor": "./views/hooks/hook-editor.tsx"
+    ,"./views/workflow-hooks-page": "./views/hooks/workflow-hooks-page.tsx"
+    ,"./views/workflow-hook-editor-page": "./views/hooks/workflow-hook-editor-page.tsx"
   },
   "dependencies": {
     "@multica/cerebro-feature-flags": "workspace:*",
@@ -38,6 +42,8 @@
   },
   "devDependencies": {
     "@multica/tsconfig": "workspace:*",
+    "@testing-library/jest-dom": "catalog:",
+    "@testing-library/react": "catalog:",
     "@types/react": "catalog:",
     "typescript": "catalog:",
     "vitest": "catalog:"

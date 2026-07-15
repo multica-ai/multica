@@ -356,3 +356,21 @@ func TestResolveOptIn(t *testing.T) {
 		})
 	}
 }
+
+func TestResolveActorOptIn(t *testing.T) {
+	if ResolveActorOptIn(Input{}, true) {
+		t.Fatal("a fresh agent must not receive opt-in access")
+	}
+	if !ResolveActorOptIn(Input{Settings: map[Layer]Setting{LayerAgent: SettingAllow}}, true) {
+		t.Fatal("an explicit agent grant should enable the opt-in capability")
+	}
+	if ResolveActorOptIn(Input{Settings: map[Layer]Setting{LayerAgent: SettingAllow, LayerUser: SettingDeny}}, true) {
+		t.Fatal("a user ceiling must revoke an agent grant")
+	}
+	if ResolveActorOptIn(Input{Settings: map[Layer]Setting{LayerAgent: SettingAllow, LayerWorkspace: SettingDisable}}, true) {
+		t.Fatal("workspace Disable must remain an unopenable floor")
+	}
+	if ResolveActorOptIn(Input{Settings: map[Layer]Setting{LayerAgent: SettingAllow}}, false) {
+		t.Fatal("member checks must not inherit an agent-layer grant")
+	}
+}

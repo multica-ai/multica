@@ -191,7 +191,7 @@ three surface for visibility and are not yet an enforcement point.
 | Squads | `manage_squad` |
 | Connections | `manage_connections` |
 | Credentials | `manage_credentials` |
-| Workflows | `manage_workflows` |
+| Workflows | `manage_workflows`, `hooks:read`, `hooks:write`, `hooks:enforce`, `hooks:manage_managed` |
 | Channels | `manage_channels`, `gateway_channel_delivery` ⚠ |
 | Read access | `read_issues` ⚠, `read_projects` ⚠ |
 
@@ -204,6 +204,8 @@ you find it cited elsewhere.)
 does nothing. They are a permanent code-only set, not a backlog item.
 
 **Two dimensions, do not confuse them:**
+
+Workflow Hook capabilities are independent of `manage_workflows`. Their resolver is deliberately opt-in for every mutation: agents receive `hooks:read`, while `hooks:write` needs an explicit grant, `hooks:enforce` rejects agent actors, and `hooks:manage_managed` accepts only the workspace owner. This boundary is enforced in `server/internal/cerebro/workflows/hook_permissions.go`, not by hiding browser controls.
 - **Platform capabilities** (this catalog, `manage_*` / `create_*` keys) — coarse HTTP/action
   permissions, keyed on action.
 - **Runtime tool capabilities** — the per-tool dimension keyed on `tool_key` values like

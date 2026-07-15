@@ -505,6 +505,26 @@ func ResolveOptIn(in Input) bool {
 	return in.Settings[LayerUser] == SettingAllow || in.Settings[LayerGroup] == SettingAllow
 }
 
+// ResolveActorOptIn extends the existing human opt-in contract to an agent
+// actor without turning the workspace default into access. Agent access needs
+// an explicit Agent-layer Allow and remains capped by the human, runtime,
+// delegation, system, and workspace-Disable safety layers.
+func ResolveActorOptIn(in Input, agentActor bool) bool {
+	if !agentActor {
+		return ResolveOptIn(in)
+	}
+	if in.Settings[LayerWorkspace] == SettingDisable {
+		return false
+	}
+	for _, layer := range []Layer{LayerRuntime, LayerGroup, LayerUser, LayerOnBehalfOf, LayerSystem} {
+		switch in.Settings[layer] {
+		case SettingDeny, SettingAsk, SettingDisable:
+			return false
+		}
+	}
+	return in.Settings[LayerAgent] == SettingAllow
+}
+
 // CombineGroups collapses the settings from every group a user belongs to into
 // the single value that enters Resolve at LayerGroup.
 //

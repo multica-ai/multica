@@ -1556,6 +1556,14 @@ Approved by FIR-3266 and implementation plan artifact `019f60d7-a728-7663-82d3-7
 - `packages/views/channels/components/channel-detail.tsx` and `thread-side-panel.tsx`: enable scheduling on the shared Channel/DM composer.
 - `server/cmd/server/router.go` and `main.go`: register the scheduled-message API and delivery sweeper.
 
+## FIR-3101 — Workflow hooks
+
+- `workflow-hooks-wire`, `workflow-hooks-routes`, and `workflow-hooks-completion-wire` in `server/cmd/server/router.go` mount and delegate to the fork-owned Workflow hook feature.
+- `workflow-hooks-completion-field` and `workflow-hooks-completion-call` in `server/internal/service/task.go` invoke the policy gate before task state changes; the interface-only sibling is `workflow_completion_gate_cerebro.go`.
+- `workflow-hooks-continuation` in `server/pkg/protocol/messages.go` preserves the server-verified structured continuation in the completed-task result.
+- All policy, persistence, permission, route and continuation-evidence logic lives in `server/internal/cerebro/workflows` and `packages/cerebro-workflows`.
+- Approved by Jesper Hvejsel on FIR-3101: “Du må gerne tilføje i cerebro koden. Alt her fra skal ligge i workflow featuren.”, 2026-07-15.
+
 ## FIR-3272 — Managed Pi harness
 
 | Patch | Location | Reason |

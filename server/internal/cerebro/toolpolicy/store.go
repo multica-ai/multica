@@ -236,6 +236,17 @@ func (s *Store) ResolveOptIn(ctx context.Context, in Query) (bool, error) {
 	return ResolveOptIn(input), nil
 }
 
+// ResolveActorOptIn is the database-backed form of ResolveActorOptIn. It is
+// used by opt-in capabilities that may be granted directly to one agent while
+// preserving every tighter human/runtime/system ceiling.
+func (s *Store) ResolveActorOptIn(ctx context.Context, in Query, agentActor bool) (bool, error) {
+	input, err := s.loadInput(ctx, in)
+	if err != nil {
+		return false, err
+	}
+	return ResolveActorOptIn(input, agentActor), nil
+}
+
 // loadInput fetches the rows for the query and assembles a chain Input. Several
 // group rows are collapsed with CombineGroups (most permissive group wins)
 // before entering the chain at LayerGroup.

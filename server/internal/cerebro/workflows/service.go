@@ -61,7 +61,8 @@ type Service struct {
 
 	// planDocuments appends deterministic, human-readable workflow status to
 	// the issue's shared plan artifact. Optional and nil-safe.
-	planDocuments *PlanDocumentService
+	planDocuments  *PlanDocumentService
+	actionRegistry *ActionRegistry
 }
 
 // WithSessionStamper plugs in the dispatch-time session badge writer.

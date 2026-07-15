@@ -1091,6 +1091,42 @@ var catalog = []Capability{
 			"POST /api/cerebro/workflows/_test/cron-sweep",
 		},
 	},
+	{
+		Key:           "hooks:read",
+		Title:         "Read workflow hooks",
+		Category:      CategoryWorkflows,
+		Description:   "Read visible Workflow hook policies, effective bindings, and run history.",
+		DescriptionZh: "读取可见的工作流钩子策略、有效绑定和运行历史。",
+		Evidence:      []string{"server/internal/cerebro/workflows/hook_permissions.go:27"},
+	},
+	{
+		Key:           "hooks:write",
+		Title:         "Create and edit workflow hooks",
+		Category:      CategoryWorkflows,
+		Description:   "Create, edit, and test Workflow hooks. Every new version remains in Dry run.",
+		DescriptionZh: "创建、编辑和测试工作流钩子。每个新版本都保持在试运行状态。",
+		Ops: []string{
+			"POST /api/cerebro/workflow-hooks/",
+			"PUT /api/cerebro/workflow-hooks/{id}",
+			"POST /api/cerebro/workflow-hooks/{id}/test",
+		},
+	},
+	{
+		Key:           "hooks:enforce",
+		Title:         "Publish workflow hooks",
+		Category:      CategoryWorkflows,
+		Description:   "Publish a tested Workflow hook so that it can enforce decisions. Human-only.",
+		DescriptionZh: "发布已测试的工作流钩子，使其能够强制执行决策。仅限人员。",
+		Ops:           []string{"POST /api/cerebro/workflow-hooks/{id}/publish"},
+	},
+	{
+		Key:           "hooks:manage_managed",
+		Title:         "Manage locked workflow hooks",
+		Category:      CategoryWorkflows,
+		Description:   "Change locked Managed workflow hooks. Workspace owner-only.",
+		DescriptionZh: "更改锁定的托管工作流钩子。仅限工作区所有者。",
+		Evidence:      []string{"server/internal/cerebro/workflows/hook_permissions.go:29"},
+	},
 
 	// --- Channels -------------------------------------------------------------
 	{

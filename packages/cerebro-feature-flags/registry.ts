@@ -168,6 +168,7 @@ export type CerebroFlagKey =
   | "cerebro_tasks"
   | "cerebro_pin_input"
   | "cerebro_workflows"
+  | "cerebro_workflow_hooks"
   | "cerebro_workflow_step_model_override"
   | "cerebro_skill_mention"
   | "cerebro_tool_policy"
@@ -538,6 +539,7 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   cerebro_browser: false,
   cerebro_pin_input: true,
   cerebro_workflows: false,
+  cerebro_workflow_hooks: false,
   cerebro_workflow_step_model_override: true,
   cerebro_skill_mention: true,
   cerebro_tool_policy: true,
@@ -1253,6 +1255,13 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     group: "workspace",
     description:
       "Enable the cerebro workflow engine and the /:workspace/workflows page (data-driven status/trigger rules, builder UI, run log). Server-side execution is additionally gated by the CEREBRO_WORKFLOWS_ENABLED env var.",
+  },
+  {
+    key: "cerebro_workflow_hooks",
+    label: "Workflow hooks",
+    group: "workspace",
+    description:
+      "Enable reusable trigger, scope, filter, decision, and action hooks inside the Workflow engine. Server-side enforcement additionally requires CEREBRO_WORKFLOW_HOOKS_ENABLED.",
   },
   {
     key: "cerebro_workflow_step_model_override",

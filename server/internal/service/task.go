@@ -79,7 +79,8 @@ type TaskService struct {
 	// CEREBRO-PATCH(workflow-loop-advancer): FIR-3052 — advance Plan -> Build on
 	// plan-task completion so the loop moves without a manual status flip. Set
 	// from router.go; nil-safe.
-	WorkflowLoopAdvancer WorkflowLoopAdvancer
+	WorkflowLoopAdvancer   WorkflowLoopAdvancer
+	WorkflowCompletionGate WorkflowCompletionGate // CEREBRO-PATCH(workflow-hooks-completion-field): FIR-3101 delegates pre-completion policy to the Workflow feature.
 
 	analyticsContextMu    sync.Mutex
 	analyticsContextCache map[string]analytics.TaskContext
@@ -1587,6 +1588,12 @@ func (s *TaskService) MarkTaskWaitingLocalDirectory(ctx context.Context, taskID 
 // flipping to 'completed' and chat_session.session_id being refreshed,
 // causing the new task to resume against a stale (or NULL) session.
 func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, result []byte, sessionID, workDir string) (*db.AgentTaskQueue, error) {
+	if s.WorkflowCompletionGate != nil { // CEREBRO-PATCH(workflow-hooks-completion-call): FIR-3101 fail-closed Workflow hook seam before state mutation.
+		var err error
+		if result, err = s.WorkflowCompletionGate.BeforeComplete(ctx, taskID, result); err != nil {
+			return nil, err
+		}
+	}
 	// Decode the daemon's payload up-front. Chat tasks need the assistant
 	// reply text inside the tx so the chat_message insert + mark-responded
 	// pair commits atomically with the task transition — otherwise a crash

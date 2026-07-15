@@ -1,6 +1,22 @@
 {
   "http": [
     {
+      "id": "POST /api/cerebro/workflow-hooks/",
+      "gate": "tool_policy:hooks:write"
+    },
+    {
+      "id": "PUT /api/cerebro/workflow-hooks/{id}",
+      "gate": "tool_policy:hooks:write"
+    },
+    {
+      "id": "POST /api/cerebro/workflow-hooks/{id}/test",
+      "gate": "tool_policy:hooks:write"
+    },
+    {
+      "id": "POST /api/cerebro/workflow-hooks/{id}/publish",
+      "gate": "tool_policy:hooks:enforce + human_only"
+    },
+    {
       "id": "POST /api/cerebro/app-folders/",
       "gate": "cerebro_capability:apps.manage"
     },
@@ -2059,6 +2075,10 @@
       "gate": "via:POST /api/cerebro/workflows"
     },
     {
+      "id": "create_workflow_hook",
+      "gate": "via:POST /api/cerebro/workflow-hooks"
+    },
+    {
       "id": "create_group",
       "gate": "via:POST /api/workspaces/{id}/groups"
     },
@@ -2083,12 +2103,36 @@
       "exempt": "read-only — wraps GET /api/cerebro/workflows/{id}"
     },
     {
+      "id": "get_workflow_hook",
+      "exempt": "read-only — wraps GET /api/cerebro/workflow-hooks/{id}"
+    },
+    {
+      "id": "get_effective_workflow_hooks",
+      "exempt": "read-only — wraps GET /api/cerebro/workflow-hooks/{id}/effective"
+    },
+    {
       "id": "list_connections",
       "exempt": "read-only — wraps GET /api/workspaces/{id}/connections"
     },
     {
       "id": "list_workflows",
       "exempt": "read-only — wraps GET /api/cerebro/workflows"
+    },
+    {
+      "id": "list_workflow_hooks",
+      "exempt": "read-only — wraps GET /api/cerebro/workflow-hooks"
+    },
+    {
+      "id": "list_workflow_hook_runs",
+      "exempt": "read-only — wraps GET /api/cerebro/workflow-hooks/{id}/runs"
+    },
+    {
+      "id": "publish_workflow_hook",
+      "gate": "via:POST /api/cerebro/workflow-hooks/{id}/publish"
+    },
+    {
+      "id": "test_workflow_hook",
+      "gate": "via:POST /api/cerebro/workflow-hooks/{id}/test"
     },
     {
       "id": "test_connection",
@@ -2105,6 +2149,10 @@
     {
       "id": "update_workflow",
       "gate": "via:PUT /api/cerebro/workflows/{id}"
+    },
+    {
+      "id": "update_workflow_hook",
+      "gate": "via:PUT /api/cerebro/workflow-hooks/{id}"
     },
     {
       "id": "create_issue",
@@ -3395,6 +3443,38 @@
     {
       "id": "workflow list",
       "exempt": "read-only — wraps GET /api/cerebro/workflows"
+    },
+    {
+      "id": "workflow hook list",
+      "exempt": "read-only — wraps GET /api/cerebro/workflow-hooks"
+    },
+    {
+      "id": "workflow hook get",
+      "exempt": "read-only — wraps GET /api/cerebro/workflow-hooks/{id}"
+    },
+    {
+      "id": "workflow hook effective",
+      "exempt": "read-only — wraps GET /api/cerebro/workflow-hooks/{id}/effective"
+    },
+    {
+      "id": "workflow hook runs",
+      "exempt": "read-only — wraps GET /api/cerebro/workflow-hooks/{id}/runs"
+    },
+    {
+      "id": "workflow hook create",
+      "gate": "via:POST /api/cerebro/workflow-hooks"
+    },
+    {
+      "id": "workflow hook update",
+      "gate": "via:PUT /api/cerebro/workflow-hooks/{id}"
+    },
+    {
+      "id": "workflow hook test",
+      "gate": "via:POST /api/cerebro/workflow-hooks/{id}/test"
+    },
+    {
+      "id": "workflow hook publish",
+      "gate": "via:POST /api/cerebro/workflow-hooks/{id}/publish"
     },
     {
       "id": "workflow activate",

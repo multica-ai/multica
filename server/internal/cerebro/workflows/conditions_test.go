@@ -17,7 +17,7 @@ func TestEvaluate_EmptyConditionsAlwaysMatch(t *testing.T) {
 func TestEvaluate_DottedFieldLookup(t *testing.T) {
 	ctx := map[string]any{
 		"issue": map[string]any{
-			"priority": "high",
+			"priority":   "high",
 			"project_id": "p-1",
 		},
 	}
@@ -64,6 +64,32 @@ func TestEvaluate_UnknownOperatorFailsClosed(t *testing.T) {
 	conds := []Condition{{Field: "x", Op: "regex", Value: ".*"}}
 	if evaluate(conds, ctx) {
 		t.Fatal("unknown operator must fail closed")
+	}
+}
+
+func TestHookConditionOperators(t *testing.T) {
+	ctx := map[string]any{
+		"agent":        map[string]any{"model": "gpt-5.6-codex"},
+		"continuation": "wakeup",
+		"attempt":      2,
+	}
+	cases := []struct {
+		name string
+		cond Condition
+		want bool
+	}{
+		{name: "starts_with", cond: Condition{Field: "agent.model", Op: "starts_with", Value: "gpt-5.6"}, want: true},
+		{name: "exists", cond: Condition{Field: "continuation", Op: "exists"}, want: true},
+		{name: "missing does not exist", cond: Condition{Field: "missing", Op: "exists"}, want: false},
+		{name: "gte", cond: Condition{Field: "attempt", Op: "gte", Value: 2}, want: true},
+		{name: "lt", cond: Condition{Field: "attempt", Op: "lt", Value: 3}, want: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := evaluate([]Condition{tc.cond}, ctx); got != tc.want {
+				t.Fatalf("evaluate() = %v, want %v", got, tc.want)
+			}
+		})
 	}
 }
 

@@ -47,9 +47,10 @@ type TaskProgressPayload struct {
 
 // TaskCompletedPayload is sent from daemon to server when a task finishes.
 type TaskCompletedPayload struct {
-	TaskID string `json:"task_id"`
-	PRURL  string `json:"pr_url,omitempty"`
-	Output string `json:"output,omitempty"`
+	TaskID       string          `json:"task_id"`
+	PRURL        string          `json:"pr_url,omitempty"`
+	Output       string          `json:"output,omitempty"`
+	Continuation json.RawMessage `json:"continuation,omitempty"` // CEREBRO-PATCH(workflow-hooks-continuation): FIR-3101 server-verified next action.
 }
 
 // TaskMessagePayload represents a single agent execution message (tool call, text, etc.)
