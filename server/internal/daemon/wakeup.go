@@ -19,7 +19,19 @@ import (
 
 var errRuntimeSetChanged = errors.New("runtime set changed")
 
-const taskWakeupMaxBackoff = 30 * time.Second
+const (
+	taskWakeupMaxBackoff = 30 * time.Second
+
+	// The authenticated control connection carries tasks.claim RPC responses,
+	// not only small wakeup hints. One response can contain up to 32 complete
+	// Task payloads, including agent instructions, project/workspace context,
+	// comments, resources, and skill references. The old 64 KiB ceiling was
+	// smaller than a valid single-task response: the server could commit a
+	// claim, then the daemon would reject its response and correctly refuse an
+	// unsafe HTTP re-claim, leaving the task dispatched but never started.
+	// Keep reads bounded while leaving headroom for the current batch contract.
+	taskWakeupReadLimit int64 = 64 << 20
+)
 
 var (
 	taskWakeupPongWait          = 60 * time.Second
@@ -395,7 +407,7 @@ func (d *Daemon) readTaskWakeupMessages(conn *websocket.Conn, taskWakeups chan<-
 }
 
 func (d *Daemon) configureTaskWakeupReadLiveness(conn *websocket.Conn) {
-	conn.SetReadLimit(64 * 1024)
+	conn.SetReadLimit(taskWakeupReadLimit)
 	if err := d.extendTaskWakeupReadDeadline(conn); err != nil {
 		d.logger.Debug("task wakeup websocket read deadline failed", "error", err)
 	}
