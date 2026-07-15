@@ -163,7 +163,6 @@
       "option_name_placeholder": "オプション名",
       "add_option": "オプションを追加",
       "remove_option": "オプションを削除",
-      "random_color": "ランダムな色を選択",
       "cancel": "キャンセル",
       "save": "プロパティを保存",
       "saving": "保存中..."
@@ -207,8 +206,6 @@
       "description": "説明",
       "description_placeholder": "このラベルを使用する条件を説明",
       "color": "色",
-      "custom_color": "カスタム色を選択",
-      "random_color": "ランダムな色を選択",
       "cancel": "キャンセル",
       "save": "ラベルを保存",
       "saving": "保存中..."

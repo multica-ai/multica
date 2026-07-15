@@ -5,7 +5,6 @@ import { useQuery } from "@tanstack/react-query";
 import {
   Archive,
   ArchiveRestore,
-  Dices,
   GripVertical,
   MoreHorizontal,
   Pencil,
@@ -66,23 +65,11 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@multica/ui/components/ui/dropdown-menu";
-import { randomOptionColor } from "../../common/random-color";
+import { ColorPicker, COLOR_PICKER_PRESETS } from "../../common/color-picker";
 import { useT } from "../../i18n";
 import { SettingsTab } from "./settings-layout";
 
 const MAX_ACTIVE_PROPERTIES = 20;
-const OPTION_COLORS = [
-  "#6b7280",
-  "#ef4444",
-  "#f97316",
-  "#eab308",
-  "#22c55e",
-  "#14b8a6",
-  "#3b82f6",
-  "#6366f1",
-  "#a855f7",
-  "#ec4899",
-] as const;
 
 interface OptionDraft {
   id?: string;
@@ -101,7 +88,7 @@ const EMPTY_DRAFT: PropertyDraft = {
   name: "",
   type: "select",
   description: "",
-  options: [{ name: "", color: OPTION_COLORS[6] }],
+  options: [{ name: "", color: COLOR_PICKER_PRESETS[6] }],
 };
 
 function typeHasOptions(type: string): boolean {
@@ -485,7 +472,7 @@ function PropertyEditorDialog({
                       type: value as IssuePropertyType,
                       options:
                         typeHasOptions(value) && current.options.length === 0
-                          ? [{ name: "", color: OPTION_COLORS[6] }]
+                          ? [{ name: "", color: COLOR_PICKER_PRESETS[6] }]
                           : current.options,
                     }))
                   }
@@ -525,27 +512,18 @@ function PropertyEditorDialog({
                 {draft.options.map((option, index) => (
                   <div key={option.id ?? index} className="flex items-center gap-2">
                     <GripVertical className="size-4 shrink-0 text-muted-foreground/40" />
-                    <label
-                      className="relative size-6 shrink-0 cursor-pointer overflow-hidden rounded-full border border-surface-border"
-                      style={{ backgroundColor: option.color }}
-                    >
-                      <input
-                        type="color"
-                        value={option.color}
-                        onChange={(event) => setOption(index, { color: event.target.value })}
-                        className="absolute inset-0 cursor-pointer opacity-0"
-                        aria-label={option.color}
-                      />
-                    </label>
-                    <Button
-                      variant="ghost"
-                      size="icon-sm"
-                      title={t(($) => $.properties.editor.random_color)}
-                      aria-label={t(($) => $.properties.editor.random_color)}
-                      onClick={() => setOption(index, { color: randomOptionColor(option.color) })}
-                    >
-                      <Dices className="size-4" />
-                    </Button>
+                    <ColorPicker
+                      value={option.color}
+                      onChange={(color) => setOption(index, { color })}
+                      trigger={
+                        <button
+                          type="button"
+                          aria-label={option.color}
+                          className="size-6 shrink-0 cursor-pointer rounded-full border border-surface-border transition-transform hover:scale-110"
+                          style={{ backgroundColor: option.color }}
+                        />
+                      }
+                    />
                     <Input
                       value={option.name}
                       maxLength={32}
@@ -581,7 +559,7 @@ function PropertyEditorDialog({
                       ...current.options,
                       {
                         name: "",
-                        color: OPTION_COLORS[current.options.length % OPTION_COLORS.length] ?? OPTION_COLORS[6],
+                        color: COLOR_PICKER_PRESETS[current.options.length % COLOR_PICKER_PRESETS.length] ?? COLOR_PICKER_PRESETS[6],
                       },
                     ],
                   }))

@@ -167,7 +167,6 @@
       "option_name_placeholder": "Option name",
       "add_option": "Add option",
       "remove_option": "Remove option",
-      "random_color": "Pick a random color",
       "cancel": "Cancel",
       "save": "Save property",
       "saving": "Saving..."
@@ -215,8 +214,6 @@
       "description": "Description",
       "description_placeholder": "Describe when this label should be used",
       "color": "Color",
-      "custom_color": "Choose a custom color",
-      "random_color": "Pick a random color",
       "cancel": "Cancel",
       "save": "Save label",
       "saving": "Saving..."

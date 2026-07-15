@@ -1,5 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { randomOptionColor } from "./random-color";
+import {
+  hexToHsv,
+  hsvToHex,
+  normalizeHex,
+  randomOptionColor,
+} from "./color-utils";
 
 const RUNS = 200;
 
@@ -24,6 +29,55 @@ function hueDistance(a: number, b: number): number {
   const diff = Math.abs(a - b) % 360;
   return Math.min(diff, 360 - diff);
 }
+
+describe("normalizeHex", () => {
+  it("normalizes case and missing hash", () => {
+    expect(normalizeHex("#3B82F6")).toBe("#3b82f6");
+    expect(normalizeHex("3b82f6")).toBe("#3b82f6");
+    expect(normalizeHex("  #3b82f6  ")).toBe("#3b82f6");
+  });
+
+  it("rejects anything that is not a 6-digit hex color", () => {
+    for (const bad of ["#fff", "3b82f", "#3b82f6ff", "red", ""]) {
+      expect(normalizeHex(bad)).toBeNull();
+    }
+  });
+});
+
+describe("hexToHsv / hsvToHex", () => {
+  it("converts primaries and grays to the expected HSV", () => {
+    expect(hexToHsv("#ff0000")).toEqual({ h: 0, s: 1, v: 1 });
+    expect(hexToHsv("#00ff00")).toEqual({ h: 120, s: 1, v: 1 });
+    expect(hexToHsv("#0000ff")).toEqual({ h: 240, s: 1, v: 1 });
+    expect(hexToHsv("#000000")).toEqual({ h: 0, s: 0, v: 0 });
+    expect(hexToHsv("#ffffff")).toEqual({ h: 0, s: 0, v: 1 });
+  });
+
+  it("returns null for invalid input", () => {
+    expect(hexToHsv("nope")).toBeNull();
+  });
+
+  it("round-trips every representable color it produces", () => {
+    for (const hex of [
+      "#6b7280",
+      "#ef4444",
+      "#f97316",
+      "#eab308",
+      "#22c55e",
+      "#14b8a6",
+      "#3b82f6",
+      "#6366f1",
+      "#a855f7",
+      "#ec4899",
+      "#000000",
+      "#ffffff",
+    ]) {
+      const hsv = hexToHsv(hex);
+      expect(hsv).not.toBeNull();
+      expect(hsvToHex(hsv!)).toBe(hex);
+    }
+  });
+});
 
 describe("randomOptionColor", () => {
   it("returns a lowercase #rrggbb hex string", () => {
@@ -55,7 +109,7 @@ describe("randomOptionColor", () => {
   });
 
   it("still returns a valid color when avoid is achromatic or malformed", () => {
-    for (const avoid of ["#808080", "not-a-color", "#fff", ""]) {
+    for (const avoid of ["#808080", "#000000", "not-a-color", "#fff", ""]) {
       expect(randomOptionColor(avoid)).toMatch(/^#[0-9a-f]{6}$/);
     }
   });
