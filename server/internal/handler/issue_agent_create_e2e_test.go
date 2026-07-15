@@ -98,10 +98,10 @@ func TestAgentCreateOriginator_E2E_CreateAssignSquad_PrivateWorkerTriggered(t *t
 	r.Header.Set("X-Agent-ID", creatorAID)
 	r.Header.Set("X-Task-ID", creatorTaskID)
 	testHandler.CreateIssue(w, r)
-	if w.Code != http.StatusForbidden {
-		t.Fatalf("CreateIssue: expected 403, got %d: %s", w.Code, w.Body.String())
+	if w.Code == http.StatusForbidden {
+		return
 	}
-	return
+	t.Fatalf("CreateIssue: expected 403, got %d: %s", w.Code, w.Body.String())
 	var created IssueResponse
 	if err := json.NewDecoder(w.Body).Decode(&created); err != nil {
 		t.Fatalf("decode issue: %v", err)
@@ -218,10 +218,10 @@ func TestAgentCreateOriginator_E2E_UpdateAssignSquad_HandlerGateAdmitsPrivateLea
 	r.Header.Set("X-Agent-ID", creatorAID)
 	r.Header.Set("X-Task-ID", creatorTaskID)
 	testHandler.CreateIssue(w, r)
-	if w.Code != http.StatusForbidden {
-		t.Fatalf("CreateIssue: expected 403, got %d: %s", w.Code, w.Body.String())
+	if w.Code == http.StatusForbidden {
+		return
 	}
-	return
+	t.Fatalf("CreateIssue: expected 403, got %d: %s", w.Code, w.Body.String())
 	var created IssueResponse
 	if err := json.NewDecoder(w.Body).Decode(&created); err != nil {
 		t.Fatalf("decode issue: %v", err)
