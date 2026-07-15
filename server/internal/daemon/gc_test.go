@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -993,6 +994,46 @@ func TestReserveEnvRootForGCIsExclusive(t *testing.T) {
 		t.Fatal("expected GC reservation after release")
 	}
 	release()
+}
+
+func TestEnvRootGCReservationBlocksConcurrentClaim(t *testing.T) {
+	t.Parallel()
+	d := newGCTestDaemon(t, http.NewServeMux())
+	root := filepath.Join(t.TempDir(), "reserved-env")
+	release, ok := d.reserveEnvRootForGC(root)
+	if !ok {
+		t.Fatal("expected inactive env root GC reservation")
+	}
+	reachedGate := make(chan struct{})
+	var reachedOnce sync.Once
+	d.activeEnvRootWaitHook = func(got string) {
+		if got != root {
+			t.Errorf("wait hook root = %q, want %q", got, root)
+		}
+		reachedOnce.Do(func() { close(reachedGate) })
+	}
+	marked := make(chan struct{})
+	go func() {
+		d.markActiveEnvRoot(root)
+		close(marked)
+	}()
+	select {
+	case <-reachedGate:
+	case <-time.After(time.Second):
+		t.Fatal("concurrent claim did not reach GC reservation gate")
+	}
+	select {
+	case <-marked:
+		t.Fatal("concurrent claim passed reservation before release")
+	default:
+	}
+	release()
+	select {
+	case <-marked:
+	case <-time.After(time.Second):
+		t.Fatal("concurrent claim did not resume after reservation release")
+	}
+	d.unmarkActiveEnvRoot(root)
 }
 
 func TestIsBareRepo(t *testing.T) {

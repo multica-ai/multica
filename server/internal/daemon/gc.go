@@ -2,7 +2,9 @@ package daemon
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
+	"fmt"
 	"net/http"
 	"os"
 	"os/exec"
@@ -74,12 +76,15 @@ func (d *Daemon) runGC(ctx context.Context) {
 
 	stats := &gcStats{byPattern: map[string]int{}}
 	for _, wsEntry := range entries {
-		if !wsEntry.IsDir() || wsEntry.Name() == ".repos" {
+		if !wsEntry.IsDir() || wsEntry.Name() == ".repos" || wsEntry.Name() == gcTrashDirName {
 			continue
 		}
 		wsDir := filepath.Join(root, wsEntry.Name())
 		d.gcWorkspace(ctx, wsDir, stats)
 	}
+	// Retry quarantines left by a prior partial/failed removal. They are never
+	// reusable task roots, so retrying cannot race with task startup.
+	_ = os.RemoveAll(filepath.Join(root, gcTrashDirName))
 
 	// Prune stale worktree references from all bare repo caches.
 	d.pruneRepoWorktrees(root)
@@ -217,7 +222,7 @@ func (d *Daemon) gcWorkspaceIssues(ctx context.Context, workspaceID string, cand
 // atomically reserves the env root because a task can start while the server
 // reconciliation request is in flight.
 func (d *Daemon) applyGCAction(taskDir string, action gcAction, stats *gcStats) int {
-	if action != gcActionSkip {
+	if action == gcActionCleanArtifacts {
 		release, ok := d.reserveEnvRootForGC(taskDir)
 		if !ok {
 			stats.skipped++
@@ -228,16 +233,20 @@ func (d *Daemon) applyGCAction(taskDir string, action gcAction, stats *gcStats) 
 	switch action {
 	case gcActionClean:
 		bytes := dirSize(taskDir)
-		d.cleanTaskDir(taskDir)
-		stats.cleaned++
-		stats.bytesReclaimed += bytes
-		return 1
+		if d.cleanTaskDir(taskDir) {
+			stats.cleaned++
+			stats.bytesReclaimed += bytes
+			return 1
+		}
+		stats.skipped++
 	case gcActionOrphan:
 		bytes := dirSize(taskDir)
-		d.cleanTaskDir(taskDir)
-		stats.orphaned++
-		stats.bytesReclaimed += bytes
-		return 1
+		if d.cleanTaskDir(taskDir) {
+			stats.orphaned++
+			stats.bytesReclaimed += bytes
+			return 1
+		}
+		stats.skipped++
 	case gcActionCleanArtifacts:
 		removed, bytes, perPattern := d.cleanTaskArtifacts(taskDir, d.cfg.GCArtifactPatterns)
 		recordArtifactCleanup(stats, removed, bytes, perPattern)
@@ -268,6 +277,8 @@ func recordArtifactCleanup(stats *gcStats, removed int, bytes int64, perPattern 
 }
 
 type gcAction int
+
+const gcTrashDirName = ".gc-trash"
 
 const (
 	gcActionSkip                  gcAction = iota
@@ -610,13 +621,84 @@ func isAgentTaskTerminal(status string) bool {
 	}
 }
 
-// cleanTaskDir removes a task directory and logs the result.
-func (d *Daemon) cleanTaskDir(taskDir string) {
-	if err := os.RemoveAll(taskDir); err != nil {
-		d.logger.Warn("gc: remove task dir failed", "dir", taskDir, "error", err)
-	} else {
-		d.logger.Info("gc: removed", "dir", taskDir)
+// cleanTaskDir reserves and atomically quarantines a task root before removal.
+// A partial removal can therefore never leave a damaged reusable PriorWorkDir.
+func (d *Daemon) cleanTaskDir(taskDir string) bool {
+	release, ok := d.reserveEnvRootForGC(taskDir)
+	if !ok {
+		d.logger.Info("gc: skip removal; env root became active", "dir", taskDir)
+		return false
 	}
+	defer release()
+
+	quarantineDir, err := d.quarantineTaskDir(taskDir)
+	if err != nil {
+		d.logger.Warn("gc: quarantine task dir failed", "dir", taskDir, "error", err)
+		return false
+	}
+	if err := d.removeEnvRoot(quarantineDir); err != nil {
+		d.logger.Warn("gc: remove quarantined task dir failed", "dir", quarantineDir, "error", err)
+		return false
+	}
+	d.logger.Info("gc: removed", "dir", taskDir)
+	return true
+}
+
+func (d *Daemon) quarantineTaskDir(taskDir string) (string, error) {
+	quarantineDir, err := gcQuarantinePath(d.cfg.WorkspacesRoot, taskDir)
+	if err != nil {
+		return "", err
+	}
+	trashRoot := filepath.Join(d.cfg.WorkspacesRoot, gcTrashDirName)
+	if err := ensureGCTrashRoot(trashRoot); err != nil {
+		return "", err
+	}
+	if _, err := os.Lstat(quarantineDir); err == nil {
+		return "", fmt.Errorf("quarantine destination already exists")
+	} else if !os.IsNotExist(err) {
+		return "", err
+	}
+	if d.renameEnvRootHook != nil {
+		err = d.renameEnvRootHook(taskDir, quarantineDir)
+	} else {
+		err = os.Rename(taskDir, quarantineDir)
+	}
+	if err != nil {
+		return "", err
+	}
+	return quarantineDir, nil
+}
+
+func gcQuarantinePath(workspacesRoot, taskDir string) (string, error) {
+	rel, err := filepath.Rel(workspacesRoot, taskDir)
+	if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
+		return "", fmt.Errorf("task dir outside workspaces root")
+	}
+	return filepath.Join(workspacesRoot, gcTrashDirName, fmt.Sprintf("%x", sha256.Sum256([]byte(rel)))), nil
+}
+
+func ensureGCTrashRoot(trashRoot string) error {
+	info, err := os.Lstat(trashRoot)
+	if os.IsNotExist(err) {
+		if err := os.Mkdir(trashRoot, 0o755); err != nil && !os.IsExist(err) {
+			return err
+		}
+		info, err = os.Lstat(trashRoot)
+	}
+	if err != nil {
+		return err
+	}
+	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("gc trash root is not a real directory")
+	}
+	return nil
+}
+
+func (d *Daemon) removeEnvRoot(path string) error {
+	if d.removeEnvRootHook != nil {
+		return d.removeEnvRootHook(path)
+	}
+	return os.RemoveAll(path)
 }
 
 // cleanTaskArtifacts walks taskDir and deletes every directory whose basename
