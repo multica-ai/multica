@@ -85,8 +85,11 @@ describe("UpdatesSettingsTab", () => {
     const toggle = screen.getByRole("switch", {
       name: "Automatic background updates",
     });
-    await waitFor(() => expect(toggle).toBeEnabled());
-    expect(toggle).not.toBeChecked();
+    // The switch renders as <span role="switch">, so jest-dom's toBeEnabled()
+    // treats it as always enabled and does not actually wait for getPreferences
+    // to resolve. Wait on the persisted value being reflected instead, which
+    // deterministically holds until the loaded preference (false) is applied.
+    await waitFor(() => expect(toggle).not.toBeChecked());
 
     fireEvent.click(toggle);
 
