@@ -3,6 +3,8 @@ package execenv
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -78,6 +80,9 @@ func prepareCodexHome(codexHome string, logger *slog.Logger) error {
 // daemon-managed sandbox block picked by codexSandboxPolicyFor.
 func prepareCodexHomeWithOpts(codexHome string, opts CodexHomeOptions, logger *slog.Logger) error {
 	sharedHome := resolveSharedCodexHome()
+	if inherited := inheritedManagedCodexHomeWithoutAuth(); inherited && !isReadableRegularFile(filepath.Join(sharedHome, "auth.json")) && codexFileAuthRequired(sharedHome) {
+		return errors.New("codex file authentication requires readable auth.json")
+	}
 
 	if err := os.MkdirAll(codexHome, 0o755); err != nil {
 		return fmt.Errorf("create codex-home dir: %w", err)
@@ -165,14 +170,80 @@ func resolveSharedCodexHome() string {
 	if v := os.Getenv("CODEX_HOME"); v != "" {
 		abs, err := filepath.Abs(v)
 		if err == nil {
+			if isManagedCodexHome(abs) && !isReadableRegularFile(filepath.Join(abs, "auth.json")) {
+				return defaultCodexHome()
+			}
 			return abs
 		}
 	}
+	return defaultCodexHome()
+}
+
+func defaultCodexHome() string {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return filepath.Join(os.TempDir(), ".codex") // last resort fallback
 	}
 	return filepath.Join(home, ".codex")
+}
+
+func isManagedCodexHome(path string) bool {
+	if filepath.Base(path) != "codex-home" {
+		return false
+	}
+	for dir := filepath.Dir(path); ; dir = filepath.Dir(dir) {
+		data, err := os.ReadFile(filepath.Join(dir, TaskContextMarkerRelPath))
+		if err == nil {
+			var marker taskContextMarkerFile
+			return json.Unmarshal(data, &marker) == nil && marker.ManagedBy == TaskContextMarkerManagedBy
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return false
+		}
+	}
+}
+
+func isReadableRegularFile(path string) bool {
+	fi, err := os.Stat(path)
+	if err != nil || !fi.Mode().IsRegular() {
+		return false
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return false
+	}
+	return f.Close() == nil
+}
+
+func inheritedManagedCodexHomeWithoutAuth() bool {
+	v := os.Getenv("CODEX_HOME")
+	if v == "" {
+		return false
+	}
+	abs, err := filepath.Abs(v)
+	return err == nil && isManagedCodexHome(abs) && !isReadableRegularFile(filepath.Join(abs, "auth.json"))
+}
+
+func codexFileAuthRequired(sharedHome string) bool {
+	if strings.TrimSpace(os.Getenv("OPENAI_API_KEY")) != "" {
+		return false
+	}
+	data, err := os.ReadFile(filepath.Join(sharedHome, "config.toml"))
+	if err != nil {
+		return true
+	}
+	var cfg struct {
+		ModelProvider  string `toml:"model_provider"`
+		ModelProviders map[string]struct {
+			EnvKey string `toml:"env_key"`
+		} `toml:"model_providers"`
+	}
+	if toml.Unmarshal(data, &cfg) != nil || cfg.ModelProvider == "" {
+		return true
+	}
+	provider, ok := cfg.ModelProviders[cfg.ModelProvider]
+	return !ok || provider.EnvKey == "" || strings.TrimSpace(os.Getenv(provider.EnvKey)) == ""
 }
 
 // codexSessionStateGlobs are the session-derived SQLite state Codex builds
