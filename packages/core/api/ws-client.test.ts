@@ -215,4 +215,18 @@ describe("WSClient liveness monitor", () => {
       "user",
     );
   });
+
+  it("ignores messages without a valid event type", () => {
+    const ws = new WSClient("ws://example.test/ws");
+    ws.setAuth("tok", "acme");
+    ws.connect();
+
+    const handler = vi.fn();
+    ws.onAny(handler);
+
+    const fakeWs = (ws as any).ws as FakeWebSocket;
+    fakeWs.onmessage?.({ data: JSON.stringify({ payload: {} }) });
+
+    expect(handler).not.toHaveBeenCalled();
+  });
 });

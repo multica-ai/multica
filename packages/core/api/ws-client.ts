@@ -95,6 +95,8 @@ export class WSClient {
       this.lastMessageAt = Date.now();
 
       const msg = JSON.parse(event.data as string) as WSMessage;
+      // CEREBRO-PATCH(ws-invalid-event-guard): never dispatch frames without an event type.
+      if (typeof msg.type !== "string" || msg.type.length === 0) return;
       if ((msg as any).type === "auth_ack") {
         this.onAuthenticated();
         return;
