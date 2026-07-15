@@ -339,8 +339,8 @@ export function AgentLiveCard({ issueId, wakeupIssueId }: AgentLiveCardProps) {
     ),
   ];
   const anyRunning = entries.some((e) => e.task.status === "running");
-  // CEREBRO-PATCH(agent-live-card-wakeup-fold): FIR-1714 — stay sticky only when a real
-  // task is present; a lone scheduled run scrolls with the page (no frozen wakeup bar).
+  // CEREBRO-PATCH(agent-live-card-wakeup-sticky): FIR-3296 — every rendered bar stays
+  // sticky; hasTask still distinguishes task summaries and the wakeup-only tint.
   const hasTask = entries.length > 0;
   // Summary text for the collapsed multi header. Pure-task stays on the upstream
   // localized string; once a wakeup joins, append the scheduled-run count.
@@ -358,10 +358,9 @@ export function AgentLiveCard({ issueId, wakeupIssueId }: AgentLiveCardProps) {
     // thread scrolls under it. One bordered container in every state: the
     // single row, the collapsed summary, and the expanded list all share it,
     // so the bar reads at one consistent width.
-    // CEREBRO-PATCH(agent-live-card-wakeup-fold): FIR-1714 — sticky only when a real task
-    // is present; a lone scheduled run renders in-flow so it scrolls with the page. The
-    // container tints orange when it is wakeup-only, matching the old scheduled-run banner.
-    <div className={cn("mt-4 rounded-lg", hasTask && "sticky top-4 z-10 bg-background/80 supports-[backdrop-filter]:bg-background/55 backdrop-blur-md")}>
+    // CEREBRO-PATCH(agent-live-card-wakeup-sticky): FIR-3296 — every rendered bar stays sticky,
+    // including a lone wakeup; the orange wakeup-only tint remains unchanged.
+    <div className="mt-4 sticky top-4 z-10 rounded-lg bg-background/80 supports-[backdrop-filter]:bg-background/55 backdrop-blur-md">
       <div className={cn("overflow-hidden rounded-lg border", hasTask ? "border-info/20 bg-info/5" : "border-warning/30 bg-warning/10")}>
         {isMulti ? (
           <>

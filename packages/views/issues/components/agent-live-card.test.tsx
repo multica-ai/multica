@@ -95,18 +95,19 @@ vi.mock("@multica/cerebro-terminal", () => ({
 
 // CEREBRO-PATCH(agent-live-card-wakeup-fold): FIR-1714 — stub the feature-flag +
 // wakeup hooks so this task-focused test doesn't need a QueryClient + workspace
-// provider. Wakeup folding has its own coverage in @multica/cerebro-wakeup.
+// provider. The mutable state also covers the shared bar's wakeup-only layout.
+const mockWakeupState = vi.hoisted(() => ({
+  wakeups: [] as Array<{ id: string }>,
+  now: 0,
+  cancel: vi.fn(),
+  cancellingIds: new Set<string>(),
+}));
 vi.mock("@multica/cerebro-feature-flags", () => ({
-  useFeatureFlag: () => false,
+  useFeatureFlag: () => true,
 }));
 vi.mock("@multica/cerebro-wakeup", () => ({
-  useIssueWakeups: () => ({
-    wakeups: [],
-    now: 0,
-    cancel: vi.fn(),
-    cancellingIds: new Set<string>(),
-  }),
-  WakeupActivityRow: () => null,
+  useIssueWakeups: () => mockWakeupState,
+  WakeupActivityRow: () => <div data-testid="wakeup-row" />,
 }));
 
 // ---------------------------------------------------------------------------
@@ -151,10 +152,10 @@ function fireEvent(event: string, payload: unknown) {
   for (const h of handlers) h(payload);
 }
 
-function renderCard(issueId = "issue-1") {
+function renderCard(issueId = "issue-1", wakeupIssueId?: string) {
   return render(
     <I18nProvider locale="en" resources={TEST_RESOURCES}>
-      <AgentLiveCard issueId={issueId} />
+      <AgentLiveCard issueId={issueId} wakeupIssueId={wakeupIssueId} />
     </I18nProvider>,
   );
 }
@@ -166,6 +167,28 @@ beforeEach(() => {
   mockApi.listTaskMessages.mockReset();
   mockApi.listTaskMessages.mockResolvedValue([]);
   mockApi.cancelTask.mockReset();
+  mockWakeupState.wakeups = [];
+  mockWakeupState.cancel.mockReset();
+  mockWakeupState.cancellingIds.clear();
+});
+
+describe("AgentLiveCard wakeup-only layout", () => {
+  it("keeps a wakeup-only bar sticky like an active run", async () => {
+    mockApi.getActiveTasksForIssue.mockResolvedValueOnce({ tasks: [] });
+    mockWakeupState.wakeups = [{ id: "wakeup-1" }];
+
+    renderCard("issue-1", "issue-uuid-1");
+
+    const wakeupRow = await screen.findByTestId("wakeup-row");
+    const bar = wakeupRow.parentElement?.parentElement;
+    expect(bar).toHaveClass(
+      "sticky",
+      "top-4",
+      "z-10",
+      "bg-background/80",
+      "backdrop-blur-md",
+    );
+  });
 });
 
 // ---------------------------------------------------------------------------
