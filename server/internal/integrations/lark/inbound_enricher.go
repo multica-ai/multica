@@ -327,7 +327,12 @@ func (e *inboundEnricher) fetchRecentItems(ctx context.Context, creds Installati
 			break
 		}
 		classified := classifyRecentContextFetchError(err)
-		if !classified.retryable || attempt == recentContextMaxFetchAttempts {
+		// A retry only helps while the shared enrichment budget still has
+		// time left. Both attempts reuse one ctx (ws_connector caps the
+		// whole Enrich at EnrichTimeout, ~2s), so once ctx is done a second
+		// call fails immediately — degrade now instead of burning a doomed
+		// request. This is why a first-attempt deadline never "recovers".
+		if !classified.retryable || attempt == recentContextMaxFetchAttempts || ctx.Err() != nil {
 			e.logRecentContextFetchFailure(msg, err, classified, attempt)
 			return nil, err
 		}
@@ -435,7 +440,10 @@ func classifyRecentContextFetchError(err error) recentContextFetchClassification
 	case containsAny(msg, "code=99991663", "code=99991664"):
 		return recentContextFetchClassification{category: recentContextFailureTokenExpired, retryable: true}
 	case containsAny(msg, "code=230020", "rate limit", "rate_limit", "http 429"):
-		return recentContextFetchClassification{category: recentContextFailureRateLimited, retryable: true}
+		// Not retryable: the client drops Retry-After, and an immediate
+		// second call within the same budget almost always re-hits the
+		// limit while doubling list load on an already-throttled tenant.
+		return recentContextFetchClassification{category: recentContextFailureRateLimited}
 	case containsAny(msg, "deadline exceeded", "timeout", "timed out"):
 		return recentContextFetchClassification{category: recentContextFailureTimeout, retryable: true}
 	case containsAny(msg, "http 500", "http 502", "http 503", "http 504", "connection reset", "connection refused", "temporary"):
@@ -454,7 +462,9 @@ func classifyRecentContextAPIError(code int, msg string) recentContextFetchClass
 	case isTokenError(code):
 		return recentContextFetchClassification{category: recentContextFailureTokenExpired, retryable: true}
 	case code == 230020:
-		return recentContextFetchClassification{category: recentContextFailureRateLimited, retryable: true}
+		// See classifyRecentContextFetchError: rate limits degrade rather
+		// than retry, since the client drops Retry-After.
+		return recentContextFetchClassification{category: recentContextFailureRateLimited}
 	}
 	return classifyRecentContextFetchError(errors.New(msg))
 }

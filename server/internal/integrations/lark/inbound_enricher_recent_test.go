@@ -342,13 +342,17 @@ func TestEnrichRecentContextFetchError(t *testing.T) {
 	}
 }
 
-// TestEnrichRecentContextRetriesTransientTimeout pins the bounded retry:
-// a transient timeout gets one retry, and a successful retry renders the
-// real recent_context block instead of degrading.
-func TestEnrichRecentContextRetriesTransientTimeout(t *testing.T) {
+// TestEnrichRecentContextRetriesTransientNetworkError pins the bounded
+// retry on a transient failure that leaves the shared enrichment budget
+// intact: one retry, and a successful retry renders the real
+// recent_context block instead of degrading. It deliberately does NOT use
+// context.DeadlineExceeded — that error means the shared ctx is already
+// spent, so a second attempt could never recover in production (see
+// TestEnrichRecentContextDoneContextDoesNotRetry).
+func TestEnrichRecentContextRetriesTransientNetworkError(t *testing.T) {
 	t.Parallel()
 	fake := newEnricherFake()
-	fake.errSeqChat["oc_g"] = []error{context.DeadlineExceeded, nil}
+	fake.errSeqChat["oc_g"] = []error{errors.New("connection reset by peer"), nil}
 	fake.byChat["oc_g"] = []LarkMessage{
 		textMsg("om_trigger", "ou_user", "总结一下", "3000"),
 		textMsg("om_a", "ou_alice", "我改完了登录页", "1000"),
@@ -374,7 +378,138 @@ func TestEnrichRecentContextRetriesTransientTimeout(t *testing.T) {
 		t.Errorf("body\n got = %q\nwant = %q", out.Body, want)
 	}
 	if len(fake.listCalls) != 2 {
-		t.Errorf("timeout should retry once; got calls %v", fake.listCalls)
+		t.Errorf("transient network error should retry once; got calls %v", fake.listCalls)
+	}
+}
+
+// TestEnrichRecentContextDoneContextDoesNotRetry locks Must-fix #1: when
+// the shared enrichment budget is already spent, a retryable first failure
+// must degrade after ONE attempt rather than fire a second call that can
+// only fail again. A pre-cancelled context stands in for that exhausted
+// budget (the production entry point wraps Enrich in a ~2s deadline).
+func TestEnrichRecentContextDoneContextDoesNotRetry(t *testing.T) {
+	t.Parallel()
+	fake := newEnricherFake()
+	// Would normally be retried (transient), but the context is done.
+	fake.errByChat["oc_g"] = errors.New("connection reset by peer")
+	in := InboundMessage{
+		MessageType:    "text",
+		MessageID:      "om_trigger",
+		ChatID:         "oc_g",
+		ChatType:       ChatTypeGroup,
+		AddressedToBot: true,
+		Body:           "在干嘛",
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	e := NewInboundEnricher(fake, groupCfg())
+	out := e.Enrich(ctx, in, InstallationCredentials{AppID: "a", AppSecret: "s"})
+
+	want := `[Recent Lark context temporarily unavailable; continuing with the latest message.]
+
+在干嘛`
+	if out.Body != want {
+		t.Errorf("body\n got = %q\nwant = %q", out.Body, want)
+	}
+	assertNoRecentContextFetchPlaceholder(t, out.Body)
+	if len(fake.listCalls) != 1 {
+		t.Errorf("a done context must not retry; got calls %v", fake.listCalls)
+	}
+}
+
+// TestEnrichRecentContextRateLimitedDoesNotRetry locks Must-fix #2: a rate
+// limit degrades immediately instead of retrying. It uses the PRODUCTION
+// error shape — ListChatMessages returns a plain wrapped error string, not
+// an *APIError — so the string classifier path (the one prod actually
+// hits) is what gets pinned.
+func TestEnrichRecentContextRateLimitedDoesNotRetry(t *testing.T) {
+	t.Parallel()
+	fake := newEnricherFake()
+	fake.errByChat["oc_g"] = errors.New(`lark http client: list chat messages: code=230020 msg="rate limit exceeded"`)
+	in := InboundMessage{
+		MessageType:    "text",
+		MessageID:      "om_trigger",
+		ChatID:         "oc_g",
+		ChatType:       ChatTypeGroup,
+		AddressedToBot: true,
+		Body:           "在干嘛",
+	}
+
+	out := enrich(t, fake, in, groupCfg())
+
+	want := `[Recent Lark context temporarily unavailable; continuing with the latest message.]
+
+在干嘛`
+	if out.Body != want {
+		t.Errorf("body\n got = %q\nwant = %q", out.Body, want)
+	}
+	assertNoRecentContextFetchPlaceholder(t, out.Body)
+	if len(fake.listCalls) != 1 {
+		t.Errorf("rate limit should not retry; got calls %v", fake.listCalls)
+	}
+}
+
+// TestEnrichRecentContextProductionErrorShapes covers the classifier on
+// the real error shape ListChatMessages returns: a plain wrapped error
+// string ("...: code=%d msg=%q"), NOT an *APIError. The typed-APIError
+// tests above exercise classifyRecentContextAPIError, but production
+// traffic only ever reaches the string path, so pin that too — including
+// that token errors DO retry (client refreshes the token) while permission
+// and deleted errors do not.
+func TestEnrichRecentContextProductionErrorShapes(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name      string
+		err       error
+		wantLine  string
+		wantCalls int
+	}{
+		{
+			name:      "permission_denied",
+			err:       errors.New(`lark http client: list chat messages: code=99991002 msg="no permission"`),
+			wantLine:  "[Recent Lark context unavailable: the bot cannot read this chat history. Continuing with the latest message.]",
+			wantCalls: 1,
+		},
+		{
+			name:      "message_deleted",
+			err:       errors.New(`lark http client: list chat messages: code=230110 msg="message has been deleted"`),
+			wantLine:  "[Recent Lark context unavailable: the referenced chat history is deleted or no longer visible. Continuing with the latest message.]",
+			wantCalls: 1,
+		},
+		{
+			name:      "token_expired_retries_then_degrades",
+			err:       errors.New(`lark http client: list chat messages: code=99991663 msg="access token expired"`),
+			wantLine:  "[Recent Lark context temporarily unavailable; continuing with the latest message.]",
+			wantCalls: 2,
+		},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			fake := newEnricherFake()
+			fake.errByChat["oc_g"] = tc.err
+			in := InboundMessage{
+				MessageType:    "text",
+				MessageID:      "om_trigger",
+				ChatID:         "oc_g",
+				ChatType:       ChatTypeGroup,
+				AddressedToBot: true,
+				Body:           "在干嘛",
+			}
+
+			out := enrich(t, fake, in, groupCfg())
+
+			want := tc.wantLine + "\n\n在干嘛"
+			if out.Body != want {
+				t.Errorf("body\n got = %q\nwant = %q", out.Body, want)
+			}
+			assertNoRecentContextFetchPlaceholder(t, out.Body)
+			if len(fake.listCalls) != tc.wantCalls {
+				t.Errorf("%s: got calls %v want %d", tc.name, fake.listCalls, tc.wantCalls)
+			}
+		})
 	}
 }
 
