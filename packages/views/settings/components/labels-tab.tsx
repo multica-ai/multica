@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { MoreHorizontal, Pencil, Plus, Search, Tag, Trash2 } from "lucide-react";
+import { Dices, MoreHorizontal, Pencil, Plus, Search, Tag, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { useFeatureEnabled } from "@multica/core/config";
 import { RESOURCE_LABELS_FLAG } from "@multica/core/feature-flags";
@@ -43,6 +43,7 @@ import {
   DropdownMenuTrigger,
 } from "@multica/ui/components/ui/dropdown-menu";
 import { cn } from "@multica/ui/lib/utils";
+import { randomOptionColor } from "../../common/random-color";
 import { useT } from "../../i18n";
 import { SettingsTab } from "./settings-layout";
 
@@ -390,6 +391,20 @@ function LabelEditorDialog({
                   aria-label={t(($) => $.labels.editor.custom_color)}
                 />
               </label>
+              <button
+                type="button"
+                title={t(($) => $.labels.editor.random_color)}
+                aria-label={t(($) => $.labels.editor.random_color)}
+                onClick={() =>
+                  setDraft((current) => ({
+                    ...current,
+                    color: randomOptionColor(current.color),
+                  }))
+                }
+                className="flex size-7 items-center justify-center rounded-full border border-dashed border-surface-border text-muted-foreground transition-transform hover:scale-110 hover:text-foreground"
+              >
+                <Dices className="size-4" />
+              </button>
             </div>
           </div>
         </div>

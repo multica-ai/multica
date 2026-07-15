@@ -166,6 +166,7 @@
       "option_name_placeholder": "选项名称",
       "add_option": "添加选项",
       "remove_option": "移除选项",
+      "random_color": "随机取色",
       "cancel": "取消",
       "save": "保存属性",
       "saving": "保存中..."
@@ -214,6 +215,7 @@
       "description_placeholder": "说明什么时候应使用这个标签",
       "color": "颜色",
       "custom_color": "选择自定义颜色",
+      "random_color": "随机取色",
       "cancel": "取消",
       "save": "保存标签",
       "saving": "保存中..."

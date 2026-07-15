@@ -163,6 +163,7 @@
       "option_name_placeholder": "옵션 이름",
       "add_option": "옵션 추가",
       "remove_option": "옵션 제거",
+      "random_color": "무작위 색상 선택",
       "cancel": "취소",
       "save": "속성 저장",
       "saving": "저장 중..."
@@ -207,6 +208,7 @@
       "description_placeholder": "이 레이블을 사용할 때를 설명하세요",
       "color": "색상",
       "custom_color": "사용자 지정 색상 선택",
+      "random_color": "무작위 색상 선택",
       "cancel": "취소",
       "save": "레이블 저장",
       "saving": "저장 중..."

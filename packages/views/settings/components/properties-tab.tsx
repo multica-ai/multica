@@ -5,6 +5,7 @@ import { useQuery } from "@tanstack/react-query";
 import {
   Archive,
   ArchiveRestore,
+  Dices,
   GripVertical,
   MoreHorizontal,
   Pencil,
@@ -65,6 +66,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@multica/ui/components/ui/dropdown-menu";
+import { randomOptionColor } from "../../common/random-color";
 import { useT } from "../../i18n";
 import { SettingsTab } from "./settings-layout";
 
@@ -535,6 +537,15 @@ function PropertyEditorDialog({
                         aria-label={option.color}
                       />
                     </label>
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      title={t(($) => $.properties.editor.random_color)}
+                      aria-label={t(($) => $.properties.editor.random_color)}
+                      onClick={() => setOption(index, { color: randomOptionColor(option.color) })}
+                    >
+                      <Dices className="size-4" />
+                    </Button>
                     <Input
                       value={option.name}
                       maxLength={32}
