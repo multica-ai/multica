@@ -7,10 +7,33 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
 )
+
+type recordingGrokCommandBuilder struct {
+	requests []CommandRequest
+}
+
+func (b *recordingGrokCommandBuilder) Command(ctx context.Context, req CommandRequest) (*exec.Cmd, error) {
+	b.requests = append(b.requests, req)
+	cmd := exec.CommandContext(ctx, req.Executable, req.Args...)
+	cmd.Dir = req.Cwd
+	env, err := explicitEnvironment(req.Env)
+	if err != nil {
+		return nil, err
+	}
+	cmd.Env = env
+	cmd.WaitDelay = req.WaitDelay
+	return cmd, nil
+}
+
+func grokTestConfig(t *testing.T, executable string, env map[string]string) Config {
+	t.Helper()
+	return acpProviderTestConfigForCwd(t, executable, filepath.Dir(executable), env)
+}
 
 func TestNewReturnsGrokBackend(t *testing.T) {
 	t.Parallel()
@@ -127,14 +150,17 @@ func TestGrokBackendStreamsAndCompletes(t *testing.T) {
 	fakePath := filepath.Join(t.TempDir(), "grok")
 	writeTestExecutable(t, fakePath, []byte(fakeGrokACPScript()))
 
-	backend, err := New("grok", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	backend, err := New("grok", grokTestConfig(t, fakePath, nil))
 	if err != nil {
 		t.Fatalf("new grok backend: %v", err)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	session, err := backend.Execute(ctx, "say pong", ExecOptions{Timeout: 5 * time.Second})
+	session, err := backend.Execute(ctx, "say pong", ExecOptions{
+		Cwd:     filepath.Dir(fakePath),
+		Timeout: 5 * time.Second,
+	})
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
@@ -175,6 +201,112 @@ func TestGrokBackendStreamsAndCompletes(t *testing.T) {
 	}
 }
 
+func TestGrokBackendUsesTaskCommandBuilder(t *testing.T) {
+	root := t.TempDir()
+	fakePath := filepath.Join(root, "grok")
+	writeTestExecutable(t, fakePath, []byte(fakeGrokACPScript()))
+
+	launcher := &recordingGrokCommandBuilder{}
+	policy := &TaskIsolationPolicy{
+		WritableRoots: []string{root},
+		SystemRoots:   existingSystemRootsForTest(t),
+		Network:       NetworkAccessPublicAndLoopback,
+	}
+	taskEnv := map[string]string{
+		"PATH":       os.Getenv("PATH"),
+		"TASK_VALUE": "task-only",
+	}
+	backend, err := New("grok", Config{
+		ExecutablePath: fakePath,
+		Logger:         slog.Default(),
+		Env:            taskEnv,
+		Launcher:       launcher,
+		Isolation:      policy,
+	})
+	if err != nil {
+		t.Fatalf("new grok backend: %v", err)
+	}
+
+	session, err := backend.Execute(t.Context(), "say pong", ExecOptions{
+		Cwd:     root,
+		Timeout: 5 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+	if result := <-session.Result; result.Status != "completed" {
+		t.Fatalf("result = %+v, want completed", result)
+	}
+
+	if len(launcher.requests) != 1 {
+		t.Fatalf("launcher requests = %d, want 1", len(launcher.requests))
+	}
+	req := launcher.requests[0]
+	if req.Executable != fakePath {
+		t.Fatalf("executable = %q, want %q", req.Executable, fakePath)
+	}
+	wantArgs := []string{"--no-auto-update", "agent", "--always-approve", "stdio"}
+	if strings.Join(req.Args, "\x00") != strings.Join(wantArgs, "\x00") {
+		t.Fatalf("args = %#v, want %#v", req.Args, wantArgs)
+	}
+	if req.Cwd != root {
+		t.Fatalf("cwd = %q, want %q", req.Cwd, root)
+	}
+	if req.Env["TASK_VALUE"] != "task-only" || len(req.Env) != len(taskEnv) {
+		t.Fatalf("env = %#v, want explicit task env %#v", req.Env, taskEnv)
+	}
+	if req.Isolation != policy {
+		t.Fatalf("isolation = %p, want task policy %p", req.Isolation, policy)
+	}
+}
+
+func TestGrokBackendFailsClosedWithoutTaskExecutionAuthority(t *testing.T) {
+	root := t.TempDir()
+	marker := filepath.Join(root, "started")
+	fakePath := filepath.Join(root, "grok")
+	writeTestExecutable(t, fakePath, []byte("#!/bin/sh\ntouch '"+marker+"'\nexit 95\n"))
+	policy := &TaskIsolationPolicy{
+		WritableRoots: []string{root},
+		SystemRoots:   existingSystemRootsForTest(t),
+		Network:       NetworkAccessPublicAndLoopback,
+	}
+
+	tests := []struct {
+		name      string
+		launcher  CommandBuilder
+		isolation *TaskIsolationPolicy
+		wantError string
+	}{
+		{name: "missing launcher", isolation: policy, wantError: "launcher is required"},
+		{name: "missing isolation", launcher: newCommandLauncher(&acpProviderTestIsolation{}), wantError: "isolation policy is required"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			backend, err := New("grok", Config{
+				ExecutablePath: fakePath,
+				Logger:         slog.Default(),
+				Env:            map[string]string{"PATH": os.Getenv("PATH")},
+				Launcher:       tt.launcher,
+				Isolation:      tt.isolation,
+			})
+			if err != nil {
+				t.Fatalf("new grok backend: %v", err)
+			}
+			_, err = backend.Execute(t.Context(), "task", ExecOptions{Cwd: root, Timeout: time.Second})
+			if err == nil || !strings.Contains(err.Error(), tt.wantError) {
+				t.Fatalf("execute error = %v, want %q", err, tt.wantError)
+			}
+			if _, statErr := os.Stat(marker); !os.IsNotExist(statErr) {
+				t.Fatalf("grok process started without task authority: stat error = %v", statErr)
+			}
+		})
+	}
+}
+
 func TestGrokBlockedArgsFiltering(t *testing.T) {
 	t.Parallel()
 	tempDir := t.TempDir()
@@ -182,11 +314,7 @@ func TestGrokBlockedArgsFiltering(t *testing.T) {
 	fakePath := filepath.Join(tempDir, "grok")
 	writeTestExecutable(t, fakePath, []byte(fakeGrokACPScript()))
 
-	backend, err := New("grok", Config{
-		ExecutablePath: fakePath,
-		Logger:         slog.Default(),
-		Env:            map[string]string{"GROK_ARGS_FILE": argsFile},
-	})
+	backend, err := New("grok", grokTestConfig(t, fakePath, map[string]string{"GROK_ARGS_FILE": argsFile}))
 	if err != nil {
 		t.Fatalf("new grok backend: %v", err)
 	}
@@ -194,6 +322,7 @@ func TestGrokBlockedArgsFiltering(t *testing.T) {
 	defer cancel()
 
 	session, err := backend.Execute(ctx, "task", ExecOptions{
+		Cwd:           tempDir,
 		Timeout:       5 * time.Second,
 		ThinkingLevel: "high",
 		// Users must not strip ACP mode, disable auto-approve, or switch
@@ -257,14 +386,18 @@ func TestGrokSetModelFailureFailsTask(t *testing.T) {
 	fakePath := filepath.Join(t.TempDir(), "grok")
 	writeTestExecutable(t, fakePath, []byte(fakeGrokACPScript()))
 
-	backend, err := New("grok", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	backend, err := New("grok", grokTestConfig(t, fakePath, nil))
 	if err != nil {
 		t.Fatalf("new grok backend: %v", err)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	session, err := backend.Execute(ctx, "task", ExecOptions{Model: "bogus-model", Timeout: 5 * time.Second})
+	session, err := backend.Execute(ctx, "task", ExecOptions{
+		Cwd:     filepath.Dir(fakePath),
+		Model:   "bogus-model",
+		Timeout: 5 * time.Second,
+	})
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
@@ -291,11 +424,7 @@ func TestGrokUsesSessionLoadForResume(t *testing.T) {
 	fakePath := filepath.Join(tempDir, "grok")
 	writeTestExecutable(t, fakePath, []byte(fakeGrokACPScript()))
 
-	backend, err := New("grok", Config{
-		ExecutablePath: fakePath,
-		Logger:         slog.Default(),
-		Env:            map[string]string{"GROK_REQUESTS_FILE": requestsFile},
-	})
+	backend, err := New("grok", grokTestConfig(t, fakePath, map[string]string{"GROK_REQUESTS_FILE": requestsFile}))
 	if err != nil {
 		t.Fatalf("new grok backend: %v", err)
 	}
@@ -303,6 +432,7 @@ func TestGrokUsesSessionLoadForResume(t *testing.T) {
 	defer cancel()
 
 	session, err := backend.Execute(ctx, "continue", ExecOptions{
+		Cwd:             tempDir,
 		ResumeSessionID: "ses_existing",
 		Timeout:         5 * time.Second,
 	})
@@ -356,11 +486,7 @@ func TestGrokAuthenticatesBeforeSession(t *testing.T) {
 			fakePath := filepath.Join(tempDir, "grok")
 			writeTestExecutable(t, fakePath, []byte(fakeGrokACPScript()))
 
-			backend, err := New("grok", Config{
-				ExecutablePath: fakePath,
-				Logger:         slog.Default(),
-				Env:            map[string]string{"GROK_REQUESTS_FILE": requestsFile},
-			})
+			backend, err := New("grok", grokTestConfig(t, fakePath, map[string]string{"GROK_REQUESTS_FILE": requestsFile}))
 			if err != nil {
 				t.Fatalf("new grok backend: %v", err)
 			}
@@ -368,6 +494,7 @@ func TestGrokAuthenticatesBeforeSession(t *testing.T) {
 			defer cancel()
 
 			session, err := backend.Execute(ctx, "task", ExecOptions{
+				Cwd:             tempDir,
 				ResumeSessionID: tc.resume,
 				Timeout:         5 * time.Second,
 			})
@@ -427,18 +554,17 @@ func TestGrokAuthFailureFailsTask(t *testing.T) {
 	fakePath := filepath.Join(t.TempDir(), "grok")
 	writeTestExecutable(t, fakePath, []byte(fakeGrokACPScript()))
 
-	backend, err := New("grok", Config{
-		ExecutablePath: fakePath,
-		Logger:         slog.Default(),
-		Env:            map[string]string{"GROK_AUTH_FAIL": "1"},
-	})
+	backend, err := New("grok", grokTestConfig(t, fakePath, map[string]string{"GROK_AUTH_FAIL": "1"}))
 	if err != nil {
 		t.Fatalf("new grok backend: %v", err)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	session, err := backend.Execute(ctx, "task", ExecOptions{Timeout: 5 * time.Second})
+	session, err := backend.Execute(ctx, "task", ExecOptions{
+		Cwd:     filepath.Dir(fakePath),
+		Timeout: 5 * time.Second,
+	})
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
@@ -463,19 +589,18 @@ func TestGrokNoUsableAuthMethodFailsBeforeSession(t *testing.T) {
 			fakePath := filepath.Join(tempDir, "grok")
 			writeTestExecutable(t, fakePath, []byte(fakeGrokACPScript()))
 
-			backend, err := New("grok", Config{
-				ExecutablePath: fakePath,
-				Logger:         slog.Default(),
-				Env: map[string]string{
-					"GROK_AUTH_METHODS":  methods,
-					"GROK_REQUESTS_FILE": requestsFile,
-					"XAI_API_KEY":        "",
-				},
-			})
+			backend, err := New("grok", grokTestConfig(t, fakePath, map[string]string{
+				"GROK_AUTH_METHODS":  methods,
+				"GROK_REQUESTS_FILE": requestsFile,
+				"XAI_API_KEY":        "",
+			}))
 			if err != nil {
 				t.Fatalf("new grok backend: %v", err)
 			}
-			session, err := backend.Execute(context.Background(), "task", ExecOptions{Timeout: 5 * time.Second})
+			session, err := backend.Execute(context.Background(), "task", ExecOptions{
+				Cwd:     tempDir,
+				Timeout: 5 * time.Second,
+			})
 			if err != nil {
 				t.Fatalf("execute: %v", err)
 			}
@@ -504,19 +629,18 @@ func TestGrokUsesAdvertisedAPIKeyMethod(t *testing.T) {
 	fakePath := filepath.Join(tempDir, "grok")
 	writeTestExecutable(t, fakePath, []byte(fakeGrokACPScript()))
 
-	backend, err := New("grok", Config{
-		ExecutablePath: fakePath,
-		Logger:         slog.Default(),
-		Env: map[string]string{
-			"GROK_AUTH_METHODS":  "api",
-			"GROK_REQUESTS_FILE": requestsFile,
-			"XAI_API_KEY":        "test-only-key",
-		},
-	})
+	backend, err := New("grok", grokTestConfig(t, fakePath, map[string]string{
+		"GROK_AUTH_METHODS":  "api",
+		"GROK_REQUESTS_FILE": requestsFile,
+		"XAI_API_KEY":        "test-only-key",
+	}))
 	if err != nil {
 		t.Fatalf("new grok backend: %v", err)
 	}
-	session, err := backend.Execute(context.Background(), "task", ExecOptions{Timeout: 5 * time.Second})
+	session, err := backend.Execute(context.Background(), "task", ExecOptions{
+		Cwd:     tempDir,
+		Timeout: 5 * time.Second,
+	})
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
@@ -540,15 +664,14 @@ func TestGrokUsesAdvertisedAPIKeyMethod(t *testing.T) {
 func TestGrokDrainsNotificationsAfterPromptResponse(t *testing.T) {
 	fakePath := filepath.Join(t.TempDir(), "grok")
 	writeTestExecutable(t, fakePath, []byte(fakeGrokACPScript()))
-	backend, err := New("grok", Config{
-		ExecutablePath: fakePath,
-		Logger:         slog.Default(),
-		Env:            map[string]string{"GROK_LATE_CHUNK": "1"},
-	})
+	backend, err := New("grok", grokTestConfig(t, fakePath, map[string]string{"GROK_LATE_CHUNK": "1"}))
 	if err != nil {
 		t.Fatalf("new grok backend: %v", err)
 	}
-	session, err := backend.Execute(context.Background(), "task", ExecOptions{Timeout: 5 * time.Second})
+	session, err := backend.Execute(context.Background(), "task", ExecOptions{
+		Cwd:     filepath.Dir(fakePath),
+		Timeout: 5 * time.Second,
+	})
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
@@ -570,18 +693,15 @@ func TestGrokPropagatesMCPAndUsage(t *testing.T) {
 	requestsFile := filepath.Join(tempDir, "requests.jsonl")
 	fakePath := filepath.Join(tempDir, "grok")
 	writeTestExecutable(t, fakePath, []byte(fakeGrokACPScript()))
-	backend, err := New("grok", Config{
-		ExecutablePath: fakePath,
-		Logger:         slog.Default(),
-		Env: map[string]string{
-			"GROK_REQUESTS_FILE": requestsFile,
-			"GROK_USAGE":         "1",
-		},
-	})
+	backend, err := New("grok", grokTestConfig(t, fakePath, map[string]string{
+		"GROK_REQUESTS_FILE": requestsFile,
+		"GROK_USAGE":         "1",
+	}))
 	if err != nil {
 		t.Fatalf("new grok backend: %v", err)
 	}
 	session, err := backend.Execute(context.Background(), "task", ExecOptions{
+		Cwd:       tempDir,
 		Timeout:   5 * time.Second,
 		McpConfig: json.RawMessage(`{"mcpServers":{"fetch":{"command":"uvx","args":["mcp-server-fetch"]}}}`),
 	})
@@ -628,20 +748,19 @@ func TestGrokTimeoutAndCancellation(t *testing.T) {
 			fakePath := filepath.Join(tempDir, "grok")
 			requestsFile := filepath.Join(tempDir, "requests.jsonl")
 			writeTestExecutable(t, fakePath, []byte(fakeGrokACPScript()))
-			backend, err := New("grok", Config{
-				ExecutablePath: fakePath,
-				Logger:         slog.Default(),
-				Env: map[string]string{
-					"GROK_HANG_PROMPT":   "1",
-					"GROK_REQUESTS_FILE": requestsFile,
-				},
-			})
+			backend, err := New("grok", grokTestConfig(t, fakePath, map[string]string{
+				"GROK_HANG_PROMPT":   "1",
+				"GROK_REQUESTS_FILE": requestsFile,
+			}))
 			if err != nil {
 				t.Fatalf("new grok backend: %v", err)
 			}
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
-			session, err := backend.Execute(ctx, "task", ExecOptions{Timeout: tc.timeout})
+			session, err := backend.Execute(ctx, "task", ExecOptions{
+				Cwd:     tempDir,
+				Timeout: tc.timeout,
+			})
 			if err != nil {
 				t.Fatalf("execute: %v", err)
 			}
@@ -793,6 +912,31 @@ func TestGrokValidateThinkingLevelUsesPerModelCatalog(t *testing.T) {
 	}
 }
 
+func TestGrokTaskThinkingValidationUsesStaticCatalogWithoutRuntimeExecution(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("malicious runtime fixture is a POSIX shell script")
+	}
+	root := t.TempDir()
+	marker := filepath.Join(root, "grok-executed")
+	executable := filepath.Join(root, "grok")
+	writeTestExecutable(t, executable, []byte("#!/bin/sh\ntouch '"+marker+"'\nexit 95\n"))
+
+	ok, err := ValidateThinkingLevelForTask(
+		t.Context(),
+		"grok",
+		executable,
+		"grok-4.5",
+		"high",
+		TaskModelDiscovery{},
+	)
+	if err != nil || !ok {
+		t.Fatalf("static task validation = (%v, %v), want (true, nil)", ok, err)
+	}
+	if _, err := os.Stat(marker); !os.IsNotExist(err) {
+		t.Fatalf("grok runtime executed during static validation: stat error = %v", err)
+	}
+}
+
 // TestGrokSelectAuthMethod covers the auth-method selection preference.
 func TestGrokSelectAuthMethod(t *testing.T) {
 	t.Parallel()
@@ -850,7 +994,8 @@ func TestGrokRealACPSmoke(t *testing.T) {
 		t.Logf("grok CLI version unavailable: %v (%s)", err, strings.TrimSpace(string(version)))
 	}
 
-	backend, err := New("grok", Config{ExecutablePath: path, Logger: slog.Default()})
+	workDir := t.TempDir()
+	backend, err := New("grok", acpProviderTestConfigForCwd(t, path, workDir, inheritedEnvironmentForTest()))
 	if err != nil {
 		t.Fatalf("new grok backend: %v", err)
 	}
@@ -858,7 +1003,7 @@ func TestGrokRealACPSmoke(t *testing.T) {
 	defer cancel()
 
 	session, err := backend.Execute(ctx, "Reply with exactly one word: pong. Do not use any tools.", ExecOptions{
-		Cwd:     t.TempDir(),
+		Cwd:     workDir,
 		Timeout: 80 * time.Second,
 	})
 	if err != nil {

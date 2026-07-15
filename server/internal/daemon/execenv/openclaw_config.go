@@ -168,22 +168,19 @@ func rejectOpenclawLoaderFeatures(value any) error {
 
 func allowlistedOpenclawSnapshot(owner map[string]any, workDir string) (map[string]any, error) {
 	snapshot := make(map[string]any)
-	for _, key := range []string{"models", "providers", "gateway"} {
-		value, ok := owner[key]
-		if !ok {
+	for key, value := range map[string]any{
+		"models":    projectOpenclawPublicModels(owner["models"]),
+		"providers": projectOpenclawPublicProviders(owner["providers"]),
+		"gateway":   projectOpenclawPublicGateway(owner["gateway"]),
+	} {
+		projected, ok := value.(map[string]any)
+		if !ok || len(projected) == 0 {
 			continue
 		}
-		if key == "providers" {
-			providers := projectOpenclawPublicProviders(value)
-			if len(providers) == 0 {
-				continue
-			}
-			value = providers
-		}
-		if err := rejectOwnerAbsolutePaths(value); err != nil {
+		if err := rejectOwnerAbsolutePaths(projected); err != nil {
 			return nil, fmt.Errorf("%s: %w", key, err)
 		}
-		snapshot[key] = value
+		snapshot[key] = projected
 	}
 
 	if rawAgents, ok := owner["agents"].(map[string]any); ok {
@@ -224,6 +221,80 @@ func allowlistedOpenclawSnapshot(owner map[string]any, workDir string) (map[stri
 	return snapshot, nil
 }
 
+func projectOpenclawPublicModels(value any) map[string]any {
+	rawModels, ok := value.(map[string]any)
+	if !ok {
+		return map[string]any{}
+	}
+
+	models := make(map[string]any)
+	copyOpenclawStringFields(models, rawModels, []string{"default", "mode"})
+	if providers := projectOpenclawPublicModelProviders(rawModels["providers"]); len(providers) > 0 {
+		models["providers"] = providers
+	}
+	return models
+}
+
+func projectOpenclawPublicModelProviders(value any) map[string]any {
+	rawProviders, ok := value.(map[string]any)
+	if !ok {
+		return map[string]any{}
+	}
+
+	providers := make(map[string]any, len(rawProviders))
+	for name, value := range rawProviders {
+		rawProvider, ok := value.(map[string]any)
+		if !ok {
+			continue
+		}
+		projected := projectOpenclawPublicProvider(rawProvider)
+		if models := projectOpenclawPublicModelCatalog(rawProvider["models"]); len(models) > 0 {
+			projected["models"] = models
+		}
+		if len(projected) > 0 {
+			providers[name] = projected
+		}
+	}
+	return providers
+}
+
+func projectOpenclawPublicModelCatalog(value any) []any {
+	rawModels, ok := value.([]any)
+	if !ok {
+		return nil
+	}
+
+	models := make([]any, 0, len(rawModels))
+	for _, value := range rawModels {
+		rawModel, ok := value.(map[string]any)
+		if !ok {
+			continue
+		}
+		projected := make(map[string]any)
+		copyOpenclawStringFields(projected, rawModel, []string{"api", "description", "id", "name", "provider"})
+		copyOpenclawBoolFields(projected, rawModel, []string{"reasoning"})
+		copyOpenclawNumberFields(projected, rawModel, []string{"contextWindow", "maxTokens"})
+		copyOpenclawStringOrStringListFields(projected, rawModel, []string{"input"})
+		if len(projected) > 0 {
+			models = append(models, projected)
+		}
+	}
+	return models
+}
+
+func projectOpenclawPublicGateway(value any) map[string]any {
+	rawGateway, ok := value.(map[string]any)
+	if !ok {
+		return map[string]any{}
+	}
+
+	gateway := make(map[string]any)
+	copyOpenclawStringFields(gateway, rawGateway, []string{"bind", "endpoint", "host", "mode", "url"})
+	copyOpenclawNumberFields(gateway, rawGateway, []string{"port"})
+	copyOpenclawBoolFields(gateway, rawGateway, []string{"tls"})
+	return gateway
+}
+
 func projectOpenclawPublicProviders(value any) map[string]any {
 	rawProviders, ok := value.(map[string]any)
 	if !ok {
@@ -246,18 +317,59 @@ func projectOpenclawPublicProviders(value any) map[string]any {
 
 func projectOpenclawPublicProvider(provider map[string]any) map[string]any {
 	projected := make(map[string]any)
-	for _, key := range []string{
+	copyOpenclawStringFields(projected, provider, []string{
 		"baseUrl", "baseURL", "endpoint", "id", "name", "organization", "organizationId",
-		"project", "projectId", "region", "type",
-	} {
-		if value, ok := provider[key].(string); ok {
-			projected[key] = value
+		"project", "projectId", "region", "type", "api",
+	})
+	copyOpenclawBoolFields(projected, provider, []string{"enabled"})
+	return projected
+}
+
+func copyOpenclawStringFields(dst, src map[string]any, keys []string) {
+	for _, key := range keys {
+		if value, ok := src[key].(string); ok {
+			dst[key] = value
 		}
 	}
-	if value, ok := provider["enabled"].(bool); ok {
-		projected["enabled"] = value
+}
+
+func copyOpenclawBoolFields(dst, src map[string]any, keys []string) {
+	for _, key := range keys {
+		if value, ok := src[key].(bool); ok {
+			dst[key] = value
+		}
 	}
-	return projected
+}
+
+func copyOpenclawNumberFields(dst, src map[string]any, keys []string) {
+	for _, key := range keys {
+		switch value := src[key].(type) {
+		case json.Number, float64, float32, int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64:
+			dst[key] = value
+		}
+	}
+}
+
+func copyOpenclawStringOrStringListFields(dst, src map[string]any, keys []string) {
+	for _, key := range keys {
+		switch value := src[key].(type) {
+		case string:
+			dst[key] = value
+		case []any:
+			items := make([]any, 0, len(value))
+			for _, item := range value {
+				text, ok := item.(string)
+				if !ok {
+					items = nil
+					break
+				}
+				items = append(items, text)
+			}
+			if items != nil {
+				dst[key] = items
+			}
+		}
+	}
 }
 
 func copyOpenclawAllowedFields(dst, src map[string]any, keys []string) {

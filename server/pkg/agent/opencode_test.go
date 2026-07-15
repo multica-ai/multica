@@ -1486,10 +1486,7 @@ func TestOpencodeBackendFailsOnStreamEndingMidTool(t *testing.T) {
 	fakePath := filepath.Join(tempDir, "opencode")
 	writeTestExecutable(t, fakePath, []byte(fakeOpencodeMidToolScript()))
 
-	backend, err := New("opencode", Config{
-		ExecutablePath: fakePath,
-		Logger:         slog.Default(),
-	})
+	backend, err := New("opencode", opencodeTestConfig(t, fakePath, tempDir, nil))
 	if err != nil {
 		t.Fatalf("new opencode backend: %v", err)
 	}
@@ -1498,6 +1495,7 @@ func TestOpencodeBackendFailsOnStreamEndingMidTool(t *testing.T) {
 	defer cancel()
 
 	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{
+		Cwd:     tempDir,
 		Timeout: 5 * time.Second,
 	})
 	if err != nil {
@@ -1539,10 +1537,7 @@ func TestOpencodeBackendAppendsExitDetailOnMidStepCrash(t *testing.T) {
 	fakePath := filepath.Join(tempDir, "opencode")
 	writeTestExecutable(t, fakePath, []byte(fakeOpencodeStepThenExit1Script()))
 
-	backend, err := New("opencode", Config{
-		ExecutablePath: fakePath,
-		Logger:         slog.Default(),
-	})
+	backend, err := New("opencode", opencodeTestConfig(t, fakePath, tempDir, nil))
 	if err != nil {
 		t.Fatalf("new opencode backend: %v", err)
 	}
@@ -1551,6 +1546,7 @@ func TestOpencodeBackendAppendsExitDetailOnMidStepCrash(t *testing.T) {
 	defer cancel()
 
 	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{
+		Cwd:     tempDir,
 		Timeout: 5 * time.Second,
 	})
 	if err != nil {

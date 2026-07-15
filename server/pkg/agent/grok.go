@@ -113,7 +113,8 @@ func (b *grokBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 	if execPath == "" {
 		execPath = "grok"
 	}
-	if _, err := exec.LookPath(execPath); err != nil {
+	resolvedExecPath, err := exec.LookPath(execPath)
+	if err != nil {
 		return nil, fmt.Errorf("grok executable not found at %q: %w", execPath, err)
 	}
 
@@ -144,14 +145,12 @@ func (b *grokBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 	grokArgs = append(grokArgs, filterCustomArgs(opts.CustomArgs, grokBlockedArgs, b.cfg.Logger)...)
 	grokArgs = append(grokArgs, "stdio")
 
-	cmd := exec.CommandContext(runCtx, execPath, grokArgs...)
-	hideAgentWindow(cmd)
-	b.cfg.Logger.Info("agent command", "exec", execPath, "args", grokArgs)
-	if opts.Cwd != "" {
-		cmd.Dir = opts.Cwd
+	cmd, err := b.cfg.command(runCtx, resolvedExecPath, grokArgs, opts.Cwd, 0)
+	if err != nil {
+		cancel()
+		return nil, fmt.Errorf("build grok command: %w", err)
 	}
-	childEnv := buildEnv(b.cfg.Env)
-	cmd.Env = childEnv
+	b.cfg.Logger.Info("agent command", "exec", resolvedExecPath, "args", grokArgs)
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -292,7 +291,7 @@ func (b *grokBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 		// documented preference is the API key when XAI_API_KEY is set and
 		// offered, otherwise the cached login token.
 		// Ref: https://docs.x.ai/build/cli/headless-scripting
-		methodID, err := selectGrokAuthMethod(extractACPAuthMethods(initResult), envHasNonEmpty(childEnv, "XAI_API_KEY"))
+		methodID, err := selectGrokAuthMethod(extractACPAuthMethods(initResult), envHasNonEmpty(cmd.Env, "XAI_API_KEY"))
 		if err != nil {
 			finalStatus = "failed"
 			finalError = fmt.Sprintf("grok authentication setup failed: %v", err)

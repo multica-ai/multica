@@ -607,12 +607,15 @@ func parseCodebuddyEffortHelp(helpText string) []string {
 // ── Shared validation ────────────────────────────────────────────────
 
 // ValidateThinkingLevel is the compatibility entry point for callers that do
-// not provide task-scoped discovery authority. Non-empty values fail closed
-// without executing a provider binary. Task callers must use
-// ValidateThinkingLevelForTask.
+// not provide task-scoped discovery authority. Providers with a verified
+// static catalog can be validated without process authority; dynamic catalogs
+// fail closed. Task callers must use ValidateThinkingLevelForTask.
 func ValidateThinkingLevel(ctx context.Context, providerType, executablePath, model, value string) (bool, error) {
 	if value == "" {
 		return true, nil
+	}
+	if providerType == "grok" {
+		return validateThinkingLevelFromModels(providerType, model, value, grokStaticModels()), nil
 	}
 	return false, nil
 }

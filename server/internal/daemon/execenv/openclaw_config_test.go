@@ -212,6 +212,74 @@ func TestPrepareOpenclawConfigProjectsPublicProviderMetadata(t *testing.T) {
 	}
 }
 
+func TestPrepareOpenclawConfigExcludesOwnerModelAndGatewayCredentials(t *testing.T) {
+	writeOwnerOpenclawConfig(t, `{
+		"models":{
+			"default":"openai/gpt-5",
+			"mode":"merge",
+			"apiKey":"models-root-secret",
+			"providers":{
+				"openai":{
+					"baseUrl":"https://api.openai.example/v1",
+					"apiKey":"models-provider-secret",
+					"headers":{"Authorization":"Bearer models-header-secret"},
+					"models":[{
+						"id":"gpt-5",
+						"name":"GPT 5",
+						"reasoning":true,
+						"contextWindow":400000,
+						"maxTokens":128000,
+						"token":"model-entry-secret"
+					}]
+				}
+			}
+		},
+		"gateway":{
+			"host":"127.0.0.1",
+			"port":18789,
+			"tls":true,
+			"auth":{"mode":"token","token":"gateway-token-secret","password":"gateway-password-secret"},
+			"headers":{"Authorization":"Bearer gateway-header-secret"}
+		}
+	}`)
+	envRoot := t.TempDir()
+	result, err := prepareOpenclawConfig(envRoot, filepath.Join(envRoot, "workdir"), OpenclawConfigPrep{})
+	if err != nil {
+		t.Fatalf("prepareOpenclawConfig: %v", err)
+	}
+
+	combined := readOpenclawTaskFiles(t, result.ConfigPath, envRoot)
+	for _, secret := range []string{
+		"models-root-secret", "models-provider-secret", "models-header-secret", "model-entry-secret",
+		"gateway-token-secret", "gateway-password-secret", "gateway-header-secret",
+	} {
+		if bytes.Contains(combined, []byte(secret)) {
+			t.Errorf("owner credential %q leaked: %s", secret, combined)
+		}
+	}
+
+	snapshot := mustReadOpenclawJSON(t, filepath.Join(envRoot, openclawUserSnapshotFile))
+	models := snapshot["models"].(map[string]any)
+	if models["default"] != "openai/gpt-5" || models["mode"] != "merge" {
+		t.Fatalf("public model selection metadata was not retained: %v", models)
+	}
+	providers := models["providers"].(map[string]any)
+	openai := providers["openai"].(map[string]any)
+	if openai["baseUrl"] != "https://api.openai.example/v1" {
+		t.Fatalf("public model provider routing metadata was not retained: %v", openai)
+	}
+	model := openai["models"].([]any)[0].(map[string]any)
+	if model["id"] != "gpt-5" || model["reasoning"] != true || model["contextWindow"] != float64(400000) {
+		t.Fatalf("public model catalog metadata was not retained: %v", model)
+	}
+
+	gateway := snapshot["gateway"].(map[string]any)
+	wantGateway := map[string]any{"host": "127.0.0.1", "port": float64(18789), "tls": true}
+	if !reflect.DeepEqual(gateway, wantGateway) {
+		t.Fatalf("gateway = %#v, want public projection %#v", gateway, wantGateway)
+	}
+}
+
 func TestPrepareOpenclawConfigManagedMCPIsTaskAuthoritative(t *testing.T) {
 	writeOwnerOpenclawConfig(t, `{"mcp":{"servers":{"owner":{"command":"owner-tool"}}}}`)
 	envRoot := t.TempDir()

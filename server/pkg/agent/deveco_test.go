@@ -9,6 +9,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -16,6 +17,25 @@ import (
 
 	"log/slog"
 )
+
+type recordingDevecoCommandBuilder struct {
+	requests []CommandRequest
+	commands []*exec.Cmd
+}
+
+func (b *recordingDevecoCommandBuilder) Command(ctx context.Context, req CommandRequest) (*exec.Cmd, error) {
+	b.requests = append(b.requests, req)
+	cmd := exec.CommandContext(ctx, req.Executable, req.Args...)
+	cmd.Dir = req.Cwd
+	env, err := explicitEnvironment(req.Env)
+	if err != nil {
+		return nil, err
+	}
+	cmd.Env = env
+	cmd.WaitDelay = req.WaitDelay
+	b.commands = append(b.commands, cmd)
+	return cmd, nil
+}
 
 func TestNewReturnsDevecoBackend(t *testing.T) {
 	t.Parallel()
@@ -59,11 +79,7 @@ func TestDevecoBackendArgvShapeAndNoPrompt(t *testing.T) {
 
 	workDir := t.TempDir()
 
-	backend, err := New("deveco", Config{
-		ExecutablePath: fakePath,
-		Logger:         slog.Default(),
-		Env:            map[string]string{"DEVECO_ARGS_FILE": argsFile},
-	})
+	backend, err := New("deveco", acpProviderTestConfigForCwd(t, fakePath, workDir, map[string]string{"DEVECO_ARGS_FILE": argsFile}))
 	if err != nil {
 		t.Fatalf("new deveco backend: %v", err)
 	}
@@ -118,6 +134,132 @@ func TestDevecoBackendArgvShapeAndNoPrompt(t *testing.T) {
 	// The prompt is the final positional arg.
 	if len(args) == 0 || args[len(args)-1] != "do the thing" {
 		t.Errorf("expected prompt as final positional arg, got %v", args)
+	}
+}
+
+func TestDevecoBackendUsesTaskCommandBuilder(t *testing.T) {
+	root := t.TempDir()
+	fakePath := filepath.Join(root, "deveco")
+	writeTestExecutable(t, fakePath, []byte(fakeDevecoScript()))
+	t.Setenv("DAEMON_ONLY_SECRET", "must-not-leak")
+
+	launcher := &recordingDevecoCommandBuilder{}
+	policy := &TaskIsolationPolicy{
+		WritableRoots: []string{root},
+		SystemRoots:   existingSystemRootsForTest(t),
+		Network:       NetworkAccessPublicAndLoopback,
+	}
+	taskEnv := map[string]string{
+		"PATH":       os.Getenv("PATH"),
+		"TASK_VALUE": "task-only",
+		"PWD":        "/owner/workdir",
+	}
+	backend, err := New("deveco", Config{
+		ExecutablePath: fakePath,
+		Logger:         slog.Default(),
+		Env:            taskEnv,
+		Launcher:       launcher,
+		Isolation:      policy,
+	})
+	if err != nil {
+		t.Fatalf("new deveco backend: %v", err)
+	}
+
+	session, err := backend.Execute(t.Context(), "task", ExecOptions{
+		Cwd:     root,
+		Timeout: 5 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+	if result := <-session.Result; result.Status != "completed" {
+		t.Fatalf("result = %+v, want completed", result)
+	}
+
+	if len(launcher.requests) != 1 {
+		t.Fatalf("launcher requests = %d, want 1", len(launcher.requests))
+	}
+	req := launcher.requests[0]
+	if req.Executable != fakePath {
+		t.Fatalf("executable = %q, want %q", req.Executable, fakePath)
+	}
+	wantArgs := []string{"run", "--format", "json", "--dangerously-skip-permissions", "--dir", root, "task"}
+	if strings.Join(req.Args, "\x00") != strings.Join(wantArgs, "\x00") {
+		t.Fatalf("args = %#v, want %#v", req.Args, wantArgs)
+	}
+	if req.Cwd != root {
+		t.Fatalf("cwd = %q, want %q", req.Cwd, root)
+	}
+	if req.Env["PATH"] != taskEnv["PATH"] || req.Env["TASK_VALUE"] != "task-only" {
+		t.Fatalf("env = %#v, want explicit task environment", req.Env)
+	}
+	if req.Env["PWD"] != root {
+		t.Fatalf("PWD = %q, want task cwd %q", req.Env["PWD"], root)
+	}
+	if _, ok := req.Env["DAEMON_ONLY_SECRET"]; ok {
+		t.Fatalf("daemon-only environment leaked: %#v", req.Env)
+	}
+	if len(req.Env) != len(taskEnv) {
+		t.Fatalf("env = %#v, want only task values plus overridden PWD", req.Env)
+	}
+	if req.Isolation != policy {
+		t.Fatalf("isolation = %p, want task policy %p", req.Isolation, policy)
+	}
+	if req.WaitDelay != 10*time.Second {
+		t.Fatalf("wait delay = %s, want 10s", req.WaitDelay)
+	}
+	if len(launcher.commands) != 1 || launcher.commands[0].Cancel == nil {
+		t.Fatal("deveco-specific cancellation override was not installed")
+	}
+	if err := launcher.commands[0].Cancel(); err != nil {
+		t.Fatalf("deveco cancellation override returned %v, want nil", err)
+	}
+}
+
+func TestDevecoBackendFailsClosedWithoutTaskExecutionAuthority(t *testing.T) {
+	root := t.TempDir()
+	marker := filepath.Join(root, "started")
+	fakePath := filepath.Join(root, "deveco")
+	writeTestExecutable(t, fakePath, []byte("#!/bin/sh\ntouch '"+marker+"'\nexit 95\n"))
+	policy := &TaskIsolationPolicy{
+		WritableRoots: []string{root},
+		SystemRoots:   existingSystemRootsForTest(t),
+		Network:       NetworkAccessPublicAndLoopback,
+	}
+
+	tests := []struct {
+		name      string
+		launcher  CommandBuilder
+		isolation *TaskIsolationPolicy
+		wantError string
+	}{
+		{name: "missing launcher", isolation: policy, wantError: "launcher is required"},
+		{name: "missing isolation", launcher: newCommandLauncher(&acpProviderTestIsolation{}), wantError: "isolation policy is required"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			backend, err := New("deveco", Config{
+				ExecutablePath: fakePath,
+				Logger:         slog.Default(),
+				Env:            map[string]string{"PATH": os.Getenv("PATH")},
+				Launcher:       tt.launcher,
+				Isolation:      tt.isolation,
+			})
+			if err != nil {
+				t.Fatalf("new deveco backend: %v", err)
+			}
+			_, err = backend.Execute(t.Context(), "task", ExecOptions{Cwd: root, Timeout: time.Second})
+			if err == nil || !strings.Contains(err.Error(), tt.wantError) {
+				t.Fatalf("execute error = %v, want %q", err, tt.wantError)
+			}
+			if _, statErr := os.Stat(marker); !os.IsNotExist(statErr) {
+				t.Fatalf("deveco process started without task authority: stat error = %v", statErr)
+			}
+		})
 	}
 }
 

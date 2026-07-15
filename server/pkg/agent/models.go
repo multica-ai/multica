@@ -288,6 +288,11 @@ func ListModelsForTask(ctx context.Context, providerType, executablePath string,
 		}
 		return cloneModels(discovery.Snapshot.Models), nil
 	}
+	if providerType == "grok" {
+		// Grok's verified thinking catalog is static and per-model. Do not
+		// start the ACP runtime merely to validate an Issue task's --effort.
+		return grokStaticModels(), nil
+	}
 
 	runner, err := taskModelDiscoveryRunner(discovery.Execution)
 	if err != nil {
