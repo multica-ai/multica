@@ -1076,7 +1076,7 @@ var catalog = []Capability{
 		Key:           "manage_workflows",
 		Title:         "Manage workflows",
 		Category:      CategoryWorkflows,
-		Description:   "Create, edit, delete, toggle a workflow, or regenerate its tokens and signing secrets.",
+		Description:   "Create, edit, delete, or toggle workflows and their eval gates, or regenerate workflow tokens and signing secrets.",
 		DescriptionZh: "创建、编辑、删除、启停工作流，或重新生成其令牌和签名密钥。",
 		Ops: []string{
 			"POST /api/cerebro/workflows/",
@@ -1089,6 +1089,12 @@ var catalog = []Capability{
 			"POST /api/cerebro/workflows/{id}/regenerate-signing-secret",
 			"POST /api/cerebro/workflows/{id}/regenerate-token",
 			"POST /api/cerebro/workflows/_test/cron-sweep",
+			"POST /api/cerebro/evals/",
+			"PUT /api/cerebro/evals/{id}",
+			"DELETE /api/cerebro/evals/{id}",
+			"POST /api/cerebro/evals/{id}/runs",
+			"POST /api/cerebro/evals/bindings",
+			"DELETE /api/cerebro/evals/bindings/{bindingId}",
 		},
 	},
 	{

@@ -43,6 +43,7 @@ import (
 	// CEREBRO-PATCH(cerebro-dashboard-route): JEH-684 dashboard handler import
 	cerebrodashboard "github.com/multica-ai/multica/server/internal/cerebro/dashboard"
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
+	cerebroevals "github.com/multica-ai/multica/server/internal/cerebro/evals"                   // CEREBRO-PATCH(cerebro-evals-routes): FIR-3308 eval catalog API.
 	operatingsystem "github.com/multica-ai/multica/server/internal/cerebro/operatingsystem"      // CEREBRO-PATCH(operating-system-routes): FIR-2816 fork route module.
 	cerebroplatformaction "github.com/multica-ai/multica/server/internal/cerebro/platformaction" // CEREBRO-PATCH(router-platform-action-gate): FIR-3266 always-on agent mutation floor.
 	// CEREBRO-PATCH(cerebro-workflows-loop-planning): FIR-2283 loop planning-dispatch materializer import
@@ -800,6 +801,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	cerebroWorkflowsHandler := cerebroworkflows.NewHandler(cerebroQueries).
 		WithService(opts.WorkflowService).
 		WithPlanDocuments(workflowPlanDocuments)
+	cerebroEvalsHandler := cerebroevals.NewHandler(pool)                                            // CEREBRO-PATCH(cerebro-evals-routes): FIR-3308 eval catalog handler.
 	workflowHooksFeature := cerebroworkflows.NewHookFeature(pool, cerebrotoolpolicy.NewStore(pool)) // CEREBRO-PATCH(workflow-hooks-wire): FIR-3101 fork-owned Workflow hook feature.
 	h.TaskService.WorkflowCompletionGate = workflowHooksFeature.CompletionGate                      // CEREBRO-PATCH(workflow-hooks-completion-wire): FIR-3101 pre-completion delegation.
 	// CEREBRO-PATCH(cerebro-workflows-loop-planning): FIR-2283 — plug the loop planning-dispatch materializer so a run_skill workflow's `loop_planning` toggle actually creates its companion planning-phase rule (see workflows/loop_planning.go).
@@ -2182,6 +2184,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Post("/_test/cron-sweep", cerebroWorkflowsHandler.TestSweepCron)
 			})
 			r.Mount("/api/cerebro/workflow-hooks", workflowHooksFeature.Routes()) // CEREBRO-PATCH(workflow-hooks-routes): FIR-3101 fork-owned management API.
+			r.Mount("/api/cerebro/evals", cerebroEvalsHandler.Routes())           // CEREBRO-PATCH(cerebro-evals-routes): FIR-3308 catalog, runs, and workflow bindings.
 			// CEREBRO-PATCH(session-mode-config-routes): FIR-3111 versioned Mode configuration.
 			r.Route("/api/cerebro/session-modes", func(r chi.Router) {
 				r.Get("/", cerebroSessionModeHandler.List)

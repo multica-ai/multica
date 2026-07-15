@@ -206,6 +206,8 @@ does nothing. They are a permanent code-only set, not a backlog item.
 **Two dimensions, do not confuse them:**
 
 Workflow Hook capabilities are independent of `manage_workflows`. Their resolver is deliberately opt-in for every mutation: agents receive `hooks:read`, while `hooks:write` needs an explicit grant, `hooks:enforce` rejects agent actors, and `hooks:manage_managed` accepts only the workspace owner. This boundary is enforced in `server/internal/cerebro/workflows/hook_permissions.go`, not by hiding browser controls.
+
+Eval catalog mutations (`POST`/`PUT`/`DELETE /api/cerebro/evals*`) belong to `manage_workflows`: eval definitions, immutable run records, and workflow bindings are part of the workflow delivery-gate contract, not a separate permission family. Their CLI/MCP wrappers call those same classified routes.
 - **Platform capabilities** (this catalog, `manage_*` / `create_*` keys) — coarse HTTP/action
   permissions, keyed on action.
 - **Runtime tool capabilities** — the per-tool dimension keyed on `tool_key` values like
