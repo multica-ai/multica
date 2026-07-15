@@ -33,6 +33,8 @@ type InboundMessage struct {
 	// enricher can decide whether a message needs an HTTP round-trip to
 	// expand while the core stays msg_type-agnostic and only reads Body.
 	MessageType string
+	// RawContent is the JSON-encoded body.content used to resolve media keys.
+	RawContent string
 
 	// CreateTime is the trigger message's creation time (epoch milliseconds).
 	// The enricher anchors the group recent-context window to it; the typing

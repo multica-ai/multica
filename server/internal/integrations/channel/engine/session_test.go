@@ -47,6 +47,8 @@ type fakeSessionQueries struct {
 	markRows         int64   // MarkChannelInboundDedupProcessed result
 	createBindingErr error   // simulate a unique violation on create
 	raceWinner       pgtype.UUID
+	attachments      []db.CreateAttachmentParams
+	attachmentLinks  []db.LinkAttachmentsToChatMessageParams
 }
 
 func newFake() *fakeSessionQueries {
@@ -83,7 +85,17 @@ func (f *fakeSessionQueries) CreateChannelChatSessionBinding(_ context.Context, 
 
 func (f *fakeSessionQueries) CreateChatMessage(_ context.Context, arg db.CreateChatMessageParams) (db.ChatMessage, error) {
 	f.messages = append(f.messages, arg.Content)
-	return db.ChatMessage{}, nil
+	return db.ChatMessage{ID: uid(88)}, nil
+}
+
+func (f *fakeSessionQueries) CreateAttachment(_ context.Context, arg db.CreateAttachmentParams) (db.Attachment, error) {
+	f.attachments = append(f.attachments, arg)
+	return db.Attachment{}, nil
+}
+
+func (f *fakeSessionQueries) LinkAttachmentsToChatMessage(_ context.Context, arg db.LinkAttachmentsToChatMessageParams) ([]pgtype.UUID, error) {
+	f.attachmentLinks = append(f.attachmentLinks, arg)
+	return nil, nil
 }
 
 func (f *fakeSessionQueries) TouchChatSession(context.Context, pgtype.UUID) error {
@@ -229,6 +241,28 @@ func TestAppendUserMessage_PlainText(t *testing.T) {
 	}
 	if f.touched != 1 || f.replyTargets != 1 {
 		t.Errorf("touched=%d replyTargets=%d, want 1/1", f.touched, f.replyTargets)
+	}
+}
+
+func TestAppendUserMessage_BindsMediaAttachment(t *testing.T) {
+	f := newFake()
+	s := newTestSession(f)
+	_, err := s.AppendUserMessage(context.Background(), AppendInput{
+		SessionID: uid(1), WorkspaceID: uid(2), Sender: uid(7), Body: "[Image]",
+		MediaRefs: []channel.MediaRef{{
+			Type: channel.MsgTypeImage, URL: "/uploads/image.png", Filename: "image.png",
+			MimeType: "image/png", SizeBytes: 3,
+		}},
+	})
+	if err != nil {
+		t.Fatalf("AppendUserMessage: %v", err)
+	}
+	if len(f.attachments) != 1 || f.attachments[0].Url != "/uploads/image.png" ||
+		f.attachments[0].UploaderID != uid(7) || f.attachments[0].WorkspaceID != uid(2) {
+		t.Fatalf("attachments = %+v", f.attachments)
+	}
+	if len(f.attachmentLinks) != 1 || f.attachmentLinks[0].ChatMessageID != uid(88) {
+		t.Fatalf("attachment links = %+v", f.attachmentLinks)
 	}
 }
 

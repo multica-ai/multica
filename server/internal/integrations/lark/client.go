@@ -118,6 +118,16 @@ type APIClient interface {
 	DeleteMessageReaction(ctx context.Context, p DeleteReactionParams) error
 }
 
+type MessageResource struct {
+	Data        []byte
+	Filename    string
+	ContentType string
+}
+
+type MessageResourceDownloader interface {
+	DownloadMessageResource(ctx context.Context, creds InstallationCredentials, messageID, fileKey, resourceType string) (MessageResource, error)
+}
+
 // ListMessagesParams selects a bounded, recent window of messages in a
 // single Lark chat for the group-context prefetch. Only the fields the
 // enricher needs today are exposed (ChatID, PageSize, EndTime);

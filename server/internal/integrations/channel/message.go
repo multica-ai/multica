@@ -86,6 +86,9 @@ type MediaRef struct {
 	Type MsgType
 	// StorageKey locates the persisted object in Multica object storage.
 	StorageKey string
+	// URL is the durable storage URL returned when the adapter persisted the
+	// object. The session binder records it on the attachment row.
+	URL string
 	// Filename is the original display name, when the platform supplies
 	// one.
 	Filename string

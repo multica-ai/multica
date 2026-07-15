@@ -353,6 +353,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					APIClient:   larkClient,
 					Credentials: installSvc,
 					Logger:      slog.Default(),
+					Storage:     store,
 				})
 				channelRouter.Register(channel.TypeFeishu, lark.NewFeishuResolverSet(
 					cs, feishuSession, auditLogger, resolverReplier, typingIndicator,

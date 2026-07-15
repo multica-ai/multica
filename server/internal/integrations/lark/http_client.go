@@ -726,6 +726,43 @@ func (c *httpAPIClient) DeleteMessageReaction(ctx context.Context, p DeleteReact
 	return nil
 }
 
+func (c *httpAPIClient) DownloadMessageResource(ctx context.Context, creds InstallationCredentials, messageID, fileKey, resourceType string) (MessageResource, error) {
+	if messageID == "" || fileKey == "" {
+		return MessageResource{}, errors.New("lark http client: missing message_id or file_key")
+	}
+	if resourceType != "image" && resourceType != "file" {
+		return MessageResource{}, fmt.Errorf("lark http client: unsupported resource type %q", resourceType)
+	}
+	token, err := c.tenantAccessToken(ctx, creds)
+	if err != nil {
+		return MessageResource{}, err
+	}
+	q := url.Values{}
+	q.Set("file_key", fileKey)
+	q.Set("type", resourceType)
+	path := "/open-apis/im/v1/messages/" + url.PathEscape(messageID) + "/resources?" + q.Encode()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.resolveBaseURL(creds)+path, nil)
+	if err != nil {
+		return MessageResource{}, fmt.Errorf("lark http client: download resource: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err := c.cfg.HTTPClient.Do(req)
+	if err != nil {
+		return MessageResource{}, fmt.Errorf("lark http client: download resource: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 513))
+		return MessageResource{}, fmt.Errorf("lark http client: download resource: http %d: %s", resp.StatusCode, truncate(string(raw), 512))
+	}
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return MessageResource{}, fmt.Errorf("lark http client: download resource: read body: %w", err)
+	}
+	filename := strings.Trim(strings.TrimPrefix(resp.Header.Get("Content-Disposition"), "attachment; filename="), `"`)
+	return MessageResource{Data: data, Filename: filename, ContentType: resp.Header.Get("Content-Type")}, nil
+}
+
 // BatchGetUsers resolves user open_ids to display names via
 // GET /open-apis/contact/v3/users/batch?user_ids=…&user_id_type=open_id.
 // It mirrors fetchBotUnionID's single-user contact lookup, batched. Only

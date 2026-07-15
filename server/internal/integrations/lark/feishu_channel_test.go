@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"io"
 	"testing"
 
 	"github.com/multica-ai/multica/server/internal/integrations/channel"
@@ -14,14 +15,34 @@ import (
 // SendTextMessage — the single method feishuChannel.Send calls.
 type fakeSender struct {
 	APIClient
-	last  SendTextParams
-	msgID string
+	last     SendTextParams
+	msgID    string
+	resource MessageResource
 }
 
 func (f *fakeSender) SendTextMessage(_ context.Context, p SendTextParams) (string, error) {
 	f.last = p
 	return f.msgID, nil
 }
+
+func (f *fakeSender) DownloadMessageResource(context.Context, InstallationCredentials, string, string, string) (MessageResource, error) {
+	return f.resource, nil
+}
+
+type fakeMediaStorage struct {
+	key, contentType, filename string
+	data                       []byte
+}
+
+func (s *fakeMediaStorage) Upload(_ context.Context, key string, data []byte, contentType, filename string) (string, error) {
+	s.key, s.data, s.contentType, s.filename = key, data, contentType, filename
+	return "/uploads/" + key, nil
+}
+func (*fakeMediaStorage) Delete(context.Context, string)                           {}
+func (*fakeMediaStorage) DeleteKeys(context.Context, []string)                     {}
+func (*fakeMediaStorage) KeyFromURL(raw string) string                             { return raw }
+func (*fakeMediaStorage) CdnDomain() string                                        { return "" }
+func (*fakeMediaStorage) GetReader(context.Context, string) (io.ReadCloser, error) { return nil, nil }
 
 type fakeCreds struct{ secret string }
 
@@ -99,6 +120,31 @@ func TestFeishuChannel_Capabilities(t *testing.T) {
 	}
 	if caps.Has(channel.CapVoice) {
 		t.Fatalf("Feishu adapter does not declare voice")
+	}
+}
+
+func TestFeishuChannel_AttachImagePersistsMediaRef(t *testing.T) {
+	api := &fakeSender{resource: MessageResource{
+		Data: []byte("png"), Filename: "screen.png", ContentType: "image/png",
+	}}
+	store := &fakeMediaStorage{}
+	fc := &feishuChannel{
+		inst:   Installation{AppID: "cli", Region: "feishu"},
+		sender: api, media: api, creds: fakeCreds{secret: "secret"}, storage: store,
+	}
+	msg := channel.InboundMessage{}
+	err := fc.attachImage(context.Background(), InboundMessage{
+		MessageID: "om_image", RawContent: `{"image_key":"img_key"}`,
+	}, &msg)
+	if err != nil {
+		t.Fatalf("attachImage: %v", err)
+	}
+	if len(msg.MediaRefs) != 1 || msg.MediaRefs[0].URL == "" ||
+		msg.MediaRefs[0].Filename != "screen.png" || msg.MediaRefs[0].MimeType != "image/png" {
+		t.Fatalf("MediaRefs = %+v", msg.MediaRefs)
+	}
+	if string(store.data) != "png" || store.contentType != "image/png" {
+		t.Fatalf("stored data=%q contentType=%q", store.data, store.contentType)
 	}
 }
 
