@@ -129,6 +129,25 @@ function MainTopBar() {
   );
 }
 
+// The canvas hugs the expanded sidebar with a hairline gap. When the sidebar
+// leaves the main flow, the left margin must grow to mirror the fixed mr-2 so
+// the floating canvas sits symmetrically inside the window frame.
+function MainCanvas({ children }: { children: React.ReactNode }) {
+  const { state, isMobile } = useSidebar();
+  const sidebarHidden = state === "collapsed" || isMobile;
+
+  return (
+    <motion.div
+      animate={{ marginLeft: sidebarHidden ? 8 : 2 }}
+      className="relative flex flex-1 min-h-0 flex-col overflow-hidden mr-2 mb-2 rounded-xl bg-page-canvas ring-1 ring-surface-border shadow-[var(--surface-shadow)]"
+      initial={false}
+      transition={toolbarMotion}
+    >
+      {children}
+    </motion.div>
+  );
+}
+
 function useInternalLinkHandler() {
   useEffect(() => {
     const handler = (e: Event) => {
@@ -219,10 +238,10 @@ export function DesktopShell() {
             {/* Right side: header + content container */}
             <motion.div layout transition={toolbarMotion} className="flex flex-1 min-w-0 flex-col">
               <MainTopBar />
-              <div className="relative flex flex-1 min-h-0 flex-col overflow-hidden mr-2 mb-2 ml-0.5 rounded-xl bg-page-canvas ring-1 ring-surface-border shadow-[var(--surface-shadow)]">
+              <MainCanvas>
                 <TabContent />
                 {slug && <FloatingChat />}
-              </div>
+              </MainCanvas>
             </motion.div>
           </SidebarProvider>
         </div>
