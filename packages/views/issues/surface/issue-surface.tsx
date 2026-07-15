@@ -17,6 +17,7 @@ import { IssuesHeader } from "../components/issues-header";
 import { ListView } from "../components/list-view";
 import { SwimLaneView } from "../components/swimlane-view";
 import { useT } from "../../i18n";
+import { IssueContextMenuProvider } from "../actions";
 import { IssueSurfaceActionsProvider } from "./actions-context";
 import { IssueSurfaceSelectionProvider } from "./selection-context";
 import type { IssueCreateDefaults, IssueSurfaceProps } from "./types";
@@ -142,6 +143,11 @@ function IssueSurfaceContent({
 
   return (
     <IssueSurfaceActionsProvider actions={controller.actions}>
+      {/* One shared right-click menu for every card/row this surface renders
+          — see IssueContextMenuProvider. Inside the actions provider so the
+          singleton's useIssueActions routes updates through surface
+          actions. */}
+      <IssueContextMenuProvider>
       <IssueSurfaceSelectionProvider selection={controller.selection}>
         {renderHeader ? (
           renderHeader(renderContext)
@@ -240,6 +246,7 @@ function IssueSurfaceContent({
         )}
         {shouldShowBatchToolbar && <BatchActionToolbar issues={issues} />}
       </IssueSurfaceSelectionProvider>
+      </IssueContextMenuProvider>
     </IssueSurfaceActionsProvider>
   );
 }
