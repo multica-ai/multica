@@ -17,7 +17,7 @@ func TestWSRPCClient_CallRoundTrip(t *testing.T) {
 	c := newWSRPCClient(time.Second)
 
 	// Fake transport: capture the frame, and reply asynchronously with a 200.
-	c.attach(func(frame []byte) (*wsOutbound, error) {
+	generation := c.attach(func(frame []byte) (*wsOutbound, error) {
 		var msg protocol.Message
 		if err := json.Unmarshal(frame, &msg); err != nil {
 			return nil, err
@@ -36,6 +36,7 @@ func TestWSRPCClient_CallRoundTrip(t *testing.T) {
 		})
 		return &wsOutbound{data: frame}, nil
 	})
+	c.markRPCV1Supported(generation)
 
 	var resp struct {
 		Tasks []struct {
@@ -60,10 +61,45 @@ func TestWSRPCClient_Unavailable(t *testing.T) {
 	}
 }
 
+// TestWSRPCClient_ReattachRequiresFreshNegotiation pins capability state to a
+// specific connection. A replacement sender must remain unavailable until a
+// heartbeat ack from that connection explicitly advertises rpc-v1.
+func TestWSRPCClient_ReattachRequiresFreshNegotiation(t *testing.T) {
+	c := newWSRPCClient(time.Second)
+	firstGeneration := c.attach(func(frame []byte) (*wsOutbound, error) {
+		return &wsOutbound{data: frame}, nil
+	})
+	c.markRPCV1Supported(firstGeneration)
+	if !c.supportsRPCV1() {
+		t.Fatal("first connection should support rpc-v1 after negotiation")
+	}
+
+	newConnectionCalls := 0
+	secondGeneration := c.attach(func(frame []byte) (*wsOutbound, error) {
+		newConnectionCalls++
+		return &wsOutbound{data: frame}, nil
+	})
+	c.markRPCV1Supported(firstGeneration) // delayed ack from the replaced connection
+	if c.supportsRPCV1() {
+		t.Fatal("replacement connection inherited rpc-v1 support from a stale ack")
+	}
+	if _, err := c.Call(context.Background(), "tasks.claim", 0, nil, nil); !errors.Is(err, errWSRPCUnavailable) {
+		t.Fatalf("Call error = %v, want errWSRPCUnavailable before fresh negotiation", err)
+	}
+	if newConnectionCalls != 0 {
+		t.Fatalf("replacement connection received %d RPC calls before negotiation, want 0", newConnectionCalls)
+	}
+	c.markRPCV1Supported(secondGeneration)
+	if !c.supportsRPCV1() {
+		t.Fatal("replacement connection did not accept its own rpc-v1 acknowledgement")
+	}
+}
+
 // TestWSRPCClient_Timeout: no response arrives within the per-request timeout.
 func TestWSRPCClient_Timeout(t *testing.T) {
 	c := newWSRPCClient(50 * time.Millisecond)
-	c.attach(func(frame []byte) (*wsOutbound, error) { return &wsOutbound{data: frame}, nil }) // send succeeds, never replies
+	generation := c.attach(func(frame []byte) (*wsOutbound, error) { return &wsOutbound{data: frame}, nil }) // send succeeds, never replies
+	c.markRPCV1Supported(generation)
 	status, err := c.Call(context.Background(), "tasks.claim", 0, nil, nil)
 	if err == nil || status != 0 {
 		t.Fatalf("status=%d err=%v, want timeout (status 0, err)", status, err)
@@ -74,7 +110,7 @@ func TestWSRPCClient_Timeout(t *testing.T) {
 // server-provided message, and a non-zero status so the caller can classify.
 func TestWSRPCClient_ServerError(t *testing.T) {
 	c := newWSRPCClient(time.Second)
-	c.attach(func(frame []byte) (*wsOutbound, error) {
+	generation := c.attach(func(frame []byte) (*wsOutbound, error) {
 		var msg protocol.Message
 		json.Unmarshal(frame, &msg)
 		var req protocol.RPCRequestPayload
@@ -82,6 +118,7 @@ func TestWSRPCClient_ServerError(t *testing.T) {
 		go c.deliver(protocol.RPCResponsePayload{RequestID: req.RequestID, Status: 400, Error: "bad daemon_id"})
 		return &wsOutbound{data: frame}, nil
 	})
+	c.markRPCV1Supported(generation)
 	status, err := c.Call(context.Background(), "tasks.claim", 0, nil, nil)
 	if status != 400 || err == nil {
 		t.Fatalf("status=%d err=%v, want 400 + error", status, err)
@@ -95,12 +132,13 @@ func TestWSRPCClient_DetachFailsPending(t *testing.T) {
 	c := newWSRPCClient(2 * time.Second)
 	var mu sync.Mutex
 	var item *wsOutbound
-	c.attach(func(frame []byte) (*wsOutbound, error) {
+	generation := c.attach(func(frame []byte) (*wsOutbound, error) {
 		mu.Lock()
 		defer mu.Unlock()
 		item = &wsOutbound{data: frame}
 		return item, nil
 	})
+	c.markRPCV1Supported(generation)
 	done := make(chan error, 1)
 	go func() {
 		_, err := c.Call(context.Background(), "tasks.claim", 0, nil, nil)
@@ -187,12 +225,13 @@ func TestWSRPCClient_TimeoutCancelsUnsentFrame(t *testing.T) {
 	c := newWSRPCClient(20 * time.Millisecond)
 	var mu sync.Mutex
 	var item *wsOutbound
-	c.attach(func(frame []byte) (*wsOutbound, error) {
+	generation := c.attach(func(frame []byte) (*wsOutbound, error) {
 		mu.Lock()
 		defer mu.Unlock()
 		item = &wsOutbound{data: frame}
 		return item, nil // enqueued; no writer ever drains it
 	})
+	c.markRPCV1Supported(generation)
 	status, err := c.Call(context.Background(), "tasks.claim", 30*time.Millisecond, nil, nil)
 	if status != 0 {
 		t.Fatalf("status = %d, want 0", status)
@@ -220,12 +259,13 @@ func TestWSRPCClient_TimeoutUncertainWhenAlreadySent(t *testing.T) {
 	c := newWSRPCClient(30 * time.Millisecond)
 	var mu sync.Mutex
 	var item *wsOutbound
-	c.attach(func(frame []byte) (*wsOutbound, error) {
+	generation := c.attach(func(frame []byte) (*wsOutbound, error) {
 		mu.Lock()
 		defer mu.Unlock()
 		item = &wsOutbound{data: frame}
 		return item, nil
 	})
+	c.markRPCV1Supported(generation)
 	done := make(chan error, 1)
 	go func() {
 		_, err := c.Call(context.Background(), "tasks.claim", 40*time.Millisecond, nil, nil)

@@ -1016,10 +1016,9 @@ func (h *Handler) HandleDaemonWSHeartbeat(ctx context.Context, identity daemonws
 	if err != nil {
 		if isNotFound(err) {
 			return &protocol.DaemonHeartbeatAckPayload{
-				RuntimeID:          runtimeID,
-				Status:             protocol.HeartbeatStatusRuntimeGone,
-				ServerCapabilities: []string{protocol.DaemonCapabilityRPCV1},
-				RuntimeGone:        true,
+				RuntimeID:   runtimeID,
+				Status:      protocol.HeartbeatStatusRuntimeGone,
+				RuntimeGone: true,
 			}, nil
 		}
 		return nil, fmt.Errorf("get agent runtime: %w", err)

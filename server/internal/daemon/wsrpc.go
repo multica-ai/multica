@@ -83,6 +83,11 @@ type wsRPCClient struct {
 	mu        sync.Mutex
 	pending   map[string]chan protocol.RPCResponsePayload
 	sendFrame func([]byte) (*wsOutbound, error)
+	// rpcV1Supported belongs to the currently attached connection. attach
+	// clears it before exposing a replacement sender so a claim that races a
+	// reconnect can never carry negotiation state across connections.
+	rpcV1Supported bool
+	generation     uint64
 	// grace is added to a call's server-side timeout budget to get how long the
 	// daemon waits for the response, so a claim that committed just before the
 	// server deadline still reports back before the daemon gives up (MUL-4257).
@@ -96,29 +101,59 @@ func newWSRPCClient(grace time.Duration) *wsRPCClient {
 	}
 }
 
-// attach binds a live connection's frame writer. Passing nil detaches (on
-// disconnect), after which Call fails fast until the next attach. Any pending
-// requests are failed so their callers fall back to HTTP immediately.
-func (c *wsRPCClient) attach(sendFrame func([]byte) (*wsOutbound, error)) {
+// attach binds a live connection's frame writer and clears the previous
+// connection's negotiated capability. Passing nil detaches (on disconnect),
+// after which Call fails fast until the next attach and rpc-v1 heartbeat ack.
+// Any pending requests are failed so their callers fall back to HTTP
+// immediately.
+func (c *wsRPCClient) attach(sendFrame func([]byte) (*wsOutbound, error)) uint64 {
 	c.mu.Lock()
+	c.generation++
+	c.rpcV1Supported = false
 	c.sendFrame = sendFrame
-	if sendFrame == nil {
-		for id, ch := range c.pending {
-			close(ch)
-			delete(c.pending, id)
-		}
+	for id, ch := range c.pending {
+		close(ch)
+		delete(c.pending, id)
+	}
+	generation := c.generation
+	c.mu.Unlock()
+	return generation
+}
+
+// markRPCV1Supported records explicit server support for the currently
+// attached connection. Heartbeat acks received without a live sender cannot
+// enable a future connection.
+func (c *wsRPCClient) markRPCV1Supported(generation uint64) {
+	if c == nil {
+		return
+	}
+	c.mu.Lock()
+	if c.sendFrame != nil && c.generation == generation {
+		c.rpcV1Supported = true
 	}
 	c.mu.Unlock()
 }
 
-// connected reports whether a live connection is attached.
-func (c *wsRPCClient) connected() bool {
+func (c *wsRPCClient) currentGeneration() uint64 {
+	if c == nil {
+		return 0
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.generation
+}
+
+// supportsRPCV1 reports whether the live connection explicitly negotiated
+// rpc-v1. Call repeats this check while capturing the sender under the same
+// mutex, so this method is only a fast-path hint and cannot authorize a send by
+// itself.
+func (c *wsRPCClient) supportsRPCV1() bool {
 	if c == nil {
 		return false
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return c.sendFrame != nil
+	return c.sendFrame != nil && c.rpcV1Supported
 }
 
 // Call issues an RPC and blocks until the response, the per-request timeout, or
@@ -155,7 +190,7 @@ func (c *wsRPCClient) Call(ctx context.Context, method string, serverTimeout tim
 
 	ch := make(chan protocol.RPCResponsePayload, 1)
 	c.mu.Lock()
-	if c.sendFrame == nil {
+	if c.sendFrame == nil || !c.rpcV1Supported {
 		c.mu.Unlock()
 		return 0, errWSRPCUnavailable
 	}
@@ -266,7 +301,7 @@ func (d *Daemon) ClaimTasksWSFirst(ctx context.Context, daemonID string, runtime
 	if d.batchClaimUnsupported.Load() {
 		return d.client.claimTasksLegacy(ctx, runtimeIDs, maxTasks)
 	}
-	if d.wsRPCSupported.Load() && d.wsRPC.connected() {
+	if d.wsRPC.supportsRPCV1() {
 		var resp struct {
 			Tasks []*Task `json:"tasks"`
 		}

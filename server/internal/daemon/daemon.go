@@ -213,11 +213,6 @@ type Daemon struct {
 	// detached, callers fall back to HTTP.
 	wsRPC *wsRPCClient
 
-	// wsRPCSupported is set after a heartbeat acknowledgement explicitly
-	// advertises rpc-v1. Older servers ignore unknown WS request types, so WS
-	// claims must stay opt-in; HTTP negotiates batch-vs-legacy compatibility.
-	wsRPCSupported atomic.Bool
-
 	// batchClaimUnsupported is set once a batch claim gets a 404 from the
 	// server (no /api/daemon/tasks/claim route — an un-upgraded server), so
 	// subsequent polls skip WS+batch and use the legacy per-runtime claim

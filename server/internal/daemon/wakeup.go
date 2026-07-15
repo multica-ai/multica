@@ -154,7 +154,7 @@ func (d *Daemon) runTaskWakeupConnection(ctx context.Context, runtimeIDs []strin
 	// close(writes), and the sender holds sendMu across its non-blocking send.
 	var sendMu sync.Mutex
 	sendClosed := false
-	d.wsRPC.attach(func(frame []byte) (*wsOutbound, error) {
+	wsRPCGeneration := d.wsRPC.attach(func(frame []byte) (*wsOutbound, error) {
 		sendMu.Lock()
 		defer sendMu.Unlock()
 		if sendClosed {
@@ -171,9 +171,6 @@ func (d *Daemon) runTaskWakeupConnection(ctx context.Context, runtimeIDs []strin
 	// A (re)connect may be a freshly-upgraded server: re-probe the batch claim
 	// route rather than staying on the legacy fallback forever (MUL-4257).
 	d.batchClaimUnsupported.Store(false)
-	// Capabilities belong to this specific connection. Require a fresh
-	// heartbeat acknowledgement before sending RPCs after every reconnect.
-	d.wsRPCSupported.Store(false)
 
 	heartbeatCtx, cancelHeartbeat := context.WithCancel(ctx)
 	hbDone := make(chan struct{})
@@ -184,7 +181,7 @@ func (d *Daemon) runTaskWakeupConnection(ctx context.Context, runtimeIDs []strin
 
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- d.readTaskWakeupMessages(conn, taskWakeups)
+		errCh <- d.readTaskWakeupMessagesForConnection(conn, taskWakeups, wsRPCGeneration)
 	}()
 
 	// Defer cleanup must shut goroutines down in this order:
@@ -325,6 +322,10 @@ func marshalRaw(v any) json.RawMessage {
 // handleRuntimeGone uses the daemon root context for its register call, so
 // this function can safely pass any caller context here.
 func (d *Daemon) handleWSHeartbeatAck(ctx context.Context, ack *HeartbeatResponse) {
+	d.handleWSHeartbeatAckForConnection(ctx, ack, d.wsRPC.currentGeneration())
+}
+
+func (d *Daemon) handleWSHeartbeatAckForConnection(ctx context.Context, ack *HeartbeatResponse, wsRPCGeneration uint64) {
 	if ack == nil || ack.RuntimeID == "" {
 		return
 	}
@@ -334,7 +335,7 @@ func (d *Daemon) handleWSHeartbeatAck(ctx context.Context, ack *HeartbeatRespons
 	}
 	for _, capability := range ack.ServerCapabilities {
 		if capability == protocol.DaemonCapabilityRPCV1 {
-			d.wsRPCSupported.Store(true)
+			d.wsRPC.markRPCV1Supported(wsRPCGeneration)
 			break
 		}
 	}
@@ -343,6 +344,10 @@ func (d *Daemon) handleWSHeartbeatAck(ctx context.Context, ack *HeartbeatRespons
 }
 
 func (d *Daemon) readTaskWakeupMessages(conn *websocket.Conn, taskWakeups chan<- taskWakeup) error {
+	return d.readTaskWakeupMessagesForConnection(conn, taskWakeups, d.wsRPC.currentGeneration())
+}
+
+func (d *Daemon) readTaskWakeupMessagesForConnection(conn *websocket.Conn, taskWakeups chan<- taskWakeup, wsRPCGeneration uint64) error {
 	d.configureTaskWakeupReadLiveness(conn)
 	for {
 		_, raw, err := conn.ReadMessage()
@@ -391,7 +396,7 @@ func (d *Daemon) readTaskWakeupMessages(conn *websocket.Conn, taskWakeups chan<-
 				d.logger.Debug("ws heartbeat ack invalid payload", "error", err)
 				continue
 			}
-			d.handleWSHeartbeatAck(context.Background(), &ack)
+			d.handleWSHeartbeatAckForConnection(context.Background(), &ack, wsRPCGeneration)
 		case protocol.EventDaemonRPCResponse:
 			var resp protocol.RPCResponsePayload
 			if err := json.Unmarshal(msg.Payload, &resp); err != nil {

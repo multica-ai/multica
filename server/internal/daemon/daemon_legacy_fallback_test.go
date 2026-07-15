@@ -90,18 +90,18 @@ func TestClaimTasksWSFirst_NoDoubleClaimOnDetach(t *testing.T) {
 	defer srv.Close()
 
 	d := New(Config{ServerBaseURL: srv.URL, MaxConcurrentTasks: 4}, slog.New(slog.NewTextHandler(noopWriter{}, nil)))
-	d.wsRPCSupported.Store(true)
 	// Sender enqueues the frame and hands back its cancelable handle; we then
 	// mark it written to simulate the writer having put it on the wire, so the
 	// disconnect leaves a genuinely uncertain outcome (the server may commit).
 	var mu sync.Mutex
 	var item *wsOutbound
-	d.wsRPC.attach(func(frame []byte) (*wsOutbound, error) {
+	generation := d.wsRPC.attach(func(frame []byte) (*wsOutbound, error) {
 		mu.Lock()
 		defer mu.Unlock()
 		item = &wsOutbound{data: frame}
 		return item, nil
 	})
+	d.wsRPC.markRPCV1Supported(generation)
 
 	done := make(chan struct{})
 	var tasks []*Task
@@ -133,10 +133,12 @@ func TestClaimTasksWSFirst_NoDoubleClaimOnDetach(t *testing.T) {
 	}
 }
 
-// TestClaimTasksWSFirst_OldServerSkipsWSRPC pins compatibility with servers
-// predating rpc-v1. They ignore unknown WS frames, so the daemon must not send
-// tasks.claim until a heartbeat ack explicitly advertises server support.
-func TestClaimTasksWSFirst_OldServerSkipsWSRPC(t *testing.T) {
+// TestClaimTasksWSFirst_ReconnectToOldServerSkipsWSRPC pins compatibility when
+// a daemon moves from an rpc-v1 server to an older server. The replacement
+// connection must not inherit the first connection's negotiated capability;
+// old servers ignore unknown WS frames, so claims must use HTTP until a fresh
+// heartbeat ack explicitly advertises server support.
+func TestClaimTasksWSFirst_ReconnectToOldServerSkipsWSRPC(t *testing.T) {
 	var httpClaims, wsClaims atomic.Int64
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.Contains(r.URL.Path, "/claim") {
@@ -148,6 +150,10 @@ func TestClaimTasksWSFirst_OldServerSkipsWSRPC(t *testing.T) {
 	defer srv.Close()
 
 	d := New(Config{ServerBaseURL: srv.URL, MaxConcurrentTasks: 4}, slog.New(slog.NewTextHandler(noopWriter{}, nil)))
+	previousGeneration := d.wsRPC.attach(func(frame []byte) (*wsOutbound, error) {
+		return &wsOutbound{data: frame}, nil
+	})
+	d.wsRPC.markRPCV1Supported(previousGeneration)
 	d.wsRPC.attach(func(frame []byte) (*wsOutbound, error) {
 		wsClaims.Add(1)
 		return &wsOutbound{data: frame}, nil
