@@ -146,6 +146,15 @@ function IssueSurfaceContent({
     },
     [controller],
   );
+  // Stable reference for BoardView's issues: the inline flatMap allocated a
+  // fresh array every render, defeating BoardView's memo.
+  const boardIssues = useMemo(
+    () =>
+      controller.assigneeGroups
+        ? controller.assigneeGroups.flatMap((group) => group.issues)
+        : issues,
+    [controller.assigneeGroups, issues],
+  );
   const shouldShowClientEmpty =
     !!clientFilter &&
     issues.length === 0 &&
@@ -200,11 +209,7 @@ function IssueSurfaceContent({
           <div className={cn("flex flex-col flex-1 min-h-0", contentClassName)}>
             {controller.viewMode === "board" && (
               <BoardView
-                issues={
-                  controller.assigneeGroups
-                    ? controller.assigneeGroups.flatMap((group) => group.issues)
-                    : issues
-                }
+                issues={boardIssues}
                 assigneeGroups={controller.assigneeGroups}
                 assigneeGroupQueryKey={controller.assigneeGroupQueryKey}
                 assigneeGroupFilter={controller.assigneeGroupFilter}

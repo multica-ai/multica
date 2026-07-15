@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useMemo, useEffect, useRef } from "react";
+import { memo, useState, useCallback, useMemo, useEffect, useRef } from "react";
 import {
   DndContext,
   DragOverlay,
@@ -450,7 +450,7 @@ function buildAssigneeLanes(
   ];
 }
 
-export function SwimLaneView({
+function SwimLaneViewImpl({
   issues,
   unfilteredIssues,
   activeFilters: activeFiltersProp,
@@ -1641,3 +1641,11 @@ function SwimLaneLoadMoreCell({
   if (!hasMore) return <div />;
   return <InfiniteScrollSentinel onVisible={loadMore} loading={isLoading} />;
 }
+
+/**
+ * Memoized: the surface controller re-renders on loading-flag flips (e.g. a
+ * query enabling when the view changes) — without memo every such flip
+ * re-rendered this entire view tree (hundreds of ms). All props are
+ * referentially stable useMemo/useCallback outputs from the controller.
+ */
+export const SwimLaneView = memo(SwimLaneViewImpl);

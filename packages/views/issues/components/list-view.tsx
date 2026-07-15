@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useMemo, useEffect, useRef } from "react";
+import { memo, useState, useCallback, useMemo, useEffect, useRef } from "react";
 import { ChevronRight, Plus } from "lucide-react";
 import { Accordion } from "@base-ui/react/accordion";
 import {
@@ -68,7 +68,7 @@ function buildListGroups(visibleStatuses: IssueStatus[]): BoardColumnGroup[] {
   }));
 }
 
-export function ListView({
+function ListViewImpl({
   issues,
   visibleStatuses,
   childProgressMap = EMPTY_PROGRESS_MAP,
@@ -594,3 +594,11 @@ function StatusAccordionItem({
     </Accordion.Item>
   );
 }
+
+/**
+ * Memoized: the surface controller re-renders on loading-flag flips (e.g. a
+ * query enabling when the view changes) — without memo every such flip
+ * re-rendered this entire view tree (hundreds of ms). All props are
+ * referentially stable useMemo/useCallback outputs from the controller.
+ */
+export const ListView = memo(ListViewImpl);
