@@ -54,6 +54,12 @@ async function captureFocused(
 }
 
 test.describe("Scheduled Channel and DM messages (FIR-2873)", () => {
+  test.use({
+    locale: "en-US",
+    timezoneId: "Europe/Copenhagen",
+    viewport: { width: 1280, height: 720 },
+  });
+
   let api: TestApiClient;
   let channelId: string;
   let workspaceSlug: string;
@@ -72,7 +78,15 @@ test.describe("Scheduled Channel and DM messages (FIR-2873)", () => {
     const composer = page.locator('[contenteditable="true"]').last();
     await composer.fill("Quarterly update is ready");
 
-    const scheduleButton = page.getByRole("button", { name: "Schedule message" });
+    const desktopSubmit = page.getByTestId("desktop-scheduled-submit");
+    await expect(desktopSubmit).toBeVisible();
+    const submitButton = desktopSubmit.getByRole("button", { name: "Submit" });
+    const scheduleButton = desktopSubmit.getByRole("button", { name: "Schedule message" });
+    const submitBox = await submitButton.boundingBox();
+    const scheduleBox = await scheduleButton.boundingBox();
+    if (!submitBox || !scheduleBox) throw new Error("Missing desktop scheduled-submit controls");
+    expect(Math.abs(submitBox.x + submitBox.width - scheduleBox.x)).toBeLessThanOrEqual(1);
+    expect(Math.abs(submitBox.height - scheduleBox.height)).toBeLessThanOrEqual(1);
     await scheduleButton.click();
     const scheduleMenu = await expectScheduleMenu(page);
     await captureFocused(page, testInfo, "m1-channel-schedule-menu", [
@@ -157,6 +171,60 @@ test.describe("Scheduled Channel and DM messages (FIR-2873)", () => {
       page.getByRole("heading", { name: "Scheduled messages" }),
     ).toBeVisible();
     await expect(page.getByText("Morning follow-up", { exact: true })).toBeVisible();
+  });
+
+  test("uses tap to send and long press to schedule on responsive mobile", async ({
+    page,
+  }, testInfo) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto(`/${workspaceSlug}/channels/${channelId}`);
+    const composer = page.locator('[contenteditable="true"]').last();
+    const mobileSubmit = page.getByTestId("mobile-submit");
+    await expect(mobileSubmit).toBeVisible();
+    await expect(page.getByTestId("desktop-scheduled-submit")).toBeHidden();
+
+    const immediateMessage = `Mobile tap ${Date.now()}`;
+    await composer.fill(immediateMessage);
+    await mobileSubmit.click();
+    await expect(composer).toHaveText("");
+    await expect(page.getByText(immediateMessage, { exact: true })).toBeVisible();
+
+    const scheduledMessage = `Mobile hold ${Date.now()}`;
+    await composer.fill(scheduledMessage);
+    await expect(mobileSubmit).toBeEnabled();
+    await mobileSubmit.dispatchEvent("pointerdown", {
+      pointerType: "touch",
+      isPrimary: true,
+      button: 0,
+    });
+    await page.waitForTimeout(550);
+    const scheduleSheet = page.getByRole("dialog", { name: "Schedule message" });
+    await expect(scheduleSheet).toHaveAttribute("data-side", "bottom");
+    await expect.poll(async () => {
+      const sheetBox = await scheduleSheet.boundingBox();
+      if (!sheetBox) throw new Error("Missing responsive-mobile schedule sheet");
+      expect(sheetBox.x).toBeLessThanOrEqual(1);
+      expect(sheetBox.width).toBeGreaterThanOrEqual(388);
+      return Math.abs(sheetBox.y + sheetBox.height - 844);
+    }).toBeLessThanOrEqual(1);
+    await captureFocused(page, testInfo, "responsive-mobile-schedule-sheet", [
+      composer,
+      mobileSubmit,
+      scheduleSheet,
+    ]);
+    await mobileSubmit.dispatchEvent("pointerup", {
+      pointerType: "touch",
+      isPrimary: true,
+      button: 0,
+    });
+    await mobileSubmit.dispatchEvent("click");
+    await expect(composer).toHaveText(scheduledMessage);
+    await expect(page.getByText(scheduledMessage, { exact: true })).toHaveCount(1);
+
+    await scheduleSheet.getByRole("button", { name: "Tomorrow at 9:00 AM" }).click();
+    await expect(page.getByText(/Message scheduled for/)).toBeVisible();
+    await page.getByRole("button", { name: "View" }).click();
+    await expect(page.getByText(scheduledMessage, { exact: true })).toBeVisible();
   });
 
   test("stores a custom local time and keeps the same time after reload", async ({ page }) => {

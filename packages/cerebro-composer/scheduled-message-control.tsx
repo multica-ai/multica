@@ -1,7 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
-import { ChevronDown, Clock3, MoreHorizontal } from "lucide-react";
+import { useCallback, useEffect, useRef, useState, type ReactElement } from "react";
+import { ArrowUp, ChevronDown, Clock3, Loader2, MoreHorizontal } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@multica/ui/components/ui/button";
 import { Input } from "@multica/ui/components/ui/input";
@@ -12,15 +12,29 @@ import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
 } from "@multica/ui/components/ui/dropdown-menu";
 import {
+  Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle,
+} from "@multica/ui/components/ui/sheet";
+import {
   deleteScheduledMessage, listScheduledMessages, nextMondayAtNine, sendScheduledMessageNow,
   toLocalInputValue, tomorrowAtNine, updateScheduledMessage, type ScheduledMessage,
 } from "./scheduled-message";
 
-export function ScheduledMessageControl({ issueId, disabled, canSchedule, onSchedule }: {
+export function ScheduledMessageControl({
+  issueId,
+  disabled,
+  canSchedule,
+  onSchedule,
+  onSubmit,
+  submitDisabled,
+  submitting,
+}: {
   issueId: string;
   disabled: boolean;
   canSchedule: boolean;
   onSchedule: (sendAt: Date) => Promise<void>;
+  onSubmit: () => void | Promise<void>;
+  submitDisabled: boolean;
+  submitting: boolean;
 }) {
   const [customOpen, setCustomOpen] = useState(false);
   const [queueOpen, setQueueOpen] = useState(false);
@@ -29,6 +43,44 @@ export function ScheduledMessageControl({ issueId, disabled, canSchedule, onSche
   const [editing, setEditing] = useState<ScheduledMessage | null>(null);
   const [editContent, setEditContent] = useState("");
   const [editTime, setEditTime] = useState("");
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const holdTimerRef = useRef<number | null>(null);
+  const suppressMobileClickRef = useRef(false);
+
+  const clearHoldTimer = useCallback(() => {
+    if (holdTimerRef.current !== null) {
+      window.clearTimeout(holdTimerRef.current);
+      holdTimerRef.current = null;
+    }
+  }, []);
+
+  useEffect(() => clearHoldTimer, [clearHoldTimer]);
+
+  const startMobileHold = () => {
+    if (submitDisabled) return;
+    clearHoldTimer();
+    suppressMobileClickRef.current = false;
+    holdTimerRef.current = window.setTimeout(() => {
+      holdTimerRef.current = null;
+      suppressMobileClickRef.current = true;
+      setMobileMenuOpen(true);
+    }, 500);
+  };
+
+  const cancelMobileHold = () => {
+    const holdWasPending = holdTimerRef.current !== null;
+    clearHoldTimer();
+    if (holdWasPending) suppressMobileClickRef.current = false;
+  };
+
+  const handleMobileSubmit = () => {
+    clearHoldTimer();
+    if (suppressMobileClickRef.current) {
+      suppressMobileClickRef.current = false;
+      return;
+    }
+    void onSubmit();
+  };
 
   const refresh = useCallback(async () => {
     try { setMessages(await listScheduledMessages(issueId)); }
@@ -46,9 +98,9 @@ export function ScheduledMessageControl({ issueId, disabled, canSchedule, onSche
     catch { toast.error("Could not schedule message"); }
   };
 
-  return <>
+  const scheduleMenu = (trigger: ReactElement) => (
     <DropdownMenu>
-      <DropdownMenuTrigger render={<Button size="icon-sm" aria-label="Schedule message" disabled={disabled} />}>
+      <DropdownMenuTrigger render={trigger}>
         <ChevronDown />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" side="top" className="w-60">
@@ -59,6 +111,104 @@ export function ScheduledMessageControl({ issueId, disabled, canSchedule, onSche
         <DropdownMenuItem onClick={() => setQueueOpen(true)}><Clock3 className="mr-2 size-4" />Scheduled messages</DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
+  );
+
+  return <>
+    <div data-testid="desktop-scheduled-submit" className="hidden items-center sm:flex">
+      <Button
+        size="icon-lg"
+        aria-label="Submit"
+        disabled={submitDisabled}
+        className="rounded-r-none"
+        onClick={() => void onSubmit()}
+      >
+        {submitting ? <Loader2 className="animate-spin" /> : <ArrowUp />}
+      </Button>
+      {scheduleMenu(
+        <Button
+          size="icon-lg"
+          aria-label="Schedule message"
+          data-testid="desktop-schedule-toggle"
+          disabled={disabled}
+          className="w-5 rounded-l-none border-l border-primary-foreground/20 px-0"
+        />,
+      )}
+    </div>
+
+    <div className="sm:hidden">
+      <Button
+        size="icon-sm"
+        aria-label="Submit"
+        data-testid="mobile-submit"
+        disabled={submitDisabled}
+        onPointerDown={startMobileHold}
+        onPointerUp={clearHoldTimer}
+        onPointerCancel={cancelMobileHold}
+        onPointerLeave={cancelMobileHold}
+        onContextMenu={(event) => event.preventDefault()}
+        onClick={handleMobileSubmit}
+      >
+        {submitting ? <Loader2 className="animate-spin" /> : <ArrowUp />}
+      </Button>
+    </div>
+
+    <Sheet open={mobileMenuOpen} onOpenChange={setMobileMenuOpen}>
+      <SheetContent
+        side="bottom"
+        className="rounded-t-2xl pb-[max(1rem,env(safe-area-inset-bottom))]"
+      >
+        <SheetHeader className="pb-2 text-left">
+          <SheetTitle>Schedule message</SheetTitle>
+          <SheetDescription>Choose when this message should be sent.</SheetDescription>
+        </SheetHeader>
+        <div className="grid gap-1 px-4 pb-4">
+          <Button
+            variant="ghost"
+            className="h-12 justify-start px-3 text-base"
+            disabled={!canSchedule}
+            onClick={() => {
+              setMobileMenuOpen(false);
+              void schedule(tomorrowAtNine());
+            }}
+          >
+            Tomorrow at 9:00 AM
+          </Button>
+          <Button
+            variant="ghost"
+            className="h-12 justify-start px-3 text-base"
+            disabled={!canSchedule}
+            onClick={() => {
+              setMobileMenuOpen(false);
+              void schedule(nextMondayAtNine());
+            }}
+          >
+            Next Monday at 9:00 AM
+          </Button>
+          <Button
+            variant="ghost"
+            className="h-12 justify-start px-3 text-base"
+            disabled={!canSchedule}
+            onClick={() => {
+              setMobileMenuOpen(false);
+              setCustomOpen(true);
+            }}
+          >
+            Custom time…
+          </Button>
+          <div className="my-1 h-px bg-border" />
+          <Button
+            variant="ghost"
+            className="h-12 justify-start px-3 text-base"
+            onClick={() => {
+              setMobileMenuOpen(false);
+              setQueueOpen(true);
+            }}
+          >
+            <Clock3 className="mr-2 size-4" />Scheduled messages
+          </Button>
+        </div>
+      </SheetContent>
+    </Sheet>
 
     <Dialog open={customOpen} onOpenChange={setCustomOpen}>
       <DialogContent>

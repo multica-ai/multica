@@ -1,6 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, cleanup, waitFor, act } from "@testing-library/react";
-import { BaseComposer, type ComposerDraftHandle } from "./base-composer";
+import {
+  BaseComposer,
+  type BaseComposerProps,
+  type ComposerDraftHandle,
+} from "./base-composer";
 
 const apiMock = vi.hoisted(() => ({
   getMe: vi.fn(),
@@ -144,6 +148,43 @@ beforeEach(() => {
 });
 
 describe("BaseComposer draft parity", () => {
+  it("lets a scheduling surface replace the default Submit control", () => {
+    const onSubmit = vi.fn();
+    let submitArgs: Parameters<NonNullable<BaseComposerProps["submitControl"]>>[0] | undefined;
+
+    render(
+      <BaseComposer
+        draft={makeDraft("scheduled draft")}
+        onSubmit={onSubmit}
+        onSchedule={vi.fn()}
+        submitControl={(args) => {
+          submitArgs = args;
+          return (
+            <button
+              aria-label="Adaptive submit"
+              disabled={args.submitDisabled}
+              data-submitting={args.submitting}
+              onClick={args.submit}
+            />
+          );
+        }}
+        editorKey="s1"
+      />,
+    );
+
+    expect(screen.queryByRole("button", { name: "Submit" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Adaptive submit" })).toBeEnabled();
+    if (!submitArgs) throw new Error("Missing adaptive submit arguments");
+    expect(submitArgs.disabled).toBe(false);
+    expect(submitArgs.canSchedule).toBe(true);
+    expect(submitArgs.submitDisabled).toBe(false);
+    expect(submitArgs.submitting).toBe(false);
+    expect(submitArgs.schedule).toEqual(expect.any(Function));
+
+    fireEvent.click(screen.getByRole("button", { name: "Adaptive submit" }));
+    expect(onSubmit).toHaveBeenCalledWith("scheduled draft", undefined);
+  });
+
   it("disables scheduling while an image is uploading", () => {
     composerFeatureFlags.imageTray = true;
     imageTrayMock.hasUploading = true;
@@ -153,7 +194,7 @@ describe("BaseComposer draft parity", () => {
         draft={makeDraft("message with upload")}
         onSubmit={vi.fn()}
         onSchedule={vi.fn()}
-        scheduleControl={({ disabled }) => (
+        submitControl={({ disabled }) => (
           <button aria-label="Schedule message" disabled={disabled} />
         )}
         editorKey="s1"

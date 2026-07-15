@@ -96,7 +96,14 @@ export interface BaseComposerProps {
 
   onSubmit: (content: string, attachmentIds?: string[]) => void | Promise<void>;
   onSchedule?: (content: string, sendAt: Date, attachmentIds?: string[]) => void | Promise<void>;
-  scheduleControl?: (args: { disabled: boolean; canSchedule: boolean; schedule: (sendAt: Date) => Promise<void> }) => ReactNode;
+  submitControl?: (args: {
+    disabled: boolean;
+    canSchedule: boolean;
+    schedule: (sendAt: Date) => Promise<void>;
+    submit: () => Promise<void>;
+    submitDisabled: boolean;
+    submitting: boolean;
+  }) => ReactNode;
   /** Track upload ids and forward only those still present in the sent text.
    *  Comments/channels need this; chat passes content only (false). */
   trackAttachmentIds?: boolean;
@@ -193,7 +200,7 @@ export const BaseComposer = forwardRef<ComposerHandle, BaseComposerProps>(functi
   draft,
   onSubmit,
   onSchedule,
-  scheduleControl,
+  submitControl,
   trackAttachmentIds = true,
   placeholder,
   autoFocus = false,
@@ -629,6 +636,21 @@ export const BaseComposer = forwardRef<ComposerHandle, BaseComposerProps>(functi
           />
         ));
 
+  const actionDisabled =
+    (imageTrayEnabled && tray.hasUploading) || submitting || disabled || noAgent;
+  const submitDisabled =
+    (isEmpty && !(imageTrayEnabled && tray.hasCompleted)) || actionDisabled;
+  const defaultSubmitControl = (
+    <Button
+      size="icon-sm"
+      aria-label="Submit"
+      disabled={submitDisabled}
+      onClick={handleSubmit}
+    >
+      {submitting ? <Loader2 className="animate-spin" /> : <ArrowUp />}
+    </Button>
+  );
+
   const actionRow = (
     <>
       {rightAdornment}
@@ -647,29 +669,18 @@ export const BaseComposer = forwardRef<ComposerHandle, BaseComposerProps>(functi
         </Button>
       ) : null}
       {sendMenu}
-      {onSchedule && scheduleControl?.({
-        disabled:
-          (imageTrayEnabled && tray.hasUploading) ||
-          submitting ||
-          disabled ||
-          noAgent,
-        canSchedule: !isEmpty || (imageTrayEnabled && tray.hasCompleted),
-        schedule: handleSchedule,
-      })}
-      <Button
-        size="icon-sm"
-        aria-label="Submit"
-        disabled={
-          (isEmpty && !(imageTrayEnabled && tray.hasCompleted)) ||
-          (imageTrayEnabled && tray.hasUploading) ||
-          submitting ||
-          disabled ||
-          noAgent
-        }
-        onClick={handleSubmit}
-      >
-        {submitting ? <Loader2 className="animate-spin" /> : <ArrowUp />}
-      </Button>
+      {onSchedule && submitControl
+        ? submitControl({
+            disabled: actionDisabled,
+            canSchedule: !isEmpty || (imageTrayEnabled && tray.hasCompleted),
+            schedule: handleSchedule,
+            submit: handleSubmit,
+            submitDisabled,
+            submitting,
+          })
+        : (
+            defaultSubmitControl
+          )}
     </>
   );
 

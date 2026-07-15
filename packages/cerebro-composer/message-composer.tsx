@@ -125,8 +125,23 @@ export const MessageComposer = forwardRef<ComposerHandle, MessageComposerProps>(
           attachment_ids: attachmentIds,
         });
       } : undefined}
-      scheduleControl={canSchedule ? ({ disabled: scheduleDisabled, canSchedule: hasMessage, schedule }) => (
-        <ScheduledMessageControl issueId={uploadIssueId} disabled={scheduleDisabled} canSchedule={hasMessage} onSchedule={schedule} />
+      submitControl={canSchedule ? ({
+        disabled: scheduleDisabled,
+        canSchedule: hasMessage,
+        schedule,
+        submit,
+        submitDisabled,
+        submitting,
+      }) => (
+        <ScheduledMessageControl
+          issueId={uploadIssueId}
+          disabled={scheduleDisabled}
+          canSchedule={hasMessage}
+          onSchedule={schedule}
+          onSubmit={submit}
+          submitDisabled={submitDisabled}
+          submitting={submitting}
+        />
       ) : undefined}
       trackAttachmentIds={trackAttachmentIds}
       placeholder={placeholder}
