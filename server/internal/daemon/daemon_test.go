@@ -1854,6 +1854,65 @@ func TestExecuteAndDrain_ProgressHeartbeatStopsWhenBackendGoesSilent(t *testing.
 	}
 }
 
+// TestTaskProgressHeartbeat_RecoversAfterConsecutiveEndpointFailures proves
+// that progress from a healthy backend resumes task liveness after a temporary
+// control-plane outage. Failed writes deliberately consume the rate-limit
+// window, so each later observed backend message is emitted after that window
+// expires rather than spawning an unbounded retry loop.
+func TestTaskProgressHeartbeat_RecoversAfterConsecutiveEndpointFailures(t *testing.T) {
+	originalInterval := taskExecutionHeartbeatMinInterval
+	taskExecutionHeartbeatMinInterval = 5 * time.Millisecond
+	t.Cleanup(func() { taskExecutionHeartbeatMinInterval = originalInterval })
+
+	var attempts atomic.Int32
+	var accepted atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/daemon/tasks/t-progress/heartbeat" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		attempt := attempts.Add(1)
+		if attempt <= 2 {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		accepted.Add(1)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	t.Cleanup(srv.Close)
+
+	d := &Daemon{client: NewClient(srv.URL), logger: slog.Default()}
+	recordProgress := d.taskProgressHeartbeat("t-progress", slog.Default())
+
+	waitForAttempt := func(want int32) {
+		t.Helper()
+		deadline := time.Now().Add(time.Second)
+		for attempts.Load() < want && time.Now().Before(deadline) {
+			time.Sleep(time.Millisecond)
+		}
+		if got := attempts.Load(); got != want {
+			t.Fatalf("heartbeat attempts = %d, want %d", got, want)
+		}
+	}
+	emitProgress := func(want int32) {
+		t.Helper()
+		recordProgress()
+		waitForAttempt(want)
+		time.Sleep(2 * taskExecutionHeartbeatMinInterval)
+	}
+
+	// The first two observed messages reach a temporarily unavailable endpoint.
+	emitProgress(1)
+	emitProgress(2)
+	// A later message must still reach the endpoint and refresh the liveness
+	// record once the control plane recovers.
+	emitProgress(3)
+
+	if got := accepted.Load(); got != 1 {
+		t.Fatalf("accepted heartbeat count = %d, want 1 after recovery", got)
+	}
+}
+
 func TestExecuteAndDrain_IdleWatchdog_DisabledWhenZero(t *testing.T) {
 	t.Parallel()
 

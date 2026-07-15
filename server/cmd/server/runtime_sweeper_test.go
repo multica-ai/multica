@@ -2,13 +2,17 @@ package main
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/multica-ai/multica/server/internal/events"
+	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/taskfailure"
 )
 
 // setupSweeperTestFixture creates an issue and a task in the given status with
@@ -492,6 +496,119 @@ func TestSweepRunningTaskWithFreshExecutionHeartbeatSurvives(t *testing.T) {
 	for _, task := range failedTasks {
 		if task.ID.Bytes == parseUUIDBytes(taskID) {
 			t.Fatalf("fresh execution heartbeat must preserve task %s", taskID)
+		}
+	}
+}
+
+// TestSweepAndCompletionRace_OnlyOneTerminalTransition protects the critical
+// at-most-once boundary for a worker whose execution heartbeat went stale at
+// the same instant it reports completion. Both transitions use a status=running
+// compare-and-swap, so exactly one may win. If the sweeper wins, that uncertain
+// worker failure must not create a retry that could duplicate side effects.
+func TestSweepAndCompletionRace_OnlyOneTerminalTransition(t *testing.T) {
+	if testPool == nil {
+		t.Skip("no database connection")
+	}
+
+	ctx := context.Background()
+	issueID, agentID, taskID := setupSweeperTestFixture(t, "running")
+	t.Cleanup(func() { cleanupSweeperFixture(t, issueID, agentID) })
+	if _, err := testPool.Exec(ctx, `
+		UPDATE agent_task_queue
+		SET last_heartbeat_at = now() - interval '10 minutes'
+		WHERE id = $1
+	`, taskID); err != nil {
+		t.Fatalf("seed stale task execution heartbeat: %v", err)
+	}
+
+	queries := db.New(testPool)
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+
+	var failed []db.AgentTaskQueue
+	var sweepErr error
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		<-start
+		failed, sweepErr = queries.FailStaleTasks(ctx, db.FailStaleTasksParams{
+			DispatchTimeoutSecs:    300.0,
+			RunningTimeoutSecs:     1.0,
+			TaskHeartbeatStaleSecs: 1.0,
+			RuntimeStaleSecs:       staleThresholdSeconds,
+		})
+	}()
+
+	var completeErr error
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		<-start
+		_, completeErr = queries.CompleteAgentTask(ctx, db.CompleteAgentTaskParams{
+			ID:     parseUUID(taskID),
+			Result: []byte(`{"output":"completed at the sweep boundary"}`),
+		})
+	}()
+
+	close(start)
+	wg.Wait()
+	if sweepErr != nil {
+		t.Fatalf("FailStaleTasks: %v", sweepErr)
+	}
+	if completeErr != nil && !errors.Is(completeErr, pgx.ErrNoRows) {
+		t.Fatalf("CompleteAgentTask: %v", completeErr)
+	}
+
+	var swept *db.AgentTaskQueue
+	for i := range failed {
+		if failed[i].ID.Bytes == parseUUIDBytes(taskID) {
+			swept = &failed[i]
+			break
+		}
+	}
+	completed := completeErr == nil
+	if (swept != nil) == completed {
+		t.Fatalf("sweeper won=%t, completion won=%t; want exactly one terminal transition", swept != nil, completed)
+	}
+
+	var status, failureReason string
+	if err := testPool.QueryRow(ctx, `
+		SELECT status, COALESCE(failure_reason, '')
+		FROM agent_task_queue WHERE id = $1
+	`, taskID).Scan(&status, &failureReason); err != nil {
+		t.Fatalf("read terminal task: %v", err)
+	}
+	if completed {
+		if status != "completed" || failureReason != "" {
+			t.Fatalf("completion winner left status=%q failure_reason=%q, want completed without failure", status, failureReason)
+		}
+	} else {
+		if status != "failed" || failureReason != string(taskfailure.ReasonTaskLivenessLost) {
+			t.Fatalf("sweeper winner left status=%q failure_reason=%q, want failed/%q", status, failureReason, taskfailure.ReasonTaskLivenessLost)
+		}
+		child, err := (&service.TaskService{}).MaybeRetryFailedTask(ctx, *swept)
+		if err != nil {
+			t.Fatalf("MaybeRetryFailedTask for liveness loss: %v", err)
+		}
+		if child != nil {
+			t.Fatalf("liveness-loss sweeper result queued retry %s", child.ID)
+		}
+	}
+
+	// A later sweeper pass must not alter the terminal winner or return it a
+	// second time; this is the database-level at-most-once guarantee.
+	failedAgain, err := queries.FailStaleTasks(ctx, db.FailStaleTasksParams{
+		DispatchTimeoutSecs:    300.0,
+		RunningTimeoutSecs:     1.0,
+		TaskHeartbeatStaleSecs: 1.0,
+		RuntimeStaleSecs:       staleThresholdSeconds,
+	})
+	if err != nil {
+		t.Fatalf("second FailStaleTasks: %v", err)
+	}
+	for _, task := range failedAgain {
+		if task.ID.Bytes == parseUUIDBytes(taskID) {
+			t.Fatalf("terminal task %s was swept more than once", taskID)
 		}
 	}
 }
