@@ -192,6 +192,19 @@ describe("ContentEditor", () => {
     );
   });
 
+  it("does not parse the initial defaultValue twice when markdown round-trip canonicalizes it", () => {
+    // useEditor already parsed defaultValue through its `content` option. The
+    // editor's canonical Markdown can legitimately differ from the source, so
+    // that difference alone must not trigger an immediate second setContent.
+    editorState.markdown = "- [ ] canonical task";
+
+    render(
+      <ContentEditor defaultValue={"- [ ] source task\n\ncontinuation"} />,
+    );
+
+    expect(mockSetContent).not.toHaveBeenCalled();
+  });
+
   it("does not sync while a file upload is in flight (in-flight upload node must survive external defaultValue changes)", () => {
     editorState.markdown = "old content";
     const { rerender } = render(<ContentEditor defaultValue="old content" />);

@@ -1,9 +1,9 @@
-import { forwardRef, useImperativeHandle, useRef, type ReactNode, type Ref } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useRef, type ReactNode, type Ref } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { fireEvent, screen, waitFor } from "@testing-library/react";
 import type { UploadResult } from "@multica/core/hooks/use-file-upload";
-import { useCommentComposerStore } from "@multica/core/issues/stores";
+import { useCommentComposerStore, useCommentDraftStore } from "@multica/core/issues/stores";
 import { renderWithI18n } from "../../test/i18n";
 import { CommentInput } from "./comment-input";
 import { ReplyInput } from "./reply-input";
@@ -26,7 +26,12 @@ vi.mock("../../common/actor-avatar", () => ({
   ),
 }));
 
-vi.mock("../../editor", () => ({
+vi.mock("../../editor", async () => ({
+  // The lazy-mount controller is pure React (no Tiptap) — use the real one so
+  // shell → activate → ready flows behave exactly as in production.
+  ...(await vi.importActual<typeof import("../../editor/use-lazy-editor")>(
+    "../../editor/use-lazy-editor",
+  )),
   useFileDropZone: () => ({
     isDragOver: false,
     dropZoneProps: { "data-testid": "drop-zone" },
@@ -38,15 +43,22 @@ vi.mock("../../editor", () => ({
       onUpdate,
       placeholder,
       onUploadFile,
+      onReady,
     }: {
       defaultValue?: string;
       onUpdate?: (markdown: string) => void;
       placeholder?: string;
       onUploadFile?: (file: File) => Promise<UploadResult | null>;
+      onReady?: () => void;
     },
     ref: Ref<unknown>,
   ) {
     const valueRef = useRef(defaultValue ?? "");
+
+    useEffect(() => {
+      onReady?.();
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
 
     useImperativeHandle(ref, () => ({
       getMarkdown: () => valueRef.current,
@@ -54,6 +66,7 @@ vi.mock("../../editor", () => ({
         valueRef.current = "";
       },
       focus: () => {},
+      focusAtCoords: () => {},
       blur: () => {},
       uploadFile: async (file: File) => {
         const result = await onUploadFile?.(file);
@@ -114,6 +127,13 @@ function renderReplyInput({
   return { ...view, onSubmit };
 }
 
+// Composers render readonly-first: a static shell until clicked (unless an
+// unsent draft exists). Tests that interact with the editor activate it the
+// same way a user does.
+function activateComposer(shellTestId: "comment-composer-shell" | "reply-composer-shell") {
+  fireEvent.click(screen.getByTestId(shellTestId));
+}
+
 function getSubmitButton(container: HTMLElement): HTMLButtonElement {
   // Submit is always the last button in a composer's action cluster.
   const buttons = container.querySelectorAll("button");
@@ -126,12 +146,20 @@ beforeEach(() => {
   uploadWithToast.mockReset();
   localStorage.clear();
   useCommentComposerStore.setState({ sticky: true });
+  // The draft store is a module singleton — a draft left by a previous test
+  // (e.g. the failed-send case) would trip the composers' draft-direct-mount
+  // path and hide the shell the next test expects.
+  useCommentDraftStore.setState({ drafts: {} });
 });
 
 describe("comment composers", () => {
   it("renders the main comment composer without a manual expand control", () => {
     const { container } = renderCommentInput();
 
+    // Readonly-first: shell shows the placeholder text; clicking mounts the
+    // real editor in place.
+    expect(screen.getByTestId("comment-composer-shell")).toHaveTextContent("Leave a comment...");
+    activateComposer("comment-composer-shell");
     expect(screen.getByPlaceholderText("Leave a comment...")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Attach file" })).toBeInTheDocument();
     expect(container.querySelectorAll("button")).toHaveLength(2);
@@ -144,6 +172,8 @@ describe("comment composers", () => {
   it("renders reply composer without a manual expand control", () => {
     const { container } = renderReplyInput();
 
+    expect(screen.getByTestId("reply-composer-shell")).toHaveTextContent("Leave a reply...");
+    activateComposer("reply-composer-shell");
     expect(screen.getByPlaceholderText("Leave a reply...")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Attach file" })).toBeInTheDocument();
     expect(container.querySelectorAll("button")).toHaveLength(2);
@@ -156,6 +186,7 @@ describe("comment composers", () => {
   it("lets default-size replies grow without a height cap", () => {
     const { container } = renderReplyInput({ size: "default" });
 
+    activateComposer("reply-composer-shell");
     expect(screen.getByPlaceholderText("Leave a reply...")).toBeInTheDocument();
     expect(container.querySelectorAll("button")).toHaveLength(2);
 
@@ -166,6 +197,7 @@ describe("comment composers", () => {
   it("keeps main comment submission wired after removing expand", async () => {
     const { container, onSubmit } = renderCommentInput();
 
+    activateComposer("comment-composer-shell");
     fireEvent.change(screen.getByTestId("editor"), {
       target: { value: "hello from composer" },
     });
@@ -179,6 +211,7 @@ describe("comment composers", () => {
   it("keeps reply submission wired after removing expand", async () => {
     const { container, onSubmit } = renderReplyInput();
 
+    activateComposer("reply-composer-shell");
     fireEvent.change(screen.getByTestId("editor"), {
       target: { value: "thread reply" },
     });
@@ -196,6 +229,7 @@ describe("comment composers", () => {
     );
     const { container } = renderCommentInput(onSubmit);
 
+    activateComposer("comment-composer-shell");
     fireEvent.change(screen.getByTestId("editor"), { target: { value: "sending" } });
     fireEvent.click(getSubmitButton(container));
 
@@ -219,6 +253,7 @@ describe("comment composers", () => {
     const onSubmit = vi.fn().mockResolvedValue(false);
     const { container } = renderCommentInput(onSubmit);
 
+    activateComposer("comment-composer-shell");
     fireEvent.change(screen.getByTestId("editor"), { target: { value: "will fail" } });
     fireEvent.click(getSubmitButton(container));
 
@@ -232,6 +267,7 @@ describe("sticky composer preference", () => {
   it("caps the editor height while the sticky preference is on (default)", () => {
     renderCommentInput();
 
+    activateComposer("comment-composer-shell");
     // The height cap lives on the editor wrapper, not the card shell.
     expect(screen.getByTestId("editor").parentElement?.className).toContain("max-h-[40vh]");
   });
@@ -240,6 +276,7 @@ describe("sticky composer preference", () => {
     useCommentComposerStore.setState({ sticky: false });
     renderCommentInput();
 
+    activateComposer("comment-composer-shell");
     expect(screen.getByTestId("editor").parentElement?.className).not.toContain("max-h-[40vh]");
   });
 });
