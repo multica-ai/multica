@@ -350,7 +350,7 @@ export function ListView({
 
   if (!dragEnabled) {
     return (
-      <div ref={setScrollEl} className="flex-1 min-h-0 overflow-y-auto p-2 pt-0">
+      <div ref={setScrollEl} data-tab-scroll-root="list" className="flex-1 min-h-0 overflow-y-auto p-2 pt-0">
         {content}
       </div>
     );
@@ -364,7 +364,7 @@ export function ListView({
       onDragOver={handleDragOver}
       onDragEnd={handleDragEnd}
     >
-      <div ref={setScrollEl} className="flex-1 min-h-0 overflow-y-auto p-2 pt-0">
+      <div ref={setScrollEl} data-tab-scroll-root="list" className="flex-1 min-h-0 overflow-y-auto p-2 pt-0">
         {content}
       </div>
 
