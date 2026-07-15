@@ -319,9 +319,8 @@ SELECT id FROM workspace WHERE id = $1 FOR KEY SHARE
 // implicit FOR KEY SHARE, which would vanish if that FK is dropped.
 func (q *Queries) LockWorkspaceForChatSessionCreate(ctx context.Context, id pgtype.UUID) (pgtype.UUID, error) {
 	row := q.db.QueryRow(ctx, lockWorkspaceForChatSessionCreate, id)
-	var id_2 pgtype.UUID
-	err := row.Scan(&id_2)
-	return id_2, err
+	err := row.Scan(&id)
+	return id, err
 }
 
 const lockWorkspaceForDelete = `-- name: LockWorkspaceForDelete :one
@@ -344,9 +343,8 @@ SELECT id FROM workspace WHERE id = $1 FOR UPDATE
 // workspace, so this cannot deadlock against it.
 func (q *Queries) LockWorkspaceForDelete(ctx context.Context, id pgtype.UUID) (pgtype.UUID, error) {
 	row := q.db.QueryRow(ctx, lockWorkspaceForDelete, id)
-	var id_2 pgtype.UUID
-	err := row.Scan(&id_2)
-	return id_2, err
+	err := row.Scan(&id)
+	return id, err
 }
 
 const updateWorkspace = `-- name: UpdateWorkspace :one

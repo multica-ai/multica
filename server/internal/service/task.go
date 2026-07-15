@@ -2448,6 +2448,10 @@ func (s *TaskService) StartTask(ctx context.Context, taskID pgtype.UUID) (*db.Ag
 	if err != nil {
 		return nil, fmt.Errorf("start task: %w", err)
 	}
+	if _, err := s.Queries.AcknowledgeDaemonClaimAttemptForTask(ctx, task.ID); err != nil {
+		slog.Warn("start task: failed to acknowledge claim attempt",
+			"task_id", util.UUIDToString(task.ID), "error", err)
+	}
 	s.cancelDeferredEscalationsForTask(ctx, task.ID)
 
 	slog.Info("task started", "task_id", util.UUIDToString(task.ID), "issue_id", util.UUIDToString(task.IssueID))

@@ -142,6 +142,10 @@ func TestRunBatchPollerClaimsAcrossRuntimes(t *testing.T) {
 	var claimCalls atomic.Int64
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
+		if r.Method == http.MethodPut && strings.Contains(r.URL.Path, "/api/daemon/task-claim-attempts/") {
+			http.Error(w, "404 page not found", http.StatusNotFound)
+			return
+		}
 		if strings.HasSuffix(r.URL.Path, "/api/daemon/tasks/claim") {
 			if claimCalls.Add(1) == 1 {
 				w.Write([]byte(`{"tasks":[
@@ -232,6 +236,8 @@ func testRunBatchPollerTaskExitWakeup(t *testing.T, maxConcurrent int, releaseDe
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch {
+		case r.Method == http.MethodPut && strings.Contains(r.URL.Path, "/api/daemon/task-claim-attempts/"):
+			http.Error(w, "404 page not found", http.StatusNotFound)
 		case strings.HasSuffix(r.URL.Path, "/api/daemon/tasks/claim"):
 			claimCalls.Add(1)
 			switch {
@@ -380,6 +386,10 @@ func TestPollLoopBatchShutdown(t *testing.T) {
 	releaseRun := make(chan struct{})
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
+		if r.Method == http.MethodPut && strings.Contains(r.URL.Path, "/api/daemon/task-claim-attempts/") {
+			http.Error(w, "404 page not found", http.StatusNotFound)
+			return
+		}
 		if strings.HasSuffix(r.URL.Path, "/api/daemon/tasks/claim") {
 			w.Write([]byte(`{"tasks":[{"id":"t1","runtime_id":"rt-1","issue_id":"i1","agent":{"name":"a"}}]}`))
 			return

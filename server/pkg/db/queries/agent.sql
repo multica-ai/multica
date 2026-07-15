@@ -468,6 +468,45 @@ WHERE id = (
 )
 RETURNING *;
 
+-- name: ClaimAgentTaskForAttempt :one
+-- Idempotent batch-claim variant. Restrict the selected task to the daemon's
+-- authorized runtime set and persist the attempt mapping in the same UPDATE
+-- that changes queued -> dispatched, so a committed v2 task is always
+-- replayable by claim_attempt_id.
+UPDATE agent_task_queue
+SET status = 'dispatched',
+    dispatched_at = now(),
+    prepare_lease_expires_at = now() + make_interval(secs => @prepare_lease_secs::double precision),
+    claim_attempt_id = @claim_attempt_id,
+    claim_attempt_ordinal = @claim_attempt_ordinal
+WHERE id = (
+    SELECT atq.id FROM agent_task_queue atq
+    WHERE atq.agent_id = @agent_id
+      AND atq.runtime_id = ANY(@runtime_ids::uuid[])
+      AND atq.status = 'queued'
+      AND NOT EXISTS (
+          SELECT 1 FROM agent_task_queue active
+          WHERE active.agent_id = atq.agent_id
+            AND active.status IN ('dispatched', 'running', 'waiting_local_directory')
+            AND (
+              (atq.issue_id IS NOT NULL AND active.issue_id = atq.issue_id)
+              OR (atq.chat_session_id IS NOT NULL AND active.chat_session_id = atq.chat_session_id)
+              OR (
+                atq.issue_id IS NULL
+                AND atq.chat_session_id IS NULL
+                AND atq.autopilot_run_id IS NULL
+                AND active.issue_id IS NULL
+                AND active.chat_session_id IS NULL
+                AND active.autopilot_run_id IS NULL
+              )
+            )
+      )
+    ORDER BY atq.priority DESC, atq.created_at ASC
+    LIMIT 1
+    FOR UPDATE SKIP LOCKED
+)
+RETURNING *;
+
 -- name: SetTaskDeliveredCommentIDs :one
 -- Replace (rather than append to) the delivery receipt for this claim. A stale
 -- dispatched task may be reclaimed by a daemon with different capabilities,
@@ -503,7 +542,9 @@ UPDATE agent_task_queue
 SET status = 'queued',
     dispatched_at = NULL,
     prepare_lease_expires_at = NULL,
-    delivered_comment_ids = '{}'
+    delivered_comment_ids = '{}',
+    claim_attempt_id = NULL,
+    claim_attempt_ordinal = NULL
 WHERE id = @task_id
   AND runtime_id = @runtime_id
   AND status = 'dispatched'
@@ -527,6 +568,12 @@ WHERE id = (
       AND atq.started_at IS NULL
       AND atq.dispatched_at < now() - make_interval(secs => @claim_recovery_secs::double precision)
       AND (atq.prepare_lease_expires_at IS NULL OR atq.prepare_lease_expires_at < now())
+      AND NOT EXISTS (
+          SELECT 1 FROM daemon_claim_attempt attempt
+          WHERE attempt.id = atq.claim_attempt_id
+            AND attempt.status IN ('processing', 'ready')
+            AND attempt.expires_at > now()
+      )
     ORDER BY atq.priority DESC, atq.dispatched_at ASC
     LIMIT 1
     FOR UPDATE SKIP LOCKED
@@ -551,11 +598,52 @@ WHERE id IN (
       AND atq.started_at IS NULL
       AND atq.dispatched_at < now() - make_interval(secs => @claim_recovery_secs::double precision)
       AND (atq.prepare_lease_expires_at IS NULL OR atq.prepare_lease_expires_at < now())
+      AND NOT EXISTS (
+          SELECT 1 FROM daemon_claim_attempt attempt
+          WHERE attempt.id = atq.claim_attempt_id
+            AND attempt.status IN ('processing', 'ready')
+            AND attempt.expires_at > now()
+      )
     ORDER BY atq.priority DESC, atq.dispatched_at ASC
     LIMIT @max_tasks::int
     FOR UPDATE SKIP LOCKED
 )
 RETURNING *;
+
+-- name: ReclaimStaleDispatchedTasksForAttempt :many
+-- Reclaim lost-response tasks into a new idempotent attempt. The ordinal and
+-- refreshed dispatch generation are written atomically. A task protected by a
+-- still-live attempt cannot be stolen by another claim path.
+WITH locked AS (
+    SELECT atq.id, atq.priority, atq.dispatched_at
+    FROM agent_task_queue atq
+    WHERE atq.runtime_id = ANY(@runtime_ids::uuid[])
+      AND atq.status = 'dispatched'
+      AND atq.started_at IS NULL
+      AND atq.dispatched_at < now() - make_interval(secs => @claim_recovery_secs::double precision)
+      AND (atq.prepare_lease_expires_at IS NULL OR atq.prepare_lease_expires_at < now())
+      AND NOT EXISTS (
+          SELECT 1 FROM daemon_claim_attempt attempt
+          WHERE attempt.id = atq.claim_attempt_id
+            AND attempt.status IN ('processing', 'ready')
+            AND attempt.expires_at > now()
+      )
+    ORDER BY atq.priority DESC, atq.dispatched_at ASC
+    LIMIT @max_tasks::int
+    FOR UPDATE SKIP LOCKED
+), candidates AS (
+    SELECT id,
+           row_number() OVER (ORDER BY priority DESC, dispatched_at ASC) - 1 AS ordinal_offset
+    FROM locked
+)
+UPDATE agent_task_queue AS task
+SET dispatched_at = now(),
+    prepare_lease_expires_at = now() + make_interval(secs => @prepare_lease_secs::double precision),
+    claim_attempt_id = @claim_attempt_id,
+    claim_attempt_ordinal = sqlc.arg('start_ordinal')::integer + candidates.ordinal_offset::integer
+FROM candidates
+WHERE task.id = candidates.id
+RETURNING task.*;
 
 -- name: ExtendAgentTaskPrepareLease :one
 -- Keeps a dispatched task protected while the daemon resolves/cache/materializes

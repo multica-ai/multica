@@ -7,16 +7,31 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/google/uuid"
 )
 
 // batchClaimResponse mirrors the {"tasks":[...]} envelope ClaimTasksByRuntime
 // returns, with the few fields these tests assert on.
 type batchClaimResponse struct {
-	Tasks []struct {
+	ClaimAttemptID string `json:"claim_attempt_id"`
+	State          string `json:"state"`
+	Tasks          []struct {
 		ID        string `json:"id"`
 		RuntimeID string `json:"runtime_id"`
 		AuthToken string `json:"auth_token"`
 	} `json:"tasks"`
+}
+
+func putBatchClaimAttempt(t *testing.T, attemptID, workspaceID string, runtimeIDs []string, maxTasks int) *httptest.ResponseRecorder {
+	t.Helper()
+	w := httptest.NewRecorder()
+	req := newDaemonTokenRequest(http.MethodPut, "/api/daemon/task-claim-attempts/"+attemptID,
+		map[string]any{"daemon_id": batchClaimTestDaemonID, "runtime_ids": runtimeIDs, "max_tasks": maxTasks},
+		workspaceID, batchClaimTestDaemonID)
+	req = withURLParam(req, "claimAttemptId", attemptID)
+	testHandler.ClaimTasksByRuntimeV2(w, req)
+	return w
 }
 
 func seedQueuedIssueTask(t *testing.T, ctx context.Context, agentID, runtimeID, issueID string) string {
@@ -47,6 +62,75 @@ func postBatchClaim(t *testing.T, workspaceID string, runtimeIDs []string, maxTa
 // and the request body in batch-claim handler tests, so the daemon_id
 // consistency check passes on the happy path.
 const batchClaimTestDaemonID = "batch-claim-review"
+
+func TestClaimTasksByRuntimeV2_ReplaysCommittedTaskWithoutClaimingAnother(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	runtimeID := createClaimReclaimRuntime(t, ctx, "Claim replay runtime")
+	agentID, issueID := createClaimReclaimAgentAndIssue(t, ctx, runtimeID, "Claim replay agent")
+	firstQueued := seedQueuedIssueTask(t, ctx, agentID, runtimeID, issueID)
+
+	// A different issue stays claimable, so a non-idempotent HTTP fallback
+	// would visibly consume it as a second task.
+	_, secondIssueID := createClaimReclaimAgentAndIssue(t, ctx, runtimeID, "Claim replay second issue")
+	secondQueued := seedQueuedIssueTask(t, ctx, agentID, runtimeID, secondIssueID)
+	attemptID := uuid.NewString()
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM daemon_claim_attempt WHERE id = $1`, attemptID)
+	})
+
+	first := putBatchClaimAttempt(t, attemptID, testWorkspaceID, []string{runtimeID}, 1)
+	if first.Code != http.StatusOK {
+		t.Fatalf("first v2 claim status = %d: %s", first.Code, first.Body.String())
+	}
+	replay := putBatchClaimAttempt(t, attemptID, testWorkspaceID, []string{runtimeID}, 1)
+	if replay.Code != http.StatusOK {
+		t.Fatalf("replay status = %d: %s", replay.Code, replay.Body.String())
+	}
+	var firstResp, replayResp batchClaimResponse
+	if err := json.Unmarshal(first.Body.Bytes(), &firstResp); err != nil {
+		t.Fatalf("decode first: %v", err)
+	}
+	if err := json.Unmarshal(replay.Body.Bytes(), &replayResp); err != nil {
+		t.Fatalf("decode replay: %v", err)
+	}
+	if firstResp.ClaimAttemptID != attemptID || replayResp.ClaimAttemptID != attemptID || firstResp.State != "ready" || replayResp.State != "ready" {
+		t.Fatalf("attempt envelopes = first:%+v replay:%+v", firstResp, replayResp)
+	}
+	if len(firstResp.Tasks) != 1 || len(replayResp.Tasks) != 1 || firstResp.Tasks[0].ID != replayResp.Tasks[0].ID {
+		t.Fatalf("task sets changed across replay: first=%+v replay=%+v", firstResp.Tasks, replayResp.Tasks)
+	}
+	if firstResp.Tasks[0].ID != firstQueued {
+		t.Fatalf("claimed task = %s, want oldest %s", firstResp.Tasks[0].ID, firstQueued)
+	}
+	var secondStatus string
+	if err := testPool.QueryRow(ctx, `SELECT status FROM agent_task_queue WHERE id = $1`, secondQueued).Scan(&secondStatus); err != nil {
+		t.Fatalf("load second task: %v", err)
+	}
+	if secondStatus != "queued" {
+		t.Fatalf("HTTP replay consumed a new task: second status=%s", secondStatus)
+	}
+
+	mismatch := putBatchClaimAttempt(t, attemptID, testWorkspaceID, []string{runtimeID}, 2)
+	if mismatch.Code != http.StatusConflict {
+		t.Fatalf("same id with changed max_tasks status = %d, want 409: %s", mismatch.Code, mismatch.Body.String())
+	}
+
+	ack := httptest.NewRecorder()
+	ackReq := newDaemonTokenRequest(http.MethodPost, "/api/daemon/task-claim-attempts/"+attemptID+"/ack",
+		map[string]any{"daemon_id": batchClaimTestDaemonID}, testWorkspaceID, batchClaimTestDaemonID)
+	ackReq = withURLParam(ackReq, "claimAttemptId", attemptID)
+	testHandler.AcknowledgeClaimAttempt(ack, ackReq)
+	if ack.Code != http.StatusOK {
+		t.Fatalf("ack status = %d: %s", ack.Code, ack.Body.String())
+	}
+	afterAck := putBatchClaimAttempt(t, attemptID, testWorkspaceID, []string{runtimeID}, 1)
+	if afterAck.Code != http.StatusConflict {
+		t.Fatalf("replay after ack status = %d, want 409: %s", afterAck.Code, afterAck.Body.String())
+	}
+}
 
 // TestClaimTasksByRuntime_RoutesAcrossRuntimesAndMintsTokens covers the happy
 // path: one call claims across two runtimes on the same machine, returns one

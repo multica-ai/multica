@@ -219,6 +219,13 @@ type Daemon struct {
 	// directly. Reset when the WS (re)connects, so a server upgrade that
 	// bounces the connection re-probes the batch route (MUL-4257).
 	batchClaimUnsupported atomic.Bool
+	// claimReplayUnsupported records a definitive v2 404. An in-memory pending
+	// attempt still takes precedence so a server rollback after a sent WS frame
+	// cannot make the daemon issue a fresh legacy claim into the same slots.
+	claimReplayUnsupported atomic.Bool
+
+	claimAttemptMu      sync.Mutex
+	pendingClaimAttempt *pendingClaimAttempt
 
 	// runtimeGoneMu guards runtimeGoneInflight, reregisterNextAttempt, and
 	// reregisterLastCompletedAt. The state lets heartbeat / poller / WS-ack

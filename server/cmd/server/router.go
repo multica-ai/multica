@@ -780,6 +780,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		// path.
 		r.Post("/tasks/claim", h.ClaimTasksByRuntime)
 		r.Post("/claim", h.ClaimTasksByRuntime)
+		r.Put("/task-claim-attempts/{claimAttemptId}", h.ClaimTasksByRuntimeV2)
+		r.Post("/task-claim-attempts/{claimAttemptId}/ack", h.AcknowledgeClaimAttempt)
 		r.Post("/runtimes/{runtimeId}/tasks/{taskId}/prepare-lease", h.ExtendTaskPrepareLease)
 		r.Post("/runtimes/{runtimeId}/tasks/{taskId}/skill-bundles/resolve", h.ResolveTaskSkillBundles)
 		r.Get("/runtimes/{runtimeId}/tasks/pending", h.ListPendingTasksByRuntime)

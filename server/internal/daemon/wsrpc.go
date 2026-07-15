@@ -5,6 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
+	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -19,8 +22,8 @@ var errWSRPCUnavailable = errors.New("ws rpc: no active connection")
 
 // errWSRPCUncertain is returned when a request's frame WAS sent but the
 // connection dropped before a definitive response. The outcome is unknown (the
-// server may have committed), so the caller must NOT fall back to another
-// transport for the same work — that risks a double claim (MUL-4257).
+// server may have committed), so the caller must not issue a fresh mutation.
+// An idempotent API may safely replay the same operation ID over HTTP.
 var errWSRPCUncertain = errors.New("ws rpc: sent but outcome unknown (connection lost)")
 
 // wsRPCResponseGrace is how much longer the daemon waits for an RPC response
@@ -98,7 +101,8 @@ func newWSRPCClient(grace time.Duration) *wsRPCClient {
 
 // attach binds a live connection's frame writer. Passing nil detaches (on
 // disconnect), after which Call fails fast until the next attach. Any pending
-// requests are failed so their callers fall back to HTTP immediately.
+// requests are failed so their callers can either fall back or replay,
+// according to the called method's idempotency contract.
 func (c *wsRPCClient) attach(sendFrame func([]byte) (*wsOutbound, error)) {
 	c.mu.Lock()
 	c.sendFrame = sendFrame
@@ -128,6 +132,13 @@ func (c *wsRPCClient) connected() bool {
 // caller can distinguish transport failure (→ HTTP fallback) from a server-side
 // error.
 func (c *wsRPCClient) Call(ctx context.Context, method string, serverTimeout time.Duration, reqBody, respBody any) (int, error) {
+	return c.CallWithID(ctx, uuid.NewString(), method, serverTimeout, reqBody, respBody)
+}
+
+// CallWithID is Call with a caller-supplied correlation id. Idempotent claim
+// v2 uses claim_attempt_id here so daemon and server logs share one identifier
+// across WS delivery and HTTP replay.
+func (c *wsRPCClient) CallWithID(ctx context.Context, id, method string, serverTimeout time.Duration, reqBody, respBody any) (int, error) {
 	if c == nil {
 		return 0, errWSRPCUnavailable
 	}
@@ -139,7 +150,6 @@ func (c *wsRPCClient) Call(ctx context.Context, method string, serverTimeout tim
 		}
 		rawReq = b
 	}
-	id := uuid.NewString()
 	frame, err := json.Marshal(protocol.Message{
 		Type: protocol.EventDaemonRPCRequest,
 		Payload: marshalRaw(protocol.RPCRequestPayload{
@@ -178,7 +188,7 @@ func (c *wsRPCClient) Call(ctx context.Context, method string, serverTimeout tim
 	// cancel it so the writer never delivers it — a definitively-not-sent
 	// outcome that is safe to HTTP-fall-back. If the writer already began
 	// sending it, it may reach the server, so the outcome is uncertain and the
-	// caller must NOT fall back (that would double-claim, MUL-4257).
+	// caller must either stop or replay the same idempotent operation ID.
 	giveUp := func() error {
 		if item.cancel() {
 			return errWSRPCUnavailable
@@ -188,7 +198,7 @@ func (c *wsRPCClient) Call(ctx context.Context, method string, serverTimeout tim
 
 	// Wait the server-side budget PLUS a grace margin: a claim that committed
 	// just before the server deadline must still report back before the daemon
-	// gives up and falls back to HTTP, or we would double-claim (MUL-4257).
+	// gives up, avoiding an unnecessary replay in the normal path.
 	timeout := serverTimeout + c.grace
 	if timeout <= 0 {
 		timeout = 5 * time.Second
@@ -221,7 +231,7 @@ func (c *wsRPCClient) Call(ctx context.Context, method string, serverTimeout tim
 		// The budget elapsed. If the frame is still queued behind a
 		// backpressured writer, cancel it so it is never delivered after we
 		// fall back (giveUp → not-sent). If it already left the writer, the
-		// outcome is uncertain and we must not fall back.
+		// outcome is uncertain; only an idempotent same-ID replay is safe.
 		if err := giveUp(); errors.Is(err, errWSRPCUncertain) {
 			return 0, err
 		}
@@ -253,13 +263,158 @@ func (c *wsRPCClient) deliver(resp protocol.RPCResponsePayload) {
 	}
 }
 
-// ClaimTasksWSFirst is the WS-first claim policy (MUL-4257): it issues the
-// tasks.claim RPC over the WS control connection when one is attached, and
-// falls back to the HTTP claim endpoint on any transport failure (no
-// connection, write-buffer full, timeout) or server error. The request/response
-// bodies are identical to the HTTP endpoint so both transports are
-// interchangeable. Wired into the claim poller as part of the poller cutover.
+type pendingClaimAttempt struct {
+	ID                   string
+	DaemonID             string
+	RuntimeIDs           []string
+	MaxTasks             int
+	MayHaveReachedServer bool
+}
+
+// ClaimTasksWSFirst uses tasks.claim.v2 when supported. A WS timeout or detach
+// replays the same attempt over HTTP; it never turns an uncertain mutation into
+// a fresh claim. The pending attempt remains in memory across poll cycles until
+// the server returns its durable task set or a terminal expiry.
 func (d *Daemon) ClaimTasksWSFirst(ctx context.Context, daemonID string, runtimeIDs []string, maxTasks int) ([]*Task, error) {
+	d.claimAttemptMu.Lock()
+	defer d.claimAttemptMu.Unlock()
+
+	if d.claimReplayUnsupported.Load() && d.pendingClaimAttempt == nil {
+		return d.claimTasksV1(ctx, daemonID, runtimeIDs, maxTasks)
+	}
+
+	canonicalRuntimeIDs := canonicalClaimRuntimeIDs(runtimeIDs)
+	attempt := d.pendingClaimAttempt
+	if attempt == nil {
+		attempt = &pendingClaimAttempt{
+			ID:         uuid.NewString(),
+			DaemonID:   daemonID,
+			RuntimeIDs: canonicalRuntimeIDs,
+			MaxTasks:   maxTasks,
+		}
+		d.pendingClaimAttempt = attempt
+	} else {
+		if attempt.DaemonID != daemonID {
+			return nil, fmt.Errorf("pending claim attempt daemon changed from %q to %q", attempt.DaemonID, daemonID)
+		}
+		if maxTasks < attempt.MaxTasks {
+			return nil, fmt.Errorf("pending claim attempt requires %d slots, only %d available", attempt.MaxTasks, maxTasks)
+		}
+	}
+
+	body := map[string]any{
+		"claim_attempt_id": attempt.ID,
+		"daemon_id":        attempt.DaemonID,
+		"runtime_ids":      attempt.RuntimeIDs,
+		"max_tasks":        attempt.MaxTasks,
+	}
+	if d.wsRPC.connected() {
+		var resp claimAttemptResponse
+		status, err := d.wsRPC.CallWithID(ctx, attempt.ID, "tasks.claim.v2", batchClaimRequestTimeout, body, &resp)
+		if err == nil {
+			return d.finishClaimAttempt(ctx, attempt, resp)
+		}
+		if errors.Is(err, errWSRPCUncertain) {
+			attempt.MayHaveReachedServer = true
+			d.logger.Debug("ws claim outcome uncertain; replaying the same attempt over http",
+				"claim_attempt_id", attempt.ID)
+		} else if status == http.StatusNotFound && !attempt.MayHaveReachedServer {
+			// A definitive unknown-method response proves this WS request did
+			// not mutate state. It is safe to retain mixed-version v1 behavior.
+			d.claimReplayUnsupported.Store(true)
+			d.pendingClaimAttempt = nil
+			return d.claimTasksV1(ctx, daemonID, runtimeIDs, maxTasks)
+		} else {
+			d.logger.Debug("ws claim v2 failed; replaying the same attempt over http",
+				"claim_attempt_id", attempt.ID, "error", err)
+		}
+	}
+
+	resp, err := d.client.ClaimTasksAttempt(ctx, attempt.ID, attempt.DaemonID, attempt.RuntimeIDs, attempt.MaxTasks)
+	if err == nil {
+		return d.finishClaimAttempt(ctx, attempt, resp)
+	}
+	if isClaimReplayUnsupported(err) && !attempt.MayHaveReachedServer {
+		d.claimReplayUnsupported.Store(true)
+		d.pendingClaimAttempt = nil
+		return d.claimTasksV1(ctx, daemonID, runtimeIDs, maxTasks)
+	}
+	attempt.MayHaveReachedServer = true
+	if isClaimAttemptExpired(err) {
+		d.pendingClaimAttempt = nil
+	}
+	return nil, fmt.Errorf("replay claim attempt %s: %w", attempt.ID, err)
+}
+
+func (d *Daemon) finishClaimAttempt(ctx context.Context, attempt *pendingClaimAttempt, resp claimAttemptResponse) ([]*Task, error) {
+	if resp.ClaimAttemptID != attempt.ID {
+		return nil, fmt.Errorf("claim replay returned attempt %q, want %q", resp.ClaimAttemptID, attempt.ID)
+	}
+	if resp.State != "ready" {
+		return nil, fmt.Errorf("claim replay returned state %q, want ready", resp.State)
+	}
+	if len(resp.Tasks) > attempt.MaxTasks {
+		return nil, fmt.Errorf("claim replay returned %d tasks for %d slots", len(resp.Tasks), attempt.MaxTasks)
+	}
+	allowedRuntimes := make(map[string]struct{}, len(attempt.RuntimeIDs))
+	for _, runtimeID := range attempt.RuntimeIDs {
+		allowedRuntimes[runtimeID] = struct{}{}
+	}
+	seenTasks := make(map[string]struct{}, len(resp.Tasks))
+	for _, task := range resp.Tasks {
+		if task == nil || task.ID == "" {
+			return nil, errors.New("claim replay returned an empty task")
+		}
+		if _, duplicate := seenTasks[task.ID]; duplicate {
+			return nil, fmt.Errorf("claim replay returned duplicate task %s", task.ID)
+		}
+		seenTasks[task.ID] = struct{}{}
+		if _, allowed := allowedRuntimes[task.RuntimeID]; !allowed {
+			return nil, fmt.Errorf("claim replay returned task %s for unexpected runtime %s", task.ID, task.RuntimeID)
+		}
+	}
+
+	// ACK is best effort: StartTask is an implicit durable acknowledgement, so
+	// an ACK transport failure must not delay execution of a received task set.
+	ackCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	if err := d.client.AcknowledgeClaimAttempt(ackCtx, attempt.ID, attempt.DaemonID); err != nil {
+		d.logger.Debug("claim attempt ack failed; StartTask will acknowledge implicitly",
+			"claim_attempt_id", attempt.ID, "error", err)
+	}
+	cancel()
+	d.pendingClaimAttempt = nil
+	return resp.Tasks, nil
+}
+
+func canonicalClaimRuntimeIDs(runtimeIDs []string) []string {
+	seen := make(map[string]struct{}, len(runtimeIDs))
+	out := make([]string, 0, len(runtimeIDs))
+	for _, runtimeID := range runtimeIDs {
+		if runtimeID == "" {
+			continue
+		}
+		if _, duplicate := seen[runtimeID]; duplicate {
+			continue
+		}
+		seen[runtimeID] = struct{}{}
+		out = append(out, runtimeID)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func isClaimReplayUnsupported(err error) bool {
+	var reqErr *requestError
+	return errors.As(err, &reqErr) && reqErr.StatusCode == http.StatusNotFound &&
+		strings.Contains(strings.ToLower(reqErr.Body), "page not found")
+}
+
+func isClaimAttemptExpired(err error) bool {
+	var reqErr *requestError
+	return errors.As(err, &reqErr) && reqErr.StatusCode == http.StatusGone
+}
+
+func (d *Daemon) claimTasksV1(ctx context.Context, daemonID string, runtimeIDs []string, maxTasks int) ([]*Task, error) {
 	// Un-upgraded server without the batch route: a prior poll already learned
 	// this (via a 404), so go straight to the legacy per-runtime claim and skip
 	// the WS + batch attempts each cycle.

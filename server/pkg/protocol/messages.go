@@ -10,6 +10,9 @@ const (
 	// Gated so only daemons+servers that both support it route claim over WS;
 	// everyone else keeps using the HTTP claim endpoint.
 	DaemonCapabilityRPCV1 = "rpc-v1"
+	// DaemonCapabilityClaimReplayV1 advertises idempotent tasks.claim.v2 plus
+	// HTTP replay by claim_attempt_id.
+	DaemonCapabilityClaimReplayV1 = "claim-replay-v1"
 
 	// AppCapabilityChatDraftRestoreV1 is advertised (X-Client-Capabilities) by
 	// app clients that understand the durable draft-restore recovery path:
@@ -64,7 +67,8 @@ type TaskDispatchPayload struct {
 }
 
 // TaskAvailablePayload is sent from server to daemon as a wakeup hint. The
-// daemon still claims work through the existing HTTP claim endpoint.
+// daemon claims through the WS-first claim RPC and replays uncertain outcomes
+// through the idempotent HTTP endpoint.
 type TaskAvailablePayload struct {
 	RuntimeID string `json:"runtime_id"`
 	TaskID    string `json:"task_id,omitempty"`

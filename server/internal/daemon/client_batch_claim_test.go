@@ -81,3 +81,33 @@ func TestClient_ClaimTasks_EmptyResult(t *testing.T) {
 		t.Fatalf("got %d tasks, want 0", len(tasks))
 	}
 }
+
+func TestClient_ClaimTasksAttempt_UsesIdempotentPut(t *testing.T) {
+	var gotMethod, gotPath string
+	var gotBody struct {
+		DaemonID   string   `json:"daemon_id"`
+		RuntimeIDs []string `json:"runtime_ids"`
+		MaxTasks   int      `json:"max_tasks"`
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotMethod, gotPath = r.Method, r.URL.Path
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"claim_attempt_id":"attempt-1","state":"ready","tasks":[{"id":"t1","runtime_id":"rt-a"}]}`))
+	}))
+	defer srv.Close()
+
+	resp, err := NewClient(srv.URL).ClaimTasksAttempt(context.Background(), "attempt-1", "daemon-x", []string{"rt-a"}, 1)
+	if err != nil {
+		t.Fatalf("ClaimTasksAttempt: %v", err)
+	}
+	if gotMethod != http.MethodPut || gotPath != "/api/daemon/task-claim-attempts/attempt-1" {
+		t.Fatalf("request = %s %s, want PUT attempt path", gotMethod, gotPath)
+	}
+	if gotBody.DaemonID != "daemon-x" || gotBody.MaxTasks != 1 || len(gotBody.RuntimeIDs) != 1 || gotBody.RuntimeIDs[0] != "rt-a" {
+		t.Fatalf("body = %+v", gotBody)
+	}
+	if resp.ClaimAttemptID != "attempt-1" || len(resp.Tasks) != 1 || resp.Tasks[0].ID != "t1" {
+		t.Fatalf("response = %+v", resp)
+	}
+}

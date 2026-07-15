@@ -1383,6 +1383,20 @@ const claimBatchMaxTasksCap = 32
 // runtime_ids are skipped silently (a daemon may send a just-deleted runtime;
 // it self-heals via the heartbeat path).
 func (h *Handler) ClaimTasksByRuntime(w http.ResponseWriter, r *http.Request) {
+	h.claimTasksByRuntime(w, r, pgtype.UUID{})
+}
+
+// ClaimTasksByRuntimeV2 is the idempotent machine-level claim endpoint. The
+// path UUID is shared by the initial WS RPC and every HTTP replay.
+func (h *Handler) ClaimTasksByRuntimeV2(w http.ResponseWriter, r *http.Request) {
+	attemptID, ok := parseUUIDOrBadRequest(w, chi.URLParam(r, "claimAttemptId"), "claim_attempt_id")
+	if !ok {
+		return
+	}
+	h.claimTasksByRuntime(w, r, attemptID)
+}
+
+func (h *Handler) claimTasksByRuntime(w http.ResponseWriter, r *http.Request, claimAttemptID pgtype.UUID) {
 	start := time.Now()
 	var req struct {
 		DaemonID   string   `json:"daemon_id"`
@@ -1420,8 +1434,10 @@ func (h *Handler) ClaimTasksByRuntime(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if req.MaxTasks == 0 {
-		writeMeasuredJSON(w, http.StatusOK, map[string]any{"tasks": []AgentTaskResponse{}})
-		return
+		if !claimAttemptID.Valid {
+			writeMeasuredJSON(w, http.StatusOK, map[string]any{"tasks": []AgentTaskResponse{}})
+			return
+		}
 	}
 	maxTasks := req.MaxTasks
 	if maxTasks > claimBatchMaxTasksCap {
@@ -1442,13 +1458,18 @@ func (h *Handler) ClaimTasksByRuntime(w http.ResponseWriter, r *http.Request) {
 		idByKey[util.UUIDToString(ruid)] = ruid
 	}
 	if len(idByKey) == 0 {
-		writeMeasuredJSON(w, http.StatusOK, map[string]any{"tasks": []AgentTaskResponse{}})
-		return
+		if !claimAttemptID.Valid {
+			writeMeasuredJSON(w, http.StatusOK, map[string]any{"tasks": []AgentTaskResponse{}})
+			return
+		}
 	}
 	ids := make([]pgtype.UUID, 0, len(idByKey))
 	for _, id := range idByKey {
 		ids = append(ids, id)
 	}
+	sort.Slice(ids, func(i, j int) bool {
+		return util.UUIDToString(ids[i]) < util.UUIDToString(ids[j])
+	})
 
 	// Resolve all requested runtimes in one query (instead of a point lookup
 	// per runtime), then authorize each; skip (don't fail) unknown/unauthorized
@@ -1475,14 +1496,47 @@ func (h *Handler) ClaimTasksByRuntime(w http.ResponseWriter, r *http.Request) {
 		authorized = append(authorized, rt.ID)
 	}
 	if len(authorized) == 0 {
-		writeMeasuredJSON(w, http.StatusOK, map[string]any{"tasks": []AgentTaskResponse{}})
-		return
+		if !claimAttemptID.Valid {
+			writeMeasuredJSON(w, http.StatusOK, map[string]any{"tasks": []AgentTaskResponse{}})
+			return
+		}
 	}
+	sort.Slice(authorized, func(i, j int) bool {
+		return util.UUIDToString(authorized[i]) < util.UUIDToString(authorized[j])
+	})
 
-	claimed, err := h.TaskService.ClaimTasksForRuntimes(r.Context(), authorized, maxTasks)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to claim tasks: "+err.Error())
-		return
+	var claimed []db.AgentTaskQueue
+	if claimAttemptID.Valid {
+		principalKey := claimAttemptPrincipal(r, req.DaemonID)
+		if principalKey == "" {
+			writeError(w, http.StatusForbidden, "claim attempt principal is unavailable")
+			return
+		}
+		fingerprint, err := claimAttemptFingerprint(req.DaemonID, ids, maxTasks, r.Header.Get("X-Client-Capabilities"))
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to fingerprint claim request")
+			return
+		}
+		attempt, err := h.TaskService.ClaimTasksForRuntimesAttempt(r.Context(), service.ClaimAttemptRequest{
+			ID:                 claimAttemptID,
+			DaemonID:           req.DaemonID,
+			PrincipalKey:       principalKey,
+			RequestFingerprint: fingerprint,
+			RuntimeIDs:         authorized,
+			MaxTasks:           maxTasks,
+		})
+		if err != nil {
+			writeClaimAttemptError(w, err)
+			return
+		}
+		claimed = attempt.Tasks
+	} else {
+		var err error
+		claimed, err = h.TaskService.ClaimTasksForRuntimes(r.Context(), authorized, maxTasks)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to claim tasks: "+err.Error())
+			return
+		}
 	}
 
 	out := make([]AgentTaskResponse, 0, len(claimed))
@@ -1563,7 +1617,113 @@ func (h *Handler) ClaimTasksByRuntime(w http.ResponseWriter, r *http.Request) {
 			"runtimes", len(authorized), "requested_max", maxTasks, "claimed", len(out),
 			"total_ms", time.Since(start).Milliseconds())
 	}
+	if claimAttemptID.Valid {
+		writeMeasuredJSON(w, http.StatusOK, map[string]any{
+			"claim_attempt_id": uuidToString(claimAttemptID),
+			"state":            "ready",
+			"tasks":            out,
+		})
+		return
+	}
 	writeMeasuredJSON(w, http.StatusOK, map[string]any{"tasks": out})
+}
+
+func claimAttemptPrincipal(r *http.Request, daemonID string) string {
+	if workspaceID := middleware.DaemonWorkspaceIDFromContext(r.Context()); workspaceID != "" {
+		return "daemon:" + workspaceID + ":" + daemonID
+	}
+	if userID := requestUserID(r); userID != "" {
+		return "user:" + userID + ":" + daemonID
+	}
+	return ""
+}
+
+func claimAttemptFingerprint(daemonID string, runtimeIDs []pgtype.UUID, maxTasks int, capabilities string) (string, error) {
+	canonicalRuntimeIDs := make([]string, 0, len(runtimeIDs))
+	for _, runtimeID := range runtimeIDs {
+		canonicalRuntimeIDs = append(canonicalRuntimeIDs, util.UUIDToString(runtimeID))
+	}
+	sort.Strings(canonicalRuntimeIDs)
+
+	capabilitySet := make(map[string]struct{})
+	for _, capability := range strings.Split(capabilities, ",") {
+		capability = strings.TrimSpace(capability)
+		if capability != "" {
+			capabilitySet[capability] = struct{}{}
+		}
+	}
+	canonicalCapabilities := make([]string, 0, len(capabilitySet))
+	for capability := range capabilitySet {
+		canonicalCapabilities = append(canonicalCapabilities, capability)
+	}
+	sort.Strings(canonicalCapabilities)
+
+	raw, err := json.Marshal(struct {
+		DaemonID     string   `json:"daemon_id"`
+		RuntimeIDs   []string `json:"runtime_ids"`
+		MaxTasks     int      `json:"max_tasks"`
+		Capabilities []string `json:"capabilities"`
+	}{
+		DaemonID: daemonID, RuntimeIDs: canonicalRuntimeIDs,
+		MaxTasks: maxTasks, Capabilities: canonicalCapabilities,
+	})
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256(raw)
+	return hex.EncodeToString(sum[:]), nil
+}
+
+func writeClaimAttemptError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, service.ErrClaimAttemptNotFound):
+		writeError(w, http.StatusNotFound, "claim attempt not found")
+	case errors.Is(err, service.ErrClaimAttemptMismatch):
+		writeError(w, http.StatusConflict, "claim_attempt_id was reused with different parameters")
+	case errors.Is(err, service.ErrClaimAttemptAcknowledged):
+		writeError(w, http.StatusConflict, "claim attempt already acknowledged")
+	case errors.Is(err, service.ErrClaimAttemptExpired):
+		writeError(w, http.StatusGone, "claim attempt expired")
+	case errors.Is(err, service.ErrClaimAttemptProcessing):
+		w.Header().Set("Retry-After", "1")
+		writeError(w, http.StatusTooEarly, "claim attempt is still processing")
+	default:
+		writeError(w, http.StatusInternalServerError, "failed to claim tasks: "+err.Error())
+	}
+}
+
+// AcknowledgeClaimAttempt records receipt of the v2 task set. It is best
+// effort on the daemon, and StartTask independently performs an implicit ACK.
+func (h *Handler) AcknowledgeClaimAttempt(w http.ResponseWriter, r *http.Request) {
+	attemptID, ok := parseUUIDOrBadRequest(w, chi.URLParam(r, "claimAttemptId"), "claim_attempt_id")
+	if !ok {
+		return
+	}
+	var req struct {
+		DaemonID string `json:"daemon_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if req.DaemonID == "" {
+		writeError(w, http.StatusBadRequest, "daemon_id is required")
+		return
+	}
+	if ctxDaemonID := middleware.DaemonIDFromContext(r.Context()); ctxDaemonID != "" && ctxDaemonID != req.DaemonID {
+		writeError(w, http.StatusForbidden, "daemon_id does not match token")
+		return
+	}
+	principalKey := claimAttemptPrincipal(r, req.DaemonID)
+	if principalKey == "" {
+		writeError(w, http.StatusForbidden, "claim attempt principal is unavailable")
+		return
+	}
+	if err := h.TaskService.AcknowledgeClaimAttempt(r.Context(), attemptID, req.DaemonID, principalKey); err != nil {
+		writeClaimAttemptError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "acknowledged"})
 }
 
 // claimBuildFailure captures a pre-response failure from

@@ -186,6 +186,7 @@ func daemonClientCapabilities() string {
 		protocol.DaemonCapabilitySkillBundlesV1,
 		protocol.DaemonCapabilityCoalescedCommentsV1,
 		protocol.DaemonCapabilityRPCV1,
+		protocol.DaemonCapabilityClaimReplayV1,
 	}, ",")
 }
 
@@ -245,6 +246,55 @@ func (c *Client) ClaimTasks(ctx context.Context, daemonID string, runtimeIDs []s
 		return nil, err
 	}
 	return resp.Tasks, nil
+}
+
+type claimAttemptResponse struct {
+	ClaimAttemptID string  `json:"claim_attempt_id"`
+	State          string  `json:"state"`
+	Tasks          []*Task `json:"tasks"`
+}
+
+var claimAttemptRetrySchedule = []time.Duration{250 * time.Millisecond, time.Second, 2 * time.Second}
+
+// ClaimTasksAttempt creates or replays one idempotent claim over HTTP. Every
+// retry uses the same path UUID and request body, so a lost HTTP response
+// cannot consume a second set of local execution slots.
+func (c *Client) ClaimTasksAttempt(ctx context.Context, claimAttemptID, daemonID string, runtimeIDs []string, maxTasks int) (claimAttemptResponse, error) {
+	var resp claimAttemptResponse
+	path := fmt.Sprintf("/api/daemon/task-claim-attempts/%s", claimAttemptID)
+	body := map[string]any{
+		"daemon_id":   daemonID,
+		"runtime_ids": runtimeIDs,
+		"max_tasks":   maxTasks,
+	}
+	var lastErr error
+	for attempt := 0; ; attempt++ {
+		if err := c.jsonRequest(ctx, http.MethodPut, path, body, &resp); err == nil {
+			return resp, nil
+		} else {
+			lastErr = err
+			if !isClaimAttemptTransientError(err) || attempt >= len(claimAttemptRetrySchedule) {
+				return claimAttemptResponse{}, err
+			}
+		}
+		if err := retrySleep(ctx, claimAttemptRetrySchedule[attempt]); err != nil {
+			return claimAttemptResponse{}, lastErr
+		}
+	}
+}
+
+func isClaimAttemptTransientError(err error) bool {
+	var reqErr *requestError
+	if errors.As(err, &reqErr) && reqErr.StatusCode == http.StatusTooEarly {
+		return true
+	}
+	return isTransientError(err)
+}
+
+func (c *Client) AcknowledgeClaimAttempt(ctx context.Context, claimAttemptID, daemonID string) error {
+	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/task-claim-attempts/%s/ack", claimAttemptID), map[string]any{
+		"daemon_id": daemonID,
+	}, nil)
 }
 
 // isBatchClaimUnsupported reports whether err is a 404 from the batch claim
@@ -849,6 +899,14 @@ func (c *Client) postJSON(ctx context.Context, path string, reqBody any, respBod
 // to control the timeout regime: c.client (fixed 30s) for control-plane calls,
 // c.bundleClient (deadline from ctx) for large skill-bundle downloads.
 func (c *Client) postJSONVia(ctx context.Context, httpClient *http.Client, path string, reqBody any, respBody any) error {
+	return c.jsonRequestVia(ctx, httpClient, http.MethodPost, path, reqBody, respBody)
+}
+
+func (c *Client) jsonRequest(ctx context.Context, method, path string, reqBody any, respBody any) error {
+	return c.jsonRequestVia(ctx, c.client, method, path, reqBody, respBody)
+}
+
+func (c *Client) jsonRequestVia(ctx context.Context, httpClient *http.Client, method, path string, reqBody any, respBody any) error {
 	var body io.Reader
 	if reqBody != nil {
 		data, err := json.Marshal(reqBody)
@@ -858,7 +916,7 @@ func (c *Client) postJSONVia(ctx context.Context, httpClient *http.Client, path 
 		body = bytes.NewReader(data)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+path, body)
+	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, body)
 	if err != nil {
 		return err
 	}
@@ -876,7 +934,7 @@ func (c *Client) postJSONVia(ctx context.Context, httpClient *http.Client, path 
 
 	if resp.StatusCode >= 400 {
 		data, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return &requestError{Method: http.MethodPost, Path: path, StatusCode: resp.StatusCode, Body: strings.TrimSpace(string(data))}
+		return &requestError{Method: method, Path: path, StatusCode: resp.StatusCode, Body: strings.TrimSpace(string(data))}
 	}
 	if respBody == nil {
 		io.Copy(io.Discard, resp.Body)
