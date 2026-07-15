@@ -3516,6 +3516,32 @@ func gateResumeToReusedWorkdir(task *Task, taskCtx *execenv.TaskContextForEnv, e
 	return reused
 }
 
+// shouldReusePriorWorkdir keeps the local_directory lock invariant without
+// forcing every squad-leader follow-up onto a fresh provider session. Worker
+// tasks already expose their current local-directory assignment, so their
+// existing reuse behavior remains unchanged. Leader tasks intentionally skip
+// that assignment and its lock; they may therefore reuse only workdirs that
+// resolve inside the daemon-owned workspaces root.
+func shouldReusePriorWorkdir(task Task, localAssignment *localDirectoryAssignment, workspacesRoot string) bool {
+	if task.PriorWorkDir == "" || localAssignment != nil {
+		return false
+	}
+	if !task.IsLeaderTask {
+		return true
+	}
+
+	root, err := filepath.EvalSymlinks(workspacesRoot)
+	if err != nil {
+		return false
+	}
+	workdir, err := filepath.EvalSymlinks(task.PriorWorkDir)
+	if err != nil {
+		return false
+	}
+	rel, err := filepath.Rel(root, workdir)
+	return err == nil && rel != "." && filepath.IsLocal(rel)
+}
+
 // gateCodexResumeToRolloutPresence drops the prior Codex session when its
 // rollout is not actually present in the task's CODEX_HOME sessions. A reused
 // workdir keeps PriorSessionID (gateResumeToReusedWorkdir), but Codex session
@@ -3941,7 +3967,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			defer d.unmarkActiveCodexStore(store)
 		}
 	}
-	if task.PriorWorkDir != "" && localAssignment == nil && !task.IsLeaderTask {
+	if shouldReusePriorWorkdir(task, localAssignment, d.cfg.WorkspacesRoot) {
 		env = execenv.Reuse(execenv.ReuseParams{
 			WorkspacesRoot:        d.cfg.WorkspacesRoot,
 			Profile:               d.cfg.Profile,
