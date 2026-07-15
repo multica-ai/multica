@@ -161,6 +161,7 @@ beforeEach(() => {
 describe("comment composers", () => {
   it("passes the Issue Space to main and reply Agent mention suggestions", () => {
     const main = renderCommentInput();
+    activateComposer("comment-composer-shell");
     expect(screen.getByTestId("editor")).toHaveAttribute(
       "data-target-space-id",
       "space-eng",
@@ -168,6 +169,7 @@ describe("comment composers", () => {
     main.unmount();
 
     renderReplyInput();
+    activateComposer("reply-composer-shell");
     expect(screen.getByTestId("editor")).toHaveAttribute(
       "data-target-space-id",
       "space-eng",

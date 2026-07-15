@@ -221,7 +221,7 @@ function SortableTabItem({
     isDragging,
   } = useSortable({ id: tab.id });
 
-  const spaceKey = extractSpaceKey(tab.path);
+  const spaceKey = extractSpaceKey(tab.resourceKey);
   const space = spaceKey ? spacesByKey.get(spaceKey) : undefined;
   const RouteIcon = TAB_ICONS[tab.icon];
 
