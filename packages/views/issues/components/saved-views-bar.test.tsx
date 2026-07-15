@@ -10,7 +10,7 @@ import {
 import { ViewStoreProvider } from "@multica/core/issues/stores/view-store-context";
 import type { IssueView } from "@multica/core/issue-views";
 import type { IssueViewDefinition } from "@multica/core/issues/stores/view-store";
-import { SavedViewsBar } from "./saved-views-bar";
+import { SavedViewsBar, visibleSavedViewIDs } from "./saved-views-bar";
 
 const { navigation, viewList } = vi.hoisted(() => ({
   navigation: {
@@ -27,7 +27,12 @@ const { navigation, viewList } = vi.hoisted(() => ({
   },
 }));
 
-vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
+vi.mock("sonner", () => {
+  const toast = vi.fn();
+  return {
+    toast: Object.assign(toast, { error: vi.fn(), success: vi.fn() }),
+  };
+});
 vi.mock("../../i18n", () => ({ useT: () => ({ t: () => "translated" }) }));
 vi.mock("../../navigation", () => ({
   useNavigation: () => ({
@@ -180,7 +185,7 @@ beforeEach(() => {
 });
 
 describe("SavedViewsBar", () => {
-  it("exposes a compact custom-view control and restores the draft for built-in views", async () => {
+  it("renders the active saved view as a stable tab and restores the draft for built-in views", async () => {
     const surfaceKey = "workspace:saved-view-control-test";
     const store = getIssueSurfaceViewStore(surfaceKey);
     store.getState().setViewMode("list");
@@ -214,14 +219,11 @@ describe("SavedViewsBar", () => {
     );
 
     await waitFor(() => expect(store.getState().viewMode).toBe("board"));
-    expect(screen.getByText("Launch focus")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /Launch focus/ }),
+    ).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByTestId("saved-view-strip")).toBeInTheDocument();
     expect(screen.getByTestId("saved-view-active")).toHaveTextContent("true");
-
-    fireEvent.click(screen.getByText("Launch focus"));
-    await waitFor(() =>
-      expect(screen.getAllByText("Launch focus")).toHaveLength(2),
-    );
-    fireEvent.keyDown(document, { key: "Escape" });
 
     navigation.replace.mockImplementation((path: string) => {
       navigation.searchParams = new URL(
@@ -315,5 +317,47 @@ describe("SavedViewsBar", () => {
     await waitFor(() =>
       expect(store.getState().priorityFilters).toEqual(["urgent", "medium"]),
     );
+  });
+});
+
+describe("visibleSavedViewIDs", () => {
+  it("keeps the active overflow view visible without changing stable order", () => {
+    const views = [
+      savedView({ id: "view-1", position: 1 }),
+      savedView({ id: "view-2", position: 2 }),
+      savedView({ id: "view-3", position: 3 }),
+    ];
+    const widths = new Map(views.map((view) => [view.id, 80]));
+
+    expect(visibleSavedViewIDs(views, "view-3", widths, 164)).toEqual([
+      "view-1",
+      "view-3",
+    ]);
+  });
+
+  it("keeps every view visible when the strip has enough room", () => {
+    const views = [
+      savedView({ id: "view-1", position: 1 }),
+      savedView({ id: "view-2", position: 2 }),
+    ];
+    const widths = new Map(views.map((view) => [view.id, 80]));
+
+    expect(visibleSavedViewIDs(views, null, widths, 164)).toEqual([
+      "view-1",
+      "view-2",
+    ]);
+  });
+
+  it("keeps only the active view when no tab budget remains", () => {
+    const views = [
+      savedView({ id: "view-1", position: 1 }),
+      savedView({ id: "view-2", position: 2 }),
+    ];
+    const widths = new Map(views.map((view) => [view.id, 80]));
+
+    expect(visibleSavedViewIDs(views, "view-2", widths, 0)).toEqual([
+      "view-2",
+    ]);
+    expect(visibleSavedViewIDs(views, null, widths, 0)).toEqual([]);
   });
 });

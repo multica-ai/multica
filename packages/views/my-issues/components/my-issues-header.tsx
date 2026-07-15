@@ -62,9 +62,9 @@ export function MyIssuesHeader({
 
   return (
     <div className="h-12 shrink-0 overflow-x-auto px-4 [-webkit-overflow-scrolling:touch]">
-      <div className="flex h-full w-max min-w-full items-center justify-between gap-2">
-        <div className="flex min-w-0 shrink-0 items-center gap-1">
-          <div className="hidden shrink-0 items-center gap-1 md:flex">
+      <div className="flex h-full min-w-full items-center gap-2">
+        <div className="flex min-w-0 flex-1 items-center gap-1">
+          <div className="hidden shrink-0 items-center gap-1 xl:flex">
             {SCOPES.map((s) => (
               <Tooltip key={s.value}>
                 <TooltipTrigger
@@ -94,7 +94,7 @@ export function MyIssuesHeader({
                 <Button
                   variant="outline"
                   size="sm"
-                  className="shrink-0 gap-1 text-muted-foreground md:hidden"
+                  className="shrink-0 gap-1 text-muted-foreground xl:hidden"
                 >
                   <span className="truncate">{scopeLabel}</span>
                   <ChevronDown className="size-3 text-muted-foreground" />

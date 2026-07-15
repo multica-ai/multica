@@ -801,10 +801,10 @@ export function IssuesHeader({
 
   return (
     <div className="h-12 shrink-0 overflow-x-auto px-4 [-webkit-overflow-scrolling:touch]">
-      <div className="flex h-full w-max min-w-full items-center justify-between gap-2">
-        <div className="flex min-w-0 shrink-0 items-center gap-1">
-          {/* Built-in views stay visible; custom views use the adjacent picker. */}
-          <div className="hidden shrink-0 items-center gap-1 md:flex">
+      <div className="flex h-full min-w-full items-center gap-2">
+        <div className="flex min-w-0 flex-1 items-center gap-1">
+          {/* System and saved views share one stable, mutually-exclusive strip. */}
+          <div className="hidden shrink-0 items-center gap-1 xl:flex">
             {SCOPE_VALUES.map((s) => (
               <Tooltip key={s}>
                 <TooltipTrigger
@@ -834,7 +834,7 @@ export function IssuesHeader({
                 <Button
                   variant="outline"
                   size="sm"
-                  className="shrink-0 gap-1 text-muted-foreground md:hidden"
+                  className="shrink-0 gap-1 text-muted-foreground xl:hidden"
                 >
                   <span className="truncate">{scopeLabel}</span>
                   <ChevronDown className="size-3 text-muted-foreground" />
