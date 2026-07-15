@@ -74,10 +74,11 @@ func (h *Handler) GetConfig(w http.ResponseWriter, r *http.Request) {
 	config.CdnSigned = h.CFSigner != nil
 	config.DaemonServerURL, config.DaemonAppURL = daemonSetupURLsFromEnv()
 	config.FeatureFlags = featureflags.EvaluateFrontendPublicFlags(r.Context(), h.FeatureFlags)
-	// Only surface the build version on self-hosted deployments. The managed
-	// cloud is continuously deployed and its users can't choose the build, so
-	// the Help popover's version row would just be noise there (MUL-4108).
-	if !isOfficialCloudDeployment() {
+	// Only surface the build version on self-hosted deployments. Multica's
+	// managed cloud is continuously deployed and its users can't choose the
+	// build, so the Help popover's version row is just noise there — on EVERY
+	// managed host, not only prod multica.ai (MUL-4108, MUL-4819).
+	if !isManagedCloudDeployment() {
 		config.ServerVersion = h.cfg.ServerVersion
 	}
 
@@ -140,13 +141,35 @@ func isOfficialCloudDaemonConfig(appURL string) bool {
 	return urlHostEquals(appURL, "multica.ai")
 }
 
-// isOfficialCloudDeployment reports whether this server is the official Multica
-// Cloud, reusing the same frontend-host signal as the daemon setup (multica.ai).
-// Managed-cloud-only behavior — such as suppressing the Help popover's
+// multicaOperatedDomains are the registrable domains Multica runs its managed
+// cloud on. A frontend host on any of them — or a subdomain such as
+// staging.multica.ai or multica-app.copilothub.ai — is a Multica-operated
+// managed deployment, not a self-hosted one. Third parties cannot host under
+// these domains, so matching them never misfires on a real self-hosted install.
+var multicaOperatedDomains = []string{"multica.ai", "copilothub.ai"}
+
+// isManagedCloudDeployment reports whether this server is a Multica-operated
+// managed deployment (prod, staging, or preview), identified by its frontend
+// host. Managed-cloud-only behavior — such as suppressing the Help popover's
 // server-version row, which only matters to self-hosted operators — is gated on
 // this.
-func isOfficialCloudDeployment() bool {
-	return isOfficialCloudDaemonConfig(resolveFrontendAppURL())
+//
+// Deliberately BROADER than isOfficialCloudDaemonConfig, which matches only the
+// exact prod host multica.ai: the daemon-setup URLs must stay per-deployment on
+// non-prod managed hosts (the hardcoded `multica setup` reaches only
+// api.multica.ai), whereas the version row is noise on EVERY managed host
+// regardless of domain or environment (MUL-4819).
+func isManagedCloudDeployment() bool {
+	host := canonicalURLHost(resolveFrontendAppURL())
+	if host == "" {
+		return false
+	}
+	for _, domain := range multicaOperatedDomains {
+		if host == domain || strings.HasSuffix(host, "."+domain) {
+			return true
+		}
+	}
+	return false
 }
 
 func urlHostEquals(raw, want string) bool {
