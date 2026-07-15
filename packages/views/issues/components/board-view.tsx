@@ -14,6 +14,7 @@ import {
 } from "@dnd-kit/core";
 import type { QueryKey } from "@tanstack/react-query";
 import { arrayMove } from "@dnd-kit/sortable";
+import { toast } from "sonner";
 import type {
   Issue,
   IssueAssigneeGroup,
@@ -205,17 +206,33 @@ export function BoardView({
   const applyPropertyGroupValue = useCallback(
     (group: BoardColumnGroup, issueId: string) => {
       if (group.propertyId === undefined) return;
+      // Surface failures like status/assignee drags do (use-issue-surface-
+      // actions): the mutation rolls the card back, but without a toast the
+      // snap-back reads as a UI glitch instead of a rejected write.
+      const onError = (err: unknown) => {
+        toast.error(
+          err instanceof Error && err.message
+            ? err.message
+            : t(($) => $.page.move_failed),
+        );
+      };
       if (group.propertyOptionId === null) {
-        unsetIssuePropertyMutation.mutate({ issueId, propertyId: group.propertyId });
+        unsetIssuePropertyMutation.mutate(
+          { issueId, propertyId: group.propertyId },
+          { onError },
+        );
       } else if (group.propertyOptionId !== undefined) {
-        setIssuePropertyMutation.mutate({
-          issueId,
-          propertyId: group.propertyId,
-          value: group.propertyOptionId,
-        });
+        setIssuePropertyMutation.mutate(
+          {
+            issueId,
+            propertyId: group.propertyId,
+            value: group.propertyOptionId,
+          },
+          { onError },
+        );
       }
     },
-    [setIssuePropertyMutation, unsetIssuePropertyMutation],
+    [setIssuePropertyMutation, t, unsetIssuePropertyMutation],
   );
   const sortFieldKey = sortBy === "created_at" ? "created" : sortBy;
   const sortPropertyId = propertyIdFromViewKey(sortBy);
