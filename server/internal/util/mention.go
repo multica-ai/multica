@@ -24,13 +24,19 @@ var ValidMentionTypes = []string{
 // Mention represents a parsed @mention from markdown content.
 // Type is one of ValidMentionTypes ("member", "agent", "squad", "issue",
 // "project", "all", "skill"). ID is the entity UUID, or the literal "all"
-// for @all mentions.
+// for @all mentions. WorkspaceID is non-empty for cross-workspace mentions
+// (the ?ws=<uuid> qualifier).
 type Mention struct {
-	Type string
-	ID   string
+	Type        string
+	ID          string
+	WorkspaceID string // populated for cross-workspace mentions (?ws= qualifier)
 }
 
-// MentionRe matches [@Label](mention://type/id) or [Label](mention://issue/id) in markdown.
+// wsIdx is the subexpression index of the cross-workspace qualifier (?ws=) group
+// in MentionRe. Computed once at init so ParseMentions doesn't call SubexpIndex per-parse.
+var wsIdx = MentionRe.SubexpIndex("ws")
+
+// MentionRe matches [@Label](mention://type/id[?ws=<wsUuid>]) or [Label](mention://issue/id[?ws=<wsUuid>]) in markdown.
 // The @ prefix is optional to support issue mentions which use [MUL-123](mention://issue/...).
 // Uses .+? (non-greedy) instead of [^\]]* so labels containing square brackets
 // (e.g. "David[TF]") are matched correctly — the ](mention:// anchor is specific
@@ -38,9 +44,14 @@ type Mention struct {
 //
 // The type alternation is built from ValidMentionTypes so that adding a new
 // type only requires editing the slice above.
+//
+// The optional (?:\?ws=(?P<ws>[0-9a-fA-F-]+))? non-capturing group after the id
+// group matches the cross-workspace qualifier (e.g. "?ws=abc123") so the backend
+// can parse it for structured injection. The id capture group is unchanged; the ws
+// group is extracted separately.
 var MentionRe = regexp.MustCompile(
 	fmt.Sprintf(
-		`\[@?(.+?)\]\(mention://(%s)/([0-9a-fA-F-]+|all)\)`,
+		`\[@?(.+?)\]\(mention://(%s)/([0-9a-fA-F-]+|all)(?:\?ws=(?P<ws>[0-9a-fA-F-]+))?\)`,
 		strings.Join(ValidMentionTypes, "|"),
 	),
 )
@@ -51,6 +62,8 @@ func (m Mention) IsMentionAll() bool {
 }
 
 // ParseMentions extracts deduplicated mentions from markdown content.
+// For cross-workspace mentions (those carrying a ?ws= qualifier), WorkspaceID
+// is populated so callers can distinguish same-workspace from cross-workspace.
 func ParseMentions(content string) []Mention {
 	matches := MentionRe.FindAllStringSubmatch(content, -1)
 	seen := make(map[string]bool)
@@ -61,7 +74,11 @@ func ParseMentions(content string) []Mention {
 			continue
 		}
 		seen[key] = true
-		result = append(result, Mention{Type: m[2], ID: m[3]})
+		result = append(result, Mention{
+			Type:        m[2],
+			ID:          m[3],
+			WorkspaceID: m[wsIdx],
+		})
 	}
 	return result
 }

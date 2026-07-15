@@ -2621,7 +2621,8 @@ func resolveAssignee(ctx context.Context, client *cli.APIClient, name string, ki
 
 func normalizeAssigneeLookupInput(raw string) string {
 	input := strings.TrimSpace(raw)
-	if m := util.MentionRe.FindStringSubmatch(input); len(m) == 4 && m[0] == input {
+	// len(m) >= 5: m[0]=full, m[1]=label, m[2]=type, m[3]=id, m[4]=ws (optional)
+	if m := util.MentionRe.FindStringSubmatch(input); len(m) >= 5 && m[0] == input {
 		switch m[2] {
 		case "member", "agent", "squad":
 			return m[3]

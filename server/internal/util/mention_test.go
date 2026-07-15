@@ -150,17 +150,18 @@ func TestValidMentionTypesMatchesFixture(t *testing.T) {
 	}
 }
 
-// TestMentionReCaptureGroups verifies that MentionRe has exactly 3 capture
-// groups and that each group extracts the expected part of a mention string.
+// TestMentionReCaptureGroups verifies that MentionRe has exactly 4 capture
+// groups and that each extracts the expected part of a mention string.
+// Group 4 (ws) is the optional cross-workspace qualifier and may be empty.
 func TestMentionReCaptureGroups(t *testing.T) {
 	input := `[@SkillName](mention://skill/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa)`
 	m := MentionRe.FindStringSubmatch(input)
 	if m == nil {
 		t.Fatal("MentionRe did not match a valid skill mention")
 	}
-	// m[0] = full match, m[1] = label, m[2] = type, m[3] = id
-	if len(m) != 4 {
-		t.Fatalf("expected 4 submatch groups (full + 3 captures), got %d", len(m))
+	// m[0] = full match, m[1] = label, m[2] = type, m[3] = id, m[4] = ws (optional)
+	if len(m) != 5 {
+		t.Fatalf("expected 5 submatch groups (full + 4 captures), got %d", len(m))
 	}
 	if m[1] != "SkillName" {
 		t.Errorf("group 1 (label) = %q, want %q", m[1], "SkillName")
@@ -170,6 +171,25 @@ func TestMentionReCaptureGroups(t *testing.T) {
 	}
 	if m[3] != "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa" {
 		t.Errorf("group 3 (id) = %q, want %q", m[3], "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+	}
+	if m[4] != "" {
+		t.Errorf("group 4 (ws, optional) = %q, want empty string", m[4])
+	}
+}
+
+// TestMentionReCaptureGroupsWithWorkspaceQualifier verifies the cross-workspace qualifier
+// is captured in group 4 (wsIdx).
+func TestMentionReCaptureGroupsWithWorkspaceQualifier(t *testing.T) {
+	input := `[@Project](mention://project/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa?ws=bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb)`
+	m := MentionRe.FindStringSubmatch(input)
+	if m == nil {
+		t.Fatal("MentionRe did not match the cross-ws mention")
+	}
+	if len(m) != 5 {
+		t.Fatalf("expected 5 groups, got %d", len(m))
+	}
+	if m[4] != "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb" {
+		t.Errorf("group 4 (ws) = %q, want %q", m[4], "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")
 	}
 }
 
