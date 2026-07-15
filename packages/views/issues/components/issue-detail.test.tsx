@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { Issue, TimelineEntry } from "@multica/core/types";
 import { I18nProvider } from "@multica/core/i18n/react";
 import { useResolvedExpandStore } from "@multica/core/issues/stores/resolved-expand-store";
+import { ScrollRestorationProvider } from "../../platform";
 import enCommon from "../../locales/en/common.json";
 import enIssues from "../../locales/en/issues.json";
 
@@ -351,17 +352,39 @@ vi.mock("@multica/core/issues/stores", async () => ({
 // layout.
 const scrollIntoViewSpy = vi.hoisted(() => vi.fn());
 
+// Observability for the deep-link path. The real Virtuoso needs layout to do
+// anything, so jsdom can only assert the contract we hand it: which index it
+// was told to start at, whether scroll restoration was suppressed, whether a
+// later target change went through the imperative scrollToIndex (rather than a
+// remount), and the props it saw on its FIRST render — `initialTopMostItemIndex`
+// is mount-only, so "was it right on the first frame" is the whole question.
+const virtuoso = vi.hoisted(() => ({
+  firstProps: null as Record<string, unknown> | null,
+  mounts: 0,
+  props: null as Record<string, unknown> | null,
+  scrollToIndex: vi.fn(),
+  reset() {
+    this.firstProps = null;
+    this.props = null;
+    this.mounts = 0;
+    this.scrollToIndex.mockClear();
+  },
+}));
+
 vi.mock("react-virtuoso", () => ({
   Virtuoso: forwardRef(function MockVirtuoso(
-    { data, itemContent }: { data: unknown[]; itemContent: (i: number, item: unknown) => unknown },
+    props: { data: unknown[]; itemContent: (i: number, item: unknown) => unknown },
     ref: any,
   ) {
+    const { data, itemContent } = props;
+    virtuoso.props = props as unknown as Record<string, unknown>;
+    if (!virtuoso.firstProps) virtuoso.firstProps = { ...props };
+    useEffect(() => {
+      virtuoso.mounts += 1;
+    }, []);
     useImperativeHandle(ref, () => ({
-      // Real Virtuoso ref methods are not exercised by tests in this file
-      // since the deep-link cold-path drives the container's scrollTop on the
-      // real DOM node, not Virtuoso's imperative API.
       scrollIntoView: vi.fn(),
-      scrollToIndex: vi.fn(),
+      scrollToIndex: virtuoso.scrollToIndex,
     }));
     return (
       <div data-testid="virtuoso-mock">
@@ -377,6 +400,7 @@ vi.mock("react-virtuoso", () => ({
 // with a spy so the deep-link effect's call can be observed.
 beforeEach(() => {
   scrollIntoViewSpy.mockClear();
+  virtuoso.reset();
   Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
     configurable: true,
     writable: true,
@@ -1207,10 +1231,9 @@ describe("IssueDetail (shared)", () => {
     it("scrolls to the highlighted comment after both issue and timeline finish loading", async () => {
       renderIssueDetailWithHighlight("comment-2");
 
-      // Wait for the comment row to mount. With initialItemCount in
-      // production, items[0..targetIdx] are force-mounted on first commit;
-      // the mock unconditionally inline-renders every item, so this just
-      // waits for the regular render pass.
+      // Wait for the comment row to mount. In production Virtuoso mounts the
+      // window around initialTopMostItemIndex; the mock inline-renders every
+      // item, so this just waits for the regular render pass.
       await waitFor(() => {
         expect(
           document.getElementById("comment-comment-2"),
@@ -1361,6 +1384,237 @@ describe("IssueDetail (shared)", () => {
           document.getElementById("comment-reply-1")?.className,
         ).toContain("bg-[color-mix(in_srgb,var(--card)_95%,var(--brand)_5%)]");
       });
+    });
+  });
+
+  // MUL-4812: a deep-link no longer force-renders the timeline flat. These
+  // tests pin the contract handed to Virtuoso, because jsdom has no layout and
+  // the landing itself is only observable in the E2E suite.
+  describe("deep-link virtualized anchoring", () => {
+    // comment-1 (head) / comment-2 / comment-3 (tail) as top-level rows.
+    const threeComments: TimelineEntry[] = [
+      ...mockTimeline,
+      {
+        type: "comment",
+        id: "comment-3",
+        actor_type: "member",
+        actor_id: "user-1",
+        content: "Third",
+        parent_id: null,
+        created_at: "2026-01-18T00:00:00Z",
+        updated_at: "2026-01-18T00:00:00Z",
+        comment_type: "comment",
+      } as TimelineEntry,
+    ];
+
+    function renderWithTarget(target: string | undefined, ui = { restoredTop: 0 }) {
+      const queryClient = createTestQueryClient();
+      const adapter = {
+        get: () => (ui.restoredTop ? { height: 0, top: ui.restoredTop } : undefined),
+      };
+      const view = render(
+        <I18nProvider locale="en" resources={TEST_RESOURCES}>
+          <QueryClientProvider client={queryClient}>
+            <ScrollRestorationProvider adapter={adapter}>
+              <IssueDetail issueId="issue-1" highlightCommentId={target} />
+            </ScrollRestorationProvider>
+          </QueryClientProvider>
+        </I18nProvider>,
+      );
+      const rerenderWithTarget = (next: string | undefined) =>
+        view.rerender(
+          <I18nProvider locale="en" resources={TEST_RESOURCES}>
+            <QueryClientProvider client={queryClient}>
+              <ScrollRestorationProvider adapter={adapter}>
+                <IssueDetail issueId="issue-1" highlightCommentId={next} />
+              </ScrollRestorationProvider>
+            </QueryClientProvider>
+          </I18nProvider>,
+        );
+      return { ...view, rerenderWithTarget };
+    }
+
+    // index 0 matters on its own: upstream treats a default-positioned
+    // {index: 0} as "no initial scroll", which is only correct because our
+    // offset makes it non-default. A target at the head must still anchor.
+    it.each([
+      ["comment-1", 0],
+      ["comment-2", 1],
+      ["comment-3", 2],
+    ])("anchors the first frame on %s (index %i)", async (target, index) => {
+      mockApiObj.listTimeline.mockResolvedValue(threeComments);
+      renderWithTarget(target);
+
+      await waitFor(() => expect(virtuoso.firstProps).not.toBeNull());
+      // First frame, not a later correction: initialTopMostItemIndex is
+      // mount-only, so anything landed afterwards would be too late.
+      expect(virtuoso.firstProps?.initialTopMostItemIndex).toEqual({
+        align: "start",
+        index,
+        offset: -16,
+      });
+      // The whole point of the change: still virtualized, never the flat path.
+      expect(screen.getByTestId("virtuoso-mock")).toBeInTheDocument();
+    });
+
+    it("does not anchor when there is no deep-link target", async () => {
+      mockApiObj.listTimeline.mockResolvedValue(threeComments);
+      renderWithTarget(undefined);
+
+      await waitFor(() => expect(virtuoso.firstProps).not.toBeNull());
+      expect(virtuoso.firstProps?.initialTopMostItemIndex).toBeUndefined();
+    });
+
+    it("expands a resolved thread on the first frame so the anchor index is already correct", async () => {
+      // comment-3 is a resolved root; the target is a reply folded inside it.
+      // Pre-expansion has to be derived during render — if it were an effect,
+      // Virtuoso would have mounted against the folded index and stayed there.
+      mockApiObj.listTimeline.mockResolvedValue([
+        ...mockTimeline,
+        {
+          type: "comment",
+          id: "comment-3",
+          actor_type: "member",
+          actor_id: "user-1",
+          content: "Resolved root",
+          parent_id: null,
+          created_at: "2026-01-18T00:00:00Z",
+          updated_at: "2026-01-18T00:00:00Z",
+          comment_type: "comment",
+          resolved_at: "2026-01-19T00:00:00Z",
+        } as TimelineEntry,
+        {
+          type: "comment",
+          id: "reply-1",
+          actor_type: "member",
+          actor_id: "user-1",
+          content: "Reply inside resolved thread",
+          parent_id: "comment-3",
+          created_at: "2026-01-18T01:00:00Z",
+          updated_at: "2026-01-18T01:00:00Z",
+          comment_type: "comment",
+        } as TimelineEntry,
+      ]);
+      renderWithTarget("reply-1");
+
+      await waitFor(() => expect(virtuoso.firstProps).not.toBeNull());
+      expect(virtuoso.firstProps?.initialTopMostItemIndex).toEqual({
+        align: "start",
+        index: 2,
+        offset: -16,
+      });
+      // Derived, not folded-then-expanded: the row is a real comment card on
+      // the very first frame Virtuoso saw, never a resolved bar.
+      const firstData = virtuoso.firstProps?.data as Array<{ kind: string; id: string }>;
+      expect(firstData[2]).toMatchObject({ id: "comment-3", kind: "comment" });
+    });
+
+    it("re-anchors through scrollToIndex without remounting when a passive inbox update swaps the target", async () => {
+      mockApiObj.listTimeline.mockResolvedValue(threeComments);
+      const { rerenderWithTarget } = renderWithTarget("comment-1");
+      await waitFor(() => expect(virtuoso.mounts).toBe(1));
+
+      rerenderWithTarget("comment-3");
+
+      await waitFor(() =>
+        expect(virtuoso.scrollToIndex).toHaveBeenCalledWith({
+          align: "start",
+          index: 2,
+          offset: -16,
+        }),
+      );
+      // The detail pane must survive the swap: a remount would flash a
+      // skeleton and re-pay the mount cost this work exists to remove.
+      expect(virtuoso.mounts).toBe(1);
+    });
+
+    it("leaves the reading position alone when the target is swapped after the user scrolled", async () => {
+      mockApiObj.listTimeline.mockResolvedValue(threeComments);
+      const { rerenderWithTarget } = renderWithTarget("comment-1");
+      await waitFor(() => expect(virtuoso.mounts).toBe(1));
+
+      const container = document.querySelector("[data-tab-scroll-root]")!;
+      fireEvent.wheel(container);
+
+      rerenderWithTarget("comment-3");
+
+      // Passive swap + a user who is already reading: the newer notification
+      // does not get to take the viewport.
+      await waitFor(() => expect(virtuoso.props?.data).toBeDefined());
+      expect(virtuoso.scrollToIndex).not.toHaveBeenCalled();
+    });
+
+    it("still renders flat while in-page find is open, deep-link or not", async () => {
+      // find needs every comment in the DOM to walk and match, so it keeps the
+      // flat path. That boundary is the one thing this change must not move.
+      // The hook gates on getClientRects(), which jsdom always reports empty.
+      const rects = vi
+        .spyOn(HTMLElement.prototype, "getClientRects")
+        .mockReturnValue({ length: 1 } as unknown as DOMRectList);
+      mockApiObj.listTimeline.mockResolvedValue(threeComments);
+      renderWithTarget("comment-1");
+      await waitFor(() => expect(virtuoso.mounts).toBe(1));
+
+      // The find chord is primary+F; primary is Meta on macOS and Control
+      // elsewhere. Fire both — exactly one matches on any given platform.
+      fireEvent.keyDown(document, { ctrlKey: true, key: "f" });
+      fireEvent.keyDown(document, { key: "f", metaKey: true });
+
+      await waitFor(() =>
+        expect(screen.queryByTestId("virtuoso-mock")).not.toBeInTheDocument(),
+      );
+      rects.mockRestore();
+    });
+  });
+
+  describe("deep-link vs scroll restoration", () => {
+    let scrollTopWrites: number[] = [];
+
+    beforeEach(() => {
+      scrollTopWrites = [];
+      Object.defineProperty(HTMLElement.prototype, "scrollTop", {
+        configurable: true,
+        get(this: HTMLElement & { __top?: number }) {
+          return this.__top ?? 0;
+        },
+        set(this: HTMLElement & { __top?: number }, value: number) {
+          this.__top = value;
+          scrollTopWrites.push(value);
+        },
+      });
+    });
+
+    function renderWithRestore(target: string | undefined) {
+      const queryClient = createTestQueryClient();
+      const adapter = { get: () => ({ height: 0, top: 500 }) };
+      return render(
+        <I18nProvider locale="en" resources={TEST_RESOURCES}>
+          <QueryClientProvider client={queryClient}>
+            <ScrollRestorationProvider adapter={adapter}>
+              <IssueDetail issueId="issue-1" highlightCommentId={target} />
+            </ScrollRestorationProvider>
+          </QueryClientProvider>
+        </I18nProvider>,
+      );
+    }
+
+    it("restores the saved offset through both write paths when browsing", async () => {
+      renderWithRestore(undefined);
+      await waitFor(() => expect(virtuoso.firstProps).not.toBeNull());
+
+      expect(virtuoso.firstProps?.initialScrollTop).toBe(500);
+      expect(scrollTopWrites).toContain(500);
+    });
+
+    it("suppresses both restoration write paths for a deep-link", async () => {
+      renderWithRestore("comment-2");
+      await waitFor(() => expect(virtuoso.firstProps).not.toBeNull());
+
+      // Write path 1: Virtuoso's own initial position.
+      expect(virtuoso.firstProps?.initialScrollTop).toBeUndefined();
+      // Write path 2: the ref-attach write. Both have to stand down, or the
+      // restored offset races the anchor and the user lands in the wrong place.
+      expect(scrollTopWrites).not.toContain(500);
     });
   });
 

@@ -171,6 +171,56 @@ export class TestApiClient {
     await this.authedFetch(`/api/issues/${id}`, { method: "DELETE" });
   }
 
+  /**
+   * Seed an inbox notification pointing at `commentId`.
+   *
+   * Inserted directly: the server only creates one when *another* actor
+   * comments on something you subscribe to, which would mean standing up a
+   * second member and an invite flow just to reach the deep-link. The row
+   * shape is what matters to the client, and that is what this writes.
+   */
+  async createInboxComment(issueId: string, commentId: string, title = "E2E inbox") {
+    if (!this.email) throw new Error("Cannot seed inbox before login");
+    const workspaceId = this.workspaceId;
+    if (!workspaceId) throw new Error("Cannot seed inbox before ensureWorkspace");
+
+    const client = new pg.Client(DATABASE_URL);
+    await client.connect();
+    try {
+      const user = await client.query('SELECT id FROM "user" WHERE email = $1', [this.email]);
+      const recipientId = user.rows[0]?.id;
+      if (!recipientId) throw new Error(`No user row for ${this.email}`);
+      await client.query(
+        `
+          INSERT INTO inbox_item
+            (workspace_id, recipient_type, recipient_id, actor_type, actor_id,
+             type, severity, issue_id, title, read, archived, details)
+          VALUES ($1, 'member', $2, 'member', $2, 'new_comment', 'info', $3, $4,
+                  FALSE, FALSE, $5::jsonb)
+        `,
+        [workspaceId, recipientId, issueId, title, JSON.stringify({ comment_id: commentId })],
+      );
+    } finally {
+      await client.end();
+    }
+  }
+
+  async createComment(issueId: string, content: string, opts?: Record<string, unknown>) {
+    const res = await this.authedFetch(`/api/issues/${issueId}/comments`, {
+      body: JSON.stringify({ content, ...opts }),
+      method: "POST",
+    });
+    return res.json();
+  }
+
+  async updateIssue(id: string, patch: Record<string, unknown>) {
+    const res = await this.authedFetch(`/api/issues/${id}`, {
+      body: JSON.stringify(patch),
+      method: "PATCH",
+    });
+    return res.json();
+  }
+
   /** Clean up all issues created during this test. */
   async cleanup() {
     for (const id of this.createdIssueIds) {

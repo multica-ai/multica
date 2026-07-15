@@ -1,7 +1,11 @@
 "use client";
 
 import { useState, useEffect, useCallback, useMemo, useRef, Fragment } from "react";
-import { Virtuoso, type VirtuosoHandle } from "react-virtuoso";
+import {
+  Virtuoso,
+  type FlatIndexLocationWithAlign,
+  type VirtuosoHandle,
+} from "react-virtuoso";
 import { useDefaultLayout, usePanelRef } from "react-resizable-panels";
 import { AppLink } from "../../navigation";
 import { useNavigation } from "../../navigation";
@@ -101,6 +105,7 @@ import { matchesPinyin } from "../../editor/extensions/pinyin-match";
 import { useT } from "../../i18n";
 import { useIssueDetailScrollRestore } from "../hooks/use-issue-detail-scroll-restore";
 import { useInPageFind } from "../hooks/use-in-page-find";
+import { useCommentAnchorCalibration } from "../hooks/use-comment-anchor-calibration";
 import { FindBar } from "./find-bar";
 import {
   AnimatedRightSidebar,
@@ -300,6 +305,12 @@ function formatTokenCount(n: number): string {
 // Stable reference for threads with no replies. Inline `[]` would create a
 // new array on every render and bust React.memo on CommentCard / ResolvedThreadBar.
 const EMPTY_REPLIES: TimelineEntry[] = [];
+
+/**
+ * Gap left above a deep-linked comment's header, so it reads as "in the page"
+ * rather than jammed against the viewport edge.
+ */
+const DEEP_LINK_TOP_GAP_PX = 16;
 
 // ---------------------------------------------------------------------------
 // Sidebar progressive disclosure
@@ -787,17 +798,30 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   // Virtuoso prop would never receive the element. Callback ref + state fixes
   // that: setState triggers the re-render that hands Virtuoso the element.
   const [scrollContainerEl, setScrollContainerEl] = useState<HTMLDivElement | null>(null);
+  const [contentWrapperEl, setContentWrapperEl] = useState<HTMLDivElement | null>(null);
   // Pull-based scroll restoration (MUL-4741): the platform serves the offset
   // captured when this route was last left. The ref-attach assignment covers
-  // the flat render modes (real heights at commit); the virtualized browsing
-  // mode feeds the offset into Virtuoso's initialScrollTop below so the
-  // list's first render already materializes the rows around it.
+  // the flat find mode (real heights at commit); the virtualized mode feeds the
+  // offset into Virtuoso's initialScrollTop below so the list's first render
+  // already materializes the rows around it.
   const restoredScrollTop = useRestoredScrollOffset("main");
   const restoreScrollRef = useRestoredScrollRef("main");
+  // An inbox deep-link outranks scroll restoration: the user asked for a
+  // specific comment, not for wherever this tab was left. Restoration has three
+  // write paths and all three must stand down, or they race the anchor:
+  //   1. `initialScrollTop` on Virtuoso (suppressed where the prop is passed);
+  //   2. this ref-attach write;
+  //   3. `useIssueDetailScrollRestore` below (already gated on the same signal).
+  // Read through a ref rather than closing over `highlightCommentId`: a ref
+  // callback whose identity changes makes React detach (null) and re-attach it,
+  // which would null out `scrollContainerEl`, flash the skeleton, and remount
+  // Virtuoso on every inbox target change — the exact remount this work removes.
+  const suppressScrollRestoreRef = useRef(false);
+  suppressScrollRestoreRef.current = !!highlightCommentId;
   const attachScrollContainer = useCallback(
     (el: HTMLDivElement | null) => {
       setScrollContainerEl(el);
-      restoreScrollRef(el);
+      if (!suppressScrollRestoreRef.current) restoreScrollRef(el);
     },
     [restoreScrollRef],
   );
@@ -811,7 +835,20 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   // all-comments commands can drive it from outside this page.
   const expandedResolved = useResolvedExpandStore(selectExpandedResolved(id));
   const setResolvedExpanded = useResolvedExpandStore((s) => s.setExpanded);
+  // Thread roots the user folded back by hand. The deep-link auto-expansion
+  // below is derived every render, so without this the user could never
+  // collapse the target's thread — the derivation would re-open it on the next
+  // render. An explicit collapse is the user overriding us; it wins.
+  const [userCollapsedRoots, setUserCollapsedRoots] = useState<Set<string>>(() => new Set());
   const toggleResolvedExpand = useCallback((commentId: string, expand: boolean) => {
+    if (!expand) {
+      setUserCollapsedRoots((prev) => {
+        if (prev.has(commentId)) return prev;
+        const next = new Set(prev);
+        next.add(commentId);
+        return next;
+      });
+    }
     setResolvedExpanded(id, commentId, expand);
     // On collapse the thread shrinks and the viewport would jump to whatever was
     // below; pull the just-folded thread back into view with the smallest
@@ -876,7 +913,6 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
       return next;
     });
   }, []);
-  const didHighlightRef = useRef<string | null>(null);
 
   // Issue data from TQ — uses detail query, seeded from list cache if available.
   // Only seed when description is present; list API omits it, and ContentEditor
@@ -1043,13 +1079,80 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     return { threadReplies, groups };
   }, [timeline]);
 
+  // Map of reply-comment id → root-comment id, so a deep-link to a reply
+  // (which lives inside a CommentCard, not in the flat items array) can fall
+  // back to scrolling the root thread into view. Without this, an inbox
+  // notification on a reply would land at items[-1] and short-circuit.
+  const replyToRoot = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const [rootId, replies] of timelineView.threadReplies) {
+      for (const reply of replies) {
+        map.set(reply.id, rootId);
+      }
+    }
+    return map;
+  }, [timelineView.threadReplies]);
+
+  const rootEntryById = useMemo(() => {
+    const map = new Map<string, TimelineEntry>();
+    for (const group of timelineView.groups) {
+      if (group.type === "comment") map.set(group.entries[0]!.id, group.entries[0]!);
+    }
+    return map;
+  }, [timelineView.groups]);
+
+  // The thread root that has to be expanded for the deep-link target to exist
+  // in `items` at all.
+  //
+  // Derived during render, deliberately NOT an effect writing the store: the
+  // flat index feeds Virtuoso's `initialTopMostItemIndex`, which is read once
+  // at mount. Expanding from an effect lands a render too late — Virtuoso has
+  // already anchored on the pre-expansion index and will not re-read the prop.
+  const autoExpandRootId = useMemo(() => {
+    if (!highlightCommentId) return null;
+    const rootId = replyToRoot.get(highlightCommentId);
+    // Only a reply can be hidden inside a thread; a root comment always has a
+    // row of its own (a folded resolved root renders as its bar, which carries
+    // the same anchor id).
+    if (!rootId || rootId === highlightCommentId) return null;
+    if (expandedResolved.has(rootId) || userCollapsedRoots.has(rootId)) return null;
+    const rootEntry = rootEntryById.get(rootId);
+    if (!rootEntry) return null;
+    // Root resolved → the whole thread is folded behind a bar.
+    if (rootEntry.resolved_at) return rootId;
+    // A reply is the resolution → the other replies fold around it; expand only
+    // when the target is one of those folded ones.
+    const resolution = deriveThreadResolution(
+      rootEntry,
+      timelineView.threadReplies.get(rootId) ?? EMPTY_REPLIES,
+    );
+    if (resolution.kind === "reply" && resolution.resolutionId !== highlightCommentId) {
+      return rootId;
+    }
+    return null;
+  }, [
+    highlightCommentId,
+    replyToRoot,
+    expandedResolved,
+    userCollapsedRoots,
+    rootEntryById,
+    timelineView.threadReplies,
+  ]);
+
+  const effectiveExpandedResolved = useMemo(() => {
+    if (!autoExpandRootId) return expandedResolved;
+    const next = new Set(expandedResolved);
+    next.add(autoExpandRootId);
+    return next;
+  }, [expandedResolved, autoExpandRootId]);
+
   // Flat array consumed by <Virtuoso>. Recomputed when timelineView.groups
-  // changes (timeline events) or expandedResolved flips (user toggles a
-  // resolved thread). Kept in a useMemo so Virtuoso's data identity is stable
-  // across unrelated re-renders.
+  // changes (timeline events) or the effective expansion flips (user toggles a
+  // resolved thread, or a deep-link target forces its thread open). Kept in a
+  // useMemo so Virtuoso's data identity is stable across unrelated re-renders.
   const items = useMemo<TimelineItem[]>(
-    () => flattenGroups(timelineView.groups, expandedResolved),
-    [timelineView.groups, expandedResolved],
+    () => flattenGroups(timelineView.groups, effectiveExpandedResolved),
+    [timelineView.groups, effectiveExpandedResolved],
   );
 
   // In-page find (Cmd/Ctrl+F). `items.length` is the content signal that
@@ -1077,20 +1180,6 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     return null;
   }, [timelineView.groups]);
 
-  // Map of reply-comment id → root-comment id, so a deep-link to a reply
-  // (which lives inside a CommentCard, not in the flat items array) can fall
-  // back to scrolling the root thread into view. Without this, an inbox
-  // notification on a reply would land at items[-1] and short-circuit.
-  const replyToRoot = useMemo(() => {
-    const map = new Map<string, string>();
-    for (const [rootId, replies] of timelineView.threadReplies) {
-      for (const reply of replies) {
-        map.set(reply.id, rootId);
-      }
-    }
-    return map;
-  }, [timelineView.threadReplies]);
-
   // Deep-link target index in the flat items array. For root comments this is
   // a direct findIndex hit; for reply ids we look up the enclosing root.
   const targetIdx = useMemo(() => {
@@ -1101,6 +1190,22 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     if (!rootId) return -1;
     return items.findIndex((it) => it.id === rootId);
   }, [items, highlightCommentId, replyToRoot]);
+
+  // First-frame anchor for an inbox deep-link. `align: "start"` plus a small
+  // negative offset is what puts the target's header just below the top edge
+  // with breathing room, rather than centring it — a long comment centred by
+  // its own box pushes its opening lines off-screen, which is the one thing a
+  // reader arriving from a notification needs to see.
+  //
+  // Virtuoso reads this once, at mount. Every later target change goes through
+  // scrollToIndex inside useCommentAnchorCalibration.
+  const deepLinkAnchor = useMemo<FlatIndexLocationWithAlign | undefined>(
+    () =>
+      targetIdx >= 0
+        ? { align: "start", index: targetIdx, offset: -DEEP_LINK_TOP_GAP_PX }
+        : undefined,
+    [targetIdx],
+  );
 
   // Quick-jump minimap rail: one tick per comment thread (folded resolved
   // bars included), activity groups skipped. Derived from the same flat
@@ -1115,9 +1220,9 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     [items],
   );
 
-  // When the timeline renders flat (deep-link or in-page find), there is no
-  // Virtuoso instance — minimap jumps drive the scroll container directly.
-  const isFlatTimeline = !!highlightCommentId || find.open;
+  // When the timeline renders flat (in-page find only), there is no Virtuoso
+  // instance — minimap jumps drive the scroll container directly.
+  const isFlatTimeline = find.open;
   const virtuosoRef = useRef<VirtuosoHandle>(null);
   const jumpFlashTimerRef = useRef<number | null>(null);
   useEffect(
@@ -1226,90 +1331,23 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
 
   const loading = issueLoading;
 
-  // Deep-link landing. Semantically equivalent to navigating to
-  // `#comment-${id}`: find the element with that id, scrollIntoView it.
-  // When `highlightCommentId` is set the timeline below renders flat (no
-  // virtualization), so every comment id is in the DOM by the time this
-  // effect runs after commit.
+  // Deep-link tint. Landing the target is no longer this effect's job: the
+  // first frame is anchored by Virtuoso's `initialTopMostItemIndex` below, and
+  // `useCommentAnchorCalibration` holds it there while late content (images
+  // above the target, mermaid, streamed replies) settles. The thread expansion
+  // a reply target may need is derived during render — see `autoExpandRootId`.
   //
-  // For a reply inside a folded resolved thread, the reply is not in items
-  // (only the resolved-bar root is). Auto-expand the thread first; the
-  // effect re-runs once items re-flatten.
-  //
-  // `scrollContainerEl` is in deps because the component early-returns a
-  // loading skeleton while the issue query is pending. The scroll-container
-  // ref populates only on the post-loading render, so it's the signal that
-  // the timeline (and the deep-link target id) has actually rendered.
+  // The old implementation force-rendered the whole timeline flat and re-centred
+  // across ~30 frames; both are gone. Never reintroduce native scrollIntoView
+  // here: it is spec'd to scroll EVERY scrollable ancestor, which shoved the
+  // desktop shell's `overflow:hidden` wrapper off the top with no scrollbar to
+  // recover (#3929). Corrections stay scoped to the scroll container.
   useEffect(() => {
-    if (!highlightCommentId || items.length === 0) return;
-    if (didHighlightRef.current === highlightCommentId) return;
-
-    const rootId = replyToRoot.get(highlightCommentId);
-    if (rootId && rootId !== highlightCommentId) {
-      // Root resolved → the whole thread is a folded bar.
-      if (items[targetIdx]?.kind === "resolved-bar") {
-        toggleResolvedExpand(rootId, true);
-        return;
-      }
-      // A reply is the resolution → the other replies fold behind the
-      // "N comments" bar; expand if the target is one of those folded replies.
-      const rootItem = items[targetIdx];
-      if (rootItem?.kind === "comment" && !expandedResolved.has(rootId)) {
-        const resolution = deriveThreadResolution(
-          rootItem.entry,
-          timelineView.threadReplies.get(rootId) ?? EMPTY_REPLIES,
-        );
-        if (resolution.kind === "reply" && resolution.resolutionId !== highlightCommentId) {
-          toggleResolvedExpand(rootId, true);
-          return;
-        }
-      }
-    }
-
-    const el = document.getElementById(`comment-${highlightCommentId}`);
-    const container = scrollContainerEl;
-    if (!el || !container) return;
-
-    didHighlightRef.current = highlightCommentId;
-
-    // Center the target comment WITHIN its own scroll container by driving the
-    // container's scrollTop directly — never native scrollIntoView. Native
-    // scrollIntoView is spec'd to scroll EVERY scrollable ancestor: on a cold
-    // mount where the timeline is still growing (streaming agent), the inner
-    // scroller can't satisfy centering on its own, so the scroll propagates up
-    // and moves the desktop shell's `overflow:hidden` wrapper — shoving the
-    // whole page, header included, off the top with no scrollbar to recover,
-    // until a resize reflows it (#3929). Scoping the scroll to `container`
-    // keeps it contained; re-centering across frames lands the comment
-    // precisely once async heights (markdown, code highlight, streamed replies)
-    // settle, instead of leaning on the ancestor scroll the way native did.
-    let rafId = 0;
-    let frames = 0;
-    let last = -1;
-    const center = () => {
-      const c = container.getBoundingClientRect();
-      const e = el.getBoundingClientRect();
-      const target = Math.max(
-        0,
-        container.scrollTop + (e.top - c.top) - (container.clientHeight - e.height) / 2,
-      );
-      container.scrollTop = target;
-      // Content is still laying out → the centered offset keeps shifting; keep
-      // re-centering until it stabilizes (within 1px) or we hit ~0.5s of frames.
-      if (Math.abs(target - last) > 1 && ++frames < 30) {
-        last = target;
-        rafId = requestAnimationFrame(center);
-      }
-    };
-    rafId = requestAnimationFrame(center);
-
+    if (!highlightCommentId) return;
     setHighlightedId(highlightCommentId);
     const fade = window.setTimeout(() => setHighlightedId(null), 2500);
-    return () => {
-      cancelAnimationFrame(rafId);
-      clearTimeout(fade);
-    };
-  }, [highlightCommentId, items, targetIdx, scrollContainerEl, replyToRoot, expandedResolved, timelineView, toggleResolvedExpand]);
+    return () => clearTimeout(fade);
+  }, [highlightCommentId]);
 
   const descEditorRef = useRef<ContentEditorRef>(null);
   // Keep the description editor mounted from the start. Unlike the empty
@@ -1471,6 +1509,20 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     scrollContainerEl,
     ready: !!issue && !loading && !timelineLoading,
     disabled: !!highlightCommentId,
+  });
+
+  // Holds the deep-linked comment at the top of the viewport while late
+  // content settles, and re-anchors when a passive inbox update swaps the
+  // target — unless the user has already scrolled, in which case their
+  // reading position wins. Disabled in flat find mode, which owns the scroll.
+  useCommentAnchorCalibration({
+    targetCommentId: highlightCommentId ?? null,
+    targetIndex: targetIdx,
+    scrollContainerEl,
+    contentWrapperEl,
+    virtuosoRef,
+    topGap: DEEP_LINK_TOP_GAP_PX,
+    enabled: !isFlatTimeline,
   });
 
   if (loading) {
@@ -1903,7 +1955,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
             onToggleReaction={handleToggleReaction}
             onResolveToggle={handleResolveToggle}
             onCollapseResolved={isResolved ? () => toggleResolvedExpand(item.id, false) : undefined}
-            expandedResolvedIds={expandedResolved}
+            expandedResolvedIds={effectiveExpandedResolved}
             onResolvedExpandChange={toggleResolvedExpand}
             highlightedCommentId={highlightedId}
           />
@@ -2077,7 +2129,13 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
           data-tab-scroll-root
           className="relative flex-1 overflow-y-auto [scrollbar-gutter:stable_both-edges]"
         >
-        <div className="mx-auto w-full max-w-4xl px-8 py-8">
+        {/* Auto-height content column. The scroll container above is a
+            fixed-height viewport whose border-box never changes, so it is
+            useless to a ResizeObserver; this element is the one that actually
+            grows when a description image, the sub-issues block, or a comment
+            lands late. useCommentAnchorCalibration observes it to know the
+            deep-link target may have been pushed. */}
+        <div ref={setContentWrapperEl} className="mx-auto w-full max-w-4xl px-8 py-8">
           {titleLazy.active && (
             <div className={titleLazy.ready ? undefined : "hidden"}>
               <TitleEditor
@@ -2369,25 +2427,21 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
               <TimelineSkeleton />
             ) : (
               // Two render modes:
-              //   - `highlightCommentId` set (came from inbox deep-link) →
-              //     render flat. Every comment mounts, every height is real,
-              //     the target id is in the DOM the instant the useEffect
-              //     above runs `scrollIntoView`. No virtualization estimate
-              //     errors, no spacer reflow drift. Pays cold-mount cost
-              //     proportional to items.length (markdown + lowlight per
-              //     comment), which is acceptable in the deep-link case —
-              //     the user has explicit intent to land on a specific item.
-              //   - `find.open` (in-page Cmd/Ctrl+F) → also render flat, so
-              //     every comment is in the DOM for the find walk to match
-              //     and highlight. Same explicit-intent cold-mount trade-off.
-              //   - otherwise → Virtuoso. Browsing mode, virtualization
-              //     wins on first-paint perf for long timelines.
-              //
-              // The split is deliberate: virtualization and "land precisely
-              // on a target" have fundamentally opposed contracts (estimated
-              // heights vs real heights). Trying to satisfy both in one
-              // path is what produced the bug history this PR closes.
-              !highlightCommentId && !find.open ? (
+              //   - `find.open` (in-page Cmd/Ctrl+F) → render flat, so every
+              //     comment is in the DOM for the find walk to match and
+              //     highlight. Pays a cold-mount cost proportional to
+              //     items.length, which is the trade-off for an explicit
+              //     "search the whole page" intent.
+              //   - otherwise → Virtuoso, including inbox deep-links. A
+              //     deep-link used to force the flat path too, on the theory
+              //     that only real heights can land precisely on a target;
+              //     what it actually bought was an O(N) markdown + lowlight
+              //     mount on every notification click, and it still drifted,
+              //     because a 30-frame re-centre window cannot outlast an
+              //     image that decodes later. Anchoring by index and holding
+              //     the anchor while heights settle is both cheaper and more
+              //     accurate — see useCommentAnchorCalibration.
+              !find.open ? (
                 !scrollContainerEl ? (
                   // Skeleton while the callback ref populates so the gap
                   // between IssueDetail mount and Virtuoso mount doesn't
@@ -2400,7 +2454,13 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                       ref={virtuosoRef}
                       customScrollParent={scrollContainerEl}
                       data={items}
-                      initialScrollTop={restoredScrollTop}
+                      // Mutually exclusive with initialTopMostItemIndex: they
+                      // are two answers to "where does this list start", and
+                      // upstream's own guidance is to prefer the index form.
+                      // A deep-link wins over restoration — the user asked for
+                      // a comment, not for wherever the tab was left.
+                      initialScrollTop={deepLinkAnchor ? undefined : restoredScrollTop}
+                      initialTopMostItemIndex={deepLinkAnchor}
                       increaseViewportBy={{ top: 800, bottom: 800 }}
                       computeItemKey={(_i, item) => `${item.kind}:${item.id}`}
                       skipAnimationFrameInResizeObserver

@@ -25,6 +25,28 @@ function item(overrides: Partial<InboxItem>): InboxItem {
 }
 
 describe("deduplicateInboxItems", () => {
+  // Load-bearing for the issue-detail deep-link anchor (MUL-4812): because the
+  // inbox shows exactly ONE row per issue, the user cannot hand-pick a second
+  // comment for an issue they are already viewing. That is what lets
+  // useCommentAnchorCalibration treat every highlightCommentId change on a
+  // mounted IssueDetail as a passive update and defer to the user's scroll,
+  // with no provenance flag threaded through the props.
+  //
+  // If this ever stops holding — an ungrouped inbox, a per-notification row —
+  // that inference is void and the anchor will start stealing the viewport on
+  // an explicit click. Fail here first.
+  it("collapses every notification for one issue into a single row", () => {
+    const merged = deduplicateInboxItems([
+      item({ created_at: "2026-06-15T08:00:00Z", id: "inbox-a", issue_id: "issue-1" }),
+      item({ created_at: "2026-06-15T09:00:00Z", id: "inbox-b", issue_id: "issue-1" }),
+      item({ created_at: "2026-06-15T10:00:00Z", id: "inbox-c", issue_id: "issue-1" }),
+      item({ created_at: "2026-06-15T08:30:00Z", id: "inbox-d", issue_id: "issue-2" }),
+    ]);
+
+    expect(merged.map((i) => i.issue_id)).toEqual(["issue-1", "issue-2"]);
+    expect(merged.find((i) => i.issue_id === "issue-1")?.id).toBe("inbox-c");
+  });
+
   it("keeps the newest issue row while preserving an older comment anchor", () => {
     const merged = deduplicateInboxItems([
       item({
