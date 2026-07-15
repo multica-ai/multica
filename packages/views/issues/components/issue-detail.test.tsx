@@ -574,6 +574,16 @@ describe("IssueDetail (shared)", () => {
     ).toBe(true);
   });
 
+  it("renders comment bodies without Base UI collapsible panels", async () => {
+    const { container } = renderIssueDetail();
+
+    await screen.findByText("Started working on this");
+
+    expect(
+      container.querySelector('[data-slot="collapsible-content"]'),
+    ).toBeNull();
+  });
+
   it("renders issue title and description after loading", async () => {
     renderIssueDetail();
 

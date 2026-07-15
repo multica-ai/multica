@@ -28,7 +28,6 @@ import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import rehypeRaw from "rehype-raw";
 import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
-import { createLowlight, common } from "lowlight";
 import { toHtml } from "hast-util-to-html";
 import { Check, Copy } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
@@ -49,14 +48,9 @@ import { MermaidDiagram } from "./mermaid-diagram";
 import { HtmlBlockPreview } from "./html-block-preview";
 import { AttachmentDownloadProvider } from "./attachment-download-context";
 import { Attachment as AttachmentRenderer } from "./attachment";
+import { highlightCode } from "./syntax-highlight";
 import "katex/dist/katex.min.css";
 import "./styles/index.css";
-
-// ---------------------------------------------------------------------------
-// Lowlight — same engine + language set as Tiptap's CodeBlockLowlight
-// ---------------------------------------------------------------------------
-
-const lowlight = createLowlight(common);
 
 // Code fences that the `code` renderer returns as a non-<code> React element
 // (Mermaid diagram, HTML preview iframe). The `pre` renderer below unwraps
@@ -388,9 +382,7 @@ function buildComponents(): Partial<Components> {
       // Block code — highlight with lowlight, output hljs classes
       const code = String(children).replace(/\n$/, "");
       try {
-        const tree = lang
-          ? lowlight.highlight(lang, code)
-          : lowlight.highlightAuto(code);
+        const tree = highlightCode(code, lang);
         const html = toHtml(tree);
         if (html) {
           return (
