@@ -196,7 +196,23 @@ func (h *Handler) UpsertIssueExternalIdentity(w http.ResponseWriter, r *http.Req
 		writeError(w, http.StatusInternalServerError, "failed to create external identity write receipt")
 		return
 	}
-	writeJSON(w, status, map[string]any{"issue": issue, "receipt": receipt})
+	responseIssue := externalUpsertResponseIssue(issue, receiptProtocol)
+	writeJSON(w, status, map[string]any{"issue": responseIssue, "receipt": receipt})
+}
+
+func externalUpsertResponseIssue(issue IssueResponse, receiptProtocol string) any {
+	if receiptProtocol != authority.WriteReceiptProtocolV1 {
+		return issue
+	}
+	return map[string]any{
+		"id": issue.ID, "workspace_id": issue.WorkspaceID, "number": issue.Number, "identifier": issue.Identifier,
+		"title": issue.Title, "description": issue.Description, "status": issue.Status, "priority": issue.Priority,
+		"assignee_type": issue.AssigneeType, "assignee_id": issue.AssigneeID, "creator_type": issue.CreatorType,
+		"creator_id": issue.CreatorID, "parent_issue_id": issue.ParentIssueID, "project_id": issue.ProjectID,
+		"position": issue.Position, "stage": issue.Stage, "start_date": issue.StartDate, "due_date": issue.DueDate,
+		"created_at": issue.CreatedAt, "updated_at": issue.UpdatedAt, "metadata": issue.Metadata,
+		"reactions": issue.Reactions, "attachments": issue.Attachments, "labels": issue.Labels,
+	}
 }
 
 func (h *Handler) externalUpsertAuthorizationError(r *http.Request, aliases []externalIdentityAliasRequest) (int, string) {

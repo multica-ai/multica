@@ -218,6 +218,13 @@ func TestUpsertIssueExternalIdentityOldClientGetsStrictV1Receipt(t *testing.T) {
 	if err := dec.Decode(&oldEnvelope); err != nil {
 		t.Fatalf("old strict client rejected new-server v1 response after commit: %v; body=%s", err, w.Body.String())
 	}
+	var oldIssueFields map[string]json.RawMessage
+	if err := json.Unmarshal(oldEnvelope.Issue, &oldIssueFields); err != nil {
+		t.Fatalf("decode old-client issue response: %v", err)
+	}
+	if _, ok := oldIssueFields["properties"]; ok {
+		t.Fatalf("old strict client would reject new-server v1 issue response after commit: unknown issue field %q; body=%s", "properties", w.Body.String())
+	}
 	if oldEnvelope.Receipt.Protocol != "multica-authority-write-receipt-v1" {
 		t.Fatalf("protocol=%q, want v1", oldEnvelope.Receipt.Protocol)
 	}
