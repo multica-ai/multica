@@ -1394,6 +1394,26 @@ type CerebroRoundMember struct {
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
+type CerebroRunPromptSnapshot struct {
+	ID                    pgtype.UUID        `json:"id"`
+	WorkspaceID           pgtype.UUID        `json:"workspace_id"`
+	TaskID                pgtype.UUID        `json:"task_id"`
+	AgentID               pgtype.UUID        `json:"agent_id"`
+	IssueID               pgtype.UUID        `json:"issue_id"`
+	AgentContextVersion   string             `json:"agent_context_version"`
+	AgentContextVersionID pgtype.UUID        `json:"agent_context_version_id"`
+	Provider              string             `json:"provider"`
+	Model                 string             `json:"model"`
+	RuntimeVersion        string             `json:"runtime_version"`
+	SystemPromptMode      string             `json:"system_prompt_mode"`
+	Layers                []byte             `json:"layers"`
+	Sha256Original        string             `json:"sha256_original"`
+	Sha256Redacted        string             `json:"sha256_redacted"`
+	TotalBytes            int32              `json:"total_bytes"`
+	Redacted              bool               `json:"redacted"`
+	CreatedAt             pgtype.Timestamptz `json:"created_at"`
+}
+
 type CerebroRuntimeTool struct {
 	ID            pgtype.UUID        `json:"id"`
 	RuntimeID     pgtype.UUID        `json:"runtime_id"`

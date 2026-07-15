@@ -4009,6 +4009,9 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		"timeout", execOpts.Timeout,
 	)
 
+	// CEREBRO-PATCH(run-prompt-snapshot): FIR-3212 — ship byte-exact production prompt evidence before spawn (async, best-effort; see cerebro_prompt_snapshot.go).
+	d.shipPromptSnapshot(buildPromptSnapshot(promptSnapshotInput{Task: task, Provider: provider, Model: model, RuntimeVersion: d.agentVersion(provider), SystemPromptMode: string(execOpts.SystemPromptMode), RuntimeBrief: runtimeBrief, BriefInline: execOpts.SystemPrompt != "", Prompt: prompt, Secrets: snapshotSecretsForTask(task, agentToken)}), taskLog)
+
 	result, tools, err := d.executeAndDrain(ctx, backend, prompt, execOpts, taskLog, task.ID)
 	if err != nil {
 		return TaskResult{}, err

@@ -1323,6 +1323,7 @@ var excluded = map[string]string{
 	"POST /api/daemon/tasks/{taskId}/fail":                                         "daemon-token — runtime daemon callback",
 	"POST /api/daemon/tasks/{taskId}/messages":                                     "daemon-token — runtime daemon callback",
 	"POST /api/daemon/tasks/{taskId}/progress":                                     "daemon-token — runtime daemon callback",
+	"POST /api/daemon/tasks/{taskId}/prompt-snapshot":                              "daemon-token — runtime daemon callback",
 	"POST /api/daemon/tasks/{taskId}/session":                                      "daemon-token — runtime daemon callback",
 	"POST /api/daemon/tasks/{taskId}/start":                                        "daemon-token — runtime daemon callback",
 	"POST /api/daemon/tasks/{taskId}/usage":                                        "daemon-token — runtime daemon callback",

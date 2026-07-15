@@ -1117,6 +1117,10 @@
       "gate": "daemon_auth"
     },
     {
+      "id": "POST /api/daemon/tasks/{taskId}/prompt-snapshot",
+      "gate": "daemon_auth"
+    },
+    {
       "id": "POST /api/daemon/tasks/{taskId}/session",
       "gate": "daemon_auth"
     },

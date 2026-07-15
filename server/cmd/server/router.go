@@ -1024,7 +1024,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		r.Post("/tasks/{taskId}/complete", h.CompleteTask)
 		r.Post("/tasks/{taskId}/fail", h.FailTask)
 		r.Post("/tasks/{taskId}/usage", h.ReportTaskUsage)
-		r.Post("/tasks/{taskId}/skill-usage", h.ReportTaskSkillUsage) // CEREBRO-PATCH(task-skill-usage-route): FIR-2996 explicit runtime-reported skill invocations.
+		r.Post("/tasks/{taskId}/skill-usage", h.ReportTaskSkillUsage)          // CEREBRO-PATCH(task-skill-usage-route): FIR-2996 explicit runtime-reported skill invocations.
+		r.Post("/tasks/{taskId}/prompt-snapshot", h.ReportTaskPromptSnapshot) // CEREBRO-PATCH(run-prompt-snapshot): FIR-3212 byte-exact per-run production prompt evidence.
 		r.Post("/tasks/{taskId}/messages", h.ReportTaskMessages)
 		r.Get("/tasks/{taskId}/messages", h.ListTaskMessages)
 
@@ -1754,6 +1755,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					// CEREBRO-PATCH(cerebro-agent-office-routes): FIR-1775 — per-agent
 					// context versioning + governance (versions, ownership, propose,
 					// diff, rollback).
+					// CEREBRO-PATCH(run-prompt-snapshot): FIR-3212 — per-run production prompt evidence (read-only).
+					r.Get("/prompt-snapshots", h.ListAgentPromptSnapshots)
+					r.Get("/prompt-snapshots/{taskId}", h.GetAgentPromptSnapshot)
 					r.Get("/context/versions", cerebroAgentOfficeHandler.ListVersions)
 					r.Put("/context/ownership", cerebroAgentOfficeHandler.UpdateOwnership)
 					r.Get("/context/change-requests", cerebroAgentOfficeHandler.ListChangeRequests)

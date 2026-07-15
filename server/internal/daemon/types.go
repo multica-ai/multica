@@ -217,6 +217,8 @@ type AgentData struct {
 	PersonaSandbox        string          `json:"persona_sandbox,omitempty"`
 	RuntimePersonaSandbox string          `json:"runtime_persona_sandbox,omitempty"`
 	RuntimeConfig         json.RawMessage `json:"runtime_config,omitempty"`
+	// CEREBRO-PATCH(run-prompt-snapshot): FIR-3212 — agent.context_version at claim time; empty on old servers.
+	ContextVersion string `json:"context_version,omitempty"`
 }
 
 // SkillData represents a structured skill for task execution.

@@ -1412,6 +1412,8 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 			ThinkingLevel: agent.ThinkingLevel.String,
 			OwnerID:       uuidToString(agent.OwnerID),
 			RuntimeConfig: runtimeConfig,
+			// CEREBRO-PATCH(run-prompt-snapshot): FIR-3212 — claim-time config version for the run's prompt snapshot.
+			ContextVersion: agent.ContextVersion,
 		}
 	}
 
