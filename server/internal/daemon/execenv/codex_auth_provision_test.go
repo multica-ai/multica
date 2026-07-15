@@ -85,7 +85,7 @@ func TestPrepareCodexHomeFailsClosedWithoutFileAuth(t *testing.T) {
 	t.Setenv("CODEX_HOME", filepath.Join(root, "ws", "task", "codex-home"))
 	t.Setenv("OPENAI_API_KEY", "")
 	err := prepareCodexHome(filepath.Join(t.TempDir(), "codex-home"), testLogger())
-	if err == nil || !strings.Contains(err.Error(), "readable provisioned auth.json") {
+	if err == nil || !strings.Contains(err.Error(), "readable durable source auth.json") {
 		t.Fatalf("error = %v", err)
 	}
 }
@@ -105,7 +105,7 @@ func TestPrepareCodexHomeFailsClosedForDefaultAndCustomHomes(t *testing.T) {
 				t.Setenv("CODEX_HOME", "")
 			}
 			err := prepareCodexHome(filepath.Join(t.TempDir(), "codex-home"), testLogger())
-			if err == nil || !strings.Contains(err.Error(), "readable provisioned auth.json") {
+			if err == nil || !strings.Contains(err.Error(), "readable durable source auth.json") {
 				t.Fatalf("error = %v", err)
 			}
 		})
@@ -205,6 +205,9 @@ func TestManagedCodexHomeDetectionUsesDaemonMarker(t *testing.T) {
 
 func TestValidateCodexAuthDestinationAcceptsWindowsCopyFallback(t *testing.T) {
 	shared := t.TempDir()
+	if err := os.WriteFile(filepath.Join(shared, "auth.json"), []byte("source-auth"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	dst := filepath.Join(t.TempDir(), "auth.json")
 	if err := os.WriteFile(dst, []byte("copied-auth"), 0o600); err != nil {
 		t.Fatal(err)
@@ -212,5 +215,40 @@ func TestValidateCodexAuthDestinationAcceptsWindowsCopyFallback(t *testing.T) {
 	t.Setenv("OPENAI_API_KEY", "")
 	if err := validateCodexAuthDestination(shared, dst); err != nil {
 		t.Fatalf("regular-file fallback rejected: %v", err)
+	}
+}
+
+func TestWindowsCopyFallbackFailsClosedAfterSourceRemoval(t *testing.T) {
+	shared := t.TempDir()
+	source := filepath.Join(shared, "auth.json")
+	if err := os.WriteFile(source, []byte("source-auth"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CODEX_HOME", shared)
+	t.Setenv("OPENAI_API_KEY", "")
+	root := t.TempDir()
+	workDir := filepath.Join(root, "workdir")
+	destination := filepath.Join(root, "codex-home", "auth.json")
+	if err := os.MkdirAll(filepath.Dir(destination), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Models createFileLink's Windows fallback: a regular file, not a symlink.
+	if err := os.WriteFile(destination, []byte("copied-auth"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := validateCodexAuthDestination(shared, destination); err != nil {
+		t.Fatalf("initial copy invalid: %v", err)
+	}
+	if err := os.Remove(source); err != nil {
+		t.Fatal(err)
+	}
+	if err := prepareCodexHome(filepath.Join(t.TempDir(), "codex-home"), testLogger()); err == nil || !strings.Contains(err.Error(), "readable durable source auth.json") {
+		t.Fatalf("prepare error = %v", err)
+	}
+	if err := os.MkdirAll(workDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if got := Reuse(ReuseParams{WorkDir: workDir, Provider: "codex"}, testLogger()); got != nil {
+		t.Fatalf("Reuse = %#v, want nil", got)
 	}
 }

@@ -238,7 +238,13 @@ func codexFileAuthRequired(sharedHome string) bool {
 }
 
 func validateCodexAuthDestination(sharedHome, destination string) error {
-	if codexFileAuthRequired(sharedHome) && !isReadableRegularFile(destination) {
+	if !codexFileAuthRequired(sharedHome) {
+		return nil
+	}
+	if !isReadableRegularFile(filepath.Join(sharedHome, "auth.json")) {
+		return errors.New("codex file authentication requires readable durable source auth.json")
+	}
+	if !isReadableRegularFile(destination) {
 		return errors.New("codex file authentication requires readable provisioned auth.json")
 	}
 	return nil
