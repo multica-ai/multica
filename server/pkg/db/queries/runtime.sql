@@ -658,7 +658,7 @@ RETURNING *;
 UPDATE agent_runtime
 SET hold_until = NULL, hold_reason = NULL, updated_at = now()
 WHERE hold_until IS NOT NULL AND hold_until <= now()
-RETURNING id, workspace_id, owner_id, daemon_id, provider;
+RETURNING id, workspace_id;
 
 -- name: ListStaleOfflineRuntimeGCCandidates :many
 -- Bounded gather for runtime GC. Non-terminal task owners are deliberately
