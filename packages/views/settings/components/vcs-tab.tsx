@@ -37,6 +37,11 @@ const PROVIDER_LABELS: Record<VCSProvider, string> = {
   gitea: "Gitea",
   gitlab: "GitLab",
 };
+const PROVIDER_OPTIONS = PROVIDERS.map((p) => ({
+  value: p,
+  label: PROVIDER_LABELS[p],
+}));
+
 
 export function VCSTab() {
   const { t } = useT("settings");
@@ -209,7 +214,11 @@ export function VCSTab() {
               <>
                 <div className="space-y-1.5">
                   <Label htmlFor="vcs-provider">{t(($) => $.vcs.form_provider_label)}</Label>
-                  <Select value={provider} onValueChange={(v) => setProvider(v as VCSProvider)}>
+                  <Select
+                    items={PROVIDER_OPTIONS}
+                    value={provider}
+                    onValueChange={(v) => setProvider(v as VCSProvider)}
+                  >
                     <SelectTrigger id="vcs-provider" disabled={connecting}>
                       <SelectValue />
                     </SelectTrigger>

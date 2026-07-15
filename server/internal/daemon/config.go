@@ -946,6 +946,7 @@ func resolveAgentsViaLoginShell(names []string) map[string]string {
 
 	cmd := exec.CommandContext(ctx, shell, "-ilc", buildLoginShellResolveScript(safe))
 	cmd.WaitDelay = loginShellResolveWaitDelay
+	cmd.Stdin = strings.NewReader("")
 	raw, err := cmd.Output()
 	if err != nil {
 		return out
