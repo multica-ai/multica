@@ -156,6 +156,12 @@ cleared_installations AS (
 cleared_issue_properties AS (
     DELETE FROM issue_property WHERE workspace_id = $1
 ),
+cleared_issue_relations AS (
+    -- issue_relation has no FK to workspace or issue, so its rows are not swept
+    -- by the CASCADE DELETE below; remove them here so they commit or roll back
+    -- atomically with the workspace teardown.
+    DELETE FROM issue_relation WHERE workspace_id = $1
+),
 deleted_pending_check_suites AS (
     DELETE FROM github_pending_check_suite WHERE workspace_id = $1
 )
