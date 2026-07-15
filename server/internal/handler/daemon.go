@@ -1375,6 +1375,8 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		}
 		// CEREBRO-PATCH(daemon-agentvault-claim-broker): TECH-3196 inject per-agent Agent Vault broker env at claim.
 		customEnv = h.mergeAgentVaultEnvForClaim(r, agent.ID, runtime.WorkspaceID, agent.Name, customEnv)
+		// CEREBRO-PATCH(personal-browser-gate): FIR-3006 expose the local personal-browser bridge when its effective feature flag is on; every action remains server-authorized per agent and host.
+		customEnv = h.withPersonalBrowserEnv(r.Context(), customEnv, agent.WorkspaceID, agent.OwnerID)
 		var customArgs []string
 		if agent.CustomArgs != nil {
 			if err := json.Unmarshal(agent.CustomArgs, &customArgs); err != nil {

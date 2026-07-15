@@ -23,7 +23,9 @@ package handler
 
 import (
 	"context"
+	"errors"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
@@ -51,22 +53,39 @@ const personalBrowserGrantEnv = "MULTICA_PERSONAL_BROWSER"
 // when checked with no host, so the agent would never even get the env to try.
 const personalBrowserFeatureFlag = "cerebro_browser"
 
-// personalBrowserFeatureEnabled reports whether the personal browser feature is
-// switched ON for this workspace. The flag default is OFF (client-side default,
-// no stored row), so a missing override or a lookup error resolves to OFF — the
-// feature, and the env grant below, stay sealed unless an admin explicitly
-// enabled it. This is only the "is the feature reachable" gate; whether THIS
-// agent may drive THIS host is decided authoritatively per action server-side.
-func (h *Handler) personalBrowserFeatureEnabled(ctx context.Context, wsID pgtype.UUID) bool {
-	enabled, err := h.CerebroQueries.GetCerebroFeatureFlag(ctx, cerebrodb.GetCerebroFeatureFlagParams{
+// personalBrowserFeatureEnabled resolves the feature for the agent owner using
+// the same precedence as the UI: a locked workspace value wins, then a personal
+// override, then an unlocked workspace default. Missing rows and lookup errors
+// keep the default-OFF feature sealed.
+func (h *Handler) personalBrowserFeatureEnabled(ctx context.Context, wsID, ownerID pgtype.UUID) bool {
+	workspaceRows, err := h.CerebroQueries.ListCerebroWorkspaceFeatureFlags(ctx, wsID)
+	if err != nil {
+		return false
+	}
+	var workspaceEnabled, workspaceSet, workspaceLocked bool
+	for _, row := range workspaceRows {
+		if row.FlagKey != personalBrowserFeatureFlag {
+			continue
+		}
+		workspaceEnabled, workspaceSet, workspaceLocked = row.Enabled, true, row.Locked
+		break
+	}
+	if workspaceLocked {
+		return workspaceEnabled
+	}
+
+	personalEnabled, err := h.CerebroQueries.GetCerebroFeatureFlag(ctx, cerebrodb.GetCerebroFeatureFlagParams{
 		WorkspaceID: wsID,
-		UserID:      pgtype.UUID{Valid: true}, // all-zero sentinel = workspace-level row
+		UserID:      ownerID,
 		FlagKey:     personalBrowserFeatureFlag,
 	})
-	if err != nil {
-		return false // no override or DB error → default OFF
+	if err == nil {
+		return personalEnabled
 	}
-	return enabled
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return false
+	}
+	return workspaceSet && workspaceEnabled
 }
 
 // withPersonalBrowserEnv returns the agent's custom-env map with the personal
@@ -75,8 +94,8 @@ func (h *Handler) personalBrowserFeatureEnabled(ctx context.Context, wsID pgtype
 // CLI fast-fails on when absent — it is NOT the authorization decision (that is
 // per action, per host, Base=Deny, in AuthorizePersonalBrowser). A nil input map
 // is allocated lazily only when the grant is added, so the off path keeps nil nil.
-func (h *Handler) withPersonalBrowserEnv(ctx context.Context, env map[string]string, wsID pgtype.UUID) map[string]string {
-	if !h.personalBrowserFeatureEnabled(ctx, wsID) {
+func (h *Handler) withPersonalBrowserEnv(ctx context.Context, env map[string]string, wsID, ownerID pgtype.UUID) map[string]string {
+	if !h.personalBrowserFeatureEnabled(ctx, wsID, ownerID) {
 		return env
 	}
 	if env == nil {
