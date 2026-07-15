@@ -452,6 +452,31 @@ type DaemonToken struct {
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
+// Transactional-outbox domain event log (MUL-4332 §4.1). One row per committed domain fact, written in the same tx as the fact. Source of truth for the hooks engine; no FK, no cascade, app-layer integrity. dispatch_* columns are the single-consumer outbox lease consumed by the PR3 matcher.
+type DomainEvent struct {
+	ID                   pgtype.UUID        `json:"id"`
+	Seq                  int64              `json:"seq"`
+	WorkspaceID          pgtype.UUID        `json:"workspace_id"`
+	Type                 string             `json:"type"`
+	SchemaVersion        int32              `json:"schema_version"`
+	SubjectType          string             `json:"subject_type"`
+	SubjectID            pgtype.UUID        `json:"subject_id"`
+	ActorType            string             `json:"actor_type"`
+	ActorID              pgtype.UUID        `json:"actor_id"`
+	Payload              []byte             `json:"payload"`
+	CorrelationID        pgtype.UUID        `json:"correlation_id"`
+	CausationExecutionID pgtype.UUID        `json:"causation_execution_id"`
+	CausationActionIndex pgtype.Int4        `json:"causation_action_index"`
+	HopCount             int32              `json:"hop_count"`
+	DispatchStatus       string             `json:"dispatch_status"`
+	Attempts             int32              `json:"attempts"`
+	AvailableAt          pgtype.Timestamptz `json:"available_at"`
+	LeaseToken           pgtype.UUID        `json:"lease_token"`
+	LeaseExpiresAt       pgtype.Timestamptz `json:"lease_expires_at"`
+	DispatchedAt         pgtype.Timestamptz `json:"dispatched_at"`
+	CreatedAt            pgtype.Timestamptz `json:"created_at"`
+}
+
 type Feedback struct {
 	ID          pgtype.UUID        `json:"id"`
 	UserID      pgtype.UUID        `json:"user_id"`

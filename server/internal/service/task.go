@@ -16,6 +16,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/attribution"
+	"github.com/multica-ai/multica/server/internal/domainevent"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/featureflags"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
@@ -2625,6 +2626,20 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 			}
 			chatAssistantMsg = msg
 		}
+
+		// Transactional outbox (MUL-4332): emit task.completed atomically with
+		// the status flip. The status CAS above makes this exactly-once — a
+		// replayed callback finds the task already terminal and never re-emits.
+		if wsID := s.taskWorkspaceID(ctx, qtx, t.AgentID); wsID.Valid {
+			evt := domainevent.TaskCompleted(wsID, t.ID, domainevent.AgentActor(t.AgentID),
+				domainevent.TaskCompletedPayload{
+					IssueID: util.UUIDToString(t.IssueID),
+					AgentID: util.UUIDToString(t.AgentID),
+				})
+			if _, err := domainevent.Write(ctx, qtx, evt); err != nil {
+				return fmt.Errorf("write task.completed event: %w", err)
+			}
+		}
 		return nil
 	}); err != nil {
 		// When parallel agents race, a task may already be completed,
@@ -2952,6 +2967,22 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 				return fmt.Errorf("create retry task: %w", cerr)
 			}
 			retried = &child
+		}
+
+		// Transactional outbox (MUL-4332): emit task.failed atomically with the
+		// fail (and any retry child). retryable reflects whether this failure
+		// spawned an auto-retry; the status CAS makes it exactly-once.
+		if wsID := s.taskWorkspaceID(ctx, qtx, t.AgentID); wsID.Valid {
+			evt := domainevent.TaskFailed(wsID, t.ID, domainevent.AgentActor(t.AgentID),
+				domainevent.TaskFailedPayload{
+					IssueID:   util.UUIDToString(t.IssueID),
+					AgentID:   util.UUIDToString(t.AgentID),
+					Retryable: wantRetry,
+					ErrorCode: failureReason,
+				})
+			if _, err := domainevent.Write(ctx, qtx, evt); err != nil {
+				return fmt.Errorf("write task.failed event: %w", err)
+			}
 		}
 		return nil
 	}); err != nil {
@@ -3431,10 +3462,21 @@ func (s *TaskService) HandleFailedTasks(ctx context.Context, tasks []db.AgentTas
 							"error", checkErr,
 						)
 					} else if !hasActive {
-						updatedIssue, updateErr := s.Queries.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{
-							ID:          t.IssueID,
-							Status:      "todo",
-							WorkspaceID: issue.WorkspaceID,
+						var updatedIssue db.Issue
+						// Transactional outbox (MUL-4332): the stuck-issue reset bypasses the
+						// HTTP UpdateIssue path, so emit issue.status_changed atomically here.
+						updateErr := domainevent.WriteInTx(ctx, s.TxStarter, s.Queries, func(qtx *db.Queries) ([]domainevent.Event, error) {
+							u, uErr := qtx.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{
+								ID:          t.IssueID,
+								Status:      "todo",
+								WorkspaceID: issue.WorkspaceID,
+							})
+							if uErr != nil {
+								return nil, uErr
+							}
+							updatedIssue = u
+							return []domainevent.Event{domainevent.IssueStatusChanged(u.WorkspaceID, u.ID, domainevent.SystemActor(),
+								domainevent.IssueStatusChangedPayload{From: issue.Status, To: u.Status})}, nil
 						})
 						if updateErr != nil {
 							slog.Warn("handle failed tasks: reset stuck issue failed",
@@ -3485,6 +3527,26 @@ func (s *TaskService) HandleFailedTasks(ctx context.Context, tasks []db.AgentTas
 // runInTx executes fn inside a single DB transaction. If TxStarter is nil
 // (e.g. some tests construct TaskService directly), fn runs against the
 // regular Queries handle without transactional guarantees.
+// taskWorkspaceID resolves the workspace of a task via its agent, to stamp the
+// workspace_id of a task domain event (agent_task_queue itself carries no
+// workspace column). It reads on the passed qtx so the lookup stays in the
+// caller's transaction. Best-effort: an unresolvable agent (already deleted)
+// returns an invalid UUID and the caller skips the event rather than wedging
+// the task's terminal callback — a missing agent means the workspace is
+// genuinely unknowable, and the lost event is bounded to that pathological case.
+func (s *TaskService) taskWorkspaceID(ctx context.Context, qtx *db.Queries, agentID pgtype.UUID) pgtype.UUID {
+	if !agentID.Valid {
+		return pgtype.UUID{}
+	}
+	agent, err := qtx.GetAgent(ctx, agentID)
+	if err != nil {
+		slog.Warn("domain event: could not resolve task workspace via agent",
+			"agent_id", util.UUIDToString(agentID), "error", err)
+		return pgtype.UUID{}
+	}
+	return agent.WorkspaceID
+}
+
 func (s *TaskService) runInTx(ctx context.Context, fn func(*db.Queries) error) error {
 	if s.TxStarter == nil {
 		return fn(s.Queries)

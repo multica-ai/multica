@@ -23,6 +23,11 @@ const (
 	// key as enabled so installed v0.4.0 desktop clients, which still gate the
 	// switch on this config decision, receive the permanently enabled behavior.
 	agentSkillTogglesCompat = "agents_skill_toggles"
+	// EventHooks gates the Event Hooks engine (MUL-4332). PR1 only lands the
+	// transactional-outbox event layer, which is always-on and consumer-less;
+	// this flag stays off until the PR3 matcher/executor ships so no reaction
+	// ever fires from a partially-built engine. Server-only, default off.
+	EventHooks = "automation_event_hooks"
 )
 
 var frontendPublicFlags = []string{
@@ -41,6 +46,13 @@ func AgentBuilderEnabled(ctx context.Context, flags *featureflag.Service) bool {
 
 func ResourceLabelsEnabled(ctx context.Context, flags *featureflag.Service) bool {
 	return flags.IsEnabled(ctx, ResourceLabels, false)
+}
+
+// EventHooksEnabled reports whether the Event Hooks engine may run reactions.
+// PR1 does not consult it (the outbox writer is always-on); it exists so the
+// PR3 matcher/executor can gate execution behind a default-off switch.
+func EventHooksEnabled(ctx context.Context, flags *featureflag.Service) bool {
+	return flags.IsEnabled(ctx, EventHooks, false)
 }
 
 func EvaluateFrontendPublicFlags(ctx context.Context, flags *featureflag.Service) map[string]bool {

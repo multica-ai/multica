@@ -18,6 +18,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/domainevent"
 	"github.com/multica-ai/multica/server/internal/issueguard"
 	"github.com/multica-ai/multica/server/internal/logger"
 	"github.com/multica-ai/multica/server/internal/middleware"
@@ -2687,7 +2688,41 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	issue, err := h.Queries.UpdateIssue(r.Context(), params)
+	// Resolve the acting identity once, up here, so the transactional-outbox
+	// events below and the realtime publish further down share one actor.
+	actorType, actorID := h.resolveActor(r, userID, workspaceID)
+	actorUUID, _ := util.ParseUUID(actorID)
+	eventActor := domainevent.ActorFrom(actorType, actorUUID)
+
+	// Transactional outbox (MUL-4332): commit the issue update and any derived
+	// status_changed / assigned event in one transaction, so a crash can never
+	// separate the fact from its event. The events are computed by diffing
+	// prevIssue against the freshly-updated row.
+	var issue db.Issue
+	err = domainevent.WriteInTx(r.Context(), h.TxStarter, h.Queries, func(qtx *db.Queries) ([]domainevent.Event, error) {
+		updated, err := qtx.UpdateIssue(r.Context(), params)
+		if err != nil {
+			return nil, err
+		}
+		issue = updated
+
+		var events []domainevent.Event
+		if req.Status != nil && prevIssue.Status != updated.Status {
+			events = append(events, domainevent.IssueStatusChanged(updated.WorkspaceID, updated.ID, eventActor,
+				domainevent.IssueStatusChangedPayload{From: prevIssue.Status, To: updated.Status}))
+		}
+		if (req.AssigneeType != nil || req.AssigneeID != nil) &&
+			(prevIssue.AssigneeType.String != updated.AssigneeType.String || uuidToString(prevIssue.AssigneeID) != uuidToString(updated.AssigneeID)) {
+			events = append(events, domainevent.IssueAssigned(updated.WorkspaceID, updated.ID, eventActor,
+				domainevent.IssueAssignedPayload{
+					FromAssigneeType: prevIssue.AssigneeType.String,
+					FromAssigneeID:   uuidToString(prevIssue.AssigneeID),
+					ToAssigneeType:   updated.AssigneeType.String,
+					ToAssigneeID:     uuidToString(updated.AssigneeID),
+				}))
+		}
+		return events, nil
+	})
 	if err != nil {
 		slog.Warn("update issue failed", append(logger.RequestAttrs(r), "error", err, "issue_id", id, "workspace_id", workspaceID)...)
 		writeError(w, http.StatusInternalServerError, "failed to update issue: "+err.Error())
@@ -2720,9 +2755,7 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	dueDateChanged := prevDueDate != resp.DueDate && (prevDueDate == nil) != (resp.DueDate == nil) ||
 		(prevDueDate != nil && resp.DueDate != nil && *prevDueDate != *resp.DueDate)
 
-	// Determine actor identity: agent (via X-Agent-ID header) or member.
-	actorType, actorID := h.resolveActor(r, userID, workspaceID)
-
+	// actorType / actorID were resolved above (shared with the domain events).
 	h.publish(protocol.EventIssueUpdated, workspaceID, actorType, actorID, map[string]any{
 		"issue":               resp,
 		"assignee_changed":    assigneeChanged,
@@ -3230,15 +3263,42 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		issue, err := h.Queries.UpdateIssue(r.Context(), params)
-		if err != nil {
-			slog.Warn("batch update issue failed", "issue_id", issueID, "error", err)
+		actorType, actorID := h.resolveActor(r, userID, workspaceID)
+		batchActorUUID, _ := util.ParseUUID(actorID)
+		batchEventActor := domainevent.ActorFrom(actorType, batchActorUUID)
+
+		// Transactional outbox (MUL-4332): each row's update and its derived
+		// status_changed / assigned events commit atomically, per issue.
+		var issue db.Issue
+		if writeErr := domainevent.WriteInTx(r.Context(), h.TxStarter, h.Queries, func(qtx *db.Queries) ([]domainevent.Event, error) {
+			updatedIssue, err := qtx.UpdateIssue(r.Context(), params)
+			if err != nil {
+				return nil, err
+			}
+			issue = updatedIssue
+			var events []domainevent.Event
+			if req.Updates.Status != nil && prevIssue.Status != updatedIssue.Status {
+				events = append(events, domainevent.IssueStatusChanged(updatedIssue.WorkspaceID, updatedIssue.ID, batchEventActor,
+					domainevent.IssueStatusChangedPayload{From: prevIssue.Status, To: updatedIssue.Status}))
+			}
+			if (req.Updates.AssigneeType != nil || req.Updates.AssigneeID != nil) &&
+				(prevIssue.AssigneeType.String != updatedIssue.AssigneeType.String || uuidToString(prevIssue.AssigneeID) != uuidToString(updatedIssue.AssigneeID)) {
+				events = append(events, domainevent.IssueAssigned(updatedIssue.WorkspaceID, updatedIssue.ID, batchEventActor,
+					domainevent.IssueAssignedPayload{
+						FromAssigneeType: prevIssue.AssigneeType.String,
+						FromAssigneeID:   uuidToString(prevIssue.AssigneeID),
+						ToAssigneeType:   updatedIssue.AssigneeType.String,
+						ToAssigneeID:     uuidToString(updatedIssue.AssigneeID),
+					}))
+			}
+			return events, nil
+		}); writeErr != nil {
+			slog.Warn("batch update issue failed", "issue_id", issueID, "error", writeErr)
 			continue
 		}
 
 		prefix := h.getIssuePrefix(r.Context(), issue.WorkspaceID)
 		resp := issueToResponse(issue, prefix)
-		actorType, actorID := h.resolveActor(r, userID, workspaceID)
 
 		assigneeChanged := (req.Updates.AssigneeType != nil || req.Updates.AssigneeID != nil) &&
 			(prevIssue.AssigneeType.String != issue.AssigneeType.String || uuidToString(prevIssue.AssigneeID) != uuidToString(issue.AssigneeID))

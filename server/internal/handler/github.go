@@ -23,6 +23,7 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/domainevent"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -1361,12 +1362,27 @@ func (h *Handler) lookupIssueByIdentifier(ctx context.Context, workspaceID pgtyp
 }
 
 func (h *Handler) advanceIssueToDone(ctx context.Context, issue db.Issue, workspaceID string) {
-	updated, err := h.Queries.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{
-		ID:          issue.ID,
-		Status:      "done",
-		WorkspaceID: issue.WorkspaceID,
-	})
-	if err != nil {
+	// Transactional outbox (MUL-4332): a merged PR closing an issue is one of the
+	// most common status transitions to `done`, so emit issue.status_changed
+	// atomically with the status flip — but only on a real transition (an
+	// already-done issue produces no event).
+	var updated db.Issue
+	if err := domainevent.WriteInTx(ctx, h.TxStarter, h.Queries, func(qtx *db.Queries) ([]domainevent.Event, error) {
+		u, err := qtx.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{
+			ID:          issue.ID,
+			Status:      "done",
+			WorkspaceID: issue.WorkspaceID,
+		})
+		if err != nil {
+			return nil, err
+		}
+		updated = u
+		if issue.Status == u.Status {
+			return nil, nil
+		}
+		return []domainevent.Event{domainevent.IssueStatusChanged(u.WorkspaceID, u.ID, domainevent.SystemActor(),
+			domainevent.IssueStatusChangedPayload{From: issue.Status, To: u.Status})}, nil
+	}); err != nil {
 		slog.Warn("github: advance issue to done failed", "err", err)
 		return
 	}

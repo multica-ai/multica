@@ -14,6 +14,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/domainevent"
 	"github.com/multica-ai/multica/server/internal/logger"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
@@ -1356,19 +1357,37 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	comment, err := h.Queries.CreateComment(r.Context(), db.CreateCommentParams{
-		IssueID:      issue.ID,
-		WorkspaceID:  issue.WorkspaceID,
-		AuthorType:   authorType,
-		AuthorID:     parseUUID(authorID),
-		Content:      req.Content,
-		Type:         req.Type,
-		ParentID:     parentID,
-		SourceTaskID: sourceTaskID,
-	})
-	if err != nil {
-		slog.Warn("create comment failed", append(logger.RequestAttrs(r), "error", err, "issue_id", issueID)...)
-		writeError(w, http.StatusInternalServerError, "failed to create comment: "+err.Error())
+	// Transactional outbox (MUL-4332): the comment and its comment.created event
+	// commit in one transaction. subject is the comment; the payload locates its
+	// issue/thread so a hook can react without a second lookup.
+	commentActorUUID, _ := util.ParseUUID(authorID)
+	commentActor := domainevent.ActorFrom(authorType, commentActorUUID)
+	var comment db.Comment
+	if writeErr := domainevent.WriteInTx(r.Context(), h.TxStarter, h.Queries, func(qtx *db.Queries) ([]domainevent.Event, error) {
+		created, err := qtx.CreateComment(r.Context(), db.CreateCommentParams{
+			IssueID:      issue.ID,
+			WorkspaceID:  issue.WorkspaceID,
+			AuthorType:   authorType,
+			AuthorID:     parseUUID(authorID),
+			Content:      req.Content,
+			Type:         req.Type,
+			ParentID:     parentID,
+			SourceTaskID: sourceTaskID,
+		})
+		if err != nil {
+			return nil, err
+		}
+		comment = created
+		return []domainevent.Event{domainevent.CommentCreated(created.WorkspaceID, created.ID, commentActor,
+			domainevent.CommentCreatedPayload{
+				IssueID:    uuidToString(created.IssueID),
+				AuthorType: authorType,
+				AuthorID:   authorID,
+				ParentID:   uuidToString(parentID),
+			})}, nil
+	}); writeErr != nil {
+		slog.Warn("create comment failed", append(logger.RequestAttrs(r), "error", writeErr, "issue_id", issueID)...)
+		writeError(w, http.StatusInternalServerError, "failed to create comment: "+writeErr.Error())
 		return
 	}
 
