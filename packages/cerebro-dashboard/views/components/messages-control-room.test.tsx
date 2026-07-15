@@ -24,6 +24,10 @@ vi.mock("@tanstack/react-query", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@tanstack/react-query")>()),
   useQuery: () => queryResult,
 }));
+vi.mock("@multica/core/auth", () => ({
+  useAuthStore: (selector: (state: { user: { id: string } }) => unknown) =>
+    selector({ user: { id: "member-1" } }),
+}));
 vi.mock("./analytics-dashboard", () => ({ AnalyticsDashboard: () => null }));
 vi.mock("./message-detail-sheet", () => ({ MessageDetailSheet: () => null }));
 

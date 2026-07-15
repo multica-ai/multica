@@ -3,6 +3,7 @@
 import { useMemo, useState, type Dispatch, type SetStateAction } from "react";
 import { useQuery } from "@tanstack/react-query";
 import type { AnalyticsDimension, AnalyticsOperator } from "@multica/cerebro-usage";
+import { useAuthStore } from "@multica/core/auth";
 import type { ActorMessage, DashboardOverview, TopActor } from "../../core/api";
 import {
   removeAnalyticsFilterValue,
@@ -51,6 +52,7 @@ export function MessagesControlRoom({
   const setRange = useDashboardStore((state) => state.setRange);
   const scope = useDashboardStore((state) => state.scope);
   const actorId = useDashboardStore((state) => state.actorId);
+  const currentUserId = useAuthStore((state) => state.user?.id ?? "");
   const messagesQuery = useQuery(allMessagesOptions(workspaceId, range, scope, actorId));
   const [compactLayout, setCompactLayout] = useState(false);
   const [search, setSearch] = useState("");
@@ -183,7 +185,7 @@ export function MessagesControlRoom({
       </ControlRoomPanel>
 
       <AnalyticsDashboard workspaceId={workspaceId} initialVisuals={[]} filters={filters} onFiltersChange={onFiltersChange} showToolbar={false} builderOpen={builderOpen} onBuilderOpenChange={onBuilderOpenChange} />
-      <MessageDetailSheet message={selectedMessage} wsId={workspaceId} workspaceSlug={workspaceSlug} onClose={() => setSelectedMessage(null)} />
+      <MessageDetailSheet message={selectedMessage} wsId={workspaceId} workspaceSlug={workspaceSlug} currentUserId={currentUserId} onClose={() => setSelectedMessage(null)} />
     </div>
   );
 }

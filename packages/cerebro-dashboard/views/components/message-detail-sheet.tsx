@@ -56,11 +56,13 @@ export function MessageDetailSheet({
   message,
   wsId,
   workspaceSlug,
+  currentUserId,
   onClose,
 }: {
   message: ActorMessage | null;
   wsId: string;
   workspaceSlug: string;
+  currentUserId: string;
   onClose: () => void;
 }) {
   const { data, isLoading } = useQuery(
@@ -168,13 +170,19 @@ export function MessageDetailSheet({
 
             {/* Footer */}
             <div className="shrink-0 border-t p-4">
-              <AppLink
-                href={`/${workspaceSlug}/inbox?chat=${message.session_id}`}
-                className="flex w-full items-center justify-center gap-2 rounded-md border px-3 py-2 text-xs text-muted-foreground transition-colors hover:text-foreground"
-              >
-                <ExternalLink className="size-3.5" />
-                Open full conversation in Inbox
-              </AppLink>
+              {message.sender_id === currentUserId ? (
+                <AppLink
+                  href={`/${workspaceSlug}/inbox?chat=${message.session_id}`}
+                  className="flex w-full items-center justify-center gap-2 rounded-md border px-3 py-2 text-xs text-muted-foreground transition-colors hover:text-foreground"
+                >
+                  <ExternalLink className="size-3.5" />
+                  Open full conversation in Inbox
+                </AppLink>
+              ) : (
+                <p className="text-center text-xs text-muted-foreground">
+                  Only {message.sender_name ?? "the sender"} can open this conversation in Inbox.
+                </p>
+              )}
             </div>
           </>
         )}

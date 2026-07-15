@@ -43,6 +43,7 @@ describe("MessageDetailSheet", () => {
         <MessageDetailSheet
           wsId="workspace-1"
           workspaceSlug="firtal"
+          currentUserId="member-1"
           onClose={vi.fn()}
           message={{
             id: "message-1",
@@ -63,5 +64,40 @@ describe("MessageDetailSheet", () => {
 
     fireEvent.click(link);
     expect(push).toHaveBeenCalledWith("/firtal/inbox?chat=session-1");
+  });
+
+  it("does not promise an Inbox conversation owned by another member", () => {
+    const adapter: NavigationAdapter = {
+      push: vi.fn(),
+      replace: vi.fn(),
+      back: vi.fn(),
+      pathname: "/firtal/dashboard",
+      searchParams: new URLSearchParams(),
+      getShareableUrl: (path) => `https://app.test${path}`,
+    };
+
+    render(
+      <NavigationProvider value={adapter}>
+        <MessageDetailSheet
+          wsId="workspace-1"
+          workspaceSlug="firtal"
+          currentUserId="member-1"
+          onClose={vi.fn()}
+          message={{
+            id: "message-2",
+            content: "Another member's conversation",
+            created_at: "2026-07-15T10:00:00Z",
+            sender_id: "member-2",
+            sender_name: "Nikolaj",
+            agent_id: "agent-1",
+            agent_name: "Tine",
+            session_id: "session-2",
+          }}
+        />
+      </NavigationProvider>,
+    );
+
+    expect(screen.queryByRole("link", { name: "Open full conversation in Inbox" })).toBeNull();
+    expect(screen.getByText("Only Nikolaj can open this conversation in Inbox.")).toBeTruthy();
   });
 });
