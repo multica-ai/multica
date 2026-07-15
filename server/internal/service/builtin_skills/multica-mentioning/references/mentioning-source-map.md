@@ -9,8 +9,8 @@ a pointer.
 | Fact | Source |
 | --- | --- |
 | `MentionRe` — the only recognizer of a mention link | `server/internal/util/mention.go:16` |
-| Pattern: `` `\[@?(.+?)\]\(mention://(member\|agent\|squad\|issue\|all)/([0-9a-fA-F-]+\|all)\)` `` | `server/internal/util/mention.go:16` |
-| `<type>` group = `member \| agent \| squad \| issue \| all` | `server/internal/util/mention.go:16` |
+| Pattern: `` `\[@?(.+?)\]\(mention://(member\|agent\|squad\|issue\|project\|skill\|all)/([0-9a-fA-F-]+\|all)\)` `` | `server/internal/util/mention.go:16` |
+| `<type>` group = `member \| agent \| squad \| issue \| project \| skill \| all` | `server/internal/util/mention.go:16` |
 | `<id>` group = `[0-9a-fA-F-]+` (hex + dashes) **or** the literal `all` — so a typical name with non-hex letters never matches | `server/internal/util/mention.go:16` |
 | `ParseMentions` extracts and dedups `{Type, ID}` from `m[2]`/`m[3]` | `server/internal/util/mention.go:24-37` |
 | `Mention.Type` doc enum = "member", "agent", "issue", or "all" (squad added in regex) | `server/internal/util/mention.go:7` |
@@ -105,6 +105,7 @@ a pointer.
 | `workspace member list` | `user_id` (NOT the membership-row id) | `server/cmd/multica/cmd_workspace.go:465` |
 | `agent list` | `id` | `server/cmd/multica/cmd_agent.go:365` |
 | `squad list` | `id` | `server/cmd/multica/cmd_squad.go:57` |
+| `project list` | `id` | `server/cmd/multica/cmd_project.go` (search `project list` command) |
 | Member mention uses `user_id`, confirmed by the backend roster formatter: `formatMention(user.Name, "member", userID)` where `userID = UUIDToString(m.MemberID)` | `server/internal/handler/squad_briefing.go:189-190` |
 | `formatMention` emits `[@<name>](mention://<type>/<id>)` | `server/internal/handler/squad_briefing.go:216-218` |
 

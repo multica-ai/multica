@@ -1,6 +1,6 @@
 ---
 name: multica-mentioning
-description: "Use when an issue comment needs to @mention someone — link to a person, trigger another agent, hand work to a squad, or broadcast with @all. Documents the verified mention contract: how a mention link is built from a real UUID, the four mention types and exactly what each one enqueues (agent → a run for that agent, squad → a run for the squad leader, member and issue → a rendered link with NO run), comment create/edit preview and suppression, the @all broadcast and how it suppresses the assignee's auto-trigger, and the silent no-op cases (a name where a UUID belongs, a bad/unknown UUID, an already-pending task, an archived agent, a private agent you cannot access). WHETHER to mention — loop avoidance, staying silent on acknowledgements — lives in the runtime brief's Mentions section, not here. This skill is the backend contract only, traced to server/internal/util/mention.go and server/internal/handler/comment.go."
+description: "Use when an issue comment or chat needs to @mention someone or a project — link to a person, reference an issue, direct an agent at a project, trigger another agent, hand work to a squad, or broadcast with @all. Documents the verified mention contract: how a mention link is built from a real UUID, the seven mention types and exactly what each one does (agent → enqueues a run; squad → enqueues a run for the squad leader; member and issue → rendered link, no run; project → rendered link, no automatic enqueue, but can be consumed as an entity directive; skill → rendered link, no run), the consume-side principle for acting on typed mentions, comment create/edit preview and suppression, the @all broadcast and how it suppresses the assignee's auto-trigger, and the silent no-op cases. WHETHER to mention — loop avoidance, staying silent on acknowledgements — lives in the runtime brief's Mentions section, not here. This skill is the backend contract only, traced to server/internal/util/mention.go and server/internal/handler/comment.go."
 user-invocable: false
 allowed-tools: Bash(multica *)
 ---
@@ -23,10 +23,10 @@ The backend recognizes a mention only through this Markdown shape:
     [@Label](mention://<type>/<id>)
 
 The parser (`util.MentionRe` in `server/internal/util/mention.go`) accepts
-exactly four `<type>` values plus the `all` sentinel, and the `<id>` group
+seven `<type>` values plus the `all` sentinel, and the `<id>` group
 accepts only hex characters and dashes, OR the literal string `all`:
 
-    (member|agent|squad|issue|all)/([0-9a-fA-F-]+|all)
+    (member|agent|squad|issue|project|skill|all)/([0-9a-fA-F-]+|all)
 
 So the link target is a real entity UUID (or `all`), never a display name. The
 label between the brackets is free text — that is where the human-readable name
@@ -39,13 +39,14 @@ A name is not a UUID. Look the UUID up first, from the matching list command:
 - a person → `multica workspace member list --output json` → use `user_id`
 - an agent → `multica agent list --output json` → use `id`
 - a squad  → `multica squad list --output json` → use `id`
+- a project → `multica project list --output json` → use `id`
 
 For a person the mention id is the `user_id`, NOT the membership-row id — the
 backend's own roster formatter uses `user_id` for member mentions. Match by
 display name. If the name is ambiguous or absent, do not guess — say so in your
 comment instead of emitting a broken link.
 
-## Step 2 — the four types and exactly what each enqueues
+## Step 2 — the seven types and exactly what each does
 
 Format: `[@Name](mention://<type>/<uuid>)`. The `<type>` and the id source must
 match, or the link resolves to the wrong entity (or to nothing).
@@ -56,6 +57,8 @@ match, or the link resolves to the wrong entity (or to nothing).
 | hand work to a squad | `squad`  | squad.id        | resolves the squad's `leader_id` and enqueues a run for the LEADER agent |
 | link a person        | `member` | member.user_id  | renders a link; enqueues NOTHING — no agent run          |
 | reference an issue   | `issue`  | issue.id        | renders a link; enqueues NOTHING — always safe           |
+| reference a project  | `project`| project.id      | renders a link; enqueues NOTHING — see Consume-side section for how to act on it |
+| reference a skill    | `skill`  | skill.id        | renders a link; enqueues NOTHING — no automatic enqueue  |
 
 The mention trigger set is computed by `computeMentionedAgentCommentTriggers`
 (`server/internal/handler/comment.go`); the comment path folds that result into
@@ -63,7 +66,7 @@ The mention trigger set is computed by `computeMentionedAgentCommentTriggers`
 It acts on two types only: the `squad` branch resolves the squad and adds its
 leader to the trigger set; everything that is not `agent` after that is skipped
 (`if m.Type != "agent" { continue }`), then the `agent` branch adds that agent.
-A `member` or `issue` mention reaches neither branch, so it enqueues no task.
+A `member`, `issue`, `project`, or `skill` mention reaches neither branch, so it enqueues no task.
 
 A `member` mention therefore does NOT make a person "run", and this skill does
 NOT claim it delivers a notification through the Go comment handler — there is
@@ -126,6 +129,45 @@ These are all silent no-ops — no error, no run:
   `canAccessPrivateAgent` directly for both `@agent` and `@squad` (the
   `canEnqueueSquadLeader` wrapper is the squad assignment/promote path, not this
   one; the child-done wake is ungated — see the multica-squads skill).
+
+## Consume-side: acting on typed mentions
+
+When a comment or chat directed at you contains a typed mention link, the
+backend injects it as structured context (type + UUID) alongside the raw text.
+You do not need to parse the Markdown yourself — treat the structured slot as
+the authoritative signal.
+
+**General principle:** any typed `mention://<type>/<uuid>` identifies an entity
+you can fetch on demand via the `multica` CLI. The type tells you which command
+to use:
+
+| type      | Fetch command                                           |
+| --------- | ------------------------------------------------------- |
+| `issue`   | `multica issue get <uuid> --output json`                |
+| `member`  | `multica workspace member list --output json` (find by id) |
+| `project` | `multica project get <uuid> --output json`              |
+| `skill`   | `multica skill list --output json` (find by id)         |
+| `agent`   | `multica agent get <uuid> --output json`                |
+| `squad`   | `multica squad get <uuid> --output json`                |
+
+**Project-mention behavior:** a `@project` mention in a comment or chat is a
+typed directive. Two cases:
+
+- **Bare `@project` with no instruction.** Record the project as the target
+  and ask what to do — do not fetch anything until instructed.
+- **Directed `@project` with an instruction.** Fetch the project metadata
+  (`multica project get <uuid> --output json`) and its issue list
+  (`multica project issue list <uuid> --output json`), then act on the
+  instruction.
+
+**Cross-workspace project mentions:** when a mention carries a workspace
+qualifier (`mention://project/<uuid>?ws=<wsUuid>`), the backend resolves the
+project server-side and injects a snapshot. Pass `--workspace-id <wsUuid>` on
+your `multica` calls so the CLI targets the correct workspace.
+
+**Other mention types behave as documented above:** `agent` and `squad` enqueue
+runs (already handled by the backend); `member` and `issue` are rendered links
+with no action required; `skill` is informational only.
 
 ## Incorrect → Correct
 

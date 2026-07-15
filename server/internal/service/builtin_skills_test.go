@@ -375,6 +375,51 @@ func TestCreatingAgentsSkillCoversAgentCreationContracts(t *testing.T) {
 	}
 }
 
+// TestMentioningSkillTeachesConsumeSidePrinciple verifies the consume-side
+// guidance is present in the skill so agents know how to act on typed
+// mentions (especially @project) rather than ignoring them.
+func TestMentioningSkillTeachesConsumeSidePrinciple(t *testing.T) {
+	skill, ok := findSkill(t, "multica-mentioning")
+	if !ok {
+		return
+	}
+	_, body, _ := splitFrontmatter(skill.Content)
+
+	mustContain := []string{
+		// consume-side principle
+		"Consume-side",
+		"typed mention link",
+		"structured context",
+		// project behavior
+		"Bare",
+		"Record the project as the target",
+		"multica project get",
+		"multica project issue list",
+		// cross-workspace
+		"?ws=",
+		"--workspace-id",
+		// other types
+		"member",
+		"issue",
+		"project",
+		"skill",
+		"agent",
+		"squad",
+		// corrected type count
+		"seven",
+	}
+	for _, want := range mustContain {
+		if !strings.Contains(body, want) {
+			t.Errorf("mentioning skill missing consume-side content %q", want)
+		}
+	}
+
+	// seven types documented: no "four" claim remains
+	if strings.Contains(body, "four") && !strings.Contains(body, "seven") {
+		t.Errorf("mentioning skill still claims four types; should document seven")
+	}
+}
+
 func TestSquadsSkillCoversLeaderRoutingContract(t *testing.T) {
 	skill, ok := findSkill(t, "multica-squads")
 	if !ok {
