@@ -209,6 +209,25 @@ runtime resolver then re-checks the acting member: API endpoints use
 Only `Allow` dispatches; `Ask`, `Deny`, lookup errors, undeclared MCP tools, and
 transport errors fail closed. Stored Connection credentials remain server-side.
 
+### Managed Pi harness
+
+When the workspace flag `cerebro_pi_harness` is on, a Pi runtime receives one
+task-scoped managed extension from `packages/cerebro-pi-harness`. The extension
+is the only Connection registration path for that Pi process: user-supplied
+extension and tool-selection arguments are removed before spawn. It exposes the
+task token's Multica CLI/MCP surface over stdio and the claim's enabled MCP HTTP
+Connections directly; API Connection credentials remain in the server-side
+relay configuration and are never copied into the task environment.
+
+Before every managed tool call the extension asks the existing daemon
+`/tool-policy/resolve` endpoint for the acting task's decision. `Allow`
+dispatches, `Ask` dispatches only after the resolver returns a final approved
+decision, and `Deny` does not dispatch. In `enforce` stage, a missing or invalid
+policy response fails closed. A failed call marked as a mutation is never
+automatically retried because the external outcome may be unknown. Turning the
+workspace flag off restores the prior Pi spawn path; other providers are
+unchanged.
+
 ## What is enforced LIVE today (no flag required)
 
 The personal browser's `secure-fill` action has an additional always-on floor:

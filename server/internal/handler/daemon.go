@@ -1391,6 +1391,7 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		var connDisallowedMCPTools []string
 		mcpConfig, connDisallowedMCPTools = h.injectClaimConnectionMCP(r.Context(), runtime.WorkspaceID, task.RuntimeID, task.AgentID, agent.OwnerID, task.InitiatorUserID, mcpConfig)
 		resp.DisallowedMCPTools = connDisallowedMCPTools
+		resp.PiHarnessEnabled = h.piHarnessFeatureEnabled(r.Context(), runtime.WorkspaceID, agent.OwnerID) // CEREBRO-PATCH(daemon-claim-pi-harness-flag): FIR-3272.
 		// runtime_config is stored as JSONB and may legitimately be the
 		// empty object `{}` for agents that haven't opted into any
 		// provider-specific tuning. Forward only non-empty payloads so the

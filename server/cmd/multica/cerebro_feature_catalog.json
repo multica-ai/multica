@@ -862,6 +862,13 @@
       "default": false
     },
     {
+      "key": "cerebro_pi_harness",
+      "label": "Managed Pi harness",
+      "description": "Run Pi agents with the Firtal-owned harness for Multica Connections, unified Allow/Ask/Deny tool policy, and durable session recovery. Turn off to restore Pi's unmanaged extension behavior. FIR-3272.",
+      "group": "agents",
+      "default": true
+    },
+    {
       "key": "cerebro_agent_vault",
       "label": "Agent Vault secret brokering",
       "description": "Broker per-agent access to secrets via Infisical Agent Vault over the internal path: the backend swaps a placeholder for the real credential on the way out, so an agent uses a secret without ever holding it. An admin-controlled table sets which key-boxes each agent may reach. TECH-3196.",

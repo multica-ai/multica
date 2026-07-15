@@ -119,6 +119,66 @@ func TestPiExecuteAttachesStdinPipe(t *testing.T) {
 	}
 }
 
+// CEREBRO-PATCH(agent-pi-early-session-test): FIR-3272 proves Pi pins resume state before tool execution.
+func TestPiPinsSessionIDAtAgentStart(t *testing.T) {
+	fakePath := filepath.Join(t.TempDir(), "pi")
+	writeTestExecutable(t, fakePath, []byte("#!/bin/sh\nprintf '%s\\n' '{\"type\":\"agent_start\"}'\n"))
+	backend, err := New("pi", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	if err != nil {
+		t.Fatalf("new pi backend: %v", err)
+	}
+	session, err := backend.Execute(context.Background(), "prompt", ExecOptions{Timeout: 5 * time.Second})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	for message := range session.Messages {
+		if message.Type == MessageStatus && message.Status == "running" {
+			if message.SessionID == "" {
+				t.Fatal("agent_start status did not pin the Pi session ID")
+			}
+			return
+		}
+	}
+	t.Fatal("Pi emitted no running status")
+}
+
+// CEREBRO-PATCH(agent-pi-tool-telemetry-test): FIR-3272 characterises Pi tool audit and token usage events.
+func TestPiStreamsToolAuditAndUsage(t *testing.T) {
+	fakePath := filepath.Join(t.TempDir(), "pi")
+	script := `#!/bin/sh
+printf '%s\n' '{"type":"agent_start"}'
+printf '%s\n' '{"type":"tool_execution_start","toolCallId":"call-1","toolName":"mcp__finance__forecast","args":{"city":"Aarhus"}}'
+printf '%s\n' '{"type":"tool_execution_end","toolCallId":"call-1","toolName":"mcp__finance__forecast","result":"sunny"}'
+printf '%s\n' '{"type":"turn_end","message":{"role":"assistant","model":"anthropic/test","usage":{"input":7,"output":3,"cacheRead":2,"cacheWrite":1,"totalTokens":13}}}'
+`
+	writeTestExecutable(t, fakePath, []byte(script))
+	backend, err := New("pi", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	if err != nil {
+		t.Fatalf("new pi backend: %v", err)
+	}
+	session, err := backend.Execute(context.Background(), "prompt", ExecOptions{Timeout: 5 * time.Second})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	var sawUse, sawResult bool
+	for message := range session.Messages {
+		switch message.Type {
+		case MessageToolUse:
+			sawUse = message.Tool == "mcp__finance__forecast" && message.CallID == "call-1"
+		case MessageToolResult:
+			sawResult = message.CallID == "call-1" && message.Output == "sunny"
+		}
+	}
+	result := <-session.Result
+	usage := result.Usage["anthropic/test"]
+	if !sawUse || !sawResult {
+		t.Fatalf("tool audit incomplete: use=%v result=%v", sawUse, sawResult)
+	}
+	if usage.InputTokens != 7 || usage.OutputTokens != 3 || usage.CacheReadTokens != 2 || usage.CacheWriteTokens != 1 {
+		t.Fatalf("usage was not preserved: %#v", usage)
+	}
+}
+
 func TestStripPiToolCallMarkup(t *testing.T) {
 	tests := map[string]string{
 		`before call:bash{command:<|"|>cd repo/path && ls -F<|"|>}<tool_call|> after`:                           "before  after",

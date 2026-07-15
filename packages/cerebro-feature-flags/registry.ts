@@ -309,6 +309,8 @@ export type CerebroFlagKey =
   // FIR-2273: expose api-type connection endpoints as agent-callable tools
   // (dispatched server-side so credentials stay on the backend). Default OFF.
   | "cerebro_api_connection_tools"
+  // FIR-3272: Firtal-owned Connections, policy, and session harness for Pi runtimes.
+  | "cerebro_pi_harness"
   // TECH-3077: skill metadata — category/domain/tag filtering, data-domain links, impact analysis.
   // TECH-3077: skill self-learning — observation recording, pattern extraction, auto change-requests.
   | "cerebro_skill_learning"
@@ -745,6 +747,9 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   // tools opens external endpoints (with server-side credentials) to agents, so
   // it stays opt-in per workspace. Matches the backend default.
   cerebro_api_connection_tools: false,
+  // FIR-3272: ON because selecting a Pi runtime is already explicit opt-in.
+  // Workspace admins retain an immediate kill switch through this flag.
+  cerebro_pi_harness: true,
   // TECH-3077: ON — skill metadata schema (category, domain, tags, data-domain links).
   // TECH-3077: OFF — skill self-learning is a later phase; enable when observation
   // infrastructure is in place.
@@ -1734,6 +1739,13 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     group: "agents",
     description:
       "Expose an api-type Workspace connection's endpoints as tools agents can call. Calls are dispatched server-side, so credentials stay on the backend and never reach the agent. Off by default because it opens external endpoints to agents; turn on per workspace to let agents use connections like the Infisical secrets API. Requires the connection's tool-policy to also allow the agent. FIR-2273.",
+  },
+  {
+    key: "cerebro_pi_harness",
+    label: "Managed Pi harness",
+    group: "agents",
+    description:
+      "Run Pi agents with the Firtal-owned harness for Multica Connections, unified Allow/Ask/Deny tool policy, and durable session recovery. Turn off to restore Pi's unmanaged extension behavior. FIR-3272.",
   },
   // TECH-3196: Agent Vault per-agent secret brokering.
   {

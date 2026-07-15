@@ -46,6 +46,13 @@ describe("cerebro feature flag grouping", () => {
     expect(CEREBRO_FLAGS.find((flag) => flag.key === "cerebro_operating_system")?.group).toBe("workspace");
   });
 
+  it("ships the managed Pi harness with a workspace kill switch", () => {
+    expect(CEREBRO_FLAGS.find((flag) => flag.key === "cerebro_pi_harness")?.group).toBe(
+      "agents",
+    );
+    expect(CEREBRO_FLAG_DEFAULTS.cerebro_pi_harness).toBe(true);
+  });
+
   it("has unique group keys", () => {
     expect(groupKeys.size).toBe(CEREBRO_FLAG_GROUPS.length);
   });

@@ -8,6 +8,9 @@ replace github.com/multica-ai/multica/packages/cerebro-pdf-text => ../packages/c
 // CEREBRO-PATCH(attachment-text-runtime-tool): shared server-side extraction for every runtime.
 replace github.com/multica-ai/multica/packages/cerebro-attachment-text => ../packages/cerebro-attachment-text
 
+// CEREBRO-PATCH(pi-harness): FIR-3272 keeps the managed Pi extension outside upstream server zones.
+replace github.com/multica-ai/multica/packages/cerebro-pi-harness => ../packages/cerebro-pi-harness
+
 require (
 	github.com/SherClockHolmes/webpush-go v1.4.0
 	github.com/aws/aws-sdk-go-v2 v1.41.6
@@ -25,6 +28,7 @@ require (
 	github.com/mattn/go-shellwords v1.0.13
 	github.com/multica-ai/multica/packages/cerebro-attachment-text v0.0.0 // CEREBRO-PATCH(attachment-text-runtime-tool): portable attachment extraction.
 	github.com/multica-ai/multica/packages/cerebro-pdf-text v0.0.0 // CEREBRO-PATCH(pdf-attachment-text): pure-Go PDF text extraction for attachment content.
+	github.com/multica-ai/multica/packages/cerebro-pi-harness v0.0.0 // CEREBRO-PATCH(pi-harness): managed Connections and tool policy for Pi.
 	github.com/oklog/ulid/v2 v2.1.1
 	github.com/pelletier/go-toml/v2 v2.3.0
 	github.com/prometheus/client_golang v1.23.2

@@ -1552,3 +1552,15 @@ Approved by FIR-3266 and implementation plan artifact `019f60d7-a728-7663-82d3-7
 
 - `packages/views/channels/components/channel-detail.tsx` and `thread-side-panel.tsx`: enable scheduling on the shared Channel/DM composer.
 - `server/cmd/server/router.go` and `main.go`: register the scheduled-message API and delivery sweeper.
+
+## FIR-3272 — Managed Pi harness
+
+| Patch | Location | Reason |
+|---|---|---|
+| `daemon-pi-harness` | `server/internal/daemon/daemon.go` | Prepare the task-scoped Firtal extension after claim configuration is available; implementation stays in the Cerebro sibling and `packages/cerebro-pi-harness`. |
+| `daemon-task-pi-harness-flag` / `agent-task-pi-harness-flag` / `daemon-claim-pi-harness-flag` | `server/internal/daemon/types.go`; `server/internal/handler/agent.go`; `server/internal/handler/daemon.go` | Carry the default-on `cerebro_pi_harness` workspace kill switch from claim to spawn. |
+| `agent-pi-early-session` | `server/pkg/agent/pi.go` | Emit Pi's daemon-owned session path with `agent_start`, before a Connection tool can mutate an external system, so resume recovery is durable immediately. |
+| `agent-pi-early-session-test` / `agent-pi-tool-telemetry-test` | `server/pkg/agent/pi_test.go` | Lock the upstream Pi adapter's early resume checkpoint and existing tool/usage event mapping while the harness implementation remains in fork-owned packages. |
+| `pi-harness` | `server/go.mod`; `Dockerfile.runtime` | Build the fork-owned harness package into the runtime image without placing its implementation in an upstream server zone. |
+
+Approved by Jesper Hvejsel on FIR-3272: “byg det hele uden stop og deploy”, 2026-07-15.
