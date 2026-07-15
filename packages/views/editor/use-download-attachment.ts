@@ -4,11 +4,15 @@ import { useCallback } from "react";
 import { toast } from "sonner";
 import { api } from "@multica/core/api";
 import { useWorkspaceSlug } from "@multica/core/paths";
+import { attachmentIdFromDownloadURL } from "@multica/core/types";
 import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
 import { useT } from "../i18n";
 
 interface DesktopBridge {
-  downloadURL?: (u: string) => Promise<void> | void;
+  downloadURL?: (
+    u: string,
+    options?: { authorization?: string },
+  ) => Promise<void> | void;
 }
 
 function attachmentDownloadEndpoint(
@@ -45,6 +49,13 @@ function hasDesktopDownloadBridge(): boolean {
   if (typeof window === "undefined") return false;
   const bridge = (window as unknown as { desktopAPI?: DesktopBridge }).desktopAPI;
   return Boolean(bridge?.downloadURL);
+}
+
+function desktopAttachmentAuthorization(downloadUrl: string): string | undefined {
+  if (typeof window === "undefined") return undefined;
+  if (!attachmentIdFromDownloadURL(downloadUrl)) return undefined;
+  const token = window.localStorage?.getItem("multica_token");
+  return token ? `Bearer ${token}` : undefined;
 }
 
 /**
@@ -93,7 +104,12 @@ export function useDownloadAttachment(): (attachmentId: string) => Promise<void>
           const bridge = (
             window as unknown as { desktopAPI?: DesktopBridge }
           ).desktopAPI;
-          await bridge!.downloadURL!(downloadUrl);
+          const authorization = desktopAttachmentAuthorization(downloadUrl);
+          if (authorization) {
+            await bridge!.downloadURL!(downloadUrl, { authorization });
+          } else {
+            await bridge!.downloadURL!(downloadUrl);
+          }
         } catch {
           failed();
         }

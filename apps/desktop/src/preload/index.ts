@@ -117,7 +117,8 @@ const desktopAPI = {
    *  Shows a save dialog and saves to disk. Unlike openExternal, this
    *  avoids browser rendering of HTML files on Linux.
    *  On non-desktop platforms this property is undefined. */
-  downloadURL: (url: string) => ipcRenderer.invoke("file:download-url", url),
+  downloadURL: (url: string, options?: { authorization?: string }) =>
+    ipcRenderer.invoke("file:download-url", url, options),
   /** Toggle immersive mode — hide macOS traffic lights for full-screen modals */
   setImmersiveMode: (immersive: boolean) =>
     ipcRenderer.invoke("window:setImmersive", immersive),
