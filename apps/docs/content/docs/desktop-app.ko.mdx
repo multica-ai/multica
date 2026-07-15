@@ -40,10 +40,10 @@ Desktop은 **참여한 모든 워크스페이스**마다 독립적인 탭 그룹
 이 전체 과정은 **작업 중인 내용을 방해하지 않습니다**.
 
 <Callout type="warning">
-**macOS와 Windows는 CPU 아키텍처별로 업데이트 채널이 분리되어 있습니다** — 기기에 맞는 빌드를 설치하면 이후 자동 업데이트도 같은 아키텍처를 유지합니다. M 시리즈 Mac은 Apple Silicon(`arm64`), 구형 Intel Mac은 `x64`를 사용합니다.
+**Windows에서는 ARM64와 x64가 별도의 업데이트 채널입니다** — 잘못된 아키텍처를 설치하면 업데이트가 감지되지 않습니다. 다운로드할 때 기기에 맞는 `.exe`를 선택하세요 (ARM 빌드에는 `arm64` 접미사가 붙어 있습니다).
 </Callout>
 
-macOS 빌드는 macOS 12 Monterey 이상이 필요하며 서명 및 공증되어 있으므로, 첫 실행 시 "확인되지 않은 개발자" 경고가 표시되지 않습니다. Linux 빌드는 `.AppImage`입니다 — 자동 업데이트는 electron-updater에 의존하는데, 일부 배포판에서는 불안정할 수 있습니다. **자동 업데이트가 작동하지 않으면, 새 버전을 수동으로 다운로드하여 기존 파일을 교체하세요.**
+macOS 빌드는 서명 및 공증되어 있으므로, 첫 실행 시 "확인되지 않은 개발자" 경고가 표시되지 않습니다. Linux 빌드는 `.AppImage`입니다 — 자동 업데이트는 electron-updater에 의존하는데, 일부 배포판에서는 불안정할 수 있습니다. **자동 업데이트가 작동하지 않으면, 새 버전을 수동으로 다운로드하여 기존 파일을 교체하세요.**
 
 ## 별도의 CLI와 데몬이 여전히 필요한가요?
 
@@ -59,8 +59,7 @@ macOS 빌드는 macOS 12 Monterey 이상이 필요하며 서명 및 공증되어
 
 | 플랫폼 | 파일 |
 |---|---|
-| macOS Apple Silicon (M 시리즈) | `.dmg` (`arm64` 접미사 포함) |
-| macOS Intel | `.dmg` (`x64` 접미사 포함) |
+| macOS (Intel 또는 Apple Silicon) | `.dmg` |
 | Windows x64 | `.exe` (표준) |
 | Windows ARM64 | `.exe` (`arm64` 접미사 포함) |
 | Linux | `.AppImage` |

@@ -323,7 +323,7 @@ describe("builderArgsForTarget", () => {
     ]);
   });
 
-  it("routes macOS x64 to an architecture-specific update channel", () => {
+  it("isolates the macOS x64 feed and platform floor", () => {
     expect(
       builderArgsForTarget(
         { platform: "mac", arch: "x64" },
@@ -346,6 +346,7 @@ describe("builderArgsForTarget", () => {
       "--publish",
       "always",
       "-c.directories.output=dist/mac-x64",
+      "-c.mac.minimumSystemVersion=12.0.0",
       "-c.publish.channel=latest-x64",
     ]);
   });

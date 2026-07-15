@@ -2228,22 +2228,16 @@ export function createEnDict(allowSignup: boolean): LandingDict {
     hero: {
       macArm64: {
         title: "Multica for macOS",
-        sub: "Apple Silicon · macOS 12 or later · bundled daemon, zero setup",
+        sub: "Apple Silicon · bundled daemon, zero setup",
         primary: "Download (.dmg)",
         altZip: "or download .zip",
       },
       macIntel: {
         title: "Multica for macOS",
-        sub: "Intel · macOS 12 or later · bundled daemon, zero setup",
-        primary: "Download (.dmg)",
-        altZip: "or download .zip",
-      },
-      macUnknown: {
-        title: "Choose your Mac build",
-        sub: "M-series Macs use Apple Silicon. Older Intel Macs use x64.",
-        armPrimary: "Download for Apple Silicon",
-        intelPrimary: "Download for Intel",
-        hint: "Both builds require macOS 12 Monterey or later.",
+        sub: "Apple Silicon required — Intel Macs not yet supported.",
+        disabledCta: "Apple Silicon required",
+        intelHint:
+          "On an Intel Mac? Use the CLI below — it runs the same daemon.",
       },
       winX64: {
         title: "Multica for Windows",
@@ -2265,12 +2259,12 @@ export function createEnDict(allowSignup: boolean): LandingDict {
         title: "Choose your platform",
         sub: "All installers are listed below.",
       },
+      safariMacHint: "On an Intel Mac? Use the CLI below.",
       archFallbackHint: "Wrong architecture? See all formats below.",
     },
     allPlatforms: {
       title: "All platforms",
-      macArm64Label: "macOS · Apple Silicon",
-      macX64Label: "macOS · Intel",
+      macLabel: "macOS · Apple Silicon",
       winX64Label: "Windows · x64",
       winArm64Label: "Windows · ARM64",
       linuxX64Label: "Linux · x64",
@@ -2281,8 +2275,8 @@ export function createEnDict(allowSignup: boolean): LandingDict {
       formatAppImage: ".AppImage",
       formatDeb: ".deb",
       formatRpm: ".rpm",
-      macMinimumVersionNote:
-        "macOS 12 Monterey or later is required for both Mac builds.",
+      intelNote:
+        "Apple Silicon only — Intel Macs not supported in this release.",
       unavailable: "Not available",
     },
     cli: {

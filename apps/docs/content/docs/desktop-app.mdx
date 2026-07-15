@@ -40,10 +40,10 @@ On launch, Desktop checks GitHub Releases for a newer version. If one is found:
 The whole process **doesn't interrupt what you're working on**.
 
 <Callout type="warning">
-**On macOS and Windows, CPU architectures use separate update channels** — install the build that matches your machine so future updates stay on the same architecture. M-series Macs use Apple Silicon (`arm64`); older Intel Macs use `x64`.
+**On Windows, ARM64 and x64 are separate update channels** — install the wrong architecture and updates won't be detected. When you download, pick the `.exe` that matches your machine (the ARM build has an `arm64` suffix).
 </Callout>
 
-The macOS builds require macOS 12 Monterey or later and are signed and notarized, so you won't see an "unidentified developer" warning on first launch. The Linux build is an `.AppImage` — auto-updates rely on electron-updater, which can be flaky on some distros. **If auto-update doesn't work, download the new version manually and replace the old file.**
+The macOS build is signed and notarized, so you won't see an "unidentified developer" warning on first launch. The Linux build is an `.AppImage` — auto-updates rely on electron-updater, which can be flaky on some distros. **If auto-update doesn't work, download the new version manually and replace the old file.**
 
 ## Do I still need the standalone CLI and daemon?
 
@@ -59,8 +59,7 @@ Grab the installer for your platform from the [Multica downloads page](https://m
 
 | Platform | File |
 |---|---|
-| macOS Apple Silicon (M-series) | `.dmg` (with `arm64` suffix) |
-| macOS Intel | `.dmg` (with `x64` suffix) |
+| macOS (Intel or Apple Silicon) | `.dmg` |
 | Windows x64 | `.exe` (standard) |
 | Windows ARM64 | `.exe` (with `arm64` suffix) |
 | Linux | `.AppImage` |

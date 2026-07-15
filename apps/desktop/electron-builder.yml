@@ -16,10 +16,6 @@ asarUnpack:
   - resources/**
 mac:
   entitlementsInherit: build/entitlements.mac.plist
-  # Electron 39 requires macOS 12 or newer. Declare the same floor in the
-  # bundle metadata so both Apple Silicon and Intel packages fail clearly on
-  # unsupported macOS versions.
-  minimumSystemVersion: "12.0.0"
   target:
     - dmg
     - zip

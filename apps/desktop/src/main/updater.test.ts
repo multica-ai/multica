@@ -52,27 +52,31 @@ vi.mock("electron", () => ({
 }));
 
 import {
-  configureArchitectureUpdateChannel,
+  configureMacX64UpdateChannel,
   setupAutoUpdater,
-  updateChannelForArchitecture,
 } from "./updater";
 import { updaterPreferencesPath } from "./updater-preferences";
 
-describe("architecture update channels", () => {
-  it("keeps established default feeds and isolates additional architectures", () => {
-    expect(updateChannelForArchitecture("darwin", "arm64")).toBeNull();
-    expect(updateChannelForArchitecture("darwin", "x64")).toBe("latest-x64");
-    expect(updateChannelForArchitecture("win32", "x64")).toBeNull();
-    expect(updateChannelForArchitecture("win32", "arm64")).toBe(
-      "latest-arm64",
-    );
-    expect(updateChannelForArchitecture("linux", "arm64")).toBeNull();
+describe("macOS x64 update channel", () => {
+  it("does not touch established architecture paths", () => {
+    for (const [platform, arch] of [
+      ["darwin", "arm64"],
+      ["win32", "x64"],
+      ["win32", "arm64"],
+      ["linux", "arm64"],
+    ] as const) {
+      const updater = { channel: null, allowDowngrade: true };
+
+      configureMacX64UpdateChannel(updater, platform, arch);
+
+      expect(updater).toEqual({ channel: null, allowDowngrade: true });
+    }
   });
 
   it("does not enable downgrades when selecting an architecture feed", () => {
     const updater = { channel: null, allowDowngrade: true };
 
-    configureArchitectureUpdateChannel(updater, "darwin", "x64");
+    configureMacX64UpdateChannel(updater, "darwin", "x64");
 
     expect(updater).toEqual({
       channel: "latest-x64",

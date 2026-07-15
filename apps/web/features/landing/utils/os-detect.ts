@@ -6,8 +6,9 @@
  *
  * Known limitation: Safari on macOS always reports `Intel Mac OS X`
  * in the UA string even on Apple Silicon, and Safari does not
- * implement userAgentData. This function therefore returns an unknown
- * architecture for Safari and lets the UI present both Mac builds.
+ * implement userAgentData. This function therefore returns `arm64`
+ * as the best default for any Mac — UI surfaces a small "On Intel
+ * Mac? Use CLI." hint to cover the Intel minority.
  */
 
 export type OSName = "mac" | "windows" | "linux" | "unknown";
@@ -18,8 +19,7 @@ export interface DetectResult {
   arch: Arch;
   /** True when arch came from userAgentData high-entropy values
    *  (i.e. we can trust the Intel vs arm distinction). False when
-   *  we fell back to legacy browser signals — UI should offer an
-   *  explicit architecture choice where a wrong guess is unsafe. */
+   *  we defaulted — UI should show the Intel Mac disclaimer. */
   archConfident: boolean;
 }
 
@@ -85,8 +85,8 @@ export async function detectOS(): Promise<DetectResult> {
 
   let arch: Arch = "unknown";
   if (os === "mac") {
-    // Safari reports the same legacy platform string on both architectures.
-    arch = "unknown";
+    // Best default. Real Intel Mac users will see the disclaimer.
+    arch = "arm64";
   } else if (/arm|aarch/i.test(ua)) {
     arch = "arm64";
   } else if (os !== "unknown") {
