@@ -61,7 +61,7 @@ import { createSuggestionPopupRender, isPickerAcceptKey } from "./suggestion-pop
 export interface MentionItem {
   id: string;
   label: string;
-  type: "member" | "agent" | "squad" | "issue" | "project" | "all" | "skill";
+  type: "member" | "agent" | "squad" | "issue" | "project" | "all" | "skill" | "__workspace__";
   /** Optional grouping hint for injected context items. */
   group?: "current" | "recent" | "search";
   /** Secondary text shown beside the label (e.g. issue title) */
@@ -72,6 +72,8 @@ export interface MentionItem {
   icon?: string | null;
   /** Project status snapshot for recent/current project rendering */
   projectStatus?: ProjectStatus;
+  /** Workspace UUID for cross-workspace project mentions. */
+  ws?: string;
 }
 
 interface MentionListProps {
@@ -98,12 +100,15 @@ function groupItems(items: MentionItem[]): MentionGroup[] {
   const current: MentionItem[] = [];
   const recent: MentionItem[] = [];
   const search: MentionItem[] = [];
+  const workspaces: MentionItem[] = [];
   // Registry-driven grouping for non-context items. Map preserves insertion
   // order, so groups appear in the order the first item of each group arrives.
   const typeGroups = new Map<string, MentionItem[]>();
 
   for (const item of items) {
-    if (item.group === "current") {
+    if (item.type === "__workspace__") {
+      workspaces.push(item);
+    } else if (item.group === "current") {
       current.push(item);
     } else if (item.group === "recent") {
       recent.push(item);
@@ -127,6 +132,7 @@ function groupItems(items: MentionItem[]): MentionGroup[] {
   for (const [label, typeItems] of typeGroups) {
     groups.push({ label, items: typeItems });
   }
+  if (workspaces.length > 0) groups.push({ label: "Other workspaces", items: workspaces });
   return groups;
 }
 
@@ -173,8 +179,28 @@ export const MentionList = forwardRef<MentionListRef, MentionListProps>(
     const [serverItems, setServerItems] = useState<MentionItem[]>([]);
     const [isSearching, setIsSearching] = useState(false);
     const [searchedQuery, setSearchedQuery] = useState("");
+    // Cross-workspace project mention: null = current workspace, non-null = foreign ws id.
+    const [crossWsId, setCrossWsId] = useState<string | null>(null);
+    // All workspaces the user belongs to (for cross-ws picker).
+    const [allWorkspaces, setAllWorkspaces] = useState<{ id: string; slug: string; name: string }[]>([]);
     const itemRefs = useRef<(HTMLButtonElement | null)[]>([]);
     const normalizedQuery = query.trim();
+    const currentWsId = getCurrentWsId();
+
+    // Load all workspaces once for the cross-ws picker.
+    useEffect(() => {
+      void (async () => {
+        try {
+          const workspaces = await api.listWorkspaces();
+          setAllWorkspaces(workspaces);
+        } catch {
+          // Non-fatal: cross-ws picker simply won't appear.
+        }
+      })();
+    }, []);
+
+    // Reset cross-ws state when query changes.
+    useEffect(() => { setCrossWsId(null); }, [normalizedQuery]);
 
     useEffect(() => {
       const q = normalizedQuery;
@@ -213,12 +239,15 @@ export const MentionList = forwardRef<MentionListRef, MentionListProps>(
                   limit: SERVER_CONTEXT_SEARCH_LIMIT,
                   include_closed: true,
                   signal: controller.signal,
+                  // Per-call workspace override for cross-workspace project mentions.
+                  // When omitted, the server uses the authenticated X-Workspace-ID header.
+                  workspace_id: crossWsId ?? undefined,
                 }),
               ]);
               if (!cancelled && !controller.signal.aborted) {
                 setServerItems([
                   ...issues.issues.map((issue) => ({ ...issueToMention(issue), group: "search" as const })),
-                  ...projects.projects.map((project) => ({ ...projectToMention(project), group: "search" as const })),
+                  ...projects.projects.map((project) => ({ ...projectToMention(project), group: "search" as const, ws: crossWsId ?? undefined })),
                 ]);
               }
             } else {
@@ -250,10 +279,42 @@ export const MentionList = forwardRef<MentionListRef, MentionListProps>(
       };
     }, [includeProjectSearch, normalizedQuery]);
 
+    // Load all workspaces once for the cross-ws picker.
+    useEffect(() => {
+      void (async () => {
+        try {
+          const workspaces = await api.listWorkspaces();
+          setAllWorkspaces(workspaces);
+        } catch {
+          // Non-fatal: cross-ws picker simply won't appear.
+        }
+      })();
+    }, []);
+
     const displayItems = useMemo(() => {
       const currentServerItems = searchedQuery === normalizedQuery ? serverItems : [];
-      return mergeMentionItems(items, currentServerItems).slice(0, MAX_ITEMS);
-    }, [items, normalizedQuery, searchedQuery, serverItems]);
+      const merged = mergeMentionItems(items, currentServerItems);
+
+      // Cross-workspace picker: show other workspaces as a "Workspaces" group
+      // when not already in cross-ws mode and there are multiple workspaces.
+      const otherWsItems: MentionItem[] =
+        crossWsId === null && allWorkspaces.length > 1
+          ? allWorkspaces
+              .filter((w) => w.id !== currentWsId)
+              .map((w) => ({
+                id: w.id,
+                label: w.name,
+                type: "__workspace__" as const,
+                ws: w.id,
+              }))
+          : [];
+
+      const baseItems =
+        otherWsItems.length > 0
+          ? [...merged, ...otherWsItems]
+          : merged;
+      return baseItems.slice(0, MAX_ITEMS);
+    }, [items, normalizedQuery, searchedQuery, serverItems, crossWsId, allWorkspaces, currentWsId]);
 
     // The single index space for selection. groupItems() re-buckets displayItems
     // (current → recent → search → users → issues); orderedItems is exactly what
@@ -280,6 +341,12 @@ export const MentionList = forwardRef<MentionListRef, MentionListProps>(
     const selectItem = useCallback(
       (item: MentionItem | undefined) => {
         if (!item) return;
+        // Workspace picker: switching to another workspace re-targets project search.
+        if (item.type === "__workspace__" && item.ws) {
+          setCrossWsId(item.ws);
+          setSelectedKey(null);
+          return;
+        }
         const wsId = getCurrentWsId();
         if (wsId) recordMentionUsage(wsId, item);
         command(item);
