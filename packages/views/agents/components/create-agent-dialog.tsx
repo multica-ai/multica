@@ -1,8 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { Globe, Lock, Users } from "lucide-react";
-import { useQueryClient } from "@tanstack/react-query";
+import { Globe, Layers3, Lock, Users } from "lucide-react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ModelDropdown } from "./model-dropdown";
 import { RuntimePicker, isRuntimeUsableForUser } from "./runtime-picker";
 import { InstructionsEditor } from "./instructions-editor";
@@ -12,15 +12,18 @@ import { api } from "@multica/core/api";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useFeatureEnabled } from "@multica/core/config";
 import { COMPOSIO_MCP_APPS_FLAG } from "@multica/core/feature-flags";
+import { spaceListOptions } from "@multica/core/spaces";
 import { workspaceKeys } from "@multica/core/workspace/queries";
 import type {
   Agent,
+  AgentAvailabilityMode,
   AgentInvocationTargetInput,
   AgentPermissionMode,
   AgentVisibility,
   RuntimeDevice,
   MemberWithUser,
   CreateAgentRequest,
+  Space,
 } from "@multica/core/types";
 import { isImeComposing } from "@multica/core/utils";
 import {
@@ -90,12 +93,42 @@ export function CreateAgentDialog({
   // together. Defaults OFF so production stays on the legacy Workspace /
   // Personal toggle until Composio is greenlit.
   const accessPickerEnabled = useFeatureEnabled(COMPOSIO_MCP_APPS_FLAG, false);
+  const {
+    data: spaces = [],
+    isLoading: spacesLoading,
+    isError: spacesError,
+  } = useQuery(spaceListOptions(wsId));
 
   // Name defaults: duplicate uses "<original> copy". Manual-create starts blank.
   const [name, setName] = useState(
     template ? `${template.name}${t(($) => $.create_dialog.duplicate_copy_suffix)}` : "",
   );
   const [description, setDescription] = useState(template?.description ?? "");
+  const templateHasLegacyAudience =
+    template?.permission_mode === "public_to" &&
+    !(template.invocation_targets ?? []).some(
+      (target) => target.target_type === "workspace",
+    );
+  const templateAvailability: AgentAvailabilityMode = templateHasLegacyAudience
+    ? "private"
+    : template?.availability_mode ??
+      (template?.visibility === "private" ? "private" : "workspace");
+  const [availabilityMode, setAvailabilityMode] =
+    useState<AgentAvailabilityMode>(templateAvailability);
+  const [selectedSpaceIds, setSelectedSpaceIds] = useState<Set<string>>(
+    () => new Set(template?.availability_space_ids ?? []),
+  );
+  const [availabilityDirty, setAvailabilityDirty] = useState(false);
+  const activeSpaceIds = new Set(
+    spaces.filter((space) => !space.archived_at).map((space) => space.id),
+  );
+  const selectedSpacesInvalid =
+    availabilityMode === "selected_spaces" &&
+    (selectedSpaceIds.size === 0 ||
+      [...selectedSpaceIds].some((id) => !activeSpaceIds.has(id)) ||
+      spacesLoading ||
+      spacesError);
+
   // Legacy visibility state. Kept as the source of truth when
   // `accessPickerEnabled` is false; only used to seed the new access state
   // when the flag flips on for a duplicate.
@@ -212,7 +245,8 @@ export function CreateAgentDialog({
       !name.trim() ||
       !selectedRuntime ||
       selectedRuntimeLocked ||
-      accessSelectionInvalid
+      accessSelectionInvalid ||
+      selectedSpacesInvalid
     ) {
       return;
     }
@@ -229,6 +263,9 @@ export function CreateAgentDialog({
         avatar_url: avatarUrl ?? undefined,
         skill_ids: [...selectedSkillIds],
       };
+      data.availability_mode = availabilityMode;
+      data.availability_space_ids =
+        availabilityMode === "selected_spaces" ? [...selectedSpaceIds] : [];
       if (accessPickerEnabled) {
         // New MUL-3963 shape: send the authoritative permission fields and
         // let the backend derive the legacy `visibility` field. Mirror the
@@ -363,6 +400,23 @@ export function CreateAgentDialog({
               </div>
             </div>
 
+            <AvailabilitySection
+              mode={availabilityMode}
+              onModeChange={(next) => {
+                setAvailabilityDirty(true);
+                setAvailabilityMode(next);
+              }}
+              selectedSpaceIds={selectedSpaceIds}
+              onSelectedSpaceIdsChange={(next) => {
+                setAvailabilityDirty(true);
+                setSelectedSpaceIds(next);
+              }}
+              spaces={spaces}
+              spacesLoading={spacesLoading}
+              spacesError={spacesError}
+              legacyCustom={templateHasLegacyAudience && !availabilityDirty}
+            />
+
             {accessPickerEnabled ? (
               <AccessSection
                 permissionMode={permissionMode}
@@ -466,7 +520,12 @@ export function CreateAgentDialog({
           <Button
             onClick={handleSubmit}
             disabled={
-              creating || !name.trim() || !selectedRuntime || selectedRuntimeLocked
+              creating ||
+              !name.trim() ||
+              !selectedRuntime ||
+              selectedRuntimeLocked ||
+              accessSelectionInvalid ||
+              selectedSpacesInvalid
             }
             title={
               selectedRuntimeLocked
@@ -479,6 +538,207 @@ export function CreateAgentDialog({
         </div>
       </DialogContent>
     </Dialog>
+  );
+}
+
+export function AvailabilitySection({
+  mode,
+  onModeChange,
+  selectedSpaceIds,
+  onSelectedSpaceIdsChange,
+  spaces,
+  spacesLoading,
+  spacesError,
+  legacyCustom,
+}: {
+  mode: AgentAvailabilityMode;
+  onModeChange: (next: AgentAvailabilityMode) => void;
+  selectedSpaceIds: Set<string>;
+  onSelectedSpaceIdsChange: (next: Set<string>) => void;
+  spaces: Space[];
+  spacesLoading: boolean;
+  spacesError: boolean;
+  legacyCustom: boolean;
+}) {
+  const { t } = useT("agents");
+  const activeSpaces = spaces.filter((space) => !space.archived_at);
+  const archivedSelected = spaces.filter(
+    (space) => !!space.archived_at && selectedSpaceIds.has(space.id),
+  );
+  const knownSpaceIds = new Set(spaces.map((space) => space.id));
+  const unknownSelected = [...selectedSpaceIds].filter(
+    (id) => !knownSpaceIds.has(id),
+  );
+
+  const toggleSpace = (spaceId: string, checked: boolean) => {
+    const next = new Set(selectedSpaceIds);
+    if (checked) next.add(spaceId);
+    else next.delete(spaceId);
+    onSelectedSpaceIdsChange(next);
+  };
+
+  const optionClass = (selected: boolean) =>
+    `flex min-w-0 flex-1 items-start gap-2 rounded-lg border px-3 py-2.5 text-sm transition-colors ${
+      selected
+        ? "border-primary bg-primary/5"
+        : "border-border hover:bg-muted"
+    }`;
+
+  return (
+    <div>
+      <Label className="text-xs text-muted-foreground">
+        {t(($) => $.create_dialog.availability.label)}
+      </Label>
+      {legacyCustom && (
+        <div className="mt-1.5 rounded-md bg-amber-500/10 px-2 py-1.5 text-xs text-amber-700 dark:text-amber-400">
+          {t(($) => $.create_dialog.availability.legacy_custom_hint)}
+        </div>
+      )}
+      <div className="mt-1.5 grid grid-cols-3 gap-2">
+        <button
+          type="button"
+          onClick={() => onModeChange("private")}
+          className={optionClass(!legacyCustom && mode === "private")}
+        >
+          <Lock className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
+          <div className="min-w-0 text-left">
+            <div className="font-medium">
+              {t(($) => $.create_dialog.availability.private_title)}
+            </div>
+            <div className="text-xs text-muted-foreground">
+              {t(($) => $.create_dialog.availability.private_desc)}
+            </div>
+          </div>
+        </button>
+        <button
+          type="button"
+          onClick={() => onModeChange("selected_spaces")}
+          className={optionClass(
+            !legacyCustom && mode === "selected_spaces",
+          )}
+        >
+          <Layers3 className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
+          <div className="min-w-0 text-left">
+            <div className="font-medium">
+              {t(($) => $.create_dialog.availability.spaces_title)}
+            </div>
+            <div className="text-xs text-muted-foreground">
+              {t(($) => $.create_dialog.availability.spaces_desc)}
+            </div>
+          </div>
+        </button>
+        <button
+          type="button"
+          onClick={() => onModeChange("workspace")}
+          className={optionClass(!legacyCustom && mode === "workspace")}
+        >
+          <Globe className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
+          <div className="min-w-0 text-left">
+            <div className="font-medium">
+              {t(($) => $.create_dialog.availability.workspace_title)}
+            </div>
+            <div className="text-xs text-muted-foreground">
+              {t(($) => $.create_dialog.availability.workspace_desc)}
+            </div>
+          </div>
+        </button>
+      </div>
+
+      {mode === "selected_spaces" && !legacyCustom && (
+        <div className="mt-2 rounded-lg border bg-muted/30 px-3 py-2">
+          {spacesLoading ? (
+            <div className="text-xs text-muted-foreground">
+              {t(($) => $.create_dialog.availability.spaces_loading)}
+            </div>
+          ) : spacesError ? (
+            <div className="text-xs text-destructive">
+              {t(($) => $.create_dialog.availability.spaces_error)}
+            </div>
+          ) : (
+            <div className="max-h-40 overflow-y-auto">
+              {activeSpaces.length === 0 && (
+                <div className="text-xs text-muted-foreground">
+                  {t(($) => $.create_dialog.availability.spaces_empty)}
+                </div>
+              )}
+              {activeSpaces.map((space) => (
+                <label
+                  key={space.id}
+                  className="flex cursor-pointer items-center gap-2 rounded-md px-1 py-1 text-sm hover:bg-background/60"
+                >
+                  <Checkbox
+                    checked={selectedSpaceIds.has(space.id)}
+                    onCheckedChange={(value) =>
+                      toggleSpace(space.id, value === true)
+                    }
+                    aria-label={space.name}
+                  />
+                  <span className="min-w-0 flex-1 truncate">{space.name}</span>
+                  <span className="text-[10px] text-muted-foreground">
+                    {space.key}
+                  </span>
+                </label>
+              ))}
+              {archivedSelected.map((space) => (
+                <label
+                  key={space.id}
+                  className="flex cursor-pointer items-center gap-2 rounded-md px-1 py-1 text-sm text-muted-foreground"
+                >
+                  <Checkbox
+                    checked
+                    onCheckedChange={(value) =>
+                      toggleSpace(space.id, value === true)
+                    }
+                    aria-label={space.name}
+                  />
+                  <span className="min-w-0 flex-1 truncate line-through">
+                    {space.name}
+                  </span>
+                  <span className="text-[10px]">
+                    {t(($) => $.create_dialog.availability.archived_badge)}
+                  </span>
+                </label>
+              ))}
+              {unknownSelected.map((spaceId) => (
+                <label
+                  key={spaceId}
+                  className="flex cursor-pointer items-center gap-2 rounded-md px-1 py-1 text-sm text-muted-foreground"
+                >
+                  <Checkbox
+                    checked
+                    onCheckedChange={(value) =>
+                      toggleSpace(spaceId, value === true)
+                    }
+                    aria-label={t(
+                      ($) => $.create_dialog.availability.unavailable_space,
+                    )}
+                  />
+                  <span className="min-w-0 flex-1 truncate line-through">
+                    {t(
+                      ($) => $.create_dialog.availability.unavailable_space,
+                    )}
+                  </span>
+                </label>
+              ))}
+            </div>
+          )}
+          {selectedSpaceIds.size === 0 && (
+            <div className="mt-1 text-xs text-amber-700 dark:text-amber-400">
+              {t(($) => $.create_dialog.availability.select_one_hint)}
+            </div>
+          )}
+          {(archivedSelected.length > 0 || unknownSelected.length > 0) && (
+            <div className="mt-1 text-xs text-amber-700 dark:text-amber-400">
+              {t(($) => $.create_dialog.availability.remove_unavailable_hint)}
+            </div>
+          )}
+        </div>
+      )}
+
+      <div className="mt-1.5 text-[11px] text-muted-foreground">
+        {t(($) => $.create_dialog.availability.work_access_note)}
+      </div>
+    </div>
   );
 }
 

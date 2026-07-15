@@ -3,11 +3,17 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, fireEvent, cleanup } from "@testing-library/react";
-import type { Agent, MemberWithUser, RuntimeDevice } from "@multica/core/types";
+import type {
+  Agent,
+  MemberWithUser,
+  RuntimeDevice,
+  Space,
+} from "@multica/core/types";
 import { I18nProvider } from "@multica/core/i18n/react";
 import { WorkspaceSlugProvider } from "@multica/core/paths";
 import { configStore } from "@multica/core/config";
 import { COMPOSIO_MCP_APPS_FLAG } from "@multica/core/feature-flags";
+import { spaceKeys } from "@multica/core/spaces";
 import { NavigationProvider, type NavigationAdapter } from "../../navigation";
 import enCommon from "../../locales/en/common.json";
 import enAgents from "../../locales/en/agents.json";
@@ -75,6 +81,49 @@ const members: MemberWithUser[] = [
   },
 ];
 
+const spaces: Space[] = [
+  {
+    id: "space-eng",
+    workspace_id: "ws-1",
+    name: "Engineering",
+    key: "ENG",
+    icon: null,
+    context: "",
+    issue_counter: 0,
+    is_default: true,
+    visibility: "open",
+    archived_at: null,
+    created_by: ME,
+    created_at: "2026-01-01T00:00:00Z",
+    updated_at: "2026-01-01T00:00:00Z",
+    is_member: true,
+    member_role: "member",
+    is_pinned: false,
+    is_followed: false,
+    sort_order: 1,
+  },
+  {
+    id: "space-design",
+    workspace_id: "ws-1",
+    name: "Design",
+    key: "DES",
+    icon: null,
+    context: "",
+    issue_counter: 0,
+    is_default: false,
+    visibility: "open",
+    archived_at: null,
+    created_by: ME,
+    created_at: "2026-01-02T00:00:00Z",
+    updated_at: "2026-01-02T00:00:00Z",
+    is_member: true,
+    member_role: "member",
+    is_pinned: false,
+    is_followed: false,
+    sort_order: 2,
+  },
+];
+
 function makeRuntime(overrides: Partial<RuntimeDevice>): RuntimeDevice {
   return {
     id: "rt",
@@ -126,6 +175,10 @@ function makeTemplate(runtimeId: string): Agent {
 function renderDialog(runtimes: RuntimeDevice[], template?: Agent) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
+  });
+  queryClient.setQueryData(spaceKeys.list("ws-1"), {
+    spaces,
+    total: spaces.length,
   });
   const onCreate = vi.fn().mockResolvedValue(undefined);
   const onClose = vi.fn();
@@ -407,5 +460,75 @@ describe("CreateAgentDialog access picker (MUL-4010, feature-flag gated)", () =>
     expect(payload.invocation_targets).toEqual([
       { target_type: "member", target_id: OTHER },
     ]);
+  });
+});
+
+describe("CreateAgentDialog Availability", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    configStore.getState().setFeatureFlags({});
+  });
+
+  afterEach(() => {
+    cleanup();
+    document.body.innerHTML = "";
+    configStore.getState().setFeatureFlags({});
+  });
+
+  it("is always visible and defaults Web/Desktop creates to Workspace", async () => {
+    const mine = makeRuntime({ id: "rt-mine", name: "My Runtime", owner_id: ME });
+    const { onCreate } = renderDialog([mine]);
+
+    expect(screen.getByText("Space access")).toBeInTheDocument();
+    fireEvent.change(screen.getByPlaceholderText("e.g. Deep Research Agent"), {
+      target: { value: "Workspace Agent" },
+    });
+    fireEvent.click(screen.getByText("Create"));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const payload = onCreate.mock.calls[0]?.[0];
+    expect(payload.availability_mode).toBe("workspace");
+    expect(payload.availability_space_ids).toEqual([]);
+  });
+
+  it("creates a Private Agent without widening its availability", async () => {
+    const mine = makeRuntime({ id: "rt-mine", name: "My Runtime", owner_id: ME });
+    const { onCreate } = renderDialog([mine]);
+
+    fireEvent.change(screen.getByPlaceholderText("e.g. Deep Research Agent"), {
+      target: { value: "Private Agent" },
+    });
+    fireEvent.click(screen.getByText("Only you can use this Agent"));
+    fireEvent.click(screen.getByText("Create"));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const payload = onCreate.mock.calls[0]?.[0];
+    expect(payload.availability_mode).toBe("private");
+    expect(payload.availability_space_ids).toEqual([]);
+  });
+
+  it("requires and submits the complete Selected Spaces set", async () => {
+    const mine = makeRuntime({ id: "rt-mine", name: "My Runtime", owner_id: ME });
+    const { onCreate } = renderDialog([mine]);
+
+    fireEvent.change(screen.getByPlaceholderText("e.g. Deep Research Agent"), {
+      target: { value: "Space Agent" },
+    });
+    fireEvent.click(screen.getByText("Selected Spaces"));
+
+    const create = screen.getByText("Create").closest("button")!;
+    expect(create).toBeDisabled();
+
+    fireEvent.click(screen.getByRole("checkbox", { name: /Engineering/ }));
+    fireEvent.click(screen.getByRole("checkbox", { name: /Design/ }));
+    expect(create).not.toBeDisabled();
+    fireEvent.click(create);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const payload = onCreate.mock.calls[0]?.[0];
+    expect(payload.availability_mode).toBe("selected_spaces");
+    expect(new Set(payload.availability_space_ids)).toEqual(
+      new Set(["space-eng", "space-design"]),
+    );
   });
 });

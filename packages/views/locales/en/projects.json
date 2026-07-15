@@ -64,6 +64,7 @@
     "unpin_tooltip": "Unpin from sidebar",
     "sidebar_tooltip": "Toggle sidebar",
     "copy_link": "Copy link",
+    "spaces": "Space",
     "delete_action": "Delete project",
     "section_properties": "Properties",
     "section_progress": "Progress",
@@ -123,6 +124,10 @@
     "description": "This will delete the project. Issues will not be deleted but will be unlinked.",
     "confirm": "Delete",
     "cancel": "Cancel"
+  },
+  "manage_spaces": {
+    "empty": "Select at least one space.",
+    "toast_failed": "Failed to update spaces"
   },
   "picker": {
     "no_project": "No project",

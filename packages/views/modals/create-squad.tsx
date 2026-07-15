@@ -7,6 +7,11 @@ import { api } from "@multica/core/api";
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
+import { canAssignAgentToIssue } from "@multica/core/permissions";
+import {
+  activeSpaceListOptions,
+  spaceMembersOptions,
+} from "@multica/core/spaces/queries";
 import {
   agentListOptions,
   memberListOptions,
@@ -14,7 +19,7 @@ import {
 } from "@multica/core/workspace/queries";
 import { AGENT_DESCRIPTION_MAX_LENGTH } from "@multica/core/agents";
 import { isImeComposing } from "@multica/core/utils";
-import type { Agent, MemberWithUser } from "@multica/core/types";
+import type { Agent } from "@multica/core/types";
 import {
   Dialog,
   DialogContent,
@@ -50,10 +55,21 @@ type SelectedMember = {
   name: string;
 };
 
+type SquadHumanCandidate = {
+  user_id: string;
+  name: string;
+};
+
 // How many chips we show inline before collapsing the tail into "+N".
 const CHIP_DISPLAY_LIMIT = 3;
 
-export function CreateSquadModal({ onClose }: { onClose: () => void }) {
+export function CreateSquadModal({
+  onClose,
+  data,
+}: {
+  onClose: () => void;
+  data?: Record<string, unknown> | null;
+}) {
   const { t } = useT("modals");
   const router = useNavigation();
   const wsPaths = useWorkspacePaths();
@@ -64,10 +80,38 @@ export function CreateSquadModal({ onClose }: { onClose: () => void }) {
 
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
   const { data: wsMembers = [] } = useQuery(memberListOptions(wsId));
+  const { data: spaces = [] } = useQuery(activeSpaceListOptions(wsId));
+  const requestedSpaceId =
+    typeof data?.space_id === "string" ? data.space_id : "";
+  const space =
+    spaces.find((candidate) => candidate.id === requestedSpaceId) ??
+    spaces.find((candidate) => candidate.is_default);
+  const spaceId = requestedSpaceId || space?.id || "";
+  const spaceKey =
+    (typeof data?.space_key === "string" ? data.space_key : "") ||
+    spaces.find((candidate) => candidate.id === spaceId)?.key ||
+    "";
+  const { data: spaceMembers = [] } = useQuery({
+    ...spaceMembersOptions(wsId, spaceId),
+    enabled: !!wsId && !!spaceId,
+  });
+  const workspaceRole =
+    wsMembers.find((member) => member.user_id === currentUserId)?.role ?? null;
 
   const activeAgents = useMemo(
-    () => agents.filter((a: Agent) => !a.archived_at && a.runtime_id),
-    [agents],
+    () =>
+      agents.filter(
+        (a: Agent) =>
+          !a.archived_at &&
+          a.runtime_id &&
+          !!spaceId &&
+          canAssignAgentToIssue(
+            a,
+            { userId: currentUserId, role: workspaceRole },
+            spaceId,
+          ).allowed,
+      ),
+    [agents, currentUserId, spaceId, workspaceRole],
   );
 
   const [name, setName] = useState("");
@@ -89,13 +133,14 @@ export function CreateSquadModal({ onClose }: { onClose: () => void }) {
     }
   };
 
-  const canSubmit = !!name.trim() && !!leaderId && !creating;
+  const canSubmit = !!spaceId && !!name.trim() && !!leaderId && !creating;
 
   const handleSubmit = async () => {
     if (!canSubmit) return;
     setCreating(true);
     try {
       const squad = await api.createSquad({
+        space_id: spaceId,
         name: name.trim(),
         description: description.trim() || undefined,
         leader_id: leaderId,
@@ -129,7 +174,11 @@ export function CreateSquadModal({ onClose }: { onClose: () => void }) {
 
       onClose();
       toast.success(t(($) => $.create_squad.toast_created));
-      router.push(wsPaths.squadDetail(squad.id));
+      router.push(
+        spaceKey
+          ? wsPaths.spaceSquadDetail(spaceKey, squad.id)
+          : wsPaths.squadDetail(squad.id),
+      );
     } catch (err) {
       toast.error(
         err instanceof Error
@@ -154,6 +203,14 @@ export function CreateSquadModal({ onClose }: { onClose: () => void }) {
 
         <div className="flex-1 overflow-y-auto p-5">
           <div className="space-y-4 min-w-0">
+            <div>
+              <Label className="text-xs text-muted-foreground">
+                {t(($) => $.create_squad.space_label)}
+              </Label>
+              <div className="mt-1 rounded-lg border bg-muted/30 px-3 py-2 text-sm font-medium">
+                {spaces.find((candidate) => candidate.id === spaceId)?.name ?? "—"}
+              </div>
+            </div>
             {/* Identity row mirrors CreateAgentDialog so the two creates read
                 as siblings — avatar (left) + name/description stack (right). */}
             <div className="flex items-start gap-4">
@@ -215,7 +272,7 @@ export function CreateSquadModal({ onClose }: { onClose: () => void }) {
 
             <AdditionalMembersPicker
               agents={activeAgents}
-              members={wsMembers}
+              members={spaceMembers}
               currentUserId={currentUserId}
               leaderId={leaderId}
               value={selectedMembers}
@@ -400,7 +457,7 @@ function AdditionalMembersPicker({
   onChange,
 }: {
   agents: Agent[];
-  members: MemberWithUser[];
+  members: SquadHumanCandidate[];
   currentUserId: string | null;
   leaderId: string;
   value: SelectedMember[];
@@ -445,7 +502,7 @@ function AdditionalMembersPicker({
   const q = filter.trim().toLowerCase();
   const agentMatches = (a: Agent) =>
     !q || a.name.toLowerCase().includes(q) || matchesPinyin(a.name, q);
-  const memberMatches = (m: MemberWithUser) =>
+  const memberMatches = (m: SquadHumanCandidate) =>
     !q || m.name.toLowerCase().includes(q) || matchesPinyin(m.name, q);
 
   const filteredMine = myAgents.filter(agentMatches);

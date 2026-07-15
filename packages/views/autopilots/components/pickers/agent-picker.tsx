@@ -4,7 +4,9 @@ import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Bot } from "lucide-react";
 import { useWorkspaceId } from "@multica/core/hooks";
-import { agentListOptions, squadListOptions } from "@multica/core/workspace/queries";
+import { useAuthStore } from "@multica/core/auth";
+import { canAssignAgentToIssue } from "@multica/core/permissions";
+import { agentListOptions, memberListOptions, squadListOptions } from "@multica/core/workspace/queries";
 import type { AutopilotAssigneeType } from "@multica/core/types";
 import { ActorAvatar } from "../../../common/actor-avatar";
 import {
@@ -27,22 +29,45 @@ export function AgentPicker({
   trigger: customTrigger,
   triggerRender,
   align = "start",
+  spaceId,
 }: {
   assignee: AssigneeSelection | null;
   onChange: (next: AssigneeSelection) => void;
   trigger?: React.ReactNode;
   triggerRender?: React.ReactElement;
   align?: "start" | "center" | "end";
+  spaceId?: string | null;
 }) {
   const { t } = useT("autopilots");
   const wsId = useWorkspaceId();
   const [open, setOpen] = useState(false);
   const [filter, setFilter] = useState("");
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
-  const { data: squads = [] } = useQuery(squadListOptions(wsId));
+  const { data: members = [] } = useQuery(memberListOptions(wsId));
+  const { data: squads = [] } = useQuery(
+    squadListOptions(wsId, typeof spaceId === "string" ? spaceId : undefined),
+  );
+  const userId = useAuthStore((state) => state.user?.id ?? null);
+  const role = members.find((member) => member.user_id === userId)?.role ?? null;
 
-  const activeAgents = useMemo(() => agents.filter((a) => !a.archived_at), [agents]);
-  const activeSquads = useMemo(() => squads.filter((s) => !s.archived_at), [squads]);
+  const activeAgents = useMemo(
+    () =>
+      agents.filter(
+        (agent) =>
+          !agent.archived_at &&
+          canAssignAgentToIssue(agent, { userId, role }, spaceId).allowed,
+      ),
+    [agents, role, spaceId, userId],
+  );
+  const activeSquads = useMemo(
+    () =>
+      squads.filter(
+        (s) =>
+          !s.archived_at &&
+          (spaceId === undefined || s.space_id === spaceId),
+      ),
+    [squads, spaceId],
+  );
 
   const selectedAgent =
     assignee?.type === "agent" ? activeAgents.find((a) => a.id === assignee.id) : undefined;

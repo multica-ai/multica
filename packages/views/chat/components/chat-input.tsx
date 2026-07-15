@@ -90,6 +90,8 @@ interface ChatInputProps {
   agentName?: string;
   /** Rendered at the bottom-left of the input bar — typically the agent picker. */
   leftAdornment?: ReactNode;
+  /** New-chat scope controls rendered in an attached bar above the editor. */
+  topAdornment?: ReactNode;
   /** Chat @ suggestions: current/recent issue/project entries. */
   contextItems?: MentionItem[];
   /** Monotonic nonce bumped by the owner whenever the compose box should grab
@@ -118,6 +120,7 @@ export function ChatInput({
   agentArchived,
   agentName,
   leftAdornment,
+  topAdornment,
   contextItems,
   focusRequest,
   draftKeyOverride,
@@ -399,7 +402,8 @@ export function ChatInput({
       <div
         {...(uploadEnabled ? dropZoneProps : {})}
         className={cn(
-          "relative mx-auto flex min-h-16 max-h-40 w-full max-w-4xl flex-col rounded-lg border border-surface-border bg-surface pb-9 transition-[border-color,box-shadow] focus-within:border-brand focus-within:ring-2 focus-within:ring-ring/20",
+          "relative mx-auto flex min-h-16 w-full max-w-4xl flex-col rounded-lg border border-surface-border bg-surface pb-9 transition-[border-color,box-shadow] focus-within:border-brand focus-within:ring-2 focus-within:ring-ring/20",
+          topAdornment ? "max-h-48" : "max-h-40",
           // Visual + interaction lock when there's no agent. We don't
           // toggle ContentEditor's editable mode (Tiptap can't switch
           // cleanly post-mount, and the prop has been removed); instead
@@ -410,6 +414,11 @@ export function ChatInput({
         )}
         aria-disabled={noAgent || undefined}
       >
+        {topAdornment && (
+          <div className="flex min-h-9 shrink-0 items-center gap-1 border-b bg-muted/30 px-1.5">
+            {topAdornment}
+          </div>
+        )}
         <div className="flex-1 min-h-0 overflow-y-auto px-3 py-2">
           <ContentEditor
             // See the editorKey / draftKey split note above — editorKey
@@ -436,6 +445,7 @@ export function ChatInput({
             debounceMs={100}
             mentionMode={contextItems ? "context" : "default"}
             mentionContextItems={contextItems}
+            targetSpaceId={null}
             enableSlashCommands
             // Chat is short-form — the floating formatting toolbar is
             // more distraction than feature here.

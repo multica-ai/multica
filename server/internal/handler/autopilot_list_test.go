@@ -15,9 +15,10 @@ func insertListTestAutopilot(t *testing.T, agentID, title string) string {
 	if err := testPool.QueryRow(context.Background(), `
 		INSERT INTO autopilot (
 			workspace_id, title, assignee_type, assignee_id,
-			status, execution_mode, created_by_type, created_by_id
+			status, execution_mode, created_by_type, created_by_id, space_id
 		)
-		VALUES ($1, $2, 'agent', $3, 'active', 'run_only', 'member', $4)
+		VALUES ($1, $2, 'agent', $3, 'active', 'run_only', 'member', $4,
+		        (SELECT id FROM workspace_space WHERE workspace_id = $1 LIMIT 1))
 		RETURNING id
 	`, testWorkspaceID, title, agentID, testUserID).Scan(&id); err != nil {
 		t.Fatalf("failed to insert test autopilot: %v", err)

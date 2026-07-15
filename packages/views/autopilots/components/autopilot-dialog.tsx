@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
+  AlertTriangle,
   Check,
   ChevronDown,
   ChevronRight,
@@ -37,6 +38,7 @@ import {
   PopoverDescription,
 } from "@multica/ui/components/ui/popover";
 import { Button } from "@multica/ui/components/ui/button";
+import { Input } from "@multica/ui/components/ui/input";
 import {
   Select,
   SelectTrigger,
@@ -46,10 +48,11 @@ import {
 } from "@multica/ui/components/ui/select";
 import { TimeInput } from "@multica/ui/components/ui/time-input";
 import { TimezonePicker } from "./pickers/timezone-picker";
-import { useCurrentWorkspace } from "@multica/core/paths";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { agentListOptions, squadListOptions } from "@multica/core/workspace/queries";
 import { projectListOptions } from "@multica/core/projects/queries";
+import { activeSpaceListOptions } from "@multica/core/spaces/queries";
+import { resolveCreationSpaceId } from "@multica/core/spaces/default-space";
 import {
   useCreateAutopilot,
   useCreateAutopilotTrigger,
@@ -66,8 +69,10 @@ import type {
 } from "@multica/core/types";
 import { TitleEditor, ContentEditor } from "../../editor";
 import { ActorAvatar } from "../../common/actor-avatar";
+import { PillButton } from "../../common/pill-button";
 import { ProjectPicker } from "../../projects/components/project-picker";
 import { ProjectIcon } from "../../projects/components/project-icon";
+import { SpacePicker } from "../../spaces/components/space-picker";
 import { AgentPicker, type AssigneeSelection } from "./pickers/agent-picker";
 import { SubscriberMultiSelect } from "./subscriber-multi-select";
 import { AutopilotAccessManager } from "./autopilot-access-manager";
@@ -92,9 +97,11 @@ export interface AutopilotInitial {
   title: string;
   description: string;
   project_id: string | null;
+  space_id: string | null;
   assignee_type: AutopilotAssigneeType;
   assignee_id: string;
   execution_mode: AutopilotExecutionMode;
+  issue_title_template: string | null;
   subscriber_user_ids?: string[];
 }
 
@@ -105,6 +112,7 @@ export type AutopilotDialogProps =
       onOpenChange: (v: boolean) => void;
       initial?: Partial<AutopilotInitial>;
       initialTriggerConfig?: Partial<TriggerConfig>;
+      initialTriggerKind?: "schedule" | "webhook";
     }
   | {
       mode: "edit";
@@ -278,11 +286,11 @@ function useNowTicker(intervalMs = 30_000): Date {
 export function AutopilotDialog(props: AutopilotDialogProps) {
   const { t } = useT("autopilots");
   const { open, onOpenChange } = props;
-  const workspaceName = useCurrentWorkspace()?.name;
   const wsId = useWorkspaceId();
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
   const { data: squads = [] } = useQuery(squadListOptions(wsId));
   const { data: projects = [] } = useQuery(projectListOptions(wsId));
+  const { data: spaces = [] } = useQuery(activeSpaceListOptions(wsId));
   const [isExpanded, setIsExpanded] = useState(false);
 
   const isCreate = props.mode === "create";
@@ -293,12 +301,16 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
   const [title, setTitle] = useState(initial.title ?? "");
   const [description, setDescription] = useState(initial.description ?? "");
   const [projectId, setProjectId] = useState<string | null>(initial.project_id ?? null);
+  const [spaceId, setSpaceId] = useState<string | null>(initial.space_id ?? null);
   const [assigneeType, setAssigneeType] = useState<AutopilotAssigneeType>(
     initial.assignee_type ?? "agent",
   );
   const [assigneeId, setAssigneeId] = useState<string>(initial.assignee_id ?? "");
   const [executionMode, setExecutionMode] = useState<AutopilotExecutionMode>(
     initial.execution_mode ?? "create_issue",
+  );
+  const [issueTitleTemplate, setIssueTitleTemplate] = useState(
+    initial.issue_title_template ?? "",
   );
   const [subscriberUserIds, setSubscriberUserIds] = useState<string[]>(
     initial.subscriber_user_ids ?? [],
@@ -324,7 +336,7 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
   // initialized from the first existing trigger so we render the right
   // panel without surprising the user.
   const initialKind: "schedule" | "webhook" = (() => {
-    if (isCreate) return "schedule";
+    if (isCreate) return props.initialTriggerKind ?? "schedule";
     const first = props.triggers[0];
     if (first?.kind === "webhook") return "webhook";
     return "schedule";
@@ -364,6 +376,11 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
     () => projects.find((project) => project.id === projectId) ?? null,
     [projects, projectId],
   );
+  // Space is required. A selected Project makes its owning Space authoritative;
+  // otherwise an explicit pick falls back to the workspace Default Space.
+  const projectSpaceId = selectedProject?.space_id;
+  const effectiveSpaceId =
+    spaceId ?? resolveCreationSpaceId(spaces, { projectSpaceId }) ?? null;
 
   const handleAssigneeChange = (next: AssigneeSelection) => {
     setAssigneeType(next.type);
@@ -394,9 +411,14 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
           title: title.trim(),
           description: description.trim() || undefined,
           project_id: executionMode === "create_issue" ? projectId : null,
+          space_id: effectiveSpaceId,
           assignee_type: assigneeType,
           assignee_id: assigneeId,
           execution_mode: executionMode,
+          issue_title_template:
+            executionMode === "create_issue"
+              ? issueTitleTemplate.trim() || undefined
+              : undefined,
           subscribers: subscriberUserIds.map((user_id) => ({
             user_type: "member" as const,
             user_id,
@@ -450,6 +472,10 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
           assignee_type: assigneeType,
           assignee_id: assigneeId,
           execution_mode: executionMode,
+          issue_title_template:
+            executionMode === "create_issue"
+              ? issueTitleTemplate.trim() || null
+              : null,
           subscribers: subscriberUserIds.map((user_id) => ({
             user_type: "member" as const,
             user_id,
@@ -548,6 +574,17 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
         {/* Header */}
         <div className="flex items-center justify-between px-5 pt-3 pb-2 shrink-0 border-b">
           <div className="flex items-center gap-2 text-xs">
+            {/* Owning space leads the breadcrumb — same grammar as the
+                issue/project modals: [space] › action. Required single-select,
+                seeded from context, switchable. */}
+            <SpacePicker
+              spaceId={effectiveSpaceId}
+              onChange={setSpaceId}
+              disabled={!isCreate || !!projectId}
+              triggerRender={<PillButton />}
+              align="start"
+            />
+            <ChevronRight className="size-3 text-muted-foreground/40" />
             <div className="flex items-center gap-1.5">
               <span className="inline-flex size-5 items-center justify-center rounded-md bg-primary/15 text-primary">
                 <Rocket className="size-3" />
@@ -560,12 +597,6 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
             </div>
             <span className="text-muted-foreground/60">·</span>
             <span className="text-muted-foreground">{t(($) => $.dialog.subtitle)}</span>
-            {workspaceName && (
-              <>
-                <ChevronRight className="size-3 text-muted-foreground/40" />
-                <span className="text-muted-foreground">{workspaceName}</span>
-              </>
-            )}
           </div>
           <div className="flex items-center gap-1">
             {!isCreate && props.canManageAccess && (
@@ -682,6 +713,7 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
               onChange={handleAssigneeChange}
               selectedName={selectedAssignee?.name}
               selectedDescription={selectedAssignee?.description}
+              spaceId={effectiveSpaceId}
             />
 
             <OutputModeSection mode={executionMode} onChange={setExecutionMode} />
@@ -691,6 +723,14 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
                 projectId={projectId}
                 selectedProject={selectedProject}
                 onChange={setProjectId}
+                spaceId={effectiveSpaceId}
+              />
+            )}
+
+            {executionMode === "create_issue" && (
+              <IssueTitleTemplateSection
+                value={issueTitleTemplate}
+                onChange={setIssueTitleTemplate}
               />
             )}
 
@@ -728,10 +768,24 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
 
         {/* Footer */}
         <div className="flex items-center justify-between gap-3 px-5 py-3 border-t shrink-0 bg-background">
-          <div className="flex items-center gap-1.5 text-xs text-muted-foreground min-w-0">
-            <Zap className="size-3.5 text-amber-500 shrink-0" />
-            <span className="truncate">{t(($) => $.dialog.auto_run_hint)}</span>
-          </div>
+          {/* Left slot: blocking-validation warnings take precedence over the
+              ambient auto-run hint — one message at a time, in the order the
+              form asks for them (title, then assignee). */}
+          {title.trim().length === 0 || assigneeId.length === 0 ? (
+            <div className="flex items-center gap-1.5 text-xs text-destructive min-w-0">
+              <AlertTriangle className="size-3.5 shrink-0" />
+              <span className="truncate">
+                {title.trim().length === 0
+                  ? t(($) => $.dialog.title_required)
+                  : t(($) => $.dialog.assignee_required)}
+              </span>
+            </div>
+          ) : (
+            <div className="flex items-center gap-1.5 text-xs text-muted-foreground min-w-0">
+              <Zap className="size-3.5 text-amber-500 shrink-0" />
+              <span className="truncate">{t(($) => $.dialog.auto_run_hint)}</span>
+            </div>
+          )}
           <div className="flex items-center gap-2 shrink-0">
             <Button size="sm" variant="outline" onClick={() => onOpenChange(false)}>
               {t(($) => $.dialog.cancel)}
@@ -772,12 +826,14 @@ function AgentSection({
   onChange,
   selectedName,
   selectedDescription,
+  spaceId,
 }: {
   selectedType: AutopilotAssigneeType;
   selectedId: string;
   onChange: (next: AssigneeSelection) => void;
   selectedName?: string;
   selectedDescription?: string;
+  spaceId: string | null;
 }) {
   const { t } = useT("autopilots");
   const hasSelection = selectedId.length > 0;
@@ -787,6 +843,7 @@ function AgentSection({
       <AgentPicker
         assignee={hasSelection ? { type: selectedType, id: selectedId } : null}
         onChange={onChange}
+        spaceId={spaceId}
         align="start"
         triggerRender={
           <button
@@ -887,10 +944,12 @@ function ProjectSection({
   projectId,
   selectedProject,
   onChange,
+  spaceId,
 }: {
   projectId: string | null;
   selectedProject: { title: string; icon: string | null } | null;
   onChange: (projectId: string | null) => void;
+  spaceId: string | null;
 }) {
   const { t } = useT("autopilots");
   return (
@@ -899,6 +958,7 @@ function ProjectSection({
       <ProjectPicker
         projectId={projectId}
         onUpdate={(updates) => onChange(updates.project_id ?? null)}
+        spaceId={spaceId}
         align="start"
         triggerRender={
           <button
@@ -922,6 +982,31 @@ function ProjectSection({
           </button>
         }
       />
+    </div>
+  );
+}
+
+function IssueTitleTemplateSection({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  const { t } = useT("autopilots");
+  return (
+    <div>
+      <SectionLabel>{t(($) => $.dialog.issue_title_template)}</SectionLabel>
+      <Input
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        placeholder={t(($) => $.dialog.issue_title_template_placeholder, {
+          date: "{{date}}",
+        })}
+      />
+      <p className="mt-1.5 text-[11px] text-muted-foreground">
+        {t(($) => $.dialog.issue_title_template_hint, { date: "{{date}}" })}
+      </p>
     </div>
   );
 }

@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "@multica/core/api";
 import { AppSidebar } from "./app-sidebar";
 
-const { appForeground, chatSessions, chatStore, detail, deletePin, navigation, pins, summary, workspaces } = vi.hoisted(() => ({
+const { appForeground, chatSessions, chatStore, detail, deletePin, navigation, pins, spaces, summary, workspaces } = vi.hoisted(() => ({
   appForeground: { current: true },
   chatSessions: { current: [] as { id?: string; unread_count?: number }[] },
   chatStore: { current: { activeSessionId: null as string | null, isOpen: false } },
@@ -27,12 +27,14 @@ const { appForeground, chatSessions, chatStore, detail, deletePin, navigation, p
       },
     ],
   },
+  spaces: { current: [] as import("@multica/core/types").Space[] },
 }));
 
 vi.mock("@dnd-kit/core", () => ({
   DndContext: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   PointerSensor: vi.fn(),
   closestCenter: vi.fn(),
+  MeasuringStrategy: { Always: "always" },
   useSensor: vi.fn(),
   useSensors: vi.fn(),
 }));
@@ -47,6 +49,19 @@ vi.mock("@multica/ui/components/ui/sidebar", () => ({
   SidebarContent: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   SidebarFooter: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   SidebarGroup: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  SidebarGroupAction: ({
+    children,
+    title,
+    onClick,
+  }: {
+    children: React.ReactNode;
+    title?: string;
+    onClick?: () => void;
+  }) => (
+    <button type="button" title={title} onClick={onClick}>
+      {children}
+    </button>
+  ),
   SidebarGroupContent: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   SidebarGroupLabel: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   SidebarHeader: ({ children }: { children: React.ReactNode }) => <>{children}</>,
@@ -127,6 +142,14 @@ vi.mock("@multica/core/paths", () => ({
     runtimes: () => "/acme/runtimes",
     skills: () => "/acme/skills",
     settings: () => "/acme/settings",
+    spaceNew: () => "/acme/spaces/new",
+    spacesDirectory: () => "/acme/spaces",
+    spaceDetail: (key: string) => `/acme/space/${key}`,
+    spaceIssues: (key: string) => `/acme/space/${key}/issues`,
+    spaceProjects: (key: string) => `/acme/space/${key}/projects`,
+    spaceAutopilots: (key: string) => `/acme/space/${key}/autopilots`,
+    spaceSquads: (key: string) => `/acme/space/${key}/squads`,
+    spaceSettings: (key: string) => `/acme/settings/space/${key}`,
     issueDetail: (id: string) => `/acme/issues/${id}`,
     projectDetail: (id: string) => `/acme/projects/${id}`,
   }),
@@ -161,6 +184,10 @@ vi.mock("@multica/core/issues/stores/draft-store", () => ({ useIssueDraftStore: 
 vi.mock("@multica/core/modals", () => ({ useModalStore: { getState: () => ({ modal: null, open: vi.fn() }) } }));
 vi.mock("@multica/core/pins/mutations", () => ({ useDeletePin: () => ({ mutate: deletePin }), useReorderPins: () => ({ mutate: vi.fn() }) }));
 vi.mock("@multica/core/pins/queries", () => ({ pinListOptions: () => ({ queryKey: ["pins"] }) }));
+vi.mock("@multica/core/spaces/queries", () => ({ mySpaceListOptions: () => ({ queryKey: ["spaces"] }) }));
+vi.mock("@multica/core/spaces/mutations", () => ({
+  useUpdateSpacePreference: () => ({ mutate: vi.fn() }),
+}));
 vi.mock("@multica/core/projects/queries", () => ({ projectDetailOptions: () => ({ queryKey: ["project"] }) }));
 vi.mock("@multica/core/workspace/queries", () => ({
   myInvitationListOptions: () => ({ queryKey: ["invitations"] }),
@@ -175,11 +202,16 @@ vi.mock("@tanstack/react-query", async (importOriginal) => ({
     if (queryKey[0] === "issue") return detail.current;
     if (queryKey[0] === "inbox" && queryKey[1] === "unread-summary") return { data: summary.current };
     if (queryKey[0] === "workspaces") return { data: workspaces.current };
+    if (queryKey[0] === "spaces") return { data: spaces.current };
     if (queryKey[0] === "chat" && queryKey[2] === "sessions") return { data: chatSessions.current };
     return { data: [] };
   },
   useQueryClient: () => ({ fetchQuery: vi.fn(), invalidateQueries: vi.fn() }),
 }));
+
+beforeEach(() => {
+  spaces.current = [];
+});
 
 describe("PinRow", () => {
   beforeEach(() => {
@@ -224,7 +256,47 @@ describe("PinRow", () => {
       "data-active",
       "true",
     );
-    expect(container.querySelector('button[data-href="/acme/issues"]')).not.toHaveAttribute("data-active");
+    // The workspace-wide Issues nav left with the space rollout, so the pin
+    // must be the ONLY active element — no nav entry lights up alongside it.
+    expect(container.querySelector('button[data-href="/acme/issues"]')).toBeNull();
+    expect(container.querySelectorAll('[data-active="true"]')).toHaveLength(1);
+  });
+});
+
+describe("project navigation", () => {
+  it("shows Projects only inside a space, not in the Workspace group", () => {
+    spaces.current = [
+      {
+        id: "space-1",
+        workspace_id: "ws-1",
+        name: "Engineering",
+        key: "ENG",
+        icon: null,
+        context: "",
+        issue_counter: 0,
+        is_default: true,
+        visibility: "open",
+        archived_at: null,
+        created_by: "user-1",
+        created_at: "2026-05-06T00:00:00Z",
+        updated_at: "2026-05-06T00:00:00Z",
+        is_member: true,
+        member_role: "lead",
+        is_pinned: false,
+        is_followed: false,
+        sort_order: 1,
+      },
+    ];
+
+    const { container } = render(<AppSidebar />);
+
+    expect(container.querySelector('button[data-href="/acme/projects"]')).toBeNull();
+    expect(
+      container.querySelector('button[data-href="/acme/space/ENG/projects"]'),
+    ).not.toBeNull();
+    expect(
+      container.querySelector('button[data-href="/acme/space/ENG/settings"]'),
+    ).toBeNull();
   });
 });
 

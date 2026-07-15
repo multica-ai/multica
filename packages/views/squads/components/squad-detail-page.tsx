@@ -11,6 +11,8 @@ import { isImeComposing } from "@multica/core/utils";
 import { getShortcut, shortcutMatchesEvent } from "@multica/core/shortcuts";
 import { useTimeAgo } from "../../i18n";
 import { agentListOptions, memberListOptions, squadMemberStatusOptions, workspaceKeys } from "@multica/core/workspace/queries";
+import { spaceListOptions, spaceMembersOptions } from "@multica/core/spaces/queries";
+import { canAssignAgentToIssue } from "@multica/core/permissions";
 import { useNavigation } from "../../navigation";
 import { AppLink } from "../../navigation";
 import { BreadcrumbHeader } from "../../layout/breadcrumb-header";
@@ -100,6 +102,15 @@ export function SquadDetailPage() {
 
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
   const { data: wsMembers = [] } = useQuery(memberListOptions(wsId));
+  const { data: spaces = [] } = useQuery(spaceListOptions(wsId));
+  const owningSpace = spaces.find((space) => space.id === squad?.space_id);
+  const squadsHref = owningSpace
+    ? p.spaceSquads(owningSpace.key)
+    : p.squads();
+  const { data: spaceMembers = [] } = useQuery({
+    ...spaceMembersOptions(wsId, squad?.space_id ?? ""),
+    enabled: !!workspace?.id && !!squad?.space_id,
+  });
 
   const currentUser = useAuthStore((s) => s.user);
   const myRole = useMemo(() => {
@@ -172,7 +183,7 @@ export function SquadDetailPage() {
 
   const deleteMut = useMutation({
     mutationFn: () => api.deleteSquad(squadId),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: workspaceKeys.squads(wsId) }); push(p.squads()); toast.success("Squad archived"); },
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: workspaceKeys.squads(wsId) }); push(squadsHref); toast.success("Squad archived"); },
     onError: (err) =>
       toast.error(err instanceof Error && err.message ? err.message : "Failed to archive squad"),
   });
@@ -186,8 +197,29 @@ export function SquadDetailPage() {
     return <SquadDetailSkeleton />;
   }
 
-  const availableAgents = agents.filter((a: Agent) => !a.archived_at && !members.some((m) => m.member_type === "agent" && m.member_id === a.id));
-  const availableMembers = wsMembers.filter((m) => !members.some((sm) => sm.member_type === "member" && sm.member_id === m.user_id));
+  const availableAgents = agents.filter(
+    (agent: Agent) =>
+      !agent.archived_at &&
+      !members.some(
+        (member) =>
+          member.member_type === "agent" && member.member_id === agent.id,
+      ) &&
+      canAssignAgentToIssue(
+        agent,
+        { userId: currentUser?.id ?? null, role: myRole },
+        squad.space_id,
+      ).allowed,
+  );
+  const spaceMemberIDs = new Set(spaceMembers.map((member) => member.user_id));
+  const availableMembers = wsMembers.filter(
+    (member) =>
+      spaceMemberIDs.has(member.user_id) &&
+      !members.some(
+        (squadMember) =>
+          squadMember.member_type === "member" &&
+          squadMember.member_id === member.user_id,
+      ),
+  );
   const isLeader = (m: SquadMember) => m.member_type === "agent" && squad.leader_id === m.member_id;
   const isArchived = (m: SquadMember) =>
     m.member_type === "agent" && !!agents.find((a: Agent) => a.id === m.member_id)?.archived_at;
@@ -202,7 +234,7 @@ export function SquadDetailPage() {
   return (
     <div className="flex flex-1 min-h-0 flex-col">
       <BreadcrumbHeader
-        segments={[{ href: p.squads(), label: t(($) => $.page.title) }]}
+        segments={[{ href: squadsHref, label: t(($) => $.page.title) }]}
         leaf={
           <>
             <SquadHeaderAvatar squad={squad} initials={initials} />

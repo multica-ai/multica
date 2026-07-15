@@ -56,6 +56,16 @@ export function BatchActionToolbar({
     () => commonIssueFields(issues.filter((i) => selectedIds.has(i.id))),
     [issues, selectedIds],
   );
+  const commonSpaceId = useMemo(() => {
+    const selectedSpaces = new Set(
+      issues
+        .filter((issue) => selectedIds.has(issue.id))
+        .map((issue) => issue.space_id),
+    );
+    return selectedSpaces.size === 1
+      ? (selectedSpaces.values().next().value ?? null)
+      : null;
+  }, [issues, selectedIds]);
 
   const [statusOpen, setStatusOpen] = useState(false);
   const [priorityOpen, setPriorityOpen] = useState(false);
@@ -193,6 +203,7 @@ export function BatchActionToolbar({
         <AssigneePicker
           assigneeType={common.assignee?.type ?? null}
           assigneeId={common.assignee?.id ?? null}
+          spaceId={commonSpaceId}
           mixed={common.assignee === null}
           onUpdate={handleBatchAssignee}
           open={assigneeOpen}

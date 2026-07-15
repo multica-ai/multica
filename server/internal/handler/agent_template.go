@@ -133,8 +133,10 @@ type CreateAgentFromTemplateRequest struct {
 	// template row lands as `permission_mode='private'` (the SQL default) and
 	// canInvokeAgent silently locks out every non-owner, even if the caller
 	// asked for a workspace-shared agent.
-	PermissionMode    *string                    `json:"permission_mode,omitempty"`
-	InvocationTargets []AgentInvocationTargetDTO `json:"invocation_targets,omitempty"`
+	PermissionMode       *string                    `json:"permission_mode,omitempty"`
+	InvocationTargets    []AgentInvocationTargetDTO `json:"invocation_targets,omitempty"`
+	AvailabilityMode     *string                    `json:"availability_mode,omitempty"`
+	AvailabilitySpaceIDs []string                   `json:"availability_space_ids,omitempty"`
 	// Optional overrides — let the picker UI customise the template before
 	// creation without forcing a second round-trip to the detail page.
 	// When nil/empty, the template's own values are used.
@@ -236,6 +238,42 @@ func (h *Handler) CreateAgentFromTemplate(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusBadRequest, permErr.Error())
 		return
 	}
+	_, hasAvailabilityMode := rawFields["availability_mode"]
+	_, hasAvailabilitySpaces := rawFields["availability_space_ids"]
+	availabilityMode := availabilityModeFromLegacyPermission(perm.mode)
+	if hasAvailabilityMode {
+		if req.AvailabilityMode == nil {
+			writeError(w, http.StatusBadRequest, "availability_mode cannot be null")
+			return
+		}
+		availabilityMode = *req.AvailabilityMode
+	} else if hasAvailabilitySpaces {
+		writeError(w, http.StatusBadRequest, "availability_mode is required with availability_space_ids")
+		return
+	}
+	availabilitySpaceIDs := req.AvailabilitySpaceIDs
+	if !hasAvailabilitySpaces {
+		availabilitySpaceIDs = nil
+	}
+	availability, availabilityErr := h.parseAndValidateAgentAvailability(
+		r.Context(), wsUUID, parseUUID(ownerID), availabilityMode, availabilitySpaceIDs,
+	)
+	if availabilityErr != nil {
+		writeError(w, http.StatusBadRequest, availabilityErr.Error())
+		return
+	}
+	if hasAvailabilityMode {
+		if availability.mode == agentAvailabilityPrivate {
+			perm.mode = permissionModePrivate
+			perm.targets = nil
+		} else {
+			perm.mode = permissionModePublicTo
+			perm.targets = []targetSpec{{
+				targetType: invocationTargetWorkspace,
+				targetID:   wsUUID,
+			}}
+		}
+	}
 
 	slog.Info("agent-template create: request received",
 		append(logger.RequestAttrs(r),
@@ -267,6 +305,11 @@ func (h *Handler) CreateAgentFromTemplate(w http.ResponseWriter, r *http.Request
 			Name:        ref.CachedName,
 		})
 		if err == nil {
+			visible, _ := h.skillVisibleToRequest(r.Context(), existing, ownerID)
+			if !visible {
+				writeError(w, http.StatusConflict, "a Skill with this name exists but is not available to you")
+				return
+			}
 			preReused[i] = existing
 			slog.Info("agent-template create: pre-reuse hit (skipped fetch)",
 				append(logger.RequestAttrs(r),
@@ -356,6 +399,11 @@ func (h *Handler) CreateAgentFromTemplate(w http.ResponseWriter, r *http.Request
 			Name:        imp.name,
 		})
 		if err == nil {
+			visible, _ := h.skillVisibleToRequest(r.Context(), existing, ownerID)
+			if !visible {
+				writeError(w, http.StatusConflict, "a Skill with this name exists but is not available to you")
+				return
+			}
 			slog.Info("agent-template create: reusing existing skill (frontmatter-name match, cached_name drifted)",
 				append(logger.RequestAttrs(r),
 					"index", i,
@@ -468,6 +516,7 @@ func (h *Handler) CreateAgentFromTemplate(w http.ResponseWriter, r *http.Request
 		RuntimeID:          runtime.ID,
 		Visibility:         perm.legacyVisibility(),
 		PermissionMode:     perm.mode,
+		AvailabilityMode:   availability.mode,
 		MaxConcurrentTasks: req.MaxConcurrentTasks,
 		OwnerID:            creatorUUID,
 		CustomEnv:          ce,
@@ -534,6 +583,12 @@ func (h *Handler) CreateAgentFromTemplate(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusInternalServerError, "failed to persist invocation targets: "+err.Error())
 		return
 	}
+	if err := replaceAgentAvailableSpacesWithQueries(
+		r.Context(), qtx, agent.ID, wsUUID, creatorUUID, availability.spaceIDs,
+	); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to persist Agent Availability")
+		return
+	}
 
 	// Attach user-supplied extra skills (selected in the create dialog
 	// alongside the template). AddAgentSkill uses ON CONFLICT DO NOTHING,
@@ -556,6 +611,12 @@ func (h *Handler) CreateAgentFromTemplate(w http.ResponseWriter, r *http.Request
 		if qerr != nil {
 			slog.Warn("agent-template create: skipping cross-workspace extra_skill_id",
 				append(logger.RequestAttrs(r), "skill_id", raw, "error", qerr)...)
+			continue
+		}
+		visible, _ := h.skillVisibleToRequest(r.Context(), owned, ownerID)
+		if !visible {
+			slog.Warn("agent-template create: skipping unavailable extra_skill_id",
+				append(logger.RequestAttrs(r), "skill_id", raw)...)
 			continue
 		}
 		if err := qtx.AddAgentSkill(r.Context(), db.AddAgentSkillParams{
@@ -605,7 +666,7 @@ func (h *Handler) CreateAgentFromTemplate(w http.ResponseWriter, r *http.Request
 			append(logger.RequestAttrs(r), "error", err, "agent_id", uuidToString(agent.ID))...)
 	}
 	actorType, actorID := h.resolveActor(r, ownerID, workspaceID)
-	h.publish(protocol.EventAgentCreated, workspaceID, actorType, actorID, map[string]any{"agent": resp})
+	h.publish(protocol.EventAgentCreated, workspaceID, actorType, actorID, map[string]any{"agent": broadcastAgentResponse(resp)})
 
 	obsmetrics.RecordEvent(h.Analytics, h.Metrics, analytics.AgentCreated(
 		ownerID,

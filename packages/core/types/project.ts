@@ -5,6 +5,7 @@ export type ProjectPriority = "urgent" | "high" | "medium" | "low" | "none";
 export interface Project {
   id: string;
   workspace_id: string;
+  space_id: string;
   title: string;
   description: string | null;
   icon: string | null;
@@ -33,6 +34,7 @@ export interface CreateProjectRequest {
   lead_id?: string;
   start_date?: string;
   due_date?: string;
+  space_id?: string;
   // Resources to attach in the same transaction as the project. Server returns
   // 4xx (and rolls back) if any one is invalid or duplicate.
   resources?: CreateProjectResourceRequest[];
@@ -49,6 +51,9 @@ export interface UpdateProjectRequest {
   // Omit the key to leave the date untouched; send null (or "") to clear it.
   start_date?: string | null;
   due_date?: string | null;
+  // Project moves require a dedicated impact-aware workflow and are not a
+  // generic metadata update.
+  space_id?: never;
 }
 
 export interface ListProjectsResponse {

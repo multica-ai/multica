@@ -82,6 +82,95 @@ func TestCreateWorkspace_DoesNotMarkOnboarded(t *testing.T) {
 	}
 }
 
+func TestCreateWorkspace_SetsInitialSpaceAsDefault(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+	const slug = "handler-tests-default-space"
+	_, _ = testPool.Exec(ctx, `DELETE FROM workspace WHERE slug = $1`, slug)
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM workspace WHERE slug = $1`, slug)
+	})
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/workspaces", map[string]any{
+		"name": "Default Space Probe",
+		"slug": slug,
+	})
+	testHandler.CreateWorkspace(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateWorkspace: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var workspaceID, spaceID string
+	var defaultCount int
+	if err := testPool.QueryRow(ctx, `SELECT id FROM workspace WHERE slug = $1`, slug).Scan(&workspaceID); err != nil {
+		t.Fatalf("load workspace: %v", err)
+	}
+	if err := testPool.QueryRow(ctx, `
+		SELECT id, count(*) OVER ()
+		FROM workspace_space
+		WHERE workspace_id = $1 AND is_default = true AND archived_at IS NULL
+	`, workspaceID).Scan(&spaceID, &defaultCount); err != nil {
+		t.Fatalf("load default space: %v", err)
+	}
+	if spaceID == "" || defaultCount != 1 {
+		t.Fatalf("expected exactly one initial Default Space, got id=%q count=%d", spaceID, defaultCount)
+	}
+}
+
+func TestUpdateWorkspace_ChangesDefaultSpace(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+	var originalDefaultID string
+	if err := testPool.QueryRow(ctx, `
+		SELECT id FROM workspace_space
+		WHERE workspace_id = $1 AND is_default = true
+	`, testWorkspaceID).Scan(&originalDefaultID); err != nil {
+		t.Fatalf("load original default: %v", err)
+	}
+
+	var targetID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO workspace_space (workspace_id, name, key, created_by)
+		VALUES ($1, 'Default Target', 'DEFTGT', $2)
+		RETURNING id
+	`, testWorkspaceID, testUserID).Scan(&targetID); err != nil {
+		t.Fatalf("create target space: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `UPDATE workspace_space SET is_default = false WHERE workspace_id = $1`, testWorkspaceID)
+		_, _ = testPool.Exec(context.Background(), `UPDATE workspace_space SET is_default = true WHERE id = $1`, originalDefaultID)
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM workspace_space WHERE id = $1`, targetID)
+	})
+
+	w := httptest.NewRecorder()
+	req := newRequest("PATCH", "/api/workspaces/"+testWorkspaceID, map[string]any{
+		"default_space_id": targetID,
+	})
+	req = withURLParam(req, "id", testWorkspaceID)
+	testHandler.UpdateWorkspace(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("UpdateWorkspace: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var selected string
+	if err := testPool.QueryRow(ctx, `
+		SELECT id FROM workspace_space
+		WHERE workspace_id = $1 AND is_default = true
+	`, testWorkspaceID).Scan(&selected); err != nil {
+		t.Fatalf("load selected default: %v", err)
+	}
+	if selected != targetID {
+		t.Fatalf("default space = %s, want %s", selected, targetID)
+	}
+}
+
 // TestCreateWorkspace_DisabledByConfig guards the self-host gate added by
 // #3433: when DisableWorkspaceCreation is true on the handler config, every
 // caller — even an already-authenticated user — must receive 403 and the

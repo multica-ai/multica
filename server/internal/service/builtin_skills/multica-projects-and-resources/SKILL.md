@@ -26,18 +26,44 @@ A project groups work and carries durable resources. A resource is not just disp
 
 A project's `description` is also durable context: when an issue (or a quick-create task) is bound to a project, the project description is injected into the agent's brief under `## Project Context` and written to `.multica/project/resources.json` as `project_description`. Use it for project-wide rules/context that should apply to every task in the project.
 
+Project Context is layered below Workspace Context and the task's Space Context. Work runs normally bind one Space; Chat may bind one Space or All spaces. Project Context applies only when the task is also bound to that Project. Neither context layer grants additional data or Integration access.
+
 Common resource types:
 
 - `github_repo` — durable GitHub repo context, with `resource_ref.url`, optional checkout `ref`, and optional prompt-only `default_branch_hint`;
 - `local_directory` — daemon-local path context, with `resource_ref.local_path`, `daemon_id`, and optional label.
 
+## Spaces
+
+A workspace is organized into spaces. A space owns an issue-key prefix and its own
+issue-number counter, so issue identifiers read `SPACE_KEY-NUMBER` (e.g. `MUL-42`).
+Every workspace has a default space whose key is the legacy workspace prefix;
+commands that omit `--space` fall back to it.
+
+Each Project belongs to exactly one Space. `project create` accepts one
+`--space <space-id-or-key>` (UUID or key), or falls back to the workspace's
+default Space. Generic project updates do not move ownership; `project list
+--space <space-id-or-key>` filters a listing to one Space.
+
+```bash
+multica space list --output json
+multica space create --name "<name>" --key <PREFIX> --output json
+multica space update <space-id-or-key> --name "<name>" --key <PREFIX> --output json
+multica space archive <space-id-or-key> --output json
+```
+
+`space create` requires `--name`; `--key` sets the issue prefix and is optional.
+`--description` and `--icon` are optional on both `create` and `update`. `archive`
+resolves a space by id or key.
+
 ## CLI
 
 ```bash
 multica project list --output json
+multica project list --space <space-id-or-key> --output json
 multica project get <project-id> --output json
-multica project create --title "<title>" --repo <github-url> --output json
-multica project create --title "<title>" --start-date 2026-03-01 --due-date 2026-03-31 --output json
+multica project create --title "<title>" --space <space-id-or-key> --repo <github-url> --output json
+multica project create --title "<title>" --space <space-id-or-key> --start-date 2026-03-01 --due-date 2026-03-31 --output json
 multica project update <project-id> --title "<title>" --output json
 multica project update <project-id> --due-date 2026-04-15 --output json
 multica project update <project-id> --start-date "" --output json   # clear the start date

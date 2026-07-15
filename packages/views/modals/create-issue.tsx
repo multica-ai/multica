@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigation } from "../navigation";
 import {
@@ -39,14 +39,18 @@ import { ContentEditor, type ContentEditorRef, TitleEditor, useFileDropZone, Fil
 import { StatusIcon, StatusPicker, PriorityPicker, StagePicker, AssigneePicker, StartDatePicker, DueDatePicker, LabelPicker } from "../issues/components";
 import { maxSiblingStage } from "../issues/components/pickers/stage-picker";
 import { ProjectPicker } from "../projects/components/project-picker";
+import { SpacePicker } from "../spaces/components/space-picker";
 import { useIssueTriggerPreview } from "../issues/hooks/use-issue-trigger-preview";
 import { useActorName } from "@multica/core/workspace/hooks";
-import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
+import { useWorkspacePaths } from "@multica/core/paths";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useIssueDraftStore } from "@multica/core/issues/stores/draft-store";
 import { useCreateModeStore } from "@multica/core/issues/stores/create-mode-store";
 import { useQuickCreateStore } from "@multica/core/issues/stores/quick-create-store";
 import { issueDetailOptions, childIssuesOptions } from "@multica/core/issues/queries";
+import { projectListOptions } from "@multica/core/projects/queries";
+import { activeSpaceListOptions } from "@multica/core/spaces/queries";
+import { resolveCreationSpaceId } from "@multica/core/spaces/default-space";
 import { useCreateIssue, useUpdateIssue } from "@multica/core/issues/mutations";
 import { useAttachLabelToIssue } from "@multica/core/labels";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
@@ -192,7 +196,6 @@ export function ManualCreatePanel({
   const { t } = useT("modals");
   const router = useNavigation();
   const p = useWorkspacePaths();
-  const workspaceName = useCurrentWorkspace()?.name;
 
   const draft = useIssueDraftStore((s) => s.draft);
   const setDraft = useIssueDraftStore((s) => s.setDraft);
@@ -229,6 +232,9 @@ export function ManualCreatePanel({
   const [projectId, setProjectId] = useState<string | undefined>(
     (data?.project_id as string) || undefined,
   );
+  const [spaceId, setSpaceId] = useState<string | undefined>(
+    (data?.space_id as string) || undefined,
+  );
   const [parentIssueId, setParentIssueId] = useState<string | undefined>(
     (data?.parent_issue_id as string) || undefined,
   );
@@ -264,6 +270,19 @@ export function ManualCreatePanel({
     ...childIssuesOptions(wsId, parentIssueId ?? ""),
     enabled: !!parentIssueId,
   });
+
+  const { data: projects = [] } = useQuery(projectListOptions(wsId));
+  const selectedProject = useMemo(
+    () => projects.find((p) => p.id === projectId) ?? null,
+    [projects, projectId],
+  );
+  // Every Issue belongs to one Space. Parent or Project ownership is
+  // authoritative; standalone creation falls back to the workspace default.
+  const { data: spaces = [] } = useQuery(activeSpaceListOptions(wsId));
+  const parentSpaceId = parentIssueId ? parentIssue?.space_id ?? undefined : undefined;
+  const projectSpaceId = selectedProject?.space_id;
+  const effectiveSpaceId =
+    spaceId ?? resolveCreationSpaceId(spaces, { parentSpaceId, projectSpaceId });
 
   const draftAttachments = draft.attachments ?? [];
 
@@ -320,6 +339,7 @@ export function ManualCreatePanel({
     setDueDate(null);
     setLabelIds([]);
     setProjectId(undefined);
+    setSpaceId(undefined);
     setParentIssueId(undefined);
     setStage(null);
     setChildIssues([]);
@@ -341,6 +361,11 @@ export function ManualCreatePanel({
 
   const handleSubmit = async () => {
     if (!title.trim() || submitting) return;
+    await doSubmit(effectiveSpaceId);
+  };
+
+  const doSubmit = async (finalSpaceId: string | undefined) => {
+    if (!title.trim() || submitting) return;
     setSubmitting(true);
     try {
       const description = descEditorRef.current?.getMarkdown()?.trim() || undefined;
@@ -358,11 +383,11 @@ export function ManualCreatePanel({
         due_date: dueDate || undefined,
         attachment_ids: activeAttachmentIds.length > 0 ? activeAttachmentIds : undefined,
         parent_issue_id: parentIssueId,
+        space_id: finalSpaceId,
         // Stage is only meaningful for a sub-issue (relative to its siblings).
         stage: parentIssueId && stage != null ? stage : undefined,
         project_id: projectId,
       });
-
       // Link queued children to the new parent. Deferred to after create
       // because the new issue's ID doesn't exist yet. Partial failures don't
       // roll back the new issue — it's already committed.
@@ -551,6 +576,7 @@ export function ManualCreatePanel({
           ? { squad_id: assigneeId }
           : {}),
       ...(projectId ? { project_id: projectId } : {}),
+      ...(effectiveSpaceId ? { space_id: effectiveSpaceId } : {}),
       ...(parentIssueId ? { parent_issue_id: parentIssueId } : {}),
       ...(carryParentIdentifier ? { parent_issue_identifier: carryParentIdentifier } : {}),
     });
@@ -563,7 +589,15 @@ export function ManualCreatePanel({
             {/* Header */}
             <div className="flex items-center justify-between px-5 pt-3 pb-2 shrink-0">
               <div className="flex items-center gap-1.5 text-xs">
-                <span className="text-muted-foreground">{workspaceName}</span>
+                {/* The issue's space namespace — leads the breadcrumb like the
+                    workspace name used to, but as a required single-select. */}
+                <SpacePicker
+                  spaceId={effectiveSpaceId ?? null}
+                  onChange={setSpaceId}
+                  disabled={!!projectId || !!parentIssueId}
+                  triggerRender={<PillButton />}
+                  align="start"
+                />
                 <ChevronRight className="size-3 text-muted-foreground/50" />
                 <span className="font-medium">{t(($) => $.create_issue.manual_breadcrumb)}</span>
               </div>
@@ -626,6 +660,7 @@ export function ManualCreatePanel({
                 onUploadFile={handleUpload}
                 debounceMs={500}
                 attachments={draftAttachments}
+                targetSpaceId={effectiveSpaceId ?? null}
               />
               {descDragOver && <FileDropOverlay />}
             </div>
@@ -656,6 +691,7 @@ export function ManualCreatePanel({
               <AssigneePicker
                 assigneeType={assigneeType ?? null}
                 assigneeId={assigneeId ?? null}
+                spaceId={effectiveSpaceId ?? null}
                 onUpdate={(u) => updateAssignee(
                   u.assignee_type ?? undefined,
                   u.assignee_id ?? undefined,
@@ -679,6 +715,7 @@ export function ManualCreatePanel({
               <ProjectPicker
                 projectId={projectId ?? null}
                 onUpdate={(u) => setProjectId(u.project_id ?? undefined)}
+                spaceId={effectiveSpaceId}
                 triggerRender={<PillButton />}
                 align="start"
               />

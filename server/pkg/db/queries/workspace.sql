@@ -47,6 +47,7 @@ RETURNING *;
 -- name: UpdateWorkspace :one
 UPDATE workspace SET
     name = COALESCE(sqlc.narg('name'), name),
+    slug = COALESCE(sqlc.narg('slug'), slug),
     description = COALESCE(sqlc.narg('description'), description),
     context = COALESCE(sqlc.narg('context'), context),
     settings = COALESCE(sqlc.narg('settings'), settings),
@@ -56,11 +57,6 @@ UPDATE workspace SET
     updated_at = now()
 WHERE id = $1
 RETURNING *;
-
--- name: IncrementIssueCounter :one
-UPDATE workspace SET issue_counter = issue_counter + 1
-WHERE id = $1
-RETURNING issue_counter;
 
 -- name: LockWorkspaceForDelete :one
 -- Taken first by DeleteWorkspace, before it enumerates the workspace's chat

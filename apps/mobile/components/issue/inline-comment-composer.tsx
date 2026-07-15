@@ -18,7 +18,13 @@ import { useReplyTargetStore } from "@/data/stores/reply-target-store";
 import { useWorkspaceStore } from "@/data/workspace-store";
 import { MessageComposer } from "@/components/composer/message-composer";
 
-export function InlineCommentComposer({ issueId }: { issueId: string }) {
+export function InlineCommentComposer({
+  issueId,
+  spaceId,
+}: {
+  issueId: string;
+  spaceId: string | null;
+}) {
   const createComment = useCreateComment(issueId);
   const wsSlug = useWorkspaceStore((s) => s.currentWorkspaceSlug);
   const replyTarget = useReplyTargetStore((s) => s.target);
@@ -53,7 +59,11 @@ export function InlineCommentComposer({ issueId }: { issueId: string }) {
       onSubmit={onSubmit}
       mentionPickerPath={{
         pathname: "/[workspace]/mention-picker",
-        params: { workspace: wsSlug ?? "", mode: "comment" },
+        params: {
+          workspace: wsSlug ?? "",
+          mode: "comment",
+          ...(spaceId ? { spaceId } : {}),
+        },
       }}
       uploadContext={{ issueId }}
       placeholder="Add a comment…"

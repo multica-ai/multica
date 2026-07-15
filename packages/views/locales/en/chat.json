@@ -4,6 +4,14 @@
     "select_prompt": "Pick a conversation, or start a new one with +",
     "agent_link_no_access": "You don't have access to chat with this agent."
   },
+  "context": {
+    "scope_label": "Context",
+    "spaces_label": "Spaces",
+    "all_spaces": "All spaces",
+    "all_spaces_description": "Can use data from {{count}} spaces",
+    "search_spaces": "Search spaces…",
+    "picker_aria": "Chat context: {{selection}}"
+  },
   "fab": {
     "running": "Multica is working...",
     "unread_one": "{{count}} unread chat",

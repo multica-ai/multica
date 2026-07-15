@@ -22,10 +22,13 @@ The GitHub webhook runs two separate scans over an incoming PR. They are not the
 same gate and they read different fields.
 
 **Linking** scans the PR **title, body, OR branch** for a routable issue key
-(`PREFIX-NUMBER`, e.g. `MUL-2759`). Each match writes an issue ↔ PR link row.
-This is the link that `multica issue pull-requests` reads back — but see the
-reference-only rule below: a key that appears **only** as a bare mention in the
-body is linked yet hidden from that list.
+(`SPACE_KEY-NUMBER`, e.g. `MUL-2759`). The prefix is the issue's Space key — a
+space owns its issue-number namespace, and each workspace has a default space
+whose key is the legacy workspace prefix, so a bare `MUL-2759` still routes.
+Each match writes an issue ↔ PR link row. This is the link that `multica issue
+pull-requests` reads back — but see the reference-only rule below: a key that
+appears **only** as a bare mention in the body is linked yet hidden from that
+list.
 
 ```text
 MUL-2759: add built-in issue working skill        # title prefix → links, shown
@@ -193,6 +196,20 @@ on it. These are the contracts, not advice:
 On an agent-assigned issue, create status decides whether the assignee fires
 immediately. A non-backlog status (e.g. `todo`) enqueues the agent at create
 time; `backlog` sets the assignee without triggering.
+
+`multica issue create` files the issue under a space: pass `--space <UUID>` to pick
+one explicitly (the space owns the `SPACE_KEY-NUMBER` identifier namespace), or omit
+it to fall back to the workspace's default space, whose key is the legacy workspace
+prefix. `multica issue list --space <UUID>` filters a listing to one space.
+
+Every Issue has one owning Space:
+
+- Issue Space is immutable in the current release. `multica issue update` has
+  no `--space` flag, and the API rejects a different `space_id`; create a new
+  Issue in the target Space instead.
+- Parent and child Issues must share a Space.
+- A Project Issue must use its Project's owning Space. An Issue can only attach
+  to a Project in its existing Space.
 
 Parallel children — all start now:
 

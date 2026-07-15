@@ -92,16 +92,35 @@ func (q *Queries) ArchiveAutopilot(ctx context.Context, id pgtype.UUID) error {
 	return err
 }
 
+const countAutopilotsPausedBySpace = `-- name: CountAutopilotsPausedBySpace :one
+SELECT count(*) FROM autopilot
+WHERE workspace_id = $1
+  AND space_id = $2
+  AND paused_by_space_at IS NOT NULL
+`
+
+type CountAutopilotsPausedBySpaceParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	SpaceID     pgtype.UUID `json:"space_id"`
+}
+
+func (q *Queries) CountAutopilotsPausedBySpace(ctx context.Context, arg CountAutopilotsPausedBySpaceParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countAutopilotsPausedBySpace, arg.WorkspaceID, arg.SpaceID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const createAutopilot = `-- name: CreateAutopilot :one
 INSERT INTO autopilot (
     workspace_id, title, description, assignee_type, assignee_id,
-    status, execution_mode, issue_title_template, project_id,
+    status, execution_mode, issue_title_template, project_id, space_id,
     created_by_type, created_by_id
 ) VALUES (
-    $1, $2, $9, $3, $4,
-    $5, $6, $10, $11,
-    $7, $8
-) RETURNING id, workspace_id, title, description, assignee_id, status, execution_mode, issue_title_template, created_by_type, created_by_id, last_run_at, created_at, updated_at, assignee_type, project_id
+    $1, $2, $10, $3, $4,
+    $5, $6, $11, $12, $7,
+    $8, $9
+) RETURNING id, workspace_id, title, description, assignee_id, status, execution_mode, issue_title_template, created_by_type, created_by_id, last_run_at, created_at, updated_at, assignee_type, project_id, space_id, paused_by_space_at, status_before_space_archive
 `
 
 type CreateAutopilotParams struct {
@@ -111,6 +130,7 @@ type CreateAutopilotParams struct {
 	AssigneeID         pgtype.UUID `json:"assignee_id"`
 	Status             string      `json:"status"`
 	ExecutionMode      string      `json:"execution_mode"`
+	SpaceID            pgtype.UUID `json:"space_id"`
 	CreatedByType      string      `json:"created_by_type"`
 	CreatedByID        pgtype.UUID `json:"created_by_id"`
 	Description        pgtype.Text `json:"description"`
@@ -126,6 +146,7 @@ func (q *Queries) CreateAutopilot(ctx context.Context, arg CreateAutopilotParams
 		arg.AssigneeID,
 		arg.Status,
 		arg.ExecutionMode,
+		arg.SpaceID,
 		arg.CreatedByType,
 		arg.CreatedByID,
 		arg.Description,
@@ -149,6 +170,9 @@ func (q *Queries) CreateAutopilot(ctx context.Context, arg CreateAutopilotParams
 		&i.UpdatedAt,
 		&i.AssigneeType,
 		&i.ProjectID,
+		&i.SpaceID,
+		&i.PausedBySpaceAt,
+		&i.StatusBeforeSpaceArchive,
 	)
 	return i, err
 }
@@ -546,7 +570,7 @@ func (q *Queries) GetActiveAutopilotRuleVersion(ctx context.Context, arg GetActi
 }
 
 const getAutopilot = `-- name: GetAutopilot :one
-SELECT id, workspace_id, title, description, assignee_id, status, execution_mode, issue_title_template, created_by_type, created_by_id, last_run_at, created_at, updated_at, assignee_type, project_id FROM autopilot
+SELECT id, workspace_id, title, description, assignee_id, status, execution_mode, issue_title_template, created_by_type, created_by_id, last_run_at, created_at, updated_at, assignee_type, project_id, space_id, paused_by_space_at, status_before_space_archive FROM autopilot
 WHERE id = $1
 `
 
@@ -569,12 +593,15 @@ func (q *Queries) GetAutopilot(ctx context.Context, id pgtype.UUID) (Autopilot, 
 		&i.UpdatedAt,
 		&i.AssigneeType,
 		&i.ProjectID,
+		&i.SpaceID,
+		&i.PausedBySpaceAt,
+		&i.StatusBeforeSpaceArchive,
 	)
 	return i, err
 }
 
 const getAutopilotInWorkspace = `-- name: GetAutopilotInWorkspace :one
-SELECT id, workspace_id, title, description, assignee_id, status, execution_mode, issue_title_template, created_by_type, created_by_id, last_run_at, created_at, updated_at, assignee_type, project_id FROM autopilot
+SELECT id, workspace_id, title, description, assignee_id, status, execution_mode, issue_title_template, created_by_type, created_by_id, last_run_at, created_at, updated_at, assignee_type, project_id, space_id, paused_by_space_at, status_before_space_archive FROM autopilot
 WHERE id = $1 AND workspace_id = $2
 `
 
@@ -602,6 +629,9 @@ func (q *Queries) GetAutopilotInWorkspace(ctx context.Context, arg GetAutopilotI
 		&i.UpdatedAt,
 		&i.AssigneeType,
 		&i.ProjectID,
+		&i.SpaceID,
+		&i.PausedBySpaceAt,
+		&i.StatusBeforeSpaceArchive,
 	)
 	return i, err
 }
@@ -1116,7 +1146,7 @@ func (q *Queries) ListAutopilotTriggers(ctx context.Context, autopilotID pgtype.
 const listAutopilots = `-- name: ListAutopilots :many
 
 SELECT
-  a.id, a.workspace_id, a.title, a.description, a.assignee_id, a.status, a.execution_mode, a.issue_title_template, a.created_by_type, a.created_by_id, a.last_run_at, a.created_at, a.updated_at, a.assignee_type, a.project_id,
+  a.id, a.workspace_id, a.title, a.description, a.assignee_id, a.status, a.execution_mode, a.issue_title_template, a.created_by_type, a.created_by_id, a.last_run_at, a.created_at, a.updated_at, a.assignee_type, a.project_id, a.space_id, a.paused_by_space_at, a.status_before_space_archive,
   (
     SELECT array_agg(DISTINCT t.kind ORDER BY t.kind)
     FROM autopilot_trigger t
@@ -1137,15 +1167,37 @@ SELECT
 FROM autopilot a
 WHERE a.workspace_id = $1
   AND (
-    ($2::text IS NULL AND a.status <> 'archived')
-    OR a.status = $2
+    EXISTS (
+      SELECT 1 FROM workspace_space wt
+      WHERE wt.id = a.space_id
+        AND wt.workspace_id = a.workspace_id
+        AND wt.visibility = 'open'
+    )
+    OR EXISTS (
+      SELECT 1 FROM workspace_space_member sm
+      WHERE sm.space_id = a.space_id
+        AND sm.user_id = $2::uuid
+    )
+    OR EXISTS (
+      SELECT 1 FROM member wm
+      WHERE wm.workspace_id = a.workspace_id
+        AND wm.user_id = $2::uuid
+        AND wm.role IN ('owner', 'admin')
+    )
+  )
+  AND ($3::uuid IS NULL OR a.space_id = $3)
+  AND (
+    ($4::text IS NULL AND a.status <> 'archived')
+    OR a.status = $4
   )
 ORDER BY a.created_at DESC
 `
 
 type ListAutopilotsParams struct {
-	WorkspaceID pgtype.UUID `json:"workspace_id"`
-	Status      pgtype.Text `json:"status"`
+	WorkspaceID  pgtype.UUID `json:"workspace_id"`
+	ViewerUserID pgtype.UUID `json:"viewer_user_id"`
+	SpaceID      pgtype.UUID `json:"space_id"`
+	Status       pgtype.Text `json:"status"`
 }
 
 type ListAutopilotsRow struct {
@@ -1165,7 +1217,12 @@ type ListAutopilotsRow struct {
 // last_run_status is COALESCEd to ” (never ran) because sqlc cannot infer
 // nullability through a scalar subquery; the handler maps ” back to omitted.
 func (q *Queries) ListAutopilots(ctx context.Context, arg ListAutopilotsParams) ([]ListAutopilotsRow, error) {
-	rows, err := q.db.Query(ctx, listAutopilots, arg.WorkspaceID, arg.Status)
+	rows, err := q.db.Query(ctx, listAutopilots,
+		arg.WorkspaceID,
+		arg.ViewerUserID,
+		arg.SpaceID,
+		arg.Status,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -1189,6 +1246,9 @@ func (q *Queries) ListAutopilots(ctx context.Context, arg ListAutopilotsParams) 
 			&i.Autopilot.UpdatedAt,
 			&i.Autopilot.AssigneeType,
 			&i.Autopilot.ProjectID,
+			&i.Autopilot.SpaceID,
+			&i.Autopilot.PausedBySpaceAt,
+			&i.Autopilot.StatusBeforeSpaceArchive,
 			&i.TriggerKinds,
 			&i.NextRunAt,
 			&i.LastRunStatus,
@@ -1275,6 +1335,31 @@ func (q *Queries) ListSchedulableAutopilotTriggers(ctx context.Context) ([]ListS
 	return items, nil
 }
 
+const pauseActiveAutopilotsBySpace = `-- name: PauseActiveAutopilotsBySpace :execrows
+UPDATE autopilot SET
+  status_before_space_archive = status,
+  status = 'paused',
+  paused_by_space_at = now(),
+  updated_at = now()
+WHERE workspace_id = $1
+  AND space_id = $2
+  AND status = 'active'
+  AND paused_by_space_at IS NULL
+`
+
+type PauseActiveAutopilotsBySpaceParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	SpaceID     pgtype.UUID `json:"space_id"`
+}
+
+func (q *Queries) PauseActiveAutopilotsBySpace(ctx context.Context, arg PauseActiveAutopilotsBySpaceParams) (int64, error) {
+	result, err := q.db.Exec(ctx, pauseActiveAutopilotsBySpace, arg.WorkspaceID, arg.SpaceID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const recoverPartialAutopilotRun = `-- name: RecoverPartialAutopilotRun :exec
 UPDATE autopilot_run
 SET status = 'failed',
@@ -1297,6 +1382,31 @@ WHERE id = $1
 func (q *Queries) RecoverPartialAutopilotRun(ctx context.Context, id pgtype.UUID) error {
 	_, err := q.db.Exec(ctx, recoverPartialAutopilotRun, id)
 	return err
+}
+
+const resumeAutopilotsPausedBySpace = `-- name: ResumeAutopilotsPausedBySpace :execrows
+UPDATE autopilot SET
+  status = COALESCE(status_before_space_archive, 'active'),
+  status_before_space_archive = NULL,
+  paused_by_space_at = NULL,
+  updated_at = now()
+WHERE workspace_id = $1
+  AND space_id = $2
+  AND paused_by_space_at IS NOT NULL
+  AND status = 'paused'
+`
+
+type ResumeAutopilotsPausedBySpaceParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	SpaceID     pgtype.UUID `json:"space_id"`
+}
+
+func (q *Queries) ResumeAutopilotsPausedBySpace(ctx context.Context, arg ResumeAutopilotsPausedBySpaceParams) (int64, error) {
+	result, err := q.db.Exec(ctx, resumeAutopilotsPausedBySpace, arg.WorkspaceID, arg.SpaceID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const rotateAutopilotTriggerWebhookToken = `-- name: RotateAutopilotTriggerWebhookToken :one
@@ -1556,7 +1666,7 @@ const systemPauseAutopilot = `-- name: SystemPauseAutopilot :one
 UPDATE autopilot
 SET status = 'paused', updated_at = now()
 WHERE id = $1 AND status = 'active'
-RETURNING id, workspace_id, title, description, assignee_id, status, execution_mode, issue_title_template, created_by_type, created_by_id, last_run_at, created_at, updated_at, assignee_type, project_id
+RETURNING id, workspace_id, title, description, assignee_id, status, execution_mode, issue_title_template, created_by_type, created_by_id, last_run_at, created_at, updated_at, assignee_type, project_id, space_id, paused_by_space_at, status_before_space_archive
 `
 
 // Atomically pauses an autopilot only if it is currently active. Returns no
@@ -1582,6 +1692,9 @@ func (q *Queries) SystemPauseAutopilot(ctx context.Context, id pgtype.UUID) (Aut
 		&i.UpdatedAt,
 		&i.AssigneeType,
 		&i.ProjectID,
+		&i.SpaceID,
+		&i.PausedBySpaceAt,
+		&i.StatusBeforeSpaceArchive,
 	)
 	return i, err
 }
@@ -1609,12 +1722,21 @@ UPDATE autopilot SET
     assignee_type = COALESCE($4, assignee_type),
     assignee_id = COALESCE($5::uuid, assignee_id),
     status = COALESCE($6, status),
+    paused_by_space_at = CASE
+      WHEN $6::text IS NOT NULL THEN NULL
+      ELSE paused_by_space_at
+    END,
+    status_before_space_archive = CASE
+      WHEN $6::text IS NOT NULL THEN NULL
+      ELSE status_before_space_archive
+    END,
     execution_mode = COALESCE($7, execution_mode),
     issue_title_template = $8,
     project_id = $9,
+    space_id = COALESCE($10::uuid, space_id),
     updated_at = now()
 WHERE id = $1
-RETURNING id, workspace_id, title, description, assignee_id, status, execution_mode, issue_title_template, created_by_type, created_by_id, last_run_at, created_at, updated_at, assignee_type, project_id
+RETURNING id, workspace_id, title, description, assignee_id, status, execution_mode, issue_title_template, created_by_type, created_by_id, last_run_at, created_at, updated_at, assignee_type, project_id, space_id, paused_by_space_at, status_before_space_archive
 `
 
 type UpdateAutopilotParams struct {
@@ -1627,6 +1749,7 @@ type UpdateAutopilotParams struct {
 	ExecutionMode      pgtype.Text `json:"execution_mode"`
 	IssueTitleTemplate pgtype.Text `json:"issue_title_template"`
 	ProjectID          pgtype.UUID `json:"project_id"`
+	SpaceID            pgtype.UUID `json:"space_id"`
 }
 
 func (q *Queries) UpdateAutopilot(ctx context.Context, arg UpdateAutopilotParams) (Autopilot, error) {
@@ -1640,6 +1763,7 @@ func (q *Queries) UpdateAutopilot(ctx context.Context, arg UpdateAutopilotParams
 		arg.ExecutionMode,
 		arg.IssueTitleTemplate,
 		arg.ProjectID,
+		arg.SpaceID,
 	)
 	var i Autopilot
 	err := row.Scan(
@@ -1658,6 +1782,9 @@ func (q *Queries) UpdateAutopilot(ctx context.Context, arg UpdateAutopilotParams
 		&i.UpdatedAt,
 		&i.AssigneeType,
 		&i.ProjectID,
+		&i.SpaceID,
+		&i.PausedBySpaceAt,
+		&i.StatusBeforeSpaceArchive,
 	)
 	return i, err
 }

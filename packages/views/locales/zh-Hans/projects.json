@@ -63,6 +63,7 @@
     "unpin_tooltip": "从侧边栏取消固定",
     "sidebar_tooltip": "切换侧边栏",
     "copy_link": "复制链接",
+    "spaces": "空间",
     "delete_action": "删除项目",
     "section_properties": "属性",
     "section_progress": "进度",
@@ -122,6 +123,10 @@
     "description": "将删除这个项目。issue 不会被删除，只会从项目中解除关联。",
     "confirm": "删除",
     "cancel": "取消"
+  },
+  "manage_spaces": {
+    "empty": "至少选择一个空间。",
+    "toast_failed": "更新空间失败"
   },
   "picker": {
     "no_project": "无项目",

@@ -2,6 +2,7 @@
   "page": {
     "title": "オートパイロット",
     "new_autopilot": "新規オートパイロット",
+    "workspace_templates": "テンプレート",
     "start_blank": "ゼロから始める",
     "table": {
       "name": "名前",
@@ -277,6 +278,9 @@
     "select_agent": "エージェントを選択",
     "select_assignee": "エージェントまたはスクワッドを選択",
     "section_project": "プロジェクト",
+    "issue_title_template": "issue タイトルテンプレート",
+    "issue_title_template_placeholder": "週次レポート — {{date}}",
+    "issue_title_template_hint": "任意。{{date}} でトリガー日を挿入します。空欄の場合は自動化名を使用します。",
     "no_project": "プロジェクトなし",
     "section_subscribers": "購読者",
     "subscribers_hint": "このオートパイロットが作成するすべてのイシューを自動で購読します",
@@ -329,7 +333,9 @@
       "thursday": "木曜日",
       "friday": "金曜日",
       "saturday": "土曜日"
-    }
+    },
+    "title_required": "タイトルが必要です",
+    "assignee_required": "実行者が必要です — エージェントまたはスクワッドを選択"
   },
   "trigger_config": {
     "frequencies": {

@@ -317,8 +317,9 @@ func TestTriggerAutopilot_SquadPrivateLeader_PlainMemberCreator_Blocked(t *testi
 	var apID string
 	if err := testPool.QueryRow(ctx, `
 		INSERT INTO autopilot (workspace_id, title, assignee_type, assignee_id,
-		                       execution_mode, created_by_type, created_by_id, status)
-		VALUES ($1, 'legacy illegal ap', 'squad', $2, 'create_issue', 'member', $3, 'active')
+		                       execution_mode, created_by_type, created_by_id, status, space_id)
+		VALUES ($1, 'legacy illegal ap', 'squad', $2, 'create_issue', 'member', $3, 'active',
+		        (SELECT id FROM workspace_space WHERE workspace_id = $1 LIMIT 1))
 		RETURNING id
 	`, testWorkspaceID, squadID, memberID).Scan(&apID); err != nil {
 		t.Fatalf("create autopilot: %v", err)
@@ -377,8 +378,9 @@ func TestTriggerAutopilot_RunOnly_SquadPrivateLeader_PlainMemberCreator_Blocked(
 	var apID string
 	if err := testPool.QueryRow(ctx, `
 		INSERT INTO autopilot (workspace_id, title, assignee_type, assignee_id,
-		                       execution_mode, created_by_type, created_by_id, status)
-		VALUES ($1, 'legacy run_only illegal ap', 'squad', $2, 'run_only', 'member', $3, 'active')
+		                       execution_mode, created_by_type, created_by_id, status, space_id)
+		VALUES ($1, 'legacy run_only illegal ap', 'squad', $2, 'run_only', 'member', $3, 'active',
+		        (SELECT id FROM workspace_space WHERE workspace_id = $1 LIMIT 1))
 		RETURNING id
 	`, testWorkspaceID, squadID, memberID).Scan(&apID); err != nil {
 		t.Fatalf("create autopilot: %v", err)

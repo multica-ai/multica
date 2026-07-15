@@ -24,9 +24,11 @@ import {
   workspaceKeys,
   workspaceListOptions,
 } from "@multica/core/workspace/queries";
-import { issueKeys } from "@multica/core/issues/queries";
+import { activeSpaceListOptions, spaceKeys } from "@multica/core/spaces/queries";
 import { api } from "@multica/core/api";
+import { issueKeys } from "@multica/core/issues/queries";
 import {
+  paths,
   resolvePostAuthDestination,
   useCurrentWorkspace,
   useHasOnboarded,
@@ -34,6 +36,7 @@ import {
 import { setCurrentWorkspace } from "@multica/core/platform";
 import type { Workspace } from "@multica/core/types";
 import { AvatarUploadControl } from "../../common/avatar-upload-control";
+import { SpacePicker } from "../../spaces/components/space-picker";
 import { useNavigation } from "../../navigation";
 import { DeleteWorkspaceDialog } from "./delete-workspace-dialog";
 import { useT } from "../../i18n";
@@ -77,6 +80,10 @@ export function WorkspaceTab() {
   const wsId = workspace?.id;
   const { data: members = [], isFetched: membersFetched } = useQuery({
     ...memberListOptions(wsId ?? ""),
+    enabled: !!wsId,
+  });
+  const { data: spaces = [] } = useQuery({
+    ...activeSpaceListOptions(wsId ?? ""),
     enabled: !!wsId,
   });
   const qc = useQueryClient();
@@ -128,10 +135,18 @@ export function WorkspaceTab() {
   };
 
   const [name, setName] = useState(workspace?.name ?? "");
+  const [slug, setSlug] = useState(workspace?.slug ?? "");
   const [description, setDescription] = useState(workspace?.description ?? "");
   const [context, setContext] = useState(workspace?.context ?? "");
-  const [issuePrefix, setIssuePrefix] = useState(workspace?.issue_prefix ?? "");
+  const [issuePrefix, setIssuePrefix] = useState(
+    workspace?.issue_prefix ?? "",
+  );
+  const [slugSaveStatus, setSlugSaveStatus] =
+    useState<SettingsSaveStatus>("idle");
   const [prefixSaveStatus, setPrefixSaveStatus] =
+    useState<SettingsSaveStatus>("idle");
+  const [defaultSpaceId, setDefaultSpaceId] = useState<string | null>(null);
+  const [defaultSpaceSaveStatus, setDefaultSpaceSaveStatus] =
     useState<SettingsSaveStatus>("idle");
   const [actionId, setActionId] = useState<string | null>(null);
   const [confirmAction, setConfirmAction] = useState<{
@@ -153,28 +168,34 @@ export function WorkspaceTab() {
   const isSoleOwner = isOwner && ownerCount <= 1;
   const isSoleMember = members.length <= 1;
 
+  const normalizeSlug = (raw: string) => raw.toLowerCase().replace(/[^a-z0-9-]/g, "");
+  const normalizedSlug = normalizeSlug(slug);
+  const slugChanged = !!workspace && normalizedSlug !== workspace.slug;
+  const slugInvalid = !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(normalizedSlug);
+  const normalizePrefix = (raw: string) =>
+    raw.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 10);
+  const normalizedPrefix = normalizePrefix(issuePrefix);
+  const prefixChanged =
+    !!workspace && normalizedPrefix !== workspace.issue_prefix;
+  const prefixInvalid = normalizedPrefix.length === 0;
+
   // Reset form state only when the user switches to a different workspace.
   // Keying on workspace?.id (not the object ref) avoids wiping unsaved edits
   // when an unrelated mutation — e.g. avatar/logo upload — replaces the
   // cached Workspace object via setQueryData.
   useEffect(() => {
     setName(workspace?.name ?? "");
+    setSlug(workspace?.slug ?? "");
     setDescription(workspace?.description ?? "");
     setContext(workspace?.context ?? "");
     setIssuePrefix(workspace?.issue_prefix ?? "");
     // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally keyed on id only; see comment above
   }, [workspace?.id]);
 
-  // Letters + digits only, uppercase, capped at 10 chars. The backend
-  // uppercases and trims on its side too — this is purely a UX guardrail
-  // so the value the user sees in the input matches what gets persisted.
-  const normalizePrefix = (raw: string) =>
-    raw.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 10);
-
-  const normalizedPrefix = normalizePrefix(issuePrefix);
-  const prefixChanged =
-    !!workspace && normalizedPrefix !== workspace.issue_prefix;
-  const prefixInvalid = normalizedPrefix.length === 0;
+  const configuredDefaultSpaceId = spaces.find((space) => space.is_default)?.id ?? null;
+  useEffect(() => {
+    setDefaultSpaceId(configuredDefaultSpaceId);
+  }, [workspace?.id, configuredDefaultSpaceId]);
 
   const detailsDraft = useMemo(
     () => ({ name, description, context }),
@@ -216,6 +237,76 @@ export function WorkspaceTab() {
     isEqual: workspaceDetailsEqual,
   });
 
+  const performSlugSave = async (nextSlug: string) => {
+    if (!workspace) return;
+    setSlugSaveStatus("saving");
+    try {
+      const updated = await api.updateWorkspace(workspace.id, {
+        slug: nextSlug,
+      });
+      qc.setQueryData(workspaceKeys.list(), (old: Workspace[] | undefined) =>
+        old?.map((ws) => (ws.id === updated.id ? updated : ws)),
+      );
+      setCurrentWorkspace(updated.slug, updated.id);
+      navigation.replace(
+        paths.workspace(updated.slug).settingsSection("workspace", "general"),
+      );
+      setSlugSaveStatus("saved");
+      toast.success(t(($) => $.workspace.toast_saved), {
+        id: "settings-auto-save",
+      });
+    } catch (error) {
+      setSlugSaveStatus("error");
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : t(($) => $.workspace.toast_save_failed),
+      );
+    }
+  };
+
+  const performDefaultSpaceSave = async (nextSpaceId: string) => {
+    if (!workspace) return;
+    setDefaultSpaceSaveStatus("saving");
+    try {
+      const updated = await api.updateWorkspace(workspace.id, {
+        default_space_id: nextSpaceId,
+      });
+      qc.setQueryData(workspaceKeys.list(), (old: Workspace[] | undefined) =>
+        old?.map((ws) => (ws.id === updated.id ? updated : ws)),
+      );
+      if (wsId) {
+        await qc.invalidateQueries({ queryKey: spaceKeys.all(wsId) });
+      }
+      setDefaultSpaceSaveStatus("saved");
+      toast.success(t(($) => $.workspace.toast_saved), {
+        id: "settings-auto-save",
+      });
+    } catch (error) {
+      setDefaultSpaceSaveStatus("error");
+      setDefaultSpaceId(configuredDefaultSpaceId);
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : t(($) => $.workspace.toast_save_failed),
+      );
+    }
+  };
+
+  const handleSlugBlur = () => {
+    if (!workspace || slugInvalid || !slugChanged) return;
+    const nextSlug = normalizedSlug;
+    setConfirmAction({
+      title: t(($) => $.workspace.slug_confirm_title),
+      description: t(($) => $.workspace.slug_confirm_description, {
+        oldSlug: workspace.slug,
+        newSlug: nextSlug,
+      }),
+      variant: "destructive",
+      onConfirm: () => performSlugSave(nextSlug),
+    });
+  };
+
   const performPrefixSave = async (nextPrefix: string) => {
     if (!workspace) return;
     setPrefixSaveStatus("saving");
@@ -226,8 +317,6 @@ export function WorkspaceTab() {
       qc.setQueryData(workspaceKeys.list(), (old: Workspace[] | undefined) =>
         old?.map((ws) => (ws.id === updated.id ? updated : ws)),
       );
-      // Issue identifiers are computed from the workspace prefix at read time,
-      // so every cached issue key is stale after this confirmed change.
       await qc.invalidateQueries({ queryKey: issueKeys.all(updated.id) });
       setPrefixSaveStatus("saved");
       toast.success(t(($) => $.workspace.toast_saved), {
@@ -307,11 +396,19 @@ export function WorkspaceTab() {
         action={
           <SettingsSaveState
             status={
-              prefixSaveStatus === "saving" || prefixSaveStatus === "error"
-                ? prefixSaveStatus
-                : detailsAutoSave.status === "idle"
-                  ? prefixSaveStatus
-                  : detailsAutoSave.status
+              defaultSpaceSaveStatus === "saving" || defaultSpaceSaveStatus === "error"
+                ? defaultSpaceSaveStatus
+                : slugSaveStatus === "saving" || slugSaveStatus === "error"
+                  ? slugSaveStatus
+                  : prefixSaveStatus === "saving" || prefixSaveStatus === "error"
+                    ? prefixSaveStatus
+                    : detailsAutoSave.status !== "idle"
+                      ? detailsAutoSave.status
+                      : slugSaveStatus !== "idle"
+                        ? slugSaveStatus
+                        : prefixSaveStatus !== "idle"
+                          ? prefixSaveStatus
+                          : defaultSpaceSaveStatus
             }
             savingLabel={t(($) => $.auto_save.saving)}
             savedLabel={t(($) => $.auto_save.saved)}
@@ -413,18 +510,46 @@ export function WorkspaceTab() {
           </SettingsRow>
 
           <SettingsRow
+            label={t(($) => $.workspace.default_space_label)}
+            description={t(($) => $.workspace.default_space_hint)}
+            size="select-wide"
+          >
+            <div className="flex h-9 items-center sm:justify-end">
+              <SpacePicker
+                spaceId={defaultSpaceId}
+                onChange={(nextSpaceId) => {
+                  if (nextSpaceId === defaultSpaceId) return;
+                  setDefaultSpaceId(nextSpaceId);
+                  void performDefaultSpaceSave(nextSpaceId);
+                }}
+                disabled={!canManageWorkspace}
+                filter={(space) => space.visibility === "open"}
+              />
+            </div>
+          </SettingsRow>
+
+          <SettingsRow
             label={t(($) => $.workspace.slug_label)}
+            description={t(($) => $.workspace.slug_hint)}
             size="text"
           >
             <Input
               type="text"
               name="workspace-slug"
               autoComplete="off"
+              autoCapitalize="none"
               spellCheck={false}
               aria-label={t(($) => $.workspace.slug_label)}
-              value={workspace.slug}
-              readOnly
-              className="bg-muted/50 font-mono text-muted-foreground dark:bg-muted/50"
+              value={slug}
+              onChange={(event) => {
+                setSlugSaveStatus("idle");
+                setSlug(normalizeSlug(event.target.value));
+              }}
+              onBlur={handleSlugBlur}
+              disabled={!canManageWorkspace}
+              aria-invalid={slugChanged && slugInvalid}
+              className="font-mono"
+              placeholder={workspace.slug}
             />
           </SettingsRow>
 
@@ -435,32 +560,32 @@ export function WorkspaceTab() {
             })}
             size="code"
           >
-              <Input
-                type="text"
-                name="workspace-issue-prefix"
-                autoComplete="off"
-                autoCapitalize="characters"
-                spellCheck={false}
-                aria-label={t(($) => $.workspace.issue_prefix_label)}
-                value={issuePrefix}
-                onChange={(event) => {
-                  setPrefixSaveStatus("idle");
-                  setIssuePrefix(normalizePrefix(event.target.value));
-                }}
-                onBlur={handlePrefixBlur}
-                disabled={!canManageWorkspace}
-                maxLength={10}
-                aria-invalid={prefixInvalid}
-                className="font-mono uppercase"
-                placeholder={workspace.issue_prefix}
-              />
+            <Input
+              type="text"
+              name="workspace-issue-prefix"
+              autoComplete="off"
+              autoCapitalize="characters"
+              spellCheck={false}
+              aria-label={t(($) => $.workspace.issue_prefix_label)}
+              value={issuePrefix}
+              onChange={(event) => {
+                setPrefixSaveStatus("idle");
+                setIssuePrefix(normalizePrefix(event.target.value));
+              }}
+              onBlur={handlePrefixBlur}
+              disabled={!canManageWorkspace}
+              maxLength={10}
+              aria-invalid={prefixInvalid}
+              className="font-mono uppercase"
+              placeholder={workspace.issue_prefix}
+            />
           </SettingsRow>
 
-            {!canManageWorkspace && (
-              <div className="px-4 py-3 text-xs text-muted-foreground">
-                {t(($) => $.workspace.manage_hint)}
-              </div>
-            )}
+          {!canManageWorkspace && (
+            <div className="px-4 py-3 text-xs text-muted-foreground">
+              {t(($) => $.workspace.manage_hint)}
+            </div>
+          )}
         </SettingsCard>
       </SettingsSection>
 

@@ -28,6 +28,7 @@ export default function IssueAssigneePickerRoute() {
     <AssigneePickerBody
       value={value}
       query={query}
+      spaceId={issue?.space_id ?? null}
       onChange={(next) => {
         if (next === null) {
           updateIssue.mutate({ assignee_type: null, assignee_id: null });

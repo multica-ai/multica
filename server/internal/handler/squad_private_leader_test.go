@@ -68,8 +68,8 @@ func TestUpdateIssue_SquadPrivateLeader_PlainMemberBlocked(t *testing.T) {
 	// Create an unassigned issue as workspace owner.
 	var issueID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO issue (workspace_id, creator_type, creator_id, title)
-		VALUES ($1, 'member', $2, 'update target')
+		INSERT INTO issue (workspace_id, creator_type, creator_id, title, space_id)
+		VALUES ($1, 'member', $2, 'update target', (SELECT id FROM workspace_space WHERE workspace_id = $1 LIMIT 1))
 		RETURNING id
 	`, testWorkspaceID, testUserID).Scan(&issueID); err != nil {
 		t.Fatalf("create issue: %v", err)
@@ -161,8 +161,8 @@ func TestComment_SquadPrivateLeader_PlainMemberNoEnqueue(t *testing.T) {
 	// Create issue assigned to the squad as workspace owner.
 	var issueID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO issue (workspace_id, creator_type, creator_id, title, assignee_type, assignee_id)
-		VALUES ($1, 'member', $2, 'private leader comment test', 'squad', $3)
+		INSERT INTO issue (workspace_id, creator_type, creator_id, title, assignee_type, assignee_id, space_id)
+		VALUES ($1, 'member', $2, 'private leader comment test', 'squad', $3, (SELECT id FROM workspace_space WHERE workspace_id = $1 LIMIT 1))
 		RETURNING id
 	`, testWorkspaceID, testUserID, squadID).Scan(&issueID); err != nil {
 		t.Fatalf("create issue: %v", err)
@@ -440,8 +440,8 @@ func TestComment_SquadPrivateLeader_AgentActorAllowed(t *testing.T) {
 	// Create issue assigned to the squad.
 	var issueID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO issue (workspace_id, creator_type, creator_id, title, assignee_type, assignee_id)
-		VALUES ($1, 'member', $2, 'private leader agent actor test', 'squad', $3)
+		INSERT INTO issue (workspace_id, creator_type, creator_id, title, assignee_type, assignee_id, space_id)
+		VALUES ($1, 'member', $2, 'private leader agent actor test', 'squad', $3, (SELECT id FROM workspace_space WHERE workspace_id = $1 LIMIT 1))
 		RETURNING id
 	`, testWorkspaceID, testUserID, squadID).Scan(&issueID); err != nil {
 		t.Fatalf("create issue: %v", err)

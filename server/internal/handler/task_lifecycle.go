@@ -162,7 +162,7 @@ func (h *Handler) RerunIssue(w http.ResponseWriter, r *http.Request) {
 	// historical agent, not the (possibly reassigned) current assignee.
 	originatorUserID := h.invokeOriginatorFromRequest(r, actorType, actorID)
 	canInvoke := func(agent db.Agent) bool {
-		return h.canInvokeAgent(r.Context(), agent, actorType, actorID, originatorUserID, workspaceID)
+		return h.canInvokeAgent(r.Context(), agent, actorType, actorID, originatorUserID, workspaceID, issue.SpaceID)
 	}
 
 	task, err := h.TaskService.RerunIssue(r.Context(), issue.ID, sourceTaskID, pgtype.UUID{}, actorUserID, canInvoke)

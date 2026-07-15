@@ -32,6 +32,7 @@ import (
 
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/issueguard"
+	"github.com/multica-ai/multica/server/internal/issueidentifier"
 	"github.com/multica-ai/multica/server/internal/logger"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/middleware"
@@ -75,7 +76,7 @@ const onboardingAssistantInstructions = `You are Multica Helper, the built-in AI
 
 ## What Multica is
 
-Multica is an open-source, AI-native team workspace (source: https://github.com/multica-ai/multica). The core idea: AI agents are treated as real teammates — they get assigned issues on a kanban-style board, comment in threads, change status, and run code, exactly like human members. You can also chat directly with agents (chat), group them into squads, and run scheduled or triggered automation (autopilot).
+Multica is an open-source, AI-native space workspace (source: https://github.com/multica-ai/multica). The core idea: AI agents are treated as real spacemates — they get assigned issues on a kanban-style board, comment in threads, change status, and run code, exactly like human members. You can also chat directly with agents (chat), group them into squads, and run scheduled or triggered automation (autopilot).
 
 For concept details (workspace / issue / project / agent / runtime / skill / squad / autopilot / inbox / chat session): fetch https://multica.ai/docs via WebFetch — that's authoritative. For the "why" or implementation, fetch the GitHub repo above. Never paraphrase concepts from memory.
 
@@ -103,7 +104,7 @@ This is your guided first run. Multica Helper is assigned to this issue and will
 1. Read Multica Helper's first comment.
 2. Reply with something you want to build, fix, write, or plan.
 3. @mention Multica Helper when you want it to continue.
-4. Open Agents and Runtimes later when you want to customize the teammate or the computer it runs on.
+4. Open Agents and Runtimes later when you want to customize the spacemate or the computer it runs on.
 
 You can close this issue when the workflow makes sense.`
 
@@ -222,6 +223,8 @@ func (h *Handler) BootstrapOnboardingRuntime(w http.ResponseWriter, r *http.Requ
 			RuntimeConfig:      []byte("{}"),
 			RuntimeID:          runtime.ID,
 			Visibility:         "workspace",
+			PermissionMode:     permissionModePublicTo,
+			AvailabilityMode:   agentAvailabilityWorkspace,
 			MaxConcurrentTasks: 6,
 			OwnerID:            parseUUID(userID),
 			Instructions:       onboardingAssistantInstructions,
@@ -236,11 +239,25 @@ func (h *Handler) BootstrapOnboardingRuntime(w http.ResponseWriter, r *http.Requ
 			return
 		}
 		assistantCreated = true
+		if err := qtx.CreateAgentInvocationTarget(r.Context(), db.CreateAgentInvocationTargetParams{
+			AgentID:    assistant.ID,
+			TargetType: invocationTargetWorkspace,
+			TargetID:   wsUUID,
+			CreatedBy:  parseUUID(userID),
+		}); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to share onboarding assistant")
+			return
+		}
 	}
 
 	var emptyUUID pgtype.UUID
+	defaultSpace, err := qtx.GetDefaultWorkspaceSpace(r.Context(), wsUUID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to resolve default space")
+		return
+	}
 	issue, foundIssue, err := issueguard.LockAndFindActiveDuplicate(
-		r.Context(), qtx, wsUUID, emptyUUID, emptyUUID, onboardingIssueTitle, false,
+		r.Context(), qtx, wsUUID, defaultSpace.ID, emptyUUID, emptyUUID, onboardingIssueTitle, false,
 	)
 	if err != nil {
 		slog.Warn("bootstrap onboarding (shim): duplicate issue check failed", append(logger.RequestAttrs(r), "error", err, "workspace_id", req.WorkspaceID)...)
@@ -249,7 +266,10 @@ func (h *Handler) BootstrapOnboardingRuntime(w http.ResponseWriter, r *http.Requ
 	}
 	issueCreated := false
 	if !foundIssue {
-		issueNumber, err := qtx.IncrementIssueCounter(r.Context(), wsUUID)
+		issueNumber, err := qtx.IncrementSpaceIssueCounter(r.Context(), db.IncrementSpaceIssueCounterParams{
+			ID:          defaultSpace.ID,
+			WorkspaceID: wsUUID,
+		})
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to allocate issue number")
 			return
@@ -260,6 +280,7 @@ func (h *Handler) BootstrapOnboardingRuntime(w http.ResponseWriter, r *http.Requ
 		}
 		issue, err = qtx.CreateIssue(r.Context(), db.CreateIssueParams{
 			WorkspaceID:   wsUUID,
+			SpaceID:       defaultSpace.ID,
 			Title:         onboardingIssueTitle,
 			Description:   strOrNullText(description),
 			Status:        "todo",
@@ -316,7 +337,7 @@ func (h *Handler) BootstrapOnboardingRuntime(w http.ResponseWriter, r *http.Requ
 		))
 	}
 	if issueCreated {
-		prefix := h.getIssuePrefix(r.Context(), issue.WorkspaceID)
+		prefix := issueidentifier.PrefixForIssue(r.Context(), h.Queries, issue)
 		resp := issueToResponse(issue, prefix)
 		h.publish(protocol.EventIssueCreated, req.WorkspaceID, "member", userID, map[string]any{"issue": resp})
 		platform, _, _ := middleware.ClientMetadataFromContext(r.Context())
@@ -397,8 +418,13 @@ func (h *Handler) BootstrapOnboardingNoRuntime(w http.ResponseWriter, r *http.Re
 	}
 
 	var emptyUUID pgtype.UUID
+	defaultSpace, err := qtx.GetDefaultWorkspaceSpace(r.Context(), wsUUID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to resolve default space")
+		return
+	}
 	existing, foundIssue, err := issueguard.LockAndFindActiveDuplicate(
-		r.Context(), qtx, wsUUID, emptyUUID, emptyUUID, noRuntimeIssueTitle, false,
+		r.Context(), qtx, wsUUID, defaultSpace.ID, emptyUUID, emptyUUID, noRuntimeIssueTitle, false,
 	)
 	if err != nil {
 		slog.Warn("bootstrap no-runtime onboarding (shim): duplicate issue check failed", append(logger.RequestAttrs(r), "error", err, "workspace_id", req.WorkspaceID)...)
@@ -411,13 +437,17 @@ func (h *Handler) BootstrapOnboardingNoRuntime(w http.ResponseWriter, r *http.Re
 	if foundIssue {
 		issue = existing
 	} else {
-		issueNumber, err := qtx.IncrementIssueCounter(r.Context(), wsUUID)
+		issueNumber, err := qtx.IncrementSpaceIssueCounter(r.Context(), db.IncrementSpaceIssueCounterParams{
+			ID:          defaultSpace.ID,
+			WorkspaceID: wsUUID,
+		})
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to allocate issue number")
 			return
 		}
 		issue, err = qtx.CreateIssue(r.Context(), db.CreateIssueParams{
 			WorkspaceID:   wsUUID,
+			SpaceID:       defaultSpace.ID,
 			Title:         noRuntimeIssueTitle,
 			Description:   strOrNullText(noRuntimeIssueDescription(userBefore.Language)),
 			Status:        "todo",
@@ -456,7 +486,7 @@ func (h *Handler) BootstrapOnboardingNoRuntime(w http.ResponseWriter, r *http.Re
 	}
 
 	if issueCreated {
-		prefix := h.getIssuePrefix(r.Context(), issue.WorkspaceID)
+		prefix := issueidentifier.PrefixForIssue(r.Context(), h.Queries, issue)
 		resp := issueToResponse(issue, prefix)
 		h.publish(protocol.EventIssueCreated, req.WorkspaceID, "member", userID, map[string]any{"issue": resp})
 		platform2, _, _ := middleware.ClientMetadataFromContext(r.Context())

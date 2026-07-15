@@ -196,7 +196,7 @@ describe("useIssueActions", () => {
     });
 
     expect(navigator.clipboard.writeText).toHaveBeenCalledWith(
-      "https://app.multica.com/test/issues/issue-1",
+      "https://app.multica.com/test/issue/TES-1",
     );
   });
 

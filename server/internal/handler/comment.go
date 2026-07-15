@@ -1967,7 +1967,7 @@ func (h *Handler) routeReplyToParentAuthor(ctx context.Context, issue db.Issue, 
 	if err != nil || !agent.RuntimeID.Valid || agent.ArchivedAt.Valid {
 		return commentAgentTrigger{}, false
 	}
-	if !h.canInvokeAgent(ctx, agent, authorType, authorID, opts.OriginatorUserID, uuidToString(issue.WorkspaceID)) {
+	if !h.canInvokeAgent(ctx, agent, authorType, authorID, opts.OriginatorUserID, uuidToString(issue.WorkspaceID), issue.SpaceID) {
 		return commentAgentTrigger{}, false
 	}
 	hasPending, err := h.hasPendingTaskForIssueAndAgent(ctx, issue.ID, parent.AuthorID, opts)
@@ -2064,7 +2064,7 @@ func (h *Handler) routeFirstExplicitRootMentionOwner(ctx context.Context, issue 
 				ID:          squadID,
 				WorkspaceID: issue.WorkspaceID,
 			})
-			if err != nil {
+			if err != nil || squad.SpaceID != issue.SpaceID {
 				return commentAgentTrigger{}, true, false
 			}
 			trigger, ok := h.routeConversationContinuationToAgent(ctx, issue, squad.LeaderID, squadID, memberID, opts)
@@ -2085,7 +2085,7 @@ func (h *Handler) routeConversationContinuationToAgent(ctx context.Context, issu
 	if err != nil || !agent.RuntimeID.Valid || agent.ArchivedAt.Valid {
 		return commentAgentTrigger{}, false
 	}
-	if !h.canInvokeAgent(ctx, agent, "member", memberID, memberID, uuidToString(issue.WorkspaceID)) {
+	if !h.canInvokeAgent(ctx, agent, "member", memberID, memberID, uuidToString(issue.WorkspaceID), issue.SpaceID) {
 		return commentAgentTrigger{}, false
 	}
 	hasPending, err := h.hasPendingTaskForIssueAndAgent(ctx, issue.ID, agentID, opts)
@@ -2097,7 +2097,7 @@ func (h *Handler) routeConversationContinuationToAgent(ctx context.Context, issu
 		if squad, err := h.Queries.GetSquadInWorkspace(ctx, db.GetSquadInWorkspaceParams{
 			ID:          squadID,
 			WorkspaceID: issue.WorkspaceID,
-		}); err == nil {
+		}); err == nil && squad.SpaceID == issue.SpaceID {
 			trigger.Squad = &squad
 		}
 	}
@@ -2127,7 +2127,7 @@ func (h *Handler) routeAssignedSquadLeaderFallback(ctx context.Context, issue db
 		ID:          issue.AssigneeID,
 		WorkspaceID: issue.WorkspaceID,
 	})
-	if err != nil {
+	if err != nil || squad.SpaceID != issue.SpaceID {
 		return commentAgentTrigger{}, false
 	}
 	if authorType == "agent" && authorID == uuidToString(squad.LeaderID) &&
@@ -2141,7 +2141,7 @@ func (h *Handler) routeAssignedSquadLeaderFallback(ctx context.Context, issue db
 	if err != nil || !agent.RuntimeID.Valid || agent.ArchivedAt.Valid {
 		return commentAgentTrigger{}, false
 	}
-	if !h.canInvokeAgent(ctx, agent, authorType, authorID, opts.OriginatorUserID, uuidToString(issue.WorkspaceID)) {
+	if !h.canInvokeAgent(ctx, agent, authorType, authorID, opts.OriginatorUserID, uuidToString(issue.WorkspaceID), issue.SpaceID) {
 		return commentAgentTrigger{}, false
 	}
 	hasPending, err := h.hasPendingTaskForIssueAndAgent(ctx, issue.ID, squad.LeaderID, opts)
@@ -2254,6 +2254,10 @@ func (h *Handler) resolveMentionedAgentCommentTriggers(ctx context.Context, issu
 				blockTarget("squad", m.ID, ReasonTargetUnavailable)
 				continue
 			}
+			if squad.SpaceID != issue.SpaceID {
+				blockTarget("squad", m.ID, ReasonTargetUnavailable)
+				continue
+			}
 			leaderID := squad.LeaderID
 			// A2A self-suppression: the author IS this squad's leader and its
 			// most recent task on this issue was a leader/generic role (NOT a
@@ -2280,7 +2284,7 @@ func (h *Handler) resolveMentionedAgentCommentTriggers(ctx context.Context, issu
 			}
 			// Private-leader gate first (enumeration-safe: a caller who cannot
 			// invoke the leader never learns its archived/runtime state).
-			if !h.canInvokeAgent(ctx, agent, authorType, authorID, opts.OriginatorUserID, wsID) {
+			if !h.canInvokeAgent(ctx, agent, authorType, authorID, opts.OriginatorUserID, wsID, issue.SpaceID) {
 				blockTarget("squad", m.ID, ReasonInvocationNotAllowed)
 				continue
 			}
@@ -2322,7 +2326,7 @@ func (h *Handler) resolveMentionedAgentCommentTriggers(ctx context.Context, issu
 			continue
 		}
 		// Private-agent gate first, before any archived/runtime state is read.
-		if !h.canInvokeAgent(ctx, agent, authorType, authorID, opts.OriginatorUserID, wsID) {
+		if !h.canInvokeAgent(ctx, agent, authorType, authorID, opts.OriginatorUserID, wsID, issue.SpaceID) {
 			blockTarget("agent", m.ID, ReasonInvocationNotAllowed)
 			continue
 		}
@@ -2369,6 +2373,10 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		writeError(w, http.StatusNotFound, "comment not found")
+		return
+	}
+	issue, ok := h.requireCommentSpaceAccess(w, r, wsUUID, existing)
+	if !ok {
 		return
 	}
 
@@ -2423,12 +2431,6 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 	var triggerIssue *db.Issue
 	var cancelled []db.AgentTaskQueue
 	if oldContent != req.Content {
-		issue, err := h.Queries.GetIssue(r.Context(), existing.IssueID)
-		if err != nil {
-			slog.Warn("load issue for edit post-processing failed", "issue_id", uuidToString(existing.IssueID), "error", err)
-			writeError(w, http.StatusInternalServerError, "failed to load issue")
-			return
-		}
 		triggerIssue = &issue
 		cancelled, err = h.TaskService.CancelTasksByTriggerComment(r.Context(), existing.ID)
 		if err != nil {
@@ -2530,6 +2532,10 @@ func (h *Handler) DeleteComment(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "comment not found")
 		return
 	}
+	issue, ok := h.requireCommentSpaceAccess(w, r, wsUUID, comment)
+	if !ok {
+		return
+	}
 
 	member, ok := h.workspaceMember(w, r, workspaceID)
 	if !ok {
@@ -2543,13 +2549,6 @@ func (h *Handler) DeleteComment(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusForbidden, "only comment author or admin can delete")
 		return
 	}
-	issue, err := h.Queries.GetIssue(r.Context(), comment.IssueID)
-	if err != nil {
-		slog.Warn("load issue for delete post-processing failed", "issue_id", uuidToString(comment.IssueID), "error", err)
-		writeError(w, http.StatusInternalServerError, "failed to load issue")
-		return
-	}
-
 	// Collect attachment URLs before CASCADE delete removes them.
 	attachmentURLs, _ := h.Queries.ListAttachmentURLsByCommentID(r.Context(), comment.ID)
 
@@ -2703,8 +2702,27 @@ func (h *Handler) loadCommentForActor(w http.ResponseWriter, r *http.Request) (d
 		writeError(w, http.StatusNotFound, "comment not found")
 		return db.Comment{}, "", "", "", false
 	}
+	if _, ok := h.requireCommentSpaceAccess(w, r, wsUUID, comment); !ok {
+		return db.Comment{}, "", "", "", false
+	}
 	actorType, actorID := h.resolveActor(r, userID, workspaceID)
 	return comment, workspaceID, actorType, actorID, true
+}
+
+// requireCommentSpaceAccess closes the direct-comment URL path over the same
+// Space gate used by issue endpoints. Reads require view access; mutations
+// require collaboration, so a Guest or a user who left a Private Space cannot
+// keep changing comments through an old URL.
+func (h *Handler) requireCommentSpaceAccess(w http.ResponseWriter, r *http.Request, workspaceID pgtype.UUID, comment db.Comment) (db.Issue, bool) {
+	issue, err := h.Queries.GetIssue(r.Context(), comment.IssueID)
+	if err != nil || issue.WorkspaceID != workspaceID {
+		writeError(w, http.StatusNotFound, "comment not found")
+		return db.Issue{}, false
+	}
+	if !h.requireIssueSpaceAccess(w, r, workspaceID, issue.SpaceID) {
+		return db.Issue{}, false
+	}
+	return issue, true
 }
 
 func (h *Handler) ResolveComment(w http.ResponseWriter, r *http.Request) {

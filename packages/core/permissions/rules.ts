@@ -57,9 +57,26 @@ export function canEditAgent(agent: Agent, ctx: PermissionContext): Decision {
 export function canAssignAgentToIssue(
   agent: Agent,
   ctx: PermissionContext,
+  spaceId?: string | null,
 ): Decision {
   if (ctx.userId === null) {
     return deny("not_authenticated", "Sign in to assign agents.");
+  }
+
+  // Availability is the Agent's Space assignment and therefore runs before the owner
+  // shortcut. Even an Agent owner cannot place a Selected-Spaces Agent into
+  // an unselected Space. Older servers omit the field; in that case the
+  // legacy invocation rules below remain authoritative.
+  if (
+    agent.availability_mode === "selected_spaces" &&
+    spaceId !== undefined &&
+    (spaceId === null ||
+      !(agent.availability_space_ids ?? []).includes(spaceId))
+  ) {
+    return deny(
+      "agent_unavailable_in_space",
+      "This Agent is not available in this Space.",
+    );
   }
 
   // The owner may always invoke their own agent, regardless of mode.

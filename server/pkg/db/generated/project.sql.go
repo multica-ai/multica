@@ -25,15 +25,16 @@ func (q *Queries) CountIssuesByProject(ctx context.Context, projectID pgtype.UUI
 
 const createProject = `-- name: CreateProject :one
 INSERT INTO project (
-    workspace_id, title, description, icon, status,
+    workspace_id, space_id, title, description, icon, status,
     lead_type, lead_id, priority, start_date, due_date
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10
-) RETURNING id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, start_date, due_date
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11
+) RETURNING id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, start_date, due_date, space_id
 `
 
 type CreateProjectParams struct {
 	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	SpaceID     pgtype.UUID `json:"space_id"`
 	Title       string      `json:"title"`
 	Description pgtype.Text `json:"description"`
 	Icon        pgtype.Text `json:"icon"`
@@ -48,6 +49,7 @@ type CreateProjectParams struct {
 func (q *Queries) CreateProject(ctx context.Context, arg CreateProjectParams) (Project, error) {
 	row := q.db.QueryRow(ctx, createProject,
 		arg.WorkspaceID,
+		arg.SpaceID,
 		arg.Title,
 		arg.Description,
 		arg.Icon,
@@ -73,6 +75,7 @@ func (q *Queries) CreateProject(ctx context.Context, arg CreateProjectParams) (P
 		&i.Priority,
 		&i.StartDate,
 		&i.DueDate,
+		&i.SpaceID,
 	)
 	return i, err
 }
@@ -93,7 +96,7 @@ func (q *Queries) DeleteProject(ctx context.Context, arg DeleteProjectParams) er
 }
 
 const getProject = `-- name: GetProject :one
-SELECT id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, start_date, due_date FROM project
+SELECT id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, start_date, due_date, space_id FROM project
 WHERE id = $1
 `
 
@@ -114,12 +117,13 @@ func (q *Queries) GetProject(ctx context.Context, id pgtype.UUID) (Project, erro
 		&i.Priority,
 		&i.StartDate,
 		&i.DueDate,
+		&i.SpaceID,
 	)
 	return i, err
 }
 
 const getProjectInWorkspace = `-- name: GetProjectInWorkspace :one
-SELECT id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, start_date, due_date FROM project
+SELECT id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, start_date, due_date, space_id FROM project
 WHERE id = $1 AND workspace_id = $2
 `
 
@@ -145,6 +149,7 @@ func (q *Queries) GetProjectInWorkspace(ctx context.Context, arg GetProjectInWor
 		&i.Priority,
 		&i.StartDate,
 		&i.DueDate,
+		&i.SpaceID,
 	)
 	return i, err
 }
@@ -185,21 +190,49 @@ func (q *Queries) GetProjectIssueStats(ctx context.Context, projectIds []pgtype.
 }
 
 const listProjects = `-- name: ListProjects :many
-SELECT id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, start_date, due_date FROM project
-WHERE workspace_id = $1
-  AND ($2::text IS NULL OR status = $2)
-  AND ($3::text IS NULL OR priority = $3)
+SELECT id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, start_date, due_date, space_id FROM project
+WHERE project.workspace_id = $1
+  AND (
+    EXISTS (
+      SELECT 1 FROM workspace_space wt
+      WHERE wt.id = project.space_id
+        AND wt.workspace_id = project.workspace_id
+        AND wt.visibility = 'open'
+    )
+    OR EXISTS (
+      SELECT 1 FROM workspace_space_member sm
+      WHERE sm.space_id = project.space_id
+        AND sm.user_id = $2::uuid
+    )
+    OR EXISTS (
+      SELECT 1 FROM member wm
+      WHERE wm.workspace_id = project.workspace_id
+        AND wm.user_id = $2::uuid
+        AND wm.role IN ('owner', 'admin')
+    )
+  )
+  AND ($3::uuid IS NULL OR project.space_id = $3::uuid)
+  AND ($4::text IS NULL OR project.status = $4)
+  AND ($5::text IS NULL OR project.priority = $5)
 ORDER BY created_at DESC
 `
 
 type ListProjectsParams struct {
-	WorkspaceID pgtype.UUID `json:"workspace_id"`
-	Status      pgtype.Text `json:"status"`
-	Priority    pgtype.Text `json:"priority"`
+	WorkspaceID  pgtype.UUID `json:"workspace_id"`
+	ViewerUserID pgtype.UUID `json:"viewer_user_id"`
+	SpaceID      pgtype.UUID `json:"space_id"`
+	Status       pgtype.Text `json:"status"`
+	Priority     pgtype.Text `json:"priority"`
 }
 
 func (q *Queries) ListProjects(ctx context.Context, arg ListProjectsParams) ([]Project, error) {
-	rows, err := q.db.Query(ctx, listProjects, arg.WorkspaceID, arg.Status, arg.Priority)
+	rows, err := q.db.Query(ctx, listProjects,
+		arg.WorkspaceID,
+		arg.ViewerUserID,
+		arg.SpaceID,
+		arg.Status,
+		arg.Priority,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -221,6 +254,7 @@ func (q *Queries) ListProjects(ctx context.Context, arg ListProjectsParams) ([]P
 			&i.Priority,
 			&i.StartDate,
 			&i.DueDate,
+			&i.SpaceID,
 		); err != nil {
 			return nil, err
 		}
@@ -245,7 +279,7 @@ UPDATE project SET
     due_date = $10,
     updated_at = now()
 WHERE id = $1
-RETURNING id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, start_date, due_date
+RETURNING id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, start_date, due_date, space_id
 `
 
 type UpdateProjectParams struct {
@@ -289,6 +323,7 @@ func (q *Queries) UpdateProject(ctx context.Context, arg UpdateProjectParams) (P
 		&i.Priority,
 		&i.StartDate,
 		&i.DueDate,
+		&i.SpaceID,
 	)
 	return i, err
 }

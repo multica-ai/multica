@@ -21,6 +21,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/auth"
 	"github.com/multica-ai/multica/server/internal/daemonws"
 	"github.com/multica-ai/multica/server/internal/integrations/slack"
+	"github.com/multica-ai/multica/server/internal/issueidentifier"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/runtimeapps"
@@ -1649,11 +1650,11 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 			RuntimeConfig: runtimeConfig,
 		}
 		if useSkillRefs {
-			_, skillRefs := h.TaskService.LoadAgentSkillBundles(r.Context(), task.AgentID)
+			_, skillRefs := h.TaskService.LoadAgentSkillBundlesForTask(r.Context(), *task)
 			agentSkillCount = len(skillRefs)
 			resp.Agent.SkillRefs = skillRefs
 		} else {
-			skills := h.TaskService.LoadAgentSkills(r.Context(), task.AgentID)
+			skills := h.TaskService.LoadAgentSkillsForTask(r.Context(), *task)
 			agentSkillCount = len(skills)
 			builtinSkills := h.TaskService.BuiltinSkills()
 			builtinSkillCount = len(builtinSkills)
@@ -1708,6 +1709,7 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 		if issue, err := h.Queries.GetIssue(r.Context(), task.IssueID); err == nil {
 			resp.WorkspaceID = uuidToString(issue.WorkspaceID)
 			resp.ThreadName = issue.Title
+			h.attachSpaceToTaskResponse(r.Context(), &resp, issue.WorkspaceID, issue.SpaceID)
 
 			// Squad-leader briefing injection: keyed off the task being a
 			// leader-task (is_leader_task) carrying a squad_id — NOT off the
@@ -1749,7 +1751,7 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 				if squad, err := h.Queries.GetSquadInWorkspace(r.Context(), db.GetSquadInWorkspaceParams{
 					ID:          task.SquadID,
 					WorkspaceID: issue.WorkspaceID,
-				}); err == nil && uuidToString(squad.LeaderID) == resp.Agent.ID {
+				}); err == nil && squad.SpaceID == issue.SpaceID && uuidToString(squad.LeaderID) == resp.Agent.ID {
 					briefing := buildSquadLeaderBriefing(r.Context(), h.Queries, squad)
 					if strings.TrimSpace(resp.Agent.Instructions) == "" {
 						resp.Agent.Instructions = briefing
@@ -2159,6 +2161,7 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 			if ap, err := h.Queries.GetAutopilot(r.Context(), run.AutopilotID); err == nil {
 				resp.AutopilotTitle = ap.Title
 				resp.ThreadName = ap.Title
+				h.attachSpaceToTaskResponse(r.Context(), &resp, ap.WorkspaceID, ap.SpaceID)
 				if ap.Description.Valid {
 					resp.AutopilotDescription = ap.Description.String
 				}
@@ -2193,6 +2196,16 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 			resp.QuickCreateAttachmentIDs = append([]string(nil), qc.AttachmentIDs...)
 			resp.ThreadName = qc.Prompt
 			resp.WorkspaceID = qc.WorkspaceID
+			resp.SpaceID = qc.SpaceID
+			resp.SpaceKey = qc.SpaceKey
+			resp.SpaceName = qc.SpaceName
+			if qc.SpaceID != "" && (resp.SpaceKey == "" || resp.SpaceName == "") {
+				if spaceUUID, err := util.ParseUUID(qc.SpaceID); err == nil {
+					if wsUUID, wsErr := util.ParseUUID(qc.WorkspaceID); wsErr == nil {
+						h.attachSpaceToTaskResponse(r.Context(), &resp, wsUUID, spaceUUID)
+					}
+				}
+			}
 
 			// When the user picked a project in the modal, surface its title
 			// and resources to the daemon so the agent has the same context
@@ -2267,9 +2280,7 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 							WorkspaceID: wsUUID,
 						})
 						if perr == nil && parent.ID.Valid {
-							if ws, werr := h.Queries.GetWorkspace(r.Context(), wsUUID); werr == nil {
-								resp.ParentIssueIdentifier = ws.IssuePrefix + "-" + strconv.Itoa(int(parent.Number))
-							}
+							resp.ParentIssueIdentifier = issueidentifier.PrefixForIssue(r.Context(), h.Queries, parent) + "-" + strconv.Itoa(int(parent.Number))
 						}
 					}
 				}
@@ -2448,7 +2459,7 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	// Mint a task-scoped `mat_` token bound to (agent, task, workspace,
-	// owner). The daemon will inject this as MULTICA_TOKEN into the agent
+	// one Space, owner). The daemon will inject this as MULTICA_TOKEN into the agent
 	// process instead of its own credential, so any API call the agent
 	// makes — even one that strips X-Agent-ID / X-Task-ID headers — is
 	// recognized server-side as actor=agent, closing the lateral-movement
@@ -2472,6 +2483,52 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "runtime owner required to mint task token")
 		return
 	}
+	taskSpaceScope := h.TaskService.ResolveTaskSpaceScope(r.Context(), *task)
+	if task.ChatSessionID.Valid && len(taskSpaceScope.IDs) == 0 {
+		outcome = "revoked_space_access"
+		if _, cancelErr := h.TaskService.CancelTask(r.Context(), task.ID); cancelErr != nil {
+			slog.Error("task claim: cancel Chat with no available Spaces failed",
+				"task_id", uuidToString(task.ID), "error", cancelErr)
+		}
+		payloadBytes, _ = writeMeasuredJSON(w, http.StatusOK, map[string]any{"task": nil})
+		return
+	}
+	if len(taskSpaceScope.IDs) > 0 {
+		agent, agentErr := h.Queries.GetAgent(r.Context(), task.AgentID)
+		spaceAccessValid := agentErr == nil
+		if spaceAccessValid {
+			for _, spaceID := range taskSpaceScope.IDs {
+				if !service.AgentAvailableInSpace(r.Context(), h.Queries, agent, parseUUID(resp.WorkspaceID), spaceID) {
+					spaceAccessValid = false
+					break
+				}
+			}
+		}
+		if !spaceAccessValid {
+			outcome = "revoked_space_access"
+			slog.Info("task claim cancelled: agent no longer has access to Chat context",
+				"task_id", uuidToString(task.ID),
+				"agent_id", uuidToString(task.AgentID),
+			)
+			if _, cancelErr := h.TaskService.CancelTask(r.Context(), task.ID); cancelErr != nil {
+				slog.Error("task claim: cancel after Space access revocation failed",
+					"task_id", uuidToString(task.ID), "error", cancelErr)
+			}
+			payloadBytes, _ = writeMeasuredJSON(w, http.StatusOK, map[string]any{"task": nil})
+			return
+		}
+	}
+	var taskSpaceID pgtype.UUID
+	if !taskSpaceScope.All && len(taskSpaceScope.IDs) == 1 {
+		taskSpaceID = taskSpaceScope.IDs[0]
+		resp.SpaceScope = "space"
+		if resp.SpaceID == "" {
+			h.attachSpaceToTaskResponse(r.Context(), &resp, parseUUID(resp.WorkspaceID), taskSpaceID)
+		}
+	} else if taskSpaceScope.All {
+		resp.SpaceScope = "all"
+		h.attachSpacesToTaskResponse(r.Context(), &resp, parseUUID(resp.WorkspaceID), taskSpaceScope.IDs)
+	}
 	tokenStr, terr := auth.GenerateAgentTaskToken()
 	if terr != nil {
 		outcome = "error_token"
@@ -2481,12 +2538,21 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to mint task token")
 		return
 	}
+	taskTokenUserID := runtime.OwnerID
+	if task.ChatSessionID.Valid && task.InitiatorUserID.Valid {
+		// Chat runs act on behalf of the member who sent this turn. Binding the
+		// task token to that initiator lets All-spaces access shrink immediately
+		// when their Space membership changes, without exposing runtime-owner reach.
+		taskTokenUserID = task.InitiatorUserID
+	}
 	receipt, ferr := h.TaskService.FinalizeTaskClaim(r.Context(), *task, db.CreateTaskTokenParams{
 		TokenHash:   auth.HashToken(tokenStr),
 		TaskID:      task.ID,
 		AgentID:     task.AgentID,
 		WorkspaceID: parseUUID(resp.WorkspaceID),
-		UserID:      runtime.OwnerID,
+		SpaceID:     taskSpaceID,
+		SpaceIds:    taskSpaceScope.IDs,
+		UserID:      taskTokenUserID,
 		ExpiresAt:   pgtype.Timestamptz{Time: time.Now().Add(24 * time.Hour), Valid: true},
 	}, deliveredCommentIDs, commentBackedTask)
 	if ferr != nil {
@@ -2516,6 +2582,58 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	payloadBytes, _ = writeMeasuredJSON(w, http.StatusOK, map[string]any{"task": resp})
+}
+
+func (h *Handler) attachSpaceToTaskResponse(ctx context.Context, resp *AgentTaskResponse, workspaceID, spaceID pgtype.UUID) {
+	if !spaceID.Valid {
+		return
+	}
+	space, err := h.Queries.GetWorkspaceSpace(ctx, db.GetWorkspaceSpaceParams{
+		ID:          spaceID,
+		WorkspaceID: workspaceID,
+	})
+	if err != nil {
+		return
+	}
+	resp.SpaceID = uuidToString(space.ID)
+	resp.SpaceKey = space.Key
+	resp.SpaceName = space.Name
+	resp.SpaceContext = space.Context
+	if rows, err := h.Queries.ListIntegrationBindingsForSpace(ctx, db.ListIntegrationBindingsForSpaceParams{
+		WorkspaceID: workspaceID,
+		SpaceID:     spaceID,
+	}); err == nil {
+		resp.IntegrationBindings = make([]IntegrationBindingData, len(rows))
+		for i, row := range rows {
+			resp.IntegrationBindings[i] = IntegrationBindingData{
+				Provider:     row.Provider,
+				ConnectionID: uuidToString(row.ConnectionID),
+				DisplayName:  row.DisplayName,
+			}
+		}
+	}
+}
+
+func (h *Handler) attachSpacesToTaskResponse(ctx context.Context, resp *AgentTaskResponse, workspaceID pgtype.UUID, spaceIDs []pgtype.UUID) {
+	if len(spaceIDs) == 0 {
+		return
+	}
+	spaces, err := h.Queries.ListWorkspaceSpacesByIDs(ctx, db.ListWorkspaceSpacesByIDsParams{
+		WorkspaceID: workspaceID,
+		SpaceIds:    spaceIDs,
+	})
+	if err != nil {
+		return
+	}
+	resp.Spaces = make([]TaskSpaceData, 0, len(spaces))
+	for _, space := range spaces {
+		resp.Spaces = append(resp.Spaces, TaskSpaceData{
+			ID:      uuidToString(space.ID),
+			Key:     space.Key,
+			Name:    space.Name,
+			Context: space.Context,
+		})
+	}
 }
 
 type resolveSkillBundlesRequest struct {
@@ -2567,7 +2685,7 @@ func (h *Handler) ResolveTaskSkillBundles(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	bundles, _ := h.TaskService.LoadAgentSkillBundles(r.Context(), task.AgentID)
+	bundles, _ := h.TaskService.LoadAgentSkillBundlesForTask(r.Context(), task)
 	allowed := make(map[string]service.AgentSkillData, len(bundles))
 	for _, bundle := range bundles {
 		allowed[bundle.Source+"\x00"+bundle.ID] = bundle

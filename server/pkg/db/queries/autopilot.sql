@@ -31,10 +31,58 @@ SELECT
 FROM autopilot a
 WHERE a.workspace_id = $1
   AND (
+    EXISTS (
+      SELECT 1 FROM workspace_space wt
+      WHERE wt.id = a.space_id
+        AND wt.workspace_id = a.workspace_id
+        AND wt.visibility = 'open'
+    )
+    OR EXISTS (
+      SELECT 1 FROM workspace_space_member sm
+      WHERE sm.space_id = a.space_id
+        AND sm.user_id = sqlc.arg('viewer_user_id')::uuid
+    )
+    OR EXISTS (
+      SELECT 1 FROM member wm
+      WHERE wm.workspace_id = a.workspace_id
+        AND wm.user_id = sqlc.arg('viewer_user_id')::uuid
+        AND wm.role IN ('owner', 'admin')
+    )
+  )
+  AND (sqlc.narg('space_id')::uuid IS NULL OR a.space_id = sqlc.narg('space_id'))
+  AND (
     (sqlc.narg('status')::text IS NULL AND a.status <> 'archived')
     OR a.status = sqlc.narg('status')
   )
 ORDER BY a.created_at DESC;
+
+-- name: PauseActiveAutopilotsBySpace :execrows
+UPDATE autopilot SET
+  status_before_space_archive = status,
+  status = 'paused',
+  paused_by_space_at = now(),
+  updated_at = now()
+WHERE workspace_id = $1
+  AND space_id = $2
+  AND status = 'active'
+  AND paused_by_space_at IS NULL;
+
+-- name: CountAutopilotsPausedBySpace :one
+SELECT count(*) FROM autopilot
+WHERE workspace_id = $1
+  AND space_id = $2
+  AND paused_by_space_at IS NOT NULL;
+
+-- name: ResumeAutopilotsPausedBySpace :execrows
+UPDATE autopilot SET
+  status = COALESCE(status_before_space_archive, 'active'),
+  status_before_space_archive = NULL,
+  paused_by_space_at = NULL,
+  updated_at = now()
+WHERE workspace_id = $1
+  AND space_id = $2
+  AND paused_by_space_at IS NOT NULL
+  AND status = 'paused';
 
 -- name: GetAutopilot :one
 SELECT * FROM autopilot
@@ -47,12 +95,12 @@ WHERE id = $1 AND workspace_id = $2;
 -- name: CreateAutopilot :one
 INSERT INTO autopilot (
     workspace_id, title, description, assignee_type, assignee_id,
-    status, execution_mode, issue_title_template, project_id,
+    status, execution_mode, issue_title_template, project_id, space_id,
     created_by_type, created_by_id
 ) VALUES (
     $1, $2, sqlc.narg('description'), $3, $4,
-    $5, $6, sqlc.narg('issue_title_template'), sqlc.narg('project_id'),
-    $7, $8
+    $5, $6, sqlc.narg('issue_title_template'), sqlc.narg('project_id'), $7,
+    $8, $9
 ) RETURNING *;
 
 -- name: UpdateAutopilot :one
@@ -62,9 +110,18 @@ UPDATE autopilot SET
     assignee_type = COALESCE(sqlc.narg('assignee_type'), assignee_type),
     assignee_id = COALESCE(sqlc.narg('assignee_id')::uuid, assignee_id),
     status = COALESCE(sqlc.narg('status'), status),
+    paused_by_space_at = CASE
+      WHEN sqlc.narg('status')::text IS NOT NULL THEN NULL
+      ELSE paused_by_space_at
+    END,
+    status_before_space_archive = CASE
+      WHEN sqlc.narg('status')::text IS NOT NULL THEN NULL
+      ELSE status_before_space_archive
+    END,
     execution_mode = COALESCE(sqlc.narg('execution_mode'), execution_mode),
     issue_title_template = sqlc.narg('issue_title_template'),
     project_id = sqlc.narg('project_id'),
+    space_id = COALESCE(sqlc.narg('space_id')::uuid, space_id),
     updated_at = now()
 WHERE id = $1
 RETURNING *;

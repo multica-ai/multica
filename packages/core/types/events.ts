@@ -6,6 +6,7 @@ import type { Comment, Reaction } from "./comment";
 import type { TimelineEntry } from "./activity";
 import type { Workspace, MemberWithUser, Invitation } from "./workspace";
 import type { Project } from "./project";
+import type { Space } from "./space";
 import type { Label } from "./label";
 
 // WebSocket event types (matching Go server protocol/events.go)
@@ -198,7 +199,10 @@ export interface CommentUnresolvedPayload {
 }
 
 export interface WorkspaceUpdatedPayload {
-  workspace: Workspace;
+  workspace?: Workspace;
+  // Space create/update/archive is broadcast on the same channel; the payload
+  // carries the affected space instead of the workspace in that case.
+  space?: Space;
 }
 
 export interface WorkspaceDeletedPayload {

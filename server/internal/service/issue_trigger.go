@@ -138,7 +138,7 @@ func (s *IssueService) WillEnqueueRun(ctx context.Context, in IssueTriggerInput,
 			ID:          issue.AssigneeID,
 			WorkspaceID: issue.WorkspaceID,
 		})
-		if err != nil {
+		if err != nil || squad.SpaceID != issue.SpaceID {
 			return IssueRunTrigger{}, false
 		}
 		leader, err := s.Queries.GetAgent(ctx, squad.LeaderID)

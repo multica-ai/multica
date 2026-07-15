@@ -11,6 +11,7 @@ const webRepoUrl = "https://github.com/multica-ai/web";
 
 vi.mock("@tanstack/react-query", () => ({
   useQuery: () => ({ data: [] }),
+  queryOptions: (options: unknown) => options,
 }));
 
 vi.mock("@multica/core/projects/mutations", () => ({

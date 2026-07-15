@@ -94,12 +94,15 @@
   "chat": {
     "floating_title": "플로팅 창",
     "floating_label": "플로팅 채팅 창",
-    "floating_hint": "모든 페이지 모서리에 플로팅 채팅 버튼을 표시합니다. 기본값은 꺼짐 — 켜면 어디서나 채팅을 불러올 수 있고, 꺼면 채팅은 이 탭에서만 사용할 수 있습니다."
+    "floating_hint": "모든 페이지 모서리에 플로팅 채팅 버튼을 표시합니다. 기본값은 꺼짐 — 켜면 어디서나 채팅을 불러올 수 있고, 끄면 전용 채팅 페이지를 사용합니다."
   },
   "page": {
     "title": "설정",
     "my_account": "내 계정",
     "workspace_fallback": "워크스페이스",
+    "space": "스페이스",
+    "loading": "설정을 불러오는 중…",
+    "this_device": "이 기기",
     "tabs": {
       "profile": "프로필",
       "preferences": "환경설정",
@@ -114,7 +117,9 @@
       "labs": "실험실",
       "members": "멤버",
       "labels": "레이블",
-      "properties": "속성"
+      "properties": "속성",
+      "spaces": "스페이스",
+      "autopilot_templates": "자동화 템플릿"
     }
   },
   "properties": {
@@ -221,6 +226,54 @@
       "confirm": "레이블 삭제",
       "failed": "레이블을 삭제하지 못했습니다"
     }
+  },
+  "autopilot_templates": {
+    "title": "자동화 템플릿",
+    "description": "워크스페이스에서 재사용하는 런북입니다. 스페이스, 프로젝트, 담당자, 구독자, 연동 접근 권한은 각 자동화 인스턴스에서 선택합니다.",
+    "new": "새 템플릿",
+    "name": "이름",
+    "runbook": "런북",
+    "issue_title_template": "이슈 제목 템플릿",
+    "issue_title_template_placeholder": "주간 보고서 — {{date}}",
+    "execution_mode": "실행 모드",
+    "execution_mode_create_issue": "이슈 생성",
+    "execution_mode_run_only": "실행만",
+    "trigger": "트리거",
+    "trigger_schedule": "일정",
+    "trigger_webhook": "Webhook",
+    "cron": "Cron 표현식",
+    "timezone": "시간대",
+    "cancel": "취소",
+    "save": "템플릿 저장",
+    "loading": "템플릿 불러오는 중…",
+    "empty": "아직 워크스페이스 템플릿이 없습니다.",
+    "no_runbook": "런북 없음",
+    "toast_saved": "템플릿을 저장했습니다",
+    "toast_save_failed": "템플릿을 저장하지 못했습니다",
+    "toast_deleted": "템플릿을 삭제했습니다",
+    "toast_delete_failed": "템플릿을 삭제하지 못했습니다",
+    "edit": "{{name}} 편집",
+    "delete": "{{name}} 삭제",
+    "delete_confirm_title": "템플릿을 삭제할까요?",
+    "delete_confirm_body": "“{{name}}” 템플릿을 삭제합니다. 이 템플릿으로 이미 만든 자동화에는 영향을 주지 않습니다.",
+    "delete_action": "템플릿 삭제"
+  },
+  "integration_bindings": {
+    "title": "스페이스 접근",
+    "description": "각 워크스페이스 연동을 참조할 수 있는 스페이스를 선택합니다. 자격 증명을 복사하거나 외부 계정 권한을 확대하지 않습니다.",
+    "toast_saved": "연동 스페이스 접근을 업데이트했습니다",
+    "toast_failed": "연동 스페이스 접근을 업데이트하지 못했습니다"
+  },
+  "spaces": {
+    "title": "스페이스",
+    "description": "워크스페이스의 스페이스, 기본 위치, 접근 상태를 관리합니다.",
+    "joined": "참여함",
+    "not_joined": "참여하지 않음",
+    "set_default": "기본값으로 설정",
+    "setting_default": "설정 중...",
+    "toast_default_updated": "기본 스페이스를 업데이트했습니다",
+    "toast_default_failed": "기본 스페이스를 업데이트하지 못했습니다",
+    "archived_title_other": "보관된 스페이스 ({{count}})"
   },
   "account": {
     "section_profile": "개인 정보",
@@ -334,11 +387,16 @@
     "description_placeholder": "이 워크스페이스는 무엇에 집중하나요?",
     "context_label": "맥락",
     "context_placeholder": "이 워크스페이스에서 작업하는 AI 에이전트가 알아야 할 배경 정보와 맥락",
+    "default_space_label": "기본 스페이스",
+    "default_space_hint": "스페이스 맥락이 없을 때 전역 생성 및 가져오기에 사용합니다.",
     "slug_label": "슬러그",
     "issue_prefix_label": "이슈 접두사",
     "issue_prefix_hint": "{{example}} 같은 이슈 번호에 사용됩니다.",
     "prefix_confirm_title": "이슈 접두사를 변경할까요?",
     "prefix_confirm_description": "모든 이슈 번호가 {{oldPrefix}}-N에서 {{newPrefix}}-N으로 다시 매겨집니다. Pull request 제목, 브랜치 이름, 문서와 채팅의 링크처럼 {{oldPrefix}}-N을 사용하는 외부 참조는 더 이상 연결되지 않습니다.",
+    "slug_hint": "워크스페이스 URL입니다. 변경하면 이 워크스페이스를 가리키는 기존 링크가 작동하지 않습니다.",
+    "slug_confirm_title": "워크스페이스 URL을 변경할까요?",
+    "slug_confirm_description": "URL이 /{{oldSlug}}에서 /{{newSlug}}(으)로 변경됩니다. /{{oldSlug}}을(를) 사용하는 기존 링크와 북마크는 더 이상 작동하지 않습니다.",
     "save": "저장",
     "saving": "저장하는 중...",
     "manage_hint": "관리자와 소유자만 워크스페이스 설정을 업데이트할 수 있습니다.",
@@ -465,6 +523,7 @@
     "invite_title": "멤버 초대",
     "invite_email_placeholder": "user@company.com",
     "invite_button": "초대",
+    "invite_spaces_label": "참여할 스페이스",
     "inviting": "초대하는 중...",
     "toast_invitation_sent": "초대를 보냈습니다",
     "toast_invitation_failed": "초대를 보내지 못했습니다",

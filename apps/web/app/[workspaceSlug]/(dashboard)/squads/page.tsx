@@ -1,1 +1,7 @@
-export { SquadsPage as default } from "@multica/views/squads";
+"use client";
+
+import { SquadsPage } from "@multica/views/squads";
+
+export default function Page() {
+  return <SquadsPage />;
+}

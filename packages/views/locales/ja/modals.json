@@ -72,6 +72,7 @@
   "create_squad": {
     "title": "スクワッドを作成",
     "description": "リーダーエージェントと任意の追加メンバーで協働スクワッドを作成します。",
+    "space_label": "スペース",
     "name_label": "名前",
     "name_placeholder": "例: フロントエンドチーム",
     "description_label": "説明",
@@ -119,6 +120,8 @@
     "submitting": "作成中...",
     "toast_created": "プロジェクトを作成しました",
     "toast_failed": "プロジェクトを作成できませんでした",
+    "space_required": "Space を少なくとも1つ選択してください",
+    "space_min_hint": "プロジェクトは 1 つの Space に属する必要があります",
     "repos_pill": "リポジトリ",
     "repos_pill_count_other": "{{count}} 個のリポジトリ",
     "repos_heading": "このプロジェクトに GitHub リポジトリを接続",

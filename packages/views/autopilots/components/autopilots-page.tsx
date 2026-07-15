@@ -4,6 +4,7 @@ import { useMemo, useRef, useState } from "react";
 import {
   AlertCircle,
   BarChart3,
+  BookTemplate,
   Bug,
   Clock,
   Code,
@@ -18,7 +19,10 @@ import {
 } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { autopilotListOptions } from "@multica/core/autopilots/queries";
+import {
+  autopilotListOptions,
+  autopilotTemplateListOptions,
+} from "@multica/core/autopilots/queries";
 import {
   useAutopilotsViewStore,
   AUTOPILOT_DEFAULT_HIDDEN_COLUMNS,
@@ -30,9 +34,17 @@ import {
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useActorName } from "@multica/core/workspace/hooks";
-import type { Autopilot } from "@multica/core/types";
+import type {
+  Autopilot,
+  AutopilotTemplate as WorkspaceAutopilotTemplate,
+} from "@multica/core/types";
 import { Button } from "@multica/ui/components/ui/button";
 import { Checkbox } from "@multica/ui/components/ui/checkbox";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@multica/ui/components/ui/popover";
 import {
   LIST_GRID_BOTTOM_CLEARANCE,
   ListGrid,
@@ -57,7 +69,7 @@ import {
   AutopilotBatchToolbar,
   AutopilotRowActions,
 } from "./autopilot-list-actions";
-import type { TriggerFrequency } from "./trigger-config";
+import { parseCronExpression, type TriggerFrequency } from "./trigger-config";
 import { useT, useTimeAgo } from "../../i18n";
 
 // Column template — single source of truth for header, rows, and skeletons.
@@ -143,7 +155,7 @@ const TEMPLATES: AutopilotTemplate[] = [
   {
     id: "daily_news",
     prompt: `1. Search the web for news and announcements published today only (strictly today's date)
-2. Filter for topics relevant to our team and industry
+2. Filter for topics relevant to our space and industry
 3. For each item, write a short summary including: title, source, key takeaways
 4. Compile everything into a single digest post
 5. Post the digest as a comment on this issue and @mention all workspace members`,
@@ -157,7 +169,7 @@ const TEMPLATES: AutopilotTemplate[] = [
 2. Identify PRs that have been open for more than 24 hours without a review
 3. For each stale PR, note the author, age, and a one-line summary of the change
 4. Post a comment on this issue listing all stale PRs with links
-5. @mention the team to remind them to review`,
+5. @mention the space to remind them to review`,
     icon: GitPullRequest,
     frequency: "weekdays",
     time: "10:00",
@@ -601,21 +613,30 @@ function LoadingSkeleton() {
 // Page
 // ---------------------------------------------------------------------------
 
-export function AutopilotsPage() {
+// `spaceId` narrows the list to that space's autopilots — used by the space
+// surface pages (/space/:key/autopilots). Client-side filter over the shared
+// list cache.
+export function AutopilotsPage({ spaceId }: { spaceId?: string } = {}) {
   const { t } = useT("autopilots");
   const wsId = useWorkspaceId();
   const wsPaths = useWorkspacePaths();
   const rowLink = useRowLink();
   const {
-    data: autopilots = [],
+    data: allAutopilots = [],
     isLoading,
     error: listError,
     refetch: refetchList,
-  } = useQuery(autopilotListOptions(wsId));
+  } = useQuery(autopilotListOptions(wsId, spaceId));
+  const autopilots = allAutopilots;
 
   const [createOpen, setCreateOpen] = useState(false);
   const [selectedTemplate, setSelectedTemplate] =
     useState<AutopilotTemplate | null>(null);
+  const [selectedWorkspaceTemplate, setSelectedWorkspaceTemplate] =
+    useState<WorkspaceAutopilotTemplate | null>(null);
+  const { data: workspaceTemplates = [] } = useQuery(
+    autopilotTemplateListOptions(wsId),
+  );
   const [selectedIds, setSelectedIds] = useState<ReadonlySet<string>>(
     new Set(),
   );
@@ -739,6 +760,13 @@ export function AutopilotsPage() {
 
   const openCreate = (template?: AutopilotTemplate) => {
     setSelectedTemplate(template ?? null);
+    setSelectedWorkspaceTemplate(null);
+    setCreateOpen(true);
+  };
+
+  const openWorkspaceTemplate = (template: WorkspaceAutopilotTemplate) => {
+    setSelectedTemplate(null);
+    setSelectedWorkspaceTemplate(template);
     setCreateOpen(true);
   };
 
@@ -772,11 +800,40 @@ export function AutopilotsPage() {
         title={t(($) => $.page.title)}
         count={totalCount}
         actions={
-          <CollectionPageHeaderAction
-            icon={Plus}
-            label={t(($) => $.page.new_autopilot)}
-            onClick={() => openCreate()}
-          />
+          <>
+            {workspaceTemplates.length > 0 && (
+              <Popover>
+                <PopoverTrigger
+                  render={
+                    <Button size="sm" variant="ghost" className="h-8 gap-1.5">
+                      <BookTemplate className="size-3.5" />
+                      {t(($) => $.page.workspace_templates)}
+                    </Button>
+                  }
+                />
+                <PopoverContent align="end" className="w-80 p-1">
+                  {workspaceTemplates.map((template) => (
+                    <button
+                      key={template.id}
+                      type="button"
+                      className="w-full rounded-md px-3 py-2 text-left hover:bg-accent"
+                      onClick={() => openWorkspaceTemplate(template)}
+                    >
+                      <div className="text-sm font-medium">{template.name}</div>
+                      <div className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">
+                        {template.description}
+                      </div>
+                    </button>
+                  ))}
+                </PopoverContent>
+              </Popover>
+            )}
+            <CollectionPageHeaderAction
+              icon={Plus}
+              label={t(($) => $.page.new_autopilot)}
+              onClick={() => openCreate()}
+            />
+          </>
         }
       />
 
@@ -967,8 +1024,20 @@ export function AutopilotsPage() {
           mode="create"
           open={createOpen}
           onOpenChange={setCreateOpen}
-          initial={
-            selectedTemplate
+          initial={{
+            // Opening from a space surface injects that space as the seed —
+            // the dialog itself stays the same everywhere (switchable).
+            ...(spaceId ? { space_id: spaceId } : {}),
+            ...(selectedWorkspaceTemplate
+              ? {
+                  title: selectedWorkspaceTemplate.name,
+                  description: selectedWorkspaceTemplate.description,
+                  execution_mode: selectedWorkspaceTemplate.execution_mode,
+                  issue_title_template:
+                    selectedWorkspaceTemplate.issue_title_template,
+                }
+              : {}),
+            ...(selectedTemplate
               ? {
                   // Template title pulls from i18n so the user-visible default
                   // matches their locale, while the prompt body stays raw EN
@@ -976,16 +1045,24 @@ export function AutopilotsPage() {
                   title: t(($) => $.templates[selectedTemplate.id].title),
                   description: selectedTemplate.prompt,
                 }
-              : undefined
-          }
+              : {}),
+          }}
           initialTriggerConfig={
-            selectedTemplate
+            selectedWorkspaceTemplate?.trigger_kind === "schedule" &&
+            selectedWorkspaceTemplate.cron_expression &&
+            selectedWorkspaceTemplate.timezone
+              ? parseCronExpression(
+                  selectedWorkspaceTemplate.cron_expression,
+                  selectedWorkspaceTemplate.timezone,
+                )
+              : selectedTemplate
               ? {
                   frequency: selectedTemplate.frequency,
                   time: selectedTemplate.time,
                 }
               : undefined
           }
+          initialTriggerKind={selectedWorkspaceTemplate?.trigger_kind}
         />
       )}
     </div>

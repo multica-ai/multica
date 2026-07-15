@@ -667,7 +667,7 @@ describe("IssueDetail (shared)", () => {
     // single link to the issue's own detail route (used to open the full page
     // from the inline Inbox pane). A bare issue has no ancestor crumbs.
     const leaf = await screen.findByText("TES-1 Implement authentication");
-    expect(leaf.closest("a")).toHaveAttribute("href", "/test/issues/issue-1");
+    expect(leaf.closest("a")).toHaveAttribute("href", "/test/issue/issue-1");
   });
 
   it("omits the project breadcrumb segment when the issue has no project_id", async () => {

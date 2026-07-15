@@ -34,6 +34,7 @@ func batchClaimFixture(t *testing.T, ctx context.Context, pool *pgxpool.Pool) (r
 	if _, err := pool.Exec(ctx, `INSERT INTO member (workspace_id, user_id, role) VALUES ($1,$2,'owner')`, workspaceID, userID); err != nil {
 		t.Fatalf("create member: %v", err)
 	}
+	spaceID := createServiceTestSpace(t, pool, workspaceID, userID)
 
 	mkRuntime := func(name, provider string) string {
 		var id string
@@ -64,9 +65,9 @@ func batchClaimFixture(t *testing.T, ctx context.Context, pool *pgxpool.Pool) (r
 	mkQueuedTask := func(agentID, runtimeID string, n int) {
 		var issueID string
 		if err := pool.QueryRow(ctx, `
-			INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type, number, position)
-			VALUES ($1, $2, 'in_progress', 'none', $3, 'member', $4, $5)
-			RETURNING id`, workspaceID, fmt.Sprintf("batch issue %d", n), userID, 800000+n, n).Scan(&issueID); err != nil {
+			INSERT INTO issue (workspace_id, space_id, title, status, priority, creator_id, creator_type, number, position)
+			VALUES ($1, $2, $3, 'in_progress', 'none', $4, 'member', $5, $6)
+			RETURNING id`, workspaceID, spaceID, fmt.Sprintf("batch issue %d", n), userID, 800000+n, n).Scan(&issueID); err != nil {
 			t.Fatalf("create issue %d: %v", n, err)
 		}
 		if _, err := pool.Exec(ctx, `

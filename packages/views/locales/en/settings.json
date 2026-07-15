@@ -97,12 +97,15 @@
   "chat": {
     "floating_title": "Floating window",
     "floating_label": "Floating chat window",
-    "floating_hint": "Show the floating chat button in the corner of every page. Off by default — turn it on to summon chat anywhere; when off, Chat lives only in this tab."
+    "floating_hint": "Show the floating chat button in the corner of every page. Off by default — turn it on to summon chat anywhere; when off, use the dedicated Chat page."
   },
   "page": {
     "title": "Settings",
     "my_account": "My Account",
     "workspace_fallback": "Workspace",
+    "space": "Space",
+    "loading": "Loading settings…",
+    "this_device": "This Device",
     "tabs": {
       "profile": "Profile",
       "preferences": "Preferences",
@@ -117,7 +120,9 @@
       "labs": "Labs",
       "members": "Members",
       "labels": "Labels",
-      "properties": "Properties"
+      "properties": "Properties",
+      "spaces": "Spaces",
+      "autopilot_templates": "Autopilot Templates"
     }
   },
   "properties": {
@@ -229,6 +234,55 @@
       "confirm": "Delete label",
       "failed": "Couldn't delete label"
     }
+  },
+  "autopilot_templates": {
+    "title": "Autopilot Templates",
+    "description": "Workspace-owned reusable runbooks. Space, Project, assignee, subscribers, and Integration access are selected on each Autopilot instance.",
+    "new": "New template",
+    "name": "Name",
+    "runbook": "Runbook",
+    "issue_title_template": "Issue title template",
+    "issue_title_template_placeholder": "Weekly report — {{date}}",
+    "execution_mode": "Execution mode",
+    "execution_mode_create_issue": "Create issue",
+    "execution_mode_run_only": "Run only",
+    "trigger": "Trigger",
+    "trigger_schedule": "Schedule",
+    "trigger_webhook": "Webhook",
+    "cron": "Cron expression",
+    "timezone": "Timezone",
+    "cancel": "Cancel",
+    "save": "Save template",
+    "loading": "Loading templates…",
+    "empty": "No Workspace templates yet.",
+    "no_runbook": "No runbook",
+    "toast_saved": "Template saved",
+    "toast_save_failed": "Failed to save template",
+    "toast_deleted": "Template deleted",
+    "toast_delete_failed": "Failed to delete template",
+    "edit": "Edit {{name}}",
+    "delete": "Delete {{name}}",
+    "delete_confirm_title": "Delete template?",
+    "delete_confirm_body": "“{{name}}” will be removed. Existing Autopilots created from it are not affected.",
+    "delete_action": "Delete template"
+  },
+  "integration_bindings": {
+    "title": "Space access",
+    "description": "Choose which Spaces may reference each Workspace connection. This does not copy credentials or expand the third-party account's permissions.",
+    "toast_saved": "Integration Space access updated",
+    "toast_failed": "Failed to update Integration Space access"
+  },
+  "spaces": {
+    "title": "Spaces",
+    "description": "Manage the workspace's Spaces, default destination, and access state.",
+    "joined": "Joined",
+    "not_joined": "Not joined",
+    "set_default": "Set as Default",
+    "setting_default": "Setting...",
+    "toast_default_updated": "Default Space updated",
+    "toast_default_failed": "Failed to update the Default Space",
+    "archived_title_one": "Archived Space ({{count}})",
+    "archived_title_other": "Archived Spaces ({{count}})"
   },
   "account": {
     "section_profile": "Personal information",
@@ -342,11 +396,16 @@
     "description_placeholder": "What does this workspace focus on?",
     "context_label": "Context",
     "context_placeholder": "Background information and context for AI agents working in this workspace",
+    "default_space_label": "Default space",
+    "default_space_hint": "Used for global creation and imports when no space context is available.",
     "slug_label": "Slug",
     "issue_prefix_label": "Issue prefix",
     "issue_prefix_hint": "Used in issue numbers like {{example}}.",
     "prefix_confirm_title": "Change issue prefix?",
     "prefix_confirm_description": "All issues will be renumbered from {{oldPrefix}}-N to {{newPrefix}}-N. External references — pull request titles, branch names, links in docs and chat — that use {{oldPrefix}}-N will stop resolving.",
+    "slug_hint": "Your workspace URL. Changing it breaks existing links to this workspace.",
+    "slug_confirm_title": "Change workspace URL?",
+    "slug_confirm_description": "The URL changes from /{{oldSlug}} to /{{newSlug}}. Existing links and bookmarks using /{{oldSlug}} will stop working.",
     "save": "Save",
     "saving": "Saving...",
     "manage_hint": "Only admins and owners can update workspace settings.",
@@ -621,6 +680,7 @@
     "invite_title": "Invite member",
     "invite_email_placeholder": "user@company.com",
     "invite_button": "Invite",
+    "invite_spaces_label": "Joins spaces",
     "inviting": "Inviting...",
     "toast_invitation_sent": "Invitation sent",
     "toast_invitation_failed": "Failed to send invitation",

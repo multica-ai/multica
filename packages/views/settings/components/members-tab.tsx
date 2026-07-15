@@ -1,8 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Crown, Shield, User, Plus, MoreHorizontal, UserMinus, Clock, X, Mail } from "lucide-react";
 import { ActorAvatar } from "../../common/actor-avatar";
+import { SpaceMultiPicker } from "../../spaces";
 import type { MemberWithUser, MemberRole, Invitation } from "@multica/core/types";
 import { Input } from "@multica/ui/components/ui/input";
 import { Button } from "@multica/ui/components/ui/button";
@@ -41,6 +42,8 @@ import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useCurrentWorkspace } from "@multica/core/paths";
 import { memberListOptions, invitationListOptions, workspaceKeys } from "@multica/core/workspace/queries";
+import { creationDefaultSpaceId } from "@multica/core/spaces";
+import { activeSpaceListOptions } from "@multica/core/spaces/queries";
 import { api } from "@multica/core/api";
 import { useT } from "../../i18n";
 import { SettingsCard, SettingsSection, SettingsTab } from "./settings-layout";
@@ -236,10 +239,28 @@ export function MembersTab() {
   const wsId = useWorkspaceId();
   const { data: members = [] } = useQuery(memberListOptions(wsId));
   const { data: invitations = [] } = useQuery(invitationListOptions(wsId));
+  const { data: spaces = [] } = useQuery(activeSpaceListOptions(wsId));
+
+  // Match the server's explicit workspace Default Space. The helper keeps the
+  // old-server compatibility fallback in one place without letting this form
+  // silently invent a different default from the rest of the product.
+  const defaultSpaceId = creationDefaultSpaceId(spaces) ?? null;
 
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteRole, setInviteRole] = useState<MemberRole>("member");
+  const [inviteSpaceIds, setInviteSpaceIds] = useState<string[]>([]);
   const [inviteLoading, setInviteLoading] = useState(false);
+
+  // Seed the selection with the default space once the list loads. Seed only
+  // once so the user is then free to deselect it down to zero (empty selection
+  // is valid — the server falls back to the default space on accept).
+  const seededSpace = useRef(false);
+  useEffect(() => {
+    if (!seededSpace.current && defaultSpaceId) {
+      setInviteSpaceIds([defaultSpaceId]);
+      seededSpace.current = true;
+    }
+  }, [defaultSpaceId]);
   const [memberActionId, setMemberActionId] = useState<string | null>(null);
   const [invitationActionId, setInvitationActionId] = useState<string | null>(null);
   const [confirmAction, setConfirmAction] = useState<{
@@ -261,9 +282,11 @@ export function MembersTab() {
       await api.createMember(workspace.id, {
         email: inviteEmail,
         role: inviteRole,
+        space_ids: inviteSpaceIds,
       });
       setInviteEmail("");
       setInviteRole("member");
+      setInviteSpaceIds(defaultSpaceId ? [defaultSpaceId] : []);
       qc.invalidateQueries({ queryKey: workspaceKeys.invitations(wsId) });
       toast.success(t(($) => $.members.toast_invitation_sent));
     } catch (e) {
@@ -379,6 +402,19 @@ export function MembersTab() {
                   {inviteLoading ? t(($) => $.members.inviting) : t(($) => $.members.invite_button)}
                 </Button>
               </div>
+              {/* Space targeting: only meaningful with more than one space —
+                  a single-space workspace always resolves to that space. */}
+              {spaces.length > 1 && (
+                <div className="flex items-center gap-2 text-sm">
+                  <span className="text-muted-foreground">
+                    {t(($) => $.members.invite_spaces_label)}
+                  </span>
+                  <SpaceMultiPicker
+                    spaceIds={inviteSpaceIds}
+                    onChange={setInviteSpaceIds}
+                  />
+                </div>
+              )}
             </CardContent>
           </Card>
         )}

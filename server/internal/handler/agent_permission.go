@@ -91,8 +91,8 @@ func (p resolvedPermission) legacyVisibility() string {
 //   - permissionMode == nil && visibility == nil  -> caller default (returns ok=false, nil)
 //   - permissionMode provided                     -> authoritative
 //   - only legacy visibility provided             -> mapped:
-//       "private"   -> private
-//       "workspace" -> public_to + workspace target
+//     "private"   -> private
+//     "workspace" -> public_to + workspace target
 //
 // workspaceID seeds workspace targets (stored as the workspace id). The
 // returned error is a client-facing 400 message.
@@ -291,6 +291,11 @@ func (h *Handler) enrichAgentResponseWithTargets(ctx context.Context, resp *Agen
 		return err
 	}
 	applyInvocationTargetsToResponse(resp, targets)
+	spaces, err := h.Queries.ListAgentAvailableSpaces(ctx, agentID)
+	if err != nil {
+		return err
+	}
+	applyAgentAvailabilityToResponse(resp, spaces)
 	return nil
 }
 

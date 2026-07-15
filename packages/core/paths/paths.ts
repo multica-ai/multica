@@ -20,7 +20,29 @@ function workspaceScoped(slug: string) {
     root: () => `${ws}/issues`,
     usage: () => `${ws}/usage`,
     issues: () => `${ws}/issues`,
-    issueDetail: (id: string) => `${ws}/issues/${encode(id)}`,
+    // Issue detail is identifier-first (Linear-style /issue/NAI-3): the space
+    // rides in the identifier, never in a nested path segment, so moving an
+    // issue between spaces can't orphan the URL (old identifiers keep
+    // resolving via the server-side alias). The same route accepts a UUID —
+    // internal navigation passes ids, shared links pass identifiers.
+    issueDetail: (idOrIdentifier: string) => `${ws}/issue/${encode(idOrIdentifier)}`,
+    // Space-scoped surfaces, addressed by space key (readable, stable: keys
+    // freeze once a space has issues) — /space/ENG/issues, Linear-style.
+    spaceIssues: (key: string) => `${ws}/space/${encode(key)}/issues`,
+    spaceProjects: (key: string) => `${ws}/space/${encode(key)}/projects`,
+    spaceAutopilots: (key: string) => `${ws}/space/${encode(key)}/autopilots`,
+    spaceSquads: (key: string) => `${ws}/space/${encode(key)}/squads`,
+    spaceSquadDetail: (key: string, id: string) =>
+      `${ws}/space/${encode(key)}/squads/${encode(id)}`,
+    spaceDetail: (key: string) => `${ws}/space/${encode(key)}`,
+    // Space configuration lives in the unified Settings information
+    // architecture. Space work stays under /space/:key/*; organization and
+    // governance live under /settings/space/:key.
+    spaceSettings: (key: string) => `${ws}/settings/space/${encode(key)}`,
+    spacesDirectory: () => `${ws}/spaces`,
+    // Static sibling of spaceDetail — "new" is a reserved space key
+    // (RESERVED_SPACE_KEYS) precisely so it can never collide with this route.
+    spaceNew: () => `${ws}/space/new`,
     projects: () => `${ws}/projects`,
     projectDetail: (id: string) => `${ws}/projects/${encode(id)}`,
     autopilots: () => `${ws}/autopilots`,
@@ -41,6 +63,8 @@ function workspaceScoped(slug: string) {
     skills: () => `${ws}/skills`,
     skillDetail: (id: string) => `${ws}/skills/${encode(id)}`,
     settings: () => `${ws}/settings`,
+    settingsSection: (scope: string, page: string) =>
+      `${ws}/settings/${encode(scope)}/${encode(page)}`,
     attachmentPreview: (id: string) => `${ws}/attachments/${encode(id)}/preview`,
   };
 }

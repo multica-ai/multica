@@ -23,10 +23,14 @@ import { useNativeSearchBar } from "@/lib/use-native-search-bar";
 type Mode = "comment" | "chat";
 
 export default function MentionPickerRoute() {
-  const { mode: rawMode } = useLocalSearchParams<{ mode?: string }>();
+  const { mode: rawMode, spaceId: rawSpaceId } = useLocalSearchParams<{
+    mode?: string;
+    spaceId?: string;
+  }>();
   const mode: Mode = rawMode === "chat" ? "chat" : "comment";
+  const spaceId = mode === "comment" ? rawSpaceId ?? null : null;
   const placeholder =
     mode === "chat" ? "Reference an issue" : "Search people or issues";
   const query = useNativeSearchBar(placeholder, { autoFocus: true });
-  return <MentionPickerBody mode={mode} query={query} />;
+  return <MentionPickerBody mode={mode} query={query} spaceId={spaceId} />;
 }

@@ -30,13 +30,14 @@ export function canAssignAgent(
   agent: Agent,
   userId: string | undefined,
   memberRole: string | undefined,
+  spaceId?: string | null,
 ): boolean {
   return canAssignAgentToIssue(agent, {
     userId: userId ?? null,
     role: memberRole === "owner" || memberRole === "admin" || memberRole === "member"
       ? memberRole
       : null,
-  }).allowed;
+  }, spaceId).allowed;
 }
 
 interface AssigneePickerProps {
@@ -55,6 +56,8 @@ interface AssigneePickerProps {
   open?: boolean;
   onOpenChange?: (v: boolean) => void;
   align?: "start" | "center" | "end";
+  /** The concrete Issue/Create target Space used for Agent Availability. */
+  spaceId?: string | null;
 }
 
 /**
@@ -96,6 +99,7 @@ function AssigneePickerImpl({
   open: controlledOpen,
   onOpenChange: controlledOnOpenChange,
   align,
+  spaceId,
 }: AssigneePickerProps) {
   const { t } = useT("issues");
   const [internalOpen, setInternalOpen] = useState(false);
@@ -106,7 +110,9 @@ function AssigneePickerImpl({
   const wsId = useWorkspaceId();
   const { data: members = [] } = useQuery(memberListOptions(wsId));
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
-  const { data: squads = [] } = useQuery(squadListOptions(wsId));
+  const { data: squads = [] } = useQuery(
+    squadListOptions(wsId, typeof spaceId === "string" ? spaceId : undefined),
+  );
   const { data: frequency = [] } = useQuery(assigneeFrequencyOptions(wsId));
   const { getActorName } = useActorName();
 
@@ -132,7 +138,12 @@ function AssigneePickerImpl({
     .filter((a) => !a.archived_at && (a.name.toLowerCase().includes(query) || matchesPinyin(a.name, query)))
     .sort((a, b) => getFreq("agent", b.id) - getFreq("agent", a.id));
   const filteredSquads = squads
-    .filter((s) => !s.archived_at && (s.name.toLowerCase().includes(query) || matchesPinyin(s.name, query)))
+    .filter(
+      (s) =>
+        !s.archived_at &&
+        (spaceId === undefined || s.space_id === spaceId) &&
+        (s.name.toLowerCase().includes(query) || matchesPinyin(s.name, query)),
+    )
     .sort((a, b) => getFreq("squad", b.id) - getFreq("squad", a.id));
 
   const isSelected = (type: string, id: string) =>
@@ -215,7 +226,7 @@ function AssigneePickerImpl({
                 memberRole === "member"
                   ? memberRole
                   : null,
-            });
+            }, spaceId);
             const allowed = decision.allowed;
             return (
               <PickerItem

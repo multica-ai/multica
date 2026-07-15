@@ -531,8 +531,14 @@ class ApiClient {
     });
   }
 
-  async listSquads(opts?: { signal?: AbortSignal }): Promise<Squad[]> {
-    const raw = await this.fetch<unknown>("/api/squads", {
+  async listSquads(opts?: {
+    signal?: AbortSignal;
+    spaceId?: string;
+  }): Promise<Squad[]> {
+    const search = new URLSearchParams();
+    if (opts?.spaceId) search.set("space_id", opts.spaceId);
+    const query = search.size > 0 ? `?${search.toString()}` : "";
+    const raw = await this.fetch<unknown>(`/api/squads${query}`, {
       signal: opts?.signal,
     });
     return parseWithFallback(raw, SquadListSchema, EMPTY_SQUAD_LIST, {
@@ -862,8 +868,12 @@ class ApiClient {
   // --- Projects ---
   async listProjects(opts?: {
     signal?: AbortSignal;
+    spaceId?: string;
   }): Promise<ListProjectsResponse> {
-    const raw = await this.fetch<unknown>("/api/projects", {
+    const search = new URLSearchParams();
+    if (opts?.spaceId) search.set("space_id", opts.spaceId);
+    const query = search.size > 0 ? `?${search.toString()}` : "";
+    const raw = await this.fetch<unknown>(`/api/projects${query}`, {
       signal: opts?.signal,
     });
     return parseWithFallback(

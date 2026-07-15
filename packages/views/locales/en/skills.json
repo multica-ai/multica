@@ -1,7 +1,7 @@
 {
   "page": {
     "title": "Skills",
-    "tagline": "Instructions any agent in this workspace can use.",
+    "tagline": "Reusable instructions shared privately, with selected Spaces, or across the Workspace.",
     "learn_more": "Learn more →",
     "new_skill": "New skill",
     "search_placeholder": "Search skills…",
@@ -13,7 +13,7 @@
     },
     "empty": {
       "title": "No skills yet",
-      "description": "Create your first skill, import one from a URL, or copy one from a connected runtime — and every agent in the workspace can use it."
+      "description": "Create your first Skill, import one from a URL, or copy one from a connected runtime. New Skills start Private."
     },
     "no_matches": {
       "title": "No matches",
@@ -23,9 +23,9 @@
       "try_different": " Try a different query."
     },
     "intro_banner": {
-      "title": "Shared with your workspace.",
-      "body": "Anyone can create a skill, import one from a URL, or copy one from their local runtime — and every agent can use it.",
-      "highlight": "Local runtime skills stay private until you copy one here."
+      "title": "Workspace-owned, explicitly shared.",
+      "body": "Skills have one source of truth in the Workspace and an independent sharing scope.",
+      "highlight": "Sharing never grants Space data or Integration access."
     },
     "list_error": {
       "title": "Couldn't load skills",
@@ -42,6 +42,9 @@
     "updated": "Updated",
     "created": "Created",
     "lock_tooltip": "Read-only — only creator or admin can edit",
+    "scope_private": "Private",
+    "scope_spaces": "Shared with {{count}} Spaces",
+    "scope_workspace": "Shared with the Workspace",
     "unused": "— unused",
     "by_creator": "by {{name}}",
     "source_manual": "Created manually",
@@ -221,6 +224,7 @@
       "name_hint": "Must be unique within the workspace.",
       "description_label": "Description",
       "description_placeholder": "One sentence on when to assign this skill to an agent.",
+      "sharing_hint": "New Skills start Private. Share with selected Spaces or the Workspace from the detail page.",
       "name_conflict_hint": " Try a different name and submit again.",
       "fallback_error": "Failed to create skill",
       "cancel": "Cancel",
@@ -241,6 +245,27 @@
       "cancel": "Cancel",
       "toast_imported": "Skill imported"
     }
+  },
+  "availability": {
+    "heading": "Availability",
+    "tooltip": "Change Skill sharing scope",
+    "private_title": "Private",
+    "private_description": "Only the creator and Workspace admins can discover or use this Skill.",
+    "spaces_title": "Selected Spaces",
+    "spaces_description": "Members and Agents can use it only in the selected Spaces.",
+    "spaces_count": "{{count}} Spaces",
+    "workspace_title": "Workspace",
+    "workspace_description": "Available across the Workspace.",
+    "spaces_empty": "No active Spaces",
+    "archived": "Archived",
+    "unavailable": "Unavailable Space",
+    "select_required": "Select at least one Space.",
+    "remove_unavailable": "Remove archived or unavailable Spaces before applying.",
+    "access_note": "Sharing a Skill never grants access to Space data, integrations, secrets, or resources.",
+    "cancel": "Cancel",
+    "apply": "Apply",
+    "toast_updated": "Skill sharing updated",
+    "toast_failed": "Failed to update Skill sharing"
   },
   "runtime_import": {
     "runtime_label": "Runtime",

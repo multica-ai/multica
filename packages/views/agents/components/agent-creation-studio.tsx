@@ -32,8 +32,10 @@ import {
   runtimeListOptions,
   runtimeModelsOptions,
 } from "@multica/core/runtimes";
+import { spaceListOptions } from "@multica/core/spaces";
 import type {
   Agent,
+  AgentAvailabilityMode,
   AgentInvocationTargetInput,
   AgentTemplateSummary,
   ChatMessage,
@@ -41,6 +43,7 @@ import type {
   MemberWithUser,
   RuntimeDevice,
   RuntimeModel,
+  Space,
 } from "@multica/core/types";
 import {
   agentListOptions,
@@ -71,6 +74,7 @@ import {
 import { ModelDropdown } from "./model-dropdown";
 import { RuntimePicker, isRuntimeUsableForUser } from "./runtime-picker";
 import { SkillMultiSelect } from "./skill-multi-select";
+import { AvailabilitySection } from "./create-agent-dialog";
 
 type StudioMode = "choose" | "templates" | "blank" | "template" | "ai";
 type PermissionScope = "private" | "workspace" | "members";
@@ -83,6 +87,8 @@ export interface AgentDraft {
   runtimeId: string;
   model: string;
   skillIds: Set<string>;
+  availabilityMode: AgentAvailabilityMode;
+  availabilitySpaceIds: Set<string>;
   permissionScope: PermissionScope;
   memberIds: Set<string>;
   /** Team grants are not editable in this form yet, but duplicates must preserve them. */
@@ -109,6 +115,8 @@ const EMPTY_DRAFT: AgentDraft = {
   runtimeId: "",
   model: "",
   skillIds: new Set(),
+  availabilityMode: "workspace",
+  availabilitySpaceIds: new Set(),
   permissionScope: "private",
   memberIds: new Set(),
   teamIds: new Set(),
@@ -131,6 +139,11 @@ export function AgentCreationStudio() {
   );
   const { data: members = [] } = useQuery(memberListOptions(wsId));
   const { data: workspaceSkills = [] } = useQuery(skillListOptions(wsId));
+  const {
+    data: spaces = [],
+    isLoading: spacesLoading,
+    isError: spacesError,
+  } = useQuery(spaceListOptions(wsId));
   const { data: templates = [], isLoading: templatesLoading } = useQuery(
     agentTemplateListOptions(),
   );
@@ -308,6 +321,7 @@ export function AgentCreationStudio() {
           : usableRuntimes[0]?.id ?? "",
       model: duplicateAgent.model ?? "",
       skillIds: new Set(duplicateAgent.skills.map((skill) => skill.id)),
+      ...deriveDuplicateAvailability(duplicateAgent),
       ...duplicateAccess,
     });
   }, [currentUser?.id, duplicateAgent, runtimes, t, usableRuntimes]);
@@ -375,11 +389,22 @@ export function AgentCreationStudio() {
     draft.permissionScope === "members" &&
     draft.memberIds.size === 0 &&
     draft.teamIds.size === 0;
+  const activeSpaceIds = useMemo(
+    () => new Set(spaces.filter((space) => !space.archived_at).map((space) => space.id)),
+    [spaces],
+  );
+  const availabilityInvalid =
+    draft.availabilityMode === "selected_spaces" &&
+    (draft.availabilitySpaceIds.size === 0 ||
+      [...draft.availabilitySpaceIds].some((id) => !activeSpaceIds.has(id)) ||
+      spacesLoading ||
+      spacesError);
   const canCreate =
     draft.name.trim().length > 0 &&
     selectedRuntime != null &&
     isRuntimeUsableForUser(selectedRuntime, currentUser?.id ?? null) &&
     !accessInvalid &&
+    !availabilityInvalid &&
     !creating;
   const currentModeLabel =
     mode === "choose"
@@ -580,6 +605,11 @@ export function AgentCreationStudio() {
           permission_mode:
             draft.permissionScope === "private" ? "private" : "public_to",
           invocation_targets: invocationTargets,
+          availability_mode: draft.availabilityMode,
+          availability_space_ids:
+            draft.availabilityMode === "selected_spaces"
+              ? [...draft.availabilitySpaceIds]
+              : [],
           extra_skill_ids: [...draft.skillIds],
         });
         agent = response.agent;
@@ -594,6 +624,11 @@ export function AgentCreationStudio() {
           permission_mode:
             draft.permissionScope === "private" ? "private" : "public_to",
           invocation_targets: invocationTargets,
+          availability_mode: draft.availabilityMode,
+          availability_space_ids:
+            draft.availabilityMode === "selected_spaces"
+              ? [...draft.availabilitySpaceIds]
+              : [],
           skill_ids: [...draft.skillIds],
           template: mode === "ai" ? "agent_builder" : undefined,
         };
@@ -719,6 +754,9 @@ export function AgentCreationStudio() {
               runtimes={runtimes}
               runtimesLoading={runtimesLoading}
               members={members}
+              spaces={spaces}
+              spacesLoading={spacesLoading}
+              spacesError={spacesError}
               currentUserId={currentUser?.id ?? null}
               createError={createError}
             />
@@ -785,6 +823,9 @@ export function AgentCreationStudio() {
                 runtimes={runtimes}
                 runtimesLoading={runtimesLoading}
                 members={members}
+                spaces={spaces}
+                spacesLoading={spacesLoading}
+                spacesError={spacesError}
                 currentUserId={currentUser?.id ?? null}
                 createError={createError}
               />
@@ -979,6 +1020,9 @@ function ConfigurationPanel({
   runtimes,
   runtimesLoading,
   members,
+  spaces,
+  spacesLoading,
+  spacesError,
   currentUserId,
   createError,
   compact = false,
@@ -988,6 +1032,9 @@ function ConfigurationPanel({
   runtimes: RuntimeDevice[];
   runtimesLoading: boolean;
   members: MemberWithUser[];
+  spaces: Space[];
+  spacesLoading: boolean;
+  spacesError: boolean;
   currentUserId: string | null;
   createError: string | null;
   compact?: boolean;
@@ -1052,6 +1099,28 @@ function ConfigurationPanel({
               className="resize-y"
             />
           </DraftFieldRow>
+        </SettingsCard>
+      </SettingsSection>
+
+      <SettingsSection
+        title={t(($) => $.create_dialog.availability.label)}
+        description={t(($) => $.create_dialog.availability.work_access_note)}
+      >
+        <SettingsCard>
+          <div className="p-4">
+            <AvailabilitySection
+              mode={draft.availabilityMode}
+              onModeChange={(mode) => set("availabilityMode", mode)}
+              selectedSpaceIds={draft.availabilitySpaceIds}
+              onSelectedSpaceIdsChange={(ids) =>
+                set("availabilitySpaceIds", ids)
+              }
+              spaces={spaces}
+              spacesLoading={spacesLoading}
+              spacesError={spacesError}
+              legacyCustom={false}
+            />
+          </div>
         </SettingsCard>
       </SettingsSection>
 
@@ -1424,6 +1493,34 @@ export function deriveDuplicateAccess(
     permissionScope: "members",
     memberIds: new Set(memberIds),
     teamIds: new Set(teamIds),
+  };
+}
+
+export function deriveDuplicateAvailability(
+  agent: Pick<
+    Agent,
+    | "availability_mode"
+    | "availability_space_ids"
+    | "permission_mode"
+    | "invocation_targets"
+    | "visibility"
+  >,
+): Pick<AgentDraft, "availabilityMode" | "availabilitySpaceIds"> {
+  const hasLegacyPeopleOnlyAudience =
+    agent.permission_mode === "public_to" &&
+    !(agent.invocation_targets ?? []).some(
+      (target) => target.target_type === "workspace",
+    );
+  const mode: AgentAvailabilityMode = hasLegacyPeopleOnlyAudience
+    ? "private"
+    : agent.availability_mode ??
+      (agent.visibility === "private" ? "private" : "workspace");
+  return {
+    availabilityMode: mode,
+    availabilitySpaceIds:
+      mode === "selected_spaces"
+        ? new Set(agent.availability_space_ids ?? [])
+        : new Set(),
   };
 }
 export function parseBuilderDraft(content: string): BuilderDraftPayload | null {

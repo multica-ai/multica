@@ -231,6 +231,13 @@ func (h *Handler) loadProjectForResource(w http.ResponseWriter, r *http.Request,
 		writeError(w, http.StatusNotFound, "project not found")
 		return db.Project{}, false
 	}
+	if r.Method == http.MethodGet || r.Method == http.MethodHead {
+		if !h.requireSpaceView(w, r, wsUUID, project.SpaceID) {
+			return db.Project{}, false
+		}
+	} else if !h.requireSpaceCollaboration(w, r, wsUUID, project.SpaceID) {
+		return db.Project{}, false
+	}
 	return project, true
 }
 

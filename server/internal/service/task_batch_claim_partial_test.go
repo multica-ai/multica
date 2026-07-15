@@ -110,8 +110,8 @@ func TestClaimTasksForRuntimes_PartialSuccessOnCandidateQueryFailureAfterReclaim
 	}
 	var issueID string
 	if err := pool.QueryRow(ctx, `
-		INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type, number, position)
-		VALUES ($1, 'stale dispatched', 'in_progress', 'none', $2, 'member', 900123, 99)
+		INSERT INTO issue (workspace_id, space_id, title, status, priority, creator_id, creator_type, number, position)
+		VALUES ($1, (SELECT id FROM workspace_space WHERE workspace_id = $1 LIMIT 1), 'stale dispatched', 'in_progress', 'none', $2, 'member', 900123, 99)
 		RETURNING id`, workspaceID, ownerID).Scan(&issueID); err != nil {
 		t.Fatalf("create issue: %v", err)
 	}

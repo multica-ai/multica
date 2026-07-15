@@ -97,12 +97,15 @@
   "chat": {
     "floating_title": "悬浮窗",
     "floating_label": "悬浮聊天窗",
-    "floating_hint": "在每个页面右下角显示悬浮聊天按钮。默认关闭——打开后可随处召唤聊天；关闭时，聊天只在此标签页中可用。"
+    "floating_hint": "在每个页面右下角显示悬浮聊天按钮。默认关闭——打开后可随处召唤聊天；关闭时，使用独立的聊天页面。"
   },
   "page": {
     "title": "设置",
     "my_account": "我的账号",
     "workspace_fallback": "工作区",
+    "space": "空间",
+    "loading": "正在加载设置…",
+    "this_device": "此设备",
     "tabs": {
       "profile": "个人资料",
       "preferences": "偏好设置",
@@ -117,7 +120,9 @@
       "labs": "实验室",
       "members": "成员",
       "labels": "标签",
-      "properties": "属性"
+      "properties": "属性",
+      "spaces": "空间",
+      "autopilot_templates": "自动化模板"
     }
   },
   "properties": {
@@ -228,6 +233,54 @@
       "confirm": "删除标签",
       "failed": "无法删除标签"
     }
+  },
+  "autopilot_templates": {
+    "title": "自动化模板",
+    "description": "工作区级的可复用执行手册。Space、项目、执行者、订阅者和 Integration 权限在每个自动化实例中单独选择。",
+    "new": "新建模板",
+    "name": "名称",
+    "runbook": "执行手册",
+    "issue_title_template": "issue 标题模板",
+    "issue_title_template_placeholder": "每周报告 — {{date}}",
+    "execution_mode": "执行模式",
+    "execution_mode_create_issue": "创建 issue",
+    "execution_mode_run_only": "仅运行",
+    "trigger": "触发方式",
+    "trigger_schedule": "定时",
+    "trigger_webhook": "Webhook",
+    "cron": "Cron 表达式",
+    "timezone": "时区",
+    "cancel": "取消",
+    "save": "保存模板",
+    "loading": "正在加载模板…",
+    "empty": "还没有工作区模板。",
+    "no_runbook": "暂无执行手册",
+    "toast_saved": "模板已保存",
+    "toast_save_failed": "保存模板失败",
+    "toast_deleted": "模板已删除",
+    "toast_delete_failed": "删除模板失败",
+    "edit": "编辑 {{name}}",
+    "delete": "删除 {{name}}",
+    "delete_confirm_title": "删除模板？",
+    "delete_confirm_body": "删除 \"{{name}}\" 后，已用它创建的自动化不会受到影响。",
+    "delete_action": "删除模板"
+  },
+  "integration_bindings": {
+    "title": "Space 访问范围",
+    "description": "选择哪些 Space 可以引用每个工作区连接。此操作不会复制凭据，也不会扩大第三方账号本身的权限。",
+    "toast_saved": "Integration 的 Space 访问范围已更新",
+    "toast_failed": "更新 Integration 的 Space 访问范围失败"
+  },
+  "spaces": {
+    "title": "空间",
+    "description": "管理工作区中的空间、默认归属和访问状态。",
+    "joined": "已加入",
+    "not_joined": "未加入",
+    "set_default": "设为默认",
+    "setting_default": "设置中...",
+    "toast_default_updated": "默认空间已更新",
+    "toast_default_failed": "无法更新默认空间",
+    "archived_title_other": "已归档空间（{{count}}）"
   },
   "account": {
     "section_profile": "个人信息",
@@ -341,11 +394,16 @@
     "description_placeholder": "这个工作区主要做什么？",
     "context_label": "上下文",
     "context_placeholder": "供工作区中的智能体参考的背景信息和上下文",
+    "default_space_label": "默认空间",
+    "default_space_hint": "没有明确空间上下文时，用于全局创建和导入。",
     "slug_label": "Slug",
     "issue_prefix_label": "Issue 前缀",
     "issue_prefix_hint": "用于 issue 编号，例如 {{example}}。",
     "prefix_confirm_title": "确认修改 issue 前缀？",
     "prefix_confirm_description": "所有 issue 将从 {{oldPrefix}}-N 重命名为 {{newPrefix}}-N。任何使用旧编号的外部引用——PR 标题、分支名、文档与聊天中的链接——都会失效。",
+    "slug_hint": "工作区的 URL 标识。修改后,指向该工作区的现有链接将失效。",
+    "slug_confirm_title": "更改工作区 URL?",
+    "slug_confirm_description": "URL 将从 /{{oldSlug}} 变为 /{{newSlug}}。使用 /{{oldSlug}} 的现有链接和书签将无法访问。",
     "save": "保存",
     "saving": "保存中...",
     "manage_hint": "只有管理员和所有者可以修改工作区设置。",
@@ -620,6 +678,7 @@
     "invite_title": "邀请成员",
     "invite_email_placeholder": "user@company.com",
     "invite_button": "邀请",
+    "invite_spaces_label": "加入空间",
     "inviting": "邀请中...",
     "toast_invitation_sent": "已发送邀请",
     "toast_invitation_failed": "发送邀请失败",

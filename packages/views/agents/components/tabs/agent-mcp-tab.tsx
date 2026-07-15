@@ -80,7 +80,7 @@ export function AgentMcpTab({ agent }: { agent: Agent }) {
     [agent.composio_toolkit_allowlist],
   );
 
-  const settingsHref = `${paths.settings()}?tab=integrations`;
+  const settingsHref = paths.settingsSection("workspace", "integrations");
 
   // Composio access warning (MUL-3963). Once an agent is shared, anyone who
   // can invoke it can drive the Composio apps enabled here on the owner's

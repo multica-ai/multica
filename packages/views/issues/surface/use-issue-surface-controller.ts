@@ -129,6 +129,7 @@ export function useIssueSurfaceController({
   const assigneeFilters = useViewStore((s) => s.assigneeFilters);
   const includeNoAssignee = useViewStore((s) => s.includeNoAssignee);
   const creatorFilters = useViewStore((s) => s.creatorFilters);
+  const spaceFilter = useViewStore((s) => s.spaceFilter);
   const projectFilters = useViewStore((s) => s.projectFilters);
   const includeNoProject = useViewStore((s) => s.includeNoProject);
   const labelFilters = useViewStore((s) => s.labelFilters);
@@ -205,8 +206,9 @@ export function useIssueSurfaceController({
       ...(Object.keys(effectivePropertyFilters).length > 0
         ? { properties: effectivePropertyFilters }
         : {}),
+      ...(spaceFilter ? { space_id: spaceFilter } : {}),
     };
-  }, [dateParams, effectivePropertyFilters, propertySortId, rawPropertySortId, sortBy, sortDirection]);
+  }, [dateParams, effectivePropertyFilters, propertySortId, rawPropertySortId, sortBy, sortDirection, spaceFilter]);
 
   const selection = useCreateIssueSurfaceSelection(
     scopeKey,
@@ -239,6 +241,7 @@ export function useIssueSurfaceController({
     assigneeFilters,
     includeNoAssignee,
     creatorFilters,
+    spaceFilter,
     projectFilters: viewProjectFilters,
     includeNoProject: viewIncludeNoProject,
     labelFilters,

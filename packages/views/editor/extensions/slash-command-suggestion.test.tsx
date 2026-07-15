@@ -244,6 +244,24 @@ describe("slash command suggestion items", () => {
 
     expect(items(qc)).toEqual([]);
   });
+
+  it("excludes Selected-Spaces Agents from context-free Chat commands", () => {
+    chatState.selectedAgentId = "selected-agent";
+    const qc = fakeQc({
+      members: [{ user_id: "u1", name: "Alice", role: "member" }],
+      agents: [
+        agent({
+          id: "selected-agent",
+          owner_id: "u1",
+          availability_mode: "selected_spaces",
+          availability_space_ids: ["space-eng"],
+          skills: [{ id: "s1", name: "deploy", description: "" }],
+        }),
+      ],
+    });
+
+    expect(items(qc)).toEqual([]);
+  });
 });
 
 describe("SlashCommandList keyboard handling", () => {

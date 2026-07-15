@@ -1,7 +1,7 @@
 {
   "page": {
     "title": "Skills",
-    "tagline": "工作区里任何智能体都能使用的指令。",
+    "tagline": "可复用的指令，可设为私有、分享给指定空间或整个工作区。",
     "learn_more": "了解更多 →",
     "new_skill": "新建 skill",
     "search_placeholder": "搜索 skill...",
@@ -25,7 +25,7 @@
     },
     "empty": {
       "title": "还没有 skill",
-      "description": "创建第一个 skill、从 URL 导入、或从已连接的运行时复制——之后工作区里每个智能体都能用它。"
+      "description": "创建第一个 Skill、从 URL 导入或从已连接的运行时复制。新 Skill 默认为私有。"
     },
     "no_matches": {
       "title": "无匹配",
@@ -35,9 +35,9 @@
       "try_different": " 换个关键词试试。"
     },
     "intro_banner": {
-      "title": "在工作区内共享。",
-      "body": "任何成员都可以创建 skill、从 URL 导入、或从本地运行时复制——之后所有智能体都能用它。",
-      "highlight": "本地运行时里的 skill 在你复制过来之前是私有的。"
+      "title": "归属工作区，显式分享。",
+      "body": "Skill 在工作区中保留唯一来源，并单独配置分享范围。",
+      "highlight": "分享不会授予空间数据或集成访问权限。"
     },
     "list_error": {
       "title": "无法加载 skill",
@@ -54,6 +54,9 @@
     "updated": "更新时间",
     "created": "创建时间",
     "lock_tooltip": "只读——只有创建者或管理员能编辑",
+    "scope_private": "私有",
+    "scope_spaces": "分享给 {{count}} 个空间",
+    "scope_workspace": "分享给整个工作区",
     "unused": "— 未使用",
     "by_creator": "由 {{name}} 创建",
     "source_manual": "手动创建",
@@ -226,6 +229,7 @@
       "name_hint": "工作区内必须唯一。",
       "description_label": "描述",
       "description_placeholder": "用一句话说什么时候应该把这个 skill 分配给智能体。",
+      "sharing_hint": "新 Skill 默认为私有。创建后可在详情页分享给指定空间或整个工作区。",
       "name_conflict_hint": "请换一个名字再提交。",
       "fallback_error": "创建 skill 失败",
       "cancel": "取消",
@@ -246,6 +250,27 @@
       "cancel": "取消",
       "toast_imported": "已导入 skill"
     }
+  },
+  "availability": {
+    "heading": "可用范围",
+    "tooltip": "更改 Skill 分享范围",
+    "private_title": "私有",
+    "private_description": "只有创建者和工作区管理员可以发现或使用此 Skill。",
+    "spaces_title": "指定空间",
+    "spaces_description": "只有指定空间中的成员和 Agent 可以使用。",
+    "spaces_count": "{{count}} 个空间",
+    "workspace_title": "整个工作区",
+    "workspace_description": "可在整个工作区中使用。",
+    "spaces_empty": "没有可用的空间",
+    "archived": "已归档",
+    "unavailable": "不可用的空间",
+    "select_required": "请至少选择一个空间。",
+    "remove_unavailable": "应用前请移除已归档或不可用的空间。",
+    "access_note": "分享 Skill 不会授予空间数据、集成、密钥或资源的访问权限。",
+    "cancel": "取消",
+    "apply": "应用",
+    "toast_updated": "Skill 分享范围已更新",
+    "toast_failed": "更新 Skill 分享范围失败"
   },
   "runtime_import": {
     "runtime_label": "运行时",

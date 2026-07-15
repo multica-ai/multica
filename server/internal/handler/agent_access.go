@@ -45,12 +45,20 @@ import (
 // public_to agents, a workspace target still admits workspace-internal
 // agent/system principals, but member/team targets fail closed without a
 // matching human.
-func (h *Handler) canInvokeAgent(ctx context.Context, agent db.Agent, actorType, actorID, originatorUserID, workspaceID string) bool {
+func (h *Handler) canInvokeAgent(ctx context.Context, agent db.Agent, actorType, actorID, originatorUserID, workspaceID string, targetSpaceID pgtype.UUID) bool {
 	effectiveUser := actorID
 	if actorType != "member" {
 		// agent / system: never trust the immediate principal, only the
 		// resolved human originator at the top of the chain.
 		effectiveUser = originatorUserID
+	}
+
+	// Availability is an independent location gate. It runs before the
+	// invocation-audience rules below, so even the agent owner cannot use a
+	// Selected Spaces agent outside the selected set. Private remains the one
+	// owner-only mode; Chat resolves its one/All context before this gate.
+	if !h.agentLocationAllowsInvocation(ctx, agent, effectiveUser, targetSpaceID) {
+		return false
 	}
 
 	// The agent owner may always invoke their own agent.
@@ -134,6 +142,21 @@ func (h *Handler) canAccessPrivateAgent(ctx context.Context, agent db.Agent, act
 	if agent.PermissionMode != "public_to" {
 		return false
 	}
+	if agent.AvailabilityMode == agentAvailabilityPrivate {
+		return false
+	}
+	if agent.AvailabilityMode == agentAvailabilitySelectedSpaces {
+		rows, err := h.Queries.ListAgentAvailableSpaces(ctx, agent.ID)
+		if err != nil {
+			return false
+		}
+		visible, ok := h.loadActiveVisibleSpaceIDSet(ctx, agent.WorkspaceID, parseUUID(actorID))
+		if !ok || !availabilityIntersectsVisibleSpaces(rows, visible) {
+			return false
+		}
+	} else if agent.AvailabilityMode != agentAvailabilityWorkspace {
+		return false
+	}
 	targets, err := h.Queries.ListAgentInvocationTargets(ctx, agent.ID)
 	if err != nil {
 		return false
@@ -164,12 +187,29 @@ func memberHitsInvocationTargets(targets []db.AgentInvocationTarget, userID stri
 // list endpoint avoids an N+1. Workspace owner/admin and the agent owner see
 // everything; a regular member sees a public_to agent only when on its
 // allow-list, and never sees other members' private agents.
-func memberAllowedToViewAgent(agent db.Agent, targets []db.AgentInvocationTarget, userID, role string) bool {
+func memberAllowedToViewAgent(
+	agent db.Agent,
+	targets []db.AgentInvocationTarget,
+	availabilitySpaces []db.AgentAvailableSpace,
+	visibleSpaceIDs map[string]struct{},
+	userID, role string,
+) bool {
 	if roleAllowed(role, "owner", "admin") {
 		return true
 	}
 	if uuidToString(agent.OwnerID) == userID {
 		return true
+	}
+	if agent.AvailabilityMode == agentAvailabilityPrivate {
+		return false
+	}
+	if agent.AvailabilityMode == agentAvailabilitySelectedSpaces &&
+		!availabilityIntersectsVisibleSpaces(availabilitySpaces, visibleSpaceIDs) {
+		return false
+	}
+	if agent.AvailabilityMode != agentAvailabilitySelectedSpaces &&
+		agent.AvailabilityMode != agentAvailabilityWorkspace {
+		return false
 	}
 	if agent.PermissionMode != "public_to" {
 		return false
@@ -217,10 +257,29 @@ func (h *Handler) accessibleAgentIDs(ctx context.Context, workspaceID, actorType
 	if !ok {
 		return nil, false
 	}
+	availabilityByAgent, ok := h.loadAvailabilitySpacesByAgent(ctx, agents)
+	if !ok {
+		return nil, false
+	}
+	visibleSpaceIDs := map[string]struct{}{}
+	if actorType == "member" {
+		var loaded bool
+		visibleSpaceIDs, loaded = h.loadActiveVisibleSpaceIDSet(ctx, wsUUID, parseUUID(actorID))
+		if !loaded {
+			return nil, false
+		}
+	}
 	allowed := make(map[string]struct{}, len(agents))
 	for _, a := range agents {
 		if actorType == "member" {
-			if !memberAllowedToViewAgent(a, targetsByAgent[uuidToString(a.ID)], actorID, role) {
+			if !memberAllowedToViewAgent(
+				a,
+				targetsByAgent[uuidToString(a.ID)],
+				availabilityByAgent[uuidToString(a.ID)],
+				visibleSpaceIDs,
+				actorID,
+				role,
+			) {
 				continue
 			}
 		}
@@ -258,10 +317,10 @@ func (h *Handler) loadInvocationTargetsByAgent(ctx context.Context, agents []db.
 // exactly like a direct assignment/mention. Non-public leaders require owner /
 // allow-list; system-initiated triggers (e.g. github webhooks) are judged as
 // system principals (workspace target only).
-func (h *Handler) canEnqueueSquadLeader(ctx context.Context, leaderID pgtype.UUID, actorType, actorID, originatorUserID, workspaceID string) bool {
+func (h *Handler) canEnqueueSquadLeader(ctx context.Context, leaderID pgtype.UUID, actorType, actorID, originatorUserID, workspaceID string, targetSpaceID pgtype.UUID) bool {
 	agent, err := h.Queries.GetAgent(ctx, leaderID)
 	if err != nil {
 		return false
 	}
-	return h.canInvokeAgent(ctx, agent, actorType, actorID, originatorUserID, workspaceID)
+	return h.canInvokeAgent(ctx, agent, actorType, actorID, originatorUserID, workspaceID, targetSpaceID)
 }

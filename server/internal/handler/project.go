@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/logger"
+	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -22,6 +23,7 @@ import (
 type ProjectResponse struct {
 	ID          string  `json:"id"`
 	WorkspaceID string  `json:"workspace_id"`
+	SpaceID     string  `json:"space_id"`
 	Title       string  `json:"title"`
 	Description *string `json:"description"`
 	Icon        *string `json:"icon"`
@@ -48,6 +50,7 @@ func projectToResponse(p db.Project) ProjectResponse {
 	return ProjectResponse{
 		ID:          uuidToString(p.ID),
 		WorkspaceID: uuidToString(p.WorkspaceID),
+		SpaceID:     uuidToString(p.SpaceID),
 		Title:       p.Title,
 		Description: textToPtr(p.Description),
 		Icon:        textToPtr(p.Icon),
@@ -78,6 +81,27 @@ func (h *Handler) loadProjectResourceCount(ctx context.Context, projectID pgtype
 	return rows[0].ResourceCount
 }
 
+func (h *Handler) resolveProjectSpaceID(ctx context.Context, workspaceID pgtype.UUID, raw string) (pgtype.UUID, bool, string) {
+	if strings.TrimSpace(raw) == "" {
+		space, err := h.Queries.GetDefaultWorkspaceSpace(ctx, workspaceID)
+		if err != nil || !space.ID.Valid {
+			return pgtype.UUID{}, false, spaceNotFoundMessage
+		}
+		if space.ArchivedAt.Valid {
+			return pgtype.UUID{}, false, spaceArchivedMessage
+		}
+		return space.ID, true, ""
+	}
+	id, err := parseStrictUUID(strings.TrimSpace(raw))
+	if err != nil {
+		return pgtype.UUID{}, false, "invalid space_id"
+	}
+	if _, err := service.ValidateActiveSpace(ctx, h.Queries, workspaceID, id); err != nil {
+		return pgtype.UUID{}, false, spaceResolveMessage(err)
+	}
+	return id, true, ""
+}
+
 type CreateProjectRequest struct {
 	Title       string                                `json:"title"`
 	Description *string                               `json:"description"`
@@ -89,6 +113,7 @@ type CreateProjectRequest struct {
 	StartDate   *string                               `json:"start_date"`
 	DueDate     *string                               `json:"due_date"`
 	Resources   []CreateProjectResourceRequestPayload `json:"resources,omitempty"`
+	SpaceID     string                                `json:"space_id,omitempty"`
 }
 
 // CreateProjectResourceRequestPayload mirrors CreateProjectResourceRequest but
@@ -111,6 +136,7 @@ type UpdateProjectRequest struct {
 	LeadID      *string `json:"lead_id"`
 	StartDate   *string `json:"start_date"`
 	DueDate     *string `json:"due_date"`
+	SpaceID     *string `json:"space_id"`
 }
 
 func (h *Handler) ListProjects(w http.ResponseWriter, r *http.Request) {
@@ -127,17 +153,33 @@ func (h *Handler) ListProjects(w http.ResponseWriter, r *http.Request) {
 	if p := r.URL.Query().Get("priority"); p != "" {
 		priorityFilter = pgtype.Text{String: p, Valid: true}
 	}
+	var spaceFilter pgtype.UUID
+	if t := r.URL.Query().Get("space_id"); t != "" {
+		id, ok := parseUUIDOrBadRequest(w, t, "space_id")
+		if !ok {
+			return
+		}
+		spaceFilter = id
+	}
+	spaceFilter, ok = h.taskTokenSpaceFilter(w, r, wsUUID, spaceFilter)
+	if !ok {
+		return
+	}
 	projects, err := h.Queries.ListProjects(r.Context(), db.ListProjectsParams{
-		WorkspaceID: wsUUID,
-		Status:      statusFilter,
-		Priority:    priorityFilter,
+		WorkspaceID:  wsUUID,
+		ViewerUserID: parseUUID(requestUserID(r)),
+		SpaceID:      spaceFilter,
+		Status:       statusFilter,
+		Priority:     priorityFilter,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list projects")
 		return
 	}
 
-	// Batch-fetch issue stats and resource counts for all projects
+	// Batch-fetch issue stats and resource counts for all projects in one query
+	// each — same shape as loadProjectIssueStats batching — so the
+	// list endpoint never N+1s per project row.
 	statsMap := make(map[string]db.GetProjectIssueStatsRow)
 	resourceCountMap := make(map[string]int64)
 	if len(projects) > 0 {
@@ -187,6 +229,9 @@ func (h *Handler) GetProject(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		writeError(w, http.StatusNotFound, "project not found")
+		return
+	}
+	if !h.requireSpaceView(w, r, wsUUID, project.SpaceID) {
 		return
 	}
 	resp := projectToResponse(project)
@@ -275,6 +320,14 @@ func (h *Handler) CreateProject(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	spaceID, ok, msg := h.resolveProjectSpaceID(r.Context(), wsUUID, req.SpaceID)
+	if !ok {
+		writeError(w, http.StatusBadRequest, msg)
+		return
+	}
+	if !h.requireSpaceCollaboration(w, r, wsUUID, spaceID) {
+		return
+	}
 
 	// start_date / due_date are optional calendar days; an absent or empty
 	// value leaves the column NULL. Mirrors CreateIssue's date handling.
@@ -335,6 +388,7 @@ func (h *Handler) CreateProject(w http.ResponseWriter, r *http.Request) {
 
 	createParams := db.CreateProjectParams{
 		WorkspaceID: wsUUID,
+		SpaceID:     spaceID,
 		Title:       req.Title,
 		Description: ptrToText(req.Description),
 		Icon:        ptrToText(req.Icon),
@@ -344,19 +398,6 @@ func (h *Handler) CreateProject(w http.ResponseWriter, r *http.Request) {
 		Priority:    priority,
 		StartDate:   startDate,
 		DueDate:     dueDate,
-	}
-
-	// Without resources, keep the simple non-tx path.
-	if len(req.Resources) == 0 {
-		project, err := h.Queries.CreateProject(r.Context(), createParams)
-		if err != nil {
-			h.writeProjectWriteError(w, r, err, "create")
-			return
-		}
-		resp := projectToResponse(project)
-		h.publish(protocol.EventProjectCreated, workspaceID, "member", userID, map[string]any{"project": resp})
-		writeJSON(w, http.StatusCreated, resp)
-		return
 	}
 
 	// Transactional path: project + all resources are atomic.
@@ -373,7 +414,6 @@ func (h *Handler) CreateProject(w http.ResponseWriter, r *http.Request) {
 		h.writeProjectWriteError(w, r, err, "create")
 		return
 	}
-
 	creator, _ := h.parseUserUUIDOrZero(userID)
 	resourceRows := make([]db.ProjectResource, 0, len(req.Resources))
 	for i, res := range req.Resources {
@@ -450,6 +490,9 @@ func (h *Handler) UpdateProject(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		writeError(w, http.StatusNotFound, "project not found")
+		return
+	}
+	if !h.requireSpaceCollaboration(w, r, wsUUID, prevProject.SpaceID) {
 		return
 	}
 	userID, ok := requireUserID(w, r)
@@ -551,6 +594,15 @@ func (h *Handler) UpdateProject(w http.ResponseWriter, r *http.Request) {
 			params.DueDate = pgtype.Date{Valid: false} // explicit null = clear date
 		}
 	}
+	if _, legacy := rawFields["space_ids"]; legacy {
+		writeError(w, http.StatusBadRequest, "space_ids is no longer supported; a Project belongs to one Space")
+		return
+	}
+	if _, touched := rawFields["space_id"]; touched {
+		writeError(w, http.StatusConflict, "Project Space cannot be changed")
+		return
+	}
+
 	project, err := h.Queries.UpdateProject(r.Context(), params)
 	if err != nil {
 		h.writeProjectWriteError(w, r, err, "update")
@@ -581,6 +633,9 @@ func (h *Handler) DeleteProject(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "project not found")
 		return
 	}
+	if !h.requireSpaceCollaboration(w, r, wsUUID, project.SpaceID) {
+		return
+	}
 	requester, ok := h.requireWorkspaceRole(w, r, uuidToString(project.WorkspaceID), "project not found", "owner", "admin")
 	if !ok {
 		return
@@ -593,7 +648,10 @@ func (h *Handler) DeleteProject(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to delete project")
 		return
 	}
-	h.publish(protocol.EventProjectDeleted, workspaceID, "member", userID, map[string]any{"project_id": uuidToString(project.ID)})
+	h.publish(protocol.EventProjectDeleted, workspaceID, "member", userID, map[string]any{
+		"project_id": uuidToString(project.ID),
+		"space_id":   uuidToString(project.SpaceID),
+	})
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -606,6 +664,10 @@ type SearchProjectResponse struct {
 
 // buildProjectSearchQuery builds a dynamic SQL query for project search.
 func buildProjectSearchQuery(phrase string, terms []string, includeClosed bool) (string, []any) {
+	return buildProjectSearchQueryForSpace(phrase, terms, includeClosed, pgtype.UUID{})
+}
+
+func buildProjectSearchQueryForSpace(phrase string, terms []string, includeClosed bool, spaceID pgtype.UUID) (string, []any) {
 	phrase = strings.ToLower(phrase)
 	for i, t := range terms {
 		terms[i] = strings.ToLower(t)
@@ -663,6 +725,9 @@ func buildProjectSearchQuery(phrase string, terms []string, includeClosed bool) 
 	if !includeClosed {
 		whereClause += " AND p.status NOT IN ('completed', 'cancelled')"
 	}
+	if spaceID.Valid {
+		whereClause += fmt.Sprintf(" AND p.space_id = %s::uuid", nextArg(spaceID))
+	}
 
 	// --- ORDER BY ranking ---
 	var rankCases []string
@@ -710,21 +775,28 @@ func buildProjectSearchQuery(phrase string, terms []string, includeClosed bool) 
 		)
 	}
 
+	viewerParam := nextArg(nil)
+	accessClause := fmt.Sprintf(`(
+		EXISTS (SELECT 1 FROM workspace_space wt WHERE wt.id = p.space_id AND wt.visibility = 'open')
+		OR EXISTS (SELECT 1 FROM workspace_space_member sm WHERE sm.space_id = p.space_id AND sm.user_id = %s::uuid)
+		OR EXISTS (SELECT 1 FROM member wm WHERE wm.workspace_id = p.workspace_id AND wm.user_id = %s::uuid AND wm.role IN ('owner', 'admin'))
+	)`, viewerParam, viewerParam)
 	limitParam := nextArg(nil)
 	offsetParam := nextArg(nil)
 
-	query := fmt.Sprintf(`SELECT p.id, p.workspace_id, p.title, p.description, p.icon,
+	query := fmt.Sprintf(`SELECT p.id, p.workspace_id, p.space_id, p.title, p.description, p.icon,
 		p.status, p.priority, p.lead_type, p.lead_id,
 		p.start_date, p.due_date,
 		p.created_at, p.updated_at,
 		COUNT(*) OVER() AS total_count,
 		%s AS match_source
 	FROM project p
-	WHERE p.workspace_id = %s AND %s
+	WHERE p.workspace_id = %s AND %s AND %s
 	ORDER BY %s, p.updated_at DESC
 	LIMIT %s OFFSET %s`,
 		matchSourceExpr,
 		wsParam,
+		accessClause,
 		whereClause,
 		rankExpr,
 		limitParam,
@@ -768,8 +840,13 @@ func (h *Handler) SearchProjects(w http.ResponseWriter, r *http.Request) {
 	}
 	terms := splitSearchTerms(q)
 
-	sqlQuery, args := buildProjectSearchQuery(q, terms, includeClosed)
+	spaceFilter, ok := h.taskTokenSpaceFilter(w, r, wsUUID, pgtype.UUID{})
+	if !ok {
+		return
+	}
+	sqlQuery, args := buildProjectSearchQueryForSpace(q, terms, includeClosed, spaceFilter)
 	args[1] = wsUUID
+	args[len(args)-3] = parseUUID(requestUserID(r))
 	args[len(args)-2] = limit
 	args[len(args)-1] = offset
 
@@ -786,6 +863,7 @@ func (h *Handler) SearchProjects(w http.ResponseWriter, r *http.Request) {
 			if err := rows.Scan(
 				&row.project.ID,
 				&row.project.WorkspaceID,
+				&row.project.SpaceID,
 				&row.project.Title,
 				&row.project.Description,
 				&row.project.Icon,
@@ -827,7 +905,7 @@ func (h *Handler) SearchProjects(w http.ResponseWriter, r *http.Request) {
 		total = results[0].totalCount
 	}
 
-	// Batch-fetch issue stats and resource counts
+	// Batch-fetch issue stats and resource counts for the search results.
 	statsMap := make(map[string]db.GetProjectIssueStatsRow)
 	resourceCountMap := make(map[string]int64)
 	if len(results) > 0 {

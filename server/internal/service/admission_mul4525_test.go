@@ -32,6 +32,7 @@ func TestRerunIssueBlockedBeforeMutationWhenInvokeDenied(t *testing.T) {
 		CreatorType:  "member",
 		CreatorID:    util.MustParseUUID(creatorID),
 		WorkspaceID:  util.MustParseUUID(workspaceID),
+		SpaceID:      serviceTestSpaceUUID(t, pool, workspaceID),
 		AssigneeType: pgtype.Text{String: "agent", Valid: true},
 	}
 	svc := &TaskService{Queries: q, TxStarter: pool, Bus: events.New()}
@@ -118,6 +119,7 @@ func TestAutopilotDispatchAdmitsClickerNotCreator(t *testing.T) {
 
 	ap := db.Autopilot{
 		WorkspaceID:   util.MustParseUUID(workspaceID),
+		SpaceID:       serviceTestSpaceUUID(t, pool, workspaceID),
 		AssigneeID:    util.MustParseUUID(agentID),
 		AssigneeType:  "agent",
 		ExecutionMode: "run_only",

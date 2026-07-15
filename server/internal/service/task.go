@@ -17,6 +17,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/attribution"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/featureflags"
+	"github.com/multica-ai/multica/server/internal/issueidentifier"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/realtime"
 	"github.com/multica-ai/multica/server/internal/runtimeapps"
@@ -964,6 +965,13 @@ func (s *TaskService) enqueueIssueTaskWithCommentPlan(ctx context.Context, issue
 		slog.Error("task enqueue failed", "issue_id", util.UUIDToString(issue.ID), "error", "agent has no runtime")
 		return db.AgentTaskQueue{}, fmt.Errorf("agent has no runtime")
 	}
+	if !AgentAvailableInSpace(ctx, s.Queries, agent, issue.WorkspaceID, issue.SpaceID) {
+		slog.Debug("task enqueue skipped: agent is not available in issue Space",
+			"issue_id", util.UUIDToString(issue.ID),
+			"agent_id", util.UUIDToString(agent.ID),
+			"space_id", util.UUIDToString(issue.SpaceID))
+		return db.AgentTaskQueue{}, fmt.Errorf("agent is not available in issue Space")
+	}
 
 	// The issue assignee reacting to an agent-authored comment is a
 	// comment_source attribution (a special case of delegation); a member
@@ -1069,6 +1077,17 @@ func (s *TaskService) enqueueMentionTask(ctx context.Context, issue db.Issue, ag
 }
 
 func (s *TaskService) enqueueMentionTaskWithCommentPlan(ctx context.Context, issue db.Issue, agentID pgtype.UUID, triggerCommentID pgtype.UUID, coalescedCommentIDs []pgtype.UUID, isLeader bool, squadID pgtype.UUID, forceFreshSession bool, handoffNote string, actorUserID pgtype.UUID, rerunOfTaskID pgtype.UUID) (db.AgentTaskQueue, error) {
+	if isLeader {
+		if !squadID.Valid {
+			return db.AgentTaskQueue{}, fmt.Errorf("squad leader task requires squad")
+		}
+		squad, err := s.Queries.GetSquadInWorkspace(ctx, db.GetSquadInWorkspaceParams{
+			ID: squadID, WorkspaceID: issue.WorkspaceID,
+		})
+		if err != nil || squad.SpaceID != issue.SpaceID || squad.LeaderID != agentID || squad.ArchivedAt.Valid {
+			return db.AgentTaskQueue{}, fmt.Errorf("squad is not available for issue Space")
+		}
+	}
 	agent, err := s.Queries.GetAgent(ctx, agentID)
 	if err != nil {
 		slog.Error("mention task enqueue failed: agent not found", "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agentID), "error", err)
@@ -1081,6 +1100,13 @@ func (s *TaskService) enqueueMentionTaskWithCommentPlan(ctx context.Context, iss
 	if !agent.RuntimeID.Valid {
 		slog.Error("mention task enqueue failed: agent has no runtime", "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agentID))
 		return db.AgentTaskQueue{}, fmt.Errorf("agent has no runtime")
+	}
+	if !AgentAvailableInSpace(ctx, s.Queries, agent, issue.WorkspaceID, issue.SpaceID) {
+		slog.Debug("mention task enqueue skipped: agent is not available in issue Space",
+			"issue_id", util.UUIDToString(issue.ID),
+			"agent_id", util.UUIDToString(agentID),
+			"space_id", util.UUIDToString(issue.SpaceID))
+		return db.AgentTaskQueue{}, fmt.Errorf("agent is not available in issue Space")
 	}
 
 	// An explicit mention / thread-parent / squad-leader hop from an
@@ -1224,6 +1250,9 @@ type QuickCreateContext struct {
 	RequesterID   string   `json:"requester_id"`
 	WorkspaceID   string   `json:"workspace_id"`
 	ProjectID     string   `json:"project_id,omitempty"`
+	SpaceID       string   `json:"space_id,omitempty"`
+	SpaceKey      string   `json:"space_key,omitempty"`
+	SpaceName     string   `json:"space_name,omitempty"`
 	SquadID       string   `json:"squad_id,omitempty"`
 	AttachmentIDs []string `json:"attachment_ids,omitempty"`
 	// ParentIssueID is the optional UUID of the parent issue the new issue
@@ -1257,7 +1286,15 @@ const QuickCreateContextType = "quick_create"
 // parentIssueID is optional (zero-valued pgtype.UUID when the user didn't
 // open the modal from "Add sub issue"). The handler is responsible for
 // validating it belongs to the same workspace before passing it in.
-func (s *TaskService) EnqueueQuickCreateTask(ctx context.Context, workspaceID, requesterID pgtype.UUID, agentID, squadID pgtype.UUID, prompt string, projectID, parentIssueID pgtype.UUID, attachmentIDs []pgtype.UUID) (db.AgentTaskQueue, error) {
+func (s *TaskService) EnqueueQuickCreateTask(ctx context.Context, workspaceID, requesterID pgtype.UUID, agentID, squadID pgtype.UUID, prompt string, projectID, parentIssueID, spaceID pgtype.UUID, attachmentIDs []pgtype.UUID) (db.AgentTaskQueue, error) {
+	if squadID.Valid {
+		squad, err := s.Queries.GetSquadInWorkspace(ctx, db.GetSquadInWorkspaceParams{
+			ID: squadID, WorkspaceID: workspaceID,
+		})
+		if err != nil || squad.SpaceID != spaceID || squad.LeaderID != agentID || squad.ArchivedAt.Valid {
+			return db.AgentTaskQueue{}, fmt.Errorf("squad is not available for target Space")
+		}
+	}
 	agent, err := s.Queries.GetAgent(ctx, agentID)
 	if err != nil {
 		return db.AgentTaskQueue{}, fmt.Errorf("load agent: %w", err)
@@ -1268,6 +1305,30 @@ func (s *TaskService) EnqueueQuickCreateTask(ctx context.Context, workspaceID, r
 	if !agent.RuntimeID.Valid {
 		return db.AgentTaskQueue{}, fmt.Errorf("agent has no runtime")
 	}
+	if workspaceID != agent.WorkspaceID {
+		return db.AgentTaskQueue{}, fmt.Errorf("agent does not belong to this workspace")
+	}
+	if !MemberCanInvokeAgent(ctx, s.Queries, agent, workspaceID, requesterID) {
+		return db.AgentTaskQueue{}, fmt.Errorf("requester cannot invoke agent")
+	}
+	if spaceID.Valid {
+		if !AgentAvailableInSpace(ctx, s.Queries, agent, workspaceID, spaceID) {
+			return db.AgentTaskQueue{}, fmt.Errorf("agent is not available in target Space")
+		}
+	} else {
+		// A context-free quick-create entry point (for example an external
+		// channel command) must not silently treat Selected Spaces as the
+		// default Space. Private remains owner-only; Workspace is the only
+		// shared mode that is meaningful without a concrete target.
+		switch agent.AvailabilityMode {
+		case "private":
+		case "workspace":
+		case "selected_spaces":
+			return db.AgentTaskQueue{}, fmt.Errorf("selected-Spaces agent requires a target Space")
+		default:
+			return db.AgentTaskQueue{}, fmt.Errorf("agent has an unknown Availability mode")
+		}
+	}
 
 	payload := QuickCreateContext{
 		Type:        QuickCreateContextType,
@@ -1277,6 +1338,16 @@ func (s *TaskService) EnqueueQuickCreateTask(ctx context.Context, workspaceID, r
 	}
 	if projectID.Valid {
 		payload.ProjectID = util.UUIDToString(projectID)
+	}
+	if spaceID.Valid {
+		payload.SpaceID = util.UUIDToString(spaceID)
+		if space, err := s.Queries.GetWorkspaceSpace(ctx, db.GetWorkspaceSpaceParams{
+			ID:          spaceID,
+			WorkspaceID: workspaceID,
+		}); err == nil {
+			payload.SpaceKey = space.Key
+			payload.SpaceName = space.Name
+		}
 	}
 	if squadID.Valid {
 		payload.SquadID = util.UUIDToString(squadID)
@@ -1366,6 +1437,63 @@ var ErrChatTaskAgentArchived = errors.New("chat task: agent archived")
 // path returns a task row, not this error.
 var ErrChatTaskAgentNoRuntime = errors.New("chat task: agent has no runtime")
 
+// ErrChatTaskAgentUnavailable signals that the member, Agent Availability,
+// and requested Chat context have no valid invocation/data-access overlap.
+var ErrChatTaskAgentUnavailable = errors.New("chat task: agent is unavailable in the selected Space context")
+
+// TaskSpaceScope is the effective Space authorization for one run. All is
+// true only for an All-spaces Chat; every other Space-backed task remains
+// bound to exactly one ID. IDs is always the concrete, current allow-list.
+type TaskSpaceScope struct {
+	All bool
+	IDs []pgtype.UUID
+}
+
+// ChatSessionSpaceScope resolves a Chat's user-visible context into concrete
+// Spaces. A NULL chat_session.space_id means All spaces, never context-free:
+// take the intersection of the initiating member's collaborative Spaces and
+// the Agent's current Availability. Recomputing this at send/claim time makes
+// member removal, Space archive, and Agent removal revoke future runs.
+func (s *TaskService) ChatSessionSpaceScope(
+	ctx context.Context,
+	session db.ChatSession,
+	agent db.Agent,
+	initiatorUserID pgtype.UUID,
+) (TaskSpaceScope, error) {
+	if session.WorkspaceID != agent.WorkspaceID || !initiatorUserID.Valid {
+		return TaskSpaceScope{}, ErrChatTaskAgentUnavailable
+	}
+	if session.SpaceID.Valid {
+		allowed, err := s.Queries.CanCollaborateInWorkspaceSpace(ctx, db.CanCollaborateInWorkspaceSpaceParams{
+			WorkspaceID: session.WorkspaceID,
+			ID:          session.SpaceID,
+			UserID:      initiatorUserID,
+		})
+		if err != nil || !allowed || !AgentAvailableInSpace(ctx, s.Queries, agent, session.WorkspaceID, session.SpaceID) {
+			return TaskSpaceScope{}, ErrChatTaskAgentUnavailable
+		}
+		return TaskSpaceScope{IDs: []pgtype.UUID{session.SpaceID}}, nil
+	}
+
+	spaces, err := s.Queries.ListCollaborativeWorkspaceSpacesForUser(ctx, db.ListCollaborativeWorkspaceSpacesForUserParams{
+		WorkspaceID: session.WorkspaceID,
+		UserID:      initiatorUserID,
+	})
+	if err != nil {
+		return TaskSpaceScope{}, fmt.Errorf("list collaborative chat Spaces: %w", err)
+	}
+	ids := make([]pgtype.UUID, 0, len(spaces))
+	for _, space := range spaces {
+		if AgentAvailableInSpace(ctx, s.Queries, agent, session.WorkspaceID, space.ID) {
+			ids = append(ids, space.ID)
+		}
+	}
+	if len(ids) == 0 {
+		return TaskSpaceScope{}, ErrChatTaskAgentUnavailable
+	}
+	return TaskSpaceScope{All: true, IDs: ids}, nil
+}
+
 // EnqueueChatTask creates a queued task for a chat session.
 // Unlike issue tasks, chat tasks have no issue_id.
 //
@@ -1401,6 +1529,15 @@ func (s *TaskService) EnqueueChatTask(ctx context.Context, chatSession db.ChatSe
 	}
 	if !agent.RuntimeID.Valid {
 		return db.AgentTaskQueue{}, ErrChatTaskAgentNoRuntime
+	}
+	if chatSession.WorkspaceID != agent.WorkspaceID {
+		return db.AgentTaskQueue{}, ErrChatTaskAgentUnavailable
+	}
+	if !MemberCanInvokeAgent(ctx, s.Queries, agent, chatSession.WorkspaceID, initiatorUserID) {
+		return db.AgentTaskQueue{}, ErrChatTaskAgentUnavailable
+	}
+	if _, err := s.ChatSessionSpaceScope(ctx, chatSession, agent, initiatorUserID); err != nil {
+		return db.AgentTaskQueue{}, ErrChatTaskAgentUnavailable
 	}
 
 	// The chat sender (initiator) is the direct_human originator and accountable.
@@ -2403,18 +2540,61 @@ func (s *TaskService) ClaimTasksForRuntimes(ctx context.Context, runtimeIDs []pg
 }
 
 func (s *TaskService) PromoteDueDeferredTasksForRuntime(ctx context.Context, runtimeID pgtype.UUID) error {
-	tasks, err := s.Queries.PromoteDueDeferredTasksForRuntime(ctx, runtimeID)
+	tasks, err := s.Queries.ListDueDeferredTasksForRuntime(ctx, runtimeID)
 	if err != nil {
-		return fmt.Errorf("promote due deferred tasks: %w", err)
+		return fmt.Errorf("list due deferred tasks: %w", err)
 	}
 	for _, task := range tasks {
+		originatorUserID := task.OriginatorUserID
+		if !originatorUserID.Valid && task.EscalationForTaskID.Valid {
+			primary, primaryErr := s.Queries.GetAgentTask(ctx, task.EscalationForTaskID)
+			if primaryErr == nil {
+				originatorUserID = primary.OriginatorUserID
+			}
+		}
+
+		agent, agentErr := s.Queries.GetAgent(ctx, task.AgentID)
+		allowed := agentErr == nil &&
+			!agent.ArchivedAt.Valid &&
+			agent.RuntimeID.Valid &&
+			s.issueTaskStillAllowed(ctx, task, agent, originatorUserID)
+		if !allowed {
+			cancelled, cancelErr := s.Queries.CancelDueDeferredTask(ctx, db.CancelDueDeferredTaskParams{
+				TaskID:    task.ID,
+				RuntimeID: runtimeID,
+			})
+			if errors.Is(cancelErr, pgx.ErrNoRows) {
+				continue
+			}
+			if cancelErr != nil {
+				return fmt.Errorf("cancel revoked deferred task %s: %w", util.UUIDToString(task.ID), cancelErr)
+			}
+			slog.Info("deferred fallback task cancelled",
+				"task_id", util.UUIDToString(cancelled.ID),
+				"runtime_id", util.UUIDToString(runtimeID),
+				"agent_id", util.UUIDToString(cancelled.AgentID),
+				"reason", "agent_access_revoked",
+			)
+			continue
+		}
+
+		promoted, promoteErr := s.Queries.PromoteDueDeferredTask(ctx, db.PromoteDueDeferredTaskParams{
+			TaskID:    task.ID,
+			RuntimeID: runtimeID,
+		})
+		if errors.Is(promoteErr, pgx.ErrNoRows) {
+			continue
+		}
+		if promoteErr != nil {
+			return fmt.Errorf("promote due deferred task %s: %w", util.UUIDToString(task.ID), promoteErr)
+		}
 		slog.Info("deferred fallback task promoted",
-			"task_id", util.UUIDToString(task.ID),
+			"task_id", util.UUIDToString(promoted.ID),
 			"runtime_id", util.UUIDToString(runtimeID),
-			"agent_id", util.UUIDToString(task.AgentID),
+			"agent_id", util.UUIDToString(promoted.AgentID),
 		)
-		s.broadcastTaskEvent(ctx, protocol.EventTaskQueued, task)
-		s.NotifyTaskEnqueued(ctx, task)
+		s.broadcastTaskEvent(ctx, protocol.EventTaskQueued, promoted)
+		s.NotifyTaskEnqueued(ctx, promoted)
 	}
 	return nil
 }
@@ -2859,7 +3039,7 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 		if parent, perr := s.Queries.GetAgentTask(ctx, taskID); perr != nil {
 			slog.Warn("fail task auto-retry: load parent failed",
 				"task_id", util.UUIDToString(taskID), "error", perr)
-		} else if retryEligible(failureReason, parent) {
+		} else if retryEligible(failureReason, parent) && s.retryStillAllowed(ctx, parent) {
 			wantRetry = true
 			if agent, aerr := s.Queries.GetAgent(ctx, parent.AgentID); aerr != nil {
 				// Best-effort: a missing overlay is not retry-fatal — the child
@@ -3051,6 +3231,58 @@ func retryEligible(failureReason string, t db.AgentTaskQueue) bool {
 		(t.IssueID.Valid || t.ChatSessionID.Valid)
 }
 
+// retryStillAllowed rechecks the current Availability location before a
+// failed attempt creates a new queued attempt. A retry inherits execution
+// context, but it is still a new run and must not outlive a Space revocation.
+func (s *TaskService) retryStillAllowed(ctx context.Context, parent db.AgentTaskQueue) bool {
+	agent, err := s.Queries.GetAgent(ctx, parent.AgentID)
+	if err != nil || agent.ArchivedAt.Valid || !agent.RuntimeID.Valid {
+		return false
+	}
+	if parent.IssueID.Valid {
+		return s.issueTaskStillAllowed(ctx, parent, agent, parent.OriginatorUserID)
+	}
+	if parent.ChatSessionID.Valid {
+		session, err := s.Queries.GetChatSession(ctx, parent.ChatSessionID)
+		if err != nil || session.WorkspaceID != agent.WorkspaceID {
+			return false
+		}
+		if !parent.OriginatorUserID.Valid ||
+			!MemberCanInvokeAgent(ctx, s.Queries, agent, session.WorkspaceID, parent.OriginatorUserID) {
+			return false
+		}
+		return agent.AvailabilityMode == "private" || agent.AvailabilityMode == "workspace"
+	}
+	return false
+}
+
+// issueTaskStillAllowed applies the delayed execution gates for issue-backed
+// work. Space assignment is always required. When a human originator exists we
+// also recheck their invocation audience; system/Autopilot work has no human
+// originator and relies on the already-authorized automation plus the Agent's
+// live Space assignment.
+func (s *TaskService) issueTaskStillAllowed(
+	ctx context.Context,
+	task db.AgentTaskQueue,
+	agent db.Agent,
+	originatorUserID pgtype.UUID,
+) bool {
+	if !task.IssueID.Valid {
+		return false
+	}
+	issue, err := s.Queries.GetIssue(ctx, task.IssueID)
+	if err != nil {
+		return false
+	}
+	if !AgentAvailableInSpace(ctx, s.Queries, agent, issue.WorkspaceID, issue.SpaceID) {
+		return false
+	}
+	if !originatorUserID.Valid {
+		return true
+	}
+	return MemberCanInvokeAgent(ctx, s.Queries, agent, issue.WorkspaceID, originatorUserID)
+}
+
 // MaybeRetryFailedTask spawns a fresh queued attempt for a recently-failed
 // task when the failure was infrastructure-shaped (daemon crash, runtime
 // went offline, dispatch/run timeout) and the task hasn't exhausted its
@@ -3084,6 +3316,9 @@ func (s *TaskService) MaybeRetryFailedTask(ctx context.Context, parent db.AgentT
 	// with no issue/chat link has nowhere to report its retry — retryEligible
 	// covers both, keeping this sweeper path in sync with FailTask's in-tx retry.
 	if !retryEligible(reason, parent) {
+		return nil, nil
+	}
+	if !s.retryStillAllowed(ctx, parent) {
 		return nil, nil
 	}
 
@@ -3417,7 +3652,7 @@ func (s *TaskService) HandleFailedTasks(ctx context.Context, tasks []db.AgentTas
 							// it here too. Without it the board / status-filter
 							// caches keep showing the issue as in_progress until
 							// the next write touches it (#4648 / MUL-3782).
-							s.broadcastIssueUpdated(updatedIssue, issue.Status)
+							s.broadcastIssueUpdated(ctx, updatedIssue, issue.Status)
 						}
 					}
 				}
@@ -3520,6 +3755,29 @@ func (s *TaskService) publishAgentStatus(agent db.Agent) {
 
 // LoadAgentSkills loads an agent's skills with their files for task execution.
 func (s *TaskService) LoadAgentSkills(ctx context.Context, agentID pgtype.UUID) []AgentSkillData {
+	return s.loadAgentSkillsForContext(ctx, agentID, nil, false)
+}
+
+// LoadAgentSkillsForTask applies Skill Availability to the concrete run.
+// Workspace-shared Skills are always eligible; Private Skills are usable only
+// by an Agent owned by the Skill creator; Selected-Space Skills require the
+// task's Issue/Autopilot Space to match. Sharing a Skill grants no Space data
+// access — it only decides whether the Skill bundle is mounted for this run.
+func (s *TaskService) LoadAgentSkillsForTask(ctx context.Context, task db.AgentTaskQueue) []AgentSkillData {
+	scope := s.ResolveTaskSpaceScope(ctx, task)
+	return s.loadAgentSkillsForContext(ctx, task.AgentID, scope.IDs, true)
+}
+
+func (s *TaskService) loadAgentSkillsForContext(
+	ctx context.Context,
+	agentID pgtype.UUID,
+	spaceIDs []pgtype.UUID,
+	enforceAvailability bool,
+) []AgentSkillData {
+	agent, err := s.Queries.GetAgent(ctx, agentID)
+	if err != nil {
+		return nil
+	}
 	skills, err := s.Queries.ListAgentSkills(ctx, agentID)
 	if err != nil || len(skills) == 0 {
 		return nil
@@ -3527,6 +3785,9 @@ func (s *TaskService) LoadAgentSkills(ctx context.Context, agentID pgtype.UUID) 
 
 	result := make([]AgentSkillData, 0, len(skills))
 	for _, sk := range skills {
+		if enforceAvailability && !s.skillAvailableForTask(ctx, sk, agent, spaceIDs) {
+			continue
+		}
 		data := AgentSkillData{
 			ID:          util.UUIDToString(sk.ID),
 			Name:        sk.Name,
@@ -3542,10 +3803,103 @@ func (s *TaskService) LoadAgentSkills(ctx context.Context, agentID pgtype.UUID) 
 	return result
 }
 
+func (s *TaskService) skillAvailableForTask(
+	ctx context.Context,
+	skill db.Skill,
+	agent db.Agent,
+	spaceIDs []pgtype.UUID,
+) bool {
+	if skill.WorkspaceID != agent.WorkspaceID {
+		return false
+	}
+	switch skill.AvailabilityMode {
+	case "workspace":
+		return true
+	case "private":
+		return skill.CreatedBy.Valid && skill.CreatedBy == agent.OwnerID
+	case "selected_spaces":
+		if len(spaceIDs) == 0 {
+			return false
+		}
+		for _, spaceID := range spaceIDs {
+			allowed, err := s.Queries.IsSkillAvailableInActiveSpace(ctx, db.IsSkillAvailableInActiveSpaceParams{
+				SkillID:     skill.ID,
+				WorkspaceID: skill.WorkspaceID,
+				SpaceID:     spaceID,
+			})
+			if err == nil && allowed {
+				return true
+			}
+		}
+		return false
+	default:
+		return false
+	}
+}
+
+// ResolveTaskSpaceScope resolves the effective Space boundary for a task.
+// Issue, Autopilot, quick-create, and single-Space Chat return one ID. An
+// All-spaces Chat returns every currently valid intersection Space.
+func (s *TaskService) ResolveTaskSpaceScope(ctx context.Context, task db.AgentTaskQueue) TaskSpaceScope {
+	if task.IssueID.Valid {
+		issue, err := s.Queries.GetIssue(ctx, task.IssueID)
+		if err == nil {
+			return TaskSpaceScope{IDs: []pgtype.UUID{issue.SpaceID}}
+		}
+	}
+	if task.AutopilotRunID.Valid {
+		run, err := s.Queries.GetAutopilotRun(ctx, task.AutopilotRunID)
+		if err == nil {
+			autopilot, err := s.Queries.GetAutopilot(ctx, run.AutopilotID)
+			if err == nil {
+				return TaskSpaceScope{IDs: []pgtype.UUID{autopilot.SpaceID}}
+			}
+		}
+	}
+	if qc, ok := s.parseQuickCreateContext(task); ok && qc.SpaceID != "" {
+		if spaceID, err := util.ParseUUID(qc.SpaceID); err == nil {
+			return TaskSpaceScope{IDs: []pgtype.UUID{spaceID}}
+		}
+	}
+	if task.ChatSessionID.Valid {
+		session, err := s.Queries.GetChatSession(ctx, task.ChatSessionID)
+		if err == nil {
+			agent, agentErr := s.Queries.GetAgent(ctx, task.AgentID)
+			initiator := task.InitiatorUserID
+			if !initiator.Valid {
+				initiator = session.CreatorID
+			}
+			if agentErr == nil {
+				if scope, scopeErr := s.ChatSessionSpaceScope(ctx, session, agent, initiator); scopeErr == nil {
+					return scope
+				}
+			}
+		}
+	}
+	return TaskSpaceScope{}
+}
+
+// TaskSpaceID is retained for single-Space call sites. It deliberately returns
+// NULL for All-spaces Chat even when the current intersection happens to
+// contain one Space, preserving the user's explicit All selection.
+func (s *TaskService) TaskSpaceID(ctx context.Context, task db.AgentTaskQueue) pgtype.UUID {
+	scope := s.ResolveTaskSpaceScope(ctx, task)
+	if scope.All || len(scope.IDs) != 1 {
+		return pgtype.UUID{}
+	}
+	return scope.IDs[0]
+}
+
 // LoadAgentSkillBundles returns every skill visible to an agent, including
 // built-ins, with stable bundle hashes and lightweight refs for slim claims.
 func (s *TaskService) LoadAgentSkillBundles(ctx context.Context, agentID pgtype.UUID) ([]AgentSkillData, []AgentSkillRefData) {
 	skills := s.LoadAgentSkills(ctx, agentID)
+	skills = append(skills, s.BuiltinSkills()...)
+	return BuildAgentSkillBundles(skills)
+}
+
+func (s *TaskService) LoadAgentSkillBundlesForTask(ctx context.Context, task db.AgentTaskQueue) ([]AgentSkillData, []AgentSkillRefData) {
+	skills := s.LoadAgentSkillsForTask(ctx, task)
 	skills = append(skills, s.BuiltinSkills()...)
 	return BuildAgentSkillBundles(skills)
 }
@@ -3886,8 +4240,8 @@ func (s *TaskService) broadcastChatDone(ctx context.Context, task db.AgentTaskQu
 // emit status-change activity / notifications. That is intentional for the
 // realtime-staleness fix (#4648 / MUL-3782); folding those side effects in
 // would mean unifying the payload type and is left as a follow-up.
-func (s *TaskService) broadcastIssueUpdated(issue db.Issue, prevStatus string) {
-	prefix := s.getIssuePrefix(issue.WorkspaceID)
+func (s *TaskService) broadcastIssueUpdated(ctx context.Context, issue db.Issue, prevStatus string) {
+	prefix := issueidentifier.PrefixForIssue(ctx, s.Queries, issue)
 	s.Bus.Publish(events.Event{
 		Type:        protocol.EventIssueUpdated,
 		WorkspaceID: util.UUIDToString(issue.WorkspaceID),
@@ -3899,14 +4253,6 @@ func (s *TaskService) broadcastIssueUpdated(issue db.Issue, prevStatus string) {
 			"prev_status":    prevStatus,
 		},
 	})
-}
-
-func (s *TaskService) getIssuePrefix(workspaceID pgtype.UUID) string {
-	ws, err := s.Queries.GetWorkspace(context.Background(), workspaceID)
-	if err != nil {
-		return ""
-	}
-	return ws.IssuePrefix
 }
 
 func (s *TaskService) createAgentComment(ctx context.Context, issueID, agentID pgtype.UUID, content, commentType string, parentID, sourceTaskID pgtype.UUID) {
@@ -4011,6 +4357,8 @@ func issueToMap(issue db.Issue, issuePrefix string) map[string]any {
 	return map[string]any{
 		"id":              util.UUIDToString(issue.ID),
 		"workspace_id":    util.UUIDToString(issue.WorkspaceID),
+		"space_id":        util.UUIDToPtr(issue.SpaceID),
+		"space_key":       issuePrefix,
 		"number":          issue.Number,
 		"identifier":      issuePrefix + "-" + strconv.Itoa(int(issue.Number)),
 		"title":           issue.Title,
@@ -4135,7 +4483,7 @@ func (s *TaskService) notifyQuickCreateCompleted(ctx context.Context, task db.Ag
 			},
 		})
 	}
-	prefix := s.getIssuePrefix(workspaceID)
+	prefix := issueidentifier.PrefixForIssue(ctx, s.Queries, issue)
 	identifier := fmt.Sprintf("%s-%d", prefix, issue.Number)
 	details, _ := json.Marshal(map[string]any{
 		"task_id":         util.UUIDToString(task.ID),

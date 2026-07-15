@@ -61,7 +61,10 @@ export function CreateWorkspaceForm({ onSuccess }: CreateWorkspaceFormProps) {
   const handleCreate = () => {
     if (!canSubmit) return;
     createWorkspace.mutate(
-      { name: name.trim(), slug: slug.trim() },
+      {
+        name: name.trim(),
+        slug: slug.trim(),
+      },
       {
         onSuccess,
         onError: (error) => {

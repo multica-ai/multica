@@ -5,6 +5,7 @@ import type {
   Agent,
   AgentRuntime,
   MemberWithUser,
+  Space,
 } from "@multica/core/types";
 import { AGENT_DESCRIPTION_MAX_LENGTH } from "@multica/core/agents";
 import { isImeComposing } from "@multica/core/utils";
@@ -24,12 +25,14 @@ import { ResourceLabelPicker } from "../../labels/resource-label-picker";
 import { ModelPicker } from "./inspector/model-picker";
 import { RuntimePicker } from "./inspector/runtime-picker";
 import { ThinkingSettingField } from "./inspector/thinking-prop-row";
+import { AvailabilityPicker } from "./inspector/availability-picker";
 
 interface InspectorProps {
   agent: Agent;
   runtime: AgentRuntime | null;
   runtimes: AgentRuntime[];
   members: MemberWithUser[];
+  spaces: Space[];
   currentUserId: string | null;
   canEdit: boolean;
   onUpdate: (id: string, data: Record<string, unknown>) => Promise<void>;
@@ -54,6 +57,7 @@ export function AgentDetailInspector({
   runtime,
   runtimes,
   members,
+  spaces,
   currentUserId,
   canEdit,
   onUpdate,
@@ -249,6 +253,25 @@ export function AgentDetailInspector({
               update({ thinking_level: thinkingLevel })
             }
           />
+          <SettingsRow
+            label={t(($) => $.inspector.prop_availability)}
+            size="select-wide"
+          >
+            <AvailabilityPicker
+              availabilityMode={agent.availability_mode}
+              availabilitySpaceIds={agent.availability_space_ids}
+              permissionMode={agent.permission_mode}
+              invocationTargets={agent.invocation_targets}
+              spaces={spaces}
+              canEdit={
+                currentUserId !== null && agent.owner_id === currentUserId
+              }
+              hasComposioAllowlist={
+                (agent.composio_toolkit_allowlist ?? []).length > 0
+              }
+              onChange={(next) => update({ ...next })}
+            />
+          </SettingsRow>
           <SettingsRow
             label={t(($) => $.inspector.prop_concurrency)}
             size="select-wide"

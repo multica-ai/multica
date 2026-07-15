@@ -6,6 +6,7 @@ import type {
   AgentBuilderSession,
   Attachment,
   AutopilotRun,
+  AutopilotTemplate,
   BillingBalance,
   BillingBatchesPage,
   BillingCheckoutSessionStatus,
@@ -25,14 +26,22 @@ import type {
   IssuePropertiesResponse,
   ListIssuesResponse,
   ListLabelsResponse,
+  ListAutopilotTemplatesResponse,
+  ListIntegrationBindingsResponse,
+  ListProjectsResponse,
+  ListSpacesResponse,
+  ListSpaceMembersResponse,
   ListWebhookDeliveriesResponse,
   ResourceLabelsResponse,
   SearchIssuesResponse,
   SearchProjectsResponse,
+  Project,
   Squad,
+  Space,
   TimelineEntry,
   User,
   WebhookDelivery,
+  IntegrationConnectionBinding,
 } from "../types";
 import type { CloudRuntimeNode } from "../runtimes/cloud-runtime";
 import type { CreateFeedbackResponse } from "../feedback/types";
@@ -421,6 +430,9 @@ const IssueMetadataSchema = z.record(z.string(), z.union([z.string(), z.number()
 export const IssueSchema = z.object({
   id: z.string(),
   workspace_id: z.string(),
+  space_id: z.string().nullable().default(null),
+  space_key: z.string().nullable().default(null),
+  space_name: z.string().nullable().default(null),
   number: z.number(),
   identifier: z.string(),
   title: z.string(),
@@ -476,9 +488,120 @@ export const EMPTY_SEARCH_ISSUES_RESPONSE: SearchIssuesResponse = {
   total: 0,
 };
 
-const ProjectSchema = z.object({
+export const SpaceSchema = z.object({
   id: z.string(),
   workspace_id: z.string(),
+  name: z.string().default(""),
+  key: z.string().default(""),
+  icon: z.string().nullable().default(null),
+  context: z.string().default(""),
+  issue_counter: z.number().default(0),
+  is_default: z.boolean().default(false),
+  visibility: z.enum(["open", "private"]).default("open"),
+  archived_at: z.string().nullable().default(null),
+  created_by: z.string().nullable().default(null),
+  created_at: z.string().default(""),
+  updated_at: z.string().default(""),
+  is_member: z.boolean().default(false),
+  member_role: z.enum(["lead", "admin", "member", "guest"]).nullable().default(null),
+  is_pinned: z.boolean().default(false),
+  is_followed: z.boolean().default(false),
+  sort_order: z.number().default(0),
+}).loose();
+
+export const RestoreSpaceResponseSchema = z.object({
+  space: SpaceSchema,
+  paused_autopilot_count: z.number().default(0),
+}).loose();
+
+export const SpaceActivitySchema = z.object({
+  id: z.string(),
+  actor_type: z.enum(["member", "agent", "system"]),
+  actor_id: z.string().default(""),
+  actor_name: z.string().default(""),
+  actor_avatar_url: z.string().optional(),
+  action: z.string(),
+  details: z.record(z.string(), z.unknown()).default({}),
+  created_at: z.string(),
+}).loose();
+
+export const ListSpaceActivityResponseSchema = z.object({
+  activities: z.array(SpaceActivitySchema).default([]),
+}).loose();
+
+// PATCH /api/spaces/{id}/membership — the caller's own sort position.
+export const SpaceMembershipSchema = z.object({
+  space_id: z.string().default(""),
+  sort_order: z.number().default(0),
+}).loose();
+
+export const SpacePreferenceSchema = z.object({
+  space_id: z.string().default(""),
+  is_pinned: z.boolean().default(false),
+  is_followed: z.boolean().default(false),
+  sort_order: z.number().default(0),
+}).loose();
+
+export const SpaceMemberRoleUpdateSchema = z.object({
+  space_id: z.string(),
+  user_id: z.string(),
+  role: z.enum(["lead", "admin", "member", "guest"]),
+}).loose();
+
+export const SpaceMemberSchema = z.object({
+  user_id: z.string(),
+  name: z.string().default(""),
+  email: z.string().default(""),
+  avatar_url: z.string().nullable().default(null),
+  role: z.string().default("member"),
+  created_at: z.string().default(""),
+}).loose();
+
+export const ListSpaceMembersResponseSchema = z.object({
+  members: z.array(SpaceMemberSchema).default([]),
+  total: z.number().default(0),
+});
+
+export const EMPTY_LIST_SPACE_MEMBERS_RESPONSE: ListSpaceMembersResponse = {
+  members: [],
+  total: 0,
+};
+
+export const ListSpacesResponseSchema = z.object({
+  spaces: z.array(SpaceSchema).default([]),
+  total: z.number().default(0),
+}).loose();
+
+export const EMPTY_SPACE: Space = {
+  id: "",
+  workspace_id: "",
+  name: "",
+  key: "",
+  icon: null,
+  context: "",
+  issue_counter: 0,
+  is_default: false,
+  visibility: "open",
+  archived_at: null,
+  created_by: null,
+  created_at: "",
+  updated_at: "",
+  is_member: false,
+  member_role: null,
+  is_pinned: false,
+  is_followed: false,
+  sort_order: 0,
+};
+
+export const EMPTY_LIST_SPACES_RESPONSE: ListSpacesResponse = {
+  spaces: [],
+  total: 0,
+};
+
+export const ProjectSchema = z.object({
+  id: z.string(),
+  workspace_id: z.string(),
+  space_id: z.string(),
   title: z.string(),
   description: z.string().nullable(),
   icon: z.string().nullable(),
@@ -497,6 +620,36 @@ const ProjectSchema = z.object({
   done_count: z.number().default(0),
   resource_count: z.number().default(0),
 }).loose();
+
+export const ListProjectsResponseSchema = z.object({
+  projects: z.array(ProjectSchema).default([]),
+  total: z.number().default(0),
+}).loose();
+
+export const EMPTY_PROJECT: Project = {
+  id: "",
+  workspace_id: "",
+  space_id: "",
+  title: "",
+  description: null,
+  icon: null,
+  status: "planned",
+  priority: "none",
+  lead_type: null,
+  lead_id: null,
+  start_date: null,
+  due_date: null,
+  created_at: "",
+  updated_at: "",
+  issue_count: 0,
+  done_count: 0,
+  resource_count: 0,
+};
+
+export const EMPTY_LIST_PROJECTS_RESPONSE: ListProjectsResponse = {
+  projects: [],
+  total: 0,
+};
 
 const SearchProjectResultSchema = ProjectSchema.extend({
   match_source: z.string(),
@@ -895,6 +1048,10 @@ export const AgentPermissionModeSchema = z
   .enum(["private", "public_to"])
   .catch("private");
 
+export const AgentAvailabilityModeSchema = z
+  .enum(["private", "selected_spaces", "workspace"])
+  .catch("private");
+
 export const AgentInvocationTargetSchema = z
   .object({
     target_type: z.string(),
@@ -916,6 +1073,8 @@ const MinimalAgentSchema = z.object({
   id: z.string(),
   permission_mode: AgentPermissionModeSchema.optional(),
   invocation_targets: AgentInvocationTargetsSchema.optional(),
+  availability_mode: AgentAvailabilityModeSchema.optional(),
+  availability_space_ids: z.array(z.string()).default([]).optional(),
 }).loose();
 
 export const CreateAgentFromTemplateResponseSchema = z.object({
@@ -959,6 +1118,9 @@ const SquadMemberPreviewSchema = z.object({
 export const SquadSchema = z.object({
   id: z.string(),
   workspace_id: z.string(),
+  // Older servers predate Space-owned Squads; keep the row visible and let
+  // callers treat an empty ID as legacy/unknown ownership.
+  space_id: z.string().default(""),
   name: z.string(),
   description: z.string().default(""),
   instructions: z.string().default(""),
@@ -978,6 +1140,7 @@ export const EMPTY_SQUAD_LIST: Squad[] = [];
 export const EMPTY_SQUAD: Squad = {
   id: "",
   workspace_id: "",
+  space_id: "",
   name: "",
   description: "",
   instructions: "",
@@ -1125,6 +1288,8 @@ const AutopilotListItemSchema = z.object({
   title: z.string(),
   description: z.string().nullable().optional(),
   project_id: z.string().nullable().optional(),
+  // Installed clients may still connect to a pre-Space Autopilot server.
+  space_id: z.string().default(""),
   // Older servers (pre-MUL-2429) omit assignee_type; "agent" is the
   // documented default.
   assignee_type: z.string().default("agent"),
@@ -1137,6 +1302,7 @@ const AutopilotListItemSchema = z.object({
   last_run_at: z.string().nullable().optional(),
   created_at: z.string(),
   updated_at: z.string(),
+  paused_by_space_at: z.string().nullable().optional(),
   trigger_kinds: z.array(z.string()).optional(),
   next_run_at: z.string().nullable().optional(),
   last_run_status: z.string().nullable().optional(),
@@ -1193,6 +1359,75 @@ export const FALLBACK_AUTOPILOT_RUN: AutopilotRun = {
   trigger_payload: null,
   result: null,
   created_at: "",
+};
+
+// Workspace-owned Autopilot templates and Integration-to-Space bindings are
+// Settings data. Keep their response parsers lenient so an older installed
+// client survives additive server fields and future provider/status values.
+export const AutopilotTemplateSchema = z.object({
+  id: z.string(),
+  workspace_id: z.string(),
+  name: z.string().default(""),
+  description: z.string().default(""),
+  execution_mode: z.string().default("create_issue"),
+  issue_title_template: z.string().nullable().optional().transform((v) => v ?? null),
+  trigger_kind: z.string().default("schedule"),
+  cron_expression: z.string().nullable().optional().transform((v) => v ?? null),
+  timezone: z.string().nullable().optional().transform((v) => v ?? null),
+  created_by: z.string(),
+  created_at: z.string().default(""),
+  updated_at: z.string().default(""),
+}).loose();
+
+export const ListAutopilotTemplatesResponseSchema = z.object({
+  templates: z.array(AutopilotTemplateSchema).default([]),
+  total: z.number().default(0),
+}).loose();
+
+export const EMPTY_AUTOPILOT_TEMPLATE: AutopilotTemplate = {
+  id: "",
+  workspace_id: "",
+  name: "",
+  description: "",
+  execution_mode: "create_issue",
+  issue_title_template: null,
+  trigger_kind: "schedule",
+  cron_expression: null,
+  timezone: null,
+  created_by: "",
+  created_at: "",
+  updated_at: "",
+};
+
+export const EMPTY_LIST_AUTOPILOT_TEMPLATES_RESPONSE: ListAutopilotTemplatesResponse = {
+  templates: [],
+  total: 0,
+};
+
+export const IntegrationConnectionBindingSchema = z.object({
+  provider: z.string(),
+  connection_id: z.string(),
+  display_name: z.string().default(""),
+  status: z.string().default(""),
+  space_ids: z.array(z.string()).default([]),
+}).loose();
+
+export const ListIntegrationBindingsResponseSchema = z.object({
+  connections: z.array(IntegrationConnectionBindingSchema).default([]),
+  can_manage: z.boolean().default(false),
+}).loose();
+
+export const EMPTY_INTEGRATION_CONNECTION_BINDING: IntegrationConnectionBinding = {
+  provider: "",
+  connection_id: "",
+  display_name: "",
+  status: "",
+  space_ids: [],
+};
+
+export const EMPTY_LIST_INTEGRATION_BINDINGS_RESPONSE: ListIntegrationBindingsResponse = {
+  connections: [],
+  can_manage: false,
 };
 
 export const EMPTY_WEBHOOK_DELIVERY: WebhookDelivery = {

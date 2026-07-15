@@ -96,6 +96,7 @@ export function onIssueUpdated(
       (cachedIssue !== undefined &&
         issue.status !== undefined &&
         issue.status !== cachedIssue.status),
+    space: false,
   };
 
   // The coordinator applies the same rules table the local mutations use:

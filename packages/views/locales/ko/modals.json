@@ -72,6 +72,7 @@
   "create_squad": {
     "title": "스쿼드 만들기",
     "description": "리더 에이전트와 선택 멤버로 협업 스쿼드를 만듭니다.",
+    "space_label": "스페이스",
     "name_label": "이름",
     "name_placeholder": "예: 프런트엔드 팀",
     "description_label": "설명",
@@ -119,6 +120,8 @@
     "submitting": "만드는 중...",
     "toast_created": "프로젝트를 만들었습니다",
     "toast_failed": "프로젝트를 만들지 못했습니다",
+    "space_required": "Space를 하나 이상 선택하세요",
+    "space_min_hint": "프로젝트는 하나의 Space에 속해야 합니다",
     "repos_pill": "저장소",
     "repos_pill_count_other": "저장소 {{count}}개",
     "repos_heading": "이 프로젝트에 GitHub 저장소 연결",

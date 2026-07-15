@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/util"
 )
 
@@ -26,6 +27,14 @@ func createPermissionTestMember(t *testing.T, email string) string {
 		INSERT INTO member (workspace_id, user_id, role) VALUES ($1, $2, 'member')
 	`, testWorkspaceID, userID); err != nil {
 		t.Fatalf("add member %s: %v", email, err)
+	}
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO workspace_space_member (workspace_id, space_id, user_id, role, sort_order)
+		SELECT workspace_id, id, $2, 'member', 1
+		FROM workspace_space
+		WHERE workspace_id = $1 AND is_default = true
+	`, testWorkspaceID, userID); err != nil {
+		t.Fatalf("join default space %s: %v", email, err)
 	}
 	return userID
 }
@@ -239,7 +248,7 @@ func canMemberInvoke(t *testing.T, agentID, userID string) bool {
 	if err != nil {
 		t.Fatalf("load agent: %v", err)
 	}
-	return testHandler.canInvokeAgent(context.Background(), agent, "member", userID, userID, testWorkspaceID)
+	return testHandler.canInvokeAgent(context.Background(), agent, "member", userID, userID, testWorkspaceID, pgtype.UUID{})
 }
 
 func invocationTargetCount(t *testing.T, agentID string) int {
@@ -440,10 +449,10 @@ func TestCanInvokeAgent_SystemWorkspaceExceptionAndMemberFailClosed(t *testing.T
 	if err != nil {
 		t.Fatalf("load ws agent: %v", err)
 	}
-	if !testHandler.canInvokeAgent(ctx, wsAgent, "system", "", "", testWorkspaceID) {
+	if !testHandler.canInvokeAgent(ctx, wsAgent, "system", "", "", testWorkspaceID, pgtype.UUID{}) {
 		t.Errorf("system trigger should hit a workspace target (product-approved exception)")
 	}
-	if !testHandler.canInvokeAgent(ctx, wsAgent, "agent", "", "", testWorkspaceID) {
+	if !testHandler.canInvokeAgent(ctx, wsAgent, "agent", "", "", testWorkspaceID, pgtype.UUID{}) {
 		t.Errorf("agent trigger with no originator should still hit a workspace target")
 	}
 
@@ -457,14 +466,14 @@ func TestCanInvokeAgent_SystemWorkspaceExceptionAndMemberFailClosed(t *testing.T
 	if err != nil {
 		t.Fatalf("load member agent: %v", err)
 	}
-	if testHandler.canInvokeAgent(ctx, memAgent, "system", "", "", testWorkspaceID) {
+	if testHandler.canInvokeAgent(ctx, memAgent, "system", "", "", testWorkspaceID, pgtype.UUID{}) {
 		t.Errorf("system trigger must FAIL CLOSED against a member target with no originator")
 	}
-	if testHandler.canInvokeAgent(ctx, memAgent, "agent", "", "", testWorkspaceID) {
+	if testHandler.canInvokeAgent(ctx, memAgent, "agent", "", "", testWorkspaceID, pgtype.UUID{}) {
 		t.Errorf("agent trigger with no originator must FAIL CLOSED against a member target")
 	}
 	// But the actual member (as originator) is admitted.
-	if !testHandler.canInvokeAgent(ctx, memAgent, "agent", "", memberX, testWorkspaceID) {
+	if !testHandler.canInvokeAgent(ctx, memAgent, "agent", "", memberX, testWorkspaceID, pgtype.UUID{}) {
 		t.Errorf("agent trigger whose originator IS the targeted member should be admitted")
 	}
 }

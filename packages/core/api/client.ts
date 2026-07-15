@@ -77,6 +77,18 @@ import type {
   HasPendingChatTasksResponse,
   SendChatMessageResponse,
   CancelTaskResponse,
+  Space,
+  SpaceMembership,
+  SpacePreference,
+  UpdateSpacePreferenceRequest,
+  SpaceMemberRoleUpdate,
+  ListSpaceMembersResponse,
+  ListSpaceActivityResponse,
+  CreateSpaceRequest,
+  UpdateSpaceRequest,
+  ListSpacesResponse,
+  RestoreSpaceResponse,
+  ResumeSpaceAutopilotsResponse,
   Project,
   CreateProjectRequest,
   UpdateProjectRequest,
@@ -104,6 +116,9 @@ import type {
   ReorderPinsRequest,
   Invitation,
   Autopilot,
+  AutopilotTemplate,
+  SaveAutopilotTemplateRequest,
+  ListAutopilotTemplatesResponse,
   AutopilotTrigger,
   AutopilotRun,
   CreateAutopilotRequest,
@@ -129,6 +144,7 @@ import type {
   ComposioConnection,
   ComposioConnectInitResponse,
   SlackInstallation,
+  ListIntegrationBindingsResponse,
   ListSlackInstallationsResponse,
   RegisterSlackBYORequest,
   RedeemSlackBindingTokenResponse,
@@ -155,7 +171,7 @@ import type {
 import { type Logger, noopLogger } from "../logger";
 import { createRequestId } from "../utils";
 import { getCurrentSlug } from "../platform/workspace-storage";
-import { parseWithFallback } from "./schema";
+import { parseWithFallback, parseOrWarn } from "./schema";
 import {
   AgentTaskListSchema,
   AgentTemplateSchema,
@@ -185,6 +201,9 @@ import {
   EMPTY_AGENT_BUILDER_SESSION,
   EMPTY_GROUPED_ISSUES_RESPONSE,
   EMPTY_LIST_ISSUES_RESPONSE,
+  EMPTY_LIST_PROJECTS_RESPONSE,
+  EMPTY_LIST_SPACES_RESPONSE,
+  EMPTY_PROJECT,
   EMPTY_SEARCH_ISSUES_RESPONSE,
   EMPTY_SEARCH_PROJECTS_RESPONSE,
   EMPTY_SQUAD,
@@ -201,12 +220,29 @@ import {
   EMPTY_LIST_AUTOPILOTS_RESPONSE,
   AutopilotRunSchema,
   FALLBACK_AUTOPILOT_RUN,
+  AutopilotTemplateSchema,
+  ListAutopilotTemplatesResponseSchema,
+  EMPTY_AUTOPILOT_TEMPLATE,
+  EMPTY_LIST_AUTOPILOT_TEMPLATES_RESPONSE,
+  ListIntegrationBindingsResponseSchema,
+  EMPTY_LIST_INTEGRATION_BINDINGS_RESPONSE,
   ListIssuesResponseSchema,
+  ListProjectsResponseSchema,
+  ListSpacesResponseSchema,
+  ListSpaceMembersResponseSchema,
+  ListSpaceActivityResponseSchema,
+  EMPTY_LIST_SPACE_MEMBERS_RESPONSE,
+  SpaceSchema,
+  RestoreSpaceResponseSchema,
+  SpaceMembershipSchema,
+  SpacePreferenceSchema,
+  SpaceMemberRoleUpdateSchema,
   ListWebhookDeliveriesResponseSchema,
   RuntimeHourlyActivityListSchema,
   RuntimeUsageByAgentListSchema,
   RuntimeUsageByHourListSchema,
   RuntimeUsageListSchema,
+  ProjectSchema,
   SearchIssuesResponseSchema,
   SearchProjectsResponseSchema,
   SquadSchema,
@@ -559,6 +595,7 @@ export class ApiClient {
     if (params?.assignee_ids?.length) search.set("assignee_ids", params.assignee_ids.join(","));
     if (params?.assignee_types?.length) search.set("assignee_types", params.assignee_types.join(","));
     if (params?.creator_id) search.set("creator_id", params.creator_id);
+    if (params?.space_id) search.set("space_id", params.space_id);
     if (params?.project_id) search.set("project_id", params.project_id);
     if (params?.involves_user_id) search.set("involves_user_id", params.involves_user_id);
     if (params?.metadata && Object.keys(params.metadata).length > 0) {
@@ -592,6 +629,7 @@ export class ApiClient {
     if (params.assignee_id) search.set("assignee_id", params.assignee_id);
     if (params.assignee_ids?.length) search.set("assignee_ids", params.assignee_ids.join(","));
     if (params.creator_id) search.set("creator_id", params.creator_id);
+    if (params.space_id) search.set("space_id", params.space_id);
     if (params.project_id) search.set("project_id", params.project_id);
     if (params.involves_user_id) search.set("involves_user_id", params.involves_user_id);
     if (params.metadata && Object.keys(params.metadata).length > 0) {
@@ -666,6 +704,7 @@ export class ApiClient {
     agent_id?: string;
     squad_id?: string;
     prompt: string;
+    space_id?: string | null;
     project_id?: string | null;
     parent_issue_id?: string | null;
     attachment_ids?: string[];
@@ -1652,11 +1691,112 @@ export class ApiClient {
     });
   }
 
-  async updateWorkspace(id: string, data: { name?: string; description?: string; context?: string; settings?: Record<string, unknown>; repos?: WorkspaceRepo[]; issue_prefix?: string; avatar_url?: string }): Promise<Workspace> {
+  async updateWorkspace(id: string, data: { name?: string; slug?: string; description?: string; context?: string; settings?: Record<string, unknown>; repos?: WorkspaceRepo[]; issue_prefix?: string; avatar_url?: string; default_space_id?: string }): Promise<Workspace> {
     return this.fetch(`/api/workspaces/${id}`, {
       method: "PATCH",
       body: JSON.stringify(data),
     });
+  }
+
+  // Spaces
+  async listSpaces(): Promise<ListSpacesResponse> {
+    const raw = await this.fetch<unknown>("/api/spaces");
+    return parseWithFallback(raw, ListSpacesResponseSchema, EMPTY_LIST_SPACES_RESPONSE, {
+      endpoint: "GET /api/spaces",
+    });
+  }
+
+  async createSpace(data: CreateSpaceRequest): Promise<Space> {
+    const raw = await this.fetch<unknown>("/api/spaces", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+    return parseOrWarn(raw, SpaceSchema, { endpoint: "POST /api/spaces" });
+  }
+
+  async updateSpace(id: string, data: UpdateSpaceRequest): Promise<Space> {
+    const raw = await this.fetch<unknown>(`/api/spaces/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    });
+    return parseOrWarn(raw, SpaceSchema, { endpoint: "PATCH /api/spaces/:id" });
+  }
+
+  async updateSpaceMembership(id: string, data: { sort_order: number }): Promise<SpaceMembership> {
+    const raw = await this.fetch<unknown>(`/api/spaces/${id}/membership`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    });
+    return parseOrWarn(raw, SpaceMembershipSchema, { endpoint: "PATCH /api/spaces/:id/membership" });
+  }
+
+  async updateSpacePreference(id: string, data: UpdateSpacePreferenceRequest): Promise<SpacePreference> {
+    const raw = await this.fetch<unknown>(`/api/spaces/${id}/preferences`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    });
+    return parseOrWarn(raw, SpacePreferenceSchema, {
+      endpoint: "PATCH /api/spaces/:id/preferences",
+    });
+  }
+
+  async joinSpace(id: string): Promise<Space> {
+    const raw = await this.fetch<unknown>(`/api/spaces/${id}/join`, { method: "POST" });
+    return parseOrWarn(raw, SpaceSchema, { endpoint: "POST /api/spaces/:id/join" });
+  }
+
+  async leaveSpace(id: string): Promise<void> {
+    await this.fetch(`/api/spaces/${id}/membership`, { method: "DELETE" });
+  }
+
+  async updateSpaceMemberRole(id: string, userId: string, role: SpaceMemberRoleUpdate["role"]): Promise<SpaceMemberRoleUpdate> {
+    const raw = await this.fetch<unknown>(`/api/spaces/${id}/members/${userId}`, {
+      method: "PATCH",
+      body: JSON.stringify({ role }),
+    });
+    return parseOrWarn(raw, SpaceMemberRoleUpdateSchema, {
+      endpoint: "PATCH /api/spaces/:id/members/:userId",
+    });
+  }
+
+  async replaceSpaceMembers(id: string, memberIds: string[]): Promise<ListSpaceMembersResponse> {
+    const raw = await this.fetch<unknown>(`/api/spaces/${id}/members`, {
+      method: "PUT",
+      body: JSON.stringify({ member_ids: memberIds }),
+    });
+    return parseWithFallback(raw, ListSpaceMembersResponseSchema, EMPTY_LIST_SPACE_MEMBERS_RESPONSE, {
+      endpoint: "PUT /api/spaces/:id/members",
+    });
+  }
+
+  async listSpaceMembers(id: string): Promise<ListSpaceMembersResponse> {
+    const raw = await this.fetch<unknown>(`/api/spaces/${id}/members`);
+    return parseWithFallback(raw, ListSpaceMembersResponseSchema, EMPTY_LIST_SPACE_MEMBERS_RESPONSE, {
+      endpoint: "GET /api/spaces/:id/members",
+    });
+  }
+
+  async listSpaceActivity(id: string): Promise<ListSpaceActivityResponse> {
+    const raw = await this.fetch<unknown>(`/api/spaces/${id}/activity`);
+    return parseWithFallback(raw, ListSpaceActivityResponseSchema, { activities: [] }, {
+      endpoint: "GET /api/spaces/:id/activity",
+    });
+  }
+
+  async archiveSpace(id: string): Promise<Space> {
+    const raw = await this.fetch<unknown>(`/api/spaces/${id}`, { method: "DELETE" });
+    return parseOrWarn(raw, SpaceSchema, { endpoint: "DELETE /api/spaces/:id" });
+  }
+
+  async restoreSpace(id: string): Promise<RestoreSpaceResponse> {
+    const raw = await this.fetch<unknown>(`/api/spaces/${id}/restore`, { method: "POST" });
+    return parseOrWarn(raw, RestoreSpaceResponseSchema, {
+      endpoint: "POST /api/spaces/:id/restore",
+    });
+  }
+
+  async resumeSpaceAutopilots(id: string): Promise<ResumeSpaceAutopilotsResponse> {
+    return this.fetch(`/api/spaces/${id}/resume-autopilots`, { method: "POST" });
   }
 
   // Members
@@ -1857,7 +1997,7 @@ export class ApiClient {
     return this.fetch(`/api/chat/sessions/${id}`);
   }
 
-  async createChatSession(data: { agent_id: string; title?: string }): Promise<ChatSession> {
+  async createChatSession(data: { agent_id: string; title?: string; space_id?: string | null }): Promise<ChatSession> {
     return this.fetch("/api/chat/sessions", {
       method: "POST",
       body: JSON.stringify(data),
@@ -2064,28 +2204,37 @@ export class ApiClient {
   }
 
   // Projects
-  async listProjects(params?: { status?: string }): Promise<ListProjectsResponse> {
+  async listProjects(params?: { status?: string; space_id?: string }): Promise<ListProjectsResponse> {
     const search = new URLSearchParams();
     if (params?.status) search.set("status", params.status);
-    return this.fetch(`/api/projects?${search}`);
+    if (params?.space_id) search.set("space_id", params.space_id);
+    const raw = await this.fetch<unknown>(`/api/projects?${search}`);
+    return parseWithFallback(raw, ListProjectsResponseSchema, EMPTY_LIST_PROJECTS_RESPONSE, {
+      endpoint: "GET /api/projects",
+    });
   }
 
   async getProject(id: string): Promise<Project> {
-    return this.fetch(`/api/projects/${id}`);
+    const raw = await this.fetch<unknown>(`/api/projects/${id}`);
+    return parseWithFallback(raw, ProjectSchema, EMPTY_PROJECT, {
+      endpoint: "GET /api/projects/:id",
+    });
   }
 
   async createProject(data: CreateProjectRequest): Promise<Project> {
-    return this.fetch("/api/projects", {
+    const raw = await this.fetch<unknown>("/api/projects", {
       method: "POST",
       body: JSON.stringify(data),
     });
+    return parseOrWarn<Project>(raw, ProjectSchema, { endpoint: "POST /api/projects" });
   }
 
   async updateProject(id: string, data: UpdateProjectRequest): Promise<Project> {
-    return this.fetch(`/api/projects/${id}`, {
+    const raw = await this.fetch<unknown>(`/api/projects/${id}`, {
       method: "PUT",
       body: JSON.stringify(data),
     });
+    return parseOrWarn<Project>(raw, ProjectSchema, { endpoint: "PUT /api/projects/:id" });
   }
 
   async deleteProject(id: string): Promise<void> {
@@ -2316,8 +2465,11 @@ export class ApiClient {
   }
 
   // Squads
-  async listSquads(): Promise<Squad[]> {
-    const raw = await this.fetch<unknown>(`/api/squads`);
+  async listSquads(params?: { space_id?: string }): Promise<Squad[]> {
+    const search = new URLSearchParams();
+    if (params?.space_id) search.set("space_id", params.space_id);
+    const suffix = search.size > 0 ? `?${search.toString()}` : "";
+    const raw = await this.fetch<unknown>(`/api/squads${suffix}`);
     return parseWithFallback(raw, SquadListSchema, EMPTY_SQUAD_LIST, {
       endpoint: "GET /api/squads",
     }) as Squad[];
@@ -2330,7 +2482,7 @@ export class ApiClient {
     }) as Squad;
   }
 
-  async createSquad(data: { name: string; description?: string; leader_id: string; avatar_url?: string }): Promise<Squad> {
+  async createSquad(data: { space_id: string; name: string; description?: string; leader_id: string; avatar_url?: string }): Promise<Squad> {
     const raw = await this.fetch<unknown>("/api/squads", { method: "POST", body: JSON.stringify(data) });
     return parseWithFallback(raw, SquadSchema, EMPTY_SQUAD, {
       endpoint: "POST /api/squads",
@@ -2376,9 +2528,71 @@ export class ApiClient {
   }
 
   // Autopilots
-  async listAutopilots(params?: { status?: string }): Promise<ListAutopilotsResponse> {
+  async listAutopilotTemplates(): Promise<ListAutopilotTemplatesResponse> {
+    const raw = await this.fetch<unknown>("/api/autopilot-templates");
+    return parseWithFallback(
+      raw,
+      ListAutopilotTemplatesResponseSchema,
+      EMPTY_LIST_AUTOPILOT_TEMPLATES_RESPONSE,
+      { endpoint: "GET /api/autopilot-templates" },
+    );
+  }
+
+  async createAutopilotTemplate(data: SaveAutopilotTemplateRequest): Promise<AutopilotTemplate> {
+    const raw = await this.fetch<unknown>("/api/autopilot-templates", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+    return parseWithFallback(raw, AutopilotTemplateSchema, EMPTY_AUTOPILOT_TEMPLATE, {
+      endpoint: "POST /api/autopilot-templates",
+    }) as AutopilotTemplate;
+  }
+
+  async updateAutopilotTemplate(id: string, data: SaveAutopilotTemplateRequest): Promise<AutopilotTemplate> {
+    const raw = await this.fetch<unknown>(`/api/autopilot-templates/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    });
+    return parseWithFallback(raw, AutopilotTemplateSchema, EMPTY_AUTOPILOT_TEMPLATE, {
+      endpoint: "PUT /api/autopilot-templates/:id",
+    }) as AutopilotTemplate;
+  }
+
+  async deleteAutopilotTemplate(id: string): Promise<void> {
+    await this.fetch(`/api/autopilot-templates/${id}`, { method: "DELETE" });
+  }
+
+  async listIntegrationBindings(): Promise<ListIntegrationBindingsResponse> {
+    const raw = await this.fetch<unknown>("/api/integration-bindings");
+    return parseWithFallback(
+      raw,
+      ListIntegrationBindingsResponseSchema,
+      EMPTY_LIST_INTEGRATION_BINDINGS_RESPONSE,
+      { endpoint: "GET /api/integration-bindings" },
+    );
+  }
+
+  async replaceIntegrationBindings(
+    provider: string,
+    connectionId: string,
+    spaceIds: string[],
+  ): Promise<ListIntegrationBindingsResponse> {
+    const raw = await this.fetch<unknown>(
+      `/api/integration-bindings/${encodeURIComponent(provider)}/${encodeURIComponent(connectionId)}`,
+      { method: "PUT", body: JSON.stringify({ space_ids: spaceIds }) },
+    );
+    return parseWithFallback(
+      raw,
+      ListIntegrationBindingsResponseSchema,
+      EMPTY_LIST_INTEGRATION_BINDINGS_RESPONSE,
+      { endpoint: "PUT /api/integration-bindings/:provider/:connectionId" },
+    );
+  }
+
+  async listAutopilots(params?: { status?: string; space_id?: string }): Promise<ListAutopilotsResponse> {
     const search = new URLSearchParams();
     if (params?.status) search.set("status", params.status);
+    if (params?.space_id) search.set("space_id", params.space_id);
     const raw = await this.fetch<unknown>(`/api/autopilots?${search}`);
     return parseWithFallback(
       raw,

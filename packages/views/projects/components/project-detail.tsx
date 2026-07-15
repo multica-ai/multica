@@ -27,6 +27,7 @@ import { PriorityIcon } from "../../issues/components/priority-icon";
 import { ProjectResourcesSection } from "./project-resources-section";
 import { ProjectStartDatePicker } from "./project-start-date-picker";
 import { ProjectDueDatePicker } from "./project-due-date-picker";
+import { SpacePicker } from "../../spaces/components/space-picker";
 import { IssueSurface } from "../../issues/surface/issue-surface";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { Button } from "@multica/ui/components/ui/button";
@@ -405,6 +406,19 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
           </PropRow>
           <PropRow label={t(($) => $.detail.prop_due_date)}>
             <ProjectDueDatePicker dueDate={project.due_date} onUpdate={handleUpdateField} />
+          </PropRow>
+          <PropRow label={t(($) => $.detail.spaces)}>
+            <SpacePicker
+              spaceId={project.space_id}
+              onChange={() => {}}
+              disabled
+              triggerRender={
+                <button
+                  type="button"
+                  className="inline-flex items-center gap-1.5 text-xs hover:text-foreground transition-colors"
+                />
+              }
+            />
           </PropRow>
         </div>}
       </div>

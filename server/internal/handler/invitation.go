@@ -12,6 +12,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/logger"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
+	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
@@ -28,6 +29,9 @@ type InvitationResponse struct {
 	CreatedAt     string  `json:"created_at"`
 	UpdatedAt     string  `json:"updated_at"`
 	ExpiresAt     string  `json:"expires_at"`
+	// Spaces the invitee joins on accept. Always present (possibly empty, which
+	// means "fall back to the default space").
+	SpaceIDs []string `json:"space_ids"`
 	// Enriched fields (present in list responses).
 	InviterName   string `json:"inviter_name,omitempty"`
 	InviterEmail  string `json:"inviter_email,omitempty"`
@@ -35,6 +39,10 @@ type InvitationResponse struct {
 }
 
 func invitationToResponse(inv db.WorkspaceInvitation) InvitationResponse {
+	spaceIDs := make([]string, 0, len(inv.SpaceIds))
+	for _, id := range inv.SpaceIds {
+		spaceIDs = append(spaceIDs, uuidToString(id))
+	}
 	return InvitationResponse{
 		ID:            uuidToString(inv.ID),
 		WorkspaceID:   uuidToString(inv.WorkspaceID),
@@ -46,6 +54,7 @@ func invitationToResponse(inv db.WorkspaceInvitation) InvitationResponse {
 		CreatedAt:     timestampToString(inv.CreatedAt),
 		UpdatedAt:     timestampToString(inv.UpdatedAt),
 		ExpiresAt:     timestampToString(inv.ExpiresAt),
+		SpaceIDs:      spaceIDs,
 	}
 }
 
@@ -81,6 +90,29 @@ func (h *Handler) CreateInvitation(w http.ResponseWriter, r *http.Request) {
 	if role == "owner" {
 		writeError(w, http.StatusBadRequest, "cannot invite as owner")
 		return
+	}
+
+	// Validate any targeted spaces up front: each must be an active space in
+	// this workspace. Empty is allowed — the invitee falls back to the default
+	// space on accept. Dedup so a repeated id does not double-join later.
+	seenSpace := make(map[pgtype.UUID]struct{}, len(req.SpaceIDs))
+	spaceIDs := make([]pgtype.UUID, 0, len(req.SpaceIDs))
+	for _, raw := range req.SpaceIDs {
+		sid, ok := parseUUIDOrBadRequest(w, raw, "space_ids")
+		if !ok {
+			return
+		}
+		if _, dup := seenSpace[sid]; dup {
+			continue
+		}
+		if _, err := service.ValidateActiveSpace(r.Context(), h.Queries, requester.WorkspaceID, sid); err != nil {
+			if !writeSpaceResolveError(w, err) {
+				writeError(w, http.StatusBadRequest, err.Error())
+			}
+			return
+		}
+		seenSpace[sid] = struct{}{}
+		spaceIDs = append(spaceIDs, sid)
 	}
 
 	// Check if the user is already a member.
@@ -130,6 +162,7 @@ func (h *Handler) CreateInvitation(w http.ResponseWriter, r *http.Request) {
 		InviteeEmail:  email,
 		InviteeUserID: inviteeUserID,
 		Role:          role,
+		SpaceIds:      spaceIDs,
 	})
 	if err != nil {
 		if isUniqueViolation(err) {
@@ -425,6 +458,49 @@ func (h *Handler) AcceptInvitation(w http.ResponseWriter, r *http.Request) {
 		}
 		writeError(w, http.StatusInternalServerError, "failed to create membership")
 		return
+	}
+
+	// Resolve which spaces the invitee joins. The invitation may target
+	// specific spaces (chosen by the inviter); re-filter to still-active spaces
+	// at accept time in case any were archived while the invite was pending.
+	// Fall back to the default space so an invitee never lands space-less — the
+	// sidebar shows joined spaces only, and issue creation needs a per-user
+	// default. Hard failure rolls the whole accept back: a missing default
+	// space is data corruption, and silently skipping would mint a space-less
+	// member.
+	spaceRole := "member"
+	if accepted.Role == "owner" || accepted.Role == "admin" {
+		spaceRole = "lead"
+	}
+	var targetSpaces []db.WorkspaceSpace
+	if len(inv.SpaceIds) > 0 {
+		invited, err := qtx.ListWorkspaceSpacesByIDs(r.Context(), db.ListWorkspaceSpacesByIDsParams{
+			WorkspaceID: accepted.WorkspaceID,
+			SpaceIds:    inv.SpaceIds,
+		})
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to resolve invited spaces")
+			return
+		}
+		for _, s := range invited {
+			if !s.ArchivedAt.Valid {
+				targetSpaces = append(targetSpaces, s)
+			}
+		}
+	}
+	if len(targetSpaces) == 0 {
+		defSpace, err := qtx.GetDefaultWorkspaceSpace(r.Context(), accepted.WorkspaceID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to resolve default space")
+			return
+		}
+		targetSpaces = []db.WorkspaceSpace{defSpace}
+	}
+	for _, s := range targetSpaces {
+		if _, err := addSpaceMember(r.Context(), qtx, accepted.WorkspaceID, s.ID, user.ID, spaceRole); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to join space")
+			return
+		}
 	}
 
 	// Accepting an invite marks the invitee as onboarded. The web /

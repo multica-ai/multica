@@ -12,13 +12,14 @@ import (
 )
 
 type skillCreateInput struct {
-	WorkspaceID pgtype.UUID
-	CreatorID   pgtype.UUID
-	Name        string
-	Description string
-	Content     string
-	Config      any
-	Files       []CreateSkillFileRequest
+	WorkspaceID  pgtype.UUID
+	CreatorID    pgtype.UUID
+	Name         string
+	Description  string
+	Content      string
+	Config       any
+	Files        []CreateSkillFileRequest
+	Availability resolvedSkillAvailability
 }
 
 // createSkillWithFilesInTx writes a skill plus its supporting files using the
@@ -46,6 +47,22 @@ func createSkillWithFilesInTx(ctx context.Context, qtx *db.Queries, input skillC
 	if err != nil {
 		return SkillWithFilesResponse{}, err
 	}
+	mode := input.Availability.mode
+	if mode == "" {
+		mode = skillAvailabilityPrivate
+	}
+	skill, err = qtx.UpdateSkillAvailability(ctx, db.UpdateSkillAvailabilityParams{
+		ID:               skill.ID,
+		AvailabilityMode: mode,
+	})
+	if err != nil {
+		return SkillWithFilesResponse{}, err
+	}
+	if err := replaceSkillAvailableSpacesWithQueries(
+		ctx, qtx, skill.ID, input.WorkspaceID, input.CreatorID, input.Availability.spaceIDs,
+	); err != nil {
+		return SkillWithFilesResponse{}, err
+	}
 
 	fileResps := make([]SkillFileResponse, 0, len(input.Files))
 	for _, f := range input.Files {
@@ -65,8 +82,14 @@ func createSkillWithFilesInTx(ctx context.Context, qtx *db.Queries, input skillC
 		fileResps = append(fileResps, skillFileToResponse(sf))
 	}
 
+	resp := skillToResponse(skill)
+	rows, err := qtx.ListSkillAvailableSpaces(ctx, skill.ID)
+	if err != nil {
+		return SkillWithFilesResponse{}, err
+	}
+	applySkillAvailabilityToResponse(&resp, rows)
 	return SkillWithFilesResponse{
-		SkillResponse: skillToResponse(skill),
+		SkillResponse: resp,
 		Files:         fileResps,
 	}, nil
 }
@@ -205,12 +228,17 @@ func (h *Handler) overwriteSkillWithFiles(ctx context.Context, input skillOverwr
 		fileResps = append(fileResps, skillFileToResponse(sf))
 	}
 
+	resp := skillToResponse(skill)
+	rows, err := qtx.ListSkillAvailableSpaces(ctx, skill.ID)
+	if err != nil {
+		return SkillWithFilesResponse{}, err
+	}
+	applySkillAvailabilityToResponse(&resp, rows)
 	if err := tx.Commit(ctx); err != nil {
 		return SkillWithFilesResponse{}, err
 	}
-
 	return SkillWithFilesResponse{
-		SkillResponse: skillToResponse(skill),
+		SkillResponse: resp,
 		Files:         fileResps,
 	}, nil
 }

@@ -63,7 +63,9 @@ flags fall through to server defaults rather than sending empty strings.
 
 The HTTP body (`CreateAgentRequest`) accepts: `name`, `description`,
 `instructions`, `runtime_id`, `runtime_config`, `custom_env`, `custom_args`,
-`model`, `thinking_level`, `visibility`, `max_concurrent_tasks`, `mcp_config`.
+`model`, `thinking_level`, `visibility`, `permission_mode`,
+`invocation_targets`, `availability_mode`, `availability_space_ids`,
+`max_concurrent_tasks`, `mcp_config`.
 
 ## Field contracts
 
@@ -79,7 +81,9 @@ The HTTP body (`CreateAgentRequest`) accepts: `name`, `description`,
 | `runtime_config` | `agent.runtime_config` (JSON) | JSON shape checked CLI-side; server stores as-is | runtime-specific config; defaults to `{}` |
 | `custom_env` | `agent.custom_env` (JSON object) | — | daemon (process env); see Env & secrets |
 | `mcp_config` | `agent.mcp_config` (raw JSON) | CLI checks it is a JSON object or `null`; server stores as-is. At create, literal `null` is dropped (no-op); at update, `null` clears the column | daemon → provider (MCP servers) — **runtime-consumed**; redacted on read |
-| `visibility` | `agent.visibility` | — | access control; defaults to `private`; gates who can read/route a private agent (e.g. a private squad leader) — NOT the runtime prompt |
+| `visibility` | `agent.visibility` | legacy compatibility input | old clients map `private`/`workspace` to the corresponding invocation and Availability behavior — NOT the runtime prompt |
+| `availability_mode` | `agent.availability_mode` | `private`, `selected_spaces`, or `workspace` | Space access policy: where the Agent may work and which Space may be bound to a run |
+| `availability_space_ids` | `agent_available_space` rows | required and non-empty for `selected_spaces`; every Space must be active, in this workspace, and visible to the Agent owner | exact Space allow-list for Issue/Autopilot runs |
 | `max_concurrent_tasks` | `agent.max_concurrent_tasks` | — | scheduler task cap; defaults to `6` |
 
 Defaults when omitted: `runtime_config` → `{}`, `custom_env` → `{}`,
@@ -87,6 +91,34 @@ Defaults when omitted: `runtime_config` → `{}`, `custom_env` → `{}`,
 (all materialized server-side before the insert). `custom_args`/`runtime_config`
 are typed `[]string`/`any` and marshaled as-is — the JSON-shape rejection
 happens in the CLI, not the create handler.
+
+### Availability and invocation audience
+
+Space access answers **where** an Agent may work and is independent from the
+legacy invocation audience (`permission_mode` + `invocation_targets`), which
+answers **who** may invoke it. Both gates must pass. Adding an Agent to a Space
+authorizes its runs to work with that Space's Multica data. Issue, Autopilot,
+Quick Create, and similar work runs are bound to exactly one Space. Chat may
+instead be created with one Space or `All spaces`; the latter is always the
+current intersection of the initiating member's collaboration access and the
+Agent's Availability. Space access does not grant credentials or bypass a
+separate Integration or Resource binding.
+
+- `private`: only the Agent owner may invoke it. For any run, the owner must
+  still have collaboration access to every selected target Space.
+- `selected_spaces`: the Agent is explicitly added to the Spaces in
+  `availability_space_ids`. The target Issue/Autopilot/Squad Space must exactly
+  match one of them, including when the caller is the owner. Chat can use one
+  selected Space or All spaces within this allow-list.
+- `workspace`: valid in every active Space in the workspace; Chat still
+  intersects that set with the initiating member's collaboration access.
+
+When `availability_mode` is sent explicitly, it is authoritative: `private`
+sets an owner-only audience; the two shared modes set the workspace audience;
+old member/team targets are cleared. When new Availability fields are omitted,
+legacy create/update calls keep their old meaning. A real legacy access change
+maps location to private/workspace, while a no-op legacy echo does not overwrite
+an existing `selected_spaces` choice.
 
 `thinking_level` is validated only at the provider level: fixed-catalog
 providers reject an unrecognized literal, while dynamic-catalog providers such
@@ -219,6 +251,10 @@ State-changing (require an explicit instruction — do not run speculatively):
   clear; only `custom_env` is gated behind the dedicated env endpoint.
 - "`agent get` shows env values." It shows only `has_custom_env` and
   `custom_env_key_count`.
+- "Availability alone grants access to a Space's data." It does not; the
+  member and selected task/Chat scope gates must also pass.
+- "The Agent owner can use Selected Spaces anywhere." The owner cannot bypass
+  either the selected Space allow-list or their own collaboration access.
 - "An invalid `thinking_level`/`model` combo is caught at create." Only an
   unknown provider-level literal is — model-specific gaps fail at run time.
 - "`set` and `add` are interchangeable for skills." `set` replaces all

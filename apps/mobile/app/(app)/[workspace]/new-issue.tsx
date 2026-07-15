@@ -73,7 +73,9 @@ export default function NewIssueModal() {
           ? { assignee_type: assignee.type, assignee_id: assignee.id }
           : {}),
         ...(dueDate ? { due_date: dueDate } : {}),
-        ...(project ? { project_id: project.id } : {}),
+        ...(project
+          ? { project_id: project.id, space_id: project.space_id }
+          : {}),
       });
       router.back();
     } catch (err) {
@@ -136,7 +138,10 @@ export default function NewIssueModal() {
         {/* Mention suggestions float above the keyboard only when the user
             types `@`. Self-hides via `if (!visible) return null` so it
             doesn't take space at rest. */}
-        <MentionSuggestionBar {...description.suggestionBar} />
+        <MentionSuggestionBar
+          {...description.suggestionBar}
+          spaceId={project?.space_id ?? null}
+        />
       </KeyboardAvoidingView>
     </>
   );

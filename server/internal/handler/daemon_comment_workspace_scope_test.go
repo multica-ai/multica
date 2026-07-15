@@ -35,9 +35,14 @@ func insertCommentForScopeTest(t *testing.T, ctx context.Context, issueID, works
 // with a hand-written row. Returns the created task id.
 func enqueueIssueTaskWithTrigger(t *testing.T, ctx context.Context, agentID, issueID, triggerCommentID string) string {
 	t.Helper()
+	var spaceID pgtype.UUID
+	if err := testPool.QueryRow(ctx, `SELECT space_id FROM issue WHERE id = $1`, issueID).Scan(&spaceID); err != nil {
+		t.Fatalf("load issue Space: %v", err)
+	}
 	task, err := testHandler.TaskService.EnqueueTaskForIssue(ctx, db.Issue{
 		ID:           parseUUID(issueID),
 		WorkspaceID:  parseUUID(testWorkspaceID),
+		SpaceID:      spaceID,
 		AssigneeType: pgtype.Text{String: "agent", Valid: true},
 		AssigneeID:   parseUUID(agentID),
 		CreatorType:  "member",
@@ -124,13 +129,21 @@ func TestClaimDoesNotLeakForeignWorkspaceTriggerCommentOrSummary(t *testing.T) {
 
 	// A comment that lives entirely in a DIFFERENT workspace (its own issue).
 	otherWS := createOtherTestWorkspace(t)
+	var foreignSpaceID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO workspace_space (workspace_id, name, key, issue_counter, created_by)
+		VALUES ($1, 'Foreign Scope', 'OTH', 90001, $2)
+		RETURNING id
+	`, otherWS, testUserID).Scan(&foreignSpaceID); err != nil {
+		t.Fatalf("insert foreign-workspace space: %v", err)
+	}
 	var foreignIssueID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type, number, position)
+		INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type, number, position, space_id)
 		VALUES ($1, 'foreign issue', 'in_progress', 'none', $2, 'member',
-			(SELECT COALESCE(MAX(number), 90000) + 1 FROM issue WHERE workspace_id = $1), 0)
+			(SELECT COALESCE(MAX(number), 90000) + 1 FROM issue WHERE workspace_id = $1), 0, $3)
 		RETURNING id
-	`, otherWS, testUserID).Scan(&foreignIssueID); err != nil {
+	`, otherWS, testUserID, foreignSpaceID).Scan(&foreignIssueID); err != nil {
 		t.Fatalf("insert foreign-workspace issue: %v", err)
 	}
 	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, foreignIssueID) })

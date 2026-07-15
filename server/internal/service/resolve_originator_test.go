@@ -149,6 +149,12 @@ func seedOriginatorFanout(t *testing.T, pool *pgxpool.Pool) (memberCommentID, ag
 	`, workspaceID, userIDStr); err != nil {
 		t.Fatalf("seed member: %v", err)
 	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO workspace_space (workspace_id, name, key, created_by)
+		VALUES ($1, 'Default', 'DEF', $2)
+	`, workspaceID, userIDStr); err != nil {
+		t.Fatalf("seed default space: %v", err)
+	}
 
 	if err := pool.QueryRow(ctx, `
 		INSERT INTO agent_runtime (
@@ -186,8 +192,8 @@ func seedOriginatorFanout(t *testing.T, pool *pgxpool.Pool) (memberCommentID, ag
 	}
 
 	if err := pool.QueryRow(ctx, `
-		INSERT INTO issue (workspace_id, title, creator_type, creator_id)
-		VALUES ($1, 'fanout-issue', 'member', $2)
+		INSERT INTO issue (workspace_id, space_id, title, creator_type, creator_id)
+		VALUES ($1, (SELECT id FROM workspace_space WHERE workspace_id = $1 LIMIT 1), 'fanout-issue', 'member', $2)
 		RETURNING id
 	`, workspaceID, userIDStr).Scan(&issueID); err != nil {
 		t.Fatalf("seed issue: %v", err)
@@ -431,7 +437,7 @@ func TestEnqueueTaskForIssueStoresRuntimeMCPOverlayInQueuedRow(t *testing.T) {
 	email := fmt.Sprintf("runtime-overlay-insert-%d@multica.test", suffix)
 	workspaceSlug := fmt.Sprintf("runtime-overlay-insert-%d", suffix)
 
-	var userIDStr, workspaceIDStr, runtimeIDStr, agentIDStr, issueIDStr string
+	var userIDStr, workspaceIDStr, spaceIDStr, runtimeIDStr, agentIDStr, issueIDStr string
 	if err := pool.QueryRow(ctx, `
 		INSERT INTO "user" (name, email)
 		VALUES ('Runtime Overlay Insert User', $1)
@@ -459,6 +465,13 @@ func TestEnqueueTaskForIssueStoresRuntimeMCPOverlayInQueuedRow(t *testing.T) {
 		t.Fatalf("seed member: %v", err)
 	}
 	if err := pool.QueryRow(ctx, `
+		INSERT INTO workspace_space (workspace_id, name, key, created_by)
+		VALUES ($1, 'Default', 'DEF', $2)
+		RETURNING id
+	`, workspaceIDStr, userIDStr).Scan(&spaceIDStr); err != nil {
+		t.Fatalf("seed default space: %v", err)
+	}
+	if err := pool.QueryRow(ctx, `
 		INSERT INTO agent_runtime (
 			workspace_id, name, runtime_mode, provider, status, device_info, metadata, owner_id
 		) VALUES ($1, 'runtime-overlay-r', 'cloud', 'codex', 'online', '', '{}'::jsonb, $2)
@@ -480,11 +493,11 @@ func TestEnqueueTaskForIssueStoresRuntimeMCPOverlayInQueuedRow(t *testing.T) {
 	}
 	if err := pool.QueryRow(ctx, `
 		INSERT INTO issue (
-			workspace_id, title, creator_type, creator_id, assignee_type, assignee_id, priority
+			workspace_id, space_id, title, creator_type, creator_id, assignee_type, assignee_id, priority
 		)
-		VALUES ($1, 'runtime overlay issue', 'member', $2, 'agent', $3, 'medium')
+		VALUES ($1, $4, 'runtime overlay issue', 'member', $2, 'agent', $3, 'medium')
 		RETURNING id
-	`, workspaceIDStr, userIDStr, agentIDStr).Scan(&issueIDStr); err != nil {
+	`, workspaceIDStr, userIDStr, agentIDStr, spaceIDStr).Scan(&issueIDStr); err != nil {
 		t.Fatalf("seed issue: %v", err)
 	}
 
@@ -507,6 +520,7 @@ func TestEnqueueTaskForIssueStoresRuntimeMCPOverlayInQueuedRow(t *testing.T) {
 		CreatorType:  "member",
 		CreatorID:    userID,
 		WorkspaceID:  util.MustParseUUID(workspaceIDStr),
+		SpaceID:      util.MustParseUUID(spaceIDStr),
 		AssigneeType: pgtype.Text{String: "agent", Valid: true},
 	})
 	if err != nil {

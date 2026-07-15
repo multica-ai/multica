@@ -53,23 +53,14 @@ import { isReservedSlug } from "@multica/core/paths";
  *
  * The create-fields block doubles as a pedagogical preview: the URL is
  * rendered as a `<host>/[slug]` pill (host derived from the deployment's
- * app URL so self-hosted instances show their own domain), and a live
- * `Issues will look
- * like ACME-123` line shows the user what their issue IDs will read
- * like before they've created anything.
+ * app URL so self-hosted instances show their own domain). The default
+ * space's issue key is derived server-side from the slug, so the form
+ * only asks for name and URL.
  *
  * Resume path ships two picker cards (existing + create-new) and the
  * user toggles between them. No-existing path just shows the create
  * fields directly.
  */
-
-function issuePrefix(slug: string): string {
-  // Mirrors the server's default prefix derivation — first 4 chars of
-  // the slug, uppercased. Falls back to "WS" when the slug is empty so
-  // the preview line never collapses to a single dangling "-".
-  const head = slug.trim().replace(/[^a-z0-9]/g, "").slice(0, 4);
-  return (head || "ws").toUpperCase();
-}
 
 export function StepWorkspace({
   existing,
@@ -116,7 +107,21 @@ export function StepWorkspace({
   const [slug, setSlug] = useState("");
   const [slugServerError, setSlugServerError] = useState<string | null>(null);
   const slugTouched = useRef(false);
+  // Blur-driven "required" validation, separate from `slugTouched` (which
+  // tracks whether the user manually edited the slug). We only flag an empty
+  // field as an error once it has been focused and left, so the form never
+  // greets the user in red — the normal required-field UX.
+  const [nameBlurred, setNameBlurred] = useState(false);
+  const [slugBlurred, setSlugBlurred] = useState(false);
 
+  const nameError =
+    nameBlurred && name.trim().length === 0
+      ? t(($) => $.step_workspace.name_required)
+      : null;
+  const slugRequiredError =
+    slugBlurred && slug.trim().length === 0
+      ? t(($) => $.step_workspace.slug_required)
+      : null;
   const slugValidationError =
     slug.length > 0 && !WORKSPACE_SLUG_REGEX.test(slug)
       ? t(($) => $.step_workspace.slug_format_error)
@@ -125,7 +130,8 @@ export function StepWorkspace({
     slug.length > 0 && isReservedSlug(slug)
       ? t(($) => $.step_workspace.slug_reserved_error)
       : null;
-  const slugError = slugValidationError ?? slugReservedError ?? slugServerError;
+  const slugError =
+    slugRequiredError ?? slugValidationError ?? slugReservedError ?? slugServerError;
   const canCreate =
     name.trim().length > 0 && slug.trim().length > 0 && !slugError;
 
@@ -148,7 +154,10 @@ export function StepWorkspace({
   const handleCreate = () => {
     if (!canCreate || createWorkspace.isPending) return;
     createWorkspace.mutate(
-      { name: name.trim(), slug: slug.trim() },
+      {
+        name: name.trim(),
+        slug: slug.trim(),
+      },
       {
         onSuccess: onCreated,
         onError: (error) => {
@@ -230,12 +239,15 @@ export function StepWorkspace({
           type="text"
           value={name}
           onChange={(e) => handleNameChange(e.target.value)}
+          onBlur={() => setNameBlurred(true)}
+          aria-invalid={!!nameError}
           placeholder={t(($) => $.step_workspace.name_placeholder)}
           onKeyDown={(e) => {
             if (isImeComposing(e)) return;
             if (e.key === "Enter") handleCreate();
           }}
         />
+        {nameError && <p className="text-xs text-destructive">{nameError}</p>}
       </div>
       <div className="flex flex-col gap-1.5">
         <Label
@@ -244,7 +256,12 @@ export function StepWorkspace({
         >
           {t(($) => $.step_workspace.url_label)}
         </Label>
-        <div className="flex items-center rounded-md border bg-muted transition-colors focus-within:border-foreground">
+        <div
+          className={cn(
+            "flex items-center rounded-md border bg-muted transition-colors focus-within:border-foreground",
+            slugError && "border-destructive focus-within:border-destructive",
+          )}
+        >
           <span className="select-none pl-3 font-mono text-sm text-muted-foreground">
             {`${urlHost}/`}
           </span>
@@ -253,6 +270,7 @@ export function StepWorkspace({
             type="text"
             value={slug}
             onChange={(e) => handleSlugChange(e.target.value)}
+            onBlur={() => setSlugBlurred(true)}
             placeholder={t(($) => $.step_workspace.slug_placeholder)}
             className="border-0 bg-transparent font-mono shadow-none focus-visible:ring-0"
             onKeyDown={(e) => {
@@ -262,18 +280,6 @@ export function StepWorkspace({
           />
         </div>
         {slugError && <p className="text-xs text-destructive">{slugError}</p>}
-      </div>
-      <div className="flex flex-col gap-1.5">
-        <div className="text-xs font-medium text-muted-foreground">
-          {t(($) => $.step_workspace.issue_prefix_label)}
-        </div>
-        <div className="text-sm leading-[1.55] text-muted-foreground">
-          {t(($) => $.step_workspace.issue_prefix_prefix)}
-          <span className="font-mono text-foreground">
-            {issuePrefix(slug)}-123
-          </span>
-          {t(($) => $.step_workspace.issue_prefix_suffix)}
-        </div>
       </div>
     </div>
   );

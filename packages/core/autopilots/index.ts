@@ -5,6 +5,7 @@ export {
   autopilotRunsOptions,
   autopilotDeliveriesOptions,
   autopilotDeliveryOptions,
+  autopilotTemplateListOptions,
 } from "./queries";
 export {
   useCreateAutopilot,
@@ -16,5 +17,8 @@ export {
   useDeleteAutopilotTrigger,
   useRotateAutopilotTriggerWebhookToken,
   useReplayAutopilotDelivery,
+  useCreateAutopilotTemplate,
+  useUpdateAutopilotTemplate,
+  useDeleteAutopilotTemplate,
 } from "./mutations";
 export { buildAutopilotWebhookUrl } from "./webhook";

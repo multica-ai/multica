@@ -23,8 +23,9 @@ func TestMemberAllowedToViewAgent_Pure(t *testing.T) {
 	otherUserID := "22222222-2222-2222-2222-222222222222"
 
 	agent := db.Agent{
-		OwnerID:        util.MustParseUUID(ownerUserID),
-		PermissionMode: "private",
+		OwnerID:          util.MustParseUUID(ownerUserID),
+		PermissionMode:   "private",
+		AvailabilityMode: agentAvailabilityPrivate,
 	}
 
 	cases := []struct {
@@ -42,7 +43,7 @@ func TestMemberAllowedToViewAgent_Pure(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := memberAllowedToViewAgent(agent, nil, tc.userID, tc.role)
+			got := memberAllowedToViewAgent(agent, nil, nil, nil, tc.userID, tc.role)
 			if got != tc.want {
 				t.Fatalf("memberAllowedToViewAgent(userID=%s, role=%s) = %v; want %v",
 					tc.userID, tc.role, got, tc.want)
@@ -78,6 +79,14 @@ func privateAgentTestFixture(t *testing.T) (agentID, ownerID, memberID string) {
 	`, testWorkspaceID, ownerID); err != nil {
 		t.Fatalf("add owner as member: %v", err)
 	}
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO workspace_space_member (workspace_id, space_id, user_id, role, sort_order)
+		SELECT workspace_id, id, $2, 'member', 1
+		FROM workspace_space
+		WHERE workspace_id = $1 AND is_default = true
+	`, testWorkspaceID, ownerID); err != nil {
+		t.Fatalf("join owner to default space: %v", err)
+	}
 
 	if err := testPool.QueryRow(ctx, `
 		INSERT INTO "user" (name, email)
@@ -96,6 +105,14 @@ func privateAgentTestFixture(t *testing.T) (agentID, ownerID, memberID string) {
 		VALUES ($1, $2, 'member')
 	`, testWorkspaceID, memberID); err != nil {
 		t.Fatalf("add plain member: %v", err)
+	}
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO workspace_space_member (workspace_id, space_id, user_id, role, sort_order)
+		SELECT workspace_id, id, $2, 'member', 1
+		FROM workspace_space
+		WHERE workspace_id = $1 AND is_default = true
+	`, testWorkspaceID, memberID); err != nil {
+		t.Fatalf("join plain member to default space: %v", err)
 	}
 
 	if err := testPool.QueryRow(ctx, `
@@ -446,9 +463,10 @@ func TestMentionAgent_RejectsCrossWorkspaceAgentUUID(t *testing.T) {
 	// agent and enqueued a task.
 	var issueID, commentID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO issue (workspace_id, title, status, priority, creator_type, creator_id, number)
+		INSERT INTO issue (workspace_id, title, status, priority, creator_type, creator_id, number, space_id)
 		VALUES ($1, 'cross-ws mention test', 'todo', 'medium', 'member', $2,
-		        COALESCE((SELECT MAX(number) FROM issue WHERE workspace_id = $1), 0) + 1)
+		        COALESCE((SELECT MAX(number) FROM issue WHERE workspace_id = $1), 0) + 1,
+		        (SELECT id FROM workspace_space WHERE workspace_id = $1 LIMIT 1))
 		RETURNING id
 	`, testWorkspaceID, testUserID).Scan(&issueID); err != nil {
 		t.Fatalf("create test issue: %v", err)
@@ -531,10 +549,11 @@ func TestShouldEnqueueOnComment_PrivateAgentGate(t *testing.T) {
 	var issueID string
 	if err := testPool.QueryRow(ctx, `
 		INSERT INTO issue (workspace_id, title, status, priority, creator_type, creator_id,
-		                   assignee_type, assignee_id, number)
+		                   assignee_type, assignee_id, number, space_id)
 		VALUES ($1, 'on_comment private-agent gate test', 'todo', 'medium', 'member', $2,
 		        'agent', $3,
-		        COALESCE((SELECT MAX(number) FROM issue WHERE workspace_id = $1), 0) + 1)
+		        COALESCE((SELECT MAX(number) FROM issue WHERE workspace_id = $1), 0) + 1,
+		        (SELECT id FROM workspace_space WHERE workspace_id = $1 LIMIT 1))
 		RETURNING id
 	`, testWorkspaceID, testUserID, agentID).Scan(&issueID); err != nil {
 		t.Fatalf("create issue assigned to private agent: %v", err)
@@ -587,7 +606,7 @@ func TestShouldEnqueueOnComment_PrivateAgentGate(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-				got := testHandler.shouldEnqueueAssigneeFallback(ctx, issue, tc.actorType, tc.actorID, commentTriggerComputeOptions{})
+			got := testHandler.shouldEnqueueAssigneeFallback(ctx, issue, tc.actorType, tc.actorID, commentTriggerComputeOptions{})
 			if got != tc.want {
 				t.Fatalf("%s\n  actor=%s/%s got=%v want=%v",
 					tc.reason, tc.actorType, tc.actorID, got, tc.want)

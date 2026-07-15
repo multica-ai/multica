@@ -125,6 +125,7 @@ func init() {
 	projectListCmd.Flags().String("output", "table", "Output format: table or json")
 	projectListCmd.Flags().Bool("full-id", false, "Show full UUIDs in table output")
 	projectListCmd.Flags().String("status", "", "Filter by status")
+	projectListCmd.Flags().String("space", "", "Filter by Space UUID or key")
 
 	// project get
 	projectGetCmd.Flags().String("output", "json", "Output format: table or json")
@@ -137,6 +138,7 @@ func init() {
 	projectCreateCmd.Flags().String("lead", "", "Lead name (member or agent)")
 	projectCreateCmd.Flags().String("start-date", "", "Start date (calendar day, YYYY-MM-DD)")
 	projectCreateCmd.Flags().String("due-date", "", "Due date (calendar day, YYYY-MM-DD)")
+	projectCreateCmd.Flags().String("space", "", "Owning Space UUID or key")
 	projectCreateCmd.Flags().StringArray("repo", nil, "Attach a github_repo resource by URL (may be repeated)")
 	projectCreateCmd.Flags().String("output", "json", "Output format: table or json")
 
@@ -210,6 +212,13 @@ func runProjectList(cmd *cobra.Command, _ []string) error {
 	}
 	if v, _ := cmd.Flags().GetString("status"); v != "" {
 		params.Set("status", v)
+	}
+	if v, _ := cmd.Flags().GetString("space"); v != "" {
+		spaceID, err := resolveSpaceRef(ctx, client, v)
+		if err != nil {
+			return fmt.Errorf("resolve space: %w", err)
+		}
+		params.Set("space_id", spaceID)
 	}
 
 	path := "/api/projects"
@@ -341,6 +350,13 @@ func runProjectCreate(cmd *cobra.Command, _ []string) error {
 	}
 	if v, _ := cmd.Flags().GetString("due-date"); v != "" {
 		body["due_date"] = v
+	}
+	if spaceRef, _ := cmd.Flags().GetString("space"); spaceRef != "" {
+		spaceID, err := resolveSpaceRef(ctx, client, spaceRef)
+		if err != nil {
+			return fmt.Errorf("resolve space: %w", err)
+		}
+		body["space_id"] = spaceID
 	}
 
 	// Bundle resources into the create payload so the server attaches them in

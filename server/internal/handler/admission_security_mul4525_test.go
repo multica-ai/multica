@@ -65,9 +65,9 @@ func TestSendChatMessage_InvokeRevokedAfterSessionCreate(t *testing.T) {
 	var agentID string
 	if err := testPool.QueryRow(ctx, `
 		INSERT INTO agent (workspace_id, name, description, runtime_mode, runtime_config,
-			runtime_id, visibility, permission_mode, max_concurrent_tasks, owner_id,
+			runtime_id, visibility, permission_mode, availability_mode, max_concurrent_tasks, owner_id,
 			instructions, custom_env, custom_args)
-		VALUES ($1, 'chat-revoke-agent', '', 'cloud', '{}'::jsonb, $2, 'private', 'public_to', 1, $3,
+		VALUES ($1, 'chat-revoke-agent', '', 'cloud', '{}'::jsonb, $2, 'private', 'public_to', 'workspace', 1, $3,
 			'', '{}'::jsonb, '[]'::jsonb)
 		RETURNING id`, testWorkspaceID, handlerTestRuntimeID(t), ownerID).Scan(&agentID); err != nil {
 		t.Fatalf("seed agent: %v", err)
@@ -186,8 +186,8 @@ func TestRerunIssue_PrivateHistoricalAgent(t *testing.T) {
 
 	var issueID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO issue (workspace_id, title, creator_type, creator_id, assignee_type, assignee_id, priority)
-		VALUES ($1, 'rerun private agent', 'member', $2, 'agent', $3, 'medium')
+		INSERT INTO issue (workspace_id, space_id, title, creator_type, creator_id, assignee_type, assignee_id, priority)
+		VALUES ($1, (SELECT id FROM workspace_space WHERE workspace_id = $1 AND is_default LIMIT 1), 'rerun private agent', 'member', $2, 'agent', $3, 'medium')
 		RETURNING id`, testWorkspaceID, ownerID, agentID).Scan(&issueID); err != nil {
 		t.Fatalf("seed issue: %v", err)
 	}
@@ -204,6 +204,7 @@ func TestRerunIssue_PrivateHistoricalAgent(t *testing.T) {
 		CreatorType:  "member",
 		CreatorID:    util.MustParseUUID(ownerID),
 		WorkspaceID:  util.MustParseUUID(testWorkspaceID),
+		SpaceID:      util.MustParseUUID(defaultSpaceIDForTestWorkspace(t)),
 		AssigneeType: pgtype.Text{String: "agent", Valid: true},
 	})
 	if err != nil {

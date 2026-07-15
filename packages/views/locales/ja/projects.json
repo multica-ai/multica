@@ -63,6 +63,7 @@
     "unpin_tooltip": "サイドバーの固定を解除",
     "sidebar_tooltip": "サイドバーの開閉",
     "copy_link": "リンクをコピー",
+    "spaces": "Space",
     "delete_action": "プロジェクトを削除",
     "section_properties": "プロパティ",
     "section_progress": "進捗",
@@ -122,6 +123,10 @@
     "description": "プロジェクトが削除されます。イシューは削除されませんが、リンクが解除されます。",
     "confirm": "削除",
     "cancel": "キャンセル"
+  },
+  "manage_spaces": {
+    "empty": "少なくとも 1 つの Space を選択してください。",
+    "toast_failed": "Space の更新に失敗しました"
   },
   "picker": {
     "no_project": "プロジェクトなし",

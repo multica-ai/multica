@@ -44,6 +44,14 @@ vi.mock("./slack-tab", () => ({
   SlackTab: () => <div data-testid="slack-tab" />,
 }));
 
+vi.mock("./github-tab", () => ({
+  GitHubTab: () => <div data-testid="github-tab" />,
+}));
+
+vi.mock("./integration-space-bindings", () => ({
+  IntegrationSpaceBindings: () => <div data-testid="integration-space-bindings" />,
+}));
+
 import { IntegrationsTab } from "./integrations-tab";
 
 function renderTab() {

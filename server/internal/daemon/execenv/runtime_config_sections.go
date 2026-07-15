@@ -200,8 +200,8 @@ func writeAvailableCommands(b *strings.Builder) {
 	b.WriteString("### Core\n")
 	b.WriteString("- `multica issue get <id> --output json` — full issue.\n")
 	b.WriteString("- `multica issue comment list <issue-id> [--thread <comment-id> [--tail N] | --recent N] [--before <ts> --before-id <uuid>] [--since <RFC3339>] [--full] --output json` — thread-aware comment reads. Resolved threads come back folded by default on complete-thread reads (default list, `--recent`, `--thread` without `--tail`); pass `--full` to expand. Page older replies / threads with `--before`/`--before-id` (stderr labels: `Next reply cursor`, `Next thread cursor`); `--help` for full semantics.\n")
-	b.WriteString("- `multica issue create --title \"...\" [--description-file <path>] [--priority X] [--status X] [--assignee X | --assignee-id <uuid>] [--parent <issue-id>] [--stage N] [--project <project-id>] [--due-date <RFC3339>] [--attachment <path>]` — create an issue. For agent-authored long descriptions prefer `--description-file <path>` (heredoc stdin can swallow trailing flags, #4182). Write that file inside your working directory (e.g. `./description.md`), never `/tmp` or shared paths, and treat a failed write as fatal — the CLI rejects a path outside the workdir so a stale file from another run can't leak in (MUL-4252).\n")
-	b.WriteString("- `multica issue update <id> [--title X] [--description-file <path>] [--priority X] [--status X] [--assignee X] [--parent <issue-id>] [--stage N] [--project <project-id>] [--due-date <RFC3339>]` — update fields; pass `--parent \"\"` to clear parent.\n")
+	b.WriteString("- `multica issue create --title \"...\" [--description-file <path>] [--priority X] [--status X] [--assignee X | --assignee-id <uuid>] [--parent <issue-id>] [--stage N] [--space <space-id-or-key>] [--project <project-id>] [--due-date <RFC3339>] [--attachment <path>]` — create an issue. Omitting `--space` falls back to the workspace's default Space. For agent-authored long descriptions prefer `--description-file <path>` (heredoc stdin can swallow trailing flags, #4182). Write that file inside your working directory (e.g. `./description.md`), never `/tmp` or shared paths, and treat a failed write as fatal — the CLI rejects a path outside the workdir so a stale file from another run can't leak in (MUL-4252).\n")
+	b.WriteString("- `multica issue update <id> [--title X] [--description-file <path>] [--priority X] [--status X] [--assignee X] [--parent <issue-id>] [--stage N] [--project <project-id>] [--due-date <RFC3339>]` — update fields. Issue Space is immutable; pass `--parent \"\"` to clear parent.\n")
 	b.WriteString("- `multica issue status <id> <status>` — flip status (todo / in_progress / in_review / done / blocked / backlog / cancelled).\n")
 	b.WriteString("- `multica issue children <id> [--output json]` — list a parent's sub-issues grouped by stage.\n")
 	b.WriteString("- `multica issue comment add <issue-id> [--content \"...\" | --content-file <path> | --content-stdin] [--parent <comment-id>] [--attachment <path>]` — post a comment. Agent-authored bodies MUST use `--content-file`. `multica issue comment add --help` for full flags.\n")
@@ -221,7 +221,7 @@ func writeAvailableCommandsQuickCreate(b *strings.Builder) {
 	b.WriteString("## Available Commands\n\n")
 	b.WriteString("**Use `--output json` for structured data.** For anything beyond `issue create`, run `multica --help` or `multica <command> --help`.\n\n")
 	b.WriteString("### Core\n")
-	b.WriteString("- `multica issue create --title \"...\" [--description \"...\" | --description-file <path> | --description-stdin] [--priority X] [--status X] [--assignee X | --assignee-id <uuid>] [--parent <issue-id>] [--stage N] [--project <project-id>] [--due-date <RFC3339>] [--attachment <path>]` — Create a new issue; `--attachment` may be repeated. For agent-authored long descriptions, prefer `--description-file <path>` over `--description-stdin` (flags after a HEREDOC terminator can be silently swallowed, #4182). Write that file inside your working directory (e.g. `./description.md`), never `/tmp` or shared paths, and treat a failed write as fatal — the CLI rejects a path outside the workdir so a stale file from another run can't leak in (MUL-4252).\n\n")
+	b.WriteString("- `multica issue create --title \"...\" [--description \"...\" | --description-file <path> | --description-stdin] [--priority X] [--status X] [--assignee X | --assignee-id <uuid>] [--parent <issue-id>] [--stage N] [--space <space-id-or-key>] [--project <project-id>] [--due-date <RFC3339>] [--attachment <path>]` — Create a new issue; `--attachment` may be repeated. Omitting `--space` falls back to the workspace's default Space. For agent-authored long descriptions, prefer `--description-file <path>` over `--description-stdin` (flags after a HEREDOC terminator can be silently swallowed, #4182). Write that file inside your working directory (e.g. `./description.md`), never `/tmp` or shared paths, and treat a failed write as fatal — the CLI rejects a path outside the workdir so a stale file from another run can't leak in (MUL-4252).\n\n")
 }
 
 // writeCommentFormatting emits the cross-platform file-first guardrail.
@@ -253,6 +253,59 @@ func writeRepositories(b *strings.Builder, ctx TaskContextForEnv) {
 		}
 	}
 	b.WriteString("\n")
+}
+
+// writeSpaceContext emits either one bound Space or the concrete contexts in
+// an All-spaces Chat. All-spaces access is not workspace-global: the listed
+// Spaces are the current intersection of member collaboration and Agent
+// Availability, and commands must still name the Space they act on.
+func writeSpaceContext(b *strings.Builder, ctx TaskContextForEnv) {
+	if ctx.SpaceScope == "all" && len(ctx.Spaces) > 0 {
+		b.WriteString("## Space Contexts\n\n")
+		b.WriteString("This Chat can work across the following Spaces. Treat this list as the complete data boundary for the run; do not infer access to any other Space. For list, search, create, or update operations, name the target with `--space <space-id-or-key>`.\n\n")
+		for _, space := range ctx.Spaces {
+			label := space.Name
+			if label == "" {
+				label = space.Key
+			}
+			fmt.Fprintf(b, "### %s", label)
+			if space.Key != "" {
+				fmt.Fprintf(b, " (`%s`)", space.Key)
+			}
+			b.WriteString("\n\n")
+			if ctxText := strings.TrimRight(space.Context, " \t\r\n"); ctxText != "" {
+				b.WriteString(ctxText)
+				b.WriteString("\n\n")
+			}
+		}
+		b.WriteString("Issue and Project Space is immutable in this release. If the user's request could create work in more than one listed Space and no target is clear, ask which Space to use.\n\n")
+		return
+	}
+	if ctx.SpaceID == "" {
+		return
+	}
+	b.WriteString("## Space Context\n\n")
+	if ctx.SpaceName != "" && ctx.SpaceKey != "" {
+		fmt.Fprintf(b, "This run is bound to the **%s** Space (key `%s`) — it owns the `%s-N` issue identifier namespace.\n\n", ctx.SpaceName, ctx.SpaceKey, ctx.SpaceKey)
+	}
+	if ctxText := strings.TrimRight(ctx.SpaceContext, " \t\r\n"); ctxText != "" {
+		b.WriteString("### Operating Context\n\n")
+		b.WriteString(ctxText)
+		b.WriteString("\n\n")
+	}
+	b.WriteString("Pass `--space <space-id-or-key>` on `multica issue create` to file a new issue under a specific Space instead of the workspace default. Issue Space is immutable in this release; do not attempt to move an existing issue between Spaces.\n\n")
+}
+
+func writeIntegrationBindings(b *strings.Builder, ctx TaskContextForEnv) {
+	if len(ctx.IntegrationBindings) == 0 {
+		return
+	}
+	b.WriteString("## Space Integration Bindings\n\n")
+	b.WriteString("These Workspace connections are explicitly available to this Space:\n\n")
+	for _, binding := range ctx.IntegrationBindings {
+		fmt.Fprintf(b, "- %s: %s (`%s`)\n", binding.Provider, binding.DisplayName, binding.ConnectionID)
+	}
+	b.WriteString("\nA binding is an allowed connection reference, not a credential grant. Use it only when the matching tool or credential is mounted for this run, and never assume permissions beyond the current member, Agent, and third-party account.\n\n")
 }
 
 // writeProjectContext emits the Project Context section when the issue
@@ -530,7 +583,7 @@ func writeOutput(b *strings.Builder, kind taskKind, ctx TaskContextForEnv) {
 //	Attachments           |    ✓    |   ✓    |     —     |      —       |  —
 //
 // Always-on rows — Header, Background Task Safety, Agent Identity,
-// Requesting User, Task Initiator, Workspace Context, Connected Apps,
+// Requesting User, Task Initiator, Workspace Context, Space Context, Connected Apps,
 // Workflow, Always Use CLI, Output — are shared by every kind and emitted
 // unconditionally (or gated by their own data preconditions).
 func buildMetaSkillContentSlim(provider string, ctx TaskContextForEnv) string {
@@ -544,7 +597,9 @@ func buildMetaSkillContentSlim(provider string, ctx TaskContextForEnv) string {
 	writeRequestingUser(&b, ctx)
 	writeTaskInitiator(&b, ctx)
 	writeWorkspaceContext(&b, ctx)
+	writeSpaceContext(&b, ctx)
 	writeConnectedApps(&b, ctx)
+	writeIntegrationBindings(&b, ctx)
 
 	switch kind {
 	case kindQuickCreate:

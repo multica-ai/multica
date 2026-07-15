@@ -27,10 +27,11 @@ import {
   useSetChatSessionArchived,
 } from "@multica/core/chat/mutations";
 import { useChatStore } from "@multica/core/chat";
-import type { Agent, ChatSession } from "@multica/core/types";
+import type { Agent, ChatSession, Space } from "@multica/core/types";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { useNavigation } from "../../navigation";
 import { useT } from "../../i18n";
+import { ChatContextLabel } from "./chat-context-picker";
 
 /**
  * Per-session header for the conversation pane: agent avatar + editable chat
@@ -41,10 +42,12 @@ import { useT } from "../../i18n";
 export function ChatSessionHeader({
   session,
   agent,
+  spaces,
   onArchive,
 }: {
   session: ChatSession;
   agent: Agent | null;
+  spaces: Space[];
   // Archiving the open conversation must move the pane off it (advance to the
   // next chat on desktop, back to the list on mobile), so the parent owns it —
   // see ChatPage.handleArchive. Falls back to a plain status flip if unwired.
@@ -141,9 +144,10 @@ export function ChatSessionHeader({
           </button>
         )}
         {agent && (
-          <div className="truncate text-xs text-muted-foreground">
-            {agent.name}
-            {agent.description ? ` · ${agent.description}` : ""}
+          <div className="flex min-w-0 items-center gap-1.5 truncate text-xs text-muted-foreground">
+            <span className="truncate">{agent.name}</span>
+            <span aria-hidden>·</span>
+            <ChatContextLabel spaces={spaces} spaceId={session.space_id} />
           </div>
         )}
       </div>

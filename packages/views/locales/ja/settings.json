@@ -94,12 +94,15 @@
   "chat": {
     "floating_title": "フローティングウィンドウ",
     "floating_label": "フローティングチャット",
-    "floating_hint": "すべてのページの隅にフローティングチャットボタンを表示します。デフォルトはオフ——オンにするとどこからでもチャットを呼び出せます。オフのときは専用タブでのみ利用できます。"
+    "floating_hint": "すべてのページの隅にフローティングチャットボタンを表示します。デフォルトはオフ——オンにするとどこからでもチャットを呼び出せます。オフのときは専用のチャットページを使用します。"
   },
   "page": {
     "title": "設定",
     "my_account": "マイアカウント",
     "workspace_fallback": "ワークスペース",
+    "space": "スペース",
+    "loading": "設定を読み込んでいます…",
+    "this_device": "このデバイス",
     "tabs": {
       "profile": "プロフィール",
       "preferences": "環境設定",
@@ -114,7 +117,9 @@
       "labs": "ラボ",
       "members": "メンバー",
       "labels": "ラベル",
-      "properties": "プロパティ"
+      "properties": "プロパティ",
+      "spaces": "スペース",
+      "autopilot_templates": "自動化テンプレート"
     }
   },
   "properties": {
@@ -221,6 +226,54 @@
       "confirm": "ラベルを削除",
       "failed": "ラベルを削除できませんでした"
     }
+  },
+  "autopilot_templates": {
+    "title": "自動化テンプレート",
+    "description": "ワークスペースで再利用できるランブックです。スペース、プロジェクト、担当、購読者、連携アクセスは自動化インスタンスごとに選択します。",
+    "new": "新しいテンプレート",
+    "name": "名前",
+    "runbook": "ランブック",
+    "issue_title_template": "issue タイトルテンプレート",
+    "issue_title_template_placeholder": "週次レポート — {{date}}",
+    "execution_mode": "実行モード",
+    "execution_mode_create_issue": "issue を作成",
+    "execution_mode_run_only": "実行のみ",
+    "trigger": "トリガー",
+    "trigger_schedule": "スケジュール",
+    "trigger_webhook": "Webhook",
+    "cron": "Cron 式",
+    "timezone": "タイムゾーン",
+    "cancel": "キャンセル",
+    "save": "テンプレートを保存",
+    "loading": "テンプレートを読み込み中…",
+    "empty": "ワークスペーステンプレートはまだありません。",
+    "no_runbook": "ランブックなし",
+    "toast_saved": "テンプレートを保存しました",
+    "toast_save_failed": "テンプレートを保存できませんでした",
+    "toast_deleted": "テンプレートを削除しました",
+    "toast_delete_failed": "テンプレートを削除できませんでした",
+    "edit": "{{name}} を編集",
+    "delete": "{{name}} を削除",
+    "delete_confirm_title": "テンプレートを削除しますか？",
+    "delete_confirm_body": "「{{name}}」を削除します。このテンプレートから作成済みの自動化には影響しません。",
+    "delete_action": "テンプレートを削除"
+  },
+  "integration_bindings": {
+    "title": "スペースアクセス",
+    "description": "各ワークスペース連携を参照できるスペースを選択します。認証情報のコピーや外部アカウント権限の拡大は行いません。",
+    "toast_saved": "連携のスペースアクセスを更新しました",
+    "toast_failed": "連携のスペースアクセスを更新できませんでした"
+  },
+  "spaces": {
+    "title": "スペース",
+    "description": "ワークスペースのスペース、既定の保存先、アクセス状態を管理します。",
+    "joined": "参加済み",
+    "not_joined": "未参加",
+    "set_default": "既定に設定",
+    "setting_default": "設定中...",
+    "toast_default_updated": "既定のスペースを更新しました",
+    "toast_default_failed": "既定のスペースを更新できませんでした",
+    "archived_title_other": "アーカイブ済みスペース（{{count}}）"
   },
   "account": {
     "section_profile": "個人情報",
@@ -330,11 +383,16 @@
     "description_placeholder": "このワークスペースは何に注力していますか？",
     "context_label": "コンテキスト",
     "context_placeholder": "このワークスペースで作業する AI エージェント向けの背景情報とコンテキスト",
+    "default_space_label": "デフォルトスペース",
+    "default_space_hint": "スペースのコンテキストがない場合のグローバル作成とインポートに使用されます。",
     "slug_label": "スラッグ",
     "issue_prefix_label": "イシュー接頭辞",
     "issue_prefix_hint": "{{example}} のようなイシュー番号に使用されます。",
     "prefix_confirm_title": "イシュー接頭辞を変更しますか？",
     "prefix_confirm_description": "すべてのイシュー番号が {{oldPrefix}}-N から {{newPrefix}}-N に振り直されます。Pull request のタイトル、ブランチ名、ドキュメントやチャットのリンクなど、{{oldPrefix}}-N を使用している外部参照は解決されなくなります。",
+    "slug_hint": "ワークスペースの URL です。変更すると、このワークスペースへの既存のリンクが無効になります。",
+    "slug_confirm_title": "ワークスペースの URL を変更しますか?",
+    "slug_confirm_description": "URL が /{{oldSlug}} から /{{newSlug}} に変わります。/{{oldSlug}} を使用している既存のリンクやブックマークは使えなくなります。",
     "save": "保存",
     "saving": "保存中...",
     "manage_hint": "ワークスペース設定を更新できるのは admin と owner のみです。",
@@ -613,6 +671,7 @@
     "invite_title": "メンバーを招待",
     "invite_email_placeholder": "user@company.com",
     "invite_button": "招待",
+    "invite_spaces_label": "参加するスペース",
     "inviting": "招待中...",
     "toast_invitation_sent": "招待を送信しました",
     "toast_invitation_failed": "招待を送信できませんでした",

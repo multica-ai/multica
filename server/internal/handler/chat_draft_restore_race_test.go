@@ -55,6 +55,12 @@ func seedDraftRestoreRaceFixture(t *testing.T, slug string) draftRestoreRaceFixt
 	`, wsID, testUserID); err != nil {
 		t.Fatalf("create owner member: %v", err)
 	}
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO workspace_space (workspace_id, name, key, is_default, created_by)
+		VALUES ($1, 'Draft Restore Race', 'DRR', true, $2)
+	`, wsID, testUserID); err != nil {
+		t.Fatalf("create default Space: %v", err)
+	}
 
 	var runtimeID string
 	if err := testPool.QueryRow(ctx, `

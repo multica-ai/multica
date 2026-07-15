@@ -27,6 +27,7 @@ import { useChatController } from "./components/use-chat-controller";
 import { OfflineBanner } from "./components/offline-banner";
 import { NoAgentBanner } from "./components/no-agent-banner";
 import { ArchivedAgentBanner } from "./components/archived-agent-banner";
+import { ChatContextPicker } from "./components/chat-context-picker";
 
 /**
  * Chat tab — the first-class two-pane surface (thread list on the left,
@@ -220,6 +221,7 @@ export function ChatPage() {
         <ChatSessionHeader
           session={c.currentSession}
           agent={c.activeAgent}
+          spaces={c.spaces}
           onArchive={handleArchive}
         />
       )}
@@ -260,6 +262,15 @@ export function ChatPage() {
         agentArchived={c.isAgentArchived}
         agentName={c.activeAgent?.name}
         focusRequest={c.focusInputRequest}
+        topAdornment={
+          !c.activeSessionId && c.activeAgent ? (
+            <ChatContextPicker
+              spaces={c.availableSpaces}
+              value={c.activeSpaceId}
+              onChange={c.setNewSessionSpaceId}
+            />
+          ) : undefined
+        }
       />
     </div>
   );

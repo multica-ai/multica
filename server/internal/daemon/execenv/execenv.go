@@ -33,6 +33,12 @@ type ProjectResourceForEnv struct {
 	Label        string          // optional user-supplied label
 }
 
+type IntegrationBindingForEnv struct {
+	Provider     string
+	ConnectionID string
+	DisplayName  string
+}
+
 // PrepareParams holds all inputs needed to set up an execution environment.
 type PrepareParams struct {
 	WorkspacesRoot string // base path for all envs (e.g., ~/multica_workspaces)
@@ -113,13 +119,20 @@ type TaskContextForEnv struct {
 	AgentName                     string
 	AgentInstructions             string // agent identity/persona instructions, injected into CLAUDE.md
 	AgentSkills                   []SkillContextForEnv
-	Repos                         []RepoContextForEnv     // workspace repos available for checkout
-	ProjectID                     string                  // issue's project, when present
-	ProjectTitle                  string                  // human-readable project title
-	ProjectDescription            string                  // durable project-level context, rendered into the brief's Project Context section
-	ProjectResources              []ProjectResourceForEnv // resources attached to the project
-	ChatSessionID                 string                  // non-empty for chat tasks
-	AutopilotRunID                string                  // non-empty for autopilot run_only tasks
+	Repos                         []RepoContextForEnv        // workspace repos available for checkout
+	SpaceID                       string                     // issue/autopilot/quick-create Space — always set for issue-bound tasks
+	SpaceKey                      string                     // Space issue namespace key, e.g. MUL
+	SpaceName                     string                     // human-readable Space name
+	SpaceContext                  string                     // operating context for the one bound Space
+	SpaceScope                    string                     // "space" or "all"
+	Spaces                        []SpaceContextForEnv       // concrete contexts for an All-spaces Chat
+	ProjectID                     string                     // issue's project, when present
+	ProjectTitle                  string                     // human-readable project title
+	ProjectDescription            string                     // durable project-level context, rendered into the brief's Project Context section
+	ProjectResources              []ProjectResourceForEnv    // resources attached to the project
+	IntegrationBindings           []IntegrationBindingForEnv // Workspace connections bound to this Space; contains no credentials
+	ChatSessionID                 string                     // non-empty for chat tasks
+	AutopilotRunID                string                     // non-empty for autopilot run_only tasks
 	AutopilotID                   string
 	AutopilotTitle                string
 	AutopilotDescription          string
@@ -155,6 +168,13 @@ type TaskContextForEnv struct {
 	InitiatorID    string
 	InitiatorName  string
 	InitiatorEmail string
+}
+
+type SpaceContextForEnv struct {
+	ID      string
+	Key     string
+	Name    string
+	Context string
 }
 
 // SkillContextForEnv represents a skill to be written into the execution environment.

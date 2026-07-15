@@ -13,7 +13,12 @@ const emptyTr = vi.hoisted(() => ({ __emptyTransaction: true }));
 // most recent render — lets the placeholder tests assert the getter it wires
 // into the Placeholder extension reads the live value.
 const capturedExtOptions = vi.hoisted<{
-  current: { placeholder?: string | (() => string) } | undefined;
+  current:
+    | {
+        placeholder?: string | (() => string);
+        getMentionTargetSpaceId?: () => string | null | undefined;
+      }
+    | undefined;
 }>(() => ({ current: undefined }));
 const editorState = vi.hoisted(() => ({
   isFocused: false,
@@ -41,6 +46,7 @@ vi.mock("@tanstack/react-query", () => ({
 vi.mock("./extensions", () => ({
   createEditorExtensions: (options: {
     placeholder?: string | (() => string);
+    getMentionTargetSpaceId?: () => string | null | undefined;
   }) => {
     capturedExtOptions.current = options;
     return [];
@@ -173,6 +179,17 @@ describe("ContentEditor", () => {
     fireEvent.mouseDown(screen.getByTestId("prosemirror"));
 
     expect(mockFocus).not.toHaveBeenCalled();
+  });
+
+  it("keeps the Agent mention Space getter live across prop changes", () => {
+    const { rerender } = render(<ContentEditor targetSpaceId="space-eng" />);
+    const getTargetSpaceId =
+      capturedExtOptions.current?.getMentionTargetSpaceId;
+
+    expect(getTargetSpaceId?.()).toBe("space-eng");
+
+    rerender(<ContentEditor targetSpaceId="space-design" />);
+    expect(getTargetSpaceId?.()).toBe("space-design");
   });
 
   it("syncs editor content when defaultValue changes externally and editor is unfocused", () => {

@@ -144,6 +144,8 @@ export interface EditorExtensionsOptions {
   /** Override @ behavior for chat context suggestions. */
   mentionMode?: "default" | "context";
   getMentionContextItems?: () => MentionItem[];
+  /** Live Issue/Create Space context used to filter Agent @mentions. */
+  getMentionTargetSpaceId?: () => string | null | undefined;
   /** When true, attach the `/` picker. Default false. */
   enableSlashCommands?: boolean;
   /**
@@ -220,7 +222,13 @@ export function createEditorExtensions(
       ...(options.disableMentions
         ? { suggestion: { allow: () => false } }
         : options.queryClient
-          ? { suggestion: createMentionSuggestion(options.queryClient, { mode: options.mentionMode, getContextItems: options.getMentionContextItems }) }
+          ? {
+              suggestion: createMentionSuggestion(options.queryClient, {
+                mode: options.mentionMode,
+                getContextItems: options.getMentionContextItems,
+                getTargetSpaceId: options.getMentionTargetSpaceId,
+              }),
+            }
           : {}),
     }),
     // Linear-style bare identifier → issue mention. Attached only when a

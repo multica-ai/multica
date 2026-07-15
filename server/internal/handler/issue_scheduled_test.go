@@ -22,7 +22,9 @@ func TestListIssues_ScheduledFilter(t *testing.T) {
 	// the assertion isn't polluted by other issues seeded by parallel tests.
 	var projectID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO project (workspace_id, title) VALUES ($1, $2) RETURNING id
+		INSERT INTO project (workspace_id, space_id, title)
+		VALUES ($1, (SELECT id FROM workspace_space WHERE workspace_id = $1 LIMIT 1), $2)
+		RETURNING id
 	`, testWorkspaceID, fmt.Sprintf("Gantt Scheduled %d", suffix)).Scan(&projectID); err != nil {
 		t.Fatalf("create project: %v", err)
 	}
@@ -39,8 +41,8 @@ func TestListIssues_ScheduledFilter(t *testing.T) {
 		}
 		var id string
 		if err := testPool.QueryRow(ctx, `
-			INSERT INTO issue (workspace_id, title, status, priority, creator_type, creator_id, position, number, project_id, start_date, due_date)
-			VALUES ($1, $2, 'todo', 'none', 'member', $3, 0, $4, $5, $6, $7) RETURNING id
+			INSERT INTO issue (workspace_id, title, status, priority, creator_type, creator_id, position, number, project_id, start_date, due_date, space_id)
+			VALUES ($1, $2, 'todo', 'none', 'member', $3, 0, $4, $5, $6, $7, (SELECT id FROM workspace_space WHERE workspace_id = $1 LIMIT 1)) RETURNING id
 		`, testWorkspaceID, title, testUserID, number, projectID, startDate, dueDate).Scan(&id); err != nil {
 			t.Fatalf("create issue %q: %v", title, err)
 		}
@@ -109,7 +111,9 @@ func TestListIssuesReturnsStage(t *testing.T) {
 
 	var projectID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO project (workspace_id, title) VALUES ($1, $2) RETURNING id
+		INSERT INTO project (workspace_id, space_id, title)
+		VALUES ($1, (SELECT id FROM workspace_space WHERE workspace_id = $1 LIMIT 1), $2)
+		RETURNING id
 	`, testWorkspaceID, fmt.Sprintf("Stage List %d", suffix)).Scan(&projectID); err != nil {
 		t.Fatalf("create project: %v", err)
 	}
@@ -126,8 +130,8 @@ func TestListIssuesReturnsStage(t *testing.T) {
 
 	var issueID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO issue (workspace_id, title, status, priority, creator_type, creator_id, position, number, project_id, stage)
-		VALUES ($1, $2, 'todo', 'none', 'member', $3, 0, $4, $5, 2)
+		INSERT INTO issue (workspace_id, space_id, title, status, priority, creator_type, creator_id, position, number, project_id, stage)
+		VALUES ($1, (SELECT id FROM workspace_space WHERE workspace_id = $1 LIMIT 1), $2, 'todo', 'none', 'member', $3, 0, $4, $5, 2)
 		RETURNING id
 	`, testWorkspaceID, fmt.Sprintf("stage-list-%d", suffix), testUserID, number, projectID).Scan(&issueID); err != nil {
 		t.Fatalf("create issue: %v", err)

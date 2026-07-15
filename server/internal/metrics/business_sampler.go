@@ -437,7 +437,11 @@ func (c *BusinessSamplerCollector) runQuery(
 	name string,
 	body func(ctx context.Context, tx pgx.Tx) error,
 ) {
-	queryCtx, cancel := context.WithTimeout(ctx, c.queryTimeout+50*time.Millisecond)
+	// Keep the caller-side deadline comfortably behind Postgres'
+	// statement_timeout. A 50 ms margin is too small on loaded CI machines:
+	// pgx can observe the client deadline before it has read SQLSTATE 57014
+	// from the server, hiding the very signal this safety mechanism provides.
+	queryCtx, cancel := context.WithTimeout(ctx, c.queryTimeout+500*time.Millisecond)
 	defer cancel()
 
 	start := c.now()

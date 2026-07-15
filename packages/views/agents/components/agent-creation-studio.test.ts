@@ -3,6 +3,7 @@ import {
   buildInvocationTargets,
   decodeBuilderInput,
   deriveDuplicateAccess,
+  deriveDuplicateAvailability,
   encodeBuilderInput,
   mergeBuilderDraft,
   parseBuilderDraft,
@@ -19,6 +20,8 @@ const draft = (): AgentDraft => ({
   runtimeId: "runtime-1",
   model: "model-1",
   skillIds: new Set(["skill-1"]),
+  availabilityMode: "workspace",
+  availabilitySpaceIds: new Set(),
   permissionScope: "private",
   memberIds: new Set(),
   teamIds: new Set(),
@@ -238,5 +241,35 @@ Return findings."}</agent_draft>`;
         invocation_targets: [{ target_type: "workspace", target_id: null }],
       }).permissionScope,
     ).toBe("workspace");
+  });
+
+  it("preserves selected Space availability when duplicating an agent", () => {
+    const availability = deriveDuplicateAvailability({
+      availability_mode: "selected_spaces",
+      availability_space_ids: ["space-1", "space-2"],
+      permission_mode: "public_to",
+      invocation_targets: [{ target_type: "workspace", target_id: null }],
+      visibility: "workspace",
+    });
+
+    expect(availability.availabilityMode).toBe("selected_spaces");
+    expect([...availability.availabilitySpaceIds]).toEqual([
+      "space-1",
+      "space-2",
+    ]);
+  });
+
+  it("keeps a legacy people-only duplicate private until explicitly shared", () => {
+    expect(
+      deriveDuplicateAvailability({
+        availability_mode: "workspace",
+        availability_space_ids: [],
+        permission_mode: "public_to",
+        invocation_targets: [
+          { target_type: "member", target_id: "member-1" },
+        ],
+        visibility: "workspace",
+      }).availabilityMode,
+    ).toBe("private");
   });
 });

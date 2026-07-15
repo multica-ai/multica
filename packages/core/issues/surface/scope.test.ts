@@ -1,8 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  UnsupportedIssueScopeError,
-  issueScopeKey,
-} from "./scope";
+import { issueScopeKey } from "./scope";
 import { buildIssueSurfaceQueryPlan } from "./query-plan";
 
 describe("issue surface scope", () => {
@@ -25,7 +22,7 @@ describe("issue surface scope", () => {
         relation: "created",
       }),
     ).toBe("actor:agent:a1:created");
-    expect(issueScopeKey({ type: "team", teamId: "t1" })).toBe("team:t1");
+    expect(issueScopeKey({ type: "space", spaceId: "t1" })).toBe("space:t1");
   });
 
   it("builds the workspace query plan", () => {
@@ -145,10 +142,16 @@ describe("issue surface scope", () => {
     });
   });
 
-  it("throws for team until the issue API has a team filter", () => {
-    const scope = { type: "team" as const, teamId: "t1" };
-    expect(() => buildIssueSurfaceQueryPlan(scope)).toThrow(
-      UnsupportedIssueScopeError,
-    );
+  it("builds the space query plan mirroring the project shape", () => {
+    expect(
+      buildIssueSurfaceQueryPlan({ type: "space", spaceId: "t1" }),
+    ).toMatchObject({
+      kind: "scoped",
+      scopeKey: "space:t1",
+      queryScope: "space:t1",
+      queryFilter: { space_id: "t1" },
+      groupedScopeFilter: { space_id: "t1" },
+      createDefaults: { space_id: "t1" },
+    });
   });
 });

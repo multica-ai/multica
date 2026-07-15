@@ -28,7 +28,9 @@ import { ActorAvatar } from "@/components/ui/actor-avatar";
 import { memberListOptions } from "@/data/queries/members";
 import { agentListOptions } from "@/data/queries/agents";
 import { squadListOptions } from "@/data/queries/squads";
+import { useAuthStore } from "@/data/auth-store";
 import { useWorkspaceStore } from "@/data/workspace-store";
+import { canAssignAgent } from "@/lib/can-assign-agent";
 import { useScrollToTopOnChange } from "@/lib/use-scroll-to-top-on-change";
 import { THEME } from "@/lib/theme";
 
@@ -42,6 +44,7 @@ export type AssigneeValue = {
 interface Props {
   value: AssigneeValue;
   query: string;
+  spaceId: string | null;
   onChange: (next: AssigneeValue) => void;
 }
 
@@ -61,11 +64,12 @@ function isRowSelected(value: AssigneeValue, row: Row): boolean {
   return value.type === "squad" && value.id === row.squad.id;
 }
 
-export function AssigneePickerBody({ value, query, onChange }: Props) {
+export function AssigneePickerBody({ value, query, spaceId, onChange }: Props) {
   const wsId = useWorkspaceStore((s) => s.currentWorkspaceId);
+  const userId = useAuthStore((s) => s.user?.id);
   const { data: members = [] } = useQuery(memberListOptions(wsId));
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
-  const { data: squads = [] } = useQuery(squadListOptions(wsId));
+  const { data: squads = [] } = useQuery(squadListOptions(wsId, spaceId));
   const listRef = useScrollToTopOnChange(query);
   const { colorScheme } = useColorScheme();
   // Tint color for the checkmark accessory. Project uses a monochrome
@@ -74,6 +78,7 @@ export function AssigneePickerBody({ value, query, onChange }: Props) {
   // selection accessories.
   const checkColor =
     colorScheme === "dark" ? THEME.dark.primary : THEME.light.primary;
+  const memberRole = members.find((m) => m.user_id === userId)?.role;
 
   const rows = useMemo<Row[]>(() => {
     const q = query.trim().toLowerCase();
@@ -84,11 +89,21 @@ export function AssigneePickerBody({ value, query, onChange }: Props) {
       .sort((a, b) => a.name.localeCompare(b.name))
       .map((m) => ({ kind: "member" as const, member: m }));
     const agentRows: Row[] = [...agents]
-      .filter((a) => matchName(a.name))
+      .filter(
+        (a) =>
+          !a.archived_at &&
+          matchName(a.name) &&
+          canAssignAgent(a, userId, memberRole, spaceId),
+      )
       .sort((a, b) => a.name.localeCompare(b.name))
       .map((a) => ({ kind: "agent" as const, agent: a }));
     const squadRows: Row[] = [...squads]
-      .filter((s) => !s.archived_at && matchName(s.name))
+      .filter(
+        (s) =>
+          !s.archived_at &&
+          s.space_id === spaceId &&
+          matchName(s.name),
+      )
       .sort((a, b) => a.name.localeCompare(b.name))
       .map((s) => ({ kind: "squad" as const, squad: s }));
 
@@ -108,7 +123,7 @@ export function AssigneePickerBody({ value, query, onChange }: Props) {
       ...agentRows.filter((r) => !isRowSelected(value, r)),
       ...squadRows.filter((r) => !isRowSelected(value, r)),
     ];
-  }, [members, agents, squads, query, value]);
+  }, [members, agents, squads, query, value, userId, memberRole, spaceId]);
 
   const isSelected = (row: Row) => isRowSelected(value, row);
 

@@ -9,7 +9,36 @@ import type {
   GetAutopilotResponse,
   CreateAutopilotTriggerRequest,
   UpdateAutopilotTriggerRequest,
+  SaveAutopilotTemplateRequest,
 } from "../types";
+
+export function useCreateAutopilotTemplate() {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: (data: SaveAutopilotTemplateRequest) => api.createAutopilotTemplate(data),
+    onSettled: () => qc.invalidateQueries({ queryKey: autopilotKeys.templates(wsId) }),
+  });
+}
+
+export function useUpdateAutopilotTemplate() {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: ({ id, ...data }: { id: string } & SaveAutopilotTemplateRequest) =>
+      api.updateAutopilotTemplate(id, data),
+    onSettled: () => qc.invalidateQueries({ queryKey: autopilotKeys.templates(wsId) }),
+  });
+}
+
+export function useDeleteAutopilotTemplate() {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: (id: string) => api.deleteAutopilotTemplate(id),
+    onSettled: () => qc.invalidateQueries({ queryKey: autopilotKeys.templates(wsId) }),
+  });
+}
 
 export function useCreateAutopilot() {
   const qc = useQueryClient();

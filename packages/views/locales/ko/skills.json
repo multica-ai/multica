@@ -1,7 +1,7 @@
 {
   "page": {
     "title": "스킬",
-    "tagline": "이 워크스페이스의 모든 에이전트가 사용할 수 있는 지침입니다.",
+    "tagline": "비공개, 선택한 Space 또는 Workspace 전체에 공유할 수 있는 재사용 가능한 지침입니다.",
     "learn_more": "자세히 보기 →",
     "new_skill": "새 스킬",
     "search_placeholder": "스킬 검색...",
@@ -13,7 +13,7 @@
     },
     "empty": {
       "title": "아직 스킬이 없습니다",
-      "description": "첫 스킬을 만들거나, URL에서 가져오거나, 연결된 런타임에서 복사하세요. 워크스페이스의 모든 에이전트가 사용할 수 있습니다."
+      "description": "첫 Skill을 만들거나 URL 또는 연결된 Runtime에서 가져오세요. 새 Skill은 비공개로 시작합니다."
     },
     "no_matches": {
       "title": "일치하는 결과 없음",
@@ -23,9 +23,9 @@
       "try_different": " 다른 검색어를 시도해 보세요."
     },
     "intro_banner": {
-      "title": "워크스페이스와 공유됩니다.",
-      "body": "누구나 스킬을 만들거나 URL에서 가져오거나 로컬 런타임에서 복사할 수 있으며, 모든 에이전트가 사용할 수 있습니다.",
-      "highlight": "로컬 런타임 스킬은 여기로 복사하기 전까지 비공개로 유지됩니다."
+      "title": "Workspace가 소유하고 명시적으로 공유합니다.",
+      "body": "Skill은 Workspace에 하나의 원본을 두고 공유 범위를 별도로 설정합니다.",
+      "highlight": "공유는 Space 데이터나 Integration 접근 권한을 부여하지 않습니다."
     },
     "list_error": {
       "title": "스킬을 불러오지 못했습니다",
@@ -42,6 +42,9 @@
     "updated": "수정일",
     "created": "생성일",
     "lock_tooltip": "읽기 전용 — 생성자 또는 관리자만 수정할 수 있습니다",
+    "scope_private": "비공개",
+    "scope_spaces": "Space {{count}}개와 공유",
+    "scope_workspace": "Workspace와 공유",
     "unused": "— 미사용",
     "by_creator": "{{name}}님",
     "source_manual": "직접 생성",
@@ -214,6 +217,7 @@
       "name_hint": "워크스페이스 안에서 고유해야 합니다.",
       "description_label": "설명",
       "description_placeholder": "이 스킬을 에이전트에 언제 할당해야 하는지 한 문장으로 적어 주세요.",
+      "sharing_hint": "새 Skill은 비공개로 시작합니다. 상세 페이지에서 선택한 Space 또는 Workspace와 공유할 수 있습니다.",
       "name_conflict_hint": " 다른 이름으로 다시 제출하세요.",
       "fallback_error": "스킬을 만들지 못했습니다",
       "cancel": "취소",
@@ -234,6 +238,27 @@
       "cancel": "취소",
       "toast_imported": "스킬을 가져왔습니다"
     }
+  },
+  "availability": {
+    "heading": "사용 범위",
+    "tooltip": "Skill 공유 범위 변경",
+    "private_title": "비공개",
+    "private_description": "생성자와 Workspace 관리자만 이 Skill을 찾고 사용할 수 있습니다.",
+    "spaces_title": "선택한 Space",
+    "spaces_description": "선택한 Space의 멤버와 Agent만 사용할 수 있습니다.",
+    "spaces_count": "Space {{count}}개",
+    "workspace_title": "Workspace",
+    "workspace_description": "Workspace 전체에서 사용할 수 있습니다.",
+    "spaces_empty": "활성 Space가 없습니다",
+    "archived": "보관됨",
+    "unavailable": "사용할 수 없는 Space",
+    "select_required": "Space를 하나 이상 선택하세요.",
+    "remove_unavailable": "적용하기 전에 보관되었거나 사용할 수 없는 Space를 제거하세요.",
+    "access_note": "Skill 공유는 Space 데이터, Integration, Secret 또는 Resource 접근 권한을 부여하지 않습니다.",
+    "cancel": "취소",
+    "apply": "적용",
+    "toast_updated": "Skill 공유 범위를 업데이트했습니다",
+    "toast_failed": "Skill 공유 범위를 업데이트하지 못했습니다"
   },
   "runtime_import": {
     "runtime_label": "런타임",

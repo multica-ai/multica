@@ -50,6 +50,17 @@ type Agent struct {
 	PermissionMode string      `json:"permission_mode"`
 	Kind           string      `json:"kind"`
 	SystemKey      pgtype.Text `json:"system_key"`
+	// Space assignment. private = owner only in a concrete active Space they can use; selected_spaces = only rows in agent_available_space; workspace = every active Space. Each run is still bound to exactly one Space.
+	AvailabilityMode string `json:"availability_mode"`
+}
+
+// Selected-Space assignments for agents with availability_mode=selected_spaces. A run may receive read/write access to its one bound Space only.
+type AgentAvailableSpace struct {
+	AgentID     pgtype.UUID        `json:"agent_id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	SpaceID     pgtype.UUID        `json:"space_id"`
+	CreatedBy   pgtype.UUID        `json:"created_by"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
 // Allow-list of who may invoke a public_to agent (MUL-3963). One row per (agent, target_type, target); targets stack and canInvokeAgent OR-matches. workspace rows store the agent workspace_id in target_id; member rows store the user id; team rows are reserved and inert in V1. Rows only matter when agent.permission_mode = public_to. No DB foreign keys: agent_id / created_by / member target_id relationships are maintained in the application layer (see migration comment).
@@ -189,6 +200,10 @@ type Autopilot struct {
 	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
 	AssigneeType       string             `json:"assignee_type"`
 	ProjectID          pgtype.UUID        `json:"project_id"`
+	SpaceID            pgtype.UUID        `json:"space_id"`
+	// Set only when the owning Space auto-pauses an active Autopilot; requires explicit resume after Space restore.
+	PausedBySpaceAt          pgtype.Timestamptz `json:"paused_by_space_at"`
+	StatusBeforeSpaceArchive pgtype.Text        `json:"status_before_space_archive"`
 }
 
 type AutopilotCollaborator struct {
@@ -234,6 +249,21 @@ type AutopilotSubscriber struct {
 	UserType    string             `json:"user_type"`
 	UserID      pgtype.UUID        `json:"user_id"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+}
+
+type AutopilotTemplate struct {
+	ID                 pgtype.UUID        `json:"id"`
+	WorkspaceID        pgtype.UUID        `json:"workspace_id"`
+	Name               string             `json:"name"`
+	Description        string             `json:"description"`
+	ExecutionMode      string             `json:"execution_mode"`
+	IssueTitleTemplate pgtype.Text        `json:"issue_title_template"`
+	TriggerKind        string             `json:"trigger_kind"`
+	CronExpression     pgtype.Text        `json:"cron_expression"`
+	Timezone           pgtype.Text        `json:"timezone"`
+	CreatedBy          pgtype.UUID        `json:"created_by"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
 }
 
 type AutopilotTrigger struct {
@@ -386,6 +416,8 @@ type ChatSession struct {
 	LastReadAt   pgtype.Timestamptz `json:"last_read_at"`
 	IsAgentIntro bool               `json:"is_agent_intro"`
 	PinnedAt     pgtype.Timestamptz `json:"pinned_at"`
+	// Chat context. NULL = all Spaces available to the Agent and current initiating member; non-NULL = one immutable Space.
+	SpaceID pgtype.UUID `json:"space_id"`
 }
 
 type Comment struct {
@@ -551,6 +583,15 @@ type InboxItem struct {
 	Details       []byte             `json:"details"`
 }
 
+type IntegrationSpaceBinding struct {
+	WorkspaceID  pgtype.UUID        `json:"workspace_id"`
+	Provider     string             `json:"provider"`
+	ConnectionID pgtype.UUID        `json:"connection_id"`
+	SpaceID      pgtype.UUID        `json:"space_id"`
+	CreatedBy    pgtype.UUID        `json:"created_by"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+}
+
 type Issue struct {
 	ID                 pgtype.UUID        `json:"id"`
 	WorkspaceID        pgtype.UUID        `json:"workspace_id"`
@@ -578,6 +619,7 @@ type Issue struct {
 	Metadata           []byte             `json:"metadata"`
 	Stage              pgtype.Int4        `json:"stage"`
 	Properties         []byte             `json:"properties"`
+	SpaceID            pgtype.UUID        `json:"space_id"`
 }
 
 type IssueDependency struct {
@@ -585,6 +627,14 @@ type IssueDependency struct {
 	IssueID          pgtype.UUID `json:"issue_id"`
 	DependsOnIssueID pgtype.UUID `json:"depends_on_issue_id"`
 	Type             string      `json:"type"`
+}
+
+type IssueIdentifierAlias struct {
+	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
+	SpaceKeyLower string             `json:"space_key_lower"`
+	Number        int32              `json:"number"`
+	IssueID       pgtype.UUID        `json:"issue_id"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
 }
 
 type IssueLabel struct {
@@ -776,6 +826,7 @@ type Project struct {
 	Priority    string             `json:"priority"`
 	StartDate   pgtype.Date        `json:"start_date"`
 	DueDate     pgtype.Date        `json:"due_date"`
+	SpaceID     pgtype.UUID        `json:"space_id"`
 }
 
 type ProjectResource struct {
@@ -815,6 +866,17 @@ type Skill struct {
 	CreatedBy   pgtype.UUID        `json:"created_by"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+	// Sharing scope only: private, selected_spaces, or workspace. Does not grant data or Integration access.
+	AvailabilityMode string `json:"availability_mode"`
+}
+
+// Selected-Space sharing grants for Skills. A row changes discovery/use scope only and grants no underlying Space access.
+type SkillAvailableSpace struct {
+	SkillID     pgtype.UUID        `json:"skill_id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	SpaceID     pgtype.UUID        `json:"space_id"`
+	CreatedBy   pgtype.UUID        `json:"created_by"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
 type SkillFile struct {
@@ -845,6 +907,10 @@ type Squad struct {
 	ArchivedBy   pgtype.UUID        `json:"archived_by"`
 	AvatarUrl    pgtype.Text        `json:"avatar_url"`
 	Instructions string             `json:"instructions"`
+	// The single Space that owns this Squad. Issues and Autopilots may use it only in this Space.
+	SpaceID pgtype.UUID `json:"space_id"`
+	// Set only when the owning Space archives the Squad; used for non-destructive Space restore.
+	ArchivedBySpaceAt pgtype.Timestamptz `json:"archived_by_space_at"`
 }
 
 type SquadMember struct {
@@ -902,6 +968,10 @@ type TaskToken struct {
 	UserID      pgtype.UUID        `json:"user_id"`
 	ExpiresAt   pgtype.Timestamptz `json:"expires_at"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	// The single Space data boundary for this run. NULL means the task has no Space data access.
+	SpaceID pgtype.UUID `json:"space_id"`
+	// Authoritative active Space allow-list for this run. Empty means no Space data access.
+	SpaceIds []pgtype.UUID `json:"space_ids"`
 }
 
 type TaskUsage struct {
@@ -1053,4 +1123,43 @@ type WorkspaceInvitation struct {
 	CreatedAt     pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
 	ExpiresAt     pgtype.Timestamptz `json:"expires_at"`
+	SpaceIds      []pgtype.UUID      `json:"space_ids"`
+}
+
+type WorkspaceSpace struct {
+	ID           pgtype.UUID        `json:"id"`
+	WorkspaceID  pgtype.UUID        `json:"workspace_id"`
+	Name         string             `json:"name"`
+	Key          string             `json:"key"`
+	Icon         pgtype.Text        `json:"icon"`
+	IssueCounter int32              `json:"issue_counter"`
+	ArchivedAt   pgtype.Timestamptz `json:"archived_at"`
+	ArchivedBy   pgtype.UUID        `json:"archived_by"`
+	CreatedBy    pgtype.UUID        `json:"created_by"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
+	IsDefault    bool               `json:"is_default"`
+	Visibility   string             `json:"visibility"`
+	// Operating context injected into Agent runs bound to this Space. It does not grant access or widen the task token scope.
+	Context string `json:"context"`
+}
+
+type WorkspaceSpaceMember struct {
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	SpaceID     pgtype.UUID        `json:"space_id"`
+	UserID      pgtype.UUID        `json:"user_id"`
+	Role        string             `json:"role"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	SortOrder   float64            `json:"sort_order"`
+}
+
+type WorkspaceSpacePreference struct {
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	SpaceID     pgtype.UUID        `json:"space_id"`
+	UserID      pgtype.UUID        `json:"user_id"`
+	IsPinned    bool               `json:"is_pinned"`
+	IsFollowed  bool               `json:"is_followed"`
+	SortOrder   float64            `json:"sort_order"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
 }

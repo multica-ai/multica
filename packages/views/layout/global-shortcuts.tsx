@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { useSidebar } from "@multica/ui/components/ui/sidebar";
 import {
   getShortcut,
@@ -13,6 +14,9 @@ import {
 import { openCreateIssueWithPreference } from "@multica/core/issues/stores";
 import { useModalStore } from "@multica/core/modals";
 import { useWorkspacePaths } from "@multica/core/paths";
+import { useWorkspaceId } from "@multica/core/hooks";
+import { mySpaceListOptions } from "@multica/core/spaces/queries";
+import type { Space } from "@multica/core/types";
 import { isImeComposing } from "@multica/core/utils";
 import { useNavigation } from "../navigation";
 import { useSearchStore } from "../search/search-store";
@@ -39,11 +43,28 @@ export function shouldIgnoreGlobalShortcutEvent(event: KeyboardEvent): boolean {
   return event.defaultPrevented || event.repeat || isImeComposing(event);
 }
 
+export function resolveCreateIssueDefaults(
+  pathname: string,
+  spaces: Pick<Space, "id" | "key">[],
+): { project_id: string } | { space_id: string } | undefined {
+  const projectId = pathname.match(/^\/[^/]+\/projects\/([^/]+)$/)?.[1];
+  if (projectId) return { project_id: projectId };
+
+  const spaceKey = pathname.match(/^\/[^/]+\/space\/([^/]+)/)?.[1];
+  if (!spaceKey) return undefined;
+  const spaceId = spaces.find(
+    (space) => space.key.toLowerCase() === spaceKey.toLowerCase(),
+  )?.id;
+  return spaceId ? { space_id: spaceId } : undefined;
+}
+
 /** Executes configurable product-level shortcuts inside the dashboard shell. */
 export function GlobalShortcuts() {
   const { toggleSidebar } = useSidebar();
   const navigation = useNavigation();
   const workspacePaths = useWorkspacePaths();
+  const workspaceId = useWorkspaceId();
+  const { data: spaces = [] } = useQuery(mySpaceListOptions(workspaceId));
 
   // Subscribe so changing a binding in Settings immediately refreshes the
   // listener closure; getShortcut remains useful to non-React call sites.
@@ -91,13 +112,9 @@ export function GlobalShortcuts() {
       }
       if (actionId === "createIssue") {
         if (useModalStore.getState().modal) return;
-        const projectMatch = navigation.pathname.match(
-          /^\/[^/]+\/projects\/([^/]+)$/,
+        openCreateIssueWithPreference(
+          resolveCreateIssueDefaults(navigation.pathname, spaces),
         );
-        const data = projectMatch
-          ? { project_id: projectMatch[1] }
-          : undefined;
-        openCreateIssueWithPreference(data);
         return;
       }
 
@@ -109,7 +126,7 @@ export function GlobalShortcuts() {
 
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [navigation, overrides, toggleSidebar, workspacePaths]);
+  }, [navigation, overrides, spaces, toggleSidebar, workspacePaths]);
 
   return null;
 }

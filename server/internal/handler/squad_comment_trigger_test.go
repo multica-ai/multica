@@ -103,8 +103,8 @@ func newSquadCommentTriggerFixture(t *testing.T) squadCommentTriggerFixture {
 
 	var issueID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO issue (workspace_id, creator_type, creator_id, title, assignee_type, assignee_id)
-		VALUES ($1, 'member', $2, $3, 'squad', $4)
+		INSERT INTO issue (workspace_id, creator_type, creator_id, title, assignee_type, assignee_id, space_id)
+		VALUES ($1, 'member', $2, $3, 'squad', $4, (SELECT id FROM workspace_space WHERE workspace_id = $1 LIMIT 1))
 		RETURNING id
 	`, testWorkspaceID, testUserID, "squad comment trigger", squadID).Scan(&issueID); err != nil {
 		t.Fatalf("create issue: %v", err)
@@ -742,8 +742,8 @@ func TestCreateComment_SquadMentionPrivateLeaderBlocksPlainMember(t *testing.T) 
 	// Create an issue.
 	var issueID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO issue (workspace_id, creator_type, creator_id, title)
-		VALUES ($1, 'member', $2, 'private leader squad mention test')
+		INSERT INTO issue (workspace_id, creator_type, creator_id, title, space_id)
+		VALUES ($1, 'member', $2, 'private leader squad mention test', (SELECT id FROM workspace_space WHERE workspace_id = $1 LIMIT 1))
 		RETURNING id
 	`, testWorkspaceID, memberID).Scan(&issueID); err != nil {
 		t.Fatalf("create issue: %v", err)
@@ -810,8 +810,8 @@ func TestCreateComment_SquadMentionTriggersLeader(t *testing.T) {
 	// Create an issue NOT assigned to the squad (assigned to nobody).
 	var issueID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO issue (workspace_id, creator_type, creator_id, title)
-		VALUES ($1, 'member', $2, 'squad mention trigger test')
+		INSERT INTO issue (workspace_id, creator_type, creator_id, title, space_id)
+		VALUES ($1, 'member', $2, 'squad mention trigger test', (SELECT id FROM workspace_space WHERE workspace_id = $1 LIMIT 1))
 		RETURNING id
 	`, testWorkspaceID, testUserID).Scan(&issueID); err != nil {
 		t.Fatalf("create issue: %v", err)

@@ -1,25 +1,40 @@
 "use client";
 
-import React from "react";
+import React, { useEffect, useMemo, useRef } from "react";
+import { useQuery } from "@tanstack/react-query";
 import {
-  User,
-  SlidersHorizontal,
-  Key,
-  Settings,
-  Users,
-  FolderGit2,
-  FlaskConical,
   Bell,
+  FolderGit2,
+  Key,
+  Layers3,
   Plug,
-  MessageCircle,
   Tags,
   Keyboard,
+  Settings,
+  SlidersHorizontal,
+  User,
+  Users,
+  Workflow,
 } from "lucide-react";
-import { GitHubMark } from "./github-mark";
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "@multica/ui/components/ui/tabs";
-import { useIsMobile } from "@multica/ui/hooks/use-mobile";
-import { useCurrentWorkspace } from "@multica/core/paths";
-import { useNavigation } from "../../navigation";
+import { cn } from "@multica/ui/lib/utils";
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectLabel,
+  SelectTrigger,
+  SelectValue,
+} from "@multica/ui/components/ui/select";
+import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
+import {
+  sortSpacesForDisplay,
+  spaceListOptions,
+} from "@multica/core/spaces/queries";
+import type { Space } from "@multica/core/types";
+import { AppLink, useNavigation } from "../../navigation";
+import { SpaceIcon } from "../../spaces/components/space-icon";
+import { SpaceSettingsPage } from "../../spaces/components/space-detail-page";
 import { AccountTab } from "./account-tab";
 import { PreferencesTab } from "./preferences-tab";
 import { ChatTab } from "./chat-tab";
@@ -27,203 +42,389 @@ import { TokensTab } from "./tokens-tab";
 import { WorkspaceTab } from "./workspace-tab";
 import { MembersTab } from "./members-tab";
 import { RepositoriesTab } from "./repositories-tab";
-import { GitHubTab } from "./github-tab";
 import { IntegrationsTab } from "./integrations-tab";
-import { LabsTab } from "./labs-tab";
 import { NotificationsTab } from "./notifications-tab";
 import { LabelsTab } from "./labels-tab";
 import { PropertiesTab } from "./properties-tab";
 import { KeyboardShortcutsTab } from "./keyboard-shortcuts-tab";
+import { WorkspaceSpacesTab } from "./workspace-spaces-tab";
+import { AutopilotTemplatesTab } from "./autopilot-templates-tab";
 import { useT } from "../../i18n";
 
-const ACCOUNT_TAB_KEYS = ["profile", "preferences", "shortcuts", "chat", "notifications", "tokens"] as const;
-const ACCOUNT_TAB_ICONS = {
-  profile: User,
-  preferences: SlidersHorizontal,
-  shortcuts: Keyboard,
-  chat: MessageCircle,
-  notifications: Bell,
-  tokens: Key,
-} as const;
+type SettingsScope = "account" | "workspace" | "space";
 
-const WORKSPACE_TAB_KEYS = [
-  "general",
-  "repositories",
-  "github",
-  "integrations",
-  "labs",
-  "members",
-  "labels",
-  "properties",
-] as const;
-const WORKSPACE_TAB_VALUES = {
-  general: "workspace",
-  repositories: "repositories",
-  github: "github",
-  integrations: "integrations",
-  labs: "labs",
-  members: "members",
-  labels: "labels",
-  properties: "properties",
-} as const;
-const WORKSPACE_TAB_ICONS = {
-  general: Settings,
-  repositories: FolderGit2,
-  github: GitHubMark,
-  integrations: Plug,
-  labs: FlaskConical,
-  members: Users,
-  labels: Tags,
-  properties: SlidersHorizontal,
-} as const;
+interface SettingsDestination {
+  scope: SettingsScope;
+  key: string;
+  label: string;
+  icon: React.ComponentType<{ className?: string; "aria-hidden"?: boolean }>;
+  content: React.ReactNode;
+  space?: Space;
+}
 
-const DEFAULT_TAB = "profile";
-const TAB_QUERY_KEY = "tab";
-
-// Legacy `?tab=…` values that have been collapsed into another tab. Old
-// bookmarks still land on the correct surface without us preserving a
-// dead TabsContent entry. Lark used to be its own top-level workspace
-// tab; it now lives inside Integrations.
-const LEGACY_WORKSPACE_TAB_REDIRECTS: Record<string, string> = {
-  lark: "integrations",
+const LEGACY_TAB_PATHS: Record<string, string> = {
+  profile: "account/profile",
+  preferences: "account/preferences",
+  shortcuts: "account/shortcuts",
+  chat: "account/preferences",
+  notifications: "account/notifications",
+  tokens: "account/tokens",
+  workspace: "workspace/general",
+  general: "workspace/general",
+  members: "workspace/members",
+  repositories: "workspace/repositories",
+  github: "workspace/integrations",
+  integrations: "workspace/integrations",
+  lark: "workspace/integrations",
+  labs: "workspace/general",
+  labels: "workspace/labels",
+  properties: "workspace/properties",
 };
-
-const SETTINGS_TAB_TRIGGER_CLASS =
-  "h-8 shrink-0 px-2.5 hover:bg-surface-hover data-active:!bg-surface-selected data-active:!text-surface-selected-foreground data-active:hover:!bg-surface-selected md:!w-full md:px-2 md:after:hidden";
 
 export interface ExtraSettingsTab {
   value: string;
   label: string;
-  icon: React.ComponentType<{ className?: string }>;
+  icon: React.ComponentType<{ className?: string; "aria-hidden"?: boolean }>;
   content: React.ReactNode;
 }
 
 interface SettingsPageProps {
-  /** Additional tabs injected by platform (e.g. desktop daemon settings) */
-  extraAccountTabs?: ExtraSettingsTab[];
+  /** Device-scoped pages injected by a platform and shown under My Account. */
+  extraDeviceTabs?: ExtraSettingsTab[];
 }
 
-export function SettingsPage({ extraAccountTabs }: SettingsPageProps = {}) {
-  const { t } = useT("settings");
-  const workspaceName = useCurrentWorkspace()?.name;
-  const navigation = useNavigation();
-  const isMobile = useIsMobile();
+function settingsSuffix(pathname: string): string | null {
+  const marker = "/settings/";
+  const markerIndex = pathname.indexOf(marker);
+  if (markerIndex === -1) return null;
+  return pathname.slice(markerIndex + marker.length).replace(/\/$/, "");
+}
 
-  // Whitelist of valid tab values; unknown ?tab=… values silently fall back to
-  // the default. Whitelisting also blocks junk like ?tab=<script> from
-  // surfacing in the DOM via Radix Tabs internals.
-  const validTabs = React.useMemo(
+export function SettingsPage({ extraDeviceTabs }: SettingsPageProps = {}) {
+  const { t } = useT("settings");
+  const workspace = useCurrentWorkspace();
+  const navigation = useNavigation();
+  const paths = useWorkspacePaths();
+  const spacesQuery = useQuery({
+    ...spaceListOptions(workspace?.id ?? ""),
+    enabled: !!workspace?.id,
+  });
+  const settingsSpaces = useMemo(() => {
+    const ordered = sortSpacesForDisplay(spacesQuery.data ?? []);
+    return [...ordered].sort(
+      (a, b) => Number(!!a.archived_at) - Number(!!b.archived_at),
+    );
+  }, [spacesQuery.data]);
+
+  const groups = useMemo(() => {
+    const account: SettingsDestination[] = [
+      {
+        scope: "account",
+        key: "profile",
+        label: t(($) => $.page.tabs.profile),
+        icon: User,
+        content: <AccountTab />,
+      },
+      {
+        scope: "account",
+        key: "preferences",
+        label: t(($) => $.page.tabs.preferences),
+        icon: SlidersHorizontal,
+        content: (
+          <div className="space-y-10">
+            <PreferencesTab />
+            <ChatTab />
+          </div>
+        ),
+      },
+      {
+        scope: "account",
+        key: "notifications",
+        label: t(($) => $.page.tabs.notifications),
+        icon: Bell,
+        content: <NotificationsTab />,
+      },
+      {
+        scope: "account",
+        key: "shortcuts",
+        label: t(($) => $.page.tabs.shortcuts),
+        icon: Keyboard,
+        content: <KeyboardShortcutsTab />,
+      },
+      {
+        scope: "account",
+        key: "tokens",
+        label: t(($) => $.page.tabs.tokens),
+        icon: Key,
+        content: <TokensTab />,
+      },
+      ...(extraDeviceTabs ?? []).map((tab) => ({
+        scope: "account" as const,
+        key: tab.value,
+        label: tab.label,
+        icon: tab.icon,
+        content: tab.content,
+      })),
+    ];
+    const workspace: SettingsDestination[] = [
+      {
+        scope: "workspace",
+        key: "general",
+        label: t(($) => $.page.tabs.general),
+        icon: Settings,
+        content: <WorkspaceTab />,
+      },
+      {
+        scope: "workspace",
+        key: "members",
+        label: t(($) => $.page.tabs.members),
+        icon: Users,
+        content: <MembersTab />,
+      },
+      {
+        scope: "workspace",
+        key: "spaces",
+        label: t(($) => $.page.tabs.spaces),
+        icon: Layers3,
+        content: <WorkspaceSpacesTab />,
+      },
+      {
+        scope: "workspace",
+        key: "labels",
+        label: t(($) => $.page.tabs.labels),
+        icon: Tags,
+        content: <LabelsTab />,
+      },
+      {
+        scope: "workspace",
+        key: "properties",
+        label: t(($) => $.page.tabs.properties),
+        icon: SlidersHorizontal,
+        content: <PropertiesTab />,
+      },
+      {
+        scope: "workspace",
+        key: "autopilot-templates",
+        label: t(($) => $.page.tabs.autopilot_templates),
+        icon: Workflow,
+        content: <AutopilotTemplatesTab />,
+      },
+      {
+        scope: "workspace",
+        key: "integrations",
+        label: t(($) => $.page.tabs.integrations),
+        icon: Plug,
+        content: <IntegrationsTab />,
+      },
+      {
+        scope: "workspace",
+        key: "repositories",
+        label: t(($) => $.page.tabs.repositories),
+        icon: FolderGit2,
+        content: <RepositoriesTab />,
+      },
+    ];
+    const space: SettingsDestination[] = settingsSpaces.map((item) => ({
+      scope: "space",
+      key: item.key,
+      label: item.name,
+      icon: Layers3,
+      content: <SpaceSettingsPage spaceKey={item.key} embedded />,
+      space: item,
+    }));
+    return { account, workspace, space };
+  }, [extraDeviceTabs, settingsSpaces, t]);
+
+  const destinations = useMemo(
+    () => [...groups.account, ...groups.workspace, ...groups.space],
+    [groups],
+  );
+  const destinationByPath = useMemo(
     () =>
-      new Set<string>([
-        ...ACCOUNT_TAB_KEYS,
-        ...Object.values(WORKSPACE_TAB_VALUES),
-        ...(extraAccountTabs?.map((tab) => tab.value) ?? []),
-      ]),
-    [extraAccountTabs],
+      new Map(
+        destinations.map((destination) => [
+          `${destination.scope}/${destination.key}`,
+          destination,
+        ]),
+      ),
+    [destinations],
   );
 
-  const tabFromUrl = navigation.searchParams.get(TAB_QUERY_KEY);
-  const candidateTab = tabFromUrl
-    ? LEGACY_WORKSPACE_TAB_REDIRECTS[tabFromUrl] ?? tabFromUrl
-    : null;
-  const activeTab =
-    candidateTab && validTabs.has(candidateTab) ? candidateTab : DEFAULT_TAB;
+  const suffix = settingsSuffix(navigation.pathname);
+  const legacyTab = navigation.searchParams.get("tab");
+  const rawRequestedPath =
+    suffix ?? (legacyTab ? LEGACY_TAB_PATHS[legacyTab] : null);
+  // Desktop builds previously placed machine-specific pages under a fourth
+  // "device" group. They now live under My Account so Settings has exactly
+  // the three product scopes, while persisted old URLs still canonicalize.
+  const requestedPath = rawRequestedPath?.startsWith("device/")
+    ? `account/${rawRequestedPath.slice("device/".length)}`
+    : rawRequestedPath;
+  const waitingForSpace =
+    !!requestedPath?.startsWith("space/") && !spacesQuery.isSuccess;
+  const active = waitingForSpace
+    ? null
+    : (requestedPath ? destinationByPath.get(requestedPath) : null) ??
+      groups.account[0]!;
+  const activePath = active
+    ? `${active.scope}/${active.key}`
+    : (requestedPath ?? "account/profile");
+  const canonicalPath =
+    waitingForSpace || !active
+      ? null
+      : suffix === activePath && legacyTab === null
+      ? null
+      : paths.settingsSection(active.scope, active.key);
+  const lastRequestedCanonicalPath = useRef<string | null>(null);
 
-  // replace (not push) so settings tab switches don't pollute browser history.
-  // Preserve any other query params the page may carry.
-  const handleTabChange = (next: string) => {
-    const params = new URLSearchParams(navigation.searchParams);
-    params.set(TAB_QUERY_KEY, next);
-    navigation.replace(`${navigation.pathname}?${params.toString()}`);
+  // Canonicalise old query-tab bookmarks and unknown/root Settings URLs. This
+  // keeps one stable URL per page while preserving every legacy entry point.
+  // The navigation adapter may re-render while a route transition is pending;
+  // remember the in-flight target so that render cannot enqueue the same
+  // replace repeatedly before the pathname commits.
+  useEffect(() => {
+    if (canonicalPath === null) {
+      lastRequestedCanonicalPath.current = null;
+      return;
+    }
+    if (lastRequestedCanonicalPath.current === canonicalPath) return;
+    lastRequestedCanonicalPath.current = canonicalPath;
+    navigation.replace(canonicalPath);
+  }, [canonicalPath, navigation]);
+
+  const selectDestination = (path: string | null) => {
+    if (!path) return;
+    const destination = destinationByPath.get(path);
+    if (!destination) return;
+    navigation.push(paths.settingsSection(destination.scope, destination.key));
   };
 
-  return (
-    <Tabs
-      value={activeTab}
-      onValueChange={handleTabChange}
-      orientation={isMobile ? "horizontal" : "vertical"}
-      className="flex flex-1 min-h-0 flex-col gap-0 overflow-y-auto md:flex-row md:overflow-hidden"
-    >
-      {/* Structural navigation; bounded setting groups remain in the content surface.
-          Stays on the content surface color (no shell tint): the desktop's active
-          tab merges into the card top, and a tinted panel under the first tabs
-          breaks that seam (MUL-4439). Zoning comes from the divider instead. */}
-      <div className="shrink-0 overflow-x-auto border-b border-surface-border p-2 md:w-56 md:overflow-y-auto md:border-b-0 md:border-r md:p-4">
-        <h1 className="sr-only text-sm font-semibold md:not-sr-only md:mb-4 md:px-2">{t(($) => $.page.title)}</h1>
-        <TabsList
-          variant="line"
-          className="flex w-max min-w-full flex-row items-center gap-1 p-0 md:w-full md:flex-col md:items-stretch"
-        >
-          {/* My Account group */}
-          <span className="hidden px-2 pb-1 pt-2 text-xs font-medium text-muted-foreground md:block">
-            {t(($) => $.page.my_account)}
-          </span>
-          {ACCOUNT_TAB_KEYS.map((key) => {
-            const Icon = ACCOUNT_TAB_ICONS[key];
-            return (
-              <TabsTrigger
-                key={key}
-                value={key}
-                className={SETTINGS_TAB_TRIGGER_CLASS}
-              >
-                <Icon className="h-4 w-4" />
-                {t(($) => $.page.tabs[key])}
-              </TabsTrigger>
-            );
-          })}
-          {extraAccountTabs?.map((tab) => (
-            <TabsTrigger
-              key={tab.value}
-              value={tab.value}
-              className={SETTINGS_TAB_TRIGGER_CLASS}
-            >
-              <tab.icon className="h-4 w-4" />
-              {tab.label}
-            </TabsTrigger>
-          ))}
+  const groupEntries: Array<{
+    scope: SettingsScope;
+    label: string;
+    entries: SettingsDestination[];
+  }> = [
+    {
+      scope: "account",
+      label: t(($) => $.page.my_account),
+      entries: groups.account,
+    },
+    {
+      scope: "workspace",
+      label: t(($) => $.page.workspace_fallback),
+      entries: groups.workspace,
+    },
+    {
+      scope: "space",
+      label: t(($) => $.page.space),
+      entries: groups.space,
+    },
+  ];
 
-          {/* Workspace group */}
-          <span className="hidden truncate px-2 pb-1 pt-4 text-xs font-medium text-muted-foreground md:block">
-            {workspaceName ?? t(($) => $.page.workspace_fallback)}
-          </span>
-          {WORKSPACE_TAB_KEYS.map((key) => {
-            const Icon = WORKSPACE_TAB_ICONS[key];
-            return (
-              <TabsTrigger
-                key={key}
-                value={WORKSPACE_TAB_VALUES[key]}
-                className={SETTINGS_TAB_TRIGGER_CLASS}
-              >
-                <Icon className="h-4 w-4" />
-                {t(($) => $.page.tabs[key])}
-              </TabsTrigger>
-            );
-          })}
-        </TabsList>
+  return (
+    <div className="flex min-h-0 flex-1 flex-col md:flex-row md:overflow-hidden">
+      <div className="border-b border-surface-border bg-app-shell/70 p-3 md:hidden">
+        <Select
+          items={destinations.map((destination) => ({
+            value: `${destination.scope}/${destination.key}`,
+            label: destination.label,
+          }))}
+          value={activePath}
+          onValueChange={selectDestination}
+        >
+          <SelectTrigger className="w-full" aria-label={t(($) => $.page.title)}>
+            <SelectValue>
+              {active?.label ?? t(($) => $.page.loading)}
+            </SelectValue>
+          </SelectTrigger>
+          <SelectContent align="start">
+            {groupEntries.map((group) => (
+              <SelectGroup key={group.scope}>
+                <SelectLabel>{group.label}</SelectLabel>
+                {group.entries.map((entry) => {
+                  const Icon = entry.icon;
+                  return (
+                    <SelectItem
+                      key={`${entry.scope}/${entry.key}`}
+                      value={`${entry.scope}/${entry.key}`}
+                    >
+                      {entry.space ? (
+                        <SpaceIcon space={entry.space} className="size-4" />
+                      ) : (
+                        <Icon className="size-4" aria-hidden />
+                      )}
+                      {entry.label}
+                    </SelectItem>
+                  );
+                })}
+              </SelectGroup>
+            ))}
+          </SelectContent>
+        </Select>
       </div>
 
-      {/* Right content */}
-      <div className="min-w-0 flex-1 md:overflow-y-auto">
-        <div className={`mx-auto w-full p-4 sm:p-6 md:p-8 ${activeTab === "labels" || activeTab === "properties" ? "max-w-5xl" : "max-w-3xl"}`}>
-          <TabsContent value="profile"><AccountTab /></TabsContent>
-          <TabsContent value="preferences"><PreferencesTab /></TabsContent>
-          <TabsContent value="shortcuts"><KeyboardShortcutsTab /></TabsContent>
-          <TabsContent value="chat"><ChatTab /></TabsContent>
-          <TabsContent value="notifications"><NotificationsTab /></TabsContent>
-          <TabsContent value="tokens"><TokensTab /></TabsContent>
-          <TabsContent value="workspace"><WorkspaceTab /></TabsContent>
-          <TabsContent value="repositories"><RepositoriesTab /></TabsContent>
-          <TabsContent value="github"><GitHubTab /></TabsContent>
-          <TabsContent value="integrations"><IntegrationsTab /></TabsContent>
-          <TabsContent value="labs"><LabsTab /></TabsContent>
-          <TabsContent value="members"><MembersTab /></TabsContent>
-          <TabsContent value="labels"><LabelsTab /></TabsContent>
-          <TabsContent value="properties"><PropertiesTab /></TabsContent>
-          {extraAccountTabs?.map((tab) => (
-            <TabsContent key={tab.value} value={tab.value}>{tab.content}</TabsContent>
+      <nav
+        aria-label={t(($) => $.page.title)}
+        className="hidden w-56 shrink-0 overflow-y-auto border-r border-surface-border bg-app-shell/70 p-4 md:block"
+      >
+        <h1 className="mb-4 px-2 text-sm font-semibold">
+          {t(($) => $.page.title)}
+        </h1>
+        <div className="space-y-4">
+          {groupEntries.map((group) => (
+            <section key={group.scope} aria-labelledby={`settings-${group.scope}`}>
+              <h2
+                id={`settings-${group.scope}`}
+                className="mb-1 truncate px-2 text-xs font-medium text-muted-foreground"
+              >
+                {group.label}
+              </h2>
+              <div className="space-y-0.5">
+                {group.entries.map((entry) => {
+                  const path = `${entry.scope}/${entry.key}`;
+                  const Icon = entry.icon;
+                  return (
+                    <AppLink
+                      key={path}
+                      href={paths.settingsSection(entry.scope, entry.key)}
+                      aria-current={path === activePath ? "page" : undefined}
+                      className={cn(
+                        "flex h-8 items-center gap-2 rounded-md px-2 text-sm text-muted-foreground transition-colors hover:bg-surface-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                        path === activePath &&
+                          "bg-surface-selected font-medium text-surface-selected-foreground hover:bg-surface-selected",
+                      )}
+                    >
+                      {entry.space ? (
+                        <SpaceIcon space={entry.space} className="size-4" />
+                      ) : (
+                        <Icon className="size-4" aria-hidden />
+                      )}
+                      <span className="truncate">{entry.label}</span>
+                    </AppLink>
+                  );
+                })}
+              </div>
+            </section>
           ))}
         </div>
-      </div>
-    </Tabs>
+      </nav>
+
+      <main className="min-w-0 flex-1 overflow-y-auto">
+        <div
+          className={cn(
+            "mx-auto w-full p-4 md:p-6",
+            active?.key === "labels" || active?.key === "properties"
+              ? "max-w-5xl"
+              : "max-w-3xl",
+          )}
+        >
+          {active?.content ?? (
+            <p className="text-sm text-muted-foreground" aria-live="polite">
+              {t(($) => $.page.loading)}
+            </p>
+          )}
+        </div>
+      </main>
+    </div>
   );
 }

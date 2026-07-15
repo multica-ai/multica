@@ -39,8 +39,8 @@ func TestDashboardEndpoints(t *testing.T) {
 	// Two issues: one bound to a project, one not.
 	var projectID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO project (workspace_id, title)
-		VALUES ($1, 'dashboard test project')
+		INSERT INTO project (workspace_id, space_id, title)
+		VALUES ($1, (SELECT id FROM workspace_space WHERE workspace_id = $1 LIMIT 1), 'dashboard test project')
 		RETURNING id
 	`, testWorkspaceID).Scan(&projectID); err != nil {
 		t.Fatalf("create project: %v", err)
@@ -59,9 +59,9 @@ func TestDashboardEndpoints(t *testing.T) {
 			pid = projectID
 		}
 		if err := testPool.QueryRow(ctx, `
-			INSERT INTO issue (workspace_id, title, creator_id, creator_type, project_id, number)
+			INSERT INTO issue (workspace_id, space_id, title, creator_id, creator_type, project_id, number)
 			VALUES (
-				$1, 'dashboard test', $2, 'member', $3,
+				$1, (SELECT id FROM workspace_space WHERE workspace_id = $1 LIMIT 1), 'dashboard test', $2, 'member', $3,
 				(SELECT COALESCE(MAX(number), 0) + 1 FROM issue WHERE workspace_id = $1)
 			)
 			RETURNING id
@@ -351,8 +351,8 @@ func TestDashboardRunTimeDailyBucketsByViewerTimezone(t *testing.T) {
 	// Issue tagged so we can clean up just this test's rows.
 	var issueID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO issue (workspace_id, title, creator_id, creator_type, number)
-		VALUES ($1, 'runtime-daily tz test', $2, 'member',
+		INSERT INTO issue (workspace_id, space_id, title, creator_id, creator_type, number)
+		VALUES ($1, (SELECT id FROM workspace_space WHERE workspace_id = $1 LIMIT 1), 'runtime-daily tz test', $2, 'member',
 		        (SELECT COALESCE(MAX(number), 0) + 1 FROM issue WHERE workspace_id = $1))
 		RETURNING id
 	`, testWorkspaceID, testUserID).Scan(&issueID); err != nil {
@@ -447,8 +447,8 @@ func TestRollupTaskUsageHourlyIdempotentAndWatermark(t *testing.T) {
 
 	var issueID, taskID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO issue (workspace_id, title, creator_id, creator_type, number)
-		VALUES ($1, 'rollup idempotency', $2, 'member',
+		INSERT INTO issue (workspace_id, space_id, title, creator_id, creator_type, number)
+		VALUES ($1, (SELECT id FROM workspace_space WHERE workspace_id = $1 LIMIT 1), 'rollup idempotency', $2, 'member',
 		        (SELECT COALESCE(MAX(number), 0) + 1 FROM issue WHERE workspace_id = $1))
 		RETURNING id
 	`, testWorkspaceID, testUserID).Scan(&issueID); err != nil {
@@ -558,8 +558,8 @@ func TestRollupTaskUsageHourlyReassignBetweenRuntimes(t *testing.T) {
 	}
 	var issueID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO issue (workspace_id, title, creator_id, creator_type, number)
-		VALUES ($1, 'reassign hourly test', $2, 'member',
+		INSERT INTO issue (workspace_id, space_id, title, creator_id, creator_type, number)
+		VALUES ($1, (SELECT id FROM workspace_space WHERE workspace_id = $1 LIMIT 1), 'reassign hourly test', $2, 'member',
 		        (SELECT COALESCE(MAX(number), 0) + 1 FROM issue WHERE workspace_id = $1))
 		RETURNING id
 	`, testWorkspaceID, testUserID).Scan(&issueID); err != nil {
@@ -682,8 +682,8 @@ func TestRollupTaskUsageHourlyWorkspaceMismatch(t *testing.T) {
 	// foreign one — so agent.workspace_id != issue.workspace_id.
 	var issueID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO issue (workspace_id, title, creator_id, creator_type, number)
-		VALUES ($1, 'mismatch hourly test', $2, 'member',
+		INSERT INTO issue (workspace_id, space_id, title, creator_id, creator_type, number)
+		VALUES ($1, (SELECT id FROM workspace_space WHERE workspace_id = $1 LIMIT 1), 'mismatch hourly test', $2, 'member',
 		        (SELECT COALESCE(MAX(number), 0) + 1 FROM issue WHERE workspace_id = $1))
 		RETURNING id
 	`, testWorkspaceID, testUserID).Scan(&issueID); err != nil {
@@ -754,7 +754,9 @@ func TestDashboardRollupReattributesOnProjectChange(t *testing.T) {
 	mkProject := func(name string) string {
 		var id string
 		if err := testPool.QueryRow(ctx, `
-			INSERT INTO project (workspace_id, title) VALUES ($1, $2) RETURNING id
+			INSERT INTO project (workspace_id, space_id, title)
+			VALUES ($1, (SELECT id FROM workspace_space WHERE workspace_id = $1 LIMIT 1), $2)
+			RETURNING id
 		`, testWorkspaceID, name).Scan(&id); err != nil {
 			t.Fatalf("create project: %v", err)
 		}
@@ -766,8 +768,8 @@ func TestDashboardRollupReattributesOnProjectChange(t *testing.T) {
 
 	var issueID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO issue (workspace_id, title, creator_id, creator_type, project_id, number)
-		VALUES ($1, 'reattr issue', $2, 'member', $3,
+		INSERT INTO issue (workspace_id, space_id, title, creator_id, creator_type, project_id, number)
+		VALUES ($1, (SELECT id FROM workspace_space WHERE workspace_id = $1 LIMIT 1), 'reattr issue', $2, 'member', $3,
 		        (SELECT COALESCE(MAX(number), 0) + 1 FROM issue WHERE workspace_id = $1))
 		RETURNING id
 	`, testWorkspaceID, testUserID, projectA).Scan(&issueID); err != nil {
@@ -863,7 +865,9 @@ func TestDashboardRollupClearsOnIssueDelete(t *testing.T) {
 
 	var projectID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO project (workspace_id, title) VALUES ($1, 'dashboard cascade test') RETURNING id
+		INSERT INTO project (workspace_id, space_id, title)
+		VALUES ($1, (SELECT id FROM workspace_space WHERE workspace_id = $1 LIMIT 1), 'dashboard cascade test')
+		RETURNING id
 	`, testWorkspaceID).Scan(&projectID); err != nil {
 		t.Fatalf("create project: %v", err)
 	}
@@ -871,8 +875,8 @@ func TestDashboardRollupClearsOnIssueDelete(t *testing.T) {
 
 	var issueID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO issue (workspace_id, title, creator_id, creator_type, project_id, number)
-		VALUES ($1, 'cascade issue', $2, 'member', $3,
+		INSERT INTO issue (workspace_id, space_id, title, creator_id, creator_type, project_id, number)
+		VALUES ($1, (SELECT id FROM workspace_space WHERE workspace_id = $1 LIMIT 1), 'cascade issue', $2, 'member', $3,
 		        (SELECT COALESCE(MAX(number), 0) + 1 FROM issue WHERE workspace_id = $1))
 		RETURNING id
 	`, testWorkspaceID, testUserID, projectID).Scan(&issueID); err != nil {
@@ -996,7 +1000,9 @@ func TestDashboardRollupReattributesOnLinkTaskToIssue(t *testing.T) {
 	// and populates the project bucket.
 	var projectID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO project (workspace_id, title) VALUES ($1, 'dashboard link test') RETURNING id
+		INSERT INTO project (workspace_id, space_id, title)
+		VALUES ($1, (SELECT id FROM workspace_space WHERE workspace_id = $1 LIMIT 1), 'dashboard link test')
+		RETURNING id
 	`, testWorkspaceID).Scan(&projectID); err != nil {
 		t.Fatalf("create project: %v", err)
 	}
@@ -1004,8 +1010,8 @@ func TestDashboardRollupReattributesOnLinkTaskToIssue(t *testing.T) {
 
 	var issueID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO issue (workspace_id, title, creator_id, creator_type, project_id, number)
-		VALUES ($1, 'link test issue', $2, 'member', $3,
+		INSERT INTO issue (workspace_id, space_id, title, creator_id, creator_type, project_id, number)
+		VALUES ($1, (SELECT id FROM workspace_space WHERE workspace_id = $1 LIMIT 1), 'link test issue', $2, 'member', $3,
 		        (SELECT COALESCE(MAX(number), 0) + 1 FROM issue WHERE workspace_id = $1))
 		RETURNING id
 	`, testWorkspaceID, testUserID, projectID).Scan(&issueID); err != nil {
@@ -1228,8 +1234,8 @@ func TestDashboardUsageDailyCrossMidnightFullPipeline(t *testing.T) {
 
 	var issueID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO issue (workspace_id, title, creator_id, creator_type, number)
-		VALUES ($1, 'cross-midnight pipeline test', $2, 'member',
+		INSERT INTO issue (workspace_id, space_id, title, creator_id, creator_type, number)
+		VALUES ($1, (SELECT id FROM workspace_space WHERE workspace_id = $1 LIMIT 1), 'cross-midnight pipeline test', $2, 'member',
 		        (SELECT COALESCE(MAX(number), 0) + 1 FROM issue WHERE workspace_id = $1))
 		RETURNING id
 	`, testWorkspaceID, testUserID).Scan(&issueID); err != nil {
@@ -1339,8 +1345,8 @@ func TestRollupTaskUsageHourlyConvergesOnTaskUsageDelete(t *testing.T) {
 
 	var issueID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO issue (workspace_id, title, creator_id, creator_type, number)
-		VALUES ($1, 'tu-delete trigger test', $2, 'member',
+		INSERT INTO issue (workspace_id, space_id, title, creator_id, creator_type, number)
+		VALUES ($1, (SELECT id FROM workspace_space WHERE workspace_id = $1 LIMIT 1), 'tu-delete trigger test', $2, 'member',
 		        (SELECT COALESCE(MAX(number), 0) + 1 FROM issue WHERE workspace_id = $1))
 		RETURNING id
 	`, testWorkspaceID, testUserID).Scan(&issueID); err != nil {

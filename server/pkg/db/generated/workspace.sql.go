@@ -211,19 +211,6 @@ func (q *Queries) GetWorkspaceBySlug(ctx context.Context, slug string) (Workspac
 	return i, err
 }
 
-const incrementIssueCounter = `-- name: IncrementIssueCounter :one
-UPDATE workspace SET issue_counter = issue_counter + 1
-WHERE id = $1
-RETURNING issue_counter
-`
-
-func (q *Queries) IncrementIssueCounter(ctx context.Context, id pgtype.UUID) (int32, error) {
-	row := q.db.QueryRow(ctx, incrementIssueCounter, id)
-	var issue_counter int32
-	err := row.Scan(&issue_counter)
-	return issue_counter, err
-}
-
 const listDaemonWorkspaces = `-- name: ListDaemonWorkspaces :many
 SELECT w.id, w.name
 FROM member m
@@ -352,12 +339,13 @@ func (q *Queries) LockWorkspaceForDelete(ctx context.Context, id pgtype.UUID) (p
 const updateWorkspace = `-- name: UpdateWorkspace :one
 UPDATE workspace SET
     name = COALESCE($2, name),
-    description = COALESCE($3, description),
-    context = COALESCE($4, context),
-    settings = COALESCE($5, settings),
-    repos = COALESCE($6, repos),
-    issue_prefix = COALESCE($7, issue_prefix),
-    avatar_url = COALESCE($8, avatar_url),
+    slug = COALESCE($3, slug),
+    description = COALESCE($4, description),
+    context = COALESCE($5, context),
+    settings = COALESCE($6, settings),
+    repos = COALESCE($7, repos),
+    issue_prefix = COALESCE($8, issue_prefix),
+    avatar_url = COALESCE($9, avatar_url),
     updated_at = now()
 WHERE id = $1
 RETURNING id, name, slug, description, settings, created_at, updated_at, context, repos, issue_prefix, issue_counter, avatar_url, attribution_fail_closed
@@ -366,6 +354,7 @@ RETURNING id, name, slug, description, settings, created_at, updated_at, context
 type UpdateWorkspaceParams struct {
 	ID          pgtype.UUID `json:"id"`
 	Name        pgtype.Text `json:"name"`
+	Slug        pgtype.Text `json:"slug"`
 	Description pgtype.Text `json:"description"`
 	Context     pgtype.Text `json:"context"`
 	Settings    []byte      `json:"settings"`
@@ -378,6 +367,7 @@ func (q *Queries) UpdateWorkspace(ctx context.Context, arg UpdateWorkspaceParams
 	row := q.db.QueryRow(ctx, updateWorkspace,
 		arg.ID,
 		arg.Name,
+		arg.Slug,
 		arg.Description,
 		arg.Context,
 		arg.Settings,

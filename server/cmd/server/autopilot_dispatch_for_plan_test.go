@@ -43,6 +43,7 @@ func TestDispatchAutopilotForPlanIsIdempotent(t *testing.T) {
 
 	ap, err := queries.CreateAutopilot(ctx, db.CreateAutopilotParams{
 		WorkspaceID:        parseUUID(testWorkspaceID),
+		SpaceID:            defaultSpaceUUID(t, ctx, testWorkspaceID),
 		Title:              "Dispatch for plan idempotency",
 		Description:        pgtype.Text{String: "Dispatch for plan test", Valid: true},
 		AssigneeType:       "agent",
@@ -167,6 +168,7 @@ func TestDispatchAutopilotSuppressesRecentDuplicateIssue(t *testing.T) {
 	title := "Autopilot recent duplicate issue " + time.Now().UTC().Format("20060102150405.000000000")
 	ap, err := queries.CreateAutopilot(ctx, db.CreateAutopilotParams{
 		WorkspaceID:        parseUUID(testWorkspaceID),
+		SpaceID:            defaultSpaceUUID(t, ctx, testWorkspaceID),
 		Title:              "Recent duplicate issue guard",
 		Description:        pgtype.Text{String: "Recent duplicate issue guard test", Valid: true},
 		AssigneeType:       "agent",
@@ -290,6 +292,7 @@ func TestDispatchAutopilotForPlanRecoversPartialRun(t *testing.T) {
 
 			ap, err := queries.CreateAutopilot(ctx, db.CreateAutopilotParams{
 				WorkspaceID:        parseUUID(testWorkspaceID),
+				SpaceID:            defaultSpaceUUID(t, ctx, testWorkspaceID),
 				Title:              "Partial recovery " + mode,
 				Description:        pgtype.Text{String: "partial run recovery test", Valid: true},
 				AssigneeType:       "agent",

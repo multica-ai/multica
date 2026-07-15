@@ -24,6 +24,7 @@ const OTHER_USER_ID = "99999999-9999-4999-8999-999999999999";
 
 interface SetupResult {
   slug: string;
+  workspaceId: string;
   userId: string;
 }
 
@@ -46,7 +47,7 @@ async function loginCapturingUser(page: Page): Promise<SetupResult> {
     localStorage.setItem("multica_token", t);
     localStorage.setItem("multica:chat:isOpen", "false");
   }, token);
-  return { slug: workspace.slug, userId };
+  return { slug: workspace.slug, workspaceId: workspace.id, userId };
 }
 
 function mockAgent(ownerId: string, workspaceId: string) {
@@ -72,14 +73,30 @@ function mockAgent(ownerId: string, workspaceId: string) {
     archived_at: null,
     archived_by: null,
     composio_toolkit_allowlist: [],
+    availability_mode: "workspace",
+    availability_space_ids: [],
   };
 }
 
 /** Mock the Composio catalog + the current user's active connections (Notion +
  *  Slack), the agent list (owned by `ownerId`), and capture any PUT
  *  /api/agents/<id> body. Returns a getter for the last captured allowlist. */
-async function mockApis(page: Page, ownerId: string) {
+async function mockApis(page: Page, ownerId: string, workspaceId: string) {
   const captured: { allowlist?: unknown } = {};
+
+  await page.route("**/api/config", (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        allow_signup: true,
+        posthog_key: "",
+        posthog_host: "",
+        analytics_environment: "",
+        feature_flags: { composio_mcp_apps: true },
+      }),
+    }),
+  );
 
   await page.route("**/api/integrations/composio/toolkits", (route) =>
     route.fulfill({
@@ -120,7 +137,7 @@ async function mockApis(page: Page, ownerId: string) {
   await page.route("**/api/agents**", (route) => {
     const req = route.request();
     const url = new URL(req.url());
-    const workspaceId = url.searchParams.get("workspace_id") ?? "ws-mock";
+    const requestedWorkspaceId = url.searchParams.get("workspace_id") ?? workspaceId;
 
     if (req.method() === "PUT" && url.pathname.endsWith(`/api/agents/${AGENT_ID}`)) {
       const body = req.postDataJSON?.() ?? {};
@@ -129,7 +146,7 @@ async function mockApis(page: Page, ownerId: string) {
         status: 200,
         contentType: "application/json",
         body: JSON.stringify({
-          ...mockAgent(ownerId, workspaceId),
+          ...mockAgent(ownerId, requestedWorkspaceId),
           composio_toolkit_allowlist: body.composio_toolkit_allowlist ?? [],
         }),
       });
@@ -139,7 +156,15 @@ async function mockApis(page: Page, ownerId: string) {
       return route.fulfill({
         status: 200,
         contentType: "application/json",
-        body: JSON.stringify([mockAgent(ownerId, workspaceId)]),
+        body: JSON.stringify([mockAgent(ownerId, requestedWorkspaceId)]),
+      });
+    }
+
+    if (req.method() === "GET" && url.pathname.endsWith(`/api/agents/${AGENT_ID}`)) {
+      return route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(mockAgent(ownerId, requestedWorkspaceId)),
       });
     }
 
@@ -153,8 +178,8 @@ test.describe("Agent MCP tab (creator-only)", () => {
   test("creator sees the MCP Apps tab and toggling a toolkit writes the allowlist", async ({
     page,
   }) => {
-    const { slug, userId } = await loginCapturingUser(page);
-    const getAllowlist = await mockApis(page, userId);
+    const { slug, workspaceId, userId } = await loginCapturingUser(page);
+    const getAllowlist = await mockApis(page, userId, workspaceId);
 
     await page.goto(`/${slug}/agents/${AGENT_ID}`, {
       waitUntil: "domcontentloaded",
@@ -162,7 +187,7 @@ test.describe("Agent MCP tab (creator-only)", () => {
     await waitForPageText(page, "MCP Test Agent");
 
     // The creator-only tab entry is present and opens the connection list.
-    const tab = page.getByRole("button", { name: "MCP Apps" });
+    const tab = page.getByRole("button", { name: "MCP Apps", exact: true });
     await expect(tab).toBeVisible({ timeout: 15000 });
     await tab.click();
 
@@ -175,9 +200,9 @@ test.describe("Agent MCP tab (creator-only)", () => {
   });
 
   test("a non-creator viewer does not see the MCP Apps tab", async ({ page }) => {
-    const { slug } = await loginCapturingUser(page);
+    const { slug, workspaceId } = await loginCapturingUser(page);
     // Agent owned by someone else → the creator gate hides the tab entry.
-    await mockApis(page, OTHER_USER_ID);
+    await mockApis(page, OTHER_USER_ID, workspaceId);
 
     await page.goto(`/${slug}/agents/${AGENT_ID}`, {
       waitUntil: "domcontentloaded",
@@ -188,6 +213,8 @@ test.describe("Agent MCP tab (creator-only)", () => {
     await expect(page.getByRole("button", { name: "Activity" })).toBeVisible({
       timeout: 15000,
     });
-    await expect(page.getByRole("button", { name: "MCP Apps" })).toHaveCount(0);
+    await expect(
+      page.getByRole("button", { name: "MCP Apps", exact: true }),
+    ).toHaveCount(0);
   });
 });

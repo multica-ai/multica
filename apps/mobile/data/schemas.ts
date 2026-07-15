@@ -156,6 +156,7 @@ export const EMPTY_ISSUE_LABELS_RESPONSE: IssueLabelsResponse = {
 export const ProjectSchema = z.object({
   id: z.string(),
   workspace_id: z.string(),
+  space_id: z.string(),
   title: z.string(),
   description: z.string().nullable(),
   icon: z.string().nullable(),
@@ -193,6 +194,7 @@ export const EMPTY_LIST_PROJECTS_RESPONSE: ListProjectsResponse = {
 export const EMPTY_PROJECT: Project = {
   id: "",
   workspace_id: "",
+  space_id: "",
   title: "",
   description: null,
   icon: null,
@@ -597,6 +599,11 @@ export const AgentSchema: z.ZodType<Agent> = z.object({
   >,
   permission_mode: z.enum(["private", "public_to"]).catch("private"),
   invocation_targets: z.array(AgentInvocationTargetSchema).default([]),
+  availability_mode: z
+    .enum(["private", "selected_spaces", "workspace"])
+    .optional()
+    .catch("private"),
+  availability_space_ids: z.array(z.string()).optional().catch([]),
   status: z.string().catch("active") as unknown as z.ZodType<Agent["status"]>,
   max_concurrent_tasks: z.number().default(1),
   model: z.string().default(""),
@@ -654,6 +661,9 @@ export const EMPTY_RUNTIME_LIST: RuntimeDevice[] = [];
 export const SquadSchema: z.ZodType<Squad> = z.object({
   id: z.string(),
   workspace_id: z.string().default(""),
+  // Older servers omitted Space ownership. Defaulting keeps identity-only
+  // surfaces resilient while selection surfaces always query by Space.
+  space_id: z.string().default(""),
   name: z.string().default(""),
   description: z.string().default(""),
   instructions: z.string().default(""),

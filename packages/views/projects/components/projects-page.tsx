@@ -772,7 +772,9 @@ function ProjectBatchToolbar({
 // Page
 // ---------------------------------------------------------------------------
 
-export function ProjectsPage() {
+// `spaceId` narrows the list to Projects owned by that Space — used by the
+// Space surface pages (/space/:key/projects).
+export function ProjectsPage({ spaceId }: { spaceId?: string } = {}) {
   const { t } = useT("projects");
   const wsId = useWorkspaceId();
   const wsPaths = useWorkspacePaths();
@@ -795,13 +797,18 @@ export function ProjectsPage() {
   const isCompact = viewMode === "compact";
   const isColVisible = (key: ProjectColumnKey) => !hiddenColumns.includes(key);
 
-  const { data: projects = [], isLoading } = useQuery(projectListOptions(wsId));
+  const { data: allProjects = [], isLoading } = useQuery(projectListOptions(wsId));
+  const projects = useMemo(
+    () => (spaceId ? allProjects.filter((p) => p.space_id === spaceId) : allProjects),
+    [allProjects, spaceId],
+  );
   const { data: members = [] } = useQuery(memberListOptions(wsId));
   const { data: pins = [] } = useQuery({
     ...pinListOptions(wsId, currentUser?.id ?? ""),
     enabled: !!wsId && !!currentUser?.id,
   });
-  const openCreateProject = () => useModalStore.getState().open("create-project");
+  const openCreateProject = () =>
+    useModalStore.getState().open("create-project", spaceId ? { space_id: spaceId } : undefined);
 
   const isWorkspaceAdmin = useMemo(() => {
     if (!currentUser) return false;

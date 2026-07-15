@@ -1,6 +1,10 @@
 # Projects and resources source map
 
 - `server/cmd/multica/cmd_project.go` registers project `list`, `get`, `create`, `update`, `delete`, and `status`.
+- `project list --space` filters by one Space UUID or key; `project create --space` resolves one owning Space into `space_id`. Project Space is immutable in the current release; Move Project is not exposed yet.
+- `server/cmd/multica/cmd_space.go` registers space `list`, `create`, `update`, and `archive`. `create` requires `--name`; `--key` (issue prefix), `--description`, `--icon` are optional; `update` accepts the same optional flags. The CLI maps to `/api/spaces` (GET/POST) and `/api/spaces/{id}` (PATCH/PUT update, DELETE archive), routes registered at `server/cmd/server/router.go:951`.
+- `resolveSpaceRef`/`resolveSpaceRefs` (`cmd_space.go`) resolve a `--space` value by exact UUID or case-insensitive key against `GET /api/spaces`. `spaceCLIResponse` carries `key`, `issue_counter`, and `is_default`.
+- A space owns the issue-key prefix and its own issue-number counter, so identifiers read `SPACE_KEY-NUMBER`. Each workspace has a default space whose key is the legacy workspace prefix; omitting `--space` uses that default space.
 - The same file registers `project resource list/add/update/remove`.
 - `project create --repo` attaches `github_repo` resources during project creation.
 - `project create` / `project update` accept `--start-date` / `--due-date` (calendar days, `YYYY-MM-DD`), mapping to the project `start_date` / `due_date` columns (migration `166_project_dates`); an empty `--start-date ""`/`--due-date ""` on update clears the date, mirroring the issue date flags in `cmd_issue.go`.
@@ -11,3 +15,4 @@
 - Project resources are written into `.multica/project/resources.json` for agent workdirs.
 - `github_repo.resource_ref.ref` is lifted into daemon `RepoData.Ref` by `server/internal/handler/daemon.go`; `server/internal/daemon/daemon.go` stores it per task, and `server/internal/daemon/health.go` uses it as the default `/repo/checkout` ref when the checkout request does not explicitly pass one.
 - A project's `description` is injected as durable context for every task in the project. The claim handler (`server/internal/handler/daemon.go`) reads `proj.Description` onto the claim response (`ProjectDescription`, `server/internal/handler/agent.go`); the daemon carries it through `Task` (`server/internal/daemon/types.go`) and `TaskContextForEnv` (`server/internal/daemon/execenv/execenv.go`) into the brief's `## Project Context` section (`server/internal/daemon/execenv/runtime_config.go`) and into `.multica/project/resources.json` as `project_description` (`server/internal/daemon/execenv/context.go`).
+- Space operating context is stored on `workspace_space.context` (`server/pkg/db/queries/space.sql`) and attached to task claims by `server/internal/handler/daemon.go`. Single-Space runs render `## Space Context`; All-spaces Chat renders the complete allowed set under `## Space Contexts`. The task token carries the same authoritative Space IDs.

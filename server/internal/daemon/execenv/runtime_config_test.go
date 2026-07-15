@@ -575,6 +575,120 @@ func TestWorkspaceContextHeadingSkippedWhenEmpty(t *testing.T) {
 	}
 }
 
+func TestSpaceContextRenderedOnlyForBoundSpace(t *testing.T) {
+	t.Parallel()
+	const spaceContext = "Use the Engineering runbook and keep changes inside owned services."
+	cases := []struct {
+		name        string
+		ctx         TaskContextForEnv
+		wantSection bool
+		wantContext bool
+	}{
+		{
+			name: "issue task",
+			ctx: TaskContextForEnv{
+				IssueID:      "11111111-2222-3333-4444-555555555555",
+				SpaceID:      "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+				SpaceContext: spaceContext,
+			},
+			wantSection: true,
+			wantContext: true,
+		},
+		{
+			name: "autopilot task",
+			ctx: TaskContextForEnv{
+				AutopilotRunID: "run-1",
+				SpaceID:        "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+				SpaceContext:   spaceContext,
+			},
+			wantSection: true,
+			wantContext: true,
+		},
+		{
+			name: "quick create task",
+			ctx: TaskContextForEnv{
+				QuickCreatePrompt: "create an issue",
+				SpaceID:           "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+				SpaceContext:      spaceContext,
+			},
+			wantSection: true,
+			wantContext: true,
+		},
+		{
+			name: "legacy chat without resolved scope",
+			ctx: TaskContextForEnv{
+				ChatSessionID: "chat-1",
+				SpaceContext:  spaceContext,
+			},
+			wantSection: false,
+			wantContext: false,
+		},
+		{
+			name: "bound space with empty context",
+			ctx: TaskContextForEnv{
+				IssueID: "11111111-2222-3333-4444-555555555555",
+				SpaceID: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+			},
+			wantSection: true,
+			wantContext: false,
+		},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			out := buildMetaSkillContent("claude", tc.ctx)
+			gotSection := strings.Contains(out, "## Space Context")
+			if gotSection != tc.wantSection {
+				t.Fatalf("Space Context heading present = %v, want %v\n%s", gotSection, tc.wantSection, out)
+			}
+			gotContext := strings.Contains(out, spaceContext)
+			if gotContext != tc.wantContext {
+				t.Fatalf("Space Context body present = %v, want %v", gotContext, tc.wantContext)
+			}
+			if tc.wantSection {
+				wsIdx := strings.Index(out, "## Workspace Context")
+				spaceIdx := strings.Index(out, "## Space Context")
+				commandsIdx := strings.Index(out, "## Available Commands")
+				if wsIdx >= 0 && wsIdx > spaceIdx {
+					t.Fatalf("Workspace Context must precede Space Context")
+				}
+				if commandsIdx == -1 || spaceIdx > commandsIdx {
+					t.Fatalf("Space Context must precede Available Commands")
+				}
+			}
+		})
+	}
+}
+
+func TestAllSpacesChatRendersCompleteContextBoundary(t *testing.T) {
+	t.Parallel()
+	ctx := TaskContextForEnv{
+		ChatSessionID: "chat-1",
+		SpaceScope:    "all",
+		Spaces: []SpaceContextForEnv{
+			{ID: "space-eng", Key: "ENG", Name: "Engineering", Context: "Use the engineering runbook."},
+			{ID: "space-prod", Key: "PROD", Name: "Product", Context: "Use the product brief."},
+		},
+	}
+
+	out := buildMetaSkillContent("claude", ctx)
+	for _, want := range []string{
+		"## Space Contexts",
+		"complete data boundary",
+		"### Engineering (`ENG`)",
+		"Use the engineering runbook.",
+		"### Product (`PROD`)",
+		"Use the product brief.",
+		"--space <space-id-or-key>",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("All-spaces brief missing %q\n%s", want, out)
+		}
+	}
+}
+
 func TestConnectedAppsRenderedAcrossBriefModes(t *testing.T) {
 	ctx := TaskContextForEnv{
 		IssueID:          "11111111-2222-3333-4444-555555555555",

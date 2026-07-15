@@ -11,6 +11,7 @@ export interface SquadMemberPreview {
 export interface Squad {
   id: string;
   workspace_id: string;
+  space_id: string;
   name: string;
   description: string;
   instructions: string;
@@ -46,6 +47,7 @@ export interface SquadActivityLog {
 }
 
 export interface CreateSquadRequest {
+  space_id: string;
   name: string;
   description?: string;
   leader_id: string;

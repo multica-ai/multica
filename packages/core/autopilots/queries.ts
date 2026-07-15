@@ -4,6 +4,8 @@ import { api } from "../api";
 export const autopilotKeys = {
   all: (wsId: string) => ["autopilots", wsId] as const,
   list: (wsId: string) => [...autopilotKeys.all(wsId), "list"] as const,
+  listBySpace: (wsId: string, spaceId: string) =>
+    [...autopilotKeys.list(wsId), "space", spaceId] as const,
   detail: (wsId: string, id: string) =>
     [...autopilotKeys.all(wsId), "detail", id] as const,
   runs: (wsId: string, id: string) =>
@@ -14,13 +16,24 @@ export const autopilotKeys = {
     [...autopilotKeys.all(wsId), "deliveries", id] as const,
   delivery: (wsId: string, autopilotId: string, deliveryId: string) =>
     [...autopilotKeys.all(wsId), "deliveries", autopilotId, deliveryId] as const,
+  templates: (wsId: string) => [...autopilotKeys.all(wsId), "templates"] as const,
 };
 
-export function autopilotListOptions(wsId: string) {
+export function autopilotListOptions(wsId: string, spaceId?: string) {
   return queryOptions({
-    queryKey: autopilotKeys.list(wsId),
-    queryFn: () => api.listAutopilots(),
+    queryKey: spaceId
+      ? autopilotKeys.listBySpace(wsId, spaceId)
+      : autopilotKeys.list(wsId),
+    queryFn: () => api.listAutopilots(spaceId ? { space_id: spaceId } : undefined),
     select: (data) => data.autopilots,
+  });
+}
+
+export function autopilotTemplateListOptions(wsId: string) {
+  return queryOptions({
+    queryKey: autopilotKeys.templates(wsId),
+    queryFn: () => api.listAutopilotTemplates(),
+    select: (data) => data.templates,
   });
 }
 

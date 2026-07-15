@@ -1,18 +1,13 @@
-"use client";
+import { redirect } from "next/navigation";
 
-import { use } from "react";
-import { IssueDetail } from "@multica/views/issues/components";
-import { ErrorBoundary } from "@multica/ui/components/common/error-boundary";
-
-export default function IssueDetailPage({
+// Legacy issue-detail path. The canonical route moved to /issue/:id
+// (identifier-first, Linear-style); old bookmarks and persisted tabs land
+// here and get forwarded.
+export default async function LegacyIssueDetailRedirect({
   params,
 }: {
-  params: Promise<{ id: string }>;
+  params: Promise<{ workspaceSlug: string; id: string }>;
 }) {
-  const { id } = use(params);
-  return (
-    <ErrorBoundary resetKeys={[id]}>
-      <IssueDetail issueId={id} />
-    </ErrorBoundary>
-  );
+  const { workspaceSlug, id } = await params;
+  redirect(`/${encodeURIComponent(workspaceSlug)}/issue/${encodeURIComponent(id)}`);
 }

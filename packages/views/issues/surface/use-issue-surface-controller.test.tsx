@@ -101,13 +101,15 @@ describe("useIssueSurfaceController", () => {
   let listIssues: ReturnType<
     typeof vi.fn<(params?: ListIssuesParams) => Promise<ListIssuesResponse>>
   >;
+  let listGroupedIssues: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
     qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     listIssues = vi.fn(() => never<ListIssuesResponse>());
+    listGroupedIssues = vi.fn(() => never());
     setApiInstance({
       listIssues,
-      listGroupedIssues: vi.fn(() => never()),
+      listGroupedIssues,
       listProjects: vi.fn(() => never()),
       getAgentTaskSnapshot: vi.fn(() => never<AgentTask[]>()),
       getChildIssueProgress: vi.fn(() => never()),
@@ -195,6 +197,55 @@ describe("useIssueSurfaceController", () => {
     ).toBeDefined();
     expect(listIssues).toHaveBeenCalledWith(
       expect.objectContaining({ status: "backlog", limit: 50, offset: 0 }),
+    );
+  });
+
+  it("server-filters the workspace issue list by the selected space", async () => {
+    const store = getIssueSurfaceViewStore("workspace:all");
+    store.getState().setSpaceFilter("space-1");
+
+    const { result } = renderHook(
+      () =>
+        useIssueSurfaceController({
+          scope: { type: "workspace", actorKind: "all" },
+          modes: ["board", "list", "swimlane"],
+        }),
+      { wrapper: makeWrapper(qc, "workspace:all") },
+    );
+
+    await waitFor(() => expect(listIssues).toHaveBeenCalled());
+
+    expect(result.current.sort).toEqual({
+      sort_by: "position",
+      sort_direction: undefined,
+      space_id: "space-1",
+    });
+    expect(listIssues).toHaveBeenCalledWith(
+      expect.objectContaining({ space_id: "space-1" }),
+    );
+  });
+
+  it("server-filters assignee groups by the selected space", async () => {
+    const store = getIssueSurfaceViewStore("workspace:all");
+    store.getState().setGrouping("assignee");
+    store.getState().setSpaceFilter("space-1");
+
+    const { result } = renderHook(
+      () =>
+        useIssueSurfaceController({
+          scope: { type: "workspace", actorKind: "all" },
+          modes: ["board", "list", "swimlane"],
+        }),
+      { wrapper: makeWrapper(qc, "workspace:all") },
+    );
+
+    await waitFor(() => expect(listGroupedIssues).toHaveBeenCalled());
+
+    expect(result.current.assigneeGroupFilter).toEqual(
+      expect.objectContaining({ space_id: "space-1" }),
+    );
+    expect(listGroupedIssues).toHaveBeenCalledWith(
+      expect.objectContaining({ space_id: "space-1" }),
     );
   });
 

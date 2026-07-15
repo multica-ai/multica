@@ -33,6 +33,14 @@ func createPlainMember(t *testing.T, email string) string {
 	); err != nil {
 		t.Fatalf("add member: %v", err)
 	}
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO workspace_space_member (workspace_id, space_id, user_id, role, sort_order)
+		SELECT workspace_id, id, $2, 'member', 1
+		FROM workspace_space
+		WHERE workspace_id = $1 AND is_default = true
+	`, testWorkspaceID, userID); err != nil {
+		t.Fatalf("join default space: %v", err)
+	}
 	return userID
 }
 

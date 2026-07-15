@@ -63,6 +63,7 @@
     "unpin_tooltip": "사이드바 고정 해제",
     "sidebar_tooltip": "사이드바 열기/닫기",
     "copy_link": "링크 복사",
+    "spaces": "Space",
     "delete_action": "프로젝트 삭제",
     "section_properties": "속성",
     "section_progress": "진행률",
@@ -122,6 +123,10 @@
     "description": "프로젝트가 삭제됩니다. 이슈는 삭제되지 않지만 프로젝트 연결은 해제됩니다.",
     "confirm": "삭제",
     "cancel": "취소"
+  },
+  "manage_spaces": {
+    "empty": "최소 하나의 Space를 선택하세요.",
+    "toast_failed": "Space 업데이트에 실패했습니다"
   },
   "picker": {
     "no_project": "프로젝트 없음",

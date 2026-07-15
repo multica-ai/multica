@@ -53,3 +53,33 @@ export function parseWithFallback<T>(
   );
   return fallback;
 }
+
+/**
+ * Validate a mutation response against a zod schema, warning (not throwing) on
+ * drift. Unlike `parseWithFallback`, there is no synthetic fallback: a write
+ * response has no safe empty stand-in — an `id: ""` placeholder would corrupt
+ * the caches these responses feed. On drift we log via the same channel as
+ * `parseWithFallback` and return the raw value cast to `T`; the caller's
+ * optimistic cache patch plus `onSettled` invalidation remain the authoritative
+ * safety net.
+ *
+ * See CLAUDE.md "API Compatibility" for when to reach for this over
+ * `parseWithFallback`.
+ */
+export function parseOrWarn<T>(
+  data: unknown,
+  schema: ZodType,
+  opts: ParseOptions,
+): T {
+  const result = schema.safeParse(data);
+  if (result.success) return result.data as T;
+  schemaLogger.warn(
+    `API response failed schema validation: ${opts.endpoint}`,
+    {
+      endpoint: opts.endpoint,
+      issues: result.error.issues,
+      received: data,
+    },
+  );
+  return data as T;
+}

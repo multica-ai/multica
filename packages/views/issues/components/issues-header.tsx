@@ -20,6 +20,7 @@ import {
   User,
   UserMinus,
   UserPen,
+  Users,
   Waves,
 } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
@@ -55,6 +56,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { memberListOptions, agentListOptions, squadListOptions } from "@multica/core/workspace/queries";
 import { projectListOptions } from "@multica/core/projects/queries";
+import { activeSpaceListOptions } from "@multica/core/spaces/queries";
 import { labelListOptions } from "@multica/core/labels/queries";
 import { propertyListOptions } from "@multica/core/properties";
 import { propertyIdFromViewKey } from "@multica/core/issues/stores/view-store";
@@ -103,6 +105,7 @@ function getActiveFilterCount(state: {
   assigneeFilters: ActorFilterValue[];
   includeNoAssignee: boolean;
   creatorFilters: ActorFilterValue[];
+  spaceFilter?: string | null;
   projectFilters: string[];
   includeNoProject: boolean;
   labelFilters: string[];
@@ -114,6 +117,7 @@ function getActiveFilterCount(state: {
   if (state.priorityFilters.length > 0) count++;
   if (state.assigneeFilters.length > 0 || state.includeNoAssignee) count++;
   if (state.creatorFilters.length > 0) count++;
+  if (state.spaceFilter) count++;
   if (state.projectFilters.length > 0 || state.includeNoProject) count++;
   if (state.labelFilters.length > 0) count++;
   for (const selected of Object.values(state.propertyFilters ?? {})) {
@@ -141,8 +145,9 @@ function useIssueCounts(allIssues: Issue[]) {
     const status = new Map<string, number>();
     const priority = new Map<string, number>();
     const assignee = new Map<string, number>();
-    const creator = new Map<string, number>();
-    const project = new Map<string, number>();
+  const creator = new Map<string, number>();
+  const space = new Map<string, number>();
+  const project = new Map<string, number>();
     const label = new Map<string, number>();
     // property definition id → option key → count. Checkbox values count
     // under the "true"/"false" pseudo-option keys the filter store uses.
@@ -163,6 +168,10 @@ function useIssueCounts(allIssues: Issue[]) {
 
       const cKey = `${issue.creator_type}:${issue.creator_id}`;
       creator.set(cKey, (creator.get(cKey) ?? 0) + 1);
+
+      if (issue.space_id) {
+        space.set(issue.space_id, (space.get(issue.space_id) ?? 0) + 1);
+      }
 
       if (!issue.project_id) {
         noProject++;
@@ -197,7 +206,7 @@ function useIssueCounts(allIssues: Issue[]) {
       }
     }
 
-    return { status, priority, assignee, creator, noAssignee, project, noProject, label, property };
+    return { status, priority, assignee, creator, noAssignee, space, project, noProject, label, property };
   }, [allIssues]);
 }
 
@@ -370,6 +379,89 @@ function ActorSubContent({
         )}
 
         {filteredMembers.length === 0 && filteredAgents.length === 0 && (!showSquads || filteredSquads.length === 0) && search && (
+          <div className="px-2 py-3 text-center text-sm text-muted-foreground">
+            {t(($) => $.filters.no_results)}
+          </div>
+        )}
+      </div>
+    </>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Space sub-menu content
+// ---------------------------------------------------------------------------
+
+function SpaceSubContent({
+  counts,
+  selected,
+  onSelect,
+}: {
+  counts: Map<string, number>;
+  selected: string | null;
+  onSelect: (spaceId: string | null) => void;
+}) {
+  const { t } = useT("issues");
+  const [search, setSearch] = useState("");
+  const wsId = useWorkspaceId();
+  const { data: spaces = [] } = useQuery(activeSpaceListOptions(wsId));
+  const query = search.trim().toLowerCase();
+  const filtered = spaces.filter((space) =>
+    space.name.toLowerCase().includes(query) ||
+    space.key.toLowerCase().includes(query),
+  );
+
+  return (
+    <>
+      <div className="px-2 py-1.5 border-b border-foreground/5">
+        <input
+          type="text"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder={t(($) => $.filters.placeholder)}
+          className="w-full bg-transparent text-sm placeholder:text-muted-foreground outline-none"
+          autoFocus
+        />
+      </div>
+
+      <div className="max-h-64 overflow-y-auto p-1">
+        {(!query || "all spaces".includes(query)) && (
+          <DropdownMenuCheckboxItem
+            checked={!selected}
+            onCheckedChange={() => onSelect(null)}
+            className={FILTER_ITEM_CLASS}
+          >
+            <HoverCheck checked={!selected} />
+            <Users className="size-3.5 text-muted-foreground" />
+            {t(($) => $.filters.all_spaces)}
+          </DropdownMenuCheckboxItem>
+        )}
+
+        {filtered.map((space) => {
+          const checked = selected === space.id;
+          const count = counts.get(space.id) ?? 0;
+          return (
+            <DropdownMenuCheckboxItem
+              key={space.id}
+              checked={checked}
+              onCheckedChange={() => onSelect(checked ? null : space.id)}
+              className={FILTER_ITEM_CLASS}
+            >
+              <HoverCheck checked={checked} />
+              <span className="inline-flex h-5 min-w-7 items-center justify-center rounded bg-muted px-1.5 text-[10px] font-medium text-muted-foreground">
+                {space.key}
+              </span>
+              <span className="truncate">{space.name}</span>
+              {count > 0 && (
+                <span className="ml-auto text-xs text-muted-foreground">
+                  {count}
+                </span>
+              )}
+            </DropdownMenuCheckboxItem>
+          );
+        })}
+
+        {filtered.length === 0 && search && (
           <div className="px-2 py-3 text-center text-sm text-muted-foreground">
             {t(($) => $.filters.no_results)}
           </div>
@@ -884,6 +976,7 @@ export function IssueDisplayControls({
   const assigneeFilters = useViewStore((s) => s.assigneeFilters);
   const includeNoAssignee = useViewStore((s) => s.includeNoAssignee);
   const creatorFilters = useViewStore((s) => s.creatorFilters);
+  const spaceFilter = useViewStore((s) => s.spaceFilter);
   const projectFilters = useViewStore((s) => s.projectFilters);
   const includeNoProject = useViewStore((s) => s.includeNoProject);
   const labelFilters = useViewStore((s) => s.labelFilters);
@@ -940,6 +1033,7 @@ export function IssueDisplayControls({
     assigneeFilters,
     includeNoAssignee,
     creatorFilters,
+    spaceFilter,
     projectFilters,
     includeNoProject,
     labelFilters,
@@ -1179,6 +1273,24 @@ export function IssueDisplayControls({
                   selected={creatorFilters}
                   onToggle={act.toggleCreatorFilter}
                   showSquads={false}
+                />
+              </DropdownMenuSubContent>
+            </DropdownMenuSub>
+
+            {/* Space */}
+            <DropdownMenuSub>
+              <DropdownMenuSubTrigger>
+                <Users className="size-3.5" />
+                <span className="flex-1">{t(($) => $.filters.section_space)}</span>
+                {spaceFilter && (
+                  <span className="text-xs text-primary font-medium">1</span>
+                )}
+              </DropdownMenuSubTrigger>
+              <DropdownMenuSubContent className="w-auto min-w-52 p-0">
+                <SpaceSubContent
+                  counts={counts.space}
+                  selected={spaceFilter}
+                  onSelect={act.setSpaceFilter}
                 />
               </DropdownMenuSubContent>
             </DropdownMenuSub>

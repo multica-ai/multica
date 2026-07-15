@@ -9,9 +9,11 @@ import { Button } from "@multica/ui/components/ui/button";
 import { Switch } from "@multica/ui/components/ui/switch";
 import { api, ApiError } from "@multica/core/api";
 import { useWorkspaceId } from "@multica/core/hooks";
-import { useCurrentWorkspace } from "@multica/core/paths";
 import { agentListOptions, squadListOptions } from "@multica/core/workspace/queries";
 import { projectListOptions } from "@multica/core/projects/queries";
+import { activeSpaceListOptions } from "@multica/core/spaces/queries";
+import { resolveCreationSpaceId } from "@multica/core/spaces/default-space";
+import { issueDetailOptions } from "@multica/core/issues/queries";
 import {
   useQuickCreateStore,
   type QuickCreateActorType,
@@ -31,6 +33,7 @@ import { contentReferencesAttachment, type Agent, type Attachment, type Squad } 
 import { ActorAvatar } from "../common/actor-avatar";
 import { PillButton } from "../common/pill-button";
 import { ProjectPicker } from "../projects/components/project-picker";
+import { SpacePicker } from "../spaces/components/space-picker";
 import { canAssignAgent } from "../issues/components/pickers/assignee-picker";
 import {
   PropertyPicker,
@@ -84,7 +87,6 @@ export function AgentCreatePanel({
 }) {
   const { t } = useT("modals");
   const sendShortcut = useShortcut("send");
-  const workspaceName = useCurrentWorkspace()?.name;
   const wsId = useWorkspaceId();
   const userId = useAuthStore((s) => s.user?.id);
   const { data: members = [] } = useQuery(memberListOptions(wsId));
@@ -102,29 +104,6 @@ export function AgentCreatePanel({
     [members, userId],
   );
 
-  // Visible = not archived AND assignable by this user. Squads inherit
-  // their leader agent's reachability: the backend always routes a squad
-  // pick to the leader, so hiding squads whose leader isn't visible keeps
-  // the picker honest with what the server would actually accept.
-  const visibleAgents = useMemo(
-    () =>
-      agents.filter(
-        (a) => !a.archived_at && canAssignAgent(a, userId, memberRole),
-      ),
-    [agents, userId, memberRole],
-  );
-  const visibleAgentIds = useMemo(
-    () => new Set(visibleAgents.map((a) => a.id)),
-    [visibleAgents],
-  );
-  const visibleSquads = useMemo(
-    () =>
-      squads.filter(
-        (s) => !s.archived_at && visibleAgentIds.has(s.leader_id),
-      ),
-    [squads, visibleAgentIds],
-  );
-
   const lastActorType = useQuickCreateStore((s) => s.lastActorType);
   const lastActorId = useQuickCreateStore((s) => s.lastActorId);
   const setLastActor = useQuickCreateStore((s) => s.setLastActor);
@@ -136,6 +115,74 @@ export function AgentCreatePanel({
   const keepOpen = useQuickCreateStore((s) => s.keepOpen);
   const setKeepOpen = useQuickCreateStore((s) => s.setKeepOpen);
   const setLastMode = useCreateModeStore((s) => s.setLastMode);
+
+  // Project selection — defaults to the last project the user picked in this
+  // workspace. `data?.project_id` lets the modal opener seed a one-shot
+  // override (e.g. a future "+ Issue" button on a project page); it does NOT
+  // replace the persisted default.
+  const [projectId, setProjectId] = useState<string | null>(() => {
+    const seed = (data?.project_id as string | undefined) ?? lastProjectId;
+    return seed ?? null;
+  });
+  const [spaceId, setSpaceId] = useState<string | null>(
+    (data?.space_id as string | undefined) ?? null,
+  );
+
+  // Parent-issue context — seeded by `openCreateSubIssue` when the modal is
+  // opened from the "Add sub issue" entry on an existing issue. We carry it
+  // through (not as an editable form field) so a manual→agent flip preserves
+  // the sub-issue intent; the agent panel never exposes this as a picker.
+  // Identifier is best-effort display context only — the UUID is the
+  // authoritative reference the backend/agent uses for `--parent <uuid>`.
+  const parentIssueId = (data?.parent_issue_id as string | undefined) ?? undefined;
+  const parentIssueIdentifier =
+    (data?.parent_issue_identifier as string | undefined) ?? undefined;
+
+  // Every Issue belongs to one Space. Parent or Project ownership is
+  // authoritative; standalone creation falls back to the workspace default.
+  const { data: spaces = [] } = useQuery(activeSpaceListOptions(wsId));
+  const { data: parentIssue } = useQuery({
+    ...issueDetailOptions(wsId, parentIssueId ?? ""),
+    enabled: !!parentIssueId,
+  });
+  const parentSpaceId = parentIssueId ? parentIssue?.space_id ?? undefined : undefined;
+  const selectedProject = useMemo(
+    () => projects.find((p) => p.id === projectId) ?? null,
+    [projects, projectId],
+  );
+  const projectSpaceId = selectedProject?.space_id;
+  const effectiveSpaceId =
+    spaceId ??
+    resolveCreationSpaceId(spaces, { parentSpaceId, projectSpaceId }) ??
+    null;
+
+  // Visible = not archived AND assignable by this user. Squads inherit
+  // their leader agent's reachability: the backend always routes a squad
+  // pick to the leader, so hiding squads whose leader isn't visible keeps
+  // the picker honest with what the server would actually accept.
+  const visibleAgents = useMemo(
+    () =>
+      agents.filter(
+        (a) =>
+          !a.archived_at &&
+          canAssignAgent(a, userId, memberRole, effectiveSpaceId),
+      ),
+    [agents, userId, memberRole, effectiveSpaceId],
+  );
+  const visibleAgentIds = useMemo(
+    () => new Set(visibleAgents.map((a) => a.id)),
+    [visibleAgents],
+  );
+  const visibleSquads = useMemo(
+    () =>
+      squads.filter(
+        (s) =>
+          !s.archived_at &&
+          s.space_id === effectiveSpaceId &&
+          visibleAgentIds.has(s.leader_id),
+      ),
+    [squads, visibleAgentIds, effectiveSpaceId],
+  );
 
   // Resolve a candidate actor against the currently-visible agents / squads.
   // Returns null when the candidate doesn't exist in this workspace right
@@ -193,25 +240,6 @@ export function AgentCreatePanel({
     if (actor?.type !== "squad") return undefined;
     return visibleSquads.find((s) => s.id === actor.id);
   }, [actor, visibleSquads]);
-
-  // Project selection — defaults to the last project the user picked in this
-  // workspace. `data?.project_id` lets the modal opener seed a one-shot
-  // override (e.g. a future "+ Issue" button on a project page); it does NOT
-  // replace the persisted default.
-  const [projectId, setProjectId] = useState<string | null>(() => {
-    const seed = (data?.project_id as string | undefined) ?? lastProjectId;
-    return seed ?? null;
-  });
-
-  // Parent-issue context — seeded by `openCreateSubIssue` when the modal is
-  // opened from the "Add sub issue" entry on an existing issue. We carry it
-  // through (not as an editable form field) so a manual→agent flip preserves
-  // the sub-issue intent; the agent panel never exposes this as a picker.
-  // Identifier is best-effort display context only — the UUID is the
-  // authoritative reference the backend/agent uses for `--parent <uuid>`.
-  const parentIssueId = (data?.parent_issue_id as string | undefined) ?? undefined;
-  const parentIssueIdentifier =
-    (data?.parent_issue_identifier as string | undefined) ?? undefined;
 
   // Stale-id sweep. Once the project list query has actually resolved
   // (`isSuccess` — distinct from "data is the empty default during loading"),
@@ -287,6 +315,10 @@ export function AgentCreatePanel({
   }, []);
 
   const submit = async () => {
+    await doSubmit(effectiveSpaceId);
+  };
+
+  const doSubmit = async (finalSpaceId: string | null) => {
     const md = editorRef.current?.getMarkdown()?.trim() ?? "";
     if (!md || !actor || submitting || versionBlocked || uploading) return;
     // Belt-and-suspenders against the multi-file upload race fixed in
@@ -308,6 +340,7 @@ export function AgentCreatePanel({
           ? { agent_id: actor.id }
           : { squad_id: actor.id }),
         prompt: md,
+        space_id: finalSpaceId ?? undefined,
         project_id: projectId ?? undefined,
         parent_issue_id: parentIssueId,
         ...(activeAttachmentIds.length > 0 ? { attachment_ids: activeAttachmentIds } : {}),
@@ -398,6 +431,7 @@ export function AgentCreatePanel({
     // through.
     const carry: Record<string, unknown> = {};
     if (projectId) carry.project_id = projectId;
+    if (effectiveSpaceId) carry.space_id = effectiveSpaceId;
     if (parentIssueId) carry.parent_issue_id = parentIssueId;
     if (parentIssueIdentifier) carry.parent_issue_identifier = parentIssueIdentifier;
     onSwitchMode?.(Object.keys(carry).length > 0 ? carry : null);
@@ -410,7 +444,15 @@ export function AgentCreatePanel({
         {/* Header */}
         <div className="flex items-center justify-between px-5 pt-3 pb-2 shrink-0">
           <div className="flex items-center gap-1.5 text-xs">
-            <span className="text-muted-foreground">{workspaceName}</span>
+            {/* The issue's space namespace — leads the breadcrumb like the
+                workspace name used to, but as a required single-select. */}
+            <SpacePicker
+              spaceId={effectiveSpaceId}
+              onChange={setSpaceId}
+              disabled={!!projectId || !!parentIssueId}
+              triggerRender={<PillButton />}
+              align="start"
+            />
             <ChevronRight className="size-3 text-muted-foreground/50" />
             <span className="font-medium">{t(($) => $.create_issue.agent_breadcrumb)}</span>
           </div>
@@ -491,6 +533,7 @@ export function AgentCreatePanel({
             }}
             onUploadFile={handleUploadFile}
             attachments={pendingAttachments}
+            targetSpaceId={effectiveSpaceId}
             onSubmit={submit}
             debounceMs={150}
           />
@@ -518,6 +561,7 @@ export function AgentCreatePanel({
           <ProjectPicker
             projectId={projectId}
             onUpdate={(u) => setProjectId(u.project_id ?? null)}
+            spaceId={effectiveSpaceId}
             triggerRender={<PillButton />}
             align="start"
           />

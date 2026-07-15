@@ -10,6 +10,36 @@ export type AutopilotAssigneeType = "agent" | "squad";
 
 export type AutopilotTriggerKind = "schedule" | "webhook" | "api";
 
+export interface AutopilotTemplate {
+  id: string;
+  workspace_id: string;
+  name: string;
+  description: string;
+  execution_mode: AutopilotExecutionMode;
+  issue_title_template: string | null;
+  trigger_kind: "schedule" | "webhook";
+  cron_expression: string | null;
+  timezone: string | null;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SaveAutopilotTemplateRequest {
+  name: string;
+  description: string;
+  execution_mode: AutopilotExecutionMode;
+  issue_title_template?: string | null;
+  trigger_kind: "schedule" | "webhook";
+  cron_expression?: string | null;
+  timezone?: string | null;
+}
+
+export interface ListAutopilotTemplatesResponse {
+  templates: AutopilotTemplate[];
+  total: number;
+}
+
 // `skipped` is emitted by the backend pre-flight admission check
 // (assignee runtime offline at dispatch time, MUL-1899). The frontend MUST
 // handle it explicitly — falling through to a generic case used to show
@@ -29,6 +59,7 @@ export interface Autopilot {
   title: string;
   description: string | null;
   project_id?: string | null;
+  space_id: string;
   assignee_type: AutopilotAssigneeType;
   assignee_id: string;
   status: AutopilotStatus;
@@ -39,6 +70,8 @@ export interface Autopilot {
   last_run_at: string | null;
   created_at: string;
   updated_at: string;
+  /** Set when Space archive, rather than a user action, paused this instance. */
+  paused_by_space_at?: string | null;
   // List-endpoint-only derived fields; absent on detail/create/update
   // responses and on older servers. Enabled triggers only. `trigger_kinds`
   // and `last_run_status` are server-driven strings — render unknown values
@@ -141,6 +174,7 @@ export interface CreateAutopilotRequest {
   title: string;
   description?: string;
   project_id?: string | null;
+  space_id?: string | null;
   // Optional on the wire — when omitted the server defaults to "agent" so
   // older clients keep working.
   assignee_type?: AutopilotAssigneeType;

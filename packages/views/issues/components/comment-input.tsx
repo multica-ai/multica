@@ -17,13 +17,14 @@ import { useCommentTriggerPreview } from "../hooks/use-comment-trigger-preview";
 
 interface CommentInputProps {
   issueId: string;
+  spaceId: string | null;
   /** Resolves true on success, false on failure. The composer keeps the text
    *  (editor locked + button spinning) until this settles, then clears only on
    *  success — a failed send must not silently discard the user's draft. */
   onSubmit: (content: string, attachmentIds?: string[], suppressAgentIds?: string[]) => Promise<boolean>;
 }
 
-function CommentInput({ issueId, onSubmit }: CommentInputProps) {
+function CommentInput({ issueId, spaceId, onSubmit }: CommentInputProps) {
   const { t } = useT("issues");
   const sendShortcut = useShortcut("send");
   const editorRef = useRef<ContentEditorRef>(null);
@@ -185,6 +186,7 @@ function CommentInput({ issueId, onSubmit }: CommentInputProps) {
           onUploadFile={handleUpload}
           debounceMs={100}
           currentIssueId={issueId}
+          targetSpaceId={spaceId}
           attachments={pendingAttachments}
           enableSlashCommands
           slashCommandMode="command"

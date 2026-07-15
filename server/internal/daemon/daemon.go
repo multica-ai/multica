@@ -3806,10 +3806,17 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		AgentInstructions:                instructions,
 		AgentSkills:                      convertSkillsForEnv(skills),
 		Repos:                            convertReposForEnv(task.Repos),
+		SpaceID:                          task.SpaceID,
+		SpaceKey:                         task.SpaceKey,
+		SpaceName:                        task.SpaceName,
+		SpaceContext:                     task.SpaceContext,
+		SpaceScope:                       task.SpaceScope,
+		Spaces:                           convertSpacesForEnv(task.Spaces),
 		ProjectID:                        task.ProjectID,
 		ProjectTitle:                     task.ProjectTitle,
 		ProjectDescription:               task.ProjectDescription,
 		ProjectResources:                 convertProjectResourcesForEnv(task.ProjectResources),
+		IntegrationBindings:              convertIntegrationBindingsForEnv(task.IntegrationBindings),
 		ChatSessionID:                    task.ChatSessionID,
 		AutopilotRunID:                   task.AutopilotRunID,
 		AutopilotID:                      task.AutopilotID,
@@ -4953,6 +4960,22 @@ func convertReposForEnv(repos []RepoData) []execenv.RepoContextForEnv {
 	return result
 }
 
+func convertSpacesForEnv(spaces []TaskSpaceData) []execenv.SpaceContextForEnv {
+	if len(spaces) == 0 {
+		return nil
+	}
+	out := make([]execenv.SpaceContextForEnv, len(spaces))
+	for i, space := range spaces {
+		out[i] = execenv.SpaceContextForEnv{
+			ID:      space.ID,
+			Key:     space.Key,
+			Name:    space.Name,
+			Context: space.Context,
+		}
+	}
+	return out
+}
+
 func convertProjectResourcesForEnv(resources []ProjectResourceData) []execenv.ProjectResourceForEnv {
 	if len(resources) == 0 {
 		return nil
@@ -4964,6 +4987,21 @@ func convertProjectResourcesForEnv(resources []ProjectResourceData) []execenv.Pr
 			ResourceType: r.ResourceType,
 			ResourceRef:  r.ResourceRef,
 			Label:        r.Label,
+		}
+	}
+	return result
+}
+
+func convertIntegrationBindingsForEnv(bindings []IntegrationBindingData) []execenv.IntegrationBindingForEnv {
+	if len(bindings) == 0 {
+		return nil
+	}
+	result := make([]execenv.IntegrationBindingForEnv, len(bindings))
+	for i, binding := range bindings {
+		result[i] = execenv.IntegrationBindingForEnv{
+			Provider:     binding.Provider,
+			ConnectionID: binding.ConnectionID,
+			DisplayName:  binding.DisplayName,
 		}
 	}
 	return result
