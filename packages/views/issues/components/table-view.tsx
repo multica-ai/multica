@@ -295,7 +295,7 @@ function SortableColumnHeader({
   );
 }
 
-function TableColumnPicker({
+export function TableColumnPicker({
   properties,
   trigger,
 }: {
@@ -345,7 +345,7 @@ function TableColumnPicker({
                 <DropdownMenuItem
                   key={key}
                   disabled={key === "title"}
-                  onSelect={(event) => {
+                  onClick={(event) => {
                     event.preventDefault();
                     toggleTableColumn(key);
                   }}
@@ -373,7 +373,7 @@ function TableColumnPicker({
                   return (
                     <DropdownMenuItem
                       key={property.id}
-                      onSelect={(event) => {
+                      onClick={(event) => {
                         event.preventDefault();
                         toggleTableColumn(key);
                       }}
