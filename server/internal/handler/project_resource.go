@@ -110,15 +110,50 @@ func validateGithubRepoRef(ref json.RawMessage) (json.RawMessage, error) {
 
 // localDirectoryRef is the JSONB shape stored for resource_type=local_directory.
 // It pins a project to an existing directory on a specific user machine, so
-// agent tasks run in-place rather than in an isolated git worktree. The
-// daemon_id scopes the path to one daemon registration — the same string path
-// on a different machine is a different resource. The optional label is a
-// human-readable hint used by the UI; the row-level project_resource.label
-// column remains the generic column for any resource type.
+// agent tasks run against the user's own checkout rather than an isolated git
+// worktree. The daemon_id scopes the path to one daemon registration — the same
+// string path on a different machine is a different resource. The optional
+// label is a human-readable hint used by the UI; the row-level
+// project_resource.label column remains the generic column for any resource
+// type.
+//
+// Mode selects how the daemon treats the path:
+//   - "" / "in_place": the agent operates directly in the user's directory.
+//     The daemon holds a per-path mutex so tasks sharing the same directory
+//     serialize — safe, but different issues on the same repo cannot run in
+//     parallel.
+//   - "worktree": the daemon creates a per-issue `git worktree` branched from
+//     the user's current commit and runs the agent there. Different issues get
+//     independent worktrees and run in parallel; tasks on the same issue share
+//     one worktree and serialize behind a per-issue mutex. Falls back to
+//     in_place when the path is not a git worktree.
 type localDirectoryRef struct {
 	LocalPath string `json:"local_path"`
 	DaemonID  string `json:"daemon_id"`
 	Label     string `json:"label,omitempty"`
+	Mode      string `json:"mode,omitempty"`
+}
+
+// localDirectoryMode constants are the accepted values for localDirectoryRef.Mode.
+// Empty string is normalized to in_place at validation time.
+const (
+	localDirectoryModeInPlace  = "in_place"
+	localDirectoryModeWorktree = "worktree"
+)
+
+// normalizeLocalDirectoryMode returns the canonical mode for a raw ref value,
+// or false if the value is not a recognized mode. Empty is normalized to
+// in_place so callers and the stored JSON never need to handle the zero value
+// as a distinct case.
+func normalizeLocalDirectoryMode(raw string) (string, bool) {
+	switch strings.TrimSpace(raw) {
+	case "", localDirectoryModeInPlace:
+		return localDirectoryModeInPlace, true
+	case localDirectoryModeWorktree:
+		return localDirectoryModeWorktree, true
+	default:
+		return "", false
+	}
 }
 
 func validateLocalDirectoryRef(ref json.RawMessage) (json.RawMessage, error) {
@@ -137,6 +172,11 @@ func validateLocalDirectoryRef(ref json.RawMessage) (json.RawMessage, error) {
 	if payload.DaemonID == "" {
 		return nil, errors.New("local_directory: daemon_id is required")
 	}
+	mode, ok := normalizeLocalDirectoryMode(payload.Mode)
+	if !ok {
+		return nil, fmt.Errorf("local_directory: mode must be %q or %q, got %q", localDirectoryModeInPlace, localDirectoryModeWorktree, payload.Mode)
+	}
+	payload.Mode = mode
 	payload.Label = strings.TrimSpace(payload.Label)
 	out, err := json.Marshal(payload)
 	if err != nil {

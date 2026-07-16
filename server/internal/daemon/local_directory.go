@@ -19,6 +19,29 @@ import (
 // constant — keep in sync if the type string is ever renamed.
 const localDirectoryResourceType = "local_directory"
 
+// localDirectoryMode constants mirror the handler-side values for
+// localDirectoryRef.Mode. Empty/missing mode (older clients, pre-mode rows) is
+// treated as in_place so existing local_directory resources keep their
+// historical serialize-the-whole-repo behaviour.
+const (
+	localDirectoryModeInPlace  = "in_place"
+	localDirectoryModeWorktree = "worktree"
+)
+
+// normalizeLocalDirectoryMode canonicalizes a raw mode string. Empty becomes
+// in_place; unknown values return ok=false so the caller can fail closed
+// rather than silently defaulting a typo to parallel execution.
+func normalizeLocalDirectoryMode(raw string) (string, bool) {
+	switch strings.TrimSpace(raw) {
+	case "", localDirectoryModeInPlace:
+		return localDirectoryModeInPlace, true
+	case localDirectoryModeWorktree:
+		return localDirectoryModeWorktree, true
+	default:
+		return "", false
+	}
+}
+
 // localDirectoryRef mirrors the server-side ref shape for local_directory
 // project resources. Defined locally so the daemon does not have to import
 // the server handler package.
@@ -26,18 +49,25 @@ type localDirectoryRef struct {
 	LocalPath string `json:"local_path"`
 	DaemonID  string `json:"daemon_id"`
 	Label     string `json:"label,omitempty"`
+	Mode      string `json:"mode,omitempty"`
 }
 
 // localDirectoryAssignment is the resolved view of a task's local_directory
 // resource: the absolute path the daemon will use as the agent's workdir,
 // plus the underlying ref for callers that still need the raw label / daemon
 // id (validation log messages, mostly). RealPath is the symlink-resolved
-// absolute path; the path mutex keys on it so two different routes to the
-// same directory are serialised.
+// absolute path; the in_place path mutex keys on it so two different routes
+// to the same directory are serialised.
+//
+// Mode drives the execution strategy (see localDirectoryMode constants).
+// IssueID is carried through so worktree mode can key its lock and worktree
+// location per issue rather than per repository.
 type localDirectoryAssignment struct {
 	Ref      localDirectoryRef
 	AbsPath  string // user-provided path, cleaned but not symlink-resolved
-	RealPath string // canonical key for the path mutex
+	RealPath string // canonical key for the in_place path mutex
+	Mode     string // in_place | worktree (never empty after resolution)
+	IssueID  string // task's issue; lock + worktree key for worktree mode
 }
 
 // localDirectoryAssignmentForTask returns the local_directory assignment a task
@@ -48,7 +78,22 @@ func localDirectoryAssignmentForTask(task Task, daemonID string) (*localDirector
 	if task.IsLeaderTask {
 		return nil, nil
 	}
-	return findLocalDirectoryAssignment(task.ProjectResources, daemonID)
+	assignment, err := findLocalDirectoryAssignment(task.ProjectResources, daemonID)
+	if err != nil || assignment == nil {
+		return assignment, err
+	}
+	assignment.IssueID = task.IssueID
+	return assignment, nil
+}
+
+// issueLockKey is the LocalPathLocker key for a worktree-mode task. Unlike
+// in_place mode (which keys on the resolved repository path and so serializes
+// every task touching the same repo), worktree mode keys on the issue: each
+// issue gets its own worktree, so tasks on different issues run in parallel
+// while tasks on the same issue — which share one worktree — serialize behind
+// this key.
+func issueLockKey(issueID string) string {
+	return "issue:" + issueID
 }
 
 // findLocalDirectoryAssignment scans the task's project resources for one of
@@ -103,10 +148,15 @@ func findLocalDirectoryAssignment(resources []ProjectResourceData, daemonID stri
 		if err != nil {
 			return nil, err
 		}
+		mode, ok := normalizeLocalDirectoryMode(ref.Mode)
+		if !ok {
+			return nil, fmt.Errorf("local_directory: unknown mode %q", ref.Mode)
+		}
 		match = &localDirectoryAssignment{
 			Ref:      ref,
 			AbsPath:  absPath,
 			RealPath: realPath,
+			Mode:     mode,
 		}
 	}
 	return match, nil

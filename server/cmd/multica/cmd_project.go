@@ -154,6 +154,7 @@ func init() {
 	projectResourceAddCmd.Flags().String("local-path", "", "Shortcut: absolute path to the working directory (only used when --type local_directory)")
 	projectResourceAddCmd.Flags().String("daemon-id", "", "Shortcut: id of the daemon that owns the local path (only used when --type local_directory)")
 	projectResourceAddCmd.Flags().String("ref-label", "", "Shortcut: optional label embedded in resource_ref (only used when --type local_directory)")
+	projectResourceAddCmd.Flags().String("mode", "", "Shortcut: execution mode for local_directory — in_place (default) or worktree")
 	projectResourceAddCmd.Flags().String("ref", "", "Generic JSON resource_ref payload, or a github_repo checkout ref when used with --url")
 	projectResourceAddCmd.Flags().String("label", "", "Optional human-readable label")
 	projectResourceAddCmd.Flags().String("output", "json", "Output format: table or json")
@@ -165,6 +166,7 @@ func init() {
 	projectResourceUpdateCmd.Flags().String("local-path", "", "Shortcut: new absolute local path (local_directory)")
 	projectResourceUpdateCmd.Flags().String("daemon-id", "", "Shortcut: new daemon id (local_directory)")
 	projectResourceUpdateCmd.Flags().String("ref-label", "", "Shortcut: new label embedded in resource_ref (local_directory)")
+	projectResourceUpdateCmd.Flags().String("mode", "", "Shortcut: new execution mode for local_directory — in_place or worktree")
 	projectResourceUpdateCmd.Flags().String("ref", "", "Generic JSON resource_ref payload, or a github_repo checkout ref")
 	projectResourceUpdateCmd.Flags().String("label", "", "New human-readable label; pass an empty string to clear")
 	projectResourceUpdateCmd.Flags().Bool("clear-label", false, "Clear the human-readable label")
@@ -607,6 +609,9 @@ func runProjectResourceAdd(cmd *cobra.Command, args []string) error {
 			if refLabel, _ := cmd.Flags().GetString("ref-label"); strings.TrimSpace(refLabel) != "" {
 				ref["label"] = strings.TrimSpace(refLabel)
 			}
+			if mode, _ := cmd.Flags().GetString("mode"); strings.TrimSpace(mode) != "" {
+				ref["mode"] = strings.TrimSpace(mode)
+			}
 			body["resource_ref"] = ref
 		default:
 			return fmt.Errorf("type %q has no built-in CLI shortcut; pass the payload via --ref '<json>'", resourceType)
@@ -845,7 +850,8 @@ func buildResourceRefFromFlags(cmd *cobra.Command, resourceType string, existing
 		pathSet := cmd.Flags().Changed("local-path")
 		daemonSet := cmd.Flags().Changed("daemon-id")
 		labelSet := cmd.Flags().Changed("ref-label")
-		if !pathSet && !daemonSet && !labelSet {
+		modeSet := cmd.Flags().Changed("mode")
+		if !pathSet && !daemonSet && !labelSet && !modeSet {
 			return nil, false, nil
 		}
 		ref := map[string]any{}
@@ -858,6 +864,9 @@ func buildResourceRefFromFlags(cmd *cobra.Command, resourceType string, existing
 			}
 			if l, ok := existingRef["label"].(string); ok && strings.TrimSpace(l) != "" {
 				ref["label"] = strings.TrimSpace(l)
+			}
+			if m, ok := existingRef["mode"].(string); ok && strings.TrimSpace(m) != "" {
+				ref["mode"] = strings.TrimSpace(m)
 			}
 		}
 		if pathSet {
@@ -882,6 +891,14 @@ func buildResourceRefFromFlags(cmd *cobra.Command, resourceType string, existing
 				ref["label"] = refLabel
 			}
 		}
+		if modeSet {
+			modeVal := strings.TrimSpace(mustString(cmd, "mode"))
+			if modeVal == "" {
+				delete(ref, "mode")
+			} else {
+				ref["mode"] = modeVal
+			}
+		}
 		if v, ok := ref["local_path"].(string); !ok || v == "" {
 			return nil, false, fmt.Errorf("local_directory: --local-path is required (no existing local_path to merge with)")
 		}
@@ -893,7 +910,7 @@ func buildResourceRefFromFlags(cmd *cobra.Command, resourceType string, existing
 		// Unknown type or empty (resource not found) — caller must use --ref.
 		if cmd.Flags().Changed("url") || cmd.Flags().Changed("default-branch-hint") ||
 			cmd.Flags().Changed("local-path") || cmd.Flags().Changed("daemon-id") ||
-			cmd.Flags().Changed("ref-label") {
+			cmd.Flags().Changed("ref-label") || cmd.Flags().Changed("mode") {
 			return nil, false, fmt.Errorf("no built-in shortcut for resource type %q; pass the full payload via --ref '<json>'", resourceType)
 		}
 		return nil, false, nil
