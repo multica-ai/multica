@@ -80,11 +80,17 @@ func (h *Handler) VerifyInternalAgentBrowser(w http.ResponseWriter, r *http.Requ
 	result, err := h.InternalBrowserQA.Verify(r.Context(), target.Name, credential)
 	if err != nil {
 		h.auditPersonalBrowser(wsID, agentID, target.Host(), "internal-agent-browser-verify", "deny", "browser verification failed")
-		writeError(w, http.StatusBadGateway, internalbrowserqa.SafeError(err))
+		writeInternalBrowserVerificationError(w, err)
 		return
 	}
 	h.auditPersonalBrowser(wsID, agentID, target.Host(), "internal-agent-browser-verify", "allow", "internal target verified")
 	writeJSON(w, http.StatusOK, result)
+}
+
+func writeInternalBrowserVerificationError(w http.ResponseWriter, err error) {
+	// A 502 body is replaced by the outer gateway. 422 preserves the allowlisted
+	// stage while still making the failed verification unambiguously non-successful.
+	writeError(w, http.StatusUnprocessableEntity, internalbrowserqa.SafeError(err))
 }
 
 func (h *Handler) authorizeInternalAgentBrowser(w http.ResponseWriter, r *http.Request, vault string) (pgtype.UUID, pgtype.UUID, pgtype.UUID, bool) {
