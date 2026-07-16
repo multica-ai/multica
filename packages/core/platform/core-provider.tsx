@@ -90,6 +90,7 @@ export function CoreProvider({
   onLogin,
   onLogout,
   identity,
+  frontendBaseline,
   locale,
   resources,
   localeAdapter,
@@ -116,6 +117,7 @@ export function CoreProvider({
         storage={storage}
         cookieAuth={cookieAuth}
         identity={identity}
+        frontendBaseline={frontendBaseline}
       >
         <WSProvider
           wsUrl={wsUrl}

@@ -77,6 +77,12 @@ export function WebProviders({
         clearLoggedInCookie();
       }}
       identity={identity}
+      // Pass the raw build-time version (no package.json/dev fallback) to the
+      // platform boundary. The config store validates it via officialBaseline,
+      // so a dev bundle or un-stamped build becomes "unavailable" rather than
+      // a false baseline. Identity.version above still carries the analytics
+      // fallback for PostHog — intentionally separate from provenance.
+      frontendBaseline={process.env.NEXT_PUBLIC_APP_VERSION}
       locale={locale}
       resources={resources}
       localeAdapter={localeAdapter}

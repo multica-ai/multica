@@ -28,6 +28,7 @@ export function AuthInitializer({
   storage = defaultStorage,
   cookieAuth,
   identity,
+  frontendBaseline,
 }: {
   children: ReactNode;
   onLogin?: () => void;
@@ -35,6 +36,7 @@ export function AuthInitializer({
   storage?: StorageAdapter;
   cookieAuth?: boolean;
   identity?: ClientIdentity;
+  frontendBaseline?: string;
 }) {
   const qc = useQueryClient();
 
@@ -44,6 +46,11 @@ export function AuthInitializer({
     // Stamp attribution before anything else — the signup event (server-side)
     // reads this cookie, so it has to be present before the user hits submit.
     captureSignupSource();
+
+    // The frontend official baseline is known synchronously at boot (it's
+    // compiled into the bundle). Set it before the config fetch so a quick
+    // Help-menu open before /api/config settles still shows the frontend row.
+    configStore.getState().setFrontendBaseline(frontendBaseline);
 
     // Fetch app config (CDN domain, PostHog key, …) in the background — non-blocking.
     api
@@ -69,6 +76,8 @@ export function AuthInitializer({
         });
         configStore.getState().setFeatureFlags(cfg.feature_flags);
         configStore.getState().setServerVersion(cfg.server_version);
+        // Backend official baseline (with loading -> settled transition).
+        configStore.getState().setBackendBaseline(cfg.server_version);
         if (cfg.posthog_key) {
           initAnalytics({
             key: cfg.posthog_key,
@@ -79,7 +88,10 @@ export function AuthInitializer({
         }
       })
       .catch(() => {
-        /* config is optional — legacy file card matching degrades gracefully */
+        // Config is optional — legacy file card matching degrades gracefully.
+        // Still mark the backend baseline settled (unavailable) so the UI
+        // doesn't show "loading" forever after a fetch failure.
+        configStore.getState().setBackendBaseline();
       });
 
     const onAuthSuccess = (user: User) => {

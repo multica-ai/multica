@@ -33,6 +33,11 @@ export interface CoreProviderProps {
   onLogout?: () => void;
   /** Identifies the calling client (web/desktop + version + os) to the server. */
   identity?: ClientIdentity;
+  /** Official release baseline of the loaded frontend bundle, as a raw
+   *  build-time tag (e.g. NEXT_PUBLIC_APP_VERSION). The config store validates
+   *  it via officialBaseline, so pass the raw value — dev/non-tag input
+   *  becomes "" (unavailable) rather than a false baseline. */
+  frontendBaseline?: string;
   /** Active locale, determined server-side (web) or at app boot (desktop). */
   locale: SupportedLocale;
   /** i18next resources, server-preloaded for the active locale. */
