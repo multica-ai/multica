@@ -11,6 +11,11 @@ export type CatalogApp = {
   folder: string;
   current_version?: string;
   status: "draft" | "published" | "disabled";
+  owner?: string;
+  deployment_status?: "not_deployed" | "pending" | "provisioning" | "ready" | "failed" | "paused";
+  deployment_version?: string;
+  health?: "healthy" | "failed" | "provisioning" | "disabled" | "not_deployed";
+  deployment_error?: string;
 };
 
 export type AppAdminSummary = {

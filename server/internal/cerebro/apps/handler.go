@@ -310,18 +310,23 @@ type connectionCallRequest struct {
 }
 
 type appResponse struct {
-	ID             string    `json:"id"`
-	WorkspaceID    string    `json:"workspace_id"`
-	Slug           string    `json:"slug"`
-	Name           string    `json:"name"`
-	Description    string    `json:"description"`
-	Icon           string    `json:"icon"`
-	Folder         string    `json:"folder"`
-	OwnerID        *string   `json:"owner_id,omitempty"`
-	CurrentVersion *string   `json:"current_version,omitempty"`
-	Status         string    `json:"status"`
-	CreatedAt      time.Time `json:"created_at"`
-	UpdatedAt      time.Time `json:"updated_at"`
+	ID                string    `json:"id"`
+	WorkspaceID       string    `json:"workspace_id"`
+	Slug              string    `json:"slug"`
+	Name              string    `json:"name"`
+	Description       string    `json:"description"`
+	Icon              string    `json:"icon"`
+	Folder            string    `json:"folder"`
+	OwnerID           *string   `json:"owner_id,omitempty"`
+	CurrentVersion    *string   `json:"current_version,omitempty"`
+	Status            string    `json:"status"`
+	CreatedAt         time.Time `json:"created_at"`
+	UpdatedAt         time.Time `json:"updated_at"`
+	Owner             string    `json:"owner,omitempty"`
+	Deployment        string    `json:"deployment_status,omitempty"`
+	DeploymentVersion string    `json:"deployment_version,omitempty"`
+	Health            string    `json:"health,omitempty"`
+	DeploymentError   string    `json:"deployment_error,omitempty"`
 }
 
 type appVersionResponse struct {
@@ -512,8 +517,14 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	}
 	rows, err := h.pool.Query(r.Context(), `
 		SELECT a.id, a.workspace_id, a.slug, a.name, a.description, a.icon, COALESCE(f.name,a.folder), a.owner_id,
-		       a.current_version, a.status, a.created_at, a.updated_at
+		       a.current_version, a.status, a.created_at, a.updated_at, COALESCE(u.name,''),
+		       COALESCE(d.status,'not_deployed'), COALESCE(d.version,''), COALESCE(d.last_error,'')
 		FROM cerebro_app a LEFT JOIN cerebro_app_folder f ON f.id=a.folder_id
+		LEFT JOIN "user" u ON u.id=a.owner_id
+		LEFT JOIN LATERAL (
+		  SELECT status,version,last_error FROM cerebro_app_deployment
+		  WHERE app_id=a.id ORDER BY updated_at DESC LIMIT 1
+		) d ON true
 		WHERE a.workspace_id=$1
 		  AND (
 		    a.owner_id=$2
@@ -528,14 +539,25 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	defer rows.Close()
 	apps := make([]appResponse, 0)
 	for rows.Next() {
-		app, err := scanApp(rows)
+		app, err := scanCatalogApp(rows)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to read apps")
 			return
 		}
 		apps = append(apps, app)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"apps": apps})
+	var canManage bool
+	err = h.pool.QueryRow(r.Context(), `SELECT EXISTS (
+		SELECT 1 FROM member m WHERE m.workspace_id=$1 AND m.user_id=$2 AND m.role IN ('owner','admin')
+		UNION ALL
+		SELECT 1 FROM cerebro_group_capability c JOIN cerebro_group g ON g.id=c.group_id JOIN cerebro_group_member gm ON gm.group_id=g.id
+		WHERE g.workspace_id=$1 AND gm.user_id=$2 AND c.capability='apps.manage'
+	)`, workspaceID, userID).Scan(&canManage)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to read app permissions")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"apps": apps, "can_manage": canManage})
 }
 
 func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
@@ -564,6 +586,42 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 		versions = append(versions, version)
 	}
 	writeJSON(w, http.StatusOK, appDetailResponse{appResponse: app, Versions: versions})
+}
+
+func (h *Handler) VersionFiles(w http.ResponseWriter, r *http.Request) {
+	app, ok := h.loadApp(w, r)
+	if !ok {
+		return
+	}
+	version := chi.URLParam(r, "version")
+	if !semverPattern.MatchString(version) {
+		writeError(w, http.StatusBadRequest, "version must be semantic versioning")
+		return
+	}
+	rows, err := h.pool.Query(r.Context(), `SELECT path,media_type,content,sha256 FROM cerebro_app_version_file WHERE app_id=$1 AND version=$2 ORDER BY path`, app.ID, version)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load app files")
+		return
+	}
+	defer rows.Close()
+	files := make([]BundleFile, 0)
+	for rows.Next() {
+		var file BundleFile
+		if err := rows.Scan(&file.Path, &file.MediaType, &file.Content, &file.SHA256); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to load app files")
+			return
+		}
+		files = append(files, file)
+	}
+	if rows.Err() != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load app files")
+		return
+	}
+	if len(files) == 0 {
+		writeError(w, http.StatusNotFound, "app version files not found")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"app_id": app.ID, "version": version, "files": files})
 }
 
 func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
@@ -771,6 +829,77 @@ func markRollbackProvisioning(ctx context.Context, exec bundleExec, appID, actor
 	_, err = exec.Exec(ctx, `INSERT INTO cerebro_app_audit_log (workspace_id,app_id,actor_type,actor_id,action,metadata)
 		SELECT workspace_id,id,'user',$2,$3,jsonb_build_object('version',$4,'status','provisioning') FROM cerebro_app WHERE id=$1`, appID, actorID.String(), "app.version.rollback", version)
 	return err
+}
+
+func markDeploymentRetrying(ctx context.Context, exec bundleExec, appID uuid.UUID, version, bundleSHA256 string) error {
+	result, err := exec.Exec(ctx, `UPDATE cerebro_app_deployment SET status='provisioning',last_error='',updated_at=now()
+		WHERE app_id=$1 AND version=$2 AND bundle_sha256=$3 AND status='failed'`, appID, version, bundleSHA256)
+	if err != nil {
+		return err
+	}
+	if result.RowsAffected() != 1 {
+		return errors.New("failed deployment is not available for retry")
+	}
+	return nil
+}
+
+func (h *Handler) RetryDeployment(w http.ResponseWriter, r *http.Request) {
+	app, ok := h.loadApp(w, r)
+	if !ok {
+		return
+	}
+	var req rollbackRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	if !semverPattern.MatchString(req.Version) {
+		writeError(w, http.StatusBadRequest, "version must be semantic versioning")
+		return
+	}
+	appID := uuid.MustParse(app.ID)
+	bundle, err := h.loadValidatedStoredBundle(r.Context(), appID, app.Name, req.Version)
+	if err != nil {
+		writeError(w, http.StatusConflict, "stored app bundle does not match this version")
+		return
+	}
+	if err := markDeploymentRetrying(r.Context(), h.pool, appID, req.Version, bundle.SHA256); err != nil {
+		writeError(w, http.StatusConflict, "failed deployment is not available for retry")
+		return
+	}
+	if h.runtime == nil || h.runtime.Deploy(r.Context(), RuntimeDeploymentRequest{AppID: app.ID, Version: req.Version, BundleSHA256: bundle.SHA256}) != nil {
+		_, _ = h.pool.Exec(r.Context(), `UPDATE cerebro_app_deployment SET status='failed',last_error='App runtime is unavailable',updated_at=now() WHERE app_id=$1 AND version=$2 AND status='provisioning'`, appID, req.Version)
+		writeError(w, http.StatusBadGateway, "app runtime is unavailable")
+		return
+	}
+	writeJSON(w, http.StatusAccepted, map[string]any{"app_id": app.ID, "version": req.Version, "deployment_status": "provisioning"})
+}
+
+func (h *Handler) loadValidatedStoredBundle(ctx context.Context, appID uuid.UUID, appName, version string) (ValidatedBundle, error) {
+	rows, err := h.pool.Query(ctx, `SELECT path,media_type,content,sha256 FROM cerebro_app_version_file WHERE app_id=$1 AND version=$2 ORDER BY path`, appID, version)
+	if err != nil {
+		return ValidatedBundle{}, err
+	}
+	defer rows.Close()
+	files := make([]BundleFile, 0)
+	for rows.Next() {
+		var file BundleFile
+		if err := rows.Scan(&file.Path, &file.MediaType, &file.Content, &file.SHA256); err != nil {
+			return ValidatedBundle{}, err
+		}
+		files = append(files, file)
+	}
+	if err := rows.Err(); err != nil {
+		return ValidatedBundle{}, err
+	}
+	bundle, err := ValidateBundle(appName, version, files)
+	if err != nil {
+		return ValidatedBundle{}, err
+	}
+	var storedSHA string
+	if err := h.pool.QueryRow(ctx, `SELECT bundle_sha256 FROM cerebro_app_deployment WHERE app_id=$1 AND version=$2 AND status='failed'`, appID, version).Scan(&storedSHA); err != nil || storedSHA != bundle.SHA256 {
+		return ValidatedBundle{}, errors.New("stored bundle hash mismatch")
+	}
+	return bundle, nil
 }
 
 func (h *Handler) ApproveScopes(w http.ResponseWriter, r *http.Request) {
@@ -1142,6 +1271,33 @@ func scanApp(row rowScanner) (appResponse, error) {
 	if ownerID != nil {
 		value := ownerID.String()
 		app.OwnerID = &value
+	}
+	return app, nil
+}
+
+func scanCatalogApp(row rowScanner) (appResponse, error) {
+	var app appResponse
+	var id, workspaceID uuid.UUID
+	var ownerID *uuid.UUID
+	if err := row.Scan(&id, &workspaceID, &app.Slug, &app.Name, &app.Description, &app.Icon, &app.Folder, &ownerID, &app.CurrentVersion, &app.Status, &app.CreatedAt, &app.UpdatedAt, &app.Owner, &app.Deployment, &app.DeploymentVersion, &app.DeploymentError); err != nil {
+		return app, err
+	}
+	app.ID, app.WorkspaceID = id.String(), workspaceID.String()
+	if ownerID != nil {
+		value := ownerID.String()
+		app.OwnerID = &value
+	}
+	switch {
+	case app.Status == "disabled":
+		app.Health = "disabled"
+	case app.Deployment == "ready":
+		app.Health = "healthy"
+	case app.Deployment == "failed":
+		app.Health = "failed"
+	case app.Deployment == "pending" || app.Deployment == "provisioning":
+		app.Health = "provisioning"
+	default:
+		app.Health = "not_deployed"
 	}
 	return app, nil
 }

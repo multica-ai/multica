@@ -23,6 +23,7 @@ test("loads one immutable bundle and only exposes health and authenticated invok
     version: "1.0.0",
     bundleUrl: "http://backend.internal/bundle",
     bundleToken: "bundle-token",
+    workerCommit: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     invokeKey: "invoke-key",
     fetch: async (_url, init) => {
       assert.equal(init.headers.authorization, "Bearer bundle-token");
@@ -30,7 +31,9 @@ test("loads one immutable bundle and only exposes health and authenticated invok
     },
   });
 
-  assert.equal((await runtime.fetch(new Request("http://worker/healthz"))).status, 200);
+  const health = await runtime.fetch(new Request("http://worker/healthz"));
+  assert.equal(health.status, 200);
+  assert.equal((await health.json()).commit, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
   assert.equal((await runtime.fetch(new Request("http://worker/other"))).status, 404);
   assert.equal((await runtime.fetch(new Request("http://worker/invoke", { method: "POST", body: "{}" }))).status, 401);
   const invoked = await runtime.fetch(new Request("http://worker/invoke", {

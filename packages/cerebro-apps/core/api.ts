@@ -14,6 +14,9 @@ const scopeSchema = z.object({ resource_type: z.string(), resource_id: z.string(
 const catalogAppSchema = z.object({
   id: z.string(), slug: z.string(), name: z.string(), description: z.string().catch(""), icon: z.string().catch("blocks"), folder: z.string().catch(""),
   current_version: z.string().nullish().transform((value) => value ?? undefined), status: z.enum(["draft", "published", "disabled"]),
+  owner: z.string().optional(), deployment_status: z.enum(["not_deployed", "pending", "provisioning", "ready", "failed", "paused"]).optional(),
+  deployment_version: z.string().optional(),
+  health: z.enum(["healthy", "failed", "provisioning", "disabled", "not_deployed"]).optional(), deployment_error: z.string().optional(),
 });
 const detailSchema = catalogAppSchema.extend({
   versions: z.array(z.object({ version: z.string(), release_notes: z.string(), grant_status: z.enum(["pending", "approved", "revoked", "not_requested"]), scopes: z.array(scopeSchema), created_at: z.string().optional() })).catch([]),
@@ -25,10 +28,14 @@ function workspacePath(path: string, workspaceSlug?: string): string {
   return `${path}${separator}workspace_slug=${encodeURIComponent(workspaceSlug)}`;
 }
 
-export async function listApps(workspaceSlug?: string): Promise<{ apps: CatalogApp[] }> {
+export async function listApps(workspaceSlug?: string): Promise<{ apps: CatalogApp[]; can_manage: boolean }> {
   const endpoint = workspacePath("/api/cerebro/apps", workspaceSlug);
   const raw = await api.cerebroRequest<unknown>(endpoint);
-  return parseWithFallback(raw, z.object({ apps: z.array(catalogAppSchema) }), { apps: [] }, { endpoint: "/api/cerebro/apps" });
+  return parseWithFallback(raw, z.object({ apps: z.array(catalogAppSchema), can_manage: z.boolean().catch(false) }), { apps: [], can_manage: false }, { endpoint: "/api/cerebro/apps" });
+}
+
+export async function retryAppDeployment(id: string, version: string, workspaceSlug?: string): Promise<void> {
+  await api.cerebroRequest(workspacePath(`/api/cerebro/apps/${encodeURIComponent(id)}/retry-deployment`, workspaceSlug), { method: "POST", body: JSON.stringify({ version }) });
 }
 
 export async function listAppAdminOverview(workspaceSlug?: string): Promise<AppAdminSummary[]> {
@@ -77,6 +84,13 @@ export async function getAppDetail(id: string, workspaceSlug?: string): Promise<
   return parsed.data as AppDetail;
 }
 
+export async function getAppVersionFiles(id: string, version: string, workspaceSlug?: string): Promise<AppSourceFile[]> {
+  const raw = await api.cerebroRequest<unknown>(workspacePath(`/api/cerebro/apps/${encodeURIComponent(id)}/versions/${encodeURIComponent(version)}/files`, workspaceSlug));
+  const parsed = z.object({ files: z.array(z.object({ path: z.string(), media_type: z.string(), content_base64: z.string() })) }).safeParse(raw);
+  if (!parsed.success) throw new Error("Could not read app source files");
+  return parsed.data.files.map((file) => ({ path: file.path, media_type: file.media_type, content: decodeBase64(file.content_base64) }));
+}
+
 export async function publishAppVersion(id: string, input: { version: string; release_notes: string; files: AppSourceFile[] }, workspaceSlug?: string): Promise<{ deployment_status: "provisioning" }> {
   const files = await Promise.all(input.files.map(async (file) => ({
     path: file.path,
@@ -98,6 +112,11 @@ function encodeBase64(value: string): string {
   let binary = "";
   for (const byte of bytes) binary += String.fromCharCode(byte);
   return btoa(binary);
+}
+
+function decodeBase64(value: string): string {
+  const binary = atob(value);
+  return new TextDecoder().decode(Uint8Array.from(binary, (character) => character.charCodeAt(0)));
 }
 
 async function sha256(value: string): Promise<string> {

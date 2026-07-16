@@ -156,6 +156,17 @@ func TestRollbackWaitsForAHealthyTargetAndRecordsIntent(t *testing.T) {
 	}
 }
 
+func TestDeploymentRetryOnlyResumesTheSameFailedBundle(t *testing.T) {
+	appID := uuid.MustParse("f1540000-0000-4154-8154-000000000001")
+	recorder := &recordingDeploymentExec{}
+	if err := markDeploymentRetrying(context.Background(), recorder, appID, "1.0.0", "bundle-sha"); err != nil {
+		t.Fatalf("prepare retry: %v", err)
+	}
+	if len(recorder.queries) != 1 || !strings.Contains(recorder.queries[0], "status='failed'") || !strings.Contains(recorder.queries[0], "bundle_sha256=$3") || !strings.Contains(recorder.queries[0], "status='provisioning'") {
+		t.Fatalf("retry transition is not immutable and atomic: %#v", recorder.queries)
+	}
+}
+
 func TestValidatePreviewSnapshotAcceptsTheAppFileDirectly(t *testing.T) {
 	snapshot := json.RawMessage(`{"manifest":{"schema_version":"1","name":"Allergen Formatter"},"frontend":{"entry":"index.js"}}`)
 	if err := validateSnapshot(snapshot); err != nil {

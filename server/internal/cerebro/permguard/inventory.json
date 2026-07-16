@@ -49,34 +49,6 @@
       "gate": "self_only"
     },
     {
-      "id": "POST /api/cerebro/app-workflows/",
-      "gate": "cerebro_capability:apps.manage"
-    },
-    {
-      "id": "POST /api/cerebro/app-workflows/{workflowId}/test",
-      "gate": "workspace_member + published app scope ceiling"
-    },
-    {
-      "id": "POST /api/cerebro/app-workflows/{workflowId}/chat",
-      "gate": "workspace_member + published app scope ceiling"
-    },
-    {
-      "id": "POST /api/cerebro/app-workflow-webhooks/{workflowId}/{token}",
-      "exempt": "pre-auth webhook — the unguessable saved workflow token authorises the delivery"
-    },
-    {
-      "id": "POST /api/cerebro/app-workflow-triggers/data-event",
-      "exempt": "pre-auth service-to-service — CEREBRO_APP_DATA_EVENT_KEY authorises Registry events"
-    },
-    {
-      "id": "POST /api/cerebro/app-workflow-triggers/schedule",
-      "exempt": "pre-auth service-to-service — CEREBRO_APP_WORKFLOW_INGEST_KEY authorises the Hatchet schedule tick"
-    },
-    {
-      "id": "POST /api/cerebro/app-workflows/{workflowId}/{state:enable|disable}",
-      "gate": "cerebro_capability:apps.manage"
-    },
-    {
       "id": "POST /api/cerebro/apps/",
       "gate": "cerebro_capability:apps.create"
     },
@@ -90,6 +62,10 @@
     },
     {
       "id": "POST /api/cerebro/apps/{id}/publish",
+      "gate": "cerebro_capability:apps.manage"
+    },
+    {
+      "id": "POST /api/cerebro/apps/{id}/retry-deployment",
       "gate": "cerebro_capability:apps.manage"
     },
     {
@@ -143,14 +119,6 @@
     {
       "id": "POST /api/cerebro/apps/{id}/views/{viewId}/submissions",
       "gate": "workspace_member + request-bound app view"
-    },
-    {
-      "id": "POST /api/cerebro/apps/workflow-runs/{runId}/token",
-      "gate": "service-key worker + durable run identity envelope"
-    },
-    {
-      "id": "POST /api/cerebro/apps/workflow-runs/{runId}/execute",
-      "exempt": "pre-auth service-to-service — CEREBRO_APP_WORKFLOW_INGEST_KEY authorises the Hatchet worker; identity is loaded from the run envelope"
     },
     {
       "id": "DELETE /api/analytics/visuals/{visualId}",

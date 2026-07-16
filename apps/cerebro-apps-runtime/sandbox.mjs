@@ -11,9 +11,7 @@ export async function executeSandbox(options) {
   const source = String(options.source ?? "");
   if (!/\bexport\s+default\b/.test(source) || /\b(?:process|require|fetch|WebSocket)\s*=/.test(source)) throw new Error("App worker failed");
   const modules = new Map(Object.entries(options.modules ?? {}).map(([name, value]) => [posix.normalize(name), String(value)]));
-  modules.set("backend/index.mjs", source
-    .replace(/\bexport\s+default\s+async\s+/, "export default ")
-    .replace(/\bawait\s+/g, ""));
+  modules.set("backend/index.mjs", source);
 
   const quickJS = await newQuickJSAsyncWASMModule(options.variant ?? RELEASE_ASYNC);
   const runtime = quickJS.newRuntime();
@@ -47,17 +45,23 @@ export async function executeSandbox(options) {
 
     const bootstrap = `
       globalThis.__multica = Object.freeze({
-        registry: Object.freeze({ call: (...args) => JSON.parse(__hostRegistry(JSON.stringify(args))) }),
-        connections: Object.freeze({ call: (...args) => JSON.parse(__hostConnection(JSON.stringify(args))) }),
+        registry: Object.freeze({ call: async (...args) => JSON.parse(await __hostRegistry(JSON.stringify(args))) }),
+        connections: Object.freeze({ call: async (...args) => JSON.parse(await __hostConnection(JSON.stringify(args))) }),
         log: (...args) => __hostLog(JSON.stringify(args)),
       });`;
     const bootstrapped = await vm.evalCodeAsync(bootstrap, "bootstrap.js", { type: "global" });
     vm.unwrapResult(bootstrapped).dispose();
     const runner = `import __handler from "./backend/index.mjs";
-      globalThis.__resultJSON = JSON.stringify(__handler(JSON.parse(__inputJSON), __multica));`;
+      globalThis.__resultPromise = Promise.resolve(__handler(JSON.parse(__inputJSON), __multica))
+        .then((value) => JSON.stringify(value));`;
     const evaluated = await vm.evalCodeAsync(runner, "__runner.mjs", { type: "module" });
     vm.unwrapResult(evaluated).dispose();
-    const resultHandle = vm.getProp(vm.global, "__resultJSON");
+    const promiseHandle = vm.getProp(vm.global, "__resultPromise");
+    const pendingResult = vm.resolvePromise(promiseHandle);
+    runtime.executePendingJobs();
+    const resolved = await pendingResult;
+    promiseHandle.dispose();
+    const resultHandle = vm.unwrapResult(resolved);
     const outputJSON = vm.getString(resultHandle);
     resultHandle.dispose();
     if (Buffer.byteLength(outputJSON) > (options.maxOutputBytes ?? MAX_OUTPUT_BYTES)) throw new Error("output too large");
@@ -79,10 +83,23 @@ function normalizeModuleName(baseModuleName, requestedName, modules) {
 }
 
 function installHostFunction(vm, name, implementation) {
-  const handle = vm.newAsyncifiedFunction(name, async (argsHandle) => {
+  const handle = vm.newFunction(name, (argsHandle) => {
     const args = JSON.parse(vm.getString(argsHandle));
-    const result = await implementation(args);
-    return vm.newString(JSON.stringify(result ?? null));
+    const deferred = vm.newPromise();
+    Promise.resolve(implementation(args)).then(
+      (result) => {
+        const resultHandle = vm.newString(JSON.stringify(result ?? null));
+        deferred.resolve(resultHandle);
+        resultHandle.dispose();
+      },
+      (error) => {
+        const errorHandle = vm.newError(error instanceof Error ? error.message : "Host call failed");
+        deferred.reject(errorHandle);
+        errorHandle.dispose();
+      },
+    );
+    deferred.settled.then(() => vm.runtime.executePendingJobs());
+    return deferred.handle;
   });
   vm.setProp(vm.global, name, handle);
   handle.dispose();

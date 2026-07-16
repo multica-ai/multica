@@ -5,6 +5,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const getAppDetail = vi.fn();
+const getAppVersionFiles = vi.fn();
 const publishAppVersion = vi.fn();
 const workspace = { id: "ws-1", slug: "firtal" };
 
@@ -12,6 +13,7 @@ vi.mock("@multica/cerebro-feature-flags", () => ({ useFeatureFlag: () => true })
 vi.mock("@multica/core/paths", () => ({ useCurrentWorkspace: () => workspace }));
 vi.mock("../core/api", () => ({
   getAppDetail: (...args: unknown[]) => getAppDetail(...args),
+  getAppVersionFiles: (...args: unknown[]) => getAppVersionFiles(...args),
   publishAppVersion: (...args: unknown[]) => publishAppVersion(...args),
 }));
 
@@ -23,8 +25,23 @@ describe("AppEditorPage", () => {
   beforeEach(() => {
     getAppDetail.mockReset();
     getAppDetail.mockResolvedValue({ id: "app-1", name: "Returns helper", status: "draft", versions: [] });
+    getAppVersionFiles.mockReset();
     publishAppVersion.mockReset();
     publishAppVersion.mockResolvedValue({ deployment_status: "provisioning" });
+  });
+
+  it("loads the exact current version and proposes the next patch version", async () => {
+    getAppDetail.mockResolvedValue({ id: "app-1", name: "Published helper", status: "published", current_version: "1.2.3", versions: [{ version: "1.2.3" }] });
+    getAppVersionFiles.mockResolvedValue([
+      { path: "app.json", media_type: "application/json", content: '{"manifest":{"schema_version":"1","name":"Published helper","version":"1.2.3","scopes":[],"frontend":{"entry":"frontend/index.html"}}}' },
+      { path: "frontend/index.html", media_type: "text/html", content: "<h1>Saved source</h1>" },
+    ]);
+    render(<AppEditorPage appId="app-1" />);
+    await screen.findByRole("tab", { name: "app.json" });
+    await userEvent.click(screen.getByRole("tab", { name: "frontend/index.html" }));
+    expect(screen.getByRole("textbox", { name: "Source for frontend/index.html" })).toHaveValue("<h1>Saved source</h1>");
+    await userEvent.click(screen.getByRole("button", { name: "Publish" }));
+    expect(screen.getByLabelText("Version")).toHaveValue("1.2.4");
   });
 
   it("edits the complete starter package and blocks publish when the manifest is invalid", async () => {

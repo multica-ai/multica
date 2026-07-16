@@ -9,6 +9,7 @@ const runtime = await createWorkerRuntime({
   bundleUrl: process.env.BUNDLE_URL,
   bundleToken: process.env.BUNDLE_TOKEN,
   expectedBundleSha256: process.env.BUNDLE_SHA256,
+  workerCommit: process.env.SLIPLANE_COMMIT_HASH,
   invokeKey: process.env.INVOKE_KEY,
   hostFactory: (grantToken) => createHostClient({ baseUrl: process.env.BACKEND_URL, grantToken }),
 });

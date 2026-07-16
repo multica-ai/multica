@@ -14,7 +14,7 @@ describe("mini apps API boundary", () => {
 
   it("keeps the catalog rendering when an older server returns a malformed app", async () => {
     cerebroRequest.mockResolvedValue({ apps: [{ id: null, status: "future-status" }] });
-    await expect(listApps()).resolves.toEqual({ apps: [] });
+    await expect(listApps()).resolves.toEqual({ apps: [], can_manage: false });
   });
 
   it("sends worker calls through the member-bound Cerebro invoke endpoint", async () => {

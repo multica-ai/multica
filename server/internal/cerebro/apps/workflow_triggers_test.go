@@ -6,21 +6,20 @@ import (
 	"testing"
 )
 
-func TestAllFiveWorkflowTriggersHaveProductionRoutes(t *testing.T) {
+func TestAppsExposeNoWorkflowRoutes(t *testing.T) {
 	raw, err := os.ReadFile("../../../cmd/server/router.go")
 	if err != nil {
 		t.Fatal(err)
 	}
 	router := string(raw)
 	for _, route := range []string{
-		`r.Post("/{workflowId}/test", cerebroAppsHandler.TestWorkflow)`,
-		`r.Post("/{workflowId}/chat", cerebroAppsHandler.TriggerChat)`,
-		`r.Post("/api/cerebro/app-workflow-webhooks/{workflowId}/{token}", cerebroAppsHandler.TriggerWebhook)`,
-		`r.Post("/api/cerebro/app-workflow-triggers/data-event", cerebroAppsHandler.TriggerDataEvent)`,
-		`r.Post("/api/cerebro/app-workflow-triggers/schedule", cerebroAppsHandler.TriggerSchedule)`,
+		`/api/cerebro/app-workflows`,
+		`/api/cerebro/app-workflow-webhooks`,
+		`/api/cerebro/app-workflow-triggers`,
+		`/api/cerebro/apps/workflow-runs`,
 	} {
-		if !strings.Contains(router, route) {
-			t.Errorf("missing trigger route %s", route)
+		if strings.Contains(router, route) {
+			t.Errorf("Apps still expose workflow route %s", route)
 		}
 	}
 }

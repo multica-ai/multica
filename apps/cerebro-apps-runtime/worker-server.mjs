@@ -22,7 +22,7 @@ export async function createWorkerRuntime(options) {
   return {
     async fetch(request) {
       const url = new URL(request.url);
-      if (request.method === "GET" && url.pathname === "/healthz") return json({ status: "ok", app_id: options.appId, version: options.version });
+      if (request.method === "GET" && url.pathname === "/healthz") return json({ status: "ok", app_id: options.appId, version: options.version, commit: options.workerCommit ?? "" });
       if (request.method !== "POST" || url.pathname !== "/invoke") return json({ error: "Not found" }, 404);
       if (!safeEqual(request.headers.get("x-multica-invoke-key") ?? "", options.invokeKey ?? "")) return json({ error: "Unauthorized" }, 401);
       const raw = await request.text();

@@ -33,6 +33,18 @@ test("supports allowlisted async Registry and Connection host calls", async () =
   ]);
 });
 
+test("executes async source byte-for-byte without rewriting strings, comments, or nested functions", async () => {
+  const output = await executeSandbox({
+    source: `export default async function run(input) {
+      // await and async are source text, not rewrite instructions
+      const nested = async () => await Promise.resolve(input.value.toUpperCase());
+      return { value: await nested(), sourceWords: "await async stay unchanged" };
+    }`,
+    input: { value: "milk" },
+  });
+  assert.deepEqual(output, { value: "MILK", sourceWords: "await async stay unchanged" });
+});
+
 test("loads relative modules from the immutable backend bundle", async () => {
   const output = await executeSandbox({
     source: `import { format } from "./format.mjs"; export default (input) => ({ value: format(input.value) })`,

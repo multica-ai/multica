@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "start": "node server.mjs",
-    "test": "node --test auth.test.mjs backend-client.test.mjs bundle-store.test.mjs host-client.test.mjs runtime.test.mjs container-launcher.test.mjs egress-proxy.test.mjs deployment-manager.test.mjs providers/sliplane-provider.test.mjs sandbox.test.mjs worker-server.test.mjs && node --test container-integration.test.mjs",
+    "test": "node --test auth.test.mjs backend-client.test.mjs bundle-store.test.mjs host-client.test.mjs runtime.test.mjs container-launcher.test.mjs ci-contract.test.mjs egress-proxy.test.mjs deployment-manager.test.mjs providers/sliplane-provider.test.mjs sandbox.test.mjs worker-server.test.mjs && node --test container-integration.test.mjs",
     "typecheck": "node --check auth.mjs && node --check backend-client.mjs && node --check bundle-store.mjs && node --check host-client.mjs && node --check runtime.mjs && node --check worker-runner.mjs && node --check worker-server.mjs && node --check worker-entry.mjs && node --check server.mjs && node --check container-launcher.mjs && node --check egress-proxy.mjs && node --check deployment-manager.mjs && node --check providers/provider.mjs && node --check providers/sliplane-provider.mjs && node --check sandbox.mjs"
   },
   "dependencies": {
