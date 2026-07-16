@@ -299,6 +299,20 @@ func (h *Handler) autopilotDelegationAuthorityFromComment(ctx context.Context, i
 	return h.autopilotDelegationAuthority(ctx, issue, comment.AuthorType, uuidToString(comment.AuthorID), task)
 }
 
+// commentSourceTaskIDForIssue returns the agent's currently-executing task (from
+// the X-Task-ID header) when it is running on the given issue, else an invalid
+// UUID. This is the exact issue-scoped lineage CreateComment stamps onto
+// source_task_id; a cross-issue (or missing) task yields invalid so the persisted
+// lineage — and every authority/originator resolution that reads it — fails closed
+// (MUL-4857).
+func (h *Handler) commentSourceTaskIDForIssue(r *http.Request, issue db.Issue) pgtype.UUID {
+	task, ok := h.taskFromRequestHeader(r)
+	if !ok || !task.IssueID.Valid || uuidToString(task.IssueID) != uuidToString(issue.ID) {
+		return pgtype.UUID{}
+	}
+	return task.ID
+}
+
 // taskFromRequestHeader resolves the agent's currently-executing task from the
 // X-Task-ID header (set by the CLI on every request). Returns ok=false when the
 // header is absent, malformed, or names no existing task.

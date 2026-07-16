@@ -2460,6 +2460,13 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 	// NOTE: See CreateComment — Markdown is sanitized at render/edit time, not here.
 
 	oldContent := existing.Content
+	// Preserve the existing authority lineage by default (member/admin edits, or an
+	// unchanged edit). MUL-4857: when the AGENT author itself edits and the content
+	// changes, re-stamp source_task_id to the CURRENT editing task (issue-scoped,
+	// exactly as CreateComment stamps it) below — so preview, save, and the deferred
+	// completion-reconcile all resolve the delegation authority from this one action,
+	// and a cross-issue edit clears the lineage and fails closed.
+	sourceTaskID := existing.SourceTaskID
 	var triggerIssue *db.Issue
 	var cancelled []db.AgentTaskQueue
 	if oldContent != req.Content {
@@ -2470,6 +2477,9 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		triggerIssue = &issue
+		if actorType == "agent" {
+			sourceTaskID = h.commentSourceTaskIDForIssue(r, issue)
+		}
 		cancelled, err = h.TaskService.CancelTasksByTriggerComment(r.Context(), existing.ID)
 		if err != nil {
 			slog.Warn("cancel tasks for edited comment failed", "comment_id", uuidToString(existing.ID), "error", err)
@@ -2479,8 +2489,9 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 	}
 
 	comment, err := h.Queries.UpdateComment(r.Context(), db.UpdateCommentParams{
-		ID:      commentUUID,
-		Content: req.Content,
+		ID:           commentUUID,
+		Content:      req.Content,
+		SourceTaskID: sourceTaskID,
 	})
 	if err != nil {
 		slog.Warn("update comment failed", append(logger.RequestAttrs(r), "error", err, "comment_id", commentId)...)
@@ -2506,10 +2517,12 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 		}
 
 		h.retriggerCancelledTaskSurvivors(r.Context(), issue, cancelled, existing.ID)
-		// MUL-4857: an edit re-triggers already-persisted content, so the autopilot
-		// delegation authority is resolved from the comment's stored source_task_id
-		// (the authoring run's lineage), not the editing request — matching the
-		// reconcile path and Elon's create/preview-vs-edit split.
+		// MUL-4857: source_task_id was just re-stamped to THIS edit's task above, so
+		// resolving from the comment keys the delegation authority on the current
+		// editing action — identical to what the edit preview computed from the same
+		// request, and to what the completion-reconcile will restore. A cross-issue
+		// edit re-stamped it to NULL, so this fails closed rather than borrowing the
+		// old authoring run's authority.
 		delegationAuthority := h.autopilotDelegationAuthorityFromComment(r.Context(), issue, comment)
 		return h.triggerTasksForComment(r.Context(), issue, comment, parentComment, actorType, actorID, h.invokeOriginatorFromRequest(r, actorType, actorID), delegationAuthority, suppressAgentIDs)
 	}

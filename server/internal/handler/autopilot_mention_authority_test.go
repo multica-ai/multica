@@ -329,3 +329,278 @@ func TestCreateComment_AutopilotLeaderMentionEnqueuesPrivateWorker(t *testing.T)
 		t.Fatal("the delegated worker task must remain unattributed; the creator authority is authorization-only")
 	}
 }
+
+// nextWorkspaceIssueNumber advances and returns the test workspace's issue
+// counter so a directly-inserted issue does not collide on uq_issue_workspace_number.
+func nextWorkspaceIssueNumber(t *testing.T) int {
+	t.Helper()
+	var number int
+	if err := testPool.QueryRow(context.Background(), `
+		UPDATE workspace
+		SET issue_counter = GREATEST(issue_counter, (SELECT COALESCE(MAX(number), 0) FROM issue WHERE workspace_id = $1)) + 1
+		WHERE id = $1 RETURNING issue_counter
+	`, testWorkspaceID).Scan(&number); err != nil {
+		t.Fatalf("next issue number: %v", err)
+	}
+	return number
+}
+
+// seedBareIssue inserts a plain (non-autopilot) issue authored by the given agent
+// and returns its id, for building a cross-issue editing context.
+func seedBareIssue(t *testing.T, creatorAgentID string) string {
+	t.Helper()
+	var issueID string
+	if err := testPool.QueryRow(context.Background(), `
+		INSERT INTO issue (workspace_id, creator_type, creator_id, title, number)
+		VALUES ($1, 'agent', $2, 'MUL-4857 unrelated issue', $3) RETURNING id
+	`, testWorkspaceID, creatorAgentID, nextWorkspaceIssueNumber(t)).Scan(&issueID); err != nil {
+		t.Fatalf("seed bare issue: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE issue_id = $1`, issueID)
+		testPool.Exec(context.Background(), `DELETE FROM comment WHERE issue_id = $1`, issueID)
+		testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, issueID)
+	})
+	return issueID
+}
+
+// seedCompletedTaskOnIssueBefore inserts a completed task for the agent on the
+// issue with a created_at safely before any comment made during the test, so the
+// completion-reconcile pass (ListReconcilableCommentsForIssueSince) picks those
+// comments up.
+func seedCompletedTaskOnIssueBefore(t *testing.T, agentID, issueID, runtimeID string) string {
+	t.Helper()
+	var taskID string
+	if err := testPool.QueryRow(context.Background(), `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, created_at)
+		VALUES ($1, $2, $3, 'completed', 0, now() - interval '1 hour') RETURNING id
+	`, agentID, runtimeID, issueID).Scan(&taskID); err != nil {
+		t.Fatalf("seed completed task: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE id = $1`, taskID) })
+	return taskID
+}
+
+// seedLeaderPlainComment inserts a plain (no-mention) agent comment stamped with
+// the given source_task_id, so a test can later edit it to add a mention.
+func seedLeaderPlainComment(t *testing.T, issueID, leaderID, sourceTaskID string) string {
+	t.Helper()
+	var commentID string
+	if err := testPool.QueryRow(context.Background(), `
+		INSERT INTO comment (workspace_id, issue_id, author_type, author_id, content, source_task_id)
+		VALUES ($1, $2, 'agent', $3, 'starting on this', $4) RETURNING id
+	`, testWorkspaceID, issueID, leaderID, sourceTaskID).Scan(&commentID); err != nil {
+		t.Fatalf("seed plain comment: %v", err)
+	}
+	return commentID
+}
+
+// TestReconcileCommentsOnCompletion_AutopilotDelegationRestoresAuthority is the
+// MUL-4857 must-fix #1 (review round 2): when the mentioned target was BUSY at
+// delegation time, the delegation is deferred to the target's completion
+// reconcile. That replay must restore the SAME autopilot-creator authority from
+// the comment's source_task_id — otherwise the unattributed autopilot chain's
+// follow-up is gate-denied again and the delegation is silently lost.
+func TestReconcileCommentsOnCompletion_AutopilotDelegationRestoresAuthority(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	workerID, ownerID, plainMemberID := privateAgentTestFixture(t)
+
+	// followUps drives the reconcile: an autopilot delegation comment mentions the
+	// busy private worker, the worker's task then completes, and we count the
+	// follow-up tasks the completion reconcile enqueues for it.
+	followUps := func(t *testing.T, creatorUserID string) (string, int) {
+		fx := newAutopilotDelegationFixture(t, workerID, creatorUserID, "autopilot")
+		issueID := uuidToString(fx.Issue.ID)
+		workerTaskID := seedCompletedTaskOnIssueBefore(t, workerID, issueID, fx.RuntimeID)
+		workerTask, err := testHandler.Queries.GetAgentTask(ctx, util.MustParseUUID(workerTaskID))
+		if err != nil {
+			t.Fatalf("load worker task: %v", err)
+		}
+		testHandler.reconcileCommentsOnCompletion(ctx, &workerTask)
+		var queued int
+		if err := testPool.QueryRow(ctx, `
+			SELECT count(*) FROM agent_task_queue
+			WHERE issue_id = $1 AND agent_id = $2 AND status = 'queued'
+		`, issueID, workerID).Scan(&queued); err != nil {
+			t.Fatalf("count follow-ups: %v", err)
+		}
+		return issueID, queued
+	}
+
+	t.Run("creator owns busy target -> one unattributed follow-up", func(t *testing.T) {
+		issueID, queued := followUps(t, ownerID)
+		if queued != 1 {
+			t.Fatalf("expected exactly 1 reconcile follow-up for the freed worker, got %d", queued)
+		}
+		var originatorValid bool
+		if err := testPool.QueryRow(ctx, `
+			SELECT originator_user_id IS NOT NULL FROM agent_task_queue
+			WHERE issue_id = $1 AND agent_id = $2 AND status = 'queued'
+		`, issueID, workerID).Scan(&originatorValid); err != nil {
+			t.Fatalf("read follow-up originator: %v", err)
+		}
+		if originatorValid {
+			t.Fatal("the reconcile follow-up must stay unattributed; creator authority is authorization-only")
+		}
+	})
+
+	t.Run("creator without rights -> no follow-up", func(t *testing.T) {
+		if _, queued := followUps(t, plainMemberID); queued != 0 {
+			t.Fatalf("a creator without invoke rights must not spawn a reconcile follow-up, got %d", queued)
+		}
+	})
+}
+
+// TestUpdateComment_AutopilotAuthorityReStampedToEditingTask is the MUL-4857
+// must-fix #2 (review round 2): an edit is a NEW action, so it must judge (and
+// persist) authority by the CURRENT editing task, not the comment's original
+// authoring task. A same-issue edit keeps the autopilot-creator authority; a
+// cross-issue edit re-stamps source_task_id to NULL and fails closed, so it can
+// never borrow the old autopilot run's authority (preview and save now agree).
+func TestUpdateComment_AutopilotAuthorityReStampedToEditingTask(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	workerID, ownerID, _ := privateAgentTestFixture(t)
+
+	editAddingMention := func(t *testing.T, editTaskID, commentID, issueID string, fx autopilotDelegationFixture) {
+		w := httptest.NewRecorder()
+		r := newRequest(http.MethodPut, "/api/comments/"+commentID, map[string]any{
+			"content": "[@Worker](mention://agent/" + workerID + ") please take this",
+		})
+		r.Header.Set("X-Agent-ID", fx.LeaderAgentID)
+		r.Header.Set("X-Task-ID", editTaskID)
+		r = withURLParam(r, "commentId", commentID)
+		testHandler.UpdateComment(w, r)
+		if w.Code != http.StatusOK {
+			t.Fatalf("UpdateComment: expected 200, got %d: %s", w.Code, w.Body.String())
+		}
+	}
+	countQueued := func(t *testing.T, issueID string) int {
+		var n int
+		if err := testPool.QueryRow(ctx, `
+			SELECT count(*) FROM agent_task_queue
+			WHERE issue_id = $1 AND agent_id = $2 AND status = 'queued'
+		`, issueID, workerID).Scan(&n); err != nil {
+			t.Fatalf("count queued: %v", err)
+		}
+		return n
+	}
+
+	t.Run("same-issue edit keeps creator authority and triggers", func(t *testing.T) {
+		fx := newAutopilotDelegationFixture(t, workerID, ownerID, "autopilot")
+		issueID := uuidToString(fx.Issue.ID)
+		commentID := seedLeaderPlainComment(t, issueID, fx.LeaderAgentID, fx.LeaderTaskID)
+		// Edit from the leader's own task on THIS autopilot issue.
+		editAddingMention(t, fx.LeaderTaskID, commentID, issueID, fx)
+		if got := countQueued(t, issueID); got != 1 {
+			t.Fatalf("same-issue edit should enqueue the private worker once, got %d", got)
+		}
+	})
+
+	t.Run("cross-issue edit re-stamps source task to NULL and fails closed", func(t *testing.T) {
+		fx := newAutopilotDelegationFixture(t, workerID, ownerID, "autopilot")
+		issueID := uuidToString(fx.Issue.ID)
+		commentID := seedLeaderPlainComment(t, issueID, fx.LeaderAgentID, fx.LeaderTaskID)
+		// The leader now runs an UNATTRIBUTED task on an unrelated issue and edits
+		// its old autopilot comment from there.
+		otherIssueID := seedBareIssue(t, fx.LeaderAgentID)
+		crossTaskID := seedTaskOnIssue(t, fx.LeaderAgentID, otherIssueID, fx.RuntimeID)
+		editAddingMention(t, crossTaskID, commentID, issueID, fx)
+		if got := countQueued(t, issueID); got != 0 {
+			t.Fatalf("cross-issue edit must not borrow the old autopilot authority; got %d queued", got)
+		}
+		var sourceTaskValid bool
+		if err := testPool.QueryRow(ctx, `SELECT source_task_id IS NOT NULL FROM comment WHERE id = $1`, commentID).Scan(&sourceTaskValid); err != nil {
+			t.Fatalf("read comment source_task_id: %v", err)
+		}
+		if sourceTaskValid {
+			t.Fatal("a cross-issue edit must clear source_task_id so preview, save, and reconcile all fail closed")
+		}
+	})
+}
+
+// TestCreateComment_AutopilotWorkerResultWakesSquadLeader locks the review's
+// accepted behavior: effectiveInvoker() lets the autopilot-creator authority reach
+// the plain (non-@mention) assigned-squad-leader fallback too, so a worker's
+// result comment on the autopilot issue can still wake the private squad leader
+// and close the leader -> worker -> leader loop under the autopilot chain.
+func TestCreateComment_AutopilotWorkerResultWakesSquadLeader(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	runtimeID := handlerTestRuntimeID(t)
+
+	// Private squad leader owned by the autopilot creator; the worker is a distinct
+	// seeded agent so the leader self-trigger guard does not apply.
+	leaderID, ownerID, _ := privateAgentTestFixture(t)
+	var workerID string
+	if err := testPool.QueryRow(ctx, `
+		SELECT id FROM agent WHERE workspace_id = $1 AND id <> $2 ORDER BY created_at ASC LIMIT 1
+	`, testWorkspaceID, leaderID).Scan(&workerID); err != nil {
+		t.Fatalf("load worker agent: %v", err)
+	}
+
+	var autopilotID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO autopilot (workspace_id, title, assignee_id, execution_mode, created_by_type, created_by_id)
+		VALUES ($1, 'MUL-4857 squad', $2, 'create_issue', 'member', $3) RETURNING id
+	`, testWorkspaceID, leaderID, ownerID).Scan(&autopilotID); err != nil {
+		t.Fatalf("create autopilot: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM autopilot WHERE id = $1`, autopilotID) })
+
+	var squadID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO squad (workspace_id, name, description, leader_id, creator_id)
+		VALUES ($1, 'MUL-4857 Squad', '', $2, $3) RETURNING id
+	`, testWorkspaceID, leaderID, ownerID).Scan(&squadID); err != nil {
+		t.Fatalf("create squad: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM squad WHERE id = $1`, squadID) })
+
+	var issueID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (workspace_id, creator_type, creator_id, title, assignee_type, assignee_id, number, origin_type, origin_id)
+		VALUES ($1, 'agent', $2, 'MUL-4857 squad issue', 'squad', $3, $4, 'autopilot', $5) RETURNING id
+	`, testWorkspaceID, leaderID, squadID, nextWorkspaceIssueNumber(t), autopilotID).Scan(&issueID); err != nil {
+		t.Fatalf("create squad issue: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE issue_id = $1`, issueID)
+		testPool.Exec(context.Background(), `DELETE FROM comment WHERE issue_id = $1`, issueID)
+		testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, issueID)
+	})
+
+	// The worker is running an unattributed task on this autopilot issue.
+	workerTaskID := seedTaskOnIssue(t, workerID, issueID, runtimeID)
+
+	// The worker posts a PLAIN result comment (no @mention) via HTTP.
+	w := httptest.NewRecorder()
+	r := newRequest("POST", "/api/issues/"+issueID+"/comments", map[string]any{
+		"content": "done — pushed the change",
+	})
+	r.Header.Set("X-Agent-ID", workerID)
+	r.Header.Set("X-Task-ID", workerTaskID)
+	r = withURLParam(r, "id", issueID)
+	testHandler.CreateComment(w, r)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("worker result CreateComment: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var leaderTasks int
+	if err := testPool.QueryRow(ctx, `
+		SELECT count(*) FROM agent_task_queue
+		WHERE issue_id = $1 AND agent_id = $2 AND status = 'queued' AND is_leader_task = TRUE
+	`, issueID, leaderID).Scan(&leaderTasks); err != nil {
+		t.Fatalf("count leader tasks: %v", err)
+	}
+	if leaderTasks != 1 {
+		t.Fatalf("expected the private squad leader to be woken once via autopilot-creator authority, got %d", leaderTasks)
+	}
+}

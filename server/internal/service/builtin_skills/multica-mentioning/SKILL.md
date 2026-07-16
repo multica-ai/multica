@@ -139,6 +139,13 @@ This fallback is bound to verified task lineage: it applies only when the
 delegating run's own task is the one working on that autopilot issue (author ==
 task agent, `task.issue_id` == this issue), so a run doing work elsewhere can
 never borrow another autopilot creator's authority by commenting on its issue.
+The same authority carries the plain assigned-squad-leader wake (a worker's
+result comment on the autopilot issue can still wake the leader), and it survives
+a busy target: if the mentioned agent is already running, the delegation is
+replayed at that run's completion under the same authority, so it is never lost.
+An edit is treated as a fresh action — it re-stamps the comment's lineage to the
+editing task, so editing an old autopilot comment from an unrelated issue fails
+closed instead of reusing the old authority.
 
 ## Incorrect → Correct
 
