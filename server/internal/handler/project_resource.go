@@ -109,16 +109,30 @@ func validateGithubRepoRef(ref json.RawMessage) (json.RawMessage, error) {
 }
 
 // localDirectoryRef is the JSONB shape stored for resource_type=local_directory.
-// It pins a project to an existing directory on a specific user machine, so
-// agent tasks run in-place rather than in an isolated git worktree. The
+// It pins a project to an existing directory on a specific user machine. The
 // daemon_id scopes the path to one daemon registration — the same string path
 // on a different machine is a different resource. The optional label is a
 // human-readable hint used by the UI; the row-level project_resource.label
 // column remains the generic column for any resource type.
+//
+// Isolate (VWO-367) selects how tasks run against the directory:
+//   - false (default): tasks run IN PLACE, editing the directory's working tree
+//     directly, serialised one-at-a-time on the daemon's path mutex. This is
+//     the contract general operators depend on (they edit the owner's live
+//     checkout, ADR-0019), so it stays the default.
+//   - true: each task runs in its OWN per-task git worktree cut from the
+//     directory's repository (own working tree + index), so tasks run
+//     concurrently without sharing an index or sidecar dir and without the
+//     whole-task path mutex. Opt in for a fleet that targets one checkout.
+//
+// resource_ref is polymorphic JSONB, so this field needs no migration — but it
+// MUST stay on this struct (and the daemon mirror), or validateLocalDirectoryRef
+// re-marshals the payload and silently drops it.
 type localDirectoryRef struct {
 	LocalPath string `json:"local_path"`
 	DaemonID  string `json:"daemon_id"`
 	Label     string `json:"label,omitempty"`
+	Isolate   bool   `json:"isolate,omitempty"`
 }
 
 func validateLocalDirectoryRef(ref json.RawMessage) (json.RawMessage, error) {

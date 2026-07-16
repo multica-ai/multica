@@ -3275,6 +3275,18 @@ func (d *Daemon) acquireLocalDirectoryLockIfNeeded(ctx context.Context, task Tas
 		return nil, true
 	}
 
+	// VWO-367: when the resource opts into per-task worktree isolation, do NOT
+	// take the whole-task path mutex. execenv.Prepare gives each task its own
+	// git worktree + index cut from this checkout, so concurrent tasks no longer
+	// share a working tree, an index, or a sidecar directory. The only shared
+	// .git mutations (worktree add/remove) are serialised briefly inside the
+	// execenv worktree module, never for the whole task lifetime — which is the
+	// serialization this opt-in removes.
+	if assignment.Ref.Isolate {
+		taskLog.Info("local_directory: worktree isolation enabled; skipping whole-task path mutex")
+		return nil, false
+	}
+
 	// While the lock is contended the daemon would otherwise sit blocked on
 	// the path mutex with no signal back from the server — the main
 	// per-task watcher only starts after the lock is acquired. If the user
@@ -3985,6 +3997,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		}
 		if localAssignment != nil {
 			prepParams.LocalWorkDir = localAssignment.AbsPath
+			prepParams.Isolate = localAssignment.Ref.Isolate
 		}
 		env, err = execenv.Prepare(prepParams, d.logger)
 		if err != nil {
@@ -4069,6 +4082,18 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 				d.logger.Warn("execenv: cleanup sidecars failed (non-fatal)", "error", cerr)
 			}
 		}()
+	}
+
+	// VWO-367: an isolated local_directory task ran in a per-task worktree the
+	// daemon owns (env.LocalDirectory is false for these, so the in-place excise
+	// above is correctly skipped — the sidecars live in the disposable worktree,
+	// not the user's checkout). Tear the worktree down on the way out to reclaim
+	// its registry entry and per-task branch. The agent must have pushed any work
+	// worth keeping before the task ends (the fleet pushes at each gate-park);
+	// the local branch is scratch. Idempotent; the crash path (no defer) is
+	// reclaimed by GC plus the next task's opportunistic `git worktree prune`.
+	if env.IsolatedWorktree != nil {
+		defer env.IsolatedWorktree.Remove(d.logger)
 	}
 
 	prompt := BuildPrompt(task, provider)
