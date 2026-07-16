@@ -80,6 +80,25 @@ export interface SnapshotToFieldsOptions {
   resolveSkill?: (id: string) => string;
 }
 
+// changedSnapshotKeys names every snapshot key whose normalised value differs
+// between two snapshots.
+//
+// FIR-3212: the approval panel asks the server what each changed field MEANS on
+// the agent's engine, and it must ask about exactly the fields the diff beside it
+// renders — so both read this one predicate. Pass the same resolveSkill the diff
+// uses, otherwise a renamed skill is "changed" in one and not the other.
+export function changedSnapshotKeys(
+  base: AgentContextSnapshot,
+  proposed: AgentContextSnapshot,
+  opts: SnapshotToFieldsOptions = {},
+): string[] {
+  const baseFields = snapshotToFields(base, opts);
+  const proposedFields = snapshotToFields(proposed, opts);
+  return baseFields
+    .filter((bf, i) => (proposedFields[i]?.value ?? "") !== bf.value)
+    .map((bf) => bf.key);
+}
+
 // Field order is deliberate: what a person reads first (instructions, model,
 // thinking, sandbox) before the structured config (skills, secrets, configs).
 export function snapshotToFields(

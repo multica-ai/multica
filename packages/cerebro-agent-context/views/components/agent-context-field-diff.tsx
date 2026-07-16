@@ -6,7 +6,10 @@
 // instructions text. Reuses the line-level AgentContextDiffView per field.
 
 import type { AgentContextSnapshot } from "@multica/core/types";
-import { snapshotToFields } from "../../core/snapshot-fields";
+import {
+  snapshotToFields,
+  changedSnapshotKeys,
+} from "../../core/snapshot-fields";
 import { AgentContextDiffView } from "./agent-context-diff-view";
 import { useSkillNameResolver } from "../use-skill-name-resolver";
 
@@ -43,8 +46,12 @@ export function AgentContextFieldDiff({
     }))
     .filter((r) => !onlyKeys || onlyKeys.includes(r.key));
 
-  const changed = rows.filter((r) => r.prev !== r.next);
-  const unchanged = rows.filter((r) => r.prev === r.next);
+  // The same predicate the approval panel asks the server about (FIR-3212), so
+  // the diff and the consequences beside it can never disagree about which
+  // fields this proposal touches.
+  const changedKeys = changedSnapshotKeys(base, proposed, { resolveSkill });
+  const changed = rows.filter((r) => changedKeys.includes(r.key));
+  const unchanged = rows.filter((r) => !changedKeys.includes(r.key));
 
   if (changed.length === 0) {
     return (

@@ -27,13 +27,19 @@ import {
 } from "@multica/ui/components/ui/dialog";
 import { Badge } from "@multica/ui/components/ui/badge";
 import { Textarea } from "@multica/ui/components/ui/textarea";
+import { useFeatureFlag } from "@multica/cerebro-feature-flags";
 import {
   agentContextChangeRequestsOptions,
   agentContextVersionsOptions,
 } from "../../core/queries";
-import { snapshotFieldsChanged } from "../../core/snapshot-fields";
+import {
+  snapshotFieldsChanged,
+  changedSnapshotKeys,
+} from "../../core/snapshot-fields";
 import { useReviewAgentContextChangeRequest } from "../../core/mutations";
+import { useSkillNameResolver } from "../use-skill-name-resolver";
 import { AgentContextFieldDiff } from "./agent-context-field-diff";
+import { AgentContextApprovalImpact } from "./agent-context-approval-impact";
 
 interface Props {
   agent: Agent;
@@ -116,9 +122,25 @@ export function AgentContextChangeRequestQueue({
 
   const pendingCount = requests.filter((r) => r.status === "pending").length;
   const mutation = useReviewAgentContextChangeRequest(agent.id, wsId);
+  // FIR-3212: the consequences panel rides the same flag as the rest of the
+  // Setup capability work, so it can be turned off without a redeploy.
+  const consequencesOn = useFeatureFlag("cerebro_agent_setup_capabilities");
+  const resolveSkill = useSkillNameResolver();
 
   const proposerName = (userId: string) =>
     members.find((m) => m.user_id === userId)?.name ?? userId.slice(0, 8);
+
+  // The fields the diff beside it is rendering — scoped the same way, so the
+  // consequences panel explains exactly what the approver can see and nothing
+  // they cannot.
+  const changedFieldsFor = (req: AgentContextChangeRequest) => {
+    const base = baseSnapshotFor(req);
+    if (!base) return [];
+    const keys = changedSnapshotKeys(base, req.proposed_snapshot, {
+      resolveSkill,
+    });
+    return onlyKeys ? keys.filter((k) => onlyKeys.includes(k)) : keys;
+  };
 
   const handleReview = async () => {
     if (!reviewTarget || !reviewAction) return;
@@ -216,13 +238,28 @@ export function AgentContextChangeRequestQueue({
 
               <div className="border-t px-2.5 py-2">
                 {baseSnapshotFor(req) ? (
-                  <AgentContextFieldDiff
-                    base={baseSnapshotFor(req)!}
-                    proposed={req.proposed_snapshot}
-                    baseLabel={`base (${req.base_version})`}
-                    proposedLabel={req.proposed_version}
-                    onlyKeys={onlyKeys}
-                  />
+                  // Mockup M3: what changed on the left, what it means on the
+                  // right. The diff alone cannot tell the approver whether the
+                  // change lands at all on this agent's engine.
+                  <div className="grid gap-4 lg:grid-cols-2">
+                    <AgentContextFieldDiff
+                      base={baseSnapshotFor(req)!}
+                      proposed={req.proposed_snapshot}
+                      baseLabel={`base (${req.base_version})`}
+                      proposedLabel={req.proposed_version}
+                      onlyKeys={onlyKeys}
+                    />
+                    {/* Pending only: the panel answers "what will approving
+                        this do?". On a merged or rejected request that question
+                        is already settled, and the engine's CURRENT matrix would
+                        be describing a decision taken in the past. */}
+                    {consequencesOn && req.status === "pending" && (
+                      <AgentContextApprovalImpact
+                        agent={agent}
+                        changedFields={changedFieldsFor(req)}
+                      />
+                    )}
+                  </div>
                 ) : (
                   <div className="rounded-md border border-dashed px-3 py-3 text-center text-xs text-muted-foreground">
                     Loading diff…

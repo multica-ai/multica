@@ -16,6 +16,14 @@ export {
   type AgentCapabilitySwapSystemPrompt,
 } from "./swap-api";
 export {
+  getAgentCapabilityApproval,
+  AgentCapabilityApprovalSchema,
+  type AgentCapabilityApproval,
+  type AgentCapabilityApprovalImpact,
+  type AgentCapabilityApprovalFieldConsequence,
+  type AgentCapabilityApprovalPromptEffect,
+} from "./approval-api";
+export {
   createAgentCapabilitiesTabs,
   CerebroCapabilitiesTab,
   type AgentCapabilitiesTabExtension,
