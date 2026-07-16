@@ -15,6 +15,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"golang.org/x/text/cases"
 )
 
 // Real Lark/飞书 Open Platform HTTP APIClient.
@@ -261,7 +263,12 @@ func parseInlineMarkdownImageDestination(markdown string, openParen int) (end in
 
 func parseMarkdownReferenceDefinitions(markdown string) map[string]markdownReferenceDefinition {
 	definitions := map[string]markdownReferenceDefinition{}
+	var state markdownReferenceDefinitionScanState
 	for start := 0; start < len(markdown); {
+		if state.skipLine(markdown, start) {
+			start = nextMarkdownLineStart(markdown, start)
+			continue
+		}
 		label, destination, end, ok := parseMarkdownReferenceDefinitionAt(markdown, start)
 		if ok {
 			key := normalizeMarkdownReferenceLabel(label)
@@ -274,6 +281,64 @@ func parseMarkdownReferenceDefinitions(markdown string) map[string]markdownRefer
 		start = nextMarkdownLineStart(markdown, start)
 	}
 	return definitions
+}
+
+type markdownReferenceDefinitionScanState struct {
+	inFence  bool
+	fence    byte
+	fenceLen int
+}
+
+func (s *markdownReferenceDefinitionScanState) skipLine(markdown string, start int) bool {
+	if s.inFence {
+		if fence, fenceLen, ok := parseMarkdownFenceLine(markdown, start); ok && fence == s.fence && fenceLen >= s.fenceLen {
+			s.inFence = false
+		}
+		return true
+	}
+	if fence, fenceLen, ok := parseMarkdownFenceLine(markdown, start); ok {
+		s.inFence = true
+		s.fence = fence
+		s.fenceLen = fenceLen
+		return true
+	}
+	return isIndentedMarkdownCodeLine(markdown, start)
+}
+
+func parseMarkdownFenceLine(markdown string, start int) (byte, int, bool) {
+	lineEnd := markdownLineEnd(markdown, start)
+	i, ok := skipUpToThreeMarkdownSpaces(markdown, start)
+	if !ok || i >= lineEnd || (markdown[i] != '`' && markdown[i] != '~') {
+		return 0, 0, false
+	}
+	fence := markdown[i]
+	j := i
+	for j < lineEnd && markdown[j] == fence {
+		j++
+	}
+	if j-i < 3 {
+		return 0, 0, false
+	}
+	if fence == '`' {
+		for k := j; k < lineEnd; k++ {
+			if markdown[k] == '`' {
+				return 0, 0, false
+			}
+		}
+	}
+	return fence, j - i, true
+}
+
+func isIndentedMarkdownCodeLine(markdown string, start int) bool {
+	lineEnd := markdownLineEnd(markdown, start)
+	if start >= lineEnd {
+		return false
+	}
+	spaces := 0
+	for start+spaces < lineEnd && markdown[start+spaces] == ' ' {
+		spaces++
+	}
+	return spaces >= 4
 }
 
 func parseMarkdownReferenceDefinitionAt(markdown string, start int) (label, destination string, end int, ok bool) {
@@ -522,14 +587,20 @@ func parseMarkdownReferenceDefinitionTitle(markdown string, i, lineEnd int) (int
 
 func removeMarkdownReferenceDefinitions(markdown string, redactedDefinitions map[string]struct{}) string {
 	var sanitized strings.Builder
+	var state markdownReferenceDefinitionScanState
 	for start := 0; start < len(markdown); {
+		next := nextMarkdownLineStart(markdown, start)
+		if state.skipLine(markdown, start) {
+			sanitized.WriteString(markdown[start:next])
+			start = next
+			continue
+		}
 		label, destination, end, ok := parseMarkdownReferenceDefinitionAt(markdown, start)
 		_, redact := redactedDefinitions[normalizeMarkdownReferenceLabel(label)]
 		if ok && redact && isLocalMarkdownImageDestination(destination) {
 			start = end
 			continue
 		}
-		next := nextMarkdownLineStart(markdown, start)
 		sanitized.WriteString(markdown[start:next])
 		start = next
 	}
@@ -562,7 +633,7 @@ func nextMarkdownLineStart(markdown string, start int) int {
 }
 
 func normalizeMarkdownReferenceLabel(label string) string {
-	return strings.ToLower(strings.Join(strings.Fields(label), " "))
+	return cases.Fold().String(strings.Join(strings.Fields(label), " "))
 }
 
 func isMarkdownSpace(c byte) bool {
