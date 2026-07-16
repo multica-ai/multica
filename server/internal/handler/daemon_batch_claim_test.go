@@ -237,7 +237,7 @@ func TestClaimTasksByRuntime_CancelsTaskWhenRuntimeOwnerMissing(t *testing.T) {
 	var rtNull string
 	if err := testPool.QueryRow(ctx, `
 		INSERT INTO agent_runtime (workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, visibility, owner_id)
-		VALUES ($1, NULL, 'Ownerless RT', 'cloud', 'handler_test_runtime', 'online', 'x', '{}'::jsonb, now(), 'private', NULL)
+		VALUES ($1, NULL, 'Ownerless RT', 'cloud', 'handler_test_runtime', 'online', 'x', '{"capabilities":["linux-bubblewrap-fd-v1"]}'::jsonb, now(), 'private', NULL)
 		RETURNING id`, testWorkspaceID).Scan(&rtNull); err != nil {
 		t.Fatalf("ownerless runtime: %v", err)
 	}
