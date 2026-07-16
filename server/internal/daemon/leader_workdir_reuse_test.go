@@ -8,14 +8,17 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/multica-ai/multica/server/internal/daemon/execenv"
 )
 
 func TestRunTaskSquadLeaderReusesDaemonManagedWorkdir(t *testing.T) {
 	t.Parallel()
 
-	d, cleanup := newLeaderReuseTestDaemon(t)
+	d, argsFile, cleanup := newLeaderReuseTestDaemon(t)
 	defer cleanup()
 
 	first := leaderReuseTestTask("task-first")
@@ -25,6 +28,13 @@ func TestRunTaskSquadLeaderReusesDaemonManagedWorkdir(t *testing.T) {
 	}
 	if firstResult.SessionID == "" || firstResult.WorkDir == "" {
 		t.Fatalf("first result missing resume state: %+v", firstResult)
+	}
+	if err := execenv.WriteGCMeta(firstResult.EnvRoot, execenv.GCMeta{
+		Kind:        execenv.GCKindIssue,
+		IssueID:     first.IssueID,
+		WorkspaceID: first.WorkspaceID,
+	}, d.logger); err != nil {
+		t.Fatalf("write first-run GC metadata: %v", err)
 	}
 
 	second := leaderReuseTestTask("task-second")
@@ -37,12 +47,19 @@ func TestRunTaskSquadLeaderReusesDaemonManagedWorkdir(t *testing.T) {
 	if secondResult.WorkDir != firstResult.WorkDir {
 		t.Fatalf("second WorkDir = %q, want reused leader workdir %q", secondResult.WorkDir, firstResult.WorkDir)
 	}
+	args, err := os.ReadFile(argsFile)
+	if err != nil {
+		t.Fatalf("read claude args: %v", err)
+	}
+	if !strings.Contains(string(args), "--resume\nsession-leader-reuse\n") {
+		t.Fatalf("second claude invocation did not resume prior session; args:\n%s", args)
+	}
 }
 
 func TestRunTaskSquadLeaderDoesNotReuseExternalPriorWorkdir(t *testing.T) {
 	t.Parallel()
 
-	d, cleanup := newLeaderReuseTestDaemon(t)
+	d, _, cleanup := newLeaderReuseTestDaemon(t)
 	defer cleanup()
 
 	externalWorkDir := t.TempDir()
@@ -75,11 +92,100 @@ func TestShouldReusePriorWorkdirSquadLeaderRejectsNonManagedPathUnderRoot(t *tes
 	}
 }
 
-func newLeaderReuseTestDaemon(t *testing.T) (*Daemon, func()) {
+func TestShouldReusePriorWorkdirSquadLeaderRejectsUnmarkedManagedShape(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	workDir := filepath.Join(root, "ws-leader", "not-a-task", "workdir")
+	if err := os.MkdirAll(workDir, 0o755); err != nil {
+		t.Fatalf("mkdir workdir: %v", err)
+	}
+
+	task := leaderReuseTestTask("task-unmarked-managed-shape")
+	task.PriorWorkDir = workDir
+	if shouldReusePriorWorkdir(task, nil, root) {
+		t.Fatalf("leader reused unmarked lookalike workdir %q", workDir)
+	}
+}
+
+func TestShouldReusePriorWorkdirSquadLeaderRejectsMismatchedTaskMarker(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	workDir := filepath.Join(root, "ws-leader", "12345678", "workdir")
+	writeLeaderTaskMarker(t, workDir, "other-agent", "issue-leader")
+
+	task := leaderReuseTestTask("task-mismatched-marker")
+	task.PriorWorkDir = workDir
+	if shouldReusePriorWorkdir(task, nil, root) {
+		t.Fatalf("leader reused workdir %q with a marker for another agent", workDir)
+	}
+}
+
+func TestShouldReusePriorWorkdirSquadLeaderRejectsMarkerWithoutManagedGCMeta(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	workDir := filepath.Join(root, "ws-leader", "12345678", "workdir")
+	writeLeaderTaskMarker(t, workDir, "agent-leader", "issue-leader")
+
+	task := leaderReuseTestTask("task-marker-without-gc-meta")
+	task.PriorWorkDir = workDir
+	if shouldReusePriorWorkdir(task, nil, root) {
+		t.Fatalf("leader reused marked workdir %q without managed GC metadata", workDir)
+	}
+}
+
+func TestShouldReusePriorWorkdirSquadLeaderRejectsLocalDirectoryGCMeta(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	workDir := filepath.Join(root, "ws-leader", "12345678", "workdir")
+	writeLeaderTaskMarker(t, workDir, "agent-leader", "issue-leader")
+	if err := execenv.WriteGCMeta(filepath.Dir(workDir), execenv.GCMeta{
+		Kind:           execenv.GCKindIssue,
+		IssueID:        "issue-leader",
+		WorkspaceID:    "ws-leader",
+		LocalDirectory: true,
+	}, slog.New(slog.NewTextHandler(io.Discard, nil))); err != nil {
+		t.Fatalf("write local-directory GC metadata: %v", err)
+	}
+
+	task := leaderReuseTestTask("task-local-directory-gc-meta")
+	task.PriorWorkDir = workDir
+	if shouldReusePriorWorkdir(task, nil, root) {
+		t.Fatalf("leader reused local-directory workdir %q without its path lock", workDir)
+	}
+}
+
+func TestShouldReusePriorWorkdirSquadLeaderRejectsRegularFile(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	workDir := filepath.Join(root, "ws-leader", "12345678", "workdir")
+	if err := os.MkdirAll(filepath.Dir(workDir), 0o755); err != nil {
+		t.Fatalf("mkdir workdir parent: %v", err)
+	}
+	if err := os.WriteFile(workDir, []byte("not a directory"), 0o644); err != nil {
+		t.Fatalf("write workdir file: %v", err)
+	}
+
+	task := leaderReuseTestTask("task-file-workdir")
+	task.PriorWorkDir = workDir
+	if shouldReusePriorWorkdir(task, nil, root) {
+		t.Fatalf("leader reused regular file %q as a workdir", workDir)
+	}
+}
+
+func newLeaderReuseTestDaemon(t *testing.T) (*Daemon, string, func()) {
 	t.Helper()
 
-	fakeBin := filepath.Join(t.TempDir(), "claude")
+	testDir := t.TempDir()
+	fakeBin := filepath.Join(testDir, "claude")
+	argsFile := filepath.Join(testDir, "claude-args.txt")
 	script := `#!/bin/sh
+printf '%s\n' "$@" >> "` + argsFile + `"
+printf '%s\n' '--invocation-end--' >> "` + argsFile + `"
 IFS= read -r _
 printf '%s\n' '{"type":"system","session_id":"session-leader-reuse"}'
 printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"session_id":"session-leader-reuse","result":"done"}'
@@ -108,7 +214,20 @@ printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"session_id
 			},
 		},
 	}
-	return d, srv.Close
+	return d, argsFile, srv.Close
+}
+
+func writeLeaderTaskMarker(t *testing.T, workDir, agentID, issueID string) {
+	t.Helper()
+
+	markerPath := filepath.Join(workDir, execenv.TaskContextMarkerRelPath)
+	if err := os.MkdirAll(filepath.Dir(markerPath), 0o755); err != nil {
+		t.Fatalf("mkdir marker dir: %v", err)
+	}
+	marker := []byte(`{"managed_by":"` + execenv.TaskContextMarkerManagedBy + `","agent_id":"` + agentID + `","issue_id":"` + issueID + `"}`)
+	if err := os.WriteFile(markerPath, marker, 0o644); err != nil {
+		t.Fatalf("write marker: %v", err)
+	}
 }
 
 func leaderReuseTestTask(id string) Task {

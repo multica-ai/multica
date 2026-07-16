@@ -3521,8 +3521,9 @@ func gateResumeToReusedWorkdir(task *Task, taskCtx *execenv.TaskContextForEnv, e
 // forcing every squad-leader follow-up onto a fresh provider session. Worker
 // tasks already expose their current local-directory assignment, so their
 // existing reuse behavior remains unchanged. Leader tasks intentionally skip
-// that assignment and its lock; they may therefore reuse only workdirs that
-// resolve to the exact daemon-managed {workspace}/{task}/workdir shape.
+// that assignment and its lock; they may therefore reuse only directories
+// that resolve to the {workspace}/{task}/workdir shape, belong to a completed
+// non-local managed env, and carry a matching daemon task-context marker.
 func shouldReusePriorWorkdir(task Task, localAssignment *localDirectoryAssignment, workspacesRoot string) bool {
 	if task.PriorWorkDir == "" || localAssignment != nil {
 		return false
@@ -3539,12 +3540,41 @@ func shouldReusePriorWorkdir(task Task, localAssignment *localDirectoryAssignmen
 	if err != nil {
 		return false
 	}
+	info, err := os.Stat(workdir)
+	if err != nil || !info.IsDir() {
+		return false
+	}
 	rel, err := filepath.Rel(root, workdir)
 	if err != nil || !filepath.IsLocal(rel) {
 		return false
 	}
 	parts := strings.Split(rel, string(filepath.Separator))
-	return len(parts) == 3 && parts[0] == task.WorkspaceID && parts[1] != "" && parts[2] == "workdir"
+	if len(parts) != 3 || parts[0] != task.WorkspaceID || parts[1] == "" || parts[2] != "workdir" {
+		return false
+	}
+	if task.AgentID == "" || task.IssueID == "" {
+		return false
+	}
+	meta, err := execenv.ReadGCMeta(filepath.Dir(workdir))
+	if err != nil || meta.LocalDirectory || meta.Kind != execenv.GCKindIssue ||
+		meta.WorkspaceID != task.WorkspaceID || meta.IssueID != task.IssueID {
+		return false
+	}
+
+	data, err := os.ReadFile(filepath.Join(workdir, execenv.TaskContextMarkerRelPath))
+	if err != nil {
+		return false
+	}
+	var marker struct {
+		ManagedBy string `json:"managed_by"`
+		AgentID   string `json:"agent_id"`
+		IssueID   string `json:"issue_id"`
+	}
+	if json.Unmarshal(data, &marker) != nil {
+		return false
+	}
+	return marker.ManagedBy == execenv.TaskContextMarkerManagedBy &&
+		marker.AgentID == task.AgentID && marker.IssueID == task.IssueID
 }
 
 // gateCodexResumeToRolloutPresence drops the prior Codex session when its
@@ -3899,8 +3929,10 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// WorkDir is the user's own path (always present) but the reuse path
 	// loses the envRoot association the GC loop needs, and re-running
 	// Prepare against a stable user path is cheap (no clone, no copy).
-	// Squad-leader tasks also skip reuse so a pre-fix leader session recorded
-	// against the user's local_directory cannot be re-entered without a lock.
+	// Leader tasks have no localAssignment; shouldReusePriorWorkdir separately
+	// requires matching managed-env metadata and a daemon-owned marker before
+	// allowing reuse, so a pre-fix leader session recorded against
+	// local_directory still fails closed.
 	var agentMcpConfig json.RawMessage
 	var effectiveMcpConfig json.RawMessage
 	var cursorMcpAuthSource string
