@@ -13,6 +13,12 @@ import (
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
+// orphanRecoveryBatchSize bounds how many orphaned tasks one recover-orphans
+// call fails (MUL-4332 review point 2). A single daemon's in-flight concurrency
+// is small, so this is far above any realistic per-restart orphan count; the rare
+// overflow is caught by the runtime sweeper's every-tick offline pass.
+const orphanRecoveryBatchSize = 500
+
 // RecoverOrphanedTasks is called by the daemon at startup for each runtime
 // it owns. It atomically fails any dispatched/running tasks the server still
 // believes belong to that runtime — those are the tasks the previous daemon
@@ -29,12 +35,24 @@ func (h *Handler) RecoverOrphanedTasks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Emit task.failed atomically with the bulk orphan-fail (MUL-4332 review
-	// point 2), so daemon-driven recovery converges onto the outbox like the
-	// runtime sweepers.
-	rows, err := h.TaskService.FailTasksInTxWithEvents(r.Context(), func(qtx *db.Queries) ([]db.AgentTaskQueue, error) {
-		return qtx.RecoverOrphanedTasksForRuntime(r.Context(), parseUUID(runtimeID))
-	})
+	// Select the runtime's orphaned tasks and fail the resolvable ones with their
+	// task.failed events atomically (MUL-4332 review point 2), so daemon-driven
+	// recovery converges onto the outbox like the runtime sweepers and an
+	// unresolvable poison row cannot block the rest.
+	rows, err := h.TaskService.FailBulkTasksWithEvents(r.Context(),
+		func(qtx *db.Queries) ([]db.AgentTaskQueue, error) {
+			return qtx.SelectOrphanedTasksForRuntime(r.Context(), db.SelectOrphanedTasksForRuntimeParams{
+				RuntimeID:  parseUUID(runtimeID),
+				MaxPerTick: orphanRecoveryBatchSize,
+			})
+		},
+		func(qtx *db.Queries, ids []pgtype.UUID) ([]db.AgentTaskQueue, error) {
+			return qtx.FailAgentTasksByIDs(r.Context(), db.FailAgentTasksByIDsParams{
+				Ids:           ids,
+				Error:         pgtype.Text{String: "daemon restarted while task was in flight", Valid: true},
+				FailureReason: pgtype.Text{String: "runtime_recovery", Valid: true},
+			})
+		})
 	if err != nil {
 		slog.Warn("recover-orphans failed", "runtime_id", runtimeID, "error", err)
 		writeError(w, http.StatusInternalServerError, "recover orphans failed")

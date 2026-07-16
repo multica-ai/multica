@@ -1925,124 +1925,6 @@ func (q *Queries) DeleteSystemAgentByID(ctx context.Context, id pgtype.UUID) err
 	return err
 }
 
-const expireStaleQueuedTasks = `-- name: ExpireStaleQueuedTasks :many
-WITH victims AS (
-    SELECT id FROM agent_task_queue
-    WHERE status = 'queued'
-      AND created_at < now() - make_interval(secs => $1::double precision)
-    ORDER BY created_at ASC
-    LIMIT $2::int
-    FOR UPDATE SKIP LOCKED
-)
-UPDATE agent_task_queue t
-SET status = 'failed',
-    completed_at = now(),
-    error = 'task expired in queue',
-    failure_reason = 'queued_expired',
-    prepare_lease_expires_at = NULL
-FROM victims v
-WHERE t.id = v.id
-  AND t.status = 'queued'
-  AND t.created_at < now() - make_interval(secs => $1::double precision)
-RETURNING t.id, t.agent_id, t.issue_id, t.status, t.priority, t.dispatched_at, t.started_at, t.completed_at, t.result, t.error, t.created_at, t.context, t.runtime_id, t.session_id, t.work_dir, t.trigger_comment_id, t.chat_session_id, t.autopilot_run_id, t.attempt, t.max_attempts, t.parent_task_id, t.failure_reason, t.trigger_summary, t.force_fresh_session, t.is_leader_task, t.wait_reason, t.initiator_user_id, t.handoff_note, t.prepare_lease_expires_at, t.squad_id, t.runtime_mcp_overlay, t.escalation_for_task_id, t.fire_at, t.originator_user_id, t.runtime_connected_apps, t.coalesced_comment_ids, t.delivered_comment_ids, t.chat_input_task_id, t.chat_finalize_deferred_at, t.originator_source, t.delegated_from_task_id, t.retry_of_task_id, t.rerun_of_task_id, t.rule_version_id, t.trigger_evidence_kind, t.trigger_evidence_ref_id, t.accountable_user_id
-`
-
-type ExpireStaleQueuedTasksParams struct {
-	TtlSecs    float64 `json:"ttl_secs"`
-	MaxPerTick int32   `json:"max_per_tick"`
-}
-
-// Fails tasks that have been sitting in 'queued' for longer than the TTL.
-// This is the cleanup arm of the MUL-1899 "queued backlog" fix: even with the
-// new dispatch-time admission gate that refuses to enqueue when the runtime
-// is offline, we still need to drain the historical 87k+ doomed rows and
-// handle edge cases where a runtime goes offline AFTER a task is already
-// queued (the admission check protects new enqueues, not in-flight queue
-// depth).
-//
-// Concurrency safety: the daemon's claim path may race with this sweeper to
-// transition the same row out of 'queued'. We protect against that two
-// ways:
-//  1. The CTE selects victims with FOR UPDATE SKIP LOCKED so a row that is
-//     currently being claimed (or otherwise locked) is skipped — no lock
-//     contention with the dispatch path, and we won't queue up behind it.
-//  2. The outer UPDATE re-checks status='queued' AND the TTL predicate at
-//     apply time. If a daemon claimed the row between selection and update
-//     (e.g. lock released after the claim transaction commits), the row is
-//     already 'dispatched'/'running' and the WHERE clause filters it out
-//     so we cannot clobber an in-flight task.
-//
-// Capped via LIMIT inside the CTE so a single sweep tick cannot monopolise
-// the DB when the backlog is large — the sweeper drains the rest on
-// subsequent ticks.
-func (q *Queries) ExpireStaleQueuedTasks(ctx context.Context, arg ExpireStaleQueuedTasksParams) ([]AgentTaskQueue, error) {
-	rows, err := q.db.Query(ctx, expireStaleQueuedTasks, arg.TtlSecs, arg.MaxPerTick)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []AgentTaskQueue{}
-	for rows.Next() {
-		var i AgentTaskQueue
-		if err := rows.Scan(
-			&i.ID,
-			&i.AgentID,
-			&i.IssueID,
-			&i.Status,
-			&i.Priority,
-			&i.DispatchedAt,
-			&i.StartedAt,
-			&i.CompletedAt,
-			&i.Result,
-			&i.Error,
-			&i.CreatedAt,
-			&i.Context,
-			&i.RuntimeID,
-			&i.SessionID,
-			&i.WorkDir,
-			&i.TriggerCommentID,
-			&i.ChatSessionID,
-			&i.AutopilotRunID,
-			&i.Attempt,
-			&i.MaxAttempts,
-			&i.ParentTaskID,
-			&i.FailureReason,
-			&i.TriggerSummary,
-			&i.ForceFreshSession,
-			&i.IsLeaderTask,
-			&i.WaitReason,
-			&i.InitiatorUserID,
-			&i.HandoffNote,
-			&i.PrepareLeaseExpiresAt,
-			&i.SquadID,
-			&i.RuntimeMcpOverlay,
-			&i.EscalationForTaskID,
-			&i.FireAt,
-			&i.OriginatorUserID,
-			&i.RuntimeConnectedApps,
-			&i.CoalescedCommentIds,
-			&i.DeliveredCommentIds,
-			&i.ChatInputTaskID,
-			&i.ChatFinalizeDeferredAt,
-			&i.OriginatorSource,
-			&i.DelegatedFromTaskID,
-			&i.RetryOfTaskID,
-			&i.RerunOfTaskID,
-			&i.RuleVersionID,
-			&i.TriggerEvidenceKind,
-			&i.TriggerEvidenceRefID,
-			&i.AccountableUserID,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const extendAgentTaskPrepareLease = `-- name: ExtendAgentTaskPrepareLease :one
 UPDATE agent_task_queue
 SET prepare_lease_expires_at = now() + make_interval(secs => $3::double precision)
@@ -2209,74 +2091,36 @@ func (q *Queries) FailAgentTask(ctx context.Context, arg FailAgentTaskParams) (A
 	return i, err
 }
 
-const failStaleTasks = `-- name: FailStaleTasks :many
+const failAgentTasksByIDs = `-- name: FailAgentTasksByIDs :many
 UPDATE agent_task_queue
-SET status = 'failed', completed_at = now(), error = 'task timed out',
-    failure_reason = 'timeout',
+SET status = 'failed',
+    completed_at = now(),
+    error = $1,
+    failure_reason = $2,
+    wait_reason = NULL,
     prepare_lease_expires_at = NULL
-WHERE (
-    status = 'dispatched'
-    AND dispatched_at < now() - make_interval(secs => $1::double precision)
-    AND (prepare_lease_expires_at IS NULL OR prepare_lease_expires_at < now())
-  )
-   OR (
-    status = 'running'
-    AND started_at < now() - make_interval(secs => $2::double precision)
-    AND NOT EXISTS (
-      SELECT 1 FROM agent_runtime r
-      WHERE r.id = agent_task_queue.runtime_id
-        AND r.status = 'online'
-        AND r.last_seen_at >= now() - make_interval(secs => $3::double precision)
-    )
-  )
+WHERE id = ANY($3::uuid[])
+  AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory')
 RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id
 `
 
-type FailStaleTasksParams struct {
-	DispatchTimeoutSecs float64 `json:"dispatch_timeout_secs"`
-	RunningTimeoutSecs  float64 `json:"running_timeout_secs"`
-	RuntimeStaleSecs    float64 `json:"runtime_stale_secs"`
+type FailAgentTasksByIDsParams struct {
+	Error         pgtype.Text   `json:"error"`
+	FailureReason pgtype.Text   `json:"failure_reason"`
+	Ids           []pgtype.UUID `json:"ids"`
 }
 
-// Fails tasks stuck in dispatched/running beyond the given thresholds.
-//
-// Each branch pairs a wall-clock deadline with a task-appropriate liveness
-// signal, so the sweeper only kills tasks whose owning daemon is no longer
-// proving it is alive:
-//
-//   - Dispatched: `prepare_lease_expires_at` is refreshed every 15s by the
-//     daemon between claim and StartTask (see startTaskPrepareLeaseExtender).
-//     A live lease excludes the row.
-//
-//   - Running: no per-task lease is renewed once StartTask fires, so we key
-//     off the daemon-wide heartbeat instead — `agent_runtime.last_seen_at`,
-//     which the daemon bumps every ~15s while it is up. A running task whose
-//     runtime is `online` AND whose `last_seen_at` is within
-//     @runtime_stale_secs is treated as alive and is NOT killed by this
-//     wall-clock backstop, even after `started_at` exceeds the running
-//     timeout. This is what lets healthy multi-hour research / training runs
-//     survive on self-hosted deployments (MUL-4107): the daemon side is
-//     bounded only by inactivity watchdogs (idle / per-tool), so the
-//     server-side wall clock must not shadow that with a coarser cap.
-//
-// The daemon-dead case is the primary responsibility of `sweepStaleRuntimes`
-// (which mixes DB `last_seen_at` with the Redis LivenessStore and calls
-// `FailTasksForOfflineRuntimes` in the same tick). The wall-clock branch
-// here is a defensive backstop for pathological cases where a runtime row
-// somehow retains status='online' with a stale DB heartbeat for longer than
-// the wall clock allows.
-//
-// runtime_id IS NULL: a running row with no runtime is by definition not
-// proving liveness, so the wall clock is allowed to fire — same shape as
-// the legacy pure-wall-clock behavior for that (rare / historical) case.
-//
-// waiting_local_directory rows are intentionally excluded: the daemon owns
-// the wait (with its own ctx-driven timeout) and a legitimate queue ahead
-// of this task can exceed the dispatch / running timeouts without being
-// "stuck". If the daemon dies, RecoverOrphanedTasksForRuntime reclaims
-// those rows at restart.
-func (q *Queries) FailStaleTasks(ctx context.Context, arg FailStaleTasksParams) ([]AgentTaskQueue, error) {
-	rows, err := q.db.Query(ctx, failStaleTasks, arg.DispatchTimeoutSecs, arg.RunningTimeoutSecs, arg.RuntimeStaleSecs)
+// Fails a specific, already-resolved set of tasks by id — the terminal half of
+// the MUL-4332 poison-isolated bulk fail (review point 2). The caller has just
+// selected these ids with SelectStaleTasksToFail / SelectExpiredQueuedTasks /
+// SelectTasksForOfflineRuntimes / SelectOrphanedTasksForRuntime FOR UPDATE in
+// the SAME transaction, so the rows are locked and cannot have transitioned;
+// the status guard is a defensive backstop that keeps this idempotent if the id
+// set is ever reused. @error / @failure_reason are supplied per sweeper. Both
+// wait_reason and prepare_lease_expires_at are cleared (clearing a NULL is a
+// no-op) so this one query serves every bulk-fail caller.
+func (q *Queries) FailAgentTasksByIDs(ctx context.Context, arg FailAgentTasksByIDsParams) ([]AgentTaskQueue, error) {
+	rows, err := q.db.Query(ctx, failAgentTasksByIDs, arg.Error, arg.FailureReason, arg.Ids)
 	if err != nil {
 		return nil, err
 	}
@@ -4455,92 +4299,6 @@ func (q *Queries) ReclaimStaleDispatchedTasksForRuntimes(ctx context.Context, ar
 	return items, nil
 }
 
-const recoverOrphanedTasksForRuntime = `-- name: RecoverOrphanedTasksForRuntime :many
-UPDATE agent_task_queue
-SET status = 'failed',
-    completed_at = now(),
-    error = 'daemon restarted while task was in flight',
-    failure_reason = 'runtime_recovery',
-    wait_reason = NULL,
-    prepare_lease_expires_at = NULL
-WHERE runtime_id = $1 AND status IN ('dispatched', 'running', 'waiting_local_directory')
-RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id
-`
-
-// Called by the daemon at startup. Atomically fails any dispatched/running/
-// waiting_local_directory task that the prior incarnation of this runtime
-// owned but did not finalize. Returns the failed rows so callers can hand
-// them to the auto-retry path. waiting_local_directory rows are included
-// because the daemon holding the path lock is the same process that just
-// died — without us, the row would sit waiting forever.
-func (q *Queries) RecoverOrphanedTasksForRuntime(ctx context.Context, runtimeID pgtype.UUID) ([]AgentTaskQueue, error) {
-	rows, err := q.db.Query(ctx, recoverOrphanedTasksForRuntime, runtimeID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []AgentTaskQueue{}
-	for rows.Next() {
-		var i AgentTaskQueue
-		if err := rows.Scan(
-			&i.ID,
-			&i.AgentID,
-			&i.IssueID,
-			&i.Status,
-			&i.Priority,
-			&i.DispatchedAt,
-			&i.StartedAt,
-			&i.CompletedAt,
-			&i.Result,
-			&i.Error,
-			&i.CreatedAt,
-			&i.Context,
-			&i.RuntimeID,
-			&i.SessionID,
-			&i.WorkDir,
-			&i.TriggerCommentID,
-			&i.ChatSessionID,
-			&i.AutopilotRunID,
-			&i.Attempt,
-			&i.MaxAttempts,
-			&i.ParentTaskID,
-			&i.FailureReason,
-			&i.TriggerSummary,
-			&i.ForceFreshSession,
-			&i.IsLeaderTask,
-			&i.WaitReason,
-			&i.InitiatorUserID,
-			&i.HandoffNote,
-			&i.PrepareLeaseExpiresAt,
-			&i.SquadID,
-			&i.RuntimeMcpOverlay,
-			&i.EscalationForTaskID,
-			&i.FireAt,
-			&i.OriginatorUserID,
-			&i.RuntimeConnectedApps,
-			&i.CoalescedCommentIds,
-			&i.DeliveredCommentIds,
-			&i.ChatInputTaskID,
-			&i.ChatFinalizeDeferredAt,
-			&i.OriginatorSource,
-			&i.DelegatedFromTaskID,
-			&i.RetryOfTaskID,
-			&i.RerunOfTaskID,
-			&i.RuleVersionID,
-			&i.TriggerEvidenceKind,
-			&i.TriggerEvidenceRefID,
-			&i.AccountableUserID,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const refreshAgentStatusFromTasks = `-- name: RefreshAgentStatusFromTasks :one
 UPDATE agent AS a
 SET status = CASE WHEN EXISTS (
@@ -4704,6 +4462,337 @@ func (q *Queries) RestoreAgent(ctx context.Context, id pgtype.UUID) (Agent, erro
 		&i.SystemKey,
 	)
 	return i, err
+}
+
+const selectExpiredQueuedTasks = `-- name: SelectExpiredQueuedTasks :many
+SELECT id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id FROM agent_task_queue
+WHERE status = 'queued'
+  AND created_at < now() - make_interval(secs => $1::double precision)
+ORDER BY created_at ASC
+LIMIT $2::int
+FOR UPDATE SKIP LOCKED
+`
+
+type SelectExpiredQueuedTasksParams struct {
+	TtlSecs    float64 `json:"ttl_secs"`
+	MaxPerTick int32   `json:"max_per_tick"`
+}
+
+// Selects (and row-locks) up to @max_per_tick tasks sitting in 'queued' past the
+// TTL — the cleanup arm of the MUL-1899 "queued backlog" fix (drains the
+// historical 87k+ doomed rows and catches the case where a runtime goes offline
+// AFTER a task is already queued).
+//
+// Candidate half of the MUL-4332 poison-isolated fail path (review point 2): the
+// caller resolves each task's workspace, fails only the resolvable set via
+// FailAgentTasksByIDs and emits its task.failed event in the SAME transaction.
+// FOR UPDATE SKIP LOCKED skips rows a daemon is currently claiming, so we never
+// contend with the dispatch path or clobber an in-flight task; because the fail
+// runs in this same transaction the locked rows cannot transition out of 'queued'
+// underneath us. The LIMIT bounds the lock hold; the rest drain on later ticks.
+func (q *Queries) SelectExpiredQueuedTasks(ctx context.Context, arg SelectExpiredQueuedTasksParams) ([]AgentTaskQueue, error) {
+	rows, err := q.db.Query(ctx, selectExpiredQueuedTasks, arg.TtlSecs, arg.MaxPerTick)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AgentTaskQueue{}
+	for rows.Next() {
+		var i AgentTaskQueue
+		if err := rows.Scan(
+			&i.ID,
+			&i.AgentID,
+			&i.IssueID,
+			&i.Status,
+			&i.Priority,
+			&i.DispatchedAt,
+			&i.StartedAt,
+			&i.CompletedAt,
+			&i.Result,
+			&i.Error,
+			&i.CreatedAt,
+			&i.Context,
+			&i.RuntimeID,
+			&i.SessionID,
+			&i.WorkDir,
+			&i.TriggerCommentID,
+			&i.ChatSessionID,
+			&i.AutopilotRunID,
+			&i.Attempt,
+			&i.MaxAttempts,
+			&i.ParentTaskID,
+			&i.FailureReason,
+			&i.TriggerSummary,
+			&i.ForceFreshSession,
+			&i.IsLeaderTask,
+			&i.WaitReason,
+			&i.InitiatorUserID,
+			&i.HandoffNote,
+			&i.PrepareLeaseExpiresAt,
+			&i.SquadID,
+			&i.RuntimeMcpOverlay,
+			&i.EscalationForTaskID,
+			&i.FireAt,
+			&i.OriginatorUserID,
+			&i.RuntimeConnectedApps,
+			&i.CoalescedCommentIds,
+			&i.DeliveredCommentIds,
+			&i.ChatInputTaskID,
+			&i.ChatFinalizeDeferredAt,
+			&i.OriginatorSource,
+			&i.DelegatedFromTaskID,
+			&i.RetryOfTaskID,
+			&i.RerunOfTaskID,
+			&i.RuleVersionID,
+			&i.TriggerEvidenceKind,
+			&i.TriggerEvidenceRefID,
+			&i.AccountableUserID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const selectOrphanedTasksForRuntime = `-- name: SelectOrphanedTasksForRuntime :many
+SELECT id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id FROM agent_task_queue
+WHERE runtime_id = $1 AND status IN ('dispatched', 'running', 'waiting_local_directory')
+ORDER BY created_at ASC
+LIMIT $2::int
+FOR UPDATE SKIP LOCKED
+`
+
+type SelectOrphanedTasksForRuntimeParams struct {
+	RuntimeID  pgtype.UUID `json:"runtime_id"`
+	MaxPerTick int32       `json:"max_per_tick"`
+}
+
+// Called by the daemon at startup. Selects (and row-locks) up to @max_per_tick
+// dispatched/running/waiting_local_directory tasks that the prior incarnation of
+// this runtime owned but did not finalize. waiting_local_directory rows are
+// included because the daemon holding the path lock is the same process that
+// just died — without us, the row would sit waiting forever.
+//
+// Candidate half of the MUL-4332 poison-isolated fail path (review point 2): the
+// caller resolves each task's workspace, fails only the resolvable set via
+// FailAgentTasksByIDs and emits its task.failed event in the SAME transaction.
+// FOR UPDATE SKIP LOCKED avoids contending with the freshly-restarted daemon's
+// own claim path; the LIMIT bounds the lock hold.
+func (q *Queries) SelectOrphanedTasksForRuntime(ctx context.Context, arg SelectOrphanedTasksForRuntimeParams) ([]AgentTaskQueue, error) {
+	rows, err := q.db.Query(ctx, selectOrphanedTasksForRuntime, arg.RuntimeID, arg.MaxPerTick)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AgentTaskQueue{}
+	for rows.Next() {
+		var i AgentTaskQueue
+		if err := rows.Scan(
+			&i.ID,
+			&i.AgentID,
+			&i.IssueID,
+			&i.Status,
+			&i.Priority,
+			&i.DispatchedAt,
+			&i.StartedAt,
+			&i.CompletedAt,
+			&i.Result,
+			&i.Error,
+			&i.CreatedAt,
+			&i.Context,
+			&i.RuntimeID,
+			&i.SessionID,
+			&i.WorkDir,
+			&i.TriggerCommentID,
+			&i.ChatSessionID,
+			&i.AutopilotRunID,
+			&i.Attempt,
+			&i.MaxAttempts,
+			&i.ParentTaskID,
+			&i.FailureReason,
+			&i.TriggerSummary,
+			&i.ForceFreshSession,
+			&i.IsLeaderTask,
+			&i.WaitReason,
+			&i.InitiatorUserID,
+			&i.HandoffNote,
+			&i.PrepareLeaseExpiresAt,
+			&i.SquadID,
+			&i.RuntimeMcpOverlay,
+			&i.EscalationForTaskID,
+			&i.FireAt,
+			&i.OriginatorUserID,
+			&i.RuntimeConnectedApps,
+			&i.CoalescedCommentIds,
+			&i.DeliveredCommentIds,
+			&i.ChatInputTaskID,
+			&i.ChatFinalizeDeferredAt,
+			&i.OriginatorSource,
+			&i.DelegatedFromTaskID,
+			&i.RetryOfTaskID,
+			&i.RerunOfTaskID,
+			&i.RuleVersionID,
+			&i.TriggerEvidenceKind,
+			&i.TriggerEvidenceRefID,
+			&i.AccountableUserID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const selectStaleTasksToFail = `-- name: SelectStaleTasksToFail :many
+SELECT id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id FROM agent_task_queue
+WHERE (
+    status = 'dispatched'
+    AND dispatched_at < now() - make_interval(secs => $1::double precision)
+    AND (prepare_lease_expires_at IS NULL OR prepare_lease_expires_at < now())
+  )
+   OR (
+    status = 'running'
+    AND started_at < now() - make_interval(secs => $2::double precision)
+    AND NOT EXISTS (
+      SELECT 1 FROM agent_runtime r
+      WHERE r.id = agent_task_queue.runtime_id
+        AND r.status = 'online'
+        AND r.last_seen_at >= now() - make_interval(secs => $3::double precision)
+    )
+  )
+ORDER BY started_at ASC NULLS FIRST, dispatched_at ASC NULLS FIRST
+LIMIT $4::int
+FOR UPDATE SKIP LOCKED
+`
+
+type SelectStaleTasksToFailParams struct {
+	DispatchTimeoutSecs float64 `json:"dispatch_timeout_secs"`
+	RunningTimeoutSecs  float64 `json:"running_timeout_secs"`
+	RuntimeStaleSecs    float64 `json:"runtime_stale_secs"`
+	MaxPerTick          int32   `json:"max_per_tick"`
+}
+
+// Selects (and row-locks) up to @max_per_tick tasks stuck in dispatched/running
+// beyond the given thresholds. Candidate half of the MUL-4332 poison-isolated
+// fail path (review point 2): the caller resolves each task's workspace, fails
+// only the resolvable set via FailAgentTasksByIDs and emits its task.failed event
+// in the SAME transaction. FOR UPDATE SKIP LOCKED keeps the backstop off rows a
+// daemon is actively claiming; the LIMIT bounds the lock hold.
+//
+// Each branch pairs a wall-clock deadline with a task-appropriate liveness
+// signal, so the sweeper only kills tasks whose owning daemon is no longer
+// proving it is alive:
+//
+//   - Dispatched: `prepare_lease_expires_at` is refreshed every 15s by the
+//     daemon between claim and StartTask (see startTaskPrepareLeaseExtender).
+//     A live lease excludes the row.
+//
+//   - Running: no per-task lease is renewed once StartTask fires, so we key
+//     off the daemon-wide heartbeat instead — `agent_runtime.last_seen_at`,
+//     which the daemon bumps every ~15s while it is up. A running task whose
+//     runtime is `online` AND whose `last_seen_at` is within
+//     @runtime_stale_secs is treated as alive and is NOT killed by this
+//     wall-clock backstop, even after `started_at` exceeds the running
+//     timeout. This is what lets healthy multi-hour research / training runs
+//     survive on self-hosted deployments (MUL-4107): the daemon side is
+//     bounded only by inactivity watchdogs (idle / per-tool), so the
+//     server-side wall clock must not shadow that with a coarser cap.
+//
+// The daemon-dead case is the primary responsibility of `sweepStaleRuntimes`
+// (which mixes DB `last_seen_at` with the Redis LivenessStore and fails
+// offline-runtime tasks via SelectTasksForOfflineRuntimes in the same tick).
+// The wall-clock branch
+// here is a defensive backstop for pathological cases where a runtime row
+// somehow retains status='online' with a stale DB heartbeat for longer than
+// the wall clock allows.
+//
+// runtime_id IS NULL: a running row with no runtime is by definition not
+// proving liveness, so the wall clock is allowed to fire — same shape as
+// the legacy pure-wall-clock behavior for that (rare / historical) case.
+//
+// waiting_local_directory rows are intentionally excluded: the daemon owns
+// the wait (with its own ctx-driven timeout) and a legitimate queue ahead
+// of this task can exceed the dispatch / running timeouts without being
+// "stuck". If the daemon dies, SelectOrphanedTasksForRuntime reclaims
+// those rows at restart.
+func (q *Queries) SelectStaleTasksToFail(ctx context.Context, arg SelectStaleTasksToFailParams) ([]AgentTaskQueue, error) {
+	rows, err := q.db.Query(ctx, selectStaleTasksToFail,
+		arg.DispatchTimeoutSecs,
+		arg.RunningTimeoutSecs,
+		arg.RuntimeStaleSecs,
+		arg.MaxPerTick,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AgentTaskQueue{}
+	for rows.Next() {
+		var i AgentTaskQueue
+		if err := rows.Scan(
+			&i.ID,
+			&i.AgentID,
+			&i.IssueID,
+			&i.Status,
+			&i.Priority,
+			&i.DispatchedAt,
+			&i.StartedAt,
+			&i.CompletedAt,
+			&i.Result,
+			&i.Error,
+			&i.CreatedAt,
+			&i.Context,
+			&i.RuntimeID,
+			&i.SessionID,
+			&i.WorkDir,
+			&i.TriggerCommentID,
+			&i.ChatSessionID,
+			&i.AutopilotRunID,
+			&i.Attempt,
+			&i.MaxAttempts,
+			&i.ParentTaskID,
+			&i.FailureReason,
+			&i.TriggerSummary,
+			&i.ForceFreshSession,
+			&i.IsLeaderTask,
+			&i.WaitReason,
+			&i.InitiatorUserID,
+			&i.HandoffNote,
+			&i.PrepareLeaseExpiresAt,
+			&i.SquadID,
+			&i.RuntimeMcpOverlay,
+			&i.EscalationForTaskID,
+			&i.FireAt,
+			&i.OriginatorUserID,
+			&i.RuntimeConnectedApps,
+			&i.CoalescedCommentIds,
+			&i.DeliveredCommentIds,
+			&i.ChatInputTaskID,
+			&i.ChatFinalizeDeferredAt,
+			&i.OriginatorSource,
+			&i.DelegatedFromTaskID,
+			&i.RetryOfTaskID,
+			&i.RerunOfTaskID,
+			&i.RuleVersionID,
+			&i.TriggerEvidenceKind,
+			&i.TriggerEvidenceRefID,
+			&i.AccountableUserID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const setTaskDeliveredCommentIDs = `-- name: SetTaskDeliveredCommentIDs :one

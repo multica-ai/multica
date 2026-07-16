@@ -362,14 +362,20 @@ SET first_executed_at = now()
 WHERE id = $1 AND first_executed_at IS NULL
 RETURNING id, workspace_id, creator_type, creator_id, first_executed_at;
 
--- name: LockIssueStatusForEvent :one
--- Row-locks an issue and returns its authoritative status + assignee for
--- domain-event emission (MUL-4332 review point 3). Callers read this INSIDE the
--- update transaction, immediately before UpdateIssue/UpdateIssueStatus, so the
--- event's `from` reflects the truly-current row rather than a snapshot read
--- outside the tx — two concurrent transitions then serialize on the lock and
--- each records the correct edge instead of both reporting the same stale `from`.
-SELECT status, assignee_type, assignee_id
-FROM issue
+-- name: LockIssueRowForUpdate :one
+-- Row-locks an issue and returns its full authoritative row for both a
+-- concurrency-safe update and domain-event emission (MUL-4332 review points 3 &
+-- 1). Callers read this INSIDE the update transaction, immediately before
+-- UpdateIssue/UpdateIssueStatus. Two purposes:
+--   1. The event's `from` (status/assignee) reflects the truly-current row
+--      rather than a pre-tx snapshot, so concurrent transitions serialize on
+--      the lock and each records the correct edge instead of a stale `from`.
+--   2. UpdateIssue writes the nullable columns (assignee, dates, parent,
+--      project, stage) as bare narg — an untouched field carries whatever the
+--      caller pre-filled. Pre-filling from a pre-tx snapshot lets a concurrent
+--      writer's change be silently rolled back; callers instead rebuild every
+--      untouched field from THIS locked row so an unrelated update never clobbers
+--      a field it did not intend to change.
+SELECT * FROM issue
 WHERE id = $1 AND workspace_id = $2
 FOR UPDATE;

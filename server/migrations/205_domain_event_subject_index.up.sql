@@ -1,4 +1,4 @@
--- Single-statement CONCURRENTLY migration (see 197). Backs "all events about
+-- Single-statement CONCURRENTLY migration (see 201). Backs "all events about
 -- this subject" scans (a given issue / comment / task) for debug + the future
 -- stage sensor:
 --   WHERE subject_type = $1 AND subject_id = $2 ORDER BY seq

@@ -1367,16 +1367,18 @@ func (h *Handler) advanceIssueToDone(ctx context.Context, issue db.Issue, worksp
 	// atomically with the status flip — but only on a real transition (an
 	// already-done issue produces no event).
 	var updated db.Issue
+	var before db.Issue
 	if err := domainevent.WriteInTx(ctx, h.TxStarter, h.Queries, func(qtx *db.Queries) ([]domainevent.Event, error) {
-		// Lock + read the authoritative status so the event `from` is correct
+		// Lock + read the authoritative row so the event `from` is correct
 		// even if another writer moved the issue concurrently (review point 3).
-		before, err := qtx.LockIssueStatusForEvent(ctx, db.LockIssueStatusForEventParams{
+		locked, err := qtx.LockIssueRowForUpdate(ctx, db.LockIssueRowForUpdateParams{
 			ID:          issue.ID,
 			WorkspaceID: issue.WorkspaceID,
 		})
 		if err != nil {
 			return nil, err
 		}
+		before = locked
 		u, err := qtx.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{
 			ID:          issue.ID,
 			Status:      "done",
@@ -1396,22 +1398,31 @@ func (h *Handler) advanceIssueToDone(ctx context.Context, issue db.Issue, worksp
 		return
 	}
 
+	// A merged PR can land for an issue that is already `done` — a duplicate
+	// webhook, or a concurrent path that won the race. The locked pre-image tells
+	// us whether THIS call actually transitioned it. On a no-op we already emitted
+	// no domain event; the parent notification and realtime status_changed must
+	// be suppressed on the SAME condition, else a no-op re-drives the child-done
+	// comment / trigger and a spurious "issue updated" (review point 4).
+	if before.Status == updated.Status {
+		return
+	}
+
 	// Fire the platform parent-notification path on the same transition the
-	// HTTP UpdateIssue / BatchUpdateIssues paths use. A merged PR is one of
-	// the most common ways a sub-issue actually reaches `done`, and skipping
-	// it here would leave the parent silent for the dominant completion path.
-	// notifyParentOfChildDone re-checks every guard (prev != done, parent
-	// exists, parent not terminal), so calling it unconditionally is safe.
-	h.notifyParentOfChildDone(ctx, issue, updated)
+	// HTTP UpdateIssue / BatchUpdateIssues paths use, driven by the locked
+	// pre-image. A merged PR is one of the most common ways a sub-issue actually
+	// reaches `done`. notifyParentOfChildDone re-checks every guard (prev != done,
+	// parent exists, parent not terminal).
+	h.notifyParentOfChildDone(ctx, before, updated)
 
 	prefix := h.getIssuePrefix(ctx, issue.WorkspaceID)
 	resp := issueToResponse(updated, prefix)
 	h.publish(protocol.EventIssueUpdated, workspaceID, "system", "", map[string]any{
 		"issue":          resp,
 		"status_changed": true,
-		"prev_status":    issue.Status,
-		"creator_type":   issue.CreatorType,
-		"creator_id":     uuidToString(issue.CreatorID),
+		"prev_status":    before.Status,
+		"creator_type":   before.CreatorType,
+		"creator_id":     uuidToString(before.CreatorID),
 		"source":         "github_pr_merged",
 	})
 }

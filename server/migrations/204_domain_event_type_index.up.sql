@@ -1,4 +1,4 @@
--- Single-statement CONCURRENTLY migration (see 197). Backs per-workspace,
+-- Single-statement CONCURRENTLY migration (see 201). Backs per-workspace,
 -- per-type event scans used by explain/debug tooling:
 --   WHERE workspace_id = $1 AND type = $2 ORDER BY seq
 CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_domain_event_type

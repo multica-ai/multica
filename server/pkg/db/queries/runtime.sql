@@ -226,19 +226,24 @@ WHERE status = 'online'
   AND last_seen_at < now() - make_interval(secs => @stale_seconds::double precision)
 RETURNING id, workspace_id, owner_id, daemon_id, provider;
 
--- name: FailTasksForOfflineRuntimes :many
--- Marks dispatched/running/waiting_local_directory tasks as failed when
--- their runtime is offline. This cleans up orphaned tasks after a daemon
--- crash or network partition.
-UPDATE agent_task_queue
-SET status = 'failed', completed_at = now(), error = 'runtime went offline',
-    failure_reason = 'runtime_offline',
-    wait_reason = NULL
+-- name: SelectTasksForOfflineRuntimes :many
+-- Selects (and row-locks) up to @max_per_tick dispatched/running/
+-- waiting_local_directory tasks whose runtime is offline — the orphans a daemon
+-- crash or network partition leaves behind. This is the candidate half of the
+-- MUL-4332 poison-isolated fail path (review point 2): the caller resolves each
+-- task's workspace, fails only the resolvable set via FailAgentTasksByIDs and
+-- emits its task.failed event in the SAME transaction, so an unresolvable poison
+-- row is skipped instead of rolling back the whole batch. FOR UPDATE SKIP LOCKED
+-- keeps the sweeper off rows a daemon is actively claiming; the LIMIT bounds the
+-- lock hold and the rest drain on later ticks.
+SELECT * FROM agent_task_queue
 WHERE status IN ('dispatched', 'running', 'waiting_local_directory')
   AND runtime_id IN (
     SELECT id FROM agent_runtime WHERE status = 'offline'
   )
-RETURNING *;
+ORDER BY created_at ASC
+LIMIT @max_per_tick::int
+FOR UPDATE SKIP LOCKED;
 
 -- name: ListAgentRuntimesByOwner :many
 SELECT * FROM agent_runtime

@@ -2682,6 +2682,14 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	// Which of the remaining bare-narg columns this request actually targeted.
+	// An untouched one is rebuilt from the locked row inside the tx (review
+	// point 1) so a concurrent writer's change is never silently rolled back.
+	_, touchedStartDate := rawFields["start_date"]
+	_, touchedDueDate := rawFields["due_date"]
+	_, touchedParent := rawFields["parent_issue_id"]
+	_, touchedProject := rawFields["project_id"]
+	_, touchedStage := rawFields["stage"]
 
 	attachmentIDs, ok := parseUUIDSliceOrBadRequest(w, req.AttachmentIDs, "attachment_ids")
 	if !ok {
@@ -2696,18 +2704,46 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 
 	// Transactional outbox (MUL-4332): commit the issue update and any derived
 	// status_changed / assigned event in one transaction, so a crash can never
-	// separate the fact from its event. The event `from` is read under a row
-	// lock INSIDE the tx (not from the pre-tx prevIssue snapshot), so concurrent
-	// transitions serialize and each records the true edge (review point 3).
+	// separate the fact from its event. The pre-image is read under a row lock
+	// INSIDE the tx (not from the pre-tx prevIssue snapshot), so concurrent
+	// transitions serialize and each records the true edge (review point 3), and
+	// every untouched nullable column is rebuilt from it (review point 1).
 	var issue db.Issue
+	var before db.Issue
 	err = domainevent.WriteInTx(r.Context(), h.TxStarter, h.Queries, func(qtx *db.Queries) ([]domainevent.Event, error) {
-		before, err := qtx.LockIssueStatusForEvent(r.Context(), db.LockIssueStatusForEventParams{
+		locked, err := qtx.LockIssueRowForUpdate(r.Context(), db.LockIssueRowForUpdateParams{
 			ID:          prevIssue.ID,
 			WorkspaceID: prevIssue.WorkspaceID,
 		})
 		if err != nil {
 			return nil, err
 		}
+		before = locked
+
+		// Rebuild every bare-narg column this request did NOT target from the
+		// locked row, so an unrelated update never clobbers a field a concurrent
+		// writer just changed (review point 1). assignee_type/id move together
+		// because validateAssigneePair validated them as a pair above.
+		if !touchedType && !touchedID {
+			params.AssigneeType = before.AssigneeType
+			params.AssigneeID = before.AssigneeID
+		}
+		if !touchedStartDate {
+			params.StartDate = before.StartDate
+		}
+		if !touchedDueDate {
+			params.DueDate = before.DueDate
+		}
+		if !touchedParent {
+			params.ParentIssueID = before.ParentIssueID
+		}
+		if !touchedProject {
+			params.ProjectID = before.ProjectID
+		}
+		if !touchedStage {
+			params.Stage = before.Stage
+		}
+
 		updated, err := qtx.UpdateIssue(r.Context(), params)
 		if err != nil {
 			return nil, err
@@ -2739,6 +2775,12 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to update issue: "+err.Error())
 		return
 	}
+	// The locked pre-image is the authoritative prev-state: drive every
+	// post-commit side effect (realtime publish, enqueue predicate, parent
+	// notify) from the transition that TRULY happened rather than the pre-tx
+	// snapshot, which a concurrent writer may have already superseded (review
+	// point 4).
+	prevIssue = before
 
 	if len(attachmentIDs) > 0 {
 		h.linkAttachmentsByIssueIDs(r.Context(), issue.ID, issue.WorkspaceID, attachmentIDs)
@@ -3273,6 +3315,13 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 		}
+		// Untouched bare-narg columns are rebuilt from the locked row inside the
+		// tx (review point 1) so an unrelated field is never rolled back.
+		_, batchTouchedStartDate := rawUpdates["start_date"]
+		_, batchTouchedDueDate := rawUpdates["due_date"]
+		_, batchTouchedParent := rawUpdates["parent_issue_id"]
+		_, batchTouchedProject := rawUpdates["project_id"]
+		_, batchTouchedStage := rawUpdates["stage"]
 
 		actorType, actorID := h.resolveActor(r, userID, workspaceID)
 		batchActorUUID, _ := util.ParseUUID(actorID)
@@ -3283,14 +3332,40 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 		// is read under a row lock inside the tx so concurrent transitions record
 		// the true edge (review point 3).
 		var issue db.Issue
+		var before db.Issue
 		if writeErr := domainevent.WriteInTx(r.Context(), h.TxStarter, h.Queries, func(qtx *db.Queries) ([]domainevent.Event, error) {
-			before, err := qtx.LockIssueStatusForEvent(r.Context(), db.LockIssueStatusForEventParams{
+			locked, err := qtx.LockIssueRowForUpdate(r.Context(), db.LockIssueRowForUpdateParams{
 				ID:          prevIssue.ID,
 				WorkspaceID: prevIssue.WorkspaceID,
 			})
 			if err != nil {
 				return nil, err
 			}
+			before = locked
+
+			// Rebuild every untouched bare-narg column from the locked row so a
+			// concurrent writer's change is never silently rolled back (review
+			// point 1). See UpdateIssue for the assignee-pair rationale.
+			if !batchTouchedType && !batchTouchedID {
+				params.AssigneeType = before.AssigneeType
+				params.AssigneeID = before.AssigneeID
+			}
+			if !batchTouchedStartDate {
+				params.StartDate = before.StartDate
+			}
+			if !batchTouchedDueDate {
+				params.DueDate = before.DueDate
+			}
+			if !batchTouchedParent {
+				params.ParentIssueID = before.ParentIssueID
+			}
+			if !batchTouchedProject {
+				params.ProjectID = before.ProjectID
+			}
+			if !batchTouchedStage {
+				params.Stage = before.Stage
+			}
+
 			updatedIssue, err := qtx.UpdateIssue(r.Context(), params)
 			if err != nil {
 				return nil, err
@@ -3316,6 +3391,9 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 			slog.Warn("batch update issue failed", "issue_id", issueID, "error", writeErr)
 			continue
 		}
+		// Drive every post-commit side effect from the locked pre-image, the
+		// transition that truly happened, not the pre-tx snapshot (review point 4).
+		prevIssue = before
 
 		prefix := h.getIssuePrefix(r.Context(), issue.WorkspaceID)
 		resp := issueToResponse(issue, prefix)

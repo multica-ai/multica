@@ -166,8 +166,14 @@ func (TaskCompletedPayload) eventType() string    { return TypeTaskCompleted }
 func (TaskCompletedPayload) subjectType() string  { return SubjectTask }
 func (TaskCompletedPayload) schemaVersion() int32 { return 1 }
 
-// TaskFailedPayload — subject is the task. Retryable distinguishes a terminal
-// failure from one that spawned an auto-retry child.
+// TaskFailedPayload — subject is the task. Retryable reports whether this failure
+// is eligible for an automatic retry (an infra-shaped reason still within the
+// attempt budget). The single FailTask path creates the retry child in the SAME
+// transaction, so there it is exact; the bulk sweeper paths create it immediately
+// after commit, so there it means "a retry is expected" — both derive it from the
+// shared retryEligible predicate so the event never contradicts the actual retry
+// decision. A consumer should read retryable=true as "not yet terminal, a fresh
+// attempt is coming" rather than reacting to the failure.
 type TaskFailedPayload struct {
 	IssueID   string `json:"issue_id,omitempty"`
 	AgentID   string `json:"agent_id,omitempty"`

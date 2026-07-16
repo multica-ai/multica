@@ -3471,17 +3471,33 @@ func (s *TaskService) HandleFailedTasks(ctx context.Context, tasks []db.AgentTas
 						)
 					} else if !hasActive {
 						var updatedIssue db.Issue
+						var didReset bool
 						// Transactional outbox (MUL-4332): the stuck-issue reset bypasses the
 						// HTTP UpdateIssue path, so emit issue.status_changed atomically here.
 						updateErr := domainevent.WriteInTx(ctx, s.TxStarter, s.Queries, func(qtx *db.Queries) ([]domainevent.Event, error) {
-							// Lock + read the true current status inside the tx so the event
-							// `from` is correct under concurrent transitions (review point 3).
-							before, bErr := qtx.LockIssueStatusForEvent(ctx, db.LockIssueStatusForEventParams{
+							// Re-decide the reset UNDER the row lock (review point 4). The
+							// in_progress + no-active-task check that gated this branch was read
+							// outside the tx, so within the window a user could have moved the
+							// issue to done, or a fresh task could have been claimed. Only a
+							// still-in_progress issue with still no active task is reset — a
+							// user-completed issue must never be silently reopened. `from` then
+							// always reflects the true edge (also review point 3).
+							before, bErr := qtx.LockIssueRowForUpdate(ctx, db.LockIssueRowForUpdateParams{
 								ID:          t.IssueID,
 								WorkspaceID: issue.WorkspaceID,
 							})
 							if bErr != nil {
 								return nil, bErr
+							}
+							if before.Status != "in_progress" {
+								return nil, nil
+							}
+							stillActive, aErr := qtx.HasActiveTaskForIssue(ctx, t.IssueID)
+							if aErr != nil {
+								return nil, aErr
+							}
+							if stillActive {
+								return nil, nil
 							}
 							u, uErr := qtx.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{
 								ID:          t.IssueID,
@@ -3492,9 +3508,7 @@ func (s *TaskService) HandleFailedTasks(ctx context.Context, tasks []db.AgentTas
 								return nil, uErr
 							}
 							updatedIssue = u
-							if before.Status == u.Status {
-								return nil, nil
-							}
+							didReset = true
 							return []domainevent.Event{domainevent.IssueStatusChanged(u.WorkspaceID, u.ID, domainevent.SystemActor(),
 								domainevent.IssueStatusChangedPayload{From: before.Status, To: u.Status})}, nil
 						})
@@ -3503,13 +3517,14 @@ func (s *TaskService) HandleFailedTasks(ctx context.Context, tasks []db.AgentTas
 								"issue_id", issueKey,
 								"error", updateErr,
 							)
-						} else {
+						} else if didReset {
 							// This direct reset bypasses the HTTP UpdateIssue
 							// handler that normally emits issue:updated, so emit
 							// it here too. Without it the board / status-filter
 							// caches keep showing the issue as in_progress until
-							// the next write touches it (#4648 / MUL-3782).
-							s.broadcastIssueUpdated(updatedIssue, issue.Status)
+							// the next write touches it (#4648 / MUL-3782). The reset
+							// only fires from in_progress, so that is the true prev.
+							s.broadcastIssueUpdated(updatedIssue, "in_progress")
 						}
 					}
 				}
@@ -3587,16 +3602,37 @@ func (s *TaskService) resolveTaskWorkspaceForEvent(ctx context.Context, qtx *db.
 	return pgtype.UUID{}
 }
 
-// FailTasksInTxWithEvents runs a bulk-fail query inside a transaction and emits
-// a task.failed domain event for each returned task atomically with the bulk
-// UPDATE (MUL-4332 review point 2). The runtime sweepers and daemon
-// orphan-recovery all funnel through this, so no bulk terminal path commits a
-// fail without its event. It is all-or-nothing per batch: an event-write or
-// workspace-resolution failure rolls the whole sweep back, and the next tick
-// retries idempotently (the bulk-fail queries only re-match tasks still in a
-// non-terminal status). Any auto-retry child is a separate downstream write, so
-// the emitted event is marked non-retryable.
-func (s *TaskService) FailTasksInTxWithEvents(ctx context.Context, bulk func(qtx *db.Queries) ([]db.AgentTaskQueue, error)) ([]db.AgentTaskQueue, error) {
+// FailBulkTasksWithEvents is the poison-isolated bulk fail path (MUL-4332 review
+// points 2 & 3). Rather than one condition-scoped UPDATE that fails every match
+// in a single statement — where one corrupt row rolls back the whole batch and
+// an unbounded match can lock a huge span — it runs, in ONE transaction:
+//
+//  1. selectFn row-locks a BOUNDED candidate batch (FOR UPDATE SKIP LOCKED +
+//     LIMIT), so the lock hold is short and we never contend with a daemon's
+//     claim path;
+//  2. each candidate's workspace is resolved on the same tx. A task whose
+//     workspace is genuinely unresolvable (corrupt / orphaned historical row)
+//     is EXCLUDED and logged — it can never have a valid event, so failing it
+//     would strand a fact without one; skipping it fail-closed keeps the healthy
+//     tasks in the batch unblocked (review point 2);
+//  3. failFn fails only the resolvable id set;
+//  4. one task.failed event is written per failed row, atomically with the fail.
+//
+// The actor is the platform (SystemActor): these are sweeper / orphan-recovery
+// paths, not an agent action — the agent is already carried in the payload
+// (review point 3). retryable is computed with the SAME retryEligible predicate
+// HandleFailedTasks uses to decide the post-commit auto-retry, so the event and
+// the retry decision agree instead of the event hard-coding false while a retry
+// child appears anyway.
+//
+// A transient event/commit failure rolls back only the CURRENT batch (no fact is
+// ever committed without its event), so the next sweep tick simply re-selects and
+// retries — every caller runs on a fixed cadence.
+func (s *TaskService) FailBulkTasksWithEvents(
+	ctx context.Context,
+	selectFn func(qtx *db.Queries) ([]db.AgentTaskQueue, error),
+	failFn func(qtx *db.Queries, ids []pgtype.UUID) ([]db.AgentTaskQueue, error),
+) ([]db.AgentTaskQueue, error) {
 	tx, err := s.TxStarter.Begin(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("begin tx: %w", err)
@@ -3604,24 +3640,61 @@ func (s *TaskService) FailTasksInTxWithEvents(ctx context.Context, bulk func(qtx
 	defer tx.Rollback(ctx)
 	qtx := s.Queries.WithTx(tx)
 
-	failed, err := bulk(qtx)
+	candidates, err := selectFn(qtx)
+	if err != nil {
+		return nil, err
+	}
+	if len(candidates) == 0 {
+		if err := tx.Commit(ctx); err != nil {
+			return nil, fmt.Errorf("commit tx: %w", err)
+		}
+		return nil, nil
+	}
+
+	ids := make([]pgtype.UUID, 0, len(candidates))
+	wsByID := make(map[string]pgtype.UUID, len(candidates))
+	for _, t := range candidates {
+		wsID := s.resolveTaskWorkspaceForEvent(ctx, qtx, t)
+		if !wsID.Valid {
+			// Fail-closed but ISOLATED: a task with no resolvable workspace can
+			// have no valid event, so skip it (leaving it for ops to reap) instead
+			// of aborting the batch and stranding every healthy task with it.
+			slog.Warn("bulk fail: skipping task with unresolvable workspace",
+				"task_id", util.UUIDToString(t.ID),
+				"agent_id", util.UUIDToString(t.AgentID))
+			continue
+		}
+		ids = append(ids, t.ID)
+		wsByID[util.UUIDToString(t.ID)] = wsID
+	}
+	if len(ids) == 0 {
+		if err := tx.Commit(ctx); err != nil {
+			return nil, fmt.Errorf("commit tx: %w", err)
+		}
+		return nil, nil
+	}
+
+	failed, err := failFn(qtx, ids)
 	if err != nil {
 		return nil, err
 	}
 	for _, t := range failed {
-		wsID := s.resolveTaskWorkspaceForEvent(ctx, qtx, t)
-		if !wsID.Valid {
-			return nil, fmt.Errorf("task.failed event: unresolvable workspace for task %s", util.UUIDToString(t.ID))
+		wsID, ok := wsByID[util.UUIDToString(t.ID)]
+		if !ok || !wsID.Valid {
+			// Defensive: failFn returned a row we never resolved. Impossible in one
+			// tx (ids came from wsByID), but fail-closed rather than emit an event
+			// with no workspace.
+			return nil, fmt.Errorf("task.failed event: unresolved workspace for task %s", util.UUIDToString(t.ID))
 		}
 		reason := ""
 		if t.FailureReason.Valid {
 			reason = t.FailureReason.String
 		}
-		evt := domainevent.TaskFailed(wsID, t.ID, domainevent.AgentActor(t.AgentID),
+		evt := domainevent.TaskFailed(wsID, t.ID, domainevent.SystemActor(),
 			domainevent.TaskFailedPayload{
 				IssueID:   util.UUIDToString(t.IssueID),
 				AgentID:   util.UUIDToString(t.AgentID),
-				Retryable: false,
+				Retryable: retryEligible(reason, t),
 				ErrorCode: reason,
 			})
 		if _, err := domainevent.Write(ctx, qtx, evt); err != nil {
