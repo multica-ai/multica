@@ -1,0 +1,134 @@
+package issuestatus
+
+import (
+	"context"
+	"testing"
+
+	"github.com/jackc/pgx/v5/pgtype"
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
+)
+
+// These tests pin the Phase 2 double-write (MUL-4809): every issue write path
+// that sets the legacy status token must also populate the authoritative
+// issue.status_id from the built-in status with the matching system_key.
+
+func newUUID(ctx context.Context, t *testing.T) pgtype.UUID {
+	t.Helper()
+	var id pgtype.UUID
+	if err := testPool.QueryRow(ctx, "SELECT gen_random_uuid()").Scan(&id); err != nil {
+		t.Fatalf("generate uuid: %v", err)
+	}
+	return id
+}
+
+func builtinStatusID(ctx context.Context, t *testing.T, q *db.Queries, wsID pgtype.UUID, systemKey string) pgtype.UUID {
+	t.Helper()
+	statuses, err := q.ListWorkspaceIssueStatuses(ctx, db.ListWorkspaceIssueStatusesParams{WorkspaceID: wsID})
+	if err != nil {
+		t.Fatalf("list statuses: %v", err)
+	}
+	for _, s := range statuses {
+		if s.SystemKey.Valid && s.SystemKey.String == systemKey {
+			return s.ID
+		}
+	}
+	t.Fatalf("no built-in status with system_key %q", systemKey)
+	return pgtype.UUID{}
+}
+
+func createTestIssue(ctx context.Context, t *testing.T, q *db.Queries, wsID pgtype.UUID, status string) db.Issue {
+	t.Helper()
+	iss, err := q.CreateIssue(ctx, db.CreateIssueParams{
+		WorkspaceID: wsID,
+		Title:       "double-write-test",
+		Status:      status,
+		Priority:    "none",
+		CreatorType: "member",
+		CreatorID:   newUUID(ctx, t),
+		Number:      1,
+	})
+	if err != nil {
+		t.Fatalf("create issue: %v", err)
+	}
+	return iss
+}
+
+func TestCreateIssueDoubleWritesStatusID(t *testing.T) {
+	ctx := context.Background()
+	q := db.New(testPool)
+	wsID, _ := seededWorkspace(ctx, t)
+
+	iss := createTestIssue(ctx, t, q, wsID, "in_progress")
+
+	want := builtinStatusID(ctx, t, q, wsID, "in_progress")
+	if !iss.StatusID.Valid || iss.StatusID != want {
+		t.Fatalf("CreateIssue did not double-write status_id: got %v, want %v", iss.StatusID, want)
+	}
+}
+
+func TestUpdateIssueStatusDoubleWritesStatusID(t *testing.T) {
+	ctx := context.Background()
+	q := db.New(testPool)
+	wsID, _ := seededWorkspace(ctx, t)
+	iss := createTestIssue(ctx, t, q, wsID, "todo")
+
+	updated, err := q.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{
+		ID: iss.ID, Status: "done", WorkspaceID: wsID,
+	})
+	if err != nil {
+		t.Fatalf("update status: %v", err)
+	}
+	want := builtinStatusID(ctx, t, q, wsID, "done")
+	if !updated.StatusID.Valid || updated.StatusID != want {
+		t.Fatalf("UpdateIssueStatus did not re-derive status_id: got %v, want %v", updated.StatusID, want)
+	}
+}
+
+func TestUpdateIssueReDerivesStatusIDOnlyOnStatusChange(t *testing.T) {
+	ctx := context.Background()
+	q := db.New(testPool)
+	wsID, _ := seededWorkspace(ctx, t)
+	iss := createTestIssue(ctx, t, q, wsID, "todo")
+
+	// Changing status re-derives status_id.
+	changed, err := q.UpdateIssue(ctx, db.UpdateIssueParams{
+		ID:     iss.ID,
+		Status: pgtype.Text{String: "done", Valid: true},
+	})
+	if err != nil {
+		t.Fatalf("update (status change): %v", err)
+	}
+	wantDone := builtinStatusID(ctx, t, q, wsID, "done")
+	if changed.StatusID != wantDone {
+		t.Fatalf("status change: got status_id %v, want %v", changed.StatusID, wantDone)
+	}
+
+	// A title-only update (status narg NULL) must leave status_id untouched.
+	titleOnly, err := q.UpdateIssue(ctx, db.UpdateIssueParams{
+		ID:    iss.ID,
+		Title: pgtype.Text{String: "renamed", Valid: true},
+	})
+	if err != nil {
+		t.Fatalf("update (title only): %v", err)
+	}
+	if titleOnly.StatusID != wantDone {
+		t.Fatalf("title-only update changed status_id: got %v, want unchanged %v", titleOnly.StatusID, wantDone)
+	}
+}
+
+// TestCreateIssueUnseededWorkspaceLeavesStatusIDNull covers the rolling-deploy
+// window: before the workspace catalog is seeded, the derivation subquery
+// returns no row and status_id stays NULL while status remains authoritative.
+func TestCreateIssueUnseededWorkspaceLeavesStatusIDNull(t *testing.T) {
+	ctx := context.Background()
+	q := db.New(testPool)
+	wsID := freshWorkspace(ctx, t) // deliberately NOT seeded
+
+	iss := createTestIssue(ctx, t, q, wsID, "todo")
+	if iss.StatusID.Valid {
+		t.Fatalf("unseeded workspace: status_id should be NULL, got %v", iss.StatusID)
+	}
+	if iss.Status != "todo" {
+		t.Fatalf("unseeded workspace: legacy status must still be written, got %q", iss.Status)
+	}
+}

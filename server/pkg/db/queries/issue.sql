@@ -74,10 +74,15 @@ INSERT INTO issue (
     workspace_id, title, description, status, priority,
     assignee_type, assignee_id, creator_type, creator_id,
     parent_issue_id, position, start_date, due_date, number, project_id,
-    stage
+    stage, status_id
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
-    sqlc.narg('stage')
+    sqlc.narg('stage'),
+    -- Phase 2 double-write (MUL-4809): mirror the legacy status token into the
+    -- authoritative status_id via its built-in system_key. Stays NULL until the
+    -- workspace catalog is seeded (rolling deploy), where status remains the
+    -- source of truth.
+    (SELECT issue_status.id FROM issue_status WHERE issue_status.workspace_id = $1 AND system_key = $4)
 ) RETURNING *;
 
 -- name: GetIssueByNumber :one
@@ -89,6 +94,13 @@ UPDATE issue SET
     title = COALESCE(sqlc.narg('title'), title),
     description = COALESCE(sqlc.narg('description'), description),
     status = COALESCE(sqlc.narg('status'), status),
+    -- Phase 2 double-write (MUL-4809): re-derive status_id only when status is
+    -- being changed, keyed on the built-in system_key; otherwise leave it.
+    status_id = CASE
+        WHEN sqlc.narg('status')::text IS NOT NULL
+        THEN (SELECT issue_status.id FROM issue_status WHERE issue_status.workspace_id = issue.workspace_id AND system_key = sqlc.narg('status'))
+        ELSE status_id
+    END,
     priority = COALESCE(sqlc.narg('priority'), priority),
     assignee_type = sqlc.narg('assignee_type'),
     assignee_id = sqlc.narg('assignee_id'),
@@ -99,15 +111,18 @@ UPDATE issue SET
     project_id = sqlc.narg('project_id'),
     stage = sqlc.narg('stage'),
     updated_at = now()
-WHERE id = $1
+WHERE issue.id = $1
 RETURNING *;
 
 -- name: UpdateIssueStatus :one
 -- Workspace_id in the WHERE clause is a SQL-layer tenant guard; see DeleteIssue.
 UPDATE issue SET
     status = $2,
+    -- Phase 2 double-write (MUL-4809): mirror the legacy status into status_id
+    -- via its built-in system_key (scoped to the same workspace guard).
+    status_id = (SELECT issue_status.id FROM issue_status WHERE issue_status.workspace_id = $3 AND system_key = $2),
     updated_at = now()
-WHERE id = $1 AND workspace_id = $3
+WHERE issue.id = $1 AND issue.workspace_id = $3
 RETURNING *;
 
 -- name: CreateIssueWithOrigin :one
@@ -115,10 +130,12 @@ INSERT INTO issue (
     workspace_id, title, description, status, priority,
     assignee_type, assignee_id, creator_type, creator_id,
     parent_issue_id, position, start_date, due_date, number, project_id,
-    origin_type, origin_id, stage
+    origin_type, origin_id, stage, status_id
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
-    sqlc.narg('origin_type'), sqlc.narg('origin_id'), sqlc.narg('stage')
+    sqlc.narg('origin_type'), sqlc.narg('origin_id'), sqlc.narg('stage'),
+    -- Phase 2 double-write (MUL-4809): see CreateIssue.
+    (SELECT issue_status.id FROM issue_status WHERE issue_status.workspace_id = $1 AND system_key = $4)
 ) RETURNING *;
 
 -- name: LockIssueDuplicateKey :exec

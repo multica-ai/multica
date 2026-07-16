@@ -175,10 +175,15 @@ INSERT INTO issue (
     workspace_id, title, description, status, priority,
     assignee_type, assignee_id, creator_type, creator_id,
     parent_issue_id, position, start_date, due_date, number, project_id,
-    stage
+    stage, status_id
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
-    $16
+    $16,
+    -- Phase 2 double-write (MUL-4809): mirror the legacy status token into the
+    -- authoritative status_id via its built-in system_key. Stays NULL until the
+    -- workspace catalog is seeded (rolling deploy), where status remains the
+    -- source of truth.
+    (SELECT issue_status.id FROM issue_status WHERE issue_status.workspace_id = $1 AND system_key = $4)
 ) RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, status_id
 `
 
@@ -258,10 +263,12 @@ INSERT INTO issue (
     workspace_id, title, description, status, priority,
     assignee_type, assignee_id, creator_type, creator_id,
     parent_issue_id, position, start_date, due_date, number, project_id,
-    origin_type, origin_id, stage
+    origin_type, origin_id, stage, status_id
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
-    $16, $17, $18
+    $16, $17, $18,
+    -- Phase 2 double-write (MUL-4809): see CreateIssue.
+    (SELECT issue_status.id FROM issue_status WHERE issue_status.workspace_id = $1 AND system_key = $4)
 ) RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, status_id
 `
 
@@ -1267,6 +1274,13 @@ UPDATE issue SET
     title = COALESCE($2, title),
     description = COALESCE($3, description),
     status = COALESCE($4, status),
+    -- Phase 2 double-write (MUL-4809): re-derive status_id only when status is
+    -- being changed, keyed on the built-in system_key; otherwise leave it.
+    status_id = CASE
+        WHEN $4::text IS NOT NULL
+        THEN (SELECT issue_status.id FROM issue_status WHERE issue_status.workspace_id = issue.workspace_id AND system_key = $4)
+        ELSE status_id
+    END,
     priority = COALESCE($5, priority),
     assignee_type = $6,
     assignee_id = $7,
@@ -1277,7 +1291,7 @@ UPDATE issue SET
     project_id = $12,
     stage = $13,
     updated_at = now()
-WHERE id = $1
+WHERE issue.id = $1
 RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, status_id
 `
 
@@ -1349,8 +1363,11 @@ func (q *Queries) UpdateIssue(ctx context.Context, arg UpdateIssueParams) (Issue
 const updateIssueStatus = `-- name: UpdateIssueStatus :one
 UPDATE issue SET
     status = $2,
+    -- Phase 2 double-write (MUL-4809): mirror the legacy status into status_id
+    -- via its built-in system_key (scoped to the same workspace guard).
+    status_id = (SELECT issue_status.id FROM issue_status WHERE issue_status.workspace_id = $3 AND system_key = $2),
     updated_at = now()
-WHERE id = $1 AND workspace_id = $3
+WHERE issue.id = $1 AND issue.workspace_id = $3
 RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, status_id
 `
 
