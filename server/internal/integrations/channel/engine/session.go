@@ -280,11 +280,12 @@ func (s *ChatSession) AppendUserMessage(ctx context.Context, in AppendInput) (Ap
 		}
 	}
 
-	if _, err := qtx.CreateChatMessage(ctx, db.CreateChatMessageParams{
+	message, err := qtx.CreateChatMessage(ctx, db.CreateChatMessageParams{
 		ChatSessionID: in.SessionID,
 		Role:          "user",
 		Content:       in.Body,
-	}); err != nil {
+	})
+	if err != nil {
 		return AppendResult{}, fmt.Errorf("create chat message: %w", err)
 	}
 	if err := qtx.TouchChatSession(ctx, in.SessionID); err != nil {
@@ -324,7 +325,7 @@ func (s *ChatSession) AppendUserMessage(ctx context.Context, in AppendInput) (Ap
 	if err := tx.Commit(ctx); err != nil {
 		return AppendResult{}, fmt.Errorf("commit: %w", err)
 	}
-	return AppendResult{IssueCommand: cmd, DedupMarked: markedInTx}, nil
+	return AppendResult{MessageID: message.ID, IssueCommand: cmd, DedupMarked: markedInTx}, nil
 }
 
 func isUniqueViolation(err error) bool {

@@ -45,6 +45,8 @@ type Router struct {
 
 	pendingFreshMu sync.Mutex
 	pendingFresh   map[string]bool
+	pendingInputMu sync.Mutex
+	pendingInput   map[string][]pgtype.UUID
 }
 
 // Config tunes the Router. Zero values default.
@@ -75,6 +77,7 @@ func NewRouter(issues IssueCreator, tasks TaskEnqueuer, reader SessionReader, cf
 		replyTimeout: cfg.ReplyTimeout,
 		logger:       cfg.Logger,
 		pendingFresh: make(map[string]bool),
+		pendingInput: make(map[string][]pgtype.UUID),
 	}
 }
 
@@ -311,24 +314,25 @@ func (r *Router) processClaimed(ctx context.Context, set ResolverSet, msg channe
 	//    THIS message's sender (the task initiator), deliberately not the
 	//    session creator (group sessions are creator=installer). Latest sender
 	//    in a window wins (MUL-2645).
-	r.scheduleRun(set, inst, msg, sessionID, identity.UserID)
+	r.scheduleRun(set, inst, msg, sessionID, identity.UserID, appendRes.MessageID)
 	return res, postAppendFinalize, nil
 }
 
 // scheduleRun hands the per-session run trigger to the debouncer (or fires it
 // inline when batching is disabled).
-func (r *Router) scheduleRun(set ResolverSet, inst ResolvedInstallation, msg channel.InboundMessage, sessionID, initiatorUserID pgtype.UUID) {
+func (r *Router) scheduleRun(set ResolverSet, inst ResolvedInstallation, msg channel.InboundMessage, sessionID, initiatorUserID, messageID pgtype.UUID) {
 	key := keyForSession(sessionID)
 	fresh := msg.ForceFresh
+	r.appendPendingInput(key, messageID)
 	if r.batcher == nil {
-		r.flushChatRun(set, inst, msg, sessionID, initiatorUserID, fresh)
+		r.flushChatRun(set, inst, msg, sessionID, initiatorUserID, fresh, r.takePendingInput(key))
 		return
 	}
 	if fresh {
 		r.markPendingFresh(key)
 	}
 	flush := func() {
-		r.flushChatRun(set, inst, msg, sessionID, initiatorUserID, r.takePendingFresh(key, fresh))
+		r.flushChatRun(set, inst, msg, sessionID, initiatorUserID, r.takePendingFresh(key, fresh), r.takePendingInput(key))
 	}
 	r.batcher.Schedule(key, flush)
 }
@@ -340,7 +344,7 @@ const chatRunFlushTimeout = 10 * time.Second
 // flushChatRun is the debounced run-trigger: reload session, enqueue exactly
 // one chat task for the window, and emit the offline/archived notice (only
 // known here now) via the replier. Errors are logged, not returned.
-func (r *Router) flushChatRun(set ResolverSet, inst ResolvedInstallation, msg channel.InboundMessage, sessionID, initiatorUserID pgtype.UUID, forceFresh bool) {
+func (r *Router) flushChatRun(set ResolverSet, inst ResolvedInstallation, msg channel.InboundMessage, sessionID, initiatorUserID pgtype.UUID, forceFresh bool, messageIDs []pgtype.UUID) {
 	ctx, cancel := context.WithTimeout(context.Background(), chatRunFlushTimeout)
 	defer cancel()
 
@@ -351,7 +355,7 @@ func (r *Router) flushChatRun(set ResolverSet, inst ResolvedInstallation, msg ch
 		r.clearTyping(ctx, set, sessionID)
 		return
 	}
-	if _, err := r.tasks.EnqueueChannelChatTask(ctx, session, initiatorUserID, forceFresh); err != nil {
+	if _, err := r.tasks.EnqueueChannelChatTask(ctx, session, initiatorUserID, forceFresh, messageIDs); err != nil {
 		// No task was enqueued, so no task lifecycle event will ever publish and
 		// the platform's bus-driven typing clear can never fire. Clear the
 		// indicator here (before any notice) so the "processing" reaction does
@@ -367,6 +371,20 @@ func (r *Router) flushChatRun(set ResolverSet, inst ResolvedInstallation, msg ch
 				"chat_session_id", uuidString(sessionID), "err", err.Error())
 		}
 	}
+}
+
+func (r *Router) appendPendingInput(key string, id pgtype.UUID) {
+	r.pendingInputMu.Lock()
+	defer r.pendingInputMu.Unlock()
+	r.pendingInput[key] = append(r.pendingInput[key], id)
+}
+
+func (r *Router) takePendingInput(key string) []pgtype.UUID {
+	r.pendingInputMu.Lock()
+	defer r.pendingInputMu.Unlock()
+	ids := r.pendingInput[key]
+	delete(r.pendingInput, key)
+	return ids
 }
 
 // clearTyping asks the platform to drop the "processing" indicator for a session

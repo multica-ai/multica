@@ -1453,7 +1453,10 @@ func (s *TaskService) EnqueueChatTask(ctx context.Context, chatSession db.ChatSe
 // currently pending channel messages as its immutable input batch. Unlike the
 // legacy claim-time trailing-message scan, this ownership survives a predecessor
 // writing its assistant reply before the queued successor is claimed.
-func (s *TaskService) EnqueueChannelChatTask(ctx context.Context, chatSession db.ChatSession, initiatorUserID pgtype.UUID, forceFreshSession bool) (db.AgentTaskQueue, error) {
+func (s *TaskService) EnqueueChannelChatTask(ctx context.Context, chatSession db.ChatSession, initiatorUserID pgtype.UUID, forceFreshSession bool, messageIDs []pgtype.UUID) (db.AgentTaskQueue, error) {
+	if len(messageIDs) == 0 {
+		return db.AgentTaskQueue{}, errors.New("channel chat task: empty input batch")
+	}
 	agent, err := s.Queries.GetAgent(ctx, chatSession.AgentID)
 	if err != nil {
 		return db.AgentTaskQueue{}, fmt.Errorf("load agent: %w", err)
@@ -1500,12 +1503,13 @@ func (s *TaskService) EnqueueChannelChatTask(ctx context.Context, chatSession db
 		claimed, err := qtx.ClaimChannelChatInputMessages(ctx, db.ClaimChannelChatInputMessagesParams{
 			ChatSessionID: chatSession.ID,
 			TaskID:        task.ID,
+			MessageIds:    messageIDs,
 		})
 		if err != nil {
 			return fmt.Errorf("claim channel chat input: %w", err)
 		}
-		if len(claimed) == 0 {
-			return errors.New("claim channel chat input: no pending user messages")
+		if len(claimed) != len(messageIDs) {
+			return fmt.Errorf("claim channel chat input: claimed %d of %d messages", len(claimed), len(messageIDs))
 		}
 		return nil
 	}); err != nil {
@@ -2838,8 +2842,14 @@ func (s *TaskService) writeChatCompletionOutcome(ctx context.Context, qtx *db.Qu
 	// row, only an empty chat:done for typing/lifecycle. Keeps the Slack/Lark
 	// silent-drop path. Attachments still force a row — the agent produced a
 	// deliverable the user must see.
-	if isEmpty && pendingAttachments == 0 && !task.ChatInputTaskID.Valid {
-		return nil, nil
+	if isEmpty && pendingAttachments == 0 {
+		isChannel, err := qtx.IsChannelChatSession(ctx, task.ChatSessionID)
+		if err != nil {
+			return nil, fmt.Errorf("detect channel chat session: %w", err)
+		}
+		if isChannel || !task.ChatInputTaskID.Valid {
+			return nil, nil
+		}
 	}
 
 	params := db.CreateChatMessageParams{

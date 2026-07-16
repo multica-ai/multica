@@ -32,69 +32,35 @@ func (q *Queries) ChatSessionHasUserMessage(ctx context.Context, chatSessionID p
 }
 
 const claimChannelChatInputMessages = `-- name: ClaimChannelChatInputMessages :many
-WITH eligible AS (
-    SELECT m.id
-    FROM chat_message m
-    WHERE m.chat_session_id = $2
-      AND m.role = 'user'
-      AND m.task_id IS NULL
-      AND (
-          EXISTS (
-              SELECT 1
-              FROM agent_task_queue t
-              WHERE t.chat_session_id = $2
-                AND t.chat_input_task_id IS NOT NULL
-                AND t.id <> $1
-          )
-          OR m.created_at > COALESCE((
-              SELECT MAX(a.created_at)
-              FROM chat_message a
-              WHERE a.chat_session_id = $2
-                AND a.role = 'assistant'
-          ), '-infinity'::timestamptz)
-      )
-    FOR UPDATE
-)
 UPDATE chat_message m
 SET task_id = $1
-FROM eligible
-WHERE m.id = eligible.id
-RETURNING m.id, m.chat_session_id, m.role, m.content, m.task_id, m.created_at, m.failure_reason, m.elapsed_ms, m.message_kind
+WHERE m.chat_session_id = $2
+  AND m.id = ANY($3::uuid[])
+  AND m.role = 'user'
+  AND m.task_id IS NULL
+RETURNING m.id
 `
 
 type ClaimChannelChatInputMessagesParams struct {
-	TaskID        pgtype.UUID `json:"task_id"`
-	ChatSessionID pgtype.UUID `json:"chat_session_id"`
+	TaskID        pgtype.UUID   `json:"task_id"`
+	ChatSessionID pgtype.UUID   `json:"chat_session_id"`
+	MessageIds    []pgtype.UUID `json:"message_ids"`
 }
 
-// Seals the user-message batch for a channel task. On the first task created
-// after upgrading, preserve the legacy cursor and claim only messages after the
-// last assistant reply. Once the session has an owned channel batch, every
-// still-unowned user message belongs to the next task even if the predecessor
-// replies before that task is claimed.
-func (q *Queries) ClaimChannelChatInputMessages(ctx context.Context, arg ClaimChannelChatInputMessagesParams) ([]ChatMessage, error) {
-	rows, err := q.db.Query(ctx, claimChannelChatInputMessages, arg.TaskID, arg.ChatSessionID)
+// Seals exactly the rows accumulated by the channel debounce window.
+func (q *Queries) ClaimChannelChatInputMessages(ctx context.Context, arg ClaimChannelChatInputMessagesParams) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, claimChannelChatInputMessages, arg.TaskID, arg.ChatSessionID, arg.MessageIds)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []ChatMessage{}
+	items := []pgtype.UUID{}
 	for rows.Next() {
-		var i ChatMessage
-		if err := rows.Scan(
-			&i.ID,
-			&i.ChatSessionID,
-			&i.Role,
-			&i.Content,
-			&i.TaskID,
-			&i.CreatedAt,
-			&i.FailureReason,
-			&i.ElapsedMs,
-			&i.MessageKind,
-		); err != nil {
+		var id pgtype.UUID
+		if err := rows.Scan(&id); err != nil {
 			return nil, err
 		}
-		items = append(items, i)
+		items = append(items, id)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -654,6 +620,19 @@ func (q *Queries) HasPendingChatTasksByCreator(ctx context.Context, arg HasPendi
 	var has_pending bool
 	err := row.Scan(&has_pending)
 	return has_pending, err
+}
+
+const isChannelChatSession = `-- name: IsChannelChatSession :one
+SELECT EXISTS (
+    SELECT 1 FROM channel_chat_session_binding WHERE chat_session_id = $1
+)
+`
+
+func (q *Queries) IsChannelChatSession(ctx context.Context, chatSessionID pgtype.UUID) (bool, error) {
+	row := q.db.QueryRow(ctx, isChannelChatSession, chatSessionID)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
 }
 
 const linkChatMessageToTask = `-- name: LinkChatMessageToTask :exec

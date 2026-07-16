@@ -231,39 +231,19 @@ WHERE id = $1
 RETURNING *;
 
 -- name: ClaimChannelChatInputMessages :many
--- Seals the user-message batch for a channel task. On the first task created
--- after upgrading, preserve the legacy cursor and claim only messages after the
--- last assistant reply. Once the session has an owned channel batch, every
--- still-unowned user message belongs to the next task even if the predecessor
--- replies before that task is claimed.
-WITH eligible AS (
-    SELECT m.id
-    FROM chat_message m
-    WHERE m.chat_session_id = sqlc.arg(chat_session_id)
-      AND m.role = 'user'
-      AND m.task_id IS NULL
-      AND (
-          EXISTS (
-              SELECT 1
-              FROM agent_task_queue t
-              WHERE t.chat_session_id = sqlc.arg(chat_session_id)
-                AND t.chat_input_task_id IS NOT NULL
-                AND t.id <> sqlc.arg(task_id)
-          )
-          OR m.created_at > COALESCE((
-              SELECT MAX(a.created_at)
-              FROM chat_message a
-              WHERE a.chat_session_id = sqlc.arg(chat_session_id)
-                AND a.role = 'assistant'
-          ), '-infinity'::timestamptz)
-      )
-    FOR UPDATE
-)
+-- Seals exactly the rows accumulated by the channel debounce window.
 UPDATE chat_message m
 SET task_id = sqlc.arg(task_id)
-FROM eligible
-WHERE m.id = eligible.id
-RETURNING m.*;
+WHERE m.chat_session_id = sqlc.arg(chat_session_id)
+  AND m.id = ANY(sqlc.arg(message_ids)::uuid[])
+  AND m.role = 'user'
+  AND m.task_id IS NULL
+RETURNING m.id;
+
+-- name: IsChannelChatSession :one
+SELECT EXISTS (
+    SELECT 1 FROM channel_chat_session_binding WHERE chat_session_id = $1
+);
 
 -- name: GetLastChatTaskSession :one
 -- Returns the most recent task in this chat session that managed to record a

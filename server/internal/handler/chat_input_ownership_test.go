@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/jackc/pgx/v5/pgtype"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
@@ -152,19 +153,21 @@ func TestChannelChat_QueuedSuccessorKeepsMessageAcrossPredecessorReply(t *testin
 	if err != nil {
 		t.Fatalf("load chat session: %v", err)
 	}
-	appendUser := func(content string) {
+	appendUser := func(content string) pgtype.UUID {
 		t.Helper()
-		if _, err := testHandler.Queries.CreateChatMessage(ctx, db.CreateChatMessageParams{
+		message, err := testHandler.Queries.CreateChatMessage(ctx, db.CreateChatMessageParams{
 			ChatSessionID: session.ID,
 			Role:          "user",
 			Content:       content,
-		}); err != nil {
+		})
+		if err != nil {
 			t.Fatalf("append channel user message: %v", err)
 		}
+		return message.ID
 	}
 
-	appendUser("今天北京天气如何?")
-	first, err := testHandler.TaskService.EnqueueChannelChatTask(ctx, session, parseUUID(testUserID), false)
+	firstMessage := appendUser("今天北京天气如何?")
+	first, err := testHandler.TaskService.EnqueueChannelChatTask(ctx, session, parseUUID(testUserID), false, []pgtype.UUID{firstMessage})
 	if err != nil {
 		t.Fatalf("enqueue first channel task: %v", err)
 	}
@@ -174,8 +177,8 @@ func TestChannelChat_QueuedSuccessorKeepsMessageAcrossPredecessorReply(t *testin
 	}
 	markTaskRunning(t, ctx, uuidToString(first.ID))
 
-	appendUser("今天上海天气怎么样")
-	second, err := testHandler.TaskService.EnqueueChannelChatTask(ctx, session, parseUUID(testUserID), false)
+	secondMessage := appendUser("今天上海天气怎么样")
+	second, err := testHandler.TaskService.EnqueueChannelChatTask(ctx, session, parseUUID(testUserID), false, []pgtype.UUID{secondMessage})
 	if err != nil {
 		t.Fatalf("enqueue second channel task: %v", err)
 	}
@@ -434,5 +437,47 @@ func TestCompleteTask_ChannelEmptyOutputWritesNoRow(t *testing.T) {
 	}
 	if rows[0].MessageKind != protocol.ChatMessageKindMessage || rows[0].Content != "channel reply" {
 		t.Fatalf("channel message = kind %q content %q, want message/'channel reply'", rows[0].MessageKind, rows[0].Content)
+	}
+
+	// A task-owned channel batch must keep the same silent-empty semantics.
+	var installationID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO channel_installation (workspace_id, agent_id, channel_type, config, installer_user_id)
+		VALUES ($1, $2, 'feishu', '{}', $3)
+		RETURNING id
+	`, testWorkspaceID, agentID, testUserID).Scan(&installationID); err != nil {
+		t.Fatalf("create channel installation: %v", err)
+	}
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO channel_chat_session_binding
+			(chat_session_id, installation_id, channel_type, channel_chat_id, chat_type)
+		VALUES ($1, $2, 'feishu', $3, 'p2p')
+	`, sessionID, installationID, "owned-channel-"+sessionID); err != nil {
+		t.Fatalf("create channel binding: %v", err)
+	}
+	message, err := testHandler.Queries.CreateChatMessage(ctx, db.CreateChatMessageParams{
+		ChatSessionID: parseUUID(sessionID),
+		Role:          "user",
+		Content:       "tool-only channel turn",
+	})
+	if err != nil {
+		t.Fatalf("create owned channel input: %v", err)
+	}
+	session, err := testHandler.Queries.GetChatSession(ctx, parseUUID(sessionID))
+	if err != nil {
+		t.Fatalf("load channel session: %v", err)
+	}
+	owned, err := testHandler.TaskService.EnqueueChannelChatTask(
+		ctx, session, parseUUID(testUserID), false, []pgtype.UUID{message.ID},
+	)
+	if err != nil {
+		t.Fatalf("enqueue owned channel task: %v", err)
+	}
+	markTaskRunning(t, ctx, uuidToString(owned.ID))
+	if _, err := testHandler.TaskService.CompleteTask(ctx, owned.ID, completeResult(t, "   "), "", ""); err != nil {
+		t.Fatalf("complete owned channel task: %v", err)
+	}
+	if rows := assistantRows(t, ctx, sessionID); len(rows) != 1 {
+		t.Fatalf("owned channel empty completion must not add an assistant row, got %d total", len(rows))
 	}
 }
