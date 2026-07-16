@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"io"
 	"testing"
 
@@ -33,11 +34,35 @@ type fakeMediaStorage struct {
 	key, contentType, filename string
 	data                       []byte
 	deleted                    []string
+	uploadErr                  error
 }
 
 func (s *fakeMediaStorage) Upload(_ context.Context, key string, data []byte, contentType, filename string) (string, error) {
 	s.key, s.data, s.contentType, s.filename = key, data, contentType, filename
+	if s.uploadErr != nil {
+		return "", s.uploadErr
+	}
 	return "/uploads/" + key, nil
+}
+
+func TestFeishuMediaResolverUploadErrorReturnsCleanup(t *testing.T) {
+	api := &fakeSender{resource: MessageResource{
+		Data: []byte("png"), Filename: "screen.png", ContentType: "image/png",
+	}}
+	store := &fakeMediaStorage{uploadErr: errors.New("upload interrupted")}
+	lm := InboundMessage{MessageID: "om_image", RawContent: `{"image_key":"img_key"}`}
+	raw, _ := json.Marshal(lm)
+	resolver := &feishuMediaResolver{media: api, creds: fakeCreds{secret: "secret"}, storage: store}
+	_, cleanup, err := resolver.Resolve(context.Background(), engine.ResolvedInstallation{
+		Platform: Installation{AppID: "cli", Region: "feishu"},
+	}, channel.InboundMessage{Type: channel.MsgTypeImage, Raw: raw})
+	if err == nil || cleanup == nil {
+		t.Fatalf("Resolve error=%v cleanup=%v, want both", err, cleanup != nil)
+	}
+	cleanup(context.Background())
+	if len(store.deleted) != 1 || store.deleted[0] != store.key {
+		t.Fatalf("cleanup deleted = %v, uploaded key = %q", store.deleted, store.key)
+	}
 }
 func (s *fakeMediaStorage) Delete(_ context.Context, key string)                   { s.deleted = append(s.deleted, key) }
 func (*fakeMediaStorage) DeleteKeys(context.Context, []string)                     {}

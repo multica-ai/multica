@@ -43,6 +43,34 @@ func TestHTTPClientDownloadMessageResource(t *testing.T) {
 	}
 }
 
+func TestHTTPClientDownloadMessageResourceParsesContentDisposition(t *testing.T) {
+	tests := []struct {
+		header string
+		want   string
+	}{
+		{`Attachment ; filename = "screen shot.png"`, "screen shot.png"},
+		{`attachment; filename="fallback.png"; filename*=UTF-8''screen%20shot.png`, "screen shot.png"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.header, func(t *testing.T) {
+			srv := resourceTestServer(t, func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "image/png")
+				w.Header().Set("Content-Disposition", tc.header)
+				_, _ = io.WriteString(w, "png")
+			})
+			defer srv.Close()
+			client := NewHTTPAPIClient(HTTPClientConfig{BaseURL: srv.URL}).(*httpAPIClient)
+			got, err := client.DownloadMessageResource(context.Background(), testCreds(), "om_1", "img_key", "image")
+			if err != nil {
+				t.Fatalf("DownloadMessageResource: %v", err)
+			}
+			if got.Filename != tc.want {
+				t.Fatalf("Filename = %q, want %q", got.Filename, tc.want)
+			}
+		})
+	}
+}
+
 func TestHTTPClientDownloadMessageResourceRejectsOversize(t *testing.T) {
 	srv := resourceTestServer(t, func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "image/png")

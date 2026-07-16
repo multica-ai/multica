@@ -38,9 +38,10 @@ type Router struct {
 
 	batcher *pendingBatcher
 
-	replyTimeout time.Duration
-	mediaTimeout time.Duration
-	replyWg      sync.WaitGroup
+	replyTimeout   time.Duration
+	mediaTimeout   time.Duration
+	cleanupTimeout time.Duration
+	replyWg        sync.WaitGroup
 
 	logger *slog.Logger
 
@@ -55,9 +56,13 @@ type RouterConfig struct {
 	// under the platform ACK deadline (Lark: 3s). Defaults to 2.5s.
 	ReplyTimeout time.Duration
 	// MediaTimeout bounds platform download + object-storage upload while the
-	// connector is waiting to ACK. Defaults to 2s (below Lark's 3s budget).
+	// connector is waiting to ACK. Defaults to 750ms, reserving most of
+	// Lark's 3s budget for enrichment, DB work, and the ACK write.
 	MediaTimeout time.Duration
-	Logger       *slog.Logger
+	// CleanupTimeout independently bounds best-effort deletion of media that
+	// was uploaded but could not be linked. Defaults to 500ms.
+	CleanupTimeout time.Duration
+	Logger         *slog.Logger
 }
 
 // NewRouter builds a Router around the shared (platform-agnostic) services:
@@ -69,20 +74,24 @@ func NewRouter(issues IssueCreator, tasks TaskEnqueuer, reader SessionReader, cf
 		cfg.ReplyTimeout = 2500 * time.Millisecond
 	}
 	if cfg.MediaTimeout == 0 {
-		cfg.MediaTimeout = 2 * time.Second
+		cfg.MediaTimeout = 750 * time.Millisecond
+	}
+	if cfg.CleanupTimeout == 0 {
+		cfg.CleanupTimeout = 500 * time.Millisecond
 	}
 	if cfg.Logger == nil {
 		cfg.Logger = slog.Default()
 	}
 	return &Router{
-		sets:         make(map[channel.Type]ResolverSet),
-		issues:       issues,
-		tasks:        tasks,
-		reader:       reader,
-		replyTimeout: cfg.ReplyTimeout,
-		mediaTimeout: cfg.MediaTimeout,
-		logger:       cfg.Logger,
-		pendingFresh: make(map[string]bool),
+		sets:           make(map[channel.Type]ResolverSet),
+		issues:         issues,
+		tasks:          tasks,
+		reader:         reader,
+		replyTimeout:   cfg.ReplyTimeout,
+		mediaTimeout:   cfg.MediaTimeout,
+		cleanupTimeout: cfg.CleanupTimeout,
+		logger:         cfg.Logger,
+		pendingFresh:   make(map[string]bool),
 	}
 }
 
@@ -256,19 +265,28 @@ func (r *Router) processClaimed(ctx context.Context, set ResolverSet, msg channe
 	cleanupMedia := func(context.Context) {}
 	if set.Media != nil {
 		mediaCtx, cancelMedia := context.WithTimeout(ctx, r.mediaTimeout)
-		msg, cleanupMedia, err = set.Media.Resolve(mediaCtx, inst, msg)
+		resolved, cleanup, mediaErr := set.Media.Resolve(mediaCtx, inst, msg)
 		cancelMedia()
-		if err != nil {
-			return Result{}, finalizeRelease, fmt.Errorf("resolve media: %w", err)
+		if cleanup != nil {
+			cleanupMedia = cleanup
 		}
-		if cleanupMedia == nil {
+		if mediaErr != nil {
+			r.logger.Warn("channel router: media resolution failed; ingesting placeholder",
+				"channel_type", string(msg.Source.ChannelType),
+				"event_id", msg.EventID,
+				"message_id", msg.MessageID,
+				"error", mediaErr,
+			)
+			r.cleanupMedia(cleanupMedia)
 			cleanupMedia = func(context.Context) {}
+		} else {
+			msg = resolved
 		}
 	}
 	mediaCommitted := false
 	defer func() {
 		if !mediaCommitted {
-			cleanupMedia(context.WithoutCancel(ctx))
+			r.cleanupMedia(cleanupMedia)
 		}
 	}()
 
@@ -345,6 +363,15 @@ func (r *Router) processClaimed(ctx context.Context, set ResolverSet, msg channe
 	//    in a window wins (MUL-2645).
 	r.scheduleRun(set, inst, msg, sessionID, identity.UserID)
 	return res, postAppendFinalize, nil
+}
+
+func (r *Router) cleanupMedia(cleanup func(context.Context)) {
+	if cleanup == nil {
+		return
+	}
+	cleanupCtx, cancel := context.WithTimeout(context.Background(), r.cleanupTimeout)
+	defer cancel()
+	cleanup(cleanupCtx)
 }
 
 // scheduleRun hands the per-session run trigger to the debouncer (or fires it

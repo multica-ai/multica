@@ -35,34 +35,58 @@ type fakeMedia struct {
 	cleanupCalls int
 	err          error
 	block        bool
+	cleanupOnErr bool
 }
 
 func (f *fakeMedia) Resolve(ctx context.Context, _ ResolvedInstallation, msg channel.InboundMessage) (channel.InboundMessage, func(context.Context), error) {
 	f.resolveCalls++
 	if f.err != nil {
-		return msg, nil, f.err
+		var cleanup func(context.Context)
+		if f.cleanupOnErr {
+			cleanup = func(context.Context) { f.cleanupCalls++ }
+		}
+		return msg, cleanup, f.err
 	}
 	if f.block {
 		<-ctx.Done()
-		return msg, nil, ctx.Err()
+		return msg, func(context.Context) { f.cleanupCalls++ }, ctx.Err()
 	}
 	msg.MediaRefs = []channel.MediaRef{{Type: channel.MsgTypeImage, StorageKey: "channel-inbound/image.png"}}
 	return msg, func(context.Context) { f.cleanupCalls++ }, nil
 }
 
-func TestRouter_MediaTimeoutReleasesClaim(t *testing.T) {
+func TestRouter_MediaTimeoutIngestsPlaceholder(t *testing.T) {
 	h := newHarness(t)
 	h.router.mediaTimeout = 10 * time.Millisecond
 	h.media.block = true
-	err := h.router.Handle(context.Background(), p2pMessage(t))
-	if !errors.Is(err, context.DeadlineExceeded) {
-		t.Fatalf("expected media deadline error, got %v", err)
+	msg := p2pMessage(t)
+	msg.Text = "[Image]"
+	if err := h.router.Handle(context.Background(), msg); err != nil {
+		t.Fatalf("media timeout must fail open, got %v", err)
 	}
-	if h.dedup.releases() != 1 {
-		t.Fatalf("media timeout must release claim, got %d", h.dedup.releases())
+	if h.dedup.releases() != 0 || h.dedup.marks() != 0 {
+		t.Fatalf("in-tx Mark must stand without Release; marks=%d releases=%d", h.dedup.marks(), h.dedup.releases())
 	}
-	if h.binder.lastAppend.Message.MessageID != "" {
-		t.Fatal("timed-out media must not append the message")
+	if h.binder.lastAppend.Message.Text != "[Image]" || len(h.binder.lastAppend.Message.MediaRefs) != 0 {
+		t.Fatalf("placeholder append = %+v", h.binder.lastAppend.Message)
+	}
+	if h.media.cleanupCalls != 1 {
+		t.Fatalf("partial media must be cleaned once, got %d", h.media.cleanupCalls)
+	}
+}
+
+func TestRouter_MediaErrorCleansPartialUploadAndIngests(t *testing.T) {
+	h := newHarness(t)
+	h.media.err = errors.New("upload interrupted")
+	h.media.cleanupOnErr = true
+	if err := h.router.Handle(context.Background(), p2pMessage(t)); err != nil {
+		t.Fatalf("media failure must fail open, got %v", err)
+	}
+	if h.media.cleanupCalls != 1 {
+		t.Fatalf("partial upload cleanup calls = %d, want 1", h.media.cleanupCalls)
+	}
+	if h.binder.lastAppend.Message.MessageID == "" || len(h.binder.lastAppend.Message.MediaRefs) != 0 {
+		t.Fatalf("original message was not appended without media: %+v", h.binder.lastAppend.Message)
 	}
 }
 

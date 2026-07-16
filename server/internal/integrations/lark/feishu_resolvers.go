@@ -119,7 +119,8 @@ func (r *feishuMediaResolver) Resolve(ctx context.Context, inst engine.ResolvedI
 	key := "channel-inbound/" + id.String() + ext
 	link, err := r.storage.Upload(ctx, key, resource.Data, resource.ContentType, filename)
 	if err != nil {
-		return msg, nil, fmt.Errorf("persist image resource: %w", err)
+		return msg, func(cleanupCtx context.Context) { r.storage.Delete(cleanupCtx, key) },
+			fmt.Errorf("persist image resource: %w", err)
 	}
 	msg.MediaRefs = []channel.MediaRef{{
 		Type: channel.MsgTypeImage, StorageKey: key, URL: link, Filename: filename,

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"mime"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -52,7 +53,7 @@ const (
 	// is normally well under 1s; we leave headroom for cross-region
 	// latency from a self-hosted Multica deployment to feishu.cn.
 	defaultRequestTimeout         = 10 * time.Second
-	defaultMaxResourceBytes int64 = 100 << 20
+	defaultMaxResourceBytes int64 = 10 << 20
 
 	// Lark's "invalid tenant_access_token" / "tenant_access_token
 	// expired" error codes. When we see either, drop the cached token
@@ -787,7 +788,10 @@ func (c *httpAPIClient) DownloadMessageResource(ctx context.Context, creds Insta
 		}
 		return MessageResource{}, errors.New("lark http client: download resource returned JSON instead of media")
 	}
-	filename := strings.Trim(strings.TrimPrefix(resp.Header.Get("Content-Disposition"), "attachment; filename="), `"`)
+	filename := ""
+	if _, params, err := mime.ParseMediaType(resp.Header.Get("Content-Disposition")); err == nil {
+		filename = params["filename"]
+	}
 	return MessageResource{Data: data, Filename: filename, ContentType: contentType}, nil
 }
 
