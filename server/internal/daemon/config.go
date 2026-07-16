@@ -64,12 +64,13 @@ const (
 	DefaultAutoUpdateCheckInterval   = 6 * time.Hour // how often the daemon polls GitHub for a newer CLI release
 )
 
-// DefaultGCArtifactPatterns lists basename matches that the GC loop treats as
+// DefaultGCArtifactPatterns lists artifact names the GC loop treats as
 // regenerable build artifacts. Kept conservative: only directories that are
-// always cheap to recreate (`pnpm install`, `next build`, `turbo build`, task-
-// local skill trees). Things like `dist/`, `build/`, `.cache/` or `.venv/` may
-// legitimately hold source or release output in some repos and are NOT included
-// by default — set MULTICA_GC_ARTIFACT_PATTERNS to extend the list per deployment.
+// always cheap to recreate (`pnpm install`, `next build`, `turbo build`, the
+// Codex provider cache under `codex-home/skills/`). Things like `dist/`,
+// `build/`, `.cache/` or `.venv/` may legitimately hold source or release
+// output in some repos and are NOT included by default — set
+// MULTICA_GC_ARTIFACT_PATTERNS to extend the list per deployment.
 var DefaultGCArtifactPatterns = []string{"node_modules", ".next", ".turbo", "skills"}
 
 // Config holds all daemon configuration.

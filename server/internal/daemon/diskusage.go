@@ -123,10 +123,11 @@ const DiskUsageKindUnknown = "unknown"
 // ScanDiskUsage walks workspacesRoot and returns the disk-usage report. The
 // walk is read-only and follows the same safety contract as the GC artifact
 // cleaner: it never enters .git, never follows symlinks, and counts only
-// regular files. artifactPatterns is filtered through the basename-only check
-// used by cleanTaskArtifacts so the reported "artifact" footprint matches the
-// bytes the GC would actually reclaim. Missing roots return an empty report
-// (not an error) — a daemon that's never run yet has no directory to walk.
+// regular files. artifactPatterns is filtered through the same path-aware
+// check used by cleanTaskArtifacts so the reported "artifact" footprint
+// matches the bytes the GC would actually reclaim. Missing roots return an
+// empty report (not an error) — a daemon that's never run yet has no
+// directory to walk.
 func ScanDiskUsage(workspacesRoot string, artifactPatterns []string) (DiskUsageReport, error) {
 	report := DiskUsageReport{
 		WorkspacesRoot:   workspacesRoot,
@@ -336,11 +337,11 @@ func taskSize(taskDir string, patternSet map[string]struct{}) (totalBytes int64,
 			if entry.Name() == ".git" {
 				return filepath.SkipDir
 			}
-			if _, ok := patternSet[entry.Name()]; ok {
-				rel, relErr := filepath.Rel(absRoot, path)
-				if relErr != nil || rel == "" || rel == "." || strings.HasPrefix(rel, "..") {
-					return filepath.SkipDir
-				}
+			rel, relErr := filepath.Rel(absRoot, path)
+			if relErr != nil || rel == "" || rel == "." || strings.HasPrefix(rel, "..") {
+				return filepath.SkipDir
+			}
+			if _, ok := matchArtifactPattern(rel, entry.Name(), patternSet); ok {
 				size := dirSize(path)
 				totalBytes += size
 				artifactBytes += size

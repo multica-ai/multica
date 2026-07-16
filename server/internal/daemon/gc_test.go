@@ -584,6 +584,8 @@ func TestCleanTaskArtifacts_RemovesSkillTrees(t *testing.T) {
 
 	mustMkdir("workdir/src")
 	mustWrite("workdir/src/main.go", "package main")
+	mustMkdir("workdir/src/skills")
+	mustWrite("workdir/src/skills/SKILL.md", "workdir skill")
 	mustMkdir("codex-home/skills/writing/docs")
 	mustWrite("codex-home/skills/writing/SKILL.md", "body")
 	mustWrite("codex-home/skills/writing/docs/guide.md", "guide")
@@ -604,6 +606,8 @@ func TestCleanTaskArtifacts_RemovesSkillTrees(t *testing.T) {
 
 	for _, rel := range []string{
 		"workdir/src/main.go",
+		"workdir/src/skills",
+		"workdir/src/skills/SKILL.md",
 		"codex-home/config.toml",
 		"output/result.txt",
 	} {

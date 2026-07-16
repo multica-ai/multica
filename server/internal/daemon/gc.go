@@ -456,11 +456,13 @@ func (d *Daemon) cleanTaskDir(taskDir string) {
 	}
 }
 
-// cleanTaskArtifacts walks taskDir and deletes every directory whose basename
-// matches one of patterns. Returns (removedCount, bytesReclaimed, perPattern).
+// cleanTaskArtifacts walks taskDir and deletes every directory whose relative
+// path matches one of the supported artifact locations. Returns
+// (removedCount, bytesReclaimed, perPattern).
 //
 // Safety contract:
-//   - patterns are basename-only; entries with a path separator are dropped.
+//   - only supported provider cache paths are matched; entries with a path
+//     separator are dropped.
 //   - .git subtrees are never descended into, so the agent's git history stays
 //     intact even if a pattern would otherwise match.
 //   - symlinks are skipped entirely — neither the link nor its target is
@@ -514,13 +516,13 @@ func (d *Daemon) cleanTaskArtifacts(taskDir string, patterns []string) (removed 
 		if info.Mode()&os.ModeSymlink != 0 {
 			return filepath.SkipDir
 		}
-		if _, ok := patternSet[entry.Name()]; !ok {
-			return nil
-		}
-		// Containment check: target must remain inside taskDir.
 		rel, relErr := filepath.Rel(absRoot, path)
 		if relErr != nil || rel == "" || rel == "." || strings.HasPrefix(rel, "..") {
 			return filepath.SkipDir
+		}
+		pattern, ok := matchArtifactPattern(rel, entry.Name(), patternSet)
+		if !ok {
+			return nil
 		}
 		size := dirSize(path)
 		if rmErr := os.RemoveAll(path); rmErr != nil {
@@ -529,7 +531,7 @@ func (d *Daemon) cleanTaskArtifacts(taskDir string, patterns []string) (removed 
 		}
 		removed++
 		bytes += size
-		perPattern[entry.Name()]++
+		perPattern[pattern]++
 		d.logger.Info("gc: artifact removed", "path", path, "bytes", size)
 		// Don't descend into the now-deleted subtree.
 		return filepath.SkipDir
@@ -691,6 +693,20 @@ func runGitCommand(barePath string, timeout time.Duration, args ...string) (stri
 	cmd := exec.CommandContext(ctx, "git", cmdArgs...)
 	out, err := cmd.CombinedOutput()
 	return strings.TrimSpace(string(out)), err
+}
+
+func matchArtifactPattern(relPath, entryName string, patternSet map[string]struct{}) (string, bool) {
+	if _, ok := patternSet[entryName]; !ok {
+		return "", false
+	}
+	if entryName != "skills" {
+		return entryName, true
+	}
+	relPath = filepath.ToSlash(relPath)
+	if relPath == "codex-home/skills" || strings.HasPrefix(relPath, "codex-home/skills/") {
+		return entryName, true
+	}
+	return "", false
 }
 
 func agentWorktreeBranches(barePath string) (map[string]struct{}, error) {

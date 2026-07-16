@@ -419,6 +419,7 @@ func TestScanDiskUsageAccountsTaskSkillCache(t *testing.T) {
 	wsID := "11111111-1111-1111-1111-111111111111"
 	taskDir := filepath.Join(root, wsID, "task-skill-cache")
 	writeFile(t, filepath.Join(taskDir, "workdir", "main.go"), 100)
+	writeFile(t, filepath.Join(taskDir, "workdir", "src", "skills", "SKILL.md"), 400)
 	writeFile(t, filepath.Join(taskDir, "codex-home", "skills", "writing", "SKILL.md"), 200)
 	writeFile(t, filepath.Join(taskDir, "codex-home", "skills", "writing", "docs", "guide.md"), 300)
 	mustWriteMeta(t, taskDir, execenv.GCMeta{
