@@ -289,6 +289,23 @@ WHERE i.workspace_id = $1
     ))
   );
 
+-- name: StatusDetailsByIssues :many
+-- Resolve the custom-status catalog detail for a batch of issues (MUL-4809 read
+-- side). Join each issue to the issue_status it points at via the authoritative
+-- status_id, scoped to the same workspace (no FK). Issues whose status_id is NULL
+-- (workspace catalog not seeded) simply don't appear. Archived statuses are
+-- included so an issue already on one still renders its detail.
+SELECT i.id AS issue_id,
+       s.id AS status_id,
+       s.name,
+       s.category,
+       s.icon,
+       s.color
+FROM issue i
+JOIN issue_status s ON s.id = i.status_id AND s.workspace_id = i.workspace_id
+WHERE i.workspace_id = sqlc.arg('workspace_id')::uuid
+  AND i.id = ANY(sqlc.arg('issue_ids')::uuid[]);
+
 -- name: ListChildIssues :many
 -- Order by number ASC so sub-issues display in stable creation order
 -- (oldest first), matching how a parent's plan reads top-to-bottom. The

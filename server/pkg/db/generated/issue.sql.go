@@ -1269,6 +1269,65 @@ func (q *Queries) SetIssueMetadataKey(ctx context.Context, arg SetIssueMetadataK
 	return i, err
 }
 
+const statusDetailsByIssues = `-- name: StatusDetailsByIssues :many
+SELECT i.id AS issue_id,
+       s.id AS status_id,
+       s.name,
+       s.category,
+       s.icon,
+       s.color
+FROM issue i
+JOIN issue_status s ON s.id = i.status_id AND s.workspace_id = i.workspace_id
+WHERE i.workspace_id = $1::uuid
+  AND i.id = ANY($2::uuid[])
+`
+
+type StatusDetailsByIssuesParams struct {
+	WorkspaceID pgtype.UUID   `json:"workspace_id"`
+	IssueIds    []pgtype.UUID `json:"issue_ids"`
+}
+
+type StatusDetailsByIssuesRow struct {
+	IssueID  pgtype.UUID `json:"issue_id"`
+	StatusID pgtype.UUID `json:"status_id"`
+	Name     string      `json:"name"`
+	Category string      `json:"category"`
+	Icon     string      `json:"icon"`
+	Color    string      `json:"color"`
+}
+
+// Resolve the custom-status catalog detail for a batch of issues (MUL-4809 read
+// side). Join each issue to the issue_status it points at via the authoritative
+// status_id, scoped to the same workspace (no FK). Issues whose status_id is NULL
+// (workspace catalog not seeded) simply don't appear. Archived statuses are
+// included so an issue already on one still renders its detail.
+func (q *Queries) StatusDetailsByIssues(ctx context.Context, arg StatusDetailsByIssuesParams) ([]StatusDetailsByIssuesRow, error) {
+	rows, err := q.db.Query(ctx, statusDetailsByIssues, arg.WorkspaceID, arg.IssueIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []StatusDetailsByIssuesRow{}
+	for rows.Next() {
+		var i StatusDetailsByIssuesRow
+		if err := rows.Scan(
+			&i.IssueID,
+			&i.StatusID,
+			&i.Name,
+			&i.Category,
+			&i.Icon,
+			&i.Color,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const updateIssue = `-- name: UpdateIssue :one
 UPDATE issue SET
     title = COALESCE($2, title),
