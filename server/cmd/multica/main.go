@@ -36,8 +36,6 @@ var taskScopedCLICommands = map[string]struct{}{
 	"multica issue comment list": {},
 	"multica issue comment add":  {},
 	"multica issue status":       {},
-	"multica issue rerun":        {},
-	"multica issue runs":         {},
 	"multica issue run-messages": {},
 	"multica repo checkout":      {},
 }

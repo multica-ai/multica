@@ -81,8 +81,6 @@ func TestTaskScopedCLIAllowsOnlyBoundedIssueCommands(t *testing.T) {
 		{"issue", "comment", "list"},
 		{"issue", "comment", "add"},
 		{"issue", "status"},
-		{"issue", "rerun"},
-		{"issue", "runs"},
 		{"issue", "run-messages"},
 		{"repo", "checkout"},
 	}
@@ -104,6 +102,8 @@ func TestTaskScopedCLIAllowsOnlyBoundedIssueCommands(t *testing.T) {
 		{"issue", "create"},
 		{"issue", "update"},
 		{"issue", "assign"},
+		{"issue", "rerun"},
+		{"issue", "runs"},
 		{"issue", "comment", "delete"},
 		{"workspace", "update"},
 		{"project", "update"},
@@ -448,22 +448,6 @@ func TestTaskScopedIssueCLIUsesOnlyBoundIssueAPIs(t *testing.T) {
 			expected: []string{"GET /api/issues/" + taskScopedCLIIssueID, "PUT /api/issues/" + taskScopedCLIIssueID},
 		},
 		{
-			name: "runs table",
-			run: func(t *testing.T) error {
-				_, err := captureStdout(t, func() error { return runIssueRuns(newTaskScopedIssueRunsCmd(), []string{taskScopedCLIIssueID}) })
-				return err
-			},
-			expected: []string{"GET /api/issues/" + taskScopedCLIIssueID, "GET /api/issues/" + taskScopedCLIIssueID + "/task-runs"},
-		},
-		{
-			name: "rerun table",
-			run: func(t *testing.T) error {
-				_, err := captureStdout(t, func() error { return runIssueRerun(newTaskScopedIssueRerunCmd(), []string{taskScopedCLIIssueID}) })
-				return err
-			},
-			expected: []string{"GET /api/issues/" + taskScopedCLIIssueID, "POST /api/issues/" + taskScopedCLIIssueID + "/rerun"},
-		},
-		{
 			name: "run messages full uuid",
 			run: func(t *testing.T) error {
 				_, err := captureStdout(t, func() error {
@@ -485,6 +469,29 @@ func TestTaskScopedIssueCLIUsesOnlyBoundIssueAPIs(t *testing.T) {
 			}
 			assertTaskScopedCLIRequests(t, recorder, tc.expected...)
 		})
+	}
+}
+
+func TestTaskScopedCLIRejectsRunEnumerationAndRerunBeforeHTTP(t *testing.T) {
+	server, recorder := newTaskScopedCLIContractServer(t)
+	defer server.Close()
+	setTaskScopedCLIContractEnv(t, server.URL)
+
+	for _, path := range [][]string{{"issue", "runs"}, {"issue", "rerun"}} {
+		path := path
+		t.Run(strings.Join(path, "_"), func(t *testing.T) {
+			ran, err := executeTaskScopeTestCommand(t, path)
+			if err == nil || !strings.Contains(err.Error(), "task-scoped CLI context") {
+				t.Fatalf("task-scoped command %q error = %v", strings.Join(path, " "), err)
+			}
+			if ran {
+				t.Fatalf("task-scoped command %q reached RunE", strings.Join(path, " "))
+			}
+		})
+	}
+
+	if requests := recorder.snapshot(); len(requests) != 0 {
+		t.Fatalf("task-scoped run commands performed HTTP requests: %#v", requests)
 	}
 }
 
