@@ -88,7 +88,7 @@ a pointer.
 | already-pending dedup (squad leader) → shared pending-task helper → `continue` | `server/internal/handler/comment.go:1429-1433` |
 | `canAccessPrivateAgent` definition | `server/internal/handler/agent_access.go` (search `func (h *Handler) canAccessPrivateAgent`) |
 | `canEnqueueSquadLeader` (loads leader, delegates to `canInvokeAgent`) | `server/internal/handler/agent_access.go:261-267` |
-| autopilot-delegation invoke authority: an unattributed agent-authored comment on an autopilot-origin issue falls back to the autopilot creator as the effective invoking user for the gate (MUL-4857) | `server/internal/handler/comment.go` (search `invokeAuthorityForAutopilotIssue`); helper in `server/internal/handler/agent_access.go` (search `func (h *Handler) invokeAuthorityForAutopilotIssue`) |
+| autopilot-delegation invoke authority: an unattributed autopilot run delegating on the issue it created falls back to the autopilot creator as the effective invoking user for the gate, bound to verified speaking-task lineage (author == task agent, `task.issue_id` == this issue) so no cross-issue borrow (MUL-4857) | gate application via `opts.effectiveInvoker()` in `server/internal/handler/comment.go` (search `func (o commentTriggerComputeOptions) effectiveInvoker`); lineage-verifying helper in `server/internal/handler/agent_access.go` (search `func (h *Handler) autopilotDelegationAuthority`); resolved from the trusted X-Task-ID / `comment.source_task_id` via `autopilotDelegationAuthorityFromRequest` / `autopilotDelegationAuthorityFromComment` |
 
 ## @all broadcast and assignee-trigger suppression
 

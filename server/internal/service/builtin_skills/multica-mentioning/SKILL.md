@@ -129,12 +129,16 @@ These are all silent no-ops — no error, no run:
 
 One nuance for automation (MUL-4857): when an UNATTRIBUTED autopilot run (a
 schedule/webhook dispatch has no human originator, so the A2A gate has no human
-to key on) authors a delegation `@mention` on an autopilot-created issue, the
-invoke gate falls back to the **autopilot creator** as the effective invoking
-user — the same principal that admitted the first dispatch. So a mid-run
+to key on) delegates by `@mention` while working on the issue that autopilot
+created, the invoke gate falls back to the **autopilot creator** as the effective
+invoking user — the same principal that admitted the first dispatch. So a mid-run
 `@agent` / `@squad` delegation fires exactly when the autopilot creator could
 invoke that target (owner / `public_to` match), and stays skipped otherwise. It
 is authorization only — the enqueued run's originator/attribution is unchanged.
+This fallback is bound to verified task lineage: it applies only when the
+delegating run's own task is the one working on that autopilot issue (author ==
+task agent, `task.issue_id` == this issue), so a run doing work elsewhere can
+never borrow another autopilot creator's authority by commenting on its issue.
 
 ## Incorrect → Correct
 
