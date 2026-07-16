@@ -281,7 +281,7 @@ func TestPatcherRedactsReferenceLocalImageBeforeTextRouting(t *testing.T) {
 		Payload: protocol.ChatDonePayload{
 			TaskID:        uuidString(taskID),
 			ChatSessionID: uuidString(q.binding.ChatSessionID),
-			Content:       "Scan this:\n\n![scan][local]\n\n[local]: " + localPath,
+			Content:       "Scan this:\n\n![scan][local]\n\n[local]:\n" + localPath,
 		},
 	})
 
@@ -309,7 +309,7 @@ func TestPatcherRedactsReferenceLocalImageBeforeCardRouting(t *testing.T) {
 		Payload: protocol.ChatDonePayload{
 			TaskID:        uuidString(taskID),
 			ChatSessionID: uuidString(q.binding.ChatSessionID),
-			Content:       "**Scan:** ![result][local]\n\n[local]: /tmp/screenshot(1).png \"preview\"",
+			Content:       "**Scan:** ![result][local]\n\n[local]:\n   /tmp/screenshot(1).png\n   \"preview\"",
 		},
 	})
 
