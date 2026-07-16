@@ -145,13 +145,14 @@ type CreateCustomIssueStatusParams struct {
 // Category: position = max(position within category) + 1, so they sort after
 // the built-ins of the same Category.
 //
-// The `WITH ws ... FOR KEY SHARE` clause is the no-FK workspace existence gate
-// (mirrors EnsureWorkspaceSystemIssueStatuses). It takes the same lock the
-// workspace delete/create protocol uses (LockWorkspaceForChatSessionCreate), so
-// a concurrent DeleteWorkspace (FOR UPDATE) cannot interleave: if the workspace
-// row is already gone, ws is empty and zero rows are inserted, so a create that
-// lost the race to a workspace delete can never leave an orphan status behind.
-// Zero rows makes this :one return pgx.ErrNoRows, which the handler maps to 404.
+// The `WITH ws ... FOR KEY SHARE` clause is a defense-in-depth workspace
+// existence gate (mirrors EnsureWorkspaceSystemIssueStatuses). The PRIMARY gate
+// and lock order now live in LockWorkspaceForStatusWrite, which takes this same
+// FOR KEY SHARE on the workspace row at the very start of the transaction —
+// before any default-swap touches a status row — so the create/delete ordering
+// cannot deadlock. This CTE stays as a backstop: if the workspace row is gone,
+// ws is empty and zero rows are inserted (never an orphan), and the :one query
+// returns pgx.ErrNoRows, which the handler also maps to 404.
 func (q *Queries) CreateCustomIssueStatus(ctx context.Context, arg CreateCustomIssueStatusParams) (IssueStatus, error) {
 	row := q.db.QueryRow(ctx, createCustomIssueStatus,
 		arg.Name,

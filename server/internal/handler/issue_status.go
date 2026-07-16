@@ -250,14 +250,16 @@ func (h *Handler) requireIssueStatusAdmin(w http.ResponseWriter, r *http.Request
 	return workspaceID, userID, true
 }
 
-// withIssueStatusLock runs fn inside a transaction holding the workspace-scoped
-// advisory lock, serializing catalog writes for the workspace: the active-count
-// cap, name-uniqueness, and the clear-then-set default swap are all
-// read-then-write and must not interleave. The lock key is derived from the
-// canonical workspace UUID (issuestatus.WorkspaceLockKey), the single protocol
-// every status write shares, so a differently-formatted UUID cannot take a
-// distinct lock and bypass mutual exclusion. The lock is transaction-scoped and
-// releases on commit or rollback.
+// withIssueStatusLock runs fn inside a transaction that first takes the shared
+// status-write locks (issuestatus.LockWorkspaceForStatusWrite): the workspace
+// row FOR KEY SHARE gate, then the workspace-scoped advisory lock. Because that
+// gate runs BEFORE fn touches any status row, every catalog write takes locks in
+// the same order — workspace row -> status rows — as DeleteWorkspace, so the
+// default-swap ClearCategoryDefault can no longer deadlock against a concurrent
+// delete. The advisory lock serializes catalog writers so the active-count cap,
+// name-uniqueness, and clear-then-set default swap can't interleave. A workspace
+// already deleted surfaces as ErrWorkspaceGone before fn runs. Both locks are
+// transaction-scoped and release on commit or rollback.
 func (h *Handler) withIssueStatusLock(r *http.Request, wsUUID pgtype.UUID, fn func(q *db.Queries) error) error {
 	tx, err := h.TxStarter.Begin(r.Context())
 	if err != nil {
@@ -415,6 +417,10 @@ func (h *Handler) CreateIssueStatus(w http.ResponseWriter, r *http.Request) {
 		return err
 	})
 	if err != nil {
+		if errors.Is(err, issuestatus.ErrWorkspaceGone) {
+			writeError(w, http.StatusNotFound, "workspace not found")
+			return
+		}
 		if errors.Is(err, errClientRejected) {
 			writeError(w, httpStatus, httpMsg)
 			return
@@ -567,6 +573,10 @@ func (h *Handler) UpdateIssueStatus(w http.ResponseWriter, r *http.Request) {
 		return nil
 	})
 	if err != nil {
+		if errors.Is(err, issuestatus.ErrWorkspaceGone) {
+			writeError(w, http.StatusNotFound, "workspace not found")
+			return
+		}
 		if errors.Is(err, errClientRejected) {
 			writeError(w, httpStatus, httpMsg)
 			return
@@ -664,6 +674,10 @@ func (h *Handler) DeleteIssueStatus(w http.ResponseWriter, r *http.Request) {
 		return err
 	})
 	if err != nil {
+		if errors.Is(err, issuestatus.ErrWorkspaceGone) {
+			writeError(w, http.StatusNotFound, "workspace not found")
+			return
+		}
 		if errors.Is(err, errClientRejected) {
 			writeError(w, httpStatus, httpMsg)
 			return

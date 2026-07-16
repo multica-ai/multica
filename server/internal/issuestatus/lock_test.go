@@ -235,3 +235,113 @@ func TestArchiveMigrationClosesUnderSharedLock(t *testing.T) {
 		t.Fatalf("issue stranded on archived status: status_id = %s, want migrated to B %s", finalStatusID, uuidToString(statusB.ID))
 	}
 }
+
+// TestDefaultCreateAndWorkspaceDeleteNoDeadlock is the lock-order regression
+// guard (P0 follow-up, MUL-4809 review). It reproduces the exact interleave that
+// deadlocked before the fix: a create with is_default=true holds a status row
+// (ClearCategoryDefault) while a concurrent DeleteWorkspace holds the workspace
+// row FOR UPDATE, and only then does the create reach for the workspace row. If
+// the create took the workspace lock at that point (inside the INSERT), the two
+// would deadlock (40P01).
+//
+// LockWorkspaceForStatusWrite now takes the workspace row FOR KEY SHARE FIRST, so
+// the create already owns the workspace lock before it touches a status row: the
+// concurrent delete blocks on FOR KEY SHARE, the create finishes, and the delete
+// then sweeps cleanly with no orphan. The interleave is arranged so that
+// reintroducing the old order (workspace lock taken only in the INSERT) makes the
+// CreateCustomIssueStatus step below deadlock and fails this test.
+func TestDefaultCreateAndWorkspaceDeleteNoDeadlock(t *testing.T) {
+	ctx := context.Background()
+	q := db.New(testPool)
+	wsID := freshWorkspace(ctx, t)
+	if err := Ensure(ctx, q, wsID); err != nil {
+		t.Fatalf("Ensure: %v", err)
+	}
+
+	// tx1 mirrors the create-with-default flow up to (but not including) the row
+	// insert: shared status-write locks first, then clear the current default,
+	// which locks a status row.
+	tx1, err := testPool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin tx1: %v", err)
+	}
+	defer tx1.Rollback(ctx)
+	if err := LockWorkspaceForStatusWrite(ctx, tx1, wsID); err != nil {
+		t.Fatalf("tx1 status locks: %v", err)
+	}
+	q1 := q.WithTx(tx1)
+	if err := q1.ClearCategoryDefault(ctx, db.ClearCategoryDefaultParams{WorkspaceID: wsID, Category: "todo"}); err != nil {
+		t.Fatalf("tx1 clear default: %v", err)
+	}
+
+	// tx2 (workspace delete) races in NOW, while tx1 holds a status row but has
+	// not yet inserted: it grabs the workspace row FOR UPDATE then sweeps the
+	// catalog. `started` fires just before it reaches for the workspace lock.
+	started := make(chan struct{})
+	deleteDone := make(chan error, 1)
+	go func() {
+		tx2, err := testPool.Begin(context.Background())
+		if err != nil {
+			close(started)
+			deleteDone <- err
+			return
+		}
+		defer tx2.Rollback(context.Background())
+		q2 := q.WithTx(tx2)
+		close(started)
+		if _, err := q2.LockWorkspaceForDelete(context.Background(), wsID); err != nil {
+			deleteDone <- err
+			return
+		}
+		if err := q2.DeleteWorkspace(context.Background(), wsID); err != nil {
+			deleteDone <- err
+			return
+		}
+		deleteDone <- tx2.Commit(context.Background())
+	}()
+
+	// Let tx2's workspace-lock request reach Postgres (it would acquire on the old
+	// order, or block on FOR KEY SHARE on the fixed one) before tx1 inserts.
+	<-started
+	time.Sleep(250 * time.Millisecond)
+
+	// The insert reaches for the workspace row (FOR KEY SHARE in its CTE). On the
+	// fixed order tx1 already holds it, so this proceeds; on the old order it
+	// would block on tx2's FOR UPDATE and deadlock (40P01) here.
+	if _, err := q1.CreateCustomIssueStatus(ctx, db.CreateCustomIssueStatusParams{
+		WorkspaceID: wsID, Name: "Triage", Icon: "todo", Color: "warning", Category: "todo", IsDefault: true,
+	}); err != nil {
+		t.Fatalf("tx1 create default deadlocked or failed (lock-order regression?): %v", err)
+	}
+
+	// The delete must still be blocked, waiting on tx1's FOR KEY SHARE.
+	select {
+	case err := <-deleteDone:
+		t.Fatalf("workspace delete completed while the create still held the lock (err=%v); expected it to wait", err)
+	case <-time.After(150 * time.Millisecond):
+	}
+
+	if err := tx1.Commit(ctx); err != nil {
+		t.Fatalf("tx1 commit failed: %v", err)
+	}
+	select {
+	case err := <-deleteDone:
+		if err != nil {
+			t.Fatalf("workspace delete errored (want clean, no deadlock): %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("workspace delete never completed after the create committed")
+	}
+
+	// No orphan catalog rows survive the delete, and the workspace is gone.
+	if n := rawStatusCount(ctx, t, wsID); n != 0 {
+		t.Fatalf("workspace delete left %d orphan issue_status rows; want 0", n)
+	}
+	var exists bool
+	if err := testPool.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM workspace WHERE id = $1)", wsID).Scan(&exists); err != nil {
+		t.Fatalf("check workspace existence: %v", err)
+	}
+	if exists {
+		t.Fatal("workspace still exists after its delete committed")
+	}
+}

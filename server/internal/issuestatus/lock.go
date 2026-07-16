@@ -2,11 +2,19 @@ package issuestatus
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 )
+
+// ErrWorkspaceGone is returned by LockWorkspaceForStatusWrite when the workspace
+// row no longer exists (a concurrent DeleteWorkspace already committed). Callers
+// map it to 404 and must not perform any catalog write. It is distinct from
+// pgx.ErrNoRows so the caller can tell "workspace deleted" from an ordinary
+// missing-status lookup.
+var ErrWorkspaceGone = errors.New("workspace no longer exists")
 
 // WorkspaceLockKey returns the canonical advisory-lock key that serializes every
 // write to a workspace's status catalog and every issue-status assignment that
@@ -23,21 +31,41 @@ func WorkspaceLockKey(workspaceID pgtype.UUID) string {
 	return "issuestatus:" + uuidToString(workspaceID)
 }
 
-// LockWorkspaceForStatusWrite takes the workspace-scoped, transaction-lifetime
-// advisory lock that is THE single serialization point for status writes
-// (MUL-4809, plan §5.5). Every catalog mutation — create, rename/recolor,
-// default swap, and archive-with-issue-migration — and any future issue-status
-// assignment that could point an issue at a status being archived MUST run
-// inside a transaction and call this first, so those read-then-write sequences
-// stay atomic against each other. The lock is released automatically on commit
-// or rollback.
+// LockWorkspaceForStatusWrite establishes the ONE lock order every status write
+// shares (MUL-4809, plan §5.5), in two steps that MUST be the first thing a
+// status-write transaction does:
 //
-// Note this advisory lock protects the catalog invariants (cap, single default,
-// archive census) between concurrent catalog writers; the no-FK workspace
-// existence guard against a concurrent workspace delete is a separate FOR KEY
-// SHARE gate inside the seed/create statements (see EnsureWorkspaceSystemIssueStatuses
-// and CreateCustomIssueStatus), matching the workspace delete/create protocol.
+//  1. Take FOR KEY SHARE on the workspace row. This is the no-FK existence gate
+//     and — critically — it fixes the global lock order. DeleteWorkspace holds
+//     the workspace row FOR UPDATE and only then deletes issue_status rows; if a
+//     status write instead grabbed status rows first (e.g. the default-swap
+//     ClearCategoryDefault) and reached for the workspace row afterwards, the two
+//     transactions would deadlock (40P01). Acquiring the workspace row FIRST here
+//     means both sides always take workspace -> status rows, so one simply waits
+//     for the other. FOR KEY SHARE shares with other status writers (they don't
+//     serialize on this) but conflicts with the delete's FOR UPDATE. A missing
+//     row means the workspace was already deleted -> ErrWorkspaceGone, before any
+//     write.
+//  2. Take the workspace-scoped advisory lock. This serializes catalog writers
+//     against each other so the count cap, single-default-per-Category swap, and
+//     archive census stay atomic. Its key is the canonical workspace UUID (see
+//     WorkspaceLockKey), so a differently-formatted UUID can't take a distinct
+//     lock and bypass mutual exclusion.
+//
+// Every catalog mutation (create, rename/recolor, default swap, archive-with-
+// migration) and any future issue-status assignment that could point an issue at
+// a status being archived calls this first. Both locks release on commit/rollback.
 func LockWorkspaceForStatusWrite(ctx context.Context, tx pgx.Tx, workspaceID pgtype.UUID) error {
+	// Step 1: workspace-row existence gate + global lock order.
+	var id pgtype.UUID
+	err := tx.QueryRow(ctx, "SELECT id FROM workspace WHERE id = $1 FOR KEY SHARE", workspaceID).Scan(&id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ErrWorkspaceGone
+	}
+	if err != nil {
+		return fmt.Errorf("lock workspace row for issue-status write: %w", err)
+	}
+	// Step 2: catalog-writer serialization.
 	if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", WorkspaceLockKey(workspaceID)); err != nil {
 		return fmt.Errorf("lock workspace for issue-status write: %w", err)
 	}
