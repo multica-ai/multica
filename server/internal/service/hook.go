@@ -19,10 +19,11 @@ import (
 // problems (shape or unresolvable/forbidden target) flow through as
 // *automation.ValidationError (→ 400).
 var (
-	ErrHookNotFound      = errors.New("hook not found")
-	ErrHookSystemManaged = errors.New("system-managed hooks cannot be modified through this API")
-	ErrHookNoPrincipal   = errors.New("no accountable authorization principal for this hook")
-	ErrHookForbidden     = errors.New("only the hook's principal or a workspace admin may modify it")
+	ErrHookNotFound          = errors.New("hook not found")
+	ErrHookSystemManaged     = errors.New("system-managed hooks cannot be modified through this API")
+	ErrHookNoPrincipal       = errors.New("no accountable authorization principal for this hook")
+	ErrHookForbidden         = errors.New("only the hook's principal or a workspace admin may modify it")
+	ErrHookPrincipalDeparted = errors.New("the hook's authorization principal is no longer a member of this workspace")
 )
 
 // HookAuthor carries the resolved identity for a hook write: who is acting
@@ -86,16 +87,17 @@ func (s *HookService) CreateHook(ctx context.Context, workspaceID pgtype.UUID, s
 	var out HookWithRevision
 	err = s.inTx(ctx, func(qtx *db.Queries) error {
 		// The creator's principal must be a current member of the workspace.
-		if _, err := qtx.GetMemberByUserAndWorkspace(ctx, db.GetMemberByUserAndWorkspaceParams{
+		creator, err := qtx.GetMemberByUserAndWorkspace(ctx, db.GetMemberByUserAndWorkspaceParams{
 			UserID: author.PrincipalUserID, WorkspaceID: workspaceID,
-		}); err != nil {
+		})
+		if err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
 				return ErrHookNoPrincipal
 			}
 			return err
 		}
 		// A newly created hook runs under the creator's authority.
-		if err := validateTargets(ctx, qtx, workspaceID, spec, util.UUIDToString(author.PrincipalUserID)); err != nil {
+		if err := validateTargets(ctx, qtx, workspaceID, spec, creator); err != nil {
 			return err
 		}
 		hook, err := qtx.CreateHook(ctx, db.CreateHookParams{
@@ -162,9 +164,15 @@ func (s *HookService) UpdateHook(ctx context.Context, workspaceID, hookID pgtype
 		if err != nil {
 			return err
 		}
-		// Admission uses the hook's STORED principal, resolved from the locked row.
-		storedPrincipal := util.UUIDToString(existing.AuthorizationPrincipalUserID)
-		if err := validateTargets(ctx, qtx, workspaceID, spec, storedPrincipal); err != nil {
+		// Editing re-arms the hook, so its STORED principal must still be a live
+		// member — an admin cannot re-point a departed principal's hook at new
+		// targets (review round 4, point 1). Admission then runs against that
+		// principal, never the editor.
+		principal, err := s.requireLivePrincipal(ctx, qtx, workspaceID, existing.AuthorizationPrincipalUserID)
+		if err != nil {
+			return err
+		}
+		if err := validateTargets(ctx, qtx, workspaceID, spec, principal); err != nil {
 			return err
 		}
 		maxRev, err := qtx.GetMaxHookRevision(ctx, hookID)
@@ -252,8 +260,17 @@ func (s *HookService) SetEnabled(ctx context.Context, workspaceID, hookID pgtype
 	}
 	var out HookWithRevision
 	err := s.inTx(ctx, func(qtx *db.Queries) error {
-		if _, err := s.lockEditableHook(ctx, qtx, workspaceID, hookID, author); err != nil {
+		existing, err := s.lockEditableHook(ctx, qtx, workspaceID, hookID, author)
+		if err != nil {
 			return err
+		}
+		// Enable re-arms the hook, so (like update) its stored principal must still
+		// be a live member. Disable is a degrading op: an admin may safely disable a
+		// departed principal's hook (review round 4, point 1).
+		if enabled {
+			if _, err := s.requireLivePrincipal(ctx, qtx, workspaceID, existing.AuthorizationPrincipalUserID); err != nil {
+				return err
+			}
 		}
 		hook, err := qtx.SetHookEnabled(ctx, db.SetHookEnabledParams{
 			ID:             hookID,
@@ -334,6 +351,22 @@ func (s *HookService) lockEditableHook(ctx context.Context, qtx *db.Queries, wor
 	return existing, nil
 }
 
+// requireLivePrincipal loads the hook's stored principal as a workspace member,
+// making live membership a hard precondition for re-arming a hook (update/enable).
+// A departed principal fails closed; a real DB error is propagated.
+func (s *HookService) requireLivePrincipal(ctx context.Context, qtx *db.Queries, workspaceID, principal pgtype.UUID) (db.Member, error) {
+	member, err := qtx.GetMemberByUserAndWorkspace(ctx, db.GetMemberByUserAndWorkspaceParams{
+		UserID: principal, WorkspaceID: workspaceID,
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return db.Member{}, ErrHookPrincipalDeparted
+		}
+		return db.Member{}, err
+	}
+	return member, nil
+}
+
 // authorizeHookEdit implements the edit gate (review point 1): a workspace
 // owner/admin may edit any hook's configuration; otherwise only the hook's
 // original authorization principal may. The principal is NOT transferred on
@@ -410,15 +443,17 @@ type targetChecker struct {
 	principalIsMember bool
 }
 
-func validateTargets(ctx context.Context, qtx *db.Queries, workspaceID pgtype.UUID, spec automation.HookSpec, principalUserID string) error {
-	tc := &targetChecker{ctx: ctx, qtx: qtx, workspaceID: workspaceID, principalUserID: principalUserID}
-	// Resolve the principal's membership once; agent workspace-target and
-	// autopilot admission both need it, and a departed principal fails closed.
-	if pid, err := util.ParseUUID(principalUserID); err == nil {
-		if m, err := qtx.GetMemberByUserAndWorkspace(ctx, db.GetMemberByUserAndWorkspaceParams{UserID: pid, WorkspaceID: workspaceID}); err == nil {
-			tc.principalMember = m
-			tc.principalIsMember = true
-		}
+// validateTargets is always called with the hook's stored principal already
+// resolved to a LIVE workspace member (the create/update paths make that a hard
+// gate first), so every target admission runs against a known-member principal.
+func validateTargets(ctx context.Context, qtx *db.Queries, workspaceID pgtype.UUID, spec automation.HookSpec, principal db.Member) error {
+	tc := &targetChecker{
+		ctx:               ctx,
+		qtx:               qtx,
+		workspaceID:       workspaceID,
+		principalUserID:   util.UUIDToString(principal.UserID),
+		principalMember:   principal,
+		principalIsMember: true,
 	}
 	return tc.validate(spec)
 }
@@ -530,20 +565,26 @@ func (tc *targetChecker) requireMember(id, field string) error {
 	return nil
 }
 
-// requireAssignee accepts either a workspace member (by member row id) or a
-// workspace agent — issue assignees are polymorphic.
+// requireAssignee validates an issue-assignee operand. Issue assignees are
+// polymorphic (member | agent | squad, §Domain): a MEMBER assignee id is a USER
+// id (looked up via GetMemberByUserAndWorkspace, NOT a member-row id), an agent
+// id is a workspace agent, and a squad id is a non-archived workspace squad
+// (review round 4, point 3).
 func (tc *targetChecker) requireAssignee(id, field string) error {
 	uid, err := util.ParseUUID(id)
 	if err != nil {
 		return automation.NewValidationError("%s must be a uuid", field)
 	}
-	if _, err := tc.qtx.GetMemberInWorkspace(tc.ctx, db.GetMemberInWorkspaceParams{ID: uid, WorkspaceID: tc.workspaceID}); err == nil {
+	if _, err := tc.qtx.GetMemberByUserAndWorkspace(tc.ctx, db.GetMemberByUserAndWorkspaceParams{UserID: uid, WorkspaceID: tc.workspaceID}); err == nil {
 		return nil
 	}
 	if _, err := tc.qtx.GetAgentInWorkspace(tc.ctx, db.GetAgentInWorkspaceParams{ID: uid, WorkspaceID: tc.workspaceID}); err == nil {
 		return nil
 	}
-	return automation.NewValidationError("%s references assignee %s which is not a member or agent in this workspace", field, id)
+	if squad, err := tc.qtx.GetSquadInWorkspace(tc.ctx, db.GetSquadInWorkspaceParams{ID: uid, WorkspaceID: tc.workspaceID}); err == nil && !squad.ArchivedAt.Valid {
+		return nil
+	}
+	return automation.NewValidationError("%s references assignee %s which is not a member, agent, or squad in this workspace", field, id)
 }
 
 func (tc *targetChecker) requireWritableAutopilot(id, field string) error {
@@ -564,17 +605,59 @@ func (tc *targetChecker) requireWritableAutopilot(id, field string) error {
 	if !tc.principalIsMember {
 		return automation.NewValidationError("%s references autopilot %s which the hook's principal may not write", field, id)
 	}
-	if admission.AutopilotWriteByOwnership(ap, tc.principalMember) {
-		return nil
+	if !admission.AutopilotWriteByOwnership(ap, tc.principalMember) {
+		granted, err := tc.qtx.IsAutopilotCollaborator(tc.ctx, db.IsAutopilotCollaboratorParams{AutopilotID: ap.ID, UserID: tc.principalMember.UserID})
+		if err != nil {
+			return err
+		}
+		if !granted {
+			return automation.NewValidationError("%s references autopilot %s which the hook's principal may not write", field, id)
+		}
 	}
-	granted, err := tc.qtx.IsAutopilotCollaborator(tc.ctx, db.IsAutopilotCollaboratorParams{AutopilotID: ap.ID, UserID: tc.principalMember.UserID})
-	if err != nil {
-		return err
+	// Write permission is not enough: running the autopilot invokes its assignee
+	// (an agent, or a squad's leader agent), so the principal must also be able to
+	// invoke that agent — otherwise execution would be admission-skipped (review
+	// round 4, point 2). PR4 re-validates dynamic state at execution time.
+	return tc.requireInvocableAutopilotAssignee(ap, field)
+}
+
+// requireInvocableAutopilotAssignee resolves the autopilot's assignee to its
+// executing agent (the agent itself, or a non-archived squad's leader) and
+// requires the stored principal be able to invoke it. A dangling/archived
+// assignee fails closed.
+func (tc *targetChecker) requireInvocableAutopilotAssignee(ap db.Autopilot, field string) error {
+	switch ap.AssigneeType {
+	case "agent":
+		agent, err := tc.qtx.GetAgentInWorkspace(tc.ctx, db.GetAgentInWorkspaceParams{ID: ap.AssigneeID, WorkspaceID: tc.workspaceID})
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return automation.NewValidationError("%s references autopilot %s whose assignee agent is missing or not in this workspace", field, util.UUIDToString(ap.ID))
+			}
+			return err
+		}
+		return tc.checkAgentInvocable(agent, field)
+	case "squad":
+		squad, err := tc.qtx.GetSquadInWorkspace(tc.ctx, db.GetSquadInWorkspaceParams{ID: ap.AssigneeID, WorkspaceID: tc.workspaceID})
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return automation.NewValidationError("%s references autopilot %s whose squad is missing or not in this workspace", field, util.UUIDToString(ap.ID))
+			}
+			return err
+		}
+		if squad.ArchivedAt.Valid {
+			return automation.NewValidationError("%s references autopilot %s whose squad is archived", field, util.UUIDToString(ap.ID))
+		}
+		leader, err := tc.qtx.GetAgentInWorkspace(tc.ctx, db.GetAgentInWorkspaceParams{ID: squad.LeaderID, WorkspaceID: tc.workspaceID})
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return automation.NewValidationError("%s references autopilot %s whose squad leader is missing", field, util.UUIDToString(ap.ID))
+			}
+			return err
+		}
+		return tc.checkAgentInvocable(leader, field)
+	default:
+		return automation.NewValidationError("%s references autopilot %s with an unsupported assignee", field, util.UUIDToString(ap.ID))
 	}
-	if !granted {
-		return automation.NewValidationError("%s references autopilot %s which the hook's principal may not write", field, id)
-	}
-	return nil
 }
 
 // requireInvokableAgent confirms the agent exists in the workspace, is not
@@ -593,6 +676,14 @@ func (tc *targetChecker) requireInvokableAgent(id, field string) error {
 		}
 		return err
 	}
+	return tc.checkAgentInvocable(agent, field)
+}
+
+// checkAgentInvocable fail-closed asserts an already-loaded workspace agent is
+// live (not archived, has a runtime) and invocable by the hook's stored
+// principal. Shared by trigger_agent and run_autopilot assignee validation.
+func (tc *targetChecker) checkAgentInvocable(agent db.Agent, field string) error {
+	id := util.UUIDToString(agent.ID)
 	if agent.ArchivedAt.Valid || !agent.RuntimeID.Valid {
 		return automation.NewValidationError("%s references agent %s which is archived or has no runtime", field, id)
 	}

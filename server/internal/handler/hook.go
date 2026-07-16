@@ -387,6 +387,8 @@ func (h *Handler) writeHookError(w http.ResponseWriter, err error) {
 		writeError(w, http.StatusForbidden, err.Error())
 	case errors.Is(err, service.ErrHookForbidden):
 		writeError(w, http.StatusForbidden, err.Error())
+	case errors.Is(err, service.ErrHookPrincipalDeparted):
+		writeError(w, http.StatusForbidden, err.Error())
 	case errors.Is(err, service.ErrHookNoPrincipal):
 		writeError(w, http.StatusForbidden, "no accountable authorization principal")
 	default:

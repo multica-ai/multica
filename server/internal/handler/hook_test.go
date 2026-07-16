@@ -477,20 +477,27 @@ func seedPrivateAgent(t *testing.T, ownerUserID string) string {
 	return id
 }
 
-// seedAutopilot inserts an autopilot created by creatorUserID.
+// seedAutopilot inserts an autopilot created by creatorUserID assigned to the
+// seeded (workspace-visible) agent.
 func seedAutopilot(t *testing.T, creatorUserID string) string {
+	return seedAutopilotWith(t, creatorUserID, "agent", seededHookAgentID(t))
+}
+
+// seedAutopilotWith inserts an autopilot with an explicit assignee.
+func seedAutopilotWith(t *testing.T, creatorUserID, assigneeType, assigneeID string) string {
 	t.Helper()
 	var id string
 	if err := testPool.QueryRow(context.Background(), `
 		INSERT INTO autopilot (workspace_id, title, assignee_type, assignee_id, status, execution_mode, created_by_type, created_by_id)
-		VALUES ($1, $2, 'agent', $3, 'active', 'run_only', 'member', $4)
+		VALUES ($1, $2, $3, $4, 'active', 'run_only', 'member', $5)
 		RETURNING id`,
-		testWorkspaceID, "hook autopilot", seededHookAgentID(t), creatorUserID).Scan(&id); err != nil {
+		testWorkspaceID, "hook autopilot", assigneeType, assigneeID, creatorUserID).Scan(&id); err != nil {
 		t.Fatalf("seed autopilot: %v", err)
 	}
 	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM autopilot WHERE id = $1`, id) })
 	return id
 }
+
 
 func triggerAgentSpec(name, issueID, agentID string) map[string]any {
 	return map[string]any{
@@ -630,6 +637,115 @@ func TestHookRejectsTrailingJSONDocument(t *testing.T) {
 	testHandler.CreateHook(w, req)
 	if w.Code != http.StatusBadRequest {
 		t.Errorf("trailing second JSON document: status %d, want 400: %s", w.Code, w.Body.String())
+	}
+}
+
+// A hook's stored principal must remain a live member for the hook to be
+// re-armed. After the principal leaves the workspace, update and enable are
+// blocked (403), but disable/archive stay allowed for admins as safe degrading
+// operations (review round 4, point 1).
+func TestHookDepartedPrincipalGate(t *testing.T) {
+	if testPool == nil {
+		t.Skip("database unavailable")
+	}
+	enableHooksFlag(t)
+	ctx := context.Background()
+	issueID := seedHookIssue(t)
+	memberA := seedHookMember(t, "member")
+	hook := createHookAs(t, memberA, sampleHookSpec("A hook", "hi", issueID))
+
+	// A leaves the workspace.
+	if _, err := testPool.Exec(ctx, `DELETE FROM member WHERE workspace_id = $1 AND user_id = $2`, testWorkspaceID, memberA); err != nil {
+		t.Fatalf("remove member A: %v", err)
+	}
+
+	// Owner (admin) may no longer PATCH or enable A's hook (re-arming).
+	w := httptest.NewRecorder()
+	testHandler.UpdateHook(w, withURLParam(newMemberHookRequest(http.MethodPatch, "/api/hooks/"+hook.ID, sampleHookSpec("x", "y", issueID)), "id", hook.ID))
+	if w.Code != http.StatusForbidden {
+		t.Errorf("PATCH after principal departed: status %d, want 403: %s", w.Code, w.Body.String())
+	}
+	w = httptest.NewRecorder()
+	testHandler.EnableHook(w, withURLParam(newMemberHookRequest(http.MethodPost, "/api/hooks/"+hook.ID+"/enable", nil), "id", hook.ID))
+	if w.Code != http.StatusForbidden {
+		t.Errorf("enable after principal departed: status %d, want 403: %s", w.Code, w.Body.String())
+	}
+
+	// Disable and archive are degrading ops an admin may still perform.
+	w = httptest.NewRecorder()
+	testHandler.DisableHook(w, withURLParam(newMemberHookRequest(http.MethodPost, "/api/hooks/"+hook.ID+"/disable", nil), "id", hook.ID))
+	if w.Code != http.StatusOK {
+		t.Errorf("disable after principal departed: status %d, want 200 (degrading): %s", w.Code, w.Body.String())
+	}
+	w = httptest.NewRecorder()
+	testHandler.DeleteHook(w, withURLParam(newMemberHookRequest(http.MethodDelete, "/api/hooks/"+hook.ID, nil), "id", hook.ID))
+	if w.Code != http.StatusNoContent {
+		t.Errorf("archive after principal departed: status %d, want 204 (degrading): %s", w.Code, w.Body.String())
+	}
+}
+
+// run_autopilot admission also gates the autopilot's assignee: a principal with
+// write access (collaborator) whose autopilot targets an agent they cannot invoke
+// is rejected at save (review round 4, point 2).
+func TestHookAutopilotAssigneeAdmission(t *testing.T) {
+	if testPool == nil {
+		t.Skip("database unavailable")
+	}
+	enableHooksFlag(t)
+	ctx := context.Background()
+	privateAgent := seedPrivateAgent(t, testUserID) // owner's private agent
+	autopilotID := seedAutopilotWith(t, testUserID, "agent", privateAgent)
+	memberA := seedHookMember(t, "member")
+
+	// A is granted collaborator write access on the autopilot...
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO autopilot_collaborator (autopilot_id, user_type, user_id, granted_by)
+		VALUES ($1, 'member', $2, $3)`, autopilotID, memberA, testUserID); err != nil {
+		t.Fatalf("grant collaborator: %v", err)
+	}
+
+	// ...but A cannot invoke the autopilot's private-agent assignee, so save fails.
+	w := httptest.NewRecorder()
+	testHandler.CreateHook(w, newUserHookRequest(http.MethodPost, "/api/hooks", runAutopilotSpec("by A collab", autopilotID), memberA))
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("collaborator run_autopilot with un-invocable assignee: status %d, want 400: %s", w.Code, w.Body.String())
+	}
+
+	// The owner owns the assignee agent, so their own hook is accepted.
+	createHookAs(t, testUserID, runAutopilotSpec("by owner", autopilotID))
+}
+
+// issue_field.assignee_id operands are polymorphic: a member operand is a USER id
+// (previously wrongly rejected), plus agent and squad (review round 4, point 3).
+func TestHookAssigneeOperandTypes(t *testing.T) {
+	if testPool == nil {
+		t.Skip("database unavailable")
+	}
+	enableHooksFlag(t)
+	realIssue := seedHookIssue(t)
+	agentID := seededHookAgentID(t)
+	squadID := seedSquad(t, agentID, fmt.Sprintf("Hook Squad %d", hookSeedCounter.Add(1)), false)
+	const ghost = "77777777-7777-7777-7777-777777777777"
+
+	assigneeCond := func(operand string) map[string]any {
+		return map[string]any{
+			"name": "assignee",
+			"when": map[string]any{"event": "issue.status_changed"},
+			"if":   []any{map[string]any{"issue_field": map[string]any{"id": realIssue, "field": "assignee_id", "eq": operand}}},
+			"fire": map[string]any{"mode": "per_event"},
+			"do":   []any{map[string]any{"type": "add_comment", "issue_id": realIssue, "message": "hi"}},
+		}
+	}
+	// member USER id, agent id, squad id are all accepted.
+	createHookAs(t, testUserID, assigneeCond(testUserID)) // member operand is a user id
+	createHookAs(t, testUserID, assigneeCond(agentID))
+	createHookAs(t, testUserID, assigneeCond(squadID))
+
+	// A ghost assignee operand is rejected.
+	w := httptest.NewRecorder()
+	testHandler.CreateHook(w, newMemberHookRequest(http.MethodPost, "/api/hooks", assigneeCond(ghost)))
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("ghost assignee operand: status %d, want 400: %s", w.Code, w.Body.String())
 	}
 }
 

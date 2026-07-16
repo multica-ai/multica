@@ -28,13 +28,19 @@ func MemberHitsInvocationTargets(targets []db.AgentInvocationTarget, userID stri
 	return false
 }
 
-// AgentInvocableByMember mirrors Handler.canInvokeAgent for a member principal:
-// the agent owner may always invoke; otherwise a public_to agent is invocable
-// only when the member is on its allow-list (a workspace target requires the
-// member to still be a current member of the workspace). There is no admin
-// bypass — an admin editing a hook may not grant a stored principal reach the
-// principal does not have.
+// AgentInvocableByMember decides whether a member principal may invoke an agent,
+// for the hook service's fail-closed save-time admission. A principal who is not
+// a CURRENT member of the workspace can invoke nothing — not even an agent they
+// own — because a hook must run under a live, accountable member (review round 4,
+// point 1); this is stricter than the interactive Handler.canInvokeAgent, whose
+// owner branch is membership-independent. Given a current member: the agent owner
+// may invoke; otherwise a public_to agent is invocable only when the member is on
+// its allow-list. There is no admin bypass — an admin editing a hook may not
+// grant a stored principal reach the principal does not have.
 func AgentInvocableByMember(agent db.Agent, targets []db.AgentInvocationTarget, memberUserID string, isCurrentMember bool) bool {
+	if !isCurrentMember {
+		return false
+	}
 	if memberUserID != "" && util.UUIDToString(agent.OwnerID) == memberUserID {
 		return true
 	}

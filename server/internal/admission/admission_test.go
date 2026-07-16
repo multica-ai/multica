@@ -30,6 +30,9 @@ func TestAgentInvocableByMember(t *testing.T) {
 	if !AgentInvocableByMember(privateAgent, nil, owner, true) {
 		t.Error("owner must be able to invoke their own private agent")
 	}
+	if AgentInvocableByMember(privateAgent, nil, owner, false) {
+		t.Error("a non-member must invoke nothing, even an agent they own")
+	}
 	if AgentInvocableByMember(privateAgent, wsTarget, member, true) {
 		t.Error("a private agent must not be invocable by a non-owner member")
 	}
