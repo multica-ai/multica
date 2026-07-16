@@ -56,6 +56,32 @@ func isTaskNotFoundError(err error) bool {
 	return strings.Contains(strings.ToLower(reqErr.Body), "task not found")
 }
 
+// isPrepareLeaseUnsupported returns true when err is a 404 from the
+// /prepare-lease route that means the ROUTE itself is unregistered on an
+// un-upgraded server (< MinServerVersion), not that the task/runtime row is
+// gone. The daemon uses this to fail loudly on a client/server version skew
+// the first time it bites, instead of Warn-looping every 15s forever
+// (VWO-364/VWO-365).
+//
+// It matches the POSITIVE signature of an unregistered route: chi's default
+// NotFound handler writes plain-text "404 page not found" (the router does not
+// override it), while every handler-level 404 goes through writeError as JSON
+// {"error": ...} — including "task not found"/"runtime not found" AND the
+// access-check paths that map transient DB errors to a generic not-found.
+// Exclusion-based matching here would let one DB hiccup on a single refresh
+// tick masquerade as version skew and permanently stop the lease extender,
+// lapsing the lease mid-task; a transient handler 404 must stay retryable.
+func isPrepareLeaseUnsupported(err error) bool {
+	var reqErr *requestError
+	if !errors.As(err, &reqErr) {
+		return false
+	}
+	if reqErr.StatusCode != http.StatusNotFound {
+		return false
+	}
+	return strings.Contains(strings.ToLower(reqErr.Body), "404 page not found")
+}
+
 // isUnauthorizedError returns true if the error is a 401 from the server.
 // Used by the token-renewal loop to surface a clear "re-login required"
 // message instead of a generic transport-level retry.
@@ -665,6 +691,10 @@ type RegisterResponse struct {
 	Repos        []RepoData      `json:"repos"`
 	ReposVersion string          `json:"repos_version"`
 	Settings     json.RawMessage `json:"settings,omitempty"`
+	// ServerVersion is the running server build version, used to detect a
+	// client/server version skew loudly at startup. Empty against a server
+	// that predates this field (treated as "unknown", not incompatible).
+	ServerVersion string `json:"server_version,omitempty"`
 }
 
 func (c *Client) Register(ctx context.Context, req map[string]any) (*RegisterResponse, error) {

@@ -176,6 +176,9 @@ type Daemon struct {
 	versionsMu    sync.RWMutex      // guards agentVersions
 	agentVersions map[string]string // provider -> detected CLI version (set during registration)
 
+	serverVersionMu sync.Mutex // guards serverVersion
+	serverVersion   string     // last non-empty server_version reported at register (VWO-365 skew gate)
+
 	// resolvedPathsMu guards resolvedPaths, the self-healed executable paths.
 	// The daemon pins each agent's absolute path at startup so a later PATH
 	// change can't redirect a task launch. When that pinned path later vanishes
@@ -922,7 +925,27 @@ func (d *Daemon) Run(ctx context.Context) error {
 	d.cancelFunc = cancel
 	d.rootCtx = ctx
 
-	// Bind health port early to detect another running daemon.
+	// Take the machine-global ownership lock before ANY side effect (health
+	// port, registration, task claim). This is the single authoritative guard
+	// that a second daemon process on this machine — most commonly the
+	// Desktop-spawned daemon racing the CLI one under a different profile —
+	// cannot advertise the same identity/runtime IDs or write the same
+	// checkout while an owner is live. The per-profile health-port bind below
+	// only catches a same-profile duplicate; this catches every profile.
+	// Deferred first so it releases LAST, after deregisterRuntimes.
+	ownership, err := d.acquireOwnership()
+	if err != nil {
+		return err
+	}
+	if ownership != nil {
+		defer func() {
+			if rerr := ownership.Release(); rerr != nil {
+				d.logger.Warn("release daemon ownership lock failed", "error", rerr)
+			}
+		}()
+	}
+
+	// Bind health port early to detect a same-profile running daemon.
 	healthLn, err := d.listenHealth()
 	if err != nil {
 		return err
@@ -988,8 +1011,20 @@ func (d *Daemon) Run(ctx context.Context) error {
 		return err
 	}
 
-	// Deregister runtimes on shutdown (uses a fresh context since ctx will be cancelled).
+	// Deregister runtimes on shutdown (uses a fresh context since ctx will be
+	// cancelled). Installed BEFORE the version gate below: preflightAuth has
+	// already registered runtimes, so a version-mismatch exit must still take
+	// them offline rather than leave the server routing tasks to a dead
+	// process until the stale-runtime sweeper catches up.
 	defer d.deregisterRuntimes()
+
+	// Fail loudly on a client/server version skew now, after the initial
+	// register learned the server_version but before any task is claimed —
+	// instead of leaving a newer daemon to 404-loop on routes an older server
+	// lacks (VWO-365).
+	if err := d.checkServerCompatibility(); err != nil {
+		return err
+	}
 
 	// Start workspace sync loop to discover newly created workspaces.
 	go d.workspaceSyncLoop(ctx)
@@ -1017,6 +1052,84 @@ func (d *Daemon) Run(ctx context.Context) error {
 // after a successful update, or empty string if no restart is needed.
 func (d *Daemon) RestartBinary() string {
 	return d.restartBinary
+}
+
+// acquireOwnership takes the machine-global daemon ownership lock unless the
+// operator has explicitly disabled the guard. It returns (nil, nil) when the
+// guard is bypassed so Run proceeds without a lock (and without a release).
+//
+// The lock lives at cli.ProfileDir("")/daemon.lock — the base config dir shared
+// by every profile — so it excludes a Desktop-spawned daemon under a different
+// profile, which the per-profile health-port guard does not.
+func (d *Daemon) acquireOwnership() (*OwnershipLock, error) {
+	if OwnershipBypassed() {
+		d.logger.Warn("daemon ownership guard disabled via MULTICA_DAEMON_ALLOW_MULTIPLE; " +
+			"multiple daemons may write the same checkout concurrently and corrupt it — unset this to restore the guard")
+		return nil, nil
+	}
+	baseDir, err := cli.ProfileDir("")
+	if err != nil {
+		return nil, fmt.Errorf("resolve base config dir for daemon ownership lock: %w", err)
+	}
+	lock, err := AcquireOwnership(baseDir, OwnerInfo{
+		PID:        os.Getpid(),
+		HealthPort: d.cfg.HealthPort,
+		DaemonID:   d.cfg.DaemonID,
+		Version:    d.cfg.CLIVersion,
+		Profile:    d.cfg.Profile,
+		StartedAt:  time.Now(),
+	})
+	if err != nil {
+		return nil, err
+	}
+	d.logger.Info("acquired daemon ownership lock", "path", OwnershipLockPath(baseDir))
+	return lock, nil
+}
+
+// recordServerVersion stores the server_version reported in a register
+// response. Only a non-empty value overwrites, so a later response from a
+// server that omits the field (or a different, older backend) never clobbers a
+// version we already learned.
+func (d *Daemon) recordServerVersion(v string) {
+	if strings.TrimSpace(v) == "" {
+		return
+	}
+	d.serverVersionMu.Lock()
+	d.serverVersion = strings.TrimSpace(v)
+	d.serverVersionMu.Unlock()
+}
+
+// serverVersionSeen returns the last non-empty server_version learned at
+// register, or "" if the server never reported one.
+func (d *Daemon) serverVersionSeen() string {
+	d.serverVersionMu.Lock()
+	defer d.serverVersionMu.Unlock()
+	return d.serverVersion
+}
+
+// checkServerCompatibility fails loudly when the daemon is talking to a server
+// too old to serve the routes it depends on (VWO-365). It runs once after the
+// initial registration in preflight, so a skew is caught before any task is
+// claimed — not discovered later as a stream of silent /prepare-lease 404s. An
+// unreported/unparseable/dev server version is treated as "unknown": we warn
+// and lean on the per-route capability backstop rather than refuse to start and
+// false-reject a server that may well be compatible.
+func (d *Daemon) checkServerCompatibility() error {
+	seen := d.serverVersionSeen()
+	switch err := agent.CheckMinServerVersion(seen); {
+	case errors.Is(err, agent.ErrServerVersionTooOld):
+		return fmt.Errorf(
+			"incompatible Multica server: this daemon (version %s) requires server >= %s but the server reports %s; upgrade the server, or downgrade/upgrade the daemon so client and server match",
+			d.cfg.CLIVersion, agent.MinServerVersion, seen,
+		)
+	case errors.Is(err, agent.ErrServerVersionUnknown):
+		d.logger.Warn("server did not report a version at registration; cannot pre-verify compatibility (a too-old server will still be caught loudly the first time a task needs an unsupported route)",
+			"min_server_version", agent.MinServerVersion)
+		return nil
+	default:
+		d.logger.Debug("server version compatible", "server_version", seen, "min_server_version", agent.MinServerVersion)
+		return nil
+	}
 }
 
 // deregisterRuntimes notifies the server that all runtimes are going offline.
@@ -1192,6 +1305,7 @@ func (d *Daemon) registerRuntimesForWorkspace(ctx context.Context, workspaceID s
 	if err != nil {
 		return nil, "", fmt.Errorf("register runtimes: %w", err)
 	}
+	d.recordServerVersion(resp.ServerVersion)
 	if len(resp.Runtimes) == 0 && len(failedProfiles) == 0 {
 		return nil, "", fmt.Errorf("register runtimes: empty response")
 	}
@@ -3678,6 +3792,18 @@ func (d *Daemon) startTaskPrepareLeaseExtender(ctx context.Context, task Task, t
 				err := d.client.ExtendTaskPrepareLease(reqCtx, task.RuntimeID, task.ID)
 				reqCancel()
 				if err != nil {
+					if isPrepareLeaseUnsupported(err) {
+						// The /prepare-lease route is missing: this daemon is
+						// newer than the server. Say so loudly ONCE and stop the
+						// loop rather than emit an identical Warn every 15s —
+						// "do not rely on repeated 404s" (VWO-365). The server
+						// version gate in Run already fails startup when the
+						// server reports a too-old version; this is the backstop
+						// for a server old enough to predate that handshake.
+						taskLog.Error("stopping task prepare-lease refresh: the server does not support the /prepare-lease route, so this daemon is incompatible with it — upgrade the server to at least "+agent.MinServerVersion+" (or run a daemon matching the server version)",
+							"error", err)
+						return
+					}
 					taskLog.Warn("extend task prepare lease failed", "error", err)
 				}
 			}

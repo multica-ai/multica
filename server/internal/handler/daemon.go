@@ -658,6 +658,16 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 		"repos":         repoResp.Repos,
 		"repos_version": repoResp.ReposVersion,
 		"settings":      repoResp.Settings,
+		// The running server build version, so the daemon can detect a
+		// client/server version skew loudly at registration instead of
+		// 404-looping later (e.g. a newer daemon calling the /prepare-lease
+		// route an older server lacks — VWO-364/VWO-365). Always populated for
+		// daemons (this is the internal daemon channel, distinct from the
+		// user-facing /api/config which omits it on official cloud). Empty only
+		// on a server built without a version stamp or one that predates this
+		// field — the daemon treats that as "unknown" and relies on the
+		// per-route capability backstop rather than failing.
+		"server_version": h.cfg.ServerVersion,
 	})
 }
 

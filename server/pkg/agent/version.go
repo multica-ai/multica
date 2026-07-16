@@ -66,6 +66,57 @@ var (
 	ErrCLIVersionTooOld  = errors.New("multica CLI version is below required minimum")
 )
 
+// MinServerVersion is the lowest Multica server version this daemon build is
+// compatible with. v0.3.28 is the first server release carrying the
+// /api/daemon/runtimes/{id}/tasks/{id}/prepare-lease route the daemon's task
+// lease extender depends on; against an older server that call 404-loops
+// silently (VWO-364/VWO-365). The daemon compares the server_version reported
+// in the register response against this and fails loudly on a
+// parseable-but-older server, rather than discovering the skew as a stream of
+// 404s once tasks run.
+const MinServerVersion = "0.3.28"
+
+// Errors returned by CheckMinServerVersion, mirroring the CLI-version taxonomy.
+// ErrServerVersionUnknown is deliberately NON-fatal to the caller: a server
+// that reports no version (built without a stamp, or one predating the
+// register-response server_version field) may still be route-compatible, so the
+// daemon warns and relies on the per-route capability backstop instead of
+// refusing to start and false-rejecting a working server.
+var (
+	ErrServerVersionUnknown = errors.New("multica server version not reported")
+	ErrServerVersionTooOld  = errors.New("multica server version is below required minimum")
+)
+
+// CheckMinServerVersion returns nil when `serverVersion` parses as ≥
+// MinServerVersion. Returns ErrServerVersionUnknown for empty or unparsable
+// input (caller should warn, not fail), and ErrServerVersionTooOld when
+// parsable but below the minimum (caller should fail loudly). Dev-built servers
+// (git-describe shape) always pass, matching CheckMinCLIVersion so a `make dev`
+// server is never gated.
+func CheckMinServerVersion(serverVersion string) error {
+	v := strings.TrimSpace(serverVersion)
+	if v == "" {
+		return ErrServerVersionUnknown
+	}
+	if devDescribeRe.MatchString(v) {
+		return nil
+	}
+	parsed, err := parseSemver(v)
+	if err != nil {
+		return ErrServerVersionUnknown
+	}
+	min, err := parseSemver(MinServerVersion)
+	if err != nil {
+		// Misconfiguration in the constant itself — do not hard-fail the daemon
+		// over our own typo; treat as unknown so the backstop still guards.
+		return ErrServerVersionUnknown
+	}
+	if parsed.lessThan(min) {
+		return ErrServerVersionTooOld
+	}
+	return nil
+}
+
 // devDescribeRe matches the `git describe --tags --always --dirty` output for
 // a build past the latest tag, e.g. `v0.2.15-235-gdaf0e935` (optionally with a
 // trailing `-dirty`). Daemons built from source (Makefile `make build` / `make
