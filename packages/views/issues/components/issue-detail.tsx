@@ -66,6 +66,7 @@ import { collectThreadReplies, deriveThreadResolution } from "./thread-utils";
 import { IssueAgentHeaderChip } from "./issue-agent-header-chip";
 import { ExecutionLogSection } from "./execution-log-section";
 import { PullRequestList } from "./pull-request-list";
+import { ProgressSteps, type ProgressData } from "./progress-steps";
 import { useGitHubSettings } from "@multica/core/github";
 import { useQuery } from "@tanstack/react-query";
 import { useAuthStore } from "@multica/core/auth";
@@ -2308,6 +2309,32 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                 })()}
               </div>
             );
+          })()}
+
+          {/* Progress — agent pipeline step indicator from metadata.progress */}
+          {(() => {
+            const raw = issue.metadata?.progress;
+            if (typeof raw !== "string") return null;
+            try {
+              const data: ProgressData = JSON.parse(raw);
+              if (!data.phases?.length) return null;
+              return (
+                <div className="mb-6">
+                  <div className="mb-2 flex items-center gap-2">
+                    <h3 className="text-sm font-medium text-muted-foreground">
+                      {t(($) => $.detail.section_progress)}
+                    </h3>
+                    <span className="text-xs tabular-nums text-muted-foreground/60">
+                      {data.phases.filter((p) => p.status === "completed").length}/
+                      {data.phases.length}
+                    </span>
+                  </div>
+                  <ProgressSteps phases={data.phases} edges={data.edges} />
+                </div>
+              );
+            } catch {
+              return null;
+            }
           })()}
 
           <div className="my-8 border-t" />
