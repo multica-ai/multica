@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"time"
 
 	"github.com/multica-ai/multica/server/internal/cli"
 	"github.com/spf13/cobra"
@@ -130,6 +131,12 @@ func verifyInternalAgentBrowser(ctx context.Context, client *cli.APIClient, out 
 	return json.NewEncoder(out).Encode(response)
 }
 
+const internalBrowserVerifyTimeout = 2 * time.Minute
+
+func configureInternalBrowserVerifyClient(client *cli.APIClient) {
+	client.HTTPClient.Timeout = internalBrowserVerifyTimeout
+}
+
 var agentBrowserInternalVerifyCmd = &cobra.Command{
 	Use:   "internal-verify",
 	Short: "Verify an allowlisted app through its Sliplane internal host",
@@ -139,10 +146,12 @@ var agentBrowserInternalVerifyCmd = &cobra.Command{
 		if app == "" {
 			return fmt.Errorf("--app is required")
 		}
-		client, ctx, cancel, err := appClient(cmd)
+		client, err := newAPIClient(cmd)
 		if err != nil {
 			return err
 		}
+		configureInternalBrowserVerifyClient(client)
+		ctx, cancel := context.WithTimeout(cmd.Context(), internalBrowserVerifyTimeout)
 		defer cancel()
 		return verifyInternalAgentBrowser(ctx, client, os.Stdout, app)
 	},

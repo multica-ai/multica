@@ -3,6 +3,7 @@ package internalbrowserqa
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 )
@@ -14,6 +15,12 @@ type commandCall struct {
 
 type recordingCommander struct {
 	calls []commandCall
+}
+
+type failingCommander struct{}
+
+func (failingCommander) Run(_ context.Context, _ string, _ ...string) ([]byte, error) {
+	return nil, errors.New("must not escape")
 }
 
 func (c *recordingCommander) Run(_ context.Context, stdin string, args ...string) ([]byte, error) {
@@ -114,5 +121,18 @@ func TestRunnerSendsSessionCookieOnlyThroughBatchStdin(t *testing.T) {
 	}
 	if stdinCount != 1 {
 		t.Fatalf("secret-bearing stdin calls = %d, want 1", stdinCount)
+	}
+}
+
+func TestRunnerReturnsOnlySafeFailureStage(t *testing.T) {
+	_, err := NewRunner(failingCommander{}).Verify(context.Background(), "customer-service", Credential{})
+	if err == nil || err.Error() != "internal browser stage open failed" {
+		t.Fatalf("error = %q", err)
+	}
+}
+
+func TestSafeErrorRejectsUnexpectedDetails(t *testing.T) {
+	if got := SafeError(errors.New("password=must-not-escape")); got != "internal browser verification failed" {
+		t.Fatalf("safe error = %q", got)
 	}
 }
