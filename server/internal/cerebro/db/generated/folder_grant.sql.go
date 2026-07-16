@@ -28,6 +28,18 @@ func (q *Queries) DeleteAllCerebroFolderGrants(ctx context.Context, arg DeleteAl
 	return err
 }
 
+const getCerebroAppFolderWorkspace = `-- name: GetCerebroAppFolderWorkspace :one
+SELECT workspace_id FROM cerebro_app_folder WHERE id = $1
+`
+
+// Ownership check for an Apps Collection.
+func (q *Queries) GetCerebroAppFolderWorkspace(ctx context.Context, id pgtype.UUID) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, getCerebroAppFolderWorkspace, id)
+	var workspace_id pgtype.UUID
+	err := row.Scan(&workspace_id)
+	return workspace_id, err
+}
+
 const getCerebroArtifactFolderWorkspace = `-- name: GetCerebroArtifactFolderWorkspace :one
 SELECT workspace_id FROM artifact_folder WHERE id = $1
 `
@@ -51,6 +63,61 @@ func (q *Queries) GetCerebroEntityFolderWorkspace(ctx context.Context, id pgtype
 	var workspace_id pgtype.UUID
 	err := row.Scan(&workspace_id)
 	return workspace_id, err
+}
+
+const listCerebroAppFolderEffectiveGrants = `-- name: ListCerebroAppFolderEffectiveGrants :many
+WITH RECURSIVE chain AS (
+    SELECT f.id, f.parent_id, 0 AS depth
+    FROM cerebro_app_folder f
+    WHERE f.id = $1
+    UNION ALL
+    SELECT f.id, f.parent_id, c.depth + 1
+    FROM cerebro_app_folder f
+    JOIN chain c ON f.id = c.parent_id
+)
+SELECT g.grantee_type, g.grantee_id, g.role,
+       g.folder_id AS source_folder_id,
+       (c.depth = 0) AS is_direct,
+       c.depth AS depth
+FROM chain c
+JOIN cerebro_folder_grant g ON g.surface = 'app' AND g.folder_id = c.id
+`
+
+type ListCerebroAppFolderEffectiveGrantsRow struct {
+	GranteeType    string      `json:"grantee_type"`
+	GranteeID      pgtype.UUID `json:"grantee_id"`
+	Role           string      `json:"role"`
+	SourceFolderID pgtype.UUID `json:"source_folder_id"`
+	IsDirect       bool        `json:"is_direct"`
+	Depth          int32       `json:"depth"`
+}
+
+// Direct + inherited grants for an Apps Collection.
+func (q *Queries) ListCerebroAppFolderEffectiveGrants(ctx context.Context, id pgtype.UUID) ([]ListCerebroAppFolderEffectiveGrantsRow, error) {
+	rows, err := q.db.Query(ctx, listCerebroAppFolderEffectiveGrants, id)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListCerebroAppFolderEffectiveGrantsRow{}
+	for rows.Next() {
+		var i ListCerebroAppFolderEffectiveGrantsRow
+		if err := rows.Scan(
+			&i.GranteeType,
+			&i.GranteeID,
+			&i.Role,
+			&i.SourceFolderID,
+			&i.IsDirect,
+			&i.Depth,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listCerebroArtifactFolderEffectiveGrants = `-- name: ListCerebroArtifactFolderEffectiveGrants :many

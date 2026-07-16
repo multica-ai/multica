@@ -1,6 +1,8 @@
 # Mini-app SDK
 
-Load `/api/cerebro/apps-runtime/sdk/multica.js` as an ES module and call `createMulticaApp({ appId, version })`. The SDK sends browser credentials only to Multica routes and throws a user-safe `Error` for non-success responses.
+Load `/api/cerebro/apps-runtime/sdk/multica.js` as an ES module and call `createMulticaApp({ appId, version })`.
+
+The app runs in an opaque iframe and cannot use the signed-in browser session directly. The SDK sends a typed `postMessage` request to the trusted Apps host. The host verifies the iframe source, app ID, version, request ID, and method before it makes the authenticated Multica request. Replies are correlated by request ID and SDK failures become user-safe `Error` values inside the app.
 
 ## Public methods
 
@@ -15,5 +17,6 @@ Load `/api/cerebro/apps-runtime/sdk/multica.js` as an ES module and call `create
 | `views.submit(viewId, value, requestId)` | Submit a response for one waiting interactive workflow request. | `POST /api/cerebro/apps/{appId}/views/{viewId}/submissions` |
 | `views.onInput(handler)` | Receive the view input and request ID from the sandbox host. | Browser `message` event |
 
-Do not persist Registry keys, Connection credentials, or copied data outside the app-owned storage API. Do not call internal services directly; use the SDK so the server can enforce both ceilings and audit the action.
+Only the methods in this table are accepted by the host. Unknown methods and requests claiming another app identity are ignored.
 
+Do not persist Registry keys, Connection credentials, or copied data outside the app-owned storage API. Do not call internal services directly; use the SDK so the host and server can enforce both ceilings and audit the action.

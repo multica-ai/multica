@@ -52,6 +52,8 @@ import { useCurrentWorkspace } from "@multica/core/paths";
 import { TasksPage } from "@multica/cerebro-tasks";
 import { RocksPage, StrategyPage } from "@multica/cerebro-operating-system/views";
 import { ApprovalsPage } from "@multica/cerebro-approvals";
+import { AppBuilderPage, AppDetailPage, AppsPage } from "@multica/cerebro-apps";
+import { api } from "@multica/core/api";
 import { NotesPage } from "@multica/cerebro-notes/views";
 import { NoteCommentsPanel } from "@multica/cerebro-notes/views/note-comments-panel";
 import { NoteReferencesSection } from "@multica/cerebro-notes/views/note-references";
@@ -235,6 +237,21 @@ export const appRoutes: RouteObject[] = [
             handle: { title: "Projects" },
           },
           {
+            path: "apps",
+            element: <AppsPage />,
+            handle: { title: "Apps" },
+          },
+          {
+            path: "apps/new",
+            element: <AppBuilderPage />,
+            handle: { title: "Build app" },
+          },
+          {
+            path: "apps/:appId",
+            element: <DesktopAppDetailRoute />,
+            handle: { title: "App" },
+          },
+          {
             path: "documents",
             element: <DocumentsRoute />,
             handle: { title: "Documents" },
@@ -403,6 +420,12 @@ export function createTabRouter(initialPath: string) {
 function DocumentsRoute() {
   const [search] = useSearchParams();
   return <FileManagerPage initialFolderId={search.get("folder")} />;
+}
+
+function DesktopAppDetailRoute() {
+  const params = useParams<{ appId: string }>();
+  const baseUrl = api.getBaseUrl().replace(/\/$/, "");
+  return <AppDetailPage appId={params.appId ?? ""} runtimeBaseUrl={`${baseUrl}/api/cerebro/apps-runtime`} />;
 }
 
 function NotesRoute() {

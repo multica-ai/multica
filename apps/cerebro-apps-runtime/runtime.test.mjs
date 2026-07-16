@@ -37,7 +37,9 @@ test("serves the mini-app SDK with a real connection call route", async () => {
   const response = await runtime.fetch(new Request("http://runtime/sdk/multica.js"));
   assert.equal(response.status, 200);
   const source = await response.text();
-  assert.match(source, /connections\/\$\{encodeURIComponent\(connectionId\)\}\/call/);
+  assert.match(source, /multica\.app-sdk\.request/);
+  assert.match(source, /requestId/);
+  assert.doesNotMatch(source, /fetch\(/);
   assert.match(source, /storage:/);
   assert.match(source, /views:/);
 });

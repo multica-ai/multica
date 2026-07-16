@@ -186,6 +186,9 @@ importers:
       '@multica/cerebro-approvals':
         specifier: workspace:*
         version: link:../../packages/cerebro-approvals
+      '@multica/cerebro-apps':
+        specifier: workspace:*
+        version: link:../../packages/cerebro-apps
       '@multica/cerebro-artifacts':
         specifier: workspace:*
         version: link:../../packages/cerebro-artifacts
@@ -204,9 +207,15 @@ importers:
       '@multica/cerebro-collections':
         specifier: workspace:*
         version: link:../../packages/cerebro-collections
+      '@multica/cerebro-cost-optimization':
+        specifier: workspace:*
+        version: link:../../packages/cerebro-cost-optimization
       '@multica/cerebro-feature-flags':
         specifier: workspace:*
         version: link:../../packages/cerebro-feature-flags
+      '@multica/cerebro-groups':
+        specifier: workspace:*
+        version: link:../../packages/cerebro-groups
       '@multica/cerebro-inbox':
         specifier: workspace:*
         version: link:../../packages/cerebro-inbox

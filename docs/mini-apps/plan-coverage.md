@@ -20,6 +20,10 @@ Playwright Allergen Formatter flow.
 | G9 | Canonical documentation covers the shipped SDK and workflow contract. | `mini-app documentation contract` | `docs/mini-apps/` |
 | G10 | Every work package stays mapped to a proof that exists. | `TestMiniAppPlanCoverageReferencesExist` and `mini-app documentation contract` | Coverage document and referenced test files |
 | G11 | Each app has its own container, process, and scoped mount. | `container-integration.test.mjs` | Docker daemon, container process, and bundle mount |
+| G12 | Apps is a standalone full-content surface with no workflow editor. | `AppDetailPage#opens the published app as the full workspace surface without workflow controls` | Web and desktop app routes |
+| G13 | Apps Collections and their inherited grants are managed in Settings → Collections. | `app-collections.test.ts` and `foldergrant/handler_test.go#TestAppSurfaceHasEffectiveGrantQueries` | Apps folder tree and folder-grant API |
+| G14 | Opaque app frames use only the allow-listed SDK host bridge. | `AppViewFrame#brokers only requests for the mounted app` and `AppViewFrame#ignores methods outside the public app SDK` | Browser iframe-to-host message boundary |
+| G15 | The Apps overview is a data table. | `AppsPage#renders apps as a data table with collection, ownership, version, status, and health` | Apps catalog UI |
 
 | Package | Delivered surface | Automated proof |
 |---:|---|---|

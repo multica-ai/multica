@@ -4,9 +4,10 @@
 // both folder backends, selected by `surface`:
 //   'artifact' = Documents/Notes folders (artifact_folder)
 //   'entity'   = Autopilots/Skills folders (cerebro_entity_folder)
+//   'app'      = Apps Collections (cerebro_app_folder)
 // Mirrors the REST shape in server/internal/cerebro/foldergrant/handler.go.
 
-export type GrantSurface = "artifact" | "entity";
+export type GrantSurface = "artifact" | "entity" | "app";
 
 export type GranteeType = "group" | "member" | "workspace" | "agent" | "runtime";
 

@@ -48,6 +48,24 @@ SELECT g.grantee_type, g.grantee_id, g.role,
 FROM chain c
 JOIN cerebro_folder_grant g ON g.surface = 'entity' AND g.folder_id = c.id;
 
+-- name: ListCerebroAppFolderEffectiveGrants :many
+-- Direct + inherited grants for an Apps Collection.
+WITH RECURSIVE chain AS (
+    SELECT f.id, f.parent_id, 0 AS depth
+    FROM cerebro_app_folder f
+    WHERE f.id = $1
+    UNION ALL
+    SELECT f.id, f.parent_id, c.depth + 1
+    FROM cerebro_app_folder f
+    JOIN chain c ON f.id = c.parent_id
+)
+SELECT g.grantee_type, g.grantee_id, g.role,
+       g.folder_id AS source_folder_id,
+       (c.depth = 0) AS is_direct,
+       c.depth AS depth
+FROM chain c
+JOIN cerebro_folder_grant g ON g.surface = 'app' AND g.folder_id = c.id;
+
 -- name: UpsertCerebroFolderGrant :one
 -- Add or change a grant on a folder. The conflict target matches the partial
 -- expression unique index (workspace grant folds its NULL id into the zero uuid).
@@ -79,3 +97,7 @@ SELECT workspace_id FROM artifact_folder WHERE id = $1;
 -- name: GetCerebroEntityFolderWorkspace :one
 -- Same ownership check for an Autopilots/Skills folder.
 SELECT workspace_id FROM cerebro_entity_folder WHERE id = $1;
+
+-- name: GetCerebroAppFolderWorkspace :one
+-- Ownership check for an Apps Collection.
+SELECT workspace_id FROM cerebro_app_folder WHERE id = $1;

@@ -120,6 +120,22 @@ func TestMiniAppsRouterExposesAppDetail(t *testing.T) {
 	}
 }
 
+func TestAppListAndOpenUseCollectionAccess(t *testing.T) {
+	handler, err := os.ReadFile("handler.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	migration, err := os.ReadFile("../../../migrations/9140_cerebro_app_collections.up.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, raw := range map[string]string{"handler": string(handler), "migration": string(migration)} {
+		if !strings.Contains(raw, "cerebro_app_folder_grant_visible") {
+			t.Fatalf("%s does not enforce Apps Collection access", name)
+		}
+	}
+}
+
 func TestMiniAppsRouterExposesInteractiveViewRequests(t *testing.T) {
 	raw, err := os.ReadFile("../../../cmd/server/router.go")
 	if err != nil {

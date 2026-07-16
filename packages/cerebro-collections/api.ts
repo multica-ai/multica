@@ -20,7 +20,7 @@ import type {
   UpsertProjectGrantInput,
 } from "./types";
 
-const surfaceSchema = z.enum(["artifact", "entity"]);
+const surfaceSchema = z.enum(["artifact", "entity", "app"]);
 const granteeTypeSchema = z.enum([
   "group",
   "member",
@@ -110,7 +110,7 @@ export interface CollectionFolder {
   surface: GrantSurface;
   id: string;
   name: string;
-  group: string; // Documents | Notes | Skills | Autopilots
+  group: string; // Documents | Notes | Skills | Autopilots | Apps
   parent_id: string | null;
 }
 
@@ -144,6 +144,15 @@ const entityFolderSchema = z.object({
 type RawEntityFolder = z.infer<typeof entityFolderSchema>;
 const entityFolderListSchema = z.array(entityFolderSchema);
 const EMPTY_ENTITY_FOLDERS: RawEntityFolder[] = [];
+
+const appFolderSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  parent_id: z.string().nullable().optional().transform((value) => value ?? null),
+});
+const appFolderListSchema = z.object({ folders: z.array(appFolderSchema) });
+type RawAppFolder = z.infer<typeof appFolderSchema>;
+const EMPTY_APP_FOLDERS: { folders: RawAppFolder[] } = { folders: [] };
 
 export async function fetchArtifactCollectionFolders(): Promise<
   CollectionFolder[]
@@ -182,6 +191,21 @@ export async function fetchEntityCollectionFolders(
     name: f.name,
     group: f.kind === "skill" ? "Skills" : "Autopilots",
     parent_id: f.parent_id,
+  }));
+}
+
+export async function fetchAppCollectionFolders(): Promise<CollectionFolder[]> {
+  const raw = await api.cerebroRequest<unknown>("/api/cerebro/app-folders");
+  const parsed = parseWithFallback(
+    raw,
+    appFolderListSchema,
+    EMPTY_APP_FOLDERS,
+    { endpoint: "fetchAppCollectionFolders" },
+  );
+  return parsed.folders.map((folder) => ({
+    ...folder,
+    surface: "app" as const,
+    group: "Apps",
   }));
 }
 
@@ -227,6 +251,20 @@ export async function createCollectionFolder(
       parent_id: folder.parent_id,
     };
   }
+  if (input.surface === "app") {
+    const raw = await api.cerebroRequest<unknown>("/api/cerebro/app-folders", {
+      method: "POST",
+      body: JSON.stringify({ name: input.name, parent_id: input.parentId }),
+    });
+    const parsed = parseWithFallback<RawAppFolder | null>(
+      raw,
+      appFolderSchema,
+      null,
+      { endpoint: "createAppCollection" },
+    );
+    if (!parsed) throw new Error("createCollectionFolder: unexpected response");
+    return { ...parsed, surface: "app", group: "Apps" };
+  }
   const raw = await api.cerebroRequest<unknown>("/api/cerebro/entity-folders", {
     method: "POST",
     body: JSON.stringify({
@@ -266,6 +304,7 @@ export interface MoveCollectionFolderInput {
   surface: GrantSurface;
   folderId: string;
   parentId: string | null;
+  name?: string;
   // Only consumed by the entity backend, which keys folders by kind.
   entityKind?: "skill" | "autopilot";
 }
@@ -277,6 +316,13 @@ export async function moveCollectionFolder(
   if (input.surface === "artifact") {
     await api.updateArtifactFolder(input.folderId, {
       parent_id: parentField,
+    });
+    return;
+  }
+  if (input.surface === "app") {
+    await api.cerebroRequest<unknown>(`/api/cerebro/app-folders/${input.folderId}`, {
+      method: "PATCH",
+      body: JSON.stringify({ name: input.name, parent_id: input.parentId }),
     });
     return;
   }

@@ -226,6 +226,19 @@ runtime resolver then re-checks the acting member: API endpoints use
 Only `Allow` dispatches; `Ask`, `Deny`, lookup errors, undeclared MCP tools, and
 transport errors fail closed. Stored Connection credentials remain server-side.
 
+### Apps Collection access
+
+App catalog listing and app open/use are deny-by-default outside the app owner
+and workspace owner/admin. Other members reach an app only through a
+`cerebro_folder_grant` on the app's Collection or an ancestor Collection. The
+same workspace/member/group and inherited-grant rules used by Documents apply,
+resolved by `cerebro_app_folder_grant_visible`. An unassigned app therefore
+stays private to its owner and workspace administrators until it is placed in a
+Collection with access configured in **Settings → Collections**. App runtime
+SDK data routes reuse `apps.loadApp`, and `connections.call` applies the same
+predicate before it reads approved scopes. The runtime iframe remains opaque
+and receives no parent session or Connection credential.
+
 ### Managed Pi harness
 
 When the workspace flag `cerebro_pi_harness` is on, a Pi runtime receives one

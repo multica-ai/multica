@@ -50,6 +50,21 @@ jobs:
       - name: Test self-host env derivation
         run: bash scripts/selfhost-config.test.sh
 
+      - name: Test PostgreSQL worktree connection routing
+        run: bash scripts/ensure-postgres.test.sh
+
+      - name: Test local check database pool sizing
+        run: bash scripts/check-db-pool.test.sh
+
+      - name: Test local check Go concurrency
+        run: bash scripts/check-go-concurrency.test.sh
+
+      - name: Test local mini-apps E2E environment
+        run: bash scripts/check-mini-apps-env.test.sh
+
+      - name: Test local check process cleanup
+        run: bash scripts/check-process-tree.test.sh
+
       - name: Verify Cerebro distribution boundary
         run: bash scripts/cerebro/check-distribution-boundary.sh
 

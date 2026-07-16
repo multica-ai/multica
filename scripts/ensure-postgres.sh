@@ -78,19 +78,35 @@ if is_local; then
   $DC up -d postgres
 
   echo "==> Waiting for PostgreSQL to be ready..."
-  until $DC exec -T postgres pg_isready -U "$POSTGRES_USER" -d postgres > /dev/null 2>&1; do
-    sleep 1
-  done
+  if command -v pg_isready > /dev/null 2>&1 && command -v psql > /dev/null 2>&1; then
+    connect_host="${db_host:-127.0.0.1}"
+    until pg_isready -h "$connect_host" -p "$db_port" -U "$POSTGRES_USER" -d postgres > /dev/null 2>&1; do
+      sleep 1
+    done
 
-  echo "==> Ensuring database '$POSTGRES_DB' exists..."
-  db_exists="$($DC exec -T postgres \
-    psql -U "$POSTGRES_USER" -d postgres -Atqc "SELECT 1 FROM pg_database WHERE datname = '$POSTGRES_DB'")"
+    echo "==> Ensuring database '$POSTGRES_DB' exists..."
+    db_exists="$(psql -h "$connect_host" -p "$db_port" -U "$POSTGRES_USER" -d postgres \
+      -Atqc "SELECT 1 FROM pg_database WHERE datname = '$POSTGRES_DB'")"
 
-  if [ "$db_exists" != "1" ]; then
-    $DC exec -T postgres \
-      psql -U "$POSTGRES_USER" -d postgres -v ON_ERROR_STOP=1 \
-      -c "CREATE DATABASE \"$POSTGRES_DB\"" \
-      > /dev/null
+    if [ "$db_exists" != "1" ]; then
+      psql -h "$connect_host" -p "$db_port" -U "$POSTGRES_USER" -d postgres \
+        -v ON_ERROR_STOP=1 -c "CREATE DATABASE \"$POSTGRES_DB\"" > /dev/null
+    fi
+  else
+    until $DC exec -T postgres pg_isready -U "$POSTGRES_USER" -d postgres > /dev/null 2>&1; do
+      sleep 1
+    done
+
+    echo "==> Ensuring database '$POSTGRES_DB' exists..."
+    db_exists="$($DC exec -T postgres \
+      psql -U "$POSTGRES_USER" -d postgres -Atqc "SELECT 1 FROM pg_database WHERE datname = '$POSTGRES_DB'")"
+
+    if [ "$db_exists" != "1" ]; then
+      $DC exec -T postgres \
+        psql -U "$POSTGRES_USER" -d postgres -v ON_ERROR_STOP=1 \
+        -c "CREATE DATABASE \"$POSTGRES_DB\"" \
+        > /dev/null
+    fi
   fi
 
   echo "✓ PostgreSQL ready (local Docker). Database: $POSTGRES_DB"

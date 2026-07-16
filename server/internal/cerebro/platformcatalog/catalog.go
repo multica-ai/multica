@@ -724,7 +724,7 @@ var catalog = []Capability{
 		Key:           "manage_collections",
 		Title:         "Manage Collections folder access",
 		Category:      CategoryPermissions,
-		Description:   "Set or remove who may see a Collections folder (and everything inside it) — the per-folder access grants behind Settings → Collections, across Documents, Notes, Autopilots, and Skills (FIR-1590).",
+		Description:   "Set or remove who may see a Collections folder (and everything inside it) — the per-folder access grants behind Settings → Collections, across Documents, Notes, Autopilots, Skills, and Apps (FIR-1590/FIR-3315).",
 		DescriptionZh: "设置或移除谁可查看 Collections 文件夹（及其内全部内容）——Settings → Collections 背后的按文件夹访问授权，涵盖 Documents、Notes、Autopilots 和 Skills（FIR-1590）。",
 		Ops: []string{
 			"PUT /api/cerebro/folder-grants/",

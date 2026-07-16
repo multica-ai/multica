@@ -1,19 +1,22 @@
 import { api, parseWithFallback } from "@multica/core/api";
 import { z } from "zod";
-import type { AppAdminSummary, AppDetail, AppFolder, AppWorkflowDefinition, CatalogApp, WorkflowRun } from "./types";
+import type { AppAdminSummary, AppDetail, AppFolder, CatalogApp } from "./types";
+
+export type AppSdkRequest = {
+  appId: string;
+  version: string;
+  method: "registry.token" | "storage.get" | "storage.set" | "storage.delete" | "connections.call" | "workers.invoke" | "views.submit";
+  args: unknown[];
+};
 
 const scopeSchema = z.object({ resource_type: z.string(), resource_id: z.string(), access: z.enum(["read", "write", "read_write"]) });
-const nodeSchema = z.object({ id: z.string(), type: z.string(), config: z.record(z.string(), z.unknown()) });
-const workflowDefinitionSchema = z.object({ schema_version: z.literal("1"), trigger: nodeSchema, steps: z.array(nodeSchema) });
 const catalogAppSchema = z.object({
   id: z.string(), slug: z.string(), name: z.string(), description: z.string().catch(""), icon: z.string().catch("blocks"), folder: z.string().catch(""),
   current_version: z.string().nullish().transform((value) => value ?? undefined), status: z.enum(["draft", "published", "disabled"]),
 });
 const detailSchema = catalogAppSchema.extend({
   versions: z.array(z.object({ version: z.string(), release_notes: z.string(), grant_status: z.enum(["pending", "approved", "revoked", "not_requested"]), scopes: z.array(scopeSchema), created_at: z.string().optional() })).catch([]),
-  workflows: z.array(z.object({ id: z.string(), name: z.string(), version: z.string(), enabled: z.boolean(), definition: workflowDefinitionSchema })).catch([]),
 });
-const runSchema = z.object({ id: z.string(), status: z.enum(["queued", "running", "waiting", "succeeded", "failed", "cancelled"]), step_log: z.array(z.object({ id: z.string(), type: z.string().optional(), status: z.string(), output: z.unknown().optional() })).optional(), error: z.string().optional() });
 
 function workspacePath(path: string, workspaceSlug?: string): string {
   if (!workspaceSlug) return path;
@@ -59,7 +62,7 @@ export async function moveAppToFolder(folderId: string, appId: string, workspace
   await api.cerebroRequest(workspacePath(`/api/cerebro/app-folders/${encodeURIComponent(folderId)}/apps/${encodeURIComponent(appId)}`, workspaceSlug), { method: "PUT", body: "{}" });
 }
 
-export async function createApp(input: { name: string; slug: string; description: string; folder: string }, workspaceSlug?: string): Promise<CatalogApp> {
+export async function createApp(input: { name: string; slug: string; description: string; folder_id: string | null }, workspaceSlug?: string): Promise<CatalogApp> {
   const raw = await api.cerebroRequest<unknown>(workspacePath("/api/cerebro/apps", workspaceSlug), { method: "POST", body: JSON.stringify(input) });
   const parsed = catalogAppSchema.safeParse(raw);
   if (!parsed.success) throw new Error("The app was created with an invalid response");
@@ -73,16 +76,45 @@ export async function getAppDetail(id: string, workspaceSlug?: string): Promise<
   return parsed.data as AppDetail;
 }
 
-export async function createWorkflow(input: { app_id: string; name: string; version: string; definition: AppWorkflowDefinition }, workspaceSlug?: string): Promise<{ id: string }> {
-  const raw = await api.cerebroRequest<unknown>(workspacePath("/api/cerebro/app-workflows", workspaceSlug), { method: "POST", body: JSON.stringify(input) });
-  const parsed = z.object({ id: z.string() }).safeParse(raw);
-  if (!parsed.success) throw new Error("The workflow was created with an invalid response");
-  return parsed.data;
+function requiredString(value: unknown): string {
+  if (typeof value !== "string" || value.trim() === "") throw new Error("Invalid app SDK request");
+  return value;
 }
 
-export async function testWorkflow(id: string, triggerPayload: unknown, workspaceSlug?: string): Promise<WorkflowRun> {
-  const raw = await api.cerebroRequest<unknown>(workspacePath(`/api/cerebro/app-workflows/${encodeURIComponent(id)}/test`, workspaceSlug), { method: "POST", body: JSON.stringify({ trigger_payload: triggerPayload }) });
-  const parsed = runSchema.safeParse(raw);
-  if (!parsed.success) throw new Error("The workflow test returned an invalid response");
-  return parsed.data;
+export async function callAppSdk(request: AppSdkRequest, runtimeBaseUrl = "/api/cerebro/apps-runtime"): Promise<unknown> {
+  const appId = encodeURIComponent(requiredString(request.appId));
+  const version = requiredString(request.version);
+  switch (request.method) {
+    case "registry.token":
+      return api.cerebroRequest(`/api/cerebro/apps/${appId}/token`, { method: "POST", body: JSON.stringify({ version }) });
+    case "storage.get":
+      return api.cerebroRequest(`/api/cerebro/apps/${appId}/storage/${encodeURIComponent(requiredString(request.args[0]))}`);
+    case "storage.set":
+      return api.cerebroRequest(`/api/cerebro/apps/${appId}/storage/${encodeURIComponent(requiredString(request.args[0]))}`, { method: "PUT", body: JSON.stringify({ value: request.args[1] }) });
+    case "storage.delete":
+      return api.cerebroRequest(`/api/cerebro/apps/${appId}/storage/${encodeURIComponent(requiredString(request.args[0]))}`, { method: "DELETE" });
+    case "connections.call":
+      return api.cerebroRequest(`/api/cerebro/connections/${encodeURIComponent(requiredString(request.args[0]))}/call`, {
+        method: "POST",
+        body: JSON.stringify({ app_id: request.appId, version, tool: requiredString(request.args[1]), arguments: request.args[2] ?? {} }),
+      });
+    case "workers.invoke":
+      return requestRuntimeJSON(`${runtimeBaseUrl.replace(/\/$/, "")}/workers/${appId}/${encodeURIComponent(version)}/invoke`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(request.args[0] ?? {}),
+      });
+    case "views.submit":
+      return api.cerebroRequest(`/api/cerebro/apps/${appId}/views/${encodeURIComponent(requiredString(request.args[0]))}/submissions`, {
+        method: "POST",
+        body: JSON.stringify({ value: request.args[1], request_id: requiredString(request.args[2]), version }),
+      });
+  }
+}
+
+async function requestRuntimeJSON(url: string, init: RequestInit): Promise<unknown> {
+  const response = await globalThis.fetch(url, init);
+  const raw = await response.text();
+  if (!response.ok) throw new Error(`App runtime HTTP ${response.status}: ${raw || response.statusText}`);
+  return raw === "" ? undefined : JSON.parse(raw);
 }

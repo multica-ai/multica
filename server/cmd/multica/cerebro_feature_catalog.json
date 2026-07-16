@@ -51,8 +51,8 @@
     },
     {
       "key": "cerebro_mini_apps",
-      "label": "Apps and workflow builder",
-      "description": "Add the Apps catalog, app builder, visual workflow builder, and interactive in-chat app views. Off hides every user-facing entry while keeping stored apps and runs intact.",
+      "label": "Apps",
+      "description": "Add the Apps catalog, app builder, app SDK runtime, and interactive in-chat app views. Off hides every user-facing Apps entry while keeping stored apps intact.",
       "group": "workspace",
       "default": false
     },

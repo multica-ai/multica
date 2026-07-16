@@ -930,10 +930,10 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
   },
   {
     key: "cerebro_mini_apps",
-    label: "Apps and workflow builder",
+    label: "Apps",
     group: "workspace",
     description:
-      "Add the Apps catalog, app builder, visual workflow builder, and interactive in-chat app views. Off hides every user-facing entry while keeping stored apps and runs intact.",
+      "Add the Apps catalog, app builder, app SDK runtime, and interactive in-chat app views. Off hides every user-facing Apps entry while keeping stored apps intact.",
   },
   {
     key: "cerebro_agent_page_redesign",

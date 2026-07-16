@@ -1324,7 +1324,7 @@ func TestCodexExecuteFirstTurnNoProgressSurfacesDiagnostics(t *testing.T) {
 		`sleep 5`+"\n")
 
 	result := executeFakeCodex(t, fakePath, ExecOptions{
-		Timeout:                   5 * time.Second,
+		Timeout:                   30 * time.Second, // CEREBRO-PATCH(agent-codex-deterministic-timeout): FIR-3315 keeps the outer timeout above the asserted inactivity timeout.
 		SemanticInactivityTimeout: 100 * time.Millisecond,
 	})
 	if result.Status != "timeout" {
@@ -1365,7 +1365,7 @@ func TestCodexExecuteFirstTurnRetryErrorDoesNotSatisfyProgress(t *testing.T) {
 		`sleep 5`+"\n")
 
 	result := executeFakeCodex(t, fakePath, ExecOptions{
-		Timeout:                   5 * time.Second,
+		Timeout:                   30 * time.Second, // CEREBRO-PATCH(agent-codex-deterministic-timeout): FIR-3315 keeps the outer timeout above the asserted inactivity timeout.
 		SemanticInactivityTimeout: 200 * time.Millisecond,
 	})
 	if result.Status != "timeout" {

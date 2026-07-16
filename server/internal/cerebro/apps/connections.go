@@ -41,7 +41,12 @@ func (h *Handler) CallConnection(w http.ResponseWriter, r *http.Request) {
 	err = h.pool.QueryRow(r.Context(), `
 		SELECT g.scopes FROM cerebro_app a
 		JOIN cerebro_app_grant g ON g.app_id=a.id AND g.version=$3 AND g.status='approved'
-		WHERE a.id=$1 AND a.workspace_id=$2 AND a.current_version=$3 AND a.status='published'`, appID, workspaceID, req.Version).Scan(&rawScopes)
+		WHERE a.id=$1 AND a.workspace_id=$2 AND a.current_version=$3 AND a.status='published'
+		  AND (
+		    a.owner_id=$4
+		    OR EXISTS (SELECT 1 FROM member m WHERE m.workspace_id=$2 AND m.user_id=$4 AND m.role IN ('owner','admin'))
+		    OR cerebro_app_folder_grant_visible(a.folder_id,$4)
+		  )`, appID, workspaceID, req.Version, memberID).Scan(&rawScopes)
 	if errors.Is(err, pgx.ErrNoRows) {
 		writeError(w, http.StatusForbidden, "app is not published with approved scopes")
 		return

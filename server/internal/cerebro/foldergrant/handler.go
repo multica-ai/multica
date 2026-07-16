@@ -9,6 +9,7 @@
 //
 //	'artifact' = Documents/Notes folders (artifact_folder)
 //	'entity'   = Autopilots/Skills folders (cerebro_entity_folder)
+//	'app'      = Apps Collections (cerebro_app_folder)
 //
 // Wired under /api/cerebro/folder-grants by the cerebro-folder-grants-routes
 // CEREBRO-PATCH in server/cmd/server/router.go. Workspace-scoped via
@@ -39,7 +40,7 @@ func NewHandler(cerebro *cerebrodb.Queries) *Handler {
 	return &Handler{Cerebro: cerebro}
 }
 
-func validSurface(s string) bool { return s == "artifact" || s == "entity" }
+func validSurface(s string) bool { return s == "artifact" || s == "entity" || s == "app" }
 
 func validGranteeType(s string) bool {
 	switch s {
@@ -182,6 +183,24 @@ func (h *Handler) ListGrants(w http.ResponseWriter, r *http.Request) {
 				Depth:          g.Depth,
 			})
 		}
+	case "app":
+		rows, err := h.Cerebro.ListCerebroAppFolderEffectiveGrants(r.Context(), folderID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "list grants failed")
+			return
+		}
+		for _, g := range rows {
+			out = append(out, grantResponse{
+				Surface:        surface,
+				FolderID:       util.UUIDToString(folderID),
+				GranteeType:    g.GranteeType,
+				GranteeID:      granteeIDPtr(g.GranteeID),
+				Role:           g.Role,
+				SourceFolderID: util.UUIDToString(g.SourceFolderID),
+				IsDirect:       g.IsDirect,
+				Depth:          g.Depth,
+			})
+		}
 	}
 	writeJSON(w, http.StatusOK, out)
 }
@@ -281,7 +300,7 @@ func (h *Handler) RemoveGrant(w http.ResponseWriter, r *http.Request) {
 // a write request, and confirms the folder belongs to the caller's workspace.
 func (h *Handler) validateGrantTarget(w http.ResponseWriter, r *http.Request, req grantRequest, wsUUID pgtype.UUID) (string, pgtype.UUID, pgtype.UUID, bool) {
 	if !validSurface(req.Surface) {
-		writeError(w, http.StatusBadRequest, "surface must be 'artifact' or 'entity'")
+		writeError(w, http.StatusBadRequest, "surface must be 'artifact', 'entity' or 'app'")
 		return "", pgtype.UUID{}, pgtype.UUID{}, false
 	}
 	if !validGranteeType(req.GranteeType) {
@@ -330,8 +349,10 @@ func (h *Handler) folderInWorkspace(w http.ResponseWriter, r *http.Request, surf
 		owner, err = h.Cerebro.GetCerebroArtifactFolderWorkspace(r.Context(), folderID)
 	case "entity":
 		owner, err = h.Cerebro.GetCerebroEntityFolderWorkspace(r.Context(), folderID)
+	case "app":
+		owner, err = h.Cerebro.GetCerebroAppFolderWorkspace(r.Context(), folderID)
 	default:
-		writeError(w, http.StatusBadRequest, "surface must be 'artifact' or 'entity'")
+		writeError(w, http.StatusBadRequest, "surface must be 'artifact', 'entity' or 'app'")
 		return false
 	}
 	if err != nil {
@@ -356,7 +377,7 @@ func (h *Handler) folderInWorkspace(w http.ResponseWriter, r *http.Request, surf
 func requireSurfaceQuery(w http.ResponseWriter, r *http.Request) (string, bool) {
 	s := strings.TrimSpace(r.URL.Query().Get("surface"))
 	if !validSurface(s) {
-		writeError(w, http.StatusBadRequest, "surface query param must be 'artifact' or 'entity'")
+		writeError(w, http.StatusBadRequest, "surface query param must be 'artifact', 'entity' or 'app'")
 		return "", false
 	}
 	return s, true

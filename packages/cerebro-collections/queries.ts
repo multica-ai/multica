@@ -3,6 +3,7 @@
 import { queryOptions } from "@tanstack/react-query";
 import {
   fetchArtifactCollectionFolders,
+  fetchAppCollectionFolders,
   fetchEntityCollectionFolders,
   fetchFolderGrants,
   fetchProjectGrants,
@@ -45,12 +46,22 @@ export const collectionFolderKeys = {
   artifact: (wsId: string) => ["collection-folders", wsId, "artifact"] as const,
   entity: (wsId: string, kind: "skill" | "autopilot") =>
     ["collection-folders", wsId, "entity", kind] as const,
+  app: (wsId: string) => ["collection-folders", wsId, "app"] as const,
 };
 
 export function artifactCollectionFoldersOptions(wsId: string) {
   return queryOptions({
     queryKey: collectionFolderKeys.artifact(wsId),
     queryFn: () => fetchArtifactCollectionFolders(),
+    enabled: Boolean(wsId),
+    staleTime: 30_000,
+  });
+}
+
+export function appCollectionFoldersOptions(wsId: string) {
+  return queryOptions({
+    queryKey: collectionFolderKeys.app(wsId),
+    queryFn: () => fetchAppCollectionFolders(),
     enabled: Boolean(wsId),
     staleTime: 30_000,
   });

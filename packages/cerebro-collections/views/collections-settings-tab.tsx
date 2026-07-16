@@ -65,10 +65,11 @@ import { useWorkspaceId } from "@multica/core/hooks";
 import { projectTreeOptions } from "@multica/core/projects/nesting";
 import type { ProjectTreeItem } from "@multica/core/types";
 import { useFeatureFlag } from "@multica/cerebro-feature-flags";
-import { useWorkspacePaths } from "@multica/core/paths";
+import { useRequiredWorkspaceSlug, useWorkspacePaths } from "@multica/core/paths";
 import { useModalStore } from "@multica/core/modals";
 import {
   artifactCollectionFoldersOptions,
+  appCollectionFoldersOptions,
   entityCollectionFoldersOptions,
   folderGrantsOptions,
 } from "../queries";
@@ -106,11 +107,13 @@ const GROUPS: {
   surface: GrantSurface;
   artifactKind?: "document" | "note";
   entityKind?: "skill" | "autopilot";
+  appKind?: "app";
 }[] = [
   { group: "Documents", surface: "artifact", artifactKind: "document" },
   { group: "Notes", surface: "artifact", artifactKind: "note" },
   { group: "Autopilots", surface: "entity", entityKind: "autopilot" },
   { group: "Skills", surface: "entity", entityKind: "skill" },
+  { group: "Apps", surface: "app", appKind: "app" },
 ];
 
 const PROJECTS_TAB = "Projects";
@@ -336,6 +339,7 @@ function FolderTree({
           surface: node.surface,
           folderId: node.id,
           parentId: null,
+          name: node.name,
           entityKind,
         });
       }
@@ -350,6 +354,7 @@ function FolderTree({
       surface: node.surface,
       folderId: node.id,
       parentId: overId,
+      name: node.name,
       entityKind,
     });
   }
@@ -494,6 +499,7 @@ function ProjectTree({
 export function CollectionsTab() {
   const wsId = useWorkspaceId();
   const wsPaths = useWorkspacePaths();
+  const workspaceSlug = useRequiredWorkspaceSlug();
   const openModal = useModalStore((s) => s.open);
   const [activeTab, setActiveTab] = React.useState("Documents");
 
@@ -506,6 +512,7 @@ export function CollectionsTab() {
   const { data: autopilotFolders = [] } = useQuery(
     entityCollectionFoldersOptions(wsId, "autopilot"),
   );
+  const { data: appFolders = [] } = useQuery(appCollectionFoldersOptions(wsId));
   const { data: projects = [] } = useQuery(projectTreeOptions(wsId));
 
   const foldersByGroup: Record<string, CollectionFolder[]> = {
@@ -513,6 +520,7 @@ export function CollectionsTab() {
     Notes: artifactFolders.filter((f) => f.group === "Notes"),
     Autopilots: autopilotFolders,
     Skills: skillFolders,
+    Apps: appFolders,
   };
 
   const [active, setActive] = React.useState<CollectionFolder | null>(null);
@@ -529,6 +537,7 @@ export function CollectionsTab() {
     if (g.artifactKind === "document") return "New document";
     if (g.artifactKind === "note") return "New note";
     if (g.entityKind === "skill") return "New skill";
+    if (g.appKind === "app") return "New app";
     return "New autopilot";
   }
 
@@ -589,13 +598,13 @@ export function CollectionsTab() {
             {/* New-item creation row — inline form for document/note/skill;
                 autopilots navigate to the full creation page (require assignee). */}
             <div className="mb-3">
-              {g.entityKind === "autopilot" ? (
+              {g.entityKind === "autopilot" || g.appKind === "app" ? (
                 <a
-                  href={wsPaths.autopilotNew()}
+                  href={g.appKind === "app" ? `/${workspaceSlug}/apps/new` : wsPaths.autopilotNew()}
                   className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[13px] text-muted-foreground hover:bg-muted/50"
                 >
                   <FilePlus className="size-3.5" />
-                  New autopilot
+                  {g.appKind === "app" ? "New app" : "New autopilot"}
                 </a>
               ) : creatingItem[g.group] ? (
                 <div className="flex items-center gap-1 px-1">
@@ -641,7 +650,7 @@ export function CollectionsTab() {
                 createFolder.mutate({
                   surface: g.surface,
                   name,
-                  kind: g.artifactKind ?? g.entityKind ?? "document",
+                  kind: g.artifactKind ?? g.entityKind ?? g.appKind ?? "document",
                   parentId,
                 })
               }

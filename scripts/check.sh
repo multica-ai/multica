@@ -29,6 +29,18 @@ set +a
 bash scripts/check-e2e-env.test.sh
 bash scripts/frontend-readiness.test.sh
 
+# The local E2E suite runs with one Playwright worker and shares PostgreSQL
+# with other worktrees. Use a small pool unless the caller explicitly tuned it.
+# shellcheck disable=SC1091
+. scripts/check-db-pool.sh
+# shellcheck disable=SC1091
+. scripts/check-go-concurrency.sh
+configure_check_go_concurrency
+# shellcheck disable=SC1091
+. scripts/check-mini-apps-env.sh
+# shellcheck disable=SC1091
+. scripts/check-process-tree.sh
+
 BACKEND_PID=""
 FRONTEND_PID=""
 STARTED_BACKEND=false
@@ -41,11 +53,11 @@ EXIT_CODE=0
 cleanup() {
   echo ""
   if [ "$STARTED_BACKEND" = true ] && [ -n "$BACKEND_PID" ]; then
-    kill "$BACKEND_PID" 2>/dev/null && wait "$BACKEND_PID" 2>/dev/null || true
+    stop_check_process_tree "$BACKEND_PID"
     echo "    Stopped backend (PID $BACKEND_PID)"
   fi
   if [ "$STARTED_FRONTEND" = true ] && [ -n "$FRONTEND_PID" ]; then
-    kill "$FRONTEND_PID" 2>/dev/null && wait "$FRONTEND_PID" 2>/dev/null || true
+    stop_check_process_tree "$FRONTEND_PID"
     echo "    Stopped frontend (PID $FRONTEND_PID)"
   fi
   echo ""
@@ -122,13 +134,18 @@ echo ""
 echo "==> [3/5] Go tests..."
 echo "==> Running database migrations..."
 (cd server && go run ./cmd/migrate up) || { EXIT_CODE=1; exit 1; }
-(cd server && go test ./...) || { EXIT_CODE=1; exit 1; }
+(cd server && go test -p "$GO_TEST_PACKAGE_PARALLEL" -parallel "$GO_TEST_PARALLEL" ./...) || { EXIT_CODE=1; exit 1; }
 
 # --------------------------------------------------------------------------
 # Step 4: Start services for E2E (only if not already running)
 # --------------------------------------------------------------------------
 echo ""
 echo "==> [4/5] Starting services for E2E..."
+
+# Apply the local pool profile only to the E2E services. Unit tests must see
+# the production defaults they explicitly verify.
+configure_check_db_pool
+configure_check_mini_apps_env
 
 if curl -sf "http://localhost:${PORT}/health" > /dev/null 2>&1; then
   echo "    Backend already running on :$PORT"

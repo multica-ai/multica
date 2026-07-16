@@ -116,8 +116,18 @@ func (h *Handler) DeleteFolder(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, "invalid folder id")
 		return
 	}
-	result, err := h.pool.Exec(r.Context(), `DELETE FROM cerebro_app_folder WHERE id=$1 AND workspace_id=$2`, id, workspaceID)
-	if err != nil || result.RowsAffected() != 1 {
+	var deleted int
+	err = h.pool.QueryRow(r.Context(), `
+		WITH target AS (
+			SELECT id FROM cerebro_app_folder WHERE id=$1 AND workspace_id=$2
+		), removed_grants AS (
+			DELETE FROM cerebro_folder_grant
+			WHERE surface='app' AND folder_id IN (SELECT id FROM target)
+		), removed_folder AS (
+			DELETE FROM cerebro_app_folder WHERE id IN (SELECT id FROM target) RETURNING id
+		)
+		SELECT count(*) FROM removed_folder`, id, workspaceID).Scan(&deleted)
+	if err != nil || deleted != 1 {
 		writeError(w, 404, "app folder not found")
 		return
 	}

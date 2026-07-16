@@ -82,11 +82,11 @@ func (h *Handler) RequireEnabled(next http.Handler) http.Handler {
 }
 
 type createRequest struct {
-	Name        string `json:"name"`
-	Slug        string `json:"slug"`
-	Description string `json:"description"`
-	Icon        string `json:"icon"`
-	Folder      string `json:"folder"`
+	Name        string     `json:"name"`
+	Slug        string     `json:"slug"`
+	Description string     `json:"description"`
+	Icon        string     `json:"icon"`
+	FolderID    *uuid.UUID `json:"folder_id"`
 }
 
 type publishRequest struct {
@@ -148,18 +148,9 @@ type appVersionResponse struct {
 	CreatedAt    time.Time       `json:"created_at"`
 }
 
-type appWorkflowResponse struct {
-	ID         string          `json:"id"`
-	Name       string          `json:"name"`
-	Version    string          `json:"version"`
-	Enabled    bool            `json:"enabled"`
-	Definition json.RawMessage `json:"definition"`
-}
-
 type appDetailResponse struct {
 	appResponse
-	Versions  []appVersionResponse  `json:"versions"`
-	Workflows []appWorkflowResponse `json:"workflows"`
+	Versions []appVersionResponse `json:"versions"`
 }
 
 func validateCreateRequest(req createRequest) error {
@@ -297,11 +288,21 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	userID, ok := requestUserID(w, r)
+	if !ok {
+		return
+	}
 	rows, err := h.pool.Query(r.Context(), `
 		SELECT a.id, a.workspace_id, a.slug, a.name, a.description, a.icon, COALESCE(f.name,a.folder), a.owner_id,
 		       a.current_version, a.status, a.created_at, a.updated_at
 		FROM cerebro_app a LEFT JOIN cerebro_app_folder f ON f.id=a.folder_id
-		WHERE a.workspace_id=$1 ORDER BY COALESCE(f.name,a.folder), a.name`, workspaceID)
+		WHERE a.workspace_id=$1
+		  AND (
+		    a.owner_id=$2
+		    OR EXISTS (SELECT 1 FROM member m WHERE m.workspace_id=$1 AND m.user_id=$2 AND m.role IN ('owner','admin'))
+		    OR cerebro_app_folder_grant_visible(a.folder_id,$2)
+		  )
+		ORDER BY COALESCE(f.name,a.folder), a.name`, workspaceID, userID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list apps")
 		return
@@ -344,22 +345,7 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 		}
 		versions = append(versions, version)
 	}
-	workflowRows, err := h.pool.Query(r.Context(), `SELECT id::text,name,version,enabled,definition FROM cerebro_app_workflow_def WHERE app_id=$1 ORDER BY updated_at DESC`, app.ID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to read app workflows")
-		return
-	}
-	defer workflowRows.Close()
-	workflows := make([]appWorkflowResponse, 0)
-	for workflowRows.Next() {
-		var workflow appWorkflowResponse
-		if err := workflowRows.Scan(&workflow.ID, &workflow.Name, &workflow.Version, &workflow.Enabled, &workflow.Definition); err != nil {
-			writeError(w, http.StatusInternalServerError, "failed to read app workflows")
-			return
-		}
-		workflows = append(workflows, workflow)
-	}
-	writeJSON(w, http.StatusOK, appDetailResponse{appResponse: app, Versions: versions, Workflows: workflows})
+	writeJSON(w, http.StatusOK, appDetailResponse{appResponse: app, Versions: versions})
 }
 
 func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
@@ -383,11 +369,23 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		req.Icon = "blocks"
 	}
 	row := h.pool.QueryRow(r.Context(), `
-		INSERT INTO cerebro_app (workspace_id, slug, name, description, icon, folder, owner_id)
-		VALUES ($1,$2,$3,$4,$5,$6,$7)
-		RETURNING id, workspace_id, slug, name, description, icon, folder, owner_id,
-		          current_version, status, created_at, updated_at`, workspaceID, req.Slug, strings.TrimSpace(req.Name), req.Description, req.Icon, req.Folder, userID)
+		WITH inserted AS (
+			INSERT INTO cerebro_app (workspace_id, slug, name, description, icon, folder, folder_id, owner_id)
+			SELECT $1,$2,$3,$4,$5,'',$6,$7
+			WHERE $6::uuid IS NULL OR EXISTS (
+				SELECT 1 FROM cerebro_app_folder WHERE id=$6 AND workspace_id=$1
+			)
+			RETURNING *
+		)
+		SELECT a.id, a.workspace_id, a.slug, a.name, a.description, a.icon,
+		       COALESCE(f.name, a.folder), a.owner_id, a.current_version, a.status,
+		       a.created_at, a.updated_at
+		FROM inserted a LEFT JOIN cerebro_app_folder f ON f.id=a.folder_id`, workspaceID, req.Slug, strings.TrimSpace(req.Name), req.Description, req.Icon, req.FolderID, userID)
 	app, err := scanApp(row)
+	if errors.Is(err, pgx.ErrNoRows) {
+		writeError(w, http.StatusBadRequest, "collection not found")
+		return
+	}
 	if err != nil {
 		writeError(w, http.StatusConflict, "app slug already exists")
 		return
@@ -791,12 +789,27 @@ func (h *Handler) loadApp(w http.ResponseWriter, r *http.Request) (appResponse, 
 	if !ok {
 		return appResponse{}, false
 	}
+	userID, ok := requestUserID(w, r)
+	if !ok {
+		return appResponse{}, false
+	}
 	appID, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
 		writeError(w, 400, "invalid app id")
 		return appResponse{}, false
 	}
-	row := h.pool.QueryRow(r.Context(), `SELECT a.id, a.workspace_id, a.slug, a.name, a.description, a.icon, COALESCE(f.name,a.folder), a.owner_id, a.current_version, a.status, a.created_at, a.updated_at FROM cerebro_app a LEFT JOIN cerebro_app_folder f ON f.id=a.folder_id WHERE a.id=$1 AND a.workspace_id=$2`, appID, workspaceID)
+	row := h.pool.QueryRow(r.Context(), `
+		SELECT a.id, a.workspace_id, a.slug, a.name, a.description, a.icon,
+		       COALESCE(f.name,a.folder), a.owner_id, a.current_version, a.status,
+		       a.created_at, a.updated_at
+		FROM cerebro_app a
+		LEFT JOIN cerebro_app_folder f ON f.id=a.folder_id
+		WHERE a.id=$1 AND a.workspace_id=$2
+		  AND (
+		    a.owner_id=$3
+		    OR EXISTS (SELECT 1 FROM member m WHERE m.workspace_id=$2 AND m.user_id=$3 AND m.role IN ('owner','admin'))
+		    OR cerebro_app_folder_grant_visible(a.folder_id,$3)
+		  )`, appID, workspaceID, userID)
 	app, err := scanApp(row)
 	if errors.Is(err, pgx.ErrNoRows) {
 		writeError(w, 404, "app not found")

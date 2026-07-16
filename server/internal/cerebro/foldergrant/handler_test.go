@@ -3,6 +3,7 @@ package foldergrant
 import (
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 
@@ -12,7 +13,7 @@ import (
 )
 
 func TestValidSurface(t *testing.T) {
-	for _, s := range []string{"artifact", "entity"} {
+	for _, s := range []string{"artifact", "entity", "app"} {
 		if !validSurface(s) {
 			t.Errorf("expected %q to be valid", s)
 		}
@@ -21,6 +22,25 @@ func TestValidSurface(t *testing.T) {
 		if validSurface(s) {
 			t.Errorf("expected %q to be invalid", s)
 		}
+	}
+}
+
+func TestAppCollectionGrantQueriesCoverWorkspaceAndInheritance(t *testing.T) {
+	query, err := os.ReadFile("../queries/folder_grant.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, contract := range []string{"ListCerebroAppFolderEffectiveGrants", "GetCerebroAppFolderWorkspace", "cerebro_app_folder", "g.surface = 'app'"} {
+		if !strings.Contains(string(query), contract) {
+			t.Errorf("app Collection grant query is missing %q", contract)
+		}
+	}
+	migration, err := os.ReadFile("../../../migrations/9140_cerebro_app_collections.up.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(migration), "'artifact', 'entity', 'app'") {
+		t.Fatal("app grant surface is missing from the migration")
 	}
 }
 

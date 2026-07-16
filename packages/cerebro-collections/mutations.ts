@@ -19,6 +19,7 @@ import {
 } from "./api";
 import { collectionFolderKeys, folderGrantKeys, projectGrantKeys } from "./queries";
 import type {
+  GrantSurface,
   RemoveFolderGrantInput,
   RemoveProjectGrantInput,
   UpsertFolderGrantInput,
@@ -36,12 +37,12 @@ import type {
 function invalidateSurfaceFolders(
   qc: ReturnType<typeof useQueryClient>,
   wsId: string,
-  surface: "artifact" | "entity",
+  surface: GrantSurface,
   entityKind?: "skill" | "autopilot",
 ) {
   if (surface === "artifact") {
     void qc.invalidateQueries({ queryKey: ["artifacts", wsId, "folders"] });
-  } else if (entityKind) {
+  } else if (surface === "entity" && entityKind) {
     void qc.invalidateQueries({
       queryKey: ["entity-folders", wsId, entityKind],
     });
@@ -59,10 +60,12 @@ export function useCreateCollectionFolder() {
         void qc.invalidateQueries({
           queryKey: collectionFolderKeys.artifact(wsId),
         });
-      } else {
+      } else if (input.surface === "entity") {
         void qc.invalidateQueries({
           queryKey: collectionFolderKeys.entity(wsId, input.kind as "skill" | "autopilot"),
         });
+      } else {
+        void qc.invalidateQueries({ queryKey: collectionFolderKeys.app(wsId) });
       }
       invalidateSurfaceFolders(
         qc,
@@ -149,10 +152,12 @@ export function useMoveCollectionFolder() {
         void qc.invalidateQueries({
           queryKey: collectionFolderKeys.artifact(wsId),
         });
-      } else if (input.entityKind) {
+      } else if (input.surface === "entity" && input.entityKind) {
         void qc.invalidateQueries({
           queryKey: collectionFolderKeys.entity(wsId, input.entityKind),
         });
+      } else if (input.surface === "app") {
+        void qc.invalidateQueries({ queryKey: collectionFolderKeys.app(wsId) });
       }
       void qc.invalidateQueries({
         queryKey: folderGrantKeys.folder(wsId, input.surface, input.folderId),

@@ -1,5 +1,7 @@
 # Mini-app workflows
 
+Workflows are not created, edited, or tested from the Apps catalog or app detail screen. Apps is a pure app surface powered by the app SDK; the separate **Workflows** product owns workflow authoring and runs. This document only describes the legacy backend attachment contract for integrations that still refer to an app version.
+
 A workflow is an immutable versioned JSON document attached to an app version. It has one trigger and an ordered list of steps.
 
 Supported triggers:
@@ -13,4 +15,3 @@ Supported triggers:
 Supported steps are `registry.read`, `registry.write`, `filter`, and `view.show_and_wait`. Registry steps mint a fresh personal key and carry the run UUID as the Registry trace ID. A view step stores a durable request, marks the run `waiting`, publishes an interactive card, and changes the same run back to `running` after a request-bound submission.
 
 Hatchet owns dispatch and retries; the Multica backend owns identities, keys, state, and audit data. Never put credentials or a human identity in workflow JSON.
-
