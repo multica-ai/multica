@@ -599,6 +599,61 @@ func TestKiroBackendTreatsCompletedCommentAddWithNonTerminalTitleAsCompleted(t *
 	}
 }
 
+// fakeKiroACPRealGPT56SolCloseErrorScript reproduces the EXACT ACP frame shape
+// captured from a live kiro-cli 2.12.3 + gpt-5.6-sol session (see #5509 /
+// MUL-4860). Three things about this shape broke the older guards:
+//   - the shell tool_call title is "Running: <cmd>" with kind "execute", which
+//     normalizes to "running" — NOT "terminal";
+//   - the command lives in rawInput.command alongside __tool_use_purpose;
+//   - the completed tool_call_update sends rawOutput as an OBJECT
+//     ({"items":[{"Json":{...}}]}), which — when rawOutput was typed as a Go
+//     string — made json.Unmarshal fail and drop the whole update, status and
+//     all, so no completion signal ever reached the guard.
+// Frames use the real wire form: method "session/update" + "sessionUpdate".
+func fakeKiroACPRealGPT56SolCloseErrorScript(command string) string {
+	return `#!/bin/sh
+while IFS= read -r line; do
+  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
+  case "$line" in
+    *'"method":"initialize"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true}}}\n' "$id"
+      ;;
+    *'"method":"session/new"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"ses_real","models":{"currentModelId":"gpt-5.6-sol"}}}\n' "$id"
+      ;;
+    *'"method":"session/prompt"'*)
+      printf '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"ses_real","update":{"sessionUpdate":"tool_call","toolCallId":"call_x","title":"Running: ` + command + `","kind":"execute","rawInput":{"command":"` + command + `","__tool_use_purpose":"deliver the final result"},"_meta":{"kiro":{"toolName":"shell"}}}}}\n'
+      printf '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"ses_real","update":{"sessionUpdate":"tool_call_update","toolCallId":"call_x","content":[{"type":"content","content":{"type":"text","text":"created comment\\n"}}]}}}\n'
+      printf '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"ses_real","update":{"sessionUpdate":"tool_call_update","toolCallId":"call_x","kind":"execute","status":"completed","title":"Running: ` + command + `","rawInput":{"command":"` + command + `"},"rawOutput":{"items":[{"Json":{"exit_status":"exit status: 0","stdout":"created comment\\n","stderr":""}}]}}}}\n'
+      printf '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"ses_real","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"DONE"}}}}\n'
+      ` + closeErrorFrame + `
+      exit 0
+      ;;
+  esac
+done
+`
+}
+
+// TestKiroBackendPreservesCompletionOnRealGPT56SolFrames is the end-to-end
+// #5509 regression against the real captured wire shape: a `multica issue
+// comment add` run through GPT-5.6 Sol's shell tool (title "Running: ...",
+// object rawOutput) that completes, then hits the -32603 close handshake, must
+// stay completed. This fails without BOTH the object-rawOutput parse fix in
+// hermes.go and the payload-based comment-add recognition in kiro.go.
+func TestKiroBackendPreservesCompletionOnRealGPT56SolFrames(t *testing.T) {
+	t.Parallel()
+
+	result := runKiroCloseErrorScript(t, fakeKiroACPRealGPT56SolCloseErrorScript(
+		"multica issue comment add issue-1 --content-file ./reply.md",
+	))
+	if result.Status != "completed" {
+		t.Fatalf("expected status=completed for the real GPT-5.6 Sol frame shape, got %q (error=%q)", result.Status, result.Error)
+	}
+	if result.Error != "" {
+		t.Fatalf("expected close-handshake error to be suppressed, got %q", result.Error)
+	}
+}
+
 // fakeKiroACPTwoCommentCloseErrorScript emits two comment-add tool calls with
 // distinct CallIDs and configurable terminal statuses (in order), then the
 // -32603 close handshake. This exercises ordering: only the most recent
