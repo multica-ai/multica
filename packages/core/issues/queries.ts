@@ -38,13 +38,13 @@ export const issueKeys = {
   flat: (
     wsId: string,
     scope: string,
-    filter: MyIssuesFilter,
+    filter: IssueFlatFilter,
     sort?: IssueSortParam,
   ) => [...issueKeys.flatAll(wsId), scope, filter, sort ?? {}] as const,
   flatExport: (
     wsId: string,
     scope: string,
-    filter: MyIssuesFilter,
+    filter: IssueFlatFilter,
     sort?: IssueSortParam,
   ) => [...issueKeys.flatAll(wsId), "export", scope, filter, sort ?? {}] as const,
   assigneeGroupsAll: (wsId: string) =>
@@ -148,6 +148,23 @@ export type MyIssuesFilter = Pick<
   | "involves_user_id"
 >;
 
+/** Server-side contract for the flat table window. These facets must travel
+ * with every offset page (and live in the query key); post-filtering a loaded
+ * page can silently omit matching issues after the current offset. */
+export type IssueFlatFilter = MyIssuesFilter &
+  Pick<
+    ListIssuesParams,
+    | "statuses"
+    | "priorities"
+    | "assignee_filters"
+    | "include_no_assignee"
+    | "creator_filters"
+    | "project_ids"
+    | "include_no_project"
+    | "label_ids"
+    | "top_level_only"
+  >;
+
 export type AssigneeGroupedIssuesFilter = Omit<
   ListGroupedIssuesParams,
   "group_by" | "limit" | "offset" | "group_assignee_type" | "group_assignee_id"
@@ -156,7 +173,6 @@ export type AssigneeGroupedIssuesFilter = Omit<
 /** Page size per status column. */
 export const ISSUE_PAGE_SIZE = 50;
 export const ISSUE_FLAT_PAGE_SIZE = 100;
-export const ISSUE_FLAT_MAX_ISSUES = 10_000;
 
 /**
  * Statuses fetched and paginated into the list/board cache — every lifecycle
@@ -275,34 +291,46 @@ export function compareIssuesForSort(a: Issue, b: Issue, sort?: IssueSortParam):
 }
 
 async function fetchAllFlatPages(
-  filter: MyIssuesFilter,
+  filter: IssueFlatFilter,
   sort?: IssueSortParam,
 ): Promise<Issue[]> {
   const issues: Issue[] = [];
+  const seenIds = new Set<string>();
   let offset = 0;
-  while (offset < ISSUE_FLAT_MAX_ISSUES) {
+  while (true) {
     const response = await api.listIssues({
       ...filter,
       ...sort,
       limit: ISSUE_FLAT_PAGE_SIZE,
       offset,
     });
-    issues.push(...response.issues);
-    if (response.issues.length < ISSUE_FLAT_PAGE_SIZE) break;
+    let added = 0;
+    for (const issue of response.issues) {
+      if (seenIds.has(issue.id)) continue;
+      seenIds.add(issue.id);
+      issues.push(issue);
+      added += 1;
+    }
     if (issues.length >= response.total) break;
-    offset += ISSUE_FLAT_PAGE_SIZE;
+    if (response.issues.length === 0 || added === 0) {
+      throw new Error("Issue export pagination did not advance");
+    }
+    // Advance by what the server actually returned. This guarantees progress
+    // even if an older server clamps the requested page size differently.
+    offset += response.issues.length;
   }
   return issues;
 }
 
 async function fetchAllMyFlatIssues(
   userId: string,
+  filter: IssueFlatFilter,
   sort?: IssueSortParam,
 ): Promise<Issue[]> {
   const relations = await Promise.all([
-    fetchAllFlatPages({ assignee_id: userId }, sort),
-    fetchAllFlatPages({ creator_id: userId }, sort),
-    fetchAllFlatPages({ involves_user_id: userId }, sort),
+    fetchAllFlatPages({ ...filter, assignee_id: userId }, sort),
+    fetchAllFlatPages({ ...filter, creator_id: userId }, sort),
+    fetchAllFlatPages({ ...filter, involves_user_id: userId }, sort),
   ]);
   const byId = new Map<string, Issue>();
   for (const issues of relations) {
@@ -314,7 +342,7 @@ async function fetchAllMyFlatIssues(
 export function issueFlatListOptions(
   wsId: string,
   scope: string,
-  filter: MyIssuesFilter,
+  filter: IssueFlatFilter,
   userId?: string,
   sort?: IssueSortParam,
 ) {
@@ -324,7 +352,7 @@ export function issueFlatListOptions(
     initialPageParam: 0,
     queryFn: async ({ pageParam }) => {
       if (allMyIssues) {
-        const issues = await fetchAllMyFlatIssues(userId, sort);
+        const issues = await fetchAllMyFlatIssues(userId, filter, sort);
         return { issues, total: issues.length };
       }
       return api.listIssues({
@@ -346,7 +374,7 @@ export function issueFlatListOptions(
 export function issueFlatExportOptions(
   wsId: string,
   scope: string,
-  filter: MyIssuesFilter,
+  filter: IssueFlatFilter,
   userId?: string,
   sort?: IssueSortParam,
 ) {
@@ -354,7 +382,7 @@ export function issueFlatExportOptions(
     queryKey: issueKeys.flatExport(wsId, scope, filter, sort),
     queryFn: () =>
       scope === "all" && userId
-        ? fetchAllMyFlatIssues(userId, sort)
+        ? fetchAllMyFlatIssues(userId, filter, sort)
         : fetchAllFlatPages(filter, sort),
     staleTime: 0,
   });

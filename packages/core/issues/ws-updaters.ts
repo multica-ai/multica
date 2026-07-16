@@ -194,6 +194,17 @@ export function onIssueLabelsChanged(
   issueId: string,
   labels: Label[],
 ) {
+  patchIssueLabels(qc, wsId, issueId, labels);
+  invalidateIssueLabelDerivatives(qc, wsId);
+}
+
+/** Deterministic label snapshot patch used by optimistic mutation legs. */
+export function patchIssueLabels(
+  qc: QueryClient,
+  wsId: string,
+  issueId: string,
+  labels: Label[],
+) {
   for (const [key, data] of qc.getQueriesData<ListIssuesCache>({ queryKey: issueKeys.list(wsId) })) {
     if (data) qc.setQueryData<ListIssuesCache>(key, patchIssueInBuckets(data, issueId, { labels }));
   }
@@ -218,9 +229,22 @@ export function onIssueLabelsChanged(
     );
     qc.setQueryData<Issue[]>(key, next);
   }
+}
+
+/** Reconcile server-filtered label windows only after the write commits. */
+export function invalidateIssueLabelDerivatives(qc: QueryClient, wsId: string) {
   qc.invalidateQueries({ queryKey: issueKeys.myAll(wsId) });
   qc.invalidateQueries({ queryKey: issueKeys.assigneeGroupsAll(wsId) });
   qc.invalidateQueries({ queryKey: issueKeys.myAssigneeGroupsAll(wsId) });
+  qc.invalidateQueries({
+    queryKey: issueKeys.flatAll(wsId),
+    predicate: (query) =>
+      query.queryKey.some((part) => {
+        if (!part || typeof part !== "object" || Array.isArray(part)) return false;
+        const labelIds = (part as { label_ids?: unknown }).label_ids;
+        return Array.isArray(labelIds) && labelIds.length > 0;
+      }),
+  });
 }
 
 /**
@@ -260,13 +284,7 @@ export function onIssuePropertiesChanged(
   issueId: string,
   properties: IssuePropertyValues,
 ) {
-  for (const [key, data] of qc.getQueriesData<ListIssuesCache>({ queryKey: issueKeys.list(wsId) })) {
-    if (data) qc.setQueryData<ListIssuesCache>(key, patchIssueInBuckets(data, issueId, { properties }));
-  }
-  patchIssueInFlatCaches(qc, wsId, issueId, { properties });
-  qc.setQueryData<Issue>(issueKeys.detail(wsId, issueId), (old) =>
-    old ? { ...old, properties } : old,
-  );
+  patchIssueProperties(qc, wsId, issueId, properties);
   qc.invalidateQueries({ queryKey: issueKeys.myAll(wsId) });
   // Plain assignee-group caches are never patched in place (their bucket
   // shape differs) and would otherwise hold stale chips forever under
@@ -274,6 +292,24 @@ export function onIssuePropertiesChanged(
   qc.invalidateQueries({ queryKey: issueKeys.assigneeGroupsAll(wsId) });
   qc.invalidateQueries({ queryKey: issueKeys.myAssigneeGroupsAll(wsId) });
   invalidatePropertyWindowQueries(qc, wsId);
+}
+
+/** Patch only deterministic entity snapshots. Optimistic mutation legs use
+ * this helper so they never start a property-filter/sort refetch before the
+ * server commit (which could return the old bag and stomp the optimistic one). */
+export function patchIssueProperties(
+  qc: QueryClient,
+  wsId: string,
+  issueId: string,
+  properties: IssuePropertyValues,
+) {
+  for (const [key, data] of qc.getQueriesData<ListIssuesCache>({ queryKey: issueKeys.list(wsId) })) {
+    if (data) qc.setQueryData<ListIssuesCache>(key, patchIssueInBuckets(data, issueId, { properties }));
+  }
+  patchIssueInFlatCaches(qc, wsId, issueId, { properties });
+  qc.setQueryData<Issue>(issueKeys.detail(wsId, issueId), (old) =>
+    old ? { ...old, properties } : old,
+  );
 }
 
 /**

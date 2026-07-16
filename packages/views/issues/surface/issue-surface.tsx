@@ -246,12 +246,12 @@ function IssueSurfaceContent({
               <TableView
                 issues={issues}
                 childProgressMap={controller.childProgressMap}
-                projectMap={controller.projectMap}
                 fetchNextPage={controller.fetchNextFlatPage}
                 hasNextPage={controller.hasNextFlatPage}
                 isFetchingNextPage={controller.isFetchingNextFlatPage}
                 total={controller.flatTotal}
                 exportIssues={controller.exportTableIssues}
+                resolveExportLookups={controller.resolveTableExportLookups}
               />
             )}
             {controller.viewMode === "gantt" && (

@@ -78,7 +78,11 @@ export interface ListIssuesParams {
   offset?: number;
   workspace_id?: string;
   status?: IssueStatus;
+  /** Multi-value table facet. OR within the field. */
+  statuses?: IssueStatus[];
   priority?: IssuePriority;
+  /** Multi-value table facet. OR within the field. */
+  priorities?: IssuePriority[];
   assignee_id?: string;
   assignee_ids?: string[];
   /**
@@ -89,6 +93,15 @@ export interface ListIssuesParams {
   assignee_types?: IssueAssigneeType[];
   creator_id?: string;
   project_id?: string;
+  /** Actor-aware table facets. OR within each field. */
+  assignee_filters?: IssueActorRef[];
+  include_no_assignee?: boolean;
+  creator_filters?: IssueActorRef[];
+  project_ids?: string[];
+  include_no_project?: boolean;
+  label_ids?: string[];
+  /** Restrict the window to root issues instead of filtering loaded pages. */
+  top_level_only?: boolean;
   /**
    * Widen the assignee filter to issues where the user is the *indirect*
    * assignee — assignee is one of the user's owned agents, or a squad that

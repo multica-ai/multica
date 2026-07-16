@@ -27,6 +27,29 @@ const membersKey = issueKeys.myListSorted(
 );
 const inboxKey = inboxKeys.list(WS_ID);
 const flatKey = issueKeys.flat(WS_ID, "workspace:all", {}, sort);
+const flatTitleKey = issueKeys.flat(
+  WS_ID,
+  "workspace:all",
+  {},
+  { sort_by: "title", sort_direction: "asc" },
+);
+const flatFilteredKey = issueKeys.flat(
+  WS_ID,
+  "workspace:all",
+  { statuses: ["todo"], priorities: ["high"] },
+  sort,
+);
+const flatUpdatedWindowKey = issueKeys.flat(
+  WS_ID,
+  "workspace:all",
+  {},
+  {
+    ...sort,
+    date_field: "updated_at",
+    date_start: "2025-01-01T00:00:00Z",
+    date_end: "2025-02-01T00:00:00Z",
+  },
+);
 
 function makeIssue(idx: number, overrides: Partial<Issue> = {}): Issue {
   return {
@@ -115,7 +138,7 @@ describe("applyIssueChange", () => {
     expect(result.staleKeys).toEqual([]);
   });
 
-  it("patches loaded flat table pages, marks their order stale, and rolls back", () => {
+  it("patches a loaded flat row without refetching an unrelated position window", () => {
     qc.setQueryData<IssueFlatCache>(flatKey, {
       pages: [{ issues: [issue()], total: 1 }],
       pageParams: [0],
@@ -130,12 +153,44 @@ describe("applyIssueChange", () => {
     expect(
       qc.getQueryData<IssueFlatCache>(flatKey)?.pages[0]?.issues[0]?.title,
     ).toBe("renamed in table");
-    expect(result.staleKeys.map(hashKey)).toContain(hashKey(flatKey));
+    expect(result.staleKeys.map(hashKey)).not.toContain(hashKey(flatKey));
 
     rollbackIssueChange(qc, WS_ID, "issue-1", result);
     expect(
       qc.getQueryData<IssueFlatCache>(flatKey)?.pages[0]?.issues[0]?.title,
     ).toBe("Issue 1");
+  });
+
+  it("marks only flat windows whose sort or facet depends on the changed field", () => {
+    for (const key of [
+      flatKey,
+      flatTitleKey,
+      flatFilteredKey,
+      flatUpdatedWindowKey,
+    ]) {
+      qc.setQueryData<IssueFlatCache>(key, {
+        pages: [{ issues: [issue()], total: 1 }],
+        pageParams: [0],
+      });
+    }
+
+    const titlePatch = { title: "renamed" };
+    const titleResult = applyIssueChange(qc, WS_ID, "issue-1", titlePatch, {
+      changed: issueChangedDims(titlePatch, issue()),
+      baseIssue: issue(),
+    });
+    expect(titleResult.staleKeys.map(hashKey)).toEqual([
+      hashKey(flatTitleKey),
+      hashKey(flatUpdatedWindowKey),
+    ]);
+
+    const statusPatch = { status: "done" as const };
+    const statusResult = applyIssueChange(qc, WS_ID, "issue-1", statusPatch, {
+      changed: issueChangedDims(statusPatch, issue()),
+      baseIssue: issue(),
+    });
+    expect(statusResult.staleKeys.map(hashKey)).toContain(hashKey(flatFilteredKey));
+    expect(statusResult.staleKeys.map(hashKey)).not.toContain(hashKey(flatKey));
   });
 
   it("status change: rebuckets loaded cards, patches inbox, adjusts counts for absent-but-member lists", () => {

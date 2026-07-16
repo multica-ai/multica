@@ -12,6 +12,7 @@ import { projectListOptions } from "@multica/core/projects/queries";
 import {
   childIssueProgressOptions,
   type AssigneeGroupedIssuesFilter,
+  type IssueFlatFilter,
   type IssueSortParam,
   type MyIssuesFilter,
 } from "@multica/core/issues/queries";
@@ -58,6 +59,13 @@ export interface IssueSurfaceData {
   activity: IssueSurfaceActivity;
   childProgressMap: Map<string, ChildProgress>;
   projectMap: Map<string, Project>;
+  resolveTableExportLookups: (needs: {
+    projects: boolean;
+    childProgress: boolean;
+  }) => Promise<{
+    projectMap: Map<string, Project>;
+    childProgressMap: Map<string, ChildProgress>;
+  }>;
   fetchNextFlatPage: () => Promise<unknown>;
   hasNextFlatPage: boolean;
   isFetchingNextFlatPage: boolean;
@@ -80,6 +88,7 @@ export function useIssueSurfaceData({
   usesGantt,
   usesTable,
   sort,
+  tableFacets,
   statusFilters,
   priorityFilters,
   assigneeFilters,
@@ -100,6 +109,7 @@ export function useIssueSurfaceData({
   usesGantt: boolean;
   usesTable: boolean;
   sort: IssueSortParam;
+  tableFacets: IssueFlatFilter;
   statusFilters: IssueStatus[];
   priorityFilters: IssueFilterState["priorityFilters"];
   assigneeFilters: IssueFilterState["assigneeFilters"];
@@ -164,7 +174,7 @@ export function useIssueSurfaceData({
     enabled: usesGantt,
   });
   const flatIssuesQuery = useInfiniteQuery({
-    ...issueSurfaceFlatOptions(wsId, queryPlan, sort),
+    ...issueSurfaceFlatOptions(wsId, queryPlan, sort, tableFacets),
     enabled: usesTable,
   });
 
@@ -271,16 +281,53 @@ export function useIssueSurfaceData({
     ],
   );
 
-  const { data: childProgressMap = EMPTY_CHILD_PROGRESS } = useQuery(
-    childIssueProgressOptions(wsId),
-  );
-  const { data: projects = EMPTY_PROJECTS } = useQuery({
+  const {
+    data: childProgressData,
+    refetch: refetchChildProgress,
+  } = useQuery(childIssueProgressOptions(wsId));
+  const childProgressMap = childProgressData ?? EMPTY_CHILD_PROGRESS;
+  const {
+    data: projectData,
+    refetch: refetchProjects,
+  } = useQuery({
     ...projectListOptions(wsId),
     enabled: loadProjects,
   });
+  const projects = projectData ?? EMPTY_PROJECTS;
   const projectMap = useMemo(
     () => new Map(projects.map((project) => [project.id, project])),
     [projects],
+  );
+  const resolveTableExportLookups = useCallback(
+    async (needs: { projects: boolean; childProgress: boolean }) => {
+      const [projectResult, progressResult] = await Promise.all([
+        needs.projects ? refetchProjects() : Promise.resolve(null),
+        needs.childProgress
+          ? refetchChildProgress()
+          : Promise.resolve(null),
+      ]);
+      if (projectResult?.error) throw projectResult.error;
+      if (progressResult?.error) throw progressResult.error;
+      if (needs.projects && !projectResult?.data) {
+        throw new Error("Failed to load project data for export");
+      }
+      if (needs.childProgress && !progressResult?.data) {
+        throw new Error("Failed to load child progress for export");
+      }
+      const resolvedProjects = projectResult?.data ?? projects;
+      return {
+        projectMap: new Map(
+          resolvedProjects.map((project) => [project.id, project]),
+        ),
+        childProgressMap: progressResult?.data ?? childProgressMap,
+      };
+    },
+    [
+      childProgressMap,
+      projects,
+      refetchChildProgress,
+      refetchProjects,
+    ],
   );
 
   const visibleStatuses = useMemo<IssueStatus[]>(() => {
@@ -368,6 +415,7 @@ export function useIssueSurfaceData({
     activity,
     childProgressMap,
     projectMap,
+    resolveTableExportLookups,
     fetchNextFlatPage: flatIssuesQuery.fetchNextPage,
     hasNextFlatPage: flatIssuesQuery.hasNextPage ?? false,
     isFetchingNextFlatPage: flatIssuesQuery.isFetchingNextPage,

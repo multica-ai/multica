@@ -183,7 +183,18 @@ describe("flat issue table queries", () => {
       issueFlatListOptions(
         WS_ID,
         "project:project-1",
-        { project_id: PROJECT_ID },
+        {
+          project_id: PROJECT_ID,
+          statuses: ["todo", "in_progress"],
+          priorities: ["high"],
+          assignee_filters: [{ type: "member", id: "member-1" }],
+          include_no_assignee: true,
+          creator_filters: [{ type: "agent", id: "agent-1" }],
+          project_ids: ["project-2"],
+          include_no_project: true,
+          label_ids: ["label-1"],
+          top_level_only: true,
+        },
         undefined,
         { sort_by: "updated_at", sort_direction: "desc" },
       ),
@@ -195,6 +206,15 @@ describe("flat issue table queries", () => {
     ]);
     expect(listIssues).toHaveBeenCalledWith({
       project_id: PROJECT_ID,
+      statuses: ["todo", "in_progress"],
+      priorities: ["high"],
+      assignee_filters: [{ type: "member", id: "member-1" }],
+      include_no_assignee: true,
+      creator_filters: [{ type: "agent", id: "agent-1" }],
+      project_ids: ["project-2"],
+      include_no_project: true,
+      label_ids: ["label-1"],
+      top_level_only: true,
       sort_by: "updated_at",
       sort_direction: "desc",
       limit: ISSUE_FLAT_PAGE_SIZE,
@@ -231,6 +251,75 @@ describe("flat issue table queries", () => {
       0,
       ISSUE_FLAT_PAGE_SIZE,
     ]);
+  });
+
+  it("does not silently truncate exports above ten thousand issues", async () => {
+    const total = 10_001;
+    const listIssues = vi
+      .fn<(params?: ListIssuesParams) => Promise<ListIssuesResponse>>()
+      .mockImplementation(async (params) => {
+        const offset = params?.offset ?? 0;
+        const count = Math.min(ISSUE_FLAT_PAGE_SIZE, total - offset);
+        return {
+          issues: Array.from({ length: count }, (_, index) =>
+            makeIssue(offset + index + 1),
+          ),
+          total,
+        };
+      });
+    installFakeApi(listIssues);
+
+    const issues = await qc.fetchQuery(
+      issueFlatExportOptions(WS_ID, "workspace:all", {}, undefined),
+    );
+
+    expect(issues).toHaveLength(total);
+    expect(listIssues).toHaveBeenCalledTimes(101);
+    expect(listIssues.mock.calls.at(-1)?.[0]?.offset).toBe(10_000);
+  });
+
+  it("keeps paging when the server returns fewer rows than requested", async () => {
+    const total = 101;
+    const serverPageSize = 40;
+    const listIssues = vi
+      .fn<(params?: ListIssuesParams) => Promise<ListIssuesResponse>>()
+      .mockImplementation(async (params) => {
+        const offset = params?.offset ?? 0;
+        const count = Math.min(serverPageSize, total - offset);
+        return {
+          issues: Array.from({ length: count }, (_, index) =>
+            makeIssue(offset + index + 1),
+          ),
+          total,
+        };
+      });
+    installFakeApi(listIssues);
+
+    const issues = await qc.fetchQuery(
+      issueFlatExportOptions(WS_ID, "workspace:all", {}, undefined),
+    );
+
+    expect(issues).toHaveLength(total);
+    expect(listIssues.mock.calls.map(([params]) => params?.offset)).toEqual([
+      0, 40, 80,
+    ]);
+  });
+
+  it("fails explicitly if the export endpoint stops advancing offsets", async () => {
+    const page = Array.from({ length: ISSUE_FLAT_PAGE_SIZE }, (_, index) =>
+      makeIssue(index + 1),
+    );
+    const listIssues = vi
+      .fn<(params?: ListIssuesParams) => Promise<ListIssuesResponse>>()
+      .mockResolvedValue({ issues: page, total: ISSUE_FLAT_PAGE_SIZE * 2 });
+    installFakeApi(listIssues);
+
+    await expect(
+      qc.fetchQuery(
+        issueFlatExportOptions(WS_ID, "workspace:all", {}, undefined),
+      ),
+    ).rejects.toThrow("Issue export pagination did not advance");
+    expect(listIssues).toHaveBeenCalledTimes(2);
   });
 
   it("deduplicates the three My Issues relations and restores global sort order", async () => {

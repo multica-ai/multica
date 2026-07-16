@@ -13,6 +13,7 @@ import { useWorkspaceId } from "@multica/core/hooks";
 import { dateOnlyToLocalDate } from "@multica/core/issues/date";
 import type {
   AssigneeGroupedIssuesFilter,
+  IssueFlatFilter,
   IssueSortParam,
   MyIssuesFilter,
 } from "@multica/core/issues/queries";
@@ -75,6 +76,13 @@ export interface IssueSurfaceController {
   selection: IssueSurfaceSelection;
   childProgressMap: Map<string, ChildProgress>;
   projectMap: Map<string, Project>;
+  resolveTableExportLookups: (needs: {
+    projects: boolean;
+    childProgress: boolean;
+  }) => Promise<{
+    projectMap: Map<string, Project>;
+    childProgressMap: Map<string, ChildProgress>;
+  }>;
   fetchNextFlatPage: () => Promise<unknown>;
   hasNextFlatPage: boolean;
   isFetchingNextFlatPage: boolean;
@@ -236,6 +244,37 @@ export function useIssueSurfaceController({
   const { projectFilters: viewProjectFilters, includeNoProject: viewIncludeNoProject } =
     projectFilterState;
 
+  const tableFacets = useMemo<IssueFlatFilter>(
+    () => ({
+      ...(statusFilters.length > 0 ? { statuses: statusFilters } : {}),
+      ...(priorityFilters.length > 0 ? { priorities: priorityFilters } : {}),
+      ...(assigneeFilters.length > 0
+        ? { assignee_filters: assigneeFilters }
+        : {}),
+      ...(includeNoAssignee ? { include_no_assignee: true } : {}),
+      ...(creatorFilters.length > 0
+        ? { creator_filters: creatorFilters }
+        : {}),
+      ...(viewProjectFilters.length > 0
+        ? { project_ids: viewProjectFilters }
+        : {}),
+      ...(viewIncludeNoProject ? { include_no_project: true } : {}),
+      ...(labelFilters.length > 0 ? { label_ids: labelFilters } : {}),
+      ...(showSubIssues === false ? { top_level_only: true } : {}),
+    }),
+    [
+      assigneeFilters,
+      creatorFilters,
+      includeNoAssignee,
+      labelFilters,
+      priorityFilters,
+      showSubIssues,
+      statusFilters,
+      viewIncludeNoProject,
+      viewProjectFilters,
+    ],
+  );
+
   const data = useIssueSurfaceData({
     wsId,
     queryPlan,
@@ -244,6 +283,7 @@ export function useIssueSurfaceController({
     usesGantt,
     usesTable,
     sort,
+    tableFacets,
     statusFilters,
     priorityFilters,
     assigneeFilters,
@@ -263,10 +303,10 @@ export function useIssueSurfaceController({
 
   const exportTableIssues = useCallback(async () => {
     const exportIssues = await queryClient.fetchQuery(
-      issueSurfaceFlatExportOptions(wsId, queryPlan, sort),
+      issueSurfaceFlatExportOptions(wsId, queryPlan, sort, tableFacets),
     );
     return data.filterIssuesForExport(exportIssues);
-  }, [data, queryClient, queryPlan, sort, wsId]);
+  }, [data, queryClient, queryPlan, sort, tableFacets, wsId]);
 
   const { actions, openCreateIssue, moveIssue } = useIssueSurfaceActions({
     createDefaults: resolvedCreateDefaults,

@@ -8,6 +8,7 @@ import {
   myIssueListOptions,
   projectGanttIssuesOptions,
   type AssigneeGroupedIssuesFilter,
+  type IssueFlatFilter,
   type IssueSortParam,
 } from "../queries";
 import type {
@@ -47,11 +48,12 @@ export function issueSurfaceFlatOptions(
   wsId: string,
   plan: IssueSurfaceQueryPlan,
   sort?: IssueSortParam,
+  facets: IssueFlatFilter = {},
 ) {
   return issueFlatListOptions(
     wsId,
     plan.queryScope ?? plan.scopeKey,
-    plan.queryFilter,
+    { ...plan.queryFilter, ...facets },
     plan.userId,
     sort,
   );
@@ -62,11 +64,12 @@ export function issueSurfaceFlatExportOptions(
   wsId: string,
   plan: IssueSurfaceQueryPlan,
   sort?: IssueSortParam,
+  facets: IssueFlatFilter = {},
 ) {
   return issueFlatExportOptions(
     wsId,
     plan.queryScope ?? plan.scopeKey,
-    plan.queryFilter,
+    { ...plan.queryFilter, ...facets },
     plan.userId,
     sort,
   );

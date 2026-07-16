@@ -11,7 +11,10 @@ import {
   onIssueDeleted,
   onIssueLabelsChanged,
   onIssueMetadataChanged,
+  onIssuePropertiesChanged,
   onIssueUpdated,
+  patchIssueLabels,
+  patchIssueProperties,
 } from "./ws-updaters";
 import { issueKeys } from "./queries";
 import { labelKeys } from "../labels/queries";
@@ -181,6 +184,25 @@ describe("onIssueLabelsChanged", () => {
       labelA,
     ]);
   });
+
+  it("defers label-filtered flat-window invalidation until commit", () => {
+    const flatKey = issueKeys.flat(
+      WS_ID,
+      "workspace:all",
+      { label_ids: [labelB.id] },
+      { sort_by: "position" },
+    );
+    qc.setQueryData(flatKey, {
+      pages: [{ issues: [baseIssue], total: 1 }],
+      pageParams: [0],
+    });
+
+    patchIssueLabels(qc, WS_ID, ISSUE_ID, [labelB]);
+    expect(qc.getQueryState(flatKey)?.isInvalidated).toBe(false);
+
+    onIssueLabelsChanged(qc, WS_ID, ISSUE_ID, [labelB]);
+    expectInvalidated(qc, flatKey);
+  });
 });
 
 describe("onIssueMetadataChanged", () => {
@@ -217,6 +239,34 @@ describe("onIssueMetadataChanged", () => {
 
     expect(qc.getQueryData(issueKeys.detail(WS_ID, ISSUE_ID))).toBeUndefined();
     expect(qc.getQueryData(issueKeys.list(WS_ID))).toBeUndefined();
+  });
+});
+
+describe("issue property snapshots", () => {
+  it("keeps optimistic patches local, then invalidates property windows after commit", () => {
+    const qc = new QueryClient();
+    const flatKey = issueKeys.flat(
+      WS_ID,
+      "workspace:all",
+      {},
+      { sort_by: "property:estimate", properties: { estimate: ["3"] } },
+    );
+    qc.setQueryData(flatKey, {
+      pages: [{ issues: [baseIssue], total: 1 }],
+      pageParams: [0],
+    });
+
+    patchIssueProperties(qc, WS_ID, ISSUE_ID, { estimate: 3 });
+
+    expect(qc.getQueryState(flatKey)?.isInvalidated).toBe(false);
+    expect(
+      qc.getQueryData<{ pages: { issues: Issue[] }[] }>(flatKey)?.pages[0]
+        ?.issues[0]?.properties,
+    ).toEqual({ estimate: 3 });
+
+    onIssuePropertiesChanged(qc, WS_ID, ISSUE_ID, { estimate: 4 });
+
+    expectInvalidated(qc, flatKey);
   });
 });
 

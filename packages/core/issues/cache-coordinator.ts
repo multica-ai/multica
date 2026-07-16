@@ -4,7 +4,12 @@ import {
   type QueryClient,
   type QueryKey,
 } from "@tanstack/react-query";
-import { issueKeys, type MyIssuesFilter } from "./queries";
+import {
+  issueKeys,
+  type IssueFlatFilter,
+  type IssueSortParam,
+  type MyIssuesFilter,
+} from "./queries";
 import { inboxKeys } from "../inbox/queries";
 import { patchInboxIssueStatus } from "../inbox/ws-updaters";
 import { projectKeys } from "../projects/queries";
@@ -128,6 +133,95 @@ function flatListEntries(
     );
 }
 
+function flatContractFromKey(key: QueryKey): {
+  scope: string | undefined;
+  filter: IssueFlatFilter;
+  sort: IssueSortParam;
+} {
+  return {
+    scope: typeof key[3] === "string" ? key[3] : undefined,
+    filter: (key[4] ?? {}) as IssueFlatFilter,
+    sort: (key[5] ?? {}) as IssueSortParam,
+  };
+}
+
+function patchFieldChanged<K extends keyof Issue>(
+  patch: Partial<Issue>,
+  base: Issue | undefined,
+  field: K,
+) {
+  if (!Object.prototype.hasOwnProperty.call(patch, field)) return false;
+  return !base || !Object.is(patch[field], base[field]);
+}
+
+/** Whether a patch can change a flat window's membership or ordering. A
+ * loaded row is always patched optimistically; only windows whose server
+ * contract depends on the changed field need the follow-up refetch. */
+function flatWindowNeedsReconcile(
+  key: QueryKey,
+  patch: Partial<Issue>,
+  base: Issue | undefined,
+  changed: IssueChangedDims,
+) {
+  const { scope, filter, sort } = flatContractFromKey(key);
+  const anyIssueFieldChanged = Object.keys(patch).some((field) =>
+    patchFieldChanged(patch, base, field as keyof Issue),
+  );
+
+  if (listFilterDependsOn(scope, filter, changed)) return true;
+  if (changed.status && (filter.statuses?.length ?? 0) > 0) return true;
+  if (
+    patchFieldChanged(patch, base, "priority") &&
+    (filter.priorities?.length ?? 0) > 0
+  ) {
+    return true;
+  }
+  if (
+    changed.assignee &&
+    ((filter.assignee_filters?.length ?? 0) > 0 || filter.include_no_assignee)
+  ) {
+    return true;
+  }
+  if (changed.project && ((filter.project_ids?.length ?? 0) > 0 || filter.include_no_project)) {
+    return true;
+  }
+  if (patchFieldChanged(patch, base, "parent_issue_id") && filter.top_level_only) {
+    return true;
+  }
+  if (sort.date_field === "updated_at" && anyIssueFieldChanged) return true;
+  if (
+    sort.date_field === "created_at" &&
+    patchFieldChanged(patch, base, "created_at")
+  ) {
+    return true;
+  }
+
+  switch (sort.sort_by ?? "position") {
+    case "title":
+      return patchFieldChanged(patch, base, "title");
+    case "status":
+      return changed.status;
+    case "priority":
+      return patchFieldChanged(patch, base, "priority");
+    case "created_at":
+      return patchFieldChanged(patch, base, "created_at");
+    case "updated_at":
+      // Every persisted issue edit advances updated_at even though the
+      // optimistic request payload does not carry the server timestamp.
+      return anyIssueFieldChanged;
+    case "start_date":
+      return patchFieldChanged(patch, base, "start_date");
+    case "due_date":
+      return patchFieldChanged(patch, base, "due_date");
+    case "position":
+      return patchFieldChanged(patch, base, "position");
+    default:
+      // Custom-property ordering is reconciled by the dedicated property
+      // mutation/WS pipeline, which has the full property-bag snapshot.
+      return false;
+  }
+}
+
 export function applyIssueChange(
   qc: QueryClient,
   wsId: string,
@@ -233,10 +327,9 @@ export function applyIssueChange(
     staleKeys.push(key);
   }
 
-  // Flat table windows have global ordering and may carry client-side facets.
-  // Patch a loaded row immediately for responsive inline editing, then mark
-  // the exact window stale so the server can reconcile ordering, membership,
-  // totals, and unloaded pages after the write commits.
+  // Patch loaded flat rows immediately. Only refetch windows whose encoded
+  // server filter/sort actually depends on this change; e.g. a title edit in
+  // a position-sorted unfiltered table is fully reconciled by the patch.
   for (const [key, data] of flatListEntries(qc, wsId)) {
     let found: Issue | undefined;
     const pages = data.pages.map((page) => ({
@@ -252,7 +345,9 @@ export function applyIssueChange(
       prevFlatLists.push([key, data]);
       qc.setQueryData<IssueFlatCache>(key, { ...data, pages });
     }
-    staleKeys.push(key);
+    if (flatWindowNeedsReconcile(key, patch, found ?? baseIssue, changed)) {
+      staleKeys.push(key);
+    }
   }
 
   const prevDetail = qc.getQueryData<Issue>(issueKeys.detail(wsId, id));

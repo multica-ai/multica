@@ -105,6 +105,7 @@ import {
   type IssueTableDisplayRow,
 } from "./table-view-model";
 import type { ChildProgress } from "./list-row";
+import { InfiniteScrollSentinel } from "./infinite-scroll-sentinel";
 
 const SELECT_COLUMN_ID = "__select";
 const ADD_COLUMN_ID = "__add";
@@ -112,12 +113,18 @@ const ADD_COLUMN_ID = "__add";
 type TableViewProps = {
   issues: Issue[];
   childProgressMap: Map<string, ChildProgress>;
-  projectMap: Map<string, Project>;
   fetchNextPage: () => Promise<unknown>;
   hasNextPage: boolean;
   isFetchingNextPage: boolean;
   total: number;
   exportIssues: () => Promise<Issue[]>;
+  resolveExportLookups: (needs: {
+    projects: boolean;
+    childProgress: boolean;
+  }) => Promise<{
+    projectMap: Map<string, Project>;
+    childProgressMap: Map<string, ChildProgress>;
+  }>;
 };
 
 type ColumnLabelKey =
@@ -400,7 +407,7 @@ export function TableColumnPicker({
   );
 }
 
-function InlineTitle({
+export function InlineTitle({
   row,
   onUpdate,
   onToggleParent,
@@ -413,8 +420,14 @@ function InlineTitle({
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(row.issue.title);
+  const editingRef = useRef(editing);
+  editingRef.current = editing;
 
-  useEffect(() => setDraft(row.issue.title), [row.issue.title]);
+  useEffect(() => {
+    // Realtime/cache snapshots should refresh the passive label, but must not
+    // overwrite text the user is actively composing.
+    if (!editingRef.current) setDraft(row.issue.title);
+  }, [row.issue.title]);
 
   const commit = () => {
     const title = draft.trim();
@@ -577,12 +590,12 @@ function propertyDisplayValue(
 export function TableView({
   issues,
   childProgressMap,
-  projectMap,
   fetchNextPage,
   hasNextPage,
   isFetchingNextPage,
   total,
   exportIssues,
+  resolveExportLookups,
 }: TableViewProps) {
   const { t, i18n } = useT("issues");
   const wsId = useWorkspaceId();
@@ -619,7 +632,6 @@ export function TableView({
   const sortDirection = useViewStore((state) => state.sortDirection);
   const setSortDirection = useViewStore((state) => state.setSortDirection);
   const [exporting, setExporting] = useState<"all" | "selected" | null>(null);
-  const sentinelRef = useRef<HTMLDivElement>(null);
   const selectionAnchorRef = useRef<string | null>(null);
 
   const groupingPropertyId = propertyIdFromViewKey(tableGrouping);
@@ -995,26 +1007,19 @@ export function TableView({
     [reorderTableColumn],
   );
 
-  useEffect(() => {
-    const sentinel = sentinelRef.current;
-    if (!sentinel || !hasNextPage) return;
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (entries[0]?.isIntersecting && !isFetchingNextPage) {
-          void fetchNextPage();
-        }
-      },
-      { rootMargin: "320px" },
-    );
-    observer.observe(sentinel);
-    return () => observer.disconnect();
-  }, [fetchNextPage, hasNextPage, isFetchingNextPage]);
-
   const handleExport = async (mode: "all" | "selected") => {
     setExporting(mode);
     try {
-      const rows = mode === "all" ? await exportIssues() : selectedIssues;
       const csvColumns = visibleColumnConfigs;
+      const [rows, exportLookups] = await Promise.all([
+        mode === "all" ? exportIssues() : Promise.resolve(selectedIssues),
+        resolveExportLookups({
+          projects: csvColumns.some((column) => column.key === "project"),
+          childProgress: csvColumns.some(
+            (column) => column.key === "child_progress",
+          ),
+        }),
+      ]);
       const headers = csvColumns.map((column) => columnLabel(column.key));
       const csvRows = rows.map((issue) =>
         csvColumns.map((column) => {
@@ -1041,7 +1046,9 @@ export function TableView({
             case "labels":
               return issue.labels?.map((label) => label.name).join(", ") ?? "";
             case "project":
-              return issue.project_id ? projectMap.get(issue.project_id)?.title ?? "" : "";
+              return issue.project_id
+                ? exportLookups.projectMap.get(issue.project_id)?.title ?? ""
+                : "";
             case "start_date":
             case "due_date":
               return issue[column.key] ?? "";
@@ -1049,7 +1056,7 @@ export function TableView({
             case "updated_at":
               return issue[column.key];
             case "child_progress": {
-              const progress = childProgressMap.get(issue.id);
+              const progress = exportLookups.childProgressMap.get(issue.id);
               return progress ? `${progress.done}/${progress.total}` : "";
             }
             case "creator":
@@ -1084,7 +1091,14 @@ export function TableView({
           colSpan={table.getVisibleLeafColumns().length}
           className="h-px p-0"
         >
-          <div ref={sentinelRef} className="h-px w-px" aria-hidden />
+          <InfiniteScrollSentinel
+            onVisible={() => {
+              if (hasNextPage && !isFetchingNextPage) void fetchNextPage();
+            }}
+            loading={false}
+            rootMargin="320px"
+            className="h-px w-px"
+          />
         </TableCell>
       </TableRow>
     </TableFooter>

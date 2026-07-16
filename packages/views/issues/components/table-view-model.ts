@@ -315,7 +315,15 @@ export function calculateIssueTableColumn(
 }
 
 function escapeCsvCell(value: unknown) {
-  const text = value == null ? "" : String(value);
+  const raw = value == null ? "" : String(value);
+  // Spreadsheet apps execute string cells beginning with these characters as
+  // formulas. Prefix text (including headers) with an apostrophe so exported
+  // user-controlled titles/properties remain data. Preserve real numbers as
+  // numbers — a negative numeric value is not an injected formula string.
+  const text =
+    typeof value === "string" && /^[=+\-@\t\r]/.test(raw)
+      ? `'${raw}`
+      : raw;
   return /[",\n\r]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
 }
 

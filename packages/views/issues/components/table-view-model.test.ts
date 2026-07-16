@@ -189,4 +189,15 @@ describe("table calculations and CSV", () => {
       ),
     ).toBe('Identifier,Title\r\nMUL-1,"Ship, ""verify""\nnext"');
   });
+
+  it("neutralizes spreadsheet formulas in headers and string cells", () => {
+    expect(
+      buildIssueTableCsv(
+        ["=Injected", "Value"],
+        [["+SUM(A1:A2)", -42], ["\tcmd", "@remote"]],
+      ),
+    ).toBe(
+      "'=Injected,Value\r\n'+SUM(A1:A2),-42\r\n'\tcmd,'@remote",
+    );
+  });
 });
