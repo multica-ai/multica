@@ -31,7 +31,7 @@ import { Button } from "@multica/ui/components/ui/button";
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@multica/ui/components/ui/resizable";
 import { Sheet, SheetContent } from "@multica/ui/components/ui/sheet";
 import { useIsMobile } from "@multica/ui/hooks/use-mobile";
-import { ContentEditor, type ContentEditorRef, TitleEditor, type TitleEditorRef, useFileDropZone, FileDropOverlay, useLazyEditor } from "../../editor";
+import { ContentEditor, type ContentEditorRef, TitleEditor, type TitleEditorRef, useFileDropZone, FileDropOverlay, useLazyEditor, useEditorUpload } from "../../editor";
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
 import {
   Tooltip,
@@ -45,6 +45,7 @@ import { Command, CommandInput, CommandList, CommandEmpty, CommandGroup, Command
 import { AvatarGroup, AvatarGroupCount } from "@multica/ui/components/ui/avatar";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { PropRow } from "../../common/prop-row";
+import { PropertyIcon } from "../../common/property-icon";
 import type { Attachment, Issue, IssueStatus, IssuePriority, TimelineEntry, UpdateIssueRequest } from "@multica/core/types";
 import { contentReferencesAttachment } from "@multica/core/types";
 import { STATUS_CONFIG, PRIORITY_CONFIG } from "@multica/core/issues/config";
@@ -90,8 +91,6 @@ import { useIssueTimeline } from "../hooks/use-issue-timeline";
 import { useIssueReactions } from "../hooks/use-issue-reactions";
 import { useIssueSubscribers } from "../hooks/use-issue-subscribers";
 import { ReactionBar } from "@multica/ui/components/common/reaction-bar";
-import { useFileUpload } from "@multica/core/hooks/use-file-upload";
-import { api } from "@multica/core/api";
 import { useTimeAgo } from "../../i18n";
 import { useRestoredScrollOffset, useRestoredScrollRef } from "../../platform";
 import { cn } from "@multica/ui/lib/utils";
@@ -728,7 +727,11 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     currentUserRole === "owner" || currentUserRole === "admin";
   const { data: allIssues = [] } = useQuery(issueListOptions(wsId));
   const { getActorName } = useActorName();
-  const { uploadWithToast } = useFileUpload(api);
+  // Description autosave is deliberately NOT gated (no explicit submit; the
+  // editor already strips `blob:` before serializing and binds ids on the
+  // later save). It still needs the failure toast, or a failed upload just
+  // erases its own placeholder and the file disappears unexplained.
+  const { uploadWithToast } = useEditorUpload();
   const { defaultLayout, onLayoutChanged } = useDefaultLayout({
     id: layoutId,
   });
@@ -1629,7 +1632,15 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                 (!p.archived && visibleCustomProps.has(p.id)),
             )
             .map((p) => (
-              <PropRow key={p.id} label={p.name}>
+              <PropRow
+                key={p.id}
+                label={
+                  <>
+                    <PropertyIcon property={p} className="size-3.5 text-xs" />
+                    <span className="truncate">{p.name}</span>
+                  </>
+                }
+              >
                 <CustomPropertyValueEditor
                   issue={issue}
                   property={p}
@@ -1706,7 +1717,11 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                             onClick={() => addCustomProp(p.id)}
                             className="flex w-full items-center gap-2 rounded-md px-2 py-1 text-xs text-foreground/90 transition-colors hover:bg-accent focus-visible:bg-accent focus-visible:outline-none"
                           >
-                            <SlidersHorizontal className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                            {p.icon ? (
+                              <PropertyIcon property={p} className="size-3.5 text-xs" />
+                            ) : (
+                              <SlidersHorizontal className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                            )}
                             <span className="truncate">{p.name}</span>
                           </button>
                         ))}

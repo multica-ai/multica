@@ -43,7 +43,12 @@ const editorProps = vi.hoisted(() => ({
 // scrubbed the editor (clearEditor) or left it intact (fire-and-forget).
 const editorState = vi.hoisted(() => ({ cleared: 0, blurred: 0, focused: 0 }));
 
-vi.mock("../../editor", () => ({
+vi.mock("../../editor", async () => ({
+  // Real submit gate (pure React) driven by the mock editor's
+  // `hasActiveUploads` / `onUploadingChange`.
+  ...(await vi.importActual<typeof import("../../editor/use-upload-gate")>(
+    "../../editor/use-upload-gate",
+  )),
   useFileDropZone: ({ onDrop }: { onDrop: (files: File[]) => void }) => {
     dropHandlers.onDrop = onDrop;
     return { isDragOver: false, dropZoneProps: { "data-testid": "drop-zone" } };
@@ -55,6 +60,7 @@ vi.mock("../../editor", () => ({
       onUpdate?: (md: string) => void;
       placeholder?: string;
       onUploadFile?: (file: File) => Promise<UploadResult | null>;
+      onUploadingChange?: (uploading: boolean) => void;
       mentionMode?: string;
       mentionContextItems?: unknown[];
     },
@@ -65,6 +71,7 @@ vi.mock("../../editor", () => ({
       onUpdate,
       placeholder,
       onUploadFile,
+      onUploadingChange,
     } = props;
     editorProps.last = props as unknown as Record<string, unknown>;
     const valueRef = useRef<string>(defaultValue ?? "");
@@ -83,6 +90,9 @@ vi.mock("../../editor", () => ({
       },
       uploadFile: async (file: File) => {
         uploadingRef.current += 1;
+        // Mirror the real editor: the pending node lands before the await, and
+        // the host learns about it through onUploadingChange, not by polling.
+        if (uploadingRef.current === 1) onUploadingChange?.(true);
         try {
           const result = await onUploadFile?.(file);
           if (result) {
@@ -100,6 +110,7 @@ vi.mock("../../editor", () => ({
           }
         } finally {
           uploadingRef.current = Math.max(0, uploadingRef.current - 1);
+          if (uploadingRef.current === 0) onUploadingChange?.(false);
         }
       },
       hasActiveUploads: () => uploadingRef.current > 0,

@@ -587,8 +587,19 @@ func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopi
 	title := s.interpolateTemplate(ap, *run, triggerTimezone)
 	description := s.buildIssueDescription(ap, *run, triggerTimezone)
 
+	// Refresh the autopilot row at dispatch time so we use the current project
+	// binding instead of any stale snapshot the caller may have cached.
+	currentAutopilot, err := qtx.GetAutopilotInWorkspace(ctx, db.GetAutopilotInWorkspaceParams{
+		ID:          ap.ID,
+		WorkspaceID: ap.WorkspaceID,
+	})
+	if err != nil {
+		return fmt.Errorf("refresh autopilot: %w", err)
+	}
+	projectID := currentAutopilot.ProjectID
+
 	if duplicate, found, err := issueguard.LockAndFindRecentAutopilotDuplicate(
-		ctx, qtx, ap.WorkspaceID, ap.ID, ap.ProjectID, title, autopilotRecentDuplicateWindow,
+		ctx, qtx, ap.WorkspaceID, ap.ID, projectID, title, autopilotRecentDuplicateWindow,
 	); err != nil {
 		return fmt.Errorf("recent duplicate guard: %w", err)
 	} else if found {
@@ -625,7 +636,7 @@ func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopi
 		StartDate:     pgtype.Date{},
 		DueDate:       pgtype.Date{},
 		Number:        issueNumber,
-		ProjectID:     ap.ProjectID,
+		ProjectID:     projectID,
 		OriginType:    pgtype.Text{String: "autopilot", Valid: true},
 		OriginID:      ap.ID,
 	})

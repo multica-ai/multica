@@ -2,11 +2,9 @@
 
 import { useRef, useState, useCallback, useEffect } from "react";
 import { cn } from "@multica/ui/lib/utils";
-import { ContentEditor, type ContentEditorRef, useFileDropZone, FileDropOverlay, useLazyEditor } from "../../editor";
+import { ContentEditor, type ContentEditorRef, useFileDropZone, FileDropOverlay, useLazyEditor, useUploadGate, useEditorUpload } from "../../editor";
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
 import { SubmitButton } from "@multica/ui/components/common/submit-button";
-import { useFileUpload } from "@multica/core/hooks/use-file-upload";
-import { api } from "@multica/core/api";
 import type { Attachment } from "@multica/core/types";
 import { contentReferencesAttachment } from "@multica/core/types";
 import { formatShortcut, useShortcut } from "@multica/core/shortcuts";
@@ -25,8 +23,12 @@ interface CommentInputProps {
 
 function CommentInput({ issueId, onSubmit }: CommentInputProps) {
   const { t } = useT("issues");
+  const { t: tEditor } = useT("editor");
   const sendShortcut = useShortcut("send");
   const editorRef = useRef<ContentEditorRef>(null);
+  // Sending mid-upload would strip the pending image's blob URL out of the
+  // markdown and bind no attachment id — the comment posts without the file.
+  const uploadGate = useUploadGate(editorRef);
   // Read the persisted draft once on mount. ContentEditor only honors
   // `defaultValue` at mount time, so this snapshot drives both the editor's
   // initial content and the submit-button enable state — without this the
@@ -43,7 +45,7 @@ function CommentInput({ issueId, onSubmit }: CommentInputProps) {
   //  - the editor's AttachmentDownloadProvider, so file-card Eye buttons can
   //    resolve text/code/markdown previews that require the attachment id.
   const [pendingAttachments, setPendingAttachments] = useState<Attachment[]>([]);
-  const { uploadWithToast } = useFileUpload(api);
+  const { uploadWithToast } = useEditorUpload();
   // Readonly-first: the composer renders as a same-looking static shell until
   // the user shows intent (click / keyboard / file drop). An unsent draft is
   // standing intent — mount the real editor immediately so the draft is
@@ -111,6 +113,10 @@ function CommentInput({ issueId, onSubmit }: CommentInputProps) {
   const handleSubmit = async () => {
     const content = editorRef.current?.getMarkdown()?.replace(/(\n\s*)+$/, "").trim();
     if (!content || submitting) return;
+    // Re-read the queue here rather than trusting the button's disabled prop:
+    // Cmd+Enter never touches the button, and a click can land in the same
+    // tick an upload starts.
+    if (uploadGate.isBlocked()) return;
     // Track every attachment whose stable download URL OR legacy
     // storage URL is referenced in the markdown body. Both shapes
     // can appear in the same comment during the MUL-3130 rollout —
@@ -183,6 +189,7 @@ function CommentInput({ issueId, onSubmit }: CommentInputProps) {
           }}
           onSubmit={handleSubmit}
           onUploadFile={handleUpload}
+          onUploadingChange={uploadGate.onUploadingChange}
           debounceMs={100}
           currentIssueId={issueId}
           attachments={pendingAttachments}
@@ -236,8 +243,14 @@ function CommentInput({ issueId, onSubmit }: CommentInputProps) {
           onClick={handleSubmit}
           disabled={isEmpty}
           loading={submitting}
-          tooltip={sendShortcut
-            ? `${t(($) => $.comment.send_tooltip)} · ${formatShortcut(sendShortcut)}`
+          busy={uploadGate.uploading}
+          tooltip={uploadGate.uploading
+            ? tEditor(($) => $.upload.in_progress)
+            : sendShortcut
+              ? `${t(($) => $.comment.send_tooltip)} · ${formatShortcut(sendShortcut)}`
+              : t(($) => $.comment.send_tooltip)}
+          ariaLabel={uploadGate.uploading
+            ? tEditor(($) => $.upload.in_progress)
             : t(($) => $.comment.send_tooltip)}
         />
       </div>

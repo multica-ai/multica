@@ -20,6 +20,7 @@ import {
   Pin,
   PinOff,
   ListX,
+  AppWindow,
   type LucideIcon,
 } from "lucide-react";
 import {
@@ -56,6 +57,7 @@ import {
   type Tab,
 } from "@/stores/tab-store";
 import { paths } from "@multica/core/paths";
+import { parseIssueWindowPath } from "../../../shared/issue-window";
 
 const TAB_ICONS: Record<string, LucideIcon> = {
   Inbox,
@@ -183,13 +185,17 @@ function SortableTabItem({
   canCloseOthers: boolean;
   isNew: boolean;
   shouldReduceMotion: boolean;
-  /** Hairline on the tab's left edge — hidden next to the active tab. */
+  /**
+   * Hairline on the tab's left edge — hidden next to the active tab, and
+   * faded out while either of the two tabs it divides is hovered.
+   */
   showSeparator: boolean;
 }) {
   const setActiveTab = useTabStore((s) => s.setActiveTab);
   const closeTab = useTabStore((s) => s.closeTab);
   const closeOtherTabs = useTabStore((s) => s.closeOtherTabs);
   const togglePin = useTabStore((s) => s.togglePin);
+  const issueWindowPath = parseIssueWindowPath(tab.url);
 
   const {
     attributes,
@@ -230,6 +236,14 @@ function SortableTabItem({
 
   const stopDragOnAction = (e: React.PointerEvent) => {
     e.stopPropagation();
+  };
+
+  const handleOpenAsWindow = () => {
+    if (!issueWindowPath) return;
+    void window.desktopAPI.openIssueWindow({
+      path: issueWindowPath.path,
+      title: tab.title,
+    });
   };
 
   // Pinned tabs keep their full title (RFC §3 D1v-ii FINAL). The only visual
@@ -345,14 +359,26 @@ function SortableTabItem({
           />
         )}
         {showSeparator && (
+          // Fades in step with the neighbouring hover pill: both use a bare
+          // transition-opacity, so the hairline clears exactly as the pill
+          // arrives rather than lingering 2px off its rounded edge.
           <span
             aria-hidden
-            className="pointer-events-none absolute left-0 top-1/2 h-4 w-px -translate-y-1/2 bg-border"
+            className="pointer-events-none absolute left-0 top-1/2 h-4 w-px -translate-y-1/2 bg-surface-border transition-opacity group-hover/tab:opacity-0 prev-tab-hover:opacity-0"
           />
         )}
         <ContextMenu>
           <ContextMenuTrigger render={tabButton} />
           <ContextMenuContent>
+            {issueWindowPath && (
+              <>
+                <ContextMenuItem onClick={handleOpenAsWindow}>
+                  <AppWindow />
+                  Open as new window
+                </ContextMenuItem>
+                <ContextMenuSeparator />
+              </>
+            )}
             <ContextMenuItem onClick={() => togglePin(tab.id)}>
               {tab.pinned ? (
                 <>
@@ -630,7 +656,7 @@ export function TabBar() {
                       unpinnedCount > 0 && (
                         <div
                           aria-hidden
-                          className="mx-1 mb-2.5 h-4 w-px shrink-0 self-end bg-border"
+                          className="mx-1 mb-2.5 h-4 w-px shrink-0 self-end bg-surface-border"
                         />
                       )}
                   </Fragment>

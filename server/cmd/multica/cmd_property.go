@@ -35,6 +35,7 @@ type propertyDTO struct {
 	Name        string `json:"name"`
 	Type        string `json:"type"`
 	Description string `json:"description"`
+	Icon        string `json:"icon"`
 	Config      struct {
 		Options []propertyOptionDTO `json:"options"`
 	} `json:"config"`
@@ -148,10 +149,12 @@ func init() {
 	propertyCreateCmd.Flags().String("name", "", "Property name (required)")
 	propertyCreateCmd.Flags().String("type", "", "Property type: text, number, select, multi_select, date, checkbox, url (required)")
 	propertyCreateCmd.Flags().String("description", "", "Property description")
+	propertyCreateCmd.Flags().String("icon", "", "Property icon key from the Web picker (for example, flag, tag, or shield)")
 	propertyCreateCmd.Flags().StringArray("option", nil, `Select option as "Name" or "Name:#rrggbb" (repeatable; select types only)`)
 	propertyUpdateCmd.Flags().String("output", "table", "Output format: table or json")
 	propertyUpdateCmd.Flags().String("name", "", "New property name")
 	propertyUpdateCmd.Flags().String("description", "", "New property description")
+	propertyUpdateCmd.Flags().String("icon", "", "New property icon key from the Web picker; pass an empty value to clear")
 	propertyUpdateCmd.Flags().StringArray("option", nil, `Replacement option list as "Name" or "Name:#rrggbb" (repeatable)`)
 	propertyArchiveCmd.Flags().String("output", "table", "Output format: table or json")
 	propertyUnarchiveCmd.Flags().String("output", "table", "Output format: table or json")
@@ -233,7 +236,7 @@ func parseOptionFlags(flags []string, existing []propertyOptionDTO) []map[string
 }
 
 func printPropertyTable(properties []propertyDTO) {
-	headers := []string{"ID", "NAME", "TYPE", "OPTIONS", "USED", "ARCHIVED"}
+	headers := []string{"ID", "ICON", "NAME", "TYPE", "OPTIONS", "USED", "ARCHIVED"}
 	rows := make([][]string, 0, len(properties))
 	for _, p := range properties {
 		names := make([]string, len(p.Config.Options))
@@ -244,7 +247,7 @@ func printPropertyTable(properties []propertyDTO) {
 		if p.Archived {
 			archived = "yes"
 		}
-		rows = append(rows, []string{p.ID, p.Name, p.Type, strings.Join(names, ", "), strconv.FormatInt(p.UsageCount, 10), archived})
+		rows = append(rows, []string{p.ID, p.Icon, p.Name, p.Type, strings.Join(names, ", "), strconv.FormatInt(p.UsageCount, 10), archived})
 	}
 	cli.PrintTable(os.Stdout, headers, rows)
 }
@@ -310,9 +313,10 @@ func runPropertyCreate(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("--type is required")
 	}
 	description, _ := cmd.Flags().GetString("description")
+	icon, _ := cmd.Flags().GetString("icon")
 	optionFlags, _ := cmd.Flags().GetStringArray("option")
 
-	body := map[string]any{"name": name, "type": propType, "description": description}
+	body := map[string]any{"name": name, "type": propType, "description": description, "icon": icon}
 	if len(optionFlags) > 0 {
 		body["config"] = map[string]any{"options": parseOptionFlags(optionFlags, nil)}
 	}
@@ -363,12 +367,16 @@ func runPropertyUpdate(cmd *cobra.Command, args []string) error {
 		description, _ := cmd.Flags().GetString("description")
 		body["description"] = description
 	}
+	if cmd.Flags().Changed("icon") {
+		icon, _ := cmd.Flags().GetString("icon")
+		body["icon"] = icon
+	}
 	if cmd.Flags().Changed("option") {
 		optionFlags, _ := cmd.Flags().GetStringArray("option")
 		body["config"] = map[string]any{"options": parseOptionFlags(optionFlags, property.Config.Options)}
 	}
 	if len(body) == 0 {
-		return fmt.Errorf("nothing to update; pass --name, --description, or --option")
+		return fmt.Errorf("nothing to update; pass --name, --description, --icon, or --option")
 	}
 
 	var updated propertyDTO

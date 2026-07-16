@@ -119,6 +119,22 @@ interface ContentEditorProps {
   onSubmit?: () => void;
   onBlur?: () => void;
   onUploadFile?: (file: File) => Promise<UploadResult | null>;
+  /**
+   * Fired whenever this editor's "any attachment still uploading" answer
+   * flips. The document IS the upload queue — every path (paste, drop, the
+   * upload button, the imperative `uploadFile`) inserts a node with
+   * `attrs.uploading` before awaiting, and clears or removes it on settle —
+   * so hosts can drive a submit gate off one source of truth instead of a
+   * counter of their own that a manual node delete would desync.
+   *
+   * Pair it with the submit-time `hasActiveUploads()` second check: this
+   * callback drives the rendered button state, and the ref read is what a
+   * keyboard submit racing the last upload's settle must consult.
+   *
+   * Hosts that don't gate (the autosaved description editor) omit it and
+   * pay nothing — the scan below is skipped entirely when it's absent.
+   */
+  onUploadingChange?: (uploading: boolean) => void;
   /** Show the floating formatting toolbar on text selection. Defaults true. */
   showBubbleMenu?: boolean;
   /**
@@ -221,6 +237,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
       onSubmit,
       onBlur,
       onUploadFile,
+      onUploadingChange,
       showBubbleMenu = true,
       currentIssueId,
       disableMentions = false,
@@ -244,6 +261,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
     const onSubmitRef = useRef(onSubmit);
     const onBlurRef = useRef(onBlur);
     const onReadyRef = useRef(onReady);
+    const onUploadingChangeRef = useRef(onUploadingChange);
     const onUploadFileRef = useRef<
       ((file: File) => Promise<UploadResult | null>) | undefined
     >(undefined);
@@ -333,6 +351,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
     onSubmitRef.current = onSubmit;
     onBlurRef.current = onBlur;
     onReadyRef.current = onReady;
+    onUploadingChangeRef.current = onUploadingChange;
     onUploadFileRef.current = wrappedOnUploadFile;
     mentionContextItemsRef.current = mentionContextItems ?? [];
     flushPendingOnUnmountRef.current = flushPendingOnUnmount;
@@ -478,6 +497,44 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
       readyFiredRef.current = true;
       onReadyRef.current?.();
     }, [editor]);
+
+    // Publish upload-queue transitions to the host so it can gate submit.
+    //
+    // Deliberately NOT derived from `onUpdate`: that path is debounced and
+    // drops emissions whose markdown matches the last one — and a FAILED
+    // upload removes its placeholder to leave byte-identical markdown (the
+    // blob URL was stripped from it all along), so the un-gate would never
+    // fire. Transactions carry the attr flip regardless of what serializes.
+    useEffect(() => {
+      if (!editor || !onUploadingChange) return;
+      // Publish the current answer UNCONDITIONALLY on subscribe, then only on
+      // flips. The host's state outlives any one editor instance — comment
+      // edit unmounts the editor on cancel and mounts a fresh one on re-entry,
+      // and chat swaps the editor by `key` when the agent changes. An editor
+      // torn down mid-upload takes its pending node with it, so a host left
+      // holding `uploading: true` has nothing left to un-gate it: skipping
+      // this first emission because the new instance also reads "not
+      // uploading" is exactly how submit gets wedged shut for good.
+      //
+      // `last` is per-subscription rather than a ref for the same reason: flip
+      // tracking must not survive the instance it describes.
+      let last = hasUploadingNode(editor);
+      onUploadingChangeRef.current?.(last);
+      const check = () => {
+        if (editor.isDestroyed) return;
+        const uploading = hasUploadingNode(editor);
+        if (uploading === last) return;
+        last = uploading;
+        onUploadingChangeRef.current?.(uploading);
+      };
+      editor.on("transaction", check);
+      return () => {
+        editor.off("transaction", check);
+      };
+      // `onUploadingChange` is read for presence only; the ref carries the
+      // live callback, so a host passing an inline arrow doesn't rebind.
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [editor, !!onUploadingChange]);
 
     // Cleanup on unmount. A pending debounced update is DROPPED by default,
     // not flushed — see the `flushPendingOnUnmount` prop doc for why. When the

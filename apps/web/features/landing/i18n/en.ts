@@ -2271,10 +2271,9 @@ export function createEnDict(allowSignup: boolean): LandingDict {
       },
       macIntel: {
         title: "Multica for macOS",
-        sub: "Apple Silicon required — Intel Macs not yet supported.",
-        disabledCta: "Apple Silicon required",
-        intelHint:
-          "On an Intel Mac? Use the CLI below — it runs the same daemon.",
+        sub: "Intel · bundled daemon, zero setup",
+        primary: "Download (.dmg)",
+        altZip: "or download .zip",
       },
       winX64: {
         title: "Multica for Windows",
@@ -2296,12 +2295,13 @@ export function createEnDict(allowSignup: boolean): LandingDict {
         title: "Choose your platform",
         sub: "All installers are listed below.",
       },
-      safariMacHint: "On an Intel Mac? Use the CLI below.",
+      safariMacHint: "On an Intel Mac? Choose the Intel download below.",
       archFallbackHint: "Wrong architecture? See all formats below.",
     },
     allPlatforms: {
       title: "All platforms",
-      macLabel: "macOS · Apple Silicon",
+      macArm64Label: "macOS · Apple Silicon",
+      macX64Label: "macOS · Intel",
       winX64Label: "Windows · x64",
       winArm64Label: "Windows · ARM64",
       linuxX64Label: "Linux · x64",
@@ -2312,8 +2312,6 @@ export function createEnDict(allowSignup: boolean): LandingDict {
       formatAppImage: ".AppImage",
       formatDeb: ".deb",
       formatRpm: ".rpm",
-      intelNote:
-        "Apple Silicon only — Intel Macs not supported in this release.",
       unavailable: "Not available",
     },
     cli: {

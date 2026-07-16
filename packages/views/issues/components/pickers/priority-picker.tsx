@@ -33,11 +33,13 @@ interface PriorityPickerProps {
  * on first interaction. See `DeferredPopup` for why.
  */
 export function PriorityPicker(props: PriorityPickerProps) {
+  const hasDeferredTriggerContent =
+    props.trigger !== undefined || props.triggerRender?.props.children != null;
   const canDefer =
     props.open === undefined &&
     props.onOpenChange === undefined &&
     !props.defaultOpen &&
-    (props.trigger !== undefined || props.triggerRender !== undefined);
+    hasDeferredTriggerContent;
   if (!canDefer) {
     return <PriorityPickerImpl {...props} />;
   }

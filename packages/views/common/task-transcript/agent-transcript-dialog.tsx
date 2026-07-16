@@ -266,6 +266,8 @@ export function AgentTranscriptDialog({
     () => (sortDirection === "newest_first" ? [...filteredItems].reverse() : filteredItems),
     [filteredItems, sortDirection],
   );
+  const isAntigravityLiveEmpty =
+    isLive && displayItems.length === 0 && runtimeInfo?.provider === "antigravity";
 
   const detailSeqs = useMemo(
     () => displayItems.filter(hasEventDetail).map((item) => item.seq),
@@ -719,7 +721,12 @@ export function AgentTranscriptDialog({
         >
           {displayItems.length === 0 ? (
             <div className="flex items-center justify-center h-full text-sm text-muted-foreground">
-              {isLive ? (
+              {isAntigravityLiveEmpty ? (
+                <div className="flex max-w-md items-center gap-2 px-4 text-center">
+                  <Clock className="h-4 w-4 shrink-0" />
+                  {t(($) => $.transcript.antigravity_live_unavailable)}
+                </div>
+              ) : isLive ? (
                 <div className="flex items-center gap-2">
                   <Loader2 className="h-4 w-4 animate-spin" />
                   {t(($) => $.transcript.waiting_events)}
