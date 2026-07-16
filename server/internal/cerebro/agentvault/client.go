@@ -108,7 +108,10 @@ func (c *Client) RevealCredential(ctx context.Context, workspaceID pgtype.UUID, 
 		return "", fmt.Errorf("agentvault: %q connection has no bearer token", conn.Name)
 	}
 	base := strings.TrimRight(strings.TrimSpace(conn.URL), "/")
-	params := url.Values{"vault": {vault}, "reveal": {"true"}, "key": {key}}
+	// Permission resources use the logical Infisical path, while Agent Vault
+	// exposes the synced box under its normalized vault name.
+	vaultName := "shared-browser-login-" + strings.ToLower(app)
+	params := url.Values{"vault": {vaultName}, "reveal": {"true"}, "key": {key}}
 	var out struct {
 		Credentials []struct {
 			Key   string `json:"key"`

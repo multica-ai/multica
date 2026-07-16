@@ -108,12 +108,14 @@ func TestRunnerSendsSessionCookieOnlyThroughBatchStdin(t *testing.T) {
 		t.Fatalf("result leaked session token: %s", encoded)
 	}
 	var stdinCount int
+	var sessionBatch string
 	for _, call := range commander.calls {
 		if strings.Contains(strings.Join(call.args, " "), sessionToken) {
 			t.Fatalf("session token leaked into argv: %v", call.args)
 		}
 		if strings.Contains(call.stdin, sessionToken) {
 			stdinCount++
+			sessionBatch = call.stdin
 			if call.args[len(call.args)-1] != "batch" {
 				t.Fatalf("session token sent outside batch stdin: %v", call.args)
 			}
@@ -121,6 +123,9 @@ func TestRunnerSendsSessionCookieOnlyThroughBatchStdin(t *testing.T) {
 	}
 	if stdinCount != 1 {
 		t.Fatalf("secret-bearing stdin calls = %d, want 1", stdinCount)
+	}
+	if !strings.Contains(sessionBatch, `"multica_auth"`) || !strings.Contains(sessionBatch, `"multica_logged_in"`) {
+		t.Fatalf("session batch does not set both required cookies: %s", sessionBatch)
 	}
 }
 
