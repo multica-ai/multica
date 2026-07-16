@@ -2,7 +2,7 @@
 //
 // Source: https://models.dev/api.json (MIT, community-maintained,
 // the same dataset OpenCode uses internally).
-// Snapshot: 2026-07-12
+// Snapshot: 2026-07-16
 //
 // Regenerate with: node scripts/generate-pricing.mjs
 
@@ -60,8 +60,8 @@ export const MODEL_PRICING: Readonly<Record<string, {
   "gemini-3.1-pro-preview-customtools": { input: 2, output: 12, cacheRead: 0.2, cacheWrite: 2 },
   "gemini-3.5-flash": { input: 1.5, output: 9, cacheRead: 0.15, cacheWrite: 1.5 },
   "gemini-embedding-001": { input: 0.15, output: 0, cacheRead: 0.15, cacheWrite: 0.15 },
-  "gemini-flash-latest": { input: 0.3, output: 2.5, cacheRead: 0.075, cacheWrite: 0.3 },
-  "gemini-flash-lite-latest": { input: 0.1, output: 0.4, cacheRead: 0.025, cacheWrite: 0.1 },
+  "gemini-flash-latest": { input: 1.5, output: 9, cacheRead: 0.15, cacheWrite: 1.5 },
+  "gemini-flash-lite-latest": { input: 0.25, output: 1.5, cacheRead: 0.025, cacheWrite: 0.25 },
   "gemini-omni-flash-preview": { input: 1.5, output: 17.5, cacheRead: 1.5, cacheWrite: 1.5 },
   "github-copilot/gpt-5.6-luna": { input: 1, output: 6, cacheRead: 0.1, cacheWrite: 1 },
   "github-copilot/gpt-5.6-sol": { input: 5, output: 30, cacheRead: 0.5, cacheWrite: 5 },
@@ -78,8 +78,8 @@ export const MODEL_PRICING: Readonly<Record<string, {
   "glm-5.1": { input: 1.4, output: 4.4, cacheRead: 0.26, cacheWrite: 0 },
   "glm-5.2": { input: 1.4, output: 4.4, cacheRead: 0.26, cacheWrite: 0 },
   "glm-5v-turbo": { input: 1.2, output: 4, cacheRead: 0.24, cacheWrite: 0 },
-  "google/gemini-flash-latest": { input: 0.3, output: 2.5, cacheRead: 0.075, cacheWrite: 0.3 },
-  "google/gemini-flash-lite-latest": { input: 0.1, output: 0.4, cacheRead: 0.025, cacheWrite: 0.1 },
+  "google/gemini-flash-latest": { input: 1.5, output: 9, cacheRead: 0.15, cacheWrite: 1.5 },
+  "google/gemini-flash-lite-latest": { input: 0.25, output: 1.5, cacheRead: 0.025, cacheWrite: 0.25 },
   "gpt-3.5-turbo": { input: 0.5, output: 1.5, cacheRead: 0, cacheWrite: 0.5 },
   "gpt-4": { input: 30, output: 60, cacheRead: 30, cacheWrite: 30 },
   "gpt-4-turbo": { input: 10, output: 30, cacheRead: 10, cacheWrite: 10 },
