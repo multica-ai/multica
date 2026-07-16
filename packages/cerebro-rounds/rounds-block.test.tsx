@@ -34,13 +34,14 @@ const props = {
 };
 
 describe("RoundsBlock", () => {
-  it("defaults to Ready and hides active runs without hiding scheduled unread messages", () => {
+  it("defaults to Ready and hides active runs and scheduled unread messages", () => {
     render(<RoundsBlock statuses={[status(true)]} {...props} />);
+    expect(screen.getByText("1 ready")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Expand Daily" }));
     expect(screen.getByRole("button", { name: "Ready" })).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByTestId("row-ready")).toBeInTheDocument();
     expect(screen.queryByTestId("row-running")).not.toBeInTheDocument();
-    expect(screen.getByTestId("row-wakeup")).toBeInTheDocument();
+    expect(screen.queryByTestId("row-wakeup")).not.toBeInTheDocument();
     expect(screen.queryByTestId("row-handled")).not.toBeInTheDocument();
   });
 

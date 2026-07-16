@@ -21,6 +21,7 @@ export function RoundsBlock({
   issueTitles,
   messageIssueIds,
   issueRunStates = new Map(),
+  wakeupIssueIds = new Set(),
   onStart,
   onSelectIssue,
   settings,
@@ -33,6 +34,7 @@ export function RoundsBlock({
   issueTitles: Record<string, string>;
   messageIssueIds?: readonly string[];
   issueRunStates?: ReadonlyMap<string, unknown>;
+  wakeupIssueIds?: ReadonlySet<string>;
   onStart: (id: string) => void;
   onSelectIssue: (id: string) => void;
   settings?: ReactNode;
@@ -62,7 +64,11 @@ export function RoundsBlock({
     const orderedIds = (messageIssueIds ?? allIds).filter((issueId) => memberIds.has(issueId));
     const readySet = new Set(
       (s.active_cycle?.items ?? [])
-        .filter((item) => item.handled_at == null && !issueRunStates.has(item.issue_id))
+        .filter((item) =>
+          item.handled_at == null &&
+          !issueRunStates.has(item.issue_id) &&
+          !wakeupIssueIds.has(item.issue_id)
+        )
         .map((item) => item.issue_id),
     );
     const handledSet = new Set(

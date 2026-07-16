@@ -1200,6 +1200,7 @@ export function DynamicInbox() {
                           onRemove={() => removeSection(section.id)}
                           onStart={(roundId) => startRound.mutate(roundId)}
                           issueRunStates={filterContext.action.issueRunStates}
+                          wakeupIssueIds={filterContext.action.wakeupIssueIds}
                           onSelectIssue={(issueId) => {
                             const entry = entries.find((candidate) => candidate.kind === "notif" && candidate.item.issue_id === issueId);
                             if (entry) onSelect(entry);
