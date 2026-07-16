@@ -16,6 +16,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/daemonws"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/handler"
+	"github.com/multica-ai/multica/server/internal/issuestatus"
 	"github.com/multica-ai/multica/server/internal/logger"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/realtime"
@@ -383,6 +384,19 @@ func main() {
 	if storeRedis != nil {
 		liveness = handler.NewRedisLivenessStore(storeRedis)
 	}
+
+	// One-shot boot reconcile: seed built-in issue statuses for workspaces
+	// created before the catalog shipped (MUL-4809). Advisory-locked so a
+	// single replica does the walk during a rolling deploy; new workspaces are
+	// seeded at creation time.
+	go func() {
+		n, err := issuestatus.Backfill(sweepCtx, pool)
+		if err != nil {
+			slog.Error("issue status backfill failed", "error", err)
+			return
+		}
+		slog.Info("issue status backfill complete", "workspaces", n)
+	}()
 
 	// Start background sweeper to mark stale runtimes as offline.
 	go runRuntimeSweeper(sweepCtx, queries, liveness, taskSvc, bus)

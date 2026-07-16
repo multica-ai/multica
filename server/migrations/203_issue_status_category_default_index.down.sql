@@ -1,0 +1,1 @@
+DROP INDEX CONCURRENTLY IF EXISTS issue_status_workspace_category_default_uidx;

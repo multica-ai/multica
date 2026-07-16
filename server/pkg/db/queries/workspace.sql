@@ -7,6 +7,12 @@ JOIN workspace w ON w.id = m.workspace_id
 WHERE m.user_id = $1
 ORDER BY w.created_at ASC;
 
+-- name: ListAllWorkspaceIDs :many
+-- Operational scan of every workspace id, for server-side reconcile jobs such
+-- as the issue-status boot backfill (MUL-4809). No membership filter -- callers
+-- must be trusted server jobs, never request handlers.
+SELECT id FROM workspace ORDER BY created_at ASC;
+
 -- name: ListDaemonWorkspaces :many
 -- Daemons only need the membership set and display name to discover which
 -- workspaces should have local runtimes. Keep this projection intentionally
@@ -92,10 +98,10 @@ SELECT id FROM workspace WHERE id = $1 FOR KEY SHARE;
 
 -- name: DeleteWorkspace :exec
 -- The channel_* tables (MUL-3515 §4), resource-label junctions, and custom issue
--- property definitions carry NO FK to workspace, so — unlike the CASCADE-backed
--- tables the DELETE below sweeps — they are not cleaned up implicitly. Remove
--- their workspace-owned rows here so they commit or roll back atomically with
--- the workspace row.
+-- property/status definitions carry NO FK to workspace, so — unlike the
+-- CASCADE-backed tables the DELETE below sweeps — they are not cleaned up
+-- implicitly. Remove their workspace-owned rows here so they commit or roll
+-- back atomically with the workspace row.
 WITH ws_installations AS (
     SELECT id FROM channel_installation WHERE workspace_id = $1
 ),
@@ -155,6 +161,12 @@ cleared_installations AS (
 ),
 cleared_issue_properties AS (
     DELETE FROM issue_property WHERE workspace_id = $1
+),
+cleared_issue_statuses AS (
+    -- issue_status has no FK to workspace (MUL-4809); sweep the whole catalog,
+    -- archived rows included, so a deleted workspace never leaves orphan status
+    -- definitions behind.
+    DELETE FROM issue_status WHERE workspace_id = $1
 ),
 deleted_pending_check_suites AS (
     DELETE FROM github_pending_check_suite WHERE workspace_id = $1

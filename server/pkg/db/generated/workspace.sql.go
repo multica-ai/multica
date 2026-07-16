@@ -113,6 +113,12 @@ cleared_installations AS (
 cleared_issue_properties AS (
     DELETE FROM issue_property WHERE workspace_id = $1
 ),
+cleared_issue_statuses AS (
+    -- issue_status has no FK to workspace (MUL-4809); sweep the whole catalog,
+    -- archived rows included, so a deleted workspace never leaves orphan status
+    -- definitions behind.
+    DELETE FROM issue_status WHERE workspace_id = $1
+),
 deleted_pending_check_suites AS (
     DELETE FROM github_pending_check_suite WHERE workspace_id = $1
 )
@@ -120,10 +126,10 @@ DELETE FROM workspace WHERE workspace.id = $1
 `
 
 // The channel_* tables (MUL-3515 §4), resource-label junctions, and custom issue
-// property definitions carry NO FK to workspace, so — unlike the CASCADE-backed
-// tables the DELETE below sweeps — they are not cleaned up implicitly. Remove
-// their workspace-owned rows here so they commit or roll back atomically with
-// the workspace row.
+// property/status definitions carry NO FK to workspace, so — unlike the
+// CASCADE-backed tables the DELETE below sweeps — they are not cleaned up
+// implicitly. Remove their workspace-owned rows here so they commit or roll
+// back atomically with the workspace row.
 func (q *Queries) DeleteWorkspace(ctx context.Context, id pgtype.UUID) error {
 	_, err := q.db.Exec(ctx, deleteWorkspace, id)
 	return err
@@ -226,6 +232,33 @@ func (q *Queries) IncrementIssueCounter(ctx context.Context, id pgtype.UUID) (in
 	var issue_counter int32
 	err := row.Scan(&issue_counter)
 	return issue_counter, err
+}
+
+const listAllWorkspaceIDs = `-- name: ListAllWorkspaceIDs :many
+SELECT id FROM workspace ORDER BY created_at ASC
+`
+
+// Operational scan of every workspace id, for server-side reconcile jobs such
+// as the issue-status boot backfill (MUL-4809). No membership filter -- callers
+// must be trusted server jobs, never request handlers.
+func (q *Queries) ListAllWorkspaceIDs(ctx context.Context) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, listAllWorkspaceIDs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []pgtype.UUID{}
+	for rows.Next() {
+		var id pgtype.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listDaemonWorkspaces = `-- name: ListDaemonWorkspaces :many
