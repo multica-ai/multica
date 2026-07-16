@@ -11,6 +11,32 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const applyRockCheckIn = `-- name: ApplyRockCheckIn :one
+UPDATE cerebro_rock
+SET confidence = $3, reported_health = $4, updated_at = now()
+WHERE id = $1 AND workspace_id = $2
+RETURNING id
+`
+
+type ApplyRockCheckInParams struct {
+	ID             pgtype.UUID `json:"id"`
+	WorkspaceID    pgtype.UUID `json:"workspace_id"`
+	Confidence     int32       `json:"confidence"`
+	ReportedHealth string      `json:"reported_health"`
+}
+
+func (q *Queries) ApplyRockCheckIn(ctx context.Context, arg ApplyRockCheckInParams) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, applyRockCheckIn,
+		arg.ID,
+		arg.WorkspaceID,
+		arg.Confidence,
+		arg.ReportedHealth,
+	)
+	var id pgtype.UUID
+	err := row.Scan(&id)
+	return id, err
+}
+
 const createObjectConnection = `-- name: CreateObjectConnection :one
 INSERT INTO cerebro_object_connection (
     workspace_id, source_type, source_id, target_type, target_id,
@@ -62,12 +88,129 @@ func (q *Queries) CreateObjectConnection(ctx context.Context, arg CreateObjectCo
 	return i, err
 }
 
+const createRock = `-- name: CreateRock :one
+INSERT INTO cerebro_rock (
+    workspace_id, title, description, owner_type, owner_id, period_id,
+    period_start, period_end, confidence, reported_health
+)
+SELECT $1, $2, $3, $4, $5, op.id, op.starts_on, op.ends_on, $6, $7
+FROM cerebro_operating_period op
+WHERE op.id = $8 AND op.workspace_id = $1
+RETURNING id, project_id, workspace_id, title, description, owner_type, owner_id,
+          period_id, period_start, period_end, confidence, reported_health, created_at, updated_at
+`
+
+type CreateRockParams struct {
+	WorkspaceID    pgtype.UUID `json:"workspace_id"`
+	Title          string      `json:"title"`
+	Description    string      `json:"description"`
+	OwnerType      pgtype.Text `json:"owner_type"`
+	OwnerID        pgtype.UUID `json:"owner_id"`
+	Confidence     int32       `json:"confidence"`
+	ReportedHealth string      `json:"reported_health"`
+	PeriodID       pgtype.UUID `json:"period_id"`
+}
+
+type CreateRockRow struct {
+	ID             pgtype.UUID        `json:"id"`
+	ProjectID      pgtype.UUID        `json:"project_id"`
+	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
+	Title          string             `json:"title"`
+	Description    string             `json:"description"`
+	OwnerType      pgtype.Text        `json:"owner_type"`
+	OwnerID        pgtype.UUID        `json:"owner_id"`
+	PeriodID       pgtype.UUID        `json:"period_id"`
+	PeriodStart    pgtype.Date        `json:"period_start"`
+	PeriodEnd      pgtype.Date        `json:"period_end"`
+	Confidence     int32              `json:"confidence"`
+	ReportedHealth string             `json:"reported_health"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+}
+
+func (q *Queries) CreateRock(ctx context.Context, arg CreateRockParams) (CreateRockRow, error) {
+	row := q.db.QueryRow(ctx, createRock,
+		arg.WorkspaceID,
+		arg.Title,
+		arg.Description,
+		arg.OwnerType,
+		arg.OwnerID,
+		arg.Confidence,
+		arg.ReportedHealth,
+		arg.PeriodID,
+	)
+	var i CreateRockRow
+	err := row.Scan(
+		&i.ID,
+		&i.ProjectID,
+		&i.WorkspaceID,
+		&i.Title,
+		&i.Description,
+		&i.OwnerType,
+		&i.OwnerID,
+		&i.PeriodID,
+		&i.PeriodStart,
+		&i.PeriodEnd,
+		&i.Confidence,
+		&i.ReportedHealth,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const createRockCheckIn = `-- name: CreateRockCheckIn :one
+INSERT INTO cerebro_rock_check_in (
+    workspace_id, rock_id, confidence, reported_health, note, created_by_type, created_by_id
+)
+SELECT $1, r.id, $3, $4, $5, $6, $7
+FROM cerebro_rock r
+WHERE r.id = $2 AND r.workspace_id = $1
+RETURNING id, workspace_id, rock_id, confidence, reported_health, note,
+          created_by_type, created_by_id, created_at
+`
+
+type CreateRockCheckInParams struct {
+	WorkspaceID    pgtype.UUID `json:"workspace_id"`
+	ID             pgtype.UUID `json:"id"`
+	Confidence     int32       `json:"confidence"`
+	ReportedHealth string      `json:"reported_health"`
+	Note           string      `json:"note"`
+	CreatedByType  string      `json:"created_by_type"`
+	CreatedByID    pgtype.UUID `json:"created_by_id"`
+}
+
+func (q *Queries) CreateRockCheckIn(ctx context.Context, arg CreateRockCheckInParams) (CerebroRockCheckIn, error) {
+	row := q.db.QueryRow(ctx, createRockCheckIn,
+		arg.WorkspaceID,
+		arg.ID,
+		arg.Confidence,
+		arg.ReportedHealth,
+		arg.Note,
+		arg.CreatedByType,
+		arg.CreatedByID,
+	)
+	var i CerebroRockCheckIn
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.RockID,
+		&i.Confidence,
+		&i.ReportedHealth,
+		&i.Note,
+		&i.CreatedByType,
+		&i.CreatedByID,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const createStrategyItem = `-- name: CreateStrategyItem :one
 INSERT INTO cerebro_strategy_item (
-    workspace_id, kind, title, description, horizon_unit, horizon_count, position, state
+    workspace_id, kind, title, description, horizon_unit, horizon_count, horizon_label, position, state
 )
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-RETURNING id, workspace_id, kind, title, description, horizon_unit, horizon_count,
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+RETURNING id, workspace_id, kind, title, description, horizon_unit, horizon_count, horizon_label,
           position, state, created_at, updated_at
 `
 
@@ -78,11 +221,27 @@ type CreateStrategyItemParams struct {
 	Description  string      `json:"description"`
 	HorizonUnit  pgtype.Text `json:"horizon_unit"`
 	HorizonCount pgtype.Int4 `json:"horizon_count"`
+	HorizonLabel pgtype.Text `json:"horizon_label"`
 	Position     int32       `json:"position"`
 	State        string      `json:"state"`
 }
 
-func (q *Queries) CreateStrategyItem(ctx context.Context, arg CreateStrategyItemParams) (CerebroStrategyItem, error) {
+type CreateStrategyItemRow struct {
+	ID           pgtype.UUID        `json:"id"`
+	WorkspaceID  pgtype.UUID        `json:"workspace_id"`
+	Kind         string             `json:"kind"`
+	Title        string             `json:"title"`
+	Description  string             `json:"description"`
+	HorizonUnit  pgtype.Text        `json:"horizon_unit"`
+	HorizonCount pgtype.Int4        `json:"horizon_count"`
+	HorizonLabel pgtype.Text        `json:"horizon_label"`
+	Position     int32              `json:"position"`
+	State        string             `json:"state"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
+}
+
+func (q *Queries) CreateStrategyItem(ctx context.Context, arg CreateStrategyItemParams) (CreateStrategyItemRow, error) {
 	row := q.db.QueryRow(ctx, createStrategyItem,
 		arg.WorkspaceID,
 		arg.Kind,
@@ -90,10 +249,11 @@ func (q *Queries) CreateStrategyItem(ctx context.Context, arg CreateStrategyItem
 		arg.Description,
 		arg.HorizonUnit,
 		arg.HorizonCount,
+		arg.HorizonLabel,
 		arg.Position,
 		arg.State,
 	)
-	var i CerebroStrategyItem
+	var i CreateStrategyItemRow
 	err := row.Scan(
 		&i.ID,
 		&i.WorkspaceID,
@@ -102,6 +262,7 @@ func (q *Queries) CreateStrategyItem(ctx context.Context, arg CreateStrategyItem
 		&i.Description,
 		&i.HorizonUnit,
 		&i.HorizonCount,
+		&i.HorizonLabel,
 		&i.Position,
 		&i.State,
 		&i.CreatedAt,
@@ -128,22 +289,61 @@ func (q *Queries) DeleteObjectConnection(ctx context.Context, arg DeleteObjectCo
 	return result.RowsAffected(), nil
 }
 
+const deleteObjectConnectionsForSource = `-- name: DeleteObjectConnectionsForSource :exec
+DELETE FROM cerebro_object_connection
+WHERE workspace_id = $1 AND source_type = $2 AND source_id = $3
+  AND target_type = ANY($4::text[])
+`
+
+type DeleteObjectConnectionsForSourceParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	SourceType  string      `json:"source_type"`
+	SourceID    pgtype.UUID `json:"source_id"`
+	TargetTypes []string    `json:"target_types"`
+}
+
+func (q *Queries) DeleteObjectConnectionsForSource(ctx context.Context, arg DeleteObjectConnectionsForSourceParams) error {
+	_, err := q.db.Exec(ctx, deleteObjectConnectionsForSource,
+		arg.WorkspaceID,
+		arg.SourceType,
+		arg.SourceID,
+		arg.TargetTypes,
+	)
+	return err
+}
+
 const deleteRock = `-- name: DeleteRock :execrows
 DELETE FROM cerebro_rock
-WHERE project_id = $1 AND workspace_id = $2
+WHERE id = $1 AND workspace_id = $2
 `
 
 type DeleteRockParams struct {
-	ProjectID   pgtype.UUID `json:"project_id"`
+	ID          pgtype.UUID `json:"id"`
 	WorkspaceID pgtype.UUID `json:"workspace_id"`
 }
 
 func (q *Queries) DeleteRock(ctx context.Context, arg DeleteRockParams) (int64, error) {
-	result, err := q.db.Exec(ctx, deleteRock, arg.ProjectID, arg.WorkspaceID)
+	result, err := q.db.Exec(ctx, deleteRock, arg.ID, arg.WorkspaceID)
 	if err != nil {
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const deleteRockStrategyConnections = `-- name: DeleteRockStrategyConnections :exec
+DELETE FROM cerebro_object_connection
+WHERE workspace_id = $1 AND source_type = 'strategy_item'
+  AND target_type = 'rock' AND target_id = $2
+`
+
+type DeleteRockStrategyConnectionsParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	TargetID    pgtype.UUID `json:"target_id"`
+}
+
+func (q *Queries) DeleteRockStrategyConnections(ctx context.Context, arg DeleteRockStrategyConnectionsParams) error {
+	_, err := q.db.Exec(ctx, deleteRockStrategyConnections, arg.WorkspaceID, arg.TargetID)
+	return err
 }
 
 const deleteStrategyItem = `-- name: DeleteStrategyItem :execrows
@@ -162,6 +362,32 @@ func (q *Queries) DeleteStrategyItem(ctx context.Context, arg DeleteStrategyItem
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const getOperatingPeriod = `-- name: GetOperatingPeriod :one
+SELECT id, workspace_id, name, starts_on, ends_on, created_at, updated_at
+FROM cerebro_operating_period
+WHERE id = $1 AND workspace_id = $2
+`
+
+type GetOperatingPeriodParams struct {
+	ID          pgtype.UUID `json:"id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+func (q *Queries) GetOperatingPeriod(ctx context.Context, arg GetOperatingPeriodParams) (CerebroOperatingPeriod, error) {
+	row := q.db.QueryRow(ctx, getOperatingPeriod, arg.ID, arg.WorkspaceID)
+	var i CerebroOperatingPeriod
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.Name,
+		&i.StartsOn,
+		&i.EndsOn,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
 }
 
 const getOperatingSystemSettings = `-- name: GetOperatingSystemSettings :one
@@ -185,23 +411,46 @@ func (q *Queries) GetOperatingSystemSettings(ctx context.Context, workspaceID pg
 }
 
 const getRock = `-- name: GetRock :one
-SELECT project_id, workspace_id, period_start, period_end, confidence,
-       reported_health, created_at, updated_at
+SELECT id, project_id, workspace_id, title, description, owner_type, owner_id,
+       period_id, period_start, period_end, confidence, reported_health, created_at, updated_at
 FROM cerebro_rock
-WHERE project_id = $1 AND workspace_id = $2
+WHERE id = $1 AND workspace_id = $2
 `
 
 type GetRockParams struct {
-	ProjectID   pgtype.UUID `json:"project_id"`
+	ID          pgtype.UUID `json:"id"`
 	WorkspaceID pgtype.UUID `json:"workspace_id"`
 }
 
-func (q *Queries) GetRock(ctx context.Context, arg GetRockParams) (CerebroRock, error) {
-	row := q.db.QueryRow(ctx, getRock, arg.ProjectID, arg.WorkspaceID)
-	var i CerebroRock
+type GetRockRow struct {
+	ID             pgtype.UUID        `json:"id"`
+	ProjectID      pgtype.UUID        `json:"project_id"`
+	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
+	Title          string             `json:"title"`
+	Description    string             `json:"description"`
+	OwnerType      pgtype.Text        `json:"owner_type"`
+	OwnerID        pgtype.UUID        `json:"owner_id"`
+	PeriodID       pgtype.UUID        `json:"period_id"`
+	PeriodStart    pgtype.Date        `json:"period_start"`
+	PeriodEnd      pgtype.Date        `json:"period_end"`
+	Confidence     int32              `json:"confidence"`
+	ReportedHealth string             `json:"reported_health"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+}
+
+func (q *Queries) GetRock(ctx context.Context, arg GetRockParams) (GetRockRow, error) {
+	row := q.db.QueryRow(ctx, getRock, arg.ID, arg.WorkspaceID)
+	var i GetRockRow
 	err := row.Scan(
+		&i.ID,
 		&i.ProjectID,
 		&i.WorkspaceID,
+		&i.Title,
+		&i.Description,
+		&i.OwnerType,
+		&i.OwnerID,
+		&i.PeriodID,
 		&i.PeriodStart,
 		&i.PeriodEnd,
 		&i.Confidence,
@@ -213,7 +462,7 @@ func (q *Queries) GetRock(ctx context.Context, arg GetRockParams) (CerebroRock, 
 }
 
 const getStrategyItem = `-- name: GetStrategyItem :one
-SELECT id, workspace_id, kind, title, description, horizon_unit, horizon_count,
+SELECT id, workspace_id, kind, title, description, horizon_unit, horizon_count, horizon_label,
        position, state, created_at, updated_at
 FROM cerebro_strategy_item
 WHERE id = $1 AND workspace_id = $2
@@ -224,9 +473,24 @@ type GetStrategyItemParams struct {
 	WorkspaceID pgtype.UUID `json:"workspace_id"`
 }
 
-func (q *Queries) GetStrategyItem(ctx context.Context, arg GetStrategyItemParams) (CerebroStrategyItem, error) {
+type GetStrategyItemRow struct {
+	ID           pgtype.UUID        `json:"id"`
+	WorkspaceID  pgtype.UUID        `json:"workspace_id"`
+	Kind         string             `json:"kind"`
+	Title        string             `json:"title"`
+	Description  string             `json:"description"`
+	HorizonUnit  pgtype.Text        `json:"horizon_unit"`
+	HorizonCount pgtype.Int4        `json:"horizon_count"`
+	HorizonLabel pgtype.Text        `json:"horizon_label"`
+	Position     int32              `json:"position"`
+	State        string             `json:"state"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
+}
+
+func (q *Queries) GetStrategyItem(ctx context.Context, arg GetStrategyItemParams) (GetStrategyItemRow, error) {
 	row := q.db.QueryRow(ctx, getStrategyItem, arg.ID, arg.WorkspaceID)
-	var i CerebroStrategyItem
+	var i GetStrategyItemRow
 	err := row.Scan(
 		&i.ID,
 		&i.WorkspaceID,
@@ -235,6 +499,7 @@ func (q *Queries) GetStrategyItem(ctx context.Context, arg GetStrategyItemParams
 		&i.Description,
 		&i.HorizonUnit,
 		&i.HorizonCount,
+		&i.HorizonLabel,
 		&i.Position,
 		&i.State,
 		&i.CreatedAt,
@@ -293,27 +558,251 @@ func (q *Queries) ListObjectConnections(ctx context.Context, arg ListObjectConne
 	return items, nil
 }
 
-const listRockRollups = `-- name: ListRockRollups :many
-SELECT r.project_id, r.workspace_id, r.period_start, r.period_end, r.confidence,
-       r.reported_health, r.created_at, r.updated_at,
-       p.title AS project_title, p.description AS project_description,
-       p.status AS project_status, p.lead_type, p.lead_id,
+const listOperatingPeriods = `-- name: ListOperatingPeriods :many
+SELECT id, workspace_id, name, starts_on, ends_on, created_at, updated_at
+FROM cerebro_operating_period
+WHERE workspace_id = $1
+ORDER BY starts_on DESC
+`
+
+func (q *Queries) ListOperatingPeriods(ctx context.Context, workspaceID pgtype.UUID) ([]CerebroOperatingPeriod, error) {
+	rows, err := q.db.Query(ctx, listOperatingPeriods, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []CerebroOperatingPeriod{}
+	for rows.Next() {
+		var i CerebroOperatingPeriod
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.Name,
+			&i.StartsOn,
+			&i.EndsOn,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listRockCheckIns = `-- name: ListRockCheckIns :many
+SELECT id, workspace_id, rock_id, confidence, reported_health, note,
+       created_by_type, created_by_id, created_at
+FROM cerebro_rock_check_in
+WHERE workspace_id = $1 AND rock_id = $2
+ORDER BY created_at DESC
+`
+
+type ListRockCheckInsParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	RockID      pgtype.UUID `json:"rock_id"`
+}
+
+func (q *Queries) ListRockCheckIns(ctx context.Context, arg ListRockCheckInsParams) ([]CerebroRockCheckIn, error) {
+	rows, err := q.db.Query(ctx, listRockCheckIns, arg.WorkspaceID, arg.RockID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []CerebroRockCheckIn{}
+	for rows.Next() {
+		var i CerebroRockCheckIn
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.RockID,
+			&i.Confidence,
+			&i.ReportedHealth,
+			&i.Note,
+			&i.CreatedByType,
+			&i.CreatedByID,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listRockIssues = `-- name: ListRockIssues :many
+WITH connected_issue AS (
+    SELECT i.id
+    FROM cerebro_object_connection c
+    JOIN issue i ON c.target_type = 'issue' AND i.id = c.target_id AND i.workspace_id = c.workspace_id
+    WHERE c.workspace_id = $1 AND c.source_type = 'rock' AND c.source_id = $2
+    UNION
+    SELECT i.id
+    FROM cerebro_object_connection c
+    JOIN issue i ON c.target_type = 'project' AND i.project_id = c.target_id AND i.workspace_id = c.workspace_id
+    WHERE c.workspace_id = $1 AND c.source_type = 'rock' AND c.source_id = $2
+)
+SELECT i.id, (w.issue_prefix || '-' || i.number)::text AS identifier, i.title, i.status, i.project_id, COALESCE(p.title, '') AS project_title
+FROM connected_issue ci
+JOIN issue i ON i.id = ci.id AND i.workspace_id = $1
+JOIN workspace w ON w.id = i.workspace_id
+LEFT JOIN project p ON p.id = i.project_id AND p.workspace_id = i.workspace_id
+ORDER BY p.title NULLS LAST, i.position, i.created_at
+`
+
+type ListRockIssuesParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	SourceID    pgtype.UUID `json:"source_id"`
+}
+
+type ListRockIssuesRow struct {
+	ID           pgtype.UUID `json:"id"`
+	Identifier   string      `json:"identifier"`
+	Title        string      `json:"title"`
+	Status       string      `json:"status"`
+	ProjectID    pgtype.UUID `json:"project_id"`
+	ProjectTitle string      `json:"project_title"`
+}
+
+func (q *Queries) ListRockIssues(ctx context.Context, arg ListRockIssuesParams) ([]ListRockIssuesRow, error) {
+	rows, err := q.db.Query(ctx, listRockIssues, arg.WorkspaceID, arg.SourceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListRockIssuesRow{}
+	for rows.Next() {
+		var i ListRockIssuesRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Identifier,
+			&i.Title,
+			&i.Status,
+			&i.ProjectID,
+			&i.ProjectTitle,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listRockProjects = `-- name: ListRockProjects :many
+SELECT p.id, p.title,
        COUNT(i.id)::integer AS issue_count,
-       COUNT(i.id) FILTER (WHERE i.status = 'done')::integer AS done_issue_count,
-       COUNT(i.id) FILTER (WHERE i.status = 'blocked')::integer AS blocked_issue_count
+       COUNT(i.id) FILTER (WHERE i.status = 'done')::integer AS done_issue_count
+FROM cerebro_object_connection c
+JOIN project p ON c.target_type = 'project' AND p.id = c.target_id AND p.workspace_id = c.workspace_id
+LEFT JOIN issue i ON i.project_id = p.id AND i.workspace_id = p.workspace_id
+WHERE c.workspace_id = $1 AND c.source_type = 'rock' AND c.source_id = $2
+GROUP BY p.id, p.title
+ORDER BY p.title
+`
+
+type ListRockProjectsParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	SourceID    pgtype.UUID `json:"source_id"`
+}
+
+type ListRockProjectsRow struct {
+	ID             pgtype.UUID `json:"id"`
+	Title          string      `json:"title"`
+	IssueCount     int32       `json:"issue_count"`
+	DoneIssueCount int32       `json:"done_issue_count"`
+}
+
+func (q *Queries) ListRockProjects(ctx context.Context, arg ListRockProjectsParams) ([]ListRockProjectsRow, error) {
+	rows, err := q.db.Query(ctx, listRockProjects, arg.WorkspaceID, arg.SourceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListRockProjectsRow{}
+	for rows.Next() {
+		var i ListRockProjectsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Title,
+			&i.IssueCount,
+			&i.DoneIssueCount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listRockRollups = `-- name: ListRockRollups :many
+WITH rock_issue AS (
+    SELECT c.source_id AS rock_id, i.id, i.status
+    FROM cerebro_object_connection c
+    JOIN issue i ON c.target_type = 'issue' AND i.id = c.target_id AND i.workspace_id = c.workspace_id
+    WHERE c.source_type = 'rock' AND c.workspace_id = $1
+    UNION
+    SELECT c.source_id AS rock_id, i.id, i.status
+    FROM cerebro_object_connection c
+    JOIN issue i ON c.target_type = 'project' AND i.project_id = c.target_id AND i.workspace_id = c.workspace_id
+    WHERE c.source_type = 'rock' AND c.workspace_id = $1
+), rollup AS (
+    SELECT rock_id,
+           COUNT(*)::integer AS issue_count,
+           COUNT(*) FILTER (WHERE status = 'done')::integer AS done_issue_count,
+           COUNT(*) FILTER (WHERE status = 'blocked')::integer AS blocked_issue_count
+    FROM rock_issue GROUP BY rock_id
+)
+SELECT r.id, r.project_id, r.workspace_id, r.title, r.description, r.owner_type, r.owner_id,
+       COALESCE(u.name, a.name, '') AS owner_name,
+       r.period_id, op.name AS period_name, r.period_start, r.period_end, r.confidence,
+       r.reported_health, r.created_at, r.updated_at,
+       COALESCE(p.title, '') AS project_title, COALESCE(p.description, '') AS project_description,
+       COALESCE(p.status, '') AS project_status,
+       COALESCE(rollup.issue_count, 0)::integer AS issue_count,
+       COALESCE(rollup.done_issue_count, 0)::integer AS done_issue_count,
+       COALESCE(rollup.blocked_issue_count, 0)::integer AS blocked_issue_count,
+       (SELECT COUNT(*)::integer FROM cerebro_object_connection c
+        WHERE c.workspace_id = r.workspace_id AND c.source_type = 'rock'
+          AND c.source_id = r.id AND c.target_type = 'project') AS project_count,
+       COALESCE(si.id, '00000000-0000-0000-0000-000000000000'::uuid) AS strategy_item_id,
+       COALESCE(si.title, '') AS strategy_item_title
 FROM cerebro_rock r
-JOIN project p ON p.id = r.project_id AND p.workspace_id = r.workspace_id
-LEFT JOIN issue i ON i.project_id = r.project_id AND i.workspace_id = r.workspace_id
+JOIN cerebro_operating_period op ON op.id = r.period_id AND op.workspace_id = r.workspace_id
+LEFT JOIN project p ON p.id = r.project_id AND p.workspace_id = r.workspace_id
+LEFT JOIN member m ON r.owner_type = 'member' AND m.id = r.owner_id AND m.workspace_id = r.workspace_id
+LEFT JOIN "user" u ON u.id = m.user_id
+LEFT JOIN agent a ON r.owner_type = 'agent' AND a.id = r.owner_id AND a.workspace_id = r.workspace_id
+LEFT JOIN rollup ON rollup.rock_id = r.id
+LEFT JOIN cerebro_object_connection sc ON sc.workspace_id = r.workspace_id
+    AND sc.source_type = 'strategy_item' AND sc.target_type = 'rock' AND sc.target_id = r.id
+LEFT JOIN cerebro_strategy_item si ON si.id = sc.source_id AND si.workspace_id = r.workspace_id
 WHERE r.workspace_id = $1
-GROUP BY r.project_id, r.workspace_id, r.period_start, r.period_end, r.confidence,
-         r.reported_health, r.created_at, r.updated_at,
-         p.title, p.description, p.status, p.lead_type, p.lead_id
-ORDER BY r.period_end ASC, p.title ASC
+ORDER BY r.period_end ASC, r.title ASC
 `
 
 type ListRockRollupsRow struct {
+	ID                 pgtype.UUID        `json:"id"`
 	ProjectID          pgtype.UUID        `json:"project_id"`
 	WorkspaceID        pgtype.UUID        `json:"workspace_id"`
+	Title              string             `json:"title"`
+	Description        string             `json:"description"`
+	OwnerType          pgtype.Text        `json:"owner_type"`
+	OwnerID            pgtype.UUID        `json:"owner_id"`
+	OwnerName          string             `json:"owner_name"`
+	PeriodID           pgtype.UUID        `json:"period_id"`
+	PeriodName         string             `json:"period_name"`
 	PeriodStart        pgtype.Date        `json:"period_start"`
 	PeriodEnd          pgtype.Date        `json:"period_end"`
 	Confidence         int32              `json:"confidence"`
@@ -321,13 +810,14 @@ type ListRockRollupsRow struct {
 	CreatedAt          pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
 	ProjectTitle       string             `json:"project_title"`
-	ProjectDescription pgtype.Text        `json:"project_description"`
+	ProjectDescription string             `json:"project_description"`
 	ProjectStatus      string             `json:"project_status"`
-	LeadType           pgtype.Text        `json:"lead_type"`
-	LeadID             pgtype.UUID        `json:"lead_id"`
 	IssueCount         int32              `json:"issue_count"`
 	DoneIssueCount     int32              `json:"done_issue_count"`
 	BlockedIssueCount  int32              `json:"blocked_issue_count"`
+	ProjectCount       int32              `json:"project_count"`
+	StrategyItemID     pgtype.UUID        `json:"strategy_item_id"`
+	StrategyItemTitle  string             `json:"strategy_item_title"`
 }
 
 func (q *Queries) ListRockRollups(ctx context.Context, workspaceID pgtype.UUID) ([]ListRockRollupsRow, error) {
@@ -340,8 +830,16 @@ func (q *Queries) ListRockRollups(ctx context.Context, workspaceID pgtype.UUID) 
 	for rows.Next() {
 		var i ListRockRollupsRow
 		if err := rows.Scan(
+			&i.ID,
 			&i.ProjectID,
 			&i.WorkspaceID,
+			&i.Title,
+			&i.Description,
+			&i.OwnerType,
+			&i.OwnerID,
+			&i.OwnerName,
+			&i.PeriodID,
+			&i.PeriodName,
 			&i.PeriodStart,
 			&i.PeriodEnd,
 			&i.Confidence,
@@ -351,11 +849,56 @@ func (q *Queries) ListRockRollups(ctx context.Context, workspaceID pgtype.UUID) 
 			&i.ProjectTitle,
 			&i.ProjectDescription,
 			&i.ProjectStatus,
-			&i.LeadType,
-			&i.LeadID,
 			&i.IssueCount,
 			&i.DoneIssueCount,
 			&i.BlockedIssueCount,
+			&i.ProjectCount,
+			&i.StrategyItemID,
+			&i.StrategyItemTitle,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listStrategyItemHistory = `-- name: ListStrategyItemHistory :many
+SELECT id, strategy_item_id, action, title, snapshot, changed_at
+FROM cerebro_strategy_item_history
+WHERE workspace_id = $1
+ORDER BY changed_at DESC, id DESC
+LIMIT 100
+`
+
+type ListStrategyItemHistoryRow struct {
+	ID             pgtype.UUID        `json:"id"`
+	StrategyItemID pgtype.UUID        `json:"strategy_item_id"`
+	Action         string             `json:"action"`
+	Title          string             `json:"title"`
+	Snapshot       []byte             `json:"snapshot"`
+	ChangedAt      pgtype.Timestamptz `json:"changed_at"`
+}
+
+func (q *Queries) ListStrategyItemHistory(ctx context.Context, workspaceID pgtype.UUID) ([]ListStrategyItemHistoryRow, error) {
+	rows, err := q.db.Query(ctx, listStrategyItemHistory, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListStrategyItemHistoryRow{}
+	for rows.Next() {
+		var i ListStrategyItemHistoryRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.StrategyItemID,
+			&i.Action,
+			&i.Title,
+			&i.Snapshot,
+			&i.ChangedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -368,22 +911,37 @@ func (q *Queries) ListRockRollups(ctx context.Context, workspaceID pgtype.UUID) 
 }
 
 const listStrategyItems = `-- name: ListStrategyItems :many
-SELECT id, workspace_id, kind, title, description, horizon_unit, horizon_count,
+SELECT id, workspace_id, kind, title, description, horizon_unit, horizon_count, horizon_label,
        position, state, created_at, updated_at
 FROM cerebro_strategy_item
 WHERE workspace_id = $1
 ORDER BY position ASC, created_at ASC
 `
 
-func (q *Queries) ListStrategyItems(ctx context.Context, workspaceID pgtype.UUID) ([]CerebroStrategyItem, error) {
+type ListStrategyItemsRow struct {
+	ID           pgtype.UUID        `json:"id"`
+	WorkspaceID  pgtype.UUID        `json:"workspace_id"`
+	Kind         string             `json:"kind"`
+	Title        string             `json:"title"`
+	Description  string             `json:"description"`
+	HorizonUnit  pgtype.Text        `json:"horizon_unit"`
+	HorizonCount pgtype.Int4        `json:"horizon_count"`
+	HorizonLabel pgtype.Text        `json:"horizon_label"`
+	Position     int32              `json:"position"`
+	State        string             `json:"state"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
+}
+
+func (q *Queries) ListStrategyItems(ctx context.Context, workspaceID pgtype.UUID) ([]ListStrategyItemsRow, error) {
 	rows, err := q.db.Query(ctx, listStrategyItems, workspaceID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []CerebroStrategyItem{}
+	items := []ListStrategyItemsRow{}
 	for rows.Next() {
-		var i CerebroStrategyItem
+		var i ListStrategyItemsRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.WorkspaceID,
@@ -392,6 +950,7 @@ func (q *Queries) ListStrategyItems(ctx context.Context, workspaceID pgtype.UUID
 			&i.Description,
 			&i.HorizonUnit,
 			&i.HorizonCount,
+			&i.HorizonLabel,
 			&i.Position,
 			&i.State,
 			&i.CreatedAt,
@@ -407,6 +966,86 @@ func (q *Queries) ListStrategyItems(ctx context.Context, workspaceID pgtype.UUID
 	return items, nil
 }
 
+const updateRock = `-- name: UpdateRock :one
+UPDATE cerebro_rock r
+SET title = $3,
+    description = $4,
+    owner_type = $5,
+    owner_id = $6,
+    period_id = $7,
+    period_start = op.starts_on,
+    period_end = op.ends_on,
+    confidence = $8,
+    reported_health = $9,
+    updated_at = now()
+FROM cerebro_operating_period op
+WHERE r.id = $1 AND r.workspace_id = $2
+  AND op.id = $7 AND op.workspace_id = $2
+RETURNING r.id, r.project_id, r.workspace_id, r.title, r.description, r.owner_type, r.owner_id,
+          r.period_id, r.period_start, r.period_end, r.confidence, r.reported_health, r.created_at, r.updated_at
+`
+
+type UpdateRockParams struct {
+	ID             pgtype.UUID `json:"id"`
+	WorkspaceID    pgtype.UUID `json:"workspace_id"`
+	Title          string      `json:"title"`
+	Description    string      `json:"description"`
+	OwnerType      pgtype.Text `json:"owner_type"`
+	OwnerID        pgtype.UUID `json:"owner_id"`
+	PeriodID       pgtype.UUID `json:"period_id"`
+	Confidence     int32       `json:"confidence"`
+	ReportedHealth string      `json:"reported_health"`
+}
+
+type UpdateRockRow struct {
+	ID             pgtype.UUID        `json:"id"`
+	ProjectID      pgtype.UUID        `json:"project_id"`
+	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
+	Title          string             `json:"title"`
+	Description    string             `json:"description"`
+	OwnerType      pgtype.Text        `json:"owner_type"`
+	OwnerID        pgtype.UUID        `json:"owner_id"`
+	PeriodID       pgtype.UUID        `json:"period_id"`
+	PeriodStart    pgtype.Date        `json:"period_start"`
+	PeriodEnd      pgtype.Date        `json:"period_end"`
+	Confidence     int32              `json:"confidence"`
+	ReportedHealth string             `json:"reported_health"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+}
+
+func (q *Queries) UpdateRock(ctx context.Context, arg UpdateRockParams) (UpdateRockRow, error) {
+	row := q.db.QueryRow(ctx, updateRock,
+		arg.ID,
+		arg.WorkspaceID,
+		arg.Title,
+		arg.Description,
+		arg.OwnerType,
+		arg.OwnerID,
+		arg.PeriodID,
+		arg.Confidence,
+		arg.ReportedHealth,
+	)
+	var i UpdateRockRow
+	err := row.Scan(
+		&i.ID,
+		&i.ProjectID,
+		&i.WorkspaceID,
+		&i.Title,
+		&i.Description,
+		&i.OwnerType,
+		&i.OwnerID,
+		&i.PeriodID,
+		&i.PeriodStart,
+		&i.PeriodEnd,
+		&i.Confidence,
+		&i.ReportedHealth,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const updateStrategyItem = `-- name: UpdateStrategyItem :one
 UPDATE cerebro_strategy_item
 SET kind = $3,
@@ -414,11 +1053,12 @@ SET kind = $3,
     description = $5,
     horizon_unit = $6,
     horizon_count = $7,
-    position = $8,
-    state = $9,
+    horizon_label = $8,
+    position = $9,
+    state = $10,
     updated_at = now()
 WHERE id = $1 AND workspace_id = $2
-RETURNING id, workspace_id, kind, title, description, horizon_unit, horizon_count,
+RETURNING id, workspace_id, kind, title, description, horizon_unit, horizon_count, horizon_label,
           position, state, created_at, updated_at
 `
 
@@ -430,11 +1070,27 @@ type UpdateStrategyItemParams struct {
 	Description  string      `json:"description"`
 	HorizonUnit  pgtype.Text `json:"horizon_unit"`
 	HorizonCount pgtype.Int4 `json:"horizon_count"`
+	HorizonLabel pgtype.Text `json:"horizon_label"`
 	Position     int32       `json:"position"`
 	State        string      `json:"state"`
 }
 
-func (q *Queries) UpdateStrategyItem(ctx context.Context, arg UpdateStrategyItemParams) (CerebroStrategyItem, error) {
+type UpdateStrategyItemRow struct {
+	ID           pgtype.UUID        `json:"id"`
+	WorkspaceID  pgtype.UUID        `json:"workspace_id"`
+	Kind         string             `json:"kind"`
+	Title        string             `json:"title"`
+	Description  string             `json:"description"`
+	HorizonUnit  pgtype.Text        `json:"horizon_unit"`
+	HorizonCount pgtype.Int4        `json:"horizon_count"`
+	HorizonLabel pgtype.Text        `json:"horizon_label"`
+	Position     int32              `json:"position"`
+	State        string             `json:"state"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
+}
+
+func (q *Queries) UpdateStrategyItem(ctx context.Context, arg UpdateStrategyItemParams) (UpdateStrategyItemRow, error) {
 	row := q.db.QueryRow(ctx, updateStrategyItem,
 		arg.ID,
 		arg.WorkspaceID,
@@ -443,10 +1099,11 @@ func (q *Queries) UpdateStrategyItem(ctx context.Context, arg UpdateStrategyItem
 		arg.Description,
 		arg.HorizonUnit,
 		arg.HorizonCount,
+		arg.HorizonLabel,
 		arg.Position,
 		arg.State,
 	)
-	var i CerebroStrategyItem
+	var i UpdateStrategyItemRow
 	err := row.Scan(
 		&i.ID,
 		&i.WorkspaceID,
@@ -455,8 +1112,122 @@ func (q *Queries) UpdateStrategyItem(ctx context.Context, arg UpdateStrategyItem
 		&i.Description,
 		&i.HorizonUnit,
 		&i.HorizonCount,
+		&i.HorizonLabel,
 		&i.Position,
 		&i.State,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const upsertLegacyRock = `-- name: UpsertLegacyRock :one
+INSERT INTO cerebro_rock (
+    project_id, workspace_id, title, description, owner_type, owner_id, period_id,
+    period_start, period_end, confidence, reported_health
+)
+SELECT p.id, p.workspace_id, p.title, COALESCE(p.description, ''), p.lead_type, p.lead_id,
+       op.id, op.starts_on, op.ends_on, $4, $5
+FROM project p
+JOIN cerebro_operating_period op ON op.id = $3 AND op.workspace_id = p.workspace_id
+WHERE p.id = $1 AND p.workspace_id = $2
+ON CONFLICT (project_id) WHERE project_id IS NOT NULL DO UPDATE
+SET title = EXCLUDED.title,
+    description = EXCLUDED.description,
+    owner_type = EXCLUDED.owner_type,
+    owner_id = EXCLUDED.owner_id,
+    period_id = EXCLUDED.period_id,
+    period_start = EXCLUDED.period_start,
+    period_end = EXCLUDED.period_end,
+    confidence = EXCLUDED.confidence,
+    reported_health = EXCLUDED.reported_health,
+    updated_at = now()
+RETURNING id, project_id, workspace_id, title, description, owner_type, owner_id,
+          period_id, period_start, period_end, confidence, reported_health, created_at, updated_at
+`
+
+type UpsertLegacyRockParams struct {
+	ID             pgtype.UUID `json:"id"`
+	WorkspaceID    pgtype.UUID `json:"workspace_id"`
+	ID_2           pgtype.UUID `json:"id_2"`
+	Confidence     int32       `json:"confidence"`
+	ReportedHealth string      `json:"reported_health"`
+}
+
+type UpsertLegacyRockRow struct {
+	ID             pgtype.UUID        `json:"id"`
+	ProjectID      pgtype.UUID        `json:"project_id"`
+	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
+	Title          string             `json:"title"`
+	Description    string             `json:"description"`
+	OwnerType      pgtype.Text        `json:"owner_type"`
+	OwnerID        pgtype.UUID        `json:"owner_id"`
+	PeriodID       pgtype.UUID        `json:"period_id"`
+	PeriodStart    pgtype.Date        `json:"period_start"`
+	PeriodEnd      pgtype.Date        `json:"period_end"`
+	Confidence     int32              `json:"confidence"`
+	ReportedHealth string             `json:"reported_health"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+}
+
+func (q *Queries) UpsertLegacyRock(ctx context.Context, arg UpsertLegacyRockParams) (UpsertLegacyRockRow, error) {
+	row := q.db.QueryRow(ctx, upsertLegacyRock,
+		arg.ID,
+		arg.WorkspaceID,
+		arg.ID_2,
+		arg.Confidence,
+		arg.ReportedHealth,
+	)
+	var i UpsertLegacyRockRow
+	err := row.Scan(
+		&i.ID,
+		&i.ProjectID,
+		&i.WorkspaceID,
+		&i.Title,
+		&i.Description,
+		&i.OwnerType,
+		&i.OwnerID,
+		&i.PeriodID,
+		&i.PeriodStart,
+		&i.PeriodEnd,
+		&i.Confidence,
+		&i.ReportedHealth,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const upsertOperatingPeriod = `-- name: UpsertOperatingPeriod :one
+INSERT INTO cerebro_operating_period (workspace_id, name, starts_on, ends_on)
+VALUES ($1, $2, $3, $4)
+ON CONFLICT (workspace_id, starts_on, ends_on) DO UPDATE
+SET name = EXCLUDED.name, updated_at = now()
+RETURNING id, workspace_id, name, starts_on, ends_on, created_at, updated_at
+`
+
+type UpsertOperatingPeriodParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	Name        string      `json:"name"`
+	StartsOn    pgtype.Date `json:"starts_on"`
+	EndsOn      pgtype.Date `json:"ends_on"`
+}
+
+func (q *Queries) UpsertOperatingPeriod(ctx context.Context, arg UpsertOperatingPeriodParams) (CerebroOperatingPeriod, error) {
+	row := q.db.QueryRow(ctx, upsertOperatingPeriod,
+		arg.WorkspaceID,
+		arg.Name,
+		arg.StartsOn,
+		arg.EndsOn,
+	)
+	var i CerebroOperatingPeriod
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.Name,
+		&i.StartsOn,
+		&i.EndsOn,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -483,54 +1254,6 @@ func (q *Queries) UpsertOperatingSystemSettings(ctx context.Context, arg UpsertO
 	err := row.Scan(
 		&i.WorkspaceID,
 		&i.Terminology,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-	)
-	return i, err
-}
-
-const upsertRock = `-- name: UpsertRock :one
-INSERT INTO cerebro_rock (
-    project_id, workspace_id, period_start, period_end, confidence, reported_health
-)
-VALUES ($1, $2, $3, $4, $5, $6)
-ON CONFLICT (project_id) DO UPDATE
-SET period_start = EXCLUDED.period_start,
-    period_end = EXCLUDED.period_end,
-    confidence = EXCLUDED.confidence,
-    reported_health = EXCLUDED.reported_health,
-    updated_at = now()
-WHERE cerebro_rock.workspace_id = EXCLUDED.workspace_id
-RETURNING project_id, workspace_id, period_start, period_end, confidence,
-          reported_health, created_at, updated_at
-`
-
-type UpsertRockParams struct {
-	ProjectID      pgtype.UUID `json:"project_id"`
-	WorkspaceID    pgtype.UUID `json:"workspace_id"`
-	PeriodStart    pgtype.Date `json:"period_start"`
-	PeriodEnd      pgtype.Date `json:"period_end"`
-	Confidence     int32       `json:"confidence"`
-	ReportedHealth string      `json:"reported_health"`
-}
-
-func (q *Queries) UpsertRock(ctx context.Context, arg UpsertRockParams) (CerebroRock, error) {
-	row := q.db.QueryRow(ctx, upsertRock,
-		arg.ProjectID,
-		arg.WorkspaceID,
-		arg.PeriodStart,
-		arg.PeriodEnd,
-		arg.Confidence,
-		arg.ReportedHealth,
-	)
-	var i CerebroRock
-	err := row.Scan(
-		&i.ProjectID,
-		&i.WorkspaceID,
-		&i.PeriodStart,
-		&i.PeriodEnd,
-		&i.Confidence,
-		&i.ReportedHealth,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)

@@ -24,6 +24,7 @@ import { useCerebroWebFetchPolicySettingsTabs } from "@multica/cerebro-web-fetch
 // cerebro_collections flag is on.
 import { useCerebroCollectionsSettingsTabs } from "@multica/cerebro-collections/views";
 import { useCerebroModeSettingsTabs } from "@multica/cerebro-sessions";
+import { useCerebroOperatingSystemSettingsTabs } from "@multica/cerebro-operating-system/views";
 
 // Assembled here, inside the client boundary, so the lucide icon components
 // carried in each tab's `icon` field are never serialized from a Server
@@ -70,6 +71,7 @@ export function SettingsPageClient({
   // cerebro_collections flag is on.
   const collectionsTabs = useCerebroCollectionsSettingsTabs();
   const modeTabs = useCerebroModeSettingsTabs();
+  const operatingSystemTabs = useCerebroOperatingSystemSettingsTabs();
   const accountTabs = useMemo(
     () => [
       ...extraAccountTabs,
@@ -81,6 +83,7 @@ export function SettingsPageClient({
       ...webFetchPolicyTabs,
       ...collectionsTabs,
       ...modeTabs,
+      ...operatingSystemTabs,
     ],
     [
       toolPolicyTabs,
@@ -91,6 +94,7 @@ export function SettingsPageClient({
       webFetchPolicyTabs,
       collectionsTabs,
       modeTabs,
+      operatingSystemTabs,
     ],
   );
 

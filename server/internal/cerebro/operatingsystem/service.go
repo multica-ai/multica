@@ -18,6 +18,7 @@ import (
 )
 
 var ErrProjectNotInWorkspace = errors.New("project not found in workspace")
+var ErrOwnerNotInWorkspace = errors.New("owner not found in workspace")
 
 var validStrategyKinds = map[string]bool{
 	"core_value": true, "core_focus": true, "horizon_goal": true,
@@ -33,6 +34,9 @@ var validRockHealth = map[string]bool{
 
 type ProjectReader interface {
 	GetProjectInWorkspace(context.Context, db.GetProjectInWorkspaceParams) (db.Project, error)
+	GetIssueInWorkspace(context.Context, db.GetIssueInWorkspaceParams) (db.Issue, error)
+	GetMember(context.Context, pgtype.UUID) (db.Member, error)
+	GetAgentInWorkspace(context.Context, db.GetAgentInWorkspaceParams) (db.Agent, error)
 }
 
 type Service struct {
@@ -92,25 +96,61 @@ func ValidateStrategyInput(input StrategyItemInput) error {
 }
 
 func ValidateRockInput(input RockInput) error {
-	if _, err := util.ParseUUID(input.ProjectID); err != nil {
-		return errors.New("project_id must be a UUID")
-	}
-	start, err := time.Parse("2006-01-02", input.PeriodStart)
-	if err != nil {
-		return errors.New("period_start must be YYYY-MM-DD")
-	}
-	end, err := time.Parse("2006-01-02", input.PeriodEnd)
-	if err != nil {
-		return errors.New("period_end must be YYYY-MM-DD")
-	}
-	if end.Before(start) {
-		return errors.New("period_end must not precede period_start")
+	legacy := input.ProjectID != "" && input.Title == "" && input.PeriodID == ""
+	if legacy {
+		if _, err := util.ParseUUID(input.ProjectID); err != nil {
+			return errors.New("project_id must be a UUID")
+		}
+		start, err := time.Parse("2006-01-02", input.PeriodStart)
+		if err != nil {
+			return errors.New("period_start must be YYYY-MM-DD")
+		}
+		end, err := time.Parse("2006-01-02", input.PeriodEnd)
+		if err != nil {
+			return errors.New("period_end must be YYYY-MM-DD")
+		}
+		if end.Before(start) {
+			return errors.New("period_end must not precede period_start")
+		}
+	} else {
+		if strings.TrimSpace(input.Title) == "" {
+			return errors.New("title is required")
+		}
+		if _, err := util.ParseUUID(input.PeriodID); err != nil {
+			return errors.New("period_id must be a UUID")
+		}
 	}
 	if input.Confidence < 0 || input.Confidence > 100 {
 		return errors.New("confidence must be between 0 and 100")
 	}
 	if !validRockHealth[input.ReportedHealth] {
 		return fmt.Errorf("invalid reported_health %q", input.ReportedHealth)
+	}
+	if (input.OwnerType == "") != (input.OwnerID == "") {
+		return errors.New("owner_type and owner_id must be provided together")
+	}
+	if input.OwnerType != "" {
+		if input.OwnerType != "member" && input.OwnerType != "agent" {
+			return errors.New("owner_type must be member or agent")
+		}
+		if _, err := util.ParseUUID(input.OwnerID); err != nil {
+			return errors.New("owner_id must be a UUID")
+		}
+	}
+	seen := make(map[string]bool)
+	for _, id := range append(append([]string{}, input.ProjectIDs...), input.IssueIDs...) {
+		if _, err := util.ParseUUID(id); err != nil {
+			return errors.New("connected object ids must be UUIDs")
+		}
+		if seen[id] {
+			return errors.New("connected object ids must not be duplicated")
+		}
+		seen[id] = true
+	}
+	if input.StrategyItemID != "" {
+		if _, err := util.ParseUUID(input.StrategyItemID); err != nil {
+			return errors.New("strategy_item_id must be a UUID")
+		}
 	}
 	return nil
 }
@@ -125,8 +165,8 @@ func DeriveHealth(total, done, blocked int32, now time.Time) DerivedHealth {
 		result.State = "on_track"
 		result.Reason = fmt.Sprintf("all %d Issues are done", total)
 	case total == 0:
-		result.State = "at_risk"
-		result.Reason = "no Issues are connected to this Project"
+		result.State = "unset"
+		result.Reason = "no execution is connected to this Rock"
 	default:
 		result.State = "at_risk"
 		result.Reason = fmt.Sprintf("%d of %d Issues are done", done, total)
@@ -138,6 +178,21 @@ func EnsureProjectInWorkspace(ctx context.Context, projects ProjectReader, proje
 	_, err := projects.GetProjectInWorkspace(ctx, db.GetProjectInWorkspaceParams{ID: projectID, WorkspaceID: workspaceID})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return ErrProjectNotInWorkspace
+	}
+	return err
+}
+
+func EnsureOwnerInWorkspace(ctx context.Context, projects ProjectReader, ownerType string, ownerID, workspaceID pgtype.UUID) error {
+	if ownerType == "member" {
+		member, err := projects.GetMember(ctx, ownerID)
+		if errors.Is(err, pgx.ErrNoRows) || err == nil && member.WorkspaceID != workspaceID {
+			return ErrOwnerNotInWorkspace
+		}
+		return err
+	}
+	_, err := projects.GetAgentInWorkspace(ctx, db.GetAgentInWorkspaceParams{ID: ownerID, WorkspaceID: workspaceID})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ErrOwnerNotInWorkspace
 	}
 	return err
 }
@@ -183,7 +238,7 @@ func (s *Service) CreateStrategyItem(ctx context.Context, workspaceID pgtype.UUI
 		return StrategyItemResponse{}, err
 	}
 	row, err := s.queries.CreateStrategyItem(ctx, strategyParams(workspaceID, input))
-	return strategyResponse(row), err
+	return strategyResponse(row.ID, row.WorkspaceID, row.Kind, row.Title, row.Description, row.HorizonUnit, row.HorizonCount, row.HorizonLabel, row.Position, row.State, row.CreatedAt, row.UpdatedAt), err
 }
 
 func (s *Service) ListStrategyItems(ctx context.Context, workspaceID pgtype.UUID) ([]StrategyItemResponse, error) {
@@ -193,7 +248,26 @@ func (s *Service) ListStrategyItems(ctx context.Context, workspaceID pgtype.UUID
 	}
 	out := make([]StrategyItemResponse, 0, len(rows))
 	for _, row := range rows {
-		out = append(out, strategyResponse(row))
+		out = append(out, strategyResponse(row.ID, row.WorkspaceID, row.Kind, row.Title, row.Description, row.HorizonUnit, row.HorizonCount, row.HorizonLabel, row.Position, row.State, row.CreatedAt, row.UpdatedAt))
+	}
+	return out, nil
+}
+
+func (s *Service) ListStrategyHistory(ctx context.Context, workspaceID pgtype.UUID) ([]StrategyHistoryResponse, error) {
+	rows, err := s.queries.ListStrategyItemHistory(ctx, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]StrategyHistoryResponse, 0, len(rows))
+	for _, row := range rows {
+		snapshot := make(map[string]any)
+		if err := json.Unmarshal(row.Snapshot, &snapshot); err != nil {
+			return nil, err
+		}
+		out = append(out, StrategyHistoryResponse{
+			ID: util.UUIDToString(row.ID), StrategyItemID: util.UUIDToString(row.StrategyItemID),
+			Action: row.Action, Title: row.Title, Snapshot: snapshot, ChangedAt: timestamp(row.ChangedAt),
+		})
 	}
 	return out, nil
 }
@@ -206,9 +280,9 @@ func (s *Service) UpdateStrategyItem(ctx context.Context, workspaceID, id pgtype
 	row, err := s.queries.UpdateStrategyItem(ctx, cerebrodb.UpdateStrategyItemParams{
 		ID: id, WorkspaceID: params.WorkspaceID, Kind: params.Kind, Title: params.Title,
 		Description: params.Description, HorizonUnit: params.HorizonUnit,
-		HorizonCount: params.HorizonCount, Position: params.Position, State: params.State,
+		HorizonCount: params.HorizonCount, HorizonLabel: params.HorizonLabel, Position: params.Position, State: params.State,
 	})
-	return strategyResponse(row), err
+	return strategyResponse(row.ID, row.WorkspaceID, row.Kind, row.Title, row.Description, row.HorizonUnit, row.HorizonCount, row.HorizonLabel, row.Position, row.State, row.CreatedAt, row.UpdatedAt), err
 }
 
 func (s *Service) DeleteStrategyItem(ctx context.Context, workspaceID, id pgtype.UUID) (bool, error) {
@@ -226,17 +300,133 @@ func (s *Service) UpsertRock(ctx context.Context, workspaceID pgtype.UUID, input
 	}
 	start, _ := time.Parse("2006-01-02", input.PeriodStart)
 	end, _ := time.Parse("2006-01-02", input.PeriodEnd)
-	_, err := s.queries.UpsertRock(ctx, cerebrodb.UpsertRockParams{
-		ProjectID: projectID, WorkspaceID: workspaceID,
-		PeriodStart: pgtype.Date{Time: start, Valid: true}, PeriodEnd: pgtype.Date{Time: end, Valid: true},
+	period, err := s.queries.UpsertOperatingPeriod(ctx, cerebrodb.UpsertOperatingPeriodParams{
+		WorkspaceID: workspaceID, Name: quarterName(start),
+		StartsOn: pgtype.Date{Time: start, Valid: true}, EndsOn: pgtype.Date{Time: end, Valid: true},
+	})
+	if err != nil {
+		return err
+	}
+	row, err := s.queries.UpsertLegacyRock(ctx, cerebrodb.UpsertLegacyRockParams{
+		ID: projectID, WorkspaceID: workspaceID, ID_2: period.ID,
 		Confidence: input.Confidence, ReportedHealth: input.ReportedHealth,
 	})
+	if err != nil {
+		return err
+	}
+	_, err = s.queries.CreateObjectConnection(ctx, cerebrodb.CreateObjectConnectionParams{
+		WorkspaceID: workspaceID, SourceType: "rock", SourceID: row.ID,
+		TargetType: "project", TargetID: projectID, RelationshipType: "contains",
+		Provenance: "system", CreatedByType: "system", CreatedByID: row.ID,
+	})
+	if IsDuplicateConnection(err) {
+		return nil
+	}
 	return err
 }
 
-func (s *Service) DeleteRock(ctx context.Context, workspaceID, projectID pgtype.UUID) (bool, error) {
-	count, err := s.queries.DeleteRock(ctx, cerebrodb.DeleteRockParams{ProjectID: projectID, WorkspaceID: workspaceID})
+func (s *Service) DeleteRock(ctx context.Context, workspaceID, rockID pgtype.UUID) (bool, error) {
+	count, err := s.queries.DeleteRock(ctx, cerebrodb.DeleteRockParams{ID: rockID, WorkspaceID: workspaceID})
 	return count > 0, err
+}
+
+func (s *Service) ListPeriods(ctx context.Context, workspaceID pgtype.UUID) ([]OperatingPeriodResponse, error) {
+	rows, err := s.queries.ListOperatingPeriods(ctx, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	if len(rows) == 0 {
+		name, start, end := quarterPeriod(s.now().UTC())
+		row, createErr := s.queries.UpsertOperatingPeriod(ctx, cerebrodb.UpsertOperatingPeriodParams{
+			WorkspaceID: workspaceID,
+			Name:        name,
+			StartsOn:    pgtype.Date{Time: start, Valid: true},
+			EndsOn:      pgtype.Date{Time: end, Valid: true},
+		})
+		if createErr != nil {
+			return nil, createErr
+		}
+		rows = append(rows, row)
+	}
+	out := make([]OperatingPeriodResponse, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, OperatingPeriodResponse{
+			ID: util.UUIDToString(row.ID), WorkspaceID: util.UUIDToString(row.WorkspaceID),
+			Name: row.Name, StartsOn: date(row.StartsOn), EndsOn: date(row.EndsOn),
+		})
+	}
+	return out, nil
+}
+
+func quarterPeriod(now time.Time) (string, time.Time, time.Time) {
+	quarter := (int(now.Month())-1)/3 + 1
+	startMonth := time.Month((quarter-1)*3 + 1)
+	start := time.Date(now.Year(), startMonth, 1, 0, 0, 0, 0, time.UTC)
+	end := start.AddDate(0, 3, 0).AddDate(0, 0, -1)
+	return fmt.Sprintf("Q%d %d", quarter, now.Year()), start, end
+}
+
+func (s *Service) SaveRock(ctx context.Context, workspaceID pgtype.UUID, actorType string, actorID pgtype.UUID, rockID *pgtype.UUID, input RockInput) (RockResponse, error) {
+	if err := ValidateRockInput(input); err != nil {
+		return RockResponse{}, err
+	}
+	periodID, _ := util.ParseUUID(input.PeriodID)
+	if _, err := s.queries.GetOperatingPeriod(ctx, cerebrodb.GetOperatingPeriodParams{ID: periodID, WorkspaceID: workspaceID}); err != nil {
+		return RockResponse{}, err
+	}
+	ownerID := pgtype.UUID{}
+	if input.OwnerID != "" {
+		ownerID, _ = util.ParseUUID(input.OwnerID)
+		if err := EnsureOwnerInWorkspace(ctx, s.projects, input.OwnerType, ownerID, workspaceID); err != nil {
+			return RockResponse{}, err
+		}
+	}
+	var id pgtype.UUID
+	if rockID == nil {
+		row, err := s.queries.CreateRock(ctx, cerebrodb.CreateRockParams{
+			WorkspaceID: workspaceID, Title: strings.TrimSpace(input.Title), Description: strings.TrimSpace(input.Description),
+			OwnerType: text(input.OwnerType), OwnerID: ownerID, PeriodID: periodID,
+			Confidence: input.Confidence, ReportedHealth: input.ReportedHealth,
+		})
+		if err != nil {
+			return RockResponse{}, err
+		}
+		id = row.ID
+	} else {
+		row, err := s.queries.UpdateRock(ctx, cerebrodb.UpdateRockParams{
+			ID: *rockID, WorkspaceID: workspaceID, Title: strings.TrimSpace(input.Title), Description: strings.TrimSpace(input.Description),
+			OwnerType: text(input.OwnerType), OwnerID: ownerID, PeriodID: periodID,
+			Confidence: input.Confidence, ReportedHealth: input.ReportedHealth,
+		})
+		if err != nil {
+			return RockResponse{}, err
+		}
+		id = row.ID
+	}
+	if err := s.replaceRockConnections(ctx, workspaceID, actorType, actorID, id, input); err != nil {
+		return RockResponse{}, err
+	}
+	return s.getRockResponse(ctx, workspaceID, id)
+}
+
+func (s *Service) AddRockCheckIn(ctx context.Context, workspaceID, rockID pgtype.UUID, actorType string, actorID pgtype.UUID, input RockCheckInInput) (RockCheckIn, error) {
+	if input.Confidence < 0 || input.Confidence > 100 || !validRockHealth[input.ReportedHealth] {
+		return RockCheckIn{}, errors.New("confidence and reported_health are invalid")
+	}
+	row, err := s.queries.CreateRockCheckIn(ctx, cerebrodb.CreateRockCheckInParams{
+		WorkspaceID: workspaceID, ID: rockID, Confidence: input.Confidence,
+		ReportedHealth: input.ReportedHealth, Note: strings.TrimSpace(input.Note),
+		CreatedByType: actorType, CreatedByID: actorID,
+	})
+	if err != nil {
+		return RockCheckIn{}, err
+	}
+	if _, err := s.queries.ApplyRockCheckIn(ctx, cerebrodb.ApplyRockCheckInParams{
+		ID: rockID, WorkspaceID: workspaceID, Confidence: input.Confidence, ReportedHealth: input.ReportedHealth,
+	}); err != nil {
+		return RockCheckIn{}, err
+	}
+	return checkInResponse(row), nil
 }
 
 func (s *Service) ListRocks(ctx context.Context, workspaceID pgtype.UUID) ([]RockResponse, error) {
@@ -246,7 +436,11 @@ func (s *Service) ListRocks(ctx context.Context, workspaceID pgtype.UUID) ([]Roc
 	}
 	out := make([]RockResponse, 0, len(rows))
 	for _, row := range rows {
-		out = append(out, rockResponse(row, s.now()))
+		rock, err := s.enrichRockResponse(ctx, workspaceID, rockResponse(row, s.now()))
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, rock)
 	}
 	return out, nil
 }
@@ -286,32 +480,159 @@ func (s *Service) DeleteConnection(ctx context.Context, workspaceID, id pgtype.U
 	return count > 0, err
 }
 
+func (s *Service) replaceRockConnections(ctx context.Context, workspaceID pgtype.UUID, actorType string, actorID, rockID pgtype.UUID, input RockInput) error {
+	if actorType != "member" && actorType != "agent" {
+		return errors.New("invalid actor type")
+	}
+	for _, raw := range input.ProjectIDs {
+		id, _ := util.ParseUUID(raw)
+		if err := EnsureProjectInWorkspace(ctx, s.projects, id, workspaceID); err != nil {
+			return err
+		}
+	}
+	for _, raw := range input.IssueIDs {
+		id, _ := util.ParseUUID(raw)
+		if _, err := s.projects.GetIssueInWorkspace(ctx, db.GetIssueInWorkspaceParams{ID: id, WorkspaceID: workspaceID}); err != nil {
+			return err
+		}
+	}
+	var strategyID pgtype.UUID
+	if input.StrategyItemID != "" {
+		strategyID, _ = util.ParseUUID(input.StrategyItemID)
+		if _, err := s.queries.GetStrategyItem(ctx, cerebrodb.GetStrategyItemParams{ID: strategyID, WorkspaceID: workspaceID}); err != nil {
+			return err
+		}
+	}
+	if err := s.queries.DeleteObjectConnectionsForSource(ctx, cerebrodb.DeleteObjectConnectionsForSourceParams{
+		WorkspaceID: workspaceID, SourceType: "rock", SourceID: rockID, TargetTypes: []string{"project", "issue"},
+	}); err != nil {
+		return err
+	}
+	for _, target := range []struct {
+		typeName string
+		ids      []string
+	}{{"project", input.ProjectIDs}, {"issue", input.IssueIDs}} {
+		for _, raw := range target.ids {
+			id, _ := util.ParseUUID(raw)
+			if _, err := s.queries.CreateObjectConnection(ctx, cerebrodb.CreateObjectConnectionParams{
+				WorkspaceID: workspaceID, SourceType: "rock", SourceID: rockID,
+				TargetType: target.typeName, TargetID: id, RelationshipType: "contains",
+				Provenance: "manual", CreatedByType: actorType, CreatedByID: actorID,
+			}); err != nil {
+				return err
+			}
+		}
+	}
+	if err := s.queries.DeleteRockStrategyConnections(ctx, cerebrodb.DeleteRockStrategyConnectionsParams{WorkspaceID: workspaceID, TargetID: rockID}); err != nil {
+		return err
+	}
+	if input.StrategyItemID != "" {
+		_, err := s.queries.CreateObjectConnection(ctx, cerebrodb.CreateObjectConnectionParams{
+			WorkspaceID: workspaceID, SourceType: "strategy_item", SourceID: strategyID,
+			TargetType: "rock", TargetID: rockID, RelationshipType: "supports",
+			Provenance: "manual", CreatedByType: actorType, CreatedByID: actorID,
+		})
+		return err
+	}
+	return nil
+}
+
+func (s *Service) getRockResponse(ctx context.Context, workspaceID, rockID pgtype.UUID) (RockResponse, error) {
+	rows, err := s.ListRocks(ctx, workspaceID)
+	if err != nil {
+		return RockResponse{}, err
+	}
+	for _, rock := range rows {
+		if rock.ID == util.UUIDToString(rockID) {
+			return rock, nil
+		}
+	}
+	return RockResponse{}, pgx.ErrNoRows
+}
+
+func (s *Service) enrichRockResponse(ctx context.Context, workspaceID pgtype.UUID, rock RockResponse) (RockResponse, error) {
+	rockID, _ := util.ParseUUID(rock.ID)
+	projects, err := s.queries.ListRockProjects(ctx, cerebrodb.ListRockProjectsParams{WorkspaceID: workspaceID, SourceID: rockID})
+	if err != nil {
+		return RockResponse{}, err
+	}
+	for _, project := range projects {
+		rock.Projects = append(rock.Projects, RockProject{ID: util.UUIDToString(project.ID), Title: project.Title, IssueCount: project.IssueCount, DoneIssueCount: project.DoneIssueCount})
+	}
+	issues, err := s.queries.ListRockIssues(ctx, cerebrodb.ListRockIssuesParams{WorkspaceID: workspaceID, SourceID: rockID})
+	if err != nil {
+		return RockResponse{}, err
+	}
+	for _, issue := range issues {
+		rock.Issues = append(rock.Issues, RockIssue{
+			ID: util.UUIDToString(issue.ID), Identifier: issue.Identifier, Title: issue.Title,
+			Status: issue.Status, ProjectID: util.UUIDToString(issue.ProjectID), ProjectTitle: issue.ProjectTitle,
+		})
+	}
+	checkIns, err := s.queries.ListRockCheckIns(ctx, cerebrodb.ListRockCheckInsParams{WorkspaceID: workspaceID, RockID: rockID})
+	if err != nil {
+		return RockResponse{}, err
+	}
+	for _, checkIn := range checkIns {
+		rock.CheckIns = append(rock.CheckIns, checkInResponse(checkIn))
+	}
+	return rock, nil
+}
+
+func checkInResponse(row cerebrodb.CerebroRockCheckIn) RockCheckIn {
+	return RockCheckIn{
+		ID: util.UUIDToString(row.ID), Confidence: row.Confidence, ReportedHealth: row.ReportedHealth,
+		Note: row.Note, CreatedByType: row.CreatedByType, CreatedByID: util.UUIDToString(row.CreatedByID), CreatedAt: timestamp(row.CreatedAt),
+	}
+}
+
+func healthScore(total, done, blocked int32) int32 {
+	if total == 0 {
+		return 0
+	}
+	score := done * 100 / total
+	if blocked > 0 && score > 49 {
+		return 49
+	}
+	return score
+}
+
+func quarterName(start time.Time) string {
+	return fmt.Sprintf("Q%d %d", (int(start.Month())-1)/3+1, start.Year())
+}
+
 func strategyParams(workspaceID pgtype.UUID, input StrategyItemInput) cerebrodb.CreateStrategyItemParams {
 	return cerebrodb.CreateStrategyItemParams{
 		WorkspaceID: workspaceID, Kind: input.Kind, Title: strings.TrimSpace(input.Title),
 		Description: input.Description, HorizonUnit: text(input.HorizonUnit),
-		HorizonCount: integer(input.HorizonCount), Position: input.Position, State: defaultState(input.State),
+		HorizonCount: integer(input.HorizonCount), HorizonLabel: text(input.HorizonLabel), Position: input.Position, State: defaultState(input.State),
 	}
 }
 
-func strategyResponse(row cerebrodb.CerebroStrategyItem) StrategyItemResponse {
+func strategyResponse(id, workspaceID pgtype.UUID, kind, title, description string, horizonUnit pgtype.Text, horizonCount pgtype.Int4, horizonLabel pgtype.Text, position int32, state string, createdAt, updatedAt pgtype.Timestamptz) StrategyItemResponse {
 	return StrategyItemResponse{
-		ID: util.UUIDToString(row.ID), WorkspaceID: util.UUIDToString(row.WorkspaceID), Kind: row.Kind,
-		Title: row.Title, Description: row.Description, HorizonUnit: row.HorizonUnit.String,
-		HorizonCount: row.HorizonCount.Int32, Position: row.Position, State: row.State,
-		CreatedAt: timestamp(row.CreatedAt), UpdatedAt: timestamp(row.UpdatedAt),
+		ID: util.UUIDToString(id), WorkspaceID: util.UUIDToString(workspaceID), Kind: kind,
+		Title: title, Description: description, HorizonUnit: horizonUnit.String,
+		HorizonCount: horizonCount.Int32, HorizonLabel: horizonLabel.String, Position: position, State: state,
+		CreatedAt: timestamp(createdAt), UpdatedAt: timestamp(updatedAt),
 	}
 }
 
 func rockResponse(row cerebrodb.ListRockRollupsRow, now time.Time) RockResponse {
 	return RockResponse{
+		ID: util.UUIDToString(row.ID), Title: row.Title, Description: row.Description,
+		OwnerType: row.OwnerType.String, OwnerID: util.UUIDToString(row.OwnerID), OwnerName: row.OwnerName,
+		PeriodID: util.UUIDToString(row.PeriodID), PeriodName: row.PeriodName,
 		ProjectID: util.UUIDToString(row.ProjectID), WorkspaceID: util.UUIDToString(row.WorkspaceID),
-		ProjectTitle: row.ProjectTitle, ProjectDescription: row.ProjectDescription.String,
-		ProjectStatus: row.ProjectStatus, LeadType: row.LeadType.String, LeadID: util.UUIDToString(row.LeadID),
+		ProjectTitle: row.ProjectTitle, ProjectDescription: row.ProjectDescription,
+		ProjectStatus: row.ProjectStatus, LeadType: row.OwnerType.String, LeadID: util.UUIDToString(row.OwnerID),
 		PeriodStart: date(row.PeriodStart), PeriodEnd: date(row.PeriodEnd), Confidence: row.Confidence,
 		ReportedHealth: row.ReportedHealth,
 		DerivedHealth:  DeriveHealth(row.IssueCount, row.DoneIssueCount, row.BlockedIssueCount, now),
 		IssueCount:     row.IssueCount, DoneIssueCount: row.DoneIssueCount, BlockedIssueCount: row.BlockedIssueCount,
+		ProjectCount: row.ProjectCount, HealthScore: healthScore(row.IssueCount, row.DoneIssueCount, row.BlockedIssueCount),
+		StrategyItemID: util.UUIDToString(row.StrategyItemID), StrategyItemTitle: row.StrategyItemTitle,
+		Projects: []RockProject{}, Issues: []RockIssue{}, CheckIns: []RockCheckIn{},
 		CreatedAt: timestamp(row.CreatedAt), UpdatedAt: timestamp(row.UpdatedAt),
 	}
 }

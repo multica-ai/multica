@@ -5,9 +5,11 @@ import {
   EMPTY_CONNECTIONS,
   EMPTY_STRATEGY,
   operatingSystemSettingsSchema,
+  operatingPeriodListSchema,
   objectConnectionListSchema,
   rocksListSchema,
   strategyListSchema,
+  strategyHistoryListSchema,
 } from "./api-schemas";
 
 describe("operating system API schemas", () => {
@@ -40,6 +42,28 @@ describe("operating system API schemas", () => {
 
   it("rejects missing issue counts and wrong confidence types", () => {
     expect(rocksListSchema.safeParse({ rocks: [{ confidence: "50" }] }).success).toBe(false);
+  });
+
+  it("parses first-class Rocks with optional connections and check-ins", () => {
+    const parsed = rocksListSchema.parse({ rocks: [{
+      id: "r1", workspace_id: "w1", title: "Independent Rock", description: "",
+      owner_type: "agent", owner_id: "a1", owner_name: "Sara", period_id: "q1", period_name: "Q3 2026",
+      period_start: "2026-07-01", period_end: "2026-09-30", confidence: 58,
+      reported_health: "at_risk", derived_health: { state: "at_risk", reason: "work remains", calculated_at: "" },
+      issue_count: 0, done_issue_count: 0, blocked_issue_count: 0, project_count: 0, health_score: 0,
+      projects: [], issues: [], check_ins: [{ id: "c1", confidence: 58, reported_health: "at_risk", note: "Blocked", created_by_type: "member", created_by_id: "m1", created_at: "" }],
+      created_at: "", updated_at: "",
+    }] });
+    expect(parsed.rocks[0]).toMatchObject({ id: "r1", title: "Independent Rock", projects: [], check_ins: [{ note: "Blocked" }] });
+  });
+
+  it("parses shared operating periods", () => {
+    expect(operatingPeriodListSchema.parse({ periods: [{ id: "q1", workspace_id: "w1", name: "Q3 2026", starts_on: "2026-07-01", ends_on: "2026-09-30" }] }).periods[0]?.name).toBe("Q3 2026");
+  });
+
+  it("parses durable Strategy history", () => {
+    const parsed = strategyHistoryListSchema.parse({ history: [{ id: "h1", strategy_item_id: "s1", action: "updated", title: "Nordic leader", snapshot: { title: "Nordic leader" }, changed_at: "2026-07-16T12:00:00Z" }] });
+    expect(parsed.history[0]).toMatchObject({ action: "updated", title: "Nordic leader" });
   });
 
   it("falls back safely when connection lists drift", () => {

@@ -20,9 +20,13 @@ type handlerService interface {
 	UpdateSettings(context.Context, pgtype.UUID, Terminology) (SettingsResponse, error)
 	CreateStrategyItem(context.Context, pgtype.UUID, StrategyItemInput) (StrategyItemResponse, error)
 	ListStrategyItems(context.Context, pgtype.UUID) ([]StrategyItemResponse, error)
+	ListStrategyHistory(context.Context, pgtype.UUID) ([]StrategyHistoryResponse, error)
 	UpdateStrategyItem(context.Context, pgtype.UUID, pgtype.UUID, StrategyItemInput) (StrategyItemResponse, error)
 	DeleteStrategyItem(context.Context, pgtype.UUID, pgtype.UUID) (bool, error)
+	ListPeriods(context.Context, pgtype.UUID) ([]OperatingPeriodResponse, error)
 	UpsertRock(context.Context, pgtype.UUID, RockInput) error
+	SaveRock(context.Context, pgtype.UUID, string, pgtype.UUID, *pgtype.UUID, RockInput) (RockResponse, error)
+	AddRockCheckIn(context.Context, pgtype.UUID, pgtype.UUID, string, pgtype.UUID, RockCheckInInput) (RockCheckIn, error)
 	ListRocks(context.Context, pgtype.UUID) ([]RockResponse, error)
 	DeleteRock(context.Context, pgtype.UUID, pgtype.UUID) (bool, error)
 	CreateConnection(context.Context, pgtype.UUID, string, pgtype.UUID, ObjectConnectionInput) (ObjectConnectionResponse, error)
@@ -46,17 +50,29 @@ func (h *Handler) MountRoutes(r chi.Router) {
 		r.Put("/{id}", h.UpdateStrategyItem)
 		r.Delete("/{id}", h.DeleteStrategyItem)
 	})
+	r.Get("/api/cerebro/strategy-history", h.ListStrategyHistory)
 	r.Route("/api/cerebro/rocks", func(r chi.Router) {
 		r.Get("/", h.ListRocks)
 		r.Post("/", h.UpsertRock)
-		r.Put("/{projectID}", h.UpsertRock)
-		r.Delete("/{projectID}", h.DeleteRock)
+		r.Put("/{id}", h.UpsertRock)
+		r.Delete("/{id}", h.DeleteRock)
+		r.Post("/{id}/check-ins", h.AddRockCheckIn)
 	})
+	r.Get("/api/cerebro/operating-periods", h.ListPeriods)
 	r.Route("/api/cerebro/object-connections", func(r chi.Router) {
 		r.Get("/", h.ListConnections)
 		r.Post("/", h.CreateConnection)
 		r.Delete("/{id}", h.DeleteConnection)
 	})
+}
+
+func (h *Handler) ListStrategyHistory(w http.ResponseWriter, r *http.Request) {
+	ws, _, ok := requestScope(w, r)
+	if !ok {
+		return
+	}
+	items, err := h.service.ListStrategyHistory(r.Context(), ws)
+	writeResult(w, http.StatusOK, map[string]any{"history": items}, err)
 }
 
 func (h *Handler) GetSettings(w http.ResponseWriter, r *http.Request) {
@@ -144,8 +160,17 @@ func (h *Handler) ListRocks(w http.ResponseWriter, r *http.Request) {
 	writeResult(w, http.StatusOK, map[string]any{"rocks": items}, err)
 }
 
-func (h *Handler) UpsertRock(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) ListPeriods(w http.ResponseWriter, r *http.Request) {
 	ws, _, ok := requestScope(w, r)
+	if !ok {
+		return
+	}
+	items, err := h.service.ListPeriods(r.Context(), ws)
+	writeResult(w, http.StatusOK, map[string]any{"periods": items}, err)
+}
+
+func (h *Handler) UpsertRock(w http.ResponseWriter, r *http.Request) {
+	ws, memberID, ok := requestScope(w, r)
 	if !ok {
 		return
 	}
@@ -153,15 +178,52 @@ func (h *Handler) UpsertRock(w http.ResponseWriter, r *http.Request) {
 	if !decodeBody(w, r, &input) {
 		return
 	}
-	if raw := strings.TrimSpace(chi.URLParam(r, "projectID")); raw != "" {
-		if _, err := util.ParseUUID(raw); err != nil {
-			writeError(w, http.StatusBadRequest, "invalid projectID")
+	rawID := strings.TrimSpace(chi.URLParam(r, "id"))
+	legacy := input.Title == "" && input.PeriodID == ""
+	if legacy {
+		if rawID != "" {
+			if _, err := util.ParseUUID(rawID); err != nil {
+				writeError(w, http.StatusBadRequest, "invalid id")
+				return
+			}
+			input.ProjectID = rawID
+		}
+		err := h.service.UpsertRock(r.Context(), ws, input)
+		writeResult(w, http.StatusOK, map[string]bool{"saved": err == nil}, err)
+		return
+	}
+	var rockID *pgtype.UUID
+	if rawID != "" {
+		parsed, err := util.ParseUUID(rawID)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid id")
 			return
 		}
-		input.ProjectID = raw
+		rockID = &parsed
 	}
-	err := h.service.UpsertRock(r.Context(), ws, input)
-	writeResult(w, http.StatusOK, map[string]bool{"saved": err == nil}, err)
+	out, err := h.service.SaveRock(r.Context(), ws, "member", memberID, rockID, input)
+	status := http.StatusCreated
+	if rockID != nil {
+		status = http.StatusOK
+	}
+	writeResult(w, status, out, err)
+}
+
+func (h *Handler) AddRockCheckIn(w http.ResponseWriter, r *http.Request) {
+	ws, memberID, ok := requestScope(w, r)
+	if !ok {
+		return
+	}
+	rockID, ok := uuidParam(w, r, "id")
+	if !ok {
+		return
+	}
+	var input RockCheckInInput
+	if !decodeBody(w, r, &input) {
+		return
+	}
+	out, err := h.service.AddRockCheckIn(r.Context(), ws, rockID, "member", memberID, input)
+	writeResult(w, http.StatusCreated, out, err)
 }
 
 func (h *Handler) DeleteRock(w http.ResponseWriter, r *http.Request) {
@@ -169,7 +231,7 @@ func (h *Handler) DeleteRock(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	projectID, ok := uuidParam(w, r, "projectID")
+	projectID, ok := uuidParam(w, r, "id")
 	if !ok {
 		return
 	}

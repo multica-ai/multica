@@ -138,11 +138,17 @@ func (f *fakeHandlerService) ListStrategyItems(ctx context.Context, ws pgtype.UU
 	}
 	return f.listStrategy(ctx, ws)
 }
+func (f *fakeHandlerService) ListStrategyHistory(context.Context, pgtype.UUID) ([]StrategyHistoryResponse, error) {
+	return []StrategyHistoryResponse{}, nil
+}
 func (f *fakeHandlerService) UpdateStrategyItem(context.Context, pgtype.UUID, pgtype.UUID, StrategyItemInput) (StrategyItemResponse, error) {
 	return StrategyItemResponse{}, nil
 }
 func (f *fakeHandlerService) DeleteStrategyItem(context.Context, pgtype.UUID, pgtype.UUID) (bool, error) {
 	return true, nil
+}
+func (f *fakeHandlerService) ListPeriods(context.Context, pgtype.UUID) ([]OperatingPeriodResponse, error) {
+	return []OperatingPeriodResponse{}, nil
 }
 func (f *fakeHandlerService) UpsertRock(ctx context.Context, ws pgtype.UUID, input RockInput) error {
 	if f.upsertRock == nil {
@@ -152,6 +158,12 @@ func (f *fakeHandlerService) UpsertRock(ctx context.Context, ws pgtype.UUID, inp
 }
 func (f *fakeHandlerService) ListRocks(context.Context, pgtype.UUID) ([]RockResponse, error) {
 	return []RockResponse{}, nil
+}
+func (f *fakeHandlerService) SaveRock(context.Context, pgtype.UUID, string, pgtype.UUID, *pgtype.UUID, RockInput) (RockResponse, error) {
+	return RockResponse{}, nil
+}
+func (f *fakeHandlerService) AddRockCheckIn(context.Context, pgtype.UUID, pgtype.UUID, string, pgtype.UUID, RockCheckInInput) (RockCheckIn, error) {
+	return RockCheckIn{}, nil
 }
 func (f *fakeHandlerService) DeleteRock(context.Context, pgtype.UUID, pgtype.UUID) (bool, error) {
 	return true, nil

@@ -22,6 +22,8 @@ vi.mock("../navigation", () => ({
 describe("OperatingSystemNavItems", () => {
   it("links Rocks and Strategy when enabled", () => {
     render(<OperatingSystemNavItems workspaceSlug="acme" />);
+    expect(screen.getByText("Operating System")).toBeInTheDocument();
+    expect(screen.getByText("NEW")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Rocks" })).toHaveAttribute("href", "/acme/rocks");
     expect(screen.getByRole("link", { name: "Strategy" })).toHaveAttribute("href", "/acme/strategy");
   });

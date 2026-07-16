@@ -50,7 +50,7 @@ import { useMembersTabCerebroExtras } from "@multica/cerebro-members/views";
 import { useNavigation } from "@multica/views/navigation";
 import { useCurrentWorkspace } from "@multica/core/paths";
 import { TasksPage } from "@multica/cerebro-tasks";
-import { RocksPage, StrategyPage } from "@multica/cerebro-operating-system/views";
+import { RocksPage, StrategyPage, useCerebroOperatingSystemSettingsTabs } from "@multica/cerebro-operating-system/views";
 import { ApprovalsPage } from "@multica/cerebro-approvals";
 import { AppBuilderPage, AppDetailPage, AppEditorPage, AppsPage } from "@multica/cerebro-apps";
 import { api } from "@multica/core/api";
@@ -122,6 +122,7 @@ function SettingsRoute() {
   // cerebro_collections flag is on.
   const collectionsTabs = useCerebroCollectionsSettingsTabs();
   const modeTabs = useCerebroModeSettingsTabs();
+  const operatingSystemTabs = useCerebroOperatingSystemSettingsTabs();
 
   return (
     <SettingsPage
@@ -150,6 +151,7 @@ function SettingsRoute() {
         ...toolPolicyTabs,
         ...collectionsTabs,
         ...modeTabs,
+        ...operatingSystemTabs,
       ]}
       membersTabCerebroExtras={membersTabCerebroExtras}
     />

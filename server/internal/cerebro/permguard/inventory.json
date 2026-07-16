@@ -257,7 +257,7 @@
       "gate": "self_only"
     },
     {
-      "id": "DELETE /api/cerebro/rocks/{projectID}",
+      "id": "DELETE /api/cerebro/rocks/{id}",
       "gate": "workspace_member"
     },
     {
@@ -846,6 +846,10 @@
     },
     {
       "id": "POST /api/cerebro/rocks/",
+      "gate": "workspace_member"
+    },
+    {
+      "id": "POST /api/cerebro/rocks/{id}/check-ins",
       "gate": "workspace_member"
     },
     {
@@ -1753,7 +1757,7 @@
       "gate": "via:PUT /api/cerebro/sprint-recurring-tasks/{id}/"
     },
     {
-      "id": "PUT /api/cerebro/rocks/{projectID}",
+      "id": "PUT /api/cerebro/rocks/{id}",
       "gate": "workspace_member"
     },
     {

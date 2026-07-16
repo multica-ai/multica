@@ -1302,6 +1302,16 @@ type CerebroObjectConnection struct {
 	CreatedAt        pgtype.Timestamptz `json:"created_at"`
 }
 
+type CerebroOperatingPeriod struct {
+	ID          pgtype.UUID        `json:"id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	Name        string             `json:"name"`
+	StartsOn    pgtype.Date        `json:"starts_on"`
+	EndsOn      pgtype.Date        `json:"ends_on"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
 type CerebroOperatingSystemSetting struct {
 	WorkspaceID pgtype.UUID        `json:"workspace_id"`
 	Terminology []byte             `json:"terminology"`
@@ -1367,6 +1377,24 @@ type CerebroRock struct {
 	ReportedHealth string             `json:"reported_health"`
 	CreatedAt      pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+	ID             pgtype.UUID        `json:"id"`
+	Title          string             `json:"title"`
+	Description    string             `json:"description"`
+	OwnerType      pgtype.Text        `json:"owner_type"`
+	OwnerID        pgtype.UUID        `json:"owner_id"`
+	PeriodID       pgtype.UUID        `json:"period_id"`
+}
+
+type CerebroRockCheckIn struct {
+	ID             pgtype.UUID        `json:"id"`
+	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
+	RockID         pgtype.UUID        `json:"rock_id"`
+	Confidence     int32              `json:"confidence"`
+	ReportedHealth string             `json:"reported_health"`
+	Note           string             `json:"note"`
+	CreatedByType  string             `json:"created_by_type"`
+	CreatedByID    pgtype.UUID        `json:"created_by_id"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
 }
 
 type CerebroRole struct {
@@ -1629,6 +1657,17 @@ type CerebroStrategyItem struct {
 	State        string             `json:"state"`
 	CreatedAt    pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
+	HorizonLabel pgtype.Text        `json:"horizon_label"`
+}
+
+type CerebroStrategyItemHistory struct {
+	ID             pgtype.UUID        `json:"id"`
+	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
+	StrategyItemID pgtype.UUID        `json:"strategy_item_id"`
+	Action         string             `json:"action"`
+	Title          string             `json:"title"`
+	Snapshot       []byte             `json:"snapshot"`
+	ChangedAt      pgtype.Timestamptz `json:"changed_at"`
 }
 
 type CerebroTaskContextFootprint struct {

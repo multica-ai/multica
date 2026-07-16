@@ -30,9 +30,9 @@ test("opens a permission detail from Settings > Permissions", async ({ page }) =
     await permissionLink.click();
 
     await expect(page).toHaveURL(/\/cerebro\/permissions\/.+/);
-    await expect(page.getByRole("tab", { name: "Who & why" })).toBeVisible();
-    await expect(page.getByRole("tab", { name: "Changes" })).toBeVisible();
-    await expect(page.getByRole("tab", { name: "Usage" })).toBeVisible();
+    await expect(page.getByRole("tab", { name: "Permission audit" })).toBeVisible();
+    await expect(page.getByRole("tab", { name: /^Changes/ })).toBeVisible();
+    await expect(page.getByRole("tab", { name: /^Usage/ })).toBeVisible();
   } finally {
     await db.query(
       `DELETE FROM cerebro_capability

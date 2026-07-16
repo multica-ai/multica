@@ -58,6 +58,42 @@ func TestDownMigrationDropsTablesInReverseOrder(t *testing.T) {
 	}
 }
 
+func TestAlignmentMigrationDefinesFirstClassRocks(t *testing.T) {
+	up := readMigration(t, "9143_cerebro_operating_system_alignment.up.sql")
+
+	for _, fragment := range []string{
+		"CREATE TABLE IF NOT EXISTS cerebro_operating_period",
+		"ADD COLUMN IF NOT EXISTS id UUID",
+		"ADD COLUMN IF NOT EXISTS title TEXT",
+		"ADD COLUMN IF NOT EXISTS owner_type TEXT",
+		"ADD COLUMN IF NOT EXISTS period_id UUID",
+		"CREATE TABLE IF NOT EXISTS cerebro_rock_check_in",
+		"CREATE TABLE IF NOT EXISTS cerebro_strategy_item_history",
+		"ADD COLUMN IF NOT EXISTS horizon_label TEXT",
+		"'10-Year Target'",
+		"INSERT INTO cerebro_object_connection",
+		"SET target_id = r.id",
+		"'system'",
+	} {
+		if !strings.Contains(up, fragment) {
+			t.Errorf("alignment migration missing %q", fragment)
+		}
+	}
+}
+
+func TestAlignmentMigrationDropsLegacyPrimaryKeyBeforeMakingProjectOptional(t *testing.T) {
+	up := readMigration(t, "9143_cerebro_operating_system_alignment.up.sql")
+
+	dropPrimaryKey := strings.Index(up, "DROP CONSTRAINT cerebro_rock_pkey")
+	dropProjectNotNull := strings.Index(up, "ALTER COLUMN project_id DROP NOT NULL")
+	if dropPrimaryKey == -1 || dropProjectNotNull == -1 {
+		t.Fatal("alignment migration must replace the legacy project primary key")
+	}
+	if dropPrimaryKey > dropProjectNotNull {
+		t.Fatal("alignment migration must drop the project primary key before making project_id nullable")
+	}
+}
+
 func readMigration(t *testing.T, name string) string {
 	t.Helper()
 	_, file, _, ok := runtime.Caller(0)
