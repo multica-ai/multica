@@ -1,7 +1,7 @@
 "use client";
 
 import { memo, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
-import { CheckCircle2, ChevronRight, ListChevronsDownUp, Copy, Loader2, MoreHorizontal, Pencil, RotateCcw, Trash2 } from "lucide-react";
+import { CheckCircle2, ChevronRight, ListChevronsDownUp, Copy, Loader2, MoreHorizontal, Pencil, RotateCcw, ScrollText, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Card } from "@multica/ui/components/ui/card";
 import { Button } from "@multica/ui/components/ui/button";
@@ -25,6 +25,9 @@ import {
 } from "@multica/ui/components/ui/alert-dialog";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { ReactionBar } from "@multica/ui/components/common/reaction-bar";
+import { AgentTranscriptDialog } from "../../common/task-transcript/agent-transcript-dialog";
+import { buildTimeline, type TimelineItem } from "../../common/task-transcript/build-timeline";
+import { useAgentTaskForComment } from "../hooks/use-agent-task-for-comment";
 import { cn } from "@multica/ui/lib/utils";
 import { copyText } from "@multica/ui/lib/clipboard";
 import { useActorName } from "@multica/core/workspace/hooks";
@@ -516,8 +519,24 @@ function CommentRow({
   const canEditEntry = isOwn || (canModerate && entry.actor_type === "member");
   const canDeleteEntry = isOwn || canModerate;
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const viewRunAgentTask = useAgentTaskForComment(issueId, entry.source_task_id ?? null);
+  const [runTranscriptOpen, setRunTranscriptOpen] = useState(false);
+  const [runTranscriptItems, setRunTranscriptItems] = useState<TimelineItem[] | null>(null);
 
   const reactions = entry.reactions ?? [];
+
+  const handleViewRunClick = useCallback(() => {
+    if (!viewRunAgentTask) return;
+    api
+      .listTaskMessages(viewRunAgentTask.id)
+      .then((msgs) => {
+        setRunTranscriptItems(buildTimeline(msgs as any[]));
+        setRunTranscriptOpen(true);
+      })
+      .catch((err) => {
+        toast.error(err instanceof Error ? err.message : t(($) => $.execution_log.retry_failed));
+      });
+  }, [viewRunAgentTask, t]);
 
   return (
     <div className="py-1.5">
@@ -571,6 +590,15 @@ function CommentRow({
                 <Copy className="h-3.5 w-3.5" />
                 {t(($) => $.comment.copy_action)}
               </DropdownMenuItem>
+              {viewRunAgentTask && (
+                <DropdownMenuItem
+                  onClick={handleViewRunClick}
+                  data-testid="comment-view-run-menu-item"
+                >
+                  <ScrollText className="h-3.5 w-3.5" />
+                  {t(($) => $.execution_log.view_run)}
+                </DropdownMenuItem>
+              )}
               {onResolveToggle && (
                 <>
                   <DropdownMenuSeparator />
@@ -607,6 +635,15 @@ function CommentRow({
               )}
             </DropdownMenuContent>
           </DropdownMenu>
+          {viewRunAgentTask && (
+            <AgentTranscriptDialog
+              open={runTranscriptOpen}
+              onOpenChange={setRunTranscriptOpen}
+              task={viewRunAgentTask}
+              items={runTranscriptItems ?? []}
+              agentName={getActorName(entry.actor_type, entry.actor_id)}
+            />
+          )}
           <DeleteCommentDialog
             open={confirmDelete}
             onOpenChange={setConfirmDelete}
@@ -739,12 +776,28 @@ function CommentCardImpl({
   const canEditEntry = isOwn || (canModerate && entry.actor_type === "member");
   const canDeleteEntry = isOwn || canModerate;
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const viewRunAgentTask = useAgentTaskForComment(issueId, entry.source_task_id ?? null);
+  const [runTranscriptOpen, setRunTranscriptOpen] = useState(false);
+  const [runTranscriptItems, setRunTranscriptItems] = useState<TimelineItem[] | null>(null);
 
   const allNestedReplies = replies;
 
   const replyCount = allNestedReplies.length;
   const contentPreview = (entry.content ?? "").replace(/\n/g, " ").slice(0, 80);
   const reactions = entry.reactions ?? [];
+
+  const handleViewRunClick = useCallback(() => {
+    if (!viewRunAgentTask) return;
+    api
+      .listTaskMessages(viewRunAgentTask.id)
+      .then((msgs) => {
+        setRunTranscriptItems(buildTimeline(msgs as any[]));
+        setRunTranscriptOpen(true);
+      })
+      .catch((err) => {
+        toast.error(err instanceof Error ? err.message : t(($) => $.execution_log.retry_failed));
+      });
+  }, [viewRunAgentTask, t]);
 
   const isHighlighted = highlightedCommentId === entry.id;
 
@@ -862,6 +915,15 @@ function CommentCardImpl({
                         <Copy className="h-3.5 w-3.5" />
                         {t(($) => $.comment.copy_action)}
                       </DropdownMenuItem>
+                      {viewRunAgentTask && (
+                        <DropdownMenuItem
+                          onClick={handleViewRunClick}
+                          data-testid="comment-view-run-menu-item"
+                        >
+                          <ScrollText className="h-3.5 w-3.5" />
+                          {t(($) => $.execution_log.view_run)}
+                        </DropdownMenuItem>
+                      )}
                       {onResolveToggle && (
                         <>
                           <DropdownMenuSeparator />
@@ -900,6 +962,15 @@ function CommentCardImpl({
                       )}
                     </DropdownMenuContent>
                   </DropdownMenu>
+                  {viewRunAgentTask && (
+                    <AgentTranscriptDialog
+                      open={runTranscriptOpen}
+                      onOpenChange={setRunTranscriptOpen}
+                      task={viewRunAgentTask}
+                      items={runTranscriptItems ?? []}
+                      agentName={getActorName(entry.actor_type, entry.actor_id)}
+                    />
+                  )}
                   <DeleteCommentDialog
                     open={confirmDelete}
                     onOpenChange={setConfirmDelete}

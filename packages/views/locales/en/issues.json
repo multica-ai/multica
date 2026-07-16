@@ -387,6 +387,8 @@
     "retry_failed": "Failed to retry task",
     "retry_blocked": "Not retried — you don't have permission to use this agent",
     "transcript_tooltip": "View transcript",
+    "view_run": "View run",
+    "view_run_cleaned_up": "This comment's source run has been cleaned up.",
     "cancel_failed": "Failed to cancel task",
     "trigger_retry": "Retry",
     "trigger_retry_attempt": "Retry #{{attempt}}",

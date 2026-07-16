@@ -370,6 +370,8 @@
     "retry_failed": "작업을 다시 시도하지 못했습니다",
     "retry_blocked": "다시 시도되지 않음 — 이 에이전트를 사용할 권한이 없습니다",
     "transcript_tooltip": "트랜스크립트 보기",
+    "view_run": "런 보기",
+    "view_run_cleaned_up": "이 댓글의 소스 런이 정리되었습니다.",
     "cancel_failed": "작업을 취소하지 못했습니다",
     "trigger_retry": "다시 시도",
     "trigger_retry_attempt": "{{attempt}}번째 다시 시도",
