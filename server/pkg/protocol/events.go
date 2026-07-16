@@ -101,6 +101,11 @@ const (
 	EventPropertyUpdated        = "property:updated"
 	EventIssuePropertiesChanged = "issue_properties:changed"
 
+	// Custom issue status catalog events (MUL-4809). Statuses are archived,
+	// never hard-deleted, so archive arrives as issue_status:updated.
+	EventIssueStatusCreated = "issue_status:created"
+	EventIssueStatusUpdated = "issue_status:updated"
+
 	// Pin events
 	EventPinCreated   = "pin:created"
 	EventPinDeleted   = "pin:deleted"

@@ -11,6 +11,90 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const archiveIssueStatus = `-- name: ArchiveIssueStatus :one
+UPDATE issue_status SET archived_at = now(), updated_at = now()
+WHERE id = $1 AND workspace_id = $2
+RETURNING id, workspace_id, name, description, icon, color, category, system_key, is_default, position, archived_at, created_at, updated_at
+`
+
+type ArchiveIssueStatusParams struct {
+	ID          pgtype.UUID `json:"id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+func (q *Queries) ArchiveIssueStatus(ctx context.Context, arg ArchiveIssueStatusParams) (IssueStatus, error) {
+	row := q.db.QueryRow(ctx, archiveIssueStatus, arg.ID, arg.WorkspaceID)
+	var i IssueStatus
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.Name,
+		&i.Description,
+		&i.Icon,
+		&i.Color,
+		&i.Category,
+		&i.SystemKey,
+		&i.IsDefault,
+		&i.Position,
+		&i.ArchivedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const clearCategoryDefault = `-- name: ClearCategoryDefault :exec
+UPDATE issue_status SET is_default = FALSE, updated_at = now()
+WHERE workspace_id = $1::uuid
+  AND category = $2::text
+  AND is_default = TRUE
+  AND archived_at IS NULL
+`
+
+type ClearCategoryDefaultParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	Category    string      `json:"category"`
+}
+
+// Drop is_default from every active status in a Category, so a new default can
+// be set without tripping the (workspace_id, category) partial unique index.
+// Run inside the same tx as the promote below (or a create-with-default).
+func (q *Queries) ClearCategoryDefault(ctx context.Context, arg ClearCategoryDefaultParams) error {
+	_, err := q.db.Exec(ctx, clearCategoryDefault, arg.WorkspaceID, arg.Category)
+	return err
+}
+
+const countActiveCustomIssueStatuses = `-- name: CountActiveCustomIssueStatuses :one
+SELECT COUNT(*) FROM issue_status
+WHERE workspace_id = $1 AND system_key IS NULL AND archived_at IS NULL
+`
+
+// Active custom (non-system) statuses, for the per-workspace cap. System
+// statuses never count against it — the 7 built-ins are always present.
+func (q *Queries) CountActiveCustomIssueStatuses(ctx context.Context, workspaceID pgtype.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countActiveCustomIssueStatuses, workspaceID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const countIssuesUsingStatus = `-- name: CountIssuesUsingStatus :one
+SELECT COUNT(*) FROM issue WHERE workspace_id = $1 AND status_id = $2
+`
+
+type CountIssuesUsingStatusParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	StatusID    pgtype.UUID `json:"status_id"`
+}
+
+// Issues currently pointing at a status via the authoritative status_id.
+func (q *Queries) CountIssuesUsingStatus(ctx context.Context, arg CountIssuesUsingStatusParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countIssuesUsingStatus, arg.WorkspaceID, arg.StatusID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const countWorkspaceIssueStatuses = `-- name: CountWorkspaceIssueStatuses :one
 SELECT COUNT(*) FROM issue_status
 WHERE workspace_id = $1::uuid
@@ -23,6 +107,66 @@ func (q *Queries) CountWorkspaceIssueStatuses(ctx context.Context, workspaceID p
 	var count int64
 	err := row.Scan(&count)
 	return count, err
+}
+
+const createCustomIssueStatus = `-- name: CreateCustomIssueStatus :one
+INSERT INTO issue_status (
+    workspace_id, name, description, icon, color, category, system_key, is_default, position
+)
+SELECT $1::uuid,
+       $2::text,
+       $3::text,
+       $4::text,
+       $5::text,
+       $6::text,
+       NULL,
+       $7::bool,
+       COALESCE((SELECT MAX(position) FROM issue_status
+                 WHERE workspace_id = $1::uuid
+                   AND category = $6::text), 0) + 1
+RETURNING id, workspace_id, name, description, icon, color, category, system_key, is_default, position, archived_at, created_at, updated_at
+`
+
+type CreateCustomIssueStatusParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	Name        string      `json:"name"`
+	Description string      `json:"description"`
+	Icon        string      `json:"icon"`
+	Color       string      `json:"color"`
+	Category    string      `json:"category"`
+	IsDefault   bool        `json:"is_default"`
+}
+
+// Custom statuses always have system_key = NULL and append to the end of their
+// Category: position = max(position within category) + 1, so they sort after
+// the built-ins of the same Category.
+func (q *Queries) CreateCustomIssueStatus(ctx context.Context, arg CreateCustomIssueStatusParams) (IssueStatus, error) {
+	row := q.db.QueryRow(ctx, createCustomIssueStatus,
+		arg.WorkspaceID,
+		arg.Name,
+		arg.Description,
+		arg.Icon,
+		arg.Color,
+		arg.Category,
+		arg.IsDefault,
+	)
+	var i IssueStatus
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.Name,
+		&i.Description,
+		&i.Icon,
+		&i.Color,
+		&i.Category,
+		&i.SystemKey,
+		&i.IsDefault,
+		&i.Position,
+		&i.ArchivedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
 }
 
 const ensureWorkspaceSystemIssueStatuses = `-- name: EnsureWorkspaceSystemIssueStatuses :exec
@@ -68,6 +212,43 @@ ON CONFLICT (workspace_id, system_key) WHERE system_key IS NOT NULL DO NOTHING
 func (q *Queries) EnsureWorkspaceSystemIssueStatuses(ctx context.Context, workspaceID pgtype.UUID) error {
 	_, err := q.db.Exec(ctx, ensureWorkspaceSystemIssueStatuses, workspaceID)
 	return err
+}
+
+const getWorkspaceIssueStatus = `-- name: GetWorkspaceIssueStatus :one
+
+SELECT id, workspace_id, name, description, icon, color, category, system_key, is_default, position, archived_at, created_at, updated_at FROM issue_status WHERE id = $1 AND workspace_id = $2
+`
+
+type GetWorkspaceIssueStatusParams struct {
+	ID          pgtype.UUID `json:"id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+// ---------------------------------------------------------------------------
+// Status-management API (MUL-4809, plan §5). Admin CRUD over the catalog.
+// All writes are tenant-scoped by workspace_id (no FK; the WHERE clause is the
+// application-level guard) and run under a workspace advisory lock so the cap,
+// name-uniqueness, and single-default swaps stay atomic.
+// ---------------------------------------------------------------------------
+func (q *Queries) GetWorkspaceIssueStatus(ctx context.Context, arg GetWorkspaceIssueStatusParams) (IssueStatus, error) {
+	row := q.db.QueryRow(ctx, getWorkspaceIssueStatus, arg.ID, arg.WorkspaceID)
+	var i IssueStatus
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.Name,
+		&i.Description,
+		&i.Icon,
+		&i.Color,
+		&i.Category,
+		&i.SystemKey,
+		&i.IsDefault,
+		&i.Position,
+		&i.ArchivedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
 }
 
 const listWorkspaceIssueStatuses = `-- name: ListWorkspaceIssueStatuses :many
@@ -125,4 +306,112 @@ func (q *Queries) ListWorkspaceIssueStatuses(ctx context.Context, arg ListWorksp
 		return nil, err
 	}
 	return items, nil
+}
+
+const reassignIssuesStatus = `-- name: ReassignIssuesStatus :exec
+UPDATE issue SET status_id = $1::uuid, updated_at = now()
+WHERE workspace_id = $2::uuid
+  AND status_id = $3::uuid
+`
+
+type ReassignIssuesStatusParams struct {
+	ToStatusID   pgtype.UUID `json:"to_status_id"`
+	WorkspaceID  pgtype.UUID `json:"workspace_id"`
+	FromStatusID pgtype.UUID `json:"from_status_id"`
+}
+
+// Move every issue off one status onto another during archive migration. The
+// handler guarantees both are the same Category, so the legacy `status`
+// projection (Category for custom statuses) is unchanged and is left as-is.
+func (q *Queries) ReassignIssuesStatus(ctx context.Context, arg ReassignIssuesStatusParams) error {
+	_, err := q.db.Exec(ctx, reassignIssuesStatus, arg.ToStatusID, arg.WorkspaceID, arg.FromStatusID)
+	return err
+}
+
+const setIssueStatusDefault = `-- name: SetIssueStatusDefault :one
+UPDATE issue_status SET is_default = $3::bool, updated_at = now()
+WHERE id = $1 AND workspace_id = $2
+RETURNING id, workspace_id, name, description, icon, color, category, system_key, is_default, position, archived_at, created_at, updated_at
+`
+
+type SetIssueStatusDefaultParams struct {
+	ID          pgtype.UUID `json:"id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	IsDefault   bool        `json:"is_default"`
+}
+
+func (q *Queries) SetIssueStatusDefault(ctx context.Context, arg SetIssueStatusDefaultParams) (IssueStatus, error) {
+	row := q.db.QueryRow(ctx, setIssueStatusDefault, arg.ID, arg.WorkspaceID, arg.IsDefault)
+	var i IssueStatus
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.Name,
+		&i.Description,
+		&i.Icon,
+		&i.Color,
+		&i.Category,
+		&i.SystemKey,
+		&i.IsDefault,
+		&i.Position,
+		&i.ArchivedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const updateIssueStatusFields = `-- name: UpdateIssueStatusFields :one
+UPDATE issue_status SET
+    name = COALESCE($3, name),
+    description = COALESCE($4, description),
+    icon = COALESCE($5, icon),
+    color = COALESCE($6, color),
+    position = COALESCE($7, position),
+    updated_at = now()
+WHERE id = $1 AND workspace_id = $2
+RETURNING id, workspace_id, name, description, icon, color, category, system_key, is_default, position, archived_at, created_at, updated_at
+`
+
+type UpdateIssueStatusFieldsParams struct {
+	ID          pgtype.UUID   `json:"id"`
+	WorkspaceID pgtype.UUID   `json:"workspace_id"`
+	Name        pgtype.Text   `json:"name"`
+	Description pgtype.Text   `json:"description"`
+	Icon        pgtype.Text   `json:"icon"`
+	Color       pgtype.Text   `json:"color"`
+	Position    pgtype.Float8 `json:"position"`
+}
+
+// Mutable human-facing fields only. category / system_key / workspace_id are
+// immutable and never appear here (the handler rejects them with 400). is_default
+// is handled by the default-swap flow below, not this COALESCE update, so the
+// one-default-per-Category invariant can be maintained across rows in one tx.
+func (q *Queries) UpdateIssueStatusFields(ctx context.Context, arg UpdateIssueStatusFieldsParams) (IssueStatus, error) {
+	row := q.db.QueryRow(ctx, updateIssueStatusFields,
+		arg.ID,
+		arg.WorkspaceID,
+		arg.Name,
+		arg.Description,
+		arg.Icon,
+		arg.Color,
+		arg.Position,
+	)
+	var i IssueStatus
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.Name,
+		&i.Description,
+		&i.Icon,
+		&i.Color,
+		&i.Category,
+		&i.SystemKey,
+		&i.IsDefault,
+		&i.Position,
+		&i.ArchivedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
 }

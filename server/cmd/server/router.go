@@ -1087,6 +1087,18 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				})
 			})
 
+			// Custom issue status catalog (MUL-4809). GET is readable by any
+			// member/agent (the alias table drives `issue status`); writes are
+			// human owner/admin only.
+			r.Route("/api/issue-statuses", func(r chi.Router) {
+				r.Get("/", h.ListIssueStatuses)
+				r.Post("/", h.CreateIssueStatus)
+				r.Route("/{id}", func(r chi.Router) {
+					r.Patch("/", h.UpdateIssueStatus)
+					r.Delete("/", h.DeleteIssueStatus)
+				})
+			})
+
 			// Labels
 			r.Route("/api/labels", func(r chi.Router) {
 				r.Get("/", h.ListLabels)
