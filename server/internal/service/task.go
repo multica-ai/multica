@@ -1454,6 +1454,7 @@ func (s *TaskService) EnqueueChatTask(ctx context.Context, chatSession db.ChatSe
 // legacy claim-time trailing-message scan, this ownership survives a predecessor
 // writing its assistant reply before the queued successor is claimed.
 func (s *TaskService) EnqueueChannelChatTask(ctx context.Context, chatSession db.ChatSession, initiatorUserID pgtype.UUID, forceFreshSession bool, messageIDs []pgtype.UUID) (db.AgentTaskQueue, error) {
+	messageIDs = uniqueUUIDs(messageIDs)
 	if len(messageIDs) == 0 {
 		return db.AgentTaskQueue{}, errors.New("channel chat task: empty input batch")
 	}
@@ -1523,6 +1524,19 @@ func (s *TaskService) EnqueueChannelChatTask(ctx context.Context, chatSession db
 	s.broadcastTaskEvent(ctx, protocol.EventTaskQueued, task)
 	s.NotifyTaskEnqueued(ctx, task)
 	return task, nil
+}
+
+func uniqueUUIDs(ids []pgtype.UUID) []pgtype.UUID {
+	unique := make([]pgtype.UUID, 0, len(ids))
+	seen := make(map[pgtype.UUID]struct{}, len(ids))
+	for _, id := range ids {
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		unique = append(unique, id)
+	}
+	return unique
 }
 
 // DirectChatSendResult carries the rows a transactional direct-chat send

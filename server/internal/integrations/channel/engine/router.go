@@ -43,10 +43,9 @@ type Router struct {
 
 	logger *slog.Logger
 
-	pendingFreshMu sync.Mutex
-	pendingFresh   map[string]bool
 	pendingInputMu sync.Mutex
 	pendingInput   map[string][]pgtype.UUID
+	pendingFresh   map[string]bool
 }
 
 // Config tunes the Router. Zero values default.
@@ -324,15 +323,17 @@ func (r *Router) scheduleRun(set ResolverSet, inst ResolvedInstallation, msg cha
 	key := keyForSession(sessionID)
 	fresh := msg.ForceFresh
 	r.appendPendingInput(key, messageID)
-	if r.batcher == nil {
-		r.flushChatRun(set, inst, msg, sessionID, initiatorUserID, fresh, r.takePendingInput(key))
-		return
-	}
 	if fresh {
 		r.markPendingFresh(key)
 	}
+	if r.batcher == nil {
+		messageIDs, forceFresh := r.takePendingBatch(key, fresh)
+		r.flushChatRun(set, inst, msg, sessionID, initiatorUserID, forceFresh, messageIDs)
+		return
+	}
 	flush := func() {
-		r.flushChatRun(set, inst, msg, sessionID, initiatorUserID, r.takePendingFresh(key, fresh), r.takePendingInput(key))
+		messageIDs, forceFresh := r.takePendingBatch(key, fresh)
+		r.flushChatRun(set, inst, msg, sessionID, initiatorUserID, forceFresh, messageIDs)
 	}
 	r.batcher.Schedule(key, flush)
 }
@@ -350,6 +351,7 @@ func (r *Router) flushChatRun(set ResolverSet, inst ResolvedInstallation, msg ch
 
 	session, err := r.reader.GetChatSession(ctx, sessionID)
 	if err != nil {
+		r.restorePendingBatch(keyForSession(sessionID), messageIDs, forceFresh)
 		r.logger.Error("channel router: flush reload chat session failed",
 			"chat_session_id", uuidString(sessionID), "err", err.Error())
 		r.clearTyping(ctx, set, sessionID)
@@ -367,6 +369,7 @@ func (r *Router) flushChatRun(set ResolverSet, inst ResolvedInstallation, msg ch
 		case errors.Is(err, service.ErrChatTaskAgentArchived):
 			r.emitFlushReply(ctx, set, inst, msg, sessionID, OutcomeAgentArchived)
 		default:
+			r.restorePendingBatch(keyForSession(sessionID), messageIDs, forceFresh)
 			r.logger.Error("channel router: flush enqueue chat task failed",
 				"chat_session_id", uuidString(sessionID), "err", err.Error())
 		}
@@ -379,12 +382,15 @@ func (r *Router) appendPendingInput(key string, id pgtype.UUID) {
 	r.pendingInput[key] = append(r.pendingInput[key], id)
 }
 
-func (r *Router) takePendingInput(key string) []pgtype.UUID {
+func (r *Router) restorePendingBatch(key string, ids []pgtype.UUID, forceFresh bool) {
 	r.pendingInputMu.Lock()
 	defer r.pendingInputMu.Unlock()
-	ids := r.pendingInput[key]
-	delete(r.pendingInput, key)
-	return ids
+	// Preserve arrival order when messages enter a new debounce window while
+	// the previous batch is being flushed.
+	r.pendingInput[key] = append(append([]pgtype.UUID(nil), ids...), r.pendingInput[key]...)
+	if forceFresh {
+		r.pendingFresh[key] = true
+	}
 }
 
 // clearTyping asks the platform to drop the "processing" indicator for a session
@@ -397,17 +403,19 @@ func (r *Router) clearTyping(ctx context.Context, set ResolverSet, sessionID pgt
 }
 
 func (r *Router) markPendingFresh(key string) {
-	r.pendingFreshMu.Lock()
-	defer r.pendingFreshMu.Unlock()
+	r.pendingInputMu.Lock()
+	defer r.pendingInputMu.Unlock()
 	r.pendingFresh[key] = true
 }
 
-func (r *Router) takePendingFresh(key string, fallback bool) bool {
-	r.pendingFreshMu.Lock()
-	defer r.pendingFreshMu.Unlock()
-	fresh := fallback || r.pendingFresh[key]
+func (r *Router) takePendingBatch(key string, fallbackFresh bool) ([]pgtype.UUID, bool) {
+	r.pendingInputMu.Lock()
+	defer r.pendingInputMu.Unlock()
+	ids := r.pendingInput[key]
+	delete(r.pendingInput, key)
+	fresh := fallbackFresh || r.pendingFresh[key]
 	delete(r.pendingFresh, key)
-	return fresh
+	return ids, fresh
 }
 
 // emitFlushReply delivers an offline/archived notice for a flushed run.

@@ -157,20 +157,38 @@ type fakeTasks struct {
 	mu         sync.Mutex
 	called     bool
 	forceFresh bool
+	freshArgs  []bool
 	initiator  pgtype.UUID
+	messageIDs [][]pgtype.UUID
 	err        error
 }
 
-func (f *fakeTasks) EnqueueChannelChatTask(_ context.Context, _ db.ChatSession, initiator pgtype.UUID, forceFresh bool, _ []pgtype.UUID) (db.AgentTaskQueue, error) {
+func (f *fakeTasks) EnqueueChannelChatTask(_ context.Context, _ db.ChatSession, initiator pgtype.UUID, forceFresh bool, messageIDs []pgtype.UUID) (db.AgentTaskQueue, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.called = true
 	f.forceFresh = forceFresh
+	f.freshArgs = append(f.freshArgs, forceFresh)
 	f.initiator = initiator
+	f.messageIDs = append(f.messageIDs, append([]pgtype.UUID(nil), messageIDs...))
 	return db.AgentTaskQueue{}, f.err
 }
 func (f *fakeTasks) wasCalled() bool { f.mu.Lock(); defer f.mu.Unlock(); return f.called }
 func (f *fakeTasks) freshArg() bool  { f.mu.Lock(); defer f.mu.Unlock(); return f.forceFresh }
+func (f *fakeTasks) freshCalls() []bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]bool(nil), f.freshArgs...)
+}
+func (f *fakeTasks) inputCalls() [][]pgtype.UUID {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	calls := make([][]pgtype.UUID, len(f.messageIDs))
+	for i := range f.messageIDs {
+		calls[i] = append([]pgtype.UUID(nil), f.messageIDs[i]...)
+	}
+	return calls
+}
 
 type fakeReader struct {
 	session db.ChatSession
@@ -495,6 +513,40 @@ func TestRouter_FlushSuccess_DoesNotClearTyping(t *testing.T) {
 	// handler on chat-done / task-failed, NOT by the flush.
 	if h.typing.settledCalls() != 0 {
 		t.Fatalf("successful flush must not clear the typing indicator, got %d OnSettled calls", h.typing.settledCalls())
+	}
+}
+
+func TestRouter_FlushFailureRestoresInputForNextFlush(t *testing.T) {
+	h := newHarness(t)
+	h.tasks.err = errors.New("transient enqueue failure")
+	firstID := uuidFromString(t, "66666666-6666-6666-6666-666666666666")
+	h.binder.appendResult.MessageID = firstID
+	first := p2pMessage(t)
+	first.ForceFresh = true
+	if err := h.router.Handle(context.Background(), first); err != nil {
+		t.Fatalf("first handle: %v", err)
+	}
+
+	h.tasks.err = nil
+	secondID := uuidFromString(t, "77777777-7777-7777-7777-777777777777")
+	second := p2pMessage(t)
+	second.EventID = "evt-2"
+	second.MessageID = "om-2"
+	h.binder.appendResult.MessageID = secondID
+	if err := h.router.Handle(context.Background(), second); err != nil {
+		t.Fatalf("second handle: %v", err)
+	}
+
+	calls := h.tasks.inputCalls()
+	if len(calls) != 2 {
+		t.Fatalf("enqueue calls = %d, want 2", len(calls))
+	}
+	if len(calls[1]) != 2 || calls[1][0] != firstID || calls[1][1] != secondID {
+		t.Fatalf("retry input = %v, want failed batch followed by new input", calls[1])
+	}
+	freshCalls := h.tasks.freshCalls()
+	if len(freshCalls) != 2 || !freshCalls[0] || !freshCalls[1] {
+		t.Fatalf("forceFresh calls = %v, want failed and retried batches to stay fresh", freshCalls)
 	}
 }
 

@@ -193,6 +193,40 @@ func TestChannelChat_QueuedSuccessorKeepsMessageAcrossPredecessorReply(t *testin
 	assertTaskInputOwner(t, ctx, uuidToString(second.ID), uuidToString(second.ID))
 }
 
+func TestChannelChat_DuplicateMessageIDsAreClaimedOnce(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	_, sessionID, _, _ := setupDirectChatSession(t, ctx, "channel duplicate input")
+	session, err := testHandler.Queries.GetChatSession(ctx, parseUUID(sessionID))
+	if err != nil {
+		t.Fatalf("load chat session: %v", err)
+	}
+	message, err := testHandler.Queries.CreateChatMessage(ctx, db.CreateChatMessageParams{
+		ChatSessionID: session.ID,
+		Role:          "user",
+		Content:       "only once",
+	})
+	if err != nil {
+		t.Fatalf("append channel user message: %v", err)
+	}
+
+	task, err := testHandler.TaskService.EnqueueChannelChatTask(
+		ctx, session, parseUUID(testUserID), false, []pgtype.UUID{message.ID, message.ID},
+	)
+	if err != nil {
+		t.Fatalf("enqueue duplicate channel input: %v", err)
+	}
+	owned, err := testHandler.Queries.ListChatInputMessages(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("list owned channel input: %v", err)
+	}
+	if len(owned) != 1 || owned[0].ID != message.ID {
+		t.Fatalf("owned input = %+v, want the message exactly once", owned)
+	}
+}
+
 // TestCompleteTask_ChatEmptyOutputWritesNoResponse: an empty final output is a
 // visible, terminal no_response outcome — exactly one assistant row with
 // message_kind='no_response' and a non-empty fallback body, task completed, and
