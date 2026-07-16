@@ -11,6 +11,7 @@ import {
   addIssueToBuckets,
   findIssueLocation,
   patchIssueInBuckets,
+  upsertChildIssueByNumber,
 } from "./cache-helpers";
 import { cleanupDeletedIssueCaches } from "./delete-cache";
 import type { Issue, IssueLabelsResponse, IssueMetadata, IssuePropertyValues, Label } from "../types";
@@ -36,8 +37,13 @@ export function onIssueCreated(
   // page (if any) will refetch and pick it up if it qualifies.
   qc.invalidateQueries({ queryKey: issueKeys.projectGanttAll(wsId) });
   if (issue.parent_issue_id) {
+    qc.setQueryData<Issue[]>(
+      issueKeys.children(wsId, issue.parent_issue_id),
+      (old) => (old ? upsertChildIssueByNumber(old, issue) : old),
+    );
     qc.invalidateQueries({ queryKey: issueKeys.children(wsId, issue.parent_issue_id) });
     qc.invalidateQueries({ queryKey: issueKeys.childProgress(wsId) });
+    qc.invalidateQueries({ queryKey: issueKeys.childrenByParentsAll(wsId) });
   }
 }
 

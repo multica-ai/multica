@@ -264,6 +264,67 @@ describe("project progress invalidation", () => {
   });
 });
 
+describe("onIssueCreated — parent children cache", () => {
+  let qc: QueryClient;
+
+  beforeEach(() => {
+    qc = new QueryClient();
+  });
+
+  it("shows a newly-created child in the parent's cached sub-issue list immediately", () => {
+    const child: Issue = {
+      ...parentedIssue,
+      id: "child-1",
+      identifier: "MUL-3",
+      number: 3,
+    };
+    qc.setQueryData<Issue[]>(issueKeys.children(WS_ID, PARENT_ISSUE_ID), []);
+    qc.setQueryData(issueKeys.childProgress(WS_ID), new Map());
+    qc.setQueryData(
+      issueKeys.childrenByParents(WS_ID, [PARENT_ISSUE_ID]),
+      new Map([[PARENT_ISSUE_ID, []]]),
+    );
+
+    onIssueCreated(qc, WS_ID, child);
+
+    const parentChildren = qc.getQueryData<Issue[]>(
+      issueKeys.children(WS_ID, PARENT_ISSUE_ID),
+    );
+    expect(parentChildren?.map((i) => i.id)).toEqual(["child-1"]);
+    expectInvalidated(qc, issueKeys.children(WS_ID, PARENT_ISSUE_ID));
+    expectInvalidated(qc, issueKeys.childProgress(WS_ID));
+    expectInvalidated(qc, issueKeys.childrenByParents(WS_ID, [PARENT_ISSUE_ID]));
+  });
+
+  it("keeps the parent's cached sub-issue list ordered by issue number and deduped", () => {
+    const serverChild: Issue = {
+      ...parentedIssue,
+      id: "child-1",
+      identifier: "MUL-2",
+      number: 2,
+      title: "Server title",
+    };
+    qc.setQueryData<Issue[]>(issueKeys.children(WS_ID, PARENT_ISSUE_ID), [
+      { ...serverChild, title: "Optimistic title" },
+      {
+        ...otherIssue,
+        id: "child-3",
+        identifier: "MUL-3",
+        number: 3,
+        parent_issue_id: PARENT_ISSUE_ID,
+      },
+    ]);
+
+    onIssueCreated(qc, WS_ID, serverChild);
+
+    const parentChildren = qc.getQueryData<Issue[]>(
+      issueKeys.children(WS_ID, PARENT_ISSUE_ID),
+    );
+    expect(parentChildren?.map((i) => i.id)).toEqual(["child-1", "child-3"]);
+    expect(parentChildren?.[0]?.title).toBe("Server title");
+  });
+});
+
 describe("onIssueUpdated — position move is surgical, not a list refetch", () => {
   let qc: QueryClient;
 

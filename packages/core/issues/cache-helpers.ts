@@ -116,6 +116,27 @@ export function insertByPosition(issues: Issue[], issue: Issue): Issue[] {
 }
 
 /**
+ * Upsert a child issue into a parent's children list using the backend's
+ * `ListChildIssues` order (`number ASC`). The create event may race with a
+ * local optimistic insert, so an existing child is merged instead of duplicated.
+ */
+export function upsertChildIssueByNumber(
+  issues: Issue[],
+  issue: Issue,
+): Issue[] {
+  const withoutIssue = issues.filter((i) => i.id !== issue.id);
+  const existing = issues.find((i) => i.id === issue.id);
+  const nextIssue = existing ? { ...existing, ...issue } : issue;
+  const idx = withoutIssue.findIndex((i) => i.number > nextIssue.number);
+  if (idx === -1) return [...withoutIssue, nextIssue];
+  return [
+    ...withoutIssue.slice(0, idx),
+    nextIssue,
+    ...withoutIssue.slice(idx),
+  ];
+}
+
+/**
  * Merge `patch` into the issue with `id`. If `patch.status` differs from the
  * current bucket, the issue moves to the new bucket and both buckets' totals
  * are adjusted. The moved card — and a same-column card whose `position`
