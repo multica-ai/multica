@@ -19,6 +19,7 @@ import { useQuery } from "@tanstack/react-query";
 import { deduplicateInboxItems, inboxListOptions } from "@multica/core/inbox/queries";
 import type { InboxItem } from "@multica/core/types";
 import { useFeatureFlag } from "@multica/cerebro-feature-flags";
+import { roundExcludedIssueIds, useRoundStatuses } from "@multica/cerebro-rounds";
 
 /**
  * Count unread inbox conversations the way the inbox list surfaces them.
@@ -32,11 +33,15 @@ import { useFeatureFlag } from "@multica/cerebro-feature-flags";
  */
 export function countUnreadInboxConversations(
   items: InboxItem[],
-  opts: { excludeThreadReplies: boolean },
+  opts: { excludeThreadReplies: boolean; excludeIssueIds?: ReadonlySet<string> },
 ): number {
-  const base = opts.excludeThreadReplies
+  let base = opts.excludeThreadReplies
     ? items.filter((i) => !i.details?.thread_root_id)
     : items;
+  const excludedIssueIds = opts.excludeIssueIds;
+  if (excludedIssueIds && excludedIssueIds.size > 0) {
+    base = base.filter((item) => !item.issue_id || !excludedIssueIds.has(item.issue_id));
+  }
   return deduplicateInboxItems(base).filter((i) => !i.read).length;
 }
 
@@ -49,11 +54,14 @@ export function useCerebroInboxUnreadCount(
   wsId: string | null | undefined,
 ): number {
   const threadSplit = useFeatureFlag("cerebro_inbox_thread_split");
+  const roundsEnabled = useFeatureFlag("cerebro_inbox_rounds");
+  const { data: roundStatuses = [] } = useRoundStatuses(wsId ?? "", roundsEnabled && !!wsId);
+  const excludeIssueIds = roundExcludedIssueIds(roundStatuses);
   const { data } = useQuery({
     ...inboxListOptions(wsId ?? ""),
     enabled: !!wsId,
     select: (items: InboxItem[]) =>
-      countUnreadInboxConversations(items, { excludeThreadReplies: threadSplit }),
+      countUnreadInboxConversations(items, { excludeThreadReplies: threadSplit, excludeIssueIds }),
   });
   return data ?? 0;
 }
