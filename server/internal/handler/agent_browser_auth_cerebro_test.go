@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -39,5 +40,18 @@ func TestVerifyInternalAgentBrowserRejectsNonTaskToken(t *testing.T) {
 	}
 	if strings.Contains(rec.Body.String(), "registry-test") {
 		t.Fatal("response leaked credential material")
+	}
+}
+
+func TestWriteInternalBrowserVerificationErrorPreservesSafeStage(t *testing.T) {
+	rec := httptest.NewRecorder()
+
+	writeInternalBrowserVerificationError(rec, errors.New("internal browser stage auth failed"))
+
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusUnprocessableEntity)
+	}
+	if body := rec.Body.String(); !strings.Contains(body, "internal browser stage auth failed") {
+		t.Fatalf("body = %q, want safe stage", body)
 	}
 }
