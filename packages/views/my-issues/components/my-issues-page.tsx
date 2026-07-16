@@ -38,9 +38,10 @@ export function MyIssuesPage() {
           }}
           modes={["board", "list", "swimlane"]}
           batchToolbar="list"
-          renderHeader={({ controller }) => (
+          renderHeader={({ controller, workingIssues }) => (
             <MyIssuesHeader
               allIssues={controller.surfaceIssues}
+              workingIssues={workingIssues}
               scope={scope}
               onScopeChange={setScope}
               isRefreshing={controller.isRefreshing}

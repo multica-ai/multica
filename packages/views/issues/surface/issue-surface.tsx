@@ -29,6 +29,10 @@ import {
 export interface IssueSurfaceRenderContext {
   controller: IssueSurfaceController;
   issues: Issue[];
+  /** The rows the agents-working filter would leave on screen, with this
+   *  surface's `clientFilter` applied — headers feed it to the working chip
+   *  so the chip's count is the post-click row count (MUL-4884). */
+  workingIssues: Issue[];
 }
 
 interface IssueSurfaceComponentProps extends IssueSurfaceProps {
@@ -136,9 +140,18 @@ function IssueSurfaceContent({
         : controller.swimlaneIssues,
     [clientFilter, controller.swimlaneIssues],
   );
+  // Same clientFilter the rendered rows go through, so the chip's promise
+  // survives on surfaces that narrow the list locally (e.g. a search box).
+  const workingIssues = useMemo(
+    () =>
+      clientFilter
+        ? controller.workingScopeIssues.filter((issue) => clientFilter(issue))
+        : controller.workingScopeIssues,
+    [clientFilter, controller.workingScopeIssues],
+  );
   const renderContext = useMemo(
-    () => ({ controller, issues }),
-    [controller, issues],
+    () => ({ controller, issues, workingIssues }),
+    [controller, issues, workingIssues],
   );
   const openCreateIssue = useCallback(
     (defaults?: IssueCreateDefaults) => {
@@ -176,6 +189,7 @@ function IssueSurfaceContent({
         ) : (
           <IssuesHeader
             scopedIssues={controller.surfaceIssues}
+            workingIssues={workingIssues}
             allowGantt={controller.allowGantt}
             isRefreshing={controller.isRefreshing}
           />

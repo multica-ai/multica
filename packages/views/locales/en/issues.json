@@ -359,9 +359,16 @@
     "hover_header_queued_other": "{{count}} agents queued",
     "status_running": "Working",
     "status_queued": "Queued",
-    "chip_label": "working",
-    "empty_hover": "No agents currently working",
-    "filter_active_label": "Viewing only working agents"
+    "empty_hover": "No issues in progress right now",
+    "filter_active_label": "Viewing only issues in progress",
+    "issues_in_progress_one": "{{count}} issue in progress",
+    "issues_in_progress_other": "{{count}} issues in progress",
+    "tasks_count_one": "{{count}} task",
+    "tasks_count_other": "{{count}} tasks",
+    "unlinked_note_one": "{{count}} more task has no linked issue (chat/autopilot) — not counted",
+    "unlinked_note_other": "{{count}} more tasks have no linked issue (chat/autopilot) — not counted",
+    "out_of_scope_note_one": "{{count}} more task is outside the current filters or loaded range — not counted",
+    "out_of_scope_note_other": "{{count}} more tasks are outside the current filters or loaded range — not counted"
   },
   "agent_live": {
     "is_working": "{{name}} is working",

@@ -39,6 +39,10 @@ export interface IssueSurfaceData {
   projectIssues: Issue[];
   issues: Issue[];
   swimlaneIssues: Issue[];
+  /** The rows the agents-working filter would leave on screen. See the
+   *  `workingScopeIssues` memo for why this is a projection of the render
+   *  pipeline rather than a second derivation from the task snapshot. */
+  workingScopeIssues: Issue[];
   filteredGanttIssues: Issue[];
   assigneeGroups?: IssueAssigneeGroup[];
   assigneeGroupQueryKey?: QueryKey;
@@ -68,6 +72,7 @@ export function useIssueSurfaceData({
   projectId,
   usesAssigneeBoard,
   usesGantt,
+  usesSwimlane,
   sort,
   statusFilters,
   priorityFilters,
@@ -87,6 +92,7 @@ export function useIssueSurfaceData({
   projectId?: string;
   usesAssigneeBoard: boolean;
   usesGantt: boolean;
+  usesSwimlane: boolean;
   sort: IssueSortParam;
   statusFilters: IssueStatus[];
   priorityFilters: IssueFilterState["priorityFilters"];
@@ -238,6 +244,65 @@ export function useIssueSurfaceData({
     ],
   );
 
+  // The rows the agents-working filter leaves on screen — i.e. exactly what
+  // the header chip promises you get when you click it.
+  //
+  // This is deliberately a PROJECTION OF THE RENDER PIPELINE, not a second
+  // pass over the task snapshot: it reuses the same predicates, the same
+  // filter state and the same per-mode source as the rows below, with
+  // `workingOnly` forced on. That makes "chip count === row count" true by
+  // construction. The chip used to count distinct running `issue_id`s
+  // straight from the snapshot against the PRE-filter issue set, so any
+  // active status/assignee/label filter (or a sub-issue hidden by the
+  // display toggle) made it disagree with the list it was filtering
+  // (MUL-4884).
+  //
+  // Turning the filter on only adds `workingOnly` to this same pipeline, so
+  // the preview is the post-click list whether the filter is currently on or
+  // off. Mode branches mirror the render branches: gantt renders its own
+  // scheduled-only projection, the assignee board renders from `groups`, and
+  // swimlane drops the status filter.
+  const workingScopeIssues = useMemo(() => {
+    if (usesGantt) {
+      return applyIssueFilters(
+        ganttIssues,
+        { ...baseFilterState, workingOnly: true },
+        filterContext,
+      );
+    }
+    if (usesAssigneeBoard) {
+      return (
+        filterAssigneeGroups(assigneeGroupsQuery.data?.groups, {
+          showSubIssues,
+          agentRunningFilter: true,
+          runningIssueIds: activity.runningIssueIds,
+          propertyFilters,
+        }) ?? []
+      ).flatMap((group) => group.issues);
+    }
+    return applyIssueFilters(
+      surfaceIssues,
+      {
+        ...(usesSwimlane ? statuslessFilterState : baseFilterState),
+        workingOnly: true,
+      },
+      filterContext,
+    );
+  }, [
+    activity.runningIssueIds,
+    assigneeGroupsQuery.data?.groups,
+    baseFilterState,
+    filterContext,
+    ganttIssues,
+    propertyFilters,
+    showSubIssues,
+    statuslessFilterState,
+    surfaceIssues,
+    usesAssigneeBoard,
+    usesGantt,
+    usesSwimlane,
+  ]);
+
   const { data: childProgressMap = EMPTY_CHILD_PROGRESS } = useQuery(
     childIssueProgressOptions(wsId),
   );
@@ -315,6 +380,7 @@ export function useIssueSurfaceData({
     projectIssues: surfaceIssues,
     issues,
     swimlaneIssues,
+    workingScopeIssues,
     filteredGanttIssues,
     assigneeGroups: usesAssigneeBoard ? filteredAssigneeGroups : undefined,
     assigneeGroupQueryKey: usesAssigneeBoard

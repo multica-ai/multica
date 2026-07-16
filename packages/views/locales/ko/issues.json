@@ -343,9 +343,12 @@
     "hover_header_queued_other": "대기 중인 에이전트 {{count}}개",
     "status_running": "작업 중",
     "status_queued": "대기 중",
-    "chip_label": "작업 중",
-    "empty_hover": "현재 작업 중인 에이전트가 없습니다",
-    "filter_active_label": "작업 중인 에이전트만 보는 중"
+    "empty_hover": "진행 중인 issue가 없습니다",
+    "filter_active_label": "진행 중인 issue만 보는 중",
+    "issues_in_progress_other": "진행 중인 issue {{count}}개",
+    "tasks_count_other": "task {{count}}개",
+    "unlinked_note_other": "issue에 연결되지 않은 task {{count}}개가 더 있습니다(chat/autopilot). 개수에 포함되지 않습니다",
+    "out_of_scope_note_other": "현재 필터 또는 불러온 범위 밖의 task {{count}}개가 더 있습니다. 개수에 포함되지 않습니다"
   },
   "agent_live": {
     "is_working": "{{name}} 작업 중",

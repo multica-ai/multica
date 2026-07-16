@@ -10,9 +10,9 @@ import {
 } from "@multica/ui/components/ui/hover-card";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { agentTaskSnapshotOptions } from "@multica/core/agents";
-import type { AgentTask } from "@multica/core/types";
+import type { AgentTask, Issue } from "@multica/core/types";
 import { AgentAvatarStack } from "../../agents/components/agent-avatar-stack";
-import { AgentActivityHoverContent } from "../../agents/components/agent-activity-hover-content";
+import { WorkspaceAgentActivityHoverContent } from "../../agents/components/agent-activity-hover-content";
 import { useT } from "../../i18n";
 
 interface WorkspaceAgentWorkingChipProps {
@@ -21,117 +21,136 @@ interface WorkspaceAgentWorkingChipProps {
   // stays presentational and accepts both forms via plain props.
   value: boolean;
   onToggle: () => void;
-  // When set, only running tasks whose issue id is in this set count
-  // toward the chip — and toward the hover card. Lets the chip stay in
-  // sync with the page's visible issue scope (e.g. My Issues only shows
-  // "my" running tasks, not the whole workspace). When omitted, the chip
-  // shows workspace-wide running agents.
-  scopedIssueIds?: ReadonlySet<string>;
+  // The rows this filter leaves on screen, computed by the surface from the
+  // same pipeline that renders them (see `workingScopeIssues`). The chip's
+  // number is this list's length — that is the whole point: the number and
+  // the click result cannot disagree, because they are the same list.
+  //
+  // The chip used to take the PRE-filter issue set and count distinct running
+  // `issue_id`s out of the task snapshot itself. That was a second derivation
+  // of "what's on screen" and it drifted from the real one (MUL-4884).
+  workingIssues: readonly Issue[];
+}
+
+export interface WorkingChipView {
+  /** Running tasks on `workingIssues`, keyed by issue id. */
+  tasksByIssueId: Map<string, AgentTask[]>;
+  /** Distinct agents behind the counted work — the avatar stack. */
+  agentIds: string[];
+  /** Total running tasks across the counted issues. */
+  taskCount: number;
+  /** Running tasks with no linked issue (chat / autopilot). */
+  unlinkedCount: number;
+  /** Running tasks whose issue isn't on screen (filtered out, or past the
+   *  50-per-status page the list loads). */
+  outOfScopeCount: number;
 }
 
 /**
- * Filter chip on the issues / my-issues header, sitting to the left of
- * the Filter button. Always rendered so the filter toggle never
- * disappears mid-flight (a previous design hid the chip when no agents
- * were running, which trapped users in an active-but-invisible filter
- * state).
+ * Bucket the workspace task snapshot against the issues the filter would
+ * show. Exported for tests: the counting rule is the entire point of this
+ * component, so it is a pure function rather than a hook-bound useMemo.
  *
- * Two visual modes:
+ * Every running task lands in exactly one bucket:
+ *   - no `issue_id`      → unlinked (chat/autopilot; never counted)
+ *   - issue on screen    → counted, grouped under that issue
+ *   - issue not on screen → out of scope (filtered out or past the page)
  *
- *   - Has running agents → avatar stack + count + "working" label,
- *     wrapped in HoverCard that lists every active task on hover.
- *     Brand-filled when the filter is on.
+ * `issue_id` is an EMPTY STRING for chat/autopilot tasks, not null — see
+ * packages/core/types/agent.ts. Without the guard those tasks all collapse
+ * into one `""` bucket and read as a phantom issue, inflating the count by
+ * exactly one (MUL-4884). Mirrors `deriveIssueSurfaceActivity`.
+ */
+export function deriveWorkingChipView(
+  snapshot: readonly AgentTask[],
+  workingIssues: readonly Issue[],
+): WorkingChipView {
+  const onScreen = new Set(workingIssues.map((issue) => issue.id));
+  const tasksByIssueId = new Map<string, AgentTask[]>();
+  const agentIds: string[] = [];
+  const seenAgents = new Set<string>();
+  let taskCount = 0;
+  let unlinkedCount = 0;
+  let outOfScopeCount = 0;
+
+  for (const task of snapshot) {
+    if (task.status !== "running") continue;
+    if (!task.issue_id) {
+      unlinkedCount += 1;
+      continue;
+    }
+    if (!onScreen.has(task.issue_id)) {
+      outOfScopeCount += 1;
+      continue;
+    }
+    const bucket = tasksByIssueId.get(task.issue_id);
+    if (bucket) bucket.push(task);
+    else tasksByIssueId.set(task.issue_id, [task]);
+    taskCount += 1;
+    if (!seenAgents.has(task.agent_id)) {
+      seenAgents.add(task.agent_id);
+      agentIds.push(task.agent_id);
+    }
+  }
+
+  return { tasksByIssueId, agentIds, taskCount, unlinkedCount, outOfScopeCount };
+}
+
+/**
+ * Filter chip on the issues / my-issues header, sitting to the left of the
+ * Filter button. Always rendered so the filter toggle never disappears
+ * mid-flight (a previous design hid the chip when no agents were running,
+ * which trapped users in an active-but-invisible filter state).
  *
- *   - No running agents  → "0 working" label, muted when off,
- *     brand-filled when on. No HoverCard — there is nothing to show;
- *     the label IS the state.
+ * It says one thing: "N issues in progress" — N being exactly the rows you
+ * get when you click it. One number, one unit, self-verifiable.
  *
- * Click toggles the filter in both modes. The button itself is the
- * affordance — no Tooltip wrapping (the popover IS the label when there
- * is one, and the label is self-explanatory when there isn't).
+ * The avatar stack is ambience ("who's on it"), not a second statistic: it
+ * carries no `+N`, because a rival number next to the main one is what made
+ * this chip read as broken (it counted issues while the stack counted
+ * agents). The precise roster, the task count, and everything the number
+ * excludes live in the hover card.
  *
- * `scopedIssueIds` lets a calling header narrow the chip to a subset of
- * issues — typically "what's visible on this page right now". My Issues
- * uses it so the chip count matches the my-scope list; the global
- * /issues page passes the All/Members/Agents-scoped set. Without it the
- * chip is workspace-wide.
+ * Colour is two-step on purpose: idle activity is a whisper of brand, and
+ * the loud filled state is reserved for "this filter is ON" — the chip
+ * should read as a quiet tool, not an alert.
  */
 export function WorkspaceAgentWorkingChip({
   value,
   onToggle,
-  scopedIssueIds,
+  workingIssues,
 }: WorkspaceAgentWorkingChipProps) {
   const { t } = useT("issues");
   const wsId = useWorkspaceId();
   const { data: snapshot = [] } = useQuery(agentTaskSnapshotOptions(wsId));
 
-  const { runningTasks, agentIds, issueIds } = useMemo(() => {
-    const running: AgentTask[] = [];
-    for (const task of snapshot) {
-      if (task.status !== "running") continue;
-      // When scoped, drop running tasks whose issue isn't in the visible
-      // set — the chip's job is to summarise what the user sees, not
-      // what's happening elsewhere in the workspace.
-      if (scopedIssueIds && !scopedIssueIds.has(task.issue_id)) continue;
-      running.push(task);
-    }
-    // The count tracks active *issues*, not active agents: several agents
-    // can work the same issue at once, and the chip answers "how many
-    // issues are agents working on right now?" (its filter narrows the
-    // list to exactly those issues). The avatar stack still shows the
-    // distinct agents behind that work.
-    const uniqueIssues = [...new Set(running.map((tk) => tk.issue_id))];
-    const uniqueAgents = [...new Set(running.map((tk) => tk.agent_id))];
-    return {
-      runningTasks: running,
-      agentIds: uniqueAgents,
-      issueIds: uniqueIssues,
-    };
-  }, [snapshot, scopedIssueIds]);
+  const view = useMemo(
+    () => deriveWorkingChipView(snapshot, workingIssues),
+    [snapshot, workingIssues],
+  );
 
-  const hasAgents = issueIds.length > 0;
+  // The number. Not a re-derivation of "what's running" — the length of the
+  // list the click produces.
+  const issueCount = workingIssues.length;
+  const hasAgents = issueCount > 0;
+
   // Active (brand-filled) class — must explicitly re-pin text and bg in
   // every interactive state. Button's `outline` variant ships
   // `hover:text-foreground` + `aria-expanded:bg-muted aria-expanded:text-foreground`,
-  // which would otherwise repaint the brand chip back to neutral on
-  // hover and while the HoverCard is open.
+  // which would otherwise repaint the brand chip back to neutral on hover
+  // and while the HoverCard is open.
   const activeClass = value
     ? "border-brand bg-brand text-brand-foreground hover:bg-brand/90 hover:text-brand-foreground aria-expanded:bg-brand aria-expanded:text-brand-foreground"
     : hasAgents
-      ? "text-foreground"
+      ? // Idle-with-activity: a brand tint, not a fill. Enough to read as
+        // "something is happening here" while scanning, quiet enough that
+        // the filled state still means something.
+        "border-brand/30 bg-brand/5 text-foreground"
       : "text-muted-foreground";
 
-  const label = t(($) => $.agent_activity.chip_label);
-
-  // Idle path: no agents in scope. Still wrap in HoverCard with a
-  // single-line placeholder so the chip's hover behavior is consistent
-  // with the active state — an idle chip that does nothing on hover
-  // reads as broken next to an active one that pops a panel.
-  if (!hasAgents) {
-    return (
-      <HoverCard>
-        <HoverCardTrigger
-          render={
-            <Button
-              variant="outline"
-              size="sm"
-              className={`h-8 px-2 md:h-7 md:px-2.5 ${activeClass}`}
-              onClick={onToggle}
-              aria-pressed={value}
-            >
-              <span className="tabular-nums">0</span>
-              <span className="hidden md:inline">{label}</span>
-            </Button>
-          }
-        />
-        <HoverCardContent align="end" className="w-auto">
-          <p className="text-xs text-muted-foreground">
-            {t(($) => $.agent_activity.empty_hover)}
-          </p>
-        </HoverCardContent>
-      </HoverCard>
-    );
-  }
+  const label = t(($) => $.agent_activity.issues_in_progress, {
+    count: issueCount,
+  });
 
   return (
     <HoverCard>
@@ -143,20 +162,32 @@ export function WorkspaceAgentWorkingChip({
             className={`h-8 px-2 md:h-7 md:px-2.5 ${activeClass}`}
             onClick={onToggle}
             aria-pressed={value}
+            // The narrow layout shows the bare number, so pin the full
+            // sentence as the accessible name in every layout.
+            aria-label={label}
           >
-            <AgentAvatarStack
-              agentIds={agentIds}
-              size="sm"
-              max={3}
-              opacity="full"
-            />
-            <span className="tabular-nums">{issueIds.length}</span>
-            <span className="hidden md:inline">{label}</span>
+            {hasAgents && (
+              <AgentAvatarStack
+                agentIds={view.agentIds}
+                size="sm"
+                max={3}
+                opacity="full"
+                overflow="fade"
+              />
+            )}
+            <span className="tabular-nums md:hidden">{issueCount}</span>
+            <span className="hidden tabular-nums md:inline">{label}</span>
           </Button>
         }
       />
-      <HoverCardContent align="end" className="w-72">
-        <AgentActivityHoverContent tasks={runningTasks} />
+      <HoverCardContent align="end" className="w-80">
+        <WorkspaceAgentActivityHoverContent
+          issues={workingIssues}
+          tasksByIssueId={view.tasksByIssueId}
+          taskCount={view.taskCount}
+          unlinkedCount={view.unlinkedCount}
+          outOfScopeCount={view.outOfScopeCount}
+        />
       </HoverCardContent>
     </HoverCard>
   );
