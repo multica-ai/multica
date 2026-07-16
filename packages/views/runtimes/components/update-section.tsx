@@ -214,7 +214,7 @@ export function UpdateSection({
               </>
             )}
 
-            {!runtimeId && (
+            {hasUpdate && !runtimeId && (
               <span
                 className="inline-flex items-center gap-1 text-xs text-muted-foreground"
                 title={t(($) => $.update.read_only_title)}
