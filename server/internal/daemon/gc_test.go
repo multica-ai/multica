@@ -1036,6 +1036,85 @@ func TestEnvRootGCReservationBlocksConcurrentClaim(t *testing.T) {
 	d.unmarkActiveEnvRoot(root)
 }
 
+func TestApplyGCAction_ArtifactCleanupActiveAfterDecisionOnlyIncrementsSkipped(t *testing.T) {
+	t.Parallel()
+	d := newGCTestDaemon(t, http.NewServeMux())
+	taskDir := createTaskDir(t, d.cfg.WorkspacesRoot, "ws-artifact-race", "task", nil)
+	artifactDir := filepath.Join(taskDir, "node_modules")
+	if err := os.MkdirAll(artifactDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	d.markActiveEnvRoot(taskDir)
+	defer d.unmarkActiveEnvRoot(taskDir)
+	stats := &gcStats{byPattern: map[string]int{}}
+	d.applyGCAction(taskDir, gcActionCleanArtifacts, stats)
+	if stats.skipped != 1 || stats.artifactDirs != 0 || stats.artifactRemoved != 0 || stats.bytesReclaimed != 0 {
+		t.Fatalf("unexpected stats: %+v", stats)
+	}
+	if _, err := os.Stat(artifactDir); err != nil {
+		t.Fatalf("artifact dir removed after concurrent claim: %v", err)
+	}
+}
+
+func TestApplyGCAction_ArtifactCleanupBlocksConcurrentClaim(t *testing.T) {
+	t.Parallel()
+	d := newGCTestDaemon(t, http.NewServeMux())
+	taskDir := createTaskDir(t, d.cfg.WorkspacesRoot, "ws-artifact-wait", "task", nil)
+	artifactDir := filepath.Join(taskDir, "node_modules")
+	if err := os.MkdirAll(artifactDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	inCleanup := make(chan struct{})
+	releaseCleanup := make(chan struct{})
+	d.artifactCleanupHook = func(string) {
+		close(inCleanup)
+		<-releaseCleanup
+	}
+	reachedGate := make(chan struct{})
+	var reachedOnce sync.Once
+	d.activeEnvRootWaitHook = func(string) { reachedOnce.Do(func() { close(reachedGate) }) }
+	cleanupDone := make(chan struct{})
+	stats := &gcStats{byPattern: map[string]int{}}
+	go func() {
+		d.applyGCAction(taskDir, gcActionCleanArtifacts, stats)
+		close(cleanupDone)
+	}()
+	<-inCleanup
+	claimed := make(chan struct{})
+	go func() {
+		d.markActiveEnvRoot(taskDir)
+		close(claimed)
+	}()
+	select {
+	case <-reachedGate:
+	case <-time.After(time.Second):
+		t.Fatal("claim did not reach GC reservation gate")
+	}
+	select {
+	case <-claimed:
+		t.Fatal("claim passed while artifact cleanup was in flight")
+	default:
+	}
+	close(releaseCleanup)
+	select {
+	case <-cleanupDone:
+	case <-time.After(time.Second):
+		t.Fatal("artifact cleanup did not finish")
+	}
+	select {
+	case <-claimed:
+	case <-time.After(time.Second):
+		t.Fatal("claim did not resume after cleanup")
+	}
+	d.unmarkActiveEnvRoot(taskDir)
+	if stats.artifactRemoved != 1 || stats.skipped != 1 {
+		t.Fatalf("unexpected stats: %+v", stats)
+	}
+	if _, err := os.Stat(artifactDir); !os.IsNotExist(err) {
+		t.Fatalf("artifact dir should be removed before claim resumes: %v", err)
+	}
+}
+
 func TestIsBareRepo(t *testing.T) {
 	t.Parallel()
 

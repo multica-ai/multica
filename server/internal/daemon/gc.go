@@ -248,6 +248,9 @@ func (d *Daemon) applyGCAction(taskDir string, action gcAction, stats *gcStats) 
 		}
 		stats.skipped++
 	case gcActionCleanArtifacts:
+		if d.artifactCleanupHook != nil {
+			d.artifactCleanupHook(taskDir)
+		}
 		removed, bytes, perPattern := d.cleanTaskArtifacts(taskDir, d.cfg.GCArtifactPatterns)
 		recordArtifactCleanup(stats, removed, bytes, perPattern)
 		stats.skipped++ // task dir itself preserved

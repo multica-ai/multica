@@ -328,6 +328,7 @@ type Daemon struct {
 	activeEnvRootWaitHook func(string)
 	renameEnvRootHook     func(string, string) error
 	removeEnvRootHook     func(string) error
+	artifactCleanupHook   func(string) // test-only: runs while the artifact-cleanup reservation is held
 
 	activeCodexStoresMu   sync.Mutex
 	activeCodexStoresCond *sync.Cond      // signalled when an in-flight store deletion finishes, so a blocked markActive can proceed
