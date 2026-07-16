@@ -32,6 +32,7 @@ describe("daemon health", () => {
       new Response('{"status":"running"} true', { status: 200 }),
       new Response('{"status":"running","pid":123}', { status: 200 }),
       new Response('{"status":"running"}', { status: 200 }),
+      new Response(`${"[".repeat(65)}0${"]".repeat(65)}`, { status: 200 }),
     ]) {
       vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response));
       expect(await fetchDaemonHealth(19514)).toBeNull();

@@ -1,4 +1,5 @@
 const MAX_DAEMON_RESPONSE_BYTES = 1 << 20;
+const MAX_DAEMON_JSON_DEPTH = 64;
 
 function rejectDuplicateJSONKeys(source: string): void {
   let offset = 0;
@@ -19,11 +20,14 @@ function rejectDuplicateJSONKeys(source: string): void {
     throw new SyntaxError("unterminated string");
   }
 
-  function parseValue(): void {
+  function parseValue(depth: number): void {
+    if (depth > MAX_DAEMON_JSON_DEPTH) {
+      throw new SyntaxError("daemon JSON nesting limit exceeded");
+    }
     skipWhitespace();
     const char = source[offset];
-    if (char === "{") return parseObject();
-    if (char === "[") return parseArray();
+    if (char === "{") return parseObject(depth);
+    if (char === "[") return parseArray(depth);
     if (char === '"') {
       parseString();
       return;
@@ -35,7 +39,7 @@ function rejectDuplicateJSONKeys(source: string): void {
     offset += match[0].length;
   }
 
-  function parseObject(): void {
+  function parseObject(depth: number): void {
     offset += 1;
     const keys = new Set<string>();
     skipWhitespace();
@@ -50,7 +54,7 @@ function rejectDuplicateJSONKeys(source: string): void {
       keys.add(key);
       skipWhitespace();
       if (source[offset++] !== ":") throw new SyntaxError("expected colon");
-      parseValue();
+      parseValue(depth + 1);
       skipWhitespace();
       const separator = source[offset++];
       if (separator === "}") return;
@@ -58,7 +62,7 @@ function rejectDuplicateJSONKeys(source: string): void {
     }
   }
 
-  function parseArray(): void {
+  function parseArray(depth: number): void {
     offset += 1;
     skipWhitespace();
     if (source[offset] === "]") {
@@ -66,7 +70,7 @@ function rejectDuplicateJSONKeys(source: string): void {
       return;
     }
     while (true) {
-      parseValue();
+      parseValue(depth + 1);
       skipWhitespace();
       const separator = source[offset++];
       if (separator === "]") return;
@@ -74,7 +78,7 @@ function rejectDuplicateJSONKeys(source: string): void {
     }
   }
 
-  parseValue();
+  parseValue(0);
   skipWhitespace();
   if (offset !== source.length) throw new SyntaxError("trailing JSON content");
 }

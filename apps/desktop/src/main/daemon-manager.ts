@@ -25,6 +25,7 @@ import {
   type DiagnosticsPayload,
 } from "./daemon-diagnostics";
 import { fetchDaemonHealth } from "./daemon-health";
+import { decideAutomaticRestart } from "./restart-decision";
 import {
   daemonLifecycleUnreachable,
   isDaemonExternallyManaged,
@@ -73,6 +74,8 @@ let cachedCliBinaryVersion: string | null | undefined = undefined;
 // busy executing tasks. The poll loop retries the check on each tick and
 // fires the restart once active_task_count drops to 0.
 let pendingVersionRestart = false;
+let pendingCredentialRestart = false;
+let automaticRestartInProgress = false;
 let targetApiBaseUrl: string | null = null;
 let activeProfile: ActiveProfile | null = null;
 
@@ -588,13 +591,18 @@ async function ensureRunningDaemonVersionMatches(): Promise<
       pendingVersionRestart = true;
       return "deferred";
     }
-    case "restart":
+    case "restart": {
       console.log(
         `[daemon] CLI version mismatch (bundled=${bundled} running=${diagnostics?.cli_version}) — restarting daemon`,
       );
       pendingVersionRestart = false;
-      await restartDaemon();
+      const restart = await restartDaemon({ requireIdle: true });
+      if (!restart.success) {
+        pendingVersionRestart = true;
+        return "deferred";
+      }
       return "restarted";
+    }
   }
 }
 
@@ -697,7 +705,13 @@ async function syncToken(
         console.log(
           "[daemon] user switched — restarting daemon with new credentials",
         );
-        void restartDaemon();
+        pendingCredentialRestart = true;
+        void restartDaemon({ requireIdle: true }).then((result) => {
+          pendingCredentialRestart = !result.success;
+          if (!result.success) {
+            console.log(`[daemon] credential restart deferred: ${result.error}`);
+          }
+        });
       }
     } catch (err) {
       console.warn("[daemon] restart-on-user-switch failed:", err);
@@ -768,8 +782,9 @@ async function reauthenticate(
     if (isAuthStatusError(err)) return { ok: false, reason: "session_invalid" };
     return { ok: false, reason: "transient", message: errorMessage(err) };
   }
-  const restart = await restartDaemon();
+  const restart = await restartDaemon({ requireIdle: true });
   if (!restart.success) {
+    pendingCredentialRestart = true;
     return {
       ok: false,
       reason: "transient",
@@ -900,15 +915,48 @@ async function stopDaemon(): Promise<{ success: boolean; error?: string }> {
   });
 }
 
-async function restartDaemon(): Promise<{ success: boolean; error?: string }> {
+async function restartDaemon(
+  options: { requireIdle?: boolean } = {},
+): Promise<{ success: boolean; error?: string }> {
   // Same central, live-preflighted guard as stopDaemon: we can neither stop nor
   // start a daemon we don't manage, so don't try (user-switch, reauth,
   // first-workspace, and any future restart caller all route through here).
   // #3916.
   if (await lifecycleBlockedByForeignDaemon()) return { success: true };
+  if (options.requireIdle) {
+    const active = await ensureActiveProfile();
+    const health = await fetchHealthAtPort(active.port);
+    const diagnostics = health
+      ? await fetchDaemonDiagnostics(active.name, active.port)
+      : null;
+    if (decideAutomaticRestart(health, diagnostics) === "defer") {
+      return {
+        success: false,
+        error: "daemon restart deferred until authenticated diagnostics report zero active tasks",
+      };
+    }
+  }
   const stopResult = await stopDaemon();
   if (!stopResult.success) return stopResult;
   return startDaemon();
+}
+
+async function retryPendingAutomaticRestarts(): Promise<void> {
+  if (automaticRestartInProgress) return;
+  automaticRestartInProgress = true;
+  try {
+    if (pendingCredentialRestart) {
+      const result = await restartDaemon({ requireIdle: true });
+      pendingCredentialRestart = !result.success;
+      if (result.success) pendingVersionRestart = false;
+      return;
+    }
+    if (pendingVersionRestart) {
+      await ensureRunningDaemonVersionMatches();
+    }
+  } finally {
+    automaticRestartInProgress = false;
+  }
 }
 
 async function pollOnce(): Promise<void> {
@@ -916,8 +964,11 @@ async function pollOnce(): Promise<void> {
   currentState = status.state;
   sendStatus(status);
   // Retry a deferred version-mismatch restart once the daemon drains.
-  if (pendingVersionRestart && status.state === "running") {
-    void ensureRunningDaemonVersionMatches();
+  if (
+    status.state === "running" &&
+    (pendingCredentialRestart || pendingVersionRestart)
+  ) {
+    void retryPendingAutomaticRestarts();
   }
 }
 

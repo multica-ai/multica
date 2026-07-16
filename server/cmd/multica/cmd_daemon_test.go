@@ -108,7 +108,7 @@ func TestRequestDaemonDiagnosticsSendsOperatorCredential(t *testing.T) {
 	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requests <- r.Clone(r.Context())
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"status":"running","pid":1234,"cli_version":"v9.9.9"}`))
+		_, _ = w.Write([]byte(validDaemonDiagnosticsJSON()))
 	}))
 	server.Listener = listener
 	server.Start()
@@ -177,10 +177,18 @@ func TestRequestDaemonDiagnosticsRejectsInvalidAndOversizedBodies(t *testing.T) 
 	t.Parallel()
 
 	for name, body := range map[string]string{
-		"malformed": `{`,
-		"trailing":  `{"status":"running"} {"extra":true}`,
-		"null":      `null`,
-		"oversized": `{"padding":"` + strings.Repeat("x", (1<<20)+1) + `"}`,
+		"malformed":           `{`,
+		"trailing":            validDaemonDiagnosticsJSON() + ` {"extra":true}`,
+		"null":                `null`,
+		"oversized":           `{"padding":"` + strings.Repeat("x", (1<<20)+1) + `"}`,
+		"duplicate top level": strings.Replace(validDaemonDiagnosticsJSON(), `"status":"running"`, `"status":"running","status":"starting"`, 1),
+		"duplicate nested":    strings.Replace(validDaemonDiagnosticsJSON(), `"id":"ws-1"`, `"id":"ws-1","id":"ws-2"`, 1),
+		"unknown field":       strings.Replace(validDaemonDiagnosticsJSON(), `"status":"running"`, `"status":"running","extra":true`, 1),
+		"missing field":       strings.Replace(validDaemonDiagnosticsJSON(), `"os":"darwin",`, ``, 1),
+		"wrong type":          strings.Replace(validDaemonDiagnosticsJSON(), `"pid":1234`, `"pid":"1234"`, 1),
+		"negative tasks":      strings.Replace(validDaemonDiagnosticsJSON(), `"active_task_count":0`, `"active_task_count":-1`, 1),
+		"extreme pid":         strings.Replace(validDaemonDiagnosticsJSON(), `"pid":1234`, `"pid":9007199254740992`, 1),
+		"deep nesting":        `[` + strings.Repeat(`[`, maxDaemonJSONDepth) + `0` + strings.Repeat(`]`, maxDaemonJSONDepth) + `]`,
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
@@ -205,6 +213,91 @@ func TestRequestDaemonDiagnosticsRejectsInvalidAndOversizedBodies(t *testing.T) 
 			}
 		})
 	}
+}
+
+func TestCheckDaemonHealthOnPortRequiresExactBoundedContract(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]struct {
+		status int
+		body   string
+	}{
+		"valid":          {http.StatusOK, `{"status":"running","os":"darwin"}`},
+		"non-2xx":        {http.StatusInternalServerError, `{"status":"running","os":"darwin"}`},
+		"duplicate":      {http.StatusOK, `{"status":"running","status":"starting","os":"darwin"}`},
+		"unknown":        {http.StatusOK, `{"status":"running","os":"darwin","pid":1}`},
+		"missing":        {http.StatusOK, `{"status":"running"}`},
+		"trailing":       {http.StatusOK, `{"status":"running","os":"darwin"} true`},
+		"invalid status": {http.StatusOK, `{"status":"stopped","os":"darwin"}`},
+		"oversized":      {http.StatusOK, strings.Repeat(" ", maxDaemonResponseBytes+1)},
+	}
+
+	for name, test := range tests {
+		name, test := name, test
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			listener, err := net.Listen("tcp", "127.0.0.1:0")
+			if err != nil {
+				t.Fatalf("listen: %v", err)
+			}
+			server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(test.status)
+				_, _ = w.Write([]byte(test.body))
+			}))
+			server.Listener = listener
+			server.Start()
+			defer server.Close()
+			port, err := strconv.Atoi(strings.TrimPrefix(server.URL, "http://127.0.0.1:"))
+			if err != nil {
+				t.Fatalf("parse test server port: %v", err)
+			}
+			got := checkDaemonHealthOnPort(context.Background(), port)
+			if name == "valid" {
+				if got["status"] != "running" || got["os"] != "darwin" {
+					t.Fatalf("health = %#v, want exact running payload", got)
+				}
+			} else if got["status"] != "stopped" {
+				t.Fatalf("health = %#v, want stopped", got)
+			}
+		})
+	}
+}
+
+func TestCheckDaemonHealthOnPortRejectsRedirect(t *testing.T) {
+	t.Parallel()
+	targetReached := make(chan struct{}, 1)
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		targetReached <- struct{}{}
+		_, _ = w.Write([]byte(`{"status":"running","os":"darwin"}`))
+	}))
+	defer target.Close()
+
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, target.URL, http.StatusTemporaryRedirect)
+	}))
+	server.Listener = listener
+	server.Start()
+	defer server.Close()
+	port, err := strconv.Atoi(strings.TrimPrefix(server.URL, "http://127.0.0.1:"))
+	if err != nil {
+		t.Fatalf("parse test server port: %v", err)
+	}
+	if got := checkDaemonHealthOnPort(context.Background(), port); got["status"] != "stopped" {
+		t.Fatalf("redirect health = %#v, want stopped", got)
+	}
+	select {
+	case <-targetReached:
+		t.Fatal("health redirect unexpectedly reached target")
+	default:
+	}
+}
+
+func validDaemonDiagnosticsJSON() string {
+	return `{"status":"running","pid":1234,"os":"darwin","uptime":"1m","daemon_id":"daemon-1","device_name":"test","server_url":"https://example.test","cli_version":"v9.9.9","active_task_count":0,"agents":["codex"],"workspaces":[{"id":"ws-1","runtimes":["codex"]}]}`
 }
 
 func TestReadDaemonShutdownCredentialValidatesOperatorFile(t *testing.T) {

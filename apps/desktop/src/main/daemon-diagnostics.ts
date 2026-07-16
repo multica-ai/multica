@@ -21,17 +21,17 @@ const DIAGNOSTICS_FIELDS = new Set([
 ]);
 
 export interface DiagnosticsPayload {
-  status?: string;
-  os?: string;
-  pid?: number;
-  uptime?: string;
-  daemon_id?: string;
-  device_name?: string;
-  server_url?: string;
-  cli_version?: string;
-  active_task_count?: number;
-  agents?: string[];
-  workspaces?: Array<{ id: string; runtimes: string[] }>;
+  status: "running" | "starting";
+  os: string;
+  pid: number;
+  uptime: string;
+  daemon_id: string;
+  device_name: string;
+  server_url: string;
+  cli_version: string;
+  active_task_count: number;
+  agents: string[];
+  workspaces: Array<{ id: string; runtimes: string[] }>;
 }
 
 function isWorkspace(value: unknown): value is { id: string; runtimes: string[] } {
@@ -52,27 +52,25 @@ function isDiagnosticsPayload(value: unknown): value is DiagnosticsPayload {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const payload = value as Record<string, unknown>;
   return (
+    Object.keys(payload).length === DIAGNOSTICS_FIELDS.size &&
     Object.keys(payload).every((key) => DIAGNOSTICS_FIELDS.has(key)) &&
     (payload.status === "running" || payload.status === "starting") &&
-    (payload.os === undefined || typeof payload.os === "string") &&
-    (payload.pid === undefined ||
-      (typeof payload.pid === "number" &&
-        Number.isSafeInteger(payload.pid) &&
-        payload.pid > 0)) &&
-    (payload.uptime === undefined || typeof payload.uptime === "string") &&
-    (payload.daemon_id === undefined || typeof payload.daemon_id === "string") &&
-    (payload.device_name === undefined || typeof payload.device_name === "string") &&
-    (payload.server_url === undefined || typeof payload.server_url === "string") &&
-    (payload.cli_version === undefined || typeof payload.cli_version === "string") &&
-    (payload.active_task_count === undefined ||
-      (typeof payload.active_task_count === "number" &&
-        Number.isSafeInteger(payload.active_task_count) &&
-        payload.active_task_count >= 0)) &&
-    (payload.agents === undefined ||
-      (Array.isArray(payload.agents) &&
-        payload.agents.every((agent) => typeof agent === "string"))) &&
-    (payload.workspaces === undefined ||
-      (Array.isArray(payload.workspaces) && payload.workspaces.every(isWorkspace)))
+    typeof payload.os === "string" &&
+    typeof payload.pid === "number" &&
+    Number.isSafeInteger(payload.pid) &&
+    payload.pid > 0 &&
+    typeof payload.uptime === "string" &&
+    typeof payload.daemon_id === "string" &&
+    typeof payload.device_name === "string" &&
+    typeof payload.server_url === "string" &&
+    typeof payload.cli_version === "string" &&
+    typeof payload.active_task_count === "number" &&
+    Number.isSafeInteger(payload.active_task_count) &&
+    payload.active_task_count >= 0 &&
+    Array.isArray(payload.agents) &&
+    payload.agents.every((agent) => typeof agent === "string") &&
+    Array.isArray(payload.workspaces) &&
+    payload.workspaces.every(isWorkspace)
   );
 }
 

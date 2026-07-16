@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -17,6 +18,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/spf13/cobra"
 	lumberjack "gopkg.in/natefinch/lumberjack.v2"
@@ -745,21 +747,200 @@ func requestDaemonDiagnostics(ctx context.Context, healthPort int, credential st
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return nil, fmt.Errorf("unexpected status %d", resp.StatusCode)
 	}
-	body, err := io.ReadAll(io.LimitReader(resp.Body, (1<<20)+1))
-	if err != nil {
-		return nil, fmt.Errorf("read daemon diagnostics: %w", err)
-	}
-	if len(body) > 1<<20 {
-		return nil, errors.New("daemon diagnostics response exceeds 1 MiB")
-	}
-	var result map[string]any
-	if err := json.Unmarshal(body, &result); err != nil {
+	var payload daemonDiagnosticsPayload
+	if err := decodeStrictDaemonJSON(resp.Body, &payload); err != nil {
 		return nil, fmt.Errorf("decode daemon diagnostics: %w", err)
 	}
-	if result == nil {
-		return nil, errors.New("decode daemon diagnostics: expected JSON object")
+	if err := payload.validate(); err != nil {
+		return nil, fmt.Errorf("decode daemon diagnostics: %w", err)
 	}
-	return result, nil
+	return payload.asMap(), nil
+}
+
+const (
+	maxDaemonResponseBytes = 1 << 20
+	maxDaemonJSONDepth     = 64
+	maxJSONSafeInteger     = int64(1<<53 - 1)
+)
+
+type daemonHealthPayload struct {
+	Status *string `json:"status"`
+	OS     *string `json:"os"`
+}
+
+type daemonDiagnosticsWorkspace struct {
+	ID       *string   `json:"id"`
+	Runtimes *[]string `json:"runtimes"`
+}
+
+type daemonDiagnosticsPayload struct {
+	Status          *string                       `json:"status"`
+	PID             *int64                        `json:"pid"`
+	OS              *string                       `json:"os"`
+	Uptime          *string                       `json:"uptime"`
+	DaemonID        *string                       `json:"daemon_id"`
+	DeviceName      *string                       `json:"device_name"`
+	ServerURL       *string                       `json:"server_url"`
+	CLIVersion      *string                       `json:"cli_version"`
+	ActiveTaskCount *int64                        `json:"active_task_count"`
+	Agents          *[]string                     `json:"agents"`
+	Workspaces      *[]daemonDiagnosticsWorkspace `json:"workspaces"`
+}
+
+func decodeStrictDaemonJSON(body io.Reader, target any) error {
+	data, err := io.ReadAll(io.LimitReader(body, maxDaemonResponseBytes+1))
+	if err != nil {
+		return fmt.Errorf("read response: %w", err)
+	}
+	if len(data) > maxDaemonResponseBytes {
+		return errors.New("response exceeds 1 MiB")
+	}
+	if !utf8.Valid(data) {
+		return errors.New("response is not valid UTF-8")
+	}
+	if err := validateDaemonJSONStructure(data); err != nil {
+		return err
+	}
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(target); err != nil {
+		return err
+	}
+	if err := requireJSONEOF(decoder); err != nil {
+		return err
+	}
+	return nil
+}
+
+func validateDaemonJSONStructure(data []byte) error {
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.UseNumber()
+	if err := validateDaemonJSONValue(decoder, 0); err != nil {
+		return err
+	}
+	return requireJSONEOF(decoder)
+}
+
+func validateDaemonJSONValue(decoder *json.Decoder, depth int) error {
+	if depth > maxDaemonJSONDepth {
+		return errors.New("JSON nesting limit exceeded")
+	}
+	token, err := decoder.Token()
+	if err != nil {
+		return err
+	}
+	delim, ok := token.(json.Delim)
+	if !ok {
+		return nil
+	}
+	switch delim {
+	case '{':
+		keys := make(map[string]struct{})
+		for decoder.More() {
+			keyToken, err := decoder.Token()
+			if err != nil {
+				return err
+			}
+			key, ok := keyToken.(string)
+			if !ok {
+				return errors.New("expected object key")
+			}
+			if _, exists := keys[key]; exists {
+				return fmt.Errorf("duplicate JSON key %q", key)
+			}
+			keys[key] = struct{}{}
+			if err := validateDaemonJSONValue(decoder, depth+1); err != nil {
+				return err
+			}
+		}
+		end, err := decoder.Token()
+		if err != nil {
+			return err
+		}
+		if end != json.Delim('}') {
+			return errors.New("expected object terminator")
+		}
+	case '[':
+		for decoder.More() {
+			if err := validateDaemonJSONValue(decoder, depth+1); err != nil {
+				return err
+			}
+		}
+		end, err := decoder.Token()
+		if err != nil {
+			return err
+		}
+		if end != json.Delim(']') {
+			return errors.New("expected array terminator")
+		}
+	default:
+		return fmt.Errorf("unexpected JSON delimiter %q", delim)
+	}
+	return nil
+}
+
+func requireJSONEOF(decoder *json.Decoder) error {
+	if _, err := decoder.Token(); err != io.EOF {
+		if err == nil {
+			return errors.New("trailing JSON content")
+		}
+		return err
+	}
+	return nil
+}
+
+func (payload daemonHealthPayload) validate() error {
+	if payload.Status == nil || payload.OS == nil {
+		return errors.New("health response is missing required fields")
+	}
+	if *payload.Status != "running" && *payload.Status != "starting" {
+		return errors.New("health response has invalid status")
+	}
+	return nil
+}
+
+func (payload daemonDiagnosticsPayload) validate() error {
+	if payload.Status == nil || payload.PID == nil || payload.OS == nil ||
+		payload.Uptime == nil || payload.DaemonID == nil || payload.DeviceName == nil ||
+		payload.ServerURL == nil || payload.CLIVersion == nil ||
+		payload.ActiveTaskCount == nil || payload.Agents == nil || payload.Workspaces == nil {
+		return errors.New("diagnostics response is missing required fields")
+	}
+	if *payload.Status != "running" && *payload.Status != "starting" {
+		return errors.New("diagnostics response has invalid status")
+	}
+	if *payload.PID <= 0 || *payload.PID > maxJSONSafeInteger ||
+		*payload.ActiveTaskCount < 0 || *payload.ActiveTaskCount > maxJSONSafeInteger {
+		return errors.New("diagnostics response has invalid numeric fields")
+	}
+	for _, workspace := range *payload.Workspaces {
+		if workspace.ID == nil || workspace.Runtimes == nil {
+			return errors.New("diagnostics workspace is missing required fields")
+		}
+	}
+	return nil
+}
+
+func (payload daemonDiagnosticsPayload) asMap() map[string]any {
+	agents := make([]any, len(*payload.Agents))
+	for i, agent := range *payload.Agents {
+		agents[i] = agent
+	}
+	workspaces := make([]any, len(*payload.Workspaces))
+	for i, workspace := range *payload.Workspaces {
+		runtimes := make([]any, len(*workspace.Runtimes))
+		for j, runtimeName := range *workspace.Runtimes {
+			runtimes[j] = runtimeName
+		}
+		workspaces[i] = map[string]any{"id": *workspace.ID, "runtimes": runtimes}
+	}
+	return map[string]any{
+		"status": *payload.Status, "pid": float64(*payload.PID), "os": *payload.OS,
+		"uptime": *payload.Uptime, "daemon_id": *payload.DaemonID,
+		"device_name": *payload.DeviceName, "server_url": *payload.ServerURL,
+		"cli_version": *payload.CLIVersion, "active_task_count": float64(*payload.ActiveTaskCount),
+		"agents": agents, "workspaces": workspaces,
+	}
 }
 
 func readDaemonShutdownCredential(profile string) (string, error) {
@@ -927,18 +1108,29 @@ func checkDaemonHealthOnPort(ctx context.Context, port int) map[string]any {
 		return map[string]any{"status": "stopped"}
 	}
 
-	httpClient := &http.Client{Timeout: 2 * time.Second}
+	httpClient := &http.Client{
+		Timeout: 2 * time.Second,
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
 	resp, err := httpClient.Do(req)
 	if err != nil {
 		return map[string]any{"status": "stopped"}
 	}
 	defer resp.Body.Close()
-
-	var result map[string]any
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return map[string]any{"status": "stopped"}
 	}
-	return result
+
+	var payload daemonHealthPayload
+	if err := decodeStrictDaemonJSON(resp.Body, &payload); err != nil {
+		return map[string]any{"status": "stopped"}
+	}
+	if err := payload.validate(); err != nil {
+		return map[string]any{"status": "stopped"}
+	}
+	return map[string]any{"status": *payload.Status, "os": *payload.OS}
 }
 
 // flagString returns a string flag value or empty string.

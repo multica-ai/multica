@@ -32,6 +32,23 @@ async function writeCredential(profile: string, value = credential) {
   return path;
 }
 
+function validDiagnostics(overrides: Record<string, unknown> = {}) {
+  return {
+    status: "running",
+    os: "darwin",
+    pid: 1234,
+    uptime: "1m2s",
+    daemon_id: "daemon-1",
+    device_name: "test-device",
+    server_url: "https://example.test",
+    cli_version: "v9.9.9",
+    active_task_count: 2,
+    agents: ["codex"],
+    workspaces: [{ id: "workspace-1", runtimes: ["codex"] }],
+    ...overrides,
+  };
+}
+
 describe("daemon diagnostics", () => {
   it("uses the exact default and named profile credential paths", () => {
     expect(profileOperatorCredentialPath("")).toBe(
@@ -52,11 +69,7 @@ describe("daemon diagnostics", () => {
     await writeCredential("test-profile");
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(
-        JSON.stringify({
-          status: "running",
-          cli_version: "v9.9.9",
-          active_task_count: 2,
-        }),
+        JSON.stringify(validDiagnostics()),
         { status: 200, headers: { "Content-Type": "application/json" } },
       ),
     );
@@ -132,6 +145,7 @@ describe("daemon diagnostics", () => {
       '{"status":"running"} true',
       '{"status":"running","unexpected":true}',
       '{"status":"running","pid":1e400}',
+      `${"[".repeat(65)}0${"]".repeat(65)}`,
     ]) {
       vi.stubGlobal(
         "fetch",
@@ -155,6 +169,8 @@ describe("daemon diagnostics", () => {
       { status: "running", workspaces: [{ id: 7, runtimes: [] }] },
       { status: "running", workspaces: [{ id: "id", runtimes: [7] }] },
       { status: "running", workspaces: [{ id: "id", runtimes: [], extra: true }] },
+      validDiagnostics({ os: undefined }),
+      validDiagnostics({ active_task_count: Number.MAX_SAFE_INTEGER + 1 }),
     ]) {
       vi.stubGlobal(
         "fetch",
