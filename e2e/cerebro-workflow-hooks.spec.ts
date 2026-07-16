@@ -161,7 +161,7 @@ async function capture(page: Page, testInfo: TestInfo, name: string) {
   await expect(page.locator("body")).not.toHaveCSS("overflow-x", "scroll");
   await page.evaluate(() => document.fonts.ready);
   await page.waitForTimeout(150);
-  await page.screenshot({ path, fullPage: false });
+  await page.screenshot({ path, fullPage: false, animations: "disabled" });
   await testInfo.attach(name, { path, contentType: "image/png" });
 }
 
