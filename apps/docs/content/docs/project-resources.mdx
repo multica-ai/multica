@@ -17,7 +17,7 @@ A project is no longer just a label. It is a small **resource container**:
 
 This shape is intentional — it's the same pattern Multica already uses for agent providers: a `type` discriminator and a typed payload. It keeps the schema stable so adding "Notion page", "Google Doc", "uploaded file", or "external URL" later is a small, additive change.
 
-Today two resource types ship: [`github_repo`](#resource-type-github_repo) (clone-per-task into an isolated worktree) and [`local_directory`](#resource-type-local_directory) (run directly inside a folder on a specific daemon's machine).
+Today two resource types ship: [`github_repo`](#resource-type-github_repo) (clone-per-task into an isolated worktree) and [`local_directory`](#resource-type-local_directory) (use a bound folder on a specific daemon, either in place or through per-issue linked worktrees).
 
 ## Resource type: `github_repo`
 
@@ -40,7 +40,7 @@ The default resource type — checked out per task into an isolated worktree:
 
 ## Resource type: `local_directory`
 
-For repos that can't reasonably be re-cloned per task — multi-gigabyte game checkouts, large monorepos, or any project where the worktree-per-task model is painful — a project can instead point at an **existing directory on a specific [daemon](/daemon-runtimes)'s machine**. The agent runs **directly inside that folder**, with no clone, no copy, and no worktree.
+For repos that can't reasonably be re-cloned per task — multi-gigabyte game checkouts, large monorepos, or any project where clone-per-task is painful — a project can instead point at an **existing directory on a specific [daemon](/daemon-runtimes)'s machine**. It can run directly in that folder (`in_place`) or create one linked worktree per issue (`worktree`), without cloning the repository again.
 
 ```json
 {
@@ -48,29 +48,30 @@ For repos that can't reasonably be re-cloned per task — multi-gigabyte game ch
   "resource_ref": {
     "local_path": "/Users/me/code/big-game",
     "daemon_id": "0001234e-…",
-    "label": "main checkout"
+    "label": "main checkout",
+    "mode": "worktree"
   }
 }
 ```
 
-The trade-off vs. `github_repo` is intentional: only the bound daemon can pick up tasks against the directory, and tasks on the same directory run **serially** instead of in parallel. In exchange you keep your existing checkout, your existing branch, your existing dirty state — Multica never re-clones it.
+`mode` defaults to `in_place`, preserving the original behavior: tasks sharing the resolved directory serialize and edit the user's checkout. `worktree` requires a Git working tree, creates a persistent branch and worktree per issue under the daemon's workspace root, serializes tasks on the same issue, and allows different issues to run in parallel. A definite non-Git path falls back to `in_place`; Git inspection or worktree creation errors fail the task.
 
 ### When to pick `local_directory` over `github_repo`
 
 | Concern | `github_repo` (worktree) | `local_directory` |
 | --- | --- | --- |
-| Checkout cost per task | Fresh clone + worktree | None — agent runs in place |
-| Concurrency on the same repo | Many tasks in parallel | One at a time per directory |
-| Branch / dirty state | Each task gets a fresh branch from the default | Whatever the directory currently has |
+| Checkout cost per task | Fresh clone + worktree | No clone; in place or linked worktree |
+| Concurrency on the same repo | Many tasks in parallel | Serial in `in_place`; parallel per issue in `worktree` |
+| Branch / dirty state | Each task gets a fresh branch from the default | Live checkout in `in_place`; persistent issue branch in `worktree` |
 | Where it can run | Any daemon | Exactly one daemon (the one bound) |
-| Disk footprint | One worktree per task | Zero overhead — your existing folder |
+| Disk footprint | One worktree per task | Zero in `in_place`; one persistent worktree per issue in `worktree` |
 
 Pick `local_directory` when **either** of these matches:
 
 1. **Re-cloning is prohibitively expensive** — a multi-gigabyte game checkout, a monorepo with heavy LFS assets, or anything where the per-task `git clone` would dominate the actual work. You trade concurrency for a clone-free run.
 2. **Your changes are fine-grained and you want to review them locally as they happen** — you're iterating on a single component, you want to flip between the agent's edits and your editor every few minutes, and you'd rather have your existing checkout be the source of truth than a per-task worktree you have to dig out of `~/multica_workspaces/`.
 
-The trade-off you accept in both cases is the same: **this version ships no file-level write lock.** The per-directory serial gate (one task at a time on the same folder) is the only protection against agents in two different issues touching the same files at the same time. If you point two issues' agents at the same `local_directory`, their tasks queue rather than parallelise — that's by design. If you need real parallelism on the same codebase, stay on `github_repo`.
+Choose `in_place` when the live checkout and its dirty state are intentional. Choose `worktree` when the path is a Git repository and cross-issue parallelism matters. Neither mode provides file-level locking; isolation in `worktree` mode comes from separate issue worktrees.
 
 ### Attaching a local directory
 
@@ -89,6 +90,7 @@ multica project resource add <project-id> \
   --type local_directory \
   --local-path /Users/me/code/big-game \
   --daemon-id <daemon-uuid> \
+  --mode worktree \
   --ref-label "main checkout"        # optional
 
 multica project resource update <project-id> <resource-id> \
@@ -129,11 +131,11 @@ A daemon that has no `local_directory` row for a project that has one bound else
 When a task is dispatched on an issue whose project has a `local_directory` bound to the receiving daemon, the daemon:
 
 1. Re-validates the path (rules above).
-2. Acquires a per-directory lock keyed on the symlink-resolved real path — so two routes to the same folder (one via a symlink, one direct) still serialise.
-3. Writes the agent's `CLAUDE.md` / `AGENTS.md` (and `.multica/project/resources.json`) **into the user's directory**. The agent works there, just as if you'd opened the folder yourself.
+2. In `in_place`, acquires a lock keyed on the symlink-resolved path. In `worktree`, acquires a per-issue lock and creates or validates that issue's linked worktree while a per-repository Git lock protects add/remove operations.
+3. Writes the agent's runtime context into the selected workdir: the user's directory for `in_place`, or the issue worktree for `worktree`.
 4. Keeps Multica's runtime artefacts (`output/`, `logs/`, `.gc_meta.json`) in a separate envRoot **outside** the user's directory.
 
-If a second task for the same directory arrives while the first is running, it parks with status **Waiting for local directory** (等待本地目录释放). The status is visible everywhere the task is — the chat task pill, the agent banner, the execution log, and the activity indicator — and the parked task counts toward the agent's "queued" presence. Cancelling the parked task releases its slot immediately; cancelling the running task lets the next one promote.
+In `in_place`, a second task for the same directory waits. In `worktree`, only another task on the same issue waits; different issues use different worktrees and may run concurrently. Waiting tasks use the **Waiting for local directory** status.
 
 The wait is not a timeout — a parked task stays parked until either the lock releases or the user / agent cancels it.
 
@@ -141,14 +143,14 @@ The wait is not a timeout — a parked task stays parked until either the lock r
 
 - **Will write** `CLAUDE.md` / `AGENTS.md` (or the equivalent for your agent's provider) and `.multica/project/resources.json` at the directory root, so the agent has its meta-skill and resource list. Add these to your `.gitignore` if you don't want them committed.
 - **Will write** whatever code edits the agent decides to make — exactly the same way as if you'd run the agent locally yourself.
-- **Will never physically delete** the directory or anything inside it. Garbage collection is path-aware: for `local_directory` envRoots it cleans only its own `output/` and `logs/` under `workspacesRoot`, and treats the user's directory as off-limits.
+- **Will never physically delete the user's bound directory.** In `worktree` mode, garbage collection may remove a clean daemon-owned issue worktree after the issue has been terminal past the configured TTL. Dirty worktrees are preserved.
 
 ### v1 limits (will tighten in follow-ups)
 
 The first release deliberately ships with sharper edges than `github_repo`. Expect this list to shrink over time — what's documented here is what's true today:
 
-- **No automatic branch switching.** The agent runs in whatever branch you have checked out. Switch branches before dispatching if it matters.
-- **No dirty-tree protection or auto-commit.** Uncommitted changes are visible to the agent, may be modified in place, and won't be stashed. Treat the directory as a real working tree and commit before risky runs.
+- **No automatic branch switching in `in_place`.** The agent runs on the branch you have checked out. `worktree` creates or reuses its deterministic per-issue branch.
+- **No dirty-tree protection or auto-commit.** In `in_place`, existing changes are visible and may be modified. In `worktree`, changes persist in the issue worktree; GC refuses to remove it while dirty.
 - **No automatic PR.** When the task ends, the changes sit on whatever branch they were made on — nothing is pushed and no PR is opened. Push and open the PR yourself when you're ready.
 - **`waiting_local_directory` shows status, not the holder.** The badge tells you the task is parked; it doesn't surface which task or which file path is currently holding the directory.
 

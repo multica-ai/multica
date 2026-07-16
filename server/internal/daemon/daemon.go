@@ -3106,12 +3106,12 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 	// fires only after execenv.Prepare/Reuse has put env.WorkDir on disk,
 	// so consumers that read status==running can resolve the workdir path
 	// without racing the daemon's os.MkdirAll.
-	localRelease, abort := d.acquireLocalDirectoryLockIfNeeded(ctx, task, taskLog)
+	localExecution, abort := d.acquireLocalDirectoryExecutionIfNeeded(ctx, task, taskLog)
 	if abort {
 		return
 	}
-	if localRelease != nil {
-		defer localRelease()
+	if localExecution != nil {
+		defer localExecution.Release()
 	}
 
 	// Hold a process-wide active-root guard for the rest of this task so
@@ -3141,6 +3141,7 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 	// deleted (404).
 	runCtx, runCancel := context.WithCancel(ctx)
 	defer runCancel()
+	runCtx = withLocalDirectoryExecution(runCtx, localExecution)
 
 	// Poll interval is d.cancelPollInterval (5s in production, reduced in tests
 	// via direct field override). Guard against zero so a misconfigured daemon
@@ -3229,7 +3230,7 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 			// Worktree-mode tasks ran in a disposable per-issue worktree under
 			// localwt (reaped by pruneLocalWorktrees), so their envRoot logbook
 			// is left to normal TTL cleanup.
-			if assignment, _ := localDirectoryAssignmentForTask(task, d.cfg.DaemonID); assignment != nil && !wantsWorktree(ctx, assignment) {
+			if localExecution != nil && !localExecution.Worktree {
 				meta.LocalDirectory = true
 			}
 			if err := execenv.WriteGCMeta(result.EnvRoot, meta, taskLog); err != nil {
@@ -3257,6 +3258,18 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 //  4. The blocking wait is cancelled (daemon shutdown, server-side cancel)
 //     — fail the task with the ctx error.
 func (d *Daemon) acquireLocalDirectoryLockIfNeeded(ctx context.Context, task Task, taskLog *slog.Logger) (release func(), abort bool) {
+	execution, abort := d.acquireLocalDirectoryExecutionIfNeeded(ctx, task, taskLog)
+	if execution == nil {
+		return nil, abort
+	}
+	return execution.Release, abort
+}
+
+// acquireLocalDirectoryExecutionIfNeeded is the authoritative decision point
+// for a local_directory task. Besides holding the lifetime lock, the returned
+// execution records the exact workdir selected at the gate so runTask never
+// re-probes git and changes strategy after the lock has been chosen.
+func (d *Daemon) acquireLocalDirectoryExecutionIfNeeded(ctx context.Context, task Task, taskLog *slog.Logger) (*localDirectoryExecution, bool) {
 	if len(task.ProjectResources) == 0 || d.cfg.DaemonID == "" {
 		return nil, false
 	}
@@ -3272,14 +3285,33 @@ func (d *Daemon) acquireLocalDirectoryLockIfNeeded(ctx context.Context, task Tas
 		return nil, false
 	}
 
-	// Worktree mode isolates each issue in its own git worktree so different
-	// issues on the same repo run in parallel. It requires the source path to
-	// be a git worktree; a non-git path cannot support branching a worktree and
-	// silently degrades to in_place so the task still runs instead of failing
-	// on a mode the path can't honour.
-	useWorktree := wantsWorktree(ctx, assignment)
-	if assignment.Mode == localDirectoryModeWorktree && !useWorktree {
-		taskLog.Warn("local_directory: worktree mode requested but path is not a git worktree; falling back to in_place", "path", assignment.AbsPath)
+	if err := validateLocalPath(assignment.AbsPath); err != nil {
+		taskLog.Error("local_directory: path validation failed", "error", err)
+		if failErr := d.client.FailTask(ctx, task.ID, err.Error(), "", "", "local_directory_error"); failErr != nil {
+			taskLog.Error("fail task after local_directory validation error", "error", failErr)
+		}
+		return nil, true
+	}
+
+	// Worktree mode isolates each issue in its own git worktree. Only a definite
+	// non-repository result falls back to in_place; git execution, permission,
+	// cancellation, and repository-corruption errors fail closed instead of
+	// unexpectedly granting the agent access to the user's live checkout.
+	useWorktree := false
+	if assignment.Mode == localDirectoryModeWorktree {
+		var probeErr error
+		useWorktree, probeErr = probeGitWorkTree(ctx, assignment.AbsPath)
+		if probeErr != nil {
+			err := fmt.Errorf("local_directory worktree: inspect source repository: %w", probeErr)
+			taskLog.Error("local_directory: git probe failed", "error", err)
+			if failErr := d.client.FailTask(ctx, task.ID, err.Error(), "", "", "local_directory_error"); failErr != nil {
+				taskLog.Error("fail task after local_directory git probe error", "error", failErr)
+			}
+			return nil, true
+		}
+		if !useWorktree {
+			taskLog.Warn("local_directory: worktree mode requested but path is not inside a Git working tree; falling back to in_place", "path", assignment.AbsPath)
+		}
 	}
 
 	// The lock key is the resolved repo path for in_place (serialize the whole
@@ -3294,13 +3326,6 @@ func (d *Daemon) acquireLocalDirectoryLockIfNeeded(ctx context.Context, task Tas
 	}
 
 	taskLog = taskLog.With("local_directory", assignment.AbsPath, "mode", assignment.Mode, "use_worktree", useWorktree)
-	if err := validateLocalPath(assignment.AbsPath); err != nil {
-		taskLog.Error("local_directory: path validation failed", "error", err)
-		if failErr := d.client.FailTask(ctx, task.ID, err.Error(), "", "", "local_directory_error"); failErr != nil {
-			taskLog.Error("fail task after local_directory validation error", "error", failErr)
-		}
-		return nil, true
-	}
 
 	// While the lock is contended the daemon would otherwise sit blocked on
 	// the path mutex with no signal back from the server — the main
@@ -3358,7 +3383,7 @@ func (d *Daemon) acquireLocalDirectoryLockIfNeeded(ctx context.Context, task Tas
 			}()
 		})
 	}
-	release, err = d.localPathLocks.Acquire(waitCtx, lockKey, task.ID, onWait)
+	release, err := d.localPathLocks.Acquire(waitCtx, lockKey, task.ID, onWait)
 	if err != nil {
 		// If the wait was cut short because the server finalized the task
 		// (terminal state) or deleted the row, the row is already in a
@@ -3387,8 +3412,11 @@ func (d *Daemon) acquireLocalDirectoryLockIfNeeded(ctx context.Context, task Tas
 	// issue lock, so runTask finds it on disk when it sets LocalWorkDir. Creation
 	// failure must release the lock and fail the task rather than let runTask
 	// start against a missing directory.
+	workDir := assignment.AbsPath
 	if useWorktree {
-		if _, _, wtErr := d.ensureIssueWorktree(ctx, assignment.AbsPath, assignment.IssueID, ""); wtErr != nil {
+		var wtErr error
+		workDir, _, wtErr = d.ensureIssueWorktree(ctx, assignment.AbsPath, assignment.IssueID, "")
+		if wtErr != nil {
 			taskLog.Error("local_directory: ensure worktree failed", "error", wtErr)
 			release()
 			if failErr := d.client.FailTask(ctx, task.ID, wtErr.Error(), "", "", "local_directory_error"); failErr != nil {
@@ -3398,7 +3426,7 @@ func (d *Daemon) acquireLocalDirectoryLockIfNeeded(ctx context.Context, task Tas
 		}
 	}
 	taskLog.Info("local_directory: lock acquired")
-	return release, false
+	return &localDirectoryExecution{Release: release, WorkDir: workDir, Worktree: useWorktree}, false
 }
 
 // reportTaskResult writes the final task disposition back to the server.
@@ -3908,23 +3936,28 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// Resolve any local_directory assignment again here so runTask can plumb
 	// LocalWorkDir into execenv. handleTask already validated + locked the
 	// path for worker tasks; leader tasks intentionally skip the assignment.
-	localAssignment, _ := localDirectoryAssignmentForTask(task, d.cfg.DaemonID)
-	// localWorkDir is the agent's working directory: the per-issue worktree for
-	// worktree mode (handleTask already created it under the issue lock), or the
-	// user's own path for in_place. Falls back to AbsPath when worktree mode was
-	// requested on a non-git path, matching the lock gate's degradation.
+	localAssignment, assignmentErr := localDirectoryAssignmentForTask(task, d.cfg.DaemonID)
+	if assignmentErr != nil {
+		return TaskResult{}, assignmentErr
+	}
+	// The lock gate passes its exact workdir decision through context so this
+	// phase cannot re-probe git and switch from an issue lock to the live tree.
 	localWorkDir := ""
-	if localAssignment != nil {
-		localWorkDir = resolvedLocalWorkDir(ctx, localAssignment, d.cfg.WorkspacesRoot, d.cfg.DaemonID)
+	if execution := localDirectoryExecutionFromContext(ctx); execution != nil {
+		localWorkDir = execution.WorkDir
+	} else if localAssignment != nil {
+		if localAssignment.Mode == localDirectoryModeWorktree {
+			return TaskResult{}, errors.New("local_directory worktree: missing validated execution lease")
+		}
+		localWorkDir = localAssignment.AbsPath
 	}
 	// Reuse is skipped for every local_directory task (in_place and worktree).
-	// execenv.Reuse derives the env root from filepath.Dir(WorkDir), which is
-	// only valid when WorkDir lives inside an envRoot; local_directory WorkDirs
-	// live outside it (the user's path for in_place, a per-issue worktree under
-	// localwt for worktree), so reuse would compute a bogus root and misplace
-	// codex-home. Cross-task continuity on the same issue does not need env
-	// reuse anyway — the worktree and its branch persist for worktree mode, and
-	// the per-issue codex session store is re-attached by each fresh Prepare.
+	// execenv.Reuse normally derives RootDir from filepath.Dir(WorkDir). Its
+	// LocalDirectory escape hatch can only replace that bogus root with an empty
+	// one because PriorWorkDir does not carry the original envRoot; downstream
+	// codex-home and sidecar cleanup therefore have no safe task root. Cross-task
+	// continuity does not need env reuse: the worktree persists in worktree mode,
+	// and each fresh Prepare re-attaches the per-issue Codex session store.
 	// Squad-leader tasks also skip reuse so a pre-fix leader session recorded
 	// against the user's local_directory cannot be re-entered without a lock.
 	var agentMcpConfig json.RawMessage
@@ -4097,13 +4130,11 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// completion and passed back via PriorWorkDir on the next claim, so
 	// rewriting the marker block in place is the right behavior.
 	//
-	// In local_directory mode the workdir is the user's own repo, reuse is
-	// already disabled above (see localAssignment == nil), and the brief
-	// would otherwise live on inside the user's repository — a subsequent
-	// manual `claude` / `codex` run in that directory would pick
-	// up stale Multica instructions (issue id, trigger comment id, reply
-	// rules) and start acting on the previous task's context. Excise the
-	// marker block on the way out instead.
+	// In local_directory mode the workdir is a stable external directory: the
+	// user's checkout for in_place or a persistent issue worktree. Reuse is
+	// disabled above, and leaving the brief behind would let a later manual or
+	// follow-up run pick up stale issue/comment instructions. Excise the marker
+	// block and other task sidecars on the way out.
 	if env.LocalDirectory {
 		defer func() {
 			if cerr := execenv.CleanupRuntimeConfig(env.WorkDir, provider); cerr != nil {

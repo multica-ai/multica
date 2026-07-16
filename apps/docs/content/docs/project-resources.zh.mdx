@@ -17,7 +17,7 @@ description: 给项目挂上有类型的指针（GitHub 仓库、本地目录，
 
 这个形状是有意的 —— 跟 Multica 里 agent provider 的设计完全一致：一个 `type` 判别字段 + 一个有类型的 payload。schema 保持稳定，未来加"Notion 页面"、"Google Doc"、"上传文件"、"外部 URL"都是小型的、增量的改动。
 
-目前内置两种资源类型：[`github_repo`](#resource-type-github_repo)（每次任务克隆出独立 worktree）和 [`local_directory`](#resource-type-local_directory)（直接在某台守护进程所在机器的目录里运行）。
+目前内置两种资源类型：[`github_repo`](#resource-type-github_repo)（每次任务克隆出独立 worktree）和 [`local_directory`](#resource-type-local_directory)（使用某台守护进程绑定的目录，可以原地运行，也可以按 issue 创建 linked worktree）。
 
 ## 资源类型：`github_repo`
 
@@ -37,7 +37,7 @@ description: 给项目挂上有类型的指针（GitHub 仓库、本地目录，
 
 ## 资源类型：`local_directory`
 
-对于那些不适合每次任务重新 clone 的仓库 —— 几十 GB 的游戏项目、超大 monorepo、或者本身就不想被多次复制的目录 —— 项目可以改为指向 **某台 [守护进程](/daemon-runtimes) 机器上的一个已有目录**。智能体会 **直接在这个目录里运行**，不 clone、不复制、不创建 worktree。
+对于那些不适合每次任务重新 clone 的仓库 —— 几十 GB 的游戏项目、超大 monorepo、或者本身就不想被多次复制的目录 —— 项目可以指向 **某台 [守护进程](/daemon-runtimes) 机器上的一个已有目录**。它既可以直接在该目录运行（`in_place`），也可以为每个 issue 创建 linked worktree（`worktree`），两种模式都不会重新 clone 仓库。
 
 ```json
 {
@@ -45,29 +45,30 @@ description: 给项目挂上有类型的指针（GitHub 仓库、本地目录，
   "resource_ref": {
     "local_path": "/Users/me/code/big-game",
     "daemon_id": "0001234e-…",
-    "label": "主开发目录"
+    "label": "主开发目录",
+    "mode": "worktree"
   }
 }
 ```
 
-跟 `github_repo` 相比的取舍是有意的：只有绑定的那台守护进程会使用这个本地目录执行任务，而且 **同一个目录上的任务串行执行**，不再并行。换来的是：你的现有 checkout、当前分支、未提交的脏改动一切照旧 —— Multica 不会重新 clone。
+`mode` 默认为 `in_place`，保持原有行为：指向同一真实路径的任务串行执行，并直接修改用户 checkout。`worktree` 要求路径属于 Git 工作树；守护进程会在自己的工作区根目录下为每个 issue 创建持久分支和 worktree，同一 issue 的任务串行，不同 issue 可以并行。明确的非 Git 路径会回退到 `in_place`；Git 检查或 worktree 创建失败则直接让任务失败。
 
 ### 什么时候选 `local_directory`、什么时候继续用 `github_repo`
 
 | 关注点 | `github_repo`（worktree 模式） | `local_directory` |
 | --- | --- | --- |
-| 每次任务的 checkout 成本 | 重新 clone + worktree | 0 —— 智能体原地干活 |
-| 同一仓库的并发 | 任意条任务并行 | 同一目录每次一条 |
-| 分支 / 脏改动 | 每条任务从默认分支拉一个干净分支 | 用目录当前的状态 |
+| 每次任务的 checkout 成本 | 重新 clone + worktree | 不 clone；原地运行或创建 linked worktree |
+| 同一仓库的并发 | 任意条任务并行 | `in_place` 串行；`worktree` 按 issue 并行 |
+| 分支 / 脏改动 | 每条任务从默认分支拉一个干净分支 | `in_place` 用当前状态；`worktree` 用持久 issue 分支 |
 | 可在哪台机器跑 | 任意守护进程 | 仅绑定的那一台 |
-| 磁盘占用 | 每条任务一个 worktree | 0 —— 用你已有的目录 |
+| 磁盘占用 | 每条任务一个 worktree | `in_place` 为 0；`worktree` 每个 issue 一个持久 worktree |
 
 下面两种场景下推荐选 `local_directory`：
 
 1. **重新 clone 的成本过高** —— 几十 GB 的游戏 checkout、带大量 LFS 资源的 monorepo、或者任何场景下 `git clone` 的耗时会盖过实际工作量。你拿并发能力换"零 clone"的运行。
 2. **改动很细碎，需要频繁在本地 review** —— 你在反复打磨某个组件，几分钟就要切回编辑器看一眼智能体改了什么；与其每次去 `~/multica_workspaces/` 翻一个新 worktree，不如让它就在你已有的 checkout 里干活。
 
-两种情况下你接受的取舍是同一个：**当前版本没有任何文件级的写入锁**。"同一目录上的任务串行执行"这一道闸是唯一防止两个 issue 的智能体同时改同一份文件的保护。如果你把两个 issue 的智能体都指向同一个 `local_directory`，它们的任务会排队、而不是并行 —— 这是有意的。如果需要在同一份代码上真正的并行，请继续用 `github_repo`。
+需要保留当前 checkout 与脏状态时选 `in_place`；路径是 Git 仓库、并且需要跨 issue 并行时选 `worktree`。两种模式都没有文件级写锁；`worktree` 的隔离来自各 issue 独立的工作树。
 
 ### 添加本地目录
 
@@ -86,6 +87,7 @@ multica project resource add <project-id> \
   --type local_directory \
   --local-path /Users/me/code/big-game \
   --daemon-id <daemon-uuid> \
+  --mode worktree \
   --ref-label "主开发目录"        # 可选
 
 multica project resource update <project-id> <resource-id> \
@@ -126,11 +128,11 @@ multica project resource update <project-id> <resource-id> \
 当一条任务被分发到某个 issue、并且该项目在领任务的守护进程上绑了 `local_directory` 时，守护进程会：
 
 1. 再次校验路径（按上面那套规则）。
-2. 以 symlink 解析后的真实路径为 key 取一把"目录锁" —— 即便两条路径走不同路由（一条经过 symlink，一条直接）指向同一个文件夹，也会被串行化。
-3. 把智能体的 `CLAUDE.md` / `AGENTS.md`（以及 `.multica/project/resources.json`）**写进你的目录**。智能体就在那里工作，跟你自己打开这个文件夹后启动它是一样的体验。
+2. `in_place` 以 symlink 解析后的真实路径加锁；`worktree` 按 issue 加锁，并用仓库级 Git 锁保护 worktree 的创建和删除。
+3. 把智能体运行上下文写入实际工作目录：`in_place` 写入用户目录，`worktree` 写入该 issue 的 worktree。
 4. Multica 自己的运行时产物（`output/`、`logs/`、`.gc_meta.json`）放在 **你目录之外** 的一个独立 envRoot 里。
 
-如果第一条任务还在跑、第二条针对同一目录的任务又来了，第二条会停在 **Waiting for local directory（等待本地目录释放）** 状态。这个状态在所有相关 UI 都看得见 —— 聊天里的任务状态条、智能体横幅、执行记录、活动指示器；等待中的任务会被计入该智能体的"排队"占用。取消等待中的任务会立即释放它的槽位；取消正在跑的那条会让下一条立即顶上。
+在 `in_place` 模式下，同一目录的后续任务会等待；在 `worktree` 模式下，只有同一 issue 的后续任务会等待，不同 issue 可以并行。等待中的任务使用 **Waiting for local directory（等待本地目录释放）** 状态。
 
 等待没有超时 —— 一条等待中的任务会一直等到锁释放、或者被用户/智能体取消为止。
 
@@ -138,14 +140,14 @@ multica project resource update <project-id> <resource-id> \
 
 - **会写入** `CLAUDE.md` / `AGENTS.md`（或对应 provider 的等价文件）以及 `.multica/project/resources.json` 到目录根 —— 这样智能体才有自己的元 skill 和资源清单。如果不想把这些提交到 git，请加进 `.gitignore`。
 - **会写入** 智能体决定做出的所有代码改动 —— 跟你自己在本地跑这个智能体没有区别。
-- **永远不会物理删除** 你的目录或里面任何内容。垃圾回收对路径是有判断的：对 `local_directory` 的 envRoot，它只会清自己挂在 `workspacesRoot` 下的 `output/` 与 `logs/`，**完全不碰** 你的目录。
+- **永远不会物理删除用户绑定的目录。** `worktree` 模式下，issue 进入终态并超过 TTL 后，垃圾回收可以删除守护进程自己创建且干净的 issue worktree；有未提交改动的 worktree 会保留。
 
 ### v1 阶段的限制（后续会逐步收敛）
 
 第一版有意比 `github_repo` 留了更多锋利的边。下面这份清单会随着后续工作逐步缩短；这里列出的是 **今天**的真实行为：
 
-- **不会自动切分支。** 智能体跑在你当前 checkout 的分支上。如果分支选择重要，请在分发任务前自己切换好。
-- **不会保护脏工作区，也不会自动 commit。** 未提交的改动智能体看得到、可能就地修改，不会被 stash。请把这个目录当作真实的工作区来对待，重要的运行前自己先 commit。
+- **`in_place` 不会自动切分支。** 智能体跑在当前 checkout 的分支上；`worktree` 会创建或复用确定的 issue 分支。
+- **不会自动 commit。** `in_place` 下现有改动对智能体可见且可能被修改；`worktree` 下改动保留在 issue worktree 中，脏 worktree 不会被 GC 删除。
 - **不会自动开 PR。** 任务结束后，改动就停在它实际做出来的分支上 —— Multica 不会 push、不会开 PR。需要 push、需要 PR 的话请自己来。
 - **`waiting_local_directory` 只显示状态，不显示是谁占着。** 这个徽标只告诉你"任务在等"，不会告诉你具体是哪条任务、哪个路径正在持有目录。
 

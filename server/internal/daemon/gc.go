@@ -599,10 +599,21 @@ func (d *Daemon) pruneLocalWorktrees(ctx context.Context) {
 	if d.cfg.DaemonID == "" {
 		return
 	}
+	if err := validateWorktreePathKey("daemonID", d.cfg.DaemonID); err != nil {
+		d.logger.Warn("gc: invalid daemon id for local worktree root", "error", err)
+		return
+	}
 	daemonDir := filepath.Join(d.cfg.WorkspacesRoot, "localwt", d.cfg.DaemonID)
+	if err := validateManagedWorktreePath(d.cfg.WorkspacesRoot, daemonDir); err != nil {
+		d.logger.Warn("gc: unsafe local worktree root", "path", daemonDir, "error", err)
+		return
+	}
 	entries, err := os.ReadDir(daemonDir)
 	if err != nil {
-		return // not created yet, or unreadable — nothing to prune
+		if !os.IsNotExist(err) {
+			d.logger.Warn("gc: read local worktree root failed", "path", daemonDir, "error", err)
+		}
+		return
 	}
 	pruned := 0
 	for _, entry := range entries {
@@ -614,10 +625,7 @@ func (d *Daemon) pruneLocalWorktrees(ctx context.Context) {
 		}
 		issueID := entry.Name()
 		wtPath := filepath.Join(daemonDir, issueID)
-		if !d.shouldPruneIssueWorktree(ctx, issueID, wtPath) {
-			continue
-		}
-		if d.removeIssueWorktreeByPath(ctx, wtPath) {
+		if d.pruneLocalWorktree(ctx, issueID, wtPath) {
 			pruned++
 		}
 	}
@@ -626,15 +634,28 @@ func (d *Daemon) pruneLocalWorktrees(ctx context.Context) {
 	}
 }
 
-// shouldPruneIssueWorktree reports whether the worktree at wtPath (for issueID)
-// is eligible for reaping: no task is currently running in it, and the issue is
-// terminal (done/cancelled) and stale past GCTTL. On any status lookup error it
-// returns false so a transient server hiccup can never over-reap a live issue's
-// worktree — mirroring gcDecisionIssue's conservative 404 handling.
-func (d *Daemon) shouldPruneIssueWorktree(ctx context.Context, issueID, wtPath string) bool {
-	if d.isActiveEnvRoot(wtPath) {
+// pruneLocalWorktree participates in the same per-issue lock protocol as task
+// execution. The non-blocking acquire keeps GC from waiting behind a live
+// agent; whichever side wins excludes the other across the status check and
+// the complete git removal.
+func (d *Daemon) pruneLocalWorktree(ctx context.Context, issueID, wtPath string) bool {
+	release, ok := d.localPathLocks.TryAcquire(issueLockKey(issueID), "gc-local-worktree:"+issueID)
+	if !ok {
 		return false
 	}
+	defer release()
+	if !d.shouldPruneIssueWorktree(ctx, issueID) {
+		return false
+	}
+	return d.removeIssueWorktreeByPath(ctx, issueID, wtPath)
+}
+
+// shouldPruneIssueWorktree reports whether the issue is terminal
+// (done/cancelled) and stale past GCTTL. The caller holds the per-issue lock,
+// which is the authoritative running-task guard. On any lookup error this
+// returns false so a transient server hiccup can never over-reap a live issue's
+// worktree.
+func (d *Daemon) shouldPruneIssueWorktree(ctx context.Context, issueID string) bool {
 	status, err := d.client.GetIssueGCCheck(ctx, issueID)
 	if err != nil || isAccessNotFound(err) {
 		return false
@@ -645,50 +666,35 @@ func (d *Daemon) shouldPruneIssueWorktree(ctx context.Context, issueID, wtPath s
 	return false
 }
 
-// removeIssueWorktreeByPath removes a worktree directory and its git metadata.
-// It discovers the owning repo from the worktree itself (git rev-parse
-// --git-common-dir) and runs `git worktree remove`, which cleans both the
-// directory and the main repo's worktree metadata atomically. If that fails
-// (damaged metadata, git missing) it falls back to RemoveAll so disk is still
-// reclaimed; leftover metadata in the user's repo is harmless and eventually
-// pruned by the user's own `git worktree prune`.
-func (d *Daemon) removeIssueWorktreeByPath(ctx context.Context, wtPath string) bool {
-	mainRepo, err := worktreeMainRepo(ctx, wtPath)
-	if err == nil && mainRepo != "" {
-		if rmErr := d.removeIssueWorktree(ctx, mainRepo, wtPath); rmErr == nil {
-			return true
-		} else {
-			d.logger.Warn("gc: git worktree remove failed; falling back to RemoveAll", "path", wtPath, "error", rmErr)
-		}
+// removeIssueWorktreeByPath removes a validated worktree and its git metadata.
+// Failures are logged and retried on a later GC pass; it deliberately does not
+// fall back to RemoveAll because bypassing git can race repository mutations,
+// discard recoverable uncommitted work, and strand metadata in the user's repo.
+func (d *Daemon) removeIssueWorktreeByPath(ctx context.Context, issueID, wtPath string) bool {
+	commonDir, err := gitCommonDir(ctx, wtPath)
+	if err != nil {
+		d.logger.Warn("gc: resolve local worktree git metadata failed", "path", wtPath, "error", err)
+		return false
 	}
-	if err := os.RemoveAll(wtPath); err != nil {
-		d.logger.Warn("gc: remove local worktree failed", "path", wtPath, "error", err)
+	valid, err := validateIssueWorktree(ctx, wtPath, commonDir, issueWorktreeBranch(issueID))
+	if err != nil || !valid {
+		d.logger.Warn("gc: refusing to remove unexpected local worktree", "path", wtPath, "error", err)
+		return false
+	}
+	clean, err := isWorktreeClean(ctx, wtPath)
+	if err != nil {
+		d.logger.Warn("gc: inspect local worktree status failed", "path", wtPath, "error", err)
+		return false
+	}
+	if !clean {
+		d.logger.Info("gc: preserving dirty local worktree", "path", wtPath)
+		return false
+	}
+	if err := d.removeIssueWorktreeWithCommonDir(ctx, commonDir, wtPath); err != nil {
+		d.logger.Warn("gc: git worktree remove failed", "path", wtPath, "error", err)
 		return false
 	}
 	return true
-}
-
-// worktreeMainRepo returns the working-tree root of the main repository that the
-// worktree at wtPath is linked to, via `git rev-parse --git-common-dir`. Returns
-// an error when git is unavailable or the path is not a linked worktree.
-func worktreeMainRepo(ctx context.Context, wtPath string) (string, error) {
-	out, err := exec.CommandContext(ctx, "git", "-C", wtPath, "rev-parse", "--git-common-dir").Output()
-	if err != nil {
-		return "", err
-	}
-	commonDir := strings.TrimSpace(string(out))
-	if commonDir == "" {
-		return "", errors.New("empty git common dir")
-	}
-	if !filepath.IsAbs(commonDir) {
-		commonDir = filepath.Join(wtPath, commonDir)
-	}
-	abs, err := filepath.Abs(commonDir)
-	if err != nil {
-		return "", err
-	}
-	// commonDir points at <mainRepo>/.git; the working tree root is its parent.
-	return filepath.Dir(abs), nil
 }
 
 // pruneRepoWorktrees runs `git worktree prune` on all bare repos in the cache.

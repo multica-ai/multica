@@ -4,8 +4,9 @@
 - The same file registers `project resource list/add/update/remove`.
 - `project create --repo` attaches `github_repo` resources during project creation.
 - `project create` / `project update` accept `--start-date` / `--due-date` (calendar days, `YYYY-MM-DD`), mapping to the project `start_date` / `due_date` columns (migration `166_project_dates`); an empty `--start-date ""`/`--due-date ""` on update clears the date, mirroring the issue date flags in `cmd_issue.go`.
-- `project resource add` supports shortcuts for `github_repo` (`--url`, non-JSON `--ref` for checkout ref, `--default-branch-hint`) and `local_directory` (`--local-path`, `--daemon-id`, `--ref-label`), or generic JSON `--ref '<json>'`.
+- `project resource add` supports shortcuts for `github_repo` (`--url`, non-JSON `--ref` for checkout ref, `--default-branch-hint`) and `local_directory` (`--local-path`, `--daemon-id`, `--ref-label`, `--mode`), or generic JSON `--ref '<json>'`.
 - `project resource update` merges shortcut edits with existing `resource_ref` so a partial edit does not clobber required fields; non-JSON `--ref` updates `github_repo.resource_ref.ref`.
+- `local_directory.resource_ref.mode` is validated by `server/internal/handler/project_resource.go`. `server/internal/daemon/daemon.go` selects and holds the lifetime lock, `local_worktree.go` creates or validates per-issue linked worktrees, and `gc.go` removes only clean, inactive, terminal-issue worktrees after the configured TTL.
 - `server/cmd/server/router.go` exposes `/api/projects` plus `/api/projects/{projectId}/resources` routes.
 - `server/pkg/db/queries/project_resource.sql` is the CRUD query surface for `project_resource` rows.
 - Project resources are written into `.multica/project/resources.json` for agent workdirs.

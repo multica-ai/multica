@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -44,6 +45,16 @@ func TestEnsureIssueWorktree_RejectsEmptyIssueID(t *testing.T) {
 	d := &Daemon{cfg: Config{WorkspacesRoot: t.TempDir(), DaemonID: "d-test"}, logger: slog.Default(), repoGitLocks: NewLocalPathLocker()}
 	if _, _, err := d.ensureIssueWorktree(context.Background(), repo, "", ""); err == nil {
 		t.Fatal("expected error for empty issueID")
+	}
+}
+
+func TestEnsureIssueWorktree_RejectsPathTraversalKeys(t *testing.T) {
+	repo := initLocalRepo(t)
+	d := &Daemon{cfg: Config{WorkspacesRoot: t.TempDir(), DaemonID: "d-test"}, logger: slog.Default(), repoGitLocks: NewLocalPathLocker()}
+	for _, issueID := range []string{"../escape", "a/b", `a\\b`, ".."} {
+		if _, _, err := d.ensureIssueWorktree(context.Background(), repo, issueID, ""); err == nil {
+			t.Errorf("issueID %q: expected rejection", issueID)
+		}
 	}
 }
 
@@ -93,6 +104,88 @@ func TestEnsureIssueWorktree_ReusesSameIssue(t *testing.T) {
 	}
 	if !strings.Contains(string(out), "work") {
 		t.Errorf("reuse lost prior commit; log=%s", out)
+	}
+}
+
+func TestEnsureIssueWorktree_RejectsUnexpectedCanonicalDirectory(t *testing.T) {
+	repo := initLocalRepo(t)
+	root := t.TempDir()
+	d := &Daemon{cfg: Config{WorkspacesRoot: root, DaemonID: "d-test"}, logger: slog.Default(), repoGitLocks: NewLocalPathLocker()}
+	wtPath := issueWorktreePath(root, "d-test", "issue-1")
+	if err := os.MkdirAll(wtPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	marker := filepath.Join(wtPath, "keep.txt")
+	if err := os.WriteFile(marker, []byte("user data"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := d.ensureIssueWorktree(context.Background(), repo, "issue-1", ""); err == nil {
+		t.Fatal("expected canonical non-worktree directory to fail closed")
+	}
+	if _, err := os.Stat(marker); err != nil {
+		t.Fatalf("unexpected directory was modified: %v", err)
+	}
+}
+
+func TestEnsureIssueWorktree_RejectsSymlinkedManagedRoot(t *testing.T) {
+	repo := initLocalRepo(t)
+	root := t.TempDir()
+	external := t.TempDir()
+	if err := os.Symlink(external, filepath.Join(root, "localwt")); err != nil {
+		t.Fatal(err)
+	}
+	d := &Daemon{cfg: Config{WorkspacesRoot: root, DaemonID: "d-test"}, logger: slog.Default(), repoGitLocks: NewLocalPathLocker()}
+	if _, _, err := d.ensureIssueWorktree(context.Background(), repo, "issue-1", ""); err == nil {
+		t.Fatal("expected symlinked managed root to fail closed")
+	}
+	entries, err := os.ReadDir(external)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("worktree creation escaped through symlink: %v", entries)
+	}
+}
+
+func TestEnsureIssueWorktree_RejectsWorktreeFromDifferentRepo(t *testing.T) {
+	repoA := initLocalRepo(t)
+	repoB := initLocalRepo(t)
+	root := t.TempDir()
+	d := &Daemon{cfg: Config{WorkspacesRoot: root, DaemonID: "d-test"}, logger: slog.Default(), repoGitLocks: NewLocalPathLocker()}
+	wtPath, _, err := d.ensureIssueWorktree(context.Background(), repoA, "issue-1", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := d.ensureIssueWorktree(context.Background(), repoB, "issue-1", ""); err == nil {
+		t.Fatal("expected existing worktree from a different repository to be rejected")
+	}
+	if !isGitWorktreeDir(wtPath) {
+		t.Fatal("existing worktree was removed or damaged")
+	}
+}
+
+func TestGitCommonDir_CollapsesRepoSubdirectoryAndLinkedWorktree(t *testing.T) {
+	repo := initLocalRepo(t)
+	if err := os.Mkdir(filepath.Join(repo, "subdir"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	d := &Daemon{cfg: Config{WorkspacesRoot: t.TempDir(), DaemonID: "d-test"}, logger: slog.Default(), repoGitLocks: NewLocalPathLocker()}
+	wtPath, _, err := d.ensureIssueWorktree(context.Background(), repo, "issue-1", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := gitCommonDir(context.Background(), repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{filepath.Join(repo, "subdir"), wtPath} {
+		got, err := gitCommonDir(context.Background(), path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got != want {
+			t.Errorf("gitCommonDir(%q)=%q, want %q", path, got, want)
+		}
 	}
 }
 

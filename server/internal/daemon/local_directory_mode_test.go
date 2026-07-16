@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -64,32 +65,35 @@ func TestIssueLockKey(t *testing.T) {
 	}
 }
 
-// wantsWorktree must be false for a non-git path even when mode=worktree, so
-// the task degrades to in_place instead of failing on a worktree it can't
-// create.
-func TestWantsWorktree_FalseForNonGit(t *testing.T) {
+// A definite non-git path is the only worktree request that degrades to
+// in_place. Operational git failures are tested separately and fail closed.
+func TestProbeGitWorkTree_FalseForNonGit(t *testing.T) {
 	tmp := t.TempDir() // exists, writable, but not a git repo
-	a := &localDirectoryAssignment{Mode: localDirectoryModeWorktree, AbsPath: tmp, IssueID: "i"}
-	if wantsWorktree(context.Background(), a) {
-		t.Fatal("wantsWorktree true for non-git path")
+	got, err := probeGitWorkTree(context.Background(), tmp)
+	if err != nil {
+		t.Fatalf("probeGitWorkTree: %v", err)
+	}
+	if got {
+		t.Fatal("probeGitWorkTree true for non-git path")
 	}
 }
 
-func TestResolvedLocalWorkDir_WorktreeUsesIssuePath(t *testing.T) {
+func TestProbeGitWorkTree_FailsClosedForBrokenGitMetadata(t *testing.T) {
 	tmp := t.TempDir()
-	repo := initLocalRepo(t) // a real git worktree
-	ctx := context.Background()
-
-	inPlace := &localDirectoryAssignment{Mode: localDirectoryModeInPlace, AbsPath: tmp, IssueID: "i"}
-	if got := resolvedLocalWorkDir(ctx, inPlace, "/ws", "d"); got != tmp {
-		t.Errorf("in_place workdir=%q want %q", got, tmp)
+	if err := os.WriteFile(filepath.Join(tmp, ".git"), []byte("gitdir: /missing/repository"), 0o644); err != nil {
+		t.Fatal(err)
 	}
+	if _, err := probeGitWorkTree(context.Background(), tmp); err == nil {
+		t.Fatal("expected broken git metadata to fail closed")
+	}
+}
 
-	wt := &localDirectoryAssignment{Mode: localDirectoryModeWorktree, AbsPath: repo, IssueID: "issue-7"}
-	got := resolvedLocalWorkDir(ctx, wt, "/ws", "d-1")
+func TestLocalDirectoryExecutionContextPreservesGateDecision(t *testing.T) {
 	want := filepath.Join("/ws", "localwt", "d-1", "issue-7")
-	if got != want {
-		t.Errorf("worktree workdir=%q want %q", got, want)
+	execution := &localDirectoryExecution{WorkDir: want, Worktree: true, Release: func() {}}
+	got := localDirectoryExecutionFromContext(withLocalDirectoryExecution(context.Background(), execution))
+	if got != execution || got.WorkDir != want || !got.Worktree {
+		t.Fatalf("execution context = %+v, want %+v", got, execution)
 	}
 }
 

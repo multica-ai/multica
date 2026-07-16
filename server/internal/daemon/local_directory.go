@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -386,21 +385,6 @@ func checkDirReadWrite(dir string) error {
 	return nil
 }
 
-// isGitWorkTree reports whether path is the working tree of a git repo. The
-// daemon uses this to skip branch / worktree machinery when the user has
-// already pointed the project at their own clone — the agent operates on
-// the current branch in place. Returns false on any error (git not on PATH,
-// path not in a repo, exec failure) so the caller can treat "not a git
-// tree" and "can't tell" the same way: skip the git-specific path.
-func isGitWorkTree(ctx context.Context, path string) bool {
-	cmd := exec.CommandContext(ctx, "git", "-C", path, "rev-parse", "--is-inside-work-tree")
-	out, err := cmd.Output()
-	if err != nil {
-		return false
-	}
-	return strings.TrimSpace(string(out)) == "true"
-}
-
 // LocalPathLocker serialises agent tasks that share the same on-disk path.
 // The lock is owned for the entire lifetime of a task (claim → context
 // write → agent execution → result report), not just the agent execution
@@ -444,6 +428,32 @@ func (l *LocalPathLocker) Holder(realPath string) string {
 	entry.mu2.Lock()
 	defer entry.mu2.Unlock()
 	return entry.holderID
+}
+
+// TryAcquire takes the lock only when it is immediately available. It is used
+// by background maintenance that must participate in the same exclusion
+// protocol as tasks without parking the whole GC pass behind a long-running
+// agent. ok=false means another caller owns the key.
+func (l *LocalPathLocker) TryAcquire(realPath, taskID string) (release func(), ok bool) {
+	if realPath == "" || taskID == "" {
+		return nil, false
+	}
+
+	l.mu.Lock()
+	entry, exists := l.locks[realPath]
+	if !exists {
+		entry = &pathLockEntry{}
+		l.locks[realPath] = entry
+	}
+	l.mu.Unlock()
+
+	if !entry.mu.TryLock() {
+		return nil, false
+	}
+	entry.mu2.Lock()
+	entry.holderID = taskID
+	entry.mu2.Unlock()
+	return l.releaser(realPath, entry), true
 }
 
 // Acquire takes the lock for realPath on behalf of taskID. If the lock is

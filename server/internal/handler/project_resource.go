@@ -109,10 +109,11 @@ func validateGithubRepoRef(ref json.RawMessage) (json.RawMessage, error) {
 }
 
 // localDirectoryRef is the JSONB shape stored for resource_type=local_directory.
-// It pins a project to an existing directory on a specific user machine, so
-// agent tasks run against the user's own checkout rather than an isolated git
-// worktree. The daemon_id scopes the path to one daemon registration — the same
-// string path on a different machine is a different resource. The optional
+// It pins a project to an existing directory on a specific user machine. Tasks
+// either run in that directory or in daemon-owned linked worktrees derived from
+// it, depending on Mode. The daemon_id scopes the path to one daemon
+// registration — the same string path on a different machine is a different
+// resource. The optional
 // label is a human-readable hint used by the UI; the row-level
 // project_resource.label column remains the generic column for any resource
 // type.
@@ -126,7 +127,7 @@ func validateGithubRepoRef(ref json.RawMessage) (json.RawMessage, error) {
 //     the user's current commit and runs the agent there. Different issues get
 //     independent worktrees and run in parallel; tasks on the same issue share
 //     one worktree and serialize behind a per-issue mutex. Falls back to
-//     in_place when the path is not a git worktree.
+//     in_place when the path is not inside a Git working tree.
 type localDirectoryRef struct {
 	LocalPath string `json:"local_path"`
 	DaemonID  string `json:"daemon_id"`

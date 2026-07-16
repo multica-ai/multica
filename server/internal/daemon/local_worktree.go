@@ -10,6 +10,26 @@ import (
 	"strings"
 )
 
+type localDirectoryExecution struct {
+	Release  func()
+	WorkDir  string
+	Worktree bool
+}
+
+type localDirectoryExecutionContextKey struct{}
+
+func withLocalDirectoryExecution(ctx context.Context, execution *localDirectoryExecution) context.Context {
+	if execution == nil {
+		return ctx
+	}
+	return context.WithValue(ctx, localDirectoryExecutionContextKey{}, execution)
+}
+
+func localDirectoryExecutionFromContext(ctx context.Context) *localDirectoryExecution {
+	execution, _ := ctx.Value(localDirectoryExecutionContextKey{}).(*localDirectoryExecution)
+	return execution
+}
+
 // issueWorktreeBranch is the git branch name the daemon creates for a
 // per-issue worktree. The multica/ namespace keeps these branches visually
 // distinct from the user's own branches. Unlike the github_repo path (which
@@ -37,8 +57,9 @@ func issueWorktreePath(workspacesRoot, daemonID, issueID string) string {
 // the worktree path and branch name.
 //
 // localRepo is the user's checkout (the caller has already validated it exists
-// and is a git worktree). baseRef, when non-empty, is the commit/branch/tag the
-// worktree branch is created from; empty falls back to HEAD so the agent starts
+// and is inside a Git working tree). baseRef, when non-empty, is the
+// commit/branch/tag the worktree branch is created from; empty falls back to
+// HEAD so the agent starts
 // from the user's latest committed state. Uncommitted changes in the user's
 // working tree are intentionally NOT carried — a worktree branches from a
 // commit, not a dirty index.
@@ -53,26 +74,26 @@ func issueWorktreePath(workspacesRoot, daemonID, issueID string) string {
 // The caller MUST hold the per-issue LocalPathLocker so two cold-start tasks on
 // the same issue don't race `git worktree add`.
 func (d *Daemon) ensureIssueWorktree(ctx context.Context, localRepo, issueID, baseRef string) (wtPath, branch string, err error) {
-	if issueID == "" {
-		// Without an issue id the path collapses to the daemon-level dir and
-		// every such task would collide. Real agent tasks always carry an
-		// issue id; fail closed rather than write into a shared path.
-		return "", "", errors.New("local_directory worktree: issueID is required")
+	if err := validateWorktreePathKey("daemonID", d.cfg.DaemonID); err != nil {
+		return "", "", err
+	}
+	if err := validateWorktreePathKey("issueID", issueID); err != nil {
+		return "", "", err
 	}
 	wtPath = issueWorktreePath(d.cfg.WorkspacesRoot, d.cfg.DaemonID, issueID)
 	branch = issueWorktreeBranch(issueID)
-
-	if isGitWorktreeDir(wtPath) {
-		return wtPath, branch, nil
+	if err := validateManagedWorktreePath(d.cfg.WorkspacesRoot, wtPath); err != nil {
+		return "", "", err
 	}
 
 	// Serialise git mutations on the same repository. Different-issue tasks
 	// hold independent issue locks, so without this two of them could race
 	// `git worktree add` on the user's repo and contend on git's lockfiles.
-	// Brief and scoped to the mutation only — task execution still parallelises.
-	repoKey, relErr := resolveRealPath(localRepo)
-	if relErr != nil {
-		return "", "", fmt.Errorf("local_directory worktree: resolve repo path: %w", relErr)
+	// Keying on the common git dir (not the supplied working-tree path) also
+	// collapses subdirectories and already-linked worktrees of the same repo.
+	repoKey, commonErr := gitCommonDir(ctx, localRepo)
+	if commonErr != nil {
+		return "", "", fmt.Errorf("local_directory worktree: resolve git common dir: %w", commonErr)
 	}
 	gitRelease, err := d.repoGitLocks.Acquire(ctx, repoKey, "ensure-worktree:"+issueID, nil)
 	if err != nil {
@@ -80,22 +101,58 @@ func (d *Daemon) ensureIssueWorktree(ctx context.Context, localRepo, issueID, ba
 	}
 	defer gitRelease()
 
+	exists, validateErr := validateIssueWorktree(ctx, wtPath, repoKey, branch)
+	if validateErr != nil {
+		return "", "", validateErr
+	}
+	if exists {
+		return wtPath, branch, nil
+	}
+
 	if baseRef == "" {
 		baseRef = "HEAD"
 	}
 
-	// Fresh branch from the base ref is the common path for a new issue.
-	if err := gitWorktreeAddBranch(ctx, localRepo, wtPath, branch, baseRef); err == nil {
+	branchExists, err := gitLocalBranchExists(ctx, localRepo, branch)
+	if err != nil {
+		return "", "", fmt.Errorf("local_directory worktree: inspect branch %q: %w", branch, err)
+	}
+	checkoutExisting := func() error {
+		checkoutErr := gitWorktreeCheckoutExisting(ctx, localRepo, wtPath, branch)
+		if checkoutErr == nil {
+			return nil
+		}
+		// A second daemon process can win the same canonical-path creation
+		// race because repoGitLocks is process-local. Accept only the exact
+		// repo+branch worktree that process created; every other collision
+		// remains a fail-closed error.
+		exists, validateErr := validateIssueWorktree(ctx, wtPath, repoKey, branch)
+		if validateErr == nil && exists {
+			return nil
+		}
+		if validateErr != nil {
+			return fmt.Errorf("%w; validate concurrent worktree: %v", checkoutErr, validateErr)
+		}
+		return checkoutErr
+	}
+	if branchExists {
+		if err := checkoutExisting(); err != nil {
+			return "", "", fmt.Errorf("local_directory worktree (reuse branch %q): %w", branch, err)
+		}
 		return wtPath, branch, nil
-	} else if !isBranchCollisionError(err) {
-		return "", "", fmt.Errorf("local_directory worktree: %w", err)
 	}
 
-	// Branch already exists (GC removed the directory but not the branch, or
-	// the user created it out of band). Check the existing branch out into the
-	// new worktree so the issue's accumulated work is recovered.
-	if err := gitWorktreeCheckoutExisting(ctx, localRepo, wtPath, branch); err != nil {
-		return "", "", fmt.Errorf("local_directory worktree (reuse branch %q): %w", branch, err)
+	// Fresh branch from the base ref is the common path for a new issue. A
+	// second process can create the branch after our check; in that case retry
+	// through the existing-branch path instead of parsing localized stderr.
+	if err := gitWorktreeAddBranch(ctx, localRepo, wtPath, branch, baseRef); err != nil {
+		nowExists, checkErr := gitLocalBranchExists(ctx, localRepo, branch)
+		if checkErr != nil || !nowExists {
+			return "", "", fmt.Errorf("local_directory worktree: %w", err)
+		}
+		if checkoutErr := checkoutExisting(); checkoutErr != nil {
+			return "", "", fmt.Errorf("local_directory worktree (reuse branch %q): %w", branch, checkoutErr)
+		}
 	}
 	return wtPath, branch, nil
 }
@@ -107,16 +164,33 @@ func (d *Daemon) ensureIssueWorktree(ctx context.Context, localRepo, issueID, ba
 func (d *Daemon) removeIssueWorktree(ctx context.Context, localRepo, wtPath string) error {
 	// Take the repo git lock so a GC removal can't race a concurrent
 	// ensureIssueWorktree on the same repository.
-	repoKey, err := resolveRealPath(localRepo)
+	repoKey, err := gitCommonDir(ctx, localRepo)
 	if err != nil {
-		repoKey = localRepo
+		return fmt.Errorf("local_directory worktree: resolve git common dir: %w", err)
 	}
 	release, err := d.repoGitLocks.Acquire(ctx, repoKey, "gc-remove-worktree", nil)
 	if err != nil {
 		return fmt.Errorf("local_directory worktree: repo lock: %w", err)
 	}
 	defer release()
-	if out, err := exec.CommandContext(ctx, "git", "-C", localRepo, "worktree", "remove", "--force", "--", wtPath).CombinedOutput(); err != nil {
+	return removeIssueWorktreeWithCommonDir(ctx, repoKey, wtPath)
+}
+
+func (d *Daemon) removeIssueWorktreeWithCommonDir(ctx context.Context, commonDir, wtPath string) error {
+	release, err := d.repoGitLocks.Acquire(ctx, commonDir, "gc-remove-worktree", nil)
+	if err != nil {
+		return fmt.Errorf("local_directory worktree: repo lock: %w", err)
+	}
+	defer release()
+	return removeIssueWorktreeWithCommonDir(ctx, commonDir, wtPath)
+}
+
+func removeIssueWorktreeWithCommonDir(ctx context.Context, commonDir, wtPath string) error {
+	// Do not use --force: the preceding clean check is advisory, and an external
+	// process can still write after it. Let git re-check and refuse removal if
+	// the worktree became dirty in that window.
+	out, err := exec.CommandContext(ctx, "git", "--git-dir", commonDir, "worktree", "remove", "--", wtPath).CombinedOutput()
+	if err != nil {
 		return fmt.Errorf("git worktree remove: %s: %w", strings.TrimSpace(string(out)), err)
 	}
 	return nil
@@ -141,15 +215,19 @@ func gitWorktreeCheckoutExisting(ctx context.Context, repo, wtPath, branch strin
 	return nil
 }
 
-// isBranchCollisionError reports whether err is git's "a branch named X already
-// exists" message. Mirrors repocache.isBranchCollisionError; duplicated here
-// because that helper is package-private and the daemon package must not depend
-// on repocache internals.
-func isBranchCollisionError(err error) bool {
+// gitLocalBranchExists checks the ref directly instead of parsing localized git
+// error text from a failed worktree add.
+func gitLocalBranchExists(ctx context.Context, repo, branch string) (bool, error) {
+	cmd := exec.CommandContext(ctx, "git", "-C", repo, "show-ref", "--verify", "--quiet", "refs/heads/"+branch)
+	err := cmd.Run()
 	if err == nil {
-		return false
+		return true, nil
 	}
-	return strings.Contains(strings.ToLower(err.Error()), "a branch named")
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
+		return false, nil
+	}
+	return false, err
 }
 
 // isGitWorktreeDir reports whether path is an existing git worktree (a .git
@@ -159,26 +237,140 @@ func isGitWorktreeDir(path string) bool {
 	return err == nil && !info.IsDir()
 }
 
-// wantsWorktree reports whether a local_directory assignment should execute in
-// a per-issue worktree rather than in place. Worktree mode additionally
-// requires the source path to be a git worktree; a non-git path degrades to
-// in_place so the task still runs. The lock gate and the runTask workdir wiring
-// must both consult this so the lock key, the on-disk worktree, and the agent's
-// working directory all agree on the strategy.
-func wantsWorktree(ctx context.Context, a *localDirectoryAssignment) bool {
-	if a == nil {
-		return false
+func validateWorktreePathKey(name, value string) error {
+	if value == "" {
+		return fmt.Errorf("local_directory worktree: %s is required", name)
 	}
-	return a.Mode == localDirectoryModeWorktree && isGitWorkTree(ctx, a.AbsPath)
+	if value != strings.TrimSpace(value) || value == "." || value == ".." || strings.ContainsAny(value, `/\\`) {
+		return fmt.Errorf("local_directory worktree: invalid %s %q", name, value)
+	}
+	return nil
 }
 
-// resolvedLocalWorkDir returns the directory the agent should run in for a
-// local_directory assignment: the per-issue worktree path for worktree mode,
-// the user's own path otherwise. Mirrors the decision acquireLocalDirectoryLock
-// IfNeeded already acted on (it created the worktree before runTask runs).
-func resolvedLocalWorkDir(ctx context.Context, a *localDirectoryAssignment, workspacesRoot, daemonID string) string {
-	if wantsWorktree(ctx, a) {
-		return issueWorktreePath(workspacesRoot, daemonID, a.IssueID)
+// validateManagedWorktreePath rejects symlinked components below the configured
+// workspace root. Without this, a local process could replace localwt or a
+// daemon/issue directory with a symlink and redirect task or GC writes outside
+// the daemon-owned subtree.
+func validateManagedWorktreePath(workspacesRoot, target string) error {
+	root, err := filepath.Abs(workspacesRoot)
+	if err != nil {
+		return fmt.Errorf("local_directory worktree: resolve workspace root: %w", err)
 	}
-	return a.AbsPath
+	target, err = filepath.Abs(target)
+	if err != nil {
+		return fmt.Errorf("local_directory worktree: resolve target path: %w", err)
+	}
+	rel, err := filepath.Rel(root, target)
+	if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return fmt.Errorf("local_directory worktree: target %s escapes workspace root %s", target, root)
+	}
+	current := root
+	for _, component := range strings.Split(rel, string(filepath.Separator)) {
+		current = filepath.Join(current, component)
+		info, statErr := os.Lstat(current)
+		if os.IsNotExist(statErr) {
+			return nil
+		}
+		if statErr != nil {
+			return fmt.Errorf("local_directory worktree: inspect managed path %s: %w", current, statErr)
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("local_directory worktree: managed path contains symlink: %s", current)
+		}
+	}
+	return nil
+}
+
+func probeGitWorkTree(ctx context.Context, path string) (bool, error) {
+	cmd := exec.CommandContext(ctx, "git", "-C", path, "rev-parse", "--is-inside-work-tree")
+	cmd.Env = append(os.Environ(), "LC_ALL=C", "LANG=C")
+	out, err := cmd.CombinedOutput()
+	if err == nil {
+		return strings.TrimSpace(string(out)) == "true", nil
+	}
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return false, ctxErr
+	}
+	if strings.Contains(strings.ToLower(string(out)), "not a git repository") {
+		if marker, markerErr := findGitMarker(path); markerErr != nil {
+			return false, markerErr
+		} else if marker != "" {
+			return false, fmt.Errorf("git metadata at %s is present but unusable: %s", marker, strings.TrimSpace(string(out)))
+		}
+		return false, nil
+	}
+	return false, fmt.Errorf("git rev-parse: %s: %w", strings.TrimSpace(string(out)), err)
+}
+
+func findGitMarker(path string) (string, error) {
+	current, err := filepath.Abs(path)
+	if err != nil {
+		return "", err
+	}
+	for {
+		marker := filepath.Join(current, ".git")
+		if _, err := os.Lstat(marker); err == nil {
+			return marker, nil
+		} else if !os.IsNotExist(err) {
+			return "", fmt.Errorf("inspect git metadata %s: %w", marker, err)
+		}
+		parent := filepath.Dir(current)
+		if parent == current {
+			return "", nil
+		}
+		current = parent
+	}
+}
+
+func gitCommonDir(ctx context.Context, path string) (string, error) {
+	out, err := exec.CommandContext(ctx, "git", "-C", path, "rev-parse", "--path-format=absolute", "--git-common-dir").CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("git rev-parse --git-common-dir: %s: %w", strings.TrimSpace(string(out)), err)
+	}
+	commonDir := strings.TrimSpace(string(out))
+	if commonDir == "" || !filepath.IsAbs(commonDir) {
+		return "", fmt.Errorf("git returned invalid common dir %q", commonDir)
+	}
+	commonDir = filepath.Clean(commonDir)
+	if real, evalErr := filepath.EvalSymlinks(commonDir); evalErr == nil {
+		commonDir = real
+	}
+	return commonDir, nil
+}
+
+func validateIssueWorktree(ctx context.Context, wtPath, expectedCommonDir, expectedBranch string) (bool, error) {
+	info, err := os.Lstat(wtPath)
+	if os.IsNotExist(err) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("local_directory worktree: inspect %s: %w", wtPath, err)
+	}
+	gitMarker, markerErr := os.Lstat(filepath.Join(wtPath, ".git"))
+	if !info.IsDir() || markerErr != nil || !gitMarker.Mode().IsRegular() {
+		return false, fmt.Errorf("local_directory worktree: canonical path exists but is not a linked git worktree: %s", wtPath)
+	}
+	actualCommonDir, err := gitCommonDir(ctx, wtPath)
+	if err != nil {
+		return false, fmt.Errorf("local_directory worktree: validate existing common dir: %w", err)
+	}
+	if actualCommonDir != expectedCommonDir {
+		return false, fmt.Errorf("local_directory worktree: canonical path belongs to %s, expected %s", actualCommonDir, expectedCommonDir)
+	}
+	out, err := exec.CommandContext(ctx, "git", "-C", wtPath, "symbolic-ref", "--quiet", "--short", "HEAD").CombinedOutput()
+	if err != nil {
+		return false, fmt.Errorf("local_directory worktree: validate existing branch: %s: %w", strings.TrimSpace(string(out)), err)
+	}
+	if actualBranch := strings.TrimSpace(string(out)); actualBranch != expectedBranch {
+		return false, fmt.Errorf("local_directory worktree: canonical path is on branch %q, expected %q", actualBranch, expectedBranch)
+	}
+	return true, nil
+}
+
+func isWorktreeClean(ctx context.Context, wtPath string) (bool, error) {
+	out, err := exec.CommandContext(ctx, "git", "-C", wtPath, "status", "--porcelain", "--untracked-files=normal").CombinedOutput()
+	if err != nil {
+		return false, fmt.Errorf("git status: %s: %w", strings.TrimSpace(string(out)), err)
+	}
+	return len(strings.TrimSpace(string(out))) == 0, nil
 }

@@ -29,7 +29,7 @@ A project's `description` is also durable context: when an issue (or a quick-cre
 Common resource types:
 
 - `github_repo` — durable GitHub repo context, with `resource_ref.url`, optional checkout `ref`, and optional prompt-only `default_branch_hint`;
-- `local_directory` — daemon-local path context, with `resource_ref.local_path`, `daemon_id`, and optional label.
+- `local_directory` — daemon-local path context, with `resource_ref.local_path`, `daemon_id`, optional label, and execution `mode` (`in_place` by default or `worktree`).
 
 ## CLI
 
@@ -46,12 +46,16 @@ multica project resource list <project-id> --output json
 multica project resource add <project-id> --type github_repo --url <github-url> --output json
 multica project resource add <project-id> --type github_repo --url <github-url> --ref <branch-or-sha> --output json
 multica project resource add <project-id> --type local_directory --local-path <abs-path> --daemon-id <daemon-id> --output json
+multica project resource add <project-id> --type local_directory --local-path <abs-path> --daemon-id <daemon-id> --mode worktree --output json
 multica project resource update <project-id> <resource-id> --url <new-github-url> --output json
 multica project resource update <project-id> <resource-id> --ref <branch-or-sha> --output json
+multica project resource update <project-id> <resource-id> --mode in_place --output json
 multica project resource remove <project-id> <resource-id> --output json
 ```
 
 For `github_repo`, non-JSON `--ref` sets `resource_ref.ref`, the default checkout branch/tag/SHA for future tasks in that project. JSON `--ref '<json>'` remains the escape hatch for full payloads or resource types not covered by shortcuts.
+
+For `local_directory`, `in_place` serializes all tasks that use the resolved path and runs directly in the user's directory. `worktree` creates a persistent per-issue branch and linked worktree under the daemon's workspace root, allowing different issues to run in parallel while tasks on the same issue serialize. A definite non-Git path falls back to `in_place`; Git inspection or worktree failures fail the task rather than writing to an unexpected directory.
 
 `--start-date` / `--due-date` are optional calendar days (`YYYY-MM-DD`, like issue dates). On `project update`, pass an empty string (`--start-date ""`) to clear a date; an unset flag leaves it untouched.
 
@@ -66,7 +70,7 @@ is task-local checkout state.
 
 1. `multica project get <project-id> --output json`.
 2. `multica project resource list <project-id> --output json`.
-3. Check `github_repo.resource_ref.url`, optional `ref`, `default_branch_hint`, and `local_directory.resource_ref.daemon_id`.
+3. Check `github_repo.resource_ref.url`, optional `ref`, `default_branch_hint`, and `local_directory.resource_ref.daemon_id` plus optional `mode`.
 4. Updating resources is a durable mutation. After an update, listing the
    resource is the verification path.
 5. If resources match the expected task context, inspect runtime/repo checkout

@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -62,6 +63,51 @@ func TestPruneLocalWorktrees_RemovesTerminalKeepsActive(t *testing.T) {
 	}
 	if _, statErr := os.Stat(wtActive); os.IsNotExist(statErr) {
 		t.Errorf("active worktree was pruned at %s", wtActive)
+	}
+}
+
+func TestPruneLocalWorktrees_SkipsTaskHoldingIssueLock(t *testing.T) {
+	d := newGCTestDaemon(t, gcCheckHandler(t, map[string]bool{"terminal-issue": true}))
+	d.cfg.DaemonID = "d-test"
+
+	repo := initLocalRepo(t)
+	wtPath, _, err := d.ensureIssueWorktree(context.Background(), repo, "terminal-issue", "")
+	if err != nil {
+		t.Fatalf("ensure terminal: %v", err)
+	}
+
+	release, err := d.localPathLocks.Acquire(context.Background(), issueLockKey("terminal-issue"), "running-task", nil)
+	if err != nil {
+		t.Fatalf("acquire issue lock: %v", err)
+	}
+	d.pruneLocalWorktrees(context.Background())
+	if _, statErr := os.Stat(wtPath); statErr != nil {
+		t.Fatalf("GC removed worktree held by a running task: %v", statErr)
+	}
+
+	release()
+	d.pruneLocalWorktrees(context.Background())
+	if _, statErr := os.Stat(wtPath); !os.IsNotExist(statErr) {
+		t.Fatalf("GC did not remove unlocked terminal worktree: %v", statErr)
+	}
+}
+
+func TestPruneLocalWorktrees_PreservesDirtyWorktree(t *testing.T) {
+	d := newGCTestDaemon(t, gcCheckHandler(t, map[string]bool{"terminal-issue": true}))
+	d.cfg.DaemonID = "d-test"
+
+	repo := initLocalRepo(t)
+	wtPath, _, err := d.ensureIssueWorktree(context.Background(), repo, "terminal-issue", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(wtPath, "uncommitted.txt"), []byte("keep me"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	d.pruneLocalWorktrees(context.Background())
+	if _, err := os.Stat(filepath.Join(wtPath, "uncommitted.txt")); err != nil {
+		t.Fatalf("GC discarded uncommitted work: %v", err)
 	}
 }
 

@@ -8,7 +8,7 @@ import (
 )
 
 // TestValidateLocalDirectoryRef_Mode exercises the mode normalization directly
-// so it runs without a database (the HTTP-layer test above covers the full
+// so it runs without a database (the HTTP-layer test below covers the full
 // handler path under CI with postgres).
 func TestValidateLocalDirectoryRef_Mode(t *testing.T) {
 	cases := []struct {
