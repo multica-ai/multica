@@ -1,6 +1,7 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
 import { inboxKeys } from "./queries";
+import { issueKeys } from "../issues/queries";
 import { useWorkspaceId } from "../hooks";
 import type { InboxItem } from "../types";
 
@@ -28,6 +29,7 @@ export function useMarkInboxRead() {
     },
     onSettled: () => {
       qc.invalidateQueries({ queryKey: inboxKeys.all(wsId) });
+      qc.invalidateQueries({ queryKey: issueKeys.all(wsId) });
     },
   });
 }
@@ -58,6 +60,7 @@ export function useArchiveInbox() {
     onSettled: () => {
       // Both lists: the item just moved from the main inbox into the archive.
       qc.invalidateQueries({ queryKey: inboxKeys.all(wsId) });
+      qc.invalidateQueries({ queryKey: issueKeys.all(wsId) });
     },
   });
 }
@@ -102,6 +105,7 @@ export function useUnarchiveInbox() {
       // rises again when it was archived unread.
       qc.invalidateQueries({ queryKey: inboxKeys.all(wsId) });
       qc.invalidateQueries({ queryKey: inboxKeys.unreadSummary() });
+      qc.invalidateQueries({ queryKey: issueKeys.all(wsId) });
     },
   });
 }
@@ -126,6 +130,7 @@ export function useMarkAllInboxRead() {
     },
     onSettled: () => {
       qc.invalidateQueries({ queryKey: inboxKeys.list(wsId) });
+      qc.invalidateQueries({ queryKey: issueKeys.all(wsId) });
     },
   });
 }
@@ -139,6 +144,7 @@ export function useArchiveAllInbox() {
     mutationFn: () => api.archiveAllInbox(),
     onSettled: () => {
       qc.invalidateQueries({ queryKey: inboxKeys.all(wsId) });
+      qc.invalidateQueries({ queryKey: issueKeys.all(wsId) });
     },
   });
 }
@@ -150,6 +156,7 @@ export function useArchiveAllReadInbox() {
     mutationFn: () => api.archiveAllReadInbox(),
     onSettled: () => {
       qc.invalidateQueries({ queryKey: inboxKeys.all(wsId) });
+      qc.invalidateQueries({ queryKey: issueKeys.all(wsId) });
     },
   });
 }
@@ -161,6 +168,7 @@ export function useArchiveCompletedInbox() {
     mutationFn: () => api.archiveCompletedInbox(),
     onSettled: () => {
       qc.invalidateQueries({ queryKey: inboxKeys.all(wsId) });
+      qc.invalidateQueries({ queryKey: issueKeys.all(wsId) });
     },
   });
 }

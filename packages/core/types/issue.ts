@@ -58,6 +58,9 @@ export interface Issue {
   // + local formatting, which shifts the day by the viewer's offset.
   start_date: string | null;
   due_date: string | null;
+  // Whether the current member's newest active inbox item for this issue is
+  // unread. This is viewer-specific and optional for older backend payloads.
+  has_unread?: boolean;
   metadata: IssueMetadata;
   // Custom property values keyed by property definition id. Always present
   // in responses (empty object when unset), mirroring `metadata`.

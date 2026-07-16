@@ -185,7 +185,7 @@ FROM (
     WHERE i.recipient_type = 'member'
       AND i.recipient_id = $1
       AND i.archived = false
-    ORDER BY i.workspace_id, COALESCE(i.issue_id, i.id), i.created_at DESC
+    ORDER BY i.workspace_id, COALESCE(i.issue_id, i.id), i.created_at DESC, i.id DESC
 ) newest
 WHERE newest.read = false
 GROUP BY newest.workspace_id
@@ -505,6 +505,50 @@ func (q *Queries) ListInboxItems(ctx context.Context, arg ListInboxItemsParams) 
 			return nil, err
 		}
 		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listUnreadIssueIDs = `-- name: ListUnreadIssueIDs :many
+SELECT newest.issue_id
+FROM (
+    SELECT DISTINCT ON (i.issue_id)
+        i.issue_id, i.read
+    FROM inbox_item i
+    WHERE i.workspace_id = $1
+      AND i.recipient_type = 'member'
+      AND i.recipient_id = $2
+      AND i.issue_id = ANY($3::uuid[])
+      AND i.archived = false
+    ORDER BY i.issue_id, i.created_at DESC, i.id DESC
+) newest
+WHERE newest.read = false
+`
+
+type ListUnreadIssueIDsParams struct {
+	WorkspaceID pgtype.UUID   `json:"workspace_id"`
+	RecipientID pgtype.UUID   `json:"recipient_id"`
+	IssueIds    []pgtype.UUID `json:"issue_ids"`
+}
+
+// Match the inbox UI's issue-level deduplication: only the newest active item
+// for each requested issue decides whether that issue has an unread update.
+func (q *Queries) ListUnreadIssueIDs(ctx context.Context, arg ListUnreadIssueIDsParams) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, listUnreadIssueIDs, arg.WorkspaceID, arg.RecipientID, arg.IssueIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []pgtype.UUID{}
+	for rows.Next() {
+		var issue_id pgtype.UUID
+		if err := rows.Scan(&issue_id); err != nil {
+			return nil, err
+		}
+		items = append(items, issue_id)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err

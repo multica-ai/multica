@@ -424,7 +424,8 @@
   },
   "card": {
     "update_failed": "イシューを更新できませんでした",
-    "updated_ago": "{{time}} に更新"
+    "updated_ago": "{{time}} に更新",
+    "unread_update": "未読の更新"
   },
   "actions": {
     "status": "ステータス",

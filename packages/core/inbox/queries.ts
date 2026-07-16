@@ -112,10 +112,7 @@ function groupInboxItemsByIssue(items: InboxItem[]): InboxItem[] {
   }
   const merged: InboxItem[] = [];
   for (const group of groups.values()) {
-    group.sort(
-      (a, b) =>
-        new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
-    );
+    group.sort(compareNewestInboxItem);
     const newest = group[0];
     if (!newest) continue;
 
@@ -133,8 +130,12 @@ function groupInboxItemsByIssue(items: InboxItem[]): InboxItem[] {
 
     merged.push(newest);
   }
-  return merged.sort(
-    (a, b) =>
-      new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
-  );
+  return merged.sort(compareNewestInboxItem);
+}
+
+function compareNewestInboxItem(a: InboxItem, b: InboxItem): number {
+  const byCreatedAt =
+    new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+  if (byCreatedAt !== 0) return byCreatedAt;
+  return b.id.localeCompare(a.id);
 }

@@ -53,6 +53,10 @@ type IssueResponse struct {
 	DueDate   *string `json:"due_date"`
 	CreatedAt string  `json:"created_at"`
 	UpdatedAt string  `json:"updated_at"`
+	// Viewer-specific: list/detail endpoints set this for the requesting
+	// member. Write responses and workspace broadcasts omit it so they cannot
+	// clear another viewer's cached unread state.
+	HasUnread *bool `json:"has_unread,omitempty"`
 	// Metadata is the per-issue KV map (see issue_metadata.go). Always emitted
 	// (empty object when unset) so frontend code can `issue.metadata[key]`
 	// without nil-guarding the parent field.
@@ -176,6 +180,40 @@ func (h *Handler) labelsByIssue(ctx context.Context, wsUUID pgtype.UUID, issueID
 		})
 	}
 	return out
+}
+
+// unreadIssueIDs returns the requested issues whose newest active inbox item
+// is unread for the current member. Failure is non-critical: issue lists remain
+// usable and simply omit unread indicators until the next refetch.
+func (h *Handler) unreadIssueIDs(ctx context.Context, r *http.Request, wsUUID pgtype.UUID, issueIDs []pgtype.UUID) map[string]bool {
+	out := map[string]bool{}
+	if len(issueIDs) == 0 {
+		return out
+	}
+	userID := requestUserID(r)
+	if userID == "" {
+		return out
+	}
+	rows, err := h.Queries.ListUnreadIssueIDs(ctx, db.ListUnreadIssueIDsParams{
+		WorkspaceID: wsUUID,
+		RecipientID: parseUUID(userID),
+		IssueIds:    issueIDs,
+	})
+	if err != nil {
+		slog.Warn("ListUnreadIssueIDs failed", "error", err)
+		return out
+	}
+	for _, issueID := range rows {
+		out[uuidToString(issueID)] = true
+	}
+	return out
+}
+
+func applyIssueUnread(resp []IssueResponse, unread map[string]bool) {
+	for i := range resp {
+		hasUnread := unread[resp[i].ID]
+		resp[i].HasUnread = &hasUnread
+	}
 }
 
 func openIssueRowToResponse(i db.ListOpenIssuesRow, issuePrefix string) IssueResponse {
@@ -723,12 +761,19 @@ func (h *Handler) SearchIssues(w http.ResponseWriter, r *http.Request) {
 	}
 
 	prefix := h.getIssuePrefix(ctx, wsUUID)
+	ids := make([]pgtype.UUID, len(results))
+	for i, result := range results {
+		ids[i] = result.issue.ID
+	}
+	unreadMap := h.unreadIssueIDs(ctx, r, wsUUID, ids)
 	resp := make([]SearchIssueResponse, len(results))
 	for i, sr := range results {
 		sir := SearchIssueResponse{
 			IssueResponse: issueToResponse(sr.issue, prefix),
 			MatchSource:   sr.matchSource,
 		}
+		hasUnread := unreadMap[sir.ID]
+		sir.HasUnread = &hasUnread
 		// Always populate comment snippet when a matching comment exists
 		if sr.matchedCommentContent != "" {
 			snippet := extractSnippet(sr.matchedCommentContent, q)
@@ -869,6 +914,7 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 			ids[i] = issue.ID
 		}
 		labelsMap := h.labelsByIssue(ctx, wsUUID, ids)
+		unreadMap := h.unreadIssueIDs(ctx, r, wsUUID, ids)
 		resp := make([]IssueResponse, len(issues))
 		for i, issue := range issues {
 			resp[i] = openIssueRowToResponse(issue, prefix)
@@ -878,6 +924,7 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 			}
 			resp[i].Labels = &labels
 		}
+		applyIssueUnread(resp, unreadMap)
 
 		writeJSON(w, http.StatusOK, map[string]any{
 			"issues": resp,
@@ -1142,6 +1189,7 @@ LIMIT %s OFFSET %s`, whereSql, orderBy, limitRef, offsetRef)
 		ids[i] = issue.ID
 	}
 	labelsMap := h.labelsByIssue(ctx, wsUUID, ids)
+	unreadMap := h.unreadIssueIDs(ctx, r, wsUUID, ids)
 	resp := make([]IssueResponse, len(issues))
 	for i, issue := range issues {
 		resp[i] = issueListRowToResponse(issue, prefix)
@@ -1151,6 +1199,7 @@ LIMIT %s OFFSET %s`, whereSql, orderBy, limitRef, offsetRef)
 		}
 		resp[i].Labels = &labels
 	}
+	applyIssueUnread(resp, unreadMap)
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"issues": resp,
@@ -1681,6 +1730,7 @@ ORDER BY
 		ids[i] = row.ID
 	}
 	labelsMap := h.labelsByIssue(ctx, wsUUID, ids)
+	unreadMap := h.unreadIssueIDs(ctx, r, wsUUID, ids)
 	prefix := h.getIssuePrefix(ctx, wsUUID)
 
 	groups := []IssueAssigneeGroupResponse{}
@@ -1701,6 +1751,8 @@ ORDER BY
 		}
 
 		issue := issueListRowToResponse(row.ListIssuesRow, prefix)
+		hasUnread := unreadMap[issue.ID]
+		issue.HasUnread = &hasUnread
 		labels := labelsMap[issue.ID]
 		if labels == nil {
 			labels = []LabelResponse{}
@@ -1720,6 +1772,8 @@ func (h *Handler) GetIssue(w http.ResponseWriter, r *http.Request) {
 	}
 	prefix := h.getIssuePrefix(r.Context(), issue.WorkspaceID)
 	resp := issueToResponse(issue, prefix)
+	hasUnread := h.unreadIssueIDs(r.Context(), r, issue.WorkspaceID, []pgtype.UUID{issue.ID})[resp.ID]
+	resp.HasUnread = &hasUnread
 	detailLabels := h.labelsByIssue(r.Context(), issue.WorkspaceID, []pgtype.UUID{issue.ID})[uuidToString(issue.ID)]
 	if detailLabels == nil {
 		detailLabels = []LabelResponse{}
@@ -1763,9 +1817,12 @@ func (h *Handler) ListChildIssues(w http.ResponseWriter, r *http.Request) {
 	}
 	prefix := h.getIssuePrefix(r.Context(), issue.WorkspaceID)
 	resp := make([]IssueResponse, len(children))
+	ids := make([]pgtype.UUID, len(children))
 	for i, child := range children {
 		resp[i] = issueToResponse(child, prefix)
+		ids[i] = child.ID
 	}
+	applyIssueUnread(resp, h.unreadIssueIDs(r.Context(), r, issue.WorkspaceID, ids))
 	writeJSON(w, http.StatusOK, map[string]any{
 		"issues": resp,
 	})
@@ -1832,9 +1889,12 @@ func (h *Handler) ListChildrenByParents(w http.ResponseWriter, r *http.Request) 
 	}
 	prefix := h.getIssuePrefix(r.Context(), wsUUID)
 	resp := make([]IssueResponse, len(children))
+	ids := make([]pgtype.UUID, len(children))
 	for i, child := range children {
 		resp[i] = issueToResponse(child, prefix)
+		ids[i] = child.ID
 	}
+	applyIssueUnread(resp, h.unreadIssueIDs(r.Context(), r, wsUUID, ids))
 	writeJSON(w, http.StatusOK, map[string]any{
 		"issues": resp,
 	})

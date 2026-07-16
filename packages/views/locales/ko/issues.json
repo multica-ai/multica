@@ -424,7 +424,8 @@
   },
   "card": {
     "update_failed": "이슈를 업데이트하지 못했습니다",
-    "updated_ago": "{{time}} 수정됨"
+    "updated_ago": "{{time}} 수정됨",
+    "unread_update": "읽지 않은 업데이트"
   },
   "actions": {
     "status": "상태",

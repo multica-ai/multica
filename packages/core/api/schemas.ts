@@ -455,6 +455,8 @@ export const IssueSchema = z.object({
   stage: z.number().nullable().default(null),
   start_date: z.string().nullable(),
   due_date: z.string().nullable(),
+  // Older backends predate issue-level unread state.
+  has_unread: z.boolean().default(false),
   metadata: IssueMetadataSchema,
   // Older backends predate custom properties; default {} so consumers never
   // nil-guard issue.properties.

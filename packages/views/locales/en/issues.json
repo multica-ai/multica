@@ -446,7 +446,8 @@
   },
   "card": {
     "update_failed": "Failed to update issue",
-    "updated_ago": "Updated {{time}}"
+    "updated_ago": "Updated {{time}}",
+    "unread_update": "Unread update"
   },
   "actions": {
     "status": "Status",

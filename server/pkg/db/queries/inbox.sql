@@ -93,6 +93,23 @@ RETURNING recipient_type, recipient_id;
 SELECT count(*) FROM inbox_item
 WHERE workspace_id = $1 AND recipient_type = $2 AND recipient_id = $3 AND read = false AND archived = false;
 
+-- name: ListUnreadIssueIDs :many
+-- Match the inbox UI's issue-level deduplication: only the newest active item
+-- for each requested issue decides whether that issue has an unread update.
+SELECT newest.issue_id
+FROM (
+    SELECT DISTINCT ON (i.issue_id)
+        i.issue_id, i.read
+    FROM inbox_item i
+    WHERE i.workspace_id = $1
+      AND i.recipient_type = 'member'
+      AND i.recipient_id = $2
+      AND i.issue_id = ANY(sqlc.arg('issue_ids')::uuid[])
+      AND i.archived = false
+    ORDER BY i.issue_id, i.created_at DESC, i.id DESC
+) newest
+WHERE newest.read = false;
+
 -- name: CountUnreadInboxByWorkspace :many
 -- Per-workspace unread inbox counts for a recipient member, matching the
 -- inbox UI's deduplicated view: notifications are grouped per issue
@@ -113,7 +130,7 @@ FROM (
     WHERE i.recipient_type = 'member'
       AND i.recipient_id = $1
       AND i.archived = false
-    ORDER BY i.workspace_id, COALESCE(i.issue_id, i.id), i.created_at DESC
+    ORDER BY i.workspace_id, COALESCE(i.issue_id, i.id), i.created_at DESC, i.id DESC
 ) newest
 WHERE newest.read = false
 GROUP BY newest.workspace_id;

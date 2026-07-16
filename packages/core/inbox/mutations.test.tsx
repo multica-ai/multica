@@ -11,6 +11,7 @@ import type { ApiClient } from "../api/client";
 import type { InboxItem } from "../types";
 import { useUnarchiveInbox } from "./mutations";
 import { inboxKeys } from "./queries";
+import { issueKeys } from "../issues/queries";
 
 vi.mock("../hooks", () => ({
   useWorkspaceId: () => "workspace-1",
@@ -111,6 +112,9 @@ describe("useUnarchiveInbox", () => {
     });
     expect(invalidate).toHaveBeenCalledWith({
       queryKey: inboxKeys.unreadSummary(),
+    });
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: issueKeys.all(WORKSPACE_ID),
     });
   });
 

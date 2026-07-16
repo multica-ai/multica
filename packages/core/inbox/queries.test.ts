@@ -78,6 +78,27 @@ describe("deduplicateInboxItems", () => {
     expect(merged[0]?.details?.comment_id).toBe("comment-2");
   });
 
+  it("uses id as the stable newest tie-breaker when timestamps match", () => {
+    const merged = deduplicateInboxItems([
+      item({
+        id: "00000000-0000-0000-0000-000000000001",
+        read: false,
+        created_at: "2026-06-15T08:00:00Z",
+      }),
+      item({
+        id: "00000000-0000-0000-0000-000000000002",
+        read: true,
+        created_at: "2026-06-15T08:00:00Z",
+      }),
+    ]);
+
+    expect(merged).toHaveLength(1);
+    expect(merged[0]).toMatchObject({
+      id: "00000000-0000-0000-0000-000000000002",
+      read: true,
+    });
+  });
+
   it("drops archived rows so an optimistic archive leaves the list at once", () => {
     const merged = deduplicateInboxItems([
       item({ id: "active", issue_id: "issue-1" }),

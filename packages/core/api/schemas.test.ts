@@ -53,6 +53,7 @@ const baseIssue = {
   stage: null,
   start_date: null,
   due_date: null,
+  has_unread: false,
   metadata: {},
   created_at: "2026-01-01T00:00:00Z",
   updated_at: "2026-01-01T00:00:00Z",
@@ -103,6 +104,18 @@ describe("IssueSchema (via ListIssuesResponseSchema)", () => {
     const payload = { issues: [issueWithoutStage], total: 1 };
     const parsed = ListIssuesResponseSchema.parse(payload);
     expect(parsed.issues[0]?.stage).toBeNull();
+  });
+
+  it("accepts issue unread state and defaults it to false for older backends", () => {
+    const unread = ListIssuesResponseSchema.parse({
+      issues: [{ ...baseIssue, has_unread: true }],
+      total: 1,
+    });
+    expect(unread.issues[0]?.has_unread).toBe(true);
+
+    const { has_unread: _omit, ...issueWithoutUnread } = baseIssue;
+    const older = ListIssuesResponseSchema.parse({ issues: [issueWithoutUnread], total: 1 });
+    expect(older.issues[0]?.has_unread).toBe(false);
   });
 
   it("accepts custom property values including multi_select arrays", () => {

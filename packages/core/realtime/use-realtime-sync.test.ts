@@ -22,6 +22,7 @@ import {
   applyChatSessionUpdatedToCache,
   applyWorkspaceUpdatedToCache,
   handleInboxNew,
+  invalidateAllWorkspaceIssueQueries,
   invalidateChatMessageQueries,
   refetchPendingChatAggregate,
   resolveInboxSourceSlug,
@@ -606,6 +607,26 @@ describe("resolveInboxSourceSlug", () => {
   });
 });
 
+describe("invalidateAllWorkspaceIssueQueries", () => {
+  it("invalidates every cached workspace-scoped issue query without touching global per-issue caches", () => {
+    const qc = createQueryClient();
+    qc.setQueryData(issueKeys.list("ws-a"), []);
+    qc.setQueryData(issueKeys.detail("ws-b", "issue-1"), { id: "issue-1" });
+    qc.setQueryData(issueKeys.timeline("issue-1"), []);
+    const invalidate = vi.spyOn(qc, "invalidateQueries");
+
+    invalidateAllWorkspaceIssueQueries(qc);
+
+    expect(invalidate).toHaveBeenCalledWith({ predicate: expect.any(Function) });
+    const predicate = invalidate.mock.calls[0]?.[0]?.predicate;
+    expect(predicate).toBeTypeOf("function");
+    expect(predicate?.({ queryKey: issueKeys.list("ws-a") } as any)).toBe(true);
+    expect(predicate?.({ queryKey: issueKeys.detail("ws-b", "issue-1") } as any)).toBe(true);
+    expect(predicate?.({ queryKey: issueKeys.timeline("issue-1") } as any)).toBe(false);
+  });
+});
+
+
 describe("handleInboxNew", () => {
   function workspace(overrides: Partial<Workspace> = {}): Workspace {
     return {
@@ -678,7 +699,7 @@ describe("handleInboxNew", () => {
     });
   });
 
-  it("invalidates the ITEM's workspace inbox cache and resolves its slug, not the active workspace's", async () => {
+  it("invalidates the ITEM's workspace inbox and issue caches, not the active workspace's", async () => {
     const qc = createQueryClient();
     qc.setQueryData<Workspace[]>(workspaceKeys.list(), [
       workspace({ id: "ws-b", slug: "workspace-b" }),
@@ -697,6 +718,9 @@ describe("handleInboxNew", () => {
     // inbox, so the archived list has to drop it in the same pass (MUL-3736).
     expect(invalidate).toHaveBeenCalledWith({
       queryKey: inboxKeys.all("ws-a"),
+    });
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: issueKeys.all("ws-a"),
     });
     expect(showNotification).toHaveBeenCalledWith(
       expect.objectContaining({ slug: "workspace-a" }),

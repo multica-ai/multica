@@ -183,6 +183,13 @@ export const BoardCardContent = memo(function BoardCardContent({
         <div className="flex items-center gap-1.5 min-w-0">
           {priorityIconNode}
           <p className="text-xs text-muted-foreground truncate">{issue.identifier}</p>
+          {issue.has_unread === true && (
+            <span
+              className="size-1.5 shrink-0 rounded-full bg-destructive"
+              aria-label={t(($) => $.card.unread_update)}
+              title={t(($) => $.card.unread_update)}
+            />
+          )}
         </div>
         <IssueAgentActivityIndicator issueId={issue.id} />
       </div>

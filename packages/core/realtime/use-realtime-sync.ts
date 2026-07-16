@@ -404,7 +404,10 @@ export async function handleInboxNew(
   item: InboxItem,
 ): Promise<void> {
   const sourceWsId = item.workspace_id;
-  if (sourceWsId) onInboxNew(qc, sourceWsId, item);
+  if (sourceWsId) {
+    onInboxNew(qc, sourceWsId, item);
+    qc.invalidateQueries({ queryKey: issueKeys.all(sourceWsId) });
+  }
   // A new item in ANY workspace can light the workspace-switcher dot, so
   // refresh the cross-workspace summary regardless of the active workspace.
   onInboxSummaryInvalidate(qc);
@@ -530,6 +533,30 @@ function invalidateWorkspaceScopedQueries(qc: QueryClient): void {
   qc.invalidateQueries({ queryKey: workspaceKeys.list() });
 }
 
+const nonWorkspaceIssueKeySegments = new Set([
+  "timeline",
+  "comment-trigger-preview",
+  "issue-trigger-preview",
+  "reactions",
+  "subscribers",
+  "usage",
+  "attachments",
+  "tasks",
+]);
+
+export function invalidateAllWorkspaceIssueQueries(qc: QueryClient): void {
+  qc.invalidateQueries({
+    predicate: (query) => {
+      const key = query.queryKey;
+      return (
+        key[0] === "issues" &&
+        typeof key[1] === "string" &&
+        !nonWorkspaceIssueKeySegments.has(key[1])
+      );
+    },
+  });
+}
+
 function invalidateSquadMemberStatusQueries(qc: QueryClient, wsId: string): void {
   qc.invalidateQueries({
     predicate: (query) => {
@@ -590,10 +617,13 @@ export function useRealtimeSync(
         if (wsId) onInboxInvalidate(qc, wsId);
         // inbox:read / inbox:archived / inbox:unarchived / batch events arrive
         // here. They can originate from a workspace other than the active one
-        // (personal events fan out to all the user's connections), so always
-        // refresh the cross-workspace summary — its dot must clear when another
-        // workspace's items are read/archived, and light again when an unread
-        // item is restored from the archive.
+        // (personal events fan out to all the user's connections), and these
+        // payloads do not carry source workspace_id. Refresh every cached
+        // workspace-scoped issue query so stale has_unread flags self-heal.
+        invalidateAllWorkspaceIssueQueries(qc);
+        // The cross-workspace summary dot must clear when another workspace's
+        // items are read/archived, and light again when an unread item is
+        // restored from the archive.
         onInboxSummaryInvalidate(qc);
       },
       agent: () => {

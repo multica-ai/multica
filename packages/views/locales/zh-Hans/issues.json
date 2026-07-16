@@ -424,7 +424,8 @@
   },
   "card": {
     "update_failed": "更新 issue 失败",
-    "updated_ago": "更新于 {{time}}"
+    "updated_ago": "更新于 {{time}}",
+    "unread_update": "有未读更新"
   },
   "actions": {
     "status": "状态",
