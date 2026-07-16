@@ -627,11 +627,13 @@ RETURNING *;
 -- Tasks that ended in a known "poisoned" terminal state are also excluded
 -- here so even auto-retry does not inherit the bad session. The daemon
 -- classifies these failures (iteration_limit, agent_fallback_message,
--- api_invalid_request, codex_semantic_inactivity) when it detects either an
--- agent fallback marker in the output, an upstream API 400 that means the
--- conversation history itself is unprocessable (oversized image, malformed
--- base64, etc.), or a Codex semantic inactivity timeout whose recorded
--- session may replay the same stuck state.
+-- api_invalid_request, codex_semantic_inactivity, agent_error.context_overflow)
+-- when it detects either an agent fallback marker in the output, an upstream
+-- API 400 that means the conversation history itself is unprocessable
+-- (oversized image, malformed base64, etc.), a Codex semantic inactivity
+-- timeout whose recorded session may replay the same stuck state, or a context
+-- window overflow that would immediately overflow again on resume. Keep this
+-- list in sync with resumeUnsafeFailureReason and GetLastChatTaskSession.
 --
 -- The error-text ILIKE clause is defense-in-depth for the api_invalid_request
 -- shape: a legacy row tagged 'agent_error' (pre-MUL-1921), a deploy-window
@@ -647,7 +649,7 @@ WHERE agent_id = $1 AND issue_id = $2
     status = 'completed'
     OR (
       status = 'failed'
-      AND COALESCE(failure_reason, '') NOT IN ('iteration_limit', 'agent_fallback_message', 'api_invalid_request', 'codex_semantic_inactivity')
+      AND COALESCE(failure_reason, '') NOT IN ('iteration_limit', 'agent_fallback_message', 'api_invalid_request', 'codex_semantic_inactivity', 'agent_error.context_overflow')
       AND NOT (COALESCE(error, '') ILIKE '%400%' AND COALESCE(error, '') ILIKE '%invalid_request_error%')
     )
   )

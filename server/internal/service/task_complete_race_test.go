@@ -179,6 +179,7 @@ func TestTaskFailureClassifiers(t *testing.T) {
 		{reason: "runtime_recovery", wantType: "runtime", wantResumeOK: true, wantRetry: true},
 		{reason: "iteration_limit", wantType: "agent_output", wantResumeOK: false, wantRetry: false},
 		{reason: "api_invalid_request", wantType: "agent_error", wantResumeOK: false, wantRetry: false},
+		{reason: "agent_error.context_overflow", wantType: "agent_error", wantResumeOK: false, wantRetry: false},
 		{reason: "agent_error", wantType: "agent_error", wantResumeOK: true, wantRetry: false},
 	}
 

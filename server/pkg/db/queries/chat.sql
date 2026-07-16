@@ -237,14 +237,15 @@ RETURNING *;
 -- resume there than start over and lose conversation memory. Used as a
 -- fallback when chat_session.session_id is NULL. Resume-unsafe failures are
 -- excluded because replaying those sessions deterministically reproduces the
--- same terminal state.
+-- same terminal state. Keep this list in sync with resumeUnsafeFailureReason
+-- and GetLastTaskSession.
 SELECT session_id, work_dir, runtime_id FROM agent_task_queue
 WHERE chat_session_id = $1
   AND (
     status = 'completed'
     OR (
       status = 'failed'
-      AND COALESCE(failure_reason, '') NOT IN ('iteration_limit', 'agent_fallback_message', 'api_invalid_request', 'codex_semantic_inactivity')
+      AND COALESCE(failure_reason, '') NOT IN ('iteration_limit', 'agent_fallback_message', 'api_invalid_request', 'codex_semantic_inactivity', 'agent_error.context_overflow')
       AND NOT (COALESCE(error, '') ILIKE '%400%' AND COALESCE(error, '') ILIKE '%invalid_request_error%')
     )
   )

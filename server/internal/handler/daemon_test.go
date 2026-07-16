@@ -3485,6 +3485,94 @@ func TestClaimTask_IssuePriorSessionRuntimeGuard(t *testing.T) {
 	}
 }
 
+// TestClaimTask_ManualRetryReusesWorkdir is the MUL-4869 claim-layer contract: a
+// manual retry (rerun_of_task_id set) ALWAYS hands back the source task's
+// workdir, and gates only the session on force_fresh_session plus a runtime
+// match. Contrast with a plain force_fresh task that carries no rerun lineage,
+// which resumes nothing — covered by TestClaimTask_IssuePriorSessionRuntimeGuard.
+func TestClaimTask_ManualRetryReusesWorkdir(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+
+	agentID, runtimeID, daemonID := createRuntimeGuardAgent(t, ctx)
+	otherRuntimeID := createRuntimeGuardRuntime(t, ctx, "kimi")
+
+	// insertRerun persists a terminal source task plus a queued rerun that points
+	// at it (rerun_of_task_id), mimicking what RerunIssue writes, then claims and
+	// returns the resolved task. Each case uses a fresh issue so the partial
+	// unique index (one pending task per issue+agent) never trips across cases.
+	// The source's runtime lets the runtime-match gate be exercised independently
+	// of the current claiming runtime.
+	issueNum := 81207
+	insertRerun := func(t *testing.T, sourceRuntimeID, failureReason, session, workdir string, forceFresh bool) *claimRuntimeGuardTask {
+		t.Helper()
+		issueNum++
+		var issueID string
+		if err := testPool.QueryRow(ctx, `
+			INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type, number, position)
+			VALUES ($1, 'manual-retry-reuse fixture', 'in_progress', 'none', $2, 'member', $3, 0)
+			RETURNING id
+		`, testWorkspaceID, testUserID, issueNum).Scan(&issueID); err != nil {
+			t.Fatalf("setup: create issue: %v", err)
+		}
+		t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID) })
+		var sourceID string
+		if err := testPool.QueryRow(ctx, `
+			INSERT INTO agent_task_queue (
+				agent_id, runtime_id, issue_id, status, priority,
+				failure_reason, session_id, work_dir
+			)
+			VALUES ($1, $2, $3, 'failed', 0, $4, $5, $6)
+			RETURNING id
+		`, agentID, sourceRuntimeID, issueID, failureReason, session, workdir).Scan(&sourceID); err != nil {
+			t.Fatalf("setup: insert source task: %v", err)
+		}
+		t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE id = $1`, sourceID) })
+		if _, err := testPool.Exec(ctx, `
+			INSERT INTO agent_task_queue (
+				agent_id, runtime_id, issue_id, status, priority,
+				rerun_of_task_id, force_fresh_session
+			)
+			VALUES ($1, $2, $3, 'queued', 0, $4, $5)
+		`, agentID, runtimeID, issueID, sourceID, forceFresh); err != nil {
+			t.Fatalf("setup: insert rerun task: %v", err)
+		}
+		return claimTaskForRuntimeGuard(t, runtimeID, daemonID)
+	}
+
+	t.Run("resume_safe_same_runtime_reuses_both", func(t *testing.T) {
+		task := insertRerun(t, runtimeID, "timeout", "safe-session", "/tmp/retry-safe-workdir", false)
+		if task.PriorWorkDir != "/tmp/retry-safe-workdir" {
+			t.Fatalf("PriorWorkDir = %q, want /tmp/retry-safe-workdir", task.PriorWorkDir)
+		}
+		if task.PriorSessionID != "safe-session" {
+			t.Fatalf("PriorSessionID = %q, want safe-session (transient failure resumes)", task.PriorSessionID)
+		}
+	})
+
+	t.Run("poisoned_same_runtime_reuses_workdir_fresh_session", func(t *testing.T) {
+		task := insertRerun(t, runtimeID, "agent_error.context_overflow", "poison-session", "/tmp/retry-poison-workdir", true)
+		if task.PriorWorkDir != "/tmp/retry-poison-workdir" {
+			t.Fatalf("PriorWorkDir = %q, want /tmp/retry-poison-workdir (workdir reused even when session poisoned)", task.PriorWorkDir)
+		}
+		if task.PriorSessionID != "" {
+			t.Fatalf("PriorSessionID = %q, want empty (poisoned session starts fresh)", task.PriorSessionID)
+		}
+	})
+
+	t.Run("different_runtime_reuses_workdir_drops_session", func(t *testing.T) {
+		task := insertRerun(t, otherRuntimeID, "timeout", "cross-session", "/tmp/retry-cross-workdir", false)
+		if task.PriorWorkDir != "/tmp/retry-cross-workdir" {
+			t.Fatalf("PriorWorkDir = %q, want /tmp/retry-cross-workdir (workdir returned regardless of runtime)", task.PriorWorkDir)
+		}
+		if task.PriorSessionID != "" {
+			t.Fatalf("PriorSessionID = %q, want empty (cross-runtime session cannot resolve)", task.PriorSessionID)
+		}
+	})
+}
+
 func TestClaimTask_ChatPriorSessionRuntimeGuard(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")

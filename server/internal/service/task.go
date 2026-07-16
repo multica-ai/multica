@@ -3060,9 +3060,13 @@ var retryableReasons = map[string]bool{
 
 func resumeUnsafeFailureReason(reason string) bool {
 	switch reason {
-	// Keep in sync with GetLastTaskSession / GetLastChatTaskSession and
-	// CreateRetryTask's fresh-session CASE WHEN.
-	case "iteration_limit", "agent_fallback_message", "api_invalid_request", "codex_semantic_inactivity":
+	// Failures that poison the agent CONVERSATION (not the workdir): resuming
+	// the same session would immediately replay the stuck/oversized state.
+	// Keep in sync with the GetLastTaskSession / GetLastChatTaskSession resume
+	// blacklists. (CreateRetryTask's fresh-session CASE WHEN only needs the
+	// subset of these that is also auto-retryable, currently
+	// codex_semantic_inactivity.)
+	case "iteration_limit", "agent_fallback_message", "api_invalid_request", "codex_semantic_inactivity", "agent_error.context_overflow":
 		return true
 	default:
 		return false
@@ -3177,13 +3181,20 @@ func (s *TaskService) MaybeRetryFailedTask(ctx context.Context, parent db.AgentT
 //     or squad leader). This preserves the CLI / API contract for callers
 //     that have an issue ID but no specific task to target.
 //
-// The new task is flagged force_fresh_session=true so the daemon starts a
-// clean agent session instead of resuming the prior (agent_id, issue_id)
-// session. A user clicking rerun has just judged the prior output bad —
-// resuming the same conversation would replay the same poisoned state.
-// Auto-retry of an orphaned mid-flight failure (HandleFailedTasks →
-// MaybeRetryFailedTask → CreateRetryTask) does NOT take this path, so
-// MUL-1128's mid-flight resume contract is preserved.
+// A retry ALWAYS reuses the source task's workdir when it still exists on
+// disk (MUL-4869): a transient failure — network, provider 5xx/rate-limit,
+// runtime_offline, timeout, or an auth/quota/config error the user has since
+// fixed — should not throw away the work already done. Only the agent SESSION
+// is gated: force_fresh_session is derived from the source task's failure
+// classification (resumeUnsafeFailureReason). A conversation-poisoning failure
+// (context overflow, iteration limit, api invalid request, codex semantic
+// inactivity, agent fallback) starts a fresh session on top of the same
+// workdir; anything else resumes the session too. The daemon hands the workdir
+// back via the rerun_of_task_id lookup independent of this flag; when the dir
+// is objectively unreusable (GC'd, on another runtime, or never recorded) it
+// falls back to a fresh workdir. Auto-retry of an orphaned mid-flight failure
+// (HandleFailedTasks → MaybeRetryFailedTask → CreateRetryTask) takes its own
+// path, so MUL-1128's mid-flight resume contract is preserved.
 //
 // ErrRerunInvokeNotAllowed signals that RerunIssue refused to rerun because the
 // current operator may not invoke the resolved target agent. The handler maps it
@@ -3214,6 +3225,13 @@ func (s *TaskService) RerunIssue(ctx context.Context, issueID pgtype.UUID, sourc
 		isLeader            bool
 		squadID             pgtype.UUID
 		coalescedCommentIDs []pgtype.UUID
+		// forceFreshSession gates ONLY the agent conversation, never the
+		// workdir — a retry always reuses the source task's workdir when it
+		// still exists on disk (see enqueueRerunTask and the daemon claim
+		// handler). It defaults to true so a no-source (CLI) rerun keeps the
+		// legacy "start a fresh session" behaviour; a task_id rerun overrides
+		// it below from the source task's failure classification.
+		forceFreshSession = true
 	)
 	if sourceTaskID.Valid {
 		sourceTask, err := s.Queries.GetAgentTask(ctx, sourceTaskID)
@@ -3225,6 +3243,15 @@ func (s *TaskService) RerunIssue(ctx context.Context, issueID pgtype.UUID, sourc
 		}
 		agentID = sourceTask.AgentID
 		isLeader = sourceTask.IsLeaderTask
+		// Only start a fresh session when the source failure poisoned the
+		// conversation (context overflow, iteration limit, api invalid request,
+		// codex semantic inactivity, agent fallback). Transient failures —
+		// network, provider 5xx/rate-limit, runtime_offline, timeout, and
+		// auth/quota/config errors the user has since fixed — resume the
+		// existing session. A cancelled source task has no failure_reason and
+		// therefore resumes when a session exists. Either way the workdir is
+		// reused; this only decides the session.
+		forceFreshSession = resumeUnsafeFailureReason(sourceTask.FailureReason.String)
 		// Carry the source task's squad provenance so a rerun of a leader
 		// task still injects the squad briefing at claim time (see migration
 		// 127 / daemon claim handler).
@@ -3301,7 +3328,7 @@ func (s *TaskService) RerunIssue(ctx context.Context, issueID pgtype.UUID, sourc
 	// sourceTaskID is the rerun lineage: it rides the CreateAgentTask insert
 	// (rerun_of_task_id) so the queued event / daemon claim never sees a NULL
 	// lineage, and it stays distinct from system-retry's retry_of_task_id (§5).
-	task, err := s.enqueueRerunTask(ctx, issue, agentID, triggerCommentID, coalescedCommentIDs, isLeader, squadID, actorUserID, sourceTaskID)
+	task, err := s.enqueueRerunTask(ctx, issue, agentID, triggerCommentID, coalescedCommentIDs, isLeader, squadID, forceFreshSession, actorUserID, sourceTaskID)
 	if err != nil {
 		return nil, err
 	}
@@ -3370,14 +3397,17 @@ func (s *TaskService) promoteNewestSurvivingComment(ctx context.Context, ids []p
 // When the target agent is the issue's single-agent assignee we use the
 // assignee-driven path (enqueueIssueTask) so the issue-assignee bookkeeping
 // stays in sync; otherwise (squad member, prior assignee that has since been
-// reassigned, mention agent) we use the mention path with the same
-// force_fresh_session=true contract.
-func (s *TaskService) enqueueRerunTask(ctx context.Context, issue db.Issue, agentID pgtype.UUID, triggerCommentID pgtype.UUID, coalescedCommentIDs []pgtype.UUID, isLeader bool, squadID pgtype.UUID, actorUserID pgtype.UUID, rerunOfTaskID pgtype.UUID) (db.AgentTaskQueue, error) {
+// reassigned, mention agent) we use the mention path. forceFreshSession is
+// forwarded (not hardcoded) so the caller can decide, from the source task's
+// failure classification, whether to resume the agent conversation. It gates
+// only the session: the daemon claim handler still hands back the source
+// task's workdir via rerun_of_task_id regardless of this flag.
+func (s *TaskService) enqueueRerunTask(ctx context.Context, issue db.Issue, agentID pgtype.UUID, triggerCommentID pgtype.UUID, coalescedCommentIDs []pgtype.UUID, isLeader bool, squadID pgtype.UUID, forceFreshSession bool, actorUserID pgtype.UUID, rerunOfTaskID pgtype.UUID) (db.AgentTaskQueue, error) {
 	if issue.AssigneeType.String == "agent" && issue.AssigneeID.Valid &&
 		util.UUIDToString(issue.AssigneeID) == util.UUIDToString(agentID) {
-		return s.enqueueIssueTaskWithCommentPlan(ctx, issue, triggerCommentID, coalescedCommentIDs, true, "", actorUserID, rerunOfTaskID)
+		return s.enqueueIssueTaskWithCommentPlan(ctx, issue, triggerCommentID, coalescedCommentIDs, forceFreshSession, "", actorUserID, rerunOfTaskID)
 	}
-	return s.enqueueMentionTaskWithCommentPlan(ctx, issue, agentID, triggerCommentID, coalescedCommentIDs, isLeader, squadID, true, "", actorUserID, rerunOfTaskID)
+	return s.enqueueMentionTaskWithCommentPlan(ctx, issue, agentID, triggerCommentID, coalescedCommentIDs, isLeader, squadID, forceFreshSession, "", actorUserID, rerunOfTaskID)
 }
 
 // HandleFailedTasks runs the post-failure side effects for a batch of
