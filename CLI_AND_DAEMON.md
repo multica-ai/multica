@@ -173,6 +173,7 @@ Daemon behavior is configured via flags or environment variables:
 | Heartbeat interval | `--heartbeat-interval` | `MULTICA_DAEMON_HEARTBEAT_INTERVAL` | `15s` |
 | Agent timeout | `--agent-timeout` | `MULTICA_AGENT_TIMEOUT` | `0` (no cap; bounded by the watchdogs) |
 | Codex semantic inactivity timeout | `--codex-semantic-inactivity-timeout` | `MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT` | `10m` |
+| OpenCode idle watchdog | — | `MULTICA_OPENCODE_IDLE_WATCHDOG` | `10m` (`0` falls back to the generic idle watchdog; cannot extend it) |
 | Max concurrent tasks | `--max-concurrent-tasks` | `MULTICA_DAEMON_MAX_CONCURRENT_TASKS` | `20` |
 | Daemon ID | `--daemon-id` | `MULTICA_DAEMON_ID` | hostname |
 | Device name | `--device-name` | `MULTICA_DAEMON_DEVICE_NAME` | hostname |

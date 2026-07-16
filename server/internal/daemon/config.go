@@ -29,6 +29,12 @@ const (
 	DefaultAgentTimeout                   = 0
 	DefaultCodexSemanticInactivityTimeout = 10 * time.Minute
 	DefaultCodexHandshakeTimeout          = 30 * time.Second
+	// DefaultOpenCodeIdleWatchdog shortens the no-message budget for OpenCode
+	// runs while they are not executing a tool. OpenCode streams text and tool
+	// events incrementally, so a completely silent interval here covers both a
+	// missing first model token and a stalled response stream. The generic
+	// AgentIdleWatchdog remains the global enable/disable switch.
+	DefaultOpenCodeIdleWatchdog = 10 * time.Minute
 	// DefaultAgentIdleWatchdog is the per-task safety net that force-stops a
 	// run when the backend has emitted no message for this long AND its
 	// message queue is empty. Backends like Claude Code can hang indefinitely
@@ -104,6 +110,7 @@ type Config struct {
 	AgentTimeout                   time.Duration
 	CodexSemanticInactivityTimeout time.Duration
 	CodexHandshakeTimeout          time.Duration
+	OpenCodeIdleWatchdog           time.Duration // OpenCode-specific no-message window; 0 falls back to AgentIdleWatchdog and values above it cannot extend the global bound
 	AgentIdleWatchdog              time.Duration // force-stop a run when the backend goes silent this long with an empty queue (0 = disabled)
 	AgentToolWatchdog              time.Duration // force-stop a run when a single tool call stays in flight (silent) this long (0 = disabled); backstop for hung tools now that there is no wall-clock cap
 	ClaudeArgs                     []string
@@ -406,6 +413,15 @@ func LoadConfig(overrides Overrides) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	// MULTICA_OPENCODE_IDLE_WATCHDOG narrows the no-message window for
+	// OpenCode's streamed model responses. Zero removes the provider-specific
+	// override and falls back to MULTICA_AGENT_IDLE_WATCHDOG; positive values
+	// cannot extend the global bound, and the global zero still disables the
+	// whole mechanism.
+	openCodeIdleWatchdog, err := durationFromEnv("MULTICA_OPENCODE_IDLE_WATCHDOG", DefaultOpenCodeIdleWatchdog)
+	if err != nil {
+		return Config{}, err
+	}
 
 	// MULTICA_AGENT_TOOL_WATCHDOG=0 disables the in-flight-tool backstop; any
 	// positive duration overrides DefaultAgentToolWatchdog.
@@ -567,6 +583,7 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		AgentTimeout:                   agentTimeout,
 		CodexSemanticInactivityTimeout: codexSemanticInactivityTimeout,
 		CodexHandshakeTimeout:          codexHandshakeTimeout,
+		OpenCodeIdleWatchdog:           openCodeIdleWatchdog,
 		AgentIdleWatchdog:              agentIdleWatchdog,
 		AgentToolWatchdog:              agentToolWatchdog,
 		ClaudeArgs:                     claudeArgs,

@@ -32,6 +32,12 @@ type ExecOptions struct {
 	MaxTurns                  int
 	Timeout                   time.Duration
 	SemanticInactivityTimeout time.Duration
+	// IdleWatchdogTimeout optionally narrows the daemon's generic no-message
+	// watchdog for this execution. Zero keeps the daemon-wide window, and a
+	// value above that window cannot extend the global safety bound. The
+	// daemon-wide zero still disables the watchdog entirely, and an in-flight
+	// tool continues to use the separate tool watchdog budget.
+	IdleWatchdogTimeout time.Duration
 	// HandshakeTimeout bounds startup RPCs for providers with a long-lived
 	// protocol transport. It is currently consumed by Codex app-server;
 	// zero uses the provider default rather than disabling the bound.
