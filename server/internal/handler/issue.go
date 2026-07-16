@@ -2420,9 +2420,15 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 		ActorID:          actualCreatorID,
 		AnalyticsAgentID: analyticsAgentID,
 		Platform:         func() string { p, _, _ := middleware.ClientMetadataFromContext(r.Context()); return p }(),
-		BroadcastPayload: func(issue db.Issue, atts []db.Attachment) map[string]any {
+		BroadcastPayload: func(issue db.Issue, atts []db.Attachment, labels []db.IssueLabel) map[string]any {
 			payload := issueToResponse(issue, prefix)
 			payload.Attachments = buildAttachmentResponses(atts)
+			// Carry the authoritative label snapshot so every online client
+			// renders the new issue already labeled. Non-nil (even empty)
+			// pointer = authoritative list; the old flow's separate
+			// issue_labels:changed broadcast is gone.
+			labelResponses := labelsToResponse(labels)
+			payload.Labels = &labelResponses
 			return map[string]any{"issue": payload}
 		},
 	})
@@ -2460,6 +2466,11 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 
 	resp := issueToResponse(issue, prefix)
 	resp.Attachments = buildAttachmentResponses(res.Attachments)
+	// Echo the authoritative labels attached in the create transaction. Always
+	// non-nil (empty slice when none) so a newer client can tell the backend
+	// understood label_ids and skip its legacy post-create attach fallback.
+	labelResponses := labelsToResponse(res.Labels)
+	resp.Labels = &labelResponses
 	writeJSON(w, http.StatusCreated, resp)
 }
 

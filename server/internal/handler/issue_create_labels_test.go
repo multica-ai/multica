@@ -6,8 +6,11 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
+	"github.com/multica-ai/multica/server/internal/events"
+	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
 // createTestIssueLabel creates an issue-scoped label in the test workspace via
@@ -84,6 +87,104 @@ func TestCreateIssueAttachesLabelsAtomically(t *testing.T) {
 	}
 	if got := countIssueLabel(t, issue.ID, labelB); got != 1 {
 		t.Errorf("label B: expected 1 attachment, got %d", got)
+	}
+
+	// The create response must echo the authoritative labels so every online
+	// client (not just the creator) renders the new issue already labeled and
+	// a newer client can tell the backend understood label_ids.
+	if issue.Labels == nil {
+		t.Fatalf("create response must include a labels field")
+	}
+	got := map[string]bool{}
+	for _, l := range *issue.Labels {
+		got[l.ID] = true
+	}
+	if !got[labelA] || !got[labelB] {
+		t.Errorf("response labels %v missing labelA=%s or labelB=%s", got, labelA, labelB)
+	}
+}
+
+// TestCreateIssueResponseAlwaysIncludesLabelsField verifies that even when no
+// labels are requested the create response carries an explicit (empty) labels
+// list — the signal a newer client uses to know the backend handled labels and
+// skip its legacy per-label attach fallback.
+func TestCreateIssueResponseAlwaysIncludesLabelsField(t *testing.T) {
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title":    "create-labels no-label response",
+		"status":   "todo",
+		"priority": "low",
+	})
+	testHandler.CreateIssue(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateIssue: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var issue IssueResponse
+	json.NewDecoder(w.Body).Decode(&issue)
+	t.Cleanup(func() { deleteTestIssue(t, issue.ID) })
+
+	if issue.Labels == nil {
+		t.Fatalf("create response must include a labels field even when empty")
+	}
+	if len(*issue.Labels) != 0 {
+		t.Errorf("expected empty labels, got %d", len(*issue.Labels))
+	}
+}
+
+// TestCreateIssueEventCarriesLabels verifies that the issue:created websocket
+// event carries the attached labels, so online members other than the creator
+// render the new issue already labeled instead of blank until a refetch (the
+// old flow relied on a separate issue_labels:changed broadcast this PR removed).
+func TestCreateIssueEventCarriesLabels(t *testing.T) {
+	label := createTestIssueLabel(t, "cl-evt-"+uuid.NewString()[:8])
+
+	gotEvent := make(chan events.Event, 1)
+	testHandler.Bus.Subscribe(protocol.EventIssueCreated, func(e events.Event) {
+		select {
+		case gotEvent <- e:
+		default:
+		}
+	})
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title":     "create-labels event carries",
+		"status":    "todo",
+		"priority":  "low",
+		"label_ids": []string{label},
+	})
+	testHandler.CreateIssue(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateIssue: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var issue IssueResponse
+	json.NewDecoder(w.Body).Decode(&issue)
+	t.Cleanup(func() { deleteTestIssue(t, issue.ID) })
+
+	select {
+	case ev := <-gotEvent:
+		pm, ok := ev.Payload.(map[string]any)
+		if !ok {
+			t.Fatalf("issue:created payload has unexpected type %T", ev.Payload)
+		}
+		resp, ok := pm["issue"].(IssueResponse)
+		if !ok {
+			t.Fatalf("issue:created payload issue has unexpected type %T", pm["issue"])
+		}
+		if resp.Labels == nil {
+			t.Fatalf("issue:created payload must include a labels field")
+		}
+		found := false
+		for _, l := range *resp.Labels {
+			if l.ID == label {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("issue:created labels %+v missing %s", *resp.Labels, label)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("did not receive issue:created event")
 	}
 }
 
