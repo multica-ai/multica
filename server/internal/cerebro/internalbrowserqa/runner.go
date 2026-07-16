@@ -175,6 +175,7 @@ func (r *Runner) Verify(ctx context.Context, app string, credential Credential) 
 			rootURL := parsed.Scheme + "://" + parsed.Host + "/"
 			commands = append(commands,
 				[]string{"cookies", "set", "multica_auth", credential.SessionToken, "--url", rootURL, "--httpOnly", "--sameSite", "Strict"},
+				[]string{"cookies", "set", "multica_logged_in", "1", "--url", rootURL, "--sameSite", "Lax"},
 				[]string{"open", rootURL},
 			)
 		}
