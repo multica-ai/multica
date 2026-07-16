@@ -1248,6 +1248,22 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				})
 			})
 
+			// Event Hooks (MUL-4332) - automation rules CRUD. Every handler
+			// additionally gates on the automation_event_hooks feature flag
+			// (default off), so this surface is invisible until enabled.
+			r.Route("/api/hooks", func(r chi.Router) {
+				r.Get("/", h.ListHooks)
+				r.Post("/", h.CreateHook)
+				r.Route("/{id}", func(r chi.Router) {
+					r.Get("/", h.GetHook)
+					r.Patch("/", h.UpdateHook)
+					r.Delete("/", h.DeleteHook)
+					r.Post("/enable", h.EnableHook)
+					r.Post("/disable", h.DisableHook)
+					r.Get("/executions", h.ListHookExecutions)
+				})
+			})
+
 			// Dashboard — workspace-wide token + run-time rollups for the
 			// "/{slug}/dashboard" page. Optional ?project_id filter scopes
 			// the rollup to a single project.

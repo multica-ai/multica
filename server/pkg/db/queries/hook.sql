@@ -1,0 +1,89 @@
+-- Event Hooks MVP (MUL-4332) — hook / revision / execution persistence access.
+-- All associations are application-validated; there are no foreign keys. Every
+-- write is workspace-scoped for tenant isolation. The hook and its immutable
+-- revisions are created together in one transaction with app-generated ids
+-- (hook.active_revision_id and hook_revision.id are chosen up front) because
+-- the two rows reference each other and there is no FK to order them.
+
+-- name: CreateHook :one
+INSERT INTO hook (
+    id, workspace_id, name, enabled, active_revision_id,
+    scope_type, scope_id, origin,
+    creator_actor_type, creator_actor_id, authorization_principal_user_id
+) VALUES (
+    $1, $2, $3, $4, $5,
+    $6, $7, $8,
+    $9, $10, $11
+)
+RETURNING *;
+
+-- name: GetHookInWorkspace :one
+SELECT * FROM hook
+WHERE id = $1 AND workspace_id = $2;
+
+-- name: ListHooksByWorkspace :many
+SELECT * FROM hook
+WHERE workspace_id = $1 AND archived_at IS NULL
+ORDER BY created_at DESC;
+
+-- name: ListHooksByScope :many
+SELECT * FROM hook
+WHERE workspace_id = $1 AND scope_type = $2 AND scope_id = $3 AND archived_at IS NULL
+ORDER BY created_at DESC;
+
+-- name: SetHookActiveRevision :one
+-- Switch the active revision pointer and update the display name (PATCH).
+-- Revisions themselves are never mutated; a config change appends a new revision
+-- and repoints here. Scope is immutable after creation and is not touched.
+UPDATE hook SET
+    active_revision_id = $3,
+    name = $4,
+    updated_at = now()
+WHERE id = $1 AND workspace_id = $2 AND archived_at IS NULL
+RETURNING *;
+
+-- name: SetHookEnabled :one
+UPDATE hook SET
+    enabled = $3,
+    disabled_reason = sqlc.narg('disabled_reason'),
+    updated_at = now()
+WHERE id = $1 AND workspace_id = $2 AND archived_at IS NULL
+RETURNING *;
+
+-- name: ArchiveHook :one
+-- Soft archive (DELETE). Existing revisions / executions / effects are retained
+-- for audit; the hook is also disabled so nothing can match it.
+UPDATE hook SET
+    archived_at = now(),
+    enabled = false,
+    updated_at = now()
+WHERE id = $1 AND workspace_id = $2 AND archived_at IS NULL
+RETURNING *;
+
+-- name: CreateHookRevision :one
+INSERT INTO hook_revision (
+    id, hook_id, revision, event_type, match, conditions, fire_mode, actions,
+    created_by_type, created_by_id
+) VALUES (
+    $1, $2, $3, $4, $5, $6, $7, $8,
+    $9, $10
+)
+RETURNING *;
+
+-- name: GetHookRevision :one
+SELECT * FROM hook_revision
+WHERE id = $1;
+
+-- name: GetMaxHookRevision :one
+-- Highest revision number for a hook, 0 when none exist yet. Used to compute the
+-- next revision on PATCH.
+SELECT COALESCE(MAX(revision), 0)::int AS max_revision
+FROM hook_revision
+WHERE hook_id = $1;
+
+-- name: ListHookExecutionsByHook :many
+-- Execution trace for the debug/explain endpoints. Newest first, bounded.
+SELECT * FROM hook_execution
+WHERE hook_id = $1
+ORDER BY created_at DESC
+LIMIT $2;
