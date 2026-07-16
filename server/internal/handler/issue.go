@@ -2894,7 +2894,7 @@ func (h *Handler) assigneeFallbackAgent(ctx context.Context, issue db.Issue, act
 	if err != nil || !agent.RuntimeID.Valid || agent.ArchivedAt.Valid {
 		return db.Agent{}, false, false
 	}
-	if !h.canInvokeAgent(ctx, agent, actorType, actorID, opts.OriginatorUserID, uuidToString(issue.WorkspaceID)) {
+	if !h.canInvokeAgent(ctx, agent, actorType, actorID, opts.effectiveInvoker(), uuidToString(issue.WorkspaceID)) {
 		return db.Agent{}, false, false
 	}
 	// Coalescing queue: pending is still a valid route target, but callers

@@ -1,7 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { cn } from "@multica/ui/lib/utils";
 import {
   ContentEditor,
@@ -12,7 +12,7 @@ import {
 } from "../../editor";
 import { SubmitButton } from "@multica/ui/components/common/submit-button";
 import { ChatAddMenu } from "./chat-add-menu";
-import { useChatStore, newSessionDraftKey } from "@multica/core/chat";
+import { useChatStore, DRAFT_NEW_SESSION } from "@multica/core/chat";
 import { createLogger } from "@multica/core/logger";
 import { formatShortcut, useShortcut } from "@multica/core/shortcuts";
 import type { UploadResult } from "@multica/core/hooks/use-file-upload";
@@ -22,6 +22,8 @@ import { useT } from "../../i18n";
 
 const logger = createLogger("chat.ui");
 const EMPTY_ATTACHMENTS: Attachment[] = [];
+/** Editor identity for the chat composer — see the editorKey note below. */
+const CHAT_COMPOSER_EDITOR_KEY = "chat-composer";
 
 function attachmentReferenceUrls(attachment: Attachment): string[] {
   const withUploadFields = attachment as Attachment & {
@@ -129,36 +131,35 @@ export function ChatInput({
   const sendShortcut = useShortcut("send");
   const editorRef = useRef<ContentEditorRef>(null);
   const activeSessionId = useChatStore((s) => s.activeSessionId);
-  const selectedAgentId = useChatStore((s) => s.selectedAgentId);
   // Two keys with deliberately different concerns:
   //
-  // `draftKey` — zustand storage key. Scopes the in-progress draft per
-  // session so different sessions don't bleed text into each other; for
-  // brand-new chats it falls back to a per-agent slot so switching agents
-  // mid-compose gives each agent its own draft. This is a STORAGE key, not
-  // a React identity.
+  // `draftKey` — zustand storage key. Scopes the in-progress draft per session
+  // so different sessions don't bleed text into each other. An uncreated chat
+  // uses ONE slot per workspace, deliberately NOT keyed by agent: the composer
+  // is "the chat I have not created yet", and `selectedAgentId` only decides
+  // where the first send goes (MUL-4864). This is a STORAGE key, not a React
+  // identity.
   //
-  // `editorKey` — React `key` on the ContentEditor. Forces a fresh editor
-  // instance when the user explicitly switches agent. Placeholder text itself
-  // no longer depends on this: ContentEditor's placeholder-sync effect
-  // refreshes it live (e.g. across archived ↔ active sessions of the SAME
-  // agent, where this key does not change). A cancelled-run draft restore
-  // does NOT bump this key either: it just writes
-  // the restored text into `inputDraft`, and the editor's own
-  // defaultValue-sync effect (content-editor.tsx) pushes it into the live
-  // instance. There is no second copy of the draft to drift or resurface.
-  // Crucially this does NOT include `activeSessionId`: when the user
-  // uploads a file in a brand-new chat, `handleUploadFile` first awaits
-  // `ensureSession` which lazily creates the session and flips
-  // `activeSessionId` from null → uuid mid-upload. If the editor key
-  // depended on session id, that flip would unmount the editor right as
-  // the blob preview was inserted, dropping the in-progress upload's
-  // image node before file-upload.ts could swap it for the CDN URL — the
-  // user would see the image flash on then disappear. Keeping editor
-  // identity stable across the lazy-create event is what makes
-  // first-upload-creates-session work the same as second-upload.
-  const draftKey =
-    draftKeyOverride ?? activeSessionId ?? newSessionDraftKey(selectedAgentId);
+  // `editorKey` — React `key` on the ContentEditor, i.e. editor identity. It is
+  // constant for the chat composer, because nothing about switching what you
+  // are composing to should throw away the instance you are typing in:
+  //   - Agent switch: same draft slot now, so a remount would only serve to
+  //     drop the last <100ms of typing the draft debounce has not persisted.
+  //   - Placeholder: ContentEditor's placeholder-sync effect refreshes it live,
+  //     so it never needed a remount.
+  //   - Draft restore (a cancelled run, a failed send): writes into
+  //     `inputDraft`, and the editor's defaultValue-sync effect pushes it into
+  //     the live instance. There is no second copy to drift or resurface.
+  //   - Session switch / lazy create: when the user uploads a file in a
+  //     brand-new chat, `handleUploadFile` awaits `ensureSession`, which flips
+  //     `activeSessionId` from null → uuid mid-upload. A session-keyed editor
+  //     would unmount right as the blob preview landed, dropping the image node
+  //     before file-upload.ts could swap in the CDN URL — the user would watch
+  //     the image flash on and vanish. Stable identity is what makes
+  //     first-upload-creates-session behave like every later upload.
+  // Embedded surfaces (Agent Builder) still pass `editorKeyOverride` to isolate
+  // their own composer.
+  const draftKey = draftKeyOverride ?? activeSessionId ?? DRAFT_NEW_SESSION;
   // Select a primitive — empty-string fallback keeps referential stability.
   const inputDraft = useChatStore((s) => s.inputDrafts[draftKey] ?? "");
   const draftAttachments = useChatStore(
@@ -181,7 +182,44 @@ export function ChatInput({
   // reads the live editor and bails when it is empty.
   const hasNothingToSend = isEmpty && !inputDraft.trim();
   const appliedRestoreIdRef = useRef<string | null>(null);
-  const editorKey = editorKeyOverride ?? selectedAgentId ?? "no-agent";
+  const editorKey = editorKeyOverride ?? CHAT_COMPOSER_EDITOR_KEY;
+
+  // The draft whose document the editor instance is currently HOLDING.
+  //
+  // Normally identical to `draftKey`. The two diverge only while an in-flight
+  // upload pins the instance to the source document: ContentEditor's Guard 0
+  // refuses to `setContent` over an `uploading` node, because wiping that node
+  // strands the upload's finalize and the file silently disappears. Until the
+  // upload settles the composer still shows — and still edits — the source
+  // draft, so every byte the instance produces belongs to THIS key, not to
+  // wherever the user has since navigated.
+  //
+  // `draftKey` answers "what is selected"; this answers "what is loaded". Every
+  // write the editor drives must use the latter.
+  const editorDraftKeyRef = useRef(draftKey);
+
+  // Write a document into a draft slot: text, plus a prune of the attachments
+  // its body no longer references (deleting an image's markdown drops the
+  // staged upload with it). Shared by the live `onUpdate` and the draft-switch
+  // flush below, so a document can never be filed under one rule by one path
+  // and a different rule by the other. Attachments are read live for `key`
+  // rather than passed in — during a divergence the rendered `draftAttachments`
+  // belongs to the selected draft, not the loaded one.
+  const commitDraft = useCallback(
+    (key: string, markdown: string) => {
+      setInputDraft(key, markdown);
+      const attachments =
+        useChatStore.getState().inputDraftAttachments[key] ?? EMPTY_ATTACHMENTS;
+      if (attachments.length === 0) return;
+      const referenced = attachments.filter((attachment) =>
+        isAttachmentReferenced(markdown, attachment),
+      );
+      if (referenced.length !== attachments.length) {
+        setInputDraftAttachments(key, referenced);
+      }
+    },
+    [setInputDraft, setInputDraftAttachments],
+  );
   // Submit gate. `uploading` disables the SubmitButton the instant an upload
   // starts; `isBlocked()` is re-read inside handleSend for the paths that skip
   // the button entirely (Mod+Enter mid-paste, drag-drop racing the keyboard).
@@ -189,6 +227,56 @@ export function ChatInput({
   // used to be a local in-flight counter that a manual delete of the pending
   // image would leave stuck (MUL-4808).
   const uploadGate = useUploadGate(editorRef);
+
+  // Move the editor from the draft it holds to the draft that is selected.
+  //
+  // Two hazards make this more than "let the defaultValue sync handle it":
+  //
+  // 1. Unflushed keystrokes. `onUpdate` is debounced, and by the time a
+  //    debounce armed under draft A fires, `onUpdate` resolves to the latest
+  //    render's closure — it would file A's document under B. Flushing takes
+  //    those bytes back and commits them to the key they were typed in.
+  // 2. An in-flight upload. Guard 0 pins the document (see editorDraftKeyRef),
+  //    so the switch cannot happen yet at all: we leave BOTH the document and
+  //    its writes on the source key and retry when the gate clears
+  //    (`uploadGate.uploading` is a dep). Blocking navigation instead would be
+  //    a worse trade — the user waits on a network round-trip to change tabs.
+  //
+  // Case 2 also has to force the adopt afterwards: ContentEditor's sync effect
+  // CONSUMED the defaultValue change while Guard 0 was up (lastDefaultValueRef
+  // advances before the guard), so it will never re-run for that value and the
+  // target draft would never load on its own.
+  //
+  // useLayoutEffect, not useEffect, for two ordering reasons: passive effects
+  // run child-first, so a passive flush here would land AFTER ContentEditor's
+  // sync effect had already skipped on a dirty editor; and a layout effect is
+  // part of the commit, so no pending debounce timer can fire ahead of it.
+  const deferredAdoptRef = useRef(false);
+  useLayoutEffect(() => {
+    const loadedKey = editorDraftKeyRef.current;
+    if (loadedKey === draftKey) return;
+    if (editorRef.current?.hasActiveUploads() === true) {
+      // Pinned. Stay bound to the source draft until the upload settles.
+      deferredAdoptRef.current = true;
+      logger.debug("input.draft switch deferred by in-flight upload", {
+        from: loadedKey,
+        to: draftKey,
+      });
+      return;
+    }
+    const pending = editorRef.current?.flushPendingUpdate() ?? null;
+    if (pending !== null) {
+      logger.debug("input.draft flush on key change", { from: loadedKey, to: draftKey });
+      commitDraft(loadedKey, pending);
+    }
+    editorDraftKeyRef.current = draftKey;
+    if (!deferredAdoptRef.current) return;
+    deferredAdoptRef.current = false;
+    const incoming = useChatStore.getState().inputDrafts[draftKey] ?? "";
+    logger.debug("input.draft adopting after upload settled", { key: draftKey });
+    editorRef.current?.adoptContent(incoming);
+    setIsEmpty(!incoming.trim());
+  }, [draftKey, uploadGate.uploading, commitDraft]);
 
   // Maps "URL inserted into the editor" → "attachment row id" so that
   // on send we can ask the server to bind only the attachments still
@@ -262,11 +350,16 @@ export function ChatInput({
       if (result) {
         const persistedURL = result.markdownLink || result.link;
         uploadMapRef.current.set(persistedURL, result.id);
-        if (result.id) addInputDraftAttachment(draftKey, result);
+        // Bind to the draft this file is landing IN. The editor inserts the
+        // node into whatever document it currently holds, so while an earlier
+        // upload pins it to the source draft, that — not the selected draft —
+        // is where the body lives. Filing the row anywhere else splits a
+        // message from its own attachment.
+        if (result.id) addInputDraftAttachment(editorDraftKeyRef.current, result);
       }
       return result;
     },
-    [addInputDraftAttachment, draftKey, onUploadFile],
+    [addInputDraftAttachment, onUploadFile],
   );
 
   // Drop zone wraps the rounded card so a drop anywhere on the input
@@ -297,6 +390,20 @@ export function ChatInput({
     // still gate here.
     if (uploadGate.isBlocked()) {
       logger.debug("input.send skipped: uploads in flight");
+      return;
+    }
+    // The editor is still holding a DIFFERENT draft's document than the one
+    // selected — an upload pinned it and the adopt below has not run yet. The
+    // upload gate above covers most of that window, but not the sliver between
+    // the upload's final dispatch (node gone) and the re-render that adopts:
+    // React flushes that state update on a scheduler task, so a click can land
+    // first. Sending here would post the source draft's text into the selected
+    // session and then clear the wrong draft.
+    if (editorDraftKeyRef.current !== draftKey) {
+      logger.debug("input.send skipped: composer still holds another draft", {
+        loaded: editorDraftKeyRef.current,
+        selected: draftKey,
+      });
       return;
     }
     // Only send attachment IDs for uploads still present in the content.
@@ -409,23 +516,18 @@ export function ChatInput({
       >
         <div className="flex-1 min-h-0 overflow-y-auto px-3 py-2">
           <ContentEditor
-            // See the editorKey / draftKey split note above — editorKey
-            // intentionally does not depend on activeSessionId.
+            // See the editorKey / draftKey split note above — editor identity
+            // intentionally tracks neither the session nor the agent.
             key={editorKey}
             ref={editorRef}
             defaultValue={inputDraft}
             placeholder={placeholder}
             onUpdate={(md) => {
               setIsEmpty(!md.trim());
-              setInputDraft(draftKey, md);
-              if (draftAttachments.length > 0) {
-                const referenced = draftAttachments.filter((attachment) =>
-                  isAttachmentReferenced(md, attachment),
-                );
-                if (referenced.length !== draftAttachments.length) {
-                  setInputDraftAttachments(draftKey, referenced);
-                }
-              }
+              // The LOADED key, not the selected one: while an upload pins the
+              // document this fires for the source draft's body — including the
+              // upload's own completion dispatch.
+              commitDraft(editorDraftKeyRef.current, md);
             }}
             onSubmit={handleSend}
             onUploadFile={uploadEnabled ? handleUpload : undefined}

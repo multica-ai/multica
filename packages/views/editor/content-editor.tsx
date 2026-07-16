@@ -32,6 +32,7 @@
 
 import {
   forwardRef,
+  useCallback,
   useEffect,
   useImperativeHandle,
   useMemo,
@@ -220,6 +221,38 @@ interface ContentEditorRef {
   uploadFile: (file: File) => void;
   /** True when file uploads are still in progress. */
   hasActiveUploads: () => boolean;
+  /**
+   * Cancel the pending debounced `onUpdate` and hand its markdown back to the
+   * caller instead of firing it. Returns null when nothing is pending.
+   *
+   * For hosts that re-point ONE editor instance at a different destination
+   * (chat swaps `draftKey` between sessions). A debounce armed under the old
+   * destination would otherwise fire after the switch and, because `onUpdate`
+   * always resolves to the latest render's closure, write the old document
+   * into the NEW destination. Taking the markdown back lets the host commit it
+   * where it was actually typed. Flushing also marks the editor clean, so the
+   * dirty guard stops suppressing the incoming `defaultValue` sync.
+   *
+   * Distinct from `flushPendingOnUnmount`: this is for a LIVE editor changing
+   * targets, so it reads the current document rather than a cached copy.
+   */
+  flushPendingUpdate: () => string | null;
+  /**
+   * Force `markdown` into the document, bypassing the `defaultValue` sync
+   * guards.
+   *
+   * Those guards SKIP permanently rather than defer: `lastDefaultValueRef`
+   * advances before they run, so a `defaultValue` they refuse is never
+   * re-applied. That is correct for their usual case (the cache will send
+   * another value), but not for a host that re-points ONE instance at a
+   * different document and must land it exactly once — chat's draft switch,
+   * where an in-flight upload makes Guard 0 refuse the swap.
+   *
+   * The caller owns the safety the guards normally provide: only call once the
+   * reason for the block is gone (upload settled) and any pending edits have
+   * been flushed, or this destroys them.
+   */
+  adoptContent: (markdown: string) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -554,6 +587,58 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
       };
     }, []);
 
+    // Replace the live document with external markdown. Shared by the
+    // `defaultValue` sync effect below and the imperative `adoptContent`, so
+    // both land content identically — chunked parse for large docs, no
+    // onUpdate echo, caret preserved. Callers own the decision to apply;
+    // the guards live in the effect, not here.
+    const applyExternalContent = useCallback(
+      (markdown: string) => {
+        if (!editor || editor.isDestroyed) return;
+        const incoming = markdown ? preprocessMarkdown(markdown) : "";
+        const incomingNormalized = normalizeMarkdown(incoming);
+        // Normalized-equal short-circuit. Avoids a no-op transaction when the
+        // cache reflects a write this same editor just emitted.
+        if (incomingNormalized === normalizeEditorMarkdown(editor)) return;
+
+        // `emitUpdate: false`. Tiptap v3's setContent defaults to
+        // `emitUpdate: true`; without this we would re-trigger onUpdate →
+        // server save → self-write loop.
+        const { from, to } = editor.state.selection;
+        // Same chunked path on WS-driven re-parse of a large description.
+        const manager =
+          incoming.length > MARKDOWN_CHUNK_THRESHOLD
+            ? (editor.storage as { markdown?: { manager?: MarkdownManagerLike } })
+                .markdown?.manager
+            : undefined;
+        if (manager) {
+          editor.commands.setContent(parseMarkdownChunked(manager, incoming), {
+            emitUpdate: false,
+          });
+        } else {
+          editor.commands.setContent(incoming, {
+            emitUpdate: false,
+            contentType: "markdown",
+          });
+        }
+
+        // An empty list item in the incoming markdown parses into a caretless,
+        // schema-invalid node; repair it and let it own the caret. Otherwise clamp
+        // the prior selection to the new doc size so the caret doesn't snap to
+        // position 0 after ProseMirror replaces the document.
+        if (!repairEmptyListItems(editor, { from, to })) {
+          const docSize = editor.state.doc.content.size;
+          editor.commands.setTextSelection({
+            from: Math.min(from, docSize),
+            to: Math.min(to, docSize),
+          });
+        }
+
+        lastEmittedRef.current = normalizeEditorMarkdown(editor);
+      },
+      [editor],
+    );
+
     // Sync external `defaultValue` changes into the editor.
     // Tiptap v3 `useEditor` reads `content` only at mount (ueberdosis/tiptap#5831);
     // without this effect, a WS-driven description update keeps the editor
@@ -579,6 +664,11 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
       // finalize can no longer find it (the file vanishes, leaving an empty
       // `!file[name]()`). Like the dirty guards below, an uploading node is
       // local state that an external sync must not overwrite.
+      //
+      // NOTE: this (like every guard here) SKIPS the sync permanently for this
+      // value — `lastDefaultValueRef` has already advanced, so the effect will
+      // not re-run for it. A host that must still land this content once the
+      // block clears has to say so explicitly, via `adoptContent`.
       if (hasUploadingNode(editor)) return;
 
       const current = normalizeEditorMarkdown(editor);
@@ -601,47 +691,8 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
       // here avoids overwriting unsaved local edits.
       if (isDirty) return;
 
-      const incoming = defaultValue ? preprocessMarkdown(defaultValue) : "";
-      const incomingNormalized = normalizeMarkdown(incoming);
-      // Guard 3: normalized-equal short-circuit. Avoids a no-op transaction
-      // when the cache reflects a write this same editor just emitted.
-      if (incomingNormalized === current) return;
-
-      // Guard 4: `emitUpdate: false`. Tiptap v3's setContent defaults to
-      // `emitUpdate: true`; without this we would re-trigger onUpdate →
-      // server save → self-write loop.
-      const { from, to } = editor.state.selection;
-      // Same chunked path on WS-driven re-parse of a large description.
-      const manager =
-        incoming.length > MARKDOWN_CHUNK_THRESHOLD
-          ? (editor.storage as { markdown?: { manager?: MarkdownManagerLike } })
-              .markdown?.manager
-          : undefined;
-      if (manager) {
-        editor.commands.setContent(parseMarkdownChunked(manager, incoming), {
-          emitUpdate: false,
-        });
-      } else {
-        editor.commands.setContent(incoming, {
-          emitUpdate: false,
-          contentType: "markdown",
-        });
-      }
-
-      // An empty list item in the incoming markdown parses into a caretless,
-      // schema-invalid node; repair it and let it own the caret. Otherwise clamp
-      // the prior selection to the new doc size so the caret doesn't snap to
-      // position 0 after ProseMirror replaces the document.
-      if (!repairEmptyListItems(editor, { from, to })) {
-        const docSize = editor.state.doc.content.size;
-        editor.commands.setTextSelection({
-          from: Math.min(from, docSize),
-          to: Math.min(to, docSize),
-        });
-      }
-
-      lastEmittedRef.current = normalizeEditorMarkdown(editor);
-    }, [defaultValue, editor]);
+      applyExternalContent(defaultValue);
+    }, [defaultValue, editor, applyExternalContent]);
 
     // Sync external `placeholder` changes into the mounted editor.
     // The Placeholder extension is configured with a getter over `placeholderRef`
@@ -700,6 +751,25 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
         uploadAndInsertFile(editor, file, onUploadFileRef.current, endPos);
       },
       hasActiveUploads: () => (editor ? hasUploadingNode(editor) : false),
+      flushPendingUpdate: () => {
+        // No armed timer = nothing typed since the last emit. The editor is
+        // already clean, so the host has nothing to re-route.
+        if (!debounceRef.current) return null;
+        clearTimeout(debounceRef.current);
+        debounceRef.current = undefined;
+        pendingFlushRef.current = null;
+        if (!editor || editor.isDestroyed) return null;
+        // Read the live document: unlike the unmount flush, the instance is
+        // still alive here, so this is the freshest possible copy.
+        const md = normalizeEditorMarkdown(editor);
+        if (md === lastEmittedRef.current) return null;
+        // Advance the emit watermark so the editor reads as clean — the host
+        // is taking responsibility for these bytes, and the dirty guard must
+        // now let the incoming defaultValue through.
+        lastEmittedRef.current = md;
+        return md;
+      },
+      adoptContent: (markdown: string) => applyExternalContent(markdown),
     }));
 
     // Link hover card — disabled when BubbleMenu is active (has selection)
