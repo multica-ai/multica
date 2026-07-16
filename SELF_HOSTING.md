@@ -482,7 +482,7 @@ make build-prod    # writes server/bin/server and apps/web/.next/...
 
 ### Recovery when baseline can't be resolved
 
-`scripts/resolve-official-baseline.sh` derives the nearest reachable upstream tag via `git describe --tags --abbrev=0 --match 'v[0-9]*'` and verifies it against the canonical upstream release tags. The following contexts can't be auto-derived and require an explicit trusted override:
+`scripts/resolve-official-baseline.sh` derives the nearest reachable upstream tag via `git describe --tags --abbrev=0 --match 'v[0-9]*'` and verifies it against the canonical upstream release tags. All four of the contexts below share one prerequisite: **the resolver calls `git ls-remote https://github.com/multica-ai/multica`**, so the build host needs network access to that URL — unless an explicit trusted override is supplied, the resolver cannot proceed. The four failure modes that require the override:
 
 - **Shallow clone** without tags (only the latest commit fetched).
 - **Source archive** (tarball / zip without a `.git` history).

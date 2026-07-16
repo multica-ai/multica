@@ -52,8 +52,9 @@ verify_upstream() {
 		return 2
 	fi
 	# ls-remote --tags emits: <sha>\trefs/tags/<tag> and, for annotated tags,
-	# <sha>\trefs/tags/<tag>^{}. Strip down to one clean tag name per line.
-	names=$(printf '%s\n' "$refs" | sed 's#.*refs/tags/##; s#\^{}$##')
+	# <sha>\trefs/tags/<tag>^{}. Reduce to one clean tag name per line via awk so
+	# the pipeline is identical on macOS BSD sed and GNU sed (POSIX-portable).
+	names=$(printf '%s\n' "$refs" | awk -F'/tags/' '{p=$2; sub(/\^{}$/, "", p); print p}')
 	if printf '%s\n' "$names" | grep -Fxq "$candidate"; then
 		return 0
 	fi
@@ -64,6 +65,10 @@ candidate=""
 reason=""
 
 if candidate=$(git describe --tags --abbrev=0 --match 'v[0-9]*' 2>/dev/null) && [ -n "$candidate" ]; then
+	# Trim the candidate for parity with the TS/Go officialBaseline helpers and
+	# with the override path below; `git describe --abbrev=0` already trims, but
+	# defending here keeps the boundary consistent across the three layers.
+	candidate=$(printf '%s' "$candidate" | tr -d '\r' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
 	if verify_upstream "$candidate"; then
 		printf '%s\n' "$candidate"
 		exit 0
@@ -79,6 +84,11 @@ fi
 # Derivation unavailable — fall back to the explicit trusted baseline.
 if [ -n "$TRUSTED_BASELINE" ]; then
 	if is_official_tag "$TRUSTED_BASELINE"; then
+		# Re-read the trimmed value so the printed baseline matches the
+		# normalized form (no leading/trailing whitespace). is_official_tag
+		# already trims internally; capture that here for the output path.
+		TRUSTED_BASELINE="${TRUSTED_BASELINE#"${TRUSTED_BASELINE%%[![:space:]]*}"}"
+		TRUSTED_BASELINE="${TRUSTED_BASELINE%"${TRUSTED_BASELINE##*[![:space:]]}"}"
 		printf '%s\n' "$TRUSTED_BASELINE"
 		exit 0
 	fi

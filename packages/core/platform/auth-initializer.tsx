@@ -52,9 +52,17 @@ export function AuthInitializer({
     // Help-menu open before /api/config settles still shows the frontend row.
     configStore.getState().setFrontendBaseline(frontendBaseline);
 
+    // Bound the non-blocking /api/config request with a wall-clock timeout so
+    // a silently dropped network or indefinitely-pending CORS preflight can't
+    // leave backendBaselineStatus stuck at "loading" (which would render as
+    // "Backend loading…" in the Help menu forever). 8s is well above a
+    // healthy same-origin response and well below any user-perceived wait.
+    const configController = new AbortController();
+    const configTimeout = setTimeout(() => configController.abort(), 8000);
+
     // Fetch app config (CDN domain, PostHog key, …) in the background — non-blocking.
     api
-      .getConfig()
+      .getConfig(configController.signal)
       .then((cfg) => {
         if (cfg.cdn_domain) {
           configStore.getState().setCdnConfig({
@@ -91,6 +99,9 @@ export function AuthInitializer({
         // Still mark the backend baseline settled (unavailable) so the UI
         // doesn't show "loading" forever after a fetch failure.
         configStore.getState().setBackendBaseline();
+      })
+      .finally(() => {
+        clearTimeout(configTimeout);
       });
 
     const onAuthSuccess = (user: User) => {

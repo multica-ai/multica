@@ -132,6 +132,12 @@ expect_fail "tagless checkout without override fails"
 run_resolver "$WORK/fork" "$WORK/upstream" "v8.8.8"
 expect_ok "trusted override used for fork-only tag" "v8.8.8"
 
+# Lock the parity contract surfaced by the resolver review: the trusted override
+# path trims surrounding whitespace, matching the TS and Go officialBaseline
+# helpers. Without this case the trim symmetry would have no test coverage.
+run_resolver "$WORK/exact" "$WORK/does-not-exist" " v8.8.8 "
+expect_ok "trusted override trims surrounding whitespace" "v8.8.8"
+
 echo
 echo "pass=$pass fail=$fails"
 [ "$fails" = "0" ] || exit 1

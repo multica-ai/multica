@@ -1649,8 +1649,8 @@ export class ApiClient {
   }
 
   // App Config
-  async getConfig(): Promise<AppConfigResponse> {
-    const raw = await this.fetch<unknown>("/api/config");
+  async getConfig(signal?: AbortSignal): Promise<AppConfigResponse> {
+    const raw = await this.fetch<unknown>("/api/config", signal ? { signal } : undefined);
     return parseWithFallback<AppConfigResponse>(raw, AppConfigSchema, EMPTY_APP_CONFIG, {
       endpoint: "GET /api/config",
     });

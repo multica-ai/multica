@@ -5,6 +5,7 @@ import { CoreProvider } from "@multica/core/platform";
 import { createBrowserCookieLocaleAdapter } from "@multica/core/i18n/browser";
 import type { LocaleResources, SupportedLocale } from "@multica/core/i18n";
 import { useWelcomeStore } from "@multica/core/onboarding";
+import { officialBaseline } from "@multica/core/config";
 import packageJson from "../package.json";
 import { WebNavigationProvider } from "@/platform/navigation";
 import {
@@ -77,12 +78,14 @@ export function WebProviders({
         clearLoggedInCookie();
       }}
       identity={identity}
-      // Pass the raw build-time version (no package.json/dev fallback) to the
-      // platform boundary. The config store validates it via officialBaseline,
-      // so a dev bundle or un-stamped build becomes "unavailable" rather than
-      // a false baseline. Identity.version above still carries the analytics
-      // fallback for PostHog — intentionally separate from provenance.
-      frontendBaseline={process.env.NEXT_PUBLIC_APP_VERSION}
+      // Wrap the raw build-time version in officialBaseline at the platform
+      // boundary so the value reaching core/config is already canonical.
+      // The store also validates as defense-in-depth, but sanitizing here
+      // makes the contract visible at the seam: the API surface takes a
+      // clean v… tag (or ""), not "anything a build script happened to set".
+      // The analytics identity.version above still carries the package.json
+      // / dev fallback for PostHog — intentionally separate from provenance.
+      frontendBaseline={officialBaseline(process.env.NEXT_PUBLIC_APP_VERSION)}
       locale={locale}
       resources={resources}
       localeAdapter={localeAdapter}
