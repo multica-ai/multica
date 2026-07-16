@@ -5,6 +5,7 @@ package repocache
 import (
 	"context"
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/url"
@@ -280,6 +281,12 @@ type Cache struct {
 	// existingWorktreeHook is test-only synchronization for adversarial
 	// replacement scenarios. Production caches leave it nil.
 	existingWorktreeHook func(stage, worktreePath string)
+	// worktreeAddHook is test-only synchronization after Git starts creating a
+	// new worktree but before the daemon waits for it to exit.
+	worktreeAddHook func(stage, worktreePath string)
+	// worktreePublicationHook is test-only synchronization immediately before
+	// an identity-bound staging worktree is published into the task workdir.
+	worktreePublicationHook func(stage, worktreePath string)
 	// bareCacheHook is test-only synchronization for clone postcondition
 	// scenarios. Production caches leave it nil.
 	bareCacheHook func(stage, barePath string)
@@ -1120,7 +1127,7 @@ func (c *Cache) CreateWorktree(params WorktreeParams) (*WorktreeResult, error) {
 
 // CreateWorktreeContext is the task-safe checkout entry point. All Git
 // subprocesses use ctx and the cache's immutable broker configuration.
-func (c *Cache) CreateWorktreeContext(ctx context.Context, params WorktreeParams) (*WorktreeResult, error) {
+func (c *Cache) CreateWorktreeContext(ctx context.Context, params WorktreeParams) (_ *WorktreeResult, returnErr error) {
 	if err := c.requireGit(); err != nil {
 		return nil, err
 	}
@@ -1260,24 +1267,68 @@ func (c *Cache) CreateWorktreeContext(ctx context.Context, params WorktreeParams
 		}, nil
 	}
 
-	// Create a new worktree. createWorktree may rename the branch to avoid
-	// collisions with stale per-task refs left over from previous runs.
-	actualBranch, err := c.createWorktreeHandle(ctx, bareHandle, worktreePath, branchName, baseRef)
+	// Create new worktrees outside the task-visible workdir, then publish the
+	// completed checkout atomically. This keeps Git from following a target
+	// path that the task replaces while `git worktree add` is still running.
+	publication, err := newWorktreePublication(c.root, worktreePath)
+	if err != nil {
+		return nil, fmt.Errorf("prepare worktree publication: %w", err)
+	}
+	defer func() {
+		returnErr = errors.Join(returnErr, publication.Close())
+	}()
+	actualBranch, err := c.createWorktreeHandle(ctx, bareHandle, publication.StagingPath(), branchName, baseRef)
 	if err != nil {
 		return nil, fmt.Errorf("create worktree: %w", err)
 	}
+	committed := false
+	var publicationHandle *worktreeHandle
+	defer func() {
+		if committed {
+			if publicationHandle != nil {
+				returnErr = errors.Join(returnErr, publicationHandle.Close())
+			}
+			return
+		}
+		cleanupCtx := context.WithoutCancel(ctx)
+		rollbackErr := publication.Rollback(publicationHandle)
+		cleanupErr := c.cleanupUnpublishedWorktreeHandle(cleanupCtx, bareHandle, publicationHandle, publication.StagingPath(), actualBranch)
+		var closeErr error
+		if publicationHandle != nil {
+			closeErr = publicationHandle.Close()
+		}
+		returnErr = errors.Join(returnErr, rollbackErr, cleanupErr, closeErr)
+	}()
 
 	if identityBoundWorktreeAccessSupported() {
-		if c.existingWorktreeHook != nil {
-			c.existingWorktreeHook("after-worktree-add", worktreePath)
-		}
-		handle, err := openWorktreeHandle(worktreePath)
+		handle, err := openWorktreeHandle(publication.StagingPath())
 		if err != nil {
 			return nil, fmt.Errorf("open new worktree identity: %w", err)
 		}
-		defer handle.Close()
+		publicationHandle = handle
 		if err := c.verifyWorktreeOwnerHandle(ctx, handle, barePath); err != nil {
 			return nil, fmt.Errorf("verify new worktree ownership: %w", err)
+		}
+		if err := publication.Prepare(handle); err != nil {
+			return nil, fmt.Errorf("prepare new worktree backlink: %w", err)
+		}
+		if c.worktreePublicationHook != nil {
+			c.worktreePublicationHook("before-publication", worktreePath)
+		}
+		if err := publication.Publish(handle); err != nil {
+			return nil, fmt.Errorf("publish new worktree: %w", err)
+		}
+		if c.worktreePublicationHook != nil {
+			c.worktreePublicationHook("after-publication", worktreePath)
+		}
+		if err := handle.VerifyGitDirBacklink(); err != nil {
+			return nil, fmt.Errorf("verify published worktree backlink: %w", err)
+		}
+		if err := handle.RecheckPaths(); err != nil {
+			return nil, err
+		}
+		if c.existingWorktreeHook != nil {
+			c.existingWorktreeHook("after-worktree-add", worktreePath)
 		}
 
 		if c.existingWorktreeHook != nil {
@@ -1320,6 +1371,9 @@ func (c *Cache) CreateWorktreeContext(ctx context.Context, params WorktreeParams
 			return nil, err
 		}
 	} else {
+		if err := publication.Publish(nil); err != nil {
+			return nil, fmt.Errorf("publish new worktree: %w", err)
+		}
 		// Windows does not advertise task execution and lacks the descriptor-
 		// relative primitives used above. Preserve operator-only worktree
 		// creation compatibility while reused worktrees remain fail closed.
@@ -1336,6 +1390,8 @@ func (c *Cache) CreateWorktreeContext(ctx context.Context, params WorktreeParams
 			}
 		}
 	}
+	publication.Commit()
+	committed = true
 
 	c.logger.Info("repo checkout: worktree created",
 		"url", params.RepoURL,
@@ -1453,10 +1509,59 @@ func (c *Cache) runWorktreeAdd(ctx context.Context, gitRoot, worktreePath, branc
 }
 
 func (c *Cache) runWorktreeAddHandle(ctx context.Context, handle *bareCacheHandle, worktreePath, branchName, baseRef string) error {
-	if out, err := c.git.combinedOutputInBareCache(ctx, 0, handle, "worktree", "add", "-b", branchName, worktreePath, baseRef); err != nil {
+	ctx, cancel := c.git.withTimeout(ctx, 0)
+	defer cancel()
+	cmd, err := c.git.bareCacheCommand(ctx, handle, "worktree", "add", "-b", branchName, worktreePath, baseRef)
+	if err != nil {
+		return err
+	}
+	var output strings.Builder
+	cmd.Stdout = &output
+	cmd.Stderr = &output
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("start git worktree add: %w", err)
+	}
+	if c.worktreeAddHook != nil {
+		c.worktreeAddHook("after-start", worktreePath)
+	}
+	err = cmd.Wait()
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	if identityErr := handle.RecheckPath(); identityErr != nil {
+		return identityErr
+	}
+	if err != nil {
+		out := output.String()
 		return fmt.Errorf("git worktree add: %s: %w", strings.TrimSpace(string(out)), err)
 	}
 	return nil
+}
+
+func (c *Cache) cleanupUnpublishedWorktreeHandle(ctx context.Context, handle *bareCacheHandle, worktree *worktreeHandle, worktreePath, branchName string) error {
+	out, err := c.git.combinedOutputInBareCache(ctx, 0, handle, "worktree", "remove", "--force", worktreePath)
+	var cleanupErr error
+	if err != nil {
+		if fallbackErr := cleanupOwnedWorktreeHandle(worktree); fallbackErr != nil {
+			cleanupErr = errors.Join(
+				fmt.Errorf("remove unpublished worktree: %s: %w", strings.TrimSpace(string(out)), err),
+				fallbackErr,
+			)
+		}
+	}
+	out, err = c.git.combinedOutputInBareCache(ctx, 0, handle, "branch", "-D", branchName)
+	if err != nil {
+		branchRef := "refs/heads/" + branchName
+		fallbackOut, fallbackErr := c.git.combinedOutputInBareCache(ctx, 0, handle, "update-ref", "-d", branchRef)
+		if fallbackErr != nil {
+			cleanupErr = errors.Join(
+				cleanupErr,
+				fmt.Errorf("delete unpublished worktree branch: %s: %w", strings.TrimSpace(string(out)), err),
+				fmt.Errorf("delete unpublished worktree ref: %s: %w", strings.TrimSpace(string(fallbackOut)), fallbackErr),
+			)
+		}
+	}
+	return cleanupErr
 }
 
 // isBranchCollisionError returns true if err is specifically about a branch

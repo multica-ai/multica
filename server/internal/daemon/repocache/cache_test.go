@@ -1732,6 +1732,14 @@ func TestCreateWorktreeRejectsNewWorktreeReplacement(t *testing.T) {
 					t.Fatalf("sync failed: %v", err)
 				}
 				workDir := t.TempDir()
+				dirName, err := worktreeDirName(sourceRepo)
+				if err != nil {
+					t.Fatalf("derive worktree directory name: %v", err)
+				}
+				worktreePath, err := canonicalWorktreeTarget(workDir, dirName)
+				if err != nil {
+					t.Fatalf("derive canonical worktree target: %v", err)
+				}
 				foreignSource := createTestRepo(t)
 				foreignSourceSentinel := filepath.Join(foreignSource, "foreign-sentinel.txt")
 				if err := os.WriteFile(foreignSourceSentinel, []byte("keep\n"), 0o644); err != nil {
@@ -1799,7 +1807,7 @@ func TestCreateWorktreeRejectsNewWorktreeReplacement(t *testing.T) {
 					}
 				}
 
-				_, err := cache.CreateWorktree(WorktreeParams{
+				_, err = cache.CreateWorktree(WorktreeParams{
 					WorkspaceID:         "ws-1",
 					RepoURL:             sourceRepo,
 					WorkDir:             workDir,
@@ -1816,8 +1824,417 @@ func TestCreateWorktreeRejectsNewWorktreeReplacement(t *testing.T) {
 				if got, readErr := os.ReadFile(replacementSentinel); readErr != nil || string(got) != "keep\n" {
 					t.Fatalf("replacement target was modified: contents=%q err=%v create error=%v", got, readErr, err)
 				}
+				if replacementKind == "worktree" {
+					entries, readErr := os.ReadDir(worktreePath + "-moved")
+					if readErr != nil || len(entries) != 0 {
+						t.Fatalf("displaced provisional checkout was not emptied: entries=%v err=%v create error=%v", entries, readErr, err)
+					}
+				}
 			})
 		}
+	}
+}
+
+func TestCreateWorktreeDoesNotCreateInsideReplacementDuringWorktreeAdd(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("identity-bound worktree publication is unsupported on windows")
+	}
+
+	sourceRepo := createTestRepo(t)
+	cache := New(t.TempDir(), testLogger())
+	if err := cache.Sync("ws-1", []RepoInfo{{URL: sourceRepo}}); err != nil {
+		t.Fatalf("sync failed: %v", err)
+	}
+	workDir := t.TempDir()
+	dirName, err := worktreeDirName(sourceRepo)
+	if err != nil {
+		t.Fatalf("derive worktree directory name: %v", err)
+	}
+	worktreePath, err := canonicalWorktreeTarget(workDir, dirName)
+	if err != nil {
+		t.Fatalf("derive canonical worktree target: %v", err)
+	}
+	attackerTarget := t.TempDir()
+	attackerSentinel := filepath.Join(attackerTarget, "keep.txt")
+	if err := os.WriteFile(attackerSentinel, []byte("keep\n"), 0o644); err != nil {
+		t.Fatalf("write attacker sentinel: %v", err)
+	}
+
+	hookRan := false
+	cache.worktreeAddHook = func(stage, addPath string) {
+		if stage != "after-start" || hookRan {
+			return
+		}
+		hookRan = true
+		if addPath == worktreePath {
+			t.Fatalf("Git received the task-visible final worktree path: %s", addPath)
+		}
+		stagingRoot, canonicalErr := canonicalExistingDir(filepath.Join(cache.root, ".worktree-staging"))
+		if canonicalErr != nil {
+			t.Fatalf("resolve staging root: %v", canonicalErr)
+		}
+		canonicalAddParent, canonicalErr := canonicalExistingDir(filepath.Dir(addPath))
+		if canonicalErr != nil || canonicalAddParent != stagingRoot {
+			t.Fatalf("Git worktree path is outside daemon staging: path=%s parent=%s root=%s err=%v", addPath, canonicalAddParent, stagingRoot, canonicalErr)
+		}
+		if err := os.Symlink(attackerTarget, worktreePath); err != nil {
+			t.Fatalf("replace worktree target during add: %v", err)
+		}
+	}
+
+	_, err = cache.CreateWorktree(WorktreeParams{
+		WorkspaceID: "ws-1",
+		RepoURL:     sourceRepo,
+		WorkDir:     workDir,
+		AgentName:   "agent",
+		TaskID:      "during-add-replacement",
+	})
+	if err == nil {
+		t.Fatal("CreateWorktree succeeded after the final target was replaced during git worktree add")
+	}
+	if !hookRan {
+		t.Fatalf("worktree add hook did not run: %v", err)
+	}
+	if got, readErr := os.ReadFile(attackerSentinel); readErr != nil || string(got) != "keep\n" {
+		t.Fatalf("attacker sentinel changed: contents=%q err=%v create error=%v", got, readErr, err)
+	}
+	entries, readErr := os.ReadDir(attackerTarget)
+	if readErr != nil {
+		t.Fatalf("read attacker target: %v", readErr)
+	}
+	if len(entries) != 1 || entries[0].Name() != "keep.txt" {
+		t.Fatalf("Git wrote into attacker replacement: entries=%v create error=%v", entries, err)
+	}
+	barePath, lookupErr := cache.lookupPath(context.Background(), "ws-1", sourceRepo)
+	if lookupErr != nil {
+		t.Fatalf("lookup bare cache: %v", lookupErr)
+	}
+	branch := "refs/heads/agent/agent/during-a"
+	if out, refErr := exec.Command("git", "-C", barePath, "rev-parse", "--verify", "--quiet", branch).CombinedOutput(); refErr == nil {
+		t.Fatalf("unpublished branch remains: ref=%s output=%s", branch, out)
+	}
+	worktreeEntries, readErr := os.ReadDir(filepath.Join(barePath, "worktrees"))
+	if readErr != nil && !os.IsNotExist(readErr) {
+		t.Fatalf("read bare worktree metadata: %v", readErr)
+	}
+	if len(worktreeEntries) != 0 {
+		t.Fatalf("unpublished worktree metadata remains: %v", worktreeEntries)
+	}
+	stagingEntries, readErr := os.ReadDir(filepath.Join(cache.root, ".worktree-staging"))
+	if readErr != nil {
+		t.Fatalf("read staging root after rejected publication: %v", readErr)
+	}
+	if len(stagingEntries) != 0 {
+		t.Fatalf("unpublished staging entries remain: %v", stagingEntries)
+	}
+}
+
+func TestCreateWorktreePublishesFinalBacklinksWithoutStagingIdentity(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("identity-bound worktree publication is unsupported on windows")
+	}
+
+	sourceRepo := createTestRepo(t)
+	cache := New(t.TempDir(), testLogger())
+	if err := cache.Sync("ws-1", []RepoInfo{{URL: sourceRepo}}); err != nil {
+		t.Fatalf("sync failed: %v", err)
+	}
+	result, err := cache.CreateWorktree(WorktreeParams{
+		WorkspaceID: "ws-1",
+		RepoURL:     sourceRepo,
+		WorkDir:     t.TempDir(),
+		AgentName:   "agent",
+		TaskID:      "published-backlinks",
+	})
+	if err != nil {
+		t.Fatalf("create worktree: %v", err)
+	}
+	gitFile, err := os.ReadFile(filepath.Join(result.Path, ".git"))
+	if err != nil {
+		t.Fatalf("read published .git file: %v", err)
+	}
+	gitDir := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(string(gitFile)), "gitdir: "))
+	if !filepath.IsAbs(gitDir) {
+		t.Fatalf("published .git path is not absolute: %q", gitDir)
+	}
+	backlink, err := os.ReadFile(filepath.Join(gitDir, "gitdir"))
+	if err != nil {
+		t.Fatalf("read published git-dir backlink: %v", err)
+	}
+	wantBacklink := filepath.Join(result.Path, ".git")
+	if got := strings.TrimSpace(string(backlink)); got != wantBacklink {
+		t.Fatalf("published git-dir backlink mismatch: got %q want %q", got, wantBacklink)
+	}
+	if strings.Contains(string(gitFile), ".worktree-staging") || strings.Contains(string(backlink), ".worktree-staging") {
+		t.Fatalf("published metadata retains staging identity: gitFile=%q backlink=%q", gitFile, backlink)
+	}
+	entries, err := os.ReadDir(filepath.Join(cache.root, ".worktree-staging"))
+	if err != nil {
+		t.Fatalf("read staging root: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("published staging root is not empty: %v", entries)
+	}
+}
+
+func TestRemoveDirectoryContentsAtFDRejectsEntryReplacement(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("descriptor-relative cleanup is unsupported on windows")
+	}
+
+	for _, kind := range []string{"file", "directory"} {
+		t.Run(kind, func(t *testing.T) {
+			root := t.TempDir()
+			entryPath := filepath.Join(root, "owned")
+			movedPath := filepath.Join(root, "owned-moved")
+			replacementSentinel := filepath.Join(entryPath, "keep.txt")
+			if kind == "directory" {
+				if err := os.Mkdir(entryPath, 0o755); err != nil {
+					t.Fatalf("create owned directory: %v", err)
+				}
+			} else if err := os.WriteFile(entryPath, []byte("owned\n"), 0o644); err != nil {
+				t.Fatalf("create owned file: %v", err)
+			}
+			rootHandle, err := openDirectoryHandle(root)
+			if err != nil {
+				t.Fatalf("open cleanup root: %v", err)
+			}
+			defer rootHandle.file.Close()
+			replaced := false
+			err = removeDirectoryContentsAtFDWithHook(int(rootHandle.file.Fd()), func(_ int, name string) {
+				if replaced || name != "owned" {
+					return
+				}
+				replaced = true
+				if err := os.Rename(entryPath, movedPath); err != nil {
+					t.Fatalf("move owned cleanup entry: %v", err)
+				}
+				if kind == "directory" {
+					if err := os.Mkdir(entryPath, 0o755); err != nil {
+						t.Fatalf("create replacement directory: %v", err)
+					}
+					if err := os.WriteFile(replacementSentinel, []byte("keep\n"), 0o644); err != nil {
+						t.Fatalf("write replacement sentinel: %v", err)
+					}
+					return
+				}
+				if err := os.WriteFile(entryPath, []byte("keep\n"), 0o644); err != nil {
+					t.Fatalf("create replacement file: %v", err)
+				}
+			})
+			if err == nil || !strings.Contains(err.Error(), "entry changed before removal") {
+				t.Fatalf("cleanup did not reject entry replacement: %v", err)
+			}
+			if !replaced {
+				t.Fatal("replacement hook did not run")
+			}
+			if kind == "directory" {
+				if got, readErr := os.ReadFile(replacementSentinel); readErr != nil || string(got) != "keep\n" {
+					t.Fatalf("replacement directory was modified: contents=%q err=%v", got, readErr)
+				}
+				return
+			}
+			if got, readErr := os.ReadFile(entryPath); readErr != nil || string(got) != "keep\n" {
+				t.Fatalf("replacement file was modified: contents=%q err=%v", got, readErr)
+			}
+		})
+	}
+}
+
+func TestCreateWorktreeRejectsFinalParentReplacementBeforePublication(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("identity-bound worktree publication is unsupported on windows")
+	}
+
+	sourceRepo := createTestRepo(t)
+	cache := New(t.TempDir(), testLogger())
+	if err := cache.Sync("ws-1", []RepoInfo{{URL: sourceRepo}}); err != nil {
+		t.Fatalf("sync failed: %v", err)
+	}
+	workDir := t.TempDir()
+	replacementSentinel := filepath.Join(workDir, "replacement-sentinel.txt")
+	hookRan := false
+	cache.worktreePublicationHook = func(stage, _ string) {
+		if stage != "before-publication" || hookRan {
+			return
+		}
+		hookRan = true
+		if err := os.Rename(workDir, workDir+"-moved"); err != nil {
+			t.Fatalf("rename final parent: %v", err)
+		}
+		if err := os.Mkdir(workDir, 0o755); err != nil {
+			t.Fatalf("install replacement final parent: %v", err)
+		}
+		if err := os.WriteFile(replacementSentinel, []byte("keep\n"), 0o644); err != nil {
+			t.Fatalf("write replacement parent sentinel: %v", err)
+		}
+	}
+
+	_, err := cache.CreateWorktree(WorktreeParams{
+		WorkspaceID: "ws-1",
+		RepoURL:     sourceRepo,
+		WorkDir:     workDir,
+		AgentName:   "agent",
+		TaskID:      "parent-replacement",
+	})
+	if err == nil {
+		t.Fatal("CreateWorktree succeeded after final parent replacement")
+	}
+	if !hookRan {
+		t.Fatalf("publication hook did not run: %v", err)
+	}
+	if got, readErr := os.ReadFile(replacementSentinel); readErr != nil || string(got) != "keep\n" {
+		t.Fatalf("replacement parent was modified: contents=%q err=%v create error=%v", got, readErr, err)
+	}
+	entries, readErr := os.ReadDir(workDir)
+	if readErr != nil {
+		t.Fatalf("read replacement parent: %v", readErr)
+	}
+	if len(entries) != 1 || entries[0].Name() != "replacement-sentinel.txt" {
+		t.Fatalf("published into replacement parent: entries=%v create error=%v", entries, err)
+	}
+}
+
+func TestCreateWorktreeRollsBackWhenFinalParentChangesAfterPublication(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("identity-bound worktree publication is unsupported on windows")
+	}
+
+	sourceRepo := createTestRepo(t)
+	cache := New(t.TempDir(), testLogger())
+	if err := cache.Sync("ws-1", []RepoInfo{{URL: sourceRepo}}); err != nil {
+		t.Fatalf("sync failed: %v", err)
+	}
+	workDir := t.TempDir()
+	movedWorkDir := workDir + "-moved"
+	replacementSentinel := filepath.Join(workDir, "replacement-sentinel.txt")
+	hookRan := false
+	cache.worktreePublicationHook = func(stage, _ string) {
+		if stage != "after-publication" || hookRan {
+			return
+		}
+		hookRan = true
+		if err := os.Rename(workDir, movedWorkDir); err != nil {
+			t.Fatalf("rename published final parent: %v", err)
+		}
+		if err := os.Mkdir(workDir, 0o755); err != nil {
+			t.Fatalf("install replacement final parent: %v", err)
+		}
+		if err := os.WriteFile(replacementSentinel, []byte("keep\n"), 0o644); err != nil {
+			t.Fatalf("write replacement parent sentinel: %v", err)
+		}
+	}
+
+	_, err := cache.CreateWorktree(WorktreeParams{
+		WorkspaceID: "ws-1",
+		RepoURL:     sourceRepo,
+		WorkDir:     workDir,
+		AgentName:   "agent",
+		TaskID:      "post-publish-parent-replacement",
+	})
+	if err == nil {
+		t.Fatal("CreateWorktree succeeded after post-publication parent replacement")
+	}
+	if !hookRan {
+		t.Fatalf("post-publication hook did not run: %v", err)
+	}
+	if got, readErr := os.ReadFile(replacementSentinel); readErr != nil || string(got) != "keep\n" {
+		t.Fatalf("replacement parent was modified: contents=%q err=%v create error=%v", got, readErr, err)
+	}
+	dirName, nameErr := worktreeDirName(sourceRepo)
+	if nameErr != nil {
+		t.Fatalf("derive worktree directory name: %v", nameErr)
+	}
+	if _, statErr := os.Lstat(filepath.Join(movedWorkDir, dirName)); !os.IsNotExist(statErr) {
+		t.Fatalf("provisional checkout remains in moved final parent: err=%v create error=%v", statErr, err)
+	}
+	barePath, lookupErr := cache.lookupPath(context.Background(), "ws-1", sourceRepo)
+	if lookupErr != nil {
+		t.Fatalf("lookup bare cache: %v", lookupErr)
+	}
+	branch := "refs/heads/agent/agent/post-pub"
+	if out, refErr := exec.Command("git", "-C", barePath, "rev-parse", "--verify", "--quiet", branch).CombinedOutput(); refErr == nil {
+		t.Fatalf("rolled-back branch remains: ref=%s output=%s", branch, out)
+	}
+	worktreeEntries, readErr := os.ReadDir(filepath.Join(barePath, "worktrees"))
+	if readErr != nil && !os.IsNotExist(readErr) {
+		t.Fatalf("read bare worktree metadata: %v", readErr)
+	}
+	if len(worktreeEntries) != 0 {
+		t.Fatalf("rolled-back worktree metadata remains: %v", worktreeEntries)
+	}
+	stagingEntries, readErr := os.ReadDir(filepath.Join(cache.root, ".worktree-staging"))
+	if readErr != nil {
+		t.Fatalf("read staging root after rollback: %v", readErr)
+	}
+	if len(stagingEntries) != 0 {
+		t.Fatalf("rolled-back staging entries remain: %v", stagingEntries)
+	}
+}
+
+func TestCreateWorktreeRejectsFinalTargetRaceBeforePublication(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("identity-bound worktree publication is unsupported on windows")
+	}
+
+	for _, replacementKind := range []string{"directory", "symlink"} {
+		t.Run(replacementKind, func(t *testing.T) {
+			sourceRepo := createTestRepo(t)
+			cache := New(t.TempDir(), testLogger())
+			if err := cache.Sync("ws-1", []RepoInfo{{URL: sourceRepo}}); err != nil {
+				t.Fatalf("sync failed: %v", err)
+			}
+			workDir := t.TempDir()
+			dirName, err := worktreeDirName(sourceRepo)
+			if err != nil {
+				t.Fatalf("derive worktree directory name: %v", err)
+			}
+			worktreePath, err := canonicalWorktreeTarget(workDir, dirName)
+			if err != nil {
+				t.Fatalf("derive canonical worktree target: %v", err)
+			}
+			attackerTarget := t.TempDir()
+			sentinel := filepath.Join(attackerTarget, "keep.txt")
+			if err := os.WriteFile(sentinel, []byte("keep\n"), 0o644); err != nil {
+				t.Fatalf("write attacker sentinel: %v", err)
+			}
+			cache.worktreePublicationHook = func(stage, _ string) {
+				if stage != "before-publication" {
+					return
+				}
+				if replacementKind == "directory" {
+					if err := os.Mkdir(worktreePath, 0o755); err != nil {
+						t.Fatalf("install target directory: %v", err)
+					}
+					if err := os.WriteFile(filepath.Join(worktreePath, "keep.txt"), []byte("keep\n"), 0o644); err != nil {
+						t.Fatalf("write target directory sentinel: %v", err)
+					}
+					return
+				}
+				if err := os.Symlink(attackerTarget, worktreePath); err != nil {
+					t.Fatalf("install target symlink: %v", err)
+				}
+			}
+
+			_, err = cache.CreateWorktree(WorktreeParams{
+				WorkspaceID: "ws-1",
+				RepoURL:     sourceRepo,
+				WorkDir:     workDir,
+				AgentName:   "agent",
+				TaskID:      "target-race-" + replacementKind,
+			})
+			if err == nil {
+				t.Fatal("CreateWorktree succeeded after final target race")
+			}
+			if replacementKind == "symlink" {
+				entries, readErr := os.ReadDir(attackerTarget)
+				if readErr != nil || len(entries) != 1 || entries[0].Name() != "keep.txt" {
+					t.Fatalf("symlink target was modified: entries=%v err=%v create error=%v", entries, readErr, err)
+				}
+			} else if got, readErr := os.ReadFile(filepath.Join(worktreePath, "keep.txt")); readErr != nil || string(got) != "keep\n" {
+				t.Fatalf("target directory was modified: contents=%q err=%v create error=%v", got, readErr, err)
+			}
+		})
 	}
 }
 

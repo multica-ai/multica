@@ -4,6 +4,9 @@ package repocache
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -19,6 +22,399 @@ import (
 
 const internalGitWorktreeMode = "__multica_internal_git_worktree_fd_v1"
 const internalGitBareCacheMode = "__multica_internal_git_bare_cache_fd_v1"
+
+type worktreePublication struct {
+	stagingParent pathHandle
+	finalParent   pathHandle
+	stagingName   string
+	finalName     string
+	stagingPath   string
+	finalPath     string
+	prepared      bool
+	moved         bool
+	committed     bool
+}
+
+func newWorktreePublication(cacheRoot, finalPath string) (*worktreePublication, error) {
+	if !filepath.IsAbs(finalPath) || filepath.Clean(finalPath) != finalPath || !isSafePathComponent(filepath.Base(finalPath)) {
+		return nil, fmt.Errorf("final worktree path must be absolute and canonical: %q", finalPath)
+	}
+	if err := validateDaemonOwnedDirectoryPath(cacheRoot, "repository cache root"); err != nil {
+		return nil, err
+	}
+	cacheRootHandle, err := openDirectoryHandle(cacheRoot)
+	if err != nil {
+		return nil, fmt.Errorf("open repository cache root: %w", err)
+	}
+	defer cacheRootHandle.file.Close()
+	if err := cacheRootHandle.recheck("repository cache root"); err != nil {
+		return nil, err
+	}
+	stagingRoot := filepath.Join(cacheRoot, ".worktree-staging")
+	stagingFD, err := ensureDirectoryAt(cacheRootHandle.file, ".worktree-staging", 0o700)
+	if err != nil {
+		return nil, fmt.Errorf("create worktree staging root: %w", err)
+	}
+	stagingFile := os.NewFile(uintptr(stagingFD), stagingRoot)
+	if err := unix.Fchmod(stagingFD, 0o700); err != nil {
+		_ = stagingFile.Close()
+		return nil, fmt.Errorf("restrict worktree staging root: %w", err)
+	}
+	stagingInfo, err := stagingFile.Stat()
+	if err != nil {
+		_ = stagingFile.Close()
+		return nil, fmt.Errorf("stat worktree staging root: %w", err)
+	}
+	stagingParent := pathHandle{path: stagingRoot, file: stagingFile, info: stagingInfo}
+	if err := validateDaemonOwnedDirectoryPath(stagingRoot, "worktree staging root"); err != nil {
+		_ = stagingParent.file.Close()
+		return nil, err
+	}
+	if err := stagingParent.recheck("worktree staging root"); err != nil {
+		_ = stagingParent.file.Close()
+		return nil, err
+	}
+	finalParentPath := filepath.Dir(finalPath)
+	finalParent, err := openDirectoryHandle(finalParentPath)
+	if err != nil {
+		_ = stagingParent.file.Close()
+		return nil, fmt.Errorf("open final worktree parent: %w", err)
+	}
+	if !sameFilesystem(stagingParent.info, finalParent.info) {
+		_ = stagingParent.file.Close()
+		_ = finalParent.file.Close()
+		return nil, fmt.Errorf("worktree staging root and final parent are on different filesystems")
+	}
+	if err := ensurePathAbsentAt(finalParent.file, filepath.Base(finalPath)); err != nil {
+		_ = stagingParent.file.Close()
+		_ = finalParent.file.Close()
+		return nil, err
+	}
+	name, err := reserveStagingName(stagingParent.file)
+	if err != nil {
+		_ = stagingParent.file.Close()
+		_ = finalParent.file.Close()
+		return nil, err
+	}
+	return &worktreePublication{
+		stagingParent: stagingParent,
+		finalParent:   finalParent,
+		stagingName:   name,
+		finalName:     filepath.Base(finalPath),
+		stagingPath:   filepath.Join(stagingRoot, name),
+		finalPath:     finalPath,
+	}, nil
+}
+
+func (p *worktreePublication) StagingPath() string { return p.stagingPath }
+
+func (p *worktreePublication) Prepare(handle *worktreeHandle) error {
+	if p == nil || handle == nil || handle.gitDir.file == nil {
+		return fmt.Errorf("worktree publication identity is unavailable")
+	}
+	if err := p.recheckParents(); err != nil {
+		return err
+	}
+	if err := handle.RecheckPaths(); err != nil {
+		return err
+	}
+	if handle.Path() != p.stagingPath {
+		return fmt.Errorf("worktree staging identity mismatch: got %s want %s", handle.Path(), p.stagingPath)
+	}
+	if err := writeFileAtFDAtomic(int(handle.gitDir.file.Fd()), "gitdir", []byte(filepath.Join(p.finalPath, ".git")+"\n"), 0o644); err != nil {
+		return fmt.Errorf("rewrite worktree git-dir backlink: %w", err)
+	}
+	p.prepared = true
+	return p.recheckParents()
+}
+
+func (p *worktreePublication) Publish(handle *worktreeHandle) error {
+	if p == nil {
+		return fmt.Errorf("worktree publication identity is unavailable")
+	}
+	if err := p.recheckParents(); err != nil {
+		return err
+	}
+	if err := ensurePathAbsentAt(p.finalParent.file, p.finalName); err != nil {
+		return err
+	}
+	if err := renameDirectoryNoReplace(int(p.stagingParent.file.Fd()), p.stagingName, int(p.finalParent.file.Fd()), p.finalName); err != nil {
+		return err
+	}
+	p.moved = true
+	if handle != nil {
+		handle.worktree.path = p.finalPath
+	}
+	return nil
+}
+
+func (p *worktreePublication) Commit() {
+	if p != nil {
+		p.committed = true
+	}
+}
+
+func (p *worktreePublication) Rollback(handle *worktreeHandle) error {
+	if p == nil || p.committed {
+		return nil
+	}
+	var rollbackErr error
+	backlinkPath := ""
+	if p.moved {
+		matches, err := pathEntryMatchesHandle(p.finalParent.file, p.finalName, handle)
+		if err != nil {
+			rollbackErr = errors.Join(rollbackErr, fmt.Errorf("verify provisional worktree before rollback: %w", err))
+		} else if !matches {
+			// The task moved the checkout and replaced its published name. Never
+			// rename or remove the replacement through the attacker-controlled
+			// pathname. Empty only the daemon-owned directory through its retained
+			// descriptor. The exact Git metadata directory is cleaned through its
+			// retained descriptor by cleanupOwnedWorktreeHandle.
+			backlinkPath = p.stagingPath
+			if handle != nil && handle.worktree.file != nil {
+				if err := removeDirectoryContentsAtFD(int(handle.worktree.file.Fd())); err != nil {
+					rollbackErr = errors.Join(rollbackErr, fmt.Errorf("empty displaced provisional worktree: %w", err))
+				}
+			}
+		} else if err := renameDirectoryNoReplace(int(p.finalParent.file.Fd()), p.finalName, int(p.stagingParent.file.Fd()), p.stagingName); err != nil {
+			rollbackErr = errors.Join(rollbackErr, fmt.Errorf("return provisional worktree to staging: %w", err))
+		} else {
+			p.moved = false
+			backlinkPath = p.stagingPath
+			if handle != nil {
+				handle.worktree.path = p.stagingPath
+			}
+		}
+	}
+	if p.prepared && backlinkPath != "" && handle != nil && handle.gitDir.file != nil {
+		if err := writeFileAtFDAtomic(int(handle.gitDir.file.Fd()), "gitdir", []byte(filepath.Join(backlinkPath, ".git")+"\n"), 0o644); err != nil {
+			rollbackErr = errors.Join(rollbackErr, fmt.Errorf("restore staged worktree backlink: %w", err))
+		}
+	}
+	return rollbackErr
+}
+
+func pathEntryMatchesHandle(parent *os.File, name string, handle *worktreeHandle) (bool, error) {
+	if parent == nil || handle == nil || handle.worktree.file == nil || handle.worktree.info == nil {
+		return false, fmt.Errorf("worktree rollback identity is unavailable")
+	}
+	var entry unix.Stat_t
+	if err := unix.Fstatat(int(parent.Fd()), name, &entry, unix.AT_SYMLINK_NOFOLLOW); err != nil {
+		if err == unix.ENOENT {
+			return false, nil
+		}
+		return false, err
+	}
+	var opened unix.Stat_t
+	if err := unix.Fstat(int(handle.worktree.file.Fd()), &opened); err != nil {
+		return false, err
+	}
+	return entry.Dev == opened.Dev && entry.Ino == opened.Ino && entry.Mode == opened.Mode && entry.Mode&unix.S_IFMT == unix.S_IFDIR, nil
+}
+
+func removeDirectoryContentsAtFD(parentFD int) error {
+	return removeDirectoryContentsAtFDWithHook(parentFD, nil)
+}
+
+func removeDirectoryContentsAtFDWithHook(parentFD int, beforeUnlink func(parentFD int, name string)) error {
+	readFD, err := unix.Dup(parentFD)
+	if err != nil {
+		return err
+	}
+	directory := os.NewFile(uintptr(readFD), "worktree-cleanup")
+	names, readErr := directory.Readdirnames(-1)
+	closeErr := directory.Close()
+	if readErr != nil {
+		return readErr
+	}
+	if closeErr != nil {
+		return closeErr
+	}
+	for _, name := range names {
+		if name == "." || name == ".." || !isSafePathComponent(name) {
+			return fmt.Errorf("unsafe worktree cleanup entry: %q", name)
+		}
+		var entry unix.Stat_t
+		if err := unix.Fstatat(parentFD, name, &entry, unix.AT_SYMLINK_NOFOLLOW); err != nil {
+			return err
+		}
+		if entry.Mode&unix.S_IFMT == unix.S_IFDIR {
+			childFD, err := unix.Openat(parentFD, name, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_CLOEXEC|unix.O_NOFOLLOW, 0)
+			if err != nil {
+				return err
+			}
+			var opened unix.Stat_t
+			if err := unix.Fstat(childFD, &opened); err != nil {
+				_ = unix.Close(childFD)
+				return err
+			}
+			err = removeDirectoryContentsAtFDWithHook(childFD, beforeUnlink)
+			closeErr := unix.Close(childFD)
+			if err != nil {
+				return err
+			}
+			if closeErr != nil {
+				return closeErr
+			}
+			if beforeUnlink != nil {
+				beforeUnlink(parentFD, name)
+			}
+			matches, err := directoryEntryMatchesStat(parentFD, name, &opened)
+			if err != nil {
+				return err
+			}
+			if !matches {
+				return fmt.Errorf("worktree cleanup entry changed before removal: %s", name)
+			}
+			if err := unix.Unlinkat(parentFD, name, unix.AT_REMOVEDIR); err != nil {
+				return err
+			}
+			continue
+		}
+		if beforeUnlink != nil {
+			beforeUnlink(parentFD, name)
+		}
+		matches, err := directoryEntryMatchesStat(parentFD, name, &entry)
+		if err != nil {
+			return err
+		}
+		if !matches {
+			return fmt.Errorf("worktree cleanup entry changed before removal: %s", name)
+		}
+		if err := unix.Unlinkat(parentFD, name, 0); err != nil {
+			return err
+		}
+	}
+	return unix.Fsync(parentFD)
+}
+
+func directoryEntryMatchesStat(parentFD int, name string, expected *unix.Stat_t) (bool, error) {
+	if expected == nil {
+		return false, fmt.Errorf("worktree cleanup identity is unavailable")
+	}
+	var current unix.Stat_t
+	if err := unix.Fstatat(parentFD, name, &current, unix.AT_SYMLINK_NOFOLLOW); err != nil {
+		if err == unix.ENOENT {
+			return false, nil
+		}
+		return false, err
+	}
+	return current.Dev == expected.Dev && current.Ino == expected.Ino && current.Mode == expected.Mode, nil
+}
+
+func cleanupOwnedWorktreeHandle(handle *worktreeHandle) error {
+	if handle == nil {
+		return fmt.Errorf("worktree cleanup identity is unavailable")
+	}
+	var cleanupErr error
+	for _, identity := range []*pathHandle{&handle.worktree, &handle.gitDir} {
+		if identity.file == nil {
+			continue
+		}
+		if err := removeDirectoryContentsAtFD(int(identity.file.Fd())); err != nil {
+			cleanupErr = errors.Join(cleanupErr, err)
+			continue
+		}
+		if err := unlinkPathHandleIfCurrent(identity); err != nil {
+			cleanupErr = errors.Join(cleanupErr, err)
+		}
+	}
+	return cleanupErr
+}
+
+func unlinkPathHandleIfCurrent(identity *pathHandle) error {
+	if identity == nil || identity.file == nil || identity.info == nil {
+		return nil
+	}
+	parent, err := openDirectoryHandle(filepath.Dir(identity.path))
+	if err != nil {
+		return nil
+	}
+	defer parent.file.Close()
+	matches, err := directoryEntryMatchesInfo(parent.file, filepath.Base(identity.path), identity.info)
+	if err != nil || !matches {
+		return err
+	}
+	if err := unix.Unlinkat(int(parent.file.Fd()), filepath.Base(identity.path), unix.AT_REMOVEDIR); err != nil && err != unix.ENOENT {
+		return err
+	}
+	return nil
+}
+
+func directoryEntryMatchesInfo(parent *os.File, name string, expected os.FileInfo) (bool, error) {
+	var entry unix.Stat_t
+	if err := unix.Fstatat(int(parent.Fd()), name, &entry, unix.AT_SYMLINK_NOFOLLOW); err != nil {
+		if err == unix.ENOENT {
+			return false, nil
+		}
+		return false, err
+	}
+	expectedStat, ok := expected.Sys().(*syscall.Stat_t)
+	if !ok {
+		return false, fmt.Errorf("directory identity metadata is unavailable")
+	}
+	return entry.Dev == expectedStat.Dev && entry.Ino == expectedStat.Ino && entry.Mode == expectedStat.Mode && entry.Mode&unix.S_IFMT == unix.S_IFDIR, nil
+}
+
+func (p *worktreePublication) Close() error {
+	if p == nil {
+		return nil
+	}
+	var first error
+	for _, identity := range []*pathHandle{&p.stagingParent, &p.finalParent} {
+		if identity.file != nil {
+			if err := identity.file.Close(); err != nil && first == nil {
+				first = err
+			}
+			identity.file = nil
+		}
+	}
+	return first
+}
+
+func (p *worktreePublication) recheckParents() error {
+	if err := p.stagingParent.recheck("worktree staging parent"); err != nil {
+		return err
+	}
+	return p.finalParent.recheck("final worktree parent")
+}
+
+func sameFilesystem(a, b os.FileInfo) bool {
+	aStat, aOK := a.Sys().(*syscall.Stat_t)
+	bStat, bOK := b.Sys().(*syscall.Stat_t)
+	return aOK && bOK && aStat.Dev == bStat.Dev
+}
+
+func reserveStagingName(parent *os.File) (string, error) {
+	for attempts := 0; attempts < 32; attempts++ {
+		var random [16]byte
+		if _, err := rand.Read(random[:]); err != nil {
+			return "", fmt.Errorf("generate worktree staging name: %w", err)
+		}
+		name := "worktree-" + hex.EncodeToString(random[:])
+		var stat unix.Stat_t
+		err := unix.Fstatat(int(parent.Fd()), name, &stat, unix.AT_SYMLINK_NOFOLLOW)
+		if err == unix.ENOENT {
+			return name, nil
+		}
+		if err != nil {
+			return "", fmt.Errorf("check worktree staging name: %w", err)
+		}
+	}
+	return "", fmt.Errorf("cannot allocate unique worktree staging name")
+}
+
+func ensurePathAbsentAt(parent *os.File, name string) error {
+	var stat unix.Stat_t
+	err := unix.Fstatat(int(parent.Fd()), name, &stat, unix.AT_SYMLINK_NOFOLLOW)
+	if err == unix.ENOENT {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("check final worktree target: %w", err)
+	}
+	return fmt.Errorf("final worktree target already exists: %s", name)
+}
 
 func identityBoundWorktreeAccessSupported() bool {
 	return true
@@ -441,4 +837,38 @@ func writeFileAtFD(parentFD int, name string, contents []byte, mode uint32) erro
 		return err
 	}
 	return file.Close()
+}
+
+func writeFileAtFDAtomic(parentFD int, name string, contents []byte, mode uint32) error {
+	var random [8]byte
+	if _, err := rand.Read(random[:]); err != nil {
+		return err
+	}
+	temporary := ".multica-" + name + "-" + hex.EncodeToString(random[:])
+	fd, err := unix.Openat(parentFD, temporary, unix.O_WRONLY|unix.O_CREAT|unix.O_EXCL|unix.O_CLOEXEC|unix.O_NOFOLLOW, mode)
+	if err != nil {
+		return err
+	}
+	file := os.NewFile(uintptr(fd), temporary)
+	cleanup := true
+	defer func() {
+		_ = file.Close()
+		if cleanup {
+			_ = unix.Unlinkat(parentFD, temporary, 0)
+		}
+	}()
+	if _, err := file.Write(contents); err != nil {
+		return err
+	}
+	if err := file.Sync(); err != nil {
+		return err
+	}
+	if err := file.Close(); err != nil {
+		return err
+	}
+	if err := unix.Renameat(parentFD, temporary, parentFD, name); err != nil {
+		return err
+	}
+	cleanup = false
+	return unix.Fsync(parentFD)
 }
