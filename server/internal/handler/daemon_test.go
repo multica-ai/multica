@@ -3285,7 +3285,13 @@ func createRuntimeGuardAgent(t *testing.T, ctx context.Context) (agentID, runtim
 		"daemon_id":    daemonID,
 		"device_name":  "runtime-guard-test",
 		"runtimes": []map[string]any{
-			{"name": "runtime-guard-current", "type": "opencode", "version": "test", "status": "online"},
+			{
+				"name":         "runtime-guard-current",
+				"type":         "opencode",
+				"version":      "test",
+				"status":       "online",
+				"capabilities": []string{protocol.RuntimeCapabilityTaskExecution},
+			},
 		},
 	}, testWorkspaceID, daemonID)
 
