@@ -63,13 +63,18 @@ func TestContentDispositionNonASCII(t *testing.T) {
 	if !strings.Contains(got, "filename*=UTF-8''") {
 		t.Fatalf("ContentDisposition should include filename* for non-ASCII: %q", got)
 	}
-	if !strings.Contains(got, `filename="`) {
+	const legacyPrefix = `filename="`
+	start := strings.Index(got, legacyPrefix)
+	if start == -1 {
 		t.Fatalf("ContentDisposition should keep ASCII fallback: %q", got)
 	}
 	// Legacy filename parameter must be ASCII only.
-	start := strings.Index(got, `filename="`)
-	end := strings.Index(got[start:], `"`) + start + 1
-	fallback := got[start:end]
+	start += len(legacyPrefix)
+	end := strings.IndexByte(got[start:], '"')
+	if end == -1 {
+		t.Fatalf("ContentDisposition fallback is not terminated: %q", got)
+	}
+	fallback := got[start : start+end]
 	for _, r := range fallback {
 		if r > 0x7f {
 			t.Fatalf("legacy filename parameter must be ASCII only, got: %q", fallback)

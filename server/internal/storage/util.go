@@ -61,7 +61,7 @@ func rfc5987Encode(name string) string {
 			n := utf8.EncodeRune(buf, r)
 			for i := 0; i < n; i++ {
 				b.WriteByte('%')
-				b.WriteString(strings.ToUpper(hex.EncodeToString(buf[i:i+1])))
+				b.WriteString(strings.ToUpper(hex.EncodeToString(buf[i : i+1])))
 			}
 		}
 	}
