@@ -39,6 +39,7 @@ type Router struct {
 	batcher *pendingBatcher
 
 	replyTimeout time.Duration
+	mediaTimeout time.Duration
 	replyWg      sync.WaitGroup
 
 	logger *slog.Logger
@@ -53,6 +54,9 @@ type RouterConfig struct {
 	// call. It runs off the connector ACK path, so it must stay strictly
 	// under the platform ACK deadline (Lark: 3s). Defaults to 2.5s.
 	ReplyTimeout time.Duration
+	// MediaTimeout bounds platform download + object-storage upload while the
+	// connector is waiting to ACK. Defaults to 2s (below Lark's 3s budget).
+	MediaTimeout time.Duration
 	Logger       *slog.Logger
 }
 
@@ -64,6 +68,9 @@ func NewRouter(issues IssueCreator, tasks TaskEnqueuer, reader SessionReader, cf
 	if cfg.ReplyTimeout == 0 {
 		cfg.ReplyTimeout = 2500 * time.Millisecond
 	}
+	if cfg.MediaTimeout == 0 {
+		cfg.MediaTimeout = 2 * time.Second
+	}
 	if cfg.Logger == nil {
 		cfg.Logger = slog.Default()
 	}
@@ -73,6 +80,7 @@ func NewRouter(issues IssueCreator, tasks TaskEnqueuer, reader SessionReader, cf
 		tasks:        tasks,
 		reader:       reader,
 		replyTimeout: cfg.ReplyTimeout,
+		mediaTimeout: cfg.MediaTimeout,
 		logger:       cfg.Logger,
 		pendingFresh: make(map[string]bool),
 	}
@@ -247,7 +255,9 @@ func (r *Router) processClaimed(ctx context.Context, set ResolverSet, msg channe
 	//    fails, remove objects created here so no unlinked media remains.
 	cleanupMedia := func(context.Context) {}
 	if set.Media != nil {
-		msg, cleanupMedia, err = set.Media.Resolve(ctx, inst, msg)
+		mediaCtx, cancelMedia := context.WithTimeout(ctx, r.mediaTimeout)
+		msg, cleanupMedia, err = set.Media.Resolve(mediaCtx, inst, msg)
+		cancelMedia()
 		if err != nil {
 			return Result{}, finalizeRelease, fmt.Errorf("resolve media: %w", err)
 		}

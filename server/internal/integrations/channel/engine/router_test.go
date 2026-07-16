@@ -34,15 +34,36 @@ type fakeMedia struct {
 	resolveCalls int
 	cleanupCalls int
 	err          error
+	block        bool
 }
 
-func (f *fakeMedia) Resolve(_ context.Context, _ ResolvedInstallation, msg channel.InboundMessage) (channel.InboundMessage, func(context.Context), error) {
+func (f *fakeMedia) Resolve(ctx context.Context, _ ResolvedInstallation, msg channel.InboundMessage) (channel.InboundMessage, func(context.Context), error) {
 	f.resolveCalls++
 	if f.err != nil {
 		return msg, nil, f.err
 	}
+	if f.block {
+		<-ctx.Done()
+		return msg, nil, ctx.Err()
+	}
 	msg.MediaRefs = []channel.MediaRef{{Type: channel.MsgTypeImage, StorageKey: "channel-inbound/image.png"}}
 	return msg, func(context.Context) { f.cleanupCalls++ }, nil
+}
+
+func TestRouter_MediaTimeoutReleasesClaim(t *testing.T) {
+	h := newHarness(t)
+	h.router.mediaTimeout = 10 * time.Millisecond
+	h.media.block = true
+	err := h.router.Handle(context.Background(), p2pMessage(t))
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("expected media deadline error, got %v", err)
+	}
+	if h.dedup.releases() != 1 {
+		t.Fatalf("media timeout must release claim, got %d", h.dedup.releases())
+	}
+	if h.binder.lastAppend.Message.MessageID != "" {
+		t.Fatal("timed-out media must not append the message")
+	}
 }
 
 func (f *fakeIdentity) ResolveSender(_ context.Context, _ ResolvedInstallation, _ channel.InboundMessage) (ResolvedIdentity, error) {

@@ -51,7 +51,8 @@ const (
 	// defaultRequestTimeout is the per-call HTTP timeout. Lark's API
 	// is normally well under 1s; we leave headroom for cross-region
 	// latency from a self-hosted Multica deployment to feishu.cn.
-	defaultRequestTimeout = 10 * time.Second
+	defaultRequestTimeout         = 10 * time.Second
+	defaultMaxResourceBytes int64 = 100 << 20
 
 	// Lark's "invalid tenant_access_token" / "tenant_access_token
 	// expired" error codes. When we see either, drop the cached token
@@ -86,6 +87,10 @@ type HTTPClientConfig struct {
 	// Logger receives warnings about Lark error codes. Nil uses
 	// slog.Default().
 	Logger *slog.Logger
+
+	// MaxResourceBytes caps message-resource downloads before they enter
+	// object storage. Zero defaults to the same 100 MB ceiling as uploads.
+	MaxResourceBytes int64
 }
 
 func (c HTTPClientConfig) withDefaults() HTTPClientConfig {
@@ -104,6 +109,9 @@ func (c HTTPClientConfig) withDefaults() HTTPClientConfig {
 	}
 	if c.Logger == nil {
 		c.Logger = slog.Default()
+	}
+	if c.MaxResourceBytes <= 0 {
+		c.MaxResourceBytes = defaultMaxResourceBytes
 	}
 	return c
 }
@@ -755,12 +763,32 @@ func (c *httpAPIClient) DownloadMessageResource(ctx context.Context, creds Insta
 		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 513))
 		return MessageResource{}, fmt.Errorf("lark http client: download resource: http %d: %s", resp.StatusCode, truncate(string(raw), 512))
 	}
-	data, err := io.ReadAll(resp.Body)
+	data, err := io.ReadAll(io.LimitReader(resp.Body, c.cfg.MaxResourceBytes+1))
 	if err != nil {
 		return MessageResource{}, fmt.Errorf("lark http client: download resource: read body: %w", err)
 	}
+	if int64(len(data)) > c.cfg.MaxResourceBytes {
+		return MessageResource{}, fmt.Errorf("lark http client: download resource exceeds %d bytes", c.cfg.MaxResourceBytes)
+	}
+	contentType := resp.Header.Get("Content-Type")
+	if strings.HasPrefix(strings.ToLower(contentType), "application/json") {
+		var businessErr struct {
+			Code int    `json:"code"`
+			Msg  string `json:"msg"`
+		}
+		if err := json.Unmarshal(data, &businessErr); err != nil {
+			return MessageResource{}, fmt.Errorf("lark http client: download resource: decode JSON response: %w", err)
+		}
+		if businessErr.Code != 0 {
+			if isTokenError(businessErr.Code) {
+				c.invalidateToken(creds.AppID)
+			}
+			return MessageResource{}, &APIError{Op: "download resource", Code: businessErr.Code, Msg: businessErr.Msg}
+		}
+		return MessageResource{}, errors.New("lark http client: download resource returned JSON instead of media")
+	}
 	filename := strings.Trim(strings.TrimPrefix(resp.Header.Get("Content-Disposition"), "attachment; filename="), `"`)
-	return MessageResource{Data: data, Filename: filename, ContentType: resp.Header.Get("Content-Type")}, nil
+	return MessageResource{Data: data, Filename: filename, ContentType: contentType}, nil
 }
 
 // BatchGetUsers resolves user open_ids to display names via
