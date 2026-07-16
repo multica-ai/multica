@@ -17,9 +17,23 @@ PROFILE="local"
 CONFIG_DIR="$HOME/.multica"
 PROFILE_DIR="$CONFIG_DIR/profiles/$PROFILE"
 CONFIG_FILE="$PROFILE_DIR/config.json"
-mkdir -p "$PROFILE_DIR"
+mkdir -p "$PROFILE_DIR" "$PI_CODING_AGENT_DIR" "$HERMES_HOME"
 
 log() { printf '%s runtime: %s\n' "$(date -Iseconds)" "$1" >&2; }
+
+for agent_path in "$MULTICA_PI_PATH" "$MULTICA_HERMES_PATH"; do
+  if [[ ! -x "$agent_path" ]]; then
+    log "FATAL: configured agent executable is unavailable: $agent_path"
+    exit 1
+  fi
+done
+
+/opt/hermes/bin/python /usr/local/lib/multica/configure-hermes-fallback.py
+if [[ -n "${FIRTAL_REGISTRY_URL:-}" && -n "${FIRTAL_REGISTRY_KEY:-}" ]]; then
+  mkdir -p "$PI_CODING_AGENT_DIR/extensions"
+  install -m 600 /usr/local/lib/multica/pi-firtal-gateway.ts \
+    "$PI_CODING_AGENT_DIR/extensions/firtal-gateway.ts"
+fi
 
 write_config() {
   # $1=server_url $2=app_url $3=token $4=workspace_id

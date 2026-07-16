@@ -121,18 +121,55 @@ func TestStartSnapshotsEligibleMessages(t *testing.T) {
 	}
 }
 
-func TestRoundMembersRemainInNormalUnreadCount(t *testing.T) {
+func TestRoundMembersAreExcludedFromOwnerUnreadCounts(t *testing.T) {
 	f := newReviewFixture(t)
-	f.newIssue(t, "normal unread")
+	ctx := context.Background()
+	issueID := f.newIssue(t, "round unread")
 
-	count, err := db.New(f.pool).CountUnreadInbox(context.Background(), db.CountUnreadInboxParams{
-		WorkspaceID: f.wsID, RecipientType: "member", RecipientID: f.ownerID,
-	})
-	if err != nil {
+	var bystanderID pgtype.UUID
+	if err := f.pool.QueryRow(ctx, `INSERT INTO "user" (name, email) VALUES ('Round Bystander', 'round-bystander-'||substr(gen_random_uuid()::text,1,8)||'@test.local') RETURNING id`).Scan(&bystanderID); err != nil {
 		t.Fatal(err)
 	}
-	if count != 1 {
-		t.Fatalf("unread count = %d, want 1 for Round member", count)
+	t.Cleanup(func() { _, _ = f.pool.Exec(context.Background(), `DELETE FROM "user" WHERE id=$1`, bystanderID) })
+
+	for _, recipientID := range []pgtype.UUID{f.ownerID, bystanderID} {
+		if recipientID != f.ownerID {
+			if _, err := f.pool.Exec(ctx, `INSERT INTO inbox_item (workspace_id,recipient_type,recipient_id,type,issue_id,title) VALUES ($1,'member',$2,'new_comment',$3,'Round unread')`, f.wsID, recipientID, issueID); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if _, err := f.pool.Exec(ctx, `INSERT INTO inbox_item (workspace_id,recipient_type,recipient_id,type,route,issue_id,title) VALUES ($1,'member',$2,'new_comment','notifications',$3,'Round notification')`, f.wsID, recipientID, issueID); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	countsFor := func(recipientID pgtype.UUID) (int64, int64, int64) {
+		t.Helper()
+		queries := db.New(f.pool)
+		workspace, err := queries.CountUnreadInbox(ctx, db.CountUnreadInboxParams{
+			WorkspaceID: f.wsID, RecipientType: "member", RecipientID: recipientID,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		allWorkspaces, err := queries.CountUnreadInboxForUserAllWorkspaces(ctx, recipientID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		notifications, err := queries.CountUnreadNotifications(ctx, db.CountUnreadNotificationsParams{
+			WorkspaceID: f.wsID, RecipientType: "member", RecipientID: recipientID,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return workspace, allWorkspaces, notifications
+	}
+
+	if workspace, allWorkspaces, notifications := countsFor(f.ownerID); workspace != 0 || allWorkspaces != 0 || notifications != 0 {
+		t.Fatalf("owner unread counts = %d/%d/%d, want 0/0/0 for own Round", workspace, allWorkspaces, notifications)
+	}
+	if workspace, allWorkspaces, notifications := countsFor(bystanderID); workspace != 1 || allWorkspaces != 1 || notifications != 1 {
+		t.Fatalf("bystander unread counts = %d/%d/%d, want 1/1/1", workspace, allWorkspaces, notifications)
 	}
 }
 

@@ -102,20 +102,31 @@ describe("countUnreadInboxConversations (FIR-2382)", () => {
   });
 });
 
-describe("countUnreadInboxConversations with Round members", () => {
-  it("counts Round-member issues through the normal inbox path", () => {
+describe("countUnreadInboxConversations Round exclusion (FIR-3340)", () => {
+  it("excludes unread items whose issue is in the user's Round", () => {
     const items = [
       inboxItem({ id: "a", issue_id: "round-issue", read: false }),
       inboxItem({ id: "b", issue_id: "plain-issue", read: false }),
     ];
-    expect(countUnreadInboxConversations(items, { excludeThreadReplies: false })).toBe(2);
+    expect(
+      countUnreadInboxConversations(items, {
+        excludeThreadReplies: false,
+        excludeIssueIds: new Set(["round-issue"]),
+      }),
+    ).toBe(1);
   });
 
-  it("keeps items without an issue id", () => {
+  it("keeps items without an issue id and counts normally without exclusions", () => {
     const items = [
       inboxItem({ id: "a", issue_id: null as unknown as string, read: false }),
       inboxItem({ id: "b", issue_id: "round-issue", read: false }),
     ];
     expect(countUnreadInboxConversations(items, { excludeThreadReplies: false })).toBe(2);
+    expect(
+      countUnreadInboxConversations(items, {
+        excludeThreadReplies: false,
+        excludeIssueIds: new Set(["round-issue"]),
+      }),
+    ).toBe(1);
   });
 });

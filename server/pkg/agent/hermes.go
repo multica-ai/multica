@@ -117,11 +117,12 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		return nil, fmt.Errorf("start hermes: %w", err)
 	}
 
-	stderrSink := io.MultiWriter(newLogWriter(b.cfg.Logger, "[hermes:stderr] "), providerErr)
+	stderrSink := newSecretSafeDiagnosticWriter(newLogWriter(b.cfg.Logger, "[hermes:stderr] "), providerErr) // CEREBRO-PATCH(hermes-safe-provider-diagnostics): redact OAuth refresh credentials before logs or classification.
 	stderrDone := make(chan struct{})
 	go func() {
 		defer close(stderrDone)
 		_, _ = io.Copy(stderrSink, stderr)
+		stderrSink.Flush() // CEREBRO-PATCH(hermes-safe-provider-diagnostics): safely emit a final unterminated diagnostic line.
 	}()
 
 	b.cfg.Logger.Info("hermes acp started", "pid", cmd.Process.Pid, "cwd", opts.Cwd)

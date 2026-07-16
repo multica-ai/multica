@@ -173,7 +173,7 @@ func isPiToolNameByte(b byte) bool {
 	return (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') || (b >= '0' && b <= '9') || b == '_' || b == '-'
 }
 
-func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions) (*Session, error) {
+func (b *piBackend) executeOnce(ctx context.Context, prompt string, opts ExecOptions) (*Session, error) { // CEREBRO-PATCH(pi-gateway-fallback): keep one-attempt execution behind the safe fallback wrapper.
 	execName := b.cfg.ExecutablePath
 	if execName == "" {
 		execName = "pi"
@@ -207,7 +207,7 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 
 	cmd := exec.CommandContext(runCtx, argv0, cmdArgs...)
 	hideAgentWindow(cmd)
-	b.cfg.Logger.Info("agent command", "exec", argv0, "args", cmdArgs)
+	b.cfg.Logger.Info("agent command", "exec", argv0, "args", safeAgentCommandArgs(cmdArgs)) // CEREBRO-PATCH(pi-safe-provider-diagnostics): redact prompt-borne credentials before command logging.
 	cmd.WaitDelay = 10 * time.Second
 	if opts.Cwd != "" {
 		cmd.Dir = opts.Cwd
@@ -231,7 +231,8 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 		cancel()
 		return nil, fmt.Errorf("pi stdin pipe: %w", err)
 	}
-	cmd.Stderr = newLogWriter(b.cfg.Logger, "[pi:stderr] ")
+	piStderr := newPiDiagnosticWriter(b.cfg.Logger) // CEREBRO-PATCH(pi-safe-provider-diagnostics): retain only redacted stderr for safe failure classification.
+	cmd.Stderr = piStderr
 
 	if err := cmd.Start(); err != nil {
 		_ = stdin.Close()
@@ -340,7 +341,7 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 				}
 
 			case "error":
-				errText := decodePiString(evt.Message)
+				errText := safePiProviderEventError(decodePiString(evt.Message)) // CEREBRO-PATCH(pi-safe-provider-diagnostics): classify and redact provider events before streaming or storage.
 				trySend(msgCh, Message{Type: MessageError, Content: errText})
 				if finalStatus == "completed" {
 					finalStatus = "failed"
@@ -351,7 +352,7 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 				if !evt.Success && finalStatus == "completed" {
 					finalStatus = "failed"
 					if evt.FinalError != "" {
-						finalError = evt.FinalError
+						finalError = safePiProviderEventError(evt.FinalError) // CEREBRO-PATCH(pi-safe-provider-diagnostics): redact the retry controller's terminal provider error too.
 					} else {
 						finalError = "pi exhausted automatic retries"
 					}
@@ -374,7 +375,7 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 			finalError = "execution cancelled"
 		} else if waitErr != nil && finalStatus == "completed" {
 			finalStatus = "failed"
-			finalError = fmt.Sprintf("pi exited with error: %v", waitErr)
+			finalError = piStderr.safeError(waitErr) // CEREBRO-PATCH(pi-safe-provider-diagnostics): surface provider category instead of generic exit status.
 		}
 
 		b.cfg.Logger.Info("pi finished", "pid", cmd.Process.Pid, "status", finalStatus, "duration", duration.Round(time.Millisecond).String())

@@ -859,7 +859,8 @@ comment for SQL/CSS/SBPL/JSON-with-_comment-field).
 | `daemon-handler-chat-history-cap` | server/internal/handler/daemon.go | 7 | JEH-757 — claim path uses ListRecentChatMessages(limit=30) and reverses to chronological order |
 | `sqlc-inbox` | server/pkg/db/queries/inbox.sql | 30 | Cerebro sqlc query additions |
 | `sqlc-inbox-remind-sort` | server/pkg/db/queries/inbox.sql | 2 | FIR-2016 — resurfaced reminders sort by muted_until so they re-enter the feed at the planned time |
-| `rounds-answer-snapshots` | packages/views/issues/components/issue-detail.tsx<br>server/cmd/server/main.go<br>server/internal/service/task.go<br>server/internal/handler/agent.go<br>server/internal/daemon/{prompt.go,prompt_test.go,types.go}<br>server/pkg/db/queries/inbox.sql + generated/inbox.sql.go | 9 | FIR-3179 — Rounds are answer snapshots only. Membership no longer schedules work, suppresses badges/push, injects a held-reply banner, creates special task context, or changes daemon prompts; all replies retain the normal inbox and trigger path. |
+| `rounds-answer-snapshots` | packages/views/issues/components/issue-detail.tsx<br>server/cmd/server/main.go<br>server/internal/service/task.go<br>server/internal/handler/agent.go<br>server/internal/daemon/{prompt.go,prompt_test.go,types.go} | 8 | FIR-3179 — Rounds are answer snapshots only. Membership no longer schedules work, injects a held-reply banner, creates special task context, or changes daemon prompts; all replies retain the normal trigger path. |
+| `rounds-badge-exclusion` | server/pkg/db/queries/inbox.sql + generated/inbox.sql.go | 3 | FIR-3340 — unread messages on issues in a user's own Rounds remain available to the Round but do not contribute to that user's workspace, notification, or OS unread counts. Other users' counts remain unchanged. |
 | `inbox-reminder-standalone-row` | packages/core/inbox/queries.ts | 2 | FIR-2278 — a fired (due, not future-muted) reminder is keyed by its own id in the per-issue dedup, so it stands as its own row: it neither hides nor is hidden by other notifications on the same issue |
 | `badge-reminder-standalone` | server/pkg/db/queries/inbox.sql | 1 | FIR-2278 — OS app-badge count groups reminders by their own id (matching the frontend standalone-row rule) so the badge agrees with the visible inbox |
 | `inbox-reminder-archive-self` | server/internal/handler/inbox.go | 1 | FIR-2278 — archiving a fired reminder row does NOT cascade-archive its issue's other rows, since the reminder is a standalone signal |
@@ -1607,3 +1608,14 @@ The intake contract, validation and Gateway tool remain fork-owned in `server/in
 | `pi-harness` | `server/go.mod`; `Dockerfile.runtime` | Build the fork-owned harness package into the runtime image without placing its implementation in an upstream server zone. |
 
 Approved by Jesper Hvejsel on FIR-3272: “byg det hele uden stop og deploy”, 2026-07-15.
+
+## FIR-3362 — Stable Pi and Hermes cloud runtime
+
+| Patch | Location | Reason |
+|---|---|---|
+| `oauth-refresh-redaction` | `server/pkg/redact/redact.go` | Route nested task input through the Cerebro-owned recursive redactor so PI/Hermes OAuth refresh credentials cannot reach stored messages or logs. Patterns and synthetic regressions live in `cerebro_oauth.go` and `cerebro_oauth_test.go`. |
+| `pi-safe-provider-diagnostics` | `server/pkg/agent/pi.go` | Replace raw Pi stderr/provider errors with a bounded, centrally redacted diagnostic and a safe provider category. Implementation and tests live in `cerebro_pi_diagnostics.go` and its test sibling. |
+| `hermes-safe-provider-diagnostics` | `server/pkg/agent/hermes.go` | Send Hermes stderr through the same line-safe central redactor before either daemon logging or provider-error classification, including credentials split across process write boundaries. The writer and synthetic regression live in `cerebro_secret_safe_writer.go` and its test sibling. |
+| `pi-gateway-fallback` | `server/pkg/agent/pi.go` | Keep the original one-attempt Pi execution behind the Cerebro-owned fallback wrapper. It retries through Firtal AI Gateway only before text or tool activity, preventing duplicate side effects and ensuring only the successful fallback session is pinned. |
+
+The runtime-image, entrypoint, fallback-provider helpers, canary, and cloud runbook are deployment-owned surfaces outside the upstream server zone. ChatGPT Pro is the primary provider for both Pi and Hermes; the Infisical-backed Firtal AI Gateway is the managed backup.
