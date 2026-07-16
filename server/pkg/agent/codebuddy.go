@@ -202,8 +202,12 @@ func (b *codebuddyBackend) Execute(ctx context.Context, prompt string, opts Exec
 				assistantEventCount++
 				assistantText, tools := b.handleAssistant(msg, msgCh, usage)
 				toolUseCount += tools
-				if assistantText != "" {
+				if tools == 0 {
 					lastAssistantText = assistantText
+				} else {
+					// A turn that invokes a tool is intermediate even when it also
+					// contains narration. Do not use it as an empty-result fallback.
+					lastAssistantText = ""
 				}
 			case "user":
 				b.handleUser(msg, msgCh)

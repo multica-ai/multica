@@ -180,6 +180,9 @@ func TestTaskFailureClassifiers(t *testing.T) {
 		{reason: "iteration_limit", wantType: "agent_output", wantResumeOK: false, wantRetry: false},
 		{reason: "api_invalid_request", wantType: "agent_error", wantResumeOK: false, wantRetry: false},
 		{reason: "agent_error", wantType: "agent_error", wantResumeOK: true, wantRetry: false},
+		// Missing terminal result errors classify to agent_error.unknown. Keep
+		// that deterministic upstream failure outside the auto-retry allowlist.
+		{reason: "agent_error.unknown", wantType: "agent_error", wantResumeOK: true, wantRetry: false},
 	}
 
 	for _, tc := range cases {

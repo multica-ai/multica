@@ -176,8 +176,12 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 				assistantEventCount++
 				assistantText, tools := b.handleAssistant(msg, msgCh, usage)
 				toolUseCount += tools
-				if assistantText != "" {
+				if tools == 0 {
 					lastAssistantText = assistantText
+				} else {
+					// A turn that invokes a tool is intermediate even when it also
+					// contains narration. Do not use it as an empty-result fallback.
+					lastAssistantText = ""
 				}
 			case "user":
 				if b.handleUser(msg, msgCh) {

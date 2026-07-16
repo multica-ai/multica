@@ -49,10 +49,10 @@ func finalizeStreamResult(
 	}
 
 	switch {
-	case errors.Is(runErr, context.DeadlineExceeded):
+	case status == "completed" && errors.Is(runErr, context.DeadlineExceeded):
 		status = "timeout"
 		errMsg = fmt.Sprintf("%s timed out after %s", provider, timeout)
-	case errors.Is(runErr, context.Canceled):
+	case status == "completed" && errors.Is(runErr, context.Canceled):
 		status = "aborted"
 		errMsg = "execution cancelled"
 	case state.scanErr != nil && status == "completed":

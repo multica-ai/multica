@@ -29,6 +29,30 @@ func TestFinalizeStreamResultEmptySuccessWithoutAssistantUsesSafeNotice(t *testi
 	}
 }
 
+func TestFinalizeStreamResultPreservesErrorResultWhenContextEnds(t *testing.T) {
+	t.Parallel()
+
+	for _, runErr := range []error{context.DeadlineExceeded, context.Canceled} {
+		status, output, errMsg := finalizeStreamResult(
+			"claude",
+			time.Second,
+			runErr,
+			nil,
+			nil,
+			"session-1",
+			streamTerminalState{
+				finalResultText: "provider rejected the request",
+				sawResult:       true,
+				resultIsError:   true,
+			},
+			"",
+		)
+		if status != "failed" || output != "" || errMsg != "provider rejected the request" {
+			t.Errorf("runErr=%v: finalizeStreamResult() = (%q, %q, %q), want failed provider error", runErr, status, output, errMsg)
+		}
+	}
+}
+
 func TestStreamProtocolObservationDoesNotLogContent(t *testing.T) {
 	t.Parallel()
 
@@ -87,6 +111,11 @@ printf '%s\n' '{"type":"assistant","message":{"role":"assistant","model":"test-m
 printf '%s\n' '{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"tool-1","content":"TOOL TRACE"}]}}'
 printf '%s\n' '{"type":"assistant","message":{"role":"assistant","model":"test-model","content":[{"type":"text","text":"LAST ASSISTANT ANSWER"}]}}'
 `
+	const toolLastStream = `printf '%s\n' '{"type":"system","session_id":"sess-boundary"}'
+printf '%s\n' '{"type":"assistant","message":{"role":"assistant","model":"test-model","content":[{"type":"text","text":"PRE-TOOL NARRATION"}]}}'
+printf '%s\n' '{"type":"assistant","message":{"role":"assistant","model":"test-model","content":[{"type":"text","text":"I WILL USE A TOOL"},{"type":"tool_use","id":"tool-1","name":"Read","input":{"path":"README.md"}}]}}'
+printf '%s\n' '{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"tool-1","content":"TOOL TRACE"}]}}'
+`
 
 	tests := []struct {
 		name            string
@@ -114,6 +143,17 @@ printf '%s\n' '{"type":"assistant","message":{"role":"assistant","model":"test-m
 			wantOutput: "LAST ASSISTANT ANSWER",
 			forbiddenOutput: []string{
 				"FIRST-TURN NARRATION",
+				"TOOL TRACE",
+			},
+		},
+		{
+			name:       "empty successful result after tool-using turn uses safe notice",
+			scriptBody: toolLastStream + `printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"session_id":"sess-boundary","result":""}'` + "\n",
+			wantStatus: "completed",
+			wantOutput: emptySuccessfulStreamResult,
+			forbiddenOutput: []string{
+				"PRE-TOOL NARRATION",
+				"I WILL USE A TOOL",
 				"TOOL TRACE",
 			},
 		},
