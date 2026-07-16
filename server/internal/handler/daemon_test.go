@@ -912,7 +912,8 @@ func TestClaimTaskByRuntime_MissingRuntimeOwnerCancelsAndRejects(t *testing.T) {
 			workspace_id, daemon_id, name, runtime_mode, provider,
 			status, device_info, metadata, last_seen_at, visibility
 		)
-		VALUES ($1, NULL, 'Missing owner claim runtime', 'cloud', 'handler_test_runtime', 'online', 'claim missing owner fixture', '{}'::jsonb, now(), 'private')
+		VALUES ($1, NULL, 'Missing owner claim runtime', 'cloud', 'handler_test_runtime', 'online', 'claim missing owner fixture',
+		        '{"capabilities":["linux-bubblewrap-fd-v1"]}'::jsonb, now(), 'private')
 		RETURNING id
 	`, testWorkspaceID).Scan(&runtimeID); err != nil {
 		t.Fatalf("setup: create runtime: %v", err)
